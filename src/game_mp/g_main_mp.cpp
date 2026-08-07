@@ -232,7 +232,7 @@ void __cdecl G_InitGame(int32_t levelTime, int32_t randomSeed, int32_t restart, 
     if (!Sys_IsMainThread())
         MyAssertHandler(".\\game_mp\\g_main_mp.cpp", 992, 0, "%s", "Sys_IsMainThread()");
     Com_Printf(15, "------- Game Initialization -------\n");
-    Com_Printf(15, "gamename: %s\n", "KisakCoD4");
+    Com_Printf(15, "gamename: %s\n", "KIWI");
     Com_Printf(15, "gamedate: %s\n", __DATE__);
     Swap_Init();
     EntHandle::Init();
@@ -379,7 +379,7 @@ const dvar_s *G_RegisterDvars()
     DvarLimits minp; // [esp+8h] [ebp-14h]
 
     g_cheats = Dvar_RegisterBool("sv_cheats", true, DVAR_NOFLAG, "Enable cheats");
-    Dvar_RegisterString("gamename", "KisakCoD4", DVAR_SERVERINFO | DVAR_ROM, "The name of the game");
+    Dvar_RegisterString("gamename", "KIWI", DVAR_SERVERINFO | DVAR_ROM, "The name of the game");
     Dvar_RegisterString("gamedate", __DATE__, DVAR_ROM, "The date compiled");
     Dvar_RegisterString("sv_mapname", (char *)"", DVAR_SERVERINFO | DVAR_ROM, "The current map name");
     g_gametype = Dvar_RegisterString("g_gametype", "war", DVAR_SERVERINFO | DVAR_LATCH, "The current campaign");

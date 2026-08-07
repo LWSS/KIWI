@@ -1,7 +1,7 @@
-message("----- KisakCOD Client(MP) -----")
+message("----- KIWI Client(MP) -----")
 
 # Set project name to mp
-project(KisakCOD-mp)
+project(KIWI-mp)
 
 # Include all common files between mp/sp/dedi
 include(${SCRIPTS_DIR}/common_files.cmake)

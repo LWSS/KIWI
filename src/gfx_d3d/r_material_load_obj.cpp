@@ -1810,7 +1810,7 @@ static bool Material_CopyTextToDXBuffer2(uint32_t shaderHash, ID3DXBuffer **shad
     int hr; // [esp+0h] [ebp-4h]
 
     char buffer[260];
-    // KisakCOD ships precompiled shaders under raw/shader_bin/ (the CoD4 mod-tools
+    // KIWI ships precompiled shaders under raw/shader_bin/ (the CoD4 mod-tools
     // layout); there is no main/shader_bin/. shader_names is likewise found in
     // raw/shader_bin/ via the FS search path, so read the individual binaries from raw/.
     // TODO_RADIANT(P6): route through FS_ReadFile so search order (raw/main/iwd) is honored.

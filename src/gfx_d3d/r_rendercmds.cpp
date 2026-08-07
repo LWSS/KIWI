@@ -1842,7 +1842,7 @@ void __cdecl R_EndDebugFrame()
 // Editor render-command additions — cod3src\src\gfx_d3d\r_rendercmds.cpp in the
 // CoD4Radiant binary (IDB port 13343). The editor's line bridge (draw.cpp
 // R_Add3DLine/Draw_02 and the XY/Z/Cam view draws) batches line geometry into
-// GfxCmdDrawLines render commands through these. KisakCOD's CoD3-era
+// GfxCmdDrawLines render commands through these. KIWI's CoD3-era
 // r_rendercmds.cpp lacks them; ported verbatim from the IDB.
 //
 // SIGNATURE / §11 NOTES (validated against the kisak callsites above):

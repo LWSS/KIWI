@@ -1,6 +1,6 @@
-message("----- KisakCOD Client(SP) -----")
+message("----- KIWI Client(SP) -----")
 
-project(KisakCOD-sp)
+project(KIWI-sp)
 
 # Include all common files between mp/sp/dedi
 include(${SCRIPTS_DIR}/common_files.cmake)

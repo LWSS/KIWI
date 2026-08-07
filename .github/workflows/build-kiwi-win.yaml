@@ -67,14 +67,14 @@ jobs:
       - name: Build ${{ matrix.config }}
         run: |
           pushd
-          cmake --build build-${{ matrix.config }} --config ${{ matrix.config }} --target "KisakCOD-sp"
-          cmake --build build-${{ matrix.config }} --config ${{ matrix.config }} --target "KisakCOD-mp"
-          cmake --build build-${{ matrix.config }} --config ${{ matrix.config }} --target "KisakCOD-dedi"
+          cmake --build build-${{ matrix.config }} --config ${{ matrix.config }} --target "KIWI-sp"
+          cmake --build build-${{ matrix.config }} --config ${{ matrix.config }} --target "KIWI-mp"
+          cmake --build build-${{ matrix.config }} --config ${{ matrix.config }} --target "KIWI-dedi"
           popd
 
       - uses: actions/upload-artifact@v4
         with:
-          name: KisakCOD-${{ matrix.config }}
+          name: KIWI-${{ matrix.config }}
           path: ${{ github.workspace }}/bin
           compression-level: 9
           retention-days: 1

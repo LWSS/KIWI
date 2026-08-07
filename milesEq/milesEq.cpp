@@ -4,13 +4,13 @@
 //##                                                                        ##
 //##  Clean re-implementation of the CoD3 custom EQ filter (originally      ##
 //##  c:\trees\cod3\cod3src\milesEq\) against the Miles Sound System 7.2e   ##
-//##  SDK, so the pipeline-filter ABI matches the 7.2e mss32.dll KisakCOD   ##
+//##  SDK, so the pipeline-filter ABI matches the 7.2e mss32.dll KIWI   ##
 //##  ships. The legacy milesEq.flt was built for an older Miles; under the ##
 //##  7.2e mixer it walked off the sample buffer -> AV inside milesEq.flt   ##
 //##  (crash on coup with EQ'd streamed sounds).                            ##
 //##                                                                        ##
 //##  Registers provider "3 Band Parm Eq" exposing per-band sample          ##
-//##  properties (N = 0..2), exactly as KisakCOD MSS_ApplyEqFilter /        ##
+//##  properties (N = 0..2), exactly as KIWI MSS_ApplyEqFilter /        ##
 //##  SND_SetEqParams drive them:                                           ##
 //##      "Enable N" (int)  "Type N" (int, SND_EQTYPE)                       ##
 //##      "Freq N"  (float) "Gain N" (float, dB) "Q N" (float)              ##
@@ -28,7 +28,7 @@
 #define FILTER_NAME "3 Band Parm Eq"
 #define N_BANDS     3
 
-// SND_EQTYPE (KisakCOD snd_public.h)
+// SND_EQTYPE (KIWI snd_public.h)
 enum
 {
    EQ_LOWPASS   = 0,
@@ -179,7 +179,7 @@ static void init_sample( SAMPLESTATE FAR *SS )
       BAND FAR *b = &SS->band[n];
       b->enabled = 0;
       b->type    = EQ_LOWPASS;
-      b->freq    = 20000.0F;            // matches KisakCOD MSS_InitEq defaults
+      b->freq    = 20000.0F;            // matches KIWI MSS_InitEq defaults
       b->gain    = 0.0F;
       b->q       = 1.0F;
       b->x1 = b->x2 = b->y1 = b->y2 = 0.0F;

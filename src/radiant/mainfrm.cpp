@@ -2684,7 +2684,7 @@ void CMainFrame::OnLayersDlg()
 
 // OnSelectionAddToActiveLayer (IDB CXYWnd::OnSelectionAddToActiveLayer 0x466930,
 // AFX msgmap nID 0x88B9 = 35001) — the right-click "Add selection to active layer"
-// command.  The binary attaches it to the CXYWnd context-menu map; KisakCOD routes
+// command.  The binary attaches it to the CXYWnd context-menu map; KIWI routes
 // menu commands through CMainFrame, so this thin handler forwards to the ported
 // core (brush.cpp), which sets every selected brush's parent_layer_string to
 // g_activeLayer_string.  g_nUpdateBits|=1 → redraw (CMainFrame::On* convention).

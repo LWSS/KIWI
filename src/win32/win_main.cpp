@@ -762,7 +762,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 #if 1 || defined(KISAK_DEBUG)
 	AllocConsole();
 
-	SetConsoleTitleA("KisakCOD");
+	SetConsoleTitleA("KIWI");
 	DeleteMenu(GetSystemMenu(GetConsoleWindow(), FALSE), SC_CLOSE, MF_BYCOMMAND);
 
 	SetConsoleMode(GetStdHandle(STD_OUTPUT_HANDLE),

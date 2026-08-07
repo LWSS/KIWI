@@ -1,4 +1,4 @@
-message("----- KisakCOD Radiant -----")
+message("----- KIWI Radiant -----")
 
 # MFC: static MFC (matches the original binary, statically linked MFC 7.1).
 # Enabled once Microsoft.VisualStudio.Component.VC.ATLMFC was installed (afxwin.h
@@ -6,7 +6,7 @@ message("----- KisakCOD Radiant -----")
 # CRadiantApp a CWinApp (MFC provides WinMain). Static MFC requires /MT (set below).
 set(CMAKE_MFC_FLAG 1)
 
-project(KisakCOD-Radiant)
+project(KIWI-Radiant)
 
 # Phase 2: engine file sets (UNIVERSAL, XANIM, etc.) from common_files.cmake
 include(${SCRIPTS_DIR}/common_files.cmake)

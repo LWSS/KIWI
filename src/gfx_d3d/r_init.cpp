@@ -4493,7 +4493,7 @@ int R_IsHiDef()
 //
 // R_InitRendererForWindow is the per-window entry. The first window (windowCount==0)
 // brings the device up via R_BeginRegistration_R_InitHardware; every later window
-// adds a swap chain via R_CreateSwapChains. KisakCOD is CoD3-single-window
+// adds a swap chain via R_CreateSwapChains. KIWI is CoD3-single-window
 // (DxGlobals.windows[1]); these are KISAK_RADIANT-only additions.
 //
 // PART-1/Task-D status: R_InitRendererForWindow is the real port; the two device-

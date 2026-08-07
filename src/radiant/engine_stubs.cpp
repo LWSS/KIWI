@@ -1170,7 +1170,7 @@ void MainFrm_EntList( entity_s *, const char * ) {}
 //                                 NOT a filesystem probe (it answers "is this path known
 //                                 to the depot?").
 //  p4api (clientapi.h / p4api.lib) is a third-party dependency that is not in the
-//  KisakCOD tree, so the ClientApi half is unportable here.  What IS reproduced is the
+//  KIWI tree, so the ClientApi half is unportable here.  What IS reproduced is the
 //  binary's own Init-FAILURE path (0x4376b9): CheckError("Init") true -> clear
 //  g_qeglobals.toggle_unk05 for the session and return false.  That is exactly what the
 //  real function does on a machine with no p4 connection, and it keeps every caller

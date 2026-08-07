@@ -1,4 +1,4 @@
-# radiant_files.cmake — editor source files for KisakCOD-Radiant
+# radiant_files.cmake — editor source files for KIWI-Radiant
 # Phase 1: scaffold + stubs.
 # Phase 2: engine subset appended at the bottom.
 # NOTE: UNIVERSAL/XANIM/COMMON come from common_files.cmake (included in CMakeLists.txt).
@@ -269,13 +269,13 @@ set(RADIANT_GFX_D3D
     "${SRC_DIR}/gfx_d3d/r_shadowcookie.h"
     "${SRC_DIR}/gfx_d3d/r_sky.cpp"
     "${SRC_DIR}/gfx_d3d/r_sky.h"
-    # r_sky_load_obj.cpp folded into r_sky.cpp in KisakCOD
+    # r_sky_load_obj.cpp folded into r_sky.cpp in KIWI
     "${SRC_DIR}/gfx_d3d/r_spotshadow.cpp"
     "${SRC_DIR}/gfx_d3d/r_spotshadow.h"
     "${SRC_DIR}/gfx_d3d/r_state.cpp"
     "${SRC_DIR}/gfx_d3d/r_state.h"
     "${SRC_DIR}/gfx_d3d/r_state_utils.cpp"
-    # r_staticmodel_load_obj.cpp folded into r_staticmodel.cpp in KisakCOD; use r_staticmodel.cpp
+    # r_staticmodel_load_obj.cpp folded into r_staticmodel.cpp in KIWI; use r_staticmodel.cpp
     "${SRC_DIR}/gfx_d3d/r_staticmodel.cpp"
     "${SRC_DIR}/gfx_d3d/r_staticmodelcache.cpp"
     "${SRC_DIR}/gfx_d3d/r_sunshadow.cpp"
@@ -290,7 +290,7 @@ set(RADIANT_GFX_D3D
     "${SRC_DIR}/gfx_d3d/r_workercmds.h"
     "${SRC_DIR}/gfx_d3d/r_xsurface.cpp"
     "${SRC_DIR}/gfx_d3d/r_xsurface.h"
-    # r_xsurface_load_obj.cpp folded into r_xsurface.cpp in KisakCOD
+    # r_xsurface_load_obj.cpp folded into r_xsurface.cpp in KIWI
 
     # ── Build 10 additions ─────────────────────────────────────────────────────
     "${SRC_DIR}/gfx_d3d/r_cmds.cpp"

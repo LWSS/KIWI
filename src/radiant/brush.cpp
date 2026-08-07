@@ -7105,7 +7105,7 @@ static void DrawBrush_PrefabContents( selbrush_t *bboxBrush, entity_s_def *eDef,
         // from GetProfileIntA("Filters",name,1) — DEFAULT 1 (SHOWN) for a fresh registry.
         // The stock CoD4Radiant.exe has NO "Filters" registry subkey, so every filter is
         // shown and all tool volumes (Hint/Portal/Clip/LightGridVolume/Caulk) render.  The
-        // port reads its OWN app registry (HKCU\...\KisakCOD-Radiant\Filters); a session that
+        // port reads its OWN app registry (HKCU\...\KIWI-Radiant\Filters); a session that
         // toggled filters there leaves them unchecked → those volumes hide.  That is FAITHFUL
         // behaviour (matches the binary given the same registry) — to reproduce the stock
         // default, clear that Filters subkey.  [tool-volume audit 2026-07-04]

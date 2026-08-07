@@ -1,6 +1,6 @@
-message("----- KisakCOD Dedicated(MP) -----")
+message("----- KIWI Dedicated(MP) -----")
 
-project(KisakCOD-dedi)
+project(KIWI-dedi)
 
 # Include all common files between mp/sp/dedi
 include(${SCRIPTS_DIR}/common_files.cmake)

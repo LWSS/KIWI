@@ -1269,7 +1269,7 @@ void __cdecl Com_Init_Try_Block_Function(char* commandLine)
     char* s; // [esp+14h] [ebp-8h]
     uint32_t initStartTime; // [esp+18h] [ebp-4h]
 
-    Com_Printf(16, "%s %s build %s %s\n", "KisakCoD4", "1.0", CPUSTRING, __DATE__);
+    Com_Printf(16, "%s %s build %s %s\n", "KIWI", "1.0", CPUSTRING, __DATE__);
     Com_ParseCommandLine(commandLine);
     SL_Init();
     Swap_Init();

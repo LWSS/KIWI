@@ -2,7 +2,7 @@
 #error this file is only for Radiant!
 #endif
 // Radiant-to-D3D renderer bootstrap. Engine-owned wrapper symbols are supplied by
-// the normal KisakCOD engine sources.
+// the normal KIWI engine sources.
 
 #include "stdafx.h"
 #include <gfx_d3d/r_init.h>         // R_Init, R_InitRendererForWindow
@@ -82,5 +82,5 @@ Material *R_BeginRegistrationInternal()
     return g_qeglobals.d_additive;
 }
 
-// The original tools build also defined engine-wrapper stubs here. KisakCOD links
+// The original tools build also defined engine-wrapper stubs here. KIWI links
 // their canonical implementations from the engine modules instead.
