@@ -67,7 +67,6 @@ jobs:
       - name: Build ${{ matrix.config }}
         run: |
           pushd
-          cmake --build build-${{ matrix.config }} --config ${{ matrix.config }} --target "KIWI-sp"
           cmake --build build-${{ matrix.config }} --config ${{ matrix.config }} --target "KIWI-mp"
           cmake --build build-${{ matrix.config }} --config ${{ matrix.config }} --target "KIWI-dedi"
           popd

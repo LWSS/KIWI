@@ -42,6 +42,6 @@ message("Building KISAK_PLATFORM: ${KISAK_PLATFORM}")
 
 # Include the subprojects
 add_subdirectory(${SCRIPTS_DIR}/mp)
-add_subdirectory(${SCRIPTS_DIR}/sp)
+#add_subdirectory(${SCRIPTS_DIR}/sp) # Disabled SP in KIWI
 add_subdirectory(${SCRIPTS_DIR}/dedi)
 add_subdirectory(${SCRIPTS_DIR}/radiant)
