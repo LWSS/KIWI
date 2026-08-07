@@ -71,7 +71,6 @@ if (NOT KISAK_SOUND)
     target_link_directories(${PROJECT_NAME} PUBLIC "${DEPS_DIR}/msslib")
 endif()
 target_link_directories(${PROJECT_NAME} PUBLIC "${DEPS_DIR}/steamsdk")
-target_link_directories(${PROJECT_NAME} PUBLIC "${DEPS_DIR}/binklib")
 
 #Enable PDB for "Release" Build. (There is also RelWithDebInfo, but it has different settings)
 target_link_options(${PROJECT_NAME} PRIVATE "$<$<CONFIG:Release>:/DEBUG>")
@@ -104,7 +103,6 @@ target_link_libraries(${PROJECT_NAME} PUBLIC
         uuid.lib
         odbc32.lib
         odbccp32.lib
-        binkw32.lib
         steam_api.lib
         dxguid.lib
 )

@@ -3257,7 +3257,7 @@ void __cdecl SND_Init()
         0.85000002f,
         mina,
         DVAR_ARCHIVE,
-        "Scales the volume of Bink videos.");
+        "Scales the volume of cinematic videos.");
     snd_drawEqEnts = Dvar_RegisterBool(
         "snd_drawEqEnts",
         0,

@@ -22,7 +22,6 @@ add_executable(${PROJECT_NAME}
     ${EFFECTSCORE} 
     ${AIM_ASSIST} 
     ${BGAME} 
-    ${BINKLIB} 
     ${CGAME} 
     ${CGAME_MP} 
     ${CLIENT} 
