@@ -1540,9 +1540,8 @@ void __cdecl CG_Init(int localClientNum, int savegame)
     CL_SetADS(localClientNum, 0);
     AimAssist_Init(localClientNum);
 
-#ifndef KISAK_NO_FASTFILES
-    CG_ModelPreviewerCreateDevGui(localClientNum);
-#endif
+    if (IsFastFileLoad())
+        CG_ModelPreviewerCreateDevGui(localClientNum);
 
     //CG_InitDevguiRumbleGraph(localClientNum); // KISAKTODO
     I_strncpyz(v10, Dvar_GetString("profile"), 1024);

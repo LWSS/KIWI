@@ -63,18 +63,16 @@ int __cdecl StringTable_LookupRowNumForValue(const StringTable *table, int compa
     return -1;
 }
 
-#ifdef KISAK_NO_FASTFILES
 #define STRING_TABLE_CACHE_SIZE 32
 
 static int g_numStringTables = 0;
 static StringTable g_stringTableCache[STRING_TABLE_CACHE_SIZE];
-#endif
 
 void __cdecl StringTable_GetAsset(const char *filename, StringTable **tablePtr)
 {
     if (!IsFastFileLoad())
     {
-#ifdef KISAK_NO_FASTFILES // KISAKTODO: memory here is never freed (not big), string cmp slightly meh but probably fine for this amt. of data
+        // KISAKTODO: memory here is never freed (not big), string cmp slightly meh but probably fine for this amt. of data
         for (int i = 0; i < g_numStringTables; i++)
         {
             if (!I_strcmp(g_stringTableCache[i].name, filename))
@@ -160,9 +158,6 @@ void __cdecl StringTable_GetAsset(const char *filename, StringTable **tablePtr)
         g_numStringTables++;
 
         iassert(g_numStringTables < STRING_TABLE_CACHE_SIZE);
-#else
-        Com_Error(ERR_DROP, "Trying to use a string table with fast file loading disabled.");
-#endif
     }
     else
     {

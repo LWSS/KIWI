@@ -145,9 +145,8 @@ void __cdecl CL_CreateDevGui()
     CL_CreateMapMenuEntries();
     R_CreateDevGui();
     Cbuf_InsertText(0, "exec devgui_main");
-#ifndef KISAK_NO_FASTFILES
-    Com_InitSoundDevGuiGraphs();
-#endif
+    if (IsFastFileLoad()) 
+        Com_InitSoundDevGuiGraphs();
     CG_InitVisionSetsMenu();
 }
 

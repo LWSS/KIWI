@@ -1531,9 +1531,9 @@ void Com_InitDvars()
 
     useFastFile = Dvar_RegisterBool(
         "useFastFile",
-        1,
+        0,
         DVAR_INIT,
-        "Enables loading data from fast files. Only tools can run without fast files.");
+        "Enables loading data from fast files. KIWI defaults to loose files.");
     sys_lockThreads = Dvar_RegisterEnum(
         "sys_lockThreads",
         s_lockThreadNames,

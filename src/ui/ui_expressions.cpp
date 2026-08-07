@@ -2367,11 +2367,8 @@ void __cdecl TableLookup(int localClientNum, OperandList *list, Operand *operand
     const char *string; // [esp-4h] [ebp-8h]
     StringTable *table; // [esp+0h] [ebp-4h] BYREF
 
-#ifdef KISAK_NO_FASTFILES
-    if (true)
-#else
-    if (IsFastFileLoad())
-#endif
+    // KIWI: StringTable_GetAsset handles both fastfile and loose CSV loading, so this
+    // no longer needs the fastfile-only guard.
     {
         if (list->operandCount == 4)
         {
@@ -2401,11 +2398,6 @@ void __cdecl TableLookup(int localClientNum, OperandList *list, Operand *operand
             operandResult->dataType = VAL_STRING;
             operandResult->internals.intVal = (int)"";
         }
-    }
-    else
-    {
-        operandResult->dataType = VAL_STRING;
-        operandResult->internals.intVal = (int)"";
     }
 }
 

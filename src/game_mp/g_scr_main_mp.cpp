@@ -3790,11 +3790,9 @@ int32_t Scr_PrecacheShader()
 
     if (!*shaderName)
     {
-#ifdef KISAK_NO_FASTFILES
-        return 0;
-#else
+        if (!IsFastFileLoad())
+            return 0;
         Scr_ParamError(0, "Shader name string is empty");
-#endif
     }
 
     return G_MaterialIndex(shaderName);
@@ -4585,27 +4583,16 @@ void Scr_TableLookup()
     int32_t returnValueColumn; // [esp+14h] [ebp-8h]
     int32_t comparisonColumn; // [esp+18h] [ebp-4h]
 
-#ifdef KISAK_NO_FASTFILES
-    if (true)
-#else
-    if (IsFastFileLoad())
-#endif
-    {
-        if (Scr_GetNumParam() < 3)
-            Scr_Error("USAGE: tableLookup( filename, searchColumnNum, searchValue, returnValueColumnNum )\n");
-        filename = Scr_GetString(0);
-        StringTable_GetAsset(filename, &table);
-        comparisonColumn = Scr_GetInt(1);
-        stringValue = Scr_GetString(2);
-        returnValueColumn = Scr_GetInt(3);
-        returnValue = (char *)StringTable_Lookup(table, comparisonColumn, stringValue, returnValueColumn);
-        Scr_AddString(returnValue);
-    }
-    else
-    {
-        Com_Printf(16, "You cannot do table lookups without fastfiles.\n");
-        Scr_AddString((char *)"");
-    }
+
+    if (Scr_GetNumParam() < 3)
+        Scr_Error("USAGE: tableLookup( filename, searchColumnNum, searchValue, returnValueColumnNum )\n");
+    filename = Scr_GetString(0);
+    StringTable_GetAsset(filename, &table);
+    comparisonColumn = Scr_GetInt(1);
+    stringValue = Scr_GetString(2);
+    returnValueColumn = Scr_GetInt(3);
+    returnValue = (char *)StringTable_Lookup(table, comparisonColumn, stringValue, returnValueColumn);
+    Scr_AddString(returnValue);
 }
 
 void Scr_TableLookupIString()
@@ -4617,27 +4604,15 @@ void Scr_TableLookupIString()
     int32_t returnValueColumn; // [esp+14h] [ebp-8h]
     int32_t comparisonColumn; // [esp+18h] [ebp-4h]
 
-#ifdef KISAK_NO_FASTFILES
-    if (true)
-#else
-    if (IsFastFileLoad())
-#endif
-    {
-        if (Scr_GetNumParam() < 3)
-            Scr_Error("USAGE: tableLookupIString( filename, searchColumnNum, searchValue, returnValueColumnNum )\n");
-        filename = Scr_GetString(0);
-        StringTable_GetAsset(filename, &table);
-        comparisonColumn = Scr_GetInt(1);
-        stringValue = Scr_GetString(2);
-        returnValueColumn = Scr_GetInt(3);
-        returnValue = (char *)StringTable_Lookup(table, comparisonColumn, stringValue, returnValueColumn);
-        Scr_AddIString(returnValue);
-    }
-    else
-    {
-        Com_Printf(16, "You cannot do table lookups without fastfiles.\n");
-        Scr_AddIString((char *)"");
-    }
+    if (Scr_GetNumParam() < 3)
+        Scr_Error("USAGE: tableLookupIString( filename, searchColumnNum, searchValue, returnValueColumnNum )\n");
+    filename = Scr_GetString(0);
+    StringTable_GetAsset(filename, &table);
+    comparisonColumn = Scr_GetInt(1);
+    stringValue = Scr_GetString(2);
+    returnValueColumn = Scr_GetInt(3);
+    returnValue = (char *)StringTable_Lookup(table, comparisonColumn, stringValue, returnValueColumn);
+    Scr_AddIString(returnValue);
 }
 
 void GScr_IsPlayer()

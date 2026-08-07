@@ -1776,7 +1776,6 @@ char __cdecl Material_FindCachedShader(
     }
 }
 
-#ifdef KISAK_NO_FASTFILES
 static bool Material_FindCachedShader2(uint32_t *shaderLen, void **cachedShader, const char *filename)
 {
     Material_DeleteOldCachedShaders();
@@ -1836,7 +1835,6 @@ static bool Material_CopyTextToDXBuffer2(uint32_t shaderHash, ID3DXBuffer **shad
     free(cachedShader);
     return true;
 }
-#endif
 
 char __cdecl Material_CopyTextToDXBuffer(uint8_t *cachedShader, uint32_t shaderLen, ID3DXBuffer **shader)
 {
@@ -2057,7 +2055,6 @@ ID3DXBuffer *__cdecl Material_CompileShader(
     return 0;
 }
 
-#ifdef KISAK_NO_FASTFILES
 static int GetHashedFilename(int shaderType, const char *shaderName)
 {
     iassert(shaderType == MTL_PIXEL_SHADER || shaderType == MTL_VERTEX_SHADER); // lwss add
@@ -2096,7 +2093,6 @@ static int GetHashedFilename(int shaderType, const char *shaderName)
     //return *(_DWORD *)(pList + 8 * v7 + 4);
     return pList[v7].val;
 }
-#endif
 
 MaterialVertexShader *__cdecl Material_LoadVertexShader(char *shaderName, int shaderVersion, GfxRenderer renderer)
 {
@@ -2111,21 +2107,18 @@ MaterialVertexShader *__cdecl Material_LoadVertexShader(char *shaderName, int sh
 
     Material_GetShaderTargetString(target, 0x10u, "vs", shaderVersion, renderer);
 
-    // We are missing the shader/ folder with hlsl, (see Material_PreLoadAllShaderText())
-#ifdef KISAK_NO_FASTFILES
+    // Precompiled shader_bin/ first (the stock install ships no shaders/*.hlsl source);
+    // fall back to compiling from hlsl for shaders we author ourselves.
     int hashedName = GetHashedFilename(MTL_VERTEX_SHADER, shaderName);
 
     if (!hashedName || !Material_CopyTextToDXBuffer2(hashedName, &shader, target))
+        shader = Material_CompileShader(shaderName, MTL_VERTEX_SHADER, (char *)"vs_main", target);
+
+    if (!shader)
     {
         Com_Error(ERR_DROP, "Can't find shader: shader_bin/%s_%8.8x\n", target, hashedName);
         return 0;
     }
-#else
-    shader = Material_CompileShader(shaderName, MTL_VERTEX_SHADER, (char *)"vs_main", target);
-#endif
-
-    if (!shader)
-        return 0;
 
     programSize = shader->GetBufferSize();
     iassert( (programSize > 0) );
@@ -2309,20 +2302,17 @@ MaterialPixelShader *__cdecl Material_LoadPixelShader(char *shaderName, int shad
 
     Material_GetShaderTargetString(target, 0x10u, "ps", shaderVersion, renderer);
 
-#ifdef KISAK_NO_FASTFILES
+    // Precompiled shader_bin/ first, hlsl compile fallback (see Material_LoadVertexShader).
     int hashedName = GetHashedFilename(MTL_PIXEL_SHADER, shaderName);
 
     if (!hashedName || !Material_CopyTextToDXBuffer2(hashedName, &shader, target))
+        shader = Material_CompileShader(shaderName, MTL_PIXEL_SHADER, (char*)"ps_main", target);
+
+    if (!shader)
     {
         Com_Error(ERR_DROP, "Can't find shader: shader_bin/%s_%8.8x\n", target, hashedName);
         return 0;
     }
-#else
-    shader = Material_CompileShader(shaderName, MTL_PIXEL_SHADER, (char*)"ps_main", target);
-#endif
-
-    if (!shader)
-        return 0;
 
     programSize = shader->GetBufferSize();
     iassert( (programSize > 0) );
@@ -6184,8 +6174,10 @@ void __cdecl Material_PreLoadAllShaderText()
     // Therefore, I have RE'd the "CoD4EffectsEd.exe" to see what it does, and that's where this code comes from.
 
     // What we have in shader_bin/ is basically a list of compiled shaders, however the names are hashed and stored in this shader_names file.
-#ifdef KISAK_NO_FASTFILES
 
+    // KIWI: do both unconditionally - the shader_names hash list feeds the shader_bin/
+    // precompiled path, and the shaders/lib/*.hlsl scan feeds the compile fallback for
+    // shaders we author ourselves. Either source being absent is fine.
     int file;
     int fileLen = FS_FOpenFileRead("shader_bin/shader_names", &file);
 
@@ -6201,7 +6193,7 @@ void __cdecl Material_PreLoadAllShaderText()
 
         FS_FCloseFile(file);
     }
-#else
+
     int fileCountLib; // [esp+154h] [ebp-8h] BYREF
     const char **shaderListLib; // [esp+158h] [ebp-4h]
 
@@ -6216,7 +6208,6 @@ void __cdecl Material_PreLoadAllShaderText()
     //    Material_CachedShaderTextLess);
     std::sort(&mtlLoadGlob.cachedShaderText[0], &mtlLoadGlob.cachedShaderText[mtlLoadGlob.cachedShaderCount], Material_CachedShaderTextLess);
     FS_FreeFileList(shaderListLib);
-#endif
 }
 
 void Material_FreeAllLiterals()

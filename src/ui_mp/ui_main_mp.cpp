@@ -4566,7 +4566,6 @@ void __cdecl UI_ListMenus_f()
 
 void __cdecl CL_SelectStringTableEntryInDvar_f()
 {
-#ifndef KISAK_NO_FASTFILES
     const char *v0; // eax
     uint32_t v1; // eax
     const char *v2; // eax
@@ -4583,6 +4582,10 @@ void __cdecl CL_SelectStringTableEntryInDvar_f()
         {
             v0 = Cmd_Argv(1);
             StringTable_GetAsset(v0, &table);
+            // KIWI: loose loading returns NULL when the csv is missing (fastfiles hand
+            // back a default asset instead) - bail rather than deref.
+            if (!table)
+                return;
             v1 = Sys_Milliseconds();
             srand(v1);
             rowCount = (double)table->rowCount;
@@ -4598,7 +4601,6 @@ void __cdecl CL_SelectStringTableEntryInDvar_f()
             Com_Printf(16, "usage: selectStringTableEntryInDvar <tableFileName> <columnNum> <dvarName>");
         }
     }
-#endif
 }
 
 void __cdecl UI_CloseMenu_f()

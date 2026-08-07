@@ -60,12 +60,6 @@ target_compile_definitions(${PROJECT_NAME} PUBLIC
     _MBCS
     # Radiant edits SP maps; use SP entity count so q_shared.h MAX_GENTITIES resolves
     MAX_GENTITIES=2176
-    # The editor runs without fastfiles (loose assets). KISAK_NO_FASTFILES selects the
-    # loose-asset code paths: precompiled shaders from raw/shader_bin/ keyed by
-    # shader_bin/shader_names (Material_PreLoadAllShaderText / Material_Load*Shader),
-    # the loose StringTable loader, and IsFastFileLoad()==false at compile time. The
-    # stock install ships no shaders/*.hlsl sources, only the precompiled binaries.
-    KISAK_NO_FASTFILES
 )
 
 # Compile flags — match the SP/MP builds (/MT static CRT to match static MFC)

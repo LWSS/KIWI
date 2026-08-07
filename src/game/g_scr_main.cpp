@@ -6352,8 +6352,10 @@ void Scr_AmplifyStop()
 
 void __cdecl Scr_ErrorOnDefaultAsset(XAssetType type, const char *assetName)
 {
-#ifndef KISAK_NO_FASTFILES
     const char *XAssetTypeName; // r3
+
+    if (!IsFastFileLoad())
+        return;
 
     DB_FindXAssetHeader(type, assetName);
     if (DB_IsXAssetDefault(type, assetName))
@@ -6361,7 +6363,6 @@ void __cdecl Scr_ErrorOnDefaultAsset(XAssetType type, const char *assetName)
         XAssetTypeName = DB_GetXAssetTypeName((int)type);
         Scr_NeverTerminalError(va("precache %s '%s' failed", XAssetTypeName, assetName));
     }
-#endif
 }
 
 int Scr_PrecacheModel()

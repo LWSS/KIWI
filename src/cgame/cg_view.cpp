@@ -1690,10 +1690,11 @@ int __cdecl CG_DrawActiveFrame(
         cgArray[0].selectedLocation[1] = 0.5;
     }
     CL_Input(localClientNum);
-#ifndef KISAK_NO_FASTFILES
-    CG_ModelPreviewerFrame(cgArray);
-    CG_AddModelPreviewerModel(cgArray[0].frametime);
-#endif
+    if (IsFastFileLoad())
+    {
+        CG_ModelPreviewerFrame(cgArray);
+        CG_AddModelPreviewerModel(cgArray[0].frametime);
+    }
     {
         PROF_SCOPED("player state");
         CG_PredictPlayerState(localClientNum);
