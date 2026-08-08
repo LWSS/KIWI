@@ -641,7 +641,7 @@ void CZWnd::OnPaint()
     Z_Draw();
 
     R_EndFrame();
-    R_IssueRenderCommands( (uint32_t)-1 );
+    R_IssueRenderCommands( (uint)-1 );
     R_SortMaterials();
     R_CheckTargetWindow( hwnd );
 }

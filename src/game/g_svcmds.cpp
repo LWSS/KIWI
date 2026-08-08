@@ -91,15 +91,15 @@ int __cdecl StringToFilter(char *s, ipFilter_s *f)
             break;
         ++s;
     }
-    f->mask = *(uint32_t *)m;
-    f->compare = *(uint32_t *)b;
+    f->mask = *(uint *)m;
+    f->compare = *(uint *)b;
     return 1;
 }
 
 #ifdef KISAK_MP
 void UpdateIPBans()
 {
-    uint32_t b; // [esp+20h] [ebp-410h]
+    uint b; // [esp+20h] [ebp-410h]
     int i; // [esp+24h] [ebp-40Ch]
     char iplist[1028]; // [esp+28h] [ebp-408h] BYREF
 

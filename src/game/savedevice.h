@@ -19,7 +19,7 @@ int __cdecl ReadFromDevice(void *, int, void *);
 int __cdecl OpenDevice(char const *, void **);
 void __cdecl CloseDevice(void *);
 bool __cdecl SaveExists(char const *);
-int __cdecl WriteSaveToDevice(unsigned char *, struct SaveHeader const *, bool);
+int __cdecl WriteSaveToDevice(byte *, struct SaveHeader const *, bool);
 void __cdecl SV_ForceSelectSaveDevice_f(void);
 void __cdecl SV_SelectSaveDevice_f(void);
 bool __cdecl SaveDevice_CheckForError(struct MemcardError const *);

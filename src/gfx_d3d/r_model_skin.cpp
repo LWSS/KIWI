@@ -8,7 +8,7 @@
 #include "r_dobj_skin.h"
 
 
-//uint32_t const *const g_shortBoneWeightPerm__uint4 820f4950     gfx_d3d : r_model_skin.obj
+//uint const *const g_shortBoneWeightPerm__uint4 820f4950     gfx_d3d : r_model_skin.obj
 //struct __vector4 const g_shortBoneWeightPerm 85b981d0     gfx_d3d : r_model_skin.obj
 
 static void __cdecl R_MultiplySkelMat(const DObjSkelMat *mat0, const DObjSkelMat *mat1, DObjSkelMat *out)
@@ -76,7 +76,7 @@ void R_SkinXModelCmd(_WORD *data)
     DObjSkelMat __declspec(align(16)) boneSkelMats[128];
     memset(boneSkelMats, 0, sizeof(boneSkelMats));
 
-    for (uint32_t i = 0; i < skinCmd->surfCount; i++)
+    for (uint i = 0; i < skinCmd->surfCount; i++)
     {
         GfxModelSkinnedSurface *skinnedSurf = surfPos;
 
@@ -91,7 +91,7 @@ void R_SkinXModelCmd(_WORD *data)
             boneIndex = skinnedSurf->info.boneIndex;
             const int totalBones = boneIndex + skinnedSurf->info.boneCount;
             const DObjAnimMat* baseMats = &skinnedSurf->info.baseMat[-boneIndex];
-            for (uint32_t j = boneIndex; j < totalBones; j++)
+            for (uint j = boneIndex; j < totalBones; j++)
             {
                 if ((skinCmd->surfacePartBits[j >> 5] & (0x80000000 >> (j & 0x1F))) == 0)
                     continue;
@@ -428,7 +428,7 @@ void __cdecl R_SkinXSurfaceRigid(
     const DObjSkelMat *boneMatrix,
     GfxPackedVertex *vertices)
 {
-    uint32_t i; // [esp+44h] [ebp-1Ch]
+    uint i; // [esp+44h] [ebp-1Ch]
     int vertCount; // [esp+48h] [ebp-18h]
     int vertIndex; // [esp+4Ch] [ebp-14h]
     GfxPackedVertex *vertex; // [esp+50h] [ebp-10h]

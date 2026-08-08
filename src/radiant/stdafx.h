@@ -70,6 +70,13 @@ using std::max;
 // Resource IDs
 #include "res/resource.h"
 
+// Engine base types (uint/ushort/byte/vec_t + the IDA compat macros). Every engine TU
+// includes q_shared.h first; editor TUs cannot, because afxwin.h must lead (see above),
+// so it goes here instead - stdafx.h is the first include of every editor TU, and this
+// still lands before qe3.h/qedefs.h and the kisak headers they pull in, all of which
+// use those base types.
+#include <universal/q_shared.h>
+
 // Editor object model (plane_t, winding_t, vec3_t, brush_t, face_t, qeglobals_t, …).
 // GtkRadiant 1.6 stdafx.h also includes qe3.h as the universal editor type header.
 // Must come AFTER afxwin.h (needs HWND/HINSTANCE) and resource.h (ICON IDs).

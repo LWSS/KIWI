@@ -16,21 +16,21 @@ void __cdecl R_InitBspDrawSurf(GfxBspDrawSurfData* surfData)
 char __cdecl R_PreTessBspDrawSurfs(
     GfxDrawSurf drawSurf,
     const uint16_t *list,
-    uint32_t count,
+    uint count,
     GfxBspDrawSurfData *surfData)
 {
-    uint32_t simplifiedCount; // [esp+34h] [ebp-230h]
+    uint simplifiedCount; // [esp+34h] [ebp-230h]
     uint16_t surfIndex; // [esp+38h] [ebp-22Ch]
     const GfxSurface *tris; // [esp+3Ch] [ebp-228h]
-    uint32_t copyIndex; // [esp+40h] [ebp-224h]
+    uint copyIndex; // [esp+40h] [ebp-224h]
     GfxBspPreTessDrawSurf simplifiedList[128]; // [esp+44h] [ebp-220h] BYREF
-    uint32_t lmapIndex; // [esp+244h] [ebp-20h]
+    uint lmapIndex; // [esp+244h] [ebp-20h]
     uint16_t *preTessIndices; // [esp+248h] [ebp-1Ch]
-    uint32_t firstIndex; // [esp+24Ch] [ebp-18h]
-    uint32_t triCount; // [esp+250h] [ebp-14h]
-    uint32_t reflectionProbeIndex; // [esp+254h] [ebp-10h]
+    uint firstIndex; // [esp+24Ch] [ebp-18h]
+    uint triCount; // [esp+250h] [ebp-14h]
+    uint reflectionProbeIndex; // [esp+254h] [ebp-10h]
     const GfxSurface *surf; // [esp+258h] [ebp-Ch]
-    uint32_t surfIter; // [esp+25Ch] [ebp-8h]
+    uint surfIter; // [esp+25Ch] [ebp-8h]
     int baseVertex; // [esp+260h] [ebp-4h]
 
     triCount = 0;
@@ -73,7 +73,7 @@ char __cdecl R_PreTessBspDrawSurfs(
             //v5 = tris->tris.triCount + *((uint16_t*)&copyIndex + 2 * simplifiedCount + 1);
             // TODO(mrsteyk): @Correctness
             iassert(simplifiedCount);
-            simplifiedList[simplifiedCount - 1].totalTriCount = truncate_cast<unsigned short>(tris->tris.triCount + simplifiedList[simplifiedCount - 1].totalTriCount);
+            simplifiedList[simplifiedCount - 1].totalTriCount = truncate_cast<ushort>(tris->tris.triCount + simplifiedList[simplifiedCount - 1].totalTriCount);
         }
     }
 
@@ -95,7 +95,7 @@ char __cdecl R_PreTessBspDrawSurfs(
 void __cdecl R_AddBspDrawSurfs(
     GfxDrawSurf drawSurf,
     uint8_t *list,
-    uint32_t count,
+    uint count,
     GfxBspDrawSurfData *surfData)
 {
     bool v4; // [esp+Bh] [ebp-1h]
@@ -119,19 +119,19 @@ void __cdecl R_AddAllBspDrawSurfacesCamera()
 }
 
 void __cdecl R_AddAllBspDrawSurfacesRangeCamera(
-    uint32_t beginSurface,
-    uint32_t endSurface,
-    uint32_t stage,
-    uint32_t maxDrawSurfCount)
+    uint beginSurface,
+    uint endSurface,
+    uint stage,
+    uint maxDrawSurfCount)
 {
     uint16_t triSurfList[128]; // [esp+30h] [ebp-148h] BYREF
     int debugFastSunShadow; // [esp+138h] [ebp-40h]
-    uint32_t* surfaceCastsSunShadow; // [esp+13Ch] [ebp-3Ch]
+    uint* surfaceCastsSunShadow; // [esp+13Ch] [ebp-3Ch]
     GfxDrawSurf drawSurf; // [esp+140h] [ebp-38h]
     GfxDrawSurf prevDrawSurf; // [esp+148h] [ebp-30h]
-    uint32_t sortedSurfIndex; // [esp+150h] [ebp-28h]
+    uint sortedSurfIndex; // [esp+150h] [ebp-28h]
     const uint8_t* surfaceVisData; // [esp+154h] [ebp-24h]
-    uint32_t triSurfCount; // [esp+158h] [ebp-20h]
+    uint triSurfCount; // [esp+158h] [ebp-20h]
     GfxDrawSurf* surfaceMaterials; // [esp+15Ch] [ebp-1Ch]
     GfxBspDrawSurfData surfData; // [esp+160h] [ebp-18h] BYREF
 
@@ -186,16 +186,16 @@ void __cdecl R_AddAllBspDrawSurfacesRangeCamera(
 }
 
 void __cdecl R_AddAllBspDrawSurfacesCameraNonlit(
-    uint32_t beginSurface,
-    uint32_t endSurface,
-    uint32_t stage)
+    uint beginSurface,
+    uint endSurface,
+    uint stage)
 {
     uint16_t triSurfList[128]; // [esp+0h] [ebp-148h] BYREF
     GfxDrawSurf drawSurf; // [esp+108h] [ebp-40h]
     GfxDrawSurf prevDrawSurf; // [esp+110h] [ebp-38h]
-    uint32_t sortedSurfIndex; // [esp+118h] [ebp-30h]
+    uint sortedSurfIndex; // [esp+118h] [ebp-30h]
     const uint8_t* surfaceVisData; // [esp+11Ch] [ebp-2Ch]
-    uint32_t triSurfCount; // [esp+120h] [ebp-28h]
+    uint triSurfCount; // [esp+120h] [ebp-28h]
     GfxDrawSurf *surfaceMaterials; // [esp+124h] [ebp-24h]
     GfxBspDrawSurfData surfData; // [esp+128h] [ebp-20h] BYREF
     int drawSurfCount; // [esp+144h] [ebp-4h]
@@ -249,20 +249,20 @@ void __cdecl R_AddAllBspDrawSurfacesSunShadow()
 }
 
 void __cdecl R_AddAllBspDrawSurfacesRangeSunShadow(
-    uint32_t partitionIndex,
-    uint32_t beginSurface,
-    uint32_t endSurface,
-    uint32_t maxDrawSurfCount)
+    uint partitionIndex,
+    uint beginSurface,
+    uint endSurface,
+    uint maxDrawSurfCount)
 {
     uint16_t triSurfList[128]; // [esp+3Ch] [ebp-158h] BYREF
-    uint32_t *surfaceCastsSunShadow; // [esp+140h] [ebp-54h]
+    uint *surfaceCastsSunShadow; // [esp+140h] [ebp-54h]
     GfxDrawSurf drawSurf; // [esp+144h] [ebp-50h]
     GfxDrawSurf prevDrawSurf; // [esp+14Ch] [ebp-48h]
-    uint32_t stage; // [esp+158h] [ebp-3Ch]
-    uint32_t sortedSurfIndex; // [esp+15Ch] [ebp-38h]
+    uint stage; // [esp+158h] [ebp-3Ch]
+    uint sortedSurfIndex; // [esp+15Ch] [ebp-38h]
     const uint8_t *surfaceVisData; // [esp+160h] [ebp-34h]
     int hasApproxSunDirChanged; // [esp+164h] [ebp-30h]
-    uint32_t triSurfCount; // [esp+168h] [ebp-2Ch]
+    uint triSurfCount; // [esp+168h] [ebp-2Ch]
     GfxDrawSurf *surfaceMaterials; // [esp+16Ch] [ebp-28h]
     int fastSunShadow; // [esp+170h] [ebp-24h]
     GfxBspDrawSurfData surfData; // [esp+174h] [ebp-20h] BYREF
@@ -360,17 +360,17 @@ void __cdecl R_AddAllBspDrawSurfacesRangeSunShadow(
     scene.drawSurfCount[stage] = surfData.drawSurfList.current - scene.drawSurfs[stage];
 }
 
-void __cdecl R_AddAllBspDrawSurfacesSpotShadow(uint32_t spotShadowIndex, uint32_t primaryLightIndex)
+void __cdecl R_AddAllBspDrawSurfacesSpotShadow(uint spotShadowIndex, uint primaryLightIndex)
 {
     uint16_t triSurfList[128]; // [esp+0h] [ebp-158h] BYREF
     GfxDrawSurf drawSurf; // [esp+108h] [ebp-50h]
     GfxShadowGeometry* shadowGeom; // [esp+114h] [ebp-44h]
     GfxDrawSurf prevDrawSurf; // [esp+118h] [ebp-40h]
-    uint32_t stage; // [esp+120h] [ebp-38h]
-    uint32_t sortedSurfIndex; // [esp+124h] [ebp-34h]
-    uint32_t triSurfCount; // [esp+128h] [ebp-30h]
+    uint stage; // [esp+120h] [ebp-38h]
+    uint sortedSurfIndex; // [esp+124h] [ebp-34h]
+    uint triSurfCount; // [esp+128h] [ebp-30h]
     GfxDrawSurf* drawSurfs; // [esp+12Ch] [ebp-2Ch]
-    uint32_t surfIter; // [esp+130h] [ebp-28h]
+    uint surfIter; // [esp+130h] [ebp-28h]
     GfxDrawSurf* surfaceMaterials; // [esp+134h] [ebp-24h]
     GfxBspDrawSurfData surfData; // [esp+138h] [ebp-20h] BYREF
     int drawSurfCount; // [esp+154h] [ebp-4h]

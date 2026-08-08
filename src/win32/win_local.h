@@ -44,7 +44,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 #ifndef KISAK_RADIANT_NETADR_DEFINED
 #define KISAK_RADIANT_NETADR_DEFINED
-struct netadr_t { int type; unsigned char ip[4]; unsigned short port; unsigned char ipx[10]; };
+struct netadr_t { int type; byte ip[4]; ushort port; byte ipx[10]; };
 #endif
 #ifndef KISAK_RADIANT_MSG_DEFINED
 #define KISAK_RADIANT_MSG_DEFINED
@@ -52,8 +52,8 @@ struct msg_t   // == qcommon/msg.h (sizeof 0x28)
 {
     int overflowed;
     int readOnly;
-    unsigned char *data;
-    unsigned char *splitData;
+    byte *data;
+    byte *splitData;
     int maxsize;
     int cursize;
     int splitSize;
@@ -181,7 +181,7 @@ extern HWND g_splashWnd;
 
 #if defined(KISAK_RADIANT)
 // Radiant tools build: use SP-compatible critical section layout
-enum CriticalSection : __int32
+enum CriticalSection : int
 {
 	CRITSECT_CONSOLE = 0x0,
 	CRITSECT_DEBUG_SOCKET = 0x1,
@@ -249,7 +249,7 @@ enum CriticalSection : int
 	CRITSECT_COUNT = 0x16,
 };
 #elif KISAK_SP
-enum CriticalSection : __int32
+enum CriticalSection : int
 {
 	CRITSECT_CONSOLE = 0x0,
 	CRITSECT_DEBUG_SOCKET = 0x1,
@@ -307,8 +307,8 @@ struct sysEvent_t // sizeof=0x18
 
 struct FastCriticalSection
 {
-	volatile uint32_t readCount;
-	volatile uint32_t writeCount;
+	volatile uint readCount;
+	volatile uint writeCount;
 };
 
 void Sys_InitializeCriticalSections();
@@ -330,7 +330,7 @@ void __cdecl  Sys_Quit();
 void __cdecl Sys_Print(const char *msg);
 char *__cdecl Sys_GetClipboardData();
 int __cdecl Sys_SetClipboardData(const char *text);
-void __cdecl Sys_QueEvent(uint32_t time, sysEventType_t type, int value, int value2, int ptrLength, void *ptr);
+void __cdecl Sys_QueEvent(uint time, sysEventType_t type, int value, int value2, int ptrLength, void *ptr);
 void Sys_ShutdownEvents();
 void __cdecl Sys_LoadingKeepAlive();
 sysEvent_t *__cdecl Sys_GetEvent(sysEvent_t *result);
@@ -365,7 +365,7 @@ double __cdecl Voice_GetVoiceLevel();
 void __cdecl Voice_Playback();
 int __cdecl Voice_GetLocalVoiceData();
 void __cdecl Voice_IncomingVoiceData(unsigned __int8 talker, unsigned __int8 *data, int packetDataSize);
-bool __cdecl Voice_IsClientTalking(uint32_t clientNum);
+bool __cdecl Voice_IsClientTalking(uint clientNum);
 char __cdecl Voice_StartRecording();
 char __cdecl Voice_StopRecording();
 

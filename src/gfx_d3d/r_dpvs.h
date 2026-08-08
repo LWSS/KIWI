@@ -6,7 +6,7 @@
 
 #define DPVS_PORTAL_MAX_PLANES 16
 
-enum $72E71F3D9535328A1AA08FD8E568F55B : __int32
+enum $72E71F3D9535328A1AA08FD8E568F55B : int
 {
     CULL_STATE_OUT = 0x0,
     CULL_STATE_BOUNDED_PENDING = 0x1,
@@ -15,13 +15,13 @@ enum $72E71F3D9535328A1AA08FD8E568F55B : __int32
     CULL_STATE_DONE = 0x4,
 };
 
-enum DpvsClipChildren : __int32
+enum DpvsClipChildren : int
 {                                       // ...
     DPVS_DONT_CLIP_CHILDREN = 0x0,
     DPVS_CLIP_CHILDREN = 0x1,
 };
 
-enum DpvsForceBevels : __int32
+enum DpvsForceBevels : int
 {                                       // ...
     DPVS_DONT_FORCE_BEVELS = 0x0,
     DPVS_FORCE_BEVELS = 0x1,
@@ -35,13 +35,13 @@ struct DpvsPlanes // sizeof=0x8
 struct DpvsClipPlaneSet // sizeof=0x44
 {                                       // ...
     const DpvsPlane *planes[16];        // ...
-    uint32_t count;                 // ...
+    uint count;                 // ...
 };
 
 struct DpvsDynamicCellCmd // sizeof=0xC
 {                                       // ...
     const DpvsPlane *planes;            // ...
-    uint32_t cellIndex;             // ...
+    uint cellIndex;             // ...
     uint8_t planeCount;         // ...
     uint8_t frustumPlaneCount;  // ...
     uint16_t viewIndex;         // ...
@@ -67,10 +67,10 @@ struct DpvsEntityCmd // sizeof=0x10
 
 struct FilterEntInfo // sizeof=0x10
 {                                       // ...
-    uint32_t localClientNum;        // ...
-    uint32_t entnum;                // ...
+    uint localClientNum;        // ...
+    uint entnum;                // ...
     GfxEntCellRefInfo info;             // ...
-    uint32_t cellOffset;            // ...
+    uint cellOffset;            // ...
 };
 
 union GfxHullPointsPool // sizeof=0x200
@@ -87,7 +87,7 @@ struct PortalHeapNode // sizeof=0x8
 
 struct DpvsView // sizeof=0x120
 {                                       // ...
-    uint32_t renderFxFlagsCull;
+    uint renderFxFlagsCull;
     DpvsPlane frustumPlanes[14];        // ...
     int frustumPlaneCount;              // ...
 };
@@ -108,11 +108,11 @@ struct DpvsGlobals // sizeof=0xAE78
     float cullDist;                     // ...
     DpvsPlane childPlanes[2048];        // ...
     DpvsView views[4][3];               // ... //[localclientNum][SCENE_VIEW_CAMERA]
-    uint32_t cameraCellIndex;       // ...
+    uint cameraCellIndex;       // ...
     DpvsPlane *sideFrustumPlanes;       // ...
-    uint32_t *entVisBits[4];        // ...
-    uint32_t *cellBits;             // ...
-    uint32_t cellVisibleBits[32];   // ...
+    uint *entVisBits[4];        // ...
+    uint *cellBits;             // ...
+    uint cellVisibleBits[32];   // ...
 };
 
 void __cdecl TRACK_r_dpvs();
@@ -122,53 +122,53 @@ void __cdecl R_FrustumClipPlanes(
     int sidePlaneCount,
     DpvsPlane *frustumPlanes);
 char *__cdecl R_PortalAssertMsg();
-uint32_t __cdecl R_FindNearestReflectionProbeInCell(
+uint __cdecl R_FindNearestReflectionProbeInCell(
     const GfxWorld *world,
     const GfxCell *cell,
     const float *origin);
-uint32_t __cdecl R_FindNearestReflectionProbe(const GfxWorld *world, const float *origin);
-uint32_t __cdecl R_CalcReflectionProbeIndex(const float *origin);
+uint __cdecl R_FindNearestReflectionProbe(const GfxWorld *world, const float *origin);
+uint __cdecl R_CalcReflectionProbeIndex(const float *origin);
 void __cdecl R_AddAllSceneEntSurfacesCamera(const GfxViewInfo *viewInfo);
 void __cdecl R_AddAllSceneEntSurfacesSunShadow();
-void __cdecl R_AddAllSceneEntSurfacesRangeSunShadow(uint32_t partitionIndex);
+void __cdecl R_AddAllSceneEntSurfacesRangeSunShadow(uint partitionIndex);
 void __cdecl R_AddAllSceneEntSurfacesSpotShadow(
     const GfxViewInfo *viewInfo,
-    uint32_t spotShadowIndex,
-    uint32_t primaryLightIndex);
-void __cdecl R_AddSceneDObj(uint32_t entnum, uint32_t viewIndex);
+    uint spotShadowIndex,
+    uint primaryLightIndex);
+void __cdecl R_AddSceneDObj(uint entnum, uint viewIndex);
 void __cdecl R_DrawAllSceneEnt(const GfxViewInfo *viewInfo);
 int __cdecl R_DrawBModel(BModelDrawInfo *bmodelInfo, const GfxBrushModel *bmodel, const GfxPlacement *placement);
 void __cdecl R_DrawAllDynEnt(const GfxViewInfo *viewInfo);
-void __cdecl R_UnfilterEntFromCells(uint32_t localClientNum, uint32_t entnum);
-void __cdecl R_UnfilterDynEntFromCells(uint32_t dynEntId, DynEntityDrawType drawType);
+void __cdecl R_UnfilterEntFromCells(uint localClientNum, uint entnum);
+void __cdecl R_UnfilterDynEntFromCells(uint dynEntId, DynEntityDrawType drawType);
 void __cdecl R_FilterXModelIntoScene(
     const XModel *model,
     const GfxScaledPlacement *placement,
     uint16_t renderFxFlags,
     uint16_t *cachedLightingHandle);
-void __cdecl R_FilterDObjIntoCells(uint32_t localClientNum, uint32_t entnum, float *origin, float radius);
+void __cdecl R_FilterDObjIntoCells(uint localClientNum, uint entnum, float *origin, float radius);
 void __cdecl R_FilterEntIntoCells_r(FilterEntInfo *entInfo, mnode_t *node, const float *mins, const float *maxs);
-void __cdecl R_AddEntToCell(FilterEntInfo *entInfo, uint32_t cellIndex);
-void __cdecl R_FilterBModelIntoCells(uint32_t localClientNum, uint32_t entnum, GfxBrushModel *bmodel);
-void __cdecl R_FilterDynEntIntoCells(uint32_t dynEntId, DynEntityDrawType drawType, float *mins, float *maxs);
+void __cdecl R_AddEntToCell(FilterEntInfo *entInfo, uint cellIndex);
+void __cdecl R_FilterBModelIntoCells(uint localClientNum, uint entnum, GfxBrushModel *bmodel);
+void __cdecl R_FilterDynEntIntoCells(uint dynEntId, DynEntityDrawType drawType, float *mins, float *maxs);
 void __cdecl R_FilterDynEntIntoCells_r(
     mnode_t *node,
-    uint32_t dynEntIndex,
+    uint dynEntIndex,
     DynEntityDrawType drawType,
     const float *mins,
     const float *maxs);
-void __cdecl R_AddDynEntToCell(uint32_t cellIndex, uint32_t dynEntIndex, DynEntityDrawType drawType);
+void __cdecl R_AddDynEntToCell(uint cellIndex, uint dynEntIndex, DynEntityDrawType drawType);
 void __cdecl R_FilterEntitiesIntoCells(int cameraCellIndex);
-uint32_t __cdecl R_SetVisData(uint32_t viewIndex);
+uint __cdecl R_SetVisData(uint viewIndex);
 void __cdecl R_AddCellDynBrushSurfacesInFrustumCmd(const DpvsDynamicCellCmd *data);
-void __cdecl R_CullDynBrushInCell(uint32_t cellIndex, const DpvsPlane *planes, int planeCount);
+void __cdecl R_CullDynBrushInCell(uint cellIndex, const DpvsPlane *planes, int planeCount);
 void __cdecl R_GenerateShadowMapCasterCells();
 void __cdecl R_VisitPortalsNoFrustum(const GfxCell *cell);
-uint32_t __cdecl R_PortalClipPlanesNoFrustum(
+uint __cdecl R_PortalClipPlanesNoFrustum(
     DpvsPlane *planes,
-    uint32_t vertexCount,
+    uint vertexCount,
     const float (*winding)[3]);
-void __cdecl R_GetSidePlaneNormals(const float (*winding)[3], uint32_t vertexCount, float (*normals)[3]);
+void __cdecl R_GetSidePlaneNormals(const float (*winding)[3], uint vertexCount, float (*normals)[3]);
 GfxPortal *__cdecl R_NextQueuedPortal();
 int R_AssertValidQueue();
 void __cdecl R_VisitPortalsForCellNoFrustum(
@@ -225,9 +225,9 @@ void __cdecl R_SetViewFrustumPlanes(GfxViewInfo *viewInfo);
 void __cdecl R_AddWorldSurfacesDpvs(const GfxViewParms *viewParms, int cameraCellIndex);
 void __cdecl R_AddWorldSurfacesPortalWalk(int cameraCellIndex);
 void __cdecl R_VisitPortals(const GfxCell *cell, const DpvsPlane *parentPlane, const DpvsPlane *planes, int planeCount);
-uint32_t __cdecl R_PortalClipPlanes(
+uint __cdecl R_PortalClipPlanes(
     DpvsPlane *planes,
-    uint32_t vertexCount,
+    uint vertexCount,
     const float (*winding)[3],
     GfxCell *cell,
     DpvsClipChildren *clipChildren);
@@ -238,9 +238,9 @@ void __cdecl R_ProjectPortal(
     float *mins,
     float *maxs,
     DpvsClipChildren *clipChildren);
-uint32_t __cdecl R_AddBevelPlanes(
+uint __cdecl R_AddBevelPlanes(
     DpvsPlane *planes,
-    uint32_t vertexCount,
+    uint vertexCount,
     const float (*winding)[3],
     const float (*windingNormals)[3],
     float *mins,
@@ -280,15 +280,15 @@ int __cdecl R_AddCellToList(const GfxCell *cell, const GfxCell **list, int count
 void __cdecl R_SetupShadowSurfacesDpvs(
     const GfxViewParms *viewParms,
     const float (*sidePlanes)[4],
-    uint32_t sidePlaneCount,
+    uint sidePlaneCount,
     int partitionIndex);
 double __cdecl R_GetFarPlaneDist();
-uint32_t __cdecl R_CalcReflectionProbeIndex(const GfxWorld *world, const float *origin);
-uint32_t __cdecl R_FindNearestReflectionProbeInCell(
+uint __cdecl R_CalcReflectionProbeIndex(const GfxWorld *world, const float *origin);
+uint __cdecl R_FindNearestReflectionProbeInCell(
     const GfxWorld *world,
     const GfxCell *cell,
     const float *origin);
-uint32_t __cdecl R_FindNearestReflectionProbe(const GfxWorld *world, const float *origin);
+uint __cdecl R_FindNearestReflectionProbe(const GfxWorld *world, const float *origin);
 int __cdecl R_CellForPoint(const GfxWorld *world, const float *origin);
 
 void __cdecl R_FreeHullPoints(GfxHullPointsPool *hullPoints);
@@ -309,8 +309,8 @@ bool __cdecl R_BoundsInCell_r(mnode_t *node, int findCellIndex, const float *min
 // r_dvps_dynmodel
 void __cdecl R_AddCellDynModelSurfacesInFrustumCmd(const DpvsDynamicCellCmd *data);
 void __cdecl R_CullDynModelInCell(
-    const uint32_t *dynEntCellBits,
-    uint32_t dynEntClientWordCount,
+    const uint *dynEntCellBits,
+    uint dynEntClientWordCount,
     DynEntityPose *dynModelList,
     const DpvsPlane *planes,
     int planeCount,

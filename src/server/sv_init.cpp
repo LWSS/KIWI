@@ -386,7 +386,7 @@ void __cdecl SV_SetExpectedHunkUsage(char *mapname)
     {
         buf = (char *)Z_Malloc(len + 1, "SV_SetExpectedHunkUsage", 10);
         memset(buf, 0, len + 1);
-        FS_Read((unsigned char *)buf, len, handle);
+        FS_Read((byte *)buf, len, handle);
         FS_FCloseFile(handle);
         buftrav = buf;
         while (1)

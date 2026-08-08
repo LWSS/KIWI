@@ -27,7 +27,7 @@
 #include "turret.h"
 #include "g_public.h"
 
-enum DEBUGMAYMOVE_LIFT_ENUM : __int32
+enum DEBUGMAYMOVE_LIFT_ENUM : int
 {
     DEBUGMAYMOVE_NOT_LIFTED = 0x0,
     DEBUGMAYMOVE_LIFTED = 0x1,

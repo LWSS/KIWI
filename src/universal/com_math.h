@@ -27,7 +27,7 @@ struct cplane_s // sizeof=0x14
 
 union PackedUnitVec // sizeof=0x4
 {                                       // ...
-    operator uint32_t()
+    operator uint()
     {
         return packed;
     }
@@ -35,7 +35,7 @@ union PackedUnitVec // sizeof=0x4
     {
         return packed;
     }
-    uint32_t packed;
+    uint packed;
     uint8_t array[4];
 };
 
@@ -60,7 +60,7 @@ constexpr vec2 vec2_origin = { 0.0, 0.0 };
 constexpr vec3 vec3_origin = { 0.0, 0.0, 0.0 };
 constexpr vec4 vec4_origin = { 0.0, 0.0, 0.0, 0.0 };
 
-using uint4 = uint32_t[4];
+using uint4 = uint[4];
 
 // NOTE: yes, these really seem to be different matrix types specific to the FX system for some reason..
 union float4 {
@@ -170,7 +170,7 @@ float __cdecl crandom();
 float __cdecl flrand(float min, float max);
 int __cdecl irand(int min, int max);
 
-uint32_t __cdecl RandWithSeed(int* seed);
+uint __cdecl RandWithSeed(int* seed);
 void __cdecl GaussianRandom(float* f0, float* f1);
 void __cdecl PointInCircleFromUniformDeviates(float radiusDeviate, float yawDeviate, float* point);
 
@@ -213,7 +213,7 @@ float __cdecl PitchForYawOnNormal(float fYaw, const float* normal);
 
 // == PACKING ==
 uint8_t __cdecl DirToByte(const float *dir);
-void __cdecl ByteToDir(uint32_t b, float *dir);
+void __cdecl ByteToDir(uint b, float *dir);
 
 // == ARCs ==
 int IsPosInsideArc(
@@ -464,7 +464,7 @@ __forceinline static float COERCE_FLOAT(unsigned val) {
     return lol.f;
 }
 
-__forceinline static uint32_t COERCE_UNSIGNED_INT(float val) {
+__forceinline static uint COERCE_UNSIGNED_INT(float val) {
     union {
         float f;
         unsigned v;

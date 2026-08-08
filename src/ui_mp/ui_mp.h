@@ -212,7 +212,7 @@ void __cdecl UI_DrawTalkerNum(
 
 int __cdecl UI_CheckExecKey(int localClientNum, int key);
 void __cdecl UI_ServersSort(int column, int force);
-int __cdecl UI_ServersQsortCompare(uint32_t *arg1, uint32_t *arg2);
+int __cdecl UI_ServersQsortCompare(uint *arg1, uint *arg2);
 void UI_VerifyLanguage();
 void __cdecl UI_UpdateDisplayServers(uiInfo_s *uiInfo);
 char __cdecl UI_GetOpenOrCloseMenuOnDvarArgs(
@@ -238,8 +238,8 @@ void __cdecl UI_CloseMenuOnDvar(
     const char *dvarName,
     const char *testValue);
 void __cdecl UI_BuildServerDisplayList(uiInfo_s *uiInfo, int force);
-void __cdecl UI_BinaryServerInsertion(uint32_t num);
-void __cdecl UI_InsertServerIntoDisplayList(uint32_t num, int position);
+void __cdecl UI_BinaryServerInsertion(uint num);
+void __cdecl UI_InsertServerIntoDisplayList(uint num, int position);
 int UI_ClearDisplayedServers();
 void __cdecl UI_BuildServerStatus(uiInfo_s *uiInfo, int force);
 void __cdecl UI_BuildPlayerList(int localClientNum);

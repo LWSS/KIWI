@@ -327,7 +327,7 @@ const clientState_s *__cdecl G_GetClientStateLocal(int clientNum)
 hudelem_s g_dummyHudCurrent_1;
 int __cdecl GetFollowPlayerStateLocal(int clientNum, playerState_s *ps)
 {
-    uint32_t index; // [esp+8h] [ebp-8h]
+    uint index; // [esp+8h] [ebp-8h]
 
     if (!svsHeaderValid)
         MyAssertHandler(".\\server_mp\\sv_archive_mp.cpp", 58, 0, "%s", "svsHeaderValid");

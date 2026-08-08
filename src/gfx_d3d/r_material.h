@@ -10,7 +10,7 @@
 
 #define MTL_LAYER_LIMIT 5
 
-enum $74254F2FBB58A9D84A85080F50CF363D : __int32
+enum $74254F2FBB58A9D84A85080F50CF363D : int
 {
     MTL_ARG_MATERIAL_VERTEX_CONST = 0x0,
     MTL_ARG_LITERAL_VERTEX_CONST = 0x1,
@@ -25,7 +25,7 @@ enum $74254F2FBB58A9D84A85080F50CF363D : __int32
     MLT_ARG_COUNT = 0x8,
 };
 
-enum MaterialTextureSource : uint32_t
+enum MaterialTextureSource : uint
 {                                       // ...
     TEXTURE_SRC_CODE_BLACK = 0x0, // ...
     TEXTURE_SRC_CODE_WHITE = 0x1, // ...
@@ -57,7 +57,7 @@ enum MaterialTextureSource : uint32_t
     TEXTURE_SRC_CODE_COUNT = 0x1B,
 };
 
-enum surfaceType_t : __int32
+enum surfaceType_t : int
 {                                       // ...
     SF_TRIANGLES = 0x0,
     SF_TRIANGLES_PRETESS = 0x1,
@@ -82,7 +82,7 @@ enum surfaceType_t : __int32
     SF_FORCE_32_BITS = -0x1,
 };
 
-enum ShaderParamType : __int32
+enum ShaderParamType : int
 {                                       // ...
     SHADER_PARAM_FLOAT4 = 0x0,
     SHADER_PARAM_SAMPLER_2D = 0x1,
@@ -90,20 +90,20 @@ enum ShaderParamType : __int32
     SHADER_PARAM_SAMPLER_CUBE = 0x3,
 };
 
-enum MaterialShaderType : __int32
+enum MaterialShaderType : int
 {                                       // ...
     MTL_VERTEX_SHADER = 0x0,
     MTL_PIXEL_SHADER = 0x1,
 };
 
-enum MtlParseSuccess : __int32
+enum MtlParseSuccess : int
 {                                       // ...
     MTL_PARSE_SUCCESS = 0x0,
     MTL_PARSE_NO_MATCH = 0x1,
     MTL_PARSE_ERROR = 0x2,
 };
 
-enum MaterialWorldVertexFormat : __int32
+enum MaterialWorldVertexFormat : int
 {                                       // ...
     MTL_WORLDVERT_TEX_1_NRM_1 = 0x0,    // ...
     MTL_WORLDVERT_TEX_2_NRM_1 = 0x1,    // ...
@@ -119,7 +119,7 @@ enum MaterialWorldVertexFormat : __int32
     MTL_WORLDVERT_TEX_5_NRM_3 = 0xB,
 };
 
-enum MaterialUpdateFrequency : __int32
+enum MaterialUpdateFrequency : int
 {                                       // ...
     MTL_UPDATE_PER_PRIM = 0x0,
     MTL_UPDATE_PER_OBJECT = 0x1,        // ...
@@ -140,12 +140,12 @@ struct MaterialWaterDef // sizeof=0x20
 
 union MaterialTextureDefRaw_u // sizeof=0x4
 {                                       // ...
-    uint32_t imageNameOffset;
-    uint32_t waterDefOffset;
+    uint imageNameOffset;
+    uint waterDefOffset;
 };
 struct MaterialTextureDefRaw // sizeof=0xC
 {
-    uint32_t nameOffset;
+    uint nameOffset;
     uint8_t samplerState;
     uint8_t semantic;
     // padding byte
@@ -155,7 +155,7 @@ struct MaterialTextureDefRaw // sizeof=0xC
 
 struct MaterialConstantDefRaw // sizeof=0x14
 {
-    uint32_t nameOffset;
+    uint nameOffset;
     float literal[4];
 };
 
@@ -193,16 +193,16 @@ struct ShaderParameterSet // sizeof=0x38C
     ShaderUniformDef uniformInputs[32];
     ShaderVaryingDef varyingInputs[32]; // ...
     ShaderVaryingDef outputs[16];       // ...
-    uint32_t uniformInputCount;
-    uint32_t varyingInputCount;     // ...
-    uint32_t outputCount;           // ...
+    uint uniformInputCount;
+    uint varyingInputCount;     // ...
+    uint outputCount;           // ...
 };
 
 struct MaterialTypeInfo // sizeof=0xC
 {                                       // ...
     const char *prefix;                 // ...
     const char *techniqueSetPrefix;     // ...
-    uint32_t prefixLen;             // ...
+    uint prefixLen;             // ...
 };
 
 struct MaterialStreamRouting // sizeof=0x2
@@ -230,8 +230,8 @@ struct $4ABF24606230B73E4E420CE33A1F14B1 // sizeof=0xC
     bool isDirty;                       // ...
     // padding byte
     // padding byte
-    uint32_t remapMask;             // ...
-    uint32_t remapValue;            // ...
+    uint remapMask;             // ...
+    uint remapValue;            // ...
 };
 
 struct MaterialVertexStreamRouting // sizeof=0x60
@@ -282,7 +282,7 @@ union MaterialArgumentDef // sizeof=0x4
     const float *literalConst;
     MaterialArgumentCodeConst codeConst;
     MaterialTextureSource codeSampler;
-    uint32_t nameHash;
+    uint nameHash;
 };
 struct MaterialShaderArgument // sizeof=0x8
 {                                       // ...
@@ -338,8 +338,8 @@ struct water_t // sizeof=0x44
 
 struct ShaderIndexRange // sizeof=0xC
 {                                       // ...
-    uint32_t first;                 // ...
-    uint32_t count;                 // ...
+    uint first;                 // ...
+    uint count;                 // ...
     bool isImplicit;                    // ...
     // padding byte
     // padding byte
@@ -389,22 +389,22 @@ struct CodeConstantSource // sizeof=0x14
 
 struct GfxAssembledShaderTextFile // sizeof=0x108
 {                                       // ...
-    uint32_t srcLine;
-    uint32_t destLine;
+    uint srcLine;
+    uint destLine;
     char fileName[256];
 };
 
 struct GfxAssembledShaderText // sizeof=0x8418
 {                                       // ...
     char *string;
-    uint32_t used;
-    uint32_t total;
-    uint32_t currentDestLine;
+    uint used;
+    uint total;
+    uint currentDestLine;
     bool overflowed;
     // padding byte
     // padding byte
     // padding byte
-    uint32_t fileCount;
+    uint fileCount;
     GfxAssembledShaderTextFile files[128];
 };
 
@@ -416,7 +416,7 @@ union MaterialTextureDefInfo // sizeof=0x4
 
 struct MaterialTextureDef // sizeof=0xC
 {
-    uint32_t nameHash;
+    uint nameHash;
     char nameStart;
     char nameEnd;
     uint8_t samplerState;
@@ -426,7 +426,7 @@ struct MaterialTextureDef // sizeof=0xC
 
 struct MaterialConstantDef // sizeof=0x20
 {
-    uint32_t nameHash;
+    uint nameHash;
     char name[12];
     float literal[4];
 };
@@ -439,7 +439,7 @@ struct MaterialInfo // sizeof=0x18
     uint8_t textureAtlasRowCount; // ...
     uint8_t textureAtlasColumnCount; // ...
     GfxDrawSurf drawSurf;
-    uint32_t surfaceTypeBits;
+    uint surfaceTypeBits;
     uint16_t hashIndex;
     // padding byte
     // padding byte
@@ -491,7 +491,7 @@ struct Material // sizeof=0x50
     // compile these.
     uint16_t editorToolFlags; // raw MaterialInfoRaw.toolFlags
     uint8_t  editorUsage;     // raw MaterialInfoRaw.usage  (qtexture usage_index)
-    uint32_t editorLocale;    // raw MaterialInfoRaw.locale (qtexture localefilter mask)
+    uint editorLocale;    // raw MaterialInfoRaw.locale (qtexture localefilter mask)
 #endif
 };
 #ifdef KISAK_RADIANT
@@ -521,7 +521,7 @@ struct stream_dest_info_t // sizeof=0x2
     uint8_t UsageIndex;
 };
 
-enum MtlTechSetNotFoundBehavior : __int32
+enum MtlTechSetNotFoundBehavior : int
 {                                       // ...
     MTL_TECHSET_NOT_FOUND_RETURN_NULL = 0x0,
     MTL_TECHSET_NOT_FOUND_RETURN_DEFAULT = 0x1,
@@ -548,14 +548,14 @@ struct GfxCachedShaderText // sizeof=0xC
 struct MaterialString // sizeof=0x8
 {                                       // ...
     const char *string;                 // ...
-    uint32_t hash;                  // ...
+    uint hash;                  // ...
 };
 struct MaterialStateMapRule // sizeof=0x20
 {                                       // ...
-    uint32_t stateBitsMask[2];
-    uint32_t stateBitsValue[2];
-    uint32_t stateBitsSet[2];
-    uint32_t stateBitsClear[2];
+    uint stateBitsMask[2];
+    uint stateBitsValue[2];
+    uint stateBitsSet[2];
+    uint stateBitsClear[2];
 };
 struct MaterialStateMapRuleSet // sizeof=0x24
 {
@@ -569,8 +569,8 @@ struct MaterialStateMap // sizeof=0x2C
 };
 struct MaterialInfoRaw // sizeof=0x28
 {                                       // ...
-    uint32_t nameOffset;
-    uint32_t refImageNameOffset;
+    uint nameOffset;
+    uint refImageNameOffset;
     uint8_t gameFlags;
     uint8_t sortKey;
     uint8_t textureAtlasRowCount;
@@ -579,7 +579,7 @@ struct MaterialInfoRaw // sizeof=0x28
     uint8_t deformFlags;
     uint8_t usage;
     uint16_t toolFlags;
-    uint32_t locale;
+    uint locale;
     uint16_t autoTexScaleWidth;
     uint16_t autoTexScaleHeight;
     float tessSize;
@@ -589,30 +589,30 @@ struct MaterialInfoRaw // sizeof=0x28
 struct MaterialRaw // sizeof=0x40
 {
     MaterialInfoRaw info;
-    uint32_t refStateBits[2];
+    uint refStateBits[2];
     uint16_t textureCount;
     uint16_t constantCount;
-    uint32_t techSetNameOffset;
-    uint32_t textureTableOffset;
-    uint32_t constantTableOffset;
+    uint techSetNameOffset;
+    uint textureTableOffset;
+    uint constantTableOffset;
 };
 struct $8E67C8D28114E56A26FBAF05ACADB66A // sizeof=0x11028
 {                                       // ...
-    uint32_t cachedShaderCount;     // ...
+    uint cachedShaderCount;     // ...
     GfxCachedShaderText *cachedShaderText; // ...
-    uint32_t vertexDeclCount;       // ...
+    uint vertexDeclCount;       // ...
     MaterialVertexDeclaration vertexDeclHashTable[32]; // ...
-    uint32_t literalCount;          // ...
+    uint literalCount;          // ...
     float literalTable[16][4];          // ...
-    uint32_t stringCount;           // ...
+    uint stringCount;           // ...
     MaterialString stringHashTable[64]; // ...
-    uint32_t vertexShaderCount;     // ...
+    uint vertexShaderCount;     // ...
     MaterialVertexShader *vertexShaderHashTable[2][2048]; // ...
-    uint32_t pixelShaderCount;      // ...
+    uint pixelShaderCount;      // ...
     MaterialPixelShader *pixelShaderHashTable[2][2048]; // ...
-    uint32_t stateMapCount;         // ...
+    uint stateMapCount;         // ...
     MaterialStateMap *stateMapHashTable[32]; // ...
-    uint32_t techniqueCount;        // ...
+    uint techniqueCount;        // ...
     MaterialTechnique *techniqueHashTable[2][4096]; // ...
     const MaterialRaw *sortMtlRaw;      // ...
 };
@@ -640,7 +640,7 @@ bool __cdecl IsValidMaterialHandle(Material* const handle);
 
 void __cdecl TRACK_r_material();
 
-uint8_t *__cdecl Material_Alloc(uint32_t size);
+uint8_t *__cdecl Material_Alloc(uint size);
 void __cdecl Load_CreateMaterialPixelShader(GfxPixelShaderLoadDef *loadDef, MaterialPixelShader *mtlShader);
 void __cdecl Load_CreateMaterialVertexShader(GfxVertexShaderLoadDef *loadDef, MaterialVertexShader *mtlShader);
 void __cdecl AssertValidVertexDeclOffsets(const stream_source_info_t *streamTable);
@@ -674,8 +674,8 @@ Material *Material_RegisterRawImage(const char *name, int imageTrack);
 struct GfxMtlFeatureMap // sizeof=0x10
 {                                       // ...
     const char *name;
-    uint32_t mask;
-    uint32_t value;
+    uint mask;
+    uint value;
     bool valueRequired;
     // padding byte
     // padding byte
@@ -684,7 +684,7 @@ struct GfxMtlFeatureMap // sizeof=0x10
 
 struct GfxShaderConstantBlock // sizeof=0x64
 {                                       // ...
-    uint32_t count;                 // ...
+    uint count;                 // ...
     uint16_t dest[16];          // ...
     const float *value[16];             // ...
 };
@@ -694,7 +694,7 @@ extern MaterialGlobals materialGlobals;
 extern $4ABF24606230B73E4E420CE33A1F14B1 mtlOverrideGlob;
 
 // r_material_load_obj
-Material *__cdecl R_GetBspMaterial(uint32_t materialIndex);
+Material *__cdecl R_GetBspMaterial(uint materialIndex);
 void __cdecl Material_FreeAll();
 void __cdecl Material_PreLoadAllShaderText();
 Material *__cdecl Material_Load(char *assetName, int imageTrack);
@@ -712,11 +712,11 @@ char __cdecl Material_SetPassShaderArguments_DX(
     const char **text,
     const char *shaderName,
     MaterialShaderType shaderType,
-    uint32_t *program,
+    uint *program,
     uint16_t *techFlags,
     ShaderParameterSet *paramSet,
-    uint32_t argLimit,
-    uint32_t *argCount,
+    uint argLimit,
+    uint *argCount,
     MaterialShaderArgument *args);
 
 const char *__cdecl Material_RegisterString(char *string);
@@ -724,26 +724,26 @@ const char *__cdecl Material_NameForStreamDest(uint8_t dest);
 MaterialTechniqueSet *__cdecl Material_RegisterTechniqueSet(const char *name);
 void __cdecl Material_SetMaterialDrawRegion(Material *material);
 char __cdecl Material_Validate(const Material *material);
-void __cdecl Material_SetStateBits(Material *material, uint32_t (*stateBitsTable)[2], uint32_t stateBitsCount);
+void __cdecl Material_SetStateBits(Material *material, uint (*stateBitsTable)[2], uint stateBitsCount);
 bool __cdecl Material_GenerateShaderString_r(
     GfxAssembledShaderText *prog,
     char *shaderName,
     const char *file,
-    uint32_t fileSize,
+    uint fileSize,
     bool isInLibDir);
 
 // r_material_override
 const GfxMtlFeatureMap *__cdecl Material_FindFeature(
     const char *featureName,
     const GfxMtlFeatureMap *featureMap,
-    uint32_t featureCount);
-uint32_t __cdecl Material_ExtendTechniqueSetName(
+    uint featureCount);
+uint __cdecl Material_ExtendTechniqueSetName(
     char *nameSoFar,
-    uint32_t nameLen,
+    uint nameLen,
     char *token,
-    uint32_t tokenLen,
+    uint tokenLen,
     bool prependUnderscore);
-uint32_t __cdecl Material_NextTechniqueSetNameToken(const char **parse, char *token);
+uint __cdecl Material_NextTechniqueSetNameToken(const char **parse, char *token);
 void __cdecl Material_OverrideTechniqueSets();
 void __cdecl Material_OriginalRemapTechniqueSet(MaterialTechniqueSet *techSet);
 void __cdecl Material_DirtyTechniqueSetOverrides();

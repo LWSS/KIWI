@@ -11,8 +11,8 @@
 #include "actor_senses.h"
 #include "actor_events.h"
 
-unsigned char *bulletPriorityMap;
-unsigned char *riflePriorityMap;
+byte *bulletPriorityMap;
+byte *riflePriorityMap;
 float g_fHitLocDamageMult[19]{ 0.0f };
 
 unsigned __int16 *modNames[16] =

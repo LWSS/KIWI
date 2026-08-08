@@ -406,8 +406,8 @@ struct patch_t
 {
     patchMesh_t     *def;          // 0x00  the patch DEF (symbiont patchMesh_t)
     __int16          version;      // 0x04  instance version (Patch_AllocInstance: def->version-1; rebuild trigger)
-    unsigned char    selected;     // 0x06  per-instance selected flag (BYTE2 of dword@+4 in IDB)
-    unsigned char    pad_07;       // 0x07
+    byte    selected;     // 0x06  per-instance selected flag (BYTE2 of dword@+4 in IDB)
+    byte    pad_07;       // 0x07
     int              vertCount;    // 0x08  a1[2]  tessellated vert count (width*height)
     int              indexCount;   // 0x0C  a1[3]  triangle index count = (h-1)*(6w-6)
     union {                        // 0x10/0x14 — the source indexed these as indices[2]
@@ -419,7 +419,7 @@ struct patch_t
     };
     int              visCount;     // 0x18  a1[6]  per-layer material count (MaterialDef_11)
     patchVisuals_s  *visArray;     // 0x1C  a1[7]  visCount * {material, vertHandle}
-    unsigned char    pad_20[36];   // 0x20  (to the 68-byte IDB instance size)
+    byte    pad_20[36];   // 0x20  (to the 68-byte IDB instance size)
 };
 static_assert(sizeof(patch_t) == 68, "patch_t (pPatch_t instance) != 68");
 static_assert(offsetof(patch_t, vertCount)  == 8,  "patch_t.vertCount");
@@ -490,7 +490,7 @@ struct brush_t
     char        *parent_layer_string; // 0x48
     union {                    // 0x4C
         __int16      unk01;
-        unsigned char modelFailed; // 0x4C low byte (assert strings; == Brush_ModelFailedByte)
+        byte modelFailed; // 0x4C low byte (assert strings; == Brush_ModelFailedByte)
     };
     __int16      version;      // 0x4E
     patchMesh_t *patch;        // 0x50
@@ -880,11 +880,11 @@ static_assert(sizeof(terrainVert_t) == 8, "terrainVert_t");
 //    CreateMruMenuDefault stores lpMRU via `*((_DWORD*)v1 + 3)`, i.e. offset 12).
 struct LPMRUMENU
 {
-    unsigned short wNbItemFill;      // 0x00  # of items currently held
-    unsigned short wNbLruShow;       // 0x02  # of items to show in the menu (6)
-    unsigned short wNbLruMenu;       // 0x04  # of item slots allocated       (9)
-    unsigned short wMaxSizeLruItem;  // 0x06  bytes per item slot             (128)
-    unsigned short wIdMru;           // 0x08  base command id                 (8000)
+    ushort wNbItemFill;      // 0x00  # of items currently held
+    ushort wNbLruShow;       // 0x02  # of items to show in the menu (6)
+    ushort wNbLruMenu;       // 0x04  # of item slots allocated       (9)
+    ushort wMaxSizeLruItem;  // 0x06  bytes per item slot             (128)
+    ushort wIdMru;           // 0x08  base command id                 (8000)
     char          *lpMRU;            // 0x0C  flat item store (wNbLruMenu × wMaxSizeLruItem)
 };
 static_assert(sizeof(LPMRUMENU) == 16, "LPMRUMENU");

@@ -1,7 +1,7 @@
 #pragma once
 #include "r_rendercmds.h"
 
-enum $A1218AF7D1C12B1D50BD9B9B70D78FD4 : __int32
+enum $A1218AF7D1C12B1D50BD9B9B70D78FD4 : int
 {
     SCENE_VIEW_CAMERA = 0x0,
     SCENE_VIEW_SUNSHADOW_0 = 0x1,
@@ -47,7 +47,7 @@ void __cdecl R_SetupSunShadowBoundingPoly(
     float maxSizeInSunProj,
     const float *snappedViewOrgInClipSpace,
     GfxSunShadowBoundingPoly *boundingPoly,
-    uint32_t pointCount);
+    uint pointCount);
 void __cdecl R_SetupSunShadowMapViewMatrix(
     const float *snappedViewOrgInSunProj,
     const float (*sunAxis)[3][3],

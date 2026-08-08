@@ -9,30 +9,30 @@
 #include <universal/profile.h>
 
 
-//   uint32_t *bitsUsedForPlayerstates 85032704     sv_snapshot_profile_mp.obj
+//   uint *bitsUsedForPlayerstates 85032704     sv_snapshot_profile_mp.obj
 //   int (*)[1024] g_currentSnapshotPerEntity 85032728     sv_snapshot_profile_mp.obj
-//   uint32_t (*)[160] currentSnapshotNetworkEntityFieldsChanged 8504a730     sv_snapshot_profile_mp.obj
-//   uint32_t bitsUsedForServerCommands 8504e0b0     sv_snapshot_profile_mp.obj
+//   uint (*)[160] currentSnapshotNetworkEntityFieldsChanged 8504a730     sv_snapshot_profile_mp.obj
+//   uint bitsUsedForServerCommands 8504e0b0     sv_snapshot_profile_mp.obj
 //   BOOL g_archivingSnapshot 8504e0b9     sv_snapshot_profile_mp.obj
 //   int originsSentDueToPredicitonError 8504e0bc     sv_snapshot_profile_mp.obj
 //   struct ClientSnapshotData *s_clientSnapshotData 8504e0c0     sv_snapshot_profile_mp.obj
 //   int originsSentDueToServerTimeMismatch 8504ea14     sv_snapshot_profile_mp.obj
-//   uint32_t (*)[160] networkEntityFieldsChanged 8504ea20     sv_snapshot_profile_mp.obj
-//   uint32_t *bitsUsedPerEType   850523a0     sv_snapshot_profile_mp.obj
-//   unsigned char (*)[1024] g_currentSnapshotFieldsPerEntity 850528b0     sv_snapshot_profile_mp.obj
-//   unsigned char *g_currentSnapshotPlayerStateFields 850589a0     sv_snapshot_profile_mp.obj
+//   uint (*)[160] networkEntityFieldsChanged 8504ea20     sv_snapshot_profile_mp.obj
+//   uint *bitsUsedPerEType   850523a0     sv_snapshot_profile_mp.obj
+//   byte (*)[1024] g_currentSnapshotFieldsPerEntity 850528b0     sv_snapshot_profile_mp.obj
+//   byte *g_currentSnapshotPlayerStateFields 850589a0     sv_snapshot_profile_mp.obj
 //   int (*)[13] g_bitsSent     850589b8     sv_snapshot_profile_mp.obj
 int g_bitsSent[64][13];
 int s_totalPacketDataSizes[20];
 int s_packetMetaDataSize[64][20];
-uint32_t s_packetModeStart[64];
+uint s_packetModeStart[64];
 packetModeList s_packetMode[64];
 int g_currentSnapshotPerEntity[64][1024];
 uint8_t g_currentSnapshotFieldsPerEntity[64][1024];
 uint8_t g_currentSnapshotPlayerStateFields[64];
 bool newDataReady;
-uint32_t bitsUsedPerEType[256];
-uint32_t bitsUsedForPlayerstates[7];
+uint bitsUsedPerEType[256];
+uint bitsUsedForPlayerstates[7];
 int playerStateFieldsChanged[161];
 bool s_packetDataEnabled;
 bool g_archivingSnapshot;
@@ -41,9 +41,9 @@ int s_originDeltaBits[8];
 int s_originZDeltaBits[8];
 int s_originZFullBits[17];
 int s_originFullBits[17];
-uint32_t networkEntityFieldsChanged[23][160];
-uint32_t currentSnapshotNetworkEntityFieldsChanged[23][160];
-uint32_t bitsUsedForServerCommands;
+uint networkEntityFieldsChanged[23][160];
+uint currentSnapshotNetworkEntityFieldsChanged[23][160];
+uint bitsUsedForServerCommands;
 int s_currentEntType;
 int s_currentEntNum;
 int originsSentDueToPredicitonError;
@@ -128,7 +128,7 @@ void __cdecl SV_ClearPacketAnalysis()
     newDataReady = 0;
 }
 
-void __cdecl SV_TrackETypeBytes(uint32_t eType, int bits)
+void __cdecl SV_TrackETypeBytes(uint eType, int bits)
 {
     if (eType >= ET_EVENTS + EV_MAX_EVENTS)
         MyAssertHandler(
@@ -211,8 +211,8 @@ void __cdecl SV_PacketDataIsType(int clientNum, const msg_t *msg, packetModeList
 {
     const char *v3; // eax
     const char *PacketDataTypeName; // eax
-    uint32_t bitsUsed; // [esp+4Ch] [ebp-Ch]
-    uint32_t bitsUsedPrev; // [esp+50h] [ebp-8h]
+    uint bitsUsed; // [esp+4Ch] [ebp-Ch]
+    uint bitsUsedPrev; // [esp+50h] [ebp-8h]
     packetModeList oldMode; // [esp+54h] [ebp-4h]
 
     if (s_packetDataEnabled)
@@ -420,7 +420,7 @@ void __cdecl SV_PacketDataIsZeroInt(int clientNum, const msg_t *msg)
     SV_PacketDataIsType(clientNum, msg, PACKETDATA_ZEROINT);
 }
 
-void __cdecl SV_TrackFloatCompressedBits(uint32_t bits)
+void __cdecl SV_TrackFloatCompressedBits(uint bits)
 {
     if (bits >= 0x3C)
         MyAssertHandler(
@@ -461,7 +461,7 @@ void __cdecl SV_TrackOriginFullBits(int bits)
     ++s_originFullBits[bits];
 }
 
-const char *__cdecl SV_GetEntityTypeString(uint32_t packetEntityType)
+const char *__cdecl SV_GetEntityTypeString(uint packetEntityType)
 {
     if (packetEntityType >= 0x17)
         MyAssertHandler(
@@ -607,7 +607,7 @@ void __cdecl SV_AnalyzePacketData(int clientNum, const msg_t *msg)
 }
 
 int __cdecl SV_TrackPacketData(
-    uint32_t clientNum,
+    uint clientNum,
     PacketDataType datatype,
     int eType,
     int entNum,
@@ -643,7 +643,7 @@ bool __cdecl SV_NewPacketAnalysisReady()
     return newDataReady;
 }
 
-void __cdecl SV_TrackFieldChange(int clientNum, int entityType, uint32_t field)
+void __cdecl SV_TrackFieldChange(int clientNum, int entityType, uint field)
 {
     const char *string; // [esp+30h] [ebp-4h]
 
@@ -709,14 +709,14 @@ void __cdecl SV_WriteEntityFieldNumbers()
 {
     char *EntityTypeName; // eax
     __int64 v1; // [esp+4h] [ebp-34h]
-    uint32_t numFields; // [esp+14h] [ebp-24h] BYREF
+    uint numFields; // [esp+14h] [ebp-24h] BYREF
     bool estimate; // [esp+1Bh] [ebp-1Dh] BYREF
     int totalData; // [esp+1Ch] [ebp-1Ch]
     NetFieldList stateFields; // [esp+20h] [ebp-18h] BYREF
     const char *entityTypeString; // [esp+28h] [ebp-10h]
     int f; // [esp+2Ch] [ebp-Ch]
     int entity; // [esp+30h] [ebp-8h]
-    uint32_t i; // [esp+34h] [ebp-4h]
+    uint i; // [esp+34h] [ebp-4h]
 
     f = FS_FOpenFileWrite((char*)"mp_entityStats.txt");
     if (f)
@@ -878,7 +878,7 @@ void __cdecl SV_WriteEntityFieldNumbers()
     }
 }
 
-void __cdecl SV_GetAnalyzeEntityFields(int analyzeEntityType, NetFieldList *stateFields, uint32_t *numFields)
+void __cdecl SV_GetAnalyzeEntityFields(int analyzeEntityType, NetFieldList *stateFields, uint *numFields)
 {
     if (analyzeEntityType > 17)
     {
@@ -944,7 +944,7 @@ void __cdecl SV_TrackSnapshotSize(int size)
     s_uncompressedDataSinceLastPoll += size;
 }
 
-void __cdecl SV_TrackPacketCompression(uint32_t clientNum, int originalSize, int compressedSize)
+void __cdecl SV_TrackPacketCompression(uint clientNum, int originalSize, int compressedSize)
 {
     int slot; // [esp+0h] [ebp-4h]
 

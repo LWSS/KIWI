@@ -17,7 +17,7 @@ void __cdecl TRACK_aim_target()
     track_static_alloc_internal(atGlobArray, 5640, "atGlobArray", 10);
 }
 
-void __cdecl AimTarget_Init(int32_t localClientNum)
+void __cdecl AimTarget_Init(int localClientNum)
 {
     memset((uint8_t*)&atGlobArray[localClientNum], 0, sizeof(AimTargetGlob));
     AimTarget_RegisterDvars();
@@ -50,15 +50,15 @@ const dvar_s *AimTarget_RegisterDvars()
     return result;
 }
 
-void __cdecl AimTarget_ClearTargetList(int32_t localClientNum)
+void __cdecl AimTarget_ClearTargetList(int localClientNum)
 {
     atGlobArray[localClientNum].targetCount = 0;
 }
 
-void __cdecl AimTarget_ProcessEntity(int32_t localClientNum, const centity_s *ent)
+void __cdecl AimTarget_ProcessEntity(int localClientNum, const centity_s *ent)
 {
     AimTarget target;
-    uint32_t visBone;
+    uint visBone;
     const cg_s *cgameGlob;
 
     PROF_SCOPED("AimTarget_ProcessEntity");
@@ -179,7 +179,7 @@ void __cdecl AimTarget_GetTargetBounds(const centity_s *targetEnt, float *mins, 
     }
 }
 
-void __cdecl AimTarget_GetTagPos(const centity_s *ent, uint32_t tagName, float *pos)
+void __cdecl AimTarget_GetTagPos(const centity_s *ent, uint tagName, float *pos)
 {
     DObj_s* dobj = Com_GetClientDObj(ent->nextState.number, ent->pose.localClientNum); // [esp+0h] [ebp-4h]
     iassert(dobj);
@@ -190,7 +190,7 @@ void __cdecl AimTarget_GetTagPos(const centity_s *ent, uint32_t tagName, float *
     }
 }
 
-char __cdecl AimTarget_IsTargetVisible(int32_t localClientNum, const centity_s *targetEnt, uint32_t visBone)
+char __cdecl AimTarget_IsTargetVisible(int localClientNum, const centity_s *targetEnt, uint visBone)
 {
     float endPos[4]; // [esp+58h] [ebp-58h] BYREF
     trace_t trace; // [esp+68h] [ebp-48h] BYREF
@@ -261,7 +261,7 @@ void __cdecl AimTarget_GetTargetCenter(const centity_s *targetEnt, float *center
     Vec3Add(targetEnt->pose.origin, center, center);
 }
 
-void __cdecl AimTarget_CreateTarget(int32_t localClientNum, const centity_s *targetEnt, AimTarget *target)
+void __cdecl AimTarget_CreateTarget(int localClientNum, const centity_s *targetEnt, AimTarget *target)
 {
     float scale; // [esp+8h] [ebp-70h]
     float diff[8]; // [esp+30h] [ebp-48h] BYREF
@@ -302,11 +302,11 @@ void __cdecl AimTarget_CreateTarget(int32_t localClientNum, const centity_s *tar
     AimTarget_AddTargetToList(localClientNum, target);
 }
 
-void __cdecl AimTarget_AddTargetToList(int32_t localClientNum, const AimTarget *target)
+void __cdecl AimTarget_AddTargetToList(int localClientNum, const AimTarget *target)
 {
-    int32_t targetIndex; // [esp+8h] [ebp-14h]
-    int32_t low; // [esp+Ch] [ebp-10h]
-    int32_t high; // [esp+18h] [ebp-4h]
+    int targetIndex; // [esp+8h] [ebp-14h]
+    int low; // [esp+Ch] [ebp-10h]
+    int high; // [esp+18h] [ebp-4h]
 
     iassert(target);
 
@@ -381,7 +381,7 @@ bool __cdecl AimTarget_PlayerInValidState(const playerState_s *ps)
 #endif
 }
 
-void __cdecl AimTarget_UpdateClientTargets(int32_t localClientNum)
+void __cdecl AimTarget_UpdateClientTargets(int localClientNum)
 {
     atGlobArray[localClientNum].clientTargetCount = atGlobArray[localClientNum].targetCount;
     memcpy(
@@ -390,7 +390,7 @@ void __cdecl AimTarget_UpdateClientTargets(int32_t localClientNum)
         44 * atGlobArray[localClientNum].targetCount);
 }
 
-void __cdecl AimTarget_GetClientTargetList(int32_t localClientNum, AimTarget **targetList, int32_t*targetCount)
+void __cdecl AimTarget_GetClientTargetList(int localClientNum, AimTarget **targetList, int*targetCount)
 {
     iassert(targetList);
     iassert(targetCount);

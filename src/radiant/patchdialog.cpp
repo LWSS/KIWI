@@ -35,7 +35,7 @@ extern void  CurveEdit_SetRange( int slot, float maxVal );        // sub_4015C0 
 #define KRAD_TBM_SETPOS    0x0405   // WM_USER+5
 #define KRAD_TBM_SETRANGE  0x0406   // WM_USER+6
 extern unsigned int  g_paintColorBGR;   // paint target colour {B,G,R} (defined below)
-extern unsigned char g_paintColorA;     // paint target alpha       (defined below)
+extern byte g_paintColorA;     // paint target alpha       (defined below)
 
 class CAdvPatchEditDlg : public CDialog
 {
@@ -138,7 +138,7 @@ protected:
         if ( dlg.DoModal() == IDOK )
         {
             COLORREF c = dlg.GetColor();
-            g_paintColorA = (unsigned char)( ( ( c & 0xFF ) + ( ( c >> 16 ) & 0xFF ) + ( ( c >> 8 ) & 0xFF ) ) / 3 );
+            g_paintColorA = (byte)( ( ( c & 0xFF ) + ( ( c >> 16 ) & 0xFF ) + ( ( c >> 8 ) & 0xFF ) ) / 3 );
         }
     }
     // sub_402490 — CurvEditDlg::OnColorAlpha (WM_DRAWITEM): paint the two owner-draw swatches.
@@ -310,7 +310,7 @@ void HideInfoDialog()
 // ═══════════════════════════════════════════════════════════════════════════════
 typedef float ( *PaintCallback )( float *cp, int channel, float cur, float strength, float weight );
 
-extern char  sub_43DD50( const float *dir, unsigned char *colorOut, const float *cam_origin, float *origin_out ); // pmesh.cpp
+extern char  sub_43DD50( const float *dir, byte *colorOut, const float *cam_origin, float *origin_out ); // pmesh.cpp
 extern void  sub_43E4F0( PaintCallback cb, float *center, char channelMask, float cellInfo ); // pmesh.cpp
 extern float sub_43E550( float *, int, float, float, float );   // raise/lower
 extern float sub_43E570( float *, int, float, float, float );   // set toward target
@@ -327,7 +327,7 @@ extern float grid_sizes[];                                      // engine_stubs
 // The paint TARGET colour (the dialog's colour control / the case-5 eyedropper); packed
 // {B, G, R} like the IDB dword_25D65A4, with a separate alpha byte_25D65A8.  Default white.
 unsigned int  g_paintColorBGR = 0x00FFFFFFu;   // 0x25D65A4
-unsigned char g_paintColorA   = 0xFFu;         // 0x25D65A8
+byte g_paintColorA   = 0xFFu;         // 0x25D65A8
 
 // Is an AdvPatchEditDlg control checked? (live read, BM_GETCHECK = WM_USER... = 0xF0).
 static bool AdvDlg_IsChecked( int id )
@@ -400,9 +400,9 @@ void sub_43E6F0( int buttons, int origin, int dir )
         g_paintChannelVal[0] = sign;
         if ( sign >= 0.0f )
         {
-            g_paintChannelVal[1] = (float)( unsigned char )( g_paintColorBGR );         // B
-            g_paintChannelVal[2] = (float)( unsigned char )( g_paintColorBGR >> 8 );    // G
-            g_paintChannelVal[3] = (float)( unsigned char )( g_paintColorBGR >> 16 );   // R
+            g_paintChannelVal[1] = (float)( byte )( g_paintColorBGR );         // B
+            g_paintChannelVal[2] = (float)( byte )( g_paintColorBGR >> 8 );    // G
+            g_paintChannelVal[3] = (float)( byte )( g_paintColorBGR >> 16 );   // R
             g_paintChannelVal[4] = (float)g_paintColorA;                                // A
         }
         else
@@ -439,7 +439,7 @@ void sub_43E6F0( int buttons, int origin, int dir )
 
     case 5:   // eyedropper: pick the cell's height + colour into the paint target
     {
-        unsigned char picked[4] = { 0, 0, 0, 0 };
+        byte picked[4] = { 0, 0, 0, 0 };
         if ( sub_43DD50( dr, picked, org, center ) )
         {
             g_paintChannelVal[0] = center[2];          // picked height

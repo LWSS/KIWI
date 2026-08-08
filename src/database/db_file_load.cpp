@@ -8,21 +8,21 @@
 #include <gfx_d3d/r_image.h>
 #include <gfx_d3d/r_buffers.h>
 
-//uint32_t volatile g_loadingAssets      828e3f3c     db_file_load.obj
-//int32_t marker_db_file_load  828e3f40     db_file_load.obj
+//uint volatile g_loadingAssets      828e3f3c     db_file_load.obj
+//int marker_db_file_load  828e3f40     db_file_load.obj
 
 struct DB_LoadData // sizeof=0x68
 {                                       // ...
     void* f;                            // ...
     const char* filename;               // ...
     XZoneMemory* zoneMem;               // ...
-    int32_t outstandingReads;               // ...
+    int outstandingReads;               // ...
     OVERLAPPED overlapped;             // ...
     z_stream_s stream;                  // ...
     uint8_t* compressBufferStart; // ...
     uint8_t* compressBufferEnd; // ...
     void(__cdecl* interrupt)();        // ...
-    int32_t allocType;                      // ...
+    int allocType;                      // ...
 };
 
 #ifdef KISAK_MP
@@ -34,19 +34,19 @@ bool g_anyFastFileLoaded;
 DB_LoadData g_load;
 LONG g_loadedSize;
 LONG g_loadedExternalBytes;
-volatile int32_t g_totalSize;
-volatile int32_t g_totalExternalBytes;
-int32_t g_trackLoadProgress;
+volatile int g_totalSize;
+volatile int g_totalExternalBytes;
+int g_trackLoadProgress;
 
 XAssetList g_varXAssetList;
 
 // --- file-local forward declarations (moved out of database.h) ---
 static void __cdecl DB_CancelLoadXFile();
-static int32_t DB_WaitXFileStage();
+static int DB_WaitXFileStage();
 static void DB_ReadXFileStage();
-static int32_t __cdecl DB_ReadData();
+static int __cdecl DB_ReadData();
 static void Load_XAssetListCustom();
-static void __cdecl Load_XAssetArrayCustom(int32_t count);
+static void __cdecl Load_XAssetArrayCustom(int count);
 
 void __cdecl DB_CancelLoadXFile()
 {
@@ -61,9 +61,9 @@ void __cdecl DB_CancelLoadXFile()
     }
 }
 
-int32_t DB_WaitXFileStage()
+int DB_WaitXFileStage()
 {
-    int32_t result; // eax
+    int result; // eax
 
     if (!g_load.f)
         MyAssertHandler(".\\database\\db_file_load.cpp", 278, 0, "%s", "g_load.f");
@@ -76,7 +76,7 @@ int32_t DB_WaitXFileStage()
     return result;
 }
 
-void __cdecl DB_LoadedExternalData(int32_t size)
+void __cdecl DB_LoadedExternalData(int size)
 {
     InterlockedExchangeAdd(&g_loadedExternalBytes, size);
 }
@@ -103,10 +103,10 @@ double __cdecl DB_GetLoadedFraction()
     return (float)((loadedBytesInternal + loadedBytesExternal) / (totalBytesInternal + totalBytesExternal));
 }
 
-void __cdecl DB_LoadXFileData(uint8_t *pos, uint32_t size)
+void __cdecl DB_LoadXFileData(uint8_t *pos, uint size)
 {
     const char *v2; // eax
-    uint32_t err; // [esp+0h] [ebp-4h]
+    uint err; // [esp+0h] [ebp-4h]
 
     iassert(size);
     iassert(g_load.f);
@@ -127,7 +127,7 @@ void __cdecl DB_LoadXFileData(uint8_t *pos, uint32_t size)
         }
         if (g_load.f)
         {
-            if ((uint32_t)(g_load.stream.next_in - g_load.compressBufferStart) > 0x80000)
+            if ((uint)(g_load.stream.next_in - g_load.compressBufferStart) > 0x80000)
                 MyAssertHandler(
                     ".\\database\\db_file_load.cpp",
                     392,
@@ -161,7 +161,7 @@ void DB_ReadXFileStage()
     }
 }
 
-int32_t __cdecl DB_ReadData()
+int __cdecl DB_ReadData()
 {
     uint8_t *fileBuffer; // [esp+0h] [ebp-4h]
 
@@ -181,8 +181,8 @@ int32_t __cdecl DB_ReadData()
 }
 
 void __stdcall DB_FileReadCompletion(
-    uint32_t dwErrorCode,
-    uint32_t dwNumberOfBytesTransfered,
+    uint dwErrorCode,
+    uint dwNumberOfBytesTransfered,
     _OVERLAPPED *lpOverlapped)
 {
     ;
@@ -190,7 +190,7 @@ void __stdcall DB_FileReadCompletion(
 
 void __cdecl DB_LoadDelayedImages()
 {
-    uint32_t copyIter; // [esp+0h] [ebp-4h]
+    uint copyIter; // [esp+0h] [ebp-4h]
 
     DB_EnumXAssets(ASSET_TYPE_IMAGE, (void(__cdecl *)(XAssetHeader, void *))R_DelayLoadImage, 0, 0);
     for (copyIter = 0; copyIter < g_copyInfoCount; ++copyIter)
@@ -216,11 +216,11 @@ void __cdecl DB_FinishGeometryBlocks(XZoneMemory *zoneMem)
 
 void __cdecl DB_LoadXFileInternal()
 {
-    int32_t err; // [esp+8h] [ebp-4Ch]
+    int err; // [esp+8h] [ebp-4Ch]
     bool fileIsSecure; // [esp+Fh] [ebp-45h]
-    uint32_t version; // [esp+10h] [ebp-44h]
+    uint version; // [esp+10h] [ebp-44h]
     XFile file; // [esp+14h] [ebp-40h] BYREF
-    int32_t fileSize; // [esp+40h] [ebp-14h]
+    int fileSize; // [esp+40h] [ebp-14h]
     const char *failureReason; // [esp+44h] [ebp-10h]
     char magic[8]; // [esp+48h] [ebp-Ch] BYREF
 
@@ -232,8 +232,8 @@ void __cdecl DB_LoadXFileInternal()
     DB_ReadXFileStage();
     if (g_load.stream.avail_in < 8)
         MyAssertHandler(".\\database\\db_file_load.cpp", 598, 0, "%s", "sizeof( magic ) <= g_load.stream.avail_in");
-    *(uint32_t *)magic = *(uint32_t *)g_load.stream.next_in;
-    *(uint32_t *)&magic[4] = *((uint32_t *)g_load.stream.next_in + 1);
+    *(uint *)magic = *(uint *)g_load.stream.next_in;
+    *(uint *)&magic[4] = *((uint *)g_load.stream.next_in + 1);
     g_load.stream.next_in += 8;
     g_load.stream.avail_in -= 8;
     if (memcmp(magic, "IWff0100", 8u) && memcmp(magic, "IWffu100", 8u))
@@ -242,7 +242,7 @@ void __cdecl DB_LoadXFileInternal()
         Com_Error(ERR_DROP, "Fastfile for zone '%s' is corrupt or unreadable.", g_load.filename);
     }
     iassert(sizeof(version) <= g_load.stream.avail_in);
-    version = *(uint32_t *)g_load.stream.next_in;
+    version = *(uint *)g_load.stream.next_in;
     g_load.stream.next_in += 4;
     g_load.stream.avail_in -= 4;
     if (version != 5)
@@ -334,10 +334,10 @@ void Load_XAssetListCustom()
     DB_PopStreamPos();
 }
 
-void __cdecl Load_XAssetArrayCustom(int32_t count)
+void __cdecl Load_XAssetArrayCustom(int count)
 {
     XAsset *var; // [esp+0h] [ebp-8h]
-    int32_t i; // [esp+4h] [ebp-4h]
+    int i; // [esp+4h] [ebp-4h]
 
     Load_Stream(1, (uint8_t *)varXAsset, 8 * count);
     var = varXAsset;
@@ -349,7 +349,7 @@ void __cdecl Load_XAssetArrayCustom(int32_t count)
     }
 }
 
-void __cdecl DB_ResetZoneSize(int32_t trackLoadProgress)
+void __cdecl DB_ResetZoneSize(int trackLoadProgress)
 {
     g_totalSize = 0;
     g_loadedSize = 0;
@@ -365,7 +365,7 @@ void __cdecl DB_LoadXFile(
     XZoneMemory *zoneMem,
     void(__cdecl *interrupt)(),
     uint8_t *buf,
-    int32_t allocType)
+    int allocType)
 {
     if (((uintptr_t)buf & 3) != 0)
         MyAssertHandler(".\\database\\db_file_load.cpp", 749, 0, "%s", "!(reinterpret_cast< psize_int >( buf ) & 3)");

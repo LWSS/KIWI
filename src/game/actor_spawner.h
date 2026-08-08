@@ -5,7 +5,7 @@
 #error This file is for SinglePlayer only 
 #endif
 
-enum enumForceSpawn : __int32
+enum enumForceSpawn : int
 {
 	CHECK_SPAWN = 0x0,
 	FORCE_SPAWN = 0x1,

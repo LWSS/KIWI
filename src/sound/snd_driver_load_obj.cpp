@@ -59,7 +59,7 @@ LoadedSound *__cdecl SND_LoadFromBuffer(void *buffer, const char *soundName)
 // declared chunk sizes and never needed the total buffer length, but drwav_init_memory
 // bounds-checks against it for safety. SND_LoadFromBuffer has no callers outside this file
 // (see SND_LoadSoundFile below), so extending its signature is safe.
-LoadedSound *__cdecl SND_LoadFromBuffer(void *buffer, uint32_t bufferSize, const char *soundName)
+LoadedSound *__cdecl SND_LoadFromBuffer(void *buffer, uint bufferSize, const char *soundName)
 {
     iassert(buffer);
 
@@ -81,10 +81,10 @@ LoadedSound *__cdecl SND_LoadFromBuffer(void *buffer, uint32_t bufferSize, const
     // source formats; dr_wav decodes both of those (and everything else it supports) to
     // plain PCM for us, so we always end up with 16-bit PCM regardless of the source
     // format/bit depth - no ADPCM-vs-PCM branching needed on this side at all.
-    uint32_t channels = wav.channels;
-    uint32_t sampleRate = wav.sampleRate;
-    uint32_t frameCount = (uint32_t)wav.totalPCMFrameCount;
-    uint32_t dataLen = frameCount * channels * sizeof(drwav_int16);
+    uint channels = wav.channels;
+    uint sampleRate = wav.sampleRate;
+    uint frameCount = (uint)wav.totalPCMFrameCount;
+    uint dataLen = frameCount * channels * sizeof(drwav_int16);
 
     drwav_int16 *pcm = (drwav_int16 *)Z_Malloc(dataLen, "SND_LoadFromBuffer_temp", 15);
     drwav_uint64 framesRead = drwav_read_pcm_frames_s16(&wav, frameCount, pcm);
@@ -94,11 +94,11 @@ LoadedSound *__cdecl SND_LoadFromBuffer(void *buffer, uint32_t bufferSize, const
     loadSnd->name = soundName;
     loadSnd->sound.info.format = 1; // PCM
     loadSnd->sound.info.data_ptr = NULL; // filled in by SND_SetData below
-    loadSnd->sound.info.data_len = (uint32_t)(framesRead * channels * sizeof(drwav_int16));
+    loadSnd->sound.info.data_len = (uint)(framesRead * channels * sizeof(drwav_int16));
     loadSnd->sound.info.rate = sampleRate;
     loadSnd->sound.info.bits = 16;
     loadSnd->sound.info.channels = channels;
-    loadSnd->sound.info.samples = (uint32_t)framesRead;
+    loadSnd->sound.info.samples = (uint)framesRead;
     loadSnd->sound.info.block_size = channels * sizeof(drwav_int16);
     loadSnd->sound.info.initial_ptr = NULL;
 
@@ -129,7 +129,7 @@ LoadedSound *__cdecl SND_LoadSoundFile(const char *name)
 #ifndef KISAK_OPENAL
         loadSnd = SND_LoadFromBuffer(buffer, name);
 #else
-        loadSnd = SND_LoadFromBuffer(buffer, (uint32_t)fileLen, name);
+        loadSnd = SND_LoadFromBuffer(buffer, (uint)fileLen, name);
 #endif
         FS_FreeFile((char*)buffer);
         return loadSnd;

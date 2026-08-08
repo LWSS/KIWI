@@ -14370,7 +14370,7 @@ void __cdecl TRACK_r_image_wavelet()
 	track_static_alloc_internal((void *)waveletEncodeAlpha, 1022, "waveletEncodeAlpha", 18);
 }
 
-void __cdecl Image_LoadWavelet(GfxImage *image, const GfxImageFileHeader *fileHeader, const unsigned char *data, _D3DFORMAT format, int bytesPerPixel)
+void __cdecl Image_LoadWavelet(GfxImage *image, const GfxImageFileHeader *fileHeader, const byte *data, _D3DFORMAT format, int bytesPerPixel)
 {
     uint8_t *from[6]; // [esp+14h] [ebp-88h]
     uint8_t *pixels[6]; // [esp+2Ch] [ebp-70h]
@@ -14379,8 +14379,8 @@ void __cdecl Image_LoadWavelet(GfxImage *image, const GfxImageFileHeader *fileHe
     int width; // [esp+48h] [ebp-54h]
     int height; // [esp+4Ch] [ebp-50h]
     _D3DCUBEMAP_FACES face; // [esp+50h] [ebp-4Ch]
-    uint32_t faceCount; // [esp+54h] [ebp-48h]
-    uint32_t faceIndex; // [esp+58h] [ebp-44h]
+    uint faceCount; // [esp+54h] [ebp-48h]
+    uint faceIndex; // [esp+58h] [ebp-44h]
     WaveletDecode decode; // [esp+5Ch] [ebp-40h] BYREF
     int picmip; // [esp+94h] [ebp-8h]
     int totalSize; // [esp+98h] [ebp-4h]
@@ -14607,7 +14607,7 @@ void __cdecl Wavelet_ConsumeBits(uint16_t bitCount, WaveletDecode *decode)
     decode->value >>= bitCount;
     decode->value |= ((*((uint8_t *)decode->data + 3) << 24)
         | (*((uint8_t *)decode->data + 2) << 16)
-        | (uint32_t)*(uint16_t *)decode->data) >> decode->bit << (16 - bitCount);
+        | (uint)*(uint16_t *)decode->data) >> decode->bit << (16 - bitCount);
     decode->bit += bitCount;
     decode->data += (int)decode->bit >> 3;
     decode->bit &= 7u;

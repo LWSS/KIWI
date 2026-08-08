@@ -115,7 +115,7 @@ extern faceVis_s  *Brush_Ray( selbrush_t *b, const float *dir, const float *star
                               const orientation_t *orient, float *outDist, float *outNormal );
 extern char        PMESH_51( const float *org, const float *dir, patch_t *pm,
                              float *outDist, int *outCol, int *outRow,
-                             unsigned char *outColor, float *outPlane );        // pmesh.cpp 0x44acc0
+                             byte *outColor, float *outPlane );        // pmesh.cpp 0x44acc0
 extern char        PMESH_RaySegPick( const float *vB, const float *vA, const float *dir,
                                      const float *base, const float *org,
                                      float *outT, float *outU, float *outV );   // pmesh.cpp 0x44ab10
@@ -441,8 +441,8 @@ bool Ed_BrushFloorRay( brush_t *def, const float *start, const float *dir, float
 static char sub_48CE60( float *outDist, float *outNormal, const float *org,
                         const float *dir, selbrush_t *brush )
 {
-    static unsigned char vbuf[196612];   // v16  — extracted vertex bytes (4000h verts * 12)
-    static unsigned char ibuf[131072];   // v37  — extracted tri indices (10000h)
+    static byte vbuf[196612];   // v16  — extracted vertex bytes (4000h verts * 12)
+    static byte ibuf[131072];   // v37  — extracted tri indices (10000h)
 
     entity_s *owner = brush->owner;                     // [esi+8]
     entity_s *ownerDef = (entity_s *)owner->def;        // [eax+8]

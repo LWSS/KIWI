@@ -93,7 +93,7 @@ int __cdecl CM_BoxLeafnums(const float *mins, const float *maxs, uint16_t *list,
     return ll.count;
 }
 
-int __cdecl CM_PointContents(const float *p, uint32_t model)
+int __cdecl CM_PointContents(const float *p, uint model)
 {
     cLeaf_t *leaf; // [esp+0h] [ebp-10h]
     int i; // [esp+Ch] [ebp-4h]
@@ -161,7 +161,7 @@ int __cdecl CM_PointContentsLeafBrushNode_r(const float *p, cLeafBrushNode_s *no
     return contents;
 }
 
-int __cdecl CM_TransformedPointContents(const float *p, uint32_t model, const float *origin, const float *angles)
+int __cdecl CM_TransformedPointContents(const float *p, uint model, const float *origin, const float *angles)
 {
     float temp[3]; // [esp+0h] [ebp-3Ch] BYREF
     float axis[3][3]; // [esp+Ch] [ebp-30h] BYREF

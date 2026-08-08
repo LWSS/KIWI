@@ -302,15 +302,15 @@ int __cdecl MSS_DigitalFormatType(int waveFormat, int bits, int channels)
     return digitalFormat;
 }
 
-uint8_t *__cdecl MSS_Alloc(uint32_t bytes, uint32_t rate)
+uint8_t *__cdecl MSS_Alloc(uint bytes, uint rate)
 {
     if (IsFastFileLoad())
-        return (uint8_t *)((int(__cdecl *)(uint32_t, uint32_t))MSS_Alloc_FastFile)(bytes, rate);
+        return (uint8_t *)((int(__cdecl *)(uint, uint))MSS_Alloc_FastFile)(bytes, rate);
     else
         return MSS_Alloc_LoadObj(bytes, rate);
 }
 
-uint8_t *__cdecl MSS_Alloc_LoadObj(uint32_t bytes, uint32_t rate)
+uint8_t *__cdecl MSS_Alloc_LoadObj(uint bytes, uint rate)
 {
     int min_Spec_bytes = bytes;
     while (rate > 0x4099)
@@ -321,9 +321,9 @@ uint8_t *__cdecl MSS_Alloc_LoadObj(uint32_t bytes, uint32_t rate)
     return Hunk_Alloc(bytes, "MSS_Alloc", 15);
 }
 
-uint32_t *__cdecl MSS_Alloc_FastFile(int bytes)
+uint *__cdecl MSS_Alloc_FastFile(int bytes)
 {
-    return (uint32_t *)Z_Malloc(bytes, "MSS_Alloc", 15);
+    return (uint *)Z_Malloc(bytes, "MSS_Alloc", 15);
 }
 
 #endif

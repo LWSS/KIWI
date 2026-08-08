@@ -24,32 +24,32 @@
 struct stype_t // sizeof=0x8
 {                                       // ...
 	sval_u val;                         // ...
-	uint32_t pos;                   // ...
+	uint pos;                   // ...
 };
 
 #define YY_BUF_SIZE 0x4000 //16384
 
-uint32_t g_out_pos;
-uint32_t g_sourcePos;
-unsigned char g_parse_user;
+uint g_out_pos;
+uint g_sourcePos;
+byte g_parse_user;
 sval_u g_dummyVal;
 int yy_init = 0;
 yy_buffer_state *yy_current_buffer;
 int yy_start;
 int yy_n_chars;
-unsigned char *yy_c_buf_p;
-unsigned char *yytext;
+byte *yy_c_buf_p;
+byte *yytext;
 FILE *yyin = 0;
 FILE *yyout = 0;
 char yy_hold_char;
-unsigned char ch_buf[YY_BUF_SIZE];
+byte ch_buf[YY_BUF_SIZE];
 sval_u yaccResult;
 int yynerrs;
 int yy_last_accepting_state;
-unsigned char *yy_last_accepting_cpos;
+byte *yy_last_accepting_cpos;
 int yy_did_buffer_switch_on_eof;
 stype_t yylval;
-uint32_t yyleng;
+uint yyleng;
 int yychar;
 
 
@@ -73,12 +73,12 @@ void __cdecl FloatValue(char *str)
 	sscanf(str, "%f", &yylval.val.floatValue);
 }
 
-int StringValue(unsigned char *str, int len)
+int StringValue(byte *str, int len)
 {
 	char c;
 	char string[8192];
 	char *pC1;
-	unsigned char *pC2;
+	byte *pC2;
 	int n;
 
 	if (len < 0x2000)
@@ -129,7 +129,7 @@ int StringValue(unsigned char *str, int len)
 	}
 }
 
-uint32_t LowerCase(uint32_t strVal)
+uint LowerCase(uint strVal)
 {
 	return SL_ConvertToLowercase(strVal, g_parse_user, MT_TYPE_SCRIPT_PARSE);
 }
@@ -163,7 +163,7 @@ void yy_flush_buffer(yy_buffer_state *b)
 
 int yy_try_NUL_trans(int yy_current_state)
 {
-	unsigned char yy_c;
+	byte yy_c;
 	int yy_current_statea;
 
 	yy_c = 1;
@@ -186,16 +186,16 @@ int yy_try_NUL_trans(int yy_current_state)
 
 int yy_get_previous_state()
 {
-	unsigned char yy_c;
+	byte yy_c;
 	int yy_current_state;
-	unsigned char *yy_cp;
+	byte *yy_cp;
 
 	yy_current_state = yy_start;
 	for (yy_cp = yytext; yy_cp < yy_c_buf_p; ++yy_cp)
 	{
 		if (*yy_cp)
 		{
-			yy_c = yy_ec[(unsigned char)*yy_cp];
+			yy_c = yy_ec[(byte)*yy_cp];
 		}
 		else
 		{
@@ -221,7 +221,7 @@ int yy_get_previous_state()
 	return yy_current_state;
 }
 
-LPVOID __cdecl yy_flex_alloc(uint32_t size)
+LPVOID __cdecl yy_flex_alloc(uint size)
 {
 	return malloc(size);
 }
@@ -232,7 +232,7 @@ void yy_fatal_error(const char *msg)
 	exit(2);
 }
 
-void *yy_flex_realloc(void *ptr, uint32_t size)
+void *yy_flex_realloc(void *ptr, uint size)
 {
 	return realloc(ptr, size);
 }
@@ -258,7 +258,7 @@ yy_buffer_state *yy_create_buffer()
 
 	b->yy_buf_size = YY_BUF_SIZE;
 	//b->yy_ch_buf = (char *)Z_TryMallocInternal(b->yy_buf_size + 2);
-	b->yy_ch_buf = (unsigned char*)yy_flex_alloc(b->yy_buf_size + 2);
+	b->yy_ch_buf = (byte*)yy_flex_alloc(b->yy_buf_size + 2);
 	if (!b->yy_ch_buf)
 	{
 		yy_fatal_error("out of dynamic memory in yy_create_buffer()");
@@ -291,9 +291,9 @@ int yy_get_next_buffer()
 	int yy_c_buf_p_offset;
 	yy_buffer_state *b;
 	signed int num_to_read;
-	unsigned char *source;
+	byte *source;
 	int ret_val;
-	unsigned char *dest;
+	byte *dest;
 	int number_to_move;
 	int i;
 
@@ -338,7 +338,7 @@ int yy_get_next_buffer()
 						(yy_current_buffer)->yy_buf_size += (yy_current_buffer)->yy_buf_size >> 3;
 					}
 
-					b->yy_ch_buf = (unsigned char *)yy_flex_realloc(b->yy_ch_buf, b->yy_buf_size + 2);
+					b->yy_ch_buf = (byte *)yy_flex_realloc(b->yy_ch_buf, b->yy_buf_size + 2);
 				}
 				else
 				{
@@ -398,10 +398,10 @@ int __cdecl yylex()
 	int yy_next_state; // [esp+8h] [ebp-1Ch]
 	int yy_amount_of_matched_text; // [esp+Ch] [ebp-18h]
 	uint8_t yy_c; // [esp+13h] [ebp-11h]
-	unsigned char *yy_bp; // [esp+14h] [ebp-10h]
+	byte *yy_bp; // [esp+14h] [ebp-10h]
 	int yy_current_state; // [esp+18h] [ebp-Ch]
 	int yy_act; // [esp+1Ch] [ebp-8h]
-	unsigned char *yy_cp; // [esp+20h] [ebp-4h]
+	byte *yy_cp; // [esp+20h] [ebp-4h]
 
 	if (yy_init)
 	{
@@ -1189,7 +1189,7 @@ yynewstate:
 
 		if (yychar > 0) // YYEOF
 		{
-			yytoken = (uint32_t)yychar > 0x158 ? 119 : yytranslate[yychar];// t5 is 0x159 and 120  YYTRANSLATE
+			yytoken = (uint)yychar > 0x158 ? 119 : yytranslate[yychar];// t5 is 0x159 and 120  YYTRANSLATE
 			// YY_SYMBOL_PRINT ("Next token is", yytoken, &yylval, &yylloc);
 		}
 		else
@@ -1966,7 +1966,7 @@ yynewstate:
 			//{
 			//	yystate = yydefact[yyn + 171];
 			//}
-			if ((uint32_t)yystate < YYTABLESIZE && yycheck[yystate] == *yyssp)
+			if ((uint)yystate < YYTABLESIZE && yycheck[yystate] == *yyssp)
 			{
 				yystate = yytable[yystate];
 			}
@@ -2099,7 +2099,7 @@ yyacceptlab:
 	return 0;
 }
 
-void ScriptParse(sval_u *parseData, unsigned char user)
+void ScriptParse(sval_u *parseData, byte user)
 {
 	yy_buffer_state buffer_state;
 

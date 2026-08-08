@@ -23,28 +23,28 @@ HunkUser *g_user;
 fileData_s *com_hunkData;
 
 static HunkUser* g_debugUser;
-static int32_t g_largeLocalPos;
-static unsigned char g_largeLocalBuf[0x80000];
+static int g_largeLocalPos;
+static byte g_largeLocalBuf[0x80000];
 
 struct hunkUsed_t // sizeof=0x8
 {                                       // ...
-	int32_t permanent;                      // ...
-	int32_t temp;                           // ...
+	int permanent;                      // ...
+	int temp;                           // ...
 };
 struct hunkHeader_t // sizeof=0x10
 {
-	uint32_t magic;
-	int32_t size;
+	uint magic;
+	int size;
 	const char* name;
-	int32_t dummy;
+	int dummy;
 };
 
 static hunkUsed_t hunk_high;
 static hunkUsed_t hunk_low;
 
-unsigned char* s_hunkData;
+byte* s_hunkData;
 uint8_t *s_origHunkData;
-int32_t s_hunkTotal;
+int s_hunkTotal;
 
 void __cdecl Hunk_AddAsset(XAssetHeader header, _DWORD *data)
 {
@@ -57,11 +57,11 @@ void __cdecl Hunk_AddAsset(XAssetHeader header, _DWORD *data)
 
 void Com_TouchMemory()
 {
-    int32_t sum; // [esp+4h] [ebp-10h]
+    int sum; // [esp+4h] [ebp-10h]
     DWORD start; // [esp+8h] [ebp-Ch]
     DWORD end; // [esp+Ch] [ebp-8h]
-    int32_t i; // [esp+10h] [ebp-4h]
-    int32_t ia; // [esp+10h] [ebp-4h]
+    int i; // [esp+10h] [ebp-4h]
+    int ia; // [esp+10h] [ebp-4h]
 
     if (!Sys_IsMainThread())
         MyAssertHandler(".\\universal\\com_memory.cpp", 1218, 0, "%s", "Sys_IsMainThread()");
@@ -85,7 +85,7 @@ CopyString
 */
 const char* CopyString(const char* in)
 {
-	uint32_t out;
+	uint out;
 
 	iassert(in);
 
@@ -97,7 +97,7 @@ void FreeString(const char* str)
 {
 	iassert(str);
 
-	uint32_t out = SL_FindString(str);
+	uint out = SL_FindString(str);
 
 	iassert(out);
 
@@ -105,23 +105,23 @@ void FreeString(const char* str)
 }
 
 
-uint8_t* __cdecl Hunk_AllocXAnimPrecache(uint32_t size)
+uint8_t* __cdecl Hunk_AllocXAnimPrecache(uint size)
 {
     return Hunk_AllocAlign(size, 4, "XAnimPrecache", 11);
 }
 
-uint8_t* __cdecl Hunk_AllocPhysPresetPrecache(uint32_t size)
+uint8_t* __cdecl Hunk_AllocPhysPresetPrecache(uint size)
 {
     return Hunk_Alloc(size, "PhysPresetPrecache", 0);
 }
 
-uint8_t* __cdecl Hunk_AllocXAnimClient(uint32_t size)
+uint8_t* __cdecl Hunk_AllocXAnimClient(uint size)
 {
     return Hunk_Alloc(size, "Hunk_AllocXAnimClient", 11);
 }
 
 
-uint8_t* __cdecl Hunk_AllocXAnimServer(uint32_t size)
+uint8_t* __cdecl Hunk_AllocXAnimServer(uint size)
 {
     return Hunk_AllocLow(size, "Hunk_AllocXAnimServer", 11);
 }
@@ -132,7 +132,7 @@ uint8_t* __cdecl Hunk_AllocXAnimServer(uint32_t size)
 //    track_static_alloc_internal(g_largeLocalBuf, 0x80000, "g_largeLocalBuf", 10);
 //}
 
-void* __cdecl Z_VirtualReserve(int32_t size)
+void* __cdecl Z_VirtualReserve(int size)
 {
     void* buf; // [esp+0h] [ebp-4h]
 
@@ -144,7 +144,7 @@ void* __cdecl Z_VirtualReserve(int32_t size)
     return buf;
 }
 
-void __cdecl Z_VirtualDecommitInternal(void* ptr, int32_t size)
+void __cdecl Z_VirtualDecommitInternal(void* ptr, int size)
 {
     if (size < 0)
         MyAssertHandler(".\\universal\\com_memory.cpp", 325, 0, "%s\n\t(size) = %i", "(size >= 0)", size);
@@ -156,7 +156,7 @@ void __cdecl Z_VirtualFreeInternal(void* ptr)
     VirtualFree(ptr, 0, 0x8000u);
 }
 
-void* __cdecl Z_TryVirtualAllocInternal(int32_t size)
+void* __cdecl Z_TryVirtualAllocInternal(int size)
 {
     void* ptr; // [esp+0h] [ebp-4h]
 
@@ -167,13 +167,13 @@ void* __cdecl Z_TryVirtualAllocInternal(int32_t size)
     return 0;
 }
 
-bool __cdecl Z_TryVirtualCommitInternal(void* ptr, int32_t size)
+bool __cdecl Z_TryVirtualCommitInternal(void* ptr, int size)
 {
     iassert(size >= 0);
     return VirtualAlloc(ptr, size, 0x1000u, 4u) != 0;
 }
 
-void __cdecl Z_VirtualCommitInternal(void* ptr, int32_t size)
+void __cdecl Z_VirtualCommitInternal(void* ptr, int size)
 {
     if (!Z_TryVirtualCommitInternal(ptr, size))
         Sys_OutOfMemErrorInternal(".\\universal\\com_memory.cpp", 426);
@@ -184,12 +184,12 @@ void __cdecl Z_VirtualFree(void* ptr)
     Z_VirtualFreeInternal(ptr);
 }
 
-void __cdecl Z_VirtualDecommit(void* ptr, int32_t size)
+void __cdecl Z_VirtualDecommit(void* ptr, int size)
 {
     Z_VirtualDecommitInternal(ptr, size);
 }
 
-char* __cdecl Z_TryVirtualAlloc(int32_t size, const char* name, int32_t type)
+char* __cdecl Z_TryVirtualAlloc(int size, const char* name, int type)
 {
     char* buf; // [esp+0h] [ebp-4h]
 
@@ -199,7 +199,7 @@ char* __cdecl Z_TryVirtualAlloc(int32_t size, const char* name, int32_t type)
     return buf;
 }
 
-char* __cdecl Z_VirtualAlloc(int32_t size, const char* name, int32_t type)
+char* __cdecl Z_VirtualAlloc(int size, const char* name, int type)
 {
     char* buf; // [esp+0h] [ebp-4h]
 
@@ -209,7 +209,7 @@ char* __cdecl Z_VirtualAlloc(int32_t size, const char* name, int32_t type)
     return buf;
 }
 
-void __cdecl Z_VirtualCommit(void* ptr, int32_t size)
+void __cdecl Z_VirtualCommit(void* ptr, int size)
 {
     Z_VirtualCommitInternal(ptr, size);
 }
@@ -269,7 +269,7 @@ void Com_InitHunkMemory()
     R_ReflectionProbeRegisterDvars();
     if (r_reflectionProbeGenerate->current.enabled)
         s_hunkTotal = 0x20000000;
-    s_hunkData = (unsigned char*)Z_VirtualReserve(s_hunkTotal);
+    s_hunkData = (byte*)Z_VirtualReserve(s_hunkTotal);
     if (!s_hunkData)
         Sys_OutOfMemErrorInternal(".\\universal\\com_memory.cpp", 1318);
     s_origHunkData = s_hunkData;
@@ -289,15 +289,15 @@ void __cdecl Com_Meminfo_f()
     Com_Printf(0, "Related commands: meminfo, imagelist, gfx_world, gfx_model, cg_drawfps, com_statmon, tempmeminfo\n");
 }
 
-void* __cdecl Hunk_FindDataForFile(int32_t type, const char* name)
+void* __cdecl Hunk_FindDataForFile(int type, const char* name)
 {
-    int32_t hash; // [esp+0h] [ebp-4h]
+    int hash; // [esp+0h] [ebp-4h]
 
     hash = FS_HashFileName(name, 1024);
     return Hunk_FindDataForFileInternal(type, name, hash);
 }
 
-void* __cdecl Hunk_FindDataForFileInternal(int32_t type, const char* name, int32_t hash)
+void* __cdecl Hunk_FindDataForFileInternal(int type, const char* name, int hash)
 {
     fileData_s* searchFileData; // [esp+0h] [ebp-4h]
 
@@ -319,12 +319,12 @@ bool __cdecl Hunk_DataOnHunk(uint8_t* data)
     return data >= s_hunkData && data < &s_hunkData[s_hunkTotal];
 }
 
-char* __cdecl Hunk_SetDataForFile(int32_t type, const char* name, void* data, void* (__cdecl* alloc)(int))
+char* __cdecl Hunk_SetDataForFile(int type, const char* name, void* data, void* (__cdecl* alloc)(int))
 {
     char v5; // [esp+3h] [ebp-25h]
     char* v6; // [esp+8h] [ebp-20h]
     const char* v7; // [esp+Ch] [ebp-1Ch]
-    int32_t hash; // [esp+20h] [ebp-8h]
+    int hash; // [esp+20h] [ebp-8h]
     fileData_s* fileData; // [esp+24h] [ebp-4h]
 
 #ifdef KISAK_MP
@@ -352,7 +352,7 @@ char* __cdecl Hunk_SetDataForFile(int32_t type, const char* name, void* data, vo
     return fileData->name;
 }
 
-void __cdecl Hunk_AddData(int32_t type, void* data, void* (__cdecl* alloc)(int))
+void __cdecl Hunk_AddData(int type, void* data, void* (__cdecl* alloc)(int))
 {
     fileData_s* fileData; // [esp+0h] [ebp-4h]
 
@@ -372,7 +372,7 @@ void __cdecl Hunk_AddData(int32_t type, void* data, void* (__cdecl* alloc)(int))
 void Hunk_ClearData()
 {
     uint8_t* low; // [esp+0h] [ebp-10h]
-    uint32_t hash; // [esp+4h] [ebp-Ch]
+    uint hash; // [esp+4h] [ebp-Ch]
     uint8_t* high; // [esp+Ch] [ebp-4h]
 
     if (!Sys_IsMainThread())
@@ -420,7 +420,7 @@ void __cdecl Hunk_ClearDataFor(fileData_s** pFileData, uint8_t* low, uint8_t* hi
     }
 }
 
-void __cdecl Hunk_ClearToMarkLow(int32_t mark)
+void __cdecl Hunk_ClearToMarkLow(int mark)
 {
     uint8_t* endBuf; // [esp+0h] [ebp-Ch]
     uint8_t* beginBuf; // [esp+8h] [ebp-4h]
@@ -428,11 +428,11 @@ void __cdecl Hunk_ClearToMarkLow(int32_t mark)
     if (!Sys_IsMainThread())
         MyAssertHandler(".\\universal\\com_memory.cpp", 1849, 0, "%s", "Sys_IsMainThread()");
     Hunk_CheckTempMemoryClear();
-    endBuf = (uint8_t*)((uint32_t)&s_hunkData[hunk_low.temp + 4095] & 0xFFFFF000);
+    endBuf = (uint8_t*)((uint)&s_hunkData[hunk_low.temp + 4095] & 0xFFFFF000);
     hunk_low.temp = mark;
     hunk_low.permanent = mark;
     Hunk_ClearData();
-    beginBuf = (uint8_t*)((uint32_t)&s_hunkData[hunk_low.temp + 4095] & 0xFFFFF000);
+    beginBuf = (uint8_t*)((uint)&s_hunkData[hunk_low.temp + 4095] & 0xFFFFF000);
     if (endBuf != beginBuf)
         Z_VirtualDecommit(beginBuf, endBuf - beginBuf);
     track_hunk_ClearToMarkLow(mark);
@@ -453,14 +453,14 @@ void Hunk_Clear()
     track_hunk_ClearToStart();
 }
 
-int32_t __cdecl Hunk_Used()
+int __cdecl Hunk_Used()
 {
     if (!Sys_IsMainThread() && !Sys_IsRenderThread())
         MyAssertHandler(".\\universal\\com_memory.cpp", 1912, 0, "%s", "Sys_IsMainThread() || Sys_IsRenderThread()");
     return hunk_high.permanent + hunk_low.permanent;
 }
 
-uint8_t* __cdecl Hunk_Alloc(uint32_t size, const char* name, int32_t type)
+uint8_t* __cdecl Hunk_Alloc(uint size, const char* name, int type)
 {
 #ifdef KISAK_MP
     iassert(Sys_IsMainThread());
@@ -468,12 +468,12 @@ uint8_t* __cdecl Hunk_Alloc(uint32_t size, const char* name, int32_t type)
     return Hunk_AllocAlign(size, 32, name, type);
 }
 
-uint8_t* __cdecl Hunk_AllocAlign(uint32_t size, int32_t alignment, const char* name, int32_t type)
+uint8_t* __cdecl Hunk_AllocAlign(uint size, int alignment, const char* name, int type)
 {
-    int32_t old_permanent; // [esp+0h] [ebp-14h]
+    int old_permanent; // [esp+0h] [ebp-14h]
     uint8_t* buf; // [esp+4h] [ebp-10h]
     uint8_t* endBuf; // [esp+8h] [ebp-Ch]
-    int32_t alignmenta; // [esp+20h] [ebp+Ch]
+    int alignmenta; // [esp+20h] [ebp+Ch]
 
 #ifdef KISAK_MP
     iassert(Sys_IsMainThread());
@@ -487,7 +487,7 @@ uint8_t* __cdecl Hunk_AllocAlign(uint32_t size, int32_t alignment, const char* n
     alignmenta = alignment - 1;
     Hunk_CheckTempMemoryHighClear();
     old_permanent = hunk_high.permanent;
-    endBuf = (uint8_t*)((uint32_t)&s_hunkData[s_hunkTotal - hunk_high.permanent] & 0xFFFFF000);
+    endBuf = (uint8_t*)((uint)&s_hunkData[s_hunkTotal - hunk_high.permanent] & 0xFFFFF000);
     hunk_high.permanent += size;
     hunk_high.permanent = ~alignmenta & (alignmenta + hunk_high.permanent);
     hunk_high.temp = hunk_high.permanent;
@@ -497,25 +497,25 @@ uint8_t* __cdecl Hunk_AllocAlign(uint32_t size, int32_t alignment, const char* n
         Com_Error(ERR_DROP, "Hunk_AllocAlign failed on %i bytes (total %i MB, low %i MB, high %i MB)", size, s_hunkTotal / 0x100000, hunk_low.temp / 0x100000, hunk_high.temp / 0x100000);
     }
     buf = &s_hunkData[s_hunkTotal - hunk_high.permanent];
-    if ((alignmenta & (uint32_t)buf) != 0)
+    if ((alignmenta & (uint)buf) != 0)
         MyAssertHandler(".\\universal\\com_memory.cpp", 2011, 0, "%s", "!(((psize_int)buf) & alignment)");
-    if (endBuf != (uint8_t*)((uint32_t)buf & 0xFFFFF000))
-        Z_VirtualCommit((void*)((uint32_t)buf & 0xFFFFF000), (int)&endBuf[-(int)((uint32_t)buf & 0xFFFFF000)]); // KISAKTODO: sus int32_t cast
+    if (endBuf != (uint8_t*)((uint)buf & 0xFFFFF000))
+        Z_VirtualCommit((void*)((uint)buf & 0xFFFFF000), (int)&endBuf[-(int)((uint)buf & 0xFFFFF000)]); // KISAKTODO: sus int cast
     track_hunk_alloc(hunk_high.permanent - old_permanent, hunk_high.temp, name, type);
     memset(buf, 0, size);
     return buf;
 }
 
-uint32_t __cdecl Hunk_AllocateTempMemoryHigh(int32_t size, const char* name)
+uint __cdecl Hunk_AllocateTempMemoryHigh(int size, const char* name)
 {
-    uint32_t buf; // [esp+0h] [ebp-10h]
+    uint buf; // [esp+0h] [ebp-10h]
     uint8_t* endBuf; // [esp+4h] [ebp-Ch]
 
     if (!Sys_IsMainThread())
         MyAssertHandler(".\\universal\\com_memory.cpp", 2050, 0, "%s", "Sys_IsMainThread()");
     if (!s_hunkData)
         MyAssertHandler(".\\universal\\com_memory.cpp", 2051, 0, "%s", "s_hunkData");
-    endBuf = (uint8_t*)((uint32_t)&s_hunkData[s_hunkTotal - hunk_high.temp] & 0xFFFFF000);
+    endBuf = (uint8_t*)((uint)&s_hunkData[s_hunkTotal - hunk_high.temp] & 0xFFFFF000);
     hunk_high.temp += size;
     hunk_high.temp = (hunk_high.temp + 15) & 0xFFFFFFF0;
     if (hunk_high.temp + hunk_low.temp > s_hunkTotal)
@@ -523,31 +523,31 @@ uint32_t __cdecl Hunk_AllocateTempMemoryHigh(int32_t size, const char* name)
         track_PrintAllInfo();
         Com_Error(ERR_DROP, "Hunk_AllocateTempMemoryHigh: failed on %i bytes (total %i MB, low %i MB, high %i MB)", size, s_hunkTotal / 0x100000, hunk_low.temp / 0x100000, hunk_high.temp / 0x100000);
     }
-    buf = (uint32_t)&s_hunkData[s_hunkTotal - hunk_high.temp];
+    buf = (uint)&s_hunkData[s_hunkTotal - hunk_high.temp];
     if ((((_BYTE)s_hunkTotal + (_BYTE)s_hunkData - LOBYTE(hunk_high.temp)) & 0xF) != 0)
         MyAssertHandler(".\\universal\\com_memory.cpp", 2074, 0, "%s", "!(((psize_int)buf) & 15)");
     if (endBuf != (uint8_t*)(buf & 0xFFFFF000))
-        Z_VirtualCommit((void*)(buf & 0xFFFFF000), (int)&endBuf[-(int)(buf & 0xFFFFF000)]); // KISAKTODO: sus int32_t cast
+        Z_VirtualCommit((void*)(buf & 0xFFFFF000), (int)&endBuf[-(int)(buf & 0xFFFFF000)]); // KISAKTODO: sus int cast
     track_temp_high_alloc(size, hunk_high.temp + hunk_low.temp, hunk_high.permanent, name);
     return buf;
 }
 
 void Hunk_ClearTempMemoryHigh()
 {
-    uint32_t commitSize; // [esp+4h] [ebp-8h]
+    uint commitSize; // [esp+4h] [ebp-8h]
     uint8_t* beginBuf; // [esp+8h] [ebp-4h]
 
     if (!Sys_IsMainThread())
         MyAssertHandler(".\\universal\\com_memory.cpp", 2106, 0, "%s", "Sys_IsMainThread()");
-    beginBuf = (uint8_t*)((uint32_t)&s_hunkData[s_hunkTotal - hunk_high.temp] & 0xFFFFF000);
+    beginBuf = (uint8_t*)((uint)&s_hunkData[s_hunkTotal - hunk_high.temp] & 0xFFFFF000);
     hunk_high.temp = hunk_high.permanent;
-    commitSize = ((uint32_t)&s_hunkData[s_hunkTotal - hunk_high.permanent] & 0xFFFFF000) - (uint32_t)beginBuf;
+    commitSize = ((uint)&s_hunkData[s_hunkTotal - hunk_high.permanent] & 0xFFFFF000) - (uint)beginBuf;
     if (commitSize)
         Z_VirtualDecommit(beginBuf, commitSize);
     track_temp_high_clear(hunk_high.permanent);
 }
 
-uint8_t* __cdecl Hunk_AllocLow(uint32_t size, const char* name, int32_t type)
+uint8_t* __cdecl Hunk_AllocLow(uint size, const char* name, int type)
 {
 #ifdef KISAK_MP
     iassert(Sys_IsMainThread());
@@ -555,13 +555,13 @@ uint8_t* __cdecl Hunk_AllocLow(uint32_t size, const char* name, int32_t type)
     return Hunk_AllocLowAlign(size, 32, name, type);
 }
 
-uint8_t* __cdecl Hunk_AllocLowAlign(uint32_t size, int32_t alignment, const char* name, int32_t type)
+uint8_t* __cdecl Hunk_AllocLowAlign(uint size, int alignment, const char* name, int type)
 {
-    int32_t old_permanent; // [esp+0h] [ebp-14h]
+    int old_permanent; // [esp+0h] [ebp-14h]
     uint8_t* buf; // [esp+4h] [ebp-10h]
-    uint32_t commitSize; // [esp+Ch] [ebp-8h]
+    uint commitSize; // [esp+Ch] [ebp-8h]
     uint8_t* beginBuf; // [esp+10h] [ebp-4h]
-    int32_t alignmenta; // [esp+20h] [ebp+Ch]
+    int alignmenta; // [esp+20h] [ebp+Ch]
 
 #ifdef KISAK_MP
     iassert(Sys_IsMainThread());
@@ -575,10 +575,10 @@ uint8_t* __cdecl Hunk_AllocLowAlign(uint32_t size, int32_t alignment, const char
     alignmenta = alignment - 1;
     Hunk_CheckTempMemoryClear();
     old_permanent = hunk_low.permanent;
-    beginBuf = (uint8_t*)((uint32_t)&s_hunkData[hunk_low.permanent + 4095] & 0xFFFFF000);
+    beginBuf = (uint8_t*)((uint)&s_hunkData[hunk_low.permanent + 4095] & 0xFFFFF000);
     hunk_low.permanent = ~alignmenta & (alignmenta + hunk_low.permanent);
     buf = &s_hunkData[hunk_low.permanent];
-    if ((alignmenta & (uint32_t)&s_hunkData[hunk_low.permanent]) != 0)
+    if ((alignmenta & (uint)&s_hunkData[hunk_low.permanent]) != 0)
         MyAssertHandler(".\\universal\\com_memory.cpp", 2210, 0, "%s", "!(((psize_int)buf) & alignment)");
     hunk_low.permanent += size;
     hunk_low.temp = hunk_low.permanent;
@@ -587,7 +587,7 @@ uint8_t* __cdecl Hunk_AllocLowAlign(uint32_t size, int32_t alignment, const char
         track_PrintAllInfo();
         Com_Error(ERR_DROP, "Hunk_AllocLowAlign failed on %i bytes (total %i MB, low %i MB, high %i MB)", size, s_hunkTotal / 0x100000, hunk_low.temp / 0x100000, hunk_high.temp / 0x100000);
     }
-    commitSize = ((uint32_t)&s_hunkData[hunk_low.permanent + 4095] & 0xFFFFF000) - (uint32_t)beginBuf;
+    commitSize = ((uint)&s_hunkData[hunk_low.permanent + 4095] & 0xFFFFF000) - (uint)beginBuf;
     if (commitSize)
         Z_VirtualCommit(beginBuf, commitSize);
     track_hunk_allocLow(hunk_low.permanent - old_permanent, hunk_low.permanent, name, type);
@@ -595,25 +595,25 @@ uint8_t* __cdecl Hunk_AllocLowAlign(uint32_t size, int32_t alignment, const char
     return buf;
 }
 
-uint32_t* __cdecl Hunk_AllocateTempMemory(int32_t size, const char* name)
+uint* __cdecl Hunk_AllocateTempMemory(int size, const char* name)
 {
     hunkHeader_t* hdr; // [esp+0h] [ebp-18h]
     uint8_t* buf; // [esp+4h] [ebp-14h]
     void* bufa; // [esp+4h] [ebp-14h]
-    int32_t prev_temp; // [esp+8h] [ebp-10h]
-    uint32_t commitSize; // [esp+10h] [ebp-8h]
+    int prev_temp; // [esp+8h] [ebp-10h]
+    uint commitSize; // [esp+10h] [ebp-8h]
     uint8_t* beginBuf; // [esp+14h] [ebp-4h]
-    int32_t sizea; // [esp+20h] [ebp+8h]
+    int sizea; // [esp+20h] [ebp+8h]
 
 
 #ifdef KISAK_MP
     iassert(Sys_IsMainThread());
 #endif
     if (!s_hunkData)
-        return (uint32_t*)Z_Malloc(size, name, 10);
+        return (uint*)Z_Malloc(size, name, 10);
     sizea = size + 16;
     prev_temp = hunk_low.temp;
-    beginBuf = (uint8_t*)((uint32_t)&s_hunkData[hunk_low.temp + 4095] & 0xFFFFF000);
+    beginBuf = (uint8_t*)((uint)&s_hunkData[hunk_low.temp + 4095] & 0xFFFFF000);
     hunk_low.temp = (hunk_low.temp + 15) & 0xFFFFFFF0;
     buf = &s_hunkData[hunk_low.temp];
     hunk_low.temp += sizea;
@@ -633,14 +633,14 @@ uint32_t* __cdecl Hunk_AllocateTempMemory(int32_t size, const char* name)
     bufa = buf + 16;
     if (((uint8_t)bufa & 0xF) != 0)
         MyAssertHandler(".\\universal\\com_memory.cpp", 2303, 0, "%s", "!(((psize_int)buf) & 15)");
-    commitSize = ((uint32_t)&s_hunkData[hunk_low.temp + 4095] & 0xFFFFF000) - (uint32_t)beginBuf;
+    commitSize = ((uint)&s_hunkData[hunk_low.temp + 4095] & 0xFFFFF000) - (uint)beginBuf;
     if (commitSize)
         Z_VirtualCommit(beginBuf, commitSize);
     hdr->magic = -1991018350;
     hdr->size = hunk_low.temp - prev_temp;
     track_temp_alloc(hdr->size, hunk_high.temp + hunk_low.temp, hunk_low.permanent, name);
     hdr->name = name;
-    return (uint32_t*)bufa;
+    return (uint*)bufa;
 }
 
 void __cdecl Hunk_FreeTempMemory(char* buf)
@@ -658,7 +658,7 @@ void __cdecl Hunk_FreeTempMemory(char* buf)
         if (!buf)
             MyAssertHandler(".\\universal\\com_memory.cpp", 2353, 0, "%s", "buf");
         hdr = (hunkHeader_t*)(buf - 16);
-        if (*((uint32_t*)buf - 4) != 0x89537892)
+        if (*((uint*)buf - 4) != 0x89537892)
             Com_Error(ERR_FATAL, "Hunk_FreeTempMemory: bad magic");
         hdr->magic = -1991018349;
         if (hdr != (hunkHeader_t*)&s_hunkData[(hunk_low.temp - hdr->size + 15) & 0xFFFFFFF0])
@@ -668,10 +668,10 @@ void __cdecl Hunk_FreeTempMemory(char* buf)
                 0,
                 "%s",
                 "hdr == (void *)( s_hunkData + ((hunk_low.temp - hdr->size + 15) & ~15) )");
-        endBuf = (uint8_t*)((uint32_t)&s_hunkData[hunk_low.temp + 4095] & 0xFFFFF000);
+        endBuf = (uint8_t*)((uint)&s_hunkData[hunk_low.temp + 4095] & 0xFFFFF000);
         hunk_low.temp -= hdr->size;
         track_temp_free(hdr->size, hunk_low.permanent, hdr->name);
-        beginBuf = (uint8_t*)((uint32_t)&s_hunkData[hunk_low.temp + 4095] & 0xFFFFF000);
+        beginBuf = (uint8_t*)((uint)&s_hunkData[hunk_low.temp + 4095] & 0xFFFFF000);
         if (endBuf != beginBuf)
             Z_VirtualDecommit(beginBuf, endBuf - beginBuf);
     }
@@ -690,9 +690,9 @@ void Hunk_ClearTempMemory()
         MyAssertHandler(".\\universal\\com_memory.cpp", 2398, 0, "%s", "Sys_IsMainThread()");
     if (!s_hunkData)
         MyAssertHandler(".\\universal\\com_memory.cpp", 2399, 0, "%s", "s_hunkData");
-    endBuf = (uint8_t*)((uint32_t)&s_hunkData[hunk_low.temp + 4095] & 0xFFFFF000);
+    endBuf = (uint8_t*)((uint)&s_hunkData[hunk_low.temp + 4095] & 0xFFFFF000);
     hunk_low.temp = hunk_low.permanent;
-    beginBuf = (uint8_t*)((uint32_t)&s_hunkData[hunk_low.permanent + 4095] & 0xFFFFF000);
+    beginBuf = (uint8_t*)((uint)&s_hunkData[hunk_low.permanent + 4095] & 0xFFFFF000);
     if (endBuf != beginBuf)
         Z_VirtualDecommit(beginBuf, endBuf - beginBuf);
     //track_temp_clear(hunk_low.permanent);
@@ -718,9 +718,9 @@ void Hunk_CheckTempMemoryHighClear()
     iassert(hunk_high.temp == hunk_high.permanent);
 }
 
-int32_t __cdecl Hunk_HideTempMemory()
+int __cdecl Hunk_HideTempMemory()
 {
-    int32_t mark; // [esp+0h] [ebp-4h]
+    int mark; // [esp+0h] [ebp-4h]
 
     if (!Sys_IsMainThread())
         MyAssertHandler(".\\universal\\com_memory.cpp", 2460, 0, "%s", "Sys_IsMainThread()");
@@ -729,7 +729,7 @@ int32_t __cdecl Hunk_HideTempMemory()
     return mark;
 }
 
-void __cdecl Hunk_ShowTempMemory(int32_t mark)
+void __cdecl Hunk_ShowTempMemory(int mark)
 {
     if (!Sys_IsMainThread())
         MyAssertHandler(".\\universal\\com_memory.cpp", 2476, 0, "%s", "Sys_IsMainThread()");
@@ -737,10 +737,10 @@ void __cdecl Hunk_ShowTempMemory(int32_t mark)
     hunk_low.permanent = mark;
 }
 
-int32_t __cdecl LargeLocalBegin(int32_t size)
+int __cdecl LargeLocalBegin(int size)
 {
-    int32_t startPos; // [esp+0h] [ebp-4h]
-    uint32_t sizea; // [esp+Ch] [ebp+8h]
+    int startPos; // [esp+0h] [ebp-4h]
+    uint sizea; // [esp+Ch] [ebp+8h]
 
     if (!Sys_IsMainThread())
         MyAssertHandler(".\\universal\\com_memory.cpp", 2534, 0, "%s", "Sys_IsMainThread()");
@@ -757,26 +757,26 @@ int32_t __cdecl LargeLocalBegin(int32_t size)
     return startPos;
 }
 
-uint32_t __cdecl LargeLocalRoundSize(int32_t size)
+uint __cdecl LargeLocalRoundSize(int size)
 {
     return (size + 3) & 0xFFFFFFFC;
 }
 
-void __cdecl LargeLocalEnd(int32_t startPos)
+void __cdecl LargeLocalEnd(int startPos)
 {
     if (!Sys_IsMainThread())
         MyAssertHandler(".\\universal\\com_memory.cpp", 2556, 0, "%s", "Sys_IsMainThread()");
     g_largeLocalPos = startPos;
 }
 
-uint8_t* __cdecl LargeLocalGetBuf(int32_t startPos)
+uint8_t* __cdecl LargeLocalGetBuf(int startPos)
 {
     if (!Sys_IsMainThread())
         MyAssertHandler(".\\universal\\com_memory.cpp", 2620, 0, "%s", "Sys_IsMainThread()");
     return &g_largeLocalBuf[startPos];
 }
 
-LargeLocal::LargeLocal(int32_t sizeParam)
+LargeLocal::LargeLocal(int sizeParam)
 {
     if (!Sys_IsMainThread())
         MyAssertHandler(".\\universal\\com_memory.cpp", 2648, 0, "%s", "Sys_IsMainThread()");
@@ -834,7 +834,7 @@ void __cdecl Hunk_ResetDebugMem()
     Hunk_UserReset(g_debugUser);
 }
 
-void* Hunk_AllocDebugMem(uint32_t size)
+void* Hunk_AllocDebugMem(uint size)
 {
     iassert(Sys_IsMainThread());
     iassert(g_debugUser);
@@ -848,7 +848,7 @@ void __cdecl Hunk_FreeDebugMem(void* ptr)
     iassert(g_debugUser);
 }
 
-HunkUser* __cdecl Hunk_UserCreate(int32_t maxSize, const char* name, bool fixed, bool tempMem, int32_t type)
+HunkUser* __cdecl Hunk_UserCreate(int maxSize, const char* name, bool fixed, bool tempMem, int type)
 {
     HunkUser* user; // [esp+0h] [ebp-4h]
 
@@ -871,10 +871,10 @@ HunkUser* __cdecl Hunk_UserCreate(int32_t maxSize, const char* name, bool fixed,
     return user;
 }
 
-void* Hunk_UserAlloc(HunkUser* user, uint32_t size, int32_t alignment)
+void* Hunk_UserAlloc(HunkUser* user, uint size, int alignment)
 {
-    int32_t pos; // [esp+4h] [ebp-10h]
-    int32_t result; // [esp+8h] [ebp-Ch]
+    int pos; // [esp+4h] [ebp-10h]
+    int result; // [esp+8h] [ebp-Ch]
     HunkUser* current; // [esp+Ch] [ebp-8h]
     HunkUser* newCurrent; // [esp+10h] [ebp-4h]
 
@@ -904,13 +904,13 @@ void* Hunk_UserAlloc(HunkUser* user, uint32_t size, int32_t alignment)
     if (pos != ((current->pos + 4095) & 0xFFFFF000))
     {
         iassert(current->pos - pos > 0);
-        Z_VirtualCommit((void*)pos, current->pos - (uint32_t)pos);
+        Z_VirtualCommit((void*)pos, current->pos - (uint)pos);
     }
 
     return (void*)result;
 }
 
-void* Hunk_UserAllocAlignStrict(HunkUser* user, uint32_t size)
+void* Hunk_UserAllocAlignStrict(HunkUser* user, uint size)
 {
     return Hunk_UserAlloc(user, size, 1);
 }
@@ -934,12 +934,12 @@ void __cdecl Hunk_UserReset(HunkUser* user)
         user->current = user;
         user->next = 0;
     }
-    pos = (void*)(((uint32_t)&user[114].name + 3) & 0xFFFFF000);
+    pos = (void*)(((uint)&user[114].name + 3) & 0xFFFFF000);
     if (pos != (void*)((user->pos + 4095) & 0xFFFFF000))
     {
         if (user->pos - (int)pos <= 0)
             MyAssertHandler(".\\universal\\com_memory.cpp", 3019, 0, "%s", "user->pos - pos > 0");
-        Z_VirtualDecommit(pos, user->pos - (uint32_t)pos);
+        Z_VirtualDecommit(pos, user->pos - (uint)pos);
     }
     user->pos = (int)user->buf;
     memset(user->buf, 0, 0xFE0u);
@@ -976,12 +976,12 @@ char* __cdecl Hunk_CopyString(HunkUser* user, const char* in)
     return out;
 }
 
-uint8_t* __cdecl Hunk_AllocXModelPrecache(uint32_t size)
+uint8_t* __cdecl Hunk_AllocXModelPrecache(uint size)
 {
     return Hunk_Alloc(size, "Hunk_AllocXModelPrecache", 21);
 }
 
-uint8_t* __cdecl Hunk_AllocXModelPrecacheColl(uint32_t size)
+uint8_t* __cdecl Hunk_AllocXModelPrecacheColl(uint size)
 {
     return Hunk_Alloc(size, "Hunk_AllocXModelPrecacheColl", 27);
 }
@@ -1003,7 +1003,7 @@ int Hunk_SetMarkLow()
 
 
 
-static char* __cdecl Z_TryMallocGarbage(int32_t size, const char* name, int32_t type)
+static char* __cdecl Z_TryMallocGarbage(int size, const char* name, int type)
 {
     char* buf; // [esp+0h] [ebp-4h]
 
@@ -1018,25 +1018,25 @@ static char* __cdecl Z_TryMallocGarbage(int32_t size, const char* name, int32_t 
     return buf;
 }
 
-static uint32_t* __cdecl Z_TryMalloc(int32_t size, const char* name, int32_t type)
+static uint* __cdecl Z_TryMalloc(int size, const char* name, int type)
 {
-    uint32_t* buf; // [esp+0h] [ebp-4h]
+    uint* buf; // [esp+0h] [ebp-4h]
 
-    buf = (uint32_t*)Z_TryMallocGarbage(size, name, type);
+    buf = (uint*)Z_TryMallocGarbage(size, name, type);
     if (buf)
         Com_Memset(buf, 0, size);
     return buf;
 }
 
-static void __cdecl Z_MallocFailed(int32_t size)
+static void __cdecl Z_MallocFailed(int size)
 {
     Com_PrintError(16, "Failed to Z_Malloc %i bytes\n", size);
     Sys_OutOfMemErrorInternal(".\\universal\\com_memory.cpp", 593);
 }
 
-void* Z_Malloc(int32_t size, const char* name, int32_t type)
+void* Z_Malloc(int size, const char* name, int type)
 {
-    uint32_t* buf; // [esp+0h] [ebp-4h]
+    uint* buf; // [esp+0h] [ebp-4h]
 
     buf = Z_TryMalloc(size, name, type);
 
@@ -1046,7 +1046,7 @@ void* Z_Malloc(int32_t size, const char* name, int32_t type)
     return buf;
 }
 
-void __cdecl Z_Free(void *ptr, int32_t type)
+void __cdecl Z_Free(void *ptr, int type)
 {
     if (ptr)
     {
@@ -1057,7 +1057,7 @@ void __cdecl Z_Free(void *ptr, int32_t type)
 }
 
 
-char *__cdecl Z_MallocGarbage(int32_t size, const char *name, int32_t type)
+char *__cdecl Z_MallocGarbage(int size, const char *name, int type)
 {
     char *buf; // [esp+0h] [ebp-4h]
 
@@ -1067,14 +1067,14 @@ char *__cdecl Z_MallocGarbage(int32_t size, const char *name, int32_t type)
     return buf;
 }
 
-char *__cdecl TempMalloc(uint32_t len)
+char *__cdecl TempMalloc(uint len)
 {
     return (char*)Hunk_UserAlloc(g_user, len, 1);
 }
 
 void __cdecl TempMemorySetPos(char *pos)
 {
-    Hunk_UserSetPos(g_user, (unsigned char*)pos);
+    Hunk_UserSetPos(g_user, (byte*)pos);
 }
 
 void __cdecl TempMemoryReset(HunkUser *user)
@@ -1082,7 +1082,7 @@ void __cdecl TempMemoryReset(HunkUser *user)
     g_user = user;
 }
 
-char *__cdecl TempMallocAlignStrict(uint32_t len)
+char *__cdecl TempMallocAlignStrict(uint len)
 {
     return (char *)Hunk_UserAllocAlignStrict(g_user, len);
 }

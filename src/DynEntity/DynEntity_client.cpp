@@ -78,7 +78,7 @@ void __cdecl DynEntCl_RegisterDvars()
     DynEntPieces_RegisterDvars();
 }
 
-void __cdecl DynEntCl_InitEntities(int32_t localClientNum)
+void __cdecl DynEntCl_InitEntities(int localClientNum)
 {
     DynEntityPose *dynEntPose; // [esp+8h] [ebp-24h]
     DynEntityClient *dynEntClient; // [esp+18h] [ebp-14h]
@@ -89,7 +89,7 @@ void __cdecl DynEntCl_InitEntities(int32_t localClientNum)
 
     if (localClientNum == RETURN_ZERO32())
     {
-        for (int32_t d = DYNENT_DRAW_MODEL; d < (int)DYNENT_DRAW_COUNT; ++d)
+        for (int d = DYNENT_DRAW_MODEL; d < (int)DYNENT_DRAW_COUNT; ++d)
         {
             DynEntityDrawType drawType = (DynEntityDrawType)d; // [esp+Ch] [ebp-20h]
             DynEnt_ClearCollWorld((DynEntityCollType)drawType);
@@ -119,18 +119,18 @@ void __cdecl DynEntCl_InitEntities(int32_t localClientNum)
 
 void __cdecl DynEntCl_LinkModel(uint16_t dynEntId)
 {
-    int32_t v1; // [esp+0h] [ebp-204h]
-    int32_t v2; // [esp+4h] [ebp-200h]
-    int32_t v3; // [esp+8h] [ebp-1FCh]
-    int32_t v4; // [esp+Ch] [ebp-1F8h]
-    int32_t v5; // [esp+10h] [ebp-1F4h]
-    int32_t v6; // [esp+14h] [ebp-1F0h]
-    int32_t v7; // [esp+18h] [ebp-1ECh]
-    int32_t v8; // [esp+1Ch] [ebp-1E8h]
-    int32_t v9; // [esp+20h] [ebp-1E4h]
-    int32_t v10; // [esp+24h] [ebp-1E0h]
-    int32_t v11; // [esp+28h] [ebp-1DCh]
-    int32_t v12; // [esp+2Ch] [ebp-1D8h]
+    int v1; // [esp+0h] [ebp-204h]
+    int v2; // [esp+4h] [ebp-200h]
+    int v3; // [esp+8h] [ebp-1FCh]
+    int v4; // [esp+Ch] [ebp-1F8h]
+    int v5; // [esp+10h] [ebp-1F4h]
+    int v6; // [esp+14h] [ebp-1F0h]
+    int v7; // [esp+18h] [ebp-1ECh]
+    int v8; // [esp+1Ch] [ebp-1E8h]
+    int v9; // [esp+20h] [ebp-1E4h]
+    int v10; // [esp+24h] [ebp-1E0h]
+    int v11; // [esp+28h] [ebp-1DCh]
+    int v12; // [esp+2Ch] [ebp-1D8h]
     float v13; // [esp+90h] [ebp-174h]
     float v14; // [esp+E0h] [ebp-124h]
     float v15; // [esp+F0h] [ebp-114h]
@@ -318,15 +318,15 @@ void __cdecl DynEntCl_LinkBrush(uint16_t dynEntId)
 
 double __cdecl DynEntCl_UpdateBModelWorldBounds(const DynEntityDef *dynEntDef, const GfxPlacement *pose)
 {
-    int32_t v3; // [esp+4h] [ebp-1C0h]
-    int32_t v4; // [esp+8h] [ebp-1BCh]
-    int32_t v5; // [esp+Ch] [ebp-1B8h]
-    int32_t v6; // [esp+14h] [ebp-1B0h]
-    int32_t v7; // [esp+18h] [ebp-1ACh]
-    int32_t v8; // [esp+1Ch] [ebp-1A8h]
-    int32_t v9; // [esp+24h] [ebp-1A0h]
-    int32_t v10; // [esp+28h] [ebp-19Ch]
-    int32_t v11; // [esp+2Ch] [ebp-198h]
+    int v3; // [esp+4h] [ebp-1C0h]
+    int v4; // [esp+8h] [ebp-1BCh]
+    int v5; // [esp+Ch] [ebp-1B8h]
+    int v6; // [esp+14h] [ebp-1B0h]
+    int v7; // [esp+18h] [ebp-1ACh]
+    int v8; // [esp+1Ch] [ebp-1A8h]
+    int v9; // [esp+24h] [ebp-1A0h]
+    int v10; // [esp+28h] [ebp-19Ch]
+    int v11; // [esp+2Ch] [ebp-198h]
     float *maxs; // [esp+30h] [ebp-194h]
     float v13; // [esp+134h] [ebp-90h]
     float v14; // [esp+138h] [ebp-8Ch]
@@ -429,7 +429,7 @@ double __cdecl DynEntCl_UpdateBModelWorldBounds(const DynEntityDef *dynEntDef, c
     return RadiusFromBounds(bmodel->bounds[0], bmodel->bounds[1]);
 }
 
-void __cdecl DynEntCl_ProcessEntities(int32_t localClientNum)
+void __cdecl DynEntCl_ProcessEntities(int localClientNum)
 {
     DynEntityPose *dynEntPose; // [esp+38h] [ebp-20h]
     DynEntityPose *dynEntPosea; // [esp+38h] [ebp-20h]
@@ -504,7 +504,7 @@ void __cdecl DynEntCl_ProcessEntities(int32_t localClientNum)
     }
 }
 
-void __cdecl DynEntCl_Shutdown(int32_t localClientNum)
+void __cdecl DynEntCl_Shutdown(int localClientNum)
 {
     DynEntityClient *dynEntClient; // [esp+0h] [ebp-Ch]
     DynEntityClient *dynEntClienta; // [esp+0h] [ebp-Ch]
@@ -588,7 +588,7 @@ void __cdecl DynEntCl_PointTrace(const pointtrace_t *clip, trace_t *results)
 void __cdecl DynEntCl_PointTrace_r(
     DynEntityCollType drawType,
     const pointtrace_t *clip,
-    uint32_t sectorIndex,
+    uint sectorIndex,
     float *p1,
     float *p2,
     trace_t *results)
@@ -603,7 +603,7 @@ void __cdecl DynEntCl_PointTrace_r(
     DynEntityClient *dynEntClient; // [esp+34h] [ebp-34h]
     const DynEntityDef *dynEntDef; // [esp+38h] [ebp-30h]
     float t2; // [esp+3Ch] [ebp-2Ch]
-    int32_t contentmask; // [esp+40h] [ebp-28h]
+    int contentmask; // [esp+40h] [ebp-28h]
     DynEntityColl *dynEntColl; // [esp+44h] [ebp-24h]
     float p[4]; // [esp+48h] [ebp-20h] BYREF
     float mid[4]; // [esp+58h] [ebp-10h] BYREF
@@ -737,7 +737,7 @@ void __cdecl DynEntCl_ClipMoveTrace(const moveclip_t *clip, trace_t *results)
 
 void __cdecl DynEntCl_ClipMoveTrace_r(
     const moveclip_t *clip,
-    uint32_t sectorIndex,
+    uint sectorIndex,
     float *p1,
     float *p2,
     trace_t *results)
@@ -882,7 +882,7 @@ uint16_t __cdecl DynEntCl_AreaEntities(
     DynEntityDrawType drawType,
     const float *mins,
     const float *maxs,
-    int32_t contentMask,
+    int contentMask,
     uint16_t dynEntMaxCount,
     uint16_t *dynEntList)
 {
@@ -909,7 +909,7 @@ uint16_t __cdecl DynEntCl_AreaEntities(
 
 void __cdecl DynEntCl_AreaEntities_r(
     DynEntityCollType drawType,
-    uint32_t sectorIndex,
+    uint sectorIndex,
     DynEntityAreaParms *areaParms)
 {
     DynEntityPose *dynEntPose; // [esp+0h] [ebp-20h]
@@ -918,7 +918,7 @@ void __cdecl DynEntCl_AreaEntities_r(
     DynEntityClient *dynEntClient; // [esp+10h] [ebp-10h]
     const DynEntityDef *dynEntDef; // [esp+14h] [ebp-Ch]
     DynEntityColl *dynEntColl; // [esp+18h] [ebp-8h]
-    uint32_t nextSectorIndex; // [esp+1Ch] [ebp-4h]
+    uint nextSectorIndex; // [esp+1Ch] [ebp-4h]
 
     if (!areaParms)
         MyAssertHandler(".\\DynEntity\\DynEntity_client.cpp", 695, 0, "%s", "areaParms");
@@ -969,8 +969,8 @@ void __cdecl DynEntCl_AreaEntities_r(
 
 void __cdecl DynEntCl_EntityImpactEvent(
     const trace_t *trace,
-    int32_t localClientNum,
-    int32_t sourceEntityNum,
+    int localClientNum,
+    int sourceEntityNum,
     const float *start,
     const float *hitPos,
     bool isMelee)
@@ -1016,9 +1016,9 @@ void __cdecl DynEntCl_EntityImpactEvent(
 }
 
 void __cdecl DynEntCl_PlayImpactEffects(
-    int32_t localClientNum,
-    uint32_t sourceEntityNum,
-    uint32_t surfType,
+    int localClientNum,
+    uint sourceEntityNum,
+    uint surfType,
     const float *hitPos,
     const float *hitNormal)
 {
@@ -1081,7 +1081,7 @@ void __cdecl DynEntCl_PlayImpactEffects(
 
 void __cdecl DynEntCl_PlayEventFx(const FxEffectDef *def, const float *origin, const float (*axis)[3])
 {
-    int32_t clientIndex; // [esp+4h] [ebp-4h]
+    int clientIndex; // [esp+4h] [ebp-4h]
 
     for (clientIndex = 0; clientIndex < 1; ++clientIndex)
     {
@@ -1092,7 +1092,7 @@ void __cdecl DynEntCl_PlayEventFx(const FxEffectDef *def, const float *origin, c
     }
 }
 
-char __cdecl DynEntCl_EventNeedsProcessed(int32_t localClientNum, int32_t sourceEntityNum)
+char __cdecl DynEntCl_EventNeedsProcessed(int localClientNum, int sourceEntityNum)
 {
     snapshot_s *nextSnap;
 
@@ -1118,11 +1118,11 @@ char __cdecl DynEntCl_EventNeedsProcessed(int32_t localClientNum, int32_t source
 }
 
 char __cdecl DynEntCl_DynEntImpactEvent(
-    int32_t localClientNum,
-    int32_t sourceEntityNum,
+    int localClientNum,
+    int sourceEntityNum,
     float *start,
     float *end,
-    int32_t damage,
+    int damage,
     bool isMelee)
 {
     dxBody *PhysObj; // eax
@@ -1243,12 +1243,12 @@ dxBody *__cdecl DynEntCl_CreatePhysObj(const DynEntityDef *dynEntDef, const GfxP
 }
 
 void __cdecl DynEntCl_Damage(
-    int32_t localClientNum,
+    int localClientNum,
     uint16_t dynEntId,
     DynEntityCollType drawType,
     const float *hitPos,
     const float *hitDir,
-    int32_t damage)
+    int damage)
 {
     DynEntityPose *dynEntPose; // [esp+0h] [ebp-34h]
     DynEntityClient *dynEntClient; // [esp+8h] [ebp-2Ch]
@@ -1318,8 +1318,8 @@ void __cdecl DynEntCl_Damage(
 }
 
 void __cdecl DynEntCl_TestPhysicsEntities(
-    int32_t localClientNum,
-    int32_t sourceEntityNum,
+    int localClientNum,
+    int sourceEntityNum,
     float *start,
     float *end,
     bool isMelee)
@@ -1337,18 +1337,18 @@ void __cdecl DynEntCl_TestPhysicsEntities(
     }
 }
 
-void __cdecl DynEntCl_MeleeEvent(int32_t localClientNum, int32_t sourceEntityNum)
+void __cdecl DynEntCl_MeleeEvent(int localClientNum, int sourceEntityNum)
 {
     float v2; // [esp+Ch] [ebp-58h]
     float scale; // [esp+10h] [ebp-54h]
     centity_s *attacker; // [esp+14h] [ebp-50h]
-    int32_t damage; // [esp+18h] [ebp-4Ch]
+    int damage; // [esp+18h] [ebp-4Ch]
     float right[3]; // [esp+20h] [ebp-44h] BYREF
     float end[3]; // [esp+2Ch] [ebp-38h] BYREF
     float forward[3]; // [esp+38h] [ebp-2Ch] BYREF
     float up[3]; // [esp+44h] [ebp-20h] BYREF
     float eyePos[3]; // [esp+50h] [ebp-14h] BYREF
-    uint32_t traceIndex; // [esp+5Ch] [ebp-8h]
+    uint traceIndex; // [esp+5Ch] [ebp-8h]
     const WeaponDef *weapDef; // [esp+60h] [ebp-4h]
 
     if (DynEntCl_EventNeedsProcessed(localClientNum, sourceEntityNum))
@@ -1381,24 +1381,24 @@ void __cdecl DynEntCl_MeleeEvent(int32_t localClientNum, int32_t sourceEntityNum
 }
 
 void __cdecl DynEntCl_ExplosionEvent(
-    int32_t localClientNum,
+    int localClientNum,
     bool isCylinder,
     float *origin,
     float innerRadius,
     float outerRadius,
     float *impulse,
     float inScale,
-    int32_t innerDamage,
-    int32_t outerDamage)
+    int innerDamage,
+    int outerDamage)
 {
     dxBody *PhysObj; // eax
     double v10; // st7
     double v11; // st7
     double v12; // st7
-    int32_t damage; // [esp+34h] [ebp-2078h]
+    int damage; // [esp+34h] [ebp-2078h]
     DynEntityPose *dynEntPose; // [esp+38h] [ebp-2074h]
     float CylindricalRadiusDistSqr; // [esp+3Ch] [ebp-2070h]
-    uint32_t ClosestEntities; // [esp+40h] [ebp-206Ch]
+    uint ClosestEntities; // [esp+40h] [ebp-206Ch]
     float radiusMaxs[3]; // [esp+44h] [ebp-2068h] BYREF
     float diff[3]; // [esp+50h] [ebp-205Ch] BYREF
     DynEntityDrawType drawType; // [esp+5Ch] [ebp-2050h]
@@ -1409,7 +1409,7 @@ void __cdecl DynEntCl_ExplosionEvent(
     float outPosition[3]; // [esp+78h] [ebp-2034h] BYREF
     uint16_t hitEnts[4098]; // [esp+84h] [ebp-2028h] BYREF
     float v30; // [esp+208Ch] [ebp-20h]
-    uint32_t i; // [esp+2090h] [ebp-1Ch]
+    uint i; // [esp+2090h] [ebp-1Ch]
     float sum[3]; // [esp+2094h] [ebp-18h] BYREF
     float outerRadiusSqr; // [esp+20A0h] [ebp-Ch]
     float scale; // [esp+20A4h] [ebp-8h]
@@ -1439,7 +1439,7 @@ void __cdecl DynEntCl_ExplosionEvent(
         }
         drawType = DYNENT_DRAW_MODEL;
     LABEL_18:
-        if ((uint32_t)drawType < DYNENT_DRAW_COUNT)
+        if ((uint)drawType < DYNENT_DRAW_COUNT)
         {
             ClosestEntities = DynEntCl_GetClosestEntities(drawType, sum, radiusMaxs, origin, hitEnts, isCylinder);
             for (i = 0; ; ++i)
@@ -1518,7 +1518,7 @@ void __cdecl DynEntCl_ExplosionEvent(
     }
 }
 
-uint32_t __cdecl DynEntCl_GetClosestEntities(
+uint __cdecl DynEntCl_GetClosestEntities(
     DynEntityDrawType drawType,
     float *radiusMins,
     float *radiusMaxs,
@@ -1527,10 +1527,10 @@ uint32_t __cdecl DynEntCl_GetClosestEntities(
     bool isCylinder)
 {
     DynEntityPose *dynEntPose; // [esp+12Ch] [ebp-8010h]
-    uint32_t hitCount; // [esp+130h] [ebp-800Ch]
+    uint hitCount; // [esp+130h] [ebp-800Ch]
     DynEntSortStruct v10[4096]; // [esp+134h] [ebp-8008h] BYREF
     DynEntityClient *dynEntClient; // [esp+8134h] [ebp-8h]
-    uint32_t i; // [esp+8138h] [ebp-4h]
+    uint i; // [esp+8138h] [ebp-4h]
 
     hitCount = DynEntCl_AreaEntities(drawType, radiusMins, radiusMaxs, 0x802013, 0x1000u, hitEnts);
     if (hitCount > dynEnt_explodeMaxEnts->current.integer)
@@ -1572,7 +1572,7 @@ bool __cdecl DynEntCl_CompareDynEntsForExplosion(const DynEntSortStruct& ent1, c
 }
 
 void __cdecl DynEntCl_JitterEvent(
-    int32_t localClientNum,
+    int localClientNum,
     float *origin,
     float innerRadius,
     float outerRadius,
@@ -1609,7 +1609,7 @@ void __cdecl DynEntCl_JitterEvent(
         Vec3AddScalar(origin, v8, maxs);
         sum[2] = -FLT_MAX;
         maxs[2] = FLT_MAX;
-        for (drawType = DYNENT_DRAW_MODEL; (uint32_t)drawType < DYNENT_DRAW_COUNT; ++drawType)
+        for (drawType = DYNENT_DRAW_MODEL; (uint)drawType < DYNENT_DRAW_COUNT; ++drawType)
         {
             unsignedInt = DynEntCl_AreaEntities(drawType, sum, maxs, 0x802013, 0x1000u, dynEntList);
             if (unsignedInt > dynEnt_explodeMaxEnts->current.integer)
@@ -1665,7 +1665,7 @@ void __cdecl DynEntCl_JitterEvent(
 }
 
 void __cdecl DynEntCl_DestroyEvent(
-    int32_t localClientNum,
+    int localClientNum,
     uint16_t dynEntId,
     DynEntityCollType drawType,
     const float *hitPos,
@@ -1715,7 +1715,7 @@ void __cdecl DynEntCl_DestroyEvent(
 void DynEntCl_WakeUpAroundPlayer(int localClientNum)
 {
     DynEntityDrawType drawType; // r29
-    uint32_t hitCount; // r3
+    uint hitCount; // r3
     const DynEntityDef *EntityDef; // r28
     DynEntityClient *dynEntClient; // r30
     DynEntityPose *ClientPose; // r3
@@ -1751,12 +1751,12 @@ void DynEntCl_WakeUpAroundPlayer(int localClientNum)
                 if (DynEnt_GetEntityProps(EntityDef->type)->usePhysics && !dynEntClient->physObjId)
                 {
                     ClientPose = DynEnt_GetClientPose(dynEntId, drawType);
-                    dynEntClient->physObjId = (int32_t)DynEntCl_CreatePhysObj(EntityDef, &ClientPose->pose);
+                    dynEntClient->physObjId = (int)DynEntCl_CreatePhysObj(EntityDef, &ClientPose->pose);
                 }
             }
 
             ++drawType;
-        } while ((uint32_t)drawType < DYNENT_DRAW_COUNT);
+        } while ((uint)drawType < DYNENT_DRAW_COUNT);
     }
 }
 #endif 

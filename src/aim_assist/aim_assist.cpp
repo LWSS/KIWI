@@ -66,7 +66,7 @@ void __cdecl TRACK_aim_assist()
     TRACK_STATIC_ARR(aaInputGraph, 10);
 }
 
-void __cdecl AimAssist_Init(int32_t localClientNum)
+void __cdecl AimAssist_Init(int localClientNum)
 {
     char graphName[128] = { 0 }; // [esp+4h] [ebp-88h] BYREF
     int graphIndex = 0; // [esp+88h] [ebp-4h]
@@ -376,7 +376,7 @@ static bool __cdecl AimAssist_DoBoundsIntersectCenterBox(
         && (clipHalfHeight >= (double)clipMins[1] && clipMaxs[1] >= -clipHalfHeight);
 }
 
-void __cdecl AimAssist_Setup(int32_t localClientNum)
+void __cdecl AimAssist_Setup(int localClientNum)
 {
     AimAssistGlobals* aaGlob = &aaGlobArray[localClientNum]; // [esp+0h] [ebp-4h]
     memset((uint8_t*)aaGlob, 0, sizeof(AimAssistGlobals));
@@ -392,7 +392,7 @@ void __cdecl AimAssist_Setup(int32_t localClientNum)
 }
 
 void __cdecl AimAssist_UpdateScreenTargets(
-    int32_t localClientNum,
+    int localClientNum,
     const float *viewOrg,
     const float *viewAngles,
     float tanHalfFovX,
@@ -711,7 +711,7 @@ void __cdecl AimAssist_AddToTargetList(AimAssistGlobals *aaGlob, const AimScreen
     }
 }
 
-int32_t __cdecl AimAssist_CompareTargets(const AimScreenTarget *screenTargetA, const AimScreenTarget *screenTargetB)
+int __cdecl AimAssist_CompareTargets(const AimScreenTarget *screenTargetA, const AimScreenTarget *screenTargetB)
 {
     iassert(screenTargetA);
     iassert(screenTargetB);
@@ -723,8 +723,8 @@ int32_t __cdecl AimAssist_CompareTargets(const AimScreenTarget *screenTargetA, c
     return -1;
 }
 
-int32_t __cdecl AimAssist_CalcAimPos(
-    int32_t localClientNum,
+int __cdecl AimAssist_CalcAimPos(
+    int localClientNum,
     const centity_s *targetEnt,
     const AimTarget *target,
     float *aimPos)
@@ -742,7 +742,7 @@ int32_t __cdecl AimAssist_CalcAimPos(
     return 1;
 }
 
-int32_t __cdecl AimTarget_GetTagPos(int32_t localClientNum, const centity_s *cent, uint32_t tagName, float *pos)
+int __cdecl AimTarget_GetTagPos(int localClientNum, const centity_s *cent, uint tagName, float *pos)
 {
     iassert(cent);
     iassert(pos);
@@ -758,12 +758,12 @@ int32_t __cdecl AimTarget_GetTagPos(int32_t localClientNum, const centity_s *cen
     return 1;
 }
 
-int32_t __cdecl AimAssist_GetScreenTargetCount(int32_t localClientNum)
+int __cdecl AimAssist_GetScreenTargetCount(int localClientNum)
 {
     return aaGlobArray[localClientNum].screenTargetCount;
 }
 
-int32_t __cdecl AimAssist_GetScreenTargetEntity(int32_t localClientNum, uint32_t targetIndex)
+int __cdecl AimAssist_GetScreenTargetEntity(int localClientNum, uint targetIndex)
 {
     const AimAssistGlobals * aaGlob = &aaGlobArray[localClientNum]; // [esp+0h] [ebp-4h]
 
@@ -772,7 +772,7 @@ int32_t __cdecl AimAssist_GetScreenTargetEntity(int32_t localClientNum, uint32_t
     return aaGlob->screenTargets[targetIndex].entIndex;
 }
 
-void __cdecl AimAssist_ClearEntityReference(int32_t localClientNum, int32_t entIndex)
+void __cdecl AimAssist_ClearEntityReference(int localClientNum, int entIndex)
 {
     AimAssistGlobals* aaGlob = &aaGlobArray[localClientNum]; // [esp+0h] [ebp-4h]
 
@@ -853,10 +853,10 @@ void __cdecl AimAssist_UpdateAdsLerp(const AimInput *input)
         aaGlob->adsLerp = 1.0;
 }
 
-uint32_t __cdecl AimAssist_GetWeaponIndex(int32_t localClientNum, const playerState_s *ps)
+uint __cdecl AimAssist_GetWeaponIndex(int localClientNum, const playerState_s *ps)
 {
-    uint32_t NumWeapons = 0; // eax
-    uint32_t weapIndex = 0; // [esp+0h] [ebp-8h]
+    uint NumWeapons = 0; // eax
+    uint weapIndex = 0; // [esp+0h] [ebp-8h]
 
     if ((ps->eFlags & 0x300) != 0)
     {
@@ -902,14 +902,14 @@ const AimScreenTarget *__cdecl AimAssist_GetBestTarget(
     return 0;
 }
 
-const AimScreenTarget *__cdecl AimAssist_GetTargetFromEntity(const AimAssistGlobals *aaGlob, int32_t entIndex)
+const AimScreenTarget *__cdecl AimAssist_GetTargetFromEntity(const AimAssistGlobals *aaGlob, int entIndex)
 {
     iassert(aaGlob);
 
     if (entIndex == ENTITYNUM_NONE)
         return 0;
 
-    for (int32_t targetIndex = 0; targetIndex < aaGlob->screenTargetCount; ++targetIndex) // [esp+4h] [ebp-4h]
+    for (int targetIndex = 0; targetIndex < aaGlob->screenTargetCount; ++targetIndex) // [esp+4h] [ebp-4h]
     {
         if (aaGlob->screenTargets[targetIndex].entIndex == entIndex)
             return &aaGlob->screenTargets[targetIndex];
@@ -925,7 +925,7 @@ void __cdecl AimAssist_ApplyAutoMelee(const AimInput *input, AimOutput *output)
     float yawDelta; // [esp+20h] [ebp-20h]
     float newPitch; // [esp+24h] [ebp-1Ch]
     float pitchDelta; // [esp+28h] [ebp-18h]
-    uint32_t weapIndex; // [esp+2Ch] [ebp-14h]
+    uint weapIndex; // [esp+2Ch] [ebp-14h]
     AimAssistGlobals *aaGlob; // [esp+30h] [ebp-10h]
     float newYaw; // [esp+34h] [ebp-Ch]
 
@@ -1091,7 +1091,7 @@ void __cdecl AimAssist_UpdateMouseInput(const AimInput *input, AimOutput *output
     }
 }
 
-void __cdecl AimAssist_DrawDebugOverlay(uint32_t localClientNum)
+void __cdecl AimAssist_DrawDebugOverlay(uint localClientNum)
 {
     float green[4] = { 0.0, 1.0, 0.0, 0.25 }; // [esp+Ch] [ebp-2Ch] BYREF
     float red[4] = { 1.0, 0.0, 0.0, 0.25 }; // [esp+1Ch] [ebp-1Ch] BYREF
@@ -1180,13 +1180,13 @@ void __cdecl AimAssist_DrawTargets(int64_t localClientNum, const float *color)
     iassert(HIDWORD(localClientNum));
     iassert(color);
 
-    int32_t weapIndex = AimAssist_GetWeaponIndex(localClientNum, (const playerState_s *)HIDWORD(localClientNum)); // [esp+78h] [ebp-1Ch]
+    int weapIndex = AimAssist_GetWeaponIndex(localClientNum, (const playerState_s *)HIDWORD(localClientNum)); // [esp+78h] [ebp-1Ch]
     if (weapIndex)
     {
         weapDef = BG_GetWeaponDef(weapIndex);
         aaGlob = &aaGlobArray[localClientNum];
         range = aaGlob->adsLerp * weapDef->aimAssistRangeAds + (1.0 - aaGlob->adsLerp) * weapDef->aimAssistRange;
-        for (int32_t targetIndex = 0; targetIndex < aaGlob->screenTargetCount; ++targetIndex)  // [esp+74h] [ebp-20h]
+        for (int targetIndex = 0; targetIndex < aaGlob->screenTargetCount; ++targetIndex)  // [esp+74h] [ebp-20h]
         {
             if (aim_autoaim_debug->current.enabled)
             {

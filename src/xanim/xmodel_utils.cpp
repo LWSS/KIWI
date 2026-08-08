@@ -32,7 +32,7 @@ int __cdecl XModelGetSurfaces(const XModel *model, XSurface **surfaces, int lod)
 
 XSurface *__cdecl XModelGetSurface(const XModel *model, int lod, int surfIndex)
 {
-    uint32_t modelSurfIndex; // [esp+0h] [ebp-4h]
+    uint modelSurfIndex; // [esp+0h] [ebp-4h]
 
     iassert(lod >= 0);
     modelSurfIndex = surfIndex + model->lodInfo[lod].surfIndex;
@@ -48,7 +48,7 @@ const XModelLodInfo *__cdecl XModelGetLodInfo(const XModel *model, int lod)
     return &model->lodInfo[lod];
 }
 
-uint32_t __cdecl XModelGetSurfCount(const XModel *model, int lod)
+uint __cdecl XModelGetSurfCount(const XModel *model, int lod)
 {
     iassert(model);
     iassert(lod >= 0);
@@ -110,7 +110,7 @@ int __cdecl XModelGetLodForDist(const XModel *model, float dist)
     return -1;
 }
 
-void __cdecl XModelSetTestLods(uint32_t lodLevel, float dist)
+void __cdecl XModelSetTestLods(uint lodLevel, float dist)
 {
     iassert((unsigned)lodLevel < MAX_LODS);
 
@@ -118,7 +118,7 @@ void __cdecl XModelSetTestLods(uint32_t lodLevel, float dist)
     g_testLods[lodLevel].enabled = dist >= 0.0;
 }
 
-double __cdecl XModelGetLodDist(const XModel *model, uint32_t lod)
+double __cdecl XModelGetLodDist(const XModel *model, uint lod)
 {
     iassert(model);
     bcassert(lod, model->numLods);
@@ -133,7 +133,7 @@ int __cdecl XModelGetContents(const XModel *model)
     return model->contents;
 }
 
-int __cdecl XModelGetStaticModelCacheVertCount(XModel *model, uint32_t lod)
+int __cdecl XModelGetStaticModelCacheVertCount(XModel *model, uint lod)
 {
     iassert(model);
     bcassert(lod, MAX_LODS);

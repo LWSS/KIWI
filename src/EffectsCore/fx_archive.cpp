@@ -5,12 +5,12 @@
 
 #include <physics/phys_local.h>
 
-void __cdecl FX_Restore(int32_t clientIndex, MemoryFile *memFile)
+void __cdecl FX_Restore(int clientIndex, MemoryFile *memFile)
 {
-    int32_t v2; // [esp+0h] [ebp-201Ch] BYREF
+    int v2; // [esp+0h] [ebp-201Ch] BYREF
     FxEffectDefTable table; // [esp+4h] [ebp-2018h] BYREF
-    int32_t v4; // [esp+200Ch] [ebp-10h]
-    int32_t relocationDistance; // [esp+2010h] [ebp-Ch]
+    int v4; // [esp+200Ch] [ebp-10h]
+    int relocationDistance; // [esp+2010h] [ebp-Ch]
     void *p; // [esp+2014h] [ebp-8h]
     FxSystemBuffers *systemBuffers; // [esp+2018h] [ebp-4h]
 
@@ -22,7 +22,7 @@ void __cdecl FX_Restore(int32_t clientIndex, MemoryFile *memFile)
         MyAssertHandler(".\\EffectsCore\\fx_archive.cpp", 223, 0, "%s", "systemBuffers");
     FX_RestoreEffectDefTable(memFile, &table);
     MemFile_ReadData(memFile, 2656, (uint8_t *)p);
-    if (!*((_BYTE *)p + 2526) || *((uint32_t *)p + 627))
+    if (!*((_BYTE *)p + 2526) || *((uint *)p + 627))
         Com_Error(ERR_DROP, "Invalid save file");
     FX_LinkSystemBuffers((FxSystem *)p, systemBuffers);
     MemFile_ReadData(memFile, 291968, (uint8_t *)systemBuffers);
@@ -37,9 +37,9 @@ void __cdecl FX_Restore(int32_t clientIndex, MemoryFile *memFile)
 
 void __cdecl FX_RestoreEffectDefTable(MemoryFile *memFile, FxEffectDefTable *table)
 {
-    uint32_t p; // [esp+0h] [ebp-10h] BYREF
+    uint p; // [esp+0h] [ebp-10h] BYREF
     const FxEffectDef *effectDef; // [esp+4h] [ebp-Ch]
-    uint32_t key; // [esp+8h] [ebp-8h]
+    uint key; // [esp+8h] [ebp-8h]
     const char *effectDefName; // [esp+Ch] [ebp-4h]
 
     table->count = 0;
@@ -55,7 +55,7 @@ void __cdecl FX_RestoreEffectDefTable(MemoryFile *memFile, FxEffectDefTable *tab
     }
 }
 
-void __cdecl FX_AddEffectDefTableEntry(FxEffectDefTable *table, uint32_t key, const FxEffectDef *effectDef)
+void __cdecl FX_AddEffectDefTableEntry(FxEffectDefTable *table, uint key, const FxEffectDef *effectDef)
 {
     if (!table)
         MyAssertHandler(".\\EffectsCore\\fx_archive.cpp", 47, 0, "%s", "table");
@@ -77,7 +77,7 @@ void __cdecl FX_FixupEffectDefHandles(FxSystem *system, FxEffectDefTable *table)
 {
     const FxEffectDef *effectDef; // [esp+Ch] [ebp-10h]
     FxEffect *effect; // [esp+10h] [ebp-Ch]
-    volatile int32_t activeIndex; // [esp+18h] [ebp-4h]
+    volatile int activeIndex; // [esp+18h] [ebp-4h]
 
     if (!system)
         MyAssertHandler(".\\EffectsCore\\fx_archive.cpp", 131, 0, "%s", "system");
@@ -86,7 +86,7 @@ void __cdecl FX_FixupEffectDefHandles(FxSystem *system, FxEffectDefTable *table)
     for (activeIndex = system->firstActiveEffect; activeIndex != system->firstNewEffect; ++activeIndex)
     {
         effect = FX_EffectFromHandle(system, system->allEffectHandles[activeIndex & 0x3FF]);
-        effectDef = FX_FindEffectDefInTable(table, (uint32_t)effect->def);
+        effectDef = FX_FindEffectDefInTable(table, (uint)effect->def);
         if (!effectDef)
             MyAssertHandler(".\\EffectsCore\\fx_archive.cpp", 139, 0, "%s", "effectDef");
         effect->def = effectDef;
@@ -114,9 +114,9 @@ FxEffect *__cdecl FX_EffectFromHandle(FxSystem *system, uint16_t handle)
     return (FxEffect *)((char *)system->effects + 4 * handle);
 }
 
-const FxEffectDef *__cdecl FX_FindEffectDefInTable(const FxEffectDefTable *table, uint32_t key)
+const FxEffectDef *__cdecl FX_FindEffectDefInTable(const FxEffectDefTable *table, uint key)
 {
-    int32_t index; // [esp+0h] [ebp-4h]
+    int index; // [esp+0h] [ebp-4h]
 
     for (index = 0; index < table->count; ++index)
     {
@@ -134,7 +134,7 @@ void __cdecl FX_RestorePhysicsData(FxSystem *system, MemoryFile *memFile)
     const FxEffect *effect; // [esp+24h] [ebp-14h]
     uint16_t elemHandleNext; // [esp+2Ch] [ebp-Ch]
     FxPool<FxElem> *elem; // [esp+30h] [ebp-8h]
-    volatile int32_t activeIndex; // [esp+34h] [ebp-4h]
+    volatile int activeIndex; // [esp+34h] [ebp-4h]
 
     if (!system)
         MyAssertHandler(".\\EffectsCore\\fx_archive.cpp", 185, 0, "%s", "system");
@@ -155,14 +155,14 @@ void __cdecl FX_RestorePhysicsData(FxSystem *system, MemoryFile *memFile)
                 elem->item.physObjId = (int)Phys_ObjLoad(PHYS_WORLD_FX, memFile);
                 visuals = FX_GetElemVisuals(
                     elemDef,
-                    (296 * elem->item.sequence + elem->item.msecBegin + (uint32_t)effect->randomSeed) % 0x1DF).model;
+                    (296 * elem->item.sequence + elem->item.msecBegin + (uint)effect->randomSeed) % 0x1DF).model;
                 Phys_ObjSetCollisionFromXModel(visuals, PHYS_WORLD_FX, (dxBody *)elem->item.physObjId);
             }
         }
     }
 }
 
-FxElemVisuals __cdecl FX_GetElemVisuals(const FxElemDef *elemDef, int32_t randomSeed)
+FxElemVisuals __cdecl FX_GetElemVisuals(const FxElemDef *elemDef, int randomSeed)
 {
     if (!elemDef->visualCount)
         MyAssertHandler(
@@ -179,10 +179,10 @@ FxElemVisuals __cdecl FX_GetElemVisuals(const FxElemDef *elemDef, int32_t random
             * LOWORD(fx_randomTable[randomSeed + 21])) >> 16];
 }
 
-void __cdecl FX_Save(int32_t clientIndex, MemoryFile *memFile)
+void __cdecl FX_Save(int clientIndex, MemoryFile *memFile)
 {
-    uint32_t UsedSize; // eax
-    uint32_t v3; // eax
+    uint UsedSize; // eax
+    uint v3; // eax
     FxSystem *p; // [esp+0h] [ebp-Ch] BYREF
     FxSystem *system; // [esp+4h] [ebp-8h]
     FxSystemBuffers *systemBuffers; // [esp+8h] [ebp-4h]
@@ -248,7 +248,7 @@ void __cdecl FX_SavePhysicsData(FxSystem *system, MemoryFile *memFile)
     const FxEffect *effect; // [esp+14h] [ebp-10h]
     uint16_t elemHandleNext; // [esp+18h] [ebp-Ch]
     FxPool<FxElem> *elem; // [esp+1Ch] [ebp-8h]
-    volatile int32_t activeIndex; // [esp+20h] [ebp-4h]
+    volatile int activeIndex; // [esp+20h] [ebp-4h]
 
     if (!system)
         MyAssertHandler(".\\EffectsCore\\fx_archive.cpp", 155, 0, "%s", "system");
@@ -270,7 +270,7 @@ void __cdecl FX_SavePhysicsData(FxSystem *system, MemoryFile *memFile)
     }
 }
 
-void __cdecl FX_Archive(int32_t clientIndex, MemoryFile *memFile)
+void __cdecl FX_Archive(int clientIndex, MemoryFile *memFile)
 {
     if (MemFile_IsWriting(memFile))
         FX_Save(clientIndex, memFile);

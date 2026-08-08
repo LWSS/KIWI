@@ -113,23 +113,23 @@ void __cdecl R_GetWorldMatrixForModelSurf(const GfxModelRigidSurface *modelSurf,
     worldMat->w.v[3] = worldMat->w.v[3] - eyeOffset.v[3];
 }
 
-uint32_t __cdecl R_DrawXModelRigidSurfLitInternal(
+uint __cdecl R_DrawXModelRigidSurfLitInternal(
     const GfxDrawSurf *drawSurfList,
-    uint32_t drawSurfCount,
+    uint drawSurfCount,
     GfxCmdBufContext context)
 {
     GfxCmdBufSourceState *matrix; // [esp+58h] [ebp-BCh]
     vector4 worldMat;
-    uint32_t baseGfxEntIndex; // [esp+A0h] [ebp-74h]
+    uint baseGfxEntIndex; // [esp+A0h] [ebp-74h]
     GfxDrawSurf drawSurf; // [esp+A4h] [ebp-70h]
     const GfxBackEndData *data; // [esp+ACh] [ebp-68h]
-    uint32_t drawSurfIndex; // [esp+C4h] [ebp-50h]
+    uint drawSurfIndex; // [esp+C4h] [ebp-50h]
     float4 eyeOffset; // [esp+C8h] [ebp-4Ch]
     const GfxEntity *gfxEnt; // [esp+D8h] [ebp-3Ch]
     GfxDrawSurf drawSurfMask; // [esp+DCh] [ebp-38h]
     const GfxModelRigidSurface *modelSurf; // [esp+E8h] [ebp-2Ch]
-    uint32_t depthHackFlags; // [esp+ECh] [ebp-28h]
-    uint32_t gfxEntIndex; // [esp+F0h] [ebp-24h]
+    uint depthHackFlags; // [esp+ECh] [ebp-28h]
+    uint gfxEntIndex; // [esp+F0h] [ebp-24h]
     float materialTime; // [esp+108h] [ebp-Ch]
     unsigned __int64 drawSurfKey; // [esp+10Ch] [ebp-8h]
 
@@ -186,31 +186,31 @@ uint32_t __cdecl R_DrawXModelRigidSurfLitInternal(
     return drawSurfIndex;
 }
 
-uint32_t __cdecl R_DrawXModelRigidSurfLit(
+uint __cdecl R_DrawXModelRigidSurfLit(
     const GfxDrawSurf *drawSurfList,
-    uint32_t drawSurfCount,
+    uint drawSurfCount,
     GfxCmdBufContext context)
 {
     return R_DrawXModelRigidSurfLitInternal(drawSurfList, drawSurfCount, context);
 }
 
-uint32_t __cdecl R_DrawXModelRigidSurfCameraInternal(
+uint __cdecl R_DrawXModelRigidSurfCameraInternal(
     const GfxDrawSurf *drawSurfList,
-    uint32_t drawSurfCount,
+    uint drawSurfCount,
     GfxCmdBufContext context)
 {
     GfxCmdBufSourceState *matrix; // [esp+58h] [ebp-BCh]
     vector4 worldMat;
-    uint32_t baseGfxEntIndex; // [esp+A0h] [ebp-74h]
+    uint baseGfxEntIndex; // [esp+A0h] [ebp-74h]
     GfxDrawSurf drawSurf; // [esp+A4h] [ebp-70h]
     const GfxBackEndData *data; // [esp+ACh] [ebp-68h]
-    uint32_t drawSurfIndex; // [esp+C4h] [ebp-50h]
+    uint drawSurfIndex; // [esp+C4h] [ebp-50h]
     float4 eyeOffset; // [esp+C8h] [ebp-4Ch]
     const GfxEntity *gfxEnt; // [esp+D8h] [ebp-3Ch]
     GfxDrawSurf drawSurfMask; // [esp+DCh] [ebp-38h]
     const GfxModelRigidSurface *modelSurf; // [esp+E8h] [ebp-2Ch]
-    uint32_t depthHackFlags; // [esp+ECh] [ebp-28h]
-    uint32_t gfxEntIndex; // [esp+F0h] [ebp-24h]
+    uint depthHackFlags; // [esp+ECh] [ebp-28h]
+    uint gfxEntIndex; // [esp+F0h] [ebp-24h]
     float materialTime; // [esp+108h] [ebp-Ch]
     unsigned __int64 drawSurfKey; // [esp+10Ch] [ebp-8h]
 
@@ -263,23 +263,23 @@ uint32_t __cdecl R_DrawXModelRigidSurfCameraInternal(
     return drawSurfIndex;
 }
 
-uint32_t __cdecl R_DrawXModelRigidSurfCamera(
+uint __cdecl R_DrawXModelRigidSurfCamera(
     const GfxDrawSurf *drawSurfList,
-    uint32_t drawSurfCount,
+    uint drawSurfCount,
     GfxCmdBufContext context)
 {
     return R_DrawXModelRigidSurfCameraInternal(drawSurfList, drawSurfCount, context);
 }
 
-uint32_t __cdecl R_DrawXModelRigidSurfInternal(
+uint __cdecl R_DrawXModelRigidSurfInternal(
     const GfxDrawSurf *drawSurfList,
-    uint32_t drawSurfCount,
+    uint drawSurfCount,
     GfxCmdBufContext context)
 {
     GfxCmdBufSourceState *matrix; // [esp+58h] [ebp-A4h]
     GfxDrawSurf drawSurf; // [esp+A4h] [ebp-70h]
     const GfxBackEndData *data; // [esp+A8h] [ebp-54h]
-    uint32_t drawSurfIndex; // [esp+C0h] [ebp-3Ch]
+    uint drawSurfIndex; // [esp+C0h] [ebp-3Ch]
     float4 eyeOffset; // [esp+C4h] [ebp-38h]
     GfxDrawSurf drawSurfMask; // [esp+D4h] [ebp-28h]
     const GfxModelRigidSurface *modelSurf; // [esp+DCh] [ebp-20h]
@@ -316,9 +316,9 @@ uint32_t __cdecl R_DrawXModelRigidSurfInternal(
     return drawSurfIndex;
 }
 
-uint32_t __cdecl R_DrawXModelRigidSurf(
+uint __cdecl R_DrawXModelRigidSurf(
     const GfxDrawSurf *drawSurfList,
-    uint32_t drawSurfCount,
+    uint drawSurfCount,
     GfxCmdBufContext context)
 {
     return R_DrawXModelRigidSurfInternal(drawSurfList, drawSurfCount, context);

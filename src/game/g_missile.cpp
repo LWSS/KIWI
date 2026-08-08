@@ -23,7 +23,7 @@ struct AttractorRepulsor_t // sizeof=0x18
 #ifdef KISAK_SP
     uint16_t entnum;
 #elif KISAK_MP
-    int32_t entnum;
+    int entnum;
 #endif
     float origin[3];                    // ...
     float strength;
@@ -229,7 +229,7 @@ const float MY_STRAIGHTUPNORMAL[3] = { 0.0, 0.0, 1.0 };
 
 void __cdecl G_ExplodeMissile(gentity_s *ent)
 {
-    int32_t v1; // eax
+    int v1; // eax
     float fInnerDamage; // [esp+0h] [ebp-E0h]
     float fOuterDamage; // [esp+4h] [ebp-DCh]
     float radius; // [esp+8h] [ebp-D8h]
@@ -252,7 +252,7 @@ void __cdecl G_ExplodeMissile(gentity_s *ent)
     float forwardDir[3]; // [esp+C8h] [ebp-18h] BYREF
     gentity_s *eventEnt; // [esp+D4h] [ebp-Ch]
     WeaponDef *weapDef; // [esp+D8h] [ebp-8h]
-    int32_t splashMethodOfDeath; // [esp+DCh] [ebp-4h]
+    int splashMethodOfDeath; // [esp+DCh] [ebp-4h]
 
     iassert(ent);
     iassert(ent->s.weapon);
@@ -469,7 +469,7 @@ void __cdecl G_ExplodeMissile(gentity_s *ent)
     }
 }
 
-int32_t __cdecl GetSplashMethodOfDeath(gentity_s *ent)
+int __cdecl GetSplashMethodOfDeath(gentity_s *ent)
 {
     WeaponDef *weapDef; // [esp+4h] [ebp-4h]
 
@@ -486,7 +486,7 @@ int32_t __cdecl GetSplashMethodOfDeath(gentity_s *ent)
         return entityHandlers[ent->handler].splashMethodOfDeath;
 }
 
-void __cdecl G_MissileTrace(trace_t *results, float *start, float *end, int32_t passEntityNum, int32_t contentmask)
+void __cdecl G_MissileTrace(trace_t *results, float *start, float *end, int passEntityNum, int contentmask)
 {
     float dir[3]; // [esp+0h] [ebp-Ch] BYREF
 
@@ -512,14 +512,14 @@ void __cdecl Missile_InitAttractors()
 void __cdecl Missile_FreeAttractorRefs(gentity_s *ent)
 {
     AttractorRepulsor_t *v1; // ecx
-    uint32_t attractorIndex; // [esp+0h] [ebp-4h]
+    uint attractorIndex; // [esp+0h] [ebp-4h]
 
     for (attractorIndex = 0; attractorIndex < 0x20; ++attractorIndex)
     {
         if (attrGlob.attractors[attractorIndex].inUse && attrGlob.attractors[attractorIndex].entnum == ent->s.number)
         {
             v1 = &attrGlob.attractors[attractorIndex];
-            *(uint32_t *)&v1->inUse = 0;
+            *(uint *)&v1->inUse = 0;
             v1->entnum = 0;
             v1->origin[0] = 0.0;
             v1->origin[1] = 0.0;
@@ -532,7 +532,7 @@ void __cdecl Missile_FreeAttractorRefs(gentity_s *ent)
 
 void __cdecl Scr_MissileCreateAttractorEnt()
 {
-    uint32_t attractorIndex; // [esp+0h] [ebp-8h]
+    uint attractorIndex; // [esp+0h] [ebp-8h]
     gentity_s *ent; // [esp+4h] [ebp-4h]
 
     attractorIndex = Missile_GetFreeAttractor();
@@ -548,10 +548,10 @@ void __cdecl Scr_MissileCreateAttractorEnt()
     Scr_AddInt(attractorIndex);
 }
 
-uint32_t __cdecl Missile_GetFreeAttractor()
+uint __cdecl Missile_GetFreeAttractor()
 {
     const char *v0; // eax
-    uint32_t attractorIndex; // [esp+0h] [ebp-4h]
+    uint attractorIndex; // [esp+0h] [ebp-4h]
 
     for (attractorIndex = 0; attractorIndex < 0x20 && attrGlob.attractors[attractorIndex].inUse; ++attractorIndex)
         ;
@@ -565,7 +565,7 @@ uint32_t __cdecl Missile_GetFreeAttractor()
 
 void __cdecl Scr_MissileCreateAttractorOrigin()
 {
-    uint32_t attractorIndex; // [esp+0h] [ebp-4h]
+    uint attractorIndex; // [esp+0h] [ebp-4h]
 
     attractorIndex = Missile_GetFreeAttractor();
     attrGlob.attractors[attractorIndex].isAttractor = 1;
@@ -581,7 +581,7 @@ void __cdecl Scr_MissileCreateAttractorOrigin()
 
 void __cdecl Scr_MissileCreateRepulsorEnt()
 {
-    uint32_t attractorIndex; // [esp+0h] [ebp-4h]
+    uint attractorIndex; // [esp+0h] [ebp-4h]
 
     attractorIndex = Missile_GetFreeAttractor();
     attrGlob.attractors[attractorIndex].isAttractor = 0;
@@ -596,7 +596,7 @@ void __cdecl Scr_MissileCreateRepulsorEnt()
 
 void __cdecl Scr_MissileCreateRepulsorOrigin()
 {
-    uint32_t attractorIndex; // [esp+0h] [ebp-4h]
+    uint attractorIndex; // [esp+0h] [ebp-4h]
 
     attractorIndex = Missile_GetFreeAttractor();
     attrGlob.attractors[attractorIndex].isAttractor = 0;
@@ -613,13 +613,13 @@ void __cdecl Scr_MissileCreateRepulsorOrigin()
 void __cdecl Scr_MissileDeleteAttractor()
 {
     AttractorRepulsor_t *v0; // ecx
-    uint32_t attractorIndex; // [esp+0h] [ebp-4h]
+    uint attractorIndex; // [esp+0h] [ebp-4h]
 
     attractorIndex = Scr_GetInt(0);
     if (attractorIndex >= 0x20)
         Scr_ParamError(0, "Invalid attractor or repulsor");
     v0 = &attrGlob.attractors[attractorIndex];
-    *(uint32_t *)&v0->inUse = 0;
+    *(uint *)&v0->inUse = 0;
     v0->entnum = 0;
     v0->origin[0] = 0.0;
     v0->origin[1] = 0.0;
@@ -631,7 +631,7 @@ void __cdecl Scr_MissileDeleteAttractor()
 void __cdecl G_MakeMissilePickupItem(gentity_s *ent)
 {
     const gitem_s *item; // [esp+8h] [ebp-8h]
-    int32_t itemIndex; // [esp+Ch] [ebp-4h]
+    int itemIndex; // [esp+Ch] [ebp-4h]
 
     ent->r.mins[0] = -1.0;
     ent->r.mins[1] = -1.0;
@@ -650,7 +650,7 @@ void __cdecl G_MakeMissilePickupItem(gentity_s *ent)
     ent->s.index.brushmodel = (uint16_t)itemIndex;
     ent->s.clientNum = 64;
 #elif KISAK_SP
-    itemIndex = (int32_t)((char *)item - (char *)bg_itemlist) >> 2;
+    itemIndex = (int)((char *)item - (char *)bg_itemlist) >> 2;
     ent->s.index.item = (uint16_t) itemIndex;
 #endif
 
@@ -661,7 +661,7 @@ void __cdecl G_MakeMissilePickupItem(gentity_s *ent)
 #ifdef KISAK_SP
 void __cdecl RunMissile_BroadcastActorEvents(gentity_s *missile)
 {
-    int32_t methodOfDeath; // r27
+    int methodOfDeath; // r27
     WeaponDef *weapDef; // r28
 
     if (!missile)
@@ -692,7 +692,7 @@ void __cdecl G_RunMissile(gentity_s *ent)
 {
     const float *v1; // [esp+1Ch] [ebp-158h]
     float v7; // [esp+34h] [ebp-140h]
-    int32_t passEntityNum; // [esp+38h] [ebp-13Ch]
+    int passEntityNum; // [esp+38h] [ebp-13Ch]
     float v9; // [esp+48h] [ebp-12Ch]
     float diff[3]; // [esp+50h] [ebp-124h] BYREF
     float *v11; // [esp+5Ch] [ebp-118h]
@@ -713,7 +713,7 @@ void __cdecl G_RunMissile(gentity_s *ent)
     float circleDir2[3]; // [esp+ACh] [ebp-C8h] BYREF
     float circleDir1[3]; // [esp+B8h] [ebp-BCh] BYREF
     const float *color; // [esp+C4h] [ebp-B0h]
-    uint32_t attractorIndex; // [esp+C8h] [ebp-ACh]
+    uint attractorIndex; // [esp+C8h] [ebp-ACh]
     float originOffset[3]; // [esp+CCh] [ebp-A8h] BYREF
     float traceStart[3]; // [esp+D8h] [ebp-9Ch] BYREF
     gentity_s *groundEnt; // [esp+E4h] [ebp-90h]
@@ -983,7 +983,7 @@ void __cdecl MissileImpact(gentity_s *ent, trace_t *trace, float *dir, float *en
 {
     uint8_t v4; // al
     bool v5; // eax
-    int32_t v6; // eax
+    int v6; // eax
     gentity_s *v7; // eax
     uint8_t v8; // al
     uint8_t v9; // al
@@ -997,7 +997,7 @@ void __cdecl MissileImpact(gentity_s *ent, trace_t *trace, float *dir, float *en
     float radius_max; // [esp+10h] [ebp-E8h]
     gentity_s *radius_min; // [esp+14h] [ebp-E4h]
     float radius_mina; // [esp+14h] [ebp-E4h]
-    int32_t fraction; // [esp+18h] [ebp-E0h]
+    int fraction; // [esp+18h] [ebp-E0h]
     uint16_t fractiona; // [esp+18h] [ebp-E0h]
     gentity_s *v24; // [esp+20h] [ebp-D8h]
     float coneAngleCos; // [esp+24h] [ebp-D4h]
@@ -1012,22 +1012,22 @@ void __cdecl MissileImpact(gentity_s *ent, trace_t *trace, float *dir, float *en
     float javNormal[3]; // [esp+58h] [ebp-A0h] BYREF
     float speed; // [esp+64h] [ebp-94h]
     float velocity[3]; // [esp+68h] [ebp-90h] BYREF
-    int32_t damage; // [esp+74h] [ebp-84h]
+    int damage; // [esp+74h] [ebp-84h]
     trace_t waterTrace; // [esp+78h] [ebp-80h] BYREF
-    int32_t explodeOnImpact; // [esp+A4h] [ebp-54h]
+    int explodeOnImpact; // [esp+A4h] [ebp-54h]
     float waterNormal[3]; // [esp+A8h] [ebp-50h] BYREF
     float waterSurfacePos[3]; // [esp+B4h] [ebp-44h] BYREF
     const float *normal; // [esp+C0h] [ebp-38h]
     bool inWater; // [esp+C6h] [ebp-32h]
     bool waterExplodeAllowed; // [esp+C7h] [ebp-31h]
     gentity_s *other; // [esp+C8h] [ebp-30h]
-    int32_t nomarks; // [esp+CCh] [ebp-2Ch]
-    int32_t explosionType; // [esp+D0h] [ebp-28h]
+    int nomarks; // [esp+CCh] [ebp-2Ch]
+    int explosionType; // [esp+D0h] [ebp-28h]
     hitLocation_t hitLocation; // [esp+D4h] [ebp-24h]
-    int32_t hitClient; // [esp+D8h] [ebp-20h]
+    int hitClient; // [esp+D8h] [ebp-20h]
     WeaponDef *weapDef; // [esp+DCh] [ebp-1Ch]
-    int32_t methodOfDeath; // [esp+E0h] [ebp-18h]
-    int32_t splashMethodOfDeath; // [esp+E4h] [ebp-14h]
+    int methodOfDeath; // [esp+E0h] [ebp-18h]
+    int splashMethodOfDeath; // [esp+E4h] [ebp-14h]
     uint16_t hitEntId; // [esp+E8h] [ebp-10h]
     float traceStart[3]; // [esp+ECh] [ebp-Ch] BYREF
 
@@ -1334,7 +1334,7 @@ bool __cdecl CheckCrumpleMissile(gentity_s *ent, trace_t *trace)
     double v3; // st7
     float scale; // [esp+Ch] [ebp-2Ch]
     float velocity[3]; // [esp+18h] [ebp-20h] BYREF
-    int32_t hitTime; // [esp+24h] [ebp-14h]
+    int hitTime; // [esp+24h] [ebp-14h]
     float MIN_CRUMPLE_SPEED; // [esp+28h] [ebp-10h]
     float cos45; // [esp+2Ch] [ebp-Ch]
     float speed; // [esp+30h] [ebp-8h]
@@ -1368,10 +1368,10 @@ bool __cdecl BounceMissile(gentity_s *ent, trace_t *trace)
     float scale; // [esp+10h] [ebp-80h]
     float velocity[3]; // [esp+50h] [ebp-40h] BYREF
     float vAngles[3]; // [esp+5Ch] [ebp-34h] BYREF
-    int32_t hitTime; // [esp+68h] [ebp-28h]
-    int32_t contents; // [esp+6Ch] [ebp-24h]
+    int hitTime; // [esp+68h] [ebp-28h]
+    int contents; // [esp+6Ch] [ebp-24h]
     bool mayStop; // [esp+73h] [ebp-1Dh]
-    int32_t surfType; // [esp+74h] [ebp-1Ch]
+    int surfType; // [esp+74h] [ebp-1Ch]
     float bounceFactor; // [esp+78h] [ebp-18h]
     WeaponDef *weapDef; // [esp+7Ch] [ebp-14h]
     float dot; // [esp+80h] [ebp-10h]
@@ -1489,7 +1489,7 @@ bool __cdecl BounceMissile(gentity_s *ent, trace_t *trace)
     }
 }
 
-void __cdecl MissileLandAngles(gentity_s *ent, trace_t *trace, float *vAngles, int32_t bForceAlign)
+void __cdecl MissileLandAngles(gentity_s *ent, trace_t *trace, float *vAngles, int bForceAlign)
 {
     double v4; // st7
     double v5; // st7
@@ -1502,7 +1502,7 @@ void __cdecl MissileLandAngles(gentity_s *ent, trace_t *trace, float *vAngles, i
     float v12; // [esp+20h] [ebp-44h]
     float v13; // [esp+24h] [ebp-40h]
     float v14; // [esp+34h] [ebp-30h]
-    int32_t hitTime; // [esp+40h] [ebp-24h]
+    int hitTime; // [esp+40h] [ebp-24h]
     float fSurfacePitch; // [esp+44h] [ebp-20h]
     float fAdjustPitchDiff; // [esp+50h] [ebp-14h]
     float fAngleDelta; // [esp+60h] [ebp-4h]
@@ -1621,7 +1621,7 @@ void __cdecl CheckGrenadeDanger(gentity_s *grenadeEnt)
     float iExplosionRadius; // [esp+8h] [ebp-14h]
     float damageRadiusSquared; // [esp+Ch] [ebp-10h]
     gentity_s *ent; // [esp+10h] [ebp-Ch]
-    int32_t i; // [esp+14h] [ebp-8h]
+    int i; // [esp+14h] [ebp-8h]
     WeaponDef *weapDef; // [esp+18h] [ebp-4h]
 
     if (!grenadeEnt)
@@ -1691,12 +1691,12 @@ void __cdecl Missile_PenetrateGlass(
     gentity_s *ent,
     float *start,
     float *end,
-    int32_t damage,
+    int damage,
     bool predicted)
 {
-    int32_t passEntityNum; // [esp+0h] [ebp-28h]
+    int passEntityNum; // [esp+0h] [ebp-28h]
     gentity_s *v7; // [esp+4h] [ebp-24h]
-    int32_t contents; // [esp+8h] [ebp-20h]
+    int contents; // [esp+8h] [ebp-20h]
     float vel[4]; // [esp+Ch] [ebp-1Ch] BYREF
     gentity_s *hitEnt; // [esp+1Ch] [ebp-Ch]
     hitLocation_t hitLoc; // [esp+20h] [ebp-8h]
@@ -1783,7 +1783,7 @@ void __cdecl RunMissile_Destabilize(gentity_s *missile)
     WeaponDef *weaponDef; // [esp+28h] [ebp-2Ch]
     float newAngleAccel[3]; // [esp+2Ch] [ebp-28h]
     float direction[3]; // [esp+38h] [ebp-1Ch] BYREF
-    int32_t axis; // [esp+44h] [ebp-10h]
+    int axis; // [esp+44h] [ebp-10h]
     float newAPos[3]; // [esp+48h] [ebp-Ch] BYREF
 
     if (!missile)
@@ -1883,7 +1883,7 @@ void __cdecl Missile_ApplyAttractorsRepulsors(gentity_s *missile)
     float force; // [esp+6Ch] [ebp-40h]
     WeaponDef *weaponDef; // [esp+70h] [ebp-3Ch]
     float totalDist; // [esp+74h] [ebp-38h]
-    uint32_t attractorIndex; // [esp+78h] [ebp-34h]
+    uint attractorIndex; // [esp+78h] [ebp-34h]
     float attractorOrigin[3]; // [esp+7Ch] [ebp-30h] BYREF
     float forwardDir[3]; // [esp+88h] [ebp-24h] BYREF
     gentity_s *ent; // [esp+94h] [ebp-18h]
@@ -2738,7 +2738,7 @@ void __cdecl G_InitGrenadeEntity(gentity_s *parent, gentity_s *grenade)
     }
 }
 
-void __cdecl G_InitGrenadeMovement(gentity_s *grenade, const float *start, const float *dir, int32_t rotate)
+void __cdecl G_InitGrenadeMovement(gentity_s *grenade, const float *start, const float *dir, int rotate)
 {
     double v4; // [esp+Ch] [ebp-4Ch]
     double v5; // [esp+18h] [ebp-40h]
@@ -2802,10 +2802,10 @@ gentity_s *__cdecl G_FireGrenade(
     gentity_s *parent,
     float *start,
     float *dir,
-    uint32_t grenadeWPID,
+    uint grenadeWPID,
     uint8_t grenModel,
-    int32_t rotate,
-    int32_t time)
+    int rotate,
+    int time)
 {
     char *Name; // eax
     float speed; // [esp+0h] [ebp-14h]
@@ -2849,9 +2849,9 @@ gentity_s *__cdecl G_FireGrenade(
     return grenade;
 }
 
-int32_t __cdecl CalcMissileNoDrawTime(float speed)
+int __cdecl CalcMissileNoDrawTime(float speed)
 {
-    int32_t v3; // [esp+4h] [ebp-8h]
+    int v3; // [esp+4h] [ebp-8h]
 
     if ((int)(speed * -35.0f / 600.0f + 85.0f) < 50)
         v3 = (int)(speed * -35.0f / 600.0f + 85.0f);
@@ -2863,7 +2863,7 @@ int32_t __cdecl CalcMissileNoDrawTime(float speed)
         return 20;
 }
 
-void __cdecl InitGrenadeTimer(const gentity_s *parent, gentity_s *grenade, const WeaponDef *weapDef, int32_t time)
+void __cdecl InitGrenadeTimer(const gentity_s *parent, gentity_s *grenade, const WeaponDef *weapDef, int time)
 {
     iassert(parent);
     iassert(grenade);
@@ -2904,14 +2904,14 @@ float MYJAVELINOFFSET_RIGHT = 10.0f;
 
 gentity_s *__cdecl G_FireRocket(
     gentity_s *parent,
-    uint32_t weaponIndex,
+    uint weaponIndex,
     float *start,
     float *dir,
     const float *gunVel,
     gentity_s *target,
     const float *targetOffset)
 {
-    int32_t v7; // eax
+    int v7; // eax
     gentityFlags_t v8; // ecx
     float iProjectileSpeed; // [esp+4h] [ebp-A8h]
     float speed; // [esp+8h] [ebp-A4h]
@@ -3387,9 +3387,9 @@ void Missile_LoadAttractors(MemoryFile *memFile)
     v3 = ARRAY_COUNT(attrGlob.attractors);
     do
     {
-        MemFile_ReadData(memFile, 1, (unsigned char*)&v4);
+        MemFile_ReadData(memFile, 1, (byte*)&v4);
         if (v4)
-            MemFile_ReadData(memFile, 24, (unsigned char*)v2);
+            MemFile_ReadData(memFile, 24, (byte*)v2);
         --v3;
         ++v2;
     } while (v3);

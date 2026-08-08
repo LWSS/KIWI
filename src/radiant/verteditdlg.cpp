@@ -53,7 +53,7 @@ static void VED_BracketPatch( patchMesh_t *patch )
 //  Paint (R,G,B) and/or A onto the selected patch control points.
 //    doColour → write vert_color.{r,g,b};  doAlpha → write vert_color.a.
 // ═════════════════════════════════════════════════════════════════════════════
-void VertEditDlg_Apply( unsigned char r, unsigned char g, unsigned char b, unsigned char a,
+void VertEditDlg_Apply( byte r, byte g, byte b, byte a,
                         bool doColour, bool doAlpha )
 {
     for ( selbrush_t *sb = selected_brushes.next; sb != &selected_brushes; sb = sb->next )
@@ -139,10 +139,10 @@ static HWND  s_vedChkAlp  = nullptr;
 static HWND  s_vedSwatch  = nullptr;        // colour preview static
 
 // The dialog's stored colour (the binary's dword_25D6624.. members; ctor seeds 255/255/0/0).
-static unsigned char s_vedColR = 255;
-static unsigned char s_vedColG = 255;
-static unsigned char s_vedColB = 0;
-static unsigned char s_vedColA = 0;
+static byte s_vedColR = 255;
+static byte s_vedColG = 255;
+static byte s_vedColB = 0;
+static byte s_vedColA = 0;
 
 static HWND VED_MakeChild( HWND parent, const char *cls, DWORD style, int id,
                            int x, int y, int w, int hgt, const char *text = nullptr )
@@ -158,10 +158,10 @@ static HWND VED_MakeChild( HWND parent, const char *cls, DWORD style, int id,
 // Pull the current slider positions into the stored colour, then repaint the swatch.
 static void VED_SyncFromSliders()
 {
-    if ( s_vedR ) s_vedColR = (unsigned char)SendMessageA( s_vedR, TBM_GETPOS, 0, 0 );
-    if ( s_vedG ) s_vedColG = (unsigned char)SendMessageA( s_vedG, TBM_GETPOS, 0, 0 );
-    if ( s_vedB ) s_vedColB = (unsigned char)SendMessageA( s_vedB, TBM_GETPOS, 0, 0 );
-    if ( s_vedA ) s_vedColA = (unsigned char)SendMessageA( s_vedA, TBM_GETPOS, 0, 0 );
+    if ( s_vedR ) s_vedColR = (byte)SendMessageA( s_vedR, TBM_GETPOS, 0, 0 );
+    if ( s_vedG ) s_vedColG = (byte)SendMessageA( s_vedG, TBM_GETPOS, 0, 0 );
+    if ( s_vedB ) s_vedColB = (byte)SendMessageA( s_vedB, TBM_GETPOS, 0, 0 );
+    if ( s_vedA ) s_vedColA = (byte)SendMessageA( s_vedA, TBM_GETPOS, 0, 0 );
     if ( s_vedSwatch )
         ::InvalidateRect( s_vedSwatch, nullptr, TRUE );
 }
@@ -199,7 +199,7 @@ int CVertEditDlg::OnCreate( LPCREATESTRUCT lpCreateStruct )
     const int M = 10, lblW = 24, slW = 220, rowH = 30;
     int lx = M, sx = M + lblW + 4, y = M;
 
-    struct { const char *lbl; HWND *out; int id; unsigned char init; } rows[] = {
+    struct { const char *lbl; HWND *out; int id; byte init; } rows[] = {
         { "R", &s_vedR, IDC_VED_R_SLIDER, s_vedColR },
         { "G", &s_vedG, IDC_VED_G_SLIDER, s_vedColG },
         { "B", &s_vedB, IDC_VED_B_SLIDER, s_vedColB },
@@ -252,9 +252,9 @@ void CVertEditDlg::OnColorButton()
     COLORREF c = dlg.GetColor();
     // Extract RGB bytes manually (the GetRValue/GetGValue/GetBValue macros clash with a
     // DXSDK redefinition under this target — they expand with an l-value-requiring '&').
-    s_vedColR = (unsigned char)( c & 0xFF );
-    s_vedColG = (unsigned char)( ( c >> 8 ) & 0xFF );
-    s_vedColB = (unsigned char)( ( c >> 16 ) & 0xFF );
+    s_vedColR = (byte)( c & 0xFF );
+    s_vedColG = (byte)( ( c >> 8 ) & 0xFF );
+    s_vedColB = (byte)( ( c >> 16 ) & 0xFF );
     VED_PushToSliders();
 }
 

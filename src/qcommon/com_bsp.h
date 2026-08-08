@@ -36,12 +36,12 @@ struct DiskPrimaryLight // sizeof=0x80
 };
 
 char __cdecl Com_CanPrimaryLightAffectPoint(const ComPrimaryLight *light, const float *point);
-uint32_t Com_FindClosestPrimaryLight(const float *origin);
+uint Com_FindClosestPrimaryLight(const float *origin);
 double __cdecl CosOfSumOfArcCos(float cos0, float cos1);
 void __cdecl Com_UnloadWorld();
 
 
-enum LumpType : __int32
+enum LumpType : int
 {                                       // ...
     LUMP_MATERIALS = 0x0,
     LUMP_LIGHTBYTES = 0x1,
@@ -100,7 +100,7 @@ enum LumpType : __int32
     LUMP_LIGHTREGION_AXES = 0x36,
 };
 
-enum ComSaveLumpBehavior : __int32
+enum ComSaveLumpBehavior : int
 {                                       // ...
     COM_SAVE_LUMP_AND_CLOSE = 0x0,
     COM_SAVE_LUMP_AND_REOPEN = 0x1,
@@ -109,21 +109,21 @@ enum ComSaveLumpBehavior : __int32
 struct BspChunk // sizeof=0x8
 {                                       // ...
     LumpType type;                      // ...
-    uint32_t length;                // ...
+    uint length;                // ...
 };
 struct BspHeader // sizeof=0x32C
 {                                       // ...
-    uint32_t ident;                 // ...
-    uint32_t version;               // ...
-    uint32_t chunkCount;            // ...
+    uint ident;                 // ...
+    uint version;               // ...
+    uint chunkCount;            // ...
     BspChunk chunks[100];               // ...
 };
 struct BspGlob // sizeof=0x54
 {                                       // ...
     char name[64];                      // ...
     BspHeader *header;                  // ...
-    uint32_t fileSize;              // ...
-    uint32_t checksum;              // ...
+    uint fileSize;              // ...
+    uint checksum;              // ...
     LumpType loadedLumpType;
     const void *loadedLumpData;         // ...
 };
@@ -131,41 +131,41 @@ struct BspGlob // sizeof=0x54
 //#define $0368CFE3C958026DEB0A011CBC6EA813 BspGlob // sizeof=0x54
 
 // com_bsp_load_obj
-char *__cdecl Com_GetBspLump(LumpType type, uint32_t elemSize, uint32_t *count);
+char *__cdecl Com_GetBspLump(LumpType type, uint elemSize, uint *count);
 void __cdecl Com_LoadBsp(char *filename);
 void __cdecl Com_UnloadBsp();
 bool __cdecl Com_IsBspLoaded();
-uint32_t __cdecl Com_GetBspLumpCountForVersion(int version);
-void __cdecl Com_GetBspFilename(char *filename, uint32_t size, const char *mapname);
+uint __cdecl Com_GetBspLumpCountForVersion(int version);
+void __cdecl Com_GetBspFilename(char *filename, uint size, const char *mapname);
 void __cdecl Com_CleanupBsp();
 bool __cdecl Com_BspHasLump(LumpType type);
 bool __cdecl Com_BspError();
 char *__cdecl Com_ValidateBspLumpData(
     LumpType type,
-    uint32_t offset,
-    uint32_t length,
-    uint32_t elemSize,
-    uint32_t *count);
-uint32_t __cdecl Com_GetBspVersion();
+    uint offset,
+    uint length,
+    uint elemSize,
+    uint *count);
+uint __cdecl Com_GetBspVersion();
 
-int __cdecl Com_BlockChecksumKey32(const uint8_t *data, uint32_t length, uint32_t initialCrc);
+int __cdecl Com_BlockChecksumKey32(const uint8_t *data, uint length, uint initialCrc);
 char *__cdecl Com_EntityString(int *numEntityChars);
 
 void __cdecl Com_LoadWorld(char *name);
 void __cdecl Com_LoadWorld_FastFile(const char *name);
 void __cdecl Com_ShutdownWorld();
-void __cdecl Com_SaveLump(LumpType type, const void *newLump, uint32_t size, ComSaveLumpBehavior behavior);
+void __cdecl Com_SaveLump(LumpType type, const void *newLump, uint size, ComSaveLumpBehavior behavior);
 
 extern ComWorld comWorld;
 
-inline uint32_t Com_GetPrimaryLightCount()
+inline uint Com_GetPrimaryLightCount()
 {
     return comWorld.primaryLightCount;
 }
 
 #ifdef KISAK_RADIANT
 // In SP/MP this lives in cgame/cg_ents.cpp; for Radiant we inline it here.
-inline const ComPrimaryLight *__cdecl Com_GetPrimaryLight(uint32_t primaryLightIndex)
+inline const ComPrimaryLight *__cdecl Com_GetPrimaryLight(uint primaryLightIndex)
 {
     return &comWorld.primaryLights[primaryLightIndex];
 }

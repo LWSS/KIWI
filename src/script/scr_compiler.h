@@ -4,7 +4,7 @@
 
 #define MAX_PRECACHE_ENTRIES 1024
 
-enum : __int32
+enum : int
 {
     SOURCE_TYPE_NONE = 0,
     SOURCE_TYPE_BREAKPOINT = 0x1,
@@ -13,7 +13,7 @@ enum : __int32
     SOURCE_TYPE_BUILTIN_CALL = 0x8,
     SOURCE_TYPE_NOTIFY = 0x10,
 };
-enum : __int32
+enum : int
 {
     SCR_DEV_NO = 0x0,
     SCR_DEV_YES = 0x1,
@@ -21,7 +21,7 @@ enum : __int32
     SCR_DEV_EVALUATE = 0x3,
 };
 
-enum : __int32
+enum : int
 {
     SCR_ABORT_NONE = 0x0,
     SCR_ABORT_CONTINUE = 0x1,
@@ -32,9 +32,9 @@ enum : __int32
 
 struct CaseStatementInfo // sizeof=0x10
 {
-    uint32_t name;
+    uint name;
     const char *codePos;
-    uint32_t sourcePos;
+    uint sourcePos;
     CaseStatementInfo *next;
 };
 static_assert(sizeof(CaseStatementInfo) == 0x10);
@@ -68,8 +68,8 @@ struct scrCompileGlob_t // sizeof=0x1D8
 {                                       // ...
     uint8_t *codePos;           // ...
     uint8_t *prevOpcodePos;     // ...
-    uint32_t fileId;                // ...
-    uint32_t threadId;              // ...
+    uint fileId;                // ...
+    uint threadId;              // ...
     int cumulOffset;                    // ...
     int maxOffset;                      // ...
     int maxCallOffset;                  // ...
@@ -77,7 +77,7 @@ struct scrCompileGlob_t // sizeof=0x1D8
     bool in_developer_thread;           // ...
     // padding byte
     // padding byte
-    uint32_t developer_thread_sourcePos; // ...
+    uint developer_thread_sourcePos; // ...
     bool firstThread[2];                // ...
     // padding byte
     // padding byte
@@ -112,18 +112,18 @@ struct scrCompilePub_t
 {
     int value_count;
     int far_function_count;
-    uint32_t loadedscripts;
-    uint32_t scripts;
-    uint32_t builtinFunc;
-    uint32_t builtinMeth;
+    uint loadedscripts;
+    uint scripts;
+    uint builtinFunc;
+    uint builtinMeth;
     short canonicalStrings[65536];
     const char *in_ptr;
     const char *parseBuf;
     bool script_loading;
     bool allowedBreakpoint;
     int developer_statement;
-    unsigned char *opcodePos;
-    uint32_t programLen;
+    byte *opcodePos;
+    uint programLen;
     int func_table_size;
     int func_table[SCR_FUNC_TABLE_SIZE];
 };
@@ -131,8 +131,8 @@ struct scrCompilePub_t
 void __cdecl Scr_CompileStatement(sval_u parseData);
 void __cdecl ScriptCompile(
     sval_u val,
-    uint32_t fileId,
-    uint32_t scriptId,
+    uint fileId,
+    uint scriptId,
     struct PrecacheEntry *entries,
     int entriesCount);
 

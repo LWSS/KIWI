@@ -848,14 +848,14 @@ constantConfigString constantConfigStrings[833] = {
   { 2273, "hud_status_connecting", 0, 0 },
   { 0, "", 0, 0}
 }; // idb
-// uint32_t *reservedConfigStrings 850cc100     com_constantconfigstrings.obj
-uint32_t reservedConfigStrings[77];
+// uint *reservedConfigStrings 850cc100     com_constantconfigstrings.obj
+uint reservedConfigStrings[77];
 // int constantConfigStringCount 850cc228     com_constantconfigstrings.obj
 int constantConfigStringCount;
 
-uint32_t __cdecl GetHashCode_0(const char *str, uint32_t len)
+uint __cdecl GetHashCode_0(const char *str, uint len)
 {
-    uint32_t hash; // [esp+4h] [ebp-8h]
+    uint hash; // [esp+4h] [ebp-8h]
 
     if (len >= 0x100)
         return (len >> 2) % 0x7FFFFFFE + 1;
@@ -868,7 +868,7 @@ uint32_t __cdecl GetHashCode_0(const char *str, uint32_t len)
     return hash % 0x7FFFFFFE + 1;
 }
 
-uint32_t __cdecl lowercaseHash(const char *str)
+uint __cdecl lowercaseHash(const char *str)
 {
     char *d; // [esp+10h] [ebp-8h]
     const char *s; // [esp+14h] [ebp-4h]
@@ -911,7 +911,7 @@ int __cdecl CCS_GetConstConfigStringIndex(const char *configString)
 {
     int hash; // [esp+24h] [ebp-Ch]
     int index; // [esp+28h] [ebp-8h]
-    uint32_t lcaseHash; // [esp+2Ch] [ebp-4h]
+    uint lcaseHash; // [esp+2Ch] [ebp-4h]
 
     index = 0;
     hash = GetHashCode_0(configString, strlen(configString));
@@ -936,7 +936,7 @@ int __cdecl CCS_GetConstConfigStringIndex(const char *configString)
     return -1;
 }
 
-int __cdecl CCS_GetConfigStringNumForConstIndex(uint32_t index)
+int __cdecl CCS_GetConfigStringNumForConstIndex(uint index)
 {
     if (index >= constantConfigStringCount)
         MyAssertHandler(
@@ -949,7 +949,7 @@ int __cdecl CCS_GetConfigStringNumForConstIndex(uint32_t index)
     return constantConfigStrings[index].configStringNum;
 }
 
-uint32_t __cdecl CCS_IsConfigStringIndexConstant(int index)
+uint __cdecl CCS_IsConfigStringIndexConstant(int index)
 {
     return reservedConfigStrings[index / 32] & (1 << (index % 32));
 }

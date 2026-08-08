@@ -9,7 +9,7 @@
 
 #include <client_mp/client_mp.h>
 
-enum //$C3A80A4928DD55B480B15DEB8BFE1B34 : __int32
+enum //$C3A80A4928DD55B480B15DEB8BFE1B34 : int
 {
     CS_FREE          = 0x0,
     CS_ZOMBIE        = 0x1,
@@ -18,7 +18,7 @@ enum //$C3A80A4928DD55B480B15DEB8BFE1B34 : __int32
     CS_ACTIVE        = 0x4,
 };
 
-enum svscmd_type : __int32
+enum svscmd_type : int
 {                                       // ...
     SV_CMD_CAN_IGNORE = 0x0,
     SV_CMD_RELIABLE = 0x1,
@@ -606,7 +606,7 @@ struct serverStaticHeader_t // sizeof=0x84
     clientState_s *firstClientState;    // ...
     playerState_s *firstPlayerState;    // ...
     int clientSize;                     // ...
-    uint32_t pad[3];
+    uint pad[3];
 };
 
 struct svEntity_s // sizeof=0x178
@@ -705,8 +705,8 @@ struct client_t // sizeof=0xA5638
 
 //sv_init_mp
 void __cdecl SV_SetConfigstring(int index, const char *val);
-void __cdecl SV_GetConfigstring(uint32_t index, char *buffer, int bufferSize);
-uint32_t __cdecl SV_GetConfigstringConst(uint32_t index);
+void __cdecl SV_GetConfigstring(uint index, char *buffer, int bufferSize);
+uint __cdecl SV_GetConfigstringConst(uint index);
 void __cdecl SV_SetConfigValueForKey(int start, int max, char *key, char *value);
 void __cdecl SV_SetUserinfo(int index, char *val);
 void __cdecl SV_GetUserinfo(int index, char *buffer, int bufferSize);
@@ -800,7 +800,7 @@ struct __declspec(align(128)) serverStatic_t // sizeof=0xB227480
     tempBanSlot_t tempBans[16];         // ...
     float mapCenter[3];                 // ...
 };
-enum serverState_t : __int32
+enum serverState_t : int
 {                                       // ...
     SS_DEAD = 0x0,
     SS_LOADING = 0x1,
@@ -1027,10 +1027,10 @@ void __cdecl SV_SendClientMessages();
 void __cdecl SV_GetChallenge(netadr_t from);
 int __cdecl SV_IsBannedGuid(const char *cdkeyHash);
 void __cdecl SV_ReceiveStats(netadr_t from, msg_t *msg);
-void __cdecl SV_SetClientStat(int clientNum, int index, uint32_t value);
+void __cdecl SV_SetClientStat(int clientNum, int index, uint value);
 int __cdecl SV_GetClientStat(int clientNum, int index);
 void __cdecl SV_BanGuidBriefly(const char *cdkeyHash);
-uint32_t __cdecl SV_FindFreeTempBanSlot();
+uint __cdecl SV_FindFreeTempBanSlot();
 void __cdecl SV_BanClient(client_t *cl);
 void __cdecl SV_UnbanClient(char *name);
 void __cdecl SV_FreeClient(client_t *cl);
@@ -1067,7 +1067,7 @@ void __cdecl SV_Heartbeat_f();
 void __cdecl SV_GameCompleteStatus_f();
 void __cdecl SV_AddOperatorCommands();
 void __cdecl SV_Map_f();
-void __cdecl ShowLoadErrorsSummary(const char *mapName, uint32_t count);
+void __cdecl ShowLoadErrorsSummary(const char *mapName, uint count);
 void __cdecl SV_MapRestart_f();
 void __cdecl SV_MapRestart(int fast_restart);
 void __cdecl SV_FastRestart_f();
@@ -1115,7 +1115,7 @@ void __cdecl SV_VoicePacket(netadr_t from, msg_t *msg);
 
 
 // sv_snapshot_profile_mp
-enum packetModeList : __int32
+enum packetModeList : int
 {                                       // ...
     PACKETDATA_FIRST = 0x0,
     PACKETDATA_UNDEFINED = 0x0,
@@ -1140,7 +1140,7 @@ enum packetModeList : __int32
     PACKETDATA_ORIGIN = 0x13,
     NUM_PACKETDATA_MODES = 0x14,
 };
-enum PacketDataType : __int32
+enum PacketDataType : int
 {                                       // ...
     ANALYZE_SNAPSHOT_DELTAENTITY = 0x0,
     ANALYZE_SNAPSHOT_NEWENTITY = 0x1,
@@ -1158,7 +1158,7 @@ enum PacketDataType : __int32
     ANALYZE_SNAPSHOT_DATATYPE_COUNT = 0xD,
 };
 void __cdecl SV_ClearPacketAnalysis();
-void __cdecl SV_TrackETypeBytes(uint32_t eType, int bits);
+void __cdecl SV_TrackETypeBytes(uint eType, int bits);
 void __cdecl SV_TrackPSBits(int bits);
 void __cdecl SV_TrackPSFieldDeltasBits(int bits);
 void __cdecl SV_TrackPSHudelemBits(int bits);
@@ -1193,15 +1193,15 @@ void __cdecl SV_PacketDataIsOrigin(int clientNum, const msg_t *msg);
 void __cdecl SV_PacketDataIsZeroAngle(int clientNum, const msg_t *msg);
 void __cdecl SV_PacketDataIsSmallAngle(int clientNum, const msg_t *msg);
 void __cdecl SV_PacketDataIsZeroInt(int clientNum, const msg_t *msg);
-void __cdecl SV_TrackFloatCompressedBits(uint32_t bits);
+void __cdecl SV_TrackFloatCompressedBits(uint bits);
 void __cdecl SV_TrackOriginDeltaBits(int bits);
 void __cdecl SV_TrackOriginZDeltaBits(int bits);
 void __cdecl SV_TrackOriginZFullBits(int bits);
 void __cdecl SV_TrackOriginFullBits(int bits);
-const char *__cdecl SV_GetEntityTypeString(uint32_t packetEntityType);
+const char *__cdecl SV_GetEntityTypeString(uint packetEntityType);
 void __cdecl SV_AnalyzePacketData(int clientNum, const msg_t *msg);
 int __cdecl SV_TrackPacketData(
-    uint32_t clientNum,
+    uint clientNum,
     PacketDataType datatype,
     int eType,
     int entNum,
@@ -1209,12 +1209,12 @@ int __cdecl SV_TrackPacketData(
     const msg_t *msg);
 void __cdecl SV_SetNextEntityStart(int eType, int entNum);
 bool __cdecl SV_NewPacketAnalysisReady();
-void __cdecl SV_TrackFieldChange(int clientNum, int entityType, uint32_t field);
+void __cdecl SV_TrackFieldChange(int clientNum, int entityType, uint field);
 void __cdecl SV_WriteEntityFieldNumbers();
-void __cdecl SV_GetAnalyzeEntityFields(int analyzeEntityType, NetFieldList *stateFields, uint32_t *numFields);
+void __cdecl SV_GetAnalyzeEntityFields(int analyzeEntityType, NetFieldList *stateFields, uint *numFields);
 int __cdecl SV_GetClientSnapshotPing(int clientNum, char snapshotNum);
 void __cdecl SV_TrackSnapshotSize(int size);
-void __cdecl SV_TrackPacketCompression(uint32_t clientNum, int originalSize, int compressedSize);
+void __cdecl SV_TrackPacketCompression(uint clientNum, int originalSize, int compressedSize);
 int __cdecl SV_GetPacketCompressionForClient(int clientNum);
 void __cdecl SV_Netchan_PrintProfileStats(int bPrintToConsole);
 void __cdecl SV_ProfDraw(int y, char *string, bool showHighlight);
@@ -1222,8 +1222,8 @@ void __cdecl SV_ProfDraw(int y, char *string, bool showHighlight);
 
 //sv_voice_mp
 void __cdecl G_BroadcastVoice(gentity_s *talker, VoicePacket_t *voicePacket);
-bool __cdecl SV_ClientHasClientMuted(uint32_t listener, uint32_t talker);
-bool __cdecl SV_ClientWantsVoiceData(uint32_t clientNum);
+bool __cdecl SV_ClientHasClientMuted(uint listener, uint talker);
+bool __cdecl SV_ClientWantsVoiceData(uint clientNum);
 void __cdecl SV_UserVoice(client_t *cl, msg_t *msg);
 void __cdecl SV_QueueVoicePacket(int talkerNum, int clientNum, VoicePacket_t *voicePacket);
 void __cdecl SV_PreGameUserVoice(client_t *cl, msg_t *msg);
@@ -1248,14 +1248,14 @@ extern int svsHeaderValid;
 extern int g_bitsSent[64][13];
 extern int s_totalPacketDataSizes[20];
 extern int s_packetMetaDataSize[64][20];
-extern uint32_t s_packetModeStart[64];
+extern uint s_packetModeStart[64];
 extern packetModeList s_packetMode[64];
 extern int g_currentSnapshotPerEntity[64][1024];
 extern uint8_t g_currentSnapshotFieldsPerEntity[64][1024];
 extern uint8_t g_currentSnapshotPlayerStateFields[64];
 extern bool newDataReady;
-extern uint32_t bitsUsedPerEType[256];
-extern uint32_t bitsUsedForPlayerstates[7];
+extern uint bitsUsedPerEType[256];
+extern uint bitsUsedForPlayerstates[7];
 extern int playerStateFieldsChanged[161];
 extern bool s_packetDataEnabled;
 extern bool g_archivingSnapshot;
@@ -1264,16 +1264,16 @@ extern int s_originDeltaBits[8];
 extern int s_originZDeltaBits[8];
 extern int s_originZFullBits[17];
 extern int s_originFullBits[17];
-extern uint32_t networkEntityFieldsChanged[23][160];
-extern uint32_t currentSnapshotNetworkEntityFieldsChanged[23][160];
-extern uint32_t bitsUsedForServerCommands;
+extern uint networkEntityFieldsChanged[23][160];
+extern uint currentSnapshotNetworkEntityFieldsChanged[23][160];
+extern uint bitsUsedForServerCommands;
 extern int s_currentEntType;
 extern int s_currentEntNum;
 extern int originsSentDueToPredicitonError;
 extern int originsSentDueToServerTimeMismatch;
 extern float s_stdSnapshotDeviation;
 extern int s_maxSnapshotSize;
-extern uint32_t huffBytesSeen[256];
+extern uint huffBytesSeen[256];
 extern int s_maxSnapshotSize;
 extern int s_numSnapshotSamples;
 extern int s_numSnapshotsBuiltSinceLastPoll;

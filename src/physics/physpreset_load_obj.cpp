@@ -93,7 +93,7 @@ PhysPreset *__cdecl PhysPresetLoadFile(const char *name, void *(__cdecl *Alloc)(
                         memset(&pStruct, 0, sizeof(pStruct));
                         pStruct.sndAliasPrefix = "";
                         physAlloc = Alloc;
-                        if (ParseConfigStringToStruct((unsigned char*)&pStruct, physPresetFields, 10, buffer, 0, 0, PhysPreset_Strcpy))
+                        if (ParseConfigStringToStruct((byte*)&pStruct, physPresetFields, 10, buffer, 0, 0, PhysPreset_Strcpy))
                         {
                             iassert(sizeof(PhysPreset) == 44);
 

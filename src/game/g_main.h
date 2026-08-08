@@ -10,7 +10,7 @@
 
 #define MAX_VEHICLES 64
 
-enum loading_t : __int32
+enum loading_t : int
 {
 	LOADING_DONE = 0x0,
 	LOADING_LEVEL = 0x1,
@@ -91,7 +91,7 @@ struct level_locals_t
 	float priorityNodeBias;
 	//void *openScriptIOFileHandles[1];
 	int openScriptIOFileHandles[1];
-	unsigned char *openScriptIOFileBuffers[1];
+	byte *openScriptIOFileBuffers[1];
 	com_parse_mark_t currentScriptIOLineMark[1];
 	int scriptPrintChannel;
 	float compassMapUpperLeft[2];

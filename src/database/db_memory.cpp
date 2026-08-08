@@ -5,7 +5,7 @@
 #include <qcommon/qcommon.h>
 #include <gfx_d3d/r_buffers.h>
 
-int32_t g_block_mem_type[9] =
+int g_block_mem_type[9] =
 { 0, 1, 1, 2, 1, 1, 2, 2, 2 };
 
 const char *g_block_mem_name[9] =
@@ -22,7 +22,7 @@ const char *g_block_mem_name[9] =
 };
 
 // --- file-local forward declarations (moved out of database.h) ---
-static uint8_t *__cdecl DB_MemAlloc(uint32_t size, uint32_t type, uint32_t allocType);
+static uint8_t *__cdecl DB_MemAlloc(uint size, uint type, uint allocType);
 
 void __cdecl DB_RecoverGeometryBuffers(XZoneMemory *zoneMem)
 {
@@ -77,15 +77,15 @@ void __cdecl DB_ReleaseGeometryBuffers(XZoneMemory *zoneMem)
 }
 
 void __cdecl DB_AllocXZoneMemory(
-    uint32_t *blockSize,
+    uint *blockSize,
     const char *filename,
     XZoneMemory *zoneMem,
-    uint32_t allocType)
+    uint allocType)
 {
-    int32_t OverAllocatedSize; // [esp+20h] [ebp-14h]
-    uint32_t blockIndex; // [esp+28h] [ebp-Ch]
+    int OverAllocatedSize; // [esp+20h] [ebp-14h]
+    uint blockIndex; // [esp+28h] [ebp-Ch]
     uint8_t *buf; // [esp+2Ch] [ebp-8h]
-    uint32_t size; // [esp+30h] [ebp-4h]
+    uint size; // [esp+30h] [ebp-4h]
 
     for (blockIndex = 0; blockIndex < 9; ++blockIndex)
     {
@@ -123,7 +123,7 @@ void __cdecl DB_AllocXZoneMemory(
         zoneMem->lockedIndexData = (uint8_t *)R_AllocStaticIndexBuffer((IDirect3DIndexBuffer9 **)&zoneMem->indexBuffer, zoneMem->blocks[8].size);
 }
 
-uint8_t *__cdecl DB_MemAlloc(uint32_t size, uint32_t type, uint32_t allocType)
+uint8_t *__cdecl DB_MemAlloc(uint size, uint type, uint allocType)
 {
     if (type <= 1)
         return PMem_Alloc(size + 15, 0x1000u, 4, allocType);

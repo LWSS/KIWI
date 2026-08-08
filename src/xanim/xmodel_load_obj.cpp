@@ -25,7 +25,7 @@ XModelSurfs *__cdecl XModelSurfsFindData(const char *name)
 
 void __cdecl XModelReadSurface_BuildCollisionTree(
     XSurface *surface,
-    uint32_t vertListIndex,
+    uint vertListIndex,
     void *(__cdecl *Alloc)(int))
 {
     unsigned __int8 *v3; // eax
@@ -40,13 +40,13 @@ void __cdecl XModelReadSurface_BuildCollisionTree(
     float *v18; // [esp+98h] [ebp-100h]
     float *v19; // [esp+9Ch] [ebp-FCh]
     GenericAabbTree *builtNode; // [esp+A0h] [ebp-F8h]
-    uint32_t leafIndex; // [esp+A4h] [ebp-F4h]
+    uint leafIndex; // [esp+A4h] [ebp-F4h]
     float nodeMins[3]; // [esp+A8h] [ebp-F0h] BYREF
     XSurfaceCollisionNode *outNode; // [esp+B4h] [ebp-E4h]
-    uint32_t leafEnd; // [esp+B8h] [ebp-E0h]
+    uint leafEnd; // [esp+B8h] [ebp-E0h]
     float nodeMaxs[3]; // [esp+BCh] [ebp-DCh] BYREF
-    uint32_t allocSize; // [esp+C8h] [ebp-D0h]
-    uint32_t alignedAddr; // [esp+CCh] [ebp-CCh]
+    uint allocSize; // [esp+C8h] [ebp-D0h]
+    uint alignedAddr; // [esp+CCh] [ebp-CCh]
     unsigned __int8 *alloced; // [esp+D0h] [ebp-C8h]
     float combinedVolume; // [esp+D4h] [ebp-C4h]
     float thisVolume; // [esp+D8h] [ebp-C0h]
@@ -57,21 +57,21 @@ void __cdecl XModelReadSurface_BuildCollisionTree(
     float triMaxs[3]; // [esp+FCh] [ebp-9Ch] BYREF
     XSurfaceCollisionTree *tree; // [esp+108h] [ebp-90h]
     bool generateLeafsPass; // [esp+10Fh] [ebp-89h]
-    uint32_t nodeIndex; // [esp+110h] [ebp-88h]
-    uint32_t triEndIndex; // [esp+114h] [ebp-84h]
+    uint nodeIndex; // [esp+110h] [ebp-88h]
+    uint triEndIndex; // [esp+114h] [ebp-84h]
     float prevMins[3]; // [esp+118h] [ebp-80h] BYREF
-    uint32_t leafCount; // [esp+124h] [ebp-74h]
+    uint leafCount; // [esp+124h] [ebp-74h]
     GenericAabbTreeOptions options; // [esp+128h] [ebp-70h] BYREF
-    uint32_t nodeCount; // [esp+150h] [ebp-48h]
+    uint nodeCount; // [esp+150h] [ebp-48h]
     float globalMaxs[3]; // [esp+154h] [ebp-44h] BYREF
-    uint32_t triIndex; // [esp+160h] [ebp-38h]
+    uint triIndex; // [esp+160h] [ebp-38h]
     float prevMaxs[3]; // [esp+164h] [ebp-34h] BYREF
     bool lastMergeable; // [esp+173h] [ebp-25h]
     float globalMins[3]; // [esp+174h] [ebp-24h] BYREF
     float globalDelta[3]; // [esp+180h] [ebp-18h] BYREF
-    uint32_t triBeginIndex; // [esp+18Ch] [ebp-Ch]
+    uint triBeginIndex; // [esp+18Ch] [ebp-Ch]
     XRigidVertList *vertList; // [esp+190h] [ebp-8h]
-    uint32_t allocedLeafCount; // [esp+194h] [ebp-4h]
+    uint allocedLeafCount; // [esp+194h] [ebp-4h]
 
     iassert(!surface->deformed);
     iassert(vertListIndex >= 0 && vertListIndex < surface->vertListCount);
@@ -216,7 +216,7 @@ void __cdecl XModelReadSurface_BuildCollisionTree(
     nodeCount = BuildAabbTree(&options);
     tree->nodeCount = nodeCount;
     allocSize = 16 * nodeCount + 15;
-    v3 = (unsigned char*)Alloc(allocSize);
+    v3 = (byte*)Alloc(allocSize);
     alloced = v3;
     alignedAddr = (uintptr_t)(v3 + 15) & 0xFFFFFFF0;
     tree->nodes = (XSurfaceCollisionNode*)alignedAddr;
@@ -235,7 +235,7 @@ void __cdecl XModelReadSurface_BuildCollisionTree(
         if (v15 >= 0)
         {
             if (v15 <= 0xFFFF)
-                outNode->aabb.mins[0] = (unsigned short)v15;
+                outNode->aabb.mins[0] = (ushort)v15;
             else
                 outNode->aabb.mins[0] = 0xFFFF;
         }
@@ -248,7 +248,7 @@ void __cdecl XModelReadSurface_BuildCollisionTree(
         if (v13 >= 0)
         {
             if (v13 <= 0xFFFF)
-                outNode->aabb.mins[1] = (unsigned short)v13;
+                outNode->aabb.mins[1] = (ushort)v13;
             else
                 outNode->aabb.mins[1] = 0xFFFF;
         }
@@ -261,7 +261,7 @@ void __cdecl XModelReadSurface_BuildCollisionTree(
         if (v11 >= 0)
         {
             if (v11 <= 0xFFFF)
-                outNode->aabb.mins[2] = (unsigned short)v11;
+                outNode->aabb.mins[2] = (ushort)v11;
             else
                 outNode->aabb.mins[2] = 0xFFFF;
         }
@@ -274,7 +274,7 @@ void __cdecl XModelReadSurface_BuildCollisionTree(
         if (v9 >= 0)
         {
             if (v9 <= 0xFFFF)
-                outNode->aabb.maxs[0] = (unsigned short)v9;
+                outNode->aabb.maxs[0] = (ushort)v9;
             else
                 outNode->aabb.maxs[0] = 0xFFFF;
         }
@@ -287,7 +287,7 @@ void __cdecl XModelReadSurface_BuildCollisionTree(
         if (v7 >= 0)
         {
             if (v7 <= 0xFFFF)
-                outNode->aabb.maxs[1] = (unsigned short)v7;
+                outNode->aabb.maxs[1] = (ushort)v7;
             else
                 outNode->aabb.maxs[1] = 0xFFFF;
         }
@@ -300,7 +300,7 @@ void __cdecl XModelReadSurface_BuildCollisionTree(
         if (v5 >= 0)
         {
             if (v5 <= 0xFFFF)
-                outNode->aabb.maxs[2] = (unsigned short)v5;
+                outNode->aabb.maxs[2] = (ushort)v5;
             else
                 outNode->aabb.maxs[2] = 0xFFFF;
         }
@@ -438,16 +438,16 @@ void __cdecl XSurfaceTransfer(
     }
 }
 
-static void ReadBlend(XSurface *surface, int *partBits, XBlendLoadInfo *blend, unsigned char **pos)
+static void ReadBlend(XSurface *surface, int *partBits, XBlendLoadInfo *blend, byte **pos)
 {
     short boner = Buf_Read<short>(pos);
     partBits[boner >> 5] |= 0x80000000 >> (boner & 0x1F);
 
     blend->boneOffset = (boner << 6);
-    blend->boneWeight = Buf_Read<unsigned short>(pos);
+    blend->boneWeight = Buf_Read<ushort>(pos);
 }
 
-void __cdecl XModelReadSurface(XModel *model, unsigned char **pos, void *(__cdecl *Alloc)(int), XSurface *surface)
+void __cdecl XModelReadSurface(XModel *model, byte **pos, void *(__cdecl *Alloc)(int), XSurface *surface)
 {
     int vertCount; // edx
     __int16 v32; // [esp+84h] [ebp-6BCh]
@@ -472,7 +472,7 @@ void __cdecl XModelReadSurface(XModel *model, unsigned char **pos, void *(__cdec
     XVertexInfo2 *verts2; // [esp+DCh] [ebp-664h]
     XVertexInfo3 *verts3; // [esp+E0h] [ebp-660h]
     int startTriIndex; // [esp+E4h] [ebp-65Ch]
-    uint32_t vertListIter; // [esp+E8h] [ebp-658h]
+    uint vertListIter; // [esp+E8h] [ebp-658h]
     int localBoneIndex; // [esp+ECh] [ebp-654h]
     int vertListCount; // [esp+F4h] [ebp-64Ch]
     XRigidVertList rigidVertListArray[129]; // [esp+F8h] [ebp-648h] BYREF
@@ -491,13 +491,13 @@ void __cdecl XModelReadSurface(XModel *model, unsigned char **pos, void *(__cdec
 
     memset(weightCount, 0, sizeof(weightCount));
     
-    surface->tileMode = Buf_Read<unsigned char>(pos);
+    surface->tileMode = Buf_Read<byte>(pos);
 
-    v32 = Buf_Read<unsigned short>(pos); // unused? what is this
+    v32 = Buf_Read<ushort>(pos); // unused? what is this
 
-    surface->vertCount = Buf_Read<unsigned short>(pos);
+    surface->vertCount = Buf_Read<ushort>(pos);
 
-    surface->triCount = Buf_Read<unsigned short>(pos);
+    surface->triCount = Buf_Read<ushort>(pos);
 
     iassert(surface->triCount > 0);
 
@@ -509,12 +509,12 @@ void __cdecl XModelReadSurface(XModel *model, unsigned char **pos, void *(__cdec
         iassert(vertListCount < ARRAY_COUNT(rigidVertListArray));
 
         rigidVertList = &rigidVertListArray[vertListCount];
-        rigidVertList->vertCount = Buf_Read<unsigned short>(pos);
+        rigidVertList->vertCount = Buf_Read<ushort>(pos);
 
         if (!rigidVertList->vertCount)
             break;
 
-        localBoneIndex = Buf_Read<unsigned short>(pos);
+        localBoneIndex = Buf_Read<ushort>(pos);
         rigidVertList->boneOffset = localBoneIndex << 6;
         rigidVertCount += rigidVertList->vertCount;
         ++vertListCount;
@@ -536,7 +536,7 @@ void __cdecl XModelReadSurface(XModel *model, unsigned char **pos, void *(__cdec
     }
     else
     {
-        numblends = Buf_Read<unsigned short>(pos);
+        numblends = Buf_Read<ushort>(pos);
     }
 
     size = (surface->vertCount << 6) + 4 * numblends;
@@ -587,14 +587,14 @@ void __cdecl XModelReadSurface(XModel *model, unsigned char **pos, void *(__cdec
         }
         else
         {
-            numWeights = Buf_Read<unsigned char>(pos);
+            numWeights = Buf_Read<byte>(pos);
             verts->numWeights = numWeights;
 
             iassert(numWeights < 4);
 
             ++weightCount[numWeights];
 
-            blendBoneIndex = Buf_Read<unsigned short>(pos);
+            blendBoneIndex = Buf_Read<ushort>(pos);
 
             surface->partBits[blendBoneIndex >> 5] |= 0x80000000 >> (blendBoneIndex & 0x1F);
             blendBoneOffset = blendBoneIndex << 6;
@@ -621,13 +621,13 @@ void __cdecl XModelReadSurface(XModel *model, unsigned char **pos, void *(__cdec
     }
     allocCount = (surface->triCount + 1) & 0xFFFFFFFE;
     sizeInBytes = 6 * (surface->triCount + 1);
-    surface->triIndices = (unsigned short*)Alloc(sizeInBytes);
+    surface->triIndices = (ushort*)Alloc(sizeInBytes);
 
     iassert(surface->triIndices);
 
     for (vertIndex = 0; vertIndex < 3 * surface->triCount; ++vertIndex)
     {
-        surface->triIndices[vertIndex] = Buf_Read<unsigned short>(pos);
+        surface->triIndices[vertIndex] = Buf_Read<ushort>(pos);
 
         iassert(surface->triIndices[vertIndex] < surface->vertCount);
     }
@@ -773,7 +773,7 @@ void __cdecl XModelReadSurface(XModel *model, unsigned char **pos, void *(__cdec
                 + surface->vertInfo.vertCount[0]);
 
         if (size)
-            vertsBlendOut = (unsigned short*)Alloc(size);
+            vertsBlendOut = (ushort*)Alloc(size);
         else
             vertsBlendOut = 0;
 
@@ -852,7 +852,7 @@ void __cdecl XModelReadSurfaces(
     XModelSurfs *modelSurfs,
     int *modelPartBits,
     int surfCount,
-    unsigned char **pos,
+    byte **pos,
     void *(__cdecl *AllocMesh)(int))
 {
     int j; // [esp+4h] [ebp-18h]
@@ -1099,7 +1099,7 @@ char __cdecl XModelLoadConfigFile(const char *name, unsigned __int8 **pos, XMode
         return 0;
     }
 
-    config->flags = Buf_Read<unsigned char>(pos); // DWORD in blops
+    config->flags = Buf_Read<byte>(pos); // DWORD in blops
 
     config->mins[0] = Buf_Read<float>(pos);
     config->mins[1] = Buf_Read<float>(pos);
@@ -1273,7 +1273,7 @@ XModel *__cdecl XModelLoadFile(char *name, void *(__cdecl *Alloc)(int), void *(_
             iassert(i == model->numLods);
             ++model->numLods;
 
-            modelLodInfo->numsurfs = Buf_Read<unsigned short>(&pos);
+            modelLodInfo->numsurfs = Buf_Read<ushort>(&pos);
 
             numsurfs += modelLodInfo->numsurfs;
             for (j = 0; j < modelLodInfo->numsurfs; ++j)
@@ -1502,7 +1502,7 @@ XModelPartsLoad *__cdecl XModelPartsLoadFile(XModel *model, const char *name, vo
     iassert(buf);
     pos = buf;
 
-    version = Buf_Read<unsigned short>(&pos);
+    version = Buf_Read<ushort>(&pos);
 
     if (version != 25)
     {
@@ -1511,8 +1511,8 @@ XModelPartsLoad *__cdecl XModelPartsLoadFile(XModel *model, const char *name, vo
         return 0;
     }
 
-    numChildBones = Buf_Read<unsigned short>(&pos);
-    numRootBones = Buf_Read<unsigned short>(&pos);
+    numChildBones = Buf_Read<ushort>(&pos);
+    numRootBones = Buf_Read<ushort>(&pos);
     numBones = numRootBones + numChildBones;
     size = 2 * numBones;
     boneNames = (uint16_t *)Alloc(2 * numBones);

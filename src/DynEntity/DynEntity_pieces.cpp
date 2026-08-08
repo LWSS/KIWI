@@ -8,7 +8,7 @@ const dvar_t *dynEntPieces_velocity;
 const dvar_t *dynEntPieces_angularVelocity;
 const dvar_t *dynEntPieces_impactForce;
 
-int32_t numPieces;
+int numPieces;
 BreakablePiece g_breakablePieces[100];
 
 void __cdecl DynEntPieces_RegisterDvars()
@@ -50,7 +50,7 @@ void __cdecl DynEntPieces_RegisterDvars()
 void __cdecl DynEntPieces_AddDrawSurfs()
 {
     GfxScaledPlacement placement; // [esp+30h] [ebp-24h] BYREF
-    int32_t i; // [esp+50h] [ebp-4h]
+    int i; // [esp+50h] [ebp-4h]
 
     PROF_SCOPED("DynEntCl_AddBreakableDrawSurfs");
     for (i = 0; i < numPieces; ++i)
@@ -71,14 +71,14 @@ void __cdecl DynEntPieces_AddDrawSurfs()
 }
 
 void __cdecl DynEntPieces_SpawnPieces(
-    int32_t localClientNum,
+    int localClientNum,
     const XModelPieces *pieces,
     const float *origin,
     const float (*axis)[3],
     const float *hitPos,
     const float *hitDir)
 {
-    int32_t pieceIndex; // [esp+0h] [ebp-4h]
+    int pieceIndex; // [esp+0h] [ebp-4h]
 
     if (!pieces)
         MyAssertHandler(".\\DynEntity\\DynEntity_pieces.cpp", 184, 0, "%s", "pieces");
@@ -94,7 +94,7 @@ void __cdecl DynEntPieces_SpawnPieces(
 }
 
 bool __cdecl DynEntPieces_SpawnPhysicsModel(
-    int32_t localClientNum,
+    int localClientNum,
     const XModel *model,
     const float *offset,
     const float *origin,
@@ -106,7 +106,7 @@ bool __cdecl DynEntPieces_SpawnPhysicsModel(
     float forceDir[3]; // [esp+10h] [ebp-5Ch] BYREF
     float velocity[3]; // [esp+1Ch] [ebp-50h] BYREF
     float angularVelocity[3]; // [esp+28h] [ebp-44h] BYREF
-    int32_t physObjId; // [esp+34h] [ebp-38h]
+    int physObjId; // [esp+34h] [ebp-38h]
     float mins[3]; // [esp+38h] [ebp-34h] BYREF
     float quat[4]; // [esp+44h] [ebp-28h] BYREF
     float maxs[3]; // [esp+54h] [ebp-18h] BYREF
@@ -203,9 +203,9 @@ dxBody *__cdecl DynEntPieces_SpawnPhysObj(
 
 void __cdecl DynEntPieces_CalcForceDir(const float *hitDir, float spreadFraction, float *forceDir)
 {
-    int32_t v3; // [esp+8h] [ebp-18h]
-    int32_t v4; // [esp+Ch] [ebp-14h]
-    int32_t v5; // [esp+10h] [ebp-10h]
+    int v3; // [esp+8h] [ebp-18h]
+    int v4; // [esp+Ch] [ebp-14h]
+    int v5; // [esp+10h] [ebp-10h]
     float outDir[3]; // [esp+14h] [ebp-Ch] BYREF
 
     v5 = rand();

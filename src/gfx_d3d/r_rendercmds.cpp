@@ -46,7 +46,7 @@ GfxCmdArray g_frontEndCmds[2];
 GfxDebugFrameGlob s_debugFrameGlob;
 GfxCmdArray g_debugFrontEndCmds;
 
-static uint32_t s_renderCmdBufferSize;
+static uint s_renderCmdBufferSize;
 static int s_renderCmdWarnSize;
 
 void __cdecl TRACK_r_rendercmds()
@@ -65,8 +65,8 @@ void __cdecl R_FreeGlobalVariable(void *var)
 
 void __cdecl R_ShutdownSceneBuffers()
 {
-    uint32_t localClientNum; // [esp+0h] [ebp-8h]
-    uint32_t viewIndex; // [esp+4h] [ebp-4h]
+    uint localClientNum; // [esp+0h] [ebp-8h]
+    uint viewIndex; // [esp+4h] [ebp-4h]
 
     for (viewIndex = 0; viewIndex < 7; ++viewIndex)
         R_FreeGlobalVariable(scene.dpvs.entVisData[viewIndex]);
@@ -81,7 +81,7 @@ void __cdecl R_ShutdownSceneBuffers()
 
 void __cdecl R_ShutdownRenderCommands()
 {
-    uint32_t dataIndex; // [esp+4h] [ebp-4h]
+    uint dataIndex; // [esp+4h] [ebp-4h]
 
     R_ShutdownModelLightingGlobals();
     for (dataIndex = 0; dataIndex < 2; ++dataIndex)
@@ -96,10 +96,10 @@ void __cdecl R_ShutdownRenderCommands()
 void __cdecl R_ShutdownRenderBuffers()
 {
     GfxBackEndData *data; // [esp+0h] [ebp-10h]
-    uint32_t partitionIndex; // [esp+4h] [ebp-Ch]
+    uint partitionIndex; // [esp+4h] [ebp-Ch]
     int dataIndex; // [esp+8h] [ebp-8h]
-    uint32_t viewIndex; // [esp+Ch] [ebp-4h]
-    uint32_t viewIndexa; // [esp+Ch] [ebp-4h]
+    uint viewIndex; // [esp+Ch] [ebp-4h]
+    uint viewIndexa; // [esp+Ch] [ebp-4h]
 
     for (dataIndex = 0; dataIndex < 2; ++dataIndex)
     {
@@ -144,7 +144,7 @@ void __cdecl R_ShutdownDynamicMesh(GfxMeshData *mesh)
 
 void __cdecl R_InitRenderCommands()
 {
-    uint32_t dataIndex; // [esp+4h] [ebp-4h]
+    uint dataIndex; // [esp+4h] [ebp-4h]
 
 #ifdef KISAK_RADIANT
     s_renderCmdBufferSize = 48u * 1024u * 1024u;   // 48 MB
@@ -177,10 +177,10 @@ void __cdecl R_InitRenderBuffers()
 {
     float w; // [esp+8h] [ebp-3Ch]
     float h; // [esp+Ch] [ebp-38h]
-    uint32_t partitionIndex; // [esp+38h] [ebp-Ch]
-    uint32_t dataIndex; // [esp+3Ch] [ebp-8h]
-    uint32_t viewIndex; // [esp+40h] [ebp-4h]
-    uint32_t viewIndexa; // [esp+40h] [ebp-4h]
+    uint partitionIndex; // [esp+38h] [ebp-Ch]
+    uint dataIndex; // [esp+3Ch] [ebp-8h]
+    uint viewIndex; // [esp+40h] [ebp-4h]
+    uint viewIndexa; // [esp+40h] [ebp-4h]
 
     for (dataIndex = 0; dataIndex < 2; ++dataIndex)
     {
@@ -205,9 +205,9 @@ void __cdecl R_InitRenderBuffers()
 
 void __cdecl R_InitDynamicMesh(
     GfxMeshData *mesh,
-    uint32_t indexCount,
-    uint32_t vertCount,
-    uint32_t vertSize)
+    uint indexCount,
+    uint vertCount,
+    uint vertSize)
 {
     mesh->indices = (uint16_t *)R_AllocGlobalVariable(2 * indexCount, "R_InitDynamicMesh");
     mesh->totalIndexCount = indexCount;
@@ -218,7 +218,7 @@ void __cdecl R_InitDynamicMesh(
 
 void __cdecl R_InitRenderThread()
 {
-    if (!Sys_SpawnRenderThread((void(__cdecl *)(uint32_t))RB_RenderThread))
+    if (!Sys_SpawnRenderThread((void(__cdecl *)(uint))RB_RenderThread))
         Com_Error(ERR_FATAL, "Failed to create render thread");
 }
 
@@ -270,7 +270,7 @@ void __cdecl R_ReleaseThreadOwnership()
     }
 }
 
-void __cdecl R_IssueRenderCommands(uint32_t type)
+void __cdecl R_IssueRenderCommands(uint type)
 {
     bool v1; // [esp+1Eh] [ebp-16h]
 
@@ -412,7 +412,7 @@ GfxCmdHeader *__cdecl R_GetCommandBuffer(GfxRenderCommand renderCmd, int bytes)
     GfxCmdHeader *header; // [esp+8h] [ebp-8h]
     int sizeLimit; // [esp+Ch] [ebp-4h]
 
-    if ((uint32_t)renderCmd >= RC_COUNT)
+    if ((uint)renderCmd >= RC_COUNT)
         MyAssertHandler(
             ".\\r_rendercmds.cpp",
             881,
@@ -471,8 +471,8 @@ void R_FreeTempSkinBuffer()
     }
 }
 
-uint32_t s_smpFrame;
-uint32_t g_frameIndex;
+uint s_smpFrame;
+uint g_frameIndex;
 DebugGlobals *R_ToggleSmpFrame()
 {
     DebugGlobals *result; // eax
@@ -735,7 +735,7 @@ void __cdecl R_AddCmdDrawStretchPicFlipST(
         cmd->t0 = t0;
         cmd->s1 = s1;
         cmd->t1 = t1;
-        R_ConvertColorToBytes(color, (uint32_t *)&cmd->color);
+        R_ConvertColorToBytes(color, (uint *)&cmd->color);
     }
 }
 
@@ -771,7 +771,7 @@ void __cdecl R_AddCmdDrawStretchPicRotateXY(
         cmd->t0 = t0;
         cmd->s1 = s1;
         cmd->t1 = t1;
-        R_ConvertColorToBytes(color, (uint32_t *)&cmd->color);
+        R_ConvertColorToBytes(color, (uint *)&cmd->color);
         cmd->rotation = AngleNormalize360(angle);
     }
 }
@@ -810,7 +810,7 @@ void __cdecl R_AddCmdDrawStretchPicRotateST(
         cmd->radiusST = radiusST;
         cmd->scaleFinalS = scaleFinalS;
         cmd->scaleFinalT = scaleFinalT;
-        R_ConvertColorToBytes(color, (uint32_t *)&cmd->color);
+        R_ConvertColorToBytes(color, (uint *)&cmd->color);
         cmd->rotation = AngleNormalize360(angle);
     }
 }
@@ -846,7 +846,7 @@ GfxCmdDrawText2D *__cdecl AddBaseDrawTextCmd(
     int cursorPos,
     char cursor)
 {
-    uint32_t v13; // [esp+0h] [ebp-4Ch]
+    uint v13; // [esp+0h] [ebp-4Ch]
     GfxCmdDrawText2D *cmd; // [esp+48h] [ebp-4h]
 
     iassert( maxChars > 0 );
@@ -863,7 +863,7 @@ GfxCmdDrawText2D *__cdecl AddBaseDrawTextCmd(
     cmd->font = font;
     cmd->xScale = xScale;
     cmd->yScale = yScale;
-    R_ConvertColorToBytes(color, (uint32_t *)&cmd->color);
+    R_ConvertColorToBytes(color, (uint *)&cmd->color);
     cmd->maxChars = maxChars;
     cmd->renderFlags = 0;
     switch (style)
@@ -1094,7 +1094,7 @@ GfxCmdDrawText2D *__cdecl AddBaseDrawConsoleTextCmd(
 
 void __cdecl CopyPoolTextToCmd(char *textPool, int poolSize, int firstChar, int charCount, GfxCmdDrawText2D *cmd)
 {
-    uint32_t poolRemaining; // [esp+30h] [ebp-4h]
+    uint poolRemaining; // [esp+30h] [ebp-4h]
 
     iassert(cmd);
     
@@ -1502,7 +1502,7 @@ void __cdecl R_AddCmdClearScreen(int whichToClear, const float *color, float dep
     cmd->color[3] = color[3];
 }
 
-void __cdecl R_AddCmdSaveScreen(uint32_t screenTimerId)
+void __cdecl R_AddCmdSaveScreen(uint screenTimerId)
 {
     GfxCmdSaveScreen *cmd; // [esp+0h] [ebp-4h]
 
@@ -1525,7 +1525,7 @@ void __cdecl R_AddCmdSaveScreenSection(
     float viewY,
     float viewWidth,
     float viewHeight,
-    uint32_t screenTimerId)
+    uint screenTimerId)
 {
     GfxCmdSaveScreenSection *cmd; // [esp+0h] [ebp-4h]
 
@@ -1553,7 +1553,7 @@ void __cdecl R_AddCmdBlendSavedScreenShockBlurred(
     float viewY,
     float viewWidth,
     float viewHeight,
-    uint32_t screenTimerId)
+    uint screenTimerId)
 {
     GfxCmdBlendSavedScreenBlurred *cmd; // [esp+0h] [ebp-4h]
 
@@ -1628,7 +1628,7 @@ void __cdecl R_AddCmdProjectionSet(GfxProjectionTypes projection)
 }
 
 #ifdef KISAK_RADIANT
-bool __cdecl CL_IsLocalClientInGame(int32_t localClientNum)
+bool __cdecl CL_IsLocalClientInGame(int localClientNum)
 {
     return true;
 }
@@ -1741,7 +1741,7 @@ bool __cdecl R_IsInRemoteScreenUpdate()
 void __cdecl R_InitTempSkinBuf()
 {
     GfxBackEndData *data; // [esp+0h] [ebp-8h]
-    uint32_t i; // [esp+4h] [ebp-4h]
+    uint i; // [esp+4h] [ebp-4h]
 
     for (i = 0; i < 2; ++i)
     {
@@ -1995,7 +1995,7 @@ static void Ed_EmitLineBatch(short count, char width, char dimension, GfxPointVe
         if ( !changed )
             continue;
 
-        const unsigned char *c = (const unsigned char *)verts[2 * runStart].color;
+        const byte *c = (const byte *)verts[2 * runStart].color;
         float rgba[4] = { c[2] * (1.0f / 255.0f), c[1] * (1.0f / 255.0f),
                           c[0] * (1.0f / 255.0f), c[3] * (1.0f / 255.0f) };
         const float *push = neutral ? s_edNeutralMatColor : rgba;
@@ -2109,7 +2109,7 @@ GfxCmdDrawPoints *__cdecl R_AddPointCmd(short pointCount, char size, char dimens
             ++runCount;
         }
 
-        const unsigned char *c = (const unsigned char *)&packed;
+        const byte *c = (const byte *)&packed;
         float rgba[4] =
         {
             c[2] * ( 1.0f / 255.0f ),
@@ -2315,7 +2315,7 @@ void __cdecl R_AddCmdDrawTextAtPosition(
     cmd->yPixelStep[0] = yPixelStep[0];
     cmd->yPixelStep[1] = yPixelStep[1];
     cmd->yPixelStep[2] = yPixelStep[2];
-    R_ConvertColorToBytes(color, (uint32_t *)&cmd->color);
+    R_ConvertColorToBytes(color, (uint *)&cmd->color);
     memcpy(cmd->text, text, tlen);
     cmd->text[tlen] = 0;
 }

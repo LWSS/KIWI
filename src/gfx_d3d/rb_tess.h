@@ -4,7 +4,7 @@
 
 struct GfxReadCmdBuf // sizeof=0x4
 {                                       // ...
-    const uint32_t *primDrawSurfPos; // ...
+    const uint *primDrawSurfPos; // ...
 };
 
 struct GfxStaticModelPreTessSurf_s // sizeof=0x4
@@ -16,7 +16,7 @@ struct GfxStaticModelPreTessSurf_s // sizeof=0x4
 union GfxStaticModelPreTessSurf // sizeof=0x4
 {                                       // ...
     GfxStaticModelPreTessSurf_s fields;
-    uint32_t packed;
+    uint packed;
 };
 
 //union $B667868682928995E3CB40CE466D3989 // sizeof=0x4
@@ -27,7 +27,7 @@ union GfxStaticModelPreTessSurf // sizeof=0x4
 
 
 void __cdecl RB_ShowTess(GfxCmdBufContext context, const float *center, const char *tessName, const float *color);
-uint32_t __cdecl R_TessCodeMeshList(const GfxDrawSurfListArgs *listArgs, GfxCmdBufContext prepassContext);
+uint __cdecl R_TessCodeMeshList(const GfxDrawSurfListArgs *listArgs, GfxCmdBufContext prepassContext);
 void __cdecl R_SetVertexDeclTypeNormal(GfxCmdBufState *state, MaterialVertexDeclType vertDeclType);
 void __cdecl R_TessCodeMeshList_AddCodeMeshArgs(
     GfxCmdBufSourceState *source,
@@ -41,29 +41,29 @@ void __cdecl R_DrawXModelSkinnedModelSurf(GfxCmdBufContext context, const GfxMod
 void __cdecl R_DrawXModelSkinnedCached(GfxCmdBufContext context, const GfxModelSkinnedSurface *modelSurf);
 void __cdecl R_SetVertexDeclTypeWorld(GfxCmdBufState *state);
 
-uint32_t __cdecl R_TessTrianglesList(const GfxDrawSurfListArgs *listArgs, GfxCmdBufContext prepassContext);
-uint32_t __cdecl R_TessCodeMeshList(const GfxDrawSurfListArgs *listArgs, GfxCmdBufContext prepassContext);
-uint32_t __cdecl R_TessMarkMeshList(const GfxDrawSurfListArgs *listArgs, GfxCmdBufContext prepassContext);
-uint32_t __cdecl R_TessParticleCloudList(const GfxDrawSurfListArgs *listArgs, GfxCmdBufContext prepassContext);
-uint32_t __cdecl R_TessXModelSkinnedDrawSurfList(
+uint __cdecl R_TessTrianglesList(const GfxDrawSurfListArgs *listArgs, GfxCmdBufContext prepassContext);
+uint __cdecl R_TessCodeMeshList(const GfxDrawSurfListArgs *listArgs, GfxCmdBufContext prepassContext);
+uint __cdecl R_TessMarkMeshList(const GfxDrawSurfListArgs *listArgs, GfxCmdBufContext prepassContext);
+uint __cdecl R_TessParticleCloudList(const GfxDrawSurfListArgs *listArgs, GfxCmdBufContext prepassContext);
+uint __cdecl R_TessXModelSkinnedDrawSurfList(
     const GfxDrawSurfListArgs *listArgs,
     GfxCmdBufContext prepassContext);
-uint32_t __cdecl R_TessXModelRigidDrawSurfList(
+uint __cdecl R_TessXModelRigidDrawSurfList(
     const GfxDrawSurfListArgs *listArgs,
     GfxCmdBufContext prepassContext);
-uint32_t __cdecl R_TessXModelRigidSkinnedDrawSurfList(
+uint __cdecl R_TessXModelRigidSkinnedDrawSurfList(
     const GfxDrawSurfListArgs *listArgs,
     GfxCmdBufContext prepassContext);
-uint32_t __cdecl R_TessStaticModelRigidDrawSurfList(
+uint __cdecl R_TessStaticModelRigidDrawSurfList(
     const GfxDrawSurfListArgs *listArgs,
     GfxCmdBufContext prepassContext);
-uint32_t __cdecl R_TessStaticModelSkinnedDrawSurfList(
+uint __cdecl R_TessStaticModelSkinnedDrawSurfList(
     const GfxDrawSurfListArgs *listArgs,
     GfxCmdBufContext prepassContext);
-uint32_t __cdecl R_TessStaticModelPreTessList(const GfxDrawSurfListArgs *listArgs, GfxCmdBufContext prepassContext);
-uint32_t __cdecl R_TessStaticModelCachedList(const GfxDrawSurfListArgs *listArgs, GfxCmdBufContext prepassContext);
-uint32_t __cdecl R_TessTrianglesPreTessList(const GfxDrawSurfListArgs *listArgs, GfxCmdBufContext prepassContext);
-uint32_t __cdecl R_TessBModel(const GfxDrawSurfListArgs *listArgs, GfxCmdBufContext prepassContext);
+uint __cdecl R_TessStaticModelPreTessList(const GfxDrawSurfListArgs *listArgs, GfxCmdBufContext prepassContext);
+uint __cdecl R_TessStaticModelCachedList(const GfxDrawSurfListArgs *listArgs, GfxCmdBufContext prepassContext);
+uint __cdecl R_TessTrianglesPreTessList(const GfxDrawSurfListArgs *listArgs, GfxCmdBufContext prepassContext);
+uint __cdecl R_TessBModel(const GfxDrawSurfListArgs *listArgs, GfxCmdBufContext prepassContext);
 
 
 

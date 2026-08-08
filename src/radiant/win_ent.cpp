@@ -371,11 +371,11 @@ void EditProp()
 //  bit math is (v & (1<<i)) / (1<<i)|v / ~(1<<i)&v — transcribed verbatim.
 
 // Return entity e's "spawnflags" value as an int (0 if absent), without disturbing it.
-static __int32 SpawnFlags_Get( entity_s_def *e )
+static int SpawnFlags_Get( entity_s_def *e )
 {
     for ( epair_t *ep = e->epairs; ep; ep = ep->next )
         if ( !_stricmp( ep->key, "spawnflags" ) )
-            return (__int32)atol( ep->value );
+            return (int)atol( ep->value );
     return 0;          // IDB: atol(zero) — the empty-CString sentinel
 }
 
@@ -385,7 +385,7 @@ void SetSpawnFlags()
 {
     if ( !edit_entity )
         return;
-    __int32 flags = SpawnFlags_Get( edit_entity );
+    int flags = SpawnFlags_Get( edit_entity );
     for ( int i = 0; i < 12; ++i )
         SendMessageA( entwnd_entcheck[i], BM_SETCHECK, ( flags & ( 1 << i ) ) != 0, 0 );
 }
@@ -457,7 +457,7 @@ void SetSpawnFlags_R( int bit )
     for ( selbrush_t *sb = selected_brushes.next; sb != &selected_brushes; sb = sb->next )
     {
         entity_s_def *def   = (entity_s_def *)sb->owner->def;
-        __int32       flags = SpawnFlags_Get( def );
+        int       flags = SpawnFlags_Get( def );
         // BM_GETCHECK on the toggled box: set the bit if checked, clear it otherwise.
         int checked = (int)SendMessageA( entwnd_entcheck[bit], BM_GETCHECK, 0, 0 );
         int v8 = checked ? ( ( checked << bit ) | flags ) : ( ~( 1 << bit ) & flags );
@@ -668,13 +668,13 @@ void Ed_RelativizeModelPath( const char *fullPath, const char *subdirToken,
     // token, before cstr_find).
     size_t n = 0;
     for ( const char *p = fullPath; *p && n < sizeof( buf ) - 1; ++p, ++n )
-        buf[n] = ( *p == '\\' ) ? '/' : (char)tolower( (unsigned char)*p );
+        buf[n] = ( *p == '\\' ) ? '/' : (char)tolower( (byte)*p );
     buf[n] = '\0';
 
     char tok[64];
     size_t tn = 0;
     for ( const char *p = subdirToken; *p && tn < sizeof( tok ) - 1; ++p, ++tn )
-        tok[tn] = ( *p == '\\' ) ? '/' : (char)tolower( (unsigned char)*p );
+        tok[tn] = ( *p == '\\' ) ? '/' : (char)tolower( (byte)*p );
     tok[tn] = '\0';
 
     // Relativise: drop everything up to (and including) the subdir token.  The binary
@@ -738,7 +738,7 @@ void Ed_PostAddModelCommand()
     // scope in this TU's macro set — build it explicitly.)
     if ( g_qeglobals.d_hwndEntity )
         PostMessageA( g_qeglobals.d_hwndEntity, WM_COMMAND,
-                      (WPARAM)( (unsigned short)IDC_ENT_ADD_MODEL_BTN
+                      (WPARAM)( (ushort)IDC_ENT_ADD_MODEL_BTN
                                 | ( (unsigned long)( BN_CLICKED ) << 16 ) ), 0 );
 }
 

@@ -437,7 +437,7 @@ static const char *LayeredMaterial_ValidateName( const char *name )
     const char *p = name;
     do
     {
-        if ( !isalnum( (unsigned char)*p ) && *p != '_' )
+        if ( !isalnum( (byte)*p ) && *p != '_' )
             return "Layered material names must contain only alphanumeric characters and '_'.";
         ++p;
     }

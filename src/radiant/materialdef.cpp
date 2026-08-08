@@ -224,13 +224,13 @@ int MaterialDef_05( qtexture_s *radMtl )   // tex_num   @0x10
 int MaterialDef_06( qtexture_s *radMtl )   // low word of unk_flags2 @0x0C
 {
     iassert( radMtl );                                     // 0x4318a9 (level 0)
-    dword_181F51C = (unsigned short)( (unsigned short)radMtl->unk_flags2 & dword_181F51C );
+    dword_181F51C = (ushort)( (ushort)radMtl->unk_flags2 & dword_181F51C );
     return dword_181F51C;
 }
 int MaterialDef_07( qtexture_s *radMtl )   // unk1 byte @0x09
 {
     iassert( radMtl );                                     // 0x431919 (level 0)
-    dword_181F51C = (unsigned char)( (unsigned char)radMtl->unk1 & dword_181F51C );
+    dword_181F51C = (byte)( (byte)radMtl->unk1 & dword_181F51C );
     return dword_181F51C;
 }
 int MaterialDef_08( qtexture_s *radMtl )   // in_use @0x20
@@ -310,7 +310,7 @@ bool MaterialDef_15_Drawflag_Multiply( int drawFlags, MaterialDef *m )
         return true;
     iassert( !(drawFlags & DRAWFLAG_ONLY_MULTIPLY) || !(drawFlags & DRAWFLAG_SKIP_MULTIPLY) );   // MaterialDef.cpp:348
     qtexture_s *lm = MaterialDef_GetLayeredMaterial( m );
-    int unk = lm ? (unsigned short)lm->unk_flags2 : 0;
+    int unk = lm ? (ushort)lm->unk_flags2 : 0;
     return ( drawFlags & ( 4 * ( (unk & 0x70) != 0x70 ) + 4 ) ) != 0;
 }
 

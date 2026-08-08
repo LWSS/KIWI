@@ -20,7 +20,7 @@ int(__cdecl *current_audioCallback)(audioSample_t *);
 void __cdecl DSOUNDRecord_UpdateSample(dsound_sample_t *pRecSample)
 {
     int lLockSize; // [esp+8h] [ebp-48h]
-    uint32_t lLockSizea; // [esp+8h] [ebp-48h]
+    uint lLockSizea; // [esp+8h] [ebp-48h]
     int lLockSizeb; // [esp+8h] [ebp-48h]
     HRESULT hr; // [esp+Ch] [ebp-44h]
     HRESULT hra; // [esp+Ch] [ebp-44h]
@@ -68,14 +68,14 @@ void __cdecl DSOUNDRecord_UpdateSample(dsound_sample_t *pRecSample)
                 {
                     audioSample.lengthInSamples = dwLockLen1 / (2 * iChannels);
                     audioSample.lengthInBytes = dwLockLen1;
-                    audioSample.buffer = (unsigned char *)pLock1;
+                    audioSample.buffer = (byte *)pLock1;
                     current_audioCallback(&audioSample);
                 }
                 if (pLock2)
                 {
                     audioSample.lengthInSamples = dwLockLen2 / (2 * iChannels);
                     audioSample.lengthInBytes = dwLockLen2;
-                    audioSample.buffer = (unsigned char*)pLock2;
+                    audioSample.buffer = (byte*)pLock2;
                     current_audioCallback(&audioSample);
                 }
                 pRecSample->dwCaptureOffset += lLockSizeb;
@@ -291,7 +291,7 @@ void __cdecl DSOUNDRecord_Shutdown()
         Com_PrintError(9, "Error releasing direct sound instance!  %s\n", hr);
 }
 
-void __cdecl Record_SetRecordingCallback(int32_t(__cdecl *new_audioCallback)(audioSample_t *))
+void __cdecl Record_SetRecordingCallback(int(__cdecl *new_audioCallback)(audioSample_t *))
 {
     current_audioCallback = new_audioCallback;
 }

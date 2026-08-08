@@ -13,7 +13,7 @@
 
 
 #ifdef KISAK_MP
-enum entity_event_t : __int32
+enum entity_event_t : int
 {
     EV_NONE = 0x0,
     EV_FOLIAGE_SOUND = 0x1,
@@ -104,7 +104,7 @@ enum entity_event_t : __int32
     EV_MAX_EVENTS = 0x87,
 };
 #elif KISAK_SP
-enum entity_event_t : __int32
+enum entity_event_t : int
 {
     EV_NONE = 0x0,
     EV_FOLIAGE_SOUND = 0x1,
@@ -448,18 +448,18 @@ struct tagInfo_s // sizeof=0x70  (SP/MP same)
     uint16_t name;
     // padding byte
     // padding byte
-    int32_t index;
+    int index;
     float axis[4][3];
     float parentInvAxis[4][3];
 };
 
 struct trigger_ent_t // sizeof=0x14
 {                                       // ...
-    int32_t threshold;
-    int32_t accumulate;
-    int32_t timestamp;
+    int threshold;
+    int accumulate;
+    int timestamp;
 #ifdef KISAK_MP
-    int32_t singleUserEntIndex;
+    int singleUserEntIndex;
 #endif
     bool requireLookAt;
     // padding byte
@@ -469,9 +469,9 @@ struct trigger_ent_t // sizeof=0x14
 
 struct item_ent_t // sizeof=0xC (SP/MP same)
 {                                       // ...
-    int32_t ammoCount;
-    int32_t clipAmmoCount;
-    int32_t index;
+    int ammoCount;
+    int clipAmmoCount;
+    int index;
 };
 static_assert(sizeof(item_ent_t) == 0xC);
 
@@ -498,18 +498,18 @@ struct entityShared_t // sizeof=0x68
     uint8_t linked;
     uint8_t bmodel;
     uint8_t svFlags;
-    int32_t clientMask[2];
+    int clientMask[2];
     uint8_t inuse;              // ...
-    int32_t broadcastTime;
+    int broadcastTime;
     float mins[3];                      // ...
     float maxs[3];
-    int32_t contents;                       // ...
+    int contents;                       // ...
     float absmin[3];                    // ...
     float absmax[3];
     float currentOrigin[3];             // ...
     float currentAngles[3];
     EntHandle ownerNum;
-    int32_t eventTime;
+    int eventTime;
 };
 static_assert(sizeof(entityShared_t) == 0x68);
 #elif KISAK_SP
@@ -532,14 +532,14 @@ struct entityShared_t
 };
 #endif
 
-enum MissileStage : __int32
+enum MissileStage : int
 {                                       // ...
     MISSILESTAGE_SOFTLAUNCH = 0x0,
     MISSILESTAGE_ASCENT = 0x1,
     MISSILESTAGE_DESCENT = 0x2,
 };
 
-enum MissileFlightMode : __int32
+enum MissileFlightMode : int
 {                                       // ...
     MISSILEFLIGHTMODE_TOP = 0x0,
     MISSILEFLIGHTMODE_DIRECT = 0x1,
@@ -549,7 +549,7 @@ enum team_t;
 #ifdef KISAK_MP
 struct corpse_ent_t // sizeof=0x4
 {                                       // ...
-    int32_t deathAnimStartTime;
+    int deathAnimStartTime;
 };
 static_assert(sizeof(corpse_ent_t) == 0x4);
 
@@ -558,7 +558,7 @@ static_assert(sizeof(corpse_ent_t) == 0x4);
 struct missile_ent_t // sizeof=0x3C
 {                                       // ...
     float time;
-    int32_t timeOfBirth;
+    int timeOfBirth;
     float travelDist;
     float surfaceNormal[3];
     team_t team;
@@ -598,7 +598,7 @@ enum EntHandler_t : uint8_t
     ENT_HANDLER_COUNT = 0x18,
 };
 
-enum gentityFlags_t : __int32 // LWSS: not a real enum name, used to force usage
+enum gentityFlags_t : int // LWSS: not a real enum name, used to force usage
 {
     FL_GODMODE              = 0x1,
     FL_DEMI_GODMODE         = 0x2,
@@ -695,20 +695,20 @@ struct gentity_s // sizeof=0x274
     uint16_t targetname;
     // padding byte
     // padding byte
-    uint32_t attachIgnoreCollision;
-    int32_t spawnflags;                     // ...
+    uint attachIgnoreCollision;
+    int spawnflags;                     // ...
     gentityFlags_t flags;                          // ...
-    int32_t eventTime;
-    int32_t freeAfterEvent;
-    int32_t unlinkAfterEvent;
-    int32_t clipmask;
-    int32_t processedFrame;
+    int eventTime;
+    int freeAfterEvent;
+    int unlinkAfterEvent;
+    int clipmask;
+    int processedFrame;
     EntHandle parent;
-    int32_t nextthink;
-    int32_t health;                         // ...
-    int32_t maxHealth;
-    int32_t damage;
-    int32_t count;
+    int nextthink;
+    int health;                         // ...
+    int maxHealth;
+    int damage;
+    int count;
     gentity_s *chain;
     //$4FD1F2C094A0DF020529999C4E24827D ___u30;
     union //$4FD1F2C094A0DF020529999C4E24827D // sizeof=0x60
@@ -724,7 +724,7 @@ struct gentity_s // sizeof=0x274
     gentity_s *tagChildren;
     uint16_t attachModelNames[19]; // ...
     uint16_t attachTagNames[19];
-    int32_t useCount;
+    int useCount;
     gentity_s *nextFree;
 };
 #elif KISAK_SP
@@ -834,7 +834,7 @@ enum EntHandler_t : uint8_t // (not a real enum name)
     ENT_HANDLER_COUNT = 0x1B,
 };
 
-enum gentityFlags_t : uint32_t // LWSS: not a real enum name, used to force usage
+enum gentityFlags_t : uint // LWSS: not a real enum name, used to force usage
 {
     FL_GODMODE               = 0x1,
     FL_DEMI_GODMODE          = 0x2,
@@ -939,7 +939,7 @@ struct gentity_s
     uint16_t script_noteworthy;
     uint16_t target;
     uint16_t targetname;
-    uint32_t attachIgnoreCollision;
+    uint attachIgnoreCollision;
     int spawnflags;
     gentityFlags_t flags;
     int clipmask;
@@ -1014,7 +1014,7 @@ extern const dvar_t *jump_ladderPushVel;
 extern const dvar_t *jump_spreadAdd;
 
 // bg_weapons
-extern uint32_t bg_lastParsedWeaponIndex;
+extern uint bg_lastParsedWeaponIndex;
 extern struct WeaponDef *bg_weaponDefs[128];
 
 // https://github.com/id-Software/RTCW-SP/blob/master/src/game/bg_public.h#L1573

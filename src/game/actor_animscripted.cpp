@@ -23,7 +23,7 @@ void __cdecl Actor_ScriptedAnim_Finish(actor_s *self, ai_state_t eNextState)
     iassert(ent);
     if (ent->scripted)
     {
-        MT_Free((unsigned char*)ent->scripted, sizeof(animscripted_s));
+        MT_Free((byte*)ent->scripted, sizeof(animscripted_s));
         ent->scripted = NULL;
     }
 }

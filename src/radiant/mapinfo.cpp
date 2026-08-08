@@ -73,7 +73,7 @@ void __cdecl MapInfo_01(
             if ( patchInst )
             {
                 patchMesh_t *pm = patchInst->def;               // instance.def = patch DEF
-                if ( ( (unsigned char)pm->type & PATCH_TERRAIN ) != 0 )
+                if ( ( (byte)pm->type & PATCH_TERRAIN ) != 0 )
                     ++worldStats[2];   // terrain
                 else
                     ++worldStats[1];   // curve

@@ -10,12 +10,12 @@ void __cdecl DObjCalcSkel(const DObj_s *obj, int *partBits)
     int j; // [esp+58h] [ebp-60h]
     const unsigned __int8 *modelParents; // [esp+5Ch] [ebp-5Ch]
     const unsigned __int8 *duplicateParts; // [esp+60h] [ebp-58h]
-    uint32_t boneIndex; // [esp+64h] [ebp-54h]
-    uint32_t boneIndexa; // [esp+64h] [ebp-54h]
+    uint boneIndex; // [esp+64h] [ebp-54h]
+    uint boneIndexa; // [esp+64h] [ebp-54h]
     int controlPartBits[4]; // [esp+68h] [ebp-50h] BYREF
     int numModels; // [esp+78h] [ebp-40h]
     XModel *model; // [esp+7Ch] [ebp-3Ch]
-    uint32_t modelParent; // [esp+80h] [ebp-38h]
+    uint modelParent; // [esp+80h] [ebp-38h]
     DSkel *skel; // [esp+84h] [ebp-34h]
     int calcPartBits[4]; // [esp+88h] [ebp-30h] BYREF
     int ignorePartBits[4]; // [esp+98h] [ebp-20h] BYREF
@@ -95,7 +95,7 @@ void __cdecl GetControlAndDuplicatePartBits(
     int boneIndex; // [esp+4h] [ebp-14h]
     DSkel *skel; // [esp+8h] [ebp-10h]
     int i; // [esp+10h] [ebp-8h]
-    uint32_t boneIndexLow; // [esp+14h] [ebp-4h]
+    uint boneIndexLow; // [esp+14h] [ebp-4h]
 
     skel = (DSkel *)&obj->skel;
     if (obj == (const DObj_s *)-20)
@@ -135,7 +135,7 @@ const unsigned __int8 *__cdecl CalcSkelDuplicateBones(
     int boneIndex; // [esp+8h] [ebp-10h]
     DObjAnimMat *mat; // [esp+Ch] [ebp-Ch]
     int parentIndex; // [esp+10h] [ebp-8h]
-    uint32_t maxBoneIndex; // [esp+14h] [ebp-4h]
+    uint maxBoneIndex; // [esp+14h] [ebp-4h]
 
     mat = skel->mat;
     maxBoneIndex = minBoneIndex + model->numBones;
@@ -164,8 +164,8 @@ void __cdecl CalcSkelRootBonesNoParentOrDuplicate(
     float v8; // [esp+24h] [ebp-2Ch]
     int boneIndex; // [esp+2Ch] [ebp-24h]
     int maxBoneIndexHigh; // [esp+30h] [ebp-20h]
-    uint32_t bits; // [esp+38h] [ebp-18h]
-    uint32_t boneBit;
+    uint bits; // [esp+38h] [ebp-18h]
+    uint boneBit;
     DObjAnimMat *mat; // [esp+3Ch] [ebp-14h]
     int boneIndexHigh; // [esp+40h] [ebp-10h]
     int boneIndexLow; // [esp+44h] [ebp-Ch]
@@ -220,24 +220,24 @@ void __cdecl CalcSkelRootBonesNoParentOrDuplicate(
 void __cdecl CalcSkelRootBonesWithParent(
     const XModel *model,
     DSkel *skel,
-    uint32_t minBoneIndex,
-    uint32_t modelParent,
+    uint minBoneIndex,
+    uint modelParent,
     int *calcPartBits,
     const int *controlPartBits)
 {
     DWORD v7; // eax
     const DObjAnimMat *parentMat; // [esp+D0h] [ebp-3Ch]
     DObjAnimMat *childMat; // [esp+D4h] [ebp-38h]
-    uint32_t boneIndex; // [esp+D8h] [ebp-34h]
-    uint32_t maxBoneIndexHigh; // [esp+DCh] [ebp-30h]
-    uint32_t maxBoneIndexLow; // [esp+E0h] [ebp-2Ch]
+    uint boneIndex; // [esp+D8h] [ebp-34h]
+    uint maxBoneIndexHigh; // [esp+DCh] [ebp-30h]
+    uint maxBoneIndexLow; // [esp+E0h] [ebp-2Ch]
     float quat[4]; // [esp+E4h] [ebp-28h]
     int bits; // [esp+F4h] [ebp-18h]
     const DObjAnimMat *mat; // [esp+F8h] [ebp-14h]
-    uint32_t boneIndexHigh; // [esp+FCh] [ebp-10h]
-    uint32_t boneIndexLow; // [esp+100h] [ebp-Ch]
+    uint boneIndexHigh; // [esp+FCh] [ebp-10h]
+    uint boneIndexLow; // [esp+100h] [ebp-Ch]
     int boneBit; // [esp+104h] [ebp-8h]
-    uint32_t maxBoneIndex; // [esp+108h] [ebp-4h]
+    uint maxBoneIndex; // [esp+108h] [ebp-4h]
 
     maxBoneIndex = minBoneIndex + model->numRootBones;
     boneIndexHigh = minBoneIndex >> 5;
@@ -405,11 +405,11 @@ void __cdecl DObjCalcBaseSkel(const DObj_s *obj, DObjAnimMat *mat, int *partBits
     int j; // [esp+Ch] [ebp-90h]
     const unsigned __int8 *modelParents; // [esp+10h] [ebp-8Ch]
     const unsigned __int8 *duplicateParts; // [esp+14h] [ebp-88h]
-    uint32_t boneIndex; // [esp+18h] [ebp-84h]
+    uint boneIndex; // [esp+18h] [ebp-84h]
     int controlPartBits[4]; // [esp+1Ch] [ebp-80h] BYREF
     int numModels; // [esp+2Ch] [ebp-70h]
     XModel *model; // [esp+30h] [ebp-6Ch]
-    uint32_t modelParent; // [esp+34h] [ebp-68h]
+    uint modelParent; // [esp+34h] [ebp-68h]
     DSkel skel; // [esp+38h] [ebp-64h] BYREF
     int calcPartBits[4]; // [esp+70h] [ebp-2Ch] BYREF
     int ignorePartBits[4]; // [esp+80h] [ebp-1Ch] BYREF

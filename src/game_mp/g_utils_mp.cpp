@@ -26,7 +26,7 @@
 
 XModel *cached_models[512];
 
-void __cdecl G_SafeDObjFree(uint32_t handle, int unusedLocalClientNum)
+void __cdecl G_SafeDObjFree(uint handle, int unusedLocalClientNum)
 {
     if (unusedLocalClientNum != -1)
         MyAssertHandler(
@@ -47,10 +47,10 @@ void __cdecl TRACK_g_utils()
 int __cdecl G_FindConfigstringIndex(char *name, int start, int max, int create, const char *errormsg)
 {
     const char *v6; // eax
-    uint32_t ConfigstringConst; // eax
+    uint ConfigstringConst; // eax
     const char *v9; // eax
-    uint32_t v10; // [esp+0h] [ebp-14h]
-    uint32_t s; // [esp+Ch] [ebp-8h]
+    uint v10; // [esp+0h] [ebp-14h]
+    uint s; // [esp+Ch] [ebp-8h]
     signed int i; // [esp+10h] [ebp-4h]
     signed int ia; // [esp+10h] [ebp-4h]
     int ib; // [esp+10h] [ebp-4h]
@@ -191,8 +191,8 @@ int __cdecl G_MaterialIndex(const char *name)
 
 int __cdecl G_ModelIndex(const char *name)
 {
-    uint32_t nameString; // [esp+68h] [ebp-10h]
-    uint32_t s; // [esp+6Ch] [ebp-Ch]
+    uint nameString; // [esp+68h] [ebp-10h]
+    uint s; // [esp+6Ch] [ebp-Ch]
     int i; // [esp+70h] [ebp-8h]
     signed int constIndex; // [esp+74h] [ebp-4h]
     signed int constIndexa; // [esp+74h] [ebp-4h]
@@ -297,7 +297,7 @@ bool __cdecl G_XModelBad(int index)
     return XModelBad(Model);
 }
 
-uint32_t __cdecl G_ModelName(uint32_t index)
+uint __cdecl G_ModelName(uint index)
 {
     if (index >= 0x200)
         MyAssertHandler(".\\game_mp\\g_utils_mp.cpp", 345, 0, "%s", "(unsigned)index < MAX_MODELS");
@@ -406,9 +406,9 @@ void __cdecl G_SetModel(gentity_s *ent, char *modelName)
     }
 }
 
-void __cdecl G_OverrideModel(uint32_t modelIndex, char *defaultModelName)
+void __cdecl G_OverrideModel(uint modelIndex, char *defaultModelName)
 {
-    uint32_t v2; // eax
+    uint v2; // eax
     XModel *v3; // eax
     const char *modelName; // [esp+8h] [ebp-4h]
 
@@ -430,7 +430,7 @@ void __cdecl G_OverrideModel(uint32_t modelIndex, char *defaultModelName)
     }
 }
 
-int __cdecl G_EntAttach(gentity_s *ent, char *modelName, uint32_t tagName, int ignoreCollision)
+int __cdecl G_EntAttach(gentity_s *ent, char *modelName, uint tagName, int ignoreCollision)
 {
     int i; // [esp+0h] [ebp-8h]
     int modelIndex; // [esp+4h] [ebp-4h]
@@ -463,10 +463,10 @@ int __cdecl G_EntAttach(gentity_s *ent, char *modelName, uint32_t tagName, int i
     return 1;
 }
 
-int __cdecl G_EntDetach(gentity_s *ent, const char *modelName, uint32_t tagName)
+int __cdecl G_EntDetach(gentity_s *ent, const char *modelName, uint tagName)
 {
-    uint32_t v4; // edx
-    uint32_t modelNameString; // [esp+4h] [ebp-8h]
+    uint v4; // edx
+    uint modelNameString; // [esp+4h] [ebp-8h]
     int i; // [esp+8h] [ebp-4h]
 
     if (!tagName)
@@ -516,7 +516,7 @@ void __cdecl G_EntDetachAll(gentity_s *ent)
     G_DObjUpdate(ent);
 }
 
-int __cdecl G_EntLinkTo(gentity_s *ent, gentity_s *parent, uint32_t tagName)
+int __cdecl G_EntLinkTo(gentity_s *ent, gentity_s *parent, uint tagName)
 {
     if (!G_EntLinkToInternal(ent, parent, tagName))
         return 0;
@@ -524,7 +524,7 @@ int __cdecl G_EntLinkTo(gentity_s *ent, gentity_s *parent, uint32_t tagName)
     return 1;
 }
 
-int __cdecl G_EntLinkToInternal(gentity_s *ent, gentity_s *parent, uint32_t tagName)
+int __cdecl G_EntLinkToInternal(gentity_s *ent, gentity_s *parent, uint tagName)
 {
     int pm_type; // [esp+0h] [ebp-10h]
     char *tagInfo; // [esp+4h] [ebp-Ch]
@@ -560,14 +560,14 @@ int __cdecl G_EntLinkToInternal(gentity_s *ent, gentity_s *parent, uint32_t tagN
             break;
     }
     tagInfo = (char*)MT_Alloc(112, MT_TYPE_TAG_INFO);
-    *(uint32_t *)tagInfo = (uint32_t)parent;
+    *(uint *)tagInfo = (uint)parent;
     *((_WORD *)tagInfo + 4) = 0;
 
     iassert(!tagName || SL_IsLowercaseString(tagName));
     
     Scr_SetString((uint16_t *)tagInfo + 4, tagName);
-    *((uint32_t *)tagInfo + 1) = (uint32_t)parent->tagChildren;
-    *((uint32_t *)tagInfo + 3) = index;
+    *((uint *)tagInfo + 1) = (uint)parent->tagChildren;
+    *((uint *)tagInfo + 3) = index;
     memset((uint8_t *)tagInfo + 16, 0, 0x30u);
     parent->tagChildren = ent;
     ent->tagInfo = (tagInfo_s *)tagInfo;
@@ -591,7 +591,7 @@ int __cdecl G_EntLinkToInternal(gentity_s *ent, gentity_s *parent, uint32_t tagN
 int __cdecl G_EntLinkToWithOffset(
     gentity_s *ent,
     gentity_s *parent,
-    uint32_t tagName,
+    uint tagName,
     const float *originOffset,
     const float *anglesOffset)
 {
@@ -920,7 +920,7 @@ void __cdecl G_DObjCalcBone(const gentity_s *ent, int boneIndex)
     }
 }
 
-DObjAnimMat *__cdecl G_DObjGetLocalTagMatrix(gentity_s *ent, uint32_t tagName)
+DObjAnimMat *__cdecl G_DObjGetLocalTagMatrix(gentity_s *ent, uint tagName)
 {
     int boneIndex; // [esp+30h] [ebp-8h]
 
@@ -936,7 +936,7 @@ DObjAnimMat *__cdecl G_DObjGetLocalTagMatrix(gentity_s *ent, uint32_t tagName)
     return &SV_DObjGetMatrixArray(ent)[boneIndex];
 }
 
-int __cdecl G_DObjGetWorldTagMatrix(gentity_s *ent, uint32_t tagName, mat4x3 &tagMat)
+int __cdecl G_DObjGetWorldTagMatrix(gentity_s *ent, uint tagName, mat4x3 &tagMat)
 {
     float v4; // [esp+1Ch] [ebp-90h]
     float v5; // [esp+20h] [ebp-8Ch]
@@ -995,7 +995,7 @@ int __cdecl G_DObjGetWorldTagMatrix(gentity_s *ent, uint32_t tagName, mat4x3 &ta
     return 1;
 }
 
-int __cdecl G_DObjGetWorldTagPos(gentity_s *ent, uint32_t tagName, float *pos)
+int __cdecl G_DObjGetWorldTagPos(gentity_s *ent, uint tagName, float *pos)
 {
     float ent_axis[4][3]; // [esp+8h] [ebp-34h] BYREF
     DObjAnimMat *mat; // [esp+38h] [ebp-4h]
@@ -1357,13 +1357,13 @@ gentity_s *__cdecl G_TempEntity(const float *origin, int event)
     return e;
 }
 
-void __cdecl G_AddPredictableEvent(gentity_s *ent, entity_event_t event, uint32_t eventParm)
+void __cdecl G_AddPredictableEvent(gentity_s *ent, entity_event_t event, uint eventParm)
 {
     if (ent->client)
         BG_AddPredictableEventToPlayerstate(event, eventParm, &ent->client->ps);
 }
 
-void __cdecl G_AddEvent(gentity_s *ent, uint32_t event, uint32_t eventParm)
+void __cdecl G_AddEvent(gentity_s *ent, uint event, uint eventParm)
 {
     if (!event)
         MyAssertHandler(".\\game_mp\\g_utils_mp.cpp", 1713, 0, "%s", "event");

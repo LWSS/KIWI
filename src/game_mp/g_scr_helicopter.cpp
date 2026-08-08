@@ -85,7 +85,7 @@ void __cdecl CMD_Heli_SetDamageStage(scr_entref_t entref)
 
 void(__cdecl *__cdecl Helicopter_GetMethod(const char **pName))(scr_entref_t)
 {
-    uint32_t i; // [esp+18h] [ebp-4h]
+    uint i; // [esp+18h] [ebp-4h]
 
     for (i = 0; i < 0x19; ++i)
     {
@@ -376,7 +376,7 @@ void __cdecl G_SpawnHelicopter(gentity_s *ent, gentity_s *owner, const char *veh
     if (!owner->client)
         MyAssertHandler(".\\game_mp\\g_scr_helicopter.cpp", 282, 0, "%s", "owner->client");
     team = owner->client->sess.cs.team;
-    if ((uint32_t)team >= TEAM_NUM_TEAMS)
+    if ((uint)team >= TEAM_NUM_TEAMS)
         MyAssertHandler(
             ".\\game_mp\\g_scr_helicopter.cpp",
             285,
@@ -400,7 +400,7 @@ void __cdecl Heli_InitFirstThink(gentity_s *pSelf)
     vehicle_physic_t *phys; // [esp+18h] [ebp-10h]
     vehicle_info_t *info; // [esp+1Ch] [ebp-Ch]
     scr_vehicle_s *veh; // [esp+20h] [ebp-8h]
-    int32_t wheelIndex; // [esp+24h] [ebp-4h]
+    int wheelIndex; // [esp+24h] [ebp-4h]
 
     veh = pSelf->scr_vehicle;
     phys = &veh->phys;
@@ -432,12 +432,12 @@ void __cdecl Heli_InitFirstThink(gentity_s *pSelf)
 void __cdecl Helicopter_Pain(
     gentity_s *pSelf,
     gentity_s *pAttacker,
-    int32_t damage,
+    int damage,
     const float *point,
-    const int32_t mod,
+    const int mod,
     const float *dir,
     const hitLocation_t hitLoc,
-    const int32_t weaponIdx)
+    const int weaponIdx)
 {
     WeaponDef *weapDef; // [esp+Ch] [ebp-4h]
 
@@ -456,12 +456,12 @@ void __cdecl Helicopter_Die(
     gentity_s *pSelf,
     gentity_s *pInflictor,
     gentity_s *pAttacker,
-    const int32_t damage,
-    const int32_t mod,
-    const int32_t weapon,
+    const int damage,
+    const int mod,
+    const int weapon,
     const float *dir,
     const hitLocation_t hitLoc,
-    int32_t psTimeOffset)
+    int psTimeOffset)
 {
     WeaponDef *weapDef; // [esp+Ch] [ebp-4h]
 
@@ -476,7 +476,7 @@ void __cdecl Helicopter_Die(
     }
 }
 
-void __cdecl Helicopter_Controller(const gentity_s *pSelf, int32_t *partBits)
+void __cdecl Helicopter_Controller(const gentity_s *pSelf, int *partBits)
 {
     //float gunYaw; // [esp+4h] [ebp-38h]
     //float v3; // [esp+Ch] [ebp-30h]

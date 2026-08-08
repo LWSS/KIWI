@@ -5,7 +5,7 @@
 struct GfxShaderConstantState_s // sizeof=0x8
 {                                       // ...
     MaterialArgumentCodeConst codeConst;
-    uint32_t version;
+    uint version;
 };
 union GfxShaderConstantState // sizeof=0x8
 {                                       // ...
@@ -20,7 +20,7 @@ int __cdecl R_SetIndexData(GfxCmdBufPrimState *state, uint8_t *indices, int triC
 void __cdecl R_SetupPassPerPrimArgs(GfxCmdBufContext context);
 void __cdecl R_SetVertexShaderConstantFromCode(GfxCmdBufContext context, const MaterialShaderArgument *routingData);
 void __cdecl R_HW_SetVertexShaderConstant(__int64 device, __int64 data);
-float *__cdecl R_GetCodeConstant(GfxCmdBufContext context, uint32_t constant);
+float *__cdecl R_GetCodeConstant(GfxCmdBufContext context, uint constant);
 char __cdecl R_IsVertexShaderConstantUpToDate(GfxCmdBufContext context, const MaterialShaderArgument *routingData);
 char __cdecl R_IsShaderMatrixUpToDate(
     const GfxCmdBufSourceState *source,
@@ -31,12 +31,12 @@ char __cdecl R_IsShaderConstantUpToDate(
     GfxShaderConstantState *constant,
     const MaterialShaderArgument *routingData);
 void __cdecl R_SetupPassPerObjectArgs(GfxCmdBufContext context);
-void __cdecl R_SetPixelShaderConstantFromLiteral(GfxCmdBufState *state, uint32_t dest, const float *literal);
+void __cdecl R_SetPixelShaderConstantFromLiteral(GfxCmdBufState *state, uint dest, const float *literal);
 void __cdecl R_HW_SetPixelShaderConstant(
     IDirect3DDevice9 *device,
-    uint32_t dest,
+    uint dest,
     const float *data,
-    uint32_t rowCount);
+    uint rowCount);
 int __cdecl R_IsPixelShaderConstantUpToDate(GfxCmdBufContext context, const MaterialShaderArgument *routingData);
 void __cdecl R_SetPixelShaderConstantFromCode(GfxCmdBufContext context, const MaterialShaderArgument *routingData);
 void __cdecl R_SetupPassCriticalPixelShaderArgs(GfxCmdBufContext context);
@@ -45,9 +45,9 @@ void __cdecl R_OverrideImage(GfxImage **image, const MaterialTextureDef *texdef)
 void __cdecl R_SetPixelShader(GfxCmdBufState *state, const MaterialPixelShader *pixelShader);
 void __cdecl R_SetVertexShader(GfxCmdBufState *state, const MaterialVertexShader *vertexShader);
 void __cdecl R_UpdateVertexDecl(GfxCmdBufState *state);
-void __cdecl R_SetupPass(GfxCmdBufContext context, uint32_t passIndex);
-void __cdecl R_SetState(GfxCmdBufState *state, uint32_t *stateBits);
-void __cdecl R_SetVertexShaderConstantFromLiteral(GfxCmdBufState *state, uint32_t dest, const float *literal);
+void __cdecl R_SetupPass(GfxCmdBufContext context, uint passIndex);
+void __cdecl R_SetState(GfxCmdBufState *state, uint *stateBits);
+void __cdecl R_SetVertexShaderConstantFromLiteral(GfxCmdBufState *state, uint dest, const float *literal);
 const MaterialTextureDef *__cdecl R_SetPixelSamplerFromMaterial(
     GfxCmdBufContext context,
     const MaterialShaderArgument *arg,
@@ -55,23 +55,23 @@ const MaterialTextureDef *__cdecl R_SetPixelSamplerFromMaterial(
 
 void __cdecl R_SetPassShaderPrimArguments(
     GfxCmdBufContext context,
-    uint32_t argCount,
+    uint argCount,
     const MaterialShaderArgument *arg);
 void __cdecl R_SetPassShaderObjectArguments(
     GfxCmdBufContext context,
-    uint32_t argCount,
+    uint argCount,
     const MaterialShaderArgument *arg);
 void __cdecl R_SetPassPixelShaderStableArguments(
     GfxCmdBufContext context,
-    uint32_t argCount,
+    uint argCount,
     const MaterialShaderArgument *arg);
 void __cdecl R_SetPassVertexShaderStableArguments(
     GfxCmdBufContext context,
-    uint32_t argCount,
+    uint argCount,
     const MaterialShaderArgument *arg);
 void __cdecl R_SetPassShaderStableArguments(
     GfxCmdBufContext context,
-    uint32_t argCount,
+    uint argCount,
     const MaterialShaderArgument *arg);
 
 inline void __cdecl R_CheckVertexDataOverflow(int dataSize)
@@ -92,4 +92,4 @@ inline void __cdecl R_CheckVertexDataOverflow(int dataSize)
 
 
 // r_draw_pixelshader
-uint32_t __cdecl R_SkipDrawSurfListMaterial(const GfxDrawSurf *drawSurfList, uint32_t drawSurfCount);
+uint __cdecl R_SkipDrawSurfListMaterial(const GfxDrawSurf *drawSurfList, uint drawSurfCount);

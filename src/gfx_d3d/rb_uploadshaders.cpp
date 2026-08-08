@@ -64,12 +64,12 @@ void __cdecl RB_SetUploadMaterialArg(const MaterialShaderArgument *arg)
     }
 }
 
-uint32_t __cdecl RB_UploadMaterialPassVertexDecl(
+uint __cdecl RB_UploadMaterialPassVertexDecl(
     GfxCmdBufPrimState *primState,
     MaterialVertexDeclaration *vertexDecl,
     MaterialVertexDeclType vertDeclType,
     void *data,
-    uint32_t stride)
+    uint stride)
 {
     if (!vertexDecl->routing.decl[vertDeclType])
         return 0;
@@ -80,18 +80,18 @@ uint32_t __cdecl RB_UploadMaterialPassVertexDecl(
     return 1;
 }
 
-uint32_t RB_UploadMaterialPass(
+uint RB_UploadMaterialPass(
     const MaterialPass *pass,
     MaterialVertexDeclType vertDeclType)
 {
-    uint32_t v4; // [esp-Ch] [ebp-B4h]
-    uint32_t v5; // [esp-Ch] [ebp-B4h]
-    uint32_t v6; // [esp-Ch] [ebp-B4h]
-    uint32_t v7; // [esp-Ch] [ebp-B4h]
+    uint v4; // [esp-Ch] [ebp-B4h]
+    uint v5; // [esp-Ch] [ebp-B4h]
+    uint v6; // [esp-Ch] [ebp-B4h]
+    uint v7; // [esp-Ch] [ebp-B4h]
     GfxCmdBufPrimState *p_prim; // [esp-8h] [ebp-B0h]
-    uint32_t v9[37]; // [esp-4h] [ebp-ACh] BYREF
-    uint32_t vertMem_136; // [esp+90h] [ebp-18h]
-    uint32_t vertMem_140; // [esp+94h] [ebp-14h]
+    uint v9[37]; // [esp-4h] [ebp-ACh] BYREF
+    uint vertMem_136; // [esp+90h] [ebp-18h]
+    uint vertMem_140; // [esp+94h] [ebp-14h]
 
     //argIter = a1;
     //argCount = retaddr;
@@ -122,11 +122,11 @@ uint32_t RB_UploadMaterialPass(
     return v4;
 }
 
-uint32_t __cdecl RB_UploadMaterialTechnique(const MaterialTechnique *tech, uint32_t techType)
+uint __cdecl RB_UploadMaterialTechnique(const MaterialTechnique *tech, uint techType)
 {
-    uint32_t uploadCount; // [esp+0h] [ebp-Ch]
+    uint uploadCount; // [esp+0h] [ebp-Ch]
     MaterialVertexDeclType vertDeclType; // [esp+4h] [ebp-8h]
-    uint32_t passIter; // [esp+8h] [ebp-4h]
+    uint passIter; // [esp+8h] [ebp-4h]
 
     if (!strncmp(tech->name, "lm_", 3u))
     {
@@ -152,7 +152,7 @@ uint32_t __cdecl RB_UploadMaterialTechnique(const MaterialTechnique *tech, uint3
 
 void __cdecl RB_UploadShaderStep()
 {
-    uint32_t uploadCount; // [esp+0h] [ebp-Ch]
+    uint uploadCount; // [esp+0h] [ebp-Ch]
     MaterialTechnique *tech; // [esp+4h] [ebp-8h]
     MaterialTechniqueSet *techSet; // [esp+8h] [ebp-4h]
 

@@ -29,8 +29,8 @@ void __cdecl RB_VirtualToSceneRadius(float radius, float *radiusX, float *radius
 int __cdecl RB_GenerateGaussianFilterChain(
     float radiusX,
     float radiusY,
-    uint32_t srcWidth,
-    uint32_t srcHeight,
+    uint srcWidth,
+    uint srcHeight,
     int dstWidth,
     int dstHeight,
     int passLimit,
@@ -40,8 +40,8 @@ int __cdecl RB_PickSymmetricFilterMaterial(int halfTapCount, const Material **ma
 int __cdecl RB_GaussianFilterPoints1D(float pixels, int srcRes, int dstRes, int tapLimit, float *tapOffsets, float *tapWeights);
 void __cdecl RB_GenerateGaussianFilter2D(
     float radius,
-    uint32_t srcWidth,
-    uint32_t srcHeight,
+    uint srcWidth,
+    uint srcHeight,
     int dstWidth,
     int dstHeight,
     GfxImageFilterPass *filterPass);

@@ -4,7 +4,7 @@
 #error This file is for SinglePlayer only 
 #endif
 
-enum ai_event_t : __int32
+enum ai_event_t : int
 {
     AI_EV_BAD = 0x0,
     AI_EV_FIRST_POINT_EVENT = 0x1,
@@ -33,7 +33,7 @@ enum ai_event_t : __int32
     AI_EV_NUM_EVENTS = 0x17,
 };
 
-enum PARM_SUPPRESSION : __int32
+enum PARM_SUPPRESSION : int
 {
     DO_SUPPRESSION = 0x0,
     DONT_SUPPRESS = 0x1,
@@ -109,7 +109,7 @@ void __cdecl Actor_BroadcastLineEvent(
     double fRadiusSqrd);
 void __cdecl Actor_BroadcastArcEvent(
     gentity_s *originator,
-    __int32 eventType,
+    int eventType,
     int teamFlags,
     const float *origin,
     double radius,
@@ -118,7 +118,7 @@ void __cdecl Actor_BroadcastArcEvent(
     double halfHeight);
 void __cdecl Actor_BroadcastVolumeEvent(
     gentity_s *originator,
-    __int32 eventType,
+    int eventType,
     int teamFlags,
     gentity_s *volumeEnt,
     double radius);

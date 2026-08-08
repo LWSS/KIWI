@@ -349,7 +349,7 @@ void __cdecl CG_CheckSnapshot(int localClientNum, const char *caller)
     int *v7; // r10
     int i; // r31
     const char *v9; // r3
-    unsigned char v10[MAX_GENTITIES]; // [sp+50h] [-8E0h] BYREF
+    byte v10[MAX_GENTITIES]; // [sp+50h] [-8E0h] BYREF
 
     if (localClientNum)
         MyAssertHandler(

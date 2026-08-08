@@ -133,7 +133,7 @@ void __cdecl R_GetNormalizedColorFromDvar(const dvar_s *dvar, float *outVec)
 
 void __cdecl R_LoadWorld(char *name, int *checksum, int savegame)
 {
-    uint32_t reflectionProbeIndex; // [esp+8Ch] [ebp-8h]
+    uint reflectionProbeIndex; // [esp+8Ch] [ebp-8h]
     int lightmapIndex; // [esp+90h] [ebp-4h]
 
     iassert( !rgp.world );
@@ -276,11 +276,11 @@ void R_ResetSunLightParseParams()
     R_UpdateLightsFromDvars();
 }
 
-uint32_t R_GetDebugReflectionProbeLocs(float (*locArray)[3], uint32_t maxCount)
+uint R_GetDebugReflectionProbeLocs(float (*locArray)[3], uint maxCount)
 {
-    uint32_t result; // r3
+    uint result; // r3
     int v4; // r9
-    uint32_t v5; // r10
+    uint v5; // r10
     GfxReflectionProbe *v6; // r8
 
     result = maxCount;

@@ -60,7 +60,7 @@ gentity_s *__cdecl SV_GEntityForSvEntity(svEntity_s *svEnt)
 
 bool __cdecl SV_EntityContact(const float *mins, const float *maxs, const gentity_s *gEnt)
 {
-    uint32_t model; // [esp+8h] [ebp-40h]
+    uint model; // [esp+8h] [ebp-40h]
     float dist; // [esp+Ch] [ebp-3Ch]
     float dista; // [esp+Ch] [ebp-3Ch]
     float distSqrd; // [esp+10h] [ebp-38h]
@@ -176,12 +176,12 @@ XModel *__cdecl SV_XModelGet(char *name)
         (void *(__cdecl *)(int))SV_AllocXModelPrecacheColl);
 }
 
-uint8_t *__cdecl SV_AllocXModelPrecache(uint32_t size)
+uint8_t *__cdecl SV_AllocXModelPrecache(uint size)
 {
     return Hunk_Alloc(size, "SV_AllocXModelPrecache", 21);
 }
 
-uint8_t *__cdecl SV_AllocXModelPrecacheColl(uint32_t size)
+uint8_t *__cdecl SV_AllocXModelPrecacheColl(uint size)
 {
     return Hunk_Alloc(size, "SV_AllocXModelPrecacheColl", 27);
 }
@@ -211,7 +211,7 @@ void __cdecl SV_ResetSkeletonCache()
 bool __cdecl SV_DObjCreateSkelForBone(DObj_s *obj, int boneIndex)
 {
     char *buf; // [esp+0h] [ebp-8h]
-    uint32_t len; // [esp+4h] [ebp-4h]
+    uint len; // [esp+4h] [ebp-4h]
 
     if (DObjSkelExists(obj, sv.skelTimeStamp))
         return DObjSkelIsBoneUpToDate(obj, boneIndex);
@@ -222,10 +222,10 @@ bool __cdecl SV_DObjCreateSkelForBone(DObj_s *obj, int boneIndex)
 }
 
 int warnCount_2;
-char *__cdecl SV_AllocSkelMemory(uint32_t size)
+char *__cdecl SV_AllocSkelMemory(uint size)
 {
     char *result; // [esp+0h] [ebp-4h]
-    uint32_t sizea; // [esp+Ch] [ebp+8h]
+    uint sizea; // [esp+Ch] [ebp+8h]
 
     iassert(size);
     sizea = (size + 15) & 0xFFFFFFF0;
@@ -253,7 +253,7 @@ char *__cdecl SV_AllocSkelMemory(uint32_t size)
 int __cdecl SV_DObjCreateSkelForBones(DObj_s *obj, int *partBits)
 {
     char *buf; // [esp+0h] [ebp-8h]
-    uint32_t len; // [esp+4h] [ebp-4h]
+    uint len; // [esp+4h] [ebp-4h]
 
     if (DObjSkelExists(obj, sv.skelTimeStamp))
         return DObjSkelAreBonesUpToDate(obj, partBits);
@@ -283,7 +283,7 @@ void __cdecl SV_DObjInitServerTime(gentity_s *ent, float dtime)
         DObjInitServerTime(obj, dtime);
 }
 
-int __cdecl SV_DObjGetBoneIndex(const gentity_s *ent, uint32_t boneName)
+int __cdecl SV_DObjGetBoneIndex(const gentity_s *ent, uint boneName)
 {
     const DObj_s *obj; // [esp+0h] [ebp-8h]
     uint8_t index; // [esp+7h] [ebp-1h] BYREF
@@ -376,7 +376,7 @@ void __cdecl SV_XModelDebugBoxes(gentity_s *ent)
     float v10; // [esp+4Ch] [ebp-2C8h]
     float v11; // [esp+50h] [ebp-2C4h]
     DObjAnimMat *boneMatrix; // [esp+54h] [ebp-2C0h]
-    uint32_t j; // [esp+58h] [ebp-2BCh]
+    uint j; // [esp+58h] [ebp-2BCh]
     XBoneInfo *boneInfoArray[128]; // [esp+5Ch] [ebp-2B8h] BYREF
     int numBones; // [esp+260h] [ebp-B4h]
     DObj_s *obj; // [esp+264h] [ebp-B0h]
@@ -556,7 +556,7 @@ void __cdecl SV_ShutdownGameProgs()
     }
 }
 
-void __cdecl SV_InitGameVM(uint32_t randomSeed, int restart, int savegame, SaveGame **save, int loadScripts)
+void __cdecl SV_InitGameVM(uint randomSeed, int restart, int savegame, SaveGame **save, int loadScripts)
 {
     iassert(save);
 
@@ -569,7 +569,7 @@ void __cdecl SV_InitGameVM(uint32_t randomSeed, int restart, int savegame, SaveG
     if (!++sv.skelTimeStamp)
         sv.skelTimeStamp = 1;
     sv.skelMemPos = 0;
-    g_sv_skel_memory_start = (char *)((uint32_t)&g_sv_skel_memory[15] & 0xFFFFFFF0);
+    g_sv_skel_memory_start = (char *)((uint)&g_sv_skel_memory[15] & 0xFFFFFFF0);
     SND_ErrorCleanup();
 
     {
@@ -607,7 +607,7 @@ void __cdecl SV_InitGameVM(uint32_t randomSeed, int restart, int savegame, SaveG
     }
 }
 
-void __cdecl SV_RestartGameProgs(uint32_t randomSeed, int savegame, SaveGame **save, int loadScripts)
+void __cdecl SV_RestartGameProgs(uint randomSeed, int savegame, SaveGame **save, int loadScripts)
 {
     iassert(Sys_IsMainThread());
     iassert(gameInitialized);
@@ -623,7 +623,7 @@ void __cdecl SV_RestartGameProgs(uint32_t randomSeed, int savegame, SaveGame **s
     SV_InitGameVM(randomSeed, 1, savegame, save, loadScripts);
 }
 
-void __cdecl SV_InitGameProgs(uint32_t randomSeed, int savegame, SaveGame **save)
+void __cdecl SV_InitGameProgs(uint randomSeed, int savegame, SaveGame **save)
 {
     iassert(save);
     gameInitialized = 1;
@@ -633,7 +633,7 @@ void __cdecl SV_InitGameProgs(uint32_t randomSeed, int savegame, SaveGame **save
 
 bool SV_SetBrushModel(gentity_s *ent)
 {
-    uint32_t index; // r3
+    uint index; // r3
     float mins[4]; // [sp+50h] [-30h] BYREF
     float maxs[4]; // [sp+60h] [-20h] BYREF
 
@@ -714,7 +714,7 @@ bool __cdecl SV_inSnapshot(const float *origin, int iEntityNum)
     float fogOpaqueDistSqrd; // [esp+8h] [ebp-20h]
     svEntity_s *svEnt; // [esp+Ch] [ebp-1Ch]
     int l; // [esp+10h] [ebp-18h]
-    uint32_t leafnum; // [esp+14h] [ebp-14h]
+    uint leafnum; // [esp+14h] [ebp-14h]
     gentity_s *ent; // [esp+18h] [ebp-10h]
     int i; // [esp+1Ch] [ebp-Ch]
     uint8_t *bitvector; // [esp+20h] [ebp-8h]
@@ -845,7 +845,7 @@ void __cdecl SV_SetGametype()
 
 void __cdecl SV_InitGameVM(int restart, int savepersist)
 {
-    uint32_t v2; // eax
+    uint v2; // eax
     int i; // [esp+0h] [ebp-4h]
 
     G_ResetEntityParsePoint();

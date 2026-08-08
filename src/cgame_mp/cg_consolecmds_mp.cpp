@@ -8,7 +8,7 @@
 #include <qcommon/cmd.h>
 
 
-void __cdecl CG_ScoresUp(int32_t localClientNum)
+void __cdecl CG_ScoresUp(int localClientNum)
 {
     cg_s *cgameGlob;
 
@@ -160,7 +160,7 @@ void __cdecl CG_ScoresDown_f()
     }
 }
 
-void __cdecl CG_ScoresDown(int32_t localClientNum)
+void __cdecl CG_ScoresDown(int localClientNum)
 {
     cg_s *cgameGlob;
 
@@ -189,7 +189,7 @@ void __cdecl CG_ShellShock_f()
     const char *v1; // eax
     shellshock_parms_t *ShellshockParms; // eax
     float v3; // [esp+0h] [ebp-28h]
-    int32_t v4; // [esp+4h] [ebp-24h]
+    int v4; // [esp+4h] [ebp-24h]
 
     cg_s *cgameGlob;
 

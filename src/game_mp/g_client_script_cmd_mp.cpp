@@ -13,13 +13,13 @@
 
 void __cdecl PlayerCmd_giveWeapon(scr_entref_t entref)
 {
-    int32_t wasGivenWeapon; // eax
+    int wasGivenWeapon; // eax
     byte weaponModel; // [esp+0h] [ebp-60h]
     gentity_s *pSelf; // [esp+4h] [ebp-5Ch]
     const char *weaponName; // [esp+8h] [ebp-58h]
     bool hadWeapon; // [esp+Ch] [ebp-54h]
     char svcmd[64]; // [esp+10h] [ebp-50h] BYREF
-    int32_t weaponIndex; // [esp+54h] [ebp-Ch]
+    int weaponIndex; // [esp+54h] [ebp-Ch]
     WeaponDef *weapDef; // [esp+58h] [ebp-8h]
     playerState_s *ps; // [esp+5Ch] [ebp-4h]
 
@@ -49,7 +49,7 @@ void __cdecl PlayerCmd_giveWeapon(scr_entref_t entref)
     {
         weapDef = BG_GetWeaponDef(weaponIndex);
         weaponModel = Scr_GetInt(1);
-        if ((uint32_t)weaponModel >= 0x100)
+        if ((uint)weaponModel >= 0x100)
         {
             weaponModel = 0;
             wasGivenWeapon = G_GivePlayerWeapon(&pSelf->client->ps, weaponIndex, 0);
@@ -73,12 +73,12 @@ LABEL_20:
     }
 }
 
-void __cdecl G_InitializeAmmo(gentity_s *pSelf, int32_t weaponIndex, uint8_t weaponModel, int32_t hadWeapon)
+void __cdecl G_InitializeAmmo(gentity_s *pSelf, int weaponIndex, uint8_t weaponModel, int hadWeapon)
 {
     gclient_s *client; // [esp+0h] [ebp-14h]
-    int32_t numWeapons; // [esp+4h] [ebp-10h]
-    int32_t startWeapon; // [esp+8h] [ebp-Ch]
-    int32_t ammoGive; // [esp+Ch] [ebp-8h]
+    int numWeapons; // [esp+4h] [ebp-10h]
+    int startWeapon; // [esp+8h] [ebp-Ch]
+    int ammoGive; // [esp+Ch] [ebp-8h]
     WeaponDef *weapDef; // [esp+10h] [ebp-4h]
 
     startWeapon = weaponIndex;
@@ -122,11 +122,11 @@ void __cdecl G_InitializeAmmo(gentity_s *pSelf, int32_t weaponIndex, uint8_t wea
     } while (Com_BitCheckAssert(client->ps.weapons, weaponIndex, 16));
 }
 
-int32_t __cdecl G_GetNeededStartAmmo(gentity_s *pSelf, WeaponDef *weapDef)
+int __cdecl G_GetNeededStartAmmo(gentity_s *pSelf, WeaponDef *weapDef)
 {
     WeaponDef *thisWeapDef; // [esp+0h] [ebp-14h]
-    int32_t applicableOwnedAmmo; // [esp+8h] [ebp-Ch]
-    uint32_t weapIndex; // [esp+Ch] [ebp-8h]
+    int applicableOwnedAmmo; // [esp+8h] [ebp-Ch]
+    uint weapIndex; // [esp+Ch] [ebp-8h]
     gclient_s *ps; // [esp+10h] [ebp-4h]
 
     if (!pSelf)
@@ -160,7 +160,7 @@ void __cdecl PlayerCmd_takeWeapon(scr_entref_t entref)
 {
     const char *v1; // eax
     gentity_s *pSelf; // [esp+0h] [ebp-Ch]
-    int32_t iWeaponIndex; // [esp+4h] [ebp-8h]
+    int iWeaponIndex; // [esp+4h] [ebp-8h]
     const char *pszWeaponName; // [esp+8h] [ebp-4h]
 
     if (entref.classnum)
@@ -188,7 +188,7 @@ void __cdecl PlayerCmd_takeAllWeapons(scr_entref_t entref)
 {
     const char *v1; // eax
     gentity_s *pSelf; // [esp+0h] [ebp-8h]
-    uint32_t weapIndex; // [esp+4h] [ebp-4h]
+    uint weapIndex; // [esp+4h] [ebp-4h]
 
     if (entref.classnum)
     {
@@ -215,7 +215,7 @@ void __cdecl PlayerCmd_getCurrentWeapon(scr_entref_t entref)
 {
     const char *v1; // eax
     gentity_s *pSelf; // [esp+0h] [ebp-10h]
-    int32_t weapon; // [esp+4h] [ebp-Ch]
+    int weapon; // [esp+4h] [ebp-Ch]
     WeaponDef *weapDef; // [esp+8h] [ebp-8h]
 
     if (entref.classnum)
@@ -296,7 +296,7 @@ void __cdecl PlayerCmd_setOffhandSecondaryClass(scr_entref_t entref)
 {
     const char *v1; // eax
     gentity_s *pSelf; // [esp+4h] [ebp-8h]
-    int32_t sf_text; // [esp+8h] [ebp-4h]
+    int sf_text; // [esp+8h] [ebp-4h]
 
     if (entref.classnum)
     {
@@ -379,7 +379,7 @@ void __cdecl PlayerCmd_hasWeapon(scr_entref_t entref)
     const char *v1; // eax
     gclient_s *client; // [esp+0h] [ebp-10h]
     gentity_s *pSelf; // [esp+4h] [ebp-Ch]
-    uint32_t iWeaponIndex; // [esp+8h] [ebp-8h]
+    uint iWeaponIndex; // [esp+8h] [ebp-8h]
     const char *pszWeaponName; // [esp+Ch] [ebp-4h]
 
     if (entref.classnum)
@@ -416,7 +416,7 @@ void __cdecl PlayerCmd_switchToWeapon(scr_entref_t entref)
 {
     gclient_s *client; // [esp+0h] [ebp-10h]
     gentity_s *pSelf; // [esp+4h] [ebp-Ch]
-    uint32_t iWeaponIndex; // [esp+8h] [ebp-8h]
+    uint iWeaponIndex; // [esp+8h] [ebp-8h]
     const char *pszWeaponName; // [esp+Ch] [ebp-4h]
 
     if (entref.classnum)
@@ -458,7 +458,7 @@ void __cdecl PlayerCmd_switchToOffhand(scr_entref_t entref)
 {
     gclient_s *client; // [esp+0h] [ebp-10h]
     gentity_s *pSelf; // [esp+4h] [ebp-Ch]
-    int32_t iWeaponIndex; // [esp+8h] [ebp-8h]
+    int iWeaponIndex; // [esp+8h] [ebp-8h]
     const char *pszWeaponName; // [esp+Ch] [ebp-4h]
 
     if (entref.classnum)
@@ -500,7 +500,7 @@ void __cdecl PlayerCmd_giveStartAmmo(scr_entref_t entref)
     const char *v1; // eax
     gclient_s *client; // [esp+0h] [ebp-10h]
     gentity_s *pSelf; // [esp+4h] [ebp-Ch]
-    uint32_t iWeaponIndex; // [esp+8h] [ebp-8h]
+    uint iWeaponIndex; // [esp+8h] [ebp-8h]
     const char *pszWeaponName; // [esp+Ch] [ebp-4h]
 
     if (entref.classnum)
@@ -533,9 +533,9 @@ void __cdecl PlayerCmd_giveMaxAmmo(scr_entref_t entref)
     gclient_s *client; // [esp+0h] [ebp-1Ch]
     gentity_s *pSelf; // [esp+4h] [ebp-18h]
     const char *weaponName; // [esp+8h] [ebp-14h]
-    int32_t maxWeaponAmmo; // [esp+Ch] [ebp-10h]
-    int32_t weaponIndex; // [esp+10h] [ebp-Ch]
-    int32_t ammoGive; // [esp+14h] [ebp-8h]
+    int maxWeaponAmmo; // [esp+Ch] [ebp-10h]
+    int weaponIndex; // [esp+10h] [ebp-Ch]
+    int ammoGive; // [esp+14h] [ebp-8h]
 
     if (entref.classnum)
     {
@@ -571,7 +571,7 @@ void __cdecl PlayerCmd_getFractionStartAmmo(scr_entref_t entref)
     const char *v1; // eax
     gclient_s *client; // [esp+4h] [ebp-18h]
     gentity_s *pSelf; // [esp+8h] [ebp-14h]
-    int32_t iWeaponIndex; // [esp+Ch] [ebp-10h]
+    int iWeaponIndex; // [esp+Ch] [ebp-10h]
     const char *pszWeaponName; // [esp+10h] [ebp-Ch]
     WeaponDef *weapDef; // [esp+14h] [ebp-8h]
     float fAmmoFrac; // [esp+18h] [ebp-4h]
@@ -621,7 +621,7 @@ void __cdecl PlayerCmd_getFractionMaxAmmo(scr_entref_t entref)
     const char *v1; // eax
     gclient_s *client; // [esp+4h] [ebp-18h]
     gentity_s *pSelf; // [esp+8h] [ebp-14h]
-    int32_t iWeaponIndex; // [esp+Ch] [ebp-10h]
+    int iWeaponIndex; // [esp+Ch] [ebp-10h]
     const char *pszWeaponName; // [esp+10h] [ebp-Ch]
     WeaponDef *weapDef; // [esp+14h] [ebp-8h]
     float fAmmoFrac; // [esp+18h] [ebp-4h]
@@ -1030,7 +1030,7 @@ void __cdecl PlayerCmd_SetViewmodel(scr_entref_t entref)
     const char *v1; // eax
     gentity_s *pSelf; // [esp+0h] [ebp-Ch]
     const char *modelName; // [esp+4h] [ebp-8h]
-    int32_t modelIndex; // [esp+8h] [ebp-4h]
+    int modelIndex; // [esp+8h] [ebp-4h]
 
     if (entref.classnum)
     {
@@ -1066,7 +1066,7 @@ void __cdecl PlayerCmd_GetViewmodel(scr_entref_t entref)
 {
     const char *v1; // eax
     gentity_s *pSelf; // [esp+0h] [ebp-8h]
-    uint32_t modelName; // [esp+4h] [ebp-4h]
+    uint modelName; // [esp+4h] [ebp-4h]
 
     if (entref.classnum)
     {
@@ -1116,7 +1116,7 @@ void __cdecl PlayerCmd_setSpawnWeapon(scr_entref_t entref)
 {
     const char *v1; // eax
     gentity_s *pSelf; // [esp+0h] [ebp-Ch]
-    int32_t iWeaponIndex; // [esp+4h] [ebp-8h]
+    int iWeaponIndex; // [esp+4h] [ebp-8h]
     const char *pszWeaponName; // [esp+8h] [ebp-4h]
 
     if (entref.classnum)
@@ -1151,9 +1151,9 @@ void __cdecl PlayerCmd_dropItem(scr_entref_t entref)
     const char *v1; // eax
     gentity_s *v2; // eax
     gentity_s *pSelf; // [esp+8h] [ebp-18h]
-    uint32_t iWeaponIndex; // [esp+Ch] [ebp-14h]
+    uint iWeaponIndex; // [esp+Ch] [ebp-14h]
     const gitem_s *pItem; // [esp+10h] [ebp-10h]
-    uint32_t dropTag; // [esp+14h] [ebp-Ch]
+    uint dropTag; // [esp+14h] [ebp-Ch]
     gentity_s *pDroppedItem; // [esp+18h] [ebp-8h]
     const char *pszItemName; // [esp+1Ch] [ebp-4h]
 
@@ -1213,12 +1213,12 @@ void __cdecl PlayerCmd_finishPlayerDamage(scr_entref_t entref)
     float *damage_from; // [esp+20h] [ebp-94h]
     gentity_s *tent; // [esp+24h] [ebp-90h]
     gentity_s *attacker; // [esp+28h] [ebp-8Ch]
-    int32_t damage; // [esp+2Ch] [ebp-88h]
+    int damage; // [esp+2Ch] [ebp-88h]
     meansOfDeath_t mod; // [esp+30h] [ebp-84h]
     float damage_time; // [esp+34h] [ebp-80h]
     gentity_s *pSelf; // [esp+38h] [ebp-7Ch]
-    int32_t knockback; // [esp+3Ch] [ebp-78h]
-    int32_t t; // [esp+40h] [ebp-74h]
+    int knockback; // [esp+3Ch] [ebp-78h]
+    int t; // [esp+40h] [ebp-74h]
     float *dir; // [esp+44h] [ebp-70h]
     float localdir[3]; // [esp+48h] [ebp-6Ch] BYREF
     float vDir[3]; // [esp+54h] [ebp-60h] BYREF
@@ -1226,9 +1226,9 @@ void __cdecl PlayerCmd_finishPlayerDamage(scr_entref_t entref)
     float vPoint[3]; // [esp+64h] [ebp-50h] BYREF
     float player_yaw; // [esp+70h] [ebp-44h]
     gentity_s *tempBulletHitEntity; // [esp+74h] [ebp-40h]
-    int32_t iWeapon; // [esp+78h] [ebp-3Ch]
-    int32_t psTimeOffset; // [esp+7Ch] [ebp-38h]
-    int32_t dflags; // [esp+80h] [ebp-34h]
+    int iWeapon; // [esp+78h] [ebp-3Ch]
+    int psTimeOffset; // [esp+7Ch] [ebp-38h]
+    int dflags; // [esp+80h] [ebp-34h]
     float mass; // [esp+84h] [ebp-30h]
     float flinchYawDir; // [esp+88h] [ebp-2Ch]
     gentity_s *inflictor; // [esp+8Ch] [ebp-28h]
@@ -1469,7 +1469,7 @@ void __cdecl PlayerCmd_finishPlayerDamage(scr_entref_t entref)
 
 bool __cdecl IsBulletImpactMOD(meansOfDeath_t mod)
 {
-    if ((uint32_t)mod >= MOD_NUM)
+    if ((uint)mod >= MOD_NUM)
         MyAssertHandler(
             "c:\\trees\\cod3\\src\\game_mp\\../bgame/bg_public.h",
             961,
@@ -1510,7 +1510,7 @@ void __cdecl PlayerCmd_Suicide(scr_entref_t entref)
 void __cdecl PlayerCmd_OpenMenu(scr_entref_t entref)
 {
     gentity_s *pSelf; // [esp+0h] [ebp-50h]
-    uint32_t iMenuIndex; // [esp+4h] [ebp-4Ch]
+    uint iMenuIndex; // [esp+4h] [ebp-4Ch]
     char svcmd[68]; // [esp+8h] [ebp-48h] BYREF
 
     if (entref.classnum)
@@ -1551,7 +1551,7 @@ void __cdecl PlayerCmd_OpenMenu(scr_entref_t entref)
 void __cdecl PlayerCmd_OpenMenuNoMouse(scr_entref_t entref)
 {
     gentity_s *pSelf; // [esp+0h] [ebp-50h]
-    uint32_t iMenuIndex; // [esp+4h] [ebp-4Ch]
+    uint iMenuIndex; // [esp+4h] [ebp-4Ch]
     char svcmd[68]; // [esp+8h] [ebp-48h] BYREF
 
     if (entref.classnum)
@@ -1640,11 +1640,11 @@ void __cdecl PlayerCmd_CloseInGameMenu(scr_entref_t entref)
 void __cdecl PlayerCmd_SetWeaponAmmoClip(scr_entref_t entref)
 {
     const char *v1; // eax
-    int32_t ammoCount; // [esp+0h] [ebp-18h]
+    int ammoCount; // [esp+0h] [ebp-18h]
     gentity_s *pSelf; // [esp+4h] [ebp-14h]
     const char *weapName; // [esp+8h] [ebp-10h]
-    int32_t clipIndex; // [esp+Ch] [ebp-Ch]
-    int32_t weapIndex; // [esp+10h] [ebp-8h]
+    int clipIndex; // [esp+Ch] [ebp-Ch]
+    int weapIndex; // [esp+10h] [ebp-8h]
     WeaponDef *weapDef; // [esp+14h] [ebp-4h]
 
     if (entref.classnum)
@@ -1695,15 +1695,15 @@ void __cdecl PlayerCmd_SetWeaponAmmoStock(scr_entref_t entref)
     VariableUnion v3; // [esp+4h] [ebp-34h]
     VariableUnion v4; // [esp+8h] [ebp-30h]
     VariableUnion v5; // [esp+10h] [ebp-28h]
-    int32_t ammoIdx; // [esp+14h] [ebp-24h]
-    int32_t maxAmmo; // [esp+18h] [ebp-20h]
-    int32_t clipIdx; // [esp+1Ch] [ebp-1Ch]
+    int ammoIdx; // [esp+14h] [ebp-24h]
+    int maxAmmo; // [esp+18h] [ebp-20h]
+    int clipIdx; // [esp+1Ch] [ebp-1Ch]
     gentity_s *pSelf; // [esp+20h] [ebp-18h]
     const char *weapName; // [esp+24h] [ebp-14h]
-    int32_t weapIdx; // [esp+28h] [ebp-10h]
+    int weapIdx; // [esp+28h] [ebp-10h]
     playerState_s *ps; // [esp+2Ch] [ebp-Ch]
     WeaponDef *weapDef; // [esp+30h] [ebp-8h]
-    int32_t newAmmoCnt; // [esp+34h] [ebp-4h]
+    int newAmmoCnt; // [esp+34h] [ebp-4h]
 
     if (entref.classnum)
     {
@@ -1766,8 +1766,8 @@ void __cdecl PlayerCmd_GetWeaponAmmoClip(scr_entref_t entref)
 {
     gentity_s *pSelf; // [esp+0h] [ebp-10h]
     const char *weapName; // [esp+4h] [ebp-Ch]
-    int32_t weapIdx; // [esp+8h] [ebp-8h]
-    int32_t clipIdx; // [esp+Ch] [ebp-4h]
+    int weapIdx; // [esp+8h] [ebp-8h]
+    int clipIdx; // [esp+Ch] [ebp-4h]
 
     if (entref.classnum)
     {
@@ -1799,11 +1799,11 @@ void __cdecl PlayerCmd_GetWeaponAmmoClip(scr_entref_t entref)
 
 void __cdecl PlayerCmd_GetWeaponAmmoStock(scr_entref_t entref)
 {
-    int32_t ammoIdx; // [esp+0h] [ebp-14h]
-    int32_t clipIdx; // [esp+4h] [ebp-10h]
+    int ammoIdx; // [esp+0h] [ebp-14h]
+    int clipIdx; // [esp+4h] [ebp-10h]
     gentity_s *pSelf; // [esp+8h] [ebp-Ch]
     const char *weapName; // [esp+Ch] [ebp-8h]
-    int32_t weapIdx; // [esp+10h] [ebp-4h]
+    int weapIdx; // [esp+10h] [ebp-4h]
 
     if (entref.classnum)
     {
@@ -1845,9 +1845,9 @@ void __cdecl PlayerCmd_AnyAmmoForWeaponModes(scr_entref_t entref)
 {
     gentity_s *pSelf; // [esp+0h] [ebp-14h]
     const char *weapName; // [esp+4h] [ebp-10h]
-    int32_t weapIdx; // [esp+8h] [ebp-Ch]
-    uint32_t altWeapIdx; // [esp+Ch] [ebp-8h]
-    int32_t totalAmmo; // [esp+10h] [ebp-4h]
+    int weapIdx; // [esp+8h] [ebp-Ch]
+    uint altWeapIdx; // [esp+Ch] [ebp-8h]
+    int totalAmmo; // [esp+10h] [ebp-4h]
 
     if (entref.classnum)
     {
@@ -1992,9 +1992,9 @@ void __cdecl PlayerCmd_ClonePlayer(scr_entref_t entref)
     const DObj_s *dobj; // [esp+50h] [ebp-1Ch]
     XAnimTree_s *tree; // [esp+54h] [ebp-18h]
     gentity_s *body; // [esp+58h] [ebp-14h]
-    int32_t deathAnimDuration; // [esp+5Ch] [ebp-10h]
+    int deathAnimDuration; // [esp+5Ch] [ebp-10h]
     corpseInfo_t *corpseInfo; // [esp+64h] [ebp-8h]
-    int32_t axis; // [esp+68h] [ebp-4h]
+    int axis; // [esp+68h] [ebp-4h]
 
     if (entref.classnum)
     {
@@ -2108,13 +2108,13 @@ void __cdecl PlayerCmd_ClonePlayer(scr_entref_t entref)
 
 void __cdecl PlayerCmd_SetClientDvar(scr_entref_t entref)
 {
-    uint32_t NumParam; // eax
+    uint NumParam; // eax
     const char *v3; // eax
     char v4; // al
     const char *v5; // eax
     const char *pszDvar; // [esp+18h] [ebp-818h]
     const char *pszText; // [esp+1Ch] [ebp-814h]
-    int32_t i; // [esp+24h] [ebp-80Ch]
+    int i; // [esp+24h] [ebp-80Ch]
     char szString[1024]; // [esp+28h] [ebp-808h] BYREF
     char szOutString[1024]; // [esp+428h] [ebp-408h] BYREF
     char *pCh; // [esp+82Ch] [ebp-4h]
@@ -2174,7 +2174,7 @@ void __cdecl PlayerCmd_SetClientDvars(scr_entref_t entref)
     char finalString[1024]; // [esp+8h] [ebp-810h] BYREF
     char tempString[1024]; // [esp+408h] [ebp-410h] BYREF
     const char *dvarName; // [esp+80Ch] [ebp-Ch]
-    uint32_t i; // [esp+810h] [ebp-8h]
+    uint i; // [esp+810h] [ebp-8h]
     const char *value; // [esp+814h] [ebp-4h]
 
     if (entref.classnum)
@@ -2225,7 +2225,7 @@ void __cdecl PlayerCmd_IsTalking(scr_entref_t entref)
 {
     const char *v1; // eax
     gentity_s *pSelf; // [esp+0h] [ebp-8h]
-    int32_t elapsedTime; // [esp+4h] [ebp-4h]
+    int elapsedTime; // [esp+4h] [ebp-4h]
 
     if (entref.classnum)
     {
@@ -2331,7 +2331,7 @@ void __cdecl PlayerCmd_SetReverb(scr_entref_t entref)
     float wetlevel; // [esp+28h] [ebp-10h]
     const char *pszReverb; // [esp+2Ch] [ebp-Ch]
     uint16_t prio_name; // [esp+30h] [ebp-8h]
-    int32_t prio; // [esp+34h] [ebp-4h]
+    int prio; // [esp+34h] [ebp-4h]
 
     if (entref.classnum)
     {
@@ -2401,8 +2401,8 @@ void __cdecl PlayerCmd_DeactivateReverb(scr_entref_t e)
     uint16_t v1; // r30
     const char *v2; // r3
     double Float; // fp31
-    uint32_t NumParam; // r3
-    int32_t ConstString; // r10
+    uint NumParam; // r3
+    int ConstString; // r10
     const char *v6; // r3
 
     v1 = HIWORD(entref);
@@ -2441,11 +2441,11 @@ LABEL_6:
 
 void __cdecl PlayerCmd_SetChannelVolumes(scr_entref_t entref)
 {
-    uint32_t NumParam; // [esp+8h] [ebp-18h]
+    uint NumParam; // [esp+8h] [ebp-18h]
     float fadetime; // [esp+10h] [ebp-10h]
-    int32_t shockIndex; // [esp+14h] [ebp-Ch]
+    int shockIndex; // [esp+14h] [ebp-Ch]
     uint16_t prio_name; // [esp+18h] [ebp-8h]
-    int32_t prio; // [esp+1Ch] [ebp-4h]
+    int prio; // [esp+1Ch] [ebp-4h]
 
     if (entref.classnum)
     {
@@ -2506,8 +2506,8 @@ void __cdecl PlayerCmd_DeactivateChannelVolumes(scr_entref_t e)
     uint16_t v1; // r30
     const char *v2; // r3
     double Float; // fp31
-    uint32_t NumParam; // r3
-    int32_t ConstString; // r10
+    uint NumParam; // r3
+    int ConstString; // r10
     const char *v6; // r3
 
     v1 = HIWORD(entref);
@@ -2603,7 +2603,7 @@ void __cdecl ScrCmd_StopLocalSound(scr_entref_t entref)
 void __cdecl PlayerCmd_SayAll(scr_entref_t entref)
 {
     const char *v1; // eax
-    uint32_t NumParam; // eax
+    uint NumParam; // eax
     gentity_s *pSelf; // [esp+0h] [ebp-40Ch]
     char szString[1028]; // [esp+4h] [ebp-408h] BYREF
 
@@ -2632,7 +2632,7 @@ void __cdecl PlayerCmd_SayAll(scr_entref_t entref)
 void __cdecl PlayerCmd_SayTeam(scr_entref_t entref)
 {
     const char *v1; // eax
-    uint32_t NumParam; // eax
+    uint NumParam; // eax
     gentity_s *pSelf; // [esp+0h] [ebp-40Ch]
     char szString[1028]; // [esp+4h] [ebp-408h] BYREF
 
@@ -2756,7 +2756,7 @@ void __cdecl PlayerCmd_SetSpreadOverride(scr_entref_t entref)
     const char *v1; // eax
     const char *v2; // eax
     gentity_s *pSelf; // [esp+0h] [ebp-8h]
-    int32_t value; // [esp+4h] [ebp-4h]
+    int value; // [esp+4h] [ebp-4h]
 
     if (entref.classnum)
     {
@@ -2833,7 +2833,7 @@ void __cdecl PlayerCmd_AllowSpectateTeam(scr_entref_t entref)
     const char *v1; // eax
     gentity_s *pSelf; // [esp+0h] [ebp-10h]
     uint16_t teamString; // [esp+8h] [ebp-8h]
-    int32_t teamBit; // [esp+Ch] [ebp-4h]
+    int teamBit; // [esp+Ch] [ebp-4h]
 
     if (entref.classnum)
     {
@@ -2933,9 +2933,9 @@ void __cdecl PlayerCmd_BeginLocationSelection(scr_entref_t entref)
     gentity_s *pSelf; // [esp+10h] [ebp-14h]
     float radius; // [esp+14h] [ebp-10h]
     float radiusa; // [esp+14h] [ebp-10h]
-    int32_t locSelIndex; // [esp+18h] [ebp-Ch]
+    int locSelIndex; // [esp+18h] [ebp-Ch]
     const char *locSelName; // [esp+1Ch] [ebp-8h]
-    uint32_t radiusBits; // [esp+20h] [ebp-4h]
+    uint radiusBits; // [esp+20h] [ebp-4h]
 
     if (entref.classnum)
     {
@@ -3046,12 +3046,12 @@ void __cdecl PlayerCmd_EndLocationSelection(scr_entref_t entref)
 
 void __cdecl PlayerCmd_SetActionSlot(scr_entref_t entref)
 {
-    uint32_t weaponIdx; // [esp+0h] [ebp-10h]
+    uint weaponIdx; // [esp+0h] [ebp-10h]
     const char *str; // [esp+4h] [ebp-Ch]
     const char *stra; // [esp+4h] [ebp-Ch]
     gentity_s *pSelf; // [esp+8h] [ebp-8h]
-    int32_t slot; // [esp+Ch] [ebp-4h]
-    int32_t slota; // [esp+Ch] [ebp-4h]
+    int slot; // [esp+Ch] [ebp-4h]
+    int slota; // [esp+Ch] [ebp-4h]
 
     if (entref.classnum)
     {
@@ -3120,8 +3120,8 @@ void __cdecl PlayerCmd_GetWeaponsList(scr_entref_t entref)
     gclient_s *client; // [esp+0h] [ebp-14h]
     WeaponDef *weapDef; // [esp+4h] [ebp-10h]
     gentity_s *pSelf; // [esp+8h] [ebp-Ch]
-    uint32_t weapCount; // [esp+Ch] [ebp-8h]
-    uint32_t idx; // [esp+10h] [ebp-4h]
+    uint weapCount; // [esp+Ch] [ebp-8h]
+    uint idx; // [esp+10h] [ebp-4h]
 
     if (entref.classnum)
     {
@@ -3161,8 +3161,8 @@ void __cdecl PlayerCmd_GetWeaponsListPrimaries(scr_entref_t entref)
     gclient_s *client; // [esp+0h] [ebp-14h]
     WeaponDef *weapDef; // [esp+4h] [ebp-10h]
     gentity_s *pSelf; // [esp+8h] [ebp-Ch]
-    uint32_t weapCount; // [esp+Ch] [ebp-8h]
-    uint32_t idx; // [esp+10h] [ebp-4h]
+    uint weapCount; // [esp+Ch] [ebp-8h]
+    uint idx; // [esp+10h] [ebp-4h]
 
     if (entref.classnum)
     {
@@ -3203,7 +3203,7 @@ void __cdecl PlayerCmd_SetPerk(scr_entref_t entref)
 {
     gentity_s *pSelf; // [esp+0h] [ebp-Ch]
     const char *perkName; // [esp+4h] [ebp-8h]
-    uint32_t perkIndex; // [esp+8h] [ebp-4h]
+    uint perkIndex; // [esp+8h] [ebp-4h]
 
     if (entref.classnum)
     {
@@ -3230,7 +3230,7 @@ void __cdecl PlayerCmd_SetPerk(scr_entref_t entref)
     BG_SetPerk(&pSelf->client->sess.cs.perks, perkIndex);
 }
 
-void __cdecl BG_SetPerk(int32_t *perks, uint32_t perkIndex)
+void __cdecl BG_SetPerk(int *perks, uint perkIndex)
 {
     iassert(perks);
     bcassert(perkIndex, PERK_COUNT);
@@ -3240,10 +3240,10 @@ void __cdecl BG_SetPerk(int32_t *perks, uint32_t perkIndex)
 
 void __cdecl PlayerCmd_HasPerk(scr_entref_t entref)
 {
-    int32_t perks; // [esp+0h] [ebp-10h]
+    int perks; // [esp+0h] [ebp-10h]
     gentity_s *pSelf; // [esp+4h] [ebp-Ch]
     const char *perkName; // [esp+8h] [ebp-8h]
-    uint32_t perkIndex; // [esp+Ch] [ebp-4h]
+    uint perkIndex; // [esp+Ch] [ebp-4h]
 
     if (entref.classnum)
     {
@@ -3282,7 +3282,7 @@ void __cdecl PlayerCmd_UnsetPerk(scr_entref_t entref)
 {
     gentity_s *pSelf; // [esp+0h] [ebp-Ch]
     const char *perkName; // [esp+4h] [ebp-8h]
-    uint32_t perkIndex; // [esp+8h] [ebp-4h]
+    uint perkIndex; // [esp+8h] [ebp-4h]
 
     if (entref.classnum)
     {
@@ -3309,7 +3309,7 @@ void __cdecl PlayerCmd_UnsetPerk(scr_entref_t entref)
     BG_UnsetPerk(&pSelf->client->sess.cs.perks, perkIndex);
 }
 
-void __cdecl BG_UnsetPerk(int32_t *perks, uint32_t perkIndex)
+void __cdecl BG_UnsetPerk(int *perks, uint perkIndex)
 {
     if (!perks)
         MyAssertHandler("c:\\trees\\cod3\\src\\bgame\\../bgame/bg_perks_mp.h", 55, 0, "%s", "perks");
@@ -3329,8 +3329,8 @@ void __cdecl PlayerCmd_ClearPerks(scr_entref_t entref)
     const char *v1; // eax
     gclient_s *client; // eax
     gclient_s *v3; // eax
-    int32_t *v4; // [esp+0h] [ebp-Ch]
-    int32_t *p_perks; // [esp+4h] [ebp-8h]
+    int *v4; // [esp+0h] [ebp-Ch]
+    int *p_perks; // [esp+4h] [ebp-8h]
     gentity_s *pSelf; // [esp+8h] [ebp-4h]
 
     if (entref.classnum)
@@ -3394,12 +3394,12 @@ void __cdecl PlayerCmd_UpdateScores(scr_entref_t entref)
 void __cdecl PlayerCmd_UpdateDMScores(scr_entref_t entref)
 {
     const char *v1; // eax
-    int32_t i; // [esp+4h] [ebp-58h]
+    int i; // [esp+4h] [ebp-58h]
     gentity_s *pSelf; // [esp+8h] [ebp-54h]
     char svcmd[64]; // [esp+Ch] [ebp-50h] BYREF
-    int32_t numSorted; // [esp+50h] [ebp-Ch]
-    int32_t nextBestClientIndex; // [esp+54h] [ebp-8h]
-    int32_t selfClientIndex; // [esp+58h] [ebp-4h]
+    int numSorted; // [esp+50h] [ebp-Ch]
+    int nextBestClientIndex; // [esp+54h] [ebp-8h]
+    int selfClientIndex; // [esp+58h] [ebp-4h]
 
     if (entref.classnum)
     {
@@ -3445,8 +3445,8 @@ void __cdecl PlayerCmd_SetRank(scr_entref_t entref)
     const char *v2; // eax
     const char *v3; // eax
     gentity_s *pSelf; // [esp+0h] [ebp-Ch]
-    int32_t prestige; // [esp+4h] [ebp-8h]
-    int32_t rank; // [esp+8h] [ebp-4h]
+    int prestige; // [esp+4h] [ebp-8h]
+    int rank; // [esp+8h] [ebp-4h]
 
     if (entref.classnum)
     {
@@ -3465,13 +3465,13 @@ void __cdecl PlayerCmd_SetRank(scr_entref_t entref)
         }
     }
     rank = Scr_GetInt(0);
-    if ((uint32_t)rank < 0x100)
+    if ((uint)rank < 0x100)
     {
         pSelf->client->sess.cs.rank = rank;
         if (Scr_GetNumParam() >= 2)
         {
             prestige = Scr_GetInt(1);
-            if ((uint32_t)prestige < 0x100)
+            if ((uint)prestige < 0x100)
             {
                 pSelf->client->sess.cs.prestige = prestige;
             }
@@ -3582,7 +3582,7 @@ const BuiltinMethodDef methods[83] =
 
 void(__cdecl *__cdecl Player_GetMethod(const char **pName))(scr_entref_t)
 {
-    uint32_t i; // [esp+18h] [ebp-4h]
+    uint i; // [esp+18h] [ebp-4h]
 
     for (i = 0; i < 0x53; ++i)
     {

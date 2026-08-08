@@ -38,7 +38,7 @@ struct unz_file_info_s;
 struct unz_global_info_s;
 
 // snd_stopsounds_arg_t forward (from sound/snd_public.h which pulls mss.h)
-enum snd_stopsounds_arg_t : __int32;
+enum snd_stopsounds_arg_t : int;
 
 // Globals from database/db_registry.cpp / win32/win_main.cpp / qcommon/threads.cpp
 // (those files are not in the Radiant build set).
@@ -48,18 +48,18 @@ MaterialGlobals materialGlobals{};
 GfxWorld s_world{};
 fileData_s *com_fileDataHashTable[1024] = {};
 HWND g_splashWnd = nullptr;
-uint32_t s_affinityMaskForCpu[4] = {};
-uint32_t s_affinityMaskForProcess = 0;
-uint32_t s_cpuCount = 1;
-volatile uint32_t g_mainThreadBlocked = 0;
+uint s_affinityMaskForCpu[4] = {};
+uint s_affinityMaskForProcess = 0;
+uint s_cpuCount = 1;
+volatile uint g_mainThreadBlocked = 0;
 
 // Renderer hooks normally supplied by the SP client/cgame targets.
 namespace
 {
     constexpr long RADIANT_SKEL_MEMORY_SIZE = 0x200000;
-    __declspec(align(16)) unsigned char s_radiantSkelMemory[RADIANT_SKEL_MEMORY_SIZE];
+    __declspec(align(16)) byte s_radiantSkelMemory[RADIANT_SKEL_MEMORY_SIZE];
     volatile long s_radiantSkelMemoryPos = 0;
-    uint32_t s_radiantSkelFrame = UINT32_MAX;
+    uint s_radiantSkelFrame = UINT32_MAX;
 }
 
 DObjAnimMat *__cdecl CG_DObjCalcPose(const cpose_t *pose, const DObj_s *obj, int *partBits)
@@ -67,7 +67,7 @@ DObjAnimMat *__cdecl CG_DObjCalcPose(const cpose_t *pose, const DObj_s *obj, int
     iassert(pose);
     iassert(obj);
 
-    const uint32_t frame = rg.frontEndFrameCount;
+    const uint frame = rg.frontEndFrameCount;
     if (s_radiantSkelFrame != frame)
     {
         s_radiantSkelFrame = frame;
@@ -327,7 +327,7 @@ int  __cdecl Com_SafeMode()   { return 0; }
 bool __cdecl Com_LogFileOpen() { return false; }
 void __cdecl Com_StartupVariable(const char *match) { (void)match; }
 void __cdecl Com_SyncThreads() {}
-DObj_s *__cdecl Com_GetClientDObj(uint32_t handle, int localClientNum) { (void)handle; (void)localClientNum; return nullptr; }
+DObj_s *__cdecl Com_GetClientDObj(uint handle, int localClientNum) { (void)handle; (void)localClientNum; return nullptr; }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Sys_* — threading / renderer / process stubs
@@ -381,10 +381,10 @@ int  __cdecl Sys_IsMainThreadReady()    { return 1; }
 int  __cdecl Sys_IsRendererReady()      { return 1; }
 int  __cdecl Sys_RendererReady()        { return 1; }
 int  __cdecl Sys_WaitBackendEvent()     { return 0; }
-uint32_t __cdecl Sys_GetCpuCount()      { return 1; }
+uint __cdecl Sys_GetCpuCount()      { return 1; }
 
-char __cdecl Sys_SpawnRenderThread(void(__cdecl *function)(uint32_t)) { (void)function; return 1; }
-bool __cdecl Sys_SpawnWorkerThread(void(__cdecl *function)(uint32_t), uint32_t idx) { (void)function; (void)idx; return true; }
+char __cdecl Sys_SpawnRenderThread(void(__cdecl *function)(uint)) { (void)function; return 1; }
+bool __cdecl Sys_SpawnWorkerThread(void(__cdecl *function)(uint), uint idx) { (void)function; (void)idx; return true; }
 
 void __cdecl Sys_SuspendThread(ThreadContext_t ctx) { (void)ctx; }
 void __cdecl Sys_ResumeThread(ThreadContext_t ctx)  { (void)ctx; }
@@ -404,9 +404,9 @@ int __cdecl BoxOnPlaneSide(const float *emins, const float *emaxs, const cplane_
     return 3; // both sides
 }
 
-void __cdecl _copyDWord(uint32_t *dest, uint32_t constant, uint32_t count)
+void __cdecl _copyDWord(uint *dest, uint constant, uint count)
 {
-    for (uint32_t i = 0; i < count; ++i)
+    for (uint i = 0; i < count; ++i)
         dest[i] = constant;
 }
 
@@ -414,7 +414,7 @@ void __cdecl _copyDWord(uint32_t *dest, uint32_t constant, uint32_t count)
 // CM (collision map) stubs
 // ─────────────────────────────────────────────────────────────────────────────
 void __cdecl CM_BoxTrace(trace_t *results, const float *start, const float *end,
-    const float *mins, const float *maxs, uint32_t model, int contentmask)
+    const float *mins, const float *maxs, uint model, int contentmask)
 {
     (void)results; (void)start; (void)end; (void)mins; (void)maxs; (void)model; (void)contentmask;
     if (results) memset(results, 0, sizeof(*results));
@@ -426,12 +426,12 @@ int  __cdecl CM_TraceBox(const TraceExtents *te, float *p1, float *p2, float dis
 { (void)te; (void)p1; (void)p2; (void)dist; return 0; }
 
 int  __cdecl CM_BoxSightTrace(int model, const float *start, const float *end,
-    const float *mins, const float *maxs, uint32_t mask, int skipmask)
+    const float *mins, const float *maxs, uint mask, int skipmask)
 { (void)model; (void)start; (void)end; (void)mins; (void)maxs; (void)mask; (void)skipmask; return 0; }
 
 int  __cdecl CM_GetPlaneCount() { return 0; }
 cplane_s *__cdecl CM_GetPlanes() { return nullptr; }
-uint8_t *__cdecl CM_Hunk_Alloc(uint32_t size, const char *name, int type)
+uint8_t *__cdecl CM_Hunk_Alloc(uint size, const char *name, int type)
 { (void)size; (void)name; (void)type; return nullptr; }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -443,7 +443,7 @@ void __cdecl DB_ResetZoneSize(int rebuild) { (void)rebuild; }
 void __cdecl DB_ShutdownXAssets()          {}
 void __cdecl DB_SyncXAssets()              {}
 void __cdecl DB_LoadedExternalData(int idx){ (void)idx; }
-void __cdecl DB_LoadXAssets(XZoneInfo *zoneInfo, uint32_t zoneCount, int sync)
+void __cdecl DB_LoadXAssets(XZoneInfo *zoneInfo, uint zoneCount, int sync)
 { (void)zoneInfo; (void)zoneCount; (void)sync; }
 
 bool __cdecl DB_IsMinimumFastFileLoaded()           { return true; }
@@ -469,33 +469,33 @@ void __cdecl DB_GetVertexBufferAndOffset(uint8_t zoneHandle, uint8_t *verts, voi
 const FxEffectDef *__cdecl FX_Register(const char *name) { (void)name; return nullptr; }
 FxSystem *__cdecl FX_GetSystem(int clientIndex) { (void)clientIndex; return nullptr; }
 
-void __cdecl FX_BeginUpdate(int32_t localClientNum) { (void)localClientNum; }
-void __cdecl FX_FillUpdateCmd(int32_t localClientNum, FxCmd *cmd) { (void)localClientNum; (void)cmd; }
+void __cdecl FX_BeginUpdate(int localClientNum) { (void)localClientNum; }
+void __cdecl FX_FillUpdateCmd(int localClientNum, FxCmd *cmd) { (void)localClientNum; (void)cmd; }
 void __cdecl FX_GenerateVerts(FxGenerateVertsCmd *cmd) { (void)cmd; }
-void __cdecl FX_RunPhysics(int32_t localClientNum) { (void)localClientNum; }
-void __cdecl FX_SetNextUpdateCamera(int32_t localClientNum, const refdef_s *refdef, float zfar)
+void __cdecl FX_RunPhysics(int localClientNum) { (void)localClientNum; }
+void __cdecl FX_SetNextUpdateCamera(int localClientNum, const refdef_s *refdef, float zfar)
 { (void)localClientNum; (void)refdef; (void)zfar; }
 
-void __cdecl FX_BeginGeneratingMarkVertsForEntModels(int32_t lc, uint32_t *indexCount)
+void __cdecl FX_BeginGeneratingMarkVertsForEntModels(int lc, uint *indexCount)
 { (void)lc; (void)indexCount; }
-void __cdecl FX_EndGeneratingMarkVertsForEntModels(int32_t lc) { (void)lc; }
+void __cdecl FX_EndGeneratingMarkVertsForEntModels(int lc) { (void)lc; }
 
-void __cdecl FX_GenerateMarkVertsForEntXModel(int32_t lc, int32_t markGroup, uint32_t *indexCount,
+void __cdecl FX_GenerateMarkVertsForEntXModel(int lc, int markGroup, uint *indexCount,
     uint16_t entityHandle, uint8_t unused, const GfxScaledPlacement *placement)
 { (void)lc; (void)markGroup; (void)indexCount; (void)entityHandle; (void)unused; (void)placement; }
 
-void __cdecl FX_GenerateMarkVertsForEntBrush(int32_t lc, int32_t entId, uint32_t *indexCount,
+void __cdecl FX_GenerateMarkVertsForEntBrush(int lc, int entId, uint *indexCount,
     uint8_t reflectionProbeIndex, const GfxPlacement *placement)
 { (void)lc; (void)entId; (void)indexCount; (void)reflectionProbeIndex; (void)placement; }
 
-void __cdecl FX_GenerateMarkVertsForEntDObj(int32_t lc, int32_t markGroup, uint32_t *indexCount,
+void __cdecl FX_GenerateMarkVertsForEntDObj(int lc, int markGroup, uint *indexCount,
     uint16_t entityHandle, uint8_t unused, const DObj_s *dobj, const cpose_t *pose)
 { (void)lc; (void)markGroup; (void)indexCount; (void)entityHandle; (void)unused; (void)dobj; (void)pose; }
 
-void __cdecl FX_GenerateMarkVertsForStaticModels(int32_t lc, int32_t markGroup, const uint8_t *visData)
+void __cdecl FX_GenerateMarkVertsForStaticModels(int lc, int markGroup, const uint8_t *visData)
 { (void)lc; (void)markGroup; (void)visData; }
 
-void __cdecl FX_GenerateMarkVertsForWorld(int32_t lc) { (void)lc; }
+void __cdecl FX_GenerateMarkVertsForWorld(int lc) { (void)lc; }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // DynEnt stubs
@@ -518,16 +518,16 @@ DynEntityPose *__cdecl DynEnt_GetClientModelPoseList()         { return nullptr;
 bool __cdecl SND_IsMultiChannel()                              { return false; }
 void __cdecl SND_StopSounds(snd_stopsounds_arg_t which)        { (void)which; }
 LoadedSound *__cdecl SND_LoadSoundFile(const char *name)       { (void)name; return nullptr; }
-int  __cdecl SND_GetSoundFileSize(uint32_t *outSize)           { if (outSize) *outSize = 0; return 0; }
+int  __cdecl SND_GetSoundFileSize(uint *outSize)           { if (outSize) *outSize = 0; return 0; }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Scr stubs
 // ─────────────────────────────────────────────────────────────────────────────
 void __cdecl Scr_AddArray()                              {}
-void __cdecl Scr_AddConstString(uint32_t s)              { (void)s; }
+void __cdecl Scr_AddConstString(uint s)              { (void)s; }
 void __cdecl Scr_AddFloat(float f)                       { (void)f; }
 void __cdecl Scr_MonitorCommand(const char *cmd)         { (void)cmd; }
-void __cdecl Scr_NotifyNum(uint32_t id, uint32_t type, uint32_t name, uint32_t count)
+void __cdecl Scr_NotifyNum(uint id, uint type, uint name, uint count)
 { (void)id; (void)type; (void)name; (void)count; }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -542,14 +542,14 @@ char *__cdecl SEH_LocalizeTextMessage(const char *text, const char *msgType, msg
 { (void)msgType; (void)errType; return const_cast<char *>(text ? text : ""); }
 
 char *__cdecl SEH_SafeTranslateString(char *s)             { return s ? s : const_cast<char *>(""); }
-const char *__cdecl SEH_GetLanguageName(uint32_t lang)     { (void)lang; return "english"; }
+const char *__cdecl SEH_GetLanguageName(uint lang)     { (void)lang; return "english"; }
 int  __cdecl SEH_GetLanguageIndexForName(const char *name, int *idx)
 { (void)name; if (idx) *idx = 0; return 0; }
 int  __cdecl SEH_GetCurrentLanguage()                       { return 0; }
 int  __cdecl SEH_PrintStrlen(const char *s)                 { return s ? (int)strlen(s) : 0; }
-uint32_t __cdecl SEH_DecodeLetter(uint32_t c, uint32_t font, int *outLen, int *outGlyph)
+uint __cdecl SEH_DecodeLetter(uint c, uint font, int *outLen, int *outGlyph)
 { (void)c; (void)font; if (outLen) *outLen = 1; if (outGlyph) *outGlyph = 0; return c; }
-uint32_t __cdecl SEH_ReadCharFromString(const char **text, int *isTrailingPunct)
+uint __cdecl SEH_ReadCharFromString(const char **text, int *isTrailingPunct)
 {
     if (!text || !*text || !**text) { if (isTrailingPunct) *isTrailingPunct = 0; return 0; }
     if (isTrailingPunct) *isTrailingPunct = 0;
@@ -603,11 +603,11 @@ void __cdecl Phys_ObjSetCollisionFromXModel(const XModel *model, PhysWorld world
 // ─────────────────────────────────────────────────────────────────────────────
 // FX worker-thread update stubs (r_workercmds_common.cpp)
 // ─────────────────────────────────────────────────────────────────────────────
-void __cdecl FX_FillGenerateVertsCmd(int32_t localClientNum, FxGenerateVertsCmd *cmd) { (void)localClientNum; (void)cmd; }
+void __cdecl FX_FillGenerateVertsCmd(int localClientNum, FxGenerateVertsCmd *cmd) { (void)localClientNum; (void)cmd; }
 void __cdecl FX_UpdateSpotLight(FxCmd *cmd)        { (void)cmd; }
 void __cdecl FX_UpdateNonDependent(FxCmd *cmd)     { (void)cmd; }
 void __cdecl FX_UpdateRemaining(FxCmd *cmd)        { (void)cmd; }
-void __cdecl FX_EndUpdate(int32_t localClientNum)  { (void)localClientNum; }
+void __cdecl FX_EndUpdate(int localClientNum)  { (void)localClientNum; }
 void __cdecl FX_AddNonSpriteDrawSurfs(FxCmd *cmd)  { (void)cmd; }
 
 // ─────────────────────────────────────────────────────────────────────────────

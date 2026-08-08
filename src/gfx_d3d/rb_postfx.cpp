@@ -345,14 +345,14 @@ float __cdecl RB_GetBlurRadius(float blurRadiusFromCode)
 void __cdecl RB_BlurScreen(const GfxViewInfo *viewInfo, float blurRadius)
 {
     float blurRadiusMin; // [esp+28h] [ebp-8h]
-    uint32_t color; // [esp+2Ch] [ebp-4h]
+    uint color; // [esp+2Ch] [ebp-4h]
 
     iassert( viewInfo );
     blurRadiusMin = 1440.0f / gfxCmdBufSourceState.sceneViewport.height;
     color = -1;
     if (blurRadiusMin > blurRadius)
     {
-        ((unsigned char *)&color)[3] = (unsigned char)SnapFloatToInt(blurRadius / blurRadiusMin * 255.0f);
+        ((byte *)&color)[3] = (byte)SnapFloatToInt(blurRadius / blurRadiusMin * 255.0f);
         blurRadius = 1440.0f / gfxCmdBufSourceState.sceneViewport.height;
     }
     RB_GaussianFilterImage(blurRadius, R_RENDERTARGET_RESOLVED_SCENE, R_RENDERTARGET_POST_EFFECT_0);

@@ -75,7 +75,7 @@ inline parseInfo_t *__cdecl Com_ParseOnLine(char **data_p)
     return Com_ParseOnLine((const char **)data_p);
 }
 int __cdecl Com_MatchToken(const char **buf_p, const char *match, int warning);
-int __cdecl Com_SkipBracedSection(const char **program, uint32_t startDepth, int iMaxNesting);
+int __cdecl Com_SkipBracedSection(const char **program, uint startDepth, int iMaxNesting);
 void __cdecl Com_SkipRestOfLine(const char **data);
 int __cdecl Com_GetArgCountOnLine(const char **data_p);
 double __cdecl Com_ParseFloat(const char **buf_p);

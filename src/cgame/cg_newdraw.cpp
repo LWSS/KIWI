@@ -196,8 +196,8 @@ void __cdecl CG_CalcPlayerSprintColor(const cg_s *cgameGlob, const playerState_s
 {
     float frac; // [esp+8h] [ebp-18h]
     const DvarValue *p_current; // [esp+Ch] [ebp-14h]
-    int32_t sprintLeft; // [esp+18h] [ebp-8h]
-    int32_t maxSprint; // [esp+1Ch] [ebp-4h]
+    int sprintLeft; // [esp+18h] [ebp-8h]
+    int maxSprint; // [esp+1Ch] [ebp-4h]
 
     maxSprint = BG_GetMaxSprintTime(ps);
     if (ps->pm_type == PM_DEAD || !maxSprint)
@@ -229,7 +229,7 @@ void __cdecl CG_CalcPlayerSprintColor(const cg_s *cgameGlob, const playerState_s
 }
 
 void __cdecl CG_DrawStanceIcon(
-    int32_t localClientNum,
+    int localClientNum,
     const rectDef_s *rect,
     float *drawColor,
     float x,
@@ -291,18 +291,18 @@ void __cdecl CG_DrawStanceIcon(
 }
 
 void __cdecl CG_DrawStanceHintPrints(
-    int32_t localClientNum,
+    int localClientNum,
     const rectDef_s *rect,
     float x,
     const float *color,
     float fadeAlpha,
     Font_s *font,
     float scale,
-    int32_t textStyle)
+    int textStyle)
 {
     float v8; // [esp+1Ch] [ebp-240h]
     char keyBinding[256]; // [esp+2Ch] [ebp-230h] BYREF
-    int32_t j; // [esp+130h] [ebp-12Ch]
+    int j; // [esp+130h] [ebp-12Ch]
     const cg_s *cgameGlob; // [esp+134h] [ebp-128h]
     const char *string; // [esp+138h] [ebp-124h]
     const char *proneCmds[3][6]; // [esp+13Ch] [ebp-120h] BYREF
@@ -312,8 +312,8 @@ void __cdecl CG_DrawStanceHintPrints(
     const char *hintLineCmds[3]; // [esp+1E8h] [ebp-74h]
     const char *standCmds[3][6]; // [esp+1F4h] [ebp-68h] BYREF
     const char *hintTypeStrings[3]; // [esp+240h] [ebp-1Ch]
-    int32_t numHintLines; // [esp+24Ch] [ebp-10h]
-    int32_t i; // [esp+250h] [ebp-Ch]
+    int numHintLines; // [esp+24Ch] [ebp-10h]
+    int i; // [esp+250h] [ebp-Ch]
     const char *binding; // [esp+254h] [ebp-8h]
     float y; // [esp+258h] [ebp-4h]
 
@@ -629,7 +629,7 @@ LABEL_16:
     float angle; // [esp+18h] [ebp-40h]
     float maxSprint; // [esp+1Ch] [ebp-3Ch]
     float v11; // [esp+20h] [ebp-38h]
-    int32_t healthOverlayPulsePhase; // [esp+24h] [ebp-34h]
+    int healthOverlayPulsePhase; // [esp+24h] [ebp-34h]
     float v13; // [esp+28h] [ebp-30h]
     float scrPlace; // [esp+2Ch] [ebp-2Ch]
     float v15; // [esp+30h] [ebp-28h]
@@ -938,12 +938,12 @@ char *__cdecl CG_GetUseString(int localClientNum)
 }
 
 void __cdecl CG_DrawCursorhint(
-    int32_t localClientNum,
+    int localClientNum,
     const rectDef_s *rect,
     Font_s *font,
     float fontscale,
     float *color,
-    int32_t textStyle)
+    int textStyle)
 {
     const char *translatedDisplayName; // r26
     char v10; // r11
@@ -1301,7 +1301,7 @@ void __cdecl CG_DrawHoldBreathHint(
     float fontscale,
     int textStyle)
 {
-    uint32_t ViewmodelWeaponIndex; // eax
+    uint ViewmodelWeaponIndex; // eax
     char *v6; // eax
     float v7; // [esp+24h] [ebp-124h]
     char *string; // [esp+34h] [ebp-114h]
@@ -1350,12 +1350,12 @@ void __cdecl CG_DrawHoldBreathHint(
 }
 
 void __cdecl CG_DrawMantleHint(
-    int32_t localClientNum,
+    int localClientNum,
     const rectDef_s *rect,
     Font_s *font,
     float fontscale,
     const float *color,
-    int32_t textStyle)
+    int textStyle)
 {
     char *v6; // eax
     char *string; // [esp+28h] [ebp-120h]
@@ -1588,7 +1588,7 @@ void __cdecl CG_DrawInvalidCmdHint(
 {
     char *string; // [esp+40h] [ebp-Ch]
     float x; // [esp+44h] [ebp-8h]
-    int32_t blinkInterval; // [esp+48h] [ebp-4h]
+    int blinkInterval; // [esp+48h] [ebp-4h]
     cg_s *cgameGlob;
 
     iassert(rect);
@@ -2203,7 +2203,7 @@ double v7; // [esp+2Ch] [ebp-274h]
 float v8; // [esp+3Ch] [ebp-264h]
 float ammoColor[5]; // [esp+4Ch] [ebp-254h] BYREF
 const ScreenPlacement *scrPlace; // [esp+60h] [ebp-240h]
-int32_t ammoVal; // [esp+64h] [ebp-23Ch]
+int ammoVal; // [esp+64h] [ebp-23Ch]
 //cg_s *cgameGlob; // [esp+68h] [ebp-238h]
 bool drawAmmo; // [esp+6Fh] [ebp-231h]
 char clipString[260]; // [esp+70h] [ebp-230h] BYREF
@@ -2213,11 +2213,11 @@ bool lowAmmo; // [esp+27Dh] [ebp-23h]
 bool lowClip; // [esp+27Eh] [ebp-22h]
 bool drawClip; // [esp+27Fh] [ebp-21h]
 float flashColor[4]; // [esp+280h] [ebp-20h] BYREF
-int32_t weapIndex; // [esp+290h] [ebp-10h]
+int weapIndex; // [esp+290h] [ebp-10h]
 const playerState_s *ps; // [esp+294h] [ebp-Ch]
 float x; // [esp+298h] [ebp-8h]
-int32_t clipVal; // [esp+29Ch] [ebp-4h]
-int32_t flashTime;
+int clipVal; // [esp+29Ch] [ebp-4h]
+int flashTime;
 color[3] = CG_FadeHudMenu(
     localClientNum,
     hud_fade_ammodisplay,
@@ -2517,12 +2517,12 @@ void __cdecl CG_DrawPlayerWeaponNameBack(
 
 // local variable allocation has failed, the output may be wrong!
 void __cdecl CG_DrawPlayerStance(
-    int32_t localClientNum,
+    int localClientNum,
     const rectDef_s *rect,
     const float *color,
     Font_s *font,
     float scale,
-    int32_t textStyle)
+    int textStyle)
 {
 #if 0
     long double v11; // fp2
@@ -2806,8 +2806,8 @@ void __cdecl CG_DrawPlayerSprintMeter(
         fadeAlpha = CG_FadeHudMenu(localClientNum, hud_fade_sprint, cgameGlob->sprintFadeTime, SnapFloatToInt(hud_fade_sprint->current.value * 1000.0f));
         if (fadeAlpha != 0.0f)
         {
-            int32_t sprintLeft = PM_GetSprintLeft(&cgameGlob->predictedPlayerState, cgameGlob->time);
-            int32_t maxSprint = BG_GetMaxSprintTime(&cgameGlob->predictedPlayerState);
+            int sprintLeft = PM_GetSprintLeft(&cgameGlob->predictedPlayerState, cgameGlob->time);
+            int maxSprint = BG_GetMaxSprintTime(&cgameGlob->predictedPlayerState);
             float sprint = sprintLeft / maxSprint;
 
             if (sprint > 0.0f)
@@ -2978,7 +2978,7 @@ void __cdecl CG_DrawPlayerBarHealthBack(
     Material *material,
     float *color)
 {
-    int32_t flashTime; // [esp+68h] [ebp-20h]
+    int flashTime; // [esp+68h] [ebp-20h]
     float health; // [esp+70h] [ebp-18h]
     float x; // [esp+74h] [ebp-14h]
     float y; // [esp+78h] [ebp-10h]
@@ -3069,25 +3069,25 @@ void __cdecl CG_DrawPlayerBarHealthBack(
 
 // local variable allocation has failed, the output may be wrong!
 void __cdecl CG_OwnerDraw(
-    int32_t localClientNum,
+    int localClientNum,
     rectDef_s parentRect,
     float x,
     float y,
     float w,
     float h,
-    int32_t horzAlign,
-    int32_t vertAlign,
+    int horzAlign,
+    int vertAlign,
     float text_x,
     float text_y,
-    int32_t ownerDraw,
-    int32_t ownerDrawFlags,
-    int32_t align,
+    int ownerDraw,
+    int ownerDrawFlags,
+    int align,
     float special,
     Font_s *font,
     float scale,
     float *color,
     Material *material,
-    int32_t textStyle,
+    int textStyle,
     char textAlignMode)
 {
     const cg_s *LocalClientGlobals; // r28

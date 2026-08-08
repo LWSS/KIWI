@@ -71,7 +71,7 @@ void __cdecl CG_VehRegisterDvars()
     heli_barrelSlowdown = Dvar_RegisterFloat("heli_barrelSlowdown", 360.0, mind, DVAR_NOFLAG, "");
 }
 
-DObj_s *__cdecl GetVehicleEntDObj(int32_t localClientNum, centity_s *centVeh)
+DObj_s *__cdecl GetVehicleEntDObj(int localClientNum, centity_s *centVeh)
 {
     cgs_t *cgs;
 
@@ -86,7 +86,7 @@ DObj_s *__cdecl GetVehicleEntDObj(int32_t localClientNum, centity_s *centVeh)
         cgs->gameModels[centVeh->nextState.un2.hintString]);
 }
 
-void __cdecl CG_VehGunnerPOV(int32_t localClientNum, float *resultOrigin, float *resultAngles)
+void __cdecl CG_VehGunnerPOV(int localClientNum, float *resultOrigin, float *resultAngles)
 {
     clientInfo_t *ci; // [esp+4h] [ebp-28h]
     float tagMtx[3][3]; // [esp+8h] [ebp-24h] BYREF
@@ -101,8 +101,8 @@ void __cdecl CG_VehGunnerPOV(int32_t localClientNum, float *resultOrigin, float 
 }
 
 void __cdecl GetTagMatrix(
-    int32_t localClientNum,
-    uint32_t vehEntNum,
+    int localClientNum,
+    uint vehEntNum,
     uint16_t tagName,
     //float (*resultTagMat)[3],
     mat3x3& resultTagMat,
@@ -138,7 +138,7 @@ void __cdecl GetTagMatrix(
     }
 }
 
-bool __cdecl CG_VehLocalClientUsingVehicle(int32_t localClientNum)
+bool __cdecl CG_VehLocalClientUsingVehicle(int localClientNum)
 {
     clientInfo_t *ci; // [esp+0h] [ebp-4h]
 
@@ -149,7 +149,7 @@ bool __cdecl CG_VehLocalClientUsingVehicle(int32_t localClientNum)
     return ci->attachedVehEntNum != ENTITYNUM_NONE;
 }
 
-bool __cdecl CG_VehLocalClientDriving(int32_t localClientNum)
+bool __cdecl CG_VehLocalClientDriving(int localClientNum)
 {
     clientInfo_t *ci; // [esp+0h] [ebp-4h]
 
@@ -160,7 +160,7 @@ bool __cdecl CG_VehLocalClientDriving(int32_t localClientNum)
     return ci->attachedVehEntNum != ENTITYNUM_NONE && ci->attachedVehSlotIndex == 0;
 }
 
-bool __cdecl CG_VehEntityUsingVehicle(int32_t localClientNum, uint32_t entNum)
+bool __cdecl CG_VehEntityUsingVehicle(int localClientNum, uint entNum)
 {
     clientInfo_t *ci; // [esp+0h] [ebp-4h]
 
@@ -169,7 +169,7 @@ bool __cdecl CG_VehEntityUsingVehicle(int32_t localClientNum, uint32_t entNum)
     return ci && ci->attachedVehEntNum != ENTITYNUM_NONE;
 }
 
-clientInfo_t *__cdecl ClientInfoForEntity(int32_t localClientNum, uint32_t entNum)
+clientInfo_t *__cdecl ClientInfoForEntity(int localClientNum, uint entNum)
 {
     centity_s *cent; // [esp+0h] [ebp-4h]
 
@@ -189,7 +189,7 @@ clientInfo_t *__cdecl ClientInfoForEntity(int32_t localClientNum, uint32_t entNu
     return &bgs->clientinfo[cent->nextState.clientNum];
 }
 
-int32_t __cdecl CG_VehLocalClientVehicleSlot(int32_t localClientNum)
+int __cdecl CG_VehLocalClientVehicleSlot(int localClientNum)
 {
     clientInfo_t *ci; // [esp+0h] [ebp-4h]
 
@@ -201,7 +201,7 @@ int32_t __cdecl CG_VehLocalClientVehicleSlot(int32_t localClientNum)
     return ci->attachedVehSlotIndex;
 }
 
-int32_t __cdecl CG_VehPlayerVehicleSlot(int32_t localClientNum, uint32_t entNum)
+int __cdecl CG_VehPlayerVehicleSlot(int localClientNum, uint entNum)
 {
     clientInfo_t *ci; // [esp+0h] [ebp-4h]
 
@@ -214,8 +214,8 @@ int32_t __cdecl CG_VehPlayerVehicleSlot(int32_t localClientNum, uint32_t entNum)
 }
 
 void __cdecl CG_VehSeatTransformForPlayer(
-    int32_t localClientNum,
-    uint32_t entNum,
+    int localClientNum,
+    uint entNum,
     float *resultOrigin,
     float *resultAngles)
 {
@@ -231,7 +231,7 @@ void __cdecl CG_VehSeatTransformForPlayer(
     SeatTransformForClientInfo(localClientNum, ci, resultOrigin, resultAngles);
 }
 
-void __cdecl SeatTransformForClientInfo(int32_t localClientNum, clientInfo_t *ci, float *resultOrigin, float *resultAngles)
+void __cdecl SeatTransformForClientInfo(int localClientNum, clientInfo_t *ci, float *resultOrigin, float *resultAngles)
 {
     iassert(ci);
     iassert(ci->attachedVehEntNum != ENTITYNUM_NONE);
@@ -240,9 +240,9 @@ void __cdecl SeatTransformForClientInfo(int32_t localClientNum, clientInfo_t *ci
 }
 
 void __cdecl SeatTransformForSlot(
-    int32_t localClientNum,
-    uint32_t vehEntNum,
-    uint32_t vehSlotIdx,
+    int localClientNum,
+    uint vehEntNum,
+    uint vehSlotIdx,
     float *resultOrigin,
     float *resultAngles)
 {
@@ -265,7 +265,7 @@ void __cdecl SeatTransformForSlot(
     }
 }
 
-void __cdecl CG_VehSeatOriginForLocalClient(int32_t localClientNum, float *result)
+void __cdecl CG_VehSeatOriginForLocalClient(int localClientNum, float *result)
 {
     clientInfo_t *ci; // [esp+0h] [ebp-4h]
 
@@ -275,11 +275,11 @@ void __cdecl CG_VehSeatOriginForLocalClient(int32_t localClientNum, float *resul
     SeatTransformForClientInfo(localClientNum, ci, result, 0);
 }
 
-double __cdecl Veh_GetTurretBarrelRoll(int32_t localClientNum, centity_s *cent)
+double __cdecl Veh_GetTurretBarrelRoll(int localClientNum, centity_s *cent)
 {
-    int32_t entityNum; // [esp+0h] [ebp-10h]
+    int entityNum; // [esp+0h] [ebp-10h]
     vehicleEffects *vehFx; // [esp+8h] [ebp-8h]
-    int32_t msecs; // [esp+Ch] [ebp-4h]
+    int msecs; // [esp+Ch] [ebp-4h]
     cg_s *cgameGlob;
 
     entityNum = CG_GetEntityIndex(localClientNum, cent);
@@ -296,13 +296,13 @@ double __cdecl Veh_GetTurretBarrelRoll(int32_t localClientNum, centity_s *cent)
     return vehFx->barrelPos;
 }
 
-int32_t __cdecl CG_GetEntityIndex(int32_t localClientNum, const centity_s *cent)
+int __cdecl CG_GetEntityIndex(int localClientNum, const centity_s *cent)
 {
     iassert(cent->nextState.number == (cent - &cg_entitiesArray[localClientNum][0]) % MAX_GENTITIES);
     return cent->nextState.number;
 }
 
-//void __cdecl Veh_IncTurretBarrelRoll(int32_t localClientNum, int32_t entityNum, float rotation)
+//void __cdecl Veh_IncTurretBarrelRoll(int localClientNum, int entityNum, float rotation)
 //{
 //    float v3; // [esp+0h] [ebp-14h]
 //    float v4; // [esp+4h] [ebp-10h]
@@ -321,12 +321,12 @@ int32_t __cdecl CG_GetEntityIndex(int32_t localClientNum, const centity_s *cent)
 //    vehFx->barrelVelocity = v3;
 //}
 
-void __cdecl CG_VehProcessEntity(int32_t localClientNum, centity_s *cent)
+void __cdecl CG_VehProcessEntity(int localClientNum, centity_s *cent)
 {
     DObj_s *obj; // [esp+10h] [ebp-78h]
     vehfx_t fxInfo; // [esp+18h] [ebp-70h] BYREF
     const cgs_t *cgs; // [esp+68h] [ebp-20h]
-    int32_t time; // [esp+6Ch] [ebp-1Ch]
+    int time; // [esp+6Ch] [ebp-1Ch]
     LerpEntityState *p_currentState; // [esp+70h] [ebp-18h]
     float lightingOrigin[3]; // [esp+74h] [ebp-14h] BYREF
     float materialTime; // [esp+80h] [ebp-8h]
@@ -365,7 +365,7 @@ void __cdecl CG_VehProcessEntity(int32_t localClientNum, centity_s *cent)
     }
 }
 
-void __cdecl SetupPoseControllers(int32_t localClientNum, DObj_s *obj, centity_s *cent, vehfx_t *fxInfo)
+void __cdecl SetupPoseControllers(int localClientNum, DObj_s *obj, centity_s *cent, vehfx_t *fxInfo)
 {
     const XModel *Model; // eax
     uint16_t v5; // ax
@@ -422,7 +422,7 @@ void __cdecl SetupPoseControllers(int32_t localClientNum, DObj_s *obj, centity_s
     float v56; // [esp+114h] [ebp-D4h]
     float suspTravel; // [esp+124h] [ebp-C4h]
     trace_t trace; // [esp+128h] [ebp-C0h] BYREF
-    int32_t tireIdx; // [esp+154h] [ebp-94h]
+    int tireIdx; // [esp+154h] [ebp-94h]
     LerpEntityState *p_currentState; // [esp+158h] [ebp-90h]
     const DObjAnimMat *boneMtxList; // [esp+15Ch] [ebp-8Ch]
     float wheelPos[3]; // [esp+160h] [ebp-88h] BYREF
@@ -554,7 +554,7 @@ void __cdecl SetupPoseControllers(int32_t localClientNum, DObj_s *obj, centity_s
     }
 }
 
-void __cdecl VehicleFXTest(int32_t localClientNum, const DObj_s *obj, centity_s *cent, vehfx_t *fxInfo)
+void __cdecl VehicleFXTest(int localClientNum, const DObj_s *obj, centity_s *cent, vehfx_t *fxInfo)
 {
     char *v4; // eax
     entityState_s_un1 v6; // [esp+18h] [ebp-10Ch]
@@ -567,8 +567,8 @@ void __cdecl VehicleFXTest(int32_t localClientNum, const DObj_s *obj, centity_s 
     float v13; // [esp+48h] [ebp-DCh]
     float v14; // [esp+4Ch] [ebp-D8h]
     float v15; // [esp+50h] [ebp-D4h]
-    int32_t v16; // [esp+54h] [ebp-D0h]
-    int32_t startMsec; // [esp+58h] [ebp-CCh]
+    int v16; // [esp+54h] [ebp-D0h]
+    int startMsec; // [esp+58h] [ebp-CCh]
     const snd_alias_t *idleAlias0; // [esp+60h] [ebp-C4h]
     SndEntHandle sndEnt; // [esp+64h] [ebp-C0h]
     float sndLerp; // [esp+68h] [ebp-BCh]
@@ -577,21 +577,21 @@ void __cdecl VehicleFXTest(int32_t localClientNum, const DObj_s *obj, centity_s 
     const snd_alias_t *engineAlias0; // [esp+74h] [ebp-B0h]
     bool result; // [esp+7Ah] [ebp-AAh]
     uint8_t boneIndex; // [esp+7Bh] [ebp-A9h]
-    int32_t entityNum; // [esp+7Ch] [ebp-A8h]
+    int entityNum; // [esp+7Ch] [ebp-A8h]
     const cg_s *cgameGlob; // [esp+80h] [ebp-A4h]
     float mins[3]; // [esp+84h] [ebp-A0h] BYREF
     float dist; // [esp+90h] [ebp-94h]
     float end[3]; // [esp+94h] [ebp-90h] BYREF
     trace_t trace; // [esp+A0h] [ebp-84h] BYREF
     float maxs[3]; // [esp+CCh] [ebp-58h] BYREF
-    int32_t tireIdx; // [esp+D8h] [ebp-4Ch]
+    int tireIdx; // [esp+D8h] [ebp-4Ch]
     vehicleEffects *vehFx; // [esp+DCh] [ebp-48h]
     float speed; // [esp+E0h] [ebp-44h]
     float groundpos[3]; // [esp+E4h] [ebp-40h] BYREF
-    int32_t nextDustInc; // [esp+F0h] [ebp-34h]
+    int nextDustInc; // [esp+F0h] [ebp-34h]
     const FxEffectDef *fx; // [esp+F4h] [ebp-30h]
     float axis[3][3]; // [esp+F8h] [ebp-2Ch] BYREF
-    int32_t tag; // [esp+11Ch] [ebp-8h]
+    int tag; // [esp+11Ch] [ebp-8h]
     const entityState_s *ns; // [esp+120h] [ebp-4h]
 
     iassert(fxInfo);

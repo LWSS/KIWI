@@ -979,7 +979,7 @@ void __cdecl MSG_WriteOriginFloat(const int clientNum, msg_t *msg, int bits, flo
     int v5; // eax
     int MinBitCountForNum; // [esp+58h] [ebp-20h]
     int roundedValue; // [esp+60h] [ebp-18h]
-    uint32_t roundedValuea; // [esp+60h] [ebp-18h]
+    uint roundedValuea; // [esp+60h] [ebp-18h]
     int truncDelta; // [esp+64h] [ebp-14h]
     int roundedOldValue; // [esp+68h] [ebp-10h]
     int roundedCenter; // [esp+6Ch] [ebp-Ch]
@@ -991,7 +991,7 @@ void __cdecl MSG_WriteOriginFloat(const int clientNum, msg_t *msg, int bits, flo
     roundedValue = SnapFloatToInt(value);    roundedOldValue = SnapFloatToInt(oldValue);
     truncDelta = roundedValue - roundedOldValue;
     SV_PacketDataIsOverhead(clientNum, msg);
-    if ((uint32_t)(roundedValue - roundedOldValue + 64) >= 0x80)
+    if ((uint)(roundedValue - roundedOldValue + 64) >= 0x80)
     {
         MSG_WriteBit1(msg);
         if (bits == -92)
@@ -1095,7 +1095,7 @@ void __cdecl MSG_WriteOriginZFloat(const int clientNum, msg_t *msg, float value,
     int v4; // eax
     int MinBitCountForNum; // eax
     int roundedValue; // [esp+58h] [ebp-14h]
-    uint32_t roundedValuea; // [esp+58h] [ebp-14h]
+    uint roundedValuea; // [esp+58h] [ebp-14h]
     int truncDelta; // [esp+5Ch] [ebp-10h]
     int roundedOldValue; // [esp+60h] [ebp-Ch]
     int roundedCenter; // [esp+64h] [ebp-8h]
@@ -1105,7 +1105,7 @@ void __cdecl MSG_WriteOriginZFloat(const int clientNum, msg_t *msg, float value,
     roundedValue = SnapFloatToInt(value);    roundedOldValue = SnapFloatToInt(oldValue);
     truncDelta = roundedValue - roundedOldValue;
     SV_PacketDataIsOverhead(clientNum, msg);
-    if ((uint32_t)(roundedValue - roundedOldValue + 64) >= 0x80)
+    if ((uint)(roundedValue - roundedOldValue + 64) >= 0x80)
     {
         MSG_WriteBit1(msg);
         iassert( svsHeaderValid );
@@ -1179,9 +1179,9 @@ bool __cdecl MSG_ValuesAreEqual(const SnapshotInfo_s *snapInfo, int bits, const 
     return result;
 }
 
-void __cdecl MSG_WriteLastChangedField(msg_t *msg, int lastChangedFieldNum, uint32_t numFields)
+void __cdecl MSG_WriteLastChangedField(msg_t *msg, int lastChangedFieldNum, uint numFields)
 {
-    uint32_t idealBits; // [esp+0h] [ebp-4h]
+    uint idealBits; // [esp+0h] [ebp-4h]
 
     iassert( !msg->readOnly );
     iassert(lastChangedFieldNum <= numFields); // add from blops
@@ -1269,7 +1269,7 @@ PacketEntityType __cdecl MSG_GetPacketEntityTypeForEType(int eType)
     return result;
 }
 
-uint32_t __cdecl MSG_GetBitCount(int bits, bool *estimate, int from, int to)
+uint __cdecl MSG_GetBitCount(int bits, bool *estimate, int from, int to)
 {
     const char *v5; // eax
 
@@ -1394,14 +1394,14 @@ void __cdecl MSG_WriteEntityRemoval(
     iassert( from );
     iassert( !msg->readOnly );
     if (cl_shownet && (cl_shownet->current.integer >= 2 || cl_shownet->current.integer == -1))
-        Com_Printf(16, "W|%3i: #%-3i remove\n", msg->cursize, *(uint32_t *)from);
+        Com_Printf(16, "W|%3i: #%-3i remove\n", msg->cursize, *(uint *)from);
     if (sv_debugPacketContents->current.enabled)
         Com_Printf(16, "Entity was removed\n");
     SV_PacketDataIsOverhead(snapInfo->clientNum, msg);
     if (changeBit)
         MSG_WriteBit1(msg);
     SV_PacketDataIsEntityNum(snapInfo->clientNum, msg);
-    MSG_WriteEntityIndex(snapInfo, msg, *(uint32_t *)from, indexBits);
+    MSG_WriteEntityIndex(snapInfo, msg, *(uint *)from, indexBits);
     SV_PacketDataIsOverhead(snapInfo->clientNum, msg);
     MSG_WriteBit1(msg);
     SV_PacketDataIsUnknown(snapInfo->clientNum, msg);
@@ -1474,9 +1474,9 @@ int __cdecl MSG_WriteEntityDelta(
     startBits = MSG_GetUsedBitCount(msg);
     iassert( !msg->readOnly );
     iassert( to );
-    if (*(uint32_t *)to >= (uint32_t)(1 << indexBits))
+    if (*(uint *)to >= (uint)(1 << indexBits))
     {
-        v9 = va("to = %i, bits = %i", *(uint32_t *)to, indexBits);
+        v9 = va("to = %i, bits = %i", *(uint *)to, indexBits);
         MyAssertHandler(
             ".\\qcommon\\sv_msg_write_mp.cpp",
             1449,
@@ -1507,9 +1507,9 @@ int __cdecl MSG_WriteEntityDelta(
         if (sv_debugPacketContents->current.enabled)
             Com_Printf(16, "Entity had a delta\n");
         if (sv_debugPacketContents->current.enabled)
-            Com_Printf(16, "Writing index number %i\n", *(uint32_t *)to);
+            Com_Printf(16, "Writing index number %i\n", *(uint *)to);
         SV_PacketDataIsEntityNum(snapInfo->clientNum, msg);
-        MSG_WriteEntityIndex(snapInfo, msg, *(uint32_t *)to, indexBits);
+        MSG_WriteEntityIndex(snapInfo, msg, *(uint *)to, indexBits);
         if (sv_debugPacketContents->current.enabled)
             Com_Printf(16, "Writing 0,1 to say it's not removed and we have a delta\n");
         SV_PacketDataIsOverhead(snapInfo->clientNum, msg);
@@ -1536,7 +1536,7 @@ int __cdecl MSG_WriteEntityDelta(
         if (sv_debugPacketContents->current.enabled)
             Com_Printf(16, "Entity did not change, but we're forcing a send to say this\n");
         SV_PacketDataIsEntityNum(snapInfo->clientNum, msg);
-        MSG_WriteEntityIndex(snapInfo, msg, *(uint32_t *)to, indexBits);
+        MSG_WriteEntityIndex(snapInfo, msg, *(uint *)to, indexBits);
         SV_PacketDataIsOverhead(snapInfo->clientNum, msg);
         MSG_WriteBit0(msg);
         MSG_WriteBit0(msg);
@@ -1623,7 +1623,7 @@ void __cdecl MSG_WriteDeltaField(
             oldFloat = *(float *)fromF;
             oldTrunc = (int)oldFloat;
             SV_PacketDataIsOverhead(snapInfo->clientNum, msg);
-            if (fullFloat != (double)trunc || LODWORD(fullFloat) == 0x80000000 || (uint32_t)(trunc + 4096) >= 0x2000)
+            if (fullFloat != (double)trunc || LODWORD(fullFloat) == 0x80000000 || (uint)(trunc + 4096) >= 0x2000)
             {
                 MSG_WriteBit1(msg);
                 SV_PacketDataIsLargeFloat(snapInfo->clientNum, msg);
@@ -1652,7 +1652,7 @@ void __cdecl MSG_WriteDeltaField(
             {
                 SV_PacketDataIsOverhead(snapInfo->clientNum, msg);
                 MSG_WriteBit1(msg);
-                if (LODWORD(fullFloat) == 0x80000000 || fullFloat != (double)trunc || (uint32_t)(trunc + 2048) >= 0x1000)
+                if (LODWORD(fullFloat) == 0x80000000 || fullFloat != (double)trunc || (uint)(trunc + 2048) >= 0x1000)
                 {
                     SV_PacketDataIsOverhead(snapInfo->clientNum, msg);
                     MSG_WriteBit1(msg);
@@ -1674,7 +1674,7 @@ void __cdecl MSG_WriteDeltaField(
                 SV_PacketDataIsZeroFloat(snapInfo->clientNum, msg);
                 MSG_WriteBit0(msg);
             }
-            if ((uint32_t)(__int64)(*(float *)toF + 2048.0) >= 0x1000)
+            if ((uint)(__int64)(*(float *)toF + 2048.0) >= 0x1000)
                 MyAssertHandler(
                     ".\\qcommon\\sv_msg_write_mp.cpp",
                     1068,
@@ -1831,8 +1831,8 @@ void __cdecl MSG_WriteDeltaField(
             MSG_WriteBit1(msg);
             if (LODWORD(fullFloat) == 0x80000000
                 || fullFloat != (double)trunc
-                || (uint32_t)(trunc + 4096) >= 0x2000
-                || (uint32_t)(oldTrunc + 4096) >= 0x2000)
+                || (uint)(trunc + 4096) >= 0x2000
+                || (uint)(oldTrunc + 4096) >= 0x2000)
             {
                 MSG_WriteBit1(msg);
                 SV_PacketDataIsLargeFloat(snapInfo->clientNum, msg);
@@ -1854,7 +1854,7 @@ void __cdecl MSG_WriteDeltaField(
                 SV_PacketDataIsSmallFloat(snapInfo->clientNum, msg);
                 trunc += 4096;
                 trunc ^= oldTrunc + 4096;
-                if ((uint32_t)trunc >= 0x2000)
+                if ((uint)trunc >= 0x2000)
                     MyAssertHandler(
                         ".\\qcommon\\sv_msg_write_mp.cpp",
                         953,
@@ -1905,7 +1905,7 @@ void __cdecl MSG_WriteDeltaTime(int clientNum, msg_t *msg, int timeBase, int tim
 void __cdecl MSG_Write24BitFlag(int clientNum, msg_t *msg, int oldFlags, int newFlags)
 {
     int bits; // [esp+0h] [ebp-10h]
-    uint32_t changedBitIndex; // [esp+4h] [ebp-Ch]
+    uint changedBitIndex; // [esp+4h] [ebp-Ch]
     int flagDiff; // [esp+8h] [ebp-8h]
     int value; // [esp+Ch] [ebp-4h]
 
@@ -1986,11 +1986,11 @@ void __cdecl MSG_WriteGroundEntityNum(int clientNum, msg_t *msg, int groundEntit
     SV_PacketDataIsUnknown(clientNum, msg);
 }
 
-bool __cdecl MSG_CheckWritingEnoughBits(int value, uint32_t bits)
+bool __cdecl MSG_CheckWritingEnoughBits(int value, uint bits)
 {
     DWORD v3; // eax
-    uint32_t checkBits; // [esp+4h] [ebp-8h]
-    uint32_t checkValue; // [esp+8h] [ebp-4h]
+    uint checkBits; // [esp+4h] [ebp-8h]
+    uint checkValue; // [esp+8h] [ebp-4h]
 
     if (value < 0)
     {
@@ -2054,9 +2054,9 @@ int __cdecl MSG_WriteDeltaStruct(
     startBits = MSG_GetUsedBitCount(msg);
     iassert( !msg->readOnly );
     iassert( to );
-    if (*(uint32_t *)to >= (uint32_t)(1 << indexBits))
+    if (*(uint *)to >= (uint)(1 << indexBits))
     {
-        v10 = va("to = %i, bits = %i", *(uint32_t *)to, indexBits);
+        v10 = va("to = %i, bits = %i", *(uint *)to, indexBits);
         MyAssertHandler(
             ".\\qcommon\\sv_msg_write_mp.cpp",
             1316,
@@ -2091,9 +2091,9 @@ int __cdecl MSG_WriteDeltaStruct(
             MSG_WriteBit1(msg);
         }
         if (sv_debugPacketContents->current.enabled)
-            Com_Printf(16, "Writing index number %i\n", *(uint32_t *)to);
+            Com_Printf(16, "Writing index number %i\n", *(uint *)to);
         SV_PacketDataIsEntityNum(snapInfo->clientNum, msg);
-        MSG_WriteEntityIndex(snapInfo, msg, *(uint32_t *)to, indexBits);
+        MSG_WriteEntityIndex(snapInfo, msg, *(uint *)to, indexBits);
         if (sv_debugPacketContents->current.enabled)
             Com_Printf(16, "Writing 0,1 to say it's not removed and we have a delta\n");
         SV_PacketDataIsOverhead(snapInfo->clientNum, msg);
@@ -2118,12 +2118,12 @@ int __cdecl MSG_WriteDeltaStruct(
     else if (force)
     {
         if (sv_debugPacketContents->current.enabled)
-            Com_Printf(16, "Entity %u did not change, but we're forcing a send to say this\n", *(uint32_t *)to);
+            Com_Printf(16, "Entity %u did not change, but we're forcing a send to say this\n", *(uint *)to);
         SV_PacketDataIsOverhead(snapInfo->clientNum, msg);
         if (bChangeBit)
             MSG_WriteBit1(msg);
         SV_PacketDataIsEntityNum(snapInfo->clientNum, msg);
-        MSG_WriteEntityIndex(snapInfo, msg, *(uint32_t *)to, indexBits);
+        MSG_WriteEntityIndex(snapInfo, msg, *(uint *)to, indexBits);
         SV_PacketDataIsOverhead(snapInfo->clientNum, msg);
         MSG_WriteBit0(msg);
         MSG_WriteBit0(msg);
@@ -2613,18 +2613,18 @@ void __cdecl MSG_WriteDeltaHudElems(
     int time,
     const hudelem_s *from,
     const hudelem_s *to,
-    uint32_t count)
+    uint count)
 {
-    uint32_t bits; // [esp+4h] [ebp-28h]
+    uint bits; // [esp+4h] [ebp-28h]
     bool est; // [esp+Bh] [ebp-21h] BYREF
     int alignY; // [esp+Ch] [ebp-20h]
     int alignX; // [esp+10h] [ebp-1Ch]
-    uint32_t j; // [esp+14h] [ebp-18h]
-    uint32_t lc; // [esp+18h] [ebp-14h]
+    uint j; // [esp+14h] [ebp-18h]
+    uint lc; // [esp+18h] [ebp-14h]
     int *toF; // [esp+1Ch] [ebp-10h]
     int *fromF; // [esp+20h] [ebp-Ch]
-    uint32_t i; // [esp+24h] [ebp-8h]
-    uint32_t inuse; // [esp+28h] [ebp-4h]
+    uint i; // [esp+24h] [ebp-8h]
+    uint inuse; // [esp+28h] [ebp-4h]
 
     iassert( !msg->readOnly );
     if (count != 31)
@@ -2657,7 +2657,7 @@ void __cdecl MSG_WriteDeltaHudElems(
                 "(!(to[i].alignOrg & ~15))",
                 from[i].alignOrg);
         alignX = (from[i].alignOrg >> 2) & 3;
-        if ((uint32_t)alignX > 2)
+        if ((uint)alignX > 2)
             MyAssertHandler(
                 ".\\qcommon\\sv_msg_write_mp.cpp",
                 1796,
@@ -2666,7 +2666,7 @@ void __cdecl MSG_WriteDeltaHudElems(
                 "(alignX == 0 || alignX == 1 || alignX == 2)",
                 from[i].alignOrg);
         alignY = from[i].alignOrg & 3;
-        if ((uint32_t)alignY > 2)
+        if ((uint)alignY > 2)
             MyAssertHandler(
                 ".\\qcommon\\sv_msg_write_mp.cpp",
                 1799,
@@ -2675,7 +2675,7 @@ void __cdecl MSG_WriteDeltaHudElems(
                 "(alignY == 0 || alignY == 1 || alignY == 2)",
                 from[i].alignOrg);
         alignX = (to[i].alignOrg >> 2) & 3;
-        if ((uint32_t)alignX > 2)
+        if ((uint)alignX > 2)
             MyAssertHandler(
                 ".\\qcommon\\sv_msg_write_mp.cpp",
                 1802,
@@ -2684,7 +2684,7 @@ void __cdecl MSG_WriteDeltaHudElems(
                 "(alignX == 0 || alignX == 1 || alignX == 2)",
                 to[i].alignOrg);
         alignY = to[i].alignOrg & 3;
-        if ((uint32_t)alignY > 2)
+        if ((uint)alignY > 2)
             MyAssertHandler(
                 ".\\qcommon\\sv_msg_write_mp.cpp",
                 1805,

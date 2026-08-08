@@ -12,7 +12,7 @@
 //int surfaceTypeSoundListCount 828010f0     bg_weapons_load_obj.obj
 //struct SurfaceTypeSoundList *surfaceTypeSoundLists 828011f8     bg_weapons_load_obj.obj
 
-uint32_t g_playerAnimTypeNamesCount;
+uint g_playerAnimTypeNamesCount;
 
 SurfaceTypeSoundList surfaceTypeSoundLists[16];
 
@@ -592,7 +592,7 @@ char *g_playerAnimTypeNames[64];
 
 WeaponDef bg_defaultWeaponDefs;
 
-char *__cdecl BG_GetPlayerAnimTypeName(int32_t index)
+char *__cdecl BG_GetPlayerAnimTypeName(int index)
 {
     return g_playerAnimTypeNames[index];
 }
@@ -634,7 +634,7 @@ const char *__cdecl BG_GetWeaponInventoryTypeName(weapInventoryType_t type)
 #ifdef KISAK_MP
 void __cdecl BG_LoadWeaponStrings()
 {
-    uint32_t i; // [esp+0h] [ebp-4h]
+    uint i; // [esp+0h] [ebp-4h]
 
     for (i = 0; i < g_playerAnimTypeNamesCount; ++i)
         BG_InitWeaponString(i, g_playerAnimTypeNames[i]);
@@ -844,7 +844,7 @@ char __cdecl G_ParseWeaponAccurayGraphInternal(
 
 char __cdecl G_ParseWeaponAccurayGraphs(WeaponDef *weaponDef)
 {
-    uint32_t size; // [esp+4h] [ebp-8Ch]
+    uint size; // [esp+4h] [ebp-8Ch]
     int weaponType; // [esp+8h] [ebp-88h]
     int accuracyGraphKnotCount; // [esp+Ch] [ebp-84h] BYREF
     float accuracyGraphKnots[16][2]; // [esp+10h] [ebp-80h] BYREF
@@ -1246,7 +1246,7 @@ WeaponDef *__cdecl BG_LoadWeaponDefInternal(const char *one, const char *two)
         buffer[len] = 0;
         if (!strncmp(buffer, "WEAPONFILE", len))
         {
-            if ((uint32_t)(v11 - len) < 0x2800)
+            if ((uint)(v11 - len) < 0x2800)
             {
                 memset((uint8_t *)buffer, 0, 0x2800u);
                 FS_Read((uint8_t *)buffer, v11 - len, f);

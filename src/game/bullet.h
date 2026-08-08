@@ -44,39 +44,39 @@ struct weaponParms // sizeof=0x40
 };
 
 char __cdecl BulletTrace(
-    int32_t localClientNum,
+    int localClientNum,
     const BulletFireParams *bp,
     const WeaponDef *weapDef,
     const centity_s *attacker,
     BulletTraceResults *br,
-    uint32_t lastSurfaceType);
-float __cdecl G_GoodRandomFloat(int32_t *idum);
-void __cdecl Bullet_Endpos(int32_t randSeed, float spread, float *end, float *dir, const weaponParms *wp, float maxRange);
-void __cdecl Bullet_RandomDir(int32_t time, float *x, float *y);
+    uint lastSurfaceType);
+float __cdecl G_GoodRandomFloat(int *idum);
+void __cdecl Bullet_Endpos(int randSeed, float spread, float *end, float *dir, const weaponParms *wp, float maxRange);
+void __cdecl Bullet_RandomDir(int time, float *x, float *y);
 void __cdecl Bullet_Fire(
     gentity_s *attacker,
     float spread,
     const weaponParms *wp,
     const gentity_s *weaponEnt,
-    int32_t gameTime);
-void __cdecl Bullet_FireExtended(BulletFireParams *bp, const WeaponDef *weapDef, gentity_s *attacker, int32_t gameTime);
+    int gameTime);
+void __cdecl Bullet_FireExtended(BulletFireParams *bp, const WeaponDef *weapDef, gentity_s *attacker, int gameTime);
 char __cdecl Bullet_Trace(
     const BulletFireParams *bp,
     const WeaponDef *weapDef,
     gentity_s *attacker,
     BulletTraceResults *br,
-    uint32_t lastSurfaceType);
+    uint lastSurfaceType);
 bool __cdecl Bullet_IgnoreHitEntity(const BulletFireParams *bp, const BulletTraceResults *br, gentity_s *attacker);
 void __cdecl Bullet_Process(
     const BulletFireParams *bp,
     BulletTraceResults *br,
     const WeaponDef *weapDef,
     gentity_s *attacker,
-    int32_t dFlags,
-    int32_t gameTime,
-    int32_t *outImpactFlags,
+    int dFlags,
+    int gameTime,
+    int *outImpactFlags,
     bool processFx);
-int32_t __cdecl Bullet_GetDamage(
+int __cdecl Bullet_GetDamage(
     const BulletFireParams *bp,
     const BulletTraceResults *br,
     const WeaponDef *weapDef,
@@ -89,4 +89,4 @@ void __cdecl Bullet_ImpactEffect(
     gentity_s *attacker,
     uint8_t impactEffectFlags,
     gentity_s **outTempEnt);
-void __cdecl Bullet_FirePenetrate(BulletFireParams *bp, const WeaponDef *weapDef, gentity_s *attacker, int32_t gameTime);
+void __cdecl Bullet_FirePenetrate(BulletFireParams *bp, const WeaponDef *weapDef, gentity_s *attacker, int gameTime);

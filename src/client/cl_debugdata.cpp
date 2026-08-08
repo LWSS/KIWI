@@ -19,8 +19,8 @@ void __cdecl CL_AddDebugString(
     const float *color,
     float scale,
     const  char *text,
-    int32_t fromServer,
-    int32_t duration)
+    int fromServer,
+    int duration)
 {
     clientDebugStringInfo_t *info; // [esp+10h] [ebp-4h]
 
@@ -77,7 +77,7 @@ void __cdecl AddDebugStringInternal(
     const float *color,
     float scale,
     const char *text,
-    int32_t duration,
+    int duration,
     clientDebugStringInfo_t *info)
 {
     trDebugString_t *string; // [esp+4h] [ebp-4h]
@@ -103,9 +103,9 @@ void __cdecl CL_AddDebugLine(
     const float *start,
     const float *end,
     const float *color,
-    int32_t depthTest,
-    int32_t duration,
-    int32_t fromServer)
+    int depthTest,
+    int duration,
+    int fromServer)
 {
     if (cls.rendererStarted && CreateDebugLinesIfNeeded())
     {
@@ -156,8 +156,8 @@ void __cdecl AddDebugLineInternal(
     const float *start,
     const float *end,
     const float *color,
-    int32_t depthTest,
-    int32_t duration,
+    int depthTest,
+    int duration,
     clientDebugLineInfo_t *info)
 {
     trDebugLine_t *line; // [esp+8h] [ebp-4h]
@@ -186,8 +186,8 @@ void __cdecl CL_AddDebugStarWithText(
     const float *textColor,
     const char *string,
     float fontsize,
-    int32_t duration,
-    int32_t fromServer)
+    int duration,
+    int fromServer)
 {
     float lineEnd[3]; // [esp+10h] [ebp-1Ch] BYREF
     float lineStart[3]; // [esp+1Ch] [ebp-10h] BYREF
@@ -220,7 +220,7 @@ void __cdecl CL_AddDebugStarWithText(
     }
 }
 
-void __cdecl CL_AddDebugStar(const float *point, const float *color, int32_t duration, int32_t fromServer)
+void __cdecl CL_AddDebugStar(const float *point, const float *color, int duration, int fromServer)
 {
     const float black[] = { 0, 0, 0, 0 };
     CL_AddDebugStarWithText(
@@ -242,9 +242,9 @@ void __cdecl CL_FlushDebugClientData()
     }
 }
 
-void __cdecl FlushDebugStrings(clientDebugStringInfo_t *info, int32_t fromServer)
+void __cdecl FlushDebugStrings(clientDebugStringInfo_t *info, int fromServer)
 {
-    int32_t idx; // [esp+8h] [ebp-4h]
+    int idx; // [esp+8h] [ebp-4h]
 
     if (info->strings)
     {
@@ -266,9 +266,9 @@ void __cdecl FlushDebugStrings(clientDebugStringInfo_t *info, int32_t fromServer
     }
 }
 
-void __cdecl FlushDebugLines(clientDebugLineInfo_t *info, int32_t fromServer)
+void __cdecl FlushDebugLines(clientDebugLineInfo_t *info, int fromServer)
 {
-    int32_t idx; // [esp+8h] [ebp-4h]
+    int idx; // [esp+8h] [ebp-4h]
 
     if (info->lines)
     {
@@ -319,8 +319,8 @@ void __cdecl CL_FlushDebugServerData()
 
 void __cdecl CL_UpdateDebugServerData()
 {
-    int32_t copySize; // [esp+0h] [ebp-4h]
-    int32_t copySizea; // [esp+0h] [ebp-4h]
+    int copySize; // [esp+0h] [ebp-4h]
+    int copySizea; // [esp+0h] [ebp-4h]
 
     if (cls.rendererStarted)
     {

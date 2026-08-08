@@ -338,7 +338,7 @@ BuiltinMethodDef methods_2[] =
   { "itemweaponsetammo", &ScrCmd_ItemWeaponSetAmmo, 0 }
 }; // idb
 
-uint32_t __cdecl GScr_AllocString(const char *s)
+uint __cdecl GScr_AllocString(const char *s)
 {
     return Scr_AllocString((char*)s, 1);
 }
@@ -392,9 +392,9 @@ void __cdecl GScr_LoadGameTypeScript()
         1);
 }
 
-int32_t __cdecl GScr_LoadScriptAndLabel(const char *filename, const char *label, int32_t bEnforceExists)
+int __cdecl GScr_LoadScriptAndLabel(const char *filename, const char *label, int bEnforceExists)
 {
-    int32_t func; // [esp+0h] [ebp-4h]
+    int func; // [esp+0h] [ebp-4h]
 
     if (G_ExitAfterConnectPaths())
         return 0;
@@ -422,9 +422,9 @@ void __cdecl GScr_LoadScripts()
     Scr_EndLoadScripts();
 }
 
-int32_t GScr_LoadLevelScript()
+int GScr_LoadLevelScript()
 {
-    int32_t result; // eax
+    int result; // eax
     char filename[64]; // [esp+0h] [ebp-48h] BYREF
     const dvar_s *mapname; // [esp+44h] [ebp-4h]
 
@@ -437,7 +437,7 @@ int32_t GScr_LoadLevelScript()
 
 void GScr_PostLoadScripts()
 {
-    int32_t classnum; // [esp+0h] [ebp-4h]
+    int classnum; // [esp+0h] [ebp-4h]
 
     for (classnum = 0; classnum < CLASS_NUM_COUNT; ++classnum)
         Scr_SetClassMap(classnum);
@@ -448,7 +448,7 @@ void GScr_PostLoadScripts()
 
 void __cdecl GScr_FreeScripts()
 {
-    int32_t classnum; // [esp+0h] [ebp-4h]
+    int classnum; // [esp+0h] [ebp-4h]
 
     for (classnum = 0; classnum < CLASS_NUM_COUNT; ++classnum)
         Scr_RemoveClassMap(classnum);
@@ -479,9 +479,9 @@ void GScr_CreatePrintChannel()
 
 void GScr_printChannelSet()
 {
-    int32_t Type; // [esp+0h] [ebp-10h]
-    int32_t oldChannel; // [esp+4h] [ebp-Ch]
-    int32_t channel; // [esp+8h] [ebp-8h] BYREF
+    int Type; // [esp+0h] [ebp-10h]
+    int oldChannel; // [esp+4h] [ebp-Ch]
+    int channel; // [esp+8h] [ebp-8h] BYREF
     const char *name; // [esp+Ch] [ebp-4h]
 
     channel = 24;
@@ -519,8 +519,8 @@ void GScr_printChannelSet()
 
 void print()
 {
-    int32_t NumParam; // r28
-    int32_t i; // r31
+    int NumParam; // r28
+    int i; // r31
     const char *DebugString; // r3
 
     if (!g_NoScriptSpam->current.enabled)
@@ -543,27 +543,27 @@ void println()
     }
 }
 
-void __cdecl Scr_LocalizationError(uint32_t  iParm, const char *pszErrorMessage)
+void __cdecl Scr_LocalizationError(uint  iParm, const char *pszErrorMessage)
 {
     Scr_ParamError(iParm, pszErrorMessage);
 }
 
 void __cdecl Scr_ConstructMessageString(
-    int32_t firstParmIndex,
-    int32_t lastParmIndex,
+    int firstParmIndex,
+    int lastParmIndex,
     const char *errorContext,
     char *string,
-    uint32_t  stringLimit)
+    uint  stringLimit)
 {
-    uint32_t  v10; // [esp+0h] [ebp-54h]
-    uint32_t  v11; // [esp+10h] [ebp-44h]
-    uint32_t  charIndex; // [esp+34h] [ebp-20h]
-    uint32_t  charIndexa; // [esp+34h] [ebp-20h]
-    uint32_t  tokenLen; // [esp+38h] [ebp-1Ch]
-    int32_t type; // [esp+40h] [ebp-14h]
+    uint  v10; // [esp+0h] [ebp-54h]
+    uint  v11; // [esp+10h] [ebp-44h]
+    uint  charIndex; // [esp+34h] [ebp-20h]
+    uint  charIndexa; // [esp+34h] [ebp-20h]
+    uint  tokenLen; // [esp+38h] [ebp-1Ch]
+    int type; // [esp+40h] [ebp-14h]
     gentity_s *ent; // [esp+44h] [ebp-10h]
     const char *token; // [esp+4Ch] [ebp-8h]
-    uint32_t  stringLen; // [esp+50h] [ebp-4h]
+    uint  stringLen; // [esp+50h] [ebp-4h]
 
     stringLen = 0;
     while (firstParmIndex <= lastParmIndex)
@@ -648,9 +648,9 @@ void __cdecl Scr_ConstructMessageString(
     string[stringLen] = 0;
 }
 
-void __cdecl Scr_ValidateLocalizedStringRef(uint32_t  parmIndex, const char *token, int32_t tokenLen)
+void __cdecl Scr_ValidateLocalizedStringRef(uint  parmIndex, const char *token, int tokenLen)
 {
-    int32_t charIter; // [esp+0h] [ebp-4h]
+    int charIter; // [esp+0h] [ebp-4h]
 
     iassert(token);
     iassert(tokenLen >= 0);
@@ -667,9 +667,9 @@ void __cdecl Scr_ValidateLocalizedStringRef(uint32_t  parmIndex, const char *tok
     }
 }
 
-void __cdecl Scr_MakeGameMessage(int32_t iClientNum, const char *pszCmd)
+void __cdecl Scr_MakeGameMessage(int iClientNum, const char *pszCmd)
 {
-    uint32_t  NumParam; // eax
+    uint  NumParam; // eax
     const char *v3; // eax
     char string[1028]; // [esp+0h] [ebp-408h] BYREF
 
@@ -679,7 +679,7 @@ void __cdecl Scr_MakeGameMessage(int32_t iClientNum, const char *pszCmd)
     SV_GameSendServerCommand(iClientNum, SV_CMD_CAN_IGNORE, v3);
 }
 
-void __cdecl Scr_VerifyWeaponIndex(int32_t weaponIndex, const char *weaponName)
+void __cdecl Scr_VerifyWeaponIndex(int weaponIndex, const char *weaponName)
 {
     const char *v2; // eax
 
@@ -768,7 +768,7 @@ void GScr_line()
     float start[3]; // [esp+14h] [ebp-2Ch] BYREF
     float end[3]; // [esp+20h] [ebp-20h] BYREF
     float color[4]; // [esp+2Ch] [ebp-14h] BYREF
-    int32_t depthTest; // [esp+3Ch] [ebp-4h]
+    int depthTest; // [esp+3Ch] [ebp-4h]
 
     duration.intValue = 0;
     depthTest = 0;
@@ -839,8 +839,8 @@ void assertmsgCmd()
 
 void GScr_IsDefined()
 {
-    int32_t type; // [esp+4h] [ebp-4h]
-    int32_t typea; // [esp+4h] [ebp-4h]
+    int type; // [esp+4h] [ebp-4h]
+    int typea; // [esp+4h] [ebp-4h]
 
     type = Scr_GetType(0);
     if (type == 1)
@@ -863,7 +863,7 @@ void GScr_IsDefined()
 
 void GScr_IsString()
 {
-    int32_t Type; // eax
+    int Type; // eax
 
     Type = Scr_GetType(0);
     Scr_AddInt(Type == 2);
@@ -911,16 +911,16 @@ void GScr_GetDvarFloat()
 
 void GScr_SetDvar()
 {
-    uint32_t  NumParam; // eax
+    uint  NumParam; // eax
     char v1; // al
     const char *v2; // eax
     bool v3; // [esp+0h] [ebp-840h]
     char string[1028]; // [esp+18h] [ebp-828h] BYREF
-    int32_t len; // [esp+41Ch] [ebp-424h]
+    int len; // [esp+41Ch] [ebp-424h]
     char outString[1024]; // [esp+420h] [ebp-420h] BYREF
     const char *dvarName; // [esp+828h] [ebp-18h]
-    int32_t type; // [esp+82Ch] [ebp-14h]
-    int32_t i; // [esp+830h] [ebp-10h]
+    int type; // [esp+82Ch] [ebp-14h]
+    int i; // [esp+830h] [ebp-10h]
     const dvar_s *dvar; // [esp+834h] [ebp-Ch]
     const char *dvarValue; // [esp+838h] [ebp-8h]
     char *pCh; // [esp+83Ch] [ebp-4h]
@@ -976,10 +976,10 @@ void GScr_GetTime()
 
 void Scr_GetEntByNum()
 {
-    int32_t entnum; // [esp+4h] [ebp-4h]
+    int entnum; // [esp+4h] [ebp-4h]
 
     entnum = Scr_GetInt(0);
-    if ((uint32_t )entnum < 0x400)
+    if ((uint )entnum < 0x400)
     {
         if (g_entities[entnum].r.inuse)
             Scr_AddEntity(&g_entities[entnum]);
@@ -989,8 +989,8 @@ void Scr_GetEntByNum()
 void Scr_GetWeaponModel()
 {
     WeaponDef *WeaponDef; // eax
-    uint32_t  weaponModel; // [esp+0h] [ebp-Ch]
-    int32_t iWeaponIndex; // [esp+4h] [ebp-8h]
+    uint  weaponModel; // [esp+0h] [ebp-Ch]
+    int iWeaponIndex; // [esp+4h] [ebp-8h]
     const char *pszWeaponName; // [esp+8h] [ebp-4h]
 
     pszWeaponName = Scr_GetString(0);
@@ -1029,9 +1029,9 @@ void Scr_GetWeaponModel()
 
 void __cdecl GScr_GetAmmoCount(scr_entref_t entref)
 {
-    int32_t v1; // eax
+    int v1; // eax
     const char *weaponName; // [esp+0h] [ebp-Ch]
-    int32_t weaponIndex; // [esp+4h] [ebp-8h]
+    int weaponIndex; // [esp+4h] [ebp-8h]
     gentity_s *ent; // [esp+8h] [ebp-4h]
 
     ent = GetPlayerEntity(entref);
@@ -1105,7 +1105,7 @@ void GScr_AnimHasNotetrack()
 void GScr_GetNotetrackTimes()
 {
     scr_anim_s anim = Scr_GetAnim(0, 0);
-    uint32_t name = Scr_GetConstString(1);
+    uint name = Scr_GetConstString(1);
     Scr_MakeArray();
     XAnimAddNotetrackTimesToScriptArray(Scr_GetAnims(anim.tree), anim.index, name);
 }
@@ -1125,8 +1125,8 @@ void GScr_Spawn()
 {
     float *currentOrigin; // [esp+0h] [ebp-1Ch]
     float origin[3]; // [esp+4h] [ebp-18h] BYREF
-    int32_t iSpawnFlags; // [esp+10h] [ebp-Ch]
-    unsigned short classname; // [esp+14h] [ebp-8h]
+    int iSpawnFlags; // [esp+10h] [ebp-Ch]
+    ushort classname; // [esp+14h] [ebp-8h]
     gentity_s *ent; // [esp+18h] [ebp-4h]
 
     classname = Scr_GetConstString(0);
@@ -1156,12 +1156,12 @@ void GScr_SpawnPlane()
 {
     float *currentOrigin; // [esp+0h] [ebp-28h]
     float origin[3]; // [esp+4h] [ebp-24h] BYREF
-    int32_t iSpawnFlags; // [esp+10h] [ebp-18h]
-    int32_t team; // [esp+14h] [ebp-14h]
+    int iSpawnFlags; // [esp+10h] [ebp-18h]
+    int team; // [esp+14h] [ebp-14h]
     gentity_s *owner; // [esp+18h] [ebp-10h]
     uint16_t classname; // [esp+1Ch] [ebp-Ch]
     gentity_s *ent; // [esp+20h] [ebp-8h]
-    int32_t ownerIndex; // [esp+24h] [ebp-4h]
+    int ownerIndex; // [esp+24h] [ebp-4h]
 
     owner = Scr_GetEntity(0);
     if (!owner->client)
@@ -1180,7 +1180,7 @@ void GScr_SpawnPlane()
     currentOrigin[2] = origin[2];
     ent->spawnflags = iSpawnFlags;
     team = owner->client->sess.cs.team;
-    if ((uint32_t )team >= 4)
+    if ((uint )team >= 4)
         MyAssertHandler(
             ".\\game_mp\\g_scr_main_mp.cpp",
             964,
@@ -1256,7 +1256,7 @@ void GScr_SpawnHelicopter()
     Scr_AddEntity(ent);
 }
 
-uint32_t  GScr_PrecacheTurret()
+uint  GScr_PrecacheTurret()
 {
     const char *turretInfo; // [esp+0h] [ebp-4h]
 
@@ -1281,8 +1281,8 @@ void __cdecl ScrCmd_SetMoveSpeedScale(scr_entref_t entref)
 
 void __cdecl ScrCmd_attach(scr_entref_t entref)
 {
-    uint32_t  v5; // [esp+0h] [ebp-18h]
-    uint32_t  v6; // [esp+4h] [ebp-14h]
+    uint  v5; // [esp+0h] [ebp-18h]
+    uint  v6; // [esp+4h] [ebp-14h]
     const char *modelName; // [esp+Ch] [ebp-Ch]
     gentity_s *ent; // [esp+10h] [ebp-8h]
 
@@ -1311,10 +1311,10 @@ void __cdecl ScrCmd_attach(scr_entref_t entref)
 
 void __cdecl ScrCmd_detach(scr_entref_t entref)
 {
-    uint32_t  v6; // [esp+0h] [ebp-14h]
+    uint  v6; // [esp+0h] [ebp-14h]
     const char *modelName; // [esp+8h] [ebp-Ch]
     gentity_s *ent; // [esp+Ch] [ebp-8h]
-    int32_t i; // [esp+10h] [ebp-4h]
+    int i; // [esp+10h] [ebp-4h]
 
     ent = GetEntity(entref);
     modelName = Scr_GetString(0);
@@ -1350,7 +1350,7 @@ void __cdecl ScrCmd_detachAll(scr_entref_t entref)
 void __cdecl ScrCmd_GetAttachSize(scr_entref_t entref)
 {
     gentity_s *ent; // [esp+0h] [ebp-8h]
-    int32_t i; // [esp+4h] [ebp-4h]
+    int i; // [esp+4h] [ebp-4h]
 
     ent = GetEntity(entref);
     for (i = 0; i < 19 && ent->attachModelNames[i]; ++i)
@@ -1360,13 +1360,13 @@ void __cdecl ScrCmd_GetAttachSize(scr_entref_t entref)
 
 void __cdecl ScrCmd_GetAttachModelName(scr_entref_t entref)
 {
-    uint32_t  v1; // eax
+    uint  v1; // eax
     gentity_s *ent; // [esp+0h] [ebp-8h]
-    int32_t i; // [esp+4h] [ebp-4h]
+    int i; // [esp+4h] [ebp-4h]
 
     ent = GetEntity(entref);
     i = Scr_GetInt(0);
-    if ((uint32_t )i >= 0x13 || !ent->attachModelNames[i])
+    if ((uint )i >= 0x13 || !ent->attachModelNames[i])
         Scr_ParamError(0, "bad index");
     v1 = G_ModelName(ent->attachModelNames[i]);
     Scr_AddConstString(v1);
@@ -1375,11 +1375,11 @@ void __cdecl ScrCmd_GetAttachModelName(scr_entref_t entref)
 void __cdecl ScrCmd_GetAttachTagName(scr_entref_t entref)
 {
     gentity_s *ent; // [esp+0h] [ebp-8h]
-    int32_t i; // [esp+4h] [ebp-4h]
+    int i; // [esp+4h] [ebp-4h]
 
     ent = GetEntity(entref);
     i = Scr_GetInt(0);
-    if ((uint32_t )i >= 0x13 || !ent->attachModelNames[i])
+    if ((uint )i >= 0x13 || !ent->attachModelNames[i])
         Scr_ParamError(0, "bad index");
     if (!ent->attachTagNames[i])
         MyAssertHandler(".\\game_mp\\g_scr_main_mp.cpp", 1196, 0, "%s", "ent->attachTagNames[i]");
@@ -1389,16 +1389,16 @@ void __cdecl ScrCmd_GetAttachTagName(scr_entref_t entref)
 void __cdecl ScrCmd_GetAttachIgnoreCollision(scr_entref_t entref)
 {
     gentity_s *ent; // [esp+0h] [ebp-8h]
-    int32_t i; // [esp+4h] [ebp-4h]
+    int i; // [esp+4h] [ebp-4h]
 
     ent = GetEntity(entref);
     i = Scr_GetInt(0);
-    if ((uint32_t )i >= 0x13 || !ent->attachModelNames[i])
+    if ((uint )i >= 0x13 || !ent->attachModelNames[i])
         Scr_ParamError(0, "bad index");
     Scr_AddBool((ent->attachIgnoreCollision & (1 << i)) != 0);
 }
 
-void __cdecl G_EntityStateSetPartBits(gentity_s *ent, const uint32_t  *partBits)
+void __cdecl G_EntityStateSetPartBits(gentity_s *ent, const uint  *partBits)
 {
     if (!ent)
         MyAssertHandler(".\\game_mp\\g_scr_main_mp.cpp", 1222, 0, "%s", "ent");
@@ -1408,7 +1408,7 @@ void __cdecl G_EntityStateSetPartBits(gentity_s *ent, const uint32_t  *partBits)
     ent->s.partBits[3] = partBits[3];
 }
 
-void __cdecl G_EntityStateGetPartBits(const gentity_s *ent, uint32_t  *partBits)
+void __cdecl G_EntityStateGetPartBits(const gentity_s *ent, uint  *partBits)
 {
     if (!ent)
         MyAssertHandler(".\\game_mp\\g_scr_main_mp.cpp", 1230, 0, "%s", "ent");
@@ -1420,12 +1420,12 @@ void __cdecl G_EntityStateGetPartBits(const gentity_s *ent, uint32_t  *partBits)
 
 void __cdecl ScrCmd_hidepart(scr_entref_t entref)
 {
-    uint32_t  tagName; // [esp+0h] [ebp-24h]
+    uint  tagName; // [esp+0h] [ebp-24h]
     uint8_t boneIndex; // [esp+7h] [ebp-1Dh] BYREF
     DObj_s *obj; // [esp+8h] [ebp-1Ch]
     const char *modelName; // [esp+Ch] [ebp-18h]
     gentity_s *ent; // [esp+10h] [ebp-14h]
-    uint32_t  partBits[4]; // [esp+14h] [ebp-10h] BYREF
+    uint  partBits[4]; // [esp+14h] [ebp-10h] BYREF
 
     ent = GetEntity(entref);
     obj = Com_GetServerDObj(ent->s.number);
@@ -1456,12 +1456,12 @@ void __cdecl ScrCmd_hidepart(scr_entref_t entref)
 
 void __cdecl ScrCmd_showpart(scr_entref_t entref)
 {
-    uint32_t  tagName; // [esp+0h] [ebp-24h]
+    uint  tagName; // [esp+0h] [ebp-24h]
     uint8_t boneIndex; // [esp+7h] [ebp-1Dh] BYREF
     DObj_s *obj; // [esp+8h] [ebp-1Ch]
     const char *modelName; // [esp+Ch] [ebp-18h]
     gentity_s *ent; // [esp+10h] [ebp-14h]
-    uint32_t  partBits[4]; // [esp+14h] [ebp-10h] BYREF
+    uint  partBits[4]; // [esp+14h] [ebp-10h] BYREF
 
     ent = GetEntity(entref);
     obj = Com_GetServerDObj(ent->s.number);
@@ -1494,7 +1494,7 @@ void __cdecl ScrCmd_showallparts(scr_entref_t entref)
 {
     DObj_s *obj; // [esp+0h] [ebp-18h]
     gentity_s *ent; // [esp+4h] [ebp-14h]
-    uint32_t  partBits[4]; // [esp+8h] [ebp-10h] BYREF
+    uint  partBits[4]; // [esp+8h] [ebp-10h] BYREF
 
     ent = GetEntity(entref);
     obj = Com_GetServerDObj(ent->s.number);
@@ -1507,10 +1507,10 @@ void __cdecl ScrCmd_showallparts(scr_entref_t entref)
 
 void __cdecl ScrCmd_LinkTo(scr_entref_t entref)
 {
-    uint32_t  tagName; // [esp+0h] [ebp-28h]
+    uint  tagName; // [esp+0h] [ebp-28h]
     float originOffset[3]; // [esp+4h] [ebp-24h] BYREF
     float anglesOffset[3]; // [esp+10h] [ebp-18h] BYREF
-    int32_t numParam; // [esp+1Ch] [ebp-Ch]
+    int numParam; // [esp+1Ch] [ebp-Ch]
     gentity_s *parent; // [esp+20h] [ebp-8h]
     gentity_s *ent; // [esp+24h] [ebp-4h]
 
@@ -1629,7 +1629,7 @@ void __cdecl ScrCmd_IsTouching(scr_entref_t entref)
     const gentity_s *pOther; // [esp+1Ch] [ebp-28h]
     float vMins[3]; // [esp+20h] [ebp-24h] BYREF
     gentity_s *pEnt; // [esp+2Ch] [ebp-18h]
-    int32_t bTouching; // [esp+30h] [ebp-14h]
+    int bTouching; // [esp+30h] [ebp-14h]
     gentity_s *pTemp; // [esp+34h] [ebp-10h]
     float vMaxs[3]; // [esp+38h] [ebp-Ch] BYREF
 
@@ -1671,7 +1671,7 @@ void ScrCmd_SoundExists()
 
 void __cdecl ScrCmd_PlaySound(scr_entref_t entref)
 {
-    uint32_t  NumParam; // eax
+    uint  NumParam; // eax
     const char *v2; // eax
 
     StartScriptPlaySoundOnEnt(entref);
@@ -1702,10 +1702,10 @@ gentity_s *__cdecl StartScriptPlaySoundOnEnt(scr_entref_t entref)
 void __cdecl ScrCmd_PlaySoundToTeam(scr_entref_t entref)
 {
     gentity_s *tempEnt; // [esp+0h] [ebp-18h]
-    int32_t teamNum; // [esp+4h] [ebp-14h]
+    int teamNum; // [esp+4h] [ebp-14h]
     uint16_t team; // [esp+8h] [ebp-10h]
     gentity_s *ignoreClientEnt; // [esp+Ch] [ebp-Ch]
-    int32_t entIndex; // [esp+10h] [ebp-8h]
+    int entIndex; // [esp+10h] [ebp-8h]
     gentity_s *clientEnt; // [esp+14h] [ebp-4h]
 
     tempEnt = StartScriptPlaySoundOnEnt(entref);
@@ -1766,7 +1766,7 @@ void __cdecl ScrCmd_PlaySoundToPlayer(scr_entref_t entref)
 
 void __cdecl ScrCmd_PlaySoundAsMaster(scr_entref_t entref)
 {
-    uint32_t  NumParam; // eax
+    uint  NumParam; // eax
     const char *pszSoundName; // [esp+0h] [ebp-10h]
     uint8_t iSoundIndex; // [esp+7h] [ebp-9h]
     gentity_s *pEnt; // [esp+8h] [ebp-8h]
@@ -1854,7 +1854,7 @@ void __cdecl ScrCmd_GetNormalHealth(scr_entref_t entref)
 
 void __cdecl ScrCmd_SetNormalHealth(scr_entref_t entref)
 {
-    int32_t newHealth; // [esp+10h] [ebp-Ch]
+    int newHealth; // [esp+10h] [ebp-Ch]
     float normalHealth; // [esp+14h] [ebp-8h]
     gentity_s *ent; // [esp+18h] [ebp-4h]
 
@@ -1937,7 +1937,7 @@ void __cdecl ScrCmd_ShowToPlayer(scr_entref_t entref)
 
 void __cdecl ScrCmd_SetContents(scr_entref_t entref)
 {
-    int32_t contents; // [esp+0h] [ebp-8h]
+    int contents; // [esp+0h] [ebp-8h]
     gentity_s *ent; // [esp+4h] [ebp-4h]
 
     ent = GetEntity(entref);
@@ -1976,7 +1976,7 @@ void __cdecl ScrCmd_GetStance(scr_entref_t entref)
 void __cdecl Scr_SetStableMissile(scr_entref_t entref)
 {
     gentityFlags_t  v1; // eax
-    int32_t stableMissile; // [esp+0h] [ebp-8h]
+    int stableMissile; // [esp+0h] [ebp-8h]
     gentity_s *ent; // [esp+4h] [ebp-4h]
 
     ent = GetEntity(entref);
@@ -1994,8 +1994,8 @@ void __cdecl GScr_SetCursorHint(scr_entref_t entref)
 {
     const char *pszHint; // [esp+0h] [ebp-Ch]
     gentity_s *pEnt; // [esp+4h] [ebp-8h]
-    int32_t i; // [esp+8h] [ebp-4h]
-    int32_t ia; // [esp+8h] [ebp-4h]
+    int i; // [esp+8h] [ebp-4h]
+    int ia; // [esp+8h] [ebp-4h]
 
     pEnt = GetEntity(entref);
     
@@ -2026,10 +2026,10 @@ void __cdecl GScr_SetCursorHint(scr_entref_t entref)
     }
 }
 
-int32_t __cdecl G_GetHintStringIndex(int32_t *piIndex, char *pszString)
+int __cdecl G_GetHintStringIndex(int *piIndex, char *pszString)
 {
     char szConfigString[1024]; // [esp+14h] [ebp-408h] BYREF
-    int32_t i; // [esp+418h] [ebp-4h]
+    int i; // [esp+418h] [ebp-4h]
 
     for (i = 0; i < 32; ++i)
     {
@@ -2053,12 +2053,12 @@ int32_t __cdecl G_GetHintStringIndex(int32_t *piIndex, char *pszString)
 void __cdecl GScr_SetHintString(scr_entref_t entref)
 {
     const char *String; // eax
-    uint32_t  NumParam; // eax
+    uint  NumParam; // eax
     const char *v3; // eax
     char szHint[1024]; // [esp+0h] [ebp-410h] BYREF
-    int32_t type; // [esp+404h] [ebp-Ch]
+    int type; // [esp+404h] [ebp-Ch]
     gentity_s *pEnt; // [esp+408h] [ebp-8h]
-    int32_t i; // [esp+40Ch] [ebp-4h] BYREF
+    int i; // [esp+40Ch] [ebp-4h] BYREF
 
     pEnt = GetEntity(entref);
     if (pEnt->classname != scr_const.trigger_use && pEnt->classname != scr_const.trigger_use_touch)
@@ -2170,13 +2170,13 @@ void __cdecl GScr_DisableAimAssist(scr_entref_t entref)
 
 void __cdecl G_InitObjectives()
 {
-    int32_t i; // [esp+0h] [ebp-4h]
+    int i; // [esp+0h] [ebp-4h]
 
     for (i = 0; i < 16; ++i)
         ClearObjective(&level.objectives[i]);
 }
 
-int32_t __cdecl ObjectiveStateIndexFromString(objectiveState_t *piStateIndex, uint32_t  stateString)
+int __cdecl ObjectiveStateIndexFromString(objectiveState_t *piStateIndex, uint  stateString)
 {
     if (stateString == scr_const.empty)
     {
@@ -2218,16 +2218,16 @@ void Scr_Objective_Add()
     objective_t *result; // eax
     objectiveState_t state; // [esp+Ch] [ebp-14h] BYREF
     objective_t *obj; // [esp+10h] [ebp-10h]
-    int32_t numParam; // [esp+14h] [ebp-Ch]
+    int numParam; // [esp+14h] [ebp-Ch]
     uint16_t stateName; // [esp+18h] [ebp-8h]
-    int32_t objNum; // [esp+1Ch] [ebp-4h]
+    int objNum; // [esp+1Ch] [ebp-4h]
 
     numParam = Scr_GetNumParam();
     if (numParam < 2)
         Scr_Error(
             "objective_add needs at least the first two parameters out of its parameter list of: index state [string] [position]\n");
     objNum = Scr_GetInt(0);
-    if ((uint32_t )objNum >= 0x10)
+    if ((uint )objNum >= 0x10)
     {
         Scr_ParamError(0, va("index %i is an illegal objective index. Valid indexes are 0 to %i\n", objNum, 15));
     }
@@ -2267,10 +2267,10 @@ void __cdecl ClearObjective_OnEntity(objective_t *obj)
     }
 }
 
-void __cdecl SetObjectiveIcon(objective_t *obj, uint32_t  paramNum)
+void __cdecl SetObjectiveIcon(objective_t *obj, uint  paramNum)
 {
     const char *shaderName; // [esp+0h] [ebp-8h]
-    int32_t i; // [esp+4h] [ebp-4h]
+    int i; // [esp+4h] [ebp-4h]
 
     shaderName = Scr_GetString(paramNum);
     for (i = 0; shaderName[i]; ++i)
@@ -2289,10 +2289,10 @@ void __cdecl SetObjectiveIcon(objective_t *obj, uint32_t  paramNum)
 
 void Scr_Objective_Delete()
 {
-    int32_t objNum; // [esp+0h] [ebp-4h]
+    int objNum; // [esp+0h] [ebp-4h]
 
     objNum = Scr_GetInt(0);
-    if ((uint32_t )objNum >= 0x10)
+    if ((uint )objNum >= 0x10)
     {
         Scr_ParamError(0, va("index %i is an illegal objective index. Valid indexes are 0 to %i\n", objNum, 15));
     }
@@ -2306,10 +2306,10 @@ void Scr_Objective_State()
     objectiveState_t state; // [esp+0h] [ebp-10h] BYREF
     objective_t *obj; // [esp+4h] [ebp-Ch]
     uint16_t stateName; // [esp+8h] [ebp-8h]
-    int32_t objNum; // [esp+Ch] [ebp-4h]
+    int objNum; // [esp+Ch] [ebp-4h]
 
     objNum = Scr_GetInt(0);
-    if ((uint32_t )objNum >= 0x10)
+    if ((uint )objNum >= 0x10)
     {
         Scr_ParamError(0, va("index %i is an illegal objective index. Valid indexes are 0 to %i\n", objNum, 15));
     }
@@ -2326,10 +2326,10 @@ void Scr_Objective_State()
 
 void Scr_Objective_Icon()
 {
-    int32_t objNum; // [esp+0h] [ebp-4h]
+    int objNum; // [esp+0h] [ebp-4h]
 
     objNum = Scr_GetInt(0);
-    if ((uint32_t )objNum >= 0x10)
+    if ((uint )objNum >= 0x10)
     {
         Scr_ParamError(0, va("index %i is an illegal objective index. Valid indexes are 0 to %i\n", objNum, 15));
     }
@@ -2340,10 +2340,10 @@ void Scr_Objective_Position()
 {
     objective_t *result; // eax
     objective_t *obj; // [esp+Ch] [ebp-8h]
-    int32_t objNum; // [esp+10h] [ebp-4h]
+    int objNum; // [esp+10h] [ebp-4h]
 
     objNum = Scr_GetInt(0);
-    if ((uint32_t )objNum >= 0x10)
+    if ((uint )objNum >= 0x10)
     {
         Scr_ParamError(0, va("index %i is an illegal objective index. Valid indexes are 0 to %i\n", objNum, 15));
     }
@@ -2361,10 +2361,10 @@ objective_t *Scr_Objective_OnEntity()
     const char *v0; // eax
     objective_t *result; // eax
     gentity_s *ent; // [esp+4h] [ebp-8h]
-    int32_t objNum; // [esp+8h] [ebp-4h]
+    int objNum; // [esp+8h] [ebp-4h]
 
     objNum = Scr_GetInt(0);
-    if ((uint32_t )objNum >= 0x10)
+    if ((uint )objNum >= 0x10)
     {
         v0 = va("index %i is an illegal objective index. Valid indexes are 0 to %i\n", objNum, 15);
         Scr_ParamError(0, v0);
@@ -2381,17 +2381,17 @@ void Scr_Objective_Current()
 {
     const char *v0; // eax
     objective_t *obj; // [esp+0h] [ebp-50h]
-    int32_t numParam; // [esp+4h] [ebp-4Ch]
-    int32_t makeCurrent[16]; // [esp+8h] [ebp-48h] BYREF
-    int32_t i; // [esp+48h] [ebp-8h]
-    int32_t objNum; // [esp+4Ch] [ebp-4h]
+    int numParam; // [esp+4h] [ebp-4Ch]
+    int makeCurrent[16]; // [esp+8h] [ebp-48h] BYREF
+    int i; // [esp+48h] [ebp-8h]
+    int objNum; // [esp+4Ch] [ebp-4h]
 
     numParam = Scr_GetNumParam();
     memset((uint8_t *)makeCurrent, 0, sizeof(makeCurrent));
     for (i = 0; i < numParam; ++i)
     {
         objNum = Scr_GetInt(i);
-        if ((uint32_t )objNum >= 0x10)
+        if ((uint )objNum >= 0x10)
         {
             v0 = va("index %i is an illegal objective index. Valid indexes are 0 to %i\n", objNum, 15);
             Scr_ParamError(i, v0);
@@ -2416,10 +2416,10 @@ void GScr_Objective_Team()
 {
     objective_t *obj; // [esp+0h] [ebp-Ch]
     uint16_t team; // [esp+4h] [ebp-8h]
-    int32_t objNum; // [esp+8h] [ebp-4h]
+    int objNum; // [esp+8h] [ebp-4h]
 
     objNum = Scr_GetInt(0);
-    if ((uint32_t )objNum >= 0x10)
+    if ((uint )objNum >= 0x10)
     {
         Scr_ParamError(0, va("index %i is an illegal objective index. Valid indexes are 0 to %i\n", objNum, 15));
     }
@@ -2445,11 +2445,11 @@ void GScr_Objective_Team()
 
 void GScr_LogPrint()
 {
-    uint32_t  v0; // [esp+0h] [ebp-428h]
-    int32_t iStringLen; // [esp+10h] [ebp-418h]
+    uint  v0; // [esp+0h] [ebp-428h]
+    int iStringLen; // [esp+10h] [ebp-418h]
     char string[1024]; // [esp+18h] [ebp-410h] BYREF
-    int32_t iNumParms; // [esp+41Ch] [ebp-Ch]
-    int32_t i; // [esp+420h] [ebp-8h]
+    int iNumParms; // [esp+41Ch] [ebp-Ch]
+    int i; // [esp+420h] [ebp-8h]
     const char *pszToken; // [esp+424h] [ebp-4h]
 
     string[0] = 0;
@@ -2472,14 +2472,14 @@ void GScr_WorldEntNumber()
     Scr_AddInt(ENTITYNUM_WORLD);
 }
 
-int32_t GScr_Obituary()
+int GScr_Obituary()
 {
-    int32_t result; // eax
+    int result; // eax
     gentity_s *pOtherEnt; // [esp+0h] [ebp-14h]
     const char *pszWeapon; // [esp+4h] [ebp-10h]
-    uint32_t  iWeaponNum; // [esp+8h] [ebp-Ch]
+    uint  iWeaponNum; // [esp+8h] [ebp-Ch]
     gentity_s *pEnt; // [esp+Ch] [ebp-8h]
-    int32_t iMODNum; // [esp+10h] [ebp-4h]
+    int iMODNum; // [esp+10h] [ebp-4h]
 
     pszWeapon = Scr_GetString(2);
     iWeaponNum = G_GetWeaponIndexForName(pszWeapon);
@@ -2507,12 +2507,12 @@ int32_t GScr_Obituary()
 
 void GScr_positionWouldTelefrag()
 {
-    int32_t entityList[1024]; // [esp+0h] [ebp-1030h] BYREF
+    int entityList[1024]; // [esp+0h] [ebp-1030h] BYREF
     float sum[3]; // [esp+1000h] [ebp-30h] BYREF
     gentity_s *v2; // [esp+100Ch] [ebp-24h]
     float maxs[3]; // [esp+1010h] [ebp-20h] BYREF
-    int32_t v4; // [esp+101Ch] [ebp-14h]
-    int32_t i; // [esp+1020h] [ebp-10h]
+    int v4; // [esp+101Ch] [ebp-14h]
+    int i; // [esp+1020h] [ebp-10h]
     float vectorValue[3]; // [esp+1024h] [ebp-Ch] BYREF
 
     Scr_GetVector(0, vectorValue);
@@ -2539,8 +2539,8 @@ void GScr_getStartTime()
 void GScr_PrecacheMenu()
 {
     const char *pszNewMenu; // [esp+0h] [ebp-410h]
-    int32_t iConfigNum; // [esp+4h] [ebp-40Ch]
-    int32_t iConfigNuma; // [esp+4h] [ebp-40Ch]
+    int iConfigNum; // [esp+4h] [ebp-40Ch]
+    int iConfigNuma; // [esp+4h] [ebp-40Ch]
     char szConfigString[1028]; // [esp+8h] [ebp-408h] BYREF
 
     pszNewMenu = Scr_GetString(0);
@@ -2566,10 +2566,10 @@ void GScr_PrecacheMenu()
     SV_SetConfigstring(iConfigNuma + 1970, pszNewMenu);
 }
 
-int32_t __cdecl GScr_GetScriptMenuIndex(const char *pszMenu)
+int __cdecl GScr_GetScriptMenuIndex(const char *pszMenu)
 {
     const char *v2; // eax
-    int32_t iConfigNum; // [esp+0h] [ebp-40Ch]
+    int iConfigNum; // [esp+0h] [ebp-40Ch]
     char szConfigString[1028]; // [esp+4h] [ebp-408h] BYREF
 
     for (iConfigNum = 0; iConfigNum < 32; ++iConfigNum)
@@ -2586,8 +2586,8 @@ int32_t __cdecl GScr_GetScriptMenuIndex(const char *pszMenu)
 void GScr_PrecacheStatusIcon()
 {
     const char *pszNewIcon; // [esp+0h] [ebp-410h]
-    int32_t iConfigNum; // [esp+4h] [ebp-40Ch]
-    int32_t iConfigNuma; // [esp+4h] [ebp-40Ch]
+    int iConfigNum; // [esp+4h] [ebp-40Ch]
+    int iConfigNuma; // [esp+4h] [ebp-40Ch]
     char szConfigString[1028]; // [esp+8h] [ebp-408h] BYREF
 
     pszNewIcon = Scr_GetString(0);
@@ -2613,9 +2613,9 @@ void GScr_PrecacheStatusIcon()
     SV_SetConfigstring(iConfigNuma + 2259, pszNewIcon);
 }
 
-int32_t __cdecl GScr_GetStatusIconIndex(const char *pszIcon)
+int __cdecl GScr_GetStatusIconIndex(const char *pszIcon)
 {
-    int32_t iConfigNum; // [esp+0h] [ebp-40Ch]
+    int iConfigNum; // [esp+0h] [ebp-40Ch]
     char szConfigString[1028]; // [esp+4h] [ebp-408h] BYREF
 
     if (!*pszIcon)
@@ -2635,8 +2635,8 @@ int32_t __cdecl GScr_GetStatusIconIndex(const char *pszIcon)
 void GScr_PrecacheHeadIcon()
 {
     const char *pszNewIcon; // [esp+0h] [ebp-410h]
-    int32_t iConfigNum; // [esp+4h] [ebp-40Ch]
-    int32_t iConfigNuma; // [esp+4h] [ebp-40Ch]
+    int iConfigNum; // [esp+4h] [ebp-40Ch]
+    int iConfigNuma; // [esp+4h] [ebp-40Ch]
     char szConfigString[1028]; // [esp+8h] [ebp-408h] BYREF
 
     pszNewIcon = Scr_GetString(0);
@@ -2662,9 +2662,9 @@ void GScr_PrecacheHeadIcon()
     SV_SetConfigstring(iConfigNuma + 2267, pszNewIcon);
 }
 
-int32_t __cdecl GScr_GetHeadIconIndex(const char *pszIcon)
+int __cdecl GScr_GetHeadIconIndex(const char *pszIcon)
 {
-    int32_t iConfigNum; // [esp+0h] [ebp-40Ch]
+    int iConfigNum; // [esp+0h] [ebp-40Ch]
     char szConfigString[1028]; // [esp+4h] [ebp-408h] BYREF
 
     if (!*pszIcon)
@@ -2684,7 +2684,7 @@ int32_t __cdecl GScr_GetHeadIconIndex(const char *pszIcon)
 void GScr_WeaponClipSize()
 {
     const char *weaponName; // [esp+0h] [ebp-Ch]
-    int32_t weaponIndex; // [esp+4h] [ebp-8h]
+    int weaponIndex; // [esp+4h] [ebp-8h]
     WeaponDef *weapDef; // [esp+8h] [ebp-4h]
 
     weaponName = Scr_GetString(0);
@@ -2697,7 +2697,7 @@ void GScr_WeaponClipSize()
 void GScr_WeaponIsSemiAuto()
 {
     const char *weaponName; // [esp+0h] [ebp-Ch]
-    int32_t weaponIndex; // [esp+4h] [ebp-8h]
+    int weaponIndex; // [esp+4h] [ebp-8h]
     WeaponDef *weapDef; // [esp+8h] [ebp-4h]
 
     weaponName = Scr_GetString(0);
@@ -2710,7 +2710,7 @@ void GScr_WeaponIsSemiAuto()
 void GScr_WeaponIsBoltAction()
 {
     const char *weaponName; // [esp+0h] [ebp-Ch]
-    int32_t weaponIndex; // [esp+4h] [ebp-8h]
+    int weaponIndex; // [esp+4h] [ebp-8h]
     WeaponDef *weapDef; // [esp+8h] [ebp-4h]
 
     weaponName = Scr_GetString(0);
@@ -2724,7 +2724,7 @@ void GScr_WeaponType()
 {
     const char *WeaponTypeName; // eax
     const char *weaponName; // [esp+0h] [ebp-Ch]
-    int32_t weaponIndex; // [esp+4h] [ebp-8h]
+    int weaponIndex; // [esp+4h] [ebp-8h]
     WeaponDef *weapDef; // [esp+8h] [ebp-4h]
 
     weaponName = Scr_GetString(0);
@@ -2739,7 +2739,7 @@ void GScr_WeaponClass()
 {
     const char *WeaponClassName; // eax
     const char *weaponName; // [esp+0h] [ebp-Ch]
-    int32_t weaponIndex; // [esp+4h] [ebp-8h]
+    int weaponIndex; // [esp+4h] [ebp-8h]
     WeaponDef *weapDef; // [esp+8h] [ebp-4h]
 
     weaponName = Scr_GetString(0);
@@ -2760,7 +2760,7 @@ void GScr_WeaponInventoryType()
 {
     const char *WeaponInventoryTypeName; // eax
     const char *weaponName; // [esp+0h] [ebp-Ch]
-    int32_t weaponIndex; // [esp+4h] [ebp-8h]
+    int weaponIndex; // [esp+4h] [ebp-8h]
     WeaponDef *weapDef; // [esp+8h] [ebp-4h]
 
     weaponName = Scr_GetString(0);
@@ -2774,7 +2774,7 @@ void GScr_WeaponInventoryType()
 void GScr_WeaponStartAmmo()
 {
     const char *weaponName; // [esp+0h] [ebp-Ch]
-    int32_t weaponIndex; // [esp+4h] [ebp-8h]
+    int weaponIndex; // [esp+4h] [ebp-8h]
     WeaponDef *weapDef; // [esp+8h] [ebp-4h]
 
     weaponName = Scr_GetString(0);
@@ -2787,7 +2787,7 @@ void GScr_WeaponStartAmmo()
 void GScr_WeaponMaxAmmo()
 {
     const char *weaponName; // [esp+0h] [ebp-Ch]
-    int32_t weaponIndex; // [esp+4h] [ebp-8h]
+    int weaponIndex; // [esp+4h] [ebp-8h]
     WeaponDef *weapDef; // [esp+8h] [ebp-4h]
 
     weaponName = Scr_GetString(0);
@@ -2800,8 +2800,8 @@ void GScr_WeaponMaxAmmo()
 void GScr_WeaponAltWeaponName()
 {
     const char *weaponName; // [esp+0h] [ebp-14h]
-    int32_t altWeaponIndex; // [esp+4h] [ebp-10h]
-    int32_t weaponIndex; // [esp+8h] [ebp-Ch]
+    int altWeaponIndex; // [esp+4h] [ebp-10h]
+    int weaponIndex; // [esp+8h] [ebp-Ch]
     WeaponDef *altWeapDef; // [esp+Ch] [ebp-8h]
 
     weaponName = Scr_GetString(0);
@@ -2824,7 +2824,7 @@ void GScr_WeaponAltWeaponName()
 void GScr_WeaponFireTime()
 {
     float value; // [esp+4h] [ebp-10h]
-    int32_t iWeaponIndex; // [esp+Ch] [ebp-8h]
+    int iWeaponIndex; // [esp+Ch] [ebp-8h]
     const char *pszWeaponName; // [esp+10h] [ebp-4h]
 
     pszWeaponName = Scr_GetString(0);
@@ -2842,9 +2842,9 @@ void GScr_WeaponFireTime()
 
 void GScr_IsWeaponClipOnly()
 {
-    uint32_t  IsClipOnly; // eax
+    uint  IsClipOnly; // eax
     const char *weapName; // [esp+0h] [ebp-8h]
-    int32_t weapIdx; // [esp+4h] [ebp-4h]
+    int weapIdx; // [esp+4h] [ebp-4h]
 
     weapName = Scr_GetString(0);
     weapIdx = G_GetWeaponIndexForName(weapName);
@@ -2862,7 +2862,7 @@ void GScr_IsWeaponClipOnly()
 void GScr_IsWeaponDetonationTimed()
 {
     const char *weapName; // [esp+0h] [ebp-Ch]
-    int32_t weapIdx; // [esp+4h] [ebp-8h]
+    int weapIdx; // [esp+4h] [ebp-8h]
     WeaponDef *weapDef; // [esp+8h] [ebp-4h]
 
     weapName = Scr_GetString(0);
@@ -2881,8 +2881,8 @@ void GScr_IsWeaponDetonationTimed()
 void GScr_PrecacheLocationSelector()
 {
     const char *v0; // eax
-    int32_t iConfigNum; // [esp+0h] [ebp-40Ch]
-    int32_t iConfigNuma; // [esp+0h] [ebp-40Ch]
+    int iConfigNum; // [esp+0h] [ebp-40Ch]
+    int iConfigNuma; // [esp+0h] [ebp-40Ch]
     char szConfigString[1024]; // [esp+4h] [ebp-408h] BYREF
     const char *pszNewMtl; // [esp+408h] [ebp-4h]
 
@@ -2910,10 +2910,10 @@ void GScr_PrecacheLocationSelector()
     SV_SetConfigstring(iConfigNuma + 827, (char *)pszNewMtl);
 }
 
-int32_t __cdecl GScr_GetLocSelIndex(const char *mtlName)
+int __cdecl GScr_GetLocSelIndex(const char *mtlName)
 {
     const char *v2; // eax
-    int32_t iConfigNum; // [esp+0h] [ebp-40Ch]
+    int iConfigNum; // [esp+0h] [ebp-40Ch]
     char szConfigString[1028]; // [esp+4h] [ebp-408h] BYREF
 
     if (!mtlName)
@@ -2937,11 +2937,11 @@ void Scr_BulletTrace()
     float vNorm[3]; // [esp+14h] [ebp-74h] BYREF
     float vEnd[3]; // [esp+20h] [ebp-68h] BYREF
     gentity_s *pIgnoreEnt; // [esp+2Ch] [ebp-5Ch]
-    int32_t iClipMask; // [esp+30h] [ebp-58h]
+    int iClipMask; // [esp+30h] [ebp-58h]
     trace_t trace; // [esp+38h] [ebp-50h] BYREF
     float endpos[3]; // [esp+64h] [ebp-24h] BYREF
-    int32_t iIgnoreEntNum; // [esp+70h] [ebp-18h]
-    int32_t iSurfaceTypeIndex; // [esp+74h] [ebp-14h]
+    int iIgnoreEntNum; // [esp+70h] [ebp-18h]
+    int iSurfaceTypeIndex; // [esp+74h] [ebp-14h]
     float vStart[3]; // [esp+78h] [ebp-10h] BYREF
     uint16_t hitEntId; // [esp+84h] [ebp-4h]
 
@@ -2992,11 +2992,11 @@ void Scr_BulletTrace()
 
 void Scr_BulletTracePassed()
 {
-    uint32_t  v0; // eax
+    uint  v0; // eax
     float vEnd[3]; // [esp+0h] [ebp-28h] BYREF
     gentity_s *pIgnoreEnt; // [esp+Ch] [ebp-1Ch]
-    int32_t iClipMask; // [esp+10h] [ebp-18h]
-    int32_t iIgnoreEntNum; // [esp+18h] [ebp-10h]
+    int iClipMask; // [esp+10h] [ebp-18h]
+    int iIgnoreEntNum; // [esp+18h] [ebp-10h]
     float vStart[3]; // [esp+1Ch] [ebp-Ch] BYREF
 
     pIgnoreEnt = 0;
@@ -3019,9 +3019,9 @@ void __cdecl Scr_SightTracePassed()
 {
     float vEnd[3]; // [esp+0h] [ebp-2Ch] BYREF
     gentity_s *pIgnoreEnt; // [esp+Ch] [ebp-20h]
-    int32_t iClipMask; // [esp+10h] [ebp-1Ch]
-    int32_t iIgnoreEntNum; // [esp+18h] [ebp-14h]
-    int32_t hitNum; // [esp+1Ch] [ebp-10h] BYREF
+    int iClipMask; // [esp+10h] [ebp-1Ch]
+    int iIgnoreEntNum; // [esp+18h] [ebp-14h]
+    int hitNum; // [esp+1Ch] [ebp-10h] BYREF
     float vStart[3]; // [esp+20h] [ebp-Ch] BYREF
 
     pIgnoreEnt = 0;
@@ -3070,8 +3070,8 @@ void Scr_PlayerPhysicsTrace()
 
 void Scr_RandomInt()
 {
-    int32_t v0; // eax
-    int32_t iMax; // [esp+0h] [ebp-4h]
+    int v0; // eax
+    int iMax; // [esp+0h] [ebp-4h]
 
     iMax = Scr_GetInt(0);
     if (iMax > 0)
@@ -3096,9 +3096,9 @@ void Scr_RandomFloat()
 
 void Scr_RandomIntRange()
 {
-    int32_t v0; // eax
-    int32_t iMax; // [esp+0h] [ebp-8h]
-    int32_t iMin; // [esp+4h] [ebp-4h]
+    int v0; // eax
+    int iMax; // [esp+0h] [ebp-8h]
+    int iMin; // [esp+4h] [ebp-4h]
 
     iMin = Scr_GetInt(0);
     iMax = Scr_GetInt(1);
@@ -3124,8 +3124,8 @@ void Scr_RandomFloatRange()
             23,
             "Scr_RandomFloatRange parms: %d %d ",
             fMin, fMax
-            //(uint32_t )COERCE_UNSIGNED_INT64(fMin),
-            //(uint32_t )HIDWORD(COERCE_UNSIGNED_INT64(fMin))
+            //(uint )COERCE_UNSIGNED_INT64(fMin),
+            //(uint )HIDWORD(COERCE_UNSIGNED_INT64(fMin))
         );
         Scr_Error("Scr_RandomFloatRange range must be positive float.\n");
     }
@@ -3281,7 +3281,7 @@ void GScr_CastInt()
     VariableUnion v0; // eax
     double Float; // st7
     const char *TypeName; // eax
-    int32_t Type; // [esp+0h] [ebp-4h]
+    int Type; // [esp+0h] [ebp-4h]
 
     Type = Scr_GetType(0);
     switch (Type)
@@ -3558,12 +3558,12 @@ void Scr_IsSubStr()
 void Scr_GetSubStr()
 {
     VariableUnion v0; // [esp+0h] [ebp-424h]
-    int32_t source; // [esp+4h] [ebp-420h]
+    int source; // [esp+4h] [ebp-420h]
     char c; // [esp+Bh] [ebp-419h]
     char tempString[1028]; // [esp+Ch] [ebp-418h] BYREF
-    int32_t start; // [esp+414h] [ebp-10h]
-    int32_t end; // [esp+418h] [ebp-Ch]
-    int32_t dest; // [esp+41Ch] [ebp-8h]
+    int start; // [esp+414h] [ebp-10h]
+    int end; // [esp+418h] [ebp-Ch]
+    int dest; // [esp+41Ch] [ebp-8h]
     const char *s; // [esp+420h] [ebp-4h]
 
     s = Scr_GetString(0);
@@ -3593,7 +3593,7 @@ void Scr_ToLower()
     char v0; // al
     char tempString[1028]; // [esp+4h] [ebp-410h] BYREF
     const char *s; // [esp+40Ch] [ebp-8h]
-    int32_t i; // [esp+410h] [ebp-4h]
+    int i; // [esp+410h] [ebp-4h]
 
     s = Scr_GetString(0);
     i = 0;
@@ -3614,16 +3614,16 @@ void Scr_ToLower()
 
 void Scr_StrTok()
 {
-    int32_t source; // [esp+10h] [ebp-42Ch]
+    int source; // [esp+10h] [ebp-42Ch]
     char c; // [esp+17h] [ebp-425h]
-    uint32_t  delimId; // [esp+18h] [ebp-424h]
+    uint  delimId; // [esp+18h] [ebp-424h]
     char tempString[1028]; // [esp+1Ch] [ebp-420h] BYREF
     const char *delim; // [esp+424h] [ebp-18h]
-    int32_t dest; // [esp+428h] [ebp-14h]
+    int dest; // [esp+428h] [ebp-14h]
     const char *s; // [esp+42Ch] [ebp-10h]
-    int32_t i; // [esp+430h] [ebp-Ch]
-    int32_t delimLen; // [esp+434h] [ebp-8h]
-    uint32_t  sId; // [esp+438h] [ebp-4h]
+    int i; // [esp+430h] [ebp-Ch]
+    int delimLen; // [esp+434h] [ebp-8h]
+    uint  sId; // [esp+438h] [ebp-4h]
 
     sId = Scr_GetConstString(0);
     delimId = Scr_GetConstString(1);
@@ -3682,8 +3682,8 @@ void Scr_MusicPlay()
 
 void Scr_MusicStop()
 {
-    uint32_t  NumParam; // [esp+0h] [ebp-18h]
-    int32_t fadeTime; // [esp+14h] [ebp-4h]
+    uint  NumParam; // [esp+0h] [ebp-18h]
+    int fadeTime; // [esp+14h] [ebp-4h]
 
     NumParam = Scr_GetNumParam();
     if (NumParam)
@@ -3709,7 +3709,7 @@ void Scr_MusicStop()
 void Scr_SoundFade()
 {
     float fTargetVol; // [esp+Ch] [ebp-8h]
-    int32_t iFadeTime; // [esp+10h] [ebp-4h]
+    int iFadeTime; // [esp+10h] [ebp-4h]
 
     fTargetVol = Scr_GetFloat(0);
     if (Scr_GetNumParam() <= 1)
@@ -3734,7 +3734,7 @@ void __cdecl Scr_ErrorOnDefaultAsset(XAssetType type, const char *assetName)
     }
 }
 
-int32_t Scr_PrecacheModel()
+int Scr_PrecacheModel()
 {
     const char *modelName; // [esp+4h] [ebp-4h]
 
@@ -3752,7 +3752,7 @@ void Scr_PrecacheShellShock()
 {
     shellshock_parms_t *ShellshockParms; // eax
     const char *shellshockName; // [esp+0h] [ebp-8h]
-    uint32_t  index; // [esp+4h] [ebp-4h]
+    uint  index; // [esp+4h] [ebp-4h]
 
     if (!level.initializing)
         Scr_Error("precacheShellShock must be called before any wait statements in the gametype or level script\n");
@@ -3779,7 +3779,7 @@ void Scr_PrecacheItem()
     }
 }
 
-int32_t Scr_PrecacheShader()
+int Scr_PrecacheShader()
 {
     const char *shaderName; // [esp+0h] [ebp-4h]
 
@@ -3812,8 +3812,8 @@ char *Scr_PrecacheString()
 
 void Scr_AmbientPlay()
 {
-    uint32_t  NumParam; // [esp+0h] [ebp-1Ch]
-    int32_t iFadeTime; // [esp+14h] [ebp-8h]
+    uint  NumParam; // [esp+0h] [ebp-1Ch]
+    int iFadeTime; // [esp+14h] [ebp-8h]
     const char *pszAliasName; // [esp+18h] [ebp-4h]
 
     iFadeTime = 0;
@@ -3844,8 +3844,8 @@ void Scr_AmbientStop()
     const char *v0; // eax
     const char *v1; // eax
     char *v2; // eax
-    uint32_t  NumParam; // [esp+0h] [ebp-18h]
-    int32_t iFadeTime; // [esp+14h] [ebp-4h]
+    uint  NumParam; // [esp+0h] [ebp-18h]
+    int iFadeTime; // [esp+14h] [ebp-4h]
 
     NumParam = Scr_GetNumParam();
     if (NumParam)
@@ -3874,7 +3874,7 @@ void Scr_AmbientStop()
 void Scr_GrenadeExplosionEffect()
 {
     uint8_t v0; // al
-    int32_t result; // eax
+    int result; // eax
     float vDir[3]; // [esp+0h] [ebp-60h] BYREF
     float vOrg[3]; // [esp+Ch] [ebp-54h] BYREF
     float vEnd[3]; // [esp+18h] [ebp-48h] BYREF
@@ -3912,7 +3912,7 @@ void __cdecl GScr_RadiusDamageInternal(gentity_s *inflictor)
     float max_damage; // [esp+28h] [ebp-1Ch]
     float origin[3]; // [esp+2Ch] [ebp-18h] BYREF
     float range; // [esp+38h] [ebp-Ch]
-    int32_t weapon; // [esp+3Ch] [ebp-8h]
+    int weapon; // [esp+3Ch] [ebp-8h]
     float min_damage; // [esp+40h] [ebp-4h]
 
     Scr_GetVector(0, origin);
@@ -3984,7 +3984,7 @@ void __cdecl GScr_DamageConeTrace(scr_entref_t entref)
     GScr_DamageConeTraceInternal(entref, 0x802011);
 }
 
-void __cdecl GScr_DamageConeTraceInternal(scr_entref_t entref, int32_t contentMask)
+void __cdecl GScr_DamageConeTraceInternal(scr_entref_t entref, int contentMask)
 {
     float damageOrigin[3]; // [esp+Ch] [ebp-18h] BYREF
     gentity_s *ignoreEnt; // [esp+18h] [ebp-Ch]
@@ -4008,10 +4008,10 @@ void __cdecl GScr_SightConeTrace(scr_entref_t entref)
 void GScr_GetMoveDelta()
 {
     const XAnim_s *Anims; // eax
-    uint32_t  index; // [esp-Ch] [ebp-3Ch]
+    uint  index; // [esp-Ch] [ebp-3Ch]
     float time1; // [esp+0h] [ebp-30h]
     float time2; // [esp+4h] [ebp-2Ch]
-    uint32_t  NumParam; // [esp+8h] [ebp-28h]
+    uint  NumParam; // [esp+8h] [ebp-28h]
     float trans[3]; // [esp+10h] [ebp-20h] BYREF
     float endTime; // [esp+1Ch] [ebp-14h]
     float startTime; // [esp+20h] [ebp-10h]
@@ -4045,11 +4045,11 @@ void GScr_GetMoveDelta()
 void GScr_GetAngleDelta()
 {
     const XAnim_s *Anims; // eax
-    uint32_t  index; // [esp-Ch] [ebp-3Ch]
+    uint  index; // [esp-Ch] [ebp-3Ch]
     float time1; // [esp+0h] [ebp-30h]
     float time2; // [esp+4h] [ebp-2Ch]
     VariableUnion time2a; // [esp+4h] [ebp-2Ch]
-    uint32_t  NumParam; // [esp+8h] [ebp-28h]
+    uint  NumParam; // [esp+8h] [ebp-28h]
     float trans[3]; // [esp+10h] [ebp-20h] BYREF
     float endTime; // [esp+1Ch] [ebp-14h]
     float startTime; // [esp+20h] [ebp-10h]
@@ -4091,7 +4091,7 @@ void GScr_GetNorthYaw()
 void Scr_LoadFX()
 {
     const char *filename; // [esp+0h] [ebp-8h]
-    int32_t id; // [esp+4h] [ebp-4h]
+    int id; // [esp+4h] [ebp-4h]
 
     filename = Scr_GetString(0);
     if (!I_strncmp(filename, "fx/", 3))
@@ -4105,8 +4105,8 @@ void Scr_LoadFX()
 void Scr_PlayFX()
 {
     float pos[3]; // [esp+18h] [ebp-40h] BYREF
-    int32_t numParams; // [esp+24h] [ebp-34h]
-    int32_t fxId; // [esp+28h] [ebp-30h]
+    int numParams; // [esp+24h] [ebp-34h]
+    int fxId; // [esp+28h] [ebp-30h]
     gentity_s *ent; // [esp+2Ch] [ebp-2Ch]
     float axis[3][3]; // [esp+30h] [ebp-28h] BYREF
     float vecLength; // [esp+54h] [ebp-4h]
@@ -4160,7 +4160,7 @@ void Scr_PlayFX()
     }
 }
 
-void __cdecl Scr_SetFxAngles(uint32_t  givenAxisCount, float (*axis)[3], float *angles)
+void __cdecl Scr_SetFxAngles(uint  givenAxisCount, float (*axis)[3], float *angles)
 {
     const char *v3; // eax
     float scale; // [esp+0h] [ebp-20h]
@@ -4200,7 +4200,7 @@ void __cdecl Scr_SetFxAngles(uint32_t  givenAxisCount, float (*axis)[3], float *
     }
 }
 
-void __cdecl Scr_FxParamError(uint32_t  paramIndex, const char *errorString, int32_t fxId)
+void __cdecl Scr_FxParamError(uint  paramIndex, const char *errorString, int fxId)
 {
     const char *v3; // eax
     char fxName[1028]; // [esp+0h] [ebp-408h] BYREF
@@ -4217,10 +4217,10 @@ void __cdecl Scr_FxParamError(uint32_t  paramIndex, const char *errorString, int
 
 void Scr_PlayFXOnTag()
 {
-    int32_t fxId; // [esp+0h] [ebp-10h]
+    int fxId; // [esp+0h] [ebp-10h]
     gentity_s *ent; // [esp+4h] [ebp-Ch]
-    uint32_t  tag; // [esp+8h] [ebp-8h]
-    int32_t csIndex; // [esp+Ch] [ebp-4h]
+    uint  tag; // [esp+8h] [ebp-8h]
+    int csIndex; // [esp+Ch] [ebp-4h]
 
     if (Scr_GetNumParam() != 3)
         Scr_Error("Incorrect number of parameters");
@@ -4248,12 +4248,12 @@ void Scr_PlayFXOnTag()
 
 void Scr_PlayLoopedFX()
 {
-    uint32_t  NumParam; // [esp+0h] [ebp-70h]
+    uint  NumParam; // [esp+0h] [ebp-70h]
     float pos[3]; // [esp+2Ch] [ebp-44h] BYREF
-    int32_t fxId; // [esp+38h] [ebp-38h]
-    int32_t repeat; // [esp+3Ch] [ebp-34h]
+    int fxId; // [esp+38h] [ebp-38h]
+    int repeat; // [esp+3Ch] [ebp-34h]
     gentity_s *ent; // [esp+40h] [ebp-30h]
-    int32_t givenAxisCount; // [esp+44h] [ebp-2Ch]
+    int givenAxisCount; // [esp+44h] [ebp-2Ch]
     float axis[3][3]; // [esp+48h] [ebp-28h] BYREF
     float cullDist; // [esp+6Ch] [ebp-4h]
 
@@ -4301,11 +4301,11 @@ LABEL_13:
 
 void Scr_SpawnFX()
 {
-    uint32_t  NumParam; // [esp+0h] [ebp-58h]
+    uint  NumParam; // [esp+0h] [ebp-58h]
     float pos[3]; // [esp+1Ch] [ebp-3Ch] BYREF
-    int32_t fxId; // [esp+28h] [ebp-30h]
+    int fxId; // [esp+28h] [ebp-30h]
     gentity_s *ent; // [esp+2Ch] [ebp-2Ch]
-    int32_t givenAxisCount; // [esp+30h] [ebp-28h]
+    int givenAxisCount; // [esp+30h] [ebp-28h]
     float axis[3][3]; // [esp+34h] [ebp-24h] BYREF
 
     if (Scr_GetNumParam() < 2 || Scr_GetNumParam() > 4)
@@ -4356,7 +4356,7 @@ LABEL_12:
 
 void Scr_TriggerFX()
 {
-    int32_t result; // eax
+    int result; // eax
     gentity_s *ent; // [esp+14h] [ebp-4h]
 
     if (!Scr_GetNumParam() || Scr_GetNumParam() > 2)
@@ -4534,8 +4534,8 @@ void __cdecl Scr_SetFog(const char *cmd, float start, float density, float r, fl
 
 void Scr_VisionSetNaked()
 {
-    uint32_t  NumParam; // [esp+0h] [ebp-1Ch]
-    int32_t duration; // [esp+14h] [ebp-8h]
+    uint  NumParam; // [esp+0h] [ebp-1Ch]
+    int duration; // [esp+14h] [ebp-8h]
     const char *name; // [esp+18h] [ebp-4h]
 
     duration = 1000;
@@ -4555,8 +4555,8 @@ void Scr_VisionSetNaked()
 
 void Scr_VisionSetNight()
 {
-    uint32_t  NumParam; // [esp+0h] [ebp-1Ch]
-    int32_t duration; // [esp+14h] [ebp-8h]
+    uint  NumParam; // [esp+0h] [ebp-1Ch]
+    int duration; // [esp+14h] [ebp-8h]
     const char *name; // [esp+18h] [ebp-4h]
 
     duration = 1000;
@@ -4580,8 +4580,8 @@ void Scr_TableLookup()
     const char *filename; // [esp+8h] [ebp-14h]
     const char *returnValue; // [esp+Ch] [ebp-10h]
     StringTable *table; // [esp+10h] [ebp-Ch] BYREF
-    int32_t returnValueColumn; // [esp+14h] [ebp-8h]
-    int32_t comparisonColumn; // [esp+18h] [ebp-4h]
+    int returnValueColumn; // [esp+14h] [ebp-8h]
+    int comparisonColumn; // [esp+18h] [ebp-4h]
 
 
     if (Scr_GetNumParam() < 3)
@@ -4601,8 +4601,8 @@ void Scr_TableLookupIString()
     const char *filename; // [esp+8h] [ebp-14h]
     const char *returnValue; // [esp+Ch] [ebp-10h]
     StringTable *table; // [esp+10h] [ebp-Ch] BYREF
-    int32_t returnValueColumn; // [esp+14h] [ebp-8h]
-    int32_t comparisonColumn; // [esp+18h] [ebp-4h]
+    int returnValueColumn; // [esp+14h] [ebp-8h]
+    int comparisonColumn; // [esp+18h] [ebp-4h]
 
     if (Scr_GetNumParam() < 3)
         Scr_Error("USAGE: tableLookupIString( filename, searchColumnNum, searchValue, returnValueColumnNum )\n");
@@ -4635,7 +4635,7 @@ void GScr_SetWinningPlayer()
 {
     const char *v0; // eax
     char *pszWinner; // [esp+0h] [ebp-410h]
-    int32_t iWinner; // [esp+4h] [ebp-40Ch]
+    int iWinner; // [esp+4h] [ebp-40Ch]
     char buffer[1024]; // [esp+8h] [ebp-408h] BYREF
     gentity_s *pEnt; // [esp+40Ch] [ebp-4h]
 
@@ -4655,7 +4655,7 @@ void GScr_SetWinningTeam()
 {
     char *pszWinner; // [esp+0h] [ebp-414h]
     uint16_t team; // [esp+4h] [ebp-410h]
-    int32_t iWinner; // [esp+8h] [ebp-40Ch]
+    int iWinner; // [esp+8h] [ebp-40Ch]
     char buffer[1028]; // [esp+Ch] [ebp-408h] BYREF
 
     team = Scr_GetConstString(0);
@@ -4687,7 +4687,7 @@ void GScr_SetWinningTeam()
 
 void GScr_Announcement()
 {
-    uint32_t  NumParam; // eax
+    uint  NumParam; // eax
     const char *v1; // eax
     char string[1028]; // [esp+0h] [ebp-408h] BYREF
 
@@ -4699,7 +4699,7 @@ void GScr_Announcement()
 
 void GScr_ClientAnnouncement()
 {
-    uint32_t  NumParam; // eax
+    uint  NumParam; // eax
     const char *v1; // eax
     char string[1024]; // [esp+0h] [ebp-408h] BYREF
     gentity_s *pEnt; // [esp+404h] [ebp-4h]
@@ -4729,8 +4729,8 @@ void GScr_GetTeamScore()
 void GScr_SetTeamScore()
 {
     const char *v2; // eax
-    unsigned short team; // [esp+0h] [ebp-8h]
-    int32_t teamScore; // [esp+4h] [ebp-4h]
+    ushort team; // [esp+0h] [ebp-8h]
+    int teamScore; // [esp+4h] [ebp-4h]
 
     team = Scr_GetConstString(0);
     if (team != scr_const.allies && team != scr_const.axis)
@@ -4754,7 +4754,7 @@ void GScr_SetTeamScore()
 
 void GScr_SetClientNameMode()
 {
-    unsigned short mode; // [esp+0h] [ebp-4h]
+    ushort mode; // [esp+0h] [ebp-4h]
 
     mode = Scr_GetConstString(0);
     if (mode == scr_const.auto_change)
@@ -4773,10 +4773,10 @@ void GScr_SetClientNameMode()
 
 void GScr_UpdateClientNames()
 {
-    int32_t result; // eax
+    int result; // eax
     gclient_s *j; // [esp+14h] [ebp-2Ch]
     char oldname[32]; // [esp+18h] [ebp-28h] BYREF
-    int32_t i; // [esp+3Ch] [ebp-4h]
+    int i; // [esp+3Ch] [ebp-4h]
 
     if (!level.manualNameChange)
         Scr_Error("Only works in [manual_change] mode");
@@ -4801,11 +4801,11 @@ void GScr_UpdateClientNames()
 
 void GScr_GetTeamPlayersAlive()
 {
-    int32_t iLivePlayers; // [esp+0h] [ebp-14h]
-    unsigned short team; // [esp+4h] [ebp-10h]
-    int32_t iTeamNum; // [esp+8h] [ebp-Ch]
+    int iLivePlayers; // [esp+0h] [ebp-14h]
+    ushort team; // [esp+4h] [ebp-10h]
+    int iTeamNum; // [esp+8h] [ebp-Ch]
     gentity_s *pEnt; // [esp+Ch] [ebp-8h]
-    int32_t i; // [esp+10h] [ebp-4h]
+    int i; // [esp+10h] [ebp-4h]
 
     team = Scr_GetConstString(0);
     if (team != scr_const.allies && team != scr_const.axis)
@@ -4838,8 +4838,8 @@ void __cdecl GScr_GetPartName()
 {
     XModel *model; // [esp+0h] [ebp-10h]
     uint16_t name; // [esp+4h] [ebp-Ch]
-    uint32_t  index; // [esp+8h] [ebp-8h]
-    uint32_t  numbones; // [esp+Ch] [ebp-4h]
+    uint  index; // [esp+8h] [ebp-8h]
+    uint  numbones; // [esp+Ch] [ebp-4h]
 
     model = SV_XModelGet((char*)Scr_GetString(0));
     index = Scr_GetInt(1);
@@ -4859,7 +4859,7 @@ gentity_s *GScr_Earthquake()
     gentity_s *result; // eax
     float source[3]; // [esp+10h] [ebp-1Ch] BYREF
     gentity_s *tent; // [esp+1Ch] [ebp-10h]
-    int32_t duration; // [esp+20h] [ebp-Ch]
+    int duration; // [esp+20h] [ebp-Ch]
     float radius; // [esp+24h] [ebp-8h]
     float scale; // [esp+28h] [ebp-4h]
 
@@ -4883,11 +4883,11 @@ gentity_s *GScr_Earthquake()
 
 void __cdecl GScr_ShellShock(scr_entref_t entref)
 {
-    int32_t duration; // [esp+18h] [ebp-414h]
+    int duration; // [esp+18h] [ebp-414h]
     const char *shock; // [esp+1Ch] [ebp-410h]
     gentity_s *ent; // [esp+20h] [ebp-40Ch]
     char s[1024]; // [esp+24h] [ebp-408h] BYREF
-    int32_t id; // [esp+428h] [ebp-4h]
+    int id; // [esp+428h] [ebp-4h]
 
     SV_CheckThread();
     ent = GetPlayerEntity(entref);
@@ -4906,7 +4906,7 @@ void __cdecl GScr_ShellShock(scr_entref_t entref)
             break;
     }
     duration = SnapFloatToInt(Scr_GetFloat(1) * 1000.0f);
-    if ((uint32_t )duration > 0xEA60)
+    if ((uint )duration > 0xEA60)
     {
         Scr_ParamError(1u, va("duration %g should be >= 0 and <= 60", (double)duration * EQUAL_EPSILON));
     }
@@ -4938,7 +4938,7 @@ void __cdecl GScr_StopShellShock(scr_entref_t entref)
 
 void __cdecl GScr_GetTagOrigin(scr_entref_t entref)
 {
-    uint32_t  tagName; // [esp+0h] [ebp-8h]
+    uint  tagName; // [esp+0h] [ebp-8h]
     gentity_s *ent; // [esp+4h] [ebp-4h]
 
     ent = GetEntity(entref);
@@ -4947,11 +4947,11 @@ void __cdecl GScr_GetTagOrigin(scr_entref_t entref)
     Scr_AddVector(level.cachedTagMat.tagMat[3]);
 }
 
-int32_t __cdecl GScr_UpdateTagInternal(
+int __cdecl GScr_UpdateTagInternal(
     gentity_s *ent,
-    uint32_t  tagName,
+    uint  tagName,
     cached_tag_mat_t *cachedTag,
-    int32_t showScriptError)
+    int showScriptError)
 {
     iassert(ent);
 
@@ -4983,7 +4983,7 @@ int32_t __cdecl GScr_UpdateTagInternal(
 
 void __cdecl GScr_GetTagAngles(scr_entref_t entref)
 {
-    uint32_t  tagName; // [esp+0h] [ebp-14h]
+    uint  tagName; // [esp+0h] [ebp-14h]
     float angles[3]; // [esp+4h] [ebp-10h] BYREF
     gentity_s *ent; // [esp+10h] [ebp-4h]
 
@@ -5291,14 +5291,14 @@ void GScr_AddTestClient()
 
 void GScr_MakeDvarServerInfo()
 {
-    uint32_t  NumParam; // eax
+    uint  NumParam; // eax
     char v1; // al
     char string[1028]; // [esp+10h] [ebp-828h] BYREF
-    int32_t len; // [esp+414h] [ebp-424h]
+    int len; // [esp+414h] [ebp-424h]
     char outString[1024]; // [esp+418h] [ebp-420h] BYREF
     const char *dvarName; // [esp+820h] [ebp-18h]
-    int32_t type; // [esp+824h] [ebp-14h]
-    int32_t i; // [esp+828h] [ebp-10h]
+    int type; // [esp+824h] [ebp-14h]
+    int i; // [esp+828h] [ebp-10h]
     const dvar_s *dvar; // [esp+82Ch] [ebp-Ch]
     const char *dvarValue; // [esp+830h] [ebp-8h]
     char *pCh; // [esp+834h] [ebp-4h]
@@ -5388,7 +5388,7 @@ void GScr_SetVoteString()
 
 void GScr_SetVoteTime()
 {
-    int32_t time; // [esp+0h] [ebp-4h]
+    int time; // [esp+0h] [ebp-4h]
 
     if (Scr_GetNumParam())
     {
@@ -5401,7 +5401,7 @@ void GScr_SetVoteTime()
 
 void GScr_SetVoteYesCount()
 {
-    int32_t yes; // [esp+0h] [ebp-4h]
+    int yes; // [esp+0h] [ebp-4h]
 
     if (Scr_GetNumParam())
     {
@@ -5413,7 +5413,7 @@ void GScr_SetVoteYesCount()
 
 void GScr_SetVoteNoCount()
 {
-    int32_t no; // [esp+0h] [ebp-4h]
+    int no; // [esp+0h] [ebp-4h]
 
     if (Scr_GetNumParam())
     {
@@ -5424,7 +5424,7 @@ void GScr_SetVoteNoCount()
 
 void GScr_KickPlayer()
 {
-    int32_t playernum; // [esp+0h] [ebp-4h]
+    int playernum; // [esp+0h] [ebp-4h]
 
     if (Scr_GetNumParam())
     {
@@ -5435,7 +5435,7 @@ void GScr_KickPlayer()
 
 void GScr_BanPlayer()
 {
-    int32_t playernum; // [esp+0h] [ebp-4h]
+    int playernum; // [esp+0h] [ebp-4h]
 
     if (Scr_GetNumParam())
     {
@@ -5458,12 +5458,12 @@ void GScr_ClientPrint()
 void GScr_OpenFile()
 {
     char *fullpathname; // [esp+3Ch] [ebp-20h]
-    int32_t filesize; // [esp+40h] [ebp-1Ch]
+    int filesize; // [esp+40h] [ebp-1Ch]
     const char *filename; // [esp+44h] [ebp-18h]
-    int32_t tempFile; // [esp+48h] [ebp-14h] BYREF
-    int32_t *f; // [esp+4Ch] [ebp-10h]
+    int tempFile; // [esp+48h] [ebp-14h] BYREF
+    int *f; // [esp+4Ch] [ebp-10h]
     const char *mode; // [esp+50h] [ebp-Ch]
-    int32_t filenum; // [esp+58h] [ebp-4h]
+    int filenum; // [esp+58h] [ebp-4h]
 
     f = 0;
     if (Scr_GetNumParam() > 1)
@@ -5474,7 +5474,7 @@ void GScr_OpenFile()
         {
             if (!level.openScriptIOFileHandles[filenum])
             {
-                //f = (int32_t *)(4 * filenum + 23808484);
+                //f = (int *)(4 * filenum + 23808484);
                 f = &level.openScriptIOFileHandles[filenum];
                 break;
             }
@@ -5533,12 +5533,12 @@ void GScr_OpenFile()
 
 void GScr_CloseFile()
 {
-    int32_t filenum; // [esp+0h] [ebp-4h]
+    int filenum; // [esp+0h] [ebp-4h]
 
     if (Scr_GetNumParam())
     {
         filenum = Scr_GetInt(0);
-        if ((uint32_t )filenum >= 2)
+        if ((uint )filenum >= 2)
         {
             Com_Printf(23, "CloseFile failed, invalid file number %i\n", filenum);
             Scr_AddInt(-1);
@@ -5582,15 +5582,15 @@ void GScr_FPrintln()
 
 void __cdecl Scr_FPrint_internal(bool commaBetweenFields)
 {
-    uint32_t  NumParam; // eax
+    uint  NumParam; // eax
     const char *s; // [esp+10h] [ebp-Ch]
-    uint32_t  arg; // [esp+14h] [ebp-8h]
-    int32_t filenum; // [esp+18h] [ebp-4h]
+    uint  arg; // [esp+14h] [ebp-8h]
+    int filenum; // [esp+18h] [ebp-4h]
 
     if (Scr_GetNumParam() > 1)
     {
         filenum = Scr_GetInt(0);
-        if ((uint32_t )filenum < 2)
+        if ((uint )filenum < 2)
         {
             if (level.openScriptIOFileHandles[filenum])
             {
@@ -5631,17 +5631,17 @@ void GScr_FPrintFields()
 
 void GScr_FReadLn()
 {
-    int32_t v0; // eax
-    int32_t ArgCountOnLine; // eax
+    int v0; // eax
+    int ArgCountOnLine; // eax
     bool eof; // [esp+0h] [ebp-10h]
     const char *buf; // [esp+4h] [ebp-Ch] BYREF
     const char *token; // [esp+8h] [ebp-8h]
-    int32_t filenum; // [esp+Ch] [ebp-4h]
+    int filenum; // [esp+Ch] [ebp-4h]
 
     if (Scr_GetNumParam())
     {
         filenum = Scr_GetInt(0);
-        if ((uint32_t )filenum < 2)
+        if ((uint )filenum < 2)
         {
             if (level.openScriptIOFileBuffers[filenum])
             {
@@ -5693,16 +5693,16 @@ void GScr_FReadLn()
 void GScr_FGetArg()
 {
     const char *buf; // [esp+0h] [ebp-14h] BYREF
-    int32_t arg; // [esp+4h] [ebp-10h]
-    int32_t i; // [esp+8h] [ebp-Ch]
+    int arg; // [esp+4h] [ebp-10h]
+    int i; // [esp+8h] [ebp-Ch]
     const char *token; // [esp+Ch] [ebp-8h]
-    int32_t filenum; // [esp+10h] [ebp-4h]
+    int filenum; // [esp+10h] [ebp-4h]
 
     if (Scr_GetNumParam() > 1)
     {
         filenum = Scr_GetInt(0);
         arg = Scr_GetInt(1);
-        if ((uint32_t )filenum < 2)
+        if ((uint )filenum < 2)
         {
             if (arg >= 0)
             {
@@ -5756,14 +5756,14 @@ void __cdecl GScr_GetStat(scr_entref_t entref)
 {
     const char *v1; // eax
     gentity_s *playerEnt; // [esp+0h] [ebp-Ch]
-    int32_t index; // [esp+4h] [ebp-8h]
-    int32_t value; // [esp+8h] [ebp-4h]
+    int index; // [esp+4h] [ebp-8h]
+    int value; // [esp+8h] [ebp-4h]
 
     playerEnt = GetEntity(entref);
     index = Scr_GetInt(0);
     if (!playerEnt->client)
         Scr_Error("getstat: entity must be a player entity");
-    if ((uint32_t )index >= 0xDAC)
+    if ((uint )index >= 0xDAC)
     {
         v1 = va("getstat: invalid index %i", index);
         Scr_Error(v1);
@@ -5781,8 +5781,8 @@ void __cdecl GScr_SetStat(scr_entref_t entref)
     const char *v3; // eax
     gentity_s *playerEnt; // [esp+4h] [ebp-10h]
     VariableUnion index; // [esp+8h] [ebp-Ch]
-    uint32_t  value; // [esp+Ch] [ebp-8h]
-    int32_t argc; // [esp+10h] [ebp-4h]
+    uint  value; // [esp+Ch] [ebp-8h]
+    int argc; // [esp+10h] [ebp-4h]
 
     playerEnt = GetEntity(entref);
     if (!playerEnt->client)
@@ -6105,11 +6105,11 @@ void __cdecl GScr_GetCorpseAnim(scr_entref_t entref)
 void __cdecl ScrCmd_ItemWeaponSetAmmo(scr_entref_t entref)
 {
     const char *v1; // eax
-    int32_t v2; // edx
+    int v2; // edx
     VariableUnion v3; // [esp+0h] [ebp-24h]
-    int32_t reserveAmmo; // [esp+Ch] [ebp-18h]
-    int32_t clipAmmo; // [esp+10h] [ebp-14h]
-    uint32_t  altIndex; // [esp+14h] [ebp-10h]
+    int reserveAmmo; // [esp+Ch] [ebp-18h]
+    int clipAmmo; // [esp+10h] [ebp-14h]
+    uint  altIndex; // [esp+14h] [ebp-10h]
     WeaponDef *weapDef; // [esp+1Ch] [ebp-8h]
     gentity_s *itemEnt; // [esp+20h] [ebp-4h]
 
@@ -6149,7 +6149,7 @@ void __cdecl ScrCmd_ItemWeaponSetAmmo(scr_entref_t entref)
     }
 }
 
-void __cdecl Scr_SetOrigin(gentity_s *ent, int32_t i)
+void __cdecl Scr_SetOrigin(gentity_s *ent, int i)
 {
     float org[3]; // [esp+0h] [ebp-Ch] BYREF
 
@@ -6159,7 +6159,7 @@ void __cdecl Scr_SetOrigin(gentity_s *ent, int32_t i)
         SV_LinkEntity(ent);
 }
 
-void __cdecl Scr_SetAngles(gentity_s *ent, int32_t i)
+void __cdecl Scr_SetAngles(gentity_s *ent, int i)
 {
     float angles[3]; // [esp+0h] [ebp-Ch] BYREF
 
@@ -6167,9 +6167,9 @@ void __cdecl Scr_SetAngles(gentity_s *ent, int32_t i)
     G_SetAngle(ent, angles);
 }
 
-void __cdecl Scr_SetHealth(gentity_s *ent, int32_t i)
+void __cdecl Scr_SetHealth(gentity_s *ent, int i)
 {
-    int32_t health; // [esp+0h] [ebp-4h]
+    int health; // [esp+0h] [ebp-4h]
 
     health = Scr_GetInt(0);
     if (ent->client)
@@ -6192,24 +6192,24 @@ void __cdecl GScr_AddEntity(gentity_s *pEnt)
         Scr_AddUndefined();
 }
 
-int32_t Scr_ParseGameTypeList_LoadObj()
+int Scr_ParseGameTypeList_LoadObj()
 {
     const char *v0; // eax
     const char *v1; // eax
-    int32_t result; // eax
+    int result; // eax
     char *qpath; // [esp+10h] [ebp-1430h]
     char *src; // [esp+14h] [ebp-142Ch]
     uint8_t buffer[1024]; // [esp+18h] [ebp-1428h] BYREF
     char *data_p; // [esp+418h] [ebp-1028h] BYREF
     char *s0; // [esp+41Ch] [ebp-1024h]
     char listbuf[4096]; // [esp+420h] [ebp-1020h] BYREF
-    int32_t f; // [esp+1424h] [ebp-1Ch] BYREF
-    uint32_t  v10; // [esp+1428h] [ebp-18h]
-    int32_t v11; // [esp+142Ch] [ebp-14h]
-    int32_t len; // [esp+1430h] [ebp-10h]
-    int32_t i; // [esp+1434h] [ebp-Ch]
+    int f; // [esp+1424h] [ebp-1Ch] BYREF
+    uint  v10; // [esp+1428h] [ebp-18h]
+    int v11; // [esp+142Ch] [ebp-14h]
+    int len; // [esp+1430h] [ebp-10h]
+    int i; // [esp+1434h] [ebp-Ch]
     char *dest; // [esp+1438h] [ebp-8h]
-    int32_t FileList; // [esp+143Ch] [ebp-4h]
+    int FileList; // [esp+143Ch] [ebp-4h]
 
     memset((uint8_t *)g_scr_data.gametype.list, 0, sizeof(g_scr_data.gametype.list));
     v11 = 0;
@@ -6285,14 +6285,14 @@ XAssetHeader Scr_ParseGameTypeList_FastFile()
     XAssetHeader result; // eax
     const char *v1; // eax
     const char *v2; // eax
-    int32_t v3; // [esp+0h] [ebp-44h]
+    int v3; // [esp+0h] [ebp-44h]
     char *fullname; // [esp+1Ch] [ebp-28h]
     RawFile *rawfile; // [esp+20h] [ebp-24h]
     const char *pszFileName; // [esp+24h] [ebp-20h]
     const char *pBuffParse; // [esp+28h] [ebp-1Ch] BYREF
     const char *pToken; // [esp+2Ch] [ebp-18h]
-    int32_t iNumGameTypes; // [esp+30h] [ebp-14h]
-    int32_t iFileLength; // [esp+34h] [ebp-10h]
+    int iNumGameTypes; // [esp+30h] [ebp-14h]
+    int iFileLength; // [esp+34h] [ebp-10h]
     RawFile *gametypesFile; // [esp+38h] [ebp-Ch]
     const char *gametypesBuf; // [esp+3Ch] [ebp-8h] BYREF
     gameTypeScript_t *pGameType; // [esp+40h] [ebp-4h]
@@ -6363,7 +6363,7 @@ XAssetHeader Scr_ParseGameTypeList_FastFile()
 
 char *__cdecl Scr_GetGameTypeNameForScript(const char *pszGameTypeScript)
 {
-    int32_t i; // [esp+0h] [ebp-4h]
+    int i; // [esp+0h] [ebp-4h]
 
     for (i = 0; i < g_scr_data.gametype.iNumGameTypes; ++i)
     {
@@ -6416,14 +6416,14 @@ void __cdecl Scr_PlayerDamage(
     gentity_s *self,
     gentity_s *inflictor,
     gentity_s *attacker,
-    int32_t damage,
-    int32_t dflags,
-    uint32_t  meansOfDeath,
-    uint32_t  iWeapon,
+    int damage,
+    int dflags,
+    uint  meansOfDeath,
+    uint  iWeapon,
     const float *vPoint,
     const float *vDir,
     hitLocation_t hitLoc,
-    int32_t timeOffset)
+    int timeOffset)
 {
     uint16_t HitLocationString; // ax
     WeaponDef *WeaponDef; // eax
@@ -6452,13 +6452,13 @@ void __cdecl Scr_PlayerKilled(
     gentity_s *self,
     gentity_s *inflictor,
     gentity_s *attacker,
-    int32_t damage,
-    uint32_t  meansOfDeath,
-    uint32_t  iWeapon,
+    int damage,
+    uint  meansOfDeath,
+    uint  iWeapon,
     const float *vDir,
     hitLocation_t hitLoc,
-    int32_t psTimeOffset,
-    int32_t deathAnimDuration)
+    int psTimeOffset,
+    int deathAnimDuration)
 {
     uint16_t HitLocationString; // ax
     WeaponDef *WeaponDef; // eax
@@ -6486,12 +6486,12 @@ void __cdecl Scr_PlayerLastStand(
     gentity_s *self,
     gentity_s *inflictor,
     gentity_s *attacker,
-    int32_t damage,
-    uint32_t  meansOfDeath,
-    uint32_t  iWeapon,
+    int damage,
+    uint  meansOfDeath,
+    uint  iWeapon,
     const float *vDir,
     hitLocation_t hitLoc,
-    int32_t psTimeOffset)
+    int psTimeOffset)
 {
     uint16_t HitLocationString; // ax
     WeaponDef *WeaponDef; // eax
@@ -6545,7 +6545,7 @@ void GScr_GetAnimLength()
 
 void(__cdecl *__cdecl Scr_GetFunction(const char **pName, int *type))()
 {
-    uint32_t i; // [esp+18h] [ebp-4h]
+    uint i; // [esp+18h] [ebp-4h]
 
     for (i = 0; i < 0xCD; ++i)
     {
@@ -6561,7 +6561,7 @@ void(__cdecl *__cdecl Scr_GetFunction(const char **pName, int *type))()
 
 void(__cdecl *__cdecl BuiltIn_GetMethod(const char **pName, int *type))(scr_entref_t)
 {
-    uint32_t i; // [esp+18h] [ebp-4h]
+    uint i; // [esp+18h] [ebp-4h]
 
     for (i = 0; i < 0x52; ++i)
     {

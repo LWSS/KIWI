@@ -2,7 +2,7 @@
 #include "fx_system.h"
 
 
-void __cdecl FX_DrawProfile(int32_t clientIndex, void(__cdecl *drawFunc)(char *), float *profilePos)
+void __cdecl FX_DrawProfile(int clientIndex, void(__cdecl *drawFunc)(char *), float *profilePos)
 {
     char *v3; // eax
     char *v4; // eax
@@ -12,14 +12,14 @@ void __cdecl FX_DrawProfile(int32_t clientIndex, void(__cdecl *drawFunc)(char *)
     char *v8; // eax
     char *v9; // eax
     char *v10; // eax
-    int32_t v11; // [esp+38h] [ebp-701Ch]
-    int32_t j; // [esp+3Ch] [ebp-7018h]
+    int v11; // [esp+38h] [ebp-701Ch]
+    int j; // [esp+3Ch] [ebp-7018h]
     FxEffect *effect; // [esp+40h] [ebp-7014h]
-    int32_t entryCount; // [esp+44h] [ebp-7010h] BYREF
+    int entryCount; // [esp+44h] [ebp-7010h] BYREF
     FxSystem *system; // [esp+48h] [ebp-700Ch]
     FxProfileEntry entryPool[1024]; // [esp+4Ch] [ebp-7008h] BYREF
     FxProfileEntry *entry; // [esp+704Ch] [ebp-8h]
-    volatile int32_t i; // [esp+7050h] [ebp-4h]
+    volatile int i; // [esp+7050h] [ebp-4h]
 
     system = FX_GetSystem(clientIndex);
     if (!system)
@@ -110,9 +110,9 @@ void __cdecl FX_DrawProfile(int32_t clientIndex, void(__cdecl *drawFunc)(char *)
     }
 }
 
-FxProfileEntry *__cdecl FX_GetProfileEntry(const FxEffectDef *effectDef, FxProfileEntry *entryPool, int32_t *entryCount)
+FxProfileEntry *__cdecl FX_GetProfileEntry(const FxEffectDef *effectDef, FxProfileEntry *entryPool, int *entryCount)
 {
-    int32_t entryIndex; // [esp+0h] [ebp-4h]
+    int entryIndex; // [esp+0h] [ebp-4h]
 
     for (entryIndex = 0; entryIndex < *entryCount; ++entryIndex)
     {
@@ -145,7 +145,7 @@ void __cdecl FX_ProfileSingleEffect(FxSystem *system, const FxEffect *effect, Fx
     FxPool<FxTrail> *trail; // [esp+8h] [ebp-14h]
     FxPool<FxTrailElem> *trailElem; // [esp+Ch] [ebp-10h]
     FxPool<FxElem> *elem; // [esp+10h] [ebp-Ch]
-    uint32_t elemClass; // [esp+14h] [ebp-8h]
+    uint elemClass; // [esp+14h] [ebp-8h]
     uint16_t trailElemHandle; // [esp+18h] [ebp-4h]
 
     ++entry->effectCount;
@@ -185,7 +185,7 @@ void __cdecl FX_ProfileSingleEffect(FxSystem *system, const FxEffect *effect, Fx
     }
 }
 
-int32_t __cdecl FX_CompareProfileEntries(const FxProfileEntry *e0, const FxProfileEntry *e1)
+int __cdecl FX_CompareProfileEntries(const FxProfileEntry *e0, const FxProfileEntry *e1)
 {
     float cost; // [esp+8h] [ebp-8h]
     float cost_4; // [esp+Ch] [ebp-4h]
@@ -213,7 +213,7 @@ double __cdecl FX_GetProfileEntryCost(const FxProfileEntry *entry)
     else
         return (float)((double)entry->effectCount * (1.0f / 1024.0f));
 }
-void __cdecl FX_DrawMarkProfile(int32_t clientIndex, void(__cdecl* drawFunc)(const char*, float*), float* profilePos)
+void __cdecl FX_DrawMarkProfile(int clientIndex, void(__cdecl* drawFunc)(const char*, float*), float* profilePos)
 {
     const char* v3; // eax
     char* v4; // eax
@@ -224,21 +224,21 @@ void __cdecl FX_DrawMarkProfile(int32_t clientIndex, void(__cdecl* drawFunc)(con
     char* v9; // eax
     char* v10; // eax
     uint16_t v11; // ax
-    int32_t modelIndex; // [esp-Ch] [ebp-60h]
-    int32_t worldBrushMarks; // [esp+10h] [ebp-44h]
-    int32_t freeMarks2; // [esp+1Ch] [ebp-38h]
-    int32_t entityIndex; // [esp+20h] [ebp-34h]
-    int32_t wastedPointGroups; // [esp+24h] [ebp-30h]
+    int modelIndex; // [esp-Ch] [ebp-60h]
+    int worldBrushMarks; // [esp+10h] [ebp-44h]
+    int freeMarks2; // [esp+1Ch] [ebp-38h]
+    int entityIndex; // [esp+20h] [ebp-34h]
+    int wastedPointGroups; // [esp+24h] [ebp-30h]
     FxTriGroupPool* triGroup; // [esp+28h] [ebp-2Ch]
     FxPointGroupPool* pointGroup; // [esp+2Ch] [ebp-28h]
-    int32_t entBrushMarks; // [esp+30h] [ebp-24h]
-    int32_t freeMarks; // [esp+34h] [ebp-20h]
-    int32_t wastedTriGroups; // [esp+38h] [ebp-1Ch]
-    int32_t freePointGroups; // [esp+3Ch] [ebp-18h]
-    int32_t entModelMarks; // [esp+40h] [ebp-14h]
-    int32_t worldModelMarks; // [esp+44h] [ebp-10h]
+    int entBrushMarks; // [esp+30h] [ebp-24h]
+    int freeMarks; // [esp+34h] [ebp-20h]
+    int wastedTriGroups; // [esp+38h] [ebp-1Ch]
+    int freePointGroups; // [esp+3Ch] [ebp-18h]
+    int entModelMarks; // [esp+40h] [ebp-14h]
+    int worldModelMarks; // [esp+44h] [ebp-10h]
     uint16_t markHandle; // [esp+48h] [ebp-Ch]
-    int32_t freeTriGroups; // [esp+4Ch] [ebp-8h]
+    int freeTriGroups; // [esp+4Ch] [ebp-8h]
     FxMark* markIter; // [esp+50h] [ebp-4h]
     FxMark* markItera; // [esp+50h] [ebp-4h]
 
@@ -384,7 +384,7 @@ void __cdecl FX_DrawMarkProfile_MarkPrint(
     FxMarksSystem *marksSystem,
     uint16_t head,
     const char *name,
-    int32_t index,
+    int index,
     void(__cdecl *drawFunc)(const char *, float *),
     float *profilePos)
 {
@@ -394,9 +394,9 @@ void __cdecl FX_DrawMarkProfile_MarkPrint(
     const char *v9; // eax
     uint8_t thisMarkType; // [esp+3h] [ebp-1Dh]
     FxMark *mark; // [esp+4h] [ebp-1Ch]
-    int32_t markCount; // [esp+8h] [ebp-18h]
-    int32_t triCount; // [esp+Ch] [ebp-14h]
-    int32_t pointCount; // [esp+10h] [ebp-10h]
+    int markCount; // [esp+8h] [ebp-18h]
+    int triCount; // [esp+Ch] [ebp-14h]
+    int pointCount; // [esp+10h] [ebp-10h]
     uint8_t type; // [esp+17h] [ebp-9h]
     uint16_t lastMarkHandle; // [esp+18h] [ebp-8h]
 

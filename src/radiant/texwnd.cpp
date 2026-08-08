@@ -64,9 +64,9 @@ struct texwnd_s
     // `mov ...usageFilter, bl`) store the FULL index byte (0..count-1), with an assert
     // that it fits in a byte — they are 1-byte INDEX fields, not booleans.  Same 1-byte
     // layout; type widened to uint8_t so `usageFilter + 60000` recovers the menu item id.
-    unsigned char usageFilter;                  // 0x0c  (usage  filter index)
-    unsigned char localeFilter;                 // 0x0d  (locale filter index)
-    unsigned char surfaceTypeFilter;            // 0x0e  (surface-type filter index)
+    byte usageFilter;                  // 0x0c  (usage  filter index)
+    byte localeFilter;                 // 0x0d  (locale filter index)
+    byte surfaceTypeFilter;            // 0x0e  (surface-type filter index)
     bool         searchbar_filter;              // 0x0f
     const char  *searchbar_buffer;              // 0x10
     int          materialCount;                 // 0x14
@@ -175,7 +175,7 @@ struct RadiantMaterialInfo
     uint8_t  gameFlags;
     uint8_t  usage;
     uint16_t toolFlags;
-    uint32_t locale;
+    uint locale;
     uint16_t autoTexScaleWidth;
     uint16_t autoTexScaleHeight;
     int      surfaceFlags;
@@ -387,7 +387,7 @@ static bool Material_ReadEditorVariant( const char *editorName, MaterialInfoRaw 
     FS_FOpenFileRead( va( "materials/%s", editorName ), &h );
     if ( !h )
         return false;
-    uint32_t got = FS_Read( (uint8_t *)out, sizeof( MaterialInfoRaw ), h );
+    uint got = FS_Read( (uint8_t *)out, sizeof( MaterialInfoRaw ), h );
     FS_FCloseFile( h );
     return got == sizeof( MaterialInfoRaw );
 }
@@ -445,7 +445,7 @@ void Load_Materials( void )
         FS_FOpenFileRead( va( "materials/%s", name ), &h );
         if ( !h )
             continue;
-        uint32_t got = FS_Read( (uint8_t *)&raw, sizeof( raw ), h );
+        uint got = FS_Read( (uint8_t *)&raw, sizeof( raw ), h );
         FS_FCloseFile( h );
         if ( got != sizeof( raw ) )
             continue;
@@ -737,20 +737,20 @@ static bool TexWnd_FilterAccept( const qtexture_s *tex )
     if ( _strnicmp( tex->name, "smoothing_", 10 ) == 0 )                        // 0x45bc68 (cl)
         return false;
 
-    const unsigned char usage_index = (unsigned char)tex->usage_index;          // 0x45bc70 mov al,[esi+0Ah]
+    const byte usage_index = (byte)tex->usage_index;          // 0x45bc70 mov al,[esi+0Ah]
     if ( !usage_index )                                                          // 0x45bc73 test al,al; jz reject
         return false;
 
-    const unsigned char usageFilter = texWndGlob_textureOffset.usageFilter;      // 0x45bc7b
-    if ( usageFilter && usage_index != (unsigned char)filter_usage_array[usageFilter].index ) // 0x45bc8b cmp/jnz
+    const byte usageFilter = texWndGlob_textureOffset.usageFilter;      // 0x45bc7b
+    if ( usageFilter && usage_index != (byte)filter_usage_array[usageFilter].index ) // 0x45bc8b cmp/jnz
         return false;
 
-    const unsigned char localeFilter = texWndGlob_textureOffset.localeFilter;    // 0x45bc98
+    const byte localeFilter = texWndGlob_textureOffset.localeFilter;    // 0x45bc98
     if ( localeFilter &&
          ( ( 1 << filter_locale_array[localeFilter].index ) & tex->tex_num_or_localefilter ) == 0 ) // 0x45bca4 shl/test/jz
         return false;
 
-    const unsigned char surfaceTypeFilter = texWndGlob_textureOffset.surfaceTypeFilter; // 0x45bcbb
+    const byte surfaceTypeFilter = texWndGlob_textureOffset.surfaceTypeFilter; // 0x45bcbb
     if ( surfaceTypeFilter &&
          filter_surfacetype_array[surfaceTypeFilter].index != ( tex->color_or_surfacetype_filter & 0x1F00000 ) ) // 0x45bcc4 and/cmp/jnz
         return false;
@@ -1013,7 +1013,7 @@ void CTexWnd::OnPaint()
     UpdateScrollRange();    // IDB OnPaint 0x45db20: set the WS_VSCROLL range from the laid-out content
 
     R_EndFrame();
-    R_IssueRenderCommands( (uint32_t)-1 );
+    R_IssueRenderCommands( (uint)-1 );
     R_SortMaterials();
     R_CheckTargetWindow( hwnd );
 }
@@ -1533,7 +1533,7 @@ void TexWnd_UsageFilter( int index )                           // 0x45B3B0
         HMENU subMenu = GetSubMenu( GetMenu( g_qeglobals.d_hwndMain ), 5 ); // 0x45b41f/0x45b441
         CheckMenuItem( subMenu, texWndGlob_textureOffset.usageFilter + 60000, MF_UNCHECKED ); // 0x45b445
         CheckMenuItem( subMenu, index + 60000, MF_CHECKED );   // 0x45b451
-        texWndGlob_textureOffset.usageFilter = (unsigned char)index; // 0x45b459 (mov ...usageFilter, bl)
+        texWndGlob_textureOffset.usageFilter = (byte)index; // 0x45b459 (mov ...usageFilter, bl)
         g_nUpdateBits |= W_TEXTURE;                            // 0x45b480 (or g_nUpdateBits, 10h — binary W_TEXTURE==0x10)
     }
 }
@@ -1547,7 +1547,7 @@ void TexWnd_localFilter( int index )                           // 0x45B490
         HMENU subMenu = GetSubMenu( GetMenu( g_qeglobals.d_hwndMain ), 5 ); // 0x45b4ff/0x45b521
         CheckMenuItem( subMenu, texWndGlob_textureOffset.localeFilter + 60256, MF_UNCHECKED ); // 0x45b525
         CheckMenuItem( subMenu, index + 60256, MF_CHECKED );   // 0x45b531
-        texWndGlob_textureOffset.localeFilter = (unsigned char)index; // 0x45b539 (mov ...localeFilter, bl)
+        texWndGlob_textureOffset.localeFilter = (byte)index; // 0x45b539 (mov ...localeFilter, bl)
         g_nUpdateBits |= W_TEXTURE;                            // 0x45b560 (or g_nUpdateBits, 10h — binary W_TEXTURE==0x10)
     }
 }
@@ -1561,7 +1561,7 @@ void TexWnd_SurfaceTypeFilter( unsigned int index )            // 0x45B570
         HMENU subMenu = GetSubMenu( GetMenu( g_qeglobals.d_hwndMain ), 5 ); // 0x45b5dc/0x45b5fe
         CheckMenuItem( subMenu, texWndGlob_textureOffset.surfaceTypeFilter + 60512, MF_UNCHECKED ); // 0x45b602
         CheckMenuItem( subMenu, index + 60512, MF_CHECKED );   // 0x45b60e
-        texWndGlob_textureOffset.surfaceTypeFilter = (unsigned char)index; // 0x45b616 (mov ...surfaceTypeFilter, bl)
+        texWndGlob_textureOffset.surfaceTypeFilter = (byte)index; // 0x45b616 (mov ...surfaceTypeFilter, bl)
         g_nUpdateBits |= W_TEXTURE;                            // 0x45b63d (or g_nUpdateBits, 10h — binary W_TEXTURE==0x10)
     }
 }

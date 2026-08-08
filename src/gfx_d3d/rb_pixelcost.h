@@ -2,7 +2,7 @@
 #include "r_material.h"
 #include "rb_backend.h"
 
-enum GfxPixelCostMode : __int32
+enum GfxPixelCostMode : int
 {                                       // ...
     GFX_PIXEL_COST_MODE_OFF = 0x0,
     GFX_PIXEL_COST_MODE_MEASURE_COST = 0x1,

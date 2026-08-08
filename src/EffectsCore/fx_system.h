@@ -15,7 +15,7 @@
 
 #define GFX_ML_HANDLE_NONE 0
 
-enum $FFE723C3A54D7F6DDF86A219D7944B2F : int32_t
+enum $FFE723C3A54D7F6DDF86A219D7944B2F : int
 {
     FX_STATUS_REF_COUNT_MASK = 0xFFFF,
     FX_STATUS_HAS_PENDING_LOOP_ELEMS = 0x10000,
@@ -27,7 +27,7 @@ enum $FFE723C3A54D7F6DDF86A219D7944B2F : int32_t
     FX_STATUS_IS_LOCKED_MASK = 0x60000000,
 };
 
-enum $390C8AB619C5D27F330E671BCD9D689E : int32_t
+enum $390C8AB619C5D27F330E671BCD9D689E : int
 {
     FX_ELEM_TYPE_SPRITE_BILLBOARD = 0x0,
     FX_ELEM_TYPE_SPRITE_ORIENTED = 0x1,
@@ -54,14 +54,14 @@ enum $390C8AB619C5D27F330E671BCD9D689E : int32_t
 
 void __cdecl TRACK_fx_system();
 XModel *__cdecl FX_RegisterModel(const char *modelName);
-FxSystem *__cdecl FX_GetSystem(int32_t clientIndex);
-FxSystemBuffers *__cdecl FX_GetSystemBuffers(int32_t clientIndex);
+FxSystem *__cdecl FX_GetSystem(int clientIndex);
+FxSystemBuffers *__cdecl FX_GetSystemBuffers(int clientIndex);
 void __cdecl FX_LinkSystemBuffers(FxSystem *system, FxSystemBuffers *systemBuffers);
-void __cdecl FX_InitSystem(int32_t localClientNum);
+void __cdecl FX_InitSystem(int localClientNum);
 void __cdecl FX_ResetSystem(FxSystem *system);
-int32_t __cdecl FX_EffectToHandle(FxSystem *system, FxEffect *effect);
-void __cdecl FX_ShutdownSystem(int32_t localClientNum);
-void __cdecl FX_RelocateSystem(FxSystem *system, int32_t relocationDistance);
+int __cdecl FX_EffectToHandle(FxSystem *system, FxEffect *effect);
+void __cdecl FX_ShutdownSystem(int localClientNum);
+void __cdecl FX_RelocateSystem(FxSystem *system, int relocationDistance);
 void __cdecl FX_EffectNoLongerReferenced(FxSystem *system, FxEffect *remoteEffect);
 void __cdecl FX_DelRefToEffect(FxSystem *system, FxEffect *effect);
 void __cdecl FX_RunGarbageCollection(FxSystem *system);
@@ -74,14 +74,14 @@ uint16_t __cdecl FX_CalculatePackedLighting(const float *origin);
 FxEffect *__cdecl FX_SpawnEffect(
     FxSystem *system,
     const FxEffectDef *remoteDef,
-    int32_t msecBegin,
+    int msecBegin,
     const float *origin,
     const float (*axis)[3],
-    int32_t dobjHandle,
-    int32_t boneIndex,
-    int32_t runnerSortOrder,
+    int dobjHandle,
+    int boneIndex,
+    int runnerSortOrder,
     uint16_t owner,
-    uint32_t markEntnum);
+    uint markEntnum);
 void __cdecl FX_AddRefToEffect(FxSystem *__formal, FxEffect *effect);
 char __cdecl FX_CullEffectForSpawn(const FxCamera *camera, const FxEffectDef *effectDef, const float *origin);
 bool __cdecl FX_CullElemForSpawn(const FxCamera *camera, const FxElemDef *elemDef, const float *origin);
@@ -91,58 +91,58 @@ char __cdecl FX_IsSpotLightEffect(FxSystem *system, const FxEffectDef *def);
 bool __cdecl FX_CanAllocSpotLightEffect(const FxSystem *system);
 char __cdecl FX_SpawnEffect_AllocSpotLightEffect(FxSystem *system, FxEffect *effect);
 FxEffect *__cdecl FX_SpawnOrientedEffect(
-    int32_t localClientNum,
+    int localClientNum,
     const FxEffectDef *def,
-    int32_t msecBegin,
+    int msecBegin,
     const float *origin,
     const float (*axis)[3],
-    uint32_t markEntnum);
-void __cdecl FX_AssertAllocatedEffect(int32_t localClientNum, FxEffect *effect);
+    uint markEntnum);
+void __cdecl FX_AssertAllocatedEffect(int localClientNum, FxEffect *effect);
 void __cdecl FX_PlayOrientedEffectWithMarkEntity(
-    int32_t localClientNum,
+    int localClientNum,
     const FxEffectDef *def,
-    int32_t startMsec,
+    int startMsec,
     const float *origin,
     const float (*axis)[3],
-    uint32_t markEntnum);
+    uint markEntnum);
 void __cdecl FX_PlayOrientedEffect(
-    int32_t localClientNum,
+    int localClientNum,
     const FxEffectDef *def,
-    int32_t startMsec,
+    int startMsec,
     const float *origin,
     const float (*axis)[3]);
 FxEffect *__cdecl FX_SpawnBoltedEffect(
-    int32_t localClientNum,
+    int localClientNum,
     const FxEffectDef *def,
-    int32_t msecBegin,
-    uint32_t dobjHandle,
-    uint32_t boneIndex);
+    int msecBegin,
+    uint dobjHandle,
+    uint boneIndex);
 char __cdecl FX_NeedsBoltUpdate(const FxEffectDef *def);
 void __cdecl FX_PlayBoltedEffect(
-    int32_t localClientNum,
+    int localClientNum,
     const FxEffectDef *def,
-    int32_t startMsec,
-    uint32_t dobjHandle,
-    uint32_t boneIndex);
-void __cdecl FX_RetriggerEffect(int32_t localClientNum, FxEffect *effect, int32_t msecBegin);
+    int startMsec,
+    uint dobjHandle,
+    uint boneIndex);
+void __cdecl FX_RetriggerEffect(int localClientNum, FxEffect *effect, int msecBegin);
 void __cdecl FX_GetTrailHandleList_Last(
     FxSystem *system,
     FxEffect *effect,
     uint16_t *outHandleList,
-    int32_t *outTrailCount);
-void __cdecl FX_ThroughWithEffect(int32_t localClientNum, FxEffect *effect);
+    int *outTrailCount);
+void __cdecl FX_ThroughWithEffect(int localClientNum, FxEffect *effect);
 void __cdecl FX_StopEffect(FxSystem *system, FxEffect *effect);
 void __cdecl FX_StopEffectNonRecursive(FxSystem *system, FxEffect *effect);
 void __cdecl FX_KillEffect(FxSystem *system, FxEffect *effect);
 void __cdecl FX_RemoveAllEffectElems(FxSystem *system, FxEffect *effect);
-void __cdecl FX_KillEffectDef(int32_t localClientNum, const FxEffectDef *def);
-void __cdecl FX_KillAllEffects(int32_t localClientNum);
+void __cdecl FX_KillEffectDef(int localClientNum, const FxEffectDef *def);
+void __cdecl FX_KillAllEffects(int localClientNum);
 void __cdecl FX_SpawnTrailElem_NoCull(
     FxSystem *system,
     FxEffect *effect,
     FxTrail *trail,
     const FxSpatialFrame *effectFrameWhenPlayed,
-    int32_t msecWhenPlayed,
+    int msecWhenPlayed,
     float distanceWhenPlayed);
 FxPool<FxTrailElem> *__cdecl FX_AllocTrailElem(FxSystem *system);
 void __cdecl FX_SpawnTrailElem_Cull(
@@ -150,7 +150,7 @@ void __cdecl FX_SpawnTrailElem_Cull(
     FxEffect *effect,
     FxTrail *trail,
     const FxSpatialFrame *effectFrameWhenPlayed,
-    int32_t msecWhenPlayed,
+    int msecWhenPlayed,
     float distanceWhenPlayed);
 bool __cdecl FX_CullTrailElem(
     const FxCamera *camera,
@@ -161,45 +161,45 @@ void __cdecl FX_SpawnSpotLightElem(FxSystem *system, FxElem *elem);
 void __cdecl FX_SpawnElem(
     FxSystem *system,
     FxEffect *effect,
-    int32_t elemDefIndex,
+    int elemDefIndex,
     const FxSpatialFrame *effectFrameWhenPlayed,
-    int32_t msecWhenPlayed,
+    int msecWhenPlayed,
     float distanceWhenPlayed,
-    int32_t sequence);
+    int sequence);
 FxPool<FxElem> *__cdecl FX_AllocElem(FxSystem *system);
 void __cdecl FX_SpawnRunner(
     FxSystem *system,
     FxEffect *effect,
     const FxElemDef *remoteElemDef,
     const FxSpatialFrame *effectFrameWhenPlayed,
-    int32_t randomSeed,
-    int32_t msecWhenPlayed);
+    int randomSeed,
+    int msecWhenPlayed);
 bool __cdecl FX_SpawnModelPhysics(
     FxSystem *system,
     FxEffect *effect,
     const FxElemDef *elemDef,
-    int32_t randomSeed,
+    int randomSeed,
     FxElem *elem);
 void __cdecl FX_GetOriginForElem(
     FxEffect *effect,
     const FxElemDef *elemDef,
     const FxSpatialFrame *effectFrameWhenPlayed,
-    int32_t randomSeed,
+    int randomSeed,
     float *outOrigin);
 void __cdecl FX_SpawnSound(
-    int32_t localClientNumber,
+    int localClientNumber,
     FxEffect *effect,
     const FxElemDef *elemDef,
     const FxSpatialFrame *effectFrameWhenPlayed,
-    int32_t randomSeed);
-void __cdecl FX_FreeElem(FxSystem *system, uint16_t elemHandle, FxEffect *effect, uint32_t elemClass);
+    int randomSeed);
+void __cdecl FX_FreeElem(FxSystem *system, uint16_t elemHandle, FxEffect *effect, uint elemClass);
 void __cdecl FX_FreeTrailElem(FxSystem *system, uint16_t trailElemHandle, FxEffect *effect, FxTrail *trail);
 void __cdecl FX_FreeSpotLightElem(FxSystem *system, uint16_t elemHandle, FxEffect *effect);
-double __cdecl FX_GetClientVisibility(int32_t localClientNum, const float *start, const float *end);
+double __cdecl FX_GetClientVisibility(int localClientNum, const float *start, const float *end);
 void __cdecl FX_TrailElem_CompressBasis(const float (*inBasis)[3], char (*outBasis)[3]);
 
 double FX_GetServerVisibility(const float *start, const float *end);
-FxEffect *FX_GetClientEffectByIndex(int clientIndex, uint32_t index);
+FxEffect *FX_GetClientEffectByIndex(int clientIndex, uint index);
 int FX_GetClientEffectIndex(int clientIndex, FxEffect *effect);
 
 extern FxSystem fx_systemPool[1];
@@ -228,7 +228,7 @@ extern const dvar_t *fx_marks_ents;
 struct cpose_t;
 
 // fx_marks
-enum MarkFragmentsAgainstEnum : int32_t
+enum MarkFragmentsAgainstEnum : int
 {                                       // ...
     MARK_FRAGMENTS_AGAINST_BRUSHES = 0x0,
     MARK_FRAGMENTS_AGAINST_MODELS = 0x1,
@@ -268,9 +268,9 @@ struct MarkInfo // sizeof=0x448
     float axis[3][3];
     float radius;
     Material *material;
-    int32_t maxTris;
+    int maxTris;
     FxMarkTri *tris;
-    int32_t maxPoints;
+    int maxPoints;
     FxMarkPoint *points;
     float mins[3];
     float maxs[3];
@@ -282,14 +282,14 @@ struct MarkInfo // sizeof=0x448
     // padding byte
     MarkFragmentsAgainstEnum markAgainst;
     uint16_t smodelsCollided[32];
-    int32_t smodelCollidedCount;
+    int smodelCollidedCount;
     MarkInfoCollidedDObj sceneDObjsCollided[32];
-    int32_t sceneDObjCollidedCount;
+    int sceneDObjCollidedCount;
     MarkInfoCollidedBModel sceneBModelsCollided[32];
-    int32_t sceneBModelCollidedCount;
-    int32_t usedTriCount;
-    int32_t usedPointCount;
-    void(__cdecl *callback)(void *, int32_t, FxMarkTri *, int32_t, FxMarkPoint *, const float *, const float *);
+    int sceneBModelCollidedCount;
+    int usedTriCount;
+    int usedPointCount;
+    void(__cdecl *callback)(void *, int, FxMarkTri *, int, FxMarkPoint *, const float *, const float *);
     void *callbackContext;
 };
 static_assert(sizeof(MarkInfo) == 0x448);
@@ -310,7 +310,7 @@ struct FxMarkDObjUpdateContext // sizeof=0x108
 {                                       // ...
     XModel *models[32];
     const char *modelParentBones[32];
-    int32_t modelCount;
+    int modelCount;
     bool isBrush;
     // padding byte
     uint16_t brushIndex;
@@ -323,7 +323,7 @@ struct FxActiveMarkSurf // sizeof=0x14
     GfxMarkContext context;
     // padding byte
     // padding byte
-    int32_t indexCount;
+    int indexCount;
     uint16_t *indices;
 };
 static_assert(sizeof(FxActiveMarkSurf) == 0x14);
@@ -331,20 +331,20 @@ static_assert(sizeof(FxActiveMarkSurf) == 0x14);
 void __cdecl TRACK_fx_marks();
 void __cdecl FX_InitMarksSystem(FxMarksSystem *marksSystem);
 uint16_t __cdecl FX_MarkToHandle(FxMarksSystem *marksSystem, FxMark *mark);
-void __cdecl FX_BeginMarks(int32_t clientIndex);
+void __cdecl FX_BeginMarks(int clientIndex);
 void __cdecl FX_CreateImpactMark(
-    int32_t localClientNum,
+    int localClientNum,
     const FxElemDef *elemDef,
     const FxSpatialFrame *spatialFrame,
-    int32_t randomSeed,
-    uint32_t markEntnum);
+    int randomSeed,
+    uint markEntnum);
 FxMark *__cdecl FX_MarkFromHandle(FxMarksSystem *marksSystem, uint16_t handle);
-void __cdecl FX_MarkEntDetachAll(int32_t localClientNum, int32_t entnum);
+void __cdecl FX_MarkEntDetachAll(int localClientNum, int entnum);
 void __cdecl FX_MarkEntUpdateHidePartBits(
-    const uint32_t *oldHidePartBits,
-    const uint32_t *newHidePartBits,
-    int32_t localClientNum,
-    int32_t entnum);
+    const uint *oldHidePartBits,
+    const uint *newHidePartBits,
+    int localClientNum,
+    int entnum);
 void __cdecl FX_MarkEntUpdateBegin(
     FxMarkDObjUpdateContext *context,
     DObj_s *obj,
@@ -352,45 +352,45 @@ void __cdecl FX_MarkEntUpdateBegin(
     uint16_t brushIndex);
 void __cdecl FX_MarkEntUpdateEnd(
     FxMarkDObjUpdateContext *context,
-    int32_t localClientNum,
-    int32_t entnum,
+    int localClientNum,
+    int entnum,
     DObj_s *obj,
     bool isBrush,
     uint16_t brushIndex);
-void __cdecl FX_BeginGeneratingMarkVertsForEntModels(int32_t localClientNum, uint32_t *indexCount);
+void __cdecl FX_BeginGeneratingMarkVertsForEntModels(int localClientNum, uint *indexCount);
 void __cdecl FX_GenerateMarkVertsForEntXModel(
-    int32_t localClientNum,
-    int32_t entId,
-    uint32_t *indexCount,
+    int localClientNum,
+    int entId,
+    uint *indexCount,
     uint16_t lightHandle,
     uint8_t reflectionProbeIndex,
     const GfxScaledPlacement *placement);
 void __cdecl FX_GenerateMarkVertsForEntDObj(
-    int32_t localClientNum,
-    int32_t entId,
-    uint32_t *indexCount,
+    int localClientNum,
+    int entId,
+    uint *indexCount,
     uint16_t lightHandle,
     uint8_t reflectionProbeIndex,
     const DObj_s *dobj,
     const cpose_t *pose);
 void __cdecl FX_GenerateMarkVertsForEntBrush(
-    int32_t localClientNum,
-    int32_t entId,
-    uint32_t *indexCount,
+    int localClientNum,
+    int entId,
+    uint *indexCount,
     uint8_t reflectionProbeIndex,
     const GfxPlacement *placement);
-void __cdecl FX_EndGeneratingMarkVertsForEntModels(int32_t localClientNum);
+void __cdecl FX_EndGeneratingMarkVertsForEntModels(int localClientNum);
 void __cdecl FX_GenerateMarkVertsForStaticModels(
-    int32_t localClientNum,
-    int32_t smodelCount,
+    int localClientNum,
+    int smodelCount,
     const uint8_t *smodelVisLods);
-void __cdecl FX_GenerateMarkVertsForWorld(int32_t localClientNum);
+void __cdecl FX_GenerateMarkVertsForWorld(int localClientNum);
 
 
 
 
 // fx_Draw
-enum FxRandKey : int32_t
+enum FxRandKey : int
 {                                       // ...
     FXRAND_VELOCITY_X = 0x0,
     FXRAND_VELOCITY_Y = 0x1,
@@ -432,7 +432,7 @@ struct FxDrawState // sizeof=0xA8
     const FxElemDef *elemDef;
     orientation_t orient;
     FxCamera *camera;
-    int32_t randomSeed;
+    int randomSeed;
     float msecLifeSpan;
     float msecElapsed;
     float normTimeUpdateEnd;
@@ -441,7 +441,7 @@ struct FxDrawState // sizeof=0xA8
     FxElemVisualState visState;
     FxElemPreVisualState preVisState;
     float physicsLerpFrac;
-    int32_t msecDraw;                       // ...
+    int msecDraw;                       // ...
 };
 static_assert(sizeof(FxDrawState) == 0xA8);
 
@@ -466,7 +466,7 @@ struct FxBeam // sizeof=0x34
     float beginRadius;                  // ...
     float endRadius;                    // ...
     Material *material;                 // ...
-    int32_t segmentCount;                   // ...
+    int segmentCount;                   // ...
     float wiggleDist;                   // ...
 };
 static_assert(sizeof(FxBeam) == 0x34);
@@ -474,7 +474,7 @@ static_assert(sizeof(FxBeam) == 0x34);
 struct FxBeamInfo // sizeof=0x1384
 {                                       // ...
     FxBeam beams[96];
-    int32_t beamCount;                      // ...
+    int beamCount;                      // ...
 };
 static_assert(sizeof(FxBeamInfo) == 0x1384);
 
@@ -491,7 +491,7 @@ static_assert(sizeof(FxPostLight) == 0x24);
 struct FxPostLightInfo // sizeof=0xD84
 {                                       // ...
     FxPostLight postLights[96];
-    int32_t postLightCount;                 // ...
+    int postLightCount;                 // ...
 };
 static_assert(sizeof(FxPostLightInfo) == 0xD84);
 
@@ -501,7 +501,7 @@ struct FxGenerateVertsCmd // sizeof=0x44
     FxBeamInfo *beamInfo;
     FxPostLightInfo *postLightInfo;
     FxSpriteInfo *spriteInfo;
-    int32_t localClientNum;
+    int localClientNum;
     float vieworg[3];
     float viewaxis[3][3];
 };
@@ -514,25 +514,25 @@ uint8_t __cdecl FX_InterpolateColor(
     float valueLerpInv,
     float sampleLerp,
     float sampleLerpInv,
-    int32_t channel);
+    int channel);
 void __cdecl FX_SetupVisualState(
     const FxElemDef *elemDef,
     const FxEffect *effect,
-    int32_t randomSeed,
+    int randomSeed,
     float normTimeUpdateEnd,
     FxElemPreVisualState *preVisState);
 void __cdecl FX_EvaluateSize(FxElemPreVisualState *preVisState, FxElemVisualState *visState);
 double __cdecl FX_InterpolateSize(
     const FxElemVisStateSample *refState,
-    int32_t randomSeed,
+    int randomSeed,
     FxRandKey randomKey,
     float sampleLerp,
     float sampleLerpInv,
-    int32_t channel);
+    int channel);
 void __cdecl FX_EvaluateVisualState(FxElemPreVisualState *preVisState, float msecLifeSpan, FxElemVisualState *visState);
 double __cdecl FX_IntegrateRotationFromZero(
     const FxElemVisStateSample *refState,
-    int32_t randomSeed,
+    int randomSeed,
     FxRandKey randomKey,
     float sampleLerp,
     float msecLifeSpan);
@@ -549,22 +549,22 @@ void __cdecl FX_DrawElem_BillboardSprite(FxDrawState *draw);
 void __cdecl FX_GenSpriteVerts(FxDrawState *draw, const float *tangent, const float *binormal, const float *normal);
 void __cdecl FX_GetSpriteTexCoords(const FxDrawState *draw, float *s0, float *ds, float *t0, float *dt);
 bool __cdecl FX_CullElementForDraw_Sprite(const FxDrawState *draw);
-uint32_t __cdecl FX_CullElementForDraw_FrustumPlaneCount(const FxDrawState *draw);
+uint __cdecl FX_CullElementForDraw_FrustumPlaneCount(const FxDrawState *draw);
 void __cdecl FX_DrawElem_OrientedSprite(FxDrawState *draw);
 void __cdecl FX_DrawElem_Tail(FxDrawState *draw);
 bool __cdecl FX_CullElementForDraw_Tail(const FxDrawState *draw);
 char __cdecl FX_CullCylinder(
     const FxCamera *camera,
-    uint32_t frustumPlaneCount,
+    uint frustumPlaneCount,
     const float *posWorld0,
     const float *posWorld1,
     float radius);
 void __cdecl FX_DrawElem_Cloud(FxDrawState *draw);
 void __cdecl FX_SetPlacement(const FxDrawState *draw, GfxScaledPlacement *placement);
-double __cdecl FX_GetMsecForSamplingAxis(float msecElapsed, float msecLifeSpan, int32_t atRestFraction);
+double __cdecl FX_GetMsecForSamplingAxis(float msecElapsed, float msecLifeSpan, int atRestFraction);
 double __cdecl FX_InterpolateScale(
     const FxElemVisStateSample *refState,
-    int32_t randomSeed,
+    int randomSeed,
     FxRandKey randomKey,
     float sampleLerp,
     float sampleLerpInv);
@@ -576,12 +576,12 @@ bool __cdecl FX_CullElementForDraw_Light(const FxDrawState *draw);
 void __cdecl FX_DrawElem_SpotLight(FxDrawState *draw);
 void __cdecl FX_DrawNonSpriteElems(FxSystem *system);
 void __cdecl FX_BeginIteratingOverEffects_Cooperative(FxSystem *system);
-void __cdecl FX_DrawNonSpriteEffect(FxSystem *system, FxEffect *effect, uint32_t elemClass, int32_t drawTime);
+void __cdecl FX_DrawNonSpriteEffect(FxSystem *system, FxEffect *effect, uint elemClass, int drawTime);
 void __cdecl FX_DrawElement(FxSystem *system, const FxElemDef *elemDef, const FxElem *elem, FxDrawState *draw);
 void __cdecl FX_DrawSpotLight(FxSystem *system);
-void __cdecl FX_DrawSpotLightEffect(FxSystem *system, FxEffect *effect, int32_t drawTime);
-void __cdecl FX_DrawSpriteElems(FxSystem *system, int32_t drawTime);
-void __cdecl FX_DrawTrailsForEffect(FxSystem *system, FxEffect *effect, int32_t drawTime);
+void __cdecl FX_DrawSpotLightEffect(FxSystem *system, FxEffect *effect, int drawTime);
+void __cdecl FX_DrawSpriteElems(FxSystem *system, int drawTime);
+void __cdecl FX_DrawTrailsForEffect(FxSystem *system, FxEffect *effect, int drawTime);
 void __cdecl FX_DrawTrail(FxSystem *system, FxDrawState *draw, FxTrail *trail);
 void __cdecl FX_TrailElem_UncompressBasis(const char (*inBasis)[3], float (*basis)[3]);
 void __cdecl FX_GenTrail_IndsForSegment(
@@ -602,16 +602,16 @@ void __cdecl Vec3MadMad(
     float scale1,
     const float *dir1,
     float *result);
-void __cdecl FX_DrawSpriteEffect(FxSystem *system, FxEffect *effect, int32_t drawTime);
+void __cdecl FX_DrawSpriteEffect(FxSystem *system, FxEffect *effect, int drawTime);
 void __cdecl FX_GenerateVerts(FxGenerateVertsCmd *cmd);
-void __cdecl FX_FillGenerateVertsCmd(int32_t localClientNum, FxGenerateVertsCmd *cmd);
+void __cdecl FX_FillGenerateVertsCmd(int localClientNum, FxGenerateVertsCmd *cmd);
 void __cdecl FX_EvaluateDistanceFade(FxDrawState *draw);
 double __cdecl FX_ClampRangeLerp(float dist, const FxFloatRange *range);
 void __cdecl FX_DrawElement_Setup_1_(
     FxSystem* system,
     FxDrawState* draw,
-    int32_t elemMsecBegin,
-    int32_t elemSequence,
+    int elemMsecBegin,
+    int elemSequence,
     const float* elemOrigin,
     float* outRealNormTime);
 
@@ -619,20 +619,20 @@ void __cdecl FX_DrawElement_Setup_1_(
 void __cdecl FX_OffsetSpawnOrigin(
     const FxSpatialFrame *effectFrame,
     const FxElemDef *elemDef,
-    int32_t randomSeed,
+    int randomSeed,
     float *spawnOrigin);
 void __cdecl FX_GetOriginForTrailElem(
     FxEffect *effect,
     const FxElemDef *elemDef,
     const FxSpatialFrame *effectFrameWhenPlayed,
-    int32_t randomSeed,
+    int randomSeed,
     float *outOrigin,
     float *outRight,
     float *outUp);
 void __cdecl FX_GetSpawnOrigin(
     const FxSpatialFrame *effectFrame,
     const FxElemDef *elemDef,
-    int32_t randomSeed,
+    int randomSeed,
     float *spawnOrigin);
 void __cdecl FX_TransformPosFromLocalToWorld(const FxSpatialFrame *frame, float *posLocal, float *posWorld);
 void __cdecl FX_SpatialFrameToOrientation(const FxSpatialFrame *frame, orientation_t *orient);
@@ -641,7 +641,7 @@ void __cdecl FX_GetOrientation(
     const FxElemDef* elemDef,
     const FxSpatialFrame* frameAtSpawn,
     const FxSpatialFrame* frameNow,
-    int32_t randomSeed,
+    int randomSeed,
     orientation_t* orient);
 char  FX_GenerateBeam_GetFlatDelta(
     const float4x4* clipMtx,
@@ -651,7 +651,7 @@ char  FX_GenerateBeam_GetFlatDelta(
     float4* outFlatDelta);
 void __cdecl FX_GetVelocityAtTime(
     const FxElemDef *elemDef,
-    int32_t randomSeed,
+    int randomSeed,
     float msecLifeSpan,
     float msecElapsed,
     const orientation_t *orient,
@@ -667,10 +667,10 @@ void __cdecl FX_OrientationPosToWorldPos(const orientation_t *orient, const floa
 void __cdecl FX_OrientationPosFromWorldPos(const orientation_t *orient, const float *pos, float *out);
 void __cdecl FX_AddVisBlocker(FxSystem *system, const float *posWorld, float radius, float opacity);
 void __cdecl FX_ToggleVisBlockerFrame(FxSystem *system);
-char __cdecl FX_CullSphere(const FxCamera *camera, uint32_t frustumPlaneCount, const float *posWorld, float radius);
+char __cdecl FX_CullSphere(const FxCamera *camera, uint frustumPlaneCount, const float *posWorld, float radius);
 void __cdecl FX_GetElemAxis(
     const FxElemDef *elemDef,
-    int32_t randomSeed,
+    int randomSeed,
     const orientation_t *orient,
     float msecElapsed,
     mat3x3& axis);
@@ -679,18 +679,18 @@ void __cdecl FX_AnglesToOrientedAxis(const float *anglesInRad, const orientation
 
 // fx_random
 void __cdecl TRACK_fx_random();
-void __cdecl FX_RandomDir(int32_t seed, float *dir);
-void __cdecl FX_RandomlyRotateAxis(const float (*axisIn)[3], int32_t randomSeed, mat3x3& axisOut);
+void __cdecl FX_RandomDir(int seed, float *dir);
+void __cdecl FX_RandomlyRotateAxis(const float (*axisIn)[3], int randomSeed, mat3x3& axisOut);
 
 
 
 // fx_sort
 struct FxInsertSortElem // sizeof=0x14
 {                                       // ...
-    int32_t defSortOrder;                   // ...
+    int defSortOrder;                   // ...
     float distToCamSq;
-    int32_t msecBegin;
-    int32_t defIndex;
+    int msecBegin;
+    int defIndex;
     uint8_t elemType;
     // padding byte
     // padding byte
@@ -701,7 +701,7 @@ static_assert(sizeof(FxInsertSortElem) == 0x14);
 void __cdecl FX_SortEffects(FxSystem *system);
 void __cdecl FX_WaitBeginIteratingOverEffects_Exclusive(FxSystem *system);
 bool __cdecl FX_FirstEffectIsFurther(FxEffect *firstEffect, FxEffect *secondEffect);
-int32_t __cdecl FX_CalcRunnerParentSortOrder(FxEffect *effect);
+int __cdecl FX_CalcRunnerParentSortOrder(FxEffect *effect);
 void __cdecl FX_SortNewElemsInEffect(FxSystem *system, FxEffect *effect);
 void __cdecl FX_SortSpriteElemIntoEffect(FxSystem *system, FxEffect *effect, FxElem *elem);
 void __cdecl FX_GetInsertSortElem(
@@ -719,32 +719,32 @@ bool __cdecl FX_ExistingElemSortsBeforeNewElem(
 // fx_archive
 struct FxEffectDefTableEntry // sizeof=0x8
 {                                       // ...
-    uint32_t key;
+    uint key;
     const FxEffectDef *effectDef;
 };
 static_assert(sizeof(FxEffectDefTableEntry) == 0x8);
 
 struct FxEffectDefTable // sizeof=0x2004
 {                                       // ...
-    int32_t count;
+    int count;
     FxEffectDefTableEntry entries[1024];
 };
 static_assert(sizeof(FxEffectDefTable) == 0x2004);
 
-void __cdecl FX_Restore(int32_t clientIndex, MemoryFile *memFile);
+void __cdecl FX_Restore(int clientIndex, MemoryFile *memFile);
 void __cdecl FX_RestoreEffectDefTable(MemoryFile *memFile, FxEffectDefTable *table);
-void __cdecl FX_AddEffectDefTableEntry(FxEffectDefTable *table, uint32_t key, const FxEffectDef *effectDef);
+void __cdecl FX_AddEffectDefTableEntry(FxEffectDefTable *table, uint key, const FxEffectDef *effectDef);
 void __cdecl FX_FixupEffectDefHandles(FxSystem *system, FxEffectDefTable *table);
 FxEffect *__cdecl FX_EffectFromHandle(FxSystem *system, uint16_t handle);
-const FxEffectDef *__cdecl FX_FindEffectDefInTable(const FxEffectDefTable *table, uint32_t key);
+const FxEffectDef *__cdecl FX_FindEffectDefInTable(const FxEffectDefTable *table, uint key);
 void __cdecl FX_RestorePhysicsData(FxSystem *system, MemoryFile *memFile);
-FxElemVisuals __cdecl FX_GetElemVisuals(const FxElemDef *elemDef, int32_t randomSeed);
-void __cdecl FX_Save(int32_t clientIndex, MemoryFile *memFile);
+FxElemVisuals __cdecl FX_GetElemVisuals(const FxElemDef *elemDef, int randomSeed);
+void __cdecl FX_Save(int clientIndex, MemoryFile *memFile);
 void __cdecl FX_SaveEffectDefTable(FxSystem *system, MemoryFile *memFile);
 void __cdecl FX_SaveEffectDefTable_FastFile(MemoryFile *memFile);
 void __cdecl FX_SaveEffectDefTable_LoadObj(MemoryFile* memFile);
 void __cdecl FX_SavePhysicsData(FxSystem *system, MemoryFile *memFile);
-void __cdecl FX_Archive(int32_t clientIndex, MemoryFile *memFile);
+void __cdecl FX_Archive(int clientIndex, MemoryFile *memFile);
 
 // fx_beam
 void __cdecl FX_Beam_GenerateVerts(FxGenerateVertsCmd *cmd);
@@ -765,26 +765,26 @@ FxPostLightInfo *__cdecl FX_PostLight_GetInfo();
 struct FxProfileEntry // sizeof=0x1C
 {                                       // ...
     const FxEffectDef *effectDef;
-    int32_t effectCount;
-    int32_t activeElemCount;
-    int32_t pendingElemCount;
-    int32_t trailCount;
-    int32_t activeTrailElemCount;
-    int32_t pendingTrailElemCount;
+    int effectCount;
+    int activeElemCount;
+    int pendingElemCount;
+    int trailCount;
+    int activeTrailElemCount;
+    int pendingTrailElemCount;
 };
 static_assert(sizeof(FxProfileEntry) == 0x1C);
 
-void __cdecl FX_DrawProfile(int32_t clientIndex, void(__cdecl *drawFunc)(char *), float *profilePos);
-FxProfileEntry *__cdecl FX_GetProfileEntry(const FxEffectDef *effectDef, FxProfileEntry *entryPool, int32_t *entryCount);
+void __cdecl FX_DrawProfile(int clientIndex, void(__cdecl *drawFunc)(char *), float *profilePos);
+FxProfileEntry *__cdecl FX_GetProfileEntry(const FxEffectDef *effectDef, FxProfileEntry *entryPool, int *entryCount);
 void __cdecl FX_ProfileSingleEffect(FxSystem *system, const FxEffect *effect, FxProfileEntry *entry);
-int32_t __cdecl FX_CompareProfileEntries(const FxProfileEntry *e0, const FxProfileEntry *e1);
+int __cdecl FX_CompareProfileEntries(const FxProfileEntry *e0, const FxProfileEntry *e1);
 double __cdecl FX_GetProfileEntryCost(const FxProfileEntry *entry);
-void __cdecl FX_DrawMarkProfile(int32_t clientIndex, void(__cdecl *drawFunc)(const char *, float *), float *profilePos);
+void __cdecl FX_DrawMarkProfile(int clientIndex, void(__cdecl *drawFunc)(const char *, float *), float *profilePos);
 void __cdecl FX_DrawMarkProfile_MarkPrint(
     FxMarksSystem* marksSystem,
     uint16_t head,
     const char* name,
-    int32_t index,
+    int index,
     void(__cdecl* drawFunc)(const char*, float*),
     float* profilePos);
 
@@ -798,7 +798,7 @@ struct FxSprite // sizeof=0x20
     uint8_t rgbaColor[4];
     float radius;
     float minScreenRadius;
-    int32_t flags;
+    int flags;
 };
 static_assert(sizeof(FxSprite) == 0x20);
 
@@ -824,10 +824,10 @@ void __cdecl FX_BuildQuadStampCodeMeshVerts(
     const float *left,
     const float *up,
     const uint8_t *rgbaColor,
-    int32_t s0,
-    int32_t t0,
-    int32_t s1,
-    int32_t t1);
+    int s0,
+    int t0,
+    int s1,
+    int t1);
 char __cdecl FX_HeightScreenToWorld(
     const float *worldOrigin,
     float screenHeight,
@@ -853,7 +853,7 @@ FxSpriteInfo *__cdecl FX_SpriteGetInfo();
 
 
 // fx_update
-enum FxUpdateResult : int32_t
+enum FxUpdateResult : int
 {                                       // ...
     FX_UPDATE_REMOVE = 0x0,
     FX_UPDATE_KEEP = 0x1,
@@ -862,8 +862,8 @@ enum FxUpdateResult : int32_t
 void __cdecl FX_SpawnAllFutureLooping(
     FxSystem *system,
     FxEffect *effect,
-    int32_t elemDefFirst,
-    int32_t elemDefCount,
+    int elemDefFirst,
+    int elemDefCount,
     const FxSpatialFrame *frameBegin,
     const FxSpatialFrame *frameEnd,
     int msecWhenPlayed,
@@ -871,60 +871,60 @@ void __cdecl FX_SpawnAllFutureLooping(
 void __cdecl FX_SpawnLoopingElems(
     FxSystem *system,
     FxEffect *effect,
-    int32_t elemDefIndex,
+    int elemDefIndex,
     const FxSpatialFrame *frameBegin,
     const FxSpatialFrame *frameEnd,
     int msecWhenPlayed,
     int msecUpdateBegin,
     int msecUpdateEnd);
-int32_t __cdecl FX_LimitStabilizeTimeForElemDef_Recurse(
+int __cdecl FX_LimitStabilizeTimeForElemDef_Recurse(
     const FxElemDef *elemDef,
     bool needToSpawnSystem,
-    int32_t originalUpdateTime);
-int32_t __cdecl FX_LimitStabilizeTimeForElemDef_SelfOnly(const FxElemDef *elemDef, bool needToSpawnSystem);
-int32_t __cdecl FX_LimitStabilizeTimeForEffectDef_Recurse(const FxEffectDef *remoteEffectDef, int32_t originalUpdateTime);
+    int originalUpdateTime);
+int __cdecl FX_LimitStabilizeTimeForElemDef_SelfOnly(const FxElemDef *elemDef, bool needToSpawnSystem);
+int __cdecl FX_LimitStabilizeTimeForEffectDef_Recurse(const FxEffectDef *remoteEffectDef, int originalUpdateTime);
 void __cdecl FX_BeginLooping(
     FxSystem* system,
     FxEffect* effect,
-    int32_t elemDefFirst,
-    int32_t elemDefCount,
+    int elemDefFirst,
+    int elemDefCount,
     FxSpatialFrame* frameWhenPlayed,
     FxSpatialFrame* a2,
-    int32_t msecWhenPlayed,
-    int32_t msecNow);
+    int msecWhenPlayed,
+    int msecNow);
 void __cdecl FX_SpawnTrailLoopingElems(
     FxSystem* system,
     FxEffect* effect,
     FxTrail* trail,
     FxSpatialFrame* frameBegin,
     FxSpatialFrame* frameEnd,
-    int32_t msecWhenPlayed,
-    int32_t msecUpdateBegin,
-    int32_t msecUpdateEnd,
+    int msecWhenPlayed,
+    int msecUpdateBegin,
+    int msecUpdateEnd,
     float distanceTravelledBegin,
     float distanceTravelledEnd);
 void __cdecl FX_TriggerOneShot(
     FxSystem *system,
     FxEffect *effect,
-    int32_t elemDefFirst,
-    int32_t elemDefCount,
+    int elemDefFirst,
+    int elemDefCount,
     const FxSpatialFrame *frameWhenPlayed,
-    int32_t msecWhenPlayed);
+    int msecWhenPlayed);
 void __cdecl FX_SpawnOneShotElems(
     FxSystem *system,
     FxEffect *effect,
-    int32_t elemDefIndex,
+    int elemDefIndex,
     const FxSpatialFrame *frameWhenPlayed,
-    int32_t msecWhenPlayed);
+    int msecWhenPlayed);
 void __cdecl FX_StartNewEffect(FxSystem* system, FxEffect* effect);
-bool __cdecl FX_GetBoltTemporalBits(int32_t localClientNum, int32_t dobjHandle);
-char __cdecl FX_GetBoneOrientation(int32_t localClientNum, uint32_t dobjHandle, int32_t boneIndex, orientation_t *orient);
-bool __cdecl FX_GetBoneOrientation_IsDObjEntityValid(int32_t localClientNum, int32_t dobjHandle);
+bool __cdecl FX_GetBoltTemporalBits(int localClientNum, int dobjHandle);
+char __cdecl FX_GetBoneOrientation(int localClientNum, uint dobjHandle, int boneIndex, orientation_t *orient);
+bool __cdecl FX_GetBoneOrientation_IsDObjEntityValid(int localClientNum, int dobjHandle);
 void __cdecl FX_UpdateEffectPartial(
     FxSystem* system,
     FxEffect* effect,
-    int32_t msecUpdateBegin,
-    int32_t msecUpdateEnd,
+    int msecUpdateBegin,
+    int msecUpdateEnd,
     float distanceTravelledBegin,
     float distanceTravelledEnd,
     uint16_t* elemHandleStart,
@@ -934,49 +934,49 @@ void __cdecl FX_UpdateEffectPartial(
 void __cdecl FX_ProcessLooping(
     FxSystem* system,
     FxEffect* effect,
-    int32_t elemDefFirst,
-    int32_t elemDefCount,
+    int elemDefFirst,
+    int elemDefCount,
     FxSpatialFrame* frameBegin,
     FxSpatialFrame* frameEnd,
-    int32_t msecWhenPlayed,
-    int32_t msecUpdateBegin,
-    int32_t msecUpdateEnd,
+    int msecWhenPlayed,
+    int msecUpdateBegin,
+    int msecUpdateEnd,
     float distanceTravelledBegin,
     float distanceTravelledEnd);
 void __cdecl FX_UpdateEffectPartialForClass(
     FxSystem *system,
     FxEffect *effect,
-    int32_t msecUpdateBegin,
-    int32_t msecUpdateEnd,
+    int msecUpdateBegin,
+    int msecUpdateEnd,
     uint16_t elemHandleStart,
     uint16_t elemHandleStop,
-    uint32_t elemClass);
+    uint elemClass);
 FxUpdateResult __cdecl FX_UpdateElement(
     FxSystem *system,
     FxEffect *effect,
     FxElem *elem,
-    int32_t msecUpdateBegin,
-    int32_t msecUpdateEnd);
+    int msecUpdateBegin,
+    int msecUpdateEnd);
 const FxElemDef *__cdecl FX_GetUpdateElemDef(const FxUpdateElem *update);
 double __cdecl FX_GetAtRestFraction(const FxUpdateElem *update, float msec);
-int32_t __cdecl FX_UpdateElementPosition(FxSystem *system, FxUpdateElem *update);
-int32_t __cdecl FX_UpdateElementPosition_Colliding(FxSystem *system, FxUpdateElem *update);
-int32_t __cdecl FX_UpdateElementPosition_CollidingStep(
+int __cdecl FX_UpdateElementPosition(FxSystem *system, FxUpdateElem *update);
+int __cdecl FX_UpdateElementPosition_Colliding(FxSystem *system, FxUpdateElem *update);
+int __cdecl FX_UpdateElementPosition_CollidingStep(
     FxSystem *system,
     FxUpdateElem *update,
-    int32_t msecUpdateBegin,
-    int32_t msecUpdateEnd,
+    int msecUpdateBegin,
+    int msecUpdateEnd,
     float *xyzWorldOld);
-void __cdecl FX_NextElementPosition(FxUpdateElem *update, int32_t msecUpdateBegin, int32_t msecUpdateEnd);
+void __cdecl FX_NextElementPosition(FxUpdateElem *update, int msecUpdateBegin, int msecUpdateEnd);
 void __cdecl FX_NextElementPosition_NoExternalForces(
     FxUpdateElem* update,
-    int32_t msecUpdateBegin,
-    int32_t msecUpdateEnd,
+    int msecUpdateBegin,
+    int msecUpdateEnd,
     float* posLocal,
     float* posWorld);
 void __cdecl FX_IntegrateVelocity(const FxUpdateElem *update, float t0, float t1, float *posLocal, float *posWorld);
 void __cdecl FX_IntegrateVelocityAcrossSegments(
-    int32_t elemDefFlags,
+    int elemDefFlags,
     const orientation_t *orient,
     const FxElemVelStateSample *velState0,
     const FxElemVelStateSample *velState1,
@@ -994,7 +994,7 @@ void __cdecl FX_IntegrateVelocityFromZeroInSegment(
     float integralScale,
     float *pos);
 void __cdecl FX_IntegrateVelocityInSegment(
-    int32_t elemDefFlags,
+    int elemDefFlags,
     const orientation_t *orient,
     const FxElemVelStateSample *velState,
     float t0,
@@ -1011,30 +1011,30 @@ void __cdecl FX_IntegrateVelocityInSegmentInFrame(
     float integralScale,
     float *pos);
 bool __cdecl FX_TraceHitSomething(const trace_t *trace);
-int32_t __cdecl FX_CollisionResponse(
+int __cdecl FX_CollisionResponse(
     FxSystem *system,
     FxUpdateElem *update,
     const trace_t *trace,
-    int32_t msecUpdateBegin,
-    int32_t msecUpdateEnd,
+    int msecUpdateBegin,
+    int msecUpdateEnd,
     float *xyzWorldOld);
 void __cdecl FX_SpawnImpactEffect(
     FxSystem *system,
     const FxUpdateElem *update,
     const FxEffectDef *impactEffect,
-    int32_t msecOnImpact,
+    int msecOnImpact,
     const float *impactNormal);
-int32_t __cdecl FX_UpdateElementPosition_NonColliding(FxUpdateElem *update);
-int32_t __cdecl FX_UpdateElementPosition_Local(FxUpdateElem *update);
+int __cdecl FX_UpdateElementPosition_NonColliding(FxUpdateElem *update);
+int __cdecl FX_UpdateElementPosition_Local(FxUpdateElem *update);
 void __cdecl FX_SpawnDeathEffect(FxSystem *system, FxUpdateElem *update);
 char __cdecl FX_UpdateElement_SetupUpdate(
     FxEffect *effect,
-    int32_t msecUpdateBegin,
-    int32_t msecUpdateEnd,
-    uint32_t elemDefIndex,
-    int32_t elemAtRestFraction,
-    int32_t elemMsecBegin,
-    int32_t elemSequence,
+    int msecUpdateBegin,
+    int msecUpdateEnd,
+    uint elemDefIndex,
+    int elemAtRestFraction,
+    int elemMsecBegin,
+    int elemSequence,
     float *elemOrigin,
     FxUpdateElem *update);
 void __cdecl FX_UpdateElement_TruncateToElemEnd(FxUpdateElem *update, FxUpdateResult *outUpdateResult);
@@ -1061,8 +1061,8 @@ void __cdecl FX_UpdateEffectPartialTrail(
     FxSystem *system,
     FxEffect *effect,
     FxTrail *trail,
-    int32_t msecUpdateBegin,
-    int32_t msecUpdateEnd,
+    int msecUpdateBegin,
+    int msecUpdateEnd,
     float distanceTravelledBegin,
     float distanceTravelledEnd,
     uint16_t trailElemHandleStart,
@@ -1074,37 +1074,37 @@ FxUpdateResult __cdecl FX_UpdateTrailElement(
     FxEffect *effect,
     FxTrail *trail,
     FxTrailElem *trailElem,
-    int32_t msecUpdateBegin,
-    int32_t msecUpdateEnd);
+    int msecUpdateBegin,
+    int msecUpdateEnd);
 void __cdecl FX_UpdateSpotLight(FxCmd *cmd);
 void __cdecl FX_UpdateSpotLightEffect(FxSystem* system, FxEffect* effect);
 void __cdecl FX_UpdateSpotLightEffectPartial(
     FxSystem* system,
     FxEffect* effect,
-    int32_t msecUpdateBegin,
-    int32_t msecUpdateEnd);
+    int msecUpdateBegin,
+    int msecUpdateEnd);
 void __cdecl FX_UpdateEffectBolt(FxSystem *system, FxEffect *effect);
 void __cdecl FX_UpdateNonDependent(FxCmd *cmd);
-void __cdecl FX_Update(FxSystem *system, int32_t localClientNum, bool nonBoltedEffectsOnly);
+void __cdecl FX_Update(FxSystem *system, int localClientNum, bool nonBoltedEffectsOnly);
 void __cdecl FX_UpdateEffect(FxSystem* system, FxEffect* effect);
 bool __cdecl FX_ShouldProcessEffect(FxSystem *system, FxEffect *effect, bool nonBoltedEffectsOnly);
-void __cdecl FX_RunPhysics(int32_t localClientNum);
+void __cdecl FX_RunPhysics(int localClientNum);
 void __cdecl FX_UpdateRemaining(FxCmd *cmd);
-void __cdecl FX_BeginUpdate(int32_t localClientNum);
-void __cdecl FX_EndUpdate(int32_t localClientNum);
+void __cdecl FX_BeginUpdate(int localClientNum);
+void __cdecl FX_EndUpdate(int localClientNum);
 void __cdecl FX_AddNonSpriteDrawSurfs(FxCmd *cmd);
-void __cdecl FX_RewindTo(int32_t localClientNum, int32_t time);
-void __cdecl FX_SetNextUpdateCamera(int32_t localClientNum, const refdef_s *refdef, float zfar);
-void __cdecl FX_SetNextUpdateTime(int32_t localClientNum, int32_t time);
-void __cdecl FX_FillUpdateCmd(int32_t localClientNum, FxCmd *cmd);
+void __cdecl FX_RewindTo(int localClientNum, int time);
+void __cdecl FX_SetNextUpdateCamera(int localClientNum, const refdef_s *refdef, float zfar);
+void __cdecl FX_SetNextUpdateTime(int localClientNum, int time);
+void __cdecl FX_FillUpdateCmd(int localClientNum, FxCmd *cmd);
 
 
 
 // fx_curve
 struct FxCurve // sizeof=0xC
 {
-    int32_t dimensionCount;
-    int32_t keyCount;
+    int dimensionCount;
+    int keyCount;
     float keys[1];
 };
 static_assert(sizeof(FxCurve) == 0xC);
@@ -1112,7 +1112,7 @@ static_assert(sizeof(FxCurve) == 0xC);
 struct FxCurveIterator // sizeof=0x8
 {                                       // ...
     const FxCurve *master;
-    int32_t currentKeyIndex;
+    int currentKeyIndex;
 };
 static_assert(sizeof(FxCurveIterator) == 0x8);
 
@@ -1121,7 +1121,7 @@ void __cdecl FxCurve_Interpolate3d(const float *key, float intermediateTime, flo
 void __cdecl FxCurveIterator_Create(FxCurveIterator *createe, const FxCurve *master);
 void __cdecl FxCurveIterator_Release(FxCurveIterator *releasee);
 
-const FxCurve *__cdecl FxCurve_AllocAndCreateWithKeys(float *keyArray, int32_t dimensionCount, int32_t keyCount);
+const FxCurve *__cdecl FxCurve_AllocAndCreateWithKeys(float *keyArray, int dimensionCount, int keyCount);
 void __cdecl FxCurveIterator_SampleTimeVec3(FxCurveIterator *source, float *replyVector, float time);
 double __cdecl FxCurveIterator_SampleTime(FxCurveIterator *source, float time);
 void __cdecl FxCurveIterator_MoveToTime(FxCurveIterator *source, float time);
@@ -1131,30 +1131,30 @@ void __cdecl FxCurveIterator_MoveToTime(FxCurveIterator *source, float time);
 // fx_load_obj
 struct FxEditorElemAtlas // sizeof=0x1C
 {                                       // ...
-    int32_t behavior;
-    int32_t index;
-    int32_t fps;
-    int32_t loopCount;
-    int32_t colIndexBits;
-    int32_t rowIndexBits;
-    int32_t entryCount;
+    int behavior;
+    int index;
+    int fps;
+    int loopCount;
+    int colIndexBits;
+    int rowIndexBits;
+    int entryCount;
 };
 static_assert(sizeof(FxEditorElemAtlas) == 0x1C);
 
 struct FxEditorTrailDef // sizeof=0x608
 {                                       // ...
     FxTrailVertex verts[64];
-    int32_t vertCount;
+    int vertCount;
     uint16_t inds[128];
-    int32_t indCount;
+    int indCount;
 };
 static_assert(sizeof(FxEditorTrailDef) == 0x608);
 
 struct FxEditorElemDef // sizeof=0x858
 {                                       // ...
     char name[48];
-    int32_t editorFlags;
-    int32_t flags;
+    int editorFlags;
+    int flags;
     FxFloatRange spawnRange;
     FxFloatRange fadeInRange;
     FxFloatRange fadeOutRange;
@@ -1187,7 +1187,7 @@ struct FxEditorElemDef // sizeof=0x858
     float collRadius;
     const FxEffectDef *effectOnImpact;
     const FxEffectDef *effectOnDeath;
-    int32_t sortOrder;
+    int sortOrder;
     const FxEffectDef *emission;
     FxFloatRange emitDist;
     FxFloatRange emitDistVariance;
@@ -1195,15 +1195,15 @@ struct FxEditorElemDef // sizeof=0x858
     // padding byte
     // padding byte
     // padding byte
-    int32_t visualCount;
+    int visualCount;
     //$6DCA2FC3F9FD742A3C1907AE7E70399A ___u41;
     union
     {
         FxElemVisuals visuals[32];
         FxElemMarkVisuals markVisuals[16];
     };
-    int32_t trailSplitDist;
-    int32_t trailRepeatDist;
+    int trailSplitDist;
+    int trailRepeatDist;
     float trailScrollTime;
     FxEditorTrailDef trailDef;
 };
@@ -1212,7 +1212,7 @@ static_assert(sizeof(FxEditorElemDef) == 0x858);
 struct FxEditorEffectDef // sizeof=0x10B44
 {                                       // ...
     char name[64];
-    int32_t elemCount;
+    int elemCount;
     FxEditorElemDef elems[32];
 };
 static_assert(sizeof(FxEditorEffectDef) == 0x10B44);
@@ -1226,20 +1226,20 @@ static_assert(sizeof(FxElemField) == 0x8);
 
 struct FxFlagOutputSet // sizeof=0xC
 {                                       // ...
-    int32_t *flags[3];                      // ...
+    int *flags[3];                      // ...
 };
 static_assert(sizeof(FxFlagOutputSet) == 0xC);
 
 struct FxFlagDef // sizeof=0x10
 {
     const char *name;
-    int32_t flagType;
-    int32_t mask;
-    int32_t value;
+    int flagType;
+    int mask;
+    int value;
 };
 static_assert(sizeof(FxFlagDef) == 0x10);
 
-enum FxSampleChannel : int32_t
+enum FxSampleChannel : int
 {                                       // ...
     FX_CHAN_RGBA = 0x0,
     FX_CHAN_SIZE_0 = 0x1,
@@ -1258,8 +1258,8 @@ void __cdecl FX_ForEachEffectDef(void(__cdecl* callback)(const FxEffectDef*, voi
 void FX_UnregisterAll();
 
 // fx_convert
-const FxEffectDef *__cdecl FX_Convert(const FxEditorEffectDef *editorEffect, void *(* Alloc)(uint32_t));
-int32_t __cdecl FX_DecideIntervalLimit(const FxEditorElemDef *edElemDef);
+const FxEffectDef *__cdecl FX_Convert(const FxEditorEffectDef *editorEffect, void *(* Alloc)(uint));
+int __cdecl FX_DecideIntervalLimit(const FxEditorElemDef *edElemDef);
 
 extern const float fx_randomTable[507];
-extern int32_t fx_serverVisClient;
+extern int fx_serverVisClient;

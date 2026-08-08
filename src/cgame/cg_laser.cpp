@@ -64,7 +64,7 @@ void __cdecl CG_Laser_Add_Core(
     FxPostLight postLight; // [esp+F0h] [ebp-34h] BYREF
     float laserEnd[3]; // [esp+118h] [ebp-Ch] BYREF
 
-    Com_Memset((uint32_t *)&traceResults, 0, 44);
+    Com_Memset((uint *)&traceResults, 0, 44);
 
     iassert((laserOwner == LASER_OWNER_PLAYER || laserOwner == LASER_OWNER_NON_PLAYER));
 

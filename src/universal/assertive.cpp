@@ -3,7 +3,7 @@
 #include <win32/win_local.h>
 #include <cstdarg>
 
-enum AssertOccurance : __int32
+enum AssertOccurance : int
 {
     FIRST_TIME = 0x0,
     RECURSIVE = 0x1,
@@ -112,7 +112,7 @@ HINSTANCE__* __cdecl GetModuleBase(char* name)
 }
 
 char lineBuffer[0x100];
-uint32_t lineBufferStartPos, lineBufferEndPos;
+uint lineBufferStartPos, lineBufferEndPos;
 
 char __cdecl ReadLine(FILE* fp)
 {
@@ -173,20 +173,20 @@ void __cdecl ParseError(const char* msg)
 
 struct AddressInfo
 {
-    uint32_t address;
+    uint address;
     char moduleName[64];
     char bestFunction[64];
     char bestFunctionFilename[64];
-    uint32_t bestFunctionAddress;
+    uint bestFunctionAddress;
     char bestLineFilename[64];
-    uint32_t bestLineAddress;
-    uint32_t bestLineNumber;
+    uint bestLineAddress;
+    uint bestLineNumber;
 }; // idb
 
-uint32_t g_assertAddressCount;
+uint g_assertAddressCount;
 AddressInfo g_assertAddress[0x20];
 
-char __cdecl ParseMapFile(FILE* fp, uint32_t baseAddress, char* mapName)
+char __cdecl ParseMapFile(FILE* fp, uint baseAddress, char* mapName)
 {
     int v4; // eax
     const char* v5; // eax
@@ -200,22 +200,22 @@ char __cdecl ParseMapFile(FILE* fp, uint32_t baseAddress, char* mapName)
     const char* v13; // eax
     char* pszNameStop; // [esp+14h] [ebp-878h]
     char* pszNameStart; // [esp+18h] [ebp-874h]
-    uint32_t loadAddress; // [esp+20h] [ebp-86Ch] BYREF
+    uint loadAddress; // [esp+20h] [ebp-86Ch] BYREF
     const char* filenameSubStr; // [esp+24h] [ebp-868h]
     int j; // [esp+28h] [ebp-864h]
-    uint32_t address; // [esp+2Ch] [ebp-860h] BYREF
+    uint address; // [esp+2Ch] [ebp-860h] BYREF
     const char* filename; // [esp+30h] [ebp-85Ch]
     AddressInfo* addressInfo; // [esp+34h] [ebp-858h]
-    uint32_t relAddress; // [esp+38h] [ebp-854h]
-    uint32_t lineOffset[4]; // [esp+3Ch] [ebp-850h] BYREF
+    uint relAddress; // [esp+38h] [ebp-854h]
+    uint lineOffset[4]; // [esp+3Ch] [ebp-850h] BYREF
     char filenameBuffer[1024]; // [esp+4Ch] [ebp-840h] BYREF
-    uint32_t offset; // [esp+44Ch] [ebp-440h] BYREF
-    uint32_t baseEndAddress; // [esp+450h] [ebp-43Ch]
-    uint32_t group; // [esp+454h] [ebp-438h] BYREF
+    uint offset; // [esp+44Ch] [ebp-440h] BYREF
+    uint baseEndAddress; // [esp+450h] [ebp-43Ch]
+    uint group; // [esp+454h] [ebp-438h] BYREF
     const char* funcName; // [esp+458h] [ebp-434h]
-    uint32_t lineGroup[4]; // [esp+45Ch] [ebp-430h] BYREF
+    uint lineGroup[4]; // [esp+45Ch] [ebp-430h] BYREF
     int i; // [esp+46Ch] [ebp-420h]
-    uint32_t lineNumber[4]; // [esp+470h] [ebp-41Ch] BYREF
+    uint lineNumber[4]; // [esp+470h] [ebp-41Ch] BYREF
     char* atChar; // [esp+480h] [ebp-40Ch]
     char function[1024]; // [esp+484h] [ebp-408h] BYREF
     int readCount; // [esp+888h] [ebp-4h]
@@ -439,7 +439,7 @@ void __cdecl LoadMapFilesForDir(const char* dir)
     char* cFileName; // [esp+1Ch] [ebp-115Ch]
     _WIN32_FIND_DATAA FindFileData; // [esp+20h] [ebp-1158h] BYREF
     char file[MAX_PATH]; // [esp+160h] [ebp-1018h] BYREF
-    uint32_t baseAddress; // [esp+964h] [ebp-814h]
+    uint baseAddress; // [esp+964h] [ebp-814h]
     FILE* fp; // [esp+968h] [ebp-810h]
     HANDLE hFindFile; // [esp+96Ch] [ebp-80Ch]
     char string[2052]; // [esp+970h] [ebp-808h] BYREF
@@ -459,7 +459,7 @@ void __cdecl LoadMapFilesForDir(const char* dir)
     {
         do
         {
-            baseAddress = (uint32_t)GetModuleBase(FindFileData.cFileName);
+            baseAddress = (uint)GetModuleBase(FindFileData.cFileName);
             if (baseAddress)
             {
                 v3 = Sys_DefaultInstallPath();
@@ -551,7 +551,7 @@ int __cdecl DoStackTrace(char* msg, int nIgnore)
     for (i = 0; i < nIgnore + 32; ++i)
     {
         v2 = reg_ebp;
-        if ((uint32_t)reg_ebp <= 0x400)
+        if ((uint)reg_ebp <= 0x400)
             break;
         reg_ebp = (int*)*reg_ebp;
         if (i >= nIgnore)
@@ -591,7 +591,7 @@ void __cdecl BuildAssertMessage(const char* expr, const char* filename, int line
 }
 
 HWND g_hwndGame[4];
-uint32_t g_hiddenCount;
+uint g_hiddenCount;
 
 int __stdcall HideWindowCallback(HWND hwnd, LPARAM lParam)
 {

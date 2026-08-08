@@ -24,7 +24,7 @@ const GfxPixelCostColorCode s_pixelCostColorCodeTable[6] =
 void __cdecl R_PixelCost_PrintColorCodeKey()
 {
     float percentage; // [esp+10h] [ebp-8h]
-    uint32_t codeIndex; // [esp+14h] [ebp-4h]
+    uint codeIndex; // [esp+14h] [ebp-4h]
 
     Com_Printf(8, "\n---- PIXEL COST KEY ----\n");
     for (codeIndex = 0; codeIndex < 6; ++codeIndex)

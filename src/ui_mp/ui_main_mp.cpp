@@ -26,7 +26,7 @@
 #include <universal/timing.h>
 #include <universal/profile.h>
 
-enum sscType_t : __int32
+enum sscType_t : int
 {                                       // ...
     SSC_STRING = 0x0,
     SSC_YESNO = 0x1,
@@ -246,7 +246,7 @@ const char *MonthAbbrev[12] =
 
 char menuBuf2[32768];
 
-void __cdecl LAN_GetServerAddressString(int source, uint32_t n, char *buf, int buflen);
+void __cdecl LAN_GetServerAddressString(int source, uint n, char *buf, int buflen);
 Material *__cdecl UI_GetLevelShot(int index);
 void __cdecl UI_SortPlayerProfiles(int selectIndex);
 int __cdecl UI_GetPlayerProfileListIndexFromName(const char *name);
@@ -1322,7 +1322,7 @@ int __cdecl UI_OwnerDrawWidth(int ownerDraw, Font_s *font, float scale)
         s = SEH_LocalizeTextMessage(v3, "net source", LOCMSG_SAFE);
         break;
     case 222:
-        if ((uint32_t)ui_serverFilterType >= 2)
+        if ((uint)ui_serverFilterType >= 2)
             ui_serverFilterType = 0;
         v4 = va("EXE_SERVERFILTER\x14%s", serverFilters[ui_serverFilterType].description);
         s = SEH_LocalizeTextMessage(v4, "server filter", LOCMSG_SAFE);
@@ -1441,7 +1441,7 @@ void __cdecl UI_MapLoadInfo(const char *filename)
                 if (!*token)
                     break;
                 tokenLen = strlen(token) + 1;
-                if ((uint32_t)tokenLen >= 0x100)
+                if ((uint)tokenLen >= 0x100)
                 {
                     Com_EndParseSession();
                     Com_Error(ERR_DROP, "key '%s' is %i > %i characters long", key, tokenLen - 1, 255);
@@ -1643,7 +1643,7 @@ void __cdecl UI_DrawNetFilter(
     const char *v6; // eax
     char *pszTeanslation; // [esp+1Ch] [ebp-4h]
 
-    if ((uint32_t)ui_serverFilterType >= 2)
+    if ((uint)ui_serverFilterType >= 2)
         ui_serverFilterType = 0;
     v6 = va("EXE_SERVERFILTER\x14%s", serverFilters[ui_serverFilterType].description);
     pszTeanslation = SEH_LocalizeTextMessage(v6, "server filter", LOCMSG_SAFE);
@@ -2534,7 +2534,7 @@ void __cdecl LAN_RemoveServer(int source, char *addr)
 
 int __cdecl UI_GetPlayerProfileListIndexFromName(const char *name)
 {
-    uint32_t nameIndex; // [esp+4h] [ebp-8h]
+    uint nameIndex; // [esp+4h] [ebp-8h]
     int profileIndex; // [esp+8h] [ebp-4h]
 
     uiInfo_s *uiInfo = &uiInfoArray;
@@ -2587,8 +2587,8 @@ static int UI_PlayerProfilesQsortCompare(const void *a, const void *b)
 {
     int result; // [esp+0h] [ebp-10h]
 
-    uint32_t *arg1 = (uint32_t *)a;
-    uint32_t *arg2 = (uint32_t *)b;
+    uint *arg1 = (uint *)a;
+    uint *arg2 = (uint *)b;
 
     iassert(arg1);
     iassert(arg2);
@@ -2631,8 +2631,8 @@ void __cdecl UI_SortPlayerProfiles(int selectIndex)
 
 void UI_DeletePlayerProfile()
 {
-    uint32_t curSelected; // [esp+8h] [ebp-8h]
-    uint32_t nameIndex; // [esp+Ch] [ebp-4h]
+    uint curSelected; // [esp+8h] [ebp-8h]
+    uint nameIndex; // [esp+Ch] [ebp-4h]
 
     uiInfo_s *uiInfo = &uiInfoArray;
 
@@ -2668,7 +2668,7 @@ void UI_DeletePlayerProfile()
     }
 }
 
-void __cdecl LAN_GetServerAddressString(int source, uint32_t n, char *buf, int buflen)
+void __cdecl LAN_GetServerAddressString(int source, uint n, char *buf, int buflen)
 {
     const char *v4; // eax
     const char *v5; // eax
@@ -2743,7 +2743,7 @@ void __cdecl UI_RunMenuScript(int localClientNum, const char **args, const char 
     char *VariantString; // eax
     int v24; // eax
     int Int; // eax
-    uint32_t ClientNumForPlayerListNum; // eax
+    uint ClientNumForPlayerListNum; // eax
     char v27[128]; // [esp+3Ch] [ebp-29F0h] BYREF
     char v28[256]; // [esp+BCh] [ebp-2970h] BYREF
     char v29[128]; // [esp+1BCh] [ebp-2870h] BYREF
@@ -3395,18 +3395,18 @@ void __cdecl UI_RunMenuScript(int localClientNum, const char **args, const char 
 
 void __cdecl UI_ServersSort(int column, int force)
 {
-    if (force || *(uint32_t *)&sharedUiInfo.serverStatus.string[1112] != column)
+    if (force || *(uint *)&sharedUiInfo.serverStatus.string[1112] != column)
     {
-        *(uint32_t *)&sharedUiInfo.serverStatus.string[1112] = column;
+        *(uint *)&sharedUiInfo.serverStatus.string[1112] = column;
         qsort(
             &sharedUiInfo.serverStatus.string[1132],
-            *(uint32_t *)&sharedUiInfo.gap8EB4[72900],
+            *(uint *)&sharedUiInfo.gap8EB4[72900],
             4u,
             (int(__cdecl *)(const void *, const void *))UI_ServersQsortCompare);
     }
 }
 
-int __cdecl UI_ServersQsortCompare(uint32_t *arg1, uint32_t *arg2)
+int __cdecl UI_ServersQsortCompare(uint *arg1, uint *arg2)
 {
     return LAN_CompareServers(
         ui_netSource->current.integer,
@@ -3438,12 +3438,12 @@ void __cdecl UI_UpdateDisplayServers(uiInfo_s *uiInfo)
     int serverCount; // [esp+0h] [ebp-4h]
 
     serverCount = LAN_GetServerCount(ui_netSource->current.integer);
-    if (*(uint32_t *)&sharedUiInfo.gap8EB4[72904] != serverCount)
+    if (*(uint *)&sharedUiInfo.gap8EB4[72904] != serverCount)
     {
-        *(uint32_t *)&sharedUiInfo.gap8EB4[72904] = serverCount;
-        if (*(uint32_t *)&sharedUiInfo.gap8EB4[72900])
+        *(uint *)&sharedUiInfo.gap8EB4[72904] = serverCount;
+        if (*(uint *)&sharedUiInfo.gap8EB4[72900])
         {
-            *(uint32_t *)&sharedUiInfo.serverStatus.string[1128] = -1;
+            *(uint *)&sharedUiInfo.serverStatus.string[1128] = -1;
             UI_BuildServerDisplayList(uiInfo, 1);
         }
     }
@@ -3628,10 +3628,10 @@ void __cdecl UI_BuildServerDisplayList(uiInfo_s *uiInfo, int force)
             } while (v18);
             len = strlen((char *)&sharedUiInfo.gap8EB4[72944]);
         }
-        if (len != *(uint32_t *)&sharedUiInfo.gap8EB4[72920])
+        if (len != *(uint *)&sharedUiInfo.gap8EB4[72920])
         {
-            *(uint32_t *)&sharedUiInfo.gap8EB4[72920] = len;
-            *(uint32_t *)&sharedUiInfo.gap8EB4[72924] = -1;
+            *(uint *)&sharedUiInfo.gap8EB4[72920] = len;
+            *(uint *)&sharedUiInfo.gap8EB4[72924] = -1;
         }
         if (force)
         {
@@ -3657,7 +3657,7 @@ void __cdecl UI_BuildServerDisplayList(uiInfo_s *uiInfo, int force)
                         LAN_GetServerInfo(ui_netSource->current.integer, i, info, 1024);
                         v4 = Info_ValueForKey(info, "clients");
                         clients = atoi(v4);
-                        *(uint32_t *)&sharedUiInfo.gap8EB4[72908] += clients;
+                        *(uint *)&sharedUiInfo.gap8EB4[72908] += clients;
                         v5 = Info_ValueForKey(info, "addr");
                         if (!I_strnicmp(v5, "000.000.000.000", 15) || !ui_browserShowEmpty->current.enabled && !clients)
                             goto LABEL_55;
@@ -3725,25 +3725,25 @@ void __cdecl UI_BuildServerDisplayList(uiInfo_s *uiInfo, int force)
                     }
                 }
             }
-            *(uint32_t *)&sharedUiInfo.serverStatus.string[1104] = uiInfo->uiDC.realTime;
+            *(uint *)&sharedUiInfo.serverStatus.string[1104] = uiInfo->uiDC.realTime;
         }
         else
         {
             UI_ClearDisplayedServers();
-            *(uint32_t *)&sharedUiInfo.gap8EB4[72912] = uiInfo->uiDC.realTime + 500;
+            *(uint *)&sharedUiInfo.gap8EB4[72912] = uiInfo->uiDC.realTime + 500;
         }
     }
 }
 
-void __cdecl UI_BinaryServerInsertion(uint32_t num)
+void __cdecl UI_BinaryServerInsertion(uint num)
 {
     int offset; // [esp+0h] [ebp-10h]
     int len; // [esp+4h] [ebp-Ch]
     int res; // [esp+8h] [ebp-8h]
     int mid; // [esp+Ch] [ebp-4h]
 
-    len = *(uint32_t *)&sharedUiInfo.gap8EB4[72900];
-    mid = *(uint32_t *)&sharedUiInfo.gap8EB4[72900];
+    len = *(uint *)&sharedUiInfo.gap8EB4[72900];
+    mid = *(uint *)&sharedUiInfo.gap8EB4[72900];
     offset = 0;
     res = 0;
     while (mid > 0)
@@ -3754,12 +3754,12 @@ void __cdecl UI_BinaryServerInsertion(uint32_t num)
             *(int *)&sharedUiInfo.serverStatus.string[1112],
             *(int *)&sharedUiInfo.serverStatus.string[1116],
             num,
-            *(uint32_t *)&sharedUiInfo.gap8EB4[4 * (len >> 1) - 7100 + 4 * offset]);
+            *(uint *)&sharedUiInfo.gap8EB4[4 * (len >> 1) - 7100 + 4 * offset]);
         if (res != -LAN_CompareServers(
             ui_netSource->current.integer,
             *(int *)&sharedUiInfo.serverStatus.string[1112],
             *(int *)&sharedUiInfo.serverStatus.string[1116],
-            *(uint32_t *)&sharedUiInfo.gap8EB4[4 * (len >> 1) - 7100 + 4 * offset],
+            *(uint *)&sharedUiInfo.gap8EB4[4 * (len >> 1) - 7100 + 4 * offset],
             num))
             MyAssertHandler(
                 ".\\ui_mp\\ui_main_mp.cpp",
@@ -3782,7 +3782,7 @@ void __cdecl UI_BinaryServerInsertion(uint32_t num)
     UI_InsertServerIntoDisplayList(num, offset);
 }
 
-void __cdecl UI_InsertServerIntoDisplayList(uint32_t num, int position)
+void __cdecl UI_InsertServerIntoDisplayList(uint num, int position)
 {
     int i; // [esp+0h] [ebp-8h]
     int res; // [esp+4h] [ebp-4h]
@@ -3797,12 +3797,12 @@ void __cdecl UI_InsertServerIntoDisplayList(uint32_t num, int position)
             *(int *)&sharedUiInfo.serverStatus.string[1112],
             *(int *)&sharedUiInfo.serverStatus.string[1116],
             num,
-            *(uint32_t *)&sharedUiInfo.gap8EB4[4 * position - 7100]);
+            *(uint *)&sharedUiInfo.gap8EB4[4 * position - 7100]);
         if (res != -LAN_CompareServers(
             ui_netSource->current.integer,
             *(int *)&sharedUiInfo.serverStatus.string[1112],
             *(int *)&sharedUiInfo.serverStatus.string[1116],
-            *(uint32_t *)&sharedUiInfo.gap8EB4[4 * position - 7100],
+            *(uint *)&sharedUiInfo.gap8EB4[4 * position - 7100],
             num))
             MyAssertHandler(
                 ".\\ui_mp\\ui_main_mp.cpp",
@@ -3821,12 +3821,12 @@ void __cdecl UI_InsertServerIntoDisplayList(uint32_t num, int position)
             *(int *)&sharedUiInfo.serverStatus.string[1112],
             *(int *)&sharedUiInfo.serverStatus.string[1116],
             num,
-            *(uint32_t *)&sharedUiInfo.gap8EB4[4 * position - 7104]);
+            *(uint *)&sharedUiInfo.gap8EB4[4 * position - 7104]);
         if (resa != -LAN_CompareServers(
             ui_netSource->current.integer,
             *(int *)&sharedUiInfo.serverStatus.string[1112],
             *(int *)&sharedUiInfo.serverStatus.string[1116],
-            *(uint32_t *)&sharedUiInfo.gap8EB4[4 * position - 7104],
+            *(uint *)&sharedUiInfo.gap8EB4[4 * position - 7104],
             num))
             MyAssertHandler(
                 ".\\ui_mp\\ui_main_mp.cpp",
@@ -3840,11 +3840,11 @@ void __cdecl UI_InsertServerIntoDisplayList(uint32_t num, int position)
     }
     if (position >= 0 && position <= *(int *)&sharedUiInfo.gap8EB4[72900])
     {
-        if (position <= *(int *)&sharedUiInfo.serverStatus.string[1128] && *(uint32_t *)&sharedUiInfo.gap8EB4[72900])
-            ++*(uint32_t *)&sharedUiInfo.serverStatus.string[1128];
-        for (i = ++ * (uint32_t *)&sharedUiInfo.gap8EB4[72900]; i > position; --i)
-            *(uint32_t *)&sharedUiInfo.gap8EB4[4 * i - 7100] = *(uint32_t *)&sharedUiInfo.gap8EB4[4 * i - 7104];
-        *(uint32_t *)&sharedUiInfo.gap8EB4[4 * position - 7100] = num;
+        if (position <= *(int *)&sharedUiInfo.serverStatus.string[1128] && *(uint *)&sharedUiInfo.gap8EB4[72900])
+            ++*(uint *)&sharedUiInfo.serverStatus.string[1128];
+        for (i = ++ * (uint *)&sharedUiInfo.gap8EB4[72900]; i > position; --i)
+            *(uint *)&sharedUiInfo.gap8EB4[4 * i - 7100] = *(uint *)&sharedUiInfo.gap8EB4[4 * i - 7104];
+        *(uint *)&sharedUiInfo.gap8EB4[4 * position - 7100] = num;
     }
 }
 
@@ -3852,10 +3852,10 @@ int UI_ClearDisplayedServers()
 {
     int result; // eax
 
-    *(uint32_t *)&sharedUiInfo.gap8EB4[72900] = 0;
-    *(uint32_t *)&sharedUiInfo.gap8EB4[72908] = 0;
+    *(uint *)&sharedUiInfo.gap8EB4[72900] = 0;
+    *(uint *)&sharedUiInfo.gap8EB4[72908] = 0;
     result = LAN_GetServerCount(ui_netSource->current.integer);
-    *(uint32_t *)&sharedUiInfo.gap8EB4[72904] = result;
+    *(uint *)&sharedUiInfo.gap8EB4[72904] = result;
     return result;
 }
 
@@ -3876,7 +3876,7 @@ void __cdecl UI_BuildServerStatus(uiInfo_s *uiInfo, int force)
         UI_UpdateDisplayServers(uiInfo);
         if (*(int *)&sharedUiInfo.serverStatus.string[1128] >= 0
             && *(int *)&sharedUiInfo.serverStatus.string[1128] <= *(int *)&sharedUiInfo.gap8EB4[72900]
-            && *(uint32_t *)&sharedUiInfo.gap8EB4[72900])
+            && *(uint *)&sharedUiInfo.gap8EB4[72900])
         {
             if (UI_GetServerStatusInfo(sharedUiInfo.serverStatusAddress, &sharedUiInfo.serverStatusInfo))
             {
@@ -4042,7 +4042,7 @@ const char *__cdecl UI_FeederItemText(
     itemDef_s *item,
     const float feederID,
     int index,
-    uint32_t column,
+    uint column,
     Material **handle)
 {
     const char *result; // eax
@@ -4057,9 +4057,9 @@ const char *__cdecl UI_FeederItemText(
     const char *v15; // eax
     const char *v16; // eax
     const char *v17; // eax
-    uint32_t ClientNumForPlayerListNum; // eax
+    uint ClientNumForPlayerListNum; // eax
     const char *v19; // [esp-4h] [ebp-18h]
-    uint32_t hardware; // [esp+4h] [ebp-10h]
+    uint hardware; // [esp+4h] [ebp-10h]
     int ping; // [esp+8h] [ebp-Ch]
     int actual; // [esp+Ch] [ebp-8h] BYREF
     uiInfo_s *uiInfo; // [esp+10h] [ebp-4h]
@@ -4140,7 +4140,7 @@ const char *__cdecl UI_FeederItemText(
     }
     if (lastColumn != column || lastTime > uiInfo->uiDC.realTime + 5000)
     {
-        LAN_GetServerInfo(ui_netSource->current.integer, *(uint32_t *)&sharedUiInfo.gap8EB4[4 * index - 7100], info, 1024);
+        LAN_GetServerInfo(ui_netSource->current.integer, *(uint *)&sharedUiInfo.gap8EB4[4 * index - 7100], info, 1024);
         lastColumn = column;
         lastTime = uiInfo->uiDC.realTime;
     }
@@ -4332,7 +4332,7 @@ void __cdecl UI_OverrideCursorPos(int localClientNum, itemDef_s *item)
                 && item->cursorPos[localClientNum] >= listPtr->startPos[localClientNum]
                 && item->cursorPos[localClientNum] <= listPtr->endPos[localClientNum])
             {
-                delta = *(uint32_t *)&sharedUiInfo.serverStatus.string[1128] - item->cursorPos[localClientNum];
+                delta = *(uint *)&sharedUiInfo.serverStatus.string[1128] - item->cursorPos[localClientNum];
                 max = Item_ListBox_MaxScroll(localClientNum, item);
                 if (delta + listPtr->startPos[localClientNum] < max)
                     v3 = delta + listPtr->startPos[localClientNum];
@@ -4344,7 +4344,7 @@ void __cdecl UI_OverrideCursorPos(int localClientNum, itemDef_s *item)
                     v2 = 0;
                 listPtr->startPos[localClientNum] = v2;
                 listPtr->endPos[localClientNum] += delta;
-                item->cursorPos[localClientNum] = *(uint32_t *)&sharedUiInfo.serverStatus.string[1128];
+                item->cursorPos[localClientNum] = *(uint *)&sharedUiInfo.serverStatus.string[1128];
             }
         }
         else
@@ -4402,8 +4402,8 @@ void __cdecl UI_FeederSelection(int localClientNum, float feederID, int index)
     else if (feederID == 2.0)
     {
         if (*(int *)&sharedUiInfo.gap8EB4[72900] > 0)
-            *(uint32_t *)&sharedUiInfo.serverStatus.string[1128] = index;
-        LAN_GetServerInfo(ui_netSource->current.integer, *(uint32_t *)&sharedUiInfo.gap8EB4[4 * index - 7100], info_0, 1024);
+            *(uint *)&sharedUiInfo.serverStatus.string[1128] = index;
+        LAN_GetServerInfo(ui_netSource->current.integer, *(uint *)&sharedUiInfo.gap8EB4[4 * index - 7100], info_0, 1024);
     }
     else if (feederID == 7.0)
     {
@@ -4431,7 +4431,7 @@ void __cdecl UI_FeederSelection(int localClientNum, float feederID, int index)
 void UI_GetGameTypesList_LoadObj()
 {
     char *v0; // eax
-    uint32_t v1; // [esp+0h] [ebp-1030h]
+    uint v1; // [esp+0h] [ebp-1030h]
     char *p; // [esp+10h] [ebp-1020h]
     char *data_p; // [esp+18h] [ebp-1018h] BYREF
     char *v4; // [esp+1Ch] [ebp-1014h]
@@ -4567,7 +4567,7 @@ void __cdecl UI_ListMenus_f()
 void __cdecl CL_SelectStringTableEntryInDvar_f()
 {
     const char *v0; // eax
-    uint32_t v1; // eax
+    uint v1; // eax
     const char *v2; // eax
     int v3; // eax
     const char *v4; // eax
@@ -5133,7 +5133,7 @@ int __cdecl UI_IsFullscreen(int localClientNum)
     return Menus_AnyFullScreenVisible(&uiInfoArray.uiDC);
 }
 
-void __cdecl UI_ReadableSize(char *buf, uint32_t bufsize, int value)
+void __cdecl UI_ReadableSize(char *buf, uint bufsize, int value)
 {
     char *v3; // eax
     char *v4; // eax
@@ -5180,7 +5180,7 @@ void __cdecl UI_ReadableSize(char *buf, uint32_t bufsize, int value)
     }
 }
 
-void __cdecl UI_PrintTime(char *buf, uint32_t bufsize, int time)
+void __cdecl UI_PrintTime(char *buf, uint bufsize, int time)
 {
     char *v3; // eax
     char *v4; // eax
@@ -5653,20 +5653,20 @@ void UI_StopServerRefresh()
 {
     int count; // [esp+0h] [ebp-4h]
 
-    if (*(uint32_t *)&sharedUiInfo.serverStatus.string[1124])
+    if (*(uint *)&sharedUiInfo.serverStatus.string[1124])
     {
-        *(uint32_t *)&sharedUiInfo.serverStatus.string[1124] = 0;
+        *(uint *)&sharedUiInfo.serverStatus.string[1124] = 0;
         Com_Printf(
             13,
             "%d servers listed in browser with %d players.\n",
-            *(uint32_t *)&sharedUiInfo.gap8EB4[72900],
-            *(uint32_t *)&sharedUiInfo.gap8EB4[72908]);
+            *(uint *)&sharedUiInfo.gap8EB4[72900],
+            *(uint *)&sharedUiInfo.gap8EB4[72908]);
         count = LAN_GetServerCount(ui_netSource->current.integer);
-        if (count - *(uint32_t *)&sharedUiInfo.gap8EB4[72900] > 0)
+        if (count - *(uint *)&sharedUiInfo.gap8EB4[72900] > 0)
             Com_Printf(
                 13,
                 "%d servers not listed (filtered out by game browser settings)\n",
-                count - *(uint32_t *)&sharedUiInfo.gap8EB4[72900]);
+                count - *(uint *)&sharedUiInfo.gap8EB4[72900]);
     }
 }
 
@@ -5675,7 +5675,7 @@ void __cdecl UI_DoServerRefresh(uiInfo_s *uiInfo)
     bool wait; // [esp+0h] [ebp-4h]
 
     wait = 0;
-    if (*(uint32_t *)&sharedUiInfo.serverStatus.string[1124])
+    if (*(uint *)&sharedUiInfo.serverStatus.string[1124])
     {
         if (ui_netSource->current.integer != 2)
         {
@@ -5689,7 +5689,7 @@ void __cdecl UI_DoServerRefresh(uiInfo_s *uiInfo)
             UI_UpdateDisplayServers(uiInfo);
             if (LAN_UpdateDirtyPings((netsrc_t)uiInfo->uiDC.localClientNum, ui_netSource->current.unsignedInt))
             {
-                *(uint32_t *)&sharedUiInfo.serverStatus.string[1104] = uiInfo->uiDC.realTime + 1000;
+                *(uint *)&sharedUiInfo.serverStatus.string[1104] = uiInfo->uiDC.realTime + 1000;
             }
             else if (!wait)
             {
@@ -5772,8 +5772,8 @@ void __cdecl UI_StartServerRefresh(int localClientNum, int full)
 void __cdecl UI_UpdatePendingPings(uiInfo_s *uiInfo)
 {
     LAN_ResetPings(ui_netSource->current.integer);
-    *(uint32_t *)&sharedUiInfo.serverStatus.string[1124] = 1;
-    *(uint32_t *)&sharedUiInfo.serverStatus.string[1104] = uiInfo->uiDC.realTime + 1000;
+    *(uint *)&sharedUiInfo.serverStatus.string[1124] = 1;
+    *(uint *)&sharedUiInfo.serverStatus.string[1104] = uiInfo->uiDC.realTime + 1000;
 }
 
 char errorString[1024];

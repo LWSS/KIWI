@@ -14,11 +14,11 @@
 static EntHandleList g_entitiesHandleList[MAX_GENTITIES];
 static EntHandleInfo g_entHandleInfoArray[0x1000];
 
-static int32_t g_usedEntHandle;
-static int32_t g_entHandleInfoHead;
-static int32_t g_maxUsedEntHandle;
+static int g_usedEntHandle;
+static int g_entHandleInfoHead;
+static int g_maxUsedEntHandle;
 
-//Line 53042:  0006 : 0050c928       uint32_t g_maxUsedEntHandle   82cbc928     enthandle.obj
+//Line 53042:  0006 : 0050c928       uint g_maxUsedEntHandle   82cbc928     enthandle.obj
 
 void __cdecl EntHandleDissociate(gentity_s *ent)
 {
@@ -29,8 +29,8 @@ void __cdecl EntHandleDissociateInternal(EntHandleList *entHandleList)
 {
     const char *v1; // eax
     EntHandleInfo *info; // [esp+0h] [ebp-Ch]
-    uint32_t infoIndexHead; // [esp+4h] [ebp-8h]
-    uint32_t infoIndex; // [esp+8h] [ebp-4h]
+    uint infoIndexHead; // [esp+4h] [ebp-8h]
+    uint infoIndex; // [esp+8h] [ebp-4h]
 
     infoIndexHead = entHandleList->infoIndex;
     if (entHandleList->infoIndex)
@@ -57,7 +57,7 @@ void __cdecl EntHandleDissociateInternal(EntHandleList *entHandleList)
     }
 }
 
-void __cdecl RemoveEntHandleInfo(EntHandleList *entHandleList, uint32_t oldInfoIndex)
+void __cdecl RemoveEntHandleInfo(EntHandleList *entHandleList, uint oldInfoIndex)
 {
     const char *v2; // eax
     EntHandleInfo *info; // [esp+0h] [ebp-10h]
@@ -87,12 +87,12 @@ void __cdecl RemoveEntHandleInfo(EntHandleList *entHandleList, uint32_t oldInfoI
     }
 }
 
-uint32_t __cdecl AddEntHandleInfo(EntHandleList *entHandleList, void *handle)
+uint __cdecl AddEntHandleInfo(EntHandleList *entHandleList, void *handle)
 {
-    uint32_t v3; // [esp+0h] [ebp-14h]
+    uint v3; // [esp+0h] [ebp-14h]
     EntHandleInfo *info; // [esp+4h] [ebp-10h]
-    uint32_t infoIndexHead; // [esp+8h] [ebp-Ch]
-    uint32_t infoIndex; // [esp+Ch] [ebp-8h]
+    uint infoIndexHead; // [esp+8h] [ebp-Ch]
+    uint infoIndex; // [esp+Ch] [ebp-8h]
     EntHandleInfo *infoHead; // [esp+10h] [ebp-4h]
 
     infoIndex = g_entHandleInfoHead;
@@ -151,7 +151,7 @@ void EntHandle::setEnt(gentity_s *ent)
     this->number = ent - g_entities + 1;
 }
 
-int32_t EntHandle::entnum()
+int EntHandle::entnum()
 {
     int number = this->number;
 
@@ -183,8 +183,8 @@ gentity_s *EntHandle::ent() const
 void EntHandle::Shutdown()
 {
     const char *v0; // eax
-    uint32_t usedEntHandle; // [esp+0h] [ebp-Ch]
-    uint32_t i; // [esp+8h] [ebp-4h]
+    uint usedEntHandle; // [esp+0h] [ebp-Ch]
+    uint i; // [esp+8h] [ebp-4h]
 
     if (g_usedEntHandle)
     {
@@ -217,7 +217,7 @@ void EntHandle::Shutdown()
 
 void __cdecl EntHandle::Init()
 {
-    uint32_t i; // [esp+4h] [ebp-4h]
+    uint i; // [esp+4h] [ebp-4h]
 
     for (i = 1; i < 0x1000; ++i)
     {

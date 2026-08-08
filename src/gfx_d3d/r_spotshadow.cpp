@@ -66,13 +66,13 @@ void __cdecl R_AddSpotShadowEntCmd(const GfxSpotShadowEntCmd *data)
 char __cdecl R_AddSpotShadowsForLight(
     GfxViewInfo *viewInfo,
     GfxLight *light,
-    uint32_t shadowableLightIndex,
+    uint shadowableLightIndex,
     float spotShadowFade)
 {
     float nearPlaneBias; // [esp+4h] [ebp-20h]
     BOOL useQualitySpotShadow; // [esp+8h] [ebp-1Ch]
-    uint32_t tileCount; // [esp+18h] [ebp-Ch]
-    uint32_t spotShadowIndex; // [esp+20h] [ebp-4h]
+    uint tileCount; // [esp+18h] [ebp-Ch]
+    uint spotShadowIndex; // [esp+20h] [ebp-4h]
 
     iassert(light);
     iassert(light->type == GFX_LIGHT_TYPE_SPOT || light->type == GFX_LIGHT_TYPE_OMNI);
@@ -173,8 +173,8 @@ void __cdecl R_SetViewParmsForLight(const GfxLight *light, GfxViewParms *viewPar
 
 void __cdecl R_GetSpotShadowLookupMatrix(
     const GfxViewParms *shadowViewParms,
-    uint32_t spotShadowIndex,
-    uint32_t tileCount,
+    uint spotShadowIndex,
+    uint tileCount,
     GfxMatrix *lookupMatrix)
 {
     float xScale; // [esp+1Ch] [ebp-1Ch]
@@ -218,14 +218,14 @@ void __cdecl R_GetSpotShadowLookupMatrix(
 }
 
 void __cdecl R_AddSpotShadowModelEntities(
-    uint32_t localClientNum,
-    uint32_t primaryLightIndex,
+    uint localClientNum,
+    uint primaryLightIndex,
     const GfxLight *light)
 {
     volatile int sceneEntIndex; // [esp+8h] [ebp-14h]
     volatile int sceneEntIndexa; // [esp+8h] [ebp-14h]
-    uint32_t entnum; // [esp+10h] [ebp-Ch]
-    uint32_t entnuma; // [esp+10h] [ebp-Ch]
+    uint entnum; // [esp+10h] [ebp-Ch]
+    uint entnuma; // [esp+10h] [ebp-Ch]
     GfxSpotShadowEntCmd cmd; // [esp+14h] [ebp-8h] BYREF
 
     cmd.light = light;
@@ -260,7 +260,7 @@ void __cdecl R_AddSpotShadowModelEntities(
 
 void __cdecl R_GenerateAllSortedSpotShadowDrawSurfs(GfxViewInfo *viewInfo)
 {
-    uint32_t spotShadowIndex; // [esp+4h] [ebp-4h]
+    uint spotShadowIndex; // [esp+4h] [ebp-4h]
 
     for (spotShadowIndex = 0; spotShadowIndex < viewInfo->spotShadowCount; ++spotShadowIndex)
     {
@@ -275,8 +275,8 @@ void __cdecl R_GenerateAllSortedSpotShadowDrawSurfs(GfxViewInfo *viewInfo)
 
 void __cdecl R_GenerateSortedPrimarySpotShadowDrawSurfs(
     const GfxViewInfo *viewInfo,
-    uint32_t spotShadowIndex,
-    uint32_t shadowableLightIndex)
+    uint spotShadowIndex,
+    uint shadowableLightIndex)
 {
     bcassert(shadowableLightIndex, Com_GetPrimaryLightCount());
 
@@ -299,7 +299,7 @@ void __cdecl R_EmitSpotShadowMapSurfs(GfxViewInfo *viewInfo)
     const float *origin; // [esp+20h] [ebp-28h]
     int firstDrawSurf; // [esp+38h] [ebp-10h]
     GfxDrawSurfListInfo *info; // [esp+3Ch] [ebp-Ch]
-    uint32_t spotShadowIndex; // [esp+44h] [ebp-4h]
+    uint spotShadowIndex; // [esp+44h] [ebp-4h]
 
     KISAK_NULLSUB();
     for (spotShadowIndex = 0; spotShadowIndex < viewInfo->spotShadowCount; ++spotShadowIndex)
@@ -344,14 +344,14 @@ void __cdecl R_EmitSpotShadowMapSurfs(GfxViewInfo *viewInfo)
     }
 }
 
-uint32_t R_InitSpotShadowMeshes()
+uint R_InitSpotShadowMeshes()
 {
-    uint32_t result; // eax
-    uint32_t sunShadowIndex; // [esp+24h] [ebp-10h]
+    uint result; // eax
+    uint sunShadowIndex; // [esp+24h] [ebp-10h]
     float x; // [esp+28h] [ebp-Ch]
     float y; // [esp+2Ch] [ebp-8h]
     float ya; // [esp+2Ch] [ebp-8h]
-    uint32_t spotShadowIndex; // [esp+30h] [ebp-4h]
+    uint spotShadowIndex; // [esp+30h] [ebp-4h]
 
     x = 0.0;
     y = 0.0;
@@ -395,8 +395,8 @@ uint32_t R_InitSpotShadowMeshes()
 
 void __cdecl R_ShutdownSpotShadowMeshes()
 {
-    uint32_t sunShadowIndex; // [esp+0h] [ebp-8h]
-    uint32_t spotShadowIndex; // [esp+4h] [ebp-4h]
+    uint sunShadowIndex; // [esp+0h] [ebp-8h]
+    uint spotShadowIndex; // [esp+4h] [ebp-4h]
 
     for (spotShadowIndex = 0; spotShadowIndex < 4; ++spotShadowIndex)
         R_ShutdownDynamicMesh(&gfxMeshGlob.spotShadowClearMeshData[spotShadowIndex]);

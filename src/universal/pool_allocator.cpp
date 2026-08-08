@@ -3,9 +3,9 @@
 #include "assertive.h"
 #include <cstdint>
 
-void __cdecl Pool_Init(char *pool, pooldata_t *pooldata, uint32_t itemSize, uint32_t itemCount)
+void __cdecl Pool_Init(char *pool, pooldata_t *pooldata, uint itemSize, uint itemCount)
 {
-    uint32_t itemIndex; // [esp+4h] [ebp-4h]
+    uint itemIndex; // [esp+4h] [ebp-4h]
 
     if (!pool)
         MyAssertHandler(".\\universal\\pool_allocator.cpp", 16, 0, "%s", "pool");
@@ -18,9 +18,9 @@ void __cdecl Pool_Init(char *pool, pooldata_t *pooldata, uint32_t itemSize, uint
     pooldata->firstFree = pool;
 
     for (itemIndex = 0; itemIndex < itemCount - 1; ++itemIndex)
-        *(uint32_t *)&pool[itemSize * itemIndex] = (uint32_t)&pool[itemSize * (itemIndex + 1)];
+        *(uint *)&pool[itemSize * itemIndex] = (uint)&pool[itemSize * (itemIndex + 1)];
 
-    *(uint32_t *)&pool[itemSize * itemIndex] = 0;
+    *(uint *)&pool[itemSize * itemIndex] = 0;
     pooldata->activeCount = 0;
 }
 
@@ -56,10 +56,10 @@ void __cdecl Pool_Free(freenode *data, pooldata_t *pooldata)
     --pooldata->activeCount;
 }
 
-uint32_t __cdecl Pool_FreeCount(const pooldata_t *pooldata)
+uint __cdecl Pool_FreeCount(const pooldata_t *pooldata)
 {
     const freenode *item; // [esp+0h] [ebp-8h]
-    uint32_t count; // [esp+4h] [ebp-4h]
+    uint count; // [esp+4h] [ebp-4h]
 
     if (!pooldata)
         MyAssertHandler(".\\universal\\pool_allocator.cpp", 79, 0, "%s", "pooldata");

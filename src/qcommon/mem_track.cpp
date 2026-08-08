@@ -781,7 +781,7 @@ void __cdecl track_addbasicmeminfo(meminfo_t* sum, meminfo_t* in)
 #endif
 }
 
-static int __cdecl mem_track_compare(uint32_t *elem1, uint32_t *elem2)
+static int __cdecl mem_track_compare(uint *elem1, uint *elem2)
 {
     if (*((uint8_t *)elem1 + 16) < (int)*((uint8_t *)elem2 + 16))
         return -1;
@@ -862,7 +862,7 @@ void __cdecl track_PrintInfo()
             mem_track->filename = nodea->data.filename;
             mem_track->size = nodea->data.size;
             mem_track->pos = nodea->data.pos;
-            *(uint32_t*)&mem_track->type = *(uint32_t*)&nodea->data.type;
+            *(uint*)&mem_track->type = *(uint*)&nodea->data.type;
             nodea = nodea->next;
             ++mem_track;
         }
@@ -874,7 +874,7 @@ void __cdecl track_PrintInfo()
             mem_track->filename = p_data->filename;
             mem_track->size = p_data->size;
             mem_track->pos = p_data->pos;
-            *(uint32_t*)&mem_track->type = *(uint32_t*)&p_data->type;
+            *(uint*)&mem_track->type = *(uint*)&p_data->type;
             ++i;
             ++mem_track;
         }
@@ -896,7 +896,7 @@ void __cdecl track_PrintInfo()
                     mem_tracka->filename = v1->filename;
                     mem_tracka->size = v1->size;
                     mem_tracka->pos = v1->pos;
-                    *(uint32_t*)&mem_tracka->type = *(uint32_t*)&v1->type;
+                    *(uint*)&mem_tracka->type = *(uint*)&v1->type;
                     break;
                 }
             }

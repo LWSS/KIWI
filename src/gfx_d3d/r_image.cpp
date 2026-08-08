@@ -125,7 +125,7 @@ void __cdecl R_SumOfUsedImages(Image_MemUsage *usage)
 {
     const char *v1; // eax
     GfxImage *image; // [esp+0h] [ebp-2040h]
-    uint32_t v3[4]; // [esp+4h] [ebp-203Ch] BYREF
+    uint v3[4]; // [esp+4h] [ebp-203Ch] BYREF
     int v4; // [esp+14h] [ebp-202Ch]
     int v5; // [esp+18h] [ebp-2028h]
     int v6; // [esp+1Ch] [ebp-2024h]
@@ -133,7 +133,7 @@ void __cdecl R_SumOfUsedImages(Image_MemUsage *usage)
     int v8; // [esp+24h] [ebp-201Ch]
     int v9; // [esp+28h] [ebp-2018h]
     int v10; // [esp+2Ch] [ebp-2014h]
-    uint32_t i; // [esp+30h] [ebp-2010h]
+    uint i; // [esp+30h] [ebp-2010h]
     int v12; // [esp+34h] [ebp-200Ch]
     ImageList imageList; // [esp+38h] [ebp-2008h] BYREF
 
@@ -228,7 +228,7 @@ void __cdecl R_ShutdownImages()
 {
     GfxImage *image; // [esp+0h] [ebp-2014h]
     int numBackups; // [esp+4h] [ebp-2010h]
-    uint32_t i; // [esp+8h] [ebp-200Ch]
+    uint i; // [esp+8h] [ebp-200Ch]
     GfxImage* backupImages[IMAGE_HASH_TABLE_SIZE]; // [esp+Ch] [ebp-2008h]
     int j; // [esp+2010h] [ebp-4h]
 
@@ -269,16 +269,16 @@ void __cdecl Image_SetupRenderTarget(
 
 void __cdecl Load_Texture(GfxTexture *remoteLoadDef, GfxImage *image)
 {
-    uint32_t mipDepth; // [esp+0h] [ebp-60h]
-    uint32_t mipHeight; // [esp+4h] [ebp-5Ch]
-    uint32_t mipWidth; // [esp+8h] [ebp-58h]
+    uint mipDepth; // [esp+0h] [ebp-60h]
+    uint mipHeight; // [esp+4h] [ebp-5Ch]
+    uint mipWidth; // [esp+8h] [ebp-58h]
     _D3DCUBEMAP_FACES v5; // [esp+Ch] [ebp-54h]
     uint16_t v6; // [esp+14h] [ebp-4Ch]
     uint16_t v7; // [esp+18h] [ebp-48h]
     GfxImageLoadDef *loadDef; // [esp+34h] [ebp-2Ch]
     LONG externalDataSize; // [esp+38h] [ebp-28h]
     signed int mipCount; // [esp+3Ch] [ebp-24h]
-    unsigned char *data; // [esp+40h] [ebp-20h]
+    byte *data; // [esp+40h] [ebp-20h]
     int faceCount; // [esp+50h] [ebp-10h]
     signed int faceIndex; // [esp+54h] [ebp-Ch]
     _D3DFORMAT imageFormat; // [esp+58h] [ebp-8h]
@@ -456,10 +456,10 @@ char __cdecl Image_ValidateHeader(GfxImageFileHeader *imageFile, const char *fil
     }
 }
 
-uint32_t __cdecl Image_CountMipmaps(char imageFlags, uint32_t width, uint32_t height, uint32_t depth)
+uint __cdecl Image_CountMipmaps(char imageFlags, uint width, uint height, uint depth)
 {
-    uint32_t mipRes; // [esp+0h] [ebp-8h]
-    uint32_t mipCount; // [esp+4h] [ebp-4h]
+    uint mipRes; // [esp+0h] [ebp-8h]
+    uint mipCount; // [esp+4h] [ebp-4h]
 
     if ((imageFlags & 2) != 0)
         return 1;
@@ -468,7 +468,7 @@ uint32_t __cdecl Image_CountMipmaps(char imageFlags, uint32_t width, uint32_t he
         ++mipCount;
     return mipCount;
 }
-uint32_t __cdecl Image_CountMipmapsForFile(const GfxImageFileHeader *fileHeader)
+uint __cdecl Image_CountMipmapsForFile(const GfxImageFileHeader *fileHeader)
 {
     return Image_CountMipmaps(
         fileHeader->flags,
@@ -481,7 +481,7 @@ void __cdecl Image_UploadData(
     const GfxImage *image,
     _D3DFORMAT format,
     _D3DCUBEMAP_FACES face,
-    uint32_t mipLevel,
+    uint mipLevel,
     uint8_t *src)
 {
     if (image->mapType != MAPTYPE_CUBE || !mipLevel || gfxMetrics.canMipCubemaps)
@@ -507,7 +507,7 @@ void __cdecl Image_LoadSolid(
 {
     uint8_t pic[4]; // [esp+4h] [ebp-4h] BYREF
 
-    *(uint32_t *)pic = (a << 24) | b | (g << 8) | (r << 16);
+    *(uint *)pic = (a << 24) | b | (g << 8) | (r << 16);
     Image_Generate2D(image, pic, 1, 1, D3DFMT_A8R8G8B8);
 }
 
@@ -530,7 +530,7 @@ void __cdecl Image_LoadBlack3D(GfxImage *image)
 {
     uint8_t pic[4]; // [esp+4h] [ebp-4h] BYREF
 
-    *(uint32_t *)pic = -16777216;
+    *(uint *)pic = -16777216;
     Image_Generate3D(image, pic, 1, 1, 1, D3DFMT_A8R8G8B8);
 }
 
@@ -539,7 +539,7 @@ void __cdecl Image_LoadBlackCube(GfxImage *image)
     const uint8_t *pic[6][15]; // [esp+4h] [ebp-170h] BYREF
     uint8_t pixel[4]; // [esp+170h] [ebp-4h] BYREF
 
-    *(uint32_t *)pixel = -16777216;
+    *(uint *)pixel = -16777216;
     pic[0][0] = pixel;
     pic[1][0] = pixel;
     pic[2][0] = pixel;
@@ -560,7 +560,7 @@ void __cdecl Image_LoadPixelCostColorCode(GfxImage *image)
 GfxImage *__cdecl Image_LoadBuiltin(char *name, uint8_t semantic, uint8_t imageTrack)
 {
     GfxImage *image; // [esp+14h] [ebp-8h]
-    uint32_t tableIndex; // [esp+18h] [ebp-4h]
+    uint tableIndex; // [esp+18h] [ebp-4h]
 
     for (tableIndex = 0; ; ++tableIndex)
     {
@@ -621,7 +621,7 @@ GfxImage *__cdecl Image_Alloc(
     uint8_t semantic,
     uint8_t imageTrack)
 {
-    uint32_t v5; // [esp+0h] [ebp-20h]
+    uint v5; // [esp+0h] [ebp-20h]
     GfxImage *image; // [esp+10h] [ebp-10h]
 
     iassert( name );
@@ -651,7 +651,7 @@ IDirect3DSurface9 *__cdecl Image_GetSurface(GfxImage *image)
     {
         if (r_logFile && r_logFile->current.integer)
             RB_LogPrint("image->texture.map->GetSurfaceLevel( 0, &surface )\n");
-        //hr = ((int(__stdcall *)(uint32_t, uint32_t, uint32_t))image->texture.basemap->__vftable[1].AddRef)(
+        //hr = ((int(__stdcall *)(uint, uint, uint))image->texture.basemap->__vftable[1].AddRef)(
         //    (GfxTexture)image->texture.basemap,
         //    0,
         //    &surface);
@@ -675,8 +675,8 @@ IDirect3DSurface9 *__cdecl Image_GetSurface(GfxImage *image)
 
 void __cdecl R_SetPicmip()
 {
-    uint32_t texMemInMegs; // [esp+0h] [ebp-10h]
-    uint32_t sysMemInMegs; // [esp+4h] [ebp-Ch]
+    uint texMemInMegs; // [esp+0h] [ebp-10h]
+    uint sysMemInMegs; // [esp+4h] [ebp-Ch]
     bool cappedPicmip; // [esp+Bh] [ebp-5h]
     int minPicmip; // [esp+Ch] [ebp-4h]
 
@@ -872,9 +872,9 @@ void __cdecl R_ImageList_f()
     int v5; // [esp+A4h] [ebp-2078h]
     bool v6; // [esp+ABh] [ebp-2071h]
     uint8_t dst[80]; // [esp+ACh] [ebp-2070h] BYREF
-    uint32_t v8[2]; // [esp+FCh] [ebp-2020h]
+    uint v8[2]; // [esp+FCh] [ebp-2020h]
     _D3DFORMAT v9; // [esp+104h] [ebp-2018h]
-    uint32_t i; // [esp+108h] [ebp-2014h]
+    uint i; // [esp+108h] [ebp-2014h]
     ImageList imageList; // [esp+10Ch] [ebp-2010h] BYREF
     int j; // [esp+2114h] [ebp-8h]
     float v13; // [esp+2118h] [ebp-4h]
@@ -982,7 +982,7 @@ void __cdecl R_ImageList_f()
             v5 = image->cardMemory.platform[j];
             if (!IsFastFileLoad())
             {
-                *(uint32_t *)&dst[8 * image->track + 4 * j] += v5;
+                *(uint *)&dst[8 * image->track + 4 * j] += v5;
                 if (!v6 && Image_IsCodeImage(image->track))
                     continue;
             }
@@ -1178,7 +1178,7 @@ _D3DFORMAT __cdecl R_ImagePixelFormat(const GfxImage *image)
 void __cdecl Image_CreateCubeTexture_PC(
     GfxImage *image,
     uint16_t edgeLen,
-    uint32_t mipmapCount,
+    uint mipmapCount,
     _D3DFORMAT imageFormat)
 {
     const char *v4; // eax
@@ -1229,7 +1229,7 @@ void __cdecl Image_Create3DTexture_PC(
     uint16_t width,
     uint16_t height,
     uint16_t depth,
-    uint32_t mipmapCount,
+    uint mipmapCount,
     int imageFlags,
     _D3DFORMAT imageFormat)
 {
@@ -1238,7 +1238,7 @@ void __cdecl Image_Create3DTexture_PC(
     const char *v9; // eax
     const char *v10; // eax
     HRESULT hr; // [esp+0h] [ebp-Ch]
-    uint32_t usage; // [esp+4h] [ebp-8h]
+    uint usage; // [esp+4h] [ebp-8h]
 
     iassert( image );
     iassert( !image->texture.basemap );
@@ -1289,7 +1289,7 @@ void __cdecl Image_Create3DTexture_PC(
 
 void __cdecl RB_UnbindAllImages()
 {
-    uint32_t samplerIndex; // [esp+0h] [ebp-4h]
+    uint samplerIndex; // [esp+0h] [ebp-4h]
 
     if (dx.device && !dx.deviceLost)
     {
@@ -1323,7 +1323,7 @@ void __cdecl Image_Create2DTexture_PC(
     GfxImage *image,
     uint16_t width,
     uint16_t height,
-    uint32_t mipmapCount,
+    uint mipmapCount,
     int imageFlags,
     _D3DFORMAT imageFormat)
 {
@@ -1332,7 +1332,7 @@ void __cdecl Image_Create2DTexture_PC(
     const char *v8; // eax
     const char *v9; // eax
     HRESULT hr; // [esp+0h] [ebp-Ch]
-    uint32_t usage; // [esp+4h] [ebp-8h]
+    uint usage; // [esp+4h] [ebp-8h]
 
     iassert( image );
     iassert( !image->texture.basemap );
@@ -1393,7 +1393,7 @@ void __cdecl Image_Create2DTexture_PC(
 
 void __cdecl Image_Setup(GfxImage *image, int width, int height, int depth, int imageFlags, _D3DFORMAT imageFormat)
 {
-    uint32_t mipmapCount; // [esp+0h] [ebp-4h]
+    uint mipmapCount; // [esp+0h] [ebp-4h]
 
     iassert(image);
     image->width = width;

@@ -580,45 +580,45 @@ void __cdecl CG_UpdateBModelWorldBounds(unsigned int localClientNum, centity_s *
     float v10; // [esp+34h] [ebp-1ACh]
     float v11; // [esp+38h] [ebp-1A8h]
     float4 rotatedBounds[2]; // [esp+3Ch] [ebp-1A4h] BYREF
-    int32_t v13; // [esp+5Ch] [ebp-184h]
+    int v13; // [esp+5Ch] [ebp-184h]
     __int64 v14; // [esp+60h] [ebp-180h]
-    int32_t v15; // [esp+68h] [ebp-178h]
-    int32_t v16; // [esp+6Ch] [ebp-174h]
-    int32_t v17; // [esp+70h] [ebp-170h]
-    int32_t v18; // [esp+74h] [ebp-16Ch]
-    int32_t v19; // [esp+78h] [ebp-168h]
+    int v15; // [esp+68h] [ebp-178h]
+    int v16; // [esp+6Ch] [ebp-174h]
+    int v17; // [esp+70h] [ebp-170h]
+    int v18; // [esp+74h] [ebp-16Ch]
+    int v19; // [esp+78h] [ebp-168h]
     __int64 v20; // [esp+7Ch] [ebp-164h]
-    int32_t v21; // [esp+84h] [ebp-15Ch]
-    int32_t v22; // [esp+88h] [ebp-158h]
-    int32_t v23; // [esp+8Ch] [ebp-154h]
+    int v21; // [esp+84h] [ebp-15Ch]
+    int v22; // [esp+88h] [ebp-158h]
+    int v23; // [esp+8Ch] [ebp-154h]
     float *v24; // [esp+90h] [ebp-150h]
     __int64 v25; // [esp+94h] [ebp-14Ch]
-    int32_t v26; // [esp+9Ch] [ebp-144h]
-    int32_t v27; // [esp+A0h] [ebp-140h]
+    int v26; // [esp+9Ch] [ebp-144h]
+    int v27; // [esp+A0h] [ebp-140h]
     __int64 v28; // [esp+A4h] [ebp-13Ch]
-    int32_t v29; // [esp+ACh] [ebp-134h]
-    int32_t v30; // [esp+B0h] [ebp-130h]
-    int32_t v31; // [esp+B4h] [ebp-12Ch]
-    int32_t v32; // [esp+B8h] [ebp-128h]
-    int32_t v33; // [esp+BCh] [ebp-124h]
+    int v29; // [esp+ACh] [ebp-134h]
+    int v30; // [esp+B0h] [ebp-130h]
+    int v31; // [esp+B4h] [ebp-12Ch]
+    int v32; // [esp+B8h] [ebp-128h]
+    int v33; // [esp+BCh] [ebp-124h]
     __int64 v34; // [esp+C0h] [ebp-120h]
-    int32_t v35; // [esp+C8h] [ebp-118h]
-    int32_t v36; // [esp+CCh] [ebp-114h]
-    int32_t v37; // [esp+D0h] [ebp-110h]
+    int v35; // [esp+C8h] [ebp-118h]
+    int v36; // [esp+CCh] [ebp-114h]
+    int v37; // [esp+D0h] [ebp-110h]
     float *v38; // [esp+D4h] [ebp-10Ch]
     __int64 v39; // [esp+D8h] [ebp-108h]
-    int32_t v40; // [esp+E0h] [ebp-100h]
-    int32_t v41; // [esp+E4h] [ebp-FCh]
+    int v40; // [esp+E0h] [ebp-100h]
+    int v41; // [esp+E4h] [ebp-FCh]
     __int64 v42; // [esp+E8h] [ebp-F8h]
-    int32_t v43; // [esp+F0h] [ebp-F0h]
-    int32_t v44; // [esp+F4h] [ebp-ECh]
-    int32_t v45; // [esp+F8h] [ebp-E8h]
-    int32_t v46; // [esp+FCh] [ebp-E4h]
-    int32_t v47; // [esp+100h] [ebp-E0h]
+    int v43; // [esp+F0h] [ebp-F0h]
+    int v44; // [esp+F4h] [ebp-ECh]
+    int v45; // [esp+F8h] [ebp-E8h]
+    int v46; // [esp+FCh] [ebp-E4h]
+    int v47; // [esp+100h] [ebp-E0h]
     __int64 v48; // [esp+104h] [ebp-DCh]
-    int32_t v49; // [esp+10Ch] [ebp-D4h]
-    int32_t v50; // [esp+110h] [ebp-D0h]
-    int32_t v51; // [esp+114h] [ebp-CCh]
+    int v49; // [esp+10Ch] [ebp-D4h]
+    int v50; // [esp+110h] [ebp-D0h]
+    int v51; // [esp+114h] [ebp-CCh]
     __int64 v52; // [esp+118h] [ebp-C8h]
     float v53; // [esp+120h] [ebp-C0h]
     float v54; // [esp+124h] [ebp-BCh]
@@ -648,9 +648,9 @@ void __cdecl CG_UpdateBModelWorldBounds(unsigned int localClientNum, centity_s *
     float v78[3][3]; // [esp+188h] [ebp-58h] BYREF
     float axis_24[4]; // [esp+1ACh] [ebp-34h]
     float bounds_4[3]; // [esp+1BCh] [ebp-24h] BYREF
-    int32_t v81; // [esp+1C8h] [ebp-18h]
+    int v81; // [esp+1C8h] [ebp-18h]
     GfxBrushModel *brush; // [esp+1CCh] [ebp-14h]
-    //int32_t bounds_28; // [esp+1D4h] [ebp-Ch]
+    //int bounds_28; // [esp+1D4h] [ebp-Ch]
     //GfxBrushModel* bmodel; // [esp+1D8h] [ebp-8h]
     //GfxBrushModel* retaddr; // [esp+1E0h] [ebp+0h]
 
@@ -2305,7 +2305,7 @@ DObjAnimMat *__cdecl CG_DObjGetLocalTagMatrix(const cpose_t *pose, DObj_s *obj, 
     return result;
 }
 
-int32_t __cdecl CG_DObjGetWorldBoneMatrix(
+int __cdecl CG_DObjGetWorldBoneMatrix(
     const cpose_t *pose,
     DObj_s *obj,
     int boneIndex,
@@ -2327,7 +2327,7 @@ int32_t __cdecl CG_DObjGetWorldBoneMatrix(
     return 1;
 }
 
-int32_t __cdecl CG_DObjGetWorldTagMatrix(
+int __cdecl CG_DObjGetWorldTagMatrix(
     const cpose_t *pose,
     DObj_s *obj,
     unsigned int tagName,

@@ -143,7 +143,7 @@ void __cdecl EmitCanonicalString(unsigned int stringValue)
 {
     if (!stringValue)
         MyAssertHandler(".\\script\\scr_compiler.cpp", 192, 0, "%s", "stringValue");
-    scrCompileGlob.codePos = (unsigned char*)TempMallocAlignStrict(2u);
+    scrCompileGlob.codePos = (byte*)TempMallocAlignStrict(2u);
     if (scrCompilePub.developer_statement == 2)
     {
         if (scrVarPub.developer_script)
@@ -229,7 +229,7 @@ unreachable:
 
 void __cdecl EmitByte(unsigned __int8 value)
 {
-    scrCompileGlob.codePos = (unsigned char*)TempMalloc(1u);
+    scrCompileGlob.codePos = (byte*)TempMalloc(1u);
     *scrCompileGlob.codePos = value;
 }
 
@@ -269,7 +269,7 @@ void __cdecl EmitGetUndefined(sval_u sourcePos)
 
 void __cdecl EmitShort(__int16 value)
 {
-    scrCompileGlob.codePos = (unsigned char*)TempMallocAlignStrict(2u);
+    scrCompileGlob.codePos = (byte*)TempMallocAlignStrict(2u);
     *scrCompileGlob.codePos = value;
 }
 
@@ -309,7 +309,7 @@ void __cdecl EmitGetIString(unsigned int value, sval_u sourcePos)
 
 void __cdecl EmitFloat(float value)
 {
-    scrCompileGlob.codePos = (unsigned char*)TempMallocAlignStrict(4u);
+    scrCompileGlob.codePos = (byte*)TempMallocAlignStrict(4u);
     *scrCompileGlob.codePos = value;
 }
 
@@ -333,7 +333,7 @@ void __cdecl EmitGetFloat(float value, sval_u sourcePos)
 
 void __cdecl EmitCodepos(const char *pos)
 {
-    scrCompileGlob.codePos = (unsigned char*)TempMallocAlignStrict(4u);
+    scrCompileGlob.codePos = (byte*)TempMallocAlignStrict(4u);
     *(unsigned int*)scrCompileGlob.codePos = (unsigned int)pos;
 }
 
@@ -1611,7 +1611,7 @@ void __cdecl EmitBoolOrExpression(
     offset = (char*)(TempMalloc(0) - nextPos);
     if (offset >= (char*)0x10000)
         MyAssertHandler(".\\script\\scr_compiler.cpp", 2731, 0, "%s", "offset < 65536");
-    *pos = (unsigned char)offset;
+    *pos = (byte)offset;
 }
 
 char __cdecl EmitOrEvalPrimitiveExpression(sval_u expr, VariableCompileValue *constValue, scr_block_s *block)
@@ -1696,7 +1696,7 @@ void __cdecl EmitBoolAndExpression(
     offset = (char*)(TempMalloc(0) - nextPos);
     if (offset >= (char*)0x10000)
         MyAssertHandler(".\\script\\scr_compiler.cpp", 2751, 0, "%s", "offset < 65536");
-    *pos = (unsigned char)offset;
+    *pos = (byte)offset;
 }
 
 int Scr_PopValue()
@@ -2162,7 +2162,7 @@ void __cdecl EmitIfStatement(
     offset = (char*)(TempMalloc(0) - nextPos);
     if (offset >= (char*)0x10000)
         MyAssertHandler(".\\script\\scr_compiler.cpp", 3169, 0, "%s", "offset < 65536");
-    *pos = (unsigned char)offset;
+    *pos = (byte)offset;
 }
 
 void __cdecl EmitIfElseStatement(
@@ -2219,7 +2219,7 @@ void __cdecl EmitIfElseStatement(
     offset = (char*)(TempMalloc(0) - nextPos1);
     if (offset >= (char*)0x10000)
         MyAssertHandler(".\\script\\scr_compiler.cpp", 3233, 0, "%s", "offset < 65536");
-    *pos1 = (unsigned char)offset;
+    *pos1 = (byte)offset;
     Scr_TransferBlock(block, elseStatBlock->block);
     EmitStatement(stmt2, lastStatement, endSourcePos, elseStatBlock->block);
     EmitNOP2(lastStatement, endSourcePos, elseStatBlock->block);
@@ -3005,7 +3005,7 @@ void __cdecl EmitSwitchStatement(
     AddOpcodePos(sourcePos.stringValue, 0);
     EmitShort(0);
     pos2 = scrCompileGlob.codePos;
-    *pos1 = scrCompileGlob.codePos - (unsigned char*)nextPos1;
+    *pos1 = scrCompileGlob.codePos - (byte*)nextPos1;
     pos3 = TempMallocAlignStrict(0);
     num = 0;
     caseStatement = scrCompileGlob.currentCaseStatement;
@@ -3308,7 +3308,7 @@ void __cdecl EmitOpcode(Opcode_t op, int offset, int callType)
 
     if (scrCompilePub.developer_statement == 3)
     {
-        scrCompileGlob.codePos = (unsigned char*)TempMalloc(1u);
+        scrCompileGlob.codePos = (byte*)TempMalloc(1u);
         *scrCompileGlob.codePos = op;
     }
     else
@@ -3447,7 +3447,7 @@ void __cdecl EmitOpcode(Opcode_t op, int offset, int callType)
                     MyAssertHandler(".\\script\\scr_compiler.cpp", 497, 0, "%s", "scrCompileGlob.prevOpcodePos");
                 if (*scrCompileGlob.prevOpcodePos == 78)
                 {
-                    if (scrCompilePub.opcodePos != (unsigned char*)TempMalloc(0) - 1)
+                    if (scrCompilePub.opcodePos != (byte*)TempMalloc(0) - 1)
                         MyAssertHandler(
                             ".\\script\\scr_compiler.cpp",
                             500,
@@ -3493,7 +3493,7 @@ void __cdecl EmitOpcode(Opcode_t op, int offset, int callType)
         {
         LABEL_79:
             scrCompileGlob.prevOpcodePos = scrCompilePub.opcodePos;
-            scrCompilePub.opcodePos = (unsigned char*)TempMalloc(1u);
+            scrCompilePub.opcodePos = (byte*)TempMalloc(1u);
             scrCompileGlob.codePos = scrCompilePub.opcodePos;
             *scrCompilePub.opcodePos = op;
         }

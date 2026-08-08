@@ -4,7 +4,7 @@
 #include "huffman.h"
 #include "msg_mp.h"
 
-static const uint32_t kbitmask[33] =
+static const uint kbitmask[33] =
 {
     0,
     1,
@@ -41,7 +41,7 @@ static const uint32_t kbitmask[33] =
     0x0FFFFFFFF,
 };
 
-enum PacketEntityType : __int32
+enum PacketEntityType : int
 {                                       // ...
     ANALYZE_DATATYPE_ENTITYTYPE_GENERALENTITY = 0x0,
     ANALYZE_DATATYPE_ENTITYTYPE_PLAYERENTITY = 0x1,
@@ -95,7 +95,7 @@ struct SnapshotInfo_s // sizeof=0x18
 struct NetFieldList // sizeof=0x8
 {                                       // ...
     const NetField *array;
-    uint32_t count;
+    uint count;
 };
 
 void __cdecl TRACK_msg();
@@ -105,11 +105,11 @@ void __cdecl MSG_WriteEntityIndex(SnapshotInfo_s *snapInfo, msg_t *msg, int inde
 void __cdecl MSG_WriteOriginFloat(const int clientNum, msg_t *msg, int bits, double value, double oldValue);
 void __cdecl MSG_WriteOriginZFloat(const int clientNum, msg_t *msg, double value, double oldValue);
 bool __cdecl MSG_ValuesAreEqual(const SnapshotInfo_s* snapInfo, int bits, const int* fromF, const int* toF);
-void __cdecl MSG_WriteLastChangedField(msg_t* msg, int lastChangedFieldNum, uint32_t numFields);
+void __cdecl MSG_WriteLastChangedField(msg_t* msg, int lastChangedFieldNum, uint numFields);
 void __cdecl MSG_WriteEventNum(int clientNum, msg_t* msg, uint8_t eventNum);
 void __cdecl MSG_WriteEventParam(int clientNum, msg_t* msg, uint8_t eventParam);
 PacketEntityType __cdecl MSG_GetPacketEntityTypeForEType(int eType);
-uint32_t __cdecl MSG_GetBitCount(int bits, bool* estimate, int from, int to);
+uint __cdecl MSG_GetBitCount(int bits, bool* estimate, int from, int to);
 void __cdecl MSG_WriteEntity(
     SnapshotInfo_s* snapInfo,
     msg_t* msg,
@@ -153,7 +153,7 @@ void __cdecl MSG_WriteDeltaField(
 void __cdecl MSG_WriteDeltaTime(int clientNum, msg_t* msg, int timeBase, int time);
 void __cdecl MSG_Write24BitFlag(int clientNum, msg_t* msg, int oldFlags, int newFlags);
 void __cdecl MSG_WriteGroundEntityNum(int clientNum, msg_t* msg, int groundEntityNum);
-bool __cdecl MSG_CheckWritingEnoughBits(int value, uint32_t bits);
+bool __cdecl MSG_CheckWritingEnoughBits(int value, uint bits);
 void __cdecl MSG_WriteDeltaArchivedEntity(
     SnapshotInfo_s* snapInfo,
     msg_t* msg,
@@ -206,7 +206,7 @@ void __cdecl MSG_WriteDeltaHudElems(
     int time,
     const hudelem_s* from,
     const hudelem_s* to,
-    uint32_t count);
+    uint count);
 
 
 extern huffman_t msgHuff;

@@ -484,7 +484,7 @@ void __cdecl Phys_CreateJointForEachContact(
     bool useCentroids; // [esp+6Bh] [ebp-11h]
     float pointVel[4]; // [esp+6Ch] [ebp-10h] BYREF
 
-    if ((uint32_t)worldIndex >= PHYS_WORLD_COUNT)
+    if ((uint)worldIndex >= PHYS_WORLD_COUNT)
         MyAssertHandler(
             ".\\physics\\phys_contacts.cpp",
             591,

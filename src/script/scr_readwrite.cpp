@@ -148,7 +148,7 @@ const char *__cdecl Scr_ReadCodepos(MemoryFile *memFile)
     const char *result; // r3
     int v4; // [sp+50h] [-30h] BYREF
 
-    MemFile_ReadData(memFile, 4, (unsigned char*)&v4);
+    MemFile_ReadData(memFile, 4, (byte*)&v4);
     v1 = v4;
     if (v4 < -1)
         MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\script\\scr_readwrite.cpp", 141, 0, "%s", "offset >= -1");
@@ -286,7 +286,7 @@ unsigned int Scr_ReadId(MemoryFile *memFile, unsigned int opcode)
     }
     else
     {
-        MemFile_ReadData(memFile, 2, (unsigned char*)&v6);
+        MemFile_ReadData(memFile, 2, (byte*)&v6);
         v3 = v6;
         v2 = g_idHistoryIndex;
     }
@@ -424,7 +424,7 @@ void __cdecl Scr_DoLoadEntryInternal(VariableValue *value, MemoryFile *memFile)
             break;
         case 6:
         case 11:
-            MemFile_ReadData(memFile, 4, (unsigned char*)&v8);
+            MemFile_ReadData(memFile, 4, (byte*)&v8);
             value->u = v8;
             break;
         case 7:
@@ -459,7 +459,7 @@ int __cdecl Scr_DoLoadEntry(VariableValue *value, bool isArray, MemoryFile *memF
     Scr_DoLoadEntryInternal(value, memFile);
     if (isArray)
     {
-        MemFile_ReadData(memFile, 1, (unsigned char *)&header);
+        MemFile_ReadData(memFile, 1, (byte *)&header);
         unsigned int tag = header & 0xFF;
         switch (tag & 7)
         {
@@ -469,18 +469,18 @@ int __cdecl Scr_DoLoadEntry(VariableValue *value, bool isArray, MemoryFile *memF
         case 1:
         {
             unsigned int byteRead = 0;
-            MemFile_ReadData(memFile, 1, (unsigned char *)&byteRead);
+            MemFile_ReadData(memFile, 1, (byte *)&byteRead);
             result = (int)(__int8)byteRead + 0x800000;
             break;
         }
         case 2:
             header2 = 0;
-            MemFile_ReadData(memFile, 2, (unsigned char *)&header2);
+            MemFile_ReadData(memFile, 2, (byte *)&header2);
             result = (int)(__int16)header2 + 0x800000;
             break;
         case 3:
             header4 = 0;
-            MemFile_ReadData(memFile, 4, (unsigned char *)&header4);
+            MemFile_ReadData(memFile, 4, (byte *)&header4);
             result = header4 + 0x800000;
             break;
         case 4:
@@ -568,7 +568,7 @@ void __cdecl Scr_DoLoadObjectInfo(unsigned __int16 parentId, MemoryFile *memFile
     iassert(IsObject(parentValue));
 
     header = 0;
-    MemFile_ReadData(memFile, 1, (unsigned char *)&header);
+    MemFile_ReadData(memFile, 1, (byte *)&header);
     unsigned int headerByte = header & 0xFF;
 
     switch (headerByte & 7)
@@ -588,7 +588,7 @@ void __cdecl Scr_DoLoadObjectInfo(unsigned __int16 parentId, MemoryFile *memFile
         parentValue->u.o.u.entnum = Scr_ReadId(memFile, headerByte);
         iassert(!(parentValue->w.waitTime & VAR_NAME_HIGH_MASK));
         header4 = 0;
-        MemFile_ReadData(memFile, 4, (unsigned char *)&header4);
+        MemFile_ReadData(memFile, 4, (byte *)&header4);
         parentValue->w.type |= header4 << 8;
         break;
     case 4:
@@ -596,7 +596,7 @@ void __cdecl Scr_DoLoadObjectInfo(unsigned __int16 parentId, MemoryFile *memFile
         v5 = 17;
         parentValue->u.o.u.size = Scr_ReadId(memFile, headerByte);
         unsigned int header_b = 0;
-        MemFile_ReadData(memFile, 1, (unsigned char *)&header_b);
+        MemFile_ReadData(memFile, 1, (byte *)&header_b);
         unsigned int byte2 = header_b & 0xFF;
         iassert(!(parentValue->w.parentLocalId & VAR_NAME_HIGH_MASK));
         parentValue->w.type |= Scr_ReadId(memFile, byte2) << 8;
@@ -611,7 +611,7 @@ void __cdecl Scr_DoLoadObjectInfo(unsigned __int16 parentId, MemoryFile *memFile
         if (v5 == 20)
         {
             header2 = 0;
-            MemFile_ReadData(memFile, 2, (unsigned char *)&header2);
+            MemFile_ReadData(memFile, 2, (byte *)&header2);
             parentValue->u.o.u.size = header2;
             if (parentValue->w.classnum & VAR_NAME_HIGH_MASK)
                 MyAssertHandler(
@@ -621,7 +621,7 @@ void __cdecl Scr_DoLoadObjectInfo(unsigned __int16 parentId, MemoryFile *memFile
                     "%s",
                     "!(parentValue->w.classnum & VAR_NAME_HIGH_MASK)");
             header2 = 0;
-            MemFile_ReadData(memFile, 2, (unsigned char *)&header2);
+            MemFile_ReadData(memFile, 2, (byte *)&header2);
             parentValue->w.type |= ((int)(__int16)header2) << 8;
         }
         else if (v5 == 21)
@@ -636,7 +636,7 @@ void __cdecl Scr_DoLoadObjectInfo(unsigned __int16 parentId, MemoryFile *memFile
     parentValue->w.type = parentValue->w.type & 0xFFFFFFE0 | v5;
 
     header2 = 0;
-    MemFile_ReadData(memFile, 2, (unsigned char *)&header2);
+    MemFile_ReadData(memFile, 2, (byte *)&header2);
     if (header2)
     {
         v13 = header2;
@@ -1350,8 +1350,8 @@ void __cdecl Scr_LoadSource(MemoryFile *memFile, void *fileHandle)
             0,
             "%s",
             "!scrParserGlob.saveSourceBufferLookup");
-    MemFile_ReadData(memFile, 1, (unsigned char*)&v12);
-    MemFile_ReadData(memFile, 1, (unsigned char*)&scrVarPub.developer_script);
+    MemFile_ReadData(memFile, 1, (byte*)&v12);
+    MemFile_ReadData(memFile, 1, (byte*)&scrVarPub.developer_script);
     if (v12)
     {
         const int bytesRead = ReadFromDevice(
@@ -1405,7 +1405,7 @@ void __cdecl Scr_SkipSource(MemoryFile *memFile, void *fileHandle)
     int v7[4]; // [sp+58h] [-28h] BYREF
 
     MemFile_ReadData(memFile, 1, v5);
-    MemFile_ReadData(memFile, 1, (unsigned char*)&scrVarPub.developer_script);
+    MemFile_ReadData(memFile, 1, (byte*)&scrVarPub.developer_script);
     if (v5[0])
     {
         if (fileHandle)
@@ -1519,9 +1519,9 @@ void __cdecl DoSaveEntry(VariableValue *value, VariableValue *name, bool isArray
                 name);
         v27[0] = (v27[0] & 0xFFFFFF00) | ((uint8_t)name);
         MemFile_WriteData(memFile, 1, v27);
-        v27[0] = (v27[0] & 0xFFFFFF00) | (((uint32_t)name >> 8) & 0xFF);
+        v27[0] = (v27[0] & 0xFFFFFF00) | (((uint)name >> 8) & 0xFF);
         MemFile_WriteData(memFile, 1, v27);
-        v27[0] = (v27[0] & 0xFFFFFF00) | (((uint32_t)name >> 16) & 0xFF);
+        v27[0] = (v27[0] & 0xFFFFFF00) | (((uint)name >> 16) & 0xFF);
         MemFile_WriteData(memFile, 1, v27);
         v13 = MemFile_GetUsedSize(memFile);
         //ProfMem_End(v13);
@@ -1565,7 +1565,7 @@ void __cdecl DoSaveEntry(VariableValue *value, VariableValue *name, bool isArray
             {
                 v27[0] = (v27[0] & 0xFFFFFF00) | 2;
                 MemFile_WriteData(memFile, 1, v27);
-                v27[0] = (v27[0] & 0xFFFF0000) | ((uint32_t)v17 & 0xFFFF);
+                v27[0] = (v27[0] & 0xFFFF0000) | ((uint)v17 & 0xFFFF);
                 MemFile_WriteData(memFile, 2, v27);
             }
         }
@@ -1573,7 +1573,7 @@ void __cdecl DoSaveEntry(VariableValue *value, VariableValue *name, bool isArray
         {
             v27[0] = (v27[0] & 0xFFFFFF00) | 1;
             MemFile_WriteData(memFile, 1, v27);
-            v27[0] = (v27[0] & 0xFFFFFF00) | ((uint32_t)v17 & 0xFF);
+            v27[0] = (v27[0] & 0xFFFFFF00) | ((uint)v17 & 0xFF);
             MemFile_WriteData(memFile, 1, v27);
         }
     }
@@ -1756,7 +1756,7 @@ void __cdecl DoSaveObjectInfo(unsigned int parentId, MemoryFile *memFile)
         goto LABEL_13;
     default:
         v8 = 1;
-        v18[0].u.intValue = (v18[0].u.intValue & 0xFFFFFF00) | ((uint32_t)(8 * v5) & 0xFF);
+        v18[0].u.intValue = (v18[0].u.intValue & 0xFFFFFF00) | ((uint)(8 * v5) & 0xFF);
     LABEL_13:
         MemFile_WriteData(memFile, v8, v18);
     LABEL_14:
@@ -1766,7 +1766,7 @@ void __cdecl DoSaveObjectInfo(unsigned int parentId, MemoryFile *memFile)
         v11 = 0;
         for (i = FindFirstSibling(parentId); i; i = FindNextSibling(i))
             ++v11;
-        v18[0].u.intValue = (v18[0].u.intValue & 0xFFFF0000) | ((uint32_t)v11 & 0xFFFF);
+        v18[0].u.intValue = (v18[0].u.intValue & 0xFFFF0000) | ((uint)v11 & 0xFFFF);
         MemFile_WriteData(memFile, 2, v18);
         for (j = FindLastSibling(parentId); j; j = FindPrevSibling(j))
         {
@@ -1840,7 +1840,7 @@ void __cdecl Scr_SavePost(MemoryFile *memFile)
     g_idHistoryIndex = 0;
     v8[0] = scrVarPub.time;
     MemFile_WriteData(memFile, 4, v8);
-    v8[0] = (v8[0] & 0xFFFF0000) | ((uint32_t)scrVarPub.savecount & 0xFFFF);
+    v8[0] = (v8[0] & 0xFFFF0000) | ((uint)scrVarPub.savecount & 0xFFFF);
     MemFile_WriteData(memFile, 2, v8);
     UsedSize = MemFile_GetUsedSize(memFile);
     //ProfMem_Begin("DoSaveObjectInfo", UsedSize);
@@ -1904,7 +1904,7 @@ void __cdecl AddSaveStack(const VariableStackBuffer *stackBuf)
                 AddSaveStack(v6);
             }
             //LOWORD(size) = v5;
-            size = (size & 0xFFFF0000) | ((uint32_t)v5 & 0xFFFF);
+            size = (size & 0xFFFF0000) | ((uint)v5 & 0xFFFF);
 
         } while (v5);
     }

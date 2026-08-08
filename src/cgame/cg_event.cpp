@@ -25,10 +25,10 @@
 #include <universal/com_sndalias.h>
 
 
-int32_t __cdecl CG_GetBoneIndex(
-    int32_t localClientNum,
-    uint32_t dobjHandle,
-    uint32_t boneName,
+int __cdecl CG_GetBoneIndex(
+    int localClientNum,
+    uint dobjHandle,
+    uint boneName,
     uint8_t *boneIndex)
 {
     const DObj_s *obj; // [esp+0h] [ebp-4h]
@@ -43,13 +43,13 @@ int32_t __cdecl CG_GetBoneIndex(
 }
 
 void __cdecl CG_PlayBoltedEffect(
-    int32_t localClientNum,
+    int localClientNum,
     const FxEffectDef *fxDef,
-    uint32_t dobjHandle,
-    uint32_t boneName)
+    uint dobjHandle,
+    uint boneName)
 {
     uint8_t boneIndex; // [esp+3h] [ebp-5h] BYREF
-    int32_t time; // [esp+4h] [ebp-4h]
+    int time; // [esp+4h] [ebp-4h]
 
     boneIndex = -2;
     if (CG_GetBoneIndex(localClientNum, dobjHandle, boneName, &boneIndex))
@@ -59,7 +59,7 @@ void __cdecl CG_PlayBoltedEffect(
     }
 }
 
-void __cdecl CG_EntityEvent(int32_t localClientNum, centity_s *cent, int32_t event)
+void __cdecl CG_EntityEvent(int localClientNum, centity_s *cent, int event)
 {
     const char *ConfigString; // eax
     float innerRadius_4; // [esp+4h] [ebp-150h]
@@ -85,21 +85,21 @@ void __cdecl CG_EntityEvent(int32_t localClientNum, centity_s *cent, int32_t eve
     centity_s *attackerCent; // [esp+E4h] [ebp-70h]
     entityType_t eType; // [esp+E8h] [ebp-6Ch]
     WeaponDef *itemWeapDef; // [esp+ECh] [ebp-68h]
-    int32_t index; // [esp+F0h] [ebp-64h]
+    int index; // [esp+F0h] [ebp-64h]
     float fallHeight; // [esp+F4h] [ebp-60h]
     float dir[3]; // [esp+F8h] [ebp-5Ch] BYREF
     bool isPlayerView; // [esp+107h] [ebp-4Dh]
     cg_s *cgameGlob; // [esp+108h] [ebp-4Ch]
-    int32_t viewDip; // [esp+10Ch] [ebp-48h]
+    int viewDip; // [esp+10Ch] [ebp-48h]
     const WeaponDef *weaponDef; // [esp+110h] [ebp-44h]
-    int32_t offset; // [esp+114h] [ebp-40h]
+    int offset; // [esp+114h] [ebp-40h]
     entityState_s *ent; // [esp+118h] [ebp-3Ch]
-    int32_t eventParm; // [esp+11Ch] [ebp-38h]
+    int eventParm; // [esp+11Ch] [ebp-38h]
     float axis[3][3]; // [esp+120h] [ebp-34h] BYREF
-    int32_t clientNum; // [esp+144h] [ebp-10h]
+    int clientNum; // [esp+144h] [ebp-10h]
     float *position; // [esp+148h] [ebp-Ch]
     const playerState_s *ps; // [esp+14Ch] [ebp-8h]
-    uint32_t weaponIdx; // [esp+150h] [ebp-4h]
+    uint weaponIdx; // [esp+150h] [ebp-4h]
 
     if (event)
     {
@@ -131,7 +131,7 @@ void __cdecl CG_EntityEvent(int32_t localClientNum, centity_s *cent, int32_t eve
 
 #ifdef KISAK_MP
         clientNum = ent->clientNum;
-        if ((uint32_t)clientNum >= 64)
+        if ((uint)clientNum >= 64)
             clientNum = 0;
 #elif KISAK_SP
         clientNum = cent->nextState.number;
@@ -972,15 +972,15 @@ void __cdecl CG_EntityEvent(int32_t localClientNum, centity_s *cent, int32_t eve
 }
 
 #ifdef KISAK_MP
-void __cdecl CG_Obituary(int32_t localClientNum, const entityState_s *ent)
+void __cdecl CG_Obituary(int localClientNum, const entityState_s *ent)
 {
     const char *v2; // eax
     weaponIconRatioType_t killIconRatio; // [esp+10h] [ebp-A0h]
-    uint32_t mod; // [esp+14h] [ebp-9Ch]
-    uint32_t attacker; // [esp+18h] [ebp-98h]
+    uint mod; // [esp+14h] [ebp-9Ch]
+    uint attacker; // [esp+18h] [ebp-98h]
     bool iconHorzFlip; // [esp+1Fh] [ebp-91h]
     float iconWidth; // [esp+24h] [ebp-8Ch]
-    uint32_t target; // [esp+2Ch] [ebp-84h]
+    uint target; // [esp+2Ch] [ebp-84h]
     float iconHeight; // [esp+30h] [ebp-80h]
     char targetName[40]; // [esp+34h] [ebp-7Ch] BYREF
     char attackerName[40]; // [esp+5Ch] [ebp-54h] BYREF
@@ -1151,7 +1151,7 @@ void __cdecl CG_Obituary(int32_t localClientNum, const entityState_s *ent)
     }
 }
 #endif
-void __cdecl CG_ItemPickup(int32_t localClientNum, int32_t weapIndex)
+void __cdecl CG_ItemPickup(int localClientNum, int weapIndex)
 {
     WeaponDef *weapDef;
     cg_s *cgameGlob;
@@ -1173,7 +1173,7 @@ void __cdecl CG_ItemPickup(int32_t localClientNum, int32_t weapIndex)
     }
 }
 
-void __cdecl CG_EquipmentSound(int32_t localClientNum, int32_t entNum, bool isPlayerView, EquipmentSound_t type)
+void __cdecl CG_EquipmentSound(int localClientNum, int entNum, bool isPlayerView, EquipmentSound_t type)
 {
 #ifdef KISAK_MP
     if (isPlayerView)
@@ -1262,10 +1262,10 @@ void __cdecl CG_EquipmentSound(int32_t localClientNum, int32_t entNum, bool isPl
 #endif
 }
 
-void __cdecl CG_PlayFx(int32_t localClientNum, centity_s *cent, const float *angles)
+void __cdecl CG_PlayFx(int localClientNum, centity_s *cent, const float *angles)
 {
     const FxEffectDef *fxDef; // [esp+4h] [ebp-30h]
-    int32_t fxId; // [esp+Ch] [ebp-28h]
+    int fxId; // [esp+Ch] [ebp-28h]
     float axis[3][3]; // [esp+10h] [ebp-24h] BYREF
 
     fxId = cent->nextState.eventParm;
@@ -1282,15 +1282,15 @@ void __cdecl CG_PlayFx(int32_t localClientNum, centity_s *cent, const float *ang
     }
 }
 
-void __cdecl CG_PlayFxOnTag(int32_t localClientNum, centity_s *cent, int32_t eventParm)
+void __cdecl CG_PlayFxOnTag(int localClientNum, centity_s *cent, int eventParm)
 {
     uint16_t tagName; // [esp+0h] [ebp-1Ch] BYREF
-    int32_t dobjHandle; // [esp+4h] [ebp-18h]
+    int dobjHandle; // [esp+4h] [ebp-18h]
     const char *tagAndEffect; // [esp+8h] [ebp-14h]
     const FxEffectDef *fxDef; // [esp+Ch] [ebp-10h]
     const cgs_t *cgs; // [esp+10h] [ebp-Ch]
-    int32_t fxId; // [esp+14h] [ebp-8h]
-    int32_t csIndex; // [esp+18h] [ebp-4h]
+    int fxId; // [esp+14h] [ebp-8h]
+    int csIndex; // [esp+18h] [ebp-4h]
 
     csIndex = CS_EFFECT_TAGS + eventParm;
     tagAndEffect = CL_GetConfigString(localClientNum, csIndex);
@@ -1319,10 +1319,10 @@ void __cdecl CG_SetInvalidCmdHint(cg_s *cgameGlob, InvalidCmdHintType hintType)
 }
 
 void __cdecl CG_StopWeaponSound(
-    int32_t localClientNum,
+    int localClientNum,
     bool isPlayerView,
     const WeaponDef *weaponDef,
-    int32_t entitynum,
+    int entitynum,
     weaponstate_t weaponstate)
 {
     switch (weaponstate)
@@ -1362,13 +1362,13 @@ void __cdecl CG_StopWeaponSound(
     }
 }
 
-void __cdecl CG_CheckEvents(int32_t localClientNum, centity_s *cent)
+void __cdecl CG_CheckEvents(int localClientNum, centity_s *cent)
 {
-    int32_t v2; // [esp+0h] [ebp-14h]
-    int32_t previousEventSequence; // [esp+4h] [ebp-10h]
-    int32_t event; // [esp+8h] [ebp-Ch]
+    int v2; // [esp+0h] [ebp-14h]
+    int previousEventSequence; // [esp+4h] [ebp-10h]
+    int event; // [esp+8h] [ebp-Ch]
     uint8_t oldEventParm; // [esp+Fh] [ebp-5h]
-    int32_t i; // [esp+10h] [ebp-4h]
+    int i; // [esp+10h] [ebp-4h]
 
     if (cent->nextState.eType <= ET_EVENTS)
     {

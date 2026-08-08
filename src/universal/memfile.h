@@ -16,7 +16,7 @@ struct MemoryFile // (SP/MP Same)
     void(* archiveProc)(MemoryFile*, int, byte *);
 };
 
-enum MemFileMode : __int32
+enum MemFileMode : int
 {                                       // ...
     MEM_FILE_MODE_DEFAULT = 0x0,
     MEM_FILE_MODE_INFLATE = 0x1,
@@ -37,13 +37,13 @@ bool MemFile_IsWriting(MemoryFile* memFile);
 double MemFile_ReadFloat(MemoryFile* memFile);
 
 void __cdecl MemFile_StartSegment(MemoryFile* memFile, int index);
-void __cdecl MemFile_deflateInit(uint8_t* next_out, uint32_t avail_out, bool compress);
+void __cdecl MemFile_deflateInit(uint8_t* next_out, uint avail_out, bool compress);
 void __cdecl MemFile_EndSegment(MemoryFile *memFile);
-uint32_t __cdecl MemFile_deflateEnd(bool compress);
+uint __cdecl MemFile_deflateEnd(bool compress);
 void __cdecl MemFile_MoveToSegment(MemoryFile* memFile, int index);
-void __cdecl MemFile_inflateInit(uint8_t* next_in, uint32_t len, bool compress);
+void __cdecl MemFile_inflateInit(uint8_t* next_in, uint len, bool compress);
 int __cdecl MemFile_inflateEnd(bool compress);
-uint8_t* __cdecl MemFile_GetSegmentAddess(MemoryFile* memFile, uint32_t index);
+uint8_t* __cdecl MemFile_GetSegmentAddess(MemoryFile* memFile, uint index);
 void __cdecl MemFile_WriteError(MemoryFile* memFile);
 int __cdecl MemFile_WriteDataInternal(
     MemoryFile* memFile,

@@ -36,7 +36,7 @@ static const char *g_pszSndAliasKeyNames[29] =
   "envelop percentage"
 }; // idb
 
-enum snd_alias_type_t : __int32
+enum snd_alias_type_t : int
 {                                       // ...
     SAT_UNKNOWN = 0x0,
     SAT_LOADED = 0x1,
@@ -44,7 +44,7 @@ enum snd_alias_type_t : __int32
     SAT_COUNT = 0x3,
 };
 
-enum snd_alias_members_t : __int32
+enum snd_alias_members_t : int
 {                                       // ...
     SA_INVALID = 0x0,
     SA_NAME = 0x1,
@@ -77,7 +77,7 @@ enum snd_alias_members_t : __int32
     SA_ENVELOPPERCENTAGE = 0x1C,
     SA_NUMFIELDS = 0x1D,
 };
-enum SA_SPKRMAPIDENTIFIERS : __int32
+enum SA_SPKRMAPIDENTIFIERS : int
 {                                       // ...
     SA_MONOSOURCE = 0x0,
     SA_LEFTSOURCE = 0x1,
@@ -112,8 +112,8 @@ struct SoundAliasGlobals // sizeof=0x2858
     // padding byte
     DevGraph curveDevGraphs[16];        // ...
     int randSeed;                       // ...
-    uint32_t hashUsed;              // ...
-    uint32_t hashSize;              // ...
+    uint hashUsed;              // ...
+    uint hashSize;              // ...
     snd_alias_list_t **hash;            // ...
     snd_alias_list_t aliasInfo[3];      // ...
     SoundFileInfo soundFileInfo[3];     // ...
@@ -223,7 +223,7 @@ char __cdecl Com_AddAliasList(const char *name, snd_alias_list_t *aliasList);
 void __cdecl Com_InitSoundDevGuiGraphs();
 void Com_InitSoundDevGuiGraphs_LoadObj();
 void Com_InitSoundDevGuiGraphs_FastFile();
-void __cdecl Com_InitSoundAliasHash(uint32_t aliasCount);
+void __cdecl Com_InitSoundAliasHash(uint aliasCount);
 void Com_InitSpeakerMaps();
 void Com_InitDefaultSpeakerMap();
 void Com_InitCurves();
@@ -250,8 +250,8 @@ void __cdecl Com_LoadSoundAliasField(
 void __cdecl Com_LoadSoundAliasDefaults(snd_alias_build_s *alias, const char *sourceFile, const char *loadspec);
 void __cdecl Com_SetChannelMapEntry(
     MSSChannelMap *entry,
-    uint32_t inputChannel,
-    uint32_t outputChannel,
+    uint inputChannel,
+    uint outputChannel,
     float volume);
 
 

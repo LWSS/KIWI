@@ -15,7 +15,7 @@ const float traceOffsets[5][2] = { { 0.0, 0.0 }, { 1.0, 1.0 }, { -1.0, 1.0 }, { 
 #define DYNENT_CL_LINKED 4
 
 
-enum DynEntityType : int32_t
+enum DynEntityType : int
 {                                       // ...
     DYNENT_TYPE_INVALID = 0x0,
     DYNENT_TYPE_CLUTTER = 0x1,
@@ -23,7 +23,7 @@ enum DynEntityType : int32_t
     DYNENT_TYPE_COUNT = 0x3,
 };
 
-enum DynEntityCollType : int32_t
+enum DynEntityCollType : int
 {                                       // ...
     DYNENT_COLL_CLIENT_FIRST = 0x0,
     DYNENT_COLL_CLIENT_MODEL = 0x0,
@@ -41,9 +41,9 @@ struct DynEntityDef // sizeof=0x60
     const FxEffectDef *destroyFx;
     XModelPieces *destroyPieces;
     PhysPreset *physPreset;
-    int32_t health;
+    int health;
     PhysMass mass;
-    int32_t contents;
+    int contents;
 };
 static_assert(sizeof(DynEntityDef) == 0x60);
 
@@ -56,10 +56,10 @@ static_assert(sizeof(DynEntityPose) == 0x20);;
 
 struct DynEntityClient // sizeof=0xC
 {
-    int32_t physObjId;
+    int physObjId;
     uint16_t flags;
     uint16_t lightingHandle;
-    int32_t health;
+    int health;
 };
 static_assert(sizeof(DynEntityClient) == 0xC);
 
@@ -76,7 +76,7 @@ struct DynEntityAreaParms // sizeof=0x14
 {                                       // ...
     const float *mins;                  // ...
     const float *maxs;                  // ...
-    int32_t contentMask;                    // ...
+    int contentMask;                    // ...
     uint16_t *list;             // ...
     uint16_t maxCount;          // ...
     uint16_t count;             // ...
@@ -97,7 +97,7 @@ static_assert(sizeof(DynEntSortStruct) == 0x8);
 struct BreakablePiece // sizeof=0xC
 {                                       // ...
     const XModel *model;                // ...
-    int32_t physObjId;                      // ...
+    int physObjId;                      // ...
     uint16_t lightingHandle;    // ...
     bool active;                        // ...
     // padding byte
@@ -109,25 +109,25 @@ struct trace_t;
 struct moveclip_t;
 
 void __cdecl DynEntCl_RegisterDvars();
-void __cdecl DynEntCl_InitEntities(int32_t localClientNum);
+void __cdecl DynEntCl_InitEntities(int localClientNum);
 void __cdecl DynEntCl_LinkModel(uint16_t dynEntId);
 void __cdecl DynEntCl_LinkBrush(uint16_t dynEntId);
 double __cdecl DynEntCl_UpdateBModelWorldBounds(const DynEntityDef *dynEntDef, const GfxPlacement *pose);
-void __cdecl DynEntCl_ProcessEntities(int32_t localClientNum);
-void __cdecl DynEntCl_Shutdown(int32_t localClientNum);
+void __cdecl DynEntCl_ProcessEntities(int localClientNum);
+void __cdecl DynEntCl_Shutdown(int localClientNum);
 void __cdecl DynEntCl_UnlinkEntity(uint16_t dynEntId, DynEntityCollType drawType);
 void __cdecl DynEntCl_PointTrace(const pointtrace_t *clip, trace_t *results);
 void __cdecl DynEntCl_PointTrace_r(
     DynEntityCollType drawType,
     const pointtrace_t *clip,
-    uint32_t sectorIndex,
+    uint sectorIndex,
     float *p1,
     float *p2,
     trace_t *results);
 void __cdecl DynEntCl_ClipMoveTrace(const moveclip_t *clip, trace_t *results);
 void __cdecl DynEntCl_ClipMoveTrace_r(
     const moveclip_t *clip,
-    uint32_t sectorIndex,
+    uint sectorIndex,
     float *p1,
     float *p2,
     trace_t *results);
@@ -135,61 +135,61 @@ uint16_t __cdecl DynEntCl_AreaEntities(
     DynEntityDrawType drawType,
     const float *mins,
     const float *maxs,
-    int32_t contentMask,
+    int contentMask,
     uint16_t dynEntMaxCount,
     uint16_t *dynEntList);
 void __cdecl DynEntCl_AreaEntities_r(
     DynEntityCollType drawType,
-    uint32_t sectorIndex,
+    uint sectorIndex,
     DynEntityAreaParms *areaParms);
 void __cdecl DynEntCl_EntityImpactEvent(
     const trace_t *trace,
-    int32_t localClientNum,
-    int32_t sourceEntityNum,
+    int localClientNum,
+    int sourceEntityNum,
     const float *start,
     const float *hitPos,
     bool isMelee);
 void __cdecl DynEntCl_PlayImpactEffects(
-    int32_t localClientNum,
-    uint32_t sourceEntityNum,
-    uint32_t surfType,
+    int localClientNum,
+    uint sourceEntityNum,
+    uint surfType,
     const float *hitPos,
     const float *hitNormal);
 void __cdecl DynEntCl_PlayEventFx(const FxEffectDef *def, const float *origin, const float (*axis)[3]);
-char __cdecl DynEntCl_EventNeedsProcessed(int32_t localClientNum, int32_t sourceEntityNum);
+char __cdecl DynEntCl_EventNeedsProcessed(int localClientNum, int sourceEntityNum);
 char __cdecl DynEntCl_DynEntImpactEvent(
-    int32_t localClientNum,
-    int32_t sourceEntityNum,
+    int localClientNum,
+    int sourceEntityNum,
     float *start,
     float *end,
-    int32_t damage,
+    int damage,
     bool isMelee);
 dxBody *__cdecl DynEntCl_CreatePhysObj(const DynEntityDef *dynEntDef, const GfxPlacement *pose);
 void __cdecl DynEntCl_Damage(
-    int32_t localClientNum,
+    int localClientNum,
     uint16_t dynEntId,
     DynEntityCollType drawType,
     const float *hitPos,
     const float *hitDir,
-    int32_t damage);
+    int damage);
 void __cdecl DynEntCl_TestPhysicsEntities(
-    int32_t localClientNum,
-    int32_t sourceEntityNum,
+    int localClientNum,
+    int sourceEntityNum,
     float *start,
     float *end,
     bool isMelee);
-void __cdecl DynEntCl_MeleeEvent(int32_t localClientNum, int32_t sourceEntityNum);
+void __cdecl DynEntCl_MeleeEvent(int localClientNum, int sourceEntityNum);
 void __cdecl DynEntCl_ExplosionEvent(
-    int32_t localClientNum,
+    int localClientNum,
     bool isCylinder,
     float *origin,
     float innerRadius,
     float outerRadius,
     float *impulse,
     float inScale,
-    int32_t innerDamage,
-    int32_t outerDamage);
-uint32_t __cdecl DynEntCl_GetClosestEntities(
+    int innerDamage,
+    int outerDamage);
+uint __cdecl DynEntCl_GetClosestEntities(
     DynEntityDrawType drawType,
     float *radiusMins,
     float *radiusMaxs,
@@ -198,14 +198,14 @@ uint32_t __cdecl DynEntCl_GetClosestEntities(
     bool isCylinder);
 bool __cdecl DynEntCl_CompareDynEntsForExplosion(const DynEntSortStruct& ent1, const DynEntSortStruct& ent2);
 void __cdecl DynEntCl_JitterEvent(
-    int32_t localClientNum,
+    int localClientNum,
     float *origin,
     float innerRadius,
     float outerRadius,
     float minDisplacement,
     float maxDisplacement);
 void __cdecl DynEntCl_DestroyEvent(
-    int32_t localClientNum,
+    int localClientNum,
     uint16_t dynEntId,
     DynEntityCollType drawType,
     const float *hitPos,
@@ -220,14 +220,14 @@ void DynEntCl_WakeUpAroundPlayer(int localClientNum);
 void __cdecl DynEntPieces_RegisterDvars();
 void __cdecl DynEntPieces_AddDrawSurfs();
 void __cdecl DynEntPieces_SpawnPieces(
-    int32_t localClientNum,
+    int localClientNum,
     const XModelPieces *pieces,
     const float *origin,
     const float (*axis)[3],
     const float *hitPos,
     const float *hitDir);
 bool __cdecl DynEntPieces_SpawnPhysicsModel(
-    int32_t localClientNum,
+    int localClientNum,
     const XModel *model,
     const float *offset,
     const float *origin,
@@ -268,7 +268,7 @@ struct DynEntityCreateParams // sizeof=0x1C0
     char physPresetFile[64];            // ...
     float origin[3];                    // ...
     float angles[3];                    // ...
-    int32_t health;                         // ...
+    int health;                         // ...
     float centerOfMass[3];              // ...
     float momentsOfInertia[3];          // ...
     float productsOfInertia[3];         // ...
@@ -289,7 +289,7 @@ DynEntityPose *__cdecl DynEnt_GetClientModelPoseList();
 DynEntityPose *__cdecl DynEnt_GetClientPose(uint16_t dynEntId, DynEntityDrawType drawType);
 DynEntityClient *__cdecl DynEnt_GetClientEntity(uint16_t dynEntId, DynEntityDrawType drawType);
 DynEntityColl *__cdecl DynEnt_GetEntityColl(DynEntityCollType collType, uint16_t dynEntId);
-int32_t __cdecl DynEnt_GetXModelUsageCount(const XModel *xModel);
+int __cdecl DynEnt_GetXModelUsageCount(const XModel *xModel);
 void DynEnt_SaveEntities(struct MemoryFile *memFile);
 
 
@@ -314,7 +314,7 @@ static_assert(sizeof(DynEntityCollTree) == 0xC);
 struct DynEntityCollSector // sizeof=0x14
 {                                       // ...
     DynEntityCollTree tree;
-    int32_t contents;
+    int contents;
     uint16_t entListHead;
     // padding byte
     // padding byte
@@ -333,7 +333,7 @@ struct DynEntityCollWorld // sizeof=0x501C
 static_assert(sizeof(DynEntityCollWorld) == 0x501C);
 
 void __cdecl TRACK_DynEntityCollWorld();
-DynEntityCollSector *__cdecl DynEnt_GetCollSector(DynEntityCollType collType, uint32_t sectorIndex);
+DynEntityCollSector *__cdecl DynEnt_GetCollSector(DynEntityCollType collType, uint sectorIndex);
 void __cdecl DynEnt_ClearCollWorld(DynEntityCollType collType);
 void __cdecl DynEnt_UnlinkEntity(DynEntityCollType collType, uint16_t dynEntId);
 void __cdecl DynEnt_LinkEntity(
@@ -351,7 +351,7 @@ void __cdecl DynEnt_SortCollSector(
     const float *mins,
     const float *maxs);
 uint16_t __cdecl DynEnt_AllocCollSector(DynEntityCollType collType, const float *mins, const float *maxs);
-int32_t __cdecl DynEnt_GetContents(const DynEntityDef *dynEntDef);
+int __cdecl DynEnt_GetContents(const DynEntityDef *dynEntDef);
 void __cdecl DynEnt_GetLocalBounds(const DynEntityDef *dynEntDef, float *mins, float *maxs);
 void __cdecl DynEnt_GetWorldBounds(const DynEntityPose *dynEntPose, float *mins, float *maxs);
 double __cdecl DynEnt_GetRadiusDistSqr(const DynEntityPose *dynEntPose, const float *origin);
@@ -361,7 +361,7 @@ bool __cdecl DynEnt_EntityInArea(
     const DynEntityPose *dynEntPose,
     const float *mins,
     const float *maxs,
-    int32_t contentMask);
+    int contentMask);
 void __cdecl DynEnt_PointTraceToModel(
     const DynEntityDef *dynEntDef,
     const DynEntityPose *dynEntPose,
@@ -380,6 +380,6 @@ void __cdecl DynEnt_ClipMoveTraceToBrush(
 void __cdecl DynEnt_SetPhysObjCollision(const DynEntityDef *dynEntDef, dxBody *physId);
 
 
-extern int32_t numPieces;
+extern int numPieces;
 extern BreakablePiece g_breakablePieces[100];
 

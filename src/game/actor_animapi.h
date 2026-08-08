@@ -4,7 +4,7 @@
 #error This file is for SinglePlayer only 
 #endif
 
-enum ai_animmode_t : __int32
+enum ai_animmode_t : int
 {
     AI_ANIM_UNKNOWN = 0x0,
     AI_ANIM_MOVE_CODE = 0x1,

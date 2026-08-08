@@ -359,7 +359,7 @@ void __cdecl GScr_AddFieldsForEntity()
     for (f = fields_1; f->name; ++f)
     {
         iassert(((f - fields_1) & ENTFIELD_MASK) == ENTFIELD_ENTITY);
-        iassert((f - fields_1) == (unsigned short)(f - fields_1));
+        iassert((f - fields_1) == (ushort)(f - fields_1));
 
         Scr_AddClassField(CLASS_NUM_ENTITY, (char*)f->name, (unsigned __int16)(f - fields_1));
     }
@@ -893,13 +893,13 @@ void __cdecl G_ParseEntityField(const char *key, const char *value, gentity_s *e
     switch (f->type)
     {
     case F_INT:
-        *(int32_t *)((char *)ent + f->ofs) = atoi(value);
+        *(int *)((char *)ent + f->ofs) = atoi(value);
         break;
     case F_SHORT:
         *(_WORD *)((char*)ent + f->ofs) = atol(value);
         break;
     case F_BYTE:
-        *((unsigned char*)ent + f->ofs) = (entityType_t)atol(value);
+        *((byte*)ent + f->ofs) = (entityType_t)atol(value);
         break;
     case F_FLOAT:
         *(float *)((char *)ent + f->ofs) = atof(value);
@@ -1286,7 +1286,7 @@ int __cdecl Scr_SetEntityField(unsigned int entnum, unsigned int offset)
         if (callback)
             callback(v11, offset);
         else
-            Scr_SetGenericField((unsigned char*)&v11->s.eType, v12->type, v12->ofs);
+            Scr_SetGenericField((byte*)&v11->s.eType, v12->type, v12->ofs);
         return 1;
     }
 }
@@ -1387,7 +1387,7 @@ void __cdecl Scr_GetEntityField(unsigned int entnum, unsigned int offset)
                 0,
                 "%s",
                 "(unsigned)offset < ARRAY_COUNT( fields ) - 1");
-        Scr_GetGenericField((unsigned char*)&g_entities[entnum].s.eType, fields_1[offset].type, fields_1[offset].ofs);
+        Scr_GetGenericField((byte*)&g_entities[entnum].s.eType, fields_1[offset].type, fields_1[offset].ofs);
         break;
     }
 }

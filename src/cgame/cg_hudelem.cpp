@@ -226,15 +226,15 @@ void __cdecl CG_HudElemRegisterDvars()
 }
 
 void __cdecl CG_TranslateHudElemMessage(
-    int32_t localClientNum,
+    int localClientNum,
     const char *message,
     const char *messageType,
     char *hudElemString)
 {
     const char *v4; // eax
     char *translatedString; // [esp+10h] [ebp-Ch]
-    uint32_t stringLen; // [esp+14h] [ebp-8h] BYREF
-    uint32_t searchPos; // [esp+18h] [ebp-4h] BYREF
+    uint stringLen; // [esp+14h] [ebp-8h] BYREF
+    uint searchPos; // [esp+18h] [ebp-4h] BYREF
 
     iassert(message);
     iassert(hudElemString);
@@ -257,21 +257,21 @@ void __cdecl CG_TranslateHudElemMessage(
     }
 }
 
-char __cdecl ReplaceDirective(int32_t localClientNum, uint32_t *searchPos, uint32_t *dstLen, char *dstString)
+char __cdecl ReplaceDirective(int localClientNum, uint *searchPos, uint *dstLen, char *dstString)
 {
     const char *v4; // eax
     const char *v6; // eax
     const char *v7; // eax
     const char *v8; // eax
     const char *v9; // eax
-    int32_t directiveLen; // [esp+34h] [ebp-324h]
+    int directiveLen; // [esp+34h] [ebp-324h]
     const char *startTokenPos; // [esp+38h] [ebp-320h]
-    int32_t newStringLen; // [esp+3Ch] [ebp-31Ch]
-    uint32_t bindingLen; // [esp+40h] [ebp-318h]
-    uint32_t endLen; // [esp+44h] [ebp-314h]
+    int newStringLen; // [esp+3Ch] [ebp-31Ch]
+    uint bindingLen; // [esp+40h] [ebp-318h]
+    uint endLen; // [esp+44h] [ebp-314h]
     char keyBinding[256]; // [esp+48h] [ebp-310h] BYREF
     uint8_t srcString[260]; // [esp+148h] [ebp-210h] BYREF
-    int32_t beginLen; // [esp+24Ch] [ebp-10Ch]
+    int beginLen; // [esp+24Ch] [ebp-10Ch]
     char directive[256]; // [esp+250h] [ebp-108h] BYREF
     const char *endTokenPos; // [esp+354h] [ebp-4h]
     char *dstStringa; // [esp+36Ch] [ebp+14h]
@@ -345,7 +345,7 @@ char __cdecl ReplaceDirective(int32_t localClientNum, uint32_t *searchPos, uint3
     }
 }
 
-void __cdecl GetHudelemDirective(int32_t localClientNum, char *directive, char *result)
+void __cdecl GetHudelemDirective(int localClientNum, char *directive, char *result)
 {
     char *v3; // eax
     char arg0[256]; // [esp+0h] [ebp-208h] BYREF
@@ -370,13 +370,13 @@ void __cdecl GetHudelemDirective(int32_t localClientNum, char *directive, char *
     }
 }
 
-void __cdecl DirectiveFakeIntroSeconds(int32_t localClientNum, const char *arg0, char *result)
+void __cdecl DirectiveFakeIntroSeconds(int localClientNum, const char *arg0, char *result)
 {
-    int32_t fakeSeconds; // [esp+4h] [ebp-4h] BYREF
+    int fakeSeconds; // [esp+4h] [ebp-4h] BYREF
 
     fakeSeconds = 0;
     fakeSeconds = (int)strtol(arg0, NULL, 10);
-    if ((uint32_t)fakeSeconds > 0x28)
+    if ((uint)fakeSeconds > 0x28)
     {
         fakeSeconds = 0;
         Com_PrintWarning(
@@ -412,14 +412,14 @@ void __cdecl ParseDirective(char *directive, char *resultName, char *resultArg0)
     }
 }
 
-void __cdecl CG_Draw2dHudElems(int32_t localClientNum, int32_t foreground)
+void __cdecl CG_Draw2dHudElems(int localClientNum, int foreground)
 {
     PROF_SCOPED("CG_Draw2dHudElems");
 
     bool v2; // [esp+7h] [ebp-100Dh]
-    int32_t i; // [esp+8h] [ebp-100Ch]
+    int i; // [esp+8h] [ebp-100Ch]
     hudelem_s *elems[1025]; // [esp+Ch] [ebp-1008h] BYREF
-    int32_t SortedHudElems; // [esp+1010h] [ebp-4h]
+    int SortedHudElems; // [esp+1010h] [ebp-4h]
     cg_s *cgameGlob;
 
     cgameGlob = CG_GetLocalClientGlobals(localClientNum);
@@ -441,7 +441,7 @@ void __cdecl CG_Draw2dHudElems(int32_t localClientNum, int32_t foreground)
     }
 }
 
-void __cdecl DrawSingleHudElem2d(int32_t localClientNum, const hudelem_s *elem)
+void __cdecl DrawSingleHudElem2d(int localClientNum, const hudelem_s *elem)
 {
     char hudElemString[256]; // [esp+8h] [ebp-340h] BYREF
     cg_hudelem_t cghe; // [esp+108h] [ebp-240h] BYREF
@@ -524,15 +524,15 @@ void __cdecl DrawSingleHudElem2d(int32_t localClientNum, const hudelem_s *elem)
     }
 }
 
-void __cdecl GetHudElemInfo(int32_t localClientNum, const hudelem_s *elem, cg_hudelem_t *cghe, char *hudElemString)
+void __cdecl GetHudElemInfo(int localClientNum, const hudelem_s *elem, cg_hudelem_t *cghe, char *hudElemString)
 {
     char *v6; // eax
     char *v7; // eax
     float v8; // [esp+10h] [ebp-30h]
-    int32_t fontEnum; // [esp+28h] [ebp-18h]
+    int fontEnum; // [esp+28h] [ebp-18h]
     const ScreenPlacement *scrPlace; // [esp+2Ch] [ebp-14h]
     float baseFontScale; // [esp+30h] [ebp-10h]
-    uint32_t namedClientIndex; // [esp+38h] [ebp-8h]
+    uint namedClientIndex; // [esp+38h] [ebp-8h]
 
     scrPlace = &scrPlaceView[localClientNum];
     switch (elem->font)
@@ -654,7 +654,7 @@ void __cdecl GetHudElemInfo(int32_t localClientNum, const hudelem_s *elem, cg_hu
     SetHudElemPos(&scrPlaceView[localClientNum], elem, cghe);
 }
 
-void __cdecl SafeTranslateHudElemString(int32_t localClientNum, int32_t index, char *hudElemString)
+void __cdecl SafeTranslateHudElemString(int localClientNum, int index, char *hudElemString)
 {
     iassert(hudElemString);
 
@@ -672,12 +672,12 @@ double __cdecl HudElemStringWidth(const char *string, const cg_hudelem_t *cghe)
     return (float)(v4 / CL_GetScreenAspectRatioDisplayPixel());
 }
 
-char *__cdecl HudElemTimerString(const hudelem_s *elem, int32_t timeNow)
+char *__cdecl HudElemTimerString(const hudelem_s *elem, int timeNow)
 {
-    int32_t HudElemTime; // eax
-    int32_t hours; // [esp+0h] [ebp-10h]
-    int32_t seconds; // [esp+4h] [ebp-Ch]
-    int32_t minutes; // [esp+8h] [ebp-8h]
+    int HudElemTime; // eax
+    int hours; // [esp+0h] [ebp-10h]
+    int seconds; // [esp+4h] [ebp-Ch]
+    int minutes; // [esp+8h] [ebp-8h]
 
     HudElemTime = GetHudElemTime(elem, timeNow);
     hours = HudElemTime / 1000 / 3600;
@@ -689,10 +689,10 @@ char *__cdecl HudElemTimerString(const hudelem_s *elem, int32_t timeNow)
         return va("%i:%02i", minutes, seconds);
 }
 
-int32_t __cdecl GetHudElemTime(const hudelem_s *elem, int32_t timeNow)
+int __cdecl GetHudElemTime(const hudelem_s *elem, int timeNow)
 {
-    int32_t result; // eax
-    int32_t time; // [esp+4h] [ebp-4h]
+    int result; // eax
+    int time; // [esp+4h] [ebp-4h]
 
     switch (elem->type)
     {
@@ -723,13 +723,13 @@ int32_t __cdecl GetHudElemTime(const hudelem_s *elem, int32_t timeNow)
     return result;
 }
 
-char *__cdecl HudElemTenthsTimerString(const hudelem_s *elem, int32_t timeNow)
+char *__cdecl HudElemTenthsTimerString(const hudelem_s *elem, int timeNow)
 {
-    int32_t HudElemTime; // eax
-    int32_t hours; // [esp+0h] [ebp-14h]
-    int32_t seconds; // [esp+4h] [ebp-10h]
-    int32_t minutes; // [esp+8h] [ebp-Ch]
-    int32_t tenths; // [esp+10h] [ebp-4h]
+    int HudElemTime; // eax
+    int hours; // [esp+0h] [ebp-14h]
+    int seconds; // [esp+4h] [ebp-10h]
+    int minutes; // [esp+8h] [ebp-Ch]
+    int tenths; // [esp+10h] [ebp-4h]
 
     HudElemTime = GetHudElemTime(elem, timeNow);
     hours = HudElemTime / 100 / 36000;
@@ -812,7 +812,7 @@ double __cdecl HudElemMaterialWidth(const ScreenPlacement *scrPlace, const hudel
 {
     float width; // [esp+1Ch] [ebp-10h]
     float lerp; // [esp+20h] [ebp-Ch]
-    int32_t deltaTime; // [esp+24h] [ebp-8h]
+    int deltaTime; // [esp+24h] [ebp-8h]
     float fromWidth; // [esp+28h] [ebp-4h]
 
     width = HudElemMaterialSpecifiedWidth(scrPlace, elem->alignScreen, elem->width, cghe);
@@ -837,7 +837,7 @@ double __cdecl HudElemMaterialWidth(const ScreenPlacement *scrPlace, const hudel
 double __cdecl HudElemMaterialSpecifiedWidth(
     const ScreenPlacement *scrPlace,
     char alignScreen,
-    int32_t sizeVirtual,
+    int sizeVirtual,
     const cg_hudelem_t *cghe)
 {
     if (!sizeVirtual)
@@ -922,7 +922,7 @@ double __cdecl HudElemMaterialHeight(const ScreenPlacement *scrPlace, const hude
 {
     float height; // [esp+1Ch] [ebp-10h]
     float lerp; // [esp+20h] [ebp-Ch]
-    int32_t deltaTime; // [esp+24h] [ebp-8h]
+    int deltaTime; // [esp+24h] [ebp-8h]
     float fromHeight; // [esp+28h] [ebp-4h]
 
     height = HudElemMaterialSpecifiedHeight(scrPlace, elem->alignScreen, elem->height, cghe);
@@ -946,7 +946,7 @@ double __cdecl HudElemMaterialHeight(const ScreenPlacement *scrPlace, const hude
 double __cdecl HudElemMaterialSpecifiedHeight(
     const ScreenPlacement *scrPlace,
     char alignScreen,
-    int32_t sizeVirtual,
+    int sizeVirtual,
     const cg_hudelem_t *cghe)
 {
     if (!sizeVirtual)
@@ -1002,8 +1002,8 @@ void __cdecl SetHudElemPos(const ScreenPlacement *scrPlace, const hudelem_s *ele
 
 void __cdecl GetHudElemOrg(
     const ScreenPlacement *scrPlace,
-    int32_t alignOrg,
-    int32_t alignScreen,
+    int alignOrg,
+    int alignScreen,
     float xVirtual,
     float yVirtual,
     float width,
@@ -1024,9 +1024,9 @@ void __cdecl GetHudElemOrg(
     *orgY = AlignHudElemY(alignOrg, y, height);
 }
 
-double __cdecl AlignHudElemX(int32_t alignOrg, float x, float width)
+double __cdecl AlignHudElemX(int alignOrg, float x, float width)
 {
-    uint32_t alignX; // [esp+4h] [ebp-4h]
+    uint alignX; // [esp+4h] [ebp-4h]
 
     alignX = (alignOrg >> 2) & 3;
 
@@ -1035,9 +1035,9 @@ double __cdecl AlignHudElemX(int32_t alignOrg, float x, float width)
     return (float)(x - width * s_alignScale[alignX]);
 }
 
-double __cdecl AlignHudElemY(int32_t alignOrg, float y, float height)
+double __cdecl AlignHudElemY(int alignOrg, float y, float height)
 {
-    int32_t alignY; // [esp+4h] [ebp-4h]
+    int alignY; // [esp+4h] [ebp-4h]
 
     alignY = alignOrg & 3;
 
@@ -1046,9 +1046,9 @@ double __cdecl AlignHudElemY(int32_t alignOrg, float y, float height)
     return (float)(y - height * s_alignScale[alignY]);
 }
 
-double __cdecl HudElemMovementFrac(const hudelem_s *elem, int32_t timeNow)
+double __cdecl HudElemMovementFrac(const hudelem_s *elem, int timeNow)
 {
-    int32_t time; // [esp+4h] [ebp-4h]
+    int time; // [esp+4h] [ebp-4h]
 
     if (elem->moveTime <= 0)
         return 1.0;
@@ -1062,9 +1062,9 @@ double __cdecl HudElemMovementFrac(const hudelem_s *elem, int32_t timeNow)
 
 void __cdecl ConsolidateHudElemText(cg_hudelem_t *cghe, char *hudElemString)
 {
-    int32_t len; // [esp+8h] [ebp-Ch]
-    int32_t textIndex; // [esp+Ch] [ebp-8h]
-    int32_t labelIndex; // [esp+10h] [ebp-4h]
+    int len; // [esp+8h] [ebp-Ch]
+    int textIndex; // [esp+Ch] [ebp-8h]
+    int labelIndex; // [esp+10h] [ebp-4h]
 
     len = 0;
     for (labelIndex = 0; len < 255 && cghe->hudElemLabel[labelIndex]; ++labelIndex)
@@ -1091,9 +1091,9 @@ void __cdecl ConsolidateHudElemText(cg_hudelem_t *cghe, char *hudElemString)
 
 void __cdecl CopyStringToHudElemString(char *string, char *hudElemString)
 {
-    int32_t v2; // ecx
+    int v2; // ecx
     const char *v3; // eax
-    int32_t stringLen; // [esp+10h] [ebp-4h]
+    int stringLen; // [esp+10h] [ebp-4h]
 
     iassert(string);
 
@@ -1167,7 +1167,7 @@ void __cdecl HudElemColorToVec4(const hudelem_color_t *hudElemColor, float *resu
 }
 
 void __cdecl DrawHudElemString(
-    uint32_t localClientNum,
+    uint localClientNum,
     const ScreenPlacement *scrPlace,
     char *text,
     const hudelem_s *elem,
@@ -1176,9 +1176,9 @@ void __cdecl DrawHudElemString(
     float v5; // [esp+34h] [ebp-2Ch]
     float offsetY; // [esp+38h] [ebp-28h]
     float v7; // [esp+3Ch] [ebp-24h]
-    int32_t strLength; // [esp+44h] [ebp-1Ch]
+    int strLength; // [esp+44h] [ebp-1Ch]
     float textScale; // [esp+48h] [ebp-18h]
-    int32_t fxBirthTime; // [esp+4Ch] [ebp-14h]
+    int fxBirthTime; // [esp+4Ch] [ebp-14h]
     float y; // [esp+54h] [ebp-Ch]
     float scaleX; // [esp+58h] [ebp-8h]
     float dy; // [esp+5Ch] [ebp-4h]
@@ -1250,7 +1250,7 @@ double __cdecl OffsetHudElemY(const hudelem_s *elem, const cg_hudelem_t *cghe, f
     return (float)((from - to) * lerp + from);
 }
 
-void __cdecl DrawHudElemClock(int32_t localClientNum, const hudelem_s *elem, const cg_hudelem_t *cghe)
+void __cdecl DrawHudElemClock(int localClientNum, const hudelem_s *elem, const cg_hudelem_t *cghe)
 {
     float offsetY; // [esp+28h] [ebp-70h]
     float v4; // [esp+2Ch] [ebp-6Ch]
@@ -1260,7 +1260,7 @@ void __cdecl DrawHudElemClock(int32_t localClientNum, const hudelem_s *elem, con
     float angle; // [esp+3Ch] [ebp-5Ch]
     char materialName[68]; // [esp+40h] [ebp-58h] BYREF
     Material *handMaterial; // [esp+88h] [ebp-10h]
-    int32_t time; // [esp+8Ch] [ebp-Ch]
+    int time; // [esp+8Ch] [ebp-Ch]
     Material *faceMaterial; // [esp+90h] [ebp-8h]
     float y; // [esp+94h] [ebp-4h]
 
@@ -1298,7 +1298,7 @@ void __cdecl DrawHudElemClock(int32_t localClientNum, const hudelem_s *elem, con
     }
 }
 
-void __cdecl DrawHudElemMaterial(int32_t localClientNum, const hudelem_s *elem, cg_hudelem_t *cghe)
+void __cdecl DrawHudElemMaterial(int localClientNum, const hudelem_s *elem, cg_hudelem_t *cghe)
 {
     float offsetY; // [esp+28h] [ebp-58h]
     Material *material; // [esp+2Ch] [ebp-54h]
@@ -1319,7 +1319,7 @@ void __cdecl DrawHudElemMaterial(int32_t localClientNum, const hudelem_s *elem, 
     }
 }
 
-void __cdecl DrawOffscreenViewableWaypoint(int32_t localClientNum, const hudelem_s *elem)
+void __cdecl DrawOffscreenViewableWaypoint(int localClientNum, const hudelem_s *elem)
 {
     double v2; // st7
     float v3; // [esp+2Ch] [ebp-118h]
@@ -1494,7 +1494,7 @@ void __cdecl DrawOffscreenViewableWaypoint(int32_t localClientNum, const hudelem
 static void __cdecl CG_GetViewAxisProjections(const refdef_s *refdef, const float *worldPoint, float *projections)
 {
     float eyeDelta[3]; // [esp+0h] [ebp-10h] BYREF
-    int32_t i; // [esp+Ch] [ebp-4h]
+    int i; // [esp+Ch] [ebp-4h]
 
     Vec3Sub(worldPoint, refdef->vieworg, eyeDelta);
     for (i = 0; i < 3; ++i)
@@ -1504,7 +1504,7 @@ static void __cdecl CG_GetViewAxisProjections(const refdef_s *refdef, const floa
 }
 #endif
 
-char __cdecl WorldPosToScreenPos(int32_t localClientNum, const float *worldPos, float *outScreenPos)
+char __cdecl WorldPosToScreenPos(int localClientNum, const float *worldPos, float *outScreenPos)
 {
     float v4; // [esp+0h] [ebp-64h]
     float v5; // [esp+4h] [ebp-60h]
@@ -1576,7 +1576,7 @@ char __cdecl WorldPosToScreenPos(int32_t localClientNum, const float *worldPos, 
 }
 
 bool __cdecl ClampScreenPosToEdges(
-    int32_t localClientNum,
+    int localClientNum,
     float *point,
     float padLeft,
     float padRight,
@@ -1721,7 +1721,7 @@ bool __cdecl ClampScreenPosToEdges(
     return clamped;
 }
 
-float __cdecl GetScaleForDistance(int32_t localClientNum, const float *worldPos)
+float __cdecl GetScaleForDistance(int localClientNum, const float *worldPos)
 {
     float diff[4]; // [esp+8h] [ebp-18h] BYREF
     float range; // [esp+18h] [ebp-8h]
@@ -1742,10 +1742,10 @@ float __cdecl GetScaleForDistance(int32_t localClientNum, const float *worldPos)
     return range * waypointDistScaleSmallest->current.value + (1.0f - range) * 1.0f;
 }
 
-int32_t __cdecl GetSortedHudElems(int32_t localClientNum, hudelem_s **elems)
+int __cdecl GetSortedHudElems(int localClientNum, hudelem_s **elems)
 {
     playerState_s *ps; // [esp+4h] [ebp-8h]
-    int32_t elemCount; // [esp+8h] [ebp-4h] BYREF
+    int elemCount; // [esp+8h] [ebp-4h] BYREF
     const cg_s *clientGlob;
 
     clientGlob = CG_GetLocalClientGlobals(localClientNum);
@@ -1767,20 +1767,20 @@ int32_t __cdecl GetSortedHudElems(int32_t localClientNum, hudelem_s **elems)
     return elemCount;
 }
 
-void __cdecl CopyInUseHudElems(hudelem_s **elems, int32_t *elemCount, hudelem_s *elemSrcArray, int32_t elemSrcArrayCount)
+void __cdecl CopyInUseHudElems(hudelem_s **elems, int *elemCount, hudelem_s *elemSrcArray, int elemSrcArrayCount)
 {
-    int32_t i; // [esp+0h] [ebp-4h]
+    int i; // [esp+0h] [ebp-4h]
 
     for (i = 0; i < elemSrcArrayCount && elemSrcArray[i].type; ++i)
         elems[(*elemCount)++] = &elemSrcArray[i];
 }
 
-void __cdecl CG_AddDrawSurfsFor3dHudElems(int32_t localClientNum)
+void __cdecl CG_AddDrawSurfsFor3dHudElems(int localClientNum)
 {
-    int32_t i; // [esp+0h] [ebp-104h]
+    int i; // [esp+0h] [ebp-104h]
     //hudelem_s *elems[62]; // [esp+4h] [ebp-100h] BYREF
     hudelem_s *elems[264]; // LWSS: 264 in SP (KISAKTODO #define)
-    int32_t elemCount; // [esp+100h] [ebp-4h]
+    int elemCount; // [esp+100h] [ebp-4h]
 
 #ifdef KISAK_MP
     if (CG_ShouldDrawHud(localClientNum))
@@ -1796,19 +1796,19 @@ void __cdecl CG_AddDrawSurfsFor3dHudElems(int32_t localClientNum)
     }
 }
 
-void AddDrawSurfForHudElemWaypoint(int32_t localClientNum, const hudelem_s *elem)
+void AddDrawSurfForHudElemWaypoint(int localClientNum, const hudelem_s *elem)
 {
     FxSprite sprite; // [esp-94h] [ebp-A0h] BYREF
     float z; // [esp-70h] [ebp-7Ch]
     float y; // [esp-6Ch] [ebp-78h]
     float x; // [esp-68h] [ebp-74h]
     float v6; // [esp-64h] [ebp-70h]
-    int32_t v7; // [esp-60h] [ebp-6Ch]
+    int v7; // [esp-60h] [ebp-6Ch]
     float v8; // [esp-5Ch] [ebp-68h]
     Material *v9; // [esp-58h] [ebp-64h]
     char v10[68]; // [esp-54h] [ebp-60h] BYREF
     hudelem_color_t v11; // [esp-10h] [ebp-1Ch] BYREF
-    int32_t time; // [esp-Ch] [ebp-18h]
+    int time; // [esp-Ch] [ebp-18h]
     const cg_s *cgameGlob;
 
     cgameGlob = CG_GetLocalClientGlobals(localClientNum);
@@ -1852,11 +1852,11 @@ void AddDrawSurfForHudElemWaypoint(int32_t localClientNum, const hudelem_s *elem
     }
 }
 
-float __cdecl HudElemWaypointHeight(int32_t localClientNum, const hudelem_s *elem)
+float __cdecl HudElemWaypointHeight(int localClientNum, const hudelem_s *elem)
 {
     float height; // [esp+20h] [ebp-10h]
     float lerp; // [esp+24h] [ebp-Ch]
-    int32_t deltaTime; // [esp+28h] [ebp-8h]
+    int deltaTime; // [esp+28h] [ebp-8h]
     float fromHeight; // [esp+2Ch] [ebp-4h]
 
     height = (float)elem->height;

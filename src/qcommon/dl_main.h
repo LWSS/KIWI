@@ -1,6 +1,6 @@
 #pragma once
 
-enum dlStatus_t : __int32
+enum dlStatus_t : int
 {                                       // ...
     DL_CONTINUE = 0x0,
     DL_DONE = 0x1,

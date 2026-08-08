@@ -134,12 +134,12 @@ void __cdecl TRACK_g_main()
     track_static_alloc_internal(g_entinfoNames, 12, "g_entinfoNames", 0);
 }
 
-int32_t __cdecl G_GetSavePersist()
+int __cdecl G_GetSavePersist()
 {
     return level.savepersist;
 }
 
-void __cdecl G_SetSavePersist(int32_t savepersist)
+void __cdecl G_SetSavePersist(int savepersist)
 {
     level.savepersist = savepersist;
 }
@@ -149,32 +149,32 @@ double __cdecl G_GetFogOpaqueDistSqrd()
     return level.fFogOpaqueDistSqrd;
 }
 
-int32_t __cdecl G_GetClientScore(int32_t clientNum)
+int __cdecl G_GetClientScore(int clientNum)
 {
     return level.clients[clientNum].sess.score;
 }
 
-int32_t __cdecl G_GetClientArchiveTime(int32_t clientNum)
+int __cdecl G_GetClientArchiveTime(int clientNum)
 {
     return level.clients[clientNum].sess.archiveTime;
 }
 
-void __cdecl G_SetClientArchiveTime(int32_t clientNum, int32_t time)
+void __cdecl G_SetClientArchiveTime(int clientNum, int time)
 {
     level.clients[clientNum].sess.archiveTime = time;
 }
 
-clientState_s *__cdecl G_GetClientState(int32_t clientNum)
+clientState_s *__cdecl G_GetClientState(int clientNum)
 {
     return &level.clients[clientNum].sess.cs;
 }
 
-gclient_s *__cdecl G_GetPlayerState(int32_t clientNum)
+gclient_s *__cdecl G_GetPlayerState(int clientNum)
 {
     return &level.clients[clientNum];
 }
 
-int32_t __cdecl G_GetClientSize()
+int __cdecl G_GetClientSize()
 {
     return 12676;
 }
@@ -182,8 +182,8 @@ int32_t __cdecl G_GetClientSize()
 void __cdecl G_FreeEntities()
 {
     gentity_s *e; // [esp+0h] [ebp-8h]
-    int32_t i; // [esp+4h] [ebp-4h]
-    int32_t ia; // [esp+4h] [ebp-4h]
+    int i; // [esp+4h] [ebp-4h]
+    int ia; // [esp+4h] [ebp-4h]
 
     e = g_entities;
     for (i = 0; i < level.num_entities; ++i)
@@ -209,7 +209,7 @@ bool __cdecl G_ExitAfterConnectPaths()
     return 0;
 }
 
-int32_t __cdecl G_IsServerGameSystem(int32_t clientNum)
+int __cdecl G_IsServerGameSystem(int clientNum)
 {
     if (!g_debugPlayerAnimScript)
         return 0;
@@ -221,13 +221,13 @@ int32_t __cdecl G_IsServerGameSystem(int32_t clientNum)
     return 1;
 }
 
-void __cdecl G_InitGame(int32_t levelTime, int32_t randomSeed, int32_t restart, int32_t savepersist)
+void __cdecl G_InitGame(int levelTime, int randomSeed, int restart, int savepersist)
 {
     com_parse_mark_t *v4; // edx
     char serverinfo[1028]; // [esp+4h] [ebp-810h] BYREF
-    int32_t file; // [esp+408h] [ebp-40Ch]
+    int file; // [esp+408h] [ebp-40Ch]
     char buffer[1024]; // [esp+40Ch] [ebp-408h] BYREF
-    int32_t i; // [esp+810h] [ebp-4h]
+    int i; // [esp+810h] [ebp-4h]
 
     if (!Sys_IsMainThread())
         MyAssertHandler(".\\game_mp\\g_main_mp.cpp", 992, 0, "%s", "Sys_IsMainThread()");
@@ -355,7 +355,7 @@ void __cdecl G_InitGame(int32_t levelTime, int32_t randomSeed, int32_t restart, 
     SaveRegisteredItems();
 }
 
-int32_t MY_DEFAULT_USEHOLDSPAWNDELAY = 500;
+int MY_DEFAULT_USEHOLDSPAWNDELAY = 500;
 
 const dvar_s *G_RegisterDvars()
 {
@@ -754,8 +754,8 @@ void __cdecl G_CreateDObj(
     DObjModel_s *dobjModels,
     uint16_t numModels,
     XAnimTree_s *tree,
-    uint32_t handle,
-    int32_t unusedLocalClientNum)
+    uint handle,
+    int unusedLocalClientNum)
 {
     if (unusedLocalClientNum != -1)
         MyAssertHandler(
@@ -768,7 +768,7 @@ void __cdecl G_CreateDObj(
     Com_ServerDObjCreate(dobjModels, numModels, tree, handle);
 }
 
-DObj_s *__cdecl G_GetDObj(uint32_t handle, int32_t unusedLocalClientNum)
+DObj_s *__cdecl G_GetDObj(uint handle, int unusedLocalClientNum)
 {
     if (unusedLocalClientNum != -1)
         MyAssertHandler(
@@ -814,9 +814,9 @@ void __cdecl G_PrintFastFileErrors(const char *fastfile)
     }
 }
 
-void __cdecl G_ShutdownGame(int32_t freeScripts)
+void __cdecl G_ShutdownGame(int freeScripts)
 {
-    int32_t file; // [esp+0h] [ebp-4h]
+    int file; // [esp+0h] [ebp-4h]
 
     Com_Printf(15, "==== ShutdownGame (%d) ====\n", freeScripts);
     if (level.logFile)
@@ -853,11 +853,11 @@ void __cdecl G_ShutdownGame(int32_t freeScripts)
     SV_track_shutdown();
 }
 
-int32_t G_FreeAnimTreeInstances()
+int G_FreeAnimTreeInstances()
 {
-    int32_t result; // eax
-    int32_t i; // [esp+0h] [ebp-4h]
-    int32_t ia; // [esp+0h] [ebp-4h]
+    int result; // eax
+    int i; // [esp+0h] [ebp-4h]
+    int ia; // [esp+0h] [ebp-4h]
 
     for (i = 0; i < 64; ++i)
     {
@@ -883,7 +883,7 @@ int32_t G_FreeAnimTreeInstances()
 
 void __cdecl SendScoreboardMessageToAllIntermissionClients()
 {
-    int32_t i; // [esp+4h] [ebp-4h]
+    int i; // [esp+4h] [ebp-4h]
 
     if (level.bUpdateScoresForIntermission)
     {
@@ -898,7 +898,7 @@ void __cdecl SendScoreboardMessageToAllIntermissionClients()
 
 void __cdecl CalculateRanks()
 {
-    int32_t i; // [esp+0h] [ebp-4h]
+    int i; // [esp+0h] [ebp-4h]
 
     level.numConnectedClients = 0;
     level.numVotingClients = 0;
@@ -915,7 +915,7 @@ void __cdecl CalculateRanks()
     level.bUpdateScoresForIntermission = 1;
 }
 
-int32_t __cdecl SortRanks(uint32_t *a, uint32_t *b)
+int __cdecl SortRanks(uint *a, uint *b)
 {
     gclient_s *cb; // [esp+0h] [ebp-8h]
     gclient_s *ca; // [esp+4h] [ebp-4h]
@@ -963,8 +963,8 @@ int32_t __cdecl SortRanks(uint32_t *a, uint32_t *b)
 
 void __cdecl ExitLevel()
 {
-    int32_t i; // [esp+4h] [ebp-4h]
-    int32_t ia; // [esp+4h] [ebp-4h]
+    int i; // [esp+4h] [ebp-4h]
+    int ia; // [esp+4h] [ebp-4h]
 
     Cbuf_AddText(0, "map_rotate\n");
     level.teamScores[1] = 0;
@@ -986,10 +986,10 @@ void G_LogPrintf(const char *fmt, ...)
 {
     char string[1024]; // [esp+10h] [ebp-818h] BYREF
     char *argptr; // [esp+410h] [ebp-418h]
-    int32_t tens; // [esp+414h] [ebp-414h]
+    int tens; // [esp+414h] [ebp-414h]
     char string2[1028]; // [esp+418h] [ebp-410h] BYREF
-    int32_t min; // [esp+820h] [ebp-8h]
-    int32_t sec; // [esp+824h] [ebp-4h]
+    int min; // [esp+820h] [ebp-8h]
+    int sec; // [esp+824h] [ebp-4h]
     va_list va; // [esp+834h] [ebp+Ch] BYREF
 
     va_start(va, fmt);
@@ -1011,7 +1011,7 @@ void __cdecl CheckVote()
     const char *v1; // eax
     const char *v2; // eax
     float v3; // [esp+8h] [ebp-20h]
-    int32_t passCount; // [esp+24h] [ebp-4h]
+    int passCount; // [esp+24h] [ebp-4h]
 
     if (level.voteExecuteTime)
     {
@@ -1054,10 +1054,10 @@ void __cdecl CheckVote()
 void __cdecl G_UpdateObjectiveToClients()
 {
     objective_t *obj; // [esp+8h] [ebp-18h]
-    int32_t team; // [esp+Ch] [ebp-14h]
+    int team; // [esp+Ch] [ebp-14h]
     gentity_s *ent; // [esp+10h] [ebp-10h]
-    int32_t clientNum; // [esp+14h] [ebp-Ch]
-    int32_t objNum; // [esp+18h] [ebp-8h]
+    int clientNum; // [esp+14h] [ebp-Ch]
+    int objNum; // [esp+18h] [ebp-8h]
     playerState_s *ps; // [esp+1Ch] [ebp-4h]
 
     for (clientNum = 0; clientNum < level.maxclients; ++clientNum)
@@ -1084,7 +1084,7 @@ void __cdecl G_UpdateObjectiveToClients()
 void __cdecl G_UpdateHudElemsToClients()
 {
     gentity_s *ent; // [esp+0h] [ebp-8h]
-    int32_t clientNum; // [esp+4h] [ebp-4h]
+    int clientNum; // [esp+4h] [ebp-4h]
 
     for (clientNum = 0; clientNum < level.maxclients; ++clientNum)
     {
@@ -1101,7 +1101,7 @@ void __cdecl G_UpdateHudElemsToClients()
 void __cdecl G_RunThink(gentity_s *ent)
 {
     void(__cdecl * think)(gentity_s *); // [esp+0h] [ebp-8h]
-    int32_t thinktime; // [esp+4h] [ebp-4h]
+    int thinktime; // [esp+4h] [ebp-4h]
 
     thinktime = ent->nextthink;
     if (thinktime > 0 && thinktime <= level.time)
@@ -1138,7 +1138,7 @@ void __cdecl TeamplayInfoMessage(gentity_s *ent)
 void __cdecl CheckTeamStatus()
 {
     gentity_s *ent; // [esp+0h] [ebp-8h]
-    int32_t i; // [esp+4h] [ebp-4h]
+    int i; // [esp+4h] [ebp-4h]
 
     if (level.time - level.lastTeammateHealthTime > 0)
     {
@@ -1155,7 +1155,7 @@ void __cdecl CheckTeamStatus()
     }
 }
 
-void __cdecl G_RunFrame(int32_t levelTime)
+void __cdecl G_RunFrame(int levelTime)
 {
     trigger_info_t *v1; // ecx
     float dtime; // [esp+4h] [ebp-530h]
@@ -1164,9 +1164,9 @@ void __cdecl G_RunFrame(int32_t levelTime)
     uint8_t index; // [esp+11Bh] [ebp-419h]
     uint8_t entIndex[1028]; // [esp+11Ch] [ebp-418h] BYREF
     gentity_s *ent; // [esp+524h] [ebp-10h]
-    int32_t bMoreTriggered; // [esp+528h] [ebp-Ch]
-    int32_t i; // [esp+52Ch] [ebp-8h]
-    int32_t entnum; // [esp+530h] [ebp-4h]
+    int bMoreTriggered; // [esp+528h] [ebp-Ch]
+    int i; // [esp+52Ch] [ebp-8h]
+    int entnum; // [esp+530h] [ebp-4h]
 
     PROF_SCOPED("G_RunFrame");
     SV_CheckThread();
@@ -1250,7 +1250,7 @@ void __cdecl G_RunFrame(int32_t levelTime)
                 --level.currentTriggerListSize;
                 --i;
                 v1 = &level.currentTriggerList[level.currentTriggerListSize];
-                *(uint32_t *)&trigger_info->entnum = *(uint32_t *)&v1->entnum;
+                *(uint *)&trigger_info->entnum = *(uint *)&v1->entnum;
                 trigger_info->useCount = v1->useCount;
                 trigger_info->otherUseCount = v1->otherUseCount;
             }
@@ -1417,7 +1417,7 @@ const dvar_s *ShowEntityInfo()
     float origin[3]; // [esp+14h] [ebp-18h] BYREF
     const char *text; // [esp+20h] [ebp-Ch]
     gentity_s *ent; // [esp+24h] [ebp-8h]
-    int32_t i; // [esp+28h] [ebp-4h]
+    int i; // [esp+28h] [ebp-4h]
 
     result = g_entinfo;
     if (g_entinfo->current.integer)
@@ -1463,7 +1463,7 @@ void __cdecl ShowEntityInfo_Items(gentity_s *ent)
     WeaponDef *weapDef; // [esp+14h] [ebp-18h]
     char *text; // [esp+18h] [ebp-14h]
     float origin[3]; // [esp+1Ch] [ebp-10h] BYREF
-    int32_t idx; // [esp+28h] [ebp-4h]
+    int idx; // [esp+28h] [ebp-4h]
 
     if (!ent)
         MyAssertHandler(".\\game_mp\\g_main_mp.cpp", 1678, 0, "%s", "ent");
@@ -1570,8 +1570,8 @@ void __cdecl G_TraceCapsule(
     const float *mins,
     const float *maxs,
     const float *end,
-    int32_t passEntityNum,
-    int32_t contentmask)
+    int passEntityNum,
+    int contentmask)
 {
     IgnoreEntParams ignoreEntParams; // [esp+0h] [ebp-Ch] BYREF
 
@@ -1579,13 +1579,13 @@ void __cdecl G_TraceCapsule(
     SV_Trace(results, (float*)start, (float *)mins, (float *)maxs, (float *)end, &ignoreEntParams, contentmask, 0, 0, 0);
 }
 
-int32_t __cdecl G_TraceCapsuleComplete(
+int __cdecl G_TraceCapsuleComplete(
     float *start,
     float *mins,
     float *maxs,
     float *end,
-    int32_t passEntityNum,
-    int32_t contentmask)
+    int passEntityNum,
+    int contentmask)
 {
     return SV_TracePassed(start, mins, maxs, end, passEntityNum, ENTITYNUM_NONE, contentmask, 0, 0, 0);
 }
@@ -1594,8 +1594,8 @@ void __cdecl G_LocationalTrace(
     trace_t *results,
     float *start,
     float *end,
-    int32_t passEntityNum,
-    int32_t contentmask,
+    int passEntityNum,
+    int contentmask,
     uint8_t *priorityMap)
 {
     IgnoreEntParams ignoreEntParams; // [esp+0h] [ebp-Ch] BYREF
@@ -1618,8 +1618,8 @@ void __cdecl G_LocationalTraceAllowChildren(
     trace_t *results,
     float *start,
     float *end,
-    int32_t passEntityNum,
-    int32_t contentmask,
+    int passEntityNum,
+    int contentmask,
     uint8_t *priorityMap)
 {
     IgnoreEntParams ignoreEntParams; // [esp+0h] [ebp-Ch] BYREF
@@ -1639,12 +1639,12 @@ void __cdecl G_LocationalTraceAllowChildren(
         1);
 }
 
-int32_t __cdecl G_LocationalTracePassed(
+int __cdecl G_LocationalTracePassed(
     float *start,
     float *end,
-    int32_t passEntityNum,
-    int32_t passEntityNum1,
-    int32_t contentmask,
+    int passEntityNum,
+    int passEntityNum1,
+    int contentmask,
     uint8_t *priorityMap)
 {
     return SV_TracePassed(
@@ -1660,12 +1660,12 @@ int32_t __cdecl G_LocationalTracePassed(
         1);
 }
 
-void __cdecl G_SightTrace(int32_t *hitNum, float *start, float *end, int32_t passEntityNum, int32_t contentmask)
+void __cdecl G_SightTrace(int *hitNum, float *start, float *end, int passEntityNum, int contentmask)
 {
     SV_SightTrace(hitNum, start, (float *)vec3_origin, (float *)vec3_origin, end, passEntityNum, ENTITYNUM_NONE, contentmask);
 }
 
-void __cdecl G_AddDebugString(const float *xyz, const float *color, float scale, const char *text, int32_t duration)
+void __cdecl G_AddDebugString(const float *xyz, const float *color, float scale, const char *text, int duration)
 {
     CL_AddDebugString(xyz, color, scale, text, 1, duration);
 }

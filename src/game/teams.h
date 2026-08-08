@@ -4,7 +4,7 @@
 #pragma once
 
 
-enum team_t : __int32
+enum team_t : int
 {
     TEAM_FREE = 0x0,
     TEAM_BAD = 0x0,

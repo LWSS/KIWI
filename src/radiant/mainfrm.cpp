@@ -1761,7 +1761,7 @@ void CMainFrame::RoutineProcessing()
 // matches the binary.  g_radiantCommands is a MUTABLE copy of g_radiantCommandsDefault (the
 // binary's table, verbatim): LoadCommandMap (0x421230) overrides individual entries BY NAME
 // from radiant.ini [Commands]; ShowMenuItemKeyBindings (0x420460) annotates the menu items.
-struct RadiantCommand { const char *name; unsigned char vk; unsigned char mods; int commandId; };
+struct RadiantCommand { const char *name; byte vk; byte mods; int commandId; };
 static const RadiantCommand g_radiantCommandsDefault[] = {
     { "ToggleOutlineDraw", 0x4A, 0, 33103 },
     { "ToggleTintDraw", 0x4A, 1, 33172 },
@@ -2013,8 +2013,8 @@ void CMainFrame::LoadCommandMap()
 
         // Parse + strip the modifier flags (each is optional, any order).  The binary uses
         // CString::Find + Replace; a plain strstr/erase is faithful.
-        unsigned char mods = 0;
-        struct { const char *tok; unsigned char bit; } flags[] =
+        byte mods = 0;
+        struct { const char *tok; byte bit; } flags[] =
             { { "+alt", 2 }, { "+ctrl", 4 }, { "+shift", 1 }, { "+lwin", 8 } };
         for ( auto &fl : flags )
         {
@@ -2034,11 +2034,11 @@ void CMainFrame::LoadCommandMap()
         *e = 0;
         _strupr( s );
 
-        unsigned char vk = 0;
+        byte vk = 0;
         bool have = false;
-        if ( strlen( s ) == 1 && isalnum( (unsigned char)*s ) )
+        if ( strlen( s ) == 1 && isalnum( (byte)*s ) )
         {
-            vk   = (unsigned char)( *s & 0x7F );   // __toascii
+            vk   = (byte)( *s & 0x7F );   // __toascii
             have = true;
         }
         else
@@ -2048,7 +2048,7 @@ void CMainFrame::LoadCommandMap()
                 // g_Keys names compared case-insensitively (binary uses _mbsicmp)
                 if ( !_stricmp( s, k.name ) )
                 {
-                    vk   = (unsigned char)k.vk;
+                    vk   = (byte)k.vk;
                     have = true;
                     break;
                 }
@@ -2138,7 +2138,7 @@ bool CMainFrame::TryHotkey( UINT nChar )
 {
     if ( !nChar )
         return false;
-    unsigned char mods = 0;
+    byte mods = 0;
     if ( GetKeyState( VK_MENU )    < 0 ) mods |= 2;   // Alt
     if ( GetKeyState( VK_CONTROL ) < 0 ) mods |= 4;   // Ctrl
     if ( GetKeyState( VK_SHIFT )   < 0 ) mods |= 1;   // Shift
@@ -4294,7 +4294,7 @@ void CMainFrame::OnAdvancedEditDlg()
 extern void Entity_RebuildBounds( entity_s *e );    // entity.cpp (0x485390)
 void CMainFrame::OnMiscCyclePreviewModels()
 {
-    if ( (unsigned short)( ++g_qeglobals.w_cyclePreviewMode ) > 4u )
+    if ( (ushort)( ++g_qeglobals.w_cyclePreviewMode ) > 4u )
         g_qeglobals.w_cyclePreviewMode = 0;
     BOOL on = ( g_qeglobals.w_cyclePreviewMode != 0 );
     TbCheck( m_wndToolBar, 35005, on );
@@ -4309,21 +4309,21 @@ void CMainFrame::OnMiscCyclePreviewModels()
             entity_s *def = (entity_s *)i->owner->def;
             i->brushFlags = brushFlags & ~0x100;
             def->modelClass = nullptr;
-            ++*(unsigned short *)&def->version;       // LOWORD(version)++ — force re-instance
-            *(unsigned char *)&i->def->unk01 = 0;     // LOBYTE(unk01) = 0  (clear brush dirty)
+            ++*(ushort *)&def->version;       // LOWORD(version)++ — force re-instance
+            *(byte *)&i->def->unk01 = 0;     // LOBYTE(unk01) = 0  (clear brush dirty)
             Entity_RebuildBounds( def );
         }
         if ( g_qeglobals.w_cyclePreviewMode )
         {
             entity_s *def = (entity_s *)i->owner->def;
             const char *modelName = *(const char **)( (char *)&def->eclass->default_model_name
-                                      + (unsigned short)g_qeglobals.w_cyclePreviewMode * 4 );
+                                      + (ushort)g_qeglobals.w_cyclePreviewMode * 4 );
             if ( modelName )
             {
                 i->brushFlags |= 0x100;
                 def->modelClass = nullptr;
-                ++*(unsigned short *)&def->version;
-                *(unsigned char *)&i->def->unk01 = 0;
+                ++*(ushort *)&def->version;
+                *(byte *)&i->def->unk01 = 0;
             }
         }
     }
@@ -4930,8 +4930,8 @@ void CMainFrame::OnMiscPrintxy()
 // ── PATCH menu — Patch_BrushToMesh primitives + Patch_AdjustSelected grid edits ──
 // Each handler is the binary's Undo-bracketed wrapper (OnCurvePatch* 0x42A360.. /
 // OnCurveInsert*/Delete* 0x42A560..); the cores live in pmesh.cpp (data layer).
-extern void Patch_BrushToMesh( char bCone, unsigned char bBevel,
-                               unsigned char bEndcap, char bSquare );   // pmesh.cpp (0x43ACC0)
+extern void Patch_BrushToMesh( char bCone, byte bBevel,
+                               byte bEndcap, char bSquare );   // pmesh.cpp (0x43ACC0)
 extern void Patch_AdjustSelected( char bInsert, char bColumn, char bFlag ); // pmesh.cpp (0x444550)
 extern void Patch_ToggleInverted();                                         // pmesh.cpp (0x4465C0)
 extern void Patch_Transpose();                                              // pmesh.cpp (0x4491D0)
@@ -4942,8 +4942,8 @@ extern void Patch_DisperseColumns();                                        // p
 extern void Patch_DisperseRows();                                           // pmesh.cpp (0x444200)
 extern void Patch_InvertTexture( char axis );                               // pmesh.cpp (0x446680)
 
-static void Radiant_PatchBrushToMesh( char cone, unsigned char bevel,
-                                      unsigned char endcap, char square, const char *op )
+static void Radiant_PatchBrushToMesh( char cone, byte bevel,
+                                      byte endcap, char square, const char *op )
 {
     Undo_ClearRedo();
     Undo_GeneralStart( op );
@@ -6521,7 +6521,7 @@ void CEdBlankPane::OnPaint()
     R_BeginSharedCmdList();
     R_AddCmdClearScreen( 7, m_clear, 1.0f, 0 );
     R_EndFrame();
-    R_IssueRenderCommands( (uint32_t)-1 );
+    R_IssueRenderCommands( (uint)-1 );
     R_SortMaterials();
     R_CheckTargetWindow( hwnd );
 }

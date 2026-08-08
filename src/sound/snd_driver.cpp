@@ -548,7 +548,7 @@ int __cdecl SND_StartAlias3DSample(SndStartAliasInfo *startAliasInfo, int *pChan
     }
     SND_Apply3DSpatializationTweaks(handle, startAliasInfo->alias0);
     SND_Set3DChannelVolume(index, realVolume);
-    //((void(__stdcall *)(uint32_t, uint32_t, uint32_t, uint32_t))AIL_set_sample_3D_distances)(
+    //((void(__stdcall *)(uint, uint, uint, uint))AIL_set_sample_3D_distances)(
     //    handle,
     //    startAliasInfo->alias0->distMax,
     //    startAliasInfo->alias0->distMin,
@@ -791,7 +791,7 @@ int __cdecl SND_StartAliasStreamOnChannel(SndStartAliasInfo *startAliasInfo, int
                         SND_Set3DStreamPosition(index, listenerIndex, g_snd.chaninfo[index].org);
                         Stream3DVolumeFallOff = SND_GetStream3DVolumeFallOff(index, listenerIndex);
                         realVolume = Stream3DVolumeFallOff * realVolume;
-                        //((void(__stdcall *)(uint32_t, uint32_t, uint32_t, uint32_t))AIL_set_sample_3D_distances)(
+                        //((void(__stdcall *)(uint, uint, uint, uint))AIL_set_sample_3D_distances)(
                         //    handle_sample,
                         //    startAliasInfo->alias0->distMax,
                         //    startAliasInfo->alias0->distMin,
@@ -891,9 +891,9 @@ void __cdecl SND_UpdateEqs()
 }
 
 void __cdecl SND_SetEqParams(
-    uint32_t entchannel,
+    uint entchannel,
     int eqIndex,
-    uint32_t band,
+    uint band,
     SND_EQTYPE type,
     float gain,
     float freq,
@@ -915,7 +915,7 @@ void __cdecl SND_SetEqParams(
 	SND_UpdateEqs();
 }
 
-void __cdecl SND_SetEqType(uint32_t entchannel, int eqIndex, uint32_t band, SND_EQTYPE type)
+void __cdecl SND_SetEqType(uint entchannel, int eqIndex, uint band, SND_EQTYPE type)
 {
     iassert(entchannel >= 0 && entchannel < 64);
     iassert(band >= 0 && band < 3);
@@ -926,7 +926,7 @@ void __cdecl SND_SetEqType(uint32_t entchannel, int eqIndex, uint32_t band, SND_
     milesGlob.eq[eqIndex].params[band][entchannel].type = type;
 }
 
-void __cdecl SND_SetEqFreq(uint32_t entchannel, int eqIndex, uint32_t band, float freq)
+void __cdecl SND_SetEqFreq(uint entchannel, int eqIndex, uint band, float freq)
 {
     iassert(entchannel >= 0 && entchannel < 64);
     iassert(band >= 0 && band < 3);
@@ -938,7 +938,7 @@ void __cdecl SND_SetEqFreq(uint32_t entchannel, int eqIndex, uint32_t band, floa
     milesGlob.eq[eqIndex].params[band][entchannel].freq = freq;
 }
 
-void __cdecl SND_SetEqGain(uint32_t entchannel, int eqIndex, uint32_t band, float gain)
+void __cdecl SND_SetEqGain(uint entchannel, int eqIndex, uint band, float gain)
 {
     iassert(entchannel >= 0 && entchannel < 64);
     iassert(band >= 0 && band < 3);
@@ -948,7 +948,7 @@ void __cdecl SND_SetEqGain(uint32_t entchannel, int eqIndex, uint32_t band, floa
     milesGlob.eq[eqIndex].params[band][entchannel].gain = gain;
 }
 
-void __cdecl SND_SetEqQ(uint32_t entchannel, int eqIndex, uint32_t band, float q)
+void __cdecl SND_SetEqQ(uint entchannel, int eqIndex, uint band, float q)
 {
     iassert(entchannel >= 0 && entchannel < 64);
     iassert(band >= 0 && band < 3);
@@ -962,7 +962,7 @@ void __cdecl SND_SetEqQ(uint32_t entchannel, int eqIndex, uint32_t band, float q
 	SND_UpdateEqs();
 }
 
-void __cdecl SND_DisableEq(uint32_t entchannel, int eqIndex, uint32_t band)
+void __cdecl SND_DisableEq(uint entchannel, int eqIndex, uint band)
 {
     iassert(entchannel >= 0 && entchannel < 64);
     iassert(band >= 0 && band < 3);
@@ -1017,8 +1017,8 @@ void __cdecl SND_PrintEqParams()
             for (band = 0; band < 3; ++band)
             {
                 v0 = (float *)&milesGlob.eq[eqIndex].params[band][entchannel];
-                if ((uint8_t)*((uint32_t *)v0 + 4))
-                    Com_Printf(9, "\t%i %s %f Hz %f dB %f q\n", band, snd_eqTypeStrings[*(uint32_t *)v0], v0[2], v0[1], v0[3]);
+                if ((uint8_t)*((uint *)v0 + 4))
+                    Com_Printf(9, "\t%i %s %f Hz %f dB %f q\n", band, snd_eqTypeStrings[*(uint *)v0], v0[2], v0[1], v0[3]);
             }
         }
     }
@@ -1304,7 +1304,7 @@ void __cdecl SND_SetStreamChannelFromSaveInfo(int index, snd_save_stream_t *info
     SND_SetStreamChannelVolume(index, volume);
 }
 
-int __cdecl SND_GetSoundFileSize(uint32_t *pSoundFile)
+int __cdecl SND_GetSoundFileSize(uint *pSoundFile)
 {
     iassert(pSoundFile);
     return pSoundFile[2];

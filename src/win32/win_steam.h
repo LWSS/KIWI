@@ -10,7 +10,7 @@ void Steam_Shutdown();
 // Called by Client to get a Ticket to send to the Dedicated Server
 bool Steam_UpdateClientAuthTicket(netadr_t serverIpv4);
 
-bool Steam_GetRawClientTicket(unsigned char **pBuffer, uint32 *pSize);
+bool Steam_GetRawClientTicket(byte **pBuffer, uint32 *pSize);
 
 void Steam_CancelClientTicket();
 

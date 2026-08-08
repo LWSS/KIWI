@@ -72,10 +72,10 @@ uint8_t PADDING[64] =
   0u
 }; // idb
 
-void __cdecl Encode(uint8_t *output, uint32_t *input, uint32_t len)
+void __cdecl Encode(uint8_t *output, uint *input, uint len)
 {
-    uint32_t j; // [esp+0h] [ebp-8h]
-    uint32_t i; // [esp+4h] [ebp-4h]
+    uint j; // [esp+0h] [ebp-8h]
+    uint i; // [esp+4h] [ebp-4h]
 
     i = 0;
     for (j = 0; j < len; j += 4)
@@ -86,10 +86,10 @@ void __cdecl Encode(uint8_t *output, uint32_t *input, uint32_t len)
     }
 }
 
-void __cdecl Decode(uint32_t *output, uint8_t *input, uint32_t len)
+void __cdecl Decode(uint *output, uint8_t *input, uint len)
 {
-    uint32_t j; // [esp+0h] [ebp-8h]
-    uint32_t i; // [esp+4h] [ebp-4h]
+    uint j; // [esp+0h] [ebp-8h]
+    uint i; // [esp+4h] [ebp-4h]
 
     i = 0;
     for (j = 0; j < len; j += 4)
@@ -106,10 +106,10 @@ void __cdecl MD4Init(MD4_CTX *context)
     context->state[3] = 271733878;
 }
 
-void __cdecl MD4Update(MD4_CTX *context, uint8_t *input, uint32_t inputLen)
+void __cdecl MD4Update(MD4_CTX *context, uint8_t *input, uint inputLen)
 {
-    uint32_t index; // [esp+4h] [ebp-8h]
-    uint32_t i; // [esp+8h] [ebp-4h]
+    uint index; // [esp+4h] [ebp-8h]
+    uint i; // [esp+8h] [ebp-4h]
 
     index = (context->count[0] >> 3) & 0x3F;
     context->count[0] += 8 * inputLen;
@@ -133,9 +133,9 @@ void __cdecl MD4Update(MD4_CTX *context, uint8_t *input, uint32_t inputLen)
 
 void __cdecl MD4Final(uint8_t *digest, MD4_CTX *context)
 {
-    uint32_t v2; // [esp+0h] [ebp-18h]
+    uint v2; // [esp+0h] [ebp-18h]
     uint8_t bits[8]; // [esp+8h] [ebp-10h] BYREF
-    uint32_t index; // [esp+14h] [ebp-4h]
+    uint index; // [esp+14h] [ebp-4h]
 
     Encode(bits, context->count, 8u);
     index = (context->count[0] >> 3) & 0x3F;
@@ -149,108 +149,108 @@ void __cdecl MD4Final(uint8_t *digest, MD4_CTX *context)
     memset((uint8_t *)context, 0, sizeof(MD4_CTX));
 }
 
-void __cdecl MD4Transform(uint32_t *state, uint8_t *block)
+void __cdecl MD4Transform(uint *state, uint8_t *block)
 {
-    uint32_t c; // [esp+0h] [ebp-50h]
-    uint32_t ca; // [esp+0h] [ebp-50h]
-    uint32_t cb; // [esp+0h] [ebp-50h]
-    uint32_t cc; // [esp+0h] [ebp-50h]
-    uint32_t cd; // [esp+0h] [ebp-50h]
-    uint32_t ce; // [esp+0h] [ebp-50h]
-    uint32_t cf; // [esp+0h] [ebp-50h]
-    uint32_t cg; // [esp+0h] [ebp-50h]
-    uint32_t ch; // [esp+0h] [ebp-50h]
-    uint32_t ci; // [esp+0h] [ebp-50h]
-    uint32_t cj; // [esp+0h] [ebp-50h]
-    uint32_t ck; // [esp+0h] [ebp-50h]
-    uint32_t cl; // [esp+0h] [ebp-50h]
-    uint32_t cm; // [esp+0h] [ebp-50h]
-    uint32_t cn; // [esp+0h] [ebp-50h]
-    uint32_t co; // [esp+0h] [ebp-50h]
-    uint32_t cp; // [esp+0h] [ebp-50h]
-    uint32_t cq; // [esp+0h] [ebp-50h]
-    uint32_t cr; // [esp+0h] [ebp-50h]
-    uint32_t cs; // [esp+0h] [ebp-50h]
-    uint32_t ct; // [esp+0h] [ebp-50h]
-    uint32_t cu; // [esp+0h] [ebp-50h]
-    uint32_t cv; // [esp+0h] [ebp-50h]
-    uint32_t cw; // [esp+0h] [ebp-50h]
-    uint32_t cx; // [esp+0h] [ebp-50h]
-    uint32_t d; // [esp+4h] [ebp-4Ch]
-    uint32_t da; // [esp+4h] [ebp-4Ch]
-    uint32_t db; // [esp+4h] [ebp-4Ch]
-    uint32_t dc; // [esp+4h] [ebp-4Ch]
-    uint32_t dd; // [esp+4h] [ebp-4Ch]
-    uint32_t de; // [esp+4h] [ebp-4Ch]
-    uint32_t df; // [esp+4h] [ebp-4Ch]
-    uint32_t dg; // [esp+4h] [ebp-4Ch]
-    uint32_t dh; // [esp+4h] [ebp-4Ch]
-    uint32_t di; // [esp+4h] [ebp-4Ch]
-    uint32_t dj; // [esp+4h] [ebp-4Ch]
-    uint32_t dk; // [esp+4h] [ebp-4Ch]
-    uint32_t dl; // [esp+4h] [ebp-4Ch]
-    uint32_t dm; // [esp+4h] [ebp-4Ch]
-    uint32_t dn; // [esp+4h] [ebp-4Ch]
-    uint32_t dp; // [esp+4h] [ebp-4Ch]
-    uint32_t dq; // [esp+4h] [ebp-4Ch]
-    uint32_t dr; // [esp+4h] [ebp-4Ch]
-    uint32_t ds; // [esp+4h] [ebp-4Ch]
-    uint32_t dt; // [esp+4h] [ebp-4Ch]
-    uint32_t du; // [esp+4h] [ebp-4Ch]
-    uint32_t dv; // [esp+4h] [ebp-4Ch]
-    uint32_t dw; // [esp+4h] [ebp-4Ch]
-    uint32_t dx; // [esp+4h] [ebp-4Ch]
-    uint32_t dy; // [esp+4h] [ebp-4Ch]
-    uint32_t b; // [esp+8h] [ebp-48h]
-    uint32_t ba; // [esp+8h] [ebp-48h]
-    uint32_t bb; // [esp+8h] [ebp-48h]
-    uint32_t bc; // [esp+8h] [ebp-48h]
-    uint32_t bd; // [esp+8h] [ebp-48h]
-    uint32_t be; // [esp+8h] [ebp-48h]
-    uint32_t bf; // [esp+8h] [ebp-48h]
-    uint32_t bg; // [esp+8h] [ebp-48h]
-    uint32_t bh; // [esp+8h] [ebp-48h]
-    uint32_t bi; // [esp+8h] [ebp-48h]
-    uint32_t bj; // [esp+8h] [ebp-48h]
-    uint32_t bk; // [esp+8h] [ebp-48h]
-    uint32_t bl; // [esp+8h] [ebp-48h]
-    uint32_t bm; // [esp+8h] [ebp-48h]
-    uint32_t bn; // [esp+8h] [ebp-48h]
-    uint32_t bo; // [esp+8h] [ebp-48h]
-    uint32_t bp; // [esp+8h] [ebp-48h]
-    uint32_t bq; // [esp+8h] [ebp-48h]
-    uint32_t br; // [esp+8h] [ebp-48h]
-    uint32_t bs; // [esp+8h] [ebp-48h]
-    uint32_t bt; // [esp+8h] [ebp-48h]
-    uint32_t bu; // [esp+8h] [ebp-48h]
-    uint32_t bv; // [esp+8h] [ebp-48h]
-    uint32_t bw; // [esp+8h] [ebp-48h]
-    uint32_t a; // [esp+Ch] [ebp-44h]
-    uint32_t aa; // [esp+Ch] [ebp-44h]
-    uint32_t ab; // [esp+Ch] [ebp-44h]
-    uint32_t ac; // [esp+Ch] [ebp-44h]
-    uint32_t ad; // [esp+Ch] [ebp-44h]
-    uint32_t ae; // [esp+Ch] [ebp-44h]
-    uint32_t af; // [esp+Ch] [ebp-44h]
-    uint32_t ag; // [esp+Ch] [ebp-44h]
-    uint32_t ah; // [esp+Ch] [ebp-44h]
-    uint32_t ai; // [esp+Ch] [ebp-44h]
-    uint32_t aj; // [esp+Ch] [ebp-44h]
-    uint32_t ak; // [esp+Ch] [ebp-44h]
-    uint32_t al; // [esp+Ch] [ebp-44h]
-    uint32_t am; // [esp+Ch] [ebp-44h]
-    uint32_t an; // [esp+Ch] [ebp-44h]
-    uint32_t ao; // [esp+Ch] [ebp-44h]
-    uint32_t ap; // [esp+Ch] [ebp-44h]
-    uint32_t aq; // [esp+Ch] [ebp-44h]
-    uint32_t ar; // [esp+Ch] [ebp-44h]
-    uint32_t as; // [esp+Ch] [ebp-44h]
-    uint32_t at; // [esp+Ch] [ebp-44h]
-    uint32_t au; // [esp+Ch] [ebp-44h]
-    uint32_t av; // [esp+Ch] [ebp-44h]
-    uint32_t aw; // [esp+Ch] [ebp-44h]
-    uint32_t ax; // [esp+Ch] [ebp-44h]
-    uint32_t x[16]; // [esp+10h] [ebp-40h] BYREF
+    uint c; // [esp+0h] [ebp-50h]
+    uint ca; // [esp+0h] [ebp-50h]
+    uint cb; // [esp+0h] [ebp-50h]
+    uint cc; // [esp+0h] [ebp-50h]
+    uint cd; // [esp+0h] [ebp-50h]
+    uint ce; // [esp+0h] [ebp-50h]
+    uint cf; // [esp+0h] [ebp-50h]
+    uint cg; // [esp+0h] [ebp-50h]
+    uint ch; // [esp+0h] [ebp-50h]
+    uint ci; // [esp+0h] [ebp-50h]
+    uint cj; // [esp+0h] [ebp-50h]
+    uint ck; // [esp+0h] [ebp-50h]
+    uint cl; // [esp+0h] [ebp-50h]
+    uint cm; // [esp+0h] [ebp-50h]
+    uint cn; // [esp+0h] [ebp-50h]
+    uint co; // [esp+0h] [ebp-50h]
+    uint cp; // [esp+0h] [ebp-50h]
+    uint cq; // [esp+0h] [ebp-50h]
+    uint cr; // [esp+0h] [ebp-50h]
+    uint cs; // [esp+0h] [ebp-50h]
+    uint ct; // [esp+0h] [ebp-50h]
+    uint cu; // [esp+0h] [ebp-50h]
+    uint cv; // [esp+0h] [ebp-50h]
+    uint cw; // [esp+0h] [ebp-50h]
+    uint cx; // [esp+0h] [ebp-50h]
+    uint d; // [esp+4h] [ebp-4Ch]
+    uint da; // [esp+4h] [ebp-4Ch]
+    uint db; // [esp+4h] [ebp-4Ch]
+    uint dc; // [esp+4h] [ebp-4Ch]
+    uint dd; // [esp+4h] [ebp-4Ch]
+    uint de; // [esp+4h] [ebp-4Ch]
+    uint df; // [esp+4h] [ebp-4Ch]
+    uint dg; // [esp+4h] [ebp-4Ch]
+    uint dh; // [esp+4h] [ebp-4Ch]
+    uint di; // [esp+4h] [ebp-4Ch]
+    uint dj; // [esp+4h] [ebp-4Ch]
+    uint dk; // [esp+4h] [ebp-4Ch]
+    uint dl; // [esp+4h] [ebp-4Ch]
+    uint dm; // [esp+4h] [ebp-4Ch]
+    uint dn; // [esp+4h] [ebp-4Ch]
+    uint dp; // [esp+4h] [ebp-4Ch]
+    uint dq; // [esp+4h] [ebp-4Ch]
+    uint dr; // [esp+4h] [ebp-4Ch]
+    uint ds; // [esp+4h] [ebp-4Ch]
+    uint dt; // [esp+4h] [ebp-4Ch]
+    uint du; // [esp+4h] [ebp-4Ch]
+    uint dv; // [esp+4h] [ebp-4Ch]
+    uint dw; // [esp+4h] [ebp-4Ch]
+    uint dx; // [esp+4h] [ebp-4Ch]
+    uint dy; // [esp+4h] [ebp-4Ch]
+    uint b; // [esp+8h] [ebp-48h]
+    uint ba; // [esp+8h] [ebp-48h]
+    uint bb; // [esp+8h] [ebp-48h]
+    uint bc; // [esp+8h] [ebp-48h]
+    uint bd; // [esp+8h] [ebp-48h]
+    uint be; // [esp+8h] [ebp-48h]
+    uint bf; // [esp+8h] [ebp-48h]
+    uint bg; // [esp+8h] [ebp-48h]
+    uint bh; // [esp+8h] [ebp-48h]
+    uint bi; // [esp+8h] [ebp-48h]
+    uint bj; // [esp+8h] [ebp-48h]
+    uint bk; // [esp+8h] [ebp-48h]
+    uint bl; // [esp+8h] [ebp-48h]
+    uint bm; // [esp+8h] [ebp-48h]
+    uint bn; // [esp+8h] [ebp-48h]
+    uint bo; // [esp+8h] [ebp-48h]
+    uint bp; // [esp+8h] [ebp-48h]
+    uint bq; // [esp+8h] [ebp-48h]
+    uint br; // [esp+8h] [ebp-48h]
+    uint bs; // [esp+8h] [ebp-48h]
+    uint bt; // [esp+8h] [ebp-48h]
+    uint bu; // [esp+8h] [ebp-48h]
+    uint bv; // [esp+8h] [ebp-48h]
+    uint bw; // [esp+8h] [ebp-48h]
+    uint a; // [esp+Ch] [ebp-44h]
+    uint aa; // [esp+Ch] [ebp-44h]
+    uint ab; // [esp+Ch] [ebp-44h]
+    uint ac; // [esp+Ch] [ebp-44h]
+    uint ad; // [esp+Ch] [ebp-44h]
+    uint ae; // [esp+Ch] [ebp-44h]
+    uint af; // [esp+Ch] [ebp-44h]
+    uint ag; // [esp+Ch] [ebp-44h]
+    uint ah; // [esp+Ch] [ebp-44h]
+    uint ai; // [esp+Ch] [ebp-44h]
+    uint aj; // [esp+Ch] [ebp-44h]
+    uint ak; // [esp+Ch] [ebp-44h]
+    uint al; // [esp+Ch] [ebp-44h]
+    uint am; // [esp+Ch] [ebp-44h]
+    uint an; // [esp+Ch] [ebp-44h]
+    uint ao; // [esp+Ch] [ebp-44h]
+    uint ap; // [esp+Ch] [ebp-44h]
+    uint aq; // [esp+Ch] [ebp-44h]
+    uint ar; // [esp+Ch] [ebp-44h]
+    uint as; // [esp+Ch] [ebp-44h]
+    uint at; // [esp+Ch] [ebp-44h]
+    uint au; // [esp+Ch] [ebp-44h]
+    uint av; // [esp+Ch] [ebp-44h]
+    uint aw; // [esp+Ch] [ebp-44h]
+    uint ax; // [esp+Ch] [ebp-44h]
+    uint x[16]; // [esp+10h] [ebp-40h] BYREF
 
     a = *state;
     b = state[1];
@@ -363,9 +363,9 @@ void __cdecl MD4Transform(uint32_t *state, uint8_t *block)
 
 void __cdecl Com_BlockChecksum128Cat(
     uint8_t *buffer0,
-    uint32_t length0,
+    uint length0,
     uint8_t *buffer1,
-    uint32_t length1,
+    uint length1,
     uint8_t *outChecksum)
 {
     MD4_CTX ctx; // [esp+0h] [ebp-60h] BYREF
@@ -376,12 +376,12 @@ void __cdecl Com_BlockChecksum128Cat(
     MD4Final(outChecksum, &ctx);
 }
 
-void __cdecl Com_BlockChecksum128(uint8_t *buffer, uint32_t length, int key, uint8_t *outChecksum)
+void __cdecl Com_BlockChecksum128(uint8_t *buffer, uint length, int key, uint8_t *outChecksum)
 {
     MD4_CTX ctx; // [esp+0h] [ebp-60h] BYREF
 
     MD4Init(&ctx);
-    MD4Update(&ctx, (unsigned char*)&key, 4u);
+    MD4Update(&ctx, (byte*)&key, 4u);
     MD4Update(&ctx, buffer, length);
     MD4Final(outChecksum, &ctx);
 }

@@ -95,7 +95,7 @@ void __cdecl StringTable_GetAsset(const char *filename, StringTable **tablePtr)
 
         char *filebuf = (char *)Hunk_AllocateTempMemoryHigh(fileSize + 1, "Kisak StringTable FF hack");
 
-        FS_Read((unsigned char *)filebuf, fileSize, f);
+        FS_Read((byte *)filebuf, fileSize, f);
         FS_FCloseFile(f);
 
         filebuf[fileSize] = 0;

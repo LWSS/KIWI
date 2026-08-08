@@ -138,7 +138,7 @@ void __cdecl G_setfog(const char *fogstring)
     float clr[3]; // [esp+4h] [ebp-18h] BYREF
     float fFar; // [esp+10h] [ebp-Ch] BYREF
     float fNear; // [esp+14h] [ebp-8h] BYREF
-    int32_t time; // [esp+18h] [ebp-4h] BYREF
+    int time; // [esp+18h] [ebp-4h] BYREF
 
     SV_GameSendServerCommand(-1, va("fog %s", fogstring));
 

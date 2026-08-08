@@ -32,10 +32,10 @@ uint16_t *controller_names[6] =
     &scr_const.pelvis
 };
 
-int32_t __cdecl GetFollowPlayerState(int32_t clientNum, playerState_s *ps)
+int __cdecl GetFollowPlayerState(int clientNum, playerState_s *ps)
 {
     gclient_s *client; // [esp+8h] [ebp-8h]
-    uint32_t index; // [esp+Ch] [ebp-4h]
+    uint index; // [esp+Ch] [ebp-4h]
 
     client = &level.clients[clientNum];
     if (!client)
@@ -74,12 +74,12 @@ int32_t __cdecl GetFollowPlayerState(int32_t clientNum, playerState_s *ps)
 void __cdecl P_DamageFeedback(gentity_s *player)
 {
     gclient_s *client; // [esp+8h] [ebp-40h]
-    int32_t damage; // [esp+Ch] [ebp-3Ch]
-    int32_t damagea; // [esp+Ch] [ebp-3Ch]
+    int damage; // [esp+Ch] [ebp-3Ch]
+    int damagea; // [esp+Ch] [ebp-3Ch]
     float kick; // [esp+10h] [ebp-38h]
     float angles[3]; // [esp+14h] [ebp-34h] BYREF
     float viewaxis[3][3]; // [esp+20h] [ebp-28h] BYREF
-    int32_t DAMAGE_COUNT_DURATION; // [esp+44h] [ebp-4h]
+    int DAMAGE_COUNT_DURATION; // [esp+44h] [ebp-4h]
 
     DAMAGE_COUNT_DURATION = 500;
     client = player->client;
@@ -140,11 +140,11 @@ void __cdecl G_SetClientSound(gentity_s *ent)
 
 void __cdecl ClientImpacts(gentity_s *ent, pmove_t *pm)
 {
-    int32_t j; // [esp+4h] [ebp-14h]
+    int j; // [esp+4h] [ebp-14h]
     void(__cdecl * entTouch)(gentity_s *, gentity_s *, int); // [esp+8h] [ebp-10h]
     gentity_s *other; // [esp+Ch] [ebp-Ch]
     void(__cdecl * otherTouch)(gentity_s *, gentity_s *, int); // [esp+10h] [ebp-8h]
-    int32_t i; // [esp+14h] [ebp-4h]
+    int i; // [esp+14h] [ebp-4h]
 
     entTouch = entityHandlers[ent->handler].touch;
     for (i = 0; i < pm->numtouch; ++i)
@@ -173,14 +173,14 @@ void __cdecl ClientImpacts(gentity_s *ent, pmove_t *pm)
 const float range[3] = { 20.0f, 20.0f, 20.0f };
 void __cdecl G_TouchTriggers(gentity_s *ent)
 {
-    int32_t entityList[1025]; // [esp+30h] [ebp-1030h] BYREF
+    int entityList[1025]; // [esp+30h] [ebp-1030h] BYREF
     float diff[3]; // [esp+1034h] [ebp-2Ch] BYREF
     void(__cdecl * touch)(gentity_s *, gentity_s *, int); // [esp+1040h] [ebp-20h]
     entityState_s *item; // [esp+1044h] [ebp-1Ch]
     float sum[3]; // [esp+1048h] [ebp-18h] BYREF
     void(__cdecl * v6)(gentity_s *, gentity_s *, int); // [esp+1054h] [ebp-Ch]
-    int32_t v7; // [esp+1058h] [ebp-8h]
-    int32_t i; // [esp+105Ch] [ebp-4h]
+    int v7; // [esp+1058h] [ebp-8h]
+    int i; // [esp+105Ch] [ebp-4h]
 
     PROF_SCOPED("G_TouchTriggers");
     if (!ent->client)
@@ -273,7 +273,7 @@ void __cdecl SpectatorThink(gentity_s *ent, usercmd_s *ucmd)
     }
 }
 
-int32_t __cdecl ClientInactivityTimer(gclient_s *client)
+int __cdecl ClientInactivityTimer(gclient_s *client)
 {
     const char *v2; // eax
 
@@ -317,7 +317,7 @@ void __cdecl ClientIntermissionThink(gentity_s *ent)
     client->buttonsSinceLastFrame |= client->buttons & ~client->oldbuttons;
 }
 
-void __cdecl NotifyGrenadePullback(gentity_s *ent, uint32_t weaponIndex)
+void __cdecl NotifyGrenadePullback(gentity_s *ent, uint weaponIndex)
 {
     WeaponDef *weapDef; // [esp+0h] [ebp-4h]
 
@@ -334,7 +334,7 @@ void __cdecl NotifyGrenadePullback(gentity_s *ent, uint32_t weaponIndex)
     Scr_Notify(ent, scr_const.grenade_pullback, 1u);
 }
 
-void __cdecl HandleClientEvent(gclient_s *client, gentity_s *ent, int32_t event, int32_t eventParm)
+void __cdecl HandleClientEvent(gclient_s *client, gentity_s *ent, int event, int eventParm)
 {
     gentity_s *attacker; // [esp+4h] [ebp-14h]
     float damage; // [esp+8h] [ebp-10h]
@@ -458,10 +458,10 @@ bool __cdecl IsLiveGrenade(gentity_s *ent)
     return weapDef->offhandClass == OFFHAND_CLASS_FRAG_GRENADE;
 }
 
-void __cdecl ClientEvents(gentity_s *ent, int32_t oldEventSequence)
+void __cdecl ClientEvents(gentity_s *ent, int oldEventSequence)
 {
     gclient_s *client; // [esp+0h] [ebp-10h]
-    int32_t i; // [esp+Ch] [ebp-4h]
+    int i; // [esp+Ch] [ebp-4h]
 
     client = ent->client;
     if (oldEventSequence < client->ps.eventSequence - 4)
@@ -472,7 +472,7 @@ void __cdecl ClientEvents(gentity_s *ent, int32_t oldEventSequence)
         HandleClientEvent(client, ent, client->ps.events[i & 3], client->ps.eventParms[i & 3]);
 }
 
-void __cdecl G_SetLastServerTime(int32_t clientNum, int32_t lastServerTime)
+void __cdecl G_SetLastServerTime(int clientNum, int lastServerTime)
 {
     gentity_s *ent; // [esp+0h] [ebp-4h]
 
@@ -524,9 +524,9 @@ void __cdecl ClientThink_real(gentity_s *ent, usercmd_s *ucmd)
     float vAxis3[3][3]; // [esp+118h] [ebp-234h] BYREF
     weaponState_t ws; // [esp+13Ch] [ebp-210h] BYREF
     float ssScale; // [esp+198h] [ebp-1B4h]
-    int32_t msec; // [esp+19Ch] [ebp-1B0h]
-    int32_t ssDT; // [esp+1A0h] [ebp-1ACh]
-    int32_t oldEventSequence; // [esp+1A4h] [ebp-1A8h]
+    int msec; // [esp+19Ch] [ebp-1B0h]
+    int ssDT; // [esp+1A0h] [ebp-1ACh]
+    int oldEventSequence; // [esp+1A4h] [ebp-1A8h]
     float vAxis2[3][3]; // [esp+1A8h] [ebp-1A4h] BYREF
     pmove_t pm; // [esp+1CCh] [ebp-180h] BYREF
     float angles[3]; // [esp+2E4h] [ebp-68h] BYREF
@@ -751,7 +751,7 @@ void __cdecl ClientThink_real(gentity_s *ent, usercmd_s *ucmd)
     }
 }
 
-void __cdecl G_PlayerStateToEntityStateExtrapolate(playerState_s *ps, entityState_s *s, int32_t time, int32_t snap)
+void __cdecl G_PlayerStateToEntityStateExtrapolate(playerState_s *ps, entityState_s *s, int time, int snap)
 {
     s->lerp.pos.trDelta[0] = ps->velocity[0];
     s->lerp.pos.trDelta[1] = ps->velocity[1];
@@ -773,7 +773,7 @@ void __cdecl G_PlayerStateToEntityStateExtrapolate(playerState_s *ps, entityStat
     s->lerp.pos.trType = TR_LINEAR_STOP;
 }
 
-void __cdecl G_AddPlayerMantleBlockage(float *endPos, int32_t duration, pmove_t *pm)
+void __cdecl G_AddPlayerMantleBlockage(float *endPos, int duration, pmove_t *pm)
 {
     gentity_s *owner; // [esp+10h] [ebp-Ch]
     gentity_s *ent; // [esp+18h] [ebp-4h]
@@ -798,7 +798,7 @@ void __cdecl G_AddPlayerMantleBlockage(float *endPos, int32_t duration, pmove_t 
     ent->nextthink = g_mantleBlockTimeBuffer->current.integer + duration + level.time;
 }
 
-void __cdecl ClientThink(int32_t clientNum)
+void __cdecl ClientThink(int clientNum)
 {
     gentity_s *ent; // [esp+8h] [ebp-4h]
 
@@ -897,13 +897,13 @@ void __cdecl IntermissionClientEndFrame(gentity_s *ent)
 
 void __cdecl SpectatorClientEndFrame(gentity_s *ent)
 {
-    uint32_t v1; // edx
+    uint v1; // edx
     gclient_s *client; // [esp+0h] [ebp-2FE4h]
     clientState_s v3; // [esp+4h] [ebp-2FE0h] BYREF
-    uint32_t v4; // [esp+6Ch] [ebp-2F78h]
-    int32_t clientNum; // [esp+70h] [ebp-2F74h]
+    uint v4; // [esp+6Ch] [ebp-2F78h]
+    int clientNum; // [esp+70h] [ebp-2F74h]
     playerState_s ps; // [esp+74h] [ebp-2F70h] BYREF
-    int32_t pArchiveTime; // [esp+2FE0h] [ebp-4h] BYREF
+    int pArchiveTime; // [esp+2FE0h] [ebp-4h] BYREF
 
     client = ent->client;
     ent->r.svFlags &= ~2u;
@@ -1005,7 +1005,7 @@ bool __cdecl G_ClientCanSpectateTeam(gclient_s *client, team_t team)
     return (client->sess.noSpectate & (1 << team)) == 0;
 }
 
-int32_t __cdecl StuckInClient(gentity_s *self)
+int __cdecl StuckInClient(gentity_s *self)
 {
     float v2; // [esp+0h] [ebp-50h]
     float integer; // [esp+4h] [ebp-4Ch]
@@ -1015,7 +1015,7 @@ int32_t __cdecl StuckInClient(gentity_s *self)
     float *velocity; // [esp+14h] [ebp-3Ch]
     float fDist; // [esp+30h] [ebp-20h]
     gentity_s *hit; // [esp+34h] [ebp-1Ch]
-    int32_t i; // [esp+38h] [ebp-18h]
+    int i; // [esp+38h] [ebp-18h]
     float selfSpeed; // [esp+3Ch] [ebp-14h]
     float hitSpeed; // [esp+40h] [ebp-10h]
     float vDelta[3]; // [esp+44h] [ebp-Ch] BYREF
@@ -1089,11 +1089,11 @@ int32_t __cdecl StuckInClient(gentity_s *self)
     return 1;
 }
 
-void __cdecl G_PlayerController(const gentity_s *self, int32_t *partBits)
+void __cdecl G_PlayerController(const gentity_s *self, int *partBits)
 {
     const DObj_s *obj; // [esp+0h] [ebp-1Ch]
     clientInfo_t *ci; // [esp+4h] [ebp-18h]
-    int32_t i; // [esp+8h] [ebp-14h]
+    int i; // [esp+8h] [ebp-14h]
     CEntPlayerInfo player; // [esp+Ch] [ebp-10h] BYREF
 
     SV_CheckThread();
@@ -1123,23 +1123,23 @@ void __cdecl G_PlayerController(const gentity_s *self, int32_t *partBits)
 
 void __cdecl ClientEndFrame(gentity_s *ent)
 {
-    //int32_t v1; // ecx
-    int32_t v2; // eax
-    uint32_t v3; // edx
+    //int v1; // ecx
+    int v2; // eax
+    uint v3; // edx
     const char *v4; // eax
     char *v5; // eax
-    int32_t v6; // [esp+24h] [ebp-144h]
+    int v6; // [esp+24h] [ebp-144h]
     bool v7; // [esp+28h] [ebp-140h]
     float *playerAngles; // [esp+70h] [ebp-F8h]
     float *viewangles; // [esp+74h] [ebp-F4h]
     float v10; // [esp+DCh] [ebp-8Ch]
-    int32_t partBits[4]; // [esp+120h] [ebp-48h] BYREF
-    int32_t bChanged; // [esp+130h] [ebp-38h]
+    int partBits[4]; // [esp+120h] [ebp-48h] BYREF
+    int bChanged; // [esp+130h] [ebp-38h]
     gclient_s *client; // [esp+134h] [ebp-34h]
     DObj_s *obj; // [esp+138h] [ebp-30h]
     float vViewPos[3]; // [esp+13Ch] [ebp-2Ch] BYREF
     clientInfo_t *ci; // [esp+148h] [ebp-20h]
-    int32_t clientNum; // [esp+14Ch] [ebp-1Ch]
+    int clientNum; // [esp+14Ch] [ebp-1Ch]
     float spawn_angles[3]; // [esp+150h] [ebp-18h] BYREF
     float spawn_origin[3]; // [esp+15Ch] [ebp-Ch] BYREF
 
@@ -1265,7 +1265,7 @@ void __cdecl ClientEndFrame(gentity_s *ent)
                     ent->handler = ENT_HANDLER_CLIENT;
                 }
                 clientNum = ent->s.clientNum;
-                if ((uint32_t)clientNum >= 0x40)
+                if ((uint)clientNum >= 0x40)
                     MyAssertHandler(
                         ".\\game_mp\\g_active_mp.cpp",
                         1669,
@@ -1372,20 +1372,20 @@ void __cdecl ClientEndFrame(gentity_s *ent)
     }
 }
 
-int32_t __cdecl G_UpdateClientInfo(gentity_s *ent)
+int __cdecl G_UpdateClientInfo(gentity_s *ent)
 {
-    uint32_t v1; // eax
-    uint32_t v2; // eax
+    uint v1; // eax
+    uint v2; // eax
     const char *v3; // eax
-    int32_t number; // [esp-4h] [ebp-5Ch]
+    int number; // [esp-4h] [ebp-5Ch]
     const char *tagName; // [esp+3Ch] [ebp-1Ch]
-    int32_t bChanged; // [esp+40h] [ebp-18h]
+    int bChanged; // [esp+40h] [ebp-18h]
     gclient_s *client; // [esp+44h] [ebp-14h]
     const char *modelName; // [esp+48h] [ebp-10h]
     const char *modelNamea; // [esp+48h] [ebp-10h]
     clientInfo_t *ci; // [esp+4Ch] [ebp-Ch]
-    int32_t i; // [esp+50h] [ebp-8h]
-    uint32_t clientNum; // [esp+54h] [ebp-4h]
+    int i; // [esp+50h] [ebp-8h]
+    uint clientNum; // [esp+54h] [ebp-4h]
 
     client = ent->client;
     if (!client)
@@ -1478,7 +1478,7 @@ int32_t __cdecl G_UpdateClientInfo(gentity_s *ent)
     return bChanged;
 }
 
-void __cdecl G_PlayerEvent(int32_t clientNum, int32_t event)
+void __cdecl G_PlayerEvent(int clientNum, int event)
 {
     gclient_s *client; // [esp+4h] [ebp-10h]
     float kickAVel[3]; // [esp+8h] [ebp-Ch] BYREF

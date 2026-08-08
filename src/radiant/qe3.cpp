@@ -82,9 +82,9 @@ int TexFilter_LoadMenuFile( const char *txt, void *dest, int startId )
 
         // Trim leading whitespace → v6 (here `p`).                       0x45b0c5..0x45b0f2
         char *p = line;
-        if ( isspace( (unsigned char)line[0] ) )
+        if ( isspace( (byte)line[0] ) )
         {
-            do { ++p; } while ( isspace( (unsigned char)*p ) );
+            do { ++p; } while ( isspace( (byte)*p ) );
         }
 
         if ( strncmp( p, "//", 2 ) )                    // 0x45b0fc — not a comment line
@@ -94,7 +94,7 @@ int TexFilter_LoadMenuFile( const char *txt, void *dest, int startId )
             {
                 // Trim trailing whitespace.                              0x45b122..0x45b143
                 char *end = &p[len - 1];
-                while ( isspace( (unsigned char)*end ) )
+                while ( isspace( (byte)*end ) )
                 {
                     --len;
                     --end;
@@ -589,7 +589,7 @@ LPMRUMENU *CreateMruMenuDefault()
 // ── 0x48A2C0  MRU_NewItem — promote/insert lpString1 to slot 0 ────────────────
 void MRU_NewItem( LPMRUMENU *mru, const char *lpString1 )
 {
-    unsigned short idx = 0;
+    ushort idx = 0;
     if ( mru->wNbItemFill )
     {
         // If already present, shift the entries above it down (promote to front).
@@ -609,7 +609,7 @@ make_room:
         int cnt = mru->wNbItemFill + 1;
         if ( cnt >= mru->wNbLruMenu )
             cnt = mru->wNbLruMenu;
-        mru->wNbItemFill = (unsigned short)cnt;
+        mru->wNbItemFill = (ushort)cnt;
         for ( int v6 = cnt - 1; v6 > 0; --v6 )
             lstrcpyA( &mru->lpMRU[mru->wMaxSizeLruItem * v6],
                       &mru->lpMRU[mru->wMaxSizeLruItem * ( v6 - 1 )] );
@@ -650,13 +650,13 @@ void MRU_InsertItem( LPMRUMENU *mru, HMENU hMenu )
 }
 
 // ── 0x48A3A0  DelMenuItem — drop a stale (open-failed) MRU entry ──────────────
-static signed int DelMenuItem( unsigned short nID, LPMRUMENU *mru )
+static signed int DelMenuItem( ushort nID, LPMRUMENU *mru )
 {
-    unsigned short v2 = (unsigned short)( nID - mru->wIdMru - 1 );
+    ushort v2 = (ushort)( nID - mru->wIdMru - 1 );
     if ( mru->wNbItemFill <= v2 )
         return 0;
     mru->wNbItemFill -= 1;
-    for ( unsigned short i = v2; i < mru->wNbItemFill; ++i )
+    for ( ushort i = v2; i < mru->wNbItemFill; ++i )
         lstrcpyA( &mru->lpMRU[i * mru->wMaxSizeLruItem],
                   &mru->lpMRU[mru->wMaxSizeLruItem * ( i + 1 )] );
     return 1;
@@ -673,7 +673,7 @@ void SaveMruInReg( LPMRUMENU *mru )
     DWORD disp = 0;
     RegCreateKeyExA( HKEY_CURRENT_USER, "Software\\iw\\CoD4Radiant\\MRU", 0, 0, 0,
                      KEY_ALL_ACCESS, 0, &hKey, &disp );
-    for ( unsigned short i = 0; i < mru->wNbLruMenu; ++i )
+    for ( ushort i = 0; i < mru->wNbLruMenu; ++i )
     {
         char valueName[16];
         wsprintfA( valueName, "File%lu", i + 1 );
@@ -703,7 +703,7 @@ void LoadMruInReg( LPMRUMENU *mru )
         return;
     HKEY hKey = 0;
     RegOpenKeyExA( HKEY_CURRENT_USER, "Software\\iw\\CoD4Radiant\\MRU", 0, KEY_READ, &hKey );
-    for ( unsigned short i = 0; i < mru->wNbLruMenu; ++i )
+    for ( ushort i = 0; i < mru->wNbLruMenu; ++i )
     {
         char valueName[16];
         wsprintfA( valueName, "File%lu", i + 1 );
@@ -718,7 +718,7 @@ void LoadMruInReg( LPMRUMENU *mru )
         {
             strncpy( &mru->lpMRU[mru->wMaxSizeLruItem * i], buf, mru->wMaxSizeLruItem - 1 );
             if ( mru->wNbItemFill <= i + 1 )
-                mru->wNbItemFill = (unsigned short)( i + 1 );
+                mru->wNbItemFill = (ushort)( i + 1 );
         }
     }
     RegCloseKey( hKey );
@@ -739,7 +739,7 @@ BOOL DoMru( short nID, HWND hWnd )
 
     LPMRUMENU *mru = g_qeglobals.d_lpMruMenu;
     char fileName[132] = "";
-    unsigned short slot = (unsigned short)( nID - mru->wIdMru - 1 );
+    ushort slot = (ushort)( nID - mru->wIdMru - 1 );
     if ( slot < mru->wNbItemFill )
     {
         strncpy( fileName, &mru->lpMRU[slot * mru->wMaxSizeLruItem], 128u );

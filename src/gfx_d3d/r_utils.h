@@ -97,18 +97,18 @@ static _DWORD s_codeConstUpdateFreq[90] =
 }; // weak
 
 
-uint32_t __cdecl R_HashAssetName(const char *name);
-uint32_t __cdecl R_HashString(const char *string);
-char *__cdecl R_AllocGlobalVariable(uint32_t bytes, const char *name);
+uint __cdecl R_HashAssetName(const char *name);
+uint __cdecl R_HashString(const char *string);
+char *__cdecl R_AllocGlobalVariable(uint bytes, const char *name);
 char __cdecl R_CullPointAndRadius(const float *pt, float radius, const DpvsPlane *clipPlanes, int clipPlaneCount);
-void __cdecl R_ConvertColorToBytes(const float *colorFloat, uint32_t *colorBytes);
-inline void __cdecl R_ConvertColorToBytes(const float *colorFloat, unsigned char *colorBytes)
+void __cdecl R_ConvertColorToBytes(const float *colorFloat, uint *colorBytes);
+inline void __cdecl R_ConvertColorToBytes(const float *colorFloat, byte *colorBytes)
 {
-    R_ConvertColorToBytes(colorFloat, (uint32_t *)colorBytes);
+    R_ConvertColorToBytes(colorFloat, (uint *)colorBytes);
 }
 inline void __cdecl R_ConvertColorToBytes(const float *colorFloat, GfxColor *colorBytes)
 {
-    R_ConvertColorToBytes(colorFloat, (uint32_t *)colorBytes);
+    R_ConvertColorToBytes(colorFloat, (uint *)colorBytes);
 }
 int __cdecl R_PickMaterial(
     int traceMask,
@@ -117,7 +117,7 @@ int __cdecl R_PickMaterial(
     char *name,
     char *surfaceFlags,
     char *contents,
-    uint32_t charLimit);
+    uint charLimit);
 double __cdecl FresnelTerm(float n0, float n1, float cosIncidentAngle);
 char __cdecl R_GetClearColor(float *unpackedRgba);
 void __cdecl Byte4UnpackBgra(const uint8_t *from, float *to);
@@ -125,9 +125,9 @@ void __cdecl Byte4UnpackBgra(const uint8_t *from, float *to);
 
 // r_state_utils
 void __cdecl R_BeginView(GfxCmdBufSourceState *source, const GfxSceneDef *sceneDef, const GfxViewParms *viewParms);
-uint32_t __cdecl R_HashAssetName(const char *name);
-uint32_t __cdecl R_HashString(const char *string);
-char *__cdecl R_AllocGlobalVariable(uint32_t bytes, const char *name);
+uint __cdecl R_HashAssetName(const char *name);
+uint __cdecl R_HashString(const char *string);
+char *__cdecl R_AllocGlobalVariable(uint bytes, const char *name);
 char __cdecl R_CullPointAndRadius(const float *pt, float radius, const DpvsPlane *clipPlanes, int clipPlaneCount);
 int __cdecl R_PickMaterial(
     int traceMask,
@@ -136,7 +136,7 @@ int __cdecl R_PickMaterial(
     char *name,
     char *surfaceFlags,
     char *contents,
-    uint32_t charLimit);
+    uint charLimit);
 double __cdecl FresnelTerm(float n0, float n1, float cosIncidentAngle);
 char __cdecl R_GetClearColor(float *unpackedRgba);
 void __cdecl Byte4UnpackBgra(const uint8_t *from, float *to);
@@ -160,7 +160,7 @@ inline void __cdecl R_ReleaseAndSetNULL(
     const char *filename,
     int line)
 {
-    uint32_t useCount; // [esp+0h] [ebp-4h]
+    uint useCount; // [esp+0h] [ebp-4h]
 
     iassert(var);
     useCount = var->Release();

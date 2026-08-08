@@ -1,6 +1,6 @@
 #pragma once
 
-enum DevEventType : __int32
+enum DevEventType : int
 {                                       // ...
     EVENT_ACTIVATE = 0x0,
     EVENT_DEACTIVATE = 0x1,

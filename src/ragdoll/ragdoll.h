@@ -5,7 +5,7 @@
 
 #define RAGDOLL_DOBJ_VALID_STATE 2
 
-enum JointType : __int32
+enum JointType : int
 {                                       // ...
     RAGDOLL_JOINT_NONE = 0x0,
     RAGDOLL_JOINT_HINGE = 0x1,
@@ -16,7 +16,7 @@ static const char *jointNames[3] = { "none", "hinge", "swivel" }; // idb
 struct BoneDef // sizeof=0x4C
 {                                       // ...
     char animBoneTextNames[2][20];
-    uint32_t animBoneNames[2];
+    uint animBoneNames[2];
     float radius;
     bool mirror;
     // padding byte
@@ -32,8 +32,8 @@ struct BoneDef // sizeof=0x4C
 struct BaseLerpBoneDef // sizeof=0x20
 {                                       // ...
     char animBoneTextName[20];
-    uint32_t animBoneName;
-    uint32_t parentBoneIndex;
+    uint animBoneName;
+    uint parentBoneIndex;
     int lerpTime;
 };
 
@@ -151,8 +151,8 @@ int __cdecl Ragdoll_CreateRagdollForDObj(int localClientNum, int ragdollDef, int
 int __cdecl Ragdoll_GetUnusedBody();
 void __cdecl Ragdoll_InitBody(RagdollBody *body);
 int __cdecl Ragdoll_ReferenceDObjBody(int dobj);
-char __cdecl Ragdoll_BindDef(uint32_t ragdollDef);
-bool __cdecl Ragdoll_ValidateDef(uint32_t ragdollDef);
+char __cdecl Ragdoll_BindDef(uint ragdollDef);
+bool __cdecl Ragdoll_ValidateDef(uint ragdollDef);
 void __cdecl Ragdoll_Remove(int ragdoll);
 void __cdecl Ragdoll_FreeBody(int ragdollBody);
 void __cdecl Ragdoll_InitDvars();

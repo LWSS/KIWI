@@ -4,7 +4,7 @@
 #include <Windows.h>
 
 // LWSS: this enum name is kinda retarded
-enum Enum_t : __int32
+enum Enum_t : int
 {
     ENUM_NOP = 0x0,
     ENUM_program = 0x1,
@@ -99,9 +99,9 @@ enum Enum_t : __int32
 typedef struct
 {
     FILE *yy_input_file;
-    unsigned char *yy_ch_buf;
-    unsigned char *yy_buf_pos;
-    uint32_t yy_buf_size;
+    byte *yy_ch_buf;
+    byte *yy_buf_pos;
+    uint yy_buf_size;
     int yy_n_chars;
     int yy_is_our_buffer;
     int yy_is_interactive;
@@ -113,7 +113,7 @@ typedef struct
 int __cdecl yyparse();
 int __cdecl yylex();
 void __cdecl TextValue(char *str, int len);
-int __cdecl StringValue(unsigned char *str, int len);
+int __cdecl StringValue(byte *str, int len);
 void __cdecl IntegerValue(char *str);
 void __cdecl FloatValue(char *str);
 int __cdecl yy_get_next_buffer();
@@ -122,7 +122,7 @@ int __cdecl yy_try_NUL_trans(int yy_current_state);
 void __cdecl yy_load_buffer_state();
 void __cdecl yy_flush_buffer(yy_buffer_state *b);
 void __cdecl  yy_fatal_error(const char *msg);
-LPVOID __cdecl yy_flex_alloc(uint32_t size);
-void *__cdecl yy_flex_realloc(void *ptr, uint32_t size);
+LPVOID __cdecl yy_flex_alloc(uint size);
+void *__cdecl yy_flex_realloc(void *ptr, uint size);
 //int __cdecl yyerror();
-void __cdecl ScriptParse(union sval_u *parseData, unsigned char user);
+void __cdecl ScriptParse(union sval_u *parseData, byte user);

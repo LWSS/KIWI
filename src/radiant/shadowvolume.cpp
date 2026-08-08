@@ -100,9 +100,9 @@ static short  s_vertexCount    = 0;    // IDB 0x23F15CA  vertexCount
 static short shadowvolume_01( const float *sunlight, const float *vtx )
 {
     // Hash over the LOW half of each component's bit pattern (0x45636b).
-    uint16_t iw0 = (uint16_t)(*(const uint32_t *)(vtx + 0));
-    uint16_t iw1 = (uint16_t)(*(const uint32_t *)(vtx + 1));
-    uint16_t iw2 = (uint16_t)(*(const uint32_t *)(vtx + 2));
+    uint16_t iw0 = (uint16_t)(*(const uint *)(vtx + 0));
+    uint16_t iw1 = (uint16_t)(*(const uint *)(vtx + 1));
+    uint16_t iw2 = (uint16_t)(*(const uint *)(vtx + 2));
     uint16_t v2  = (uint16_t)( iw2 + 12517u * iw1 - 12519u * iw0 ) & 0x7FFF;
 
     if ( s_vertHashIdx[v2] == -1 )
@@ -127,9 +127,9 @@ LABEL_6:
         for ( ;; )
         {
             const float *cached = (const float *)(uintptr_t)s_vertHashPtr[v2];
-            if (   *(const uint32_t *)(vtx + 0) == *(const uint32_t *)(cached + 0)
-                && *(const uint32_t *)(vtx + 1) == *(const uint32_t *)(cached + 1)
-                && *(const uint32_t *)(vtx + 2) == *(const uint32_t *)(cached + 2) )
+            if (   *(const uint *)(vtx + 0) == *(const uint *)(cached + 0)
+                && *(const uint *)(vtx + 1) == *(const uint *)(cached + 1)
+                && *(const uint *)(vtx + 2) == *(const uint *)(cached + 2) )
             {
                 return s_vertHashIdx[v2];
             }
@@ -498,7 +498,7 @@ static void ShadVol_AddBrushFaces( const brush_t *def, const orientation_t *orie
         {
             const Material *m = lm->next;
             int bidx = ( m->techniqueSet && m->techniqueSet->techniques[5] )
-                         ? (unsigned char)m->stateBitsEntry[4] : 0;
+                         ? (byte)m->stateBitsEntry[4] : 0;
             casts = ( m->surfaceFlags & 0x40000 ) == 0 && m->stateBitsTable
                     && ( m->stateBitsTable[bidx].loadBits[0] & 0x7000F00u ) == 0x800u
                     && ( m->stateBitsTable[bidx].loadBits[1] & 1 ) != 0;
@@ -516,7 +516,7 @@ static void ShadVol_AddBrushFaces( const brush_t *def, const orientation_t *orie
 // Returns indexCount (the binary's __usercall return is unused by its callers).
 static int ShadVol_AddModelSilhouette( int indexCount, const uint16_t *indices,
                                        const orientation_t *orient,
-                                       const unsigned char *verts, int stride,
+                                       const byte *verts, int stride,
                                        const float *light )
 {
     if ( indexCount <= 0 )
@@ -546,8 +546,8 @@ static int ShadVol_AddModelSilhouette( int indexCount, const uint16_t *indices,
 static char SunLightPreview_DrawModelShadow( selbrush_t *b, orientation_t *orient,
                                              const float *light )
 {
-    static unsigned char vbuf[196612];                  // v8  — 0x4000 verts * 12 bytes
-    static unsigned char ibuf[131076];                  // v11 — 0x10000 indices * 2 + slack
+    static byte vbuf[196612];                  // v8  — 0x4000 verts * 12 bytes
+    static byte ibuf[131076];                  // v11 — 0x10000 indices * 2 + slack
 
     entity_s *owner = (entity_s *)b->owner;
     SetupModelInst( ((orientation_t *)orient)->origin, owner );   // 0x479c19 (ecx0->origin)
@@ -591,7 +591,7 @@ static char Patch_AddShadowSilhouette( orientation_t *orient, patch_t *patch, co
         return 0;                        // no tessellation yet (headless / pre-realize)
     return (char)ShadVol_AddModelSilhouette( patch->indexCount,            // 0x441919
                                              patch->indicesFront, orient,
-                                             (const unsigned char *)patch->def->curveDef->verts,
+                                             (const byte *)patch->def->curveDef->verts,
                                              (int)sizeof( curveVert_t ), light );
 }
 

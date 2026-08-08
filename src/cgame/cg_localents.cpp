@@ -24,9 +24,9 @@ void __cdecl TRACK_cg_localents()
     track_static_alloc_internal(cg_activeLocalEntities, 80, "cg_activeLocalEntities", 9);
 }
 
-void __cdecl CG_InitLocalEntities(int32_t localClientNum)
+void __cdecl CG_InitLocalEntities(int localClientNum)
 {
-    int32_t entIter; // [esp+0h] [ebp-4h]
+    int entIter; // [esp+0h] [ebp-4h]
 
     memset((uint8_t *)cg_localEntities[localClientNum], 0, sizeof(localEntity_s[128]));
     cg_activeLocalEntities[localClientNum].next = &cg_activeLocalEntities[localClientNum];
@@ -36,7 +36,7 @@ void __cdecl CG_InitLocalEntities(int32_t localClientNum)
         cg_localEntities[localClientNum][entIter].next = &cg_localEntities[localClientNum][entIter + 1];
 }
 
-localEntity_s *__cdecl CG_AllocLocalEntity(int32_t localClientNum)
+localEntity_s *__cdecl CG_AllocLocalEntity(int localClientNum)
 {
     localEntity_s *le; // [esp+0h] [ebp-4h]
 
@@ -56,7 +56,7 @@ localEntity_s *__cdecl CG_AllocLocalEntity(int32_t localClientNum)
     return le;
 }
 
-void __cdecl CG_FreeLocalEntity(int32_t localClientNum, localEntity_s *le)
+void __cdecl CG_FreeLocalEntity(int localClientNum, localEntity_s *le)
 {
     if (!le->prev)
         Com_Error(ERR_DROP, "CG_FreeLocalEntity: not active");
@@ -66,9 +66,9 @@ void __cdecl CG_FreeLocalEntity(int32_t localClientNum, localEntity_s *le)
     cg_freeLocalEntities[localClientNum] = le;
 }
 
-void __cdecl CG_AddLocalEntityTracerBeams(int32_t localClientNum)
+void __cdecl CG_AddLocalEntityTracerBeams(int localClientNum)
 {
-    int32_t time; // [esp+38h] [ebp-10h]
+    int time; // [esp+38h] [ebp-10h]
     localEntity_s *prev; // [esp+3Ch] [ebp-Ch]
     localEntity_s *le; // [esp+40h] [ebp-8h]
     localEntity_s *activeLocalEntities; // [esp+44h] [ebp-4h]

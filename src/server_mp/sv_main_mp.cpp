@@ -83,7 +83,7 @@ void __cdecl TRACK_sv_main()
 char string_2[1024];
 char *__cdecl SV_ExpandNewlines(char *in)
 {
-    uint32_t l; // [esp+0h] [ebp-4h]
+    uint l; // [esp+0h] [ebp-4h]
 
     l = 0;
     while (*in && l < 1021)
@@ -747,7 +747,7 @@ void __cdecl SV_PacketEvent(netadr_t from, msg_t *msg)
 
     if (!Sys_IsMainThread())
         MyAssertHandler(".\\server_mp\\sv_main_mp.cpp", 1336, 0, "%s", "Sys_IsMainThread()");
-    if (msg->cursize >= 4 && *(uint32_t *)msg->data == -1)
+    if (msg->cursize >= 4 && *(uint *)msg->data == -1)
     {
         SV_ConnectionlessPacket(from, msg);
     }

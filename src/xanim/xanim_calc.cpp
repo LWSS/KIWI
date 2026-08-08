@@ -32,9 +32,9 @@ void __cdecl XAnimCalc(
     XAnimInfo *firstInfo; // [esp+18h] [ebp-28h]
     XAnimInfo *secondInfo; // [esp+1Ch] [ebp-24h]
     const XAnimTree_s *tree; // [esp+20h] [ebp-20h]
-    uint32_t secondInfoIndex; // [esp+24h] [ebp-1Ch]
+    uint secondInfoIndex; // [esp+24h] [ebp-1Ch]
     DObjAnimMat *calcBuffer; // [esp+28h] [ebp-18h]
-    uint32_t firstInfoIndex; // [esp+2Ch] [ebp-14h]
+    uint firstInfoIndex; // [esp+2Ch] [ebp-14h]
     bool secondChildFound; // [esp+32h] [ebp-Eh]
     bool additiveChildExists; // [esp+33h] [ebp-Dh]
     int allocedCalcBuffer; // [esp+34h] [ebp-Ch]
@@ -167,7 +167,7 @@ bool __cdecl IsInfoAdditive(const XAnimInfo *info)
 
 void __cdecl XAnimClearRotTransArray(const DObj_s *obj, DObjAnimMat *rotTransArray, XAnimCalcAnimInfo *info)
 {
-    uint32_t modelPartIndex; // [esp+4h] [ebp-4h]
+    uint modelPartIndex; // [esp+4h] [ebp-4h]
 
     for (modelPartIndex = 0; (int)modelPartIndex < obj->numBones; ++modelPartIndex)
     {
@@ -239,14 +239,14 @@ void __cdecl XAnimCalcParts(
     float4 fromVec; // [esp+254h] [ebp-4Ch] BYREF
     __int16 *dataShort; // [esp+268h] [ebp-38h]
     XAnimTime animTime; // [esp+26Ch] [ebp-34h] BYREF
-    uint32_t animPartIndex; // [esp+278h] [ebp-28h]
+    uint animPartIndex; // [esp+278h] [ebp-28h]
     unsigned __int8 *dataByte; // [esp+27Ch] [ebp-24h]
     int *randomDataInt; // [esp+280h] [ebp-20h]
-    uint32_t size; // [esp+284h] [ebp-1Ch]
+    uint size; // [esp+284h] [ebp-1Ch]
     int *dataInt; // [esp+288h] [ebp-18h]
     __int16 *randomDataShort; // [esp+28Ch] [ebp-14h]
     unsigned __int8 *randomDataByte; // [esp+290h] [ebp-10h]
-    uint32_t tableSize; // [esp+294h] [ebp-Ch]
+    uint tableSize; // [esp+294h] [ebp-Ch]
     T *indices; // [esp+298h] [ebp-8h]
     int modelPartIndex; // [esp+29Ch] [ebp-4h]
 
@@ -282,7 +282,7 @@ void __cdecl XAnimCalcParts(
     {
         modelPartIndex = animToModel[animPartIndex];
         iassert(modelPartIndex < DOBJ_MAX_PARTS);
-        tableSize = (unsigned short)*dataShort++;
+        tableSize = (ushort)*dataShort++;
 
         T *pIndices;
 
@@ -301,7 +301,7 @@ void __cdecl XAnimCalcParts(
             XAnim_GetTimeIndex<T>(&animTime, pIndices, finalTableSize, &tmpKeyframeIndex, &animTime.time);
             tmpKeyframeIndex <<= 8;
 
-            uint32_t keyframeDelta = CLAMP(tableSize - tmpKeyframeIndex, 0, 256);
+            uint keyframeDelta = CLAMP(tableSize - tmpKeyframeIndex, 0, 256);
             pIndices = &indices[tmpKeyframeIndex];
             XAnim_GetTimeIndex<T>(&animTime, pIndices, keyframeDelta, &keyFrameIndex, &keyFrameLerpFrac);
             keyFrameIndex += tmpKeyframeIndex;
@@ -309,7 +309,7 @@ void __cdecl XAnimCalcParts(
         }
         else
         {
-            if constexpr (sizeof(T) == sizeof(unsigned char))
+            if constexpr (sizeof(T) == sizeof(byte))
             {
                 pIndices = (T *)dataByte;
                 dataByte += tableSize + 1;
@@ -358,7 +358,7 @@ LABEL_45:
     {
         modelPartIndex = animToModel[animPartIndex];
         iassert(modelPartIndex < DOBJ_MAX_PARTS);
-        tableSize = (unsigned short)*dataShort++;
+        tableSize = (ushort)*dataShort++;
 
         T *pIndices;
 
@@ -386,7 +386,7 @@ LABEL_45:
         }
         else
         {
-            if constexpr (sizeof(T) == sizeof(unsigned char))
+            if constexpr (sizeof(T) == sizeof(byte))
             {
                 pIndices = (T *)dataByte;
                 dataByte += tableSize + 1;
@@ -538,7 +538,7 @@ LABEL_67:
     {
         modelPartIndex = animToModel[*dataByte++];
         iassert(modelPartIndex < DOBJ_MAX_PARTS);
-        tableSize = (unsigned short)*dataShort++;
+        tableSize = (ushort)*dataShort++;
 
         T *pIndices;
 
@@ -566,7 +566,7 @@ LABEL_67:
         }
         else
         {
-            if constexpr (sizeof(T) == sizeof(unsigned char))
+            if constexpr (sizeof(T) == sizeof(byte))
             {
                 pIndices = (T *)dataByte;
                 dataByte += tableSize + 1;
@@ -615,7 +615,7 @@ LABEL_119:
     {
         modelPartIndex = animToModel[*dataByte++];
         iassert(modelPartIndex < DOBJ_MAX_PARTS);
-        tableSize = (unsigned short)*dataShort++;
+        tableSize = (ushort)*dataShort++;
 
         T *pIndices;
         if (tableSize >= 64 && sizeof(T) > 1)
@@ -641,7 +641,7 @@ LABEL_119:
         }
         else
         {
-            if constexpr (sizeof(T) == sizeof(unsigned char))
+            if constexpr (sizeof(T) == sizeof(byte))
             {
                 pIndices = (T *)dataByte;
                 dataByte += tableSize + 1;
@@ -664,7 +664,7 @@ LABEL_119:
 LABEL_141:
         if (v17)
         {
-            v51 = (unsigned short *)&randomDataShort[3 * v50];
+            v51 = (ushort *)&randomDataShort[3 * v50];
 
             float4 from;
             from.v[0] = (float)v51[0];
@@ -728,7 +728,7 @@ void __cdecl XAnimCalcLeaf(XAnimInfo *info, float weightScale, DObjAnimMat *rotT
     animToModel = (XAnimToXModel*)SL_ConvertToString(info->animToModel);
 
     //for (i = 0; i < 4; ++i)
-    //    animInfo->animPartBits.array[i] |= *(uint32_t *)&animToModel[4 * i] & ~animInfo->ignorePartBits.array[i]; // weird exception
+    //    animInfo->animPartBits.array[i] |= *(uint *)&animToModel[4 * i] & ~animInfo->ignorePartBits.array[i]; // weird exception
 
     for (i = 0; i < 4; i++)
     {
@@ -743,7 +743,7 @@ void __cdecl XAnimCalcLeaf(XAnimInfo *info, float weightScale, DObjAnimMat *rotT
     if (time != 1.0f && parts->numframes)
     {
         if (parts->numframes >= 256)
-            XAnimCalcParts<unsigned short>(
+            XAnimCalcParts<ushort>(
                 parts,
                 animToModel->boneIndex,
                 time,
@@ -751,7 +751,7 @@ void __cdecl XAnimCalcLeaf(XAnimInfo *info, float weightScale, DObjAnimMat *rotT
                 rotTransArray,
                 &animInfo->ignorePartBits);
         else
-            XAnimCalcParts<unsigned char>(
+            XAnimCalcParts<byte>(
                 parts,
                 animToModel->boneIndex,
                 time,
@@ -785,9 +785,9 @@ void __cdecl XAnimCalcNonLoopEnd(
     float v12[5]; // [esp+8Ch] [ebp-190h] BYREF
     float *result; // [esp+A0h] [ebp-17Ch]
     float v14[5]; // [esp+A4h] [ebp-178h] BYREF
-    uint32_t v15; // [esp+B8h] [ebp-164h]
+    uint v15; // [esp+B8h] [ebp-164h]
     float *start; // [esp+BCh] [ebp-160h]
-    uint32_t v19; // [esp+D4h] [ebp-148h]
+    uint v19; // [esp+D4h] [ebp-148h]
     float v20; // [esp+D8h] [ebp-144h]
     float v21; // [esp+DCh] [ebp-140h]
     float v22; // [esp+E0h] [ebp-13Ch]
@@ -827,14 +827,14 @@ void __cdecl XAnimCalcNonLoopEnd(
     int useSmallIndices; // [esp+1ECh] [ebp-30h]
     __int16 *dataShort; // [esp+1F0h] [ebp-2Ch]
     DObjAnimMat *totalRotTrans; // [esp+1F4h] [ebp-28h]
-    uint32_t animPartIndex; // [esp+1F8h] [ebp-24h]
+    uint animPartIndex; // [esp+1F8h] [ebp-24h]
     unsigned __int8 *dataByte; // [esp+1FCh] [ebp-20h]
     int *randomDataInt; // [esp+200h] [ebp-1Ch]
-    uint32_t size; // [esp+204h] [ebp-18h]
+    uint size; // [esp+204h] [ebp-18h]
     int *dataInt; // [esp+208h] [ebp-14h]
     __int16 *randomDataShort; // [esp+20Ch] [ebp-10h]
     unsigned __int8 *randomDataByte; // [esp+210h] [ebp-Ch]
-    uint32_t tableSize; // [esp+214h] [ebp-8h]
+    uint tableSize; // [esp+214h] [ebp-8h]
     int modelPartIndex; // [esp+218h] [ebp-4h]
 
     iassert(!parts->bLoop);
@@ -852,7 +852,7 @@ void __cdecl XAnimCalcNonLoopEnd(
     while (animPartIndex < size)
     {
         modelPartIndex = animToModel[animPartIndex];
-        iassert((uint32_t)modelPartIndex < DOBJ_MAX_PARTS);
+        iassert((uint)modelPartIndex < DOBJ_MAX_PARTS);
 
         if (!ignorePartBits->testBit(modelPartIndex))
         {
@@ -1202,7 +1202,7 @@ DObjAnimMat *__cdecl XAnimGetCalcBuffer(XAnimCalcAnimInfo *info, const DObj_s *o
 void __cdecl XAnimScaleRotTransArray(int numBones, const XAnimCalcAnimInfo *info, DObjAnimMat *rotTransArray)
 {
     float r; // [esp+8h] [ebp-8h]
-    uint32_t i; // [esp+Ch] [ebp-4h]
+    uint i; // [esp+Ch] [ebp-4h]
 
     for (i = 0; (int)i < numBones; ++i)
     {
@@ -1224,7 +1224,7 @@ void __cdecl XAnimNormalizeRotScaleTransArray(
 {
     float r;
 
-    for (uint32_t i = 0; (int)i < numBones; ++i)
+    for (uint i = 0; (int)i < numBones; ++i)
     {
         if (!info->ignorePartBits.testBit(i))
         {
@@ -1338,7 +1338,7 @@ void __cdecl XAnim_CalcRotDeltaEntire(const XAnimDeltaPart *animDelta, float *ro
 void __cdecl XAnim_CalcPosDeltaEntire(const XAnimDeltaPart *animDelta, float4 *posDelta)
 {
     XAnimPartTrans *trans; // ecx
-    unsigned short *v3; // [esp+20h] [ebp-44h]
+    ushort *v3; // [esp+20h] [ebp-44h]
     unsigned __int8 *v4; // [esp+24h] [ebp-40h]
     float sizeVec[2]; // [esp+30h] [ebp-34h]
     float lerp[4]; // [esp+3Ch] [ebp-28h]
@@ -1424,8 +1424,8 @@ void XAnim_GetTimeIndex(
     int *keyFrameIndex,
     float *keyFrameLerpFrac)
 {
-    uint32_t low; // [esp+20h] [ebp-10h]
-    uint32_t frameIndex; // [esp+24h] [ebp-Ch]
+    uint low; // [esp+20h] [ebp-10h]
+    uint frameIndex; // [esp+24h] [ebp-Ch]
     int index; // [esp+28h] [ebp-8h]
     int high; // [esp+2Ch] [ebp-4h]
 
@@ -1652,12 +1652,12 @@ void DObjCalcAnim(const DObj_s *obj, int *partBits)
     XModel *model; // [esp+94h] [ebp-60A0h]
     int kk; // [esp+98h] [ebp-609Ch]
     XModel **models; // [esp+9Ch] [ebp-6098h]
-    uint32_t boneIndex; // [esp+A0h] [ebp-6094h]
+    uint boneIndex; // [esp+A0h] [ebp-6094h]
     XAnimInfo *AnimInfo; // [esp+A4h] [ebp-6090h]
     XAnimTree_s *tree; // [esp+A8h] [ebp-608Ch]
     int jj; // [esp+ACh] [ebp-6088h]
     int ii; // [esp+B0h] [ebp-6084h]
-    uint32_t bone; // [esp+D0h] [ebp-6064h]
+    uint bone; // [esp+D0h] [ebp-6064h]
     DObjAnimMat *mat; // [esp+D4h] [ebp-6060h]
     //float *quat; // [esp+D4h] [ebp-6060h]
     char endEarly; // [esp+DBh] [ebp-6059h]
@@ -1809,12 +1809,12 @@ void __cdecl XAnim_CalcDeltaForTime(const XAnimParts *anim, float time, float *r
     }
     else if (anim->numframes >= 0x100u)
     {
-        XAnim_CalcRotDeltaDuring<unsigned short>(animDelta, time, frameCount, rotDelta);
-        XAnim_CalcPosDeltaDuring<unsigned short>(animDelta, time, frameCount, posDelta);
+        XAnim_CalcRotDeltaDuring<ushort>(animDelta, time, frameCount, rotDelta);
+        XAnim_CalcPosDeltaDuring<ushort>(animDelta, time, frameCount, posDelta);
     }
     else
     {
-        XAnim_CalcRotDeltaDuring<unsigned char>(animDelta, time, frameCount, rotDelta);
-        XAnim_CalcPosDeltaDuring<unsigned char>(animDelta, time, frameCount, posDelta);
+        XAnim_CalcRotDeltaDuring<byte>(animDelta, time, frameCount, rotDelta);
+        XAnim_CalcPosDeltaDuring<byte>(animDelta, time, frameCount, posDelta);
     }
 }

@@ -10,7 +10,7 @@
 
 #include <bgame/bg_local.h>
 
-enum clientConnected_t : __int32
+enum clientConnected_t : int
 {
     CON_DISCONNECTED = 0x0,
     CON_CONNECTING = 0x1,
@@ -129,7 +129,7 @@ struct FileMarkSkip
     int fileOffset;
 };
 
-enum SaveType : __int32
+enum SaveType : int
 {
     SAVE_TYPE_INTERNAL = 0x0,
     SAVE_TYPE_AUTOSAVE = 0x1,
@@ -147,7 +147,7 @@ struct __declspec(align(4)) PendingSave
     bool suppressPlayerNotify;
 };
 
-enum ServerFrameExtent : __int32
+enum ServerFrameExtent : int
 {
     SV_FRAME_DO_ALL = 0x0,
     SV_FRAME_DO_SMOOTHING = 0x1,
@@ -249,7 +249,7 @@ void __cdecl SV_RecordButtonPressed(int buttonPressed);
 void __cdecl SV_GetFreeDemoName(const char *baseName, int demoCount, char *testDemoName);
 void __cdecl SV_SaveDemoImmediate(SaveImmediate *save);
 void __cdecl SV_WriteDemo(SaveGame *save);
-void __cdecl SV_SaveDemo(const char *demoName, const char *description, unsigned __int32 saveType);
+void __cdecl SV_SaveDemo(const char *demoName, const char *description, uint saveType);
 void __cdecl SV_AutoSaveDemo(const char *baseName, const char *description, int demoCount, bool force);
 bool __cdecl SV_GetLatestAutoReplayName(char *filename, int filenameSize);
 void SV_EnableAutoDemo();
@@ -312,7 +312,7 @@ int __cdecl SV_DemoButtonPressed();
 
 
 // sv_main
-enum serverState_t : __int32
+enum serverState_t : int
 {
     SS_DEAD = 0x0,
     SS_LOADING = 0x1,

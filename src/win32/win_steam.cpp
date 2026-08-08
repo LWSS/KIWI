@@ -37,7 +37,7 @@ uint64_t g_steamID = 0;
 char g_steamName[64]{ 0 };
 
 static HAuthTicket steamClientAuthTicket = 0;
-static unsigned char steamClientTicket[1024]{ 0 };
+static byte steamClientTicket[1024]{ 0 };
 static uint32 steamClientTicketSize = 0;
 
 std::mutex kickPlayerMutex;
@@ -49,7 +49,7 @@ uint64_t Steam_GetClientSteamID64()
 	return g_steamID;
 }
 
-bool Steam_GetRawClientTicket(unsigned char **pBuffer, uint32 *pSize)
+bool Steam_GetRawClientTicket(byte **pBuffer, uint32 *pSize)
 {
 	if (!steamClientTicketSize || !steamClientTicket[0])
 	{

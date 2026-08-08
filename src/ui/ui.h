@@ -109,7 +109,7 @@ void __cdecl UI_SetMap(const char *mapname);
 int __cdecl UI_OwnerDrawVisible(int flags);
 int __cdecl UI_OwnerDrawHandleKey(int ownerDraw, int flags, float *special, int key);
 int __cdecl UI_CompareTimes(qtime_s *tm1, qtime_s *tm2);
-int __cdecl UI_SavegamesQsortCompare(uint32_t *arg1, uint32_t *arg2);
+int __cdecl UI_SavegamesQsortCompare(uint *arg1, uint *arg2);
 void __cdecl UI_Update(const char *name);
 void UI_SaveComplete();
 void *UI_SaveRevert();
@@ -139,7 +139,7 @@ int __cdecl UI_IsFullscreen();
 float __cdecl UI_GetBlurRadius();
 char *__cdecl UI_SafeTranslateString(const char *reference);
 int __cdecl UI_AnyFullScreenMenuVisible(int localClientNum);
-void __cdecl UI_FilterStringForButtonAnimation(char *str, uint32_t strMaxSize);
+void __cdecl UI_FilterStringForButtonAnimation(char *str, uint strMaxSize);
 void __cdecl UI_ReplaceConversions(
     const char *sourceString,
     ConversionArguments *arguments,

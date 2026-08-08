@@ -19,14 +19,14 @@
 // ─── patch INSTANCE (IDB pPatch_t, 68 bytes) — only the fields Maya export reads ──
 //   off 0x00 mesh        patchMesh_t*  (its curveDef @ +0x5038 holds the tessellated verts)
 //   off 0x0C indexCount  int           (built by PMESH_24 = (cw-1)*(6*ch-6))
-//   off 0x10 indices     unsigned short* (forward tri index list, 3 per tri)
+//   off 0x10 indices     ushort* (forward tri index list, 3 per tri)
 // Verified against PMESH_24 (0x440213) which writes a1[3]=indexCount, a1[4]=indices.
 struct edPatchInst_t
 {
     patchMesh_t    *mesh;        // 0x00
     char            pad04[8];    // 0x04
     int             indexCount;  // 0x0C
-    unsigned short *indices;     // 0x10
+    ushort *indices;     // 0x10
     char            pad14[48];   // 0x14 .. 0x44 (revIndices @0x14 + tail; unused here)
 };
 static_assert(sizeof(edPatchInst_t) == 68, "edPatchInst_t (pPatch_t) != 68");
@@ -153,7 +153,7 @@ static int Patch_ExportToMaya( FILE *f, edPatchInst_t *patch, char groupAsBrush,
 
     if ( polyList )
     {
-        const unsigned short *idx = patch->indices;        // [patch+0x10]
+        const ushort *idx = patch->indices;        // [patch+0x10]
         for ( int i = 0; i < patch->indexCount; i += 3 )   // [patch+0x0C]
         {
             fprintf( f, "\t\t$strPolyInfo = `polyCreateFacet -ch off -tx 1 -s 1" );

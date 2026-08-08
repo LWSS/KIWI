@@ -8,9 +8,9 @@ int __cdecl FS_FileGetFileSize(FILE *file)
     return FileWrapper_GetFileSize(file);
 }
 
-uint32_t __cdecl FS_FileRead(void *ptr, uint32_t len, FILE *stream)
+uint __cdecl FS_FileRead(void *ptr, uint len, FILE *stream)
 {
-    uint32_t read_size; // [esp+0h] [ebp-4h]
+    uint read_size; // [esp+0h] [ebp-4h]
 
     ProfLoad_BeginTrackedValue(MAP_PROFILE_FILE_READ);
     read_size = fread(ptr, 1u, len, stream);
@@ -28,7 +28,7 @@ uint32_t __cdecl FS_FileRead(void *ptr, uint32_t len, FILE *stream)
     return read_size;
 }
 
-uint32_t __cdecl FS_FileWrite(const void *ptr, uint32_t len, FILE *stream)
+uint __cdecl FS_FileWrite(const void *ptr, uint len, FILE *stream)
 {
     return fwrite(ptr, 1u, len, stream);
 }
@@ -139,7 +139,7 @@ int __cdecl FileWrapper_GetFileSize(FILE *h)
 #ifdef KISAK_SP
 #include <Windows.h>
 #include <fileapi.h>
-uint32_t FS_FileTell(FILE *file)
+uint FS_FileTell(FILE *file)
 {
     _LARGE_INTEGER v2; // [sp+50h] [-20h] BYREF
 

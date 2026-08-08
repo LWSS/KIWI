@@ -4,7 +4,7 @@
 #include <universal/profile.h>
 #include "r_init.h"
 
-uint32_t __cdecl Image_CubemapFace(uint32_t faceIndex)
+uint __cdecl Image_CubemapFace(uint faceIndex)
 {
     iassert(faceIndex < 6);
     return faceIndex;
@@ -180,7 +180,7 @@ LABEL_17:
 void __cdecl Image_Upload3D_CopyData_PC(
     const GfxImage *image,
     _D3DFORMAT format,
-    uint32_t mipLevel,
+    uint mipLevel,
     uint8_t *src)
 {
     int v6; // [esp+0h] [ebp-44h]
@@ -266,18 +266,18 @@ void __cdecl Image_Upload2D_CopyData_PC(
     const GfxImage *image,
     _D3DFORMAT format,
     _D3DCUBEMAP_FACES face,
-    uint32_t mipLevel,
+    uint mipLevel,
     uint8_t *src)
 {
-    uint32_t v9; // [esp+0h] [ebp-30h]
-    uint32_t v10; // [esp+4h] [ebp-2Ch]
+    uint v9; // [esp+0h] [ebp-30h]
+    uint v10; // [esp+4h] [ebp-2Ch]
     int v11; // [esp+10h] [ebp-20h]
     int v12; // [esp+14h] [ebp-1Ch]
     int v13; // [esp+18h] [ebp-18h]
     int hr; // [esp+1Ch] [ebp-14h]
     _D3DLOCKED_RECT lockedRect; // [esp+20h] [ebp-10h] BYREF
-    uint32_t width; // [esp+28h] [ebp-8h]
-    uint32_t height; // [esp+2Ch] [ebp-4h]
+    uint width; // [esp+28h] [ebp-8h]
+    uint height; // [esp+2Ch] [ebp-4h]
 
     if (image->width >> mipLevel > 1)
         v10 = image->width >> mipLevel;
@@ -409,13 +409,13 @@ void __cdecl Image_GetMipmapResolution(
     iassert(mipWidth);
     iassert(mipHeight);
 
-    if ((int)((uint32_t)baseWidth >> mipmap) > 1)
-        *mipWidth = (uint32_t)baseWidth >> mipmap;
+    if ((int)((uint)baseWidth >> mipmap) > 1)
+        *mipWidth = (uint)baseWidth >> mipmap;
     else
         *mipWidth = 1;
 
-    if ((int)((uint32_t)baseHeight >> mipmap) > 1)
-        *mipHeight = (uint32_t)baseHeight >> mipmap;
+    if ((int)((uint)baseHeight >> mipmap) > 1)
+        *mipHeight = (uint)baseHeight >> mipmap;
     else
         *mipHeight = 1;
 
@@ -430,8 +430,8 @@ void __cdecl Image_TrackFullscreenTexture(
     int picmip,
     _D3DFORMAT format)
 {
-    uint32_t memory; // [esp+0h] [ebp-18h]
-    uint32_t platformHeight; // [esp+4h] [ebp-14h]
+    uint memory; // [esp+0h] [ebp-18h]
+    uint platformHeight; // [esp+4h] [ebp-14h]
     uint16_t width; // [esp+8h] [ebp-10h] BYREF
     uint16_t height; // [esp+Ch] [ebp-Ch] BYREF
     int platformWidth; // [esp+10h] [ebp-8h]

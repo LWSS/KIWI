@@ -34,8 +34,8 @@ void __cdecl R_DrawStaticModelDrawSurfLightingNonOptimized(
     const GfxStaticModelDrawInst *smodelDrawInst; // [esp+0h] [ebp-28h]
     GfxStaticModelDrawInst *smodelDrawInsts; // [esp+4h] [ebp-24h]
     const uint16_t *list; // [esp+8h] [ebp-20h]
-    uint32_t smodelCount; // [esp+Ch] [ebp-1Ch]
-    uint32_t index; // [esp+10h] [ebp-18h]
+    uint smodelCount; // [esp+Ch] [ebp-1Ch]
+    uint index; // [esp+10h] [ebp-18h]
     XSurface *xsurf; // [esp+14h] [ebp-14h]
     GfxDrawPrimArgs args; // [esp+18h] [ebp-10h] BYREF
     uint16_t lightingHandle; // [esp+24h] [ebp-4h]
@@ -58,7 +58,7 @@ void __cdecl R_DrawStaticModelDrawSurfLightingNonOptimized(
     }
 }
 
-void __cdecl R_DrawStaticModelSurfLit(const uint32_t *primDrawSurfPos, GfxCmdBufContext context)
+void __cdecl R_DrawStaticModelSurfLit(const uint *primDrawSurfPos, GfxCmdBufContext context)
 {
     GfxStaticModelDrawStream drawStream; // [esp+0h] [ebp-20h] BYREF
     XSurface *surf; // [esp+1Ch] [ebp-4h] BYREF
@@ -73,7 +73,7 @@ void __cdecl R_DrawStaticModelSurfLit(const uint32_t *primDrawSurfPos, GfxCmdBuf
 int __cdecl R_GetNextStaticModelSurf(GfxStaticModelDrawStream *drawStream, XSurface **outSurf)
 {
     XSurface *xsurf; // [esp+0h] [ebp-Ch]
-    const uint32_t *primDrawSurfPos; // [esp+4h] [ebp-8h]
+    const uint *primDrawSurfPos; // [esp+4h] [ebp-8h]
 
     drawStream->smodelCount = *drawStream->primDrawSurfPos++;
     if (!drawStream->smodelCount)
@@ -92,7 +92,7 @@ int __cdecl R_GetNextStaticModelSurf(GfxStaticModelDrawStream *drawStream, XSurf
     return 1;
 }
 
-void __cdecl R_DrawStaticModelSurf(const uint32_t *primDrawSurfPos, GfxCmdBufContext context)
+void __cdecl R_DrawStaticModelSurf(const uint *primDrawSurfPos, GfxCmdBufContext context)
 {
     GfxStaticModelDrawStream drawStream; // [esp+0h] [ebp-20h] BYREF
     XSurface *surf; // [esp+1Ch] [ebp-4h] BYREF
@@ -108,8 +108,8 @@ void __cdecl R_DrawStaticModelDrawSurfNonOptimized(GfxStaticModelDrawStream *dra
 {
     GfxStaticModelDrawInst *smodelDrawInsts; // [esp+4h] [ebp-20h]
     const uint16_t *list; // [esp+8h] [ebp-1Ch]
-    uint32_t smodelCount; // [esp+Ch] [ebp-18h]
-    uint32_t index; // [esp+10h] [ebp-14h]
+    uint smodelCount; // [esp+Ch] [ebp-18h]
+    uint index; // [esp+10h] [ebp-14h]
     XSurface *xsurf; // [esp+14h] [ebp-10h]
     GfxDrawPrimArgs args; // [esp+18h] [ebp-Ch] BYREF
 
@@ -183,7 +183,7 @@ int __cdecl R_GetNextStaticModelCachedSurf(GfxStaticModelDrawStream *drawStream)
     if (!drawStream->smodelCount)
         return 0;
     xsurf = (XSurface *)*drawStream->primDrawSurfPos++;
-    drawStream->smodelList = (const unsigned short*)drawStream->primDrawSurfPos;
+    drawStream->smodelList = (const ushort*)drawStream->primDrawSurfPos;
     drawStream->primDrawSurfPos += (drawStream->smodelCount + 1) >> 1;
     smodelDrawInst = &rgp.world->dpvs.smodelDrawInsts[R_GetCachedSModelSurf(*drawStream->smodelList)->smodelIndex];
     drawStream->localSurf = xsurf;
@@ -198,7 +198,7 @@ int __cdecl R_GetNextStaticModelCachedSurf(GfxStaticModelDrawStream *drawStream)
 
 XSurface *__cdecl R_GetCurrentStaticModelCachedSurf(
     GfxStaticModelDrawStream *drawStream,
-    uint32_t *reflectionProbeIndex)
+    uint *reflectionProbeIndex)
 {
     if (reflectionProbeIndex)
         *reflectionProbeIndex = drawStream->reflectionProbeIndex;
@@ -212,20 +212,20 @@ void __cdecl R_SetStaticModelCachedPrimArgs(const XSurface *xsurf, GfxDrawPrimAr
     args->triCount = xsurf->triCount;
 }
 
-void __cdecl R_SetStaticModelCachedBuffer(GfxCmdBufState *state, uint32_t cachedIndex)
+void __cdecl R_SetStaticModelCachedBuffer(GfxCmdBufState *state, uint cachedIndex)
 {
     R_SetStreamSource(&state->prim, gfxBuf.smodelCacheVb, ((cachedIndex - 1) & 0xFFFFF000) << 9, 32);
 }
 
 void __cdecl R_DrawStaticModelsCachedDrawSurfLighting(GfxStaticModelDrawStream *drawStream, GfxCmdBufContext context)
 {
-    uint32_t copyBaseIndex; // [esp+0h] [ebp-30h]
-    uint32_t baseIndex; // [esp+4h] [ebp-2Ch]
-    uint32_t surfBaseIndex; // [esp+8h] [ebp-28h]
-    uint32_t reflectionProbeIndex; // [esp+10h] [ebp-20h] BYREF
+    uint copyBaseIndex; // [esp+0h] [ebp-30h]
+    uint baseIndex; // [esp+4h] [ebp-2Ch]
+    uint surfBaseIndex; // [esp+8h] [ebp-28h]
+    uint reflectionProbeIndex; // [esp+10h] [ebp-20h] BYREF
     const uint16_t *list; // [esp+14h] [ebp-1Ch]
-    uint32_t smodelCount; // [esp+18h] [ebp-18h]
-    uint32_t index; // [esp+1Ch] [ebp-14h]
+    uint smodelCount; // [esp+18h] [ebp-18h]
+    uint index; // [esp+1Ch] [ebp-14h]
     const XSurface *xsurf; // [esp+20h] [ebp-10h]
     GfxDrawPrimArgs args; // [esp+24h] [ebp-Ch] BYREF
 
@@ -245,7 +245,7 @@ void __cdecl R_DrawStaticModelsCachedDrawSurfLighting(GfxStaticModelDrawStream *
         baseIndex = surfBaseIndex + 4 * R_GetCachedSModelSurf(list[index])->baseVertIndex;
         iassert(baseIndex < SMC_MAX_INDEX_IN_CACHE);
         iassert(baseIndex + xsurf->triCount * 3 <= SMC_MAX_INDEX_IN_CACHE);
-        copyBaseIndex = R_SetIndexData(&context.state->prim, (unsigned char*)&gfxBuf.smodelCache.indices[baseIndex], xsurf->triCount);
+        copyBaseIndex = R_SetIndexData(&context.state->prim, (byte*)&gfxBuf.smodelCache.indices[baseIndex], xsurf->triCount);
         iassert(copyBaseIndex == args.baseIndex + xsurf->triCount * 3 * index);
         ++index;
     } while (index < smodelCount);
@@ -254,12 +254,12 @@ void __cdecl R_DrawStaticModelsCachedDrawSurfLighting(GfxStaticModelDrawStream *
 
 void __cdecl R_DrawStaticModelsCachedDrawSurf(GfxStaticModelDrawStream *drawStream, GfxCmdBufContext context)
 {
-    uint32_t copyBaseIndex; // [esp+0h] [ebp-2Ch]
-    uint32_t baseIndex; // [esp+4h] [ebp-28h]
-    uint32_t surfBaseIndex; // [esp+8h] [ebp-24h]
+    uint copyBaseIndex; // [esp+0h] [ebp-2Ch]
+    uint baseIndex; // [esp+4h] [ebp-28h]
+    uint surfBaseIndex; // [esp+8h] [ebp-24h]
     const uint16_t *list; // [esp+10h] [ebp-1Ch]
-    uint32_t smodelCount; // [esp+14h] [ebp-18h]
-    uint32_t index; // [esp+18h] [ebp-14h]
+    uint smodelCount; // [esp+14h] [ebp-18h]
+    uint index; // [esp+18h] [ebp-14h]
     const XSurface *xsurf; // [esp+1Ch] [ebp-10h]
     GfxDrawPrimArgs args; // [esp+20h] [ebp-Ch] BYREF
 
@@ -278,14 +278,14 @@ void __cdecl R_DrawStaticModelsCachedDrawSurf(GfxStaticModelDrawStream *drawStre
         baseIndex = surfBaseIndex + 4 * R_GetCachedSModelSurf(list[index])->baseVertIndex;
         iassert(baseIndex < SMC_MAX_INDEX_IN_CACHE);
         iassert(baseIndex + xsurf->triCount * 3 <= SMC_MAX_INDEX_IN_CACHE);
-        copyBaseIndex = R_SetIndexData(&context.state->prim, (unsigned char*)&gfxBuf.smodelCache.indices[baseIndex], xsurf->triCount);
+        copyBaseIndex = R_SetIndexData(&context.state->prim, (byte*)&gfxBuf.smodelCache.indices[baseIndex], xsurf->triCount);
         iassert(copyBaseIndex == args.baseIndex + xsurf->triCount * 3 * index);
         ++index;
     } while (index < smodelCount);
     R_DrawIndexedPrimitive(&context.state->prim, &args);
 }
 
-void __cdecl R_DrawStaticModelCachedSurfLit(const uint32_t *primDrawSurfPos, GfxCmdBufContext context)
+void __cdecl R_DrawStaticModelCachedSurfLit(const uint *primDrawSurfPos, GfxCmdBufContext context)
 {
     GfxStaticModelDrawStream drawStream; // [esp+0h] [ebp-1Ch] BYREF
 
@@ -300,7 +300,7 @@ void __cdecl R_DrawStaticModelCachedSurfLit(const uint32_t *primDrawSurfPos, Gfx
     context.state->samplerTexture[1] = drawStream.reflectionProbeTexture;
 }
 
-void __cdecl R_DrawStaticModelCachedSurf(const uint32_t *primDrawSurfPos, GfxCmdBufContext context)
+void __cdecl R_DrawStaticModelCachedSurf(const uint *primDrawSurfPos, GfxCmdBufContext context)
 {
     GfxStaticModelDrawStream drawStream; // [esp+0h] [ebp-1Ch] BYREF
 
@@ -319,16 +319,16 @@ void __cdecl R_DrawStaticModelCachedSurf(const uint32_t *primDrawSurfPos, GfxCmd
             "context.state->samplerTexture[TEXTURE_DEST_CODE_REFLECTION_PROBE] == drawStream.reflectionProbeTexture");
 }
 
-const uint32_t *__cdecl R_ReadPrimDrawSurfData(GfxReadCmdBuf *cmdBuf, uint32_t count)
+const uint *__cdecl R_ReadPrimDrawSurfData(GfxReadCmdBuf *cmdBuf, uint count)
 {
-    const uint32_t *result; // [esp+0h] [ebp-4h]
+    const uint *result; // [esp+0h] [ebp-4h]
 
     result = cmdBuf->primDrawSurfPos;
     cmdBuf->primDrawSurfPos += count;
     return result;
 }
 
-uint32_t __cdecl R_ReadPrimDrawSurfInt(GfxReadCmdBuf *cmdBuf)
+uint __cdecl R_ReadPrimDrawSurfInt(GfxReadCmdBuf *cmdBuf)
 {
     return *cmdBuf->primDrawSurfPos++;
 }
@@ -336,8 +336,8 @@ uint32_t __cdecl R_ReadPrimDrawSurfInt(GfxReadCmdBuf *cmdBuf)
 int __cdecl R_ReadStaticModelPreTessDrawSurf(
     GfxReadCmdBuf *readCmdBuf,
     GfxStaticModelPreTessSurf *pretessSurf,
-    uint32_t *firstIndex,
-    uint32_t *count)
+    uint *firstIndex,
+    uint *count)
 {
     *count = R_ReadPrimDrawSurfInt(readCmdBuf);
     if (!*count)
@@ -357,12 +357,12 @@ int __cdecl R_ReadStaticModelPreTessDrawSurf(
 
 const GfxStaticModelDrawInst *__cdecl R_SetupCachedSModelSurface(
     GfxCmdBufState *state,
-    uint32_t cachedIndex,
-    uint32_t lod,
-    uint32_t surfIndex,
-    uint32_t count,
+    uint cachedIndex,
+    uint lod,
+    uint surfIndex,
+    uint count,
     GfxDrawPrimArgs *args,
-    uint32_t *baseIndex)
+    uint *baseIndex)
 {
     const GfxStaticModelDrawInst *smodelDrawInst; // [esp+14h] [ebp-Ch]
     const XSurface *xsurf; // [esp+1Ch] [ebp-4h]
@@ -384,8 +384,8 @@ const GfxStaticModelDrawInst *__cdecl R_SetupCachedSModelSurface(
 
 void __cdecl R_DrawStaticModelsPreTessDrawSurf(
     GfxStaticModelPreTessSurf pretessSurf,
-    uint32_t firstIndex,
-    uint32_t count,
+    uint firstIndex,
+    uint count,
     GfxCmdBufContext context)
 {
     IDirect3DIndexBuffer9 *ib; // [esp+0h] [ebp-2Ch]
@@ -410,8 +410,8 @@ void __cdecl R_DrawStaticModelsPreTessDrawSurf(
 
 void __cdecl R_DrawStaticModelsPreTessDrawSurfLighting(
     GfxStaticModelPreTessSurf pretessSurf,
-    uint32_t firstIndex,
-    uint32_t count,
+    uint firstIndex,
+    uint count,
     GfxCmdBufContext context)
 {
     IDirect3DIndexBuffer9 *ib; // [esp+0h] [ebp-30h]
@@ -441,7 +441,7 @@ void __cdecl R_SetStaticModelSkinnedPrimArgs(GfxCmdBufPrimState *state, const XS
     iassert(xsurf);
     args->triCount = XSurfaceGetNumTris(xsurf);
     args->vertexCount = XSurfaceGetNumVerts(xsurf);
-    args->baseIndex = R_SetIndexData(state, (unsigned char*)xsurf->triIndices, args->triCount);
+    args->baseIndex = R_SetIndexData(state, (byte*)xsurf->triIndices, args->triCount);
 }
 
 void __cdecl R_DrawStaticModelSkinnedDrawSurfLighting(
@@ -461,11 +461,11 @@ void __cdecl R_DrawStaticModelsSkinnedDrawSurfLighting(GfxStaticModelDrawStream 
 {
     const GfxStaticModelDrawInst *smodelDrawInst; // [esp+10h] [ebp-30h]
     IDirect3DVertexBuffer9 *vb; // [esp+14h] [ebp-2Ch]
-    uint32_t vertexOffset; // [esp+18h] [ebp-28h]
+    uint vertexOffset; // [esp+18h] [ebp-28h]
     GfxStaticModelDrawInst *smodelDrawInsts; // [esp+1Ch] [ebp-24h]
     const uint16_t *list; // [esp+20h] [ebp-20h]
-    uint32_t smodelCount; // [esp+24h] [ebp-1Ch]
-    uint32_t index; // [esp+28h] [ebp-18h]
+    uint smodelCount; // [esp+24h] [ebp-1Ch]
+    uint index; // [esp+28h] [ebp-18h]
     XSurface *xsurf; // [esp+2Ch] [ebp-14h]
     GfxDrawPrimArgs args; // [esp+30h] [ebp-10h] BYREF
     uint16_t lightingHandle; // [esp+3Ch] [ebp-4h]
@@ -488,7 +488,7 @@ void __cdecl R_DrawStaticModelsSkinnedDrawSurfLighting(GfxStaticModelDrawStream 
     }
 }
 
-void __cdecl R_DrawStaticModelSkinnedSurfLit(const uint32_t *primDrawSurfPos, GfxCmdBufContext context)
+void __cdecl R_DrawStaticModelSkinnedSurfLit(const uint *primDrawSurfPos, GfxCmdBufContext context)
 {
     GfxStaticModelDrawStream drawStream; // [esp+0h] [ebp-20h] BYREF
     XSurface *surf; // [esp+1Ch] [ebp-4h] BYREF
@@ -516,11 +516,11 @@ void __cdecl R_DrawStaticModelSkinnedDrawSurf(
 void __cdecl R_DrawStaticModelsSkinnedDrawSurf(GfxStaticModelDrawStream *drawStream, GfxCmdBufContext context)
 {
     IDirect3DVertexBuffer9 *vb; // [esp+14h] [ebp-28h]
-    uint32_t vertexOffset; // [esp+18h] [ebp-24h]
+    uint vertexOffset; // [esp+18h] [ebp-24h]
     GfxStaticModelDrawInst *smodelDrawInsts; // [esp+1Ch] [ebp-20h]
     const uint16_t *list; // [esp+20h] [ebp-1Ch]
-    uint32_t smodelCount; // [esp+24h] [ebp-18h]
-    uint32_t index; // [esp+28h] [ebp-14h]
+    uint smodelCount; // [esp+24h] [ebp-18h]
+    uint index; // [esp+28h] [ebp-14h]
     XSurface *xsurf; // [esp+2Ch] [ebp-10h]
     GfxDrawPrimArgs args; // [esp+30h] [ebp-Ch] BYREF
 
@@ -538,7 +538,7 @@ void __cdecl R_DrawStaticModelsSkinnedDrawSurf(GfxStaticModelDrawStream *drawStr
         R_DrawStaticModelSkinnedDrawSurf(&smodelDrawInsts[list[index]], &args, context);
 }
 
-void __cdecl R_DrawStaticModelSkinnedSurf(const uint32_t *primDrawSurfPos, GfxCmdBufContext context)
+void __cdecl R_DrawStaticModelSkinnedSurf(const uint *primDrawSurfPos, GfxCmdBufContext context)
 {
     GfxStaticModelDrawStream drawStream; // [esp+0h] [ebp-20h] BYREF
     XSurface *surf; // [esp+1Ch] [ebp-4h] BYREF

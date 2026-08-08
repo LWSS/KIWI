@@ -15,11 +15,11 @@ void __cdecl XAnimLoadAnimInfo(XAnimInfo *info, MemoryFile *memFile)
 {
     _WORD v4[4]; // [sp+50h] [-20h] BYREF
 
-    MemFile_ReadData(memFile, 2, (unsigned char*)v4);
+    MemFile_ReadData(memFile, 2, (byte*)v4);
     info->notifyIndex = v4[0];
-    MemFile_ReadData(memFile, 2, (unsigned char *)v4);
+    MemFile_ReadData(memFile, 2, (byte *)v4);
     info->notifyChild = v4[0];
-    MemFile_ReadData(memFile, 2, (unsigned char *)v4);
+    MemFile_ReadData(memFile, 2, (byte *)v4);
     info->notifyType = v4[0];
     info->notifyName = Scr_ReadOptionalString(memFile);
     MemFile_ArchiveData(memFile, 32, &info->state);
@@ -64,12 +64,12 @@ void __cdecl XAnimLoadAnimTree(DObj_s *obj, MemoryFile *memFile)
     {
         if (obj->tree->children)
             MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\xanim\\xanim_readwrite.cpp", 65, 0, "%s", "!tree->children");
-        MemFile_ReadData(memFile, 2, (unsigned char *)v6);
+        MemFile_ReadData(memFile, 2, (byte *)v6);
         for (i = v6[0]; v6[0] != 0xFFFF; i = v6[0])
         {
             v5 = XAnimAllocInfo(obj, i, 1);
             XAnimLoadAnimInfo(v5, memFile);
-            MemFile_ReadData(memFile, 2, (unsigned char *)v6);
+            MemFile_ReadData(memFile, 2, (byte *)v6);
         }
     }
 }

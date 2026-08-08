@@ -14,7 +14,7 @@
 void __cdecl SV_UnmutePlayer_f(client_t *cl)
 {
     const char *v1; // eax
-    uint32_t otherClient; // [esp+0h] [ebp-4h]
+    uint otherClient; // [esp+0h] [ebp-4h]
 
     v1 = SV_Cmd_Argv(1);
     otherClient = atoi(v1);
@@ -27,7 +27,7 @@ void __cdecl SV_UnmutePlayer_f(client_t *cl)
 void __cdecl SV_MutePlayer_f(client_t *cl)
 {
     const char *v1; // eax
-    uint32_t otherClient; // [esp+0h] [ebp-4h]
+    uint otherClient; // [esp+0h] [ebp-4h]
 
     v1 = SV_Cmd_Argv(1);
     otherClient = atoi(v1);

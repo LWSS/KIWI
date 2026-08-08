@@ -68,7 +68,7 @@ void CM_ClearWorld()
 {
     float size; // [esp+4h] [ebp-Ch]
     float size_4; // [esp+8h] [ebp-8h]
-    uint32_t i; // [esp+Ch] [ebp-4h]
+    uint i; // [esp+Ch] [ebp-4h]
 
     memset((uint8_t *)&cm_world, 0, sizeof(cm_world));
     CM_ModelBounds(0, cm_world.mins, cm_world.maxs);
@@ -168,7 +168,7 @@ void __cdecl CM_UnlinkEntity(svEntity_s *ent)
     }
 }
 
-void __cdecl CM_LinkEntity(svEntity_s *ent, float *absmin, float *absmax, uint32_t clipHandle)
+void __cdecl CM_LinkEntity(svEntity_s *ent, float *absmin, float *absmax, uint clipHandle)
 {
     worldSector_s *node; // [esp+10h] [ebp-30h]
     int contents; // [esp+14h] [ebp-2Ch]
@@ -246,20 +246,20 @@ void __cdecl CM_LinkEntity(svEntity_s *ent, float *absmin, float *absmax, uint32
 void __cdecl CM_AddEntityToNode(svEntity_s *ent, uint16_t childNodeIndex)
 {
     uint16_t *prevEnt; // [esp+0h] [ebp-8h]
-    uint32_t entnum; // [esp+4h] [ebp-4h]
+    uint entnum; // [esp+4h] [ebp-4h]
 
     entnum = ent - sv.svEntities;
     prevEnt = &cm_world.sectors[childNodeIndex].contents.entities;
 #ifdef KISAK_MP
     for (;
-        (uint32_t)*prevEnt - 1 <= entnum;
+        (uint)*prevEnt - 1 <= entnum;
         prevEnt = &sv.configstrings[188 * *prevEnt + 2256])
     {
         ;
     }
 #elif KISAK_SP // KISAKTODO: hellish previous array abuse here
     for (entnum = ent - sv.svEntities;
-        (uint32_t)*prevEnt - 1 <= entnum;
+        (uint)*prevEnt - 1 <= entnum;
         prevEnt = &sv.configstrings[4 * *prevEnt + 2804 + 4 * __ROL4__(*prevEnt, 1)])
     {
         ;
@@ -446,12 +446,12 @@ uint16_t __cdecl CM_AllocWorldSector(float *mins, float *maxs)
 
 void __cdecl CM_AddStaticModelToNode(cStaticModel_s *staticModel, uint16_t childNodeIndex)
 {
-    uint32_t modelnum; // [esp+0h] [ebp-8h]
+    uint modelnum; // [esp+0h] [ebp-8h]
     cStaticModel_s *prevStaticModel; // [esp+4h] [ebp-4h]
 
     modelnum = staticModel - cm.staticModelList;
     for (prevStaticModel = (cStaticModel_s *)&cm_world.sectors[childNodeIndex].contents.staticModels;
-        (uint32_t)prevStaticModel->writable.nextModelInWorldSector - 1 <= modelnum;
+        (uint)prevStaticModel->writable.nextModelInWorldSector - 1 <= modelnum;
         prevStaticModel = &cm.staticModelList[prevStaticModel->writable.nextModelInWorldSector - 1])
     {
         ;
@@ -460,11 +460,11 @@ void __cdecl CM_AddStaticModelToNode(cStaticModel_s *staticModel, uint16_t child
     prevStaticModel->writable.nextModelInWorldSector = modelnum + 1;
 }
 
-uint32_t CM_LinkAllStaticModels()
+uint CM_LinkAllStaticModels()
 {
-    uint32_t result; // eax
+    uint result; // eax
     cStaticModel_s *staticModel; // [esp+0h] [ebp-8h]
-    uint32_t i; // [esp+4h] [ebp-4h]
+    uint i; // [esp+4h] [ebp-4h]
 
     i = 0;
     for (staticModel = cm.staticModelList; ; ++staticModel)
@@ -539,12 +539,12 @@ int __cdecl CM_AreaEntities(const float *mins, const float *maxs, int *entityLis
     return ap.count;
 }
 
-void __cdecl CM_AreaEntities_r(uint32_t nodeIndex, areaParms_t *ap)
+void __cdecl CM_AreaEntities_r(uint nodeIndex, areaParms_t *ap)
 {
     worldSector_s *node; // [esp+0h] [ebp-14h]
-    uint32_t nextNodeIndex; // [esp+4h] [ebp-10h]
+    uint nextNodeIndex; // [esp+4h] [ebp-10h]
     gentity_s *gcheck; // [esp+8h] [ebp-Ch]
-    uint32_t entnum; // [esp+Ch] [ebp-8h]
+    uint entnum; // [esp+Ch] [ebp-8h]
     svEntity_s *svEnt;
 
     for (node = &cm_world.sectors[nodeIndex]; (node->contents.contentsEntities & ap->contentmask) != 0; node = &cm_world.sectors[nodeIndex])
@@ -828,7 +828,7 @@ void __cdecl CM_ClipMoveToEntities_r(
     float t2; // [esp+50h] [ebp-38h]
     float frac2; // [esp+54h] [ebp-34h]
     float invDist; // [esp+5Ch] [ebp-2Ch]
-    uint32_t entnum; // [esp+60h] [ebp-28h]
+    uint entnum; // [esp+60h] [ebp-28h]
     float mid[4]; // [esp+64h] [ebp-24h] BYREF
     svEntity_s *check; // [esp+74h] [ebp-14h]
     float p[4]; // [esp+78h] [ebp-10h] BYREF
@@ -959,7 +959,7 @@ int __cdecl CM_ClipSightTraceToEntities_r(
     float t2; // [esp+50h] [ebp-34h]
     float frac2; // [esp+54h] [ebp-30h]
     float invDist; // [esp+5Ch] [ebp-28h]
-    uint32_t entnum; // [esp+60h] [ebp-24h]
+    uint entnum; // [esp+60h] [ebp-24h]
     int hitNum; // [esp+64h] [ebp-20h]
     int hitNuma; // [esp+64h] [ebp-20h]
     float mid[3]; // [esp+68h] [ebp-1Ch] BYREF
@@ -1079,7 +1079,7 @@ void __cdecl CM_PointTraceToEntities_r(
     float t1; // [esp+18h] [ebp-34h]
     float frac; // [esp+1Ch] [ebp-30h]
     float t2; // [esp+20h] [ebp-2Ch]
-    uint32_t entnum; // [esp+24h] [ebp-28h]
+    uint entnum; // [esp+24h] [ebp-28h]
     float mid[4]; // [esp+28h] [ebp-24h] BYREF
     svEntity_s *check; // [esp+38h] [ebp-14h]
     float p[4]; // [esp+3Ch] [ebp-10h] BYREF
@@ -1157,7 +1157,7 @@ int __cdecl CM_PointSightTraceToEntities_r(
     float t1; // [esp+18h] [ebp-24h]
     float frac; // [esp+1Ch] [ebp-20h]
     float t2; // [esp+20h] [ebp-1Ch]
-    uint32_t entnum; // [esp+24h] [ebp-18h]
+    uint entnum; // [esp+24h] [ebp-18h]
     int hitNum; // [esp+28h] [ebp-14h]
     int hitNuma; // [esp+28h] [ebp-14h]
     int hitNumb; // [esp+28h] [ebp-14h]

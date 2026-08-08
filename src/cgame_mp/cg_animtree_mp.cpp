@@ -14,15 +14,15 @@ void __cdecl CGScr_LoadAnimTrees()
     Scr_BeginLoadAnimTrees(0);
 }
 
-void __cdecl CG_FreeClientDObjInfo(int32_t localClientNum)
+void __cdecl CG_FreeClientDObjInfo(int localClientNum)
 {
-    int32_t i; // [esp+0h] [ebp-4h]
+    int i; // [esp+0h] [ebp-4h]
 
     for (i = 0; i < 64; ++i)
         CG_SafeDObjFree(localClientNum, i);
 }
 
-void __cdecl CG_SetDObjInfo(int32_t localClientNum, int32_t iEntNum, int32_t iEntType, XModel *pXModel)
+void __cdecl CG_SetDObjInfo(int localClientNum, int iEntNum, int iEntType, XModel *pXModel)
 {
     cg_s *cgameGlob;
 
@@ -32,7 +32,7 @@ void __cdecl CG_SetDObjInfo(int32_t localClientNum, int32_t iEntNum, int32_t iEn
     cgameGlob->pEntityLastXModel[iEntNum] = pXModel;
 }
 
-bool __cdecl CG_CheckDObjInfoMatches(int32_t localClientNum, int32_t iEntNum, int32_t iEntType, XModel *pXModel)
+bool __cdecl CG_CheckDObjInfoMatches(int localClientNum, int iEntNum, int iEntType, XModel *pXModel)
 {
     const cg_s *cgameGlob;
 
@@ -41,7 +41,7 @@ bool __cdecl CG_CheckDObjInfoMatches(int32_t localClientNum, int32_t iEntNum, in
     return cgameGlob->iEntityLastType[iEntNum] == iEntType && cgameGlob->pEntityLastXModel[iEntNum] == pXModel;
 }
 
-void __cdecl CG_SafeDObjFree(int32_t localClientNum, int32_t entIndex)
+void __cdecl CG_SafeDObjFree(int localClientNum, int entIndex)
 {
     centity_s *cent; // [esp+0h] [ebp-4h]
 
@@ -55,9 +55,9 @@ void __cdecl CG_SafeDObjFree(int32_t localClientNum, int32_t entIndex)
     }
 }
 
-void __cdecl CG_FreeEntityDObjInfo(int32_t localClientNum)
+void __cdecl CG_FreeEntityDObjInfo(int localClientNum)
 {
-    int32_t i; // [esp+0h] [ebp-4h]
+    int i; // [esp+0h] [ebp-4h]
 
     for (i = 64; i < 1024; ++i)
         CG_SafeDObjFree(localClientNum, i);

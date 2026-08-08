@@ -1,7 +1,7 @@
 #pragma once
 #include "rb_backend.h"
 
-enum $A1823DBB2E1ECBBFE5B3FD011D242004 : __int32
+enum $A1823DBB2E1ECBBFE5B3FD011D242004 : int
 {
     R_NORMAL_OVERRIDE_FLAT = 0x0,
     R_NORMAL_OVERRIDE_NONE = 0x1,

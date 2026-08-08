@@ -22,7 +22,7 @@ struct r_double_index_t // sizeof=0x4
     union
     {
         uint16_t value[2];          // ...
-        uint32_t kisak;
+        uint kisak;
     };
 };
 
@@ -47,15 +47,15 @@ struct FxElemDef;
 /////////////////////////////////////////////////////////////////////////////////
 struct FxBoltAndSortOrder // sizeof=0x4
 {
-    unsigned __int32 dobjHandle : 12;
+    uint dobjHandle : 12;
 #ifdef KISAK_SP
-    unsigned __int32 temporalBits : 2;
-    unsigned __int32 boneIndex : 10;
+    uint temporalBits : 2;
+    uint boneIndex : 10;
 #else
-    unsigned __int32 temporalBits : 1;
-    unsigned __int32 boneIndex : 11;
+    uint temporalBits : 1;
+    uint boneIndex : 11;
 #endif
-    unsigned __int32 sortOrder : 8;
+    uint sortOrder : 8;
 };
 
 struct FxSpatialFrame // sizeof=0x1C
@@ -112,15 +112,15 @@ struct FxCamera // sizeof=0xB0
     volatile long isValid;
     float frustum[6][4];
     float axis[3][3];
-    uint32_t frustumPlaneCount;
+    uint frustumPlaneCount;
     float viewOffset[3];
-    uint32_t pad[3];
+    uint pad[3];
 };
 
 struct FxSpriteInfo // sizeof=0x10
 {                                       // ...
     r_double_index_t *indices;          // ...
-    uint32_t indexCount;
+    uint indexCount;
     Material *material;
     const char *name;
 };
@@ -183,7 +183,7 @@ struct FxVisState // sizeof=0x1010
 {                                       // ...
     FxVisBlocker blocker[256];
     volatile long blockerCount;
-    uint32_t pad[3];
+    uint pad[3];
 };
 struct FxSystem // sizeof=0xA60
 {                                       // ...
@@ -225,7 +225,7 @@ struct FxSystem // sizeof=0xA60
     bool needsGarbageCollection;
     bool isArchiving;
     uint8_t localClientNum;
-    uint32_t restartList[32];
+    uint restartList[32];
 };
 struct FxMarkPoint // sizeof=0x20
 {                                       // ...
@@ -371,7 +371,7 @@ struct FxElemPreVisualState // sizeof=0x1C
     const FxEffect *effect;
     const FxElemVisStateSample *refState; // ...
     int randomSeed;
-    uint32_t distanceFade;
+    uint distanceFade;
 };
 struct FxElemVelStateInFrame // sizeof=0x30
 {                                       // ...

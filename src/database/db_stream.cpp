@@ -1,23 +1,23 @@
 #include <universal/q_shared.h>
 #include "database.h"
 
-uint32_t g_streamDelayIndex;
+uint g_streamDelayIndex;
 XBlock * g_streamBlocks;
 uint8_t *g_streamPosArray[9];
 StreamDelayInfo g_streamDelayArray[4096];
-uint32_t g_streamPosIndex;
+uint g_streamPosIndex;
 XZoneMemory *g_streamZoneMem;
 uint8_t *g_streamPos;
 
 StreamPosInfo g_streamPosStack[64];
-uint32_t g_streamPosStackIndex;
+uint g_streamPosStackIndex;
 
 // --- file-local forward declarations (moved out of database.h) ---
-static void __cdecl DB_SetStreamIndex(uint32_t index);
+static void __cdecl DB_SetStreamIndex(uint index);
 
 void __cdecl DB_InitStreams(XZoneMemory *zoneMem)
 {
-    int32_t i; // [esp+0h] [ebp-4h]
+    int i; // [esp+0h] [ebp-4h]
 
     g_streamZoneMem = zoneMem;
     g_streamPos = zoneMem->blocks[0].data;
@@ -28,7 +28,7 @@ void __cdecl DB_InitStreams(XZoneMemory *zoneMem)
         g_streamPosArray[i] = zoneMem->blocks[i].data;
 }
 
-void __cdecl DB_PushStreamPos(uint32_t index)
+void __cdecl DB_PushStreamPos(uint index)
 {
     iassert(index < ARRAY_COUNT(g_streamPosArray));
     iassert(g_streamPosIndex < ARRAY_COUNT(g_streamPosArray));
@@ -49,7 +49,7 @@ void __cdecl DB_CloneStreamData(uint8_t *destStart)
             g_streamPos - g_streamPosArray[g_streamPosIndex]);
 }
 
-void __cdecl DB_SetStreamIndex(uint32_t index)
+void __cdecl DB_SetStreamIndex(uint index)
 {
     if (index != g_streamPosIndex)
     {
@@ -82,14 +82,14 @@ uint8_t *__cdecl DB_GetStreamPos()
     return g_streamPos;
 }
 
-uint8_t *__cdecl DB_AllocStreamPos(int32_t alignment)
+uint8_t *__cdecl DB_AllocStreamPos(int alignment)
 {
     iassert(g_streamPos);
-    g_streamPos = (uint8_t *)(~alignment & (uint32_t)&g_streamPos[alignment]);
+    g_streamPos = (uint8_t *)(~alignment & (uint)&g_streamPos[alignment]);
     return g_streamPos;
 }
 
-void __cdecl DB_IncStreamPos(int32_t size)
+void __cdecl DB_IncStreamPos(int size)
 {
     iassert(g_streamPos);
     iassert(g_streamPos + size <= g_streamZoneMem->blocks[g_streamPosIndex].data + g_streamZoneMem->blocks[g_streamPosIndex].size);

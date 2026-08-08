@@ -227,9 +227,9 @@ keyname_t keynames_localized[96] =
 //struct keyname_t *keynames 827b29b0     cl_keys.obj
 //struct keyname_t *keynames_localized 827b2d50     cl_keys.obj
 //char **frenchNumberKeysMap 827b30f0     cl_keys.obj
-//int32_t historyLine          82874d18     cl_keys.obj
-//int32_t nextHistoryLine      82875128     cl_keys.obj
-//int32_t marker_cl_keys       8287512c     cl_keys.obj
+//int historyLine          82874d18     cl_keys.obj
+//int nextHistoryLine      82875128     cl_keys.obj
+//int marker_cl_keys       8287512c     cl_keys.obj
 //struct field_t g_consoleField 82875130     cl_keys.obj
 //struct PlayerKeyState *playerKeys 82875250     cl_keys.obj
 //struct field_t *historyEditLines 828786f0     cl_keys.obj
@@ -239,12 +239,12 @@ field_t g_consoleField;
 field_t historyEditLines[32];
 char s_shortestMatch[1024];
 
-int32_t historyLine;
-int32_t nextHistoryLine;
+int historyLine;
+int nextHistoryLine;
 bool s_shouldCompleteCmd;
 const char *s_completionString;
-int32_t s_matchCount;
-int32_t s_prefixMatchCount;
+int s_matchCount;
+int s_prefixMatchCount;
 bool s_hasExactMatch;
 
 void __cdecl TRACK_cl_keys()
@@ -258,15 +258,15 @@ void __cdecl TRACK_cl_keys()
 }
 
 void __cdecl Field_DrawTextOverride(
-    int32_t localClientNum,
+    int localClientNum,
     const field_t *edit,
-    int32_t x,
-    int32_t y,
-    int32_t horzAlign,
-    int32_t vertAlign,
+    int x,
+    int y,
+    int horzAlign,
+    int vertAlign,
     char *str,
-    int32_t drawLen,
-    int32_t cursorPos)
+    int drawLen,
+    int cursorPos)
 {
     Font_s *font; // [esp+30h] [ebp-24h]
     float xScale; // [esp+34h] [ebp-20h]
@@ -275,7 +275,7 @@ void __cdecl Field_DrawTextOverride(
     float xAdj; // [esp+40h] [ebp-14h]
     float fontScalea; // [esp+44h] [ebp-10h]
     float fontScale; // [esp+44h] [ebp-10h]
-    int32_t fontStyle; // [esp+48h] [ebp-Ch]
+    int fontStyle; // [esp+48h] [ebp-Ch]
     float yScale; // [esp+4Ch] [ebp-8h]
     char cursorChar; // [esp+53h] [ebp-1h]
 
@@ -332,7 +332,7 @@ void __cdecl Field_DrawTextOverride(
         cursorChar);
 }
 
-void __cdecl Field_Draw(int32_t localClientNum, field_t *edit, int32_t x, int32_t y, int32_t horzAlign, int32_t vertAlign)
+void __cdecl Field_Draw(int localClientNum, field_t *edit, int x, int y, int horzAlign, int vertAlign)
 {
     char str[1024]; // [esp+0h] [ebp-408h] BYREF
 
@@ -435,16 +435,16 @@ void __cdecl Field_AdjustScroll(const ScreenPlacement *scrPlace, field_t *edit)
     }
 }
 
-void __cdecl Console_Key(int32_t localClientNum, int32_t key)
+void __cdecl Console_Key(int localClientNum, int key)
 {
     bool v2; // [esp+8h] [ebp-1Ch]
     bool v3; // [esp+Ch] [ebp-18h]
     char v4; // [esp+12h] [ebp-12h]
     char v5; // [esp+13h] [ebp-11h]
-    int32_t isShiftDown; // [esp+14h] [ebp-10h]
-    int32_t isCtrlDown; // [esp+18h] [ebp-Ch]
-    int32_t shouldCompleteCmd; // [esp+1Ch] [ebp-8h]
-    int32_t isAltDown; // [esp+20h] [ebp-4h]
+    int isShiftDown; // [esp+14h] [ebp-10h]
+    int isCtrlDown; // [esp+18h] [ebp-Ch]
+    int shouldCompleteCmd; // [esp+1Ch] [ebp-8h]
+    int isAltDown; // [esp+20h] [ebp-4h]
 
     shouldCompleteCmd = s_shouldCompleteCmd;
     s_shouldCompleteCmd = 1;
@@ -622,11 +622,11 @@ void __cdecl Console_Key(int32_t localClientNum, int32_t key)
     }
 }
 
-char __cdecl Field_KeyDownEvent(int32_t localClientNum, const ScreenPlacement *scrPlace, field_t *edit, int32_t key)
+char __cdecl Field_KeyDownEvent(int localClientNum, const ScreenPlacement *scrPlace, field_t *edit, int key)
 {
-    int32_t OverstrikeMode; // eax
-    int32_t len; // [esp+14h] [ebp-Ch]
-    int32_t isCtrlDown; // [esp+18h] [ebp-8h]
+    int OverstrikeMode; // eax
+    int len; // [esp+14h] [ebp-Ch]
+    int isCtrlDown; // [esp+18h] [ebp-8h]
     char isModified; // [esp+1Fh] [ebp-1h]
 
     isCtrlDown = playerKeys[localClientNum].keys[159].down;
@@ -691,10 +691,10 @@ char __cdecl Field_KeyDownEvent(int32_t localClientNum, const ScreenPlacement *s
     return isModified;
 }
 
-char __cdecl Field_Paste(int32_t localClientNum, const ScreenPlacement *scrPlace, field_t *edit)
+char __cdecl Field_Paste(int localClientNum, const ScreenPlacement *scrPlace, field_t *edit)
 {
-    int32_t v4; // [esp+0h] [ebp-1Ch]
-    int32_t i; // [esp+14h] [ebp-8h]
+    int v4; // [esp+0h] [ebp-1Ch]
+    int i; // [esp+14h] [ebp-8h]
     char *cbd; // [esp+18h] [ebp-4h]
 
     cbd = Sys_GetClipboardData();
@@ -707,9 +707,9 @@ char __cdecl Field_Paste(int32_t localClientNum, const ScreenPlacement *scrPlace
     return 1;
 }
 
-bool __cdecl Field_CharEvent(int32_t localClientNum, const ScreenPlacement *scrPlace, field_t *edit, int32_t ch)
+bool __cdecl Field_CharEvent(int localClientNum, const ScreenPlacement *scrPlace, field_t *edit, int ch)
 {
-    uint32_t len; // [esp+10h] [ebp-8h]
+    uint len; // [esp+10h] [ebp-8h]
     bool isModified; // [esp+17h] [ebp-1h]
 
     len = strlen(edit->buffer);
@@ -774,12 +774,12 @@ void CompleteCommand()
     bool v0; // [esp+28h] [ebp-268h]
     bool v1; // [esp+2Ch] [ebp-264h]
     bool v2; // [esp+40h] [ebp-250h]
-    int32_t matchLenAfterCmds; // [esp+44h] [ebp-24Ch] BYREF
+    int matchLenAfterCmds; // [esp+44h] [ebp-24Ch] BYREF
     field_t savedField; // [esp+158h] [ebp-138h] BYREF
     bool isDvarCommand; // [esp+27Bh] [ebp-15h]
-    int32_t offset; // [esp+27Ch] [ebp-14h]
+    int offset; // [esp+27Ch] [ebp-14h]
     const char *originalCommand; // [esp+280h] [ebp-10h]
-    int32_t matchLenAfterDvars; // [esp+284h] [ebp-Ch] BYREF
+    int matchLenAfterDvars; // [esp+284h] [ebp-Ch] BYREF
     bool useExactMatch; // [esp+28Bh] [ebp-5h]
     field_t *edit; // [esp+28Ch] [ebp-4h]
 
@@ -905,11 +905,11 @@ void __cdecl ConcatRemaining(char *src, char *start)
         keyConcatArgs();
 }
 
-int32_t keyConcatArgs()
+int keyConcatArgs()
 {
-    int32_t result; // eax
+    int result; // eax
     char *v1; // eax
-    int32_t i; // [esp+0h] [ebp-8h]
+    int i; // [esp+0h] [ebp-8h]
     const char *arg; // [esp+4h] [ebp-4h]
 
     for (i = 1; ; ++i)
@@ -940,7 +940,7 @@ void CompleteCmdArgument()
     char arg[256]; // [esp+14h] [ebp-110h] BYREF
     const char *cmdName; // [esp+118h] [ebp-Ch]
     const char **files; // [esp+11Ch] [ebp-8h]
-    int32_t fileCount; // [esp+120h] [ebp-4h] BYREF
+    int fileCount; // [esp+120h] [ebp-4h] BYREF
 
     cmdName = Con_TokenizeInput();
     cmdArgPrefix = Cmd_Argv(1);
@@ -962,10 +962,10 @@ void CompleteCmdArgument()
     }
 }
 
-void __cdecl ReplaceConsoleInputArgument(int32_t replaceCount, char *replacement)
+void __cdecl ReplaceConsoleInputArgument(int replaceCount, char *replacement)
 {
     const char *v2; // eax
-    int32_t cmdLineLen; // [esp+10h] [ebp-8h]
+    int cmdLineLen; // [esp+10h] [ebp-8h]
 
     if (!replacement)
         MyAssertHandler(".\\client\\cl_keys.cpp", 845, 0, "%s", "replacement");
@@ -1015,7 +1015,7 @@ void CompleteDvarArgument()
     }
 }
 
-void __cdecl UpdateMatches(bool searchCmds, int32_t *matchLenAfterCmds, int32_t *matchLenAfterDvars)
+void __cdecl UpdateMatches(bool searchCmds, int *matchLenAfterCmds, int *matchLenAfterDvars)
 {
     s_matchCount = 0;
     s_prefixMatchCount = 0;
@@ -1035,11 +1035,11 @@ void __cdecl UpdateMatches(bool searchCmds, int32_t *matchLenAfterCmds, int32_t 
 
 void __cdecl FindMatches(char *s)
 {
-    int32_t v1; // esi
+    int v1; // esi
     bool v2; // [esp+4h] [ebp-28h]
     bool v3; // [esp+8h] [ebp-24h]
-    int32_t v4; // [esp+Ch] [ebp-20h]
-    int32_t i; // [esp+28h] [ebp-4h]
+    int v4; // [esp+Ch] [ebp-20h]
+    int i; // [esp+28h] [ebp-4h]
 
     v4 = strlen(s_completionString);
     if (Con_IsAutoCompleteMatch(s, s_completionString, v4))
@@ -1088,17 +1088,17 @@ bool __cdecl Console_IsClientDisconnected()
 #endif
 }
 
-int32_t __cdecl Key_GetOverstrikeMode(int32_t localClientNum)
+int __cdecl Key_GetOverstrikeMode(int localClientNum)
 {
     return playerKeys[localClientNum].overstrikeMode;
 }
 
-void __cdecl Key_SetOverstrikeMode(int32_t localClientNum, int32_t state)
+void __cdecl Key_SetOverstrikeMode(int localClientNum, int state)
 {
     playerKeys[localClientNum].overstrikeMode = state;
 }
 
-int32_t __cdecl Key_IsDown(int32_t localClientNum, int32_t keynum)
+int __cdecl Key_IsDown(int localClientNum, int keynum)
 {
     if (keynum == -1)
         return 0;
@@ -1107,13 +1107,13 @@ int32_t __cdecl Key_IsDown(int32_t localClientNum, int32_t keynum)
 }
 
 char tinystr[5];
-const char *__cdecl Key_KeynumToString(int32_t keynum, int32_t translate)
+const char *__cdecl Key_KeynumToString(int keynum, int translate)
 {
     char v3; // [esp+0h] [ebp-14h]
     char v4; // [esp+4h] [ebp-10h]
     char j; // [esp+8h] [ebp-Ch]
     keyname_t *kn; // [esp+Ch] [ebp-8h]
-    int32_t i; // [esp+10h] [ebp-4h]
+    int i; // [esp+10h] [ebp-4h]
 
     if (keynum == -1)
         return "<KEY NOT FOUND>";
@@ -1155,7 +1155,7 @@ const char *__cdecl Key_KeynumToString(int32_t keynum, int32_t translate)
     return tinystr;
 }
 
-void __cdecl Key_SetBinding(int32_t localClientNum, int32_t keynum, char *binding)
+void __cdecl Key_SetBinding(int localClientNum, int keynum, char *binding)
 {
     if (keynum != -1)
     {
@@ -1164,7 +1164,7 @@ void __cdecl Key_SetBinding(int32_t localClientNum, int32_t keynum, char *bindin
     }
 }
 
-const char *__cdecl Key_GetBinding(int32_t localClientNum, uint32_t keynum)
+const char *__cdecl Key_GetBinding(int localClientNum, uint keynum)
 {
     if (localClientNum)
         MyAssertHandler(
@@ -1185,16 +1185,16 @@ const char *__cdecl Key_GetBinding(int32_t localClientNum, uint32_t keynum)
     return playerKeys[localClientNum].keys[keynum].binding;
 }
 
-int32_t __cdecl Key_GetCommandAssignment(int32_t localClientNum, const char *command, int32_t *twokeys)
+int __cdecl Key_GetCommandAssignment(int localClientNum, const char *command, int *twokeys)
 {
     return Key_GetCommandAssignmentInternal(localClientNum, command, twokeys);
 }
 
-int32_t __cdecl Key_GetCommandAssignmentInternal(int32_t localClientNum, const char *command, int32_t *twokeys)
+int __cdecl Key_GetCommandAssignmentInternal(int localClientNum, const char *command, int *twokeys)
 {
-    int32_t keynum; // [esp+0h] [ebp-Ch]
+    int keynum; // [esp+0h] [ebp-Ch]
     const char *binding; // [esp+4h] [ebp-8h]
-    int32_t count; // [esp+8h] [ebp-4h]
+    int count; // [esp+8h] [ebp-4h]
 
     twokeys[1] = -1;
     *twokeys = -1;
@@ -1215,9 +1215,9 @@ int32_t __cdecl Key_GetCommandAssignmentInternal(int32_t localClientNum, const c
     return count;
 }
 
-bool __cdecl Key_IsCommandBound(int32_t localClientNum, const char *command)
+bool __cdecl Key_IsCommandBound(int localClientNum, const char *command)
 {
-    int32_t keys[2]; // [esp+0h] [ebp-Ch] BYREF
+    int keys[2]; // [esp+0h] [ebp-Ch] BYREF
 
     return Key_GetCommandAssignment(localClientNum, command, keys) > 0;
 }
@@ -1226,7 +1226,7 @@ void __cdecl Key_Unbind_f()
 {
     const char *v0; // eax
     const char *v1; // eax
-    int32_t b; // [esp+0h] [ebp-4h]
+    int b; // [esp+0h] [ebp-4h]
 
     if (Cmd_Argc() == 2)
     {
@@ -1248,12 +1248,12 @@ void __cdecl Key_Unbind_f()
     }
 }
 
-int32_t __cdecl Key_StringToKeynum(const char *str)
+int __cdecl Key_StringToKeynum(const char *str)
 {
-    int32_t n2; // [esp+10h] [ebp-Ch]
-    int32_t n2a; // [esp+10h] [ebp-Ch]
-    int32_t n1; // [esp+14h] [ebp-8h]
-    int32_t n1a; // [esp+14h] [ebp-8h]
+    int n2; // [esp+10h] [ebp-Ch]
+    int n2a; // [esp+10h] [ebp-Ch]
+    int n1; // [esp+14h] [ebp-8h]
+    int n1a; // [esp+14h] [ebp-8h]
     keyname_t *kn; // [esp+18h] [ebp-4h]
 
     if (!str || !*str)
@@ -1303,7 +1303,7 @@ int32_t __cdecl Key_StringToKeynum(const char *str)
 
 void __cdecl Key_Unbindall_f()
 {
-    int32_t keynum; // [esp+0h] [ebp-Ch]
+    int keynum; // [esp+0h] [ebp-Ch]
 
     for (keynum = 0; keynum < 256; ++keynum)
     {
@@ -1321,11 +1321,11 @@ void __cdecl Key_Bind_f()
     uint8_t *v4; // eax
     char *v6; // eax
     bool v7; // [esp+0h] [ebp-424h]
-    int32_t keynum; // [esp+4h] [ebp-420h]
-    int32_t keynuma; // [esp+4h] [ebp-420h]
-    int32_t i; // [esp+10h] [ebp-414h]
+    int keynum; // [esp+4h] [ebp-420h]
+    int keynuma; // [esp+4h] [ebp-420h]
+    int i; // [esp+10h] [ebp-414h]
     const char *binding; // [esp+14h] [ebp-410h]
-    int32_t argc; // [esp+18h] [ebp-40Ch]
+    int argc; // [esp+18h] [ebp-40Ch]
     char cmd[1028]; // [esp+1Ch] [ebp-408h] BYREF
 
     argc = Cmd_Argc();
@@ -1386,7 +1386,7 @@ void __cdecl Key_Bind_f()
     }
 }
 
-void __cdecl Key_WriteBindings(int32_t localClientNum, int32_t f)
+void __cdecl Key_WriteBindings(int localClientNum, int f)
 {
     char buffer[8196]; // [esp+0h] [ebp-2008h] BYREF
 
@@ -1394,16 +1394,16 @@ void __cdecl Key_WriteBindings(int32_t localClientNum, int32_t f)
     FS_Printf(f, "%s", buffer);
 }
 
-int32_t __cdecl Key_WriteBindingsToBuffer(int32_t localClientNum, char *buffer, int32_t bufferSize)
+int __cdecl Key_WriteBindingsToBuffer(int localClientNum, char *buffer, int bufferSize)
 {
     const char *v3; // eax
-    int32_t bytesUsed; // [esp+0h] [ebp-14h]
-    int32_t bytesUseda; // [esp+0h] [ebp-14h]
+    int bytesUsed; // [esp+0h] [ebp-14h]
+    int bytesUseda; // [esp+0h] [ebp-14h]
     const char *bind; // [esp+4h] [ebp-10h]
     KeyState *keys; // [esp+8h] [ebp-Ch]
-    int32_t len; // [esp+Ch] [ebp-8h]
-    int32_t keyIndex; // [esp+10h] [ebp-4h]
-    int32_t bufferSizea; // [esp+24h] [ebp+10h]
+    int len; // [esp+Ch] [ebp-8h]
+    int keyIndex; // [esp+10h] [ebp-4h]
+    int bufferSizea; // [esp+24h] [ebp+10h]
 
     keys = playerKeys[localClientNum].keys;
     bufferSizea = bufferSize - 4;
@@ -1435,7 +1435,7 @@ int32_t __cdecl Key_WriteBindingsToBuffer(int32_t localClientNum, char *buffer, 
 void __cdecl Key_Bindlist_f()
 {
     const char *v0; // eax
-    int32_t keynum; // [esp+0h] [ebp-Ch]
+    int keynum; // [esp+0h] [ebp-Ch]
     const char *binding; // [esp+8h] [ebp-4h]
 
     for (keynum = 0; keynum < 256; ++keynum)
@@ -1464,14 +1464,14 @@ void __cdecl CL_InitKeyCommands()
     Cmd_AddCommandInternal("bindlist", Key_Bindlist_f, &Key_Bindlist_f_VAR);
 }
 
-bool __cdecl CL_IsConsoleKey(int32_t key)
+bool __cdecl CL_IsConsoleKey(int key)
 {
     // key 184 isn't apart of ASCII
     return (key == '`' || key == '^' || key == 184 || key == '~');
 }
 
 #ifdef KISAK_MP
-void __cdecl CL_KeyEvent(int32_t localClientNum, int32_t key, int32_t down, uint32_t time)
+void __cdecl CL_KeyEvent(int localClientNum, int key, int down, uint time)
 {
     PROF_SCOPED("CL_KeyEvent");
 
@@ -1758,7 +1758,7 @@ void __cdecl CL_KeyEvent(int32_t localClientNum, int32_t key, int32_t down, uint
     }
 }
 #elif KISAK_SP
-void __cdecl CL_KeyEvent(int32_t localClientNum, int32_t key, int32_t down, uint32_t time)
+void __cdecl CL_KeyEvent(int localClientNum, int key, int down, uint time)
 {
     PROF_SCOPED("CL_KeyEvent");
 
@@ -2027,7 +2027,7 @@ void __cdecl CL_KeyEvent(int32_t localClientNum, int32_t key, int32_t down, uint
 }
 #endif
 
-void __cdecl Message_Key(int32_t localClientNum, int32_t key)
+void __cdecl Message_Key(int localClientNum, int key)
 {
     char buffer[1028]; // [esp+4h] [ebp-410h] BYREF
     field_t *chatField; // [esp+40Ch] [ebp-8h]
@@ -2075,7 +2075,7 @@ void __cdecl Message_Key(int32_t localClientNum, int32_t key)
     }
 }
 
-bool __cdecl CL_MouseInputShouldBypassMenus(int32_t localClientNum, int32_t key)
+bool __cdecl CL_MouseInputShouldBypassMenus(int localClientNum, int key)
 {
 #ifdef KISAK_SP
     return false; //KISAKTODO: Is this proper for PC?
@@ -2090,7 +2090,7 @@ bool __cdecl CL_MouseInputShouldBypassMenus(int32_t localClientNum, int32_t key)
 #endif
 }
 
-void __cdecl CL_CharEvent(int32_t localClientNum, int32_t key)
+void __cdecl CL_CharEvent(int localClientNum, int key)
 {
     PROF_SCOPED("CL_CharEvent");
 
@@ -2134,15 +2134,15 @@ void __cdecl CL_CharEvent(int32_t localClientNum, int32_t key)
         goto LABEL_18;
 }
 
-void __cdecl CL_ConsoleCharEvent(int32_t localClientNum, int32_t key)
+void __cdecl CL_ConsoleCharEvent(int localClientNum, int key)
 {
     if (Field_CharEvent(localClientNum, &scrPlaceFull, &g_consoleField, key))
         Con_AllowAutoCompleteCycling(1);
 }
 
-void __cdecl Key_ClearStates(int32_t localClientNum)
+void __cdecl Key_ClearStates(int localClientNum)
 {
-    int32_t keynum; // [esp+0h] [ebp-8h]
+    int keynum; // [esp+0h] [ebp-8h]
     KeyState *keys; // [esp+4h] [ebp-4h]
 
     playerKeys[localClientNum].anyKeyDown = 0;
@@ -2156,19 +2156,19 @@ void __cdecl Key_ClearStates(int32_t localClientNum)
     }
 }
 
-int32_t __cdecl CL_GetKeyBinding(int32_t localClientNum, const char *command, char (*keyNames)[128])
+int __cdecl CL_GetKeyBinding(int localClientNum, const char *command, char (*keyNames)[128])
 {
     return CL_GetKeyBindingInternal(localClientNum, command, keyNames);
 }
 
-int32_t __cdecl CL_GetKeyBindingInternal(int32_t localClientNum, const char *command, char (*keyNames)[128])
+int __cdecl CL_GetKeyBindingInternal(int localClientNum, const char *command, char (*keyNames)[128])
 {
-    int32_t keys[2]; // [esp+0h] [ebp-Ch] BYREF
-    int32_t bindCount; // [esp+8h] [ebp-4h]
+    int keys[2]; // [esp+0h] [ebp-Ch] BYREF
+    int bindCount; // [esp+8h] [ebp-4h]
 
     (*keyNames)[128] = 0;
     bindCount = Key_GetCommandAssignmentInternal(localClientNum, command, keys);
-    if ((uint32_t)bindCount > 2)
+    if ((uint)bindCount > 2)
         MyAssertHandler(".\\client\\cl_keys.cpp", 2347, 0, "bindCount not in [0, 2]\n\t%i not in [%i, %i]", bindCount, 0, 2);
     if (bindCount)
     {
@@ -2185,8 +2185,8 @@ int32_t __cdecl CL_GetKeyBindingInternal(int32_t localClientNum, const char *com
 
 void __cdecl Key_Shutdown()
 {
-    int32_t client; // [esp+0h] [ebp-8h]
-    int32_t keynum; // [esp+4h] [ebp-4h]
+    int client; // [esp+0h] [ebp-8h]
+    int keynum; // [esp+4h] [ebp-4h]
 
     for (client = 0; client < 1; ++client)
     {
@@ -2201,13 +2201,13 @@ void __cdecl Key_Shutdown()
     }
 }
 
-bool __cdecl Key_IsCatcherActive(int32_t localClientNum, int32_t mask)
+bool __cdecl Key_IsCatcherActive(int localClientNum, int mask)
 {
     iassert(localClientNum == 0);
     return (mask & clientUIActives[0].keyCatchers) != 0;
 }
 
-void __cdecl Key_AddCatcher(int32_t localClientNum, int32_t orMask)
+void __cdecl Key_AddCatcher(int localClientNum, int orMask)
 {
     if (localClientNum)
         MyAssertHandler(
@@ -2220,7 +2220,7 @@ void __cdecl Key_AddCatcher(int32_t localClientNum, int32_t orMask)
     clientUIActives[0].keyCatchers |= orMask;
 }
 
-void __cdecl Key_RemoveCatcher(int32_t localClientNum, int32_t andMask)
+void __cdecl Key_RemoveCatcher(int localClientNum, int andMask)
 {
     if ((andMask & (andMask - 1)) == 0)
         MyAssertHandler(".\\client\\cl_keys.cpp", 2448, 0, "%s", "!IsPowerOf2( andMask )");
@@ -2237,7 +2237,7 @@ void __cdecl Key_RemoveCatcher(int32_t localClientNum, int32_t andMask)
         clientUIActives[0].displayHUDWithKeycatchUI = 0;
 }
 
-void __cdecl Key_SetCatcher(int32_t localClientNum, int32_t catcher)
+void __cdecl Key_SetCatcher(int localClientNum, int catcher)
 {
     if (localClientNum)
         MyAssertHandler(

@@ -348,11 +348,11 @@ void __cdecl CG_CheckForPlayerInput(int localClientNum)
     usercmd_s v1; // [esp-40h] [ebp-9Ch] BYREF
     usercmd_s v2; // [esp-20h] [ebp-7Ch] BYREF
     usercmd_s oldCmd; // [esp+8h] [ebp-54h] BYREF
-    int32_t oldCmdIndex; // [esp+28h] [ebp-34h]
+    int oldCmdIndex; // [esp+28h] [ebp-34h]
     usercmd_s newCmd; // [esp+2Ch] [ebp-30h] BYREF
-    int32_t newInput; // [esp+50h] [ebp-Ch]
-    int32_t changedButtons; // [esp+54h] [ebp-8h]
-    int32_t newCmdIndex; // [esp+58h] [ebp-4h]
+    int newInput; // [esp+50h] [ebp-Ch]
+    int changedButtons; // [esp+54h] [ebp-8h]
+    int newCmdIndex; // [esp+58h] [ebp-4h]
 
     newCmdIndex = CL_GetCurrentCmdNumber(localClientNum);
     if (newCmdIndex > 1)

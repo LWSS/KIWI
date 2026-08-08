@@ -27,7 +27,7 @@ void __cdecl R_InitDrawSurfListInfo(GfxDrawSurfListInfo *info)
     iassert(!info->light);
 }
 
-void __cdecl R_EmitDrawSurfList(GfxDrawSurf *drawSurfs, uint32_t drawSurfCount)
+void __cdecl R_EmitDrawSurfList(GfxDrawSurf *drawSurfs, uint drawSurfCount)
 {
     int newDrawSurfCount; // [esp+4Ch] [ebp-4h]
 
@@ -57,15 +57,15 @@ void __cdecl R_EmitDrawSurfList(GfxDrawSurf *drawSurfs, uint32_t drawSurfCount)
 
 void __cdecl R_MergeAndEmitDrawSurfLists(DrawSurfType firstStage, int stageCount)
 {
-    uint32_t v2; // eax
+    uint v2; // eax
     signed int v3; // [esp+0h] [ebp-164h]
-    uint32_t srcStageIndex; // [esp+38h] [ebp-12Ch]
+    uint srcStageIndex; // [esp+38h] [ebp-12Ch]
     int freeDrawSurfCount; // [esp+3Ch] [ebp-128h]
-    uint32_t stageIndex; // [esp+40h] [ebp-124h]
+    uint stageIndex; // [esp+40h] [ebp-124h]
     signed int primarySortKey; // [esp+48h] [ebp-11Ch]
     GfxDrawSurf *drawSurfs[DRAW_SURF_TYPE_COUNT]; // [esp+4Ch] [ebp-118h]
-    uint32_t dstStageIndex; // [esp+D8h] [ebp-8Ch]
-    uint32_t drawSurfCount[DRAW_SURF_TYPE_COUNT]; // [esp+DCh] [ebp-88h]
+    uint dstStageIndex; // [esp+D8h] [ebp-8Ch]
+    uint drawSurfCount[DRAW_SURF_TYPE_COUNT]; // [esp+DCh] [ebp-88h]
     
     iassert(stageCount >= 1 && stageCount <= DRAW_SURF_TYPE_COUNT);
 
@@ -118,12 +118,12 @@ void __cdecl R_MergeAndEmitDrawSurfLists(DrawSurfType firstStage, int stageCount
     }
 }
 
-uint32_t __cdecl R_EmitDrawSurfListForKey(
+uint __cdecl R_EmitDrawSurfListForKey(
     const GfxDrawSurf *drawSurfs,
-    uint32_t drawSurfCount,
-    uint32_t primarySortKey)
+    uint drawSurfCount,
+    uint primarySortKey)
 {
-    uint32_t usedCount; // [esp+44h] [ebp-14h]
+    uint usedCount; // [esp+44h] [ebp-14h]
     GfxDrawSurf drawSurf; // [esp+48h] [ebp-10h]
     GfxDrawSurf *outDrawSurf; // [esp+54h] [ebp-4h]
 
@@ -183,8 +183,8 @@ void __cdecl R_BeginPreTess()
 int __cdecl R_ReadBspPreTessDrawSurfs(
     GfxReadCmdBuf *cmdBuf,
     const GfxBspPreTessDrawSurf **list,
-    uint32_t *count,
-    uint32_t *baseIndex)
+    uint *count,
+    uint *baseIndex)
 {
     *count = R_ReadPrimDrawSurfInt(cmdBuf);
     if (!*count)

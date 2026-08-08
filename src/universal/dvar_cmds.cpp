@@ -442,8 +442,8 @@ void __cdecl Com_DvarDumpSingle(const dvar_s *dvar, void *userData)
     const char *v4; // [esp-4h] [ebp-810h]
     char message[2052]; // [esp+4h] [ebp-808h] BYREF
 
-    ++*(uint32_t *)userData;
-    if (!*((uint32_t *)userData + 2) || Com_Filter(*((const char **)userData + 2), (char *)dvar->name, 0))
+    ++*(uint *)userData;
+    if (!*((uint *)userData + 2) || Com_Filter(*((const char **)userData + 2), (char *)dvar->name, 0))
     {
         if (Dvar_HasLatchedValue(dvar))
         {
@@ -457,7 +457,7 @@ void __cdecl Com_DvarDumpSingle(const dvar_s *dvar, void *userData)
             Com_sprintf(message, 0x800u, "      %s \"%s\"\n", dvar->name, v3);
         }
 #ifndef KISAK_RADIANT
-        Com_PrintMessage(*((uint32_t *)userData + 1), message, 0);
+        Com_PrintMessage(*((uint *)userData + 1), message, 0);
 #else
         Com_PrintMessage("%s", message);
 #endif
@@ -705,7 +705,7 @@ void __cdecl Dvar_SetFromLocalizedStr_f()
 void __cdecl Dvar_SetToTime_f()
 {
     const char *v0; // eax
-    uint32_t v1; // eax
+    uint v1; // eax
     const char *v2; // eax
     char *v3; // [esp-4h] [ebp-Ch]
     const char *dvarName; // [esp+4h] [ebp-4h]

@@ -2,12 +2,12 @@
 #include "fft.h"
 #include "q_shared.h"
 
-void __cdecl FFT(complex_s *data_inout, uint32_t log2_count, int *bitSwap, complex_s *trigTable)
+void __cdecl FFT(complex_s *data_inout, uint log2_count, int *bitSwap, complex_s *trigTable)
 {
     int v4; // eax
     float imag; // ecx
     float* v6; // edi
-    uint32_t v7; // ecx
+    uint v7; // ecx
     float* v8; // esi
     double v9; // st7
     double v10; // st6
@@ -29,11 +29,11 @@ void __cdecl FFT(complex_s *data_inout, uint32_t log2_count, int *bitSwap, compl
     float* v26; // ecx
     float* v27; // ecx
     float* v28; // eax
-    uint32_t v29; // [esp+44h] [ebp-10C8h]
-    uint32_t j; // [esp+48h] [ebp-10C4h]
+    uint v29; // [esp+44h] [ebp-10C8h]
+    uint j; // [esp+48h] [ebp-10C4h]
     float v31[512]; // [esp+4Ch] [ebp-10C0h] BYREF
-    uint32_t v32; // [esp+84Ch] [ebp-8C0h]
-    uint32_t v33; // [esp+850h] [ebp-8BCh]
+    uint v32; // [esp+84Ch] [ebp-8C0h]
+    uint v33; // [esp+850h] [ebp-8BCh]
     float v34[512]; // [esp+854h] [ebp-8B8h] BYREF
     float v35; // [esp+1054h] [ebp-B8h]
     float v36; // [esp+1058h] [ebp-B4h]
@@ -70,7 +70,7 @@ void __cdecl FFT(complex_s *data_inout, uint32_t log2_count, int *bitSwap, compl
     float v67; // [esp+10D4h] [ebp-38h]
     float v68; // [esp+10D8h] [ebp-34h]
     float v69; // [esp+10DCh] [ebp-30h]
-    uint32_t i; // [esp+10E0h] [ebp-2Ch]
+    uint i; // [esp+10E0h] [ebp-2Ch]
     float v71; // [esp+10E4h] [ebp-28h]
     float v72; // [esp+10E8h] [ebp-24h]
     float v73; // [esp+10ECh] [ebp-20h]
@@ -79,7 +79,7 @@ void __cdecl FFT(complex_s *data_inout, uint32_t log2_count, int *bitSwap, compl
     float v76; // [esp+10F8h] [ebp-14h]
     float v77; // [esp+10FCh] [ebp-10h]
     float v78; // [esp+1100h] [ebp-Ch]
-    uint32_t v79; // [esp+1108h] [ebp-4h]
+    uint v79; // [esp+1108h] [ebp-4h]
 
     v79 = 1 << log2_count;
     v61 = 8 - log2_count;

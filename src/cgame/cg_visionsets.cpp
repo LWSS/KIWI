@@ -25,8 +25,8 @@ const char *MYDEFAULTVISIONNAME = "default";
 struct visField_t // sizeof=0xC
 {                                       // ...
     const char *name;                   // ...
-    int32_t offset;
-    int32_t fieldType;
+    int offset;
+    int fieldType;
 };
 visField_t visionDefFields[16] =
 {
@@ -102,9 +102,9 @@ void __cdecl CG_AddVisionSetMenuItem(XAssetHeader header)
     }
 }
 
-void __cdecl CG_VisionSetsUpdate(int32_t localClientNum)
+void __cdecl CG_VisionSetsUpdate(int localClientNum)
 {
-    int32_t idx; // [esp+4h] [ebp-4h]
+    int idx; // [esp+4h] [ebp-4h]
 
     cg_s *cgameGlob;
 
@@ -123,13 +123,13 @@ void __cdecl CG_VisionSetsUpdate(int32_t localClientNum)
 }
 
 void __cdecl UpdateVarsLerp(
-    int32_t time,
+    int time,
     const visionSetVars_t *from,
     const visionSetVars_t *to,
     visionSetLerpData_t *lerpData,
     visionSetVars_t *result)
 {
-    int32_t fieldType; // [esp+18h] [ebp-34h]
+    int fieldType; // [esp+18h] [ebp-34h]
     float v6; // [esp+1Ch] [ebp-30h]
     float v7; // [esp+20h] [ebp-2Ch]
     float v8; // [esp+24h] [ebp-28h]
@@ -139,13 +139,13 @@ void __cdecl UpdateVarsLerp(
     float *voidTo; // [esp+3Ch] [ebp-10h]
     float *voidResult; // [esp+40h] [ebp-Ch]
     float fraction; // [esp+44h] [ebp-8h]
-    int32_t fieldNum; // [esp+48h] [ebp-4h]
+    int fieldNum; // [esp+48h] [ebp-4h]
 
     iassert(from);
     iassert(to);
     iassert(lerpData);
     iassert(result);
-    if (lerpData->style >= (uint32_t)VISIONSETLERP_TO_LINEAR)
+    if (lerpData->style >= (uint)VISIONSETLERP_TO_LINEAR)
     {
         if (lerpData->timeDuration + lerpData->timeStart >= time)
         {
@@ -250,11 +250,11 @@ void __cdecl LerpVec3(float *from, float *to, float fraction, visionSetLerpStyle
 }
 
 char __cdecl CG_VisionSetStartLerp_To(
-    int32_t localClientNum,
+    int localClientNum,
     visionSetMode_t mode,
     visionSetLerpStyle_t style,
     char *nameTo,
-    int32_t duration)
+    int duration)
 {
     cg_s *cgameGlob;
 
@@ -276,10 +276,10 @@ char __cdecl CG_VisionSetStartLerp_To(
     return 1;
 }
 
-char __cdecl GetVisionSet(int32_t localClientNum, char *name, visionSetVars_t *resultSettings)
+char __cdecl GetVisionSet(int localClientNum, char *name, visionSetVars_t *resultSettings)
 {
-    int32_t idx; // [esp+10h] [ebp-4h]
-    int32_t idxa; // [esp+10h] [ebp-4h]
+    int idx; // [esp+10h] [ebp-4h]
+    int idxa; // [esp+10h] [ebp-4h]
     cg_s *cgameGlob;
 
     iassert(name);
@@ -353,7 +353,7 @@ char *__cdecl RawBufferOpen(const char *name, const char *formatFullPath)
 
 char __cdecl LoadVisionSettingsFromBuffer(const char *buffer, const char *filename, visionSetVars_t *settings)
 {
-    int32_t fieldNum; // [esp+0h] [ebp-20h]
+    int fieldNum; // [esp+0h] [ebp-20h]
     bool wasRead[16]; // [esp+4h] [ebp-1Ch] BYREF
     const char *token; // [esp+1Ch] [ebp-4h]
 
@@ -387,13 +387,13 @@ char __cdecl LoadVisionSettingsFromBuffer(const char *buffer, const char *filena
     return 1;
 }
 
-char __cdecl ApplyTokenToField(uint32_t fieldNum, const char *token, visionSetVars_t *settings)
+char __cdecl ApplyTokenToField(uint fieldNum, const char *token, visionSetVars_t *settings)
 {
-    int32_t fieldType; // [esp+0h] [ebp-30h]
-    int32_t tempInt; // [esp+Ch] [ebp-24h] BYREF
+    int fieldType; // [esp+0h] [ebp-30h]
+    int tempInt; // [esp+Ch] [ebp-24h] BYREF
     float *vec3Field; // [esp+10h] [ebp-20h]
     void *voidField; // [esp+14h] [ebp-1Ch]
-    int32_t scanResult; // [esp+18h] [ebp-18h]
+    int scanResult; // [esp+18h] [ebp-18h]
     float tempVec[3]; // [esp+1Ch] [ebp-14h] BYREF
     float tempFloat; // [esp+28h] [ebp-8h] BYREF
     bool *boolField; // [esp+2Ch] [ebp-4h]
@@ -436,7 +436,7 @@ char __cdecl ApplyTokenToField(uint32_t fieldNum, const char *token, visionSetVa
     return 1;
 }
 
-char __cdecl VisionSetCurrent(int32_t localClientNum, visionSetMode_t mode, char *name)
+char __cdecl VisionSetCurrent(int localClientNum, visionSetMode_t mode, char *name)
 {
     cg_s *cgameGlob;
 
@@ -450,7 +450,7 @@ char __cdecl VisionSetCurrent(int32_t localClientNum, visionSetMode_t mode, char
     return 1;
 }
 
-void __cdecl SetDefaultVision(int32_t localClientNum)
+void __cdecl SetDefaultVision(int localClientNum)
 {
     cg_s *cgameGlob;
 
@@ -460,10 +460,10 @@ void __cdecl SetDefaultVision(int32_t localClientNum)
     CG_VisionSetStartLerp_To(localClientNum, VISIONSETMODE_NAKED, VISIONSETLERP_TO_SMOOTH, cgameGlob->visionNameNaked, 0);
 }
 
-void __cdecl CG_VisionSetConfigString_Naked(int32_t localClientNum)
+void __cdecl CG_VisionSetConfigString_Naked(int localClientNum)
 {
     parseInfo_t *v1; // eax
-    int32_t duration; // [esp+0h] [ebp-10h]
+    int duration; // [esp+0h] [ebp-10h]
     const char *configString; // [esp+8h] [ebp-8h] BYREF
     const char *token; // [esp+Ch] [ebp-4h]
     cg_s *cgameGlob;
@@ -483,10 +483,10 @@ void __cdecl CG_VisionSetConfigString_Naked(int32_t localClientNum)
         duration);
 }
 
-void __cdecl CG_VisionSetConfigString_Night(int32_t localClientNum)
+void __cdecl CG_VisionSetConfigString_Night(int localClientNum)
 {
     parseInfo_t *v1; // eax
-    int32_t duration; // [esp+0h] [ebp-10h]
+    int duration; // [esp+0h] [ebp-10h]
     const char *configString; // [esp+8h] [ebp-8h] BYREF
     const char *token; // [esp+Ch] [ebp-4h]
     cg_s *cgameGlob;
@@ -508,8 +508,8 @@ void __cdecl CG_VisionSetConfigString_Night(int32_t localClientNum)
 
 void __cdecl CG_VisionSetMyChanges()
 {
-    uint32_t visSetIdx; // [esp+8h] [ebp-8h]
-    int32_t localClientNum; // [esp+Ch] [ebp-4h]
+    uint visSetIdx; // [esp+8h] [ebp-8h]
+    int localClientNum; // [esp+Ch] [ebp-4h]
     cg_s *cgameGlob;
 
     for (localClientNum = 0; localClientNum < 1; ++localClientNum)
@@ -599,9 +599,9 @@ void __cdecl CG_VisionSetUpdateTweaksFromFile_Film()
     }
 }
 
-char __cdecl CG_LookingThroughNightVision(int32_t localClientNum)
+char __cdecl CG_LookingThroughNightVision(int localClientNum)
 {
-    int32_t weapIndex; // [esp+4h] [ebp-10h]
+    int weapIndex; // [esp+4h] [ebp-10h]
     WeaponDef *weapDef; // [esp+10h] [ebp-4h]
 
     // idk what this is yet
@@ -642,7 +642,7 @@ char __cdecl CG_LookingThroughNightVision(int32_t localClientNum)
     return 0;
 }
 
-void __cdecl CG_VisionSetApplyToRefdef(int32_t localClientNum)
+void __cdecl CG_VisionSetApplyToRefdef(int localClientNum)
 {
     float fade; // [esp+14h] [ebp-1Ch]
     GfxFilm *film; // [esp+1Ch] [ebp-14h]
@@ -686,7 +686,7 @@ void __cdecl CG_VisionSetApplyToRefdef(int32_t localClientNum)
     }
 }
 
-double __cdecl VisionFadeValue(int32_t localClientNum)
+double __cdecl VisionFadeValue(int localClientNum)
 {
     float v3; // [esp+4h] [ebp-50h]
     float v4; // [esp+8h] [ebp-4Ch]
@@ -703,9 +703,9 @@ double __cdecl VisionFadeValue(int32_t localClientNum)
     float deltaa; // [esp+3Ch] [ebp-18h]
     float deltae; // [esp+3Ch] [ebp-18h]
     float deltab; // [esp+3Ch] [ebp-18h]
-    int32_t weapIndex; // [esp+44h] [ebp-10h]
-    int32_t timePassed; // [esp+48h] [ebp-Ch]
-    int32_t timePasseda; // [esp+48h] [ebp-Ch]
+    int weapIndex; // [esp+44h] [ebp-10h]
+    int timePassed; // [esp+48h] [ebp-Ch]
+    int timePasseda; // [esp+48h] [ebp-Ch]
     WeaponDef *weapDef; // [esp+50h] [ebp-4h]
     cg_s *cgameGlob;
 

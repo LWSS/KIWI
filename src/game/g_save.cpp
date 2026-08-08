@@ -345,7 +345,7 @@ void __cdecl Scr_FreeFields(const saveField_t *fields, unsigned __int8 *base)
 
 void __cdecl Scr_FreeEntityFields(gentity_s *ent)
 {
-    Scr_FreeFields(gentityFields, (unsigned char*)&ent->s.eType);
+    Scr_FreeFields(gentityFields, (byte*)&ent->s.eType);
 }
 
 void __cdecl Scr_FreeActorFields(actor_s *pActor)
@@ -1107,7 +1107,7 @@ void WriteEntity(gentity_s *ent, SaveGame *save)
     iassert(save);
     memcpy(v8, ent, sizeof(gentity_s));
     //ProfMem_Begin("WriteStruct", UsedSize);
-    G_WriteStruct(gentityFields, (unsigned char *)ent, v8, sizeof(gentity_s), save);
+    G_WriteStruct(gentityFields, (byte *)ent, v8, sizeof(gentity_s), save);
     //ProfMem_End(v7);
     if (ent->s.weapon)
     {
@@ -1122,7 +1122,7 @@ void __cdecl ReadEntity(gentity_s *ent, SaveGame *save)
     _BYTE v4[8]; // [sp+50h] [-20h] BYREF
 
     iassert(save);
-    G_ReadStruct(gentityFields, (unsigned char*)ent, sizeof(gentity_s), save);
+    G_ReadStruct(gentityFields, (byte*)ent, sizeof(gentity_s), save);
     if (ent->s.weapon)
     {
         ent->s.weapon = ReadWeaponIndex(save);
@@ -2657,7 +2657,7 @@ void __cdecl G_LoadMainState(SaveGame *save)
                 do
                 {
                     int read;
-                    MemFile_ReadData(memFile, 4, (unsigned char*)&read);
+                    MemFile_ReadData(memFile, 4, (byte*)&read);
                     --v25;
                     *v24++ = read;
                 } while (v25);

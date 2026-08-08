@@ -37,8 +37,8 @@ struct badplace_t
 };
 
 struct actor_s;
-enum actor_think_result_t : __int32;
-enum ai_state_t : __int32;
+enum actor_think_result_t : int;
+enum ai_state_t : int;
 
 void __cdecl TRACK_actor_badplace();
 void __cdecl Path_UpdateBadPlaceCount(badplace_t *place, int delta);

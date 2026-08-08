@@ -425,7 +425,7 @@ int __cdecl BuildAabbTree(const GenericAabbTreeOptions *options)
     options->treeNodePool->itemCount = options->itemCount;
     aabbTreeCount = 1;
     BuildAabbTree_r(options->treeNodePool, options, remap);
-    itemCopies = (unsigned char*)operator new(options->itemSize * options->itemCount);
+    itemCopies = (byte*)operator new(options->itemSize * options->itemCount);
     memcpy(itemCopies, options->items, options->itemSize * options->itemCount);
     for (itemIndexa = 0; itemIndexa < options->itemCount; ++itemIndexa)
         memcpy(
@@ -435,7 +435,7 @@ int __cdecl BuildAabbTree(const GenericAabbTreeOptions *options)
     operator delete(itemCopies);
     if (options->maintainValidBounds)
     {
-        boundCopies = (unsigned char*)operator new(4 * ((3 * (unsigned __int64)options->itemCount) >> 32 != 0 ? -1 : 3 * options->itemCount));
+        boundCopies = (byte*)operator new(4 * ((3 * (unsigned __int64)options->itemCount) >> 32 != 0 ? -1 : 3 * options->itemCount));
         memcpy(boundCopies, options->mins, 12 * options->itemCount);
         for (itemIndexb = 0; itemIndexb < options->itemCount; ++itemIndexb)
         {

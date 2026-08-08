@@ -305,7 +305,7 @@ static char Eclass_RealizeModel(int *a1, const char *a2)
         // Optional: mark the eclass if the file also physically exists on disk.
         if ( g_qeglobals.toggle_unk05 && FileExists(a2) )
         {
-            *(unsigned char *)( node + 148 ) = 1;
+            *(byte *)( node + 148 ) = 1;
         }
 
         // Walk all loaded entities (circular list, v7 is sentinel, v5 = current).
@@ -1146,7 +1146,7 @@ models_t *Eclass_01(const char *a1, int a2)
     // Search g_models for a node whose name matches a1 AND whose model-type
     // flag (bit 4 of x96/classtype, byte 384) matches the entity's eclass flag.
     while ( _stricmp(a1, (const char *)e->handle) ||
-            (((unsigned char)e->x96 ^ (unsigned char)ent->eclass->classtype) & 0x10) != 0 )
+            (((byte)e->x96 ^ (byte)ent->eclass->classtype) & 0x10) != 0 )
     {
         e = (models_t *)e->x0;
         if ( !e )
@@ -1273,7 +1273,7 @@ void Init_ScanFiles(int a1)
             int v23 = 0;
             while ( 1 )
             {
-                unsigned char *v7 = (unsigned char *)Src;
+                byte *v7 = (byte *)Src;
                 int  v8  = *((int *)Src - 3);
                 int  v9  = *((int *)Src - 2);
                 char v20 = *((char *)buffer + v6);
@@ -1281,14 +1281,14 @@ void Init_ScanFiles(int a1)
                 if ( ((1 - *((int *)Src - 1)) | (v9 - v10)) < 0 )
                 {
                     __strcpy(&Src, v10);
-                    v7 = (unsigned char *)Src;
+                    v7 = (byte *)Src;
                 }
-                v7[v8] = (unsigned char)v20;
+                v7[v8] = (byte)v20;
                 if ( v10 < 0 || v10 > *((int *)Src - 2) )
                     OleException(-2147024809);
                 *((int *)Src - 3) = v10;
-                unsigned char *v11 = (unsigned char *)buffer;
-                *((unsigned char *)Src + v10) = 0;
+                byte *v11 = (byte *)buffer;
+                *((byte *)Src + v10) = 0;
                 if ( v11[v6] == '/' && v11[v6 - 1] == '*' )
                     break;
                 ++v6;
@@ -1617,7 +1617,7 @@ LABEL_72:
 //  menu; Eclass_InitForSourceDirectory only scans .def files and would miss them.
 // ═════════════════════════════════════════════════════════════════════════════
 extern const char  *Info_ValueForKey( const char *s, const char *key );        // q_shared 0x4B98D0
-extern int          Com_sprintf( char *dest, uint32_t size, const char *fmt, ... );  // q_shared 0x4B9780
+extern int          Com_sprintf( char *dest, uint size, const char *fmt, ... );  // q_shared 0x4B9780
 
 // Init_ScanWeapons (0x48B7B0) — read each weapon def file in `folder`, extract its
 // displayName/worldModel, and synthesize a `weapon_<name>` /*QUAKED*/ eclass block.

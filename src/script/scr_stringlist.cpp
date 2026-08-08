@@ -21,9 +21,9 @@ static scrStringGlob_t scrStringGlob; // 0x244E300
 
 #define SCR_SYS_GAME 1
 
-static uint32_t __cdecl GetHashCode(const char *str, uint32_t len)
+static uint __cdecl GetHashCode(const char *str, uint len)
 {
-	uint32_t hash; // [esp+4h] [ebp-8h]
+	uint hash; // [esp+4h] [ebp-8h]
 
 	if (len >= 0x100)
 	{
@@ -42,7 +42,7 @@ static uint32_t __cdecl GetHashCode(const char *str, uint32_t len)
 	return hash % (STRINGLIST_SIZE-1) + 1;
 }
 
-uint32_t __cdecl Scr_AllocString(char *s, int sys)
+uint __cdecl Scr_AllocString(char *s, int sys)
 {
 	iassert(sys == SCR_SYS_GAME);
 	return SL_GetString(s, 1);
@@ -57,8 +57,8 @@ void SL_Init()
 	Sys_EnterCriticalSection(CRITSECT_SCRIPT_STRING);
 
 	scrStringGlob.hashTable[0].status_next = 0;
-	uint32_t prev = 0;
-	for (uint32_t hash = 1; hash < STRINGLIST_SIZE; ++hash)
+	uint prev = 0;
+	for (uint hash = 1; hash < STRINGLIST_SIZE; ++hash)
 	{
 		iassert(!(hash & HASH_STAT_MASK));
 		scrStringGlob.hashTable[hash].status_next = HASH_STAT_FREE; // (0)
@@ -82,12 +82,12 @@ void SL_InitCheckLeaks()
 	scrStringDebugGlob->totalRefCount = 0;
 }
 
-static uint32_t SL_ConvertFromRefString(RefString *refString)
+static uint SL_ConvertFromRefString(RefString *refString)
 {
 	return ((char *)refString - scrMemTreePub.mt_buffer) / MT_NODE_SIZE;
 }
 
-void SL_AddUserInternal(RefString* refStr, uint32_t user)
+void SL_AddUserInternal(RefString* refStr, uint user)
 {
 	if (((uint8_t)user & refStr->user) == 0)
 	{
@@ -109,7 +109,7 @@ void SL_AddUserInternal(RefString* refStr, uint32_t user)
 	}
 }
 
-void SL_AddRefToString(uint32_t stringValue)
+void SL_AddRefToString(uint stringValue)
 {
 	PROF_SCOPED("SL_AddRefToString");
 
@@ -128,7 +128,7 @@ void SL_AddRefToString(uint32_t stringValue)
 	iassert(refStr->refCount);
 }
 
-void SL_CheckExists(uint32_t stringValue)
+void SL_CheckExists(uint stringValue)
 {
 	iassert(!scrStringDebugGlob || scrStringDebugGlob->refCount[stringValue]);
 }
@@ -158,13 +158,13 @@ void SL_Shutdown()
 	}
 }
 
-void SL_ShutdownSystem(uint32_t user)
+void SL_ShutdownSystem(uint user)
 {
 	iassert(user);
 
 	Sys_EnterCriticalSection(CRITSECT_SCRIPT_STRING);
 
-	for (uint32_t hash = 1; hash < STRINGLIST_SIZE; ++hash)
+	for (uint hash = 1; hash < STRINGLIST_SIZE; ++hash)
 	{
 		do
 		{
@@ -186,7 +186,7 @@ void SL_ShutdownSystem(uint32_t user)
 	Sys_LeaveCriticalSection(CRITSECT_SCRIPT_STRING);
 }
 
-int SL_IsLowercaseString(uint32_t stringValue)
+int SL_IsLowercaseString(uint stringValue)
 {
 	iassert(stringValue);
 
@@ -202,14 +202,14 @@ int SL_IsLowercaseString(uint32_t stringValue)
 	return 1;
 }
 
-void SL_TransferSystem(uint32_t from, uint32_t to)
+void SL_TransferSystem(uint from, uint to)
 {
 	iassert(from);
 	iassert(to);
 
 	Sys_EnterCriticalSection(CRITSECT_SCRIPT_STRING);
 
-	for (uint32_t hash = 1; hash < STRINGLIST_SIZE; ++hash)
+	for (uint hash = 1; hash < STRINGLIST_SIZE; ++hash)
 	{
 		if ((scrStringGlob.hashTable[hash].status_next & HASH_STAT_MASK) != 0)
 		{
@@ -225,28 +225,28 @@ void SL_TransferSystem(uint32_t from, uint32_t to)
 	Sys_LeaveCriticalSection(CRITSECT_SCRIPT_STRING);
 }
 
-uint32_t SL_GetString_(const char* str, uint32_t user, mtType_t type)
+uint SL_GetString_(const char* str, uint user, mtType_t type)
 {
 	return SL_GetStringOfSize(str, user, strlen(str) + 1, type);
 }
 
-uint32_t SL_GetStringOfSize(const char* str, uint32_t user, uint32_t len, mtType_t type)
+uint SL_GetStringOfSize(const char* str, uint user, uint len, mtType_t type)
 {
 	PROF_SCOPED("SL_GetStringOfSize");
 
 	iassert(str);
 
-	uint32_t hash = GetHashCode(str, len);
+	uint hash = GetHashCode(str, len);
 
 	Sys_EnterCriticalSection(CRITSECT_SCRIPT_STRING);
 
 	RefString* refStr = NULL;
 
-	uint32_t stringValue = 0;
+	uint stringValue = 0;
 
-	uint32_t prev;
-	uint32_t next;
-	uint32_t newIndex;
+	uint prev;
+	uint next;
+	uint newIndex;
 
 	HashEntry *entry = &scrStringGlob.hashTable[hash];
 	HashEntry *newEntry;
@@ -314,7 +314,7 @@ uint32_t SL_GetStringOfSize(const char* str, uint32_t user, uint32_t len, mtType
 		newEntry = &scrStringGlob.hashTable[newIndex];
 		iassert((newEntry->status_next & HASH_STAT_MASK) == HASH_STAT_FREE);
 
-		uint32_t newNext = (uint16_t)newEntry->status_next;
+		uint newNext = (uint16_t)newEntry->status_next;
 
 		scrStringGlob.hashTable[0].status_next = newNext;
 		scrStringGlob.hashTable[newNext].u.prev = 0;
@@ -354,7 +354,7 @@ uint32_t SL_GetStringOfSize(const char* str, uint32_t user, uint32_t len, mtType
 
 			iassert((newEntry->status_next & HASH_STAT_MASK) == HASH_STAT_FREE);
 
-			uint32_t newNext = (uint16_t)newEntry->status_next;
+			uint newNext = (uint16_t)newEntry->status_next;
 
 			scrStringGlob.hashTable[0].status_next = newNext;
 			scrStringGlob.hashTable[newNext].u.prev = 0;
@@ -398,7 +398,7 @@ uint32_t SL_GetStringOfSize(const char* str, uint32_t user, uint32_t len, mtType
 	return stringValue;
 }
 
-const char* SL_ConvertToString(uint32_t stringValue)
+const char* SL_ConvertToString(uint stringValue)
 {
 	iassert((!stringValue || !scrStringDebugGlob || scrStringDebugGlob->refCount[stringValue]));
 
@@ -412,7 +412,7 @@ const char* SL_ConvertToString(uint32_t stringValue)
 	}
 }
 
-RefString* GetRefString(uint32_t stringValue)
+RefString* GetRefString(uint stringValue)
 {
 	iassert(stringValue);
 	iassert(stringValue * MT_NODE_SIZE < MT_SIZE);
@@ -426,21 +426,21 @@ RefString* GetRefString(const char* str)
 	return (RefString*)(str - 4);
 }
 
-int SL_GetStringLen(uint32_t stringValue)
+int SL_GetStringLen(uint stringValue)
 {
 	iassert(stringValue);
 	RefString* refString = GetRefString(stringValue);
 	return SL_GetRefStringLen(refString);
 }
 
-static uint32_t FindStringOfSize(const char* str, uint32_t len)
+static uint FindStringOfSize(const char* str, uint len)
 {
-	uint32_t stringValue = 0;
+	uint stringValue = 0;
 
 	PROF_SCOPED("FindStringOfSize");
 
 	iassert(str);
-	uint32_t hash = GetHashCode(str, len);
+	uint hash = GetHashCode(str, len);
 
 	Sys_EnterCriticalSection(CRITSECT_SCRIPT_STRING);
 
@@ -456,8 +456,8 @@ static uint32_t FindStringOfSize(const char* str, uint32_t len)
 
 	if (refStr->byteLen != (uint8_t)len || memcmp(refStr->str, str, len))
 	{
-		uint32_t prev = hash;
-		uint32_t newIndex = (uint16_t)entry->status_next;
+		uint prev = hash;
+		uint newIndex = (uint16_t)entry->status_next;
 
 		for (HashEntry* newEntry = &scrStringGlob.hashTable[newIndex];
 			newEntry != entry;
@@ -498,12 +498,12 @@ static uint32_t FindStringOfSize(const char* str, uint32_t len)
 	return stringValue;
 }
 
-uint32_t SL_FindString(const char* str)
+uint SL_FindString(const char* str)
 {
 	return FindStringOfSize(str, strlen(str) + 1);
 }
 
-void __cdecl SL_TransferRefToUser(uint32_t stringValue, uint32_t user)
+void __cdecl SL_TransferRefToUser(uint stringValue, uint user)
 {
 	volatile LONG Comperand; // [esp+20h] [ebp-28h]
 	RefString *refStr; // [esp+44h] [ebp-4h]
@@ -532,7 +532,7 @@ void __cdecl SL_TransferRefToUser(uint32_t stringValue, uint32_t user)
 	}
 }
 
-uint32_t SL_GetStringForVector(const float* v)
+uint SL_GetStringForVector(const float* v)
 {
 	char tempString[132];
 
@@ -540,7 +540,7 @@ uint32_t SL_GetStringForVector(const float* v)
 	return SL_GetString_(tempString, 0, MT_TYPE_SCRIPT_STRING);
 }
 
-uint32_t SL_GetStringForInt(int i)
+uint SL_GetStringForInt(int i)
 {
 	char tempString[132]; // [esp+0h] [ebp-88h] BYREF
 
@@ -548,7 +548,7 @@ uint32_t SL_GetStringForInt(int i)
 	return SL_GetString_(tempString, 0, MT_TYPE_SCRIPT_STRING);
 }
 
-uint32_t SL_GetStringForFloat(float f)
+uint SL_GetStringForFloat(float f)
 {
 	char tempString[132]; // [esp+8h] [ebp-88h] BYREF
 
@@ -556,7 +556,7 @@ uint32_t SL_GetStringForFloat(float f)
 	return SL_GetString_(tempString, 0, MT_TYPE_SCRIPT_STRING);
 }
 
-uint32_t SL_GetString(const char* str, uint32_t user)
+uint SL_GetString(const char* str, uint user)
 {
 	return SL_GetString_(str, user, MT_TYPE_EXTERNAL);
 }
@@ -578,14 +578,14 @@ int SL_GetRefStringLen(RefString* refString)
 	return len;
 }
 
-static uint32_t GetLowercaseStringOfSize(
+static uint GetLowercaseStringOfSize(
 	const char* str,
-	uint32_t user,
-	uint32_t len,
+	uint user,
+	uint len,
 	mtType_t type)
 {
 	char stra[8192]; // [esp+4Ch] [ebp-2008h] BYREF
-	uint32_t i; // [esp+2050h] [ebp-4h]
+	uint i; // [esp+2050h] [ebp-4h]
 
 	PROF_SCOPED("GetLowercaseStringOfSize");
 	if (len <= 0x2000)
@@ -601,16 +601,16 @@ static uint32_t GetLowercaseStringOfSize(
 	}
 }
 
-uint32_t SL_GetLowercaseString_(const char* str, uint32_t user, mtType_t type)
+uint SL_GetLowercaseString_(const char* str, uint user, mtType_t type)
 {
 	return GetLowercaseStringOfSize(str, user, strlen(str) + 1, type);
 }
-uint32_t SL_GetLowercaseString(const char* str, uint32_t user)
+uint SL_GetLowercaseString(const char* str, uint user)
 {
 	return SL_GetLowercaseString_(str, user, MT_TYPE_EXTERNAL);
 }
 
-void SL_RemoveRefToString(uint32_t stringValue)
+void SL_RemoveRefToString(uint stringValue)
 {
 	RefString* refStr; // [esp+30h] [ebp-8h]
 	int len; // [esp+34h] [ebp-4h]
@@ -622,11 +622,11 @@ void SL_RemoveRefToString(uint32_t stringValue)
 	SL_RemoveRefToStringOfSize(stringValue, len);
 }
 
-static void SL_FreeString(uint32_t stringValue, RefString* refStr, uint32_t len)
+static void SL_FreeString(uint stringValue, RefString* refStr, uint len)
 {
 	PROF_SCOPED("SL_FreeString");
 
-	uint32_t index = GetHashCode(refStr->str, len);
+	uint index = GetHashCode(refStr->str, len);
 
 	Sys_EnterCriticalSection(CRITSECT_SCRIPT_STRING);
 
@@ -645,7 +645,7 @@ static void SL_FreeString(uint32_t stringValue, RefString* refStr, uint32_t len)
 
 		iassert(((entry->status_next & HASH_STAT_MASK) == HASH_STAT_HEAD));
 
-		uint32_t newIndex = (uint16_t)entry->status_next;
+		uint newIndex = (uint16_t)entry->status_next;
 		HashEntry* newEntry = &scrStringGlob.hashTable[newIndex];
 
 		if (entry->u.prev == stringValue)
@@ -664,7 +664,7 @@ static void SL_FreeString(uint32_t stringValue, RefString* refStr, uint32_t len)
 		}
 		else
 		{
-			uint32_t prev = index;
+			uint prev = index;
 			while (1)
 			{
 				iassert(newEntry != entry);
@@ -681,7 +681,7 @@ static void SL_FreeString(uint32_t stringValue, RefString* refStr, uint32_t len)
 		}
 
 		iassert((newEntry->status_next & HASH_STAT_MASK) != HASH_STAT_FREE);
-		uint32_t newNext = scrStringGlob.hashTable[0].status_next;
+		uint newNext = scrStringGlob.hashTable[0].status_next;
 		iassert((newNext & HASH_STAT_MASK) == HASH_STAT_FREE);
 
 		newEntry->status_next = newNext;
@@ -692,7 +692,7 @@ static void SL_FreeString(uint32_t stringValue, RefString* refStr, uint32_t len)
 	}
 }
 
-const char* __cdecl SL_DebugConvertToString(uint32_t stringValue)
+const char* __cdecl SL_DebugConvertToString(uint stringValue)
 {
 	int len; // [esp+0h] [ebp-10h]
 	int i; // [esp+8h] [ebp-8h]
@@ -712,17 +712,17 @@ const char* __cdecl SL_DebugConvertToString(uint32_t stringValue)
 	return refString->str;
 }
 
-uint32_t SL_ConvertFromString(const char* str)
+uint SL_ConvertFromString(const char* str)
 {
 	iassert(str);
 	RefString* refStr = GetRefString(str);
 	return SL_ConvertFromRefString(refStr);
 }
 
-uint32_t SL_FindLowercaseString(const char* str)
+uint SL_FindLowercaseString(const char* str)
 {
 	char stra[8196]; // [esp+5Ch] [ebp-2010h] BYREF
-	uint32_t len; // [esp+2064h] [ebp-8h]
+	uint len; // [esp+2064h] [ebp-8h]
 	signed int i; // [esp+2068h] [ebp-4h]
 
 	PROF_SCOPED("SL_FindLowercaseString");
@@ -739,7 +739,7 @@ uint32_t SL_FindLowercaseString(const char* str)
 	}
 }
 
-void SL_RemoveRefToStringOfSize(uint32_t stringValue, uint32_t len)
+void SL_RemoveRefToStringOfSize(uint stringValue, uint len)
 {
 	PROF_SCOPED("SL_RemoveRefToStringOfSize");
 
@@ -779,7 +779,7 @@ void SL_RemoveRefToStringOfSize(uint32_t stringValue, uint32_t len)
 	}
 }
 
-void __cdecl SL_AddUser(uint32_t stringValue, uint32_t user)
+void __cdecl SL_AddUser(uint stringValue, uint user)
 {
 	RefString *RefString; // eax
 
@@ -787,7 +787,7 @@ void __cdecl SL_AddUser(uint32_t stringValue, uint32_t user)
 	SL_AddUserInternal(RefString, user);
 }
 
-void __cdecl Scr_SetString(uint16_t *to, uint32_t from)
+void __cdecl Scr_SetString(uint16_t *to, uint from)
 {
 	if (from)
 		SL_AddRefToString(from);
@@ -796,13 +796,13 @@ void __cdecl Scr_SetString(uint16_t *to, uint32_t from)
 	*to = from;
 }
 
-uint32_t __cdecl SL_ConvertToLowercase(uint32_t stringValue, uint32_t user, mtType_t type)
+uint __cdecl SL_ConvertToLowercase(uint stringValue, uint user, mtType_t type)
 {
 	const char *v4; // [esp+4Ch] [ebp-2014h]
 	char str[8192]; // [esp+50h] [ebp-2010h] BYREF
-	uint32_t stringOfSize; // [esp+2054h] [ebp-Ch]
-	uint32_t len; // [esp+2058h] [ebp-8h]
-	uint32_t i; // [esp+205Ch] [ebp-4h]
+	uint stringOfSize; // [esp+2054h] [ebp-Ch]
+	uint len; // [esp+2058h] [ebp-8h]
+	uint i; // [esp+205Ch] [ebp-4h]
 
 	PROF_SCOPED("SL_ConvertToLowercase");
 
@@ -824,7 +824,7 @@ uint32_t __cdecl SL_ConvertToLowercase(uint32_t stringValue, uint32_t user, mtTy
 
 void __cdecl CreateCanonicalFilename(char *newFilename, const char *filename, int count)
 {
-	uint32_t c; // [esp+0h] [ebp-4h]
+	uint c; // [esp+0h] [ebp-4h]
 	const int oldCount = count; // addition because the old assert was broken, lol
 
 	iassert(count);
@@ -851,7 +851,7 @@ void __cdecl CreateCanonicalFilename(char *newFilename, const char *filename, in
 	*newFilename = 0;
 }
 
-uint32_t __cdecl Scr_CreateCanonicalFilename(const char *filename)
+uint __cdecl Scr_CreateCanonicalFilename(const char *filename)
 {
 	char newFilename[1028]; // [esp+0h] [ebp-408h] BYREF
 
@@ -861,7 +861,7 @@ uint32_t __cdecl Scr_CreateCanonicalFilename(const char *filename)
 
 void Scr_SetStringFromCharString(uint16_t *to, const char *from)
 {
-	uint32_t v4; // r3
+	uint v4; // r3
 	const char *v5; // r11
 
 	v4 = *to;
@@ -873,12 +873,12 @@ void Scr_SetStringFromCharString(uint16_t *to, const char *from)
 	*to = SL_GetStringOfSize(from, 0, v5 - from, MT_TYPE_EXTERNAL);
 }
 
-uint32_t SL_GetUser(uint32_t stringValue)
+uint SL_GetUser(uint stringValue)
 {
 	return GetRefString(stringValue)->user;
 }
 
-const char *SL_ConvertToStringSafe(uint32_t stringValue)
+const char *SL_ConvertToStringSafe(uint stringValue)
 {
 	if (!stringValue)
 		return "(NULL)";

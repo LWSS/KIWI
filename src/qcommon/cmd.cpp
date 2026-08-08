@@ -40,8 +40,8 @@ CmdText cmd_textArray[1];
 uint8_t cmd_text_buf[1][65536];
 uint8_t sv_cmd_text_buf[65536];
 
-int32_t  marker_cmd;
-int32_t  cmd_wait;
+int  marker_cmd;
+int  cmd_wait;
 bool cmd_insideCBufExecute[1];
 
 
@@ -57,7 +57,7 @@ cmd_function_s *__cdecl _Cmd_FindCommand(const char *cmdName)
     return 0;
 }
 
-const char **__cdecl Cmd_GetAutoCompleteFileList(const char *cmdName, int32_t  *fileCount)
+const char **__cdecl Cmd_GetAutoCompleteFileList(const char *cmdName, int  *fileCount)
 {
     cmd_function_s *cmd; // [esp+0h] [ebp-4h]
 
@@ -82,7 +82,7 @@ int Cmd_LocalClientNum()
 Cmd_Argc
 ============
 */
-int32_t 	Cmd_Argc(void) {
+int 	Cmd_Argc(void) {
 	iassert(cmd_args.nesting >= 0 && cmd_args.nesting < 8);
 	return cmd_args.argc[cmd_args.nesting];
 }
@@ -92,7 +92,7 @@ int32_t 	Cmd_Argc(void) {
 Cmd_Argv
 ============
 */
-const char* Cmd_Argv(int32_t  arg) {
+const char* Cmd_Argv(int  arg) {
 	iassert(cmd_args.nesting < 8);
 	iassert(arg >= 0);
 
@@ -103,7 +103,7 @@ const char* Cmd_Argv(int32_t  arg) {
 	return (char*)(cmd_args.argv[cmd_args.nesting][arg]);
 }
 
-int32_t  __cdecl SV_Cmd_Argc()
+int  __cdecl SV_Cmd_Argc()
 {
     if (sv_cmd_args.nesting >= 8u)
         MyAssertHandler(
@@ -117,7 +117,7 @@ int32_t  __cdecl SV_Cmd_Argc()
     return sv_cmd_args.argc[sv_cmd_args.nesting];
 }
 
-const char *__cdecl SV_Cmd_Argv(int32_t  argIndex)
+const char *__cdecl SV_Cmd_Argv(int  argIndex)
 {
     if (sv_cmd_args.nesting >= 8u)
         MyAssertHandler(
@@ -242,17 +242,17 @@ static void LoadXAssets()
 }
 
 // aislop
-static void WriteWAVHeader(FILE *f, uint32_t dataSize, uint32_t sampleRate, uint16_t bits, uint16_t channels)
+static void WriteWAVHeader(FILE *f, uint dataSize, uint sampleRate, uint16_t bits, uint16_t channels)
 {
-    uint32_t byteRate = sampleRate * channels * bits / 8;
+    uint byteRate = sampleRate * channels * bits / 8;
     uint16_t blockAlign = channels * bits / 8;
 
     fwrite("RIFF", 1, 4, f);
-    uint32_t chunkSize = 36 + dataSize;
+    uint chunkSize = 36 + dataSize;
     fwrite(&chunkSize, 4, 1, f);
     fwrite("WAVEfmt ", 1, 8, f);
 
-    uint32_t subchunk1Size = 16;
+    uint subchunk1Size = 16;
     fwrite(&subchunk1Size, 4, 1, f);
     uint16_t audioFormat = 1;
     fwrite(&audioFormat, 2, 1, f);
@@ -514,7 +514,7 @@ void __cdecl _Cmd_Wait_f()
 
 void __cdecl Cbuf_Init()
 {
-    int32_t  client; // [esp+0h] [ebp-4h]
+    int  client; // [esp+0h] [ebp-4h]
 
     Sys_EnterCriticalSection(CRITSECT_CBUF);
     for (client = 0; client < 1; ++client)
@@ -530,10 +530,10 @@ void __cdecl Cbuf_Init()
     Sys_LeaveCriticalSection(CRITSECT_CBUF);
 }
 
-void __cdecl Cbuf_AddText(int32_t  localClientNum, const char *text)
+void __cdecl Cbuf_AddText(int  localClientNum, const char *text)
 {
     CmdText *cmd_text; // [esp+0h] [ebp-8h]
-    int32_t  length; // [esp+4h] [ebp-4h]
+    int  length; // [esp+4h] [ebp-4h]
 
     Sys_EnterCriticalSection(CRITSECT_CBUF);
     if ((*text == 112 || *text == 80) && text[1] == 48)
@@ -557,14 +557,14 @@ void __cdecl Cbuf_AddText(int32_t  localClientNum, const char *text)
     Sys_LeaveCriticalSection(CRITSECT_CBUF);
 }
 
-void __cdecl memcpy_noncrt(void *dst, const void *src, uint32_t length)
+void __cdecl memcpy_noncrt(void *dst, const void *src, uint length)
 {
     memcpy(dst, src, length);
 }
 
-int32_t  __cdecl strlen_noncrt(const char *str)
+int  __cdecl strlen_noncrt(const char *str)
 {
-    int32_t  count; // [esp+0h] [ebp-4h]
+    int  count; // [esp+0h] [ebp-4h]
 
     count = 0;
     while (*str)
@@ -575,18 +575,18 @@ int32_t  __cdecl strlen_noncrt(const char *str)
     return count;
 }
 
-void __cdecl Cbuf_InsertText(int32_t  localClientNum, const char *text)
+void __cdecl Cbuf_InsertText(int  localClientNum, const char *text)
 {
-    uint32_t v2; // [esp+4h] [ebp-1Ch]
+    uint v2; // [esp+4h] [ebp-1Ch]
     CmdText *cmd_text; // [esp+14h] [ebp-Ch]
-    int32_t  i; // [esp+18h] [ebp-8h]
-    int32_t  length; // [esp+1Ch] [ebp-4h]
+    int  i; // [esp+18h] [ebp-8h]
+    int  length; // [esp+1Ch] [ebp-4h]
 
     Sys_EnterCriticalSection(CRITSECT_CBUF);
     cmd_text = &cmd_textArray[localClientNum];
     v2 = strlen(text);
     length = v2 + 1;
-    if ((int32_t )(cmd_text->cmdsize + v2 + 1) <= cmd_text->maxsize)
+    if ((int )(cmd_text->cmdsize + v2 + 1) <= cmd_text->maxsize)
     {
         for (i = cmd_text->cmdsize - 1; i >= 0; --i)
             cmd_text->data[length + i] = cmd_text->data[i];
@@ -640,8 +640,8 @@ void __cdecl Cmd_ExecuteServerString(char *text)
 void __cdecl Cbuf_SV_Execute()
 {
     char v0; // [esp+0h] [ebp-1010h]
-    int32_t  count; // [esp+4h] [ebp-100Ch]
-    uint32_t counta; // [esp+4h] [ebp-100Ch]
+    int  count; // [esp+4h] [ebp-100Ch]
+    uint counta; // [esp+4h] [ebp-100Ch]
     char dst[4096]; // [esp+8h] [ebp-1008h] BYREF
     uint8_t *src; // [esp+100Ch] [ebp-4h]
 
@@ -701,12 +701,12 @@ void __cdecl Cmd_AddServerCommandInternal(const char *cmdName, void(__cdecl *fun
         Com_Printf(16, "Cmd_AddServerCommand: %s already defined\n", cmdName);
 }
 
-void __cdecl Cbuf_ExecuteBuffer(int32_t  localClientNum, int32_t  controllerIndex, const char *buffer)
+void __cdecl Cbuf_ExecuteBuffer(int  localClientNum, int  controllerIndex, const char *buffer)
 {
     char v3; // [esp+10h] [ebp-1018h]
-    int32_t  v4; // [esp+14h] [ebp-1014h]
+    int  v4; // [esp+14h] [ebp-1014h]
     char dst[4100]; // [esp+18h] [ebp-1010h] BYREF
-    uint32_t count; // [esp+1020h] [ebp-8h]
+    uint count; // [esp+1020h] [ebp-8h]
     uint8_t *src; // [esp+1024h] [ebp-4h]
 
     iassert( buffer );
@@ -715,14 +715,14 @@ void __cdecl Cbuf_ExecuteBuffer(int32_t  localClientNum, int32_t  controllerInde
     while (v4)
     {
         v3 = 0;
-        for (count = 0; (int32_t )count < v4; ++count)
+        for (count = 0; (int )count < v4; ++count)
         {
             if (src[count] == 34)
                 ++v3;
             if ((v3 & 1) == 0 && src[count] == 59 || src[count] == 10 || src[count] == 13)
                 break;
         }
-        if ((int32_t )count >= 4095)
+        if ((int )count >= 4095)
             count = 4095;
         memcpy((uint8_t *)dst, src, count);
         dst[count] = 0;
@@ -734,7 +734,7 @@ void __cdecl Cbuf_ExecuteBuffer(int32_t  localClientNum, int32_t  controllerInde
     }
 }
 
-void __cdecl Cbuf_Execute(int32_t  localClientNum, int32_t  controllerIndex)
+void __cdecl Cbuf_Execute(int  localClientNum, int  controllerIndex)
 {
     PROF_SCOPED("Cbuf_Execute");
     if (cmd_insideCBufExecute[localClientNum])
@@ -751,12 +751,12 @@ void __cdecl Cbuf_Execute(int32_t  localClientNum, int32_t  controllerIndex)
     Cbuf_SV_Execute();
 }
 
-void __cdecl Cbuf_ExecuteInternal(int32_t  localClientNum, int32_t  controllerIndex)
+void __cdecl Cbuf_ExecuteInternal(int  localClientNum, int  controllerIndex)
 {
     char v2; // [esp+0h] [ebp-1014h]
     CmdText *v3; // [esp+4h] [ebp-1010h]
-    int32_t  count; // [esp+8h] [ebp-100Ch]
-    uint32_t counta; // [esp+8h] [ebp-100Ch]
+    int  count; // [esp+8h] [ebp-100Ch]
+    uint counta; // [esp+8h] [ebp-100Ch]
     char dst[4096]; // [esp+Ch] [ebp-1008h] BYREF
     uint8_t *src; // [esp+1010h] [ebp-4h]
 
@@ -832,7 +832,7 @@ void __cdecl _Cmd_Vstr_f()
     }
 }
 
-void __cdecl SVCmd_ArgvBuffer(int32_t  arg, char *buffer, int32_t  bufferLength)
+void __cdecl SVCmd_ArgvBuffer(int  arg, char *buffer, int  bufferLength)
 {
     char *v3; // eax
 
@@ -840,14 +840,14 @@ void __cdecl SVCmd_ArgvBuffer(int32_t  arg, char *buffer, int32_t  bufferLength)
     I_strncpyz(buffer, v3, bufferLength);
 }
 
-void __cdecl Cmd_ArgsBuffer(int32_t  start, char *buffer, int32_t  bufLength)
+void __cdecl Cmd_ArgsBuffer(int  start, char *buffer, int  bufLength)
 {
     const char *src; // [esp+0h] [ebp-14h]
-    int32_t  argIndex; // [esp+4h] [ebp-10h]
+    int  argIndex; // [esp+4h] [ebp-10h]
     const char **argv; // [esp+8h] [ebp-Ch]
     char *dst; // [esp+Ch] [ebp-8h]
-    int32_t  argc; // [esp+10h] [ebp-4h]
-    int32_t  bufLengtha; // [esp+24h] [ebp+10h]
+    int  argc; // [esp+10h] [ebp-4h]
+    int  bufLengtha; // [esp+24h] [ebp+10h]
 
     iassert( Sys_IsMainThread() );
     iassert( start >= 0 );
@@ -890,12 +890,12 @@ void __cdecl Cmd_ArgsBuffer(int32_t  start, char *buffer, int32_t  bufLength)
     *dst = 0;
 }
 
-void __cdecl Cmd_TokenizeStringWithLimit(char *text_in, int32_t  max_tokens)
+void __cdecl Cmd_TokenizeStringWithLimit(char *text_in, int  max_tokens)
 {
     Cmd_TokenizeStringKernel(text_in, max_tokens, &cmd_args, &cmd_argsPrivate);
 }
 
-void __cdecl Cmd_TokenizeStringKernel(char *text_in, int32_t  max_tokens, CmdArgs *args, CmdArgsPrivate *argsPriv)
+void __cdecl Cmd_TokenizeStringKernel(char *text_in, int  max_tokens, CmdArgs *args, CmdArgsPrivate *argsPriv)
 {
     if (max_tokens > 512 - argsPriv->totalUsedArgvPool)
         MyAssertHandler(
@@ -924,18 +924,18 @@ void __cdecl Cmd_TokenizeStringKernel(char *text_in, int32_t  max_tokens, CmdArg
     AssertCmdArgsConsistency(args, argsPriv);
 }
 
-int32_t  __cdecl Cmd_TokenizeStringInternal(char *text_in, int32_t  max_tokens, const char **argv, CmdArgsPrivate *argsPriv)
+int  __cdecl Cmd_TokenizeStringInternal(char *text_in, int  max_tokens, const char **argv, CmdArgsPrivate *argsPriv)
 {
-    int32_t  v5; // [esp+0h] [ebp-44h]
-    int32_t  v6; // [esp+4h] [ebp-40h]
-    int32_t  v7; // [esp+8h] [ebp-3Ch]
-    int32_t  v8; // [esp+Ch] [ebp-38h]
-    int32_t  v9; // [esp+10h] [ebp-34h]
-    int32_t  v10; // [esp+14h] [ebp-30h]
+    int  v5; // [esp+0h] [ebp-44h]
+    int  v6; // [esp+4h] [ebp-40h]
+    int  v7; // [esp+8h] [ebp-3Ch]
+    int  v8; // [esp+Ch] [ebp-38h]
+    int  v9; // [esp+10h] [ebp-34h]
+    int  v10; // [esp+14h] [ebp-30h]
     uint8_t *text; // [esp+3Ch] [ebp-8h]
     const char *texta; // [esp+3Ch] [ebp-8h]
     const char *textb; // [esp+3Ch] [ebp-8h]
-    int32_t  argc; // [esp+40h] [ebp-4h]
+    int  argc; // [esp+40h] [ebp-4h]
 
     iassert( text_in );
     argc = 0;
@@ -1040,11 +1040,11 @@ bool __cdecl Cmd_IsWhiteSpaceChar(uint8_t letter)
 void __cdecl AssertCmdArgsConsistency(const CmdArgs *args, const CmdArgsPrivate *argsPriv)
 {
     const char *v2; // eax
-    int32_t  totalUsedTextPool; // [esp+0h] [ebp-10h]
-    int32_t  totalUsedArgvPool; // [esp+4h] [ebp-Ch]
-    int32_t  arg; // [esp+8h] [ebp-8h]
-    int32_t  nesting; // [esp+Ch] [ebp-4h]
-    int32_t  nestinga; // [esp+Ch] [ebp-4h]
+    int  totalUsedTextPool; // [esp+0h] [ebp-10h]
+    int  totalUsedArgvPool; // [esp+4h] [ebp-Ch]
+    int  arg; // [esp+8h] [ebp-8h]
+    int  nesting; // [esp+Ch] [ebp-4h]
+    int  nestinga; // [esp+Ch] [ebp-4h]
 
     totalUsedArgvPool = 0;
     totalUsedTextPool = 0;
@@ -1171,7 +1171,7 @@ void __cdecl Cmd_ForEach(void(__cdecl *callback)(const char *))
 
 void __cdecl Cmd_ComErrorCleanup()
 {
-    int32_t  client; // [esp+0h] [ebp-4h]
+    int  client; // [esp+0h] [ebp-4h]
 
     Cmd_ResetArgs(&cmd_args, &cmd_argsPrivate);
     Cmd_ResetArgs(&sv_cmd_args, &sv_cmd_argsPrivate);
@@ -1179,7 +1179,7 @@ void __cdecl Cmd_ComErrorCleanup()
         cmd_insideCBufExecute[client] = 0;
 }
 
-void __cdecl Cmd_ExecuteSingleCommand(int32_t  localClientNum, int32_t  controllerIndex, char *text)
+void __cdecl Cmd_ExecuteSingleCommand(int  localClientNum, int  controllerIndex, char *text)
 {
     const char *arg0; // [esp+20h] [ebp-Ch]
     cmd_function_s *itr; // [esp+28h] [ebp-4h]
@@ -1260,7 +1260,7 @@ void __cdecl Cmd_ExecuteSingleCommand(int32_t  localClientNum, int32_t  controll
     }
 }
 
-void __cdecl SV_Cmd_ExecuteString(int32_t  localClientNum, int32_t  controllerIndex, char *text)
+void __cdecl SV_Cmd_ExecuteString(int  localClientNum, int  controllerIndex, char *text)
 {
     Cmd_ExecuteSingleCommand(localClientNum, controllerIndex, text);
 }
@@ -1268,7 +1268,7 @@ void __cdecl SV_Cmd_ExecuteString(int32_t  localClientNum, int32_t  controllerIn
 void __cdecl Cmd_List_f()
 {
     const char *match; // [esp+0h] [ebp-Ch]
-    int32_t  i; // [esp+4h] [ebp-8h]
+    int  i; // [esp+4h] [ebp-8h]
     cmd_function_s *cmd; // [esp+8h] [ebp-4h]
 
     if (Cmd_Argc() <= 1)
@@ -1293,7 +1293,7 @@ void __cdecl Cmd_Exec_f()
     const char *v1; // eax
     char *pathname; // [esp+4h] [ebp-4Ch]
     char filename[64]; // [esp+8h] [ebp-48h] BYREF
-    int32_t  localClientNum; // [esp+4Ch] [ebp-4h]
+    int  localClientNum; // [esp+4Ch] [ebp-4h]
 
     if (Cmd_Argc() == 2)
     {
@@ -1328,7 +1328,7 @@ void __cdecl Cmd_Exec_f()
     }
 }
 
-char __cdecl Cmd_ExecFromDisk(int32_t  localClientNum, int32_t  controllerIndex, const char *filename)
+char __cdecl Cmd_ExecFromDisk(int  localClientNum, int  controllerIndex, const char *filename)
 {
     char *text; // [esp+0h] [ebp-4h] BYREF
 
@@ -1341,7 +1341,7 @@ char __cdecl Cmd_ExecFromDisk(int32_t  localClientNum, int32_t  controllerIndex,
     return 1;
 }
 
-char __cdecl Cmd_ExecFromFastFile(int32_t  localClientNum, int32_t  controllerIndex, const char *filename)
+char __cdecl Cmd_ExecFromFastFile(int  localClientNum, int  controllerIndex, const char *filename)
 {
     RawFile *rawfile; // [esp+4h] [ebp-4h]
 
@@ -1361,7 +1361,7 @@ char __cdecl Cmd_ExecFromFastFile(int32_t  localClientNum, int32_t  controllerIn
     return 1;
 }
 
-void __cdecl SV_Cmd_ArgvBuffer(int32_t  arg, char *buffer, int32_t  bufferLength)
+void __cdecl SV_Cmd_ArgvBuffer(int  arg, char *buffer, int  bufferLength)
 {
     char *v3; // eax
 
@@ -1386,8 +1386,8 @@ int cmd_notifyCount = 0;
 
 void Cmd_RegisterNotification(const char *commandString, const char *notifyString)
 {
-    uint32_t commandID = SL_GetLowercaseString(commandString, 0);
-    uint32_t notifyID  = SL_GetString(notifyString, 0);
+    uint commandID = SL_GetLowercaseString(commandString, 0);
+    uint notifyID  = SL_GetString(notifyString, 0);
 
     // Already registered? Drop the extra refs and bail.
     for (int i = 0; i < cmd_notifyCount; ++i)
@@ -1423,7 +1423,7 @@ void Cmd_CheckNotify()
     if (cl_paused->current.integer)
         return;
 
-    uint32_t commandID = SL_FindLowercaseString(Cmd_Argv(0));
+    uint commandID = SL_FindLowercaseString(Cmd_Argv(0));
 
     if (!commandID)
         return;
@@ -1440,15 +1440,15 @@ void Cmd_LoadNotifications(MemoryFile *memFile)
     int count = 0;
 
     cmd_notifyCount = 0;
-    MemFile_ReadData(memFile, 4, (unsigned char *)&count);
+    MemFile_ReadData(memFile, 4, (byte *)&count);
 
     for (int i = 0; i < count; ++i)
     {
-        uint32_t commandID = SL_GetString(MemFile_ReadCString(memFile), 0);
+        uint commandID = SL_GetString(MemFile_ReadCString(memFile), 0);
         iassert(commandID == (uint16_t)commandID);
         cmd_notify[i].command = (uint16_t)commandID;
 
-        uint32_t notifyID = SL_GetString(MemFile_ReadCString(memFile), 0);
+        uint notifyID = SL_GetString(MemFile_ReadCString(memFile), 0);
         iassert(notifyID == (uint16_t)notifyID);
         cmd_notify[i].notify = (uint16_t)notifyID;
     }

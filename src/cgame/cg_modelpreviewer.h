@@ -9,7 +9,7 @@
 #include "cg_local.h"
 #include <gfx_d3d/r_scene.h>
 
-enum ButtonNames : __int32
+enum ButtonNames : int
 {
     BTN_MODESWITCH = 0x0,
     BTN_DROPMDL = 0x1,
@@ -41,14 +41,14 @@ enum ButtonNames : __int32
     TOTAL_BUTTONNAMES = 0x1B,
 };
 
-enum MdlPrvFreeSpeed : __int32
+enum MdlPrvFreeSpeed : int
 {
     FREESPEED_NORMAL = 0x0,
     FREESPEED_SLOW = 0x1,
     FREESPEED_FAST = 0x2,
 };
 
-enum ModPrvUiModePC : __int32
+enum ModPrvUiModePC : int
 {
     SELECTION_MODE = 0x0,
     MOVE_MODE = 0x1,
@@ -56,7 +56,7 @@ enum ModPrvUiModePC : __int32
     SCALE_MODE = 0x3,
 };
 
-enum MdlPrvUiModeGamepad : __int32
+enum MdlPrvUiModeGamepad : int
 {
     MDLPRVMODE_FOCUSED = 0x0,
     MDLPRVMODE_FREE = 0x1,
@@ -71,7 +71,7 @@ struct MdlPrvClone
     char objBuf[100];
 };
 
-enum MdlPrvFocusedMode : __int32
+enum MdlPrvFocusedMode : int
 {
     FOCUSEDMODE_CAMERA = 0x0,
     FOCUSEDMODE_MODELROTATE = 0x1,
@@ -79,7 +79,7 @@ enum MdlPrvFocusedMode : __int32
     FOCUSEDMODE_FOCALMOVE = 0x3,
 };
 
-enum MdlPrvMRotCamMode : __int32
+enum MdlPrvMRotCamMode : int
 {
     MROTCAMMODE_STATIC = 0x0,
     MROTCAMMODE_TRAVEL = 0x1,

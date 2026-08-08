@@ -14,7 +14,7 @@ void __cdecl VP_ParseField(const char *key, const char *value, vehicle_node_t *n
 void __cdecl VP_ParseFields(vehicle_node_t *node);
 void __cdecl VP_ClearNode(vehicle_node_t *node);
 void __cdecl VP_CopyNode(const vehicle_node_t *src, vehicle_node_t *dst);
-int __cdecl VP_GetNodeIndex(unsigned short name, float *origin);
+int __cdecl VP_GetNodeIndex(ushort name, float *origin);
 float __cdecl VP_CalcNodeSpeed(short nodeIdx);
 float __cdecl VP_CalcNodeLookAhead(short nodeIdx);
 void __cdecl VP_CalcNodeAngles(short nodeIdx, float *angles);

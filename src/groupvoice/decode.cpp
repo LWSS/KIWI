@@ -8,12 +8,12 @@
 #include <qcommon/qcommon.h>
 
 void *g_decoder;
-int32_t g_current_decode_bandwidth_setting;
+int g_current_decode_bandwidth_setting;
 SpeexBits decodeBits;
-int32_t g_decode_frame_size;
+int g_decode_frame_size;
 
 
-char __cdecl Decode_Init(int32_t bandwidthEnum)
+char __cdecl Decode_Init(int bandwidthEnum)
 {
     const SpeexMode *mode; // [esp+8h] [ebp-4h]
 
@@ -38,7 +38,7 @@ char __cdecl Decode_Init(int32_t bandwidthEnum)
         mode = &speex_nb_mode;
     }
     g_decoder = speex_decoder_init(mode);
-    int32_t tmp = 1;
+    int tmp = 1;
     speex_decoder_ctl(g_decoder, SPEEX_SET_ENH, &tmp);
     Decode_SetOptions();
     speex_decoder_ctl(g_decoder, SPEEX_GET_FRAME_SIZE, &g_decode_frame_size);
@@ -62,11 +62,11 @@ void __cdecl Decode_Shutdown()
     g_decoder = 0;
 }
 
-int32_t __cdecl Decode_Sample(char *buffer, int32_t maxLength, int16_t *out, int32_t frame_size)
+int __cdecl Decode_Sample(char *buffer, int maxLength, int16_t *out, int frame_size)
 {
-    int32_t v5; // [esp+0h] [ebp-400Ch]
+    int v5; // [esp+0h] [ebp-400Ch]
     float v6[4097]; // [esp+4h] [ebp-4008h]
-    int32_t i; // [esp+4008h] [ebp-4h]
+    int i; // [esp+4008h] [ebp-4h]
 
     iassert(maxLength <= 4096);
     iassert(maxLength <= frame_size);

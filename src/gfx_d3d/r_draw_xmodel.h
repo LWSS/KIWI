@@ -4,17 +4,17 @@
 
 void __cdecl R_DrawXModelRigidModelSurf(GfxCmdBufContext context, XSurface *xsurf);
 
-uint32_t __cdecl R_DrawXModelRigidSurf(
+uint __cdecl R_DrawXModelRigidSurf(
     const GfxDrawSurf *drawSurfList,
-    uint32_t drawSurfCount,
+    uint drawSurfCount,
     GfxCmdBufContext context);
 
-uint32_t __cdecl R_DrawXModelRigidSurfCamera(
+uint __cdecl R_DrawXModelRigidSurfCamera(
     const GfxDrawSurf *drawSurfList,
-    uint32_t drawSurfCount,
+    uint drawSurfCount,
     GfxCmdBufContext context);
 
-uint32_t __cdecl R_DrawXModelRigidSurfLit(
+uint __cdecl R_DrawXModelRigidSurfLit(
     const GfxDrawSurf *drawSurfList,
-    uint32_t drawSurfCount,
+    uint drawSurfCount,
     GfxCmdBufContext context);

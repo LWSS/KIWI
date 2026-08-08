@@ -21,7 +21,7 @@ void __cdecl TRACK_cm_load()
 
 static void CM_InitAllThreadData()
 {
-    uint32_t workerIndex; // [esp+0h] [ebp-4h]
+    uint workerIndex; // [esp+0h] [ebp-4h]
 
     CM_InitThreadData(THREAD_CONTEXT_MAIN);
     CM_InitThreadData(THREAD_CONTEXT_BACKEND);
@@ -46,7 +46,7 @@ void __cdecl CM_LoadMap(const char *name, int *checksum)
 }
 
 extern TraceThreadInfo g_traceThreadInfo[THREAD_CONTEXT_COUNT];
-void __cdecl CM_InitThreadData(uint32_t threadContext)
+void __cdecl CM_InitThreadData(uint threadContext)
 {
     TraceThreadInfo *traceThreadInfo; // [esp+8h] [ebp-4h]
 
@@ -85,7 +85,7 @@ void __cdecl CM_Shutdown()
     const char *savedName; // [esp+0h] [ebp-4h]
 
     savedName = cm.name;
-    Com_Memset((uint32_t *)&cm, 0, 284);
+    Com_Memset((uint *)&cm, 0, 284);
     cm.name = savedName;
     iassert( !cm.isInUse );
 }
@@ -97,13 +97,13 @@ void __cdecl CM_Unload()
         Sys_Error("Cannot unload collision while it is in use");
 }
 
-int __cdecl CM_LeafCluster(uint32_t leafnum)
+int __cdecl CM_LeafCluster(uint leafnum)
 {
     bcassert(leafnum, cm.numLeafs);
     return cm.leafs[leafnum].cluster;
 }
 
-void __cdecl CM_ModelBounds(uint32_t model, float *mins, float *maxs)
+void __cdecl CM_ModelBounds(uint model, float *mins, float *maxs)
 {
     cmodel_t *cmodel; // eax
 

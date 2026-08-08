@@ -58,7 +58,7 @@ void __cdecl G_BroadcastVoice(gentity_s *talker, VoicePacket_t *voicePacket)
     }
 }
 
-bool __cdecl SV_ClientHasClientMuted(uint32_t listener, uint32_t talker)
+bool __cdecl SV_ClientHasClientMuted(uint listener, uint talker)
 {
     if (listener >= 0x40)
         MyAssertHandler(
@@ -79,7 +79,7 @@ bool __cdecl SV_ClientHasClientMuted(uint32_t listener, uint32_t talker)
     return svs.clients[listener].muteList[talker];
 }
 
-bool __cdecl SV_ClientWantsVoiceData(uint32_t clientNum)
+bool __cdecl SV_ClientWantsVoiceData(uint clientNum)
 {
     if (clientNum >= 0x40)
         MyAssertHandler(

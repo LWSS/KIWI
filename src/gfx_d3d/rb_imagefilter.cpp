@@ -50,8 +50,8 @@ void __cdecl RB_VirtualToSceneRadius(float radius, float *radiusX, float *radius
 int __cdecl RB_GenerateGaussianFilterChain(
     float radiusX,
     float radiusY,
-    uint32_t srcWidth,
-    uint32_t srcHeight,
+    uint srcWidth,
+    uint srcHeight,
     int dstWidth,
     int dstHeight,
     int passLimit,
@@ -184,7 +184,7 @@ int __cdecl RB_PickSymmetricFilterMaterial(int halfTapCount, const Material **ma
             "%s\n\t(halfTapCount) = %i",
             "(halfTapCount > 0 && halfTapCount <= 8)",
             halfTapCount);
-    *material = (const Material *)*((uint32_t *)&rgp.postFxMaterial + halfTapCount);
+    *material = (const Material *)*((uint *)&rgp.postFxMaterial + halfTapCount);
     return halfTapCount;
 }
 
@@ -267,8 +267,8 @@ int __cdecl RB_GaussianFilterPoints1D(
 
 void __cdecl RB_GenerateGaussianFilter2D(
     float radius,
-    uint32_t srcWidth,
-    uint32_t srcHeight,
+    uint srcWidth,
+    uint srcHeight,
     int dstWidth,
     int dstHeight,
     GfxImageFilterPass *filterPass)
@@ -372,7 +372,7 @@ void __cdecl RB_FilterPingPong(const GfxImageFilter *filter, int passIndex)
 {
     GfxRenderTargetId finalTarget; // [esp+0h] [ebp-14h]
     GfxImage *image; // [esp+4h] [ebp-10h]
-    uint32_t pingpong; // [esp+8h] [ebp-Ch]
+    uint pingpong; // [esp+8h] [ebp-Ch]
 
     pingpong = passIndex & 1;
     if (passIndex)

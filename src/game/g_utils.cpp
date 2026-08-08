@@ -1630,7 +1630,7 @@ gentity_s *__cdecl G_Find(gentity_s *from, int fieldofs, unsigned __int16 match)
     //if (result >= v4)
     //    return 0;
     //
-    //for (i = (unsigned char*)result + fieldofs; 
+    //for (i = (byte*)result + fieldofs; 
     //    !i[168 - fieldofs] || !*(_WORD *)i || *(unsigned __int16 *)i != match; i += 628)
     //{
     //    if (++result >= v4)
@@ -2713,7 +2713,7 @@ void __cdecl G_EntUnlink(gentity_s *ent)
             }
         }
         Scr_SetString(&tagInfo->name, 0);
-        MT_Free((unsigned char *)tagInfo, 112);
+        MT_Free((byte *)tagInfo, 112);
     }
     //Profile_EndInternal(0);
 }
@@ -2770,7 +2770,7 @@ void __cdecl G_EntUnlinkFree(gentity_s *ent)
     scripted = ent->scripted;
     if (scripted)
     {
-        MT_Free((unsigned char *)scripted, 96);
+        MT_Free((byte *)scripted, 96);
         ent->scripted = 0;
     }
     G_EntUnlink(ent);
@@ -2800,7 +2800,7 @@ void __cdecl G_FreeEntity(gentity_s *ed)
     scripted = ed->scripted;
     if (scripted)
     {
-        MT_Free((unsigned char*)scripted, 96);
+        MT_Free((byte*)scripted, 96);
         ed->scripted = 0;
     }
     G_EntUnlink(ed);
@@ -2810,7 +2810,7 @@ void __cdecl G_FreeEntity(gentity_s *ed)
         v4 = tagChildren->scripted;
         if (v4)
         {
-            MT_Free((unsigned char *)v4, 96);
+            MT_Free((byte *)v4, 96);
             tagChildren->scripted = 0;
         }
         G_EntUnlink(tagChildren);

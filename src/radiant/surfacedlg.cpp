@@ -414,7 +414,7 @@ static MaterialDef *SI_ReadControlsIntoTexdef( CSurfaceDlg *dlg )
     // Name → SetMaterial (empty/blank → "$default", then reflect the resolved name back).
     char name[132] = { 0 };
     ::GetDlgItemTextA( dlg->GetSafeHwnd(), IDC_SURFACE_INSP_CURR_TEX, name, 127 );
-    if ( (unsigned char)name[0] > 32 )
+    if ( (byte)name[0] > 32 )
     {
         SetMaterial( name, (patchMesh_material *)md );
     }

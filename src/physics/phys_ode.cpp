@@ -1075,7 +1075,7 @@ void __cdecl Phys_ObjSetCollisionFromXModel(const XModel *model, PhysWorld world
     PhysGeomInfo *geom; // [esp+1Ch] [ebp-18h]
     float maxs[3]; // [esp+20h] [ebp-14h] BYREF
     PhysGeomList *geomList; // [esp+2Ch] [ebp-8h]
-    uint32_t geomIndex; // [esp+30h] [ebp-4h]
+    uint geomIndex; // [esp+30h] [ebp-4h]
 
     if (model->physGeoms)
     {
@@ -1327,7 +1327,7 @@ void __cdecl Phys_TweakBulletImpact(float *worldPos, float *bulletDir, const flo
     Vec3Add(worldPos, offset, worldPos);
 }
 
-void __cdecl Phys_PlayCollisionSound(int localClientNum, dxBody *body, uint32_t sndClass, ContactList *contactList)
+void __cdecl Phys_PlayCollisionSound(int localClientNum, dxBody *body, uint sndClass, ContactList *contactList)
 {
     double v4; // st7
     float scale; // [esp+8h] [ebp-74h]
@@ -1393,8 +1393,8 @@ void __cdecl Phys_BodyGetPointVelocity(dxBody *body, float *point, float *outVel
 void __cdecl Phys_DrawDebugText(const ScreenPlacement *scrPlace)
 {
     int v1; // eax
-    uint32_t totalBodiesAwake; // [esp+20h] [ebp-14h]
-    uint32_t totalBodiesAwakea; // [esp+20h] [ebp-14h]
+    uint totalBodiesAwake; // [esp+20h] [ebp-14h]
+    uint totalBodiesAwakea; // [esp+20h] [ebp-14h]
     float x; // [esp+24h] [ebp-10h] BYREF
     float y; // [esp+28h] [ebp-Ch] BYREF
     float charHeight; // [esp+2Ch] [ebp-8h]
@@ -1411,7 +1411,7 @@ void __cdecl Phys_DrawDebugText(const ScreenPlacement *scrPlace)
 }
 
 int __cdecl Phys_DrawDebugTextForWorld(
-    uint32_t worldIndex,
+    uint worldIndex,
     char *worldText,
     float *x,
     float *y,
@@ -1509,7 +1509,7 @@ void __cdecl Phys_CheckIfAliveTooLong(dxBody *body)
     float delta[3]; // [esp+50h] [ebp-20h] BYREF
     PhysObjUserData *userData; // [esp+5Ch] [ebp-14h]
     dxGeom *geom; // [esp+60h] [ebp-10h]
-    uint32_t timeNow; // [esp+64h] [ebp-Ch]
+    uint timeNow; // [esp+64h] [ebp-Ch]
     dxWorld *odeWorld; // [esp+68h] [ebp-8h]
     int type; // [esp+6Ch] [ebp-4h]
 
@@ -1520,7 +1520,7 @@ void __cdecl Phys_CheckIfAliveTooLong(dxBody *body)
     if (geom)
     {
         odeWorld = ODE_BodyGetWorld(body);
-        timeNow = physGlob.worldData[Phys_IndexFromODEWorld(odeWorld)].timeLastUpdate; //  (uint32_t)physGlob.space[51 * Phys_IndexFromODEWorld(odeWorld) - 152];
+        timeNow = physGlob.worldData[Phys_IndexFromODEWorld(odeWorld)].timeLastUpdate; //  (uint)physGlob.space[51 * Phys_IndexFromODEWorld(odeWorld) - 152];
         if (dBodyIsEnabled(body))
         {
             Phys_BodyGetCenterOfMass(body, newPos);
@@ -1565,7 +1565,7 @@ void __cdecl Phys_CheckIfAliveTooLong(dxBody *body)
     }
 }
 
-int __cdecl Phys_DoBodyOncePerFrame(uint32_t worldIndex, dxBody *body, float deltaT)
+int __cdecl Phys_DoBodyOncePerFrame(uint worldIndex, dxBody *body, float deltaT)
 {
     float v4; // [esp+8h] [ebp-20h]
     float v5; // [esp+Ch] [ebp-1Ch]
@@ -1744,8 +1744,8 @@ void __cdecl Phys_GetPerformance(float *average, int *mintime, int *maxtime)
 
 void __cdecl Phys_PerformanceEndFrame()
 {
-    uint32_t total; // [esp+8h] [ebp-8h]
-    uint32_t frameIndex; // [esp+Ch] [ebp-4h]
+    uint total; // [esp+8h] [ebp-8h]
+    uint frameIndex; // [esp+Ch] [ebp-4h]
 
     Sys_EnterCriticalSection(CRITSECT_PHYSICS);
     ++physGlob.physPerformanceFrame;
@@ -1775,11 +1775,11 @@ void __cdecl Phys_RunToTime(int localClientNum, PhysWorld worldIndex, int timeNo
 {
     DWORD v3; // eax
     float seconds; // [esp+20h] [ebp-5Ch]
-    uint32_t v5; // [esp+2Ch] [ebp-50h]
+    uint v5; // [esp+2Ch] [ebp-50h]
     PhysWorldData *data; // [esp+6Ch] [ebp-10h]
     DWORD time; // [esp+70h] [ebp-Ch]
     dxWorld *world; // [esp+74h] [ebp-8h]
-    uint32_t maxIter; // [esp+78h] [ebp-4h]
+    uint maxIter; // [esp+78h] [ebp-4h]
 
     data = &physGlob.worldData[worldIndex];
 
@@ -2281,7 +2281,7 @@ void __cdecl Phys_ObjTraceNewPos(dxBody *body)
             v5 = newPos[0] == userData->savedPos[0]
                 && newPos[1] == userData->savedPos[1]
                 && newPos[2] == userData->savedPos[2];
-            if (!v5 || userData->state <= (uint32_t)PHYS_OBJ_STATE_STUCK)
+            if (!v5 || userData->state <= (uint)PHYS_OBJ_STATE_STUCK)
             {
                 CM_BoxTrace(&trace, userData->savedPos, newPos, mins, maxs, 0, PHYS_WORLD_CLIPMASK);
                 userData->state = trace.startsolid ? PHYS_OBJ_STATE_STUCK : PHYS_OBJ_STATE_FREE;
@@ -2597,7 +2597,7 @@ dxJointAMotor *__cdecl Phys_CreateAngularMotor(
     PhysWorld worldIndex,
     dxBody *obj1,
     dxBody *obj2,
-    uint32_t numAxes,
+    uint numAxes,
     const float (*axes)[3],
     const float *motorSpeeds,
     const float *motorFMaxs,
@@ -2669,7 +2669,7 @@ void __cdecl Phys_JointDestroy(PhysWorld worldIndex, dxJointHinge *id)
 
 void __cdecl Phys_SetCollisionCallback(PhysWorld worldIndex, void(__cdecl *callback)())
 {
-    if ((uint32_t)worldIndex >= PHYS_WORLD_COUNT)
+    if ((uint)worldIndex >= PHYS_WORLD_COUNT)
         MyAssertHandler(
             ".\\physics\\phys_ode.cpp",
             2648,
@@ -2695,7 +2695,7 @@ void __cdecl Phys_AddJitterRegion(
     Jitter *jitter; // [esp+1Ch] [ebp-8h]
     dxBody *body; // [esp+20h] [ebp-4h]
 
-    if ((uint32_t)worldIndex >= PHYS_WORLD_COUNT)
+    if ((uint)worldIndex >= PHYS_WORLD_COUNT)
         MyAssertHandler(
             ".\\physics\\phys_ode.cpp",
             2688,
@@ -2763,8 +2763,8 @@ void Phys_ArchiveState(MemoryFile *memFile)
     }
     else
     {
-        MemFile_ReadData(memFile, 612, (unsigned char*)physGlob.worldData);
-        MemFile_ReadData(memFile, 12, (unsigned char*)physGlob.gravityDirection);
+        MemFile_ReadData(memFile, 612, (byte*)physGlob.worldData);
+        MemFile_ReadData(memFile, 12, (byte*)physGlob.gravityDirection);
     }
 }
 

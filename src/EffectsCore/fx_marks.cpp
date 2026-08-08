@@ -54,7 +54,7 @@ FxMark *__cdecl FX_MarkFromHandle(FxMarksSystem *marksSystem, uint16_t handle)
     return &marksSystem->marks[handle];
 }
 
-static FxTriGroupPool *__cdecl FX_TriGroupFromHandle(FxMarksSystem *marksSystem, uint32_t handle)
+static FxTriGroupPool *__cdecl FX_TriGroupFromHandle(FxMarksSystem *marksSystem, uint handle)
 {
     bcassert(handle, FX_TRI_GROUP_LIMIT * sizeof(FxTriGroup));
     iassert(marksSystem);
@@ -62,14 +62,14 @@ static FxTriGroupPool *__cdecl FX_TriGroupFromHandle(FxMarksSystem *marksSystem,
     return (FxTriGroupPool *)((char *)marksSystem->triGroups + handle);
 }
 
-static FxPointGroupPool *__cdecl FX_PointGroupFromHandle(FxMarksSystem *marksSystem, uint32_t handle)
+static FxPointGroupPool *__cdecl FX_PointGroupFromHandle(FxMarksSystem *marksSystem, uint handle)
 {
     bcassert(handle, FX_POINT_GROUP_LIMIT * sizeof(FxPointGroup));
     iassert(marksSystem);
     return (FxPointGroupPool *)((char *)marksSystem->pointGroups + handle);
 }
 
-static int32_t __cdecl FX_TriGroupToHandle(FxMarksSystem *marksSystem, FxTriGroup *group)
+static int __cdecl FX_TriGroupToHandle(FxMarksSystem *marksSystem, FxTriGroup *group)
 {
     iassert(marksSystem);
     iassert(group);
@@ -80,7 +80,7 @@ static int32_t __cdecl FX_TriGroupToHandle(FxMarksSystem *marksSystem, FxTriGrou
     return handle;
 }
 
-static int32_t __cdecl FX_PointGroupToHandle(FxMarksSystem *marksSystem, FxPointGroup *group)
+static int __cdecl FX_PointGroupToHandle(FxMarksSystem *marksSystem, FxPointGroup *group)
 {
     iassert(marksSystem);
     iassert(group);
@@ -91,7 +91,7 @@ static int32_t __cdecl FX_PointGroupToHandle(FxMarksSystem *marksSystem, FxPoint
     return (char *)group - (char *)marksSystem->pointGroups;
 }
 
-static int32_t __cdecl FX_MarkContextsCompare(const GfxMarkContext *context0, const GfxMarkContext *context1)
+static int __cdecl FX_MarkContextsCompare(const GfxMarkContext *context0, const GfxMarkContext *context1)
 {
     int type0 = context0->modelTypeAndSurf & MARK_MODEL_TYPE_MASK;
     int type1 = context1->modelTypeAndSurf & MARK_MODEL_TYPE_MASK;
@@ -111,7 +111,7 @@ static int32_t __cdecl FX_MarkContextsCompare(const GfxMarkContext *context0, co
 
 static bool __cdecl FX_CompareMarkTris(const FxMarkTri &tri0, const FxMarkTri &tri1)
 {
-    int32_t contextCompareResult; // [esp+10h] [ebp-4h]
+    int contextCompareResult; // [esp+10h] [ebp-4h]
 
     contextCompareResult = FX_MarkContextsCompare(&tri0.context, &tri1.context);
     if (contextCompareResult)
@@ -122,9 +122,9 @@ static bool __cdecl FX_CompareMarkTris(const FxMarkTri &tri0, const FxMarkTri &t
 
 void __cdecl FX_InitMarksSystem(FxMarksSystem *marksSystem)
 {
-    int32_t pointIndex; // [esp+8h] [ebp-10h]
-    uint32_t markIndex; // [esp+Ch] [ebp-Ch]
-    int32_t triIndex; // [esp+10h] [ebp-8h]
+    int pointIndex; // [esp+8h] [ebp-10h]
+    uint markIndex; // [esp+Ch] [ebp-Ch]
+    int triIndex; // [esp+10h] [ebp-8h]
 
     for (uint markHandleIndex = 0; markHandleIndex != MAX_GENTITIES; ++markHandleIndex)
         marksSystem->entFirstMarkHandles[markHandleIndex] = -1;
@@ -253,10 +253,10 @@ static void __cdecl FX_FreeLruMark(FxMarksSystem *marksSystem)
     FX_FreeMark(marksSystem, lruMark);
 }
 
-static int32_t __cdecl FX_AllocMarkTris(FxMarksSystem *marksSystem, const FxMarkTri *markTris, int32_t triCount)
+static int __cdecl FX_AllocMarkTris(FxMarksSystem *marksSystem, const FxMarkTri *markTris, int triCount)
 {
-    int32_t groupHandle; // [esp+14h] [ebp-Ch]
-    int32_t usedCount; // [esp+18h] [ebp-8h]
+    int groupHandle; // [esp+14h] [ebp-Ch]
+    int usedCount; // [esp+18h] [ebp-8h]
     FxTriGroupPool *newGroup; // [esp+1Ch] [ebp-4h]
 
     groupHandle = FX_HANDLE_NONE;
@@ -281,7 +281,7 @@ static int32_t __cdecl FX_AllocMarkTris(FxMarksSystem *marksSystem, const FxMark
     return groupHandle;
 }
 
-static int32_t __cdecl FX_AllocMarkPoints(FxMarksSystem *marksSystem, int32_t pointCount)
+static int __cdecl FX_AllocMarkPoints(FxMarksSystem *marksSystem, int pointCount)
 {
     int groupHandle = FX_HANDLE_NONE;
     int pointGroupCount = (pointCount + 1) / 2;
@@ -352,11 +352,11 @@ static void __cdecl FX_LinkMarkIntoList(FxMarksSystem *marksSystem, uint16_t *he
 static void __cdecl FX_CopyMarkTris(
     FxMarksSystem *marksSystem,
     const FxMarkTri *srcTris,
-    uint32_t dstGroupHandle,
-    int32_t triCount)
+    uint dstGroupHandle,
+    int triCount)
 {
-    int32_t copyCount; // [esp+10h] [ebp-14h]
-    int32_t copyIndex; // [esp+1Ch] [ebp-8h]
+    int copyCount; // [esp+10h] [ebp-14h]
+    int copyIndex; // [esp+1Ch] [ebp-8h]
     FxTriGroupPool *dstGroup; // [esp+20h] [ebp-4h]
 
     do
@@ -388,11 +388,11 @@ static void __cdecl FX_CopyMarkTris(
 static void __cdecl FX_CopyMarkPoints(
     FxMarksSystem *marksSystem,
     const FxMarkPoint *srcPoints,
-    uint32_t dstGroupHandle,
-    int32_t pointCount)
+    uint dstGroupHandle,
+    int pointCount)
 {
-    int32_t copyCount; // [esp+8h] [ebp-14h]
-    int32_t copyIndex; // [esp+14h] [ebp-8h]
+    int copyCount; // [esp+8h] [ebp-14h]
+    int copyIndex; // [esp+14h] [ebp-8h]
     FxPointGroupPool *dstGroup; // [esp+18h] [ebp-4h]
 
     do
@@ -418,7 +418,7 @@ static void __cdecl FX_CopyMarkPoints(
     iassert(dstGroupHandle == FX_HANDLE_NONE);
 }
 
-static uint16_t __cdecl FX_FindModelHead(FxMarksSystem *marksSystem, uint16_t modelIndex, int32_t type)
+static uint16_t __cdecl FX_FindModelHead(FxMarksSystem *marksSystem, uint16_t modelIndex, int type)
 {
     for (FxMark *mark = marksSystem->marks; mark != (FxMark *)marksSystem->triGroups; ++mark)
     {
@@ -434,9 +434,9 @@ static uint16_t __cdecl FX_FindModelHead(FxMarksSystem *marksSystem, uint16_t mo
 }
 
 static void __cdecl FX_AllocAndConstructMark(
-    int32_t localClientNum,
-    int32_t triCount,
-    int32_t pointCount,
+    int localClientNum,
+    int triCount,
+    int pointCount,
     Material *material,
     FxMarkTri *markTris,
     const FxMarkPoint *markPoints,
@@ -448,10 +448,10 @@ static void __cdecl FX_AllocAndConstructMark(
     uint16_t staticModelMarkHead; // [esp+1Ch] [ebp-1Ch] BYREF
     uint16_t newMarkHandle; // [esp+20h] [ebp-18h]
     FxMarksSystem *marksSystem; // [esp+24h] [ebp-14h]
-    int32_t points; // [esp+28h] [ebp-10h]
-    int32_t modelType; // [esp+2Ch] [ebp-Ch]
+    int points; // [esp+28h] [ebp-10h]
+    int modelType; // [esp+2Ch] [ebp-Ch]
     FxMark *newMark; // [esp+30h] [ebp-8h]
-    int32_t tris; // [esp+34h] [ebp-4h]
+    int tris; // [esp+34h] [ebp-4h]
 
     std::sort(markTris, &markTris[triCount], FX_CompareMarkTris);
 
@@ -531,9 +531,9 @@ static void __cdecl FX_AllocAndConstructMark(
 
 static void __cdecl FX_ImpactMark_Generate_Callback(
     void *context_p,
-    int32_t triCount,
+    int triCount,
     FxMarkTri *tris,
-    int32_t pointCount,
+    int pointCount,
     FxMarkPoint *points,
     const float *markOrigin,
     const float *markTexCoordAxis)
@@ -553,9 +553,9 @@ static void __cdecl FX_ImpactMark_Generate_Callback(
 }
 
 static void __cdecl FX_ImpactMark_Generate_AddEntityBrush(
-    int32_t localClientNum,
+    int localClientNum,
     MarkInfo* markInfo,
-    uint32_t entityIndex,
+    uint entityIndex,
     const float* origin,
     float radius)
 {
@@ -578,20 +578,20 @@ static void __cdecl FX_ImpactMark_Generate_AddEntityBrush(
     AnglesToAxis(ent->pose.angles, entAxis);
 
     float worldModelBounds[2][3];
-    for (int32_t worldAxis = 0; worldAxis < 3; ++worldAxis)
+    for (int worldAxis = 0; worldAxis < 3; ++worldAxis)
     {
         const float firstAxisComponent = entAxis[0][worldAxis];
-        const int32_t firstMinBound = firstAxisComponent >= 0.0f ? 0 : 1;
-        const int32_t firstMaxBound = firstMinBound ^ 1;
+        const int firstMinBound = firstAxisComponent >= 0.0f ? 0 : 1;
+        const int firstMaxBound = firstMinBound ^ 1;
 
         worldModelBounds[0][worldAxis] = brushModel->bounds[firstMinBound][0] * firstAxisComponent + ent->pose.origin[worldAxis];
         worldModelBounds[1][worldAxis] = brushModel->bounds[firstMaxBound][0] * firstAxisComponent + ent->pose.origin[worldAxis];
 
-        for (int32_t modelAxis = 1; modelAxis < 3; ++modelAxis)
+        for (int modelAxis = 1; modelAxis < 3; ++modelAxis)
         {
             const float axisComponent = entAxis[modelAxis][worldAxis];
-            const int32_t minBound = axisComponent >= 0.0f ? 0 : 1;
-            const int32_t maxBound = minBound ^ 1;
+            const int minBound = axisComponent >= 0.0f ? 0 : 1;
+            const int maxBound = minBound ^ 1;
 
             worldModelBounds[0][worldAxis] += brushModel->bounds[minBound][modelAxis] * axisComponent;
             worldModelBounds[1][worldAxis] += brushModel->bounds[maxBound][modelAxis] * axisComponent;
@@ -606,9 +606,9 @@ static void __cdecl FX_ImpactMark_Generate_AddEntityBrush(
 }
 
 static void __cdecl FX_ImpactMark_Generate_AddEntityModel(
-    int32_t localClientNum,
+    int localClientNum,
     MarkInfo *markInfo,
-    uint32_t entityIndex,
+    uint entityIndex,
     const float *origin,
     float radius)
 {
@@ -642,7 +642,7 @@ static void __cdecl FX_ImpactMark_Generate_AddEntityModel(
 }
 
 static void __cdecl FX_ImpactMark_Generate(
-    int32_t localClientNum,
+    int localClientNum,
     MarkFragmentsAgainstEnum markAgainst,
     Material *material,
     float *origin,
@@ -650,7 +650,7 @@ static void __cdecl FX_ImpactMark_Generate(
     float orientation,
     const byte *nativeColor,
     float radius,
-    uint32_t markEntnum)
+    uint markEntnum)
 {
     FxMarkTri tris[256]; // [esp+230h] [ebp-1058h] BYREF
     MarkInfo markInfo; // [esp+E28h] [ebp-460h] BYREF
@@ -695,7 +695,7 @@ static void __cdecl FX_ImpactMark_Generate(
 }
 
 static void __cdecl FX_ImpactMark(
-    int32_t localClientNum,
+    int localClientNum,
     Material *worldMaterial,
     Material *modelMaterial,
     float *origin,
@@ -703,7 +703,7 @@ static void __cdecl FX_ImpactMark(
     float orientation,
     const uint8_t *nativeColor,
     float radius,
-    uint32_t markEntnum)
+    uint markEntnum)
 {
     float axis[3][3]; // [esp+5Ch] [ebp-24h] BYREF
 
@@ -748,11 +748,11 @@ static void __cdecl FX_ImpactMark(
 }
 
 void __cdecl FX_CreateImpactMark(
-    int32_t localClientNum,
+    int localClientNum,
     const FxElemDef *elemDef,
     const FxSpatialFrame *spatialFrame,
-    int32_t randomSeed,
-    uint32_t markEntnum)
+    int randomSeed,
+    uint markEntnum)
 {
     FxElemVisualState visState; // [esp+50h] [ebp-3Ch] BYREF
     FxElemPreVisualState preVisState; // [esp+6Ch] [ebp-20h] BYREF
@@ -782,7 +782,7 @@ void __cdecl FX_CreateImpactMark(
         markEntnum);
 }
 
-void __cdecl FX_BeginMarks(int32_t clientIndex)
+void __cdecl FX_BeginMarks(int clientIndex)
 {
     FxMarksSystem *marksSystem = FX_GetMarksSystem(clientIndex);
 
@@ -794,12 +794,12 @@ void __cdecl FX_BeginMarks(int32_t clientIndex)
 
 static void __cdecl FX_MarkEntDetachMatchingBones(
     FxMarksSystem *marksSystem,
-    int32_t entnum,
-    const uint32_t *unsetHidePartBits)
+    int entnum,
+    const uint *unsetHidePartBits)
 {
     uint16_t handle; // [esp+18h] [ebp-Ch]
     FxMark *mark; // [esp+1Ch] [ebp-8h]
-    int32_t markBoneIndex; // [esp+20h] [ebp-4h]
+    int markBoneIndex; // [esp+20h] [ebp-4h]
 
     handle = marksSystem->entFirstMarkHandles[entnum];
     while (handle != FX_HANDLE_NONE)
@@ -819,7 +819,7 @@ static void __cdecl FX_MarkEntDetachMatchingBones(
     }
 }
 
-void __cdecl FX_MarkEntDetachAll(int32_t localClientNum, int32_t entnum)
+void __cdecl FX_MarkEntDetachAll(int localClientNum, int entnum)
 {
     FxMarksSystem *marksSystem = FX_GetMarksSystem(localClientNum);
     
@@ -830,15 +830,15 @@ void __cdecl FX_MarkEntDetachAll(int32_t localClientNum, int32_t entnum)
 }
 
 void __cdecl FX_MarkEntUpdateHidePartBits(
-    const uint32_t *oldHidePartBits,
-    const uint32_t *newHidePartBits,
-    int32_t localClientNum,
-    int32_t entnum)
+    const uint *oldHidePartBits,
+    const uint *newHidePartBits,
+    int localClientNum,
+    int entnum)
 {
-    uint32_t v4; // edx
-    uint32_t unsetHidePartBits[4]; // [esp+8h] [ebp-18h] BYREF
-    int32_t hidePartIntIndex; // [esp+18h] [ebp-8h]
-    uint32_t oredUnsetHidePartBits; // [esp+1Ch] [ebp-4h]
+    uint v4; // edx
+    uint unsetHidePartBits[4]; // [esp+8h] [ebp-18h] BYREF
+    int hidePartIntIndex; // [esp+18h] [ebp-8h]
+    uint oredUnsetHidePartBits; // [esp+1Ch] [ebp-4h]
 
     FxMarksSystem *marksSystem = FX_GetMarksSystem(localClientNum);
     
@@ -853,7 +853,7 @@ void __cdecl FX_MarkEntUpdateHidePartBits(
         FX_MarkEntDetachMatchingBones(marksSystem, entnum, unsetHidePartBits);
 }
 
-static void __cdecl FX_MarkEntDetachAllOfType(int32_t localClientNum, int32_t entnum, int32_t markType)
+static void __cdecl FX_MarkEntDetachAllOfType(int localClientNum, int entnum, int markType)
 {
     FxMarksSystem *marksSystem = FX_GetMarksSystem(localClientNum);
     ushort handle = marksSystem->entFirstMarkHandles[entnum];
@@ -866,11 +866,11 @@ static void __cdecl FX_MarkEntDetachAllOfType(int32_t localClientNum, int32_t en
     }
 }
 
-static void __cdecl FX_MarkEntDetachModel(FxMarksSystem *marksSystem, int32_t entnum, int32_t oldModelIndex)
+static void __cdecl FX_MarkEntDetachModel(FxMarksSystem *marksSystem, int entnum, int oldModelIndex)
 {
     uint16_t handle; // [esp+18h] [ebp-Ch]
     FxMark *mark; // [esp+1Ch] [ebp-8h]
-    int32_t markModelIndex; // [esp+20h] [ebp-4h]
+    int markModelIndex; // [esp+20h] [ebp-4h]
 
     handle = marksSystem->entFirstMarkHandles[entnum];
     while (handle != FX_HANDLE_NONE)
@@ -896,13 +896,13 @@ static void __cdecl FX_MarkEntDetachModel(FxMarksSystem *marksSystem, int32_t en
     }
 }
 
-static void __cdecl FX_MarkEntUpdateEndDObj(FxMarkDObjUpdateContext *context, int32_t localClientNum, int32_t entnum, DObj_s *obj)
+static void __cdecl FX_MarkEntUpdateEndDObj(FxMarkDObjUpdateContext *context, int localClientNum, int entnum, DObj_s *obj)
 {
-    int32_t oldModelCount; // [esp+4h] [ebp-14h]
-    int32_t removedModelCount; // [esp+8h] [ebp-10h]
-    int32_t oldModelIndex; // [esp+Ch] [ebp-Ch]
-    int32_t modelCount; // [esp+10h] [ebp-8h]
-    int32_t modelIndex; // [esp+14h] [ebp-4h]
+    int oldModelCount; // [esp+4h] [ebp-14h]
+    int removedModelCount; // [esp+8h] [ebp-10h]
+    int oldModelIndex; // [esp+Ch] [ebp-Ch]
+    int modelCount; // [esp+10h] [ebp-8h]
+    int modelIndex; // [esp+14h] [ebp-4h]
 
     FxMarksSystem *marksSystem = FX_GetMarksSystem(localClientNum);
 
@@ -939,8 +939,8 @@ void __cdecl FX_MarkEntUpdateBegin(
     bool isBrush,
     uint16_t brushIndex)
 {
-    int32_t modelCount; // [esp+0h] [ebp-8h]
-    int32_t modelIndex; // [esp+4h] [ebp-4h]
+    int modelCount; // [esp+0h] [ebp-8h]
+    int modelIndex; // [esp+4h] [ebp-4h]
 
     if (obj)
     {
@@ -962,8 +962,8 @@ void __cdecl FX_MarkEntUpdateBegin(
 
 void __cdecl FX_MarkEntUpdateEnd(
     FxMarkDObjUpdateContext *context,
-    int32_t localClientNum,
-    int32_t entnum,
+    int localClientNum,
+    int entnum,
     DObj_s *obj,
     bool isBrush,
     uint16_t brushIndex)
@@ -1036,10 +1036,10 @@ static void __cdecl FX_DrawMarkTris(
     uint16_t *indices,
     FxActiveMarkSurf *outSurf)
 {
-    uint32_t groupHandle; // [esp+Ch] [ebp-10h]
-    int32_t triCount; // [esp+10h] [ebp-Ch]
+    uint groupHandle; // [esp+Ch] [ebp-10h]
+    int triCount; // [esp+10h] [ebp-Ch]
     FxTriGroupPool *group; // [esp+14h] [ebp-8h]
-    int32_t triIndex; // [esp+18h] [ebp-4h]
+    int triIndex; // [esp+18h] [ebp-4h]
 
     iassert(mark);
     groupHandle = mark->tris;
@@ -1080,12 +1080,12 @@ static void __cdecl FX_DrawMarkTris(
 static char __cdecl FX_GenerateMarkVertsForMark_Begin(
     FxMarksSystem *marksSystem,
     FxMark *mark,
-    uint32_t *indexCount,
+    uint *indexCount,
     uint16_t *outBaseVertex,
     FxActiveMarkSurf *outDrawSurf)
 {
-    uint32_t newIndexCount; // [esp+18h] [ebp-10h]
-    uint32_t reserveIndexCount; // [esp+1Ch] [ebp-Ch]
+    uint newIndexCount; // [esp+18h] [ebp-10h]
+    uint reserveIndexCount; // [esp+1Ch] [ebp-Ch]
     uint16_t *indices; // [esp+20h] [ebp-8h]
     r_double_index_t *doubleIndices; // [esp+24h] [ebp-4h] BYREF
 
@@ -1145,7 +1145,7 @@ static void __cdecl FX_ExpandMarkVerts_Transform_GfxWorldVertex_(
     PackedUnitVec v8; // [esp+74h] [ebp-9Ch]
     float *lmapCoord; // [esp+94h] [ebp-7Ch]
     GfxWorldVertex *castOutVert; // [esp+A8h] [ebp-68h]
-    uint32_t groupHandle; // [esp+ACh] [ebp-64h]
+    uint groupHandle; // [esp+ACh] [ebp-64h]
     float delta[3]; // [esp+B0h] [ebp-60h] BYREF
     float transformedNormal[3]; // [esp+BCh] [ebp-54h] BYREF
     float texCoordScale; // [esp+C8h] [ebp-48h]
@@ -1155,8 +1155,8 @@ static void __cdecl FX_ExpandMarkVerts_Transform_GfxWorldVertex_(
     float transformedDelta[3]; // [esp+E0h] [ebp-30h] BYREF
     //__int64 texCoord; // [esp+ECh] [ebp-24h]
     float texCoord[2];
-    int32_t pointCount; // [esp+F4h] [ebp-1Ch]
-    int32_t loopCount; // [esp+F8h] [ebp-18h]
+    int pointCount; // [esp+F4h] [ebp-1Ch]
+    int loopCount; // [esp+F8h] [ebp-18h]
     float transformedTexCoordAxis[3]; // [esp+FCh] [ebp-14h] BYREF
     const FxPointGroup *group; // [esp+108h] [ebp-8h]
     GfxWorldVertex *outVert; // [esp+10Ch] [ebp-4h]
@@ -1238,7 +1238,7 @@ static void __cdecl FX_ExpandMarkVerts_Transform_GfxPackedVertex_(
     PackedUnitVec v7; // [esp+54h] [ebp-ECh]
     PackedUnitVec v8; // [esp+74h] [ebp-CCh]
     GfxPackedVertex *castOutVert; // [esp+D8h] [ebp-68h]
-    uint32_t groupHandle; // [esp+DCh] [ebp-64h]
+    uint groupHandle; // [esp+DCh] [ebp-64h]
     float delta[3]; // [esp+E0h] [ebp-60h] BYREF
     float transformedNormal[3]; // [esp+ECh] [ebp-54h] BYREF
     float texCoordScale; // [esp+F8h] [ebp-48h]
@@ -1247,8 +1247,8 @@ static void __cdecl FX_ExpandMarkVerts_Transform_GfxPackedVertex_(
     GfxWorldVertex *verts; // [esp+10Ch] [ebp-34h]
     float transformedDelta[3]; // [esp+110h] [ebp-30h] BYREF
     float texCoord[2]; // [esp+11Ch] [ebp-24h] BYREF
-    int32_t pointCount; // [esp+124h] [ebp-1Ch]
-    int32_t loopCount; // [esp+128h] [ebp-18h]
+    int pointCount; // [esp+124h] [ebp-1Ch]
+    int loopCount; // [esp+128h] [ebp-18h]
     float transformedTexCoordAxis[3]; // [esp+12Ch] [ebp-14h] BYREF
     const FxPointGroup *group; // [esp+138h] [ebp-8h]
     GfxWorldVertex *outVert; // [esp+13Ch] [ebp-4h]
@@ -1368,13 +1368,13 @@ static void __cdecl FX_GenerateMarkVertsForMark_MatrixFromAnim(
     iassert(dobj);
     iassert(boneMtxList);
 
-    const int32_t boneIndex = mark->context.lmapIndex;
-    const int32_t modelIndex = mark->context.modelTypeAndSurf & MARK_MODEL_SURF_MASK;
+    const int boneIndex = mark->context.lmapIndex;
+    const int modelIndex = mark->context.modelTypeAndSurf & MARK_MODEL_SURF_MASK;
 
     iassert(modelIndex < DObjGetNumModels(dobj));
 
-    int32_t modelBoneOffset = 0;
-    for (int32_t modelIndexIter = 0; modelIndexIter < modelIndex; ++modelIndexIter)
+    int modelBoneOffset = 0;
+    for (int modelIndexIter = 0; modelIndexIter < modelIndex; ++modelIndexIter)
     {
         const XModel *model = DObjGetModel(dobj, modelIndexIter);
         modelBoneOffset += XModelNumBones(model);
@@ -1413,7 +1413,7 @@ static char __cdecl FX_GenerateMarkVertsForList_EntXModel(
     FxMarksSystem *marksSystem,
     uint16_t head,
     const FxCamera *camera,
-    uint32_t *indexCount,
+    uint *indexCount,
     uint16_t lightHandleOverride,
     uint8_t reflectionProbeIndexOverride,
     const GfxScaledPlacement *placement)
@@ -1444,7 +1444,7 @@ static char __cdecl FX_GenerateMarkVertsForList_EntDObj(
     FxMarksSystem *marksSystem,
     uint16_t head,
     const FxCamera *camera,
-    uint32_t *indexCount,
+    uint *indexCount,
     uint16_t lightHandleOverride,
     uint8_t reflectionProbeIndexOverride,
     const DObj_s *dobj,
@@ -1481,7 +1481,7 @@ static char __cdecl FX_GenerateMarkVertsForList_EntBrush(
     FxMarksSystem *marksSystem,
     uint16_t head,
     const FxCamera *camera,
-    uint32_t *indexCount,
+    uint *indexCount,
     const GfxPlacement *placement,
     uint8_t reflectionProbeIndex)
 {
@@ -1506,7 +1506,7 @@ static char __cdecl FX_GenerateMarkVertsForList_EntBrush(
     return 1;
 }
 
-void __cdecl FX_BeginGeneratingMarkVertsForEntModels(int32_t localClientNum, uint32_t *indexCount)
+void __cdecl FX_BeginGeneratingMarkVertsForEntModels(int localClientNum, uint *indexCount)
 {
     if (!fx_marks->current.enabled || !fx_marks_ents->current.enabled)
         MyAssertHandler(
@@ -1531,9 +1531,9 @@ void __cdecl FX_BeginGeneratingMarkVertsForEntModels(int32_t localClientNum, uin
 }
 
 void __cdecl FX_GenerateMarkVertsForEntXModel(
-    int32_t localClientNum,
-    int32_t entId,
-    uint32_t *indexCount,
+    int localClientNum,
+    int entId,
+    uint *indexCount,
     uint16_t lightHandle,
     uint8_t reflectionProbeIndex,
     const GfxScaledPlacement *placement)
@@ -1559,16 +1559,16 @@ void __cdecl FX_GenerateMarkVertsForEntXModel(
 }
 
 void __cdecl FX_GenerateMarkVertsForEntDObj(
-    int32_t localClientNum,
-    int32_t entId,
-    uint32_t *indexCount,
+    int localClientNum,
+    int entId,
+    uint *indexCount,
     uint16_t lightHandle,
     uint8_t reflectionProbeIndex,
     const DObj_s *dobj,
     const cpose_t *pose)
 {
     FxSystem *camera; // [esp+94h] [ebp-20h]
-    uint32_t hidePartBits[4]; // [esp+98h] [ebp-1Ch] BYREF
+    uint hidePartBits[4]; // [esp+98h] [ebp-1Ch] BYREF
     FxSystem *system; // [esp+A8h] [ebp-Ch]
     const DObjAnimMat *boneMtxList; // [esp+ACh] [ebp-8h] BYREF
     uint16_t entMarkListHead; // [esp+B0h] [ebp-4h]
@@ -1597,9 +1597,9 @@ void __cdecl FX_GenerateMarkVertsForEntDObj(
 }
 
 void __cdecl FX_GenerateMarkVertsForEntBrush(
-    int32_t localClientNum,
-    int32_t entId,
-    uint32_t *indexCount,
+    int localClientNum,
+    int entId,
+    uint *indexCount,
     uint8_t reflectionProbeIndex,
     const GfxPlacement *placement)
 {
@@ -1622,7 +1622,7 @@ void __cdecl FX_GenerateMarkVertsForEntBrush(
     }
 }
 
-void __cdecl FX_EndGeneratingMarkVertsForEntModels(int32_t localClientNum)
+void __cdecl FX_EndGeneratingMarkVertsForEntModels(int localClientNum)
 {
     PROF_SCOPED("FX_GenMarkVertsEnt");
     FxMarksSystem *marksSystem = FX_GetMarksSystem(localClientNum);
@@ -1640,15 +1640,15 @@ static void __cdecl FX_ExpandMarkVerts_NoTransform_GfxPackedVertex_(
     PackedUnitVec v6; // [esp+58h] [ebp-CCh]
     PackedUnitVec v7; // [esp+7Ch] [ebp-A8h]
     GfxPackedVertex *castOutVert; // [esp+E0h] [ebp-44h]
-    uint32_t groupHandle; // [esp+E4h] [ebp-40h]
+    uint groupHandle; // [esp+E4h] [ebp-40h]
     float delta[3]; // [esp+E8h] [ebp-3Ch] BYREF
     float texCoordScale; // [esp+F4h] [ebp-30h]
     float binormal[3]; // [esp+F8h] [ebp-2Ch] BYREF
     const FxMarkPoint *markPoint; // [esp+104h] [ebp-20h]
     GfxWorldVertex *verts; // [esp+108h] [ebp-1Ch]
     float texCoord[2]; // [esp+10Ch] [ebp-18h] BYREF
-    int32_t pointCount; // [esp+114h] [ebp-10h]
-    int32_t loopCount; // [esp+118h] [ebp-Ch]
+    int pointCount; // [esp+114h] [ebp-10h]
+    int loopCount; // [esp+118h] [ebp-Ch]
     const FxPointGroup *group; // [esp+11Ch] [ebp-8h]
     GfxWorldVertex *outVert; // [esp+120h] [ebp-4h]
 
@@ -1711,14 +1711,14 @@ static void __cdecl FX_ExpandMarkVerts_NoTransform_GfxWorldVertex_(
     PackedUnitVec v6; // [esp+58h] [ebp-9Ch]
     PackedUnitVec v7; // [esp+7Ch] [ebp-78h]
     GfxWorldVertex *castOutVert; // [esp+B0h] [ebp-44h]
-    uint32_t groupHandle; // [esp+B4h] [ebp-40h]
+    uint groupHandle; // [esp+B4h] [ebp-40h]
     float delta[3]; // [esp+B8h] [ebp-3Ch] BYREF
     float texCoordScale; // [esp+C4h] [ebp-30h]
     float binormal[3]; // [esp+C8h] [ebp-2Ch] BYREF
     const FxMarkPoint *markPoint; // [esp+D4h] [ebp-20h]
     GfxWorldVertex *verts; // [esp+D8h] [ebp-1Ch]
-    int32_t pointCount; // [esp+E4h] [ebp-10h]
-    int32_t loopCount; // [esp+E8h] [ebp-Ch]
+    int pointCount; // [esp+E4h] [ebp-10h]
+    int loopCount; // [esp+E8h] [ebp-Ch]
     const FxPointGroup *group; // [esp+ECh] [ebp-8h]
     GfxWorldVertex *outVert; // [esp+F0h] [ebp-4h]
 
@@ -1798,7 +1798,7 @@ static char __cdecl FX_GenerateMarkVertsForList_WorldXModel(
     FxMarksSystem *marksSystem,
     uint16_t head,
     const FxCamera *camera,
-    uint32_t *indexCount)
+    uint *indexCount)
 {
     FxMark *mark; // [esp+B0h] [ebp-20h]
     FxActiveMarkSurf drawSurf; // [esp+B4h] [ebp-1Ch] BYREF
@@ -1818,7 +1818,7 @@ static bool FX_GenerateMarkVertsForList_WorldBrush(
     FxMarksSystem *marksSystem,
     uint16_t head,
     const FxCamera *camera,
-    uint32_t *indexCount)
+    uint *indexCount)
 {
     FxMark *mark; // [esp+B4h] [ebp-20h]
     FxActiveMarkSurf drawSurf; // [esp+B8h] [ebp-1Ch] BYREF
@@ -1841,13 +1841,13 @@ static bool FX_GenerateMarkVertsForList_WorldBrush(
 }
 
 void __cdecl FX_GenerateMarkVertsForStaticModels(
-    int32_t localClientNum,
-    int32_t smodelCount,
+    int localClientNum,
+    int smodelCount,
     const uint8_t *smodelVisLods)
 {
     FxMark *mark; // [esp+64h] [ebp-14h]
     FxSystem *camera; // [esp+68h] [ebp-10h]
-    uint32_t indexCount; // [esp+6Ch] [ebp-Ch] BYREF
+    uint indexCount; // [esp+6Ch] [ebp-Ch] BYREF
     FxSystem *system; // [esp+70h] [ebp-8h]
     FxMark *markEnd; // [esp+74h] [ebp-4h]
 
@@ -1879,7 +1879,7 @@ void __cdecl FX_GenerateMarkVertsForStaticModels(
     R_EndMarkMeshVerts();
 }
 
-void __cdecl FX_GenerateMarkVertsForWorld(int32_t localClientNum)
+void __cdecl FX_GenerateMarkVertsForWorld(int localClientNum)
 {
     if (fx_marks->current.enabled)
     {

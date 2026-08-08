@@ -59,7 +59,7 @@ void __cdecl SV_SetConfigstring(int index, const char *val)
     int i; // [esp+45Ch] [ebp-8h]
     char cmd; // [esp+463h] [ebp-1h]
 
-    if ((uint32_t)index >= 0x98A)
+    if ((uint)index >= 0x98A)
         Com_Error(ERR_DROP, "SV_SetConfigstring: bad index %i", index);
 
     if (sv.configstrings[index])
@@ -122,7 +122,7 @@ void __cdecl SV_SetConfigstring(int index, const char *val)
     }
 }
 
-void __cdecl SV_GetConfigstring(uint32_t index, char *buffer, int bufferSize)
+void __cdecl SV_GetConfigstring(uint index, char *buffer, int bufferSize)
 {
     if (bufferSize < 1)
         Com_Error(ERR_DROP, "SV_GetConfigstring: bufferSize == %i", bufferSize);
@@ -133,7 +133,7 @@ void __cdecl SV_GetConfigstring(uint32_t index, char *buffer, int bufferSize)
     I_strncpyz(buffer, SL_ConvertToString(sv.configstrings[index]), bufferSize);
 }
 
-uint32_t __cdecl SV_GetConfigstringConst(uint32_t index)
+uint __cdecl SV_GetConfigstringConst(uint index)
 {
     iassert((unsigned)index < MAX_CONFIGSTRINGS);
     iassert(sv.configstrings[index]);
@@ -143,8 +143,8 @@ uint32_t __cdecl SV_GetConfigstringConst(uint32_t index)
 
 void __cdecl SV_SetConfigValueForKey(int start, int max, char *key, char *value)
 {
-    uint32_t string; // [esp+0h] [ebp-14h]
-    uint32_t name; // [esp+4h] [ebp-10h]
+    uint string; // [esp+0h] [ebp-14h]
+    uint name; // [esp+4h] [ebp-10h]
     signed int i; // [esp+10h] [ebp-4h]
     int ia; // [esp+10h] [ebp-4h]
 
@@ -283,7 +283,7 @@ void __cdecl SV_ClearServer()
     }
     if (sv.emptyConfigString)
         SL_RemoveRefToString(sv.emptyConfigString);
-    Com_Memset((uint32_t *)&sv, 0, 392288);
+    Com_Memset((uint *)&sv, 0, 392288);
     com_inServerFrame = 0;
 }
 
@@ -355,7 +355,7 @@ void __cdecl SV_SetExpectedHunkUsage(char *mapname)
     {
         buf = (char*)Z_Malloc(len + 1, "SV_SetExpectedHunkUsage", 10);
         memset(buf, 0, len + 1);
-        FS_Read((unsigned char*)buf, len, handle);
+        FS_Read((byte*)buf, len, handle);
         FS_FCloseFile(handle);
         buftrav = buf;
         while (1)

@@ -175,7 +175,7 @@ void __cdecl RB_SetIdentity()
     }
 }
 
-void __cdecl R_SetVertex2d(GfxVertex *vert, float x, float y, float s, float t, uint32_t color)
+void __cdecl R_SetVertex2d(GfxVertex *vert, float x, float y, float s, float t, uint color)
 {
     vert->xyzw[0] = x;
     vert->xyzw[1] = y;
@@ -211,7 +211,7 @@ void __cdecl R_SetVertex4dWithNormal(
     v11.array[2] = (int)(nz * 127.0 + 127.5);
     v11.array[3] = 63;
     vert->normal = v11;
-    vert->color.packed = *(uint32_t *)color;
+    vert->color.packed = *(uint *)color;
     vert->texCoord[0] = s;
     vert->texCoord[1] = t;
 }
@@ -226,7 +226,7 @@ void __cdecl RB_DrawStretchPic(
     float t0,
     float s1,
     float t1,
-    uint32_t color,
+    uint color,
     GfxPrimStatsTarget statsTarget)
 {
     uint16_t vertCount; // [esp+24h] [ebp-4h]
@@ -283,7 +283,7 @@ void __cdecl RB_DrawStretchPicFlipST(
     float t0,
     float s1,
     float t1,
-    uint32_t color,
+    uint color,
     GfxPrimStatsTarget statsTarget)
 {
     float v11; // [esp+1Ch] [ebp-Ch]
@@ -317,7 +317,7 @@ void __cdecl RB_DrawFullScreenColoredQuad(
     float t0,
     float s1,
     float t1,
-    uint32_t color)
+    uint color)
 {
     float screenWidth; // [esp+28h] [ebp-8h]
     float screenHeight; // [esp+2Ch] [ebp-4h]
@@ -331,7 +331,7 @@ void __cdecl RB_DrawFullScreenColoredQuad(
     RB_EndTessSurface();
 }
 
-void __cdecl RB_FullScreenColoredFilter(const Material *material, uint32_t color)
+void __cdecl RB_FullScreenColoredFilter(const Material *material, uint color)
 {
     RB_DrawFullScreenColoredQuad(material, 0.0, 0.0, 1.0, 1.0, color);
 }
@@ -703,8 +703,8 @@ void __cdecl R_DrawSurfs(GfxCmdBufContext context, GfxCmdBufState *prepassState,
     GfxViewport viewport; // [esp+30h] [ebp-30h] BYREF
     GfxCmdBufContext prepassContext; // [esp+40h] [ebp-20h]
     GfxDrawSurfListArgs listArgs; // [esp+48h] [ebp-18h] BYREF
-    uint32_t processedDrawSurfCount; // [esp+58h] [ebp-8h]
-    uint32_t drawSurfCount; // [esp+5Ch] [ebp-4h]
+    uint processedDrawSurfCount; // [esp+58h] [ebp-8h]
+    uint drawSurfCount; // [esp+5Ch] [ebp-4h]
 
     PROF_SCOPED("R_DrawSurfs");
 
@@ -738,7 +738,7 @@ void __cdecl R_DrawSurfs(GfxCmdBufContext context, GfxCmdBufState *prepassState,
 }
 
 
-uint32_t(__cdecl *const rb_tessTable[13])(const GfxDrawSurfListArgs *, GfxCmdBufContext) =
+uint(__cdecl *const rb_tessTable[13])(const GfxDrawSurfListArgs *, GfxCmdBufContext) =
 {
   &R_TessTrianglesList,
   &R_TessTrianglesPreTessList,
@@ -755,17 +755,17 @@ uint32_t(__cdecl *const rb_tessTable[13])(const GfxDrawSurfListArgs *, GfxCmdBuf
   &R_TessParticleCloudList
 }; // idb
 
-uint32_t __cdecl R_RenderDrawSurfListMaterial(const GfxDrawSurfListArgs *listArgs, GfxCmdBufContext prepassContext)
+uint __cdecl R_RenderDrawSurfListMaterial(const GfxDrawSurfListArgs *listArgs, GfxCmdBufContext prepassContext)
 {
     //GfxCmdBufSourceState *passPrepassContext; // [esp+4h] [ebp-28h]
     //GfxCmdBufState *passPrepassContext_4; // [esp+8h] [ebp-24h]
     GfxCmdBufContext passPrepassContext;
     GfxDrawSurf drawSurf; // [esp+Ch] [ebp-20h]
-    uint32_t subListCount; // [esp+18h] [ebp-14h]
+    uint subListCount; // [esp+18h] [ebp-14h]
     const GfxDrawSurf *drawSurfList; // [esp+1Ch] [ebp-10h]
-    uint32_t passIndex; // [esp+20h] [ebp-Ch]
+    uint passIndex; // [esp+20h] [ebp-Ch]
     bool isPixelCostEnabled; // [esp+27h] [ebp-5h]
-    uint32_t drawSurfCount; // [esp+28h] [ebp-4h]
+    uint drawSurfCount; // [esp+28h] [ebp-4h]
 
     drawSurfCount = listArgs->info->drawSurfCount - listArgs->firstDrawSurfIndex;
     drawSurfList = &listArgs->info->drawSurfs[listArgs->firstDrawSurfIndex];
@@ -1092,7 +1092,7 @@ void __cdecl R_SetVertex4d(
     vert->xyzw[2] = z;
     vert->xyzw[3] = w;
     vert->normal.packed = 1073643391;
-    vert->color.packed = *(uint32_t *)color;
+    vert->color.packed = *(uint *)color;
     vert->texCoord[0] = s;
     vert->texCoord[1] = t;
 }
@@ -1214,7 +1214,7 @@ void __cdecl R_SetVertex3d(GfxVertex *vert, float x, float y, float z, float s, 
     vert->xyzw[2] = z;
     vert->xyzw[3] = 1.0;
     vert->normal.packed = 0x3FFE7F7F;
-    vert->color.packed = *(uint32_t *)color;
+    vert->color.packed = *(uint *)color;
     vert->texCoord[0] = s;
     vert->texCoord[1] = t;
 }
@@ -1327,7 +1327,7 @@ void __cdecl RB_DrawLines3D(int count, int width, const GfxPointVertex *verts, b
                 dev->GetRenderState(D3DRS_COLORWRITEENABLE, &cwe);
             }
             const float *mc = gfxCmdBufSourceState.input.consts[CONST_SRC_CODE_MATERIAL_COLOR];
-            const unsigned char *c0 = (const unsigned char *)verts[0].color;
+            const byte *c0 = (const byte *)verts[0].color;
             Radiant_FL_Log("LINEPROBE: mtl='%s' techSet='%s' tech='%s' entry=%d loadBits=%08x/%08x "
                            "DEV[blendEn=%lu src=%lu dst=%lu zwrite=%lu ztest=%lu zfunc=%lu cwe=%lu] "
                            "matColor=%g %g %g %g vert0=%u,%u,%u,%u count=%d width=%d",
@@ -1413,7 +1413,7 @@ void __cdecl RB_DrawTrianglesCmd(GfxRenderCommandExecState *execState)
         cmd->material,
         cmd->techType,
         cmd->indexCount,
-        (const unsigned short *)((char *)cmd + indexOffset),
+        (const ushort *)((char *)cmd + indexOffset),
         cmd->vertexCount,
         (const float (*)[4])((char *)cmd + xyzwOffset),
         (const float(*)[3])((char *)cmd + normalOffset),
@@ -1543,7 +1543,7 @@ void __cdecl RB_LookupColor(uint8_t c, GfxColor *color)
 {
     GfxColor *p_color_axis; // [esp+8h] [ebp-Ch]
     GfxColor *p_color_allies; // [esp+Ch] [ebp-8h]
-    uint32_t index; // [esp+10h] [ebp-4h]
+    uint index; // [esp+10h] [ebp-4h]
 
     index = ColorIndex(c);
     if (index >= 8)
@@ -1571,7 +1571,7 @@ void __cdecl RB_LookupColor(uint8_t c, GfxColor *color)
     }
     else
     {
-        color->packed = (uint32_t)color_table[index];
+        color->packed = (uint)color_table[index];
     }
 }
 
@@ -1650,10 +1650,10 @@ void __cdecl DrawText2D(
     float decayOffset; // [esp+17Ch] [ebp-74h]
     float xAdj; // [esp+180h] [ebp-70h]
     bool skipDrawing; // [esp+187h] [ebp-69h] BYREF
-    uint32_t letter; // [esp+188h] [ebp-68h] BYREF
+    uint letter; // [esp+188h] [ebp-68h] BYREF
     int extraFxChar; // [esp+18Ch] [ebp-64h]
     float deltaX; // [esp+190h] [ebp-60h]
-    uint32_t origLetter; // [esp+194h] [ebp-5Ch]
+    uint origLetter; // [esp+194h] [ebp-5Ch]
     uint8_t fadeAlpha; // [esp+19Bh] [ebp-55h] BYREF
     float yRot; // [esp+19Ch] [ebp-54h] BYREF
     int passRandSeed; // [esp+1A0h] [ebp-50h] BYREF
@@ -2062,7 +2062,7 @@ void __cdecl RB_DrawStretchPicRotate(
     float t1,
     float sinAngle,
     float cosAngle,
-    uint32_t color,
+    uint color,
     GfxPrimStatsTarget statsTarget)
 {
     float v13; // [esp+14h] [ebp-30h]
@@ -2117,7 +2117,7 @@ double __cdecl RB_DrawHudIcon(
     Font_s *font,
     float xScale,
     float yScale,
-    uint32_t color)
+    uint color)
 {
     const Material *v9; // eax
     float s1; // [esp+40h] [ebp-10h]
@@ -2160,13 +2160,13 @@ void __cdecl RB_DrawCursor(
     Font_s *font,
     float xScale,
     float yScale,
-    uint32_t color)
+    uint color)
 {
     float v10; // [esp+3Ch] [ebp-24h]
     float w; // [esp+40h] [ebp-20h]
     float h; // [esp+44h] [ebp-1Ch]
     const Glyph *cursorGlyph; // [esp+58h] [ebp-8h]
-    uint32_t newColor; // [esp+5Ch] [ebp-4h]
+    uint newColor; // [esp+5Ch] [ebp-4h]
 
     iassert( font );
     if ((((
@@ -2330,7 +2330,7 @@ char __cdecl SetupPulseFXVars(
 }
 
 void __cdecl GetDecayingLetterInfo(
-    uint32_t letter,
+    uint letter,
     Font_s *font,
     int *randSeed,
     int decayTimeElapsed,
@@ -2339,7 +2339,7 @@ void __cdecl GetDecayingLetterInfo(
     uint8_t alpha,
     bool *resultSkipDrawing,
     uint8_t *resultAlpha,
-    uint32_t *resultLetter,
+    uint *resultLetter,
     bool *resultDrawExtraFxChar)
 {
     int scrambleSeed; // [esp+28h] [ebp-20h] BYREF
@@ -2396,7 +2396,7 @@ void __cdecl DrawTextFxExtraCharacter(
     float h,
     float sinAngle,
     float cosAngle,
-    uint32_t color)
+    uint color)
 {
     float s1; // [esp+38h] [ebp-8h]
     float s0; // [esp+3Ch] [ebp-4h]
@@ -2417,7 +2417,7 @@ void __cdecl RB_DrawTextInSpace(
     const float *org,
     const float *xPixelStep,
     const float *yPixelStep,
-    uint32_t color)
+    uint color)
 {
     float scale; // [esp+0h] [ebp-60h]
     float scalea; // [esp+0h] [ebp-60h]
@@ -2429,9 +2429,9 @@ void __cdecl RB_DrawTextInSpace(
     const Glyph *glyph; // [esp+38h] [ebp-28h]
     float xyz[3]; // [esp+3Ch] [ebp-24h] BYREF
     const Material *material; // [esp+48h] [ebp-18h]
-    uint32_t letter; // [esp+4Ch] [ebp-14h]
+    uint letter; // [esp+4Ch] [ebp-14h]
     float dy[3]; // [esp+50h] [ebp-10h] BYREF
-    uint32_t newColor; // [esp+5Ch] [ebp-4h]
+    uint newColor; // [esp+5Ch] [ebp-4h]
 
     iassert( text );
     iassert( font );
@@ -2470,7 +2470,7 @@ void __cdecl RB_DrawCharInSpace(
     const float *dx,
     const float *dy,
     const Glyph *glyph,
-    uint32_t color)
+    uint color)
 {
     float v6; // [esp+18h] [ebp-30h]
     float v7; // [esp+1Ch] [ebp-2Ch]
@@ -2922,11 +2922,11 @@ void RB_RenderThreadIdle()
 
 // positive sp value has been detected, the output may be wrong!
 const void *data;
-void __cdecl  RB_RenderThread(uint32_t threadContext)
+void __cdecl  RB_RenderThread(uint threadContext)
 {
     void *Value; // eax
     signed int wait; // [esp+34h] [ebp-8h]
-    uint32_t start; // [esp+38h] [ebp-4h]
+    uint start; // [esp+38h] [ebp-4h]
 
     iassert(threadContext == THREAD_CONTEXT_BACKEND);
 
@@ -3033,7 +3033,7 @@ int __cdecl RB_BackendTimeout()
 
 void __cdecl RB_RenderCommandFrame(const GfxBackEndData *data)
 {
-    uint32_t drawType; // [esp+28h] [ebp-8h]
+    uint drawType; // [esp+28h] [ebp-8h]
     bool allowRendering; // [esp+2Fh] [ebp-1h]
 
     //Profile_EndInternal(0);
@@ -3090,7 +3090,7 @@ void __cdecl RB_SetBspImages()
 void __cdecl RB_BindDefaultImages()
 {
     GfxCmdBufContext context; // [esp+0h] [ebp-10h]
-    uint32_t samplerIndex; // [esp+8h] [ebp-8h]
+    uint samplerIndex; // [esp+8h] [ebp-8h]
 
     context.source = &gfxCmdBufSourceState;
     context.state = &gfxCmdBufState;

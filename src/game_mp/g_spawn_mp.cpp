@@ -13,14 +13,14 @@
 #include <server/sv_game.h>
 #include <server/sv_world.h>
 
-int32_t __cdecl G_LevelSpawnString(const char *key, const char *defaultString, const char **out)
+int __cdecl G_LevelSpawnString(const char *key, const char *defaultString, const char **out)
 {
     return G_SpawnString(&level.spawnVar, key, defaultString, out);
 }
 
-int32_t __cdecl G_SpawnFloat(const char *key, const char *defaultString, float *out)
+int __cdecl G_SpawnFloat(const char *key, const char *defaultString, float *out)
 {
-    int32_t present; // [esp+0h] [ebp-8h]
+    int present; // [esp+0h] [ebp-8h]
     const char *s; // [esp+4h] [ebp-4h] BYREF
 
     present = G_LevelSpawnString(key, defaultString, &s);
@@ -28,9 +28,9 @@ int32_t __cdecl G_SpawnFloat(const char *key, const char *defaultString, float *
     return present;
 }
 
-int32_t __cdecl G_SpawnInt(const char *key, const char *defaultString, int32_t *out)
+int __cdecl G_SpawnInt(const char *key, const char *defaultString, int *out)
 {
-    int32_t present; // [esp+0h] [ebp-8h]
+    int present; // [esp+0h] [ebp-8h]
     const char *s; // [esp+4h] [ebp-4h] BYREF
 
     present = G_LevelSpawnString(key, defaultString, &s);
@@ -38,7 +38,7 @@ int32_t __cdecl G_SpawnInt(const char *key, const char *defaultString, int32_t *
     return present;
 }
 
-void __cdecl Scr_ReadOnlyField(gentity_s *ent, int32_t i)
+void __cdecl Scr_ReadOnlyField(gentity_s *ent, int i)
 {
     Scr_Error("Tried to set a read only entity field");
 }
@@ -70,7 +70,7 @@ const SpawnFuncEntry s_bspOnlySpawns[14] =
   { "script_vehicle_mp", &G_VehSpawner }
 }; // idb
 
-int32_t __cdecl G_CallSpawnEntity(gentity_s *ent)
+int __cdecl G_CallSpawnEntity(gentity_s *ent)
 {
     const gitem_s *item; // [esp+0h] [ebp-Ch]
     void(__cdecl * spawnFunc)(gentity_s *); // [esp+4h] [ebp-8h]
@@ -112,7 +112,7 @@ int32_t __cdecl G_CallSpawnEntity(gentity_s *ent)
 
 const gitem_s *__cdecl G_GetItemForClassname(const char *classname, uint8_t model)
 {
-    int32_t weapIndex; // [esp+0h] [ebp-8h]
+    int weapIndex; // [esp+0h] [ebp-8h]
 
     if (strncmp(classname, "weapon_", 7u))
         return 0;
@@ -126,9 +126,9 @@ const gitem_s *__cdecl G_GetItemForClassname(const char *classname, uint8_t mode
 void(__cdecl *__cdecl G_FindSpawnFunc(
     const char *classname,
     const SpawnFuncEntry *spawnFuncArray,
-    int32_t spawnFuncCount))(gentity_s *)
+    int spawnFuncCount))(gentity_s *)
 {
-    int32_t spawnFuncIter; // [esp+14h] [ebp-4h]
+    int spawnFuncIter; // [esp+14h] [ebp-4h]
 
     for (spawnFuncIter = 0; spawnFuncIter < spawnFuncCount; ++spawnFuncIter)
     {
@@ -141,7 +141,7 @@ void(__cdecl *__cdecl G_FindSpawnFunc(
 struct ent_field_t // sizeof=0x10
 {                                       // ...
     const char *name;
-    int32_t ofs;
+    int ofs;
     fieldtype_t type;
     void(__cdecl *callback)(gentity_s *, int);
 };
@@ -181,7 +181,7 @@ void __cdecl GScr_AddFieldsForRadiant()
     Scr_AddFields("radiant", "txt");
 }
 
-void __cdecl Scr_SetGenericField(uint8_t *b, fieldtype_t type, int32_t ofs)
+void __cdecl Scr_SetGenericField(uint8_t *b, fieldtype_t type, int ofs)
 {
     VariableUnion v3; // eax
     float vec[3]; // [esp+4h] [ebp-Ch] BYREF
@@ -206,7 +206,7 @@ void __cdecl Scr_SetGenericField(uint8_t *b, fieldtype_t type, int32_t ofs)
         *(float *)&b[ofs + 8] = vec[2];
         break;
     case F_ENTITY:
-        *(uint32_t *)&b[ofs] = (uint32_t)Scr_GetEntityAllowNull(0);
+        *(uint *)&b[ofs] = (uint)Scr_GetEntityAllowNull(0);
         break;
     case F_ENTHANDLE:
         pEnt = (EntHandle *)&b[ofs];
@@ -221,7 +221,7 @@ void __cdecl Scr_SetGenericField(uint8_t *b, fieldtype_t type, int32_t ofs)
     }
 }
 
-int32_t __cdecl Scr_SetObjectField(uint32_t classnum, uint32_t entnum, uint32_t offset)
+int __cdecl Scr_SetObjectField(uint classnum, uint entnum, uint offset)
 {
     const char *v4; // eax
 
@@ -239,7 +239,7 @@ int32_t __cdecl Scr_SetObjectField(uint32_t classnum, uint32_t entnum, uint32_t 
     return 1;
 }
 
-int32_t __cdecl Scr_SetEntityField(uint32_t entnum, uint32_t offset)
+int __cdecl Scr_SetEntityField(uint entnum, uint offset)
 {
     const ent_field_t *f; // [esp+0h] [ebp-8h]
     gentity_s *ent; // [esp+4h] [ebp-4h]
@@ -274,7 +274,7 @@ int32_t __cdecl Scr_SetEntityField(uint32_t entnum, uint32_t offset)
     }
 }
 
-void __cdecl Scr_GetEntityField(uint32_t entnum, uint32_t offset)
+void __cdecl Scr_GetEntityField(uint entnum, uint offset)
 {
     gentity_s *ent; // [esp+4h] [ebp-4h]
 
@@ -296,9 +296,9 @@ void __cdecl Scr_GetEntityField(uint32_t entnum, uint32_t offset)
     }
 }
 
-void __cdecl Scr_GetGenericField(uint8_t *b, fieldtype_t type, int32_t ofs)
+void __cdecl Scr_GetGenericField(uint8_t *b, fieldtype_t type, int ofs)
 {
-    uint32_t value; // eax
+    uint value; // eax
     uint16_t str; // [esp+8h] [ebp-18h]
     float vec[3]; // [esp+10h] [ebp-10h] BYREF
     uint16_t id; // [esp+1Ch] [ebp-4h]
@@ -307,7 +307,7 @@ void __cdecl Scr_GetGenericField(uint8_t *b, fieldtype_t type, int32_t ofs)
     switch (type)
     {
     case F_INT:
-        Scr_AddInt(*(uint32_t *)&b[ofs]);
+        Scr_AddInt(*(uint *)&b[ofs]);
         break;
     case F_FLOAT:
         Scr_AddFloat(*(float *)&b[ofs]);
@@ -324,7 +324,7 @@ void __cdecl Scr_GetGenericField(uint8_t *b, fieldtype_t type, int32_t ofs)
         Scr_AddVector((float *)&b[ofs]);
         break;
     case F_ENTITY:
-        if (*(uint32_t *)&b[ofs])
+        if (*(uint *)&b[ofs])
             Scr_AddEntity(*(gentity_s **)&b[ofs]);
         break;
     case F_ENTHANDLE:
@@ -357,7 +357,7 @@ void __cdecl Scr_GetGenericField(uint8_t *b, fieldtype_t type, int32_t ofs)
 void __cdecl Scr_FreeEntityConstStrings(gentity_s *pEnt)
 {
     const ent_field_t *f; // [esp+4h] [ebp-8h]
-    int32_t i; // [esp+8h] [ebp-4h]
+    int i; // [esp+8h] [ebp-4h]
 
     for (f = fields_1; f->name; ++f)
     {
@@ -406,7 +406,7 @@ void __cdecl Scr_AddEntity(gentity_s *ent)
     Scr_AddEntityNum(ent->s.number, CLASS_NUM_ENTITY);
 }
 
-gentity_s *__cdecl Scr_GetEntityAllowNull(uint32_t index)
+gentity_s *__cdecl Scr_GetEntityAllowNull(uint index)
 {
     scr_entref_t entref; // [esp+4h] [ebp-8h]
 
@@ -420,7 +420,7 @@ gentity_s *__cdecl Scr_GetEntityAllowNull(uint32_t index)
     return &g_entities[entref.entnum];
 }
 
-gentity_s *__cdecl Scr_GetEntity(uint32_t index)
+gentity_s *__cdecl Scr_GetEntity(uint index)
 {
     scr_entref_t entref; // [esp+4h] [ebp-4h]
 
@@ -442,7 +442,7 @@ void __cdecl Scr_FreeHudElem(game_hudelem_s *hud)
 {
     if (!hud)
         MyAssertHandler(".\\game_mp\\g_spawn_mp.cpp", 881, 0, "%s", "hud");
-    if ((uint32_t)(hud - g_hudelems) >= 0x400)
+    if ((uint)(hud - g_hudelems) >= 0x400)
         MyAssertHandler(
             ".\\game_mp\\g_spawn_mp.cpp",
             882,
@@ -461,7 +461,7 @@ void __cdecl Scr_AddHudElem(game_hudelem_s *hud)
 {
     if (!hud)
         MyAssertHandler(".\\game_mp\\g_spawn_mp.cpp", 902, 0, "%s", "hud");
-    if ((uint32_t)(hud - g_hudelems) >= 0x400)
+    if ((uint)(hud - g_hudelems) >= 0x400)
         MyAssertHandler(
             ".\\game_mp\\g_spawn_mp.cpp",
             903,
@@ -474,7 +474,7 @@ void __cdecl Scr_AddHudElem(game_hudelem_s *hud)
     Scr_AddEntityNum(hud - g_hudelems, CLASS_NUM_HUDELEM);
 }
 
-uint16_t __cdecl Scr_ExecEntThread(gentity_s *ent, int32_t handle, uint32_t paramcount)
+uint16_t __cdecl Scr_ExecEntThread(gentity_s *ent, int handle, uint paramcount)
 {
     if (!ent)
         MyAssertHandler(".\\game_mp\\g_spawn_mp.cpp", 937, 0, "%s", "ent");
@@ -491,7 +491,7 @@ uint16_t __cdecl Scr_ExecEntThread(gentity_s *ent, int32_t handle, uint32_t para
     return Scr_ExecEntThreadNum(ent->s.number, CLASS_NUM_ENTITY, handle, paramcount);
 }
 
-void __cdecl Scr_Notify(gentity_s *ent, uint16_t stringValue, uint32_t paramcount)
+void __cdecl Scr_Notify(gentity_s *ent, uint16_t stringValue, uint paramcount)
 {
     iassert(ent);
     iassert(ent->s.number == ent - g_entities);
@@ -504,10 +504,10 @@ void __cdecl Scr_GetEnt()
 {
     gentity_s *result; // [esp+0h] [ebp-24h]
     uint16_t name; // [esp+8h] [ebp-1Ch]
-    int32_t offset; // [esp+Ch] [ebp-18h]
+    int offset; // [esp+Ch] [ebp-18h]
     const char *key; // [esp+10h] [ebp-14h]
     gentity_s *ent; // [esp+18h] [ebp-Ch]
-    int32_t i; // [esp+1Ch] [ebp-8h]
+    int i; // [esp+1Ch] [ebp-8h]
     uint16_t value; // [esp+20h] [ebp-4h]
 
     name = Scr_GetConstString(0);
@@ -554,12 +554,12 @@ void __cdecl Scr_GetEnt()
 void __cdecl Scr_GetEntArray()
 {
     uint16_t name; // [esp+4h] [ebp-1Ch]
-    int32_t offset; // [esp+8h] [ebp-18h]
+    int offset; // [esp+8h] [ebp-18h]
     const char *key; // [esp+Ch] [ebp-14h]
     gentity_s *ent; // [esp+14h] [ebp-Ch]
     gentity_s *enta; // [esp+14h] [ebp-Ch]
-    int32_t i; // [esp+18h] [ebp-8h]
-    int32_t ia; // [esp+18h] [ebp-8h]
+    int i; // [esp+18h] [ebp-8h]
+    int ia; // [esp+18h] [ebp-8h]
     uint16_t value; // [esp+1Ch] [ebp-4h]
 
     if (Scr_GetNumParam())
@@ -726,7 +726,7 @@ void G_CallSpawn()
 
 void __cdecl G_ParseEntityFields(gentity_s *ent)
 {
-    int32_t i; // [esp+0h] [ebp-4h]
+    int i; // [esp+0h] [ebp-4h]
 
     if (!level.spawnVar.spawnVarsValid)
         MyAssertHandler(".\\game_mp\\g_spawn_mp.cpp", 293, 0, "%s", "level.spawnVar.spawnVarsValid");
@@ -741,7 +741,7 @@ void __cdecl G_ParseEntityField(const char *key, char *value, gentity_s *ent)
 {
     const ent_field_t *f; // [esp+Ch] [ebp-14h]
     float vec[3]; // [esp+10h] [ebp-10h] BYREF
-    int32_t modelIndex; // [esp+1Ch] [ebp-4h]
+    int modelIndex; // [esp+1Ch] [ebp-4h]
 
     for (f = fields_1; ; ++f)
     {
@@ -757,7 +757,7 @@ void __cdecl G_ParseEntityField(const char *key, char *value, gentity_s *ent)
     switch (f->type)
     {
     case F_INT:
-        *(int32_t *)((char *)ent + f->ofs) = atoi(value);
+        *(int *)((char *)ent + f->ofs) = atoi(value);
         break;
     case F_FLOAT:
         *(float *)((char *)ent + f->ofs) = atof(value);
@@ -794,24 +794,24 @@ void __cdecl G_ParseEntityField(const char *key, char *value, gentity_s *ent)
     }
 }
 
-void __cdecl GScr_SetDynamicEntityField(gentity_s *ent, uint32_t index)
+void __cdecl GScr_SetDynamicEntityField(gentity_s *ent, uint index)
 {
     Scr_SetDynamicEntityField(ent->s.number, 0, index);
 }
 
 void __cdecl G_SetEntityScriptVariable(const char *key, char *value, gentity_s *ent)
 {
-    uint32_t index; // [esp+0h] [ebp-4h]
+    uint index; // [esp+0h] [ebp-4h]
 
     index = G_SetEntityScriptVariableInternal(key, value);
     if (index)
         GScr_SetDynamicEntityField(ent, index);
 }
 
-uint32_t __cdecl G_SetEntityScriptVariableInternal(const char *key, char *value)
+uint __cdecl G_SetEntityScriptVariableInternal(const char *key, char *value)
 {
-    uint32_t index; // [esp+Ch] [ebp-14h]
-    int32_t type; // [esp+10h] [ebp-10h] BYREF
+    uint index; // [esp+Ch] [ebp-14h]
+    int type; // [esp+10h] [ebp-10h] BYREF
     float vec[3]; // [esp+14h] [ebp-Ch] BYREF
 
     index = Scr_FindField(key, &type);
@@ -863,12 +863,12 @@ void __cdecl G_LoadStructs()
     G_ResetEntityParsePoint();
 }
 
-int32_t G_SpawnStruct()
+int G_SpawnStruct()
 {
-    int32_t result; // eax
-    uint32_t index; // [esp+0h] [ebp-Ch]
-    int32_t i; // [esp+4h] [ebp-8h]
-    uint32_t structId; // [esp+8h] [ebp-4h]
+    int result; // eax
+    uint index; // [esp+0h] [ebp-Ch]
+    int i; // [esp+4h] [ebp-8h]
+    uint structId; // [esp+8h] [ebp-4h]
 
     if (!level.spawnVar.spawnVarsValid)
         MyAssertHandler(".\\game_mp\\g_spawn_mp.cpp", 315, 0, "%s", "level.spawnVar.spawnVarsValid");
@@ -888,7 +888,7 @@ int32_t G_SpawnStruct()
     return result;
 }
 
-void __cdecl Scr_GetObjectField(uint32_t classnum, int entnum, int offset)
+void __cdecl Scr_GetObjectField(uint classnum, int entnum, int offset)
 {
     const char *v3; // eax
 

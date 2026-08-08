@@ -5,7 +5,7 @@
 #error This file is for SinglePlayer only
 #endif
 
-enum CompassType : __int32;
+enum CompassType : int;
 
 struct __declspec(align(4)) CompassActor
 {

@@ -102,7 +102,7 @@ const dvar_t *cl_voice;
 const dvar_t *name;
 
 serverStatus_s cl_serverStatusList[16];
-int32_t serverStatusCount;
+int serverStatusCount;
 
 const char *customClassDvars[6] =
 {
@@ -122,9 +122,9 @@ ping_t cl_pinglist[16];
 
 bool cl_waitingOnServerToLoadMap[STATIC_MAX_LOCAL_CLIENTS];
 
-int32_t cl_maxLocalClients;
-int32_t old_com_frameTime;
-uint32_t frame_msec;
+int cl_maxLocalClients;
+int old_com_frameTime;
+uint frame_msec;
 
 clientConnection_t clientConnections[STATIC_MAX_LOCAL_CLIENTS];
 clientUIActive_t clientUIActives[STATIC_MAX_LOCAL_CLIENTS];
@@ -132,7 +132,7 @@ clientActive_t clients[STATIC_MAX_LOCAL_CLIENTS];
 
 clientStatic_t cls;
 
-int32_t lastUpdateKeyAuthTime;
+int lastUpdateKeyAuthTime;
 
 char cl_cdkey[34] = {"                                "};
 
@@ -151,7 +151,7 @@ void __cdecl TRACK_cl_main()
     track_static_alloc_internal(&cls, sizeof(clientStatic_t)/*3002480*/, "cls", 9);
 }
 
-int32_t autoupdateChecked;
+int autoupdateChecked;
 void __cdecl CL_GetAutoUpdate()
 {
     if (autoupdateChecked)
@@ -161,7 +161,7 @@ void __cdecl CL_GetAutoUpdate()
     }
 }
 
-char __cdecl CL_IsLocalClientActive(int32_t localClientNum)
+char __cdecl CL_IsLocalClientActive(int localClientNum)
 {
     if (localClientNum)
         MyAssertHandler(
@@ -174,7 +174,7 @@ char __cdecl CL_IsLocalClientActive(int32_t localClientNum)
     return 1;
 }
 
-int32_t __cdecl CL_LocalActiveIndexFromClientNum(int32_t localClientNum)
+int __cdecl CL_LocalActiveIndexFromClientNum(int localClientNum)
 {
     if (localClientNum)
         MyAssertHandler(
@@ -187,7 +187,7 @@ int32_t __cdecl CL_LocalActiveIndexFromClientNum(int32_t localClientNum)
     return 0;
 }
 
-int32_t __cdecl CL_ControllerIndexFromClientNum(int32_t clientIndex)
+int __cdecl CL_ControllerIndexFromClientNum(int clientIndex)
 {
     if (clientIndex)
         MyAssertHandler(
@@ -202,7 +202,7 @@ int32_t __cdecl CL_ControllerIndexFromClientNum(int32_t clientIndex)
 
 char __cdecl CL_AllLocalClientsDisconnected()
 {
-    int32_t client; // [esp+0h] [ebp-4h]
+    int client; // [esp+0h] [ebp-4h]
 
     if (!Sys_IsMainThread() && !Sys_IsRenderThread())
         MyAssertHandler(".\\client_mp\\cl_main_mp.cpp", 551, 0, "%s", "Sys_IsMainThread() || Sys_IsRenderThread()");
@@ -220,7 +220,7 @@ char __cdecl CL_AllLocalClientsDisconnected()
 
 char __cdecl CL_AnyLocalClientChallenging()
 {
-    int32_t clientIndex; // [esp+0h] [ebp-4h]
+    int clientIndex; // [esp+0h] [ebp-4h]
 
     for (clientIndex = 0; clientIndex < 1; ++clientIndex)
     {
@@ -235,7 +235,7 @@ const char *__cdecl CL_GetUsernameForLocalClient()
     return name->current.string;
 }
 
-void __cdecl CL_AddReliableCommand(int32_t localClientNum, const char *cmd)
+void __cdecl CL_AddReliableCommand(int localClientNum, const char *cmd)
 {
     clientConnection_t *clc; // [esp+0h] [ebp-8h]
 
@@ -256,7 +256,7 @@ void __cdecl CL_ShutdownDevGui()
 
 void __cdecl CL_ShutdownHunkUsers()
 {
-    int32_t client; // [esp+0h] [ebp-4h]
+    int client; // [esp+0h] [ebp-4h]
 
     Com_SyncThreads();
     if (cls.hunkUsersStarted)
@@ -292,7 +292,7 @@ void __cdecl CL_ShutdownAll(bool destroyWindow)
 
 char __cdecl CL_AnyLocalClientsRunning()
 {
-    int32_t localClientNum; // [esp+0h] [ebp-4h]
+    int localClientNum; // [esp+0h] [ebp-4h]
 
     for (localClientNum = 0; localClientNum < 1; ++localClientNum)
     {
@@ -305,8 +305,8 @@ char __cdecl CL_AnyLocalClientsRunning()
 void __cdecl CL_MapLoading(const char *mapname)
 {
     clientActive_t *LocalClientGlobals; // [esp+Ch] [ebp-10h]
-    int32_t localClientNum; // [esp+10h] [ebp-Ch]
-    int32_t localClientNuma; // [esp+10h] [ebp-Ch]
+    int localClientNum; // [esp+10h] [ebp-Ch]
+    int localClientNuma; // [esp+10h] [ebp-Ch]
     int localClientNumb; // [esp+10h] [ebp-Ch]
     clientConnection_t *clc; // [esp+14h] [ebp-8h]
     clientConnection_t *clca; // [esp+14h] [ebp-8h]
@@ -371,7 +371,7 @@ void __cdecl CL_MapLoading(const char *mapname)
     }
 }
 
-void __cdecl CL_ResetSkeletonCache(int32_t localClientNum)
+void __cdecl CL_ResetSkeletonCache(int localClientNum)
 {
     clientActive_t *v1; // [esp+0h] [ebp-4h]
 
@@ -390,11 +390,11 @@ void __cdecl CL_ResetSkeletonCache(int32_t localClientNum)
     v1 = &clients[localClientNum];
     if (!++v1->skelTimeStamp)
         ++v1->skelTimeStamp;
-    v1->skelMemoryStart = (char *)((uint32_t)&v1->skelMemory[15] & 0xFFFFFFF0);
+    v1->skelMemoryStart = (char *)((uint)&v1->skelMemory[15] & 0xFFFFFFF0);
     v1->skelMemPos = 0;
 }
 
-void __cdecl CL_ClearState(int32_t localClientNum)
+void __cdecl CL_ClearState(int localClientNum)
 {
     clientActive_t *dst; // [esp+0h] [ebp-4h]
 
@@ -420,9 +420,9 @@ void __cdecl CL_ClearStaticDownload()
     DL_CancelDownload();
 }
 
-void __cdecl CL_Disconnect(int32_t localClientNum)
+void __cdecl CL_Disconnect(int localClientNum)
 {
-    int32_t v1; // eax
+    int v1; // eax
     connstate_t connstate; // [esp+4h] [ebp-Ch]
     clientConnection_t *clc; // [esp+8h] [ebp-8h]
 
@@ -511,7 +511,7 @@ void __cdecl CL_Disconnect(int32_t localClientNum)
     }
 }
 
-void __cdecl CL_ForwardCommandToServer(int32_t localClientNum, const char *string)
+void __cdecl CL_ForwardCommandToServer(int localClientNum, const char *string)
 {
     const char *cmd; // [esp+8h] [ebp-4h]
 
@@ -545,12 +545,12 @@ void __cdecl CL_RequestAuthorization(int localClientNum)
 {
     //__int16 v1; // ax
     //const char *v2; // eax
-    //int32_t j; // [esp+10h] [ebp-78h]
-    //int32_t l; // [esp+14h] [ebp-74h]
+    //int j; // [esp+10h] [ebp-78h]
+    //int l; // [esp+14h] [ebp-74h]
     //char md5Str[36]{ 0 }; // [esp+18h] [ebp-70h] BYREF
     //const dvar_s *v6; // [esp+3Ch] [ebp-4Ch]
     //char nums[64]; // [esp+40h] [ebp-48h] BYREF
-    //int32_t i; // [esp+84h] [ebp-4h]
+    //int i; // [esp+84h] [ebp-4h]
     //
     //lastUpdateKeyAuthTime = cls.realtime;
     // KISAKKEY
@@ -633,8 +633,8 @@ void __cdecl CL_Setenv_f()
     const char *v4; // eax
     char *env; // [esp+0h] [ebp-414h]
     char buffer[1028]; // [esp+4h] [ebp-410h] BYREF
-    int32_t i; // [esp+40Ch] [ebp-8h]
-    int32_t argc; // [esp+410h] [ebp-4h]
+    int i; // [esp+40Ch] [ebp-8h]
+    int argc; // [esp+410h] [ebp-4h]
 
     argc = Cmd_Argc();
     if (argc <= 2)
@@ -670,7 +670,7 @@ void __cdecl CL_Setenv_f()
     }
 }
 
-void __cdecl CL_DisconnectLocalClient(int32_t localClientNum)
+void __cdecl CL_DisconnectLocalClient(int localClientNum)
 {
     bool v1; // [esp+0h] [ebp-Ch]
 
@@ -683,7 +683,7 @@ void __cdecl CL_DisconnectLocalClient(int32_t localClientNum)
             "%s\n\t(localClientNum) = %i",
             "(localClientNum == 0)",
             localClientNum);
-    v1 = clientUIActives[0].connectionState > (uint32_t)CA_LOGO;
+    v1 = clientUIActives[0].connectionState > (uint)CA_LOGO;
     CL_Disconnect(localClientNum);
     if (v1)
     {
@@ -707,7 +707,7 @@ void __cdecl CL_Reconnect_f()
     }
 }
 
-void __cdecl CL_ResetPureClientAtServer(int32_t localClientNum)
+void __cdecl CL_ResetPureClientAtServer(int localClientNum)
 {
     const char *v1; // eax
 
@@ -715,7 +715,7 @@ void __cdecl CL_ResetPureClientAtServer(int32_t localClientNum)
     CL_AddReliableCommand(localClientNum, v1);
 }
 
-void __cdecl CL_SendPureChecksums(int32_t localClientNum)
+void __cdecl CL_SendPureChecksums(int localClientNum)
 {
     char *pChecksums; // [esp+0h] [ebp-40Ch]
     char cMsg[1028]; // [esp+4h] [ebp-408h] BYREF
@@ -740,12 +740,12 @@ void __cdecl CL_Vid_Restart_f()
     clientActive_t *LocalClientGlobals; // [esp+98h] [ebp-3Ch]
     clientUIActive_t *clientUIActive; // [esp+9Ch] [ebp-38h]
     connstate_t connstate; // [esp+A0h] [ebp-34h]
-    int32_t localClientNum; // [esp+A4h] [ebp-30h]
+    int localClientNum; // [esp+A4h] [ebp-30h]
     clientConnection_t *clc; // [esp+A8h] [ebp-2Ch]
-    int32_t clientStateBytes; // [esp+ACh] [ebp-28h]
+    int clientStateBytes; // [esp+ACh] [ebp-28h]
     MemoryFile memFile; // [esp+B0h] [ebp-24h] BYREF
     uint8_t *clientStateBuf; // [esp+CCh] [ebp-8h]
-    int32_t fileSystemRestarted; // [esp+D0h] [ebp-4h]
+    int fileSystemRestarted; // [esp+D0h] [ebp-4h]
 
     if (com_sv_running->current.enabled)
     {
@@ -857,8 +857,8 @@ void __cdecl CL_Snd_Restart_f()
 void __cdecl CL_Configstrings_f()
 {
     clientActive_t *LocalClientGlobals; // [esp+0h] [ebp-10h]
-    int32_t ofs; // [esp+4h] [ebp-Ch]
-    int32_t i; // [esp+Ch] [ebp-4h]
+    int ofs; // [esp+4h] [ebp-Ch]
+    int i; // [esp+Ch] [ebp-4h]
 
     if (clientUIActives[0].connectionState == 9)
     {
@@ -909,7 +909,7 @@ void __cdecl LoadMapLoadscreen(const char *mapname)
     DB_UpdateDebugZone();
 }
 
-void __cdecl CL_DownloadsComplete(int32_t localClientNum)
+void __cdecl CL_DownloadsComplete(int localClientNum)
 {
     char *v1; // eax
     const char *v2; // eax
@@ -997,25 +997,25 @@ void __cdecl CL_CheckForResend(int localClientNum)
     const char *v4; // eax
     const char *v5; // eax
     const char *v6; // eax
-    int32_t v7; // [esp+0h] [ebp-1188h]
+    int v7; // [esp+0h] [ebp-1188h]
     uint8_t dst[1244]; // [esp+50h] [ebp-1138h] BYREF
     connstate_t connectionState; // [esp+52Ch] [ebp-C5Ch]
     char dest[1028]; // [esp+530h] [ebp-C58h] BYREF
-    int32_t pktlen; // [esp+934h] [ebp-854h] BYREF
+    int pktlen; // [esp+934h] [ebp-854h] BYREF
     uint8_t src[1028]; // [esp+938h] [ebp-850h] BYREF
-    uint32_t count; // [esp+D3Ch] [ebp-44Ch]
+    uint count; // [esp+D3Ch] [ebp-44Ch]
     msg_t buf; // [esp+D40h] [ebp-448h] BYREF
-    int32_t length; // [esp+D68h] [ebp-420h]
+    int length; // [esp+D68h] [ebp-420h]
     void *data; // [esp+D6Ch] [ebp-41Ch]
     clientConnection_t *clc; // [esp+D70h] [ebp-418h]
-    int32_t c; // [esp+D74h] [ebp-414h]
+    int c; // [esp+D74h] [ebp-414h]
     char pkt[1036]; // [esp+D78h] [ebp-410h] BYREF
 
-    unsigned char *pSteamClientTicket = NULL;
+    byte *pSteamClientTicket = NULL;
     uint32 steamClientTicketSize = 0;
-    unsigned char steamTicketBase64[2048]{ 0 };
+    byte steamTicketBase64[2048]{ 0 };
     bool got;
-    unsigned char steamTicketDecodeBuf[1024]{ 0 };
+    byte steamTicketDecodeBuf[1024]{ 0 };
 
     iassert(localClientNum == 0);
     connectionState = clientUIActives[0].connectionState;
@@ -1108,7 +1108,7 @@ void __cdecl CL_CheckForResend(int localClientNum)
                 else
                     v7 = 0x2000 - 1240 * c;
                 length = v7;
-                MSG_WriteData(&buf, (unsigned char*)data, v7);
+                MSG_WriteData(&buf, (byte*)data, v7);
                 clc->statPacketSendTime[c] = cls.realtime;
                 clc->lastPacketSentTime = cls.realtime;
                 NET_OutOfBandData((netsrc_t)localClientNum, clc->serverAddress, buf.data, buf.cursize);
@@ -1121,11 +1121,11 @@ void __cdecl CL_CheckForResend(int localClientNum)
     }
 }
 
-int32_t __cdecl CL_HighestPriorityStatPacket(clientConnection_t *clc)
+int __cdecl CL_HighestPriorityStatPacket(clientConnection_t *clc)
 {
-    int32_t packet; // [esp+0h] [ebp-Ch]
-    int32_t oldestPacketTime; // [esp+4h] [ebp-8h]
-    int32_t oldestPacket; // [esp+8h] [ebp-4h]
+    int packet; // [esp+0h] [ebp-Ch]
+    int oldestPacketTime; // [esp+4h] [ebp-8h]
+    int oldestPacket; // [esp+8h] [ebp-4h]
 
     oldestPacketTime = cls.realtime;
     oldestPacket = -1;
@@ -1161,7 +1161,7 @@ void __cdecl CL_DisconnectError(char *message)
     Com_Error(ERR_SERVERDISCONNECT, v2);
 }
 
-char __cdecl CL_ConnectionlessPacket(int localClientNum, netadr_t from, msg_t *msg, int32_t time)
+char __cdecl CL_ConnectionlessPacket(int localClientNum, netadr_t from, msg_t *msg, int time)
 {
     const char *v5; // eax
     char success; // [esp+3h] [ebp-9h]
@@ -1200,7 +1200,7 @@ void __cdecl CL_UpdateInfoPacket(netadr_t from)
     __int16 v1; // ax
     __int16 v2; // ax
     const char *v3; // eax
-    int32_t v4; // eax
+    int v4; // eax
     char *v5; // eax
     char *v6; // eax
 
@@ -1266,13 +1266,13 @@ void __cdecl CL_InitServerInfo(serverInfo_t *server, netadr_t adr)
     server->requestCount = 0;
 }
 
-int32_t __cdecl CL_FindServerInfo(netadr_t adr)
+int __cdecl CL_FindServerInfo(netadr_t adr)
 {
-    int32_t cmp; // [esp+0h] [ebp-14h]
-    int32_t low; // [esp+4h] [ebp-10h]
-    int32_t i; // [esp+8h] [ebp-Ch]
-    int32_t ia; // [esp+8h] [ebp-Ch]
-    int32_t high; // [esp+Ch] [ebp-8h]
+    int cmp; // [esp+0h] [ebp-14h]
+    int low; // [esp+4h] [ebp-10h]
+    int i; // [esp+8h] [ebp-Ch]
+    int ia; // [esp+8h] [ebp-Ch]
+    int high; // [esp+Ch] [ebp-8h]
 
     low = 0;
     high = cls.numglobalservers;
@@ -1302,7 +1302,7 @@ int32_t __cdecl CL_FindServerInfo(netadr_t adr)
     return 1;
 }
 
-int32_t __cdecl CL_CompareAdrSigned(netadr_t *a, netadr_t *b)
+int __cdecl CL_CompareAdrSigned(netadr_t *a, netadr_t *b)
 {
     return NET_CompareAdrSigned(a, b);
 }
@@ -1318,15 +1318,15 @@ void __cdecl CL_SortGlobalServers()
 
 void __cdecl CL_ServersResponsePacket(netadr_t from, msg_t *msg)
 {
-    int32_t v2; // eax
+    int v2; // eax
     netadr_t v3; // [esp-14h] [ebp-64Ch]
-    int32_t numservers; // [esp+8h] [ebp-630h]
+    int numservers; // [esp+8h] [ebp-630h]
     uint8_t *buffend; // [esp+Ch] [ebp-62Ch]
     serverAddress_t addresses[256]; // [esp+10h] [ebp-628h] BYREF
     uint8_t *buffptr; // [esp+610h] [ebp-28h]
-    int32_t i; // [esp+614h] [ebp-24h]
+    int i; // [esp+614h] [ebp-24h]
     serverInfo_t *server; // [esp+618h] [ebp-20h]
-    int32_t count; // [esp+61Ch] [ebp-1Ch]
+    int count; // [esp+61Ch] [ebp-1Ch]
     netadr_t adr; // [esp+620h] [ebp-18h]
 
     Com_Printf(14, "CL_ServersResponsePacket\n");
@@ -1373,7 +1373,7 @@ void __cdecl CL_ServersResponsePacket(netadr_t from, msg_t *msg)
         adr.ip[2] = addresses[i].ip[2];
         adr.ip[3] = addresses[i].ip[3];
         adr.port = addresses[i].port;
-        *(_QWORD *)&v3.type = __PAIR64__(*(uint32_t *)adr.ip, 4);
+        *(_QWORD *)&v3.type = __PAIR64__(*(uint *)adr.ip, 4);
         *(_DWORD *)&v3.port = *(_DWORD *)&adr.port;
         *(_QWORD *)&v3.ipx[2] = *(_QWORD *)&adr.ipx[2];
         if (!CL_FindServerInfo(v3))
@@ -1388,7 +1388,7 @@ void __cdecl CL_ServersResponsePacket(netadr_t from, msg_t *msg)
 }
 
 char printBuf[2048];
-char __cdecl CL_DispatchConnectionlessPacket(int localClientNum, netadr_t from, msg_t *msg, int32_t time)
+char __cdecl CL_DispatchConnectionlessPacket(int localClientNum, netadr_t from, msg_t *msg, int time)
 {
     const char *v5; // eax
     const char *v6; // eax
@@ -1406,7 +1406,7 @@ char __cdecl CL_DispatchConnectionlessPacket(int localClientNum, netadr_t from, 
     char *v18; // [esp+4h] [ebp-68h]
     connstate_t connstate; // [esp+Ch] [ebp-60h]
     const char *c; // [esp+10h] [ebp-5Ch]
-    int32_t statPacketsNeeded; // [esp+18h] [ebp-54h]
+    int statPacketsNeeded; // [esp+18h] [ebp-54h]
     clientConnection_t *clcc; // [esp+1Ch] [ebp-50h]
     clientConnection_t *clc; // [esp+1Ch] [ebp-50h]
     clientConnection_t *clca; // [esp+1Ch] [ebp-50h]
@@ -1716,7 +1716,7 @@ char __cdecl CL_DispatchConnectionlessPacket(int localClientNum, netadr_t from, 
     }
 }
 
-void __cdecl CL_DisconnectPacket(int32_t localClientNum, netadr_t from, char *reason)
+void __cdecl CL_DisconnectPacket(int localClientNum, netadr_t from, char *reason)
 {
     clientConnection_t *clc; // [esp+4h] [ebp-8h]
 
@@ -1766,8 +1766,8 @@ void __cdecl CL_InitLoad(const char *mapname, const char *gametype)
 void __cdecl CL_WriteDemoClientArchive(
     const clientConnection_t *clc,
     const clientActive_t *cl,
-    int32_t localClientNum,
-    int32_t index)
+    int localClientNum,
+    int index)
 {
     char *archive; // [esp+0h] [ebp-8h]
     uint8_t msgType; // [esp+7h] [ebp-1h] BYREF
@@ -1784,7 +1784,7 @@ void __cdecl CL_WriteDemoClientArchive(
     FS_Write(archive + 36, 0xCu, clc->demofile);
 }
 
-void __cdecl CL_WriteNewDemoClientArchive(int32_t localClientNum)
+void __cdecl CL_WriteNewDemoClientArchive(int localClientNum)
 {
     clientActive_t *LocalClientGlobals; // [esp+0h] [ebp-8h]
     clientConnection_t *clc; // [esp+4h] [ebp-4h]
@@ -1798,12 +1798,12 @@ void __cdecl CL_WriteNewDemoClientArchive(int32_t localClientNum)
     }
 }
 
-void __cdecl CL_WriteDemoMessage(int32_t localClientNum, msg_t *msg, int32_t headerBytes)
+void __cdecl CL_WriteDemoMessage(int localClientNum, msg_t *msg, int headerBytes)
 {
     clientConnection_t *LocalClientConnection; // eax
-    uint32_t len; // [esp+0h] [ebp-10h]
+    uint len; // [esp+0h] [ebp-10h]
     clientConnection_t *clc; // [esp+4h] [ebp-Ch]
-    int32_t swlen; // [esp+8h] [ebp-8h] BYREF
+    int swlen; // [esp+8h] [ebp-8h] BYREF
     uint8_t networkPacketMarker; // [esp+Fh] [ebp-1h] BYREF
 
     LocalClientConnection = CL_GetLocalClientConnection(0);
@@ -1818,15 +1818,15 @@ void __cdecl CL_WriteDemoMessage(int32_t localClientNum, msg_t *msg, int32_t hea
     FS_Write((char *)&msg->data[headerBytes], len, clc->demofile);
 }
 
-char __cdecl CL_PacketEvent(int localClientNum, netadr_t from, msg_t *msg, int32_t time)
+char __cdecl CL_PacketEvent(int localClientNum, netadr_t from, msg_t *msg, int time)
 {
     connstate_t connstate; // [esp+4h] [ebp-18h]
-    int32_t savedServerMessageSequence; // [esp+8h] [ebp-14h]
+    int savedServerMessageSequence; // [esp+8h] [ebp-14h]
     clientConnection_t *clc; // [esp+Ch] [ebp-10h]
-    int32_t headerBytes; // [esp+10h] [ebp-Ch]
-    int32_t savedReliableAcknowledge; // [esp+14h] [ebp-8h]
+    int headerBytes; // [esp+10h] [ebp-Ch]
+    int savedReliableAcknowledge; // [esp+14h] [ebp-8h]
 
-    if (msg->cursize >= 4 && *(uint32_t *)msg->data == -1)
+    if (msg->cursize >= 4 && *(uint *)msg->data == -1)
         return CL_ConnectionlessPacket(localClientNum, from, msg, time);
     if (localClientNum)
         MyAssertHandler(
@@ -1850,7 +1850,7 @@ char __cdecl CL_PacketEvent(int localClientNum, netadr_t from, msg_t *msg, int32
                     headerBytes = msg->readcount;
                     savedServerMessageSequence = clc->serverMessageSequence;
                     savedReliableAcknowledge = clc->reliableAcknowledge;
-                    clc->serverMessageSequence = *(uint32_t *)msg->data;
+                    clc->serverMessageSequence = *(uint *)msg->data;
                     clc->reliableAcknowledge = MSG_ReadLong(msg);
                     if (clc->reliableAcknowledge >= clc->reliableSequence - 128)
                     {
@@ -1901,12 +1901,12 @@ char __cdecl CL_PacketEvent(int localClientNum, netadr_t from, msg_t *msg, int32
     }
     else
     {
-        Com_DPrintf(14, "%s: Got msg sequence %i but connstate (%i) is < CA_CONNECTED\n", NET_AdrToString(from), *(uint32_t *)msg->data, connstate);
+        Com_DPrintf(14, "%s: Got msg sequence %i but connstate (%i) is < CA_CONNECTED\n", NET_AdrToString(from), *(uint *)msg->data, connstate);
         return 0;
     }
 }
 
-void __cdecl CL_VoiceTransmit(int32_t localClientNum)
+void __cdecl CL_VoiceTransmit(int localClientNum)
 {
     if (localClientNum)
         MyAssertHandler(
@@ -1928,9 +1928,9 @@ void __cdecl CL_VoiceTransmit(int32_t localClientNum)
     }
 }
 
-void __cdecl CL_RunOncePerClientFrame(int32_t localClientNum, int32_t msec)
+void __cdecl CL_RunOncePerClientFrame(int localClientNum, int msec)
 {
-    int32_t v2; // eax
+    int v2; // eax
 
     FakeLag_Frame();
     if (UI_IsFullscreen(localClientNum))
@@ -1961,7 +1961,7 @@ void __cdecl CL_RunOncePerClientFrame(int32_t localClientNum, int32_t msec)
 void __cdecl CL_FinishMotdDownload()
 {
     void *buf; // [esp+0h] [ebp-8h] BYREF
-    int32_t fileSize; // [esp+4h] [ebp-4h]
+    int fileSize; // [esp+4h] [ebp-4h]
 
     fileSize = FS_ReadFile("motd.txt", &buf);
     if (fileSize >= 0)
@@ -1973,7 +1973,7 @@ void __cdecl CL_FinishMotdDownload()
 
 void __cdecl CL_BeginDownload(char *localName, char *remoteName);
 
-void __cdecl CL_NextDownload(int32_t localClientNum);
+void __cdecl CL_NextDownload(int localClientNum);
 
 void __cdecl CL_WWWDownload()
 {
@@ -2102,7 +2102,7 @@ void __cdecl CL_Frame(int localClientNum)
     }
 }
 
-void __cdecl CL_CheckTimeout(int32_t localClientNum)
+void __cdecl CL_CheckTimeout(int localClientNum)
 {
     clientActive_t *LocalClientGlobals; // [esp+8h] [ebp-Ch]
     connstate_t connstate; // [esp+Ch] [ebp-8h]
@@ -2163,7 +2163,7 @@ void __cdecl CL_ServerTimedOut()
     Com_Error(ERR_DROP, "EXE_ERR_SERVER_TIMEOUT");
 }
 
-void __cdecl CL_CheckUserinfo(int32_t localClientNum)
+void __cdecl CL_CheckUserinfo(int localClientNum)
 {
     char *v1; // eax
     const char *v2; // eax
@@ -2184,7 +2184,7 @@ void __cdecl CL_CheckUserinfo(int32_t localClientNum)
     }
 }
 
-void __cdecl CL_UpdateInGameState(int32_t localClientNum)
+void __cdecl CL_UpdateInGameState(int localClientNum)
 {
     if (localClientNum)
         MyAssertHandler(
@@ -2205,7 +2205,7 @@ void __cdecl CL_UpdateInGameState(int32_t localClientNum)
     }
 }
 
-void __cdecl CL_VoiceFrame(int32_t localClientNum)
+void __cdecl CL_VoiceFrame(int localClientNum)
 {
     if (localClientNum)
         MyAssertHandler(
@@ -2219,7 +2219,7 @@ void __cdecl CL_VoiceFrame(int32_t localClientNum)
     Voice_Playback();
 }
 
-bool __cdecl CL_IsLocalClientInGame(int32_t localClientNum)
+bool __cdecl CL_IsLocalClientInGame(int localClientNum)
 {
     if (localClientNum)
         MyAssertHandler(
@@ -2232,9 +2232,9 @@ bool __cdecl CL_IsLocalClientInGame(int32_t localClientNum)
     return clientUIActives[0].connectionState == 9;
 }
 
-char __cdecl CL_IsClientLocal(int32_t clientNum)
+char __cdecl CL_IsClientLocal(int clientNum)
 {
-    int32_t client; // [esp+0h] [ebp-4h]
+    int client; // [esp+0h] [ebp-4h]
 
     for (client = 0; client < 1; ++client)
     {
@@ -2255,7 +2255,7 @@ char __cdecl CL_IsClientLocal(int32_t clientNum)
 void __cdecl CL_ParseBadPacket_f()
 {
     msg_t msg; // [esp+0h] [ebp-30h] BYREF
-    int32_t fileSize; // [esp+28h] [ebp-8h]
+    int fileSize; // [esp+28h] [ebp-8h]
     char *file; // [esp+2Ch] [ebp-4h] BYREF
 
     fileSize = FS_ReadFile("badpacket.dat", (void **)&file);
@@ -2287,7 +2287,7 @@ void __cdecl CL_ShutdownRef()
 
 void __cdecl CL_InitRenderer()
 {
-    int32_t localClientNum; // [esp+0h] [ebp-4h]
+    int localClientNum; // [esp+0h] [ebp-4h]
 
     if (cls.rendererStarted)
         MyAssertHandler(".\\client_mp\\cl_main_mp.cpp", 4284, 0, "%s", "!cls.rendererStarted");
@@ -2308,7 +2308,7 @@ void __cdecl CL_InitRenderer()
     Con_InitClientAssets();
 }
 
-void __cdecl CL_ShutdownRenderer(int32_t destroyWindow)
+void __cdecl CL_ShutdownRenderer(int destroyWindow)
 {
     iassert(cls.rendererStarted || destroyWindow);
     cls.rendererStarted = 0;
@@ -2426,7 +2426,7 @@ void __cdecl CL_DevGuiOpen_f()
     }
 }
 
-int32_t __cdecl CL_ScaledMilliseconds()
+int __cdecl CL_ScaledMilliseconds()
 {
     return cls.realtime;
 }
@@ -2475,10 +2475,10 @@ void __cdecl CL_startSingleplayer_f()
     Sys_QuitAndStartProcess("cod3sp.exe", 0);
 }
 
-void __cdecl CL_DrawLogo(int32_t localClientNum)
+void __cdecl CL_DrawLogo(int localClientNum)
 {
     float fade; // [esp+44h] [ebp-24h]
-    int32_t time; // [esp+48h] [ebp-20h]
+    int time; // [esp+48h] [ebp-20h]
     float h1; // [esp+4Ch] [ebp-1Ch]
     float h0; // [esp+50h] [ebp-18h]
     float color[4]; // [esp+54h] [ebp-14h] BYREF
@@ -2533,7 +2533,7 @@ void __cdecl CL_DrawLogo(int32_t localClientNum)
         CL_StopLogo(localClientNum);
 }
 
-void __cdecl CL_StopLogo(int32_t localClientNum)
+void __cdecl CL_StopLogo(int localClientNum)
 {
     clientUIActives[localClientNum].connectionState = CA_DISCONNECTED;
 }
@@ -2591,7 +2591,7 @@ void __cdecl CL_PlayLogo_f()
     cls.logo.startTime = cls.realtime + 100;
 }
 
-void __cdecl CL_StopLogoOrCinematic(int32_t localClientNum)
+void __cdecl CL_StopLogoOrCinematic(int localClientNum)
 {
     connstate_t clcState; // [esp+0h] [ebp-4h]
 
@@ -2655,11 +2655,11 @@ void __cdecl CL_ToggleMenu_f()
     }
 }
 
-void __cdecl CL_WriteAllDemoClientArchive(int32_t localClientNum)
+void __cdecl CL_WriteAllDemoClientArchive(int localClientNum)
 {
     const clientActive_t *LocalClientGlobals; // [esp+0h] [ebp-Ch]
     clientConnection_t *clc; // [esp+4h] [ebp-8h]
-    int32_t index; // [esp+8h] [ebp-4h]
+    int index; // [esp+8h] [ebp-4h]
 
     clc = CL_GetLocalClientConnection(localClientNum);
     LocalClientGlobals = CL_GetLocalClientGlobals(localClientNum);
@@ -2715,26 +2715,26 @@ cmd_function_s KISAK_NULLSUB_VAR;
 
 void __cdecl CL_Record_f()
 {
-    int32_t v0; // eax
-    int32_t number; // [esp+4h] [ebp-2C8h]
+    int v0; // eax
+    int number; // [esp+4h] [ebp-2C8h]
     clientActive_t *LocalClientGlobals; // [esp+8h] [ebp-2C4h]
     __int16 configStringCount; // [esp+Ch] [ebp-2C0h]
-    int32_t compressedSize; // [esp+18h] [ebp-2B4h]
+    int compressedSize; // [esp+18h] [ebp-2B4h]
     connstate_t connstate; // [esp+1Ch] [ebp-2B0h]
     uint8_t (*bufData)[131072]; // [esp+20h] [ebp-2ACh]
     char demoName[64]; // [esp+24h] [ebp-2A8h] BYREF
     entityState_s nullstate; // [esp+64h] [ebp-268h] BYREF
     uint8_t (*compressedBuf)[131072]; // [esp+15Ch] [ebp-170h]
-    int32_t localClientNum; // [esp+160h] [ebp-16Ch]
+    int localClientNum; // [esp+160h] [ebp-16Ch]
     msg_t buf; // [esp+164h] [ebp-168h] BYREF
     SnapshotInfo_s snapInfo; // [esp+18Ch] [ebp-140h] BYREF
     char name[260]; // [esp+1A4h] [ebp-128h] BYREF
-    int32_t len; // [esp+2ACh] [ebp-20h] BYREF
+    int len; // [esp+2ACh] [ebp-20h] BYREF
     clientConnection_t *clc; // [esp+2B0h] [ebp-1Ch]
     uint8_t type; // [esp+2BFh] [ebp-Dh] BYREF
     const entityState_s *ent; // [esp+2C0h] [ebp-Ch]
     const char *s; // [esp+2C4h] [ebp-8h]
-    int32_t i; // [esp+2C8h] [ebp-4h]
+    int i; // [esp+2C8h] [ebp-4h]
 
     LargeLocal bufData_large_local(0x20000); // [esp+2B4h] [ebp-18h] BYREF
     LargeLocal compressedBuf_large_local(0x20000); // [esp+10h] [ebp-2BCh] BYREF
@@ -2867,7 +2867,7 @@ void __cdecl CL_Record_f()
 
 void __cdecl CL_StopRecord_f()
 {
-    int32_t len; // [esp+0h] [ebp-Ch] BYREF
+    int len; // [esp+0h] [ebp-Ch] BYREF
     clientConnection_t *clc; // [esp+4h] [ebp-8h]
     char type; // [esp+Bh] [ebp-1h] BYREF
 
@@ -2896,10 +2896,10 @@ void __cdecl CL_PlayDemo_f()
     const char *v1; // eax
     const char *v2; // eax
     const char *v3; // eax
-    int32_t v4; // eax
+    int v4; // eax
     const char *v5; // eax
     char extension[32]; // [esp+24h] [ebp-134h] BYREF
-    int32_t localClientNum; // [esp+44h] [ebp-114h]
+    int localClientNum; // [esp+44h] [ebp-114h]
     char name[260]; // [esp+48h] [ebp-110h] BYREF
     clientConnection_t *clc; // [esp+150h] [ebp-8h]
     const char *arg; // [esp+154h] [ebp-4h]
@@ -2996,9 +2996,9 @@ ping_t *__cdecl CL_GetFreePing()
 {
     ping_t *best; // [esp+0h] [ebp-18h]
     DWORD currentTime; // [esp+8h] [ebp-10h]
-    int32_t oldest; // [esp+Ch] [ebp-Ch]
-    int32_t i; // [esp+10h] [ebp-8h]
-    int32_t ia; // [esp+10h] [ebp-8h]
+    int oldest; // [esp+Ch] [ebp-Ch]
+    int i; // [esp+10h] [ebp-8h]
+    int ia; // [esp+10h] [ebp-8h]
     ping_t *pingptr; // [esp+14h] [ebp-4h]
     ping_t *pingptra; // [esp+14h] [ebp-4h]
 
@@ -3100,14 +3100,14 @@ void CL_RconHost()
 void __cdecl CL_Rcon_f()
 {
     const char *v0; // eax
-    int32_t v1; // [esp-Ch] [ebp-450h]
-    int32_t v2; // [esp-8h] [ebp-44Ch]
+    int v1; // [esp-Ch] [ebp-450h]
+    int v2; // [esp-8h] [ebp-44Ch]
     connstate_t connstate; // [esp+10h] [ebp-434h]
     char message[1028]; // [esp+14h] [ebp-430h] BYREF
-    int32_t maxlen; // [esp+418h] [ebp-2Ch]
-    int32_t len; // [esp+41Ch] [ebp-28h]
+    int maxlen; // [esp+418h] [ebp-2Ch]
+    int len; // [esp+41Ch] [ebp-28h]
     const clientConnection_t *clc; // [esp+420h] [ebp-24h]
-    int32_t i; // [esp+424h] [ebp-20h]
+    int i; // [esp+424h] [ebp-20h]
     netadr_t to; // [esp+428h] [ebp-1Ch]
     const char *cmd; // [esp+440h] [ebp-4h]
 
@@ -3171,7 +3171,7 @@ void __cdecl CL_Rcon_f()
     {
         to = clc->netchan.remoteAddress;
     }
-    NET_OutOfBandData(NS_CLIENT1, to, (const unsigned char*)message, &message[strlen(message) + 1] - &message[1] + 1);
+    NET_OutOfBandData(NS_CLIENT1, to, (const byte*)message, &message[strlen(message) + 1] - &message[1] + 1);
 }
 
 void __cdecl CL_OpenedIWDList_f()
@@ -3192,17 +3192,17 @@ void __cdecl CL_ReferencedIWDList_f()
 
 void __cdecl CL_UpdateLevelHunkUsage()
 {
-    int32_t v0; // eax
+    int v0; // eax
     const char *v1; // eax
-    uint32_t v2; // eax
-    int32_t handle; // [esp+20h] [ebp-130h] BYREF
+    uint v2; // eax
+    int handle; // [esp+20h] [ebp-130h] BYREF
     clientActive_t *LocalClientGlobals; // [esp+24h] [ebp-12Ch]
     const char *memlistfile; // [esp+28h] [ebp-128h]
     char *buf; // [esp+2Ch] [ebp-124h]
-    int32_t localClientNum; // [esp+30h] [ebp-120h]
-    int32_t len; // [esp+34h] [ebp-11Ch]
+    int localClientNum; // [esp+30h] [ebp-120h]
+    int len; // [esp+34h] [ebp-11Ch]
     char *outbuftrav; // [esp+38h] [ebp-118h]
-    int32_t memusage; // [esp+3Ch] [ebp-114h]
+    int memusage; // [esp+3Ch] [ebp-114h]
     char outstr[256]; // [esp+40h] [ebp-110h] BYREF
     const char *token; // [esp+144h] [ebp-Ch]
     char *outbuf; // [esp+148h] [ebp-8h]
@@ -3219,7 +3219,7 @@ void __cdecl CL_UpdateLevelHunkUsage()
         memset(buf, 0, len + 1);
         outbuf = (char*)Z_Malloc(len + 1, "CL_UpdateLevelHunkUsage", 10);
         memset(outbuf, 0, len + 1);
-        FS_Read((unsigned char*)buf, len, handle);
+        FS_Read((byte*)buf, len, handle);
         FS_FCloseFile(handle);
         buftrav = buf;
         outbuftrav = outbuf;
@@ -3291,7 +3291,7 @@ void __cdecl CL_OpenScriptMenu_f()
 {
     const char *menuName; // [esp+0h] [ebp-10h]
     const char *menuResponse; // [esp+4h] [ebp-Ch]
-    int32_t menuIndex; // [esp+8h] [ebp-8h]
+    int menuIndex; // [esp+8h] [ebp-8h]
     const char *parentMenuName; // [esp+Ch] [ebp-4h]
 
     if (Cmd_Argc() == 3)
@@ -3333,7 +3333,7 @@ void __cdecl CL_OpenScriptMenu_f()
 void __cdecl COM_WriteFinalStringEdFile(char *fromOSPath, char *toOSPath)
 {
     uint8_t *buf; // [esp+0h] [ebp-Ch]
-    int32_t len; // [esp+4h] [ebp-8h]
+    int len; // [esp+4h] [ebp-8h]
     FILE *f; // [esp+8h] [ebp-4h]
     FILE *fa; // [esp+8h] [ebp-4h]
 
@@ -3341,7 +3341,7 @@ void __cdecl COM_WriteFinalStringEdFile(char *fromOSPath, char *toOSPath)
     if (f)
     {
         len = FS_FileGetFileSize(f);
-        buf = (unsigned char*)malloc(len);
+        buf = (byte*)malloc(len);
         if (FS_FileRead(buf, len, f) != len)
             Com_Error(ERR_FATAL, "Short read in COM_WriteFinalStringEdFile()");
         FS_FileClose(f);
@@ -3363,12 +3363,12 @@ void __cdecl COM_WriteFinalStringEdFile(char *fromOSPath, char *toOSPath)
 void __cdecl Com_WriteLocalizedSoundAliasFiles()
 {
     char stringEdFileName[256]; // [esp+10h] [ebp-218h] BYREF
-    int32_t mark; // [esp+110h] [ebp-118h]
+    int mark; // [esp+110h] [ebp-118h]
     const char **fileNames; // [esp+114h] [ebp-114h]
     char stringEdExternalFileName[256]; // [esp+118h] [ebp-110h] BYREF
     FILE *f; // [esp+21Ch] [ebp-Ch]
-    int32_t i; // [esp+220h] [ebp-8h]
-    int32_t fileCount; // [esp+224h] [ebp-4h] BYREF
+    int i; // [esp+220h] [ebp-8h]
+    int fileCount; // [esp+224h] [ebp-4h] BYREF
 
     FS_BuildOSPath(
         (char*)fs_homepath->current.integer,
@@ -3423,11 +3423,11 @@ void __cdecl CL_CheckAutoUpdate()
 {
     __int16 v0; // ax
     const char *v1; // eax
-    int32_t rnd; // [esp+0h] [ebp-3Ch]
+    int rnd; // [esp+0h] [ebp-3Ch]
     netadr_t temp; // [esp+4h] [ebp-38h] BYREF
     const char *servername; // [esp+1Ch] [ebp-20h]
-    int32_t i; // [esp+20h] [ebp-1Ch]
-    int32_t validServerNum; // [esp+24h] [ebp-18h]
+    int i; // [esp+20h] [ebp-1Ch]
+    int validServerNum; // [esp+24h] [ebp-18h]
     const char *pszGoodServers[5]; // [esp+28h] [ebp-14h]
 
     validServerNum = 0;
@@ -3489,11 +3489,11 @@ void __cdecl CL_CheckAutoUpdate()
 
 serverStatus_s *__cdecl CL_GetServerStatus(netadr_t from)
 {
-    int32_t oldest; // [esp+0h] [ebp-10h]
-    int32_t i; // [esp+4h] [ebp-Ch]
-    int32_t ia; // [esp+4h] [ebp-Ch]
-    int32_t ib; // [esp+4h] [ebp-Ch]
-    int32_t oldestTime; // [esp+8h] [ebp-8h]
+    int oldest; // [esp+0h] [ebp-10h]
+    int i; // [esp+4h] [ebp-Ch]
+    int ia; // [esp+4h] [ebp-Ch]
+    int ib; // [esp+4h] [ebp-Ch]
+    int oldestTime; // [esp+8h] [ebp-8h]
 
     for (i = 0; i < 16; ++i)
     {
@@ -3572,7 +3572,7 @@ void __cdecl CL_InitOnceForAllClients()
     DvarLimits minj; // [esp+4h] [ebp-18h]
     DvarLimits mink; // [esp+4h] [ebp-18h]
     DvarLimits minl; // [esp+4h] [ebp-18h]
-    int32_t i; // [esp+18h] [ebp-4h]
+    int i; // [esp+18h] [ebp-4h]
 
     v0 = Sys_MillisecondsRaw();
     srand(v0);
@@ -3809,9 +3809,9 @@ void __cdecl CL_Disconnect_f()
     CL_DisconnectLocalClient(0);
 }
 
-void __cdecl CL_Init(int32_t localClientNum)
+void __cdecl CL_Init(int localClientNum)
 {
-    int32_t v1; // eax
+    int v1; // eax
 
     Com_Printf(14, "----- Client Initialization -----\n");
     CL_ClearState(localClientNum);
@@ -3846,10 +3846,10 @@ void __cdecl CL_Init(int32_t localClientNum)
 }
 
 // LWSS: I dont see the point of this function?
-//int32_t __cdecl CountBitsEnabled(uint32_t num)
+//int __cdecl CountBitsEnabled(uint num)
 //{
-//    uint32_t numa; // [esp+1Ch] [ebp+8h]
-//    uint32_t numb; // [esp+1Ch] [ebp+8h]
+//    uint numa; // [esp+1Ch] [ebp+8h]
+//    uint numb; // [esp+1Ch] [ebp+8h]
 //
 //    numa = (((((num >> 1) & 0x55555555) + (num & 0x55555555)) >> 2) & 0x33333333)
 //        + ((((num >> 1) & 0x55555555) + (num & 0x55555555)) & 0x33333333);
@@ -3858,8 +3858,8 @@ void __cdecl CL_Init(int32_t localClientNum)
 //    return HIWORD(numb) + numb;
 //}
 
-int32_t recursive;
-void __cdecl CL_Shutdown(int32_t localClientNum)
+int recursive;
+void __cdecl CL_Shutdown(int localClientNum)
 {
     if (!Sys_IsMainThread())
         MyAssertHandler(".\\client_mp\\cl_main_mp.cpp", 5246, 0, "%s", "Sys_IsMainThread()");
@@ -3924,9 +3924,9 @@ void __cdecl CL_Shutdown(int32_t localClientNum)
 void __cdecl CL_LocalServers_f()
 {
     uint8_t b; // [esp+10h] [ebp-2Ch]
-    int32_t j; // [esp+14h] [ebp-28h]
-    int32_t i; // [esp+20h] [ebp-1Ch]
-    int32_t ia; // [esp+20h] [ebp-1Ch]
+    int j; // [esp+14h] [ebp-28h]
+    int i; // [esp+20h] [ebp-1Ch]
+    int ia; // [esp+20h] [ebp-1Ch]
     netadr_t to; // [esp+24h] [ebp-18h] BYREF
 
     Com_Printf(0, "Scanning for servers on the local network...\n");
@@ -3935,26 +3935,26 @@ void __cdecl CL_LocalServers_f()
     for (i = 0; i < 128; ++i)
     {
         b = cls.localServers[i].dirty;
-        Com_Memset((uint32_t *)&cls.localServers[i], 0, 148);
+        Com_Memset((uint *)&cls.localServers[i], 0, 148);
         cls.localServers[i].dirty = b;
     }
-    Com_Memset((uint32_t *)&to, 0, 20);
+    Com_Memset((uint *)&to, 0, 20);
     for (ia = 0; ia < 2; ++ia)
     {
         for (j = 0; j < 4; ++j)
         {
             to.port = BigShort(j + 28960);
             to.type = NA_BROADCAST;
-            NET_OutOfBandData(NS_CLIENT1, to, (const unsigned char*)"getinfo xxx", strlen("getinfo xxx"));
+            NET_OutOfBandData(NS_CLIENT1, to, (const byte*)"getinfo xxx", strlen("getinfo xxx"));
         }
     }
 }
 
-void __cdecl CL_GetPing(int32_t n, char *buf, int32_t buflen, int32_t *pingtime)
+void __cdecl CL_GetPing(int n, char *buf, int buflen, int *pingtime)
 {
     const char *str; // [esp+0h] [ebp-Ch]
-    int32_t time; // [esp+4h] [ebp-8h]
-    int32_t maxPing; // [esp+8h] [ebp-4h]
+    int time; // [esp+4h] [ebp-8h]
+    int maxPing; // [esp+8h] [ebp-4h]
 
     if (cl_pinglist[n].adr.port)
     {
@@ -3980,17 +3980,17 @@ void __cdecl CL_GetPing(int32_t n, char *buf, int32_t buflen, int32_t *pingtime)
     }
 }
 
-void __cdecl CL_ClearPing(uint32_t n)
+void __cdecl CL_ClearPing(uint n)
 {
     if (n < 0x10)
         cl_pinglist[n].adr.port = 0;
 }
 
-int32_t __cdecl CL_GetPingQueueCount()
+int __cdecl CL_GetPingQueueCount()
 {
-    int32_t i; // [esp+0h] [ebp-Ch]
+    int i; // [esp+0h] [ebp-Ch]
     ping_t *pingptr; // [esp+4h] [ebp-8h]
-    int32_t count; // [esp+8h] [ebp-4h]
+    int count; // [esp+8h] [ebp-4h]
 
     count = 0;
     pingptr = cl_pinglist;
@@ -4003,20 +4003,20 @@ int32_t __cdecl CL_GetPingQueueCount()
     return count;
 }
 
-int32_t __cdecl CL_UpdateDirtyPings(int localClientNum, uint32_t source)
+int __cdecl CL_UpdateDirtyPings(int localClientNum, uint source)
 {
     serverInfo_t *v3; // edx
     ping_t *v4; // eax
-    int32_t j; // [esp+4h] [ebp-420h]
-    int32_t ja; // [esp+4h] [ebp-420h]
+    int j; // [esp+4h] [ebp-420h]
+    int ja; // [esp+4h] [ebp-420h]
     serverInfo_t *server; // [esp+8h] [ebp-41Ch]
-    int32_t max; // [esp+Ch] [ebp-418h]
-    int32_t status; // [esp+10h] [ebp-414h]
-    int32_t slots; // [esp+14h] [ebp-410h]
-    int32_t i; // [esp+18h] [ebp-40Ch]
-    int32_t ia; // [esp+18h] [ebp-40Ch]
+    int max; // [esp+Ch] [ebp-418h]
+    int status; // [esp+10h] [ebp-414h]
+    int slots; // [esp+14h] [ebp-410h]
+    int i; // [esp+18h] [ebp-40Ch]
+    int ia; // [esp+18h] [ebp-40Ch]
     char buff[1024]; // [esp+1Ch] [ebp-408h] BYREF
-    int32_t pingTime; // [esp+420h] [ebp-4h] BYREF
+    int pingTime; // [esp+420h] [ebp-4h] BYREF
 
     status = 0;
     if (localClientNum)
@@ -4071,10 +4071,10 @@ int32_t __cdecl CL_UpdateDirtyPings(int localClientNum, uint32_t source)
                     v3 = &server[i];
                     v4 = &cl_pinglist[ja];
                     v4->adr.type = v3->adr.type;
-                    *(uint32_t *)v4->adr.ip = *(uint32_t *)v3->adr.ip;
-                    *(uint32_t *)&v4->adr.port = *(uint32_t *)&v3->adr.port;
-                    *(uint32_t *)&v4->adr.ipx[2] = *(uint32_t *)&v3->adr.ipx[2];
-                    *(uint32_t *)&v4->adr.ipx[6] = *(uint32_t *)&v3->adr.ipx[6];
+                    *(uint *)v4->adr.ip = *(uint *)v3->adr.ip;
+                    *(uint *)&v4->adr.port = *(uint *)&v3->adr.port;
+                    *(uint *)&v4->adr.ipx[2] = *(uint *)&v3->adr.ipx[2];
+                    *(uint *)&v4->adr.ipx[6] = *(uint *)&v3->adr.ipx[6];
                     cl_pinglist[ja].start = Sys_Milliseconds();
                     cl_pinglist[ja].time = 0;
                     cl_pinglist[ja].info[0] = 0;
@@ -4109,7 +4109,7 @@ void __cdecl CL_ShowIP_f()
 
 void __cdecl CL_SetupForNewServerMap(char *pszMapName, char *pszGametype)
 {
-    int32_t localClientNum; // [esp+0h] [ebp-4h]
+    int localClientNum; // [esp+0h] [ebp-4h]
 
     Com_Printf(14, "Server changing map %s, gametype %s\n", pszMapName, pszGametype);
     if (!com_sv_running->current.enabled)
@@ -4135,7 +4135,7 @@ bool __cdecl CL_IsServerLoadingMap()
     return cl_serverLoadingMap;
 }
 
-bool __cdecl CL_IsWaitingOnServerToLoadMap(int32_t localClientNum)
+bool __cdecl CL_IsWaitingOnServerToLoadMap(int localClientNum)
 {
     if (localClientNum)
         MyAssertHandler(
@@ -4148,7 +4148,7 @@ bool __cdecl CL_IsWaitingOnServerToLoadMap(int32_t localClientNum)
     return cl_waitingOnServerToLoadMap[localClientNum];
 }
 
-void __cdecl CL_SetWaitingOnServerToLoadMap(int32_t localClientNum, bool waiting)
+void __cdecl CL_SetWaitingOnServerToLoadMap(int localClientNum, bool waiting)
 {
     if (localClientNum)
         MyAssertHandler(
@@ -4163,35 +4163,35 @@ void __cdecl CL_SetWaitingOnServerToLoadMap(int32_t localClientNum, bool waiting
 
 void __cdecl CL_DrawTextPhysical(
     const char *text,
-    int32_t maxChars,
+    int maxChars,
     Font_s *font,
     float x,
     float y,
     float xScale,
     float yScale,
     const float *color,
-    int32_t style)
+    int style)
 {
     R_AddCmdDrawText(text, maxChars, font, x, y, xScale, yScale, 0.0, color, style);
 }
 
 void __cdecl CL_DrawTextPhysicalWithEffects(
     const char *text,
-    int32_t maxChars,
+    int maxChars,
     Font_s *font,
     float x,
     float y,
     float xScale,
     float yScale,
     const float *color,
-    int32_t style,
+    int style,
     const float *glowColor,
     Material *fxMaterial,
     Material *fxMaterialGlow,
-    int32_t fxBirthTime,
-    int32_t fxLetterTime,
-    int32_t fxDecayStartTime,
-    int32_t fxDecayDuration)
+    int fxBirthTime,
+    int fxLetterTime,
+    int fxDecayStartTime,
+    int fxDecayDuration)
 {
     R_AddCmdDrawTextWithEffects(
         text,
@@ -4216,16 +4216,16 @@ void __cdecl CL_DrawTextPhysicalWithEffects(
 void __cdecl CL_DrawText(
     const ScreenPlacement *scrPlace,
     const char *text,
-    int32_t maxChars,
+    int maxChars,
     Font_s *font,
     float x,
     float y,
-    int32_t horzAlign,
-    int32_t vertAlign,
+    int horzAlign,
+    int vertAlign,
     float xScale,
     float yScale,
     const float *color,
-    int32_t style)
+    int style)
 {
     ScrPlace_ApplyRect(scrPlace, &x, &y, &xScale, &yScale, horzAlign, vertAlign);
     R_AddCmdDrawText(text, maxChars, font, x, y, xScale, yScale, 0.0, color, style);
@@ -4234,17 +4234,17 @@ void __cdecl CL_DrawText(
 void __cdecl CL_DrawTextRotate(
     const ScreenPlacement *scrPlace,
     const char *text,
-    int32_t maxChars,
+    int maxChars,
     Font_s *font,
     float x,
     float y,
     float rotation,
-    int32_t horzAlign,
-    int32_t vertAlign,
+    int horzAlign,
+    int vertAlign,
     float xScale,
     float yScale,
     const float *color,
-    int32_t style)
+    int style)
 {
     ScrPlace_ApplyRect(scrPlace, &x, &y, &xScale, &yScale, horzAlign, vertAlign);
     R_AddCmdDrawText(text, maxChars, font, x, y, xScale, yScale, rotation, color, style);
@@ -4252,15 +4252,15 @@ void __cdecl CL_DrawTextRotate(
 
 void __cdecl CL_DrawTextPhysicalWithCursor(
     char *text,
-    int32_t maxChars,
+    int maxChars,
     Font_s *font,
     float x,
     float y,
     float xScale,
     float yScale,
     const float *color,
-    int32_t style,
-    int32_t cursorPos,
+    int style,
+    int cursorPos,
     char cursor)
 {
     R_AddCmdDrawTextWithCursor(text, maxChars, font, x, y, xScale, yScale, 0.0, color, style, cursorPos, cursor);
@@ -4269,24 +4269,24 @@ void __cdecl CL_DrawTextPhysicalWithCursor(
 void __cdecl CL_DrawTextWithCursor(
     const ScreenPlacement *scrPlace,
     const char *text,
-    int32_t maxChars,
+    int maxChars,
     Font_s *font,
     float x,
     float y,
-    int32_t horzAlign,
-    int32_t vertAlign,
+    int horzAlign,
+    int vertAlign,
     float xScale,
     float yScale,
     const float *color,
-    int32_t style,
-    int32_t cursorPos,
+    int style,
+    int cursorPos,
     char cursor)
 {
     ScrPlace_ApplyRect(scrPlace, &x, &y, &xScale, &yScale, horzAlign, vertAlign);
     R_AddCmdDrawTextWithCursor(text, maxChars, font, x, y, xScale, yScale, 0.0, color, style, cursorPos, cursor);
 }
 
-bool __cdecl CL_ShouldDisplayHud(int32_t localClientNum)
+bool __cdecl CL_ShouldDisplayHud(int localClientNum)
 {
     if (cl_hudDrawsBehindUI->current.enabled)
         return 1;
@@ -4301,7 +4301,7 @@ bool __cdecl CL_ShouldDisplayHud(int32_t localClientNum)
     return (clientUIActives[0].keyCatchers & 0x10) == 0 || clientUIActives[0].displayHUDWithKeycatchUI;
 }
 
-bool __cdecl CL_IsUIActive(int32_t localClientNum)
+bool __cdecl CL_IsUIActive(int localClientNum)
 {
     if (localClientNum)
         MyAssertHandler(
@@ -4314,7 +4314,7 @@ bool __cdecl CL_IsUIActive(int32_t localClientNum)
     return (clientUIActives[0].keyCatchers & 0x10) != 0;
 }
 
-Font_s *__cdecl CL_RegisterFont(const char *fontName, int32_t imageTrack)
+Font_s *__cdecl CL_RegisterFont(const char *fontName, int imageTrack)
 {
     return R_RegisterFont(fontName, imageTrack);
 }
@@ -4333,7 +4333,7 @@ float (*__cdecl CL_GetMapCenter())[3]
     return (float (*)[3])cls.mapCenter;
 }
 
-int32_t __cdecl CL_GetLocalClientActiveCount()
+int __cdecl CL_GetLocalClientActiveCount()
 {
     return 1;
 }

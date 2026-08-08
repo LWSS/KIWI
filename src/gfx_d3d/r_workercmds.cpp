@@ -217,15 +217,15 @@ int __cdecl R_ProcessWorkerCmd(WorkerCmdType type)
 {
     int v2; // eax
     int v3; // eax
-    uint32_t bufCount; // [esp+0h] [ebp-7A4h]
+    uint bufCount; // [esp+0h] [ebp-7A4h]
     uint8_t data[1920]; // [esp+4h] [ebp-7A0h] BYREF
     int dataSize; // [esp+788h] [ebp-1Ch]
     WorkerCmds *workerCmds; // [esp+78Ch] [ebp-18h]
-    uint32_t currentCount; // [esp+790h] [ebp-14h]
-    uint32_t startPos; // [esp+794h] [ebp-10h]
-    uint32_t newStartPos; // [esp+798h] [ebp-Ch]
-    uint32_t i; // [esp+79Ch] [ebp-8h]
-    uint32_t count; // [esp+7A0h] [ebp-4h]
+    uint currentCount; // [esp+790h] [ebp-14h]
+    uint startPos; // [esp+794h] [ebp-10h]
+    uint newStartPos; // [esp+798h] [ebp-Ch]
+    uint i; // [esp+79Ch] [ebp-8h]
+    uint count; // [esp+7A0h] [ebp-4h]
 
     bcassert(type, WRKCMD_COUNT);
     workerCmds = &g_workerCmds[type];
@@ -373,7 +373,7 @@ void __cdecl R_ProcessWorkerCmdInternal(WorkerCmdType type, void *data)
 
 void R_InitWorkerThreads()
 {
-    uint32_t workerThreadIndexa; // [esp+0h] [ebp-4h]
+    uint workerThreadIndexa; // [esp+0h] [ebp-4h]
 
     iassert( Sys_IsMainThread() );
     if (sys_smp_allowed->current.enabled)
@@ -381,7 +381,7 @@ void R_InitWorkerThreads()
         R_InitWorkerCmds();
         for (workerThreadIndexa = 0; workerThreadIndexa < 2; ++workerThreadIndexa)
         {
-            if (!Sys_SpawnWorkerThread((void(__cdecl *)(uint32_t))R_WorkerThread, workerThreadIndexa))
+            if (!Sys_SpawnWorkerThread((void(__cdecl *)(uint))R_WorkerThread, workerThreadIndexa))
                 Com_Error(ERR_FATAL, "Failed to create thread");
         }
     }
@@ -566,8 +566,8 @@ void __cdecl R_AddWorkerCmd(WorkerCmdType type, uint8_t *data)
 void __cdecl R_UpdateActiveWorkerThreads()
 {
     char v0; // [esp+3h] [ebp-9h]
-    uint32_t i; // [esp+4h] [ebp-8h]
-    uint32_t workerIter; // [esp+8h] [ebp-4h]
+    uint i; // [esp+4h] [ebp-8h]
+    uint workerIter; // [esp+8h] [ebp-4h]
 
     iassert( Sys_IsMainThread() );
     for (i = 0; i < 2; ++i)

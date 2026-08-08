@@ -16,21 +16,21 @@ int __cdecl CG_CheckPlayerForLowClipSpecific(const cg_s *cgameGlob, unsigned int
 int __cdecl CG_CheckPlayerForLowClip(const cg_s *cgameGlob);
 void __cdecl CG_CalcPlayerSprintColor(const cg_s *cgameGlob, const playerState_s *ps, float *color);
 void __cdecl CG_DrawStanceIcon(
-    int32_t localClientNum,
+    int localClientNum,
     const rectDef_s *rect,
     float *drawColor,
     float x,
     float y,
     float fadeAlpha);
 void __cdecl CG_DrawStanceHintPrints(
-    int32_t localClientNum,
+    int localClientNum,
     const rectDef_s *rect,
     float x,
     const float *color,
     float fadeAlpha,
     Font_s *font,
     float scale,
-    int32_t textStyle);
+    int textStyle);
 float CG_CalcPlayerHealth(const playerState_s *ps); 
 float __cdecl CG_FadeLowHealthOverlay(const cg_s *cgameGlob);
 void __cdecl CG_PulseLowHealthOverlay(cg_s *cgameGlob, double healthRatio);
@@ -45,12 +45,12 @@ void __cdecl CG_UpdateCursorHints(int localClientNum);
 char *__cdecl CG_GetWeaponUseString(int localClientNum, const char **secondaryString);
 char *__cdecl CG_GetUseString(int localClientNum);
 void __cdecl CG_DrawCursorhint(
-    int32_t localClientNum,
+    int localClientNum,
     const rectDef_s *rect,
     Font_s *font,
     float fontscale,
     float *color,
-    int32_t textStyle);
+    int textStyle);
 void __cdecl CG_DrawHoldBreathHint(
     int localClientNum,
     const rectDef_s *rect,
@@ -114,12 +114,12 @@ void __cdecl CG_DrawPlayerWeaponNameBack(
     Material *material);
 // local variable allocation has failed, the output may be wrong!
 void __cdecl CG_DrawPlayerStance(
-    int32_t localClientNum,
+    int localClientNum,
     const rectDef_s *rect,
     const float *color,
     Font_s *font,
     float scale,
-    int32_t textStyle);
+    int textStyle);
 void __cdecl CG_DrawPlayerSprintBack(
     int localClientNum,
     const rectDef_s *rect,
@@ -138,25 +138,25 @@ void __cdecl CG_DrawPlayerBarHealthBack(
     Material *material,
     float *color);
 void CG_OwnerDraw(
-    int32_t localClientNum,
+    int localClientNum,
     rectDef_s parentRect,
     float x,
     float y,
     float w,
     float h,
-    int32_t horzAlign,
-    int32_t vertAlign,
+    int horzAlign,
+    int vertAlign,
     float text_x,
     float text_y,
-    int32_t ownerDraw,
-    int32_t ownerDrawFlags,
-    int32_t align,
+    int ownerDraw,
+    int ownerDrawFlags,
+    int align,
     float special,
     Font_s *font,
     float scale,
     float *color,
     Material *material,
-    int32_t textStyle,
+    int textStyle,
     char textAlignMode);
 
 

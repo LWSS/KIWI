@@ -27,6 +27,10 @@
 // this source file is mostly concerned with the data structures, not the
 // numerics.
 
+// Engine base types (uint/ushort/byte) - this TU pulls in kisak headers (odeext.h and
+// what it drags along), which use them, so q_shared.h has to lead like it does everywhere else.
+#include <universal/q_shared.h>
+
 #include "objects.h"
 #include <ode/ode.h>
 #include "joint.h"

@@ -230,10 +230,10 @@ void __cdecl ScrPlace_CalcSafeAreaOffsets(
 
 void __cdecl ScrPlace_SetupViewport(
     ScreenPlacement *scrPlace,
-    int32_t viewportX,
-    int32_t viewportY,
-    int32_t viewportWidth,
-    int32_t viewportHeight)
+    int viewportX,
+    int viewportY,
+    int viewportWidth,
+    int viewportHeight)
 {
     float v5; // [esp+0h] [ebp-10h]
     float v6; // [esp+4h] [ebp-Ch]
@@ -262,10 +262,10 @@ void __cdecl ScrPlace_SetupViewport(
 
 void __cdecl ScrPlace_SetupUnsafeViewport(
     ScreenPlacement *scrPlace,
-    int32_t viewportX,
-    int32_t viewportY,
-    int32_t viewportWidth,
-    int32_t viewportHeight)
+    int viewportX,
+    int viewportY,
+    int viewportWidth,
+    int viewportHeight)
 {
     float v5; // [esp+0h] [ebp-18h]
     float v6; // [esp+4h] [ebp-14h]
@@ -292,7 +292,7 @@ void __cdecl ScrPlace_SetupUnsafeViewport(
 #endif
 }
 
-double __cdecl ScrPlace_ApplyX(const ScreenPlacement *scrPlace, float x, int32_t horzAlign)
+double __cdecl ScrPlace_ApplyX(const ScreenPlacement *scrPlace, float x, int horzAlign)
 {
     double result; // st7
     float v4; // [esp+0h] [ebp-20h]
@@ -348,7 +348,7 @@ double __cdecl ScrPlace_ApplyX(const ScreenPlacement *scrPlace, float x, int32_t
     return result;
 }
 
-double __cdecl ScrPlace_ApplyY(const ScreenPlacement *scrPlace, float y, int32_t vertAlign)
+double __cdecl ScrPlace_ApplyY(const ScreenPlacement *scrPlace, float y, int vertAlign)
 {
     double result; // st7
     float v4; // [esp+0h] [ebp-20h]
@@ -410,8 +410,8 @@ void __cdecl ScrPlace_ApplyRect(
     float *y,
     float *w,
     float *h,
-    int32_t horzAlign,
-    int32_t vertAlign)
+    int horzAlign,
+    int vertAlign)
 {
     if (!x)
         MyAssertHandler(".\\client\\screen_placement.cpp", 244, 0, "%s", "x");

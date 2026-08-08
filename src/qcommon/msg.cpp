@@ -404,7 +404,7 @@ void __cdecl MSG_WriteByte(msg_t *msg, unsigned __int8 c)
     }
 }
 
-void __cdecl MSG_WriteData(msg_t *buf, unsigned char *data, int length)
+void __cdecl MSG_WriteData(msg_t *buf, byte *data, int length)
 {
     int i; // r10
     int cursize; // r11
@@ -473,7 +473,7 @@ void __cdecl MSG_WriteString(msg_t *sb, char *s)
     v4 = s;
     while (*(unsigned __int8 *)v4++)
         ;
-    MSG_WriteData(sb, (unsigned char*)s, v4 - s);
+    MSG_WriteData(sb, (byte*)s, v4 - s);
 }
 
 void __cdecl MSG_WriteAngle(msg_t *sb, double f)

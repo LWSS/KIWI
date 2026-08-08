@@ -96,7 +96,7 @@ static __forceinline __m128 PackXyzW(__m128 xyz, __m128 wSource)
 }
 
 // decode a byte-packed unit vector to a direction, scaled by its packed length
-static __forceinline __m128 DecodeUnitVec(uint32_t packed)
+static __forceinline __m128 DecodeUnitVec(uint packed)
 {
     __m64 bytes = _m_punpcklbw(_mm_cvtsi32_si64(packed), _mm_setzero_si64());
     __m128 d = _mm_div_ps(_mm_sub_ps(_mm_cvtpu16_ps(bytes), sse_encodeShift), sse_encodeScale);
@@ -104,7 +104,7 @@ static __forceinline __m128 DecodeUnitVec(uint32_t packed)
 }
 
 // transform a packed unit vector by a bone's rotation and re-encode it (as floats ready to pack)
-static __forceinline __m128 SkinUnitVec(const DObjSkelMat *m, uint32_t packed)
+static __forceinline __m128 SkinUnitVec(const DObjSkelMat *m, uint packed)
 {
     __m128 transformed = TransformDir(m, DecodeUnitVec(packed));
     return _mm_add_ps(_mm_mul_ps(PackXyzW(transformed, _mm_load_ps(m->origin)), sse_encodeScale), sse_encodeShift);

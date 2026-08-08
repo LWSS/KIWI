@@ -10,17 +10,17 @@
 #endif
 
 
-uint32_t __cdecl DevGui_GetScreenWidth()
+uint __cdecl DevGui_GetScreenWidth()
 {
     return cls.vidConfig.displayWidth;
 }
 
-uint32_t __cdecl DevGui_GetScreenHeight()
+uint __cdecl DevGui_GetScreenHeight()
 {
     return cls.vidConfig.displayHeight;
 }
 
-void __cdecl DevGui_DrawBox(int32_t x, int32_t y, int32_t w, int32_t h, const uint8_t *color)
+void __cdecl DevGui_DrawBox(int x, int y, int w, int h, const uint8_t *color)
 {
     float v5; // [esp+0h] [ebp-58h]
     float v6; // [esp+4h] [ebp-54h]
@@ -40,12 +40,12 @@ void __cdecl DevGui_DrawBox(int32_t x, int32_t y, int32_t w, int32_t h, const ui
     R_AddCmdDrawStretchPic(v5, v6, v7, v8, 0.0, 0.0, 0.0, 0.0, unpackedColor, cls.whiteMaterial);
 }
 
-void __cdecl DevGui_DrawBoxCentered(int32_t centerX, int32_t centerY, int32_t w, int32_t h, const uint8_t *color)
+void __cdecl DevGui_DrawBoxCentered(int centerX, int centerY, int w, int h, const uint8_t *color)
 {
     DevGui_DrawBox(centerX - w / 2, centerY - h / 2, w, h, color);
 }
 
-void __cdecl DevGui_DrawBevelBox(int32_t x, int32_t y, int32_t w, int32_t h, float shade, const uint8_t *color) 
+void __cdecl DevGui_DrawBevelBox(int x, int y, int w, int h, float shade, const uint8_t *color) 
 {
     float v6; // [esp+8h] [ebp-F0h]
     float v7; // [esp+Ch] [ebp-ECh]
@@ -95,7 +95,7 @@ void __cdecl DevGui_DrawBevelBox(int32_t x, int32_t y, int32_t w, int32_t h, flo
     float v51; // [esp+BCh] [ebp-3Ch]
     float v52; // [esp+C0h] [ebp-38h]
     float v53; // [esp+C4h] [ebp-34h]
-    int32_t vtxs[4][2]; // [esp+C8h] [ebp-30h] BYREF
+    int vtxs[4][2]; // [esp+C8h] [ebp-30h] BYREF
     float unpackedColor[4]; // [esp+E8h] [ebp-10h] BYREF
 
     if ((double)w < 8.0)
@@ -276,7 +276,7 @@ void __cdecl DevGui_DrawBevelBox(int32_t x, int32_t y, int32_t w, int32_t h, flo
     DevGui_DrawQuad(vtxs, unpackedColor);
 }
 
-void __cdecl DevGui_DrawQuad(const int32_t (*vtxs)[2], const float *color)
+void __cdecl DevGui_DrawQuad(const int (*vtxs)[2], const float *color)
 {
     float xy[4][2]; // [esp+0h] [ebp-20h] BYREF
 
@@ -291,7 +291,7 @@ void __cdecl DevGui_DrawQuad(const int32_t (*vtxs)[2], const float *color)
     R_AddCmdDrawQuadPic(xy, color, cls.whiteMaterial);
 }
 
-void __cdecl DevGui_DrawLine(float *start, float *end, int32_t width, const uint8_t *color)
+void __cdecl DevGui_DrawLine(float *start, float *end, int width, const uint8_t *color)
 {
     float h; // [esp+Ch] [ebp-C0h]
     float x; // [esp+2Ch] [ebp-A0h]
@@ -374,7 +374,7 @@ void __cdecl DevGui_DrawLine(float *start, float *end, int32_t width, const uint
     R_AddCmdDrawStretchPicRotateXY(x, y, len, h, 0.0, 0.0, 1.0, 1.0, angle, unpackedColor, cls.whiteMaterial);
 }
 
-void __cdecl DevGui_DrawFont(int32_t x, int32_t y, const uint8_t *color, char *text)
+void __cdecl DevGui_DrawFont(int x, int y, const uint8_t *color, char *text)
 {
     float v4; // [esp+0h] [ebp-2Ch]
     float v5; // [esp+4h] [ebp-28h]
@@ -391,12 +391,12 @@ void __cdecl DevGui_DrawFont(int32_t x, int32_t y, const uint8_t *color, char *t
     }
 }
 
-int32_t __cdecl DevGui_GetFontWidth(const char *text)
+int __cdecl DevGui_GetFontWidth(const char *text)
 {
     return R_TextWidth(text, 0, cls.consoleFont);
 }
 
-int32_t __cdecl DevGui_GetFontHeight()
+int __cdecl DevGui_GetFontHeight()
 {
     return R_TextHeight(cls.consoleFont);
 }

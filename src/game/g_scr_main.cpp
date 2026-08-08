@@ -10004,7 +10004,7 @@ void GScr_OpenFile()
     const char *v9; // r31
     int Remote; // r3
     int v11; // r31
-    unsigned char *v12; // r3
+    byte *v12; // r3
     void *v13; // r5
     const char *v14; // r10
     const char *v15; // r11
@@ -10056,7 +10056,7 @@ void GScr_OpenFile()
             v11 = Remote;
             if (Remote >= 0)
             {
-                v12 = (unsigned char *)Z_VirtualAlloc(Remote + 1, "GScr_OpenFile", 10);
+                v12 = (byte *)Z_VirtualAlloc(Remote + 1, "GScr_OpenFile", 10);
                 v13 = v23[0];
                 level.openScriptIOFileBuffers[v4] = v12;
                 FS_Read(v12, v11, (int)v13);
@@ -11457,7 +11457,7 @@ void __cdecl G_StopAnimScripted(gentity_s *ent)
             if (ServerDObj)
                 XAnimSetCompleteGoalWeight(ServerDObj, scripted->anim, 0.0, 0.2, 1.0, 0, 0, 0);
         }
-        MT_Free((unsigned char*)scripted, 96);
+        MT_Free((byte*)scripted, 96);
         ent->scripted = 0;
     }
 }

@@ -86,7 +86,7 @@ CaCItem cacItems[61] =
 
 const CaCItem *__cdecl Script_FindCacItem(int itemIndex)
 {
-    uint32_t i; // [esp+0h] [ebp-4h]
+    uint i; // [esp+0h] [ebp-4h]
 
     for (i = 0; i < 0x3D; ++i)
     {
@@ -96,7 +96,7 @@ const CaCItem *__cdecl Script_FindCacItem(int itemIndex)
     return 0;
 }
 
-void __cdecl Script_ValidateSlotItem(int itemIndex, int level, uint32_t typeMask)
+void __cdecl Script_ValidateSlotItem(int itemIndex, int level, uint typeMask)
 {
     const CaCItem *cacItem; // [esp+0h] [ebp-4h]
 
@@ -213,13 +213,13 @@ void __cdecl LiveStorage_StatsInit(int controllerIndex)
     LiveStorage_TrySetStat(controllerIndex, 3002, 9u);
 }
 
-void __cdecl LiveStorage_TrySetStat(int controllerIndex, int index, uint32_t value)
+void __cdecl LiveStorage_TrySetStat(int controllerIndex, int index, uint value)
 {
     if (LiveStorage_GetStat(controllerIndex, index) != value)
         LiveStorage_SetStat(controllerIndex, index, value);
 }
 
-void __cdecl LiveStorage_TrySetStatRange(int controllerIndex, int first, int last, uint32_t value)
+void __cdecl LiveStorage_TrySetStatRange(int controllerIndex, int first, int last, uint value)
 {
     while (first <= last)
         LiveStorage_TrySetStat(controllerIndex, first++, value);
@@ -367,7 +367,7 @@ void __cdecl LiveStorage_ReadStatsFromDir(char *directory)
             v2 = LiveStorage_ChecksumGamerStats(&statData.playerStats[4], 8188);
             statData.statsFetched = 1;
             statData.statWriteNeeded = 0;
-            if (*(uint32_t *)statData.playerStats != v2)
+            if (*(uint *)statData.playerStats != v2)
                 LiveStorage_HandleCorruptStats(path);
             if (!stat_version)
                 MyAssertHandler(".\\win32\\win_storage.cpp", 300, 0, "%s", "stat_version");
@@ -384,13 +384,13 @@ void __cdecl LiveStorage_ReadStatsFromDir(char *directory)
     }
 }
 
-void __cdecl xxtea_enc(uint32_t *v, uint32_t n, const uint32_t *k)
+void __cdecl xxtea_enc(uint *v, uint n, const uint *k)
 {
-    uint32_t e; // [esp+4h] [ebp-18h]
-    uint32_t z; // [esp+8h] [ebp-14h]
-    uint32_t sum; // [esp+Ch] [ebp-10h]
-    uint32_t q; // [esp+10h] [ebp-Ch]
-    uint32_t p; // [esp+18h] [ebp-4h]
+    uint e; // [esp+4h] [ebp-18h]
+    uint z; // [esp+8h] [ebp-14h]
+    uint sum; // [esp+Ch] [ebp-10h]
+    uint q; // [esp+10h] [ebp-Ch]
+    uint p; // [esp+18h] [ebp-4h]
 
     if (n <= 1)
         MyAssertHandler(".\\win32\\win_storage.cpp", 74, 0, "%s\n\t(n) = %i", "(n > 1)", n);
@@ -411,12 +411,12 @@ void __cdecl xxtea_enc(uint32_t *v, uint32_t n, const uint32_t *k)
     }
 }
 
-void __cdecl xxtea_dec(uint32_t *v, uint32_t n, const uint32_t *k)
+void __cdecl xxtea_dec(uint *v, uint n, const uint *k)
 {
-    uint32_t e; // [esp+4h] [ebp-18h]
-    uint32_t sum; // [esp+Ch] [ebp-10h]
-    uint32_t y; // [esp+14h] [ebp-8h]
-    uint32_t p; // [esp+18h] [ebp-4h]
+    uint e; // [esp+4h] [ebp-18h]
+    uint sum; // [esp+Ch] [ebp-10h]
+    uint y; // [esp+14h] [ebp-8h]
+    uint p; // [esp+18h] [ebp-4h]
 
     if (n <= 1)
         MyAssertHandler(".\\win32\\win_storage.cpp", 99, 0, "%s\n\t(n) = %i", "(n > 1)", n);
@@ -436,10 +436,10 @@ void __cdecl xxtea_dec(uint32_t *v, uint32_t n, const uint32_t *k)
 
 bool __cdecl LiveStorage_DecryptAndCheck(StatsFile *statsFile, const char *statsDir)
 {
-    uint32_t hash[4]; // [esp+64h] [ebp-20h] BYREF
-    uint32_t key[4]; // [esp+74h] [ebp-10h] BYREF
+    uint hash[4]; // [esp+64h] [ebp-20h] BYREF
+    uint key[4]; // [esp+74h] [ebp-10h] BYREF
 
-    if (*(uint32_t *)statsFile->magic != *(uint32_t *)"iwm0")
+    if (*(uint *)statsFile->magic != *(uint *)"iwm0")
         return 0;
     LiveStorage_GetCryptKey(statsFile->nonce, (unsigned __int8 *)key);
     xxtea_dec(statsFile->body.hash, 0x845u, key);
@@ -455,13 +455,13 @@ bool __cdecl LiveStorage_DecryptAndCheck(StatsFile *statsFile, const char *stats
     return I_stricmp("", statsFile->body.statsData.path) == 0;
 }
 
-void __cdecl LiveStorage_GetCryptKey(uint32_t nonce, unsigned __int8 *outKey)
+void __cdecl LiveStorage_GetCryptKey(uint nonce, unsigned __int8 *outKey)
 {
 #ifdef KISAK_MP
-    uint32_t hashR[4]; // [esp+0h] [ebp-44h] BYREF
-    uint32_t keyHash[4]; // [esp+10h] [ebp-34h] BYREF
-    uint32_t ipad[4]; // [esp+20h] [ebp-24h] BYREF
-    uint32_t opad[4]; // [esp+30h] [ebp-14h] BYREF
+    uint hashR[4]; // [esp+0h] [ebp-44h] BYREF
+    uint keyHash[4]; // [esp+10h] [ebp-34h] BYREF
+    uint ipad[4]; // [esp+20h] [ebp-24h] BYREF
+    uint opad[4]; // [esp+30h] [ebp-14h] BYREF
     int wordIndex; // [esp+40h] [ebp-4h]
 
     Com_BlockChecksum128((unsigned __int8 *)cl_cdkey, 0x22u, 529771271, (unsigned __int8 *)keyHash);
@@ -483,7 +483,7 @@ int __cdecl LiveStorage_ChecksumGamerStats(unsigned __int8 *buffer, int len)
 void LiveStorage_NoStatsFound()
 {
     int v0; // eax
-    uint32_t unsignedInt; // [esp-4h] [ebp-4h]
+    uint unsignedInt; // [esp-4h] [ebp-4h]
 
     memset(statData.playerStats, 0, sizeof(statData.playerStats));
     LiveStorage_WriteChecksumToBuffer(statData.playerStats, 0x2000);
@@ -499,13 +499,13 @@ void LiveStorage_NoStatsFound()
 
 void __cdecl LiveStorage_WriteChecksumToBuffer(unsigned __int8 *buffer, int len)
 {
-    *(uint32_t *)buffer = LiveStorage_ChecksumGamerStats(buffer + 4, len - 4);
+    *(uint *)buffer = LiveStorage_ChecksumGamerStats(buffer + 4, len - 4);
 }
 
-bool __cdecl LiveStorage_ReadStatsFile(const char *qpath, unsigned __int8 *buffer, uint32_t lenToRead)
+bool __cdecl LiveStorage_ReadStatsFile(const char *qpath, unsigned __int8 *buffer, uint lenToRead)
 {
-    uint32_t len; // [esp+0h] [ebp-8h]
-    uint32_t lena; // [esp+0h] [ebp-8h]
+    uint len; // [esp+0h] [ebp-8h]
+    uint lena; // [esp+0h] [ebp-8h]
     int h; // [esp+4h] [ebp-4h] BYREF
 
     FS_CheckFileSystemStarted();
@@ -596,9 +596,9 @@ void __cdecl LiveStorage_UploadStats()
 
 void __cdecl LiveStorage_Encrypt(StatsFile *statsFile)
 {
-    uint32_t key[4]; // [esp+5Ch] [ebp-10h] BYREF
+    uint key[4]; // [esp+5Ch] [ebp-10h] BYREF
 
-    *(uint32_t *)statsFile->magic = *(uint32_t *)"iwm0";
+    *(uint *)statsFile->magic = *(uint *)"iwm0";
     statsFile->nonce = timeGetTime();
     LiveStorage_GetCryptKey(statsFile->nonce, (unsigned __int8 *)key);
     Com_BlockChecksum128(
@@ -613,14 +613,14 @@ int __cdecl LiveStorage_GetStat(int __formal, int index)
 {
     const char *v3; // eax
 
-    if ((uint32_t)index > 0xDAA)
+    if ((uint)index > 0xDAA)
         MyAssertHandler(".\\win32\\win_storage.cpp", 375, 0, "%s\n\t(index) = %i", "(index >= 0 && index < 3499)", index);
     if (!statData.statsFetched)
         return 0;
     if (index < 2000)
         return statData.playerStats[index + 4];
     if (index < 3498)
-        return *(uint32_t *)&statData.playerStats[4 * index - 5996];
+        return *(uint *)&statData.playerStats[4 * index - 5996];
     if (!alwaysfails)
     {
         v3 = va("Unhandled stat index %i", index);
@@ -629,14 +629,14 @@ int __cdecl LiveStorage_GetStat(int __formal, int index)
     return 0;
 }
 
-void __cdecl LiveStorage_SetStat(int __formal, int index, uint32_t value)
+void __cdecl LiveStorage_SetStat(int __formal, int index, uint value)
 {
 #ifdef KISAK_SP
     iassert(0); // LWSS: do not use with SP!! Broken! Writes random addresses with crap!
 #endif
     const char *v3; // eax
 
-    if ((uint32_t)index > 0xDAA)
+    if ((uint)index > 0xDAA)
         MyAssertHandler(".\\win32\\win_storage.cpp", 403, 0, "%s\n\t(index) = %i", "(index >= 0 && index < 3499)", index);
     if (!statData.statsFetched)
     {
@@ -696,7 +696,7 @@ void __cdecl LiveStorage_SetStat(int __formal, int index, uint32_t value)
     }
 }
 
-void __cdecl LiveStorage_TrySetStatForCmd(int index, uint32_t value)
+void __cdecl LiveStorage_TrySetStatForCmd(int index, uint value)
 {
     if (LiveStorage_GetStat(0, index) != value)
     {

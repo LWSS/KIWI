@@ -13,7 +13,7 @@
 #endif
 
 #ifdef KISAK_MP
-void __cdecl CG_LoadingString(int32_t localClientNum, const char *s)
+void __cdecl CG_LoadingString(int localClientNum, const char *s)
 {
     CG_GetLocalClientGlobals(localClientNum)->isLoading = *s != 0;
     if (s && *s)
@@ -31,10 +31,10 @@ BOOL __cdecl CG_IsShowingProgress_LoadObj()
 
 static bool drawInformationCalled = false;
 static int lastDraw = 0;
-void __cdecl CG_DrawInformation(int32_t localClientNum)
+void __cdecl CG_DrawInformation(int localClientNum)
 {
 #ifdef KISAK_MP
-    int32_t v1; // [esp+20h] [ebp-30h]
+    int v1; // [esp+20h] [ebp-30h]
     uint8_t (*v2)(void); // [esp+24h] [ebp-2Ch]
     bool serverLoading; // [esp+2Bh] [ebp-25h]
     Font_s *font; // [esp+30h] [ebp-20h]

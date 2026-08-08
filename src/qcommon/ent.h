@@ -2,7 +2,7 @@
 
 
 #ifdef KISAK_MP
-enum entityType_t : __int32
+enum entityType_t : int
 {                                       // ...
     ET_GENERAL = 0x0,
     ET_PLAYER = 0x1,
@@ -24,7 +24,7 @@ enum entityType_t : __int32
     ET_EVENTS = 0x11,
 };
 #elif KISAK_SP
-enum entityType_t : __int32
+enum entityType_t : int
 {
     ET_GENERAL = 0x0,
     ET_PLAYER = 0x1,
@@ -225,7 +225,7 @@ struct entityState_s // sizeof=0xF4 // (KISAKTODO: should be in q_shared?)
     int iHeadIcon;
     int iHeadIconTeam;                  // XREF: G_InitGrenadeEntity(gentity_s *,gentity_s *)+218/o
     int solid;
-    uint32_t eventParm;
+    uint eventParm;
     int eventSequence;
     int events[4];                      // XREF: G_MoverPush+3FE/o
     int eventParms[4];
@@ -237,7 +237,7 @@ struct entityState_s // sizeof=0xF4 // (KISAKTODO: should be in q_shared?)
     entityState_s_un2 un2;
     float fTorsoPitch;
     float fWaistPitch;
-    uint32_t partBits[4];           // XREF: Fire_Lead:loc_5189EC/o
+    uint partBits[4];           // XREF: Fire_Lead:loc_5189EC/o
 };
 struct archivedEntityShared_t // sizeof=0x24
 {                                       // ...
@@ -279,7 +279,7 @@ struct entityState_s
     uint8_t weaponModel;
     entityState_s_tag un1;
     LerpEntityState lerp;
-    uint32_t eventParm;
+    uint eventParm;
     uint16_t loopSound;
     uint16_t number;
     uint16_t otherEntityNum;
@@ -290,7 +290,7 @@ struct entityState_s
     int solid;
     int eventSequence;
     uint8_t events[4];
-    uint32_t eventParms[4];
+    uint eventParms[4];
     _BYTE un2[4];
 };
 #endif

@@ -48,7 +48,7 @@ void __cdecl SV_WriteSnapshotToClient(client_t *client, msg_t *msg)
     if (!client)
         MyAssertHandler(".\\server_mp\\sv_snapshot_mp.cpp", 506, 0, "%s", "localClient");
     clientNum = client - svsHeader.clients;
-    if ((uint32_t)clientNum >= 0x40)
+    if ((uint)clientNum >= 0x40)
         MyAssertHandler(
             ".\\server_mp\\sv_snapshot_mp.cpp",
             510,
@@ -616,8 +616,8 @@ char __cdecl SV_GetClientPositionAtTime(int client, int gametime, float *pos)
 int __cdecl SV_GetArchivedClientInfo(int clientNum, int *pArchiveTime, playerState_s *ps, clientState_s *cs)
 {
     cachedSnapshot_t *cachedFrame; // [esp+74h] [ebp-10h]
-    uint32_t i; // [esp+78h] [ebp-Ch]
-    uint32_t ia; // [esp+78h] [ebp-Ch]
+    uint i; // [esp+78h] [ebp-Ch]
+    uint ia; // [esp+78h] [ebp-Ch]
     int deltaTime; // [esp+7Ch] [ebp-8h]
     cachedClient_s *cachedClient; // [esp+80h] [ebp-4h]
 
@@ -729,9 +729,9 @@ cachedSnapshot_t *__cdecl SV_GetCachedSnapshotInternal(int archivedFrame)
     int v7; // eax
     int oldArchivedFrame; // [esp+4h] [ebp-5Ch]
     signed int newnum; // [esp+8h] [ebp-58h]
-    uint32_t newnuma; // [esp+8h] [ebp-58h]
-    uint32_t newnumb; // [esp+8h] [ebp-58h]
-    uint32_t newnumc; // [esp+8h] [ebp-58h]
+    uint newnuma; // [esp+8h] [ebp-58h]
+    uint newnumb; // [esp+8h] [ebp-58h]
+    uint newnumc; // [esp+8h] [ebp-58h]
     int oldindex; // [esp+14h] [ebp-4Ch]
     int oldnum; // [esp+18h] [ebp-48h]
     msg_t msg; // [esp+1Ch] [ebp-44h] BYREF
@@ -999,7 +999,7 @@ void __cdecl SV_BuildClientSnapshot(client_t *client)
     archivedEntity_s *v8; // [esp+1034h] [ebp-138h]
     clientState_s *v9; // [esp+1038h] [ebp-134h]
     cachedSnapshot_t *CachedSnapshot; // [esp+1040h] [ebp-12Ch]
-    uint32_t v12[65]; // [esp+1044h] [ebp-128h] BYREF
+    uint v12[65]; // [esp+1044h] [ebp-128h] BYREF
     float position[3]; // [esp+1148h] [ebp-24h] BYREF
     //float v14; // [esp+1150h] [ebp-1Ch]
     gentity_s *v15; // [esp+1154h] [ebp-18h]
@@ -1034,8 +1034,8 @@ void __cdecl SV_BuildClientSnapshot(client_t *client)
                 dst = (uint8_t *)v5;
                 v1 = (uint8_t *)SV_GameClientNum(clientNum);
                 memcpy(dst, v1, 0x2F64u);
-                clientNum = *((uint32_t *)dst + 55);
-                if ((uint32_t)clientNum >= 0x400)
+                clientNum = *((uint *)dst + 55);
+                if ((uint)clientNum >= 0x400)
                     Com_Error(ERR_DROP, "SV_BuildClientSnapshot: bad gEnt");
                 position[0] = *((float *)dst + 7);
                 position[1] = *((float *)dst + 8);
@@ -1163,7 +1163,7 @@ void __cdecl SV_AddEntitiesVisibleFromPoint(float *org, int clientNum, snapshotE
     float fogOpaqueDistSqrd; // [esp+20h] [ebp-20h]
     svEntity_s *svEnt; // [esp+24h] [ebp-1Ch]
     int l; // [esp+28h] [ebp-18h]
-    uint32_t leafnum; // [esp+2Ch] [ebp-14h]
+    uint leafnum; // [esp+2Ch] [ebp-14h]
     gentity_s *ent; // [esp+30h] [ebp-10h]
     int i; // [esp+34h] [ebp-Ch]
     uint8_t *clientpvs; // [esp+3Ch] [ebp-4h]
@@ -1255,7 +1255,7 @@ void __cdecl SV_AddCachedEntitiesVisibleFromPoint(
     int cluster; // [esp+8h] [ebp-112Ch]
     int lastLeaf; // [esp+Ch] [ebp-1128h] BYREF
     float fogOpaqueDistSqrd; // [esp+10h] [ebp-1124h]
-    uint32_t dst[1025]; // [esp+14h] [ebp-1120h] BYREF
+    uint dst[1025]; // [esp+14h] [ebp-1120h] BYREF
     int v10; // [esp+1018h] [ebp-11Ch]
     uint16_t list[128]; // [esp+101Ch] [ebp-118h] BYREF
     int leafnum; // [esp+1120h] [ebp-14h]
@@ -1323,7 +1323,7 @@ void __cdecl SV_SendMessageToClient(msg_t *msg, client_t *client)
 
     if (msg->cursize < 4)
         MyAssertHandler(".\\server_mp\\sv_snapshot_mp.cpp", 1916, 0, "%s", "msg->cursize >= SV_ENCODE_START");
-    *(uint32_t *)svCompressedBuf = *(uint32_t *)msg->data;
+    *(uint *)svCompressedBuf = *(uint *)msg->data;
     compressedSize = MSG_WriteBitsCompress(
         client->header.state == 4,
         (const uint8_t *)msg->data + 4,
@@ -1414,7 +1414,7 @@ int __cdecl SV_RateMsec(client_t *client, int messageSize)
 uint8_t tempSnapshotMsgBuf[131072];
 void __cdecl SV_BeginClientSnapshot(client_t *client, msg_t *msg)
 {
-    uint32_t clientNum; // [esp+0h] [ebp-4h]
+    uint clientNum; // [esp+0h] [ebp-4h]
 
     client->tempPacketDebugging = 0;
     if (sv_debugPacketContentsForClientThisFrame->current.enabled)
@@ -1515,7 +1515,7 @@ void __cdecl SV_WriteDownloadToClient(client_t *cl, msg_t *msg)
             {
                 curindex = cl->downloadCurrentBlock % 8;
                 if (!cl->downloadBlocks[curindex])
-                    cl->downloadBlocks[curindex] = (unsigned char*)Z_Malloc(2048, "SV_WriteDownloadToClient", 9);
+                    cl->downloadBlocks[curindex] = (byte*)Z_Malloc(2048, "SV_WriteDownloadToClient", 9);
                 cl->downloadBlockSize[curindex] = FS_Read(cl->downloadBlocks[curindex], 0x800u, cl->download);
                 if (cl->downloadBlockSize[curindex] < 0)
                 {
@@ -1624,7 +1624,7 @@ void __cdecl SV_WriteDownloadToClient(client_t *cl, msg_t *msg)
 
 void __cdecl SV_EndClientSnapshot(client_t *client, msg_t *msg)
 {
-    uint32_t clientNum; // [esp+30h] [ebp-4h]
+    uint clientNum; // [esp+30h] [ebp-4h]
 
     clientNum = client - svs.clients;
     if (clientNum >= 0x40)

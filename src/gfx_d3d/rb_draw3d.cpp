@@ -491,10 +491,10 @@ void __cdecl R_DrawPointLitSurfs(GfxCmdBufSourceState *source, const GfxViewInfo
     GfxColor color; // [esp+120h] [ebp-3Ch] BYREF
     float x; // [esp+124h] [ebp-38h]
     float y; // [esp+128h] [ebp-34h]
-    uint32_t axis; // [esp+12Ch] [ebp-30h]
+    uint axis; // [esp+12Ch] [ebp-30h]
     float offsetDistSq; // [esp+130h] [ebp-2Ch]
     GfxDrawPrimArgs args; // [esp+134h] [ebp-28h]
-    uint32_t planeIndex; // [esp+140h] [ebp-1Ch]
+    uint planeIndex; // [esp+140h] [ebp-1Ch]
     float halfHeight; // [esp+144h] [ebp-18h]
     float perpDir[3]; // [esp+148h] [ebp-14h] BYREF
     float perpDist; // [esp+154h] [ebp-8h]
@@ -506,7 +506,7 @@ void __cdecl R_DrawPointLitSurfs(GfxCmdBufSourceState *source, const GfxViewInfo
     if (pointLightCount)
     {
         pointLightPartitions = viewInfo->pointLightPartitions;
-        R_ConvertColorToBytes(colorWhite, (uint32_t*)&color);
+        R_ConvertColorToBytes(colorWhite, (uint*)&color);
         data = source->input.data;
         args.baseIndex = 0;
         args.vertexCount = 4;
@@ -610,9 +610,9 @@ void __cdecl R_DrawPointLitSurfs(GfxCmdBufSourceState *source, const GfxViewInfo
 
 void __cdecl R_DrawPointLitSurfsCallback(const void *userData, GfxCmdBufContext context, GfxCmdBufContext prepassContext)
 {
-    uint32_t h; // [esp+4h] [ebp-28h]
-    uint32_t w; // [esp+8h] [ebp-24h]
-    uint32_t y; // [esp+Ch] [ebp-20h]
+    uint h; // [esp+4h] [ebp-28h]
+    uint w; // [esp+8h] [ebp-24h]
+    uint y; // [esp+Ch] [ebp-20h]
     IDirect3DDevice9 *device; // [esp+14h] [ebp-18h]
     tagRECT rect; // [esp+18h] [ebp-14h] BYREF
     const GfxPointLitSurfsInfo *info; // [esp+28h] [ebp-4h]
@@ -719,7 +719,7 @@ GfxCmdBufSourceState *RB_DebugShaderDrawCommandsCommon()
     GfxCmdBufSourceState *result; // eax
     const GfxBackEndData *data; // [esp+10h] [ebp-Ch]
     GfxViewInfo *viewInfo; // [esp+14h] [ebp-8h]
-    uint32_t viewInfoIndex; // [esp+18h] [ebp-4h]
+    uint viewInfoIndex; // [esp+18h] [ebp-4h]
 
     result = gfxCmdBufContext.source;
     data = backEndData;
@@ -748,7 +748,7 @@ void RB_StandardDrawCommandsCommon()
     const GfxBackEndData *data; // [esp+1Ch] [ebp-Ch]
     GfxViewInfo *viewInfo; // [esp+20h] [ebp-8h]
     GfxViewInfo *viewInfoa; // [esp+20h] [ebp-8h]
-    uint32_t viewInfoIndex; // [esp+24h] [ebp-4h]
+    uint viewInfoIndex; // [esp+24h] [ebp-4h]
 
     data = backEndData;
     if (backEndData->viewInfoCount)

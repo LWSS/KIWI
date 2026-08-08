@@ -26,6 +26,10 @@ geom transform
 
 */
 
+// Engine base types (uint/ushort/byte) - this TU pulls in kisak headers (phys_local.h and
+// what it drags along), which use them, so q_shared.h has to lead like it does everywhere else.
+#include <universal/q_shared.h>
+
 #include <ode/collision.h>
 #include <ode/matrix.h>
 #include <ode/rotation.h>

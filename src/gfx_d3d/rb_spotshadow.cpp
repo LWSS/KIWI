@@ -42,7 +42,7 @@ void __cdecl RB_DrawSpotShadowOverlay()
     float t0; // [esp+44h] [ebp-24h]
     float t1; // [esp+50h] [ebp-18h]
     GfxViewInfo *viewInfo; // [esp+54h] [ebp-14h]
-    uint32_t spotShadowIndex; // [esp+5Ch] [ebp-Ch]
+    uint spotShadowIndex; // [esp+5Ch] [ebp-Ch]
     float h; // [esp+60h] [ebp-8h]
 
     iassert( backEndData->viewInfoCount > 0 );

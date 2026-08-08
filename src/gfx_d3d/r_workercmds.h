@@ -3,7 +3,7 @@
 #include "rb_backend.h"
 #include "fxprimitives.h"
 
-enum WorkerCmdType : __int32
+enum WorkerCmdType : int
 {
     WRKCMD_FIRST_FRONTEND = 0x0,
     WRKCMD_UPDATE_FX_SPOT_LIGHT = 0x0,
@@ -42,11 +42,11 @@ struct WorkerCmds // sizeof=0x80
     volatile int syncedEndPos;
     volatile int inSize;                // ...
     volatile int outSize;               // ...
-    uint32_t dataSize;              // ...
+    uint dataSize;              // ...
     uint8_t *buf;               // ...
     int bufSize;                        // ...
     int bufCount;
-    uint32_t pad[23];
+    uint pad[23];
 };
 
 int __cdecl R_FXNonDependentOrSpotLightPending(void* args);

@@ -33,7 +33,7 @@ typedef struct dxGeom *dGeomID;
 typedef struct dxJoint *dJointID;
 typedef struct dxJointGroup *dJointGroupID;
 
-int __cdecl Phys_GetSurfaceFlagsFromBrush(const cbrush_t *brush, uint32_t brushSideIndex)
+int __cdecl Phys_GetSurfaceFlagsFromBrush(const cbrush_t *brush, uint brushSideIndex)
 {
     if (!brush)
         MyAssertHandler(".\\physics\\phys_world_collision.cpp", 37, 0, "%s", "brush");
@@ -288,14 +288,14 @@ void __cdecl CM_TestGeomInLeafBrushNode(cLeaf_t *leaf, const objInfo *input, Res
         &io);
 }
 
-void __cdecl Phys_TestGeomInBrush(const cbrush_t *brush, uint32_t *userData)
+void __cdecl Phys_TestGeomInBrush(const cbrush_t *brush, uint *userData)
 {
     Results *results; // [esp+68h] [ebp-8h]
 
     results = (Results *)userData[1];
     if (results->contactCount < results->maxContacts)
     {
-        switch (*(uint32_t *)(*userData + 52))
+        switch (*(uint *)(*userData + 52))
         {
         case 1:
         {
@@ -830,7 +830,7 @@ void __cdecl Phys_GetCylinderAABB(dxGeom *geom, float *aabb)
     pos[1] = Position[1];
     pos[2] = Position[2];
     axisIdx = cyl->direction - 1;
-    if ((uint32_t)axisIdx > 2)
+    if ((uint)axisIdx > 2)
         MyAssertHandler(
             ".\\physics\\phys_world_collision.cpp",
             632,
@@ -907,7 +907,7 @@ void __cdecl Phys_GetCapsuleAABB(dxGeom *geom, float *aabb)
     pos[1] = Position[1];
     pos[2] = Position[2];
     axisIdx = cyl->direction - 1;
-    if ((uint32_t)axisIdx > 2)
+    if ((uint)axisIdx > 2)
         MyAssertHandler(
             ".\\physics\\phys_world_collision.cpp",
             669,

@@ -1,7 +1,7 @@
 #pragma once
 
 
-const int32_t iEdgePairs[12][2] =
+const int iEdgePairs[12][2] =
 {
   { 0, 1 },
   { 0, 2 },

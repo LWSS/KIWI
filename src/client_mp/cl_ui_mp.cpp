@@ -115,7 +115,7 @@ int __cdecl LAN_WaitServerResponse(int source)
         return 0;
 }
 
-void __cdecl LAN_GetServerInfo(int source, uint32_t n, char *buf, int buflen)
+void __cdecl LAN_GetServerInfo(int source, uint n, char *buf, int buflen)
 {
     const char *v4; // eax
     const char *v5; // eax
@@ -204,7 +204,7 @@ void __cdecl LAN_GetServerInfo(int source, uint32_t n, char *buf, int buflen)
     }
 }
 
-int __cdecl LAN_GetServerPing(int source, uint32_t n)
+int __cdecl LAN_GetServerPing(int source, uint n)
 {
     serverInfo_t *server; // [esp+4h] [ebp-4h]
 
@@ -231,7 +231,7 @@ int __cdecl LAN_GetServerPing(int source, uint32_t n)
         return -1;
 }
 
-serverInfo_t *__cdecl LAN_GetServerPtr(int source, uint32_t n)
+serverInfo_t *__cdecl LAN_GetServerPtr(int source, uint n)
 {
     if (source)
     {
@@ -283,7 +283,7 @@ int __cdecl LAN_CompareHostname(const char *hostName1, const char *hostName2)
         return I_stricmp(hostName1, hostName2);
 }
 
-int __cdecl LAN_CompareServers(int source, int sortKey, int sortDir, uint32_t s1, uint32_t s2)
+int __cdecl LAN_CompareServers(int source, int sortKey, int sortDir, uint s1, uint s2)
 {
     char *v6; // eax
     char *v7; // eax
@@ -386,7 +386,7 @@ int __cdecl LAN_CompareServers(int source, int sortKey, int sortDir, uint32_t s1
         return res;
 }
 
-void __cdecl LAN_MarkServerDirty(int source, uint32_t n, uint8_t dirty)
+void __cdecl LAN_MarkServerDirty(int source, uint n, uint8_t dirty)
 {
     serverInfo_t *server; // [esp+8h] [ebp-8h]
     int count; // [esp+Ch] [ebp-4h]
@@ -436,7 +436,7 @@ void __cdecl LAN_MarkServerDirty(int source, uint32_t n, uint8_t dirty)
     }
 }
 
-int __cdecl LAN_ServerIsDirty(int source, uint32_t n)
+int __cdecl LAN_ServerIsDirty(int source, uint n)
 {
     if (source)
     {
@@ -457,7 +457,7 @@ int __cdecl LAN_ServerIsDirty(int source, uint32_t n)
     return 0;
 }
 
-int __cdecl LAN_UpdateDirtyPings(int localClientNum, uint32_t source)
+int __cdecl LAN_UpdateDirtyPings(int localClientNum, uint source)
 {
     return CL_UpdateDirtyPings(localClientNum, source);
 }

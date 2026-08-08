@@ -10,7 +10,7 @@
 #include "g_main.h"
 #endif
 
-void __cdecl G_DebugLine(const float *start, const float *end, const float *color, int32_t depthTest)
+void __cdecl G_DebugLine(const float *start, const float *end, const float *color, int depthTest)
 {
     CL_AddDebugLine(start, end, color, depthTest, 0, 1);
 }
@@ -19,8 +19,8 @@ void __cdecl G_DebugLineWithDuration(
     const float *start,
     const float *end,
     const float *color,
-    int32_t depthTest,
-    int32_t duration)
+    int depthTest,
+    int duration)
 {
     CL_AddDebugLine(start, end, color, depthTest, duration, 1);
 }
@@ -46,16 +46,16 @@ void __cdecl G_DebugBox(
     const float *maxs,
     float yaw,
     const float *color,
-    int32_t depthTest,
-    int32_t duration)
+    int depthTest,
+    int duration)
 {
     float v7; // [esp+0h] [ebp-94h]
     float v8; // [esp+10h] [ebp-84h]
-    uint32_t j; // [esp+14h] [ebp-80h]
+    uint j; // [esp+14h] [ebp-80h]
     float rotated; // [esp+18h] [ebp-7Ch]
     float rotated_4; // [esp+1Ch] [ebp-78h]
-    uint32_t i; // [esp+24h] [ebp-70h]
-    uint32_t ia; // [esp+24h] [ebp-70h]
+    uint i; // [esp+24h] [ebp-70h]
+    uint ia; // [esp+24h] [ebp-70h]
     float fCos; // [esp+28h] [ebp-6Ch]
     float v[25]; // [esp+2Ch] [ebp-68h] BYREF
     float fSin; // [esp+90h] [ebp-4h]
@@ -87,9 +87,9 @@ void __cdecl G_DebugCircle(
     const float *center,
     float radius,
     const float *color,
-    int32_t depthTest,
-    int32_t onGround,
-    int32_t duration)
+    int depthTest,
+    int onGround,
+    int duration)
 {
     float eyepos[3]; // [esp+18h] [ebp-18h] BYREF
     float dir[3]; // [esp+24h] [ebp-Ch] BYREF
@@ -116,8 +116,8 @@ void __cdecl G_DebugCircleEx(
     float radius,
     const float *dir,
     const float *color,
-    int32_t depthTest,
-    int32_t duration)
+    int depthTest,
+    int duration)
 {
     float fAngle; // [esp+1Ch] [ebp-F4h]
     float fCos; // [esp+20h] [ebp-F0h]
@@ -127,7 +127,7 @@ void __cdecl G_DebugCircleEx(
     float normal[3]; // [esp+28h] [ebp-E8h] BYREF
     float right[3]; // [esp+34h] [ebp-DCh] BYREF
     float up[3]; // [esp+40h] [ebp-D0h] BYREF
-    uint32_t i; // [esp+4Ch] [ebp-C4h]
+    uint i; // [esp+4Ch] [ebp-C4h]
     float v[16][3]; // [esp+50h] [ebp-C0h] BYREF
 
     Vec3NormalizeTo(dir, normal);
@@ -208,7 +208,7 @@ void G_DebugDrawBrush_r(cLeafBrushNode_s *node, const float *color)
 
 void G_DebugDrawBrushModel(gentity_s *entity, const float *color, int depthTest, int duration)
 {
-    uint32_t v8; // r29
+    uint v8; // r29
     cmodel_t *v9; // r31
 
     iassert(entity);
@@ -304,8 +304,8 @@ void __cdecl G_DebugArc(
     float fAngle; // [esp+10h] [ebp-D4h]
     float fCos; // [esp+14h] [ebp-D0h]
     float fSin; // [esp+18h] [ebp-CCh]
-    uint32_t i; // [esp+1Ch] [ebp-C8h]
-    uint32_t ia; // [esp+1Ch] [ebp-C8h]
+    uint i; // [esp+1Ch] [ebp-C8h]
+    uint ia; // [esp+1Ch] [ebp-C8h]
     float scale; // [esp+20h] [ebp-C4h]
     float v[16][3]; // [esp+24h] [ebp-C0h] BYREF
 

@@ -2226,7 +2226,7 @@ void __cdecl ShowEntityInfo()
     float endPos[3]; // BYREF
     IgnoreEntParams ignoreEntParams; // BYREF
     trace_t trace; // BYREF
-    int32_t i;
+    int i;
 
     if (!g_entinfo->current.integer)
         return;

@@ -36,7 +36,7 @@ struct MemoryNode // sizeof=0xC
 {                                       // XREF: scrMemTreeGlob_t/r
     uint16_t prev;              // XREF: MT_Init(void)+46/w
     uint16_t next;              // XREF: MT_Init(void)+4E/w
-    uint32_t padding[2];            // XREF: MT_RemoveHeadMemoryNode+61/w
+    uint padding[2];            // XREF: MT_RemoveHeadMemoryNode+61/w
 };
 static_assert(sizeof(MemoryNode) == 12);
 
@@ -92,22 +92,22 @@ static const char* mt_type_names[22] =
 
 int MT_GetSubTreeSize(int nodeNum);
 void MT_DumpTree(void);
-void MT_FreeIndex(uint32_t nodeNum, int numBytes);
+void MT_FreeIndex(uint nodeNum, int numBytes);
 
-void MT_Free(unsigned char* p, int numBytes);
+void MT_Free(byte* p, int numBytes);
 bool MT_Realloc(int oldNumBytes, int newNumbytes);
 
 void MT_Init(void);
-unsigned short MT_AllocIndex(int numBytes, mtType_t type);
+ushort MT_AllocIndex(int numBytes, mtType_t type);
 void* MT_Alloc(int numBytes, mtType_t type);
 
 //void TRACK_scr_memorytree(void);
-//uint32_t Scr_GetStringUsage(void);
+//uint Scr_GetStringUsage(void);
 
-char const* MT_NodeInfoString(uint32_t nodeNum);
+char const* MT_NodeInfoString(uint nodeNum);
 int MT_GetScore(int num);
 void MT_AddMemoryNode(int newNode, int size);
-bool MT_RemoveMemoryNode(int oldNode, uint32_t size);
+bool MT_RemoveMemoryNode(int oldNode, uint size);
 void MT_RemoveHeadMemoryNode(int size);
 void MT_Error(char const* funcName, int numBytes);
 int MT_GetSize(int numBytes);

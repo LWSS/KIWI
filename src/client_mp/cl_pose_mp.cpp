@@ -8,12 +8,12 @@
 #include <gfx_d3d/r_scene.h>
 #include <xanim/dobj_utils.h>
 
-char *__cdecl CL_AllocSkelMemory(uint32_t size)
+char *__cdecl CL_AllocSkelMemory(uint size)
 {
-    volatile uint32_t *Addend; // [esp+0h] [ebp-Ch]
+    volatile uint *Addend; // [esp+0h] [ebp-Ch]
     char *result; // [esp+4h] [ebp-8h]
     int skelMemPos; // [esp+8h] [ebp-4h]
-    uint32_t sizea; // [esp+14h] [ebp+8h]
+    uint sizea; // [esp+14h] [ebp+8h]
 
     if (!size)
         MyAssertHandler(".\\client_mp\\cl_pose_mp.cpp", 30, 0, "%s", "size");
@@ -41,7 +41,7 @@ int warnCount_0;
 int __cdecl CL_DObjCreateSkelForBones(const DObj_s *obj, int *partBits, DObjAnimMat **pMatOut)
 {
     char *buf; // [esp+0h] [ebp-Ch]
-    uint32_t len; // [esp+4h] [ebp-8h]
+    uint len; // [esp+4h] [ebp-8h]
     int timeStamp; // [esp+8h] [ebp-4h]
 
     iassert(obj);

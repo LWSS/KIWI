@@ -5,7 +5,7 @@
 #error This file is for SinglePlayer only 
 #endif
 
-enum ThreatDebugStringCategory : __int32
+enum ThreatDebugStringCategory : int
 {
     TDS_TOTAL_THREAT = 0x0,
     TDS_FLASHED = 0x1,

@@ -148,8 +148,8 @@ void __cdecl RB_DrawSunShadowOverlay()
                     w,
                     h,
                     g_overlayPoints[pointIndexDst + 1].xyz);
-                *(uint32_t *)g_overlayPoints[pointIndexDst].color = -16711936;
-                *(uint32_t *)g_overlayPoints[pointIndexDst + 1].color = -16711936;
+                *(uint *)g_overlayPoints[pointIndexDst].color = -16711936;
+                *(uint *)g_overlayPoints[pointIndexDst + 1].color = -16711936;
                 pointIndexDst += 2;
             }
         }

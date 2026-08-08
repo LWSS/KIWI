@@ -849,7 +849,7 @@ void Brush_Select_Helper( selbrush_t *b )
     if ( g_qeglobals.w_cyclePreviewMode )
     {
         eclass_t *cls = eDef->eclass;
-        if ( cls && cls->cycleModelName[(unsigned short)g_qeglobals.w_cyclePreviewMode] )
+        if ( cls && cls->cycleModelName[(ushort)g_qeglobals.w_cyclePreviewMode] )
         {
             b->brushFlags |= 0x100u;
             eDef->modelClass = nullptr;
@@ -2243,7 +2243,7 @@ static char Ed_Material_GetColorTint( Material *mtl, const char *name, float *ou
     MaterialConstantDef *c = mtl->constantTable;
     while ( c->nameHash != hash )
     {
-        if ( (unsigned)++v4 >= (unsigned)(unsigned char)mtl->constantCount )
+        if ( (unsigned)++v4 >= (unsigned)(byte)mtl->constantCount )
             return 0;
         ++c;
     }
@@ -2262,12 +2262,12 @@ static int Ed_ClampColorByte( float f )
     if ( v <= 0 )   return 0;
     return v;
 }
-static void Ed_PackColor( const float *a1, unsigned char *a2 )
+static void Ed_PackColor( const float *a1, byte *a2 )
 {
-    a2[2] = (unsigned char)Ed_ClampColorByte( a1[0] );
-    a2[1] = (unsigned char)Ed_ClampColorByte( a1[1] );
-    a2[0] = (unsigned char)Ed_ClampColorByte( a1[2] );
-    a2[3] = (unsigned char)Ed_ClampColorByte( a1[3] );
+    a2[2] = (byte)Ed_ClampColorByte( a1[0] );
+    a2[1] = (byte)Ed_ClampColorByte( a1[1] );
+    a2[0] = (byte)Ed_ClampColorByte( a1[2] );
+    a2[3] = (byte)Ed_ClampColorByte( a1[3] );
 }
 
 // 0x46F6C0  per-layer face colour: colorTint·entityColor if the material defines a
@@ -2275,7 +2275,7 @@ static void Ed_PackColor( const float *a1, unsigned char *a2 )
 void sub_46F6C0( int mtlDef, int faceDef, int visIdx, int *outData )
 {
     MaterialDef   *a1 = (MaterialDef *)mtlDef;
-    unsigned char *a2 = (unsigned char *)faceDef;
+    byte *a2 = (byte *)faceDef;
     Material      *mtl = MaterialDef_14( visIdx, a1 );
     iassert( mtl );   // MaterialDef.cpp:336
     float tint[4];
@@ -2287,7 +2287,7 @@ void sub_46F6C0( int mtlDef, int faceDef, int visIdx, int *outData )
         v9[1] = tint[1] * (float)( (double)a2[229] * k );
         v9[2] = tint[2] * (float)( (double)a2[228] * k );
         v9[3] = tint[3] * (float)( k * (double)a2[231] );
-        Ed_PackColor( v9, (unsigned char *)outData );
+        Ed_PackColor( v9, (byte *)outData );
     }
     else
     {
@@ -2497,14 +2497,14 @@ static unsigned int SunPrev_ShadeColor( unsigned int packed, const float *wn )
     if ( ndl < 0.0f ) ndl = 0.0f;
     float lit = g_edSun.ambient + g_edSun.diffuse * ndl;
     if ( lit > 1.5f ) lit = 1.5f;
-    unsigned char *c = (unsigned char *)&packed;
+    byte *c = (byte *)&packed;
     float b = (float)c[0] * ( g_edSun.color[2] * lit );   // B
     float gg = (float)c[1] * ( g_edSun.color[1] * lit );  // G
     float r = (float)c[2] * ( g_edSun.color[0] * lit );   // R
     int bi = (int)b; if ( bi > 255 ) bi = 255; if ( bi < 0 ) bi = 0;
     int gi = (int)gg; if ( gi > 255 ) gi = 255; if ( gi < 0 ) gi = 0;
     int ri = (int)r; if ( ri > 255 ) ri = 255; if ( ri < 0 ) ri = 0;
-    c[0] = (unsigned char)bi; c[1] = (unsigned char)gi; c[2] = (unsigned char)ri;
+    c[0] = (byte)bi; c[1] = (byte)gi; c[2] = (byte)ri;
     return packed;
 }
 
@@ -5184,9 +5184,9 @@ extern "C++" {
 
 // The byte at def+0x4C is modelFailed (brush_t.unk01 low byte); the set/clear/test widths
 // come from Model_SetModel 0x478807/478846/4789e9/4789f2.
-static inline unsigned char *Brush_ModelFailedByte( brush_t *def )
+static inline byte *Brush_ModelFailedByte( brush_t *def )
 {
-    return (unsigned char *)def + 0x4C;   // brush_t.unk01 low byte = modelFailed
+    return (byte *)def + 0x4C;   // brush_t.unk01 low byte = modelFailed
 }
 
 // VecMultiplyAdd (0x40A5E0... 0x40A5A0) — vec3 multiply-add: out = a + scale*b.  (VectorMA is a
@@ -5274,7 +5274,7 @@ bool Model_SetModel( entity_brush_s *b, int orientMatrix )
                 //    model name from the eclass's default_model_name[] char* array, trace
                 //    straight down from the entity origin, and if the floor is hit, drop the
                 //    orientation matrix's origin onto it (VecMultiplyAdd by the hit distance).
-                modelName = eclass->cycleModelName[(unsigned short)g_qeglobals.w_cyclePreviewMode];
+                modelName = eclass->cycleModelName[(ushort)g_qeglobals.w_cyclePreviewMode];
                 float dropDir[3] = { 0.0f, 0.0f, -1.0f };
                 edTrace_t tr;
                 Trace_AllDirectionsIfFailed( ownerDef->origin, &tr, dropDir, 4608 );
@@ -5781,7 +5781,7 @@ static void Brush_UpdateSpecialMaterialFlag( brush_t *def )
     }
 
     // brush entity: clear the flag, then set it if any face's material is "special".
-    *( (unsigned char *)def + 0x4D ) = 0;                    // HIBYTE(def->unk01) = 0
+    *( (byte *)def + 0x4D ) = 0;                    // HIBYTE(def->unk01) = 0
     if ( !g_PrefsDlg->draw_toggle || def->faceCount <= 0 )
         return;
 
@@ -5793,7 +5793,7 @@ static void Brush_UpdateSpecialMaterialFlag( brush_t *def )
         MaterialDef_02( md, MaterialDef_06 );
         if ( dword_181F51C )                                 // a "special" flag survived
         {
-            *( (unsigned char *)def + 0x4D ) = 1;            // HIBYTE(def->unk01) = 1
+            *( (byte *)def + 0x4D ) = 1;            // HIBYTE(def->unk01) = 1
             break;
         }
     }
@@ -5860,7 +5860,7 @@ int DrawShadedWireframe( int cullMode, face_t *face, const orientation_t *orient
 // dword into the float colour array (a bit-cast, not a value cast).
 // ─────────────────────────────────────────────────────────────────────────────
 void Face_AddWindingToTriBatch( face_t *face, const float *packedColor,
-                                int *indexCount, unsigned short *indices,
+                                int *indexCount, ushort *indices,
                                 int *vertCount, float ( *xyzw )[4],
                                 float ( *normal )[3], float *colorArr,
                                 float ( *st )[2] )
@@ -5908,9 +5908,9 @@ void Face_AddWindingToTriBatch( face_t *face, const float *packedColor,
         int ic = *indexCount;
         for ( int i = 2; i < w->numpoints; ++i )
         {
-            indices[ic]     = (unsigned short)( *vertCount );        // 0x47b8ca
-            indices[ic + 1] = (unsigned short)( *vertCount + i - 1 );// 0x47b8d6
-            indices[ic + 2] = (unsigned short)( *vertCount + i );    // 0x47b8da
+            indices[ic]     = (ushort)( *vertCount );        // 0x47b8ca
+            indices[ic + 1] = (ushort)( *vertCount + i - 1 );// 0x47b8d6
+            indices[ic + 2] = (ushort)( *vertCount + i );    // 0x47b8da
             ic += 3;                                                 // 0x47b8c6
         }
         *indexCount = ic;                                            // 0x47b8ed
@@ -6711,7 +6711,7 @@ static void DrawOriginBox( const float *mins, const float *origin, char width,
         // v24 = b->owner->def->eclass; gate on the eclass-model-node flag bit 0x10
         // (the binary's `(*(_BYTE*)(eclass+0x180) & 0x10)==0` — draw unless that bit set).
         eclass_t *eclass = ( (entity_s_def *)b->owner->def )->eclass;
-        if ( ( *(unsigned char *)( (char *)eclass + 0x180 ) & 0x10 ) == 0 )
+        if ( ( *(byte *)( (char *)eclass + 0x180 ) & 0x10 ) == 0 )
         {
             Byte4PackPixelColor( eclass->color, &col );
             // model bbox = the brush DEF's mins/maxs (brush_t +0x20 / +0x2C).
@@ -7510,7 +7510,7 @@ static void Face_TexLock_Save( float *saveBuf, face_t *face )
 // world tex matrix back into a texdef via texturevecs_02 (the inverse of
 // Face_MoveTexture), writing it into this layer's texdef record in place.
 static void Face_TexLock_Reproject( face_t *face, const float *saveBuf,
-                                    const unsigned char *lockFlags )
+                                    const byte *lockFlags )
 {
     Face_MakePlane( face );                                 // 0x470470 (re-derive plane)
 
@@ -7608,9 +7608,9 @@ entity_s *Brush_Move( const float *move, brush_t *def, char snap )
 {
     // Texture/lightmap lock flags struct (IDA a4): {LOBYTE=texLock, BYTE1=lightmapLock,
     // BYTE2=1}.  Built once before the face loop, exactly as the binary.
-    unsigned char lockFlags[3];
-    lockFlags[0] = (unsigned char)( g_PrefsDlg->m_bTextureLock  != 0 );   // texLock
-    lockFlags[1] = (unsigned char)( g_PrefsDlg->m_bLightmapLock != 0 );   // lightmapLock
+    byte lockFlags[3];
+    lockFlags[0] = (byte)( g_PrefsDlg->m_bTextureLock  != 0 );   // texLock
+    lockFlags[1] = (byte)( g_PrefsDlg->m_bLightmapLock != 0 );   // lightmapLock
     lockFlags[2] = 1;                                                     // const1
 
     // saveBuf: IDA `int a3[19]` (76 bytes) on Brush_Move's stack, passed to both

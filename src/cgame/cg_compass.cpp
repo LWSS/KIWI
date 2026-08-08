@@ -528,7 +528,7 @@ void __cdecl CG_CompassRegisterDvars()
         "The size of the full map's border, filled by the CG_PLAYER_FULLMAP_BORDER ownerdraw");
 }
 
-bool __cdecl CG_IsSelectingLocation(int32_t localClientNum)
+bool __cdecl CG_IsSelectingLocation(int localClientNum)
 {
     return CG_GetLocalClientGlobals(localClientNum)->predictedPlayerState.locationSelectionInfo != 0;
 }
@@ -709,7 +709,7 @@ void __cdecl CG_CompassCalcDimensions(
     }
 }
 
-double __cdecl CG_FadeCompass(int32_t localClientNum, int32_t displayStartTime, CompassType compassType)
+double __cdecl CG_FadeCompass(int localClientNum, int displayStartTime, CompassType compassType)
 {
 
     if (compassType)
@@ -718,7 +718,7 @@ double __cdecl CG_FadeCompass(int32_t localClientNum, int32_t displayStartTime, 
     return CG_FadeHudMenu(localClientNum, hud_fade_compass, displayStartTime, SnapFloatToInt(hud_fade_compass->current.value * 1000.0f));}
 
 void __cdecl CG_CompassDrawPlayerBack(
-    int32_t localClientNum,
+    int localClientNum,
     CompassType compassType,
     const rectDef_s *parentRect,
     const rectDef_s *rect,
@@ -754,14 +754,14 @@ void __cdecl CG_CompassDrawPlayerBack(
     }
 }
 void __cdecl CG_CompassDrawPlayerNorthCoord(
-    int32_t localClientNum,
+    int localClientNum,
     CompassType compassType,
     const rectDef_s *parentRect,
     const rectDef_s *rect,
     Font_s *font,
     Material *material,
     float *const color,
-    int32_t style)
+    int style)
 {
     float v8; // [esp+24h] [ebp-5Ch]
     float v9; // [esp+28h] [ebp-58h]
@@ -769,11 +769,11 @@ void __cdecl CG_CompassDrawPlayerNorthCoord(
     float v11; // [esp+30h] [ebp-50h]
     float v12; // [esp+38h] [ebp-48h]
     float v13; // [esp+3Ch] [ebp-44h]
-    int32_t v14; // [esp+40h] [ebp-40h]
-    int32_t v15; // [esp+44h] [ebp-3Ch]
+    int v14; // [esp+40h] [ebp-40h]
+    int v15; // [esp+44h] [ebp-3Ch]
     float textW; // [esp+50h] [ebp-30h]
     float textWa; // [esp+50h] [ebp-30h]
-    int32_t integerPortion; // [esp+54h] [ebp-2Ch]
+    int integerPortion; // [esp+54h] [ebp-2Ch]
     float coord; // [esp+5Ch] [ebp-24h]
     float coorda; // [esp+5Ch] [ebp-24h]
     float SMALL_FRAC; // [esp+60h] [ebp-20h]
@@ -865,23 +865,23 @@ void __cdecl CG_CompassDrawPlayerNorthCoord(
 }
 
 void __cdecl CG_CompassDrawPlayerEastCoord(
-    int32_t localClientNum,
+    int localClientNum,
     CompassType compassType,
     const rectDef_s *parentRect,
     const rectDef_s *rect,
     Font_s *font,
     Material *material,
     float *const color,
-    int32_t style)
+    int style)
 {
     float v8; // [esp+20h] [ebp-54h]
     float v9; // [esp+24h] [ebp-50h]
     float v10; // [esp+2Ch] [ebp-48h]
-    int32_t v11; // [esp+30h] [ebp-44h]
-    int32_t v12; // [esp+34h] [ebp-40h]
+    int v11; // [esp+30h] [ebp-44h]
+    int v12; // [esp+34h] [ebp-40h]
     float textW; // [esp+3Ch] [ebp-38h]
     float textWa; // [esp+3Ch] [ebp-38h]
-    int32_t integerPortion; // [esp+40h] [ebp-34h]
+    int integerPortion; // [esp+40h] [ebp-34h]
     float coord; // [esp+48h] [ebp-2Ch]
     float coorda; // [esp+48h] [ebp-2Ch]
     float SMALL_FRAC; // [esp+4Ch] [ebp-28h]
@@ -967,17 +967,17 @@ void __cdecl CG_CompassDrawPlayerEastCoord(
 }
 
 void __cdecl CG_CompassDrawPlayerNCoordScroll(
-    int32_t localClientNum,
+    int localClientNum,
     CompassType compassType,
     const rectDef_s *parentRect,
     const rectDef_s *rect,
     Font_s *font,
     Material *material,
     float *color,
-    int32_t textStyle)
+    int textStyle)
 {
-    int32_t v8; // [esp+24h] [ebp-48h]
-    int32_t textW; // [esp+38h] [ebp-34h]
+    int v8; // [esp+24h] [ebp-48h]
+    int textW; // [esp+38h] [ebp-34h]
     float coorda; // [esp+40h] [ebp-2Ch]
     float coordb; // [esp+40h] [ebp-2Ch]
     float coordc; // [esp+40h] [ebp-2Ch]
@@ -1045,18 +1045,18 @@ void __cdecl CG_CompassDrawPlayerNCoordScroll(
 }
 
 void __cdecl CG_CompassDrawPlayerECoordScroll(
-    int32_t localClientNum,
+    int localClientNum,
     CompassType compassType,
     const rectDef_s *parentRect,
     const rectDef_s *rect,
     Font_s *font,
     Material *material,
     float *color,
-    int32_t textStyle)
+    int textStyle)
 {
     float v8; // [esp+20h] [ebp-54h]
-    int32_t v9; // [esp+28h] [ebp-4Ch]
-    int32_t integerPortion; // [esp+34h] [ebp-40h]
+    int v9; // [esp+28h] [ebp-4Ch]
+    int integerPortion; // [esp+34h] [ebp-40h]
     float leftCutoff; // [esp+38h] [ebp-3Ch]
     float coord; // [esp+40h] [ebp-34h]
     float coorda; // [esp+40h] [ebp-34h]
@@ -1124,7 +1124,7 @@ void __cdecl CG_CompassDrawPlayerECoordScroll(
 }
 
 void __cdecl CG_CompassDrawPlayerMap(
-    int32_t localClientNum,
+    int localClientNum,
     CompassType compassType,
     const rectDef_s *parentRect,
     const rectDef_s *rect,
@@ -1230,7 +1230,7 @@ void __cdecl CG_CompassDrawPlayerMap(
 }
 
 void __cdecl CG_CompassDrawPlayerMapLocationSelector(
-    int32_t localClientNum,
+    int localClientNum,
     CompassType compassType,
     const rectDef_s *parentRect,
     const rectDef_s *rect,
@@ -1242,7 +1242,7 @@ void __cdecl CG_CompassDrawPlayerMapLocationSelector(
     float texMax; // [esp+3Ch] [ebp-58h]
     float texMax_4; // [esp+40h] [ebp-54h]
     const char *mtlName; // [esp+44h] [ebp-50h]
-    int32_t mtlIndex; // [esp+48h] [ebp-4Ch]
+    int mtlIndex; // [esp+48h] [ebp-4Ch]
     float radius; // [esp+50h] [ebp-44h]
     Material *selectorMaterial; // [esp+54h] [ebp-40h]
     float posScreen; // [esp+58h] [ebp-3Ch]
@@ -1334,7 +1334,7 @@ void __cdecl CG_CompassDrawPlayerMapLocationSelector(
 }
 
 void __cdecl CG_CompassDrawPlayer(
-    int32_t localClientNum,
+    int localClientNum,
     CompassType compassType,
     const rectDef_s *parentRect,
     rectDef_s *rect,
@@ -1418,7 +1418,7 @@ void __cdecl CG_CompassDrawPlayer(
 }
 
 void __cdecl CG_CompassDrawBorder(
-    int32_t localClientNum,
+    int localClientNum,
     CompassType compassType,
     const rectDef_s *parentRect,
     rectDef_s *rect,
@@ -1687,7 +1687,7 @@ static void DrawTickerTapeObjectivePing(
 #endif
 
 void __cdecl CG_CompassDrawTickertape(
-    int32_t localClientNum,
+    int localClientNum,
     CompassType compassType,
     const rectDef_s *parentRect,
     const rectDef_s *rect,
@@ -1695,7 +1695,7 @@ void __cdecl CG_CompassDrawTickertape(
     const float *color,
     Font_s *textFont,
     float textScale,
-    int32_t textStyle,
+    int textStyle,
     bool drawObjectives)
 {
     float angle; // [esp+2Ch] [ebp-B0h]
@@ -1723,7 +1723,7 @@ void __cdecl CG_CompassDrawTickertape(
     float nearestDistHeightDelta; // [esp+98h] [ebp-44h]
     float iconW; // [esp+9Ch] [ebp-40h] BYREF
     float iconH; // [esp+A0h] [ebp-3Ch] BYREF
-    int32_t objIdx; // [esp+A4h] [ebp-38h]
+    int objIdx; // [esp+A4h] [ebp-38h]
 #ifdef KISAK_MP
     const objective_t *objective; // [esp+A8h] [ebp-34h]
 #elif KISAK_SP
@@ -1903,7 +1903,7 @@ void __cdecl CalcCompassPointerSize(CompassType compassType, float *w, float *h)
 }
 
 void __cdecl DrawIconDistanceText(
-    int32_t localClientNum,
+    int localClientNum,
     float distance,
     float iconX,
     float iconY,
@@ -1912,7 +1912,7 @@ void __cdecl DrawIconDistanceText(
     const float *color,
     Font_s *textFont,
     float textScale,
-    int32_t textStyle)
+    int textStyle)
 {
     double v10; // st7
     char str[68]; // [esp+24h] [ebp-68h] BYREF
@@ -1963,7 +1963,7 @@ double __cdecl CutFloat(float original)
     return (float)((double)(int)(original * 10.0) * 0.1000000014901161);
 }
 
-double __cdecl CG_GetHudAlphaCompass(int32_t localClientNum)
+double __cdecl CG_GetHudAlphaCompass(int localClientNum)
 {
     cg_s *LocalClientGlobals = CG_GetLocalClientGlobals(localClientNum);
     return CG_FadeCompass(localClientNum, LocalClientGlobals->compassFadeTime, COMPASS_TYPE_PARTIAL);
@@ -1988,7 +1988,7 @@ void __cdecl CalcCompassFriendlySize(CompassType compassType, float *w, float *h
 
 #ifdef KISAK_MP
 void __cdecl CG_CompassDrawPlayerPointers_MP(
-    int32_t localClientNum,
+    int localClientNum,
     CompassType compassType,
     const rectDef_s *parentRect,
     const rectDef_s *rect,
@@ -2015,7 +2015,7 @@ void __cdecl CG_CompassDrawPlayerPointers_MP(
     float x; // [esp+A0h] [ebp-34h]
     float y; // [esp+A4h] [ebp-30h]
     const playerState_s *ps; // [esp+A8h] [ebp-2Ch]
-    int32_t objNum; // [esp+ACh] [ebp-28h]
+    int objNum; // [esp+ACh] [ebp-28h]
     float clipfade; // [esp+B0h] [ebp-24h]
     float centerX; // [esp+B4h] [ebp-20h]
     float h; // [esp+B8h] [ebp-1Ch] BYREF

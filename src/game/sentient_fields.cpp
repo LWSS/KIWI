@@ -114,7 +114,7 @@ void __cdecl GScr_AddFieldsForSentient()
     for (f = fields_2; f->name; ++f)
     {
         iassert(!((f - fields_2) & ENTFIELD_MASK));
-        iassert((f - fields_2) == (unsigned short)(f - fields_2));
+        iassert((f - fields_2) == (ushort)(f - fields_2));
 
         Scr_AddClassField(CLASS_NUM_ENTITY, (char*)f->name, (unsigned __int16)(f - fields_2) | ENTFIELD_SENTIENT);
     }

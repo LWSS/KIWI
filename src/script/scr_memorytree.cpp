@@ -75,10 +75,10 @@ void* MT_Alloc(int numBytes, mtType_t type)
     return &scrMemTreeGlob.nodes[MT_AllocIndex(numBytes, type)];
 }
 
-unsigned short MT_AllocIndex(int numBytes, mtType_t type)
+ushort MT_AllocIndex(int numBytes, mtType_t type)
 {
-    uint32_t nodeNum; // [esp+4Ch] [ebp-Ch]
-    uint32_t size; // [esp+50h] [ebp-8h]
+    uint nodeNum; // [esp+4Ch] [ebp-Ch]
+    uint size; // [esp+50h] [ebp-8h]
     int newSize; // [esp+54h] [ebp-4h]
 
     PROF_SCOPED("scriptMemory");
@@ -186,7 +186,7 @@ void MT_RemoveHeadMemoryNode(int size)
     }
 }
 
-void MT_FreeIndex(uint32_t nodeNum, int numBytes)
+void MT_FreeIndex(uint nodeNum, int numBytes)
 {
     int size; // [esp+30h] [ebp-8h]
     int lowBit; // [esp+34h] [ebp-4h]
@@ -225,7 +225,7 @@ void MT_FreeIndex(uint32_t nodeNum, int numBytes)
     Sys_LeaveCriticalSection(CRITSECT_MEMORY_TREE);
 }
 
-bool __cdecl MT_RemoveMemoryNode(int oldNode, uint32_t size)
+bool __cdecl MT_RemoveMemoryNode(int oldNode, uint size)
 {
     MemoryNode tempNodeValue;
     int node;
@@ -535,7 +535,7 @@ void MT_DumpTree()
     iassert(totalBuckets == (1 << MEMORY_NODE_BITS) - 1);
 }
 
-char const* MT_NodeInfoString(uint32_t nodeNum)
+char const* MT_NodeInfoString(uint nodeNum)
 {
     int type = scrMemTreeDebugGlob.mt_usage[nodeNum];
 

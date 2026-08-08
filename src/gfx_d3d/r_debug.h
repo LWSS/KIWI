@@ -87,7 +87,7 @@ struct DebugGlobals // sizeof=0x54
     int plumeLimit;                     // ...
 };
 
-enum GfxWarningType : __int32
+enum GfxWarningType : int
 {                                       // ...
     R_WARN_FRONTEND_ENT_LIMIT = 0x0,
     R_WARN_KNOWN_MODELS = 0x1,

@@ -32,7 +32,7 @@ bool Scr_IsIdentifier(char const* token)
     return 1;
 }
 
-uint32_t SL_TransferToCanonicalString(uint32_t stringValue)
+uint SL_TransferToCanonicalString(uint stringValue)
 {
 	iassert(stringValue);
 	SL_TransferRefToUser(stringValue, 2u);
@@ -45,10 +45,10 @@ uint32_t SL_TransferToCanonicalString(uint32_t stringValue)
 	return scrVarPub.canonicalStrCount;
 }
 
-uint32_t __cdecl SL_GetCanonicalString(const char* str)
+uint __cdecl SL_GetCanonicalString(const char* str)
 {
-    uint32_t v1; // eax
-    uint32_t v3; // eax
+    uint v1; // eax
+    uint v3; // eax
 
     v1 = SL_FindString(str);
     if (scrCompilePub.canonicalStrings[v1])
@@ -63,7 +63,7 @@ void SL_BeginLoadScripts()
     scrVarPub.canonicalStrCount = 0;
 }
 
-int __cdecl Scr_ScanFile(unsigned char *buf, int max_size)
+int __cdecl Scr_ScanFile(byte *buf, int max_size)
 {
     char c; // [esp+3h] [ebp-5h]
     int n; // [esp+4h] [ebp-4h]
@@ -215,20 +215,20 @@ void __cdecl Scr_BeginLoadAnimTrees(int user)
     scrCompilePub.developer_statement = 0;
 }
 
-uint32_t __cdecl Scr_LoadScriptInternal(const char *filename, PrecacheEntry *entries, int entriesCount)
+uint __cdecl Scr_LoadScriptInternal(const char *filename, PrecacheEntry *entries, int entriesCount)
 {
-    uint32_t Variable; // eax
+    uint Variable; // eax
     VariableValueInternal_u Object; // [esp+0h] [ebp-7Ch]
     char extFilename[64]; // [esp+14h] [ebp-68h] BYREF
-    uint32_t filePtr; // [esp+58h] [ebp-24h]
+    uint filePtr; // [esp+58h] [ebp-24h]
     char *sourceBuffer; // [esp+5Ch] [ebp-20h]
     const char *oldFilename; // [esp+60h] [ebp-1Ch]
-    uint32_t name; // [esp+64h] [ebp-18h]
-    uint32_t oldAnimTreeNames; // [esp+68h] [ebp-14h]
+    uint name; // [esp+64h] [ebp-18h]
+    uint oldAnimTreeNames; // [esp+68h] [ebp-14h]
     const char *oldSourceBuf; // [esp+6Ch] [ebp-10h]
-    uint32_t scriptId; // [esp+70h] [ebp-Ch]
+    uint scriptId; // [esp+70h] [ebp-Ch]
     sval_u parseData; // [esp+74h] [ebp-8h] BYREF
-    uint32_t fileId; // [esp+78h] [ebp-4h]
+    uint fileId; // [esp+78h] [ebp-4h]
 
     iassert(scrCompilePub.script_loading);
     iassert(strlen(filename) < MAX_QPATH);
@@ -285,7 +285,7 @@ uint32_t __cdecl Scr_LoadScriptInternal(const char *filename, PrecacheEntry *ent
     }
 }
 
-uint32_t __cdecl Scr_LoadScript(const char *filename)
+uint __cdecl Scr_LoadScript(const char *filename)
 {
     PrecacheEntry entries[MAX_PRECACHE_ENTRIES]; // [esp+0h] [ebp-2000h] BYREF
 
@@ -300,7 +300,7 @@ void __cdecl Scr_PostCompileScripts()
 
 void __cdecl Scr_PrecacheAnimTrees(void *(__cdecl *Alloc)(int), int user)
 {
-    uint32_t i; // [esp+0h] [ebp-4h]
+    uint i; // [esp+0h] [ebp-4h]
 
     for (i = 1; i <= scrAnimPub.xanim_num[user]; ++i)
         Scr_LoadAnimTreeAtIndex(i, Alloc, user);

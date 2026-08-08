@@ -6,7 +6,7 @@
 #error This file is for SinglePlayer only 
 #endif
 
-enum PredictionTraceResult : __int32
+enum PredictionTraceResult : int
 {
     PTR_SUCCESS = 0x0,
     PTR_HIT_WORLD = 0x1,
@@ -64,7 +64,7 @@ struct actor_goal_s
 
 struct actor_s;
 struct pathnode_t;
-enum ai_stance_e : __int32;
+enum ai_stance_e : int;
 
 bool __cdecl Path_IsPathStanceNode(const pathnode_t *node);
 float __cdecl Path_GetPathDir(float *delta, const float *vFrom, const float *vTo);

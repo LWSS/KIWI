@@ -10,7 +10,7 @@ CinematicGlob cinematicGlob;
 
 void __cdecl R_Cinematic_Init() {}
 void __cdecl R_Cinematic_Shutdown() {}
-void __cdecl R_Cinematic_StartPlayback(char *name, uint32_t playbackFlags, float volume) {}
+void __cdecl R_Cinematic_StartPlayback(char *name, uint playbackFlags, float volume) {}
 void __cdecl R_Cinematic_StartNextPlayback() {}
 void __cdecl R_Cinematic_StopPlayback() {}
 
@@ -35,5 +35,5 @@ bool __cdecl R_Cinematic_IsUnderrun() { return false; }
 void __cdecl R_Cinematic_BeginLostDevice() {}
 void __cdecl R_Cinematic_EndLostDevice() {}
 void __cdecl R_Cinematic_SetPaused(CinematicEnum paused) {}
-void R_Cinematic_SetNextPlayback(const char *name, uint32_t playbackFlags) {}
+void R_Cinematic_SetNextPlayback(const char *name, uint playbackFlags) {}
 void R_Cinematic_UnsetNextPlayback() {}

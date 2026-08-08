@@ -13,14 +13,14 @@
 
 struct Scr_WatchElement_s;
 
-enum Scr_ConsoleOpenMode : __int32
+enum Scr_ConsoleOpenMode : int
 {
     SCR_CONSOLE_INPUT_ONLY = 0x0,
     SCR_CONSOLE_INPUT_OUTPUT = 0x1,
 };
 
 #ifdef KISAK_MP
-enum operationEnum : __int32
+enum operationEnum : int
 {                                       // ...
     OP_NOOP = 0x0,
     OP_RIGHTPAREN = 0x1,
@@ -111,7 +111,7 @@ enum operationEnum : __int32
 // compiled into the Radiant target, but operationEnum is declared transitively
 // via ui_shared.h, so it must exist — keep it identical to SP.
 #elif defined(KISAK_SP) || defined(KISAK_RADIANT)
-enum operationEnum : __int32
+enum operationEnum : int
 {
     OP_NOOP = 0x0,
     OP_RIGHTPAREN = 0x1,
@@ -200,7 +200,7 @@ enum operationEnum : __int32
 
 
 #ifdef KISAK_MP
-enum uiMenuCommand_t : __int32
+enum uiMenuCommand_t : int
 {                                       // ...
     UIMENU_NONE = 0x0,
     UIMENU_MAIN = 0x1,
@@ -216,7 +216,7 @@ enum uiMenuCommand_t : __int32
     UIMENU_ENDOFGAME = 0xB,
 };
 #elif KISAK_SP
-enum uiMenuCommand_t : __int32
+enum uiMenuCommand_t : int
 {
     UIMENU_NONE = 0x0,
     UIMENU_MAIN = 0x1,
@@ -232,28 +232,28 @@ enum uiMenuCommand_t : __int32
     UIMENU_CONTROLLERREMOVED = 0xB,
 };
 #elif defined(KISAK_RADIANT)
-enum uiMenuCommand_t : __int32 { UIMENU_NONE = 0x0, UIMENU_MAIN = 0x1, UIMENU_INGAME = 0x2 };
+enum uiMenuCommand_t : int { UIMENU_NONE = 0x0, UIMENU_MAIN = 0x1, UIMENU_INGAME = 0x2 };
 #endif
 
-enum parseSkip_t : __int32
+enum parseSkip_t : int
 {                                       // ...
     SKIP_NO = 0x0,
     SKIP_YES = 0x1,
     SKIP_ALL_ELIFS = 0x2,
 };
-enum UILocalVarType : __int32
+enum UILocalVarType : int
 {                                       // ...
     UILOCALVAR_INT = 0x0,
     UILOCALVAR_FLOAT = 0x1,
     UILOCALVAR_STRING = 0x2,
 };
-enum EvalValueType : __int32
+enum EvalValueType : int
 {                                       // ...
     EVAL_VALUE_DOUBLE = 0x0,
     EVAL_VALUE_INT = 0x1,
     EVAL_VALUE_STRING = 0x2,
 };
-enum EvalOperatorType : __int32
+enum EvalOperatorType : int
 {                                       // ...
     EVAL_OP_LPAREN = 0x0,
     EVAL_OP_RPAREN = 0x1,
@@ -421,7 +421,7 @@ union operandInternalDataUnion // sizeof=0x4
     float floatVal;
     const char *string;
 };
-enum expDataType : __int32
+enum expDataType : int
 {                                       // ...
     VAL_INT = 0x0,
     VAL_FLOAT = 0x1,
@@ -672,7 +672,7 @@ struct __declspec(align(8)) token_s // sizeof=0x430
     char string[1024];                  // ...
     int type;                           // ...
     int subtype;                        // ...
-    uint32_t intvalue;              // ...
+    uint intvalue;              // ...
     // padding byte
     // padding byte
     // padding byte
@@ -1100,14 +1100,14 @@ void __cdecl Item_ListBox_PaintHighlight(int localClientNum, itemDef_s *item, fl
 void __cdecl Item_OwnerDraw_Paint(UiContext *dc, itemDef_s *item);
 void __cdecl Item_GameMsgWindow_Paint(UiContext *dc, itemDef_s *item);
 int __cdecl Menu_Count(UiContext *dc);
-void __cdecl Menu_PaintAll_BeginVisibleList(char *stringBegin, uint32_t stringSize);
-void __cdecl Menu_PaintAll_AppendToVisibleList(char *stringBegin, uint32_t stringSize, char *stringToAppend);
+void __cdecl Menu_PaintAll_BeginVisibleList(char *stringBegin, uint stringSize);
+void __cdecl Menu_PaintAll_AppendToVisibleList(char *stringBegin, uint stringSize, char *stringToAppend);
 void __cdecl Menu_PaintAll_DrawVisibleList(char *stringBegin, UiContext *dc);
 void __cdecl Menu_PaintAll(UiContext *dc);
 void __cdecl TRACK_ui_shared();
 void __cdecl UI_AddMenuList(UiContext *dc, MenuList *menuList);
 void __cdecl UI_AddMenu(UiContext *dc, menuDef_t *menu);
-int __cdecl UI_PlayLocalSoundAliasByName(uint32_t localClientNum, const char *aliasname);
+int __cdecl UI_PlayLocalSoundAliasByName(uint localClientNum, const char *aliasname);
 int __cdecl UI_GetMenuScreen();
 int __cdecl UI_GetForcedMenuScreen();
 int __cdecl UI_GetMenuScreenForError();
@@ -1120,13 +1120,13 @@ MenuList *__cdecl UI_LoadMenus_FastFile(const char *menuFile);
 void __cdecl UILocalVar_Init(UILocalVarContext *context);
 void __cdecl UILocalVar_Shutdown(UILocalVarContext *context);
 UILocalVarContext *__cdecl UILocalVar_Find(UILocalVarContext *context, const char *name);
-char __cdecl UILocalVar_FindLocation(UILocalVarContext *context, const char *name, uint32_t *hashForName);
-uint32_t __cdecl UILocalVar_HashName(const char *name);
+char __cdecl UILocalVar_FindLocation(UILocalVarContext *context, const char *name, uint *hashForName);
+uint __cdecl UILocalVar_HashName(const char *name);
 UILocalVarContext *__cdecl UILocalVar_FindOrCreate(UILocalVarContext *context, char *name);
 bool __cdecl UILocalVar_GetBool(const UILocalVar *var);
 UILocalVar_u __cdecl UILocalVar_GetInt(const UILocalVar *var);
 double __cdecl UILocalVar_GetFloat(const UILocalVar *var);
-char *__cdecl UILocalVar_GetString(const UILocalVar *var, char *stringBuf, uint32_t size);
+char *__cdecl UILocalVar_GetString(const UILocalVar *var, char *stringBuf, uint size);
 void __cdecl UILocalVar_SetBool(UILocalVar *var, bool b);
 void __cdecl UILocalVar_SetInt(UILocalVar *var, int i);
 void __cdecl UILocalVar_SetFloat(UILocalVar *var, float f);
@@ -1157,7 +1157,7 @@ int __cdecl Item_IsEditFieldDef(itemDef_s *item);
 listBoxDef_s *__cdecl Item_GetListBoxDef(itemDef_s *item);
 editFieldDef_s *__cdecl Item_GetEditFieldDef(itemDef_s *item);
 multiDef_s *__cdecl Item_GetMultiDef(itemDef_s *item);
-uint8_t *__cdecl UI_Alloc(uint32_t size, int alignment);
+uint8_t *__cdecl UI_Alloc(uint size, int alignment);
 void __cdecl String_Init();
 const char *__cdecl String_Alloc(const char *p);
 int __cdecl hashForString(const char *str);
@@ -1215,7 +1215,7 @@ void __cdecl GetLocalVarStringValue(
     Operand *source,
     Operand *result,
     char *stringBuf,
-    uint32_t size);
+    uint size);
 UILocalVarContext *__cdecl GetLocalVar(int localClientNum, Operand *source);
 void __cdecl GetLocalVarBoolValue(int localClientNum, Operand *source, Operand *result);
 void __cdecl GetLocalVarIntValue(int localClientNum, Operand *source, Operand *result);
@@ -1569,7 +1569,7 @@ struct UI_ScrollPane : UI_Component // sizeof=0x34
 
 struct Scr_ScriptWindow : UI_LinesComponent // sizeof=0x3C
 {
-    //void *operator new(uint32_t size)
+    //void *operator new(uint size)
     //{
     //    return Hunk_AllocDebugMem(size);
     //}
@@ -1589,7 +1589,7 @@ struct Scr_ScriptWindow : UI_LinesComponent // sizeof=0x3C
     virtual void Init();
     virtual bool KeyEvent(float *point, int key);
 
-    uint32_t bufferIndex;
+    uint bufferIndex;
     int currentTopLine;
     const char *currentBufPos;
     struct Scr_Breakpoint *breakpointHead;
@@ -1618,7 +1618,7 @@ struct Scr_ScriptWindow : UI_LinesComponent // sizeof=0x3C
     void FindPrev();
     void SetCurrentLine(int line);
 
-    void GetSourcePos(uint32_t *start, uint32_t *end);
+    void GetSourcePos(uint *start, uint *end);
 
     void AddBreakpoint(
         struct Scr_Breakpoint **pBreakpoint,
@@ -1632,8 +1632,8 @@ struct Scr_ScriptWindow : UI_LinesComponent // sizeof=0x3C
         uint8_t breakpointType,
         bool user,
         struct Scr_Breakpoint **pBreakpoint,
-        uint32_t startSourcePos,
-        uint32_t endSourcePos);
+        uint startSourcePos,
+        uint endSourcePos);
 
     void ToggleBreakpointInternal(
         Scr_WatchElement_s *element,
@@ -1723,7 +1723,7 @@ struct Scr_ScriptWatch : UI_LinesComponent // sizeof=0x34
         float width,
         float lastHeight,
         int startLine,
-        uint32_t depth,
+        uint depth,
         bool isArray,
         int *currentLine,
         float *currentY,
@@ -1732,7 +1732,7 @@ struct Scr_ScriptWatch : UI_LinesComponent // sizeof=0x34
 
     Scr_WatchElement_s *elementHead;    // ...
     int elementId;                      // ...
-    uint32_t localId;               // ...
+    uint localId;               // ...
     int dirty;                          // ...
 
     bool ReadFromFile();
@@ -1784,7 +1784,7 @@ struct Scr_ScriptWatch : UI_LinesComponent // sizeof=0x34
 
     bool EvaluateWatchChildElement(
         Scr_WatchElement_s *element,
-        uint32_t fieldName,
+        uint fieldName,
         Scr_WatchElement_s *childElement,
         bool hardcodedField);
     void EvaluateWatchChildren(Scr_WatchElement_s *parentElement);
@@ -1835,8 +1835,8 @@ struct Scr_ScriptWatch : UI_LinesComponent // sizeof=0x34
 
     Scr_WatchElement_s *CreateBreakpointElement(
         Scr_WatchElement_s *element,
-        uint32_t bufferIndex,
-        uint32_t sourcePos,
+        uint bufferIndex,
+        uint sourcePos,
         bool user);
 
     void UpdateBreakpoint(bool add);
@@ -1844,8 +1844,8 @@ struct Scr_ScriptWatch : UI_LinesComponent // sizeof=0x34
 
 struct Scr_SourcePos2_t // sizeof=0x8
 {                                       // ...
-    uint32_t bufferIndex;           // ...
-    uint32_t sourcePos;             // ...
+    uint bufferIndex;           // ...
+    uint sourcePos;             // ...
 };
 
 struct Scr_ScriptCallStack : UI_LinesComponent // sizeof=0x12C
@@ -2017,7 +2017,7 @@ const char *__cdecl UI_FeederItemText(
     itemDef_s *item,
     const float feederID,
     int index,
-    uint32_t column,
+    uint column,
     Material **handle);
 void __cdecl UI_FeederItemColor(
     int localClientNum,

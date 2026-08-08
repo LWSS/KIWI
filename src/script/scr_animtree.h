@@ -6,12 +6,12 @@
 
 struct scrAnimPub_t // sizeof=0x41C
 {                                       // ...
-    uint32_t animtrees;             // ...
-    uint32_t animtree_node;         // ...
-    uint32_t animTreeNames;         // ...
+    uint animtrees;             // ...
+    uint animtree_node;         // ...
+    uint animTreeNames;         // ...
     scr_animtree_t xanim_lookup[2][MAX_XANIMTREE_NUM]; // ...
-    uint32_t xanim_num[2];          // ...
-    uint32_t animTreeIndex;         // ...
+    uint xanim_num[2];          // ...
+    uint animTreeIndex;         // ...
     bool animtree_loading;              // ...
     // padding byte
     // padding byte
@@ -30,37 +30,37 @@ static_assert(sizeof(scrAnimGlob_t) == 0x20C);
 
 void __cdecl TRACK_scr_animtree();
 void __cdecl SetAnimCheck(int bAnimCheck);
-void __cdecl Scr_EmitAnimation(char *pos, uint32_t animName, uint32_t sourcePos);
-void __cdecl Scr_EmitAnimationInternal(char *pos, uint32_t animName, uint32_t names);
+void __cdecl Scr_EmitAnimation(char *pos, uint animName, uint sourcePos);
+void __cdecl Scr_EmitAnimationInternal(char *pos, uint animName, uint names);
 int __cdecl Scr_GetAnimsIndex(const XAnim_s *anims);
-XAnim_s *__cdecl Scr_GetAnims(uint32_t index);
-void __cdecl Scr_UsingTree(const char *filename, uint32_t sourcePos);
-uint32_t __cdecl Scr_UsingTreeInternal(const char *filename, uint32_t *index, int user);
-void __cdecl Scr_LoadAnimTreeAtIndex(uint32_t index, void *(__cdecl *Alloc)(int), int user);
-int __cdecl Scr_GetAnimTreeSize(uint32_t parentNode);
+XAnim_s *__cdecl Scr_GetAnims(uint index);
+void __cdecl Scr_UsingTree(const char *filename, uint sourcePos);
+uint __cdecl Scr_UsingTreeInternal(const char *filename, uint *index, int user);
+void __cdecl Scr_LoadAnimTreeAtIndex(uint index, void *(__cdecl *Alloc)(int), int user);
+int __cdecl Scr_GetAnimTreeSize(uint parentNode);
 void __cdecl ConnectScriptToAnim(
-    uint32_t names,
+    uint names,
     uint16_t index,
-    uint32_t filename,
-    uint32_t name,
+    uint filename,
+    uint name,
     uint16_t treeIndex);
 int __cdecl Scr_CreateAnimationTree(
-    uint32_t parentNode,
-    uint32_t names,
+    uint parentNode,
+    uint names,
     XAnim_s *anims,
-    uint32_t childIndex,
+    uint childIndex,
     const char *parentName,
-    uint32_t parentIndex,
-    uint32_t filename,
+    uint parentIndex,
+    uint filename,
     int treeIndex,
     uint16_t flags);
-void __cdecl Scr_CheckAnimsDefined(uint32_t names, uint32_t filename);
-bool __cdecl Scr_LoadAnimTreeInternal(const char *filename, uint32_t parentNode, uint32_t names);
-void __cdecl Scr_AnimTreeParse(const char *pos, uint32_t parentNode, uint32_t names);
+void __cdecl Scr_CheckAnimsDefined(uint names, uint filename);
+bool __cdecl Scr_LoadAnimTreeInternal(const char *filename, uint parentNode, uint names);
+void __cdecl Scr_AnimTreeParse(const char *pos, uint parentNode, uint names);
 void __cdecl AnimTreeCompileError(const char *msg);
 bool __cdecl AnimTreeParseInternal(
-    uint32_t parentNode,
-    uint32_t names,
+    uint parentNode,
+    uint names,
     bool bIncludeParent,
     bool bLoop,
     bool bComplete);

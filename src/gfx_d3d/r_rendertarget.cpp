@@ -169,10 +169,10 @@ void __cdecl R_InitFullscreenRenderTargetImage(
 
 void __cdecl R_GetFullScreenRes(FullscreenType screenType, int *fullscreenWidth, int *fullscreenHeight)
 {
-    uint32_t sceneHeight; // [esp+0h] [ebp-8h]
-    uint32_t sceneWidth; // [esp+4h] [ebp-4h]
+    uint sceneHeight; // [esp+0h] [ebp-8h]
+    uint sceneWidth; // [esp+4h] [ebp-4h]
 
-    if ((uint32_t)screenType > FULLSCREEN_SCENE)
+    if ((uint)screenType > FULLSCREEN_SCENE)
         MyAssertHandler(
             ".\\r_rendertarget.cpp",
             467,
@@ -268,7 +268,7 @@ void __cdecl R_InitRenderTargetImage(
     RenderTargetUsage usage,
     GfxRenderTarget *renderTarget)
 {
-    uint32_t renderTargetId; // [esp+0h] [ebp-4h]
+    uint renderTargetId; // [esp+0h] [ebp-4h]
 
     AssertUninitializedRenderTarget(renderTarget);
     iassert( (width > 0) );

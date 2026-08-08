@@ -14,8 +14,8 @@ const int g_layerDataStride[16] = { 0, 0, 0, 8, 12, 16, 20, 24, 24, 28, 32, 32, 
 void __cdecl R_SetStreamSource(
     GfxCmdBufPrimState *primState,
     IDirect3DVertexBuffer9 *vb,
-    uint32_t vertexOffset,
-    uint32_t vertexStride)
+    uint vertexOffset,
+    uint vertexStride)
 {
     if (primState->streams[0].vb != vb
         || primState->streams[0].offset != vertexOffset
@@ -27,7 +27,7 @@ void __cdecl R_SetStreamSource(
         R_ChangeStreamSource(primState, 1u, 0, 0, 0);
 }
 
-void __cdecl R_HW_SetSamplerTexture(IDirect3DDevice9 *device, uint32_t samplerIndex, const GfxTexture *texture)
+void __cdecl R_HW_SetSamplerTexture(IDirect3DDevice9 *device, uint samplerIndex, const GfxTexture *texture)
 {
     int hr; // [esp+0h] [ebp-4h]
 
@@ -61,7 +61,7 @@ void __cdecl R_SetStreamsForBspSurface(GfxCmdBufPrimState *state, const srfTrian
     IDirect3DVertexBuffer9 *layerVb; // [esp+4h] [ebp-28h]
     int vertexOffset; // [esp+8h] [ebp-24h]
     IDirect3DVertexBuffer9 *vb; // [esp+Ch] [ebp-20h]
-    uint32_t layerDataStride; // [esp+28h] [ebp-4h]
+    uint layerDataStride; // [esp+28h] [ebp-4h]
 
     layerDataStride = g_layerDataStride[state->vertDeclType];
     if (layerDataStride)
@@ -86,13 +86,13 @@ void __cdecl R_SetStreamsForBspSurface(GfxCmdBufPrimState *state, const srfTrian
 }
 
 void __cdecl R_DrawBspDrawSurfsLit(
-    const uint32_t *primDrawSurfPos,
+    const uint *primDrawSurfPos,
     GfxCmdBufContext context,
     GfxCmdBufContext prepassContext)
 {
     GfxTrianglesDrawStream drawStream; // [esp+4h] [ebp-38h] BYREF
     const MaterialPass *pass; // [esp+34h] [ebp-8h]
-    uint32_t customSamplerFlags; // [esp+38h] [ebp-4h]
+    uint customSamplerFlags; // [esp+38h] [ebp-4h]
 
     pass = context.state->pass;
     customSamplerFlags = pass->customSamplerFlags;
@@ -130,27 +130,27 @@ void __cdecl R_DrawTrianglesLit(
 {
     const GfxTexture *v3; // [esp+0h] [ebp-78h]
     int baseIndex; // [esp+10h] [ebp-68h]
-    uint32_t surfIndex; // [esp+14h] [ebp-64h]
+    uint surfIndex; // [esp+14h] [ebp-64h]
     const GfxSurface *tris; // [esp+18h] [ebp-60h]
     const srfTriangles_t *prevTris; // [esp+1Ch] [ebp-5Ch]
-    uint32_t lightmapSecondaryFlag; // [esp+20h] [ebp-58h]
-    uint32_t reflectionProbeFlag; // [esp+24h] [ebp-54h]
+    uint lightmapSecondaryFlag; // [esp+20h] [ebp-58h]
+    uint reflectionProbeFlag; // [esp+24h] [ebp-54h]
     const GfxTexture *lightmapPrimaryTexture; // [esp+28h] [ebp-50h]
     const uint16_t *list; // [esp+2Ch] [ebp-4Ch] BYREF
     int triCount; // [esp+30h] [ebp-48h]
-    uint32_t reflectionProbeIndex; // [esp+34h] [ebp-44h]
+    uint reflectionProbeIndex; // [esp+34h] [ebp-44h]
     const GfxTexture *reflectionProbeTexture; // [esp+38h] [ebp-40h]
     const GfxTexture *newLightmapPrimaryTexture; // [esp+3Ch] [ebp-3Ch]
     GfxTexture *reflectionProbeTextures; // [esp+40h] [ebp-38h]
     const GfxSurface *bspSurf; // [esp+44h] [ebp-34h]
-    uint32_t index; // [esp+48h] [ebp-30h]
-    uint32_t lightmapIndex; // [esp+4Ch] [ebp-2Ch]
+    uint index; // [esp+48h] [ebp-30h]
+    uint lightmapIndex; // [esp+4Ch] [ebp-2Ch]
     const GfxTexture *lightmapSecondaryTexture; // [esp+50h] [ebp-28h]
     const GfxTexture *newLightmapSecondaryTexture; // [esp+54h] [ebp-24h]
     IDirect3DDevice9 *device; // [esp+58h] [ebp-20h]
-    uint32_t lightmapPrimaryFlag; // [esp+5Ch] [ebp-1Ch]
+    uint lightmapPrimaryFlag; // [esp+5Ch] [ebp-1Ch]
     const GfxImage *overrideImage; // [esp+60h] [ebp-18h]
-    uint32_t count; // [esp+64h] [ebp-14h] BYREF
+    uint count; // [esp+64h] [ebp-14h] BYREF
     int baseVertex; // [esp+68h] [ebp-10h]
     const GfxTexture *newReflectionProbeTexture; // [esp+6Ch] [ebp-Ch]
     int hasSunDirChanged; // [esp+70h] [ebp-8h]
@@ -311,7 +311,7 @@ void __cdecl R_DrawTrianglesLit(
     drawStream->lightmapSecondaryTexture = lightmapSecondaryTexture;
 }
 
-void __cdecl R_DrawBspTris(GfxCmdBufPrimState *state, const srfTriangles_t *tris, uint32_t triCount)
+void __cdecl R_DrawBspTris(GfxCmdBufPrimState *state, const srfTriangles_t *tris, uint triCount)
 {
     GfxDrawPrimArgs args; // [esp+0h] [ebp-Ch] BYREF
 
@@ -325,9 +325,9 @@ void __cdecl R_DrawBspTris(GfxCmdBufPrimState *state, const srfTriangles_t *tris
 }
 
 int __cdecl R_ReadBspDrawSurfs(
-    const uint32_t **primDrawSurfPos,
+    const uint **primDrawSurfPos,
     const uint16_t **list,
-    uint32_t *count)
+    uint *count)
 {
     *count = *(*primDrawSurfPos)++;
     if (!*count)
@@ -337,7 +337,7 @@ int __cdecl R_ReadBspDrawSurfs(
     return 1;
 }
 
-void __cdecl R_DrawBspDrawSurfs(const uint32_t *primDrawSurfPos, GfxCmdBufState *state)
+void __cdecl R_DrawBspDrawSurfs(const uint *primDrawSurfPos, GfxCmdBufState *state)
 {
     GfxTrianglesDrawStream drawStream; // [esp+0h] [ebp-30h] BYREF
 
@@ -353,8 +353,8 @@ void __cdecl R_DrawTriangles(GfxTrianglesDrawStream *drawStream, GfxCmdBufPrimSt
     const uint16_t *list; // [esp+10h] [ebp-18h] BYREF
     int triCount; // [esp+14h] [ebp-14h]
     const GfxSurface *bspSurf; // [esp+18h] [ebp-10h]
-    uint32_t index; // [esp+1Ch] [ebp-Ch]
-    uint32_t count; // [esp+20h] [ebp-8h] BYREF
+    uint index; // [esp+1Ch] [ebp-Ch]
+    uint count; // [esp+20h] [ebp-8h] BYREF
     int baseVertex; // [esp+24h] [ebp-4h]
 
     prevTris = 0;
@@ -390,8 +390,8 @@ void __cdecl R_DrawTriangles(GfxTrianglesDrawStream *drawStream, GfxCmdBufPrimSt
 void __cdecl R_DrawPreTessTris(
     GfxCmdBufPrimState *state,
     const srfTriangles_t *tris,
-    uint32_t baseIndex,
-    uint32_t triCount)
+    uint baseIndex,
+    uint triCount)
 {
     GfxDrawPrimArgs args; // [esp+0h] [ebp-Ch] BYREF
 
@@ -405,18 +405,18 @@ void __cdecl R_DrawPreTessTris(
     g_primStats->dynamicIndexCount += 3 * triCount;
 }
 
-void __cdecl R_DrawBspDrawSurfsPreTess(const uint32_t *primDrawSurfPos, GfxCmdBufContext context)
+void __cdecl R_DrawBspDrawSurfsPreTess(const uint *primDrawSurfPos, GfxCmdBufContext context)
 {
-    uint32_t baseIndex; // [esp+0h] [ebp-2Ch] BYREF
-    uint32_t surfIndex; // [esp+4h] [ebp-28h]
+    uint baseIndex; // [esp+0h] [ebp-2Ch] BYREF
+    uint surfIndex; // [esp+4h] [ebp-28h]
     GfxReadCmdBuf cmdBuf; // [esp+8h] [ebp-24h] BYREF
     const srfTriangles_t *tris; // [esp+Ch] [ebp-20h]
     const srfTriangles_t *prevTris; // [esp+10h] [ebp-1Ch]
     const GfxBspPreTessDrawSurf *list; // [esp+14h] [ebp-18h] BYREF
-    uint32_t triCount; // [esp+18h] [ebp-14h]
+    uint triCount; // [esp+18h] [ebp-14h]
     const GfxSurface *bspSurf; // [esp+1Ch] [ebp-10h]
-    uint32_t index; // [esp+20h] [ebp-Ch]
-    uint32_t count; // [esp+24h] [ebp-8h] BYREF
+    uint index; // [esp+20h] [ebp-Ch]
+    uint count; // [esp+24h] [ebp-8h] BYREF
     int baseVertex; // [esp+28h] [ebp-4h]
 
     R_SetupPassPerObjectArgs(context);
@@ -457,18 +457,18 @@ void __cdecl R_DrawBspDrawSurfsPreTess(const uint32_t *primDrawSurfPos, GfxCmdBu
     }
 }
 
-void __cdecl R_DrawBspDrawSurfsLitPreTess(const uint32_t *primDrawSurfPos, GfxCmdBufContext context)
+void __cdecl R_DrawBspDrawSurfsLitPreTess(const uint *primDrawSurfPos, GfxCmdBufContext context)
 {
-    uint32_t baseIndex; // [esp+4h] [ebp-28h] BYREF
-    uint32_t surfIndex; // [esp+8h] [ebp-24h]
+    uint baseIndex; // [esp+4h] [ebp-28h] BYREF
+    uint surfIndex; // [esp+8h] [ebp-24h]
     GfxReadCmdBuf cmdBuf; // [esp+Ch] [ebp-20h] BYREF
     const srfTriangles_t *tris; // [esp+10h] [ebp-1Ch]
     const GfxBspPreTessDrawSurf *list; // [esp+14h] [ebp-18h] BYREF
-    uint32_t reflectionProbeIndex; // [esp+18h] [ebp-14h]
+    uint reflectionProbeIndex; // [esp+18h] [ebp-14h]
     const GfxSurface *bspSurf; // [esp+1Ch] [ebp-10h]
-    uint32_t index; // [esp+20h] [ebp-Ch]
-    uint32_t lightmapIndex; // [esp+24h] [ebp-8h]
-    uint32_t count; // [esp+28h] [ebp-4h] BYREF
+    uint index; // [esp+20h] [ebp-Ch]
+    uint lightmapIndex; // [esp+24h] [ebp-8h]
+    uint count; // [esp+28h] [ebp-4h] BYREF
 
     if (sc_enable->current.enabled)
         R_SetCodeImageTexture(context.source, TEXTURE_SRC_CODE_DYNAMIC_SHADOWS, gfxRenderTargets[R_RENDERTARGET_DYNAMICSHADOWS].image);

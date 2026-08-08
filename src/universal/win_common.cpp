@@ -17,7 +17,7 @@ _RTL_CRITICAL_SECTION s_criticalSections[CRITSECT_COUNT];
 #else
 #include <mutex>
 std::mutex s_criticalSections[CRITSECT_COUNT];
-uint32_t s_criticalSectionsCount[CRITSECT_COUNT] = { 0 };
+uint s_criticalSectionsCount[CRITSECT_COUNT] = { 0 };
 #endif
 
 void Sys_InitializeCriticalSections()
@@ -87,7 +87,7 @@ int Sys_InterlockedDecrement(uint *addend)
     return InterlockedDecrement(addend);
 }
 
-uint32_t Win_InitThreads()
+uint Win_InitThreads()
 {
     HANDLE CurrentProcess;
     unsigned long result; 
@@ -392,7 +392,7 @@ char exePath[256];
 char *__cdecl Sys_DefaultInstallPath()
 {
     char *v0; // eax
-    uint32_t len; // [esp+0h] [ebp-8h]
+    uint len; // [esp+0h] [ebp-8h]
     HINSTANCE__ *hinst; // [esp+4h] [ebp-4h]
 
     if (!exePath[0])

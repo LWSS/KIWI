@@ -438,7 +438,7 @@ void __cdecl AimTarget_UpdateClientTargets()
     memcpy(atGlob.clientTargets, &atGlob, 44 * atGlob.targetCount);
 }
 
-void __cdecl AimTarget_GetClientTargetList(int32_t localClientNum, AimTarget **targetList, int *targetCount)
+void __cdecl AimTarget_GetClientTargetList(int localClientNum, AimTarget **targetList, int *targetCount)
 {
     iassert(targetList);
     iassert(targetCount);

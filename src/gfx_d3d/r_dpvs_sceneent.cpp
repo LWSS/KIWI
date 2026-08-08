@@ -29,28 +29,28 @@ void R_AddCellSceneEntSurfacesInFrustumCmd(GfxWorldDpvsPlanes *data)
     int skipWorkerCmd; // [esp+30h] [ebp-A8h]
     const DpvsPlane *bmodel; // [esp+38h] [ebp-A0h]
     GfxSceneEntity *sceneEnt; // [esp+40h] [ebp-98h]
-    uint32_t sceneEntIndex; // [esp+4Ch] [ebp-8Ch]
-    uint32_t entnum; // [esp+54h] [ebp-84h]
-    uint32_t indexLow; // [esp+58h] [ebp-80h]
-    uint32_t bits; // [esp+5Ch] [ebp-7Ch]
-    uint32_t wordIndex; // [esp+60h] [ebp-78h]
+    uint sceneEntIndex; // [esp+4Ch] [ebp-8Ch]
+    uint entnum; // [esp+54h] [ebp-84h]
+    uint indexLow; // [esp+58h] [ebp-80h]
+    uint bits; // [esp+5Ch] [ebp-7Ch]
+    uint wordIndex; // [esp+60h] [ebp-78h]
     int innerPlaneCount; // [esp+64h] [ebp-74h]
     const DpvsPlane *innerPlanes; // [esp+68h] [ebp-70h]
-    uint32_t *entCellBits; // [esp+6Ch] [ebp-6Ch]
+    uint *entCellBits; // [esp+6Ch] [ebp-6Ch]
     const DpvsPlane *planes; // [esp+70h] [ebp-68h]
-    uint32_t offset; // [esp+78h] [ebp-60h]
+    uint offset; // [esp+78h] [ebp-60h]
     DpvsEntityCmd dpvsEntity; // [esp+7Ch] [ebp-5Ch] BYREF
     int frustumPlaneCount; // [esp+98h] [ebp-40h]
     int planeCount; // [esp+9Ch] [ebp-3Ch]
     const DpvsPlane *planesEA; // [esp+A0h] [ebp-38h]
-    uint32_t cellIndex; // [esp+A4h] [ebp-34h]
-    uint32_t viewIndex; // [esp+A8h] [ebp-30h]
+    uint cellIndex; // [esp+A4h] [ebp-34h]
+    uint viewIndex; // [esp+A8h] [ebp-30h]
     uint16_t *sceneDObjIndex; // [esp+ACh] [ebp-2Ch]
     uint16_t *sceneXModelIndex; // [esp+B0h] [ebp-28h]
     GfxEntCellRefInfo *entInfo; // [esp+B4h] [ebp-24h]
-    uint32_t wordCount; // [esp+B8h] [ebp-20h]
+    uint wordCount; // [esp+B8h] [ebp-20h]
     GfxWorldDpvsPlanes *worldDpvsPlanes; // [esp+BCh] [ebp-1Ch]
-    uint32_t localClientNum; // [esp+C0h] [ebp-18h]
+    uint localClientNum; // [esp+C0h] [ebp-18h]
     GfxSceneDpvs *sceneDpvs; // [esp+C4h] [ebp-14h]
     DpvsDynamicCellCmd *dpvsCell; // [esp+C8h] [ebp-10h]
 
@@ -106,7 +106,7 @@ void R_AddCellSceneEntSurfacesInFrustumCmd(GfxWorldDpvsPlanes *data)
                 break;
 
             entnum = indexLow + 32 * wordIndex;
-            uint32_t bit = (0x80000000 >> indexLow);
+            uint bit = (0x80000000 >> indexLow);
             iassert(bits & bit);
 
             bits &= ~(bit);
@@ -179,7 +179,7 @@ void R_AddCellSceneEntSurfacesInFrustumCmd(GfxWorldDpvsPlanes *data)
                 break;
             entnum = indexLow + 32 * wordIndex;
 
-            uint32_t bit = (0x80000000 >> indexLow);
+            uint bit = (0x80000000 >> indexLow);
             iassert(bits & bit);
 
             bits &= ~(bit);

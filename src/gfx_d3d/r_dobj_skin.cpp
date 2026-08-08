@@ -12,7 +12,7 @@
 #include "r_model_pose.h"
 #include "r_dpvs.h"
 
-static void __cdecl R_FlagXModelAsSkinned(GfxSceneEntity *sceneEnt, uint32_t surfaceCount)
+static void __cdecl R_FlagXModelAsSkinned(GfxSceneEntity *sceneEnt, uint surfaceCount)
 {
     iassert(sceneEnt->cull.state == CULL_STATE_SKINNED_PENDING);
     sceneEnt->cull.state = surfaceCount + 4;
@@ -34,7 +34,7 @@ static int __cdecl R_AllocSkinnedCachedVerts(int vertCount)
         return -1;
 
     offset = InterlockedExchangeAdd(&frontEndDataOut->skinnedCacheVb->used, 32 * vertCount);
-    if ((uint32_t)(32 * vertCount + offset) <= 0x480000)
+    if ((uint)(32 * vertCount + offset) <= 0x480000)
         return offset;
     R_WarnOncePerFrame(R_WARN_MAX_SKINNED_CACHE_VERTICES);
     return -1;
@@ -44,7 +44,7 @@ int  R_PreSkinXSurface(
     const DObj_s *obj,
     XSurface *surf,
     const GfxModelSurfaceInfo *surfaceInfo,
-    uint32_t *numSkinnedVerts,
+    uint *numSkinnedVerts,
     GfxModelSkinnedSurface *surfPos_)
 {
     float origin[4]; // [esp+20h] [ebp-154h] BYREF
@@ -113,7 +113,7 @@ int  R_SkinSceneDObjModels(
 
     PROF_SCOPED("R_SkinXModel");
 
-    unsigned char surfsBuffer[150 * sizeof(GfxModelSkinnedSurface)]{0}; // ~3588
+    byte surfsBuffer[150 * sizeof(GfxModelSkinnedSurface)]{0}; // ~3588
     GfxModelSkinnedSurface *surfPos = (GfxModelSkinnedSurface *)surfsBuffer;
     GfxModelSurfaceInfo targBoneIndexHigh;
 
@@ -122,26 +122,26 @@ int  R_SkinSceneDObjModels(
 
     uint32 surfPartBits[7] = {};
 
-    uint32_t NumModels = DObjGetNumModels(obj);
+    uint NumModels = DObjGetNumModels(obj);
     if (!NumModels)
     {
         return 0;
     }
-    uint32_t lod = 0;
-    uint32_t boneIndex = 0;
+    uint lod = 0;
+    uint boneIndex = 0;
 
-    uint32_t totalSurfaceCount = 0;
-    uint32_t numSkinnedVerts = 0;
+    uint totalSurfaceCount = 0;
+    uint numSkinnedVerts = 0;
 
-    uint32_t boneCount = 0;
+    uint boneCount = 0;
     int cullLod;
-    uint32_t surfaceCount;
-    uint32_t boneIndex_div32;
-    uint32_t boneIndex_mod32;
-    uint32_t boneIndex_rem32;
+    uint surfaceCount;
+    uint boneIndex_div32;
+    uint boneIndex_mod32;
+    uint boneIndex_rem32;
 
-    uint32_t partbits[4];
-    uint32_t partBitsCheck[4] = {};
+    uint partbits[4];
+    uint partBitsCheck[4] = {};
     GfxModelRigidSurface *rigidSurf;
 
     while (lod < NumModels)
@@ -174,7 +174,7 @@ int  R_SkinSceneDObjModels(
 
             DObjGetHidePartBits(obj, partbits);
 
-            for (uint32_t i = 0; i < surfaceCount; i++)
+            for (uint i = 0; i < surfaceCount; i++)
             {
                 XSurface *surface = &surfaces[i];
 
@@ -245,7 +245,7 @@ int  R_SkinSceneDObjModels(
             {
                 return 0;
             }
-            uint32_t oldSkinnedCachedOffset = 0x80000001;
+            uint oldSkinnedCachedOffset = 0x80000001;
 #ifdef KISAK_MP
             if (gfxBuf.fastSkin)
             {
@@ -268,7 +268,7 @@ int  R_SkinSceneDObjModels(
             }
 #endif
             GfxModelSkinnedSurface *surfPos2 = (GfxModelSkinnedSurface *)surfsBuffer;
-            for (uint32_t offset = 0; offset < totalSurfaceCount; ++offset)
+            for (uint offset = 0; offset < totalSurfaceCount; ++offset)
             {
                 rigidSurf = (GfxModelRigidSurface *)surfPos2;
                 if (surfPos2->skinnedCachedOffset == -2)
@@ -292,7 +292,7 @@ int  R_SkinSceneDObjModels(
         }
         else
         {
-            uint32_t vertsSize = sizeof(GfxPackedVertex) * numSkinnedVerts;
+            uint vertsSize = sizeof(GfxPackedVertex) * numSkinnedVerts;
             iassert(frontEndDataOut->tempSkinBuf);
             unsigned long firstSurf = InterlockedExchangeAdd(&frontEndDataOut->tempSkinPos, vertsSize);
             if ((firstSurf + vertsSize) > 0x480000)
@@ -302,7 +302,7 @@ int  R_SkinSceneDObjModels(
             }
             Z_VirtualCommit(&frontEndDataOut->tempSkinBuf[firstSurf], vertsSize);
             GfxModelSkinnedSurface *surfPos2 = (GfxModelSkinnedSurface *)surfsBuffer;
-            for (uint32_t offset = 0; offset < totalSurfaceCount; ++offset)
+            for (uint offset = 0; offset < totalSurfaceCount; ++offset)
             {
                 if (surfPos2->skinnedCachedOffset == -2)
                 {
@@ -324,8 +324,8 @@ int  R_SkinSceneDObjModels(
         }
     }
 
-    uint32_t totalSurfSize = ((char *)surfPos - (char *)surfsBuffer);
-    uint32_t startSurfPos = InterlockedExchangeAdd(&frontEndDataOut->surfPos, totalSurfSize);
+    uint totalSurfSize = ((char *)surfPos - (char *)surfsBuffer);
+    uint startSurfPos = InterlockedExchangeAdd(&frontEndDataOut->surfPos, totalSurfSize);
 
     if (startSurfPos + totalSurfSize >= 0x20000)
     {
@@ -348,7 +348,7 @@ int  R_SkinSceneDObjModels(
         skinCmd.modelSurfs = &frontEndDataOut->surfsBuffer[startSurfPos];
         skinCmd.surfCount = totalSurfaceCount;
         skinCmd.mat = boneMatrix;
-        R_AddWorkerCmd(WRKCMD_SKIN_XMODEL, (unsigned char *)&skinCmd);
+        R_AddWorkerCmd(WRKCMD_SKIN_XMODEL, (byte *)&skinCmd);
     }
 
     return totalSurfaceCount;
@@ -380,7 +380,7 @@ void __cdecl R_SkinSceneDObj(
     DObjAnimMat *boneMatrix,
     int waitForCullState)
 {
-    volatile uint32_t state; // [esp+0h] [ebp-8h]
+    volatile uint state; // [esp+0h] [ebp-8h]
     int surfaceCount; // [esp+4h] [ebp-4h]
 
     iassert(localSceneEnt);
@@ -389,7 +389,7 @@ void __cdecl R_SkinSceneDObj(
 
     if (localSceneEnt->cull.state < 4)
     {
-        if (InterlockedCompareExchange((volatile uint32_t *)&sceneEnt->cull, 3, 2) == 2)
+        if (InterlockedCompareExchange((volatile uint *)&sceneEnt->cull, 3, 2) == 2)
         {
             surfaceCount = R_SkinSceneDObjModels(localSceneEnt, obj, boneMatrix);
             R_FlagXModelAsSkinned(localSceneEnt, surfaceCount);

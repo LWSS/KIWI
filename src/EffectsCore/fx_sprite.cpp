@@ -17,7 +17,7 @@ static FxSprite g_sprites[96]; // ADDED
 
 void __cdecl FX_SpriteGenerateVerts(FxGenerateVertsCmd *cmd)
 {
-    int32_t i; // [esp+0h] [ebp-8h]
+    int i; // [esp+0h] [ebp-8h]
     FxSpriteInfo *spriteInfo; // [esp+4h] [ebp-4h]
 
     if (!cmd)
@@ -108,10 +108,10 @@ void __cdecl FX_BuildQuadStampCodeMeshVerts(
     const float *left,
     const float *up,
     const uint8_t *rgbaColor,
-    int32_t s0,
-    int32_t t0,
-    int32_t s1,
-    int32_t t1)
+    int s0,
+    int t0,
+    int s1,
+    int t1)
 {
     double v10; // st7
     __int16 v11; // [esp+10h] [ebp-1DCh]
@@ -122,14 +122,14 @@ void __cdecl FX_BuildQuadStampCodeMeshVerts(
     __int16 v16; // [esp+24h] [ebp-1C8h]
     __int16 v17; // [esp+28h] [ebp-1C4h]
     __int16 v18; // [esp+2Ch] [ebp-1C0h]
-    int32_t v19; // [esp+7Ch] [ebp-170h]
-    int32_t v20; // [esp+90h] [ebp-15Ch]
-    int32_t v21; // [esp+B0h] [ebp-13Ch]
-    int32_t v22; // [esp+C4h] [ebp-128h]
-    int32_t v23; // [esp+E4h] [ebp-108h]
-    int32_t v24; // [esp+F8h] [ebp-F4h]
-    int32_t v25; // [esp+118h] [ebp-D4h]
-    int32_t v26; // [esp+12Ch] [ebp-C0h]
+    int v19; // [esp+7Ch] [ebp-170h]
+    int v20; // [esp+90h] [ebp-15Ch]
+    int v21; // [esp+B0h] [ebp-13Ch]
+    int v22; // [esp+C4h] [ebp-128h]
+    int v23; // [esp+E4h] [ebp-108h]
+    int v24; // [esp+F8h] [ebp-F4h]
+    int v25; // [esp+118h] [ebp-D4h]
+    int v26; // [esp+12Ch] [ebp-C0h]
     PackedUnitVec v27; // [esp+148h] [ebp-A4h]
     float v28; // [esp+154h] [ebp-98h]
     float v29; // [esp+158h] [ebp-94h]

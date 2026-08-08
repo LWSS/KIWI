@@ -3,7 +3,7 @@
 #include "r_init.h"
 
 const dvar_s *r_warningRepeatDelay;
-uint32_t s_warnCount[R_WARN_COUNT];
+uint s_warnCount[R_WARN_COUNT];
 
 static const char *const s_warnFormat[R_WARN_COUNT] =
 {
@@ -70,13 +70,13 @@ void R_WarnOncePerFrame(GfxWarningType warnType, ...)
     }
 }
 
-uint32_t frameCount;
+uint frameCount;
 int previous_0;
 float frameRate;
 double __cdecl R_UpdateFrameRate()
 {
     int frameTime; // [esp+0h] [ebp-8h]
-    uint32_t current; // [esp+4h] [ebp-4h]
+    uint current; // [esp+4h] [ebp-4h]
 
     if (frameCount != rg.frontEndFrameCount)
     {

@@ -602,14 +602,14 @@ void CG_DeactivateEqCmd()
 // KISAKTODO: remove function (also in cg_servercmds_mp) and just call SND_SetEnvironmentEffects(like in blops)
 void CG_ReverbCmd()
 {
-    int32_t fademsec; // [esp+Ch] [ebp-30h]
+    int fademsec; // [esp+Ch] [ebp-30h]
     float v5; // [esp+14h] [ebp-28h]
     const char *roomstring; // [esp+24h] [ebp-18h]
     float drylevel; // [esp+28h] [ebp-14h]
     float fadetime; // [esp+2Ch] [ebp-10h]
     float wetlevel; // [esp+30h] [ebp-Ch]
-    int32_t prio; // [esp+34h] [ebp-8h]
-    int32_t argc; // [esp+38h] [ebp-4h]
+    int prio; // [esp+34h] [ebp-8h]
+    int argc; // [esp+38h] [ebp-4h]
 
     argc = Cmd_Argc();
 

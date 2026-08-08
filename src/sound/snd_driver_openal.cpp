@@ -115,8 +115,8 @@ struct AlStreamState
     int fsHandle;
     drwav wav;
     drmp3 mp3;
-    uint32_t channels;
-    uint32_t sampleRate;
+    uint channels;
+    uint sampleRate;
     // Frames decoded/queued since the current loop pass began (reset to the post-seek frame
     // index on start, reset again each time SND_FillStreamBuffers loops back to frame 0).
     // Needed because AL_SEC_OFFSET on a queued streaming source only reports the offset
@@ -145,7 +145,7 @@ static const int AL_STREAM_BUFFER_FRAMES = 8192;
 static size_t AL_StreamReadCallback(void *pUserData, void *pBufferOut, size_t bytesToRead)
 {
     AlStreamState *stream = (AlStreamState *)pUserData;
-    return FS_Read((uint8_t *)pBufferOut, (uint32_t)bytesToRead, stream->fsHandle);
+    return FS_Read((uint8_t *)pBufferOut, (uint)bytesToRead, stream->fsHandle);
 }
 
 // FS_Seek's zip-archive branch (com_files.cpp, used whenever a streamed sound is packed into an
@@ -715,7 +715,7 @@ int __cdecl SND_StartAliasStreamOnChannel(SndStartAliasInfo *startAliasInfo, int
     AlStreamState *stream = &g_streamState[index];
     memset(stream, 0, sizeof(*stream));
 
-    uint32_t openResult = (FS_FOpenFileReadStream(realname, &stream->fsHandle) & 0x80000000) == 0;
+    uint openResult = (FS_FOpenFileReadStream(realname, &stream->fsHandle) & 0x80000000) == 0;
     if (!openResult)
     {
         Com_PrintError(9, "Couldn't play stream '%s' from alias '%s' - file not found\n", realname, startAliasInfo->alias0->aliasName);
@@ -949,9 +949,9 @@ void __cdecl SND_UpdateEqs()
 }
 
 void __cdecl SND_SetEqParams(
-    uint32_t entchannel,
+    uint entchannel,
     int eqIndex,
-    uint32_t band,
+    uint band,
     SND_EQTYPE type,
     float gain,
     float freq,
@@ -975,7 +975,7 @@ void __cdecl SND_SetEqParams(
 #endif
 }
 
-void __cdecl SND_SetEqType(uint32_t entchannel, int eqIndex, uint32_t band, SND_EQTYPE type)
+void __cdecl SND_SetEqType(uint entchannel, int eqIndex, uint band, SND_EQTYPE type)
 {
     iassert(entchannel >= 0 && entchannel < 64);
     iassert(band >= 0 && band < 3);
@@ -986,7 +986,7 @@ void __cdecl SND_SetEqType(uint32_t entchannel, int eqIndex, uint32_t band, SND_
     alGlob.eq[eqIndex].params[band][entchannel].type = type;
 }
 
-void __cdecl SND_SetEqFreq(uint32_t entchannel, int eqIndex, uint32_t band, float freq)
+void __cdecl SND_SetEqFreq(uint entchannel, int eqIndex, uint band, float freq)
 {
     iassert(entchannel >= 0 && entchannel < 64);
     iassert(band >= 0 && band < 3);
@@ -998,7 +998,7 @@ void __cdecl SND_SetEqFreq(uint32_t entchannel, int eqIndex, uint32_t band, floa
     alGlob.eq[eqIndex].params[band][entchannel].freq = freq;
 }
 
-void __cdecl SND_SetEqGain(uint32_t entchannel, int eqIndex, uint32_t band, float gain)
+void __cdecl SND_SetEqGain(uint entchannel, int eqIndex, uint band, float gain)
 {
     iassert(entchannel >= 0 && entchannel < 64);
     iassert(band >= 0 && band < 3);
@@ -1008,7 +1008,7 @@ void __cdecl SND_SetEqGain(uint32_t entchannel, int eqIndex, uint32_t band, floa
     alGlob.eq[eqIndex].params[band][entchannel].gain = gain;
 }
 
-void __cdecl SND_SetEqQ(uint32_t entchannel, int eqIndex, uint32_t band, float q)
+void __cdecl SND_SetEqQ(uint entchannel, int eqIndex, uint band, float q)
 {
     iassert(entchannel >= 0 && entchannel < 64);
     iassert(band >= 0 && band < 3);
@@ -1024,7 +1024,7 @@ void __cdecl SND_SetEqQ(uint32_t entchannel, int eqIndex, uint32_t band, float q
 #endif
 }
 
-void __cdecl SND_DisableEq(uint32_t entchannel, int eqIndex, uint32_t band)
+void __cdecl SND_DisableEq(uint entchannel, int eqIndex, uint band)
 {
     iassert(entchannel >= 0 && entchannel < 64);
     iassert(band >= 0 && band < 3);
@@ -1088,8 +1088,8 @@ void __cdecl SND_PrintEqParams()
             for (band = 0; band < 3; ++band)
             {
                 v0 = (float *)&alGlob.eq[eqIndex].params[band][entchannel];
-                if ((uint8_t) * ((uint32_t *)v0 + 4))
-                    Com_Printf(9, "\t%i %s %f Hz %f dB %f q\n", band, snd_eqTypeStrings[*(uint32_t *)v0], v0[2], v0[1], v0[3]);
+                if ((uint8_t) * ((uint *)v0 + 4))
+                    Com_Printf(9, "\t%i %s %f Hz %f dB %f q\n", band, snd_eqTypeStrings[*(uint *)v0], v0[2], v0[1], v0[3]);
             }
         }
     }
@@ -1337,7 +1337,7 @@ void __cdecl SND_SetStreamChannelFromSaveInfo(int index, snd_save_stream_t *info
     SND_SetStreamChannelVolume(index, volume);
 }
 
-int __cdecl SND_GetSoundFileSize(uint32_t *pSoundFile)
+int __cdecl SND_GetSoundFileSize(uint *pSoundFile)
 {
     iassert(pSoundFile);
 
@@ -1533,10 +1533,10 @@ void __cdecl SND_SetData(MssSoundCOD4 *mssSound, void *srcData)
         // resample), matching the halving loop in the Miles branch above. A real
         // low-pass-filtered resample would sound better, but this matches WORK.md Phase 3's
         // stated scope - revisit if downsampled loaded sounds turn out to sound too aliased.
-        uint32_t srcFrameCount = mssSound->info.samples;
-        uint32_t channels = mssSound->info.channels;
-        uint32_t rate = mssSound->info.rate;
-        uint32_t frameCount = srcFrameCount;
+        uint srcFrameCount = mssSound->info.samples;
+        uint channels = mssSound->info.channels;
+        uint rate = mssSound->info.rate;
+        uint frameCount = srcFrameCount;
 
         while (rate > g_snd.playback_rate)
         {
@@ -1544,15 +1544,15 @@ void __cdecl SND_SetData(MssSoundCOD4 *mssSound, void *srcData)
             frameCount /= 2;
         }
 
-        uint32_t newDataLen = frameCount * channels * sizeof(int16_t);
+        uint newDataLen = frameCount * channels * sizeof(int16_t);
         mssSound->data = MSS_Alloc(newDataLen, rate);
 
         const int16_t *src16 = (const int16_t *)srcData;
         int16_t *dst16 = (int16_t *)mssSound->data;
-        for (uint32_t i = 0; i < frameCount; ++i)
+        for (uint i = 0; i < frameCount; ++i)
         {
-            uint32_t srcFrame = (uint32_t)((uint64_t)i * srcFrameCount / frameCount);
-            for (uint32_t c = 0; c < channels; ++c)
+            uint srcFrame = (uint)((uint64_t)i * srcFrameCount / frameCount);
+            for (uint c = 0; c < channels; ++c)
                 dst16[i * channels + c] = src16[srcFrame * channels + c];
         }
 

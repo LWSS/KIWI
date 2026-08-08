@@ -72,14 +72,14 @@ void __cdecl CG_AntiBurnInHUD_RegisterDvars()
     cg_drawTalk = Dvar_RegisterEnum( "cg_drawTalk", cg_drawTalkNames, 1, DVAR_NOFLAG, "Controls which icons CG_TALKER ownerdraw draws");
 }
 
-bool __cdecl CG_ShouldDrawHud(int32_t localClientNum)
+bool __cdecl CG_ShouldDrawHud(int localClientNum)
 {
     cg_s *cgameGlob; // [esp+4h] [ebp-4h]
     cgameGlob = CG_GetLocalClientGlobals(localClientNum);
     return cgameGlob && cgameGlob->drawHud && CL_ShouldDisplayHud(localClientNum);
 }
 
-double __cdecl CG_FadeHudMenu(int32_t localClientNum, const dvar_s *fadeDvar, int32_t displayStartTime, int32_t duration)
+double __cdecl CG_FadeHudMenu(int localClientNum, const dvar_s *fadeDvar, int displayStartTime, int duration)
 {
     float *fadeColor; // [esp+4h] [ebp-4h]
 
@@ -99,10 +99,10 @@ double __cdecl CG_FadeHudMenu(int32_t localClientNum, const dvar_s *fadeDvar, in
         return 0.0;
 }
 
-bool __cdecl CG_CheckPlayerForLowAmmoSpecific(const cg_s *cgameGlob, uint32_t weapIndex)
+bool __cdecl CG_CheckPlayerForLowAmmoSpecific(const cg_s *cgameGlob, uint weapIndex)
 {
-    int32_t maxAmmo; // [esp+4h] [ebp-10h]
-    int32_t curAmmo; // [esp+8h] [ebp-Ch]
+    int maxAmmo; // [esp+4h] [ebp-10h]
+    int curAmmo; // [esp+8h] [ebp-Ch]
     const playerState_s *ps; // [esp+Ch] [ebp-8h]
 
     ps = &cgameGlob->predictedPlayerState;
@@ -121,17 +121,17 @@ bool __cdecl CG_CheckPlayerForLowAmmoSpecific(const cg_s *cgameGlob, uint32_t we
 
 bool __cdecl CG_CheckPlayerForLowAmmo(const cg_s *cgameGlob)
 {
-    int32_t weapIndex; // [esp+0h] [ebp-4h]
+    int weapIndex; // [esp+0h] [ebp-4h]
 
     weapIndex = GetWeaponIndex(cgameGlob);
     return CG_CheckPlayerForLowAmmoSpecific(cgameGlob, weapIndex);
 }
 
-bool __cdecl CG_CheckPlayerForLowClipSpecific(const cg_s *cgameGlob, uint32_t weapIndex)
+bool __cdecl CG_CheckPlayerForLowClipSpecific(const cg_s *cgameGlob, uint weapIndex)
 {
-    int32_t curClipVal; // [esp+0h] [ebp-10h]
+    int curClipVal; // [esp+0h] [ebp-10h]
     WeaponDef *weapDef; // [esp+8h] [ebp-8h]
-    int32_t fullClipVal; // [esp+Ch] [ebp-4h]
+    int fullClipVal; // [esp+Ch] [ebp-4h]
 
     if (!weapIndex)
         return 0;
@@ -151,7 +151,7 @@ bool __cdecl CG_CheckPlayerForLowClipSpecific(const cg_s *cgameGlob, uint32_t we
 
 bool __cdecl CG_CheckPlayerForLowClip(const cg_s *cgameGlob)
 {
-    int32_t weapIndex; // [esp+0h] [ebp-4h]
+    int weapIndex; // [esp+0h] [ebp-4h]
 
     weapIndex = GetWeaponIndex(cgameGlob);
     return CG_CheckPlayerForLowClipSpecific(cgameGlob, weapIndex);
@@ -187,7 +187,7 @@ void __cdecl CG_ResetLowHealthOverlay(cg_s *cgameGlob)
     cgameGlob->healthOverlayOldHealth = 1.0;
 }
 
-int32_t __cdecl CG_ServerMaterialName(int32_t localClientNum, int32_t index, char *materialName, uint32_t maxLen)
+int __cdecl CG_ServerMaterialName(int localClientNum, int index, char *materialName, uint maxLen)
 {
     char v5; // cl
     const char *v7; // [esp+Ch] [ebp-18h]
@@ -209,7 +209,7 @@ int32_t __cdecl CG_ServerMaterialName(int32_t localClientNum, int32_t index, cha
     return 1;
 }
 
-Material *__cdecl CG_ObjectiveIcon(int32_t localClientNum, int32_t icon, int32_t type)
+Material *__cdecl CG_ObjectiveIcon(int localClientNum, int icon, int type)
 {
     char shaderName[68]; // [esp+0h] [ebp-48h] BYREF
 
@@ -226,31 +226,31 @@ Material *__cdecl CG_ObjectiveIcon(int32_t localClientNum, int32_t icon, int32_t
         return cgMedia.objectiveMaterials[type];
 }
 
-const char *__cdecl CG_ScriptMainMenu(int32_t localClientNum)
+const char *__cdecl CG_ScriptMainMenu(int localClientNum)
 {
     return CG_GetLocalClientGlobals(localClientNum)->scriptMainMenu;
 }
 
 void __cdecl CG_OwnerDraw(
-    int32_t localClientNum,
+    int localClientNum,
     rectDef_s parentRect,
     float x,
     float y,
     float w,
     float h,
-    int32_t horzAlign,
-    int32_t vertAlign,
+    int horzAlign,
+    int vertAlign,
     float text_x,
     float text_y,
-    int32_t ownerDraw,
-    int32_t ownerDrawFlags,
-    int32_t align,
+    int ownerDraw,
+    int ownerDrawFlags,
+    int align,
     float special,
     Font_s *font,
     float scale,
     float *color,
     Material *material,
-    int32_t textStyle,
+    int textStyle,
     char textAlignMode)
 {
     OffhandClass offSecond; // [esp+20h] [ebp-24h]
@@ -540,7 +540,7 @@ void __cdecl CG_OwnerDraw(
 }
 
 void __cdecl CG_DrawPlayerAmmoBackdrop(
-    int32_t localClientNum,
+    int localClientNum,
     const rectDef_s *rect,
     const float *color,
     Material *material)
@@ -586,18 +586,18 @@ void __cdecl CG_DrawPlayerAmmoBackdrop(
 }
 
 void __cdecl CG_DrawPlayerAmmoValue(
-    int32_t localClientNum,
+    int localClientNum,
     const rectDef_s *rect,
     Font_s *font,
     float scale,
     float *color,
     Material *material,
-    int32_t textStyle)
+    int textStyle)
 {
     double v7; // [esp+2Ch] [ebp-274h]
     float ammoColor[5]; // [esp+4Ch] [ebp-254h] BYREF
     const ScreenPlacement *scrPlace; // [esp+60h] [ebp-240h]
-    int32_t ammoVal; // [esp+64h] [ebp-23Ch]
+    int ammoVal; // [esp+64h] [ebp-23Ch]
     cg_s *cgameGlob; // [esp+68h] [ebp-238h]
     bool drawAmmo; // [esp+6Fh] [ebp-231h]
     char clipString[260]; // [esp+70h] [ebp-230h] BYREF
@@ -607,11 +607,11 @@ void __cdecl CG_DrawPlayerAmmoValue(
     bool lowClip; // [esp+27Eh] [ebp-22h]
     bool drawClip; // [esp+27Fh] [ebp-21h]
     float flashColor[4]; // [esp+280h] [ebp-20h] BYREF
-    int32_t weapIndex; // [esp+290h] [ebp-10h]
+    int weapIndex; // [esp+290h] [ebp-10h]
     const playerState_s *ps; // [esp+294h] [ebp-Ch]
     float x; // [esp+298h] [ebp-8h]
-    int32_t clipVal; // [esp+29Ch] [ebp-4h]
-    int32_t flashTime;
+    int clipVal; // [esp+29Ch] [ebp-4h]
+    int flashTime;
 
     flashTime = 800;
     cgameGlob = CG_GetLocalClientGlobals(localClientNum);
@@ -791,19 +791,19 @@ void __cdecl CG_DrawPlayerAmmoValue(
 }
 
 void __cdecl CG_DrawPlayerWeaponName(
-    int32_t localClientNum,
+    int localClientNum,
     const rectDef_s *rect,
     Font_s *font,
     float scale,
     float *color,
-    int32_t textStyle)
+    int textStyle)
 {
     double v6; // [esp+20h] [ebp-34h]
     weaponInfo_s *weapInfo; // [esp+28h] [ebp-2Ch]
     float *fadeColor; // [esp+2Ch] [ebp-28h]
     char *string; // [esp+34h] [ebp-20h]
     float drawColor[4]; // [esp+38h] [ebp-1Ch] BYREF
-    int32_t weapIndex; // [esp+48h] [ebp-Ch]
+    int weapIndex; // [esp+48h] [ebp-Ch]
     WeaponDef *weapDef; // [esp+4Ch] [ebp-8h]
     float x; // [esp+50h] [ebp-4h]
     const cg_s *cgameGlob;
@@ -855,7 +855,7 @@ void __cdecl CG_DrawPlayerWeaponName(
 }
 
 void __cdecl CG_DrawPlayerWeaponNameBack(
-    int32_t localClientNum,
+    int localClientNum,
     const rectDef_s *rect,
     Font_s *font,
     float scale,
@@ -865,7 +865,7 @@ void __cdecl CG_DrawPlayerWeaponNameBack(
     const weaponInfo_s *weapInfo; // [esp+24h] [ebp-2Ch]
     char *string; // [esp+2Ch] [ebp-24h]
     float drawColor[4]; // [esp+30h] [ebp-20h] BYREF
-    int32_t weapIndex; // [esp+40h] [ebp-10h]
+    int weapIndex; // [esp+40h] [ebp-10h]
     WeaponDef *weapDef; // [esp+44h] [ebp-Ch]
     float x; // [esp+48h] [ebp-8h]
     float w; // [esp+4Ch] [ebp-4h]
@@ -912,12 +912,12 @@ void __cdecl CG_DrawPlayerWeaponNameBack(
 }
 
 void __cdecl CG_DrawPlayerStance(
-    int32_t localClientNum,
+    int localClientNum,
     const rectDef_s *rect,
     const float *color,
     Font_s *font,
     float scale,
-    int32_t textStyle)
+    int textStyle)
 {
     float v9; // [esp+24h] [ebp-54h]
     float halfWidth; // [esp+4Ch] [ebp-2Ch]
@@ -985,7 +985,7 @@ void __cdecl CG_DrawPlayerStance(
 }
 
 void __cdecl CG_DrawStanceIcon(
-    int32_t localClientNum,
+    int localClientNum,
     const rectDef_s *rect,
     float *drawColor,
     float x,
@@ -1047,18 +1047,18 @@ void __cdecl CG_DrawStanceIcon(
 }
 
 void __cdecl CG_DrawStanceHintPrints(
-    int32_t localClientNum,
+    int localClientNum,
     const rectDef_s *rect,
     float x,
     const float *color,
     float fadeAlpha,
     Font_s *font,
     float scale,
-    int32_t textStyle)
+    int textStyle)
 {
     float v8; // [esp+1Ch] [ebp-240h]
     char keyBinding[256]; // [esp+2Ch] [ebp-230h] BYREF
-    int32_t j; // [esp+130h] [ebp-12Ch]
+    int j; // [esp+130h] [ebp-12Ch]
     const cg_s *cgameGlob; // [esp+134h] [ebp-128h]
     const char *string; // [esp+138h] [ebp-124h]
     const char *proneCmds[3][6]; // [esp+13Ch] [ebp-120h] BYREF
@@ -1068,8 +1068,8 @@ void __cdecl CG_DrawStanceHintPrints(
     const char *hintLineCmds[3]; // [esp+1E8h] [ebp-74h]
     const char *standCmds[3][6]; // [esp+1F4h] [ebp-68h] BYREF
     const char *hintTypeStrings[3]; // [esp+240h] [ebp-1Ch]
-    int32_t numHintLines; // [esp+24Ch] [ebp-10h]
-    int32_t i; // [esp+250h] [ebp-Ch]
+    int numHintLines; // [esp+24Ch] [ebp-10h]
+    int i; // [esp+250h] [ebp-Ch]
     const char *binding; // [esp+254h] [ebp-8h]
     float y; // [esp+258h] [ebp-4h]
 
@@ -1221,7 +1221,7 @@ void __cdecl CG_DrawStanceHintPrints(
     }
 }
 
-void __cdecl CG_DrawPlayerSprintBack(int32_t localClientNum, const rectDef_s *rect, Material *material, float *color)
+void __cdecl CG_DrawPlayerSprintBack(int localClientNum, const rectDef_s *rect, Material *material, float *color)
 {
     float drawColor[4]; // [esp+48h] [ebp-14h] BYREF
     float fadeAlpha; // [esp+58h] [ebp-4h]
@@ -1252,15 +1252,15 @@ void __cdecl CG_DrawPlayerSprintBack(int32_t localClientNum, const rectDef_s *re
     }
 }
 
-void __cdecl CG_DrawPlayerSprintMeter(int32_t localClientNum, const rectDef_s *rect, Material *material, float *color)
+void __cdecl CG_DrawPlayerSprintMeter(int localClientNum, const rectDef_s *rect, Material *material, float *color)
 {
     float sprint; // [esp+44h] [ebp-38h]
     float drawColor[4]; // [esp+4Ch] [ebp-30h] BYREF
-    int32_t sprintLeft; // [esp+5Ch] [ebp-20h]
+    int sprintLeft; // [esp+5Ch] [ebp-20h]
     float x; // [esp+60h] [ebp-1Ch]
     float y; // [esp+64h] [ebp-18h]
     playerState_s *ps; // [esp+68h] [ebp-14h]
-    int32_t maxSprint; // [esp+6Ch] [ebp-10h]
+    int maxSprint; // [esp+6Ch] [ebp-10h]
     float h; // [esp+70h] [ebp-Ch]
     float fadeAlpha; // [esp+74h] [ebp-8h]
     float w; // [esp+78h] [ebp-4h]
@@ -1309,8 +1309,8 @@ void __cdecl CG_CalcPlayerSprintColor(const cg_s *cgameGlob, const playerState_s
 {
     float frac; // [esp+8h] [ebp-18h]
     const DvarValue *p_current; // [esp+Ch] [ebp-14h]
-    int32_t sprintLeft; // [esp+18h] [ebp-8h]
-    int32_t maxSprint; // [esp+1Ch] [ebp-4h]
+    int sprintLeft; // [esp+18h] [ebp-8h]
+    int maxSprint; // [esp+1Ch] [ebp-4h]
 
     maxSprint = BG_GetMaxSprintTime(ps);
     if (ps->pm_type == PM_DEAD || !maxSprint)
@@ -1341,7 +1341,7 @@ void __cdecl CG_CalcPlayerSprintColor(const cg_s *cgameGlob, const playerState_s
     }
 }
 
-void __cdecl CG_DrawPlayerBarHealth(int32_t localClientNum, const rectDef_s *rect, Material *material, float *color)
+void __cdecl CG_DrawPlayerBarHealth(int localClientNum, const rectDef_s *rect, Material *material, float *color)
 {
     float v4; // [esp+30h] [ebp-4Ch]
     float v5; // [esp+34h] [ebp-48h]
@@ -1470,9 +1470,9 @@ void __cdecl CG_DrawPlayerBarHealth(int32_t localClientNum, const rectDef_s *rec
     }
 }
 
-void __cdecl CG_DrawPlayerBarHealthBack(int32_t localClientNum, const rectDef_s *rect, Material *material, float *color)
+void __cdecl CG_DrawPlayerBarHealthBack(int localClientNum, const rectDef_s *rect, Material *material, float *color)
 {
-    int32_t flashTime; // [esp+68h] [ebp-20h]
+    int flashTime; // [esp+68h] [ebp-20h]
     float health; // [esp+70h] [ebp-18h]
     float x; // [esp+74h] [ebp-14h]
     float y; // [esp+78h] [ebp-10h]
@@ -1561,7 +1561,7 @@ void __cdecl CG_DrawPlayerBarHealthBack(int32_t localClientNum, const rectDef_s 
     }
 }
 
-void __cdecl CG_DrawPlayerLowHealthOverlay(int32_t localClientNum, const rectDef_s *rect, Material *material, float *color)
+void __cdecl CG_DrawPlayerLowHealthOverlay(int localClientNum, const rectDef_s *rect, Material *material, float *color)
 {
     float healthRatio; // [esp+34h] [ebp-4h]
     cg_s *cgameGlob;
@@ -1594,7 +1594,7 @@ double __cdecl CG_FadeLowHealthOverlay(const cg_s *cgameGlob)
 {
     float curAlpha; // [esp+8h] [ebp-Ch]
     float lerp; // [esp+Ch] [ebp-8h]
-    int32_t timeSinceFadeStarted; // [esp+10h] [ebp-4h]
+    int timeSinceFadeStarted; // [esp+10h] [ebp-4h]
 
     timeSinceFadeStarted = cgameGlob->time - cgameGlob->healthOverlayPulseTime;
     if (timeSinceFadeStarted < 0)
@@ -1639,7 +1639,7 @@ void __cdecl CG_PulseLowHealthOverlay(cg_s *cgameGlob, float healthRatio)
     float v9; // [esp+18h] [ebp-40h]
     float v10; // [esp+1Ch] [ebp-3Ch]
     float v11; // [esp+20h] [ebp-38h]
-    int32_t healthOverlayPulsePhase; // [esp+24h] [ebp-34h]
+    int healthOverlayPulsePhase; // [esp+24h] [ebp-34h]
     float v13; // [esp+28h] [ebp-30h]
     float v14; // [esp+2Ch] [ebp-2Ch]
     float v15; // [esp+30h] [ebp-28h]
@@ -1745,12 +1745,12 @@ void __cdecl CG_PulseLowHealthOverlay(cg_s *cgameGlob, float healthRatio)
 }
 
 void __cdecl CG_DrawCursorhint(
-    int32_t localClientNum,
+    int localClientNum,
     const rectDef_s *rect,
     Font_s *font,
     float fontscale,
     float *color,
-    int32_t textStyle)
+    int textStyle)
 {
     double v6; // st7
     char *v7; // eax
@@ -1776,7 +1776,7 @@ void __cdecl CG_DrawCursorhint(
     float heighta; // [esp+9Ch] [ebp-134h]
     float height; // [esp+9Ch] [ebp-134h]
     float halfscale; // [esp+A0h] [ebp-130h]
-    uint32_t weaponIndex; // [esp+A4h] [ebp-12Ch]
+    uint weaponIndex; // [esp+A4h] [ebp-12Ch]
     char *displayString; // [esp+A8h] [ebp-128h]
     char *displayStringa; // [esp+A8h] [ebp-128h]
     float scale; // [esp+ACh] [ebp-124h]
@@ -2023,10 +2023,10 @@ void __cdecl CG_UpdateCursorHints(cg_s *cgameGlob)
     }
 }
 
-char *__cdecl CG_GetWeaponUseString(int32_t localClientNum, const char **secondaryString)
+char *__cdecl CG_GetWeaponUseString(int localClientNum, const char **secondaryString)
 {
     const weaponInfo_s *weapInfo; // [esp+0h] [ebp-120h]
-    int32_t weaponIndex; // [esp+8h] [ebp-118h]
+    int weaponIndex; // [esp+8h] [ebp-118h]
     char *displayString; // [esp+Ch] [ebp-114h]
     char binding[260]; // [esp+10h] [ebp-110h] BYREF
     WeaponDef *weapDef; // [esp+118h] [ebp-8h]
@@ -2075,7 +2075,7 @@ char *__cdecl CG_GetWeaponUseString(int32_t localClientNum, const char **seconda
     return UI_ReplaceConversionString(displayString, binding);
 }
 
-char *__cdecl CG_GetUseString(int32_t localClientNum)
+char *__cdecl CG_GetUseString(int localClientNum)
 {
     const char *displayString; // [esp+4h] [ebp-10Ch]
     char binding[260]; // [esp+8h] [ebp-108h] BYREF
@@ -2098,13 +2098,13 @@ char *__cdecl CG_GetUseString(int32_t localClientNum)
 }
 
 void __cdecl CG_DrawHoldBreathHint(
-    int32_t localClientNum,
+    int localClientNum,
     const rectDef_s *rect,
     Font_s *font,
     float fontscale,
-    int32_t textStyle)
+    int textStyle)
 {
-    uint32_t ViewmodelWeaponIndex; // eax
+    uint ViewmodelWeaponIndex; // eax
     char *v6; // eax
     char *string; // [esp+34h] [ebp-114h]
     char binding[256]; // [esp+38h] [ebp-110h] BYREF
@@ -2152,12 +2152,12 @@ void __cdecl CG_DrawHoldBreathHint(
 }
 
 void __cdecl CG_DrawMantleHint(
-    int32_t localClientNum,
+    int localClientNum,
     const rectDef_s *rect,
     Font_s *font,
     float fontscale,
     const float *color,
-    int32_t textStyle)
+    int textStyle)
 {
     char *v6; // eax
     char *string; // [esp+28h] [ebp-120h]
@@ -2214,16 +2214,16 @@ void __cdecl CG_DrawMantleHint(
 }
 
 void __cdecl CG_DrawInvalidCmdHint(
-    int32_t localClientNum,
+    int localClientNum,
     const rectDef_s *rect,
     Font_s *font,
     float fontscale,
     float *color,
-    int32_t textStyle)
+    int textStyle)
 {
     char *string; // [esp+40h] [ebp-Ch]
     float x; // [esp+44h] [ebp-8h]
-    int32_t blinkInterval; // [esp+48h] [ebp-4h]
+    int blinkInterval; // [esp+48h] [ebp-4h]
     cg_s *cgameGlob;
 
     iassert(rect);
@@ -2285,24 +2285,24 @@ void __cdecl CG_DrawInvalidCmdHint(
 }
 
 void __cdecl CG_DrawTalkerNum(
-    int32_t localClientNum,
-    int32_t num,
+    int localClientNum,
+    int num,
     rectDef_s *rect,
     Font_s *font,
     float *color,
     float textScale,
-    int32_t style)
+    int style)
 {
     float v7; // [esp+20h] [ebp-44h]
     float v8; // [esp+24h] [ebp-40h]
     bool v9; // [esp+28h] [ebp-3Ch]
     team_t team; // [esp+34h] [ebp-30h]
-    int32_t client; // [esp+38h] [ebp-2Ch]
+    int client; // [esp+38h] [ebp-2Ch]
     Material *material; // [esp+3Ch] [ebp-28h]
     float textColor[4]; // [esp+44h] [ebp-20h] BYREF
     char *name; // [esp+54h] [ebp-10h]
-    int32_t drawTalk; // [esp+58h] [ebp-Ch]
-    int32_t textHeight; // [esp+5Ch] [ebp-8h]
+    int drawTalk; // [esp+58h] [ebp-Ch]
+    int textHeight; // [esp+5Ch] [ebp-8h]
     bool isEnemy; // [esp+63h] [ebp-1h]
     cg_s *cgameGlob;
 
@@ -2377,7 +2377,7 @@ void __cdecl CG_DrawTalkerNum(
     }
 }
 
-void __cdecl CG_ArchiveState(int32_t localClientNum, MemoryFile *memFile)
+void __cdecl CG_ArchiveState(int localClientNum, MemoryFile *memFile)
 {
     cg_s *cgameGlob = CG_GetLocalClientGlobals(localClientNum);
 

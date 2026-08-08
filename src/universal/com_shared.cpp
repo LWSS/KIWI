@@ -182,12 +182,12 @@ int __cdecl Com_RealTime(qtime_s *qtime)
 static void __cdecl Com_Prefetch(const char *s, signed int bytes)
 {
     signed int v3; // ecx
-    uint32_t i; // ecx
+    uint i; // ecx
 
     v3 = bytes;
     if (bytes > 4096)
         v3 = 4096;
-    for (i = (uint32_t)(v3 + 31) >> 5; i; --i)
+    for (i = (uint)(v3 + 31) >> 5; i; --i)
         s += 32;
 }
 
@@ -223,18 +223,18 @@ void __cdecl Com_Memcpy(void *dest_p, const void *src_p, const size_t count)
         v6 = (count & 0xFFFFFFE0) - 32;
         do
         {
-            v7 = *(uint32_t *)&src[v6 + 4];
-            *(uint32_t *)&dest[v6] = *(uint32_t *)&src[v6];
-            *(uint32_t *)&dest[v6 + 4] = v7;
-            v8 = *(uint32_t *)&src[v6 + 12];
-            *(uint32_t *)&dest[v6 + 8] = *(uint32_t *)&src[v6 + 8];
-            *(uint32_t *)&dest[v6 + 12] = v8;
-            v9 = *(uint32_t *)&src[v6 + 20];
-            *(uint32_t *)&dest[v6 + 16] = *(uint32_t *)&src[v6 + 16];
-            *(uint32_t *)&dest[v6 + 20] = v9;
-            v10 = *(uint32_t *)&src[v6 + 28];
-            *(uint32_t *)&dest[v6 + 24] = *(uint32_t *)&src[v6 + 24];
-            *(uint32_t *)&dest[v6 + 28] = v10;
+            v7 = *(uint *)&src[v6 + 4];
+            *(uint *)&dest[v6] = *(uint *)&src[v6];
+            *(uint *)&dest[v6 + 4] = v7;
+            v8 = *(uint *)&src[v6 + 12];
+            *(uint *)&dest[v6 + 8] = *(uint *)&src[v6 + 8];
+            *(uint *)&dest[v6 + 12] = v8;
+            v9 = *(uint *)&src[v6 + 20];
+            *(uint *)&dest[v6 + 16] = *(uint *)&src[v6 + 16];
+            *(uint *)&dest[v6 + 20] = v9;
+            v10 = *(uint *)&src[v6 + 28];
+            *(uint *)&dest[v6 + 24] = *(uint *)&src[v6 + 24];
+            *(uint *)&dest[v6 + 28] = v10;
             v11 = v6 < 32;
             v6 -= 32;
         } while (!v11);
@@ -246,28 +246,28 @@ void __cdecl Com_Memcpy(void *dest_p, const void *src_p, const size_t count)
         padding_0:
             if (v3 >= 16)
             {
-                *(uint32_t *)v4 = *(uint32_t *)v5;
-                *((uint32_t *)v4 + 1) = *((uint32_t *)v5 + 1);
-                *((uint32_t *)v4 + 2) = *((uint32_t *)v5 + 2);
-                *((uint32_t *)v4 + 3) = *((uint32_t *)v5 + 3);
+                *(uint *)v4 = *(uint *)v5;
+                *((uint *)v4 + 1) = *((uint *)v5 + 1);
+                *((uint *)v4 + 2) = *((uint *)v5 + 2);
+                *((uint *)v4 + 3) = *((uint *)v5 + 3);
                 v3 -= 16;
                 v5 += 16;
                 v4 += 16;
             }
             if (v3 >= 8)
             {
-                *(uint32_t *)v4 = *(uint32_t *)v5;
+                *(uint *)v4 = *(uint *)v5;
                 v3 -= 8;
-                *((uint32_t *)v4 + 1) = *((uint32_t *)v5 + 1);
+                *((uint *)v4 + 1) = *((uint *)v5 + 1);
                 v5 += 8;
                 v4 += 8;
             }
             if (v3 >= 4)
             {
-                v12 = *(uint32_t *)v5;
+                v12 = *(uint *)v5;
                 v5 += 4;
                 v3 -= 4;
-                *(uint32_t *)v4 = v12;
+                *(uint *)v4 = v12;
                 v4 += 4;
             }
             if (v3 < 2)
@@ -291,9 +291,9 @@ void __cdecl Com_Memcpy(void *dest_p, const void *src_p, const size_t count)
 
 void __cdecl Com_Memset(void *dest_p, const int val, const size_t count)
 {
-    uint32_t *dest = (uint32_t *)dest_p;
+    uint *dest = (uint *)dest_p;
 
-    uint32_t *v3; // edx
+    uint *v3; // edx
     int v4; // eax
     int v5; // eax
     int v6; // ecx
@@ -334,7 +334,7 @@ void __cdecl Com_Memset(void *dest_p, const int val, const size_t count)
         if (v6 >= 2)
         {
             *(_WORD *)v3 = v5;
-            v3 = (uint32_t *)((char *)v3 + 2);
+            v3 = (uint *)((char *)v3 + 2);
             v6 -= 2;
         }
         if (v6)

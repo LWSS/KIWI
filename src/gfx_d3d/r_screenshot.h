@@ -4,13 +4,13 @@
 
 #define CUBE_MAP_HIGH_MIP_SIZE 64
 
-enum GfxScreenshotType : __int32
+enum GfxScreenshotType : int
 {                                       // ...
     R_SCREENSHOT_JPG = 0x0,
     R_SCREENSHOT_TGA = 0x1,
 };
 
-enum CubeCoord : __int32
+enum CubeCoord : int
 {                                       // ...
     CUBE_X0 = 0x0,
     CUBE_X1 = 0x1,
@@ -19,7 +19,7 @@ enum CubeCoord : __int32
     CUBE_NUM_COORDS = 0x4,
 };
 
-enum FlipEdge : __int32
+enum FlipEdge : int
 {                                       // ...
     DONT_FLIP_EDGE = 0x0,
     FLIP_EDGE = 0x1,

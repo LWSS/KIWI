@@ -3,23 +3,23 @@
 #include <Windows.h> // literally just for some of the extern types at the bottom
 #include <gfx_d3d/rb_backend.h> // THREAD_CONTEXT_COUNT
 
-enum ThreadOwner : __int32
+enum ThreadOwner : int
 {                                       // ...
     THREAD_OWNER_NONE = 0x0,
     THREAD_OWNER_DATABASE = 0x1,
     THREAD_OWNER_CINEMATICS = 0x2,
 };
 
-uint32_t __cdecl Sys_GetCpuCount();
+uint __cdecl Sys_GetCpuCount();
 void __cdecl Sys_InitMainThread();
-uint32_t __cdecl Sys_GetCurrentThreadId();
+uint __cdecl Sys_GetCurrentThreadId();
 void __cdecl Sys_InitThread(ThreadContext_t threadContext);
-char __cdecl Sys_SpawnRenderThread(void(__cdecl* function)(uint32_t));
+char __cdecl Sys_SpawnRenderThread(void(__cdecl* function)(uint));
 void __cdecl Sys_CreateEvent(bool manualReset, bool initialState, void** event);
-void __cdecl Sys_CreateThread(void(__cdecl* function)(uint32_t), ThreadContext_t threadContext);
-void __cdecl SetThreadName(uint32_t threadId, const char* threadName);
-uint32_t __stdcall Sys_ThreadMain(ThreadContext_t parameter);
-char __cdecl Sys_SpawnDatabaseThread(void(__cdecl* function)(uint32_t));
+void __cdecl Sys_CreateThread(void(__cdecl* function)(uint), ThreadContext_t threadContext);
+void __cdecl SetThreadName(uint threadId, const char* threadName);
+uint __stdcall Sys_ThreadMain(ThreadContext_t parameter);
+char __cdecl Sys_SpawnDatabaseThread(void(__cdecl* function)(uint));
 void __cdecl Sys_SuspendDatabaseThread(ThreadOwner owner);
 void __cdecl Sys_ResetEvent(void** event);
 void __cdecl Sys_ResumeDatabaseThread(ThreadOwner owner);
@@ -27,14 +27,14 @@ void __cdecl Sys_SetEvent(void** event);
 bool __cdecl Sys_HaveSuspendedDatabaseThread(ThreadOwner owner);
 void __cdecl Sys_WaitDatabaseThread();
 void __cdecl Sys_WaitForSingleObject(void** event);
-bool __cdecl Sys_SpawnWorkerThread(void(__cdecl* function)(uint32_t), uint32_t threadIndex);
+bool __cdecl Sys_SpawnWorkerThread(void(__cdecl* function)(uint), uint threadIndex);
 void __cdecl Sys_SuspendThread(ThreadContext_t threadContext);
 void __cdecl Sys_ResumeThread(ThreadContext_t threadContext);
 void *__cdecl Sys_RendererSleep();
 int __cdecl Sys_RendererReady();
 void __cdecl Sys_RenderCompleted();
 void __cdecl Sys_FrontEndSleep();
-bool __cdecl Sys_WaitForSingleObjectTimeout(void** event, uint32_t msec);
+bool __cdecl Sys_WaitForSingleObjectTimeout(void** event, uint msec);
 void __cdecl Sys_WakeRenderer(void* data);
 void __cdecl Sys_NotifyRenderer();
 void __cdecl Sys_DatabaseCompleted();
@@ -71,11 +71,11 @@ void __cdecl Sys_SetUpdateNonDependentEffectsEvent();
 void __cdecl Sys_ResetUpdateNonDependentEffectsEvent();
 void __cdecl Sys_SuspendOtherThreads();
 void __cdecl Sys_ReleaseThreadOwnership();
-char __cdecl Sys_SpawnCinematicsThread(void(__cdecl* function)(uint32_t));
-bool __cdecl Sys_WaitForCinematicsThreadOutstandingRequestEventTimeout(uint32_t timeoutMsec);
+char __cdecl Sys_SpawnCinematicsThread(void(__cdecl* function)(uint));
+bool __cdecl Sys_WaitForCinematicsThreadOutstandingRequestEventTimeout(uint timeoutMsec);
 void __cdecl Sys_SetCinematicsThreadOutstandingRequestEvent();
 void __cdecl Sys_ResetCinematicsThreadOutstandingRequestEvent();
-bool __cdecl Sys_WaitForCinematicsHostOutstandingRequestEventTimeout(uint32_t timeoutMsec);
+bool __cdecl Sys_WaitForCinematicsHostOutstandingRequestEventTimeout(uint timeoutMsec);
 void __cdecl Sys_SetCinematicsHostOutstandingRequestEvent();
 void __cdecl Sys_ResetCinematicsHostOutstandingRequestEvent();
 
@@ -83,11 +83,11 @@ int __cdecl Sys_IsRendererReady();
 void __cdecl Sys_BeginLoadThreadPriorities();
 
 #ifdef KISAK_SP
-int Sys_WaitStartServer(uint32_t timeout);
+int Sys_WaitStartServer(uint timeout);
 void Sys_InitServerEvents();
 void Sys_ClientMessageReceived();
 void Sys_ClearClientMessage();
-int Sys_SpawnServerThread(void(*function)(uint32_t));
+int Sys_SpawnServerThread(void(*function)(uint));
 void Sys_WaitClientMessageReceived();
 void Sys_ServerSnapshotCompleted();
 bool Sys_WaitServerSnapshot();
@@ -99,17 +99,17 @@ int Sys_ServerTimeout();
 void Sys_WakeServer();
 void Sys_SleepServer();
 bool Sys_WaitServer();
-void Sys_Sleep(uint32_t msec);
+void Sys_Sleep(uint msec);
 void Sys_SetServerTimeout(int timeout);
 bool Sys_WaitForSaveHistoryDone();
-int Sys_SpawnServerDemoThread(void(*function)(uint32_t));
+int Sys_SpawnServerDemoThread(void(*function)(uint));
 void Sys_SetSaveHistoryEvent();
 void Sys_WaitForSaveHistory();
 void Sys_SetSaveHistoryDoneEvent();
 #endif
 
 
-enum WinThreadLock : __int32
+enum WinThreadLock : int
 {                                       // ...
     THREAD_LOCK_NONE = 0x0,
     THREAD_LOCK_MINIMAL = 0x1,
@@ -123,6 +123,6 @@ void Win_UpdateThreadLock();
 extern void *g_threadValues[THREAD_CONTEXT_COUNT][4];
 extern DWORD threadId[THREAD_CONTEXT_COUNT];
 extern HANDLE threadHandle[THREAD_CONTEXT_COUNT];
-extern uint32_t s_affinityMaskForProcess;
-extern uint32_t s_cpuCount;
-extern uint32_t s_affinityMaskForCpu[4];
+extern uint s_affinityMaskForProcess;
+extern uint s_cpuCount;
+extern uint s_affinityMaskForCpu[4];

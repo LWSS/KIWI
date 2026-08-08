@@ -495,7 +495,7 @@ void __cdecl SkinModelInst(int instanceHandle, Material *checkhandle, int techTy
             const int nv  = XSurfaceGetNumVerts(skinned[i].xsurf);         // 0x4fe43d
             uint8_t  *base = (uint8_t *)skinned[i].skinnedVert;
             for (int vi = 0; vi < nv; ++vi)                                // 0x4fe449-0x4fe45f
-                *(uint32_t *)(base + 32 * vi + 0x10) = (uint32_t)*colorPtr;
+                *(uint *)(base + 32 * vi + 0x10) = (uint)*colorPtr;
         } else {
             mi->colorOverride = -1;
         }
@@ -541,7 +541,7 @@ static void R_DrawTessTechnique_Brushes(const GfxDrawPrimArgs *args)
     const MaterialTechnique *technique = gfxCmdBufState.technique;
     iassert(technique);
 
-    for (uint32_t passIndex = 0; passIndex < technique->passCount; ++passIndex) {
+    for (uint passIndex = 0; passIndex < technique->passCount; ++passIndex) {
         R_SetupPass(gfxCmdBufContext, passIndex);
         R_UpdateVertexDecl(&gfxCmdBufState);
         R_SetupPassCriticalPixelShaderArgs(gfxCmdBufContext);
@@ -600,20 +600,20 @@ static void Editor_ForceVsDefConstants(IDirect3DDevice9 *dev, const MaterialVert
 {
     if (!vs || !vs->prog.loadDef.program)
         return;
-    const uint32_t *tok = (const uint32_t *)vs->prog.loadDef.program;
+    const uint *tok = (const uint *)vs->prog.loadDef.program;
     unsigned n = vs->prog.loadDef.programSize;   // dwords
     unsigned i = 1;                              // skip version token
     while (i < n) {
-        uint32_t t = tok[i];
+        uint t = tok[i];
         if (t == 0x0000FFFF)                     // end token
             break;
         if ((t & 0xFFFF) == 0xFFFE) {            // comment (CTAB etc): length in bits 16..30
             i += ((t >> 16) & 0x7FFF) + 1;
             continue;
         }
-        uint32_t op = t & 0xFFFF;
+        uint op = t & 0xFFFF;
         if (op == 0x51) {                        // D3DSIO_DEF: dst tok + 4 raw float dwords
-            uint32_t dst = tok[i + 1] & 0x7FF;
+            uint dst = tok[i + 1] & 0x7FF;
             dev->SetVertexShaderConstantF(dst, (const float *)&tok[i + 2], 1);
             i += 6;
             continue;
@@ -674,13 +674,13 @@ static void Editor_DrawXModelSkinnedUncached(XSurface *xsurf, GfxPackedVertex *s
     IDirect3DVertexBuffer9 *vb = gfxBuf.dynamicVertexBuffer->buffer;
     if (!vb)
         Assert("C:\\trees\\cod3-pc\\cod3-modtools\\cod3src\\src\\gfx_d3d\\rb_shade.cpp", 412, 0, "%s", "vb");
-    if (gfxCmdBufState.prim.streams[0].vb != vb || gfxCmdBufState.prim.streams[0].offset != (uint32_t)vertexOffset ||
+    if (gfxCmdBufState.prim.streams[0].vb != vb || gfxCmdBufState.prim.streams[0].offset != (uint)vertexOffset ||
         gfxCmdBufState.prim.streams[0].stride != 32)
         R_ChangeStreamSource(&gfxCmdBufState.prim, 0, vb, vertexOffset, 32);
     if (gfxCmdBufState.prim.streams[1].vb || gfxCmdBufState.prim.streams[1].offset || gfxCmdBufState.prim.streams[1].stride)
         R_ChangeStreamSource(&gfxCmdBufState.prim, 1, 0, 0, 0);
 
-    for (uint32_t pass = 0; pass < gfxCmdBufState.technique->passCount; ++pass) {
+    for (uint pass = 0; pass < gfxCmdBufState.technique->passCount; ++pass) {
         R_SetupPass(gfxCmdBufContext, pass);
         R_UpdateVertexDecl(&gfxCmdBufState);
         R_SetupPassCriticalPixelShaderArgs(gfxCmdBufContext);

@@ -2,7 +2,7 @@
 
 #include "q_shared.h"
 
-enum FsThread : __int32
+enum FsThread : int
 {                                       // ...
     FS_THREAD_MAIN = 0x0,
     FS_THREAD_STREAM = 0x1,
@@ -13,7 +13,7 @@ enum FsThread : __int32
     FS_THREAD_INVALID = 0x6,
 };
 
-enum fsMode_t : __int32
+enum fsMode_t : int
 {                                       // ...
     FS_READ = 0x0,
     FS_WRITE = 0x1,
@@ -28,7 +28,7 @@ struct directory_t // sizeof=0x200
 };
 struct fileInIwd_s // sizeof=0xC
 {
-    uint32_t pos;
+    uint pos;
     char* name;
     fileInIwd_s* next;
 };
@@ -40,13 +40,13 @@ struct iwd_t // sizeof=0x324
     uint8_t* handle;
     int checksum;
     int pure_checksum;
-    volatile uint32_t hasOpenFile;
+    volatile uint hasOpenFile;
     int numfiles;
     uint8_t referenced;
     // padding byte
     // padding byte
     // padding byte
-    uint32_t hashSize;
+    uint hashSize;
     fileInIwd_s** hashTable;
     fileInIwd_s* buildBuffer;
 };
@@ -64,7 +64,7 @@ struct searchpath_s // sizeof=0x1C
 union qfile_gus // sizeof=0x4
 {                                       // ...
     FILE *o;
-    unsigned char *z;
+    byte *z;
 };
 struct qfile_us // sizeof=0x8
 {                                       // ...
@@ -109,27 +109,27 @@ void __cdecl FS_FCloseLogFile(int h);
 int __cdecl FS_FOpenFileWrite(const char *filename);
 int __cdecl FS_FOpenTextFileWrite(const char *filename);
 int __cdecl FS_FOpenFileAppend(const char *filename);
-uint32_t __cdecl FS_FOpenFileReadStream(const char *filename, int *file);
-uint32_t __cdecl FS_FOpenFileReadForThread(const char *filename, int *file, FsThread thread);
+uint __cdecl FS_FOpenFileReadStream(const char *filename, int *file);
+uint __cdecl FS_FOpenFileReadForThread(const char *filename, int *file, FsThread thread);
 int __cdecl FS_FOpenFileReadDatabase(const char *filename, int *file);
-uint32_t __cdecl FS_FOpenFileRead(const char *filename, int *file);
+uint __cdecl FS_FOpenFileRead(const char *filename, int *file);
 bool __cdecl FS_Delete(const char *filename);
 int __cdecl FS_FilenameCompare(const char *s1, const char *s2);
-uint32_t __cdecl FS_Read(uint8_t *buffer, uint32_t len, int h);
-uint32_t __cdecl FS_Write(const char *buffer, uint32_t len, int h);
-uint32_t __cdecl FS_WriteLog(const char *buffer, uint32_t len, int h);
+uint __cdecl FS_Read(uint8_t *buffer, uint len, int h);
+uint __cdecl FS_Write(const char *buffer, uint len, int h);
+uint __cdecl FS_WriteLog(const char *buffer, uint len, int h);
 void FS_Printf(int h, const char *fmt, ...);
 int __cdecl FS_Seek(int f, int offset, int origin);
 int __cdecl FS_ReadFile(const char *qpath, void **buffer);
-uint32_t *__cdecl FS_AllocMem(int bytes);
+uint *__cdecl FS_AllocMem(int bytes);
 void __cdecl FS_ResetFiles();
 void __cdecl FS_FreeFile(char *buffer);
 void __cdecl FS_FreeMem(char *buffer);
 int __cdecl FS_FileExists(char *file);
-int __cdecl FS_WriteFile(char *filename, char *buffer, uint32_t size);
+int __cdecl FS_WriteFile(char *filename, char *buffer, uint size);
 void __cdecl FS_ConvertPath(char *s);
 void __cdecl FS_InitFilesystem();
-uint32_t __cdecl FS_FOpenFileByMode(char *qpath, int *f, fsMode_t mode);
+uint __cdecl FS_FOpenFileByMode(char *qpath, int *f, fsMode_t mode);
 void __cdecl FS_Flush(int f);
 void __cdecl FS_FreeFileList(const char **list);
 
@@ -143,8 +143,8 @@ int __cdecl FS_SV_FOpenFileWrite(const char *filename);
 void __cdecl FS_SV_Rename(char *from, char *to);
 int __cdecl FS_SV_FileExists(char *file);
 
-uint32_t __cdecl FS_FTell(int f);
-enum FsListBehavior_e : __int32
+uint __cdecl FS_FTell(int f);
+enum FsListBehavior_e : int
 {                                       // ...
     FS_LIST_PURE_ONLY = 0x0,
     FS_LIST_ALL = 0x1,
@@ -167,7 +167,7 @@ const char **__cdecl FS_ListFilesInLocation(
 void __cdecl FS_FileClose(struct iobuf *stream);
 int __cdecl FS_FOpenFileWriteToDirForThread(const char *filename, const char *dir, FsThread thread);
 int __cdecl FS_FOpenFileWriteToDir(const char *filename, const char *dir);
-int __cdecl FS_WriteFileToDir(const char *filename, const char *path, char *buffer, uint32_t size);
+int __cdecl FS_WriteFileToDir(const char *filename, const char *path, char *buffer, uint size);
 
 void __cdecl FS_Restart(int localClientNum, int checksumFeed);
 bool __cdecl FS_NeedRestart(int checksumFeed);

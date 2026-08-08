@@ -4,7 +4,7 @@
 #error This file is for SinglePlayer only 
 #endif
 
-enum aiphys_t : __int32
+enum aiphys_t : int
 {
     AIPHYS_BAD = 0x0,
     AIPHYS_NORMAL_ABSOLUTE = 0x1,
@@ -14,7 +14,7 @@ enum aiphys_t : __int32
     AIPHYS_ZONLY_PHYSICS_RELATIVE = 0x5,
 };
 
-enum SlideMoveResult : __int32
+enum SlideMoveResult : int
 {
     SLIDEMOVE_COMPLETE = 0x0,
     SLIDEMOVE_CLIPPED = 0x1,

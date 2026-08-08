@@ -1,7 +1,7 @@
 #pragma once
 #include "r_rendercmds.h"
 
-enum GfxDrawSceneMethod : __int32
+enum GfxDrawSceneMethod : int
 {                                       // ...
     GFX_DRAW_SCENE_NONE = 0x0,
     GFX_DRAW_SCENE_FULLBRIGHT = 0x1,

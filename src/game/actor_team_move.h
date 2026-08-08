@@ -7,7 +7,7 @@
 #include "actor.h"
 #include "sentient.h"
 
-enum ai_teammove_t : __int32
+enum ai_teammove_t : int
 {
     AI_TEAMMOVE_TRAVEL = 0x0,
     AI_TEAMMOVE_WAIT = 0x1,

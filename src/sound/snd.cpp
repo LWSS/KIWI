@@ -47,7 +47,7 @@ const dvar_t *snd_touchStreamFilesOnLoad;
 snd_local_t g_snd;
 snd_physics g_sndPhysics;
 
-uint32_t g_FXPlaySoundCount;
+uint g_FXPlaySoundCount;
 AsyncPlaySound g_FXPlaySounds[32];
 
 void __cdecl TRACK_snd()
@@ -360,10 +360,10 @@ char __cdecl SND_ParseChannelAndBand_f(int *entchannel, int *eqIndex, int *band)
     if (*entchannel >= 0)
     {
         *eqIndex = atoi(Cmd_Argv(2));
-        if ((uint32_t)*eqIndex < 2)
+        if ((uint)*eqIndex < 2)
         {
             *band = atoi(Cmd_Argv(3));
-            if ((uint32_t)*band <= 2)
+            if ((uint)*band <= 2)
             {
                 return 1;
             }
@@ -481,8 +481,8 @@ void __cdecl SND_DeactivateEq_f()
 {
     const char *channelName; // [esp+4h] [ebp-10h]
     const char *channelNamea; // [esp+4h] [ebp-10h]
-    uint32_t band; // [esp+8h] [ebp-Ch]
-    uint32_t eqIndex; // [esp+Ch] [ebp-8h]
+    uint band; // [esp+8h] [ebp-Ch]
+    uint eqIndex; // [esp+Ch] [ebp-8h]
     int argc; // [esp+10h] [ebp-4h]
 
     argc = Cmd_Argc();
@@ -607,7 +607,7 @@ void __cdecl SND_RestoreListeners(snd_listener *listeners)
     memcpy(g_snd.listeners, listeners, sizeof(g_snd.listeners));
 }
 
-int __cdecl SND_SetPlaybackIdNotPlayed(uint32_t index)
+int __cdecl SND_SetPlaybackIdNotPlayed(uint index)
 {
     iassert(index >= 0 && index < SND_MAX_CHANNELS);
 
@@ -615,7 +615,7 @@ int __cdecl SND_SetPlaybackIdNotPlayed(uint32_t index)
     return SND_PLAYBACKID_NOTPLAYED;
 }
 
-int __cdecl SND_AcquirePlaybackId(uint32_t index, int totalMsec)
+int __cdecl SND_AcquirePlaybackId(uint index, int totalMsec)
 {
     snd_channel_info_t *chanInfo; // [esp+0h] [ebp-4h]
 
@@ -782,7 +782,7 @@ void __cdecl SND_ResetChannelInfo(int index)
     g_snd.chaninfo[index].alias0 = 0;
 }
 
-void __cdecl SND_SetChannelStartInfo(uint32_t index, SndStartAliasInfo *SndStartAliasInfo)
+void __cdecl SND_SetChannelStartInfo(uint index, SndStartAliasInfo *SndStartAliasInfo)
 {
     sndLengthNotifyInfo *p_lengthNotifyInfo; // ecx
     float offset[3]; // [esp+8h] [ebp-40h] BYREF
@@ -836,7 +836,7 @@ void __cdecl SND_SetChannelStartInfo(uint32_t index, SndStartAliasInfo *SndStart
 }
 
 void __cdecl SND_SetSoundFileChannelInfo(
-    uint32_t index,
+    uint index,
     int srcChannelCount,
     int baserate,
     int total_msec,
@@ -938,7 +938,7 @@ int __cdecl SND_FindFree2DChannel(SndStartAliasInfo *startAliasInfo, int entchan
 int __cdecl SND_FindReplaceableChannel(
     SndStartAliasInfo *startAliasInfo,
     int entchannel,
-    uint32_t first,
+    uint first,
     int count)
 {
     int Priority; // eax
@@ -1839,7 +1839,7 @@ char __cdecl SND_ContinueLoopingSound(
 }
 
 void __cdecl SND_ContinueLoopingSound_Internal(
-    uint32_t chanIndex,
+    uint chanIndex,
     float lerp,
     float volumeScale,
     int *pChannel,
@@ -2078,7 +2078,7 @@ char __cdecl SND_ValidateSoundAliasBlend(const snd_alias_t *alias0, const snd_al
     }
 }
 
-int __cdecl SND_PlayLocalSoundAlias(uint32_t localClientNum, const snd_alias_t *alias, snd_alias_system_t system)
+int __cdecl SND_PlayLocalSoundAlias(uint localClientNum, const snd_alias_t *alias, snd_alias_system_t system)
 {
     bcassert(system, SASYS_COUNT);
     bcassert(localClientNum, ARRAY_COUNT(g_snd.listeners));
@@ -2098,7 +2098,7 @@ int __cdecl SND_PlayLocalSoundAlias(uint32_t localClientNum, const snd_alias_t *
 }
 
 int __cdecl SND_PlayLocalSoundAliasByName(
-    uint32_t localClientNum,
+    uint localClientNum,
     const char *aliasname,
     snd_alias_system_t system)
 {
@@ -2133,7 +2133,7 @@ void __cdecl SND_PlayMusicAlias(
 
 void __cdecl SND_StartBackground(
     int localClientNum,
-    uint32_t track,
+    uint track,
     const snd_alias_t *alias,
     int fadetime,
     float fraction,
@@ -2290,7 +2290,7 @@ void __cdecl SND_StopMusic(int fadetime)
         SND_StopBackground(0, fadetime);
 }
 
-void __cdecl SND_StopBackground(uint32_t track, int fadetime)
+void __cdecl SND_StopBackground(uint track, int fadetime)
 {
     iassert(track >= 0 && track < SND_TRACK_COUNT);
     iassert(fadetime >= 0);
@@ -2546,7 +2546,7 @@ void __cdecl SND_UpdateLoopingSounds()
     }
 }
 
-char __cdecl SND_UpdateBackgroundVolume(uint32_t track, int frametime)
+char __cdecl SND_UpdateBackgroundVolume(uint track, int frametime)
 {
     float volume; // [esp+0h] [ebp-8h]
     int channel; // [esp+4h] [ebp-4h]
@@ -2699,7 +2699,7 @@ void __cdecl SND_DeactivateChannelEq(const char *channelName, int eqIndex)
         SND_DeactivateEq(channelName, eqIndex, band);
 }
 
-void __cdecl SND_DeactivateEq(const char *channelName, int eqIndex, uint32_t band)
+void __cdecl SND_DeactivateEq(const char *channelName, int eqIndex, uint band)
 {
     signed int entchannel; // [esp+0h] [ebp-4h]
 
@@ -3010,7 +3010,7 @@ void __cdecl DebugDrawWorldSounds(int debugDrawStyle)
 }
 
 void __cdecl DebugDrawWorldSound3D(
-    uint32_t idx,
+    uint idx,
     int debugDrawStyle,
     int *offsets,
     int *closestId,
@@ -4334,10 +4334,10 @@ int __cdecl SND_GetSoundOverlayStream(snd_overlay_info_t *info, int maxcount)
     return maxcount;
 }
 
-void __cdecl SND_StopChannelAndPlayChainAlias(uint32_t chanId)
+void __cdecl SND_StopChannelAndPlayChainAlias(uint chanId)
 {
     snd_alias_t *chainAlias; // [esp+0h] [ebp-18h]
-    uint32_t sndEnt; // [esp+4h] [ebp-14h]
+    uint sndEnt; // [esp+4h] [ebp-14h]
     float org[3]; // [esp+8h] [ebp-10h] BYREF
     snd_channel_info_t *chaninfo; // [esp+14h] [ebp-4h]
 

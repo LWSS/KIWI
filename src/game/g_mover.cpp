@@ -383,7 +383,7 @@ char __cdecl G_MoverPush(gentity_s *pusher, float *move, float *amove, gentity_s
     int entityList[MAX_GENTITIES];
     int i; // [esp+108Ch] [ebp-1008h]
     gentity_s *ent; // [esp+1090h] [ebp-1004h]
-    uint32_t v23[MAX_GENTITIES];
+    uint v23[MAX_GENTITIES];
 
     *obstacle = 0;
     v18 = 1;
@@ -591,7 +591,7 @@ void __cdecl trigger_use_shared(gentity_s *self)
 {
     char szConfigString[1028]; // [esp+34h] [ebp-410h] BYREF
     const char *cursorhint; // [esp+43Ch] [ebp-8h] BYREF
-    uint32_t i; // [esp+440h] [ebp-4h]
+    uint i; // [esp+440h] [ebp-4h]
 
     if (self->s.eType == ET_MISSILE)
         MyAssertHandler(".\\game\\g_mover.cpp", 749, 0, "%s", "self->s.eType != ET_MISSILE");
@@ -735,7 +735,7 @@ void trigger_use_shared(gentity_s *self)
                 } while (!v9);
                 if (!v9)
                     goto LABEL_25;
-                if ((uint32_t)++v6 >= 0x20)
+                if ((uint)++v6 >= 0x20)
                     goto LABEL_26;
             }
             SV_SetConfigstring(CS_USE_TRIG_STRINGS + v6, v10[0]);

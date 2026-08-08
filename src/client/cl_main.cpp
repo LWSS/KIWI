@@ -30,7 +30,7 @@
 #include <sound/snd_local.h>
 #include <server/server.h>
 
-enum MovieToPlayScriptOp : __int32
+enum MovieToPlayScriptOp : int
 {
     MTPSOP_PLUS = 0x0,
     MTPSOP_MINUS = 0x1,
@@ -1431,35 +1431,35 @@ void __cdecl CL_Shutdown(int localClientNum)
 
 void __cdecl CL_DrawTextPhysical(
     const char *text,
-    int32_t maxChars,
+    int maxChars,
     Font_s *font,
     float x,
     float y,
     float xScale,
     float yScale,
     const float *color,
-    int32_t style)
+    int style)
 {
     R_AddCmdDrawText(text, maxChars, font, x, y, xScale, yScale, 0.0, color, style);
 }
 
 void __cdecl CL_DrawTextPhysicalWithEffects(
     const char *text,
-    int32_t maxChars,
+    int maxChars,
     Font_s *font,
     float x,
     float y,
     float xScale,
     float yScale,
     const float *color,
-    int32_t style,
+    int style,
     const float *glowColor,
     Material *fxMaterial,
     Material *fxMaterialGlow,
-    int32_t fxBirthTime,
-    int32_t fxLetterTime,
-    int32_t fxDecayStartTime,
-    int32_t fxDecayDuration)
+    int fxBirthTime,
+    int fxLetterTime,
+    int fxDecayStartTime,
+    int fxDecayDuration)
 {
     R_AddCmdDrawTextWithEffects(
         text,
@@ -1484,16 +1484,16 @@ void __cdecl CL_DrawTextPhysicalWithEffects(
 void __cdecl CL_DrawText(
     const ScreenPlacement *scrPlace,
     const char *text,
-    int32_t maxChars,
+    int maxChars,
     Font_s *font,
     float x,
     float y,
-    int32_t horzAlign,
-    int32_t vertAlign,
+    int horzAlign,
+    int vertAlign,
     float xScale,
     float yScale,
     const float *color,
-    int32_t style)
+    int style)
 {
     ScrPlace_ApplyRect(scrPlace, &x, &y, &xScale, &yScale, horzAlign, vertAlign);
     R_AddCmdDrawText(text, maxChars, font, x, y, xScale, yScale, 0.0, color, style);
@@ -1502,17 +1502,17 @@ void __cdecl CL_DrawText(
 void __cdecl CL_DrawTextRotate(
     const ScreenPlacement *scrPlace,
     const char *text,
-    int32_t maxChars,
+    int maxChars,
     Font_s *font,
     float x,
     float y,
     float rotation,
-    int32_t horzAlign,
-    int32_t vertAlign,
+    int horzAlign,
+    int vertAlign,
     float xScale,
     float yScale,
     const float *color,
-    int32_t style)
+    int style)
 {
     ScrPlace_ApplyRect(scrPlace, &x, &y, &xScale, &yScale, horzAlign, vertAlign);
     R_AddCmdDrawText(text, maxChars, font, x, y, xScale, yScale, rotation, color, style);
@@ -1520,15 +1520,15 @@ void __cdecl CL_DrawTextRotate(
 
 void __cdecl CL_DrawTextPhysicalWithCursor(
     char *text,
-    int32_t maxChars,
+    int maxChars,
     Font_s *font,
     float x,
     float y,
     float xScale,
     float yScale,
     const float *color,
-    int32_t style,
-    int32_t cursorPos,
+    int style,
+    int cursorPos,
     char cursor)
 {
     R_AddCmdDrawTextWithCursor(text, maxChars, font, x, y, xScale, yScale, 0.0, color, style, cursorPos, cursor);
@@ -1537,17 +1537,17 @@ void __cdecl CL_DrawTextPhysicalWithCursor(
 void __cdecl CL_DrawTextWithCursor(
     const ScreenPlacement *scrPlace,
     const char *text,
-    int32_t maxChars,
+    int maxChars,
     Font_s *font,
     float x,
     float y,
-    int32_t horzAlign,
-    int32_t vertAlign,
+    int horzAlign,
+    int vertAlign,
     float xScale,
     float yScale,
     const float *color,
-    int32_t style,
-    int32_t cursorPos,
+    int style,
+    int cursorPos,
     char cursor)
 {
     iassert(maxChars > 0);

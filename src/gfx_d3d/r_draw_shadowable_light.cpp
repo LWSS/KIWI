@@ -81,7 +81,7 @@ void __cdecl R_SetCodeImageSamplerState(
 
 void __cdecl R_SetShadowableLight(
     GfxCmdBufSourceState *source,
-    uint32_t shadowableLightIndex,
+    uint shadowableLightIndex,
     const GfxViewInfo *viewInfo)
 {
     float falloffScale; // [esp+28h] [ebp-28h]
@@ -165,7 +165,7 @@ void __cdecl R_SetShadowableLight(
 
 void __cdecl R_SetDrawSurfsShadowableLight(GfxCmdBufSourceState *source, const GfxDrawSurfListInfo *info)
 {
-    uint32_t shadowableLightIndex; // [esp+4h] [ebp-14h]
+    uint shadowableLightIndex; // [esp+4h] [ebp-14h]
     const GfxLight *light; // [esp+14h] [ebp-4h]
 
     if (info->light)
@@ -179,7 +179,7 @@ void __cdecl R_SetDrawSurfsShadowableLight(GfxCmdBufSourceState *source, const G
     }
 }
 
-uint32_t __cdecl R_GetShadowableLightIndex(
+uint __cdecl R_GetShadowableLightIndex(
     const GfxBackEndData *data,
     const GfxViewInfo *viewInfo,
     const GfxLight *light)

@@ -26,7 +26,7 @@ void __cdecl TRACK_dobj_management()
     track_static_alloc_internal(serverObjMap, 2048, "serverObjMap", 11);
 }
 
-DObj_s *__cdecl Com_GetClientDObj(uint32_t handle, int localClientNum)
+DObj_s *__cdecl Com_GetClientDObj(uint handle, int localClientNum)
 {
     iassert(handle >= 0 && handle < CLIENT_DOBJ_HANDLE_MAX);
     iassert(localClientNum == 0);
@@ -42,10 +42,10 @@ DObj_s *__cdecl Com_GetClientDObj(uint32_t handle, int localClientNum)
         return 0;
 }
 
-DObj_s *Com_GetClientDObjBuffered(uint32_t handle, int localClientNum)
+DObj_s *Com_GetClientDObjBuffered(uint handle, int localClientNum)
 {
-    uint32_t v4; // r31
-    uint32_t v5; // r31
+    uint v4; // r31
+    uint v5; // r31
 
     iassert(handle >= 0 && handle < CLIENT_DOBJ_HANDLE_MAX);
 
@@ -62,7 +62,7 @@ DObj_s *Com_GetClientDObjBuffered(uint32_t handle, int localClientNum)
         return 0;
 }
 
-DObj_s *__cdecl Com_GetServerDObj(uint32_t handle)
+DObj_s *__cdecl Com_GetServerDObj(uint handle)
 {
     iassert(((unsigned)handle < (sizeof(serverObjMap) / (sizeof(serverObjMap[0]) * (sizeof(serverObjMap) != 4 || sizeof(serverObjMap[0]) <= 4)))));
     iassert((unsigned)serverObjMap[handle] < DOBJ_HANDLE_MAX);
@@ -89,10 +89,10 @@ DObj_s *__cdecl Com_ClientDObjCreate(
     DObjModel_s *dobjModels,
     uint16_t numModels,
     XAnimTree_s *tree,
-    uint32_t handle,
+    uint handle,
     int localClientNum)
 {
-    uint32_t index; // [esp+0h] [ebp-4h]
+    uint index; // [esp+0h] [ebp-4h]
 
     iassert(dobjModels);
     iassert(((unsigned)handle < CLIENT_DOBJ_HANDLE_MAX));
@@ -183,9 +183,9 @@ DObj_s *__cdecl Com_ServerDObjCreate(
     DObjModel_s *dobjModels,
     uint16_t numModels,
     XAnimTree_s *tree,
-    uint32_t handle)
+    uint handle)
 {
-    uint32_t index; // [esp+0h] [ebp-4h]
+    uint index; // [esp+0h] [ebp-4h]
 
     iassert(dobjModels);
     iassert(handle < SERVER_DOBJ_HANDLE_MAX);
@@ -211,9 +211,9 @@ DObj_s *__cdecl Com_ServerDObjCreate(
     return &objBuf[index];
 }
 
-void __cdecl Com_SafeClientDObjFree(uint32_t handle, int localClientNum)
+void __cdecl Com_SafeClientDObjFree(uint handle, int localClientNum)
 {
-    uint32_t index; // [esp+0h] [ebp-4h]
+    uint index; // [esp+0h] [ebp-4h]
 
     iassert(handle < CLIENT_DOBJ_HANDLE_MAX);
 
@@ -240,9 +240,9 @@ void __cdecl Com_SafeClientDObjFree(uint32_t handle, int localClientNum)
     }
 }
 
-void __cdecl Com_SafeServerDObjFree(uint32_t handle)
+void __cdecl Com_SafeServerDObjFree(uint handle)
 {
-    uint32_t index; // [esp+0h] [ebp-4h]
+    uint index; // [esp+0h] [ebp-4h]
 
     iassert(handle < SERVER_DOBJ_HANDLE_MAX);
 
@@ -314,12 +314,12 @@ void __cdecl Com_ShutdownDObj()
     }
 }
 
-DObj_s *Com_DObjCloneToBuffer(uint32_t entnum)
+DObj_s *Com_DObjCloneToBuffer(uint entnum)
 {
-    uint32_t v2; // r27
+    uint v2; // r27
     __int16 serverDobjIndex; // r11
-    uint32_t v4; // r26
-    uint32_t FreeDObjIndex; // r30
+    uint v4; // r26
+    uint FreeDObjIndex; // r30
 
     if (entnum >= 0x880)
         MyAssertHandler(
@@ -381,9 +381,9 @@ DObj_s *Com_DObjCloneToBuffer(uint32_t entnum)
     return &objBuf[FreeDObjIndex];
 }
 
-void Com_DObjCloneFromBuffer(uint32_t entnum)
+void Com_DObjCloneFromBuffer(uint entnum)
 {
-    uint32_t v2; // r31
+    uint v2; // r31
 
     if (entnum >= 0x900)
         MyAssertHandler(

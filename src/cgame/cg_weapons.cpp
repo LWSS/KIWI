@@ -42,9 +42,9 @@ enum {
 const float MYLERP_START = 0.3f;
 const float MYLERP_END = 0.1f;
 
-int32_t removeMeWhenMPStopsCrashingInHere;
+int removeMeWhenMPStopsCrashingInHere;
 
-int32_t g_animRateOffsets[33] =
+int g_animRateOffsets[33] =
 {
   -1,
   -1,
@@ -81,9 +81,9 @@ int32_t g_animRateOffsets[33] =
   -1
 }; // idb
 
-bool __cdecl CG_JavelinADS(int32_t localClientNum)
+bool __cdecl CG_JavelinADS(int localClientNum)
 {
-    int32_t weapIdx; // [esp+4h] [ebp-Ch]
+    int weapIdx; // [esp+4h] [ebp-Ch]
     cg_s *cgameGlob;
 
     cgameGlob = CG_GetLocalClientGlobals(localClientNum);
@@ -96,18 +96,18 @@ bool __cdecl CG_JavelinADS(int32_t localClientNum)
     return 0;
 }
 
-int32_t __cdecl CG_WeaponDObjHandle(int32_t weaponNum)
+int __cdecl CG_WeaponDObjHandle(int weaponNum)
 {
     return weaponNum + MAX_GENTITIES;
 }
 
-void __cdecl CG_RegisterWeapon(int32_t localClientNum, uint32_t weaponNum)
+void __cdecl CG_RegisterWeapon(int localClientNum, uint weaponNum)
 {
     weaponInfo_s *weapInfo; // [esp+18h] [ebp-28h]
-    uint32_t dobjHandle; // [esp+1Ch] [ebp-24h]
+    uint dobjHandle; // [esp+1Ch] [ebp-24h]
     uint8_t boneIndex; // [esp+23h] [ebp-1Dh] BYREF
     DObj_s *obj; // [esp+24h] [ebp-1Ch]
-    int32_t tagIndex; // [esp+28h] [ebp-18h]
+    int tagIndex; // [esp+28h] [ebp-18h]
     WeaponDef *weapDef; // [esp+2Ch] [ebp-14h]
     DObjModel_s dobjModels[2]; // [esp+30h] [ebp-10h] BYREF
 
@@ -237,8 +237,8 @@ void __cdecl CG_RegisterWeapon(int32_t localClientNum, uint32_t weaponNum)
 
 XAnimTree_s *__cdecl CG_CreateWeaponViewModelXAnim(WeaponDef *weapDef)
 {
-    int32_t v2; // [esp+0h] [ebp-14h]
-    int32_t animIndex; // [esp+8h] [ebp-Ch]
+    int v2; // [esp+0h] [ebp-14h]
+    int animIndex; // [esp+8h] [ebp-Ch]
     XAnimTree_s *pAnimTree; // [esp+Ch] [ebp-8h]
     XAnim_s *pAnims; // [esp+10h] [ebp-4h]
 
@@ -266,9 +266,9 @@ XAnimTree_s *__cdecl CG_CreateWeaponViewModelXAnim(WeaponDef *weapDef)
     return pAnimTree;
 }
 
-void __cdecl CG_UpdateWeaponViewmodels(int32_t localClientNum)
+void __cdecl CG_UpdateWeaponViewmodels(int localClientNum)
 {
-    uint32_t weaponIndex; // [esp+8h] [ebp-4h]
+    uint weaponIndex; // [esp+8h] [ebp-4h]
 
     cg_s *cgameGlob;
 
@@ -290,8 +290,8 @@ void __cdecl CG_UpdateWeaponViewmodels(int32_t localClientNum)
 }
 
 void __cdecl ChangeViewmodelDobj(
-    int32_t localClientNum,
-    uint32_t weaponNum,
+    int localClientNum,
+    uint weaponNum,
     uint8_t weaponModel,
     XModel *newHands,
     XModel *newGoggles,
@@ -300,8 +300,8 @@ void __cdecl ChangeViewmodelDobj(
     bool updateClientInfo)
 {
     weaponInfo_s *weapInfo; // [esp+8h] [ebp-34h]
-    uint32_t dobjHandle; // [esp+Ch] [ebp-30h]
-    int32_t mdlIdx; // [esp+10h] [ebp-2Ch]
+    uint dobjHandle; // [esp+Ch] [ebp-30h]
+    int mdlIdx; // [esp+10h] [ebp-2Ch]
     WeaponDef *weapDef; // [esp+14h] [ebp-28h]
     XAnimTree_s *pAnimTree; // [esp+18h] [ebp-24h]
     DObjModel_s dobjModels[4]; // [esp+1Ch] [ebp-20h] BYREF
@@ -374,9 +374,9 @@ void __cdecl ChangeViewmodelDobj(
     }
 }
 
-void __cdecl CG_UpdateHandViewmodels(int32_t localClientNum, XModel *handModel)
+void __cdecl CG_UpdateHandViewmodels(int localClientNum, XModel *handModel)
 {
-    uint32_t weaponIndex; // [esp+Ch] [ebp-4h]
+    uint weaponIndex; // [esp+Ch] [ebp-4h]
 
     iassert(handModel);
     iassert(localClientNum == 0);
@@ -396,9 +396,9 @@ void __cdecl CG_UpdateHandViewmodels(int32_t localClientNum, XModel *handModel)
     }
 }
 
-void __cdecl CG_RegisterItemVisuals(int32_t localClientNum, uint32_t weapIdx)
+void __cdecl CG_RegisterItemVisuals(int localClientNum, uint weapIdx)
 {
-    int32_t modelIdx; // [esp+4h] [ebp-4h]
+    int modelIdx; // [esp+4h] [ebp-4h]
 
     bcassert(weapIdx, MAX_WEAPONS);
 
@@ -411,14 +411,14 @@ void __cdecl CG_RegisterItemVisuals(int32_t localClientNum, uint32_t weapIdx)
     CG_RegisterWeapon(localClientNum, weapIdx);
 }
 
-void __cdecl CG_RegisterItems(int32_t localClientNum)
+void __cdecl CG_RegisterItems(int localClientNum)
 {
     char v1; // al
     char *v2; // [esp+8h] [ebp-98h]
     const char *ConfigString; // [esp+Ch] [ebp-94h]
     char items[132]; // [esp+10h] [ebp-90h] BYREF
-    int32_t i; // [esp+98h] [ebp-8h]
-    int32_t digit; // [esp+9Ch] [ebp-4h]
+    int i; // [esp+98h] [ebp-8h]
+    int digit; // [esp+9Ch] [ebp-4h]
 
     ConfigString = CL_GetConfigString(localClientNum, CS_ITEMS);
     v2 = items;
@@ -447,7 +447,7 @@ void __cdecl CG_HoldBreathInit(cg_s *cgameGlob)
     cgameGlob->holdBreathFrac = 0.0;
 }
 
-void __cdecl CG_UpdateViewModelPose(const DObj_s* obj, int32_t localClientNum)
+void __cdecl CG_UpdateViewModelPose(const DObj_s* obj, int localClientNum)
 {
     cg_s *cgameGlob;
 
@@ -483,7 +483,7 @@ bool __cdecl CG_IsPlayerADS(clientInfo_t *ci, const centity_s *cent)
 }
 
 void __cdecl CG_GuessSpreadForWeapon(
-    int32_t localClientNum,
+    int localClientNum,
     const centity_s *cent,
     const WeaponDef *weapDef,
     float *minSpread,
@@ -515,7 +515,7 @@ void __cdecl CG_GuessSpreadForWeapon(
     }
 }
 
-void __cdecl CG_GetPlayerViewOrigin(int32_t localClientNum, const playerState_s *ps, float *origin)
+void __cdecl CG_GetPlayerViewOrigin(int localClientNum, const playerState_s *ps, float *origin)
 {
     DObj_s *obj; // [esp+0h] [ebp-8h]
     centity_s *turretEnt; // [esp+4h] [ebp-4h]
@@ -539,19 +539,19 @@ void __cdecl CG_GetPlayerViewOrigin(int32_t localClientNum, const playerState_s 
 #endif
 
 void __cdecl CG_AddPlayerWeapon(
-    int32_t localClientNum,
+    int localClientNum,
     const GfxScaledPlacement* placement,
     const playerState_s* ps,
     centity_s* cent,
-    int32_t bDrawGun)
+    int bDrawGun)
 {
-    uint32_t fLeanDist; // [esp+Ch] [ebp-48h]
+    uint fLeanDist; // [esp+Ch] [ebp-48h]
     bool v7; // [esp+10h] [ebp-44h]
     BOOL v8; // [esp+14h] [ebp-40h]
     bool v9; // [esp+18h] [ebp-3Ch]
     snapshot_s* nextSnap; // [esp+28h] [ebp-2Ch]
     const weaponInfo_s* weapInfo; // [esp+30h] [ebp-24h]
-    int32_t weaponNum; // [esp+34h] [ebp-20h]
+    int weaponNum; // [esp+34h] [ebp-20h]
     float lightingOrigin[3]; // [esp+44h] [ebp-10h] BYREF
     const WeaponDef* weapDef; // [esp+50h] [ebp-4h]
 
@@ -632,11 +632,11 @@ void __cdecl CG_AddPlayerWeapon(
 }
 
 void __cdecl WeaponFlash(
-    int32_t localClientNum,
-    uint32_t dobjHandle,
-    uint32_t weaponNum,
-    int32_t bViewFlash,
-    uint32_t flashTag)
+    int localClientNum,
+    uint dobjHandle,
+    uint weaponNum,
+    int bViewFlash,
+    uint flashTag)
 {
     const FxEffectDef *viewFlashEffect; // [esp+0h] [ebp-Ch]
     WeaponDef *weapDef; // [esp+8h] [ebp-4h]
@@ -650,10 +650,10 @@ void __cdecl WeaponFlash(
         CG_PlayBoltedEffect(localClientNum, viewFlashEffect, dobjHandle, flashTag);
 }
 
-void __cdecl HoldBreathUpdate(int32_t localClientNum)
+void __cdecl HoldBreathUpdate(int localClientNum)
 {
     float deltaTime; // [esp+10h] [ebp-10h]
-    int32_t playbackId; // [esp+14h] [ebp-Ch]
+    int playbackId; // [esp+14h] [ebp-Ch]
     cg_s *cgameGlob;
 
     cgameGlob = CG_GetLocalClientGlobals(localClientNum);
@@ -714,9 +714,9 @@ void __cdecl HoldBreathUpdate(int32_t localClientNum)
     HoldBreathSoundLerp(localClientNum, cgameGlob->holdBreathFrac);
 }
 
-void __cdecl HoldBreathSoundLerp(int32_t localClientNum, float lerp)
+void __cdecl HoldBreathSoundLerp(int localClientNum, float lerp)
 {
-    int32_t channelIndex; // [esp+0h] [ebp-10Ch]
+    int channelIndex; // [esp+0h] [ebp-10Ch]
     float channelVolumes[64]; // [esp+Ch] [ebp-100h] BYREF
     cgs_t *cgs;
 
@@ -733,11 +733,11 @@ void __cdecl HoldBreathSoundLerp(int32_t localClientNum, float lerp)
     }
 }
 
-void __cdecl CG_UpdateViewWeaponAnim(int32_t localClientNum)
+void __cdecl CG_UpdateViewWeaponAnim(int localClientNum)
 {
     float dtime; // [esp+8h] [ebp-14h]
     weaponInfo_s* weapInfo; // [esp+Ch] [ebp-10h]
-    int32_t weaponIndex; // [esp+14h] [ebp-8h]
+    int weaponIndex; // [esp+14h] [ebp-8h]
     playerState_s* ps; // [esp+18h] [ebp-4h]
     cg_s *cgameGlob;
 
@@ -765,15 +765,15 @@ void __cdecl CG_UpdateViewWeaponAnim(int32_t localClientNum)
     }
 }
 
-void __cdecl WeaponRunXModelAnims(int32_t localClientNum, const playerState_s* ps, weaponInfo_s* weapInfo)
+void __cdecl WeaponRunXModelAnims(int localClientNum, const playerState_s* ps, weaponInfo_s* weapInfo)
 {
     BOOL v3; // [esp+14h] [ebp-34h]
     BOOL v4; // [esp+18h] [ebp-30h]
     BOOL v5; // [esp+1Ch] [ebp-2Ch]
     DObj_s* obj; // [esp+24h] [ebp-24h]
     float transitionTime; // [esp+28h] [ebp-20h]
-    int32_t weaponIndex; // [esp+38h] [ebp-10h]
-    int32_t i; // [esp+3Ch] [ebp-Ch]
+    int weaponIndex; // [esp+38h] [ebp-10h]
+    int i; // [esp+3Ch] [ebp-Ch]
     XAnimTree_s* pAnimTree; // [esp+40h] [ebp-8h]
     const WeaponDef* weapDef; // [esp+44h] [ebp-4h]
 
@@ -919,10 +919,10 @@ void __cdecl WeaponRunXModelAnims(int32_t localClientNum, const playerState_s* p
     }
 }
 void __cdecl StartWeaponAnim(
-    int32_t localClientNum,
-    uint32_t weaponNum,
+    int localClientNum,
+    uint weaponNum,
     DObj_s* obj,
-    int32_t animIndex,
+    int animIndex,
     float transitionTime)
 {
     float rate; // [esp+20h] [ebp-1Ch]
@@ -970,10 +970,10 @@ void __cdecl StartWeaponAnim(
     }
 }
 
-double __cdecl GetWeaponAnimRate(WeaponDef *weapDef, XAnim_s *anims, uint32_t animIndex)
+double __cdecl GetWeaponAnimRate(WeaponDef *weapDef, XAnim_s *anims, uint animIndex)
 {
-    int32_t offset; // [esp+8h] [ebp-8h]
-    int32_t time; // [esp+Ch] [ebp-4h]
+    int offset; // [esp+8h] [ebp-8h]
+    int time; // [esp+Ch] [ebp-4h]
 
     iassert(weapDef);
     iassert(anims);
@@ -981,14 +981,14 @@ double __cdecl GetWeaponAnimRate(WeaponDef *weapDef, XAnim_s *anims, uint32_t an
     offset = g_animRateOffsets[animIndex];
     if (offset < 0)
         return 1.0;
-    time = *(int32_t *)((char *)&weapDef->szInternalName + offset);
+    time = *(int *)((char *)&weapDef->szInternalName + offset);
     iassert(time >= 0);
     if (!time)
         return 0.0;
     return (float)((double)XAnimGetLengthMsec(anims, animIndex) / (double)time);
 }
 
-void __cdecl PlayADSAnim(float weaponPosFrac, int32_t weaponNum, DObj_s *obj, int32_t animIndex)
+void __cdecl PlayADSAnim(float weaponPosFrac, int weaponNum, DObj_s *obj, int animIndex)
 {
     XAnimTree_s *Tree; // eax
     XAnimTree_s *v5; // eax
@@ -1012,11 +1012,11 @@ void __cdecl PlayADSAnim(float weaponPosFrac, int32_t weaponNum, DObj_s *obj, in
     XAnimSetTime(v5, 0x20u, time);
 }
 
-void __cdecl ResetWeaponAnimTrees(int32_t localClientNum, const playerState_s *ps)
+void __cdecl ResetWeaponAnimTrees(int localClientNum, const playerState_s *ps)
 {
     DObj_s *obj; // [esp+1Ch] [ebp-Ch]
     XAnimTree_s *animTree; // [esp+20h] [ebp-8h]
-    uint32_t weapIndex; // [esp+24h] [ebp-4h]
+    uint weapIndex; // [esp+24h] [ebp-4h]
 
     for (weapIndex = 1; weapIndex < BG_GetNumWeapons(); ++weapIndex)
     {
@@ -1037,7 +1037,7 @@ void __cdecl ResetWeaponAnimTrees(int32_t localClientNum, const playerState_s *p
 }
 
 #ifdef KISAK_SP
-bool __cdecl CG_NVGViewModelShouldBeAttached(int32_t localClientNum)
+bool __cdecl CG_NVGViewModelShouldBeAttached(int localClientNum)
 {
     cg_s *cgameGlob;
     playerState_s *ps;
@@ -1066,8 +1066,8 @@ bool __cdecl CG_NVGViewModelShouldBeAttached(int32_t localClientNum)
 #endif
 
 char __cdecl UpdateViewmodelAttachments(
-    int32_t localClientNum,
-    uint32_t weaponNum,
+    int localClientNum,
+    uint weaponNum,
     uint8_t weaponModel,
     weaponInfo_s *weapInfo)
 {
@@ -1105,7 +1105,7 @@ char __cdecl UpdateViewmodelAttachments(
     return 1;
 }
 
-bool __cdecl ViewmodelRocketShouldBeAttached(int32_t localClientNum, WeaponDef* weapDef)
+bool __cdecl ViewmodelRocketShouldBeAttached(int localClientNum, WeaponDef* weapDef)
 {
     cg_s *cgameGlob;
 
@@ -1127,9 +1127,9 @@ bool __cdecl ViewmodelRocketShouldBeAttached(int32_t localClientNum, WeaponDef* 
         && weapDef->iReloadTime - cgameGlob->predictedPlayerState.weaponTime > weapDef->reloadShowRocketTime;
 }
 
-bool __cdecl ViewmodelKnifeShouldBeAttached(int32_t localClientNum, WeaponDef* weapDef)
+bool __cdecl ViewmodelKnifeShouldBeAttached(int localClientNum, WeaponDef* weapDef)
 {
-    uint32_t anim; // [esp+4h] [ebp-8h]
+    uint anim; // [esp+4h] [ebp-8h]
 
     iassert(weapDef);
 
@@ -1140,12 +1140,12 @@ bool __cdecl ViewmodelKnifeShouldBeAttached(int32_t localClientNum, WeaponDef* w
     return anim == 8 || anim == 9;
 }
 
-void __cdecl ProcessWeaponNoteTracks(int32_t localClientNum, const playerState_s *predictedPlayerState)
+void __cdecl ProcessWeaponNoteTracks(int localClientNum, const playerState_s *predictedPlayerState)
 {
-    int32_t noteListSize; // [esp+0h] [ebp-14h]
+    int noteListSize; // [esp+0h] [ebp-14h]
     XAnimNotify_s *noteList; // [esp+4h] [ebp-10h] BYREF
-    int32_t weapIndex; // [esp+8h] [ebp-Ch]
-    int32_t i; // [esp+Ch] [ebp-8h]
+    int weapIndex; // [esp+8h] [ebp-Ch]
+    int i; // [esp+Ch] [ebp-8h]
     WeaponDef *weapDef; // [esp+10h] [ebp-4h]
 
     weapIndex = BG_GetViewmodelWeaponIndex(predictedPlayerState);
@@ -1173,11 +1173,11 @@ void __cdecl ProcessWeaponNoteTracks(int32_t localClientNum, const playerState_s
     }
 }
 
-void __cdecl PlayNoteMappedSoundAliases(int32_t localClientNum, const char *noteName, const WeaponDef *weapDef)
+void __cdecl PlayNoteMappedSoundAliases(int localClientNum, const char *noteName, const WeaponDef *weapDef)
 {
     const char *soundName; // [esp+0h] [ebp-Ch]
-    int32_t mapIdx; // [esp+4h] [ebp-8h]
-    uint32_t noteNameSL; // [esp+8h] [ebp-4h]
+    int mapIdx; // [esp+4h] [ebp-8h]
+    uint noteNameSL; // [esp+8h] [ebp-4h]
 
     if (weapDef->notetrackSoundMapKeys[0])
     {
@@ -1543,20 +1543,20 @@ static void CalculateWeaponAxis(cg_s *cgameGlob, float (*axis)[3])
 #endif // KISAK_SP
 
 // KISAKTODO: would like to have this function more like blops, it's cleaner
-void __cdecl CG_AddViewWeapon(int32_t localClientNum)
+void __cdecl CG_AddViewWeapon(int localClientNum)
 {
-    int32_t v3; // [esp+Ch] [ebp-12Ch]
+    int v3; // [esp+Ch] [ebp-12Ch]
     float* vGunSpeed; // [esp+10h] [ebp-128h]
     float* vGunOffset; // [esp+14h] [ebp-124h]
     float* vLastMoveAng; // [esp+18h] [ebp-120h]
     playerEntity_t* pe; // [esp+2Ch] [ebp-10Ch]
     weaponState_t ws; // [esp+30h] [ebp-108h] BYREF
     cg_s* cgameGlob; // [esp+88h] [ebp-B0h]
-    int32_t drawgun; // [esp+8Ch] [ebp-ACh]
+    int drawgun; // [esp+8Ch] [ebp-ACh]
     float vAxis2[3][3]; // [esp+90h] [ebp-A8h] BYREF
     float angles[3]; // [esp+B4h] [ebp-84h] BYREF
     GfxScaledPlacement placement; // [esp+C0h] [ebp-78h] BYREF
-    int32_t weaponIndex; // [esp+E0h] [ebp-58h]
+    int weaponIndex; // [esp+E0h] [ebp-58h]
     float fZoom; // [esp+E4h] [ebp-54h] BYREF
     playerState_s* ps; // [esp+E8h] [ebp-50h]
     float axis[3][3]; // [esp+ECh] [ebp-4Ch] BYREF
@@ -1692,8 +1692,8 @@ void __cdecl CalculateWeaponPosition_Sway(cg_s *cgameGlob)
 {
     float ssScale; // [esp+8h] [ebp-14h]
     float ssScalea; // [esp+8h] [ebp-14h]
-    int32_t ssDT; // [esp+Ch] [ebp-10h]
-    int32_t weapIndex; // [esp+10h] [ebp-Ch]
+    int ssDT; // [esp+Ch] [ebp-10h]
+    int weapIndex; // [esp+10h] [ebp-Ch]
     WeaponDef *weapDef; // [esp+14h] [ebp-8h]
     float ssSwayScale; // [esp+18h] [ebp-4h]
 
@@ -1726,7 +1726,7 @@ void __cdecl CalculateWeaponPosition_Sway(cg_s *cgameGlob)
 
 void __cdecl CalculateWeaponPosition(cg_s *cgameGlob, float *origin)
 {
-    int32_t delta; // [esp+10h] [ebp-24h]
+    int delta; // [esp+10h] [ebp-24h]
     float fLean; // [esp+14h] [ebp-20h]
     float right[3]; // [esp+18h] [ebp-1Ch] BYREF
     float fDist; // [esp+24h] [ebp-10h]
@@ -1803,9 +1803,9 @@ void __cdecl CalculateWeaponPosition_BasePosition_movement(cg_s *cgameGlob, floa
     bool prone; // [esp+35h] [ebp-23h]
     bool moving; // [esp+37h] [ebp-21h]
     float targetPos[3]; // [esp+38h] [ebp-20h] BYREF
-    int32_t weapIndex; // [esp+44h] [ebp-14h]
+    int weapIndex; // [esp+44h] [ebp-14h]
     float minSpeed; // [esp+48h] [ebp-10h]
-    int32_t i; // [esp+4Ch] [ebp-Ch]
+    int i; // [esp+4Ch] [ebp-Ch]
     playerState_s *ps; // [esp+50h] [ebp-8h]
     WeaponDef *weapDef; // [esp+54h] [ebp-4h]
 
@@ -1952,7 +1952,7 @@ void __cdecl CalculateWeaponPosition_ToWorldPosition(const cg_s *cgameGlob, floa
 void __cdecl CalculateWeaponPosition_SaveOffsetMovement(cg_s *cgameGlob, float *origin)
 {
     float fPosLerp; // [esp+0h] [ebp-8h]
-    int32_t weapIndex; // [esp+4h] [ebp-4h]
+    int weapIndex; // [esp+4h] [ebp-4h]
 
     weapIndex = BG_GetViewmodelWeaponIndex(&cgameGlob->predictedPlayerState);
     if (!BG_IsAimDownSightWeapon(weapIndex)
@@ -1972,7 +1972,7 @@ void __cdecl CalculateWeaponPosition_SaveOffsetMovement(cg_s *cgameGlob, float *
 
 void __cdecl CalculateWeaponPostion_PositionToADS(cg_s *cgameGlob, playerState_s *ps)
 {
-    int32_t weapIndex; // [esp+4h] [ebp-4h]
+    int weapIndex; // [esp+4h] [ebp-4h]
 
     weapIndex = BG_GetViewmodelWeaponIndex(ps);
     if (BG_IsAimDownSightWeapon(weapIndex))
@@ -2040,9 +2040,9 @@ void __cdecl CG_PrevWeapon_f()
     }
 }
 
-void __cdecl CG_OutOfAmmoChange(int32_t localClientNum)
+void __cdecl CG_OutOfAmmoChange(int localClientNum)
 {
-    uint32_t bitNum; // [esp+0h] [ebp-14h]
+    uint bitNum; // [esp+0h] [ebp-14h]
     const WeaponDef *weapDef; // [esp+10h] [ebp-4h]
     cg_s *cgameGlob;
 
@@ -2077,7 +2077,7 @@ void __cdecl CG_OutOfAmmoChange(int32_t localClientNum)
     }
 }
 
-char __cdecl VerifyPlayerAltModeWeapon(int32_t localClientNum, const WeaponDef *weapDef)
+char __cdecl VerifyPlayerAltModeWeapon(int localClientNum, const WeaponDef *weapDef)
 {
     iassert(weapDef);
     iassert(weapDef->inventoryType == WEAPINVENTORY_ALTMODE);
@@ -2096,13 +2096,13 @@ char __cdecl VerifyPlayerAltModeWeapon(int32_t localClientNum, const WeaponDef *
     return 0;
 }
 
-char __cdecl CycleWeapPrimary(int32_t localClientNum, int32_t cycleForward, int32_t bIgnoreEmpty)
+char __cdecl CycleWeapPrimary(int localClientNum, int cycleForward, int bIgnoreEmpty)
 {
-    uint32_t weaponSelect; // [esp+0h] [ebp-24h]
-    uint32_t bitNum; // [esp+4h] [ebp-20h]
-    uint32_t highestWeapIndex; // [esp+8h] [ebp-1Ch]
-    int32_t startIndex; // [esp+10h] [ebp-14h]
-    int32_t weaponIndex; // [esp+18h] [ebp-Ch]
+    uint weaponSelect; // [esp+0h] [ebp-24h]
+    uint bitNum; // [esp+4h] [ebp-20h]
+    uint highestWeapIndex; // [esp+8h] [ebp-1Ch]
+    int startIndex; // [esp+10h] [ebp-14h]
+    int weaponIndex; // [esp+18h] [ebp-Ch]
     WeaponDef *weapDef; // [esp+20h] [ebp-4h]
     WeaponDef *weapDefa; // [esp+20h] [ebp-4h]
     cg_s *cgameGlob;
@@ -2178,11 +2178,11 @@ char __cdecl CycleWeapPrimary(int32_t localClientNum, int32_t cycleForward, int3
     }
 }
 
-uint32_t __cdecl CG_AltWeaponToggleIndex(int32_t localClientNum, const cg_s *cgameGlob)
+uint __cdecl CG_AltWeaponToggleIndex(int localClientNum, const cg_s *cgameGlob)
 {
     const playerState_s *ps; // [esp+0h] [ebp-Ch]
     WeaponDef *weapDef; // [esp+4h] [ebp-8h]
-    int32_t newPrimaryIdx; // [esp+8h] [ebp-4h]
+    int newPrimaryIdx; // [esp+8h] [ebp-4h]
 
     iassert(cgameGlob);
     ps = &cgameGlob->predictedPlayerState;
@@ -2199,17 +2199,17 @@ uint32_t __cdecl CG_AltWeaponToggleIndex(int32_t localClientNum, const cg_s *cga
         return 0;
 }
 
-int32_t __cdecl NextWeapInCycle(
-    int32_t localClientNum,
+int __cdecl NextWeapInCycle(
+    int localClientNum,
     const playerState_s *ps,
     weapInventoryType_t type,
-    uint32_t startWeaponIndex,
+    uint startWeaponIndex,
     bool cycleForward,
     bool skipEmpties,
     bool skipHaveNoAlts)
 {
-    uint32_t highestWeapIndex; // [esp+0h] [ebp-14h]
-    int32_t weaponIndex; // [esp+Ch] [ebp-8h]
+    uint highestWeapIndex; // [esp+0h] [ebp-14h]
+    int weaponIndex; // [esp+Ch] [ebp-8h]
     WeaponDef *weapDef; // [esp+10h] [ebp-4h]
 
     iassert(ps);
@@ -2242,10 +2242,10 @@ int32_t __cdecl NextWeapInCycle(
 void __cdecl CG_ActionSlotDown_f()
 {
     ActionSlotType v0; // [esp+0h] [ebp-24h]
-    uint32_t bitNum; // [esp+4h] [ebp-20h]
-    int32_t slot; // [esp+10h] [ebp-14h] BYREF
-    uint32_t weapon; // [esp+14h] [ebp-10h]
-    int32_t localClientNum; // [esp+18h] [ebp-Ch]
+    uint bitNum; // [esp+4h] [ebp-20h]
+    int slot; // [esp+10h] [ebp-14h] BYREF
+    uint weapon; // [esp+14h] [ebp-10h]
+    int localClientNum; // [esp+18h] [ebp-Ch]
     bool didSomething; // [esp+1Fh] [ebp-5h]
     playerState_s *ps; // [esp+20h] [ebp-4h]
     cg_s *cgameGlob;
@@ -2308,9 +2308,9 @@ void __cdecl CG_ActionSlotDown_f()
     }
 }
 
-char __cdecl ToggleWeaponAltMode(int32_t localClientNum)
+char __cdecl ToggleWeaponAltMode(int localClientNum)
 {
-    uint32_t weapIdx; // [esp+4h] [ebp-8h]
+    uint weapIdx; // [esp+4h] [ebp-8h]
     cg_s *cgameGlob;
 
     cgameGlob = CG_GetLocalClientGlobals(localClientNum);
@@ -2352,10 +2352,10 @@ bool __cdecl ActionSlotUsageAllowed(cg_s *cgameGlob)
     return (cgameGlob->predictedPlayerState.eFlags & 0x20000) == 0;
 }
 
-char __cdecl ActionParms(int32_t *slotResult)
+char __cdecl ActionParms(int *slotResult)
 {
     const char *v2; // eax
-    int32_t slot; // [esp+0h] [ebp-4h]
+    int slot; // [esp+0h] [ebp-4h]
 
     if (Cmd_Argc() >= 2)
     {
@@ -2381,7 +2381,7 @@ char __cdecl ActionParms(int32_t *slotResult)
 
 void __cdecl CG_ActionSlotUp_f()
 {
-    int32_t slot[2]; // [esp+Ch] [ebp-8h] BYREF
+    int slot[2]; // [esp+Ch] [ebp-8h] BYREF
     cg_s *cgameGlob;
 
     cgameGlob = CG_GetLocalClientGlobals(0);
@@ -2391,9 +2391,9 @@ void __cdecl CG_ActionSlotUp_f()
         ActionParms(slot);
 }
 
-void __cdecl CG_EjectWeaponBrass(int32_t localClientNum, const entityState_s *ent, int32_t event)
+void __cdecl CG_EjectWeaponBrass(int localClientNum, const entityState_s *ent, int event)
 {
-    uint32_t number; // [esp+0h] [ebp-28h]
+    uint number; // [esp+0h] [ebp-28h]
     const FxEffectDef *viewShellEjectEffect; // [esp+4h] [ebp-24h]
     const FxEffectDef *viewLastShotEjectEffect; // [esp+8h] [ebp-20h]
     bool v6; // [esp+Ch] [ebp-1Ch]
@@ -2444,25 +2444,25 @@ void __cdecl CG_EjectWeaponBrass(int32_t localClientNum, const entityState_s *en
 }
 
 void __cdecl CG_FireWeapon(
-    int32_t localClientNum,
+    int localClientNum,
     centity_s *cent,
-    int32_t event,
+    int event,
     uint16_t tagName,
-    uint32_t weapon,
+    uint weapon,
     const playerState_s *ps)
 {
     snapshot_s *nextSnap; // [esp+Ch] [ebp-3Ch]
     const weaponInfo_s *weapInfo; // [esp+14h] [ebp-34h]
     snd_alias_list_t *firesound; // [esp+18h] [ebp-30h]
     DObj_s *obj; // [esp+1Ch] [ebp-2Ch]
-    int32_t playbackId; // [esp+20h] [ebp-28h]
+    int playbackId; // [esp+20h] [ebp-28h]
     float origin[3]; // [esp+24h] [ebp-24h] BYREF
-    int32_t msec; // [esp+30h] [ebp-18h] BYREF
-    int32_t isPlayer; // [esp+34h] [ebp-14h]
+    int msec; // [esp+30h] [ebp-18h] BYREF
+    int isPlayer; // [esp+34h] [ebp-14h]
     cg_s *cgameGlob; // [esp+38h] [ebp-10h]
     const WeaponDef *weaponDef; // [esp+3Ch] [ebp-Ch]
     const entityState_s *p_nextState; // [esp+40h] [ebp-8h]
-    int32_t playerUsingTurret; // [esp+44h] [ebp-4h]
+    int playerUsingTurret; // [esp+44h] [ebp-4h]
 
     p_nextState = &cent->nextState;
     if (!weapon)
@@ -2586,7 +2586,7 @@ void __cdecl CG_FireWeapon(
 
 #ifdef KISAK_MP
 void __cdecl DrawBulletImpacts(
-    int32_t localClientNum,
+    int localClientNum,
     const centity_s *ent,
     const WeaponDef *weaponDef,
     uint16_t boneName,
@@ -2600,15 +2600,15 @@ void __cdecl DrawBulletImpacts(
     snapshot_s *nextSnap; // [esp+48h] [ebp-110h]
     float velocity[3]; // [esp+4Ch] [ebp-10Ch] BYREF
     uint8_t boneIndex; // [esp+5Bh] [ebp-FDh] BYREF
-    int32_t weaponNum; // [esp+5Ch] [ebp-FCh]
-    int32_t ads; // [esp+60h] [ebp-F8h]
-    int32_t shotCount; // [esp+64h] [ebp-F4h]
+    int weaponNum; // [esp+5Ch] [ebp-FCh]
+    int ads; // [esp+60h] [ebp-F8h]
+    int shotCount; // [esp+64h] [ebp-F4h]
     float origin[3]; // [esp+68h] [ebp-F0h] BYREF
     float range; // [esp+74h] [ebp-E4h]
     float dist; // [esp+78h] [ebp-E0h]
     cg_s *cgameGlob; // [esp+7Ch] [ebp-DCh]
-    int32_t shot; // [esp+80h] [ebp-D8h]
-    int32_t dobjNumber; // [esp+84h] [ebp-D4h]
+    int shot; // [esp+80h] [ebp-D8h]
+    int dobjNumber; // [esp+84h] [ebp-D4h]
     orientation_t orient; // [esp+88h] [ebp-D0h] BYREF
     bool drawTracers; // [esp+BBh] [ebp-9Dh]
     float minSpread; // [esp+BCh] [ebp-9Ch] BYREF
@@ -2782,7 +2782,7 @@ void __cdecl DrawBulletImpacts(
 }
 
 void __cdecl FireBulletPenetrate(
-    int32_t localClientNum,
+    int localClientNum,
     BulletFireParams *bp,
     const WeaponDef *weapDef,
     const centity_s *attacker,
@@ -2798,46 +2798,46 @@ void __cdecl FireBulletPenetrate(
     double value; // [esp+24h] [ebp-1D8h]
     float v13; // [esp+2Ch] [ebp-1D0h]
     __int16 v15; // [esp+34h] [ebp-1C8h]
-    int32_t v16; // [esp+38h] [ebp-1C4h]
-    uint32_t v17; // [esp+3Ch] [ebp-1C0h]
-    uint32_t v18; // [esp+40h] [ebp-1BCh]
-    int32_t v19; // [esp+44h] [ebp-1B8h]
+    int v16; // [esp+38h] [ebp-1C4h]
+    uint v17; // [esp+3Ch] [ebp-1C0h]
+    uint v18; // [esp+40h] [ebp-1BCh]
+    int v19; // [esp+44h] [ebp-1B8h]
     float v20; // [esp+50h] [ebp-1ACh]
     float v21[3]; // [esp+54h] [ebp-1A8h] BYREF
-    int32_t v22; // [esp+60h] [ebp-19Ch]
-    int32_t v23; // [esp+64h] [ebp-198h]
-    int32_t v24; // [esp+68h] [ebp-194h]
-    int32_t v25; // [esp+6Ch] [ebp-190h]
-    int32_t v26; // [esp+70h] [ebp-18Ch]
-    int32_t contents; // [esp+78h] [ebp-184h]
-    int32_t v28; // [esp+7Ch] [ebp-180h]
-    int32_t v29; // [esp+80h] [ebp-17Ch]
-    int32_t targetEntityNum; // [esp+84h] [ebp-178h]
-    int32_t number; // [esp+88h] [ebp-174h]
+    int v22; // [esp+60h] [ebp-19Ch]
+    int v23; // [esp+64h] [ebp-198h]
+    int v24; // [esp+68h] [ebp-194h]
+    int v25; // [esp+6Ch] [ebp-190h]
+    int v26; // [esp+70h] [ebp-18Ch]
+    int contents; // [esp+78h] [ebp-184h]
+    int v28; // [esp+7Ch] [ebp-180h]
+    int v29; // [esp+80h] [ebp-17Ch]
+    int targetEntityNum; // [esp+84h] [ebp-178h]
+    int number; // [esp+88h] [ebp-174h]
     float v32; // [esp+90h] [ebp-16Ch]
     float v33; // [esp+94h] [ebp-168h]
     float v34[3]; // [esp+98h] [ebp-164h] BYREF
     float SurfacePenetrationDepth; // [esp+A4h] [ebp-158h]
     float v36; // [esp+A8h] [ebp-154h]
-    int32_t v37; // [esp+ACh] [ebp-150h]
+    int v37; // [esp+ACh] [ebp-150h]
     float v[4]; // [esp+B4h] [ebp-148h] BYREF
     float diff[3]; // [esp+C4h] [ebp-138h] BYREF
-    int32_t perks; // [esp+D8h] [ebp-124h]
-    int32_t hitContents; // [esp+DCh] [ebp-120h]
-    int32_t damage; // [esp+E0h] [ebp-11Ch]
-    int32_t surfType; // [esp+E4h] [ebp-118h]
-    int32_t entityNum; // [esp+E8h] [ebp-114h]
-    int32_t sourceEntityNum; // [esp+ECh] [ebp-110h]
+    int perks; // [esp+D8h] [ebp-124h]
+    int hitContents; // [esp+DCh] [ebp-120h]
+    int damage; // [esp+E0h] [ebp-11Ch]
+    int surfType; // [esp+E4h] [ebp-118h]
+    int entityNum; // [esp+E8h] [ebp-114h]
+    int sourceEntityNum; // [esp+ECh] [ebp-110h]
     BulletTraceResults revBr; // [esp+F4h] [ebp-108h] BYREF
     float lastHitPos[3]; // [esp+140h] [ebp-BCh] BYREF
     float depth; // [esp+14Ch] [ebp-B0h]
-    int32_t weapType; // [esp+150h] [ebp-ACh]
-    int32_t penetrateIndex; // [esp+154h] [ebp-A8h]
+    int weapType; // [esp+150h] [ebp-ACh]
+    int penetrateIndex; // [esp+154h] [ebp-A8h]
     uint16_t traceHitEntityId; // [esp+158h] [ebp-A4h]
     cg_s *cgameGlob; // [esp+15Ch] [ebp-A0h]
     bool allSolid; // [esp+163h] [ebp-99h]
     BulletFireParams revBp; // [esp+164h] [ebp-98h] BYREF
-    int32_t weaponIndex; // [esp+1A4h] [ebp-58h]
+    int weaponIndex; // [esp+1A4h] [ebp-58h]
     bool revTraceHit; // [esp+1ABh] [ebp-51h]
     BulletTraceResults br; // [esp+1ACh] [ebp-50h] BYREF
     float maxDepth; // [esp+1F4h] [ebp-8h]
@@ -3083,12 +3083,12 @@ void __cdecl FireBulletPenetrate(
 
 
 char __cdecl BulletTrace(
-    int32_t localClientNum,
+    int localClientNum,
     const BulletFireParams *bp,
     const WeaponDef *weapDef,
     const centity_s *attacker,
     BulletTraceResults *br,
-    uint32_t lastSurfaceType)
+    uint lastSurfaceType)
 {
     centity_s *Entity; // [esp+Ch] [ebp-10h]
     uint16_t hitEntId; // [esp+18h] [ebp-4h]
@@ -3098,7 +3098,7 @@ char __cdecl BulletTrace(
     iassert(attacker);
     iassert(br);
     bcassert(lastSurfaceType, SURF_TYPECOUNT);
-    Com_Memset((uint32_t *)br, 0, 68);
+    Com_Memset((uint *)br, 0, 68);
     CG_LocationalTrace(&br->trace, (float*)bp->start, (float*)bp->end, bp->ignoreEntIndex, 0x2806831);
     if (br->trace.hitType == TRACE_HITTYPE_NONE)
         return 0;
@@ -3129,12 +3129,12 @@ char __cdecl BulletTrace(
 
 #endif
 
-bool __cdecl ShouldIgnoreHitEntity(int32_t attackerNum, int32_t hitEntNum)
+bool __cdecl ShouldIgnoreHitEntity(int attackerNum, int hitEntNum)
 {
     return hitEntNum == attackerNum;
 }
 
-bool __cdecl IsEntityAPlayer(int32_t localClientNum, uint32_t entityNum)
+bool __cdecl IsEntityAPlayer(int localClientNum, uint entityNum)
 {
     centity_s *cent; // [esp+4h] [ebp-4h]
 
@@ -3146,7 +3146,7 @@ bool __cdecl IsEntityAPlayer(int32_t localClientNum, uint32_t entityNum)
 }
 
 void __cdecl CG_BulletEndpos(
-    int32_t randSeed,
+    int randSeed,
     float spread,
     const float *start,
     float *end,
@@ -3186,7 +3186,7 @@ void __cdecl CG_BulletEndpos(
     }
 }
 
-void __cdecl RandomBulletDir(int32_t randSeed, float *x, float *y)
+void __cdecl RandomBulletDir(int randSeed, float *x, float *y)
 {
     float v3; // [esp+8h] [ebp-14h]
     float sinT; // [esp+Ch] [ebp-10h]
@@ -3205,7 +3205,7 @@ void __cdecl RandomBulletDir(int32_t randSeed, float *x, float *y)
     *y = r * sinT;
 }
 
-void __cdecl TakeClipOnlyWeaponIfEmpty(int32_t localClientNum, playerState_s *ps)
+void __cdecl TakeClipOnlyWeaponIfEmpty(int localClientNum, playerState_s *ps)
 {
     if (BG_WeaponIsClipOnly(ps->weapon)
         && !ps->ammoclip[BG_ClipForWeapon(ps->weapon)]
@@ -3217,16 +3217,16 @@ void __cdecl TakeClipOnlyWeaponIfEmpty(int32_t localClientNum, playerState_s *ps
     }
 }
 
-void __cdecl CG_SpawnTracer(int32_t localClientNum, const float *pstart, const float *pend)
+void __cdecl CG_SpawnTracer(int localClientNum, const float *pstart, const float *pend)
 {
-    int32_t v3; // [esp+8h] [ebp-60h]
+    int v3; // [esp+8h] [ebp-60h]
     float *trBase; // [esp+24h] [ebp-44h]
     float dir[3]; // [esp+34h] [ebp-34h] BYREF
     float dist; // [esp+40h] [ebp-28h]
     const cg_s *cgameGlob; // [esp+44h] [ebp-24h]
     float start[3]; // [esp+48h] [ebp-20h] BYREF
     float end[3]; // [esp+54h] [ebp-14h] BYREF
-    int32_t startTime; // [esp+60h] [ebp-8h]
+    int startTime; // [esp+60h] [ebp-8h]
     localEntity_s *le; // [esp+64h] [ebp-4h]
 
     cgameGlob = CG_GetLocalClientGlobals(localClientNum);
@@ -3360,10 +3360,10 @@ double __cdecl CalcTracerFinalScale(float tracerScaleDistRange, float dist, floa
     }
 }
 
-cg_s *__cdecl CG_GetLocalClientGlobalsForEnt(int32_t localClientNum, int32_t entityNum)
+cg_s *__cdecl CG_GetLocalClientGlobalsForEnt(int localClientNum, int entityNum)
 {
     snapshot_s *nextSnap; // [esp+4h] [ebp-Ch]
-    int32_t clientIndex; // [esp+Ch] [ebp-4h]
+    int clientIndex; // [esp+Ch] [ebp-4h]
     cg_s *cgameGlob;
 
     cgameGlob = CG_GetLocalClientGlobals(localClientNum);
@@ -3383,7 +3383,7 @@ cg_s *__cdecl CG_GetLocalClientGlobalsForEnt(int32_t localClientNum, int32_t ent
     return 0;
 }
 
-void __cdecl CG_GetViewDirection(int32_t localClientNum, int32_t entityNum, float *forward, float *right, float *up)
+void __cdecl CG_GetViewDirection(int localClientNum, int entityNum, float *forward, float *right, float *up)
 {
     const cg_s *cgameGlob = CG_GetLocalClientGlobalsForEnt(localClientNum, entityNum);
     if (cgameGlob)
@@ -3394,7 +3394,7 @@ void __cdecl CG_GetViewDirection(int32_t localClientNum, int32_t entityNum, floa
     {
 #ifdef KISAK_MP
         const clientInfo_t *ci;
-        uint32_t clientNum = CG_GetEntity(localClientNum, entityNum)->nextState.clientNum;
+        uint clientNum = CG_GetEntity(localClientNum, entityNum)->nextState.clientNum;
 
         bcassert(clientNum, MAX_CLIENTS);
         ci = &CG_GetLocalClientGlobals(localClientNum)->bgs.clientinfo[clientNum];
@@ -3407,7 +3407,7 @@ void __cdecl CG_GetViewDirection(int32_t localClientNum, int32_t entityNum, floa
     }
 }
 
-void __cdecl CG_CalcEyePoint(int32_t localClientNum, int32_t entityNum, float *eyePos)
+void __cdecl CG_CalcEyePoint(int localClientNum, int entityNum, float *eyePos)
 {
     const cg_s *cgameGlob; // [esp+8h] [ebp-8h]
     centity_s *cent; // [esp+Ch] [ebp-4h]
@@ -3472,8 +3472,8 @@ void __cdecl CG_RandomEffectAxis(const float *forward, float *left, float *up)
 }
 
 void __cdecl CG_ImpactEffectForWeapon(
-    uint32_t weaponIndex,
-    uint32_t surfType,
+    uint weaponIndex,
+    uint surfType,
     char impactFlags,
     const FxEffectDef **outFx,
     snd_alias_list_t **outSnd)
@@ -3483,8 +3483,8 @@ void __cdecl CG_ImpactEffectForWeapon(
     snd_alias_list_t *v7; // [esp+8h] [ebp-20h]
     snd_alias_list_t *v8; // [esp+Ch] [ebp-1Ch]
     snd_alias_list_t *v9; // [esp+10h] [ebp-18h]
-    int32_t fleshType; // [esp+18h] [ebp-10h]
-    int32_t fxType; // [esp+20h] [ebp-8h]
+    int fleshType; // [esp+18h] [ebp-10h]
+    int fxType; // [esp+20h] [ebp-8h]
     const WeaponDef *weaponDef; // [esp+24h] [ebp-4h]
 
     weaponDef = BG_GetWeaponDef(weaponIndex);
@@ -3571,17 +3571,17 @@ void __cdecl CG_ImpactEffectForWeapon(
 }
 
 void __cdecl CG_BulletHitEvent(
-    int32_t localClientNum,
-    int32_t sourceEntityNum,
-    uint32_t targetEntityNum,
-    uint32_t weaponIndex,
+    int localClientNum,
+    int sourceEntityNum,
+    uint targetEntityNum,
+    uint weaponIndex,
     float *startPos,
     float *position,
     const float *normal,
-    uint32_t surfType,
-    int32_t event,
+    uint surfType,
+    int event,
     uint8_t eventParam,
-    int32_t damage,
+    int damage,
     __int16 hitContents)
 {
 #ifdef KISAK_MP
@@ -3634,7 +3634,7 @@ void __cdecl CG_BulletHitEvent(
         hitContents);
 }
 
-int32_t __cdecl CalcMuzzlePoint(int32_t localClientNum, int32_t entityNum, float *muzzle, uint32_t flashTag)
+int __cdecl CalcMuzzlePoint(int localClientNum, int entityNum, float *muzzle, uint flashTag)
 {
     double v6; // st7
     DObj_s *obj; // [esp+8h] [ebp-Ch]
@@ -3691,23 +3691,23 @@ int32_t __cdecl CalcMuzzlePoint(int32_t localClientNum, int32_t entityNum, float
 }
 
 void __cdecl CG_BulletHitEvent_Internal(
-    int32_t localClientNum,
-    int32_t sourceEntityNum,
-    uint32_t targetEntityNum,
-    uint32_t weaponIndex,
+    int localClientNum,
+    int sourceEntityNum,
+    uint targetEntityNum,
+    uint weaponIndex,
     float *startPos,
     float *position,
     const float *normal,
-    uint32_t surfType,
-    int32_t event,
+    uint surfType,
+    int event,
     uint8_t eventParam,
-    int32_t damage,
+    int damage,
     __int16 hitContents)
 {
     snapshot_s *nextSnap; // [esp+4h] [ebp-3Ch]
     snd_alias_list_t *hitSound; // [esp+Ch] [ebp-34h] BYREF
     cg_s *cgameGlob; // [esp+10h] [ebp-30h]
-    int32_t time; // [esp+14h] [ebp-2Ch]
+    int time; // [esp+14h] [ebp-2Ch]
     const FxEffectDef *fx; // [esp+18h] [ebp-28h] BYREF
     float axis[3][3]; // [esp+1Ch] [ebp-24h] BYREF
 
@@ -3763,14 +3763,14 @@ void __cdecl CG_BulletHitEvent_Internal(
 }
 
 void __cdecl BulletTrajectoryEffects(
-    int32_t localClientNum,
-    int32_t sourceEntityNum,
+    int localClientNum,
+    int sourceEntityNum,
     float *startPos,
     float *position,
-    int32_t surfType,
-    uint32_t flashTag,
+    int surfType,
+    uint flashTag,
     uint8_t impactFlags,
-    int32_t damage)
+    int damage)
 {
     float muzzle[3]; // [esp+0h] [ebp-Ch] BYREF
 
@@ -3793,7 +3793,7 @@ void __cdecl BulletTrajectoryEffects(
     }
 }
 
-void __cdecl WhizbySound(int32_t localClientNum, const float *start, const float *end)
+void __cdecl WhizbySound(int localClientNum, const float *start, const float *end)
 {
     float viewDelta[3]; // [esp+10h] [ebp-4Ch] BYREF
     float delta[3]; // [esp+1Ch] [ebp-40h] BYREF
@@ -3829,7 +3829,7 @@ void __cdecl WhizbySound(int32_t localClientNum, const float *start, const float
     }
 }
 
-bool __cdecl ShouldSpawnTracer(int32_t localClientNum, int32_t sourceEntityNum)
+bool __cdecl ShouldSpawnTracer(int localClientNum, int sourceEntityNum)
 {
     snapshot_s *nextSnap; // [esp+8h] [ebp-8h]
     cg_s *cgameGlob;
@@ -3855,13 +3855,13 @@ bool __cdecl ShouldSpawnTracer(int32_t localClientNum, int32_t sourceEntityNum)
 }
 
 void __cdecl CG_BulletHitClientEvent(
-    int32_t localClientNum,
-    int32_t sourceEntityNum,
+    int localClientNum,
+    int sourceEntityNum,
     float *startPos,
     float *position,
-    uint32_t surfType,
-    int32_t event,
-    int32_t damage)
+    uint surfType,
+    int event,
+    int damage)
 {
     const char *v7; // eax
 
@@ -3898,11 +3898,11 @@ void __cdecl CG_BulletHitClientEvent(
     }
 }
 
-void __cdecl CG_MeleeBloodEvent(int32_t localClientNum, const centity_s *cent)
+void __cdecl CG_MeleeBloodEvent(int localClientNum, const centity_s *cent)
 {
-    int32_t weapon; // [esp+4h] [ebp-18h]
+    int weapon; // [esp+4h] [ebp-18h]
     snapshot_s *nextSnap; // [esp+8h] [ebp-14h]
-    uint32_t dobjHandle; // [esp+10h] [ebp-Ch]
+    uint dobjHandle; // [esp+10h] [ebp-Ch]
 
     iassert(cent);
 
@@ -3924,7 +3924,7 @@ void __cdecl CG_MeleeBloodEvent(int32_t localClientNum, const centity_s *cent)
     }
 }
 
-void __cdecl CG_SetupWeaponDef(int32_t localClientNum)
+void __cdecl CG_SetupWeaponDef(int localClientNum)
 {
 #ifdef KISAK_MP
     char v1; // [esp+3h] [ebp-2225h]
@@ -3932,7 +3932,7 @@ void __cdecl CG_SetupWeaponDef(int32_t localClientNum)
     const char *v3; // [esp+Ch] [ebp-221Ch]
     _DWORD dst[129]; // [esp+10h] [ebp-2218h] BYREF
     const char *ConfigString; // [esp+214h] [ebp-2014h]
-    int32_t iNumFiles; // [esp+218h] [ebp-2010h]
+    int iNumFiles; // [esp+218h] [ebp-2010h]
     _BYTE *v7; // [esp+21Ch] [ebp-200Ch]
     _BYTE v8[8196]; // [esp+220h] [ebp-2008h] BYREF
 
@@ -3971,10 +3971,10 @@ void __cdecl CG_SetupWeaponDef(int32_t localClientNum)
 #endif
 }
 
-void __cdecl ParseWeaponDefFiles(const char **ppszFiles, int32_t iNumFiles)
+void __cdecl ParseWeaponDefFiles(const char **ppszFiles, int iNumFiles)
 {
     const char *name; // [esp+0h] [ebp-8h]
-    int32_t i; // [esp+4h] [ebp-4h]
+    int i; // [esp+4h] [ebp-4h]
 
     for (i = 0; i < iNumFiles; ++i)
     {
@@ -3984,10 +3984,10 @@ void __cdecl ParseWeaponDefFiles(const char **ppszFiles, int32_t iNumFiles)
     }
 }
 
-uint32_t __cdecl ValidLatestPrimaryWeapIdx(uint32_t weaponIndex)
+uint __cdecl ValidLatestPrimaryWeapIdx(uint weaponIndex)
 {
     WeaponDef *weapDef; // [esp+0h] [ebp-4h]
-    uint32_t weaponIndexa; // [esp+Ch] [ebp+8h]
+    uint weaponIndexa; // [esp+Ch] [ebp+8h]
 
     if (!weaponIndex)
         return 0;
@@ -4001,10 +4001,10 @@ uint32_t __cdecl ValidLatestPrimaryWeapIdx(uint32_t weaponIndex)
         return weaponIndexa;
 }
 
-void __cdecl CG_SelectWeaponIndex(int32_t localClientNum, uint32_t weaponIndex)
+void __cdecl CG_SelectWeaponIndex(int localClientNum, uint weaponIndex)
 {
     BOOL v2; // [esp+0h] [ebp-10h]
-    uint32_t validLatest; // [esp+Ch] [ebp-4h]
+    uint validLatest; // [esp+Ch] [ebp-4h]
     cg_s *cgameGlob;
 
     cgameGlob = CG_GetLocalClientGlobals(localClientNum);
@@ -4024,7 +4024,7 @@ void __cdecl CG_SelectWeaponIndex(int32_t localClientNum, uint32_t weaponIndex)
     }
 }
 
-char __cdecl CG_ScopeIsOverlayed(int32_t localClientNum)
+char __cdecl CG_ScopeIsOverlayed(int localClientNum)
 {
     float zoom; // [esp+8h] [ebp-4h] BYREF
 
@@ -4038,7 +4038,7 @@ char __cdecl CG_ScopeIsOverlayed(int32_t localClientNum)
     return CG_GetWeapReticleZoom(CG_GetLocalClientGlobals(localClientNum), &zoom);
 }
 
-int32_t __cdecl CG_PlayerTurretWeaponIdx(int32_t localClientNum)
+int __cdecl CG_PlayerTurretWeaponIdx(int localClientNum)
 {
     cg_s *cgameGlob = CG_GetLocalClientGlobals(localClientNum);
 
@@ -4053,9 +4053,9 @@ int32_t __cdecl CG_PlayerTurretWeaponIdx(int32_t localClientNum)
     return CG_GetEntity(localClientNum, cgameGlob->predictedPlayerState.viewlocked_entNum)->nextState.weapon;
 }
 
-bool __cdecl CG_PlayerUsingScopedTurret(int32_t localClientNum)
+bool __cdecl CG_PlayerUsingScopedTurret(int localClientNum)
 {
-    int32_t weapIdxTurret; // [esp+4h] [ebp-4h]
+    int weapIdxTurret; // [esp+4h] [ebp-4h]
 
     weapIdxTurret = CG_PlayerTurretWeaponIdx(localClientNum);
     return weapIdxTurret && BG_GetWeaponDef(weapIdxTurret)->overlayMaterial != 0;
@@ -4079,9 +4079,9 @@ void CG_DisplayViewmodelAnim(int localClientNum)
 void CG_SaveViewModelAnimTrees(SaveGame *save)
 {
     MemoryFile *MemoryFile; // r27
-    uint32_t v3; // r31
+    uint v3; // r31
     weaponInfo_s *v4; // r30
-    uint32_t NumWeapons; // [sp+50h] [-40h] BYREF
+    uint NumWeapons; // [sp+50h] [-40h] BYREF
 
     iassert(save);
     NumWeapons = BG_GetNumWeapons();
@@ -4108,17 +4108,17 @@ void CG_SaveViewModelAnimTrees(SaveGame *save)
 
 void CG_LoadViewModelAnimTrees(SaveGame *save, const playerState_s *ps)
 {
-    uint32_t NumWeapons; // r3
+    uint NumWeapons; // r3
     int viewmodelIndex; // r11
     const char *ConfigString; // r3
     const char *v7; // r31
     XModel *v8; // r22
     MemoryFile *MemoryFile; // r23
-    uint32_t v10; // r29
+    uint v10; // r29
     weaponInfo_s *v11; // r31
     WeaponDef *WeaponDef; // r30
     XAnimTree_s *Tree; // r30
-    uint32_t numWeapons; // [sp+50h] [-70h] BYREF
+    uint numWeapons; // [sp+50h] [-70h] BYREF
 
     iassert(save);
     iassert(ps);
@@ -4182,7 +4182,7 @@ void CG_ArchiveWeaponInfo(MemoryFile *memFile)
 {
     BOOL IsWriting; // r22
     float numWeapons; // r30
-    uint32_t NumWeapons; // r3
+    uint NumWeapons; // r3
     int v5; // r28
     int *p_hasAnimTree; // r30
     const DObj_s *v7; // r3
@@ -4198,7 +4198,7 @@ void CG_ArchiveWeaponInfo(MemoryFile *memFile)
     }
     else
     {
-        MemFile_ReadData(memFile, 4, (unsigned char*)v8);
+        MemFile_ReadData(memFile, 4, (byte*)v8);
         numWeapons = v8[0];
         iassert(LODWORD(numWeapons) <= BG_GetNumWeapons());
     }

@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-enum $CF43A0974C3EB2799D9079D7BDE5CE8D : __int32
+enum $CF43A0974C3EB2799D9079D7BDE5CE8D : int
 {
 	FOG_NONE = 0x0,
 	FOG_SERVER = 0x1,
@@ -16,5 +16,5 @@ struct MemoryFile;
 
 void __cdecl R_ClearFogs();
 void __cdecl R_SetFogFromServer(float start, uint8_t r, uint8_t g, uint8_t b, float density);
-void __cdecl R_SwitchFog(uint32_t fogvar, int startTime, int transitionTime);
+void __cdecl R_SwitchFog(uint fogvar, int startTime, int transitionTime);
 void __cdecl R_ArchiveFogState(MemoryFile *memFile);

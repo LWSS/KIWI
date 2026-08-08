@@ -1200,7 +1200,7 @@ int sub_4DD260( rface_t **a1, const lightDesc_t *a2, void **a3 )
     Region_DecomposeAgainst( &copy, *a1 );
     Region_ClipByCaster( &copy, a2 );                // sub_4DBB40
 
-    unsigned char kdop[0x16C];                        // v19 scratch hull (sub_4DCFE0 out)
+    byte kdop[0x16C];                        // v19 scratch hull (sub_4DCFE0 out)
     int count = 0;                                    // v22
     Region_BuildKDOP( copy, a2, kdop, 0 );           // sub_4DCFE0(.., a2, v19, 0)
     Region_FreeList( copy );                          // sub_4DA240
@@ -1234,7 +1234,7 @@ int sub_4DD260( rface_t **a1, const lightDesc_t *a2, void **a3 )
                 rface_t *dec = Region_CopyList( *a1 ); // v23[0] = copy of remaining region
                 Region_DecomposeAgainst( &dec, *a1 );
                 Region_ClipByCasterEdges( occ, &dec ); // sub_4DBBB0(occ, v23)
-                unsigned char kdop2[0x16C];
+                byte kdop2[0x16C];
                 Region_BuildKDOP( dec, a2, kdop2, occ );    // sub_4DCFE0(.., occ)
                 Region_FreeList( dec );
 

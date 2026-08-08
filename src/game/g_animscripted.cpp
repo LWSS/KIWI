@@ -486,7 +486,7 @@ void __cdecl G_Animscripted_Think(gentity_s *ent)
         }
         else
         {
-            MT_Free((unsigned char*)scripted, 96);
+            MT_Free((byte*)scripted, 96);
             ent->scripted = 0;
         }
     }

@@ -2,7 +2,7 @@
 #include "r_gfx.h"
 #include "r_model_lighting.h"
 
-enum GfxSortedHistoryAdd : __int32
+enum GfxSortedHistoryAdd : int
 {                                       // ...
     SH_ADD_NEVER = 0x0,
     SH_ADD_IF_NEW = 0x1,
@@ -22,7 +22,7 @@ void __cdecl R_FixedPointBlendLightGridColors(
     const GfxLightGrid *lightGrid,
     const uint16_t *colorsIndex,
     uint16_t *fixedPointWeight,
-    uint32_t colorsCount,
+    uint colorsCount,
     GfxLightGridColors *outPacked);
 void __cdecl R_ScaleLightGridColors(
     const GfxLightGridColors *colors,
@@ -42,62 +42,62 @@ uint8_t __cdecl R_LightGridLookup(
     const float *samplePos,
     float *cornerWeight,
     const GfxLightGridEntry **cornerEntry,
-    uint32_t *defaultGridEntry);
+    uint *defaultGridEntry);
 void __cdecl R_ShowLightGrid(
     const GfxLightGrid *lightGrid,
-    const uint32_t *pos,
+    const uint *pos,
     const float *samplePos,
     const GfxLightGridEntry **cornerEntry,
     bool *suppressEntry,
     bool honorSuppression);
 void __cdecl R_ShowGridOrigin(const float *origin);
-void __cdecl R_ShowGridBox(const uint32_t *pos);
-void __cdecl R_ShowGridCorner(uint32_t x, uint32_t y, uint32_t z, float halfSize, const float *color);
-void __cdecl R_UpdateVisHistory(const GfxLightGrid *lightGrid, const uint32_t *pos);
+void __cdecl R_ShowGridBox(const uint *pos);
+void __cdecl R_ShowGridCorner(uint x, uint y, uint z, float halfSize, const float *color);
+void __cdecl R_UpdateVisHistory(const GfxLightGrid *lightGrid, const uint *pos);
 void __cdecl R_GetLightGridSampleEntryQuad(
     const GfxLightGrid *lightGrid,
-    const uint32_t *pos,
+    const uint *pos,
     const GfxLightGridEntry **entries,
-    uint32_t *defaultGridEntry);
+    uint *defaultGridEntry);
 bool __cdecl R_IsValidLightGridSample(
     const GfxLightGrid *lightGrid,
     const GfxLightGridEntry *entry,
     char cornerIndex,
-    const uint32_t *pos,
+    const uint *pos,
     const float *samplePos);
-uint32_t __cdecl R_GetLightingAtPoint(
+uint __cdecl R_GetLightingAtPoint(
     const GfxLightGrid *lightGrid,
     const float *samplePos,
-    uint32_t nonSunPrimaryLightIndex,
+    uint nonSunPrimaryLightIndex,
     uint16_t dest,
     GfxModelLightExtrapolation extrapolateBehavior);
 void __cdecl R_SetLightGridColorsFromIndex(
     const GfxLightGrid *lightGrid,
-    uint32_t colorsIndex,
+    uint colorsIndex,
     float primaryLightWeight,
     uint16_t dest);
 void __cdecl R_BlendAndSetLightGridColors(
     const GfxLightGrid *lightGrid,
     uint8_t *colorsIndex,
     const float *colorsWeight,
-    uint32_t colorsCount,
+    uint colorsCount,
     float primaryLightWeight,
     float weightNormalizeScale,
     uint16_t dest);
 void __cdecl R_GetLightGridColorsFixedPointBlendWeights(
     const float *colorsWeight,
-    uint32_t colorsCount,
+    uint colorsCount,
     float weightNormalizeScale,
     uint16_t *fixedPointWeight);
 uint8_t __cdecl R_ExtrapolateLightingAtPoint(
     const GfxLightGrid *lightGrid,
     uint16_t dest,
     GfxModelLightExtrapolation extrapolateBehavior,
-    uint32_t defaultGridEntry);
-uint32_t __cdecl R_AddLightGridSample(
+    uint defaultGridEntry);
+uint __cdecl R_AddLightGridSample(
     uint16_t *sampleColors,
     float *sampleWeight,
-    uint32_t sampleCount,
+    uint sampleCount,
     uint16_t sampleColorsAdd,
     float sampleWeightAdd);
 char __cdecl R_CanLightInfluenceLightGridCorner(
@@ -110,7 +110,7 @@ void __cdecl R_BlendAndAverageLightGridColors(
     const GfxLightGrid *lightGrid,
     const uint16_t *colorsIndex,
     const float *colorsWeight,
-    uint32_t colorsCount,
+    uint colorsCount,
     float primaryLightWeight,
     float weightNormalizeScale,
     uint8_t *outAverage);

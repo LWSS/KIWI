@@ -1083,7 +1083,7 @@ void FreePrefabLevel( entity_s *a1, entity_s *a2, entity_s *a3, int a4 )
                 RemoveModelInstFromBuf( i->modelInst );
                 i->modelInst = 0;
             }
-            ++*(unsigned short *)&def->version_prob_wrong;  // 0x4890c1: ++def->version (word)
+            ++*(ushort *)&def->version_prob_wrong;  // 0x4890c1: ++def->version (word)
             // 0x4890c9: clear the def-brush's modelFailed byte (+0x4C).
             if ( i->brushes.ownerNext && i->brushes.ownerNext != (selbrush_t *)&i->brushes )
             {
@@ -1551,8 +1551,8 @@ void Prefab_NextLevel( void *a1 )
     {
         // def version is the word at def->version_prob_wrong (+0x78); the instance
         // version is the low word of entity_s.version (+0x4C).
-        unsigned short dv = *(unsigned short *)&j->def->version_prob_wrong;
-        *(unsigned short *)&j->version = (unsigned short)( dv - 1 );
+        ushort dv = *(ushort *)&j->def->version_prob_wrong;
+        *(ushort *)&j->version = (ushort)( dv - 1 );
     }
 
     modified = 0;
@@ -1596,7 +1596,7 @@ void Prefab_NextLevel( void *a1 )
         if ( odef )
         {
             odef->modelClass = nullptr;                    // re-realize on leave
-            ++*(unsigned short *)&odef->version_prob_wrong;// ++version (word)
+            ++*(ushort *)&odef->version_prob_wrong;// ++version (word)
         }
         if ( v1->def )
             v1->def->modelFailed = 0;                      // brush_t+0x4C low byte

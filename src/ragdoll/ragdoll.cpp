@@ -235,7 +235,7 @@ int __cdecl Ragdoll_ReferenceDObjBody(int dobj)
     return 0;
 }
 
-char __cdecl Ragdoll_BindDef(uint32_t ragdollDef)
+char __cdecl Ragdoll_BindDef(uint ragdollDef)
 {
     RagdollDef *def; // [esp+0h] [ebp-18h]
     int nameIdx; // [esp+4h] [ebp-14h]
@@ -296,7 +296,7 @@ char __cdecl Ragdoll_BindDef(uint32_t ragdollDef)
     return 1;
 }
 
-bool __cdecl Ragdoll_ValidateDef(uint32_t ragdollDef)
+bool __cdecl Ragdoll_ValidateDef(uint ragdollDef)
 {
     if (ragdollDef >= 2)
         MyAssertHandler(
@@ -529,7 +529,7 @@ char __cdecl Ragdoll_ReadAxis(int arg, float *dest)
 {
     float *axis; // [esp+0h] [ebp-10h]
     bool negate; // [esp+7h] [ebp-9h]
-    uint32_t idx; // [esp+8h] [ebp-8h]
+    uint idx; // [esp+8h] [ebp-8h]
     const char *argv; // [esp+Ch] [ebp-4h]
 
     if (Cmd_Argc() >= arg)
@@ -576,7 +576,7 @@ char __cdecl Ragdoll_ReadAxis(int arg, float *dest)
 void __cdecl Ragdoll_Clear_f()
 {
     const char *v0; // eax
-    uint32_t ragdoll; // [esp+0h] [ebp-4h]
+    uint ragdoll; // [esp+0h] [ebp-4h]
 
     if (Cmd_Argc() >= 2)
     {
@@ -599,7 +599,7 @@ void __cdecl Ragdoll_Bone_f()
     const char *v4; // eax
     const char *v5; // eax
     const char *v6; // eax
-    uint32_t ragdoll; // [esp+0h] [ebp-18h]
+    uint ragdoll; // [esp+0h] [ebp-18h]
     RagdollDef *def; // [esp+4h] [ebp-14h]
     int parentBone; // [esp+8h] [ebp-10h]
     char *name; // [esp+Ch] [ebp-Ch]
@@ -673,7 +673,7 @@ void __cdecl Ragdoll_BaseLerpBone_f()
     const char *v2; // eax
     int v3; // [esp+0h] [ebp-1Ch]
     int lerpTime; // [esp+8h] [ebp-14h]
-    uint32_t ragdoll; // [esp+Ch] [ebp-10h]
+    uint ragdoll; // [esp+Ch] [ebp-10h]
     RagdollDef *def; // [esp+10h] [ebp-Ch]
     char *name; // [esp+14h] [ebp-8h]
     BaseLerpBoneDef *bone; // [esp+18h] [ebp-4h]
@@ -731,7 +731,7 @@ void __cdecl Ragdoll_PinBone_f()
 {
     const char *v0; // eax
     const char *v1; // eax
-    uint32_t ragdoll; // [esp+0h] [ebp-10h]
+    uint ragdoll; // [esp+0h] [ebp-10h]
     RagdollDef *def; // [esp+4h] [ebp-Ch]
     const char *name; // [esp+8h] [ebp-8h]
     BaseLerpBoneDef *bone; // [esp+Ch] [ebp-4h]
@@ -778,7 +778,7 @@ void __cdecl Ragdoll_Joint_f()
 {
     const char *v0; // eax
     const char *v1; // eax
-    uint32_t ragdoll; // [esp+0h] [ebp-Ch]
+    uint ragdoll; // [esp+0h] [ebp-Ch]
     RagdollDef *def; // [esp+4h] [ebp-8h]
     JointDef *joint; // [esp+8h] [ebp-4h]
 
@@ -842,7 +842,7 @@ void __cdecl Ragdoll_Limit_f()
     float v15; // [esp+28h] [ebp-1Ch]
     float v16; // [esp+2Ch] [ebp-18h]
     float v17; // [esp+30h] [ebp-14h]
-    uint32_t ragdoll; // [esp+34h] [ebp-10h]
+    uint ragdoll; // [esp+34h] [ebp-10h]
     RagdollDef *def; // [esp+38h] [ebp-Ch]
     int jointNum; // [esp+40h] [ebp-4h]
 
@@ -920,7 +920,7 @@ void __cdecl Ragdoll_Selfpair_f()
 {
     const char *v0; // eax
     const char *v1; // eax
-    uint32_t ragdoll; // [esp+0h] [ebp-10h]
+    uint ragdoll; // [esp+0h] [ebp-10h]
     RagdollDef *def; // [esp+4h] [ebp-Ch]
     SelfPairDef *pair; // [esp+8h] [ebp-8h]
     int i; // [esp+Ch] [ebp-4h]

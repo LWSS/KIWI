@@ -2271,7 +2271,7 @@ void Ed_Clip( CXYWnd *wnd )
     //   useRawSwitch = m_bSwitchClip ? (view==XZ) : (view!=XZ)
     const bool isXZ = ( wnd->m_nViewType == ED_VIEW_XZ );    // XZ == 1
     const bool useRawSwitch = g_PrefsDlg->m_bSwitchClip ? isXZ : !isXZ;
-    const int  v2 = useRawSwitch ? (int)(unsigned char)g_bSwitch : ( g_bSwitch == 0 );
+    const int  v2 = useRawSwitch ? (int)(byte)g_bSwitch : ( g_bSwitch == 0 );
     selbrush_t *keep = ( v2 == 0 ) ? &g_brBackSplits : &g_brFrontSplits;
 
     if ( keep->next == keep )      // nothing produced -> leave the selection untouched
@@ -2435,7 +2435,7 @@ void Ed_DrawClipper( CXYWnd *wnd )
         // IDB DrawClipper keep-side (distinct from Clip -- no m_bSwitchClip here):
         //   v37 = (view==XZ) ? (g_bSwitch==0) : g_bSwitch;  keep = v37 ? back : front.
         const int v37 = ( wnd->m_nViewType == ED_VIEW_XZ ) ? ( g_bSwitch == 0 )
-                                                            : (int)(unsigned char)g_bSwitch;
+                                                            : (int)(byte)g_bSwitch;
         selbrush_t *keep = v37 ? &g_brBackSplits : &g_brFrontSplits;
 
         GfxColor previewCol;
@@ -3884,8 +3884,8 @@ static void Ed_DrawTurretExportBox( const float *p, const float *col )
 // and draw a coloured box - both set -> flt_6DE1B0 magenta, share only -> flt_6DE130 red,
 // ambush only -> flt_6DE160 blue.
 static void Ed_HighlightTurretShareAmbush( selbrush_t *listHead, selbrush_t *listEnd,
-                                           const unsigned char *shareFlags,
-                                           const unsigned char *ambushFlags )
+                                           const byte *shareFlags,
+                                           const byte *ambushFlags )
 {
     static const float kShare[4] = { 1.0f, 0.0f, 0.0f, 1.0f };   // flt_6DE130 (red)
     static const float kAmbush[4]= { 0.0f, 0.0f, 1.0f, 1.0f };   // flt_6DE160 (blue)
@@ -3921,8 +3921,8 @@ static void Ed_HighlightTurretShareAmbush( selbrush_t *listHead, selbrush_t *lis
 extern bool Entity_HasEpairMatch( entity_s *e, const char *key, const char *val ); // entity.cpp 0x483930
 static void Ed_DrawTurretExportHighlights()
 {
-    static unsigned char shareFlags[2048];   // v67 (the binary memsets 2048 at the top of XY_Draw)
-    static unsigned char ambushFlags[2048];  // v66
+    static byte shareFlags[2048];   // v67 (the binary memsets 2048 at the top of XY_Draw)
+    static byte ambushFlags[2048];  // v66
     memset( shareFlags, 0, sizeof( shareFlags ) );
     memset( ambushFlags, 0, sizeof( ambushFlags ) );
 
@@ -4134,7 +4134,7 @@ void CXYWnd::OnPaint()
     CopySelectedFaceValues();  // IDB XY_Draw tail 0x46db54: rebuild the selected faces' faceVis
     }   // end if (sceneOk) — degenerate-projection frame draws only the cleared background
     R_EndFrame();
-    R_IssueRenderCommands( (uint32_t)-1 );
+    R_IssueRenderCommands( (uint)-1 );
     R_SortMaterials();
     R_CheckTargetWindow( hwnd );
 }

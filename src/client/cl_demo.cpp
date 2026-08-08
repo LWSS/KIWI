@@ -66,7 +66,7 @@ const char *__cdecl CL_ReadDemoShortCString(MemoryFile *memFile, char *string)
         return 0;
     v5 = memFile;
     v6 = (unsigned __int8)(v7[0] - 1);
-    MemFile_ReadData(v5, v6, (unsigned char*)string);
+    MemFile_ReadData(v5, v6, (byte*)string);
     result = string;
     string[v6] = 0;
     return result;
@@ -93,7 +93,7 @@ void __cdecl CL_ReadDemoDObjModel(MemoryFile *memFile, DObjModel_s *dobjModel)
     const char *DemoShortCString; // r3
     XModel *Existing; // r3
     const char *v6; // r3
-    unsigned char modelFlags; // [sp+50h] [-140h] BYREF
+    byte modelFlags; // [sp+50h] [-140h] BYREF
     char v8[304]; // [sp+60h] [-130h] BYREF
 
     if (!dobjModel)
@@ -122,7 +122,7 @@ void __cdecl CL_WriteAnimTree(MemoryFile *memFile, int entnum, const XAnimTree_s
         bytes[0] = 1;
         MemFile_WriteData(memFile, 1, bytes);
         id = G_GetEntAnimTreeId(entnum);
-        iassert(id == static_cast<unsigned short>(id));
+        iassert(id == static_cast<ushort>(id));
         *(_WORD *)bytes = id;
         byteCount = 2;
     }
@@ -136,13 +136,13 @@ void __cdecl CL_WriteAnimTree(MemoryFile *memFile, int entnum, const XAnimTree_s
 XAnimTree_s *__cdecl CL_ReadAnimTree(MemoryFile *memFile, int entnum)
 {
     XAnimTree_s *tree; // r31
-    unsigned char buf[4]; // [sp+50h] [-20h] BYREF
+    byte buf[4]; // [sp+50h] [-20h] BYREF
 
-    MemFile_ReadData(memFile, 1, (unsigned char*)buf);
+    MemFile_ReadData(memFile, 1, (byte*)buf);
     if (!HIBYTE(buf[0]))
         return 0;
 
-    MemFile_ReadData(memFile, 2, (unsigned char *)buf);
+    MemFile_ReadData(memFile, 2, (byte *)buf);
     tree = G_GetEntAnimTreeForId(entnum, buf[0]);
     iassert(tree);
     XAnimClearTree(tree);
@@ -154,7 +154,7 @@ void __cdecl CL_WriteDemoDObj(int entnum, const DObj_s *obj)
     const XAnimTree_s *Tree; // r3
     const DObjModel_s *pModel; // r30
     unsigned __int16 modelCount; // [sp+50h] [-160h] BYREF
-    unsigned char modelCountWrite; // [sp+52h] [-15Eh] BYREF
+    byte modelCountWrite; // [sp+52h] [-15Eh] BYREF
     unsigned __int16 v10[6]; // [sp+54h] [-15Ch] BYREF
     MemoryFile memFile; // [sp+60h] [-150h] BYREF
     XAnimTree_s *v12; // [sp+7Ch] [-134h] BYREF
@@ -201,14 +201,14 @@ void __cdecl CL_ReadDemoDObj(int entnum)
     MemoryFile memFile; // [sp+60h] [-150h] BYREF
     DObjModel_s v11[38]; // [sp+80h] [-130h] BYREF
 
-    if (FS_Read((unsigned char *)&memFile.bufferSize, 4, cls.demofile) == 4)
+    if (FS_Read((byte *)&memFile.bufferSize, 4, cls.demofile) == 4)
     {
         Hunk_CheckTempMemoryClear();
         TempMemory = Hunk_AllocateTempMemory(memFile.bufferSize, "CL_ReadDemoDObj");
-        v3 = FS_Read((unsigned char*)TempMemory, memFile.bufferSize, cls.demofile);
+        v3 = FS_Read((byte*)TempMemory, memFile.bufferSize, cls.demofile);
         if (v3 == memFile.bufferSize)
         {
-            MemFile_InitForReading(&memFile, memFile.bufferSize, (unsigned char*)TempMemory, 0);
+            MemFile_InitForReading(&memFile, memFile.bufferSize, (byte*)TempMemory, 0);
             v4 = CL_ReadAnimTree(&memFile, entnum);
             MemFile_ReadData(&memFile, 1, v9);
             v5 = v9[0];
@@ -280,7 +280,7 @@ int CL_ReadDemoDObjs()
     for (i = 1; i < 2176; ++i)
         Com_SafeServerDObjFree(i);
     v3[0] = 0;
-    result = FS_Read((unsigned char*)v3, 2, cls.demofile);
+    result = FS_Read((byte*)v3, 2, cls.demofile);
     for (j = v3[0]; v3[0]; j = v3[0])
     {
         if (j < 1 || j >= 2176)
@@ -292,7 +292,7 @@ int CL_ReadDemoDObjs()
                 "entnum >= MAX_CLIENTS && entnum < MAX_GENTITIES");
         CL_ReadDemoDObj(v3[0]);
         v3[0] = 0;
-        result = FS_Read((unsigned char *)v3, 2, cls.demofile);
+        result = FS_Read((byte *)v3, 2, cls.demofile);
     }
     return result;
 }
@@ -335,7 +335,7 @@ void __cdecl CL_ReadDemoEntityState(entityState_s *es)
     {
         FS_Read(v4, v2[0], cls.demofile);
         MemFile_InitForReading(&v3, v2[0], v4, 0);
-        MemFile_ReadData(&v3, 164, (unsigned char*)es);
+        MemFile_ReadData(&v3, 164, (byte*)es);
         G_ArchiveSpecialEntityInfo((const entityState_s*)es, &v3);
         MemFile_MoveToSegment(&v3, -1);
     }
@@ -509,7 +509,7 @@ void __cdecl CL_Record_f()
                 FS_Write((const char*)v10, 1, cls.demofile);
                 v9 = FS_Write(v6, v10[0], cls.demofile);
                 Hunk_CheckTempMemoryClear();
-                MemFile_InitForWriting(&v12, 0x100000, (unsigned char*)cls.demobuf, 1, 0);
+                MemFile_InitForWriting(&v12, 0x100000, (byte*)cls.demobuf, 1, 0);
                 CL_ArchiveClientState(&v12, 0);
                 MemFile_StartSegment(&v12, -1);
                 FS_Write((const char *)&v12.bytesUsed, 4, cls.demofile);
@@ -555,14 +555,14 @@ void CL_DemoPlaybackStartup()
         if (v5[0] < 0x3Fu)
         {
             v1 = v5[0];
-            if (FS_Read((unsigned char *)v8, v5[0], cls.demofile) == v0)
+            if (FS_Read((byte *)v8, v5[0], cls.demofile) == v0)
             {
                 demofile = cls.demofile;
                 v8[v1] = 0;
-                if (FS_Read((unsigned char*)v6, 4, demofile) == 4)
+                if (FS_Read((byte*)v6, 4, demofile) == 4)
                 {
                     v3 = Z_VirtualAlloc(v6[0], "CL_DemoPlaybackStartup", 10);
-                    v4 = FS_Read((unsigned char *)v3, v6[0], cls.demofile);
+                    v4 = FS_Read((byte *)v3, v6[0], cls.demofile);
                     if (v4 == v6[0])
                     {
                         Dvar_SetBoolByName("sv_cheats", 1);
@@ -572,7 +572,7 @@ void CL_DemoPlaybackStartup()
                             MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\client\\cl_demo.cpp", 715, 0, "%s", "cls.demofile");
                         if (!cls.demoplaying)
                             MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\client\\cl_demo.cpp", 716, 0, "%s", "cls.demoplaying");
-                        MemFile_InitForReading(&v7, v6[0], (unsigned char *)v3, 0);
+                        MemFile_InitForReading(&v7, v6[0], (byte *)v3, 0);
                         CL_ArchiveClientState(&v7, 0);
                         MemFile_MoveToSegment(&v7, -1);
                         Z_VirtualFree(v3);
@@ -758,12 +758,12 @@ int __cdecl CL_GetDemoMessage(msg_t *buf, unsigned __int8 *bufData, int bufDataS
         MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\client\\cl_demo.cpp", 584, 0, "%s", "bufDataSize > 0");
     if (!cls.demofile)
         goto LABEL_17;
-    if (FS_Read((unsigned char*)&v8, 4, cls.demofile) != 4)
+    if (FS_Read((byte*)&v8, 4, cls.demofile) != 4)
         goto LABEL_17;
     clientConnections[0].serverMessageSequence = v8;
     MSG_Init(buf, bufData, bufDataSize);
     p_cursize = &buf->cursize;
-    if (FS_Read((unsigned char*)&buf->cursize, 4, cls.demofile) != 4 || *p_cursize == -1)
+    if (FS_Read((byte*)&buf->cursize, 4, cls.demofile) != 4 || *p_cursize == -1)
         goto LABEL_17;
     if (*p_cursize > buf->maxsize)
         Com_Error(ERR_DROP, "CL_GetDemoMessage: demoMsglen > MAX_MSGLEN");

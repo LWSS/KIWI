@@ -174,7 +174,7 @@ char *__cdecl Dvar_InfoString(int localClientNum, char bit)
     return info1;
 }
 
-void __cdecl Dvar_InfoStringSingle(const dvar_s *dvar, uint32_t *userData)
+void __cdecl Dvar_InfoStringSingle(const dvar_s *dvar, uint *userData)
 {
     const char *v2; // eax
 
@@ -192,7 +192,7 @@ char *__cdecl Dvar_InfoString_Big(int bit)
     return info2;
 }
 
-void __cdecl Dvar_InfoStringSingle_Big(const dvar_s *dvar, uint32_t *userData)
+void __cdecl Dvar_InfoStringSingle_Big(const dvar_s *dvar, uint *userData)
 {
     const char *v2; // eax
 
@@ -265,7 +265,7 @@ void __cdecl Dvar_ForEachName(void(__cdecl *callback)(const char *))
     InterlockedDecrement(&g_dvarCritSect.readCount);
 }
 
-const dvar_s *__cdecl Dvar_GetAtIndex(uint32_t index)
+const dvar_s *__cdecl Dvar_GetAtIndex(uint index)
 {
     if (index >= dvarCount)
         MyAssertHandler(
@@ -546,7 +546,7 @@ const char *__cdecl Dvar_DomainToString_Internal(
     uint8_t type,
     DvarLimits domain,
     char *outBuffer,
-    uint32_t outBufferLen,
+    uint outBufferLen,
     int *outLineCount)
 {
     const char *v4; // eax
@@ -669,12 +669,12 @@ const char *__cdecl Dvar_DomainToString(
     uint8_t type,
     DvarLimits *domain,
     char *outBuffer,
-    uint32_t outBufferLen)
+    uint outBufferLen)
 {
     return Dvar_DomainToString_Internal(type, *domain, outBuffer, outBufferLen, 0);
 }
 
-void __cdecl Dvar_VectorDomainToString(int components, DvarLimits domain, char *outBuffer, uint32_t outBufferLen)
+void __cdecl Dvar_VectorDomainToString(int components, DvarLimits domain, char *outBuffer, uint outBufferLen)
 {
     if (domain.value.min == -FLT_MAX)
     {
@@ -713,7 +713,7 @@ const char *Dvar_DomainToString_GetLines(
     uint8_t type,
     DvarLimits *domain,
     char *outBuffer,
-    uint32_t outBufferLen,
+    uint outBufferLen,
     int *outLineCount)
 {
     if (!outLineCount)
@@ -1117,7 +1117,7 @@ void __cdecl Dvar_GetUnpackedColor(const dvar_s *dvar, float *expandedColor)
             "(dvar->type == DVAR_TYPE_COLOR || (dvar->type == DVAR_TYPE_STRING && (dvar->flags & (1 << 14))))",
             dvar->type);
     if (dvar->type == 8)
-        *(uint32_t *)color = dvar->current.integer;
+        *(uint *)color = dvar->current.integer;
     else
         Dvar_StringToColor(dvar->current.string, color);
     *expandedColor = (double)color[0] * 0.003921568859368563;
@@ -1359,7 +1359,7 @@ void __cdecl Dvar_SetVariant(dvar_s *dvar, DvarValue value, DvarSetSource source
         return;
     }
     if (dvar->domainFunc
-        && !((uint8_t(__cdecl *)(dvar_s *, int, uint32_t, uint32_t, uint32_t))dvar->domainFunc)(
+        && !((uint8_t(__cdecl *)(dvar_s *, int, uint, uint, uint))dvar->domainFunc)(
             dvar,
             value.integer,
             LODWORD(value.vector[1]),
@@ -2033,9 +2033,9 @@ const dvar_s *__cdecl Dvar_RegisterInt(
 const dvar_t *__cdecl Dvar_RegisterInt(
     const char *dvarName,
     int value,
-    uint32_t min,
-    uint32_t max,
-    uint32_t flags,
+    uint min,
+    uint max,
+    uint flags,
     const char *description)
 {
     DvarValue dvarValue = {};
@@ -2717,7 +2717,7 @@ void __cdecl Dvar_SetDomainFunc(dvar_s *dvar, bool(__cdecl *customFunc)(dvar_s *
     dvar->domainFunc = customFunc;
     if (customFunc)
     {
-        if (!((uint8_t(__cdecl *)(dvar_s *, int, uint32_t, uint32_t, uint32_t))dvar->domainFunc)(
+        if (!((uint8_t(__cdecl *)(dvar_s *, int, uint, uint, uint))dvar->domainFunc)(
             dvar,
             dvar->current.integer,
             LODWORD(dvar->current.vector[1]),
@@ -2859,11 +2859,11 @@ void __cdecl Dvar_ResetDvars(uint16_t filter, DvarSetSource setSource)
     InterlockedDecrement(&g_dvarCritSect.readCount);
 }
 
-int __cdecl Com_SaveDvarsToBuffer(const char **dvarnames, uint32_t numDvars, char *buffer, uint32_t bufsize)
+int __cdecl Com_SaveDvarsToBuffer(const char **dvarnames, uint numDvars, char *buffer, uint bufsize)
 {
     const char *string; // [esp+0h] [ebp-10h]
     int written; // [esp+4h] [ebp-Ch]
-    uint32_t i; // [esp+8h] [ebp-8h]
+    uint i; // [esp+8h] [ebp-8h]
     const dvar_s *dvar; // [esp+Ch] [ebp-4h]
 
     for (i = 0; i < numDvars; ++i)
@@ -2881,11 +2881,11 @@ int __cdecl Com_SaveDvarsToBuffer(const char **dvarnames, uint32_t numDvars, cha
     return 1;
 }
 
-int __cdecl Com_LoadDvarsFromBuffer(const char **dvarnames, uint32_t numDvars, char *buffer, char *filename)
+int __cdecl Com_LoadDvarsFromBuffer(const char **dvarnames, uint numDvars, char *buffer, char *filename)
 {
     const char *v4; // eax
     uint8_t dst[16388]; // [esp+0h] [ebp-4018h] BYREF
-    uint32_t i; // [esp+4008h] [ebp-10h]
+    uint i; // [esp+4008h] [ebp-10h]
     char *s0; // [esp+400Ch] [ebp-Ch]
     dvar_s *dvar; // [esp+4010h] [ebp-8h]
     int v10; // [esp+4014h] [ebp-4h]
@@ -2964,7 +2964,7 @@ void Dvar_SaveDvars(MemoryFile *memFile, uint16_t filter)
             iassert(var->name);
 
             const char *namePtr = var->name;
-            while (*(unsigned char *)namePtr++)
+            while (*(byte *)namePtr++)
                 ;
             int nameLen = (int)(namePtr - var->name - 1);
             if (nameLen >= 1024)
@@ -2979,7 +2979,7 @@ void Dvar_SaveDvars(MemoryFile *memFile, uint16_t filter)
             const char *stringValue = Dvar_ValueToString(var, var->current);
             iassert(stringValue);
             const char *valuePtr = stringValue;
-            while (*(unsigned char *)valuePtr++)
+            while (*(byte *)valuePtr++)
                 ;
             int valueLen = (int)(valuePtr - stringValue - 1);
             if (valueLen >= 1024)
@@ -3013,19 +3013,19 @@ void Dvar_LoadDvars(MemoryFile *memFile)
     char valueBuf[1024];
     char nameBuf[1072];
 
-    MemFile_ReadData(memFile, 4, (unsigned char *)&nameLen);
+    MemFile_ReadData(memFile, 4, (byte *)&nameLen);
     while (nameLen >= 0)
     {
         if (nameLen >= 1024)
             Com_Error(ERR_DROP, "SAVE_STRING_MAX_SIZE exceeded in save game");
-        MemFile_ReadData(memFile, nameLen, (unsigned char *)nameBuf);
+        MemFile_ReadData(memFile, nameLen, (byte *)nameBuf);
         nameBuf[nameLen] = 0;
 
-        MemFile_ReadData(memFile, 4, (unsigned char *)valueLenBuf);
+        MemFile_ReadData(memFile, 4, (byte *)valueLenBuf);
         int valueLen = valueLenBuf[0];
         if (valueLen >= 1024)
             Com_Error(ERR_DROP, "SAVE_STRING_MAX_SIZE exceeded in save game");
-        MemFile_ReadData(memFile, valueLen, (unsigned char *)valueBuf);
+        MemFile_ReadData(memFile, valueLen, (byte *)valueBuf);
         valueBuf[valueLen] = 0;
 
         dvar_s *malleableVar = Dvar_FindMalleableVar(nameBuf);
@@ -3038,7 +3038,7 @@ void Dvar_LoadDvars(MemoryFile *memFile)
         {
             Dvar_RegisterString(nameBuf, valueBuf, 0x4000u, "External Dvar");
         }
-        MemFile_ReadData(memFile, 4, (unsigned char *)&nameLen);
+        MemFile_ReadData(memFile, 4, (byte *)&nameLen);
     }
 }
 

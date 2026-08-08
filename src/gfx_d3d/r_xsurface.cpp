@@ -68,9 +68,9 @@ uint16_t *__cdecl R_CheckTris( const XSurface *surface, void *dstIndices, uint16
     if ( !baseVert )
         return (uint16_t *)memcpy( dstIndices, src, 6 * surface->triCount );
 
-    uint32_t  add = baseVert | ( (uint32_t)baseVert << 16 );
-    uint32_t *dst = (uint32_t *)dstIndices;
-    uint32_t *s   = (uint32_t *)src;
+    uint  add = baseVert | ( (uint)baseVert << 16 );
+    uint *dst = (uint *)dstIndices;
+    uint *s   = (uint *)src;
     for ( int pair = surface->triCount >> 1; pair; --pair )   // 2 tris (6 indices = 3 dwords) per step
     {
         dst[0] = add + s[0];

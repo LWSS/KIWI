@@ -375,9 +375,9 @@ void __cdecl R_CopyBlockFromBgraToPixelColorWithColorCorrection(
     const ColorCorrectionData *colorCorrectionData,
     uint8_t *to,
     const uint8_t *from,
-    uint32_t blockSize)
+    uint blockSize)
 {
-    uint32_t offset; // [esp+0h] [ebp-4h]
+    uint offset; // [esp+0h] [ebp-4h]
 
     iassert( blockSize );
     iassert( blockSize % 4 == 0 );
@@ -470,18 +470,18 @@ bool __cdecl R_ReflectionProbeGenerateExitWhenDone()
     return r_reflectionProbeGenerate->current.enabled && r_reflectionProbeGenerateExit->current.enabled;
 }
 
-void __cdecl R_GenerateReflections(char *mapname, GfxReflectionProbe *probes, uint32_t probeCount)
+void __cdecl R_GenerateReflections(char *mapname, GfxReflectionProbe *probes, uint probeCount)
 {
     char v3; // al
     DiskGfxReflectionProbe *v4; // [esp+8h] [ebp-124h]
     GfxReflectionProbe *v5; // [esp+Ch] [ebp-120h]
-    uint32_t lumpProbeCount; // [esp+10h] [ebp-11Ch] BYREF
-    uint32_t version; // [esp+14h] [ebp-118h]
+    uint lumpProbeCount; // [esp+10h] [ebp-11Ch] BYREF
+    uint version; // [esp+14h] [ebp-118h]
     const DiskGfxReflectionProbe *probeRawLumpData; // [esp+18h] [ebp-114h]
     DiskGfxReflectionProbe *probeRawGeneratedData; // [esp+1Ch] [ebp-110h]
-    uint32_t probeIndex; // [esp+20h] [ebp-10Ch]
+    uint probeIndex; // [esp+20h] [ebp-10Ch]
     bool generateProbe[256]; // [esp+24h] [ebp-108h] BYREF
-    uint32_t lumpSize; // [esp+128h] [ebp-4h]
+    uint lumpSize; // [esp+128h] [ebp-4h]
 
     iassert( r_reflectionProbeGenerate );
     iassert( probeCount < MAX_MAP_REFLECTION_PROBES );

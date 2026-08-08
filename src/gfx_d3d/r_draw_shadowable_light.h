@@ -3,7 +3,7 @@
 
 #define GFX_MAX_EMISSIVE_SPOT_LIGHTS 1
 
-enum LightHasShadowMap : __int32
+enum LightHasShadowMap : int
 {                                       // ...
     LIGHT_HAS_SHADOWMAP = 0x0,
     LIGHT_HAS_NO_SHADOWMAP = 0x1,
@@ -21,10 +21,10 @@ void __cdecl R_SetCodeImageSamplerState(
     uint8_t samplerState);
 void __cdecl R_SetShadowableLight(
     GfxCmdBufSourceState *source,
-    uint32_t shadowableLightIndex,
+    uint shadowableLightIndex,
     const GfxViewInfo *viewInfo);
 void __cdecl R_SetDrawSurfsShadowableLight(GfxCmdBufSourceState *source, const GfxDrawSurfListInfo *info);
-uint32_t __cdecl R_GetShadowableLightIndex(
+uint __cdecl R_GetShadowableLightIndex(
     const GfxBackEndData *data,
     const GfxViewInfo *viewInfo,
     const GfxLight *light);

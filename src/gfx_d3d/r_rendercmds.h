@@ -8,9 +8,9 @@
 #include "r_material.h"
 #include <qcommon/com_pack.h>
 
-enum CodeConstant : __int32; // r_state.h
+enum CodeConstant : int; // r_state.h
 
-enum GfxRenderCommand : __int32
+enum GfxRenderCommand : int
 {                                       // ...
     RC_END_OF_LIST = 0x0,
     RC_SET_MATERIAL_COLOR = 0x1,
@@ -61,7 +61,7 @@ enum GfxRenderCommand : __int32
     RC_COUNT = 0x16,
 #endif
 };
-enum GfxRenderTargetId : __int32
+enum GfxRenderTargetId : int
 {                                       // ...
     R_RENDERTARGET_SAVED_SCREEN = 0x0,
     R_RENDERTARGET_FRAME_BUFFER = 0x1,
@@ -83,20 +83,20 @@ enum GfxRenderTargetId : __int32
 };
 
 
-enum ShadowType : __int32
+enum ShadowType : int
 {                                       // ...
     SHADOW_NONE = 0x0,
     SHADOW_COOKIE = 0x1,
     SHADOW_MAP = 0x2,
 };
 
-enum GfxProjectionTypes : __int32
+enum GfxProjectionTypes : int
 {                                       // ...
     GFX_PROJECTION_2D = 0x0,
     GFX_PROJECTION_3D = 0x1,
 };
 
-enum MaterialTechniqueType : __int32
+enum MaterialTechniqueType : int
 {                                       // ...
     TECHNIQUE_DEPTH_PREPASS = 0x0,
     TECHNIQUE_BUILD_FLOAT_Z = 0x1,
@@ -148,7 +148,7 @@ inline MaterialTechniqueType &operator++(MaterialTechniqueType &e, int i)
     return e;
 }
 
-enum FullscreenType : __int32
+enum FullscreenType : int
 {                                       // ...
     FULLSCREEN_DISPLAY = 0x0,
     FULLSCREEN_MIXED = 0x1,
@@ -219,8 +219,8 @@ struct GfxRenderTarget // sizeof=0x14
 {                                       // ...
     GfxImage *image;                    // ...
     GfxRenderTargetSurface surface;     // ...
-    uint32_t width;                 // ...
-    uint32_t height;                // ...
+    uint width;                 // ...
+    uint height;                // ...
 };
 
 struct StateBitsTable // sizeof=0x8
@@ -272,11 +272,11 @@ struct GfxCmdDrawText2D // sizeof=0x54
 
 struct FxCodeMeshData // sizeof=0x10
 {                                       // ...
-    uint32_t triCount;
+    uint triCount;
     uint16_t *indices;
     uint16_t argOffset;
     uint16_t argCount;
-    uint32_t pad;
+    uint pad;
 };
 
 struct GfxParticleCloud // sizeof=0x40
@@ -285,11 +285,11 @@ struct GfxParticleCloud // sizeof=0x40
     float endpos[3];
     GfxColor color;
     float radius[2];
-    uint32_t pad[2];
+    uint pad[2];
 };
 union PackedLightingCoords // sizeof=0x4
 {                                       // ...
-    uint32_t packed;
+    uint packed;
     uint8_t array[4];
 };
 struct GfxSModelCachedVertex // sizeof=0x20
@@ -316,18 +316,18 @@ struct GfxBackEndPrimitiveData // sizeof=0x4
 };
 struct FxMarkMeshData // sizeof=0x10
 {                                       // ...
-    uint32_t triCount;
+    uint triCount;
     uint16_t *indices;
     uint16_t modelIndex;
     uint8_t modelTypeAndSurf;
     uint8_t pad0;
-    uint32_t pad1;
+    uint pad1;
 };
 
 struct GfxDrawSurfListInfo // sizeof=0x28
 {                                       // ...
     const GfxDrawSurf *drawSurfs;
-    uint32_t drawSurfCount;
+    uint drawSurfCount;
     MaterialTechniqueType baseTechType; // ...
     const struct GfxViewInfo *viewInfo;
     float viewOrigin[4];
@@ -346,7 +346,7 @@ struct __declspec(align(16)) ShadowCookie // sizeof=0xC0
     float boxMax[3];
     GfxViewParms *shadowViewParms;
     float fade;
-    uint32_t sceneEntIndex;
+    uint sceneEntIndex;
     GfxDrawSurfListInfo casterInfo;
     GfxDrawSurfListInfo receiverInfo;
     // padding byte
@@ -365,7 +365,7 @@ struct __declspec(align(16)) ShadowCookie // sizeof=0xC0
 struct __declspec(align(16)) ShadowCookieList // sizeof=0x1210
 {                                       // ...
     ShadowCookie cookies[24];
-    uint32_t cookieCount;
+    uint cookieCount;
     // padding byte
     // padding byte
     // padding byte
@@ -493,15 +493,15 @@ const struct GfxViewInfo // sizeof=0x67B0
     // padding byte
     // padding byte
     GfxLight shadowableLights[255];
-    uint32_t shadowableLightCount;
+    uint shadowableLightCount;
     PointLightPartition pointLightPartitions[4];
     GfxMeshData pointLightMeshData[4];
     int pointLightCount;
-    uint32_t emissiveSpotLightIndex;
+    uint emissiveSpotLightIndex;
     GfxLight emissiveSpotLight;
     int emissiveSpotDrawSurfCount;
     GfxDrawSurf *emissiveSpotDrawSurfs;
-    uint32_t emissiveSpotLightCount;
+    uint emissiveSpotLightCount;
     float blurRadius;
     float frustumPlanes[4][4];
     GfxDepthOfField dof;
@@ -513,7 +513,7 @@ const struct GfxViewInfo // sizeof=0x67B0
     // padding byte
     // padding byte
     GfxSunShadow sunShadow;
-    uint32_t spotShadowCount;
+    uint spotShadowCount;
     // padding byte
     // padding byte
     // padding byte
@@ -541,7 +541,7 @@ const struct __declspec(align(16)) GfxBackEndData // sizeof=0x11E780
 {                                       // ...
     uint8_t surfsBuffer[0x20000];
     FxCodeMeshData codeMeshes[2048];
-    uint32_t primDrawSurfsBuf[65536]; // ...
+    uint primDrawSurfsBuf[65536]; // ...
     GfxViewParms viewParms[28];
     uint8_t primaryLightTechType[13][256];
     float codeMeshArgs[256][4];
@@ -550,13 +550,13 @@ const struct __declspec(align(16)) GfxBackEndData // sizeof=0x11E780
     GfxMeshData codeMesh;
     GfxSModelCachedVertex smcPatchVerts[8192];
     uint16_t smcPatchList[256];
-    uint32_t smcPatchCount;
-    uint32_t smcPatchVertsUsed;
+    uint smcPatchCount;
+    uint smcPatchVertsUsed;
     GfxModelLightingPatch modelLightingPatchList[4096];
     volatile long modelLightingPatchCount;
     GfxBackEndPrimitiveData prim;
-    uint32_t shadowableLightHasShadowMap[8];
-    uint32_t frameCount;
+    uint shadowableLightHasShadowMap[8];
+    uint frameCount;
     int drawSurfCount;
     volatile long surfPos;
     volatile long gfxEntCount;
@@ -575,16 +575,16 @@ const struct __declspec(align(16)) GfxBackEndData // sizeof=0x11E780
     int viewParmCount;
     GfxFog fogSettings;
     GfxCmdArray *commands;              // ...
-    uint32_t viewInfoIndex;
-    uint32_t viewInfoCount;
+    uint viewInfoIndex;
+    uint viewInfoCount;
     GfxViewInfo *viewInfo;
     const void *cmds;
     GfxLight sunLight;
     int hasApproxSunDirChanged;
-    volatile uint32_t primDrawSurfPos;
-    uint32_t *staticModelLit;
+    volatile uint primDrawSurfPos;
+    uint *staticModelLit;
     DebugGlobals debugGlobals;
-    uint32_t drawType;
+    uint drawType;
     // padding byte
     // padding byte
     // padding byte
@@ -605,14 +605,14 @@ void __cdecl R_InitRenderCommands();
 void __cdecl R_InitRenderBuffers();
 void __cdecl R_InitDynamicMesh(
     GfxMeshData *mesh,
-    uint32_t indexCount,
-    uint32_t vertCount,
-    uint32_t vertSize);
+    uint indexCount,
+    uint vertCount,
+    uint vertSize);
 void __cdecl R_InitRenderThread();
 void __cdecl R_SyncRenderThread();
 GfxCmdArray *R_ClearCmdList();
 void __cdecl R_ReleaseThreadOwnership();
-void __cdecl R_IssueRenderCommands(uint32_t type);
+void __cdecl R_IssueRenderCommands(uint type);
 void R_PerformanceCounters();
 bool R_UpdateSkinCacheUsage();
 char __cdecl R_HandOffToBackend(char type);
@@ -882,20 +882,20 @@ void __cdecl R_SetInputCodeConstant(GfxCmdBufInput *input, CodeConstant constant
 void R_EnvMapOverrideConstants();
 void __cdecl R_EndFrame();
 void __cdecl R_AddCmdClearScreen(int whichToClear, const float *color, float depth, uint8_t stencil);
-void __cdecl R_AddCmdSaveScreen(uint32_t screenTimerId);
+void __cdecl R_AddCmdSaveScreen(uint screenTimerId);
 void __cdecl R_AddCmdSaveScreenSection(
     float viewX,
     float viewY,
     float viewWidth,
     float viewHeight,
-    uint32_t screenTimerId);
+    uint screenTimerId);
 void __cdecl R_AddCmdBlendSavedScreenShockBlurred(
     int fadeMsec,
     float viewX,
     float viewY,
     float viewWidth,
     float viewHeight,
-    uint32_t screenTimerId);
+    uint screenTimerId);
 void __cdecl R_AddCmdBlendSavedScreenShockFlashed(
     float intensityWhiteout,
     float intensityScreengrab,

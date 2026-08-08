@@ -102,7 +102,7 @@ Scr_StringNode_s* __cdecl Scr_GetStringList(const char* filename, char** pBuf)
     {
         buf = (char*)Hunk_AllocDebugMem(len + 1);
         *pBuf = buf;
-        FS_Read((unsigned char*)buf, len, f);
+        FS_Read((byte*)buf, len, f);
         buf[len] = 0;
         FS_FCloseFile(f);
         head = 0;
@@ -138,14 +138,14 @@ Scr_StringNode_s* __cdecl Scr_GetStringList(const char* filename, char** pBuf)
 int __cdecl Scr_GetFunctionHandle(const char* filename, const char* name)
 {
     VariableValue v3; // [esp+10h] [ebp-34h]
-    uint32_t str; // [esp+18h] [ebp-2Ch]
+    uint str; // [esp+18h] [ebp-2Ch]
     int result; // [esp+24h] [ebp-20h]
-    uint32_t name2; // [esp+28h] [ebp-1Ch]
-    uint32_t posId; // [esp+2Ch] [ebp-18h]
-    uint32_t threadId; // [esp+30h] [ebp-14h]
-    uint32_t fileId; // [esp+38h] [ebp-Ch]
-    uint32_t nameId; // [esp+3Ch] [ebp-8h]
-    uint32_t id; // [esp+40h] [ebp-4h]
+    uint name2; // [esp+28h] [ebp-1Ch]
+    uint posId; // [esp+2Ch] [ebp-18h]
+    uint threadId; // [esp+30h] [ebp-14h]
+    uint fileId; // [esp+38h] [ebp-Ch]
+    uint nameId; // [esp+3Ch] [ebp-8h]
+    uint id; // [esp+40h] [ebp-4h]
 
     if (!scrCompilePub.scripts)
         MyAssertHandler(".\\script\\scr_main.cpp", 69, 0, "%s", "scrCompilePub.scripts");
@@ -183,7 +183,7 @@ int __cdecl Scr_GetFunctionHandle(const char* filename, const char* name)
             "pos.type == VAR_CODE::pos || pos.type == VAR_DEVELOPER_CODE::pos");
     if (!Scr_IsInOpcodeMemory(v3.u.codePosValue))
         return 0;
-    result = v3.u.intValue - (uint32_t)scrVarPub.programBuffer;
+    result = v3.u.intValue - (uint)scrVarPub.programBuffer;
     if ((const char*)v3.u.intValue == scrVarPub.programBuffer)
         MyAssertHandler(".\\script\\scr_main.cpp", 106, 0, "%s", "result");
     return result;
@@ -239,7 +239,7 @@ const dvar_s* Scr_VM_Init()
     scrVmPub.top = scrVmPub.stack;
     scrVmPub.function_count = 0;
     scrVmPub.function_frame = scrVmPub.function_frame_start;
-    scrVmPub.localVars = (uint32_t*)&scrVmGlob.starttime;
+    scrVmPub.localVars = (uint*)&scrVmGlob.starttime;
     scrVarPub.evaluate = 0;
     scrVmPub.debugCode = 0;
     Scr_ClearErrorMessage();
@@ -299,7 +299,7 @@ void __cdecl Scr_SetLoading(int bLoading)
     scrVmGlob.loading = bLoading;
 }
 
-uint32_t __cdecl Scr_GetNumScriptThreads()
+uint __cdecl Scr_GetNumScriptThreads()
 {
     return scrVarPub.numScriptThreads;
 }
@@ -314,7 +314,7 @@ void __cdecl Scr_ClearOutParams()
     }
 }
 
-char* __cdecl Scr_GetReturnPos(uint32_t* localId)
+char* __cdecl Scr_GetReturnPos(uint* localId)
 {
     char* pos; // [esp+0h] [ebp-4h]
 
@@ -327,7 +327,7 @@ char* __cdecl Scr_GetReturnPos(uint32_t* localId)
     return pos;
 }
 
-char* __cdecl Scr_GetNextCodepos(VariableValue* top, const char* pos, int opcode, int mode, uint32_t* localId)
+char* __cdecl Scr_GetNextCodepos(VariableValue* top, const char* pos, int opcode, int mode, uint* localId)
 {
     char* result; // eax
     int type; // eax
@@ -339,7 +339,7 @@ char* __cdecl Scr_GetNextCodepos(VariableValue* top, const char* pos, int opcode
     uint16_t v12; // [esp+44h] [ebp-3Ch]
     uint16_t v13; // [esp+54h] [ebp-2Ch]
     uint16_t v14; // [esp+58h] [ebp-28h]
-    uint32_t caseValue; // [esp+6Ch] [ebp-14h]
+    uint caseValue; // [esp+6Ch] [ebp-14h]
     int caseCount; // [esp+74h] [ebp-Ch]
     VariableValue value; // [esp+78h] [ebp-8h] BYREF
     const char* posb; // [esp+8Ch] [ebp+Ch]
@@ -644,13 +644,13 @@ char* __cdecl Scr_GetNextCodepos(VariableValue* top, const char* pos, int opcode
     }
 }
 
-void __cdecl VM_CancelNotify(uint32_t notifyListOwnerId, uint32_t startLocalId)
+void __cdecl VM_CancelNotify(uint notifyListOwnerId, uint startLocalId)
 {
-    uint32_t Variable; // eax
+    uint Variable; // eax
     uint16_t ThreadNotifyName; // ax
-    uint32_t v4; // eax
-    uint32_t stringValue; // [esp+0h] [ebp-Ch]
-    uint32_t notifyListId; // [esp+4h] [ebp-8h]
+    uint v4; // eax
+    uint stringValue; // [esp+0h] [ebp-Ch]
+    uint notifyListId; // [esp+4h] [ebp-8h]
     VariableValueInternal_u notifyNameListId; // [esp+8h] [ebp-4h]
 
     Variable = FindVariable(notifyListOwnerId, 0x18000u);
@@ -665,14 +665,14 @@ void __cdecl VM_CancelNotify(uint32_t notifyListOwnerId, uint32_t startLocalId)
 }
 
 void __cdecl VM_CancelNotifyInternal(
-    uint32_t notifyListOwnerId,
-    uint32_t startLocalId,
-    uint32_t notifyListId,
-    uint32_t notifyNameListId,
-    uint32_t stringValue)
+    uint notifyListOwnerId,
+    uint startLocalId,
+    uint notifyListId,
+    uint notifyNameListId,
+    uint stringValue)
 {
-    uint32_t Variable; // eax
-    uint32_t v6; // eax
+    uint Variable; // eax
+    uint v6; // eax
 
     if (stringValue != Scr_GetThreadNotifyName(startLocalId))
         MyAssertHandler(".\\script\\scr_vm.cpp", 2724, 0, "%s", "stringValue == Scr_GetThreadNotifyName( startLocalId )");
@@ -702,10 +702,10 @@ void __cdecl VM_CancelNotifyInternal(
     }
 }
 
-bool __cdecl Scr_IsEndonThread(uint32_t localId)
+bool __cdecl Scr_IsEndonThread(uint localId)
 {
-    uint32_t stackId; // [esp+0h] [ebp-8h]
-    uint32_t type; // [esp+4h] [ebp-4h]
+    uint stackId; // [esp+0h] [ebp-8h]
+    uint type; // [esp+4h] [ebp-4h]
 
     if (GetObjectType(localId) != 15)
         return 0;
@@ -721,19 +721,19 @@ bool __cdecl Scr_IsEndonThread(uint32_t localId)
     return type == 0;
 }
 
-uint32_t __cdecl Scr_GetWaittillThreadStackId(uint32_t localId, uint32_t startLocalId)
+uint __cdecl Scr_GetWaittillThreadStackId(uint localId, uint startLocalId)
 {
     uint16_t ThreadNotifyName; // ax
-    uint32_t ObjectVariable; // eax
+    uint ObjectVariable; // eax
     VariableValueInternal_u Object; // eax
-    uint32_t v5; // eax
+    uint v5; // eax
     VariableValueInternal_u* VariableValueAddress; // eax
-    uint32_t Variable; // eax
-    uint32_t v8; // eax
+    uint Variable; // eax
+    uint v8; // eax
     VariableValueInternal_u v9; // eax
-    uint32_t stringValue; // [esp+0h] [ebp-18h]
+    uint stringValue; // [esp+0h] [ebp-18h]
     VariableValueInternal_u notifyListId; // [esp+8h] [ebp-10h]
-    uint32_t selfId; // [esp+14h] [ebp-4h]
+    uint selfId; // [esp+14h] [ebp-4h]
 
     if (!scrVarPub.developer)
         MyAssertHandler(".\\script\\scr_vm.cpp", 3318, 0, "%s", "scrVarPub.developer");
@@ -753,14 +753,14 @@ uint32_t __cdecl Scr_GetWaittillThreadStackId(uint32_t localId, uint32_t startLo
     return FindObjectVariable(v9.u.stringValue, startLocalId);
 }
 
-const char* __cdecl Scr_GetThreadPos(uint32_t localId)
+const char* __cdecl Scr_GetThreadPos(uint localId)
 {
-    uint32_t ValueType; // eax
-    uint32_t v3; // eax
+    uint ValueType; // eax
+    uint v3; // eax
     VariableValueInternal_u* VariableValueAddress; // eax
-    uint32_t ObjectType; // [esp+0h] [ebp-10h]
-    uint32_t stackId; // [esp+8h] [ebp-8h]
-    uint32_t startLocalId; // [esp+Ch] [ebp-4h]
+    uint ObjectType; // [esp+0h] [ebp-10h]
+    uint stackId; // [esp+8h] [ebp-8h]
+    uint startLocalId; // [esp+Ch] [ebp-4h]
 
     if (!scrVarPub.developer)
         MyAssertHandler(".\\script\\scr_vm.cpp", 3386, 0, "%s", "scrVarPub.developer");
@@ -810,15 +810,15 @@ const char* __cdecl Scr_GetThreadPos(uint32_t localId)
     return 0;
 }
 
-const char* __cdecl Scr_GetStackThreadPos(uint32_t endLocalId, VariableStackBuffer* stackValue, bool killThread)
+const char* __cdecl Scr_GetStackThreadPos(uint endLocalId, VariableStackBuffer* stackValue, bool killThread)
 {
     const char* pos; // [esp+0h] [ebp-20h]
-    uint32_t startLocalId; // [esp+4h] [ebp-1Ch]
-    uint32_t localId; // [esp+8h] [ebp-18h]
+    uint startLocalId; // [esp+4h] [ebp-1Ch]
+    uint localId; // [esp+8h] [ebp-18h]
     const char* buf; // [esp+Ch] [ebp-14h]
     const char* bufa; // [esp+Ch] [ebp-14h]
     int size; // [esp+10h] [ebp-10h]
-    uint32_t parentLocalId; // [esp+14h] [ebp-Ch]
+    uint parentLocalId; // [esp+14h] [ebp-Ch]
     VariableUnion u; // [esp+18h] [ebp-8h]
 
     if (!scrVarPub.developer)
@@ -860,7 +860,7 @@ const char* __cdecl Scr_GetStackThreadPos(uint32_t endLocalId, VariableStackBuff
     return pos;
 }
 
-const char* __cdecl Scr_GetRunningThreadPos(uint32_t localId)
+const char* __cdecl Scr_GetRunningThreadPos(uint localId)
 {
     int function_count; // [esp+4h] [ebp-8h]
 
@@ -880,10 +880,10 @@ const char* __cdecl Scr_GetRunningThreadPos(uint32_t localId)
     return 0;
 }
 
-uint32_t __cdecl Scr_GetWaitThreadStackId(uint32_t localId, uint32_t startLocalId)
+uint __cdecl Scr_GetWaitThreadStackId(uint localId, uint startLocalId)
 {
-    uint32_t Variable; // eax
-    uint32_t time; // [esp+0h] [ebp-8h]
+    uint Variable; // eax
+    uint time; // [esp+0h] [ebp-8h]
     VariableValueInternal_u id; // [esp+4h] [ebp-4h]
 
     if (!scrVarPub.developer)
@@ -895,17 +895,17 @@ uint32_t __cdecl Scr_GetWaitThreadStackId(uint32_t localId, uint32_t startLocalI
 }
 
 void __cdecl Scr_NotifyNum(
-    uint32_t entnum,
-    uint32_t classnum,
-    uint32_t stringValue,
-    uint32_t paramcount)
+    uint entnum,
+    uint classnum,
+    uint stringValue,
+    uint paramcount)
 {
     VariableValue* top; // [esp+34h] [ebp-14h]
     const char* varUsagePos; // [esp+38h] [ebp-10h]
     VariableValue* startTop; // [esp+3Ch] [ebp-Ch]
     int type; // [esp+40h] [ebp-8h]
-    uint32_t id; // [esp+44h] [ebp-4h]
-    uint32_t paramcounta; // [esp+5Ch] [ebp+14h]
+    uint id; // [esp+44h] [ebp-4h]
+    uint paramcounta; // [esp+5Ch] [ebp+14h]
 
     PROF_SCOPED("Scr_NotifyNum");
 
@@ -950,34 +950,34 @@ void __cdecl Scr_NotifyNum(
     SL_CheckExists(stringValue);
 }
 
-void __cdecl VM_Notify(uint32_t notifyListOwnerId, uint32_t stringValue, VariableValue* top)
+void __cdecl VM_Notify(uint notifyListOwnerId, uint stringValue, VariableValue* top)
 {
-    uint32_t ObjectVariable; // eax
+    uint ObjectVariable; // eax
     Vartype_t type; // edx
-    uint32_t Variable; // eax
+    uint Variable; // eax
     VariableValueInternal_u Array; // eax
-    uint32_t v7; // [esp-4h] [ebp-64h]
+    uint v7; // [esp-4h] [ebp-64h]
     VariableStackBuffer *stackValue; // [esp+0h] [ebp-60h]
-    uint32_t notifyListIndex; // [esp+4h] [ebp-5Ch]
+    uint notifyListIndex; // [esp+4h] [ebp-5Ch]
     VariableValue tempValue2; // [esp+8h] [ebp-58h] BYREF
     VariableValue tempValue3; // [esp+10h] [ebp-50h] BYREF
-    uint32_t stackId; // [esp+18h] [ebp-48h]
-    uint32_t startLocalId; // [esp+1Ch] [ebp-44h]
+    uint stackId; // [esp+18h] [ebp-48h]
+    uint startLocalId; // [esp+1Ch] [ebp-44h]
     VariableStackBuffer* newStackValue; // [esp+20h] [ebp-40h]
     VariableValue tempValue5; // [esp+24h] [ebp-3Ch] BYREF
     VariableValue* currentValue; // [esp+2Ch] [ebp-34h]
     char* buf; // [esp+30h] [ebp-30h]
-    uint32_t selfNameId; // [esp+34h] [ebp-2Ch]
+    uint selfNameId; // [esp+34h] [ebp-2Ch]
     int size; // [esp+38h] [ebp-28h]
     int len; // [esp+3Ch] [ebp-24h]
-    uint32_t notifyListId; // [esp+40h] [ebp-20h]
-    uint32_t notifyNameListId; // [esp+44h] [ebp-1Ch]
+    uint notifyListId; // [esp+40h] [ebp-20h]
+    uint notifyNameListId; // [esp+44h] [ebp-1Ch]
     int newSize; // [esp+48h] [ebp-18h]
     int bufLen; // [esp+4Ch] [ebp-14h]
     bool bNoStack; // [esp+53h] [ebp-Dh]
     VariableValueInternal_u* tempValue; // [esp+54h] [ebp-Ch]
-    uint32_t selfId; // [esp+58h] [ebp-8h]
-    uint32_t notifyListEntry; // [esp+5Ch] [ebp-4h]
+    uint selfId; // [esp+58h] [ebp-8h]
+    uint notifyListEntry; // [esp+5Ch] [ebp-4h]
 
     notifyListId = FindVariable(notifyListOwnerId, 0x18000u);
     if (notifyListId)
@@ -1028,7 +1028,7 @@ LABEL_30:
                                 goto next;
                             }
                             --size;
-                            tempValue3.type = (Vartype_t)*(unsigned char*)buf;
+                            tempValue3.type = (Vartype_t)*(byte*)buf;
                             buf += 1;
                             iassert(tempValue3.type != VAR_CODEPOS);
 
@@ -1114,7 +1114,7 @@ LABEL_30:
                             newStackValue->pos = stackValue->pos;
                             newStackValue->localId = stackValue->localId;
                             memcpy(newStackValue->buf, stackValue->buf, len);
-                            MT_Free((unsigned char*)stackValue, stackValue->bufLen);
+                            MT_Free((byte*)stackValue, stackValue->bufLen);
                             stackValue = newStackValue;
                             tempValue->u.stackValue = newStackValue;
                         }
@@ -1158,10 +1158,10 @@ LABEL_30:
     }
 }
 
-void __cdecl Scr_TerminateThread(uint32_t localId)
+void __cdecl Scr_TerminateThread(uint localId)
 {
-    uint32_t ObjectType; // [esp+0h] [ebp-8h]
-    uint32_t startLocalId; // [esp+4h] [ebp-4h]
+    uint ObjectType; // [esp+0h] [ebp-8h]
+    uint startLocalId; // [esp+4h] [ebp-4h]
 
     startLocalId = GetStartLocalId(localId);
     ObjectType = GetObjectType(startLocalId);
@@ -1183,11 +1183,11 @@ void __cdecl Scr_TerminateThread(uint32_t localId)
     }
 }
 
-void __cdecl Scr_TerminateRunningThread(uint32_t localId)
+void __cdecl Scr_TerminateRunningThread(uint localId)
 {
     int function_count; // [esp+0h] [ebp-Ch]
     int topThread; // [esp+4h] [ebp-8h]
-    uint32_t threadId; // [esp+8h] [ebp-4h]
+    uint threadId; // [esp+8h] [ebp-4h]
 
     iassert(scrVmPub.function_count);
 
@@ -1220,13 +1220,13 @@ void __cdecl Scr_TerminateRunningThread(uint32_t localId)
     }
 }
 
-void __cdecl Scr_TerminateWaitThread(uint32_t localId, uint32_t startLocalId)
+void __cdecl Scr_TerminateWaitThread(uint localId, uint startLocalId)
 {
-    uint32_t Variable; // eax
+    uint Variable; // eax
     VariableStackBuffer* stackValue; // [esp+0h] [ebp-10h]
-    uint32_t stackId; // [esp+4h] [ebp-Ch]
-    uint32_t time; // [esp+8h] [ebp-8h]
-    uint32_t id; // [esp+Ch] [ebp-4h]
+    uint stackId; // [esp+4h] [ebp-Ch]
+    uint time; // [esp+8h] [ebp-8h]
+    uint id; // [esp+Ch] [ebp-4h]
 
     time = Scr_GetThreadWaitTime(startLocalId);
     Scr_ClearWaitTime(startLocalId);
@@ -1246,17 +1246,17 @@ void __cdecl Scr_TerminateWaitThread(uint32_t localId, uint32_t startLocalId)
     VM_TerminateStack(localId, startLocalId, stackValue);
 }
 
-void __cdecl VM_TerminateStack(uint32_t endLocalId, uint32_t startLocalId, VariableStackBuffer* stackValue)
+void __cdecl VM_TerminateStack(uint endLocalId, uint startLocalId, VariableStackBuffer* stackValue)
 {
-    uint32_t Variable; // eax
+    uint Variable; // eax
     VariableValueInternal_u Array; // eax
-    uint32_t stackId; // [esp+0h] [ebp-24h]
-    uint32_t localId; // [esp+4h] [ebp-20h]
+    uint stackId; // [esp+0h] [ebp-24h]
+    uint localId; // [esp+4h] [ebp-20h]
     char* buf; // [esp+8h] [ebp-1Ch]
     const char* bufa; // [esp+8h] [ebp-1Ch]
     int size; // [esp+Ch] [ebp-18h]
     int sizea; // [esp+Ch] [ebp-18h]
-    uint32_t parentLocalId; // [esp+10h] [ebp-14h]
+    uint parentLocalId; // [esp+10h] [ebp-14h]
     const char* u; // [esp+14h] [ebp-10h]
     VariableValue tempValue; // [esp+1Ch] [ebp-8h] BYREF
 
@@ -1315,22 +1315,22 @@ void __cdecl VM_TerminateStack(uint32_t endLocalId, uint32_t startLocalId, Varia
     MT_Free((byte*)stackValue, stackValue->bufLen);
 }
 
-void __cdecl Scr_TerminateWaittillThread(uint32_t localId, uint32_t startLocalId)
+void __cdecl Scr_TerminateWaittillThread(uint localId, uint startLocalId)
 {
     uint16_t ThreadNotifyName; // ax
-    uint32_t ObjectVariable; // eax
-    uint32_t v4; // eax
-    uint32_t Variable; // eax
-    uint32_t v6; // eax
+    uint ObjectVariable; // eax
+    uint v4; // eax
+    uint Variable; // eax
+    uint v6; // eax
     VariableStackBuffer* stackValue; // [esp+0h] [ebp-20h]
-    uint32_t stringValue; // [esp+4h] [ebp-1Ch]
-    uint32_t stackId; // [esp+8h] [ebp-18h]
-    uint32_t stackIda; // [esp+8h] [ebp-18h]
-    uint32_t selfNameId; // [esp+Ch] [ebp-14h]
-    uint32_t notifyListId; // [esp+10h] [ebp-10h]
-    uint32_t notifyNameListId; // [esp+14h] [ebp-Ch]
+    uint stringValue; // [esp+4h] [ebp-1Ch]
+    uint stackId; // [esp+8h] [ebp-18h]
+    uint stackIda; // [esp+8h] [ebp-18h]
+    uint selfNameId; // [esp+Ch] [ebp-14h]
+    uint notifyListId; // [esp+10h] [ebp-10h]
+    uint notifyNameListId; // [esp+14h] [ebp-Ch]
     VariableUnion notifyListOwnerId; // [esp+18h] [ebp-8h]
-    uint32_t selfId; // [esp+1Ch] [ebp-4h]
+    uint selfId; // [esp+1Ch] [ebp-4h]
 
     ThreadNotifyName = Scr_GetThreadNotifyName(startLocalId);
     stringValue = ThreadNotifyName;
@@ -1373,16 +1373,16 @@ void __cdecl Scr_TerminateWaittillThread(uint32_t localId, uint32_t startLocalId
     VM_TerminateStack(localId, startLocalId, stackValue);
 }
 
-void __cdecl Scr_CancelNotifyList(uint32_t notifyListOwnerId)
+void __cdecl Scr_CancelNotifyList(uint notifyListOwnerId)
 {
     VariableValueInternal_u* VariableValueAddress; // eax
     VariableStackBuffer* stackValue; // [esp+0h] [ebp-1Ch]
-    uint32_t stackId; // [esp+4h] [ebp-18h]
-    uint32_t startLocalId; // [esp+8h] [ebp-14h]
-    uint32_t selfStartLocalId; // [esp+Ch] [ebp-10h]
-    uint32_t notifyListId; // [esp+10h] [ebp-Ch]
-    uint32_t notifyNameListId; // [esp+14h] [ebp-8h]
-    uint32_t selfLocalId; // [esp+18h] [ebp-4h]
+    uint stackId; // [esp+4h] [ebp-18h]
+    uint startLocalId; // [esp+8h] [ebp-14h]
+    uint selfStartLocalId; // [esp+Ch] [ebp-10h]
+    uint notifyListId; // [esp+10h] [ebp-Ch]
+    uint notifyNameListId; // [esp+14h] [ebp-8h]
+    uint selfLocalId; // [esp+18h] [ebp-4h]
 
     while (1)
     {
@@ -1429,14 +1429,14 @@ void __cdecl Scr_CancelNotifyList(uint32_t notifyListOwnerId)
     }
 }
 
-void __cdecl VM_TrimStack(uint32_t startLocalId, VariableStackBuffer* stackValue, bool fromEndon)
+void __cdecl VM_TrimStack(uint startLocalId, VariableStackBuffer* stackValue, bool fromEndon)
 {
-    uint32_t NewVariable; // eax
-    uint32_t localId; // [esp+0h] [ebp-20h]
+    uint NewVariable; // eax
+    uint localId; // [esp+0h] [ebp-20h]
     const char* buf; // [esp+4h] [ebp-1Ch]
     const char* bufa; // [esp+4h] [ebp-1Ch]
     int size; // [esp+8h] [ebp-18h]
-    uint32_t parentLocalId; // [esp+Ch] [ebp-14h]
+    uint parentLocalId; // [esp+Ch] [ebp-14h]
     VariableUnion u; // [esp+10h] [ebp-10h]
     VariableValue tempValue; // [esp+18h] [ebp-8h] BYREF
 
@@ -1486,16 +1486,16 @@ void __cdecl VM_TrimStack(uint32_t startLocalId, VariableStackBuffer* stackValue
     Scr_KillThread(startLocalId);
     RemoveRefToObject(startLocalId);
     --scrVarPub.numScriptThreads;
-    MT_Free((unsigned char*)stackValue, stackValue->bufLen);
+    MT_Free((byte*)stackValue, stackValue->bufLen);
 }
 
-void __cdecl Scr_CancelWaittill(uint32_t startLocalId)
+void __cdecl Scr_CancelWaittill(uint startLocalId)
 {
-    uint32_t ObjectVariable; // eax
-    uint32_t v2; // eax
+    uint ObjectVariable; // eax
+    uint v2; // eax
     VariableValueInternal_u* VariableValueAddress; // eax
     VariableValueInternal_u selfNameId; // [esp+0h] [ebp-Ch]
-    uint32_t selfId; // [esp+8h] [ebp-4h]
+    uint selfId; // [esp+8h] [ebp-4h]
 
     selfId = Scr_GetSelf(startLocalId);
     ObjectVariable = FindObjectVariable(scrVarPub.pauseArrayId, selfId);
@@ -1533,7 +1533,7 @@ VariableStackBuffer *__cdecl VM_ArchiveStack()
     VariableStackBuffer *stackValue; // [esp+0h] [ebp-18h]
     VariableValue *top; // [esp+4h] [ebp-14h]
     char *buf; // [esp+8h] [ebp-10h]
-    uint32_t localId; // [esp+Ch] [ebp-Ch]
+    uint localId; // [esp+Ch] [ebp-Ch]
     int size; // [esp+10h] [ebp-8h]
     int bufLen; // [esp+14h] [ebp-4h]
 
@@ -1584,12 +1584,12 @@ VariableStackBuffer *__cdecl VM_ArchiveStack()
     return stackValue;
 }
 
-uint16_t __cdecl Scr_ExecThread(int handle, uint32_t paramcount)
+uint16_t __cdecl Scr_ExecThread(int handle, uint paramcount)
 {
-    uint32_t v2; // eax
+    uint v2; // eax
     const char *pos; // [esp+34h] [ebp-Ch]
     const char *varUsagePos; // [esp+38h] [ebp-8h]
-    uint32_t id; // [esp+3Ch] [ebp-4h]
+    uint id; // [esp+3Ch] [ebp-4h]
 
     pos = &scrVarPub.programBuffer[handle];
     if (!scrVmPub.function_count)
@@ -1623,13 +1623,13 @@ uint16_t __cdecl Scr_ExecThread(int handle, uint32_t paramcount)
     return id;
 }
 
-uint32_t __cdecl GetDummyObject()
+uint __cdecl GetDummyObject()
 {
     ClearVariableValue(scrVarPub.tempVariable);
     return GetObject(scrVarPub.tempVariable);
 }
 
-uint32_t __cdecl GetDummyFieldValue()
+uint __cdecl GetDummyFieldValue()
 {
     ClearVariableValue(scrVarPub.tempVariable);
     return scrVarPub.tempVariable;
@@ -1656,19 +1656,19 @@ int Scr_ReadInt(const char **pos)
     return value;
 }
 
-unsigned short Scr_ReadUnsignedShort(const char **pos)
+ushort Scr_ReadUnsignedShort(const char **pos)
 {
-    unsigned short value = *(reinterpret_cast<const unsigned short *>(*pos));
-    *pos += sizeof(unsigned short);
+    ushort value = *(reinterpret_cast<const ushort *>(*pos));
+    *pos += sizeof(ushort);
     return value;
 }
 
-const uint32_t *Scr_ReadIntArray(const char **pos, int count)
+const uint *Scr_ReadIntArray(const char **pos, int count)
 {
-    const uint32_t *value;
+    const uint *value;
 
-    value = reinterpret_cast<const uint32_t *>(*pos);
-    *pos += sizeof(uint32_t) * count;
+    value = reinterpret_cast<const uint *>(*pos);
+    *pos += sizeof(uint) * count;
     return value;
 }
 
@@ -1686,14 +1686,14 @@ const float *Scr_ReadVector(const char **pos)
     return value;
 }
 
-uint32_t Scr_GetLocalVar(const char *pos)
+uint Scr_GetLocalVar(const char *pos)
 {
     return scrVmPub.localVars[-*(pos)];
 }
 
-VariableStackBuffer *VM_ArchiveStack2(int size, const char *codePos, VariableValue *top, uint32_t localVarCount, uint32_t *localId)
+VariableStackBuffer *VM_ArchiveStack2(int size, const char *codePos, VariableValue *top, uint localVarCount, uint *localId)
 {
-    uint32_t id;
+    uint id;
     char *buf;
     char *pos;
     VariableStackBuffer *stackBuf;
@@ -1702,8 +1702,8 @@ VariableStackBuffer *VM_ArchiveStack2(int size, const char *codePos, VariableVal
     //bufLen = 5 * size + 11;
     bufLen = 5 * size + sizeof(VariableStackBuffer);
 
-    iassert(size == (unsigned short)size);
-    iassert(bufLen == (unsigned short)bufLen);
+    iassert(size == (ushort)size);
+    iassert(bufLen == (ushort)bufLen);
 
     stackBuf = (VariableStackBuffer *)MT_Alloc(bufLen, MT_TYPE_THREAD);
     ++scrVarPub.numScriptThreads;
@@ -1748,9 +1748,9 @@ VariableStackBuffer *VM_ArchiveStack2(int size, const char *codePos, VariableVal
     return stackBuf;
 }
 
-uint32_t Scr_EvalArrayIndex(uint32_t parentId, VariableValue *index)
+uint Scr_EvalArrayIndex(uint parentId, VariableValue *index)
 {
-    uint32_t stringValue;
+    uint stringValue;
 
     switch (index->type)
     {
@@ -1773,42 +1773,42 @@ uint32_t Scr_EvalArrayIndex(uint32_t parentId, VariableValue *index)
 
 #define INC_TOP() iassert(fs.top >= scrVmPub.stack); ++fs.top; iassert(fs.top <= scrVmPub.maxstack);
 
-uint32_t VM_ExecuteInternal()
+uint VM_ExecuteInternal()
 {
     //int gOpcode;
     //int gParamCount;
     int builtInTime;
     int time;
     int timeSpent;
-    uint32_t parentLocalId;
-    uint32_t builtinIndex;
+    uint parentLocalId;
+    uint builtinIndex;
     VariableValue stackValue;
     int jumpOffset;
-    uint32_t waitTime;
-    uint32_t stringValue;
-    uint32_t id;
-    uint32_t threadId;
+    uint waitTime;
+    uint stringValue;
+    uint id;
+    uint threadId;
     const char *tempCodePos;
     VariableValue tempValue;
-    uint32_t outparamcount;
-    uint32_t selfId;
-    uint32_t objectId;
-    uint32_t fieldValueId;
-    uint32_t fieldValueIndex;
+    uint outparamcount;
+    uint selfId;
+    uint objectId;
+    uint fieldValueId;
+    uint fieldValueIndex;
     int profileIndex;
     int profileBit;
     //int gCaseCount;
-    uint32_t caseValue;
-    uint32_t currentCaseValue;
-    uint32_t classnum;
+    uint caseValue;
+    uint currentCaseValue;
+    uint classnum;
     int entnum;
     const char *currentCodePos;
-    unsigned char removeCount;
+    byte removeCount;
     scr_entref_t entref;
-    uint32_t stackId;
+    uint stackId;
 
-    uint32_t profileEnable[33];
-    uint32_t *profileEnablePos;
+    uint profileEnable[33];
+    uint *profileEnablePos;
     profileEnable[0] = scrVmDebugPub.profileEnable[fs.localId];
     if (profileEnable[0])
         Profile_BeginScripts(profileEnable[0]);
@@ -2117,7 +2117,7 @@ endon:
         iassert(!scrVmPub.outparamcount);
         iassert(!scrVmPub.inparamcount);
 
-        opcode = *(unsigned char *)fs.pos++;
+        opcode = *(byte *)fs.pos++;
         // Log("0x%x\n", opcode);
 interrupt_return:
         scrVarPub.varUsagePos = fs.pos;
@@ -2210,13 +2210,13 @@ thread_return:
         case OP_GetByte:
             INC_TOP();
             fs.top->type = VAR_INTEGER;
-            fs.top->u.intValue = *(unsigned char *)fs.pos++;
+            fs.top->u.intValue = *(byte *)fs.pos++;
             continue;
 
         case OP_GetNegByte:
             INC_TOP();
             fs.top->type = VAR_INTEGER;
-            fs.top->u.intValue = -*(unsigned char *)fs.pos++;
+            fs.top->u.intValue = -*(byte *)fs.pos++;
             continue;
 
         case OP_GetUnsignedShort:
@@ -2616,7 +2616,7 @@ setlocalvariablefieldcached:
 
         case OP_CallBuiltin:
             iassert(!scrVmPub.outparamcount);
-            scrVmPub.outparamcount = *(unsigned char *)fs.pos++;
+            scrVmPub.outparamcount = *(byte *)fs.pos++;
 CallBuiltIn:
             iassert(!scrVmPub.inparamcount);
             builtinIndex = Scr_ReadUnsignedShort(&fs.pos);
@@ -2648,7 +2648,7 @@ CallBuiltIn:
             goto CallBuiltinMethod;
         case OP_CallBuiltinMethod:
             iassert(!scrVmPub.outparamcount);
-            scrVmPub.outparamcount = *(unsigned char *)fs.pos++;
+            scrVmPub.outparamcount = *(byte *)fs.pos++;
 CallBuiltinMethod:
             iassert(!scrVmPub.inparamcount);
             scrVmPub.top = fs.top - 1;
@@ -2671,7 +2671,7 @@ CallBuiltinMethod:
                 {
                     if (scrVmPub.top != fs.top - 1)
                         MyAssertHandler(".\\script\\scr_vm.cpp", 1084, 0, "%s", "scrVmPub.top == fs.top - 1");
-                    uint32_t backup = scrVmPub.outparamcount;
+                    uint backup = scrVmPub.outparamcount;
                     Scr_HitBuiltinBreakpoint(fs.top, fs.pos, fs.localId, opcode, builtinIndex, scrVmPub.outparamcount + 1);
                     scrVmPub.outparamcount = scrVmPub.outparamcount;
                     scrVmPub.top = fs.top - 1;
@@ -3033,7 +3033,7 @@ function_call:
                 }
                 Sys_Error("exceeded maximum number of script variables");
             }
-            if ((uint32_t)(Sys_Milliseconds() - scrVmGlob.starttime) >= INFINITE_LOOP_TIMEOUT)
+            if ((uint)(Sys_Milliseconds() - scrVmGlob.starttime) >= INFINITE_LOOP_TIMEOUT)
             {
                 iassert(logScriptTimes);
                 if (logScriptTimes->current.enabled)
@@ -3480,15 +3480,15 @@ function_call:
     }
 }
 
-uint32_t __cdecl VM_Execute(uint32_t localId, const char *pos, uint32_t paramcount)
+uint __cdecl VM_Execute(uint localId, const char *pos, uint paramcount)
 {
     int time; // [esp+14h] [ebp-24h]
     function_stack_t fs_backup; // [esp+18h] [ebp-20h]
     VariableValue *startTop; // [esp+2Ch] [ebp-Ch]
     int type; // [esp+30h] [ebp-8h]
     int thread_count_backup; // [esp+34h] [ebp-4h]
-    uint32_t localIda; // [esp+40h] [ebp+8h]
-    uint32_t paramcounta; // [esp+48h] [ebp+10h]
+    uint localIda; // [esp+40h] [ebp+8h]
+    uint paramcounta; // [esp+48h] [ebp+10h]
 
     iassert(paramcount <= scrVmPub.inparamcount);
     Scr_ClearOutParams();
@@ -3563,16 +3563,16 @@ uint32_t __cdecl VM_Execute(uint32_t localId, const char *pos, uint32_t paramcou
 }
 
 uint16_t __cdecl Scr_ExecEntThreadNum(
-    uint32_t entnum,
-    uint32_t classnum,
+    uint entnum,
+    uint classnum,
     int handle,
-    uint32_t paramcount)
+    uint paramcount)
 {
-    uint32_t v4; // eax
+    uint v4; // eax
     const char *pos; // [esp+34h] [ebp-10h]
     const char *varUsagePos; // [esp+38h] [ebp-Ch]
-    uint32_t objId; // [esp+3Ch] [ebp-8h]
-    uint32_t id; // [esp+40h] [ebp-4h]
+    uint objId; // [esp+3Ch] [ebp-8h]
+    uint id; // [esp+40h] [ebp-4h]
 
     pos = &scrVarPub.programBuffer[handle];
     if (!scrVmPub.function_count)
@@ -3611,10 +3611,10 @@ uint16_t __cdecl Scr_ExecEntThreadNum(
     return id;
 }
 
-void __cdecl Scr_AddExecThread(int handle, uint32_t paramcount)
+void __cdecl Scr_AddExecThread(int handle, uint paramcount)
 {
-    uint32_t v2; // eax
-    uint32_t v3; // eax
+    uint v2; // eax
+    uint v3; // eax
     const char *pos; // [esp+30h] [ebp-8h]
     const char *varUsagePos; // [esp+34h] [ebp-4h]
 
@@ -3661,9 +3661,9 @@ void __cdecl Scr_FreeThread(uint16_t handle)
     --scrVarPub.ext_threadcount;
 }
 
-void __cdecl Scr_ExecCode(const char *pos, uint32_t localId)
+void __cdecl Scr_ExecCode(const char *pos, uint localId)
 {
-    uint32_t localIda; // [esp+Ch] [ebp+Ch]
+    uint localIda; // [esp+Ch] [ebp+Ch]
 
     Scr_ResetTimeout();
     if (!scrVarPub.timeArrayId)
@@ -3749,9 +3749,9 @@ void __cdecl Scr_ShutdownSystem(uint8_t sys, int bComplete)
     VariableValueInternal_u v3; // eax
     VariableUnion parentId; // [esp+0h] [ebp-Ch]
     int function_count; // [esp+4h] [ebp-8h]
-    uint32_t id; // [esp+8h] [ebp-4h]
-    uint32_t ida; // [esp+8h] [ebp-4h]
-    uint32_t idb; // [esp+8h] [ebp-4h]
+    uint id; // [esp+8h] [ebp-4h]
+    uint ida; // [esp+8h] [ebp-4h]
+    uint idb; // [esp+8h] [ebp-4h]
 
     iassert(sys == SCR_SYS_GAME);
     scrVarPub.varUsagePos = "<script shutdown variable>";
@@ -3835,11 +3835,11 @@ void __cdecl Scr_ShutdownSystem(uint8_t sys, int bComplete)
     }
 }
 
-void __cdecl VM_TerminateTime(uint32_t timeId)
+void __cdecl VM_TerminateTime(uint timeId)
 {
     VariableStackBuffer* stackValue; // [esp+0h] [ebp-Ch]
-    uint32_t stackId; // [esp+4h] [ebp-8h]
-    uint32_t startLocalId; // [esp+8h] [ebp-4h]
+    uint stackId; // [esp+4h] [ebp-8h]
+    uint startLocalId; // [esp+8h] [ebp-4h]
 
     if (!timeId)
         MyAssertHandler(".\\script\\scr_vm.cpp", 3793, 0, "%s", "timeId");
@@ -3869,7 +3869,7 @@ BOOL __cdecl Scr_IsSystemActive()
     return scrVarPub.timeArrayId && !scrVarPub.error_message;
 }
 
-int __cdecl Scr_GetInt(uint32_t index)
+int __cdecl Scr_GetInt(uint index)
 {
 	VariableValue *entryValue;
 
@@ -3890,7 +3890,7 @@ int __cdecl Scr_GetInt(uint32_t index)
 	return entryValue->u.intValue;
 }
 
-scr_anim_s __cdecl Scr_GetAnim(uint32_t index, XAnimTree_s* tree)
+scr_anim_s __cdecl Scr_GetAnim(uint index, XAnimTree_s* tree)
 {
     XAnim_s* Anims; // esi
     const XAnim_s* v4; // eax
@@ -3970,7 +3970,7 @@ BOOL Scr_ErrorInternal()
     return result;
 }
 
-float __cdecl Scr_GetFloat(uint32_t index)
+float __cdecl Scr_GetFloat(uint index)
 {
     VariableValue* value; // [esp+0h] [ebp-4h]
 
@@ -3988,7 +3988,7 @@ float __cdecl Scr_GetFloat(uint32_t index)
     return 0.0;
 }
 
-uint32_t __cdecl Scr_GetConstString(uint32_t index)
+uint __cdecl Scr_GetConstString(uint index)
 {
     VariableValue* value; // [esp+0h] [ebp-4h]
 
@@ -4011,10 +4011,10 @@ uint32_t __cdecl Scr_GetConstString(uint32_t index)
     return value->u.stringValue;
 }
 
-uint32_t __cdecl Scr_GetConstLowercaseString(uint32_t index)
+uint __cdecl Scr_GetConstLowercaseString(uint index)
 {
     const char* string; // [esp+0h] [ebp-2018h]
-    uint32_t stringValue; // [esp+4h] [ebp-2014h]
+    uint stringValue; // [esp+4h] [ebp-2014h]
     char str[8196]; // [esp+8h] [ebp-2010h] BYREF
     int i; // [esp+2010h] [ebp-8h]
     VariableValue* value; // [esp+2014h] [ebp-4h]
@@ -4055,12 +4055,12 @@ uint32_t __cdecl Scr_GetConstLowercaseString(uint32_t index)
 
 }
 
-const char* __cdecl Scr_GetString(uint32_t index)
+const char* __cdecl Scr_GetString(uint index)
 {
     return SL_ConvertToString(Scr_GetConstString(index));
 }
 
-uint32_t __cdecl Scr_GetConstStringIncludeNull(uint32_t index)
+uint __cdecl Scr_GetConstStringIncludeNull(uint index)
 {
     if (index >= scrVmPub.outparamcount || scrVmPub.top[-(int)index].type)
         return Scr_GetConstString(index);
@@ -4068,7 +4068,7 @@ uint32_t __cdecl Scr_GetConstStringIncludeNull(uint32_t index)
     return 0;
 }
 
-const char* __cdecl Scr_GetDebugString(uint32_t index)
+const char* __cdecl Scr_GetDebugString(uint index)
 {
     const char* v2; // eax
     VariableValue* value; // [esp+0h] [ebp-4h]
@@ -4089,7 +4089,7 @@ const char* __cdecl Scr_GetDebugString(uint32_t index)
     }
 }
 
-uint32_t __cdecl Scr_GetConstIString(uint32_t index)
+uint __cdecl Scr_GetConstIString(uint index)
 {
 	VariableValue *entryValue;
 
@@ -4110,12 +4110,12 @@ uint32_t __cdecl Scr_GetConstIString(uint32_t index)
 	return entryValue->u.stringValue;
 }
 
-const char* __cdecl Scr_GetIString(uint32_t index)
+const char* __cdecl Scr_GetIString(uint index)
 {
     return SL_ConvertToString(Scr_GetConstIString(index));
 }
 
-void __cdecl Scr_GetVector(uint32_t index, float* vectorValue)
+void __cdecl Scr_GetVector(uint index, float* vectorValue)
 {
     const char* v2; // eax
     const char* v3; // eax
@@ -4141,11 +4141,11 @@ void __cdecl Scr_GetVector(uint32_t index, float* vectorValue)
     Scr_Error(v3);
 }
 
-scr_entref_t __cdecl Scr_GetEntityRef(uint32_t index)
+scr_entref_t __cdecl Scr_GetEntityRef(uint index)
 {
-    uint32_t ObjectType; // eax
+    uint ObjectType; // eax
     VariableValue* value; // [esp+8h] [ebp-8h]
-    uint32_t id; // [esp+Ch] [ebp-4h]
+    uint id; // [esp+Ch] [ebp-4h]
 
     if (index < scrVmPub.outparamcount)
     {
@@ -4166,7 +4166,7 @@ scr_entref_t __cdecl Scr_GetEntityRef(uint32_t index)
     return 0;
 }
 
-uint32_t __cdecl Scr_GetObject(uint32_t paramnum)
+uint __cdecl Scr_GetObject(uint paramnum)
 {
 	VariableValue *var;
 
@@ -4188,7 +4188,7 @@ uint32_t __cdecl Scr_GetObject(uint32_t paramnum)
 	return 0;
 }
 
-int __cdecl Scr_GetType(uint32_t index)
+int __cdecl Scr_GetType(uint index)
 {
     if (index < scrVmPub.outparamcount)
         return scrVmPub.top[-(int)index].type;
@@ -4196,7 +4196,7 @@ int __cdecl Scr_GetType(uint32_t index)
     return 0;
 }
 
-const char* __cdecl Scr_GetTypeName(uint32_t index)
+const char* __cdecl Scr_GetTypeName(uint index)
 {
     const char* v2; // eax
 
@@ -4207,7 +4207,7 @@ const char* __cdecl Scr_GetTypeName(uint32_t index)
     return 0;
 }
 
-uint32_t __cdecl Scr_GetPointerType(uint32_t index)
+uint __cdecl Scr_GetPointerType(uint index)
 {
     if (index < scrVmPub.outparamcount)
     {
@@ -4219,12 +4219,12 @@ uint32_t __cdecl Scr_GetPointerType(uint32_t index)
     return 0;
 }
 
-uint32_t __cdecl Scr_GetNumParam()
+uint __cdecl Scr_GetNumParam()
 {
     return scrVmPub.outparamcount;
 }
 
-void __cdecl Scr_AddBool(uint32_t value)
+void __cdecl Scr_AddBool(uint value)
 {
     iassert(value == 0 || value == 1);
 
@@ -4291,7 +4291,7 @@ void __cdecl Scr_AddUndefined()
     scrVmPub.top->type = VAR_UNDEFINED;
 }
 
-void __cdecl Scr_AddObject(uint32_t id)
+void __cdecl Scr_AddObject(uint id)
 {
     if (!id)
         MyAssertHandler(".\\script\\scr_vm.cpp", 4891, 0, "%s", "id");
@@ -4311,9 +4311,9 @@ void __cdecl Scr_AddObject(uint32_t id)
     AddRefToObject(id);
 }
 
-void __cdecl Scr_AddEntityNum(uint32_t entnum, uint32_t classnum)
+void __cdecl Scr_AddEntityNum(uint entnum, uint classnum)
 {
-    uint32_t EntityId; // eax
+    uint EntityId; // eax
     const char* varUsagePos; // [esp+0h] [ebp-4h]
 
     varUsagePos = scrVarPub.varUsagePos;
@@ -4326,7 +4326,7 @@ void __cdecl Scr_AddEntityNum(uint32_t entnum, uint32_t classnum)
 
 void __cdecl Scr_AddStruct()
 {
-    uint32_t id; // [esp+0h] [ebp-4h]
+    uint id; // [esp+0h] [ebp-4h]
 
     id = AllocObject();
     Scr_AddObject(id);
@@ -4351,7 +4351,7 @@ void __cdecl Scr_AddIString(const char* value)
     scrVmPub.top->u.intValue = SL_GetString(value, 0);
 }
 
-void __cdecl Scr_AddConstString(uint32_t value)
+void __cdecl Scr_AddConstString(uint value)
 {
     if (!value)
         MyAssertHandler(".\\script\\scr_vm.cpp", 4966, 0, "%s", "value");
@@ -4377,9 +4377,9 @@ void __cdecl Scr_MakeArray()
 
 void __cdecl Scr_AddArray()
 {
-    uint32_t ArraySize; // eax
+    uint ArraySize; // eax
     const char* varUsagePos; // [esp+0h] [ebp-8h]
-    uint32_t id; // [esp+4h] [ebp-4h]
+    uint id; // [esp+4h] [ebp-4h]
 
     varUsagePos = scrVarPub.varUsagePos;
     if (!scrVarPub.varUsagePos)
@@ -4394,9 +4394,9 @@ void __cdecl Scr_AddArray()
     scrVarPub.varUsagePos = varUsagePos;
 }
 
-void __cdecl Scr_AddArrayStringIndexed(uint32_t stringValue)
+void __cdecl Scr_AddArrayStringIndexed(uint stringValue)
 {
-    uint32_t id; // [esp+0h] [ebp-4h]
+    uint id; // [esp+0h] [ebp-4h]
 
     if (!scrVmPub.inparamcount)
         MyAssertHandler(".\\script\\scr_vm.cpp", 5019, 0, "%s", "scrVmPub.inparamcount");
@@ -4442,7 +4442,7 @@ void __cdecl Scr_NeverTerminalError(const char* error)
     Scr_Error(error);
 }
 
-void __cdecl Scr_ParamError(uint32_t index, const char* error)
+void __cdecl Scr_ParamError(uint index, const char* error)
 {
     if (index >= scrVmPub.outparamcount)
         MyAssertHandler(".\\script\\scr_vm.cpp", 5078, 0, "%s", "index < scrVmPub.outparamcount");
@@ -4456,7 +4456,7 @@ void __cdecl Scr_ObjectError(const char* error)
     Scr_Error(error);
 }
 
-char __cdecl SetEntityFieldValue(uint32_t classnum, int entnum, int offset, VariableValue* value)
+char __cdecl SetEntityFieldValue(uint classnum, int entnum, int offset, VariableValue* value)
 {
     if (value - scrVmPub.stack <= 0)
         MyAssertHandler(
@@ -4505,7 +4505,7 @@ char __cdecl SetEntityFieldValue(uint32_t classnum, int entnum, int offset, Vari
     }
 }
 
-VariableValue __cdecl GetEntityFieldValue(uint32_t classnum, int entnum, int offset)
+VariableValue __cdecl GetEntityFieldValue(uint classnum, int entnum, int offset)
 {
     iassert(!scrVmPub.inparamcount);
     iassert(!scrVmPub.outparamcount);
@@ -4522,10 +4522,10 @@ VariableValue __cdecl GetEntityFieldValue(uint32_t classnum, int entnum, int off
     return scrVmGlob.eval_stack[0];
 }
 
-void __cdecl Scr_SetStructField(uint32_t structId, uint32_t index)
+void __cdecl Scr_SetStructField(uint structId, uint index)
 {
-    uint32_t fieldValueId; // [esp+0h] [ebp-8h]
-    uint32_t fieldValueIndex; // [esp+4h] [ebp-4h]
+    uint fieldValueId; // [esp+0h] [ebp-8h]
+    uint fieldValueIndex; // [esp+4h] [ebp-4h]
 
     if (scrVmPub.outparamcount)
         MyAssertHandler(".\\script\\scr_vm.cpp", 5146, 0, "%s", "!scrVmPub.outparamcount");
@@ -4548,9 +4548,9 @@ void __cdecl Scr_SetStructField(uint32_t structId, uint32_t index)
     scrVarPub.varUsagePos = 0;
 }
 
-void __cdecl Scr_SetDynamicEntityField(uint32_t entnum, uint32_t classnum, uint32_t index)
+void __cdecl Scr_SetDynamicEntityField(uint entnum, uint classnum, uint index)
 {
-    uint32_t entId; // [esp+0h] [ebp-4h]
+    uint entId; // [esp+0h] [ebp-4h]
 
     if (scrVarPub.varUsagePos)
         MyAssertHandler(".\\script\\scr_vm.cpp", 5178, 0, "%s", "!scrVarPub.varUsagePos");
@@ -4589,8 +4589,8 @@ void __cdecl Scr_RunCurrentThreads()
 
 void VM_SetTime()
 {
-    uint32_t Object; // eax
-    uint32_t id; // [esp+0h] [ebp-4h]
+    uint Object; // eax
+    uint id; // [esp+0h] [ebp-4h]
 
     iassert(!(scrVarPub.time & ~VAR_NAME_LOW_MASK));
 
@@ -4611,15 +4611,15 @@ void VM_SetTime()
     }
 }
 
-void __cdecl VM_Resume(uint32_t timeId)
+void __cdecl VM_Resume(uint timeId)
 {
-    uint32_t v1; // eax
-    uint32_t v2; // eax
+    uint v1; // eax
+    uint v2; // eax
     const char* pos; // [esp+18h] [ebp-14h]
     int time; // [esp+1Ch] [ebp-10h]
     VariableStackBuffer* stackValue; // [esp+20h] [ebp-Ch]
-    uint32_t stackId; // [esp+24h] [ebp-8h]
-    uint32_t startLocalId; // [esp+28h] [ebp-4h]
+    uint stackId; // [esp+24h] [ebp-8h]
+    uint startLocalId; // [esp+28h] [ebp-4h]
 
     PROF_SCOPED("VM_Resume");
 
@@ -4684,11 +4684,11 @@ void __cdecl VM_Resume(uint32_t timeId)
     scrVmPub.top = scrVmPub.stack;
 }
 
-void __cdecl VM_UnarchiveStack(uint32_t startLocalId, VariableStackBuffer* stackValue)
+void __cdecl VM_UnarchiveStack(uint startLocalId, VariableStackBuffer* stackValue)
 {
     VariableValue* top; // [esp+0h] [ebp-14h]
     char* buf; // [esp+4h] [ebp-10h]
-    uint32_t localId; // [esp+8h] [ebp-Ch]
+    uint localId; // [esp+8h] [ebp-Ch]
     int function_count; // [esp+Ch] [ebp-8h]
     int size; // [esp+10h] [ebp-4h]
 
@@ -4707,7 +4707,7 @@ void __cdecl VM_UnarchiveStack(uint32_t startLocalId, VariableStackBuffer* stack
     {
         ++top;
         --size;
-        top->type = (Vartype_t)*(unsigned char*)buf;
+        top->type = (Vartype_t)*(byte*)buf;
         buf += 1;
 
         if (top->type == VAR_CODEPOS)
@@ -4762,10 +4762,10 @@ void __cdecl VM_UnarchiveStack(uint32_t startLocalId, VariableStackBuffer* stack
     iassert(scrVmPub.stack[0].type == VAR_CODEPOS);
 }
 
-void VM_UnarchiveStack2(uint32_t startLocalId, function_stack_t *stack, VariableStackBuffer *stackValue)
+void VM_UnarchiveStack2(uint startLocalId, function_stack_t *stack, VariableStackBuffer *stackValue)
 {
     int function_count;
-    uint32_t localId;
+    uint localId;
     VariableValue *startTop;
     int size;
     const char *buf;
@@ -4786,7 +4786,7 @@ void VM_UnarchiveStack2(uint32_t startLocalId, function_stack_t *stack, Variable
     {
         ++startTop;
         --size;
-        startTop->type = (Vartype_t)*(unsigned char *)buf;
+        startTop->type = (Vartype_t)*(byte *)buf;
         pos = buf + 1;
 
         if (startTop->type == VAR_CODEPOS)
@@ -4834,16 +4834,16 @@ void VM_UnarchiveStack2(uint32_t startLocalId, function_stack_t *stack, Variable
 
     --scrVarPub.numScriptThreads;
 
-    MT_Free((unsigned char*)stackValue, stackValue->bufLen);
+    MT_Free((byte*)stackValue, stackValue->bufLen);
 
     //iassert(scrVmPub.stack[0].type == VAR_CODEPOS);
     iassert(stack->startTop[0].type == VAR_CODEPOS);
 }
 
-int __cdecl Scr_AddLocalVars(uint32_t localId)
+int __cdecl Scr_AddLocalVars(uint localId)
 {
     int localVarCount; // [esp+0h] [ebp-8h]
-    uint32_t fieldIndex; // [esp+4h] [ebp-4h]
+    uint fieldIndex; // [esp+4h] [ebp-4h]
 
     localVarCount = 0;
     for (fieldIndex = FindLastSibling(localId); fieldIndex; fieldIndex = FindPrevSibling(fieldIndex))
@@ -5019,23 +5019,23 @@ int __cdecl Scr_BuiltinCompare(_DWORD* a, _DWORD* b)
 
 void Scr_DecTime()
 {
-    uint32_t time; // r11
+    uint time; // r11
 
     time = scrVarPub.time;
     iassert(!(scrVarPub.time & ~VAR_NAME_LOW_MASK));
     scrVarPub.time = time - 1;
-    scrVarPub.time &= 0x00FFFFFF; // Zero out highest byte to ensure the uint32_t didn't rollback to 4 billion
+    scrVarPub.time &= 0x00FFFFFF; // Zero out highest byte to ensure the uint didn't rollback to 4 billion
     //HIBYTE(scrVarPub.time) = 0; 
 }
 
 
-void Scr_AddExecEntThreadNum(int entnum, uint32_t classnum, int handle, uint32_t paramcount)
+void Scr_AddExecEntThreadNum(int entnum, uint classnum, int handle, uint paramcount)
 {
     int v9; // r3
     const char *varUsagePos; // r27
-    uint32_t EntityId; // r28
-    uint32_t v12; // r3
-    uint32_t v13; // r3
+    uint EntityId; // r28
+    uint v12; // r3
+    uint v13; // r3
 
     //_R29 = &scrVarPub.programBuffer[handle];
     const char *pos = &scrVarPub.programBuffer[handle];
@@ -5088,7 +5088,7 @@ void Scr_ErrorWithDialogMessage(const char *error, const char *dialog_error)
     Scr_ErrorInternal();
 }
 
-uint32_t Scr_GetFunc(uint32_t index)
+uint Scr_GetFunc(uint index)
 {
     VariableValue *value; // r29
 
@@ -5104,7 +5104,7 @@ uint32_t Scr_GetFunc(uint32_t index)
                     0,
                     "%s",
                     "Scr_IsInOpcodeMemory( value->u.codePosValue )");
-            return value->u.intValue - (uint32_t)scrVarPub.programBuffer;
+            return value->u.intValue - (uint)scrVarPub.programBuffer;
         }
         scrVarPub.error_index = index + 1;
         Scr_Error(va("type %s is not a function", var_typename[value->type]));
@@ -5138,7 +5138,7 @@ void Scr_GetLastScriptPlace(int *line, const char **filename)
     *filename = lastFileName;
 }
 
-XAnim_s * Scr_GetAnimTree(uint32_t index)
+XAnim_s * Scr_GetAnimTree(uint index)
 {
     VariableValue *v3; // r29
     int type; // r11
@@ -5155,7 +5155,7 @@ XAnim_s * Scr_GetAnimTree(uint32_t index)
             if (v3->u.intValue <= scrAnimPub.xanim_num[1])
             {
                 v5 = (VariableUnion *)(4 * v3->u.intValue);
-                if (*(uint32_t *)((char *)&scrAnimPub.xanim_num[-128] + (_DWORD)v5))
+                if (*(uint *)((char *)&scrAnimPub.xanim_num[-128] + (_DWORD)v5))
                     return *(XAnim_s **)((char *)&scrAnimPub.xanim_num[-128] + (_DWORD)v5);
             }
             scrVarPub.error_message = "bad anim tree";

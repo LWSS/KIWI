@@ -9,11 +9,11 @@ struct PackedTexCoords // sizeof=0x4
     {
         packed = 0;
     }
-    PackedTexCoords(uint32_t i)
+    PackedTexCoords(uint i)
     {
         packed = i;
     }
-    uint32_t packed;
+    uint packed;
 };
 
 void __cdecl Vec2UnpackTexCoords(PackedTexCoords in, float *out);

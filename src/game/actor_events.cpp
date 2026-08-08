@@ -785,7 +785,7 @@ void __cdecl Actor_BroadcastLineEvent(
 
 void __cdecl Actor_BroadcastArcEvent(
     gentity_s *originator,
-    __int32 eventType,
+    int eventType,
     int teamFlags,
     const float *origin,
     double radius,
@@ -865,7 +865,7 @@ void __cdecl Actor_BroadcastArcEvent(
 
 void __cdecl Actor_BroadcastVolumeEvent(
     gentity_s *originator,
-    __int32 eventType,
+    int eventType,
     int teamFlags,
     gentity_s *volumeEnt,
     double radius)

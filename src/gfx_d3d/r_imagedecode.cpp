@@ -217,7 +217,7 @@ void __cdecl Image_DecompressDxt3(uint8_t *block, GfxRawImage *image, int x, int
 void __cdecl Image_DecompressDxt5(uint8_t *block, GfxRawImage *image, int x, int y)
 {
     int i; // [esp+F4h] [ebp-24h]
-    uint32_t used; // [esp+F8h] [ebp-20h]
+    uint used; // [esp+F8h] [ebp-20h]
     int bit; // [esp+FCh] [ebp-1Ch]
     uint8_t a[8]; // [esp+104h] [ebp-14h]
     int dy; // [esp+110h] [ebp-8h]
@@ -230,21 +230,21 @@ void __cdecl Image_DecompressDxt5(uint8_t *block, GfxRawImage *image, int x, int
 
     if (block[0] <= block[1])
     {
-        a[2] = (unsigned char)SnapFloatToInt((block[1] + 4 * block[0]) * 0.2f);
-        a[3] = (unsigned char)SnapFloatToInt((3 * block[0] + 2 * block[1]) * 0.2f);
-        a[4] = (unsigned char)SnapFloatToInt((3 * block[1] + 2 * block[0]) * 0.2f);
-        a[5] = (unsigned char)SnapFloatToInt((block[0] + 4 * block[1]) * 0.2f);
+        a[2] = (byte)SnapFloatToInt((block[1] + 4 * block[0]) * 0.2f);
+        a[3] = (byte)SnapFloatToInt((3 * block[0] + 2 * block[1]) * 0.2f);
+        a[4] = (byte)SnapFloatToInt((3 * block[1] + 2 * block[0]) * 0.2f);
+        a[5] = (byte)SnapFloatToInt((block[0] + 4 * block[1]) * 0.2f);
         a[6] = 0;
         a[7] = -1;
     }
     else
     {
-        a[2] = (unsigned char)SnapFloatToInt((block[1] + 6 * block[0]) * 0.1428571492433548);
-        a[3] = (unsigned char)SnapFloatToInt((5 * block[0] + 2 * block[1]) * 0.1428571492433548);
-        a[4] = (unsigned char)SnapFloatToInt((3 * block[1] + 4 * block[0]) * 0.1428571492433548);
-        a[5] = (unsigned char)SnapFloatToInt((3 * block[0] + 4 * block[1]) * 0.1428571492433548);
-        a[6] = (unsigned char)SnapFloatToInt((5 * block[1] + 2 * block[0]) * 0.1428571492433548);
-        a[7] = (unsigned char)SnapFloatToInt((6 * block[1] + block[0]) * 0.1428571492433548);
+        a[2] = (byte)SnapFloatToInt((block[1] + 6 * block[0]) * 0.1428571492433548);
+        a[3] = (byte)SnapFloatToInt((5 * block[0] + 2 * block[1]) * 0.1428571492433548);
+        a[4] = (byte)SnapFloatToInt((3 * block[1] + 4 * block[0]) * 0.1428571492433548);
+        a[5] = (byte)SnapFloatToInt((3 * block[0] + 4 * block[1]) * 0.1428571492433548);
+        a[6] = (byte)SnapFloatToInt((5 * block[1] + 2 * block[0]) * 0.1428571492433548);
+        a[7] = (byte)SnapFloatToInt((6 * block[1] + block[0]) * 0.1428571492433548);
     }
     sample = *(block + 1);
     bit = 0;
@@ -374,52 +374,52 @@ void __cdecl Image_GetRawPixels(char *imageName, GfxRawImage *image)
     {
     case 1u:
         image->hasAlpha = 1;
-        Image_DecodeBitmap(image, imageFile, (unsigned char*)imageData, 4);
+        Image_DecodeBitmap(image, imageFile, (byte*)imageData, 4);
         break;
     case 2u:
         image->hasAlpha = 0;
-        Image_DecodeBitmap(image, imageFile, (unsigned char *)imageData, 3);
+        Image_DecodeBitmap(image, imageFile, (byte *)imageData, 3);
         break;
     case 3u:
         image->hasAlpha = 1;
-        Image_DecodeBitmap(image, imageFile, (unsigned char *)imageData, 2);
+        Image_DecodeBitmap(image, imageFile, (byte *)imageData, 2);
         break;
     case 4u:
         image->hasAlpha = 0;
-        Image_DecodeBitmap(image, imageFile, (unsigned char *)imageData, 1);
+        Image_DecodeBitmap(image, imageFile, (byte *)imageData, 1);
         break;
     case 5u:
         image->hasAlpha = 1;
-        Image_DecodeBitmap(image, imageFile, (unsigned char *)imageData, 1);
+        Image_DecodeBitmap(image, imageFile, (byte *)imageData, 1);
         break;
     case 6u:
         image->hasAlpha = 1;
-        Image_DecodeWavelet(image, imageFile, (unsigned char *)imageData, 4);
+        Image_DecodeWavelet(image, imageFile, (byte *)imageData, 4);
         break;
     case 7u:
         image->hasAlpha = 0;
-        Image_DecodeWavelet(image, imageFile, (unsigned char *)imageData, 3);
+        Image_DecodeWavelet(image, imageFile, (byte *)imageData, 3);
         break;
     case 8u:
         image->hasAlpha = 1;
-        Image_DecodeWavelet(image, imageFile, (unsigned char *)imageData, 2);
+        Image_DecodeWavelet(image, imageFile, (byte *)imageData, 2);
         break;
     case 9u:
         image->hasAlpha = 0;
-        Image_DecodeWavelet(image, imageFile, (unsigned char *)imageData, 1);
+        Image_DecodeWavelet(image, imageFile, (byte *)imageData, 1);
         break;
     case 0xAu:
         image->hasAlpha = 1;
-        Image_DecodeWavelet(image, imageFile, (unsigned char *)imageData, 1);
+        Image_DecodeWavelet(image, imageFile, (byte *)imageData, 1);
         break;
     case 0xBu:
         image->hasAlpha = 0;
-        Image_DecodeDxtc(image, imageFile, (unsigned char*)imageData, 8);
+        Image_DecodeDxtc(image, imageFile, (byte*)imageData, 8);
         break;
     case 0xCu:
     case 0xDu:
         image->hasAlpha = 1;
-        Image_DecodeDxtc(image, imageFile, (unsigned char *)imageData, 16);
+        Image_DecodeDxtc(image, imageFile, (byte *)imageData, 16);
         break;
     default:
         if (!alwaysfails)

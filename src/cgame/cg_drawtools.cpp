@@ -61,7 +61,7 @@ void __cdecl CG_DrawRotatedPicPhysical(
     float cos; // [esp+24h] [ebp-4Ch]
     float halfWidth; // [esp+28h] [ebp-48h]
     float verts[4][2]; // [esp+2Ch] [ebp-44h] BYREF
-    int32_t i; // [esp+4Ch] [ebp-24h]
+    int i; // [esp+4Ch] [ebp-24h]
     float scale[2][2]; // [esp+50h] [ebp-20h]
     float halfHeight; // [esp+60h] [ebp-10h]
     float center[2]; // [esp+64h] [ebp-Ch]
@@ -99,8 +99,8 @@ void __cdecl CG_DrawRotatedPic(
     float y,
     float width,
     float height,
-    int32_t horzAlign,
-    int32_t vertAlign,
+    int horzAlign,
+    int vertAlign,
     float angle,
     const float *color,
     Material *material)
@@ -130,7 +130,7 @@ void __cdecl CG_DrawRotatedQuadPic(
     float c; // [esp+2Ch] [ebp-2Ch]
     float xy[4][2]; // [esp+30h] [ebp-28h] BYREF
     float s; // [esp+50h] [ebp-8h]
-    int32_t i; // [esp+54h] [ebp-4h]
+    int i; // [esp+54h] [ebp-4h]
 
     v15 = DEG2RAD( angle );
     c = cos(v15);
@@ -157,14 +157,14 @@ void __cdecl CG_DrawVLine(
     float top,
     float lineWidth,
     float height,
-    int32_t horzAlign,
-    int32_t vertAlign,
+    int horzAlign,
+    int vertAlign,
     const float *color,
     Material *material)
 {
     float halfWidth; // [esp+0h] [ebp-34h]
     float verts[4][2]; // [esp+4h] [ebp-30h] BYREF
-    int32_t i; // [esp+24h] [ebp-10h]
+    int i; // [esp+24h] [ebp-10h]
     float halfHeight; // [esp+28h] [ebp-Ch]
     float center[2]; // [esp+2Ch] [ebp-8h]
 
@@ -187,8 +187,8 @@ void __cdecl CG_DrawStringExt(
     float y,
     char *string,
     const float *setColor,
-    int32_t forceColor,
-    int32_t shadow,
+    int forceColor,
+    int shadow,
     float charHeight)
 {
     Font_s *font; // [esp+1Ch] [ebp-8h]
@@ -203,7 +203,7 @@ void __cdecl CG_DrawStringExt(
     UI_DrawText(scrPlace, string, 0x7FFFFFFF, font, x, ya, 1, 1, fontScale, setColor, shadow != 0 ? 3 : 0);
 }
 
-int32_t __cdecl CG_DrawDevString(
+int __cdecl CG_DrawDevString(
     const ScreenPlacement *scrPlace,
     float x,
     float y,
@@ -214,7 +214,7 @@ int32_t __cdecl CG_DrawDevString(
     char align,
     Font_s *font)
 {
-    int32_t step;
+    int step;
 
 #ifdef KISAK_SP
     float effXScale = cg_small_dev_string_fontscale->current.value * xScale;
@@ -244,7 +244,7 @@ int32_t __cdecl CG_DrawDevString(
     return (int)((float)step * effYScale);
 }
 
-int32_t __cdecl CG_DrawBigDevString(const ScreenPlacement *scrPlace, float x, float y, char *s, float alpha, char align)
+int __cdecl CG_DrawBigDevString(const ScreenPlacement *scrPlace, float x, float y, char *s, float alpha, char align)
 {
     float color[4]; // [esp+14h] [ebp-10h] BYREF
 
@@ -255,7 +255,7 @@ int32_t __cdecl CG_DrawBigDevString(const ScreenPlacement *scrPlace, float x, fl
     return CG_DrawBigDevStringColor(scrPlace, x, y, s, color, align);
 }
 
-int32_t __cdecl CG_DrawBigDevStringColor(
+int __cdecl CG_DrawBigDevStringColor(
     const ScreenPlacement *scrPlace,
     float x,
     float y,
@@ -266,7 +266,7 @@ int32_t __cdecl CG_DrawBigDevStringColor(
     return CG_DrawDevString(scrPlace, x, y, 1.0, 1.0, s, color, align, cgMedia.bigDevFont);
 }
 
-int32_t __cdecl CG_DrawSmallDevStringColor(
+int __cdecl CG_DrawSmallDevStringColor(
     const ScreenPlacement *scrPlace,
     float x,
     float y,
@@ -277,9 +277,9 @@ int32_t __cdecl CG_DrawSmallDevStringColor(
     return CG_DrawDevString(scrPlace, x, y, 1.0, 1.0, s, color, align, cgMedia.smallDevFont);
 }
 
-double __cdecl CG_FadeAlpha(int32_t timeNow, int32_t startMsec, int32_t totalMsec, int32_t fadeMsec)
+double __cdecl CG_FadeAlpha(int timeNow, int startMsec, int totalMsec, int fadeMsec)
 {
-    int32_t t; // [esp+8h] [ebp-4h]
+    int t; // [esp+8h] [ebp-4h]
 
     t = timeNow - startMsec;
     if (fadeMsec <= 0 || totalMsec - t >= fadeMsec)
@@ -287,7 +287,7 @@ double __cdecl CG_FadeAlpha(int32_t timeNow, int32_t startMsec, int32_t totalMse
     return (float)((double)(totalMsec - t) * 1.0 / (double)fadeMsec);
 }
 
-float *__cdecl CG_FadeColor(int32_t timeNow, int32_t startMsec, int32_t totalMsec, int32_t fadeMsec)
+float *__cdecl CG_FadeColor(int timeNow, int startMsec, int totalMsec, int fadeMsec)
 {
     if (!startMsec)
         return 0;
@@ -300,7 +300,7 @@ float *__cdecl CG_FadeColor(int32_t timeNow, int32_t startMsec, int32_t totalMse
     return color_0;
 }
 
-void __cdecl CG_MiniMapChanged(int32_t localClientNum)
+void __cdecl CG_MiniMapChanged(int localClientNum)
 {
     parseInfo_t* v1; // eax
     parseInfo_t* v2; // eax
@@ -340,7 +340,7 @@ void __cdecl CG_MiniMapChanged(int32_t localClientNum)
         cgameGlob->compassMapWorldSize[1] = 1000.0;
 }
 
-void __cdecl CG_NorthDirectionChanged(int32_t localClientNum)
+void __cdecl CG_NorthDirectionChanged(int localClientNum)
 {
     float v1; // [esp+8h] [ebp-Ch]
     const char *pszString; // [esp+10h] [ebp-4h]
@@ -355,12 +355,12 @@ void __cdecl CG_NorthDirectionChanged(int32_t localClientNum)
     CG_MiniMapChanged(localClientNum);
 }
 
-void __cdecl CG_DebugLine(const float *start, const float *end, const float *color, int32_t depthTest, int32_t duration)
+void __cdecl CG_DebugLine(const float *start, const float *end, const float *color, int depthTest, int duration)
 {
     CL_AddDebugLine(start, end, color, depthTest, duration, 0);
 }
 
-void __cdecl CG_DebugStar(const float *point, const float *color, int32_t duration)
+void __cdecl CG_DebugStar(const float *point, const float *color, int duration)
 {
     CL_AddDebugStar(point, color, duration, 0);
 }
@@ -371,7 +371,7 @@ void __cdecl CG_DebugStarWithText(
     const float *textColor,
     char *string,
     float fontsize,
-    int32_t duration)
+    int duration)
 {
     CL_AddDebugStarWithText(point, starColor, textColor, string, fontsize, duration, 0);
 }
@@ -382,16 +382,16 @@ void __cdecl CG_DebugBox(
     const float *maxs,
     float yaw,
     const float *color,
-    int32_t depthTest,
-    int32_t duration)
+    int depthTest,
+    int duration)
 {
     float v7; // [esp+0h] [ebp-94h]
     float v8; // [esp+10h] [ebp-84h]
-    uint32_t j; // [esp+14h] [ebp-80h]
+    uint j; // [esp+14h] [ebp-80h]
     float rotated; // [esp+18h] [ebp-7Ch]
     float rotated_4; // [esp+1Ch] [ebp-78h]
-    uint32_t i; // [esp+24h] [ebp-70h]
-    uint32_t ia; // [esp+24h] [ebp-70h]
+    uint i; // [esp+24h] [ebp-70h]
+    uint ia; // [esp+24h] [ebp-70h]
     float fCos; // [esp+28h] [ebp-6Ch]
     float v[25]; // [esp+2Ch] [ebp-68h] BYREF
     float fSin; // [esp+90h] [ebp-4h]
@@ -425,14 +425,14 @@ void __cdecl CG_DebugBoxOriented(
     const float *maxs,
     const mat3x3 &rotation,
     const float *color,
-    int32_t depthTest,
-    int32_t duration)
+    int depthTest,
+    int duration)
 {
     float v7; // [esp+0h] [ebp-7Ch]
     float *v8; // [esp+4h] [ebp-78h]
-    uint32_t j; // [esp+8h] [ebp-74h]
+    uint j; // [esp+8h] [ebp-74h]
     float rotated[3]; // [esp+Ch] [ebp-70h] BYREF
-    uint32_t i; // [esp+18h] [ebp-64h]
+    uint i; // [esp+18h] [ebp-64h]
     float v[8][3]; // [esp+1Ch] [ebp-60h] BYREF
 
     for (i = 0; i < 8; ++i)
@@ -461,8 +461,8 @@ void __cdecl CG_DebugCircle(
     float radius,
     const float *dir,
     const float *color,
-    int32_t depthTest,
-    int32_t duration)
+    int depthTest,
+    int duration)
 {
     float fAngle; // [esp+1Ch] [ebp-F4h]
     float fCos; // [esp+20h] [ebp-F0h]
@@ -472,7 +472,7 @@ void __cdecl CG_DebugCircle(
     float normal[3]; // [esp+28h] [ebp-E8h] BYREF
     float right[3]; // [esp+34h] [ebp-DCh] BYREF
     float up[3]; // [esp+40h] [ebp-D0h] BYREF
-    uint32_t i; // [esp+4Ch] [ebp-C4h]
+    uint i; // [esp+4Ch] [ebp-C4h]
     float v[16][3]; // [esp+50h] [ebp-C0h] BYREF
 
     Vec3NormalizeTo(dir, normal);
@@ -492,7 +492,7 @@ void __cdecl CG_DebugCircle(
         CG_DebugLine(v[i], v[(i + 1) % 0x10], color, depthTest, duration);
 }
 
-void __cdecl CG_TeamColor(int32_t team, const char *prefix, float *color)
+void __cdecl CG_TeamColor(int team, const char *prefix, float *color)
 {
     const char *v3; // eax
     char dvarName[32]; // [esp+4h] [ebp-24h] BYREF
@@ -524,7 +524,7 @@ void __cdecl CG_TeamColor(int32_t team, const char *prefix, float *color)
 }
 
 #ifdef KISAK_MP
-void __cdecl CG_RelativeTeamColor(int32_t clientNum, const char *prefix, float *color, int32_t localClientNum)
+void __cdecl CG_RelativeTeamColor(int clientNum, const char *prefix, float *color, int localClientNum)
 {
     char dvarName[32]; // [esp+Ch] [ebp-28h] BYREF
     float savedAlpha; // [esp+30h] [ebp-4h]

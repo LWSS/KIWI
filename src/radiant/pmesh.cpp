@@ -271,13 +271,13 @@ static void Curve_LerpHalf( curveVert_t *out, const curveVert_t *a, const curveV
     const float *fb = (const float *)b;
     for ( int i = 0; i < 7; ++i )           // xyz(3) + st(2) + lightmap(2)
         o[i] = ( fb[i] + fa[i] ) * 0.5f;
-    unsigned char *oc = (unsigned char *)&out->vert_color;
-    const unsigned char *ac = (const unsigned char *)&a->vert_color;
-    const unsigned char *bc = (const unsigned char *)&b->vert_color;
-    oc[0] = (unsigned char)( ( ac[0] + bc[0] ) >> 1 );
-    oc[1] = (unsigned char)( ( ac[1] + bc[1] ) >> 1 );
-    oc[2] = (unsigned char)( ( ac[2] + bc[2] ) >> 1 );
-    oc[3] = (unsigned char)( ( ac[3] + bc[3] ) >> 1 );
+    byte *oc = (byte *)&out->vert_color;
+    const byte *ac = (const byte *)&a->vert_color;
+    const byte *bc = (const byte *)&b->vert_color;
+    oc[0] = (byte)( ( ac[0] + bc[0] ) >> 1 );
+    oc[1] = (byte)( ( ac[1] + bc[1] ) >> 1 );
+    oc[2] = (byte)( ( ac[2] + bc[2] ) >> 1 );
+    oc[3] = (byte)( ( ac[3] + bc[3] ) >> 1 );
 }
 
 // ─── sub_432b20 — adaptive subdivision along COLUMNS (insert midpoint columns
@@ -809,7 +809,7 @@ static int Patch_CalcVertColors( patchMesh_t *p )
     // leave them (0x444a07..0x444a44).
     for ( int i = 0; i < p->width; i++ )
         for ( int j = 0; j < p->height; j++ )
-            if ( (unsigned char)p->ctrl[i][j].vert_color.a != 0xFF )
+            if ( (byte)p->ctrl[i][j].vert_color.a != 0xFF )
                 return j;
 
     // Pass 2 — recompute: alpha = (R+G+B)/3, RGB = white (0x444a46..0x444aa9).
@@ -818,7 +818,7 @@ static int Patch_CalcVertColors( patchMesh_t *p )
         for ( int j = 0; j < p->height; j++ )
         {
             rgba_4byte *c = &p->ctrl[i][j].vert_color;
-            int sum = (unsigned char)c->r + (unsigned char)c->g + (unsigned char)c->b;
+            int sum = (byte)c->r + (byte)c->g + (byte)c->b;
             c->a = (char)( sum / 3 );
             c->r = (char)0xFF;
             c->g = (char)0xFF;
@@ -1075,10 +1075,10 @@ static void Patch_WriteVert( drawVert_t *v, WriteWriter_t writer )
     WRITE( writer, "\tv %s %s %s",
            Fmt8g( bx, v->xyz[0] ), Fmt8g( by, v->xyz[1] ), Fmt8g( bz, v->xyz[2] ) );
 
-    unsigned char r = (unsigned char)v->vert_color.r;
-    unsigned char g = (unsigned char)v->vert_color.g;
-    unsigned char b = (unsigned char)v->vert_color.b;
-    unsigned char a = (unsigned char)v->vert_color.a;
+    byte r = (byte)v->vert_color.r;
+    byte g = (byte)v->vert_color.g;
+    byte b = (byte)v->vert_color.b;
+    byte a = (byte)v->vert_color.a;
     if ( r != 0xFF || g != 0xFF || b != 0xFF || a != 0xFF )
         WRITE( writer, " c %i %i %i %i", b, g, r, a );   // wire order: b g r a
 
@@ -1256,7 +1256,7 @@ static void InterpolateInteriorPoints( patchMesh_t *p )
         int wPrev = ( w == 0 ) ? ( p->width - 2 ) : ( w - 1 );
         for ( int h = 0; h < p->height; ++h )
         {
-            if ( ( (unsigned char)p->ctrl[w][h].turned_edge & 2 ) == 0 )
+            if ( ( (byte)p->ctrl[w][h].turned_edge & 2 ) == 0 )
             {
                 for ( int k = 0; k < 3; ++k )
                     p->ctrl[w][h].xyz[k] =
@@ -1272,7 +1272,7 @@ static void InterpolateInteriorPoints( patchMesh_t *p )
 //  Geometry transcribed verbatim from the IDB; the texturing/curve tail is the
 //  curveDef-free subset (see Patch_FinishCreate).
 // ════════════════════════════════════════════════════════════════════════════
-void Patch_BrushToMesh( char bCone, unsigned char bBevel, unsigned char bEndcap, char bSquare )
+void Patch_BrushToMesh( char bCone, byte bBevel, byte bEndcap, char bSquare )
 {
     if ( !QE_SingleBrush() )
         return;
@@ -1720,10 +1720,10 @@ static void Patch_TerrainInsertRow( patchMesh_t *p, int at )
             nv->texCoord.lightmap[k]  = ( lo->texCoord.lightmap[k]  + hi->texCoord.lightmap[k] )  * 0.5f;
             nv->texCoord.smoothing[k] = ( lo->texCoord.smoothing[k] + hi->texCoord.smoothing[k] ) * 0.5f;
         }
-        ((unsigned char *)&nv->vert_color)[0] = (unsigned char)( ( ((unsigned char*)&lo->vert_color)[0] + ((unsigned char*)&hi->vert_color)[0] ) / 2 );
-        ((unsigned char *)&nv->vert_color)[1] = (unsigned char)( ( ((unsigned char*)&lo->vert_color)[1] + ((unsigned char*)&hi->vert_color)[1] ) / 2 );
-        ((unsigned char *)&nv->vert_color)[2] = (unsigned char)( ( ((unsigned char*)&lo->vert_color)[2] + ((unsigned char*)&hi->vert_color)[2] ) / 2 );
-        ((unsigned char *)&nv->vert_color)[3] = (unsigned char)( ( ((unsigned char*)&lo->vert_color)[3] + ((unsigned char*)&hi->vert_color)[3] ) / 2 );
+        ((byte *)&nv->vert_color)[0] = (byte)( ( ((byte*)&lo->vert_color)[0] + ((byte*)&hi->vert_color)[0] ) / 2 );
+        ((byte *)&nv->vert_color)[1] = (byte)( ( ((byte*)&lo->vert_color)[1] + ((byte*)&hi->vert_color)[1] ) / 2 );
+        ((byte *)&nv->vert_color)[2] = (byte)( ( ((byte*)&lo->vert_color)[2] + ((byte*)&hi->vert_color)[2] ) / 2 );
+        ((byte *)&nv->vert_color)[3] = (byte)( ( ((byte*)&lo->vert_color)[3] + ((byte*)&hi->vert_color)[3] ) / 2 );
         // register the new control point as an editable handle (IDB d_points append).
         for ( int k = 0; k < 3; ++k )
             g_qeglobals.d_points[g_qeglobals.d_numpoints][k] = nv->xyz[k];
@@ -1753,10 +1753,10 @@ static void Patch_TerrainInsertColumn( patchMesh_t *p, int at )
             nv->texCoord.lightmap[k]  = ( lo->texCoord.lightmap[k]  + hi->texCoord.lightmap[k] )  * 0.5f;
             nv->texCoord.smoothing[k] = ( lo->texCoord.smoothing[k] + hi->texCoord.smoothing[k] ) * 0.5f;
         }
-        ((unsigned char *)&nv->vert_color)[0] = (unsigned char)( ( ((unsigned char*)&lo->vert_color)[0] + ((unsigned char*)&hi->vert_color)[0] ) / 2 );
-        ((unsigned char *)&nv->vert_color)[1] = (unsigned char)( ( ((unsigned char*)&lo->vert_color)[1] + ((unsigned char*)&hi->vert_color)[1] ) / 2 );
-        ((unsigned char *)&nv->vert_color)[2] = (unsigned char)( ( ((unsigned char*)&lo->vert_color)[2] + ((unsigned char*)&hi->vert_color)[2] ) / 2 );
-        ((unsigned char *)&nv->vert_color)[3] = (unsigned char)( ( ((unsigned char*)&lo->vert_color)[3] + ((unsigned char*)&hi->vert_color)[3] ) / 2 );
+        ((byte *)&nv->vert_color)[0] = (byte)( ( ((byte*)&lo->vert_color)[0] + ((byte*)&hi->vert_color)[0] ) / 2 );
+        ((byte *)&nv->vert_color)[1] = (byte)( ( ((byte*)&lo->vert_color)[1] + ((byte*)&hi->vert_color)[1] ) / 2 );
+        ((byte *)&nv->vert_color)[2] = (byte)( ( ((byte*)&lo->vert_color)[2] + ((byte*)&hi->vert_color)[2] ) / 2 );
+        ((byte *)&nv->vert_color)[3] = (byte)( ( ((byte*)&lo->vert_color)[3] + ((byte*)&hi->vert_color)[3] ) / 2 );
         // register the new control point as an editable handle (IDB d_points append).
         for ( int k = 0; k < 3; ++k )
             g_qeglobals.d_points[g_qeglobals.d_numpoints][k] = nv->xyz[k];
@@ -4177,9 +4177,9 @@ static void PMESH_BlendCornerColor( const curveVert_t *base, const curveVert_t *
                                     const curveVert_t *B, float u, float v, float *outRGBA )
 {
     double w = 1.0 - u - v;
-    const unsigned char *cb = (const unsigned char *)&base->vert_color;
-    const unsigned char *ca = (const unsigned char *)&A->vert_color;
-    const unsigned char *cc = (const unsigned char *)&B->vert_color;
+    const byte *cb = (const byte *)&base->vert_color;
+    const byte *ca = (const byte *)&A->vert_color;
+    const byte *cc = (const byte *)&B->vert_color;
     for ( int k = 0; k < 4; ++k )
         outRGBA[k] = (float)( (double)ca[k] * u + (double)cc[k] * v + (double)cb[k] * w );
 }
@@ -4193,7 +4193,7 @@ static void PMESH_BlendCornerColor( const curveVert_t *base, const curveVert_t *
 // non-static: also called by the per-brush ray trace (sub_48D240) in select.cpp.
 char PMESH_51( const float *org, const float *dir, patch_t *pm,
                       float *outDist, int *outCol, int *outRow,
-                      unsigned char *outColor, float *outPlane )
+                      byte *outColor, float *outPlane )
 {
     iassert( pm );          // 8042 — #pm byte-matches the embedded "pm"
     iassert( pm->def );     // 8043 — #pm->def byte-matches the embedded "pm->def"
@@ -4291,10 +4291,10 @@ char PMESH_51( const float *org, const float *dir, patch_t *pm,
     {
         // inline-fistp rounds (the binary adds 2^-30 before the cvt); colours are
         // byte-ranged so this matches the rounded original.
-        outColor[0] = (unsigned char)(int)( color[0] + 9.313225746154785e-10 );
-        outColor[1] = (unsigned char)(int)( color[1] + 9.313225746154785e-10 );
-        outColor[2] = (unsigned char)(int)( color[2] + 9.313225746154785e-10 );
-        outColor[3] = (unsigned char)(int)( color[3] + 9.313225746154785e-10 );
+        outColor[0] = (byte)(int)( color[0] + 9.313225746154785e-10 );
+        outColor[1] = (byte)(int)( color[1] + 9.313225746154785e-10 );
+        outColor[2] = (byte)(int)( color[2] + 9.313225746154785e-10 );
+        outColor[3] = (byte)(int)( color[3] + 9.313225746154785e-10 );
     }
     return found;
 }
@@ -4309,11 +4309,11 @@ char PMESH_51( const float *org, const float *dir, patch_t *pm,
 extern char FilterBrush( selbrush_t *b, int updateFilters );    // filters.cpp 0x46A1F0
 extern selbrush_t active_brushes;                               // map.cpp   0x23F189C
 
-char sub_43DD50( const float *dir, unsigned char *colorOut,
+char sub_43DD50( const float *dir, byte *colorOut,
                  const float *cam_origin, float *origin_out )
 {
     float best = 3.4028235e38f;             // i — nearest hit parameter
-    unsigned char cell[4];                   // a7 — the picked vertex colour
+    byte cell[4];                   // a7 — the picked vertex colour
 
     for ( selbrush_t *b = selected_brushes.next; b != &selected_brushes; b = b->next )
     {
@@ -4494,8 +4494,8 @@ float Radiant_ValueNoise4D( float a1, float a2, float a3, float a4 )
     int iz = (int)( a3 - 0.4999999990686774 );  float fz = a3 - (double)iz;   // v29/v34
     int iw = (int)( a4 - 0.4999999990686774 );  float fw = a4 - (double)iw;   // v33/v25
 
-    unsigned char bx = (unsigned char)ix;        // v5
-    unsigned char by = (unsigned char)iy;        // v4
+    byte bx = (byte)ix;        // v5
+    byte by = (byte)iy;        // v4
     float fy0 = fy, fy1 = 1.0f - fy;             // v7 / v8
     float fx0 = fx, fx1 = 1.0f - fx;             // v9 / v10
 
@@ -4504,21 +4504,21 @@ float Radiant_ValueNoise4D( float a1, float a2, float a3, float a4 )
     int i = 0;                                   // v6
     do
     {
-        unsigned char v11 = (unsigned char)( bx + P[(unsigned char)( by + P[(unsigned char)( P[(unsigned char)wcur] + iz )] )] );
+        byte v11 = (byte)( bx + P[(byte)( by + P[(byte)( P[(byte)wcur] + iz )] )] );
         float v22 = G[ P[v11] ];
-        unsigned char v12 = (unsigned char)( bx + P[(unsigned char)( by + P[(unsigned char)( P[(unsigned char)wcur] + iz )] + 1 )] );
-        float v23 = G[ P[(unsigned char)( v11 + 1 )] ];
-        int   v13 = P[(unsigned char)( v12 + 1 )];
+        byte v12 = (byte)( bx + P[(byte)( by + P[(byte)( P[(byte)wcur] + iz )] + 1 )] );
+        float v23 = G[ P[(byte)( v11 + 1 )] ];
+        int   v13 = P[(byte)( v12 + 1 )];
         float v24 = G[ P[v12] ];
-        by = (unsigned char)iy;
-        unsigned char v15 = (unsigned char)( iy + P[(unsigned char)( P[(unsigned char)wcur] + iz + 1 )] );
-        unsigned char v16 = (unsigned char)( bx + P[v15] );
-        unsigned char v17 = (unsigned char)( bx + P[(unsigned char)( v15 + 1 )] );
-        float v35 = G[ P[(unsigned char)( v17 + 1 )] ] * fx0 + G[ P[v17] ] * fx1;
+        by = (byte)iy;
+        byte v15 = (byte)( iy + P[(byte)( P[(byte)wcur] + iz + 1 )] );
+        byte v16 = (byte)( bx + P[v15] );
+        byte v17 = (byte)( bx + P[(byte)( v15 + 1 )] );
+        float v35 = G[ P[(byte)( v17 + 1 )] ] * fx0 + G[ P[v17] ] * fx1;
         float v18 = v35 * fy0;
-        wcur = ( wcur & ~0xFF ) | (unsigned char)( wcur + 1 );   // LOBYTE(v33) = v33 + 1
+        wcur = ( wcur & ~0xFF ) | (byte)( wcur + 1 );   // LOBYTE(v33) = v33 + 1
         ++i;
-        float v36 = G[ P[(unsigned char)( v16 + 1 )] ] * fx0 + G[ P[v16] ] * fx1;
+        float v36 = G[ P[(byte)( v16 + 1 )] ] * fx0 + G[ P[v16] ] * fx1;
         float v37 = v18 + v36 * fy1;
         float v19 = v37 * fz;
         float v38 = G[ v13 ] * fx0 + v24 * fx1;
@@ -5059,13 +5059,13 @@ static void sub_45E770( entity_brush_s *pBrushInst )
 }
 
 // Per-colour-byte apply: blend, clamp to [0,255], round (the binary's fistp + 2^-30 guard).
-static unsigned char PMESH_16_PaintByte( PaintCallback cb, float *cp, int channel,
-                                         unsigned char cur, float cellInfo, float weight )
+static byte PMESH_16_PaintByte( PaintCallback cb, float *cp, int channel,
+                                         byte cur, float cellInfo, float weight )
 {
     float v = cb( cp, channel, (float)cur, cellInfo * 0.0625f, weight );   // dbl_6F4520 = 0.0625
     if ( v < 0.0f )        v = 0.0f;                                       // dbl_6F40B8 = 0
     else if ( v > 255.0f ) v = 255.0f;                                     // dbl_6F4190 / flt_6F4720 = 255
-    return (unsigned char)lrintf( v + 9.313225746154785e-10f );            // dbl_6F4220 = 2^-30, fistp rounds
+    return (byte)lrintf( v + 9.313225746154785e-10f );            // dbl_6F4220 = 2^-30, fistp rounds
 }
 
 void PMESH_16( selbrush_t *b, char channelMask, float *center, float cellInfo, PaintCallback cb )
@@ -5773,11 +5773,11 @@ static void Curve_LerpVert( curveVert_t *dst, const curveVert_t *a, const curveV
     for ( int k = 0; k < 7; ++k )
         fd[k] = ( fb[k] - fa[k] ) * t + fa[k];
     // vert_color rgba (bytes 40..43): lerped in double then truncated to a byte.
-    const unsigned char *ba = (const unsigned char *)a;
-    const unsigned char *bb = (const unsigned char *)b;
-    unsigned char       *bd = (unsigned char *)dst;
+    const byte *ba = (const byte *)a;
+    const byte *bb = (const byte *)b;
+    byte       *bd = (byte *)dst;
     for ( int k = 40; k < 44; ++k )
-        bd[k] = (unsigned char)(int)( (double)( (int)bb[k] - (int)ba[k] ) * t + (double)ba[k] );
+        bd[k] = (byte)(int)( (double)( (int)bb[k] - (int)ba[k] ) * t + (double)ba[k] );
     // normal (floats 7..9, bytes 28..36), then renormalize.
     fd[7] = ( fb[7] - fa[7] ) * t + fa[7];
     fd[8] = ( fb[8] - fa[8] ) * t + fa[8];
@@ -6547,7 +6547,7 @@ void PMESH_29_Winding( int patchInst, const orientation_t *orient, float *desc, 
     {
         for ( ; ; )
         {
-            const unsigned short *indices = pm->indicesFront;
+            const ushort *indices = pm->indicesFront;
             const char *verts = (const char *)pm->def->curveDef->verts;       // GfxWorldVertex base
             #define VPTR(n) (const float *)( verts + 44 * indices[indexIter + (n)] )
             const float *p0 = VPTR(0), *p1 = VPTR(1), *p2 = VPTR(2);
@@ -6586,7 +6586,7 @@ void PMESH_29_Winding( int patchInst, const orientation_t *orient, float *desc, 
     if ( indexIter != pm->indexCount )
     {
         vassert( indexIter + 3 == pm->indexCount, "%i, %i", indexIter + 3, pm->indexCount );   // PMESH.CPP:4274
-        const unsigned short *indices = pm->indicesFront;
+        const ushort *indices = pm->indicesFront;
         const char *verts = (const char *)pm->def->curveDef->verts;
         const float *t0 = (const float *)( verts + 44 * indices[indexIter] );
         const float *t1 = (const float *)( verts + 44 * indices[indexIter + 1] );
@@ -6657,7 +6657,7 @@ static bool Ed_PointInFrustum4( const edFrustumPlane_t *planes, const float *xyz
 //  Returns 1 iff this pass touched a point.
 static int Terrain_SelectAreaPoints_sub( const edFrustumPlane_t *planes, char a2 )
 {
-    unsigned char touched = 0;
+    byte touched = 0;
 
     for ( selbrush_t *b = selected_brushes.next; b != &selected_brushes; b = b->next )
     {
@@ -6771,7 +6771,7 @@ void Terrain_SelectAreaPoints( const void *planes, char select )
 //  &unkown_pmesh_float2, count patch_verts_array02_count).  Returns 1 iff pass 0 added.
 static int Patch_SelectAreaPoints_sub( const edFrustumPlane_t *planes, char a2 )
 {
-    unsigned char added = 0;
+    byte added = 0;
 
     if ( g_qeglobals.bLockPatchVerts || g_qeglobals.bUnlockPatchVerts )
         return 0;
@@ -7875,8 +7875,8 @@ restartWeld:
         selbrush_t *next = i->next;
         if ( next == &selected_brushes )
             continue;
-        while ( ( ( (unsigned char)i->def->patch->type
-                    ^ (unsigned char)next->def->patch->type ) & 0x40 ) != 0
+        while ( ( ( (byte)i->def->patch->type
+                    ^ (byte)next->def->patch->type ) & 0x40 ) != 0
                 || !Patch_Weld( next, i ) )
         {
             next = next->next;
@@ -9685,19 +9685,19 @@ static void Patch_Fill_BuildVisuals( patch_t *inst, const orientation_t *orient,
         st[2*i+1] = cv->st[1];
         // per-vertex colour, BGRA byte order (Byte4PackPixelColor: array[0]=B, [1]=G, [2]=R, [3]=A).
         // alpha byte = curveVert.vert_color.a (cv @ +43 = 0x28+3).
-        const unsigned a = ( (const unsigned char *)&cv->vert_color )[3];
-        unsigned char B, G, R, A;
+        const unsigned a = ( (const byte *)&cv->vert_color )[3];
+        byte B, G, R, A;
         if ( !lightmapAlpha )
         {
             // 0x440048: colour bytes = colorTint verbatim; alpha byte from the vert.
-            B = tintC.array[0]; G = tintC.array[1]; R = tintC.array[2]; A = (unsigned char)a;
+            B = tintC.array[0]; G = tintC.array[1]; R = tintC.array[2]; A = (byte)a;
         }
         else
         {
             // 0x43ffea: lightmap-alpha mode multiplies RGB by vertex alpha; final alpha byte = 0xFF.
-            auto mul255 = []( unsigned c, unsigned aa ) -> unsigned char {
+            auto mul255 = []( unsigned c, unsigned aa ) -> byte {
                 unsigned t = c * aa + 127;               // +127 rounding (IDB 2155905153*x>>32>>7 == x/255)
-                return (unsigned char)( t / 255 );
+                return (byte)( t / 255 );
             };
             B = mul255( tintC.array[0], a );
             G = mul255( tintC.array[1], a );

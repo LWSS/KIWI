@@ -11,7 +11,7 @@
 #include "cg_servercmds.h"
 #endif
 
-void __cdecl CG_Respawn(int32_t localClientNum)
+void __cdecl CG_Respawn(int localClientNum)
 {
     cg_s *cgameGlob;
 
@@ -75,20 +75,20 @@ void __cdecl CG_Respawn(int32_t localClientNum)
 #endif
 }
 
-void __cdecl CG_DamageFeedback(int32_t localClientNum, int32_t yawByte, int32_t pitchByte, int32_t damage)
+void __cdecl CG_DamageFeedback(int localClientNum, int yawByte, int pitchByte, int damage)
 {
     double v4; // st7
     float angle; // [esp+8h] [ebp-3Ch]
     float kick; // [esp+Ch] [ebp-38h]
     float dir[3]; // [esp+10h] [ebp-34h] BYREF
-    int32_t slot; // [esp+1Ch] [ebp-28h]
+    int slot; // [esp+1Ch] [ebp-28h]
     cg_s *cgameGlob; // [esp+20h] [ebp-24h]
     float yaw; // [esp+24h] [ebp-20h]
     float forwardFrac; // [esp+28h] [ebp-1Ch]
     float sideFrac; // [esp+2Ch] [ebp-18h]
     float angles[3]; // [esp+30h] [ebp-14h] BYREF
     float pitch; // [esp+3Ch] [ebp-8h]
-    int32_t i; // [esp+40h] [ebp-4h]
+    int i; // [esp+40h] [ebp-4h]
 
     cgameGlob = CG_GetLocalClientGlobals(localClientNum);
     kick = (double)damage * bg_viewKickScale->current.value;
@@ -136,19 +136,19 @@ void __cdecl CG_DamageFeedback(int32_t localClientNum, int32_t yawByte, int32_t 
 }
 
 #ifdef KISAK_MP
-int32_t __cdecl CG_TransitionPlayerState(int32_t localClientNum, playerState_s *ps, const transPlayerState_t *ops)
+int __cdecl CG_TransitionPlayerState(int localClientNum, playerState_s *ps, const transPlayerState_t *ops)
 {
     if (ps->damageEvent != ops->damageEvent && ps->damageCount)
         CG_DamageFeedback(localClientNum, ps->damageYaw, ps->damagePitch, ps->damageCount);
     return CG_CheckPlayerstateEvents(localClientNum, ps, ops);
 }
 
-int32_t __cdecl CG_CheckPlayerstateEvents(int32_t localClientNum, playerState_s* ps, const transPlayerState_t* ops)
+int __cdecl CG_CheckPlayerstateEvents(int localClientNum, playerState_s* ps, const transPlayerState_t* ops)
 {
-    int32_t v4; // [esp+4h] [ebp-18h]
-    int32_t event; // [esp+8h] [ebp-14h]
-    int32_t i; // [esp+14h] [ebp-8h]
-    int32_t eventSequence; // [esp+18h] [ebp-4h]
+    int v4; // [esp+4h] [ebp-18h]
+    int event; // [esp+8h] [ebp-14h]
+    int i; // [esp+14h] [ebp-8h]
+    int eventSequence; // [esp+18h] [ebp-4h]
     cg_s *cgameGlob;
 
     cgameGlob = CG_GetLocalClientGlobals(localClientNum);
@@ -170,14 +170,14 @@ int32_t __cdecl CG_CheckPlayerstateEvents(int32_t localClientNum, playerState_s*
     return eventSequence;
 }
 #elif KISAK_SP
-void __cdecl CG_TransitionPlayerState(int32_t localClientNum, playerState_s *ps, const playerState_s *ops)
+void __cdecl CG_TransitionPlayerState(int localClientNum, playerState_s *ps, const playerState_s *ops)
 {
     if (ps->damageEvent != ops->damageEvent && ps->damageCount)
         CG_DamageFeedback(localClientNum, ps->damageYaw, ps->damagePitch, ps->damageCount);
     CG_CheckPlayerstateEvents(localClientNum, ps, ops);
 }
 
-void __cdecl CG_CheckPlayerstateEvents(int32_t localClientNum, playerState_s *ps, const playerState_s *ops)
+void __cdecl CG_CheckPlayerstateEvents(int localClientNum, playerState_s *ps, const playerState_s *ops)
 {
     int eventSequence; // r29
     int v6; // r8

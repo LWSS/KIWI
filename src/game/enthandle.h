@@ -24,7 +24,7 @@ struct EntHandle // sizeof=0x4 // (SP/MP same)
 
     void setEnt(gentity_s *ent);
     gentity_s *ent() const;
-    int32_t entnum();
+    int entnum();
     bool isDefined() const;
 
     static void Init();
@@ -34,8 +34,8 @@ static_assert(sizeof(EntHandle) == 0x4);
 
 void __cdecl EntHandleDissociate(gentity_s *ent);
 void __cdecl EntHandleDissociateInternal(EntHandleList *entHandleList);
-void __cdecl RemoveEntHandleInfo(EntHandleList *entHandleList, uint32_t oldInfoIndex);
-uint32_t __cdecl AddEntHandleInfo(EntHandleList *entHandleList, void *handle);
+void __cdecl RemoveEntHandleInfo(EntHandleList *entHandleList, uint oldInfoIndex);
+uint __cdecl AddEntHandleInfo(EntHandleList *entHandleList, void *handle);
 
 
 #ifdef KISAK_SP

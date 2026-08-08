@@ -500,7 +500,7 @@ void __cdecl CL_ArchiveServerCommands(MemoryFile *memFile)
                 0,
                 "%s",
                 "memFile->archiveProc");
-        memFile->archiveProc(memFile, 4, (unsigned char *)clientConnections[0].serverCommands.commands + ((4 * i) & 0x3FC));
+        memFile->archiveProc(memFile, 4, (byte *)clientConnections[0].serverCommands.commands + ((4 * i) & 0x3FC));
     }
     rover = clientConnections[0].serverCommands.header.rover;
     if (!memFile)
@@ -708,8 +708,8 @@ void __cdecl CL_DrawStretchPic(
     float y,
     float w,
     float h,
-    int32_t horzAlign,
-    int32_t vertAlign,
+    int horzAlign,
+    int vertAlign,
     float s1,
     float t1,
     float s2,
@@ -743,8 +743,8 @@ void __cdecl CL_DrawStretchPicFlipST(
     float y,
     float w,
     float h,
-    int32_t horzAlign,
-    int32_t vertAlign,
+    int horzAlign,
+    int vertAlign,
     float s1,
     float t1,
     float s2,
@@ -762,8 +762,8 @@ void __cdecl CL_DrawStretchPicRotatedST(
     float y,
     float w,
     float h,
-    int32_t horzAlign,
-    int32_t vertAlign,
+    int horzAlign,
+    int vertAlign,
     float centerS,
     float centerT,
     float radiusST,

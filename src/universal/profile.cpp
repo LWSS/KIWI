@@ -510,7 +510,7 @@ void Profile_Init()
 {
 #if 0
     const char *v0; // eax
-    uint32_t profPageIter; // [esp+14h] [ebp-4h]
+    uint profPageIter; // [esp+14h] [ebp-4h]
 
     for (profPageIter = 0; s_profileArrays[profPageIter].name; ++profPageIter)
     {
@@ -605,7 +605,7 @@ void __cdecl Profile_ResetCounters(int system)
 #if 0
     ProfileStack *prof_stack; // [esp+30h] [ebp-Ch]
     int profileContext; // [esp+34h] [ebp-8h]
-    uint32_t profileStackPos; // [esp+38h] [ebp-4h]
+    uint profileStackPos; // [esp+38h] [ebp-4h]
 
     prof_stack = (ProfileStack *)Sys_GetValue(0);
     profileStackPos = 0;
@@ -765,7 +765,7 @@ ProfileScript *__cdecl Profile_GetScript()
     return &profileScript;
 }
 
-int __cdecl Profile_GetEnumParity(uint32_t profEnum)
+int __cdecl Profile_GetEnumParity(uint profEnum)
 {
     if (profEnum >= 0x1B0)
         MyAssertHandler(
@@ -785,7 +785,7 @@ int __cdecl Profile_GetDisplayThread()
     return profile_thread->current.integer;
 }
 
-void __cdecl Profile_EndScripts(uint32_t profileFlags)
+void __cdecl Profile_EndScripts(uint profileFlags)
 {
 #if 0
     int profileIndex; // [esp+10h] [ebp-4h]
@@ -820,7 +820,7 @@ void __cdecl Profile_EndScript(int profileIndex)
 {
 #if 0
     ProfileScriptWritable *write; // [esp+8h] [ebp-8h]
-    uint32_t endTime; // [esp+Ch] [ebp-4h]
+    uint endTime; // [esp+Ch] [ebp-4h]
 
     endTime = __rdtsc();
     if (profileIndex >= 40)
@@ -881,7 +881,7 @@ int __cdecl Profile_EndInternal(long double *duration)
     return p - prof_stack->prof_array;
 }
 
-void __cdecl Profile_BeginScripts(uint32_t profileFlags)
+void __cdecl Profile_BeginScripts(uint profileFlags)
 {
     // KISAKTODO: profiler
     int profileIndex; // [esp+Ch] [ebp-4h]
@@ -954,7 +954,7 @@ void __cdecl Profile_Begin(int index)
 int __cdecl Profile_AddScriptName(char *profileName)
 {
     char *name; // [esp+0h] [ebp-8h]
-    uint32_t i; // [esp+4h] [ebp-4h]
+    uint i; // [esp+4h] [ebp-4h]
 
     for (i = 0; i < 0x28; ++i)
     {
@@ -978,7 +978,7 @@ void __cdecl Profile_ResetCountersForContext(int profileContext, int system)
 #if 0
     int atomType; // [esp+8h] [ebp-Ch]
     profile_t *prof_array; // [esp+Ch] [ebp-8h]
-    uint32_t i; // [esp+10h] [ebp-4h]
+    uint i; // [esp+10h] [ebp-4h]
 
     prof_array = Profile_GetStackForContext(profileContext)->prof_array;
     for (i = 0; i < 0x1B0; ++i)
@@ -1007,7 +1007,7 @@ const char *__cdecl Profile_MissingEnd()
 {
     ProfileStack *prof_stack; // [esp+0h] [ebp-Ch]
     char *msg; // [esp+4h] [ebp-8h]
-    uint32_t profId; // [esp+8h] [ebp-4h]
+    uint profId; // [esp+8h] [ebp-4h]
 
     prof_stack = (ProfileStack *)Sys_GetValue(0);
     msg = 0;

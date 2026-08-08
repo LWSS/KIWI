@@ -36,14 +36,14 @@ void __cdecl Com_LoadVolumeModGroups(VolumeModGroup *volumeModGroups)
     {
         if (v6)
         {
-            FS_Read((unsigned char*)buffer, len, file);
+            FS_Read((byte*)buffer, len, file);
             buffer[len] = 0;
             if (!strncmp(buffer, last, len))
             {
                 if (v6 - len < 0x2000)
                 {
                     memset(buffer, 0, 0x2000u);
-                    FS_Read((unsigned char *)buffer, v6 - len, file);
+                    FS_Read((byte *)buffer, v6 - len, file);
                     buffer[v6 - len] = 0;
                     FS_FCloseFile(file);
                     Com_BeginParseSession(filename);
@@ -156,7 +156,7 @@ void __cdecl Com_LoadSoundAliasDefaults(snd_alias_build_s *alias, const char *so
 
 BOOL __cdecl Com_IsValidName(
     const char *token,
-    uint32_t maxLength,
+    uint maxLength,
     int(__cdecl *validityFunction)(const char *),
     snd_alias_build_s *alias,
     snd_alias_members_t field,
@@ -689,7 +689,7 @@ void __cdecl Com_LoadSoundAliasField(
     char *v16; // [esp+40h] [ebp-40h]
     char *aliasName; // [esp+4Ch] [ebp-34h]
     char *v18; // [esp+50h] [ebp-30h]
-    uint32_t i; // [esp+7Ch] [ebp-4h]
+    uint i; // [esp+7Ch] [ebp-4h]
 
     if (field > SA_ENVELOPPERCENTAGE)
         MyAssertHandler(
@@ -863,7 +863,7 @@ void __cdecl Com_LoadSoundAliasField(
     }
 }
 
-uint32_t *__cdecl Com_AllocateTempSoundMemory(int size, const char *name)
+uint *__cdecl Com_AllocateTempSoundMemory(int size, const char *name)
 {
     return Hunk_AllocateTempMemory(size, name);
 }
@@ -1455,7 +1455,7 @@ void __cdecl Com_MakeSoundAliasesPermanent(snd_alias_list_t *aliasInfo, SoundFil
     char *currentNamea; // [esp+B8h] [ebp-30h]
     char *currentNameb; // [esp+B8h] [ebp-30h]
     char *subtitle; // [esp+BCh] [ebp-2Ch]
-    uint32_t aliasCount; // [esp+C0h] [ebp-28h]
+    uint aliasCount; // [esp+C0h] [ebp-28h]
     snd_alias_build_s *other; // [esp+C4h] [ebp-24h]
     snd_alias_list_t *aliasList; // [esp+C8h] [ebp-20h]
     snd_alias_build_s *build; // [esp+CCh] [ebp-1Ch]
@@ -1465,7 +1465,7 @@ void __cdecl Com_MakeSoundAliasesPermanent(snd_alias_list_t *aliasInfo, SoundFil
     int soundCount; // [esp+D4h] [ebp-14h]
     int bytesCount; // [esp+D8h] [ebp-10h]
     int bytesCounta; // [esp+D8h] [ebp-10h]
-    uint32_t stringBytesCount; // [esp+E0h] [ebp-8h]
+    uint stringBytesCount; // [esp+E0h] [ebp-8h]
 
     soundFileInfo->count = 0;
     aliasInfo->count = 0;
@@ -1727,8 +1727,8 @@ void __cdecl Com_ParseEntChannelFile(const char *buffer)
 
 void __cdecl Com_SetChannelMapEntry(
     MSSChannelMap *entry,
-    uint32_t inputChannel,
-    uint32_t outputChannel,
+    uint inputChannel,
+    uint outputChannel,
     float volume)
 {
     MSSSpeakerLevels *speaker; // [esp+0h] [ebp-4h]
@@ -1803,13 +1803,13 @@ char __cdecl Com_LoadSpkrMapParseBuffer(char *fileName, char *buffer)
     {
         if (identifierStrLength >= 0x2000)
             MyAssertHandler(".\\universal\\com_sndalias_load_obj.cpp", 2620, 0, "%s", "identifierStrLength < BIG_INFO_STRING");
-        FS_Read((unsigned char *)buffer, identifierStrLength, fileHandle);
+        FS_Read((byte *)buffer, identifierStrLength, fileHandle);
         buffer[identifierStrLength] = 0;
         if (!strncmp(buffer, "SPKRMAP", identifierStrLength))
         {
             if (fileLength - identifierStrLength < 0x2000)
             {
-                FS_Read((unsigned char*)buffer, fileLength - identifierStrLength, fileHandle);
+                FS_Read((byte*)buffer, fileLength - identifierStrLength, fileHandle);
                 buffer[fileLength - identifierStrLength] = 0;
                 FS_FCloseFile(fileHandle);
                 return 1;

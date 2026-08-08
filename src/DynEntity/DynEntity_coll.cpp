@@ -6,13 +6,13 @@ DynEntityCollWorld dynEntCollWorlds[2];
 
 void __cdecl TRACK_DynEntityCollWorld()
 {
-    int32_t collType; // [esp+0h] [ebp-4h]
+    int collType; // [esp+0h] [ebp-4h]
 
     for (collType = 0; collType < 2; ++collType)
         track_static_alloc_internal(&dynEntCollWorlds[collType], 20508, "dynEntCollWorlds[collType]", 25);
 }
 
-DynEntityCollSector *__cdecl DynEnt_GetCollSector(DynEntityCollType collType, uint32_t sectorIndex)
+DynEntityCollSector *__cdecl DynEnt_GetCollSector(DynEntityCollType collType, uint sectorIndex)
 {
     iassert(sectorIndex);
     iassert(sectorIndex < 1024);
@@ -28,7 +28,7 @@ void __cdecl DynEnt_ClearCollWorld(DynEntityCollType collType)
     uint16_t sectorIndex; // [esp+14h] [ebp-8h]
     DynEntityCollWorld *world; // [esp+18h] [ebp-4h]
 
-    if ((uint32_t)collType >= DYNENT_COLL_COUNT)
+    if ((uint)collType >= DYNENT_COLL_COUNT)
         MyAssertHandler(
             ".\\DynEntity\\DynEntity_coll.cpp",
             59,
@@ -53,7 +53,7 @@ void __cdecl DynEnt_UnlinkEntity(DynEntityCollType collType, uint16_t dynEntId)
 {
     uint16_t EntityCount; // ax
     DynEntityClient *ClientEntity; // eax
-    int32_t contents; // [esp+8h] [ebp-28h]
+    int contents; // [esp+8h] [ebp-28h]
     DynEntityCollSector *sector; // [esp+Ch] [ebp-24h]
     DynEntityColl *scan; // [esp+14h] [ebp-1Ch]
     DynEntityColl *scana; // [esp+14h] [ebp-1Ch]
@@ -67,7 +67,7 @@ void __cdecl DynEnt_UnlinkEntity(DynEntityCollType collType, uint16_t dynEntId)
 
     if (dynEntId == 0xFFFF)
         MyAssertHandler(".\\DynEntity\\DynEntity_coll.cpp", 410, 0, "%s", "dynEntId != DYNENT_INVALID_ID");
-    if (dynEntId >= (uint32_t)DynEnt_GetEntityCount(collType))
+    if (dynEntId >= (uint)DynEnt_GetEntityCount(collType))
     {
         EntityCount = DynEnt_GetEntityCount(collType);
         MyAssertHandler(
@@ -78,7 +78,7 @@ void __cdecl DynEnt_UnlinkEntity(DynEntityCollType collType, uint16_t dynEntId)
             dynEntId,
             EntityCount);
     }
-    if ((uint32_t)collType >= DYNENT_COLL_COUNT)
+    if ((uint)collType >= DYNENT_COLL_COUNT)
         MyAssertHandler(
             ".\\DynEntity\\DynEntity_coll.cpp",
             59,
@@ -170,7 +170,7 @@ void __cdecl DynEnt_LinkEntity(
 {
     uint16_t EntityCount; // ax
     uint16_t *p_flags; // [esp+4h] [ebp-4Ch]
-    int32_t contents; // [esp+1Ch] [ebp-34h]
+    int contents; // [esp+1Ch] [ebp-34h]
     DynEntityCollSector *sector; // [esp+20h] [ebp-30h]
     float dist; // [esp+28h] [ebp-28h]
     float mins[2]; // [esp+2Ch] [ebp-24h] BYREF
@@ -178,12 +178,12 @@ void __cdecl DynEnt_LinkEntity(
     uint16_t sectorIndex; // [esp+38h] [ebp-18h]
     float maxs[2]; // [esp+3Ch] [ebp-14h] BYREF
     DynEntityCollWorld *world; // [esp+44h] [ebp-Ch]
-    int32_t axis; // [esp+48h] [ebp-8h]
+    int axis; // [esp+48h] [ebp-8h]
     DynEntityColl *dynEntColl; // [esp+4Ch] [ebp-4h]
 
     if (dynEntId == 0xFFFF)
         MyAssertHandler(".\\DynEntity\\DynEntity_coll.cpp", 530, 0, "%s", "dynEntId != DYNENT_INVALID_ID");
-    if (dynEntId >= (uint32_t)DynEnt_GetEntityCount(collType))
+    if (dynEntId >= (uint)DynEnt_GetEntityCount(collType))
     {
         EntityCount = DynEnt_GetEntityCount(collType);
         MyAssertHandler(
@@ -198,7 +198,7 @@ void __cdecl DynEnt_LinkEntity(
         MyAssertHandler(".\\DynEntity\\DynEntity_coll.cpp", 532, 0, "%s", "absMins");
     if (!absMaxs)
         MyAssertHandler(".\\DynEntity\\DynEntity_coll.cpp", 533, 0, "%s", "absMaxs");
-    if ((uint32_t)collType >= DYNENT_COLL_COUNT)
+    if ((uint)collType >= DYNENT_COLL_COUNT)
         MyAssertHandler(
             ".\\DynEntity\\DynEntity_coll.cpp",
             59,
@@ -272,7 +272,7 @@ void __cdecl DynEnt_AddToCollSector(
 
     if (dynEntId == 0xFFFF)
         MyAssertHandler(".\\DynEntity\\DynEntity_coll.cpp", 274, 0, "%s", "dynEntId != DYNENT_INVALID_ID");
-    if (dynEntId >= (uint32_t)DynEnt_GetEntityCount(collType))
+    if (dynEntId >= (uint)DynEnt_GetEntityCount(collType))
     {
         EntityCount = DynEnt_GetEntityCount(collType);
         MyAssertHandler(
@@ -293,7 +293,7 @@ void __cdecl DynEnt_AddToCollSector(
             "%s\n\t(sectorIndex) = %i",
             "(sectorIndex < 1024)",
             sectorIndex);
-    if ((uint32_t)collType >= DYNENT_COLL_COUNT)
+    if ((uint)collType >= DYNENT_COLL_COUNT)
         MyAssertHandler(
             ".\\DynEntity\\DynEntity_coll.cpp",
             59,
@@ -303,7 +303,7 @@ void __cdecl DynEnt_AddToCollSector(
             2);
     dynEntColl = DynEnt_GetEntityColl(collType, dynEntId);
     for (prevListIndex = &dynEntCollWorlds[collType].sectors[sectorIndex].entListHead;
-        (uint32_t)*prevListIndex - 1 <= dynEntId;
+        (uint)*prevListIndex - 1 <= dynEntId;
         prevListIndex = &DynEnt_GetEntityColl(collType, *prevListIndex - 1)->nextEntInSector)
     {
         ;
@@ -325,7 +325,7 @@ void __cdecl DynEnt_SortCollSector(
     DynEntityCollWorld *world; // [esp+18h] [ebp-18h]
     uint16_t dynEntId; // [esp+1Ch] [ebp-14h]
     DynEntityColl *prevDynEntColl; // [esp+20h] [ebp-10h]
-    int32_t axis; // [esp+24h] [ebp-Ch]
+    int axis; // [esp+24h] [ebp-Ch]
     DynEntityColl *dynEntColl; // [esp+28h] [ebp-8h]
     uint16_t childSectorIndex; // [esp+2Ch] [ebp-4h]
 
@@ -343,7 +343,7 @@ void __cdecl DynEnt_SortCollSector(
         MyAssertHandler(".\\DynEntity\\DynEntity_coll.cpp", 323, 0, "%s", "mins");
     if (!maxs)
         MyAssertHandler(".\\DynEntity\\DynEntity_coll.cpp", 324, 0, "%s", "maxs");
-    if ((uint32_t)collType >= DYNENT_COLL_COUNT)
+    if ((uint)collType >= DYNENT_COLL_COUNT)
         MyAssertHandler(
             ".\\DynEntity\\DynEntity_coll.cpp",
             59,
@@ -435,7 +435,7 @@ uint16_t __cdecl DynEnt_AllocCollSector(DynEntityCollType collType, const float 
         MyAssertHandler(".\\DynEntity\\DynEntity_coll.cpp", 230, 0, "%s", "mins");
     if (!maxs)
         MyAssertHandler(".\\DynEntity\\DynEntity_coll.cpp", 231, 0, "%s", "maxs");
-    if ((uint32_t)collType >= DYNENT_COLL_COUNT)
+    if ((uint)collType >= DYNENT_COLL_COUNT)
         MyAssertHandler(
             ".\\DynEntity\\DynEntity_coll.cpp",
             59,
@@ -467,7 +467,7 @@ uint16_t __cdecl DynEnt_AllocCollSector(DynEntityCollType collType, const float 
     return sectorIndex;
 }
 
-int32_t __cdecl DynEnt_GetContents(const DynEntityDef *dynEntDef)
+int __cdecl DynEnt_GetContents(const DynEntityDef *dynEntDef)
 {
     if (!dynEntDef)
         MyAssertHandler(".\\DynEntity\\DynEntity_coll.cpp", 625, 0, "%s", "dynEntDef");
@@ -511,7 +511,7 @@ double __cdecl DynEnt_GetRadiusDistSqr(const DynEntityPose *dynEntPose, const fl
 {
     float absMaxs[3]; // [esp+0h] [ebp-28h] BYREF
     float offset[3]; // [esp+Ch] [ebp-1Ch] BYREF
-    int32_t vecIndex; // [esp+18h] [ebp-10h]
+    int vecIndex; // [esp+18h] [ebp-10h]
     float absMins[3]; // [esp+1Ch] [ebp-Ch] BYREF
 
     if (!dynEntPose)
@@ -540,7 +540,7 @@ double __cdecl DynEnt_GetCylindricalRadiusDistSqr(const DynEntityPose *dynEntPos
 {
     float absMaxs[3]; // [esp+4h] [ebp-24h] BYREF
     float offset[2]; // [esp+10h] [ebp-18h]
-    int32_t vecIndex; // [esp+18h] [ebp-10h]
+    int vecIndex; // [esp+18h] [ebp-10h]
     float absMins[3]; // [esp+1Ch] [ebp-Ch] BYREF
 
     if (!dynEntPose)
@@ -570,7 +570,7 @@ bool __cdecl DynEnt_EntityInArea(
     const DynEntityPose *dynEntPose,
     const float *mins,
     const float *maxs,
-    int32_t contentMask)
+    int contentMask)
 {
     float absMaxs[3]; // [esp+0h] [ebp-18h] BYREF
     float absMins[3]; // [esp+Ch] [ebp-Ch] BYREF

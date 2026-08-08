@@ -10,7 +10,7 @@
 #include "game_public.h"
 
 
-enum $854C867908149C343981C8BAF4C9A230 : __int32
+enum $854C867908149C343981C8BAF4C9A230 : int
 {
     ENTFIELD_ENTITY = 0x0,
     ENTFIELD_SENTIENT = 0x4000,
@@ -20,7 +20,7 @@ enum $854C867908149C343981C8BAF4C9A230 : __int32
 };
 
 // MOD = Means of Death
-enum meansOfDeath_t : __int32
+enum meansOfDeath_t : int
 {
     MOD_UNKNOWN = 0x0,
     MOD_PISTOL_BULLET = 0x1,

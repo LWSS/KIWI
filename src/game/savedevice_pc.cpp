@@ -23,7 +23,7 @@
 // int __cdecl OpenDevice(char const *, void **) 82280140 f   savedevice_xenon.obj
 // void __cdecl CloseDevice(void *)     822801e0 f   savedevice_xenon.obj
 // BOOL __cdecl SaveExists(char const *)     82280280 f   savedevice_xenon.obj
-// int __cdecl WriteSaveToDevice(unsigned char *, struct SaveHeader const *, BOOL) 82280448 f   savedevice_xenon.obj
+// int __cdecl WriteSaveToDevice(byte *, struct SaveHeader const *, BOOL) 82280448 f   savedevice_xenon.obj
 // void __cdecl SV_ForceSelectSaveDevice_f(void) 823cfd38 f   sv_ccmds.obj
 // void __cdecl SV_SelectSaveDevice_f(void) 823cfd90 f   sv_ccmds.obj
 // char const *const CONSOLE_DEFAULT_SAVE_NAME 826969a4     savedevice_xenon.obj
@@ -67,7 +67,7 @@ bool __cdecl BuildCleanSavePath(char *cleanSavePath, unsigned int cleanSavePathS
 		int c;
 		do
 		{
-			c = (unsigned char)*src++;
+			c = (byte)*src++;
 			*dst++ = (char)c;
 		} while (c);
 		return true;
@@ -75,7 +75,7 @@ bool __cdecl BuildCleanSavePath(char *cleanSavePath, unsigned int cleanSavePathS
 #endif
 
 	const char *p = filename;
-	while (*(unsigned char *)p++)
+	while (*(byte *)p++)
 		;
 	unsigned int len = (unsigned int)(p - filename - 1);
 
@@ -172,7 +172,7 @@ int __cdecl ReadFromDevice(void *buffer, int size, void *fileHandle)
 	int handle = (int)(intptr_t)fileHandle;
 	if (!handle || !buffer || size <= 0)
 		return 0;
-	return (int)FS_Read((unsigned char *)buffer, (unsigned int)size, handle);
+	return (int)FS_Read((byte *)buffer, (unsigned int)size, handle);
 }
 
 static bool SaveExistsValidated(char const *path)
@@ -187,7 +187,7 @@ static bool SaveExistsValidated(char const *path)
 	if (!handle)
 		return false;
 
-	const int bytesRead = FS_Read((unsigned char *)&header, (unsigned int)sizeof(SaveHeader), handle);
+	const int bytesRead = FS_Read((byte *)&header, (unsigned int)sizeof(SaveHeader), handle);
 	FS_FCloseFile(handle);
 
 	return bytesRead == (int)sizeof(SaveHeader) && header.saveVersion == 287;
@@ -217,7 +217,7 @@ bool __cdecl SaveExists(char const *savename)
 #endif
 }
 
-int __cdecl WriteSaveToDevice(unsigned char *data, struct SaveHeader const *saveHeader, bool /*suppressPlayerNotify*/)
+int __cdecl WriteSaveToDevice(byte *data, struct SaveHeader const *saveHeader, bool /*suppressPlayerNotify*/)
 {
 	if (!data || !saveHeader)
 	{

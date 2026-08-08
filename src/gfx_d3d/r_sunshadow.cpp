@@ -86,7 +86,7 @@ void __cdecl R_SunShadowMapBoundingPoly(
     }
 }
 
-static uint32_t __cdecl R_SunShadowMapClipSpaceClipPlanes(
+static uint __cdecl R_SunShadowMapClipSpaceClipPlanes(
     const GfxSunShadowBoundingPoly *boundingPoly,
     int partitionIndex,
     float sampleSize,
@@ -94,7 +94,7 @@ static uint32_t __cdecl R_SunShadowMapClipSpaceClipPlanes(
 {
     float v5; // [esp+Ch] [ebp-A4h]
     float v8; // [esp+18h] [ebp-98h]
-    uint32_t planeCount; // [esp+30h] [ebp-80h]
+    uint planeCount; // [esp+30h] [ebp-80h]
     int pointIsNear[10]; // [esp+34h] [ebp-7Ch] BYREF
     float frustumBoundPolyInClipSpace[10][2]; // [esp+60h] [ebp-50h] BYREF
     //float frustumBoundPolyInClipSpace[9][2]; // [esp+60h] [ebp-50h] BYREF
@@ -145,7 +145,7 @@ static uint32_t __cdecl R_SunShadowMapClipSpaceClipPlanes(
 void __cdecl R_SetupSunShadowMaps(const GfxViewParms *viewParms, GfxSunShadow *sunShadow)
 {
     float sunOrigin[3]; // [esp+50h] [ebp-100h] BYREF
-    uint32_t planeCount; // [esp+5Ch] [ebp-F4h]
+    uint planeCount; // [esp+5Ch] [ebp-F4h]
     float shadowSampleSize; // [esp+64h] [ebp-ECh]
     float snappedViewOrgInClipSpace[2][2]; // [esp+68h] [ebp-E8h] BYREF
     float partitionFraction[4]; // [esp+78h] [ebp-D8h] BYREF
@@ -301,7 +301,7 @@ void __cdecl R_SetupSunShadowMapProjection(
     float (*snappedViewOrgInClipSpace)[2][2],
     float *partitionFraction)
 {
-    uint32_t sunShadowSize; // [esp+78h] [ebp-23Ch]
+    uint sunShadowSize; // [esp+78h] [ebp-23Ch]
     float minsInSunProj[2][2]; // [esp+140h] [ebp-174h] BYREF
     float sizeInSunProj[2]; // [esp+150h] [ebp-164h]
     float nearFrustumPoints[4][3]; // [esp+158h] [ebp-15Ch] BYREF
@@ -313,13 +313,13 @@ void __cdecl R_SetupSunShadowMapProjection(
     float shadowOrg[3]; // [esp+238h] [ebp-7Ch] BYREF
     float viewOrgInSunProj[2]; // [esp+244h] [ebp-70h] BYREF
     float sampleSizeFar; // [esp+24Ch] [ebp-68h]
-    uint32_t farShadowBegin; // [esp+250h] [ebp-64h]
+    uint farShadowBegin; // [esp+250h] [ebp-64h]
     GfxSunShadowPartition *partitionNear; // [esp+254h] [ebp-60h]
     float offset[2]; // [esp+258h] [ebp-5Ch]
-    uint32_t pointIndex; // [esp+260h] [ebp-54h]
-    uint32_t farShadowEnd; // [esp+264h] [ebp-50h]
+    uint pointIndex; // [esp+260h] [ebp-54h]
+    uint farShadowEnd; // [esp+264h] [ebp-50h]
     int useShadowOffset; // [esp+274h] [ebp-40h]
-    uint32_t farShadowMiddle; // [esp+278h] [ebp-3Ch]
+    uint farShadowMiddle; // [esp+278h] [ebp-3Ch]
     GfxSunShadowPartition *partitionFar; // [esp+27Ch] [ebp-38h]
     float sampleSizeNear; // [esp+280h] [ebp-34h]
     float scale; // [esp+284h] [ebp-30h]
@@ -683,9 +683,9 @@ void __cdecl R_SetupSunShadowBoundingPoly(
     float maxSizeInSunProj,
     const float *snappedViewOrgInClipSpace,
     GfxSunShadowBoundingPoly *boundingPoly,
-    uint32_t pointCount)
+    uint pointCount)
 {
-    uint32_t nearPointIndex; // [esp+Ch] [ebp-94h]
+    uint nearPointIndex; // [esp+Ch] [ebp-94h]
     float scaleToClipSpace; // [esp+10h] [ebp-90h]
     int pointIndex; // [esp+14h] [ebp-8Ch]
     float tempFrustumPointsInSunProj[8][2]; // [esp+18h] [ebp-88h] BYREF
@@ -780,7 +780,7 @@ void __cdecl R_SetupNearRegionPlane(const float *partitionFraction)
 {
     float size; // [esp+24h] [ebp-14h]
     DpvsPlane *shadowFarPlane; // [esp+28h] [ebp-10h]
-    uint32_t partitionIndex; // [esp+2Ch] [ebp-Ch]
+    uint partitionIndex; // [esp+2Ch] [ebp-Ch]
     float scale; // [esp+30h] [ebp-8h]
     float length; // [esp+34h] [ebp-4h]
 
@@ -874,9 +874,9 @@ void __cdecl R_GetSunShadowLookupMatrix(
 
 void __cdecl R_SunShadowMaps()
 {
-    uint32_t oldViewIndex;
+    uint oldViewIndex;
     int partitionIndex;
-    uint32_t viewIndex;
+    uint viewIndex;
 
     iassert(rgp.world);
 
@@ -902,7 +902,7 @@ void __cdecl R_MergeAndEmitSunShadowMapsSurfs(GfxViewInfo *viewInfo)
 {
     int firstDrawSurf; // [esp+38h] [ebp-14h]
     GfxDrawSurfListInfo *info; // [esp+3Ch] [ebp-10h]
-    uint32_t partitionIndex; // [esp+40h] [ebp-Ch]
+    uint partitionIndex; // [esp+40h] [ebp-Ch]
     GfxSunShadow *sunShadow; // [esp+44h] [ebp-8h]
 
     sunShadow = &viewInfo->sunShadow;

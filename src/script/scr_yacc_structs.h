@@ -1002,7 +1002,7 @@ const alignas(4) int yy_ec[256] =
 
 
 
-static alignas(4) const int32_t yy_meta[60] =
+static alignas(4) const int yy_meta[60] =
 {
 	0,    1,    1,    2,    1,    1,    1,    1,    1,    1,
 	1,    1,    1,    1,    1,    1,    1,    1,    3,    1,

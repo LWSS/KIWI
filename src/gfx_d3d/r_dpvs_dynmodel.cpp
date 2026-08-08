@@ -6,11 +6,11 @@
 
 void __cdecl R_AddCellDynModelSurfacesInFrustumCmd(const DpvsDynamicCellCmd *data)
 {
-    uint32_t planeCount; // [esp+0h] [ebp-28h]
+    uint planeCount; // [esp+0h] [ebp-28h]
     const DpvsPlane *planes; // [esp+4h] [ebp-24h]
-    uint32_t dynEntClientWordCount; // [esp+8h] [ebp-20h]
+    uint dynEntClientWordCount; // [esp+8h] [ebp-20h]
     uint8_t *dynEntVisData; // [esp+10h] [ebp-18h]
-    uint32_t *dynEntCellBits; // [esp+14h] [ebp-14h]
+    uint *dynEntCellBits; // [esp+14h] [ebp-14h]
     DynEntityPose *dynModelList; // [esp+18h] [ebp-10h]
     GfxWorldDpvsDynamic *worldDpvsDyn; // [esp+24h] [ebp-4h]
 
@@ -30,8 +30,8 @@ void __cdecl R_AddCellDynModelSurfacesInFrustumCmd(const DpvsDynamicCellCmd *dat
 }
 
 void __cdecl R_CullDynModelInCell(
-    const uint32_t *dynEntCellBits,
-    uint32_t dynEntClientWordCount,
+    const uint *dynEntCellBits,
+    uint dynEntClientWordCount,
     DynEntityPose *dynModelList,
     const DpvsPlane *planes,
     int planeCount,
@@ -42,10 +42,10 @@ void __cdecl R_CullDynModelInCell(
     float radius; // [esp+8h] [ebp-24h]
     const DpvsPlane *a; // [esp+Ch] [ebp-20h]
     int v11; // [esp+10h] [ebp-1Ch]
-    uint32_t dynEntIndex; // [esp+1Ch] [ebp-10h]
-    uint32_t bits; // [esp+20h] [ebp-Ch]
-    uint32_t indexLow; // [esp+24h] [ebp-8h]
-    uint32_t wordIndex; // [esp+28h] [ebp-4h]
+    uint dynEntIndex; // [esp+1Ch] [ebp-10h]
+    uint bits; // [esp+20h] [ebp-Ch]
+    uint indexLow; // [esp+24h] [ebp-8h]
+    uint wordIndex; // [esp+28h] [ebp-4h]
 
     for (wordIndex = 0; wordIndex < dynEntClientWordCount; ++wordIndex)
     {
@@ -58,7 +58,7 @@ void __cdecl R_CullDynModelInCell(
             if ((v7 ^ 0x1Fu) >= 0x20)
                 break;
             dynEntIndex = indexLow + 32 * wordIndex;
-            uint32_t bit = (0x80000000 >> indexLow);
+            uint bit = (0x80000000 >> indexLow);
             iassert( bits & bit );
             bits &= ~bit;
             if (!dynEntVisData[dynEntIndex])

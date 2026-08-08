@@ -2,7 +2,7 @@
 #include "database.h"
 
 
-void __cdecl Load_Stream(bool atStreamStart, uint8_t *ptr, int32_t size)
+void __cdecl Load_Stream(bool atStreamStart, uint8_t *ptr, int size)
 {
     iassert(atStreamStart == (ptr == DB_GetStreamPos()));
     if (atStreamStart && size)
@@ -30,24 +30,24 @@ void __cdecl Load_Stream(bool atStreamStart, uint8_t *ptr, int32_t size)
 
 void __cdecl Load_DelayStream()
 {
-    uint32_t index; // [esp+4h] [ebp-8h]
+    uint index; // [esp+4h] [ebp-8h]
 
     for (index = 0; index < g_streamDelayIndex; ++index)
-        DB_LoadXFileData((unsigned char*)g_streamDelayArray[index].ptr, g_streamDelayArray[index].size);
+        DB_LoadXFileData((byte*)g_streamDelayArray[index].ptr, g_streamDelayArray[index].size);
 }
 
-void __cdecl DB_ConvertOffsetToAlias(uint32_t *data)
+void __cdecl DB_ConvertOffsetToAlias(uint *data)
 {
-    uint32_t offset; // [esp+0h] [ebp-8h]
+    uint offset; // [esp+0h] [ebp-8h]
 
     offset = *data;
     iassert((offset && (offset != -1) && (offset != -2)));
-    *data = *(uint32_t *)&g_streamZoneMem->blocks[(offset - 1) >> 28].data[(offset - 1) & 0xFFFFFFF];
+    *data = *(uint *)&g_streamZoneMem->blocks[(offset - 1) >> 28].data[(offset - 1) & 0xFFFFFFF];
 }
 
-void __cdecl DB_ConvertOffsetToPointer(uint32_t *data)
+void __cdecl DB_ConvertOffsetToPointer(uint *data)
 {
-    *data = (uint32_t)&g_streamZoneMem->blocks[(uint32_t)(*data - 1) >> 28].data[(*data - 1) & 0xFFFFFFF];
+    *data = (uint)&g_streamZoneMem->blocks[(uint)(*data - 1) >> 28].data[(*data - 1) & 0xFFFFFFF];
 }
 
 void __cdecl Load_XStringCustom(char **str)

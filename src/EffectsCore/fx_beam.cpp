@@ -81,7 +81,7 @@ void __cdecl FX_Beam_GenerateVerts(FxGenerateVertsCmd *cmd)
     GfxColor lerpedColor; // [esp+1BCh] [ebp-FCh]
     float4 tpos0; // [esp+1C0h] [ebp-F8h]
     float4 normDelta; // [esp+1D0h] [ebp-E8h] BYREF
-    uint32_t argOffset; // [esp+1E0h] [ebp-D8h] BYREF
+    uint argOffset; // [esp+1E0h] [ebp-D8h] BYREF
     uint16_t baseVertex; // [esp+1E4h] [ebp-D4h] BYREF
     float4 perpFlatDelta; // [esp+1E8h] [ebp-D0h] BYREF
     float4 *args; // [esp+1F8h] [ebp-C0h]

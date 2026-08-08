@@ -11,20 +11,20 @@ struct bitarray // sizeof=0x10
             this->array[j] = 0;
     }
 
-    void setBit(uint32_t pos)
+    void setBit(uint pos)
     {
         iassert(pos < BIT_COUNT);
         array[pos / 32] |= 0x80000000 >> (pos & 0x1F);
     }
 
-    void resetBit(uint32_t pos)
+    void resetBit(uint pos)
     {
         iassert(pos < BIT_COUNT);
 
         array[pos / 32] &= ~(0x80000000 >> (pos & 0x1F));
     }
 
-    bool testBit(uint32_t pos) const
+    bool testBit(uint pos) const
     {
         iassert(pos < BIT_COUNT);
         return (array[pos / 32] & (0x80000000 >> (pos & 0x1F))) != 0;

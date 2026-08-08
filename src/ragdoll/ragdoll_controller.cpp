@@ -16,7 +16,7 @@
 
 RagdollBody *__cdecl Ragdoll_HandleBody(int ragdollHandle)
 {
-    if ((uint32_t)(ragdollHandle - 1) >= 0x20)
+    if ((uint)(ragdollHandle - 1) >= 0x20)
         MyAssertHandler(
             ".\\ragdoll\\ragdoll_controller.cpp",
             31,

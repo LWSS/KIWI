@@ -529,7 +529,7 @@ inline cgs_t *CG_GetLocalClientStaticGlobals(int localClientNum)
     return &cgsArray[localClientNum];
 }
 
-inline centity_s *CG_GetEntity(int32_t localClientNum, uint32_t entityIndex)
+inline centity_s *CG_GetEntity(int localClientNum, uint entityIndex)
 {
     iassert(localClientNum == 0);
     bcassert(entityIndex, MAX_GENTITIES);
@@ -537,7 +537,7 @@ inline centity_s *CG_GetEntity(int32_t localClientNum, uint32_t entityIndex)
     return &cg_entitiesArray[localClientNum][entityIndex];
 }
 
-inline cg_s *CG_GetLocalClientGlobals(int32_t localClientNum)
+inline cg_s *CG_GetLocalClientGlobals(int localClientNum)
 {
     iassert(localClientNum == 0);
 

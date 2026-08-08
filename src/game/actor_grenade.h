@@ -5,7 +5,7 @@
 #error This file is for SinglePlayer only 
 #endif
 
-enum ActorGrenadeReevaluateMode : __int32
+enum ActorGrenadeReevaluateMode : int
 {
     REEVALUATE_ATTEMPT_RETURN = 0x0,
     REEVALUATE_NO_RETURN = 0x1,

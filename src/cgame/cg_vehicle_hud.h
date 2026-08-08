@@ -7,7 +7,7 @@
 #include <gfx_d3d/r_material.h>
 #include <qcommon/qcommon.h>
 
-enum Clip_t : __int32
+enum Clip_t : int
 {
     CLIP_NONE = 0x0,
     CLIP_TOP = 0x1,

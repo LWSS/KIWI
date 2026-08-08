@@ -32,7 +32,7 @@ const float TEST_bullet_step_1[2] = { 20.0f, 12.0f };
 const float TEST_bullet_wh_1[2] = { 16.0f, 8.0f };
 const float TEST_bullet_step_2[2] = { 72.0f, 12.0f };
 const float TEST_bullet_wh_2[2] = {64.0f, 16.0f};
-const int32_t TEST_bullet_rowCnt = 20;
+const int TEST_bullet_rowCnt = 20;
 const float TEST_bullet_wh_3[2] = { 8.0f, 4.0f };
 const float TEST_bullet_step_3[2] = { 8.0f, -2.0f };
 
@@ -138,19 +138,19 @@ void __cdecl CG_AmmoCounterRegisterDvars()
 }
 
 void __cdecl CG_DrawPlayerWeaponAmmoStock(
-    int32_t localClientNum,
+    int localClientNum,
     const rectDef_s *rect,
     Font_s *font,
     float scale,
     float *color,
     Material *material,
-    int32_t textStyle)
+    int textStyle)
 {
-    uint32_t WeaponIndex; // eax
+    uint WeaponIndex; // eax
     char str[64]; // [esp+30h] [ebp-68h] BYREF
     cg_s *cgameGlob; // [esp+74h] [ebp-24h]
-    int32_t ammoStock; // [esp+78h] [ebp-20h]
-    int32_t weapIndex; // [esp+80h] [ebp-18h]
+    int ammoStock; // [esp+78h] [ebp-20h]
+    int weapIndex; // [esp+80h] [ebp-18h]
     const playerState_s *ps; // [esp+84h] [ebp-14h]
     float colorMod[4]; // [esp+88h] [ebp-10h] BYREF
 
@@ -197,7 +197,7 @@ void __cdecl CG_DrawPlayerWeaponAmmoStock(
     }
 }
 
-uint32_t __cdecl ClipCounterWeapIdx(const cg_s *cgameGlob, uint32_t weapIndex)
+uint __cdecl ClipCounterWeapIdx(const cg_s *cgameGlob, uint weapIndex)
 {
     const WeaponDef *weapDef; // [esp+0h] [ebp-4h]
 
@@ -211,7 +211,7 @@ uint32_t __cdecl ClipCounterWeapIdx(const cg_s *cgameGlob, uint32_t weapIndex)
     return weapIndex;
 }
 
-uint32_t __cdecl GetWeaponAltIndex(const cg_s *cgameGlob, const WeaponDef *weapDef)
+uint __cdecl GetWeaponAltIndex(const cg_s *cgameGlob, const WeaponDef *weapDef)
 {
     const WeaponDef *weapDefAlt; // [esp+0h] [ebp-4h]
 
@@ -244,7 +244,7 @@ uint32_t __cdecl GetWeaponAltIndex(const cg_s *cgameGlob, const WeaponDef *weapD
     }
 }
 
-double __cdecl AmmoCounterFadeAlpha(int32_t localClientNum, cg_s *cgameGlob)
+double __cdecl AmmoCounterFadeAlpha(int localClientNum, cg_s *cgameGlob)
 {
 
     iassert(cgameGlob);
@@ -259,15 +259,15 @@ double __cdecl AmmoCounterFadeAlpha(int32_t localClientNum, cg_s *cgameGlob)
         SnapFloatToInt(hud_fade_ammodisplay->current.value * 1000.0f));
 }
 
-double __cdecl CG_GetHudAlphaDPad(int32_t localClientNum)
+double __cdecl CG_GetHudAlphaDPad(int localClientNum)
 {
     cg_s *LocalClientGlobals = CG_GetLocalClientGlobals(localClientNum);
     return DpadFadeAlpha(localClientNum, LocalClientGlobals);
 }
 
-double __cdecl DpadFadeAlpha(int32_t localClientNum, cg_s *cgameGlob)
+double __cdecl DpadFadeAlpha(int localClientNum, cg_s *cgameGlob)
 {
-    uint32_t idx; // [esp+14h] [ebp-4h]
+    uint idx; // [esp+14h] [ebp-4h]
 
     iassert(cgameGlob);
 
@@ -282,7 +282,7 @@ double __cdecl DpadFadeAlpha(int32_t localClientNum, cg_s *cgameGlob)
     return AmmoCounterFadeAlpha(localClientNum, cgameGlob);
 }
 
-bool __cdecl ActionSlotIsActive(int32_t localClientNum, uint32_t slotIdx)
+bool __cdecl ActionSlotIsActive(int localClientNum, uint slotIdx)
 {
     ActionSlotType v3; // [esp+0h] [ebp-10h]
     playerState_s *ps; // [esp+8h] [ebp-8h]
@@ -314,15 +314,15 @@ bool __cdecl ActionSlotIsActive(int32_t localClientNum, uint32_t slotIdx)
     return 0;
 }
 
-double __cdecl CG_GetHudAlphaAmmoCounter(int32_t localClientNum)
+double __cdecl CG_GetHudAlphaAmmoCounter(int localClientNum)
 {
     cg_s *LocalClientGlobals = CG_GetLocalClientGlobals(localClientNum);
     return AmmoCounterFadeAlpha(localClientNum, LocalClientGlobals);
 }
 
-bool __cdecl CG_ActionSlotIsUsable(int32_t localClientNum, uint32_t slotIdx)
+bool __cdecl CG_ActionSlotIsUsable(int localClientNum, uint slotIdx)
 {
-    uint32_t weapIdx; // [esp+8h] [ebp-8h]
+    uint weapIdx; // [esp+8h] [ebp-8h]
     playerState_s *ps; // [esp+Ch] [ebp-4h]
     cg_s *cgameGlob;
 
@@ -359,7 +359,7 @@ bool __cdecl CG_ActionSlotIsUsable(int32_t localClientNum, uint32_t slotIdx)
 }
 
 void __cdecl CG_DrawPlayerActionSlotDpad(
-    int32_t localClientNum,
+    int localClientNum,
     const rectDef_s *rect,
     const float *color,
     Material *material)
@@ -369,7 +369,7 @@ void __cdecl CG_DrawPlayerActionSlotDpad(
     float h; // [esp+38h] [ebp-28h]
     float w; // [esp+3Ch] [ebp-24h]
     ScreenPlacement *scrPlace; // [esp+40h] [ebp-20h]
-    int32_t idx; // [esp+48h] [ebp-18h]
+    int idx; // [esp+48h] [ebp-18h]
     float colorMod[4]; // [esp+50h] [ebp-10h] BYREF
     cg_s *LocalClientGlobals;
 
@@ -416,7 +416,7 @@ void __cdecl CG_DrawPlayerActionSlotDpad(
                     y = rect->h * (float)MY_DIMS[idx + 4][1] + rect->y;
                     w = rect->w * (float)MY_DIMS[idx][0];
                     h = rect->h * (float)MY_DIMS[idx][1];
-                    if ((uint32_t)idx > 1)
+                    if ((uint)idx > 1)
                         CL_DrawStretchPicFlipST(
                             scrPlace,
                             x,
@@ -452,20 +452,20 @@ void __cdecl CG_DrawPlayerActionSlotDpad(
     }
 }
 void __cdecl CG_DrawPlayerActionSlot(
-    int32_t localClientNum,
+    int localClientNum,
     const rectDef_s* rect,
-    uint32_t slotIdx,
+    uint slotIdx,
     float* color,
     Font_s* textFont,
     float textScale,
-    int32_t textStyle)
+    int textStyle)
 {
-    int32_t v8; // eax
+    int v8; // eax
     ActionSlotType v9; // [esp+30h] [ebp-7Ch]
     char str[64]; // [esp+34h] [ebp-78h] BYREF
-    int32_t ammo; // [esp+78h] [ebp-34h]
+    int ammo; // [esp+78h] [ebp-34h]
     cg_s* cgameGlob; // [esp+7Ch] [ebp-30h]
-    uint32_t weapIdx; // [esp+80h] [ebp-2Ch]
+    uint weapIdx; // [esp+80h] [ebp-2Ch]
     const playerState_s* ps; // [esp+84h] [ebp-28h]
     float colorMod[4]; // [esp+88h] [ebp-24h] BYREF
     float x; // [esp+98h] [ebp-14h] BYREF
@@ -615,7 +615,7 @@ void __cdecl CG_DrawPlayerActionSlot(
 
 void __cdecl DpadIconDims(
     const rectDef_s *rect,
-    uint32_t slotIdx,
+    uint slotIdx,
     WeaponDef *weapDef,
     float *x,
     float *y,
@@ -654,7 +654,7 @@ void __cdecl DpadIconDims(
     }
 }
 
-void __cdecl DpadTextPos(const rectDef_s *rect, uint32_t slotIdx, WeaponDef *weapDef, float *x, float *y)
+void __cdecl DpadTextPos(const rectDef_s *rect, uint slotIdx, WeaponDef *weapDef, float *x, float *y)
 {
     iassert(rect);
     iassert(weapDef);
@@ -669,7 +669,7 @@ void __cdecl DpadTextPos(const rectDef_s *rect, uint32_t slotIdx, WeaponDef *wea
 }
 
 void __cdecl CG_DrawPlayerWeaponBackground(
-    int32_t localClientNum,
+    int localClientNum,
     const rectDef_s *rect,
     const float *color,
     Material *material)
@@ -704,9 +704,9 @@ void __cdecl CG_DrawPlayerWeaponBackground(
             material);
 }
 
-void __cdecl CG_DrawPlayerWeaponAmmoClipGraphic(int32_t localClientNum, const rectDef_s *rect, const float *color)
+void __cdecl CG_DrawPlayerWeaponAmmoClipGraphic(int localClientNum, const rectDef_s *rect, const float *color)
 {
-    int32_t weapIdx; // [esp+18h] [ebp-20h]
+    int weapIdx; // [esp+18h] [ebp-20h]
     float base[2]; // [esp+1Ch] [ebp-1Ch] BYREF
     float colorMod[4]; // [esp+24h] [ebp-14h] BYREF
     WeaponDef *weapDef; // [esp+34h] [ebp-4h]
@@ -734,7 +734,7 @@ void __cdecl CG_DrawPlayerWeaponAmmoClipGraphic(int32_t localClientNum, const re
     }
 }
 
-void __cdecl GetBaseRectPos(int32_t localClientNum, const rectDef_s *rect, float *base)
+void __cdecl GetBaseRectPos(int localClientNum, const rectDef_s *rect, float *base)
 {
     float dummyW; // [esp+0h] [ebp-8h] BYREF
     float dummyH; // [esp+4h] [ebp-4h] BYREF
@@ -746,10 +746,10 @@ void __cdecl GetBaseRectPos(int32_t localClientNum, const rectDef_s *rect, float
     ScrPlace_ApplyRect(&scrPlaceView[localClientNum], base, base + 1, &dummyW, &dummyH, rect->horzAlign, rect->vertAlign);
 }
 
-void __cdecl DrawClipAmmo(cg_s *cgameGlob, float *base, uint32_t weapIdx, const WeaponDef *weapDef, float *color)
+void __cdecl DrawClipAmmo(cg_s *cgameGlob, float *base, uint weapIdx, const WeaponDef *weapDef, float *color)
 {
     WeaponDef *weapDefAlt; // [esp+4h] [ebp-8h]
-    int32_t weapIdxAlt; // [esp+8h] [ebp-4h]
+    int weapIdxAlt; // [esp+8h] [ebp-4h]
 
     iassert(cgameGlob);
     iassert(weapDef);
@@ -788,14 +788,14 @@ void __cdecl DrawClipAmmo(cg_s *cgameGlob, float *base, uint32_t weapIdx, const 
 void __cdecl DrawClipAmmoMagazine(
     cg_s *cgameGlob,
     const float *base,
-    uint32_t weapIdx,
+    uint weapIdx,
     const WeaponDef *weapDef,
     float *color)
 {
     float bulletX; // [esp+34h] [ebp-14h]
     float bulletY; // [esp+38h] [ebp-10h]
-    int32_t clipIdx; // [esp+3Ch] [ebp-Ch]
-    int32_t clipCnt; // [esp+44h] [ebp-4h]
+    int clipIdx; // [esp+3Ch] [ebp-Ch]
+    int clipCnt; // [esp+44h] [ebp-4h]
 
     iassert(cgameGlob);
     iassert(weapDef);
@@ -817,13 +817,13 @@ void __cdecl DrawClipAmmoMagazine(
     }
 }
 
-void __cdecl AmmoColor(cg_s *cgameGlob, float *color, uint32_t weapIndex)
+void __cdecl AmmoColor(cg_s *cgameGlob, float *color, uint weapIndex)
 {
     float v3; // [esp+0h] [ebp-10h]
     float delta; // [esp+8h] [ebp-8h]
     float deltaa; // [esp+8h] [ebp-8h]
     float deltab; // [esp+8h] [ebp-8h]
-    int32_t idx; // [esp+Ch] [ebp-4h]
+    int idx; // [esp+Ch] [ebp-4h]
 
     if (CG_CheckPlayerForLowClipSpecific(cgameGlob, weapIndex))
     {
@@ -845,14 +845,14 @@ void __cdecl AmmoColor(cg_s *cgameGlob, float *color, uint32_t weapIndex)
 void __cdecl DrawClipAmmoShortMagazine(
     cg_s *cgameGlob,
     const float *base,
-    uint32_t weapIdx,
+    uint weapIdx,
     const WeaponDef *weapDef,
     float *color)
 {
     float bulletX; // [esp+34h] [ebp-14h]
     float bulletY; // [esp+38h] [ebp-10h]
-    int32_t clipIdx; // [esp+3Ch] [ebp-Ch]
-    int32_t clipCnt; // [esp+44h] [ebp-4h]
+    int clipIdx; // [esp+3Ch] [ebp-Ch]
+    int clipCnt; // [esp+44h] [ebp-4h]
 
     iassert(cgameGlob);
     iassert(weapDef);
@@ -879,14 +879,14 @@ void __cdecl DrawClipAmmoShortMagazine(
 void __cdecl DrawClipAmmoShotgunShells(
     cg_s *cgameGlob,
     const float *base,
-    uint32_t weapIdx,
+    uint weapIdx,
     const WeaponDef *weapDef,
     float *color)
 {
-    int32_t magCnt; // [esp+34h] [ebp-14h]
+    int magCnt; // [esp+34h] [ebp-14h]
     float bulletX; // [esp+38h] [ebp-10h]
     float bulletY; // [esp+3Ch] [ebp-Ch]
-    int32_t magIdx; // [esp+44h] [ebp-4h]
+    int magIdx; // [esp+44h] [ebp-4h]
 
     iassert(cgameGlob);
     iassert(weapDef);
@@ -921,14 +921,14 @@ void __cdecl DrawClipAmmoShotgunShells(
 void __cdecl DrawClipAmmoRockets(
     cg_s *cgameGlob,
     const float *base,
-    uint32_t weapIdx,
+    uint weapIdx,
     const WeaponDef *weapDef,
     float *color)
 {
-    int32_t magCnt; // [esp+34h] [ebp-14h]
+    int magCnt; // [esp+34h] [ebp-14h]
     float bulletX; // [esp+38h] [ebp-10h]
     float bulletY; // [esp+3Ch] [ebp-Ch]
-    int32_t magIdx; // [esp+44h] [ebp-4h]
+    int magIdx; // [esp+44h] [ebp-4h]
 
     iassert(cgameGlob);
     iassert(weapDef);
@@ -963,15 +963,15 @@ void __cdecl DrawClipAmmoRockets(
 void __cdecl DrawClipAmmoBeltfed(
     cg_s *cgameGlob,
     float *base,
-    uint32_t weapIdx,
+    uint weapIdx,
     const WeaponDef *weapDef,
     float *color)
 {
     float stepX; // [esp+38h] [ebp-18h]
     float bulletX; // [esp+3Ch] [ebp-14h]
     float bulletY; // [esp+40h] [ebp-10h]
-    int32_t clipIdx; // [esp+44h] [ebp-Ch]
-    int32_t clipCnt; // [esp+4Ch] [ebp-4h]
+    int clipIdx; // [esp+44h] [ebp-Ch]
+    int clipCnt; // [esp+4Ch] [ebp-4h]
 
     iassert(cgameGlob);
     iassert(weapDef);
@@ -1010,9 +1010,9 @@ void __cdecl DrawClipAmmoBeltfed(
     }
 }
 
-void __cdecl CG_DrawPlayerWeaponIcon(int32_t localClientNum, const rectDef_s *rect, const float *color)
+void __cdecl CG_DrawPlayerWeaponIcon(int localClientNum, const rectDef_s *rect, const float *color)
 {
-    int32_t weapIdx; // [esp+18h] [ebp-18h]
+    int weapIdx; // [esp+18h] [ebp-18h]
     float colorMod[4]; // [esp+1Ch] [ebp-14h] BYREF
     WeaponDef *weapDef; // [esp+2Ch] [ebp-4h]
     cg_s *cgameGlob;
@@ -1081,11 +1081,11 @@ void __cdecl DrawStretchPicGun(
 }
 
 void __cdecl CG_DrawPlayerWeaponLowAmmoWarning(
-    int32_t localClientNum,
+    int localClientNum,
     const rectDef_s *rect,
     Font_s *font,
     float textScale,
-    int32_t textStyle,
+    int textStyle,
     float text_x,
     float text_y,
     char textAlignMode,
@@ -1102,7 +1102,7 @@ void __cdecl CG_DrawPlayerWeaponLowAmmoWarning(
     bool empty; // [esp+6Fh] [ebp-5Dh]
     char *localizedString; // [esp+70h] [ebp-5Ch]
     float color1[4]; // [esp+74h] [ebp-58h] BYREF
-    int32_t weapIndex; // [esp+84h] [ebp-48h]
+    int weapIndex; // [esp+84h] [ebp-48h]
     float bias; // [esp+88h] [ebp-44h]
     float colorMod[4]; // [esp+8Ch] [ebp-40h] BYREF
     WeaponDef *weapDef; // [esp+9Ch] [ebp-30h]
@@ -1203,9 +1203,9 @@ void __cdecl CG_DrawPlayerWeaponLowAmmoWarning(
     }
 }
 
-uint32_t __cdecl GetWeaponIndex(const cg_s *cgameGlob)
+uint __cdecl GetWeaponIndex(const cg_s *cgameGlob)
 {
-    uint32_t bitNum; // [esp+0h] [ebp-8h]
+    uint bitNum; // [esp+0h] [ebp-8h]
 
     if (cgameGlob->weaponSelect >= BG_GetNumWeapons())
         return cgameGlob->predictedPlayerState.weapon;

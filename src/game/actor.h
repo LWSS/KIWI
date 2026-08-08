@@ -22,7 +22,7 @@
 #define ACTOR_STOP_TIME 500
 #define MAX_ACTORS 32
 
-enum AISpecies : __int32
+enum AISpecies : int
 {
     AI_SPECIES_HUMAN = 0x0,
     AI_SPECIES_DOG = 0x1,
@@ -30,7 +30,7 @@ enum AISpecies : __int32
     AI_SPECIES_ALL = 0x2,
 };
 
-enum ai_state_t : __int32
+enum ai_state_t : int
 {
     AIS_INVALID = 0x0,
     AIS_KEEPCURRENT = 0x0,
@@ -52,7 +52,7 @@ enum ai_state_t : __int32
     AIS_COUNT = 0xB,
 };
 
-enum ai_substate_t : __int32
+enum ai_substate_t : int
 {
     STATE_EXPOSED_COMBAT = 0x64,
     STATE_EXPOSED_NONCOMBAT = 0x65,
@@ -78,14 +78,14 @@ enum ai_state_transition_t
     AIS_TRANSITION_POP = 0x3,
 };
 
-enum actor_think_result_t : __int32
+enum actor_think_result_t : int
 {
     ACTOR_THINK_DONE = 0x0,
     ACTOR_THINK_REPEAT = 0x1,
     ACTOR_THINK_MOVE_TO_BODY_QUEUE = 0x2,
 };
 
-enum aiGoalSources : __int32
+enum aiGoalSources : int
 {
     AI_GOAL_SRC_SCRIPT_GOAL = 0x0,
     AI_GOAL_SRC_SCRIPT_ENTITY_GOAL = 0x1,
@@ -93,7 +93,7 @@ enum aiGoalSources : __int32
     AI_GOAL_SRC_ENEMY = 0x3,
 };
 
-enum ai_orient_mode_t : __int32
+enum ai_orient_mode_t : int
 {
     AI_ORIENT_INVALID = 0x0,
     AI_ORIENT_DONT_CHANGE = 0x1,
@@ -105,7 +105,7 @@ enum ai_orient_mode_t : __int32
     AI_ORIENT_COUNT = 0x7,
 };
 
-enum ai_traverse_mode_t : __int32
+enum ai_traverse_mode_t : int
 {
     AI_TRAVERSE_INVALID = 0x0,
     AI_TRAVERSE_GRAVITY = 0x1,
@@ -114,7 +114,7 @@ enum ai_traverse_mode_t : __int32
     AI_TRAVERSE_COUNT = 0x4,
 };
 
-enum ai_stance_e : __int32
+enum ai_stance_e : int
 {
     STANCE_BAD = 0x0,
     STANCE_STAND = 0x1,
@@ -227,7 +227,7 @@ struct ai_funcs_t
     void( *pfnPain)(actor_s *, gentity_s *, int, const float *, const int, const float *, const hitLocation_t);
 };
 
-//enum $D416C61A81CE0211A2B0E6C3C6220A84 : __int32
+//enum $D416C61A81CE0211A2B0E6C3C6220A84 : int
 enum ai_movemode_t : unsigned __int8 // not a real name
 {
     AI_MOVE_STOP      = 0x0,

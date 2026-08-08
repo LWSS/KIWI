@@ -110,7 +110,7 @@ void __cdecl Image_Blend1x1Faces(uint8_t *(*pixels)[15], int mipLevel)
 
 uint8_t *__cdecl Image_GetCubeCornerPixel(
     uint8_t *facePixels,
-    uint32_t coordx,
+    uint coordx,
     int coordy,
     int edgeSize)
 {
@@ -1178,8 +1178,8 @@ void __cdecl R_ResampleImage(
 
 uint8_t *__cdecl R_TakeResampledScreenshot(int width, int height, int bytesPerPixel, int headerSize)
 {
-    uint32_t displayHeight; // [esp+0h] [ebp-14h]
-    uint32_t displayWidth; // [esp+4h] [ebp-10h]
+    uint displayHeight; // [esp+0h] [ebp-14h]
+    uint displayWidth; // [esp+4h] [ebp-10h]
     uint8_t *buffer; // [esp+8h] [ebp-Ch]
 
     if (width < (int)vidConfig.displayWidth)
@@ -1212,10 +1212,10 @@ void __cdecl R_LevelShot()
     buffer = R_TakeResampledScreenshot(128, 128, 3, 18);
     if (buffer)
     {
-        *(uint32_t *)buffer = 0;
-        *((uint32_t *)buffer + 1) = 0;
-        *((uint32_t *)buffer + 2) = 0;
-        *((uint32_t *)buffer + 3) = 0;
+        *(uint *)buffer = 0;
+        *((uint *)buffer + 1) = 0;
+        *((uint *)buffer + 2) = 0;
+        *((uint *)buffer + 3) = 0;
         *((_WORD *)buffer + 8) = 0;
         buffer[2] = 2;
         buffer[12] = 0x80;
@@ -1233,8 +1233,8 @@ void __cdecl R_LevelShot()
 int __cdecl R_SaveJpg(
     char *filename,
     int quality,
-    uint32_t image_width,
-    uint32_t image_height,
+    uint image_width,
+    uint image_height,
     uint8_t *image_buffer)
 {
 #ifndef _WIN32
@@ -1257,7 +1257,7 @@ int __cdecl R_SaveJpg(
     ULARGE_INTEGER streamSize;
     LARGE_INTEGER zero;
     int ok;
-    uint32_t row;
+    uint row;
     int srcStride;
     int dstStride;
     if (!filename || !image_buffer || !image_width || !image_height)
@@ -1387,7 +1387,7 @@ void R_CubemapShotSetInitialState()
                 " (123987))) == 0 || ((123987 / ((((0 || 0 || (123987 / ((-123987)) == 123987 / (123987))) ? (123987) : (-123987)"
                 ") * ((0 || 0 || (123987 / ((-123987)) == 123987 / (123987))) == 0 || (0 || 0 || (123987 / ((-123987)) == 123987 "
                 "/ (123987))) == 1))) == 123987 / (123987))) == 1))) == 123987 / (123987)) ? 0.0f : 1.0f), 0 )\n");
-        //hr = ((int(__stdcall *)(IDirect3DDevice9 *, uint32_t, uint32_t, int, int, uint32_t, uint32_t))dx.device->Clear)(
+        //hr = ((int(__stdcall *)(IDirect3DDevice9 *, uint, uint, int, int, uint, uint))dx.device->Clear)(
         //    dx.device,
         //    0,
         //    0,
@@ -1477,7 +1477,7 @@ char __cdecl R_GetBackBufferData(int x, int y, int width, int height, int bytesP
         hra = surfaceBackBuffer->GetDesc(&desc);
         if (hra >= 0)
         {
-            //hrb = ((int(__thiscall *)(IDirect3DDevice9 *, IDirect3DDevice9 *, uint32_t, uint32_t, _D3DFORMAT, int, IDirect3DSurface9 **, _DWORD))dx.device->CreateOffscreenPlainSurface)(
+            //hrb = ((int(__thiscall *)(IDirect3DDevice9 *, IDirect3DDevice9 *, uint, uint, _D3DFORMAT, int, IDirect3DSurface9 **, _DWORD))dx.device->CreateOffscreenPlainSurface)(
             //    dx.device,
             //    dx.device,
             //    desc.Width,
@@ -1691,10 +1691,10 @@ void __cdecl R_CubemapShotWriteTargaHeader(int res, uint8_t *fileBuffer)
 {
     iassert( fileBuffer );
     iassert( (res > 0) );
-    *(uint32_t *)fileBuffer = 0;
-    *((uint32_t *)fileBuffer + 1) = 0;
-    *((uint32_t *)fileBuffer + 2) = 0;
-    *((uint32_t *)fileBuffer + 3) = 0;
+    *(uint *)fileBuffer = 0;
+    *((uint *)fileBuffer + 1) = 0;
+    *((uint *)fileBuffer + 2) = 0;
+    *((uint *)fileBuffer + 3) = 0;
     *((_WORD *)fileBuffer + 8) = 0;
     fileBuffer[2] = 2;
     *((_WORD *)fileBuffer + 6) = res;
@@ -1966,7 +1966,7 @@ void __cdecl R_CubemapShotExtractLinearLight(
     }
 }
 
-void __cdecl R_ScreenshotFilename(uint32_t lastNumber, const char *extension, char *fileName)
+void __cdecl R_ScreenshotFilename(uint lastNumber, const char *extension, char *fileName)
 {
     if (lastNumber < 0x2710)
         Com_sprintf(fileName, 0x100u, "screenshots/shot%04i.%s", lastNumber, extension);

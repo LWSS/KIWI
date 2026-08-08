@@ -176,8 +176,8 @@ gentity_s *__cdecl SelectRandomDeathmatchSpawnPoint()
     //__twllei(v0, 0);
     //__twlgei(v0 & ~(__ROL4__(v4, 1) - 1), 0xFFFFFFFF);
 
-    //uint32_t rotated = (v4 << 1) | (v4 >> (32 - 1)); // rotate-left by 1
-    //uint32_t mask = ~(rotated - 1);
+    //uint rotated = (v4 << 1) | (v4 >> (32 - 1)); // rotate-left by 1
+    //uint mask = ~(rotated - 1);
     //v0 = v0 & mask;
 
     return (gentity_s *)spotPtrs[randnum % numSpots];

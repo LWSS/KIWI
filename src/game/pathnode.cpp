@@ -406,7 +406,7 @@ void __cdecl GScr_AddFieldsForPathnode()
 {
     for (node_field_t *f = fields_3; f->name; ++f)
     {
-        iassert((f - fields_3) == (unsigned short)(f - fields_3));
+        iassert((f - fields_3) == (ushort)(f - fields_3));
         Scr_AddClassField(CLASS_NUM_PATHNODE, (char *)f->name, (unsigned __int16)(f - fields_3));
     }
 }
@@ -2782,7 +2782,7 @@ void __cdecl Path_UpdateBrushBadPlaceCount(gentity_s *brushEnt, int teamflags, i
     int v18; // r31
     pathlink_s *v19; // r3
     pathsort_t nodes[512]; // [sp+50h] [-3870h] BYREF
-    unsigned char nodeInBrush[0x2000]; // [sp+1850h] [-2070h] BYREF
+    byte nodeInBrush[0x2000]; // [sp+1850h] [-2070h] BYREF
 
     iassert(brushEnt);
     iassert(brushEnt->r.currentAngles[PITCH] == 0.f && brushEnt->r.currentAngles[ROLL] == 0.f);

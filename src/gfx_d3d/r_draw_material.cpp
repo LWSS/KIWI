@@ -14,7 +14,7 @@ int __cdecl R_SetupMaterial(
 {
     GfxDrawSurf overrideDrawSurf; // [esp+8h] [ebp-18h]
     MaterialTechniqueType baseTechType; // [esp+14h] [ebp-Ch]
-    uint32_t surfType; // [esp+18h] [ebp-8h]
+    uint surfType; // [esp+18h] [ebp-8h]
 
     surfType = drawSurf.fields.surfType;
     baseTechType = info->baseTechType;
@@ -54,7 +54,7 @@ int __cdecl R_SetupMaterial(
     {
         //v5 = ((R_PixelCost_GetAccumulationMaterial(context.state->material)->info.drawSurf.packed >> 29) & 0x7FF) << 29;
         //v5 = R_PixelCost_GetAccumulationMaterial(context.state->material)->info.drawSurf.fields.materialSortedIndex;
-        //*(uint32_t *)&overrideDrawSurf.fields = v5 | *(uint32_t *)&drawSurf.fields & 0x1FFFFFFF;
+        //*(uint *)&overrideDrawSurf.fields = v5 | *(uint *)&drawSurf.fields & 0x1FFFFFFF;
         //HIDWORD(overrideDrawSurf.packed) = HIDWORD(v5) | HIDWORD(drawSurf.packed) & 0xFFFFFF00;
         overrideDrawSurf.fields.materialSortedIndex = R_PixelCost_GetAccumulationMaterial(context.state->material)->info.drawSurf.fields.materialSortedIndex;
         R_SetMaterial(context, overrideDrawSurf, TECHNIQUE_UNLIT);

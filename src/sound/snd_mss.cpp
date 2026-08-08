@@ -9,7 +9,7 @@
 #include <math.h>
 #include <mss.h>
 
-uint32_t __stdcall MSS_FileOpenCallback(const MSS_FILE *pszFilename, UINTa *phFileHandle)
+uint __stdcall MSS_FileOpenCallback(const MSS_FILE *pszFilename, UINTa *phFileHandle)
 {
     return (FS_FOpenFileReadStream(pszFilename, (int *)phFileHandle) & 0x80000000) == 0;
 }
@@ -17,7 +17,7 @@ void __stdcall MSS_FileCloseCallback(UINTa hFileHandle)
 {
     FS_FCloseFile(hFileHandle);
 }
-int __stdcall MSS_FileSeekCallback(UINTa hFileHandle, int offset, uint32_t type)
+int __stdcall MSS_FileSeekCallback(UINTa hFileHandle, int offset, uint type)
 {
     if (type)
     {
@@ -38,9 +38,9 @@ int __stdcall MSS_FileSeekCallback(UINTa hFileHandle, int offset, uint32_t type)
     }
     return FS_FTell(hFileHandle);
 }
-uint32_t __stdcall MSS_FileReadCallback(UINTa hFileHandle, void *pBuffer, uint32_t bytes)
+uint __stdcall MSS_FileReadCallback(UINTa hFileHandle, void *pBuffer, uint bytes)
 {
-    return FS_Read((unsigned char *)pBuffer, bytes, hFileHandle);
+    return FS_Read((byte *)pBuffer, bytes, hFileHandle);
 }
 
 _DIG_DRIVER *__cdecl MSS_open_digital_driver(int hertz, int bits, int channels)
@@ -314,15 +314,15 @@ int __cdecl MSS_DigitalFormatType(int waveFormat, int bits, int channels)
   return digitalFormat;
 }
 
-uint8_t *__cdecl MSS_Alloc(uint32_t bytes, uint32_t rate)
+uint8_t *__cdecl MSS_Alloc(uint bytes, uint rate)
 {
   if ( IsFastFileLoad() )
-    return (uint8_t *)((int (__cdecl *)(uint32_t, uint32_t))MSS_Alloc_FastFile)(bytes, rate);
+    return (uint8_t *)((int (__cdecl *)(uint, uint))MSS_Alloc_FastFile)(bytes, rate);
   else
     return MSS_Alloc_LoadObj(bytes, rate);
 }
 
-uint8_t *__cdecl MSS_Alloc_LoadObj(uint32_t bytes, uint32_t rate)
+uint8_t *__cdecl MSS_Alloc_LoadObj(uint bytes, uint rate)
 {
   int min_Spec_bytes; // [esp+0h] [ebp-4h]
 
@@ -336,9 +336,9 @@ uint8_t *__cdecl MSS_Alloc_LoadObj(uint32_t bytes, uint32_t rate)
   return Hunk_Alloc(bytes, "MSS_Alloc", 15);
 }
 
-uint32_t *__cdecl MSS_Alloc_FastFile(int bytes)
+uint *__cdecl MSS_Alloc_FastFile(int bytes)
 {
-  return (uint32_t *)Z_Malloc(bytes, "MSS_Alloc", 15);
+  return (uint *)Z_Malloc(bytes, "MSS_Alloc", 15);
 }
 
 #endif

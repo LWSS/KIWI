@@ -9,7 +9,7 @@
 #include <client/cl_input.h>
 #endif
 
-int32_t s_butMapsKey[11] = { 154, 155, 156, 157, 13, 27, 9, 32, 161, 162, 171 }; // idb
+int s_butMapsKey[11] = { 154, 155, 156, 157, 13, 27, 9, 32, 161, 162, 171 }; // idb
 
 DevGuiInput s_input;
 
@@ -31,9 +31,9 @@ void DevGui_InputUpdateMouse()
     s_input.sliderScrollMaxTimeStep = 0.30000001f;
 }
 
-char __cdecl DevGui_InputUpdate(int32_t localClientNum, float deltaTime)
+char __cdecl DevGui_InputUpdate(int localClientNum, float deltaTime)
 {
-    int32_t butIndex; // [esp+10h] [ebp-8h]
+    int butIndex; // [esp+10h] [ebp-8h]
 
     DevGui_InputUpdateMouse();
     for (butIndex = 0; butIndex < 11; ++butIndex)
@@ -48,7 +48,7 @@ char __cdecl DevGui_InputUpdate(int32_t localClientNum, float deltaTime)
     return 1;
 }
 
-void __cdecl DevGui_UpdateScrollInputs(int32_t localClientNum)
+void __cdecl DevGui_UpdateScrollInputs(int localClientNum)
 {
     float v1; // [esp+0h] [ebp-38h]
     float v2; // [esp+4h] [ebp-34h]
@@ -112,7 +112,7 @@ void __cdecl DevGui_UpdateScrollStates(float deltaTime, DevGuiInputState *states
 {
     float v4; // [esp+0h] [ebp-10h]
     DevGuiInputState v5; // [esp+4h] [ebp-Ch]
-    int32_t axisIndex; // [esp+Ch] [ebp-4h]
+    int axisIndex; // [esp+Ch] [ebp-4h]
 
     for (axisIndex = 0; axisIndex < 2; ++axisIndex)
     {
@@ -165,7 +165,7 @@ void __cdecl DevGui_UpdateMenuScroll(float deltaTime)
     float v6; // [esp+18h] [ebp-2Ch]
     float v7; // [esp+1Ch] [ebp-28h]
     float adjustedAnalogAxis[2]; // [esp+30h] [ebp-14h]
-    int32_t axisIndex; // [esp+38h] [ebp-Ch]
+    int axisIndex; // [esp+38h] [ebp-Ch]
     bool pressed; // [esp+3Eh] [ebp-6h]
     bool held; // [esp+3Fh] [ebp-5h]
     float axis; // [esp+40h] [ebp-4h]
@@ -216,7 +216,7 @@ void __cdecl DevGui_UpdateMenuScroll(float deltaTime)
     }
 }
 
-void __cdecl DevGui_MouseEvent(int32_t dx, int32_t dy)
+void __cdecl DevGui_MouseEvent(int dx, int dy)
 {
     s_input.mousePos[0] = (float)dx;
     s_input.mousePos[1] = (float)dy;
@@ -227,22 +227,22 @@ __int16 __cdecl DevGui_GetMenuScroll(DevGuiInputAxis axis)
     return s_input.menuScroll[axis];
 }
 
-int32_t __cdecl DevGui_UpdateIntScroll(float deltaTime, int32_t value, int32_t min, int32_t max, DevGuiInputAxis axis)
+int __cdecl DevGui_UpdateIntScroll(float deltaTime, int value, int min, int max, DevGuiInputAxis axis)
 {
     float v6; // [esp+0h] [ebp-4Ch]
     float v7; // [esp+4h] [ebp-48h]
     float v8; // [esp+8h] [ebp-44h]
     float v9; // [esp+14h] [ebp-38h]
-    int32_t range; // [esp+40h] [ebp-Ch]
+    int range; // [esp+40h] [ebp-Ch]
     float stepTime; // [esp+44h] [ebp-8h]
     float stepTimea; // [esp+44h] [ebp-8h]
-    int32_t scroll; // [esp+48h] [ebp-4h]
-    int32_t valuea; // [esp+58h] [ebp+Ch]
+    int scroll; // [esp+48h] [ebp-4h]
+    int valuea; // [esp+58h] [ebp+Ch]
 
     range = max - min;
     if (max - min < 0)
         MyAssertHandler(".\\devgui\\devgui_input.cpp", 454, 0, "%s", "range >= 0");
-    if ((uint32_t)axis >= SCROLL_AXIS_COUNT)
+    if ((uint)axis >= SCROLL_AXIS_COUNT)
         MyAssertHandler(".\\devgui\\devgui_input.cpp", 455, 0, "%s", "axis >= SCROLL_XAXIS && axis < SCROLL_AXIS_COUNT");
     if (!range)
         return 0;
@@ -322,7 +322,7 @@ double __cdecl DevGui_UpdateFloatScroll(
         MyAssertHandler(".\\devgui\\devgui_input.cpp", 547, 0, "%s", "range >= 0");
     if (step == 0.0)
         MyAssertHandler(".\\devgui\\devgui_input.cpp", 548, 0, "%s", "step");
-    if ((uint32_t)axis >= SCROLL_AXIS_COUNT)
+    if ((uint)axis >= SCROLL_AXIS_COUNT)
         MyAssertHandler(".\\devgui\\devgui_input.cpp", 549, 0, "%s", "axis >= SCROLL_XAXIS && axis < SCROLL_AXIS_COUNT");
     analog = s_input.analogAxis[axis] * s_input.scrollScale / s_input.sliderScrollTime;
     scroll = analog * range * deltaTime;

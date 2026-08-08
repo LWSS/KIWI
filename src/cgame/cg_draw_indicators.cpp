@@ -13,7 +13,7 @@
 #include <xanim/xanim.h>
 #endif
 
-uint32_t g_hudGrenadeCount;
+uint g_hudGrenadeCount;
 HudGrenade g_hudGrenades[32];
 
 void __cdecl CG_DrawFlashDamage(const cg_s *cgameGlob)
@@ -23,10 +23,10 @@ void __cdecl CG_DrawFlashDamage(const cg_s *cgameGlob)
     float height; // [esp+18h] [ebp-34h]
     float v4; // [esp+1Ch] [ebp-30h]
     float v5; // [esp+24h] [ebp-28h]
-    int32_t displayHeight; // [esp+28h] [ebp-24h] BYREF
+    int displayHeight; // [esp+28h] [ebp-24h] BYREF
     float sidebuffer; // [esp+2Ch] [ebp-20h]
     float displayAspect; // [esp+30h] [ebp-1Ch] BYREF
-    int32_t displayWidth; // [esp+34h] [ebp-18h] BYREF
+    int displayWidth; // [esp+34h] [ebp-18h] BYREF
     float redFlash; // [esp+38h] [ebp-14h]
     float col[4]; // [esp+3Ch] [ebp-10h] BYREF
 
@@ -50,23 +50,23 @@ void __cdecl CG_DrawFlashDamage(const cg_s *cgameGlob)
     }
 }
 
-void __cdecl CG_DrawDamageDirectionIndicators(int32_t localClientNum)
+void __cdecl CG_DrawDamageDirectionIndicators(int localClientNum)
 {
     float v1; // [esp+18h] [ebp-7Ch]
     float v2; // [esp+1Ch] [ebp-78h]
     float v3; // [esp+20h] [ebp-74h]
     float v4; // [esp+24h] [ebp-70h]
-    int32_t t; // [esp+34h] [ebp-60h]
+    int t; // [esp+34h] [ebp-60h]
     const ScreenPlacement *scrPlace; // [esp+38h] [ebp-5Ch]
     float xy[4][2]; // [esp+3Ch] [ebp-58h] BYREF
     const cg_s *cgameGlob; // [esp+5Ch] [ebp-38h]
-    int32_t slot; // [esp+60h] [ebp-34h]
+    int slot; // [esp+60h] [ebp-34h]
     float halfWidth; // [esp+64h] [ebp-30h]
     float yaw; // [esp+68h] [ebp-2Ch]
     float height; // [esp+6Ch] [ebp-28h]
     float angle; // [esp+70h] [ebp-24h] BYREF
     float radius; // [esp+74h] [ebp-20h]
-    int32_t maxTime; // [esp+78h] [ebp-1Ch]
+    int maxTime; // [esp+78h] [ebp-1Ch]
     float centerY; // [esp+7Ch] [ebp-18h] BYREF
     float color[4]; // [esp+80h] [ebp-14h] BYREF
     float centerX; // [esp+90h] [ebp-4h] BYREF
@@ -250,7 +250,7 @@ void __cdecl CG_AddHudGrenade(const cg_s *cgameGlob, const centity_s *grenadeEnt
     }
 }
 
-void __cdecl CG_DrawGrenadeIndicators(int32_t localClientNum)
+void __cdecl CG_DrawGrenadeIndicators(int localClientNum)
 {
     float v1; // [esp+14h] [ebp-58h]
     float v2; // [esp+18h] [ebp-54h]
@@ -259,7 +259,7 @@ void __cdecl CG_DrawGrenadeIndicators(int32_t localClientNum)
     float v5; // [esp+2Ch] [ebp-40h]
     float v6; // [esp+30h] [ebp-3Ch]
     float grenadeOffset[3]; // [esp+34h] [ebp-38h] BYREF
-    uint32_t entityIndex; // [esp+40h] [ebp-2Ch]
+    uint entityIndex; // [esp+40h] [ebp-2Ch]
     const cg_s *cgameGlob; // [esp+44h] [ebp-28h]
     float amplitude; // [esp+48h] [ebp-24h]
     float angle; // [esp+4Ch] [ebp-20h] BYREF
@@ -322,7 +322,7 @@ void __cdecl CG_DrawGrenadeIndicators(int32_t localClientNum)
 }
 
 void __cdecl CG_DrawGrenadePointer(
-    int32_t localClientNum,
+    int localClientNum,
     float centerX,
     float centerY,
     const float *grenadeOffset,
@@ -385,7 +385,7 @@ void __cdecl CG_DrawGrenadePointer(
 }
 
 void __cdecl CG_DrawGrenadeIcon(
-    int32_t localClientNum,
+    int localClientNum,
     float centerX,
     float centerY,
     const float *grenadeOffset,

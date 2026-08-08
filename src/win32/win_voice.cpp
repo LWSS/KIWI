@@ -28,14 +28,14 @@ int count;
 dsound_sample_t *currentRecordingSample;
 dsound_sample_t *s_clientSamples[64];
 
-static uint32_t __cdecl mixerGetRecordLevel(char *SrcName)
+static uint __cdecl mixerGetRecordLevel(char *SrcName)
 {
     const char *v2; // eax
     tagMIXERCONTROLA mxc; // [esp+0h] [ebp-188h] BYREF
-    uint32_t jj; // [esp+98h] [ebp-F0h]
+    uint jj; // [esp+98h] [ebp-F0h]
     tagMIXERLINECONTROLSA mxlc; // [esp+9Ch] [ebp-ECh] BYREF
     HMIXER__ *phmx; // [esp+B8h] [ebp-D0h] BYREF
-    uint32_t ii; // [esp+BCh] [ebp-CCh]
+    uint ii; // [esp+BCh] [ebp-CCh]
     tagMIXERLINEA mixerline{ 0 }; // [esp+C0h] [ebp-C8h] BYREF
     tMIXERCONTROLDETAILS_UNSIGNED newSetting; // [esp+16Ch] [ebp-1Ch] BYREF
     tMIXERCONTROLDETAILS mxcd; // [esp+170h] [ebp-18h] BYREF
@@ -96,7 +96,7 @@ int __cdecl mixerSetRecordSource(char *SrcName)
     const char *v2; // eax
     int jj; // [esp+0h] [ebp-100h]
     tagMIXERLINECONTROLSA mxlc; // [esp+4h] [ebp-FCh] BYREF
-    uint32_t err; // [esp+1Ch] [ebp-E4h]
+    uint err; // [esp+1Ch] [ebp-E4h]
     int iNumChannels; // [esp+20h] [ebp-E0h]
     int iMultipleItems; // [esp+24h] [ebp-DCh]
     HMIXER mixerHandle; // [esp+28h] [ebp-D8h] BYREF
@@ -206,7 +206,7 @@ int __cdecl mixerGetRecordSource(char *srcName)
 {
     int jj; // [esp+4h] [ebp-100h]
     tagMIXERLINECONTROLSA mxlc; // [esp+8h] [ebp-FCh] BYREF
-    uint32_t err; // [esp+20h] [ebp-E4h]
+    uint err; // [esp+20h] [ebp-E4h]
     int iNumChannels; // [esp+24h] [ebp-E0h]
     int iMultipleItems; // [esp+28h] [ebp-DCh]
     tMIXERCONTROLDETAILS_BOOLEAN *lpListBool; // [esp+30h] [ebp-D4h]
@@ -313,11 +313,11 @@ int __cdecl mixerSetRecordLevel(char *SrcName, unsigned __int16 newLevel)
 {
     const char *v3; // eax
     tagMIXERCONTROLA mxc; // [esp+0h] [ebp-188h] BYREF
-    uint32_t jj; // [esp+98h] [ebp-F0h]
+    uint jj; // [esp+98h] [ebp-F0h]
     tagMIXERLINECONTROLSA mxlc; // [esp+9Ch] [ebp-ECh] BYREF
-    uint32_t err; // [esp+B4h] [ebp-D4h]
+    uint err; // [esp+B4h] [ebp-D4h]
     HMIXER mixerHandle; // [esp+B8h] [ebp-D0h] BYREF
-    uint32_t ii; // [esp+BCh] [ebp-CCh]
+    uint ii; // [esp+BCh] [ebp-CCh]
     tagMIXERLINEA mixerline; // [esp+C0h] [ebp-C8h] BYREF
     tMIXERCONTROLDETAILS_UNSIGNED newSetting; // [esp+16Ch] [ebp-1Ch] BYREF
     tMIXERCONTROLDETAILS mxcd; // [esp+170h] [ebp-18h] BYREF
@@ -379,11 +379,11 @@ int __cdecl mixerSetMicrophoneMute(unsigned __int8 bMute)
 {
     const char *v2; // eax
     tagMIXERCONTROLA mxc; // [esp+0h] [ebp-188h] BYREF
-    uint32_t jj; // [esp+98h] [ebp-F0h]
+    uint jj; // [esp+98h] [ebp-F0h]
     tagMIXERLINECONTROLSA mxlc; // [esp+9Ch] [ebp-ECh] BYREF
-    uint32_t err; // [esp+B4h] [ebp-D4h]
+    uint err; // [esp+B4h] [ebp-D4h]
     HMIXER mixerHandle; // [esp+B8h] [ebp-D0h] BYREF
-    uint32_t ii; // [esp+BCh] [ebp-CCh]
+    uint ii; // [esp+BCh] [ebp-CCh]
     tagMIXERLINEA mixerline; // [esp+C0h] [ebp-C8h] BYREF
     tMIXERCONTROLDETAILS_BOOLEAN newSetting; // [esp+16Ch] [ebp-1Ch] BYREF
     tMIXERCONTROLDETAILS mxcd; // [esp+170h] [ebp-18h] BYREF
@@ -723,7 +723,7 @@ int __cdecl Voice_GetLocalVoiceData()
     return 0;
 }
 
-uint32_t __cdecl Sound_UpdateSample(dsound_sample_t *sample, char *data, uint32_t data_len)
+uint __cdecl Sound_UpdateSample(dsound_sample_t *sample, char *data, uint data_len)
 {
     return DSound_UpdateSample(sample, data, data_len);
 }
@@ -734,7 +734,7 @@ void __cdecl Voice_IncomingVoiceData(unsigned __int8 talker, unsigned __int8 *da
     FILE *stream; // [esp+8h] [ebp-2014h]
     int v5; // [esp+10h] [ebp-200Ch]
     __int16 out[4096]; // [esp+14h] [ebp-2008h] BYREF
-    uint32_t data_len; // [esp+2018h] [ebp-4h]
+    uint data_len; // [esp+2018h] [ebp-4h]
 
     if (!playing)
         playing = 1;
@@ -765,7 +765,7 @@ void __cdecl Voice_IncomingVoiceData(unsigned __int8 talker, unsigned __int8 *da
     }
 }
 
-bool __cdecl Voice_IsClientTalking(uint32_t clientNum)
+bool __cdecl Voice_IsClientTalking(uint clientNum)
 {
     if (clientNum >= 0x40)
         MyAssertHandler(

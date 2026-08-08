@@ -1,7 +1,7 @@
 #pragma once
 #include "r_rendercmds.h"
 
-enum RenderTargetUsage : __int32
+enum RenderTargetUsage : int
 {                                       // ...
     RENDERTARGET_USAGE_DEPTH = 0x0,
     RENDERTARGET_USAGE_RENDER = 0x1,

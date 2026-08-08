@@ -8,7 +8,7 @@
 #include <client/client.h>
 #include <server/server.h>
 
-enum saveFieldtype_t : __int32
+enum saveFieldtype_t : int
 {
     SF_NONE = 0x0,
     SF_STRING = 0x1,
@@ -30,14 +30,14 @@ enum saveFieldtype_t : __int32
     SF_MODELINT = 0x11,
 };
 
-enum SaveHandleType : __int32
+enum SaveHandleType : int
 {
     SAVE_GAME_HANDLE = 0x0,
     SAVE_DEMO_HANDLE = 0x1,
     SAVE_LAST_COMMITTED = 0x2,
 };
 
-enum SaveErrorType : __int32
+enum SaveErrorType : int
 {
     SAVE_ERROR_MISSING_DEVICE = 0x0,
     SAVE_ERROR_CORRUPT_SAVE = 0x1,

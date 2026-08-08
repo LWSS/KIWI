@@ -17,7 +17,7 @@ void __cdecl R_SetFogFromServer(float start, uint8_t r, uint8_t g, uint8_t b, fl
     rg.fogSettings[FOG_SERVER].density = density;
 }
 
-void __cdecl R_SwitchFog(uint32_t fogvar, int startTime, int transitionTime)
+void __cdecl R_SwitchFog(uint fogvar, int startTime, int transitionTime)
 {
     iassert( (fogvar >= FOG_NONE && fogvar < FOG_COUNT) );
     rg.fogIndex = fogvar;

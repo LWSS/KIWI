@@ -344,7 +344,7 @@ static bool Cam_EditorMaterialColor( const char *name, float out[4] )
 // Draw one face's winding as a textured triangle fan with technique `tech`. bgra
 // modulates it (0xFFFFFFFF = white = the world path); push displaces each vertex along
 // the face normal (selection overlay, to sit just in front of the coplanar world face).
-static void Cam_DrawFaceTinted( const face_t *f, Material *mtl, uint32_t bgra, float push,
+static void Cam_DrawFaceTinted( const face_t *f, Material *mtl, uint bgra, float push,
                                 MaterialTechniqueType tech )
 {
     const winding_t *w = f->w;
@@ -376,7 +376,7 @@ static void Cam_DrawFaceTinted( const face_t *f, Material *mtl, uint32_t bgra, f
         normal[i][0] = n[0]; normal[i][1] = n[1]; normal[i][2] = n[2];
         st[i][0] = p[ai] * texScale;
         st[i][1] = p[bi] * texScale;
-        *(uint32_t *)&color[i] = bgra;            // modulated by the technique
+        *(uint *)&color[i] = bgra;            // modulated by the technique
     }
 
     // Fan triangulation: (0, i, i+1).
@@ -712,7 +712,7 @@ static void Cam_DrawSelectedFaces()
 // Cam_Draw's stack frame); sizes are the binary's exactly.
 // ─────────────────────────────────────────────────────────────────────────────
 extern void Face_AddWindingToTriBatch( face_t *face, const float *packedColor,
-                                       int *indexCount, unsigned short *indices,
+                                       int *indexCount, ushort *indices,
                                        int *vertCount, float ( *xyzw )[4],
                                        float ( *normal )[3], float *colorArr,
                                        float ( *st )[2] );                 // brush.cpp 0x47b780
@@ -733,7 +733,7 @@ static void Cam_DrawSelectedFaceFill()
     static float          s_normal[1362][3];
     static float          s_xyzw[1362][4];
     static float          s_color[1362];
-    static unsigned short s_indices[2046];
+    static ushort s_indices[2046];
 
     int indexCount = 0;                                       // 0x408137
     int vertCount  = 0;                                       // 0x40813d
@@ -2114,7 +2114,7 @@ void CCamWnd::Cam_Draw()
     // the terrain-paint mode (sub_401D50 = AdvPatchEditDlg visible + a paint mode + outer>inner,
     // the gate the binary inlines here).  Pick the terrain cell under the cursor, ring it.
     extern int  sub_401D50();                                            // patchdialog.cpp 0x401D50
-    extern char sub_43DD50( const float *dir, unsigned char *colorOut,
+    extern char sub_43DD50( const float *dir, byte *colorOut,
                             const float *cam_origin, float *origin_out ); // pmesh.cpp 0x43DD50
     if ( this->cursor_visible && sub_401D50() )
     {
@@ -2468,7 +2468,7 @@ void CCamWnd::OnPaint()
     Cam_Draw();
 
     R_EndFrame();
-    R_IssueRenderCommands( (uint32_t)-1 );
+    R_IssueRenderCommands( (uint)-1 );
     R_SortMaterials();
     R_CheckTargetWindow( hwnd );
 }
@@ -3153,7 +3153,7 @@ static void Region_DrawHull( const winding_t *w, const GfxColor *col )
     static float          s_normal[1024][3];
     static float          s_st[1024][2];
     static float          s_color[1025];
-    static unsigned short s_indices[6132];
+    static ushort s_indices[6132];
 
     const int n = w->numpoints;
     for ( int i = 0; i < n; ++i )                             // 0x40c6d6
@@ -3175,10 +3175,10 @@ static void Region_DrawHull( const winding_t *w, const GfxColor *col )
     for ( int k = 2; k < n; ++k )
     {
         s_indices[idx]     = 0;
-        s_indices[idx + 1] = (unsigned short)( k - 1 );
-        s_indices[idx + 2] = (unsigned short)k;
-        s_indices[idx + 3] = (unsigned short)k;
-        s_indices[idx + 4] = (unsigned short)( k - 1 );
+        s_indices[idx + 1] = (ushort)( k - 1 );
+        s_indices[idx + 2] = (ushort)k;
+        s_indices[idx + 3] = (ushort)k;
+        s_indices[idx + 4] = (ushort)( k - 1 );
         s_indices[idx + 5] = 0;
         idx += 6;
     }
