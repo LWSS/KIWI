@@ -48,13 +48,25 @@ static void VED_BracketPatch( patchMesh_t *patch )
     Undo_AddBrush( pSymbiot );
 }
 
+// One [Apply] pass snapshot: the four R/G/B/A slider values and the two enable check
+// boxes the paint consults.
+struct vertEditState_t
+{
+    byte r;               // IDC_VED_R_SLIDER   (binary this+128)
+    byte g;               // IDC_VED_G_SLIDER   (binary this+124)
+    byte b;               // IDC_VED_B_SLIDER   (binary this+120)
+    byte a;               // IDC_VED_A_SLIDER   (binary this+116)
+    bool doColour;        // IDC_VED_CHK_COLOR  (binary CButton @this+600)
+    bool doAlpha;         // IDC_VED_CHK_ALPHA  (binary CButton @this+516)
+};
+
 // ═════════════════════════════════════════════════════════════════════════════
+//  UI-independent action behind CVertEditDlg's [Apply] button.
 //  THE CORE — 0x461210  CVertEditDlg::Apply (VertEditDlg_01)
 //  Paint (R,G,B) and/or A onto the selected patch control points.
 //    doColour → write vert_color.{r,g,b};  doAlpha → write vert_color.a.
 // ═════════════════════════════════════════════════════════════════════════════
-void VertEditDlg_Apply( byte r, byte g, byte b, byte a,
-                        bool doColour, bool doAlpha )
+void VertEditDlg_Apply( const vertEditState_t &st )
 {
     for ( selbrush_t *sb = selected_brushes.next; sb != &selected_brushes; sb = sb->next )
     {
@@ -85,19 +97,19 @@ void VertEditDlg_Apply( byte r, byte g, byte b, byte a,
                 if ( !picked )
                     continue;
 
-                if ( doColour )                          // SendMessageA(this+600, BM_GETCHECK)
+                if ( st.doColour )                       // SendMessageA(this+600, BM_GETCHECK)
                 {
                     VED_BracketPatch( patch );
                     changed = true;
-                    cp->vert_color.b = b;                // this+120
-                    cp->vert_color.g = g;                // this+124
-                    cp->vert_color.r = r;                // this+128
+                    cp->vert_color.b = st.b;             // this+120
+                    cp->vert_color.g = st.g;             // this+124
+                    cp->vert_color.r = st.r;             // this+128
                 }
-                if ( doAlpha )                           // SendMessageA(this+516, BM_GETCHECK)
+                if ( st.doAlpha )                        // SendMessageA(this+516, BM_GETCHECK)
                 {
                     VED_BracketPatch( patch );
                     changed = true;
-                    cp->vert_color.a = a;                // this+116
+                    cp->vert_color.a = st.a;             // this+116
                 }
             }
 
@@ -262,9 +274,14 @@ void CVertEditDlg::OnColorButton()
 void CVertEditDlg::OnApply()
 {
     VED_SyncFromSliders();
-    bool doColour = ( s_vedChkClr && ::SendMessageA( s_vedChkClr, BM_GETCHECK, 0, 0 ) == BST_CHECKED );
-    bool doAlpha  = ( s_vedChkAlp && ::SendMessageA( s_vedChkAlp, BM_GETCHECK, 0, 0 ) == BST_CHECKED );
-    VertEditDlg_Apply( s_vedColR, s_vedColG, s_vedColB, s_vedColA, doColour, doAlpha );
+    vertEditState_t st;
+    st.r = s_vedColR;
+    st.g = s_vedColG;
+    st.b = s_vedColB;
+    st.a = s_vedColA;
+    st.doColour = ( s_vedChkClr && ::SendMessageA( s_vedChkClr, BM_GETCHECK, 0, 0 ) == BST_CHECKED );
+    st.doAlpha  = ( s_vedChkAlp && ::SendMessageA( s_vedChkAlp, BM_GETCHECK, 0, 0 ) == BST_CHECKED );
+    VertEditDlg_Apply( st );
     g_nUpdateBits |= 1;
 }
 

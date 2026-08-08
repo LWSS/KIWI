@@ -244,6 +244,44 @@ bool FindReplaceTextures( const char *find, const char *replace, char flags )
     return replaced;
 }
 
+// UI-independent action behind CFindTextureDlg's OK / Apply buttons.
+void FindTexture_Apply( const char *find, const char *replace,
+                        bool bSelectedOnly, bool bForce, bool bRecursePrefabs, bool bLive )
+{
+    if ( !replace[0] )                 // nothing to replace with → no-op (GtkRadiant: FindReplace skips empty)
+        return;
+
+    // Flag byte (IDB OnOK/OnApply 0x415B50 / 0x415A90 — the DDX members at this+116/128/132/140):
+    //   bit0 = selected-only, bit1 = force-replace-all, bit2 = recurse-prefabs, bit3 = live.
+    char flags = 0;
+    if ( bSelectedOnly )   flags |= 1;
+    if ( bForce )          flags |= 2;
+    if ( bRecursePrefabs ) flags |= 4;
+    if ( bLive )           flags |= 8;
+
+    // Reset the prefab-recursion visited set at the top-level entry (the IDB's
+    // Set_EraseTreeRec + reset-sentinels before each FindReplaceTextures call) so a
+    // fresh OK/Apply starts with an empty visited set; the recursion accumulates into it.
+    FindReplaceVisited_Reset();
+
+    FindReplaceTextures( find, replace, flags );
+    g_nUpdateBits = -1;
+}
+
+// UI-independent read behind the Find field's pre-fill (nullptr when the active layer
+// has no single valid material).
+const char *FindTexture_GetCurrentMaterialName()
+{
+    int layer = g_qeglobals.current_edit_layer;
+    if ( layer >= 0 && layer < 3 )
+    {
+        MaterialDef *cur = &g_qeglobals.random_texture_stuff[layer].mtl;
+        if ( ( (cur->lyrMtl != nullptr) + (cur->radMtl != nullptr) ) == 1 )
+            return (const char *)Materialdef_GetName( cur );
+    }
+    return nullptr;
+}
+
 // ══════════════════════════════════════════════════════════════════════════════
 // Find/replace texture modeless popup. The hand-built controls preserve the binary IDs
 // and flag layout because the original dialog resource is unavailable.
@@ -346,17 +384,9 @@ int CFindTextureDlg::OnCreate( LPCREATESTRUCT lpCreateStruct )
     FR_MakeChild( self, "button", BS_PUSHBUTTON    | WS_TABSTOP, IDC_FR_BTN_CLOSE, M + 156,  y, 70, 24, "Close" );
 
     // Pre-fill Find with the current-texture-window material name (the active texture).
-    int layer = g_qeglobals.current_edit_layer;
-    if ( layer >= 0 && layer < 3 )
-    {
-        MaterialDef *cur = &g_qeglobals.random_texture_stuff[layer].mtl;
-        if ( ( (cur->lyrMtl != nullptr) + (cur->radMtl != nullptr) ) == 1 )
-        {
-            const char *nm = (const char *)Materialdef_GetName( cur );
-            if ( nm && nm[0] )
-                ::SetWindowTextA( s_frFind, nm );
-        }
-    }
+    const char *nm = FindTexture_GetCurrentMaterialName();
+    if ( nm && nm[0] )
+        ::SetWindowTextA( s_frFind, nm );
     return 0;
 }
 
@@ -373,24 +403,13 @@ static void FR_DoReplace()
     char findBuf[256] = { 0 }, replBuf[256] = { 0 };
     if ( s_frFind )    ::GetWindowTextA( s_frFind,    findBuf, sizeof( findBuf ) - 1 );
     if ( s_frReplace ) ::GetWindowTextA( s_frReplace, replBuf, sizeof( replBuf ) - 1 );
-    if ( !replBuf[0] )                 // nothing to replace with → no-op (GtkRadiant: FindReplace skips empty)
-        return;
 
-    // Flag byte (IDB OnOK/OnApply 0x415B50 / 0x415A90 — the DDX members at this+116/128/132/140):
-    //   bit0 = selected-only, bit1 = force-replace-all, bit2 = recurse-prefabs, bit3 = live.
-    char flags = 0;
-    if ( s_frSelOnly && SendMessageA( s_frSelOnly, BM_GETCHECK, 0, 0 ) == BST_CHECKED ) flags |= 1;
-    if ( s_frForce   && SendMessageA( s_frForce,   BM_GETCHECK, 0, 0 ) == BST_CHECKED ) flags |= 2;
-    if ( s_frRecurse && SendMessageA( s_frRecurse, BM_GETCHECK, 0, 0 ) == BST_CHECKED ) flags |= 4;
-    if ( s_frLive    && SendMessageA( s_frLive,    BM_GETCHECK, 0, 0 ) == BST_CHECKED ) flags |= 8;
+    bool bSelectedOnly   = s_frSelOnly && SendMessageA( s_frSelOnly, BM_GETCHECK, 0, 0 ) == BST_CHECKED;
+    bool bForce          = s_frForce   && SendMessageA( s_frForce,   BM_GETCHECK, 0, 0 ) == BST_CHECKED;
+    bool bRecursePrefabs = s_frRecurse && SendMessageA( s_frRecurse, BM_GETCHECK, 0, 0 ) == BST_CHECKED;
+    bool bLive           = s_frLive    && SendMessageA( s_frLive,    BM_GETCHECK, 0, 0 ) == BST_CHECKED;
 
-    // Reset the prefab-recursion visited set at the top-level entry (the IDB's
-    // Set_EraseTreeRec + reset-sentinels before each FindReplaceTextures call) so a
-    // fresh OK/Apply starts with an empty visited set; the recursion accumulates into it.
-    FindReplaceVisited_Reset();
-
-    FindReplaceTextures( findBuf, replBuf, flags );
-    g_nUpdateBits = -1;
+    FindTexture_Apply( findBuf, replBuf, bSelectedOnly, bForce, bRecursePrefabs, bLive );
 }
 
 void CFindTextureDlg::OnFindReplaceOK()

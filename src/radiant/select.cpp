@@ -2706,6 +2706,13 @@ void Select_ByKeyValue_Core( const char *key, const char *value, bool keySubstr,
     g_nUpdateBits = -1;
 }
 
+// UI-independent action behind CKeyValueSelectDlg's OK button.
+void KeyValueSelect_Apply( const char *key, const char *value, bool keySubstr, bool valueSubstr )
+{
+    Select_ByKeyValue_Core( key, value, keySubstr, valueSubstr );
+    g_nUpdateBits |= 1;
+}
+
 // ── CKeyValueSelectDlg — hand-built modeless popup (the win_dlg.cpp pattern) ──────
 class CKeyValueSelectDlg : public CWnd
 {
@@ -2798,9 +2805,8 @@ void CKeyValueSelectDlg::OnOk2()      // DoModal returns 1 → run the match-wal
     if ( s_kvsValue ) ::GetWindowTextA( s_kvsValue, value, sizeof( value ) - 1 );
     bool keySub = s_kvsKeySub && ::SendMessageA( s_kvsKeySub, BM_GETCHECK, 0, 0 ) == BST_CHECKED;
     bool valSub = s_kvsValSub && ::SendMessageA( s_kvsValSub, BM_GETCHECK, 0, 0 ) == BST_CHECKED;
-    Select_ByKeyValue_Core( key, value, keySub, valSub );
+    KeyValueSelect_Apply( key, value, keySub, valSub );
     ShowWindow( SW_HIDE );      // binary EndDialog(,1); modeless → hide
-    g_nUpdateBits |= 1;
 }
 
 void CKeyValueSelectDlg::OnCancel2() { ShowWindow( SW_HIDE ); }

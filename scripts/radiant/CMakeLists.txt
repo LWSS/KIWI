@@ -33,6 +33,19 @@ else()
     set(D3DX_LIB d3dx9.lib)
 endif()
 
+# Dear ImGui (docking branch) — deps/imgui, pinned in deps/imgui/VERSION.txt.
+# UI-rework Phase 2: compiled into the target; win32 + dx9 backends match the
+# renderer bridge. These TUs do NOT include stdafx.h (no afx ordering constraint).
+set(IMGUI_SRCS
+    ${DEPS_DIR}/imgui/imgui.cpp
+    ${DEPS_DIR}/imgui/imgui_draw.cpp
+    ${DEPS_DIR}/imgui/imgui_tables.cpp
+    ${DEPS_DIR}/imgui/imgui_widgets.cpp
+    ${DEPS_DIR}/imgui/imgui_demo.cpp
+    ${DEPS_DIR}/imgui/backends/imgui_impl_win32.cpp
+    ${DEPS_DIR}/imgui/backends/imgui_impl_dx9.cpp
+)
+
 # WIN32 = GUI subsystem (not console)
 # Engine subset: UNIVERSAL (leaf math/string/FS), COMMON (brush_edges), XANIM (model preview),
 # RADIANT_SCRIPT (scr_memorytree + scr_stringlist), RADIANT_PHYSICS (physpreset + ode mass/matrix),
@@ -48,6 +61,7 @@ add_executable(${PROJECT_NAME} WIN32
     ${RADIANT_PHYSICS}
     ${RADIANT_QCOMMON}
     ${RADIANT_GFX_D3D}
+    ${IMGUI_SRCS}
 )
 
 # KISAK_RADIANT guards all editor additions.
@@ -131,4 +145,4 @@ source_group(TREE ${SRC_DIR} PREFIX "src" FILES
     ${RADIANT_QCOMMON}
     ${RADIANT_GFX_D3D}
 )
-source_group(TREE ${DEPS_DIR} PREFIX "deps" FILES ${ZLIB})
+source_group(TREE ${DEPS_DIR} PREFIX "deps" FILES ${ZLIB} ${IMGUI_SRCS})

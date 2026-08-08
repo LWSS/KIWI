@@ -11,6 +11,7 @@
 #include <stdio.h>
 #include <map>
 #include <string>
+#include <vector>
 
 // ── map entity instance list (entity.cpp / map.cpp) ──────────────────────────
 extern entity_s   entityInsts;        // 0x23F1748 — entity-instance list sentinel (ring)
@@ -54,6 +55,49 @@ static const char *EL_ClassName( entity_s *inst )
     return "";
 }
 
+// One tree row: the classname the group node and its leaf are both labelled with, and the
+// instance the leaf carries as its item data.
+struct entListEntry_t
+{
+    std::string  className;
+    entity_s    *inst;
+};
+
+// One key/value row of the epair list.
+struct entListPair_t
+{
+    const char *key;
+    const char *value;
+};
+
+// UI-independent read behind the entity tree's population (InsertItems 0x40F7D0's entityInsts walk).
+void EntityList_Gather( std::vector<entListEntry_t> &rows )
+{
+    for ( entity_s *ent = entityInsts.next; ent && ent != &entityInsts; ent = ent->next )
+    {
+        entListEntry_t row;
+        row.className = EL_ClassName( ent );
+        row.inst      = ent;
+        rows.push_back( row );
+    }
+}
+
+// UI-independent read behind the K/V list's population (UpdateKeyValuePairs 0x40F990's epair walk).
+void EntityEpairs_Gather( entity_s *inst, std::vector<entListPair_t> &rows )
+{
+    entity_s_def *def = EL_Def( inst );
+    if ( !def )
+        return;
+
+    for ( epair_t *e = def->epairs; e; e = e->next )
+    {
+        entListPair_t row;
+        row.key   = e->key   ? e->key   : "";
+        row.value = e->value ? e->value : "";
+        rows.push_back( row );
+    }
+}
+
 // ══════════════════════════════════════════════════════════════════════════════
 //  EntityListDlg::SelectItem (0x40F750) essence — select the picked entity's brushes.
 //  `inst` is the entity_s* stored as the tree leaf's item data.  Deselect everything,
@@ -61,7 +105,8 @@ static const char *EL_ClassName( entity_s *inst )
 //  Headless-safe (no HWNDs); the dialog passes the GetItemData result, the gate passes
 //  an entity directly.
 // ══════════════════════════════════════════════════════════════════════════════
-static void EL_SelectEntityBrushes( entity_s *inst )
+// UI-independent action behind CEntityListDlg's Select button / tree double-click.
+void EntListSelect_Apply( entity_s *inst )
 {
     // IDA SelectItem 0x40F750: Select_Deselect + the brush-walk run ONLY when the tree item's
     // data (entity_s*) is non-null.  A caret on a classname GROUP node (inserted without
@@ -78,7 +123,7 @@ static void EL_SelectEntityBrushes( entity_s *inst )
     g_nUpdateBits = -1;
 }
 
-// Count how many brushes EL_SelectEntityBrushes would select for `inst` (the gate oracle).
+// Count how many brushes EntListSelect_Apply would select for `inst` (the gate oracle).
 static int EL_EntityBrushCount( entity_s *inst )
 {
     if ( !inst ) return 0;
@@ -203,12 +248,15 @@ void CEntityListDlg::PopulateTree()
 
     TreeView_DeleteAllItems( m_hTree );
 
+    std::vector<entListEntry_t> rows;
+    EntityList_Gather( rows );
+
     std::map<std::string, HTREEITEM> byClass;     // classname -> parent node (dedup)
 
-    for ( entity_s *ent = entityInsts.next; ent && ent != &entityInsts; ent = ent->next )
+    for ( size_t i = 0; i < rows.size(); ++i )
     {
-        const char *cls = EL_ClassName( ent );
-        std::string key( cls ? cls : "" );
+        const std::string &key = rows[i].className;
+        const char *cls = key.c_str();
 
         HTREEITEM parent;
         std::map<std::string, HTREEITEM>::iterator it = byClass.find( key );
@@ -219,7 +267,7 @@ void CEntityListDlg::PopulateTree()
             tis.hParent = TVI_ROOT;
             tis.hInsertAfter = TVI_SORT;
             tis.item.mask = TVIF_TEXT;
-            tis.item.pszText = (LPSTR)( cls ? cls : "" );
+            tis.item.pszText = (LPSTR)cls;
             parent = TreeView_InsertItem( m_hTree, &tis );
             byClass[key] = parent;
         }
@@ -235,8 +283,8 @@ void CEntityListDlg::PopulateTree()
         leaf.hParent = parent;
         leaf.hInsertAfter = TVI_SORT;
         leaf.item.mask = TVIF_TEXT | TVIF_PARAM;
-        leaf.item.pszText = (LPSTR)( cls ? cls : "" );
-        leaf.item.lParam = (LPARAM)ent;
+        leaf.item.pszText = (LPSTR)cls;
+        leaf.item.lParam = (LPARAM)rows[i].inst;
         TreeView_InsertItem( m_hTree, &leaf );
     }
 
@@ -275,22 +323,20 @@ void CEntityListDlg::ShowKeyValues()
         if ( TreeView_GetItem( m_hTree, &ti ) )
             inst = (entity_s *)ti.lParam;
     }
-    entity_s_def *def = EL_Def( inst );
-    if ( !def )
-        return;
 
-    int row = 0;
-    for ( epair_t *e = def->epairs; e; e = e->next )
+    std::vector<entListPair_t> rows;
+    EntityEpairs_Gather( inst, rows );
+
+    for ( int row = 0; row < (int)rows.size(); ++row )
     {
         LVITEMA lvi;
         ZeroMemory( &lvi, sizeof( lvi ) );
         lvi.mask = LVIF_TEXT;
         lvi.iItem = row;
         lvi.iSubItem = 0;
-        lvi.pszText = (LPSTR)( e->key ? e->key : "" );
+        lvi.pszText = (LPSTR)rows[row].key;
         int idx = ListView_InsertItem( m_hList, &lvi );
-        ListView_SetItemText( m_hList, idx, 1, (LPSTR)( e->value ? e->value : "" ) );
-        ++row;
+        ListView_SetItemText( m_hList, idx, 1, (LPSTR)rows[row].value );
     }
 }
 
@@ -308,7 +354,7 @@ void CEntityListDlg::SelectFromTree()
     ti.hItem = sel;
     if ( !TreeView_GetItem( m_hTree, &ti ) )
         return;
-    EL_SelectEntityBrushes( (entity_s *)ti.lParam );
+    EntListSelect_Apply( (entity_s *)ti.lParam );
 }
 
 // WM_NOTIFY from the tree: TVN_SELCHANGED -> refresh the K/V list; NM_DBLCLK -> select the

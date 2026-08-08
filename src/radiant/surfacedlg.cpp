@@ -362,6 +362,26 @@ void SurfaceInspector_Wnd02()
 //    * Select_SetTexture_2 (0x4572d0) — WRITE the target texdef back into the controls.
 // ══════════════════════════════════════════════════════════════════════════════
 
+// One Surface Inspector control snapshot: the seven edit-field values the dialog exchanges
+// with the texdef core, the two "Repeats in" readouts the read pass computes, and the three
+// dialog state members (m_bPatchMode / m_texdefDirty / m_sampleDirty) the commit + spin
+// paths consult.
+struct surfaceDlgState_t
+{
+    char  currTex[132];    // IDC_SURFACE_INSP_CURR_TEX (in; the resolved name comes back out)
+    float horzShift;       // IDC_SURFACE_INSP_HORZ_SHIFT_IN   (texels)
+    float vertShift;       // IDC_SURFACE_INSP_VERT_SHIFT_IN
+    float horzStretch;     // IDC_SURFACE_INSP_HORZ_STRETCH    ("stretch" = size/width; raw for a patch)
+    float vertStretch;     // IDC_SURFACE_INSP_VERT_STRETCH
+    float rotate;          // IDC_SURFACE_INSP_ROTATE          (degrees)
+    float sampleSize;      // IDC_SURFACE_INSP_SAMPLE_SIZE     (shared g_patch_texdef.sample_size)
+    float repeatsX;        // IDC_SURFACE_INSP_TXT_REPEATS_X   (raw texel size[0])
+    float repeatsY;        // IDC_SURFACE_INSP_TXT_REPEATS_Y   (raw texel size[1])
+    int   bPatchMode;      // m_bPatchMode
+    char  texdefDirty;     // m_texdefDirty
+    char  sampleDirty;     // m_sampleDirty
+};
+
 // %.6g float → control (SprintFormat_SetText 0x457270 essence).
 static void SI_SetDlgFloat( CWnd *dlg, int id, float v )
 {
@@ -376,13 +396,39 @@ static float SI_GetDlgFloat( CWnd *dlg, int id )
     return (float)atof( buf );
 }
 
+// Snapshot the inspector's edit controls + dialog flags into a surfaceDlgState_t.
+static void SI_ReadState( CSurfaceDlg *dlg, surfaceDlgState_t &st )
+{
+    memset( &st, 0, sizeof( st ) );
+    ::GetDlgItemTextA( dlg->GetSafeHwnd(), IDC_SURFACE_INSP_CURR_TEX, st.currTex, 127 );
+    st.horzShift   = SI_GetDlgFloat( dlg, IDC_SURFACE_INSP_HORZ_SHIFT_IN );
+    st.vertShift   = SI_GetDlgFloat( dlg, IDC_SURFACE_INSP_VERT_SHIFT_IN );
+    st.horzStretch = SI_GetDlgFloat( dlg, IDC_SURFACE_INSP_HORZ_STRETCH );
+    st.vertStretch = SI_GetDlgFloat( dlg, IDC_SURFACE_INSP_VERT_STRETCH );
+    st.rotate      = SI_GetDlgFloat( dlg, IDC_SURFACE_INSP_ROTATE );
+    st.sampleSize  = SI_GetDlgFloat( dlg, IDC_SURFACE_INSP_SAMPLE_SIZE );
+    st.bPatchMode  = dlg->m_bPatchMode;
+    st.texdefDirty = dlg->m_texdefDirty;
+    st.sampleDirty = dlg->m_sampleDirty;
+}
+
+// Push a state's dialog-member half (m_bPatchMode + the two dirty flags) back onto the dialog;
+// the edit fields + "Repeats in" readouts are populated by the action's trailing Surf_RefreshFields.
+static void SI_WriteState( CSurfaceDlg *dlg, const surfaceDlgState_t &st )
+{
+    dlg->m_bPatchMode  = st.bPatchMode;
+    dlg->m_texdefDirty = st.texdefDirty;
+    dlg->m_sampleDirty = st.sampleDirty;
+}
+
+// UI-independent action behind the inspector's read-fields-into-texdef pass.
 // SurfaceInspector_GetMaterialDef (0x457950) — READ the dialog's edit controls into the
 // current-layer texdef of the target MaterialDef (the picked face's mtldef[layer], or the
 // current-texture template / g_patch_texdef for a patch/no-selection), then TexMatToFakeTexCoords.
 // Returns the MaterialDef (NULL only when nothing editable).  For a NON-patch selection the
 // "stretch" fields are texel-scale = size/width, so they are multiplied by width/height back to
 // texels; for a patch they are stored raw.  Sample size always lands in g_patch_texdef.sample_size.
-static MaterialDef *SI_ReadControlsIntoTexdef( CSurfaceDlg *dlg )
+MaterialDef *SurfaceDlg_StateToTexdef( surfaceDlgState_t &st )
 {
     // WHICH MaterialDef + patch-mode (Surf_TargetMaterialDef == SurfaceInspector_GetMaterialDef's
     // target resolution; also sets m_bPatchMode for the patch/no-face-selection path).
@@ -396,12 +442,12 @@ static MaterialDef *SI_ReadControlsIntoTexdef( CSurfaceDlg *dlg )
     {
         // patch-only selection → the shared g_patch_texdef template (binary path).
         md = &g_patch_texdef.mtlDef;
-        dlg->m_bPatchMode = 1;
+        st.bPatchMode = 1;
     }
     else
     {
         md = Surf_TargetMaterialDef();
-        dlg->m_bPatchMode = 0;
+        st.bPatchMode = 0;
     }
     if ( !md )
         return nullptr;
@@ -412,49 +458,45 @@ static MaterialDef *SI_ReadControlsIntoTexdef( CSurfaceDlg *dlg )
     if ( height <= 0 ) height = 512;
 
     // Name → SetMaterial (empty/blank → "$default", then reflect the resolved name back).
-    char name[132] = { 0 };
-    ::GetDlgItemTextA( dlg->GetSafeHwnd(), IDC_SURFACE_INSP_CURR_TEX, name, 127 );
-    if ( (byte)name[0] > 32 )
+    if ( (byte)st.currTex[0] > 32 )
     {
-        SetMaterial( name, (patchMesh_material *)md );
+        SetMaterial( st.currTex, (patchMesh_material *)md );
     }
     else
     {
         SetMaterial( "$default", (patchMesh_material *)md );
         LayerMaterialDef *n = Materialdef_GetName( md );
-        dlg->SetDlgItemText( IDC_SURFACE_INSP_CURR_TEX, n ? (const char *)n : "" );
+        memset( st.currTex, 0, sizeof( st.currTex ) );
+        strncpy( st.currTex, n ? (const char *)n : "", sizeof( st.currTex ) - 1 );
     }
 
     texdef_sub_t *td = &md->mat_texDef + LayerMat::GetCurrentLayer( md );
-    td->shift[0] = SI_GetDlgFloat( dlg, IDC_SURFACE_INSP_HORZ_SHIFT_IN );
-    td->shift[1] = SI_GetDlgFloat( dlg, IDC_SURFACE_INSP_VERT_SHIFT_IN );
+    td->shift[0] = st.horzShift;
+    td->shift[1] = st.vertShift;
 
-    float sx = SI_GetDlgFloat( dlg, IDC_SURFACE_INSP_HORZ_STRETCH );
-    td->size[0] = dlg->m_bPatchMode ? sx : sx * (float)width;
-    SI_SetDlgFloat( dlg, IDC_SURFACE_INSP_TXT_REPEATS_X, td->size[0] );   // "Repeats in" X readout
+    float sx = st.horzStretch;
+    td->size[0] = st.bPatchMode ? sx : sx * (float)width;
+    st.repeatsX = td->size[0];   // "Repeats in" X readout
 
-    float sy = SI_GetDlgFloat( dlg, IDC_SURFACE_INSP_VERT_STRETCH );
-    td->size[1] = dlg->m_bPatchMode ? sy : sy * (float)height;
-    SI_SetDlgFloat( dlg, IDC_SURFACE_INSP_TXT_REPEATS_Y, td->size[1] );   // "Repeats in" Y readout
+    float sy = st.vertStretch;
+    td->size[1] = st.bPatchMode ? sy : sy * (float)height;
+    st.repeatsY = td->size[1];   // "Repeats in" Y readout
 
-    td->rotate = SI_GetDlgFloat( dlg, IDC_SURFACE_INSP_ROTATE );
-    g_patch_texdef.sample_size = SI_GetDlgFloat( dlg, IDC_SURFACE_INSP_SAMPLE_SIZE );
+    td->rotate = st.rotate;
+    g_patch_texdef.sample_size = st.sampleSize;
 
     TexMatToFakeTexCoords( md, td );
     g_surfTexModDirty = 1;
     return md;
 }
 
-// Select_SetTexture_2 (0x4572d0) — WRITE the target texdef back into the dialog controls.
-// Public (texwnd.cpp / map.cpp / Material_SetMode call it as Surf_RefreshFields).  Shift is
-// shown in texels; "stretch" = size/width (size/height); rotate in degrees; sample-size the
-// shared g_patch_texdef.sample_size ("" when 0).  Also fills the "Repeats in" readouts (raw size).
-void Surf_RefreshFields()
+// UI-independent core reads behind the inspector's field refresh.
+// Select_SetTexture_2 (0x4572d0) — resolve the target texdef for the current selection and
+// snapshot it for the dialog controls.  Returns false when there is no editable MaterialDef.
+// Shift is in texels; "stretch" = size/width (size/height); rotate in degrees; sample-size the
+// shared g_patch_texdef.sample_size.  Also fills the "Repeats in" readouts (raw size).
+bool SurfaceDlg_Gather( surfaceDlgState_t &out )
 {
-    if ( !surfDlgGlob.hwnd || !g_pSurfDlg || !::IsWindow( g_pSurfDlg->GetSafeHwnd() ) )
-        return;
-    CSurfaceDlg *dlg = g_pSurfDlg;
-
     // Target + patch-mode (mirrors Select_SetTexture_2's target resolution).
     bool onlyPatches = ( SEL_FACE_COUNT() <= 0 && selected_brushes.next != &selected_brushes );
     if ( onlyPatches )
@@ -475,54 +517,84 @@ void Surf_RefreshFields()
             g_patch_texdef.mtlDef.radMtl = tmpl->radMtl;
         }
         md = &g_patch_texdef.mtlDef;
-        dlg->m_bPatchMode = 1;
+        out.bPatchMode = 1;
         g_patch_texdef.sample_size = GetBrushSampleSize();
     }
     else
     {
         md = Surf_TargetMaterialDef();
-        dlg->m_bPatchMode = 0;
+        out.bPatchMode = 0;
         g_patch_texdef.sample_size = ( g_bNewFace && SEL_FACE_COUNT() > 0 )
                                    ? GetBrushfaceSampleSize()
                                    : GetBrushSampleSize();
     }
     if ( !md || ( ( md->lyrMtl != nullptr ) + ( md->radMtl != nullptr ) ) != 1 )
-        return;   // no editable MaterialDef (uninitialized template) — leave fields as-is
+        return false;   // no editable MaterialDef (uninitialized template) — leave fields as-is
 
     int width = 512, height = 512;
     Surf_MaterialWH( md, &width, &height );
     if ( width  <= 0 ) width  = 512;
     if ( height <= 0 ) height = 512;
 
-    ::SendMessageA( dlg->GetSafeHwnd(), WM_SETREDRAW, 0, 0 );
-
     texdef_sub_t *td = &md->mat_texDef + LayerMat::GetCurrentLayer( md );
-    if ( !dlg->m_bPatchMode )
+    if ( !out.bPatchMode )
         TexMatToFakeTexCoords( md, td );
 
     // Name: single selected patch → Patch_GetTextureName; else the MaterialDef name.
     const char *name;
-    if ( dlg->m_bPatchMode && QE_SingleBrush() )
+    if ( out.bPatchMode && QE_SingleBrush() )
         name = (const char *)Patch_GetTextureName();
     else
         name = (const char *)Materialdef_GetName( md );
-    dlg->SetDlgItemText( IDC_SURFACE_INSP_CURR_TEX, name ? name : "" );
+    memset( out.currTex, 0, sizeof( out.currTex ) );
+    strncpy( out.currTex, name ? name : "", sizeof( out.currTex ) - 1 );
 
-    SI_SetDlgFloat( dlg, IDC_SURFACE_INSP_HORZ_SHIFT_IN, td->shift[0] );
-    SI_SetDlgFloat( dlg, IDC_SURFACE_INSP_VERT_SHIFT_IN, td->shift[1] );
+    out.horzShift   = td->shift[0];
+    out.vertShift   = td->shift[1];
 
-    SI_SetDlgFloat( dlg, IDC_SURFACE_INSP_HORZ_STRETCH,
-                    dlg->m_bPatchMode ? td->size[0] : td->size[0] / (float)width );
-    SI_SetDlgFloat( dlg, IDC_SURFACE_INSP_TXT_REPEATS_X, td->size[0] );
-    SI_SetDlgFloat( dlg, IDC_SURFACE_INSP_VERT_STRETCH,
-                    dlg->m_bPatchMode ? td->size[1] : td->size[1] / (float)height );
-    SI_SetDlgFloat( dlg, IDC_SURFACE_INSP_TXT_REPEATS_Y, td->size[1] );
-    SI_SetDlgFloat( dlg, IDC_SURFACE_INSP_ROTATE, td->rotate );
+    out.horzStretch = out.bPatchMode ? td->size[0] : td->size[0] / (float)width;
+    out.repeatsX    = td->size[0];
+    out.vertStretch = out.bPatchMode ? td->size[1] : td->size[1] / (float)height;
+    out.repeatsY    = td->size[1];
+    out.rotate      = td->rotate;
+    out.sampleSize  = g_patch_texdef.sample_size;
+    return true;
+}
 
-    if ( g_patch_texdef.sample_size == 0.0f )
+// Select_SetTexture_2 (0x4572d0) — WRITE the target texdef back into the dialog controls.
+// Public (texwnd.cpp / map.cpp / Material_SetMode call it as Surf_RefreshFields).  Shift is
+// shown in texels; "stretch" = size/width (size/height); rotate in degrees; sample-size the
+// shared g_patch_texdef.sample_size ("" when 0).  Also fills the "Repeats in" readouts (raw size).
+void Surf_RefreshFields()
+{
+    if ( !surfDlgGlob.hwnd || !g_pSurfDlg || !::IsWindow( g_pSurfDlg->GetSafeHwnd() ) )
+        return;
+    CSurfaceDlg *dlg = g_pSurfDlg;
+
+    surfaceDlgState_t st;
+    memset( &st, 0, sizeof( st ) );
+    bool haveTexdef = SurfaceDlg_Gather( st );
+    dlg->m_bPatchMode = st.bPatchMode;
+    if ( !haveTexdef )
+        return;
+
+    ::SendMessageA( dlg->GetSafeHwnd(), WM_SETREDRAW, 0, 0 );
+
+    dlg->SetDlgItemText( IDC_SURFACE_INSP_CURR_TEX, st.currTex );
+
+    SI_SetDlgFloat( dlg, IDC_SURFACE_INSP_HORZ_SHIFT_IN, st.horzShift );
+    SI_SetDlgFloat( dlg, IDC_SURFACE_INSP_VERT_SHIFT_IN, st.vertShift );
+
+    SI_SetDlgFloat( dlg, IDC_SURFACE_INSP_HORZ_STRETCH, st.horzStretch );
+    SI_SetDlgFloat( dlg, IDC_SURFACE_INSP_TXT_REPEATS_X, st.repeatsX );
+    SI_SetDlgFloat( dlg, IDC_SURFACE_INSP_VERT_STRETCH, st.vertStretch );
+    SI_SetDlgFloat( dlg, IDC_SURFACE_INSP_TXT_REPEATS_Y, st.repeatsY );
+    SI_SetDlgFloat( dlg, IDC_SURFACE_INSP_ROTATE, st.rotate );
+
+    if ( st.sampleSize == 0.0f )
         dlg->SetDlgItemText( IDC_SURFACE_INSP_SAMPLE_SIZE, "" );
     else
-        SI_SetDlgFloat( dlg, IDC_SURFACE_INSP_SAMPLE_SIZE, g_patch_texdef.sample_size );
+        SI_SetDlgFloat( dlg, IDC_SURFACE_INSP_SAMPLE_SIZE, st.sampleSize );
 
     ::SendMessageA( dlg->GetSafeHwnd(), WM_SETREDRAW, 1, 0 );
     ::InvalidateRect( dlg->GetSafeHwnd(), nullptr, TRUE );
@@ -548,47 +620,49 @@ namespace SurfaceInspector
     }
 }
 
+// UI-independent action behind the inspector's Done/Apply commit.
 // GetTexMods (0x458960) — commit any pending dialog edits to the selection.  Called on
 // Done/Apply and after each spin.  m_texdefDirty (edit changed) → read controls into the texdef
 // (GetMaterialDef) then Brush_SetTextureMapping (Undo-bracketed propagate to the selection);
 // m_sampleDirty (sample-size changed) → Brush_SetSampleSize; then refresh.
-static void SI_GetTexMods( CSurfaceDlg *dlg )
+void SurfaceDlg_Apply( surfaceDlgState_t &st )
 {
-    if ( !dlg->m_texdefDirty && !dlg->m_sampleDirty )
+    if ( !st.texdefDirty && !st.sampleDirty )
         return;
-    MaterialDef *md = SI_ReadControlsIntoTexdef( dlg );
+    MaterialDef *md = SurfaceDlg_StateToTexdef( st );
     int layer = md ? LayerMat::GetCurrentLayer( md ) : 0;
-    if ( dlg->m_texdefDirty )
+    if ( st.texdefDirty )
     {
         if ( md )
             Brush_SetTextureMapping( &md->mat_texDef + layer );
-        dlg->m_texdefDirty = 0;
+        st.texdefDirty = 0;
     }
-    if ( dlg->m_sampleDirty )
+    if ( st.sampleDirty )
     {
         if ( g_patch_texdef.sample_size != 0.0f )
         {
             Brush_SetSampleSize( (int)g_patch_texdef.sample_size );
-            dlg->m_sampleDirty = 0;
+            st.sampleDirty = 0;
             Surf_RefreshFields();
             return;
         }
-        dlg->m_sampleDirty = 0;
+        st.sampleDirty = 0;
     }
     Surf_RefreshFields();
 }
 
+// UI-independent action behind the inspector's spin-arrow nudges.
 // UpdateSpinners (0x457cf0) — a spin arrow stepped the texdef.  The non-patch path (the common
 // case) steps the current-layer texdef of SurfaceInspector_GetMaterialDef's target: stretch
 // size[0]/size[1] ±8, shift[0]/shift[1] ±1, rotate ±45 (0..360 wrap), sample-size ±4 (min 4).
 // The patch path builds a relative texdef_sub_t and Patch_SetTextureInfo's it.  Then refresh +
 // Brush_SetTexture + clear the edit-dirty flag (binary xx9_1=0).
-static void SI_UpdateSpinners( CSurfaceDlg *dlg, int idFrom, bool up )
+void SurfaceDlg_Spin( surfaceDlgState_t &st, int idFrom, bool up )
 {
-    if ( dlg->m_bPatchMode )
+    if ( st.bPatchMode )
     {
         // patch path (Patch_SetTextureInfo relative transform).
-        SI_ReadControlsIntoTexdef( dlg );   // UpdateGPatchTexdef equivalent (commit current fields)
+        SurfaceDlg_StateToTexdef( st );   // UpdateGPatchTexdef equivalent (commit current fields)
         texdef_sub_t *pt = &g_patch_texdef.mtlDef.mat_texDef + LayerMat::GetCurrentLayer( &g_patch_texdef.mtlDef );
         texdef_sub_t rel; memset( &rel, 0, sizeof( rel ) );
         switch ( idFrom )
@@ -607,7 +681,7 @@ static void SI_UpdateSpinners( CSurfaceDlg *dlg, int idFrom, bool up )
                 g_patch_texdef.sample_size = s;
                 Brush_SetSampleSize( (int)g_patch_texdef.sample_size );
                 Surf_RefreshFields();
-                dlg->m_sampleDirty = 0;
+                st.sampleDirty = 0;
                 return;
             }
         }
@@ -616,13 +690,13 @@ static void SI_UpdateSpinners( CSurfaceDlg *dlg, int idFrom, bool up )
         Surf_RefreshFields();
         g_surfTexModDirty = 1;
         Brush_SetTexture( md, 0 );
-        dlg->m_texdefDirty = 0;
+        st.texdefDirty = 0;
         return;
     }
 
     // brush / face path — the binary calls SurfaceInspector_GetMaterialDef (reads the current
     // control values into the target texdef) FIRST, then steps that texdef by the delta.
-    MaterialDef *md = SI_ReadControlsIntoTexdef( dlg );
+    MaterialDef *md = SurfaceDlg_StateToTexdef( st );
     if ( !md )
         return;
     texdef_sub_t *td = &md->mat_texDef + LayerMat::GetCurrentLayer( md );
@@ -646,7 +720,7 @@ static void SI_UpdateSpinners( CSurfaceDlg *dlg, int idFrom, bool up )
             g_patch_texdef.sample_size = s;
             Brush_SetSampleSize( (int)g_patch_texdef.sample_size );
             Surf_RefreshFields();
-            dlg->m_sampleDirty = 0;
+            st.sampleDirty = 0;
             g_surfTexModDirty = 1;
             return;
         }
@@ -656,7 +730,7 @@ static void SI_UpdateSpinners( CSurfaceDlg *dlg, int idFrom, bool up )
     Surf_RefreshFields();
     g_surfTexModDirty = 1;
     Brush_SetTexture( md, 0 );
-    dlg->m_texdefDirty = 0;
+    st.texdefDirty = 0;
 }
 
 BEGIN_MESSAGE_MAP( CSurfaceDlg, CDialog )
@@ -758,7 +832,10 @@ void CSurfaceDlg::OnSampleEdited() { m_sampleDirty = 1; }
 // delete this).  Do NOT call CDialog::OnOK (it ::EndDialog-hides a modeless dialog).
 void CSurfaceDlg::OnOK()
 {
-    SI_GetTexMods( this );
+    surfaceDlgState_t st;
+    SI_ReadState( this, st );
+    SurfaceDlg_Apply( st );
+    SI_WriteState( this, st );
     SurfaceInspector_Wnd02();   // commit the scratch back (SurfaceDlg_Wnd02 0x4583f0)
     surfDlgGlob.hwnd = 0;
     DestroyWindow();
@@ -789,14 +866,20 @@ void CSurfaceDlg::OnClose()
     DestroyWindow();                // modeless port-form CWnd::OnClose (fires OnDestroy/PostNcDestroy)
 }
 
+// UI-independent action behind CSurfaceDlg's "Fit" button.
 // "Fit" (SurfaceInspector::OnFit 0x458DE0): fit the texture to the selected face(s) —
 // Brush_FitTexture(1,1,0) computes the texdef so the texture tiles once across the face,
 // then invalidate every view (camera re-projects via Face_MoveTexture) and re-read the fields.
-void CSurfaceDlg::OnFit()
+void SurfaceFit_Apply()
 {
     Brush_FitTexture( 1.0f, 1.0f, 0 );
     g_nUpdateBits = -1;
     Surf_RefreshFields();
+}
+
+void CSurfaceDlg::OnFit()
+{
+    SurfaceFit_Apply();
 }
 
 // Read a tex-repeat edit field as a float (0 if empty / unparseable).
@@ -807,10 +890,11 @@ static float SI_ReadEditFloat( HWND self, int id )
     return (float)atof( buf );
 }
 
+// UI-independent action behind CSurfaceDlg's "Natural" button.
 // "Natural" (SurfaceInspector::OnNaturalize 0x458C60): patch 1:1 natural projection at the
 // layer's default sample size (Select_SetTexture).  No-op when no patch is selected
 // (Patch_NaturalizeSelected scans for the first selected patch).
-void CSurfaceDlg::OnNaturalize()
+void SurfaceNaturalize_Apply()
 {
     float x[2];
     Select_SetTexture( x );
@@ -818,18 +902,22 @@ void CSurfaceDlg::OnNaturalize()
     g_nUpdateBits = -1;
 }
 
+void CSurfaceDlg::OnNaturalize()
+{
+    SurfaceNaturalize_Apply();
+}
+
+// UI-independent action behind CSurfaceDlg's "CAP" button.
 // "CAP" (SurfaceInspector::OnCap 0x458B40): patch cap texturing — scale the layer sample
 // size by the tex-repeat X/Y fields, then Patch_NaturalizeSelected(unk=1).  Bails (matching
 // the binary) if either tex-repeat reads 0.
-void CSurfaceDlg::OnCap()
+void SurfaceCap_Apply( float xSize, float ySize )
 {
     float v4[2];
     Select_SetTexture( v4 );
-    float xSize = SI_ReadEditFloat( GetSafeHwnd(), IDC_SURFACE_INSP_TEX_REP_X );
     if ( xSize != 0.0f )
     {
         xSize *= v4[0];
-        float ySize = SI_ReadEditFloat( GetSafeHwnd(), IDC_SURFACE_INSP_TEX_REP_Y );
         if ( ySize != 0.0f )
         {
             ySize *= v4[1];
@@ -839,28 +927,33 @@ void CSurfaceDlg::OnCap()
     }
 }
 
+void CSurfaceDlg::OnCap()
+{
+    float xSize = SI_ReadEditFloat( GetSafeHwnd(), IDC_SURFACE_INSP_TEX_REP_X );
+    float ySize = SI_ReadEditFloat( GetSafeHwnd(), IDC_SURFACE_INSP_TEX_REP_Y );
+    SurfaceCap_Apply( xSize, ySize );
+}
+
+// UI-independent action behind CSurfaceDlg's "Lmap" button.
 // "Lmap" (SurfaceInspector::OnLightmap 0x458CA0): re-align the lightmap layer's texCoords
 // across the selected patches (Patch_Lightmap_Texturing).
-void CSurfaceDlg::OnLightmap()
+void SurfaceLightmap_Apply()
 {
     Patch_Lightmap_Texturing();
     g_nUpdateBits = -1;
 }
 
+void CSurfaceDlg::OnLightmap()
+{
+    SurfaceLightmap_Apply();
+}
+
+// UI-independent action behind CSurfaceDlg's "Set..." button.
 // "Set..." (SurfaceInspector::OnSet 0x458CB0): read the tex-repeat X/Y + the terrain-distance
 // (2D/3D/Curve) mode radio and texture the selected patches (Patch_SetTexturing).  Caches the
 // chosen mode + repeats into g_qeglobals for the next open (OnInitDialog restores them).
-void CSurfaceDlg::OnSet()
+void SurfaceSet_Apply( float v5, float v6, int checked )
 {
-    HWND self = GetSafeHwnd();
-    float v5 = SI_ReadEditFloat( self, IDC_SURFACE_INSP_TEX_REP_X );
-    float v6 = SI_ReadEditFloat( self, IDC_SURFACE_INSP_TEX_REP_Y );
-
-    int checked = 0;                         // GetCheckedRadioButton(2D..Curve)
-    if ( IsDlgButtonChecked( IDC_SURFACE_INSP_PATCH_2D ) )         checked = IDC_SURFACE_INSP_PATCH_2D;
-    else if ( IsDlgButtonChecked( IDC_SURFACE_INSP_PATCH_3D ) )    checked = IDC_SURFACE_INSP_PATCH_3D;
-    else if ( IsDlgButtonChecked( IDC_SURFACE_INSP_PATCH_CURVE ) ) checked = IDC_SURFACE_INSP_PATCH_CURVE;
-
     if ( checked )
         g_qeglobals.surfInsp_nIDButton = checked;
     g_qeglobals.surfInsp_tex_repeatx = (int)v5;
@@ -876,12 +969,29 @@ void CSurfaceDlg::OnSet()
     g_nUpdateBits = -1;
 }
 
+void CSurfaceDlg::OnSet()
+{
+    HWND self = GetSafeHwnd();
+    float v5 = SI_ReadEditFloat( self, IDC_SURFACE_INSP_TEX_REP_X );
+    float v6 = SI_ReadEditFloat( self, IDC_SURFACE_INSP_TEX_REP_Y );
+
+    int checked = 0;                         // GetCheckedRadioButton(2D..Curve)
+    if ( IsDlgButtonChecked( IDC_SURFACE_INSP_PATCH_2D ) )         checked = IDC_SURFACE_INSP_PATCH_2D;
+    else if ( IsDlgButtonChecked( IDC_SURFACE_INSP_PATCH_3D ) )    checked = IDC_SURFACE_INSP_PATCH_3D;
+    else if ( IsDlgButtonChecked( IDC_SURFACE_INSP_PATCH_CURVE ) ) checked = IDC_SURFACE_INSP_PATCH_CURVE;
+
+    SurfaceSet_Apply( v5, v6, checked );
+}
+
 // UDN_DELTAPOS (OnDeltaPosSpin 0x458b10) — a spin arrow stepped; step the texdef by the
 // binary's per-spin delta (UpdateSpinners).  Up-arrow = iDelta > 0.
 void CSurfaceDlg::OnDeltaPosSpin( NMHDR *pNMHDR, LRESULT *pResult )
 {
     NMUPDOWN *ud = (NMUPDOWN *)pNMHDR;
-    SI_UpdateSpinners( this, (int)pNMHDR->idFrom, ud->iDelta > 0 );
+    surfaceDlgState_t st;
+    SI_ReadState( this, st );
+    SurfaceDlg_Spin( st, (int)pNMHDR->idFrom, ud->iDelta > 0 );
+    SI_WriteState( this, st );
     if ( pResult )
         *pResult = 0;
 }

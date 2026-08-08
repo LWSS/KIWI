@@ -5093,6 +5093,15 @@ void CMainFrame::OnPatchCap()
 // ── CDialogThick (IDD 0xA4) — Curve→Thicken parameters (thickness + seam) ─────
 //   Hand-built like CPatchDensityDlg.  DDX (0x40C060): checkbox 1288 = "create seam"
 //   (member @0x74, default 1), edit 1290 = thickness (member @0x78, default 8).
+// UI-independent action behind Curve→Thicken's OK — Patch_Thicken + full repaint.  (The
+// undo bracket stays with the caller: IDB 0x42B0D0 opens it around the DIALOG, not the
+// thicken — even a cancel opens/closes the bracket.)
+void CurveThicken_Apply( int amount, bool seam )
+{
+    Patch_Thicken( amount, seam );
+    g_nUpdateBits = -1;
+}
+
 class CDialogThick : public CDialog
 {
 public:
@@ -5119,10 +5128,7 @@ void CMainFrame::OnCurveThicken()
         dlg.m_seam   = 1;
         dlg.m_amount = 8;
         if ( dlg.DoModal() == IDOK )
-        {
-            Patch_Thicken( dlg.m_amount, dlg.m_seam != 0 );
-            g_nUpdateBits = -1;
-        }
+            CurveThicken_Apply( dlg.m_amount, dlg.m_seam != 0 );
     }
     Undo_EndBrushList( &selected_brushes );
     Undo_End();
@@ -5150,13 +5156,38 @@ protected:
     }
 };
 
-// Selection->Scale... (32809, IDB OnSelectScale 0x4283D0) - pop the Scale dialog and, if the
-// factors pass the two validations, Select_Scale the selection inside an undo bracket.
+extern void Select_Scale( float sx, float sy, float sz );   // select.cpp (0x48FDC0)
+extern int  OnlyPatchesSelected();                          // engine_stubs.cpp (0x447860)
+
+// UI-independent action behind Selection→Scale's OK — the two validations, then
+// Select_Scale inside an undo bracket (IDB OnSelectScale 0x4283D0 body after DoModal).
 // PRECEDENCE, verbatim from 0x42844D..0x428481: the negative test is X < 0 || (Y < 0 && Z < 0),
 // NOT a three-way OR (`fcom X` + `jnp` -> error, then `fcom Y` + `jp` SKIPS the Z test).  An
 // original quirk: a lone negative Y or Z slips through to Select_Scale.
-extern void Select_Scale( float sx, float sy, float sz );   // select.cpp (0x48FDC0)
-extern int  OnlyPatchesSelected();                          // engine_stubs.cpp (0x447860)
+void SelectScale_Apply( float x, float y, float z )
+{
+    if ( x < 0.0f || ( y < 0.0f && z < 0.0f ) )
+    {
+        Sys_Printf( "Cannot scale by a negative value." );
+        return;
+    }
+    if ( ( x == 0.0f || y == 0.0f || z == 0.0f ) && !OnlyPatchesSelected() )
+    {
+        Sys_Printf( "Can only scale patches by zero." );
+        return;
+    }
+
+    Undo_ClearRedo();
+    Undo_GeneralStart( "scale" );
+    Undo_AddBrushList( &selected_brushes );
+    Select_Scale( x, y, z );
+    Undo_EndBrushList( &selected_brushes );
+    Undo_End();
+    g_nUpdateBits = -1;
+}
+
+// Selection->Scale... (32809, IDB OnSelectScale 0x4283D0) - pop the Scale dialog and, if the
+// factors pass the two validations, Select_Scale the selection inside an undo bracket.
 void CMainFrame::OnSelectScale()
 {
     CScaleDialog dlg;
@@ -5166,24 +5197,7 @@ void CMainFrame::OnSelectScale()
     if ( dlg.DoModal() != IDOK )
         return;
 
-    if ( dlg.m_x < 0.0f || ( dlg.m_y < 0.0f && dlg.m_z < 0.0f ) )
-    {
-        Sys_Printf( "Cannot scale by a negative value." );
-        return;
-    }
-    if ( ( dlg.m_x == 0.0f || dlg.m_y == 0.0f || dlg.m_z == 0.0f ) && !OnlyPatchesSelected() )
-    {
-        Sys_Printf( "Can only scale patches by zero." );
-        return;
-    }
-
-    Undo_ClearRedo();
-    Undo_GeneralStart( "scale" );
-    Undo_AddBrushList( &selected_brushes );
-    Select_Scale( dlg.m_x, dlg.m_y, dlg.m_z );
-    Undo_EndBrushList( &selected_brushes );
-    Undo_End();
-    g_nUpdateBits = -1;
+    SelectScale_Apply( dlg.m_x, dlg.m_y, dlg.m_z );
 }
 
 // Selection→Clipper→Split selected (32794 / Shift+Enter, IDB OnSplitSelected 0x4271D0) —
@@ -5254,6 +5268,41 @@ void CMainFrame::OnDeleteExportables() { Delete_Exportables(); }
 //   (0x40B890).  OnInitDialog sets ONE tab stop at 96 dialog units, opens "c:/commandlist.txt"
 //   (CFile modeCreate|modeWrite, no exception object - a silent no-op when C:\ is not writable)
 //   and appends "<name> \t<modifiers><key>" for every command to both the listbox and the file.
+// UI-independent halves of a command-list line (sub_40BBC0): key-name lookup and the
+// modifier string, in the binary's order.
+// key name: the g_Keys entry, else the raw character (sub_40BBC0's %c).
+const char *CommandList_KeyName( const RadiantCommand &c, char keybuf[8] )
+{
+    for ( const RadiantKeyName &k : g_radiantKeys )
+        if ( k.vk == c.vk )
+            return k.name;
+    keybuf[0] = (char)c.vk;
+    keybuf[1] = '\0';
+    return keybuf;
+}
+
+void CommandList_Mods( const RadiantCommand &c, char mods[64] )
+{
+    mods[0] = '\0';
+    if ( c.mods & 1 ) strcat( mods, "Shift" );
+    if ( c.mods & 2 ) strcat( mods, mods[0] ? " + Alt"      : "Alt" );
+    if ( c.mods & 4 ) strcat( mods, mods[0] ? " + Control"  : "Control" );
+    if ( c.mods & 8 ) strcat( mods, mods[0] ? " + Left Win" : "Left Win" );
+    if ( mods[0] )    strcat( mods, " + " );
+}
+
+// Single shell-agnostic command entry point.  Every editor command is identified by its
+// menu/accelerator id (the ids in g_radiantCommands and the ON_COMMAND maps); routing goes
+// through CMainFrame's message map, which stays the one authoritative id->handler table
+// while the MFC shell exists.  The ImGui shell's menus/keybinds call this.  When CMainFrame
+// is removed (rework Phase 4) the internals become a direct dispatch table; callers do not
+// change.
+void Radiant_ExecCommand( unsigned int cmdId )
+{
+    if ( g_pParentWnd && ::IsWindow( g_pParentWnd->GetSafeHwnd() ) )
+        g_pParentWnd->SendMessage( WM_COMMAND, cmdId, 0 );
+}
+
 class CCommandsDlg : public CDialog
 {
 public:
@@ -5279,25 +5328,10 @@ protected:
         Radiant_SeedCommandTable();
         for ( const RadiantCommand &c : g_radiantCommands )
         {
-            // key name: the g_Keys entry, else the raw character (sub_40BBC0's %c).
             char keybuf[8];
-            const char *keyName = nullptr;
-            for ( const RadiantKeyName &k : g_radiantKeys )
-                if ( k.vk == c.vk ) { keyName = k.name; break; }
-            if ( !keyName )
-            {
-                keybuf[0] = (char)c.vk;
-                keybuf[1] = '\0';
-                keyName = keybuf;
-            }
-
+            const char *keyName = CommandList_KeyName( c, keybuf );
             char mods[64];
-            mods[0] = '\0';
-            if ( c.mods & 1 ) strcat( mods, "Shift" );
-            if ( c.mods & 2 ) strcat( mods, mods[0] ? " + Alt"      : "Alt" );
-            if ( c.mods & 4 ) strcat( mods, mods[0] ? " + Control"  : "Control" );
-            if ( c.mods & 8 ) strcat( mods, mods[0] ? " + Left Win" : "Left Win" );
-            if ( mods[0] )    strcat( mods, " + " );
+            CommandList_Mods( c, mods );
 
             char line[320];
             _snprintf( line, sizeof( line ) - 1, "%s \t%s%s", c.name, mods, keyName );

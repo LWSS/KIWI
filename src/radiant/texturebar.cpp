@@ -218,6 +218,20 @@ static int TB_GetInt( HWND h )
     return atoi( buf );
 }
 
+// One texture-bar control snapshot: the current-material readout plus the five member ints
+// the bar exchanges with the picked face's texdef (the binary's CTextureBar members
+// @0x248..0x25C described above).
+struct textureBarState_t
+{
+    char texName[132];    // IDC_TB_TEXNAME (out only — the resolved material name)
+    int  hShift;          // m_nHShift @0x248
+    int  vShift;          // m_nVShift @0x254
+    int  hScale;          // m_nHScale @0x24C
+    int  vScale;          // m_nVScale @0x258
+    int  rotate;          // m_nRotate @0x250
+};
+
+// UI-independent core reads behind the texture bar's field refresh.
 // ─────────────────────────────────────────────────────────────────────────────
 // 0x459610  CTextureBar::GetSurfaceAttributes — READ the picked face's texdef into the
 // member ints and DISPLAY them (UpdateData(FALSE)).  Faithful field mapping (disasm):
@@ -226,34 +240,54 @@ static int TB_GetInt( HWND h )
 // Each is int(float) (truncating __ftol2).  The bar shows raw texel scale/shift + degrees
 // (NOT the Surface Inspector's size/width "stretch" — the texture bar is the raw-texel view).
 // THE REFRESH ENTRY POINT (called whenever the current texture / selection changes).
+// Returns false when there is no editable texdef (the display is then left as-is).
 // ─────────────────────────────────────────────────────────────────────────────
-void CTextureBar::GetSurfaceAttributes( CTextureBar *bar )
+bool TextureBar_Gather( textureBarState_t &out )
 {
-    if ( !bar || !bar->GetSafeHwnd() || !s_tbShiftH )
-        return;
-
     texdef_sub_t *td = TexBar_TargetTexdef();
     if ( !td )
-        return;
-
-    s_tbRefreshing = true;
+        return false;
 
     // Texture name (the bar's current-material readout) — the brief's "shows the current
     // material name".  TexBar_TargetMaterialDef only returns a MtlDef_IsValid def, so
     // Materialdef_GetName is safe (no NULL radMtl->name deref).
     MaterialDef *md = TexBar_TargetMaterialDef();
     const char *name = md ? (const char *)Materialdef_GetName( md ) : "";
-    ::SetWindowTextA( s_tbName, name ? name : "" );
+    memset( out.texName, 0, sizeof( out.texName ) );
+    strncpy( out.texName, name ? name : "", sizeof( out.texName ) - 1 );
 
-    TB_SetInt( s_tbShiftH, (int)td->shift[0] );   // m_nHShift @0x248
-    TB_SetInt( s_tbShiftV, (int)td->shift[1] );   // m_nVShift @0x254
-    TB_SetInt( s_tbScaleH, (int)td->size[0] );    // m_nHScale @0x24C
-    TB_SetInt( s_tbScaleV, (int)td->size[1] );    // m_nVScale @0x258
-    TB_SetInt( s_tbRotate, (int)td->rotate );     // m_nRotate @0x250
+    out.hShift = (int)td->shift[0];   // m_nHShift @0x248
+    out.vShift = (int)td->shift[1];   // m_nVShift @0x254
+    out.hScale = (int)td->size[0];    // m_nHScale @0x24C
+    out.vScale = (int)td->size[1];    // m_nVScale @0x258
+    out.rotate = (int)td->rotate;     // m_nRotate @0x250
+    return true;
+}
+
+void CTextureBar::GetSurfaceAttributes( CTextureBar *bar )
+{
+    if ( !bar || !bar->GetSafeHwnd() || !s_tbShiftH )
+        return;
+
+    textureBarState_t st;
+    memset( &st, 0, sizeof( st ) );
+    if ( !TextureBar_Gather( st ) )
+        return;
+
+    s_tbRefreshing = true;
+
+    ::SetWindowTextA( s_tbName, st.texName );
+
+    TB_SetInt( s_tbShiftH, st.hShift );
+    TB_SetInt( s_tbShiftV, st.vShift );
+    TB_SetInt( s_tbScaleH, st.hScale );
+    TB_SetInt( s_tbScaleV, st.vScale );
+    TB_SetInt( s_tbRotate, st.rotate );
 
     s_tbRefreshing = false;
 }
 
+// UI-independent action behind the texture bar's live field commit.
 // ─────────────────────────────────────────────────────────────────────────────
 // 0x459750  TextureBar_02 (via the 0x459600 thunk) — UpdateData(TRUE) then WRITE the
 // member ints back onto the picked face's texdef (live edit-as-you-type), g_nUpdateBits|=1.
@@ -265,10 +299,8 @@ void CTextureBar::GetSurfaceAttributes( CTextureBar *bar )
 // Each member is read as int and stored as (float).  No-op when nothing is selected
 // (result == GetSelectedFaces size == 0).
 // ─────────────────────────────────────────────────────────────────────────────
-void CTextureBar::ApplyFields()
+void TextureBar_Apply( const textureBarState_t &st )
 {
-    if ( s_tbRefreshing )
-        return;
     if ( SEL_FACE_COUNT() <= 0 )
         return;                       // the binary's `if (GetSelectedFaces.size)` guard
 
@@ -276,13 +308,29 @@ void CTextureBar::ApplyFields()
     if ( !td )
         return;
 
-    td->shift[0] = (float)TB_GetInt( s_tbShiftH );   // m_nHShift → shift[0]
-    td->shift[1] = (float)TB_GetInt( s_tbShiftV );   // m_nVShift → shift[1]
-    td->size[0]  = (float)TB_GetInt( s_tbScaleH );   // m_nHScale → size[0]
-    td->size[1]  = (float)TB_GetInt( s_tbScaleV );   // m_nVScale → size[1]
-    td->rotate   = (float)TB_GetInt( s_tbRotate );   // m_nRotate → rotate
+    td->shift[0] = (float)st.hShift;   // m_nHShift → shift[0]
+    td->shift[1] = (float)st.vShift;   // m_nVShift → shift[1]
+    td->size[0]  = (float)st.hScale;   // m_nHScale → size[0]
+    td->size[1]  = (float)st.vScale;   // m_nVScale → size[1]
+    td->rotate   = (float)st.rotate;   // m_nRotate → rotate
 
     g_nUpdateBits |= 1;
+}
+
+void CTextureBar::ApplyFields()
+{
+    if ( s_tbRefreshing )
+        return;
+
+    textureBarState_t st;
+    memset( &st, 0, sizeof( st ) );
+    st.hShift = TB_GetInt( s_tbShiftH );
+    st.vShift = TB_GetInt( s_tbShiftV );
+    st.hScale = TB_GetInt( s_tbScaleH );
+    st.vScale = TB_GetInt( s_tbScaleV );
+    st.rotate = TB_GetInt( s_tbRotate );
+
+    TextureBar_Apply( st );
 }
 
 void CTextureBar::OnFieldEdited()
@@ -290,16 +338,14 @@ void CTextureBar::OnFieldEdited()
     ApplyFields();
 }
 
+// UI-independent action behind the texture bar's spin-arrow nudges.
 // ── the five spin handlers (sub_459470/4594C0/459510/459550/459590) ───────────
 // HShift/VShift spins: ±gridsize via Brush_ShiftTexture; HScale/VScale spins: ±gridsize via
 // Brush_ScaleTexture; Rotate spin: ±m_nRotateAmt via Brush_RotateTexture.  Each then refreshes
-// the member ints via GetSurfaceAttributes (the binary's tail).  `iDelta>=0` (down arrow) =
-// negative step (disasm `if (*(int*)(a2+16) >= 0) v4 = -v4`).
-void CTextureBar::OnDeltaPos( NMHDR *pNMHDR, LRESULT *pResult )
+// the member ints via GetSurfaceAttributes (the binary's tail — issued by the caller).
+// Returns false for a spin id the bar does not own (no step, no refresh).
+bool TextureBar_Spin( int idFrom, bool negate )
 {
-    NMUPDOWN *ud = (NMUPDOWN *)pNMHDR;
-    bool negate  = ( ud->iDelta >= 0 );    // faithful: positive delta negates the step
-
     // disasm 0x45947e: `mov eax,[d_savedinfo.d_gridsize]; cdq;xor;sub` (INTEGER abs) then `fild`
     // (INT->float) — the binary stores d_savedinfo.d_gridsize @0x2BC as an INT (the texel snap is
     // integer); the port typed it float (qe3.h:640) so (int)8.0f == fild(int 8) for every grid the
@@ -308,7 +354,7 @@ void CTextureBar::OnDeltaPos( NMHDR *pNMHDR, LRESULT *pResult )
     if ( grid < 0 ) grid = -grid;          // abs32(d_gridsize)
     int step = negate ? -grid : grid;
 
-    switch ( (int)pNMHDR->idFrom )
+    switch ( idFrom )
     {
         case IDC_TB_SHIFT_H_SPIN:  Brush_ShiftTexture( (float)step, 0.0f ); break;   // sub_459470
         case IDC_TB_SHIFT_V_SPIN:  Brush_ShiftTexture( 0.0f, (float)step ); break;   // sub_4594C0
@@ -322,11 +368,19 @@ void CTextureBar::OnDeltaPos( NMHDR *pNMHDR, LRESULT *pResult )
             break;
         }
         default:
-            if ( pResult ) *pResult = 0;
-            return;
+            return false;
     }
+    return true;
+}
 
-    GetSurfaceAttributes( this );          // refresh the member ints (disasm tail)
+// `iDelta>=0` (down arrow) = negative step (disasm `if (*(int*)(a2+16) >= 0) v4 = -v4`).
+void CTextureBar::OnDeltaPos( NMHDR *pNMHDR, LRESULT *pResult )
+{
+    NMUPDOWN *ud = (NMUPDOWN *)pNMHDR;
+    bool negate  = ( ud->iDelta >= 0 );    // faithful: positive delta negates the step
+
+    if ( TextureBar_Spin( (int)pNMHDR->idFrom, negate ) )
+        GetSurfaceAttributes( this );      // refresh the member ints (disasm tail)
     if ( pResult )
         *pResult = 0;
 }

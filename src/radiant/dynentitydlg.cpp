@@ -121,6 +121,48 @@ void DynEntityDlg_02_RemovePair( const char *key )
     SetKeyValuePairs();
 }
 
+// UI-independent action behind CDynEntityDlg's per-field [Set] buttons.
+// Faithful to each edit handler (0x40E760 etc.): GetWindowText → empty? RemovePair :
+// SetPair.  (The binary's per-field control also has dedicated Clear buttons that
+// always RemovePair; OnClear* below provide those.)
+void DynEntSetKey_Apply( const char *value, const char *key )
+{
+    if ( value[0] )
+        DynEntityDlg_01_SetPair( value, key );
+    else
+        DynEntityDlg_02_RemovePair( key );
+    g_nUpdateBits |= 1;
+}
+
+// UI-independent action behind CDynEntityDlg's per-field [Clear] buttons.
+void DynEntClearKey_Apply( const char *key )
+{
+    DynEntityDlg_02_RemovePair( key );
+    g_nUpdateBits |= 1;
+}
+
+// UI-independent action behind CDynEntityDlg's type [Set] button (0x40E6C0's SetPair tail).
+void DynEntSetType_Apply( const char *type )
+{
+    DynEntityDlg_01_SetPair( type, "type" );
+    g_nUpdateBits |= 1;
+}
+
+// UI-independent lookup behind CDynEntityDlg's [Help] button (0x40E5C0's eclass walk).
+const char *DynEntHelp_Gather()
+{
+    for ( selbrush_t *i = selected_brushes.prev; i != &selected_brushes; i = i->prev )
+    {
+        entity_s_def *def = nullptr;
+        if ( !DynEnt_SelectedDef( i, &def ) )
+            continue;
+        if ( def->eclass && def->eclass->comments )
+            return def->eclass->comments;
+        return nullptr;
+    }
+    return nullptr;
+}
+
 // ══════════════════════════════════════════════════════════════════════════════
 //  CDynEntityDlg — the hand-built modeless popup (CLayerDlg / CSurfaceDlg pattern)
 // ══════════════════════════════════════════════════════════════════════════════
@@ -267,20 +309,13 @@ int CDynEntityDlg::OnCreate( LPCREATESTRUCT lpCreateStruct )
 }
 
 // ── per-field commit: read the control, SetPair (non-empty) / RemovePair (empty) ──
-// Faithful to each edit handler (0x40E760 etc.): GetWindowText → empty? RemovePair :
-// SetPair.  (The binary's per-field control also has dedicated Clear buttons that
-// always RemovePair; OnClear* below provide those.)
 static void DE_Commit( HWND field, const char *key )
 {
     if ( !field )
         return;
     char buf[1024] = { 0 };
     ::GetWindowTextA( field, buf, sizeof( buf ) - 1 );
-    if ( buf[0] )
-        DynEntityDlg_01_SetPair( buf, key );
-    else
-        DynEntityDlg_02_RemovePair( key );
-    g_nUpdateBits |= 1;
+    DynEntSetKey_Apply( buf, key );
 }
 
 // The type combo handler (0x40E6C0): require a selection, else "Type is not selected".
@@ -307,8 +342,7 @@ void CDynEntityDlg::OnSetType()
     {
         ::SendMessageA( s_deType, CB_GETLBTEXT, cur, (LPARAM)buf );
     }
-    DynEntityDlg_01_SetPair( buf, "type" );
-    g_nUpdateBits |= 1;
+    DynEntSetType_Apply( buf );
 }
 
 void CDynEntityDlg::OnSetHealth() { DE_Commit( s_deHealth, "health" ); }
@@ -316,11 +350,11 @@ void CDynEntityDlg::OnSetPhys()   { DE_Commit( s_dePhys,   "physPreset" ); }
 void CDynEntityDlg::OnSetEfx()    { DE_Commit( s_deEfx,    "destroyEfx" ); }
 void CDynEntityDlg::OnSetPieces() { DE_Commit( s_dePieces, "destroyPieces" ); }
 
-void CDynEntityDlg::OnClearType()   { DynEntityDlg_02_RemovePair( "type" );          g_nUpdateBits |= 1; }
-void CDynEntityDlg::OnClearHealth() { DynEntityDlg_02_RemovePair( "health" );        g_nUpdateBits |= 1; }
-void CDynEntityDlg::OnClearPhys()   { DynEntityDlg_02_RemovePair( "physPreset" );    g_nUpdateBits |= 1; }
-void CDynEntityDlg::OnClearEfx()    { DynEntityDlg_02_RemovePair( "destroyEfx" );    g_nUpdateBits |= 1; }
-void CDynEntityDlg::OnClearPieces() { DynEntityDlg_02_RemovePair( "destroyPieces" ); g_nUpdateBits |= 1; }
+void CDynEntityDlg::OnClearType()   { DynEntClearKey_Apply( "type" ); }
+void CDynEntityDlg::OnClearHealth() { DynEntClearKey_Apply( "health" ); }
+void CDynEntityDlg::OnClearPhys()   { DynEntClearKey_Apply( "physPreset" ); }
+void CDynEntityDlg::OnClearEfx()    { DynEntClearKey_Apply( "destroyEfx" ); }
+void CDynEntityDlg::OnClearPieces() { DynEntClearKey_Apply( "destroyPieces" ); }
 
 // ── the file-picker helper (GUI-only) ────────────────────────────────────────
 // 0x40E150  DynEntityDlg_OpenDialog(parentWnd, editControl, subdir, ofnFlags) — pick a
@@ -394,15 +428,9 @@ void CDynEntityDlg::OnBrowsePieces()
 // doc block) in a message box, like the binary's "Radiant - Help".
 void CDynEntityDlg::OnHelp()
 {
-    for ( selbrush_t *i = selected_brushes.prev; i != &selected_brushes; i = i->prev )
-    {
-        entity_s_def *def = nullptr;
-        if ( !DynEnt_SelectedDef( i, &def ) )
-            continue;
-        if ( def->eclass && def->eclass->comments )
-            MessageBoxA( def->eclass->comments, "Radiant - Help", MB_OK | MB_ICONINFORMATION );
-        return;
-    }
+    const char *comments = DynEntHelp_Gather();
+    if ( comments )
+        MessageBoxA( comments, "Radiant - Help", MB_OK | MB_ICONINFORMATION );
 }
 
 void CDynEntityDlg::OnClose()

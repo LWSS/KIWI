@@ -161,12 +161,24 @@ void MapInfo_03_Item( CWnd *dlg, int ctrlId, int value )
     item->SetWindowText( buf );
 }
 
+// One Map Info snapshot: the two 7-counter blocks MapInfo_01 fills, the four derived
+// totals, and the per-classname tally MapInfo_02 builds for the listbox rows.
+struct mapInfoStats_t
+{
+    int brushes, curves, terrain, brush_ents, box_ents, model_ents, prefabs_total;
+    int prefab_brushes, prefab_curves, prefab_terrain, prefab_brush_ents,
+        prefab_box_ents, prefab_model_ents, prefab_prefabs;
+    int geo_world_total, prefab_geo_total, world_total, prefab_total_total;
+    CMap<CString, LPCSTR, int, int> classCounts;
+};
+
 // ══════════════════════════════════════════════════════════════════════════════
+//  UI-independent count + tally behind CMapInfo's grid/listbox population.
 //  0x42F230  MapInfoDialog (CMapInfo::OnInitDialog) — count + display body: MapInfo_01
 //  fills the 14 counters, 27 MapInfo_03_Item calls push the grid cells (ids 1490..1516),
 //  then MapInfo_02 fills the listbox with "<classname>\t<count>" lines.
 // ══════════════════════════════════════════════════════════════════════════════
-void MapInfo_PopulateDialog( CWnd *dlg, HWND hListBox )
+void MapInfo_Gather( mapInfoStats_t &out )
 {
     Select_Deselect( 1 );  // 0x42F28D — the binary deselects before counting
 
@@ -175,74 +187,80 @@ void MapInfo_PopulateDialog( CWnd *dlg, HWND hListBox )
     int prefabStats[7] = { 0, 0, 0, 0, 0, 0, 0 };
     MapInfo_01( worldStats, (int)prefabStats, &active_brushes, &entityInsts );
 
-    const int brushes    = worldStats[0], curves     = worldStats[1], terrain    = worldStats[2];
-    const int brush_ents = worldStats[3], box_ents   = worldStats[4], model_ents = worldStats[5];
-    const int prefabs_total = worldStats[6];
-    const int prefab_brushes    = prefabStats[0], prefab_curves   = prefabStats[1];
-    const int prefab_terrain    = prefabStats[2], prefab_brush_ents = prefabStats[3];
-    const int prefab_box_ents   = prefabStats[4], prefab_model_ents = prefabStats[5];
-    const int prefab_prefabs    = prefabStats[6];
+    out.brushes    = worldStats[0]; out.curves     = worldStats[1]; out.terrain    = worldStats[2];
+    out.brush_ents = worldStats[3]; out.box_ents   = worldStats[4]; out.model_ents = worldStats[5];
+    out.prefabs_total = worldStats[6];
+    out.prefab_brushes    = prefabStats[0]; out.prefab_curves   = prefabStats[1];
+    out.prefab_terrain    = prefabStats[2]; out.prefab_brush_ents = prefabStats[3];
+    out.prefab_box_ents   = prefabStats[4]; out.prefab_model_ents = prefabStats[5];
+    out.prefab_prefabs    = prefabStats[6];
 
     // Derived totals (0x42F2B9..0x42F2E6).
-    int geo_world_total    = brushes + terrain + curves;
-    int prefab_geo_total   = prefab_brushes + prefab_terrain + prefab_curves;
-    int world_total        = brush_ents + box_ents + prefabs_total + model_ents;
-    int prefab_total_total = prefab_brush_ents + prefab_box_ents + prefab_prefabs + prefab_model_ents;
+    out.geo_world_total    = out.brushes + out.terrain + out.curves;
+    out.prefab_geo_total   = out.prefab_brushes + out.prefab_terrain + out.prefab_curves;
+    out.world_total        = out.brush_ents + out.box_ents + out.prefabs_total + out.model_ents;
+    out.prefab_total_total = out.prefab_brush_ents + out.prefab_box_ents + out.prefab_prefabs + out.prefab_model_ents;
+
+    // ── Per-class entity tally (MapInfo_02) ──
+    // The binary builds a CMap<CString,LPCSTR,int,int>(10 buckets) and populates it.
+    out.classCounts.InitHashTable( 11 );             // ~10 buckets (binary uses 10)
+    MapInfo_02( &out.classCounts, &entityInsts );
+}
+
+void MapInfo_PopulateDialog( CWnd *dlg, HWND hListBox )
+{
+    mapInfoStats_t st;
+    MapInfo_Gather( st );
 
     if ( !dlg )
         return;
 
     // ── World column (1490,1493,...) ──
-    MapInfo_03_Item( dlg, 1490, brushes );           // Brushes
-    MapInfo_03_Item( dlg, 1493, curves );            // Curves
-    MapInfo_03_Item( dlg, 1496, terrain );           // Terrain
-    MapInfo_03_Item( dlg, 1499, geo_world_total );   // geo total
-    MapInfo_03_Item( dlg, 1502, brush_ents );
-    MapInfo_03_Item( dlg, 1505, box_ents );
-    MapInfo_03_Item( dlg, 1508, model_ents );
-    MapInfo_03_Item( dlg, 1511, prefabs_total );
-    MapInfo_03_Item( dlg, 1514, world_total );
+    MapInfo_03_Item( dlg, 1490, st.brushes );           // Brushes
+    MapInfo_03_Item( dlg, 1493, st.curves );            // Curves
+    MapInfo_03_Item( dlg, 1496, st.terrain );           // Terrain
+    MapInfo_03_Item( dlg, 1499, st.geo_world_total );   // geo total
+    MapInfo_03_Item( dlg, 1502, st.brush_ents );
+    MapInfo_03_Item( dlg, 1505, st.box_ents );
+    MapInfo_03_Item( dlg, 1508, st.model_ents );
+    MapInfo_03_Item( dlg, 1511, st.prefabs_total );
+    MapInfo_03_Item( dlg, 1514, st.world_total );
     // ── Prefab column (1491,1494,...) ──
-    MapInfo_03_Item( dlg, 1491, prefab_brushes );
-    MapInfo_03_Item( dlg, 1494, prefab_curves );
-    MapInfo_03_Item( dlg, 1497, prefab_terrain );
-    MapInfo_03_Item( dlg, 1500, prefab_geo_total );
-    MapInfo_03_Item( dlg, 1503, prefab_brush_ents );
-    MapInfo_03_Item( dlg, 1506, prefab_box_ents );
-    MapInfo_03_Item( dlg, 1509, prefab_model_ents );
-    MapInfo_03_Item( dlg, 1512, prefab_prefabs );
-    MapInfo_03_Item( dlg, 1515, prefab_total_total );
+    MapInfo_03_Item( dlg, 1491, st.prefab_brushes );
+    MapInfo_03_Item( dlg, 1494, st.prefab_curves );
+    MapInfo_03_Item( dlg, 1497, st.prefab_terrain );
+    MapInfo_03_Item( dlg, 1500, st.prefab_geo_total );
+    MapInfo_03_Item( dlg, 1503, st.prefab_brush_ents );
+    MapInfo_03_Item( dlg, 1506, st.prefab_box_ents );
+    MapInfo_03_Item( dlg, 1509, st.prefab_model_ents );
+    MapInfo_03_Item( dlg, 1512, st.prefab_prefabs );
+    MapInfo_03_Item( dlg, 1515, st.prefab_total_total );
     // ── Totals column (1492,1495,...) = world + prefab ──
-    MapInfo_03_Item( dlg, 1492, brushes + prefab_brushes );
-    MapInfo_03_Item( dlg, 1495, curves + prefab_curves );
-    MapInfo_03_Item( dlg, 1498, terrain + prefab_terrain );
-    MapInfo_03_Item( dlg, 1501, brushes + curves + terrain + prefab_brushes + prefab_curves + prefab_terrain );
-    MapInfo_03_Item( dlg, 1504, brush_ents + prefab_brush_ents );
-    MapInfo_03_Item( dlg, 1507, box_ents + prefab_box_ents );
-    MapInfo_03_Item( dlg, 1510, model_ents + prefab_model_ents );
-    MapInfo_03_Item( dlg, 1513, prefabs_total + prefab_prefabs );
-    MapInfo_03_Item( dlg, 1516, world_total + prefab_total_total );
+    MapInfo_03_Item( dlg, 1492, st.brushes + st.prefab_brushes );
+    MapInfo_03_Item( dlg, 1495, st.curves + st.prefab_curves );
+    MapInfo_03_Item( dlg, 1498, st.terrain + st.prefab_terrain );
+    MapInfo_03_Item( dlg, 1501, st.brushes + st.curves + st.terrain + st.prefab_brushes + st.prefab_curves + st.prefab_terrain );
+    MapInfo_03_Item( dlg, 1504, st.brush_ents + st.prefab_brush_ents );
+    MapInfo_03_Item( dlg, 1507, st.box_ents + st.prefab_box_ents );
+    MapInfo_03_Item( dlg, 1510, st.model_ents + st.prefab_model_ents );
+    MapInfo_03_Item( dlg, 1513, st.prefabs_total + st.prefab_prefabs );
+    MapInfo_03_Item( dlg, 1516, st.world_total + st.prefab_total_total );
 
-    // ── Per-class entity list (MapInfo_02 → listbox) ──
-    // The binary builds a CMap<CString,LPCSTR,int,int>(10 buckets), populates it, resets
-    // the listbox (LB_RESETCONTENT), sets one tab stop at 196 (LB_SETTABSTOPS), then
-    // adds "<name>\t<count>" per class (LB_ADDSTRING).
+    // ── Per-class entity list (tally → listbox) ──
+    // The binary resets the listbox (LB_RESETCONTENT), sets one tab stop at 196
+    // (LB_SETTABSTOPS), then adds "<name>\t<count>" per class (LB_ADDSTRING).
     if ( hListBox && ::IsWindow( hListBox ) )
     {
-        CMap<CString, LPCSTR, int, int> classCounts;
-        classCounts.InitHashTable( 11 );             // ~10 buckets (binary uses 10)
-        MapInfo_02( &classCounts, &entityInsts );
-
         ::SendMessageA( hListBox, LB_RESETCONTENT, 0, 0 );
         int tab = 196;                               // 0xC4 (IDA 0x42F50E)
         ::SendMessageA( hListBox, LB_SETTABSTOPS, 1, (LPARAM)&tab );
 
-        POSITION pos = classCounts.GetStartPosition();
+        POSITION pos = st.classCounts.GetStartPosition();
         while ( pos )
         {
             CString key;
             int     count = 0;
-            classCounts.GetNextAssoc( pos, key, count );
+            st.classCounts.GetNextAssoc( pos, key, count );
             char line[512];
             _snprintf( line, sizeof( line ), "%s\t%i", (LPCSTR)key, count );
             ::SendMessageA( hListBox, LB_ADDSTRING, 0, (LPARAM)line );

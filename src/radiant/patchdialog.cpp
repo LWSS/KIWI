@@ -37,6 +37,38 @@ extern void  CurveEdit_SetRange( int slot, float maxVal );        // sub_4015C0 
 extern unsigned int  g_paintColorBGR;   // paint target colour {B,G,R} (defined below)
 extern byte g_paintColorA;     // paint target alpha       (defined below)
 
+// UI-independent action behind CAdvPatchEditDlg's buddy edits — transform the typed value
+// (sub_401CF0 for amplitude) then clamp+snap it into the slot's stored value.
+void AdvPatchEdit_ApplySlotValue( int slot, float typed )
+{
+    CurveEdit_SnapStore( slot, CurveEdit_InputToValue( slot, typed ) );
+}
+
+// UI-independent action behind CAdvPatchEditDlg's inner/outer slider-range edits — set the
+// slot's max, rebuilding its [0,64] range and re-snapping the value (sub_4015C0).
+void AdvPatchEdit_ApplySlotRange( int slot, float maxVal )
+{
+    CurveEdit_SetRange( slot, maxVal );
+}
+
+// UI-independent action behind CAdvPatchEditDlg's slider drags — thumb pos -> slot value.
+void AdvPatchEdit_ApplySlotStep( int slot, int pos )
+{
+    CurveEdit_SetFromStep( slot, pos );
+}
+
+// UI-independent action behind CAdvPatchEditDlg's "Color..." button — store the picked colour.
+void AdvPatchEdit_ApplyPaintColor( COLORREF color )
+{
+    g_paintColorBGR = color;          // raw COLORREF, matching this[323]
+}
+
+// UI-independent action behind CAdvPatchEditDlg's "Alpha..." button — alpha = (R+G+B)/3.
+void AdvPatchEdit_ApplyPaintAlpha( COLORREF c )
+{
+    g_paintColorA = (byte)( ( ( c & 0xFF ) + ( ( c >> 16 ) & 0xFF ) + ( ( c >> 8 ) & 0xFF ) ) / 3 );
+}
+
 class CAdvPatchEditDlg : public CDialog
 {
 public:
@@ -57,7 +89,7 @@ protected:
     {
         CString s;
         GetDlgItemText( CurveEdit_EditId( slot ), s );
-        CurveEdit_SnapStore( slot, CurveEdit_InputToValue( slot, (float)atof( (LPCSTR)s ) ) );
+        AdvPatchEdit_ApplySlotValue( slot, (float)atof( (LPCSTR)s ) );
         RefreshSlot( slot );
     }
 
@@ -94,7 +126,7 @@ protected:
         GetDlgItemText( rangeEditId, s );
         float mx = (float)atof( (LPCSTR)s );
         if ( mx == 0.0f ) { mx = 1024.0f; SetDlgItemText( rangeEditId, "1024" ); }
-        CurveEdit_SetRange( slot, mx );
+        AdvPatchEdit_ApplySlotRange( slot, mx );
         HWND hTb = ::GetDlgItem( m_hWnd, CurveEdit_TrackbarId( slot ) );
         if ( hTb ) ::SendMessageA( hTb, KRAD_TBM_SETRANGE, TRUE, (LPARAM)( CurveEdit_StepCount( slot ) << 16 ) );
         RefreshSlot( slot );
@@ -111,7 +143,7 @@ protected:
                 if ( CurveEdit_TrackbarId( slot ) == id )
                 {
                     int pos = (int)::SendMessageA( pScrollBar->m_hWnd, KRAD_TBM_GETPOS, 0, 0 );
-                    CurveEdit_SetFromStep( slot, pos );
+                    AdvPatchEdit_ApplySlotStep( slot, pos );
                     RefreshSlot( slot );
                     return;
                 }
@@ -127,7 +159,7 @@ protected:
     {
         CColorDialog dlg( (COLORREF)g_paintColorBGR, 0, this );
         if ( dlg.DoModal() == IDOK )
-            g_paintColorBGR = dlg.GetColor();          // raw COLORREF, matching this[323]
+            AdvPatchEdit_ApplyPaintColor( dlg.GetColor() );
     }
     // sub_4022A0 — "Alpha..." button (real id 1464).  Seeds the dialog with the current alpha
     // as a grey, and on OK sets alpha = (R+G+B)/3 of the chosen colour.
@@ -136,10 +168,7 @@ protected:
         unsigned int a = g_paintColorA;
         CColorDialog dlg( (COLORREF)( a | ( ( a | ( a << 8 ) ) << 8 ) ), 0, this );
         if ( dlg.DoModal() == IDOK )
-        {
-            COLORREF c = dlg.GetColor();
-            g_paintColorA = (byte)( ( ( c & 0xFF ) + ( ( c >> 16 ) & 0xFF ) + ( ( c >> 8 ) & 0xFF ) ) / 3 );
-        }
+            AdvPatchEdit_ApplyPaintAlpha( dlg.GetColor() );
     }
     // sub_402490 — CurvEditDlg::OnColorAlpha (WM_DRAWITEM): paint the two owner-draw swatches.
     afx_msg void OnDrawItem( int nIDCtl, LPDRAWITEMSTRUCT dis )
@@ -508,6 +537,123 @@ protected:
     }
 };
 
+// One patch control point as the inspector shows and edits it: which cell (the Row/Column
+// combo selections), its position, and its current-layer texture coords.
+struct patchPointState_t
+{
+    int   row, col;   // combo 1301 / 1302 selections (idx row+16*col into patchMesh_t.ctrl)
+    float xyz[3];     // edits 1089 / 1142 / 1147
+    float st[2];      // edits 1102 / 1106
+};
+
+// UI-independent core read behind the inspector's control-point display (sub_436E10) — fill
+// `pt`'s xyz/st from the row/col cell; false = no patch, or the cell is out of range.
+bool PatchInspector_GatherPoint( patchMesh_t *def, patchPointState_t &pt )
+{
+    if ( !def )
+        return false;
+    if ( pt.row < 0 || pt.row >= def->height || pt.col < 0 || pt.col >= def->width )
+        return false;
+    drawVert_t *cp = &def->ctrl[pt.col][pt.row];                     // idx row+16*col
+    pt.xyz[0] = cp->xyz[0];  pt.xyz[1] = cp->xyz[1];  pt.xyz[2] = cp->xyz[2];
+    const float *st = (const float *)( (const char *)&cp->texCoord + 8 * g_qeglobals.current_edit_layer );
+    pt.st[0] = st[0];  pt.st[1] = st[1];
+    return true;
+}
+
+// UI-independent core read behind g_PatchDialog.GetPatchInfo — the selected single patch's
+// mesh def (the binary's this+116), or null when the selection is not one patch.
+patchMesh_t *PatchInspector_GatherSelectedPatch()
+{
+    patch_t *patch = nullptr;
+    if ( QE_SingleBrush() && ( patch = selected_brushes.next->patch ) != nullptr )
+        return patch->def;
+    return nullptr;
+}
+
+// UI-independent action behind the inspector's Apply button.
+// OnApply (0x436ef0) — write the edited X/Y/Z + current-layer S/T back into the selected
+// control point, bump the patch version, and force a redraw (no explicit Patch_Rebuild —
+// the version bump + g_nUpdateBits=-1 re-tessellate on the next render, as in the binary).
+void PatchInspector_ApplyPoint( patchMesh_t *def, const patchPointState_t &pt )
+{
+    if ( !def )
+        return;
+    if ( pt.row < 0 || pt.row >= def->height || pt.col < 0 || pt.col >= def->width )
+        return;
+    drawVert_t *cp = &def->ctrl[pt.col][pt.row];
+    cp->xyz[0] = pt.xyz[0];  cp->xyz[1] = pt.xyz[1];  cp->xyz[2] = pt.xyz[2];
+    float *st = (float *)( (char *)&cp->texCoord + 8 * g_qeglobals.current_edit_layer );
+    st[0] = pt.st[0];  st[1] = pt.st[1];
+    ++def->version;             // +0x5040
+    g_nUpdateBits = -1;         // force a full redraw (re-tessellates the dirty patch)
+}
+
+// UI-independent actions behind the inspector's texturing buttons — thin wrappers over the
+// ported patch-texturing ops, scaled by the current edit layer's sample size
+// (random_texture_stuff[layer].sampleSize, IDB +36).
+void PatchInspector_Cap()                          // CAP (1282) -> sub_4368D0
+{
+    float s = g_qeglobals.random_texture_stuff[g_qeglobals.current_edit_layer].sampleSize;
+    Patch_NaturalizeSelected( true, false, s, s );
+    g_nUpdateBits = -1;
+}
+
+void PatchInspector_Natural()                       // Natural (1284) -> sub_436940
+{
+    float s = g_qeglobals.random_texture_stuff[g_qeglobals.current_edit_layer].sampleSize;
+    Patch_NaturalizeSelected( false, false, s, s );
+    g_nUpdateBits = -1;
+}
+
+void PatchInspector_Fit()                           // Fit (1286) -> sub_436910
+{
+    Brush_FitTexture( 1.0f, 1.0f, 0 );
+    g_nUpdateBits = -1;
+}
+
+// "Set..." (1283) -> sub_436980.  `bAccepted` is the CTextureLayout modal result: the port
+// bumps g_nUpdateBits either way (the repaint brackets the DIALOG, not the OK branch — the
+// CurveThicken_Apply situation), so the flag rides along instead of splitting the update out.
+void PatchInspector_SetTexturing( bool bAccepted, float sx, float sy, int mode )
+{
+    if ( bAccepted )
+        Patch_SetTexturing( sx, sy, mode );
+    g_nUpdateBits = -1;
+}
+
+// The five texdef spin STEPs as the inspector's step edits hold them (binary ctor
+// flt_25D75A8..75B8: stretch/shift 0.05, rotate 45).
+struct texdefSpinState_t
+{
+    float rotate;        // edit 1217
+    float stretchHoriz;  // edit 1211
+    float stretchVert;   // edit 1213
+    float shiftHoriz;    // edit 1195
+    float shiftVert;     // edit 1196
+};
+
+// UI-independent action behind the inspector's texdef spin arrows.
+// Texdef spin arrows (1248/1251/1254/1257/1259) — apply a RELATIVE texture transform
+// by the step typed in the matching edit (sub_4370E0 -> Patch_SetTextureInfo): shift =
+// +/-step, stretch = *(1 -/+ step), rotate = +/-step.  Up = iDelta > 0.
+void PatchInspector_SpinTexdef( UINT id, bool up, const texdefSpinState_t &step )
+{
+    texdef_sub_t td;
+    memset( &td, 0, sizeof( td ) );
+    switch ( id )
+    {
+    case 1259: { float s = step.rotate;       td.rotate  = up ?  s        : -s;        break; } // Rotate
+    case 1257: { float s = step.stretchHoriz; td.size[0] = up ? 1.0f - s  : 1.0f + s;  break; } // Horiz stretch
+    case 1254: { float s = step.stretchVert;  td.size[1] = up ? 1.0f - s  : 1.0f + s;  break; } // Vert  stretch
+    case 1248: { float s = step.shiftHoriz;   td.shift[0] = up ?  s        : -s;        break; } // Horiz shift
+    case 1251: { float s = step.shiftVert;    td.shift[1] = up ?  s        : -s;        break; } // Vert  shift
+    default:   return;
+    }
+    Patch_SetTextureInfo( &td );
+    g_nUpdateBits |= 1;
+}
+
 class CPatchInspectorDlg : public CDialog
 {
 public:
@@ -532,27 +678,20 @@ protected:
         static const int fields[5] = { 1089, 1142, 1147, 1102, 1106 };   // X Y Z S T
         for ( int i = 0; i < 5; ++i )
             SetDlgItemText( fields[i], "" );
-        if ( !m_def )
+        patchPointState_t pt;
+        pt.row = (int)SendDlgItemMessage( 1301, CB_GETCURSEL, 0, 0 );    // Row combo (0..height-1)
+        pt.col = (int)SendDlgItemMessage( 1302, CB_GETCURSEL, 0, 0 );    // Column combo (0..width-1)
+        if ( !PatchInspector_GatherPoint( m_def, pt ) )
             return;
-        int row = (int)SendDlgItemMessage( 1301, CB_GETCURSEL, 0, 0 );   // Row combo (0..height-1)
-        int col = (int)SendDlgItemMessage( 1302, CB_GETCURSEL, 0, 0 );   // Column combo (0..width-1)
-        if ( row < 0 || row >= m_def->height || col < 0 || col >= m_def->width )
-            return;
-        drawVert_t *cp = &m_def->ctrl[col][row];                         // idx row+16*col
-        SetField( 1089, cp->xyz[0] );  SetField( 1142, cp->xyz[1] );  SetField( 1147, cp->xyz[2] );
-        const float *st = (const float *)( (const char *)&cp->texCoord + 8 * g_qeglobals.current_edit_layer );
-        SetField( 1102, st[0] );  SetField( 1106, st[1] );
+        SetField( 1089, pt.xyz[0] );  SetField( 1142, pt.xyz[1] );  SetField( 1147, pt.xyz[2] );
+        SetField( 1102, pt.st[0] );  SetField( 1106, pt.st[1] );
     }
 
 public:
     // g_PatchDialog.GetPatchInfo — bind to the selected single patch + repopulate the combos.
     void GetPatchInfo()
     {
-        patch_t *patch = nullptr;
-        if ( QE_SingleBrush() && ( patch = selected_brushes.next->patch ) != nullptr )
-            m_def = patch->def;
-        else
-            m_def = nullptr;
+        m_def = PatchInspector_GatherSelectedPatch();
         FillCombo( 1301, m_def ? m_def->height : 0 );   // Row    0..height-1
         FillCombo( 1302, m_def ? m_def->width  : 0 );   // Column 0..width-1
         ShowSelectedPoint();
@@ -571,69 +710,34 @@ protected:
         return TRUE;
     }
     afx_msg void OnRowColChange() { ShowSelectedPoint(); }
-    // OnApply (0x436ef0) — write the edited X/Y/Z + current-layer S/T back into the selected
-    // control point, bump the patch version, and force a redraw (no explicit Patch_Rebuild —
-    // the version bump + g_nUpdateBits=-1 re-tessellate on the next render, as in the binary).
-    afx_msg void OnApply()
+    afx_msg void OnApply()                         // "Apply" (3) -> PatchInspector_ApplyPoint
     {
-        if ( !m_def )
-            return;
-        int row = (int)SendDlgItemMessage( 1301, CB_GETCURSEL, 0, 0 );
-        int col = (int)SendDlgItemMessage( 1302, CB_GETCURSEL, 0, 0 );
-        if ( row < 0 || row >= m_def->height || col < 0 || col >= m_def->width )
-            return;
-        drawVert_t *cp = &m_def->ctrl[col][row];
-        cp->xyz[0] = GetFieldF( 1089 );  cp->xyz[1] = GetFieldF( 1142 );  cp->xyz[2] = GetFieldF( 1147 );
-        float *st = (float *)( (char *)&cp->texCoord + 8 * g_qeglobals.current_edit_layer );
-        st[0] = GetFieldF( 1102 );  st[1] = GetFieldF( 1106 );
-        ++m_def->version;             // +0x5040
-        g_nUpdateBits = -1;           // force a full redraw (re-tessellates the dirty patch)
+        patchPointState_t pt;
+        pt.row = (int)SendDlgItemMessage( 1301, CB_GETCURSEL, 0, 0 );
+        pt.col = (int)SendDlgItemMessage( 1302, CB_GETCURSEL, 0, 0 );
+        pt.xyz[0] = GetFieldF( 1089 );  pt.xyz[1] = GetFieldF( 1142 );  pt.xyz[2] = GetFieldF( 1147 );
+        pt.st[0] = GetFieldF( 1102 );   pt.st[1] = GetFieldF( 1106 );
+        PatchInspector_ApplyPoint( m_def, pt );
     }
-    // Texturing buttons — thin wrappers over the ported patch-texturing ops, scaled by the
-    // current edit layer's sample size (random_texture_stuff[layer].sampleSize, IDB +36).
-    afx_msg void OnCap()                          // CAP (1282) -> sub_4368D0
-    {
-        float s = g_qeglobals.random_texture_stuff[g_qeglobals.current_edit_layer].sampleSize;
-        Patch_NaturalizeSelected( true, false, s, s );
-        g_nUpdateBits = -1;
-    }
-    afx_msg void OnNatural()                       // Natural (1284) -> sub_436940
-    {
-        float s = g_qeglobals.random_texture_stuff[g_qeglobals.current_edit_layer].sampleSize;
-        Patch_NaturalizeSelected( false, false, s, s );
-        g_nUpdateBits = -1;
-    }
-    afx_msg void OnFit()                           // Fit (1286) -> sub_436910
-    {
-        Brush_FitTexture( 1.0f, 1.0f, 0 );
-        g_nUpdateBits = -1;
-    }
+    afx_msg void OnCap()          { PatchInspector_Cap(); }        // CAP     (1282)
+    afx_msg void OnNatural()      { PatchInspector_Natural(); }    // Natural (1284)
+    afx_msg void OnFit()          { PatchInspector_Fit(); }        // Fit     (1286)
     afx_msg void OnSetTexturing()                  // "Set..." (1283) -> sub_436980
     {
         CTextureLayout dlg( this );                // modal "Patch texture layout"
-        if ( dlg.DoModal() == IDOK )
-            Patch_SetTexturing( dlg.m_x, dlg.m_y, dlg.m_mode );
-        g_nUpdateBits = -1;
+        bool bAccepted = ( dlg.DoModal() == IDOK );
+        PatchInspector_SetTexturing( bAccepted, dlg.m_x, dlg.m_y, dlg.m_mode );
     }
-    // Texdef spin arrows (1248/1251/1254/1257/1259) — apply a RELATIVE texture transform
-    // by the step typed in the matching edit (sub_4370E0 -> Patch_SetTextureInfo): shift =
-    // +/-step, stretch = *(1 -/+ step), rotate = +/-step.  Up = iDelta > 0.
     afx_msg void OnSpin( UINT id, NMHDR *pNMHDR, LRESULT *pResult )
     {
         bool up = ( (NMUPDOWN *)pNMHDR )->iDelta > 0;
-        texdef_sub_t td;
-        memset( &td, 0, sizeof( td ) );
-        switch ( id )
-        {
-        case 1259: { float s = GetFieldF( 1217 ); td.rotate  = up ?  s        : -s;        break; } // Rotate
-        case 1257: { float s = GetFieldF( 1211 ); td.size[0] = up ? 1.0f - s  : 1.0f + s;  break; } // Horiz stretch
-        case 1254: { float s = GetFieldF( 1213 ); td.size[1] = up ? 1.0f - s  : 1.0f + s;  break; } // Vert  stretch
-        case 1248: { float s = GetFieldF( 1195 ); td.shift[0] = up ?  s        : -s;        break; } // Horiz shift
-        case 1251: { float s = GetFieldF( 1196 ); td.shift[1] = up ?  s        : -s;        break; } // Vert  shift
-        default:   *pResult = 0; return;
-        }
-        Patch_SetTextureInfo( &td );
-        g_nUpdateBits |= 1;
+        texdefSpinState_t step;
+        step.rotate       = GetFieldF( 1217 );
+        step.stretchHoriz = GetFieldF( 1211 );
+        step.stretchVert  = GetFieldF( 1213 );
+        step.shiftHoriz   = GetFieldF( 1195 );
+        step.shiftVert    = GetFieldF( 1196 );
+        PatchInspector_SpinTexdef( id, up, step );
         *pResult = 0;
     }
     virtual void OnOK()           { ShowWindow( SW_HIDE ); }   // "Done" (IDOK): modeless -> hide
@@ -757,6 +861,35 @@ static int g_patchDensityLastHeightSel = 0;
 static int g_terrainLastWidthSel       = 0;
 static int g_terrainLastHeightSel      = 0;
 
+// UI-independent action behind CPatchDensityDlg's OK (0x436390) — validate the two combo
+// selections, build the patch/terrain mesh, then remember the selections for the next open.
+// (The undo bracket stays with the caller: DoSimpleTerrainPatchMesh / IDB 0x429a20 opens it
+// around the DIALOG, not the create — even a cancel opens/closes the bracket.)
+void PatchDensity_Apply( bool terrain, int wSel, int hSel )
+{
+    const unsigned int maxSel = terrain ? 14u : 6u;
+    if ( (unsigned int)wSel <= maxSel && (unsigned int)hSel <= maxSel )
+    {
+        if ( terrain )
+            Create_Terrain( wSel + 2, hSel + 2,                         // 0x458FB0
+                            g_pParentWnd->m_pActiveXY->m_nViewType );
+        else
+            Patch_GenericMesh( s_patchDensityDims[wSel], s_patchDensityDims[hSel],
+                               g_pParentWnd->m_pActiveXY->m_nViewType, 1, 0 ); // 0x436400
+        g_nUpdateBits = -1;
+    }
+    if ( terrain )
+    {
+        g_terrainLastWidthSel  = wSel;
+        g_terrainLastHeightSel = hSel;
+    }
+    else
+    {
+        g_patchDensityLastWidthSel  = wSel;
+        g_patchDensityLastHeightSel = hSel;
+    }
+}
+
 class CPatchDensityDlg : public CDialog
 {
 public:
@@ -797,27 +930,7 @@ protected:
     {
         int wSel = m_wndWidth.GetCurSel();
         int hSel = m_wndHeight.GetCurSel();
-        const unsigned int maxSel = m_terrain ? 14u : 6u;
-        if ( (unsigned int)wSel <= maxSel && (unsigned int)hSel <= maxSel )
-        {
-            if ( m_terrain )
-                Create_Terrain( wSel + 2, hSel + 2,                         // 0x458FB0
-                                g_pParentWnd->m_pActiveXY->m_nViewType );
-            else
-                Patch_GenericMesh( s_patchDensityDims[wSel], s_patchDensityDims[hSel],
-                                   g_pParentWnd->m_pActiveXY->m_nViewType, 1, 0 ); // 0x436400
-            g_nUpdateBits = -1;
-        }
-        if ( m_terrain )
-        {
-            g_terrainLastWidthSel  = wSel;
-            g_terrainLastHeightSel = hSel;
-        }
-        else
-        {
-            g_patchDensityLastWidthSel  = wSel;
-            g_patchDensityLastHeightSel = hSel;
-        }
+        PatchDensity_Apply( m_terrain, wSel, hSel );
         CDialog::OnOK();
     }
 };

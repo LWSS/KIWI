@@ -340,6 +340,133 @@ void Prefs_Init( bool loadFromRegistry )
         Prefs_LoadPrefs( g_PrefsDlg );
 }
 
+// One preferences-dialog control snapshot: every DDX-backed member of CPrefsDlg below
+// (field name = the member minus m_).  The dialog exchanges it with prefData_t through
+// PrefsDlg_Gather (load) and Prefs_ApplyFromDialogState (commit), so the field↔pref
+// mapping is UI-free; the control ids / registry keys are annotated on the CPrefsDlg
+// members + DoDataExchange.
+struct prefsDlgState_t
+{
+    // Radio group indices (DDX_Radio): 0-based position of the checked button.
+    int  rMouse;
+    int  rView;
+    // Checkboxes (BOOL).
+    BOOL bLoadLast, bFace, bRightClick, bAutoSave, bLoadLastMap, bTexSubset;
+    BOOL bSnapshots, bLoseChanges, bCamXYUpdate, bUseWheel, bAltAlwaysMove;
+    BOOL bSnapTGrid, bLinkKeepSel, bPaintSizing, bCullSky, bDontClamp;
+    BOOL bTexToolbar;
+    BOOL bChaseMouse, bTexScrollbar, bThickLines, bColoredEnts, bTexBrush2d;
+    BOOL bTexMesh2d, bFast2dDrag, bDetachWin, bTransBg;
+    // Edit fields (ints / floats).
+    int   nAutoSaveMin, nStatusSize, nRotation, nFarplane, nUndoLevels;
+    int   nTolerantWeld, nSplay, nDropHeight, nScaleBase, nScaleRange;
+    int   nVehArrowTime, nVehArrowSize;
+    float fFov, fModelOrg, fPrefabOrg;
+    CString sUserIni, sUserFilters;
+};
+
+// UI-independent load pass behind the dialog's OnInitDialog: prefData_t → control state.
+static void PrefsDlg_Gather( const prefData_t *p, prefsDlgState_t &out )
+{
+    out.rMouse         = ( p->m_nMouseButtons == 3 ) ? 1 : 0;
+    out.rView          = p->m_nView;
+    out.bLoadLast      = p->m_bLoadLast != 0;
+    out.bFace          = p->m_bFace != 0;
+    out.bRightClick    = p->m_bRightClick != 0;
+    out.bAutoSave      = p->m_bAutoSave != 0;
+    out.nAutoSaveMin   = p->m_nAutoSave;
+    out.bLoadLastMap   = p->m_bLoadLastMap != 0;
+    out.bTexSubset     = p->m_bTextureWindowSearch != 0;
+    out.bSnapshots     = p->m_bSnapShots != 0;
+    out.bLoseChanges   = p->loose_changes != 0;
+    out.nStatusSize    = p->m_nStatusSize;
+    out.bCamXYUpdate   = p->m_bCamXYUpdate != 0;
+    out.bUseWheel      = p->camera_use_wheel != 0;
+    out.bAltAlwaysMove = p->m_bALTEdge != 0;
+    out.bTexToolbar    = p->m_bTextureBar != 0;
+    out.bSnapTGrid     = p->m_bSnapTToGrid != 0;
+    out.bLinkKeepSel   = p->linking_keeps_selection != 0;
+    out.bPaintSizing   = p->m_bSizePaint != 0;
+    out.bCullSky       = p->b_mCullSky != 0;
+    out.bDontClamp     = p->m_bNoClamp != 0;
+    out.sUserIni       = p->m_strUserIniPath;
+    out.sUserFilters   = p->m_strUserFilterPath;
+    out.nRotation      = p->m_nRotation;
+    out.nFarplane      = p->farplane;
+    out.nTolerantWeld  = p->tolerant_weld;
+    out.nVehArrowTime  = p->vehicle_arrow_time;
+    out.nVehArrowSize  = p->vehicle_arrow_size;
+    out.nSplay         = p->splay;
+    out.nDropHeight    = p->m_dropHeight;
+    out.bChaseMouse    = p->m_bChaseMouse != 0;
+    out.bTexScrollbar  = p->m_bTextureScrollbar != 0;
+    out.bThickLines    = p->thick_selection_lines != 0;
+    out.bColoredEnts   = p->m_bColoredEnts != 0;
+    out.bTexBrush2d    = p->texture_brush_2d != 0;
+    out.bTexMesh2d     = p->texture_mesh_2d != 0;
+    out.bFast2dDrag    = p->fast_2d_view_dragging != 0;
+    out.bDetachWin     = p->detatch_windows != 0;
+    out.bTransBg       = p->transparent_background != 0;
+    out.nUndoLevels    = p->m_nUndoLevels;
+    out.nScaleBase     = p->scale_base;
+    out.nScaleRange    = p->scale_range;
+    out.fFov           = p->camera_fov;
+    out.fModelOrg      = p->model_origin_size;
+    out.fPrefabOrg     = p->prefab_origin_size;
+}
+
+// UI-independent action behind the dialog's OK: control state → prefData_t, then persist.
+static void Prefs_ApplyFromDialogState( prefData_t *p, const prefsDlgState_t &st )
+{
+    p->m_nMouse_unsure    = st.rMouse;                // raw registry value (0/1)
+    p->m_nMouseButtons    = st.rMouse ? 3 : 2;
+    p->m_nView            = st.rView;
+    p->m_bLoadLast        = st.bLoadLast ? 1 : 0;
+    p->m_bFace            = st.bFace ? 1 : 0;
+    p->m_bRightClick      = st.bRightClick ? 1 : 0;
+    p->m_bAutoSave        = st.bAutoSave ? 1 : 0;
+    p->m_nAutoSave        = st.nAutoSaveMin;
+    p->m_bLoadLastMap     = st.bLoadLastMap ? 1 : 0;
+    p->m_bTextureWindowSearch = st.bTexSubset ? 1 : 0;
+    p->m_bSnapShots       = st.bSnapshots ? 1 : 0;
+    p->loose_changes      = st.bLoseChanges ? 1 : 0;
+    p->m_nStatusSize      = st.nStatusSize;
+    p->m_bCamXYUpdate     = st.bCamXYUpdate ? 1 : 0;
+    p->camera_use_wheel   = st.bUseWheel ? 1 : 0;
+    p->m_bALTEdge         = st.bAltAlwaysMove ? 1 : 0;
+    p->m_bTextureBar      = st.bTexToolbar ? 1 : 0;
+    p->m_bSnapTToGrid     = st.bSnapTGrid ? 1 : 0;
+    p->linking_keeps_selection = st.bLinkKeepSel ? 1 : 0;
+    p->m_bSizePaint       = st.bPaintSizing ? 1 : 0;
+    p->b_mCullSky         = st.bCullSky ? 1 : 0;
+    p->m_bNoClamp         = st.bDontClamp ? 1 : 0;
+    p->m_strUserIniPath   = st.sUserIni;
+    p->m_strUserFilterPath= st.sUserFilters;
+    p->m_nRotation        = st.nRotation;
+    p->farplane           = st.nFarplane;
+    p->tolerant_weld      = st.nTolerantWeld;
+    p->vehicle_arrow_time = st.nVehArrowTime;
+    p->vehicle_arrow_size = st.nVehArrowSize;
+    p->splay              = st.nSplay;
+    p->m_dropHeight       = st.nDropHeight;
+    p->m_bChaseMouse      = st.bChaseMouse ? 1 : 0;
+    p->m_bTextureScrollbar= st.bTexScrollbar ? 1 : 0;
+    p->thick_selection_lines = st.bThickLines ? 1 : 0;
+    p->m_bColoredEnts     = st.bColoredEnts ? 1 : 0;
+    p->texture_brush_2d   = st.bTexBrush2d ? 1 : 0;
+    p->texture_mesh_2d    = st.bTexMesh2d ? 1 : 0;
+    p->fast_2d_view_dragging = st.bFast2dDrag ? 1 : 0;
+    p->detatch_windows    = st.bDetachWin ? 1 : 0;
+    p->transparent_background = st.bTransBg ? 1 : 0;
+    p->m_nUndoLevels      = st.nUndoLevels;
+    p->scale_base         = st.nScaleBase;
+    p->scale_range        = st.nScaleRange;
+    p->camera_fov         = st.fFov;
+    p->model_origin_size  = st.fModelOrg;
+    p->prefab_origin_size = st.fPrefabOrg;
+    Prefs_SavePrefs( p );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 //  CPrefsDlg — the GUI editor for prefData_t (Edit→Preferences).
 //
@@ -429,52 +556,53 @@ protected:
     virtual BOOL OnInitDialog()
     {
         CDialog::OnInitDialog();
-        prefData_t *p = g_PrefsDlg;
-        m_rMouse         = ( p->m_nMouseButtons == 3 ) ? 1 : 0;
-        m_rView          = p->m_nView;
-        m_bLoadLast      = p->m_bLoadLast != 0;
-        m_bFace          = p->m_bFace != 0;
-        m_bRightClick    = p->m_bRightClick != 0;
-        m_bAutoSave      = p->m_bAutoSave != 0;
-        m_nAutoSaveMin   = p->m_nAutoSave;
-        m_bLoadLastMap   = p->m_bLoadLastMap != 0;
-        m_bTexSubset     = p->m_bTextureWindowSearch != 0;
-        m_bSnapshots     = p->m_bSnapShots != 0;
-        m_bLoseChanges   = p->loose_changes != 0;
-        m_nStatusSize    = p->m_nStatusSize;
-        m_bCamXYUpdate   = p->m_bCamXYUpdate != 0;
-        m_bUseWheel      = p->camera_use_wheel != 0;
-        m_bAltAlwaysMove = p->m_bALTEdge != 0;
-        m_bTexToolbar    = p->m_bTextureBar != 0;
-        m_bSnapTGrid     = p->m_bSnapTToGrid != 0;
-        m_bLinkKeepSel   = p->linking_keeps_selection != 0;
-        m_bPaintSizing   = p->m_bSizePaint != 0;
-        m_bCullSky       = p->b_mCullSky != 0;
-        m_bDontClamp     = p->m_bNoClamp != 0;
-        m_sUserIni       = p->m_strUserIniPath;
-        m_sUserFilters   = p->m_strUserFilterPath;
-        m_nRotation      = p->m_nRotation;
-        m_nFarplane      = p->farplane;
-        m_nTolerantWeld  = p->tolerant_weld;
-        m_nVehArrowTime  = p->vehicle_arrow_time;
-        m_nVehArrowSize  = p->vehicle_arrow_size;
-        m_nSplay         = p->splay;
-        m_nDropHeight    = p->m_dropHeight;
-        m_bChaseMouse    = p->m_bChaseMouse != 0;
-        m_bTexScrollbar  = p->m_bTextureScrollbar != 0;
-        m_bThickLines    = p->thick_selection_lines != 0;
-        m_bColoredEnts   = p->m_bColoredEnts != 0;
-        m_bTexBrush2d    = p->texture_brush_2d != 0;
-        m_bTexMesh2d     = p->texture_mesh_2d != 0;
-        m_bFast2dDrag    = p->fast_2d_view_dragging != 0;
-        m_bDetachWin     = p->detatch_windows != 0;
-        m_bTransBg       = p->transparent_background != 0;
-        m_nUndoLevels    = p->m_nUndoLevels;
-        m_nScaleBase     = p->scale_base;
-        m_nScaleRange    = p->scale_range;
-        m_fFov           = p->camera_fov;
-        m_fModelOrg      = p->model_origin_size;
-        m_fPrefabOrg     = p->prefab_origin_size;
+        prefsDlgState_t st;
+        PrefsDlg_Gather( g_PrefsDlg, st );
+        m_rMouse         = st.rMouse;
+        m_rView          = st.rView;
+        m_bLoadLast      = st.bLoadLast;
+        m_bFace          = st.bFace;
+        m_bRightClick    = st.bRightClick;
+        m_bAutoSave      = st.bAutoSave;
+        m_nAutoSaveMin   = st.nAutoSaveMin;
+        m_bLoadLastMap   = st.bLoadLastMap;
+        m_bTexSubset     = st.bTexSubset;
+        m_bSnapshots     = st.bSnapshots;
+        m_bLoseChanges   = st.bLoseChanges;
+        m_nStatusSize    = st.nStatusSize;
+        m_bCamXYUpdate   = st.bCamXYUpdate;
+        m_bUseWheel      = st.bUseWheel;
+        m_bAltAlwaysMove = st.bAltAlwaysMove;
+        m_bTexToolbar    = st.bTexToolbar;
+        m_bSnapTGrid     = st.bSnapTGrid;
+        m_bLinkKeepSel   = st.bLinkKeepSel;
+        m_bPaintSizing   = st.bPaintSizing;
+        m_bCullSky       = st.bCullSky;
+        m_bDontClamp     = st.bDontClamp;
+        m_sUserIni       = st.sUserIni;
+        m_sUserFilters   = st.sUserFilters;
+        m_nRotation      = st.nRotation;
+        m_nFarplane      = st.nFarplane;
+        m_nTolerantWeld  = st.nTolerantWeld;
+        m_nVehArrowTime  = st.nVehArrowTime;
+        m_nVehArrowSize  = st.nVehArrowSize;
+        m_nSplay         = st.nSplay;
+        m_nDropHeight    = st.nDropHeight;
+        m_bChaseMouse    = st.bChaseMouse;
+        m_bTexScrollbar  = st.bTexScrollbar;
+        m_bThickLines    = st.bThickLines;
+        m_bColoredEnts   = st.bColoredEnts;
+        m_bTexBrush2d    = st.bTexBrush2d;
+        m_bTexMesh2d     = st.bTexMesh2d;
+        m_bFast2dDrag    = st.bFast2dDrag;
+        m_bDetachWin     = st.bDetachWin;
+        m_bTransBg       = st.bTransBg;
+        m_nUndoLevels    = st.nUndoLevels;
+        m_nScaleBase     = st.nScaleBase;
+        m_nScaleRange    = st.nScaleRange;
+        m_fFov           = st.fFov;
+        m_fModelOrg      = st.fModelOrg;
+        m_fPrefabOrg     = st.fPrefabOrg;
         UpdateData( FALSE );   // push settings → controls
         return TRUE;
     }
@@ -482,54 +610,53 @@ protected:
     virtual void OnOK()
     {
         UpdateData( TRUE );    // pull controls → members
-        prefData_t *p = g_PrefsDlg;
-        p->m_nMouse_unsure    = m_rMouse;                 // raw registry value (0/1)
-        p->m_nMouseButtons    = m_rMouse ? 3 : 2;
-        p->m_nView            = m_rView;
-        p->m_bLoadLast        = m_bLoadLast ? 1 : 0;
-        p->m_bFace            = m_bFace ? 1 : 0;
-        p->m_bRightClick      = m_bRightClick ? 1 : 0;
-        p->m_bAutoSave        = m_bAutoSave ? 1 : 0;
-        p->m_nAutoSave        = m_nAutoSaveMin;
-        p->m_bLoadLastMap     = m_bLoadLastMap ? 1 : 0;
-        p->m_bTextureWindowSearch = m_bTexSubset ? 1 : 0;
-        p->m_bSnapShots       = m_bSnapshots ? 1 : 0;
-        p->loose_changes      = m_bLoseChanges ? 1 : 0;
-        p->m_nStatusSize      = m_nStatusSize;
-        p->m_bCamXYUpdate     = m_bCamXYUpdate ? 1 : 0;
-        p->camera_use_wheel   = m_bUseWheel ? 1 : 0;
-        p->m_bALTEdge         = m_bAltAlwaysMove ? 1 : 0;
-        p->m_bTextureBar      = m_bTexToolbar ? 1 : 0;
-        p->m_bSnapTToGrid     = m_bSnapTGrid ? 1 : 0;
-        p->linking_keeps_selection = m_bLinkKeepSel ? 1 : 0;
-        p->m_bSizePaint       = m_bPaintSizing ? 1 : 0;
-        p->b_mCullSky         = m_bCullSky ? 1 : 0;
-        p->m_bNoClamp         = m_bDontClamp ? 1 : 0;
-        p->m_strUserIniPath   = m_sUserIni;
-        p->m_strUserFilterPath= m_sUserFilters;
-        p->m_nRotation        = m_nRotation;
-        p->farplane           = m_nFarplane;
-        p->tolerant_weld      = m_nTolerantWeld;
-        p->vehicle_arrow_time = m_nVehArrowTime;
-        p->vehicle_arrow_size = m_nVehArrowSize;
-        p->splay              = m_nSplay;
-        p->m_dropHeight       = m_nDropHeight;
-        p->m_bChaseMouse      = m_bChaseMouse ? 1 : 0;
-        p->m_bTextureScrollbar= m_bTexScrollbar ? 1 : 0;
-        p->thick_selection_lines = m_bThickLines ? 1 : 0;
-        p->m_bColoredEnts     = m_bColoredEnts ? 1 : 0;
-        p->texture_brush_2d   = m_bTexBrush2d ? 1 : 0;
-        p->texture_mesh_2d    = m_bTexMesh2d ? 1 : 0;
-        p->fast_2d_view_dragging = m_bFast2dDrag ? 1 : 0;
-        p->detatch_windows    = m_bDetachWin ? 1 : 0;
-        p->transparent_background = m_bTransBg ? 1 : 0;
-        p->m_nUndoLevels      = m_nUndoLevels;
-        p->scale_base         = m_nScaleBase;
-        p->scale_range        = m_nScaleRange;
-        p->camera_fov         = m_fFov;
-        p->model_origin_size  = m_fModelOrg;
-        p->prefab_origin_size = m_fPrefabOrg;
-        Prefs_SavePrefs( g_PrefsDlg );
+        prefsDlgState_t st;
+        st.rMouse         = m_rMouse;
+        st.rView          = m_rView;
+        st.bLoadLast      = m_bLoadLast;
+        st.bFace          = m_bFace;
+        st.bRightClick    = m_bRightClick;
+        st.bAutoSave      = m_bAutoSave;
+        st.nAutoSaveMin   = m_nAutoSaveMin;
+        st.bLoadLastMap   = m_bLoadLastMap;
+        st.bTexSubset     = m_bTexSubset;
+        st.bSnapshots     = m_bSnapshots;
+        st.bLoseChanges   = m_bLoseChanges;
+        st.nStatusSize    = m_nStatusSize;
+        st.bCamXYUpdate   = m_bCamXYUpdate;
+        st.bUseWheel      = m_bUseWheel;
+        st.bAltAlwaysMove = m_bAltAlwaysMove;
+        st.bTexToolbar    = m_bTexToolbar;
+        st.bSnapTGrid     = m_bSnapTGrid;
+        st.bLinkKeepSel   = m_bLinkKeepSel;
+        st.bPaintSizing   = m_bPaintSizing;
+        st.bCullSky       = m_bCullSky;
+        st.bDontClamp     = m_bDontClamp;
+        st.sUserIni       = m_sUserIni;
+        st.sUserFilters   = m_sUserFilters;
+        st.nRotation      = m_nRotation;
+        st.nFarplane      = m_nFarplane;
+        st.nTolerantWeld  = m_nTolerantWeld;
+        st.nVehArrowTime  = m_nVehArrowTime;
+        st.nVehArrowSize  = m_nVehArrowSize;
+        st.nSplay         = m_nSplay;
+        st.nDropHeight    = m_nDropHeight;
+        st.bChaseMouse    = m_bChaseMouse;
+        st.bTexScrollbar  = m_bTexScrollbar;
+        st.bThickLines    = m_bThickLines;
+        st.bColoredEnts   = m_bColoredEnts;
+        st.bTexBrush2d    = m_bTexBrush2d;
+        st.bTexMesh2d     = m_bTexMesh2d;
+        st.bFast2dDrag    = m_bFast2dDrag;
+        st.bDetachWin     = m_bDetachWin;
+        st.bTransBg       = m_bTransBg;
+        st.nUndoLevels    = m_nUndoLevels;
+        st.nScaleBase     = m_nScaleBase;
+        st.nScaleRange    = m_nScaleRange;
+        st.fFov           = m_fFov;
+        st.fModelOrg      = m_fModelOrg;
+        st.fPrefabOrg     = m_fPrefabOrg;
+        Prefs_ApplyFromDialogState( g_PrefsDlg, st );
         CDialog::OnOK();
     }
 

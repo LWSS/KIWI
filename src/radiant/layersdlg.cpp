@@ -138,6 +138,92 @@ static void LY_ApplyFreeze( const char *n )   { Layers_SetFrozen( n ); }
 static void LY_ApplyCollapse( const char *n ) { Layers_SetExpanded( n, false ); }
 static void LY_ApplyExpand( const char *n )   { Layers_SetExpanded( n, true ); }
 
+// UI-independent action behind MENU233's Hide / Show / Freeze / Collapse / Expand picks
+// (and their "and Children" variants): run `fn` over the layer and, when `recurse`, its
+// whole subtree, then invalidate every view.
+void LayerSubtreeOp_Apply( const char *layerName, bool recurse, void ( *fn )( const char * ) )
+{
+    Layers_ForSelfAndChildren( layerName, recurse, fn );
+    g_nUpdateBits = -1;
+}
+
+// UI-independent action behind CLayerDlg's New button / MENU233 "Create New Layer".
+// Faithful subset of CLayers::NewLayer (0x41C690): reject empty / "./\\" / "prefabs"
+// names; if a layer is selected and isn't "The Map", nest under it ("parent/name");
+// Layers_AddLayerPath + refresh.  `parentLayer` is "" (or "The Map") for a root layer;
+// returns false when the name was rejected and nothing changed.
+bool LayerNew_Apply( const char *name, const char *parentLayer )
+{
+    if ( !name[0] || strpbrk( name, "./\\" ) || !strncmp( name, "prefabs", 7 ) )
+        return false;
+
+    char full[1100];
+    if ( parentLayer[0] && strcmp( parentLayer, "The Map" ) )
+        _snprintf( full, sizeof( full ) - 1, "%s/%s", parentLayer, name );
+    else
+        _snprintf( full, sizeof( full ) - 1, "%s", name );
+    full[sizeof( full ) - 1] = '\0';
+
+    Layers_AddLayerPath( full, 0 );
+    g_nUpdateBits = -1;
+    return true;
+}
+
+// UI-independent guard behind Delete Layer: the two built-ins are not deletable.  Split
+// out so the caller can skip its confirmation prompt for a layer that cannot be deleted.
+bool Layers_CanDeleteLayer( const char *layerName )
+{
+    return strcmp( layerName, "000_Global" ) != 0 && strcmp( layerName, "The Map" ) != 0;
+}
+
+// UI-independent action behind CLayerDlg's Delete button / MENU233 "Delete Layer"
+// (CLayers::DeleteLayer 0x41CBE0): Layers_DeleteLayer re-layers the victim's brushes onto
+// the active layer.  Returns false when the layer is a built-in and nothing changed.
+bool LayerDelete_Apply( const char *layerName )
+{
+    if ( !Layers_CanDeleteLayer( layerName ) )
+        return false;
+    Layers_DeleteLayer( layerName );
+    g_nUpdateBits = -1;
+    return true;
+}
+
+// UI-independent action behind CLayerDlg's Rename button / MENU233 "Rename Layer"
+// (CLayers::RenameLayer 0x41CC60): reject 000_Global and the same bad leaf names New
+// rejects, then splice `newLeaf` onto the picked layer's parent path.  Returns false when
+// the rename was rejected and nothing changed.
+bool LayerRename_Apply( const char *oldFull, const char *newLeaf )
+{
+    if ( !strcmp( oldFull, "000_Global" ) )
+        return false;
+    if ( !newLeaf[0] || strpbrk( newLeaf, "./\\" ) || !strncmp( newLeaf, "prefabs", 7 ) )
+        return false;
+
+    // Build the new full path = (old's parent path) + newLeaf.
+    char newFull[1100];
+    const char *slash = strrchr( oldFull, '/' );
+    if ( slash )
+    {
+        int plen = (int)( slash - oldFull );
+        _snprintf( newFull, sizeof( newFull ) - 1, "%.*s/%s", plen, oldFull, newLeaf );
+    }
+    else
+        _snprintf( newFull, sizeof( newFull ) - 1, "%s", newLeaf );
+    newFull[sizeof( newFull ) - 1] = '\0';
+
+    Layers_RenameLayer( oldFull, newFull );
+    g_nUpdateBits = -1;
+    return true;
+}
+
+// UI-independent read behind the layers pane's list population: the sorted (full path,
+// flags) rows plus the active layer's name.
+void LayerList_Gather( std::vector<std::pair<std::string,int>> &layers, const char *&active )
+{
+    Layers_Enumerate( layers );
+    active = Layers_GetActive();
+}
+
 // ══════════════════════════════════════════════════════════════════════════════
 //  CLayerDlg — the hand-built modeless popup (CSurfaceDlg / CFindTextureDlg pattern)
 // ══════════════════════════════════════════════════════════════════════════════
@@ -212,8 +298,8 @@ void CLayerDlg::Refresh()
     ::SendMessageA( s_lyList, LB_RESETCONTENT, 0, 0 );
 
     std::vector<std::pair<std::string,int>> layers;
-    Layers_Enumerate( layers );
-    const char *active = Layers_GetActive();
+    const char *active = nullptr;
+    LayerList_Gather( layers, active );
     for ( const auto &kv : layers )
     {
         char line[1100];
@@ -346,27 +432,17 @@ void CLayerDlg::OnSize( UINT nType, int cx, int cy )
 }
 
 // ── New: read the Name edit, add the layer under the picked parent (or root) ──
-// Faithful subset of CLayers::NewLayer (0x41C690): reject empty / "./\\" / "prefabs"
-// names; if a layer is selected and isn't "The Map", nest under it ("parent/name");
-// Layers_AddLayerPath + refresh.
 void CLayerDlg::OnNew()
 {
     char name[260] = { 0 };
     if ( s_lyName ) ::GetWindowTextA( s_lyName, name, sizeof( name ) - 1 );
-    if ( !name[0] || strpbrk( name, "./\\" ) || !strncmp( name, "prefabs", 7 ) )
-        return;
 
-    char full[1100];
     char parent[1100];
-    if ( LY_SelectedName( parent, sizeof( parent ) ) && strcmp( parent, "The Map" ) )
-        _snprintf( full, sizeof( full ) - 1, "%s/%s", parent, name );
-    else
-        _snprintf( full, sizeof( full ) - 1, "%s", name );
-    full[sizeof( full ) - 1] = '\0';
+    LY_SelectedName( parent, sizeof( parent ) );    // "" when nothing is picked → root
 
-    Layers_AddLayerPath( full, 0 );
+    if ( !LayerNew_Apply( name, parent ) )
+        return;
     Refresh();
-    g_nUpdateBits = -1;
 }
 
 // ── Delete: confirm, then Layers_DeleteLayer (re-layers brushes to active) ──
@@ -375,13 +451,12 @@ void CLayerDlg::OnDelete()
     char name[1100];
     if ( !LY_SelectedName( name, sizeof( name ) ) )
         return;
-    if ( !strcmp( name, "000_Global" ) || !strcmp( name, "The Map" ) )
-        return;                       // the built-ins are not deletable
+    if ( !Layers_CanDeleteLayer( name ) )
+        return;                       // the built-ins are not deletable (no prompt either)
     if ( MessageBoxA( "Delete Layer?", "Radiant", MB_YESNO | MB_ICONQUESTION ) == IDNO )
         return;
-    Layers_DeleteLayer( name );
+    LayerDelete_Apply( name );
     Refresh();
-    g_nUpdateBits = -1;
 }
 
 // ── Rename: read the Name edit, rename the picked layer's path leaf ──
@@ -390,28 +465,12 @@ void CLayerDlg::OnRename()
     char oldFull[1100];
     if ( !LY_SelectedName( oldFull, sizeof( oldFull ) ) )
         return;
-    if ( !strcmp( oldFull, "000_Global" ) )
-        return;
     char newLeaf[260] = { 0 };
     if ( s_lyName ) ::GetWindowTextA( s_lyName, newLeaf, sizeof( newLeaf ) - 1 );
-    if ( !newLeaf[0] || strpbrk( newLeaf, "./\\" ) || !strncmp( newLeaf, "prefabs", 7 ) )
+
+    if ( !LayerRename_Apply( oldFull, newLeaf ) )
         return;
-
-    // Build the new full path = (old's parent path) + newLeaf.
-    char newFull[1100];
-    const char *slash = strrchr( oldFull, '/' );
-    if ( slash )
-    {
-        int plen = (int)( slash - oldFull );
-        _snprintf( newFull, sizeof( newFull ) - 1, "%.*s/%s", plen, oldFull, newLeaf );
-    }
-    else
-        _snprintf( newFull, sizeof( newFull ) - 1, "%s", newLeaf );
-    newFull[sizeof( newFull ) - 1] = '\0';
-
-    Layers_RenameLayer( oldFull, newFull );
     Refresh();
-    g_nUpdateBits = -1;
 }
 
 void CLayerDlg::OnAssign()
@@ -576,19 +635,18 @@ void CLayerDlg::OnContextMenu( CWnd *pWnd, CPoint point )
 
     switch ( cmd )
     {
-    case 33967: Layers_ForSelfAndChildren( name, false, LY_ApplyHide );     break;  // 0x41CA60
-    case 33966: Layers_ForSelfAndChildren( name, true,  LY_ApplyHide );     break;  // 0x41CA90
-    case 33968: Layers_ForSelfAndChildren( name, false, LY_ApplyShow );     break;  // 0x41CAC0
-    case 33969: Layers_ForSelfAndChildren( name, true,  LY_ApplyShow );     break;  // 0x41CAF0
-    case 35006: Layers_ForSelfAndChildren( name, false, LY_ApplyFreeze );   break;  // 0x41CB20
-    case 35007: Layers_ForSelfAndChildren( name, true,  LY_ApplyFreeze );   break;  // 0x41CB50
-    case 33963: Layers_ForSelfAndChildren( name, true,  LY_ApplyCollapse ); break;  // 0x41CB80
-    case 33965: Layers_ForSelfAndChildren( name, true,  LY_ApplyExpand );   break;  // 0x41CBB0
+    case 33967: LayerSubtreeOp_Apply( name, false, LY_ApplyHide );     break;  // 0x41CA60
+    case 33966: LayerSubtreeOp_Apply( name, true,  LY_ApplyHide );     break;  // 0x41CA90
+    case 33968: LayerSubtreeOp_Apply( name, false, LY_ApplyShow );     break;  // 0x41CAC0
+    case 33969: LayerSubtreeOp_Apply( name, true,  LY_ApplyShow );     break;  // 0x41CAF0
+    case 35006: LayerSubtreeOp_Apply( name, false, LY_ApplyFreeze );   break;  // 0x41CB20
+    case 35007: LayerSubtreeOp_Apply( name, true,  LY_ApplyFreeze );   break;  // 0x41CB50
+    case 33963: LayerSubtreeOp_Apply( name, true,  LY_ApplyCollapse ); break;  // 0x41CB80
+    case 33965: LayerSubtreeOp_Apply( name, true,  LY_ApplyExpand );   break;  // 0x41CBB0
     default: return;
     }
 
     LayersDlg_RefreshIfOpen();
-    g_nUpdateBits = -1;
 }
 
 void CLayerDlg::OnClose()

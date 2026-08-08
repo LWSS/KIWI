@@ -7245,6 +7245,16 @@ static selbrush_t *Patch_CapSpecial( patchMesh_t *pm, int nType, char bFirst )
     return b;
 }
 
+// UI-independent action behind CCapDialog's OK button (Patch_CapCurrent 0x43abaf-0x43abf3).
+int Cap_Apply( patchMesh_t *def, int nType, selbrush_t **caps )
+{
+    selbrush_t *c0 = Patch_CapSpecial( def, nType, 0 );
+    selbrush_t *c1 = Patch_CapSpecial( def, nType, 1 );
+    caps[0] = c0;
+    caps[1] = c1;
+    return 2;
+}
+
 // ── CCapDialog (sub_40A8A0, IDD 0xA1 = 161) — the "special cap" type picker ──────
 //   Radio dialog popped by Patch_CapCurrent when the patch has no closed seam edge.
 //   The binary's DoDataExchange (0x40A900) is one DDX_Radio(pDX, 1285, m_nType@+0x74)
@@ -7322,13 +7332,7 @@ void Patch_CapCurrent()
         CCapDialog dlg;
         dlg.m_nType = 0;
         if ( dlg.DoModal() == IDOK )
-        {
-            selbrush_t *c0 = Patch_CapSpecial( def, dlg.m_nType, 0 );
-            selbrush_t *c1 = Patch_CapSpecial( def, dlg.m_nType, 1 );
-            caps[0] = c0;
-            caps[1] = c1;
-            n = 2;
-        }
+            n = Cap_Apply( def, dlg.m_nType, caps );
     }
 
     if ( n > 0 )

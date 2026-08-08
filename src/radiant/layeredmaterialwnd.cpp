@@ -15,6 +15,7 @@
 
 #include "stdafx.h"
 #include <commctrl.h>
+#include <vector>
 #include "qe3.h"
 #include "mainfrm.h"                  // CMainFrame (g_pParentWnd->OnKeyDown)
 #include <gfx_d3d/r_material.h>       // Material
@@ -96,7 +97,7 @@ static LRESULT sub_417440();
 static LRESULT sub_4174E0();
 static int     sub_4173D0();
 static BOOL    sub_417710();
-static BOOL    LayeredMaterialWnd_Layer( unsigned int newLayerIndex );
+BOOL           LayeredMaterialWnd_Layer( unsigned int newLayerIndex );
 static int     sub_417D60();
 ATOM           LayeredMaterialWnd_PreCreateWindow();
 
@@ -355,6 +356,12 @@ static BOOL sub_417710()
     return result;
 }
 
+// UI-independent action behind the layered-material window's "New" command.
+void LyrMtlNewMaterial_Apply( const char *name )
+{
+    LayeredMaterials_AddEntries( (char *)name, lyrMtlWndGlob.hwnd );
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 //  LayeredMaterialWnd_OnNewMaterial  (0x417760) — the "New" command: pop the name
 //  modal; on OK, add a new (empty) library entry named by the operator.
@@ -374,7 +381,7 @@ int LayeredMaterialWnd_OnNewMaterial()
         ret = (int)dlg.DoModal();
         parent.Detach();
         if ( ret == IDOK )
-            LayeredMaterials_AddEntries( (char *)(LPCSTR)dlg.m_result, lyrMtlWndGlob.hwnd );
+            LyrMtlNewMaterial_Apply( (LPCSTR)dlg.m_result );
         // dlg destructor (the binary's sub_417820) releases the two CStrings (RAII).
     }
     return ret;
@@ -384,7 +391,8 @@ int LayeredMaterialWnd_OnNewMaterial()
 //  LayeredMaterialWnd_Layer  (0x417940) — reorder: move the selected layer to
 //  newLayerIndex by swapping the two {id,handle} pairs, then re-select newLayerIndex.
 // ═══════════════════════════════════════════════════════════════════════════════
-static BOOL LayeredMaterialWnd_Layer( unsigned int newLayerIndex )
+// UI-independent action behind the layered-material window's layer Down/Up commands.
+BOOL LayeredMaterialWnd_Layer( unsigned int newLayerIndex )
 {
     LyrMtlEntry *e = ActiveEntry();
     iassert( lyrMtlWndGlob.activeLyrMtl );   // LayeredMaterialWnd.cpp:200
@@ -404,6 +412,35 @@ static BOOL LayeredMaterialWnd_Layer( unsigned int newLayerIndex )
     return sub_417710();
 }
 
+// UI-independent action behind the layered-material window's "Delete material" command.
+BOOL LyrMtlDeleteMaterial_Apply()
+{
+    // LayeredMaterials_texcoords (0x417190, layeredmaterials.cpp) — now a real port:
+    // replaces the deleted material with "$default" on the live brushes (via the ported
+    // FindReplaceTextures), then compacts the in-memory library.  Its only remaining
+    // FATAL is the FindReplaceTextures flag&4 prefab-recursion branch, which fires ONLY
+    // on an explicit operator delete with a REFERENCING prefab present (disk-mutating
+    // Map_SaveFile of stock .maps — HARD RULE).  Faithful to the binary.
+    LayeredMaterials_texcoords( (char *)(intptr_t)lyrMtlWndGlob.activeLyrMtl );
+    lyrMtlWndGlob.activeLyrMtl = 0;
+    return sub_417710();
+}
+
+// UI-independent action behind the layered-material window's "Remove layer" command.
+BOOL LyrMtlRemoveLayer_Apply()
+{
+    LyrMtlEntry *e = ActiveEntry();
+    iassert( lyrMtlWndGlob.activeLyrMtl );   // LayeredMaterialWnd.cpp:180
+    int sel = lyrMtlWndGlob.selectedLayerIndex;
+    bcassert( (unsigned)sel, (unsigned)e->layerCount );    // LayeredMaterialWnd.cpp:181
+    // memcpy( &layer[sel], &layer[sel+1], 8 * (--layerCount - sel) )
+    int remaining = --e->layerCount - sel;
+    memcpy( EntryLayerId( e, sel ), EntryLayerId( e, sel + 1 ), (size_t)8 * remaining );
+    if ( lyrMtlWndGlob.selectedLayerIndex )
+        --lyrMtlWndGlob.selectedLayerIndex;
+    return sub_417710();
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 //  LayeredMaterialWnd_Commands  (0x417A60) — toolbar / WM_COMMAND dispatch.
 //    0 New, 1 Delete-material, 2 toggle-Live, 3 Remove-layer, 4 Down, 5 Up.
@@ -417,32 +454,13 @@ LRESULT LayeredMaterialWnd_Commands( int cmd )
 
     case 1:   // Delete the active layered material.
         SetWindowTextA( lyrMtlWndGlob.hwnd, "(no layered material)" );
-        // LayeredMaterials_texcoords (0x417190, layeredmaterials.cpp) — now a real port:
-        // replaces the deleted material with "$default" on the live brushes (via the ported
-        // FindReplaceTextures), then compacts the in-memory library.  Its only remaining
-        // FATAL is the FindReplaceTextures flag&4 prefab-recursion branch, which fires ONLY
-        // on an explicit operator delete with a REFERENCING prefab present (disk-mutating
-        // Map_SaveFile of stock .maps — HARD RULE).  Faithful to the binary.
-        LayeredMaterials_texcoords( (char *)(intptr_t)lyrMtlWndGlob.activeLyrMtl );
-        lyrMtlWndGlob.activeLyrMtl = 0;
-        return sub_417710();
+        return LyrMtlDeleteMaterial_Apply();
 
     case 2:
         return sub_417440();
 
     case 3:   // Remove the selected layer (shift the rest down, shrink layerCount).
-    {
-        LyrMtlEntry *e = ActiveEntry();
-        iassert( lyrMtlWndGlob.activeLyrMtl );   // LayeredMaterialWnd.cpp:180
-        int sel = lyrMtlWndGlob.selectedLayerIndex;
-        bcassert( (unsigned)sel, (unsigned)e->layerCount );    // LayeredMaterialWnd.cpp:181
-        // memcpy( &layer[sel], &layer[sel+1], 8 * (--layerCount - sel) )
-        int remaining = --e->layerCount - sel;
-        memcpy( EntryLayerId( e, sel ), EntryLayerId( e, sel + 1 ), (size_t)8 * remaining );
-        if ( lyrMtlWndGlob.selectedLayerIndex )
-            --lyrMtlWndGlob.selectedLayerIndex;
-        return sub_417710();
-    }
+        return LyrMtlRemoveLayer_Apply();
 
     case 4:
         return LayeredMaterialWnd_Layer( lyrMtlWndGlob.selectedLayerIndex + 1 );
@@ -574,6 +592,30 @@ LRESULT CALLBACK LayeredMaterialWnd_WindowProc( HWND hWnd, UINT Msg, WPARAM wPar
     return 0;
 }
 
+// One layer-list row.  Rows are gathered in layer order (0 = bottom) and drawn in
+// reverse, so the FIRST row is the bottom-most band in the list.
+struct lyrMtlLayerRow_t
+{
+    qtexture_s *handle;     // layer[i].handle — the radMtl whose thumbnail + name the row shows
+    bool        selected;   // i == lyrMtlWndGlob.selectedLayerIndex (draws the highlight band)
+};
+
+// UI-independent read behind the layer list's population (sub_417D60 0x417D60's layer walk).
+void LyrMtlLayers_Gather( std::vector<lyrMtlLayerRow_t> &rows )
+{
+    if ( !lyrMtlWndGlob.activeLyrMtl )
+        return;
+
+    LyrMtlEntry *e = ActiveEntry();
+    for ( int i = 0; i < e->layerCount; ++i )
+    {
+        lyrMtlLayerRow_t row;
+        row.handle   = (qtexture_s *)*EntryLayerHandle( e, i );
+        row.selected = ( i == lyrMtlWndGlob.selectedLayerIndex );
+        rows.push_back( row );
+    }
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 //  sub_417D60  (0x417D60) — paint the layer list: for each layer (top-down) draw the
 //  selected-row highlight band, the material thumbnail (aspect-fit into 64×64), and the
@@ -582,7 +624,6 @@ LRESULT CALLBACK LayeredMaterialWnd_WindowProc( HWND hWnd, UINT Msg, WPARAM wPar
 static int sub_417D60()
 {
     int result = 0;
-    LyrMtlEntry *e = ActiveEntry();
     if ( !lyrMtlWndGlob.activeLyrMtl )
         return result;
 
@@ -593,7 +634,10 @@ static int sub_417D60()
 
     static const float s_white[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
 
-    int v3 = e->layerCount - 1;       // walk layers bottom index → 0 (rows top-down)
+    std::vector<lyrMtlLayerRow_t> rows;
+    LyrMtlLayers_Gather( rows );
+
+    int v3 = (int)rows.size() - 1;     // walk layers bottom index → 0 (rows top-down)
     if ( v3 < 0 )
         return fontH;
 
@@ -604,7 +648,7 @@ static int sub_417D60()
     for ( ; v3 >= 0; --v3 )
     {
         const float *textColor;
-        if ( v3 == lyrMtlWndGlob.selectedLayerIndex )
+        if ( rows[v3].selected )
         {
             RECT fr;
             GetClientRect( lyrMtlWndGlob.hwnd, &fr );
@@ -618,7 +662,7 @@ static int sub_417D60()
             textColor = g_qeglobals.d_savedinfo.colors[8];
         }
 
-        qtexture_s *q = (qtexture_s *)*EntryLayerHandle( e, v3 );   // v4
+        qtexture_s *q = rows[v3].handle;              // v4
         int h = q->height;                            // v5 (= *(qtex+24))
         int w = q->width;                             // v24 (= *(qtex+20))
         int drawH = h;                                // v23
@@ -713,6 +757,16 @@ static UINT CLayermatWnd_OnScroll( int pos, int code )
     return result;
 }
 
+// UI-independent action behind the layer list's row selection.
+int LyrMtlSelectLayer_Apply( int layerIndex )
+{
+    lyrMtlWndGlob.selectedLayerIndex = layerIndex;
+    sub_4174E0();
+    int result = InvalidateRect( lyrMtlWndGlob.layerList, nullptr, FALSE );
+    g_nUpdateBits |= 0x10u;   // W_TEXTURE
+    return result;
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 //  sub_4180E0  (0x4180E0) — list-child WM_LBUTTONDOWN: hit-test the y to a layer row
 //  (66px pitch, 64px hot band) and select it.  Rows are drawn top-down, so the index
@@ -726,13 +780,7 @@ static int sub_4180E0( int y )
     {
         int n = ActiveEntry()->layerCount;
         if ( row < n && ( v1 - 2 ) % 66 < 64 )
-        {
-            lyrMtlWndGlob.selectedLayerIndex = n - row - 1;
-            sub_4174E0();
-            int result = InvalidateRect( lyrMtlWndGlob.layerList, nullptr, FALSE );
-            g_nUpdateBits |= 0x10u;   // W_TEXTURE
-            return result;
-        }
+            return LyrMtlSelectLayer_Apply( n - row - 1 );
     }
     return v1;
 }

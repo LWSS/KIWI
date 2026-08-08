@@ -45,6 +45,8 @@
                           // the DXSDK headers and breaks every gfx_d3d TU (DXGI redefinitions).
 #include "qe3.h"
 #include "mainfrm.h"
+#include <string>
+#include <vector>
 
 // ── radiant-local deps (home files) ───────────────────────────────────────────
 extern selbrush_t  selected_brushes;                 // engine_stubs (0x23F1864)
@@ -158,6 +160,27 @@ enum
 //  Data operations — faithful ports of the IDB win_ent.cpp cluster.
 // ──────────────────────────────────────────────────────────────────────────────
 
+// One row of the eclass list: the name the row is labelled with and the eclass_t* the row
+// carries as its item data (read back by the selchange / create paths).
+struct eclassRow_t
+{
+    const char *name;
+    eclass_t   *eclass;
+};
+
+// UI-independent read behind the eclass list's population (FillClassList 0x496800's
+// g_eclass walk).
+void EclassList_Gather( std::vector<eclassRow_t> &rows )
+{
+    for ( eclass_t *pec = g_eclass; pec; pec = pec->next )
+    {
+        eclassRow_t row;
+        row.name   = pec->name;
+        row.eclass = pec;
+        rows.push_back( row );
+    }
+}
+
 // FillClassList (0x496800) — reset + repopulate the eclass listbox from g_eclass,
 // stashing each eclass_t* as the item data (so selchange/create can recover it).
 static void FillClassList()
@@ -165,10 +188,14 @@ static void FillClassList()
     if ( !hwndEnt_entlist )
         return;
     SendMessageA( hwndEnt_entlist, LB_RESETCONTENT, 0, 0 );
-    for ( eclass_t *pec = g_eclass; pec; pec = pec->next )
+
+    std::vector<eclassRow_t> rows;
+    EclassList_Gather( rows );
+
+    for ( size_t i = 0; i < rows.size(); ++i )
     {
-        LRESULT idx = SendMessageA( hwndEnt_entlist, LB_ADDSTRING, 0, (LPARAM)pec->name );
-        SendMessageA( hwndEnt_entlist, LB_SETITEMDATA, idx, (LPARAM)pec );
+        LRESULT idx = SendMessageA( hwndEnt_entlist, LB_ADDSTRING, 0, (LPARAM)rows[i].name );
+        SendMessageA( hwndEnt_entlist, LB_SETITEMDATA, idx, (LPARAM)rows[i].eclass );
     }
 }
 
@@ -184,6 +211,42 @@ static void FillClassList()
 //   in SetKeyValuePairs = the only port-added defensive). The hand-built dialog plumbing is the only
 //   reconstruction; the logic above is 1:1.
 // ════════════════════════════════════════════════════════════════════════════════════════════
+// One key/value row of the inspector's key/value list: the epair's key + value.  The
+// synthesised "origin" row carries the def's origin vec3, pre-formatted, as its value.
+struct entKvRow_t
+{
+    std::string key;
+    std::string value;
+};
+
+// UI-independent read behind the key/value list's population (SetKeyValuePairs 0x496cf0's
+// epair walk: "origin" is skipped, then appended from the def's origin vec3 when non-zero).
+void EntityKeyValues_Gather( entity_s_def *def, std::vector<entKvRow_t> &rows )
+{
+    if ( !def )
+        return;
+
+    for ( epair_t *ep = def->epairs; ep; ep = ep->next )
+    {
+        if ( !strcmp( ep->key, "origin" ) )
+            continue;
+        entKvRow_t row;
+        row.key   = ep->key;
+        row.value = ep->value;
+        rows.push_back( row );
+    }
+
+    if ( def->origin[0] != 0.0f || def->origin[1] != 0.0f || def->origin[2] != 0.0f )
+    {
+        char sz[4100];
+        sprintf( sz, "%g %g %g", def->origin[0], def->origin[1], def->origin[2] );
+        entKvRow_t row;
+        row.key   = "origin";
+        row.value = sz;
+        rows.push_back( row );
+    }
+}
+
 // SetKeyValuePairs (0x496cf0) — repopulate the key/value listbox from edit_entity's
 // epairs (skipping "origin", which is appended specially from the def's origin vec3).
 void SetKeyValuePairs()
@@ -196,39 +259,30 @@ void SetKeyValuePairs()
     SendMessageA( entwnd_kvlist, LB_SETCOLUMNWIDTH, ( rc.right - rc.left ) / 2, 0 );
     SendMessageA( entwnd_kvlist, LB_RESETCONTENT, 0, 0 );
 
-    char sz[4100];
-    for ( epair_t *ep = edit_entity->epairs; ep; ep = ep->next )
-    {
-        if ( !strcmp( ep->key, "origin" ) )
-            continue;
-        // <=8-char keys get a second tab so the value column lines up.
-        if ( strlen( ep->key ) <= 8 )
-            sprintf( sz, "%s\t\t%s", ep->key, ep->value );
-        else
-            sprintf( sz, "%s\t%s", ep->key, ep->value );
-        SendMessageA( entwnd_kvlist, LB_ADDSTRING, 0, (LPARAM)sz );
-    }
+    std::vector<entKvRow_t> rows;
+    EntityKeyValues_Gather( edit_entity, rows );
 
-    if ( edit_entity->origin[0] != 0.0f || edit_entity->origin[1] != 0.0f || edit_entity->origin[2] != 0.0f )
+    char sz[4100];
+    for ( size_t i = 0; i < rows.size(); ++i )
     {
-        sprintf( sz, "origin\t\t%g %g %g",
-                 edit_entity->origin[0], edit_entity->origin[1], edit_entity->origin[2] );
+        // <=8-char keys get a second tab so the value column lines up.  ("origin" is 6, so
+        // the synthesised origin row still comes out as the binary's "origin\t\t%g %g %g".)
+        if ( rows[i].key.length() <= 8 )
+            sprintf( sz, "%s\t\t%s", rows[i].key.c_str(), rows[i].value.c_str() );
+        else
+            sprintf( sz, "%s\t%s", rows[i].key.c_str(), rows[i].value.c_str() );
         SendMessageA( entwnd_kvlist, LB_ADDSTRING, 0, (LPARAM)sz );
     }
 
     g_nUpdateBits |= W_CAMERA | W_XY;
 }
 
-// AddProp (0x497490) — read the key/value fields, set the pair (Undo-bracketed) on the
-// edited entity (or every selected entity when multiple), refresh the list.
-void AddProp()
+// UI-independent action behind the inspector's key/value commit (AddProp 0x497490's set
+// half — the Enter-in-the-value-field path and the entity-colour picker both land here).
+void EntSetKey_Apply( const char *key, const char *value )
 {
     if ( !edit_entity )
         return;
-
-    char key[4100], value[4096];
-    SendMessageA( entwnd_keyfield,   WM_GETTEXT, 4095, (LPARAM)key   );
-    SendMessageA( entwnd_valuefield, WM_GETTEXT, 4095, (LPARAM)value );
 
     Undo_ClearRedo();
     Undo_GeneralStart( "set key value pair" );
@@ -253,6 +307,20 @@ void AddProp()
     }
     SetKeyValuePairs();
     Undo_End();
+}
+
+// AddProp (0x497490) — read the key/value fields, set the pair (Undo-bracketed) on the
+// edited entity (or every selected entity when multiple), refresh the list.
+void AddProp()
+{
+    if ( !edit_entity )
+        return;
+
+    char key[4100], value[4096];
+    SendMessageA( entwnd_keyfield,   WM_GETTEXT, 4095, (LPARAM)key   );
+    SendMessageA( entwnd_valuefield, WM_GETTEXT, 4095, (LPARAM)value );
+
+    EntSetKey_Apply( key, value );
 }
 
 // Win_GetEntityKeyValueFields — copy the current text of the entity-window key/value
@@ -289,15 +357,12 @@ void Win_SetEntityKeyValueFields( const char *key, const char *value )
         SetWindowTextA( entwnd_keyfield, key );
 }
 
-// DelProp (0x4975c0) — delete the key named in the key field (blocking "classname"),
-// Undo-bracketed, with the binary's post-delete model/colour re-validation.
-void DelProp()
+// UI-independent action behind the inspector's "Delete Key" button (DelProp 0x4975c0's
+// delete half, including the classname block).
+void EntDeleteKey_Apply( const char *key )
 {
     if ( !edit_entity )
         return;
-
-    char key[4100];
-    SendMessageA( entwnd_keyfield, WM_GETTEXT, 0xFFF, (LPARAM)key );
 
     if ( !_stricmp( key, "classname" ) )
     {
@@ -330,6 +395,19 @@ void DelProp()
     }
     SetKeyValuePairs();
     Undo_End();
+}
+
+// DelProp (0x4975c0) — delete the key named in the key field (blocking "classname"),
+// Undo-bracketed, with the binary's post-delete model/colour re-validation.
+void DelProp()
+{
+    if ( !edit_entity )
+        return;
+
+    char key[4100];
+    SendMessageA( entwnd_keyfield, WM_GETTEXT, 0xFFF, (LPARAM)key );
+
+    EntDeleteKey_Apply( key );
 }
 
 // EditProp (0x4977b0) — the selected key/value list item → split on the tab into the
@@ -379,32 +457,28 @@ static int SpawnFlags_Get( entity_s_def *e )
     return 0;          // IDB: atol(zero) — the empty-CString sentinel
 }
 
+// UI-independent read behind the 12 spawnflag checkboxes' state (SetSpawnFlags 0x496e70's
+// "spawnflags" read; 0 when nothing is being edited).
+int SpawnFlags_Gather()
+{
+    return edit_entity ? SpawnFlags_Get( edit_entity ) : 0;
+}
+
 // SetSpawnFlags (0x496e70) — read edit_entity's spawnflags, push each bit into the
 // matching checkbox's BM_SETCHECK state.
 void SetSpawnFlags()
 {
     if ( !edit_entity )
         return;
-    int flags = SpawnFlags_Get( edit_entity );
+    int flags = SpawnFlags_Gather();
     for ( int i = 0; i < 12; ++i )
         SendMessageA( entwnd_entcheck[i], BM_SETCHECK, ( flags & ( 1 << i ) ) != 0, 0 );
 }
 
-// SetSpawnFlags_2 (0x497040) — collapse all 12 checkbox states into one int and write
-// it as "spawnflags" on the edited entity (single) or every selected entity (multiple).
-// 0x497040: vs IDA 0x497040 — flags = OR of (BM_GETCHECK<<i) for i in 0..11; sprintf "%i";
-// Undo_ClearRedo + Undo_GeneralStart("set spawnflags"); multi → per-entity Undo_AddEntity_W (=
-// the binary's inlined `if(g_lastundo) Undo_AddEntity + def->brushes.oprev brush-def walk /
-// else Sys_Printf "no last undo"`, disasm-verified equiv) + SetKeyValue; single →
-// Undo_AddEntity_W(edit_entity) + SetKeyValue; SetKeyValuePairs + Undo_End. SetSpawnFlags
-// 0x496e70 (flags→12 BM_SETCHECK) + SpawnFlags_Get (atol of the spawnflags epair, ""
-// sentinel→0) also match.
-void SetSpawnFlags_2()
+// UI-independent action behind the 12 spawnflag checkboxes (SetSpawnFlags_2 0x497040's
+// write half): `flags` becomes the entity's decimal "spawnflags" key.
+void SpawnFlags_Apply( int flags )
 {
-    int flags = 0;
-    for ( int i = 0; i < 12; ++i )
-        flags |= (int)SendMessageA( entwnd_entcheck[i], BM_GETCHECK, 0, 0 ) << i;
-
     char sz[32];
     sprintf( sz, "%i", flags );
 
@@ -425,6 +499,45 @@ void SetSpawnFlags_2()
     {
         Undo_AddEntity_W( (entity_s *)edit_entity );
         SetKeyValue( edit_entity, "spawnflags", sz );
+    }
+    SetKeyValuePairs();
+    Undo_End();
+}
+
+// SetSpawnFlags_2 (0x497040) — collapse all 12 checkbox states into one int and write
+// it as "spawnflags" on the edited entity (single) or every selected entity (multiple).
+// 0x497040: vs IDA 0x497040 — flags = OR of (BM_GETCHECK<<i) for i in 0..11; sprintf "%i";
+// Undo_ClearRedo + Undo_GeneralStart("set spawnflags"); multi → per-entity Undo_AddEntity_W (=
+// the binary's inlined `if(g_lastundo) Undo_AddEntity + def->brushes.oprev brush-def walk /
+// else Sys_Printf "no last undo"`, disasm-verified equiv) + SetKeyValue; single →
+// Undo_AddEntity_W(edit_entity) + SetKeyValue; SetKeyValuePairs + Undo_End. SetSpawnFlags
+// 0x496e70 (flags→12 BM_SETCHECK) + SpawnFlags_Get (atol of the spawnflags epair, ""
+// sentinel→0) also match.
+void SetSpawnFlags_2()
+{
+    int flags = 0;
+    for ( int i = 0; i < 12; ++i )
+        flags |= (int)SendMessageA( entwnd_entcheck[i], BM_GETCHECK, 0, 0 ) << i;
+
+    SpawnFlags_Apply( flags );
+}
+
+// UI-independent action behind one spawnflag checkbox toggle in a MULTI-entity selection
+// (SetSpawnFlags_R 0x496f00's per-entity bit math); `checked` is that box's BM_GETCHECK.
+void SpawnFlagBit_Apply( int bit, int checked )
+{
+    Undo_ClearRedo();
+    Undo_GeneralStart( "set spawnflags" );
+    for ( selbrush_t *sb = selected_brushes.next; sb != &selected_brushes; sb = sb->next )
+    {
+        entity_s_def *def   = (entity_s_def *)sb->owner->def;
+        int       flags = SpawnFlags_Get( def );
+        int v8 = checked ? ( ( checked << bit ) | flags ) : ( ~( 1 << bit ) & flags );
+
+        char sz[32];
+        sprintf( sz, "%i", v8 );
+        Undo_AddEntity_W( (entity_s *)def );
+        SetKeyValue( def, "spawnflags", sz );
     }
     SetKeyValuePairs();
     Undo_End();
@@ -452,51 +565,18 @@ void SetSpawnFlags_R( int bit )
         return;
     }
 
-    Undo_ClearRedo();
-    Undo_GeneralStart( "set spawnflags" );
-    for ( selbrush_t *sb = selected_brushes.next; sb != &selected_brushes; sb = sb->next )
-    {
-        entity_s_def *def   = (entity_s_def *)sb->owner->def;
-        int       flags = SpawnFlags_Get( def );
-        // BM_GETCHECK on the toggled box: set the bit if checked, clear it otherwise.
-        int checked = (int)SendMessageA( entwnd_entcheck[bit], BM_GETCHECK, 0, 0 );
-        int v8 = checked ? ( ( checked << bit ) | flags ) : ( ~( 1 << bit ) & flags );
-
-        char sz[32];
-        sprintf( sz, "%i", v8 );
-        Undo_AddEntity_W( (entity_s *)def );
-        SetKeyValue( def, "spawnflags", sz );
-    }
-    SetKeyValuePairs();
-    Undo_End();
+    // BM_GETCHECK on the toggled box: set the bit if checked, clear it otherwise.  (The
+    // binary re-reads it inside the per-entity loop; the box cannot change mid-loop, so
+    // hoisting the read to the caller side is value-identical.)
+    int checked = (int)SendMessageA( entwnd_entcheck[bit], BM_GETCHECK, 0, 0 );
+    SpawnFlagBit_Apply( bit, checked );
 }
 
 
-// CreateEntity (0x497300) — create a new entity of the eclass selected in the list,
-// using the currently-selected brush(es) as the proxy (Entity_Create), then re-select
-// and refresh.  (Mirrors the binary; the GUI also reaches this via the eclass DBLCLK.)
-void CreateEntity()
+// UI-independent action behind the eclass list's double-click / the create-entity command
+// (CreateEntity 0x497300's Entity_Create half).
+void EclassCreate_Apply( const char *name )
 {
-    if ( selected_brushes.next == &selected_brushes )
-    {
-        MessageBoxA( GetActiveWindow(),
-            "Failed to create entity.\n\nYou must have a selected brush to create an entity",
-            "Radiant", MB_ICONEXCLAMATION );
-        return;
-    }
-
-    LRESULT i = SendMessageA( hwndEnt_entlist, LB_GETCURSEL, 0, 0 );
-    if ( i < 0 )
-    {
-        MessageBoxA( GetActiveWindow(),
-            "Failed to create entity.\n\nYou must have a selected class to create an entity",
-            "Radiant", MB_ICONEXCLAMATION );
-        return;
-    }
-
-    char name[1028];
-    SendMessageA( hwndEnt_entlist, LB_GETTEXT, i, (LPARAM)name );
-
     if ( !_stricmp( name, "worldspawn" ) )
     {
         MessageBoxA( GetActiveWindow(),
@@ -530,6 +610,56 @@ void CreateEntity()
     {
         MessageBoxA( GetActiveWindow(), "Failed to create entity.\n", "Radiant", MB_ICONEXCLAMATION );
     }
+}
+
+// CreateEntity (0x497300) — create a new entity of the eclass selected in the list,
+// using the currently-selected brush(es) as the proxy (Entity_Create), then re-select
+// and refresh.  (Mirrors the binary; the GUI also reaches this via the eclass DBLCLK.)
+void CreateEntity()
+{
+    if ( selected_brushes.next == &selected_brushes )
+    {
+        MessageBoxA( GetActiveWindow(),
+            "Failed to create entity.\n\nYou must have a selected brush to create an entity",
+            "Radiant", MB_ICONEXCLAMATION );
+        return;
+    }
+
+    LRESULT i = SendMessageA( hwndEnt_entlist, LB_GETCURSEL, 0, 0 );
+    if ( i < 0 )
+    {
+        MessageBoxA( GetActiveWindow(),
+            "Failed to create entity.\n\nYou must have a selected class to create an entity",
+            "Radiant", MB_ICONEXCLAMATION );
+        return;
+    }
+
+    char name[1028];
+    SendMessageA( hwndEnt_entlist, LB_GETTEXT, i, (LPARAM)name );
+
+    EclassCreate_Apply( name );
+}
+
+// The eclass-driven inspector fields: the description-box text and the first 8 spawnflag
+// checkbox labels (an empty name means that box is blanked + disabled).
+struct entEclassInfo_t
+{
+    const char *comment;
+    const char *flagname[8];
+};
+
+// UI-independent read behind the description box + the first 8 spawnflag checkbox labels
+// (UpdateSelection 0x497180's comments + flag-name walk).
+void EclassInfo_Gather( eclass_t *cls, entEclassInfo_t &out )
+{
+    out.comment = TranslateString( cls->comments );
+
+    // The eclass flag names (flagname0..flagname7, 32-byte stride), exactly as the IDB
+    // loop reads them (it stops at checkbox 8 = &entcheck_easy; the remaining 4 —
+    // easy/medium/hard/deathmatch — keep their static labels).
+    const char *flagname = cls->flagname0;
+    for ( int i = 0; i < 8; ++i, flagname += 32 )
+        out.flagname[i] = flagname;
 }
 
 // UpdateSelection (0x497180) — the selection→inspector refresh.  edit_entity becomes
@@ -572,17 +702,18 @@ int UpdateSelection( int wParam, eclass_t *cls )
 
     if ( cls )
     {
-        if ( entwnd_comment )
-            SendMessageA( entwnd_comment, WM_SETTEXT, 0, (LPARAM)TranslateString( cls->comments ) );
+        entEclassInfo_t info;
+        EclassInfo_Gather( cls, info );
 
-        // Label + enable the first 8 checkboxes from the eclass flag names
-        // (flagname0..flagname7, 32-byte stride).  An empty name → blank " " +
-        // disabled, exactly as the IDB loop (it stops at checkbox 8 = &entcheck_easy).
-        // The remaining 4 (easy/medium/hard/deathmatch) keep their static labels.
-        const char *flagname = cls->flagname0;
-        for ( int i = 0; i < 8; ++i, flagname += 32 )
+        if ( entwnd_comment )
+            SendMessageA( entwnd_comment, WM_SETTEXT, 0, (LPARAM)info.comment );
+
+        // Label + enable the first 8 checkboxes from the eclass flag names.  An empty
+        // name → blank " " + disabled, exactly as the IDB loop.
+        for ( int i = 0; i < 8; ++i )
         {
             HWND checkbox = entwnd_entcheck[i];
+            const char *flagname = info.flagname[i];
             if ( flagname && *flagname )
             {
                 EnableWindow( checkbox, TRUE );
@@ -610,6 +741,19 @@ int UpdateSelection( int wParam, eclass_t *cls )
         }
     }
     return 1;
+}
+
+// UI-independent action behind the eclass list's selection change (the entity WndProc's
+// eclass LBN_SELCHANGE arm): remember the picked class name (the RMB create reads it),
+// then refresh the inspector from that class.
+void EclassSelect_Apply( int listIndex, eclass_t *pec )
+{
+    if ( pec && pec->name )
+    {
+        strncpy( s_selectedEclass, pec->name, sizeof( s_selectedEclass ) - 1 );
+        s_selectedEclass[sizeof( s_selectedEclass ) - 1] = '\0';
+    }
+    UpdateSelection( listIndex, pec );        // description + this entity's key/values
 }
 
 // Public entry for the selection hooks (= UpdateSelection(-1, NULL)); a no-op when the
@@ -1402,12 +1546,7 @@ void CEntityWnd::OnEclassSelChange()
     if ( idx < 0 )
         return;
     eclass_t *pec = (eclass_t *)::SendMessageA( hwndEnt_entlist, LB_GETITEMDATA, idx, 0 );
-    if ( pec && pec->name )
-    {
-        strncpy( s_selectedEclass, pec->name, sizeof( s_selectedEclass ) - 1 );
-        s_selectedEclass[sizeof( s_selectedEclass ) - 1] = '\0';
-    }
-    UpdateSelection( (int)idx, pec );        // description + this entity's key/values
+    EclassSelect_Apply( (int)idx, pec );
 }
 
 void CEntityWnd::OnEclassDblClk()
@@ -1458,9 +1597,9 @@ void CEntityWnd::OnSpawnFlagCheck( UINT nID )
 // toggle the PITCH component (axis 0) to -90 / +90 (CoD pitch convention: negative
 // pitch looks up, positive looks down — NOT the GtkRadiant -1/-2 `angle` special
 // values, which this CoD build does not use).  All cases refresh the kv list.
-void CEntityWnd::OnAngleButton( UINT nID )
+// UI-independent action behind the inspector's 10 angle/direction buttons.
+void EntAngle_Apply( int idx )
 {
-    int idx = (int)( nID - IDC_ENT_DIR_FIRST );
     switch ( idx )
     {
         case 0: Entity_SetAngles(   0.0f, 1 ); break;   // E   (IDC_ANGLE360)
@@ -1490,8 +1629,13 @@ void CEntityWnd::OnAngleButton( UINT nID )
         default:
             return;
     }
-    ::SetFocus( g_qeglobals.d_hwndCamera );
     SetKeyValuePairs();                                 // reflect the new "angles" key
+}
+
+void CEntityWnd::OnAngleButton( UINT nID )
+{
+    EntAngle_Apply( (int)( nID - IDC_ENT_DIR_FIRST ) );
+    ::SetFocus( g_qeglobals.d_hwndCamera );
 }
 
 // ── Accelerator forwarding for the floating inspector popup ─────────────────────

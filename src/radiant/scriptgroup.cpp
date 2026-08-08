@@ -9,6 +9,8 @@
 #include "prefs.h"      // prefData_t / g_PrefsDlg (ScriptGroupKey / ScriptColorTeamKey CStrings)
 #include <cstring>
 #include <cstdlib>     // atol / _itoa
+#include <string>
+#include <vector>
 
 extern void Assert( const char *file, int line, int type, const char *fmt, ... );
 
@@ -1284,15 +1286,17 @@ void ScriptGroup_AddColorToSelection()
 // (GetDlgItem / SendMessageA / CheckDlgButton / CreateDialogParamA come from <windows.h>
 //  via stdafx.h; the dialog code below uses the ::A variants to stay ANSI/_MBCS.)
 
-// 0x454e40  ScriptGroup_HasFlag — fill listbox `dlgItemID` with the DISTINCT token values
-// held under epair key `key` across the selected trigger entities.  (Binary uses raw
-// listbox messages: 0x184=LB_RESETCONTENT, 0x180=LB_ADDSTRING — the hex-rays WM_*|WM_SETICON
-// ORs were artifacts.)  Dedups via a 16-byte-stride scratch, capped implicitly by the list.
-void ScriptGroup_HasFlag( const char *key, int dlgItemID, HWND hDlg )
+// One distinct flag-token row of the dialog's script_flag_true/script_flag_false listboxes.
+struct scriptFlagRow_t
 {
-    HWND hWnd = GetDlgItem( hDlg, dlgItemID );
-    ::SendMessageA( hWnd, LB_RESETCONTENT, 0, 0 );
+    std::string token;
+};
 
+// UI-independent read behind the two script-flag listboxes' population (ScriptGroup_HasFlag
+// 0x454e40's selected-trigger token walk).  Dedups via a 16-byte-stride scratch, capped
+// implicitly by the list.
+void ScriptGroupFlags_Gather( const char *key, std::vector<scriptFlagRow_t> &rows )
+{
     char seen[256][16];
     int  seenCount = 0;
 
@@ -1328,12 +1332,29 @@ void ScriptGroup_HasFlag( const char *key, int dlgItemID, HWND hDlg )
             }
             if ( !found )
             {
-                ::SendMessageA( hWnd, LB_ADDSTRING, 0, (LPARAM)token );
+                scriptFlagRow_t row;
+                row.token = token;
+                rows.push_back( row );
                 strcpy( seen[seenCount], token );
                 ++seenCount;
             }
         }
     }
+}
+
+// 0x454e40  ScriptGroup_HasFlag — fill listbox `dlgItemID` with the DISTINCT token values
+// held under epair key `key` across the selected trigger entities.  (Binary uses raw
+// listbox messages: 0x184=LB_RESETCONTENT, 0x180=LB_ADDSTRING — the hex-rays WM_*|WM_SETICON
+// ORs were artifacts.)
+void ScriptGroup_HasFlag( const char *key, int dlgItemID, HWND hDlg )
+{
+    HWND hWnd = GetDlgItem( hDlg, dlgItemID );
+    ::SendMessageA( hWnd, LB_RESETCONTENT, 0, 0 );
+
+    std::vector<scriptFlagRow_t> rows;
+    ScriptGroupFlags_Gather( key, rows );
+    for ( size_t i = 0; i < rows.size(); ++i )
+        ::SendMessageA( hWnd, LB_ADDSTRING, 0, (LPARAM)rows[i].token.c_str() );
 }
 
 // 0x454480  ScriptGroup_SyncGroupKeyToTeam (was sub_454480) — force the active script
@@ -1358,20 +1379,61 @@ void ScriptGroup_SyncGroupKeyToTeam()
 // Each reads its edit control(s) and drives a cluster function.  The original CString
 // fork/release is replaced with char[256] locals (see header note).
 
-// 0x454630  ScriptGroupDlg_OnOK — "OK": commit the group-key edit, AssignNextNumber, close.
-static void ScriptGroupDlg_OnOK( HWND hDlg )
+// UI-independent action behind the Script-Group dialog's OK button — commit the typed group
+// key to prefs (empty text is a no-op) and assign the next group number to the selection.
+void ScriptGroupKey_Apply( const char *key )
 {
-    char text[256];
-    ::GetWindowTextA( GetDlgItem( hDlg, 1441 ), text, 255 );
-    if ( text[0] )
+    if ( key[0] )
     {
-        g_PrefsDlg->ScriptGroupKey = text;
+        g_PrefsDlg->ScriptGroupKey = key;
         Prefs_SavePrefs( g_PrefsDlg );
         ScriptGroup_AssignNextNumber();
         UpdateSelection( 0xFFFFFFFF, 0 );
         g_nUpdateBits = -1;
     }
+}
+
+// 0x454630  ScriptGroupDlg_OnOK — "OK": commit the group-key edit, AssignNextNumber, close.
+static void ScriptGroupDlg_OnOK( HWND hDlg )
+{
+    char text[256];
+    ::GetWindowTextA( GetDlgItem( hDlg, 1441 ), text, 255 );
+    ScriptGroupKey_Apply( text );
     ::EndDialog( hDlg, 1 );
+}
+
+// UI-independent action behind the Script-Group dialog's sub-key Add button — store the
+// sub key/value to prefs if non-empty, then add that key/value to every selected entity.
+void ScriptGroupAddSubKey_Apply( const char *subKey, const char *subValue )
+{
+    if ( subKey[0] )
+    {
+        g_PrefsDlg->ScriptSubKey_key = subKey;
+        Prefs_SavePrefs( g_PrefsDlg );
+    }
+    if ( subValue[0] )
+    {
+        g_PrefsDlg->ScriptSubValue_key = subValue;
+        Prefs_SavePrefs( g_PrefsDlg );
+    }
+    ScriptGroup_AddKeyToSelected( subValue, subKey );   // (value, key)
+}
+
+// UI-independent action behind the Script-Group dialog's sub-key Remove button — same prefs
+// store, but REMOVE the key/value from every selected entity.
+void ScriptGroupRemoveSubKey_Apply( const char *subKey, const char *subValue )
+{
+    if ( subKey[0] )
+    {
+        g_PrefsDlg->ScriptSubKey_key = subKey;
+        Prefs_SavePrefs( g_PrefsDlg );
+    }
+    if ( subValue[0] )
+    {
+        g_PrefsDlg->ScriptSubValue_key = subValue;
+        Prefs_SavePrefs( g_PrefsDlg );
+    }
+    ScriptGroup_RemoveKeyFromSelected( subKey, subValue );   // (key, value)
 }
 
 // 0x454780  ScriptGroupDlg_AddSubKey — read sub-key (1631) + sub-value (1635) edits, store
@@ -1380,18 +1442,8 @@ static void ScriptGroupDlg_AddSubKey( HWND hDlg )
 {
     char subKey[256], subValue[256];
     ::GetWindowTextA( GetDlgItem( hDlg, 1631 ), subKey, 255 );
-    if ( subKey[0] )
-    {
-        g_PrefsDlg->ScriptSubKey_key = subKey;
-        Prefs_SavePrefs( g_PrefsDlg );
-    }
     ::GetWindowTextA( GetDlgItem( hDlg, 1635 ), subValue, 255 );
-    if ( subValue[0] )
-    {
-        g_PrefsDlg->ScriptSubValue_key = subValue;
-        Prefs_SavePrefs( g_PrefsDlg );
-    }
-    ScriptGroup_AddKeyToSelected( subValue, subKey );   // (value, key)
+    ScriptGroupAddSubKey_Apply( subKey, subValue );
     ::SetFocus( g_qeglobals.d_hwndCamera );
 }
 
@@ -1400,18 +1452,8 @@ static void ScriptGroupDlg_RemoveSubKey( HWND hDlg )
 {
     char subKey[256], subValue[256];
     ::GetWindowTextA( GetDlgItem( hDlg, 1631 ), subKey, 255 );
-    if ( subKey[0] )
-    {
-        g_PrefsDlg->ScriptSubKey_key = subKey;
-        Prefs_SavePrefs( g_PrefsDlg );
-    }
     ::GetWindowTextA( GetDlgItem( hDlg, 1635 ), subValue, 255 );
-    if ( subValue[0] )
-    {
-        g_PrefsDlg->ScriptSubValue_key = subValue;
-        Prefs_SavePrefs( g_PrefsDlg );
-    }
-    ScriptGroup_RemoveKeyFromSelected( subKey, subValue );   // (key, value)
+    ScriptGroupRemoveSubKey_Apply( subKey, subValue );
     ::SetFocus( g_qeglobals.d_hwndCamera );
 }
 
@@ -1449,17 +1491,32 @@ static void ScriptGroupDlg_Disassociate()
     g_nUpdateBits = -1;
 }
 
+// UI-independent action behind the Script-Group dialog's axis/allies team radios.
+void ScriptGroupTeam_Apply( const char *teamKey )
+{
+    g_PrefsDlg->ScriptColorTeamKey = teamKey;
+    ScriptGroup_SyncGroupKeyToTeam();
+    g_nUpdateBits = -1;
+    Prefs_SavePrefs( g_PrefsDlg );
+}
+
 // ── team-radio click helper (cases 8/0xB/0x684/0x686) ────────────────────────
 // Sets ScriptColorTeamKey to axis/allies, re-syncs the group key, updates the two team
 // radio buttons, bumps the update bits, and saves prefs.  (Binary: get_m_strStatus +
 // sub_454480 + CheckDlgButton(allies/axis) + g_nUpdateBits + SavePrefs.)
 static void ScriptGroupDlg_SetTeam( HWND hDlg, const char *teamKey )
 {
-    g_PrefsDlg->ScriptColorTeamKey = teamKey;
-    ScriptGroup_SyncGroupKeyToTeam();
+    ScriptGroupTeam_Apply( teamKey );
     bool allies = !strcmp( teamKey, "script_color_allies" );
     ::CheckDlgButton( hDlg, 1668, allies ? BST_CHECKED : BST_UNCHECKED );   // allies
     ::CheckDlgButton( hDlg, 1670, allies ? BST_UNCHECKED : BST_CHECKED );   // axis
+}
+
+// UI-independent action behind the Script-Group dialog's 7 colour radios.
+void ScriptGroupColorCode_Apply( const char *code )
+{
+    g_PrefsDlg->ScriptColorKey = code;
+    ScriptGroup_SyncGroupKeyToTeam();
     g_nUpdateBits = -1;
     Prefs_SavePrefs( g_PrefsDlg );
 }
@@ -1468,14 +1525,11 @@ static void ScriptGroupDlg_SetTeam( HWND hDlg, const char *teamKey )
 // Sets ScriptColorKey to the chosen 1-char code and updates the 7 radio buttons.
 static void ScriptGroupDlg_SetColorCode( HWND hDlg, const char *code )
 {
-    g_PrefsDlg->ScriptColorKey = code;
+    ScriptGroupColorCode_Apply( code );
     static const struct { const char *c; int id; } radios[7] =
         { {"r",1661}, {"b",1662}, {"y",1663}, {"c",1664}, {"g",1665}, {"p",1666}, {"o",1667} };
     for ( int i = 0; i < 7; ++i )
         ::CheckDlgButton( hDlg, radios[i].id, !strcmp( code, radios[i].c ) ? BST_CHECKED : BST_UNCHECKED );
-    ScriptGroup_SyncGroupKeyToTeam();
-    g_nUpdateBits = -1;
-    Prefs_SavePrefs( g_PrefsDlg );
 }
 
 // ── turret-share button handlers ──────────────────────────────────────────────
@@ -1602,6 +1656,30 @@ static void ScriptGroupDlg_TurretKey( const char *turretKey )   // 0x455d80
     g_nUpdateBits = -1;
 }
 
+// UI-independent action behind the dialog's fixed group-key rows (script_health 1442 /
+// script_killspawner 0x5A7) — adopt the key, rebuild the brush-list displays, save prefs and
+// assign the next group number to the selection.  (The row's EndDialog stays in the handler.)
+void ScriptGroupKeyPreset_Apply( const char *key )
+{
+    g_PrefsDlg->ScriptGroupKey = key;
+    sub_47D060( (int)(intptr_t)&active_brushes );
+    sub_47D060( (int)(intptr_t)&selected_brushes );
+    sub_47D060( (int)(intptr_t)&filtered_brushes );
+    Prefs_SavePrefs( g_PrefsDlg );
+    ScriptGroup_AssignNextNumber();
+    g_nUpdateBits = -1;
+    UpdateSelection( 0xFFFFFFFF, 0 );
+}
+
+// UI-independent action behind the dialog's fixed sub-key rows (script_objective_active
+// 0x669 / script_objective_inactive 0x66A) — adopt the sub key and save prefs.  (The edit
+// control mirror stays in the handler.)
+void ScriptGroupSubKeyPreset_Apply( const char *subKey )
+{
+    g_PrefsDlg->ScriptSubKey_key = subKey;
+    Prefs_SavePrefs( g_PrefsDlg );
+}
+
 // 0x455100  ScriptGroupDlgProc — the Script-Group dialog procedure.  WM_INITDIALOG seeds
 // the edit controls + colour/team radios from prefs; WM_COMMAND dispatches the buttons.
 // Control-command IDs are the binary's raw immediates (decoded from disasm).
@@ -1654,14 +1732,7 @@ INT_PTR CALLBACK ScriptGroupDlgProc( HWND hDlg, UINT message, WPARAM wParam, LPA
         case 0xF:  ScriptGroupDlg_RemoveFlag( "script_flag_false", hDlg, 1639 );
                    ScriptGroup_HasFlag( "script_flag_false", 1298, hDlg );return TRUE;
         case 1442: // "script_health" group-key shortcut row → AssignNextNumber + close.
-            g_PrefsDlg->ScriptGroupKey = "script_health";
-            sub_47D060( (int)(intptr_t)&active_brushes );
-            sub_47D060( (int)(intptr_t)&selected_brushes );
-            sub_47D060( (int)(intptr_t)&filtered_brushes );
-            Prefs_SavePrefs( g_PrefsDlg );
-            ScriptGroup_AssignNextNumber();
-            g_nUpdateBits = -1;
-            UpdateSelection( 0xFFFFFFFF, 0 );
+            ScriptGroupKeyPreset_Apply( "script_health" );
             ::EndDialog( hDlg, 1 );
             return TRUE;
         // colour-radio rows (two command IDs each: the button + its accelerator twin).
@@ -1675,28 +1746,19 @@ INT_PTR CALLBACK ScriptGroupDlgProc( HWND hDlg, UINT message, WPARAM wParam, LPA
         case 0x684: ScriptGroupDlg_SetTeam( hDlg, "script_color_allies" ); return TRUE;
         case 0x686: ScriptGroupDlg_SetTeam( hDlg, "script_color_axis" );   return TRUE;
         case 0x5A7: // "script_killspawner" group-key row.
-            g_PrefsDlg->ScriptGroupKey = "script_killspawner";
-            sub_47D060( (int)(intptr_t)&active_brushes );
-            sub_47D060( (int)(intptr_t)&selected_brushes );
-            sub_47D060( (int)(intptr_t)&filtered_brushes );
-            Prefs_SavePrefs( g_PrefsDlg );
-            ScriptGroup_AssignNextNumber();
-            g_nUpdateBits = -1;
-            UpdateSelection( 0xFFFFFFFF, 0 );
+            ScriptGroupKeyPreset_Apply( "script_killspawner" );
             ::EndDialog( hDlg, 1 );
             return TRUE;
         case 0x5A9: ScriptGroupDlg_TurretKey( "script_turret_share" );  return TRUE;
         case 0x5AA: ScriptGroupDlg_TurretShare();                       return TRUE;
         case 0x5AB: ScriptGroupDlg_TurretKey( "script_turret_ambush" ); return TRUE;
         case 0x669: // "script_objective_active" sub-key row.
-            g_PrefsDlg->ScriptSubKey_key = "script_objective_active";
-            Prefs_SavePrefs( g_PrefsDlg );
+            ScriptGroupSubKeyPreset_Apply( "script_objective_active" );
             ::SetDlgItemTextA( hDlg, 1631, (const char *)g_PrefsDlg->ScriptSubKey_key );
             ::SetFocus( g_qeglobals.d_hwndCamera );
             return TRUE;
         case 0x66A: // "script_objective_inactive" sub-key row.
-            g_PrefsDlg->ScriptSubKey_key = "script_objective_inactive";
-            Prefs_SavePrefs( g_PrefsDlg );
+            ScriptGroupSubKeyPreset_Apply( "script_objective_inactive" );
             ::SetDlgItemTextA( hDlg, 1631, (const char *)g_PrefsDlg->ScriptSubKey_key );
             ::SetFocus( g_qeglobals.d_hwndCamera );
             return TRUE;

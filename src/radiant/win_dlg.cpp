@@ -233,6 +233,14 @@ enum
     IDC_AR_Z,
 };
 
+// UI-independent action behind CFindBrushDlg's Find button.
+// FindBrushDlgProc OK (wParam==1): atol the brush# + ent# edits → Select_ByEntityNumber.
+void FindBrush_Apply( int brushIdx, int entIdx )
+{
+    Select_ByEntityNumber( brushIdx, entIdx );
+    g_nUpdateBits |= 1;
+}
+
 // ══════════════════════════════════════════════════════════════════════════════
 //  CFindBrushDlg — Misc→Find brush (FindBrushDlgProc @0x4957E0).
 // ══════════════════════════════════════════════════════════════════════════════
@@ -286,7 +294,6 @@ int CFindBrushDlg::OnCreate( LPCREATESTRUCT lpCreateStruct )
     return 0;
 }
 
-// FindBrushDlgProc OK (wParam==1): atol the brush# + ent# edits → Select_ByEntityNumber.
 void CFindBrushDlg::OnFind()
 {
     char entTxt[256] = { 0 }, brushTxt[256] = { 0 };
@@ -294,9 +301,8 @@ void CFindBrushDlg::OnFind()
     if ( s_fbBrush ) ::GetWindowTextA( s_fbBrush, brushTxt, sizeof( brushTxt ) - 1 );
     int brushIdx = atol( brushTxt );
     int entIdx   = atol( entTxt );
-    Select_ByEntityNumber( brushIdx, entIdx );
+    FindBrush_Apply( brushIdx, entIdx );
     ShowWindow( SW_HIDE );      // binary EndDialog(,1); modeless → hide
-    g_nUpdateBits |= 1;
 }
 
 void CFindBrushDlg::OnCancel2() { ShowWindow( SW_HIDE ); }
@@ -314,6 +320,37 @@ void CFindBrushDlg::Show()
     DLG_ShowPopup( (CWnd **)&g_dlgFindBrush,
                    []() -> CWnd * { return new CFindBrushDlg(); },
                    "Find Brush", 260, 150 );
+}
+
+// UI-independent action behind CGoToDlg's Go button.
+// GoToDlgProc OK (a3==1): if the text is non-empty, zero camera origin then try the four
+// coordinate formats in order (last 3-field match wins); Select_Deselect + PositionView.
+void GoTo_Apply( const char *text )
+{
+    if ( text[0] && g_pParentWnd )
+    {
+        CCamWnd *cam = g_pParentWnd->m_pCamWnd;
+        if ( cam )
+        {
+            cam->camera.origin[0] = 0.0f;
+            cam->camera.origin[1] = 0.0f;
+            cam->camera.origin[2] = 0.0f;
+
+            float x, yv, z;
+            if ( sscanf( text, "%f, %f, %f", &x, &yv, &z ) == 3 )
+            { cam->camera.origin[0] = x; cam->camera.origin[1] = yv; cam->camera.origin[2] = z; }
+            if ( sscanf( text, "(%f, %f, %f)", &x, &yv, &z ) == 3 )
+            { cam->camera.origin[0] = x; cam->camera.origin[1] = yv; cam->camera.origin[2] = z; }
+            if ( sscanf( text, "%f %f %f", &x, &yv, &z ) == 3 )
+            { cam->camera.origin[0] = x; cam->camera.origin[1] = yv; cam->camera.origin[2] = z; }
+            if ( sscanf( text, "(%f %f %f)", &x, &yv, &z ) == 3 )
+            { cam->camera.origin[0] = x; cam->camera.origin[1] = yv; cam->camera.origin[2] = z; }
+        }
+        Select_Deselect( 1 );
+        if ( g_pParentWnd->m_pXYWnd )
+            g_pParentWnd->m_pXYWnd->PositionView();
+    }
+    g_nUpdateBits |= 5;     // W_CAMERA | W_XY_OVERLAY
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -358,38 +395,13 @@ int CGoToDlg::OnCreate( LPCREATESTRUCT lpCreateStruct )
     return 0;
 }
 
-// GoToDlgProc OK (a3==1): if the text is non-empty, zero camera origin then try the four
-// coordinate formats in order (last 3-field match wins); Select_Deselect + PositionView.
 void CGoToDlg::OnGo()
 {
     char text[128] = { 0 };
     if ( s_gtCoords )
         ::GetWindowTextA( s_gtCoords, text, sizeof( text ) - 1 );
 
-    if ( text[0] && g_pParentWnd )
-    {
-        CCamWnd *cam = g_pParentWnd->m_pCamWnd;
-        if ( cam )
-        {
-            cam->camera.origin[0] = 0.0f;
-            cam->camera.origin[1] = 0.0f;
-            cam->camera.origin[2] = 0.0f;
-
-            float x, yv, z;
-            if ( sscanf( text, "%f, %f, %f", &x, &yv, &z ) == 3 )
-            { cam->camera.origin[0] = x; cam->camera.origin[1] = yv; cam->camera.origin[2] = z; }
-            if ( sscanf( text, "(%f, %f, %f)", &x, &yv, &z ) == 3 )
-            { cam->camera.origin[0] = x; cam->camera.origin[1] = yv; cam->camera.origin[2] = z; }
-            if ( sscanf( text, "%f %f %f", &x, &yv, &z ) == 3 )
-            { cam->camera.origin[0] = x; cam->camera.origin[1] = yv; cam->camera.origin[2] = z; }
-            if ( sscanf( text, "(%f %f %f)", &x, &yv, &z ) == 3 )
-            { cam->camera.origin[0] = x; cam->camera.origin[1] = yv; cam->camera.origin[2] = z; }
-        }
-        Select_Deselect( 1 );
-        if ( g_pParentWnd->m_pXYWnd )
-            g_pParentWnd->m_pXYWnd->PositionView();
-    }
-    g_nUpdateBits |= 5;     // W_CAMERA | W_XY_OVERLAY
+    GoTo_Apply( text );
     ShowWindow( SW_HIDE );
 }
 
@@ -408,6 +420,42 @@ void CGoToDlg::Show()
     DLG_ShowPopup( (CWnd **)&g_dlgGoTo,
                    []() -> CWnd * { return new CGoToDlg(); },
                    "Go to position", 324, 116 );
+}
+
+// Apply one typed angle about `axis` to the selection (the Brush→Rotate pattern: pivot →
+// matrix → apply).  Mirrors sub_450D50's per-axis block (`0.0 != atof(text)` gate).
+static void ArbRot_ApplyAxis( int axis, float deg )
+{
+    if ( deg == 0.0f )
+        return;
+    float rot_around[4][3];
+    Select_GetMid( rot_around[0] );
+    Select_RotateAxis( axis, deg, (float (*)[4][3])rot_around );
+    Select_ApplyMatrix_SelectedBrushes( 0, rot_around[0], deg, 0 );
+    g_nUpdateBits = -1;
+}
+
+// UI-independent action behind CArbRotateDlg's OK button.
+// CRotateDlg OnOK (sub_450D50): UpdateData(TRUE) then atof X/Y/Z → per-axis rotate.  The
+// undo bracket (CMainFrame::OnSelectionArbitraryrotation 0x425300) is applied here.
+void ArbRotate_Apply( float xDeg, float yDeg, float zDeg )
+{
+    if ( selected_brushes.next == &selected_brushes )
+        return;
+
+    Undo_ClearRedo();
+    Undo_GeneralStart( "arbitrary rotation" );
+    Undo_AddBrushList( &selected_brushes );
+
+    ArbRot_ApplyAxis( 0, xDeg );
+    ArbRot_ApplyAxis( 1, yDeg );
+    ArbRot_ApplyAxis( 2, zDeg );
+
+    UpdateSelection( -1, 0 );
+    Undo_EndBrushList( &selected_brushes );
+    Undo_End();
+
+    g_nUpdateBits = -1;
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -467,47 +515,16 @@ int CArbRotateDlg::OnCreate( LPCREATESTRUCT lpCreateStruct )
     return 0;
 }
 
-// Apply one typed angle about `axis` to the selection (the Brush→Rotate pattern: pivot →
-// matrix → apply).  Mirrors sub_450D50's per-axis block (`0.0 != atof(text)` gate).
-static void ArbRot_ApplyAxis( int axis, float deg )
-{
-    if ( deg == 0.0f )
-        return;
-    float rot_around[4][3];
-    Select_GetMid( rot_around[0] );
-    Select_RotateAxis( axis, deg, (float (*)[4][3])rot_around );
-    Select_ApplyMatrix_SelectedBrushes( 0, rot_around[0], deg, 0 );
-    g_nUpdateBits = -1;
-}
-
-// CRotateDlg OnOK (sub_450D50): UpdateData(TRUE) then atof X/Y/Z → per-axis rotate.  The
-// undo bracket (CMainFrame::OnSelectionArbitraryrotation 0x425300) is applied here.
 void CArbRotateDlg::OnApply()
 {
-    if ( selected_brushes.next == &selected_brushes )
-    {
-        ShowWindow( SW_HIDE );
-        return;
-    }
     char xb[64] = { 0 }, yb[64] = { 0 }, zb[64] = { 0 };
     if ( s_arX ) ::GetWindowTextA( s_arX, xb, sizeof( xb ) - 1 );
     if ( s_arY ) ::GetWindowTextA( s_arY, yb, sizeof( yb ) - 1 );
     if ( s_arZ ) ::GetWindowTextA( s_arZ, zb, sizeof( zb ) - 1 );
 
-    Undo_ClearRedo();
-    Undo_GeneralStart( "arbitrary rotation" );
-    Undo_AddBrushList( &selected_brushes );
-
-    ArbRot_ApplyAxis( 0, (float)atof( xb ) );
-    ArbRot_ApplyAxis( 1, (float)atof( yb ) );
-    ArbRot_ApplyAxis( 2, (float)atof( zb ) );
-
-    UpdateSelection( -1, 0 );
-    Undo_EndBrushList( &selected_brushes );
-    Undo_End();
+    ArbRotate_Apply( (float)atof( xb ), (float)atof( yb ), (float)atof( zb ) );
 
     ShowWindow( SW_HIDE );
-    g_nUpdateBits = -1;
 }
 
 void CArbRotateDlg::OnCancel2() { ShowWindow( SW_HIDE ); }

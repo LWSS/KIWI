@@ -137,6 +137,24 @@ enum
     IDC_MDL_REPLACE,            // [Replace] → ModelDlg_DoReplace
 };
 
+// One [Replace] pass snapshot: the two model-set list boxes and the three class check
+// boxes the replace consults.
+struct modelReplaceState_t
+{
+    const char *const *fromSet;    // IDC_MDL_FROM_LIST contents (binary ctrl 1566)
+    int                fromCount;
+    const char *const *toSet;      // IDC_MDL_TO_LIST contents   (binary ctrl 1564)
+    int                toCount;
+    int                classFlags; // IDC_MDL_CHK_MODEL / _DYN / _PREFAB → bit0 / bit1 / bit2
+};
+
+// UI-independent action behind CModelDlg's [Replace] button.
+void ModelReplace_Apply( const modelReplaceState_t &st )
+{
+    ModelDlg_DoReplace( st.fromSet, st.fromCount, st.toSet, st.toCount, st.classFlags );
+    g_nUpdateBits |= 1;
+}
+
 CModelDlg *g_dlgModel = nullptr;            // the singleton (NULL until first opened)
 
 static HFONT s_mdlFont    = nullptr;
@@ -328,11 +346,16 @@ void CModelDlg::OnReplace()
     if ( s_mdlChkDyn && ::SendMessageA( s_mdlChkDyn, BM_GETCHECK, 0, 0 ) == BST_CHECKED ) flags |= 2;
     if ( s_mdlChkPfb && ::SendMessageA( s_mdlChkPfb, BM_GETCHECK, 0, 0 ) == BST_CHECKED ) flags |= 4;
 
-    ModelDlg_DoReplace( fromSet, fromN, toSet, toN, flags );
+    modelReplaceState_t st;
+    st.fromSet    = fromSet;
+    st.fromCount  = fromN;
+    st.toSet      = toSet;
+    st.toCount    = toN;
+    st.classFlags = flags;
+    ModelReplace_Apply( st );
 
     MDL_FreeSet( fromSet, fromN );
     MDL_FreeSet( toSet, toN );
-    g_nUpdateBits |= 1;
 }
 
 void CModelDlg::OnClose()

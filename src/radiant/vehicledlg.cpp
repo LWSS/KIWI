@@ -108,6 +108,70 @@ void VehicleDlg_RemovePair( const char *key )
     g_nUpdateBits = -1;
 }
 
+// UI-independent action behind CVehicleDlg's per-field [Set] buttons.
+// Faithful to each edit handler (0x460140 etc.): GetWindowText → empty? RemovePair :
+// SetPair.  (The accuracy field additionally scales — handled in OnSetAccuracy.)
+void VehSetKey_Apply( const char *value, const char *key )
+{
+    if ( value[0] )
+        VehicleDlg_SetPair( value, key );
+    else
+        VehicleDlg_RemovePair( key );
+    g_nUpdateBits |= 1;
+}
+
+// UI-independent action behind CVehicleDlg's accuracy [Set] button.
+// Accuracy (0x460250): empty → RemovePair (binary resets the slider to 44 first); else
+// value = atol(text)/100.0 formatted "%.2f" → SetPair("script_accuracy", value).
+void VehSetAccuracy_Apply( const char *text )
+{
+    if ( !text[0] )
+    {
+        VehicleDlg_RemovePair( "script_accuracy" );
+        g_nUpdateBits |= 1;
+        return;
+    }
+    char val[64];
+    _snprintf( val, sizeof( val ), "%.2f", (double)atol( text ) / 100.0 );
+    VehicleDlg_SetPair( val, "script_accuracy" );
+    g_nUpdateBits |= 1;
+}
+
+// UI-independent action behind CVehicleDlg's per-field [Clear] buttons.
+void VehClearKey_Apply( const char *key )
+{
+    VehicleDlg_RemovePair( key );
+    g_nUpdateBits |= 1;
+}
+
+// UI-independent action behind CVehicleDlg's crash-type [Set] button.
+// Crash type (0x460700): CB_GETCURSEL → 0 default / 1 plane / 2 forced → SetPair.
+void VehSetCrashType_Apply( int crashType )
+{
+    const char *v = ( crashType == 1 ) ? "plane" : ( crashType == 2 ) ? "forced" : "default";
+    VehicleDlg_SetPair( v, "script_crashtype" );
+    g_nUpdateBits |= 1;
+}
+
+// UI-independent action behind CVehicleDlg's on/off toggle pushbuttons.
+// on/off toggle pushbuttons — each button is a fixed SetPair (the binary's per-button
+// thunks at 0x45FDE0.. each SetKeyValue a constant value, e.g. script_turret 1/0).
+void VehSetToggle_Apply( const char *value, const char *key )
+{
+    VehicleDlg_SetPair( value, key );
+    g_nUpdateBits |= 1;
+}
+
+// UI-independent action behind CVehicleDlg's script-group buttons.
+// script-group buttons (the binary's thunks @0x45fd50.. + OnAttackOrgs @0x460670): each
+// is VehicleDlg_SetScriptGroupKey("<key>") → store the key NAME into ScriptGroupKey, then
+// ScriptGroup_AssignNextNumber assigns the next free group number to the selection.
+void VehScriptGroup_Apply( const char *key )
+{
+    VehicleDlg_SetScriptGroupKey( key );
+    g_nUpdateBits |= 1;
+}
+
 // ══════════════════════════════════════════════════════════════════════════════
 //  CVehicleDlg — the hand-built modeless popup (CDynEntityDlg / CLayerDlg pattern)
 // ══════════════════════════════════════════════════════════════════════════════
@@ -294,90 +358,67 @@ int CVehicleDlg::OnCreate( LPCREATESTRUCT lpCreateStruct )
 }
 
 // ── per-field commit: read the edit, SetPair (non-empty) / RemovePair (empty) ──
-// Faithful to each edit handler (0x460140 etc.): GetWindowText → empty? RemovePair :
-// SetPair.  (The accuracy field additionally scales — handled in OnSetAccuracy.)
 static void VEH_Commit( HWND field, const char *key )
 {
     if ( !field )
         return;
     char buf[1024] = { 0 };
     ::GetWindowTextA( field, buf, sizeof( buf ) - 1 );
-    if ( buf[0] )
-        VehicleDlg_SetPair( buf, key );
-    else
-        VehicleDlg_RemovePair( key );
-    g_nUpdateBits |= 1;
+    VehSetKey_Apply( buf, key );
 }
 
 void CVehicleDlg::OnSetHealth()   { VEH_Commit( s_vehHealth, "script_startinghealth" ); }
 void CVehicleDlg::OnSetSpeed()    { VEH_Commit( s_vehSpeed,  "speed" ); }
 void CVehicleDlg::OnSetLookahead(){ VEH_Commit( s_vehLook,   "lookahead" ); }
 
-// Accuracy (0x460250): empty → RemovePair (binary resets the slider to 44 first); else
-// value = atol(text)/100.0 formatted "%.2f" → SetPair("script_accuracy", value).
 void CVehicleDlg::OnSetAccuracy()
 {
     if ( !s_vehAccur )
         return;
     char buf[256] = { 0 };
     ::GetWindowTextA( s_vehAccur, buf, sizeof( buf ) - 1 );
-    if ( !buf[0] )
-    {
-        VehicleDlg_RemovePair( "script_accuracy" );
-        g_nUpdateBits |= 1;
-        return;
-    }
-    char val[64];
-    _snprintf( val, sizeof( val ), "%.2f", (double)atol( buf ) / 100.0 );
-    VehicleDlg_SetPair( val, "script_accuracy" );
-    g_nUpdateBits |= 1;
+    VehSetAccuracy_Apply( buf );
 }
 
-void CVehicleDlg::OnClearHealth()   { VehicleDlg_RemovePair( "script_startinghealth" ); g_nUpdateBits |= 1; }
-void CVehicleDlg::OnClearAccuracy() { VehicleDlg_RemovePair( "script_accuracy" );       g_nUpdateBits |= 1; }
-void CVehicleDlg::OnClearSpeed()    { VehicleDlg_RemovePair( "speed" );                 g_nUpdateBits |= 1; }
-void CVehicleDlg::OnClearLookahead(){ VehicleDlg_RemovePair( "lookahead" );             g_nUpdateBits |= 1; }
+void CVehicleDlg::OnClearHealth()   { VehClearKey_Apply( "script_startinghealth" ); }
+void CVehicleDlg::OnClearAccuracy() { VehClearKey_Apply( "script_accuracy" ); }
+void CVehicleDlg::OnClearSpeed()    { VehClearKey_Apply( "speed" ); }
+void CVehicleDlg::OnClearLookahead(){ VehClearKey_Apply( "lookahead" ); }
 
-// Crash type (0x460700): CB_GETCURSEL → 0 default / 1 plane / 2 forced → SetPair.
 void CVehicleDlg::OnSetCrashType()
 {
     if ( !s_vehCrash )
         return;
     int cur = (int)::SendMessageA( s_vehCrash, CB_GETCURSEL, 0, 0 );
-    const char *v = ( cur == 1 ) ? "plane" : ( cur == 2 ) ? "forced" : "default";
-    VehicleDlg_SetPair( v, "script_crashtype" );
-    g_nUpdateBits |= 1;
+    VehSetCrashType_Apply( cur );
 }
-void CVehicleDlg::OnClearCrashType() { VehicleDlg_RemovePair( "script_crashtype" ); g_nUpdateBits |= 1; }
+void CVehicleDlg::OnClearCrashType() { VehClearKey_Apply( "script_crashtype" ); }
 
-// on/off toggle pushbuttons — each button is a fixed SetPair (the binary's per-button
-// thunks at 0x45FDE0.. each SetKeyValue a constant value, e.g. script_turret 1/0).
 void CVehicleDlg::OnToggle( UINT nID )
 {
+    const char *value;
+    const char *key;
     switch ( nID )
     {
-    case IDC_VEH_DEATHROLL_ON:  VehicleDlg_SetPair( "1", "script_deathroll" );      break;
-    case IDC_VEH_DEATHROLL_OFF: VehicleDlg_SetPair( "0", "script_deathroll" );      break;
-    case IDC_VEH_TURRET_ON:     VehicleDlg_SetPair( "1", "script_turret" );         break;
-    case IDC_VEH_TURRET_OFF:    VehicleDlg_SetPair( "0", "script_turret" );         break;
-    case IDC_VEH_TURRETMG_ON:   VehicleDlg_SetPair( "1", "script_turretmg" );       break;
-    case IDC_VEH_TURRETMG_OFF:  VehicleDlg_SetPair( "0", "script_turretmg" );       break;
-    case IDC_VEH_BADPLACE_ON:   VehicleDlg_SetPair( "1", "script_badplace" );       break;
-    case IDC_VEH_BADPLACE_OFF:  VehicleDlg_SetPair( "0", "script_badplace" );       break;
-    case IDC_VEH_AVOID_ON:      VehicleDlg_SetPair( "1", "script_avoidvehicles" );  break;
-    case IDC_VEH_AVOID_OFF:     VehicleDlg_SetPair( "0", "script_avoidvehicles" );  break;
-    case IDC_VEH_ATTACKAI_ON:   VehicleDlg_SetPair( "1", "script_attackai" );       break;
-    case IDC_VEH_ATTACKAI_OFF:  VehicleDlg_SetPair( "0", "script_attackai" );       break;
-    case IDC_VEH_TEAM_ALLIES:   VehicleDlg_SetPair( "allies", "script_team" );      break;
-    case IDC_VEH_TEAM_AXIS:     VehicleDlg_SetPair( "axis", "script_team" );        break;
+    case IDC_VEH_DEATHROLL_ON:  value = "1";      key = "script_deathroll";     break;
+    case IDC_VEH_DEATHROLL_OFF: value = "0";      key = "script_deathroll";     break;
+    case IDC_VEH_TURRET_ON:     value = "1";      key = "script_turret";        break;
+    case IDC_VEH_TURRET_OFF:    value = "0";      key = "script_turret";        break;
+    case IDC_VEH_TURRETMG_ON:   value = "1";      key = "script_turretmg";      break;
+    case IDC_VEH_TURRETMG_OFF:  value = "0";      key = "script_turretmg";      break;
+    case IDC_VEH_BADPLACE_ON:   value = "1";      key = "script_badplace";      break;
+    case IDC_VEH_BADPLACE_OFF:  value = "0";      key = "script_badplace";      break;
+    case IDC_VEH_AVOID_ON:      value = "1";      key = "script_avoidvehicles"; break;
+    case IDC_VEH_AVOID_OFF:     value = "0";      key = "script_avoidvehicles"; break;
+    case IDC_VEH_ATTACKAI_ON:   value = "1";      key = "script_attackai";      break;
+    case IDC_VEH_ATTACKAI_OFF:  value = "0";      key = "script_attackai";      break;
+    case IDC_VEH_TEAM_ALLIES:   value = "allies"; key = "script_team";          break;
+    case IDC_VEH_TEAM_AXIS:     value = "axis";   key = "script_team";          break;
     default: return;
     }
-    g_nUpdateBits |= 1;
+    VehSetToggle_Apply( value, key );
 }
 
-// script-group buttons (the binary's thunks @0x45fd50.. + OnAttackOrgs @0x460670): each
-// is VehicleDlg_SetScriptGroupKey("<key>") → store the key NAME into ScriptGroupKey, then
-// ScriptGroup_AssignNextNumber assigns the next free group number to the selection.
 void CVehicleDlg::OnScriptGroup( UINT nID )
 {
     const char *key;
@@ -395,8 +436,7 @@ void CVehicleDlg::OnScriptGroup( UINT nID )
     case IDC_VEH_SG_ATTACKORGS:  key = "script_attackorgs";            break;
     default: return;
     }
-    VehicleDlg_SetScriptGroupKey( key );
-    g_nUpdateBits |= 1;
+    VehScriptGroup_Apply( key );
 }
 
 void CVehicleDlg::OnClose()
