@@ -43,27 +43,13 @@ XModel *__cdecl FX_RegisterModel(const char *modelName)
 
 FxSystem *__cdecl FX_GetSystem(int clientIndex)
 {
-    if (clientIndex)
-        MyAssertHandler(
-            ".\\EffectsCore\\fx_system.cpp",
-            140,
-            0,
-            "%s\n\t(clientIndex) = %i",
-            "(clientIndex == 0)",
-            clientIndex);
+    vassert((clientIndex == 0), "(clientIndex) = %i", clientIndex);
     return fx_systemPool;
 }
 
 FxSystemBuffers *__cdecl FX_GetSystemBuffers(int clientIndex)
 {
-    if (clientIndex)
-        MyAssertHandler(
-            ".\\EffectsCore\\fx_system.cpp",
-            152,
-            0,
-            "%s\n\t(clientIndex) = %i",
-            "(clientIndex == 0)",
-            clientIndex);
+    vassert((clientIndex == 0), "(clientIndex) = %i", clientIndex);
     return fx_systemBufferPool;
 }
 
@@ -83,12 +69,10 @@ void __cdecl FX_InitSystem(int localClientNum)
     FxSystemBuffers *systemBuffers; // [esp+8h] [ebp-4h]
 
     system = FX_GetSystem(localClientNum);
-    if (!system)
-        MyAssertHandler(".\\EffectsCore\\fx_system.cpp", 463, 0, "%s", "system");
+    iassert(system);
     memset((uint8_t *)system, 0, sizeof(FxSystem));
     systemBuffers = FX_GetSystemBuffers(localClientNum);
-    if (!systemBuffers)
-        MyAssertHandler(".\\EffectsCore\\fx_system.cpp", 466, 0, "%s", "systemBuffers");
+    iassert(systemBuffers);
     memset((uint8_t *)systemBuffers, 0, sizeof(FxSystemBuffers));
     FX_LinkSystemBuffers(system, systemBuffers);
     FX_RegisterDvars();
@@ -179,11 +163,9 @@ void __cdecl FX_ShutdownSystem(int localClientNum)
 
     system = FX_GetSystem(localClientNum);
     systemBuffers = FX_GetSystemBuffers(localClientNum);
-    if (!system)
-        MyAssertHandler(".\\EffectsCore\\fx_system.cpp", 503, 0, "%s", "system");
+    iassert(system);
     memset((uint8_t *)system, 0, sizeof(FxSystem));
-    if (!systemBuffers)
-        MyAssertHandler(".\\EffectsCore\\fx_system.cpp", 505, 0, "%s", "systemBuffers");
+    iassert(systemBuffers);
     memset((uint8_t *)systemBuffers, 0, sizeof(FxSystemBuffers));
     if (system->isInitialized)
         MyAssertHandler(".\\EffectsCore\\fx_system.cpp", 507, 1, "%s", "!system->isInitialized");
@@ -205,8 +187,7 @@ void __cdecl FX_EffectNoLongerReferenced(FxSystem *system, FxEffect *remoteEffec
     int oldStatusValue; // [esp+14h] [ebp-8h]
     FxEffect *remoteOwner; // [esp+18h] [ebp-4h]
 
-    if (!remoteEffect)
-        MyAssertHandler(".\\EffectsCore\\fx_system.cpp", 677, 0, "%s", "remoteEffect");
+    iassert(remoteEffect);
     if ((uint16_t)remoteEffect->status != 1)
         MyAssertHandler(".\\EffectsCore\\fx_system.cpp", 690, 0, "%s", "(effect->status & FX_STATUS_REF_COUNT_MASK) == 1");
     if ((remoteEffect->status & 0x7FE0000) != 0)
@@ -248,8 +229,7 @@ void __cdecl FX_EffectNoLongerReferenced(FxSystem *system, FxEffect *remoteEffec
 
 void __cdecl FX_DelRefToEffect(FxSystem *system, FxEffect *effect)
 {
-    if (!effect)
-        MyAssertHandler("c:\\trees\\cod3\\src\\effectscore\\fx_system.h", 393, 0, "%s", "effect");
+    iassert(effect);
     if ((uint16_t)effect->status == 1)
         FX_EffectNoLongerReferenced(system, effect);
     if (!(uint16_t)effect->status)
@@ -271,8 +251,7 @@ void __cdecl FX_RunGarbageCollection(FxSystem *system)
     FxEffect *effect; // [esp+818h] [ebp-8h]
     int activeIndex; // [esp+81Ch] [ebp-4h]
 
-    if (!system)
-        MyAssertHandler(".\\EffectsCore\\fx_system.cpp", 779, 0, "%s", "system");
+    iassert(system);
     if (system->needsGarbageCollection && FX_BeginIteratingOverEffects_Exclusive(system))
     {
         system->needsGarbageCollection = 0;
@@ -306,8 +285,7 @@ void __cdecl FX_RunGarbageCollection(FxSystem *system)
 
 bool __cdecl FX_BeginIteratingOverEffects_Exclusive(FxSystem *system)
 {
-    if (system->isArchiving)
-        MyAssertHandler("c:\\trees\\cod3\\src\\effectscore\\fx_system.h", 523, 0, "%s", "!system->isArchiving");
+    iassert(!system->isArchiving);
     return InterlockedCompareExchange(&system->iteratorCount, -1, 0) == 0;
 }
 
@@ -315,8 +293,7 @@ void __cdecl FX_RunGarbageCollection_FreeSpotLight(FxSystem *system, uint16_t ef
 {
     if (system->activeSpotLightEffectCount && system->activeSpotLightEffectHandle == effectHandle)
     {
-        if (system->activeSpotLightEffectCount != 1)
-            MyAssertHandler(".\\EffectsCore\\fx_system.cpp", 739, 0, "%s", "system->activeSpotLightEffectCount == 1");
+        iassert(system->activeSpotLightEffectCount == 1);
         InterlockedDecrement(&system->activeSpotLightEffectCount);
     }
 }
@@ -354,8 +331,7 @@ void __cdecl FX_RunGarbageCollection_FreeTrails(FxSystem *system, FxEffect *effe
     while (effect->firstTrailHandle != FX_HANDLE_NONE)
     {
         firstTrailHandle = effect->firstTrailHandle;
-        if (!system)
-            MyAssertHandler("c:\\trees\\cod3\\src\\effectscore\\fx_system.h", 362, 0, "%s", "system");
+        iassert(system);
         trail = FX_PoolFromHandle_Generic<FxTrail, 128>(system->trails, firstTrailHandle);
         effect->firstTrailHandle = trail->item.nextTrailHandle;
         trail->nextFree = 0;
@@ -668,8 +644,7 @@ FxEffect* __cdecl FX_SpawnEffect(
             iassert(((oldStatusValue & ~FX_STATUS_OWNED_EFFECTS_MASK) == ((oldStatusValue + (1 << FX_STATUS_OWNED_EFFECTS_SHIFT)) & ~FX_STATUS_OWNED_EFFECTS_MASK)));
             iassert(((ownerEffect->status & FX_STATUS_OWNED_EFFECTS_MASK) > 0));
         }
-        if (dobjHandle < 0)
-            MyAssertHandler(".\\EffectsCore\\fx_system.cpp", 1253, 0, "%s", "dobjHandle >= 0");
+        iassert(dobjHandle >= 0);
 
         remoteEffect->boltAndSortOrder.boneIndex = boneIndex;
         iassert(remoteEffect->boltAndSortOrder.boneIndex == static_cast<uint>(boneIndex));
@@ -721,8 +696,7 @@ FxEffect* __cdecl FX_SpawnEffect(
 
 void __cdecl FX_AddRefToEffect(FxSystem *__formal, FxEffect *effect)
 {
-    if (!effect)
-        MyAssertHandler("c:\\trees\\cod3\\src\\effectscore\\fx_system.h", 369, 0, "%s", "effect");
+    iassert(effect);
     if (!(uint16_t)effect->status)
         MyAssertHandler(
             "c:\\trees\\cod3\\src\\effectscore\\fx_system.h",
@@ -793,8 +767,7 @@ char __cdecl FX_EffectAffectsGameplay(const FxEffectDef *remoteEffectDef)
     uint visIndex; // [esp+18h] [ebp-8h]
     uint elemDefIndex; // [esp+1Ch] [ebp-4h]
 
-    if (!remoteEffectDef)
-        MyAssertHandler(".\\EffectsCore\\fx_system.cpp", 867, 0, "%s", "remoteEffectDef");
+    iassert(remoteEffectDef);
     elemDefCount = remoteEffectDef->elemDefCountEmission
         + remoteEffectDef->elemDefCountOneShot
         + remoteEffectDef->elemDefCountLooping;
@@ -894,8 +867,7 @@ FxEffect *__cdecl FX_SpawnOrientedEffect(
     if (!fx_enable->current.enabled)
         return 0;
     system = FX_GetSystem(localClientNum);
-    if (!system)
-        MyAssertHandler(".\\EffectsCore\\fx_system.cpp", 1323, 0, "%s", "system");
+    iassert(system);
     return FX_SpawnEffect(
         system,
         def,
@@ -914,8 +886,7 @@ void __cdecl FX_AssertAllocatedEffect(int localClientNum, FxEffect *effect)
     FxSystem *system; // [esp+0h] [ebp-4h]
 
     system = FX_GetSystem(localClientNum);
-    if (!system)
-        MyAssertHandler(".\\EffectsCore\\fx_system.cpp", 1335, 0, "%s", "system");
+    iassert(system);
     FX_EffectToHandle(system, effect);
     if (!(uint16_t)effect->status)
         MyAssertHandler(".\\EffectsCore\\fx_system.cpp", 1337, 0, "%s", "(effect->status & FX_STATUS_REF_COUNT_MASK) != 0");
@@ -986,8 +957,7 @@ char __cdecl FX_NeedsBoltUpdate(const FxEffectDef *def)
 {
     int elemDefIndex; // [esp+4h] [ebp-4h]
 
-    if (!def)
-        MyAssertHandler(".\\EffectsCore\\fx_system.cpp", 1372, 0, "%s", "def");
+    iassert(def);
     for (elemDefIndex = 0; elemDefIndex < def->elemDefCountOneShot + def->elemDefCountLooping; ++elemDefIndex)
     {
         if (def->elemDefs[elemDefIndex].elemType == 3)
@@ -1122,8 +1092,7 @@ void __cdecl FX_GetTrailHandleList_Last(
     trailIndex = 0;
     for (trailHandle = effect->firstTrailHandle; trailHandle != FX_HANDLE_NONE; trailHandle = trail->item.nextTrailHandle)
     {
-        if (!system)
-            MyAssertHandler("c:\\trees\\cod3\\src\\effectscore\\fx_system.h", 362, 0, "%s", "system");
+        iassert(system);
         trail = FX_PoolFromHandle_Generic<FxTrail, 128>(system->trails, trailHandle);
         if (trailIndex >= 2)
             MyAssertHandler(
@@ -1144,8 +1113,7 @@ void __cdecl FX_ThroughWithEffect(int localClientNum, FxEffect *effect)
     FxSystem *system; // [esp+4h] [ebp-4h]
 
     system = FX_GetSystem(localClientNum);
-    if (!system)
-        MyAssertHandler(".\\EffectsCore\\fx_system.cpp", 1517, 0, "%s", "system");
+    iassert(system);
     if (system->isInitialized)
     {
         if (!(uint16_t)effect->status)
@@ -1170,8 +1138,7 @@ void __cdecl FX_StopEffect(FxSystem *system, FxEffect *effect)
     FxEffect *otherEffect; // [esp+2Ch] [ebp-8h]
     volatile int activeIndex; // [esp+30h] [ebp-4h]
 
-    if (!effect)
-        MyAssertHandler(".\\EffectsCore\\fx_system.cpp", 1569, 0, "%s", "effect");
+    iassert(effect);
     if ((uint16_t)effect->status)
     {
         PROF_SCOPED("FX_StopEffect");
@@ -1211,8 +1178,7 @@ void __cdecl FX_StopEffectNonRecursive(FxSystem *system, FxEffect *effect)
 {
     volatile int status; // [esp+4h] [ebp-4h]
 
-    if (!effect)
-        MyAssertHandler(".\\EffectsCore\\fx_system.cpp", 1541, 0, "%s", "effect");
+    iassert(effect);
     while (1)
     {
         status = effect->status;
@@ -1233,8 +1199,7 @@ void __cdecl FX_KillEffect(FxSystem* system, FxEffect* effect)
     FxEffect* otherEffect; // [esp+18h] [ebp-8h]
     volatile int activeIndex; // [esp+1Ch] [ebp-4h]
 
-    if (!effect)
-        MyAssertHandler(".\\EffectsCore\\fx_system.cpp", 1653, 0, "%s", "effect");
+    iassert(effect);
     if (!(uint16_t)effect->status)
         MyAssertHandler(".\\EffectsCore\\fx_system.cpp", 1654, 0, "%s", "(effect->status & FX_STATUS_REF_COUNT_MASK) != 0");
     if ((effect->status & 0x60000000) == 0)
@@ -1291,8 +1256,7 @@ void __cdecl FX_RemoveAllEffectElems(FxSystem *system, FxEffect *effect)
     FxPool<FxTrail> *trail; // [esp+8h] [ebp-8h]
     uint elemClass; // [esp+Ch] [ebp-4h]
 
-    if (!effect)
-        MyAssertHandler(".\\EffectsCore\\fx_system.cpp", 1618, 0, "%s", "effect");
+    iassert(effect);
     FX_AddRefToEffect(system, effect);
     FX_StopEffect(system, effect);
     for (elemClass = 0; elemClass < 3; ++elemClass)
@@ -1302,8 +1266,7 @@ void __cdecl FX_RemoveAllEffectElems(FxSystem *system, FxEffect *effect)
     }
     for (trailHandle = effect->firstTrailHandle; trailHandle != FX_HANDLE_NONE; trailHandle = trail->item.nextTrailHandle)
     {
-        if (!system)
-            MyAssertHandler("c:\\trees\\cod3\\src\\effectscore\\fx_system.h", 362, 0, "%s", "system");
+        iassert(system);
         for (trail = FX_PoolFromHandle_Generic<FxTrail, 128>(system->trails, trailHandle);
             trail->item.firstElemHandle != FX_HANDLE_NONE;
             FX_FreeTrailElem(system, trail->item.firstElemHandle, effect, (FxTrail *)trail))
@@ -1349,8 +1312,7 @@ void __cdecl FX_KillAllEffects(int localClientNum)
     int activeIndex; // [esp+14h] [ebp-4h]
 
     system = FX_GetSystem(localClientNum);
-    if (!system)
-        MyAssertHandler(".\\EffectsCore\\fx_system.cpp", 1732, 0, "%s", "system");
+    iassert(system);
     if (system->isInitialized)
     {
         FX_BeginIteratingOverEffects_Cooperative(system);
@@ -1388,14 +1350,11 @@ void __cdecl FX_SpawnTrailElem_NoCull(
     uint16_t trailElemHandle; // [esp+54h] [ebp-8h]
     FxTrailElem *lastTrailElemInEffect; // [esp+58h] [ebp-4h]
 
-    if (!system)
-        MyAssertHandler(".\\EffectsCore\\fx_system.cpp", 1916, 0, "%s", "system");
-    if (!effect)
-        MyAssertHandler(".\\EffectsCore\\fx_system.cpp", 1917, 0, "%s", "effect");
+    iassert(system);
+    iassert(effect);
     if (!effect->def)
         MyAssertHandler(".\\EffectsCore\\fx_system.cpp", 1919, 0, "%s", "effectDef");
-    if (!trail)
-        MyAssertHandler(".\\EffectsCore\\fx_system.cpp", 1920, 0, "%s", "trail");
+    iassert(trail);
     elemDef = &effect->def->elemDefs[trail->defIndex];
     if (elemDef->elemType != 3)
         MyAssertHandler(
@@ -1440,20 +1399,17 @@ void __cdecl FX_SpawnTrailElem_NoCull(
                 remoteTrailElem->item.origin,
                 basis[0],
                 basis[1]);
-            if (!system)
-                MyAssertHandler("c:\\trees\\cod3\\src\\effectscore\\fx_system.h", 341, 0, "%s", "system");
+            iassert(system);
             trailElemHandle = FX_PoolToHandle_Generic<FxTrailElem, 2048>(system->trailElems, (FxTrailElem *)remoteTrailElem);
             if (trail->lastElemHandle == FX_HANDLE_NONE)
             {
-                if (trail->firstElemHandle != FX_HANDLE_NONE)
-                    MyAssertHandler(".\\EffectsCore\\fx_system.cpp", 1954, 0, "%s", "trail->firstElemHandle == FX_HANDLE_NONE");
+                iassert(trail->firstElemHandle == FX_HANDLE_NONE);
                 trail->firstElemHandle = trailElemHandle;
             }
             else
             {
                 lastElemHandle = trail->lastElemHandle;
-                if (!system)
-                    MyAssertHandler("c:\\trees\\cod3\\src\\effectscore\\fx_system.h", 348, 0, "%s", "system");
+                iassert(system);
                 lastTrailElemInEffect = (FxTrailElem *)FX_PoolFromHandle_Generic<FxTrailElem, 2048>(
                     system->trailElems,
                     lastElemHandle);
@@ -1488,14 +1444,11 @@ void __cdecl FX_SpawnTrailElem_Cull(
 {
     const FxElemDef *elemDef; // [esp+28h] [ebp-4h]
 
-    if (!system)
-        MyAssertHandler(".\\EffectsCore\\fx_system.cpp", 1981, 0, "%s", "system");
-    if (!effect)
-        MyAssertHandler(".\\EffectsCore\\fx_system.cpp", 1982, 0, "%s", "effect");
+    iassert(system);
+    iassert(effect);
     if (!effect->def)
         MyAssertHandler(".\\EffectsCore\\fx_system.cpp", 1984, 0, "%s", "effectDef");
-    if (!trail)
-        MyAssertHandler(".\\EffectsCore\\fx_system.cpp", 1985, 0, "%s", "trail");
+    iassert(trail);
     elemDef = &effect->def->elemDefs[trail->defIndex];
     if (elemDef->elemType != 3)
         MyAssertHandler(
@@ -1542,13 +1495,10 @@ bool __cdecl FX_CullTrailElem(
 
 void __cdecl FX_SpawnSpotLightElem(FxSystem *system, FxElem *elem)
 {
-    if (system->activeSpotLightEffectCount <= 0)
-        MyAssertHandler(".\\EffectsCore\\fx_system.cpp", 2038, 0, "%s", "system->activeSpotLightEffectCount > 0");
-    if (system->activeSpotLightElemCount)
-        MyAssertHandler(".\\EffectsCore\\fx_system.cpp", 2039, 0, "%s", "system->activeSpotLightElemCount == 0");
+    iassert(system->activeSpotLightEffectCount > 0);
+    iassert(system->activeSpotLightElemCount == 0);
     ++system->activeSpotLightElemCount;
-    if (!system)
-        MyAssertHandler("c:\\trees\\cod3\\src\\effectscore\\fx_system.h", 327, 0, "%s", "system");
+    iassert(system);
     system->activeSpotLightElemHandle = FX_PoolToHandle_Generic<FxElem, 2048>(system->elems, elem);
 }
 
@@ -1671,14 +1621,12 @@ void __cdecl FX_SpawnElem(
                             elemClass = 0;
                         }
                         elem->item.nextElemHandleInEffect = effect->firstElemHandle[elemClass];
-                        if (!system)
-                            MyAssertHandler("c:\\trees\\cod3\\src\\effectscore\\fx_system.h", 327, 0, "%s", "system");
+                        iassert(system);
                         effect->firstElemHandle[elemClass] = FX_PoolToHandle_Generic<FxElem, 2048>(system->elems, (FxElem *)elem);
                         if (elem->item.nextElemHandleInEffect != FX_HANDLE_NONE)
                         {
                             nextElemHandleInEffect = elem->item.nextElemHandleInEffect;
-                            if (!system)
-                                MyAssertHandler("c:\\trees\\cod3\\src\\effectscore\\fx_system.h", 334, 0, "%s", "system");
+                            iassert(system);
                             FX_PoolFromHandle_Generic<FxElem, 2048>(system->elems, nextElemHandleInEffect)->item.prevElemHandleInEffect = effect->firstElemHandle[elemClass];
                         }
                         if (elemDef->elemType == 5)
@@ -1687,8 +1635,7 @@ void __cdecl FX_SpawnElem(
                             if ((elemDef->flags & 0x8000000) != 0
                                 && !FX_SpawnModelPhysics(system, effect, elemDef, randomSeed, (FxElem*)elem))
                             {
-                                if (!system)
-                                    MyAssertHandler("c:\\trees\\cod3\\src\\effectscore\\fx_system.h", 327, 0, "%s", "system");
+                                iassert(system);
                                 v7 = FX_PoolToHandle_Generic<FxElem, 2048>(system->elems, (FxElem*)elem);
                                 FX_FreeElem(system, v7, effect, elemClass);
                             }
@@ -1930,34 +1877,25 @@ void __cdecl FX_FreeElem(FxSystem* system, uint16_t elemHandle, FxEffect* effect
     const FxElemDef* elemDef; // [esp+14h] [ebp-10h]
     FxPool<FxElem>* elem; // [esp+20h] [ebp-4h]
 
-    if (!system)
-        MyAssertHandler("c:\\trees\\cod3\\src\\effectscore\\fx_system.h", 334, 0, "%s", "system");
+    iassert(system);
     elem = FX_PoolFromHandle_Generic<FxElem, 2048>(system->elems, elemHandle);
     if (!elemClass && effect->firstSortedElemHandle == elemHandle)
         effect->firstSortedElemHandle = elem->item.nextElemHandleInEffect;
     if (elem->item.nextElemHandleInEffect != FX_HANDLE_NONE)
     {
         nextElemHandleInEffect = elem->item.nextElemHandleInEffect;
-        if (!system)
-            MyAssertHandler("c:\\trees\\cod3\\src\\effectscore\\fx_system.h", 334, 0, "%s", "system");
+        iassert(system);
         FX_PoolFromHandle_Generic<FxElem, 2048>(system->elems, nextElemHandleInEffect)->item.prevElemHandleInEffect = elem->item.prevElemHandleInEffect;
     }
     if (elem->item.prevElemHandleInEffect == FX_HANDLE_NONE)
     {
-        if (effect->firstElemHandle[elemClass] != elemHandle)
-            MyAssertHandler(
-                ".\\EffectsCore\\fx_system.cpp",
-                2207,
-                0,
-                "%s",
-                "effect->firstElemHandle[elemClass] == elemHandle");
+        iassert(effect->firstElemHandle[elemClass] == elemHandle);
         effect->firstElemHandle[elemClass] = elem->item.nextElemHandleInEffect;
     }
     else
     {
         prevElemHandleInEffect = elem->item.prevElemHandleInEffect;
-        if (!system)
-            MyAssertHandler("c:\\trees\\cod3\\src\\effectscore\\fx_system.h", 334, 0, "%s", "system");
+        iassert(system);
         FX_PoolFromHandle_Generic<FxElem, 2048>(system->elems, prevElemHandleInEffect)->item.nextElemHandleInEffect = elem->item.nextElemHandleInEffect;
     }
     elemDef = &effect->def->elemDefs[elem->item.defIndex];
@@ -1986,15 +1924,12 @@ void __cdecl FX_FreeTrailElem(FxSystem *system, uint16_t trailElemHandle, FxEffe
 {
     FxPool<FxTrailElem> *trailElem; // [esp+10h] [ebp-4h]
 
-    if (!system)
-        MyAssertHandler("c:\\trees\\cod3\\src\\effectscore\\fx_system.h", 348, 0, "%s", "system");
+    iassert(system);
     trailElem = FX_PoolFromHandle_Generic<FxTrailElem, 2048>(system->trailElems, trailElemHandle);
-    if (trail->firstElemHandle != trailElemHandle)
-        MyAssertHandler(".\\EffectsCore\\fx_system.cpp", 2256, 0, "%s", "trail->firstElemHandle == trailElemHandle");
+    iassert(trail->firstElemHandle == trailElemHandle);
     if (trail->lastElemHandle == trailElemHandle)
     {
-        if (trail->firstElemHandle != trailElemHandle)
-            MyAssertHandler(".\\EffectsCore\\fx_system.cpp", 2260, 0, "%s", "trail->firstElemHandle == trailElemHandle");
+        iassert(trail->firstElemHandle == trailElemHandle);
         trail->lastElemHandle = -1;
     }
     trail->firstElemHandle = trailElem->item.nextTrailElemHandle;
@@ -2016,16 +1951,9 @@ void __cdecl FX_FreeSpotLightElem(FxSystem *system, uint16_t elemHandle, FxEffec
     FxPool<FxElem> *v3; // eax
     uint16_t activeSpotLightElemHandle; // [esp+Eh] [ebp-6h]
 
-    if (system->activeSpotLightEffectCount <= 0 || system->activeSpotLightElemCount <= 0)
-        MyAssertHandler(
-            ".\\EffectsCore\\fx_system.cpp",
-            2288,
-            0,
-            "%s",
-            "system->activeSpotLightEffectCount > 0 && system->activeSpotLightElemCount > 0");
+    iassert(system->activeSpotLightEffectCount > 0 && system->activeSpotLightElemCount > 0);
     activeSpotLightElemHandle = system->activeSpotLightElemHandle;
-    if (!system)
-        MyAssertHandler("c:\\trees\\cod3\\src\\effectscore\\fx_system.h", 334, 0, "%s", "system");
+    iassert(system);
     v3 = FX_PoolFromHandle_Generic<FxElem, 2048>(system->elems, activeSpotLightElemHandle);
     v3->nextFree = 0;
     *(uint *)&v3->item.nextElemHandleInEffect = 0;

@@ -13,15 +13,13 @@
 
 bool __cdecl Actor_InPain(const actor_s *self)
 {
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_pain.cpp", 14, 0, "%s", "self");
+    iassert(self);
     return self->eState[self->stateLevel] == AIS_PAIN;
 }
 
 bool __cdecl Actor_Pain_Start(actor_s *self, ai_state_t ePrevState)
 {
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_pain.cpp", 28, 0, "%s", "self");
+    iassert(self);
     self->iPainTime = level.time;
     Actor_ClearPath(self);
     Actor_AnimPain(self);
@@ -33,10 +31,8 @@ void __cdecl Actor_Pain_Finish(actor_s *self, ai_state_t eNextState)
 {
     sentient_s *sentient; // r3
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_pain.cpp", 51, 0, "%s", "self");
-    if (!self->ent)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_pain.cpp", 52, 0, "%s", "self->ent");
+    iassert(self);
+    iassert(self->ent);
     sentient = self->sentient;
     if (sentient->lastAttacker)
     {

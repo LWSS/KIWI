@@ -476,14 +476,7 @@ int R_InitWorkerCmdsPos()
         workerCmds->outSize = 0;
         iassert( workerCmds->dataSize );
         workerCmds->bufCount = workerCmds->bufSize / workerCmds->dataSize;
-        if (workerCmds->dataSize > 0xC0)
-            MyAssertHandler(
-                ".\\r_workercmds.cpp",
-                369,
-                0,
-                "%s\n\t(workerCmds->dataSize) = %i",
-                "(workerCmds->dataSize <= 192)",
-                workerCmds->dataSize);
+        vassert((workerCmds->dataSize <= 192), "(workerCmds->dataSize) = %i", workerCmds->dataSize);
         result = type + 1;
     }
     return result;

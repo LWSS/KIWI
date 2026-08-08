@@ -342,8 +342,7 @@ static void __cdecl FX_LinkMarkIntoList(FxMarksSystem *marksSystem, uint16_t *he
     if (mark->nextMark != FX_HANDLE_NONE)
     {
         nextMark = FX_MarkFromHandle(marksSystem, mark->nextMark);
-        if (nextMark->prevMark != mark->prevMark)
-            MyAssertHandler(".\\EffectsCore\\fx_marks.cpp", 364, 0, "%s", "nextMark->prevMark == mark->prevMark");
+        iassert(nextMark->prevMark == mark->prevMark);
         nextMark->prevMark = markHandle;
     }
     *iterHandlePrev = markHandle;
@@ -882,11 +881,9 @@ static void __cdecl FX_MarkEntDetachModel(FxMarksSystem *marksSystem, int entnum
             markModelIndex = mark->context.modelTypeAndSurf & MARK_MODEL_SURF_MASK;
             if (markModelIndex == oldModelIndex)
             {
-                if (mark->frameCountDrawn == -1)
-                    MyAssertHandler(".\\EffectsCore\\fx_marks.cpp", 972, 0, "%s", "mark->frameCountDrawn != FX_MARK_FREE");
+                iassert(mark->frameCountDrawn != FX_MARK_FREE);
                 FX_FreeMark(marksSystem, mark);
-                if (mark->frameCountDrawn != -1)
-                    MyAssertHandler(".\\EffectsCore\\fx_marks.cpp", 974, 0, "%s", "mark->frameCountDrawn == FX_MARK_FREE");
+                iassert(mark->frameCountDrawn == FX_MARK_FREE);
             }
             else if (markModelIndex > oldModelIndex)
             {
@@ -1508,13 +1505,7 @@ static char __cdecl FX_GenerateMarkVertsForList_EntBrush(
 
 void __cdecl FX_BeginGeneratingMarkVertsForEntModels(int localClientNum, uint *indexCount)
 {
-    if (!fx_marks->current.enabled || !fx_marks_ents->current.enabled)
-        MyAssertHandler(
-            ".\\EffectsCore\\fx_marks.cpp",
-            1633,
-            0,
-            "%s",
-            "fx_marks->current.enabled && fx_marks_ents->current.enabled");
+    iassert(fx_marks->current.enabled && fx_marks_ents->current.enabled);
     PROF_SCOPED("FX_GenMarkVertsEnt");
     R_BeginMarkMeshVerts();
     if (InterlockedIncrement((LONG*) & g_markThread[localClientNum]) != 1)

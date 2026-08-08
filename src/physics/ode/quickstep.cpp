@@ -353,8 +353,7 @@ __int64 __cdecl SOR_LCP_irand(int max)
 {
 	unsigned int holdrand; // [esp+0h] [ebp-Ch]
 
-	if (!g_holdrand)
-		MyAssertHandler(".\\physics\\ode\\src\\quickstep.cpp", 626, 0, "%s", "g_holdrand");
+	iassert(g_holdrand);
 	holdrand = 214013 * *g_holdrand + 2531011;
 	*g_holdrand = holdrand;
 	return ((holdrand >> 17) * max) >> 15;
@@ -533,10 +532,8 @@ void __cdecl SOR_LCP_MainLoop_OneBody(
 		for (ia = 0; ia < constraintRowCount; ++ia)
 		{
 			index = sd->order[ia];
-			if (body != rows[index].body1)
-				MyAssertHandler(".\\physics\\ode\\src\\quickstep.cpp", 727, 0, "%s", "body == rows[index].body1");
-			if (rows[index].body2 >= 0)
-				MyAssertHandler(".\\physics\\ode\\src\\quickstep.cpp", 728, 0, "%s", "rows[index].body2 < 0");
+			iassert(body == rows[index].body1);
+			iassert(rows[index].body2 < 0);
 			v11 = findex[index];
 			b = &rows[index];
 			if (v11 < 0)
@@ -604,14 +601,7 @@ static void SOR_LCP (int constraintRowCount,
 	ConstraintRowData *row_ptr; // [esp+4Ch] [ebp-4h]
 
 	sor_w = qs->w;
-	if (constraintRowCount > 444)
-		MyAssertHandler(
-			".\\physics\\ode\\src\\quickstep.cpp",
-			769,
-			0,
-			"%s\n\t(constraintRowCount) = %i",
-			"(constraintRowCount <= ( 74 * 6 ))",
-			constraintRowCount);
+	vassert((constraintRowCount <= ( 74 * 6 )), "(constraintRowCount) = %i", constraintRowCount);
 
 	iassert(rows);
 	iassert(body);
@@ -660,8 +650,7 @@ static void SOR_LCP (int constraintRowCount,
 		else
 			sd->order[j++] = ib;
 	}
-	if (j + k - 1 != constraintRowCount)
-		MyAssertHandler(".\\physics\\ode\\src\\quickstep.cpp", 861, 0, "%s", "(j + k - 1) == constraintRowCount");
+	iassert((j + k - 1) == constraintRowCount);
 	if (bodyCount == 1)
 		SOR_LCP_MainLoop_OneBody(constraintRowCount, rows, findex, fc, qs, sd);
 	else

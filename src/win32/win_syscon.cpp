@@ -265,8 +265,7 @@ void __cdecl Sys_ShowConsole()
 		module = GetModuleHandleA(0);
 		Sys_CreateConsole(module);
 
-		if (!s_wcd.hWnd)
-			MyAssertHandler(".\\win32\\win_syscon.cpp", 385, 0, "%s", "s_wcd.hWnd");
+		iassert(s_wcd.hWnd);
 	}
 
 	ShowWindow(s_wcd.hWnd, 1);
@@ -297,8 +296,7 @@ void __cdecl Conbuf_AppendText(const char *pMsg)
 	char target[32772]; // [esp+20h] [ebp-8010h] BYREF
 	const char *source; // [esp+8028h] [ebp-8h]
 
-	if (!s_wcd.hwndBuffer)
-		MyAssertHandler(".\\win32\\win_syscon.cpp", 420, 0, "%s", "s_wcd.hwndBuffer");
+	iassert(s_wcd.hwndBuffer);
 	if (strlen(pMsg) <= 0x3FFF)
 		source = pMsg;
 	else

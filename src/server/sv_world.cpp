@@ -112,17 +112,7 @@ void __cdecl SV_LinkEntity(gentity_s *gEnt)
             "%s",
             "!IS_NAN((angles)[0]) && !IS_NAN((angles)[1]) && !IS_NAN((angles)[2])");
     }
-    if ((COERCE_UNSIGNED_INT(*origin) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(origin[1]) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(origin[2]) & 0x7F800000) == 0x7F800000)
-    {
-        MyAssertHandler(
-            ".\\server\\sv_world.cpp",
-            157,
-            0,
-            "%s",
-            "!IS_NAN((origin)[0]) && !IS_NAN((origin)[1]) && !IS_NAN((origin)[2])");
-    }
+    nanassertvec3(origin);
     SnapAngles(angles);
     if (!gEnt->r.bmodel || *angles == 0.0 && angles[1] == 0.0 && angles[2] == 0.0)
     {
@@ -476,8 +466,7 @@ void __cdecl SV_PointTraceToEntity(const pointtrace_t *clip, svEntity_s *check, 
         }
         else
         {
-            if (!clip->priorityMap)
-                MyAssertHandler(".\\server\\sv_world.cpp", 442, 0, "%s", "clip->priorityMap");
+            iassert(clip->priorityMap);
             entAxis[3][0] = touch->r.currentOrigin[0];
             entAxis[3][1] = touch->r.currentOrigin[1];
             entAxis[3][2] = touch->r.currentOrigin[2];
@@ -504,14 +493,7 @@ void __cdecl SV_PointTraceToEntity(const pointtrace_t *clip, svEntity_s *check, 
             }
             if (trace->fraction > objTrace.fraction)
             {
-                if (objTrace.fraction >= 1.0 || objTrace.fraction < 0.0)
-                    MyAssertHandler(
-                        ".\\server\\sv_world.cpp",
-                        474,
-                        0,
-                        "%s\n\t(objTrace.fraction) = %g",
-                        "(objTrace.fraction < 1.0f && objTrace.fraction >= 0)",
-                        objTrace.fraction);
+                vassert((objTrace.fraction < 1.0f && objTrace.fraction >= 0), "(objTrace.fraction) = %g", objTrace.fraction);
                 trace->fraction = objTrace.fraction;
                 trace->surfaceFlags = objTrace.surfaceflags;
                 trace->modelIndex = objTrace.modelIndex;
@@ -568,8 +550,7 @@ void __cdecl SV_PointTraceToEntity(const pointtrace_t *clip, svEntity_s *check, 
                     "%s",
                     "touch->s.number == static_cast<unsigned short>( touch->s.number )");
             number = touch->s.number;
-            if (!trace)
-                MyAssertHandler("c:\\trees\\cod3\\src\\server_mp\\../qcommon/cm_public.h", 135, 0, "%s", "trace");
+            iassert(trace);
             trace->hitType = TRACE_HITTYPE_ENTITY;
             trace->hitId = number;
             trace->contents = touch->r.contents;
@@ -627,8 +608,7 @@ void __cdecl SV_ClipMoveToEntity(const moveclip_t *clip, svEntity_s *check, trac
                         "%s",
                         "touch->s.number == static_cast<unsigned short>( touch->s.number )");
                 number = touch->s.number;
-                if (!trace)
-                    MyAssertHandler("c:\\trees\\cod3\\src\\server_mp\\../qcommon/cm_public.h", 135, 0, "%s", "trace");
+                iassert(trace);
                 trace->hitType = TRACE_HITTYPE_ENTITY;
                 trace->hitId = number;
             }
@@ -702,8 +682,7 @@ int __cdecl SV_PointSightTraceToEntity(const sightpointtrace_t *clip, svEntity_s
         }
         else
         {
-            if (!clip->priorityMap)
-                MyAssertHandler(".\\server\\sv_world.cpp", 634, 0, "%s", "clip->priorityMap");
+            iassert(clip->priorityMap);
             entAxis[3][0] = touch->r.currentOrigin[0];
             entAxis[3][1] = touch->r.currentOrigin[1];
             entAxis[3][2] = touch->r.currentOrigin[2];
@@ -983,10 +962,8 @@ void __cdecl SV_Trace(
     }
     else
     {
-        if (staticmodels)
-            MyAssertHandler(".\\server\\sv_world.cpp", 798, 0, "%s", "!staticmodels");
-        if (locational)
-            MyAssertHandler(".\\server\\sv_world.cpp", 799, 0, "%s", "!locational");
+        iassert(!staticmodels);
+        iassert(!locational);
         result.contentmask = contentmask;
         result.passEntityNum = ignoreEntParams->baseEntity;
         if (ignoreEntParams->baseEntity != ENTITYNUM_NONE && ignoreEntParams->parentEntity != -1)
@@ -1100,8 +1077,7 @@ int __cdecl SV_TracePassed(
     }
     else
     {
-        if (locational)
-            MyAssertHandler(".\\server\\sv_world.cpp", 901, 0, "%s", "!locational");
+        iassert(!locational);
         result.contentmask = contentmask;
         result.passEntityNum[0] = passEntityNum0;
         result.passEntityNum[1] = passEntityNum1;

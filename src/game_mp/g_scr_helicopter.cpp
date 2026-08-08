@@ -373,17 +373,9 @@ void __cdecl G_SpawnHelicopter(gentity_s *ent, gentity_s *owner, const char *veh
     veh->phys.maxs[0] = 50.0f;
     veh->phys.maxs[1] = 50.0f;
     veh->phys.maxs[2] = 50.0f;
-    if (!owner->client)
-        MyAssertHandler(".\\game_mp\\g_scr_helicopter.cpp", 282, 0, "%s", "owner->client");
+    iassert(owner->client);
     team = owner->client->sess.cs.team;
-    if ((uint)team >= TEAM_NUM_TEAMS)
-        MyAssertHandler(
-            ".\\game_mp\\g_scr_helicopter.cpp",
-            285,
-            0,
-            "team doesn't index (1 << 2)\n\t%i not in [0, %i)",
-            team,
-            4);
+    bcassert((uint)team, TEAM_NUM_TEAMS);
     ent->s.lerp.u.vehicle.teamAndOwnerIndex = team | (4 * (owner->client - level.clients));
     ent->handler = ENT_HANDLER_HELICOPTER;
     ent->nextthink = level.time + 50;
@@ -486,14 +478,11 @@ void __cdecl Helicopter_Controller(const gentity_s *pSelf, int *partBits)
     float bodyAngles[3]; // [esp+24h] [ebp-18h] BYREF
     float turretAngles[3]; // [esp+30h] [ebp-Ch] BYREF
 
-    if (!pSelf)
-        MyAssertHandler(".\\game_mp\\g_scr_helicopter.cpp", 346, 0, "%s", "pSelf");
-    if (!pSelf->scr_vehicle)
-        MyAssertHandler(".\\game_mp\\g_scr_helicopter.cpp", 347, 0, "%s", "pSelf->scr_vehicle");
+    iassert(pSelf);
+    iassert(pSelf->scr_vehicle);
     veh = pSelf->scr_vehicle;
     obj = Com_GetServerDObj(pSelf->s.number);
-    if (!obj)
-        MyAssertHandler(".\\game_mp\\g_scr_helicopter.cpp", 351, 0, "%s", "obj");
+    iassert(obj);
     //v3 = pSelf->s.lerp.u.turret.gunAngles[1];
     bodyAngles[0] = pSelf->s.lerp.u.vehicle.bodyPitch;
     bodyAngles[1] = 0.0f;

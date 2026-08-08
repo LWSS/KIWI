@@ -581,8 +581,7 @@ bool __cdecl AnimTreeParseInternal(
             }
             else
             {
-                if (!bIgnore)
-                    MyAssertHandler(".\\script\\scr_animtree.cpp", 265, 0, "%s", "bIgnore");
+                iassert(bIgnore);
                 RemoveVariable(parentNode, animName);
             }
 

@@ -30,14 +30,7 @@ uint __cdecl Sys_AddApicIdIfUnique(
 
     for (existingIter = 0; existingIter < existingCount; ++existingIter)
     {
-        if (existingIter)
-            MyAssertHandler(
-                ".\\win32\\win_configure.cpp",
-                261,
-                0,
-                "existingIter doesn't index ARRAY_COUNT( existingApicId )\n\t%i not in [0, %i)",
-                existingIter,
-                1);
+        vassert((existingIter) == 0, "%i not in [0, %i)", existingIter, 1);
         if (existingApicId[existingIter] == apicId)
             return existingCount;
     }
@@ -125,12 +118,9 @@ LABEL_8:
                     sysInfo->physicalCpuCount = 0;
                     process = GetCurrentProcess();
                     GetProcessAffinityMask(process, &processAffinityMask, &systemAffinityMask);
-                    if (!processAffinityMask)
-                        MyAssertHandler(".\\win32\\win_configure.cpp", 320, 0, "%s", "processAffinityMask");
-                    if (!systemAffinityMask)
-                        MyAssertHandler(".\\win32\\win_configure.cpp", 321, 0, "%s", "systemAffinityMask");
-                    if ((processAffinityMask & ~systemAffinityMask) != 0)
-                        MyAssertHandler(".\\win32\\win_configure.cpp", 322, 0, "%s", "!(processAffinityMask & ~systemAffinityMask)");
+                    iassert(processAffinityMask);
+                    iassert(systemAffinityMask);
+                    iassert(!(processAffinityMask & ~systemAffinityMask));
                     for (testAffinityMask = 1; testAffinityMask && testAffinityMask <= processAffinityMask; testAffinityMask *= 2)
                     {
                         if (SetProcessAffinityMask(process, testAffinityMask))
@@ -151,15 +141,7 @@ LABEL_8:
                     }
                     SetProcessAffinityMask(process, processAffinityMask);
                     Sleep(0);
-                    if (sysInfo->physicalCpuCount < 1 || sysInfo->physicalCpuCount > sysInfo->logicalCpuCount)
-                        MyAssertHandler(
-                            ".\\win32\\win_configure.cpp",
-                            344,
-                            0,
-                            "sysInfo->physicalCpuCount not in [1, sysInfo->logicalCpuCount]\n\t%i not in [%i, %i]",
-                            sysInfo->physicalCpuCount,
-                            1,
-                            sysInfo->logicalCpuCount);
+                    rangeassert(sysInfo->physicalCpuCount, 1, sysInfo->logicalCpuCount);
                 }
             }
         }

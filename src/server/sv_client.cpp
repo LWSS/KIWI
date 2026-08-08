@@ -26,8 +26,7 @@ void __cdecl SV_DirectConnect()
 
 void __cdecl SV_SendClientGameState(client_t *client)
 {
-    if (client != svs.clients)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_client.cpp", 64, 0, "%s", "client == svs.clients");
+    iassert(client == svs.clients);
     CL_ParseGamestate((char *)sv.configstrings);
 }
 
@@ -62,8 +61,7 @@ float __cdecl SV_FX_GetVisibility(const float *start, const float *end)
 
 void __cdecl SV_ExecuteClientCommand(const char *s)
 {
-    if (!SV_Loaded())
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_client.cpp", 140, 0, "%s", "SV_Loaded()");
+    iassert(SV_Loaded());
     if (svs.clients->state != 1)
         MyAssertHandler(
             "c:\\trees\\cod3\\cod3src\\src\\server\\sv_client.cpp",
@@ -78,8 +76,7 @@ void __cdecl SV_ClientThink(usercmd_s *cmd)
 {
     client_t *clients; // r11
 
-    if (!SV_Loaded())
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_client.cpp", 155, 0, "%s", "SV_Loaded()");
+    iassert(SV_Loaded());
     clients = svs.clients;
     if (svs.clients->state != 1)
     {

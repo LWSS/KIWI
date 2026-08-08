@@ -22,8 +22,7 @@ void __cdecl FX_DrawProfile(int clientIndex, void(__cdecl *drawFunc)(char *), fl
     volatile int i; // [esp+7050h] [ebp-4h]
 
     system = FX_GetSystem(clientIndex);
-    if (!system)
-        MyAssertHandler(".\\EffectsCore\\fx_profile.cpp", 181, 0, "%s", "system");
+    iassert(system);
     FX_BeginIteratingOverEffects_Cooperative(system);
     entryCount = 0;
     for (i = system->firstActiveEffect; i != system->firstNewEffect; ++i)
@@ -119,14 +118,7 @@ FxProfileEntry *__cdecl FX_GetProfileEntry(const FxEffectDef *effectDef, FxProfi
         if (entryPool[entryIndex].effectDef == effectDef)
             return &entryPool[entryIndex];
     }
-    if (entryIndex != *entryCount)
-        MyAssertHandler(
-            ".\\EffectsCore\\fx_profile.cpp",
-            84,
-            0,
-            "entryIndex == *entryCount\n\t%i, %i",
-            entryIndex,
-            *entryCount);
+    vassert(entryIndex == *entryCount, "%i, %i", entryIndex, *entryCount);
     ++*entryCount;
     entryPool[entryIndex].effectDef = effectDef;
     entryPool[entryIndex].effectCount = 0;
@@ -155,8 +147,7 @@ void __cdecl FX_ProfileSingleEffect(FxSystem *system, const FxEffect *effect, Fx
             elemHandle != 0xFFFF;
             elemHandle = elem->item.nextElemHandleInEffect)
         {
-            if (!system)
-                MyAssertHandler("c:\\trees\\cod3\\src\\effectscore\\fx_system.h", 334, 0, "%s", "system");
+            iassert(system);
             elem = FX_PoolFromHandle_Generic<FxElem, 2048>(system->elems, elemHandle);
             if (elem->item.msecBegin > system->msecNow)
                 ++entry->pendingElemCount;
@@ -166,16 +157,14 @@ void __cdecl FX_ProfileSingleEffect(FxSystem *system, const FxEffect *effect, Fx
     }
     for (trailHandle = effect->firstTrailHandle; trailHandle != 0xFFFF; trailHandle = trail->item.nextTrailHandle)
     {
-        if (!system)
-            MyAssertHandler("c:\\trees\\cod3\\src\\effectscore\\fx_system.h", 362, 0, "%s", "system");
+        iassert(system);
         trail = FX_PoolFromHandle_Generic<FxTrail, 128>(system->trails, trailHandle);
         ++entry->trailCount;
         for (trailElemHandle = trail->item.firstElemHandle;
             trailElemHandle != 0xFFFF;
             trailElemHandle = trailElem->item.nextTrailElemHandle)
         {
-            if (!system)
-                MyAssertHandler("c:\\trees\\cod3\\src\\effectscore\\fx_system.h", 348, 0, "%s", "system");
+            iassert(system);
             trailElem = FX_PoolFromHandle_Generic<FxTrailElem, 2048>(system->trailElems, trailElemHandle);
             if (trailElem->item.msecBegin > system->msecNow)
                 ++entry->pendingTrailElemCount;
@@ -242,14 +231,7 @@ void __cdecl FX_DrawMarkProfile(int clientIndex, void(__cdecl* drawFunc)(const c
     FxMark* markIter; // [esp+50h] [ebp-4h]
     FxMark* markItera; // [esp+50h] [ebp-4h]
 
-    if (clientIndex)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\src\\effectscore\\fx_marks.h",
-            139,
-            0,
-            "%s\n\t(clientIndex) = %i",
-            "(clientIndex == 0)",
-            clientIndex);
+    vassert((clientIndex == 0), "(clientIndex) = %i", clientIndex);
     markHandle = fx_marksSystemPool[0].firstFreeMarkHandle;
     freeMarks = 0;
     while (markHandle != 0xFFFF)
@@ -408,10 +390,8 @@ void __cdecl FX_DrawMarkProfile_MarkPrint(
     while (head != 0xFFFF)
     {
         mark = FX_MarkFromHandle(marksSystem, head);
-        if (mark->frameCountDrawn == -1)
-            MyAssertHandler(".\\EffectsCore\\fx_profile.cpp", 299, 0, "%s", "mark->frameCountDrawn != FX_MARK_FREE");
-        if (mark->prevMark != lastMarkHandle)
-            MyAssertHandler(".\\EffectsCore\\fx_profile.cpp", 300, 0, "%s", "mark->prevMark == lastMarkHandle");
+        iassert(mark->frameCountDrawn != FX_MARK_FREE);
+        iassert(mark->prevMark == lastMarkHandle);
         triCount += mark->triCount;
         pointCount += mark->pointCount;
         thisMarkType = mark->context.modelTypeAndSurf & 0xC0;

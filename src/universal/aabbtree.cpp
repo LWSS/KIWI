@@ -149,14 +149,10 @@ static bool PickAabbSplitPlane(
                     0,
                     "%s",
                     "sideFrontCount + sideBackCount + sideSplitCount + sideOnCount == count");
-            if (sideFrontCount < 0)
-                MyAssertHandler(".\\universal\\aabbtree.cpp", 162, 0, "%s", "sideFrontCount >= 0");
-            if (sideBackCount < 0)
-                MyAssertHandler(".\\universal\\aabbtree.cpp", 163, 0, "%s", "sideBackCount >= 0");
-            if (sideSplitCount < 0)
-                MyAssertHandler(".\\universal\\aabbtree.cpp", 164, 0, "%s", "sideSplitCount >= 0");
-            if (sideOnCount < 0)
-                MyAssertHandler(".\\universal\\aabbtree.cpp", 165, 0, "%s", "sideOnCount >= 0");
+            iassert(sideFrontCount >= 0);
+            iassert(sideBackCount >= 0);
+            iassert(sideSplitCount >= 0);
+            iassert(sideOnCount >= 0);
             if (sideFrontCount > 1 && sideBackCount > 1)
             {
                 heuristic = LODWORD(globalMins[axisIndex + 3])
@@ -369,8 +365,7 @@ void __cdecl BuildAabbTree_r(GenericAabbTree *tree, const GenericAabbTreeOptions
     int lastStart; // [esp+8h] [ebp-8h] BYREF
     GenericAabbTree *subtree; // [esp+Ch] [ebp-4h]
 
-    if (!tree->itemCount)
-        MyAssertHandler(".\\universal\\aabbtree.cpp", 391, 0, "%s", "tree->itemCount");
+    iassert(tree->itemCount);
     tree->firstChild = aabbTreeCount;
     tree->childCount = 0;
     if (tree->itemCount > options->maxItemsPerLeaf

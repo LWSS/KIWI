@@ -105,8 +105,7 @@ void __cdecl CL_Netchan_PrintProfileStats(int localClientNum, int bPrintToConsol
     iTotalBPS = 0;
     iYPos = 80;
     iYStep = 10;
-    if (!net_profile->current.integer)
-        MyAssertHandler(".\\client_mp\\cl_net_chan_mp.cpp", 193, 0, "%s", "net_profile->current.integer");
+    iassert(net_profile->current.integer);
     CL_Netchan_UpdateProfileStats(localClientNum);
     if (bPrintToConsole)
         Com_Printf(14, "\n\n");

@@ -82,14 +82,7 @@ void __cdecl RB_Draw3DInternal(const GfxViewInfo *viewInfo)
         }
         else
         {
-            if (gfxDrawMethod.drawScene != GFX_DRAW_SCENE_STANDARD)
-                MyAssertHandler(
-                    ".\\rb_draw3d.cpp",
-                    1472,
-                    0,
-                    "%s\n\t(gfxDrawMethod.drawScene) = %i",
-                    "(gfxDrawMethod.drawScene == GFX_DRAW_SCENE_STANDARD)",
-                    gfxDrawMethod.drawScene);
+            vassert((gfxDrawMethod.drawScene == GFX_DRAW_SCENE_STANDARD), "(gfxDrawMethod.drawScene) = %i", gfxDrawMethod.drawScene);
             RB_StandardDrawCommands(viewInfo);
         }
     }
@@ -140,14 +133,7 @@ void __cdecl RB_EndSceneRendering(GfxCmdBufContext context, const GfxCmdBufInput
     if (developer->current.integer)
     {
         R_Set3D(&gfxCmdBufSourceState);
-        if (gfxCmdBufSourceState.viewMode != VIEW_MODE_3D)
-            MyAssertHandler(
-                ".\\rb_draw3d.cpp",
-                119,
-                0,
-                "%s\n\t(gfxCmdBufSourceState.viewMode) = %i",
-                "(gfxCmdBufSourceState.viewMode == VIEW_MODE_3D)",
-                gfxCmdBufSourceState.viewMode);
+        vassert((gfxCmdBufSourceState.viewMode == VIEW_MODE_3D), "(gfxCmdBufSourceState.viewMode) = %i", gfxCmdBufSourceState.viewMode);
         RB_DrawDebug(&gfxCmdBufSourceState.viewParms);
         RB_ShowCollision(&gfxCmdBufSourceState.viewParms);
     }
@@ -695,14 +681,7 @@ void __cdecl RB_Draw3DCommon()
         }
         else
         {
-            if (gfxDrawMethod.drawScene != GFX_DRAW_SCENE_STANDARD)
-                MyAssertHandler(
-                    ".\\rb_draw3d.cpp",
-                    1501,
-                    0,
-                    "%s\n\t(gfxDrawMethod.drawScene) = %i",
-                    "(gfxDrawMethod.drawScene == GFX_DRAW_SCENE_STANDARD)",
-                    gfxDrawMethod.drawScene);
+            vassert((gfxDrawMethod.drawScene == GFX_DRAW_SCENE_STANDARD), "(gfxDrawMethod.drawScene) = %i", gfxDrawMethod.drawScene);
             RB_StandardDrawCommandsCommon();
         }
     }

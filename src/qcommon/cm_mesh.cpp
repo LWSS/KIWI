@@ -711,14 +711,7 @@ void __cdecl CM_TraceCapsuleThroughBorder(const traceWork_t *tw, CollisionBorder
         discriminant = deltaDotOffset * deltaDotOffset - tw->deltaLenSq * c;
         if (discriminant < 0.0)
             return;
-        if (tw->deltaLenSq <= 0.0)
-            MyAssertHandler(
-                ".\\qcommon\\cm_mesh.cpp",
-                1227,
-                0,
-                "%s\n\t(tw->deltaLenSq) = %g",
-                "(tw->deltaLenSq > 0.0f)",
-                tw->deltaLenSq);
+        vassert((tw->deltaLenSq > 0.0f), "(tw->deltaLenSq) = %g", tw->deltaLenSq);
         v18 = sqrt(discriminant);
         t = (-deltaDotOffset - v18) / tw->deltaLenSq;
         if (trace->fraction <= (double)t || t <= 0.0)
@@ -825,14 +818,7 @@ void __cdecl CM_TraceCapsuleThroughBorder(const traceWork_t *tw, CollisionBorder
     discriminanta = deltaDotOffseta * deltaDotOffseta - tw->deltaLenSq * ca;
     if (discriminanta >= 0.0)
     {
-        if (tw->deltaLenSq <= 0.0)
-            MyAssertHandler(
-                ".\\qcommon\\cm_mesh.cpp",
-                1265,
-                0,
-                "%s\n\t(tw->deltaLenSq) = %g",
-                "(tw->deltaLenSq > 0.0f)",
-                tw->deltaLenSq);
+        vassert((tw->deltaLenSq > 0.0f), "(tw->deltaLenSq) = %g", tw->deltaLenSq);
         v15 = sqrt(discriminanta);
         t = (-deltaDotOffseta - v15) / tw->deltaLenSq;
         if (trace->fraction > (double)t && t > 0.0)

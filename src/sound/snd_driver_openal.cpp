@@ -663,13 +663,7 @@ double __cdecl SND_GetStream3DVolumeFallOff(int index, int listenerIndex)
 
     alias0 = g_snd.chaninfo[index].alias0;
     alias1 = g_snd.chaninfo[index].alias1;
-    if (!SND_IsAliasChannel3D(SNDALIASFLAGS_GET_CHANNEL(alias0->flags)))
-        MyAssertHandler(
-            ".\\win32\\snd_driver.cpp",
-            585,
-            0,
-            "%s",
-            "SND_IsAliasChannel3D( SNDALIASFLAGS_GET_CHANNEL( alias0->flags ) )");
+    iassert(SND_IsAliasChannel3D( SNDALIASFLAGS_GET_CHANNEL( alias0->flags ) ));
     Vec3Sub(g_snd.listeners[listenerIndex].orient.origin, g_snd.chaninfo[index].org, diff);
     dist = Vec3Length(diff);
     lerp = g_snd.chaninfo[index].lerp;

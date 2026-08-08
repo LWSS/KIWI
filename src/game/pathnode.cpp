@@ -212,22 +212,8 @@ void __cdecl Scr_GetPathnodeField(unsigned int entnum, unsigned int offset)
     unsigned __int8 *v5; // r3
     void(__cdecl * getter)(pathnode_t *, int); // r10
 
-    if (offset >= 0xB)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\pathnode.cpp",
-            596,
-            0,
-            "offset doesn't index ARRAY_COUNT( fields ) - 1\n\t%i not in [0, %i)",
-            offset,
-            11);
-    if (entnum >= g_path.actualNodeCount)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\pathnode.cpp",
-            597,
-            0,
-            "entnum doesn't index g_path.actualNodeCount\n\t%i not in [0, %i)",
-            entnum,
-            g_path.actualNodeCount);
+    bcassert(offset, 0xB);
+    bcassert(entnum, g_path.actualNodeCount);
     v4 = &fields_3[offset];
     v5 = (unsigned __int8 *)&gameWorldSp.path.nodes[entnum];
     getter = v4->getter;
@@ -257,10 +243,8 @@ void __cdecl PathNode_UpdateStringField(
 {
     const char *v8; // r3
 
-    if (!key)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\pathnode.cpp", 686, 0, "%s", "key");
-    if (!destKey)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\pathnode.cpp", 687, 0, "%s", "destKey");
+    iassert(key);
+    iassert(destKey);
     if (!I_stricmp(key, destKey))
     {
         v8 = SL_ConvertToString(*destScrString);
@@ -464,30 +448,15 @@ unsigned int __cdecl Path_ConvertNodeToIndex(const pathnode_t *node)
 {
     unsigned int v2; // r31
 
-    if (!node)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\pathnode.cpp", 1175, 0, "%s", "node");
+    iassert(node);
     v2 = node - gameWorldSp.path.nodes;
-    if (v2 >= g_path.actualNodeCount)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\pathnode.cpp",
-            1178,
-            0,
-            "nodeIndex doesn't index g_path.actualNodeCount\n\t%i not in [0, %i)",
-            v2,
-            g_path.actualNodeCount);
+    bcassert(v2, g_path.actualNodeCount);
     return v2;
 }
 
 pathnode_t *__cdecl Path_ConvertIndexToNode(unsigned int index)
 {
-    if (index >= g_path.actualNodeCount)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\pathnode.cpp",
-            1185,
-            0,
-            "index doesn't index g_path.actualNodeCount\n\t%i not in [0, %i)",
-            index,
-            g_path.actualNodeCount);
+    bcassert(index, g_path.actualNodeCount);
     return &gameWorldSp.path.nodes[index];
 }
 
@@ -506,15 +475,13 @@ void __cdecl Path_Init(int restart)
 
 int __cdecl NodeVisCacheEntry(int i, int j)
 {
-    if (i >= j)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\pathnode.cpp", 1255, 0, "%s", "i < j");
+    iassert(i < j);
     return g_path.actualNodeCount * i + j;
 }
 
 int __cdecl ExpandedNodeVisCacheEntry(int i, int j)
 {
-    if (i <= j)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\pathnode.cpp", 1262, 0, "%s", "i > j");
+    iassert(i > j);
     return (i - 1) * g_path.actualNodeCount + j;
 }
 
@@ -641,22 +608,8 @@ bool __cdecl Path_IsBadPlaceLink(unsigned int nodeNumFrom, unsigned int nodeNumT
             g_path.actualNodeCount);
         actualNodeCount = g_path.actualNodeCount;
     }
-    if (nodeNumTo >= actualNodeCount)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\pathnode.cpp",
-            1382,
-            0,
-            "nodeNumTo doesn't index g_path.actualNodeCount\n\t%i not in [0, %i)",
-            nodeNumTo,
-            actualNodeCount);
-    if ((unsigned int)eTeam >= TEAM_DEAD)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\pathnode.cpp",
-            1383,
-            0,
-            "eTeam doesn't index ARRAY_COUNT( ((pathlink_t *) 0)->ubBadPlaceCount )\n\t%i not in [0, %i)",
-            eTeam,
-            4);
+    bcassert(nodeNumTo, actualNodeCount);
+    bcassert((unsigned int)eTeam, TEAM_DEAD);
     v7 = 0;
     v8 = &gameWorldSp.path.nodes[nodeNumFrom];
     totalLinkCount = v8->constant.totalLinkCount;
@@ -1041,10 +994,8 @@ float __cdecl Path_GetDebugStringScale(const float *cameraPos, const float *orig
     double v6; // fp12
     double v7; // fp1
 
-    if (!cameraPos)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\pathnode.cpp", 1662, 0, "%s", "cameraPos");
-    if (!origin)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\pathnode.cpp", 1663, 0, "%s", "origin");
+    iassert(cameraPos);
+    iassert(origin);
     v4 = G_Find(0, 284, scr_const.player);
     if (v4)
     {
@@ -1120,10 +1071,8 @@ void __cdecl Path_DrawDebugNode(const float *cameraPos, const pathnode_t *node)
     const char *v7; // r5
     float xyz[16]; // [sp+50h] [-40h] BYREF
 
-    if (!cameraPos)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\pathnode.cpp", 1724, 0, "%s", "cameraPos");
-    if (!node)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\pathnode.cpp", 1725, 0, "%s", "node");
+    iassert(cameraPos);
+    iassert(node);
     Path_DrawDebugNodeBox(node);
     xyz[0] = node->constant.vOrigin[0];
     xyz[2] = node->constant.vOrigin[2] + 8.0f;
@@ -1371,8 +1320,7 @@ bool __cdecl Path_IsNodeIndex(const pathnode_t *node, unsigned int nodeIndexToCh
     unsigned int v4; // r31
     pathnode_t *nodes; // r11
 
-    if (!node)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\pathnode.cpp", 2134, 0, "%s", "node");
+    iassert(node);
     v4 = 0;
     if (g_path.actualNodeCount)
     {
@@ -1407,10 +1355,8 @@ int __cdecl Path_NodesVisible(const pathnode_t *node0, const pathnode_t *node1)
     int v11; // r11
     int v12; // r10
 
-    if (!node0)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\pathnode.cpp", 2159, 0, "%s", "node0");
-    if (!node1)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\pathnode.cpp", 2160, 0, "%s", "node1");
+    iassert(node0);
+    iassert(node1);
     v4 = Path_ConvertNodeToIndex(node0);
     v5 = Path_ConvertNodeToIndex(node1);
     actualNodeCount = g_path.actualNodeCount;
@@ -1425,14 +1371,7 @@ int __cdecl Path_NodesVisible(const pathnode_t *node0, const pathnode_t *node1)
             g_path.actualNodeCount);
         actualNodeCount = g_path.actualNodeCount;
     }
-    if (v5 >= actualNodeCount)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\pathnode.cpp",
-            2166,
-            0,
-            "nodeIndex1 doesn't index g_path.actualNodeCount\n\t%i not in [0, %i)",
-            v5,
-            actualNodeCount);
+    bcassert(v5, actualNodeCount);
     if (v4 >= v5)
     {
         if (v4 <= v5)
@@ -1468,10 +1407,8 @@ int __cdecl Path_ExpandedNodeVisible(const pathnode_t *node0, const pathnode_t *
     int v11; // r11
     int v12; // r10
 
-    if (!node0)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\pathnode.cpp", 2187, 0, "%s", "node0");
-    if (!node1)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\pathnode.cpp", 2188, 0, "%s", "node1");
+    iassert(node0);
+    iassert(node1);
     v4 = Path_ConvertNodeToIndex(node0);
     v5 = Path_ConvertNodeToIndex(node1);
     actualNodeCount = g_path.actualNodeCount;
@@ -1486,14 +1423,7 @@ int __cdecl Path_ExpandedNodeVisible(const pathnode_t *node0, const pathnode_t *
             g_path.actualNodeCount);
         actualNodeCount = g_path.actualNodeCount;
     }
-    if (v5 >= actualNodeCount)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\pathnode.cpp",
-            2194,
-            0,
-            "nodeIndex1 doesn't index g_path.actualNodeCount\n\t%i not in [0, %i)",
-            v5,
-            actualNodeCount);
+    bcassert(v5, actualNodeCount);
     if (v4 <= v5)
     {
         if (v4 >= v5)
@@ -1553,8 +1483,7 @@ pathnode_t *__cdecl Path_FindChainPos(const float *vOrigin, pathnode_t *pPrevCha
     double v35; // fp12
     double v36; // fp0
 
-    if (!vOrigin)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\pathnode.cpp", 2323, 0, "%s", "vOrigin");
+    iassert(vOrigin);
     result = 0;
     if (pPrevChainPos)
         wChainId = pPrevChainPos->constant.wChainId;
@@ -1713,11 +1642,9 @@ void __cdecl Path_AttachSentientToChainNode(sentient_s *sentient, unsigned __int
     const char *v13; // r3
     const char *v14; // r3
 
-    if (!sentient)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\pathnode.cpp", 2755, 0, "%s", "sentient");
+    iassert(sentient);
     v4 = targetname;
-    if (!targetname)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\pathnode.cpp", 2756, 0, "%s", "targetname");
+    iassert(targetname);
     if (g_spawnai->current.enabled)
     {
         pActualChainPos = sentient->pActualChainPos;
@@ -1792,8 +1719,7 @@ pathnode_t *__cdecl Path_NextNode(pathnode_t *prevNode, int typeFlags)
     unsigned int v6; // r10
     pathnode_t *i; // r8
 
-    if (!prevNode)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\pathnode.cpp", 2815, 0, "%s", "prevNode");
+    iassert(prevNode);
     nodes = gameWorldSp.path.nodes;
     if (prevNode < gameWorldSp.path.nodes
         || (actualNodeCount = g_path.actualNodeCount, prevNode >= &gameWorldSp.path.nodes[g_path.actualNodeCount]))
@@ -1909,10 +1835,8 @@ int __cdecl Path_CanStealNode(const pathnode_t *node, sentient_s *claimer)
     actor_s *actor; // r3
     bool v8; // zf
 
-    if (!node)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\pathnode.cpp", 2942, 0, "%s", "node");
-    if (!claimer)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\pathnode.cpp", 2943, 0, "%s", "claimer");
+    iassert(node);
+    iassert(claimer);
     NodeOwner = Path_GetNodeOwner(node);
     v5 = NodeOwner;
     if (!NodeOwner)
@@ -2101,8 +2025,7 @@ int __cdecl Path_AllowedStancesForNode(pathnode_t *node)
     int spawnflags; // r8
     int v3; // r31
 
-    if (!node)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\pathnode.cpp", 3323, 0, "%s", "node");
+    iassert(node);
     spawnflags = node->constant.spawnflags;
     v3 = 7;
     if ((spawnflags & 4) != 0)
@@ -2330,8 +2253,7 @@ void __cdecl Path_DisconnectPath(pathnode_t *node, pathlink_s *link)
     link->disconnectCount = v4;
     if (!v4)
         Scr_Error("too many disconnects on a single path link (overflow on disconnect count)");
-    if (!link->disconnectCount)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\pathnode.cpp", 3435, 0, "%s", "link->disconnectCount");
+    iassert(link->disconnectCount);
     if (link->disconnectCount <= 1u)
     {
         v10 = (__int16)(node->dynamic.wLinkCount - 1);
@@ -2415,15 +2337,8 @@ void __cdecl Path_ConnectPath(pathnode_t *node, pathlink_s *link)
     pathlink_s *v8; // r11
     pathlink_s *v9; // r11
 
-    if (!link->disconnectCount)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\pathnode.cpp", 3461, 0, "%s", "link->disconnectCount");
-    if (&node->constant.Links[node->dynamic.wLinkCount] > link)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\pathnode.cpp",
-            3462,
-            0,
-            "%s",
-            "&node->constant.Links[node->dynamic.wLinkCount] <= link");
+    iassert(link->disconnectCount);
+    iassert(&node->constant.Links[node->dynamic.wLinkCount] <= link);
     Path_ValidateNode(node);
     v4 = (unsigned __int8)(link->disconnectCount - 1);
     link->disconnectCount = v4;
@@ -2861,8 +2776,7 @@ void __cdecl WriteEntityDisconnectedLinks(gentity_s *ent, SaveGame *save)
     int disconnectedLinks; // r11
     int v5; // r31
 
-    if (!save)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\pathnode.cpp", 3845, 0, "%s", "save");
+    iassert(save);
     disconnectedLinks = ent->disconnectedLinks;
     if (ent->disconnectedLinks)
     {
@@ -3122,14 +3036,7 @@ void __cdecl Scr_GetNode()
     v3 = Offset;
     if (Offset >= 0)
     {
-        if ((unsigned int)Offset >= 0xB)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\pathnode.cpp",
-                1029,
-                0,
-                "offset doesn't index ARRAY_COUNT( fields ) - 1\n\t%i not in [0, %i)",
-                Offset,
-                11);
+        bcassert((unsigned int)Offset, 0xB);
         v4 = &fields_3[v3];
         if (v4->type != F_STRING)
             Scr_ParamError(1u, "key is not internally a string");
@@ -3183,14 +3090,7 @@ void __cdecl Scr_GetNodeArray()
         v3 = va("key '%s' does not internally belong to nodes", String);
         Scr_ParamError(1u, v3);
     }
-    if ((unsigned int)Offset >= 0xB)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\pathnode.cpp",
-            1082,
-            0,
-            "offset doesn't index ARRAY_COUNT( fields ) - 1\n\t%i not in [0, %i)",
-            Offset,
-            11);
+    bcassert((unsigned int)Offset, 0xB);
     v4 = &fields_3[Offset];
     if (v4->type != F_STRING)
         Scr_ParamError(1u, "key is not internally a string");
@@ -3508,8 +3408,7 @@ void __cdecl G_ParsePathnodeScriptFields(pathnode_t *node)
     int v2; // r30
     const char **v3; // r31
 
-    if (!level.spawnVar.spawnVarsValid)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\pathnode.cpp", 768, 0, "%s", "level.spawnVar.spawnVarsValid");
+    iassert(level.spawnVar.spawnVarsValid);
     v2 = 0;
     if (level.spawnVar.numSpawnVars > 0)
     {
@@ -3627,10 +3526,8 @@ void __cdecl Path_ForceClaimNode(pathnode_t *node, sentient_s *claimer)
     __int16 v8; // r11
     int v9; // r11
 
-    if (!node)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\pathnode.cpp", 3145, 0, "%s", "node");
-    if (!claimer)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\pathnode.cpp", 3146, 0, "%s", "claimer");
+    iassert(node);
+    iassert(claimer);
     eTeam = claimer->eTeam;
     if (eTeam != TEAM_AXIS && eTeam != TEAM_ALLIES && eTeam != TEAM_NEUTRAL)
         MyAssertHandler(
@@ -3702,19 +3599,10 @@ pathnode_t *__cdecl Path_ChooseSubsequentChainNode_r(
     pathnode_t *v22; // [sp+50h] [-70h] BYREF
     unsigned int v23[27]; // [sp+54h] [-6Ch] BYREF
 
-    if (depthMin > depthMax)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\pathnode.cpp", 2404, 0, "%s", "depthMin <= depthMax");
-    if (!pParent)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\pathnode.cpp", 2405, 0, "%s", "pParent");
-    if (pParent->constant.wChainDepth >= depthMax)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\pathnode.cpp",
-            2406,
-            0,
-            "%s",
-            "pParent->constant.wChainDepth < depthMax");
-    if (!claimer)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\pathnode.cpp", 2407, 0, "%s", "claimer");
+    iassert(depthMin <= depthMax);
+    iassert(pParent);
+    iassert(pParent->constant.wChainDepth < depthMax);
+    iassert(claimer);
     wChainId = pParent->constant.wChainId;
     v9 = depthMax;
     v10 = pParent - gameWorldSp.path.nodes;
@@ -3781,19 +3669,10 @@ pathnode_t *__cdecl Path_ChooseAnyChainNodeIfDeadEnd(
     pathnode_t *v16; // [sp+50h] [-60h] BYREF
     unsigned int v17; // [sp+54h] [-5Ch] BYREF
 
-    if (depthMin > depthMax)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\pathnode.cpp", 2457, 0, "%s", "depthMin <= depthMax");
-    if (!chainPos)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\pathnode.cpp", 2458, 0, "%s", "chainPos");
-    if (chainPos->constant.wChainDepth >= depthMax)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\pathnode.cpp",
-            2459,
-            0,
-            "%s",
-            "chainPos->constant.wChainDepth < depthMax");
-    if (!claimer)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\pathnode.cpp", 2460, 0, "%s", "claimer");
+    iassert(depthMin <= depthMax);
+    iassert(chainPos);
+    iassert(chainPos->constant.wChainDepth < depthMax);
+    iassert(claimer);
     wChainId = chainPos->constant.wChainId;
     v9 = (__int16)(chainPos - gameWorldSp.path.nodes);
     v17 = 0;
@@ -3830,19 +3709,10 @@ pathnode_t *__cdecl Path_ChoosePreviousChainNode(int depthMin, int depthMax, pat
     int wChainParent; // r11
     int v9; // r11
 
-    if (depthMin > depthMax)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\pathnode.cpp", 2500, 0, "%s", "depthMin <= depthMax");
-    if (!chainPos)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\pathnode.cpp", 2501, 0, "%s", "chainPos");
-    if (chainPos->constant.wChainDepth < depthMin)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\pathnode.cpp",
-            2502,
-            0,
-            "%s",
-            "chainPos->constant.wChainDepth >= depthMin");
-    if (!claimer)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\pathnode.cpp", 2503, 0, "%s", "claimer");
+    iassert(depthMin <= depthMax);
+    iassert(chainPos);
+    iassert(chainPos->constant.wChainDepth >= depthMin);
+    iassert(claimer);
     for (; chainPos->constant.wChainDepth > depthMax; chainPos = &gameWorldSp.path.nodes[wChainParent])
     {
         wChainParent = chainPos->constant.wChainParent;
@@ -3882,12 +3752,9 @@ pathnode_t *__cdecl Path_ChooseDesperationChainNode(
     int wChainDepth; // r11
     int v16; // r30
 
-    if (!refPos)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\pathnode.cpp", 2534, 0, "%s", "refPos");
-    if (!claimer)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\pathnode.cpp", 2535, 0, "%s", "claimer");
-    if (depthMin > depthMax)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\pathnode.cpp", 2536, 0, "%s", "depthMin <= depthMax");
+    iassert(refPos);
+    iassert(claimer);
+    iassert(depthMin <= depthMax);
     if ((unsigned __int16)refPos->constant.wChainParent != 0xFFFF)
         MyAssertHandler(
             "c:\\trees\\cod3\\cod3src\\src\\game\\pathnode.cpp",
@@ -3958,12 +3825,9 @@ pathnode_t *__cdecl Path_ChooseDesperationNewChainNode(
     int wChainDepth; // r11
     int v16; // r30
 
-    if (!refPos)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\pathnode.cpp", 2588, 0, "%s", "refPos");
-    if (!claimer)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\pathnode.cpp", 2589, 0, "%s", "claimer");
-    if (depthMin > depthMax)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\pathnode.cpp", 2590, 0, "%s", "depthMin <= depthMax");
+    iassert(refPos);
+    iassert(claimer);
+    iassert(depthMin <= depthMax);
     if ((unsigned __int16)refPos->constant.wChainParent != 0xFFFF)
         MyAssertHandler(
             "c:\\trees\\cod3\\cod3src\\src\\game\\pathnode.cpp",
@@ -4039,10 +3903,8 @@ pathnode_t *__cdecl Path_ChooseChainPos(
     int i; // r11
 
     v5 = refPos;
-    if (!refPos)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\pathnode.cpp", 2647, 0, "%s", "refPos");
-    if (iFollowMin > iFollowMax)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\pathnode.cpp", 2648, 0, "%s", "iFollowMin <= iFollowMax");
+    iassert(refPos);
+    iassert(iFollowMin <= iFollowMax);
     v10 = v5 - gameWorldSp.path.nodes;
     if (v10 < 0 || gameWorldSp.path.chainNodeForNode[v10] >= gameWorldSp.path.chainNodeCount)
         MyAssertHandler(

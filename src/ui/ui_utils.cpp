@@ -14,14 +14,7 @@ void __cdecl TRACK_ui_utils()
 
 void __cdecl Window_SetDynamicFlags(int localClientNum, windowDef_t *w, int flags)
 {
-    if (localClientNum)
-        MyAssertHandler(
-            ".\\ui\\ui_utils.cpp",
-            43,
-            0,
-            "localClientNum doesn't index MAX_POSSIBLE_LOCAL_CLIENTS\n\t%i not in [0, %i)",
-            localClientNum,
-            1);
+    vassert((localClientNum) == 0, "%i not in [0, %i)", localClientNum, 1);
     if (flags && (flags & 0xFFFFF) == 0)
         MyAssertHandler(".\\ui\\ui_utils.cpp", 44, 0, "%s\n\t(flags) = %i", "(flags == 0 || flags & 0x000FFFFF)", flags);
     if ((flags & 0xFFF00000) != 0)
@@ -31,14 +24,7 @@ void __cdecl Window_SetDynamicFlags(int localClientNum, windowDef_t *w, int flag
 
 void __cdecl Window_AddDynamicFlags(int localClientNum, windowDef_t *w, int newFlags)
 {
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\src\\ui\\ui_utils.h",
-            23,
-            0,
-            "localClientNum doesn't index MAX_POSSIBLE_LOCAL_CLIENTS\n\t%i not in [0, %i)",
-            localClientNum,
-            1);
+    vassert((localClientNum) == 0, "%i not in [0, %i)", localClientNum, 1);
     Window_SetDynamicFlags(localClientNum, w, newFlags | w->dynamicFlags[localClientNum]);
 }
 
@@ -46,14 +32,7 @@ void __cdecl Window_RemoveDynamicFlags(int localClientNum, windowDef_t *w, int n
 {
     int modifiedFlags; // [esp+0h] [ebp-8h]
 
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\src\\ui\\ui_utils.h",
-            23,
-            0,
-            "localClientNum doesn't index MAX_POSSIBLE_LOCAL_CLIENTS\n\t%i not in [0, %i)",
-            localClientNum,
-            1);
+    vassert((localClientNum) == 0, "%i not in [0, %i)", localClientNum, 1);
     modifiedFlags = newFlags;
     if ((newFlags & 4) != 0)
         modifiedFlags = newFlags | 2;
@@ -62,8 +41,7 @@ void __cdecl Window_RemoveDynamicFlags(int localClientNum, windowDef_t *w, int n
 
 void __cdecl Window_SetStaticFlags(windowDef_t *w, int flags)
 {
-    if (flags && (flags & 0xFFF00000) == 0)
-        MyAssertHandler(".\\ui\\ui_utils.cpp", 82, 0, "%s\n\t(flags) = %i", "(flags == 0 || flags & 0xFFF00000)", flags);
+    vassert((flags == 0 || flags & 0xFFF00000), "(flags) = %i", flags);
     if ((flags & 0xFFFFF) != 0)
         MyAssertHandler(".\\ui\\ui_utils.cpp", 83, 0, "%s", "!(flags & WINDOWDYNAMIC_CHECKMASK)");
     w->staticFlags = flags;
@@ -71,16 +49,8 @@ void __cdecl Window_SetStaticFlags(windowDef_t *w, int flags)
 
 void __cdecl Menu_SetCursorItem(int localClientNum, menuDef_t *menu, int cursorItem)
 {
-    if (localClientNum)
-        MyAssertHandler(
-            ".\\ui\\ui_utils.cpp",
-            90,
-            0,
-            "localClientNum doesn't index MAX_POSSIBLE_LOCAL_CLIENTS\n\t%i not in [0, %i)",
-            localClientNum,
-            1);
-    if (!menu)
-        MyAssertHandler(".\\ui\\ui_utils.cpp", 91, 0, "%s", "menu");
+    vassert((localClientNum) == 0, "%i not in [0, %i)", localClientNum, 1);
+    iassert(menu);
     menu->cursorItem[localClientNum] = cursorItem;
 }
 
@@ -110,8 +80,7 @@ bool __cdecl Item_EnableShowViaDvar(const itemDef_s *item, int flag)
     char val[1024]; // [esp+4h] [ebp-408h] BYREF
     const char *p; // [esp+408h] [ebp-4h] BYREF
 
-    if (!item)
-        MyAssertHandler(".\\ui\\ui_utils.cpp", 207, 0, "%s", "item");
+    iassert(item);
     if (!item->enableDvar || !*item->enableDvar || !item->dvarTest || !*item->dvarTest)
         return 1;
     testValue = Dvar_GetVariantString(item->dvarTest);
@@ -128,18 +97,9 @@ void __cdecl Item_SetTextRect(int localClientNum, itemDef_s *item, const rectDef
 {
     rectDef_s *v3; // edx
 
-    if (localClientNum)
-        MyAssertHandler(
-            ".\\ui\\ui_utils.cpp",
-            234,
-            0,
-            "localClientNum doesn't index MAX_POSSIBLE_LOCAL_CLIENTS\n\t%i not in [0, %i)",
-            localClientNum,
-            1);
-    if (!item)
-        MyAssertHandler(".\\ui\\ui_utils.cpp", 235, 0, "%s", "item");
-    if (!textRect)
-        MyAssertHandler(".\\ui\\ui_utils.cpp", 236, 0, "%s", "textRect");
+    vassert((localClientNum) == 0, "%i not in [0, %i)", localClientNum, 1);
+    iassert(item);
+    iassert(textRect);
     if (textRect->horzAlign >= 8u)
         MyAssertHandler(
             ".\\ui\\ui_utils.cpp",
@@ -169,14 +129,7 @@ int __cdecl Item_GetCursorPosOffset(int localClientNum, const itemDef_s *item, c
 {
     int pos; // [esp+0h] [ebp-4h]
 
-    if (localClientNum)
-        MyAssertHandler(
-            ".\\ui\\ui_utils.cpp",
-            254,
-            0,
-            "localClientNum doesn't index MAX_POSSIBLE_LOCAL_CLIENTS\n\t%i not in [0, %i)",
-            localClientNum,
-            1);
+    vassert((localClientNum) == 0, "%i not in [0, %i)", localClientNum, 1);
     pos = item->cursorPos[localClientNum];
     if (delta > 0)
     {
@@ -224,14 +177,7 @@ bool __cdecl ListBox_HasValidCursorPos(int localClientNum, itemDef_s *item)
     const listBoxDef_s *listPtr; // [esp+4h] [ebp-8h]
     int cursorPos; // [esp+8h] [ebp-4h]
 
-    if (localClientNum)
-        MyAssertHandler(
-            ".\\ui\\ui_utils.cpp",
-            295,
-            0,
-            "localClientNum doesn't index MAX_POSSIBLE_LOCAL_CLIENTS\n\t%i not in [0, %i)",
-            localClientNum,
-            1);
+    vassert((localClientNum) == 0, "%i not in [0, %i)", localClientNum, 1);
     listPtr = Item_GetListBoxDef(item);
     cursorPos = item->cursorPos[localClientNum];
     return cursorPos >= listPtr->startPos[localClientNum] && cursorPos < listPtr->endPos[localClientNum];
@@ -340,16 +286,8 @@ editFieldDef_s *__cdecl Item_GetEditFieldDef(itemDef_s *item)
 
 multiDef_s *__cdecl Item_GetMultiDef(itemDef_s *item)
 {
-    if (!item)
-        MyAssertHandler(".\\ui\\ui_utils.cpp", 408, 0, "%s", "item");
-    if (item->dataType != 12)
-        MyAssertHandler(
-            ".\\ui\\ui_utils.cpp",
-            409,
-            0,
-            "%s\n\t(item->dataType) = %i",
-            "(item->dataType == 12)",
-            item->dataType);
+    iassert(item);
+    vassert((item->dataType == 12), "(item->dataType) = %i", item->dataType);
     return item->typeData.multi;
 }
 
@@ -376,8 +314,7 @@ const char *__cdecl String_Alloc(const char *p)
     uint8_t *s; // [esp+40h] [ebp-8h]
     stringDef_s *last; // [esp+44h] [ebp-4h]
 
-    if (!Sys_IsMainThread())
-        MyAssertHandler(".\\ui\\ui_utils.cpp", 458, 0, "%s", "Sys_IsMainThread()");
+    iassert(Sys_IsMainThread());
     if (!p)
         return 0;
     if (!*p)
@@ -385,8 +322,7 @@ const char *__cdecl String_Alloc(const char *p)
     hash = hashForString(p);
     for (str = g_strHandle[hash]; str; str = str->next)
     {
-        if (!str->str)
-            MyAssertHandler(".\\ui\\ui_utils.cpp", 475, 0, "%s", "str->str");
+        iassert(str->str);
         if (!strcmp(p, str->str))
             return str->str;
     }

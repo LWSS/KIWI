@@ -159,10 +159,7 @@ struct CStringEdPackage // sizeof=0x78
 
         auto itEntry = this->m_StringEntries.find(v4);
 
-        if (itEntry == m_StringEntries.end())
-        {
-            MyAssertHandler(".\\stringed\\stringed_ingame.cpp", 685, 0, "%s", "itEntry != m_StringEntries.end()");
-        }
+        iassert(itEntry != m_StringEntries.end());
 
         auto& Entry = (*itEntry).second;
 

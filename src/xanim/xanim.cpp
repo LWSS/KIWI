@@ -508,8 +508,7 @@ uint __cdecl XAnimGetAnimMap(const XAnimParts* parts, const XModelNameMap* model
     uint16_t* partNames; // [esp+B4h] [ebp-8h]
     uint partName; // [esp+B8h] [ebp-4h]
 
-    if (!parts)
-        MyAssertHandler(".\\xanim\\xanim.cpp", 575, 0, "%s", "parts");
+    iassert(parts);
     memset(&animToModel, 0, 16);
     boneCount = parts->boneCount[9];
     partNames = parts->names;
@@ -543,17 +542,14 @@ double __cdecl XAnimGetLength(const XAnim_s* anims, uint animIndex)
 {
     XAnimParts* parts; // [esp+Ch] [ebp-4h]
 
-    if (!anims)
-        MyAssertHandler(".\\xanim\\xanim.cpp", 2395, 0, "%s", "anims");
-    if (animIndex >= anims->size)
-        MyAssertHandler(".\\xanim\\xanim.cpp", 2396, 0, "animIndex < anims->size\n\t%i, %i", animIndex, anims->size);
+    iassert(anims);
+    vassert(animIndex < anims->size, "%i, %i", animIndex, anims->size);
     if ((const XAnim_s*)((char*)anims + 8 * animIndex) == (const XAnim_s*)-12)
         MyAssertHandler(".\\xanim\\xanim.cpp", 2399, 0, "%s", "entry");
     if (!IsLeafNode(&anims->entries[animIndex]))
         MyAssertHandler(".\\xanim\\xanim.cpp", 2400, 0, "%s", "IsLeafNode( entry )");
     parts = anims->entries[animIndex].parts;
-    if (!parts)
-        MyAssertHandler(".\\xanim\\xanim.cpp", 2403, 0, "%s", "parts");
+    iassert(parts);
     return (float)((double)parts->numframes / parts->framerate);
 }
 
@@ -566,21 +562,11 @@ double __cdecl XAnimGetTime(const XAnimTree_s* tree, uint animIndex)
 {
     uint infoIndex; // [esp+4h] [ebp-4h]
 
-    if (!tree)
-        MyAssertHandler(".\\xanim\\xanim.cpp", 2481, 0, "%s", "tree");
-    if (!tree->anims)
-        MyAssertHandler(".\\xanim\\xanim.cpp", 2482, 0, "%s", "tree->anims");
-    if (animIndex >= tree->anims->size)
-        MyAssertHandler(
-            ".\\xanim\\xanim.cpp",
-            2483,
-            0,
-            "animIndex < tree->anims->size\n\t%i, %i",
-            animIndex,
-            tree->anims->size);
+    iassert(tree);
+    iassert(tree->anims);
+    vassert(animIndex < tree->anims->size, "%i, %i", animIndex, tree->anims->size);
     infoIndex = XAnimGetInfoIndex(tree, animIndex);
-    if (infoIndex >= 0x1000)
-        MyAssertHandler(".\\xanim\\xanim.cpp", 2486, 0, "%s\n\t(infoIndex) = %i", "(infoIndex < 4096)", infoIndex);
+    vassert((infoIndex < 4096), "(infoIndex) = %i", infoIndex);
     if (infoIndex)
         return g_xAnimInfo[infoIndex].state.currentAnimTime;
     else
@@ -589,8 +575,7 @@ double __cdecl XAnimGetTime(const XAnimTree_s* tree, uint animIndex)
 
 uint __cdecl XAnimGetInfoIndex(const XAnimTree_s* tree, uint animIndex)
 {
-    if (!tree)
-        MyAssertHandler(".\\xanim\\xanim.cpp", 2466, 0, "%s", "tree");
+    iassert(tree);
     if (tree->children)
         return XAnimGetInfoIndex_r(tree, animIndex, tree->children);
     else
@@ -605,17 +590,9 @@ uint __cdecl XAnimGetInfoIndex_r(const XAnimTree_s* tree, uint animIndex, uint i
     uint resultInfoIndex; // [esp+Ch] [ebp-4h]
     uint infoIndexa; // [esp+20h] [ebp+10h]
 
-    if (!infoIndex || infoIndex >= 0x1000)
-        MyAssertHandler(
-            ".\\xanim\\xanim.cpp",
-            2433,
-            0,
-            "%s\n\t(infoIndex) = %i",
-            "(infoIndex && (infoIndex < 4096))",
-            infoIndex);
+    vassert((infoIndex && (infoIndex < 4096)), "(infoIndex) = %i", infoIndex);
     info = &g_xAnimInfo[infoIndex];
-    if (!info->inuse)
-        MyAssertHandler(".\\xanim\\xanim.cpp", 2436, 0, "%s", "info->inuse");
+    iassert(info->inuse);
     if (info->animIndex == animIndex)
         return infoIndex;
     prevAnimIndex = 0;
@@ -637,21 +614,11 @@ double __cdecl XAnimGetWeight(const XAnimTree_s* tree, uint animIndex)
 {
     uint infoIndex; // [esp+4h] [ebp-4h]
 
-    if (!tree)
-        MyAssertHandler(".\\xanim\\xanim.cpp", 2500, 0, "%s", "tree");
-    if (!tree->anims)
-        MyAssertHandler(".\\xanim\\xanim.cpp", 2501, 0, "%s", "tree->anims");
-    if (animIndex >= tree->anims->size)
-        MyAssertHandler(
-            ".\\xanim\\xanim.cpp",
-            2502,
-            0,
-            "animIndex < tree->anims->size\n\t%i, %i",
-            animIndex,
-            tree->anims->size);
+    iassert(tree);
+    iassert(tree->anims);
+    vassert(animIndex < tree->anims->size, "%i, %i", animIndex, tree->anims->size);
     infoIndex = XAnimGetInfoIndex(tree, animIndex);
-    if (infoIndex >= 0x1000)
-        MyAssertHandler(".\\xanim\\xanim.cpp", 2505, 0, "%s\n\t(infoIndex) = %i", "(infoIndex < 4096)", infoIndex);
+    vassert((infoIndex < 4096), "(infoIndex) = %i", infoIndex);
     if (infoIndex)
         return g_xAnimInfo[infoIndex].state.weight;
     else
@@ -663,18 +630,9 @@ bool __cdecl XAnimHasFinished(const XAnimTree_s* tree, uint animIndex)
     XAnimState* state; // [esp+4h] [ebp-8h]
     uint infoIndex; // [esp+8h] [ebp-4h]
 
-    if (!tree)
-        MyAssertHandler(".\\xanim\\xanim.cpp", 2520, 0, "%s", "tree");
-    if (!tree->anims)
-        MyAssertHandler(".\\xanim\\xanim.cpp", 2521, 0, "%s", "tree->anims");
-    if (animIndex >= tree->anims->size)
-        MyAssertHandler(
-            ".\\xanim\\xanim.cpp",
-            2522,
-            0,
-            "animIndex < tree->anims->size\n\t%i, %i",
-            animIndex,
-            tree->anims->size);
+    iassert(tree);
+    iassert(tree->anims);
+    vassert(animIndex < tree->anims->size, "%i, %i", animIndex, tree->anims->size);
     infoIndex = XAnimGetInfoIndex(tree, animIndex);
     if (!infoIndex)
         return 1;
@@ -694,27 +652,16 @@ bool __cdecl XAnimHasFinished(const XAnimTree_s* tree, uint animIndex)
 
 int __cdecl XAnimGetNumChildren(const XAnim_s* anims, uint animIndex)
 {
-    if (!anims)
-        MyAssertHandler(".\\xanim\\xanim.cpp", 2541, 0, "%s", "anims");
-    if (animIndex >= anims->size)
-        MyAssertHandler(".\\xanim\\xanim.cpp", 2542, 0, "animIndex < anims->size\n\t%i, %i", animIndex, anims->size);
+    iassert(anims);
+    vassert(animIndex < anims->size, "%i, %i", animIndex, anims->size);
     return anims->entries[animIndex].numAnims;
 }
 
 uint __cdecl XAnimGetChildAt(const XAnim_s* anims, uint animIndex, uint childIndex)
 {
-    if (!anims)
-        MyAssertHandler(".\\xanim\\xanim.cpp", 2555, 0, "%s", "anims");
-    if (animIndex >= anims->size)
-        MyAssertHandler(".\\xanim\\xanim.cpp", 2556, 0, "animIndex < anims->size\n\t%i, %i", animIndex, anims->size);
-    if (childIndex >= anims->entries[animIndex].numAnims)
-        MyAssertHandler(
-            ".\\xanim\\xanim.cpp",
-            2557,
-            0,
-            "childIndex < anims->entries[animIndex].numAnims\n\t%i, %i",
-            childIndex,
-            anims->entries[animIndex].numAnims);
+    iassert(anims);
+    vassert(animIndex < anims->size, "%i, %i", animIndex, anims->size);
+    vassert(childIndex < anims->entries[animIndex].numAnims, "%i, %i", childIndex, anims->entries[animIndex].numAnims);
     return childIndex + anims->entries[animIndex].animParent.children;
 }
 
@@ -736,15 +683,12 @@ char* __cdecl XAnimGetAnimDebugName(const XAnim_s* anims, uint animIndex)
     const char* debugName; // [esp+18h] [ebp-Ch]
     const XAnimEntry* anim; // [esp+1Ch] [ebp-8h]
 
-    if (!anims)
-        MyAssertHandler(".\\xanim\\xanim.cpp", 2602, 0, "%s", "anims");
-    if (animIndex >= anims->size)
-        MyAssertHandler(".\\xanim\\xanim.cpp", 2603, 0, "animIndex < anims->size\n\t%i, %i", animIndex, anims->size);
+    iassert(anims);
+    vassert(animIndex < anims->size, "%i, %i", animIndex, anims->size);
     anim = &anims->entries[animIndex];
     if (anims->debugAnimNames)
     {
-        if (!anims->debugAnimNames[animIndex])
-            MyAssertHandler(".\\xanim\\xanim.cpp", 2608, 0, "%s", "anims->debugAnimNames[animIndex]");
+        iassert(anims->debugAnimNames[animIndex]);
         debugName = anims->debugAnimNames[animIndex];
         if (IsLeafNode(anim)
             && ((parts = anims->entries[animIndex].parts, !IsFastFileLoad())
@@ -771,15 +715,13 @@ char* __cdecl XAnimGetAnimDebugName(const XAnim_s* anims, uint animIndex)
 
 const char* __cdecl XAnimGetAnimTreeDebugName(const XAnim_s* anims)
 {
-    if (!anims)
-        MyAssertHandler(".\\xanim\\xanim.cpp", 2622, 0, "%s", "anims");
+    iassert(anims);
     return anims->debugName;
 }
 
 uint __cdecl XAnimGetAnimTreeSize(const XAnim_s* anims)
 {
-    if (!anims)
-        MyAssertHandler(".\\xanim\\xanim.cpp", 2634, 0, "%s", "anims");
+    iassert(anims);
     return anims->size;
 }
 
@@ -820,21 +762,11 @@ void __cdecl XAnimUpdateOldTime(
     tree = obj->tree;
     if (!obj->tree)
         MyAssertHandler(".\\xanim\\xanim.cpp", 1667, 0, "%s", "tree");
-    if (!tree->anims)
-        MyAssertHandler(".\\xanim\\xanim.cpp", 1668, 0, "%s", "tree->anims");
-    if (dtime < 0.0)
-        MyAssertHandler(".\\xanim\\xanim.cpp", 1669, 0, "%s\n\t(dtime) = %g", "(dtime >= 0)", dtime);
-    if (!infoIndex || infoIndex >= 0x1000)
-        MyAssertHandler(
-            ".\\xanim\\xanim.cpp",
-            1671,
-            0,
-            "%s\n\t(infoIndex) = %i",
-            "(infoIndex && (infoIndex < 4096))",
-            infoIndex);
+    iassert(tree->anims);
+    vassert((dtime >= 0), "(dtime) = %g", dtime);
+    vassert((infoIndex && (infoIndex < 4096)), "(infoIndex) = %i", infoIndex);
     info = &g_xAnimInfo[infoIndex];
-    if (!info->inuse)
-        MyAssertHandler(".\\xanim\\xanim.cpp", 1674, 0, "%s", "info->inuse");
+    iassert(info->inuse);
     state = &info->state;
     if (parentHasWeight && dtime < (double)info->state.goalTime)
     {
@@ -851,13 +783,11 @@ void __cdecl XAnimUpdateOldTime(
     }
     v6 = parentHasWeight && info->state.weight != 0.0;
     info->state.instantWeightChange = 0;
-    if (!info->inuse)
-        MyAssertHandler(".\\xanim\\xanim.cpp", 1695, 0, "%s", "info->inuse");
+    iassert(info->inuse);
     if (info->animToModel)
     {
         parts = info->parts;
-        if (!parts)
-            MyAssertHandler(".\\xanim\\xanim.cpp", 1701, 0, "%s", "parts");
+        iassert(parts);
         childHasTime = parts->frequency != 0.0;
     }
     else
@@ -896,14 +826,7 @@ uint __cdecl XAnimInitTime(XAnimTree_s* tree, uint infoIndex, float goalTime)
 {
     uint toInfoIndex; // [esp+10h] [ebp-4h]
 
-    if (!infoIndex || infoIndex >= 0x1000)
-        MyAssertHandler(
-            ".\\xanim\\xanim.cpp",
-            1632,
-            0,
-            "%s\n\t(infoIndex) = %i",
-            "(infoIndex && (infoIndex < 4096))",
-            infoIndex);
+    vassert((infoIndex && (infoIndex < 4096)), "(infoIndex) = %i", infoIndex);
     if (g_xAnimInfo[infoIndex].state.currentAnimTime == 0.0 && !g_xAnimInfo[infoIndex].state.cycleCount)
         return infoIndex;
     if (g_xAnimInfo[infoIndex].state.cycleCount != g_xAnimInfo[infoIndex].state.oldCycleCount)
@@ -934,14 +857,7 @@ void __cdecl XAnimResetTimeInternal(uint infoIndex)
 {
     XAnimState* state; // [esp+0h] [ebp-8h]
 
-    if (!infoIndex || infoIndex >= 0x1000)
-        MyAssertHandler(
-            ".\\xanim\\xanim.cpp",
-            1570,
-            0,
-            "%s\n\t(infoIndex) = %i",
-            "(infoIndex && (infoIndex < 4096))",
-            infoIndex);
+    vassert((infoIndex && (infoIndex < 4096)), "(infoIndex) = %i", infoIndex);
     state = &g_xAnimInfo[infoIndex].state;
     state->currentAnimTime = 0.0;
     state->cycleCount = 0;
@@ -958,14 +874,7 @@ uint __cdecl XAnimCloneInitTime(XAnimTree_s* tree, uint infoIndex, uint parentIn
     uint animToModel; // [esp+Ch] [ebp-8h]
     uint childInfoIndex; // [esp+10h] [ebp-4h]
 
-    if (!infoIndex || infoIndex >= 0x1000)
-        MyAssertHandler(
-            ".\\xanim\\xanim.cpp",
-            1603,
-            0,
-            "%s\n\t(infoIndex) = %i",
-            "(infoIndex && (infoIndex < 4096))",
-            infoIndex);
+    vassert((infoIndex && (infoIndex < 4096)), "(infoIndex) = %i", infoIndex);
     fromInfo = &g_xAnimInfo[infoIndex];
     animToModel = fromInfo->animToModel;
     if (fromInfo->animToModel)
@@ -1036,19 +945,10 @@ void __cdecl XAnimUpdateTimeAndNotetrack(const DObj_s* obj, uint infoIndex, floa
     tree = obj->tree;
     if (!obj->tree)
         MyAssertHandler(".\\xanim\\xanim.cpp", 1363, 0, "%s", "tree");
-    if (dtime < 0.0)
-        MyAssertHandler(".\\xanim\\xanim.cpp", 1365, 0, "%s\n\t(dtime) = %g", "(dtime >= 0)", dtime);
-    if (!infoIndex || infoIndex >= 0x1000)
-        MyAssertHandler(
-            ".\\xanim\\xanim.cpp",
-            1366,
-            0,
-            "%s\n\t(infoIndex) = %i",
-            "(infoIndex && (infoIndex < 4096))",
-            infoIndex);
+    vassert((dtime >= 0), "(dtime) = %g", dtime);
+    vassert((infoIndex && (infoIndex < 4096)), "(infoIndex) = %i", infoIndex);
     info = &g_xAnimInfo[infoIndex];
-    if (!info->inuse)
-        MyAssertHandler(".\\xanim\\xanim.cpp", 1369, 0, "%s", "info->inuse");
+    iassert(info->inuse);
     if (info->state.weight == 0.0)
     {
         XAnimCheckFreeInfo(obj->tree, infoIndex, 0);
@@ -1076,8 +976,7 @@ void __cdecl XAnimUpdateTimeAndNotetrack(const DObj_s* obj, uint infoIndex, floa
     {
         if ((info->animParent.flags & 4) != 0)
             MyAssertHandler(".\\xanim\\xanim.cpp", 1401, 0, "%s", "!(info->animParent.flags & XANIM_SYNC_ROOT)");
-        if (obj->entnum && info->notifyName)
-            MyAssertHandler(".\\xanim\\xanim.cpp", 1402, 0, "%s", "!(obj->entnum && info->notifyName)");
+        iassert(!(obj->entnum && info->notifyName));
         dtimeb = dtime * info->state.rate;
         if (dtimeb == 0.0)
             goto LABEL_18;
@@ -1095,14 +994,7 @@ void __cdecl XAnimCheckFreeInfo(XAnimTree_s* tree, uint infoIndex, int hasWeight
     XAnimInfo* info; // [esp+8h] [ebp-8h]
     uint childInfoIndex; // [esp+Ch] [ebp-4h]
 
-    if (!infoIndex || infoIndex >= 0x1000)
-        MyAssertHandler(
-            ".\\xanim\\xanim.cpp",
-            821,
-            0,
-            "%s\n\t(infoIndex) = %i",
-            "(infoIndex && (infoIndex < 4096))",
-            infoIndex);
+    vassert((infoIndex && (infoIndex < 4096)), "(infoIndex) = %i", infoIndex);
     info = &g_xAnimInfo[infoIndex];
     if (info->state.weight == 0.0)
         hasWeight = 0;
@@ -1207,18 +1099,14 @@ double __cdecl XAnimGetAverageRateFrequency(const XAnimTree_s *tree, uint infoIn
     const XAnimParts *parts; // [esp+28h] [ebp-4h]
     uint infoIndexa; // [esp+38h] [ebp+Ch]
 
-    if (!tree)
-        MyAssertHandler(".\\xanim\\xanim.cpp", 853, 0, "%s", "tree");
-    if (!tree->anims)
-        MyAssertHandler(".\\xanim\\xanim.cpp", 854, 0, "%s", "tree->anims");
+    iassert(tree);
+    iassert(tree->anims);
     info = &g_xAnimInfo[infoIndex];
-    if (!info->inuse)
-        MyAssertHandler(".\\xanim\\xanim.cpp", 858, 0, "%s", "info->inuse");
+    iassert(info->inuse);
     if (info->animToModel)
     {
         parts = info->parts;
-        if (!parts)
-            MyAssertHandler(".\\xanim\\xanim.cpp", 864, 0, "%s", "parts");
+        iassert(parts);
         return parts->frequency;
     }
     else
@@ -1237,8 +1125,7 @@ double __cdecl XAnimGetAverageRateFrequency(const XAnimTree_s *tree, uint infoIn
                     infoIndexa);
             infoa = &g_xAnimInfo[infoIndexa];
             weight = infoa->state.weight;
-            if (weight < 0.0)
-                MyAssertHandler(".\\xanim\\xanim.cpp", 876, 0, "%s\n\t(weight) = %g", "(weight >= 0.0f)", weight);
+            vassert((weight >= 0.0f), "(weight) = %g", weight);
             if (weight != 0.0)
             {
                 frequency = XAnimGetAverageRateFrequency(tree, infoIndexa);
@@ -1275,8 +1162,7 @@ void __cdecl XAnimUpdateTimeAndNotetrackLeaf(
     __int16 cycleCount; // [esp+3Ch] [ebp-4h]
     float dtimea; // [esp+54h] [ebp+14h]
 
-    if (!parts)
-        MyAssertHandler(".\\xanim\\xanim.cpp", 1231, 0, "%s", "parts");
+    iassert(parts);
     info = &g_xAnimInfo[infoIndex];
     state = &info->state;
     if (info->state.oldTime < 0.0)
@@ -1286,8 +1172,7 @@ void __cdecl XAnimUpdateTimeAndNotetrackLeaf(
     {
         time = g_xAnimInfo[infoIndex].state.oldTime + dtimea;
         cycleCount = g_xAnimInfo[infoIndex].state.cycleCount;
-        if (time < 0.0)
-            MyAssertHandler(".\\xanim\\xanim.cpp", 1245, 0, "%s\n\t(time) = %g", "(time >= 0)", time);
+        vassert((time >= 0), "(time) = %g", time);
         if (time >= 1.0)
         {
             if (parts->bLoop)
@@ -1297,8 +1182,7 @@ void __cdecl XAnimUpdateTimeAndNotetrackLeaf(
                     time = time - 1.0;
                     ++cycleCount;
                 } while (time >= 1.0);
-                if (time < 0.0)
-                    MyAssertHandler(".\\xanim\\xanim.cpp", 1262, 0, "%s", "time >= 0");
+                iassert(time >= 0);
             }
             else
             {
@@ -1328,14 +1212,7 @@ void __cdecl XAnimUpdateTimeAndNotetrackLeaf(
             info->notifyIndex = -1;
             if (bNotify)
                 XAnimProcessClientNotify(info, dtimea);
-            if (state->currentAnimTime < 0.0)
-                MyAssertHandler(
-                    ".\\xanim\\xanim.cpp",
-                    1282,
-                    0,
-                    "%s\n\t(state->currentAnimTime) = %g",
-                    "(state->currentAnimTime >= 0)",
-                    state->currentAnimTime);
+            vassert((state->currentAnimTime >= 0), "(state->currentAnimTime) = %g", state->currentAnimTime);
             if (parts->bLoop)
                 v7 = state->currentAnimTime < 1.0;
             else
@@ -1374,8 +1251,7 @@ void __cdecl XAnimProcessClientNotify(XAnimInfo* info, float dtime)
     XAnimParts* parts; // [esp+1Ch] [ebp-4h]
 
     state = &info->state;
-    if (dtime == 0.0)
-        MyAssertHandler(".\\xanim\\xanim.cpp", 1062, 0, "%s", "dtime");
+    iassert(dtime);
     notifyType = info->notifyType;
     if (notifyType)
     {
@@ -1389,8 +1265,7 @@ void __cdecl XAnimProcessClientNotify(XAnimInfo* info, float dtime)
         else if (info->animToModel)
         {
             parts = info->parts;
-            if (!parts)
-                MyAssertHandler(".\\xanim\\xanim.cpp", 1084, 0, "%s", "parts");
+            iassert(parts);
             notifyIndex = XAnimGetNextNotifyIndex(parts, info->state.oldTime);
             if (notifyIndex >= (int)parts->notifyCount)
                 MyAssertHandler(".\\xanim\\xanim.cpp", 1087, 0, "%s", "notifyIndex < parts->notifyCount");
@@ -1399,8 +1274,7 @@ void __cdecl XAnimProcessClientNotify(XAnimInfo* info, float dtime)
             {
                 if (state->currentAnimTime == 1.0)
                 {
-                    if (parts->bLoop)
-                        MyAssertHandler(".\\xanim\\xanim.cpp", 1134, 0, "%s", "!parts->bLoop");
+                    iassert(!parts->bLoop);
                     if (notifyInfo->time >= (double)info->state.oldTime)
                     {
                         do
@@ -1478,22 +1352,17 @@ uint16_t __cdecl XAnimGetNextNotifyIndex(const XAnimParts* parts, float time)
     float testTime; // [esp+14h] [ebp-8h]
     int notifyInfoIndex; // [esp+18h] [ebp-4h]
 
-    if (!parts)
-        MyAssertHandler(".\\xanim\\xanim.cpp", 901, 0, "%s", "parts");
-    if (time < 0.0)
-        MyAssertHandler(".\\xanim\\xanim.cpp", 903, 0, "%s\n\t(time) = %g", "(time >= 0)", time);
-    if (time >= 1.0)
-        MyAssertHandler(".\\xanim\\xanim.cpp", 904, 0, "%s\n\t(time) = %g", "(time < 1.f)", time);
+    iassert(parts);
+    vassert((time >= 0), "(time) = %g", time);
+    vassert((time < 1.f), "(time) = %g", time);
     bestNotifyInfo = 0;
     bestTime = 2.0;
     notifyInfo = parts->notify;
-    if (!notifyInfo)
-        MyAssertHandler(".\\xanim\\xanim.cpp", 910, 0, "%s", "notifyInfo");
+    iassert(notifyInfo);
     for (notifyInfoIndex = 0; notifyInfoIndex < parts->notifyCount; ++notifyInfoIndex)
     {
         testTime = notifyInfo->time;
-        if (testTime < 0.0)
-            MyAssertHandler(".\\xanim\\xanim.cpp", 914, 0, "%s", "testTime >= 0");
+        iassert(testTime >= 0);
         if (time <= (double)testTime && bestTime > (double)testTime)
         {
             bestTime = testTime;
@@ -1501,8 +1370,7 @@ uint16_t __cdecl XAnimGetNextNotifyIndex(const XAnimParts* parts, float time)
         }
         ++notifyInfo;
     }
-    if (!bestNotifyInfo)
-        MyAssertHandler(".\\xanim\\xanim.cpp", 924, 0, "%s", "bestNotifyInfo");
+    iassert(bestNotifyInfo);
     if (bestNotifyInfo != parts->notify && bestNotifyInfo[-1].time >= (double)bestNotifyInfo->time)
         MyAssertHandler(
             ".\\xanim\\xanim.cpp",
@@ -1515,8 +1383,7 @@ uint16_t __cdecl XAnimGetNextNotifyIndex(const XAnimParts* parts, float time)
 
 double __cdecl XAnimGetNotifyFracLeaf(const XAnimState* state, const XAnimState* nextState, float time, float dtime)
 {
-    if (dtime == 0.0)
-        MyAssertHandler(".\\xanim\\xanim.cpp", 940, 0, "%s", "dtime");
+    iassert(dtime);
     if (nextState->oldTime == 1.0)
         return 1.0;
     if (nextState->oldTime <= (double)nextState->currentAnimTime)
@@ -1557,8 +1424,7 @@ void __cdecl XAnimAddClientNotify(uint notetrackName, float frac, uint notifyTyp
 
     if (g_notifyListSize >= 128)
         MyAssertHandler(".\\xanim\\xanim.cpp", 1032, 0, "%s", "g_notifyListSize < MAX_NOTIFYLIST");
-    if (!Sys_IsMainThread())
-        MyAssertHandler(".\\xanim\\xanim.cpp", 1033, 0, "%s", "Sys_IsMainThread()");
+    iassert(Sys_IsMainThread());
     for (i = g_notifyListSize - 1; i >= 0; --i)
     {
         notify = &g_notifyList[i];
@@ -1609,8 +1475,7 @@ void __cdecl XAnimUpdateTimeAndNotetrackSyncSubTree(
             1.0);
     time = g_xAnimInfo[infoIndex].state.oldTime + dtime;
     cycleCount = g_xAnimInfo[infoIndex].state.oldCycleCount;
-    if (time < 0.0)
-        MyAssertHandler(".\\xanim\\xanim.cpp", 1305, 0, "%s\n\t(time) = %g", "(time >= 0)", time);
+    vassert((time >= 0), "(time) = %g", time);
     if (time >= 1.0)
     {
         if ((info->animParent.flags & 2) != 0)
@@ -1633,8 +1498,7 @@ void __cdecl XAnimUpdateTimeAndNotetrackSyncSubTree(
                 time = time - 1.0;
                 ++cycleCount;
             } while (time >= 1.0);
-            if (time < 0.0)
-                MyAssertHandler(".\\xanim\\xanim.cpp", 1324, 0, "%s", "time >= 0");
+            iassert(time >= 0);
         }
     }
     if ((info->animParent.flags & 1) != 0)
@@ -1661,14 +1525,7 @@ void __cdecl XAnimUpdateTimeAndNotetrackSyncSubTree(
         info->notifyIndex = -1;
         if (bNotify)
             XAnimProcessClientNotify(info, dtime);
-        if (state->currentAnimTime < 0.0)
-            MyAssertHandler(
-                ".\\xanim\\xanim.cpp",
-                1344,
-                0,
-                "%s\n\t(state->currentAnimTime) = %g",
-                "(state->currentAnimTime >= 0)",
-                state->currentAnimTime);
+        vassert((state->currentAnimTime >= 0), "(state->currentAnimTime) = %g", state->currentAnimTime);
         if ((info->animParent.flags & 1) != 0)
             v6 = state->currentAnimTime < 1.0;
         else
@@ -1707,16 +1564,8 @@ void __cdecl XAnimUpdateInfoSync(
     XAnimInfo* info; // [esp+Ch] [ebp-4h]
     uint infoIndexa; // [esp+1Ch] [ebp+Ch]
 
-    if (dtime <= 0.0)
-        MyAssertHandler(".\\xanim\\xanim.cpp", 1172, 0, "%s", "dtime > 0");
-    if (!infoIndex || infoIndex >= 0x1000)
-        MyAssertHandler(
-            ".\\xanim\\xanim.cpp",
-            1173,
-            0,
-            "%s\n\t(infoIndex) = %i",
-            "(infoIndex && (infoIndex < 4096))",
-            infoIndex);
+    iassert(dtime > 0);
+    vassert((infoIndex && (infoIndex < 4096)), "(infoIndex) = %i", infoIndex);
     info = &g_xAnimInfo[infoIndex];
     state = &info->state;
     if (info->state.weight == 0.0)
@@ -1727,8 +1576,7 @@ void __cdecl XAnimUpdateInfoSync(
     {
         if (g_xAnimInfo[infoIndex].state.goalWeight == 0.0)
             bNotify = 0;
-        if (!info->inuse)
-            MyAssertHandler(".\\xanim\\xanim.cpp", 1187, 0, "%s", "info->inuse");
+        iassert(info->inuse);
         if (syncState->oldTime != g_xAnimInfo[infoIndex].state.oldTime
             || g_xAnimInfo[infoIndex].state.oldCycleCount != syncState->oldCycleCount)
         {
@@ -1762,10 +1610,8 @@ void __cdecl XAnimProcessServerNotify(const DObj_s* obj, XAnimInfo* info, float 
     int notifyIndexa; // [esp+8h] [ebp-8h]
     XAnimParts* parts; // [esp+Ch] [ebp-4h]
 
-    if (info->state.goalWeight == 0.0)
-        MyAssertHandler(".\\xanim\\xanim.cpp", 1944, 0, "%s", "info->state.goalWeight");
-    if (time > 1.0)
-        MyAssertHandler(".\\xanim\\xanim.cpp", 1945, 0, "%s", "time <= 1.f");
+    iassert(info->state.goalWeight);
+    iassert(time <= 1.f);
     if (obj->entnum && info->notifyName)
     {
         if (info->state.currentAnimTime == 1.0)
@@ -1783,28 +1629,23 @@ void __cdecl XAnimProcessServerNotify(const DObj_s* obj, XAnimInfo* info, float 
             {
                 if (info->notifyIndex >= 0 || (XAnimUpdateServerNotifyIndex(info, parts), info->notifyIndex >= 0))
                 {
-                    if (info->state.currentAnimTime >= 1.0)
-                        MyAssertHandler(".\\xanim\\xanim.cpp", 1987, 0, "%s", "info->state.currentAnimTime < 1.f");
+                    iassert(info->state.currentAnimTime < 1.f);
                     if (!parts->notifyCount)
                         MyAssertHandler(".\\xanim\\xanim.cpp", 1988, 0, "%s", "parts->notifyCount > 0");
                     if (parts->notify->time > 1.0)
                         MyAssertHandler(".\\xanim\\xanim.cpp", 1989, 0, "%s", "parts->notify[0].time <= 1.f");
                     notifyIndex = info->notifyIndex;
-                    if (notifyIndex < 0)
-                        MyAssertHandler(".\\xanim\\xanim.cpp", 1992, 0, "%s", "notifyIndex >= 0");
-                    if (notifyIndex >= parts->notifyCount)
-                        MyAssertHandler(".\\xanim\\xanim.cpp", 1993, 0, "%s", "notifyIndex < parts->notifyCount");
+                    iassert(notifyIndex >= 0);
+                    iassert(notifyIndex < parts->notifyCount);
                     notifyInfo = &parts->notify[notifyIndex];
                     if (info->state.currentAnimTime <= (double)time)
                     {
                         if (time == 1.0)
                         {
-                            if (parts->bLoop)
-                                MyAssertHandler(".\\xanim\\xanim.cpp", 2042, 0, "%s", "!parts->bLoop");
+                            iassert(!parts->bLoop);
                             if (notifyInfo->time >= (double)info->state.currentAnimTime)
                             {
-                                if (notifyIndex >= parts->notifyCount)
-                                    MyAssertHandler(".\\xanim\\xanim.cpp", 2047, 0, "%s", "notifyIndex < parts->notifyCount");
+                                iassert(notifyIndex < parts->notifyCount);
                                 do
                                 {
                                     if (notifyInfo->time < (double)info->state.currentAnimTime)
@@ -1822,8 +1663,7 @@ void __cdecl XAnimProcessServerNotify(const DObj_s* obj, XAnimInfo* info, float 
                         }
                         else if (notifyInfo->time < (double)time && notifyInfo->time >= (double)info->state.currentAnimTime)
                         {
-                            if (notifyIndex >= parts->notifyCount)
-                                MyAssertHandler(".\\xanim\\xanim.cpp", 2066, 0, "%s", "notifyIndex < parts->notifyCount");
+                            iassert(notifyIndex < parts->notifyCount);
                             do
                             {
                                 if (notifyInfo->time < (double)info->state.currentAnimTime)
@@ -1843,8 +1683,7 @@ void __cdecl XAnimProcessServerNotify(const DObj_s* obj, XAnimInfo* info, float 
                     {
                         if (notifyInfo->time >= (double)info->state.currentAnimTime)
                         {
-                            if (notifyIndex >= parts->notifyCount)
-                                MyAssertHandler(".\\xanim\\xanim.cpp", 2015, 0, "%s", "notifyIndex < parts->notifyCount");
+                            iassert(notifyIndex < parts->notifyCount);
                             do
                             {
                                 if (notifyInfo->time < (double)info->state.currentAnimTime)
@@ -1870,8 +1709,7 @@ void __cdecl XAnimProcessServerNotify(const DObj_s* obj, XAnimInfo* info, float 
                     }
                     else
                     {
-                        if (notifyIndex >= parts->notifyCount)
-                            MyAssertHandler(".\\xanim\\xanim.cpp", 2000, 0, "%s", "notifyIndex < parts->notifyCount");
+                        iassert(notifyIndex < parts->notifyCount);
                         do
                         {
                             NotifyServerNotetrack(obj, info->notifyName, notifyInfo->name);
@@ -1904,15 +1742,13 @@ XAnimParts* __cdecl XAnimGetParts(const XAnimTree_s* tree, XAnimInfo* info)
     if (info->animToModel)
     {
         parts = info->parts;
-        if (!parts)
-            MyAssertHandler(".\\xanim\\xanim.cpp", 971, 0, "%s", "parts");
+        iassert(parts);
         return parts;
     }
     else if (info->notifyChild)
     {
         anim = &tree->anims->entries[info->notifyChild];
-        if (!IsLeafNode(anim))
-            MyAssertHandler(".\\xanim\\xanim.cpp", 979, 0, "%s", "IsLeafNode( anim )");
+        iassert(IsLeafNode( anim ));
         partsa = anim->parts;
         if (!partsa)
             MyAssertHandler(".\\xanim\\xanim.cpp", 982, 0, "%s", "parts");
@@ -1987,23 +1823,13 @@ double __cdecl XAnimFindServerNoteTrack(const DObj_s* obj, uint infoIndex, float
     tree = obj->tree;
     if (!obj->tree)
         MyAssertHandler(".\\xanim\\xanim.cpp", 1887, 0, "%s", "tree");
-    if (dtime < 0.0)
-        MyAssertHandler(".\\xanim\\xanim.cpp", 1889, 0, "%s", "dtime >= 0");
-    if (!tree->anims)
-        MyAssertHandler(".\\xanim\\xanim.cpp", 1890, 0, "%s", "tree->anims");
-    if (!infoIndex || infoIndex >= 0x1000)
-        MyAssertHandler(
-            ".\\xanim\\xanim.cpp",
-            1892,
-            0,
-            "%s\n\t(infoIndex) = %i",
-            "(infoIndex && (infoIndex < 4096))",
-            infoIndex);
+    iassert(dtime >= 0);
+    iassert(tree->anims);
+    vassert((infoIndex && (infoIndex < 4096)), "(infoIndex) = %i", infoIndex);
     info = &g_xAnimInfo[infoIndex];
     if (info->state.weight == 0.0 || g_xAnimInfo[infoIndex].state.goalWeight == 0.0)
         return 1.0;
-    if (!info->inuse)
-        MyAssertHandler(".\\xanim\\xanim.cpp", 1900, 0, "%s", "info->inuse");
+    iassert(info->inuse);
     if (info->animToModel)
         return XAnimFindServerNoteTrackLeafNode(obj, info, dtime);
     if ((info->animParent.flags & 3) != 0)
@@ -2028,8 +1854,7 @@ double __cdecl XAnimFindServerNoteTrack(const DObj_s* obj, uint infoIndex, float
     }
     else
     {
-        if (obj->entnum && info->notifyName)
-            MyAssertHandler(".\\xanim\\xanim.cpp", 1919, 0, "%s", "!(obj->entnum && info->notifyName)");
+        iassert(!(obj->entnum && info->notifyName));
         dtimeb = dtime * g_xAnimInfo[infoIndex].state.rate;
         if (dtimeb == 0.0)
         {
@@ -2064,19 +1889,16 @@ double __cdecl XAnimFindServerNoteTrackLeafNode(const DObj_s* obj, XAnimInfo* in
     const XAnimParts* parts; // [esp+3Ch] [ebp-4h]
     float dtimea; // [esp+50h] [ebp+10h]
 
-    if (!info->inuse)
-        MyAssertHandler(".\\xanim\\xanim.cpp", 1784, 0, "%s", "info->inuse");
+    iassert(info->inuse);
     parts = info->parts;
-    if (!parts)
-        MyAssertHandler(".\\xanim\\xanim.cpp", 1788, 0, "%s", "parts");
+    iassert(parts);
     state = &info->state;
     dtimea = info->state.rate * parts->frequency * dtime;
     if (dtimea == 0.0)
         return 1.0;
     time = info->state.oldTime + dtimea;
     cycleCount = info->state.oldCycleCount;
-    if (time < 0.0)
-        MyAssertHandler(".\\xanim\\xanim.cpp", 1799, 0, "%s", "time >= 0");
+    iassert(time >= 0);
     if (parts->bLoop)
     {
         while (time >= 1.0)
@@ -2113,14 +1935,11 @@ double __cdecl XAnimGetNextServerNotifyFrac(
     XAnimTree_s* tree; // [esp+8h] [ebp-8h]
     const XAnimParts* parts; // [esp+Ch] [ebp-4h]
 
-    if (info->state.goalWeight == 0.0)
-        MyAssertHandler(".\\xanim\\xanim.cpp", 999, 0, "%s", "info->state.goalWeight");
-    if (dtime == 0.0)
-        MyAssertHandler(".\\xanim\\xanim.cpp", 1000, 0, "%s", "dtime");
+    iassert(info->state.goalWeight);
+    iassert(dtime);
     if (!obj->entnum || !info->notifyName)
         return 1.0;
-    if (!info->inuse)
-        MyAssertHandler(".\\xanim\\xanim.cpp", 1006, 0, "%s", "info->inuse");
+    iassert(info->inuse);
     tree = obj->tree;
     if (!obj->tree)
         MyAssertHandler(".\\xanim\\xanim.cpp", 1010, 0, "%s", "tree");
@@ -2143,10 +1962,8 @@ double __cdecl XAnimFindServerNoteTrackSyncSubTree(const DObj_s* obj, XAnimInfo*
     state = &info->state;
     time = info->state.oldTime + dtime;
     cycleCount = info->state.oldCycleCount;
-    if (time < 0.0)
-        MyAssertHandler(".\\xanim\\xanim.cpp", 1840, 0, "%s", "time >= 0");
-    if (!info->inuse)
-        MyAssertHandler(".\\xanim\\xanim.cpp", 1843, 0, "%s", "info->inuse");
+    iassert(time >= 0);
+    iassert(info->inuse);
     if ((info->animParent.flags & 2) != 0)
     {
         if ((info->animParent.flags & 1) != 0)
@@ -2170,8 +1987,7 @@ double __cdecl XAnimFindServerNoteTrackSyncSubTree(const DObj_s* obj, XAnimInfo*
             time = time - 1.0;
             ++cycleCount;
         }
-        if (time < 0.0)
-            MyAssertHandler(".\\xanim\\xanim.cpp", 1862, 0, "%s", "time >= 0");
+        iassert(time >= 0);
     }
     if (info->state.currentAnimTime - time > (double)(cycleCount - info->state.cycleCount))
         return 1.0;
@@ -2218,8 +2034,7 @@ double __cdecl XAnimGetServerNotifyFracSyncTotal(
 
 int __cdecl DObjGetClientNotifyList(XAnimNotify_s** notifyList)
 {
-    if (!Sys_IsMainThread())
-        MyAssertHandler(".\\xanim\\xanim.cpp", 2804, 0, "%s", "Sys_IsMainThread()");
+    iassert(Sys_IsMainThread());
     *notifyList = g_notifyList;
     return g_notifyListSize;
 }
@@ -2229,10 +2044,8 @@ void __cdecl DObjDisplayAnimToBuffer(const DObj_s* obj, const char* header, char
     XAnimTree_s* tree; // [esp+0h] [ebp-8h]
     int bufferPos; // [esp+4h] [ebp-4h] BYREF
 
-    if (!header)
-        MyAssertHandler(".\\xanim\\xanim.cpp", 2816, 0, "%s", "header");
-    if (!buffer)
-        MyAssertHandler(".\\xanim\\xanim.cpp", 2817, 0, "%s", "buffer");
+    iassert(header);
+    iassert(buffer);
     tree = obj->tree;
     if (obj->tree && tree->children)
     {
@@ -2266,34 +2079,20 @@ void __cdecl XAnimDisplay(
     float realtimedelta; // [esp+54h] [ebp-4h]
     uint infoIndexa; // [esp+64h] [ebp+Ch]
 
-    if (!tree)
-        MyAssertHandler(".\\xanim\\xanim.cpp", 2159, 0, "%s", "tree");
-    if (!tree->anims)
-        MyAssertHandler(".\\xanim\\xanim.cpp", 2160, 0, "%s", "tree->anims");
-    if (!buffer)
-        MyAssertHandler(".\\xanim\\xanim.cpp", 2161, 0, "%s", "buffer");
-    if (!bufferPos)
-        MyAssertHandler(".\\xanim\\xanim.cpp", 2162, 0, "%s", "bufferPos");
-    if (bufferSize <= *bufferPos)
-        MyAssertHandler(".\\xanim\\xanim.cpp", 2163, 0, "%s", "bufferSize > *bufferPos");
-    if (!infoIndex || infoIndex >= 0x1000)
-        MyAssertHandler(
-            ".\\xanim\\xanim.cpp",
-            2165,
-            0,
-            "%s\n\t(infoIndex) = %i",
-            "(infoIndex && (infoIndex < 4096))",
-            infoIndex);
+    iassert(tree);
+    iassert(tree->anims);
+    iassert(buffer);
+    iassert(bufferPos);
+    iassert(bufferSize > *bufferPos);
+    vassert((infoIndex && (infoIndex < 4096)), "(infoIndex) = %i", infoIndex);
     info = &g_xAnimInfo[infoIndex];
     if (info->state.weight < 0.0)
         MyAssertHandler(".\\xanim\\xanim.cpp", 2169, 0, "%s", "state->weight >= 0");
     for (i = 0; i < depth; ++i)
         Com_sprintfPos(buffer, bufferSize, bufferPos, " ");
-    if (!info->inuse)
-        MyAssertHandler(".\\xanim\\xanim.cpp", 2175, 0, "%s", "info->inuse");
+    iassert(info->inuse);
     animIndex = info->animIndex;
-    if (animIndex >= tree->anims->size)
-        MyAssertHandler(".\\xanim\\xanim.cpp", 2178, 0, "%s", "animIndex < tree->anims->size");
+    iassert(animIndex < tree->anims->size);
     debugName = XAnimGetAnimDebugName(tree->anims, animIndex);
     if (g_xAnimInfo[infoIndex].state.weight == 0.0)
     {
@@ -2313,8 +2112,7 @@ void __cdecl XAnimDisplay(
     if (info->animToModel)
     {
         parts = info->parts;
-        if (!parts)
-            MyAssertHandler(".\\xanim\\xanim.cpp", 2194, 0, "%s", "parts");
+        iassert(parts);
         delta = g_xAnimInfo[infoIndex].state.currentAnimTime - g_xAnimInfo[infoIndex].state.oldTime;
         if (delta < 0.0)
             delta = delta + 1.0;
@@ -2506,17 +2304,9 @@ void __cdecl XAnimCalcDeltaTree(
     XAnimSimpleRotPos* rotPos2; // [esp+A0h] [ebp-8h]
     const XAnimParts* parts; // [esp+A4h] [ebp-4h]
 
-    if (!infoIndex || infoIndex >= 0x1000)
-        MyAssertHandler(
-            ".\\xanim\\xanim.cpp",
-            2262,
-            0,
-            "%s\n\t(infoIndex) = %i",
-            "(infoIndex && (infoIndex < 4096))",
-            infoIndex);
+    vassert((infoIndex && (infoIndex < 4096)), "(infoIndex) = %i", infoIndex);
     info = &g_xAnimInfo[infoIndex];
-    if (!info->inuse)
-        MyAssertHandler(".\\xanim\\xanim.cpp", 2265, 0, "%s", "info->inuse");
+    iassert(info->inuse);
     if (info->animToModel)
     {
         if (deltaInfo.bClear)
@@ -2529,8 +2319,7 @@ void __cdecl XAnimCalcDeltaTree(
             rotPos->pos[2] = 0.0;
         }
         parts = info->parts;
-        if (!parts)
-            MyAssertHandler(".\\xanim\\xanim.cpp", 2278, 0, "%s", "parts");
+        iassert(parts);
         if (parts->bDelta)
         {
             if (deltaInfo.bAbs)
@@ -2676,8 +2465,7 @@ void __cdecl XAnimCalcDeltaTree(
         }
         else
         {
-            if (!deltaInfo.bClear)
-                MyAssertHandler(".\\xanim\\xanim.cpp", 2337, 0, "%s", "deltaInfo.bClear");
+            iassert(deltaInfo.bClear);
             if (rotPos->posWeight != 0.0)
             {
                 v7 = 1.0 / rotPos->posWeight;
@@ -3137,8 +2925,7 @@ uint __cdecl XAnimEnsureGoalWeightParent(DObj_s* obj, uint animIndex)
         for (infoIndexa = g_xAnimInfo[parentInfoIndex].children; infoIndexa; infoIndexa = info->next)
         {
             info = &g_xAnimInfo[infoIndexa];
-            if (!info->inuse)
-                MyAssertHandler(".\\xanim\\xanim.cpp", 3218, 0, "%s", "info->inuse");
+            iassert(info->inuse);
             if (info->animIndex == animIndex)
                 return infoIndexa;
         }
@@ -3171,21 +2958,11 @@ void __cdecl XAnimClearGoalWeightInternal(
     float goalTime; // [esp+8h] [ebp-Ch]
     XAnimInfo* info; // [esp+10h] [ebp-4h]
 
-    if (!tree)
-        MyAssertHandler(".\\xanim\\xanim.cpp", 3286, 0, "%s", "tree");
-    if (!tree->anims)
-        MyAssertHandler(".\\xanim\\xanim.cpp", 3287, 0, "%s", "tree->anims");
-    if (!infoIndex || infoIndex >= 0x1000)
-        MyAssertHandler(
-            ".\\xanim\\xanim.cpp",
-            3288,
-            0,
-            "%s\n\t(infoIndex) = %i",
-            "(infoIndex && (infoIndex < 4096))",
-            infoIndex);
+    iassert(tree);
+    iassert(tree->anims);
+    vassert((infoIndex && (infoIndex < 4096)), "(infoIndex) = %i", infoIndex);
     info = &g_xAnimInfo[infoIndex];
-    if (!info->inuse)
-        MyAssertHandler(".\\xanim\\xanim.cpp", 3291, 0, "%s", "info->inuse");
+    iassert(info->inuse);
     if (info->state.goalWeight == 0.0 && !forceBlendTime)
     {
         goalTime = info->state.goalTime;
@@ -3244,12 +3021,9 @@ void __cdecl XAnimClearTreeGoalWeightsStrict(XAnimTree_s* tree, uint animIndex, 
     const XAnimEntry* anim; // [esp+8h] [ebp-8h]
     int i; // [esp+Ch] [ebp-4h]
 
-    if (!tree)
-        MyAssertHandler(".\\xanim\\xanim.cpp", 3355, 0, "%s", "tree");
-    if (!tree->anims)
-        MyAssertHandler(".\\xanim\\xanim.cpp", 3356, 0, "%s", "tree->anims");
-    if (animIndex >= tree->anims->size)
-        MyAssertHandler(".\\xanim\\xanim.cpp", 3357, 0, "%s", "animIndex < tree->anims->size");
+    iassert(tree);
+    iassert(tree->anims);
+    iassert(animIndex < tree->anims->size);
     anim = &tree->anims->entries[animIndex];
     numAnims = anim->numAnims;
     for (i = 0; i < numAnims; ++i)
@@ -3274,18 +3048,9 @@ void __cdecl XAnimClearGoalWeightKnobInternal(
     uint childInfoIndex; // [esp+3Ch] [ebp-4h]
     uint childInfoIndexa; // [esp+3Ch] [ebp-4h]
 
-    if (!tree)
-        MyAssertHandler(".\\xanim\\xanim.cpp", 3377, 0, "%s", "tree");
-    if (!tree->anims)
-        MyAssertHandler(".\\xanim\\xanim.cpp", 3378, 0, "%s", "tree->anims");
-    if (!infoIndex || infoIndex >= 0x1000)
-        MyAssertHandler(
-            ".\\xanim\\xanim.cpp",
-            3379,
-            0,
-            "%s\n\t(infoIndex) = %i",
-            "(infoIndex && (infoIndex < 4096))",
-            infoIndex);
+    iassert(tree);
+    iassert(tree->anims);
+    vassert((infoIndex && (infoIndex < 4096)), "(infoIndex) = %i", infoIndex);
     largestWeightDiff = 0.0;
     if (g_xAnimInfo[infoIndex].parent)
         children = g_xAnimInfo[g_xAnimInfo[infoIndex].parent].children;

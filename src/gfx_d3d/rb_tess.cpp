@@ -247,14 +247,7 @@ void __cdecl R_TessCodeMeshList_AddCodeMeshArgs(
         v4 = data->codeMeshArgs[argGlobalIndex][1];
         v5 = data->codeMeshArgs[argGlobalIndex][2];
         v6 = data->codeMeshArgs[argGlobalIndex][3];
-        if (constantId >= 0x3A)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\src\\gfx_d3d\\r_state.h",
-                495,
-                0,
-                "constant doesn't index CONST_SRC_CODE_COUNT_FLOAT4\n\t%i not in [0, %i)",
-                constantId,
-                58);
+        bcassert(constantId, 0x3A);
         v7 = source->input.consts[constantId];
         *v7 = v3;
         v7[1] = v4;
@@ -456,13 +449,7 @@ uint __cdecl R_TessParticleCloudList(const GfxDrawSurfListArgs *listArgs, GfxCmd
 
     context = listArgs->context;
     commonSource = listArgs->context.source;
-    if (prepassContext.state && commonSource != prepassContext.source)
-        MyAssertHandler(
-            ".\\rb_tess.cpp",
-            629,
-            0,
-            "%s",
-            "prepassContext.state == NULL || commonSource == prepassContext.source");
+    iassert(prepassContext.state == NULL || commonSource == prepassContext.source);
     info = listArgs->info;
     if (r_logFile->current.integer)
     {
@@ -471,14 +458,7 @@ uint __cdecl R_TessParticleCloudList(const GfxDrawSurfListArgs *listArgs, GfxCmd
     }
     drawSurf = info->drawSurfs[listArgs->firstDrawSurfIndex];
     data = commonSource->input.data;
-    if ((uint)(uint16_t)drawSurf.fields.objectId >= data->cloudCount)
-        MyAssertHandler(
-            ".\\rb_tess.cpp",
-            639,
-            0,
-            "drawSurf.fields.objectId doesn't index data->cloudCount\n\t%i not in [0, %i)",
-            (uint16_t)drawSurf.fields.objectId,
-            data->cloudCount);
+    bcassert((uint)(uint16_t)drawSurf.fields.objectId, data->cloudCount);
     cloud = &data->clouds[drawSurf.fields.objectId];
     {
         PROF_SCOPED("RB_SetParticleCloudConstants");
@@ -558,14 +538,7 @@ void __cdecl RB_Vec3DirWorldToView(const GfxCmdBufSourceState *source, const flo
     float v8; // [esp+28h] [ebp-2Ch]
     float viewAxis[3][3]; // [esp+30h] [ebp-24h] BYREF
 
-    if (source->viewMode != VIEW_MODE_3D)
-        MyAssertHandler(
-            ".\\rb_tess.cpp",
-            528,
-            0,
-            "%s\n\t(source->viewMode) = %i",
-            "(source->viewMode == VIEW_MODE_3D)",
-            source->viewMode);
+    vassert((source->viewMode == VIEW_MODE_3D), "(source->viewMode) = %i", source->viewMode);
     v7 = source->viewParms.viewMatrix.m[0][1];
     v8 = source->viewParms.viewMatrix.m[0][2];
     viewAxis[0][0] = source->viewParms.viewMatrix.m[0][0];
@@ -1183,13 +1156,7 @@ uint __cdecl R_TessStaticModelRigidDrawSurfList(
 
     context = listArgs->context;
     commonSource = listArgs->context.source;
-    if (prepassContext.state && commonSource != prepassContext.source)
-        MyAssertHandler(
-            ".\\rb_tess.cpp",
-            1476,
-            0,
-            "%s",
-            "prepassContext.state == NULL || commonSource == prepassContext.source");
+    iassert(prepassContext.state == NULL || commonSource == prepassContext.source);
     info = listArgs->info;
     if (r_logFile->current.integer)
     {
@@ -1261,13 +1228,7 @@ uint __cdecl R_TessXModelRigidSkinnedDrawSurfList(
 
     context = listArgs->context;
     commonSource = listArgs->context.source;
-    if (prepassContext.state && commonSource != prepassContext.source)
-        MyAssertHandler(
-            ".\\rb_tess.cpp",
-            1328,
-            0,
-            "%s",
-            "prepassContext.state == NULL || commonSource == prepassContext.source");
+    iassert(prepassContext.state == NULL || commonSource == prepassContext.source);
     data = commonSource->input.data;
     info = listArgs->info;
     baseTechType = info->baseTechType;

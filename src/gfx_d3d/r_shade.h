@@ -76,16 +76,8 @@ void __cdecl R_SetPassShaderStableArguments(
 
 inline void __cdecl R_CheckVertexDataOverflow(int dataSize)
 {
-    if (!gfxBuf.dynamicVertexBuffer)
-        MyAssertHandler("c:\\trees\\cod3\\src\\gfx_d3d\\r_shade.h", 38, 0, "%s", "gfxBuf.dynamicVertexBuffer");
-    if (dataSize <= 0 || dataSize > gfxBuf.dynamicVertexBuffer->total)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\src\\gfx_d3d\\r_shade.h",
-            39,
-            0,
-            "%s\n\t(dataSize) = %i",
-            "(dataSize > 0 && dataSize <= gfxBuf.dynamicVertexBuffer->total)",
-            dataSize);
+    iassert(gfxBuf.dynamicVertexBuffer);
+    vassert((dataSize > 0 && dataSize <= gfxBuf.dynamicVertexBuffer->total), "(dataSize) = %i", dataSize);
     if (dataSize + gfxBuf.dynamicVertexBuffer->used > gfxBuf.dynamicVertexBuffer->total)
         gfxBuf.dynamicVertexBuffer->used = 0;
 }

@@ -32,14 +32,7 @@ void __cdecl CG_CenterPrint(int localClientNum, const char *str)
     v3 = &s_centerPrint[localClientNum];
     v4 = SEH_LocalizeTextMessage(str, "Center Print", LOCMSG_SAFE);
     I_strncpyz(s_centerPrint[localClientNum].text, v4, 1024);
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            910,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     v3->time = cgArray[0].time;
 }
 
@@ -281,14 +274,7 @@ int __cdecl CG_CheckPlayerTryReload(int localClientNum, char buttons)
 
     if ((buttons & 0x30) == 0)
         return 0;
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            910,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     if ((cgArray[0].predictedPlayerState.pm_flags & 4) != 0)
         return 0;
     result = 1;
@@ -303,14 +289,7 @@ int __cdecl CG_CheckPlayerFireNonTurret(int localClientNum, char buttons)
 
     if ((buttons & 1) == 0)
         return 0;
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            910,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     result = 1;
     if ((cgArray[0].predictedPlayerState.eFlags & 0x300) != 0)
         return 0;
@@ -424,14 +403,7 @@ void __cdecl CG_CheckHudHealthDisplay(int localClientNum)
 {
     __int64 v2; // r11
 
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            910,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     if (CG_CalcPlayerHealth(&cgArray[0].nextSnap->ps) >= (double)hud_health_startpulse_injured->current.value)
     {
         if (hud_fade_healthbar->current.value != 0.0 && cgArray[0].healthFadeTime)
@@ -454,14 +426,7 @@ void __cdecl CG_CheckHudAmmoDisplay(int localClientNum)
 {
     __int64 v2; // r11
 
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            910,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     if (CG_CheckPlayerForLowAmmo(cgArray) || CG_CheckPlayerForLowClip(cgArray))
         CG_MenuShowNotify(localClientNum, 1);
     if (hud_fade_ammodisplay->current.value != 0.0 && cgArray[0].ammoFadeTime)
@@ -512,14 +477,7 @@ void __cdecl CG_CheckHudStanceDisplay(int localClientNum)
     int eFlags; // r11
     __int64 v3; // r11
 
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            910,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     eFlags = cgArray[0].nextSnap->ps.eFlags;
     if ((eFlags & 8) != 0 && (eFlags & 0x100) != 0 || (eFlags & 4) != 0 && (eFlags & 0x200) != 0)
         CG_MenuShowNotify(localClientNum, 3);
@@ -540,14 +498,7 @@ void __cdecl CG_CheckHudSprintDisplay(int localClientNum)
     __int64 v3; // r11
     int v4; // [sp+50h] [-30h]
 
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            910,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     p_ps = &cgArray[0].nextSnap->ps;
     if (cgArray[0].nextSnap->ps.pm_type != PM_DEAD)
     {
@@ -606,14 +557,7 @@ void __cdecl CG_CheckHudOffHandDisplay(int localClientNum)
 
 void __cdecl CG_CheckHudObjectiveDisplay(int localClientNum)
 {
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            910,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     if (cgArray[0].showScores)
     {
         Menus_ShowByName(&cgDC, "objectiveinfo");
@@ -626,14 +570,7 @@ void __cdecl CG_CheckHudObjectiveDisplay(int localClientNum)
 
 void __cdecl CG_CheckTimedMenus(int localClientNum)
 {
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            910,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     if (cgArray[0].voiceTime && cgArray[0].time - cgArray[0].voiceTime > 2500)
     {
         Menus_CloseByName(&cgDC, "voiceMenu");
@@ -661,16 +598,8 @@ void __cdecl CG_Blur(
     ScreenBlur *v12; // r31
     int v13; // r3
 
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            910,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
-    if (time < 0)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_draw.cpp", 592, 0, "%s", "time >= 0");
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
+    iassert(time >= 0);
     if (endBlur < 0.0)
         MyAssertHandler(
             "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_draw.cpp",
@@ -1239,14 +1168,7 @@ void __cdecl CG_DrawActive(int localClientNum)
 {
     double zoomSensitivity; // fp1
 
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            910,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     zoomSensitivity = cgArray[0].zoomSensitivity;
     if (cgArray[0].shellshock.sensitivity != 0.0)
         zoomSensitivity = (float)(cgArray[0].shellshock.sensitivity * cgArray[0].zoomSensitivity);

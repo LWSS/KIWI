@@ -21,8 +21,7 @@ bool __cdecl Actor_CheckCoverLeave(actor_s *self, const float *exitPos)
     float *i; // r9
     double v14; // fp13
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_cover_arrival.cpp", 25, 0, "%s", "self");
+    iassert(self);
     if (!Actor_HasPath(self) || !self->sentient->pPrevClaimedNode)
         return 0;
     v5 = Vec2DistanceSq(self->ent->r.currentOrigin, exitPos);
@@ -71,10 +70,8 @@ int __cdecl Actor_CheckCoverApproach(actor_s *self)
     sentient_s *sentient; // r11
     float *pClaimedNode; // r30
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_cover_arrival.cpp", 77, 0, "%s", "self");
-    if (!self->sentient)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_cover_arrival.cpp", 78, 0, "%s", "self->sentient");
+    iassert(self);
+    iassert(self->sentient);
     if (self->arrivalInfo.animscriptOverrideRunTo)
         return 0;
     if (Path_HasNegotiationNode(&self->Path))

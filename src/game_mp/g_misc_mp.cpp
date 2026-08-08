@@ -75,10 +75,8 @@ void __cdecl TeleportPlayer(gentity_s *player, float *origin, float *angles)
     float *v4; // [esp+8h] [ebp-8h]
     int linked; // [esp+Ch] [ebp-4h]
 
-    if (!player->client)
-        MyAssertHandler(".\\game_mp\\g_misc_mp.cpp", 75, 0, "%s", "player->client");
-    if (player->client->sess.connected == CON_DISCONNECTED)
-        MyAssertHandler(".\\game_mp\\g_misc_mp.cpp", 76, 0, "%s", "player->client->sess.connected != CON_DISCONNECTED");
+    iassert(player->client);
+    iassert(player->client->sess.connected != CON_DISCONNECTED);
     linked = player->r.linked;
     SV_UnlinkEntity(player);
     v4 = player->client->ps.origin;
@@ -168,16 +166,14 @@ void __cdecl turret_think_client(gentity_s *self)
 
     iassert(self->r.ownerNum.isDefined());
     owner = self->r.ownerNum.ent();
-    if (!owner->client)
-        MyAssertHandler(".\\game_mp\\g_misc_mp.cpp", 596, 0, "%s", "owner->client");
+    iassert(owner->client);
     if (owner->active != 1 || owner->client->sess.sessionState || owner->client->ps.pm_type == PM_LASTSTAND)
     {
         G_ClientStopUsingTurret(self);
     }
     else
     {
-        if (!self->active)
-            MyAssertHandler(".\\game_mp\\g_misc_mp.cpp", 600, 0, "%s", "self->active");
+        iassert(self->active);
         turret_track(self, owner);
         turret_UpdateSound(self);
     }
@@ -280,17 +276,9 @@ void __cdecl G_PlayerTurretPositionAndBlend(gentity_s *ent, gentity_s *pTurretEn
     float vDelta[3]; // [esp+220h] [ebp-Ch] BYREF
 
     clientNum = ent->s.clientNum;
-    if (clientNum >= 0x40)
-        MyAssertHandler(
-            ".\\game_mp\\g_misc_mp.cpp",
-            230,
-            0,
-            "clientNum doesn't index MAX_CLIENTS\n\t%i not in [0, %i)",
-            clientNum,
-            64);
+    bcassert(clientNum, 0x40);
     ci = &level_bgs.clientinfo[clientNum];
-    if (!ci->infoValid)
-        MyAssertHandler(".\\game_mp\\g_misc_mp.cpp", 232, 0, "%s", "ci->infoValid");
+    iassert(ci->infoValid);
     pLerpAnim = &ci->legs;
     if (ci->legs.animationNumber && pLerpAnim->animation && (pLerpAnim->animation->flags & 4) != 0)
     {
@@ -300,13 +288,10 @@ void __cdecl G_PlayerTurretPositionAndBlend(gentity_s *ent, gentity_s *pTurretEn
             obj = Com_GetServerDObj(ent->s.number);
             if (obj)
             {
-                if (!pTurretEnt->s.weapon)
-                    MyAssertHandler(".\\game_mp\\g_misc_mp.cpp", 250, 0, "%s", "pTurretEnt->s.weapon");
+                iassert(pTurretEnt->s.weapon);
                 weapDef = BG_GetWeaponDef(pTurretEnt->s.weapon);
-                if (weapDef->weapClass != WEAPCLASS_TURRET)
-                    MyAssertHandler(".\\game_mp\\g_misc_mp.cpp", 252, 0, "%s", "weapDef->weapClass == WEAPCLASS_TURRET");
-                if (weapDef->fAnimHorRotateInc == 0.0)
-                    MyAssertHandler(".\\game_mp\\g_misc_mp.cpp", 253, 0, "%s", "weapDef->fAnimHorRotateInc");
+                iassert(weapDef->weapClass == WEAPCLASS_TURRET);
+                iassert(weapDef->fAnimHorRotateInc);
                 pAnimTree = ci->pXAnimTree;
                 pXAnims = level_bgs.animScriptData.animTree.anims;
                 baseAnim = pLerpAnim->animationNumber & 0xFFFFFDFF;
@@ -411,8 +396,7 @@ void __cdecl G_PlayerTurretPositionAndBlend(gentity_s *ent, gentity_s *pTurretEn
                     XAnimSetGoalWeight(obj, leafAnim2, fBlend, 0.0, 1.0, 0, 0, 0);
                 if (i && i != numVertChildren)
                 {
-                    if (trans[2] - fPrevTransZ == 0.0)
-                        MyAssertHandler(".\\game_mp\\g_misc_mp.cpp", 329, 0, "%s", "trans[2] - fPrevTransZ");
+                    iassert(trans[2] - fPrevTransZ);
                     fHeightRatio = (fDelta - fPrevTransZ) / (trans[2] - fPrevTransZ);
                     XAnimSetGoalWeight(obj, heightAnim, fHeightRatio, 0.0, 1.0, 0, 0, 0);
                     heightAnim = XAnimGetChildAt(pXAnims, baseAnim, numVertChildren - i);
@@ -494,20 +478,14 @@ void __cdecl turret_clientaim(gentity_s *self, gentity_s *other)
     turretInfo_s *pTurretInfo; // [esp+48h] [ebp-8h]
     gclient_s *ps; // [esp+4Ch] [ebp-4h]
 
-    if (!self)
-        MyAssertHandler(".\\game_mp\\g_misc_mp.cpp", 392, 0, "%s", "self");
-    if (self->s.eType != ET_MG42)
-        MyAssertHandler(".\\game_mp\\g_misc_mp.cpp", 393, 0, "%s", "self->s.eType == ET_MG42");
+    iassert(self);
+    iassert(self->s.eType == ET_MG42);
     pTurretInfo = self->pTurretInfo;
-    if (!pTurretInfo)
-        MyAssertHandler(".\\game_mp\\g_misc_mp.cpp", 396, 0, "%s", "pTurretInfo");
-    if (!other)
-        MyAssertHandler(".\\game_mp\\g_misc_mp.cpp", 398, 0, "%s", "other");
-    if (!other->client)
-        MyAssertHandler(".\\game_mp\\g_misc_mp.cpp", 399, 0, "%s", "other->client");
+    iassert(pTurretInfo);
+    iassert(other);
+    iassert(other->client);
     ps = other->client;
-    if (!self->active)
-        MyAssertHandler(".\\game_mp\\g_misc_mp.cpp", 403, 0, "%s", "self->active");
+    iassert(self->active);
 
     iassert(self->r.ownerNum.isDefined());
     iassert(self->r.ownerNum.ent() == other);
@@ -554,10 +532,8 @@ void __cdecl turret_clientaim(gentity_s *self, gentity_s *other)
 
 void __cdecl turret_shoot_internal(gentity_s *self, gentity_s *other)
 {
-    if (!self->pTurretInfo)
-        MyAssertHandler(".\\game_mp\\g_misc_mp.cpp", 428, 0, "%s", "self->pTurretInfo");
-    if (!other)
-        MyAssertHandler(".\\game_mp\\g_misc_mp.cpp", 429, 0, "%s", "other");
+    iassert(self->pTurretInfo);
+    iassert(other);
     self->pTurretInfo->fireSndDelay = 3 * BG_GetWeaponDef(self->s.weapon)->iFireTime;
     if (other->client)
     {
@@ -597,8 +573,7 @@ void __cdecl Turret_FillWeaponParms(gentity_s *ent, gentity_s *activator, weapon
     {
         Com_Error(ERR_DROP, "Couldn't find %s on turret (entity %d, classname %s )", "tag_flash", ent->s.number, SL_ConvertToString(ent->classname));
     }
-    if (!activator->client)
-        MyAssertHandler(".\\game_mp\\g_misc_mp.cpp", 137, 0, "%s", "activator->client");
+    iassert(activator->client);
     G_GetPlayerViewOrigin(&activator->client->ps, playerPos);
     BG_GetPlayerViewDirection(&activator->client->ps, wp->forward, wp->right, wp->up);
     wp->gunForward[0] = wp->forward[0];
@@ -614,8 +589,7 @@ void __cdecl turret_UpdateSound(gentity_s *self)
     turretInfo_s *pTurretInfo; // [esp+0h] [ebp-4h]
 
     pTurretInfo = self->pTurretInfo;
-    if (!pTurretInfo)
-        MyAssertHandler(".\\game_mp\\g_misc_mp.cpp", 498, 0, "%s", "pTurretInfo");
+    iassert(pTurretInfo);
     self->s.loopSound = 0;
     if (pTurretInfo->fireSndDelay > 0)
     {
@@ -660,8 +634,7 @@ int __cdecl turret_ReturnToDefaultPos(gentity_s *self, int bManned)
     turretInfo_s *pTurretInfo; // [esp+Ch] [ebp-4h]
 
     pTurretInfo = self->pTurretInfo;
-    if (!pTurretInfo)
-        MyAssertHandler(".\\game_mp\\g_misc_mp.cpp", 724, 0, "%s", "pTurretInfo");
+    iassert(pTurretInfo);
     if (bManned)
         dropPitch = 0.0;
     else
@@ -683,11 +656,9 @@ int __cdecl turret_UpdateTargetAngles(gentity_s *self, float *desiredAngles, int
     float fSpeed[2]; // [esp+24h] [ebp-Ch]
     int i; // [esp+2Ch] [ebp-4h]
 
-    if (self->s.eType != ET_MG42)
-        MyAssertHandler(".\\game_mp\\g_misc_mp.cpp", 629, 0, "%s", "self->s.eType == ET_MG42");
+    iassert(self->s.eType == ET_MG42);
     pTurretInfo = self->pTurretInfo;
-    if (!pTurretInfo)
-        MyAssertHandler(".\\game_mp\\g_misc_mp.cpp", 632, 0, "%s", "pTurretInfo");
+    iassert(pTurretInfo);
     bComplete = 1;
     pitch = self->s.lerp.u.turret.gunAngles[0];
     self->s.lerp.u.turret.gunAngles[0] = pitch + self->s.lerp.u.turret.gunAngles[2];
@@ -706,8 +677,7 @@ int __cdecl turret_UpdateTargetAngles(gentity_s *self, float *desiredAngles, int
     for (i = 0; i < 2; ++i)
     {
         fSpeed[i] = fSpeed[i] * 0.05000000074505806;
-        if (fSpeed[i] <= 0.0)
-            MyAssertHandler(".\\game_mp\\g_misc_mp.cpp", 656, 0, "%s", "fSpeed[i] > 0");
+        iassert(fSpeed[i] > 0);
         fDelta = AngleDelta(desiredAngles[i], self->s.lerp.u.turret.gunAngles[i]);
         if (fSpeed[i] >= (double)fDelta)
         {
@@ -784,14 +754,11 @@ void __cdecl turret_think_init(gentity_s *self)
 
     numSteps = 30;
     pTurretInfo = self->pTurretInfo;
-    if (!pTurretInfo)
-        MyAssertHandler(".\\game_mp\\g_misc_mp.cpp", 781, 0, "%s", "pTurretInfo");
-    if (self->handler != 14)
-        MyAssertHandler(".\\game_mp\\g_misc_mp.cpp", 783, 0, "%s", "self->handler == ENT_HANDLER_TURRET_INIT");
+    iassert(pTurretInfo);
+    iassert(self->handler == ENT_HANDLER_TURRET_INIT);
     self->handler = ENT_HANDLER_TURRET;
     self->nextthink = level.time + 50;
-    if (!self->pTurretInfo)
-        MyAssertHandler(".\\game_mp\\g_misc_mp.cpp", 790, 0, "%s", "self->pTurretInfo");
+    iassert(self->pTurretInfo);
     if (self->pTurretInfo->dropPitch == -90.0)
     {
         aimMtx = G_DObjGetLocalTagMatrix(self, scr_const.tag_aim);
@@ -833,14 +800,12 @@ void __cdecl turret_controller(const gentity_s *self, int *partBits)
     DObj_s *obj; // [esp+4h] [ebp-10h]
     float angles[3]; // [esp+8h] [ebp-Ch] BYREF
 
-    if (self->s.eType != ET_MG42)
-        MyAssertHandler(".\\game_mp\\g_misc_mp.cpp", 836, 0, "%s", "self->s.eType == ET_MG42");
+    iassert(self->s.eType == ET_MG42);
     angles[1] = self->s.lerp.u.turret.gunAngles[1];
     angles[0] = self->s.lerp.u.turret.gunAngles[0];
     angles[2] = 0.0;
     obj = Com_GetServerDObj(self->s.number);
-    if (!obj)
-        MyAssertHandler(".\\game_mp\\g_misc_mp.cpp", 843, 0, "%s", "obj");
+    iassert(obj);
     boneIndex = -2;
     DObjGetBoneIndex(obj, scr_const.tag_aim, &boneIndex);
     DObjSetControlTagAngles(obj, partBits, boneIndex, angles);
@@ -904,8 +869,7 @@ bool __cdecl turret_behind(gentity_s *self, gentity_s *other)
     float dot; // [esp+84h] [ebp-4h]
 
     pTurretInfo = self->pTurretInfo;
-    if (!other->client)
-        MyAssertHandler(".\\game_mp\\g_misc_mp.cpp", 869, 0, "%s", "other->client");
+    iassert(other->client);
     minYaw = self->r.currentAngles[1] + pTurretInfo->arcmin[1];
     v10 = I_fabs(pTurretInfo->arcmin[1]);
     v9 = I_fabs(pTurretInfo->arcmax[1]);
@@ -957,21 +921,14 @@ void __cdecl turret_use(gentity_s *self, gentity_s *owner, gentity_s* activator)
     turretInfo_s *pTurretInfo; // [esp+60h] [ebp-8h]
     gclient_s *ps; // [esp+64h] [ebp-4h]
 
-    if (!self)
-        MyAssertHandler(".\\game_mp\\g_misc_mp.cpp", 934, 0, "%s", "self");
-    if (self->s.eType != ET_MG42)
-        MyAssertHandler(".\\game_mp\\g_misc_mp.cpp", 935, 0, "%s", "self->s.eType == ET_MG42");
+    iassert(self);
+    iassert(self->s.eType == ET_MG42);
     pTurretInfo = self->pTurretInfo;
-    if (!pTurretInfo)
-        MyAssertHandler(".\\game_mp\\g_misc_mp.cpp", 938, 0, "%s", "pTurretInfo");
-    if (!owner)
-        MyAssertHandler(".\\game_mp\\g_misc_mp.cpp", 940, 0, "%s", "owner");
-    if (!owner->client)
-        MyAssertHandler(".\\game_mp\\g_misc_mp.cpp", 941, 0, "%s", "owner->client");
-    if (owner->s.number < 0)
-        MyAssertHandler(".\\game_mp\\g_misc_mp.cpp", 942, 0, "%s", "owner->s.number >= 0");
-    if (owner->s.number >= level.maxclients)
-        MyAssertHandler(".\\game_mp\\g_misc_mp.cpp", 943, 0, "%s", "owner->s.number < level.maxclients");
+    iassert(pTurretInfo);
+    iassert(owner);
+    iassert(owner->client);
+    iassert(owner->s.number >= 0);
+    iassert(owner->s.number < level.maxclients);
     ps = owner->client;
     owner->active = 1;
     self->active = 1;
@@ -1080,8 +1037,7 @@ void __cdecl G_SpawnTurret(gentity_s *self, const char *weaponinfoname)
             weaponinfoname);
         Scr_Error(v2);
     }
-    if (weapDef->weapClass != WEAPCLASS_TURRET)
-        MyAssertHandler(".\\game_mp\\g_misc_mp.cpp", 1036, 0, "%s", "weapDef->weapClass == WEAPCLASS_TURRET");
+    iassert(weapDef->weapClass == WEAPCLASS_TURRET);
     if (!level.initializing && !IsItemRegistered(self->s.weapon))
     {
         v3 = va("turret '%s' not precached", weaponinfoname);

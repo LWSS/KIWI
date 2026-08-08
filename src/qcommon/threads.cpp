@@ -251,14 +251,7 @@ void __cdecl Sys_SuspendDatabaseThread(ThreadOwner owner)
 {
     iassert( owner != THREAD_OWNER_NONE );
 
-    if (g_databaseThreadOwner)
-        MyAssertHandler(
-            ".\\qcommon\\threads.cpp",
-            1061,
-            0,
-            "%s\n\t(g_databaseThreadOwner) = %i",
-            "(g_databaseThreadOwner == THREAD_OWNER_NONE)",
-            g_databaseThreadOwner);
+    vassert((g_databaseThreadOwner == THREAD_OWNER_NONE), "(g_databaseThreadOwner) = %i", g_databaseThreadOwner);
 
     g_databaseThreadOwner = owner;
     Sys_ResetEvent(&resumedDatabaseEvent);
@@ -272,14 +265,7 @@ void __cdecl Sys_ResetEvent(void** event)
 void __cdecl Sys_ResumeDatabaseThread(ThreadOwner owner)
 {
     iassert( owner != THREAD_OWNER_NONE );
-    if (g_databaseThreadOwner != owner)
-        MyAssertHandler(
-            ".\\qcommon\\threads.cpp",
-            1073,
-            0,
-            "g_databaseThreadOwner == owner\n\t%i, %i",
-            g_databaseThreadOwner,
-            owner);
+    vassert(g_databaseThreadOwner == owner, "%i, %i", g_databaseThreadOwner, owner);
     g_databaseThreadOwner = THREAD_OWNER_NONE;
     Sys_SetEvent(&resumedDatabaseEvent);
 }
@@ -357,25 +343,12 @@ void __cdecl Sys_FrontEndSleep()
     int newCount; // [esp+0h] [ebp-4h]
 
     KISAK_NULLSUB();
-    if (!Sys_WaitForSingleObjectTimeout(&noThreadOwnershipEvent, 0))
-        MyAssertHandler(
-            ".\\qcommon\\threads.cpp",
-            1206,
-            0,
-            "%s",
-            "Sys_WaitForSingleObjectTimeout( &noThreadOwnershipEvent, 0 )");
+    iassert(Sys_WaitForSingleObjectTimeout( &noThreadOwnershipEvent, 0 ));
     Sys_WaitForSingleObject(&rendererRunningEvent);
     Sys_ResetEvent(&noThreadOwnershipEvent);
     Sys_SetEvent(&backendEvent[1]);
     newCount = InterlockedDecrement(&renderPausedCount);
-    if (newCount != -1 && newCount)
-        MyAssertHandler(
-            ".\\qcommon\\threads.cpp",
-            1212,
-            0,
-            "%s\n\t(newCount) = %i",
-            "((newCount == -1) || (newCount == 0))",
-            newCount);
+    vassert(((newCount == -1) || (newCount == 0)), "(newCount) = %i", newCount);
     Sys_WaitForSingleObject(&renderPausedEvent);
 }
 
@@ -597,13 +570,7 @@ void __cdecl Sys_SuspendOtherThreads()
 
 void __cdecl Sys_ReleaseThreadOwnership()
 {
-    if (Sys_WaitForSingleObjectTimeout(&noThreadOwnershipEvent, 0))
-        MyAssertHandler(
-            ".\\qcommon\\threads.cpp",
-            2000,
-            0,
-            "%s",
-            "!Sys_WaitForSingleObjectTimeout( &noThreadOwnershipEvent, 0 )");
+    iassert(!Sys_WaitForSingleObjectTimeout( &noThreadOwnershipEvent, 0 ));
     Sys_SetEvent(&noThreadOwnershipEvent);
 }
 

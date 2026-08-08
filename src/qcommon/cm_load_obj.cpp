@@ -76,28 +76,8 @@ void __cdecl CM_InitStaticModel(cStaticModel_s *staticModel, float *origin, floa
     float v4; // [esp+10h] [ebp-48h]
     float axis[3][3]; // [esp+34h] [ebp-24h] BYREF
 
-    if ((COERCE_UNSIGNED_INT(*origin) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(origin[1]) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(origin[2]) & 0x7F800000) == 0x7F800000)
-    {
-        MyAssertHandler(
-            ".\\qcommon\\cm_staticmodel_load_obj.cpp",
-            20,
-            0,
-            "%s",
-            "!IS_NAN((origin)[0]) && !IS_NAN((origin)[1]) && !IS_NAN((origin)[2])");
-    }
-    if ((COERCE_UNSIGNED_INT(*angles) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(angles[1]) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(angles[2]) & 0x7F800000) == 0x7F800000)
-    {
-        MyAssertHandler(
-            ".\\qcommon\\cm_staticmodel_load_obj.cpp",
-            21,
-            0,
-            "%s",
-            "!IS_NAN((angles)[0]) && !IS_NAN((angles)[1]) && !IS_NAN((angles)[2])");
-    }
+    nanassertvec3(origin);
+    nanassertvec3(angles);
     iassert( !IS_NAN(scale) );
     staticModel->origin[0] = *origin;
     staticModel->origin[1] = origin[1];
@@ -115,27 +95,9 @@ void __cdecl CM_InitStaticModel(cStaticModel_s *staticModel, float *origin, floa
     {
         Vec3Add(staticModel->absmin, origin, staticModel->absmin);
         Vec3Add(staticModel->absmax, origin, staticModel->absmax);
-        if (staticModel->absmax[0] - staticModel->absmin[0] < 0.0)
-            MyAssertHandler(
-                ".\\qcommon\\cm_staticmodel_load_obj.cpp",
-                45,
-                0,
-                "%s",
-                "staticModel->absmax[0] - staticModel->absmin[0] >= 0");
-        if (staticModel->absmax[1] - staticModel->absmin[1] < 0.0)
-            MyAssertHandler(
-                ".\\qcommon\\cm_staticmodel_load_obj.cpp",
-                46,
-                0,
-                "%s",
-                "staticModel->absmax[1] - staticModel->absmin[1] >= 0");
-        if (staticModel->absmax[2] - staticModel->absmin[2] < 0.0)
-            MyAssertHandler(
-                ".\\qcommon\\cm_staticmodel_load_obj.cpp",
-                47,
-                0,
-                "%s",
-                "staticModel->absmax[2] - staticModel->absmin[2] >= 0");
+        iassert(staticModel->absmax[0] - staticModel->absmin[0] >= 0);
+        iassert(staticModel->absmax[1] - staticModel->absmin[1] >= 0);
+        iassert(staticModel->absmax[2] - staticModel->absmin[2] >= 0);
     }
 }
 
@@ -165,28 +127,8 @@ char __cdecl CM_CreateStaticModel(cStaticModel_s *staticModel, char *name, float
 {
     XModel *model; // [esp+34h] [ebp-4h]
 
-    if ((COERCE_UNSIGNED_INT(*origin) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(origin[1]) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(origin[2]) & 0x7F800000) == 0x7F800000)
-    {
-        MyAssertHandler(
-            ".\\qcommon\\cm_staticmodel_load_obj.cpp",
-            60,
-            0,
-            "%s",
-            "!IS_NAN((origin)[0]) && !IS_NAN((origin)[1]) && !IS_NAN((origin)[2])");
-    }
-    if ((COERCE_UNSIGNED_INT(*angles) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(angles[1]) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(angles[2]) & 0x7F800000) == 0x7F800000)
-    {
-        MyAssertHandler(
-            ".\\qcommon\\cm_staticmodel_load_obj.cpp",
-            61,
-            0,
-            "%s",
-            "!IS_NAN((angles)[0]) && !IS_NAN((angles)[1]) && !IS_NAN((angles)[2])");
-    }
+    nanassertvec3(origin);
+    nanassertvec3(angles);
     iassert( !IS_NAN(scale) );
     if (!name || !*name)
         Com_Error(ERR_DROP, "Missing model name at %.0f %.0f %.0f", *origin, origin[1], origin[2]);
@@ -326,13 +268,7 @@ void __cdecl CM_LoadStaticModels()
             }
             if (bMiscModel)
             {
-                if (cm.numStaticModels >= numStaticModels)
-                    MyAssertHandler(
-                        ".\\qcommon\\cm_staticmodel_load_obj.cpp",
-                        207,
-                        0,
-                        "%s",
-                        "cm.numStaticModels < numStaticModels");
+                iassert(cm.numStaticModels < numStaticModels);
                 if (CM_CreateStaticModel(&cm.staticModelList[cm.numStaticModels], modelName, origin, angles, scale))
                     ++cm.numStaticModels;
             }
@@ -973,10 +909,7 @@ void __cdecl CMod_PartionLeafBrushes(uint16_t *leafBrushes, int numLeafBrushes, 
         leaf->leafBrushNode = CMod_PartionLeafBrushes_r(leafBrushes, numLeafBrushes, mins, maxs) - cm.leafbrushNodes;
         CM_Hunk_ClearTempMemoryHigh();
     }
-    else if (leaf->leafBrushNode)
-    {
-        MyAssertHandler(".\\qcommon\\cm_load_obj.cpp", 379, 0, "%s", "!leaf->leafBrushNode");
-    }
+    else iassert(!leaf->leafBrushNode);
 }
 
 uint __cdecl CM_Hunk_AllocateTempMemoryHigh(int size, const char *name)

@@ -35,8 +35,7 @@ int __cdecl G_GetFreePlayerCorpseIndex()
     bestDistSq = -1.0;
     bestIndex = 0;
     ent = G_Find(0, 368, scr_const.player);
-    if (!ent)
-        MyAssertHandler(".\\game_mp\\g_player_corpse_mp.cpp", 122, 0, "%s", "ent");
+    iassert(ent);
     //LODWORD(diff[3]) = ent->s.lerp.pos.trBase; // KISAKTODO??
     playerPos[0] = ent->s.lerp.pos.trBase[0];
     playerPos[1] = ent->s.lerp.pos.trBase[1];
@@ -65,13 +64,7 @@ void __cdecl PlayerCorpse_Free(gentity_s *ent)
     int playerCorpseIndex; // [esp+0h] [ebp-4h]
 
     playerCorpseIndex = G_GetPlayerCorpseIndex(ent);
-    if (g_scr_data.playerCorpseInfo[playerCorpseIndex].entnum != ent->s.number)
-        MyAssertHandler(
-            ".\\game_mp\\g_player_corpse_mp.cpp",
-            156,
-            0,
-            "%s",
-            "g_scr_data.playerCorpseInfo[playerCorpseIndex].entnum == ent->s.number");
+    iassert(g_scr_data.playerCorpseInfo[playerCorpseIndex].entnum == ent->s.number);
     g_scr_data.playerCorpseInfo[playerCorpseIndex].entnum = -1;
 }
 
@@ -105,23 +98,9 @@ void __cdecl G_RunCorpseMove(gentity_s *ent)
     {
         if (corpseInfo->falling)
         {
-            if (ent->s.lerp.pos.trType != TR_GRAVITY && !isRagdoll)
-                MyAssertHandler(
-                    ".\\game_mp\\g_player_corpse_mp.cpp",
-                    239,
-                    0,
-                    "%s",
-                    "ent->s.lerp.pos.trType == TR_GRAVITY || isRagdoll");
+            iassert(ent->s.lerp.pos.trType == TR_GRAVITY || isRagdoll);
         }
-        else if (ent->s.lerp.pos.trType != TR_INTERPOLATE && !isRagdoll)
-        {
-            MyAssertHandler(
-                ".\\game_mp\\g_player_corpse_mp.cpp",
-                241,
-                0,
-                "%s",
-                "ent->s.lerp.pos.trType == TR_INTERPOLATE || isRagdoll");
-        }
+        else iassert(ent->s.lerp.pos.trType == TR_INTERPOLATE || isRagdoll);
         BG_EvaluateTrajectory(&ent->s.lerp.pos, level.time, origin);
         if (haveDelta)
         {
@@ -138,11 +117,9 @@ void __cdecl G_RunCorpseMove(gentity_s *ent)
             left[1] = 0.0;
             left[2] = 0.0;
         }
-        if (!ent->clipmask)
-            MyAssertHandler(".\\game_mp\\g_player_corpse_mp.cpp", 264, 0, "%s", "ent->clipmask");
+        iassert(ent->clipmask);
         mask = ent->clipmask;
-        if ((mask & ent->r.contents) != 0)
-            MyAssertHandler(".\\game_mp\\g_player_corpse_mp.cpp", 268, 0, "%s", "!( ent->r.contents & mask )");
+        iassert(!( ent->r.contents & mask ));
         if (ent->r.ownerNum.isDefined())
         {
             passEntityNum = ent->r.ownerNum.entnum();
@@ -282,13 +259,7 @@ void __cdecl G_BounceCorpse(gentity_s *ent, corpseInfo_t *corpseInfo, trace_t *t
         ent->s.lerp.pos.trBase[0] = ent->r.currentOrigin[0];
         ent->s.lerp.pos.trBase[1] = ent->r.currentOrigin[1];
         ent->s.lerp.pos.trBase[2] = ent->r.currentOrigin[2];
-        if (ent->s.lerp.pos.trType != TR_GRAVITY && !isRagdoll)
-            MyAssertHandler(
-                ".\\game_mp\\g_player_corpse_mp.cpp",
-                72,
-                0,
-                "%s",
-                "ent->s.lerp.pos.trType == TR_GRAVITY || isRagdoll");
+        iassert(ent->s.lerp.pos.trType == TR_GRAVITY || isRagdoll);
         ent->s.lerp.pos.trTime = level.time;
     }
 }
@@ -320,10 +291,8 @@ void __cdecl G_RunCorpseAnimate(gentity_s *ent)
     int corpseIndex; // [esp+4h] [ebp-8h]
 
     corpseIndex = G_GetPlayerCorpseIndex(ent);
-    if (corpseIndex < 0)
-        MyAssertHandler(".\\game_mp\\g_player_corpse_mp.cpp", 363, 0, "%s", "corpseIndex >= 0");
-    if (corpseIndex >= 8)
-        MyAssertHandler(".\\game_mp\\g_player_corpse_mp.cpp", 364, 0, "%s", "corpseIndex < MAX_CLIENT_CORPSES");
+    iassert(corpseIndex >= 0);
+    iassert(corpseIndex < MAX_CLIENT_CORPSES);
     ServerDObj = Com_GetServerDObj(ent->s.number);
     BG_UpdatePlayerDObj(-1, ServerDObj, &ent->s, &g_scr_data.playerCorpseInfo[corpseIndex].ci, 0);
     if (Com_GetServerDObj(ent->s.number))

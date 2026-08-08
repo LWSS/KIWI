@@ -247,8 +247,7 @@ int __cdecl Scr_SetEntityField(uint entnum, uint offset)
     if (entnum >= 0x400)
         MyAssertHandler(".\\game_mp\\g_spawn_mp.cpp", 561, 0, "%s", "(unsigned)entnum < MAX_GENTITIES");
     ent = &g_entities[entnum];
-    if (!ent->r.inuse)
-        MyAssertHandler(".\\game_mp\\g_spawn_mp.cpp", 564, 0, "%s\n\t(ent->s.number) = %i", "(ent->r.inuse)", ent->s.number);
+    vassert((ent->r.inuse), "(ent->s.number) = %i", ent->s.number);
     if ((offset & 0xC000) == 0xC000)
     {
         if (ent->client)
@@ -281,8 +280,7 @@ void __cdecl Scr_GetEntityField(uint entnum, uint offset)
     if (entnum >= 0x400)
         MyAssertHandler(".\\game_mp\\g_spawn_mp.cpp", 664, 0, "%s", "(unsigned)entnum < MAX_GENTITIES");
     ent = &g_entities[entnum];
-    if (!ent->r.inuse)
-        MyAssertHandler(".\\game_mp\\g_spawn_mp.cpp", 667, 0, "%s\n\t(ent->s.number) = %i", "(ent->r.inuse)", ent->s.number);
+    vassert((ent->r.inuse), "(ent->s.number) = %i", ent->s.number);
     if ((offset & 0xC000) == 0xC000)
     {
         if (ent->client)
@@ -373,36 +371,18 @@ void __cdecl Scr_FreeEntityConstStrings(gentity_s *pEnt)
 
 void __cdecl Scr_FreeEntity(gentity_s *ent)
 {
-    if (!ent)
-        MyAssertHandler(".\\game_mp\\g_spawn_mp.cpp", 803, 0, "%s", "ent");
-    if (ent->s.number != ent - g_entities)
-        MyAssertHandler(
-            ".\\game_mp\\g_spawn_mp.cpp",
-            804,
-            0,
-            "ent->s.number == ent - g_entities\n\t%i, %i",
-            ent->s.number,
-            ent - g_entities);
-    if (!ent->r.inuse)
-        MyAssertHandler(".\\game_mp\\g_spawn_mp.cpp", 805, 0, "%s\n\t(ent->s.number) = %i", "(ent->r.inuse)", ent->s.number);
+    iassert(ent);
+    vassert(ent->s.number == ent - g_entities, "%i, %i", ent->s.number, ent - g_entities);
+    vassert((ent->r.inuse), "(ent->s.number) = %i", ent->s.number);
     Scr_FreeEntityConstStrings(ent);
     Scr_FreeEntityNum(ent->s.number, CLASS_NUM_ENTITY);
 }
 
 void __cdecl Scr_AddEntity(gentity_s *ent)
 {
-    if (!ent)
-        MyAssertHandler(".\\game_mp\\g_spawn_mp.cpp", 819, 0, "%s", "ent");
-    if (ent->s.number != ent - g_entities)
-        MyAssertHandler(
-            ".\\game_mp\\g_spawn_mp.cpp",
-            820,
-            0,
-            "ent->s.number == ent - g_entities\n\t%i, %i",
-            ent->s.number,
-            ent - g_entities);
-    if (!ent->r.inuse)
-        MyAssertHandler(".\\game_mp\\g_spawn_mp.cpp", 821, 0, "%s\n\t(ent->s.number) = %i", "(ent->r.inuse)", ent->s.number);
+    iassert(ent);
+    vassert(ent->s.number == ent - g_entities, "%i, %i", ent->s.number, ent - g_entities);
+    vassert((ent->r.inuse), "(ent->s.number) = %i", ent->s.number);
     Scr_AddEntityNum(ent->s.number, CLASS_NUM_ENTITY);
 }
 
@@ -415,8 +395,7 @@ gentity_s *__cdecl Scr_GetEntityAllowNull(uint index)
     entref = Scr_GetEntityRef(index);
     if (entref.classnum)
         return 0;
-    if (entref.entnum >= 0x400u)
-        MyAssertHandler(".\\game_mp\\g_spawn_mp.cpp", 844, 0, "%s", "entref.entnum < MAX_GENTITIES");
+    iassert(entref.entnum < MAX_GENTITIES);
     return &g_entities[entref.entnum];
 }
 
@@ -432,26 +411,16 @@ gentity_s *__cdecl Scr_GetEntity(uint index)
     }
     else
     {
-        if (entref.entnum >= 0x400u)
-            MyAssertHandler(".\\game_mp\\g_spawn_mp.cpp", 864, 0, "%s", "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         return &g_entities[entref.entnum];
     }
 }
 
 void __cdecl Scr_FreeHudElem(game_hudelem_s *hud)
 {
-    if (!hud)
-        MyAssertHandler(".\\game_mp\\g_spawn_mp.cpp", 881, 0, "%s", "hud");
-    if ((uint)(hud - g_hudelems) >= 0x400)
-        MyAssertHandler(
-            ".\\game_mp\\g_spawn_mp.cpp",
-            882,
-            0,
-            "hud - g_hudelems doesn't index MAX_HUDELEMS_TOTAL\n\t%i not in [0, %i)",
-            hud - g_hudelems,
-            1024);
-    if (hud->elem.type == HE_TYPE_FREE)
-        MyAssertHandler(".\\game_mp\\g_spawn_mp.cpp", 883, 0, "%s", "hud->elem.type != HE_TYPE_FREE");
+    iassert(hud);
+    bcassert((uint)(hud - g_hudelems), 0x400);
+    iassert(hud->elem.type != HE_TYPE_FREE);
     Scr_NotifyNum(hud - g_hudelems, CLASS_NUM_HUDELEM, scr_const.death, 0);
     Scr_FreeHudElemConstStrings(hud);
     Scr_FreeEntityNum(hud - g_hudelems, CLASS_NUM_HUDELEM);
@@ -459,35 +428,17 @@ void __cdecl Scr_FreeHudElem(game_hudelem_s *hud)
 
 void __cdecl Scr_AddHudElem(game_hudelem_s *hud)
 {
-    if (!hud)
-        MyAssertHandler(".\\game_mp\\g_spawn_mp.cpp", 902, 0, "%s", "hud");
-    if ((uint)(hud - g_hudelems) >= 0x400)
-        MyAssertHandler(
-            ".\\game_mp\\g_spawn_mp.cpp",
-            903,
-            0,
-            "hud - g_hudelems doesn't index MAX_HUDELEMS_TOTAL\n\t%i not in [0, %i)",
-            hud - g_hudelems,
-            1024);
-    if (hud->elem.type == HE_TYPE_FREE)
-        MyAssertHandler(".\\game_mp\\g_spawn_mp.cpp", 904, 0, "%s", "hud->elem.type != HE_TYPE_FREE");
+    iassert(hud);
+    bcassert((uint)(hud - g_hudelems), 0x400);
+    iassert(hud->elem.type != HE_TYPE_FREE);
     Scr_AddEntityNum(hud - g_hudelems, CLASS_NUM_HUDELEM);
 }
 
 uint16_t __cdecl Scr_ExecEntThread(gentity_s *ent, int handle, uint paramcount)
 {
-    if (!ent)
-        MyAssertHandler(".\\game_mp\\g_spawn_mp.cpp", 937, 0, "%s", "ent");
-    if (ent->s.number != ent - g_entities)
-        MyAssertHandler(
-            ".\\game_mp\\g_spawn_mp.cpp",
-            938,
-            0,
-            "ent->s.number == ent - g_entities\n\t%i, %i",
-            ent->s.number,
-            ent - g_entities);
-    if (!ent->r.inuse)
-        MyAssertHandler(".\\game_mp\\g_spawn_mp.cpp", 939, 0, "%s\n\t(ent->s.number) = %i", "(ent->r.inuse)", ent->s.number);
+    iassert(ent);
+    vassert(ent->s.number == ent - g_entities, "%i, %i", ent->s.number, ent - g_entities);
+    vassert((ent->r.inuse), "(ent->s.number) = %i", ent->s.number);
     return Scr_ExecEntThreadNum(ent->s.number, CLASS_NUM_ENTITY, handle, paramcount);
 }
 
@@ -728,8 +679,7 @@ void __cdecl G_ParseEntityFields(gentity_s *ent)
 {
     int i; // [esp+0h] [ebp-4h]
 
-    if (!level.spawnVar.spawnVarsValid)
-        MyAssertHandler(".\\game_mp\\g_spawn_mp.cpp", 293, 0, "%s", "level.spawnVar.spawnVarsValid");
+    iassert(level.spawnVar.spawnVarsValid);
     for (i = 0; i < level.spawnVar.numSpawnVars; ++i)
         G_ParseEntityField(level.spawnVar.spawnVars[i][0], level.spawnVar.spawnVars[i][1], ent);
     G_SetOrigin(ent, ent->r.currentOrigin);
@@ -850,8 +800,7 @@ void __cdecl G_LoadStructs()
     uint16_t hThread; // [esp+14h] [ebp-8h]
     const char *classname; // [esp+18h] [ebp-4h] BYREF
 
-    if (!g_scr_data.initstructs)
-        MyAssertHandler(".\\game_mp\\g_spawn_mp.cpp", 1185, 0, "%s", "g_scr_data.initstructs");
+    iassert(g_scr_data.initstructs);
     hThread = Scr_ExecThread(g_scr_data.initstructs, 0);
     Scr_FreeThread(hThread);
     while (G_ParseSpawnVars(&level.spawnVar))
@@ -870,10 +819,8 @@ int G_SpawnStruct()
     int i; // [esp+4h] [ebp-8h]
     uint structId; // [esp+8h] [ebp-4h]
 
-    if (!level.spawnVar.spawnVarsValid)
-        MyAssertHandler(".\\game_mp\\g_spawn_mp.cpp", 315, 0, "%s", "level.spawnVar.spawnVarsValid");
-    if (!g_scr_data.createstruct)
-        MyAssertHandler(".\\game_mp\\g_spawn_mp.cpp", 317, 0, "%s", "g_scr_data.createstruct");
+    iassert(level.spawnVar.spawnVarsValid);
+    iassert(g_scr_data.createstruct);
     Scr_AddExecThread(g_scr_data.createstruct, 0);
     structId = Scr_GetObject(0);
     for (i = 0; ; ++i)

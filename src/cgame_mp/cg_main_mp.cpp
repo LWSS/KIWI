@@ -245,10 +245,8 @@ const char *cg_drawMaterialNames[5] =
 
 bool __cdecl CG_IsRagdollTrajectory(const trajectory_t *trajectory)
 {
-    if (!trajectory)
-        MyAssertHandler(".\\cgame_mp\\cg_main_mp.cpp", 367, 0, "%s", "trajectory");
-    if (!ragdoll_enable)
-        MyAssertHandler(".\\cgame_mp\\cg_main_mp.cpp", 368, 0, "%s", "ragdoll_enable");
+    iassert(trajectory);
+    iassert(ragdoll_enable);
     return ragdoll_enable->current.enabled
         && trajectory->trType >= TR_FIRST_RAGDOLL
         && trajectory->trType <= TR_RAGDOLL_INTERPOLATE;
@@ -1843,16 +1841,8 @@ void __cdecl CG_Init(int localClientNum, int serverMessageNum, int serverCommand
 
 clientConnection_t *__cdecl CL_GetLocalClientConnection(int localClientNum)
 {
-    if (!clientConnections)
-        MyAssertHandler("c:\\trees\\cod3\\src\\cgame_mp\\../client_mp/client_mp.h", 1095, 0, "%s", "clientConnections");
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\src\\cgame_mp\\../client_mp/client_mp.h",
-            1100,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    iassert(clientConnections);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     return clientConnections;
 }
 
@@ -2006,16 +1996,14 @@ uint16_t __cdecl CG_AttachWeapon(DObjModel_s *dobjModels, uint16_t numModels, cl
         weaponModel = ci->weaponModel;
         if (weapDef->worldModel[weaponModel] && !ci->hideWeapon)
         {
-            if (numModels >= 0x20u)
-                MyAssertHandler(".\\cgame_mp\\cg_main_mp.cpp", 1698, 0, "%s", "numModels < DOBJ_MAX_SUBMODELS");
+            iassert(numModels < DOBJ_MAX_SUBMODELS);
             dobjModels[numModels].model = weapDef->worldModel[weaponModel];
             dobjModels[numModels].boneName = CG_GetWeaponAttachBone(ci, weapDef->weapType);
             dobjModels[numModels++].ignoreCollision = 0;
         }
         if (weapDef->worldKnifeModel && ci->usingKnife)
         {
-            if (numModels >= 0x20u)
-                MyAssertHandler(".\\cgame_mp\\cg_main_mp.cpp", 1709, 0, "%s", "numModels < DOBJ_MAX_SUBMODELS");
+            iassert(numModels < DOBJ_MAX_SUBMODELS);
             dobjModels[numModels].model = weapDef->worldKnifeModel;
             dobjModels[numModels].boneName = scr_const.tag_inhand;
             dobjModels[numModels++].ignoreCollision = 0;
@@ -2113,14 +2101,7 @@ void __cdecl CG_FreeWeapons(int localClientNum)
     {
         v1 = CG_WeaponDObjHandle(weapIndex);
         Com_SafeClientDObjFree(v1, localClientNum);
-        if (localClientNum)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\src\\cgame_mp\\cg_local_mp.h",
-                1095,
-                0,
-                "%s\n\t(localClientNum) = %i",
-                "(localClientNum == 0)",
-                localClientNum);
+        vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
         weapInfo = &cg_weaponsArray[0][weapIndex];
         if (weapInfo->tree)
         {

@@ -240,8 +240,7 @@ void __cdecl MemFile_EndSegment(MemoryFile* memFile)
     uint err; // [esp+0h] [ebp-Ch]
     uint index; // [esp+8h] [ebp-4h]
 
-    if (memFile->memoryOverflow)
-        MyAssertHandler(".\\universal\\memfile.cpp", 310, 0, "%s", "!memFile->memoryOverflow");
+    iassert(!memFile->memoryOverflow);
     if (!memFile->memoryOverflow)
     {
         index = memFile->segmentIndex;
@@ -255,8 +254,7 @@ void __cdecl MemFile_EndSegment(MemoryFile* memFile)
                 index);
         if (g_cacheSize > 1)
         {
-            if (g_cacheBufferLen < 0)
-                MyAssertHandler(".\\universal\\memfile.cpp", 321, 0, "%s", "g_cacheBufferLen >= 0");
+            iassert(g_cacheBufferLen >= 0);
             if (!MemFile_WriteDataInternal(memFile, g_cacheSize, g_nonZeroCount, g_cacheBufferLen, 0))
             {
                 MemFile_WriteError(memFile);
@@ -268,19 +266,12 @@ void __cdecl MemFile_EndSegment(MemoryFile* memFile)
         if (!memFile->compress)
             goto LABEL_30;
         stream.next_in = g_saveBuffer;
-        if (&memFile->buffer[memFile->bytesUsed] != stream.next_out)
-            MyAssertHandler(
-                ".\\universal\\memfile.cpp",
-                337,
-                0,
-                "%s",
-                "memFile->buffer + memFile->bytesUsed == stream.next_out");
+        iassert(memFile->buffer + memFile->bytesUsed == stream.next_out);
         err = deflate(&stream, 4u);
         if (err > 1)
             MyAssertHandler(".\\universal\\memfile.cpp", 340, 0, "%s\n\t(err) = %i", "((err == 0) || (err == 1))", err);
         memFile->bytesUsed = stream.next_out - memFile->buffer;
-        if (memFile->bytesUsed > memFile->bufferSize)
-            MyAssertHandler(".\\universal\\memfile.cpp", 343, 0, "%s", "memFile->bytesUsed <= memFile->bufferSize");
+        iassert(memFile->bytesUsed <= memFile->bufferSize);
         if (err == 1)
         {
         LABEL_30:
@@ -291,14 +282,7 @@ void __cdecl MemFile_EndSegment(MemoryFile* memFile)
         }
         else
         {
-            if (stream.avail_out)
-                MyAssertHandler(
-                    ".\\universal\\memfile.cpp",
-                    347,
-                    0,
-                    "%s\n\t(stream.avail_out) = %i",
-                    "(!stream.avail_out)",
-                    stream.avail_out);
+            vassert((!stream.avail_out), "(stream.avail_out) = %i", stream.avail_out);
             MemFile_deflateEnd(memFile->compress);
             if (memFile->errorOnOverflow)
                 Com_Error(ERR_DROP, "MemFile_EndSegment: Out of memory");
@@ -326,14 +310,7 @@ void __cdecl MemFile_MoveToSegment(MemoryFile* memFile, int index)
     uint8_t* data; // [esp+4h] [ebp-8h]
     uint len; // [esp+8h] [ebp-4h]
 
-    if (index < -1 || index >= 8)
-        MyAssertHandler(
-            ".\\universal\\memfile.cpp",
-            446,
-            0,
-            "%s\n\t(index) = %i",
-            "((index >= -1) && (index < SAVE_SEGMENT_COUNT))",
-            index);
+    vassert(((index >= -1) && (index < SAVE_SEGMENT_COUNT)), "(index) = %i", index);
     if (!memFile->memoryOverflow)
     {
         if (memFile->segmentIndex >= 0 && MemFile_inflateEnd(memFile->compress))
@@ -391,8 +368,7 @@ uint8_t* __cdecl MemFile_GetSegmentAddess(MemoryFile* memFile, uint index)
             "%s\n\t(index) = %i",
             "((index >= 0) && (index < SAVE_SEGMENT_COUNT))",
             index);
-    if (memFile->memoryOverflow)
-        MyAssertHandler(".\\universal\\memfile.cpp", 419, 0, "%s", "!memFile->memoryOverflow");
+    iassert(!memFile->memoryOverflow);
     segmentStart = 0;
     while (index)
     {
@@ -418,8 +394,7 @@ uint8_t* __cdecl MemFile_GetSegmentAddess(MemoryFile* memFile, uint index)
 
 void __cdecl MemFile_WriteError(MemoryFile* memFile)
 {
-    if (memFile->memoryOverflow)
-        MyAssertHandler(".\\universal\\memfile.cpp", 523, 0, "%s", "!memFile->memoryOverflow");
+    iassert(!memFile->memoryOverflow);
     MemFile_deflateEnd(memFile->compress);
     if (memFile->errorOnOverflow)
         Com_Error(ERR_DROP, "MemFile_EndSegment: Out of memory");
@@ -438,26 +413,13 @@ int __cdecl MemFile_WriteDataInternal(
     uint8_t* data; // [esp+8h] [ebp-8h]
     int len; // [esp+Ch] [ebp-4h]
 
-    if (!memFile)
-        MyAssertHandler(".\\universal\\memfile.cpp", 544, 0, "%s", "memFile");
-    if (!MemFile_IsWriting(memFile))
-        MyAssertHandler(".\\universal\\memfile.cpp", 545, 0, "%s", "MemFile_IsWriting( memFile )");
-    if (!memFile->buffer)
-        MyAssertHandler(".\\universal\\memfile.cpp", 546, 0, "%s", "memFile->buffer");
-    if (memFile->bytesUsed < 0 || memFile->bytesUsed > memFile->bufferSize)
-        MyAssertHandler(
-            ".\\universal\\memfile.cpp",
-            547,
-            0,
-            "memFile->bytesUsed not in [0, memFile->bufferSize]\n\t%i not in [%i, %i]",
-            memFile->bytesUsed,
-            0,
-            memFile->bufferSize);
-    if (bytes <= 0)
-        MyAssertHandler(".\\universal\\memfile.cpp", 548, 0, "%s\n\t(bytes) = %i", "(bytes > 0)", bytes);
+    iassert(memFile);
+    iassert(MemFile_IsWriting( memFile ));
+    iassert(memFile->buffer);
+    rangeassert(memFile->bytesUsed, 0, memFile->bufferSize);
+    vassert((bytes > 0), "(bytes) = %i", bytes);
     AssertStreamMode(MEM_FILE_MODE_DEFLATE);
-    if (memFile->memoryOverflow)
-        MyAssertHandler(".\\universal\\memfile.cpp", 550, 0, "%s", "!memFile->memoryOverflow");
+    iassert(!memFile->memoryOverflow);
     if (memFile->compress)
     {
         data = g_cacheBuffer;
@@ -475,18 +437,11 @@ int __cdecl MemFile_WriteDataInternal(
             sourceLen -= 0x2000;
             data += len;
             stream.next_in = g_saveBuffer;
-            if (&memFile->buffer[memFile->bytesUsed] != stream.next_out)
-                MyAssertHandler(
-                    ".\\universal\\memfile.cpp",
-                    578,
-                    0,
-                    "%s",
-                    "memFile->buffer + memFile->bytesUsed == stream.next_out");
+            iassert(memFile->buffer + memFile->bytesUsed == stream.next_out);
             if (deflate(&stream, 2u))
                 MyAssertHandler(".\\universal\\memfile.cpp", 581, 0, "%s", "err == Z_OK");
             memFile->bytesUsed = stream.next_out - memFile->buffer;
-            if (memFile->bytesUsed > memFile->bufferSize)
-                MyAssertHandler(".\\universal\\memfile.cpp", 584, 0, "%s", "memFile->bytesUsed <= memFile->bufferSize");
+            iassert(memFile->bytesUsed <= memFile->bufferSize);
             if (!stream.avail_out)
                 return 0;
             if (!sourceLen)
@@ -516,8 +471,7 @@ int __cdecl MemFile_WriteDataInternal(
 
 int __cdecl MemFile_GetUsedSize(MemoryFile* memFile)
 {
-    if (!memFile)
-        MyAssertHandler(".\\universal\\memfile.cpp", 612, 0, "%s", "memFile");
+    iassert(memFile);
     return memFile->bytesUsed;
 }
 
@@ -534,27 +488,14 @@ void __cdecl MemFile_WriteData(MemoryFile* memFile, int byteCount, const void* d
 
     const byte* p = (const byte *)dat;
 
-    if (!memFile)
-        MyAssertHandler(".\\universal\\memfile.cpp", 643, 0, "%s", "memFile");
-    if (!MemFile_IsWriting(memFile))
-        MyAssertHandler(".\\universal\\memfile.cpp", 644, 0, "%s", "MemFile_IsWriting( memFile )");
-    if (!memFile->buffer)
-        MyAssertHandler(".\\universal\\memfile.cpp", 645, 0, "%s", "memFile->buffer");
-    if (memFile->bytesUsed < 0 || memFile->bytesUsed > memFile->bufferSize)
-        MyAssertHandler(
-            ".\\universal\\memfile.cpp",
-            646,
-            0,
-            "memFile->bytesUsed not in [0, memFile->bufferSize]\n\t%i not in [%i, %i]",
-            memFile->bytesUsed,
-            0,
-            memFile->bufferSize);
-    if (byteCount < 0)
-        MyAssertHandler(".\\universal\\memfile.cpp", 647, 0, "%s\n\t(byteCount) = %i", "(byteCount >= 0)", byteCount);
+    iassert(memFile);
+    iassert(MemFile_IsWriting( memFile ));
+    iassert(memFile->buffer);
+    rangeassert(memFile->bytesUsed, 0, memFile->bufferSize);
+    vassert((byteCount >= 0), "(byteCount) = %i", byteCount);
     if (memFile->memoryOverflow)
         return;
-    if (!p)
-        MyAssertHandler(".\\universal\\memfile.cpp", 652, 0, "%s", "p");
+    iassert(p);
 
     cacheSize = g_cacheSize;
     zeroCount = g_zeroCount;
@@ -732,8 +673,7 @@ void __cdecl MemFile_WriteData(MemoryFile* memFile, int byteCount, const void* d
         }
         goto LABEL_71;
     }
-    if (cacheSize <= 2)
-        MyAssertHandler(".\\universal\\memfile.cpp", 728, 0, "%s", "cacheSize > 2");
+    iassert(cacheSize > 2);
     if (zeroCount < 3)
     {
         if (memFile->compress)
@@ -759,10 +699,8 @@ void __cdecl MemFile_WriteData(MemoryFile* memFile, int byteCount, const void* d
         }
         goto LABEL_71;
     }
-    if (zeroCount != 3)
-        MyAssertHandler(".\\universal\\memfile.cpp", 731, 0, "%s", "zeroCount == 3");
-    if (cacheSize <= 4)
-        MyAssertHandler(".\\universal\\memfile.cpp", 732, 0, "%s\n\t(cacheSize) = %i", "(cacheSize > 4)", cacheSize);
+    iassert(zeroCount == 3);
+    vassert((cacheSize > 4), "(cacheSize) = %i", cacheSize);
     cacheSizea = cacheSize - 3;
 
     if (memFile->compress)
@@ -780,8 +718,7 @@ void __cdecl MemFile_WriteData(MemoryFile* memFile, int byteCount, const void* d
 
         moveByte = memFile->buffer[cacheSizea + memFile->bytesUsed];
     }
-    if (!moveByte)
-        MyAssertHandler(".\\universal\\memfile.cpp", 749, 0, "%s", "moveByte");
+    iassert(moveByte);
     if (MemFile_WriteDataInternal(memFile, cacheSizea, 0, cacheBufferLen - 3, moveByte))
     {
         cacheBufferLen = 2;
@@ -798,8 +735,7 @@ LABEL_56:
 
 void __cdecl MemFile_WriteCString(MemoryFile* memFile, const char* string)
 {
-    if (!string)
-        MyAssertHandler(".\\universal\\memfile.cpp", 813, 0, "%s", "string");
+    iassert(string);
     MemFile_WriteData(memFile, strlen(string) + 1, string);
 }
 
@@ -807,19 +743,9 @@ const char* __cdecl MemFile_ReadCString(MemoryFile* memFile)
 {
     uint8_t* string; // [esp+0h] [ebp-4h]
 
-    if (!memFile)
-        MyAssertHandler(".\\universal\\memfile.cpp", 824, 0, "%s", "memFile");
-    if (!memFile->buffer)
-        MyAssertHandler(".\\universal\\memfile.cpp", 825, 0, "%s", "memFile->buffer");
-    if (memFile->bytesUsed < 0 || memFile->bytesUsed > memFile->bufferSize)
-        MyAssertHandler(
-            ".\\universal\\memfile.cpp",
-            826,
-            0,
-            "memFile->bytesUsed not in [0, memFile->bufferSize]\n\t%i not in [%i, %i]",
-            memFile->bytesUsed,
-            0,
-            memFile->bufferSize);
+    iassert(memFile);
+    iassert(memFile->buffer);
+    rangeassert(memFile->bytesUsed, 0, memFile->bufferSize);
 
     string = g_saveBuffer;
     while (1)
@@ -841,27 +767,14 @@ void __cdecl MemFile_ReadData(MemoryFile* memFile, int byteCount, uint8_t* p)
     uint8_t* data; // [esp+0h] [ebp-8h]
     uint8_t code; // [esp+7h] [ebp-1h]
 
-    if (!memFile)
-        MyAssertHandler(".\\universal\\memfile.cpp", 900, 0, "%s", "memFile");
-    if (!MemFile_IsReading(memFile))
-        MyAssertHandler(".\\universal\\memfile.cpp", 901, 0, "%s", "MemFile_IsReading( memFile )");
-    if (!memFile->buffer)
-        MyAssertHandler(".\\universal\\memfile.cpp", 902, 0, "%s", "memFile->buffer");
-    if (memFile->bytesUsed < 0 || memFile->bytesUsed > memFile->bufferSize)
-        MyAssertHandler(
-            ".\\universal\\memfile.cpp",
-            903,
-            0,
-            "memFile->bytesUsed not in [0, memFile->bufferSize]\n\t%i not in [%i, %i]",
-            memFile->bytesUsed,
-            0,
-            memFile->bufferSize);
-    if (byteCount < 0)
-        MyAssertHandler(".\\universal\\memfile.cpp", 904, 0, "%s\n\t(byteCount) = %i", "(byteCount >= 0)", byteCount);
+    iassert(memFile);
+    iassert(MemFile_IsReading( memFile ));
+    iassert(memFile->buffer);
+    rangeassert(memFile->bytesUsed, 0, memFile->bufferSize);
+    vassert((byteCount >= 0), "(byteCount) = %i", byteCount);
     if (byteCount && !memFile->memoryOverflow)
     {
-        if (!p)
-            MyAssertHandler(".\\universal\\memfile.cpp", 912, 0, "%s", "p");
+        iassert(p);
         data = p;
         while (1)
         {
@@ -903,35 +816,17 @@ uint8_t __cdecl MemFile_ReadByteInternal(MemoryFile* memFile)
     uint err; // [esp+0h] [ebp-8h]
     uint8_t result; // [esp+7h] [ebp-1h] BYREF
 
-    if (!memFile)
-        MyAssertHandler(".\\universal\\memfile.cpp", 851, 0, "%s", "memFile");
-    if (!MemFile_IsReading(memFile))
-        MyAssertHandler(".\\universal\\memfile.cpp", 852, 0, "%s", "MemFile_IsReading( memFile )");
-    if (!memFile->buffer)
-        MyAssertHandler(".\\universal\\memfile.cpp", 853, 0, "%s", "memFile->buffer");
-    if (memFile->bytesUsed < 0 || memFile->bytesUsed > memFile->bufferSize)
-        MyAssertHandler(
-            ".\\universal\\memfile.cpp",
-            854,
-            0,
-            "memFile->bytesUsed not in [0, memFile->bufferSize]\n\t%i not in [%i, %i]",
-            memFile->bytesUsed,
-            0,
-            memFile->bufferSize);
-    if (memFile->memoryOverflow)
-        MyAssertHandler(".\\universal\\memfile.cpp", 855, 0, "%s", "!memFile->memoryOverflow");
+    iassert(memFile);
+    iassert(MemFile_IsReading( memFile ));
+    iassert(memFile->buffer);
+    rangeassert(memFile->bytesUsed, 0, memFile->bufferSize);
+    iassert(!memFile->memoryOverflow);
     AssertStreamMode(MEM_FILE_MODE_INFLATE);
     if (memFile->compress)
     {
         stream.next_out = &result;
         stream.avail_out = 1;
-        if (&memFile->buffer[memFile->bytesUsed] != stream.next_in)
-            MyAssertHandler(
-                ".\\universal\\memfile.cpp",
-                865,
-                0,
-                "%s",
-                "memFile->buffer + memFile->bytesUsed == stream.next_in");
+        iassert(memFile->buffer + memFile->bytesUsed == stream.next_in);
         err = inflate(&stream, 2);
         if (err > 1)
             MyAssertHandler(".\\universal\\memfile.cpp", 868, 0, "%s\n\t(err) = %i", "((err == 0) || (err == 1))", err);

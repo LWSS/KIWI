@@ -230,13 +230,7 @@ void WriteId(unsigned int id, unsigned int opcode, MemoryFile *memFile)
     _WORD v9[32]; // [sp+50h] [-40h] BYREF
 
     v3 = id;
-    if (!scrVarPub.saveIdMap[id] && id)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\script\\scr_readwrite.cpp",
-            188,
-            0,
-            "%s",
-            "scrVarPub.saveIdMap[id] || !id");
+    iassert(scrVarPub.saveIdMap[id] || !id);
     if ((opcode & 0xFFFFFFF8) != 0)
         MyAssertHandler(
             "c:\\trees\\cod3\\cod3src\\src\\script\\scr_readwrite.cpp",
@@ -613,13 +607,7 @@ void __cdecl Scr_DoLoadObjectInfo(unsigned __int16 parentId, MemoryFile *memFile
             header2 = 0;
             MemFile_ReadData(memFile, 2, (byte *)&header2);
             parentValue->u.o.u.size = header2;
-            if (parentValue->w.classnum & VAR_NAME_HIGH_MASK)
-                MyAssertHandler(
-                    "c:\\trees\\cod3\\cod3src\\src\\script\\scr_readwrite.cpp",
-                    827,
-                    0,
-                    "%s",
-                    "!(parentValue->w.classnum & VAR_NAME_HIGH_MASK)");
+            iassert(!(parentValue->w.classnum & VAR_NAME_HIGH_MASK));
             header2 = 0;
             MemFile_ReadData(memFile, 2, (byte *)&header2);
             parentValue->w.type |= ((int)(__int16)header2) << 8;
@@ -676,8 +664,7 @@ void __cdecl Scr_ReadGameEntry(MemoryFile *memFile)
     VariableUnion v4; // r8
     VariableValue v5; // [sp+50h] [-30h] BYREF
 
-    if (scrVarPub.gameId)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\script\\scr_readwrite.cpp", 910, 0, "%s", "!scrVarPub.gameId");
+    iassert(!scrVarPub.gameId);
     scrVarPub.gameId = AllocValue();
     Scr_DoLoadEntryInternal(&v5, memFile);
     type = v5.type;
@@ -734,13 +721,7 @@ static void Scr_AddDebuggerRefs()
 {
     if (scrVarPub.developer)
     {
-        if (scrVmPub.function_count)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\script\\scr_debugger.cpp",
-                8605,
-                0,
-                "%s",
-                "!scrVmPub.function_count");
+        iassert(!scrVmPub.function_count);
         scrDebuggerGlob.scriptWatch.localId = 0;
         iassert(!scrVarPub.evaluate);
         scrVarPub.evaluate = 1;
@@ -757,27 +738,17 @@ static void Scr_RemoveDebuggerRefs()
 {
     if (scrVarPub.developer)
     {
-        if (!Scr_IsStackClear())
-            MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\script\\scr_debugger.cpp", 8582, 0, "%s", "Scr_IsStackClear()");
-        if (scrVmPub.function_count)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\script\\scr_debugger.cpp",
-                8584,
-                0,
-                "%s",
-                "!scrVmPub.function_count");
+        iassert(Scr_IsStackClear());
+        iassert(!scrVmPub.function_count);
         scrDebuggerGlob.scriptWatch.localId = 0;
-        if (scrVarPub.evaluate)
-            MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\script\\scr_debugger.cpp", 8587, 0, "%s", "!scrVarPub.evaluate");
+        iassert(!scrVarPub.evaluate);
         scrVarPub.evaluate = 1;
         //Scr_ScriptWatch::UpdateBreakpoints(&scrDebuggerGlob.scriptWatch, 0);
         scrDebuggerGlob.scriptWatch.UpdateBreakpoints(false);
         Scr_RemoveElementValues();
-        if (!scrVarPub.evaluate)
-            MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\script\\scr_debugger.cpp", 8593, 0, "%s", "scrVarPub.evaluate");
+        iassert(scrVarPub.evaluate);
         scrVarPub.evaluate = 0;
-        if (!Scr_IsStackClear())
-            MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\script\\scr_debugger.cpp", 8596, 0, "%s", "Scr_IsStackClear()");
+        iassert(Scr_IsStackClear());
     }
 }
 
@@ -862,10 +833,8 @@ void __cdecl Scr_LoadPre(int sys, MemoryFile *memFile)
     scrVarDebugPub_t *v22; // r11
     unsigned __int8 v23[96]; // [sp+50h] [-60h] BYREF
 
-    if (sys != 1)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\script\\scr_readwrite.cpp", 1008, 0, "%s", "sys == SCR_SYS_GAME");
-    if (scrVarPub.varUsagePos)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\script\\scr_readwrite.cpp", 1011, 0, "%s", "!scrVarPub.varUsagePos");
+    iassert(sys == SCR_SYS_GAME);
+    iassert(!scrVarPub.varUsagePos);
     scrVarPub.varUsagePos = "<save game variable>";
     memset(scrVmDebugPub.profileEnable, 0, sizeof(scrVmDebugPub.profileEnable));
     MemFile_ReadData(memFile, 4, v23);
@@ -903,45 +872,35 @@ void __cdecl Scr_LoadPre(int sys, MemoryFile *memFile)
     Scr_ReadGameEntry(memFile);
     MemFile_ReadData(memFile, 1, v23);
     v9 = v23[0];
-    if (scrVarPub.levelId)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\script\\scr_readwrite.cpp", 1042, 0, "%s", "!scrVarPub.levelId");
+    iassert(!scrVarPub.levelId);
     Id = Scr_ReadId(memFile, v9);
     scrVarPub.levelId = Id;
     if (scrVarDebugPub)
         ++scrVarDebugPub->extRefCount[Id];
     MemFile_ReadData(memFile, 1, v23);
     v11 = v23[0];
-    if (scrVarPub.animId)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\script\\scr_readwrite.cpp", 1050, 0, "%s", "!scrVarPub.animId");
+    iassert(!scrVarPub.animId);
     v12 = Scr_ReadId(memFile, v11);
     scrVarPub.animId = v12;
     if (scrVarDebugPub)
         ++scrVarDebugPub->extRefCount[v12];
     MemFile_ReadData(memFile, 1, v23);
     v13 = v23[0];
-    if (scrVarPub.timeArrayId)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\script\\scr_readwrite.cpp", 1058, 0, "%s", "!scrVarPub.timeArrayId");
+    iassert(!scrVarPub.timeArrayId);
     v14 = Scr_ReadId(memFile, v13);
     scrVarPub.timeArrayId = v14;
     if (scrVarDebugPub)
         ++scrVarDebugPub->extRefCount[v14];
     MemFile_ReadData(memFile, 1, v23);
     v15 = v23[0];
-    if (scrVarPub.pauseArrayId)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\script\\scr_readwrite.cpp",
-            1066,
-            0,
-            "%s",
-            "!scrVarPub.pauseArrayId");
+    iassert(!scrVarPub.pauseArrayId);
     v16 = Scr_ReadId(memFile, v15);
     scrVarPub.pauseArrayId = v16;
     if (scrVarDebugPub)
         ++scrVarDebugPub->extRefCount[v16];
     MemFile_ReadData(memFile, 1, v23);
     v17 = v23[0];
-    if (scrVarPub.freeEntList)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\script\\scr_readwrite.cpp", 1074, 0, "%s", "!scrVarPub.freeEntList");
+    iassert(!scrVarPub.freeEntList);
     v18 = Scr_ReadId(memFile, v17);
     scrVarPub.freeEntList = v18;
     if (scrVarDebugPub)
@@ -1169,8 +1128,7 @@ void __cdecl Scr_LoadShutdown()
     }
     Scr_InitDebuggerSystem();
     scrVarPub.varUsagePos = 0;
-    if (!CheckReferences())
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\script\\scr_readwrite.cpp", 1115, 0, "%s", "CheckReferences()");
+    iassert(CheckReferences());
 }
 
 void __cdecl DoSaveEntryInternal(unsigned int type, VariableUnion *u, MemoryFile *memFile)
@@ -1202,13 +1160,7 @@ void __cdecl DoSaveEntryInternal(unsigned int type, VariableUnion *u, MemoryFile
     _BYTE v30[4]; // [sp+50h] [-30h] BYREF
     unsigned int v31[11]; // [sp+54h] [-2Ch] BYREF
 
-    if (type != (unsigned __int8)type)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\script\\scr_readwrite.cpp",
-            1122,
-            0,
-            "%s",
-            "type == (unsigned char)type");
+    iassert(type == (unsigned char)type);
     if (type == 1)
     {
         UsedSize = MemFile_GetUsedSize(memFile);
@@ -1343,13 +1295,7 @@ void __cdecl Scr_LoadSource(MemoryFile *memFile, void *fileHandle)
     int v11; // r4
     char v12; // [sp+50h] [-50h] BYREF
 
-    if (scrParserGlob.saveSourceBufferLookup)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\script\\scr_readwrite.cpp",
-            1236,
-            0,
-            "%s",
-            "!scrParserGlob.saveSourceBufferLookup");
+    iassert(!scrParserGlob.saveSourceBufferLookup);
     MemFile_ReadData(memFile, 1, (byte*)&v12);
     MemFile_ReadData(memFile, 1, (byte*)&scrVarPub.developer_script);
     if (v12)
@@ -1496,8 +1442,7 @@ void __cdecl DoSaveEntry(VariableValue *value, VariableValue *name, bool isArray
     unsigned int v27[2]; // [sp+50h] [-40h] BYREF
     __int64 v28; // [sp+58h] [-38h]
 
-    if (!value)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\script\\scr_readwrite.cpp", 391, 0, "%s", "value");
+    iassert(value);
     UsedSize = MemFile_GetUsedSize(memFile);
     //ProfMem_Begin("DoSaveEntry", UsedSize);
     v9 = MemFile_GetUsedSize(memFile);
@@ -1930,12 +1875,9 @@ void __cdecl Scr_SavePre(int sys)
     const VariableStackBuffer *stackValue; // r3
     int v6; // r11
 
-    if (!scrVarPub.timeArrayId)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\script\\scr_readwrite.cpp", 871, 0, "%s", "scrVarPub.timeArrayId");
-    if (!CheckReferences())
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\script\\scr_readwrite.cpp", 874, 0, "%s", "CheckReferences()");
-    if (sys != 1)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\script\\scr_readwrite.cpp", 876, 0, "%s", "sys == SCR_SYS_GAME");
+    iassert(scrVarPub.timeArrayId);
+    iassert(CheckReferences());
+    iassert(sys == SCR_SYS_GAME);
     Scr_RemoveDebuggerRefs();
     Com_Memset(scrVarPub.saveIdMap, 0, 0x10000);
     Com_Memset(scrVarPub.saveIdMapRev, 0, 0x10000);

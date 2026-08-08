@@ -22,14 +22,7 @@ void __cdecl StatMon_Warning(int type, int duration, const char *materialName)
 {
     if (com_statmon->current.enabled)
     {
-        if ((uint)type >= 7)
-            MyAssertHandler(
-                ".\\qcommon\\statmonitor.cpp",
-                41,
-                0,
-                "type doesn't index ARRAY_COUNT( stats )\n\t%i not in [0, %i)",
-                type,
-                7);
+        bcassert((uint)type, 7);
         Sys_EnterCriticalSection(CRITSECT_STATMON);
         stats[type].endtime = duration + Sys_Milliseconds();
         if (!stats[type].material && cls.rendererStarted)

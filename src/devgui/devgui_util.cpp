@@ -28,10 +28,8 @@ void __cdecl DevGui_DrawBox(int x, int y, int w, int h, const uint8_t *color)
     float v8; // [esp+Ch] [ebp-4Ch]
     float unpackedColor[4]; // [esp+48h] [ebp-10h] BYREF
 
-    if (!w)
-        MyAssertHandler(".\\devgui\\devgui_util.cpp", 116, 0, "%s", "w");
-    if (!h)
-        MyAssertHandler(".\\devgui\\devgui_util.cpp", 117, 0, "%s", "h");
+    iassert(w);
+    iassert(h);
     Byte4UnpackRgba(color, unpackedColor);
     v8 = (float)h;
     v7 = (float)w;
@@ -380,8 +378,7 @@ void __cdecl DevGui_DrawFont(int x, int y, const uint8_t *color, char *text)
     float v5; // [esp+4h] [ebp-28h]
     float unpackedColor[4]; // [esp+1Ch] [ebp-10h] BYREF
 
-    if (!text)
-        MyAssertHandler(".\\devgui\\devgui_util.cpp", 290, 0, "%s", "text");
+    iassert(text);
     if (*text)
     {
         Byte4UnpackRgba(color, unpackedColor);

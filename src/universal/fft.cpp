@@ -264,10 +264,8 @@ void __cdecl FFT_Init(int *fftBitswap, complex_s *fftTrigTable)
     int fftIndex; // [esp+Ch] [ebp-8h]
     int logIndex; // [esp+10h] [ebp-4h]
 
-    if (!fftBitswap)
-        MyAssertHandler(".\\universal\\fft.cpp", 11, 0, "%s", "fftBitswap");
-    if (!fftTrigTable)
-        MyAssertHandler(".\\universal\\fft.cpp", 12, 0, "%s", "fftTrigTable");
+    iassert(fftBitswap);
+    iassert(fftTrigTable);
     for (fftIndex = 0; fftIndex < 256; ++fftIndex)
     {
         fftBitswap[fftIndex] = 0;

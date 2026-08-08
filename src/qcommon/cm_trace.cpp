@@ -273,13 +273,7 @@ void __cdecl CM_Trace(
     }
     else
     {
-        if (results->surfaceFlags != -1 && oldFrac != results->fraction)
-            MyAssertHandler(
-                ".\\qcommon\\cm_trace.cpp",
-                1476,
-                0,
-                "%s",
-                "results->surfaceFlags == SURF_INVALID || results->fraction == oldFrac");
+        iassert(results->surfaceFlags == SURF_INVALID || results->fraction == oldFrac);
         results->surfaceFlags = oldSurfaceFlags;
     }
 }
@@ -293,16 +287,7 @@ void __cdecl CM_GetTraceThreadInfo(TraceThreadInfo *threadInfo)
     iassert( value );
     ++value->checkcount.global;
     *threadInfo = *value;
-    if (!threadInfo->checkcount.partitions)
-    {
-        if (cm.partitionCount)
-            MyAssertHandler(
-                ".\\qcommon\\cm_trace.cpp",
-                62,
-                0,
-                "%s",
-                "threadInfo->checkcount.partitions || cm.partitionCount == 0");
-    }
+    iassert(threadInfo->checkcount.partitions || cm.partitionCount == 0);
 }
 
 void __cdecl CM_TestInLeaf(traceWork_t *tw, cLeaf_t *leaf, trace_t *trace)
@@ -387,28 +372,8 @@ void __cdecl CM_TestBoxInBrush(const traceWork_t *tw, cbrush_t *brush, trace_t *
     float dist; // [esp+4Ch] [ebp-Ch]
     signed int i; // [esp+54h] [ebp-4h]
 
-    if ((COERCE_UNSIGNED_INT(tw->extents.start[0]) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(tw->extents.start[1]) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(tw->extents.start[2]) & 0x7F800000) == 0x7F800000)
-    {
-        MyAssertHandler(
-            ".\\qcommon\\cm_trace.cpp",
-            224,
-            0,
-            "%s",
-            "!IS_NAN((tw->extents.start)[0]) && !IS_NAN((tw->extents.start)[1]) && !IS_NAN((tw->extents.start)[2])");
-    }
-    if ((COERCE_UNSIGNED_INT(tw->extents.end[0]) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(tw->extents.end[1]) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(tw->extents.end[2]) & 0x7F800000) == 0x7F800000)
-    {
-        MyAssertHandler(
-            ".\\qcommon\\cm_trace.cpp",
-            225,
-            0,
-            "%s",
-            "!IS_NAN((tw->extents.end)[0]) && !IS_NAN((tw->extents.end)[1]) && !IS_NAN((tw->extents.end)[2])");
-    }
+    nanassertvec3(tw->extents.start);
+    nanassertvec3(tw->extents.end);
     if (brush->maxs[0] > (double)tw->bounds[0][0]
         && brush->maxs[1] > (double)tw->bounds[0][1]
         && brush->maxs[2] > (double)tw->bounds[0][2]
@@ -424,17 +389,7 @@ void __cdecl CM_TestBoxInBrush(const traceWork_t *tw, cbrush_t *brush, trace_t *
             plane = side->plane;
             iassert( !IS_NAN(plane->dist) );
             iassert( !IS_NAN(tw->radius) );
-            if ((COERCE_UNSIGNED_INT(plane->normal[0]) & 0x7F800000) == 0x7F800000
-                || (COERCE_UNSIGNED_INT(plane->normal[1]) & 0x7F800000) == 0x7F800000
-                || (COERCE_UNSIGNED_INT(plane->normal[2]) & 0x7F800000) == 0x7F800000)
-            {
-                MyAssertHandler(
-                    ".\\qcommon\\cm_trace.cpp",
-                    255,
-                    0,
-                    "%s",
-                    "!IS_NAN((plane->normal)[0]) && !IS_NAN((plane->normal)[1]) && !IS_NAN((plane->normal)[2])");
-            }
+            nanassertvec3(plane->normal);
             iassert( !IS_NAN(tw->offsetZ) );
             v4 = tw->offsetZ * plane->normal[2];
             v3 = I_fabs(v4);
@@ -812,28 +767,8 @@ void __cdecl CM_TraceThroughBrush(const traceWork_t *tw, cbrush_t *brush, trace_
     index = 0;
     while (2)
     {
-        if ((COERCE_UNSIGNED_INT(*bounds) & 0x7F800000) == 0x7F800000
-            || (COERCE_UNSIGNED_INT(bounds[1]) & 0x7F800000) == 0x7F800000
-            || (COERCE_UNSIGNED_INT(bounds[2]) & 0x7F800000) == 0x7F800000)
-        {
-            MyAssertHandler(
-                ".\\qcommon\\cm_trace.cpp",
-                586,
-                0,
-                "%s",
-                "!IS_NAN((bounds)[0]) && !IS_NAN((bounds)[1]) && !IS_NAN((bounds)[2])");
-        }
-        if ((COERCE_UNSIGNED_INT(tw->radiusOffset[0]) & 0x7F800000) == 0x7F800000
-            || (COERCE_UNSIGNED_INT(tw->radiusOffset[1]) & 0x7F800000) == 0x7F800000
-            || (COERCE_UNSIGNED_INT(tw->radiusOffset[2]) & 0x7F800000) == 0x7F800000)
-        {
-            MyAssertHandler(
-                ".\\qcommon\\cm_trace.cpp",
-                587,
-                0,
-                "%s",
-                "!IS_NAN((tw->radiusOffset)[0]) && !IS_NAN((tw->radiusOffset)[1]) && !IS_NAN((tw->radiusOffset)[2])");
-        }
+        nanassertvec3(bounds);
+        nanassertvec3(tw->radiusOffset);
         for (j = 0; j < 3; ++j)
         {
             d1 = (tw->extents.start[j] - bounds[j]) * sign - tw->radiusOffset[j];
@@ -907,17 +842,7 @@ void __cdecl CM_TraceThroughBrush(const traceWork_t *tw, cbrush_t *brush, trace_
             plane = side->plane;
             iassert( !IS_NAN(plane->dist) );
             iassert( !IS_NAN(tw->radius) );
-            if ((COERCE_UNSIGNED_INT(plane->normal[0]) & 0x7F800000) == 0x7F800000
-                || (COERCE_UNSIGNED_INT(plane->normal[1]) & 0x7F800000) == 0x7F800000
-                || (COERCE_UNSIGNED_INT(plane->normal[2]) & 0x7F800000) == 0x7F800000)
-            {
-                MyAssertHandler(
-                    ".\\qcommon\\cm_trace.cpp",
-                    647,
-                    0,
-                    "%s",
-                    "!IS_NAN((plane->normal)[0]) && !IS_NAN((plane->normal)[1]) && !IS_NAN((plane->normal)[2])");
-            }
+            nanassertvec3(plane->normal);
             iassert( !IS_NAN(tw->offsetZ) );
             v11 = tw->offsetZ * plane->normal[2];
             v5 = I_fabs(v11);
@@ -1146,14 +1071,7 @@ int __cdecl CM_TraceSphereThroughSphere(
         if (fB < 0.0)
         {
             fA = tw->deltaLenSq;
-            if (fA <= 0.0)
-                MyAssertHandler(
-                    ".\\qcommon\\cm_trace.cpp",
-                    959,
-                    0,
-                    "%s\n\t(tw->deltaLenSq) = %g",
-                    "(fA > 0.0f)",
-                    tw->deltaLenSq);
+            vassert((fA > 0.0f), "(tw->deltaLenSq) = %g", tw->deltaLenSq);
             fDiscriminant = fB * fB - fA * fC;
             if (fDiscriminant >= 0.0)
             {
@@ -1768,17 +1686,7 @@ int __cdecl CM_SightTraceThroughBrush(const traceWork_t *tw, cbrush_t *brush)
                 "%s",
                 "!IS_NAN((bounds)[0]) && !IS_NAN((bounds)[1]) && !IS_NAN((bounds)[2])");
         }
-        if ((COERCE_UNSIGNED_INT(tw->radiusOffset[0]) & 0x7F800000) == 0x7F800000
-            || (COERCE_UNSIGNED_INT(tw->radiusOffset[1]) & 0x7F800000) == 0x7F800000
-            || (COERCE_UNSIGNED_INT(tw->radiusOffset[2]) & 0x7F800000) == 0x7F800000)
-        {
-            MyAssertHandler(
-                ".\\qcommon\\cm_trace.cpp",
-                1684,
-                0,
-                "%s",
-                "!IS_NAN((tw->radiusOffset)[0]) && !IS_NAN((tw->radiusOffset)[1]) && !IS_NAN((tw->radiusOffset)[2])");
-        }
+        nanassertvec3(tw->radiusOffset);
         for (j = 0; j < 3; ++j)
         {
             d1 = (tw->extents.start[j] - bounds->mins[j]) * sign - tw->radiusOffset[j];
@@ -1828,17 +1736,7 @@ int __cdecl CM_SightTraceThroughBrush(const traceWork_t *tw, cbrush_t *brush)
         plane = side->plane;
         iassert( !IS_NAN(plane->dist) );
         iassert( !IS_NAN(tw->radius) );
-        if ((COERCE_UNSIGNED_INT(plane->normal[0]) & 0x7F800000) == 0x7F800000
-            || (COERCE_UNSIGNED_INT(plane->normal[1]) & 0x7F800000) == 0x7F800000
-            || (COERCE_UNSIGNED_INT(plane->normal[2]) & 0x7F800000) == 0x7F800000)
-        {
-            MyAssertHandler(
-                ".\\qcommon\\cm_trace.cpp",
-                1730,
-                0,
-                "%s",
-                "!IS_NAN((plane->normal)[0]) && !IS_NAN((plane->normal)[1]) && !IS_NAN((plane->normal)[2])");
-        }
+        nanassertvec3(plane->normal);
         iassert( !IS_NAN(tw->offsetZ) );
         v8 = tw->offsetZ * plane->normal[2];
         v3 = I_fabs(v8);

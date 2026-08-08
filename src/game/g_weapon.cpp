@@ -26,13 +26,11 @@ void __cdecl G_AntiLagRewindClientPos(int gameTime, AntilagClientStore *antilagS
     int client; // [esp+34h] [ebp-14h]
     float clientPosition[4]; // [esp+38h] [ebp-10h] BYREF
 
-    if (!antilagStore)
-        MyAssertHandler(".\\game\\g_weapon.cpp", 30, 0, "%s", "antilagStore");
+    iassert(antilagStore);
     if (g_antilag->current.enabled)
     {
         memset((uint8_t *)antilagStore, 0, sizeof(AntilagClientStore));
-        if (gameTime <= 0)
-            MyAssertHandler(".\\game\\g_weapon.cpp", 36, 0, "%s", "gameTime > 0");
+        iassert(gameTime > 0);
         if (level.time - gameTime <= 400 && level.time - gameTime > 1000 / sv_fps->current.integer)
         {
             for (client = 0; client < level.maxclients; ++client)
@@ -105,8 +103,7 @@ void __cdecl G_AntiLag_RestoreClientPos(AntilagClientStore *antilagStore)
     float *currentOrigin; // eax
     int client; // [esp+24h] [ebp-4h]
 
-    if (!antilagStore)
-        MyAssertHandler(".\\game\\g_weapon.cpp", 80, 0, "%s", "antilagStore");
+    iassert(antilagStore);
     if (g_antilag->current.enabled)
     {
         for (client = 0; client < level.maxclients; ++client)
@@ -174,10 +171,8 @@ gentity_s *__cdecl Weapon_Melee_internal(gentity_s *ent, weaponParms *wp, float 
     uint16_t hitEntId; // [esp+58h] [ebp-8h]
     gentity_s *traceEnt; // [esp+5Ch] [ebp-4h]
 
-    if (!wp)
-        MyAssertHandler(".\\game\\g_weapon.cpp", 190, 0, "%s", "wp");
-    if (!wp->weapDef)
-        MyAssertHandler(".\\game\\g_weapon.cpp", 191, 0, "%s", "wp->weapDef");
+    iassert(wp);
+    iassert(wp->weapDef);
     damage = wp->weapDef->iMeleeDamage;
     if (!Melee_Trace(ent, wp, damage, range, width, height, &tr, endpos))
         return 0;
@@ -325,10 +320,8 @@ gentity_s *__cdecl Weapon_Throw_Grenade(
     float vTossVel[3]; // [esp+3Ch] [ebp-18h] BYREF
     float forwardHoriz[3]; // [esp+48h] [ebp-Ch] BYREF
 
-    if (!ent)
-        MyAssertHandler(".\\game\\g_weapon.cpp", 302, 0, "%s", "ent");
-    if (!wp)
-        MyAssertHandler(".\\game\\g_weapon.cpp", 303, 0, "%s", "wp");
+    iassert(ent);
+    iassert(wp);
     scale = (float)wp->weapDef->iProjectileSpeed;
     Vec3Scale(wp->forward, scale, vTossVel);
     vTossVel[2] = (double)wp->weapDef->iProjectileSpeedUp + vTossVel[2];
@@ -350,17 +343,7 @@ gentity_s *__cdecl Weapon_Throw_Grenade(
     Vec3Normalize(vTossVel);
     fAddVel = Vec3Dot(ent->client->ps.velocity, vTossVel);
     Vec3Mad(m->s.lerp.pos.trDelta, fAddVel, vTossVel, m->s.lerp.pos.trDelta);
-    if ((COERCE_UNSIGNED_INT(m->s.lerp.pos.trDelta[0]) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(m->s.lerp.pos.trDelta[1]) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(m->s.lerp.pos.trDelta[2]) & 0x7F800000) == 0x7F800000)
-    {
-        MyAssertHandler(
-            ".\\game\\g_weapon.cpp",
-            322,
-            0,
-            "%s",
-            "!IS_NAN((m->s.lerp.pos.trDelta)[0]) && !IS_NAN((m->s.lerp.pos.trDelta)[1]) && !IS_NAN((m->s.lerp.pos.trDelta)[2])");
-    }
+    nanassertvec3(m->s.lerp.pos.trDelta);
     return m;
 }
 
@@ -375,10 +358,8 @@ gentity_s *__cdecl Weapon_GrenadeLauncher_Fire(
     float fAddVel; // [esp+28h] [ebp-10h]
     float vTossVel[3]; // [esp+2Ch] [ebp-Ch] BYREF
 
-    if (!ent)
-        MyAssertHandler(".\\game\\g_weapon.cpp", 334, 0, "%s", "ent");
-    if (!wp)
-        MyAssertHandler(".\\game\\g_weapon.cpp", 335, 0, "%s", "wp");
+    iassert(ent);
+    iassert(wp);
     scale = (float)wp->weapDef->iProjectileSpeed;
     Vec3Scale(wp->forward, scale, vTossVel);
     vTossVel[2] = (double)wp->weapDef->iProjectileSpeedUp + vTossVel[2];
@@ -387,17 +368,7 @@ gentity_s *__cdecl Weapon_GrenadeLauncher_Fire(
     Vec3Normalize(vTossVel);
     fAddVel = Vec3Dot(ent->client->ps.velocity, vTossVel);
     Vec3Mad(m->s.lerp.pos.trDelta, fAddVel, vTossVel, m->s.lerp.pos.trDelta);
-    if ((COERCE_UNSIGNED_INT(m->s.lerp.pos.trDelta[0]) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(m->s.lerp.pos.trDelta[1]) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(m->s.lerp.pos.trDelta[2]) & 0x7F800000) == 0x7F800000)
-    {
-        MyAssertHandler(
-            ".\\game\\g_weapon.cpp",
-            347,
-            0,
-            "%s",
-            "!IS_NAN((m->s.lerp.pos.trDelta)[0]) && !IS_NAN((m->s.lerp.pos.trDelta)[1]) && !IS_NAN((m->s.lerp.pos.trDelta)[2])");
-    }
+    nanassertvec3(m->s.lerp.pos.trDelta);
     return m;
 }
 
@@ -419,10 +390,8 @@ gentity_s *__cdecl Weapon_RocketLauncher_Fire(
     float launchpos[3]; // [esp+40h] [ebp-10h] BYREF
     float u; // [esp+4Ch] [ebp-4h] BYREF
 
-    if (!ent)
-        MyAssertHandler(".\\game\\g_weapon.cpp", 362, 0, "%s", "ent");
-    if (!wp)
-        MyAssertHandler(".\\game\\g_weapon.cpp", 363, 0, "%s", "wp");
+    iassert(ent);
+    iassert(wp);
     v9 = DEG2RAD( spread );
     v8 = tan(v9);
     fAimOffset = v8 * 16.0;
@@ -580,13 +549,10 @@ void __cdecl G_UseOffHand(gentity_s *ent)
 {
     weaponParms wp; // [esp+0h] [ebp-40h] BYREF
 
-    if (!ent->client)
-        MyAssertHandler(".\\game\\g_weapon.cpp", 545, 0, "%s", "ent->client");
-    if (!ent->client->ps.offHandIndex)
-        MyAssertHandler(".\\game\\g_weapon.cpp", 546, 0, "%s", "ent->client->ps.offHandIndex != WP_NONE");
+    iassert(ent->client);
+    iassert(ent->client->ps.offHandIndex != WP_NONE);
     wp.weapDef = BG_GetWeaponDef(ent->client->ps.offHandIndex);
-    if (wp.weapDef->weapType != WEAPTYPE_GRENADE)
-        MyAssertHandler(".\\game\\g_weapon.cpp", 550, 0, "%s", "wp.weapDef->weapType == WEAPTYPE_GRENADE");
+    iassert(wp.weapDef->weapType == WEAPTYPE_GRENADE);
     CalcMuzzlePoints(ent, &wp);
     Weapon_Throw_Grenade(
         ent,
@@ -608,12 +574,9 @@ void __cdecl FireWeaponMelee(gentity_s *ent, int gametime)
         wp.weapDef = BG_GetWeaponDef(ent->s.weapon);
         G_GetPlayerViewOrigin(&ent->client->ps, wp.muzzleTrace);
         BG_GetPlayerViewDirection(&ent->client->ps, wp.forward, wp.right, wp.up);
-        if (!player_meleeRange)
-            MyAssertHandler(".\\game\\g_weapon.cpp", 577, 0, "%s", "player_meleeRange");
-        if (!player_meleeWidth)
-            MyAssertHandler(".\\game\\g_weapon.cpp", 578, 0, "%s", "player_meleeWidth");
-        if (!player_meleeHeight)
-            MyAssertHandler(".\\game\\g_weapon.cpp", 579, 0, "%s", "player_meleeHeight");
+        iassert(player_meleeRange);
+        iassert(player_meleeWidth);
+        iassert(player_meleeHeight);
         Weapon_Melee(
             ent,
             &wp,
@@ -645,14 +608,7 @@ int __cdecl G_GivePlayerWeapon(playerState_s *pPS, int iWeaponIndex, uint8_t alt
         return 0;
     if (!weapDef->gunXModel[altModelIndex])
         return 0;
-    if (level.clientIsSpawning)
-        MyAssertHandler(
-            ".\\game\\g_weapon.cpp",
-            612,
-            0,
-            "%s\n\t(weapDef->szDisplayName) = %s",
-            "(!level.clientIsSpawning)",
-            weapDef->szDisplayName);
+    vassert((!level.clientIsSpawning), "(weapDef->szDisplayName) = %s", weapDef->szDisplayName);
     Com_BitSetAssert(pPS->weapons, iWeaponIndex, 16);
     Com_BitClearAssert(pPS->weaponrechamber, iWeaponIndex, 16);
     Com_BitClearAssert(pPS->weaponold, iWeaponIndex, 16);
@@ -666,8 +622,7 @@ int __cdecl G_GivePlayerWeapon(playerState_s *pPS, int iWeaponIndex, uint8_t alt
             if (BG_WeaponAmmo(pPS, pPS->offHandIndex) <= 0)
             {
                 oldWeapDef = BG_GetWeaponDef(pPS->offHandIndex);
-                if (!oldWeapDef)
-                    MyAssertHandler(".\\game\\g_weapon.cpp", 634, 0, "%s", "oldWeapDef");
+                iassert(oldWeapDef);
                 newOffHandIndex = BG_GetFirstAvailableOffhand(pPS, oldWeapDef->offhandClass);
                 if (newOffHandIndex)
                     pPS->offHandIndex = newOffHandIndex;

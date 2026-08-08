@@ -84,12 +84,9 @@ void __cdecl G_InitializeAmmo(gentity_s *pSelf, int weaponIndex, uint8_t weaponM
     startWeapon = weaponIndex;
     numWeapons = BG_GetNumWeapons();
     weapDef = BG_GetWeaponDef(weaponIndex);
-    if (!weapDef)
-        MyAssertHandler(".\\game_mp\\g_client_script_cmd_mp.cpp", 77, 0, "%s", "weapDef");
-    if (!pSelf)
-        MyAssertHandler(".\\game_mp\\g_client_script_cmd_mp.cpp", 79, 0, "%s", "pSelf");
-    if (!pSelf->client)
-        MyAssertHandler(".\\game_mp\\g_client_script_cmd_mp.cpp", 80, 0, "%s", "pSelf->client");
+    iassert(weapDef);
+    iassert(pSelf);
+    iassert(pSelf->client);
     do
     {
         ammoGive = G_GetNeededStartAmmo(pSelf, weapDef);
@@ -104,8 +101,7 @@ void __cdecl G_InitializeAmmo(gentity_s *pSelf, int weaponIndex, uint8_t weaponM
         }
         weaponIndex = weapDef->altWeaponIndex;
         weapDef = BG_GetWeaponDef(weaponIndex);
-        if (!weapDef)
-            MyAssertHandler(".\\game_mp\\g_client_script_cmd_mp.cpp", 92, 0, "%s", "weapDef");
+        iassert(weapDef);
         if (--numWeapons < 0)
             MyAssertHandler(
                 ".\\game_mp\\g_client_script_cmd_mp.cpp",
@@ -129,12 +125,9 @@ int __cdecl G_GetNeededStartAmmo(gentity_s *pSelf, WeaponDef *weapDef)
     uint weapIndex; // [esp+Ch] [ebp-8h]
     gclient_s *ps; // [esp+10h] [ebp-4h]
 
-    if (!pSelf)
-        MyAssertHandler(".\\game_mp\\g_client_script_cmd_mp.cpp", 34, 0, "%s", "pSelf");
-    if (!pSelf->client)
-        MyAssertHandler(".\\game_mp\\g_client_script_cmd_mp.cpp", 35, 0, "%s", "pSelf->client");
-    if (!weapDef)
-        MyAssertHandler(".\\game_mp\\g_client_script_cmd_mp.cpp", 36, 0, "%s", "weapDef");
+    iassert(pSelf);
+    iassert(pSelf->client);
+    iassert(weapDef);
     ps = pSelf->client;
     applicableOwnedAmmo = ps->ps.ammo[weapDef->iAmmoIndex];
     for (weapIndex = 0; weapIndex <= bg_lastParsedWeaponIndex; ++weapIndex)
@@ -142,8 +135,7 @@ int __cdecl G_GetNeededStartAmmo(gentity_s *pSelf, WeaponDef *weapDef)
         thisWeapDef = BG_GetWeaponDef(weapIndex);
         if (thisWeapDef->iAmmoIndex == weapDef->iAmmoIndex)
         {
-            if (!ps)
-                MyAssertHandler("c:\\trees\\cod3\\src\\bgame\\../bgame/bg_weapons.h", 229, 0, "%s", "ps");
+            iassert(ps);
             if (Com_BitCheckAssert(ps->ps.weapons, weapIndex, 16))
             {
                 if (weapDef != thisWeapDef)
@@ -170,8 +162,7 @@ void __cdecl PlayerCmd_takeWeapon(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x400u)
-            MyAssertHandler(".\\game_mp\\g_client_script_cmd_mp.cpp", 151, 0, "%s", "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         pSelf = &g_entities[entref.entnum];
         if (!pSelf->client)
         {
@@ -197,8 +188,7 @@ void __cdecl PlayerCmd_takeAllWeapons(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x400u)
-            MyAssertHandler(".\\game_mp\\g_client_script_cmd_mp.cpp", 164, 0, "%s", "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         pSelf = &g_entities[entref.entnum];
         if (!pSelf->client)
         {
@@ -225,8 +215,7 @@ void __cdecl PlayerCmd_getCurrentWeapon(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x400u)
-            MyAssertHandler(".\\game_mp\\g_client_script_cmd_mp.cpp", 192, 0, "%s", "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         pSelf = &g_entities[entref.entnum];
         if (!pSelf->client)
         {
@@ -247,15 +236,8 @@ void __cdecl PlayerCmd_getCurrentWeapon(scr_entref_t entref)
 
 bool __cdecl ClientPlaying(gentity_s *pSelf)
 {
-    if (!pSelf->client)
-        MyAssertHandler(".\\game_mp\\g_client_script_cmd_mp.cpp", 179, 0, "%s", "pSelf->client");
-    if (pSelf->client->sess.connected == CON_DISCONNECTED)
-        MyAssertHandler(
-            ".\\game_mp\\g_client_script_cmd_mp.cpp",
-            180,
-            0,
-            "%s",
-            "pSelf->client->sess.connected != CON_DISCONNECTED");
+    iassert(pSelf->client);
+    iassert(pSelf->client->sess.connected != CON_DISCONNECTED);
     return pSelf->client->sess.sessionState == SESS_STATE_PLAYING;
 }
 
@@ -272,8 +254,7 @@ void __cdecl PlayerCmd_getCurrentOffhand(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x400u)
-            MyAssertHandler(".\\game_mp\\g_client_script_cmd_mp.cpp", 218, 0, "%s", "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         pSelf = &g_entities[entref.entnum];
         if (!pSelf->client)
         {
@@ -305,8 +286,7 @@ void __cdecl PlayerCmd_setOffhandSecondaryClass(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x400u)
-            MyAssertHandler(".\\game_mp\\g_client_script_cmd_mp.cpp", 242, 0, "%s", "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         pSelf = &g_entities[entref.entnum];
         if (!pSelf->client)
         {
@@ -348,8 +328,7 @@ void __cdecl PlayerCmd_getOffhandSecondaryClass(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x400u)
-            MyAssertHandler(".\\game_mp\\g_client_script_cmd_mp.cpp", 265, 0, "%s", "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         pSelf = &g_entities[entref.entnum];
         if (!pSelf->client)
         {
@@ -363,13 +342,7 @@ void __cdecl PlayerCmd_getOffhandSecondaryClass(scr_entref_t entref)
     }
     else
     {
-        if (pSelf->client->ps.offhandSecondary)
-            MyAssertHandler(
-                ".\\game_mp\\g_client_script_cmd_mp.cpp",
-                273,
-                0,
-                "%s",
-                "pSelf->client->ps.offhandSecondary == PLAYER_OFFHAND_SECONDARY_SMOKE");
+        iassert(pSelf->client->ps.offhandSecondary == PLAYER_OFFHAND_SECONDARY_SMOKE);
         Scr_AddConstString(scr_const.smoke);
     }
 }
@@ -389,8 +362,7 @@ void __cdecl PlayerCmd_hasWeapon(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x400u)
-            MyAssertHandler(".\\game_mp\\g_client_script_cmd_mp.cpp", 284, 0, "%s", "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         pSelf = &g_entities[entref.entnum];
         if (!pSelf->client)
         {
@@ -426,8 +398,7 @@ void __cdecl PlayerCmd_switchToWeapon(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x400u)
-            MyAssertHandler(".\\game_mp\\g_client_script_cmd_mp.cpp", 301, 0, "%s", "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         pSelf = &g_entities[entref.entnum];
         if (!pSelf->client)
         {
@@ -681,8 +652,7 @@ void __cdecl PlayerCmd_setOrigin(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x400u)
-            MyAssertHandler(".\\game_mp\\g_client_script_cmd_mp.cpp", 452, 0, "%s", "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         pSelf = &g_entities[entref.entnum];
         if (!pSelf->client)
         {
@@ -718,8 +688,7 @@ void __cdecl PlayerCmd_GetVelocity(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x400u)
-            MyAssertHandler(".\\game_mp\\g_client_script_cmd_mp.cpp", 476, 0, "%s", "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         pSelf = &g_entities[entref.entnum];
         if (!pSelf->client)
         {
@@ -743,8 +712,7 @@ void __cdecl PlayerCmd_setAngles(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x400u)
-            MyAssertHandler(".\\game_mp\\g_client_script_cmd_mp.cpp", 486, 0, "%s", "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         pSelf = &g_entities[entref.entnum];
         if (!pSelf->client)
         {
@@ -770,8 +738,7 @@ void __cdecl PlayerCmd_getAngles(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x400u)
-            MyAssertHandler(".\\game_mp\\g_client_script_cmd_mp.cpp", 498, 0, "%s", "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         pSelf = &g_entities[entref.entnum];
         if (!pSelf->client)
         {
@@ -794,8 +761,7 @@ void __cdecl PlayerCmd_useButtonPressed(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x400u)
-            MyAssertHandler(".\\game_mp\\g_client_script_cmd_mp.cpp", 516, 0, "%s", "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         pSelf = &g_entities[entref.entnum];
         if (!pSelf->client)
         {
@@ -821,8 +787,7 @@ void __cdecl PlayerCmd_attackButtonPressed(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x400u)
-            MyAssertHandler(".\\game_mp\\g_client_script_cmd_mp.cpp", 537, 0, "%s", "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         pSelf = &g_entities[entref.entnum];
         if (!pSelf->client)
         {
@@ -848,8 +813,7 @@ void __cdecl PlayerCmd_adsButtonPressed(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x400u)
-            MyAssertHandler(".\\game_mp\\g_client_script_cmd_mp.cpp", 558, 0, "%s", "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         pSelf = &g_entities[entref.entnum];
         if (!pSelf->client)
         {
@@ -875,8 +839,7 @@ void __cdecl PlayerCmd_meleeButtonPressed(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x400u)
-            MyAssertHandler(".\\game_mp\\g_client_script_cmd_mp.cpp", 579, 0, "%s", "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         pSelf = &g_entities[entref.entnum];
         if (!pSelf->client)
         {
@@ -902,8 +865,7 @@ void __cdecl PlayerCmd_fragButtonPressed(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x400u)
-            MyAssertHandler(".\\game_mp\\g_client_script_cmd_mp.cpp", 600, 0, "%s", "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         pSelf = &g_entities[entref.entnum];
         if (!pSelf->client)
         {
@@ -929,8 +891,7 @@ void __cdecl PlayerCmd_secondaryOffhandButtonPressed(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x400u)
-            MyAssertHandler(".\\game_mp\\g_client_script_cmd_mp.cpp", 621, 0, "%s", "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         pSelf = &g_entities[entref.entnum];
         if (!pSelf->client)
         {
@@ -961,8 +922,7 @@ void __cdecl PlayerCmd_playerADS(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x400u)
-            MyAssertHandler(".\\game_mp\\g_client_script_cmd_mp.cpp", 674, 0, "%s", "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         pSelf = &g_entities[entref.entnum];
         if (!pSelf->client)
         {
@@ -985,8 +945,7 @@ void __cdecl PlayerCmd_isOnGround(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x400u)
-            MyAssertHandler(".\\game_mp\\g_client_script_cmd_mp.cpp", 682, 0, "%s", "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         pSelf = &g_entities[entref.entnum];
         if (!pSelf->client)
         {
@@ -1012,8 +971,7 @@ void __cdecl PlayerCmd_pingPlayer(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x400u)
-            MyAssertHandler(".\\game_mp\\g_client_script_cmd_mp.cpp", 710, 0, "%s", "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         pSelf = &g_entities[entref.entnum];
         if (!pSelf->client)
         {
@@ -1075,8 +1033,7 @@ void __cdecl PlayerCmd_GetViewmodel(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x400u)
-            MyAssertHandler(".\\game_mp\\g_client_script_cmd_mp.cpp", 750, 0, "%s", "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         pSelf = &g_entities[entref.entnum];
         if (!pSelf->client)
         {
@@ -1100,8 +1057,7 @@ void __cdecl PlayerCmd_showScoreboard(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x400u)
-            MyAssertHandler(".\\game_mp\\g_client_script_cmd_mp.cpp", 768, 0, "%s", "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         pSelf = &g_entities[entref.entnum];
         if (!pSelf->client)
         {
@@ -1346,20 +1302,8 @@ void __cdecl PlayerCmd_finishPlayerDamage(scr_entref_t entref)
                     tempBulletHitEntity->s.un1.scale = hitLoc == HITLOC_HEAD;
                     tempBulletHitEntity->s.surfType = 7;
                     tempBulletHitEntity->s.otherEntityNum = attacker->s.number;
-                    if (tempBulletHitEntity->r.clientMask[0])
-                        MyAssertHandler(
-                            ".\\game_mp\\g_client_script_cmd_mp.cpp",
-                            1002,
-                            0,
-                            "%s",
-                            "tempBulletHitEntity->r.clientMask[ 0 ] == 0");
-                    if (tempBulletHitEntity->r.clientMask[1])
-                        MyAssertHandler(
-                            ".\\game_mp\\g_client_script_cmd_mp.cpp",
-                            1003,
-                            0,
-                            "%s",
-                            "tempBulletHitEntity->r.clientMask[ 1 ] == 0");
+                    iassert(tempBulletHitEntity->r.clientMask[ 0 ] == 0);
+                    iassert(tempBulletHitEntity->r.clientMask[ 1 ] == 0);
                     tempBulletHitEntity->r.clientMask[pSelf->client->ps.clientNum >> 5] |= 1 << (pSelf->client->ps.clientNum & 0x1F);
                     WeaponDef = BG_GetWeaponDef(iWeapon);
                     tent = G_TempEntity(vPoint, (WeaponDef->bRifleBullet != 0) + 42);
@@ -1448,8 +1392,7 @@ void __cdecl PlayerCmd_finishPlayerDamage(scr_entref_t entref)
                     pSelf->client->lastStandTime = level.time + 500;
                     Scr_PlayerLastStand(pSelf, inflictor, attacker, damage, mod, iWeapon, localdir, hitLoc, psTimeOffset);
                 LABEL_93:
-                    if (!pSelf->r.inuse)
-                        MyAssertHandler(".\\game_mp\\g_client_script_cmd_mp.cpp", 1166, 0, "%s", "pSelf->r.inuse");
+                    iassert(pSelf->r.inuse);
                     pSelf->client->ps.stats[0] = pSelf->health;
                     return;
                 }
@@ -1469,14 +1412,7 @@ void __cdecl PlayerCmd_finishPlayerDamage(scr_entref_t entref)
 
 bool __cdecl IsBulletImpactMOD(meansOfDeath_t mod)
 {
-    if ((uint)mod >= MOD_NUM)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\src\\game_mp\\../bgame/bg_public.h",
-            961,
-            0,
-            "mod doesn't index MOD_NUM\n\t%i not in [0, %i)",
-            mod,
-            16);
+    bcassert((uint)mod, MOD_NUM);
     return mod == MOD_PISTOL_BULLET || mod == MOD_RIFLE_BULLET || mod == MOD_HEAD_SHOT;
 }
 
@@ -1492,8 +1428,7 @@ void __cdecl PlayerCmd_Suicide(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x400u)
-            MyAssertHandler(".\\game_mp\\g_client_script_cmd_mp.cpp", 1184, 0, "%s", "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         pSelf = &g_entities[entref.entnum];
         if (!pSelf->client)
         {
@@ -1600,8 +1535,7 @@ void __cdecl PlayerCmd_CloseMenu(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x400u)
-            MyAssertHandler(".\\game_mp\\g_client_script_cmd_mp.cpp", 1245, 0, "%s", "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         if (!g_entities[entref.entnum].client)
         {
             v1 = va("entity %i is not a player", entref.entnum);
@@ -1624,8 +1558,7 @@ void __cdecl PlayerCmd_CloseInGameMenu(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x400u)
-            MyAssertHandler(".\\game_mp\\g_client_script_cmd_mp.cpp", 1268, 0, "%s", "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         if (!g_entities[entref.entnum].client)
         {
             v1 = va("entity %i is not a player", entref.entnum);
@@ -1888,8 +1821,7 @@ void __cdecl iclientprintln(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x400u)
-            MyAssertHandler(".\\game_mp\\g_client_script_cmd_mp.cpp", 1435, 0, "%s", "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         if (!g_entities[entref.entnum].client)
         {
             v1 = va("entity %i is not a player", entref.entnum);
@@ -1912,8 +1844,7 @@ void __cdecl iclientprintlnbold(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x400u)
-            MyAssertHandler(".\\game_mp\\g_client_script_cmd_mp.cpp", 1448, 0, "%s", "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         if (!g_entities[entref.entnum].client)
         {
             v1 = va("entity %i is not a player", entref.entnum);
@@ -1939,8 +1870,7 @@ void __cdecl PlayerCmd_spawn(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x400u)
-            MyAssertHandler(".\\game_mp\\g_client_script_cmd_mp.cpp", 1462, 0, "%s", "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         pSelf = &g_entities[entref.entnum];
         if (!pSelf->client)
         {
@@ -1965,8 +1895,7 @@ void __cdecl PlayerCmd_setEnterTime(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x400u)
-            MyAssertHandler(".\\game_mp\\g_client_script_cmd_mp.cpp", 1472, 0, "%s", "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         pSelf = &g_entities[entref.entnum];
         if (!pSelf->client)
         {
@@ -2003,8 +1932,7 @@ void __cdecl PlayerCmd_ClonePlayer(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x400u)
-            MyAssertHandler(".\\game_mp\\g_client_script_cmd_mp.cpp", 1510, 0, "%s", "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         pSelf = &g_entities[entref.entnum];
         if (!pSelf->client)
         {
@@ -2014,15 +1942,8 @@ void __cdecl PlayerCmd_ClonePlayer(scr_entref_t entref)
     }
     deathAnimDuration = Scr_GetInt(0);
     client = pSelf->client;
-    if (!client)
-        MyAssertHandler(".\\game_mp\\g_client_script_cmd_mp.cpp", 1515, 0, "%s", "client");
-    if (client->sess.connected == CON_DISCONNECTED)
-        MyAssertHandler(
-            ".\\game_mp\\g_client_script_cmd_mp.cpp",
-            1516,
-            0,
-            "%s",
-            "client->sess.connected != CON_DISCONNECTED");
+    iassert(client);
+    iassert(client->sess.connected != CON_DISCONNECTED);
     body = G_SpawnPlayerClone();
     body->s.clientNum = client->ps.clientNum;
     body->s.lerp.eFlags = body->s.lerp.eFlags & 2 | client->ps.eFlags & 0xFFFFFFFD | 0xA0000;
@@ -2033,17 +1954,7 @@ void __cdecl PlayerCmd_ClonePlayer(scr_entref_t entref)
     body->s.lerp.pos.trDelta[0] = client->ps.velocity[0];
     body->s.lerp.pos.trDelta[1] = client->ps.velocity[1];
     body->s.lerp.pos.trDelta[2] = client->ps.velocity[2];
-    if ((COERCE_UNSIGNED_INT(body->s.lerp.pos.trDelta[0]) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(body->s.lerp.pos.trDelta[1]) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(body->s.lerp.pos.trDelta[2]) & 0x7F800000) == 0x7F800000)
-    {
-        MyAssertHandler(
-            ".\\game_mp\\g_client_script_cmd_mp.cpp",
-            1529,
-            0,
-            "%s",
-            "!IS_NAN((body->s.lerp.pos.trDelta)[0]) && !IS_NAN((body->s.lerp.pos.trDelta)[1]) && !IS_NAN((body->s.lerp.pos.trDelta)[2])");
-    }
+    nanassertvec3(body->s.lerp.pos.trDelta);
     body->s.eType = ET_PLAYER_CORPSE;
     body->physicsObject = 1;
     dobj = Com_GetServerDObj(client->ps.clientNum);
@@ -2053,36 +1964,18 @@ void __cdecl PlayerCmd_ClonePlayer(scr_entref_t entref)
         if (g_clonePlayerMaxVelocity->current.value < (double)body->s.lerp.pos.trDelta[axis])
             body->s.lerp.pos.trDelta[axis] = g_clonePlayerMaxVelocity->current.value;
     }
-    if ((COERCE_UNSIGNED_INT(body->s.lerp.pos.trDelta[0]) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(body->s.lerp.pos.trDelta[1]) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(body->s.lerp.pos.trDelta[2]) & 0x7F800000) == 0x7F800000)
-    {
-        MyAssertHandler(
-            ".\\game_mp\\g_client_script_cmd_mp.cpp",
-            1543,
-            0,
-            "%s",
-            "!IS_NAN((body->s.lerp.pos.trDelta)[0]) && !IS_NAN((body->s.lerp.pos.trDelta)[1]) && !IS_NAN((body->s.lerp.pos.trDelta)[2])");
-    }
+    nanassertvec3(body->s.lerp.pos.trDelta);
     body->item[0].ammoCount = level.time;
     corpseInfo = &g_scr_data.playerCorpseInfo[G_GetFreePlayerCorpseIndex()];
     corpseInfo->entnum = body->s.number;
     corpseInfo->time = level.time;
     corpseInfo->falling = 1;
-    if (client->ps.clientNum >= 0x40u)
-        MyAssertHandler(
-            ".\\game_mp\\g_client_script_cmd_mp.cpp",
-            1551,
-            0,
-            "client->ps.clientNum doesn't index MAX_CLIENTS\n\t%i not in [0, %i)",
-            client->ps.clientNum,
-            64);
+    bcassert(client->ps.clientNum, 0x40u);
     memcpy(&corpseInfo->ci, &level_bgs.clientinfo[client->ps.clientNum], sizeof(corpseInfo->ci));
     corpseInfo->ci.pXAnimTree = corpseInfo->tree;
     XAnimCloneAnimTree(tree, corpseInfo->tree);
     body->s.groundEntityNum = ENTITYNUM_NONE;
-    if (body->r.svFlags)
-        MyAssertHandler(".\\game_mp\\g_client_script_cmd_mp.cpp", 1559, 0, "%s", "!body->r.svFlags");
+    iassert(!body->r.svFlags);
     body->r.svFlags = 2;
     body->r.mins[0] = pSelf->r.mins[0];
     body->r.mins[1] = pSelf->r.mins[1];
@@ -2183,8 +2076,7 @@ void __cdecl PlayerCmd_SetClientDvars(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x400u)
-            MyAssertHandler(".\\game_mp\\g_client_script_cmd_mp.cpp", 1636, 0, "%s", "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         if (!g_entities[entref.entnum].client)
         {
             v1 = va("entity %i is not a player", entref.entnum);
@@ -2234,8 +2126,7 @@ void __cdecl PlayerCmd_IsTalking(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x400u)
-            MyAssertHandler(".\\game_mp\\g_client_script_cmd_mp.cpp", 1688, 0, "%s", "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         pSelf = &g_entities[entref.entnum];
         if (!pSelf->client)
         {
@@ -2262,8 +2153,7 @@ void __cdecl PlayerCmd_FreezeControls(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x400u)
-            MyAssertHandler(".\\game_mp\\g_client_script_cmd_mp.cpp", 1700, 0, "%s", "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         pSelf = &g_entities[entref.entnum];
         if (!pSelf->client)
         {
@@ -2286,8 +2176,7 @@ void __cdecl PlayerCmd_DisableWeapons(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x400u)
-            MyAssertHandler(".\\game_mp\\g_client_script_cmd_mp.cpp", 1707, 0, "%s", "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         pSelf = &g_entities[entref.entnum];
         if (!pSelf->client)
         {
@@ -2310,8 +2199,7 @@ void __cdecl PlayerCmd_EnableWeapons(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x400u)
-            MyAssertHandler(".\\game_mp\\g_client_script_cmd_mp.cpp", 1714, 0, "%s", "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         pSelf = &g_entities[entref.entnum];
         if (!pSelf->client)
         {
@@ -2339,8 +2227,7 @@ void __cdecl PlayerCmd_SetReverb(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x400u)
-            MyAssertHandler(".\\game_mp\\g_client_script_cmd_mp.cpp", 1728, 0, "%s", "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         if (!g_entities[entref.entnum].client)
         {
             v1 = va("entity %i is not a player", entref.entnum);
@@ -2453,8 +2340,7 @@ void __cdecl PlayerCmd_SetChannelVolumes(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x400u)
-            MyAssertHandler(".\\game_mp\\g_client_script_cmd_mp.cpp", 1806, 0, "%s", "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         if (!g_entities[entref.entnum].client)
         {
             Scr_ObjectError(va("entity %i is not a player", entref.entnum));
@@ -2614,8 +2500,7 @@ void __cdecl PlayerCmd_SayAll(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x400u)
-            MyAssertHandler(".\\game_mp\\g_client_script_cmd_mp.cpp", 1934, 0, "%s", "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         pSelf = &g_entities[entref.entnum];
         if (!pSelf->client)
         {
@@ -2643,8 +2528,7 @@ void __cdecl PlayerCmd_SayTeam(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x400u)
-            MyAssertHandler(".\\game_mp\\g_client_script_cmd_mp.cpp", 1958, 0, "%s", "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         pSelf = &g_entities[entref.entnum];
         if (!pSelf->client)
         {
@@ -2670,8 +2554,7 @@ void __cdecl PlayerCmd_AllowADS(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x400u)
-            MyAssertHandler(".\\game_mp\\g_client_script_cmd_mp.cpp", 1969, 0, "%s", "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         pSelf = &g_entities[entref.entnum];
         if (!pSelf->client)
         {
@@ -2709,8 +2592,7 @@ void __cdecl PlayerCmd_AllowJump(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x400u)
-            MyAssertHandler(".\\game_mp\\g_client_script_cmd_mp.cpp", 1991, 0, "%s", "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         pSelf = &g_entities[entref.entnum];
         if (!pSelf->client)
         {
@@ -2736,8 +2618,7 @@ void __cdecl PlayerCmd_AllowSprint(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x400u)
-            MyAssertHandler(".\\game_mp\\g_client_script_cmd_mp.cpp", 2002, 0, "%s", "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         pSelf = &g_entities[entref.entnum];
         if (!pSelf->client)
         {
@@ -2765,8 +2646,7 @@ void __cdecl PlayerCmd_SetSpreadOverride(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x400u)
-            MyAssertHandler(".\\game_mp\\g_client_script_cmd_mp.cpp", 2015, 0, "%s", "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         pSelf = &g_entities[entref.entnum];
         if (!pSelf->client)
         {
@@ -2813,8 +2693,7 @@ void __cdecl PlayerCmd_ResetSpreadOverride(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x400u)
-            MyAssertHandler(".\\game_mp\\g_client_script_cmd_mp.cpp", 2043, 0, "%s", "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         pSelf = &g_entities[entref.entnum];
         if (!pSelf->client)
         {
@@ -2842,8 +2721,7 @@ void __cdecl PlayerCmd_AllowSpectateTeam(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x400u)
-            MyAssertHandler(".\\game_mp\\g_client_script_cmd_mp.cpp", 2071, 0, "%s", "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         pSelf = &g_entities[entref.entnum];
         if (!pSelf->client)
         {
@@ -2890,8 +2768,7 @@ void __cdecl PlayerCmd_GetGuid(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x400u)
-            MyAssertHandler(".\\game_mp\\g_client_script_cmd_mp.cpp", 2098, 0, "%s", "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         if (!g_entities[entref.entnum].client)
         {
             v1 = va("entity %i is not a player", entref.entnum);
@@ -2914,8 +2791,7 @@ void __cdecl PlayerCmd_GetXuid(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x400u)
-            MyAssertHandler(".\\game_mp\\g_client_script_cmd_mp.cpp", 2113, 0, "%s", "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         if (!g_entities[entref.entnum].client)
         {
             v1 = va("entity %i is not a player", entref.entnum);
@@ -2944,8 +2820,7 @@ void __cdecl PlayerCmd_BeginLocationSelection(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x400u)
-            MyAssertHandler(".\\game_mp\\g_client_script_cmd_mp.cpp", 2143, 0, "%s", "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         pSelf = &g_entities[entref.entnum];
         if (!pSelf->client)
         {
@@ -2953,26 +2828,11 @@ void __cdecl PlayerCmd_BeginLocationSelection(scr_entref_t entref)
             Scr_ObjectError(v1);
         }
     }
-    if (!pSelf->client)
-        MyAssertHandler(".\\game_mp\\g_client_script_cmd_mp.cpp", 2145, 0, "%s", "pSelf->client");
-    if (pSelf->client->sess.connected == CON_DISCONNECTED)
-        MyAssertHandler(
-            ".\\game_mp\\g_client_script_cmd_mp.cpp",
-            2146,
-            0,
-            "%s",
-            "pSelf->client->sess.connected != CON_DISCONNECTED");
+    iassert(pSelf->client);
+    iassert(pSelf->client->sess.connected != CON_DISCONNECTED);
     locSelName = Scr_GetString(0);
     locSelIndex = GScr_GetLocSelIndex(locSelName);
-    if (locSelIndex < 1 || locSelIndex > 4)
-        MyAssertHandler(
-            ".\\game_mp\\g_client_script_cmd_mp.cpp",
-            2150,
-            0,
-            "locSelIndex not in [1, MAX_LOC_SEL_MTLS + 1]\n\t%i not in [%i, %i]",
-            locSelIndex,
-            1,
-            4);
+    rangeassert(locSelIndex, 1, 4);
     if (Scr_GetNumParam() < 2)
     {
         radiusa = 0.15000001f;
@@ -3000,14 +2860,7 @@ void __cdecl PlayerCmd_BeginLocationSelection(scr_entref_t entref)
     }
     radiusBits = SnapFloatToInt(radiusa * 63.0f);
 
-    if (radiusBits >= 0x40)
-        MyAssertHandler(
-            ".\\game_mp\\g_client_script_cmd_mp.cpp",
-            2173,
-            0,
-            "radiusBits doesn't index (1 << LOC_SEL_RADIUS_BITS)\n\t%i not in [0, %i)",
-            radiusBits,
-            64);
+    bcassert(radiusBits, 0x40);
     pSelf->client->ps.locationSelectionInfo = locSelIndex | (4 * radiusBits);
 }
 
@@ -3023,8 +2876,7 @@ void __cdecl PlayerCmd_EndLocationSelection(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x400u)
-            MyAssertHandler(".\\game_mp\\g_client_script_cmd_mp.cpp", 2181, 0, "%s", "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         pSelf = &g_entities[entref.entnum];
         if (!pSelf->client)
         {
@@ -3032,15 +2884,8 @@ void __cdecl PlayerCmd_EndLocationSelection(scr_entref_t entref)
             Scr_ObjectError(v1);
         }
     }
-    if (!pSelf->client)
-        MyAssertHandler(".\\game_mp\\g_client_script_cmd_mp.cpp", 2183, 0, "%s", "pSelf->client");
-    if (pSelf->client->sess.connected == CON_DISCONNECTED)
-        MyAssertHandler(
-            ".\\game_mp\\g_client_script_cmd_mp.cpp",
-            2184,
-            0,
-            "%s",
-            "pSelf->client->sess.connected != CON_DISCONNECTED");
+    iassert(pSelf->client);
+    iassert(pSelf->client->sess.connected != CON_DISCONNECTED);
     pSelf->client->ps.locationSelectionInfo = 0;
 }
 
@@ -3130,8 +2975,7 @@ void __cdecl PlayerCmd_GetWeaponsList(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x400u)
-            MyAssertHandler(".\\game_mp\\g_client_script_cmd_mp.cpp", 2247, 0, "%s", "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         pSelf = &g_entities[entref.entnum];
         if (!pSelf->client)
         {
@@ -3171,8 +3015,7 @@ void __cdecl PlayerCmd_GetWeaponsListPrimaries(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x400u)
-            MyAssertHandler(".\\game_mp\\g_client_script_cmd_mp.cpp", 2271, 0, "%s", "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         pSelf = &g_entities[entref.entnum];
         if (!pSelf->client)
         {
@@ -3252,8 +3095,7 @@ void __cdecl PlayerCmd_HasPerk(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x400u)
-            MyAssertHandler(".\\game_mp\\g_client_script_cmd_mp.cpp", 2337, 0, "%s", "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         pSelf = &g_entities[entref.entnum];
         if (!pSelf->client)
         {
@@ -3267,14 +3109,7 @@ void __cdecl PlayerCmd_HasPerk(scr_entref_t entref)
         Scr_Error(va("Unknown perk: %s\n", perkName));
     }
     perks = pSelf->client->ps.perks;
-    if (perkIndex >= 0x14)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\src\\bgame\\../bgame/bg_perks_mp.h",
-            40,
-            0,
-            "perkIndex doesn't index PERK_COUNT\n\t%i not in [0, %i)",
-            perkIndex,
-            20);
+    bcassert(perkIndex, 0x14);
     Scr_AddBool((perks & (1 << perkIndex)) != 0);
 }
 
@@ -3311,16 +3146,8 @@ void __cdecl PlayerCmd_UnsetPerk(scr_entref_t entref)
 
 void __cdecl BG_UnsetPerk(int *perks, uint perkIndex)
 {
-    if (!perks)
-        MyAssertHandler("c:\\trees\\cod3\\src\\bgame\\../bgame/bg_perks_mp.h", 55, 0, "%s", "perks");
-    if (perkIndex >= 0x14)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\src\\bgame\\../bgame/bg_perks_mp.h",
-            56,
-            0,
-            "perkIndex doesn't index PERK_COUNT\n\t%i not in [0, %i)",
-            perkIndex,
-            20);
+    iassert(perks);
+    bcassert(perkIndex, 0x14);
     *perks &= ~(1 << perkIndex);
 }
 
@@ -3340,8 +3167,7 @@ void __cdecl PlayerCmd_ClearPerks(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x400u)
-            MyAssertHandler(".\\game_mp\\g_client_script_cmd_mp.cpp", 2388, 0, "%s", "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         pSelf = &g_entities[entref.entnum];
         if (!pSelf->client)
         {
@@ -3374,8 +3200,7 @@ void __cdecl PlayerCmd_UpdateScores(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x400u)
-            MyAssertHandler(".\\game_mp\\g_client_script_cmd_mp.cpp", 2409, 0, "%s", "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         pSelf = &g_entities[entref.entnum];
         if (!pSelf->client)
         {
@@ -3408,8 +3233,7 @@ void __cdecl PlayerCmd_UpdateDMScores(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x400u)
-            MyAssertHandler(".\\game_mp\\g_client_script_cmd_mp.cpp", 2437, 0, "%s", "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         pSelf = &g_entities[entref.entnum];
         if (!pSelf->client)
         {
@@ -3455,8 +3279,7 @@ void __cdecl PlayerCmd_SetRank(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x400u)
-            MyAssertHandler(".\\game_mp\\g_client_script_cmd_mp.cpp", 2483, 0, "%s", "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         pSelf = &g_entities[entref.entnum];
         if (!pSelf->client)
         {

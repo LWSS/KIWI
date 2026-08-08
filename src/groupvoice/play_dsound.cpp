@@ -62,13 +62,7 @@ uint __cdecl DSound_UpdateSample(dsound_sample_t *sample, char *data, int data_l
         hra = sample->DSB->Unlock(pLock1, dwLockLen1, pLock2, dwLockLen2);
         if (hra >= 0)
         {
-            if (sample->currentBufferLength > sample->dwBufferSize)
-                MyAssertHandler(
-                    ".\\groupvoice\\play_dsound.cpp",
-                    175,
-                    0,
-                    "%s",
-                    "sample->currentBufferLength <= sample->dwBufferSize");
+            iassert(sample->currentBufferLength <= sample->dwBufferSize);
             if (sample->currentBufferLength < sample->dwBufferSize)
             {
                 sample->currentBufferLength += dataOffset;
@@ -136,8 +130,7 @@ void __cdecl DSound_AdjustSamplePlayback(dsound_sample_t *sample, int bytesLeft)
 {
     uint8_t playMode; // [esp+20h] [ebp-8h]
 
-    if (bytesLeft <= 0)
-        MyAssertHandler(".\\groupvoice\\play_dsound.cpp", 207, 0, "%s", "bytesLeft > 0");
+    iassert(bytesLeft > 0);
     if (bytesLeft >= MIN_COMFORTABLE_BUFFER_AMOUNT)
     {
         if (bytesLeft <= MAX_COMFORTABLE_BUFFER_AMOUNT)
@@ -243,8 +236,7 @@ void __cdecl DSound_SampleFrame(dsound_sample_t *sample)
         bytesPlayed = dwPlayPos - sample->lastPlayPos;
         if (bytesPlayed < 0)
             bytesPlayed = dwPlayPos + sample->currentBufferLength - sample->lastPlayPos;
-        if (bytesPlayed < 0)
-            MyAssertHandler(".\\groupvoice\\play_dsound.cpp", 368, 0, "%s", "bytesPlayed >= 0");
+        iassert(bytesPlayed >= 0);
         sample->bytesBuffered -= bytesPlayed;
         if (!DSound_BufferUnderrunOccurred(sample))
         {

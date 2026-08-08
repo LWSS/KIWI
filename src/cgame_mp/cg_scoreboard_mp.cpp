@@ -472,14 +472,7 @@ double __cdecl CG_DrawTeamOfClientScore(
     i = 0;
     while (i < cgameGlob->numScores)
     {
-        if (score->client >= 0x40u)
-            MyAssertHandler(
-                ".\\cgame_mp\\cg_scoreboard_mp.cpp",
-                1037,
-                0,
-                "score->client doesn't index MAX_CLIENTS\n\t%i not in [0, %i)",
-                score->client,
-                64);
+        bcassert(score->client, 0x40u);
         if (cgameGlob->bgs.clientinfo[score->client].infoValid && score->team == team)
         {
             v8 = (double)cg_scoreboardItemHeight->current.integer;
@@ -561,14 +554,7 @@ double __cdecl CG_DrawScoreboard_ListBanner(
 
     if (!CG_CheckDrawScoreboardLine(localClientNum, piDrawLine, y, h))
         return y;
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\src\\cgame_mp\\cg_local_mp.h",
-            1071,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     scrPlace = &scrPlaceView[localClientNum];
     v17 = CG_BannerScoreboardScaleMultiplier() * 0.3499999940395355;
     bannerFont = UI_GetFontHandle(scrPlace, cg_scoreboardFont->current.integer, v17);
@@ -590,14 +576,7 @@ double __cdecl CG_DrawScoreboard_ListBanner(
         }
         else
         {
-            if (team != 3)
-                MyAssertHandler(
-                    ".\\cgame_mp\\cg_scoreboard_mp.cpp",
-                    666,
-                    0,
-                    "%s\n\t(team) = %i",
-                    "(team == TEAM_SPECTATOR)",
-                    team);
+            vassert((team == TEAM_SPECTATOR), "(team) = %i", team);
             shaderName = (char *)Dvar_GetString("g_TeamIcon_Spectator");
             v10 = SEH_LocalizeTextMessage("CGAME_SPECTATORS", "scoreboard team name", LOCMSG_SAFE);
             displayString = va("%s", v10);
@@ -873,8 +852,7 @@ double __cdecl CalcXAdj(int align, float maxw, float w)
     }
     else
     {
-        if (align)
-            MyAssertHandler(".\\cgame_mp\\cg_scoreboard_mp.cpp", 698, 0, "%s", "align == UI_LEFT");
+        iassert(align == UI_LEFT);
         return 0.0;
     }
 }
@@ -903,15 +881,7 @@ void __cdecl DrawListString(
     {
         while (width < (double)UI_TextWidth(string, 0x7FFFFFFF, font, scale))
             scale = scale - 0.02500000037252903;
-        if (scale <= 0.0)
-            MyAssertHandler(
-                ".\\cgame_mp\\cg_scoreboard_mp.cpp",
-                717,
-                0,
-                "%s\n\t(scale) = %i",
-                "(scale > 0)",
-                //(uint)COERCE_UNSIGNED_INT64(scale));
-                (uint)(uint64_t)(scale));
+        vassert((scale > 0), "(scale) = %i", (uint)(uint64_t)(scale));
         if (scale < 0.2000000029802322)
             style = 0;
         maxw_4 = (float)UI_TextWidth(string, 0x7FFFFFFF, font, scale);
@@ -955,8 +925,7 @@ void __cdecl CG_DrawClientPing(int localClientNum, int ping, float x, float y, f
     UI_DrawHandlePic(scrPlace, v8, y, v9, maxHeight, 1, 0, color, materiala);
     maxBars = Dvar_GetInt("cg_ScoresPing_MaxBars");
     interval = Dvar_GetInt("cg_ScoresPing_Interval");
-    if (interval <= 0)
-        MyAssertHandler(".\\cgame_mp\\cg_scoreboard_mp.cpp", 757, 0, "%s\n\t(interval) = %i", "(interval > 0)", interval);
+    vassert((interval > 0), "(interval) = %i", interval);
     material = Material_RegisterHandle("white", 7);
     if (maxBars - ping / interval < 1)
         v7 = 1;

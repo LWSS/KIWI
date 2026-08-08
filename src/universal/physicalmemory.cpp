@@ -54,10 +54,8 @@ void __cdecl PMem_DumpMemStats()
 
 void __cdecl PMem_InitPhysicalMemory(PhysicalMemory *pmem, uint8_t *memory, uint memorySize)
 {
-    if (!pmem)
-        MyAssertHandler(".\\universal\\physicalmemory.cpp", 277, 0, "%s", "pmem");
-    if (!memory)
-        MyAssertHandler(".\\universal\\physicalmemory.cpp", 278, 0, "%s", "memory");
+    iassert(pmem);
+    iassert(memory);
     memset((uint8_t *)pmem, 0, sizeof(PhysicalMemory));
     pmem->buf = memory;
     pmem->prim[1].pos = memorySize;
@@ -65,14 +63,7 @@ void __cdecl PMem_InitPhysicalMemory(PhysicalMemory *pmem, uint8_t *memory, uint
 
 void __cdecl PMem_BeginAlloc(const char *name, uint allocType)
 {
-    if (allocType >= 2)
-        MyAssertHandler(
-            ".\\universal\\physicalmemory.cpp",
-            350,
-            0,
-            "allocType doesn't index PHYS_ALLOC_COUNT\n\t%i not in [0, %i)",
-            allocType,
-            2);
+    bcassert(allocType, 2);
     PMem_BeginAllocInPrim(&g_mem.prim[allocType], name);
 }
 
@@ -80,8 +71,7 @@ void __cdecl PMem_BeginAllocInPrim(PhysicalMemoryPrim *prim, const char *name)
 {
     PhysicalMemoryAllocation *allocEntry; // [esp+0h] [ebp-4h]
 
-    if (prim->allocName)
-        MyAssertHandler(".\\universal\\physicalmemory.cpp", 332, 0, "%s", "!prim->allocName");
+    iassert(!prim->allocName);
     if (prim->allocListCount >= 0x20)
         MyAssertHandler(".\\universal\\physicalmemory.cpp", 333, 0, "%s", "prim->allocListCount < MAX_PHYSICAL_ALLOCATIONS");
     prim->allocName = name;
@@ -92,14 +82,7 @@ void __cdecl PMem_BeginAllocInPrim(PhysicalMemoryPrim *prim, const char *name)
 
 void __cdecl PMem_EndAlloc(const char *name, uint allocType)
 {
-    if (allocType >= 2)
-        MyAssertHandler(
-            ".\\universal\\physicalmemory.cpp",
-            378,
-            0,
-            "allocType doesn't index PHYS_ALLOC_COUNT\n\t%i not in [0, %i)",
-            allocType,
-            2);
+    bcassert(allocType, 2);
     PMem_EndAllocInPrim(&g_mem.prim[allocType], name);
 }
 
@@ -107,8 +90,7 @@ void __cdecl PMem_EndAllocInPrim(PhysicalMemoryPrim *prim, const char *name)
 {
     __int64 v2; // rax
 
-    if (prim->allocName != name)
-        MyAssertHandler(".\\universal\\physicalmemory.cpp", 364, 0, "%s", "prim->allocName == name");
+    iassert(prim->allocName == name);
     prim->allocName = 0;
     if (!prim->allocListCount)
         MyAssertHandler(".\\universal\\physicalmemory.cpp", 368, 0, "%s", "prim->allocListCount > 0");
@@ -118,14 +100,7 @@ void __cdecl PMem_EndAllocInPrim(PhysicalMemoryPrim *prim, const char *name)
 
 void __cdecl PMem_Free(const char *name, uint allocType)
 {
-    if (allocType >= 2)
-        MyAssertHandler(
-            ".\\universal\\physicalmemory.cpp",
-            454,
-            0,
-            "allocType doesn't index PHYS_ALLOC_COUNT\n\t%i not in [0, %i)",
-            allocType,
-            2);
+    bcassert(allocType, 2);
     PMem_FreeInPrim(&g_mem.prim[allocType], name);
 }
 
@@ -151,8 +126,7 @@ void __cdecl PMem_FreeIndex(PhysicalMemoryPrim *prim, uint allocIndex)
     PhysicalMemoryAllocation *allocEntry; // [esp+0h] [ebp-Ch]
     const char *name; // [esp+4h] [ebp-8h]
 
-    if (prim->allocName)
-        MyAssertHandler(".\\universal\\physicalmemory.cpp", 394, 0, "%s", "!prim->allocName");
+    iassert(!prim->allocName);
     allocEntry = &prim->allocList[allocIndex];
     name = allocEntry->name;
     if (!allocEntry->name)
@@ -165,8 +139,7 @@ void __cdecl PMem_FreeIndex(PhysicalMemoryPrim *prim, uint allocIndex)
         do
         {
             prim->pos = allocEntry->pos;
-            if (!prim->allocListCount)
-                MyAssertHandler(".\\universal\\physicalmemory.cpp", 424, 0, "%s", "prim->allocListCount");
+            iassert(prim->allocListCount);
             if (!--prim->allocListCount)
                 break;
             allocEntry = (PhysicalMemoryAllocation *)(&prim->allocListCount + 2 * prim->allocListCount);
@@ -174,8 +147,7 @@ void __cdecl PMem_FreeIndex(PhysicalMemoryPrim *prim, uint allocIndex)
     }
     else
     {
-        if (allocIndex + 1 >= prim->allocListCount)
-            MyAssertHandler(".\\universal\\physicalmemory.cpp", 408, 0, "%s", "allocIndex + 1 < prim->allocListCount");
+        iassert(allocIndex + 1 < prim->allocListCount);
         v2 = prim->allocList[allocIndex + 1].pos - prim->allocList[allocIndex].pos;
         //track_physical_alloc(HIunsigned int(v2) - (HIunsigned int(v2) ^ v2), name, 10);
         if (!alwaysfails)
@@ -202,12 +174,9 @@ uint8_t *__cdecl PMem_Alloc(
     uint alignmenta; // [esp+28h] [ebp+Ch]
 
     prim = &g_mem.prim[allocType];
-    if (!prim->allocName)
-        MyAssertHandler(".\\universal\\physicalmemory.cpp", 536, 0, "%s", "prim->allocName");
-    if (!size)
-        MyAssertHandler(".\\universal\\physicalmemory.cpp", 537, 0, "%s", "size");
-    if (!alignment)
-        MyAssertHandler(".\\universal\\physicalmemory.cpp", 539, 0, "%s", "alignment");
+    iassert(prim->allocName);
+    iassert(size);
+    iassert(alignment);
     alignmenta = alignment - 1;
     if (allocType)
     {

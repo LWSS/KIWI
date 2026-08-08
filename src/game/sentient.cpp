@@ -110,19 +110,10 @@ void __cdecl Sentient_GetCentroid(sentient_s *self, float *vCentroidOut)
     double v6; // fp12
     const float *v7; // r11
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\sentient.cpp", 254, 0, "%s", "self");
-    if (!self->ent)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\sentient.cpp", 255, 0, "%s", "self->ent");
-    if (!self->ent->actor && !self->ent->client)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\sentient.cpp",
-            256,
-            0,
-            "%s",
-            "self->ent->actor || self->ent->client");
-    if (!vCentroidOut)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\sentient.cpp", 257, 0, "%s", "vCentroidOut");
+    iassert(self);
+    iassert(self->ent);
+    iassert(self->ent->actor || self->ent->client);
+    iassert(vCentroidOut);
     ent = self->ent;
     *vCentroidOut = self->ent->r.currentOrigin[0];
     vCentroidOut[1] = ent->r.currentOrigin[1];
@@ -158,19 +149,10 @@ void __cdecl Sentient_GetDebugEyePosition(const sentient_s *self, float *vEyePos
 {
     actor_s *actor; // r3
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\sentient.cpp", 310, 0, "%s", "self");
-    if (!self->ent)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\sentient.cpp", 311, 0, "%s", "self->ent");
-    if (!self->ent->actor && !self->ent->client)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\sentient.cpp",
-            312,
-            0,
-            "%s",
-            "self->ent->actor || self->ent->client");
-    if (!vEyePosOut)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\sentient.cpp", 313, 0, "%s", "vEyePosOut");
+    iassert(self);
+    iassert(self->ent);
+    iassert(self->ent->actor || self->ent->client);
+    iassert(vEyePosOut);
     actor = self->ent->actor;
     if (actor)
         Actor_GetDebugEyePosition(actor, vEyePosOut);
@@ -182,17 +164,9 @@ float __cdecl Sentient_GetHeadHeight(const sentient_s *self)
 {
     double v2; // fp1
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\sentient.cpp", 335, 0, "%s", "self");
-    if (!self->ent)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\sentient.cpp", 336, 0, "%s", "self->ent");
-    if (!self->ent->actor && !self->ent->sentient)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\sentient.cpp",
-            337,
-            0,
-            "%s",
-            "self->ent->actor || self->ent->sentient");
+    iassert(self);
+    iassert(self->ent);
+    iassert(self->ent->actor || self->ent->sentient);
     if (self->ent->actor)
         v2 = 6.0;
     else
@@ -206,8 +180,7 @@ void __cdecl Sentient_UpdateActualChainPos(sentient_s *self)
     pathnode_t *ChainPos; // r3
     float v3[4]; // [sp+50h] [-20h] BYREF
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\sentient.cpp", 359, 0, "%s", "self");
+    iassert(self);
     if (self->iActualChainPosTime != level.time)
     {
         self->iActualChainPosTime = level.time;
@@ -292,8 +265,7 @@ pathnode_t *__cdecl Sentient_NearestNodeSuppressed(
 
 void __cdecl Sentient_InvalidateNearestNode(sentient_s *self)
 {
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\sentient.cpp", 448, 0, "%s", "self");
+    iassert(self);
     self->bNearestNodeValid = 0;
 }
 
@@ -384,13 +356,7 @@ sentient_s *__cdecl Sentient_FirstSentient(int iTeamFlags)
     int v2; // r10
     team_t *i; // r11
 
-    if (iTeamFlags > 31)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\sentient.cpp",
-            564,
-            0,
-            "%s",
-            "iTeamFlags <= (1 << TEAM_NUM_TEAMS) - 1");
+    iassert(iTeamFlags <= (1 << TEAM_NUM_TEAMS) - 1);
     v2 = 0;
     for (i = &level.sentients->eTeam; !*((_BYTE *)i + 106) || ((1 << *i) & iTeamFlags) == 0; i += 29)
     {
@@ -406,15 +372,8 @@ sentient_s *__cdecl Sentient_NextSentient(sentient_s *pPrevSentient, int iTeamFl
     int v5; // r10
     int i; // r9
 
-    if (iTeamFlags > 31)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\sentient.cpp",
-            593,
-            0,
-            "%s",
-            "iTeamFlags <= (1 << TEAM_NUM_TEAMS) - 1");
-    if (!pPrevSentient)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\sentient.cpp", 595, 0, "%s", "pPrevSentient");
+    iassert(iTeamFlags <= (1 << TEAM_NUM_TEAMS) - 1);
+    iassert(pPrevSentient);
     sentients = level.sentients;
     if (pPrevSentient < level.sentients || pPrevSentient >= &level.sentients[33])
     {
@@ -464,13 +423,7 @@ const char *__cdecl Sentient_NameForTeam(unsigned int eTeam)
 
 void __cdecl Sentient_SetTeam(sentient_s *self, team_t eTeam)
 {
-    if (eTeam <= TEAM_FREE || eTeam >= TEAM_NUM_TEAMS)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\sentient.cpp",
-            652,
-            0,
-            "%s",
-            "eTeam > TEAM_BAD && eTeam < TEAM_NUM_TEAMS");
+    iassert(eTeam > TEAM_BAD && eTeam < TEAM_NUM_TEAMS);
     if (self->eTeam != eTeam)
         self->eTeam = eTeam;
 }
@@ -481,10 +434,8 @@ void __cdecl Sentient_ClaimNode(sentient_s *self, pathnode_t *node)
     pathnode_t *pClaimedNode; // r11
     char v6; // r11
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\sentient.cpp", 673, 0, "%s", "self");
-    if (!self->ent)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\sentient.cpp", 674, 0, "%s", "self->ent");
+    iassert(self);
+    iassert(self->ent);
     actor = self->ent->actor;
     if (actor && (unsigned __int8)Actor_KeepClaimedNode(actor))
         MyAssertHandler(
@@ -513,29 +464,21 @@ void __cdecl Sentient_ClaimNode(sentient_s *self, pathnode_t *node)
 
 void __cdecl Sentient_NodeClaimRevoked(sentient_s *self, pathnode_t *node)
 {
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\sentient.cpp", 705, 0, "%s", "self");
-    if (!node)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\sentient.cpp", 706, 0, "%s", "node");
-    if (node != self->pClaimedNode)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\sentient.cpp", 707, 0, "%s", "node == self->pClaimedNode");
-    if (!self->ent->actor)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\sentient.cpp", 709, 0, "%s", "self->ent->actor");
+    iassert(self);
+    iassert(node);
+    iassert(node == self->pClaimedNode);
+    iassert(self->ent->actor);
     Actor_NodeClaimRevoked(self->ent->actor, 5000);
-    if (self->pClaimedNode == node)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\sentient.cpp", 713, 0, "%s", "self->pClaimedNode != node");
+    iassert(self->pClaimedNode != node);
 }
 
 void __cdecl Sentient_StealClaimNode(sentient_s *self, sentient_s *other)
 {
     pathnode_t *pClaimedNode; // r3
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\sentient.cpp", 726, 0, "%s", "self");
-    if (!other)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\sentient.cpp", 727, 0, "%s", "other");
-    if (!other->ent->actor)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\sentient.cpp", 728, 0, "%s", "other->ent->actor");
+    iassert(self);
+    iassert(other);
+    iassert(other->ent->actor);
     pClaimedNode = other->pClaimedNode;
     if (pClaimedNode)
         Path_ForceClaimNode(pClaimedNode, self);
@@ -632,15 +575,13 @@ void __cdecl Sentient_UpdatePlayerTrail(gentity_s *ent)
 
 void __cdecl Sentient_WriteGlob(SaveGame *save)
 {
-    if (!save)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\sentient.cpp", 819, 0, "%s", "save");
+    iassert(save);
     SaveMemory_SaveWrite(&glob, 40, save);
 }
 
 void __cdecl Sentient_ReadGlob(SaveGame *save)
 {
-    if (!save)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\sentient.cpp", 826, 0, "%s", "save");
+    iassert(save);
     SaveMemory_LoadRead(&glob, 40, save);
 }
 
@@ -650,15 +591,8 @@ void __cdecl Sentient_GetTrailPos(sentient_s *self, float *pos, int *time)
     int v7; // r8
     float *v8; // r11
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\sentient.cpp", 838, 0, "%s", "self");
-    if (!self->ent->actor && !self->ent->client)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\sentient.cpp",
-            839,
-            0,
-            "%s",
-            "self->ent->actor || self->ent->client");
+    iassert(self);
+    iassert(self->ent->actor || self->ent->client);
     if (self->ent->client)
     {
         v6 = glob.lastSample - 1;

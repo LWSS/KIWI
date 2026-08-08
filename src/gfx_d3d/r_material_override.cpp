@@ -196,16 +196,7 @@ void __cdecl Material_RemapTechniqueSetName(
                         v6);
                 }
             }
-            else if ((feature->mask & remapValue) != 0)
-            {
-                MyAssertHandler(
-                    ".\\r_material_override.cpp",
-                    294,
-                    0,
-                    "%s\n\t(feature->name) = %s",
-                    "((remapValue & feature->mask) == 0)",
-                    feature->name);
-            }
+            else vassert(((remapValue & feature->mask) == 0), "(feature->name) = %s", feature->name);
         }
         else
         {

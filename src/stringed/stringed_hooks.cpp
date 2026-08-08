@@ -51,8 +51,7 @@ void __cdecl TRACK_stringed_hooks()
 
 int __cdecl SEH_GetCurrentLanguage()
 {
-    if (!loc_language)
-        MyAssertHandler(".\\stringed\\stringed_hooks.cpp", 130, 0, "%s", "loc_language");
+    iassert(loc_language);
     return loc_language->current.integer;
 }
 
@@ -73,8 +72,7 @@ const dvar_s *SEH_UpdateCurrentLanguage()
     const dvar_s *result; // eax
     int integer; // [esp+0h] [ebp-4h]
 
-    if (!loc_language)
-        MyAssertHandler(".\\stringed\\stringed_hooks.cpp", 100, 0, "%s", "loc_language");
+    iassert(loc_language);
     result = loc_language;
     integer = loc_language->current.integer;
     g_currentAsian = integer >= 8 && integer <= 12;
@@ -248,8 +246,7 @@ char *__cdecl SEH_LocalizeTextMessage(const char *pszInputBuffer, const char *ps
                             }
                         }
                     }
-                    if (i < 0)
-                        MyAssertHandler(".\\stringed\\stringed_hooks.cpp", 513, 0, "%s", "i >= 0");
+                    iassert(i >= 0);
                     v12 = szTokenBuf;
                     v11 = &pszString[i];
                     do
@@ -534,8 +531,7 @@ int __cdecl SEH_StringEd_SetLanguageStrings(uint iLanguage)
 
     if (!g_languages[iLanguage].bPresent)
         return 0;
-    if (!loc_forceEnglish)
-        MyAssertHandler(".\\stringed\\stringed_hooks.cpp", 278, 0, "%s", "loc_forceEnglish");
+    iassert(loc_forceEnglish);
     pszError = SE_LoadLanguage(loc_forceEnglish->current.enabled);
     if (!pszError)
         return 1;
@@ -561,8 +557,7 @@ void __cdecl SEH_UpdateLanguageInfo()
     int i; // [esp+4h] [ebp-4h]
     int ia; // [esp+4h] [ebp-4h]
 
-    if (!loc_language)
-        MyAssertHandler(".\\stringed\\stringed_hooks.cpp", 172, 0, "%s", "loc_language");
+    iassert(loc_language);
     Dvar_RegisterInt(loc_language->name, 0, 0xE00000000LL, DVAR_ARCHIVE | DVAR_LATCH, "Language");
     Dvar_RegisterBool(loc_forceEnglish->name, 0, DVAR_ARCHIVE | DVAR_LATCH, "Force english language");
     SEH_UpdateCurrentLanguage();

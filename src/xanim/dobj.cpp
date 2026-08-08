@@ -389,15 +389,13 @@ void __cdecl DObjComputeBounds(DObj_s *obj)
     XModel **models; // [esp+8h] [ebp-8h]
     int modelIndex; // [esp+Ch] [ebp-4h]
 
-    if (!obj)
-        MyAssertHandler(".\\xanim\\dobj.cpp", 487, 0, "%s", "obj");
+    iassert(obj);
     numModels = obj->numModels;
     radius = 0.0;
     models = obj->models;
     for (modelIndex = 0; modelIndex < numModels; ++modelIndex)
     {
-        if (!models[modelIndex])
-            MyAssertHandler(".\\xanim\\dobj.cpp", 497, 0, "%s", "models[modelIndex]");
+        iassert(models[modelIndex]);
         radius = XModelGetRadius(models[modelIndex]) + radius;
     }
     obj->radius = radius;
@@ -449,16 +447,12 @@ void __cdecl DObjGetCreateParms(
     int modelIndex; // [esp+A0h] [ebp-8h]
     unsigned const __int16 *boneNames; // [esp+A4h] [ebp-4h]
 
-    if (!obj)
-        MyAssertHandler(".\\xanim\\dobj.cpp", 621, 0, "%s", "obj");
+    iassert(obj);
     if (!obj->numModels || obj->numModels > 0x20u)
         MyAssertHandler(".\\xanim\\dobj.cpp", 622, 0, "%s", "obj->numModels > 0 && obj->numModels <= DOBJ_MAX_SUBMODELS");
-    if (!dobjModels)
-        MyAssertHandler(".\\xanim\\dobj.cpp", 623, 0, "%s", "dobjModels");
-    if (!numModels)
-        MyAssertHandler(".\\xanim\\dobj.cpp", 624, 0, "%s", "numModels");
-    if (!tree)
-        MyAssertHandler(".\\xanim\\dobj.cpp", 625, 0, "%s", "tree");
+    iassert(dobjModels);
+    iassert(numModels);
+    iassert(tree);
     *numModels = obj->numModels;
     *tree = obj->tree;
     *entnum = obj->entnum;
@@ -482,13 +476,7 @@ void __cdecl DObjGetCreateParms(
                 if (modelParents[modelIndex] >= matOffset[parentModelIndex])
                 {
                     boneIndex = modelParents[modelIndex] - matOffset[parentModelIndex];
-                    if (boneIndex >= XModelNumBones(models[parentModelIndex]))
-                        MyAssertHandler(
-                            ".\\xanim\\dobj.cpp",
-                            653,
-                            0,
-                            "%s",
-                            "boneIndex < XModelNumBones( models[parentModelIndex] )");
+                    iassert(boneIndex < XModelNumBones( models[parentModelIndex] ));
                     boneNames = models[parentModelIndex]->boneNames;
                     dobjModel->boneName = boneNames[boneIndex];
                     break;

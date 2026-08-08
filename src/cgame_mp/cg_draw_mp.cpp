@@ -692,8 +692,7 @@ void __cdecl CG_DrawErrorMessages(int localClientNum)
 
 void __cdecl CG_DrawSay(int localClientNum)
 {
-    if (!cg_hudSayPosition)
-        MyAssertHandler(".\\cgame_mp\\cg_draw_mp.cpp", 1092, 0, "%s", "cg_hudSayPosition");
+    iassert(cg_hudSayPosition);
     Con_DrawSay(localClientNum, (int)cg_hudSayPosition->current.value, (int)cg_hudSayPosition->current.vector[1] + 24);
 }
 
@@ -940,14 +939,7 @@ int __cdecl CG_DrawFollow(int localClientNum)
         return 0;
     if (cgameGlob->inKillCam)
         return 0;
-    if (ps->clientNum >= 0x40u)
-        MyAssertHandler(
-            ".\\cgame_mp\\cg_draw_mp.cpp",
-            1419,
-            0,
-            "ps->clientNum doesn't index MAX_CLIENTS\n\t%i not in [0, %i)",
-            ps->clientNum,
-            64);
+    bcassert(ps->clientNum, 0x40u);
     if (!CL_GetClientName(localClientNum, ps->clientNum, clientName, 38))
         Com_sprintf(clientName, 0x26u, "?");
     followingString = SEH_LocalizeTextMessage("CGAME_FOLLOWING", "spectator follow string", LOCMSG_SAFE);
@@ -1347,14 +1339,7 @@ void __cdecl DrawViewmodelInfo(int localClientNum)
     font = UI_GetFontHandle(scrPlace, 6, 0.25);
     if (weaponIndex > 0)
     {
-        if (localClientNum)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\src\\cgame_mp\\cg_local_mp.h",
-                1095,
-                0,
-                "%s\n\t(localClientNum) = %i",
-                "(localClientNum == 0)",
-                localClientNum);
+        vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
         weapInfo = &cg_weaponsArray[0][weaponIndex];
         weapDef = BG_GetWeaponDef(weaponIndex);
         weaponMdl = weapDef->gunXModel[cgameGlob->predictedPlayerState.weaponmodels[weaponIndex]];

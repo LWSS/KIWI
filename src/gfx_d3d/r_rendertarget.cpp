@@ -321,14 +321,7 @@ void __cdecl R_InitShadowmapRenderTarget(
             "%s\n\t(totalWidth) = %i",
             "((((totalWidth) & ((totalWidth) - 1)) == 0))",
             tileRes);
-    if (((totalHeight - 1) & totalHeight) != 0)
-        MyAssertHandler(
-            ".\\r_rendertarget.cpp",
-            803,
-            0,
-            "%s\n\t(totalHeight) = %i",
-            "((((totalHeight) & ((totalHeight) - 1)) == 0))",
-            totalHeight);
+    vassert(((((totalHeight) & ((totalHeight) - 1)) == 0)), "(totalHeight) = %i", totalHeight);
     usage = (RenderTargetUsage)(gfxMetrics.shadowmapBuildTechType != TECHNIQUE_BUILD_SHADOWMAP_DEPTH);
     R_InitAndTrackRenderTargetImage(
         imageProgType,

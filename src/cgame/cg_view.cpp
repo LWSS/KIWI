@@ -53,14 +53,7 @@ void __cdecl CG_PlayTestFx(int localClientNum)
     v5[6] = 0.0;
     v5[7] = 1.0;
     v5[8] = 0.0;
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            910,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     time = cgArray[0].time;
     FX_PlayOrientedEffect(localClientNum, v3, cgArray[0].time, v2->pos, (const float (*)[3])v5);
     v2->time = time;
@@ -180,13 +173,7 @@ void __cdecl CG_SmoothCameraZ(cg_s *cgameGlob)
     {
         p_stepViewStart = &cgameGlob->stepViewStart;
         p_time = &cgameGlob->time;
-        if (cgameGlob->time - cgameGlob->stepViewStart < 0)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_view.cpp",
-                216,
-                0,
-                "%s",
-                "cgameGlob->time - cgameGlob->stepViewStart >= 0");
+        iassert(cgameGlob->time - cgameGlob->stepViewStart >= 0);
         int elapsed = *p_time - *p_stepViewStart;
         int duration = (int)(cg_viewZSmoothingTime->current.value * 1000.0f);
         if (elapsed >= duration)
@@ -782,14 +769,7 @@ void __cdecl CG_CalcVehicleViewValues(int localClientNum)
     float v29[4]; // [sp+1D0h] [-80h] BYREF
     float v30[4][3]; // [sp+1E0h] [-70h] BYREF
 
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            910,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     Entity = CG_GetEntity(localClientNum, cgArray[0].predictedPlayerState.viewlocked_entNum);
     ClientDObj = Com_GetClientDObj(Entity->nextState.number, 0);
     v4 = ClientDObj;
@@ -915,14 +895,7 @@ void CalcTurretViewValues(int localClientNum)
     WeaponDef *weapDef; // r29
     WeaponDef *v6; // r30
 
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            910,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     if ((cgArray[0].predictedPlayerState.eFlags & 0x300) != 0)
     {
         if (cgArray[0].predictedPlayerState.viewlocked == PLAYERVIEWLOCK_NONE)
@@ -963,14 +936,7 @@ void __cdecl CG_CalcLinkedViewValues(int localClientNum)
     float v4[4][3]; // [sp+C0h] [-70h] BYREF
     float v5[4][3]; // [sp+F0h] [-40h] BYREF
 
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            910,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
 
     if (cgArray[0].predictedPlayerState.pm_type == PM_NORMAL_LINKED
         && (cgArray[0].predictedPlayerState.eFlags & 0x20300) == 0
@@ -1166,14 +1132,7 @@ void __cdecl CG_UpdateEntInfo(int localClientNum)
 
     //PIXBeginNamedEvent_Copy_NoVarArgs(0xFFFFFFFF, "update ent info");
     //Profile_Begin(12);
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            910,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     nextSnap = cgArray[0].nextSnap;
     numEntities = cgArray[0].nextSnap->numEntities;
     if (numEntities > 0x800)
@@ -1195,14 +1154,7 @@ void __cdecl CG_UpdateEntInfo(int localClientNum)
         do
         {
             v6 = *(int *)((char *)&nextSnap->snapFlags + v5);
-            if (v6 >= 0x880)
-                MyAssertHandler(
-                    "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_view.cpp",
-                    1193,
-                    0,
-                    "entnum doesn't index MAX_GENTITIES\n\t%i not in [0, %i)",
-                    *(int *)((char *)&nextSnap->snapFlags + v5),
-                    2176);
+            bcassert(v6, 0x880);
             ClientDObj = Com_GetClientDObj(v6, localClientNum);
             if (ClientDObj)
                 CG_DObjUpdateInfo(cgArray, ClientDObj, 0);
@@ -1217,15 +1169,13 @@ void __cdecl CG_UpdateEntInfo(int localClientNum)
 
 const ClientViewParams *__cdecl CG_GetLocalClientViewParams(int localClientNum)
 {
-    if (localClientNum)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_view.cpp", 1241, 0, "%s", "localClientNum == 0");
+    iassert(localClientNum == 0);
     return clientViewParamsArray[0];
 }
 
 void __cdecl CG_ArchiveViewInfo(cg_s *cgameGlob, MemoryFile *memFile)
 {
-    if (!memFile)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_view.cpp", 1248, 0, "%s", "memFile");
+    iassert(memFile);
     MemFile_ArchiveData(memFile, 4, &cgameGlob->vehicleInitView);
     MemFile_ArchiveData(memFile, 36, cgameGlob->prevVehicleInvAxis);
     MemFile_ArchiveData(memFile, 1, &cgameGlob->vehicleViewLocked);
@@ -1295,14 +1245,7 @@ void __cdecl DrawShellshockBlend(int localClientNum)
 {
     ShockViewTypes type; // r10
 
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            910,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     if (cg_drawShellshock->current.enabled)
     {
         type = cgArray[0].shellshock.parms->screenBlend.type;
@@ -1341,14 +1284,7 @@ void __cdecl CG_UpdateViewOffset(int localClientNum)
 {
     double v1; // fp0
 
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            910,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     cgArray[0].refdef.viewOffset[0] = (float)((float)(cgArray[0].nextSnap->ps.origin[0] - cgArray[0].snap->ps.origin[0])
         * cgArray[0].frameInterpolation)
         + cgArray[0].snap->ps.origin[0];
@@ -1515,14 +1451,7 @@ void __cdecl CG_InitView(int localClientNum)
 {
     double FarPlaneDist; // fp1
 
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            910,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     CG_UpdateViewOffset(localClientNum);
     CG_PredictPlayerState(localClientNum);
     CG_UpdateViewWeaponAnim(localClientNum);
@@ -1559,14 +1488,7 @@ int __cdecl CG_DrawActiveFrame(
     R_ClearScene(localClientNum);
     FX_BeginUpdate(localClientNum);
     CG_SetCollWorldLocalClientNum(localClientNum);
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            910,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     v12 = serverTime;
     v13 = animFrametime;
     time = cgArray[0].time;
@@ -1643,14 +1565,7 @@ int __cdecl CG_DrawActiveFrame(
     //Profile_Begin(22);
     R_UpdateNonDependentEffects(v32);
     //Profile_EndInternal(0);
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            917,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     shellshockIndex = cgArray[0].snap->ps.shellshockIndex;
     if (shellshockIndex)
     {

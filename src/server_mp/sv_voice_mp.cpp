@@ -103,8 +103,7 @@ void __cdecl SV_UserVoice(client_t *cl, msg_t *msg)
     if (sv_voice->current.enabled)
     {
         packetCount = MSG_ReadByte(msg);
-        if (!cl->gentity)
-            MyAssertHandler(".\\server_mp\\sv_voice_mp.cpp", 177, 0, "%s", "cl->gentity");
+        iassert(cl->gentity);
         for (packet = 0; packet < packetCount; ++packet)
         {
             voicePacket.dataSize = MSG_ReadByte(msg);
@@ -113,8 +112,7 @@ void __cdecl SV_UserVoice(client_t *cl, msg_t *msg)
                 Com_Printf(15, "Received invalid voice packet of size %i from %s\n", voicePacket.dataSize, cl->name);
                 return;
             }
-            if (!msg->data)
-                MyAssertHandler(".\\server_mp\\sv_voice_mp.cpp", 189, 0, "%s", "msg->data");
+            iassert(msg->data);
             if (&voicePacket == (VoicePacket_t *)-1)
                 MyAssertHandler(".\\server_mp\\sv_voice_mp.cpp", 190, 0, "%s", "voicePacket.data");
             MSG_ReadData(msg, voicePacket.data, voicePacket.dataSize);
@@ -127,14 +125,10 @@ void __cdecl SV_QueueVoicePacket(int talkerNum, int clientNum, VoicePacket_t *vo
 {
     client_t *client; // [esp+0h] [ebp-8h]
 
-    if (talkerNum < 0)
-        MyAssertHandler(".\\server_mp\\sv_voice_mp.cpp", 126, 0, "%s", "talkerNum >= 0");
-    if (clientNum < 0)
-        MyAssertHandler(".\\server_mp\\sv_voice_mp.cpp", 127, 0, "%s", "clientNum >= 0");
-    if (talkerNum >= sv_maxclients->current.integer)
-        MyAssertHandler(".\\server_mp\\sv_voice_mp.cpp", 128, 0, "%s", "talkerNum < sv_maxclients->current.integer");
-    if (clientNum >= sv_maxclients->current.integer)
-        MyAssertHandler(".\\server_mp\\sv_voice_mp.cpp", 129, 0, "%s", "clientNum < sv_maxclients->current.integer");
+    iassert(talkerNum >= 0);
+    iassert(clientNum >= 0);
+    iassert(talkerNum < sv_maxclients->current.integer);
+    iassert(clientNum < sv_maxclients->current.integer);
     client = &svs.clients[clientNum];
     if (client->voicePacketCount < 40)
     {
@@ -168,8 +162,7 @@ void __cdecl SV_PreGameUserVoice(client_t *cl, msg_t *msg)
                 Com_Printf(15, "Received invalid voice packet of size %i from %s\n", voicePacket.dataSize, cl->name);
                 return;
             }
-            if (!msg->data)
-                MyAssertHandler(".\\server_mp\\sv_voice_mp.cpp", 240, 0, "%s", "msg->data");
+            iassert(msg->data);
             if (&voicePacket == (VoicePacket_t *)-1)
                 MyAssertHandler(".\\server_mp\\sv_voice_mp.cpp", 241, 0, "%s", "voicePacket.data");
             MSG_ReadData(msg, voicePacket.data, voicePacket.dataSize);

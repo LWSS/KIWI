@@ -821,14 +821,7 @@ void __cdecl CG_DrawPlayerWeaponName(
             weapIndex = GetWeaponIndex(cgameGlob);
             if (weapIndex)
             {
-                if (localClientNum)
-                    MyAssertHandler(
-                        "c:\\trees\\cod3\\src\\cgame_mp\\cg_local_mp.h",
-                        1095,
-                        0,
-                        "%s\n\t(localClientNum) = %i",
-                        "(localClientNum == 0)",
-                        localClientNum);
+                vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
                 weapInfo = &cg_weaponsArray[0][weapIndex];
                 weapDef = BG_GetWeaponDef(weapIndex);
                 if (*weapDef->szModeName)
@@ -881,14 +874,7 @@ void __cdecl CG_DrawPlayerWeaponNameBack(
         weapIndex = GetWeaponIndex(cgameGlob);
         if (weapIndex)
         {
-            if (localClientNum)
-                MyAssertHandler(
-                    "c:\\trees\\cod3\\src\\cgame_mp\\cg_local_mp.h",
-                    1095,
-                    0,
-                    "%s\n\t(localClientNum) = %i",
-                    "(localClientNum == 0)",
-                    localClientNum);
+            vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
             weapInfo = &cg_weaponsArray[0][weapIndex];
             weapDef = BG_GetWeaponDef(weapIndex);
             if (*weapDef->szModeName)
@@ -1605,26 +1591,12 @@ double __cdecl CG_FadeLowHealthOverlay(const cg_s *cgameGlob)
     }
     else
     {
-        if (!cgameGlob->healthOverlayPulseDuration)
-            MyAssertHandler(
-                ".\\cgame_mp\\cg_newDraw_mp.cpp",
-                1067,
-                0,
-                "%s\n\t(cgameGlob->healthOverlayPulseDuration) = %i",
-                "(cgameGlob->healthOverlayPulseDuration)",
-                cgameGlob->healthOverlayPulseDuration);
+        vassert((cgameGlob->healthOverlayPulseDuration), "(cgameGlob->healthOverlayPulseDuration) = %i", cgameGlob->healthOverlayPulseDuration);
         lerp = (double)timeSinceFadeStarted / (double)cgameGlob->healthOverlayPulseDuration;
         curAlpha = (cgameGlob->healthOverlayToAlpha - cgameGlob->healthOverlayFromAlpha) * lerp
             + cgameGlob->healthOverlayFromAlpha;
     }
-    if (curAlpha < 0.0 || curAlpha > 1.0)
-        MyAssertHandler(
-            ".\\cgame_mp\\cg_newDraw_mp.cpp",
-            1076,
-            0,
-            "%s\n\t(curAlpha) = %g",
-            "(curAlpha >= 0.0f && curAlpha <= 1.0f)",
-            curAlpha);
+    vassert((curAlpha >= 0.0f && curAlpha <= 1.0f), "(curAlpha) = %g", curAlpha);
     return curAlpha;
 }
 
@@ -1900,13 +1872,7 @@ void __cdecl CG_DrawCursorhint(
                                 }
                                 else
                                 {
-                                    if (weapDef->hudIconRatio != WEAPON_ICON_RATIO_4TO1)
-                                        MyAssertHandler(
-                                            ".\\cgame_mp\\cg_newDraw_mp.cpp",
-                                            1440,
-                                            0,
-                                            "%s",
-                                            "weapDef->hudIconRatio == WEAPON_ICON_RATIO_4TO1");
+                                    iassert(weapDef->hudIconRatio == WEAPON_ICON_RATIO_4TO1);
                                     widthScale = 2.0;
                                     widthOfs = rect->w * -0.5;
                                     heightScale = 0.5;
@@ -1917,14 +1883,7 @@ void __cdecl CG_DrawCursorhint(
                         {
                             if (cgameGlob->cursorHintString >= 0)
                                 displayString = CG_GetUseString(localClientNum);
-                            if (localClientNum)
-                                MyAssertHandler(
-                                    "c:\\trees\\cod3\\src\\cgame_mp\\cg_local_mp.h",
-                                    1095,
-                                    0,
-                                    "%s\n\t(localClientNum) = %i",
-                                    "(localClientNum == 0)",
-                                    localClientNum);
+                            vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
                             secondaryString = cg_weaponsArray[0][weaponIndex].translatedDisplayName;
                         }
                         else
@@ -2040,14 +1999,7 @@ char *__cdecl CG_GetWeaponUseString(int localClientNum, const char **secondarySt
     weaponIndex = cgameGlob->cursorHintIcon - 4;
     ps = &cgameGlob->predictedPlayerState;
     weapDef = BG_GetWeaponDef(weaponIndex);
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\src\\cgame_mp\\cg_local_mp.h",
-            1095,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     weapInfo = &cg_weaponsArray[0][weaponIndex];
     if (weapDef->inventoryType)
     {
@@ -2261,8 +2213,7 @@ void __cdecl CG_DrawInvalidCmdHint(
         string = UI_SafeTranslateString("WEAPON_TARGET_NOT_ENOUGH_CLEARANCE");
     LABEL_21:
         blinkInterval = cg_invalidCmdHintBlinkInterval->current.integer;
-        if (blinkInterval <= 0)
-            MyAssertHandler(".\\cgame_mp\\cg_newDraw_mp.cpp", 1667, 0, "%s", "blinkInterval > 0");
+        iassert(blinkInterval > 0);
         color[3] = (float)((cgameGlob->time - cgameGlob->invalidCmdHintTime) % blinkInterval) / (float)blinkInterval;
         x = rect->x - SnapFloat(UI_TextWidth(string, 0, font, fontscale) * 0.5f);
         UI_DrawText(

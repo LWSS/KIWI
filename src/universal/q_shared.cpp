@@ -199,16 +199,11 @@ void __cdecl Com_AssembleFilepath(char *folder, char *name, char *extension, cha
     uint v7; // [esp+20h] [ebp-1Ch]
     char *patha; // [esp+50h] [ebp+14h]
 
-    if (!folder)
-        MyAssertHandler(".\\universal\\q_shared.cpp", 148, 0, "%s", "folder");
-    if (!name)
-        MyAssertHandler(".\\universal\\q_shared.cpp", 149, 0, "%s", "name");
-    if (!extension)
-        MyAssertHandler(".\\universal\\q_shared.cpp", 150, 0, "%s", "extension");
-    if (!path)
-        MyAssertHandler(".\\universal\\q_shared.cpp", 151, 0, "%s", "path");
-    if (maxCharCount <= 0)
-        MyAssertHandler(".\\universal\\q_shared.cpp", 152, 0, "%s", "maxCharCount > 0");
+    iassert(folder);
+    iassert(name);
+    iassert(extension);
+    iassert(path);
+    iassert(maxCharCount > 0);
     v7 = strlen(folder);
     v6 = strlen(name);
     v5 = strlen(extension);
@@ -224,8 +219,7 @@ const char *__cdecl Com_GetExtensionSubString(const char *filename)
 {
     const char *substr; // [esp+0h] [ebp-4h]
 
-    if (!filename)
-        MyAssertHandler(".\\universal\\q_shared.cpp", 177, 0, "%s", "filename");
+    iassert(filename);
     substr = 0;
     while (*filename)
     {
@@ -391,10 +385,8 @@ int __cdecl I_strncmp(const char *s0, const char *s1, int n)
 
 int __cdecl I_strcmp(const char *s0, const char *s1)
 {
-    if (!s0)
-        MyAssertHandler(".\\universal\\q_shared.cpp", 649, 0, "%s", "s0");
-    if (!s1)
-        MyAssertHandler(".\\universal\\q_shared.cpp", 650, 0, "%s", "s1");
+    iassert(s0);
+    iassert(s1);
     return I_strncmp(s0, s1, 0x7FFFFFFF);
 }
 
@@ -405,10 +397,8 @@ int __cdecl I_stricmpwild(const char *wild, const char *s)
     int delta; // [esp+8h] [ebp-8h]
     char charRef; // [esp+Fh] [ebp-1h]
 
-    if (!wild)
-        MyAssertHandler(".\\universal\\q_shared.cpp", 661, 0, "%s", "wild");
-    if (!s)
-        MyAssertHandler(".\\universal\\q_shared.cpp", 662, 0, "%s", "s");
+    iassert(wild);
+    iassert(s);
     do
     {
         charWild = *wild++;
@@ -792,8 +782,7 @@ void __cdecl Info_SetValueForKey(char *s, const char *key, const char *value)
     char newi[1024]; // [esp+464h] [ebp-408h] BYREF
     int i; // [esp+868h] [ebp-4h]
 
-    if (!value)
-        MyAssertHandler(".\\universal\\q_shared.cpp", 1254, 0, "%s", "value");
+    iassert(value);
     if (strlen(s) < 0x400)
     {
         j = 0;
@@ -804,13 +793,11 @@ void __cdecl Info_SetValueForKey(char *s, const char *key, const char *value)
                 break;
             if (c != 92 && c != 59 && c != 34)
             {
-                if (j >= 1024)
-                    MyAssertHandler(".\\universal\\q_shared.cpp", 1270, 0, "%s", "j < MAX_INFO_STRING");
+                iassert(j < MAX_INFO_STRING);
                 cleanValue[j++] = c;
             }
         }
-        if (j >= 1024)
-            MyAssertHandler(".\\universal\\q_shared.cpp", 1275, 0, "%s", "j < MAX_INFO_STRING");
+        iassert(j < MAX_INFO_STRING);
         cleanValue[j] = 0;
         v3 = (int)strchr(key, 0x5Cu);
         if (v3)
@@ -992,8 +979,7 @@ bool __cdecl ParseConfigStringToStructCustomSize(
                 }
                 else
                 {
-                    if (!parseSpecialFieldType)
-                        MyAssertHandler(".\\universal\\q_shared.cpp", 1492, 0, "%s", "parseSpecialFieldType != NULL");
+                    iassert(parseSpecialFieldType != NULL);
                     if (!parseSpecialFieldType(pStruct, src, v20->iFieldType))
                         return 0;
                 }

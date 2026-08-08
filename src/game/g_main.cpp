@@ -1140,8 +1140,7 @@ void __cdecl G_InitGame(
     level.loading = (loading_t)((((uintptr_t)*save) != 0) + 1);
     if (level.loading == LOADING_SAVEGAME)
     {
-        if (!*save)
-            MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_main.cpp", 1488, 0, "%s", "*save");
+        iassert(*save);
         SaveMemory_MoveToSegment(*save, 1);
         v17 = Hunk_SetMarkLow();
         if (!G_LoadWeapons(*save))
@@ -1166,8 +1165,7 @@ void __cdecl G_InitGame(
         g_scr_data.actorBackup = actorBackup;
     }
     memset(actorBackup, 0, sizeof(actorBackup_s));
-    if (level.time)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_main.cpp", 1517, 0, "%s", "!level.time");
+    iassert(!level.time);
     Mantle_CreateAnims(Hunk_AllocXAnimServer);
     if (restart)
         G_RestartScrVehicleInfo();
@@ -1414,8 +1412,7 @@ void __cdecl G_CheckReloadStatus()
 
     if (level.absoluteReloadDelayTime && (int)(level.absoluteReloadDelayTime - Sys_Milliseconds()) < 0)
     {
-        if (!g_reloading->current.integer)
-            MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_main.cpp", 1833, 0, "%s", "g_reloading->current.integer");
+        iassert(g_reloading->current.integer);
         level.absoluteReloadDelayTime = 0;
         Cbuf_AddText(0, "loadgame_continue\n");
     }
@@ -1612,8 +1609,7 @@ void __cdecl G_CheckLoadGame(int checksum, SaveGame *save)
         goto LABEL_4;
     }
 LABEL_5:
-    if (!save)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_main.cpp", 2202, 0, "%s", "save");
+    iassert(save);
     SV_ClearPendingSaves();
     G_LoadGame(checksum, save);
 LABEL_8:
@@ -1649,11 +1645,9 @@ void __cdecl G_ClientDoPerFrameNotifies(gentity_s *ent)
     unsigned __int16 begin_firing; // r4
     bool *p_previouslyUsingNightVision; // r11
 
-    if (!ent)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_main.cpp", 2244, 0, "%s", "ent");
+    iassert(ent);
     client = ent->client;
-    if (!client)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_main.cpp", 2248, 0, "%s", "client");
+    iassert(client);
     weapon = client->ps.weapon;
     if (weapon != client->lastWeapon)
     {
@@ -2490,8 +2484,7 @@ int __cdecl G_RunFrame(ServerFrameExtent extent, int timeCap)
         v21 = vehEnt;
         if (vehEnt)
         {
-            if (!vehEnt->r.inuse)
-                MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_main.cpp", 2811, 0, "%s", "vehEnt->r.inuse");
+            iassert(vehEnt->r.inuse);
             G_RunFrameForEntity(v21);
         }
     }

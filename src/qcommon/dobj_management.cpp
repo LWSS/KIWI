@@ -347,14 +347,7 @@ DObj_s *Com_DObjCloneToBuffer(uint entnum)
             "%s",
             "!clientObjMapBuffered[entnum]");
     FreeDObjIndex = Com_GetFreeDObjIndex();
-    if (entnum >= 0x900)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\qcommon\\dobj_management.cpp",
-            334,
-            0,
-            "entnum doesn't index ARRAY_COUNT( clientObjMapBuffered )\n\t%i not in [0, %i)",
-            entnum,
-            2304);
+    bcassert(entnum, 0x900);
 
     clientObjMapBuffered[v2] = FreeDObjIndex;
 
@@ -393,14 +386,7 @@ void Com_DObjCloneFromBuffer(uint entnum)
             "%s",
             "(unsigned)entnum < ARRAY_COUNT( clientObjMap )");
     v2 = entnum;
-    if (clientObjMap[entnum])
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\qcommon\\dobj_management.cpp",
-            357,
-            0,
-            "%s\n\t(entnum) = %i",
-            "(!clientObjMap[entnum])",
-            entnum);
+    vassert((!clientObjMap[entnum]), "(entnum) = %i", entnum);
 
     if (clientObjMapBuffered[v2])
     {

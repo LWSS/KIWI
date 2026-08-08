@@ -35,25 +35,8 @@ void __cdecl LocalConvertQuatToMat(const DObjAnimMat *mat, float (*axis)[3])
     double v11; // fp8
     double v12; // fp9
 
-    if ((COERCE_UNSIGNED_INT(mat->quat[0]) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(mat->quat[1]) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(mat->quat[2]) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(mat->quat[3]) & 0x7F800000) == 0x7F800000)
-    {
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\../xanim/xanim_public.h",
-            434,
-            0,
-            "%s",
-            "!IS_NAN((mat->quat)[0]) && !IS_NAN((mat->quat)[1]) && !IS_NAN((mat->quat)[2]) && !IS_NAN((mat->quat)[3])");
-    }
-    if ((COERCE_UNSIGNED_INT(mat->transWeight) & 0x7F800000) == 0x7F800000)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\../xanim/xanim_public.h",
-            435,
-            0,
-            "%s",
-            "!IS_NAN(mat->transWeight)");
+    iassert(!IS_NAN((mat->quat)[0]) && !IS_NAN((mat->quat)[1]) && !IS_NAN((mat->quat)[2]) && !IS_NAN((mat->quat)[3]));
+    iassert(!IS_NAN(mat->transWeight));
     v4 = (float)(mat->quat[2] * (float)(mat->quat[0] * mat->transWeight));
     v5 = (float)(mat->quat[1] * (float)(mat->quat[0] * mat->transWeight));
     v6 = (float)(mat->quat[2] * (float)(mat->quat[1] * mat->transWeight));
@@ -80,16 +63,8 @@ void __cdecl LocalConvertQuatToMat(const DObjAnimMat *mat, float (*axis)[3])
 
 const ComPrimaryLight *__cdecl Com_GetPrimaryLight(unsigned int primaryLightIndex)
 {
-    if (!comWorld.isInUse)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\cgame\\../qcommon/com_bsp_api.h", 31, 0, "%s", "comWorld.isInUse");
-    if (primaryLightIndex >= comWorld.primaryLightCount)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\../qcommon/com_bsp_api.h",
-            32,
-            0,
-            "primaryLightIndex doesn't index comWorld.primaryLightCount\n\t%i not in [0, %i)",
-            primaryLightIndex,
-            comWorld.primaryLightCount);
+    iassert(comWorld.isInUse);
+    bcassert(primaryLightIndex, comWorld.primaryLightCount);
     return &comWorld.primaryLights[primaryLightIndex];
 }
 
@@ -256,14 +231,7 @@ void __cdecl CG_mg42_PreControllers(int localClientNum, const DObj_s *obj, centi
 {
     bool v5; // r11
 
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            910,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     if ((cgArray[0].predictedPlayerState.eFlags & 0x300) == 0
         || (v5 = 1, cgArray[0].predictedPlayerState.viewlocked_entNum != cent->nextState.number))
     {
@@ -337,14 +305,7 @@ void __cdecl CG_Missile(int localClientNum, centity_s *cent)
     snd_alias_list_t *projIgnitionSound; // r6
     unsigned int RenderFlagForRefEntity; // r3
 
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            910,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     if ((cent->nextState.lerp.eFlags & 0x20) == 0
         && cent->nextState.lerp.u.missile.launchTime <= CG_GetLocalClientTime(localClientNum))
     {
@@ -955,14 +916,7 @@ void __cdecl CG_SetFrameInterpolation(int localClientNum)
     __int64 v3; // r10
     __int64 v4; // [sp+50h] [-30h]
 
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            910,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     if (!cgArray[0].snap)
         MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_ents.cpp", 487, 0, "%s", "cgameGlob->snap");
     nextSnap = cgArray[0].nextSnap;
@@ -999,14 +953,7 @@ cpose_t *__cdecl CG_GetPose(int localClientNum, int handle)
 
     iassert((handle >= ((MAX_GENTITIES)) && handle - ((MAX_GENTITIES)) < 128));
 
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            910,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     return &cgArray[0].viewModelPose;
 }
 
@@ -1185,14 +1132,7 @@ FxEffect *__cdecl CG_StartFx(int localClientNum, centity_s *cent, int startAtTim
             cent->nextState.un1.scale,
             1,
             99);
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            917,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     v7 = cgsArray[0].fxs[scale];
     if (!v7)
         MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_ents.cpp", 946, 0, "%s", "fxDef");
@@ -1224,14 +1164,7 @@ void __cdecl CG_LoopFx(int localClientNum, centity_s *cent)
     FxEffect *started; // r3
     int v6; // r10
 
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            910,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     if (cent->nextState.lerp.u.turret.gunAngles[0] == 0.0
         || (float)((float)((float)(cent->pose.origin[1] - cgArray[0].predictedPlayerState.origin[1])
             * (float)(cent->pose.origin[1] - cgArray[0].predictedPlayerState.origin[1]))
@@ -1241,8 +1174,7 @@ void __cdecl CG_LoopFx(int localClientNum, centity_s *cent)
                     * (float)(cent->pose.origin[2] - cgArray[0].predictedPlayerState.origin[2])))) < (double)(float)(cent->nextState.lerp.u.turret.gunAngles[0] * cent->nextState.lerp.u.turret.gunAngles[0]))
     {
         period = cent->nextState.lerp.u.loopFx.period;
-        if (period <= 0)
-            MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_ents.cpp", 981, 0, "%s", "period > 0");
+        iassert(period > 0);
         if (!cent->pose.fx.effect)
         {
             started = CG_StartFx(localClientNum, cent, cgArray[0].time);
@@ -1319,15 +1251,7 @@ void CG_PrimaryLight(int localClientNum, centity_s *cent) {
     iassert(comWorld.isInUse);
     bcassert(cent->nextState.index.primaryLight, Com_GetPrimaryLightCount());
 
-    if (localClientNum != 0) {
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            910,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
-    }
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
 
     unsigned int lightIndex = cent->nextState.index.item;
     LerpEntityState *p_currentState = &cent->currentState;
@@ -1427,8 +1351,7 @@ void __cdecl CG_InterpolateEntityAngles(const cg_s *cgameGlob, centity_s *cent)
     float v5[4]; // [sp+50h] [-40h] BYREF
     float v6[4]; // [sp+60h] [-30h] BYREF
 
-    if (!cgameGlob->nextSnap)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_ents.cpp", 1121, 0, "%s", "cgameGlob->nextSnap");
+    iassert(cgameGlob->nextSnap);
     frameInterpolation = cgameGlob->frameInterpolation;
     BG_EvaluateTrajectory(&cent->currentState.apos, cgameGlob->snap->serverTime, v6);
     BG_EvaluateTrajectory(&cent->nextState.lerp.apos, cgameGlob->nextSnap->serverTime, v5);
@@ -1540,14 +1463,7 @@ int __cdecl CG_ExpiredLaunch(int localClientNum, centity_s *cent)
 {
     int result; // r3
 
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            910,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     if (cent->pose.physObjId || cgArray[0].time <= cent->currentState.pos.trTime + 1000)
         return 0;
     result = 1;
@@ -1557,15 +1473,8 @@ int __cdecl CG_ExpiredLaunch(int localClientNum, centity_s *cent)
 
 void __cdecl CG_CalcEntityPhysicsPositions(int localClientNum, centity_s *cent)
 {
-    if (!cent)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_ents.cpp", 1226, 0, "%s", "cent");
-    if (cent->currentState.pos.trType != TR_PHYSICS || cent->currentState.apos.trType != TR_PHYSICS)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_ents.cpp",
-            1227,
-            0,
-            "%s",
-            "cent->currentState.pos.trType == TR_PHYSICS && cent->currentState.apos.trType == TR_PHYSICS");
+    iassert(cent);
+    iassert(cent->currentState.pos.trType == TR_PHYSICS && cent->currentState.apos.trType == TR_PHYSICS);
     if (Com_GetClientDObj(cent->nextState.number, localClientNum)
         && !(unsigned __int8)CG_ExpiredLaunch(localClientNum, cent))
     {
@@ -1656,8 +1565,7 @@ void __cdecl CG_UpdateRagdollPose(centity_s *cent)
 
 void __cdecl CG_CalcEntityRagdollPositions(int localClientNum, centity_s *cent)
 {
-    if (!cent)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_ents.cpp", 1321, 0, "%s", "cent");
+    iassert(cent);
     if (!(unsigned __int8)Com_IsRagdollTrajectory(&cent->currentState.pos)
         && !(unsigned __int8)Com_IsRagdollTrajectory(&cent->currentState.apos))
     {
@@ -1679,14 +1587,7 @@ void __cdecl CG_CalcEntityRagdollPositions(int localClientNum, centity_s *cent)
 
 void __cdecl CG_CalcEntityLerpPositions(int localClientNum, centity_s *cent)
 {
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            910,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     if (cent->currentState.pos.trType == TR_PHYSICS)
     {
         CG_CalcEntityPhysicsPositions(localClientNum, cent);
@@ -1721,10 +1622,8 @@ void __cdecl CG_DObjCalcBone(const cpose_t *pose, DObj_s *obj, int boneIndex)
     bool v7; // zf
     int v8[16]; // [sp+50h] [-40h] BYREF
 
-    if (!obj)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_ents.cpp", 1384, 0, "%s", "obj");
-    if (!pose)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_ents.cpp", 1385, 0, "%s", "pose");
+    iassert(obj);
+    iassert(pose);
     DObjLock(obj);
     v7 = CL_DObjCreateSkelForBone(obj, boneIndex) != 0;
     v6 = obj;
@@ -1965,8 +1864,7 @@ void __cdecl CG_SaveEntity(unsigned int entnum, SaveGame *save)
 {
     centity_s *v4; // r31
 
-    if (!save)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_ents.cpp", 1628, 0, "%s", "save");
+    iassert(save);
     if (entnum >= 0x880)
     {
         MyAssertHandler(
@@ -1996,8 +1894,7 @@ void __cdecl CG_LoadEntity(unsigned int entnum, SaveGame *save)
 {
     centity_s *v4; // r31
 
-    if (!save)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_ents.cpp", 1648, 0, "%s", "save");
+    iassert(save);
     if (entnum >= 0x880)
     {
         MyAssertHandler(
@@ -2075,8 +1972,7 @@ void __cdecl CG_LoadEntities(SaveGame *save)
 
 void __cdecl CG_GetPoseOrigin(const cpose_t *pose, float *origin)
 {
-    if (!pose)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_ents.cpp", 1699, 0, "%s", "pose");
+    iassert(pose);
     *origin = pose->origin[0];
     origin[1] = pose->origin[1];
     origin[2] = pose->origin[2];
@@ -2084,8 +1980,7 @@ void __cdecl CG_GetPoseOrigin(const cpose_t *pose, float *origin)
 
 void __cdecl CG_GetPoseAngles(const cpose_t *pose, float *angles)
 {
-    if (!pose)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_ents.cpp", 1706, 0, "%s", "pose");
+    iassert(pose);
     *angles = pose->angles[0];
     angles[1] = pose->angles[1];
     angles[2] = pose->angles[2];
@@ -2230,14 +2125,7 @@ int __cdecl CG_AddPacketEntities(int localClientNum)
 
     //PIXBeginNamedEvent_Copy_NoVarArgs(0xFFFFFFFF, "add packet ents");
     //Profile_Begin(325);
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            910,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     cgArray[0].rumbleScale = 0.0;
     if ((cgArray[0].predictedPlayerState.eFlags & 0x300) != 0)
         viewlocked_entNum = cgArray[0].predictedPlayerState.viewlocked_entNum;
@@ -2279,8 +2167,7 @@ DObjAnimMat *__cdecl CG_DObjGetLocalBoneMatrix(const cpose_t *pose, DObj_s *obj,
 {
     DObjAnimMat *RotTransArray; // r3
 
-    if (!obj)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_ents.cpp", 640, 0, "%s", "obj");
+    iassert(obj);
     //Profile_Begin(319);
     CG_DObjCalcBone(pose, obj, boneIndex);
     //Profile_EndInternal(0);
@@ -2296,8 +2183,7 @@ DObjAnimMat *__cdecl CG_DObjGetLocalTagMatrix(const cpose_t *pose, DObj_s *obj, 
     DObjAnimMat *result; // r3
     unsigned __int8 v7; // [sp+50h] [-30h] BYREF
 
-    if (!obj)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_ents.cpp", 661, 0, "%s", "obj");
+    iassert(obj);
     v7 = -2;
     result = (DObjAnimMat *)DObjGetBoneIndex(obj, tagName, &v7);
     if (result)

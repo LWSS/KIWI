@@ -19,10 +19,8 @@ bool __cdecl Actor_Death_Start(actor_s *self, ai_state_t ePrevState)
     int time; // r11
     gentity_s *ent; // r3
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_death.cpp", 20, 0, "%s", "self");
-    if (!self->ent)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_death.cpp", 21, 0, "%s", "self->ent");
+    iassert(self);
+    iassert(self->ent);
     health = self->ent->health;
     if (health > 0)
         MyAssertHandler(
@@ -55,17 +53,13 @@ bool __cdecl Actor_Death_Start(actor_s *self, ai_state_t ePrevState)
 
 void __cdecl Actor_Death_Cleanup(actor_s *self)
 {
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_death.cpp", 53, 0, "%s", "self");
-    if (!self->sentient)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_death.cpp", 54, 0, "%s", "self->sentient");
+    iassert(self);
+    iassert(self->sentient);
     Actor_BroadcastTeamEvent(self->sentient, AI_EV_DEATH);
     Actor_Grenade_DropIfHeld(self);
     Sentient_Dissociate(self->sentient);
-    if (!self->sentient)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_death.cpp", 63, 0, "%s", "self->sentient");
-    if (self->Physics.bIsAlive)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_death.cpp", 64, 0, "%s", "!self->Physics.bIsAlive");
+    iassert(self->sentient);
+    iassert(!self->Physics.bIsAlive);
     Actor_ClearPath(self);
 }
 
@@ -73,8 +67,7 @@ actor_think_result_t __cdecl Actor_Death_Think(actor_s *self)
 {
     unsigned int v2; // r10
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_death.cpp", 79, 0, "%s", "self");
+    iassert(self);
     v2 = 4 * (self->stateLevel + 8);
     self->pszDebugInfo = "death";
     if (*(gentity_s **)((char *)&self->ent + v2) == (gentity_s *)200 && level.time - self->iStateTime >= 800)

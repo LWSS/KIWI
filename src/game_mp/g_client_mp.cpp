@@ -150,14 +150,7 @@ void __cdecl ClientUserinfoChanged(uint clientNum)
 
     ent = &g_entities[clientNum];
     client = ent->client;
-    if (clientNum >= 0x40)
-        MyAssertHandler(
-            ".\\game_mp\\g_client_mp.cpp",
-            207,
-            0,
-            "clientNum doesn't index MAX_CLIENTS\n\t%i not in [0, %i)",
-            clientNum,
-            64);
+    bcassert(clientNum, 0x40);
     SV_GetUserinfo(clientNum, userinfo, 1024);
     if (!Info_Validate(userinfo))
         strcpy(userinfo, "\\name\\badinfo");
@@ -179,17 +172,9 @@ void __cdecl ClientUserinfoChanged(uint clientNum)
         ClientCleanName(s, client->sess.cs.name, 16);
         I_strncpyz(client->sess.newnetname, client->sess.cs.name, 16);
     }
-    if (clientNum >= 0x40)
-        MyAssertHandler(
-            ".\\game_mp\\g_client_mp.cpp",
-            253,
-            0,
-            "clientNum doesn't index MAX_CLIENTS\n\t%i not in [0, %i)",
-            clientNum,
-            64);
+    bcassert(clientNum, 0x40);
     ci = &level_bgs.clientinfo[clientNum];
-    if (!ci->infoValid)
-        MyAssertHandler(".\\game_mp\\g_client_mp.cpp", 255, 0, "%s", "ci->infoValid");
+    iassert(ci->infoValid);
     ci->clientNum = clientNum;
     I_strncpyz(ci->name, client->sess.cs.name, 16);
     ci->team = client->sess.cs.team;
@@ -254,20 +239,12 @@ char *__cdecl ClientConnect(uint clientNum, uint16_t scriptPersId)
     gentity_s *ent; // [esp+424h] [ebp-8h]
     const char *value; // [esp+428h] [ebp-4h]
 
-    if (!scriptPersId)
-        MyAssertHandler(".\\game_mp\\g_client_mp.cpp", 302, 0, "%s", "scriptPersId");
+    iassert(scriptPersId);
     ent = &g_entities[clientNum];
     client = &level.clients[clientNum];
     ClientClearFields(client);
     memset((uint8_t *)client, 0, sizeof(gclient_s));
-    if (clientNum >= 0x40)
-        MyAssertHandler(
-            ".\\game_mp\\g_client_mp.cpp",
-            313,
-            0,
-            "clientNum doesn't index MAX_CLIENTS\n\t%i not in [0, %i)",
-            clientNum,
-            64);
+    bcassert(clientNum, 0x40);
     ci = &level_bgs.clientinfo[clientNum];
     pXAnimTree = ci->pXAnimTree;
     memset((uint8_t *)ci, 0, sizeof(clientInfo_t));
@@ -289,10 +266,8 @@ char *__cdecl ClientConnect(uint clientNum, uint16_t scriptPersId)
     client->ps.clientNum = clientNum;
     client->sess.moveSpeedScaleMultiplier = 1.0f;
     client->ps.moveSpeedScaleMultiplier = client->sess.moveSpeedScaleMultiplier;
-    if (client->ps.eFlags)
-        MyAssertHandler(".\\game_mp\\g_client_mp.cpp", 344, 0, "%s", "!client->ps.eFlags");
-    if (ent->r.svFlags)
-        MyAssertHandler(".\\game_mp\\g_client_mp.cpp", 345, 0, "%s", "!ent->r.svFlags");
+    iassert(!client->ps.eFlags);
+    iassert(!ent->r.svFlags);
     ClientUserinfoChanged(clientNum);
     SV_GetUserinfo(clientNum, userinfo, 1024);
     if (client->sess.localClient
@@ -401,10 +376,8 @@ void __cdecl ClientSpawn(gentity_s *ent, const float *spawn_origin, const float 
     client->ps.pm_flags |= PMF_RESPAWNED;
     SetClientViewAngle(ent, spawn_angles);
     client->inactivityTime = level.time + 1000 * g_inactivity->current.integer;
-    if (client->latched_buttons)
-        MyAssertHandler(".\\game_mp\\g_client_mp.cpp", 525, 0, "%s", "!client->latched_buttons");
-    if (client->buttonsSinceLastFrame)
-        MyAssertHandler(".\\game_mp\\g_client_mp.cpp", 526, 0, "%s", "!client->buttonsSinceLastFrame");
+    iassert(!client->latched_buttons);
+    iassert(!client->buttonsSinceLastFrame);
     client->buttons = client->sess.cmd.buttons;
     level.clientIsSpawning = 1;
     client->lastSpawnTime = level.time;
@@ -424,8 +397,7 @@ void __cdecl ClientDisconnect(int clientNum)
 
     client = &level.clients[clientNum];
     ent = &g_entities[clientNum];
-    if (!ent->r.inuse)
-        MyAssertHandler(".\\game_mp\\g_client_mp.cpp", 570, 0, "%s", "ent->r.inuse");
+    iassert(ent->r.inuse);
     if (Scr_IsSystemActive())
     {
         Scr_AddString("disconnect");
@@ -441,8 +413,7 @@ void __cdecl ClientDisconnect(int clientNum)
             StopFollowing(&g_entities[i]);
         }
     }
-    if (ent->client != client)
-        MyAssertHandler(".\\game_mp\\g_client_mp.cpp", 592, 0, "%s", "ent->client == client");
+    iassert(ent->client == client);
     HudElem_ClientDisconnect(ent);
     if (Scr_IsSystemActive())
         Scr_PlayerDisconnect(ent);
@@ -452,8 +423,7 @@ void __cdecl ClientDisconnect(int clientNum)
     client->sess.connected = CON_DISCONNECTED;
     memset((uint8_t *)&client->sess.cs, 0, sizeof(client->sess.cs));
     CalculateRanks();
-    if (ent->client != client)
-        MyAssertHandler(".\\game_mp\\g_client_mp.cpp", 612, 0, "%s", "ent->client == client");
+    iassert(ent->client == client);
 }
 
 uint __cdecl G_GetNonPVSPlayerInfo(gentity_s *pSelf, float *vPosition, int iLastUpdateEnt)

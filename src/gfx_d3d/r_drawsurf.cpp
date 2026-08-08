@@ -520,14 +520,7 @@ char __cdecl R_AddParticleCloudDrawSurf(volatile uint cloudIndex, Material *mate
     GfxDrawSurf *drawSurf; // [esp+2Ch] [ebp-Ch]
     int region; // [esp+30h] [ebp-8h]
 
-    if (cloudIndex >= frontEndDataOut->cloudCount)
-        MyAssertHandler(
-            ".\\r_drawsurf.cpp",
-            561,
-            0,
-            "cloudIndex doesn't index frontEndDataOut->cloudCount\n\t%i not in [0, %i)",
-            cloudIndex,
-            frontEndDataOut->cloudCount);
+    bcassert(cloudIndex, frontEndDataOut->cloudCount);
 
     iassert(rgp.sortedMaterials[material->info.drawSurf.fields.materialSortedIndex] == material);
 

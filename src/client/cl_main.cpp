@@ -150,14 +150,7 @@ void __cdecl CL_SetLocalClientActive(int clientNum, bool active)
 
 int __cdecl CL_LocalClientNumFromControllerIndex(unsigned int controllerIndex)
 {
-    if (controllerIndex >= 4)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\client\\cl_main.cpp",
-            219,
-            0,
-            "controllerIndex doesn't index MAX_GPAD_COUNT\n\t%i not in [0, %i)",
-            controllerIndex,
-            4);
+    bcassert(controllerIndex, 4);
     if (!cl_multi_gamepads_enabled && controllerIndex != cl_controller_in_use)
         Com_PrintError(
             14,
@@ -169,14 +162,7 @@ int __cdecl CL_LocalClientNumFromControllerIndex(unsigned int controllerIndex)
 
 int __cdecl CL_ControllerIndexFromClientNum(int clientIndex)
 {
-    if (clientIndex)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\client\\cl_main.cpp",
-            230,
-            0,
-            "clientIndex doesn't index STATIC_MAX_LOCAL_CLIENTS\n\t%i not in [0, %i)",
-            clientIndex,
-            1);
+    vassert((clientIndex) == 0, "%i not in [0, %i)", clientIndex, 1);
     return cl_controller_in_use;
 }
 
@@ -293,8 +279,7 @@ void __cdecl CL_ShutdownHunkUsers()
         cls.devGuiStarted = 0;
     }
     CL_ShutdownUI();
-    if (cls.uiStarted)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\client\\cl_main.cpp", 383, 0, "%s", "!cls.uiStarted");
+    iassert(!cls.uiStarted);
 }
 
 void __cdecl CL_SaveSettings(MemoryFile *memFile)
@@ -302,8 +287,7 @@ void __cdecl CL_SaveSettings(MemoryFile *memFile)
     bool usingAds; // r31
     bool v3; // [sp+50h] [-30h] BYREF
 
-    if (!MemFile_IsWriting(memFile))
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\client\\cl_main.cpp", 428, 0, "%s", "MemFile_IsWriting( memFile )");
+    iassert(MemFile_IsWriting( memFile ));
     usingAds = clients[0].usingAds;
     if (clients[0].usingAds && !clients[0].usingAds)
         MyAssertHandler(
@@ -322,8 +306,7 @@ void __cdecl CL_RestoreSettings(MemoryFile *memFile)
     int v2; // r31
     _BYTE v3[8]; // [sp+50h] [-20h] BYREF
 
-    if (MemFile_IsWriting(memFile))
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\client\\cl_main.cpp", 439, 0, "%s", "!MemFile_IsWriting( memFile )");
+    iassert(!MemFile_IsWriting( memFile ));
     MemFile_ReadData(memFile, 1, v3);
     v2 = v3[0];
     if (v3[0] > 1u)
@@ -671,14 +654,7 @@ void __cdecl CL_Disconnect(int localClientNum)
         CL_SetLocalClientConnectionState(localClientNum, CA_DISCONNECTED);
         SND_DisconnectListener(localClientNum);
         //CL_ResetLastGamePadEventTime(); // KISAKTODO
-        if (localClientNum)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\client\\cl_main.cpp",
-                230,
-                0,
-                "clientIndex doesn't index STATIC_MAX_LOCAL_CLIENTS\n\t%i not in [0, %i)",
-                localClientNum,
-                1);
+        vassert((localClientNum) == 0, "%i not in [0, %i)", localClientNum, 1);
         //Live_Disconnected(cl_controller_in_use);
     }
 }
@@ -773,13 +749,7 @@ void __cdecl CL_PacketEvent(msg_t *msg, int serverMessageSequence)
 
 void __cdecl CL_SetFrametime(int frametime, int animFrametime)
 {
-    if (frametime - animFrametime < 0)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\client\\cl_main.cpp",
-            1078,
-            0,
-            "%s",
-            "frametime - animFrametime >= 0");
+    iassert(frametime - animFrametime >= 0);
     cls.frametime = frametime;
     cls.animFrametime = animFrametime;
 }
@@ -842,14 +812,7 @@ void __cdecl CL_Frame(int localClientNum, int msec)
         }
         CL_DevGuiFrame(0);
         //Profile_Begin(366);
-        if (localClientNum)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\client\\cl_main.cpp",
-                230,
-                0,
-                "clientIndex doesn't index STATIC_MAX_LOCAL_CLIENTS\n\t%i not in [0, %i)",
-                localClientNum,
-                1);
+        vassert((localClientNum) == 0, "%i not in [0, %i)", localClientNum, 1);
         //Live_Frame(cl_controller_in_use, v14);
         //Profile_EndInternal(0);
         CheckForConsoleGuidePause(localClientNum);
@@ -1026,10 +989,8 @@ void __cdecl CL_StartHunkUsers()
 {
     if (clientUIActives[0].isRunning)
     {
-        if (!cls.rendererStarted)
-            MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\client\\cl_main.cpp", 1339, 0, "%s", "cls.rendererStarted");
-        if (!cls.soundStarted)
-            MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\client\\cl_main.cpp", 1341, 0, "%s", "cls.soundStarted");
+        iassert(cls.rendererStarted);
+        iassert(cls.soundStarted);
         if (!cls.uiStarted)
         {
             CL_InitUI();
@@ -1091,8 +1052,7 @@ void __cdecl CL_VoidCommand()
 void __cdecl CL_startMultiplayer_f()
 {
     iassert(0); // KISAKTODO
-    if (!Sys_IsMainThread())
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\client\\cl_main.cpp", 1453, 0, "%s", "Sys_IsMainThread()");
+    iassert(Sys_IsMainThread());
     //LSP_SendLogRequest(cl_controller_in_use);
     //LB_EndOngoingTasks();
     Com_SyncThreads();
@@ -1185,14 +1145,7 @@ void __cdecl CL_StopLogo(int localClientNum)
     const char *string; // r4
     const char *v3; // r3
 
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\client\\client.h",
-            569,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     if (clientUIActives[0].connectionState == CA_LOGO)
     {
         CL_SetLocalClientConnectionState(localClientNum, CA_DISCONNECTED);
@@ -1294,14 +1247,7 @@ void __cdecl CL_StopLogoOrCinematic(int localClientNum)
 {
     connstate_t connectionState; // r30
 
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\client\\client.h",
-            569,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     connectionState = clientUIActives[0].connectionState;
     if (clientUIActives[0].connectionState == CA_CINEMATIC)
     {
@@ -1379,8 +1325,7 @@ void CL_Pause_f()
 static int recursive;
 void __cdecl CL_Shutdown(int localClientNum)
 {
-    if (!Sys_IsMainThread())
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\client\\cl_main.cpp", 1982, 0, "%s", "Sys_IsMainThread()");
+    iassert(Sys_IsMainThread());
     Com_SyncThreads();
     Com_Printf(14, "----- CL_Shutdown -----\n");
     if (recursive)
@@ -1801,14 +1746,7 @@ void __cdecl CL_Init(int localClientNum)
     Com_Printf(14, "----- Client Initialization -----\n");
     srand(Sys_MillisecondsRaw());
     Con_Init();
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\client\\client.h",
-            576,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     clientUIActives[0].connectionState = CA_DISCONNECTED;
     //CL_ResetLastGamePadEventTime(); // KISAKTODO
     cls.realtime = 0;

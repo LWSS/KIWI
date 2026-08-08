@@ -548,8 +548,7 @@ void __cdecl Profile_Unguard(int id)
     ProfileStack *prof_stack; // [esp+0h] [ebp-4h]
 
     prof_stack = (ProfileStack *)Sys_GetValue(0);
-    if (prof_stack->prof_guardpos <= 0)
-        MyAssertHandler(".\\universal\\profile.cpp", 516, 0, "%s", "prof_stack->prof_guardpos > 0");
+    iassert(prof_stack->prof_guardpos > 0);
     if (prof_stack->prof_guardstack[--prof_stack->prof_guardpos].id != id)
         MyAssertHandler(
             ".\\universal\\profile.cpp",
@@ -611,14 +610,7 @@ void __cdecl Profile_ResetCounters(int system)
     profileStackPos = 0;
     while (prof_stack->prof_ppStack != prof_stack->prof_pStack)
     {
-        if (profileStackPos >= 0x100)
-            MyAssertHandler(
-                ".\\universal\\profile.cpp",
-                416,
-                0,
-                "profileStackPos doesn't index ARRAY_COUNT( g_profileStack )\n\t%i not in [0, %i)",
-                profileStackPos,
-                256);
+        bcassert(profileStackPos, 0x100);
         g_profileStack[profileStackPos++] = Profile_EndInternal(0);
     }
     for (profileContext = 0; profileContext < 7; ++profileContext)
@@ -635,13 +627,7 @@ void __cdecl Profile_Recover(int id)
     ProfileStack *prof_stack; // [esp+0h] [ebp-4h]
 
     prof_stack = (ProfileStack *)Sys_GetValue(0);
-    if (prof_stack->prof_guardpos <= 0)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\src\\renderer\\../universal/profile.h",
-            355,
-            0,
-            "%s",
-            "prof_stack->prof_guardpos > 0");
+    iassert(prof_stack->prof_guardpos > 0);
     while (prof_stack->prof_guardpos > 0)
     {
         if (prof_stack->prof_guardstack[--prof_stack->prof_guardpos].id == id)
@@ -732,23 +718,10 @@ void __cdecl Profile_Guard(int id)
             "%s",
             "prof_stack->prof_guardpos == 0 || prof_stack->prof_guardstack[prof_stack->prof_guardpos - 1].ppStack <= prof_stack->prof_ppStack");
     }
-    if (prof_stack->prof_guardpos >= 0x20u)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\src\\renderer\\../universal/profile.h",
-            332,
-            0,
-            "prof_stack->prof_guardpos doesn't index ARRAY_COUNT( prof_stack->prof_guardstack )\n\t%i not in [0, %i)",
-            prof_stack->prof_guardpos,
-            32);
+    bcassert(prof_stack->prof_guardpos, 0x20u);
     for (i = 0; i < prof_stack->prof_guardpos; ++i)
     {
-        if (prof_stack->prof_guardstack[i].id == id)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\src\\renderer\\../universal/profile.h",
-                339,
-                0,
-                "%s",
-                "prof_stack->prof_guardstack[i].id != id");
+        iassert(prof_stack->prof_guardstack[i].id != id);
     }
     prof_stack->prof_guardstack[prof_stack->prof_guardpos].id = id;
     prof_stack->prof_guardstack[prof_stack->prof_guardpos++].ppStack = prof_stack->prof_ppStack;
@@ -767,21 +740,13 @@ ProfileScript *__cdecl Profile_GetScript()
 
 int __cdecl Profile_GetEnumParity(uint profEnum)
 {
-    if (profEnum >= 0x1B0)
-        MyAssertHandler(
-            ".\\universal\\profile.cpp",
-            474,
-            0,
-            "profEnum doesn't index ARRAY_COUNT( prof_enumSystems )\n\t%i not in [0, %i)",
-            profEnum,
-            432);
+    bcassert(profEnum, 0x1B0);
     return prof_parity[prof_enumSystems[profEnum]];
 }
 
 int __cdecl Profile_GetDisplayThread()
 {
-    if (!profile_thread)
-        MyAssertHandler(".\\universal\\profile.cpp", 668, 0, "%s", "profile_thread");
+    iassert(profile_thread);
     return profile_thread->current.integer;
 }
 
@@ -790,8 +755,7 @@ void __cdecl Profile_EndScripts(uint profileFlags)
 #if 0
     int profileIndex; // [esp+10h] [ebp-4h]
 
-    if (!profileFlags)
-        MyAssertHandler(".\\universal\\profile.cpp", 593, 0, "%s", "profileFlags");
+    iassert(profileFlags);
     profileIndex = 0;
     do
     {
@@ -886,8 +850,7 @@ void __cdecl Profile_BeginScripts(uint profileFlags)
     // KISAKTODO: profiler
     int profileIndex; // [esp+Ch] [ebp-4h]
 
-    if (!profileFlags)
-        MyAssertHandler(".\\universal\\profile.cpp", 557, 0, "%s", "profileFlags");
+    iassert(profileFlags);
     profileIndex = 0;
     do
     {

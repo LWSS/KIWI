@@ -37,10 +37,8 @@ void __cdecl CG_BuildItemList(int localClientNum, const snapshot_s *nextSnap)
     centity_s *cent; // [esp+0h] [ebp-Ch]
     int entIndex; // [esp+4h] [ebp-8h]
 
-    if (!nextSnap)
-        MyAssertHandler(".\\cgame_mp\\cg_predict_mp.cpp", 70, 0, "%s", "nextSnap");
-    if (!Sys_IsMainThread())
-        MyAssertHandler(".\\cgame_mp\\cg_predict_mp.cpp", 71, 0, "%s", "Sys_IsMainThread()");
+    iassert(nextSnap);
+    iassert(Sys_IsMainThread());
     CG_ClearItemList();
     cg_itemLocalClientNum = localClientNum;
     for (entIndex = 0; entIndex < nextSnap->numEntities; ++entIndex)

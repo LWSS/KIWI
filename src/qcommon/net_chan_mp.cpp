@@ -842,14 +842,7 @@ bool __cdecl Netchan_Transmit(netchan_t *chan, int length, char *data)
     {
         chan->unsentFragments = 1;
         chan->unsentLength = length;
-        if (chan->unsentBufferSize <= length)
-            MyAssertHandler(
-                ".\\qcommon\\net_chan_mp.cpp",
-                1228,
-                0,
-                "%s\n\t(length) = %i",
-                "(chan->unsentBufferSize > length)",
-                length);
+        vassert((chan->unsentBufferSize > length), "(length) = %i", length);
         Com_Memcpy((char *)chan->unsentBuffer, data, length);
         Netchan_TransmitNextFragment(chan);
         return 1;

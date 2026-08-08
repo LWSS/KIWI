@@ -191,8 +191,7 @@ const dvar_t *cg_cinematicFullscreen;
 
 const rectDef_s *__cdecl Window_GetRect(const windowDef_t *w)
 {
-    if (!w)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\cgame\\../ui/ui_utils_api.h", 36, 0, "%s", "w");
+    iassert(w);
     return &w->rect;
 }
 
@@ -531,8 +530,7 @@ void CG_RegisterDvars()
     cg_modPrvMruModels = Dvar_RegisterString("cg_modPrvMruModels", "", 1u, "");
     cg_modPrvMruAnims = Dvar_RegisterString("cg_modPrvMruAnims", "", 1u, "");
     cg_r_forceLod = Dvar_FindVar("r_forceLod");
-    if (!cg_r_forceLod)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_main.cpp", 490, 0, "%s", "cg_r_forceLod");
+    iassert(cg_r_forceLod);
     sv_znear = Dvar_RegisterFloat("sv_znear", 0.0, 0.0, 10000.0, 0, "Things closer than this aren't drawn.");
     DynEntCl_RegisterDvars();
     CG_OffhandRegisterDvars();
@@ -678,10 +676,8 @@ void __cdecl CG_GetDObjOrientation(int localClientNum, int dobjHandle, float (*a
             "%s\n\t(dobjHandle) = %i",
             "(dobjHandle >= 0 && dobjHandle < (((2176)) + 128))",
             dobjHandle);
-    if (!axis)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_main.cpp", 572, 0, "%s", "axis");
-    if (!origin)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_main.cpp", 573, 0, "%s", "origin");
+    iassert(axis);
+    iassert(origin);
     if (dobjHandle >= 2176)
     {
         if (dobjHandle - 2176 >= 128)
@@ -692,14 +688,7 @@ void __cdecl CG_GetDObjOrientation(int localClientNum, int dobjHandle, float (*a
                 "%s\n\t(dobjHandle) = %i",
                 "(dobjHandle >= ((2176)) && dobjHandle - ((2176)) < 128)",
                 dobjHandle);
-        if (localClientNum)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-                910,
-                0,
-                "%s\n\t(localClientNum) = %i",
-                "(localClientNum == 0)",
-                localClientNum);
+        vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
         AxisCopy((const mat3x3&)cgArray[0].viewModelAxis, (mat3x3&)axis);
         *origin = cgArray[0].viewModelAxis[3][0];
         origin[1] = cgArray[0].viewModelAxis[3][1];
@@ -747,14 +736,7 @@ unsigned int __cdecl CG_SoundEntityUseEq(SndEntHandle sndEnt)
 
 const playerState_s *__cdecl CG_GetPredictedPlayerState(int localClientNum)
 {
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            910,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     return &cgArray[0].predictedPlayerState;
 }
 
@@ -762,14 +744,7 @@ int __cdecl CG_IsValidRemoteInputState(int localClientNum)
 {
     int result; // r3
 
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            910,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     if (g_godModeRemoteInputValid)
         return 1;
     if (cgArray[0].predictedPlayerState.pm_type == PM_UFO)
@@ -953,14 +928,7 @@ void __cdecl CG_RegisterGraphics(int localClientNum, const char *mapname)
     const char *v12; // r29
     shellshock_parms_t *ShellshockParms; // r3
 
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            917,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     CG_DrawInformation(localClientNum);
     SCR_UpdateLoadScreen();
     ProfLoad_Begin("Register code assets");
@@ -1086,14 +1054,7 @@ void __cdecl CG_StartAmbient(int localClientNum)
     ConfigString = CL_GetConfigString(localClientNum, CS_AMBIENT);
     v3 = Info_ValueForKey(ConfigString, "n");
     v4 = Info_ValueForKey(ConfigString, "t");
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            910,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     v5 = v4;
     time = cgArray[0].time;
     v7 = atol(v5) - time;
@@ -1134,14 +1095,7 @@ void __cdecl CG_StopSoundAliasByName(int localClientNum, SndEntHandle entityNum,
 
 void __cdecl CG_StopClientSoundAliasByName(int localClientNum, const char *aliasName)
 {
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            910,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     SND_StopSoundAliasOnEnt((SndEntHandle)cgArray[0].nextSnap->ps.clientNum, aliasName);
 }
 
@@ -1153,12 +1107,9 @@ static void __cdecl CG_SubtitlePrint(int msec, const snd_alias_t *alias)
     long double v8; // fp2
     int v9; // r5
 
-    if (!alias)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_main.cpp", 1194, 0, "%s", "alias");
-    if (!cg_subtitleWidthStandard)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_main.cpp", 1195, 0, "%s", "cg_subtitleWidthStandard");
-    if (!cg_subtitleWidthWidescreen)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_main.cpp", 1196, 0, "%s", "cg_subtitleWidthWidescreen");
+    iassert(alias);
+    iassert(cg_subtitleWidthStandard);
+    iassert(cg_subtitleWidthWidescreen);
     v5 = cg_subtitleMinTime;
     if (!cg_subtitleMinTime)
     {
@@ -1260,14 +1211,7 @@ void __cdecl CG_LoadHudMenu(int localClientNum)
     v3 = Menus_FindByName(&cgDC, "Compass");
     if (v3)
     {
-        if (localClientNum)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-                917,
-                0,
-                "%s\n\t(localClientNum) = %i",
-                "(localClientNum == 0)",
-                localClientNum);
+        vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
         cgsArray[0].compassWidth = v3->window.rect.w;
         cgsArray[0].compassHeight = v3->window.rect.h;
     }
@@ -1321,14 +1265,7 @@ const char *__cdecl CG_GetTeamName(team_t team)
 
 const char *__cdecl CG_GetPlayerTeamName(int localClientNum)
 {
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\../client/client.h",
-            569,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     if (clientUIActives[0].connectionState >= CA_ACTIVE)
         return "TEAM_ALLIES";
     else
@@ -1337,14 +1274,7 @@ const char *__cdecl CG_GetPlayerTeamName(int localClientNum)
 
 const char *__cdecl CG_GetPlayerOpposingTeamName(int localClientNum)
 {
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\../client/client.h",
-            569,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     if (clientUIActives[0].connectionState >= CA_ACTIVE)
         return "TEAM_AXIS";
     else
@@ -1353,24 +1283,10 @@ const char *__cdecl CG_GetPlayerOpposingTeamName(int localClientNum)
 
 bool __cdecl CG_IsPlayerDead(int localClientNum)
 {
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\../client/client.h",
-            569,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     if (clientUIActives[0].connectionState < CA_ACTIVE)
         return 0;
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            910,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     return cgArray[0].nextSnap->ps.stats[0] == 0;
 }
 
@@ -1378,14 +1294,7 @@ int __cdecl CG_GetPlayerClipAmmoCount(int localClientNum)
 {
     playerState_s *p_ps; // r31
 
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            910,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     p_ps = &cgArray[0].nextSnap->ps;
     return p_ps->ammoclip[BG_ClipForWeapon(cgArray[0].nextSnap->ps.weapon)];
 }
@@ -1564,14 +1473,7 @@ void __cdecl CG_FreeWeapons(int localClientNum)
         {
             v4 = CG_WeaponDObjHandle(v2);
             Com_SafeClientDObjFree(v4, localClientNum);
-            if (localClientNum)
-                MyAssertHandler(
-                    "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-                    924,
-                    0,
-                    "%s\n\t(localClientNum) = %i",
-                    "(localClientNum == 0)",
-                    localClientNum);
+            vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
             if (*p_tree)
             {
                 XAnimFreeTree(*p_tree, 0);
@@ -1633,14 +1535,7 @@ int __cdecl CG_PlayClientSoundAlias(int localClientNum, snd_alias_list_t *aliasL
     snd_alias_t *v6; // r31
     int v8; // r30
 
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            910,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     origin = cgArray[0].nextSnap->ps.origin;
     clientNum = cgArray[0].nextSnap->ps.clientNum;
     v5 = Com_PickSoundAliasFromList(aliasList);
@@ -1660,14 +1555,7 @@ int __cdecl CG_PlayClientSoundAliasByName(int localClientNum, const char *aliasn
     snd_alias_t *v6; // r31
     int v8; // r30
 
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            910,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     origin = cgArray[0].nextSnap->ps.origin;
     clientNum = cgArray[0].nextSnap->ps.clientNum;
     v5 = CL_PickSoundAlias(aliasname);

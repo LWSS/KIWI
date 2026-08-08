@@ -112,8 +112,7 @@ int __cdecl G_LocalizedStringIndex(const char *string)
     unsigned int v11; // r3
     const char *v12; // r3
 
-    if (!string)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_utils.cpp", 170, 0, "%s", "string");
+    iassert(string);
     if (!*string)
         return 0;
     v3 = origErrorMsg;
@@ -238,8 +237,7 @@ int __cdecl G_ModelIndex(const char *name)
     const char *v6; // r3
 
     //Profile_Begin(248);
-    if (!name)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_utils.cpp", 240, 0, "%s", "name");
+    iassert(name);
     if (!*name)
     {
         //Profile_EndInternal(0);
@@ -282,10 +280,8 @@ int __cdecl G_ModelIndex(const char *name)
 
 XModel *__cdecl G_GetModel(int index)
 {
-    if (index <= 0)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_utils.cpp", 282, 0, "%s", "index > 0");
-    if (index >= 512)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_utils.cpp", 283, 0, "%s", "index < MAX_MODELS");
+    iassert(index > 0);
+    iassert(index < MAX_MODELS);
     return cached_models[index];
 }
 
@@ -294,10 +290,8 @@ bool __cdecl G_GetModelBounds(int index, float *outMins, float *outMaxs)
     const XModel *Model; // r29
     float v8[8][3]; // [sp+50h] [-60h] BYREF
 
-    if (!outMins)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_utils.cpp", 293, 0, "%s", "outMins");
-    if (!outMaxs)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_utils.cpp", 294, 0, "%s", "outMaxs");
+    iassert(outMins);
+    iassert(outMaxs);
     Model = G_GetModel(index);
     if (!Model)
         MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_utils.cpp", 296, 0, "%s", "xmodel");
@@ -310,8 +304,7 @@ int __cdecl G_XModelBad(int index)
 {
     const XModel *Model; // r3
 
-    if (!index)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_utils.cpp", 309, 0, "%s", "index");
+    iassert(index);
     Model = G_GetModel(index);
     return XModelBad(Model);
 }
@@ -330,10 +323,8 @@ void __cdecl G_EntityCentroidWithBounds(const gentity_s *ent, const float *mins,
     float v10[4]; // [sp+50h] [-70h] BYREF
     float v11[8][3]; // [sp+60h] [-60h] BYREF
 
-    if (!ent)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_utils.cpp", 323, 0, "%s", "ent");
-    if (!centroid)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_utils.cpp", 324, 0, "%s", "centroid");
+    iassert(ent);
+    iassert(centroid);
     AnglesToAxis(ent->r.currentAngles, v11);
     v8 = (float)(mins[2] + maxs[2]);
     v9 = (float)((float)(mins[1] + maxs[1]) * (float)0.5);
@@ -353,10 +344,8 @@ void __cdecl G_EntityCentroid(const gentity_s *ent, float *centroid)
     float v6[4]; // [sp+50h] [-60h] BYREF
     float v7[6][3]; // [sp+60h] [-50h] BYREF
 
-    if (!ent)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_utils.cpp", 340, 0, "%s", "ent");
-    if (!centroid)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_utils.cpp", 341, 0, "%s", "centroid");
+    iassert(ent);
+    iassert(centroid);
     AnglesToAxis(ent->r.currentAngles, v7);
     v4 = ent->r.mins[2];
     v5 = (float)(ent->r.mins[1] + ent->r.maxs[1]);
@@ -371,23 +360,14 @@ void __cdecl G_EntityCentroid(const gentity_s *ent, float *centroid)
 
 int __cdecl G_EffectIndex(const char *name)
 {
-    if (!name)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_utils.cpp", 357, 0, "%s", "name");
-    if (!I_strncmp(name, "fx/", 3))
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\g_utils.cpp",
-            358,
-            0,
-            "%s\n\t(name) = %s",
-            "(I_strncmp( name, \"fx/\", 3 ))",
-            name);
+    iassert(name);
+    vassert((I_strncmp( name, "fx/", 3 )), "(name) = %s", name);
     return G_FindConfigstringIndex(name, 2147, 100, level.initializing, "effect"); // CS_EFFECT_NAMES (PC SP, was Xbox 2179)
 }
 
 int __cdecl G_ShellShockIndex(const char *name)
 {
-    if (!name)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_utils.cpp", 365, 0, "%s", "name");
+    iassert(name);
     return G_FindConfigstringIndex(name, 2503, 16, 1, 0); // CS_SHELLSHOCKS (PC SP, was Xbox 2535)
 }
 
@@ -395,22 +375,8 @@ unsigned int __cdecl G_SoundAliasIndexTransientAdvance(unsigned __int16 aliasInd
 {
     unsigned int v4; // r31
 
-    if (aliasIndex < 0x100u || aliasIndex >= 0x200u)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\g_utils.cpp",
-            372,
-            0,
-            "%s\n\t(aliasIndex) = %i",
-            "(aliasIndex >= 256 && aliasIndex < 512)",
-            aliasIndex);
-    if (offset <= 0 || offset >= 256)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\g_utils.cpp",
-            373,
-            0,
-            "%s\n\t(offset) = %i",
-            "(offset > 0 && offset < 512 - 256)",
-            offset);
+    vassert((aliasIndex >= 256 && aliasIndex < 512), "(aliasIndex) = %i", aliasIndex);
+    vassert((offset > 0 && offset < 512 - 256), "(offset) = %i", offset);
     v4 = (unsigned __int16)(aliasIndex + offset);
     if (v4 >= 0x200)
         v4 = (unsigned __int16)(v4 - 256);
@@ -442,8 +408,7 @@ unsigned int __cdecl G_SoundAliasIndexTransient(const char *name)
     unsigned __int16 v15; // r31
     unsigned int v16; // r31
 
-    if (!name)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_utils.cpp", 392, 0, "%s", "name");
+    iassert(name);
     if (!*name)
         return 0;
     soundAliasFirst = level.soundAliasFirst;
@@ -604,8 +569,7 @@ unsigned int __cdecl G_SoundAliasIndexTransient(const char *name)
 
 int __cdecl G_SoundAliasIndexPermanent(const char *name)
 {
-    if (!name)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_utils.cpp", 424, 0, "%s", "name");
+    iassert(name);
     return (unsigned __int16)G_FindConfigstringIndex(name, 1635, 256, 1, 0);
 }
 
@@ -679,27 +643,13 @@ void __cdecl G_ClearDemoEntities()
                     if (!pTurretInfo->inuse)
                         MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_utils.cpp", 501, 0, "%s", "ent->pTurretInfo->inuse");
                     G_FreeTurret(ent);
-                    if (ent->pTurretInfo)
-                        MyAssertHandler(
-                            "c:\\trees\\cod3\\cod3src\\src\\game\\g_utils.cpp",
-                            503,
-                            0,
-                            "%s",
-                            "ent->pTurretInfo == NULL");
+                    iassert(ent->pTurretInfo == NULL);
                 }
                 ent->r.inuse = 0;
             }
-            if (ent->actor)
-                MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_utils.cpp", 509, 0, "%s", "ent->actor == NULL");
-            if (ent->sentient && !ent->client)
-                MyAssertHandler(
-                    "c:\\trees\\cod3\\cod3src\\src\\game\\g_utils.cpp",
-                    510,
-                    0,
-                    "%s",
-                    "(ent->sentient == NULL) || (ent->client != NULL)");
-            if (ent->scr_vehicle)
-                MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_utils.cpp", 511, 0, "%s", "ent->scr_vehicle == NULL");
+            iassert(ent->actor == NULL);
+            iassert((ent->sentient == NULL) || (ent->client != NULL));
+            iassert(ent->scr_vehicle == NULL);
             ++v0;
         }
     }
@@ -715,8 +665,7 @@ void __cdecl G_UpdateDemoEntity(entityState_s *es)
     actor_s *v7; // r3
     scr_vehicle_s *v8; // r11
 
-    if (!es)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_utils.cpp", 522, 0, "%s", "es");
+    iassert(es);
     number = es->number;
     if (number >= 0x880)
         MyAssertHandler(
@@ -815,13 +764,7 @@ unsigned int __cdecl G_GetEntAnimTreeId(int entnum)
     unsigned int v5; // r31
     const XAnim_s *Anims; // r31
 
-    if (entnum < 0 || entnum >= level.num_entities)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\g_utils.cpp",
-            579,
-            0,
-            "%s",
-            "entnum >= 0 && entnum < level.num_entities");
+    iassert(entnum >= 0 && entnum < level.num_entities);
     v2 = &g_entities[entnum];
     eType = v2->s.eType;
     if (eType != 14)
@@ -864,13 +807,7 @@ XAnimTree_s *__cdecl G_GetEntAnimTreeForId(int entnum, unsigned int id)
     XAnim_s *v9; // r31
     XAnimTree_s *SmallTree; // r3
 
-    if (entnum < 0 || entnum >= level.num_entities)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\g_utils.cpp",
-            616,
-            0,
-            "%s",
-            "entnum >= 0 && entnum < level.num_entities");
+    iassert(entnum >= 0 && entnum < level.num_entities);
     v4 = &g_entities[entnum];
     eType = v4->s.eType;
     if (eType != 14)
@@ -879,13 +816,7 @@ XAnimTree_s *__cdecl G_GetEntAnimTreeForId(int entnum, unsigned int id)
             goto LABEL_14;
         if (!v4->s.lerp.u.actor.species)
         {
-            if (g_scr_data.actorCorpseInfo[id].entnum != entnum)
-                MyAssertHandler(
-                    "c:\\trees\\cod3\\cod3src\\src\\game\\g_utils.cpp",
-                    623,
-                    0,
-                    "%s",
-                    "g_scr_data.actorCorpseInfo[id].entnum == entnum");
+            iassert(g_scr_data.actorCorpseInfo[id].entnum == entnum);
             return G_GetActorCorpseIndexAnimTree(id);
         }
     }
@@ -1177,10 +1108,8 @@ void __cdecl G_UpdateViewAngleClamp(gclient_s *client, const float *worldAnglesC
     double v8; // fp13
     double v9; // fp0
 
-    if (!client)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_utils.cpp", 1501, 0, "%s", "client");
-    if (!worldAnglesCenter)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_utils.cpp", 1502, 0, "%s", "worldAnglesCenter");
+    iassert(client);
+    iassert(worldAnglesCenter);
     v4 = client->linkAnglesMaxClamp[0];
     v5 = (float)((float)(client->linkAnglesMaxClamp[0] - client->linkAnglesMinClamp[0]) * (float)0.5);
     client->ps.viewAngleClampRange[0] = (float)(client->linkAnglesMaxClamp[0] - client->linkAnglesMinClamp[0])
@@ -1899,8 +1828,7 @@ void __cdecl G_LoadFreeEntities(unsigned __int8 *buf)
     unsigned __int8 *v4; // r9
     unsigned __int8 v5; // r10
 
-    if (!buf)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_utils.cpp", 2608, 0, "%s", "buf");
+    iassert(buf);
     v2 = *(_BYTE **)buf;
     v3 = *(unsigned int *)buf == 0;
     level.firstFreeEnt = *(gentity_s **)buf;
@@ -1938,21 +1866,13 @@ void __cdecl G_AddEvent(gentity_s *ent, unsigned int event, unsigned int eventPa
     v3 = event;
     if (event)
     {
-        if (event >= 0x100)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\g_utils.cpp",
-                2690,
-                0,
-                "event doesn't index 256\n\t%i not in [0, %i)",
-                event,
-                256);
+        bcassert(event, 0x100);
     }
     else
     {
         MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_utils.cpp", 2689, 0, "%s", "event");
     }
-    if (ent->s.eType >= 0x11u)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_utils.cpp", 2692, 0, "%s", "ent->s.eType < ET_EVENTS");
+    iassert(ent->s.eType < ET_EVENTS);
     client = ent->client;
     if (client)
     {
@@ -2027,22 +1947,9 @@ void __cdecl G_PlaySoundAliasWithNotify(
     unsigned int event,
     unsigned int notifyevent)
 {
-    if (!ent)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_utils.cpp", 2773, 0, "%s", "ent");
-    if (event != 3 && event != 4)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\g_utils.cpp",
-            2774,
-            0,
-            "%s",
-            "event == EV_SOUND_ALIAS || event == EV_SOUND_ALIAS_AS_MASTER");
-    if (notifyevent != 42 && notifyevent != 43)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\g_utils.cpp",
-            2775,
-            0,
-            "%s",
-            "notifyevent == EV_SOUND_ALIAS_NOTIFY || notifyevent == EV_SOUND_ALIAS_NOTIFY_AS_MASTER");
+    iassert(ent);
+    iassert(event == EV_SOUND_ALIAS || event == EV_SOUND_ALIAS_AS_MASTER);
+    iassert(notifyevent == EV_SOUND_ALIAS_NOTIFY || notifyevent == EV_SOUND_ALIAS_NOTIFY_AS_MASTER);
     if (index)
     {
         if (notifyString)
@@ -2059,25 +1966,14 @@ void __cdecl G_PlaySoundAliasWithNotify(
 
 void __cdecl G_PlaySoundAlias(gentity_s *ent, unsigned __int16 index)
 {
-    if (!ent)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_utils.cpp", 2773, 0, "%s", "ent");
+    iassert(ent);
     if (index)
         G_AddEvent(ent, EV_SOUND_ALIAS, index);
 }
 
 void __cdecl G_SetOrigin(gentity_s *ent, float *origin)
 {
-    if ((COERCE_UNSIGNED_INT(*origin) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(origin[1]) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(origin[2]) & 0x7F800000) == 0x7F800000)
-    {
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\g_utils.cpp",
-            2814,
-            0,
-            "%s",
-            "!IS_NAN((origin)[0]) && !IS_NAN((origin)[1]) && !IS_NAN((origin)[2])");
-    }
+    nanassertvec3(origin);
     ent->s.lerp.pos.trBase[0] = *origin;
     ent->s.lerp.pos.trBase[1] = origin[1];
     ent->s.lerp.pos.trBase[2] = origin[2];
@@ -2237,8 +2133,7 @@ void __cdecl G_CalcTagParentAxis(gentity_s *ent, float (*parentAxis)[3])
 
     //Profile_Begin(317);
     tagInfo = ent->tagInfo;
-    if (!tagInfo)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_utils.cpp", 1375, 0, "%s", "tagInfo");
+    iassert(tagInfo);
     parent = tagInfo->parent;
     if (!tagInfo->parent)
         MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_utils.cpp", 1377, 0, "%s", "parent");
@@ -2272,17 +2167,7 @@ void __cdecl G_CalcTagParentAxis(gentity_s *ent, float (*parentAxis)[3])
         v8 = &(*parentAxis)[9];
         MatrixTransformVector43(v7->trans, (const mat4x3&)v10, &(*parentAxis)[9]);
     }
-    if ((COERCE_UNSIGNED_INT((*parentAxis)[0]) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT((*parentAxis)[1]) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT((*parentAxis)[2]) & 0x7F800000) == 0x7F800000)
-    {
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\g_utils.cpp",
-            1399,
-            0,
-            "%s",
-            "!IS_NAN((parentAxis[0])[0]) && !IS_NAN((parentAxis[0])[1]) && !IS_NAN((parentAxis[0])[2])");
-    }
+    nanassertvec3(parentAxis[0]);
     if ((COERCE_UNSIGNED_INT((*parentAxis)[3]) & 0x7F800000) == 0x7F800000
         || (COERCE_UNSIGNED_INT((*parentAxis)[4]) & 0x7F800000) == 0x7F800000
         || (COERCE_UNSIGNED_INT((*parentAxis)[5]) & 0x7F800000) == 0x7F800000)
@@ -2325,8 +2210,7 @@ void __cdecl G_CalcTagParentRelAxis(gentity_s *ent, float (*parentRelAxis)[3])
     float v5[6][3]; // [sp+50h] [-50h] BYREF
 
     tagInfo = ent->tagInfo;
-    if (!tagInfo)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_utils.cpp", 1419, 0, "%s", "tagInfo");
+    iassert(tagInfo);
     G_CalcTagParentAxis(ent, v5);
     // Same pointer-vs-pointee gotcha as G_CalcTagParentAxis: parentRelAxis is
     // `float (*)[3]` and `(mat4x3&)parentRelAxis` would treat the 4-byte pointer
@@ -2344,8 +2228,7 @@ void __cdecl G_CalcTagAxis(gentity_s *ent, int bAnglesOnly)
     G_CalcTagParentAxis(ent, v7);
     AnglesToAxis(ent->r.currentAngles, (float (*)[3])v5);
     tagInfo = ent->tagInfo;
-    if (!tagInfo)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_utils.cpp", 1443, 0, "%s", "tagInfo");
+    iassert(tagInfo);
     if (bAnglesOnly)
     {
         MatrixTranspose((const mat3x3&)v7, (mat3x3&)v6);
@@ -2376,8 +2259,7 @@ void __cdecl G_SetFixedLink(gentity_s *ent, unsigned int eAngles)
 
     G_CalcTagParentAxis(ent, v15);
     tagInfo = ent->tagInfo;
-    if (!tagInfo)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_utils.cpp", 1473, 0, "%s", "tagInfo");
+    iassert(tagInfo);
     if (eAngles)
     {
         if (eAngles == 1)
@@ -2607,8 +2489,7 @@ gentity_s *__cdecl G_TempEntity(float *origin, int event)
 
 void __cdecl G_PlaySoundAliasAtPoint(float *origin, unsigned __int16 index)
 {
-    if (!origin)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_utils.cpp", 2756, 0, "%s", "origin");
+    iassert(origin);
     if (index)
         G_TempEntity(origin, 3)->s.eventParm = index;
 }
@@ -2725,8 +2606,7 @@ void __cdecl G_UpdateTagInfo(gentity_s *ent, int bParentHasDObj)
 
     //Profile_Begin(256);
     tagInfo = ent->tagInfo;
-    if (!tagInfo)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_utils.cpp", 1311, 0, "%s", "tagInfo");
+    iassert(tagInfo);
     if (tagInfo->name)
     {
         if (!bParentHasDObj
@@ -2795,8 +2675,7 @@ void __cdecl G_FreeEntity(gentity_s *ed)
         Path_ConnectPathsForEntity(ed);
     if ((ed->flags & 0x200000) != 0)
         Path_RemoveBadPlaceEntity(ed);
-    if (ed->disconnectedLinks)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_utils.cpp", 2421, 0, "%s", "!ed->disconnectedLinks");
+    iassert(!ed->disconnectedLinks);
     scripted = ed->scripted;
     if (scripted)
     {
@@ -2834,15 +2713,13 @@ void __cdecl G_FreeEntity(gentity_s *ed)
     if (actor)
     {
         Actor_Free(actor);
-        if (ed->actor)
-            MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_utils.cpp", 2450, 0, "%s", "ed->actor == NULL");
+        iassert(ed->actor == NULL);
     }
     sentient = ed->sentient;
     if (sentient)
     {
         Sentient_Free(sentient);
-        if (ed->sentient)
-            MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_utils.cpp", 2456, 0, "%s", "ed->sentient == NULL");
+        iassert(ed->sentient == NULL);
     }
     else
     {
@@ -2869,21 +2746,17 @@ void __cdecl G_FreeEntity(gentity_s *ed)
         if (!pTurretInfo->inuse)
             MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_utils.cpp", 2482, 0, "%s", "ed->pTurretInfo->inuse");
         G_FreeTurret(ed);
-        if (ed->pTurretInfo)
-            MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_utils.cpp", 2484, 0, "%s", "ed->pTurretInfo == NULL");
+        iassert(ed->pTurretInfo == NULL);
     }
     if (ed->scr_vehicle)
     {
         G_FreeVehicle(ed);
-        if (ed->scr_vehicle)
-            MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_utils.cpp", 2490, 0, "%s", "ed->scr_vehicle == NULL");
+        iassert(ed->scr_vehicle == NULL);
     }
     EntHandleDissociate(ed);
-    if (!ed->r.inuse)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_utils.cpp", 2495, 0, "%s", "ed->r.inuse");
+    iassert(ed->r.inuse);
     Scr_FreeEntity(ed);
-    if (ed->classname)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_utils.cpp", 2498, 0, "%s", "ed->classname == 0");
+    iassert(ed->classname == 0);
     useCount = ed->s.lerp.useCount;
     memset(ed, 0, sizeof(gentity_s));
     if (ed - level.gentities >= 1)
@@ -3010,8 +2883,7 @@ int __cdecl G_EntDetach(gentity_s *ent, const char *modelName, unsigned int tagN
     unsigned int v18; // r10
 
     //Profile_Begin(250);
-    if (!tagName)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_utils.cpp", 977, 0, "%s", "tagName");
+    iassert(tagName);
     LowercaseString = SL_FindLowercaseString(modelName);
     v7 = LowercaseString;
     if (!LowercaseString || LowercaseString == scr_const._)
@@ -3113,18 +2985,10 @@ int __cdecl G_EntLinkToInternal(gentity_s *ent, gentity_s *parent, unsigned int 
     int pm_type; // r10
     float v16[10][3]; // [sp+50h] [-80h] BYREF
 
-    if (!parent)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_utils.cpp", 1061, 0, "%s", "parent");
-    if ((ent->flags & 0x800) == 0)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\g_utils.cpp",
-            1062,
-            0,
-            "%s",
-            "ent->flags & FL_SUPPORTS_LINKTO");
+    iassert(parent);
+    iassert(ent->flags & FL_SUPPORTS_LINKTO);
     G_EntUnlink(ent);
-    if (ent->tagInfo)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_utils.cpp", 1066, 0, "%s", "!ent->tagInfo");
+    iassert(!ent->tagInfo);
     if (tagName)
     {
         if (!SV_DObjExists(parent))
@@ -3252,15 +3116,8 @@ int __cdecl G_EntAttach(gentity_s *ent, const char *modelName, unsigned int tagN
     int v12; // r31
 
     //Profile_Begin(249);
-    if (!tagName)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_utils.cpp", 930, 0, "%s", "tagName");
-    if (G_EntDetach(ent, modelName, tagName))
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\g_utils.cpp",
-            933,
-            0,
-            "%s",
-            "!G_EntDetach( ent, modelName, tagName )");
+    iassert(tagName);
+    iassert(!G_EntDetach( ent, modelName, tagName ));
     v8 = 0;
     for (i = ent->attachModelNames; *i; ++i)
     {

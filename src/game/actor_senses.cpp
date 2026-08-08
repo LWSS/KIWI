@@ -79,18 +79,9 @@ int __cdecl Actor_CanSeePointFrom(
     double v12; // fp12
     double v13; // fp0
 
-    if (fMaxDistSqrd < 0.0)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\actor_senses.cpp",
-            100,
-            0,
-            "%s\n\t(fMaxDistSqrd) = %g",
-            "(fMaxDistSqrd >= 0)",
-            fMaxDistSqrd);
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_senses.cpp", 101, 0, "%s", "self");
-    if (!self->ent)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_senses.cpp", 102, 0, "%s", "self->ent");
+    vassert((fMaxDistSqrd >= 0), "(fMaxDistSqrd) = %g", fMaxDistSqrd);
+    iassert(self);
+    iassert(self->ent);
     if (fMaxDistSqrd == 0.0)
         return Actor_SightTrace(self, vStart, vEnd, ignoreEntityNum);
     v11 = (float)(vEnd[2] - vStart[2]);
@@ -168,12 +159,9 @@ int __cdecl Actor_CanShootFrom(actor_s *self, const float *vTarget, const float 
     bool v12; // zf
     trace_t v13[2]; // [sp+50h] [-60h] BYREF
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_senses.cpp", 572, 0, "%s", "self");
-    if (!self->ent)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_senses.cpp", 573, 0, "%s", "self->ent");
-    if (!self->sentient)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_senses.cpp", 574, 0, "%s", "self->sentient");
+    iassert(self);
+    iassert(self->ent);
+    iassert(self->sentient);
     v6 = (float)(vFrom[2] - vTarget[2]);
     v7 = (float)(vFrom[1] - vTarget[1]);
     if ((float)((float)((float)v7 * (float)v7)
@@ -209,10 +197,8 @@ void __cdecl Actor_UpdateLastKnownPos(actor_s *self, sentient_s *other)
     char *v5; // r11
     char *v6; // r31
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_senses.cpp", 743, 0, "%s", "self");
-    if (!other)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_senses.cpp", 744, 0, "%s", "other");
+    iassert(self);
+    iassert(other);
     sentients = level.sentients;
     if (other < level.sentients || other >= &level.sentients[33])
     {
@@ -304,10 +290,8 @@ void __cdecl Actor_UpdateEyeInformation(actor_s *self)
 
 void __cdecl Actor_GetEyePosition(actor_s *self, float *vEyePosOut)
 {
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_senses.cpp", 843, 0, "%s", "self");
-    if (!vEyePosOut)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_senses.cpp", 844, 0, "%s", "vEyePosOut");
+    iassert(self);
+    iassert(vEyePosOut);
     Actor_UpdateEyeInformation(self);
     *vEyePosOut = self->eyeInfo.pos[0];
     vEyePosOut[1] = self->eyeInfo.pos[1];
@@ -322,10 +306,8 @@ void __cdecl Actor_GetDebugEyePosition(actor_s *self, float *vEyePosOut)
     float *absmax; // r11
     double v8; // fp0
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_senses.cpp", 870, 0, "%s", "self");
-    if (!vEyePosOut)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_senses.cpp", 871, 0, "%s", "vEyePosOut");
+    iassert(self);
+    iassert(vEyePosOut);
     *vEyePosOut = self->eyeInfo.pos[0];
     ent = self->ent;
     v5 = 0;
@@ -351,10 +333,8 @@ void __cdecl Actor_GetDebugEyePosition(actor_s *self, float *vEyePosOut)
 
 void __cdecl Actor_GetEyeDirection(actor_s *self, float *vEyeDir)
 {
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_senses.cpp", 896, 0, "%s", "self");
-    if (!vEyeDir)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_senses.cpp", 897, 0, "%s", "vEyeDir");
+    iassert(self);
+    iassert(vEyeDir);
     Actor_UpdateEyeInformation(self);
     *vEyeDir = self->eyeInfo.dir[0];
     vEyeDir[1] = self->eyeInfo.dir[1];
@@ -363,10 +343,8 @@ void __cdecl Actor_GetEyeDirection(actor_s *self, float *vEyeDir)
 
 void __cdecl Actor_GetEyeOffset(actor_s *self, float *vEyePosOut)
 {
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_senses.cpp", 913, 0, "%s", "self");
-    if (!vEyePosOut)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_senses.cpp", 914, 0, "%s", "vEyePosOut");
+    iassert(self);
+    iassert(vEyePosOut);
     *vEyePosOut = 0.0;
     vEyePosOut[1] = 0.0;
     vEyePosOut[2] = 64.0;
@@ -382,8 +360,7 @@ int __cdecl Actor_GetMuzzleInfo(actor_s *self, float *vOrigin, float *vForward)
     double v12; // fp9
     float v13[28]; // [sp+50h] [-70h] BYREF
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_senses.cpp", 931, 0, "%s", "self");
+    iassert(self);
     if (self->muzzleInfo.time != level.time)
     {
         //Profile_Begin(238);
@@ -407,8 +384,7 @@ int __cdecl Actor_GetMuzzleInfo(actor_s *self, float *vOrigin, float *vForward)
         self->muzzleInfo.dir[2] = v12;
         //Profile_EndInternal(0);
     }
-    if (!vOrigin)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_senses.cpp", 950, 0, "%s", "vOrigin");
+    iassert(vOrigin);
     *vOrigin = self->muzzleInfo.pos[0];
     vOrigin[1] = self->muzzleInfo.pos[1];
     vOrigin[2] = self->muzzleInfo.pos[2];
@@ -501,12 +477,9 @@ void __cdecl Actor_UpdateVisCache(actor_s *self, const gentity_s *ent, sentient_
     bool v8; // r31
     int number; // r5
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_senses.cpp", 265, 0, "%s", "self");
-    if (!ent)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_senses.cpp", 266, 0, "%s", "ent");
-    if (!pInfo)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_senses.cpp", 267, 0, "%s", "pInfo");
+    iassert(self);
+    iassert(ent);
+    iassert(pInfo);
     v8 = pInfo->VisCache.bVisible;
     VisCache_Update(&pInfo->VisCache, bVisible);
     if (bVisible)

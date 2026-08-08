@@ -209,14 +209,10 @@ void __cdecl OffHandFlash(const cg_s *cgameGlob, const float *base_color, float 
     float fade; // [esp+Ch] [ebp-8h]
     float flashTime; // [esp+10h] [ebp-4h]
 
-    if (!base_color)
-        MyAssertHandler(".\\cgame\\offhandweapons.cpp", 147, 0, "%s", "base_color");
-    if (!out_color)
-        MyAssertHandler(".\\cgame\\offhandweapons.cpp", 148, 0, "%s", "out_color");
-    if (!hud_flash_time_offhand)
-        MyAssertHandler(".\\cgame\\offhandweapons.cpp", 149, 0, "%s", "hud_flash_time_offhand");
-    if (!hud_flash_period_offhand)
-        MyAssertHandler(".\\cgame\\offhandweapons.cpp", 150, 0, "%s", "hud_flash_period_offhand");
+    iassert(base_color);
+    iassert(out_color);
+    iassert(hud_flash_time_offhand);
+    iassert(hud_flash_period_offhand);
     *out_color = *base_color;
     out_color[1] = base_color[1];
     out_color[2] = base_color[2];
@@ -224,8 +220,7 @@ void __cdecl OffHandFlash(const cg_s *cgameGlob, const float *base_color, float 
     flashTime = (float)(cgameGlob->time - cgameGlob->offhandFlashTime) / 1000.0f;
     if (hud_flash_time_offhand->current.value > flashTime)
     {
-        if (hud_flash_period_offhand->current.value <= 0.0f)
-            MyAssertHandler(".\\cgame\\offhandweapons.cpp", 157, 0, "%s", "hud_flash_period_offhand->current.value > 0.0f");
+        iassert(hud_flash_period_offhand->current.value > 0.0f);
         phi = flashTime * 6.283185482025146f / hud_flash_period_offhand->current.value;
         v3 = cos(phi);
         fade = v3 * 0.5f + 0.5f;
@@ -249,8 +244,7 @@ int __cdecl CalcOffHandAmmo(const playerState_s *predictedPlayerState, int weapo
         if (Com_BitCheckAssert(predictedPlayerState->weapons, weapIndex, 16))
         {
             weapDef = BG_GetWeaponDef(weapIndex);
-            if (!weapDef)
-                MyAssertHandler(".\\cgame\\offhandweapons.cpp", 186, 0, "%s", "weapDef");
+            iassert(weapDef);
             if (weapDef->offhandClass == weaponType)
                 ammoCount += predictedPlayerState->ammoclip[BG_ClipForWeapon(weapIndex)];
         }
@@ -393,8 +387,7 @@ void __cdecl CG_PrepOffHand(int localClientNum, const entityState_s *ent, uint w
 {
     WeaponDef *weapDef; // [esp+0h] [ebp-4h]
 
-    if (ent->eType != ET_PLAYER)
-        MyAssertHandler(".\\cgame\\offhandweapons.cpp", 339, 0, "%s", "ent->eType == ET_PLAYER");
+    iassert(ent->eType == ET_PLAYER);
     if (!weaponIndex || weaponIndex >= BG_GetNumWeapons())
         MyAssertHandler(
             ".\\cgame\\offhandweapons.cpp",
@@ -420,14 +413,7 @@ void __cdecl CG_UseOffHand(int localClientNum, const centity_s *cent, uint weapo
     iassert(cent->nextState.eType == ET_PLAYER);
     iassert(weaponIndex > 0 && weaponIndex < BG_GetNumWeapons());
 
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\src\\cgame\\../cgame_mp/cg_local_mp.h",
-            1095,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     weapInfo = &cg_weaponsArray[0][weaponIndex];
     weapDef = BG_GetWeaponDef(weaponIndex);
     if (weapDef->fireSound)

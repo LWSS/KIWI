@@ -604,22 +604,8 @@ uint  R_CylinderSurfaces(
     //v13 = a1;
     //v14 = retaddr;
     iassert( rgp.world );
-    if (rgp.world->dpvsPlanes.cellCount > 1024)
-        MyAssertHandler(
-            ".\\r_marks.cpp",
-            987,
-            0,
-            "%s\n\t(rgp.world->dpvsPlanes.cellCount) = %i",
-            "(rgp.world->dpvsPlanes.cellCount <= (1024))",
-            rgp.world->dpvsPlanes.cellCount);
-    if (rgp.world->cellBitsCount > 128)
-        MyAssertHandler(
-            ".\\r_marks.cpp",
-            988,
-            0,
-            "%s\n\t(rgp.world->cellBitsCount) = %i",
-            "(rgp.world->cellBitsCount <= ((1024) >> 3))",
-            rgp.world->cellBitsCount);
+    vassert((rgp.world->dpvsPlanes.cellCount <= (1024)), "(rgp.world->dpvsPlanes.cellCount) = %i", rgp.world->dpvsPlanes.cellCount);
+    vassert((rgp.world->cellBitsCount <= ((1024) >> 3)), "(rgp.world->cellBitsCount) = %i", rgp.world->cellBitsCount);
     Com_Memset(v12, 0, rgp.world->cellBitsCount);
     surfCount = 0;
     R_CylinderSurfaces_r(
@@ -957,8 +943,7 @@ void __cdecl R_MarkUtil_GetDObjAnimMatAndHideParts(
     DObjLock((DObj_s*)dobj);
     *outBoneMtxList = CG_DObjCalcPose(pose, dobj, partBits);
     DObjUnlock((DObj_s*)dobj);
-    if (!DObjSkelAreBonesUpToDate(dobj, partBits))
-        MyAssertHandler(".\\r_marks.cpp", 1726, 0, "%s", "DObjSkelAreBonesUpToDate( dobj, partBits )");
+    iassert(DObjSkelAreBonesUpToDate( dobj, partBits ));
     iassert( *outBoneMtxList );
     DObjGetHidePartBits(dobj, outHidePartBits);
 }
@@ -1388,14 +1373,7 @@ int __cdecl R_ChopWorldPolyBehindPlane(
         {
             if (sides[pointIndex] == 2)
             {
-                if (outPointCount >= 9)
-                    MyAssertHandler(
-                        ".\\r_marks.cpp",
-                        291,
-                        0,
-                        "%s\n\t(outPointCount) = %i",
-                        "(outPointCount < 3 + 6)",
-                        outPointCount);
+                vassert((outPointCount < 3 + 6), "(outPointCount) = %i", outPointCount);
                 v6 = &inPoints[pointIndex];
                 v7 = &outPoints[outPointCount];
                 v7->xyz[0] = v6->xyz[0];
@@ -1410,14 +1388,7 @@ int __cdecl R_ChopWorldPolyBehindPlane(
             {
                 if (!sides[pointIndex])
                 {
-                    if (outPointCount >= 9)
-                        MyAssertHandler(
-                            ".\\r_marks.cpp",
-                            299,
-                            0,
-                            "%s\n\t(outPointCount) = %i",
-                            "(outPointCount < 3 + 6)",
-                            outPointCount);
+                    vassert((outPointCount < 3 + 6), "(outPointCount) = %i", outPointCount);
                     v8 = &inPoints[pointIndex];
                     v9 = &outPoints[outPointCount];
                     v9->xyz[0] = v8->xyz[0];
@@ -1430,22 +1401,8 @@ int __cdecl R_ChopWorldPolyBehindPlane(
                 }
                 if (sides[pointIndex + 1] != 2 && sides[pointIndex + 1] != sides[pointIndex])
                 {
-                    if (outPointCount >= 9)
-                        MyAssertHandler(
-                            ".\\r_marks.cpp",
-                            308,
-                            0,
-                            "%s\n\t(outPointCount) = %i",
-                            "(outPointCount < 3 + 6)",
-                            outPointCount);
-                    if (dists[pointIndex + 1] == dists[pointIndex])
-                        MyAssertHandler(
-                            ".\\r_marks.cpp",
-                            309,
-                            0,
-                            "%s\n\t(dists[pointIndex]) = %g",
-                            "(dists[pointIndex] != dists[pointIndex + 1])",
-                            dists[pointIndex]);
+                    vassert((outPointCount < 3 + 6), "(outPointCount) = %i", outPointCount);
+                    vassert((dists[pointIndex] != dists[pointIndex + 1]), "(dists[pointIndex]) = %g", dists[pointIndex]);
                     lerp = dists[pointIndex] / (dists[pointIndex] - dists[pointIndex + 1]);
                     nextIndex = (pointIndex + 1) % inPointCount;
                     R_LerpModelMarkPoints(
@@ -1704,14 +1661,7 @@ char __cdecl R_MarkFragments_AnimatedXModel(
                     if ((hidePartBits[(boneOffset + boneIndex) >> 5] & (0x80000000 >> ((boneOffset + boneIndex) & 0x1F))) == 0)
                     {
                         markContext->lmapIndex = boneOffset;
-                        if (markContext->lmapIndex != boneOffset)
-                            MyAssertHandler(
-                                ".\\r_marks.cpp",
-                                1680,
-                                0,
-                                "%s\n\t(boneOffset) = %i",
-                                "(markContext->lmapIndex == boneOffset)",
-                                boneOffset);
+                        vassert((markContext->lmapIndex == boneOffset), "(boneOffset) = %i", boneOffset);
                         if (!R_MarkFragments_AnimatedXModel_VertList(
                             markInfo,
                             vertListIndex,
@@ -1782,14 +1732,7 @@ int __cdecl R_AddMarkFragment_1_(
             &(*clipPoints)[9 * pingPong],
             &(*clipPoints)[9 * (pingPong == 0)],
             &(*planes)[4 * planeIndex]);
-        if (clipPointCount > 9)
-            MyAssertHandler(
-                ".\\r_marks.cpp",
-                1016,
-                0,
-                "%s\n\t(clipPointCount) = %i",
-                "(clipPointCount <= 3 + 6)",
-                clipPointCount);
+        vassert((clipPointCount <= 3 + 6), "(clipPointCount) = %i", clipPointCount);
         pingPong ^= 1u;
         if (!clipPointCount)
             return 0;
@@ -1870,14 +1813,7 @@ char __cdecl R_MarkFragment_DoTriangle_1_(
         return 0;
     if (fragmentPointCount)
     {
-        if (fragmentPointCount < 3)
-            MyAssertHandler(
-                ".\\r_marks.cpp",
-                1161,
-                0,
-                "%s\n\t(fragmentPointCount) = %i",
-                "(fragmentPointCount >= 3)",
-                fragmentPointCount);
+        vassert((fragmentPointCount >= 3), "(fragmentPointCount) = %i", fragmentPointCount);
         markInfo->usedPointCount += fragmentPointCount;
         markInfo->usedTriCount = fragmentPointCount + markInfo->usedTriCount - 2;
     }
@@ -2038,14 +1974,7 @@ char __cdecl R_MarkFragment_DoTriangle_0_(
         return 0;
     if (fragmentPointCount)
     {
-        if (fragmentPointCount < 3)
-            MyAssertHandler(
-                ".\\r_marks.cpp",
-                1161,
-                0,
-                "%s\n\t(fragmentPointCount) = %i",
-                "(fragmentPointCount >= 3)",
-                fragmentPointCount);
+        vassert((fragmentPointCount >= 3), "(fragmentPointCount) = %i", fragmentPointCount);
         markInfo->usedPointCount += fragmentPointCount;
         markInfo->usedTriCount = fragmentPointCount + markInfo->usedTriCount - 2;
     }
@@ -2215,14 +2144,7 @@ char __cdecl R_MarkFragments_StaticModels(MarkInfo *markInfo)
         xmodel = smodelDraw->model;
         markContext.lmapIndex = 31;
         markContext.reflectionProbeIndex = smodelDraw->reflectionProbeIndex;
-        if (markContext.reflectionProbeIndex != smodelDraw->reflectionProbeIndex)
-            MyAssertHandler(
-                ".\\r_marks.cpp",
-                1809,
-                0,
-                "%s\n\t(smodelDraw->reflectionProbeIndex) = %i",
-                "(markContext.reflectionProbeIndex == smodelDraw->reflectionProbeIndex)",
-                smodelDraw->reflectionProbeIndex);
+        vassert((markContext.reflectionProbeIndex == smodelDraw->reflectionProbeIndex), "(smodelDraw->reflectionProbeIndex) = %i", smodelDraw->reflectionProbeIndex);
         markContext.primaryLightIndex = smodelDraw->primaryLightIndex;
         markContext.modelIndex = smodelIndex;
         if ((uint16_t)smodelIndex != smodelIndex)
@@ -2417,14 +2339,7 @@ int __cdecl R_ChopPolyBehindPlane(
         {
             if (sides[pointIndex] == 2)
             {
-                if (outPointCount >= 9)
-                    MyAssertHandler(
-                        ".\\r_marks.cpp",
-                        199,
-                        0,
-                        "%s\n\t(outPointCount) = %i",
-                        "(outPointCount < 3 + 6)",
-                        outPointCount);
+                vassert((outPointCount < 3 + 6), "(outPointCount) = %i", outPointCount);
                 v6 = &inPoints[pointIndex];
                 v7 = &outPoints[outPointCount];
                 v7->xyz[0] = v6->xyz[0];
@@ -2439,14 +2354,7 @@ int __cdecl R_ChopPolyBehindPlane(
             {
                 if (!sides[pointIndex])
                 {
-                    if (outPointCount >= 9)
-                        MyAssertHandler(
-                            ".\\r_marks.cpp",
-                            207,
-                            0,
-                            "%s\n\t(outPointCount) = %i",
-                            "(outPointCount < 3 + 6)",
-                            outPointCount);
+                    vassert((outPointCount < 3 + 6), "(outPointCount) = %i", outPointCount);
                     v8 = &inPoints[pointIndex];
                     v9 = &outPoints[outPointCount];
                     v9->xyz[0] = v8->xyz[0];
@@ -2459,22 +2367,8 @@ int __cdecl R_ChopPolyBehindPlane(
                 }
                 if (sides[pointIndex + 1] != 2 && sides[pointIndex + 1] != sides[pointIndex])
                 {
-                    if (outPointCount >= 9)
-                        MyAssertHandler(
-                            ".\\r_marks.cpp",
-                            216,
-                            0,
-                            "%s\n\t(outPointCount) = %i",
-                            "(outPointCount < 3 + 6)",
-                            outPointCount);
-                    if (dists[pointIndex + 1] == dists[pointIndex])
-                        MyAssertHandler(
-                            ".\\r_marks.cpp",
-                            217,
-                            0,
-                            "%s\n\t(dists[pointIndex]) = %g",
-                            "(dists[pointIndex] != dists[pointIndex + 1])",
-                            dists[pointIndex]);
+                    vassert((outPointCount < 3 + 6), "(outPointCount) = %i", outPointCount);
+                    vassert((dists[pointIndex] != dists[pointIndex + 1]), "(dists[pointIndex]) = %g", dists[pointIndex]);
                     lerp = dists[pointIndex] / (dists[pointIndex] - dists[pointIndex + 1]);
                     nextIndex = (pointIndex + 1) % inPointCount;
                     R_LerpModelMarkPoints(&inPoints[pointIndex], &inPoints[nextIndex], lerp, &outPoints[outPointCount++]);

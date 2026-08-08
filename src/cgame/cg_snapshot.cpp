@@ -112,14 +112,7 @@ void __cdecl CG_ResetEntity(int localClientNum, centity_s *cent)
     cent->bTrailMade = 0;
     cent->pose.cullIn = 0;
     cent->oldEType = v5;
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            910,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     time = cgArray[0].time;
     BG_EvaluateTrajectory(&cent->nextState.lerp.pos, cgArray[0].time, cent->pose.origin);
     BG_EvaluateTrajectory(&cent->nextState.lerp.apos, time, cent->pose.angles);
@@ -187,14 +180,7 @@ void __cdecl CG_SetInitialSnapshot(int localClientNum)
 
     memset(g_centInPrevSnapshot, 0, sizeof(g_centInPrevSnapshot));
     R_InitSceneData(localClientNum);
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            910,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     if (cgArray[0].snap)
         MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_snapshot.cpp", 184, 0, "%s", "!cgameGlob->snap");
     nextSnap = cgArray[0].nextSnap;
@@ -298,14 +284,7 @@ void __cdecl CG_UpdateSnapshotNum(int localClientNum)
     int v2; // r10
     int n; // [sp+50h] [-20h] BYREF
 
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            910,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     CL_GetCurrentSnapshotNumber(localClientNum, &n, &cgArray[0].latestSnapshotTime);
     v2 = n;
     if (n != cgArray[0].latestSnapshotNum)
@@ -324,14 +303,7 @@ snapshot_s *__cdecl CG_ReadNextSnapshot(int localClientNum)
     int v2; // r3
     snapshot_s *v3; // r31
 
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            910,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     v2 = localClientNum;
     v3 = &cgArray[0].activeSnapshots[cgArray[0].activeSnapshots == cgArray[0].snap];
     CL_GetSnapshot(v2, v3);
@@ -351,14 +323,7 @@ void __cdecl CG_CheckSnapshot(int localClientNum, const char *caller)
     const char *v9; // r3
     byte v10[MAX_GENTITIES]; // [sp+50h] [-8E0h] BYREF
 
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            910,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
 
     memset(v10, 0, MAX_GENTITIES);
 
@@ -683,14 +648,7 @@ void __cdecl CG_ProcessNextSnap(int localClientNum)
         v3 += 32;
         ++v1;
     } while (v4);
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            910,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     CG_CheckSnapshot(localClientNum, "CG_ProcessNextSnap - pre");
     nextSnap = cgArray[0].nextSnap;
     if (!cgArray[0].nextSnap)
@@ -727,22 +685,8 @@ void __cdecl CG_ProcessNextSnap(int localClientNum)
             do
             {
                 v18 = *entityNums;
-                if (localClientNum)
-                    MyAssertHandler(
-                        "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-                        931,
-                        0,
-                        "%s\n\t(localClientNum) = %i",
-                        "(localClientNum == 0)",
-                        localClientNum);
-                if (v18 >= 0x880)
-                    MyAssertHandler(
-                        "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-                        932,
-                        0,
-                        "entityIndex doesn't index MAX_GENTITIES\n\t%i not in [0, %i)",
-                        v18,
-                        2176);
+                vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
+                bcassert(v18, 0x880);
                 CG_CheckEvents(localClientNum, &cg_entitiesArray[0][v18]);
                 ++v15;
                 ++entityNums;
@@ -797,14 +741,7 @@ void __cdecl CG_CreateNextSnap(int localClientNum, double dtime, int readNext)
     unsigned int v45[68]; // [sp+60h] [-1B0h] BYREF
 
     CG_CheckSnapshot(localClientNum, "CG_CreateNextSnap(pre)");
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            910,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     if (cgArray[0].createdNextSnap)
     {
         iassert(!readNext);
@@ -916,22 +853,8 @@ void __cdecl CG_CreateNextSnap(int localClientNum, double dtime, int readNext)
                         Tree = DObjGetTree(ServerDObj);
                     else
                         Tree = 0;
-                    if (localClientNum)
-                        MyAssertHandler(
-                            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-                            931,
-                            0,
-                            "%s\n\t(localClientNum) = %i",
-                            "(localClientNum == 0)",
-                            localClientNum);
-                    if (v23 >= 0x880)
-                        MyAssertHandler(
-                            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-                            932,
-                            0,
-                            "entityIndex doesn't index MAX_GENTITIES\n\t%i not in [0, %i)",
-                            v23,
-                            2176);
+                    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
+                    bcassert(v23, 0x880);
                     if (!v26 || CG_DObjCloneToBuffer(localClientNum, &cg_entitiesArray[0][v23], Tree))
                     {
                         Com_ServerDObjClean(v23);
@@ -952,22 +875,8 @@ void __cdecl CG_CreateNextSnap(int localClientNum, double dtime, int readNext)
             do
             {
                 v30 = *v29;
-                if (localClientNum)
-                    MyAssertHandler(
-                        "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-                        931,
-                        0,
-                        "%s\n\t(localClientNum) = %i",
-                        "(localClientNum == 0)",
-                        localClientNum);
-                if ((unsigned int)v30 >= 0x880)
-                    MyAssertHandler(
-                        "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-                        932,
-                        0,
-                        "entityIndex doesn't index MAX_GENTITIES\n\t%i not in [0, %i)",
-                        v30,
-                        2176);
+                vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
+                bcassert((unsigned int)v30, 0x880);
                 if (!cg_entitiesArray[0][v30].nextValid)
                     MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_snapshot.cpp", 524, 0, "%s", "cent->nextValid");
                 v31 = Com_GetServerDObj(v30);
@@ -1083,14 +992,7 @@ void __cdecl CG_ProcessDemoSnapshots(int localClientNum)
 {
     snapshot_s *nextSnap; // r11
 
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            910,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     if (!cgArray[0].snap)
         MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_snapshot.cpp", 885, 0, "%s", "cgameGlob->snap");
     nextSnap = cgArray[0].nextSnap;
@@ -1120,14 +1022,7 @@ void __cdecl CG_ProcessSnapshots(int localClientNum)
 
     //PIXBeginNamedEvent_Copy_NoVarArgs(0xFFFFFFFF, "process snapshots");
     //Profile_Begin(11);
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            910,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     if (cgArray[0].demoType == DEMO_TYPE_CLIENT)
     {
         CG_ProcessDemoSnapshots(localClientNum);

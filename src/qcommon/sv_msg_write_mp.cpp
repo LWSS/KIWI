@@ -1674,14 +1674,7 @@ void __cdecl MSG_WriteDeltaField(
                 SV_PacketDataIsZeroFloat(snapInfo->clientNum, msg);
                 MSG_WriteBit0(msg);
             }
-            if ((uint)(__int64)(*(float *)toF + 2048.0) >= 0x1000)
-                MyAssertHandler(
-                    ".\\qcommon\\sv_msg_write_mp.cpp",
-                    1068,
-                    0,
-                    "*(float *)toF + HUDELEM_COORD_BIAS doesn't index 1 << HUDELEM_COORD_BITS\n\t%i not in [0, %i)",
-                    (int)(*(float *)toF + 2048.0),
-                    4096);
+            bcassert((uint)(__int64)(*(float *)toF + 2048.0), 0x1000);
             goto LABEL_103;
         case 0xFFFFFF9C:
             if (*toF)

@@ -422,14 +422,7 @@ GfxCmdHeader *__cdecl R_GetCommandBuffer(GfxRenderCommand renderCmd, int bytes)
             renderCmd);
     iassert( ((bytes & 3) == 0) );
     iassert( (bytes < s_renderCmdBufferSize) );
-    if (bytes != (uint16_t)bytes)
-        MyAssertHandler(
-            ".\\r_rendercmds.cpp",
-            884,
-            0,
-            "%s\n\t(bytes) = %i",
-            "(bytes == static_cast< unsigned short >( bytes ))",
-            bytes);
+    vassert((bytes == static_cast< unsigned short >( bytes )), "(bytes) = %i", bytes);
     iassert( s_cmdList );
     iassert( s_cmdList->cmds );
     iassert( rg.inFrame );
@@ -514,14 +507,7 @@ DebugGlobals *R_ToggleSmpFrame()
             frontEndDataOut->drawSurfCount,
             0,
             0x8000);
-    if (frontEndDataOut->surfPos < 0)
-        MyAssertHandler(
-            ".\\r_rendercmds.cpp",
-            1038,
-            0,
-            "%s\n\t(frontEndDataOut->surfPos) = %i",
-            "(frontEndDataOut->surfPos >= 0)",
-            frontEndDataOut->surfPos);
+    vassert((frontEndDataOut->surfPos >= 0), "(frontEndDataOut->surfPos) = %i", frontEndDataOut->surfPos);
     if (frontEndDataOut->surfPos > 0x20000)
         surfPos = 0x20000;
     else
@@ -565,14 +551,7 @@ DebugGlobals *R_ToggleSmpFrame()
 GfxViewParms *__cdecl R_AllocViewParms()
 {
     iassert( frontEndDataOut );
-    if (frontEndDataOut->viewParmCount >= 0x1Cu)
-        MyAssertHandler(
-            ".\\r_rendercmds.cpp",
-            1129,
-            0,
-            "frontEndDataOut->viewParmCount doesn't index ARRAY_COUNT( frontEndDataOut->viewParms )\n\t%i not in [0, %i)",
-            frontEndDataOut->viewParmCount,
-            28);
+    bcassert(frontEndDataOut->viewParmCount, 0x1Cu);
     return &frontEndDataOut->viewParms[frontEndDataOut->viewParmCount++];
 }
 
@@ -667,14 +646,7 @@ const MaterialTechnique *__cdecl Material_GetTechnique(const Material *material,
 MaterialTechniqueSet *__cdecl Material_GetTechniqueSet(const Material *material)
 {
     iassert( material );
-    if (!material->techniqueSet)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\src\\gfx_d3d\\r_material.h",
-            300,
-            0,
-            "%s\n\t(material->info.name) = %s",
-            "(material->techniqueSet)",
-            material->info.name);
+    vassert((material->techniqueSet), "(material->info.name) = %s", material->info.name);
     return material->techniqueSet->remappedTechniqueSet;
 }
 
@@ -1412,22 +1384,8 @@ void __cdecl R_SetInputCodeConstant(GfxCmdBufInput *input, CodeConstant constant
 {
     float *v6; // [esp+0h] [ebp-4h]
 
-    if (constant >= 0x3A)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\src\\gfx_d3d\\r_state.h",
-            475,
-            0,
-            "constant doesn't index CONST_SRC_CODE_COUNT_FLOAT4\n\t%i not in [0, %i)",
-            constant,
-            58);
-    if (s_codeConstUpdateFreq[constant] != 2)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\src\\gfx_d3d\\r_state.h",
-            476,
-            0,
-            "%s\n\t(constant) = %i",
-            "(s_codeConstUpdateFreq[constant] == MTL_UPDATE_RARELY)",
-            constant);
+    bcassert(constant, 0x3A);
+    vassert((s_codeConstUpdateFreq[constant] == MTL_UPDATE_RARELY), "(constant) = %i", constant);
     if (constant < 0x20)
         MyAssertHandler(
             "c:\\trees\\cod3\\src\\gfx_d3d\\r_state.h",
@@ -1469,10 +1427,7 @@ void __cdecl R_EndFrame()
         iassert( rg.inFrame );
         rg.inFrame = 0;
     }
-    else if (rg.inFrame)
-    {
-        MyAssertHandler(".\\r_rendercmds.cpp", 1923, 0, "%s", "!rg.inFrame");
-    }
+    else iassert(!rg.inFrame);
 }
 
 void __cdecl R_AddCmdClearScreen(int whichToClear, const float *color, float depth, uint8_t stencil)
@@ -1684,10 +1639,7 @@ void __cdecl R_EndRemoteScreenUpdate()
                 --r_glob.remoteScreenUpdateNesting;
             }
         }
-        else if (r_glob.remoteScreenUpdateNesting)
-        {
-            MyAssertHandler(".\\r_rendercmds.cpp", 2402, 0, "%s", "r_glob.remoteScreenUpdateNesting == 0");
-        }
+        else iassert(r_glob.remoteScreenUpdateNesting == 0);
     }
 }
 
@@ -1695,14 +1647,7 @@ void __cdecl R_PushRemoteScreenUpdate(int remoteScreenUpdateNesting)
 {
     iassert( IsFastFileLoad() || remoteScreenUpdateNesting == 0 );
     iassert( Sys_IsMainThread() );
-    if (remoteScreenUpdateNesting < 0)
-        MyAssertHandler(
-            ".\\r_rendercmds.cpp",
-            2441,
-            0,
-            "%s\n\t(remoteScreenUpdateNesting) = %i",
-            "(remoteScreenUpdateNesting >= 0)",
-            remoteScreenUpdateNesting);
+    vassert((remoteScreenUpdateNesting >= 0), "(remoteScreenUpdateNesting) = %i", remoteScreenUpdateNesting);
     while (remoteScreenUpdateNesting)
     {
         R_BeginRemoteScreenUpdate();
@@ -1721,14 +1666,7 @@ int __cdecl R_PopRemoteScreenUpdate()
     remoteScreenUpdateNesting = r_glob.remoteScreenUpdateNesting;
     while (r_glob.remoteScreenUpdateNesting)
         R_EndRemoteScreenUpdate();
-    if (remoteScreenUpdateNesting < 0)
-        MyAssertHandler(
-            ".\\r_rendercmds.cpp",
-            2463,
-            0,
-            "%s\n\t(remoteScreenUpdateNesting) = %i",
-            "(remoteScreenUpdateNesting >= 0)",
-            remoteScreenUpdateNesting);
+    vassert((remoteScreenUpdateNesting >= 0), "(remoteScreenUpdateNesting) = %i", remoteScreenUpdateNesting);
     return remoteScreenUpdateNesting;
 }
 

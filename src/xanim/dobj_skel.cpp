@@ -417,10 +417,8 @@ void __cdecl DObjCalcBaseSkel(const DObj_s *obj, DObjAnimMat *mat, int *partBits
     XModel **models; // [esp+94h] [ebp-8h]
     const int *savedDuplicatePartBits; // [esp+98h] [ebp-4h]
 
-    if (!obj)
-        MyAssertHandler(".\\xanim\\dobj_skel.cpp", 531, 0, "%s", "obj");
-    if (!mat)
-        MyAssertHandler(".\\xanim\\dobj_skel.cpp", 532, 0, "%s", "mat");
+    iassert(obj);
+    iassert(mat);
     skel.mat = mat;
     skel.timeStamp = 0;
     for (i = 0; i < 4; ++i)
@@ -431,8 +429,7 @@ void __cdecl DObjCalcBaseSkel(const DObj_s *obj, DObjAnimMat *mat, int *partBits
         ignorePartBits[i] = ~partBits[i];
     }
     DObjCalcBaseAnim(obj, mat, partBits);
-    if (!obj->duplicateParts)
-        MyAssertHandler(".\\xanim\\dobj_skel.cpp", 546, 0, "%s", "obj->duplicateParts");
+    iassert(obj->duplicateParts);
     savedDuplicatePartBits = (const int *)SL_ConvertToString(obj->duplicateParts);
     duplicateParts = (const unsigned __int8 *)(savedDuplicatePartBits + 4);
     DObjGetBaseControlAndDuplicatePartBits(
@@ -470,10 +467,8 @@ void __cdecl DObjCalcBaseAnim(const DObj_s *obj, DObjAnimMat *mat, int *partBits
     int i; // [esp+28h] [ebp-4h]
     int ia; // [esp+28h] [ebp-4h]
 
-    if (!obj)
-        MyAssertHandler(".\\xanim\\dobj_skel.cpp", 459, 0, "%s", "obj");
-    if (!mat)
-        MyAssertHandler(".\\xanim\\dobj_skel.cpp", 460, 0, "%s", "mat");
+    iassert(obj);
+    iassert(mat);
     boneIndex = 0;
     for (j = 0; j < obj->numModels; ++j)
     {

@@ -36,22 +36,8 @@ uint __cdecl RB_CalcSunSpriteSamples()
     HRESULT hr; // [esp+4Ch] [ebp-8h]
     uint sampleCount; // [esp+50h] [ebp-4h] BYREF
 
-    if (vidConfig.displayWidth < 0x10)
-        MyAssertHandler(
-            ".\\rb_sky.cpp",
-            45,
-            0,
-            "%s\n\t(vidConfig.displayWidth) = %i",
-            "(vidConfig.displayWidth >= 16)",
-            vidConfig.displayWidth);
-    if (vidConfig.displayHeight < 0x10)
-        MyAssertHandler(
-            ".\\rb_sky.cpp",
-            46,
-            0,
-            "%s\n\t(vidConfig.displayHeight) = %i",
-            "(vidConfig.displayHeight >= 16)",
-            vidConfig.displayHeight);
+    vassert((vidConfig.displayWidth >= 16), "(vidConfig.displayWidth) = %i", vidConfig.displayWidth);
+    vassert((vidConfig.displayHeight >= 16), "(vidConfig.displayHeight) = %i", vidConfig.displayHeight);
     occlusionQuery = sunFlareArray[0].sunQuery[0];
     if (!sunFlareArray[0].sunQuery[0])
         return 0;
@@ -141,14 +127,7 @@ void __cdecl RB_DrawSun(uint localClientNum)
     SunFlareDynamic *sunFlare; // [esp+0h] [ebp-4h]
 
     iassert( rgp.world );
-    if (localClientNum >= gfxCfg.maxClientViews)
-        MyAssertHandler(
-            ".\\rb_sky.cpp",
-            591,
-            0,
-            "localClientNum doesn't index gfxCfg.maxClientViews\n\t%i not in [0, %i)",
-            localClientNum,
-            gfxCfg.maxClientViews);
+    bcassert(localClientNum, gfxCfg.maxClientViews);
     if (r_drawSun->current.enabled && rgp.world->sun.hasValidData)
     {
         sunFlare = &sunFlareArray[localClientNum];
@@ -174,14 +153,7 @@ void __cdecl RB_DrawSunQuerySprite(SunFlareDynamic *sunFlare)
 
     iassert( sunFlare );
     queryIndex = r_glob.backEndFrameCount % 2;
-    if ((uint)(r_glob.backEndFrameCount % 2) >= 2)
-        MyAssertHandler(
-            ".\\rb_sky.cpp",
-            319,
-            0,
-            "queryIndex doesn't index ARRAY_COUNT( sunFlare->sunQuery )\n\t%i not in [0, %i)",
-            r_glob.backEndFrameCount % 2,
-            2);
+    bcassert((uint)(r_glob.backEndFrameCount % 2), 2);
     if (sunFlare->sunQuery[queryIndex])
     {
         PROF_SCOPED("RB_DrawSunQuerySprite");
@@ -519,14 +491,7 @@ void __cdecl RB_DrawSunPostEffects(uint localClientNum)
     int frameTime; // [esp+0h] [ebp-8h]
     SunFlareDynamic *sunFlare; // [esp+4h] [ebp-4h]
 
-    if (localClientNum >= 4)
-        MyAssertHandler(
-            ".\\rb_sky.cpp",
-            618,
-            0,
-            "localClientNum doesn't index ARRAY_COUNT( sunFlareArray )\n\t%i not in [0, %i)",
-            localClientNum,
-            4);
+    bcassert(localClientNum, 4);
     sunFlare = &sunFlareArray[localClientNum];
     if (sunFlare->lastTime && sunFlare->lastTime <= gfxCmdBufSourceState.sceneDef.time)
         frameTime = gfxCmdBufSourceState.sceneDef.time - sunFlare->lastTime;
@@ -570,36 +535,15 @@ void __cdecl RB_DrawSunFlare(SunFlareDynamic *sunFlare, int frameTime)
                 rgp.world->sun.flareMaxAlpha);
         alpha = lerp * rgp.world->sun.flareMaxAlpha;
         size = lerp * rgp.world->sun.flareMaxSize + rgp.world->sun.flareMinSize;
-        if (sunFlare->flareIntensity < 0.0)
-            MyAssertHandler(
-                ".\\rb_sky.cpp",
-                489,
-                0,
-                "%s\n\t(sunFlare->flareIntensity) = %g",
-                "(sunFlare->flareIntensity >= 0.0f)",
-                sunFlare->flareIntensity);
-        if (sunFlare->lastVisibility < 0.0)
-            MyAssertHandler(
-                ".\\rb_sky.cpp",
-                490,
-                0,
-                "%s\n\t(sunFlare->lastVisibility) = %g",
-                "(sunFlare->lastVisibility >= 0.0f)",
-                sunFlare->lastVisibility);
+        vassert((sunFlare->flareIntensity >= 0.0f), "(sunFlare->flareIntensity) = %g", sunFlare->flareIntensity);
+        vassert((sunFlare->lastVisibility >= 0.0f), "(sunFlare->lastVisibility) = %g", sunFlare->lastVisibility);
         sunFlare->flareIntensity = R_UpdateOverTime(
             sunFlare->flareIntensity,
             sunFlare->lastVisibility,
             rgp.world->sun.flareFadeInTime,
             rgp.world->sun.flareFadeOutTime,
             frameTime);
-        if (sunFlare->flareIntensity < 0.0)
-            MyAssertHandler(
-                ".\\rb_sky.cpp",
-                494,
-                0,
-                "%s\n\t(sunFlare->flareIntensity) = %g",
-                "(sunFlare->flareIntensity >= 0.0f)",
-                sunFlare->flareIntensity);
+        vassert((sunFlare->flareIntensity >= 0.0f), "(sunFlare->flareIntensity) = %g", sunFlare->flareIntensity);
         iassert( (alpha >= 0.0f) );
         v2 = sunFlare->flareIntensity * alpha;
         RB_DrawSunFlareCore(v2, size);
@@ -705,22 +649,8 @@ void __cdecl RB_CalcSunBlind(SunFlareDynamic *sunFlare, int frameTime, float *bl
             rgp.world->sun.blindFadeInTime,
             rgp.world->sun.blindFadeOutTime,
             frameTime);
-        if (sunFlare->currentBlind < 0.0)
-            MyAssertHandler(
-                ".\\rb_sky.cpp",
-                530,
-                0,
-                "%s\n\t(sunFlare->currentBlind) = %g",
-                "(sunFlare->currentBlind >= 0)",
-                sunFlare->currentBlind);
-        if (sunFlare->currentBlind > 1.0)
-            MyAssertHandler(
-                ".\\rb_sky.cpp",
-                531,
-                0,
-                "%s\n\t(sunFlare->currentBlind) = %g",
-                "(sunFlare->currentBlind <= 1)",
-                sunFlare->currentBlind);
+        vassert((sunFlare->currentBlind >= 0), "(sunFlare->currentBlind) = %g", sunFlare->currentBlind);
+        vassert((sunFlare->currentBlind <= 1), "(sunFlare->currentBlind) = %g", sunFlare->currentBlind);
         *blind = sunFlare->currentBlind * rgp.world->sun.blindMaxDarken;
     }
     else

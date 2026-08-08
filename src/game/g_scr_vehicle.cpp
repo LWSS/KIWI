@@ -816,10 +816,8 @@ void __cdecl VEH_TouchEntities(gentity_s *ent)
     float mins[3]; // [esp+1074h] [ebp-18h] BYREF
     float diff[3]; // [esp+1080h] [ebp-Ch] BYREF
 
-    if (!ent)
-        MyAssertHandler(".\\game\\g_scr_vehicle.cpp", 1916, 0, "%s", "ent");
-    if (!ent->scr_vehicle)
-        MyAssertHandler(".\\game\\g_scr_vehicle.cpp", 1917, 0, "%s", "ent->scr_vehicle");
+    iassert(ent);
+    iassert(ent->scr_vehicle);
     scr_vehicle = ent->scr_vehicle;
 #ifdef KISAK_SP
     if (!ent->r.bmodel)
@@ -1102,8 +1100,7 @@ void __cdecl VEH_UpdateAim(gentity_s *ent)
             if (ent->r.ownerNum.isDefined() && veh->targetEnt == ENTITYNUM_NONE)
             {
                 player = ent->r.ownerNum.ent();
-                if (!player->client)
-                    MyAssertHandler(".\\game\\g_scr_vehicle.cpp", 2081, 0, "%s", "player->client");
+                iassert(player->client);
 
                 if ((player->client->ps.eFlags & 0x40000) == 0 && info->type != 5)
                     angles[1] = player->client->ps.viewangles[1];
@@ -1229,10 +1226,8 @@ void __cdecl VEH_UpdateAIMove(gentity_s *ent)
     VehicleMoveState moveState; // [esp+0h] [ebp-8h]
     scr_vehicle_s *veh; // [esp+4h] [ebp-4h]
 
-    if (!ent)
-        MyAssertHandler(".\\game\\g_scr_vehicle.cpp", 3448, 0, "%s", "ent");
-    if (!ent->scr_vehicle)
-        MyAssertHandler(".\\game\\g_scr_vehicle.cpp", 3449, 0, "%s", "ent->scr_vehicle");
+    iassert(ent);
+    iassert(ent->scr_vehicle);
     veh = ent->scr_vehicle;
     moveState = veh->moveState;
     if (moveState == VEH_MOVESTATE_MOVE)
@@ -1280,10 +1275,8 @@ void __cdecl VEH_UpdateMoveToGoal(gentity_s *ent, const float *goalPos)
     float distToGoal; // [esp+C0h] [ebp-8h]
     int hovering; // [esp+C4h] [ebp-4h]
 
-    if (!ent)
-        MyAssertHandler(".\\game\\g_scr_vehicle.cpp", 3294, 0, "%s", "ent");
-    if (!ent->scr_vehicle)
-        MyAssertHandler(".\\game\\g_scr_vehicle.cpp", 3295, 0, "%s", "ent->scr_vehicle");
+    iassert(ent);
+    iassert(ent->scr_vehicle);
     veh = ent->scr_vehicle;
     phys = &veh->phys;
     hovering = VEH_IsHovering(veh);
@@ -1325,8 +1318,7 @@ void __cdecl VEH_UpdateMoveToGoal(gentity_s *ent, const float *goalPos)
         accelMaxDt = accelMax * dt;
         if (accelMaxDt < (float)accelMagnitude)
         {
-            if (accelMagnitude == 0.0)
-                MyAssertHandler(".\\game\\g_scr_vehicle.cpp", 3346, 0, "%s", "accelMagnitude");
+            iassert(accelMagnitude);
             v8 = accelMaxDt / accelMagnitude;
             Vec3Scale(accelVec, v8, accelVec);
         }
@@ -1356,8 +1348,7 @@ void __cdecl VEH_UpdateMoveToGoal(gentity_s *ent, const float *goalPos)
         Vec3Mad(phys->origin, dt, averageVel, phys->origin);
         VEH_UpdateMoveOrientation(ent, desiredDir);
     }
-    if (s_vehicleInfos[veh->infoIdx].engineSndSpeed == 0.0f)
-        MyAssertHandler(".\\game\\g_scr_vehicle.cpp", 3386, 0, "%s", "s_vehicleInfos[veh->infoIdx].engineSndSpeed");
+    iassert(s_vehicleInfos[veh->infoIdx].engineSndSpeed);
     v12 = veh->speed / s_vehicleInfos[veh->infoIdx].engineSndSpeed;
     v5 = v12 - 1.0f;
     if (v5 < 0.0f)
@@ -1380,8 +1371,7 @@ void __cdecl VEH_UpdateMoveToGoal(gentity_s *ent, const float *goalPos)
 
 bool __cdecl VEH_IsHovering(scr_vehicle_s *veh)
 {
-    if (!veh)
-        MyAssertHandler(".\\game\\g_scr_vehicle.cpp", 2635, 0, "%s", "veh");
+    iassert(veh);
     return veh->moveState == VEH_MOVESTATE_HOVER;
 }
 
@@ -1426,12 +1416,10 @@ void __cdecl VEH_UpdateMoveOrientation(gentity_s *ent, float *desiredDir)
     stoppingFactor = 1.0f;
     if (veh->stopping && horizontalAccel > 0.0f)
     {
-        if (horizontalAccel == 0.0f)
-            MyAssertHandler(".\\game\\g_scr_vehicle.cpp", 2984, 0, "%s", "horizontalAccel");
+        iassert(horizontalAccel);
         timeToGoal = Vec2Length(veh->phys.vel) / horizontalAccel;
         stoppingTime = VEH_CalcStoppingTime(horizontalAccel, accelFraction);
-        if (stoppingTime == 0.0f)
-            MyAssertHandler(".\\game\\g_scr_vehicle.cpp", 2988, 0, "%s", "stoppingTime");
+        iassert(stoppingTime);
         if (stoppingTime > timeToGoal)
             stoppingFactor = timeToGoal / stoppingTime;
     }
@@ -1485,10 +1473,8 @@ void __cdecl VEH_UpdateAngleAndAngularVel(
         }
         else
         {
-            if (decel == 0.0f)
-                MyAssertHandler(".\\game\\g_scr_vehicle.cpp", 2662, 0, "%s", "decel");
-            if (overShoot < 0.0f || overShoot >= 1.0f)
-                MyAssertHandler(".\\game\\g_scr_vehicle.cpp", 2666, 0, "%s", "overShoot >= 0.f && overShoot < 1.f");
+            iassert(decel);
+            iassert(overShoot >= 0.f && overShoot < 1.f);
             stopTime = v11 / decel;
             stopAngle = v11 * 0.5f * stopTime;
             stopAnglea = (1.0f - overShoot) * stopAngle;
@@ -1571,10 +1557,8 @@ float __cdecl VEH_UpdateMove_GetDesiredYaw(scr_vehicle_s *veh, float *desiredDir
         if (veh->hasGoalYaw && (veh->stopping || VEH_IsHovering(veh)))
         {
             desiredYaw = veh->goalYaw;
-            if (phys->maxAngleVel[1] == 0.0)
-                MyAssertHandler(".\\game\\g_scr_vehicle.cpp", 2745, 0, "%s", "phys->maxAngleVel[YAW]");
-            if (veh->manualDecel == 0.0)
-                MyAssertHandler(".\\game\\g_scr_vehicle.cpp", 2746, 0, "%s", "veh->manualDecel");
+            iassert(phys->maxAngleVel[YAW]);
+            iassert(veh->manualDecel);
             timeToStop = veh->speed / veh->manualDecel;
             v2 = phys->maxAngleVel[1] / phys->yawAccel;
             timeToTurn = v2 + v2;
@@ -1616,8 +1600,7 @@ float __cdecl VEH_CalcAccelFraction(float accel, int infoIdx)
 
     minAccel = MPH_TO_INCHES_PER_SEC * 0.0f;
     maxAccel = s_vehicleInfos[infoIdx].accel;
-    if (minAccel >= maxAccel)
-        MyAssertHandler(".\\game\\g_scr_vehicle.cpp", 2784, 0, "%s", "maxAccel > minAccel");
+    iassert(maxAccel > minAccel);
     v6 = accel - maxAccel;
     if (v6 < 0.0f)
         v7 = accel;
@@ -1710,8 +1693,7 @@ float __cdecl VEH_GetAccelForAngles(scr_vehicle_s *veh)
     float MAX_HOVER_ANGLE_VEL; // [esp+20h] [ebp-8h]
     float MAX_HOVER_ANGLE; // [esp+24h] [ebp-4h]
 
-    if (!veh)
-        MyAssertHandler(".\\game\\g_scr_vehicle.cpp", 2878, 0, "%s", "veh");
+    iassert(veh);
     if (VEH_IsHovering(veh))
     {
         MAX_HOVER_ANGLE = 5.0f;
@@ -1767,8 +1749,7 @@ void __cdecl VEH_AddFakeDrag(const float *velocity, float maxDragSpeed, float *a
         v3 = maxDragSpeed;
     else
         v3 = horizontalVel;
-    if (maxDragSpeed == 0.0f)
-        MyAssertHandler(".\\game\\g_scr_vehicle.cpp", 2925, 0, "%s", "maxDragSpeed");
+    iassert(maxDragSpeed);
     fakeDrag = v3 / maxDragSpeed;
     fakeDraga = fakeDrag * fakeDrag;
     Vec2Normalize(velocityVec);
@@ -1840,8 +1821,7 @@ void __cdecl VEH_CheckHorizontalVelocityToGoal(
         {
             perpDir[0] = phys->vel[1];
             perpDir[1] = -phys->vel[0];
-            if (horizontalDist == 0.0)
-                MyAssertHandler(".\\game\\g_scr_vehicle.cpp", 3061, 0, "%s", "horizontalDist");
+            iassert(horizontalDist);
             v12 = perpDir[0] * *vecToGoal + perpDir[1] * vecToGoal[1];
             v6 = I_fabs(v12);
             radiusVec[0] = v6;
@@ -1853,12 +1833,10 @@ void __cdecl VEH_CheckHorizontalVelocityToGoal(
                 radiusVec[1] = v11 * radiusVec[1];
                 v5 = radiusVec[1] * radiusVec[1] + radiusVec[0] * radiusVec[0];
                 radius = v5 / (radiusVec[0] * 2.0f);
-                if (radius <= 0.0f)
-                    MyAssertHandler(".\\game\\g_scr_vehicle.cpp", 3073, 0, "%s", "radius > 0.f");
+                iassert(radius > 0.f);
                 if (radius > 1.0f && accelMax * radius < horizontalSpeed * horizontalSpeed)
                 {
-                    if (radius == 0.0f)
-                        MyAssertHandler(".\\game\\g_scr_vehicle.cpp", 3083, 0, "%s", "radius");
+                    iassert(radius);
                     breakingAccel = horizontalSpeed * horizontalSpeed / radius;
                     if (horizontalSpeed < breakingAccel)
                         breakingAccel = horizontalSpeed;
@@ -1907,8 +1885,7 @@ void __cdecl VEH_CheckVerticalVelocityToGoal(scr_vehicle_s *veh, float verticalD
             desiredStoppingTime = verticalDist / (verticalSpeed * 0.5f);
             if (desiredStoppingTime < currentStoppingTime)
             {
-                if (desiredStoppingTime == 0.0f)
-                    MyAssertHandler(".\\game\\g_scr_vehicle.cpp", 3124, 0, "%s", "desiredStoppingTime");
+                iassert(desiredStoppingTime);
                 breakingAccel = -verticalSpeed * 0.05f / desiredStoppingTime;
                 if (accelVec[2] * accelVec[2] < breakingAccel * breakingAccel)
                 {
@@ -2002,8 +1979,7 @@ double __cdecl VEH_UpdateMove_CheckStop(scr_vehicle_s *veh, float distToGoal)
 
     dt = 0.05f;
     newSpeed = VEH_AccelerateSpeed(veh->speed, veh->manualSpeed, veh->manualAccel, 0.05f);
-    if (veh->manualDecel == 0.0f)
-        MyAssertHandler(".\\game\\g_scr_vehicle.cpp", 3211, 0, "%s", "veh->manualDecel");
+    iassert(veh->manualDecel);
     time = newSpeed / veh->manualDecel;
     stopDist = newSpeed * 0.5f * time;
     checkDist = distToGoal - newSpeed * 0.05f;
@@ -2015,8 +1991,7 @@ double __cdecl VEH_UpdateMove_CheckStop(scr_vehicle_s *veh, float distToGoal)
     {
         if (stopDist < distToGoal)
         {
-            if (veh->speed == 0.0f)
-                MyAssertHandler(".\\game\\g_scr_vehicle.cpp", 3223, 0, "%s", "veh->speed");
+            iassert(veh->speed);
             dta = 0.05f - (distToGoal - stopDist) / veh->speed;
             v5 = dta - 0.05f;
             if (v5 < 0.0f)
@@ -2039,8 +2014,7 @@ void __cdecl VEH_UpdateMove_CheckNearGoal(gentity_s *ent, float distToGoal)
 {
     scr_vehicle_s *veh; // [esp+0h] [ebp-4h]
 
-    if (!ent)
-        MyAssertHandler(".\\game\\g_scr_vehicle.cpp", 3241, 0, "%s", "ent");
+    iassert(ent);
     veh = ent->scr_vehicle;
     if (veh->nearGoalNotifyDist != 0.0f && veh->nearGoalNotifyDist > (double)distToGoal)
         Scr_Notify(ent, scr_const.near_goal, 0);
@@ -2052,8 +2026,7 @@ void __cdecl VEH_GetNewSpeedAndAccel(scr_vehicle_s *veh, float dt, int hovering,
     float speed; // [esp+14h] [ebp-8h]
     float accel; // [esp+18h] [ebp-4h]
 
-    if (!veh)
-        MyAssertHandler(".\\game\\g_scr_vehicle.cpp", 3255, 0, "%s", "veh");
+    iassert(veh);
     if (hovering)
     {
         speed = veh->hover.hoverSpeed;
@@ -2073,8 +2046,7 @@ void __cdecl VEH_GetNewSpeedAndAccel(scr_vehicle_s *veh, float dt, int hovering,
     }
     else
     {
-        if (speed < 0.0)
-            MyAssertHandler(".\\game\\g_scr_vehicle.cpp", 3277, 0, "%s", "speed >= 0.0f");
+        iassert(speed >= 0.0f);
         *newSpeed = VEH_AccelerateSpeed(veh->speed, speed, accel, dt);
         *accelMax = accel;
     }
@@ -2089,10 +2061,8 @@ void __cdecl VEH_UpdateHover(gentity_s *ent)
     float hoverPos[3]; // [esp+1Ch] [ebp-10h] BYREF
     float newHoverDist; // [esp+28h] [ebp-4h]
 
-    if (!ent)
-        MyAssertHandler(".\\game\\g_scr_vehicle.cpp", 3400, 0, "%s", "ent");
-    if (!ent->scr_vehicle)
-        MyAssertHandler(".\\game\\g_scr_vehicle.cpp", 3401, 0, "%s", "ent->scr_vehicle");
+    iassert(ent);
+    iassert(ent->scr_vehicle);
     veh = ent->scr_vehicle;
     Vec3Add(veh->goalPosition, veh->hover.hoverGoalPos, hoverPos);
     VEH_UpdateMoveToGoal(ent, hoverPos);
@@ -2142,14 +2112,11 @@ void __cdecl CMD_VEH_Script_SetSpeed(gentity_s *ent)
     vehicle_info_t *info; // [esp+0h] [ebp-8h]
     scr_vehicle_s *veh; // [esp+4h] [ebp-4h]
 
-    if (!ent)
-        MyAssertHandler(".\\game\\g_scr_vehicle.cpp", 4868, 0, "%s", "ent");
+    iassert(ent);
     veh = ent->scr_vehicle;
     info = &s_vehicleInfos[veh->infoIdx];
-    if (!veh)
-        MyAssertHandler(".\\game\\g_scr_vehicle.cpp", 4873, 0, "%s", "veh");
-    if (!info)
-        MyAssertHandler(".\\game\\g_scr_vehicle.cpp", 4874, 0, "%s", "info");
+    iassert(veh);
+    iassert(info);
     veh->manualMode = 1;
     veh->manualSpeed = Scr_GetFloat(0) * MPH_TO_INCHES_PER_SEC;
     if (veh->manualSpeed < 0.0f)
@@ -2599,8 +2566,7 @@ void __cdecl CMD_VEH_FireWeapon(scr_entref_t entref)
             && veh->targetEnt == ENTITYNUM_NONE)
         {
             player = ent->r.ownerNum.ent();
-            if (!player->client)
-                MyAssertHandler(".\\game\\g_scr_vehicle.cpp", 6196, 0, "%s", "player->client");
+            iassert(player->client);
 
             if (barrel == 0
                 && vehHelicopterHeadSwayDontSwayTheTurret->current.enabled
@@ -2697,8 +2663,7 @@ forwardDone:
                 veh->phys.vel,
                 target,
                 targetOffset);
-            if (!missile)
-                MyAssertHandler(".\\game\\g_scr_vehicle.cpp", 6250, 0, "%s", "missile");
+            iassert(missile);
             Scr_AddEntity(missile);
         }
         else
@@ -3576,11 +3541,9 @@ void __cdecl VEH_CalcAccel(gentity_s *ent, char *move, float *bodyAccel, float *
     if (move[2] > 0)
     {
         // Handbrake on: yaw toward player view yaw (SP tank-style steer).
-        if (!ent->r.ownerNum.isDefined())
-            MyAssertHandler(".\\game\\g_scr_vehicle.cpp", 1073, 0, "%s", "ent->r.ownerNum.isDefined()");
+        iassert(ent->r.ownerNum.isDefined());
         player = ent->r.ownerNum.ent();
-        if (!player->client)
-            MyAssertHandler(".\\game\\g_scr_vehicle.cpp", 1077, 0, "%s", "player->client");
+        iassert(player->client);
 
         // Wrap (viewYaw - prevYaw)/360 into [-0.5, 0.5], multiply by 7200 (= 20*360 deg/sec).
         angle = (player->client->ps.viewangles[1] - veh->phys.prevAngles[1]) * 0.0027777778f;
@@ -3706,10 +3669,8 @@ void __cdecl VEH_UpdateClient(gentity_s *ent)
     move[1] = 0;
     move[2] = 0;
 
-    if (!ent)
-        MyAssertHandler(".\\game\\g_scr_vehicle.cpp", 2416, 0, "%s", "ent");
-    if (!ent->scr_vehicle)
-        MyAssertHandler(".\\game\\g_scr_vehicle.cpp", 2417, 0, "%s", "ent->scr_vehicle");
+    iassert(ent);
+    iassert(ent->scr_vehicle);
 
     veh  = ent->scr_vehicle;
     info = &s_vehicleInfos[veh->infoIdx];
@@ -3717,8 +3678,7 @@ void __cdecl VEH_UpdateClient(gentity_s *ent)
     if (ent->r.ownerNum.isDefined())
     {
         player = ent->r.ownerNum.ent();
-        if (!player->client)
-            MyAssertHandler(".\\game\\g_scr_vehicle.cpp", 2427, 0, "%s", "player->client");
+        iassert(player->client);
         player->client->ps.eFlags |= 0x40000u;
         if ((player->client->ps.eFlags & 0x80000) == 0
          && (player->client->ps.pm_flags & 0xC00) == 0)
@@ -3774,8 +3734,7 @@ void __cdecl VEH_UpdateClient(gentity_s *ent)
 
     MatrixTransposeTransformVector43(veh->phys.vel, axis, veh->phys.bodyVel); // world→body
     veh->speed = I_fabs(veh->phys.bodyVel[0]);
-    if (veh->speed < 0.0f)
-        MyAssertHandler(".\\game\\g_scr_vehicle.cpp", 2486, 0, "%s", "veh->speed >= 0.0f");
+    iassert(veh->speed >= 0.0f);
 
     // Idle/engine sound crossfade: targets driven by whether throttle is held.
     if (move[0])
@@ -3803,10 +3762,8 @@ void __cdecl VEH_UpdatePath(gentity_s *ent)
     float ratio;
     float clampedRatio;
 
-    if (!ent)
-        MyAssertHandler(".\\game\\g_scr_vehicle.cpp", 2516, 0, "%s", "ent");
-    if (!ent->scr_vehicle)
-        MyAssertHandler(".\\game\\g_scr_vehicle.cpp", 2517, 0, "%s", "ent->scr_vehicle");
+    iassert(ent);
+    iassert(ent->scr_vehicle);
 
     veh = ent->scr_vehicle;
     info = &s_vehicleInfos[veh->infoIdx];
@@ -3817,10 +3774,8 @@ void __cdecl VEH_UpdatePath(gentity_s *ent)
     if (nextVpp.nodeIdx < 0)
         return;
 
-    if (veh->pathPos.speed < 0.0f)
-        MyAssertHandler(".\\game\\g_scr_vehicle.cpp", 2530, 0, "%s", "veh->pathPos.speed >= 0.0f");
-    if (veh->manualSpeed < 0.0f)
-        MyAssertHandler(".\\game\\g_scr_vehicle.cpp", 2531, 0, "%s", "veh->manualSpeed >= 0.0f");
+    iassert(veh->pathPos.speed >= 0.0f);
+    iassert(veh->manualSpeed >= 0.0f);
 
     if (veh->manualMode == 0)
     {
@@ -3851,8 +3806,7 @@ void __cdecl VEH_UpdatePath(gentity_s *ent)
             veh->manualMode = 0;
     }
 
-    if (veh->speed < 0.0f)
-        MyAssertHandler(".\\game\\g_scr_vehicle.cpp", 2547, 0, "%s", "veh->speed >= 0.0f");
+    iassert(veh->speed >= 0.0f);
 
     if (veh->pathPos.speed <= 0.0f)
         veh->manualTime = 0.0f;
@@ -3877,8 +3831,7 @@ void __cdecl VEH_UpdatePath(gentity_s *ent)
 
     if (veh->manualTime > 0.0f)
     {
-        if (veh->manualTime >= 1.0f)
-            MyAssertHandler(".\\game\\g_scr_vehicle.cpp", 2567, 0, "%s", "veh->manualTime < 1.0f");
+        iassert(veh->manualTime < 1.0f);
         // Get a lookahead pathPos for the manualTime fractional remainder
         // so we can interpolate origin/angles smoothly between this tick's
         // node state and the next.
@@ -3962,8 +3915,7 @@ static void VEH_UpdateNonPilotClient(gentity_s *vehEnt)
     if (!vehEnt->r.ownerNum.isDefined())
         return;
     player = vehEnt->r.ownerNum.ent();
-    if (!player->client)
-        MyAssertHandler(".\\game\\g_scr_vehicle.cpp", 3429, 0, "%s", "player->client");
+    iassert(player->client);
     player->client->ps.eFlags &= ~0x40000u;
     info = VEH_GetVehicleInfo(vehEnt->scr_vehicle->infoIdx);
     player->client->linkAnglesFrac = 0.0f;
@@ -4215,11 +4167,9 @@ gentity_s *G_GetPlayerVehicle(const gentity_s *player)
     const EntHandle *p_ownerNum; // r29
     gentity_s *v5; // r29
 
-    if (!player)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_scr_vehicle.cpp", 3976, 0, "%s", "player");
+    iassert(player);
     client = player->client;
-    if (!client)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_scr_vehicle.cpp", 3979, 0, "%s", "client");
+    iassert(client);
     if ((client->ps.eFlags & 0x20000) == 0)
         return 0;
     p_ownerNum = &player->r.ownerNum;
@@ -4318,12 +4268,9 @@ void  VEH_ResetWheels(gentity_s *ent, vehicle_physic_t *phys)
     int *wheel; // r30
     float v7[16]; // [sp+50h] [-40h] BYREF
 
-    if (!ent)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_scr_vehicle.cpp", 643, 0, "%s", "ent");
-    if (!ent->scr_vehicle)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_scr_vehicle.cpp", 644, 0, "%s", "ent->scr_vehicle");
-    if (!phys)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_scr_vehicle.cpp", 645, 0, "%s", "phys");
+    iassert(ent);
+    iassert(ent->scr_vehicle);
+    iassert(phys);
     wheelZPos = phys->wheelZPos;
     v5 = 6;
     wheel = ent->scr_vehicle->boneIndex.wheel;
@@ -5188,10 +5135,8 @@ void HELI_CancelAIMove(gentity_s *ent)
     float v10[3]; // [sp+7Ch] [-54h] BYREF
     float v11[8]; // [sp+88h] [-48h] BYREF
 
-    if (!ent)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_helicopter.cpp", 341, 0, "%s", "ent");
-    if (!ent->scr_vehicle)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_helicopter.cpp", 342, 0, "%s", "ent->scr_vehicle");
+    iassert(ent);
+    iassert(ent->scr_vehicle);
     scr_vehicle = ent->scr_vehicle;
     origin = scr_vehicle->phys.origin;
     VEH_GetVehicleInfo(scr_vehicle->infoIdx);
@@ -5223,10 +5168,8 @@ void VEH_CancelAIMove(gentity_s *ent)
     scr_vehicle_s *scr_vehicle; // r11
     int infoIdx; // r9
 
-    if (!ent)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_scr_vehicle.cpp", 3146, 0, "%s", "ent");
-    if (!ent->scr_vehicle)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_scr_vehicle.cpp", 3147, 0, "%s", "ent->scr_vehicle");
+    iassert(ent);
+    iassert(ent->scr_vehicle);
     scr_vehicle = ent->scr_vehicle;
     infoIdx = scr_vehicle->infoIdx;
     scr_vehicle->flags &= ~2u;
@@ -5685,8 +5628,7 @@ static void VEH_LinkPlayer(gentity_s *ent, gentity_s *player)
 
     client = player->client;
     scr_vehicle = ent->scr_vehicle;
-    if (!client)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_scr_vehicle.cpp", 3484, 0, "%s", "client");
+    iassert(client);
     VehicleInfo = VEH_GetVehicleInfo(scr_vehicle->infoIdx);
     if ((client->ps.eFlags & 0x20000) != 0)
         Com_Error(ERR_DROP, "VEH_LinkPlayer: Player is already using a vehicle");

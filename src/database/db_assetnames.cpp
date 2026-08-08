@@ -256,15 +256,13 @@ const char *__cdecl DB_GetXAssetName(const XAsset *asset)
 
 void __cdecl DB_SetXAssetName(XAsset *asset, const char *name)
 {
-    if (!DB_XAssetSetNameHandler[asset->type])
-        MyAssertHandler(".\\database\\db_assetnames.cpp", 608, 0, "%s", "DB_XAssetSetNameHandler[asset->type]");
+    iassert(DB_XAssetSetNameHandler[asset->type]);
     DB_XAssetSetNameHandler[asset->type](&asset->header, name);
 }
 
 int __cdecl DB_GetXAssetTypeSize(int type)
 {
-    if (!DB_GetXAssetSizeHandler[type])
-        MyAssertHandler(".\\database\\db_assetnames.cpp", 615, 0, "%s", "DB_GetXAssetSizeHandler[type]");
+    iassert(DB_GetXAssetSizeHandler[type]);
     return DB_GetXAssetSizeHandler[type]();
 }
 

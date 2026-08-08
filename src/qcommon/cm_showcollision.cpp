@@ -391,13 +391,7 @@ void __cdecl CM_AddColinearExteriorPointToWindingProjected(
     float dj; // [esp+24h] [ebp-8h]
     int axis; // [esp+28h] [ebp-4h]
 
-    if (w->p[index1][i] == w->p[index0][i] && w->p[index1][j] == w->p[index0][j])
-        MyAssertHandler(
-            ".\\qcommon\\cm_showcollision.cpp",
-            232,
-            0,
-            "%s",
-            "w->p[index0][i] != w->p[index1][i] || w->p[index0][j] != w->p[index1][j]");
+    iassert(w->p[index0][i] != w->p[index1][i] || w->p[index0][j] != w->p[index1][j]);
     v13 = w->p[index1][i] - w->p[index0][i];
     dj = w->p[index1][j] - w->p[index0][j];
     v7 = I_fabs(v13);

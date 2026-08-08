@@ -68,14 +68,7 @@ void __cdecl ScrPlace_SetupFloatViewport(
     scrPlace->scaleVirtualToFull[1] = viewportHeight / 480.0;
     scrPlace->scaleRealToVirtual[0] = 640.0 / adjustedRealWidth;
     scrPlace->scaleRealToVirtual[1] = 480.0 / viewportHeight;
-    if (horzAspectPixelDiff < 0.0)
-        MyAssertHandler(
-            ".\\client\\screen_placement.cpp",
-            112,
-            0,
-            "%s\n\t(horzAspectPixelDiff) = %g",
-            "(horzAspectPixelDiff >= 0)",
-            horzAspectPixelDiff);
+    vassert((horzAspectPixelDiff >= 0), "(horzAspectPixelDiff) = %g", horzAspectPixelDiff);
     scrPlace->subScreenLeft = horzAspectPixelDiff * 0.5;
 }
 
@@ -150,26 +143,10 @@ void __cdecl ScrPlace_CalcSafeAreaOffsets(
             "%s\n\t(cls.vidConfig.displayHeight) = %i",
             "(cls.vidConfig.displayHeight > 0)",
             0);
-    if (viewportX < 0.0)
-        MyAssertHandler(".\\client\\screen_placement.cpp", 55, 0, "%s\n\t(viewportX) = %g", "(viewportX >= 0)", viewportX);
-    if (viewportY < 0.0)
-        MyAssertHandler(".\\client\\screen_placement.cpp", 56, 0, "%s\n\t(viewportY) = %g", "(viewportY >= 0)", viewportY);
-    if (viewportWidth <= 0.0)
-        MyAssertHandler(
-            ".\\client\\screen_placement.cpp",
-            57,
-            0,
-            "%s\n\t(viewportWidth) = %g",
-            "(viewportWidth > 0)",
-            viewportWidth);
-    if (viewportHeight <= 0.0)
-        MyAssertHandler(
-            ".\\client\\screen_placement.cpp",
-            58,
-            0,
-            "%s\n\t(viewportHeight) = %g",
-            "(viewportHeight > 0)",
-            viewportHeight);
+    vassert((viewportX >= 0), "(viewportX) = %g", viewportX);
+    vassert((viewportY >= 0), "(viewportY) = %g", viewportY);
+    vassert((viewportWidth > 0), "(viewportWidth) = %g", viewportWidth);
+    vassert((viewportHeight > 0), "(viewportHeight) = %g", viewportHeight);
     if ((double)cls.vidConfig.displayWidth < viewportX + viewportWidth)
     {
         v9 = va("%g + %g > %i", viewportX, viewportWidth, cls.vidConfig.displayWidth);
@@ -333,14 +310,7 @@ double __cdecl ScrPlace_ApplyX(const ScreenPlacement *scrPlace, float x, int hor
         result = v7;
         break;
     default:
-        if (horzAlign)
-            MyAssertHandler(
-                ".\\client\\screen_placement.cpp",
-                158,
-                0,
-                "%s\n\t(horzAlign) = %i",
-                "(horzAlign == 0)",
-                horzAlign);
+        vassert((horzAlign == 0), "(horzAlign) = %i", horzAlign);
         v10 = x * scrPlace->scaleVirtualToReal[0] + scrPlace->subScreenLeft;
         result = v10;
         break;
@@ -389,14 +359,7 @@ double __cdecl ScrPlace_ApplyY(const ScreenPlacement *scrPlace, float y, int ver
         result = v7;
         break;
     default:
-        if (vertAlign)
-            MyAssertHandler(
-                ".\\client\\screen_placement.cpp",
-                195,
-                0,
-                "%s\n\t(vertAlign) = %i",
-                "(vertAlign == 0)",
-                vertAlign);
+        vassert((vertAlign == 0), "(vertAlign) = %i", vertAlign);
         v10 = y * scrPlace->scaleVirtualToReal[1];
         result = v10;
         break;
@@ -413,14 +376,10 @@ void __cdecl ScrPlace_ApplyRect(
     int horzAlign,
     int vertAlign)
 {
-    if (!x)
-        MyAssertHandler(".\\client\\screen_placement.cpp", 244, 0, "%s", "x");
-    if (!y)
-        MyAssertHandler(".\\client\\screen_placement.cpp", 245, 0, "%s", "y");
-    if (!w)
-        MyAssertHandler(".\\client\\screen_placement.cpp", 246, 0, "%s", "w");
-    if (!h)
-        MyAssertHandler(".\\client\\screen_placement.cpp", 247, 0, "%s", "h");
+    iassert(x);
+    iassert(y);
+    iassert(w);
+    iassert(h);
     switch (horzAlign)
     {
     case 0:

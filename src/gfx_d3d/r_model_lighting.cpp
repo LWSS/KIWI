@@ -268,14 +268,7 @@ uint __cdecl R_AllocModelLighting(
         modelLightGlob.pixelFreeRover = pixelFreeRover;
         modelLightGlob.currPixelFreeBits[pixelFreeRover] &= ~(0x80000000 >> usedCount);
         usedIndexa = usedCount + 32 * pixelFreeRover;
-        if (usedIndexa >= modelLightGlob.xmodelEntryLimit)
-            MyAssertHandler(
-                ".\\r_model_lighting.cpp",
-                362,
-                0,
-                "usedIndex doesn't index modelLightGlob.xmodelEntryLimit\n\t%i not in [0, %i)",
-                usedIndexa,
-                modelLightGlob.xmodelEntryLimit);
+        bcassert(usedIndexa, modelLightGlob.xmodelEntryLimit);
         entryIndex = usedIndexa + modelLightGlob.xmodel.baseIndex;
         lightingHandlea = usedIndexa + LOWORD(modelLightGlob.xmodel.baseIndex) + 1;
         v9 = modelLightGlob.lightingOrigins[usedIndexa];
@@ -449,14 +442,7 @@ void __cdecl R_SetStaticModelLighting(uint smodelIndex)
     const GfxStaticModelInst *smodelInst; // [esp+8h] [ebp-10h]
     float lightingOrigin[3]; // [esp+Ch] [ebp-Ch] BYREF
 
-    if (smodelIndex >= rgp.world->dpvs.smodelCount)
-        MyAssertHandler(
-            ".\\r_model_lighting.cpp",
-            728,
-            0,
-            "smodelIndex doesn't index rgp.world->dpvs.smodelCount\n\t%i not in [0, %i)",
-            smodelIndex,
-            rgp.world->dpvs.smodelCount);
+    bcassert(smodelIndex, rgp.world->dpvs.smodelCount);
     smodelInst = &rgp.world->dpvs.smodelInsts[smodelIndex];
     Vec3Avg(smodelInst->mins, smodelInst->maxs, lightingOrigin);
     smodelDrawInst = &rgp.world->dpvs.smodelDrawInsts[smodelIndex];

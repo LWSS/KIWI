@@ -96,14 +96,7 @@ void __cdecl CG_DrawInformation(int localClientNum)
     int v2; // r3
 
     iassert(!drawInformationCalled);
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            910,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     if (!cgArray[0].loaded)
     {
         v2 = Sys_Milliseconds();

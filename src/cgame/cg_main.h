@@ -560,14 +560,7 @@ inline int CG_GetEntityIndex(const centity_s *cent)
 
 inline int CG_GetLocalClientTime(int localClientNum)
 {
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            910,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     return cgArray[localClientNum].time;
 }
 

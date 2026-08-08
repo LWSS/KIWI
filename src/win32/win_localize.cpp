@@ -16,8 +16,7 @@ char* __cdecl Win_CopyLocalizationString(const char* string)
 
 char* __cdecl Win_GetLanguage()
 {
-	if (!localization.language)
-		MyAssertHandler(".\\win32\\win_localize.cpp", 145, 0, "%s", "localization.language");
+	iassert(localization.language);
 	return localization.language;
 }
 
@@ -41,8 +40,7 @@ int __cdecl Win_InitLocalization()
 
     size = FS_FileGetFileSize(fp);
 
-    if (size >= LANGUAGE_BUF_SIZE)
-        MyAssertHandler(".\\win32\\win_localize.cpp", 44, 0, "%s", "size < LANGUAGE_BUF_SIZE");
+    iassert(size < LANGUAGE_BUF_SIZE);
 
     localization.language = language_buffer;
     sizea = FS_FileRead(language_buffer, size, fp);

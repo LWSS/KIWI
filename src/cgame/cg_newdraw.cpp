@@ -800,14 +800,7 @@ Material *__cdecl CG_ObjectiveIcon(int icon, unsigned int type)
 {
     char v5[72]; // [sp+50h] [-60h] BYREF
 
-    if (type >= 2)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_newDraw.cpp",
-            1128,
-            0,
-            "type doesn't index ARRAY_COUNT( cgMedia.objectiveMaterials )\n\t%i not in [0, %i)",
-            type,
-            2);
+    bcassert(type, 2);
     if (icon && CG_ServerMaterialName(0, icon, v5, 0x40u))
         return Material_RegisterHandle(v5, 7);
     else
@@ -816,14 +809,7 @@ Material *__cdecl CG_ObjectiveIcon(int icon, unsigned int type)
 
 void __cdecl CG_UpdateCursorHints(int localClientNum)
 {
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            910,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     if (cgArray[0].nextSnap->ps.cursorHint)
     {
         cgArray[0].cursorHintTime = cgArray[0].time;
@@ -843,14 +829,7 @@ char *__cdecl CG_GetWeaponUseString(int localClientNum, const char **secondarySt
     char *v9; // r30
     char v11[336]; // [sp+50h] [-150h] BYREF
 
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            910,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     cursorHintIcon = cgArray[0].cursorHintIcon;
     if (cgArray[0].cursorHintIcon < 5 || cgArray[0].cursorHintIcon > 132)
     {
@@ -864,14 +843,7 @@ char *__cdecl CG_GetWeaponUseString(int localClientNum, const char **secondarySt
     }
     v5 = cursorHintIcon - 4;
     WeaponDef = BG_GetWeaponDef(cursorHintIcon - 4);
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            924,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     v7 = (char *)cg_weaponsArray + 72 * v5;
     if (WeaponDef->inventoryType)
     {
@@ -905,14 +877,7 @@ char *__cdecl CG_GetUseString(int localClientNum)
     const char *v6; // r3
     char v8[264]; // [sp+50h] [-120h] BYREF
 
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            910,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     cursorHintString = cgArray[0].cursorHintString;
     if (cgArray[0].cursorHintString < 0)
     {
@@ -1626,8 +1591,7 @@ void __cdecl CG_DrawInvalidCmdHint(
         string = UI_SafeTranslateString("WEAPON_TARGET_NOT_ENOUGH_CLEARANCE");
     LABEL_21:
         blinkInterval = cg_invalidCmdHintBlinkInterval->current.integer;
-        if (blinkInterval <= 0)
-            MyAssertHandler(".\\cgame_mp\\cg_newDraw_mp.cpp", 1667, 0, "%s", "blinkInterval > 0");
+        iassert(blinkInterval > 0);
         color[3] = (float)((cgameGlob->time - cgameGlob->invalidCmdHintTime) % blinkInterval) / (float)blinkInterval;
         x = rect->x - SnapFloat(UI_TextWidth(string, 0, font, fontscale) * 0.5f);
         UI_DrawText(
@@ -2408,14 +2372,7 @@ void __cdecl CG_DrawPlayerWeaponName(
     const char *string; // r31
 	float drawColor[4];
 
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            910,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
 	drawColor[3] = CG_FadeHudMenu(localClientNum, hud_fade_ammodisplay, cgArray[0].weaponSelectTime, 1800);
 	if ((cgArray[0].predictedPlayerState.eFlags & 0x20000) == 0 && (cgArray[0].predictedPlayerState.weapFlags & 0x80) == 0 && drawColor[3] != 0.0f)
     {
@@ -2570,14 +2527,7 @@ void __cdecl CG_DrawPlayerStance(
 
     if (hud_showStance->current.enabled)
     {
-        if (localClientNum)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-                910,
-                0,
-                "%s\n\t(localClientNum) = %i",
-                "(localClientNum == 0)",
-                localClientNum);
+        vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
         *(double *)&v11 = (float)((float)(hud_fade_stance->current.value * (float)1000.0) + (float)0.5);
         v12 = floor(v11);
         v13 = CG_FadeHudMenu(localClientNum, hud_fade_stance, cgArray[0].stanceFadeTime, (int)(float)*(double *)&v12);

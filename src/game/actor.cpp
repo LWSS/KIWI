@@ -312,21 +312,11 @@ void __cdecl Actor_FinishSpawning(actor_s *self)
     int *DataForFile; // r29
     unsigned __int16 v6; // r3
 
-    if (!self->ent)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 747, 0, "%s", "self->ent");
-    if (self->ent->actor != self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 748, 0, "%s", "self->ent->actor == self");
-    if (!self->sentient)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 749, 0, "%s", "self->sentient");
-    if (self->ent->sentient != self->sentient)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp",
-            750,
-            0,
-            "%s",
-            "self->ent->sentient == self->sentient");
-    if (self->sentient->ent != self->ent)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 751, 0, "%s", "self->sentient->ent == self->ent");
+    iassert(self->ent);
+    iassert(self->ent->actor == self);
+    iassert(self->sentient);
+    iassert(self->ent->sentient == self->sentient);
+    iassert(self->sentient->ent == self->ent);
     ent = self->ent;
     v3 = G_Find(0, 284, scr_const.player);
     if (!v3)
@@ -380,13 +370,7 @@ actor_s *__cdecl Actor_FirstActor(int iTeamFlags)
     int v3; // r31
     actor_s *actors; // r11
 
-    if (iTeamFlags > 31)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp",
-            882,
-            0,
-            "%s",
-            "iTeamFlags <= (1 << TEAM_NUM_TEAMS) - 1");
+    iassert(iTeamFlags <= (1 << TEAM_NUM_TEAMS) - 1);
     v2 = 0;
     v3 = 0;
     actors = level.actors;
@@ -416,15 +400,8 @@ actor_s *__cdecl Actor_NextActor(actor_s *pPrevActor, int iTeamFlags)
     int v5; // r30
     int v6; // r31
 
-    if (iTeamFlags > 31)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp",
-            907,
-            0,
-            "%s",
-            "iTeamFlags <= (1 << TEAM_NUM_TEAMS) - 1");
-    if (!pPrevActor)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 909, 0, "%s", "pPrevActor");
+    iassert(iTeamFlags <= (1 << TEAM_NUM_TEAMS) - 1);
+    iassert(pPrevActor);
     actors = level.actors;
     if (pPrevActor < level.actors || pPrevActor >= &level.actors[32])
     {
@@ -472,8 +449,7 @@ actor_s *__cdecl Actor_NextActor(actor_s *pPrevActor, int iTeamFlags)
 
 void __cdecl Actor_ClearArrivalPos(actor_s *self)
 {
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 1013, 0, "%s", "self");
+    iassert(self);
     self->arrivalInfo.animscriptOverrideRunTo = 0;
     self->arrivalInfo.arrivalNotifyRequested = 0;
 }
@@ -483,8 +459,7 @@ void __cdecl Actor_PreThink(actor_s *self)
     int flashBanged; // r10
     sentient_s *v3; // r3
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 1069, 0, "%s", "self");
+    iassert(self);
     if (self->preThinkTime != level.time)
     {
         flashBanged = self->flashBanged;
@@ -530,19 +505,10 @@ void __cdecl Actor_Touch(gentity_s *self, gentity_s *other, int bTouched)
     ai_state_t v7; // r8
 
     actor = self->actor;
-    if (!actor)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 1490, 0, "%s", "actor");
-    if (!actor->inuse)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 1491, 0, "%s", "actor->inuse");
+    iassert(actor);
+    iassert(actor->inuse);
     stateLevel = actor->stateLevel;
-    if (stateLevel >= 5)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp",
-            1500,
-            0,
-            "actor->stateLevel doesn't index ARRAY_COUNT( actor->eState )\n\t%i not in [0, %i)",
-            stateLevel,
-            5);
+    bcassert(stateLevel, 5);
     v6 = actor->eState[actor->stateLevel];
     if (v6 <= 0 || v6 >= 11)
         MyAssertHandler(
@@ -566,8 +532,7 @@ void __cdecl Actor_Touch(gentity_s *self, gentity_s *other, int bTouched)
 
 bool __cdecl Actor_InScriptedState(const actor_s *self)
 {
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 1516, 0, "%s", "self");
+    iassert(self);
     return Actor_IsStateOnStack(self, AIS_SCRIPTEDANIM) || Actor_IsStateOnStack(self, AIS_NEGOTIATION) != 0;
 }
 
@@ -575,10 +540,8 @@ int __cdecl Actor_CheckDeathAllowed(actor_s *self, int damage)
 {
     int health; // r11
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 1532, 0, "%s", "self");
-    if (!self->ent)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 1533, 0, "%s", "self->ent");
+    iassert(self);
+    iassert(self->ent);
     if (damage < self->ent->health || self->allowDeath || !Actor_InScriptedState(self))
         return 0;
     health = self->ent->health;
@@ -608,32 +571,12 @@ void __cdecl Actor_Pain(
     sentient_s *sentient; // r4
 
     actor = self->actor;
-    if (!actor)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 1568, 0, "%s", "actor");
-    if (!actor->inuse)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 1569, 0, "%s", "actor->inuse");
-    if (!vDir)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 1570, 0, "%s", "vDir");
-    if ((COERCE_UNSIGNED_INT(*vDir) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(vDir[1]) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(vDir[2]) & 0x7F800000) == 0x7F800000)
-    {
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp",
-            1571,
-            0,
-            "%s",
-            "!IS_NAN((vDir)[0]) && !IS_NAN((vDir)[1]) && !IS_NAN((vDir)[2])");
-    }
+    iassert(actor);
+    iassert(actor->inuse);
+    iassert(vDir);
+    nanassertvec3(vDir);
     stateLevel = actor->stateLevel;
-    if (stateLevel >= 5)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp",
-            1590,
-            0,
-            "actor->stateLevel doesn't index ARRAY_COUNT( actor->eState )\n\t%i not in [0, %i)",
-            stateLevel,
-            5);
+    bcassert(stateLevel, 5);
     v18 = actor->eState[actor->stateLevel];
     if (v18 <= 0 || v18 >= 11)
         MyAssertHandler(
@@ -663,13 +606,7 @@ void __cdecl Actor_Pain(
             MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 1606, 0, "%s", "weapDef->szInternalName");
         Scr_SetStringFromCharString(&actor->damageWeapon, WeaponDef->szInternalName);
     }
-    if (!AIFuncTable[actor->species][actor->eState[actor->stateLevel]].pfnPain)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp",
-            1611,
-            0,
-            "%s",
-            "AIFuncTable[actor->species][actor->eState[actor->stateLevel]].pfnPain");
+    iassert(AIFuncTable[actor->species][actor->eState[actor->stateLevel]].pfnPain);
     AIFuncTable[actor->species][actor->eState[actor->stateLevel]].pfnPain(
         actor,
         pAttacker,
@@ -711,25 +648,11 @@ void __cdecl Actor_Die(
     WeaponDef *WeaponDef; // r29
 
     actor = self->actor;
-    if (!actor)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 1643, 0, "%s", "actor");
-    if (!actor->inuse)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 1644, 0, "%s", "actor->inuse");
-    if (!vDir)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 1645, 0, "%s", "vDir");
-    if ((COERCE_UNSIGNED_INT(*vDir) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(vDir[1]) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(vDir[2]) & 0x7F800000) == 0x7F800000)
-    {
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp",
-            1646,
-            0,
-            "%s",
-            "!IS_NAN((vDir)[0]) && !IS_NAN((vDir)[1]) && !IS_NAN((vDir)[2])");
-    }
-    if (!actor->ent)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 1659, 0, "%s", "actor->ent");
+    iassert(actor);
+    iassert(actor->inuse);
+    iassert(vDir);
+    nanassertvec3(vDir);
+    iassert(actor->ent);
     health = actor->ent->health;
     if (health > 0)
         MyAssertHandler(
@@ -740,14 +663,7 @@ void __cdecl Actor_Die(
             "(actor->ent->health <= 0)",
             health);
     stateLevel = actor->stateLevel;
-    if (stateLevel >= 5)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp",
-            1661,
-            0,
-            "actor->stateLevel doesn't index ARRAY_COUNT( actor->eState )\n\t%i not in [0, %i)",
-            stateLevel,
-            5);
+    bcassert(stateLevel, 5);
     v17 = actor->eState[actor->stateLevel];
     if (v17 <= 0 || v17 >= 11)
         MyAssertHandler(
@@ -789,8 +705,7 @@ void __cdecl Actor_Die(
 
 bool __cdecl Actor_IsDying(const actor_s *self)
 {
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 1712, 0, "%s", "self");
+    iassert(self);
     return self->eState[self->stateLevel] == AIS_DEATH;
 }
 
@@ -806,10 +721,8 @@ bool __cdecl usingCodeGoal(actor_s *actor)
 
 gentity_s *__cdecl Actor_GetTargetEntity(actor_s *self)
 {
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 2308, 0, "%s", "self");
-    if (!self->sentient)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 2309, 0, "%s", "self->sentient");
+    iassert(self);
+    iassert(self->sentient);
     if (self->sentient->targetEnt.isDefined())
         return self->sentient->targetEnt.ent();
     else
@@ -906,8 +819,7 @@ int __cdecl Actor_Physics_GetLeftOrRightDodge(actor_s *self, bool dodgeRight, do
     double v11; // fp13
     double v12; // fp0
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 2411, 0, "%s", "self");
+    iassert(self);
     flags = self->ent->flags;
     if (dodgeRight)
     {
@@ -1097,8 +1009,7 @@ void __cdecl actor_controller(const gentity_s *self, int *partBits)
     DObjAnimMat *RotTransArray; // r3
     DObjAnimMat *v7; // r30
 
-    if (!self->actor)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 3085, 0, "%s", "self->actor");
+    iassert(self->actor);
     p_ProneInfo = &self->actor->ProneInfo;
     if (BG_ActorIsProne(p_ProneInfo, level.time) && SV_DObjSetRotTransIndex(self, partBits, 0))
     {
@@ -1227,10 +1138,8 @@ pathnode_t *__cdecl Actor_FindClaimedNode(actor_s *self)
     pathnode_t *result; // r3
     pathnode_t *node; // r4
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 3503, 0, "%s", "self");
-    if (self->ent->tagInfo)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 3504, 0, "%s", "!self->ent->tagInfo");
+    iassert(self);
+    iassert(!self->ent->tagInfo);
     pClaimedNode = self->sentient->pClaimedNode;
     if (pClaimedNode)
     {
@@ -1264,10 +1173,8 @@ bool __cdecl Actor_EnemyInPathFightDist(actor_s *self, sentient_s *enemy)
     double v5; // fp0
     double v6; // fp13
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 3541, 0, "%s", "self");
-    if (!enemy)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 3542, 0, "%s", "enemy");
+    iassert(self);
+    iassert(enemy);
     result = 0;
     v5 = (float)(enemy->ent->r.currentOrigin[0] - self->ent->r.currentOrigin[0]);
     v6 = (float)(enemy->ent->r.currentOrigin[1] - self->ent->r.currentOrigin[1]);
@@ -1394,10 +1301,8 @@ gentity_s *__cdecl Actor_IsKnownEnemyInRegion(
     const actor_s *actor; // r3
     bool v16; // cr58
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 3772, 0, "%s", "self");
-    if (!position)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 3773, 0, "%s", "position");
+    iassert(self);
+    iassert(position);
     if (radius == 0.0 && !volume)
         return 0;
     v8 = 0;
@@ -1450,8 +1355,7 @@ int __cdecl Actor_InFixedNodeExposedCombat(actor_s *self)
     bool v7; // r3
     unsigned __int8 v8; // r11
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 3882, 0, "%s", "self");
+    iassert(self);
     TargetEntity = Actor_GetTargetEntity(self);
     if (!TargetEntity)
         return 0;
@@ -1477,8 +1381,7 @@ int __cdecl Actor_InFixedNodeExposedCombat(actor_s *self)
 
 bool __cdecl Actor_HasPath(actor_s *self)
 {
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 4490, 0, "%s", "self");
+    iassert(self);
     return Path_Exists(&self->Path);
 }
 
@@ -1490,8 +1393,7 @@ void __cdecl Actor_InitPath(actor_s *self)
 
 void __cdecl Actor_ClearPath(actor_s *self)
 {
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 4516, 0, "%s", "self");
+    iassert(self);
     if (self->Path.wPathLen)
     {
         Path_AddTrimmedAmount(&self->Path, self->ent->r.currentOrigin);
@@ -1545,8 +1447,7 @@ bool __cdecl Actor_SkipPathEndActions(actor_s *self)
     double v6; // fp29
     char v7; // r11
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 4567, 0, "%s", "self");
+    iassert(self);
     if (self->Path.iPathEndTime)
         return 0;
     if (!self->Physics.bHasGroundPlane && self->Physics.groundEntNum == ENTITYNUM_NONE
@@ -1670,11 +1571,9 @@ void __cdecl Actor_PredictAnim(actor_s *self)
     int Int; // r3
     int updated; // r3
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 4921, 0, "%s", "self");
+    iassert(self);
     ent = self->ent;
-    if (!ent)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 4923, 0, "%s", "ent");
+    iassert(ent);
     Int = Scr_GetInt(0);
     updated = G_DObjUpdateServerTime(ent, Int);
     Scr_AddInt(updated);
@@ -1707,10 +1606,8 @@ void __cdecl Actor_CheckCollisions(actor_s *self)
     actor_s *v8; // r31
     float v9[20]; // [sp+50h] [-50h] BYREF
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 4962, 0, "%s", "self");
-    if (!self->sentient)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 4963, 0, "%s", "self->sentient");
+    iassert(self);
+    iassert(self->sentient);
     if (!self->pCloseEnt.isDefined())
     {
         ent = self->ent;
@@ -1746,18 +1643,15 @@ void __cdecl Actor_ClearPileUp(actor_s *self)
 
 void __cdecl Actor_ClipPathToGoal(actor_s *self)
 {
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 5045, 0, "%s", "self");
-    if (!self->sentient)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 5046, 0, "%s", "self->sentient");
+    iassert(self);
+    iassert(self->sentient);
     if (!Path_ClipToGoal(&self->Path, &self->codeGoal))
         Actor_ClearPath(self);
 }
 
 void __cdecl Actor_BeginTrimPath(actor_s *self)
 {
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 5058, 0, "%s", "self");
+    iassert(self);
     Path_BeginTrim(&self->Path, &self->TrimInfo);
 }
 
@@ -2033,10 +1927,8 @@ void __cdecl Actor_UpdateMoveHistory(actor_s *self)
 
 void __cdecl Path_UpdateLeanAmount(actor_s *self, float *vWishDir)
 {
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 5186, 0, "%s", "self");
-    if (!vWishDir)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 5187, 0, "%s", "vWishDir");
+    iassert(self);
+    iassert(vWishDir);
     if (self->Path.wNegotiationStartNode == self->Path.wPathLen - 2
         && Actor_PointNearPoint(
             self->ent->r.currentOrigin,
@@ -2272,12 +2164,9 @@ void __cdecl G_BypassForCG_GetClientActorIndexAndTeam(int iEntNum, int *actorInd
     const char *v10; // r3
     const char *v11; // r3
 
-    if (!Sys_IsMainThread())
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 5415, 0, "%s", "Sys_IsMainThread()");
-    if (!actorIndex)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 5416, 0, "%s", "actorIndex");
-    if (!team)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 5417, 0, "%s", "team");
+    iassert(Sys_IsMainThread());
+    iassert(actorIndex);
+    iassert(team);
     *actorIndex = level.specialIndex[iEntNum];
     if (*actorIndex >= 32)
     {
@@ -2318,8 +2207,7 @@ unsigned int __cdecl G_BypassForCG_GetClientActorFriendlyIndex(int iEntNum)
     const char *v8; // r3
     unsigned int result; // r3
 
-    if (!Sys_IsMainThread())
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 5431, 0, "%s", "Sys_IsMainThread()");
+    iassert(Sys_IsMainThread());
     v2 = level.specialIndex[iEntNum];
     if (v2 >= 0x20)
     {
@@ -2354,8 +2242,7 @@ unsigned int __cdecl G_BypassForCG_GetClientActorFriendlyIndex(int iEntNum)
 
 gentity_s *__cdecl G_GetFriendlyIndexActor(int iFriendlyIndex)
 {
-    if (iFriendlyIndex >= 32)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 5451, 0, "%s", "iFriendlyIndex < MAX_ACTORS");
+    iassert(iFriendlyIndex < MAX_ACTORS);
     return level.actors[iFriendlyIndex].ent;
 }
 
@@ -2363,8 +2250,7 @@ void __cdecl Actor_SetFlashed(actor_s *self, int flashed, double strength)
 {
     sentient_s *sentient; // r3
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 5460, 0, "%s", "self");
+    iassert(self);
     if (!flashed || self->flashBangImmunity)
     {
         self->flashBangedStrength = 0.0;
@@ -2450,8 +2336,7 @@ void __cdecl Actor_UpdateDesiredChainPos(actor_s *self)
     int iFollowMax; // r5
     pathnode_t *pDesiredChainPos; // r31
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 5540, 0, "%s", "self");
+    iassert(self);
     sentient = self->sentient;
     if (!self->scriptGoalEnt.isDefined())
         goto LABEL_16;
@@ -2531,10 +2416,8 @@ bool __cdecl Actor_IsInsideArc(
 
 void __cdecl SentientInfo_Copy(actor_s *pTo, const actor_s *pFrom, int index)
 {
-    if (!pTo)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 153, 0, "%s", "pTo");
-    if (!pFrom)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 154, 0, "%s", "pFrom");
+    iassert(pTo);
+    iassert(pFrom);
     if (((1 << pTo->species) & pFrom->talkToSpecies) != 0)
     {
         sentient_info_t *to = &pTo->sentientInfo[index];
@@ -2590,8 +2473,7 @@ void __cdecl Actor_Free(actor_s *actor)
     int i; // r10
     actor_s *v8; // r11
 
-    if (!actor)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 404, 0, "%s", "actor");
+    iassert(actor);
     actors = level.actors;
     if (!level.actors)
     {
@@ -2615,10 +2497,8 @@ void __cdecl Actor_Free(actor_s *actor)
             0,
             "%s",
             "&level.actors[actor - level.actors] == actor");
-    if (!actor->sentient)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 408, 0, "%s", "actor->sentient");
-    if (!actor->inuse)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 409, 0, "%s", "actor->inuse");
+    iassert(actor->sentient);
+    iassert(actor->inuse);
     ent = actor->ent;
     Actor_ClearPath(actor);
     Actor_StopUseTurret(actor);
@@ -2833,8 +2713,7 @@ void __cdecl Actor_FreeExpendable()
         MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 625, 0, "%s", "ent->sentient == NULL");
     if (v1->inuse)
         MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 627, 0, "%s", "!pExpendable->inuse");
-    if (sentient->inuse)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 628, 0, "%s", "!sentient->inuse");
+    iassert(!sentient->inuse);
 }
 
 #define ACTOR_CLASSNAME_PREFIX "actor_"
@@ -2888,14 +2767,10 @@ void __cdecl Actor_FinishSpawningAll()
 
 void __cdecl Actor_DissociateSentient(actor_s *self, sentient_s *other, team_t eOtherTeam)
 {
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 860, 0, "%s", "self");
-    if (!self->sentient)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 861, 0, "%s", "self->sentient");
-    if (self->sentient == other)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 862, 0, "%s", "self->sentient != other");
-    if (other->eTeam != TEAM_DEAD)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 863, 0, "%s", "other->eTeam == TEAM_DEAD");
+    iassert(self);
+    iassert(self->sentient);
+    iassert(self->sentient != other);
+    iassert(other->eTeam == TEAM_DEAD);
     SentientInfo_Clear(&self->sentientInfo[other - level.sentients]);
     Actor_DissociateSuppressor(self, other);
     if (other == Actor_GetTargetSentient(self))
@@ -2906,10 +2781,8 @@ void __cdecl Actor_NodeClaimRevoked(actor_s *self, int invalidTime)
 {
     pathnode_t *pClaimedNode; // r31
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 937, 0, "%s", "self");
-    if (!self->sentient)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 938, 0, "%s", "self->sentient");
+    iassert(self);
+    iassert(self->sentient);
     pClaimedNode = self->sentient->pClaimedNode;
     if (pClaimedNode)
     {
@@ -2940,8 +2813,7 @@ int __cdecl Actor_KeepClaimedNode(actor_s *self)
 {
     pathnode_t *pClaimedNode; // r11
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 974, 0, "%s", "self");
+    iassert(self);
     if (self->keepClaimedNode)
         return 1;
     if (self->keepClaimedNodeInGoal)
@@ -2956,8 +2828,7 @@ int __cdecl Actor_KeepClaimedNode(actor_s *self)
 
 void __cdecl Actor_ClearKeepClaimedNode(actor_s *self)
 {
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 1003, 0, "%s", "self");
+    iassert(self);
     self->keepClaimedNode = 0;
     self->keepClaimedNodeInGoal = 0;
     self->arrivalInfo.animscriptOverrideRunTo = 0;
@@ -4018,8 +3889,7 @@ int __cdecl Actor_IsFixedNodeUseable(actor_s *self)
     const gentity_s *v7; // r4
     gentity_s *v8; // r3
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 3830, 0, "%s", "self");
+    iassert(self);
     node = self->codeGoal.node;
     v4 = !Path_Exists(&self->Path);
     p_codeGoal = &self->codeGoal;
@@ -4606,8 +4476,7 @@ void __cdecl Actor_UpdateGoalPos(actor_s *self)
     pathnode_t *node; // r11
     gentity_s *volume; // r10
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 5599, 0, "%s", "self");
+    iassert(self);
     p_codeGoal = &self->codeGoal;
     v3 = self->codeGoal.pos[0];
     v4 = self->codeGoal.pos[1];
@@ -4668,8 +4537,7 @@ void __cdecl Actor_UpdateGoalPos(actor_s *self)
         goto LABEL_24;
     }
     enemy = Actor_GetTargetSentient(self);
-    if (!enemy)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 5606, 0, "%s", "enemy");
+    iassert(enemy);
 
     {
         sentient_info_t *pInfo = &self->sentientInfo[enemy - level.sentients];
@@ -4873,12 +4741,9 @@ int __cdecl Actor_CheckGoalNotify(actor_s *self)
 
 void __cdecl Actor_CheckNotify(actor_s *self)
 {
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 1289, 0, "%s", "self");
-    if (!self->sentient)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 1290, 0, "%s", "self->sentient");
-    if (!self->ent)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 1291, 0, "%s", "self->ent");
+    iassert(self);
+    iassert(self->sentient);
+    iassert(self->ent);
     if ((unsigned __int8)Actor_CheckGoalNotify(self))
         Scr_Notify(self->ent, scr_const.goal, 0);
     if (self->arrivalInfo.animscriptOverrideRunTo)
@@ -5090,13 +4955,7 @@ int __cdecl Actor_PhysicsAndDodge(actor_s *self)
                 0,
                 "%s",
                 "self->Path.wNegotiationStartNode >= 0");
-        if (self->Path.wPathLen - 2 < self->Path.wNegotiationStartNode)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp",
-                2530,
-                0,
-                "%s",
-                "self->Path.wPathLen - 2 >= self->Path.wNegotiationStartNode");
+        iassert(self->Path.wPathLen - 2 >= self->Path.wNegotiationStartNode);
         v13 = (float *)&self->Physics.iTouchEnts[7 * self->Path.wPathLen + 27];
         v14 = 0;
         v15 = sqrtf((float)((float)(self->Physics.vWishDelta[0] * self->Physics.vWishDelta[0])
@@ -5359,10 +5218,8 @@ bool __cdecl Actor_IsAtGoal(actor_s *self)
 {
     gentity_s *ent; // r28
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 3217, 0, "%s", "self");
-    if (!self->sentient)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 3218, 0, "%s", "self->sentient");
+    iassert(self);
+    iassert(self->sentient);
     ent = self->ent;
     if (!self->ent)
         MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 3221, 0, "%s", "ent");
@@ -5501,13 +5358,11 @@ void __cdecl Actor_FindPathToGoalDirect(actor_s *self)
 {
     bool PathToGoalDirectInternal; // r27
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 4490, 0, "%s", "self");
+    iassert(self);
     if (Path_Exists(&self->Path) || level.time >= self->pathWaitTime)
     {
         PathToGoalDirectInternal = Actor_FindPathToGoalDirectInternal(self);
-        if (!self)
-            MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 4490, 0, "%s", "self");
+        iassert(self);
         if (!Path_Exists(&self->Path))
         {
             self->pPileUpActor = 0;
@@ -5530,12 +5385,9 @@ int __cdecl Actor_FindPathToClaimNode(actor_s *self, pathnode_t *node)
     bool Path; // r28
     float *currentOrigin; // r3
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 3452, 0, "%s", "self");
-    if (self->ent->tagInfo)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 3453, 0, "%s", "!self->ent->tagInfo");
-    if (!node)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 3454, 0, "%s", "node");
+    iassert(self);
+    iassert(!self->ent->tagInfo);
+    iassert(node);
     v4 = Path_Exists(&self->Path);
     if (!v4 && level.time < self->pathWaitTime)
     {
@@ -5597,8 +5449,7 @@ int __cdecl Actor_CheckStop(actor_s *self, bool canUseEnemyGoal, pathnode_t *nod
     TargetSentient = Actor_GetTargetSentient(self);
     if (!TargetSentient)
         return 0;
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 4490, 0, "%s", "self");
+    iassert(self);
     if (!Path_Exists(&self->Path)
         || !Actor_EnemyInPathFightDist(self, TargetSentient)
         || node && Actor_PointNearNode(self->ent->r.currentOrigin, node)
@@ -5692,8 +5543,7 @@ void __cdecl Actor_FindPathToFixedNode(actor_s *self)
     bool v13; // r11
     bool v14; // zf
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 3921, 0, "%s", "self");
+    iassert(self);
     self->useEnemyGoal = 0;
     v2 = self->codeGoal.pos[0];
     v3 = self->codeGoal.pos[1];
@@ -5807,8 +5657,7 @@ void __cdecl Actor_FindPathToGoal(actor_s *self)
     bool v15; // r11
     bool v16; // zf
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 4032, 0, "%s", "self");
+    iassert(self);
     if (self->ent->tagInfo)
     {
         Actor_ClearPath(self);
@@ -5960,20 +5809,12 @@ void __cdecl Actor_PredictOriginAndAngles(actor_s *self)
 {
     gentity_s *ent; // r28
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 4901, 0, "%s", "self");
+    iassert(self);
     ent = self->ent;
     if (!self->ent)
         MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 4903, 0, "%s", "ent");
-    if (ent->tagInfo)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 4905, 0, "%s", "!ent->tagInfo");
-    if (self->eAnimMode == AI_ANIM_MOVE_CODE)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp",
-            4906,
-            0,
-            "%s",
-            "self->eAnimMode != AI_ANIM_MOVE_CODE");
+    iassert(!ent->tagInfo);
+    iassert(self->eAnimMode != AI_ANIM_MOVE_CODE);
     Actor_UpdateAnglesAndDelta(self);
     Actor_DoMove(self);
     SV_DObjInitServerTime(ent, 0.050000001);
@@ -5984,15 +5825,8 @@ void __cdecl Actor_PostThink(actor_s *self)
     pathnode_t *pClaimedNode; // r29
     gentity_s *v3; // r3
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp", 1091, 0, "%s", "self");
-    if (self->eAnimMode == AI_ANIM_UNKNOWN)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\actor.cpp",
-            1092,
-            0,
-            "%s",
-            "self->eAnimMode != AI_ANIM_UNKNOWN");
+    iassert(self);
+    iassert(self->eAnimMode != AI_ANIM_UNKNOWN);
     Actor_UpdateOriginAndAngles(self);
     if (self->eAnimMode != AI_ANIM_MOVE_CODE)
     {

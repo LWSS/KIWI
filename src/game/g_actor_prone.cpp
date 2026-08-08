@@ -92,8 +92,7 @@ void __cdecl G_InitActorProneInfo(actor_s *actor)
     actor_prone_info_s *p_ProneInfo; // r11
     int v3; // ctr
 
-    if (!actor)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_actor_prone.cpp", 56, 0, "%s", "actor");
+    iassert(actor);
     p_ProneInfo = &actor->ProneInfo;
     v3 = 6;
     do
@@ -197,8 +196,7 @@ void __cdecl G_ActorExitProne(actor_s *actor, unsigned int iTransTime)
             time = level.time - scaled;
         }
         actor->ProneInfo.iProneTime = time;
-        if (!actor->ProneInfo.prone)
-            MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_actor_prone.cpp", 113, 0, "%s", "actor->ProneInfo.prone");
+        iassert(actor->ProneInfo.prone);
         actor->ProneInfo.iProneTrans = -iTransTime;
     }
     if (BG_ActorGoalIsProne(p_ProneInfo))

@@ -54,10 +54,8 @@ void __cdecl SV_DisplaySaveErrorUI(void)
 
 bool __cdecl BuildCleanSavePath(char *cleanSavePath, unsigned int cleanSavePathSize, char const *filename, enum SaveType saveType)
 {
-	if (!filename)
-		MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\savedevice_xenon.cpp", 83, 0, "%s", "filename");
-	if (!cleanSavePath)
-		MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\savedevice_xenon.cpp", 84, 0, "%s", "cleanSavePath");
+	iassert(filename);
+	iassert(cleanSavePath);
 
 #ifdef KISAK_XBOX
 	if (saveType == SAVE_TYPE_AUTOSAVE)

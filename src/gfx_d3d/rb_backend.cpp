@@ -253,22 +253,8 @@ void __cdecl RB_DrawStretchPic(
 
 void __cdecl RB_CheckTessOverflow(int vertexCount, int indexCount)
 {
-    if (vertexCount > 5450)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\src\\gfx_d3d\\rb_backend.h",
-            153,
-            0,
-            "%s\n\t(vertexCount) = %i",
-            "(vertexCount <= 5450)",
-            vertexCount);
-    if (indexCount > 0x100000)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\src\\gfx_d3d\\rb_backend.h",
-            154,
-            0,
-            "%s\n\t(indexCount) = %i",
-            "(indexCount <= ((2 * 1024 * 1024) / 2))",
-            indexCount);
+    vassert((vertexCount <= 5450), "(vertexCount) = %i", vertexCount);
+    vassert((indexCount <= ((2 * 1024 * 1024) / 2)), "(indexCount) = %i", indexCount);
     if (vertexCount + tess.vertexCount > 5450 || indexCount + tess.indexCount > 0x100000)
         RB_TessOverflow();
 }
@@ -775,13 +761,7 @@ uint __cdecl R_RenderDrawSurfListMaterial(const GfxDrawSurfListArgs *listArgs, G
     isPixelCostEnabled = pixelCostMode != GFX_PIXEL_COST_MODE_OFF;
     if (pixelCostMode)
         R_PixelCost_BeginSurface(listArgs->context);
-    if (prepassContext.state && prepassContext.state->technique->passCount != 1)
-        MyAssertHandler(
-            ".\\rb_backend.cpp",
-            1013,
-            0,
-            "%s",
-            "!prepassContext.state || (prepassContext.state->technique->passCount == 1)");
+    iassert(!prepassContext.state || (prepassContext.state->technique->passCount == 1));
     passPrepassContext.source = prepassContext.source;
     subListCount = 0;
     for (passIndex = 0; passIndex < listArgs->context.state->technique->passCount; ++passIndex)
@@ -2814,32 +2794,11 @@ void __cdecl RB_CallExecuteRenderCommands()
     PROF_SCOPED("ExecuteRenderCmds");
     if ((backEndData->drawType & 2) != 0)
     {
-        if (g_primStats)
-            MyAssertHandler(
-                ".\\rb_backend.cpp",
-                3055,
-                0,
-                "%s\n\t(g_primStats - g_viewStats->primStats) = %i",
-                "(!g_primStats)",
-                ((char *)g_primStats - (char *)g_viewStats) / 24);
-        if (tess.indexCount)
-            MyAssertHandler(
-                ".\\rb_backend.cpp",
-                3057,
-                0,
-                "%s\n\t(tess.indexCount) = %i",
-                "(!tess.indexCount)",
-                tess.indexCount);
+        vassert((!g_primStats), "(g_primStats - g_viewStats->primStats) = %i", ((char *)g_primStats - (char *)g_viewStats) / 24);
+        vassert((!tess.indexCount), "(tess.indexCount) = %i", tess.indexCount);
         if (backEndData->viewInfoCount)
             RB_Draw3DCommon();
-        if (tess.indexCount)
-            MyAssertHandler(
-                ".\\rb_backend.cpp",
-                3062,
-                0,
-                "%s\n\t(tess.indexCount) = %i",
-                "(!tess.indexCount)",
-                tess.indexCount);
+        vassert((!tess.indexCount), "(tess.indexCount) = %i", tess.indexCount);
         R_InitCmdBufSourceState(&gfxCmdBufSourceState, &gfxCmdBufInput, 0);
         gfxCmdBufSourceState.input.data = backEndData;
         memcpy(&gfxCmdBufState, &gfxCmdBufState, sizeof(gfxCmdBufState));
@@ -2858,22 +2817,8 @@ void __cdecl RB_CallExecuteRenderCommands()
         if (gfxCmdBufState.prim.indexBuffer)
             R_ChangeIndices(&gfxCmdBufState.prim, 0);
         R_ClearAllStreamSources(&gfxCmdBufState.prim);
-        if (g_primStats)
-            MyAssertHandler(
-                ".\\rb_backend.cpp",
-                3100,
-                0,
-                "%s\n\t(g_primStats - g_viewStats->primStats) = %i",
-                "(!g_primStats)",
-                ((char *)g_primStats - (char *)g_viewStats) / 24);
-        if (tess.indexCount)
-            MyAssertHandler(
-                ".\\rb_backend.cpp",
-                3102,
-                0,
-                "%s\n\t(tess.indexCount) = %i",
-                "(!tess.indexCount)",
-                tess.indexCount);
+        vassert((!g_primStats), "(g_primStats - g_viewStats->primStats) = %i", ((char *)g_primStats - (char *)g_viewStats) / 24);
+        vassert((!tess.indexCount), "(tess.indexCount) = %i", tess.indexCount);
         iassert( dx.device );
         iassert( dx.inScene );
         do

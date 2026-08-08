@@ -130,14 +130,7 @@ uint __cdecl R_FindNearestReflectionProbeInCell(
     for (cellProbeIndex = 0; cellProbeIndex < cell->reflectionProbeCount; ++cellProbeIndex)
     {
         probeIndex = cell->reflectionProbes[cellProbeIndex];
-        if (probeIndex >= world->reflectionProbeCount)
-            MyAssertHandler(
-                ".\\r_dpvs.cpp",
-                714,
-                0,
-                "probeIndex doesn't index world->reflectionProbeCount\n\t%i not in [0, %i)",
-                probeIndex,
-                world->reflectionProbeCount);
+        bcassert(probeIndex, world->reflectionProbeCount);
         Vec3Sub(origin, world->reflectionProbes[probeIndex].origin, diff);
         testProbeDist = Vec3LengthSq(diff);
         if (bestProbeDist > (double)testProbeDist)
@@ -1050,14 +1043,7 @@ void __cdecl R_UnfilterEntFromCells(uint localClientNum, uint entnum)
             "(!(gfxCfg.entCount & 31))",
             gfxCfg.entCount);
     offset = localClientNum * (gfxCfg.entCount >> 5);
-    if (offset >= 0x80)
-        MyAssertHandler(
-            ".\\r_dpvs.cpp",
-            1781,
-            0,
-            "offset doesn't index MAX_TOTAL_ENT_COUNT >> 5\n\t%i not in [0, %i)",
-            offset,
-            128);
+    bcassert(offset, 0x80);
     entCellBits = &rgp.world->dpvsPlanes.sceneEntCellBits[offset];
     wordIndex = entnum >> 5;
     invBit = ~(0x80000000 >> (entnum & 0x1F));
@@ -1202,14 +1188,7 @@ void __cdecl R_FilterDObjIntoCells(uint localClientNum, uint entnum, float *orig
     float maxs[3]; // [esp+24h] [ebp-Ch] BYREF
 
     iassert( entnum != gfxCfg.entnumNone );
-    if (localClientNum >= gfxCfg.maxClientViews)
-        MyAssertHandler(
-            ".\\r_dpvs.cpp",
-            2137,
-            0,
-            "localClientNum doesn't index gfxCfg.maxClientViews\n\t%i not in [0, %i)",
-            localClientNum,
-            gfxCfg.maxClientViews);
+    bcassert(localClientNum, gfxCfg.maxClientViews);
     R_UnfilterEntFromCells(localClientNum, entnum);
     s = -radius;
     Vec3AddScalar(origin, s, mins);
@@ -1305,33 +1284,12 @@ void __cdecl R_AddEntToCell(FilterEntInfo *entInfo, uint cellIndex)
 
     iassert( Sys_IsMainThread() );
     localClientNum = entInfo->localClientNum;
-    if (entInfo->localClientNum >= gfxCfg.maxClientViews)
-        MyAssertHandler(
-            ".\\r_dpvs.cpp",
-            1840,
-            0,
-            "localClientNum doesn't index gfxCfg.maxClientViews\n\t%i not in [0, %i)",
-            localClientNum,
-            gfxCfg.maxClientViews);
+    bcassert(entInfo->localClientNum, gfxCfg.maxClientViews);
     entnum = entInfo->entnum;
     iassert( gfxCfg.maxClientViews * gfxCfg.entCount <= MAX_TOTAL_ENT_COUNT );
-    if ((gfxCfg.entCount & 7) != 0)
-        MyAssertHandler(
-            ".\\r_dpvs.cpp",
-            1846,
-            0,
-            "%s\n\t(gfxCfg.entCount) = %i",
-            "(!(gfxCfg.entCount & 7))",
-            gfxCfg.entCount);
+    vassert((!(gfxCfg.entCount & 7)), "(gfxCfg.entCount) = %i", gfxCfg.entCount);
     offset = localClientNum * (gfxCfg.entCount >> 5);
-    if (offset >= 0x80)
-        MyAssertHandler(
-            ".\\r_dpvs.cpp",
-            1849,
-            0,
-            "offset doesn't index MAX_TOTAL_ENT_COUNT >> 5\n\t%i not in [0, %i)",
-            offset,
-            128);
+    bcassert(offset, 0x80);
     entCellBits = &rgp.world->dpvsPlanes.sceneEntCellBits[128 * entInfo->cellOffset + 128 * cellIndex + offset];
     bit = 0x80000000 >> (entnum & 0x1F);
     entCellBits[entnum >> 5] |= bit;
@@ -1344,14 +1302,7 @@ void __cdecl R_FilterBModelIntoCells(uint localClientNum, uint entnum, GfxBrushM
     FilterEntInfo entInfo; // [esp+0h] [ebp-10h] BYREF
 
     iassert( entnum != gfxCfg.entnumNone );
-    if (localClientNum >= gfxCfg.maxClientViews)
-        MyAssertHandler(
-            ".\\r_dpvs.cpp",
-            2158,
-            0,
-            "localClientNum doesn't index gfxCfg.maxClientViews\n\t%i not in [0, %i)",
-            localClientNum,
-            gfxCfg.maxClientViews);
+    bcassert(localClientNum, gfxCfg.maxClientViews);
     R_UnfilterEntFromCells(localClientNum, entnum);
     entInfo.localClientNum = localClientNum;
     entInfo.entnum = entnum;
@@ -1636,14 +1587,7 @@ void __cdecl R_CullDynBrushInCell(uint cellIndex, const DpvsPlane *planes, int p
     uint wordIndex; // [esp+30h] [ebp-8h]
     const GfxBrushModel *bmodel; // [esp+34h] [ebp-4h]
 
-    if (cellIndex >= rgp.world->dpvsPlanes.cellCount)
-        MyAssertHandler(
-            ".\\r_dpvs.cpp",
-            1289,
-            0,
-            "cellIndex doesn't index rgp.world->dpvsPlanes.cellCount\n\t%i not in [0, %i)",
-            cellIndex,
-            rgp.world->dpvsPlanes.cellCount);
+    bcassert(cellIndex, rgp.world->dpvsPlanes.cellCount);
     dynEntVisData = g_dynEntVisData[1];
     dynEntClientWordCount = rgp.world->dpvsDyn.dynEntClientWordCount[1];
     dynEntCellBits = &rgp.world->dpvsDyn.dynEntCellBits[1][dynEntClientWordCount * cellIndex];
@@ -1870,14 +1814,7 @@ GfxPortal *__cdecl R_NextQueuedPortal()
     int chosenChildIndex; // [esp+8h] [ebp-8h]
     GfxPortal *portal; // [esp+Ch] [ebp-4h]
 
-    if (dpvsGlob.queuedCount <= 0)
-        MyAssertHandler(
-            ".\\r_dpvs.cpp",
-            2394,
-            0,
-            "%s\n\t(dpvsGlob.queuedCount) = %i",
-            "(dpvsGlob.queuedCount > 0)",
-            dpvsGlob.queuedCount);
+    vassert((dpvsGlob.queuedCount > 0), "(dpvsGlob.queuedCount) = %i", dpvsGlob.queuedCount);
     portal = dpvsGlob.portalQueue->portal;
     dpvsGlob.portalQueue->portal->writable.isQueued = 0;
     --dpvsGlob.queuedCount;
@@ -2512,14 +2449,7 @@ void __cdecl R_InitSceneData(int localClientNum)
             "(!(gfxCfg.entCount & 31))",
             gfxCfg.entCount);
     offset = localClientNum * (gfxCfg.entCount >> 5);
-    if (offset >= 0x80)
-        MyAssertHandler(
-            ".\\r_dpvs.cpp",
-            3156,
-            0,
-            "offset doesn't index MAX_TOTAL_ENT_COUNT >> 5\n\t%i not in [0, %i)",
-            offset,
-            128);
+    bcassert(offset, 0x80);
     for (cellIndex = 0; cellIndex < 2 * cellCount; ++cellIndex)
         Com_Memset(&rgp.world->dpvsPlanes.sceneEntCellBits[128 * cellIndex + offset], 0, 4 * (gfxCfg.entCount >> 5));
     memset((uint8_t *)dpvsGlob.entVisBits[localClientNum], 0, 4 * (gfxCfg.entCount >> 5));
@@ -2801,21 +2731,8 @@ void __cdecl R_AddWorldSurfacesDpvs(const GfxViewParms *viewParms, int cameraCel
     dpvsView = dpvsGlob.views[scene.dpvs.localClientNum];
     if (dpvsGlob.farPlane)
     {
-        if (dpvsView->frustumPlaneCount <= 0)
-            MyAssertHandler(
-                ".\\r_dpvs.cpp",
-                3369,
-                0,
-                "%s\n\t(dpvsView->frustumPlaneCount) = %i",
-                "(dpvsView->frustumPlaneCount > 0)",
-                dpvsView->frustumPlaneCount);
-        if (!Vec4Compare(dpvsView->frustumPlanes[dpvsView->frustumPlaneCount - 1].coeffs, dpvsGlob.farPlane->coeffs))
-            MyAssertHandler(
-                ".\\r_dpvs.cpp",
-                3370,
-                0,
-                "%s",
-                "Vec4Compare( dpvsView->frustumPlanes[dpvsView->frustumPlaneCount - 1].coeffs, dpvsGlob.farPlane->coeffs )");
+        vassert((dpvsView->frustumPlaneCount > 0), "(dpvsView->frustumPlaneCount) = %i", dpvsView->frustumPlaneCount);
+        iassert(Vec4Compare( dpvsView->frustumPlanes[dpvsView->frustumPlaneCount - 1].coeffs, dpvsGlob.farPlane->coeffs ));
         R_AddSkySurfacesDpvs(dpvsView->frustumPlanes, dpvsView->frustumPlaneCount - 1);
     }
     if (r_vc_makelog->current.integer)
@@ -3302,14 +3219,7 @@ void __cdecl R_VisitPortalsForCell(
     R_SetAncestorListStatus(parentPortal, 1);
     if (clipChildren)
     {
-        if (clipChildren != DPVS_CLIP_CHILDREN)
-            MyAssertHandler(
-                ".\\r_dpvs.cpp",
-                2679,
-                0,
-                "%s\n\t(clipChildren) = %i",
-                "(clipChildren == DPVS_CLIP_CHILDREN)",
-                clipChildren);
+        vassert((clipChildren == DPVS_CLIP_CHILDREN), "(clipChildren) = %i", clipChildren);
         for (portalIndex = 0; portalIndex < cell->portalCount; ++portalIndex)
         {
             portal = &cell->portals[portalIndex];
@@ -3543,14 +3453,7 @@ uint __cdecl R_CalcReflectionProbeIndex(const GfxWorld *world, const float *orig
     cellIndex = R_CellForPoint(world, origin);
     if (cellIndex == -1)
         return R_FindNearestReflectionProbe(world, origin);
-    if (cellIndex >= world->dpvsPlanes.cellCount)
-        MyAssertHandler(
-            ".\\r_staticmodel_load_obj.cpp",
-            552,
-            0,
-            "cellIndex doesn't index world->dpvsPlanes.cellCount\n\t%i not in [0, %i)",
-            cellIndex,
-            world->dpvsPlanes.cellCount);
+    bcassert(cellIndex, world->dpvsPlanes.cellCount);
     return R_FindNearestReflectionProbeInCell(world, &world->cells[cellIndex], origin);
 }
 

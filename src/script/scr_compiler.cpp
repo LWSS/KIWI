@@ -133,21 +133,18 @@ bool __cdecl IsUndefinedExpression(sval_u expr)
 
 void __cdecl Scr_CompileRemoveRefToString(unsigned int stringValue)
 {
-    if (!stringValue)
-        MyAssertHandler(".\\script\\scr_compiler.cpp", 178, 0, "%s", "stringValue");
+    iassert(stringValue);
     if (!scrCompileGlob.bConstRefCount && scrCompilePub.developer_statement != 3)
         SL_RemoveRefToString(stringValue);
 }
 
 void __cdecl EmitCanonicalString(unsigned int stringValue)
 {
-    if (!stringValue)
-        MyAssertHandler(".\\script\\scr_compiler.cpp", 192, 0, "%s", "stringValue");
+    iassert(stringValue);
     scrCompileGlob.codePos = (byte*)TempMallocAlignStrict(2u);
     if (scrCompilePub.developer_statement == 2)
     {
-        if (scrVarPub.developer_script)
-            MyAssertHandler(".\\script\\scr_compiler.cpp", 198, 0, "%s", "!scrVarPub.developer_script");
+        iassert(!scrVarPub.developer_script);
         Scr_CompileRemoveRefToString(stringValue);
     }
     else if (scrCompilePub.developer_statement == 3)
@@ -179,13 +176,7 @@ int __cdecl Scr_FindLocalVarIndex(unsigned int name, sval_u sourcePos, bool crea
     char *v5; // eax
     int i; // [esp+4h] [ebp-4h]
 
-    if (scrCompilePub.developer_statement == 3)
-        MyAssertHandler(
-            ".\\script\\scr_compiler.cpp",
-            759,
-            0,
-            "%s",
-            "scrCompilePub.developer_statement != SCR_DEV_EVALUATE");
+    iassert(scrCompilePub.developer_statement != SCR_DEV_EVALUATE);
     if (block)
     {
         for (i = 0; ; ++i)
@@ -218,8 +209,7 @@ int __cdecl Scr_FindLocalVarIndex(unsigned int name, sval_u sourcePos, bool crea
             }
             block->localVarsInitBits[i >> 3] |= 1 << (i & 7);
         }
-        if (block->localVarsCreateCount - 1 < i)
-            MyAssertHandler(".\\script\\scr_compiler.cpp", 789, 0, "%s", "(block->localVarsCreateCount - 1) >= i");
+        iassert((block->localVarsCreateCount - 1) >= i);
         return block->localVarsCreateCount - 1 - i;
     }
 unreachable:
@@ -450,8 +440,7 @@ int __cdecl Scr_GetUncacheType(int type)
 {
     if (type == 7)
         return 0;
-    if (type != 12)
-        MyAssertHandler(".\\script\\scr_compiler.cpp", 2032, 0, "%s", "type == VAR_DEVELOPER_CODEPOS");
+    iassert(type == VAR_DEVELOPER_CODEPOS);
     return 1;
 }
 
@@ -459,8 +448,7 @@ Vartype_t __cdecl Scr_GetCacheType(int type)
 {
     if (!type)
         return VAR_CODEPOS;
-    if (type != 1)
-        MyAssertHandler(".\\script\\scr_compiler.cpp", 2018, 0, "%s", "type == BUILTIN_DEVELOPER_ONLY");
+    iassert(type == BUILTIN_DEVELOPER_ONLY);
     return VAR_DEVELOPER_CODEPOS;
 
 }
@@ -527,8 +515,7 @@ int __cdecl AddFunction(int func, const char *name)
         if (scrCompilePub.func_table[i] == func)
             return i;
     }
-    if (i != scrCompilePub.func_table_size)
-        MyAssertHandler(".\\script\\scr_compiler.cpp", 1835, 0, "%s", "i == scrCompilePub.func_table_size");
+    iassert(i == scrCompilePub.func_table_size);
     if (scrCompilePub.func_table_size == 1024)
         Com_Error(ERR_DROP, "SCR_FUNC_TABLE_SIZE exceeded");
     scrCompilePub.func_table[scrCompilePub.func_table_size] = func;
@@ -555,8 +542,7 @@ void EmitDecTop()
 
 void __cdecl Scr_EndDevScript(int type, char **savedPos)
 {
-    if (type != 1)
-        MyAssertHandler(".\\script\\scr_compiler.cpp", 2001, 0, "%s", "type == BUILTIN_DEVELOPER_ONLY");
+    iassert(type == BUILTIN_DEVELOPER_ONLY);
     scrCompilePub.developer_statement = 0;
     if (!scrVarPub.developer_script)
         TempMemorySetPos(*savedPos);
@@ -572,8 +558,7 @@ unsigned int  __cdecl AddFilePrecache(unsigned int filename, unsigned int source
 {
     unsigned int Variable_DONE; // eax
 
-    if (!scrCompileGlob.precachescriptList)
-        MyAssertHandler(".\\script\\scr_compiler.cpp", 1646, 0, "%s", "scrCompileGlob.precachescriptList");
+    iassert(scrCompileGlob.precachescriptList);
     SL_AddRefToString(filename);
     Scr_CompileRemoveRefToString(filename);
     scrCompileGlob.precachescriptList->filename = filename;
@@ -621,12 +606,10 @@ void __cdecl EmitFunction(sval_u func, sval_u sourcePos)
         threadPtr = GetVariable(scrCompileGlob.fileId, func.node[1].idValue);
 		CompileTransferRefToString(func.node[1].stringValue, 2);
         threadId = GetObject(threadPtr);
-        if (!threadId)
-            MyAssertHandler(".\\script\\scr_compiler.cpp", 1708, 0, "%s", "threadId");
+        iassert(threadId);
         goto LABEL_39;
     }
-    if (func.node[0].type != 21)
-        MyAssertHandler(".\\script\\scr_compiler.cpp", 1712, 0, "%s", "func.node[0].type == ENUM_far_function");
+    iassert(func.node[0].type == ENUM_far_function);
     scope = 1;
     v2 = SL_ConvertToString(func.node[1].stringValue);
     filename.prev = Scr_CreateCanonicalFilename(v2).prev;
@@ -654,31 +637,17 @@ void __cdecl EmitFunction(sval_u func, sval_u sourcePos)
     if (!posId)
         goto LABEL_39;
     pos = Scr_EvalVariable(posId);
-    if (pos.type != 7 && pos.type != 12 && pos.type != 13)
-        MyAssertHandler(
-            ".\\script\\scr_compiler.cpp",
-            1748,
-            0,
-            "%s\n\t(pos.type) = %i",
-            "(pos.type == VAR_CODEPOS || pos.type == VAR_DEVELOPER_CODEPOS || pos.type == VAR_INCLUDE_CODEPOS)",
-            pos.type);
+    vassert((pos.type == VAR_CODEPOS || pos.type == VAR_DEVELOPER_CODEPOS || pos.type == VAR_INCLUDE_CODEPOS), "(pos.type) = %i", pos.type);
     if (pos.type == 13)
         goto LABEL_26;
     if (!pos.u.intValue)
     {
     LABEL_39:
-        if (!threadId)
-            MyAssertHandler(".\\script\\scr_compiler.cpp", 1781, 0, "%s", "threadId");
+        iassert(threadId);
         EmitCodepos((const char*)scope);
         countId = GetVariable(threadId, 0);
         count = Scr_EvalVariable(countId);
-        if (count.type && count.type != 6)
-            MyAssertHandler(
-                ".\\script\\scr_compiler.cpp",
-                1787,
-                0,
-                "%s",
-                "(count.type == VAR_UNDEFINED) || (count.type == VAR_INTEGER)");
+        iassert((count.type == VAR_UNDEFINED) || (count.type == VAR_INTEGER));
         if (!count.type)
         {
             count.type = VAR_INTEGER;
@@ -688,8 +657,7 @@ void __cdecl EmitFunction(sval_u func, sval_u sourcePos)
         value.u.intValue = (int)scrCompileGlob.codePos;
         if (scrCompilePub.developer_statement)
         {
-            if (!scrVarPub.developer_script)
-                MyAssertHandler(".\\script\\scr_compiler.cpp", 1800, 0, "%s", "scrVarPub.developer_script");
+            iassert(scrVarPub.developer_script);
             value.type = VAR_DEVELOPER_CODEPOS;
         }
         else
@@ -704,12 +672,9 @@ void __cdecl EmitFunction(sval_u func, sval_u sourcePos)
     }
     if (pos.type == 7)
         goto LABEL_29;
-    if (pos.type != 12)
-        MyAssertHandler(".\\script\\scr_compiler.cpp", 1767, 0, "%s", "pos.type == VAR_DEVELOPER_CODEPOS");
-    if (!scrVarPub.developer_script)
-        MyAssertHandler(".\\script\\scr_compiler.cpp", 1768, 0, "%s", "scrVarPub.developer_script");
-    if (scrCompilePub.developer_statement == 2)
-        MyAssertHandler(".\\script\\scr_compiler.cpp", 1769, 0, "%s", "scrCompilePub.developer_statement != SCR_DEV_IGNORE");
+    iassert(pos.type == VAR_DEVELOPER_CODEPOS);
+    iassert(scrVarPub.developer_script);
+    iassert(scrCompilePub.developer_statement != SCR_DEV_IGNORE);
     if (scrCompilePub.developer_statement)
         LABEL_29:
     EmitCodepos(pos.u.codePosValue);
@@ -1333,8 +1298,7 @@ bool __cdecl EmitOrEvalPrimitiveExpressionList(
     int expr_count; // [esp+10h] [ebp-8h]
     bool success; // [esp+17h] [ebp-1h]
 
-    if (!constValue)
-        MyAssertHandler(".\\script\\scr_compiler.cpp", 2536, 0, "%s", "constValue");
+    iassert(constValue);
     expr_count = GetExpressionCount(exprlist);
     if (expr_count == 1)
         return EmitOrEvalExpression(exprlist.node[0].node[0].type, constValue, block); // KISAKTODO: might be wrong 
@@ -1356,8 +1320,7 @@ bool __cdecl EmitOrEvalPrimitiveExpressionList(
         }
         if (success)
         {
-            if (scrCompilePub.value_count < 3)
-                MyAssertHandler(".\\script\\scr_compiler.cpp", 2565, 0, "%s", "scrCompilePub.value_count >= 3");
+            iassert(scrCompilePub.value_count >= 3);
             scrCompilePub.value_count -= 3;
             Scr_CreateVector(&scrCompileGlob.value_start[scrCompilePub.value_count], &constValue->value);
             constValue->sourcePos = sourcePos;
@@ -1701,8 +1664,7 @@ void __cdecl EmitBoolAndExpression(
 
 int Scr_PopValue()
 {
-    if (!scrCompilePub.value_count)
-        MyAssertHandler(".\\script\\scr_compiler.cpp", 1209, 0, "%s", "scrCompilePub.value_count");
+    iassert(scrCompilePub.value_count);
     return --scrCompilePub.value_count;
 }
 
@@ -2093,23 +2055,10 @@ void __cdecl EmitRemoveLocalVars(scr_block_s *block, scr_block_s *outerBlock)
 
     if (!block->abortLevel)
     {
-        if (block->localVarsCreateCount < block->localVarsPublicCount)
-            MyAssertHandler(
-                ".\\script\\scr_compiler.cpp",
-                832,
-                0,
-                "%s",
-                "block->localVarsCreateCount >= block->localVarsPublicCount");
-        if (block->localVarsPublicCount < outerBlock->localVarsPublicCount)
-            MyAssertHandler(
-                ".\\script\\scr_compiler.cpp",
-                833,
-                0,
-                "%s",
-                "block->localVarsPublicCount >= outerBlock->localVarsPublicCount");
+        iassert(block->localVarsCreateCount >= block->localVarsPublicCount);
+        iassert(block->localVarsPublicCount >= outerBlock->localVarsPublicCount);
         removeCount = block->localVarsCreateCount - outerBlock->localVarsPublicCount;
-        if (removeCount < 0)
-            MyAssertHandler(".\\script\\scr_compiler.cpp", 835, 0, "%s", "removeCount >= 0");
+        iassert(removeCount >= 0);
         if (removeCount)
         {
             EmitOpcode(OP_RemoveLocalVariables, 0, 0);
@@ -2234,13 +2183,7 @@ void __cdecl EmitCreateLocalVars(scr_block_s *block)
 {
     int i; // [esp+0h] [ebp-4h]
 
-    if (block->localVarsPublicCount < block->localVarsCreateCount)
-        MyAssertHandler(
-            ".\\script\\scr_compiler.cpp",
-            809,
-            0,
-            "%s",
-            "block->localVarsPublicCount >= block->localVarsCreateCount");
+    iassert(block->localVarsPublicCount >= block->localVarsCreateCount);
     if (block->localVarsCreateCount != block->localVarsPublicCount)
     {
         for (i = block->localVarsCreateCount; i < block->localVarsPublicCount; ++i)
@@ -2275,8 +2218,7 @@ BreakStatementInfo *ConnectBreakStatements()
     BreakStatementInfo *breakStatement; // [esp+0h] [ebp-8h]
     char *codePos; // [esp+4h] [ebp-4h]
 
-    if (scrCompilePub.value_count)
-        MyAssertHandler(".\\script\\scr_compiler.cpp", 3022, 0, "%s", "!scrCompilePub.value_count");
+    iassert(!scrCompilePub.value_count);
     codePos = TempMalloc(0);
     result = scrCompileGlob.currentBreakStatement;
     for (breakStatement = scrCompileGlob.currentBreakStatement; breakStatement; breakStatement = result)
@@ -2818,8 +2760,7 @@ void __cdecl EmitCaseStatementInfo(unsigned int name, sval_u sourcePos)
 
     if (scrCompilePub.developer_statement == 2)
     {
-        if (scrVarPub.developer_script)
-            MyAssertHandler(".\\script\\scr_compiler.cpp", 4300, 0, "%s", "!scrVarPub.developer_script");
+        iassert(!scrVarPub.developer_script);
     }
     else
     {
@@ -2903,8 +2844,7 @@ void __cdecl EmitSwitchStatementList(sval_u val, bool lastStatement, unsigned in
         {
             if (scrCompileGlob.breakBlock)
             {
-                if (!scrCompileGlob.bCanBreak)
-                    MyAssertHandler(".\\script\\scr_compiler.cpp", 4053, 0, "%s", "scrCompileGlob.bCanBreak");
+                iassert(scrCompileGlob.bCanBreak);
                 scrCompileGlob.bCanBreak = 0;
                 EmitRemoveLocalVars(scrCompileGlob.breakBlock, scrCompileGlob.breakBlock);
             }
@@ -2920,8 +2860,7 @@ void __cdecl EmitSwitchStatementList(sval_u val, bool lastStatement, unsigned in
                 EmitDefaultStatement(node[0].node[1]);
             }
             Scr_TransferBlock(block, scrCompileGlob.breakBlock);
-            if (scrCompileGlob.bCanBreak)
-                MyAssertHandler(".\\script\\scr_compiler.cpp", 4072, 0, "%s", "!scrCompileGlob.bCanBreak");
+            iassert(!scrCompileGlob.bCanBreak);
             scrCompileGlob.bCanBreak = 1;
         }
         else
@@ -2938,16 +2877,14 @@ void __cdecl EmitSwitchStatementList(sval_u val, bool lastStatement, unsigned in
             if (scrCompileGlob.breakBlock && scrCompileGlob.breakBlock->abortLevel)
             {
                 scrCompileGlob.breakBlock = 0;
-                if (!scrCompileGlob.bCanBreak)
-                    MyAssertHandler(".\\script\\scr_compiler.cpp", 4089, 0, "%s", "scrCompileGlob.bCanBreak");
+                iassert(scrCompileGlob.bCanBreak);
                 scrCompileGlob.bCanBreak = 0;
             }
         }
     }
     if (scrCompileGlob.breakBlock)
     {
-        if (!scrCompileGlob.bCanBreak)
-            MyAssertHandler(".\\script\\scr_compiler.cpp", 4095, 0, "%s", "scrCompileGlob.bCanBreak");
+        iassert(scrCompileGlob.bCanBreak);
         scrCompileGlob.bCanBreak = 0;
         EmitRemoveLocalVars(scrCompileGlob.breakBlock, scrCompileGlob.breakBlock);
     }
@@ -3047,8 +2984,7 @@ void __cdecl EmitBreakStatement(sval_u sourcePos, scr_block_s *block)
     if (scrCompileGlob.bCanBreak && !block->abortLevel)
     {
         Scr_AddBreakBlock(block);
-        if (!scrCompileGlob.breakBlock)
-            MyAssertHandler(".\\script\\scr_compiler.cpp", 4325, 0, "%s", "scrCompileGlob.breakBlock");
+        iassert(scrCompileGlob.breakBlock);
         EmitRemoveLocalVars(block, scrCompileGlob.breakBlock);
 
         block->abortLevel = 2;
@@ -3131,8 +3067,7 @@ void __cdecl EmitProfStatement(sval_u profileName, sval_u sourcePos, Opcode_t op
             Scr_CompileRemoveRefToString(profileName.stringValue);
             if (profileIndex >= 0)
             {
-                if (profileIndex >= 32)
-                    MyAssertHandler(".\\script\\scr_compiler.cpp", 4413, 0, "%s", "profileIndex < 32");
+                iassert(profileIndex < 32);
                 EmitOpcode(op, 0, 0);
                 EmitByte(profileIndex);
                 AddOpcodePos(sourcePos.stringValue, 0);
@@ -3443,17 +3378,10 @@ void __cdecl EmitOpcode(Opcode_t op, int offset, int callType)
                     goto LABEL_79;
                 RemoveOpcodePos();
                 *scrCompilePub.opcodePos = 80;
-                if (!scrCompileGlob.prevOpcodePos)
-                    MyAssertHandler(".\\script\\scr_compiler.cpp", 497, 0, "%s", "scrCompileGlob.prevOpcodePos");
+                iassert(scrCompileGlob.prevOpcodePos);
                 if (*scrCompileGlob.prevOpcodePos == 78)
                 {
-                    if (scrCompilePub.opcodePos != (byte*)TempMalloc(0) - 1)
-                        MyAssertHandler(
-                            ".\\script\\scr_compiler.cpp",
-                            500,
-                            0,
-                            "%s",
-                            "scrCompilePub.opcodePos == (byte *)TempMalloc( 0 ) - 1");
+                    iassert(scrCompilePub.opcodePos == (byte *)TempMalloc( 0 ) - 1);
                     TempMemorySetPos((char*)scrCompilePub.opcodePos);
                     --scrCompilePub.opcodePos;
                     scrCompileGlob.prevOpcodePos = 0;
@@ -3695,8 +3623,7 @@ void __cdecl Scr_MergeChildBlocks(scr_block_s **childBlocks, int childCount, scr
     for (childIndex = 0; childIndex < childCount; ++childIndex)
     {
         childBlock = childBlocks[childIndex];
-        if (childBlock->localVarsPublicCount)
-            MyAssertHandler(".\\script\\scr_compiler.cpp", 1006, 0, "%s", "!childBlock->localVarsPublicCount");
+        iassert(!childBlock->localVarsPublicCount);
         childBlock->localVarsPublicCount = block->localVarsCount;
         for (i = 0; i < block->localVarsCount; ++i)
         {
@@ -4347,21 +4274,13 @@ void __cdecl LinkThread(unsigned int threadId, VariableValue *pos, bool allowFar
         for (i = 0; i < v3.u.intValue; ++i)
         {
             valueId = FindVariable(threadId, i + 2);
-            if (!valueId)
-                MyAssertHandler(".\\script\\scr_compiler.cpp", 2312, 0, "%s", "valueId");
+            iassert(valueId);
             value = GetVariableValueAddress(valueId);
             type = GetValueType(valueId);
-            if (type != 7 && type != 12)
-                MyAssertHandler(
-                    ".\\script\\scr_compiler.cpp",
-                    2315,
-                    0,
-                    "%s",
-                    "type == VAR_CODEPOS || type == VAR_DEVELOPER_CODEPOS");
+            iassert(type == VAR_CODEPOS || type == VAR_DEVELOPER_CODEPOS);
             if (pos->type == 12)
             {
-                if (!scrVarPub.developer_script)
-                    MyAssertHandler(".\\script\\scr_compiler.cpp", 2319, 0, "%s", "scrVarPub.developer_script");
+                iassert(scrVarPub.developer_script);
                 if (type == 7)
                 {
                     CompileError2((char*)value->u.intValue, "normal script cannot reference a function in a /# ... #/ comment");
@@ -4391,8 +4310,7 @@ void __cdecl LinkFile(unsigned int fileId)
     for (threadPtr = FindFirstSibling(fileId); threadPtr; threadPtr = FindNextSibling(threadPtr))
     {
         threadId = FindObject(threadPtr);
-        if (!threadId)
-            MyAssertHandler(".\\script\\scr_compiler.cpp", 2364, 0, "%s", "threadId");
+        iassert(threadId);
         posId = FindVariable(threadId, 1u);
         if (posId)
         {
@@ -4403,15 +4321,8 @@ void __cdecl LinkFile(unsigned int fileId)
             }
             else
             {
-                if (pos.type != 7 && pos.type != 12)
-                    MyAssertHandler(
-                        ".\\script\\scr_compiler.cpp",
-                        2376,
-                        0,
-                        "%s",
-                        "pos.type == VAR_CODEPOS || pos.type == VAR_DEVELOPER_CODEPOS");
-                if (!pos.u.codePosValue)
-                    MyAssertHandler(".\\script\\scr_compiler.cpp", 2377, 0, "%s", "pos.u.codePosValue");
+                iassert(pos.type == VAR_CODEPOS || pos.type == VAR_DEVELOPER_CODEPOS);
+                iassert(pos.u.codePosValue);
                 LinkThread(threadId, &pos, 1);
             }
         }
@@ -4470,13 +4381,7 @@ void __cdecl ScriptCompile(
     scrCompilePub.programLen = TempMalloc(0) - scrVarPub.programBuffer;
     Scr_ShutdownAllocNode();
     Hunk_ClearTempMemoryHigh();
-    if (scrCompilePub.far_function_count != scrCompileGlob.precachescriptList - precachescriptList)
-        MyAssertHandler(
-            ".\\script\\scr_compiler.cpp",
-            4990,
-            0,
-            "%s",
-            "scrCompilePub.far_function_count == scrCompileGlob.precachescriptList - precachescriptList");
+    iassert(scrCompilePub.far_function_count == scrCompileGlob.precachescriptList - precachescriptList);
     far_function_count = scrCompilePub.far_function_count;
     for (i = 0; i < far_function_count; ++i)
     {
@@ -4512,8 +4417,7 @@ void __cdecl ScriptCompile(
                 if (GetValueType(threadPtr) == 1)
                 {
                     threadId = FindObject(threadPtr);
-                    if (!threadId)
-                        MyAssertHandler(".\\script\\scr_compiler.cpp", 5026, 0, "%s", "threadId");
+                    iassert(threadId);
                     posId = FindVariable(threadId, 1u);
                     if (posId)
                     {

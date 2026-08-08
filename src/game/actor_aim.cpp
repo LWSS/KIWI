@@ -779,10 +779,8 @@ void __cdecl Actor_ShootBlank(actor_s *self)
     gentity_s *ent; // r11
     weaponParms v6; // [sp+50h] [-70h] BYREF
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_aim.cpp", 793, 0, "%s", "self");
-    if (!self->ent)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_aim.cpp", 794, 0, "%s", "self->ent");
+    iassert(self);
+    iassert(self->ent);
     if (self->lastShotTime == level.time)
     {
         Com_PrintError(
@@ -1023,10 +1021,8 @@ void __cdecl Actor_AccuracyGraphSaveToFile(
     char v14[256]; // [sp+50h] [-340h] BYREF
     char v15[576]; // [sp+150h] [-240h] BYREF
 
-    if (!graph)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_aim.cpp", 1006, 0, "%s", "graph");
-    if (!weaponDef)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_aim.cpp", 1007, 0, "%s", "weaponDef");
+    iassert(graph);
+    iassert(weaponDef);
     if (accuracyType)
     {
         if (accuracyType == WEAP_ACCURACY_AI_VS_PLAYER)
@@ -1103,10 +1099,8 @@ void __cdecl Actor_CommonAccuracyGraphEventCallback(
     char v15[8240];
     static_assert(sizeof(_QWORD[1030]) == sizeof(char[8240])); // We changed the type, so this is a check
 
-    if (!graph)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_aim.cpp", 1054, 0, "%s", "graph");
-    if (!graph->data)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_aim.cpp", 1055, 0, "%s", "graph->data");
+    iassert(graph);
+    iassert(graph->data);
     data = (const char **)graph->data;
     if (event == EVENT_ACCEPT)
     {

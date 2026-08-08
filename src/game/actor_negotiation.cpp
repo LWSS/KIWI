@@ -72,13 +72,7 @@ actor_think_result_t __cdecl Actor_Negotiation_Think(actor_s *pSelf)
         HasNegotiationNode = (pathnode_t *)Path_HasNegotiationNode(&pSelf->Path);
         if ((_BYTE)HasNegotiationNode)
         {
-            if (pSelf->Path.wNegotiationStartNode >= pSelf->Path.wPathLen)
-                MyAssertHandler(
-                    "c:\\trees\\cod3\\cod3src\\src\\game\\actor_negotiation.cpp",
-                    61,
-                    0,
-                    "%s",
-                    "pSelf->Path.wNegotiationStartNode < pSelf->Path.wPathLen");
+            iassert(pSelf->Path.wNegotiationStartNode < pSelf->Path.wPathLen);
             if (pSelf->Physics.vHitNormal[7 * pSelf->Path.wNegotiationStartNode + 2] < 0.0)
                 MyAssertHandler(
                     "c:\\trees\\cod3\\cod3src\\src\\game\\actor_negotiation.cpp",

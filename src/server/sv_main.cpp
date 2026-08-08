@@ -105,8 +105,7 @@ void __cdecl SV_DumpServerCommands(client_t *client)
 
 void __cdecl AppendCommandsForInternalSave(const char *filename)
 {
-    if (!filename)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_main.cpp", 191, 0, "%s", "filename");
+    iassert(filename);
 	if (!strcmp(filename, "internal/vid_restart"))
 	{
 		Com_Printf(15, "Game saved for vid_restart\n");
@@ -128,14 +127,10 @@ void __cdecl SV_InitiatePendingSave(
     PendingSave *pendingSave,
     bool suppressPlayerNotify)
 {
-    if (!filename)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_main.cpp", 219, 0, "%s", "filename");
-    if (!pendingSave)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_main.cpp", 220, 0, "%s", "pendingSave");
-    if (!description)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_main.cpp", 221, 0, "%s", "description");
-    if (!screenshot)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_main.cpp", 222, 0, "%s", "screenshot");
+    iassert(filename);
+    iassert(pendingSave);
+    iassert(description);
+    iassert(screenshot);
     I_strncpyz(pendingSave->filename, filename, 64);
     I_strncpyz(pendingSave->description, description, 256);
     I_strncpyz(pendingSave->screenShotName, screenshot, 64);
@@ -163,12 +158,9 @@ int __cdecl SV_AddPendingSave(
 {
     PendingSave *v13; // r30
 
-    if (!filename)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_main.cpp", 242, 0, "%s", "filename");
-    if (!description)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_main.cpp", 243, 0, "%s", "description");
-    if (!screenshot)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_main.cpp", 244, 0, "%s", "screenshot");
+    iassert(filename);
+    iassert(description);
+    iassert(screenshot);
     if (Dvar_GetInt("g_reloading"))
     {
         Com_Printf(15, "savegame request ignored\n");
@@ -209,8 +201,7 @@ int __cdecl SV_ProcessPendingSave(PendingSave *pendingSave)
     int checksum; // r3
     int result; // r28
 
-    if (!pendingSave)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_main.cpp", 292, 0, "%s", "pendingSave");
+    iassert(pendingSave);
     checksum = SV_GetCheckSum();
     result = G_SaveGame(pendingSave, checksum);
     if (!pendingSave)
@@ -261,8 +252,7 @@ int __cdecl SV_IsInternalSave(const char *filename)
     bool v4; // zf
 
     v1 = filename;
-    if (!filename)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_main.cpp", 351, 0, "%s", "filename");
+    iassert(filename);
 LABEL_3:
     if (!I_strnicmp(v1, "internal", 8) && v1[8] == 45)
         return 1;
@@ -281,8 +271,7 @@ LABEL_3:
 
 void __cdecl SV_SetLastSaveName(const char *filename)
 {
-    if (!filename)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_main.cpp", 374, 0, "%s", "filename");
+    iassert(filename);
     if (!(unsigned __int8)SV_IsInternalSave(filename))
         Dvar_SetString(sv_lastSaveGame, filename);
 }
@@ -343,8 +332,7 @@ void __cdecl SV_SaveServerCommands(SaveGame *save)
     int i; // r31
 
     clients = svs.clients;
-    if (!save)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_main.cpp", 455, 0, "%s", "save");
+    iassert(save);
     SaveMemory_SaveWrite(&clients->reliableCommands, 12, save);
     for (i = clients->reliableCommands.header.sent + 1; i <= clients->reliableCommands.header.sequence; ++i)
         SaveMemory_SaveWrite(&clients->reliableCommands.commands[(unsigned __int8)i], 4, save);
@@ -357,8 +345,7 @@ void __cdecl SV_LoadServerCommands(SaveGame *save)
     int i; // r31
 
     clients = svs.clients;
-    if (!save)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_main.cpp", 471, 0, "%s", "save");
+    iassert(save);
     SaveMemory_LoadRead(&clients->reliableCommands, 12, save);
     for (i = clients->reliableCommands.header.sent + 1; i <= clients->reliableCommands.header.sequence; ++i)
         SaveMemory_LoadRead(&clients->reliableCommands.commands[(unsigned __int8)i], 4, save);
@@ -561,8 +548,7 @@ void __cdecl  SV_ServerThread(unsigned int threadContext)
             }
             Sys_EnterCriticalSection(CRITSECT_CLIENT_MESSAGE);
         }
-        if (sv.clientMessageTimeout)
-            MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_main.cpp", 784, 0, "%s", "!sv.clientMessageTimeout");
+        iassert(!sv.clientMessageTimeout);
         sv.clientMessageTimeout = 1;
         Sys_LeaveCriticalSection(CRITSECT_CLIENT_MESSAGE);
         {
@@ -648,8 +634,7 @@ void __cdecl SV_WaitServer()
 {
     const dvar_s *v0; // r11
 
-    if (!Sys_IsMainThread())
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_main.cpp", 887, 0, "%s", "Sys_IsMainThread()");
+    iassert(Sys_IsMainThread());
     if (com_inServerFrame)
     {
         com_inServerFrame = 0;
@@ -697,8 +682,7 @@ void __cdecl SV_WaitServer()
 
 void __cdecl SV_InitSnapshot()
 {
-    if (com_inServerFrame)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_main.cpp", 942, 0, "%s", "!com_inServerFrame");
+    iassert(!com_inServerFrame);
     sv.restartServerThread = 1;
     Sys_InitServerEvents();
     sv.smp = sv_smp->current.enabled;
@@ -849,10 +833,8 @@ void __cdecl SV_FrameInternal(int msec)
     int v8; // r4
     int v9; // r3
 
-    if (!Sys_IsMainThread())
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_main.cpp", 1104, 0, "%s", "Sys_IsMainThread()");
-    if (msec < 0)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_main.cpp", 1105, 0, "%s", "msec >= 0");
+    iassert(Sys_IsMainThread());
+    iassert(msec >= 0);
     if (!com_inServerFrame)
     {
         com_inServerFrame = 1;
@@ -924,8 +906,7 @@ void __cdecl SV_FrameInternal(int msec)
     }
     if (!CL_DemoPlaying())
     {
-        if (sv.pendingSnapshot)
-            MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_main.cpp", 1181, 0, "%s", "!sv.pendingSnapshot");
+        iassert(!sv.pendingSnapshot);
         sv.pendingSnapshot = 1;
     }
     v6 = sv.timeResidual - 50;

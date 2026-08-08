@@ -296,13 +296,7 @@ void __cdecl player_die(
                 "%s",
                 "self->r.maxs[2] >= self->r.mins[2]");
         self->client->respawnTime = level.time + 1700;
-        if (self->handler != 17)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\g_combat.cpp",
-                364,
-                0,
-                "%s",
-                "self->handler == ENT_HANDLER_CLIENT");
+        iassert(self->handler == ENT_HANDLER_CLIENT);
         self->handler = ENT_HANDLER_CLIENT_DEAD;
         SV_TrackPlayerDied();
         if (p_szInternalName)
@@ -353,15 +347,11 @@ void __cdecl handleDeathInvulnerability(gentity_s *targ, int prevHealth, int mod
     bool v12; // r11
     bool *p_invulnerableActivated; // r10
 
-    if (!targ)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_combat.cpp", 417, 0, "%s", "targ");
-    if (targ->health > prevHealth)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_combat.cpp", 418, 0, "%s", "targ->health <= prevHealth");
+    iassert(targ);
+    iassert(targ->health <= prevHealth);
     client = targ->client;
-    if (!client)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_combat.cpp", 422, 0, "%s", "client");
-    if (!client->invulnerableEnabled)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_combat.cpp", 423, 0, "%s", "client->invulnerableEnabled");
+    iassert(client);
+    iassert(client->invulnerableEnabled);
     if (prevHealth == client->ps.stats[2])
         client->invulnerableActivated = 0;
     health = targ->health;
@@ -443,29 +433,15 @@ int __cdecl G_GetWeaponIndexForEntity(const gentity_s *ent)
     unsigned int viewlocked_entNum; // r7
     int result; // r3
 
-    if (!ent)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_combat.cpp", 501, 0, "%s", "ent");
+    iassert(ent);
     client = ent->client;
     if (client)
     {
         if ((client->ps.eFlags & 0x20300) != 0)
         {
-            if (client->ps.viewlocked_entNum == ENTITYNUM_NONE)
-                MyAssertHandler(
-                    "c:\\trees\\cod3\\cod3src\\src\\game\\g_combat.cpp",
-                    509,
-                    0,
-                    "%s",
-                    "client->ps.viewlocked_entNum != ENTITYNUM_NONE");
+            iassert(client->ps.viewlocked_entNum != ENTITYNUM_NONE);
             viewlocked_entNum = client->ps.viewlocked_entNum;
-            if (viewlocked_entNum >= 0x880)
-                MyAssertHandler(
-                    "c:\\trees\\cod3\\cod3src\\src\\game\\g_combat.cpp",
-                    510,
-                    0,
-                    "client->ps.viewlocked_entNum doesn't index MAX_GENTITIES\n\t%i not in [0, %i)",
-                    viewlocked_entNum,
-                    2176);
+            bcassert(viewlocked_entNum, 0x880);
             return 0;
         }
         else

@@ -261,14 +261,7 @@ void __cdecl UI_SetSystemCursorPos(UiContext *dc, float x, float y);
 
 UILocalVarContext *__cdecl UI_GetLocalVarsContext(int localClientNum)
 {
-    if (localClientNum)
-        MyAssertHandler(
-            ".\\ui_mp\\ui_main_mp.cpp",
-            332,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     return &uiInfoArray.uiDC.localVars;
 }
 
@@ -702,14 +695,7 @@ void __cdecl UI_MouseEvent(int localClientNum, int x, int y)
 {
     BOOL v3; // [esp+0h] [ebp-8h]
 
-    if (localClientNum)
-        MyAssertHandler(
-            ".\\ui_mp\\ui_main_mp.cpp",
-            332,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
 
     uiInfoArray.uiDC.cursor.x = x / scrPlaceFull.scaleVirtualToFull[0];
     uiInfoArray.uiDC.cursor.y = y / scrPlaceFull.scaleVirtualToFull[1];
@@ -731,14 +717,7 @@ void __cdecl UI_UpdateTime(int localClientNum, int realtime)
     int frameTimeIndex; // [esp+4h] [ebp-Ch]
     int frameTimeTotal; // [esp+Ch] [ebp-4h]
 
-    if (localClientNum)
-        MyAssertHandler(
-            ".\\ui_mp\\ui_main_mp.cpp",
-            332,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     uiInfoArray.uiDC.frameTime = realtime - uiInfoArray.uiDC.realTime;
     uiInfoArray.uiDC.realTime = realtime;
     uiInfoArray.previousTimes[uiInfoArray.timeIndex++ % 4] = uiInfoArray.uiDC.frameTime;
@@ -1089,14 +1068,7 @@ void __cdecl UI_Refresh(int localClientNum)
     float h; // [esp+30h] [ebp-8h]
     float w; // [esp+34h] [ebp-4h]
 
-    if (localClientNum)
-        MyAssertHandler(
-            ".\\ui_mp\\ui_main_mp.cpp",
-            332,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     if (Menu_Count(&uiInfoArray.uiDC) > 0)
     {
         Menu_PaintAll(&uiInfoArray.uiDC);
@@ -1105,14 +1077,7 @@ void __cdecl UI_Refresh(int localClientNum)
         UI_BuildFindPlayerList();
         if (CL_AllLocalClientsDisconnected())
         {
-            if (localClientNum)
-                MyAssertHandler(
-                    "c:\\trees\\cod3\\src\\ui_mp\\../client_mp/client_mp.h",
-                    1112,
-                    0,
-                    "%s\n\t(localClientNum) = %i",
-                    "(localClientNum == 0)",
-                    localClientNum);
+            vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
             if (clientUIActives[0].connectionState == CA_DISCONNECTED)
                 UI_DrawBuildNumber(localClientNum);
         }
@@ -1170,14 +1135,7 @@ void __cdecl LAN_SaveServersToCache()
 
 void __cdecl UI_Shutdown(int localClientNum)
 {
-    if (localClientNum)
-        MyAssertHandler(
-            ".\\ui_mp\\ui_main_mp.cpp",
-            332,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     Menus_CloseAll(&uiInfoArray.uiDC);
     sharedUiInfo.assets.whiteMaterial = 0;
     UILocalVar_Shutdown(&uiInfoArray.uiDC.localVars);
@@ -1241,14 +1199,7 @@ int __cdecl Load_ScriptMenu(int localClientNum, const char *pszMenu, int imageTr
     menuList = Load_ScriptMenuInternal(pszMenu, imageTrack);
     if (!menuList)
         return 0;
-    if (localClientNum)
-        MyAssertHandler(
-            ".\\ui_mp\\ui_main_mp.cpp",
-            332,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     UI_AddMenuList(&uiInfoArray.uiDC, menuList);
     return 1;
 }
@@ -1279,8 +1230,7 @@ char *__cdecl UI_GetMapDisplayNameFromPartialLoadNameMatch(const char *mapName, 
 {
     int i; // [esp+14h] [ebp-4h]
 
-    if (!mapLoadNameLen)
-        MyAssertHandler(".\\ui_mp\\ui_main_mp.cpp", 1043, 0, "%s", "mapLoadNameLen");
+    iassert(mapLoadNameLen);
     for (i = 0; i < sharedUiInfo.mapCount; ++i)
     {
         *mapLoadNameLen = strlen((const char *)sharedUiInfo.serverHardwareIconList[40 * i - 5119]);
@@ -1351,14 +1301,7 @@ void __cdecl UI_DrawMapLevelshot(int localClientNum)
     menuDef_t *menu; // [esp+28h] [ebp-8h]
     menuDef_t *menua; // [esp+28h] [ebp-8h]
 
-    if (localClientNum)
-        MyAssertHandler(
-            ".\\ui_mp\\ui_main_mp.cpp",
-            332,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     menu = Menus_FindByName(&uiInfoArray.uiDC, "pregame_loaderror_mp");
     if (!menu || !Menus_MenuIsInStack(&uiInfoArray.uiDC, menu))
     {
@@ -1396,14 +1339,7 @@ void __cdecl UI_LoadIngameMenus(int localClientNum)
     {
         g_ingameMenusLoaded[localClientNum] = 1;
         menuList = UI_LoadMenus((char*)"ui_mp/ingame.txt", 3);
-        if (localClientNum)
-            MyAssertHandler(
-                ".\\ui_mp\\ui_main_mp.cpp",
-                332,
-                0,
-                "%s\n\t(localClientNum) = %i",
-                "(localClientNum == 0)",
-                localClientNum);
+        vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
         UI_AddMenuList(&uiInfoArray.uiDC, menuList);
     }
 }
@@ -1829,14 +1765,7 @@ void __cdecl UI_DrawServerRefreshDate(
         lowLight[1] = color[1] * 0.800000011920929f;
         lowLight[2] = color[2] * 0.800000011920929f;
         lowLight[3] = color[3] * 0.800000011920929f;
-        if (localClientNum)
-            MyAssertHandler(
-                ".\\ui_mp\\ui_main_mp.cpp",
-                332,
-                0,
-                "%s\n\t(localClientNum) = %i",
-                "(localClientNum == 0)",
-                localClientNum);
+        vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
         newColor[4] = 1.117259e-30f;
         v10 = (float)(uiInfoArray.uiDC.realTime / 75);
         v9 = sin(v10);
@@ -2154,14 +2083,7 @@ int __cdecl UI_NetFilter_HandleKey(int flags, float *special, int key)
 
 BOOL __cdecl UI_IsMapActive(int mapIndex)
 {
-    if (mapIndex < 0 || mapIndex >= sharedUiInfo.mapCount)
-        MyAssertHandler(
-            ".\\ui_mp\\ui_main_mp.cpp",
-            3117,
-            0,
-            "%s\n\t(mapIndex) = %i",
-            "(mapIndex >= 0 && mapIndex < sharedUiInfo.mapCount)",
-            mapIndex);
+    vassert((mapIndex >= 0 && mapIndex < sharedUiInfo.mapCount), "(mapIndex) = %i", mapIndex);
     return sharedUiInfo.serverHardwareIconList[40 * mapIndex - 5081] != 0;
 }
 
@@ -2310,14 +2232,7 @@ int __cdecl UI_CheckExecKey(int localClientNum, int key)
     menuDef_t *menu; // [esp+4h] [ebp-8h]
     ItemKeyHandler *handler; // [esp+8h] [ebp-4h]
 
-    if (localClientNum)
-        MyAssertHandler(
-            ".\\ui_mp\\ui_main_mp.cpp",
-            332,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     menu = Menu_GetFocused(&uiInfoArray.uiDC);
     if (g_editingField)
         return 1;
@@ -2779,14 +2694,7 @@ void __cdecl UI_RunMenuScript(int localClientNum, const char **args, const char 
 
     if (String_Parse((const char **)args, out, 1024))
     {
-        if (localClientNum)
-            MyAssertHandler(
-                ".\\ui_mp\\ui_main_mp.cpp",
-                332,
-                0,
-                "%s\n\t(localClientNum) = %i",
-                "(localClientNum == 0)",
-                localClientNum);
+        vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
         dc = (UiContext *)&uiInfoArray;
         if (I_stricmp(out, "StartServer"))
         {
@@ -3189,14 +3097,7 @@ void __cdecl UI_RunMenuScript(int localClientNum, const char **args, const char 
                                                                                 }
                                                                                 else
                                                                                 {
-                                                                                    if (sharedUiInfo.modIndex >= 0x40u)
-                                                                                        MyAssertHandler(
-                                                                                            ".\\ui_mp\\ui_main_mp.cpp",
-                                                                                            2780,
-                                                                                            0,
-                                                                                            "sharedUiInfo.modIndex doesn't index MAX_MODS\n\t%i not in [0, %i)",
-                                                                                            sharedUiInfo.modIndex,
-                                                                                            64);
+                                                                                    bcassert(sharedUiInfo.modIndex, 0x40u);
                                                                                     if (sharedUiInfo.modList[sharedUiInfo.modIndex].modName)
                                                                                     {
                                                                                         Com_sprintf(
@@ -3259,14 +3160,7 @@ void __cdecl UI_RunMenuScript(int localClientNum, const char **args, const char 
                                             {
                                                 Dvar_SetStringByName("com_errorMessage", (char *)"");
                                                 Dvar_SetBoolByName("com_isNotice", 0);
-                                                if (localClientNum)
-                                                    MyAssertHandler(
-                                                        "c:\\trees\\cod3\\src\\ui_mp\\../client_mp/client_mp.h",
-                                                        1112,
-                                                        0,
-                                                        "%s\n\t(localClientNum) = %i",
-                                                        "(localClientNum == 0)",
-                                                        localClientNum);
+                                                vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
                                                 if (clientUIActives[0].connectionState > CA_DISCONNECTED)
                                                     Key_RemoveCatcher(localClientNum, -17);
                                             }
@@ -3495,18 +3389,9 @@ void __cdecl UI_OpenMenuOnDvar(
 {
     bool wantMatch; // [esp+3h] [ebp-1h]
 
-    if (!cmd)
-        MyAssertHandler(".\\ui_mp\\ui_main_mp.cpp", 2570, 0, "%s", "cmd");
-    if (I_stricmp(cmd, "openMenuOnDvar") && I_stricmp(cmd, "openMenuOnDvarNot"))
-        MyAssertHandler(
-            ".\\ui_mp\\ui_main_mp.cpp",
-            2571,
-            0,
-            "%s\n\t(cmd) = %s",
-            "(!I_stricmp( cmd, \"openMenuOnDvar\" ) || !I_stricmp( cmd, \"openMenuOnDvarNot\" ))",
-            cmd);
-    if (!menuName)
-        MyAssertHandler(".\\ui_mp\\ui_main_mp.cpp", 2572, 0, "%s", "menuName");
+    iassert(cmd);
+    vassert((!I_stricmp( cmd, "openMenuOnDvar" ) || !I_stricmp( cmd, "openMenuOnDvarNot" )), "(cmd) = %s", cmd);
+    iassert(menuName);
     wantMatch = I_stricmp(cmd, "openMenuOnDvar") == 0;
     if (UI_DvarValueTest(cmd, dvarName, testValue, wantMatch))
         Menus_OpenByName(&uiInfo->uiDC, menuName);
@@ -3516,12 +3401,9 @@ bool __cdecl UI_DvarValueTest(const char *cmd, const char *dvarName, const char 
 {
     const char *dvarValue; // [esp+8h] [ebp-4h]
 
-    if (!cmd)
-        MyAssertHandler(".\\ui_mp\\ui_main_mp.cpp", 2549, 0, "%s", "cmd");
-    if (!dvarName)
-        MyAssertHandler(".\\ui_mp\\ui_main_mp.cpp", 2550, 0, "%s", "dvarName");
-    if (!testValue)
-        MyAssertHandler(".\\ui_mp\\ui_main_mp.cpp", 2551, 0, "%s", "testValue");
+    iassert(cmd);
+    iassert(dvarName);
+    iassert(testValue);
     if (Dvar_FindVar(dvarName))
     {
         dvarValue = Dvar_GetVariantString(dvarName);
@@ -3543,18 +3425,9 @@ void __cdecl UI_CloseMenuOnDvar(
 {
     bool wantMatch; // [esp+3h] [ebp-1h]
 
-    if (!cmd)
-        MyAssertHandler(".\\ui_mp\\ui_main_mp.cpp", 2584, 0, "%s", "cmd");
-    if (I_stricmp(cmd, "closeMenuOnDvar") && I_stricmp(cmd, "closeMenuOnDvarNot"))
-        MyAssertHandler(
-            ".\\ui_mp\\ui_main_mp.cpp",
-            2585,
-            0,
-            "%s\n\t(cmd) = %s",
-            "(!I_stricmp( cmd, \"closeMenuOnDvar\" ) || !I_stricmp( cmd, \"closeMenuOnDvarNot\" ))",
-            cmd);
-    if (!menuName)
-        MyAssertHandler(".\\ui_mp\\ui_main_mp.cpp", 2586, 0, "%s", "menuName");
+    iassert(cmd);
+    vassert((!I_stricmp( cmd, "closeMenuOnDvar" ) || !I_stricmp( cmd, "closeMenuOnDvarNot" )), "(cmd) = %s", cmd);
+    iassert(menuName);
     wantMatch = I_stricmp(cmd, "closeMenuOnDvar") == 0;
     if (UI_DvarValueTest(cmd, dvarName, testValue, wantMatch))
         Menus_CloseByName(&uiInfo->uiDC, menuName);
@@ -3788,8 +3661,7 @@ void __cdecl UI_InsertServerIntoDisplayList(uint num, int position)
     int res; // [esp+4h] [ebp-4h]
     int resa; // [esp+4h] [ebp-4h]
 
-    if (position < 0)
-        MyAssertHandler(".\\ui_mp\\ui_main_mp.cpp", 3238, 0, "%s", "position >= 0");
+    iassert(position >= 0);
     if (position < *(int *)&sharedUiInfo.gap8EB4[72900])
     {
         res = LAN_CompareServers(
@@ -3811,8 +3683,7 @@ void __cdecl UI_InsertServerIntoDisplayList(uint num, int position)
                 "%s",
                 "res == -LAN_CompareServers( ui_netSource->current.integer, sharedUiInfo.serverStatus.sortKey, sharedUiInfo.serve"
                 "rStatus.sortDir, sharedUiInfo.serverStatus.displayServers[position], num )");
-        if (res > 0)
-            MyAssertHandler(".\\ui_mp\\ui_main_mp.cpp", 3244, 0, "%s", "res <= 0");
+        iassert(res <= 0);
     }
     if (position > 0)
     {
@@ -3919,14 +3790,7 @@ int __cdecl UI_FeederCount(int localClientNum, float feederID)
         return sharedUiInfo.modCount;
     if (feederID == 2.0)
     {
-        if (localClientNum)
-            MyAssertHandler(
-                ".\\ui_mp\\ui_main_mp.cpp",
-                332,
-                0,
-                "%s\n\t(localClientNum) = %i",
-                "(localClientNum == 0)",
-                localClientNum);
+        vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
         UI_UpdateDisplayServers(&uiInfoArray);
         return *(_DWORD *)&sharedUiInfo.gap8EB4[72900];
     }
@@ -3936,14 +3800,7 @@ int __cdecl UI_FeederCount(int localClientNum, float feederID)
     }
     else if (feederID == 7.0)
     {
-        if (localClientNum)
-            MyAssertHandler(
-                ".\\ui_mp\\ui_main_mp.cpp",
-                332,
-                0,
-                "%s\n\t(localClientNum) = %i",
-                "(localClientNum == 0)",
-                localClientNum);
+        vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
         if (uiInfoArray.uiDC.realTime > uiInfoArray.playerRefresh)
         {
             uiInfoArray.playerRefresh = uiInfoArray.uiDC.realTime + 3000;
@@ -3957,14 +3814,7 @@ int __cdecl UI_FeederCount(int localClientNum, float feederID)
     }
     else if (feederID == 20.0)
     {
-        if (localClientNum)
-            MyAssertHandler(
-                ".\\ui_mp\\ui_main_mp.cpp",
-                332,
-                0,
-                "%s\n\t(localClientNum) = %i",
-                "(localClientNum == 0)",
-                localClientNum);
+        vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
         if (uiInfoArray.uiDC.realTime > uiInfoArray.playerRefresh)
         {
             uiInfoArray.playerRefresh = uiInfoArray.uiDC.realTime + 3000;
@@ -3974,14 +3824,7 @@ int __cdecl UI_FeederCount(int localClientNum, float feederID)
     }
     else if (feederID == 24.0)
     {
-        if (localClientNum)
-            MyAssertHandler(
-                ".\\ui_mp\\ui_main_mp.cpp",
-                332,
-                0,
-                "%s\n\t(localClientNum) = %i",
-                "(localClientNum == 0)",
-                localClientNum);
+        vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
         return uiInfoArray.playerProfileCount;
     }
     else if (feederID == 29.0)
@@ -4109,14 +3952,7 @@ const char *__cdecl UI_FeederItemText(
         }
         goto LABEL_73;
     }
-    if (localClientNum)
-        MyAssertHandler(
-            ".\\ui_mp\\ui_main_mp.cpp",
-            332,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     uiInfo = (uiInfo_s *)&uiInfoArray;
     UI_UpdateDisplayServers((uiInfo_s *)&uiInfoArray);
     if (index < 0 || index >= *(int *)&sharedUiInfo.gap8EB4[72900])
@@ -4124,14 +3960,7 @@ const char *__cdecl UI_FeederItemText(
     LABEL_73:
         if (feederID != 24.0)
             return (char *)"";
-        if (localClientNum)
-            MyAssertHandler(
-                ".\\ui_mp\\ui_main_mp.cpp",
-                332,
-                0,
-                "%s\n\t(localClientNum) = %i",
-                "(localClientNum == 0)",
-                localClientNum);
+        vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
         uiInfo = (uiInfo_s *)&uiInfoArray;
         if (index >= 0 && index < uiInfo->playerProfileCount)
             return (char *)uiInfo->playerProfileName[uiInfo->playerProfileStatus.displayProfile[index]];
@@ -4267,8 +4096,7 @@ void __cdecl UI_FeederItemColor(
     listBoxDef_s *listPtr; // [esp+10h] [ebp-4h]
 
     listPtr = Item_GetListBoxDef(item);
-    if (!listPtr)
-        MyAssertHandler(".\\ui_mp\\ui_main_mp.cpp", 4704, 0, "%s", "listPtr");
+    iassert(listPtr);
     if (CL_GetLocalClientActiveCount())
     {
         *color = item->window.foreColor[0];
@@ -4290,14 +4118,7 @@ int __cdecl UI_GetListIndexFromMapIndex(int testMapIndex)
     int listIndex; // [esp+0h] [ebp-8h]
     int mapIndex; // [esp+4h] [ebp-4h]
 
-    if (testMapIndex < 0 || testMapIndex >= sharedUiInfo.mapCount)
-        MyAssertHandler(
-            ".\\ui_mp\\ui_main_mp.cpp",
-            4153,
-            0,
-            "%s\n\t(testMapIndex) = %i",
-            "(testMapIndex >= 0 && testMapIndex < sharedUiInfo.mapCount)",
-            testMapIndex);
+    vassert((testMapIndex >= 0 && testMapIndex < sharedUiInfo.mapCount), "(testMapIndex) = %i", testMapIndex);
     listIndex = 0;
     for (mapIndex = 0; mapIndex < sharedUiInfo.mapCount; ++mapIndex)
     {
@@ -4382,16 +4203,8 @@ void __cdecl UI_FeederSelection(int localClientNum, float feederID, int index)
     int actual; // [esp+8h] [ebp-8h] BYREF
     uiInfo_s *uiInfo; // [esp+Ch] [ebp-4h]
 
-    if (index < 0)
-        MyAssertHandler(".\\ui_mp\\ui_main_mp.cpp", 4915, 0, "%s", "index >= 0");
-    if (localClientNum)
-        MyAssertHandler(
-            ".\\ui_mp\\ui_main_mp.cpp",
-            332,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    iassert(index >= 0);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     uiInfo = (uiInfo_s *)&uiInfoArray;
     if (feederID == 4.0)
     {
@@ -4661,14 +4474,7 @@ void __cdecl LAN_LoadCachedServers()
 
 void __cdecl UI_Init(int localClientNum)
 {
-    if (localClientNum)
-        MyAssertHandler(
-            ".\\ui_mp\\ui_main_mp.cpp",
-            332,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     uiInfoArray.uiDC.localClientNum = localClientNum;
     g_ingameMenusLoaded[localClientNum] = 0;
     if (IsFastFileLoad())
@@ -4939,14 +4745,7 @@ void __cdecl UI_KeyEvent(int localClientNum, int key, int down)
 {
     menuDef_t *menu; // [esp+8h] [ebp-4h]
 
-    if (localClientNum)
-        MyAssertHandler(
-            ".\\ui_mp\\ui_main_mp.cpp",
-            332,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     if (Menu_Count(&uiInfoArray.uiDC))
     {
         menu = Menu_GetFocused(&uiInfoArray.uiDC);
@@ -4975,28 +4774,14 @@ void __cdecl UI_KeyEvent(int localClientNum, int key, int down)
 
 uiMenuCommand_t __cdecl UI_GetActiveMenu(int localClientNum)
 {
-  if ( localClientNum )
-    MyAssertHandler(
-      ".\\ui_mp\\ui_main_mp.cpp",
-      332,
-      0,
-      "%s\n\t(localClientNum) = %i",
-      "(localClientNum == 0)",
-      localClientNum);
+  vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
   return uiInfoArray.currentMenuType;
 }
 const char *__cdecl UI_GetTopActiveMenuName(int localClientNum)
 {
     int topMenuStackIndex; // [esp+4h] [ebp-4h]
 
-    if (localClientNum)
-        MyAssertHandler(
-            ".\\ui_mp\\ui_main_mp.cpp",
-            332,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     topMenuStackIndex = uiInfoArray.uiDC.openMenuCount - 1;
     if (topMenuStackIndex < 0 || topMenuStackIndex >= uiInfoArray.uiDC.menuCount)
         return 0;
@@ -5014,18 +4799,10 @@ int __cdecl UI_SetActiveMenu(int localClientNum, uiMenuCommand_t menu)
     const char *bufa; // [esp+40h] [ebp-4h]
     const char *bufb; // [esp+40h] [ebp-4h]
 
-    if (localClientNum)
-        MyAssertHandler(
-            ".\\ui_mp\\ui_main_mp.cpp",
-            332,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     if (Menu_Count(&uiInfoArray.uiDC) <= 0)
         return 0;
-    if (menu == UIMENU_SCRIPT_POPUP)
-        MyAssertHandler(".\\ui_mp\\ui_main_mp.cpp", 6348, 0, "%s", "menu != UIMENU_SCRIPT_POPUP");
+    iassert(menu != UIMENU_SCRIPT_POPUP);
     uiInfoArray.currentMenuType = menu;
     switch (menu)
     {
@@ -5036,14 +4813,7 @@ int __cdecl UI_SetActiveMenu(int localClientNum, uiMenuCommand_t menu)
         result = 1;
         break;
     case UIMENU_MAIN:
-        if (localClientNum)
-            MyAssertHandler(
-                ".\\ui_mp\\ui_main_mp.cpp",
-                6361,
-                0,
-                "%s\n\t(localClientNum) = %i",
-                "(localClientNum == 0)",
-                localClientNum);
+        vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
         Key_SetCatcher(localClientNum, 16);
         Menus_OpenByName(&uiInfoArray.uiDC, "main");
         buf = Dvar_GetString("com_errorMessage");
@@ -5122,14 +4892,7 @@ int __cdecl UI_SetActiveMenu(int localClientNum, uiMenuCommand_t menu)
 
 int __cdecl UI_IsFullscreen(int localClientNum)
 {
-    if (localClientNum)
-        MyAssertHandler(
-            ".\\ui_mp\\ui_main_mp.cpp",
-            332,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     return Menus_AnyFullScreenVisible(&uiInfoArray.uiDC);
 }
 
@@ -5447,8 +5210,7 @@ void __cdecl UI_DrawConnectScreen(int localClientNum)
     centerPoint = 320.0;
     scale = 0.5;
     font = UI_GetFontHandle(&scrPlaceFull, 6, 0.5);
-    if (!font)
-        MyAssertHandler(".\\ui_mp\\ui_main_mp.cpp", 6876, 0, "%s", "font");
+    iassert(font);
     CL_GetClientState(localClientNum, &cstate);
     if (cls.wwwDlInProgress && legacyHacks.cl_downloadName[0])
     {
@@ -5636,14 +5398,7 @@ void __cdecl Text_PaintCenterWithDots(
 
 double __cdecl UI_GetBlurRadius(int localClientNum)
 {
-    if (localClientNum)
-        MyAssertHandler(
-            ".\\ui_mp\\ui_main_mp.cpp",
-            332,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     if (!&uiInfoArray)
         MyAssertHandler(".\\ui_mp\\ui_main_mp.cpp", 7029, 0, "%s", "uiInfo");
     return uiInfoArray.uiDC.blurRadiusOut;
@@ -5717,14 +5472,7 @@ void __cdecl UI_StartServerRefresh(int localClientNum, int full)
     const char *ptr; // [esp+54h] [ebp-8h]
     int i; // [esp+58h] [ebp-4h]
 
-    if (localClientNum)
-        MyAssertHandler(
-            ".\\ui_mp\\ui_main_mp.cpp",
-            332,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     Com_RealTime(&q);
     _snprintf(dvarName, 0x18u, "ui_lastServerRefresh_%i", ui_netSource->current.integer);
     tm_min = q.tm_min;
@@ -5822,14 +5570,7 @@ char *__cdecl UI_SafeTranslateString(const char *reference)
 
 bool __cdecl UI_AnyMenuVisible(int localClientNum)
 {
-    if (localClientNum)
-        MyAssertHandler(
-            ".\\ui_mp\\ui_main_mp.cpp",
-            332,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     return uiInfoArray.uiDC.openMenuCount != 0;
 }
 
@@ -5874,21 +5615,12 @@ void __cdecl UI_ReplaceConversions(
     int outputStringCounter; // [esp+30h] [ebp-8h]
     int sourceStringLength; // [esp+34h] [ebp-4h]
 
-    if (!sourceString)
-        MyAssertHandler(".\\ui_mp\\ui_main_mp.cpp", 7349, 0, "%s", "sourceString");
+    iassert(sourceString);
     v4 = (int)strstr(sourceString, "&&");
     if (v4)
     {
-        if (!arguments)
-            MyAssertHandler(".\\ui_mp\\ui_main_mp.cpp", 7357, 0, "%s", "arguments");
-        if (arguments->argCount > 9)
-            MyAssertHandler(
-                ".\\ui_mp\\ui_main_mp.cpp",
-                7358,
-                0,
-                "%s\n\t(arguments->argCount) = %i",
-                "(arguments->argCount <= 9)",
-                arguments->argCount);
+        iassert(arguments);
+        vassert((arguments->argCount <= 9), "(arguments->argCount) = %i", arguments->argCount);
         v5 = strlen(sourceString);
         sourceStringLength = v5;
         if (v5 <= 0)
@@ -5907,18 +5639,9 @@ void __cdecl UI_ReplaceConversions(
             if (!strncmp(&sourceString[index], "&&", 2u) && isdigit(sourceString[index + 2]))
             {
                 argIndex = sourceString[index + 2] - 49;
-                if (argIndex < 0 || argIndex >= arguments->argCount)
-                    MyAssertHandler(
-                        ".\\ui_mp\\ui_main_mp.cpp",
-                        7376,
-                        0,
-                        "%s\n\t(argIndex) = %i",
-                        "(argIndex >= 0 && argIndex < arguments->argCount)",
-                        argIndex);
-                if (argIndex >= 9)
-                    MyAssertHandler(".\\ui_mp\\ui_main_mp.cpp", 7377, 0, "%s\n\t(argIndex) = %i", "(argIndex < 9)", argIndex);
-                if (!arguments->args[argIndex])
-                    MyAssertHandler(".\\ui_mp\\ui_main_mp.cpp", 7379, 0, "%s", "arguments->args[argIndex]");
+                vassert((argIndex >= 0 && argIndex < arguments->argCount), "(argIndex) = %i", argIndex);
+                vassert((argIndex < 9), "(argIndex) = %i", argIndex);
+                iassert(arguments->args[argIndex]);
                 v6 = strlen(arguments->args[argIndex]);
                 for (argStringIndex = 0; argStringIndex < v6; ++argStringIndex)
                     outputString[outputStringCounter++] = arguments->args[argIndex][argStringIndex];
@@ -5939,28 +5662,14 @@ void __cdecl UI_ReplaceConversions(
 
 void __cdecl UI_CloseAll(int localClientNum)
 {
-    if (localClientNum)
-        MyAssertHandler(
-            ".\\ui_mp\\ui_main_mp.cpp",
-            332,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     Menus_CloseAll(&uiInfoArray.uiDC);
     UI_SetActiveMenu(localClientNum, UIMENU_NONE);
 }
 
 void __cdecl UI_CloseFocusedMenu(int localClientNum)
 {
-    if (localClientNum)
-        MyAssertHandler(
-            ".\\ui_mp\\ui_main_mp.cpp",
-            332,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     if (Menu_Count(&uiInfoArray.uiDC) > 0)
     {
         if (Menu_GetFocused(&uiInfoArray.uiDC))
@@ -6021,14 +5730,7 @@ int __cdecl UI_PopupScriptMenu(int localClientNum, const char *menuName, bool us
 {
     menuDef_t *pFocus; // [esp+Ch] [ebp-4h]
 
-    if (localClientNum)
-        MyAssertHandler(
-            ".\\ui_mp\\ui_main_mp.cpp",
-            332,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     pFocus = Menu_GetFocused(&uiInfoArray.uiDC);
     if (pFocus && uiInfoArray.currentMenuType != UIMENU_SCRIPT_POPUP && uiInfoArray.currentMenuType != UIMENU_SCOREBOARD)
         return 0;
@@ -6050,14 +5752,7 @@ int __cdecl UI_PopupScriptMenu(int localClientNum, const char *menuName, bool us
 
 void __cdecl UI_ClosePopupScriptMenu(int localClientNum, bool allowResponse)
 {
-    if (localClientNum)
-        MyAssertHandler(
-            ".\\ui_mp\\ui_main_mp.cpp",
-            332,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     if (uiInfoArray.currentMenuType == UIMENU_SCRIPT_POPUP)
     {
         uiInfoArray.allowScriptMenuResponse = allowResponse;
@@ -6068,14 +5763,7 @@ void __cdecl UI_ClosePopupScriptMenu(int localClientNum, bool allowResponse)
 
 bool __cdecl UI_AllowScriptMenuResponse(int localClientNum)
 {
-    if (localClientNum)
-        MyAssertHandler(
-            ".\\ui_mp\\ui_main_mp.cpp",
-            332,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     return uiInfoArray.allowScriptMenuResponse;
 }
 
@@ -6094,14 +5782,7 @@ bool __cdecl Menu_IsMenuOpenAndVisible(int localClientNum, const char *menuName)
 {
     menuDef_t *menu; // [esp+4h] [ebp-4h]
 
-    if (localClientNum)
-        MyAssertHandler(
-            ".\\ui_mp\\ui_main_mp.cpp",
-            332,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     menu = Menus_FindByName(&uiInfoArray.uiDC, menuName);
     if (!menu)
         return 0;

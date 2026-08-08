@@ -500,14 +500,7 @@ int __cdecl SND_StartAlias3DSample(SndStartAliasInfo *startAliasInfo, int *pChan
         *pChannel = index;
     if (index < 0)
         return -1;
-    if (index < 8 || index >= g_snd.max_3D_channels + 8)
-        MyAssertHandler(
-            ".\\win32\\snd_driver.cpp",
-            965,
-            0,
-            "%s\n\t(index) = %i",
-            "(index >= (0 + 8) && index < (0 + 8) + g_snd.max_3D_channels)",
-            index);
+    vassert((index >= (0 + 8) && index < (0 + 8) + g_snd.max_3D_channels), "(index) = %i", index);
     handle = milesGlob.handle_sample[index];
     sound = &startAliasInfo->alias0->soundFile->u.loadSnd->sound;
     distMin = (1.0 - startAliasInfo->lerp) * startAliasInfo->alias0->distMin
@@ -569,8 +562,7 @@ int __cdecl SND_StartAlias3DSample(SndStartAliasInfo *startAliasInfo, int *pChan
     maxdist = MSS_GetWetLevel(startAliasInfo->alias0);
     mindist = MSS_GetDryLevel();
     AIL_set_sample_reverb_levels(handle, mindist, maxdist);
-    if (!rate)
-        MyAssertHandler(".\\win32\\snd_driver.cpp", 1004, 0, "%s", "rate");
+    iassert(rate);
     if (startAliasInfo->timescale)
     {
         total_msec = SnapFloatToInt(g_snd.timescale * (float)(1000 * sound->info.samples) / (float)rate);
@@ -649,13 +641,7 @@ float __cdecl SND_GetStream3DVolumeFallOff(int index, int listenerIndex)
 
     alias0 = g_snd.chaninfo[index].alias0;
     alias1 = g_snd.chaninfo[index].alias1;
-    if (!SND_IsAliasChannel3D(SNDALIASFLAGS_GET_CHANNEL(alias0->flags)))
-        MyAssertHandler(
-            ".\\win32\\snd_driver.cpp",
-            585,
-            0,
-            "%s",
-            "SND_IsAliasChannel3D( SNDALIASFLAGS_GET_CHANNEL( alias0->flags ) )");
+    iassert(SND_IsAliasChannel3D( SNDALIASFLAGS_GET_CHANNEL( alias0->flags ) ));
     Vec3Sub(g_snd.listeners[listenerIndex].orient.origin, g_snd.chaninfo[index].org, diff);
     dist = Vec3Length(diff);
     lerp = g_snd.chaninfo[index].lerp;

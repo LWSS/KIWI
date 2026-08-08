@@ -18,8 +18,7 @@ void __cdecl Actor_Exposed_CheckLockGoal(actor_s *self)
     ai_animmode_t eAnimMode; // r11
     double v3; // fp31
 
-    if (!Actor_IsAtGoal(self))
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_exposed.cpp", 35, 0, "%s", "Actor_IsAtGoal( self )");
+    iassert(Actor_IsAtGoal( self ));
     if (!self->useEnemyGoal)
     {
         eAnimMode = self->eAnimMode;
@@ -96,12 +95,9 @@ void __cdecl Actor_Exposed_DecideSubState(actor_s *self)
 {
     ai_substate_t v2; // r11
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_exposed.cpp", 173, 0, "%s", "self");
-    if (!self->ent)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_exposed.cpp", 174, 0, "%s", "self->ent");
-    if (!self->sentient)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_exposed.cpp", 175, 0, "%s", "self->sentient");
+    iassert(self);
+    iassert(self->ent);
+    iassert(self->sentient);
     if (self->flashBanged)
     {
         Actor_SetSubState(self, STATE_EXPOSED_FLASHBANGED);
@@ -149,10 +145,8 @@ pathnode_t *__cdecl Actor_Exposed_GetReacquireNode(actor_s *self)
 {
     int v2; // r11
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_exposed.cpp", 257, 0, "%s", "self");
-    if (!self->sentient)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_exposed.cpp", 258, 0, "%s", "self->sentient");
+    iassert(self);
+    iassert(self->sentient);
     if (!Actor_GetTargetEntity(self) || self->eState[self->stateLevel] != AIS_EXPOSED)
     {
     LABEL_11:
@@ -340,10 +334,8 @@ void __cdecl Actor_Exposed_FindReacquireDirectPath(actor_s *self, bool ignoreSup
     sentient_s *TargetSentient; // r4
     float v5[16]; // [sp+50h] [-40h] BYREF
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_exposed.cpp", 448, 0, "%s", "self");
-    if (!self->sentient)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_exposed.cpp", 449, 0, "%s", "self->sentient");
+    iassert(self);
+    iassert(self->sentient);
     if (Actor_GetTargetEntity(self) && self->eState[self->stateLevel] == AIS_EXPOSED)
     {
         Actor_GetTargetPosition(self, v5);
@@ -370,10 +362,8 @@ void __cdecl Actor_Exposed_FindReacquireProximatePath(actor_s *self, char ignore
     double v8; // fp1
     float v9[16]; // [sp+50h] [-40h] BYREF
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_exposed.cpp", 485, 0, "%s", "self");
-    if (!self->sentient)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_exposed.cpp", 486, 0, "%s", "self->sentient");
+    iassert(self);
+    iassert(self->sentient);
     if (Actor_GetTargetEntity(self) && self->eState[self->stateLevel] == AIS_EXPOSED)
     {
         Actor_GetTargetPosition(self, v9);
@@ -396,10 +386,8 @@ void __cdecl Actor_Exposed_FindReacquireProximatePath(actor_s *self, char ignore
 
 int __cdecl Actor_Exposed_StartReacquireMove(actor_s *self)
 {
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_exposed.cpp", 521, 0, "%s", "self");
-    if (!self->sentient)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_exposed.cpp", 522, 0, "%s", "self->sentient");
+    iassert(self);
+    iassert(self->sentient);
     self->TrimInfo.iIndex = 0;
     self->TrimInfo.iDelta = 0;
     if (!Actor_GetTargetEntity(self) || self->eState[self->stateLevel] != AIS_EXPOSED || !Actor_HasPath(self))
@@ -420,20 +408,16 @@ void __cdecl Actor_Exposed_Reacquire_Move(actor_s *self)
 
 void __cdecl Actor_Exposed_MoveToGoal_Move(actor_s *self)
 {
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_exposed.cpp", 568, 0, "%s", "self");
-    if (!self->sentient)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_exposed.cpp", 569, 0, "%s", "self->sentient");
+    iassert(self);
+    iassert(self->sentient);
     Actor_SetOrientMode(self, AI_ORIENT_TO_ENEMY_OR_MOTION);
     Actor_MoveAlongPathWithTeam(self, 1, 1, 1);
 }
 
 bool __cdecl Actor_Exposed_IsShortMove(actor_s *self)
 {
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_exposed.cpp", 585, 0, "%s", "self");
-    if (!self->sentient)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_exposed.cpp", 586, 0, "%s", "self->sentient");
+    iassert(self);
+    iassert(self->sentient);
     return Actor_HasPath(self)
         && level.time - self->Path.iPathTime < 2000
         && Path_DistanceGreaterThan(&self->Path, 60.0) == 0;
@@ -557,10 +541,8 @@ actor_think_result_t __cdecl Actor_Exposed_Think(actor_s *self)
     ai_substate_t v4; // r4
     const char *v5; // r3
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_exposed.cpp", 736, 0, "%s", "self");
-    if (!self->sentient)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_exposed.cpp", 737, 0, "%s", "self->sentient");
+    iassert(self);
+    iassert(self->sentient);
     self->pszDebugInfo = "exposed";
     if (self->pGrenade.isDefined() && !self->flashBanged)
     {
@@ -632,12 +614,9 @@ void __cdecl Actor_Exposed_Touch(actor_s *self, gentity_s *pOther)
 {
     sentient_s *sentient; // r4
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_exposed.cpp", 823, 0, "%s", "self");
-    if (!self->sentient)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_exposed.cpp", 824, 0, "%s", "self->sentient");
-    if (!pOther)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_exposed.cpp", 825, 0, "%s", "pOther");
+    iassert(self);
+    iassert(self->sentient);
+    iassert(pOther);
     sentient = pOther->sentient;
     if (sentient)
         Actor_GetPerfectInfo(self, sentient);

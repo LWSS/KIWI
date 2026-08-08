@@ -356,10 +356,7 @@ void __cdecl SV_SetConfigstring(unsigned int index, const char *val)
             }
         }
     }
-    else if (val)
-    {
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_init.cpp", 91, 0, "%s", "!val");
-    }
+    else iassert(!val);
 }
 
 void SV_SaveSystemInfo()
@@ -392,8 +389,7 @@ void __cdecl SV_SetExpectedHunkUsage(char *mapname)
         while (1)
         {
             token = Com_Parse(&buftrav)->token;
-            if (!token)
-                MyAssertHandler(".\\server_mp\\sv_init_mp.cpp", 573, 0, "%s", "token");
+            iassert(token);
             if (!*token)
                 break;
             if (!I_stricmp(token, mapname))

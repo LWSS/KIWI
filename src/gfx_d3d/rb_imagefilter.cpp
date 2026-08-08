@@ -176,14 +176,7 @@ void __cdecl RB_GenerateGaussianFilter1D(float radius, int *res, int axis, GfxIm
 
 int __cdecl RB_PickSymmetricFilterMaterial(int halfTapCount, const Material **material)
 {
-    if (halfTapCount <= 0 || halfTapCount > 8)
-        MyAssertHandler(
-            ".\\rb_imagefilter.cpp",
-            76,
-            0,
-            "%s\n\t(halfTapCount) = %i",
-            "(halfTapCount > 0 && halfTapCount <= 8)",
-            halfTapCount);
+    vassert((halfTapCount > 0 && halfTapCount <= 8), "(halfTapCount) = %i", halfTapCount);
     *material = (const Material *)*((uint *)&rgp.postFxMaterial + halfTapCount);
     return halfTapCount;
 }
@@ -313,14 +306,7 @@ void __cdecl RB_FilterImage(GfxImageFilter *filter)
     float w; // [esp+34h] [ebp-4h]
 
     iassert( filter );
-    if (filter->passCount <= 0)
-        MyAssertHandler(
-            ".\\rb_imagefilter.cpp",
-            360,
-            0,
-            "%s\n\t(filter->passCount) = %i",
-            "(filter->passCount > 0)",
-            filter->passCount);
+    vassert((filter->passCount > 0), "(filter->passCount) = %i", filter->passCount);
     iassert( filter->sourceImage );
     if (tess.indexCount)
         RB_EndTessSurface();
@@ -393,14 +379,7 @@ void __cdecl RB_GlowFilterImage(float radius)
     float radiusScale; // [esp+1Ch] [ebp-8h]
     float radiusa; // [esp+2Ch] [ebp+8h]
 
-    if (backEnd.glowCount)
-        MyAssertHandler(
-            ".\\rb_imagefilter.cpp",
-            472,
-            0,
-            "%s\n\t(backEnd.glowCount) = %i",
-            "(backEnd.glowCount == 0)",
-            backEnd.glowCount);
+    vassert((backEnd.glowCount == 0), "(backEnd.glowCount) = %i", backEnd.glowCount);
     if (radius != 0.0f)
     {
         radiusScale = (float)gfxRenderTargets[R_RENDERTARGET_POST_EFFECT_0].width / (float)gfxRenderTargets[R_RENDERTARGET_RESOLVED_SCENE].width;

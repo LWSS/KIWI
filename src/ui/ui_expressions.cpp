@@ -317,14 +317,7 @@ char *__cdecl GetSourceString(Operand operand)
 
     if (operand.dataType == VAL_STRING)
         return (char *)operand.internals.intVal;
-    if ((uint)currentTempOperand >= 0x10)
-        MyAssertHandler(
-            ".\\ui\\ui_expressions.cpp",
-            182,
-            0,
-            "currentTempOperand doesn't index NUM_OPERAND_STRINGS\n\t%i not in [0, %i)",
-            currentTempOperand,
-            16);
+    bcassert((uint)currentTempOperand, 0x10);
     result = s_tempOperandValueAsString[currentTempOperand];
     currentTempOperand = (currentTempOperand + 1) % 16;
     if (operand.dataType)
@@ -345,8 +338,7 @@ double __cdecl GetSourceFloat(Operand *source)
         return source->internals.floatVal;
     if (source->dataType == VAL_INT)
         return (double)source->internals.intVal;
-    if (source->dataType != VAL_STRING)
-        MyAssertHandler(".\\ui\\ui_expressions.cpp", 211, 0, "%s", "source->dataType == VAL_STRING");
+    iassert(source->dataType == VAL_STRING);
     return (float)atof(source->internals.string);
 }
 
@@ -358,8 +350,7 @@ operandInternalDataUnion __cdecl GetSourceInt(Operand *source)
     }
     else if (source->dataType)
     {
-        if (source->dataType != VAL_STRING)
-            MyAssertHandler(".\\ui\\ui_expressions.cpp", 222, 0, "%s", "source->dataType == VAL_STRING");
+        iassert(source->dataType == VAL_STRING);
         return (operandInternalDataUnion)atoi(source->internals.string);
     }
     else
@@ -641,14 +632,7 @@ void __cdecl RunOp(int localClientNum, OperatorStack *opStack, OperandStack *dat
     Operand data1; // [esp+15Ch] [ebp-8h] BYREF
 
     localVarStringIndex = 0;
-    if (opStack->numOperators <= 0)
-        MyAssertHandler(
-            ".\\ui\\ui_expressions.cpp",
-            1972,
-            0,
-            "%s\n\t(opStack->numOperators) = %i",
-            "(opStack->numOperators > 0)",
-            opStack->numOperators);
+    vassert((opStack->numOperators > 0), "(opStack->numOperators) = %i", opStack->numOperators);
     op = opStack->stack[--opStack->numOperators];
     opStack->stack[opStack->numOperators] = OP_NOOP;
     if (uiscript_debug->current.integer > 1)
@@ -1058,14 +1042,7 @@ char *__cdecl CopyDvarString(const char *string)
 {
     char *result; // [esp+0h] [ebp-4h]
 
-    if ((uint)currentTempOperand >= 0x10)
-        MyAssertHandler(
-            ".\\ui\\ui_expressions.cpp",
-            197,
-            0,
-            "currentTempOperand doesn't index NUM_OPERAND_STRINGS\n\t%i not in [0, %i)",
-            currentTempOperand,
-            16);
+    bcassert((uint)currentTempOperand, 0x10);
     result = s_tempOperandValueAsString[currentTempOperand];
     currentTempOperand = (currentTempOperand + 1) % 16;
     Com_sprintf(result, 0x100u, "%s", string);
@@ -1658,10 +1635,8 @@ void __cdecl GetPlayerStatRangeBitsSet(int localClientNum, OperandList *list, Op
     int minStat; // [esp+10h] [ebp-8h]
     int maxStat; // [esp+14h] [ebp-4h]
 
-    if (!list)
-        MyAssertHandler(".\\ui\\ui_expressions.cpp", 931, 0, "%s", "list");
-    if (!result)
-        MyAssertHandler(".\\ui\\ui_expressions.cpp", 932, 0, "%s", "result");
+    iassert(list);
+    iassert(result);
     if (list->operandCount == 3)
     {
         minStat = getOperandValueInt(list->operands).intVal;
@@ -1731,8 +1706,7 @@ int __cdecl GetKeyBindingLocalizedString(int localClientNum, const char *command
         }
         else
         {
-            if (bindCount != 2)
-                MyAssertHandler(".\\ui\\ui_shared.cpp", 5084, 0, "%s\n\t(bindCount) = %i", "(bindCount == 2)", bindCount);
+            vassert((bindCount == 2), "(bindCount) = %i", bindCount);
             translationa = SEH_StringEd_GetString(bindings[0]);
             translation_4 = SEH_StringEd_GetString(bindings[1]);
             conjunction = UI_SafeTranslateString("KEY_OR");
@@ -1803,10 +1777,8 @@ void __cdecl GetHudFade(int localClientNum, Operand *fieldName, Operand *result)
     const char *v3; // eax
     const char *NameForValueType; // eax
 
-    if (!fieldName)
-        MyAssertHandler(".\\ui\\ui_expressions.cpp", 1023, 0, "%s", "fieldName");
-    if (!result)
-        MyAssertHandler(".\\ui\\ui_expressions.cpp", 1024, 0, "%s", "result");
+    iassert(fieldName);
+    iassert(result);
     if (CL_IsCgameInitialized(localClientNum))
     {
         result->dataType = VAL_FLOAT;
@@ -1987,14 +1959,7 @@ void __cdecl BitShiftRight(int localClientNum, Operand *source, Operand *bitsSou
 void __cdecl GetAdsJavelin(int localClientNum, Operand *result)
 {
     result->dataType = VAL_INT;
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\src\\ui\\../client_mp/client_mp.h",
-            1112,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     result->internals.intVal = clientUIActives[0].connectionState >= CA_LOADING && CG_JavelinADS(localClientNum);
     if (uiscript_debug->current.integer)
         Com_Printf(13, "adsjavelin() = %i\n", result->internals.intVal);
@@ -2006,14 +1971,7 @@ void __cdecl GetWeapLockBlink(int localClientNum, Operand *source, Operand *resu
 
     bps = GetSourceFloat(source);
     result->dataType = VAL_INT;
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\src\\ui\\../client_mp/client_mp.h",
-            1112,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
 #ifdef KISAK_MP
     result->internals.intVal = clientUIActives[0].connectionState >= CA_LOADING && G_ExitAfterConnectPaths();
 #elif KISAK_SP
@@ -2041,14 +1999,7 @@ void __cdecl GetWeapLockBlink(int localClientNum, Operand *source, Operand *resu
 void __cdecl GetWeapAttackTop(int localClientNum, Operand *result)
 {
     result->dataType = VAL_INT;
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\src\\ui\\../client_mp/client_mp.h",
-            1112,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
 #ifdef KISAK_MP
     result->internals.intVal = clientUIActives[0].connectionState >= CA_LOADING && G_ExitAfterConnectPaths();
 #elif KISAK_SP
@@ -2061,14 +2012,7 @@ void __cdecl GetWeapAttackTop(int localClientNum, Operand *result)
 void __cdecl GetWeapAttackDirect(int localClientNum, Operand *result)
 {
     result->dataType = VAL_INT;
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\src\\ui\\../client_mp/client_mp.h",
-            1112,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
 #ifdef KISAK_MP
     result->internals.intVal = clientUIActives[0].connectionState >= CA_LOADING && G_ExitAfterConnectPaths();
 #elif KISAK_SP
@@ -2122,14 +2066,7 @@ void __cdecl GetTimeLeft(int localClientNum, Operand *result)
     cgs_t *cgs;
     cg_s *cgameGlob;
 
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\src\\ui\\../client_mp/client_mp.h",
-            1112,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     if (clientUIActives[0].connectionState < CA_LOADING)
     {
         result->dataType = VAL_INT;
@@ -2153,24 +2090,10 @@ void __cdecl GetGametypeObjective(int localClientNum, Operand *result)
 {
 #ifdef KISAK_MP
     result->dataType = VAL_STRING;
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\src\\ui\\../client_mp/client_mp.h",
-            1112,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     if (clientUIActives[0].connectionState >= CA_LOADING)
     {
-        if (localClientNum)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\src\\ui\\../cgame_mp/cg_local_mp.h",
-                1071,
-                0,
-                "%s\n\t(localClientNum) = %i",
-                "(localClientNum == 0)",
-                localClientNum);
+        vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
         result->internals.intVal = (int)CG_GetGametypeDescription(localClientNum);
         if (!result->internals.intVal)
             result->internals.intVal = (int)"";
@@ -2191,14 +2114,7 @@ void __cdecl GetGametypeName(int localClientNum, Operand *result)
     cgs_t *cgs;
 
     result->dataType = VAL_STRING;
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\src\\ui\\../client_mp/client_mp.h",
-            1112,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     if (clientUIActives[0].connectionState >= CA_LOADING)
     {
         cgs = CG_GetLocalClientStaticGlobals(localClientNum);
@@ -2227,14 +2143,7 @@ void __cdecl GetGametypeInternal(int localClientNum, Operand *result)
     cgs_t *cgs = CG_GetLocalClientStaticGlobals(localClientNum);
 
     result->dataType = VAL_STRING;
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\src\\ui\\../client_mp/client_mp.h",
-            1112,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     if (clientUIActives[0].connectionState >= CA_LOADING)
         result->internals.intVal = (int)cgs->gametype;
     else
@@ -2528,8 +2437,7 @@ void __cdecl LocalizationError(const char *errorMessage)
 {
     if (Dvar_GetBool("loc_warnings"))
     {
-        if (!errorMessage)
-            MyAssertHandler(".\\ui\\ui_expressions.cpp", 1833, 0, "%s", "errorMessage");
+        iassert(errorMessage);
         if (Dvar_GetBool("loc_warningsAsErrors"))
             Com_Error(ERR_LOCALIZATION, "Error: %s", errorMessage);
         else
@@ -2543,10 +2451,8 @@ void __cdecl ValidateLocalizedStringRef(const char *token, int tokenLen)
     const char *v3; // eax
     int charIter; // [esp+0h] [ebp-4h]
 
-    if (!token)
-        MyAssertHandler(".\\ui\\ui_expressions.cpp", 1847, 0, "%s", "token");
-    if (tokenLen <= 0)
-        MyAssertHandler(".\\ui\\ui_expressions.cpp", 1848, 0, "%s", "tokenLen > 0");
+    iassert(token);
+    iassert(tokenLen > 0);
     if (*token != 64)
     {
         v2 = va("Illegal localized string reference: %s must start with a '@'.", token);

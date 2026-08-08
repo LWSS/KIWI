@@ -92,12 +92,10 @@ void __cdecl CL_AddMapDirSlider(char *dir, int locationFlags, const char *locati
 
     fullDir = va("maps/%s", dir);
     fileList = FS_ListFilesInLocation(fullDir, "d3dbsp", FS_LIST_PURE_ONLY, &fileCount, locationFlags);
-    if (fileCount < 0)
-        MyAssertHandler(".\\client\\cl_devgui.cpp", 89, 0, "%s", "fileCount >= 0");
+    iassert(fileCount >= 0);
     if (fileCount)
     {
-        if (!fileList)
-            MyAssertHandler(".\\client\\cl_devgui.cpp", 93, 0, "%s", "fileList");
+        iassert(fileList);
         if (clGuiGlob.mapDirCount >= 8)
             MyAssertHandler(".\\client\\cl_devgui.cpp", 94, 0, "%s", "clGuiGlob.mapDirCount < MAX_MAP_DIRS");
         for (fileIndex = 0; fileIndex != fileCount; ++fileIndex)
@@ -128,8 +126,7 @@ void __cdecl CL_CreateMapMenuEntriesForLocation(int locationFlags, const char *l
 
 void CL_CreateMapMenuEntries()
 {
-    if (!clGuiGlob.inited)
-        MyAssertHandler(".\\client\\cl_devgui.cpp", 154, 0, "%s", "clGuiGlob.inited");
+    iassert(clGuiGlob.inited);
     clGuiGlob.mapDirCount = 0;
     CL_CreateMapMenuEntriesForLocation(1, "main*");
     CL_CreateMapMenuEntriesForLocation(2, "dev*");
@@ -138,8 +135,7 @@ void CL_CreateMapMenuEntries()
 
 void __cdecl CL_CreateDevGui()
 {
-    if (clGuiGlob.inited)
-        MyAssertHandler(".\\client\\cl_devgui.cpp", 179, 0, "%s", "!clGuiGlob.inited");
+    iassert(!clGuiGlob.inited);
     clGuiGlob.inited = 1;
     CL_RegisterDevGuiDvars();
     CL_CreateMapMenuEntries();
@@ -154,8 +150,7 @@ void __cdecl CL_DestroyDevGui()
 {
     int dvarIndex; // [esp+0h] [ebp-4h]
 
-    if (!clGuiGlob.inited)
-        MyAssertHandler(".\\client\\cl_devgui.cpp", 219, 0, "%s", "clGuiGlob.inited");
+    iassert(clGuiGlob.inited);
     clGuiGlob.inited = 0;
     DevGui_RemoveMenu("Main:1/Maps:3");
     CL_UnregisterDevGuiDvars();

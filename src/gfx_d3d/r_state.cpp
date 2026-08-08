@@ -209,14 +209,7 @@ void __cdecl R_SetTexFilter()
     {
         linearNonMippedFilter = 8704;
         mipFilterMode = r_texFilterMipMode->current.unsignedInt;
-        if (mipFilterMode >= 4)
-            MyAssertHandler(
-                ".\\r_state.cpp",
-                169,
-                0,
-                "mipFilterMode doesn't index R_MIP_FILTER_COUNT\n\t%i not in [0, %i)",
-                mipFilterMode,
-                4);
+        bcassert(mipFilterMode, 4);
     }
     for (entryIndex = 0; entryIndex < 0x18; ++entryIndex)
     {
@@ -573,14 +566,7 @@ const GfxImage *__cdecl R_GetTextureFromCode(
 
 void __cdecl R_TextureFromCodeError(GfxCmdBufSourceState *source, uint codeTexture)
 {
-    if (!rg.codeImageNames[codeTexture])
-        MyAssertHandler(
-            ".\\r_state.cpp",
-            618,
-            0,
-            "%s\n\t(codeTexture) = %i",
-            "(rg.codeImageNames[codeTexture])",
-            codeTexture);
+    vassert((rg.codeImageNames[codeTexture]), "(codeTexture) = %i", codeTexture);
     Com_Error(ERR_DROP, "Tried to use '%s' when it isn't valid\n", rg.codeImageNames[codeTexture]);
 }
 
@@ -619,14 +605,7 @@ void __cdecl R_SetLightmap(GfxCmdBufContext context, uint lmapIndex)
     }
     else
     {
-        if (lmapIndex >= rgp.world->lightmapCount)
-            MyAssertHandler(
-                ".\\r_state.cpp",
-                651,
-                0,
-                "lmapIndex doesn't index rgp.world->lightmapCount\n\t%i not in [0, %i)",
-                lmapIndex,
-                rgp.world->lightmapCount);
+        bcassert(lmapIndex, rgp.world->lightmapCount);
         if (r_lightMap->current.integer == 1)
         {
             if ((pass->customSamplerFlags & 2) != 0)
@@ -654,14 +633,7 @@ void __cdecl R_SetReflectionProbe(GfxCmdBufContext context, uint reflectionProbe
 {
     iassert( rgp.world );
     iassert( reflectionProbeIndex != REFLECTION_PROBE_INVALID );
-    if (reflectionProbeIndex >= rgp.world->reflectionProbeCount)
-        MyAssertHandler(
-            ".\\r_state.cpp",
-            683,
-            0,
-            "reflectionProbeIndex doesn't index rgp.world->reflectionProbeCount\n\t%i not in [0, %i)",
-            reflectionProbeIndex,
-            rgp.world->reflectionProbeCount);
+    bcassert(reflectionProbeIndex, rgp.world->reflectionProbeCount);
     iassert( rgp.world->reflectionProbes[reflectionProbeIndex].reflectionImage );
     if ((context.state->pass->customSamplerFlags & 1) != 0)
         R_SetSampler(context, 1u, 0x72u, rgp.world->reflectionProbes[reflectionProbeIndex].reflectionImage);
@@ -1299,13 +1271,7 @@ void __cdecl R_ChangeState_1(GfxCmdBufState *state, uint stateBits1)
     changedBits = state->activeStateBits[1] ^ stateBits1;
     if (changedBits)
     {
-        if (!(stateBits1 & 0x40 | ((stateBits1 & 0x80) == 0)))
-            MyAssertHandler(
-                ".\\r_state.cpp",
-                937,
-                0,
-                "%s",
-                "!(stateBits1 & GFXS1_STENCIL_BACK_ENABLE) | (stateBits1 & GFXS1_STENCIL_FRONT_ENABLE)");
+        iassert(!(stateBits1 & GFXS1_STENCIL_BACK_ENABLE) | (stateBits1 & GFXS1_STENCIL_FRONT_ENABLE));
         if (r_logFile->current.integer)
             RB_LogPrintState_1(stateBits1, changedBits);
         iassert( dx.d3d9 && dx.device );
@@ -2009,22 +1975,8 @@ void __cdecl R_GetViewport(GfxCmdBufSourceState *source, GfxViewport *outViewpor
     iassert( source );
     if (source->viewportBehavior == GFX_USE_VIEWPORT_FULL)
     {
-        if (source->renderTargetWidth <= 0)
-            MyAssertHandler(
-                ".\\r_state.cpp",
-                1167,
-                0,
-                "%s\n\t(source->renderTargetWidth) = %i",
-                "(source->renderTargetWidth > 0)",
-                source->renderTargetWidth);
-        if (source->renderTargetHeight <= 0)
-            MyAssertHandler(
-                ".\\r_state.cpp",
-                1168,
-                0,
-                "%s\n\t(source->renderTargetHeight) = %i",
-                "(source->renderTargetHeight > 0)",
-                source->renderTargetHeight);
+        vassert((source->renderTargetWidth > 0), "(source->renderTargetWidth) = %i", source->renderTargetWidth);
+        vassert((source->renderTargetHeight > 0), "(source->renderTargetHeight) = %i", source->renderTargetHeight);
         outViewport->x = 0;
         outViewport->y = 0;
         outViewport->width = source->renderTargetWidth;
@@ -2032,39 +1984,11 @@ void __cdecl R_GetViewport(GfxCmdBufSourceState *source, GfxViewport *outViewpor
     }
     else
     {
-        if (source->sceneViewport.width <= 0)
-            MyAssertHandler(
-                ".\\r_state.cpp",
-                1177,
-                0,
-                "%s\n\t(source->sceneViewport.width) = %i",
-                "(source->sceneViewport.width > 0)",
-                source->sceneViewport.width);
-        if (source->sceneViewport.height <= 0)
-            MyAssertHandler(
-                ".\\r_state.cpp",
-                1178,
-                0,
-                "%s\n\t(source->sceneViewport.height) = %i",
-                "(source->sceneViewport.height > 0)",
-                source->sceneViewport.height);
+        vassert((source->sceneViewport.width > 0), "(source->sceneViewport.width) = %i", source->sceneViewport.width);
+        vassert((source->sceneViewport.height > 0), "(source->sceneViewport.height) = %i", source->sceneViewport.height);
         *outViewport = source->sceneViewport;
-        if (outViewport->width <= 0)
-            MyAssertHandler(
-                ".\\r_state.cpp",
-                1181,
-                0,
-                "%s\n\t(outViewport->width) = %i",
-                "(outViewport->width > 0)",
-                outViewport->width);
-        if (outViewport->height <= 0)
-            MyAssertHandler(
-                ".\\r_state.cpp",
-                1182,
-                0,
-                "%s\n\t(outViewport->height) = %i",
-                "(outViewport->height > 0)",
-                outViewport->height);
+        vassert((outViewport->width > 0), "(outViewport->width) = %i", outViewport->width);
+        vassert((outViewport->height > 0), "(outViewport->height) = %i", outViewport->height);
     }
     if (source->viewMode != VIEW_MODE_2D && r_scaleViewport->current.value != 1.0)
     {
@@ -2095,14 +2019,7 @@ void __cdecl R_SetViewport(GfxCmdBufState *state, const GfxViewport *viewport)
     iassert( (viewport->x >= 0) );
     iassert( (viewport->y >= 0) );
     iassert( (viewport->width > 0) );
-    if (viewport->height <= 0)
-        MyAssertHandler(
-            ".\\r_state.cpp",
-            1202,
-            0,
-            "%s\n\t(viewport->height) = %i",
-            "(viewport->height > 0)",
-            viewport->height);
+    vassert((viewport->height > 0), "(viewport->height) = %i", viewport->height);
     if (viewport->x != state->viewport.x
         || viewport->y != state->viewport.y
         || viewport->width != state->viewport.width
@@ -2682,14 +2599,7 @@ void __cdecl R_UpdateCodeConstant(
         || z != source->input.consts[constant][2]
         || w != source->input.consts[constant][3])
     {
-        if (constant >= 0x3A)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\src\\gfx_d3d\\r_state.h",
-                495,
-                0,
-                "constant doesn't index CONST_SRC_CODE_COUNT_FLOAT4\n\t%i not in [0, %i)",
-                constant,
-                58);
+        bcassert(constant, 0x3A);
         v6 = source->input.consts[constant];
         *v6 = x;
         v6[1] = y;

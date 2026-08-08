@@ -432,26 +432,12 @@ void __cdecl CG_PredictPlayerState_Internal(int localClientNum) // KISAKTODO: us
     Buf = (playerState_s *)v31.GetBuf();
     
     //Profile_Begin(326);
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            910,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     if (!cgArray[0].validPPS)
     {
         cgArray[0].validPPS = 1;
         memcpy(&cgArray[0].predictedPlayerState, &cgArray[0].nextSnap->ps, sizeof(cgArray[0].predictedPlayerState));
-        if (localClientNum)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-                917,
-                0,
-                "%s\n\t(localClientNum) = %i",
-                "(localClientNum == 0)",
-                localClientNum);
+        vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
         if (cl_freemove->current.integer && cgsArray[0].started)
             CG_RestorePlayerOrientation(cgArray);
         cgsArray[0].started = 1;

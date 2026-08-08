@@ -40,8 +40,7 @@ bool __cdecl CreateDebugStringsIfNeeded()
 {
     if (cls.debug.clStrings.strings)
     {
-        if (!cls.debug.svStrings.strings)
-            MyAssertHandler(".\\client\\cl_debugdata.cpp", 26, 0, "%s", "cls.debug.svStrings.strings");
+        iassert(cls.debug.svStrings.strings);
         return cls.debug.clStrings.durations
             && cls.debug.svStrings.strings
             && cls.debug.svStrings.durations
@@ -49,10 +48,8 @@ bool __cdecl CreateDebugStringsIfNeeded()
     }
     else
     {
-        if (cls.debug.svStrings.strings)
-            MyAssertHandler(".\\client\\cl_debugdata.cpp", 30, 0, "%s", "NULL == cls.debug.svStrings.strings");
-        if (cls.debug.svStringsBuffer.strings)
-            MyAssertHandler(".\\client\\cl_debugdata.cpp", 31, 0, "%s", "NULL == cls.debug.svStringsBuffer.strings");
+        iassert(NULL == cls.debug.svStrings.strings);
+        iassert(NULL == cls.debug.svStringsBuffer.strings);
         cls.debug.clStrings.max = 1024;
         cls.debug.svStrings.max = 1024;
         cls.debug.svStringsBuffer.max = 1024;
@@ -129,10 +126,8 @@ bool __cdecl CreateDebugLinesIfNeeded()
     }
     else
     {
-        if (cls.debug.svLines.lines)
-            MyAssertHandler(".\\client\\cl_debugdata.cpp", 101, 0, "%s", "NULL == cls.debug.svLines.lines");
-        if (cls.debug.svLinesBuffer.lines)
-            MyAssertHandler(".\\client\\cl_debugdata.cpp", 102, 0, "%s", "NULL == cls.debug.svLinesBuffer.lines");
+        iassert(NULL == cls.debug.svLines.lines);
+        iassert(NULL == cls.debug.svLinesBuffer.lines);
         cls.debug.clLines.max = 2048;
         cls.debug.svLines.max = 2048;
         cls.debug.svLinesBuffer.max = 2048;

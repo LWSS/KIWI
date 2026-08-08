@@ -18,8 +18,7 @@ void __cdecl FX_SortEffects(FxSystem *system)
     volatile int i; // [esp+1064h] [ebp-4h]
 
     PROF_SCOPED("FX_Sort");
-    if (!system)
-        MyAssertHandler(".\\EffectsCore\\fx_sort.cpp", 98, 0, "%s", "system");
+    iassert(system);
     a = (float *)system;
     FX_WaitBeginIteratingOverEffects_Exclusive(system);
     for (i = system->firstActiveEffect; i != system->firstNewEffect; ++i)
@@ -54,8 +53,7 @@ void __cdecl FX_WaitBeginIteratingOverEffects_Exclusive(FxSystem *system)
 {
     volatile long *Destination; // [esp+0h] [ebp-4h]
 
-    if (system->isArchiving)
-        MyAssertHandler("c:\\trees\\cod3\\src\\effectscore\\fx_system.h", 512, 0, "%s", "!system->isArchiving");
+    iassert(!system->isArchiving);
     Destination = &system->iteratorCount;
     do
     {
@@ -87,8 +85,7 @@ int __cdecl FX_CalcRunnerParentSortOrder(FxEffect *effect)
     int totalSortOrder; // [esp+20h] [ebp-8h]
     int elemDefIndex; // [esp+24h] [ebp-4h]
 
-    if (!effect)
-        MyAssertHandler(".\\EffectsCore\\fx_sort.cpp", 39, 0, "%s", "effect");
+    iassert(effect);
     def = effect->def;
     if (!effect->def)
         MyAssertHandler(".\\EffectsCore\\fx_sort.cpp", 42, 0, "%s", "def");
@@ -132,14 +129,12 @@ void __cdecl FX_SortNewElemsInEffect(FxSystem *system, FxEffect *effect)
         effect->firstElemHandle[0] = stopElemHandle;
         if (stopElemHandle != 0xFFFF)
         {
-            if (!system)
-                MyAssertHandler("c:\\trees\\cod3\\src\\effectscore\\fx_system.h", 334, 0, "%s", "system");
+            iassert(system);
             FX_PoolFromHandle_Generic<FxElem, 2048>(system->elems, stopElemHandle)->item.prevElemHandleInEffect = -1;
         }
         do
         {
-            if (!system)
-                MyAssertHandler("c:\\trees\\cod3\\src\\effectscore\\fx_system.h", 334, 0, "%s", "system");
+            iassert(system);
             elema = FX_PoolFromHandle_Generic<FxElem, 2048>(system->elems, elemHandle);
             elemHandle = elema->item.nextElemHandleInEffect;
             FX_SortSpriteElemIntoEffect(system, effect, (FxElem *)elema);
@@ -147,8 +142,7 @@ void __cdecl FX_SortNewElemsInEffect(FxSystem *system, FxEffect *effect)
         effect->firstSortedElemHandle = effect->firstElemHandle[0];
         for (elemHandlea = effect->firstElemHandle[0]; elemHandlea != 0xFFFF; elemHandlea = elem->item.nextElemHandleInEffect)
         {
-            if (!system)
-                MyAssertHandler("c:\\trees\\cod3\\src\\effectscore\\fx_system.h", 334, 0, "%s", "system");
+            iassert(system);
             elem = FX_PoolFromHandle_Generic<FxElem, 2048>(system->elems, elemHandlea);
             if (effect->def->elemDefs[elem->item.defIndex].elemType > 3u)
                 MyAssertHandler(
@@ -178,13 +172,11 @@ void __cdecl FX_SortSpriteElemIntoEffect(FxSystem *system, FxEffect *effect, FxE
     if (effect->firstElemHandle[0] != 0xFFFF)
     {
         FX_GetInsertSortElem(system, effect, elem, &sortElem);
-        if (sortElem.defSortOrder < 0)
-            MyAssertHandler(".\\EffectsCore\\fx_sort.cpp", 215, 0, "%s", "sortElem.defSortOrder >= 0");
+        iassert(sortElem.defSortOrder >= 0);
         do
         {
             v3 = *prevNextElemHandle;
-            if (!system)
-                MyAssertHandler("c:\\trees\\cod3\\src\\effectscore\\fx_system.h", 334, 0, "%s", "system");
+            iassert(system);
             nextElem = (FxElem *)FX_PoolFromHandle_Generic<FxElem, 2048>(system->elems, v3);
             if (!FX_ExistingElemSortsBeforeNewElem(system, effect, nextElem, &sortElem))
                 break;
@@ -195,8 +187,7 @@ void __cdecl FX_SortSpriteElemIntoEffect(FxSystem *system, FxEffect *effect, FxE
     }
     elem->nextElemHandleInEffect = *prevNextElemHandle;
     elem->prevElemHandleInEffect = prevElemHandle;
-    if (!system)
-        MyAssertHandler("c:\\trees\\cod3\\src\\effectscore\\fx_system.h", 327, 0, "%s", "system");
+    iassert(system);
     elemHandle = FX_PoolToHandle_Generic<FxElem, 2048>(system->elems, elem);
     *prevNextElemHandle = elemHandle;
     if (elem->nextElemHandleInEffect != 0xFFFF)

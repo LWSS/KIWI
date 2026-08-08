@@ -3342,10 +3342,8 @@ bool __cdecl Eval_OperatorForToken(const char *text, EvalOperatorType *op)
 {
     bool result; // al
 
-    if (!text)
-        MyAssertHandler(".\\universal\\eval.cpp", 669, 0, "%s", "text");
-    if (!op)
-        MyAssertHandler(".\\universal\\eval.cpp", 670, 0, "%s", "op");
+    iassert(text);
+    iassert(op);
     switch (*text)
     {
     case '!':
@@ -4241,8 +4239,7 @@ EvalValue *__cdecl Eval_Solve(EvalValue *result, Eval *eval)
     }
     while (Eval_EvaluationStep(eval))
         ;
-    if (eval->opStackPos)
-        MyAssertHandler(".\\universal\\eval.cpp", 647, 0, "%s", "eval->opStackPos == 0");
+    iassert(eval->opStackPos == 0);
     if (eval->valStackPos > 1)
     {
         v5 = "extra operand (for example, 'a b +')";
@@ -4465,14 +4462,7 @@ char *__cdecl GetValueAsString(Operand operand)
 {
     char *result; // [esp+8h] [ebp-4h]
 
-    if ((uint)currentTempOperand_0 >= 4)
-        MyAssertHandler(
-            ".\\ui\\ui_expressions_obj.cpp",
-            106,
-            0,
-            "currentTempOperand doesn't index NUM_OPERAND_STRINGS\n\t%i not in [0, %i)",
-            currentTempOperand_0,
-            4);
+    bcassert((uint)currentTempOperand_0, 4);
     result = s_tempOperandValueAsString_0[currentTempOperand_0];
     currentTempOperand_0 = (currentTempOperand_0 + 1) % 4;
     if (operand.dataType == VAL_STRING)
@@ -4919,8 +4909,7 @@ int __cdecl Item_Parse(int handle, itemDef_s *item)
 
 void __cdecl Menu_FreeItemMemory(itemDef_s *item)
 {
-    if (!item)
-        MyAssertHandler(".\\ui\\ui_shared_obj.cpp", 106, 0, "%s", "item");
+    iassert(item);
     free_expression(&item->visibleExp);
     free_expression(&item->materialExp);
     free_expression(&item->textExp);
@@ -5007,16 +4996,14 @@ int __cdecl MenuParse_execKeyInt(menuDef_t *menu, int handle)
 
 int __cdecl SetItemStaticFlag(menuDef_t *menu, int handle, int flag)
 {
-    if (!menu)
-        MyAssertHandler(".\\ui\\ui_shared_obj.cpp", 1150, 0, "%s", "menu");
+    iassert(menu);
     Window_SetStaticFlags(&menu->window, flag | menu->window.staticFlags);
     return 1;
 }
 
 int __cdecl MenuParse_blurWorld(menuDef_t *menu, int handle)
 {
-    if (!menu)
-        MyAssertHandler(".\\ui\\ui_shared_obj.cpp", 1134, 0, "%s", "menu");
+    iassert(menu);
     if (!PC_Float_Parse(handle, &menu->blurRadius))
         return 0;
     if (menu->blurRadius >= 0.0)
@@ -5200,8 +5187,7 @@ void __cdecl Item_ValidateTypeData(itemDef_s *item, int handle)
             if (item->type == 4 || item->type == 16 || item->type == 9 || item->type == 18 || item->type == 17)
             {
                 editDef = Item_GetEditFieldDef(item);
-                if (!editDef)
-                    MyAssertHandler(".\\ui\\ui_shared_obj.cpp", 1293, 0, "%s", "editDef");
+                iassert(editDef);
                 if (!editDef->maxPaintChars)
                     editDef->maxPaintChars = 256;
             }
@@ -5557,8 +5543,7 @@ int __cdecl ItemParse_dvar(itemDef_s *item, int handle)
     if (item->typeData.listBox && Item_IsEditFieldDef(item))
     {
         editPtr = Item_GetEditFieldDef(item);
-        if (!editPtr)
-            MyAssertHandler(".\\ui\\ui_shared_obj.cpp", 1984, 0, "%s", "editPtr");
+        iassert(editPtr);
         editPtr->minVal = -1.0;
         editPtr->maxVal = -1.0;
         editPtr->defVal = -1.0;
@@ -5894,15 +5879,13 @@ int __cdecl ItemParse_execExp(itemDef_s *item, int handle)
 
 int __cdecl ItemParse_gameMsgWindowIndex(itemDef_s *item, int handle)
 {
-    if (!item)
-        MyAssertHandler(".\\ui\\ui_shared_obj.cpp", 2406, 0, "%s", "item");
+    iassert(item);
     return PC_Int_Parse(handle, &item->gameMsgWindowIndex);
 }
 
 int __cdecl ItemParse_gameMsgWindowMode(itemDef_s *item, int handle)
 {
-    if (!item)
-        MyAssertHandler(".\\ui\\ui_shared_obj.cpp", 2413, 0, "%s", "item");
+    iassert(item);
     return PC_Int_Parse(handle, &item->gameMsgWindowMode);
 }
 
@@ -6116,8 +6099,7 @@ void __cdecl KeywordHash_Add_itemDef_s_256_3855_(
     int hash; // [esp+8h] [ebp-4h]
 
     hash = KeywordHash_Key_256_3855_(key->keyword);
-    if (table[hash])
-        MyAssertHandler(".\\ui\\ui_shared_obj.cpp", 695, 0, "%s", "table[hash] == NULL");
+    iassert(table[hash] == NULL);
     table[hash] = key;
 }
 
@@ -6127,8 +6109,7 @@ int __cdecl KeywordHash_PickSeed_itemDef_s_256_3855_(const KeywordHashEntry<item
 
     for (seed = 0; !KeywordHash_IsValidSeed_itemDef_s_256_3855_(array, count, seed); ++seed)
     {
-        if (seed == 0x10000)
-            MyAssertHandler(".\\ui\\ui_shared_obj.cpp", 673, 0, "seed != 65536\n\t%i, %i", 0x10000, 0x10000);
+        vassert(seed != 65536, "%i, %i", 0x10000, 0x10000);
     }
     return seed;
 }
@@ -6184,8 +6165,7 @@ int __cdecl KeywordHash_PickSeed_menuDef_t_128_128_(const KeywordHashEntry<menuD
 
     for (seed = 0; !KeywordHash_IsValidSeed_menuDef_t_128_128_(array, count, seed); ++seed)
     {
-        if (seed == 0x10000)
-            MyAssertHandler(".\\ui\\ui_shared_obj.cpp", 673, 0, "seed != 65536\n\t%i, %i", 0x10000, 0x10000);
+        vassert(seed != 65536, "%i, %i", 0x10000, 0x10000);
     }
     return seed;
 }
@@ -6225,8 +6205,7 @@ void __cdecl KeywordHash_Add_menuDef_t_128_128_(
     int hash; // [esp+8h] [ebp-4h]
 
     hash = KeywordHash_Key_128_128_(key->keyword);
-    if (table[hash])
-        MyAssertHandler(".\\ui\\ui_shared_obj.cpp", 695, 0, "%s", "table[hash] == NULL");
+    iassert(table[hash] == NULL);
     table[hash] = key;
 }
 
@@ -6302,8 +6281,7 @@ void __cdecl Menu_PostParse(menuDef_t *menu)
 {
     uint size; // [esp+0h] [ebp-4h]
 
-    if (!menu)
-        MyAssertHandler(".\\ui\\ui_shared_obj.cpp", 2653, 0, "%s", "menu");
+    iassert(menu);
     size = 4 * menu->itemCount;
     menu->items = (itemDef_s **)UI_Alloc(size, 4);
     memcpy((uint8_t *)menu->items, (uint8_t *)g_load_0.items, size);

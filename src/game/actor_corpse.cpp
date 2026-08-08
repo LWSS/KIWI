@@ -19,14 +19,7 @@ float playerEyePos[3];
 
 XAnimTree_s *__cdecl G_GetActorCorpseIndexAnimTree(unsigned int index)
 {
-    if (index >= 0x10)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\actor_corpse.cpp",
-            29,
-            0,
-            "index doesn't index ARRAY_COUNT( g_scr_data.actorCorpseInfo )\n\t%i not in [0, %i)",
-            index,
-            16);
+    bcassert(index, 0x10);
     return g_scr_data.actorCorpseInfo[index].tree;
 }
 
@@ -267,14 +260,7 @@ int __cdecl G_PruneCorpsesSortCmp(int *a, int *b)
     }
     v6 = v2;
     v7 = g_scr_data.actorCorpseInfo[v6].entnum;
-    if (v7 >= num_entities)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\actor_corpse.cpp",
-            221,
-            0,
-            "g_scr_data.actorCorpseInfo[bIdx].entnum doesn't index level.num_entities\n\t%i not in [0, %i)",
-            v7,
-            num_entities);
+    bcassert(v7, num_entities);
     v8 = &level.gentities[g_scr_data.actorCorpseInfo[v3].entnum];
     v9 = &level.gentities[g_scr_data.actorCorpseInfo[v6].entnum];
     v10 = (float)((float)((float)((float)(v8->r.currentOrigin[1] - playerEyePos[1])
@@ -350,14 +336,7 @@ void __cdecl G_PruneLoadedCorpses()
         {
             v9 = *v8;
             entnum = g_scr_data.actorCorpseInfo[v9].entnum;
-            if (entnum >= level.num_entities)
-                MyAssertHandler(
-                    "c:\\trees\\cod3\\cod3src\\src\\game\\actor_corpse.cpp",
-                    275,
-                    0,
-                    "g_scr_data.actorCorpseInfo[corpseIdx].entnum doesn't index level.num_entities\n\t%i not in [0, %i)",
-                    entnum,
-                    level.num_entities);
+            bcassert(entnum, level.num_entities);
             G_FreeEntity(&level.gentities[g_scr_data.actorCorpseInfo[v9].entnum]);
             --v7;
             ++v8;
@@ -798,10 +777,8 @@ int __cdecl Actor_BecomeCorpse(gentity_s *self)
         v10 = 0;
     Actor_EventListener_RemoveEntity(self->s.number);
     Actor_Free(actor);
-    if (self->actor)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_corpse.cpp", 576, 0, "%s", "self->actor == NULL");
-    if (self->sentient)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_corpse.cpp", 577, 0, "%s", "self->sentient == NULL");
+    iassert(self->actor == NULL);
+    iassert(self->sentient == NULL);
     self->physicsObject = 1;
     p_pos = &self->s.lerp.pos;
     self->handler = ENT_HANDLER_ACTOR_CORPSE;

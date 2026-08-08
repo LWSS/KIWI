@@ -276,14 +276,7 @@ void __cdecl R_AddCasters(
         if (sceneEntIndex < 0)
             goto LABEL_24;
         entityWeight = candidates[candidateIter].weight;
-        if (entityWeight >= 100000000.0)
-            MyAssertHandler(
-                ".\\r_shadowcookie.cpp",
-                480,
-                0,
-                "%s\n\t(entityWeight) = %g",
-                "(entityWeight < 100000000.0f)",
-                entityWeight);
+        vassert((entityWeight < 100000000.0f), "(entityWeight) = %g", entityWeight);
         if (shadowCookieGlob.weightCap < (double)entityWeight)
             break;
         if (fadePoint >= (double)entityWeight || entityWeight == 0.0)
@@ -364,14 +357,7 @@ void __cdecl R_AddShadowCookie(
     sceneEnt = &scene.sceneDObj[sceneEntIndex];
     if (R_UpdateSceneEntBounds(sceneEnt, &localSceneEnt, &obj, 1))
     {
-        if (cookieList->cookieCount >= 0x18)
-            MyAssertHandler(
-                ".\\r_shadowcookie.cpp",
-                231,
-                0,
-                "%s\n\t(cookieList->cookieCount) = %i",
-                "(cookieList->cookieCount < 24)",
-                cookieList->cookieCount);
+        vassert((cookieList->cookieCount < 24), "(cookieList->cookieCount) = %i", cookieList->cookieCount);
         Vec3Sub(sceneEnt->cull.maxs, sceneEnt->cull.mins, span);
         iassert( Vec3LengthSq( span ) > 0.0f );
         cookie = &cookieList->cookies[cookieList->cookieCount++];
@@ -435,13 +421,7 @@ static void __cdecl R_GetSunAxes(float (*sunAxis)[3][3])
     float *dir; // [esp+18h] [ebp-4h]
 
     iassert( frontEndDataOut );
-    if (frontEndDataOut->sunLight.type != 1)
-        MyAssertHandler(
-            (char *)".\\r_shadowcookie.cpp",
-            63,
-            0,
-            "%s",
-            "frontEndDataOut->sunLight.type == GFX_LIGHT_TYPE_DIR");
+    iassert(frontEndDataOut->sunLight.type == GFX_LIGHT_TYPE_DIR);
     dir = frontEndDataOut->sunLight.dir;
     (*sunAxis)[0][0] = -frontEndDataOut->sunLight.dir[0];
     (*sunAxis)[0][1] = -dir[1];
@@ -628,14 +608,7 @@ void __cdecl R_GenerateBspShadowReceivers(ShadowCookieList *shadowCookieList)
             std::sort(surfaces, surfaces + cookieDrawSurfCount, R_SortBspShadowReceiverSurfaces);
             for (listSurfIndex = 0; listSurfIndex < cookieDrawSurfCount; ++listSurfIndex)
             {
-                if (listSurfIndex >= rgp.world->surfaceCount)
-                    MyAssertHandler(
-                        ".\\r_shadowcookie.cpp",
-                        620,
-                        0,
-                        "listSurfIndex doesn't index rgp.world->surfaceCount\n\t%i not in [0, %i)",
-                        listSurfIndex,
-                        rgp.world->surfaceCount);
+                bcassert(listSurfIndex, rgp.world->surfaceCount);
                 surfIndex = surfaces[listSurfIndex] - rgp.world->dpvs.surfaces;
                 triSurfList[0] = surfIndex;
                 R_AddBspDrawSurfs(surfaceMaterials[surfIndex], (uint8_t *)triSurfList, 1u, &surfData);

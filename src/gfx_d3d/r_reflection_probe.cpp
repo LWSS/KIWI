@@ -496,14 +496,7 @@ void __cdecl R_GenerateReflections(char *mapname, GfxReflectionProbe *probes, ui
                 22,
                 version);
         probeRawLumpData = (DiskGfxReflectionProbe*)Com_GetBspLump(LUMP_REFLECTION_PROBES, 0x20044u, &lumpProbeCount);
-        if (probeCount != lumpProbeCount)
-            MyAssertHandler(
-                ".\\r_reflection_probe.cpp",
-                189,
-                0,
-                "probeCount == lumpProbeCount\n\t%i, %i",
-                probeCount,
-                lumpProbeCount);
+        vassert(probeCount == lumpProbeCount, "%i, %i", probeCount, lumpProbeCount);
         if (probeCount)
         {
             lumpSize = 131140 * probeCount;

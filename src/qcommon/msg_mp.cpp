@@ -910,14 +910,7 @@ int __cdecl MSG_ReadEntityIndex(msg_t *msg, uint indexBits)
     }
     if (msg_printEntityNums->current.enabled)
         Com_Printf(16, "Read entity num %i\n", msg->lastEntityRef);
-    if (msg->lastEntityRef < 0)
-        MyAssertHandler(
-            ".\\qcommon\\msg_mp.cpp",
-            1309,
-            0,
-            "%s\n\t(msg->lastEntityRef) = %i",
-            "(msg->lastEntityRef >= 0)",
-            msg->lastEntityRef);
+    vassert((msg->lastEntityRef >= 0), "(msg->lastEntityRef) = %i", msg->lastEntityRef);
     return msg->lastEntityRef;
 }
 
@@ -1065,14 +1058,7 @@ void __cdecl MSG_ReadDeltaField(
             *toF = 0;
             iassert( *reinterpret_cast< float * >( toF ) == 0.0f );
         }
-        if ((uint)(__int64)(*(float *)toF + 2048.0) >= 0x1000)
-            MyAssertHandler(
-                ".\\qcommon\\msg_mp.cpp",
-                1476,
-                0,
-                "*(float *)toF + HUDELEM_COORD_BIAS doesn't index 1 << HUDELEM_COORD_BITS\n\t%i not in [0, %i)",
-                (int)(*(float *)toF + 2048.0),
-                4096);
+        bcassert((uint)(__int64)(*(float *)toF + 2048.0), 0x1000);
         return;
     case 0xFFFFFF9E:
         v14 = MSG_Read24BitFlag(msg, *fromF);
@@ -1318,8 +1304,7 @@ int __cdecl MSG_ReadDeltaEntityStruct(msg_t *msg, int time, char *from, char *to
             print = 0;
         }
         *(uint *)to = number;
-        if (strcmp(entityStateFields[0].name, "eType"))
-            MyAssertHandler(".\\qcommon\\msg_mp.cpp", 1763, 0, "%s", "strcmp( entityStateFields[0].name, \"eType\" ) == 0");
+        iassert(strcmp( entityStateFields[0].name, "eType" ) == 0);
         MSG_ReadDeltaField(msg, time, from, to, entityStateFields, print, 0);
         stateFieldList = MSG_GetStateFieldListForEntityType(*((uint *)to + 1));
         stateFields = stateFieldList->array;

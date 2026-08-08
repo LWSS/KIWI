@@ -404,8 +404,7 @@ void __cdecl SV_Map_f()
         I_strlwr(mapname);
         if (IsFastFileLoad())
         {
-            if (!fs_gameDirVar)
-                MyAssertHandler(".\\server_mp\\sv_ccmds_mp.cpp", 239, 0, "%s", "fs_gameDirVar");
+            iassert(fs_gameDirVar);
             if (!DB_FileSize(mapname, 0) && (!*(_BYTE *)fs_gameDirVar->current.integer || !DB_FileSize(mapname, 1)))
             {
                 Com_PrintError(1, "Can't find map \"%s\".\n", mapname);
@@ -721,8 +720,7 @@ client_t *__cdecl SV_GetPlayerByName()
 
 int __cdecl SV_KickClient(client_t *cl, char *playerName, int maxPlayerNameLen, char *cdkeyHash)
 {
-    if (!cl)
-        MyAssertHandler(".\\server_mp\\sv_ccmds_mp.cpp", 537, 0, "%s", "cl");
+    iassert(cl);
     if (cl->header.netchan.remoteAddress.type == NA_LOOPBACK)
     {
         SV_SendServerCommand(0, SV_CMD_CAN_IGNORE, "%c \"EXE_CANNOTKICKHOSTPLAYER\"", 101);
@@ -1080,14 +1078,7 @@ void __cdecl SV_SetPerk_f()
             i = 0;
             for (clIdx = svs.clients; i < sv_maxclients->current.integer && clIdx != PlayerByName; ++clIdx)
                 ++i;
-            if ((uint)i >= sv_maxclients->current.integer)
-                MyAssertHandler(
-                    ".\\server_mp\\sv_ccmds_mp.cpp",
-                    1130,
-                    0,
-                    "i doesn't index sv_maxclients->current.integer\n\t%i not in [0, %i)",
-                    i,
-                    sv_maxclients->current.integer);
+            bcassert((uint)i, sv_maxclients->current.integer);
             ps = SV_GameClientNum(i);
             BG_SetPerk(&ps->perks, perkIndex);
             ClientState = G_GetClientState(i);

@@ -68,10 +68,8 @@ void __cdecl CG_ModPrvUpdateMru(const dvar_s **mruDvars, const char **stringTabl
     char *v7; // r27
 
     v3 = mruDvars;
-    if (!mruDvars)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_modelpreviewer.cpp", 345, 0, "%s", "mruDvars");
-    if (!stringTable)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_modelpreviewer.cpp", 346, 0, "%s", "stringTable");
+    iassert(mruDvars);
+    iassert(stringTable);
     v6 = 0;
     v7 = (char *)((char *)stringTable - (char *)v3);
     do
@@ -436,12 +434,9 @@ void *__cdecl CG_ModPrvAlloc(int size)
 
 void __cdecl CG_ModPrvFree(void *allocated, int size)
 {
-    if (!allocated)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_modelpreviewer.cpp", 608, 0, "%s", "allocated");
-    if (!size)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_modelpreviewer.cpp", 609, 0, "%s", "size");
-    if (!g_modPrvHunkUser)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_modelpreviewer.cpp", 610, 0, "%s", "g_modPrvHunkUser");
+    iassert(allocated);
+    iassert(size);
+    iassert(g_modPrvHunkUser);
 }
 
 void CG_ModPrvResetGlobals()
@@ -705,8 +700,7 @@ int __cdecl CG_ModPrvGetNumTotalBones(DObj_s *dobj)
     int i; // r31
     const XModel *Model; // r3
 
-    if (!dobj)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_modelpreviewer.cpp", 1217, 0, "%s", "dobj");
+    iassert(dobj);
     v2 = 0;
     NumModels = DObjGetNumModels(dobj);
     for (i = 0; i < NumModels; v2 += XModelNumBones(Model))
@@ -721,10 +715,8 @@ int __cdecl CG_ModPrvGetNumSurfaces(DObj_s *obj, int lod)
     int v6; // ctr
     char v8[80]; // [sp+50h] [-50h] BYREF
 
-    if (!obj)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_modelpreviewer.cpp", 1238, 0, "%s", "obj");
-    if (lod < 0)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_modelpreviewer.cpp", 1239, 0, "%s", "lod >= 0");
+    iassert(obj);
+    iassert(lod >= 0);
     NumModels = DObjGetNumModels(obj);
     if ((unsigned int)NumModels > 0x20)
         MyAssertHandler(
@@ -751,24 +743,10 @@ const char *__cdecl CG_ModPrvModelGetBoneName(DObj_s *dobj, int modelIndex, int 
     XModel *Model; // r3
     unsigned __int16 *v7; // r29
 
-    if (!dobj)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_modelpreviewer.cpp", 1253, 0, "%s", "dobj");
-    if (modelIndex < 0)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_modelpreviewer.cpp", 1254, 0, "%s", "modelIndex >= 0");
-    if (boneIndex < 0 || boneIndex >= DObjNumBones(dobj))
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_modelpreviewer.cpp",
-            1256,
-            0,
-            "%s",
-            "boneIndex >= 0 && boneIndex < DObjNumBones( dobj )");
-    if (modelIndex < 0 || modelIndex >= DObjGetNumModels(dobj))
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_modelpreviewer.cpp",
-            1257,
-            0,
-            "%s",
-            "modelIndex >= 0 && modelIndex < DObjGetNumModels( dobj )");
+    iassert(dobj);
+    iassert(modelIndex >= 0);
+    iassert(boneIndex >= 0 && boneIndex < DObjNumBones( dobj ));
+    iassert(modelIndex >= 0 && modelIndex < DObjGetNumModels( dobj ));
     Model = DObjGetModel(dobj, modelIndex);
     v7 = XModelBoneNames(Model);
     if (!v7)
@@ -951,10 +929,7 @@ void __cdecl CG_ModPrvLoadAnimations(const char *animationFilename)
             Hunk_UserDestroy(v5);
             g_modPrvHunkUser = 0;
         }
-        else if (g_modPrvHunkUser)
-        {
-            MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_modelpreviewer.cpp", 1394, 0, "%s", "!g_modPrvHunkUser");
-        }
+        else iassert(!g_modPrvHunkUser);
 
         g_modPrvHunkUser = Hunk_UserCreate(0x10000, "CG_ModPrvLoadAnimations", 0, 0, 0);
         xAnims = XAnimCreateAnims("ModelPreviewer", 3, CG_ModPrvAlloc);
@@ -1201,10 +1176,8 @@ void __cdecl CG_ModPrvAnimRecentAccept(const dvar_s *dvar, int *currentIndex)
     const char *v9; // r11
     int v10; // r8
 
-    if (!dvar)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_modelpreviewer.cpp", 1609, 0, "%s", "dvar");
-    if (!currentIndex)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_modelpreviewer.cpp", 1610, 0, "%s", "currentIndex");
+    iassert(dvar);
+    iassert(currentIndex);
     Dvar_ClearModified((dvar_s*)dvar);
     v4 = Dvar_EnumToString(dvar);
     v5 = v4;
@@ -1253,10 +1226,8 @@ void __cdecl CG_ModPrvAnimRecentAccept(const dvar_s *dvar, int *currentIndex)
 
 void __cdecl CG_ModPrvLoadAnimAccept(const dvar_s *dvar, int *currentIndex)
 {
-    if (!dvar)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_modelpreviewer.cpp", 1636, 0, "%s", "dvar");
-    if (!currentIndex)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_modelpreviewer.cpp", 1637, 0, "%s", "currentIndex");
+    iassert(dvar);
+    iassert(currentIndex);
     Dvar_ClearModified((dvar_s*)dvar);
     *currentIndex = dvar->current.integer;
     CG_ModPrvLoadAnimations(g_mdlprv.system.animNames[dvar->current.integer]);
@@ -2310,14 +2281,7 @@ void __cdecl MdlPrvControlsGamepad(int localClientNum, double forward, double si
 
     if (DevGui_IsActive())
         return;
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            910,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     v10 = Sys_Milliseconds();
     LODWORD(v11) = cgArray[0].frametime;
     v12 = (float)((float)v11 * (float)0.001);
@@ -2512,14 +2476,7 @@ void __cdecl CG_ModelPreviewerHandleGamepadEvents(
 
 void __cdecl CG_ModelPreviewerHandleKeyEvents(int localClientNum, int key, int down, unsigned int time)
 {
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            910,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     if (cgArray[0].predictedPlayerState.pm_type == PM_MPVIEWER)
     {
         switch (key)
@@ -2564,8 +2521,7 @@ void __cdecl MdlPrvUpdateViewFocused(float *viewOrigin, float (*viewAxis)[3], fl
     float v22[16]; // [sp+180h] [-C0h] BYREF
     float v23[8][4]; // [sp+1C0h] [-80h] BYREF
 
-    if (!zNear)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_modelpreviewer.cpp", 3112, 0, "%s", "zNear");
+    iassert(zNear);
     MatrixIdentity44((mat4x4&)v22);
     MatrixIdentity44((mat4x4&)v21);
     MatrixIdentity44((mat4x4&)v20);
@@ -2674,14 +2630,7 @@ void __cdecl CG_ModelPreviewerUpdateView(float *viewOrigin, float (*viewAxis)[3]
 
 bool __cdecl CG_ModelPreviewerNeedsVieworgInterpSkipped(int localClientNum)
 {
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            910,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     return cgArray[0].predictedPlayerState.pm_type == PM_MPVIEWER;
 }
 

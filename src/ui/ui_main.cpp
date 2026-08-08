@@ -586,8 +586,7 @@ void UI_UpdateSaveUI()
         v2 = (int)(float)(ui_saveMessageMinTime->current.value * (float)1000.0);
         if (Sys_Milliseconds() - ui_saveTimeGlob.saveTime > v2 && !SaveDevice_IsAccessingDevice())
         {
-            if (!ui_saveTimeGlob.saveMenuName)
-                MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\ui\\ui_main.cpp", 477, 0, "%s", "ui_saveTimeGlob.saveMenuName");
+            iassert(ui_saveTimeGlob.saveMenuName);
             ui_saveTimeGlob.saveTime = 0;
             ui_saveTimeGlob.isSaving = 0;
             Dvar_SetBool(ui_isSaving, 0);
@@ -653,8 +652,7 @@ int __cdecl UI_SavegameIndexFromFilename(const char *filename)
     int v2; // r29
     int *i; // r31
 
-    if (!filename)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\ui\\ui_main.cpp", 635, 0, "%s", "filename");
+    iassert(filename);
     v2 = 0;
     if (uiInfo.savegameCount <= 0)
         return -1;
@@ -950,12 +948,9 @@ bool __cdecl UI_DvarValueTest(const char *cmd, const char *dvarName, const char 
 {
     const char *VariantString; // r3
 
-    if (!cmd)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\ui\\ui_main.cpp", 1609, 0, "%s", "cmd");
-    if (!dvarName)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\ui\\ui_main.cpp", 1610, 0, "%s", "dvarName");
-    if (!testValue)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\ui\\ui_main.cpp", 1611, 0, "%s", "testValue");
+    iassert(cmd);
+    iassert(dvarName);
+    iassert(testValue);
     if (Dvar_FindVar(dvarName))
     {
         VariantString = Dvar_GetVariantString(dvarName);
@@ -972,18 +967,9 @@ void __cdecl UI_OpenMenuOnDvar(const char *cmd, const char *menuName, const char
 {
     int v8; // r3
 
-    if (!cmd)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\ui\\ui_main.cpp", 1630, 0, "%s", "cmd");
-    if (I_stricmp(cmd, "openMenuOnDvar") && I_stricmp(cmd, "openMenuOnDvarNot"))
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\ui\\ui_main.cpp",
-            1631,
-            0,
-            "%s\n\t(cmd) = %s",
-            "(!I_stricmp( cmd, \"openMenuOnDvar\" ) || !I_stricmp( cmd, \"openMenuOnDvarNot\" ))",
-            cmd);
-    if (!menuName)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\ui\\ui_main.cpp", 1632, 0, "%s", "menuName");
+    iassert(cmd);
+    vassert((!I_stricmp( cmd, "openMenuOnDvar" ) || !I_stricmp( cmd, "openMenuOnDvarNot" )), "(cmd) = %s", cmd);
+    iassert(menuName);
     v8 = I_stricmp(cmd, "openMenuOnDvar");
     if (UI_DvarValueTest(cmd, dvarName, testValue, v8 == 0))
         Menus_OpenByName(&uiInfo.uiDC, menuName);
@@ -993,18 +979,9 @@ void __cdecl UI_CloseMenuOnDvar(const char *cmd, const char *menuName, const cha
 {
     int v8; // r3
 
-    if (!cmd)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\ui\\ui_main.cpp", 1644, 0, "%s", "cmd");
-    if (I_stricmp(cmd, "closeMenuOnDvar") && I_stricmp(cmd, "closeMenuOnDvarNot"))
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\ui\\ui_main.cpp",
-            1645,
-            0,
-            "%s\n\t(cmd) = %s",
-            "(!I_stricmp( cmd, \"closeMenuOnDvar\" ) || !I_stricmp( cmd, \"closeMenuOnDvarNot\" ))",
-            cmd);
-    if (!menuName)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\ui\\ui_main.cpp", 1646, 0, "%s", "menuName");
+    iassert(cmd);
+    vassert((!I_stricmp( cmd, "closeMenuOnDvar" ) || !I_stricmp( cmd, "closeMenuOnDvarNot" )), "(cmd) = %s", cmd);
+    iassert(menuName);
     v8 = I_stricmp(cmd, "closeMenuOnDvar");
     if (UI_DvarValueTest(cmd, dvarName, testValue, v8 == 0))
         Menus_CloseByName(&uiInfo.uiDC, menuName);
@@ -1496,20 +1473,11 @@ void __cdecl UI_ReplaceConversions(
     int v21; // r10
     char v22; // r9
 
-    if (!sourceString)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\ui\\ui_main.cpp", 2701, 0, "%s", "sourceString");
+    iassert(sourceString);
     if (strstr(sourceString, "&&"))
     {
-        if (!arguments)
-            MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\ui\\ui_main.cpp", 2709, 0, "%s", "arguments");
-        if (arguments->argCount > 9)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\ui\\ui_main.cpp",
-                2710,
-                0,
-                "%s\n\t(arguments->argCount) = %i",
-                "(arguments->argCount <= 9)",
-                arguments->argCount);
+        iassert(arguments);
+        vassert((arguments->argCount <= 9), "(arguments->argCount) = %i", arguments->argCount);
         v8 = sourceString;
         while (*(unsigned __int8 *)v8++)
             ;
@@ -2231,13 +2199,7 @@ void __cdecl UI_RunMenuScript(int localClientNum, const char **args, const char 
             memset(missionDifficulty, 0, sizeof(missionDifficulty));
             const char *VariantString = Dvar_GetVariantString("mis_difficulty");
             I_strncpyz(missionDifficulty, VariantString, sizeof(missionDifficulty));
-            if (offset >= (int)sizeof(missionDifficulty))
-                MyAssertHandler(
-                    "c:\\trees\\cod3\\cod3src\\src\\ui\\ui_main.cpp",
-                    1700,
-                    0,
-                    "%s",
-                    "offset < static_cast< int >( sizeof( missionDifficulty ) )");
+            iassert(offset < static_cast< int >( sizeof( missionDifficulty ) ));
             I_strncpyz(v10, &missionDifficulty[offset], 2);
             Dvar_SetStringByName("ui_level", v10);
         }
@@ -2493,10 +2455,7 @@ int __cdecl UI_SetActiveMenu(int localClientNum, uiMenuCommand_t menu)
         if (g_currentMenuType == UIMENU_BRIEFING)
             return 0;
     }
-    else if (menu == UIMENU_SCRIPT_POPUP)
-    {
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\ui\\ui_main.cpp", 2416, 0, "%s", "menu != UIMENU_SCRIPT_POPUP");
-    }
+    else iassert(menu != UIMENU_SCRIPT_POPUP);
     v4 = g_currentMenuType;
     g_currentMenuType = menu;
     switch (menu)
@@ -2506,8 +2465,7 @@ int __cdecl UI_SetActiveMenu(int localClientNum, uiMenuCommand_t menu)
         Key_ClearStates(0);
         Dvar_SetIntByName("cl_paused", 0);
         Menus_CloseAll(&uiInfo.uiDC);
-        if (CL_SkipRendering())
-            MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\ui\\ui_main.cpp", 2429, 0, "%s", "!CL_SkipRendering()");
+        iassert(!CL_SkipRendering());
         goto LABEL_10;
     case UIMENU_MAIN:
         Key_SetCatcher(0, 16);
@@ -2579,13 +2537,7 @@ int __cdecl UI_SetActiveMenu(int localClientNum, uiMenuCommand_t menu)
         result = 1;
         break;
     case UIMENU_SAVE_LOADING:
-        if (SaveMemory_IsRecentlyLoaded())
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\ui\\ui_main.cpp",
-                2480,
-                0,
-                "%s",
-                "!SaveMemory_IsRecentlyLoaded()");
+        iassert(!SaveMemory_IsRecentlyLoaded());
         Menus_OpenByName(&uiInfo.uiDC, "savegameloading");
         result = 1;
         break;

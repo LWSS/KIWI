@@ -33,8 +33,7 @@ void __cdecl P_DamageFeedback(gentity_s *player)
     float v15[14]; // [sp+78h] [-38h] BYREF
 
     client = player->client;
-    if (!client)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_active.cpp", 29, 0, "%s", "client");
+    iassert(client);
     if (client->ps.pm_type < PM_DEAD)
     {
         if (player_debugHealth->current.enabled
@@ -277,12 +276,9 @@ void __cdecl NotifyGrenadePullback(gentity_s *ent, unsigned int weaponIndex)
 {
     WeaponDef *WeaponDef; // r29
 
-    if (!ent)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_active.cpp", 281, 0, "%s", "ent");
-    if (!ent->client)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_active.cpp", 282, 0, "%s", "ent->client");
-    if (!weaponIndex)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_active.cpp", 283, 0, "%s", "weaponIndex != WP_NONE");
+    iassert(ent);
+    iassert(ent->client);
+    iassert(weaponIndex != WP_NONE);
     WeaponDef = BG_GetWeaponDef(weaponIndex);
     if (!WeaponDef)
         MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_active.cpp", 286, 0, "%s", "weapDef");
@@ -307,10 +303,8 @@ void __cdecl AttemptLiveGrenadePickup(gentity_s *clientEnt)
     gentity_s *v2; // r31
     void(__cdecl * touch)(gentity_s *, gentity_s *, int); // r29
 
-    if (!clientEnt)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_active.cpp", 315, 0, "%s", "clientEnt");
-    if (!clientEnt->client)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_active.cpp", 316, 0, "%s", "clientEnt->client");
+    iassert(clientEnt);
+    iassert(clientEnt->client);
     if (clientEnt->client->ps.cursorHintEntIndex >= 0x880u)
         MyAssertHandler(
             "c:\\trees\\cod3\\cod3src\\src\\game\\g_active.cpp",
@@ -332,13 +326,7 @@ void __cdecl AttemptLiveGrenadePickup(gentity_s *clientEnt)
                     clientEnt->client->ps.throwBackGrenadeOwner = ENTITYNUM_WORLD;
                 clientEnt->client->ps.grenadeTimeLeft = clientEnt->client->ps.throwBackGrenadeTimeLeft;
                 touch(v2, clientEnt, 0);
-                if (!clientEnt->client->ps.throwBackGrenadeTimeLeft)
-                    MyAssertHandler(
-                        "c:\\trees\\cod3\\cod3src\\src\\game\\g_active.cpp",
-                        337,
-                        0,
-                        "%s",
-                        "clientEnt->client->ps.throwBackGrenadeTimeLeft");
+                iassert(clientEnt->client->ps.throwBackGrenadeTimeLeft);
             }
         }
     }
@@ -477,10 +465,8 @@ void __cdecl Client_ClaimNode(gentity_s *ent)
     const sentient_s *v4; // r3
     float v5[12]; // [sp+50h] [-30h] BYREF
 
-    if (!ent->client)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_active.cpp", 503, 0, "%s", "ent->client");
-    if (!ent->sentient)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_active.cpp", 504, 0, "%s", "ent->sentient");
+    iassert(ent->client);
+    iassert(ent->sentient);
     v2 = Sentient_NearestNode(ent->sentient);
     Sentient_GetOrigin(ent->sentient, v5);
     if (v2 && Vec2DistanceSq(v2->constant.vOrigin, v5) > 1024.0)
@@ -623,13 +609,7 @@ void __cdecl ClientThink_real(gentity_s *ent)
     pmove_t v39; // [sp+70h] [-180h] BYREF
 
     client = ent->client;
-    if (client->pers.connected != CON_CONNECTED)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\g_active.cpp",
-            644,
-            0,
-            "%s",
-            "client->pers.connected == CON_CONNECTED");
+    iassert(client->pers.connected == CON_CONNECTED);
     p_cmd = &ent->client->pers.cmd;
     if (client->bFrozen || client->linkAnglesLocked)
         v5 = client->ps.pm_flags | 0x800;
@@ -862,8 +842,7 @@ void __cdecl ClientEndFrame(gentity_s *ent)
         }
         G_UpdateGroundTilt(ent->client);
     }
-    if (!ent->sentient)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_active.cpp", 913, 0, "%s", "ent->sentient");
+    iassert(ent->sentient);
     Sentient_UpdateActualChainPos(ent->sentient);
     if (ent->client->ps.commandTime && level.time > 500)
     {
@@ -908,8 +887,7 @@ void __cdecl G_UpdatePlayerTriggers(gentity_s *ent)
 
     if (ent->r.inuse)
     {
-        if (!ent->client)
-            MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_active.cpp", 1012, 0, "%s", "ent->client");
+        iassert(ent->client);
         ent->client->playerMoved = Vec2DistanceSq(ent->r.currentOrigin, ent->sentient->oldOrigin) >= 0.0099999998;
         sentient = ent->sentient;
         if (ent->r.currentOrigin[0] != sentient->oldOrigin[0]

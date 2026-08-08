@@ -83,13 +83,7 @@ char __cdecl cldTestFace(
     float fDepth; // [esp+28h] [ebp-8h]
     float fMax; // [esp+2Ch] [ebp-4h]
 
-    if (*vNormal == 0.0 && vNormal[1] == 0.0 && vNormal[2] == 0.0)
-        MyAssertHandler(
-            ".\\physics\\ode\\src\\collision_trimesh_box.cpp",
-            167,
-            0,
-            "%s",
-            "vNormal[0] != 0 || vNormal[1] != 0 || vNormal[2] != 0");
+    iassert(vNormal[0] != 0 || vNormal[1] != 0 || vNormal[2] != 0);
     if (fp1 <= fp0)
     {
         if (fp2 <= fp1)
@@ -167,31 +161,17 @@ char __cdecl cldTestNormal(collData_t *tbData, dReal fp0, dReal fR, float *vNorm
     float fDeptha; // [esp+38h] [ebp-8h]
     float fLength; // [esp+3Ch] [ebp-4h]
 
-    if ((LODWORD(fp0) & 0x7F800000) == 0x7F800000)
-        MyAssertHandler(".\\physics\\ode\\src\\collision_trimesh_box.cpp", 121, 0, "%s", "!IS_NAN(fp0)");
-    if ((LODWORD(fR) & 0x7F800000) == 0x7F800000)
-        MyAssertHandler(".\\physics\\ode\\src\\collision_trimesh_box.cpp", 122, 0, "%s", "!IS_NAN(fR)");
-    if (!vNormal)
-        MyAssertHandler(".\\physics\\ode\\src\\collision_trimesh_box.cpp", 123, 0, "%s", "vNormal");
-    if ((COERCE_UNSIGNED_INT(*vNormal) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(vNormal[1]) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(vNormal[2]) & 0x7F800000) == 0x7F800000)
-    {
-        MyAssertHandler(
-            ".\\physics\\ode\\src\\collision_trimesh_box.cpp",
-            124,
-            0,
-            "%s",
-            "!IS_NAN((vNormal)[0]) && !IS_NAN((vNormal)[1]) && !IS_NAN((vNormal)[2])");
-    }
+    iassert(!IS_NAN(fp0));
+    iassert(!IS_NAN(fR));
+    iassert(vNormal);
+    nanassertvec3(vNormal);
     fDepth = fR + fp0;
     if (fDepth >= 3.402823466385289e38)
         MyAssertHandler(".\\physics\\ode\\src\\collision_trimesh_box.cpp", 128, 0, "%s", "fDepth < MAXVALUE");
     if (fDepth < 0.0)
         return 0;
     fLength = Vec3Length(vNormal);
-    if (fLength <= 0.0)
-        MyAssertHandler(".\\physics\\ode\\src\\collision_trimesh_box.cpp", 139, 0, "%s", "fLength > 0");
+    iassert(fLength > 0);
     fOneOverLength = 1.0 / fLength;
     fDeptha = fDepth * fOneOverLength;
     if (tbData->fBestDepth > fDeptha)
@@ -1136,14 +1116,7 @@ void __cdecl cldClipping(collData_t *tbData, const dVector3 *v0, const dVector3 
                 ctContacts = tbData->ctContacts;
                 ContactGeoms = tbData->ContactGeoms;
                 iFlags = tbData->iFlags;
-                if (ctContacts >= (unsigned __int16)iFlags)
-                    MyAssertHandler(
-                        "c:\\trees\\cod3\\src\\physics\\ode\\src\\collision_trimesh_internal.h",
-                        47,
-                        0,
-                        "Index doesn't index Flags & 0x0ffff\n\t%i not in [0, %i)",
-                        ctContacts,
-                        (unsigned __int16)iFlags);
+                bcassert(ctContacts, (unsigned __int16)iFlags);
                 Contact = (dContactGeom *)((char *)ContactGeoms + iStride * ctContacts);
                 Contact->depth = -fTempDepth;
                 Contact->normal[0] = tbData->vBestNormal[0];
@@ -1238,14 +1211,7 @@ void __cdecl cldClipping(collData_t *tbData, const dVector3 *v0, const dVector3 
         v26 = tbData->ctContacts;
         v27 = tbData->ContactGeoms;
         v28 = tbData->iFlags;
-        if (v26 >= (unsigned __int16)v28)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\src\\physics\\ode\\src\\collision_trimesh_internal.h",
-                47,
-                0,
-                "Index doesn't index Flags & 0x0ffff\n\t%i not in [0, %i)",
-                v26,
-                (unsigned __int16)v28);
+        bcassert(v26, (unsigned __int16)v28);
         Contact = (dContactGeom *)((char *)v27 + v25 * v26);
         Contact->depth = tbData->fBestDepth;
         Contact->normal[0] = tbData->vBestNormal[0];
@@ -1426,14 +1392,7 @@ void __cdecl cldClipping(collData_t *tbData, const dVector3 *v0, const dVector3 
         v16 = tbData->ctContacts;
         v17 = tbData->ContactGeoms;
         v18 = tbData->iFlags;
-        if (v16 >= (unsigned __int16)v18)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\src\\physics\\ode\\src\\collision_trimesh_internal.h",
-                47,
-                0,
-                "Index doesn't index Flags & 0x0ffff\n\t%i not in [0, %i)",
-                v16,
-                (unsigned __int16)v18);
+        bcassert(v16, (unsigned __int16)v18);
         Contact = (dContactGeom *)((char *)v17 + v15 * v16);
         Contact->depth = -v30;
         Contact->normal[0] = -tbData->triangleNormal[0];

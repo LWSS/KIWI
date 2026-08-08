@@ -70,10 +70,8 @@ int __cdecl huffman_bitCountForNode(nodetype *node, nodetype *child)
 
 int __cdecl Huff_bitCount(huff_t *huff, uint ch)
 {
-    if (ch >= 0x100)
-        MyAssertHandler(".\\qcommon\\huffman.cpp", 152, 0, "ch doesn't index 256\n\t%i not in [0, %i)", ch, 256);
-    if (!huff->loc[ch])
-        MyAssertHandler(".\\qcommon\\huffman.cpp", 153, 0, "%s", "huff->loc[ch] != NULL");
+    bcassert(ch, 0x100);
+    iassert(huff->loc[ch] != NULL);
     return huffman_bitCountForNode(huff->loc[ch], 0);
 }
 

@@ -15,8 +15,7 @@ char *__cdecl CL_AllocSkelMemory(uint size)
     int skelMemPos; // [esp+8h] [ebp-4h]
     uint sizea; // [esp+14h] [ebp+8h]
 
-    if (!size)
-        MyAssertHandler(".\\client_mp\\cl_pose_mp.cpp", 30, 0, "%s", "size");
+    iassert(size);
     sizea = (size + 15) & 0xFFFFFFF0;
     if (sizea > 0x3FFF0)
         MyAssertHandler(".\\client_mp\\cl_pose_mp.cpp", 33, 0, "%s", "size <= CL_SKEL_MEMORY_SIZE - SKEL_MEM_ALIGNMENT");
@@ -27,8 +26,7 @@ char *__cdecl CL_AllocSkelMemory(uint size)
     result = &clients[R_GetLocalClientNum()].skelMemoryStart[skelMemPos];
     if (sizea + skelMemPos > 0x3FFF0)
         return 0;
-    if (!result)
-        MyAssertHandler(".\\client_mp\\cl_pose_mp.cpp", 46, 0, "%s", "result");
+    iassert(result);
     return result;
 }
 

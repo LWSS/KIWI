@@ -199,8 +199,7 @@ float __cdecl CL_KeyState(kbutton_t *key)
         return 0.0f;
     if (msec >= frame_msec)
         return 1.0f;
-    if (!frame_msec)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\client\\cl_input.cpp", 229, 0, "%s", "frame_msec");
+    iassert(frame_msec);
     return (float)msec / (float)frame_msec;
 }
 
@@ -1024,13 +1023,7 @@ void __cdecl CL_GamepadMove(usercmd_s *cmd)
     AimOutput v26; // [sp+60h] [-A0h] BYREF
     AimInput v27; // [sp+70h] [-90h] BYREF
 
-    if (cl_paused->current.integer == 1)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\client\\cl_input.cpp",
-            1127,
-            0,
-            "%s",
-            "cl_paused->current.integer != 1");
+    iassert(cl_paused->current.integer != 1);
     if ((clients[0].snap.ps.pm_flags & 0x800) == 0 || cl_freemove->current.integer == 2)
     {
         v2 = CL_GamepadAxisValue(0, 4);
@@ -1449,14 +1442,7 @@ int __cdecl CG_HandleLocationSelectionInput(int localClientNum, usercmd_s *cmd)
     long double v17; // fp2
     long double v18; // fp2
 
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\client\\../cgame/cg_local.h",
-            910,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     if (cgArray[0].predictedPlayerState.locationSelectionInfo)
     {
         CL_AddCurrentStanceToCmd(cmd);

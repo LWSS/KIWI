@@ -78,8 +78,7 @@ void __cdecl CL_WriteDemoDObjModel(MemoryFile *memFile, const DObjModel_s *dobjM
     const char *v5; // r3
     bool v6[8]; // [sp+50h] [-20h] BYREF
 
-    if (!dobjModel)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\client\\cl_demo.cpp", 67, 0, "%s", "dobjModel");
+    iassert(dobjModel);
     Name = XModelGetName(dobjModel->model);
     CL_WriteDemoShortCString(memFile, Name);
     v5 = SL_ConvertToString(dobjModel->boneName);
@@ -96,8 +95,7 @@ void __cdecl CL_ReadDemoDObjModel(MemoryFile *memFile, DObjModel_s *dobjModel)
     byte modelFlags; // [sp+50h] [-140h] BYREF
     char v8[304]; // [sp+60h] [-130h] BYREF
 
-    if (!dobjModel)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\client\\cl_demo.cpp", 81, 0, "%s", "dobjModel");
+    iassert(dobjModel);
     DemoShortCString = CL_ReadDemoShortCString(memFile, v8);
     Existing = XModelFindExisting(DemoShortCString);
     dobjModel->model = Existing;
@@ -237,10 +235,8 @@ int CL_WriteDemoDObjs()
     const DObj_s *ServerDObj; // r31
     _WORD v3[24]; // [sp+50h] [-30h] BYREF
 
-    if (!cls.demorecording)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\client\\cl_demo.cpp", 194, 0, "%s", "cls.demorecording");
-    if (!cls.demofile)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\client\\cl_demo.cpp", 195, 0, "%s", "cls.demofile");
+    iassert(cls.demorecording);
+    iassert(cls.demofile);
     v0 = 1;
     v3[0] = 1;
     do
@@ -272,10 +268,8 @@ int CL_ReadDemoDObjs()
     int j; // r11
     _WORD v3[32]; // [sp+50h] [-40h] BYREF
 
-    if (!cls.demoplaying)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\client\\cl_demo.cpp", 224, 0, "%s", "cls.demoplaying");
-    if (!cls.demofile)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\client\\cl_demo.cpp", 225, 0, "%s", "cls.demofile");
+    iassert(cls.demoplaying);
+    iassert(cls.demofile);
     Hunk_CheckTempMemoryClear();
     for (i = 1; i < 2176; ++i)
         Com_SafeServerDObjFree(i);
@@ -303,8 +297,7 @@ void __cdecl CL_WriteDemoEntityState(const entityState_s *es)
     MemoryFile v3; // [sp+60h] [-1E0h] BYREF
     _BYTE v4[424]; // [sp+80h] [-1C0h] BYREF
 
-    if (!es)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\client\\cl_demo.cpp", 250, 0, "%s", "es");
+    iassert(es);
     MemFile_InitForWriting(&v3, 419, v4, 1, 0);
     MemFile_WriteData(&v3, 164, es);
     G_ArchiveSpecialEntityInfo(es, &v3);
@@ -328,8 +321,7 @@ void __cdecl CL_ReadDemoEntityState(entityState_s *es)
     MemoryFile v3; // [sp+60h] [-1E0h] BYREF
     _BYTE v4[424]; // [sp+80h] [-1C0h] BYREF
 
-    if (!es)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\client\\cl_demo.cpp", 270, 0, "%s", "es");
+    iassert(es);
     FS_Read(v2, 1, cls.demofile);
     if (v2[0])
     {
@@ -349,10 +341,8 @@ void __cdecl CL_WriteDemoSnapshotData()
 
     if (!clients[0].snap.valid)
         MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\client\\cl_demo.cpp", 295, 0, "%s", "cl->snap.valid");
-    if (!cls.demorecording)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\client\\cl_demo.cpp", 296, 0, "%s", "cls.demorecording");
-    if (!cls.demofile)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\client\\cl_demo.cpp", 297, 0, "%s", "cls.demofile");
+    iassert(cls.demorecording);
+    iassert(cls.demofile);
     for (i = 0; i < clients[0].snap.numEntities; ++i)
     {
         EntityState = SV_GetEntityState(*(int *)((char *)clients[0].parseEntityNums + ((4 * (clients[0].snap.parseEntitiesNum + i)) & 0x1FFC)));
@@ -368,10 +358,8 @@ void __cdecl CL_ReadDemoSnapshotData()
 
     if (!clients[0].snap.valid)
         MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\client\\cl_demo.cpp", 317, 0, "%s", "cl->snap.valid");
-    if (!cls.demoplaying)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\client\\cl_demo.cpp", 318, 0, "%s", "cls.demoplaying");
-    if (!cls.demofile)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\client\\cl_demo.cpp", 319, 0, "%s", "cls.demofile");
+    iassert(cls.demoplaying);
+    iassert(cls.demofile);
     G_ClearDemoEntities();
     for (i = 0; i < clients[0].snap.numEntities; ++i)
     {
@@ -485,8 +473,7 @@ void __cdecl CL_Record_f()
             if (cls.demofile)
             {
                 cls.demorecording = 1;
-                if (cls.demobuf)
-                    MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\client\\cl_demo.cpp", 473, 0, "%s", "!cls.demobuf");
+                iassert(!cls.demobuf);
                 cls.demobuf = Z_VirtualAlloc(0x100000, "demo", 0);
                 I_strncpyz(cls.demoName, v14, 64);
                 MSG_Init(&v13, v16, 0x4000);
@@ -568,10 +555,8 @@ void CL_DemoPlaybackStartup()
                         Dvar_SetBoolByName("sv_cheats", 1);
                         FS_ConvertPath(v8);
                         SV_SpawnServer(v8, 0);
-                        if (!cls.demofile)
-                            MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\client\\cl_demo.cpp", 715, 0, "%s", "cls.demofile");
-                        if (!cls.demoplaying)
-                            MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\client\\cl_demo.cpp", 716, 0, "%s", "cls.demoplaying");
+                        iassert(cls.demofile);
+                        iassert(cls.demoplaying);
                         MemFile_InitForReading(&v7, v6[0], (byte *)v3, 0);
                         CL_ArchiveClientState(&v7, 0);
                         MemFile_MoveToSegment(&v7, -1);
@@ -748,14 +733,10 @@ int __cdecl CL_GetDemoMessage(msg_t *buf, unsigned __int8 *bufData, int bufDataS
     int result; // r3
     int v8; // [sp+50h] [-40h] BYREF
 
-    if (!cls.demoplaying)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\client\\cl_demo.cpp", 581, 0, "%s", "cls.demoplaying");
-    if (!buf)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\client\\cl_demo.cpp", 582, 0, "%s", "buf");
-    if (!bufData)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\client\\cl_demo.cpp", 583, 0, "%s", "bufData");
-    if (bufDataSize <= 0)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\client\\cl_demo.cpp", 584, 0, "%s", "bufDataSize > 0");
+    iassert(cls.demoplaying);
+    iassert(buf);
+    iassert(bufData);
+    iassert(bufDataSize > 0);
     if (!cls.demofile)
         goto LABEL_17;
     if (FS_Read((byte*)&v8, 4, cls.demofile) != 4)

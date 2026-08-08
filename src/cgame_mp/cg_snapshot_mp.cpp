@@ -298,20 +298,12 @@ void __cdecl CG_SetNextSnap(int localClientNum, snapshot_s *snap)
                 {
                     if (cent->pose.fx.effect)
                     {
-                        if (cgameGlob->mapRestart)
-                            MyAssertHandler(".\\cgame_mp\\cg_snapshot_mp.cpp", 651, 0, "%s", "!cgameGlob->mapRestart");
+                        iassert(!cgameGlob->mapRestart);
                         FX_ThroughWithEffect(localClientNum, cent->pose.fx.effect);
                         cent->pose.fx.effect = 0;
                         cent->pose.fx.triggerTime = 0;
                     }
-                    if (cent->pose.fx.triggerTime)
-                        MyAssertHandler(
-                            ".\\cgame_mp\\cg_snapshot_mp.cpp",
-                            656,
-                            0,
-                            "%s\n\t(cent->pose.fx.triggerTime) = %i",
-                            "(cent->pose.fx.triggerTime == 0)",
-                            cent->pose.fx.triggerTime);
+                    vassert((cent->pose.fx.triggerTime == 0), "(cent->pose.fx.triggerTime) = %i", cent->pose.fx.triggerTime);
                 }
             }
         }
@@ -324,8 +316,7 @@ void __cdecl CG_SetNextSnap(int localClientNum, snapshot_s *snap)
         if (snap->ps.viewmodelIndex > 0)
         {
             modelName = CL_GetConfigString(localClientNum, snap->ps.viewmodelIndex + 830);
-            if (!modelName || !*modelName)
-                MyAssertHandler(".\\cgame_mp\\cg_snapshot_mp.cpp", 672, 0, "%s", "modelName && modelName[0]");
+            iassert(modelName && modelName[0]);
             v5 = R_RegisterModel(modelName);
             CG_UpdateHandViewmodels(localClientNum, v5);
         }
@@ -396,21 +387,12 @@ void __cdecl CG_ResetEntity(int localClientNum, centity_s *cent, int newEntity)
     qmemcpy(&cent->currentState, &cent->nextState.lerp, sizeof(cent->currentState));
     cent->bTrailMade = 0;
     cent->pose.cullIn = 0;
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\src\\cgame_mp\\cg_local_mp.h",
-            1071,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     BG_EvaluateTrajectory(&cent->nextState.lerp.pos, cgameGlob->time, cent->pose.origin);
     BG_EvaluateTrajectory(&cent->nextState.lerp.apos, cgameGlob->time, cent->pose.angles);
-    if (cent->pose.localClientNum != localClientNum)
-        MyAssertHandler(".\\cgame_mp\\cg_snapshot_mp.cpp", 120, 0, "%s", "cent->pose.localClientNum == localClientNum");
+    iassert(cent->pose.localClientNum == localClientNum);
     cent->pose.eType = cent->nextState.eType;
-    if (cent->pose.eType != cent->nextState.eType)
-        MyAssertHandler(".\\cgame_mp\\cg_snapshot_mp.cpp", 123, 0, "%s", "cent->pose.eType == cent->nextState.eType");
+    iassert(cent->pose.eType == cent->nextState.eType);
     CG_UnlinkEntity(localClientNum, cent->nextState.number);
     switch (cent->nextState.eType)
     {
@@ -480,8 +462,7 @@ void __cdecl CG_ResetEntity(int localClientNum, centity_s *cent, int newEntity)
         break;
     case ET_FX:
     case ET_LOOP_FX:
-        if (cent->pose.fx.effect)
-            MyAssertHandler(".\\cgame_mp\\cg_snapshot_mp.cpp", 204, 0, "%s", "!cent->pose.fx.effect");
+        iassert(!cent->pose.fx.effect);
         goto LABEL_43;
     case ET_MG42:
         cent->previousEventSequence = cent->nextState.eventSequence;

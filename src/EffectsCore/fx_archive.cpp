@@ -18,8 +18,7 @@ void __cdecl FX_Restore(int clientIndex, MemoryFile *memFile)
     if (!p)
         MyAssertHandler(".\\EffectsCore\\fx_archive.cpp", 220, 0, "%s", "system");
     systemBuffers = FX_GetSystemBuffers(clientIndex);
-    if (!systemBuffers)
-        MyAssertHandler(".\\EffectsCore\\fx_archive.cpp", 223, 0, "%s", "systemBuffers");
+    iassert(systemBuffers);
     FX_RestoreEffectDefTable(memFile, &table);
     MemFile_ReadData(memFile, 2656, (uint8_t *)p);
     if (!*((_BYTE *)p + 2526) || *((uint *)p + 627))
@@ -57,18 +56,9 @@ void __cdecl FX_RestoreEffectDefTable(MemoryFile *memFile, FxEffectDefTable *tab
 
 void __cdecl FX_AddEffectDefTableEntry(FxEffectDefTable *table, uint key, const FxEffectDef *effectDef)
 {
-    if (!table)
-        MyAssertHandler(".\\EffectsCore\\fx_archive.cpp", 47, 0, "%s", "table");
-    if (table->count >= 0x400u)
-        MyAssertHandler(
-            ".\\EffectsCore\\fx_archive.cpp",
-            48,
-            0,
-            "table->count doesn't index ARRAY_COUNT( table->entries )\n\t%i not in [0, %i)",
-            table->count,
-            1024);
-    if (!effectDef)
-        MyAssertHandler(".\\EffectsCore\\fx_archive.cpp", 49, 0, "%s", "effectDef");
+    iassert(table);
+    bcassert(table->count, 0x400u);
+    iassert(effectDef);
     table->entries[table->count].key = key;
     table->entries[table->count++].effectDef = effectDef;
 }
@@ -79,16 +69,13 @@ void __cdecl FX_FixupEffectDefHandles(FxSystem *system, FxEffectDefTable *table)
     FxEffect *effect; // [esp+10h] [ebp-Ch]
     volatile int activeIndex; // [esp+18h] [ebp-4h]
 
-    if (!system)
-        MyAssertHandler(".\\EffectsCore\\fx_archive.cpp", 131, 0, "%s", "system");
-    if (!system->isArchiving)
-        MyAssertHandler(".\\EffectsCore\\fx_archive.cpp", 132, 0, "%s", "system->isArchiving");
+    iassert(system);
+    iassert(system->isArchiving);
     for (activeIndex = system->firstActiveEffect; activeIndex != system->firstNewEffect; ++activeIndex)
     {
         effect = FX_EffectFromHandle(system, system->allEffectHandles[activeIndex & 0x3FF]);
         effectDef = FX_FindEffectDefInTable(table, (uint)effect->def);
-        if (!effectDef)
-            MyAssertHandler(".\\EffectsCore\\fx_archive.cpp", 139, 0, "%s", "effectDef");
+        iassert(effectDef);
         effect->def = effectDef;
     }
 }
@@ -97,8 +84,7 @@ FxEffect *__cdecl FX_EffectFromHandle(FxSystem *system, uint16_t handle)
 {
     const char *v2; // eax
 
-    if (!system)
-        MyAssertHandler("c:\\trees\\cod3\\src\\effectscore\\fx_system.h", 256, 0, "%s", "system");
+    iassert(system);
     if (handle >= 0x8000u || handle % 0x20u)
     {
         v2 = va("%p %i", system->effects, handle);
@@ -136,17 +122,14 @@ void __cdecl FX_RestorePhysicsData(FxSystem *system, MemoryFile *memFile)
     FxPool<FxElem> *elem; // [esp+30h] [ebp-8h]
     volatile int activeIndex; // [esp+34h] [ebp-4h]
 
-    if (!system)
-        MyAssertHandler(".\\EffectsCore\\fx_archive.cpp", 185, 0, "%s", "system");
-    if (!system->isArchiving)
-        MyAssertHandler(".\\EffectsCore\\fx_archive.cpp", 186, 0, "%s", "system->isArchiving");
+    iassert(system);
+    iassert(system->isArchiving);
     for (activeIndex = system->firstActiveEffect; activeIndex != system->firstNewEffect; ++activeIndex)
     {
         effect = FX_EffectFromHandle(system, system->allEffectHandles[activeIndex & 0x3FF]);
         for (elemHandle = effect->firstElemHandle[1]; elemHandle != 0xFFFF; elemHandle = elemHandleNext)
         {
-            if (!system)
-                MyAssertHandler("c:\\trees\\cod3\\src\\effectscore\\fx_system.h", 334, 0, "%s", "system");
+            iassert(system);
             elem = FX_PoolFromHandle_Generic<FxElem, 2048>(system->elems, elemHandle);
             elemDef = &effect->def->elemDefs[elem->item.defIndex];
             elemHandleNext = elem->item.nextElemHandleInEffect;
@@ -188,13 +171,10 @@ void __cdecl FX_Save(int clientIndex, MemoryFile *memFile)
     FxSystemBuffers *systemBuffers; // [esp+8h] [ebp-4h]
 
     system = FX_GetSystem(clientIndex);
-    if (!system)
-        MyAssertHandler(".\\EffectsCore\\fx_archive.cpp", 265, 0, "%s", "system");
+    iassert(system);
     systemBuffers = FX_GetSystemBuffers(clientIndex);
-    if (!systemBuffers)
-        MyAssertHandler(".\\EffectsCore\\fx_archive.cpp", 267, 0, "%s", "systemBuffers");
-    if (system->isArchiving)
-        MyAssertHandler(".\\EffectsCore\\fx_archive.cpp", 270, 0, "%s", "!system->isArchiving");
+    iassert(systemBuffers);
+    iassert(!system->isArchiving);
     system->isArchiving = 1;
     FX_SaveEffectDefTable(system, memFile);
     MemFile_WriteData(memFile, 2656, system);
@@ -250,17 +230,14 @@ void __cdecl FX_SavePhysicsData(FxSystem *system, MemoryFile *memFile)
     FxPool<FxElem> *elem; // [esp+1Ch] [ebp-8h]
     volatile int activeIndex; // [esp+20h] [ebp-4h]
 
-    if (!system)
-        MyAssertHandler(".\\EffectsCore\\fx_archive.cpp", 155, 0, "%s", "system");
-    if (!system->isArchiving)
-        MyAssertHandler(".\\EffectsCore\\fx_archive.cpp", 156, 0, "%s", "system->isArchiving");
+    iassert(system);
+    iassert(system->isArchiving);
     for (activeIndex = system->firstActiveEffect; activeIndex != system->firstNewEffect; ++activeIndex)
     {
         effect = FX_EffectFromHandle(system, system->allEffectHandles[activeIndex & 0x3FF]);
         for (elemHandle = effect->firstElemHandle[1]; elemHandle != 0xFFFF; elemHandle = elemHandleNext)
         {
-            if (!system)
-                MyAssertHandler("c:\\trees\\cod3\\src\\effectscore\\fx_system.h", 334, 0, "%s", "system");
+            iassert(system);
             elem = FX_PoolFromHandle_Generic<FxElem, 2048>(system->elems, elemHandle);
             elemDef = &effect->def->elemDefs[elem->item.defIndex];
             elemHandleNext = elem->item.nextElemHandleInEffect;

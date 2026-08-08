@@ -111,14 +111,7 @@ void __cdecl Ragdoll_SnapshotBaseLerpOffsets(RagdollBody *body)
     while (i < def->numBaseLerpBones)
     {
         parentIndex = bone->parentBone;
-        if (parentIndex >= body->numBones)
-            MyAssertHandler(
-                ".\\ragdoll\\ragdoll_update.cpp",
-                672,
-                0,
-                "parentIndex doesn't index body->numBones\n\t%i not in [0, %i)",
-                parentIndex,
-                body->numBones);
+        bcassert(parentIndex, body->numBones);
         Ragdoll_GetDObjBaseBoneMatrix(obj, bone->animBone, &boneAnimMat);
         Ragdoll_GetDObjBaseBoneMatrix(obj, body->bones[parentIndex].animBones[0], &parentAnimMat);
         if ((LODWORD(parentAnimMat.quat[0]) & 0x7F800000) == 0x7F800000
@@ -199,18 +192,7 @@ void __cdecl Ragdoll_AnimMatToMat43(const DObjAnimMat *mat, float (*out)[3])
     float v10; // [esp+4Ch] [ebp-8h]
     float v11; // [esp+50h] [ebp-4h]
 
-    if ((COERCE_UNSIGNED_INT(mat->quat[0]) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(mat->quat[1]) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(mat->quat[2]) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(mat->quat[3]) & 0x7F800000) == 0x7F800000)
-    {
-        MyAssertHandler(
-            "c:\\trees\\cod3\\src\\ragdoll\\../xanim/xanim_public.h",
-            432,
-            0,
-            "%s",
-            "!IS_NAN((mat->quat)[0]) && !IS_NAN((mat->quat)[1]) && !IS_NAN((mat->quat)[2]) && !IS_NAN((mat->quat)[3])");
-    }
+    iassert(!IS_NAN((mat->quat)[0]) && !IS_NAN((mat->quat)[1]) && !IS_NAN((mat->quat)[2]) && !IS_NAN((mat->quat)[3]));
     iassert( !IS_NAN(mat->transWeight) );
     Vec3Scale(mat->quat, mat->transWeight, result);
     v10 = result[0] * mat->quat[0];
@@ -293,14 +275,7 @@ char __cdecl Ragdoll_CreatePhysJoint(RagdollBody *body, JointDef *jointDef, Join
     iassert( body );
     iassert( jointDef );
     iassert( joint );
-    if ((uint)jointDef->bone >= body->numBones)
-        MyAssertHandler(
-            ".\\ragdoll\\ragdoll_update.cpp",
-            527,
-            0,
-            "jointDef->bone doesn't index body->numBones\n\t%i not in [0, %i)",
-            jointDef->bone,
-            body->numBones);
+    bcassert((uint)jointDef->bone, body->numBones);
     bone = &body->bones[jointDef->bone];
     if (bone->parentBone == -1)
         parentBone = 0;
@@ -772,22 +747,8 @@ void __cdecl Ragdoll_GenerateAllSelfCollisionContacts()
 
 void __cdecl Ragdoll_GenBoneCapsuleSegments(RagdollBody *body, uint8_t *bones, float (*s0)[3], float (*s1)[3])
 {
-    if ((uint)*bones >= body->numBones)
-        MyAssertHandler(
-            ".\\ragdoll\\ragdoll_update.cpp",
-            957,
-            0,
-            "bones[0] doesn't index body->numBones\n\t%i not in [0, %i)",
-            *bones,
-            body->numBones);
-    if ((uint)bones[1] >= body->numBones)
-        MyAssertHandler(
-            ".\\ragdoll\\ragdoll_update.cpp",
-            958,
-            0,
-            "bones[1] doesn't index body->numBones\n\t%i not in [0, %i)",
-            bones[1],
-            body->numBones);
+    bcassert((uint)*bones, body->numBones);
+    bcassert((uint)bones[1], body->numBones);
     Ragdoll_GenBoneCapsuleSegment(&body->bones[*bones], s0);
     Ragdoll_GenBoneCapsuleSegment(&body->bones[bones[1]], s1);
 }
@@ -1088,14 +1049,7 @@ void __cdecl Ragdoll_SnapshotBaseLerpBones(RagdollBody *body, BoneOrientation *s
                 }
                 boneIdx = lerpBone->animBone;
                 parentBoneNum = lerpBone->parentBone;
-                if (parentBoneNum >= body->numBones)
-                    MyAssertHandler(
-                        ".\\ragdoll\\ragdoll_update.cpp",
-                        202,
-                        0,
-                        "parentBoneNum doesn't index body->numBones\n\t%i not in [0, %i)",
-                        parentBoneNum,
-                        body->numBones);
+                bcassert(parentBoneNum, body->numBones);
                 v2 = Ragdoll_BodyBoneOrientations(body);
                 parentOrientation = &v2[parentBoneNum];
                 parentBoneIdx = body->bones[parentBoneNum].animBones[0];
@@ -1411,14 +1365,7 @@ char __cdecl Ragdoll_TunnelTest(RagdollBody *body)
                 for (child = 0; child < numChildren; ++child)
                 {
                     childIdx = childIndices[child];
-                    if ((uint)childIdx >= body->numBones)
-                        MyAssertHandler(
-                            ".\\ragdoll\\ragdoll_update.cpp",
-                            1377,
-                            0,
-                            "childIdx doesn't index body->numBones\n\t%i not in [0, %i)",
-                            childIdx,
-                            body->numBones);
+                    bcassert((uint)childIdx, body->numBones);
                     childBone = &body->bones[childIdx];
                     if (!Ragdoll_BoneTrace(&trace, &revTrace, center, boneOrientations[childIdx].origin))
                         return 0;
@@ -1865,23 +1812,9 @@ char __cdecl Ragdoll_BodyNewState(RagdollBody *body, BodyState_t state)
     BodyState_t prevState; // [esp+4h] [ebp-4h]
 
     iassert( body );
-    if ((uint)state >= RAGDOLL_NUM_STATES)
-        MyAssertHandler(
-            ".\\ragdoll\\ragdoll_update.cpp",
-            1827,
-            0,
-            "state doesn't index RAGDOLL_NUM_STATES\n\t%i not in [0, %i)",
-            state,
-            6);
+    bcassert((uint)state, RAGDOLL_NUM_STATES);
     prevState = body->state;
-    if ((uint)prevState >= RAGDOLL_NUM_STATES)
-        MyAssertHandler(
-            ".\\ragdoll\\ragdoll_update.cpp",
-            1830,
-            0,
-            "prevState doesn't index RAGDOLL_NUM_STATES\n\t%i not in [0, %i)",
-            prevState,
-            6);
+    bcassert((uint)prevState, RAGDOLL_NUM_STATES);
     if (prevState == state)
         return 1;
     if (stateEntries[prevState].exitFunc && !stateEntries[prevState].exitFunc(body, prevState, state))
@@ -1907,14 +1840,7 @@ void __cdecl Ragdoll_BodyUpdate(int msec, RagdollBody *body)
     BodyState_t prevState; // [esp+4h] [ebp-4h]
 
     iassert( body );
-    if (body->state >= (uint)RAGDOLL_NUM_STATES)
-        MyAssertHandler(
-            ".\\ragdoll\\ragdoll_update.cpp",
-            1871,
-            0,
-            "body->state doesn't index RAGDOLL_NUM_STATES\n\t%i not in [0, %i)",
-            body->state,
-            6);
+    bcassert(body->state, (uint)RAGDOLL_NUM_STATES);
     do
     {
         prevState = body->state;

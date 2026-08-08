@@ -8,6 +8,7 @@
 #include "r_scene.h"
 #include "r_dvars.h"
 #include "r_spotshadow.h"
+#include "r_draw_shadowable_light.h"
 
 #ifdef KISAK_MP
 #include <cgame_mp/cg_local_mp.h>
@@ -231,13 +232,7 @@ void __cdecl R_AddShadowedLightToShadowHistory(
     if (shadowHistory->entryCount < sm_maxLights->current.integer)
     {
         shadowHistory->entries[shadowHistory->entryCount].shadowableLightIndex = shadowableLightIndex;
-        if (shadowHistory->entries[shadowHistory->entryCount].shadowableLightIndex != shadowableLightIndex)
-            MyAssertHandler(
-                ".\\r_primarylights.cpp",
-                117,
-                0,
-                "%s",
-                "shadowHistory->entries[shadowHistory->entryCount].shadowableLightIndex == shadowableLightIndex");
+        iassert(shadowHistory->entries[shadowHistory->entryCount].shadowableLightIndex == shadowableLightIndex);
         shadowHistory->entries[shadowHistory->entryCount].isFadingOut = 0;
         if (Com_BitCheckAssert(shadowHistory->shadowableLightWasUsed, shadowableLightIndex, 32))
             v3 = fadeDelta;
@@ -302,14 +297,7 @@ void __cdecl R_LinkSphereEntityToPrimaryLights(
         ++primaryLightIndex)
     {
         light = Com_GetPrimaryLight(primaryLightIndex);
-        if (light->type != 2 && light->type != 3)
-            MyAssertHandler(
-                ".\\r_primarylights.cpp",
-                303,
-                0,
-                "%s\n\t(light->type) = %i",
-                "(light->type == GFX_LIGHT_TYPE_SPOT || light->type == GFX_LIGHT_TYPE_OMNI)",
-                light->type);
+        vassert((light->type == GFX_LIGHT_TYPE_SPOT || light->type == GFX_LIGHT_TYPE_OMNI), "(light->type) = %i", light->type);
         Vec3Sub(origin, light->origin, diff);
         v5 = Vec3LengthSq(diff);
         v4 = (light->radius + radius) * (light->radius + radius);
@@ -378,14 +366,7 @@ void __cdecl R_LinkBoxEntityToPrimaryLights(
         ++primaryLightIndex)
     {
         light = Com_GetPrimaryLight(primaryLightIndex);
-        if (light->type != 2 && light->type != 3)
-            MyAssertHandler(
-                ".\\r_primarylights.cpp",
-                332,
-                0,
-                "%s\n\t(light->type) = %i",
-                "(light->type == GFX_LIGHT_TYPE_SPOT || light->type == GFX_LIGHT_TYPE_OMNI)",
-                light->type);
+        vassert((light->type == GFX_LIGHT_TYPE_SPOT || light->type == GFX_LIGHT_TYPE_OMNI), "(light->type) = %i", light->type);
         v4 = PointToBoxDistSq(light->origin, mins, maxs);
         v5 = light->radius * light->radius;
         if (v5 > v4
@@ -567,14 +548,7 @@ void __cdecl R_LinkDynEntToPrimaryLights(
         ++primaryLightIndex)
     {
         light = Com_GetPrimaryLight(primaryLightIndex);
-        if (light->type != 2 && light->type != 3)
-            MyAssertHandler(
-                ".\\r_primarylights.cpp",
-                369,
-                0,
-                "%s\n\t(light->type) = %i",
-                "(light->type == GFX_LIGHT_TYPE_SPOT || light->type == GFX_LIGHT_TYPE_OMNI)",
-                light->type);
+        vassert((light->type == GFX_LIGHT_TYPE_SPOT || light->type == GFX_LIGHT_TYPE_OMNI), "(light->type) = %i", light->type);
         if (!Com_CullBoxFromPrimaryLight(light, boxMidPoint, boxHalfSize))
         {
             v6 = &rgp.world->lightRegion[primaryLightIndex];
@@ -650,14 +624,7 @@ uint __cdecl R_GetPrimaryLightDynEntShadowBit(uint entnum, uint primaryLightInde
             0,
             "%s",
             "rgp.world->sunPrimaryLightIndex == PRIMARY_LIGHT_SUN || rgp.world->sunPrimaryLightIndex == PRIMARY_LIGHT_NONE");
-    if (primaryLightIndex <= rgp.world->sunPrimaryLightIndex)
-        MyAssertHandler(
-            ".\\r_primarylights.cpp",
-            285,
-            0,
-            "primaryLightIndex > rgp.world->sunPrimaryLightIndex\n\t%i, %i",
-            primaryLightIndex,
-            rgp.world->sunPrimaryLightIndex);
+    vassert(primaryLightIndex > rgp.world->sunPrimaryLightIndex, "%i, %i", primaryLightIndex, rgp.world->sunPrimaryLightIndex);
     return primaryLightIndex
         - (rgp.world->sunPrimaryLightIndex
             + 1)
@@ -725,14 +692,7 @@ int __cdecl R_IsEntityVisibleToAnyShadowedPrimaryLight(const GfxViewInfo *viewIn
     relevantPrimaryLightCount = rgp.world->primaryLightCount - ignoredPrimaryLightCount;
     baseBitIndex = relevantPrimaryLightCount * (entityNum + gfxCfg.entCount * viewInfo->localClientNum)
         - ignoredPrimaryLightCount;
-    if (relevantPrimaryLightCount + 1 < viewInfo->spotShadowCount)
-        MyAssertHandler(
-            ".\\r_primarylights.cpp",
-            460,
-            0,
-            "relevantPrimaryLightCount + GFX_MAX_EMISSIVE_SPOT_LIGHTS >= viewInfo->spotShadowCount\n\t%i, %i",
-            relevantPrimaryLightCount + 1,
-            viewInfo->spotShadowCount);
+    vassert(relevantPrimaryLightCount + GFX_MAX_EMISSIVE_SPOT_LIGHTS >= viewInfo->spotShadowCount, "%i, %i", relevantPrimaryLightCount + 1, viewInfo->spotShadowCount);
     for (spotShadowIndex = 0; spotShadowIndex < viewInfo->spotShadowCount; ++spotShadowIndex)
     {
         if (R_IsEntityVisibleToShadowedPrimaryLight(
@@ -762,14 +722,7 @@ int __cdecl R_IsDynEntVisibleToAnyShadowedPrimaryLight(
 
     ignoredPrimaryLightCount = rgp.world->sunPrimaryLightIndex + 1;
     relevantPrimaryLightCount = rgp.world->primaryLightCount - ignoredPrimaryLightCount;
-    if (relevantPrimaryLightCount + 1 < viewInfo->spotShadowCount)
-        MyAssertHandler(
-            ".\\r_primarylights.cpp",
-            495,
-            0,
-            "relevantPrimaryLightCount + GFX_MAX_EMISSIVE_SPOT_LIGHTS >= viewInfo->spotShadowCount\n\t%i, %i",
-            relevantPrimaryLightCount + 1,
-            viewInfo->spotShadowCount);
+    vassert(relevantPrimaryLightCount + GFX_MAX_EMISSIVE_SPOT_LIGHTS >= viewInfo->spotShadowCount, "%i, %i", relevantPrimaryLightCount + 1, viewInfo->spotShadowCount);
     for (spotShadowIndex = 0; spotShadowIndex < viewInfo->spotShadowCount; ++spotShadowIndex)
     {
         if (R_IsDynEntVisibleToShadowedPrimaryLight(
@@ -855,14 +808,7 @@ uint __cdecl R_GetNonSunPrimaryLightForSphere(const GfxViewInfo *viewInfo, const
         ++primaryLightIndex)
     {
         light = Com_GetPrimaryLight(primaryLightIndex);
-        if (light->type != 2 && light->type != 3)
-            MyAssertHandler(
-                ".\\r_primarylights.cpp",
-                539,
-                0,
-                "%s\n\t(light->type) = %i",
-                "(light->type == GFX_LIGHT_TYPE_SPOT || light->type == GFX_LIGHT_TYPE_OMNI)",
-                light->type);
+        vassert((light->type == GFX_LIGHT_TYPE_SPOT || light->type == GFX_LIGHT_TYPE_OMNI), "(light->type) = %i", light->type);
         if (!Com_CullSphereFromPrimaryLight(light, origin, radius))
         {
             v5 = &rgp.world->lightRegion[primaryLightIndex];

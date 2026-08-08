@@ -871,8 +871,7 @@ void __cdecl Scr_PrintSourcePos(int channel, const char *filename, const char *b
     int i; // [esp+410h] [ebp-8h]
     int col; // [esp+414h] [ebp-4h] BYREF
 
-    if (!filename)
-        MyAssertHandler(".\\script\\scr_parser.cpp", 956, 0, "%s", "filename");
+    iassert(filename);
     lineNum = Scr_GetLineInfo(buf, sourcePos, &col, line);
     if (scrParserGlob.saveSourceBufferLookup)
         v6 = " (savegame)";
@@ -889,8 +888,7 @@ void __cdecl Scr_PrintSourcePos(int channel, const char *filename, const char *b
 
 const char *__cdecl Scr_PrevCodePosFileName(char *codePos)
 {
-    if (!scrVarPub.developer)
-        MyAssertHandler(".\\script\\scr_parser.cpp", 1096, 0, "%s", "scrVarPub.developer");
+    iassert(scrVarPub.developer);
     if (!codePos)
         return "<frozen thread>";
     if (codePos == &g_EndPos)
@@ -906,8 +904,7 @@ const char *__cdecl Scr_PrevCodePosFunctionName(char *codePos)
     uint bufferIndex; // [esp+0h] [ebp-8h]
     const char *startLine; // [esp+4h] [ebp-4h] BYREF
 
-    if (!scrVarPub.developer)
-        MyAssertHandler(".\\script\\scr_parser.cpp", 1120, 0, "%s", "scrVarPub.developer");
+    iassert(scrVarPub.developer);
     if (!codePos)
         return "<frozen thread>";
     if (codePos == &g_EndPos)
@@ -924,10 +921,8 @@ bool __cdecl Scr_PrevCodePosFileNameMatches(char *codePos, const char *fileName)
 {
     const char *codePosFileName; // [esp+0h] [ebp-4h]
 
-    if (!fileName)
-        MyAssertHandler(".\\script\\scr_parser.cpp", 1149, 0, "%s", "fileName");
-    if (!scrVarPub.developer)
-        MyAssertHandler(".\\script\\scr_parser.cpp", 1150, 0, "%s", "scrVarPub.developer");
+    iassert(fileName);
+    iassert(scrVarPub.developer);
     codePosFileName = Scr_PrevCodePosFileName(codePos);
     return codePosFileName && I_stristr(codePosFileName, fileName) != 0;
 }
@@ -938,8 +933,7 @@ void __cdecl Scr_PrintPrevCodePosSpreadSheet(int channel, char *codePos, bool su
     char *v5; // eax
     uint bufferIndex; // [esp+0h] [ebp-4h]
 
-    if (!scrVarPub.developer)
-        MyAssertHandler(".\\script\\scr_parser.cpp", 1165, 0, "%s", "scrVarPub.developer");
+    iassert(scrVarPub.developer);
     if (codePos)
     {
         if (codePos == &g_EndPos)
@@ -991,8 +985,7 @@ void __cdecl Scr_PrintSourcePosSpreadSheet(int channel, const char *filename, co
     char line[1024]; // [esp+8h] [ebp-408h] BYREF
     int col; // [esp+40Ch] [ebp-4h] BYREF
 
-    if (!filename)
-        MyAssertHandler(".\\script\\scr_parser.cpp", 975, 0, "%s", "filename");
+    iassert(filename);
     lineNum = Scr_GetLineInfo(buf, sourcePos, &col, line);
     if (scrParserGlob.saveSourceBufferLookup)
         v5 = "(savegame)";
@@ -1013,8 +1006,7 @@ void __cdecl Scr_PrintFunctionPosSpreadSheet(
     uint lineNum; // [esp+4h] [ebp-40Ch]
     char line[1028]; // [esp+8h] [ebp-408h] BYREF
 
-    if (!filename)
-        MyAssertHandler(".\\script\\scr_parser.cpp", 988, 0, "%s", "filename");
+    iassert(filename);
     lineNum = Scr_GetFunctionInfo(buf, sourcePos, line);
     if (scrParserGlob.saveSourceBufferLookup)
         v5 = "(savegame)";
@@ -1039,8 +1031,7 @@ void __cdecl Scr_PrintSourcePosSummary(int channel, const char *filename)
     char *v2; // eax
     const char *v3; // [esp+0h] [ebp-4h]
 
-    if (!filename)
-        MyAssertHandler(".\\script\\scr_parser.cpp", 998, 0, "%s", "filename");
+    iassert(filename);
     if (scrParserGlob.saveSourceBufferLookup)
         v3 = "(savegame)";
     else
@@ -1060,8 +1051,7 @@ void __cdecl Scr_GetCodePos(const char *codePos, uint index, char *outBuf, uint 
     }
     else
     {
-        if (!Scr_IsInOpcodeMemory(codePos))
-            MyAssertHandler(".\\script\\scr_parser.cpp", 1201, 0, "%s", "Scr_IsInOpcodeMemory( codePos )");
+        iassert(Scr_IsInOpcodeMemory( codePos ));
         Com_sprintf(outBuf, outBufLen, "@ %d", codePos - scrVarPub.programBuffer);
     }
 }
@@ -1072,8 +1062,7 @@ void __cdecl Scr_GetFileAndLine(const char *codePos, char **filename, int *linen
     OpcodeLookup *opcodeLookup; // [esp+4h] [ebp-8h]
     uint sourcePos; // [esp+8h] [ebp-4h]
 
-    if (!Scr_IsInOpcodeMemory(codePos))
-        MyAssertHandler(".\\script\\scr_parser.cpp", 1216, 0, "%s", "Scr_IsInOpcodeMemory( codePos )");
+    iassert(Scr_IsInOpcodeMemory( codePos ));
     opcodeLookup = Scr_GetPrevSourcePosOpcodeLookup(codePos);
     if (opcodeLookup)
     {
@@ -1095,14 +1084,10 @@ void __cdecl Scr_AddProfileTime(const char *codePos, int time, int builtInTime)
     uint middle; // [esp+4h] [ebp-8h]
     uint high; // [esp+8h] [ebp-4h]
 
-    if (time < 0)
-        MyAssertHandler(".\\script\\scr_parser.cpp", 1240, 0, "%s\n\t(time) = %i", "(time >= 0)", time);
-    if (builtInTime > time)
-        MyAssertHandler(".\\script\\scr_parser.cpp", 1241, 0, "builtInTime <= time\n\t%i, %i", builtInTime, time);
-    if (!Scr_IsInOpcodeMemory(codePos))
-        MyAssertHandler(".\\script\\scr_parser.cpp", 1242, 0, "%s", "Scr_IsInOpcodeMemory( codePos )");
-    if (!scrParserGlob.opcodeLookup)
-        MyAssertHandler(".\\script\\scr_parser.cpp", 1243, 0, "%s", "scrParserGlob.opcodeLookup");
+    vassert((time >= 0), "(time) = %i", time);
+    vassert(builtInTime <= time, "%i, %i", builtInTime, time);
+    iassert(Scr_IsInOpcodeMemory( codePos ));
+    iassert(scrParserGlob.opcodeLookup);
     low = 0;
     high = scrParserGlob.opcodeLookupLen - 1;
     while (low <= high)
@@ -1175,10 +1160,7 @@ void __cdecl Scr_CalcScriptFileProfile()
                 v1->totalBuiltIn = (double)profileBuiltInTime * *((float *)Sys_GetValue(0) + 20782) + v1->totalBuiltIn;
                 Script->srcTotal += profileTime;
             }
-            else if (scrParserGlob.opcodeLookup[i].profileTime)
-            {
-                MyAssertHandler(".\\script\\scr_parser.cpp", 1302, 0, "%s", "!scrParserGlob.opcodeLookup[i].profileTime");
-            }
+            else iassert(!scrParserGlob.opcodeLookup[i].profileTime);
         }
         Script->srcAvgTime = (Script->srcTotal + 4 * Script->srcAvgTime) / 5;
         if (Script->srcTotal > Script->srcMaxTime)
@@ -1233,13 +1215,7 @@ void __cdecl Scr_CalcAnimscriptProfile(int *total, int *totalNonBuiltIn)
                 codePos = (char *)(v2 + 1);
                 if (v2 == (const char *)-1 || codePos == &g_EndPos)
                     MyAssertHandler(".\\script\\scr_parser.cpp", 1371, 0, "%s", "codePos && codePos != &g_EndPos");
-                if (!scrVarPub.programBuffer || !Scr_IsInOpcodeMemory(codePos))
-                    MyAssertHandler(
-                        ".\\script\\scr_parser.cpp",
-                        1372,
-                        0,
-                        "%s",
-                        "scrVarPub.programBuffer && Scr_IsInOpcodeMemory( codePos )");
+                iassert(scrVarPub.programBuffer && Scr_IsInOpcodeMemory( codePos ));
                 srcBuffer = &scrParserPub.sourceBufferLookup[Scr_GetSourceBuffer(codePos - 1)];
                 if (!strncmp(srcBuffer->buf, "animscript", 0xAu))
                 {
@@ -1247,10 +1223,7 @@ void __cdecl Scr_CalcAnimscriptProfile(int *total, int *totalNonBuiltIn)
                     *totalNonBuiltIn += profileTime - profileBuiltInTime;
                 }
             }
-            else if (scrParserGlob.opcodeLookup[i].profileTime)
-            {
-                MyAssertHandler(".\\script\\scr_parser.cpp", 1360, 0, "%s", "!scrParserGlob.opcodeLookup[i].profileTime");
-            }
+            else iassert(!scrParserGlob.opcodeLookup[i].profileTime);
         }
     }
 }
@@ -1317,8 +1290,7 @@ char __cdecl Scr_PrintProfileTimes(float minTime)
                 MyAssertHandler(".\\script\\scr_parser.cpp", 1482, 0, "%s", "!scrParserGlob.opcodeLookup[i].profileTime");
             }
         }
-        if (profileIndex != profileCount)
-            MyAssertHandler(".\\script\\scr_parser.cpp", 1492, 0, "%s", "profileIndex == profileCount");
+        iassert(profileIndex == profileCount);
         //std::_Sort<MapProfileHotSpot *, int, bool(__cdecl *)(MapProfileHotSpot const &, MapProfileHotSpot const &)>(
         //    (MapProfileHotSpot *)sortedOpcodeLookup,
         //    (MapProfileHotSpot *)&sortedOpcodeLookup[24 * profileCount],
@@ -1403,8 +1375,7 @@ void CompileError(uint sourcePos, const char *msg, ...)
         Com_PrintError(23, "******* script compile error *******\n");
         if (scrVarPub.developer)
         {
-            if (!scrParserPub.sourceBuf)
-                MyAssertHandler(".\\script\\scr_parser.cpp", 1578, 0, "%s", "scrParserPub.sourceBuf");
+            iassert(scrParserPub.sourceBuf);
             Com_PrintError(23, "%s: ", text);
             Scr_PrintSourcePos(23, scrParserPub.scriptfilename, scrParserPub.sourceBuf, sourcePos);
             Scr_GetLineInfo(scrParserPub.sourceBuf, sourcePos, &col, line);
@@ -1439,10 +1410,8 @@ void CompileError2(char *codePos, const char *msg, ...)
     va_list va; // [esp+81Ch] [ebp+10h] BYREF
 
     va_start(va, msg);
-    if (scrVarPub.evaluate)
-        MyAssertHandler(".\\script\\scr_parser.cpp", 1595, 0, "%s", "!scrVarPub.evaluate");
-    if (!Scr_IsInOpcodeMemory(codePos))
-        MyAssertHandler(".\\script\\scr_parser.cpp", 1596, 0, "%s", "Scr_IsInOpcodeMemory( codePos )");
+    iassert(!scrVarPub.evaluate);
+    iassert(Scr_IsInOpcodeMemory( codePos ));
     Scr_IgnoreLeaks();
     Com_PrintError(23, "\n");
     Com_PrintError(23, "******* script compile error *******\n");
@@ -1524,8 +1493,7 @@ void __cdecl RuntimeErrorInternal(int channel, char *codePos, uint index, const 
 {
     int i; // [esp+4h] [ebp-4h]
 
-    if (!Scr_IsInOpcodeMemory(codePos))
-        MyAssertHandler(".\\script\\scr_parser.cpp", 1622, 0, "%s", "Scr_IsInOpcodeMemory( codePos )");
+    iassert(Scr_IsInOpcodeMemory( codePos ));
     Com_PrintError(channel, "\n******* script runtime error *******\n%s: ", msg);
     Scr_PrintPrevCodePos(channel, codePos, index);
     if (scrVmPub.function_count)

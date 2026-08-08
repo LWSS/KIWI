@@ -4142,13 +4142,7 @@ double __cdecl PM_ViewHeightTableLerp(int iFrac, viewLerpWaypoint_s *pTable, flo
             }
             pCurr = &pTable[++i];
         } while (pCurr->iFrac != -1);
-        if (!va("No encapsulating table entries found for fraction %i", iFrac))
-            MyAssertHandler(
-                ".\\bgame\\bg_pmove.cpp",
-                2187,
-                0,
-                "%s",
-                "va( \"No encapsulating table entries found for fraction %i\", iFrac )");
+        iassert(va( "No encapsulating table entries found for fraction %i", iFrac ));
         *pfPosOfs = (float)pTable->iOffset;
         return pTable->fViewHeight;
     }

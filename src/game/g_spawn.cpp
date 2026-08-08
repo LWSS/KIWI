@@ -187,8 +187,7 @@ void G_SpawnStruct()
     const char **v3; // r31
     unsigned int v4; // r4
 
-    if (!level.spawnVar.spawnVarsValid)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_spawn.cpp", 311, 0, "%s", "level.spawnVar.spawnVarsValid");
+    iassert(level.spawnVar.spawnVarsValid);
     createstruct = g_scr_data.createstruct;
     if (!g_scr_data.createstruct)
     {
@@ -378,8 +377,7 @@ void __cdecl Scr_FreeEntity(gentity_s *ent)
 {
     int number; // r7
 
-    if (!ent)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_spawn.cpp", 860, 0, "%s", "ent");
+    iassert(ent);
     number = ent->s.number;
     if (number != ent - g_entities)
         MyAssertHandler(
@@ -389,14 +387,7 @@ void __cdecl Scr_FreeEntity(gentity_s *ent)
             "ent->s.number == ent - g_entities\n\t%i, %i",
             number,
             ent - g_entities);
-    if (!ent->r.inuse)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\g_spawn.cpp",
-            862,
-            0,
-            "%s\n\t(ent->s.number) = %i",
-            "(ent->r.inuse)",
-            ent->s.number);
+    vassert((ent->r.inuse), "(ent->s.number) = %i", ent->s.number);
     Scr_FreeEntityFields(ent);
     Scr_FreeEntityNum(ent->s.number, CLASS_NUM_ENTITY);
 }
@@ -405,8 +396,7 @@ void __cdecl Scr_AddEntity(gentity_s *ent)
 {
     int number; // r7
 
-    if (!ent)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_spawn.cpp", 871, 0, "%s", "ent");
+    iassert(ent);
     number = ent->s.number;
     if (number != ent - g_entities)
         MyAssertHandler(
@@ -416,14 +406,7 @@ void __cdecl Scr_AddEntity(gentity_s *ent)
             "ent->s.number == ent - g_entities\n\t%i, %i",
             number,
             ent - g_entities);
-    if (!ent->r.inuse)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\g_spawn.cpp",
-            873,
-            0,
-            "%s\n\t(ent->s.number) = %i",
-            "(ent->r.inuse)",
-            ent->s.number);
+    vassert((ent->r.inuse), "(ent->s.number) = %i", ent->s.number);
     Scr_AddEntityNum(ent->s.number, CLASS_NUM_ENTITY);
 }
 
@@ -475,19 +458,10 @@ void __cdecl Scr_AddHudElem(game_hudelem_s *hud)
 {
     unsigned int v2; // r31
 
-    if (!hud)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_spawn.cpp", 934, 0, "%s", "hud");
+    iassert(hud);
     v2 = hud - g_hudelems;
-    if (v2 >= 0x100)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\g_spawn.cpp",
-            935,
-            0,
-            "hud - g_hudelems doesn't index MAX_HUDELEMS_TOTAL\n\t%i not in [0, %i)",
-            v2,
-            256);
-    if (hud->elem.type == HE_TYPE_FREE)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_spawn.cpp", 936, 0, "%s", "hud->elem.type != HE_TYPE_FREE");
+    bcassert(v2, 0x100);
+    iassert(hud->elem.type != HE_TYPE_FREE);
     Scr_AddEntityNum(v2, CLASS_NUM_HUDELEM);
 }
 
@@ -512,8 +486,7 @@ int __cdecl Scr_ExecEntThread(gentity_s *ent, int handle, unsigned int paramcoun
 {
     int number; // r7
 
-    if (!ent)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_spawn.cpp", 959, 0, "%s", "ent");
+    iassert(ent);
     number = ent->s.number;
     if (number != ent - g_entities)
         MyAssertHandler(
@@ -523,14 +496,7 @@ int __cdecl Scr_ExecEntThread(gentity_s *ent, int handle, unsigned int paramcoun
             "ent->s.number == ent - g_entities\n\t%i, %i",
             number,
             ent - g_entities);
-    if (!ent->r.inuse)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\g_spawn.cpp",
-            961,
-            0,
-            "%s\n\t(ent->s.number) = %i",
-            "(ent->r.inuse)",
-            ent->s.number);
+    vassert((ent->r.inuse), "(ent->s.number) = %i", ent->s.number);
     return Scr_ExecEntThreadNum(ent->s.number, CLASS_NUM_ENTITY, handle, paramcount);
 }
 
@@ -538,8 +504,7 @@ void __cdecl Scr_AddExecEntThread(gentity_s *ent, int handle, unsigned int param
 {
     int number; // r7
 
-    if (!ent)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_spawn.cpp", 969, 0, "%s", "ent");
+    iassert(ent);
     number = ent->s.number;
     if (number != ent - g_entities)
         MyAssertHandler(
@@ -549,14 +514,7 @@ void __cdecl Scr_AddExecEntThread(gentity_s *ent, int handle, unsigned int param
             "ent->s.number == ent - g_entities\n\t%i, %i",
             number,
             ent - g_entities);
-    if (!ent->r.inuse)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\g_spawn.cpp",
-            971,
-            0,
-            "%s\n\t(ent->s.number) = %i",
-            "(ent->r.inuse)",
-            ent->s.number);
+    vassert((ent->r.inuse), "(ent->s.number) = %i", ent->s.number);
     Scr_AddExecEntThreadNum(ent->s.number, CLASS_NUM_ENTITY, handle, paramcount);
 }
 
@@ -565,8 +523,7 @@ void __cdecl Scr_Notify(gentity_s *ent, unsigned __int16 stringValue, unsigned i
     const char *v6; // r3
     const char *v7; // r3
 
-    if (!ent)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_spawn.cpp", 979, 0, "%s", "ent");
+    iassert(ent);
     if (ent->s.number != ent - g_entities)
     {
         v6 = SL_ConvertToString(stringValue);
@@ -579,14 +536,7 @@ void __cdecl Scr_Notify(gentity_s *ent, unsigned __int16 stringValue, unsigned i
             "ent->s.number == ent - g_entities",
             v7);
     }
-    if (!ent->r.inuse)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\g_spawn.cpp",
-            981,
-            0,
-            "%s\n\t(ent->s.number) = %i",
-            "(ent->r.inuse)",
-            ent->s.number);
+    vassert((ent->r.inuse), "(ent->s.number) = %i", ent->s.number);
     Scr_NotifyNum(ent->s.number, CLASS_NUM_ENTITY, stringValue, paramcount);
 }
 
@@ -944,8 +894,7 @@ void __cdecl G_ParseEntityFields(gentity_s *ent, int ignoreModel)
     int v4; // r30
     const char **v5; // r31
 
-    if (!level.spawnVar.spawnVarsValid)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_spawn.cpp", 295, 0, "%s", "level.spawnVar.spawnVarsValid");
+    iassert(level.spawnVar.spawnVarsValid);
     v4 = 0;
     if (level.spawnVar.numSpawnVars > 0)
     {

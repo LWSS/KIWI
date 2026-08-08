@@ -362,13 +362,7 @@ void __cdecl RB_DrawAllProfileBackgrounds(const ProfileSettings *profSettings, i
     float y; // [esp+4h] [ebp-8h]
     int rowIndex; // [esp+8h] [ebp-4h]
 
-    if (profSettings && profSettings->infoCount != rowCount)
-        MyAssertHandler(
-            ".\\rb_drawprofile.cpp",
-            285,
-            0,
-            "%s",
-            "profSettings == NULL || profSettings->infoCount == rowCount");
+    iassert(profSettings == NULL || profSettings->infoCount == rowCount);
     y = drawProfGlob.fontHeight * 3.0;
     RB_DrawProfileBackground(y);
     for (rowIndex = 0; rowIndex < rowCount; ++rowIndex)

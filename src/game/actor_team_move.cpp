@@ -158,15 +158,8 @@ float __cdecl Actor_TeamMoveDeltaCorrection(actor_s *self, double fVelSelfSqrd)
 
 void __cdecl Actor_AddToList(int *dodgeEntities, int *dodgeEntityCount, int arraysz, actor_s *pOtherActor)
 {
-    if (!pOtherActor->ent)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_team_move.cpp", 192, 0, "%s", "pOtherActor->ent");
-    if (*dodgeEntityCount >= arraysz)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\actor_team_move.cpp",
-            193,
-            0,
-            "%s",
-            "(*dodgeEntityCount) < arraysz");
+    iassert(pOtherActor->ent);
+    iassert((*dodgeEntityCount) < arraysz);
     dodgeEntities[(*dodgeEntityCount)++] = pOtherActor->ent->s.number;
 }
 
@@ -201,8 +194,7 @@ int __cdecl Actor_TeamMoveShouldTryDodgeSentient(
     other = context_other->other;
     if (!context->self)
         MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_team_move.cpp", 225, 0, "%s", "self");
-    if (!other)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_team_move.cpp", 226, 0, "%s", "other");
+    iassert(other);
     v6 = 1;
     actor = other->ent->actor;
     if (actor
@@ -264,8 +256,7 @@ int __cdecl Actor_TeamMoveShouldTryDodgeSentient(
             return 0;
         if (Actor_IsEnemy(self, other))
             return 1;
-        if (!other->ent->client)
-            MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_team_move.cpp", 290, 0, "%s", "other->ent->client");
+        iassert(other->ent->client);
         client = other->ent->client;
         context_other->vVelOther[0] = client->ps.velocity[0];
         context_other->vVelOther[1] = client->ps.velocity[1];
@@ -597,15 +588,8 @@ int __cdecl Actor_TeamMoveTrimPath(path_t *pPath, const team_move_context_t *con
     int lookaheadNextNode; // r31
     const float *vOrigPoint; // r30
 
-    if (pPath->wPathLen <= 0)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_team_move.cpp", 557, 0, "%s", "pPath->wPathLen > 0");
-    if (pPath->lookaheadNextNode >= pPath->wPathLen)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\actor_team_move.cpp",
-            558,
-            0,
-            "%s",
-            "pPath->lookaheadNextNode < pPath->wPathLen");
+    iassert(pPath->wPathLen > 0);
+    iassert(pPath->lookaheadNextNode < pPath->wPathLen);
     wDodgeCount = pPath->wDodgeCount;
     wPathLen = pPath->wPathLen;
     lookaheadNextNode = wPathLen - 1;
@@ -1039,8 +1023,7 @@ void __cdecl Actor_MoveAlongPathWithTeam(actor_s *self, bool bRun, bool bUseInte
     unsigned int stateLevel; // r11
     const char *v11; // r3
 
-    if (!Actor_HasPath(self))
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_team_move.cpp", 925, 0, "%s", "Actor_HasPath( self )");
+    iassert(Actor_HasPath( self ));
     if (self->eAnimMode == AI_ANIM_USE_BOTH_DELTAS_ZONLY_PHYSICS)
     {
         IsMoving = 0;

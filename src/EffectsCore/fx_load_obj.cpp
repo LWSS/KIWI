@@ -607,14 +607,7 @@ bool __cdecl FX_ParseTrailDef(const char **parse, FxEditorElemDef *edElemDef)
         if (!FX_ParseInt(parse, &index))
             return 0;
         edElemDef->trailDef.inds[edElemDef->trailDef.indCount] = index;
-        if (index != edElemDef->trailDef.inds[edElemDef->trailDef.indCount])
-            MyAssertHandler(
-                ".\\EffectsCore\\fx_load_obj.cpp",
-                912,
-                0,
-                "%s\n\t(index) = %i",
-                "(index == edElemDef->trailDef.inds[edElemDef->trailDef.indCount])",
-                index);
+        vassert((index == edElemDef->trailDef.inds[edElemDef->trailDef.indCount]), "(index) = %i", index);
     }
     return 1;
 }
@@ -951,16 +944,12 @@ char __cdecl FX_ParseEditorElem(int version, const char **parse, FxEditorElemDef
     parseInfo_t *token; // [esp+0h] [ebp-4h]
 
     memset((uint8_t *)edElemDef, 0, sizeof(FxEditorElemDef));
-    if (edElemDef->flags)
-        MyAssertHandler(".\\EffectsCore\\fx_load_obj.cpp", 1072, 0, "%s", "edElemDef->flags == 0");
-    if (edElemDef->editorFlags)
-        MyAssertHandler(".\\EffectsCore\\fx_load_obj.cpp", 1073, 0, "%s", "edElemDef->editorFlags == 0");
-    if (edElemDef->lightingFrac != 0.0)
-        MyAssertHandler(".\\EffectsCore\\fx_load_obj.cpp", 1074, 0, "%s", "edElemDef->lightingFrac == 0.0f");
+    iassert(edElemDef->flags == 0);
+    iassert(edElemDef->editorFlags == 0);
+    iassert(edElemDef->lightingFrac == 0.0f);
     if (version < 2)
         edElemDef->editorFlags = 1024;
-    if (edElemDef->atlas.behavior)
-        MyAssertHandler(".\\EffectsCore\\fx_load_obj.cpp", 1079, 0, "%s", "edElemDef->atlas.behavior == 0");
+    iassert(edElemDef->atlas.behavior == 0);
     edElemDef->elemType = 11;
     edElemDef->sortOrder = 5;
     while (1)
@@ -1049,10 +1038,8 @@ bool __cdecl FX_LoadEditorEffect(const char *name, FxEditorEffectDef *edEffectDe
     bool success; // [esp+5Bh] [ebp-5h]
     void *fileData; // [esp+5Ch] [ebp-4h] BYREF
 
-    if (!name)
-        MyAssertHandler(".\\EffectsCore\\fx_load_obj.cpp", 1178, 0, "%s", "name");
-    if (!edEffectDef)
-        MyAssertHandler(".\\EffectsCore\\fx_load_obj.cpp", 1179, 0, "%s", "edEffectDef");
+    iassert(name);
+    iassert(edEffectDef);
     Com_sprintf(filename, 0x40u, "fx/%s.efx", name);
     fileSize = FS_ReadFile(filename, &fileData);
     if (fileSize >= 0)
@@ -1083,8 +1070,7 @@ void* FX_AllocMem(uint size)
 
 PhysPreset *__cdecl FX_RegisterPhysPreset(const char *name)
 {
-    if (!name)
-        MyAssertHandler(".\\EffectsCore\\fx_load_obj.cpp", 246, 0, "%s", "name");
+    iassert(name);
     return PhysPresetPrecache(name, (void *(__cdecl *)(int))Hunk_AllocPhysPresetPrecache);
 }
 
@@ -1189,10 +1175,8 @@ int __cdecl FX_GetHashIndex(const char *name, bool *exists)
 {
     int hashIndex; // [esp+0h] [ebp-4h]
 
-    if (!name)
-        MyAssertHandler(".\\EffectsCore\\fx_load_obj.cpp", 1302, 0, "%s", "name");
-    if (!exists)
-        MyAssertHandler(".\\EffectsCore\\fx_load_obj.cpp", 1303, 0, "%s", "exists");
+    iassert(name);
+    iassert(exists);
     for (hashIndex = FX_HashName(name); fx_load.effectDefs[hashIndex]; hashIndex = ((_WORD)hashIndex + 1) & 0x1FF)
     {
         if (!I_stricmp(name, fx_load.effectDefs[hashIndex]->name))
@@ -1228,14 +1212,7 @@ const FxEffectDef *__cdecl FX_Register(const char *name)
 
 const FxEffectDef *__cdecl FX_Register_FastFile(const char *name)
 {
-    if (!I_strncmp(name, "fx/", 3))
-        MyAssertHandler(
-            ".\\EffectsCore\\fx_load_obj.cpp",
-            1330,
-            0,
-            "%s\n\t(name) = %s",
-            "(I_strncmp( name, \"fx/\", 3 ))",
-            name);
+    vassert((I_strncmp( name, "fx/", 3 )), "(name) = %s", name);
     return DB_FindXAssetHeader(ASSET_TYPE_FX, name).fx;
 }
 

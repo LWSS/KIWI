@@ -290,8 +290,7 @@ void __cdecl Actor_UpdateLookAt(actor_s *self)
         self->lookAtInfo.fLookAtTurnSpeed = 0.0;
     LABEL_41:
         pAnimTree = G_GetEntAnimTree(self->ent);
-        if (!pAnimTree)
-            MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_lookat.cpp", 317, 0, "%s", "pAnimTree");
+        iassert(pAnimTree);
         v13 = (float)((float)(self->lookAtInfo.fLookAtTurnAngle / Actor_CurrentLookAtAnimYawMax(self)) * (float)0.5);
         if (v13 <= 1.0)
         {

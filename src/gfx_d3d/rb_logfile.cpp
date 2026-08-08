@@ -209,14 +209,7 @@ void __cdecl RB_LogBlend(const char *format, uint blend)
     blendNames[12] = "BlendFactor";
     blendNames[13] = "InvBlendFactor";
     iassert( r_logFile->current.integer );
-    if (blend >= 0xE)
-        MyAssertHandler(
-            ".\\rb_logfile.cpp",
-            204,
-            0,
-            "blend doesn't index ARRAY_COUNT( blendNames )\n\t%i not in [0, %i)",
-            blend,
-            14);
+    bcassert(blend, 0xE);
     v2 = va(format, blendNames[blend]);
     RB_LogPrint(v2);
 }
@@ -233,14 +226,7 @@ void __cdecl RB_LogBlendOp(const char *format, uint blendOp)
     blendOpNames[4] = "Min";
     blendOpNames[5] = "Max";
     iassert( r_logFile->current.integer );
-    if (blendOp >= 6)
-        MyAssertHandler(
-            ".\\rb_logfile.cpp",
-            223,
-            0,
-            "blendOp doesn't index ARRAY_COUNT( blendOpNames )\n\t%i not in [0, %i)",
-            blendOp,
-            6);
+    bcassert(blendOp, 6);
     v2 = va(format, blendOpNames[blendOp]);
     RB_LogPrint(v2);
 }

@@ -1840,8 +1840,7 @@ int __cdecl ODE_CollideCapsuleBox(
             "skip >= (int)sizeof( dContactGeom )\n\t%i, %i",
             skip,
             44);
-    if (maxc <= 0)
-        MyAssertHandler(".\\physics\\ode\\src\\collision_std.cpp", 1393, 0, "%s", "maxc > 0");
+    iassert(maxc > 0);
     endOffset[0] = capHalfHeight * capRot[2];
     endOffset[1] = capHalfHeight * capRot[6];
     endOffset[2] = capHalfHeight * capRot[10];

@@ -152,13 +152,7 @@ void __cdecl RB_CalcGlowEffect(const GfxViewInfo *viewInfo)
 
 void __cdecl RB_ApplyGlowEffect(const GfxViewInfo *viewInfo)
 {
-    if (gfxRenderTargets[gfxCmdBufState.renderTargetId].surface.color != gfxRenderTargets[R_RENDERTARGET_FRAME_BUFFER].surface.color)
-        MyAssertHandler(
-            ".\\rb_postfx.cpp",
-            143,
-            0,
-            "%s",
-            "gfxRenderTargets[gfxCmdBufState.renderTargetId].surface.color == gfxRenderTargets[R_RENDERTARGET_FRAME_BUFFER].surface.color");
+    iassert(gfxRenderTargets[gfxCmdBufState.renderTargetId].surface.color == gfxRenderTargets[R_RENDERTARGET_FRAME_BUFFER].surface.color);
     if (backEnd.glowCount > 0)
     {
         iassert( backEnd.glowCount == 1 );
@@ -316,14 +310,7 @@ float __cdecl RB_GetDepthOfFieldBlurFraction(const GfxViewInfo *viewInfo, float 
     float fraction; // [esp+18h] [ebp-8h]
     float normalizedRadius; // [esp+1Ch] [ebp-4h]
 
-    if (viewInfo->dof.nearBlur < 4.0)
-        MyAssertHandler(
-            ".\\rb_postfx.cpp",
-            302,
-            0,
-            "%s\n\t(viewInfo->dof.nearBlur) = %g",
-            "(viewInfo->dof.nearBlur >= 4.0f)",
-            viewInfo->dof.nearBlur);
+    vassert((viewInfo->dof.nearBlur >= 4.0f), "(viewInfo->dof.nearBlur) = %g", viewInfo->dof.nearBlur);
     normalizedRadius = pixelRadiusAtSceneRes * 480.0f / (double)vidConfig.sceneHeight;
     fraction = normalizedRadius / viewInfo->dof.nearBlur;
     return pow(fraction, r_dof_bias->current.value);

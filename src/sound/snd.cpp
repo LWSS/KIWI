@@ -2555,13 +2555,7 @@ char __cdecl SND_UpdateBackgroundVolume(uint track, int frametime)
 
     channel = SND_FIRST_STREAM_CHANNEL + track;
 
-    if (SND_IsAliasChannel3D(SNDALIASFLAGS_GET_CHANNEL(g_snd.chaninfo[channel].alias0->flags)))
-        MyAssertHandler(
-            ".\\snd.cpp",
-            2584,
-            0,
-            "%s",
-            "!SND_IsAliasChannel3D( SNDALIASFLAGS_GET_CHANNEL( g_snd.chaninfo[channel].alias0->flags ) )");
+    iassert(!SND_IsAliasChannel3D( SNDALIASFLAGS_GET_CHANNEL( g_snd.chaninfo[channel].alias0->flags ) ));
 
     volume = (double)frametime * g_snd.background[track].goalrate + g_snd.chaninfo[channel].basevolume;
     if (g_snd.background[track].goalrate <= 0.0)
@@ -3880,8 +3874,7 @@ char __cdecl SND_Restore3DChannel(MemoryFile *memFile)
         && alias0->soundFile->type == 1
         && SND_ValidateSoundAliasBlend(alias0, alias1, 0))
     {
-        if (!SND_AnyActiveListeners())
-            MyAssertHandler(".\\snd.cpp", 3975, 0, "%s", "SND_AnyActiveListeners()");
+        iassert(SND_AnyActiveListeners());
 
         if (!snd_enable3D->current.enabled)
             return 1;

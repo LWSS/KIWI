@@ -26,15 +26,8 @@ void __cdecl Phys_CollideCylinderWithBrush(const cbrush_t *brush, const objInfo 
     uint i; // [esp+CF4h] [ebp-64h]
     float axialPlanes[6][4]; // [esp+CF8h] [ebp-60h] BYREF
 
-    if (results->contactCount >= results->maxContacts)
-        MyAssertHandler(
-            ".\\physics\\phys_coll_cylinderbrush.cpp",
-            801,
-            0,
-            "%s",
-            "results->contactCount < results->maxContacts");
-    if (!brush)
-        MyAssertHandler("c:\\trees\\cod3\\src\\physics\\phys_coll_local.h", 175, 0, "%s", "brush");
+    iassert(results->contactCount < results->maxContacts);
+    iassert(brush);
     brushPlane[0] = 0.0;
     brushPlane[1] = 0.0;
     brushPlane[2] = 0.0;
@@ -90,14 +83,7 @@ LABEL_24:
         Phys_GetWindingForBrushFace2(brush, brushSideIndex, &brushPoly, 256, axialPlanes);
         if (phys_drawCollisionWorld->current.enabled)
             Phys_DrawPoly(&brushPoly, colorCyan);
-        if (brushSideIndex >= brush->numsides + 6)
-            MyAssertHandler(
-                ".\\physics\\phys_coll_cylinderbrush.cpp",
-                818,
-                0,
-                "brushSideIndex doesn't index static_cast< int >( brush->numsides ) + 6\n\t%i not in [0, %i)",
-                brushSideIndex,
-                brush->numsides + 6);
+        bcassert(brushSideIndex, brush->numsides + 6);
         surfaceFlags = Phys_GetSurfaceFlagsFromBrush(brush, brushSideIndex);
         Phys_CollideCylinderWithFace(brushPlane, &brushPoly, info, surfaceFlags, results);
         if (info->isNarrow)
@@ -189,8 +175,7 @@ void __cdecl Phys_CollideCylinderWithFace(
     if ((distanceCylinderCenterToPlane > 0.0 || distanceBodyCenterToPlane > 0.0)
         && Phys_CylinderFaceTestSeparatingAxes(polyPlane, poly, info, &axisInfo))
     {
-        if (!axisInfo.bestAxis)
-            MyAssertHandler(".\\physics\\phys_coll_cylinderbrush.cpp", 705, 0, "%s", "axisInfo.bestAxis");
+        iassert(axisInfo.bestAxis);
         if (axisInfo.bestAxis == 1)
         {
             dot = Vec3Dot(axisInfo.bestContactNormal, info->R[direction]);
@@ -213,13 +198,7 @@ void __cdecl Phys_CollideCylinderWithFace(
                 if (axisInfo.bestAxis >= poly->ptCount)
                 {
                     axisInfo.bestAxis -= poly->ptCount;
-                    if (axisInfo.bestAxis >= 2 * poly->ptCount)
-                        MyAssertHandler(
-                            ".\\physics\\phys_coll_cylinderbrush.cpp",
-                            748,
-                            0,
-                            "%s",
-                            "axisInfo.bestAxis < poly->ptCount * 2");
+                    iassert(axisInfo.bestAxis < poly->ptCount * 2);
                     axisInfo.bestAxis >>= 1;
                     nextVertIndexa = axisInfo.bestAxis + 1;
                     if (axisInfo.bestAxis + 1 == poly->ptCount)
@@ -335,8 +314,7 @@ uint __cdecl Phys_ClipPolygonAgainstCylinderRadius(
     int direction; // [esp+78h] [ebp-8h]
     uint lastIndex; // [esp+7Ch] [ebp-4h]
 
-    if (poly->ptCount <= 2)
-        MyAssertHandler(".\\physics\\phys_coll_cylinderbrush.cpp", 96, 0, "%s", "poly->ptCount > 2");
+    iassert(poly->ptCount > 2);
     radiusSq = info->u.sideExtents[0] * info->u.sideExtents[0];
     outVertIndex = 0;
     lastIndex = poly->ptCount - 1;
@@ -500,14 +478,7 @@ char __cdecl Phys_CylinderFaceTestSeparatingAxes(
     if (poly->ptCount > 0x100)
         MyAssertHandler(".\\physics\\phys_coll_cylinderbrush.cpp", 373, 0, "%s", "poly->ptCount <= ARRAY_COUNT( edges )");
     direction = info->cylDirection - 1;
-    if (direction >= 3)
-        MyAssertHandler(
-            ".\\physics\\phys_coll_cylinderbrush.cpp",
-            376,
-            0,
-            "direction doesn't index 3\n\t%i not in [0, %i)",
-            direction,
-            3);
+    bcassert(direction, 3);
     axisInfo->bestAxis = 0;
     axisInfo->bestDepth = FLT_MAX;
     testAxis[0] = -*polyPlane;
@@ -554,8 +525,7 @@ char __cdecl Phys_CylinderFaceTestSeparatingAxes(
             ++testAxisNumber;
         }
     }
-    if (testAxisNumber != poly->ptCount + 3)
-        MyAssertHandler(".\\physics\\phys_coll_cylinderbrush.cpp", 425, 0, "%s", "testAxisNumber == 3 + poly->ptCount");
+    iassert(testAxisNumber == 3 + poly->ptCount);
     for (vertIndex = 0; vertIndex < poly->ptCount; ++vertIndex)
     {
         Vec3Sub(poly->pts[vertIndex], info->pos, toVert);
@@ -569,13 +539,7 @@ char __cdecl Phys_CylinderFaceTestSeparatingAxes(
         }
         ++testAxisNumber;
     }
-    if (testAxisNumber != 2 * poly->ptCount + 3)
-        MyAssertHandler(
-            ".\\physics\\phys_coll_cylinderbrush.cpp",
-            442,
-            0,
-            "%s",
-            "testAxisNumber == 3 + ( 2 * poly->ptCount )");
+    iassert(testAxisNumber == 3 + ( 2 * poly->ptCount ));
     Vec3Mad(info->pos, info->u.sideExtents[2], info->R[direction], endcapCenter0);
     scalea = -info->u.sideExtents[2];
     Vec3Mad(info->pos, scalea, info->R[direction], endcapCenter1);
@@ -602,13 +566,7 @@ char __cdecl Phys_CylinderFaceTestSeparatingAxes(
             testAxisNumber++))
             return 0;
     }
-    if (testAxisNumber != 4 * poly->ptCount + 3)
-        MyAssertHandler(
-            ".\\physics\\phys_coll_cylinderbrush.cpp",
-            456,
-            0,
-            "%s",
-            "testAxisNumber == 3 + ( 4 * poly->ptCount )");
+    iassert(testAxisNumber == 3 + ( 4 * poly->ptCount ));
     return 1;
 }
 
@@ -649,17 +607,9 @@ char __cdecl Phys_CylinderFaceTestAxis(
     uint vertIndex; // [esp+70h] [ebp-8h]
     float cylCenterDist; // [esp+74h] [ebp-4h]
 
-    if (!Vec3IsNormalized(axis))
-        MyAssertHandler(".\\physics\\phys_coll_cylinderbrush.cpp", 269, 0, "%s", "Vec3IsNormalized( axis )");
+    iassert(Vec3IsNormalized( axis ));
     direction = info->cylDirection - 1;
-    if (direction >= 3)
-        MyAssertHandler(
-            ".\\physics\\phys_coll_cylinderbrush.cpp",
-            272,
-            0,
-            "direction doesn't index 3\n\t%i not in [0, %i)",
-            direction,
-            3);
+    bcassert(direction, 3);
     axisNormalDot = -Vec3Dot(axis, polyNormal);
     if (axisNormalDot < 0.0)
         v22 = -*axis;
@@ -750,14 +700,7 @@ char __cdecl Phys_TestCircleToEdgeAxis(
     float clockwiseTestDir[3]; // [esp+74h] [ebp-Ch] BYREF
 
     direction = info->cylDirection - 1;
-    if (direction >= 3)
-        MyAssertHandler(
-            ".\\physics\\phys_coll_cylinderbrush.cpp",
-            331,
-            0,
-            "direction doesn't index 3\n\t%i not in [0, %i)",
-            direction,
-            3);
+    bcassert(direction, 3);
     if (Vec3NormalizeTo(edge, normalizedEdge) < 0.000009999999747378752)
         return 1;
     axialLengthOfNormalizedEdge = Vec3Dot(normalizedEdge, info->R[direction]);
@@ -846,21 +789,13 @@ void __cdecl Phys_PushEdgeAwayFromCylinderCircle(
     float contactPt[2][3]; // [esp+60h] [ebp-18h] BYREF
 
     direction = info->cylDirection - 1;
-    if (direction >= 3)
-        MyAssertHandler(
-            ".\\physics\\phys_coll_cylinderbrush.cpp",
-            565,
-            0,
-            "direction doesn't index 3\n\t%i not in [0, %i)",
-            direction,
-            3);
+    bcassert(direction, 3);
     length = Vec3NormalizeTo(edge, edgeNormalized);
     if (length >= 0.000009999999747378752)
     {
         Vec3Cross(edgeNormalized, contactNormal, choppingPlane);
         length = Vec3Normalize(choppingPlane);
-        if (length <= EQUAL_EPSILON)
-            MyAssertHandler(".\\physics\\phys_coll_cylinderbrush.cpp", 573, 0, "%s", "length > 1e-3f");
+        iassert(length > 1e-3f);
         choppingPlane[3] = Vec3Dot(choppingPlane, ptOnEdge);
         dot = Vec3Dot(info->R[direction], contactNormal);
         if (dot >= 0.0)
@@ -1020,14 +955,7 @@ void __cdecl Phys_ClipCylinderEndcapToPoly(
     circleCoords[7][0] = 0.70710677f;
     circleCoords[7][1] = -0.70710677f;
     direction = info->cylDirection - 1;
-    if (direction >= 3)
-        MyAssertHandler(
-            ".\\physics\\phys_coll_cylinderbrush.cpp",
-            637,
-            0,
-            "direction doesn't index 3\n\t%i not in [0, %i)",
-            direction,
-            3);
+    bcassert(direction, 3);
     rDotN = Vec3Dot(info->R[direction], polyPlane);
     if (rDotN <= 0.0)
     {

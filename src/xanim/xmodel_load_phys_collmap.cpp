@@ -458,8 +458,7 @@ char __cdecl Xmodel_ParsePhysicsCylinder(const char **file, PhysGeomInfo *geom)
     const char *token; // [esp+Ch] [ebp-10h]
     float axis[3]; // [esp+10h] [ebp-Ch] BYREF
 
-    if (!geom)
-        MyAssertHandler(".\\xanim\\xmodel_load_phys_collmap.cpp", 484, 0, "%s", "geom");
+    iassert(geom);
     token = Com_Parse(file)->token;
     if (*token == 123)
     {
@@ -492,8 +491,7 @@ char __cdecl Xmodel_ParsePhysicsCylinder(const char **file, PhysGeomInfo *geom)
 
 bool __cdecl Xmodel_ParsePhysicsBox(const char **file, PhysGeomInfo *geom)
 {
-    if (!geom)
-        MyAssertHandler(".\\xanim\\xmodel_load_phys_collmap.cpp", 445, 0, "%s", "geom");
+    iassert(geom);
     if (Com_Parse(file)->token[0] == 123)
     {
         geom->type = 1;
@@ -1203,14 +1201,7 @@ PhysGeomList *__cdecl Xmodel_ParsePhysicsCollMap(
                         return 0;
                     }
                 }
-                if (geomIndex != geomCount)
-                    MyAssertHandler(
-                        ".\\xanim\\xmodel_load_phys_collmap.cpp",
-                        943,
-                        0,
-                        "geomIndex == geomCount\n\t%i, %i",
-                        geomIndex,
-                        geomCount);
+                vassert(geomIndex == geomCount, "%i, %i", geomIndex, geomCount);
                 mins[0] = FLT_MAX;
                 mins[1] = FLT_MAX;
                 mins[2] = FLT_MAX;
@@ -1257,12 +1248,9 @@ PhysGeomList *__cdecl Xmodel_ParsePhysicsCollMap(
                         v6 = mins[2];
                     mins[2] = v6;
                 }
-                if (maxs[0] <= mins[0])
-                    MyAssertHandler(".\\xanim\\xmodel_load_phys_collmap.cpp", 957, 0, "%s", "mins[0] < maxs[0]");
-                if (maxs[1] <= mins[1])
-                    MyAssertHandler(".\\xanim\\xmodel_load_phys_collmap.cpp", 958, 0, "%s", "mins[1] < maxs[1]");
-                if (maxs[2] <= mins[2])
-                    MyAssertHandler(".\\xanim\\xmodel_load_phys_collmap.cpp", 959, 0, "%s", "mins[2] < maxs[2]");
+                iassert(mins[0] < maxs[0]);
+                iassert(mins[1] < maxs[1]);
+                iassert(mins[2] < maxs[2]);
                 Phys_ComputeMassProperties(
                     mins,
                     maxs,
@@ -1315,8 +1303,7 @@ PhysGeomList *__cdecl XModel_LoadPhysicsCollMap(const char *name, void *(__cdecl
                 if (geomCount)
                 {
                     fileSize = FS_ReadFile(filename, (void**)&file);
-                    if (fileSize <= 0)
-                        MyAssertHandler(".\\xanim\\xmodel_load_phys_collmap.cpp", 1004, 0, "%s", "fileSize > 0");
+                    iassert(fileSize > 0);
                     buf = (const char*)file;
                     geomList = Xmodel_ParsePhysicsCollMap(&buf, filename, geomCount, Alloc);
                     FS_FreeFile((char*)file);
@@ -1336,8 +1323,7 @@ PhysGeomList *__cdecl XModel_LoadPhysicsCollMap(const char *name, void *(__cdecl
         }
         else
         {
-            if (file)
-                MyAssertHandler(".\\xanim\\xmodel_load_phys_collmap.cpp", 985, 0, "%s", "!file");
+            iassert(!file);
             return 0;
         }
     }

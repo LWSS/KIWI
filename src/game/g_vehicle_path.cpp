@@ -1384,22 +1384,8 @@ void __cdecl GScr_AddFieldsForVehicleNode()
 
 void __cdecl GScr_GetVehicleNodeField(unsigned int entnum, unsigned int offset)
 {
-    if (offset >= 8)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\universal\\g_vehicle_path.cpp",
-            1447,
-            0,
-            "offset doesn't index ARRAY_COUNT( vn_fields ) - 1\n\t%i not in [0, %i)",
-            offset,
-            8);
-    if (entnum >= s_numNodes)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\universal\\g_vehicle_path.cpp",
-            1448,
-            0,
-            "entnum doesn't index s_numNodes\n\t%i not in [0, %i)",
-            entnum,
-            s_numNodes);
+    bcassert(offset, 8);
+    bcassert(entnum, s_numNodes);
     Scr_GetGenericField((unsigned __int8 *)&s_nodes[entnum], vn_fields[offset].type, vn_fields[offset].ofs);
 }
 
@@ -1422,14 +1408,7 @@ void __cdecl GScr_GetVehicleNode()
     v3 = Offset;
     if (Offset >= 0)
     {
-        if ((unsigned int)Offset >= 8)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\universal\\g_vehicle_path.cpp",
-                1485,
-                0,
-                "offset doesn't index ARRAY_COUNT( vn_fields ) - 1\n\t%i not in [0, %i)",
-                Offset,
-                8);
+        bcassert((unsigned int)Offset, 8);
         v4 = &vn_fields[v3];
         if (v4->type != F_STRING)
             Scr_ParamError(1u, "key is not internally a string");
@@ -1477,14 +1456,7 @@ void __cdecl GScr_GetVehicleNodeArray()
     v3 = Offset;
     if (Offset >= 0)
     {
-        if ((unsigned int)Offset >= 8)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\universal\\g_vehicle_path.cpp",
-                1543,
-                0,
-                "offset doesn't index ARRAY_COUNT( vn_fields ) - 1\n\t%i not in [0, %i)",
-                Offset,
-                8);
+        bcassert((unsigned int)Offset, 8);
         v4 = &vn_fields[v3];
         if (v4->type != F_STRING)
             Scr_ParamError(1u, "key is not internally a string");

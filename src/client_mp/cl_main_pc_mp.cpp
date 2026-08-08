@@ -574,14 +574,7 @@ void __cdecl CL_MutePlayer(int localClientNum, uint muteClientIndex)
 {
     const char *v2; // eax
 
-    if (muteClientIndex >= 0x40)
-        MyAssertHandler(
-            ".\\client_mp\\cl_main_pc_mp.cpp",
-            1385,
-            0,
-            "muteClientIndex doesn't index MAX_CLIENTS\n\t%i not in [0, %i)",
-            muteClientIndex,
-            64);
+    bcassert(muteClientIndex, 0x40);
     s_playerMute[muteClientIndex] = !s_playerMute[muteClientIndex];
     if (s_playerMute[muteClientIndex])
         v2 = va("muteplayer %i", muteClientIndex);

@@ -51,14 +51,7 @@ void __cdecl G_LoadTargets()
             if (*v2)
             {
                 v4 = atol(v2);
-                if (v4 >= 0x880)
-                    MyAssertHandler(
-                        "c:\\trees\\cod3\\cod3src\\src\\game\\g_targets.cpp",
-                        64,
-                        0,
-                        "entNum doesn't index MAX_GENTITIES\n\t%i not in [0, %i)",
-                        v4,
-                        2176);
+                bcassert(v4, 0x880);
                 *((unsigned int *)v1 - 3) = (unsigned int)&level.gentities[atol(v3)];
             }
             else
@@ -463,8 +456,7 @@ int __cdecl G_WorldDirToScreenPos(
     float v16[4]; // [sp+50h] [-90h] BYREF
     float v17[6][3]; // [sp+60h] [-80h] BYREF
 
-    if (fov_x <= 0.0)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_targets.cpp", 360, 0, "%s", "fov_x > 0");
+    iassert(fov_x > 0);
     AnglesToAxis(player->s.lerp.apos.trBase, v17);
     MatrixTransposeTransformVector(worldDir, (const mat3x3&)v17, v16);
     if (v16[0] <= 0.0)

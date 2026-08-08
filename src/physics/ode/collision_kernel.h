@@ -247,8 +247,7 @@ void __cdecl dInitUserGeom(dxUserGeom *geom, int classnum, dxSpace *space, dxBod
 
 inline dxGeom *__cdecl ODE_BodyGetFirstGeom(dxBody *body)
 {
-    if (!body)
-        MyAssertHandler(".\\physics\\ode\\src\\collision_kernel.cpp", 310, 0, "%s", "body");
+    iassert(body);
     return body->geom;
 }
 

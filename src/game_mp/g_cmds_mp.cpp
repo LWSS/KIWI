@@ -515,21 +515,17 @@ void __cdecl Cmd_UFO_f(gentity_s *ent)
 
 void __cdecl Cmd_Kill_f(gentity_s *ent)
 {
-    if (!ent->client)
-        MyAssertHandler(".\\game_mp\\g_cmds_mp.cpp", 679, 0, "%s", "ent->client");
-    if (ent->client->sess.connected == CON_DISCONNECTED)
-        MyAssertHandler(".\\game_mp\\g_cmds_mp.cpp", 680, 0, "%s", "ent->client->sess.connected != CON_DISCONNECTED");
+    iassert(ent->client);
+    iassert(ent->client->sess.connected != CON_DISCONNECTED);
     if (ent->client->sess.sessionState == SESS_STATE_PLAYING && CheatsOk(ent))
     {
-        if (bgs)
-            MyAssertHandler(".\\game_mp\\g_cmds_mp.cpp", 688, 0, "%s\n\t(bgs) = %p", "(bgs == 0)", bgs);
+        vassert((bgs == 0), "(bgs) = %p", bgs);
         bgs = &level_bgs;
         ent->flags &= ~(FL_GODMODE|FL_DEMI_GODMODE);
         ent->health = 0;
         ent->client->ps.stats[0] = 0;
         player_die(ent, ent, ent, 100000, 12, 0, 0, HITLOC_NONE, 0);
-        if (bgs != &level_bgs)
-            MyAssertHandler(".\\game_mp\\g_cmds_mp.cpp", 695, 0, "%s\n\t(bgs) = %p", "(bgs == &level_bgs)", bgs);
+        vassert((bgs == &level_bgs), "(bgs) = %p", bgs);
         bgs = 0;
     }
 }
@@ -547,8 +543,7 @@ void __cdecl StopFollowing(gentity_s *ent)
     float vMaxs[3]; // [esp+8Ch] [ebp-Ch] BYREF
 
     client = ent->client;
-    if (!client)
-        MyAssertHandler(".\\game_mp\\g_cmds_mp.cpp", 721, 0, "%s", "client");
+    iassert(client);
     client->sess.forceSpectatorClient = -1;
     client->sess.killCamEntity = -1;
     client->spectatorClient = -1;
@@ -600,8 +595,7 @@ int __cdecl Cmd_FollowCycle_f(gentity_s *ent, int dir)
 
     if (dir != 1 && dir != -1)
         Com_Error(ERR_DROP, "Cmd_FollowCycle_f: bad dir %i", dir);
-    if (!ent->client)
-        MyAssertHandler(".\\game_mp\\g_cmds_mp.cpp", 793, 0, "%s", "ent->client");
+    iassert(ent->client);
     if (ent->client->sess.sessionState != SESS_STATE_SPECTATOR)
         return 0;
     if (ent->client->sess.forceSpectatorClient >= 0)
@@ -633,10 +627,8 @@ int __cdecl Cmd_FollowCycle_f(gentity_s *ent, int dir)
 
 bool __cdecl G_IsPlaying(gentity_s *ent)
 {
-    if (!ent->client)
-        MyAssertHandler(".\\game_mp\\g_cmds_mp.cpp", 845, 0, "%s", "ent->client");
-    if (ent->client->sess.connected == CON_DISCONNECTED)
-        MyAssertHandler(".\\game_mp\\g_cmds_mp.cpp", 846, 0, "%s", "ent->client->sess.connected != CON_DISCONNECTED");
+    iassert(ent->client);
+    iassert(ent->client->sess.connected != CON_DISCONNECTED);
     return ent->client->sess.sessionState == SESS_STATE_PLAYING;
 }
 
@@ -660,13 +652,7 @@ void __cdecl G_Say(gentity_s *ent, gentity_s *target, int mode, char *chatText)
     I_CleanStr(cleanname);
     if (mode == 1)
     {
-        if (ent->client->sess.cs.team != TEAM_AXIS && ent->client->sess.cs.team != TEAM_ALLIES)
-            MyAssertHandler(
-                ".\\game_mp\\g_cmds_mp.cpp",
-                965,
-                0,
-                "%s",
-                "(ent->client->sess.cs.team == TEAM_AXIS) || (ent->client->sess.cs.team == TEAM_ALLIES)");
+        iassert((ent->client->sess.cs.team == TEAM_AXIS) || (ent->client->sess.cs.team == TEAM_ALLIES));
         number = ent->s.number;
         Guid = SV_GetGuid(ent->s.number);
         G_LogPrintf("sayteam;%s;%d;%s;%s\n", Guid, number, cleanname, chatText);

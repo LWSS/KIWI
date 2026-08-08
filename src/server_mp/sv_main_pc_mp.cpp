@@ -33,13 +33,11 @@ const netadr_t *__cdecl SV_MasterAddress()
                 adr.ip[2],
                 adr.ip[3],
                 v1);
-            if (adr.type == NA_BOT)
-                MyAssertHandler(".\\server_mp\\sv_main_pc_mp.cpp", 50, 0, "%s", "adr.type != 0");
+            iassert(adr.type != 0);
         }
         else
         {
-            if (adr.type != NA_BAD)
-                MyAssertHandler(".\\server_mp\\sv_main_pc_mp.cpp", 42, 0, "%s", "adr.type == NA_BAD");
+            iassert(adr.type == NA_BAD);
             Com_Printf(15, "Couldn't resolve address: %s\n", com_masterServerName->current.string);
         }
     }
@@ -65,8 +63,7 @@ void __cdecl SV_MasterGameCompleteStatus()
     if (com_dedicated && com_dedicated->current.integer == 2)
     {
         adr = (netadr_t *)SV_MasterAddress();
-        if (!adr)
-            MyAssertHandler(".\\server_mp\\sv_main_pc_mp.cpp", 125, 0, "%s", "adr");
+        iassert(adr);
         if (adr->type != NA_BAD)
         {
             Com_Printf(15, "Sending gameCompleteStatus to %s\n", com_masterServerName->current.string);

@@ -31,15 +31,13 @@ void __cdecl CG_StartClientSideEffects(int localClientNum)
     char fxfilename[256]; // [esp+0h] [ebp-108h] BYREF
     const char *mapname; // [esp+104h] [ebp-4h]
 
-    if (!cg_clientSideEffects)
-        MyAssertHandler(".\\cgame_mp\\cg_client_side_effects_mp.cpp", 554, 0, "%s", "cg_clientSideEffects");
+    iassert(cg_clientSideEffects);
     if (!localClientNum)
         g_clientEntSoundCount = 0;
     if (cg_clientSideEffects->current.enabled)
     {
         mapname = Dvar_GetString("mapname");
-        if (!mapname || !*mapname)
-            MyAssertHandler(".\\cgame_mp\\cg_client_side_effects_mp.cpp", 563, 0, "%s", "mapname && mapname[0]");
+        iassert(mapname && mapname[0]);
         Com_sprintf(fxfilename, 0x100u, "maps/mp/%s_fx.gsc", mapname);
         CG_LoadClientEffectMapping(fxfilename);
         Com_sprintf(fxfilename, 0x100u, "maps/createfx/%s_fx.gsc", mapname);
@@ -537,14 +535,7 @@ void __cdecl CG_CopyClientSideSoundEntityOrientation(
 {
     ClientEntSound *v3; // edx
 
-    if (clientSoundEntIndex >= g_clientEntSoundCount)
-        MyAssertHandler(
-            ".\\cgame_mp\\cg_client_side_effects_mp.cpp",
-            603,
-            0,
-            "clientSoundEntIndex doesn't index g_clientEntSoundCount\n\t%i not in [0, %i)",
-            clientSoundEntIndex,
-            g_clientEntSoundCount);
+    bcassert(clientSoundEntIndex, g_clientEntSoundCount);
     AnglesToAxis(zeroVec3, axis_out);
     *origin_out = g_clientEntSounds[clientSoundEntIndex].origin[0];
     v3 = &g_clientEntSounds[clientSoundEntIndex];

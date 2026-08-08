@@ -187,8 +187,7 @@ void __cdecl EntinfoPosAndScale(gentity_s *self, float *source, float *pos, floa
     double v16; // fp0
     double value; // fp13
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_misc.cpp", 28, 0, "%s", "self");
+    iassert(self);
     *pos = self->r.absmin[0] + self->r.absmax[0];
     pos[1] = self->r.absmin[1] + self->r.absmax[1];
     pos[2] = self->r.absmin[2] + self->r.absmax[2];

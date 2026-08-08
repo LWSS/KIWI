@@ -150,8 +150,7 @@ void __cdecl DynEntCl_LinkModel(uint16_t dynEntId)
     dynEntDef = DynEnt_GetEntityDef(dynEntId, DYNENT_DRAW_MODEL);
     dynEntPose = DynEnt_GetClientPose(dynEntId, DYNENT_DRAW_MODEL);
     model = dynEntDef->xModel;
-    if (!model)
-        MyAssertHandler(".\\DynEntity\\DynEntity_client.cpp", 126, 0, "%s", "model");
+    iassert(model);
     dynEntPose->radius = XModelGetRadius(model);
     XModelGetBounds(model, modelBoundsVec3[0], modelBoundsVec3[1]);
     modelBoundsFloat4[0].v[0] = modelBoundsVec3[0][0];
@@ -302,8 +301,7 @@ void __cdecl DynEntCl_LinkBrush(uint16_t dynEntId)
 
     dynEntDef = DynEnt_GetEntityDef(dynEntId, DYNENT_DRAW_BRUSH);
     dynEntPose = DynEnt_GetClientPose(dynEntId, DYNENT_DRAW_BRUSH);
-    if (dynEntDef->xModel)
-        MyAssertHandler(".\\DynEntity\\DynEntity_client.cpp", 160, 0, "%s", "!dynEntDef->xModel");
+    iassert(!dynEntDef->xModel);
     dynEntPose->radius = DynEntCl_UpdateBModelWorldBounds(dynEntDef, &dynEntPose->pose);
     bmodel = R_GetBrushModel(dynEntDef->brushModel);
     absMins[0] = bmodel->writable.mins[0];
@@ -608,22 +606,11 @@ void __cdecl DynEntCl_PointTrace_r(
     float p[4]; // [esp+48h] [ebp-20h] BYREF
     float mid[4]; // [esp+58h] [ebp-10h] BYREF
 
-    if (!clip)
-        MyAssertHandler(".\\DynEntity\\DynEntity_client.cpp", 399, 0, "%s", "clip");
-    if (!p1)
-        MyAssertHandler(".\\DynEntity\\DynEntity_client.cpp", 400, 0, "%s", "p1");
-    if (!p2)
-        MyAssertHandler(".\\DynEntity\\DynEntity_client.cpp", 401, 0, "%s", "p2");
-    if (!results)
-        MyAssertHandler(".\\DynEntity\\DynEntity_client.cpp", 402, 0, "%s", "results");
-    if (results->fraction > 1.0)
-        MyAssertHandler(
-            ".\\DynEntity\\DynEntity_client.cpp",
-            403,
-            0,
-            "%s\n\t(results->fraction) = %g",
-            "(results->fraction <= 1.0f)",
-            results->fraction);
+    iassert(clip);
+    iassert(p1);
+    iassert(p2);
+    iassert(results);
+    vassert((results->fraction <= 1.0f), "(results->fraction) = %g", results->fraction);
     contentmask = clip->contentmask;
     p[0] = *p1;
     p[1] = p1[1];
@@ -638,8 +625,7 @@ void __cdecl DynEntCl_PointTrace_r(
         {
             dynEntColl = DynEnt_GetEntityColl(drawType, listIndex - 1);
             dynEntClient = DynEnt_GetClientEntity(listIndex - 1, (DynEntityDrawType)drawType);
-            if ((dynEntClient->flags & 2) == 0)
-                MyAssertHandler(".\\DynEntity\\DynEntity_client.cpp", 421, 0, "%s", "dynEntClient->flags & DYNENT_CL_VISIBLE");
+            iassert(dynEntClient->flags & DYNENT_CL_VISIBLE);
             if ((dynEntClient->flags & 1) != 0)
             {
                 dynEntDef = DynEnt_GetEntityDef(listIndex - 1, (DynEntityDrawType)drawType);
@@ -650,14 +636,7 @@ void __cdecl DynEntCl_PointTrace_r(
                     {
                         if (drawType)
                         {
-                            if (drawType != DYNENT_COLL_CLIENT_BRUSH)
-                                MyAssertHandler(
-                                    ".\\DynEntity\\DynEntity_client.cpp",
-                                    442,
-                                    0,
-                                    "%s\n\t(drawType) = %i",
-                                    "(drawType == DYNENT_DRAW_BRUSH)",
-                                    drawType);
+                            vassert((drawType == DYNENT_DRAW_BRUSH), "(drawType) = %i", drawType);
                             DynEnt_PointTraceToBrush(dynEntDef, dynEntPose, clip, results);
                         }
                         else
@@ -677,10 +656,8 @@ void __cdecl DynEntCl_PointTrace_r(
             if (p[3] >= (double)results->fraction)
                 return;
             frac = t1 / (t1 - t2);
-            if (frac < 0.0)
-                MyAssertHandler(".\\DynEntity\\DynEntity_client.cpp", 463, 0, "%s", "frac >= 0.0f");
-            if (frac > 1.0)
-                MyAssertHandler(".\\DynEntity\\DynEntity_client.cpp", 464, 0, "%s", "frac <= 1.0f");
+            iassert(frac >= 0.0f);
+            iassert(frac <= 1.0f);
             mid[0] = (*p2 - p[0]) * frac + p[0];
             mid[1] = (p2[1] - p[1]) * frac + p[1];
             mid[2] = (p2[2] - p[2]) * frac + p[2];
@@ -768,22 +745,11 @@ void __cdecl DynEntCl_ClipMoveTrace_r(
     float p[4]; // [esp+74h] [ebp-20h] BYREF
     float mid[4]; // [esp+84h] [ebp-10h] BYREF
 
-    if (!clip)
-        MyAssertHandler(".\\DynEntity\\DynEntity_client.cpp", 556, 0, "%s", "clip");
-    if (!p1)
-        MyAssertHandler(".\\DynEntity\\DynEntity_client.cpp", 557, 0, "%s", "p1");
-    if (!p2)
-        MyAssertHandler(".\\DynEntity\\DynEntity_client.cpp", 558, 0, "%s", "p2");
-    if (!results)
-        MyAssertHandler(".\\DynEntity\\DynEntity_client.cpp", 559, 0, "%s", "results");
-    if (results->fraction > 1.0)
-        MyAssertHandler(
-            ".\\DynEntity\\DynEntity_client.cpp",
-            560,
-            0,
-            "%s\n\t(results->fraction) = %g",
-            "(results->fraction <= 1.0f)",
-            results->fraction);
+    iassert(clip);
+    iassert(p1);
+    iassert(p2);
+    iassert(results);
+    vassert((results->fraction <= 1.0f), "(results->fraction) = %g", results->fraction);
     p[0] = *p1;
     p[1] = p1[1];
     p[2] = p1[2];
@@ -842,8 +808,7 @@ void __cdecl DynEntCl_ClipMoveTrace_r(
                     frac2 = (v9 - offset) * invDist;
                     side = diff >= 0.0;
                 }
-                if (frac < 0.0)
-                    MyAssertHandler(".\\DynEntity\\DynEntity_client.cpp", 625, 0, "%s", "frac >= 0.0f");
+                iassert(frac >= 0.0f);
                 v8 = 1.0 - frac;
                 v7 = v8 < 0.0 ? 1.0 : frac;
                 mid[0] = (*p2 - p[0]) * v7 + p[0];
@@ -853,8 +818,7 @@ void __cdecl DynEntCl_ClipMoveTrace_r(
                 DynEntCl_ClipMoveTrace_r(clip, sector->tree.child[side], p, mid, results);
                 if (results->fraction == 0.0)
                     return;
-                if (frac2 > 1.0)
-                    MyAssertHandler(".\\DynEntity\\DynEntity_client.cpp", 637, 0, "%s", "frac2 <= 1.0f");
+                iassert(frac2 <= 1.0f);
                 v6 = frac2 - 0.0;
                 if (v6 < 0.0)
                     v5 = 0.0;
@@ -920,8 +884,7 @@ void __cdecl DynEntCl_AreaEntities_r(
     DynEntityColl *dynEntColl; // [esp+18h] [ebp-8h]
     uint nextSectorIndex; // [esp+1Ch] [ebp-4h]
 
-    if (!areaParms)
-        MyAssertHandler(".\\DynEntity\\DynEntity_client.cpp", 695, 0, "%s", "areaParms");
+    iassert(areaParms);
     while (sectorIndex)
     {
         sector = DynEnt_GetCollSector(drawType, sectorIndex);
@@ -931,8 +894,7 @@ void __cdecl DynEntCl_AreaEntities_r(
         {
             dynEntColl = DynEnt_GetEntityColl(drawType, listIndex - 1);
             dynEntClient = DynEnt_GetClientEntity(listIndex - 1, (DynEntityDrawType)drawType);
-            if ((dynEntClient->flags & 2) == 0)
-                MyAssertHandler(".\\DynEntity\\DynEntity_client.cpp", 710, 0, "%s", "dynEntClient->flags & DYNENT_CL_VISIBLE");
+            iassert(dynEntClient->flags & DYNENT_CL_VISIBLE);
             if ((dynEntClient->flags & 1) != 0)
             {
                 dynEntDef = DynEnt_GetEntityDef(listIndex - 1, (DynEntityDrawType)drawType);
@@ -983,8 +945,7 @@ void __cdecl DynEntCl_EntityImpactEvent(
     if (trace->hitType == TRACE_HITTYPE_ENTITY && DynEntCl_EventNeedsProcessed(localClientNum, sourceEntityNum))
     {
         cent = CG_GetEntity(localClientNum, trace->hitId);
-        if (!cent)
-            MyAssertHandler(".\\DynEntity\\DynEntity_client.cpp", 996, 0, "%s", "cent");
+        iassert(cent);
         if (cent->pose.physObjId != -1 && cent->pose.physObjId)
         {
             Vec3Sub(hitPos, start, hitDir);
@@ -999,11 +960,9 @@ void __cdecl DynEntCl_EntityImpactEvent(
                     hitPos,
                     trace->normal);
             obj = Com_GetClientDObj(cent->nextState.number, localClientNum);
-            if (!obj)
-                MyAssertHandler(".\\DynEntity\\DynEntity_client.cpp", 1010, 0, "%s", "obj");
+            iassert(obj);
             physPreset = DObjGetPhysPreset(obj);
-            if (!physPreset)
-                MyAssertHandler(".\\DynEntity\\DynEntity_client.cpp", 1013, 0, "%s", "physPreset");
+            iassert(physPreset);
             Phys_ObjBulletImpact(
                 PHYS_WORLD_DYNENT,
                 (dxBody *)cent->pose.physObjId,
@@ -1028,22 +987,12 @@ void __cdecl DynEntCl_PlayImpactEffects(
     const WeaponDef *weaponDef; // [esp+30h] [ebp-8h]
     const FxEffectDef *hitFx; // [esp+34h] [ebp-4h]
 
-    if (surfType >= 0x1D)
-        MyAssertHandler(
-            ".\\DynEntity\\DynEntity_client.cpp",
-            845,
-            0,
-            "surfType doesn't index SURF_TYPECOUNT\n\t%i not in [0, %i)",
-            surfType,
-            29);
-    if (!hitPos)
-        MyAssertHandler(".\\DynEntity\\DynEntity_client.cpp", 846, 0, "%s", "hitPos");
-    if (!hitNormal)
-        MyAssertHandler(".\\DynEntity\\DynEntity_client.cpp", 847, 0, "%s", "hitNormal");
+    bcassert(surfType, 0x1D);
+    iassert(hitPos);
+    iassert(hitNormal);
     attacker = CG_GetEntity(localClientNum, sourceEntityNum);
     weaponDef = BG_GetWeaponDef(attacker->nextState.weapon);
-    if (!weaponDef)
-        MyAssertHandler(".\\DynEntity\\DynEntity_client.cpp", 852, 0, "%s", "weaponDef");
+    iassert(weaponDef);
     hitFx = 0;
     hitSound = 0;
     switch (weaponDef->impactType)
@@ -1136,12 +1085,9 @@ char __cdecl DynEntCl_DynEntImpactEvent(
     float hitPos[3]; // [esp+90h] [ebp-10h] BYREF
     uint16_t dynEntId; // [esp+9Ch] [ebp-4h]
 
-    if (!start)
-        MyAssertHandler(".\\DynEntity\\DynEntity_client.cpp", 1058, 0, "%s", "start");
-    if (!end)
-        MyAssertHandler(".\\DynEntity\\DynEntity_client.cpp", 1059, 0, "%s", "end");
-    if (damage < 0)
-        MyAssertHandler(".\\DynEntity\\DynEntity_client.cpp", 1060, 0, "%s\n\t(damage) = %i", "((damage >= 0))", damage);
+    iassert(start);
+    iassert(end);
+    vassert(((damage >= 0)), "(damage) = %i", damage);
     if (!DynEntCl_EventNeedsProcessed(localClientNum, sourceEntityNum))
         return 0;
 #ifdef KISAK_MP
@@ -1167,8 +1113,7 @@ char __cdecl DynEntCl_DynEntImpactEvent(
         return 0;
     dynEntDef = DynEnt_GetEntityDef(dynEntId, drawType);
     dynEntClient = DynEnt_GetClientEntity(dynEntId, drawType);
-    if ((dynEntClient->flags & 1) == 0)
-        MyAssertHandler(".\\DynEntity\\DynEntity_client.cpp", 1090, 0, "%s", "dynEntClient->flags & DYNENT_CL_ACTIVE");
+    iassert(dynEntClient->flags & DYNENT_CL_ACTIVE);
     Vec3Lerp(start, end, trace.fraction, hitPos);
     Vec3Sub(end, start, hitDir);
     Vec3Normalize(hitDir);
@@ -1214,21 +1159,11 @@ dxBody *__cdecl DynEntCl_CreatePhysObj(const DynEntityDef *dynEntDef, const GfxP
 {
     dxBody *physId; // [esp+0h] [ebp-4h]
 
-    if (!dynEntDef)
-        MyAssertHandler(".\\DynEntity\\DynEntity_client.cpp", 793, 0, "%s", "dynEntDef");
-    if (!pose)
-        MyAssertHandler(".\\DynEntity\\DynEntity_client.cpp", 794, 0, "%s", "pose");
-    if (!DynEnt_GetEntityProps(dynEntDef->type)->usePhysics)
-        MyAssertHandler(
-            ".\\DynEntity\\DynEntity_client.cpp",
-            795,
-            0,
-            "%s",
-            "DynEnt_GetEntityProps( dynEntDef->type )->usePhysics");
-    if (!dynEntDef->physPreset)
-        MyAssertHandler(".\\DynEntity\\DynEntity_client.cpp", 796, 0, "%s", "dynEntDef->physPreset");
-    if (!dynEnt_active->current.enabled)
-        MyAssertHandler(".\\DynEntity\\DynEntity_client.cpp", 799, 0, "%s", "dynEnt_active->current.enabled");
+    iassert(dynEntDef);
+    iassert(pose);
+    iassert(DynEnt_GetEntityProps( dynEntDef->type )->usePhysics);
+    iassert(dynEntDef->physPreset);
+    iassert(dynEnt_active->current.enabled);
     physId = Phys_ObjCreate(PHYS_WORLD_DYNENT, (float*)pose->origin, (float*)pose->quat, (float *)vec3_origin, dynEntDef->physPreset);
     if (physId)
     {
@@ -1257,38 +1192,15 @@ void __cdecl DynEntCl_Damage(
 
     if (dynEntId == 0xFFFF)
         MyAssertHandler(".\\DynEntity\\DynEntity_client.cpp", 906, 0, "%s", "dynEntId != DYNENT_INVALID_ID");
-    if (!hitPos)
-        MyAssertHandler(".\\DynEntity\\DynEntity_client.cpp", 907, 0, "%s", "hitPos");
-    if (!hitDir)
-        MyAssertHandler(".\\DynEntity\\DynEntity_client.cpp", 908, 0, "%s", "hitDir");
-    if (damage <= 0)
-        MyAssertHandler(".\\DynEntity\\DynEntity_client.cpp", 909, 0, "%s\n\t(damage) = %i", "((damage > 0))", damage);
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\src\\dynentity\\../cgame_mp/cg_local_mp.h",
-            1071,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    iassert(hitPos);
+    iassert(hitDir);
+    vassert(((damage > 0)), "(damage) = %i", damage);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     dynEntDef = DynEnt_GetEntityDef(dynEntId, (DynEntityDrawType)drawType);
     dynEntClient = DynEnt_GetClientEntity(dynEntId, (DynEntityDrawType)drawType);
-    if (!DynEnt_GetEntityProps(dynEntDef->type)->destroyable)
-        MyAssertHandler(
-            ".\\DynEntity\\DynEntity_client.cpp",
-            916,
-            0,
-            "%s",
-            "DynEnt_GetEntityProps( dynEntDef->type )->destroyable");
-    if ((dynEntClient->flags & 3) == 0)
-        MyAssertHandler(
-            ".\\DynEntity\\DynEntity_client.cpp",
-            917,
-            0,
-            "%s",
-            "dynEntClient->flags & (DYNENT_CL_ACTIVE | DYNENT_CL_VISIBLE)");
-    if (dynEntClient->health <= 0)
-        MyAssertHandler(".\\DynEntity\\DynEntity_client.cpp", 919, 0, "%s", "dynEntClient->health > 0");
+    iassert(DynEnt_GetEntityProps( dynEntDef->type )->destroyable);
+    iassert(dynEntClient->flags & (DYNENT_CL_ACTIVE | DYNENT_CL_VISIBLE));
+    iassert(dynEntClient->health > 0);
     dynEntClient->health -= damage;
     if (dynEntClient->health <= 0)
     {
@@ -1362,12 +1274,9 @@ void __cdecl DynEntCl_MeleeEvent(int localClientNum, int sourceEntityNum)
             CG_GetViewDirection(localClientNum, sourceEntityNum, forward, right, up);
             for (traceIndex = 0; traceIndex < 5; ++traceIndex)
             {
-                if (!player_meleeRange)
-                    MyAssertHandler(".\\DynEntity\\DynEntity_client.cpp", 1154, 0, "%s", "player_meleeRange");
-                if (!player_meleeWidth)
-                    MyAssertHandler(".\\DynEntity\\DynEntity_client.cpp", 1155, 0, "%s", "player_meleeWidth");
-                if (!player_meleeHeight)
-                    MyAssertHandler(".\\DynEntity\\DynEntity_client.cpp", 1156, 0, "%s", "player_meleeHeight");
+                iassert(player_meleeRange);
+                iassert(player_meleeWidth);
+                iassert(player_meleeHeight);
                 Vec3Mad(eyePos, player_meleeRange->current.value, forward, end);
                 scale = player_meleeWidth->current.value * (float)traceOffsets[traceIndex][0];
                 Vec3Mad(end, scale, right, end);
@@ -1595,10 +1504,8 @@ void __cdecl DynEntCl_JitterEvent(
     uint16_t i; // [esp+A170h] [ebp-10h]
     float sum[3]; // [esp+A174h] [ebp-Ch] BYREF
 
-    if (!origin)
-        MyAssertHandler(".\\DynEntity\\DynEntity_client.cpp", 1372, 0, "%s", "origin");
-    if (innerRadius < 0.0)
-        MyAssertHandler(".\\DynEntity\\DynEntity_client.cpp", 1373, 0, "%s", "innerRadius >= 0.0f");
+    iassert(origin);
+    iassert(innerRadius >= 0.0f);
     if (innerRadius > (double)outerRadius)
         MyAssertHandler(".\\DynEntity\\DynEntity_client.cpp", 1374, 0, "%s", "outerRadius >= innerRadius");
     if (DynEntCl_EventNeedsProcessed(localClientNum, ENTITYNUM_NONE) && outerRadius != 0.0)
@@ -1678,26 +1585,15 @@ void __cdecl DynEntCl_DestroyEvent(
 
     if (dynEntId == 0xFFFF)
         MyAssertHandler(".\\DynEntity\\DynEntity_client.cpp", 1454, 0, "%s", "dynEntId != DYNENT_INVALID_ID");
-    if (!hitPos)
-        MyAssertHandler(".\\DynEntity\\DynEntity_client.cpp", 1455, 0, "%s", "hitPos");
-    if (!hitDir)
-        MyAssertHandler(".\\DynEntity\\DynEntity_client.cpp", 1456, 0, "%s", "hitDir");
+    iassert(hitPos);
+    iassert(hitDir);
     if (DynEntCl_EventNeedsProcessed(localClientNum, ENTITYNUM_NONE))
     {
-        if (localClientNum)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\src\\dynentity\\../cgame_mp/cg_local_mp.h",
-                1071,
-                0,
-                "%s\n\t(localClientNum) = %i",
-                "(localClientNum == 0)",
-                localClientNum);
+        vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
         dynEntDef = DynEnt_GetEntityDef(dynEntId, (DynEntityDrawType)drawType);
         dynEntClient = DynEnt_GetClientEntity(dynEntId, (DynEntityDrawType)drawType);
-        if ((dynEntClient->flags & 1) != 0)
-            MyAssertHandler(".\\DynEntity\\DynEntity_client.cpp", 1466, 0, "%s", "!(dynEntClient->flags & DYNENT_CL_ACTIVE)");
-        if ((dynEntClient->flags & 2) == 0)
-            MyAssertHandler(".\\DynEntity\\DynEntity_client.cpp", 1467, 0, "%s", "dynEntClient->flags & DYNENT_CL_VISIBLE");
+        iassert(!(dynEntClient->flags & DYNENT_CL_ACTIVE));
+        iassert(dynEntClient->flags & DYNENT_CL_VISIBLE);
         dynEntClient->flags &= ~2u;
         DynEntCl_UnlinkEntity(dynEntId, drawType);
         dynEntPose = DynEnt_GetClientPose(dynEntId, (DynEntityDrawType)drawType);

@@ -344,14 +344,7 @@ int __cdecl R_ReadStaticModelPreTessDrawSurf(
         return 0;
     pretessSurf->packed = R_ReadPrimDrawSurfInt(readCmdBuf);
     *firstIndex = R_ReadPrimDrawSurfInt(readCmdBuf);
-    if (*firstIndex >= 0x100000)
-        MyAssertHandler(
-            ".\\r_draw_staticmodel.cpp",
-            1894,
-            0,
-            "*firstIndex doesn't index R_MAX_PRETESS_INDICES\n\t%i not in [0, %i)",
-            *firstIndex,
-            0x100000);
+    bcassert(*firstIndex, 0x100000);
     return 1;
 }
 

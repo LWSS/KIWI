@@ -113,98 +113,32 @@ void __cdecl Bullet_Endpos(int randSeed, float spread, float *end, float *dir, c
     float aimOffset; // [esp+88h] [ebp-8h]
     float up; // [esp+8Ch] [ebp-4h] BYREF
 
-    if ((LODWORD(spread) & 0x7F800000) == 0x7F800000)
-        MyAssertHandler(".\\game\\bullet.cpp", 91, 0, "%s", "!IS_NAN(spread)");
-    if (!end)
-        MyAssertHandler(".\\game\\bullet.cpp", 94, 0, "%s", "end");
-    if (!wp)
-        MyAssertHandler(".\\game\\bullet.cpp", 95, 0, "%s", "wp");
+    iassert(!IS_NAN(spread));
+    iassert(end);
+    iassert(wp);
     v7 = DEG2RAD( spread );
     v6 = tan(v7);
     aimOffset = v6 * maxRange;
-    if ((LODWORD(aimOffset) & 0x7F800000) == 0x7F800000)
-        MyAssertHandler(".\\game\\bullet.cpp", 100, 0, "%s", "!IS_NAN(aimOffset)");
+    iassert(!IS_NAN(aimOffset));
     Bullet_RandomDir(randSeed, &right, &up);
     right = right * aimOffset;
     up = up * aimOffset;
-    if ((LODWORD(right) & 0x7F800000) == 0x7F800000)
-        MyAssertHandler(".\\game\\bullet.cpp", 110, 0, "%s", "!IS_NAN(right)");
-    if ((LODWORD(up) & 0x7F800000) == 0x7F800000)
-        MyAssertHandler(".\\game\\bullet.cpp", 111, 0, "%s", "!IS_NAN(up)");
-    if ((COERCE_UNSIGNED_INT(wp->muzzleTrace[0]) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(wp->muzzleTrace[1]) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(wp->muzzleTrace[2]) & 0x7F800000) == 0x7F800000)
-    {
-        MyAssertHandler(
-            ".\\game\\bullet.cpp",
-            112,
-            0,
-            "%s",
-            "!IS_NAN((wp->muzzleTrace)[0]) && !IS_NAN((wp->muzzleTrace)[1]) && !IS_NAN((wp->muzzleTrace)[2])");
-    }
-    if ((COERCE_UNSIGNED_INT(wp->forward[0]) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(wp->forward[1]) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(wp->forward[2]) & 0x7F800000) == 0x7F800000)
-    {
-        MyAssertHandler(
-            ".\\game\\bullet.cpp",
-            113,
-            0,
-            "%s",
-            "!IS_NAN((wp->forward)[0]) && !IS_NAN((wp->forward)[1]) && !IS_NAN((wp->forward)[2])");
-    }
-    if ((COERCE_UNSIGNED_INT(wp->right[0]) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(wp->right[1]) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(wp->right[2]) & 0x7F800000) == 0x7F800000)
-    {
-        MyAssertHandler(
-            ".\\game\\bullet.cpp",
-            114,
-            0,
-            "%s",
-            "!IS_NAN((wp->right)[0]) && !IS_NAN((wp->right)[1]) && !IS_NAN((wp->right)[2])");
-    }
-    if ((COERCE_UNSIGNED_INT(wp->up[0]) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(wp->up[1]) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(wp->up[2]) & 0x7F800000) == 0x7F800000)
-    {
-        MyAssertHandler(
-            ".\\game\\bullet.cpp",
-            115,
-            0,
-            "%s",
-            "!IS_NAN((wp->up)[0]) && !IS_NAN((wp->up)[1]) && !IS_NAN((wp->up)[2])");
-    }
+    iassert(!IS_NAN(right));
+    iassert(!IS_NAN(up));
+    nanassertvec3(wp->muzzleTrace);
+    nanassertvec3(wp->forward);
+    nanassertvec3(wp->right);
+    nanassertvec3(wp->up);
     Vec3Mad(wp->muzzleTrace, maxRange, wp->forward, end);
-    if ((COERCE_UNSIGNED_INT(*end) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(end[1]) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(end[2]) & 0x7F800000) == 0x7F800000)
-    {
-        MyAssertHandler(".\\game\\bullet.cpp", 122, 0, "%s", "!IS_NAN((end)[0]) && !IS_NAN((end)[1]) && !IS_NAN((end)[2])");
-    }
+    nanassertvec3(end);
     Vec3Mad(end, right, wp->right, end);
     Vec3Mad(end, up, wp->up, end);
-    if ((COERCE_UNSIGNED_INT(*end) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(end[1]) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(end[2]) & 0x7F800000) == 0x7F800000)
-    {
-        MyAssertHandler(".\\game\\bullet.cpp", 127, 0, "%s", "!IS_NAN((end)[0]) && !IS_NAN((end)[1]) && !IS_NAN((end)[2])");
-    }
+    nanassertvec3(end);
     if (dir)
     {
         Vec3Sub(end, wp->muzzleTrace, dir);
         Vec3Normalize(dir);
-        if ((COERCE_UNSIGNED_INT(*dir) & 0x7F800000) == 0x7F800000
-            || (COERCE_UNSIGNED_INT(dir[1]) & 0x7F800000) == 0x7F800000
-            || (COERCE_UNSIGNED_INT(dir[2]) & 0x7F800000) == 0x7F800000)
-        {
-            MyAssertHandler(
-                ".\\game\\bullet.cpp",
-                136,
-                0,
-                "%s",
-                "!IS_NAN((dir)[0]) && !IS_NAN((dir)[1]) && !IS_NAN((dir)[2])");
-        }
+        nanassertvec3(dir);
     }
 }
 
@@ -216,10 +150,8 @@ void __cdecl Bullet_RandomDir(int time, float *x, float *y)
     float r; // [esp+14h] [ebp-8h]
     float cosT; // [esp+18h] [ebp-4h]
 
-    if (!x)
-        MyAssertHandler(".\\game\\bullet.cpp", 68, 0, "%s", "x");
-    if (!y)
-        MyAssertHandler(".\\game\\bullet.cpp", 69, 0, "%s", "y");
+    iassert(x);
+    iassert(y);
     theta = G_GoodRandomFloat(&time) * 360.0f;
     r = G_GoodRandomFloat(&time);
     v3 = DEG2RAD( theta );
@@ -314,12 +246,9 @@ void __cdecl Bullet_FireExtended(BulletFireParams *bp, const WeaponDef *weapDef,
     int impactFlags; // [esp+8h] [ebp-4Ch] BYREF
     BulletTraceResults br; // [esp+Ch] [ebp-48h] BYREF
 
-    if (!bp)
-        MyAssertHandler(".\\game\\bullet.cpp", 565, 0, "%s", "bp");
-    if (!weapDef)
-        MyAssertHandler(".\\game\\bullet.cpp", 566, 0, "%s", "weapDef");
-    if (!attacker)
-        MyAssertHandler(".\\game\\bullet.cpp", 567, 0, "%s", "attacker");
+    iassert(bp);
+    iassert(weapDef);
+    iassert(attacker);
     for (extIndex = 0; extIndex < 12 && Bullet_Trace(bp, weapDef, attacker, &br, 0); ++extIndex)
     {
         Bullet_Process(bp, &br, weapDef, attacker, 0, gameTime, &impactFlags, 1);
@@ -582,16 +511,11 @@ int __cdecl Bullet_GetDamage(
     float dist; // [esp+2Ch] [ebp-8h]
     int minDamage; // [esp+30h] [ebp-4h]
 
-    if (!bp)
-        MyAssertHandler(".\\game\\bullet.cpp", 154, 0, "%s", "bp");
-    if (!br)
-        MyAssertHandler(".\\game\\bullet.cpp", 155, 0, "%s", "br");
-    if (br->trace.hitType == TRACE_HITTYPE_NONE)
-        MyAssertHandler(".\\game\\bullet.cpp", 156, 0, "%s", "br->trace.hitType != TRACE_HITTYPE_NONE");
-    if (!weapDef)
-        MyAssertHandler(".\\game\\bullet.cpp", 157, 0, "%s", "weapDef");
-    if (!attacker)
-        MyAssertHandler(".\\game\\bullet.cpp", 158, 0, "%s", "attacker");
+    iassert(bp);
+    iassert(br);
+    iassert(br->trace.hitType != TRACE_HITTYPE_NONE);
+    iassert(weapDef);
+    iassert(attacker);
     baseDamage = weapDef->damage;
     minDamage = weapDef->minDamage;
     damage = baseDamage;
@@ -609,14 +533,7 @@ int __cdecl Bullet_GetDamage(
             else
             {
                 lerpAmount = (dist - weapDef->fMaxDamageRange) / range;
-                if (lerpAmount < 0.0 || lerpAmount > 1.0)
-                    MyAssertHandler(
-                        ".\\game\\bullet.cpp",
-                        202,
-                        0,
-                        "%s\n\t(lerpAmount) = %g",
-                        "((lerpAmount >= 0.0) && (lerpAmount <= 1.0))",
-                        lerpAmount);
+                vassert(((lerpAmount >= 0.0) && (lerpAmount <= 1.0)), "(lerpAmount) = %g", lerpAmount);
                 v5 = lerpAmount * (double)minDamage + (1.0 - lerpAmount) * (double)baseDamage;
                 damage = (int)v5;
             }
@@ -773,19 +690,11 @@ void __cdecl Bullet_ImpactEffect(
         else
             v25 = ENTITYNUM_NONE;
         tempEnt->s.groundEntityNum = v25;
-        if (tempEnt->s.otherEntityNum != bp->weaponEntIndex)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\bullet.cpp",
-                345,
-                0,
-                "%s",
-                "tempEnt->s.otherEntityNum == bp->weaponEntIndex");
+        iassert(tempEnt->s.otherEntityNum == bp->weaponEntIndex);
         if (br->hitEnt)
         {
-            if (!attacker->r.inuse)
-                MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\bullet.cpp", 349, 0, "%s", "attacker->r.inuse");
-            if (!br->hitEnt->r.inuse)
-                MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\bullet.cpp", 350, 0, "%s", "br->hitEnt->r.inuse");
+            iassert(attacker->r.inuse);
+            iassert(br->hitEnt->r.inuse);
             Scr_AddEntity(attacker);
             Scr_Notify(br->hitEnt, scr_const.bullethit, 1u);
         }

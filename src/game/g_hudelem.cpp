@@ -178,14 +178,7 @@ void __cdecl HudElem_Free(game_hudelem_s *hud)
 	iassert(hud);
 	bcassert(hud - g_hudelems, ARRAY_COUNT(g_hudelems));
     
-    if (hud->elem.type <= HE_TYPE_FREE || hud->elem.type >= HE_TYPE_COUNT)
-        MyAssertHandler(
-            ".\\game\\g_hudelem.cpp",
-            266,
-            0,
-            "%s\n\t(hud->elem.type) = %i",
-            "(hud->elem.type > HE_TYPE_FREE && hud->elem.type < HE_TYPE_COUNT)",
-            hud->elem.type);
+    vassert((hud->elem.type > HE_TYPE_FREE && hud->elem.type < HE_TYPE_COUNT), "(hud->elem.type) = %i", hud->elem.type);
     Scr_FreeHudElem(hud);
     hud->elem.type = HE_TYPE_FREE;
 }
@@ -449,14 +442,10 @@ void __cdecl HudElem_SetEnumString(
     int nameIndex; // [esp+80Ch] [ebp-8h]
     int *value; // [esp+810h] [ebp-4h]
 
-    if (!hud)
-        MyAssertHandler(".\\game\\g_hudelem.cpp", 321, 0, "%s", "hud");
-    if (!f)
-        MyAssertHandler(".\\game\\g_hudelem.cpp", 322, 0, "%s", "f");
-    if (!names)
-        MyAssertHandler(".\\game\\g_hudelem.cpp", 323, 0, "%s", "names");
-    if (nameCount <= 0)
-        MyAssertHandler(".\\game\\g_hudelem.cpp", 324, 0, "%s\n\t(nameCount) = %i", "(nameCount > 0)", nameCount);
+    iassert(hud);
+    iassert(f);
+    iassert(names);
+    vassert((nameCount > 0), "(nameCount) = %i", nameCount);
     value = (int *)((char *)hud + f->ofs);
     selectedName = Scr_GetString(0);
     for (nameIndex = 0; nameIndex < nameCount; ++nameIndex)
@@ -491,17 +480,12 @@ void __cdecl HudElem_GetEnumString(
 {
     int index; // [esp+0h] [ebp-8h]
 
-    if (!hud)
-        MyAssertHandler(".\\game\\g_hudelem.cpp", 353, 0, "%s", "hud");
-    if (!f)
-        MyAssertHandler(".\\game\\g_hudelem.cpp", 354, 0, "%s", "f");
-    if (!names)
-        MyAssertHandler(".\\game\\g_hudelem.cpp", 355, 0, "%s", "names");
-    if (nameCount <= 0)
-        MyAssertHandler(".\\game\\g_hudelem.cpp", 356, 0, "%s\n\t(nameCount) = %i", "(nameCount > 0)", nameCount);
+    iassert(hud);
+    iassert(f);
+    iassert(names);
+    vassert((nameCount > 0), "(nameCount) = %i", nameCount);
     index = f->mask & (*(int *)((char *)&hud->elem.type + f->ofs) >> f->shift);
-    if (index < 0 || index >= nameCount)
-        MyAssertHandler(".\\game\\g_hudelem.cpp", 360, 0, "%s\n\t(index) = %i", "(index >= 0 && index < nameCount)", index);
+    vassert((index >= 0 && index < nameCount), "(index) = %i", index);
     Scr_AddString((char *)names[index]);
 }
 
@@ -606,10 +590,8 @@ void __cdecl GScr_NewClientHudElem()
     gentity_s *ent; // [esp+4h] [ebp-4h]
 
     ent = Scr_GetEntity(0);
-    if (!ent)
-        MyAssertHandler(".\\game\\g_hudelem.cpp", 759, 0, "%s", "ent");
-    if (!ent->r.inuse)
-        MyAssertHandler(".\\game\\g_hudelem.cpp", 760, 0, "%s", "ent->r.inuse");
+    iassert(ent);
+    iassert(ent->r.inuse);
     if (!ent->client)
         Scr_ParamError(0, "not a client");
     hud = HudElem_Alloc(ent->s.number, 0);
@@ -776,19 +758,7 @@ void __cdecl HECmd_SetTimer_Internal(scr_entref_t entref, he_type_t type, const 
     int time; // [esp+1Ch] [ebp-4h]
 
     hud = HECmd_GetHudElem(entref);
-    if (type != HE_TYPE_TIMER_DOWN
-        && type != HE_TYPE_TIMER_UP
-        && type != HE_TYPE_TENTHS_TIMER_DOWN
-        && type != HE_TYPE_TENTHS_TIMER_UP)
-    {
-        MyAssertHandler(
-            ".\\game\\g_hudelem.cpp",
-            998,
-            0,
-            "%s\n\t(type) = %i",
-            "(type == HE_TYPE_TIMER_DOWN || type == HE_TYPE_TIMER_UP || type == HE_TYPE_TENTHS_TIMER_DOWN || type == HE_TYPE_TENTHS_TIMER_UP)",
-            type);
-    }
+    vassert((type == HE_TYPE_TIMER_DOWN || type == HE_TYPE_TIMER_UP || type == HE_TYPE_TENTHS_TIMER_DOWN || type == HE_TYPE_TENTHS_TIMER_UP), "(type) = %i", type);
     if (Scr_GetNumParam() != 1)
     {
         v3 = va("USAGE: <hudelem> %s(time_in_seconds);\n", cmdName);
@@ -1334,13 +1304,7 @@ void __cdecl HudElem_UpdateClient(gclient_s *client, int clientNum, hudelem_upda
                 (uint8_t *)&client->ps.hud.archival[archivalCount],
                 0,
                 sizeof(client->ps.hud.archival[archivalCount]));
-            if (client->ps.hud.archival[archivalCount].type)
-                MyAssertHandler(
-                    ".\\game\\g_hudelem.cpp",
-                    1697,
-                    0,
-                    "%s",
-                    "client->ps.hud.archival[archivalCount].type == HE_TYPE_FREE");
+            iassert(client->ps.hud.archival[archivalCount].type == HE_TYPE_FREE);
             ++archivalCount;
         }
         while (archivalCount < 31)
@@ -1360,13 +1324,7 @@ void __cdecl HudElem_UpdateClient(gclient_s *client, int clientNum, hudelem_upda
         while (currentCount < 31 && client->ps.hud.current[currentCount].type)
         {
             memset((uint8_t *)&client->ps.hud.current[currentCount], 0, sizeof(client->ps.hud.current[currentCount]));
-            if (client->ps.hud.current[currentCount].type)
-                MyAssertHandler(
-                    ".\\game\\g_hudelem.cpp",
-                    1715,
-                    0,
-                    "%s",
-                    "client->ps.hud.current[currentCount].type == HE_TYPE_FREE");
+            iassert(client->ps.hud.current[currentCount].type == HE_TYPE_FREE);
             ++currentCount;
         }
         while (currentCount < 31)

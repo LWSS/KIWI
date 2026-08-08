@@ -41,13 +41,7 @@ actor_s *__cdecl Actor_Get(scr_entref_t entref)
     v2 = entref.entnum;
     if (entref.classnum)
         goto LABEL_5;
-    if (entref.entnum >= 0x880u)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\actor_script_cmd.cpp",
-            68,
-            0,
-            "%s",
-            "entref.entnum < MAX_GENTITIES");
+    iassert(entref.entnum < MAX_GENTITIES);
     result = g_entities[v2].actor;
     if (!result)
     {
@@ -1980,13 +1974,7 @@ void __cdecl ActorCmd_EndPrediction(scr_entref_t entref)
     v1 = Actor_Get(entref);
     if (--level.actorPredictDepth)
         Scr_Error("endPrediction already called");
-    if (!g_scr_data.actorBackupXAnimTree)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\actor_script_cmd.cpp",
-            2453,
-            0,
-            "%s",
-            "g_scr_data.actorBackupXAnimTree");
+    iassert(g_scr_data.actorBackupXAnimTree);
     ActorAnimTree = G_GetActorAnimTree(v1);
     XAnimCloneAnimTree(g_scr_data.actorBackupXAnimTree, ActorAnimTree);
     XAnimClearTree(g_scr_data.actorBackupXAnimTree);

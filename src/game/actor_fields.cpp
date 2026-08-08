@@ -213,17 +213,9 @@ void __cdecl ActorScr_GetSpecies(actor_s *pSelf, const actor_fields_s *pField)
 {
     AISpecies species; // r7
 
-    if (!pSelf)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_fields.cpp", 269, 0, "%s", "pSelf");
+    iassert(pSelf);
     species = pSelf->species;
-    if ((unsigned int)species >= MAX_AI_SPECIES)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\actor_fields.cpp",
-            270,
-            0,
-            "pSelf->species doesn't index MAX_AI_SPECIES\n\t%i not in [0, %i)",
-            species,
-            2);
+    bcassert((unsigned int)species, MAX_AI_SPECIES);
     Scr_AddConstString(*g_AISpeciesNames[pSelf->species]);
 }
 
@@ -233,10 +225,8 @@ void __cdecl ActorScr_Clamp_0_1(actor_s *pSelf, const actor_fields_s *pField)
     double v5; // fp31
     const char *v6; // r3
 
-    if (!pSelf)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_fields.cpp", 283, 0, "%s", "pSelf");
-    if (!pField)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_fields.cpp", 288, 0, "%s", "pField");
+    iassert(pSelf);
+    iassert(pField);
     Float = Scr_GetFloat(0);
     v5 = 1.0;
     if (Float > 1.0)
@@ -262,10 +252,8 @@ void __cdecl ActorScr_Clamp_0_Positive(actor_s *pSelf, const actor_fields_s *pFi
     double Float; // fp1
     const char *v5; // r3
 
-    if (!pSelf)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_fields.cpp", 316, 0, "%s", "pSelf");
-    if (!pField)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_fields.cpp", 321, 0, "%s", "pField");
+    iassert(pSelf);
+    iassert(pField);
     Float = Scr_GetFloat(0);
     if (Float < 0.0)
     {
@@ -280,10 +268,8 @@ void __cdecl ActorScr_ReadOnly(actor_s *pSelf, const actor_fields_s *pField)
 {
     const char *v3; // r3
 
-    if (!pSelf)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_fields.cpp", 344, 0, "%s", "pSelf");
-    if (!pField)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_fields.cpp", 347, 0, "%s", "pField");
+    iassert(pSelf);
+    iassert(pField);
     v3 = va("actor field %s is read-only", pField->name);
     Scr_Error(v3);
 }
@@ -292,8 +278,7 @@ void __cdecl ActorScr_SetGoalRadius(actor_s *pSelf, const actor_fields_s *pField
 {
     double Float; // fp31
 
-    if (!pSelf)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_fields.cpp", 364, 0, "%s", "pSelf");
+    iassert(pSelf);
     Float = Scr_GetFloat(0);
     if (Float < 0.0)
         Scr_ParamError(0, "radius must be >= 0");
@@ -304,8 +289,7 @@ void __cdecl ActorScr_SetGoalHeight(actor_s *pSelf, const actor_fields_s *pField
 {
     double Float; // fp1
 
-    if (!pSelf)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_fields.cpp", 382, 0, "%s", "pSelf");
+    iassert(pSelf);
     Float = Scr_GetFloat(0);
     Actor_SetGoalHeight(&pSelf->scriptGoal, Float);
 }
@@ -315,12 +299,9 @@ void __cdecl ActorScr_SetTime(actor_s *pSelf, const actor_fields_s *pField)
     long double v4; // fp2
     long double v5; // fp2
 
-    if (!pSelf)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_fields.cpp", 396, 0, "%s", "pSelf");
-    if (!pField)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_fields.cpp", 399, 0, "%s", "pField");
-    if (pField->type)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_fields.cpp", 401, 0, "%s", "pField->type == F_INT");
+    iassert(pSelf);
+    iassert(pField);
+    iassert(pField->type == F_INT);
     *(double *)&v4 = (float)((float)(Scr_GetFloat(0) * (float)1000.0) + (float)0.5);
     v5 = floor(v4);
     *(gentity_s **)((char *)&pSelf->ent + pField->ofs) = (gentity_s *)(int)(float)*(double *)&v5;
@@ -330,10 +311,8 @@ void __cdecl ActorScr_GetTime(actor_s *pSelf, const actor_fields_s *pField)
 {
     __int64 v2; // r11
 
-    if (!pField)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_fields.cpp", 414, 0, "%s", "pField");
-    if (pField->type)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_fields.cpp", 415, 0, "%s", "pField->type == F_INT");
+    iassert(pField);
+    iassert(pField->type == F_INT);
     //LODWORD(v2) = *(gentity_s **)((char *)&pSelf->ent + pField->ofs);
     //Scr_AddFloat((float)((float)v2 * (float)0.001));
     Scr_AddFloat((float)*(int *)((char *)&pSelf->ent + pField->ofs) * 0.001);
@@ -345,12 +324,9 @@ void __cdecl ActorScr_SetWeapon(actor_s *pSelf, const actor_fields_s *pField)
     const char *v5; // r3
     const char *v6; // r3
 
-    if (!pSelf)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_fields.cpp", 430, 0, "%s", "pSelf");
-    if (!pField)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_fields.cpp", 433, 0, "%s", "pField");
-    if (pField->type)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_fields.cpp", 435, 0, "%s", "pField->type == F_INT");
+    iassert(pSelf);
+    iassert(pField);
+    iassert(pField->type == F_INT);
     String = Scr_GetString(0);
     if (!G_GetWeaponIndexForName(String))
     {
@@ -365,10 +341,8 @@ void __cdecl ActorScr_GetWeapon(actor_s *pSelf, const actor_fields_s *pField)
 {
     WeaponDef *WeaponDef; // r3
 
-    if (!pField)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_fields.cpp", 454, 0, "%s", "pField");
-    if (pField->type)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_fields.cpp", 455, 0, "%s", "pField->type == F_INT");
+    iassert(pField);
+    iassert(pField->type == F_INT);
     WeaponDef = BG_GetWeaponDef(*(unsigned int *)((char *)&pSelf->ent + pField->ofs));
     if (WeaponDef)
         Scr_AddString(WeaponDef->szInternalName);
@@ -379,12 +353,9 @@ void __cdecl ActorScr_GetGroundType(actor_s *pSelf, const actor_fields_s *pField
     int iSurfaceType; // r3
     const char *v5; // r3
 
-    if (!pSelf)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_fields.cpp", 472, 0, "%s", "pSelf");
-    if (!pField)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_fields.cpp", 473, 0, "%s", "pField");
-    if (pField->type != F_STRING)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_fields.cpp", 474, 0, "%s", "pField->type == F_STRING");
+    iassert(pSelf);
+    iassert(pField);
+    iassert(pField->type == F_STRING);
     if (pField->ofs != 568)
         MyAssertHandler(
             "c:\\trees\\cod3\\cod3src\\src\\game\\actor_fields.cpp",
@@ -409,10 +380,8 @@ void __cdecl ActorScr_SetAnimPos(actor_s *pSelf, const actor_fields_s *pField)
     const char *v8; // r3
     const char *v9; // r3
 
-    if (!pSelf)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_fields.cpp", 492, 0, "%s", "pSelf");
-    if (!pField)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_fields.cpp", 495, 0, "%s", "pField");
+    iassert(pSelf);
+    iassert(pField);
     ConstString = Scr_GetConstString(0);
     IsProne = BG_ActorGoalIsProne(&pSelf->ProneInfo);
     if ((scr_const.prone == ConstString) == IsProne)
@@ -439,12 +408,9 @@ void __cdecl ActorScr_SetAnimPos(actor_s *pSelf, const actor_fields_s *pField)
 
 void __cdecl ActorScr_SetLastEnemySightPos(actor_s *pSelf, const actor_fields_s *pField)
 {
-    if (!pSelf)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_fields.cpp", 523, 0, "%s", "pSelf");
-    if (!pField)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_fields.cpp", 524, 0, "%s", "pField");
-    if (pField->type != F_VECTOR)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_fields.cpp", 525, 0, "%s", "pField->type == F_VECTOR");
+    iassert(pSelf);
+    iassert(pField);
+    iassert(pField->type == F_VECTOR);
     if (pField->ofs != 3428)
         MyAssertHandler(
             "c:\\trees\\cod3\\cod3src\\src\\game\\actor_fields.cpp",
@@ -465,12 +431,9 @@ void __cdecl ActorScr_SetLastEnemySightPos(actor_s *pSelf, const actor_fields_s 
 
 void __cdecl ActorScr_GetLastEnemySightPos(actor_s *pSelf, const actor_fields_s *pField)
 {
-    if (!pSelf)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_fields.cpp", 546, 0, "%s", "pSelf");
-    if (!pField)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_fields.cpp", 547, 0, "%s", "pField");
-    if (pField->type != F_VECTOR)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_fields.cpp", 548, 0, "%s", "pField->type == F_VECTOR");
+    iassert(pSelf);
+    iassert(pField);
+    iassert(pField->type == F_VECTOR);
     if (pField->ofs != 3428)
         MyAssertHandler(
             "c:\\trees\\cod3\\cod3src\\src\\game\\actor_fields.cpp",
@@ -484,12 +447,9 @@ void __cdecl ActorScr_GetLastEnemySightPos(actor_s *pSelf, const actor_fields_s 
 
 void __cdecl ActorScr_GetPathGoalPos(actor_s *self, const actor_fields_s *field)
 {
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_fields.cpp", 564, 0, "%s", "self");
-    if (!field)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_fields.cpp", 565, 0, "%s", "field");
-    if (field->type != F_VECTOR)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_fields.cpp", 566, 0, "%s", "field->type == F_VECTOR");
+    iassert(self);
+    iassert(field);
+    iassert(field->type == F_VECTOR);
     if (field->ofs != 1704)
         MyAssertHandler(
             "c:\\trees\\cod3\\cod3src\\src\\game\\actor_fields.cpp",
@@ -505,12 +465,9 @@ void __cdecl ActorScr_SetFixedNode(actor_s *self, const actor_fields_s *field)
 {
     unsigned int Int; // r3
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_fields.cpp", 582, 0, "%s", "self");
-    if (!field)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_fields.cpp", 583, 0, "%s", "field");
-    if (field->type != F_BYTE)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_fields.cpp", 584, 0, "%s", "field->type == F_BYTE");
+    iassert(self);
+    iassert(field);
+    iassert(field->type == F_BYTE);
     Int = Scr_GetInt(0);
     self->exposedStartTime = 0x80000000;
     //self->fixedNode = (_cntlzw(Int) & 0x20) == 0;
@@ -519,12 +476,9 @@ void __cdecl ActorScr_SetFixedNode(actor_s *self, const actor_fields_s *field)
 
 void __cdecl ActorScr_GetMoveMode(actor_s *pSelf, const actor_fields_s *pField)
 {
-    if (!pSelf)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_fields.cpp", 598, 0, "%s", "pSelf");
-    if (!pField)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_fields.cpp", 599, 0, "%s", "pField");
-    if (pField->type != F_STRING)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_fields.cpp", 600, 0, "%s", "pField->type == F_STRING");
+    iassert(pSelf);
+    iassert(pField);
+    iassert(pField->type == F_STRING);
     if (pField->ofs != 516)
         MyAssertHandler(
             "c:\\trees\\cod3\\cod3src\\src\\game\\actor_fields.cpp",
@@ -640,14 +594,10 @@ void __cdecl Cmd_AI_DisplayInfo(actor_s *actor)
     const char *v3; // r3
     const char *v4; // r3
 
-    if (!actor)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_fields.cpp", 720, 0, "%s", "actor");
-    if (!actor->ent)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_fields.cpp", 721, 0, "%s", "actor->ent");
-    if (!actor->ent->classname)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_fields.cpp", 722, 0, "%s", "actor->ent->classname");
-    if (!actor->sentient)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_fields.cpp", 723, 0, "%s", "actor->sentient");
+    iassert(actor);
+    iassert(actor->ent);
+    iassert(actor->ent->classname);
+    iassert(actor->sentient);
     v2 = SL_ConvertToString(actor->ent->classname);
     v3 = Sentient_NameForTeam(actor->sentient->eTeam);
     Com_Printf(0, "ent %i (%-7s) %-24s", actor->ent->s.number, v3, v2);
@@ -661,10 +611,8 @@ void __cdecl Cmd_AI_DisplayInfo(actor_s *actor)
 
 void __cdecl Cmd_AI_Delete(actor_s *actor)
 {
-    if (!actor)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_fields.cpp", 742, 0, "%s", "actor");
-    if (!actor->ent)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_fields.cpp", 743, 0, "%s", "actor->ent");
+    iassert(actor);
+    iassert(actor->ent);
     G_FreeEntityDelay(actor->ent);
 }
 
@@ -698,13 +646,11 @@ void __cdecl Cmd_AI_DisplayValue(actor_s *pSelf, unsigned __int8 *pBase, const a
     SentientHandle *senthand;
     EntHandle *enthand;
 
-    if (!pField)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_fields.cpp", 763, 0, "%s", "pField");
+    iassert(pField);
     number = pSelf->ent->s.number;
     if (pField->getter == ActorScr_GetTime)
     {
-        if (pField->type)
-            MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_fields.cpp", 769, 0, "%s", "pField->type == F_INT");
+        iassert(pField->type == F_INT);
         HIDWORD(v7) = pField->ofs;
         LODWORD(v7) = *(unsigned int *)&pBase[HIDWORD(v7)];
 
@@ -896,8 +842,7 @@ void __cdecl Cmd_AI_SetValue(actor_s *pSelf, int argc, unsigned __int8 *pBase, c
     _BYTE v19[24]; // [sp+58h] [-158h] BYREF
     char v20[320]; // [sp+70h] [-140h] BYREF
 
-    if (!pField)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_fields.cpp", 908, 0, "%s", "pField");
+    iassert(pField);
     setter = pField->setter;
     if (setter == ActorScr_ReadOnly)
     {
@@ -906,8 +851,7 @@ void __cdecl Cmd_AI_SetValue(actor_s *pSelf, int argc, unsigned __int8 *pBase, c
     }
     if (setter == ActorScr_SetTime)
     {
-        if (pField->type)
-            MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_fields.cpp", 918, 0, "%s", "pField->type == F_INT");
+        iassert(pField->type == F_INT);
         if (argc != 4)
             goto LABEL_9;
         SV_Cmd_ArgvBuffer(3, v20, 256);
@@ -1000,37 +944,29 @@ void __cdecl Cmd_AI_Dispatch(int argc, actor_s *pSelf, const actor_fields_s *fie
     unsigned __int8 *v8; // r3
     unsigned __int8 *v9; // r3
 
-    if (argc < 3)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_fields.cpp", 1035, 0, "%s", "argc >= 3");
-    if (!pSelf)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_fields.cpp", 1036, 0, "%s", "pSelf");
-    if (!pSelf->ent)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_fields.cpp", 1037, 0, "%s", "pSelf->ent");
-    if (!pField)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_fields.cpp", 1041, 0, "%s", "pField");
+    iassert(argc >= 3);
+    iassert(pSelf);
+    iassert(pSelf->ent);
+    iassert(pField);
     if (pField == &aifield_list)
     {
-        if (fields)
-            MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_fields.cpp", 1046, 0, "%s", "fields == NULL");
+        iassert(fields == NULL);
         Cmd_AI_DisplayInfo(pSelf);
     }
     else if (pField == &aifield_delete)
     {
-        if (fields)
-            MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_fields.cpp", 1051, 0, "%s", "fields == NULL");
+        iassert(fields == NULL);
         Cmd_AI_Delete(pSelf);
     }
     else if (argc == 3)
     {
-        if (!fields)
-            MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_fields.cpp", 1056, 0, "%s", "fields != NULL");
+        iassert(fields != NULL);
         v8 = BaseForFields((unsigned __int8 *)pSelf, fields);
         Cmd_AI_DisplayValue(pSelf, v8, pField);
     }
     else
     {
-        if (!fields)
-            MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_fields.cpp", 1061, 0, "%s", "fields != NULL");
+        iassert(fields != NULL);
         v9 = BaseForFields((unsigned __int8 *)pSelf, fields);
         Cmd_AI_SetValue(pSelf, argc, v9, pField);
     }

@@ -74,8 +74,7 @@ int __cdecl G_FindConfigstringIndex(char *name, int start, int max, int create, 
         }
         else
         {
-            if (s != scr_const._)
-                MyAssertHandler(".\\game_mp\\g_utils_mp.cpp", 92, 0, "%s", "s == scr_const._");
+            iassert(s == scr_const._);
             SV_SetConfigstring(ia, name);
             return ia - start;
         }
@@ -174,10 +173,8 @@ int __cdecl G_MaterialIndex(const char *name)
     const char *v4; // [esp+Ch] [ebp-4Ch]
     char shaderName[68]; // [esp+10h] [ebp-48h] BYREF
 
-    if (!name)
-        MyAssertHandler(".\\game_mp\\g_utils_mp.cpp", 201, 0, "%s", "name");
-    if (!*name)
-        MyAssertHandler(".\\game_mp\\g_utils_mp.cpp", 202, 0, "%s", "name[0]");
+    iassert(name);
+    iassert(name[0]);
     v4 = name;
     v3 = shaderName;
     do
@@ -267,23 +264,18 @@ bool __cdecl G_GetModelBounds(int index, float *outMins, float *outMaxs)
     float identityBasis[3][3]; // [esp+0h] [ebp-28h] BYREF
     XModel *xmodel; // [esp+24h] [ebp-4h]
 
-    if (!outMins)
-        MyAssertHandler(".\\game_mp\\g_utils_mp.cpp", 323, 0, "%s", "outMins");
-    if (!outMaxs)
-        MyAssertHandler(".\\game_mp\\g_utils_mp.cpp", 324, 0, "%s", "outMaxs");
+    iassert(outMins);
+    iassert(outMaxs);
     xmodel = G_GetModel(index);
-    if (!xmodel)
-        MyAssertHandler(".\\game_mp\\g_utils_mp.cpp", 326, 0, "%s", "xmodel");
+    iassert(xmodel);
     AxisClear(identityBasis);
     return XModelGetStaticBounds(xmodel, identityBasis, outMins, outMaxs) != 0;
 }
 
 XModel *__cdecl G_GetModel(int index)
 {
-    if (index <= 0)
-        MyAssertHandler(".\\game_mp\\g_utils_mp.cpp", 313, 0, "%s", "index > 0");
-    if (index >= 512)
-        MyAssertHandler(".\\game_mp\\g_utils_mp.cpp", 314, 0, "%s", "index < MAX_MODELS");
+    iassert(index > 0);
+    iassert(index < MAX_MODELS);
     return cached_models[index];
 }
 
@@ -291,8 +283,7 @@ bool __cdecl G_XModelBad(int index)
 {
     const XModel *Model; // eax
 
-    if (!index)
-        MyAssertHandler(".\\game_mp\\g_utils_mp.cpp", 338, 0, "%s", "index");
+    iassert(index);
     Model = G_GetModel(index);
     return XModelBad(Model);
 }
@@ -306,29 +297,25 @@ uint __cdecl G_ModelName(uint index)
 
 int __cdecl G_TagIndex(char *name)
 {
-    if (!name)
-        MyAssertHandler(".\\game_mp\\g_utils_mp.cpp", 352, 0, "%s", "name");
+    iassert(name);
     return G_FindConfigstringIndex(name, 2282, 32, 1, 0);
 }
 
 int __cdecl G_EffectIndex(char *name)
 {
-    if (!name)
-        MyAssertHandler(".\\game_mp\\g_utils_mp.cpp", 359, 0, "%s", "name");
+    iassert(name);
     return G_FindConfigstringIndex(name, 1598, 100, level.initializing, "effect");
 }
 
 int __cdecl G_ShellShockIndex(char *name)
 {
-    if (!name)
-        MyAssertHandler(".\\game_mp\\g_utils_mp.cpp", 366, 0, "%s", "name");
+    iassert(name);
     return G_FindConfigstringIndex(name, 1954, 16, 1, 0);
 }
 
 int __cdecl G_SoundAliasIndex(char *name)
 {
-    if (!name)
-        MyAssertHandler(".\\game_mp\\g_utils_mp.cpp", 374, 0, "%s", "name");
+    iassert(name);
     return G_FindConfigstringIndex(name, 1342, 256, 1, 0);
 }
 
@@ -349,8 +336,7 @@ void __cdecl G_DObjUpdate(gentity_s *ent)
         if (ent->model)
         {
             model = G_GetModel(modelIndex);
-            if (!model)
-                MyAssertHandler(".\\game_mp\\g_utils_mp.cpp", 420, 0, "%s", "model");
+            iassert(model);
             dobjModels[0].model = model;
             dobjModels[0].boneName = 0;
             dobjModels[0].ignoreCollision = 0;
@@ -368,13 +354,10 @@ void __cdecl G_DObjUpdate(gentity_s *ent)
                 modelIndexa = ent->attachModelNames[i];
                 if (!ent->attachModelNames[i])
                     break;
-                if (numModels >= 32)
-                    MyAssertHandler(".\\game_mp\\g_utils_mp.cpp", 447, 0, "%s", "numModels < DOBJ_MAX_SUBMODELS");
+                iassert(numModels < DOBJ_MAX_SUBMODELS);
                 dobjModels[numModels].model = G_GetModel(modelIndexa);
-                if (!dobjModels[numModels].model)
-                    MyAssertHandler(".\\game_mp\\g_utils_mp.cpp", 449, 0, "%s", "dobjModels[numModels].model");
-                if (!ent->attachTagNames[i])
-                    MyAssertHandler(".\\game_mp\\g_utils_mp.cpp", 450, 0, "%s", "ent->attachTagNames[i]");
+                iassert(dobjModels[numModels].model);
+                iassert(ent->attachTagNames[i]);
                 dobjModels[numModels].boneName = ent->attachTagNames[i];
                 dobjModels[numModels++].ignoreCollision = (ent->attachIgnoreCollision & (1 << i)) != 0;
             }
@@ -435,10 +418,8 @@ int __cdecl G_EntAttach(gentity_s *ent, char *modelName, uint tagName, int ignor
     int i; // [esp+0h] [ebp-8h]
     int modelIndex; // [esp+4h] [ebp-4h]
 
-    if (!tagName)
-        MyAssertHandler(".\\game_mp\\g_utils_mp.cpp", 539, 0, "%s", "tagName");
-    if (G_EntDetach(ent, modelName, tagName))
-        MyAssertHandler(".\\game_mp\\g_utils_mp.cpp", 542, 0, "%s", "!G_EntDetach( ent, modelName, tagName )");
+    iassert(tagName);
+    iassert(!G_EntDetach( ent, modelName, tagName ));
     for (i = 0; ; ++i)
     {
         if (i >= 19)
@@ -452,11 +433,9 @@ int __cdecl G_EntAttach(gentity_s *ent, char *modelName, uint tagName, int ignor
     if (modelIndex != (uint16_t)modelIndex)
         MyAssertHandler(".\\game_mp\\g_utils_mp.cpp", 553, 0, "%s", "modelIndex == (modelNameIndex_t) modelIndex");
     ent->attachModelNames[i] = modelIndex;
-    if (ent->attachTagNames[i])
-        MyAssertHandler(".\\game_mp\\g_utils_mp.cpp", 555, 0, "%s", "!ent->attachTagNames[i]");
+    iassert(!ent->attachTagNames[i]);
     Scr_SetString(&ent->attachTagNames[i], tagName);
-    if ((ent->attachIgnoreCollision & (1 << i)) != 0)
-        MyAssertHandler(".\\game_mp\\g_utils_mp.cpp", 557, 0, "%s", "!(ent->attachIgnoreCollision & (1 << i))");
+    iassert(!(ent->attachIgnoreCollision & (1 << i)));
     if (ignoreCollision)
         ent->attachIgnoreCollision |= 1 << i;
     G_DObjUpdate(ent);
@@ -469,8 +448,7 @@ int __cdecl G_EntDetach(gentity_s *ent, const char *modelName, uint tagName)
     uint modelNameString; // [esp+4h] [ebp-8h]
     int i; // [esp+8h] [ebp-4h]
 
-    if (!tagName)
-        MyAssertHandler(".\\game_mp\\g_utils_mp.cpp", 578, 0, "%s", "tagName");
+    iassert(tagName);
     modelNameString = SL_FindLowercaseString(modelName);
     if (!modelNameString || modelNameString == scr_const._)
         return 0;
@@ -481,8 +459,7 @@ int __cdecl G_EntDetach(gentity_s *ent, const char *modelName, uint tagName)
         if (ent->attachTagNames[i] == tagName && G_ModelName(ent->attachModelNames[i]) == modelNameString)
             break;
     }
-    if (!ent->attachModelNames[i])
-        MyAssertHandler(".\\game_mp\\g_utils_mp.cpp", 592, 0, "%s", "ent->attachModelNames[i]");
+    iassert(ent->attachModelNames[i]);
     ent->attachModelNames[i] = 0;
     Scr_SetString(&ent->attachTagNames[i], 0);
     while (i < 18)
@@ -531,13 +508,10 @@ int __cdecl G_EntLinkToInternal(gentity_s *ent, gentity_s *parent, uint tagName)
     gentity_s *checkEnt; // [esp+8h] [ebp-8h]
     int index; // [esp+Ch] [ebp-4h]
 
-    if (!parent)
-        MyAssertHandler(".\\game_mp\\g_utils_mp.cpp", 651, 0, "%s", "parent");
-    if ((ent->flags & 0x1000) == 0)
-        MyAssertHandler(".\\game_mp\\g_utils_mp.cpp", 652, 0, "%s", "ent->flags & FL_SUPPORTS_LINKTO");
+    iassert(parent);
+    iassert(ent->flags & FL_SUPPORTS_LINKTO);
     G_EntUnlink(ent);
-    if (ent->tagInfo)
-        MyAssertHandler(".\\game_mp\\g_utils_mp.cpp", 656, 0, "%s", "!ent->tagInfo");
+    iassert(!ent->tagInfo);
     if (tagName)
     {
         if (!SV_DObjExists(parent))
@@ -552,8 +526,7 @@ int __cdecl G_EntLinkToInternal(gentity_s *ent, gentity_s *parent, uint tagName)
     }
     for (checkEnt = parent; ; checkEnt = checkEnt->tagInfo->parent)
     {
-        if (!checkEnt)
-            MyAssertHandler(".\\game_mp\\g_utils_mp.cpp", 675, 0, "%s", "checkEnt");
+        iassert(checkEnt);
         if (checkEnt == ent)
             return 0;
         if (!checkEnt->tagInfo)
@@ -640,12 +613,10 @@ void __cdecl G_EntUnlink(gentity_s *ent)
         next = parent->tagChildren;
         while (next != ent)
         {
-            if (!next->tagInfo)
-                MyAssertHandler(".\\game_mp\\g_utils_mp.cpp", 790, 0, "%s", "next->tagInfo");
+            iassert(next->tagInfo);
             prev = next;
             next = next->tagInfo->next;
-            if (!next)
-                MyAssertHandler(".\\game_mp\\g_utils_mp.cpp", 793, 0, "%s", "next");
+            iassert(next);
         }
         if (prev)
             prev->tagInfo->next = tagInfo->next;
@@ -674,8 +645,7 @@ void __cdecl G_UpdateTagInfo(gentity_s *ent, int bParentHasDObj)
     tagInfo_s *tagInfo; // [esp+0h] [ebp-4h]
 
     tagInfo = ent->tagInfo;
-    if (!tagInfo)
-        MyAssertHandler(".\\game_mp\\g_utils_mp.cpp", 853, 0, "%s", "tagInfo");
+    iassert(tagInfo);
     if (tagInfo->name)
     {
         if (!bParentHasDObj || (tagInfo->index = SV_DObjGetBoneIndex(tagInfo->parent, tagInfo->name), tagInfo->index < 0))
@@ -721,11 +691,9 @@ void __cdecl G_CalcTagParentAxis(gentity_s *ent, float (*parentAxis)[3])
     float axis[3][3]; // [esp+ACh] [ebp-24h] BYREF
 
     tagInfo = ent->tagInfo;
-    if (!tagInfo)
-        MyAssertHandler(".\\game_mp\\g_utils_mp.cpp", 904, 0, "%s", "tagInfo");
+    iassert(tagInfo);
     parent = tagInfo->parent;
-    if (!parent)
-        MyAssertHandler(".\\game_mp\\g_utils_mp.cpp", 906, 0, "%s", "parent");
+    iassert(parent);
     if (tagInfo->index < 0)
     {
         AnglesToAxis(parent->r.currentAngles, parentAxis);
@@ -747,20 +715,8 @@ void __cdecl G_CalcTagParentAxis(gentity_s *ent, float (*parentAxis)[3])
             G_DObjCalcBone(parent, tagInfo->index);
         }
         mat = &SV_DObjGetMatrixArray(parent)[tagInfo->index];
-        if ((COERCE_UNSIGNED_INT(mat->quat[0]) & 0x7F800000) == 0x7F800000
-            || (COERCE_UNSIGNED_INT(mat->quat[1]) & 0x7F800000) == 0x7F800000
-            || (COERCE_UNSIGNED_INT(mat->quat[2]) & 0x7F800000) == 0x7F800000
-            || (COERCE_UNSIGNED_INT(mat->quat[3]) & 0x7F800000) == 0x7F800000)
-        {
-            MyAssertHandler(
-                "c:\\trees\\cod3\\src\\bgame\\../xanim/xanim_public.h",
-                432,
-                0,
-                "%s",
-                "!IS_NAN((mat->quat)[0]) && !IS_NAN((mat->quat)[1]) && !IS_NAN((mat->quat)[2]) && !IS_NAN((mat->quat)[3])");
-        }
-        if ((COERCE_UNSIGNED_INT(mat->transWeight) & 0x7F800000) == 0x7F800000)
-            MyAssertHandler("c:\\trees\\cod3\\src\\bgame\\../xanim/xanim_public.h", 433, 0, "%s", "!IS_NAN(mat->transWeight)");
+        iassert(!IS_NAN((mat->quat)[0]) && !IS_NAN((mat->quat)[1]) && !IS_NAN((mat->quat)[2]) && !IS_NAN((mat->quat)[3]));
+        iassert(!IS_NAN(mat->transWeight));
         Vec3Scale(mat->quat, mat->transWeight, result);
         v11 = result[0] * mat->quat[0];
         v4 = result[0] * mat->quat[1];
@@ -795,8 +751,7 @@ void __cdecl G_CalcTagAxis(gentity_s *ent, int bAnglesOnly)
     G_CalcTagParentAxis(ent, parentAxis);
     AnglesToAxis(ent->r.currentAngles, axis);
     tagInfo = ent->tagInfo;
-    if (!tagInfo)
-        MyAssertHandler(".\\game_mp\\g_utils_mp.cpp", 965, 0, "%s", "tagInfo");
+    iassert(tagInfo);
     if (bAnglesOnly)
     {
         MatrixTranspose(*(const mat3x3*)&parentAxis, *(mat3x3*)&invParentAxis);
@@ -820,8 +775,7 @@ void __cdecl G_SetFixedLink(gentity_s *ent, int eAngles)
 
     G_CalcTagParentAxis(ent, parentAxis);
     tagInfo = ent->tagInfo;
-    if (!tagInfo)
-        MyAssertHandler(".\\game_mp\\g_utils_mp.cpp", 995, 0, "%s", "tagInfo");
+    iassert(tagInfo);
     if (eAngles)
     {
         if (eAngles == 1)
@@ -852,8 +806,7 @@ void __cdecl G_SetFixedLink(gentity_s *ent, int eAngles)
 
 void __cdecl G_GeneralLink(gentity_s *ent)
 {
-    if (!ent->tagInfo)
-        MyAssertHandler(".\\game_mp\\g_utils_mp.cpp", 1026, 0, "%s", "ent->tagInfo");
+    iassert(ent->tagInfo);
     G_SetFixedLink(ent, 0);
     G_SetOrigin(ent, ent->r.currentOrigin);
     G_SetAngle(ent, ent->r.currentAngles);
@@ -908,8 +861,7 @@ void __cdecl G_DObjCalcBone(const gentity_s *ent, int boneIndex)
     int partBits[4]; // [esp+8h] [ebp-10h] BYREF
 
     obj = Com_GetServerDObj(ent->s.number);
-    if (!obj)
-        MyAssertHandler(".\\game_mp\\g_utils_mp.cpp", 1103, 0, "%s", "obj");
+    iassert(obj);
     if (!SV_DObjCreateSkelForBone(obj, boneIndex))
     {
         DObjGetHierarchyBits(obj, boneIndex, partBits);
@@ -1058,20 +1010,8 @@ void __cdecl G_DObjGetWorldBoneIndexMatrix(gentity_s *ent, int boneIndex, float 
     ent_axis[3][0] = ent->r.currentOrigin[0];
     ent_axis[3][1] = ent->r.currentOrigin[1];
     ent_axis[3][2] = ent->r.currentOrigin[2];
-    if ((COERCE_UNSIGNED_INT(mat->quat[0]) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(mat->quat[1]) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(mat->quat[2]) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(mat->quat[3]) & 0x7F800000) == 0x7F800000)
-    {
-        MyAssertHandler(
-            "c:\\trees\\cod3\\src\\bgame\\../xanim/xanim_public.h",
-            432,
-            0,
-            "%s",
-            "!IS_NAN((mat->quat)[0]) && !IS_NAN((mat->quat)[1]) && !IS_NAN((mat->quat)[2]) && !IS_NAN((mat->quat)[3])");
-    }
-    if ((COERCE_UNSIGNED_INT(mat->transWeight) & 0x7F800000) == 0x7F800000)
-        MyAssertHandler("c:\\trees\\cod3\\src\\bgame\\../xanim/xanim_public.h", 433, 0, "%s", "!IS_NAN(mat->transWeight)");
+    iassert(!IS_NAN((mat->quat)[0]) && !IS_NAN((mat->quat)[1]) && !IS_NAN((mat->quat)[2]) && !IS_NAN((mat->quat)[3]));
+    iassert(!IS_NAN(mat->transWeight));
     Vec3Scale(mat->quat, mat->transWeight, result);
     v11 = result[0] * mat->quat[0];
     v4 = result[0] * mat->quat[1];
@@ -1248,8 +1188,7 @@ void __cdecl G_FreeEntityRefs(gentity_s *ed)
             if (g_entities[ib].r.inuse)
             {
                 pClient = g_entities[ib].client;
-                if (!pClient)
-                    MyAssertHandler(".\\game_mp\\g_utils_mp.cpp", 1473, 0, "%s", "pClient");
+                iassert(pClient);
                 if (pClient->ps.cursorHintEntIndex == entnum)
                     pClient->ps.cursorHintEntIndex = ENTITYNUM_NONE;
             }
@@ -1275,17 +1214,14 @@ void __cdecl G_FreeEntity(gentity_s *ed)
     G_FreeEntityRefs(ed);
     if (ed->pTurretInfo)
     {
-        if (!ed->pTurretInfo->inuse)
-            MyAssertHandler(".\\game_mp\\g_utils_mp.cpp", 1513, 0, "%s", "ed->pTurretInfo->inuse");
+        iassert(ed->pTurretInfo->inuse);
         G_FreeTurret(ed);
-        if (ed->pTurretInfo)
-            MyAssertHandler(".\\game_mp\\g_utils_mp.cpp", 1515, 0, "%s", "ed->pTurretInfo == NULL");
+        iassert(ed->pTurretInfo == NULL);
     }
     if (ed->scr_vehicle)
     {
         G_VehFreeEntity(ed);
-        if (ed->scr_vehicle)
-            MyAssertHandler(".\\game_mp\\g_utils_mp.cpp", 1522, 0, "%s", "ed->scr_vehicle == NULL");
+        iassert(ed->scr_vehicle == NULL);
     }
     if (ed->s.eType == ET_PLAYER_CORPSE)
         PlayerCorpse_Free(ed);
@@ -1293,11 +1229,9 @@ void __cdecl G_FreeEntity(gentity_s *ed)
     ed->r.ownerNum.setEnt(NULL);
     ed->parent.setEnt(NULL);
     ed->missileTargetEnt.setEnt(NULL);
-    if (!ed->r.inuse)
-        MyAssertHandler(".\\game_mp\\g_utils_mp.cpp", 1537, 0, "%s", "ed->r.inuse");
+    iassert(ed->r.inuse);
     Scr_FreeEntity(ed);
-    if (ed->classname)
-        MyAssertHandler(".\\game_mp\\g_utils_mp.cpp", 1540, 0, "%s", "ed->classname == 0");
+    iassert(ed->classname == 0);
     useCount = ed->useCount;
     memset((uint8_t *)ed, 0, sizeof(gentity_s));
     ed->eventTime = level.time;
@@ -1311,16 +1245,14 @@ void __cdecl G_FreeEntity(gentity_s *ed)
         ed->nextFree = 0;
     }
     ed->useCount = useCount + 1;
-    if (ed->r.inuse)
-        MyAssertHandler(".\\game_mp\\g_utils_mp.cpp", 1556, 0, "%s", "!ed->r.inuse");
+    iassert(!ed->r.inuse);
 }
 
 void __cdecl G_FreeEntityDelay(gentity_s *ed)
 {
     uint16_t hThread; // [esp+0h] [ebp-4h]
 
-    if (!g_scr_data.delete_)
-        MyAssertHandler(".\\game_mp\\g_utils_mp.cpp", 1570, 0, "%s", "g_scr_data.delete_");
+    iassert(g_scr_data.delete_);
     hThread = Scr_ExecEntThread(ed, g_scr_data.delete_, 0);
     Scr_FreeThread(hThread);
 }
@@ -1365,14 +1297,11 @@ void __cdecl G_AddPredictableEvent(gentity_s *ent, entity_event_t event, uint ev
 
 void __cdecl G_AddEvent(gentity_s *ent, uint event, uint eventParm)
 {
-    if (!event)
-        MyAssertHandler(".\\game_mp\\g_utils_mp.cpp", 1713, 0, "%s", "event");
-    if (event >= 0x100)
-        MyAssertHandler(".\\game_mp\\g_utils_mp.cpp", 1714, 0, "event doesn't index 256\n\t%i not in [0, %i)", event, 256);
+    iassert(event);
+    bcassert(event, 0x100);
     if (eventParm >= 0xFF)
         MyAssertHandler(".\\game_mp\\g_utils_mp.cpp", 1715, 0, "%s", "eventParm < EVENT_PARM_MAX");
-    if (ent->s.eType >= ET_EVENTS)
-        MyAssertHandler(".\\game_mp\\g_utils_mp.cpp", 1716, 0, "%s", "ent->s.eType < ET_EVENTS");
+    iassert(ent->s.eType < ET_EVENTS);
     if (ent->client)
     {
         ent->client->ps.events[ent->client->ps.eventSequence & 3] = event;
@@ -1391,8 +1320,7 @@ void __cdecl G_AddEvent(gentity_s *ent, uint event, uint eventParm)
 
 void __cdecl G_PlaySoundAlias(gentity_s *ent, uint8_t index)
 {
-    if (!ent)
-        MyAssertHandler(".\\game_mp\\g_utils_mp.cpp", 1760, 0, "%s", "ent");
+    iassert(ent);
     if (index)
         G_AddEvent(ent, EV_SOUND_ALIAS, index);
 }

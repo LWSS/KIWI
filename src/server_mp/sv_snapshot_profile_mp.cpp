@@ -422,55 +422,37 @@ void __cdecl SV_PacketDataIsZeroInt(int clientNum, const msg_t *msg)
 
 void __cdecl SV_TrackFloatCompressedBits(uint bits)
 {
-    if (bits >= 0x3C)
-        MyAssertHandler(
-            ".\\server_mp\\sv_snapshot_profile_mp.cpp",
-            502,
-            0,
-            "bits doesn't index MAX_COMPRESSED_FLOAT_BITS\n\t%i not in [0, %i)",
-            bits,
-            60);
+    bcassert(bits, 0x3C);
     ++s_floatBitsCompressed[bits];
 }
 
 void __cdecl SV_TrackOriginDeltaBits(int bits)
 {
-    if (bits > 7)
-        MyAssertHandler(".\\server_mp\\sv_snapshot_profile_mp.cpp", 509, 0, "%s\n\t(bits) = %i", "(bits <= 7)", bits);
+    vassert((bits <= 7), "(bits) = %i", bits);
     ++s_originDeltaBits[bits];
 }
 
 void __cdecl SV_TrackOriginZDeltaBits(int bits)
 {
-    if (bits > 7)
-        MyAssertHandler(".\\server_mp\\sv_snapshot_profile_mp.cpp", 516, 0, "%s\n\t(bits) = %i", "(bits <= 7)", bits);
+    vassert((bits <= 7), "(bits) = %i", bits);
     ++s_originZDeltaBits[bits];
 }
 
 void __cdecl SV_TrackOriginZFullBits(int bits)
 {
-    if (bits > 16)
-        MyAssertHandler(".\\server_mp\\sv_snapshot_profile_mp.cpp", 523, 0, "%s\n\t(bits) = %i", "(bits <= 16)", bits);
+    vassert((bits <= 16), "(bits) = %i", bits);
     ++s_originZFullBits[bits];
 }
 
 void __cdecl SV_TrackOriginFullBits(int bits)
 {
-    if (bits > 16)
-        MyAssertHandler(".\\server_mp\\sv_snapshot_profile_mp.cpp", 530, 0, "%s\n\t(bits) = %i", "(bits <= 16)", bits);
+    vassert((bits <= 16), "(bits) = %i", bits);
     ++s_originFullBits[bits];
 }
 
 const char *__cdecl SV_GetEntityTypeString(uint packetEntityType)
 {
-    if (packetEntityType >= 0x17)
-        MyAssertHandler(
-            ".\\server_mp\\sv_snapshot_profile_mp.cpp",
-            537,
-            0,
-            "packetEntityType doesn't index ANALYZE_DATATYPE_ENTITYTYPE_COUNT\n\t%i not in [0, %i)",
-            packetEntityType,
-            23);
+    bcassert(packetEntityType, 0x17);
     return s_analyzeEntityTypeNames[packetEntityType];
 }
 
@@ -673,14 +655,7 @@ void __cdecl SV_TrackFieldChange(int clientNum, int entityType, uint field)
         }
         else
         {
-            if (s_currentEntType < 0)
-                MyAssertHandler(
-                    ".\\server_mp\\sv_snapshot_profile_mp.cpp",
-                    699,
-                    0,
-                    "%s\n\t(s_currentEntType) = %i",
-                    "(s_currentEntType >= 0)",
-                    s_currentEntType);
+            vassert((s_currentEntType >= 0), "(s_currentEntType) = %i", s_currentEntType);
             if (s_currentEntNum >= 0x400)
                 MyAssertHandler(
                     ".\\server_mp\\sv_snapshot_profile_mp.cpp",
@@ -1030,8 +1005,7 @@ void __cdecl SV_Netchan_PrintProfileStats(int bPrintToConsole)
     iTotalMinRecieved = 9999;
     iYPos = cl_profileTextY->current.integer;
     iYStep = 10;
-    if (!net_profile->current.integer)
-        MyAssertHandler(".\\server_mp\\sv_snapshot_profile_mp.cpp", 1185, 0, "%s", "net_profile->current.integer");
+    iassert(net_profile->current.integer);
     SV_Netchan_UpdateProfileStats();
     if (bPrintToConsole)
         Com_Printf(15, "\n\n");

@@ -83,14 +83,7 @@ bool __cdecl ClampScreenPosToEdges(
     if (!a12)
         MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_hudelem.cpp", 1070, 0, "%s", "resultDist");
     v20 = &scrPlaceView[(unsigned int)localClientNum];
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            910,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     v21 = v20->realViewportSize[0];
     v22 = 0;
     v23 = *(float *)&point->info.name;
@@ -347,14 +340,7 @@ int __cdecl WorldDirToScreenPos(int localClientNum, const float *worldDir, float
     //float v15; // [sp+58h] [-78h]
     float axis[6][3]; // [sp+60h] [-70h] BYREF
 
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            910,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     AnglesToAxis(cgArray[0].refdefViewAngles, axis);
     MatrixTransposeTransformVector(worldDir, (const mat3x3&)axis, transformed);
     v5 = (float)(cls.vidConfig.aspectRatioWindow * (float)480.0);
@@ -437,14 +423,7 @@ static Clip_t ClampScreenPosToEdges_0(int localClientNum, float *point)
     double v19; // fp13
     double v20; // fp12
 
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            910,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     value = vehHudTargetScreenEdgeClampBufferTop->current.value;
     v6 = vehHudTargetScreenEdgeClampBufferBottom->current.value;
     v7 = scrPlaceView[localClientNum].virtualViewableMin[0];
@@ -507,14 +486,7 @@ void __cdecl CG_DrawVehicleTargets(int localClientNum, rectDef_s *rect, float *c
 {
     int targetIndex;
 
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            910,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
 
     for (targetIndex = 0; targetIndex < ARRAY_COUNT(cgArray[0].targets); ++targetIndex)
     {
@@ -535,8 +507,7 @@ void __cdecl CG_DrawVehicleTargets(int localClientNum, rectDef_s *rect, float *c
             continue;
 
         targetEnt = CG_GetEntity(localClientNum, target->entNum);
-        if (!targetEnt)
-            MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_vehicle_hud.cpp", 209, 0, "%s", "targetEnt");
+        iassert(targetEnt);
 
         worldDir[0] = targetEnt->pose.origin[0] + target->offset[0] - cgArray[0].refdef.vieworg[0];
         worldDir[1] = targetEnt->pose.origin[1] + target->offset[1] - cgArray[0].refdef.vieworg[1];
@@ -609,26 +580,13 @@ void __cdecl CG_DrawJavelinTargets(int localClientNum, rectDef_s *rect, float *c
     float worldDir[3];
     float screenPos[2];
 
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            910,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
 
     ps = CG_GetPredictedPlayerState(localClientNum);
     if ((ps->weapLockFlags & 2) == 0)
         return;
 
-    if (ps->weapLockedEntnum == ENTITYNUM_NONE)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_vehicle_hud.cpp",
-            271,
-            0,
-            "%s",
-            "ps->weapLockedEntnum != ENTITYNUM_NONE");
+    iassert(ps->weapLockedEntnum != ENTITYNUM_NONE);
 
     for (targetIndex = 0; targetIndex < ARRAY_COUNT(cgArray[0].targets); ++targetIndex)
     {
@@ -639,8 +597,7 @@ void __cdecl CG_DrawJavelinTargets(int localClientNum, rectDef_s *rect, float *c
         return;
 
     targetEnt = CG_GetEntity(localClientNum, ps->weapLockedEntnum);
-    if (!targetEnt)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_vehicle_hud.cpp", 283, 0, "%s", "targetEnt");
+    iassert(targetEnt);
 
     worldDir[0] = targetEnt->pose.origin[0] + cgArray[0].targets[targetIndex].offset[0] - cgArray[0].refdef.vieworg[0];
     worldDir[1] = targetEnt->pose.origin[1] + cgArray[0].targets[targetIndex].offset[1] - cgArray[0].refdef.vieworg[1];
@@ -714,14 +671,7 @@ void CG_DrawPipOnAStickReticle(int localClientNum, rectDef_s *rect, float *color
     float v34[9]; // [sp+B0h] [-C0h] BYREF
     float v35[21]; // [sp+D4h] [-9Ch] BYREF
 
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            910,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     Entity = CG_GetEntity(localClientNum, cgArray[0].predictedPlayerState.viewlocked_entNum);
     ClientDObj = Com_GetClientDObj(Entity->nextState.number, 0);
     WeaponDef = BG_GetWeaponDef(Entity->nextState.weapon);
@@ -750,27 +700,9 @@ void CG_DrawPipOnAStickReticle(int localClientNum, rectDef_s *rect, float *color
             v33 = (float)v9 + v33;
             if (WorldDirToScreenPos(localClientNum, &v31, (float *)&v28))
             {
-                if (!cgMedia.vehCenterCircle)
-                    MyAssertHandler(
-                        "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_vehicle_hud.cpp",
-                        341,
-                        0,
-                        "%s",
-                        "cgMedia.vehCenterCircle");
-                if (!cgMedia.vehMovingCircle)
-                    MyAssertHandler(
-                        "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_vehicle_hud.cpp",
-                        342,
-                        0,
-                        "%s",
-                        "cgMedia.vehMovingCircle");
-                if (!cgMedia.vehHudLine)
-                    MyAssertHandler(
-                        "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_vehicle_hud.cpp",
-                        343,
-                        0,
-                        "%s",
-                        "cgMedia.vehHudLine");
+                iassert(cgMedia.vehCenterCircle);
+                iassert(cgMedia.vehMovingCircle);
+                iassert(cgMedia.vehHudLine);
                 v10 = *(float *)&v28;
                 v11 = screenPos[0];
                 v12 = *((float *)&v28 + 1);
@@ -846,14 +778,7 @@ void CG_DrawPipOnAStickReticle(int localClientNum, rectDef_s *rect, float *color
 
 void __cdecl CG_InitVehicleReticle(int localClientNum)
 {
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            910,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     cgArray[0].vehReticleLockOnEntNum = ENTITYNUM_NONE;
     cgArray[0].vehReticleOffset[0] = 0.0;
     cgArray[0].vehReticleOffset[1] = 0.0;
@@ -863,14 +788,7 @@ void __cdecl CG_InitVehicleReticle(int localClientNum)
 
 void __cdecl CG_ReticleStartLockOn(int localClientNum, int targetEntNum, int msecDuration)
 {
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            910,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     cgArray[0].vehReticleLockOnEntNum = targetEntNum;
     cgArray[0].vehReticleLockOnStartTime = cgArray[0].time;
     cgArray[0].vehReticleLockOnDuration = msecDuration;
@@ -884,14 +802,7 @@ int __cdecl CG_GetTargetPos(int localClientNum, int targetEntNum, float *outPos)
     centity_s *Entity; // r31
     float *offset; // r11
 
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            910,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     v6 = 0;
     targets = cgArray[0].targets;
     while (targets->entNum != targetEntNum)
@@ -915,15 +826,7 @@ int __cdecl CG_GetTargetPos(int localClientNum, int targetEntNum, float *outPos)
 // aislop
 void CG_DrawBouncingDiamond(int localClientNum, rectDef_s *rect, float *color)
 {
-    if (localClientNum != 0) {
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            910,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
-    }
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
 
     float bounceRadius = vehHudReticleBouncingRadius->current.value;
     int targetEntNum = cgArray[0].vehReticleLockOnEntNum;
@@ -1047,20 +950,12 @@ void __cdecl CG_DrawVehicleReticle(int localClientNum, rectDef_s *rect, float *c
     centity_s *vehicle; // r30
     activeReticleType_t activeReticleType; // r11
 
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            910,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     if ((cgArray[0].predictedPlayerState.eFlags & 0x20000) != 0
         && cgArray[0].predictedPlayerState.viewlocked_entNum != ENTITYNUM_NONE)
     {
         vehicle = CG_GetEntity(localClientNum, cgArray[0].predictedPlayerState.viewlocked_entNum);
-        if (!vehicle)
-            MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_vehicle_hud.cpp", 521, 0, "%s", "vehicle");
+        iassert(vehicle);
         if (vehicle->nextState.weapon)
         {
             activeReticleType = BG_GetWeaponDef(vehicle->nextState.weapon)->activeReticleType;
@@ -1092,14 +987,7 @@ void __cdecl CG_TargetsChanged(int localClientNum, unsigned int num)
     const char *v15; // r3
     int v16; // r3
 
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            910,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     ConfigString = CL_GetConfigString(localClientNum, num);
     v5 = num - 27;
     v7 = num - 27 < 0x20;

@@ -91,10 +91,8 @@ int __cdecl Actor_NearCoverNode(actor_s *self)
     const pathnode_t *v4; // r31
     bool v5; // zf
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_suppression.cpp", 60, 0, "%s", "self");
-    if (!self->sentient)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_suppression.cpp", 61, 0, "%s", "self->sentient");
+    iassert(self);
+    iassert(self->sentient);
     if (Actor_NearClaimNode(self, 32.0))
         return 1;
     v3 = Sentient_NearestNode(self->sentient);
@@ -112,10 +110,8 @@ int __cdecl Actor_NearCoverNode(actor_s *self)
 
 void __cdecl Actor_BulletWhizbyNotify(actor_s *self, sentient_s *pSuppressor)
 {
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_suppression.cpp", 85, 0, "%s", "self");
-    if (!pSuppressor)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_suppression.cpp", 86, 0, "%s", "pSuppressor");
+    iassert(self);
+    iassert(pSuppressor);
     Scr_AddEntity(pSuppressor->ent);
     Scr_Notify(self->ent, scr_const.bulletwhizby, 1u);
 }
@@ -156,13 +152,7 @@ void __cdecl Actor_AddSuppressionLine(
         goto LABEL_18;
     if (!self->ignoreSuppression)
     {
-        if (!pSuppressor->ent->actor)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\actor_suppression.cpp",
-                120,
-                0,
-                "%s",
-                "pSuppressor->ent->actor");
+        iassert(pSuppressor->ent->actor);
         if (!(unsigned __int8)Actor_IsMoving(pSuppressor->ent->actor))
         {
             v8 = (float)(*vStart - self->ent->r.currentOrigin[0]);
@@ -218,8 +208,7 @@ void __cdecl Actor_AddSuppressionLine(
 
 void __cdecl Actor_ClearSuppressant(ai_suppression_t *suppressant)
 {
-    if (!suppressant)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_suppression.cpp", 199, 0, "%s", "suppressant");
+    iassert(suppressant);
     suppressant->iTime = 0;
     suppressant->pSuppressor = 0;
     suppressant->movementOnly = 0;
@@ -278,8 +267,7 @@ void __cdecl Actor_DecaySuppressionLines(actor_s *self)
             }
             else
             {
-                if (!suppressant)
-                    MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_suppression.cpp", 199, 0, "%s", "suppressant");
+                iassert(suppressant);
                 suppressant->iTime = 0;
                 suppressant->pSuppressor = NULL;
                 suppressant->movementOnly = 0;
@@ -319,10 +307,8 @@ void __cdecl Actor_DissociateSuppressor(actor_s *self, sentient_s *pSuppressor)
     int v7; // r29
     int *p_movementOnly; // r30
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_suppression.cpp", 276, 0, "%s", "self");
-    if (!pSuppressor)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_suppression.cpp", 277, 0, "%s", "pSuppressor");
+    iassert(self);
+    iassert(pSuppressor);
     v4 = self->suppressionStartTime > 0;
     v5 = 0;
     Suppressant = self->Suppressant;
@@ -356,8 +342,7 @@ int __cdecl Actor_IsSuppressedInAnyway(actor_s *self)
     int v3; // r11
     ai_suppression_t *i; // r10
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_suppression.cpp", 333, 0, "%s", "self");
+    iassert(self);
     if (self->suppressionStartTime <= 0)
     {
         v3 = 0;
@@ -372,8 +357,7 @@ int __cdecl Actor_IsSuppressedInAnyway(actor_s *self)
 
 bool __cdecl Actor_IsSuppressed(actor_s *self)
 {
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_suppression.cpp", 359, 0, "%s", "self");
+    iassert(self);
     return self->suppressionStartTime > 0;
 }
 
@@ -382,8 +366,7 @@ int __cdecl Actor_IsMoveSuppressed(actor_s *self)
     int v2; // r10
     int *i; // r11
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_suppression.cpp", 374, 0, "%s", "self");
+    iassert(self);
     v2 = 0;
     for (i = &self->Suppressant[0].movementOnly; !*(i - 5) || !*i; i += 6)
     {
@@ -398,8 +381,7 @@ int __cdecl Actor_IsSuppressionWaiting(actor_s *self)
     int v2; // r9
     ai_suppression_t *i; // r10
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_suppression.cpp", 397, 0, "%s", "self");
+    iassert(self);
     if (self->ignoreSuppression)
         return 0;
     v2 = 0;
@@ -418,8 +400,7 @@ int __cdecl Actor_GetSuppressionPlanes(actor_s *self, float (*vNormalOut)[2], fl
     float *v8; // r11
     float *v9; // r11
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_suppression.cpp", 428, 0, "%s", "self");
+    iassert(self);
     result = 0;
     if (self->Suppressant[0].iTime)
     {
@@ -459,8 +440,7 @@ int __cdecl Actor_GetMoveOnlySuppressionPlanes(actor_s *self, float (*vNormalOut
     float *v8; // r11
     float *v9; // r11
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_suppression.cpp", 457, 0, "%s", "self");
+    iassert(self);
     result = 0;
     if (self->Suppressant[0].iTime && self->Suppressant[0].movementOnly)
     {
@@ -501,8 +481,7 @@ void __cdecl Actor_ClearAllSuppressionFromEnemySentient(sentient_s *pSuppressor)
     int v2; // r26
     actor_s *i; // r31
 
-    if (!pSuppressor)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_suppression.cpp", 311, 0, "%s", "pSuppressor");
+    iassert(pSuppressor);
     v2 = 1 << Sentient_EnemyTeam(pSuppressor->eTeam);
     for (i = Actor_FirstActor(v2); i; i = Actor_NextActor(i, v2))
     {

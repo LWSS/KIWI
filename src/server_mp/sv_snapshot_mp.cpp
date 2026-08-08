@@ -39,8 +39,7 @@ void __cdecl SV_WriteSnapshotToClient(client_t *client, msg_t *msg)
     int clientNum; // [esp+4Ch] [ebp-8h]
     int from_first_client; // [esp+50h] [ebp-4h]
 
-    if (!svsHeaderValid)
-        MyAssertHandler(".\\server_mp\\sv_snapshot_mp.cpp", 499, 0, "%s", "svsHeaderValid");
+    iassert(svsHeaderValid);
     memset(
         (uint8_t *)currentSnapshotNetworkEntityFieldsChanged,
         0,
@@ -356,14 +355,12 @@ void __cdecl SV_EmitPacketClients(
 
     bitsStart = MSG_GetUsedBitCount(msg);
     bitsUsed = bitsStart;
-    if (!svsHeaderValid)
-        MyAssertHandler(".\\server_mp\\sv_snapshot_mp.cpp", 305, 0, "%s", "svsHeaderValid");
+    iassert(svsHeaderValid);
     oldnum = -1;
     for (newnum = 0; newnum < from_num_clients; ++newnum)
     {
         newclient = &svsHeader.snapshotClients[(newnum + from_first_client) % svsHeader.numSnapshotClients];
-        if (newclient->clientIndex <= oldnum)
-            MyAssertHandler(".\\server_mp\\sv_snapshot_mp.cpp", 312, 0, "%s", "newclient->clientIndex > oldnum");
+        iassert(newclient->clientIndex > oldnum);
         oldnum = newclient->clientIndex;
     }
     oldnuma = -1;
@@ -420,8 +417,7 @@ void __cdecl SV_EmitPacketClients(
         {
             if (newnumb > oldnumb)
             {
-                if (!oldclient)
-                    MyAssertHandler(".\\server_mp\\sv_snapshot_mp.cpp", 435, 0, "%s", "oldclient");
+                iassert(oldclient);
                 if (oldclient->clientIndex <= msg->lastEntityRef)
                 {
                     Com_Printf(15, "** Client index LE msg->lastEntityRef:\n");
@@ -625,8 +621,7 @@ int __cdecl SV_GetArchivedClientInfo(int clientNum, int *pArchiveTime, playerSta
     cachedFrame = SV_GetCachedSnapshot(pArchiveTime);
     if (cachedFrame)
     {
-        if (*pArchiveTime <= 0)
-            MyAssertHandler(".\\server_mp\\sv_snapshot_mp.cpp", 1597, 0, "%s", "*pArchiveTime > 0");
+        iassert(*pArchiveTime > 0);
         deltaTime = svs.time - cachedFrame->time;
         for (i = 0; ; ++i)
         {
@@ -641,8 +636,7 @@ int __cdecl SV_GetArchivedClientInfo(int clientNum, int *pArchiveTime, playerSta
         LABEL_14:
             return 0;
         }
-        if (!cachedClient)
-            MyAssertHandler(".\\server_mp\\sv_snapshot_mp.cpp", 1618, 0, "%s", "cachedClient");
+        iassert(cachedClient);
         memcpy((uint8_t *)ps, (uint8_t *)&cachedClient->ps, sizeof(playerState_s));
         memcpy(cs, &cachedClient->cs, sizeof(clientState_s));
         if (ps->commandTime)
@@ -689,10 +683,8 @@ cachedSnapshot_t *__cdecl SV_GetCachedSnapshot(int *pArchiveTime)
     int archivedFrame; // [esp+4h] [ebp-8h]
     cachedSnapshot_t *cachedFrame; // [esp+8h] [ebp-4h]
 
-    if (!SV_Loaded())
-        MyAssertHandler(".\\server_mp\\sv_snapshot_mp.cpp", 1398, 0, "%s", "SV_Loaded()");
-    if (!sv_fps->current.integer)
-        MyAssertHandler(".\\server_mp\\sv_snapshot_mp.cpp", 1399, 0, "%s", "sv_fps->current.integer");
+    iassert(SV_Loaded());
+    iassert(sv_fps->current.integer);
     if (*pArchiveTime <= 0)
         return 0;
     archivedFrame = svs.nextArchivedSnapshotFrames - sv_fps->current.integer * *pArchiveTime / 1000;
@@ -799,8 +791,7 @@ cachedSnapshot_t *__cdecl SV_GetCachedSnapshotInternal(int archivedFrame)
             cachedClient->playerStateExists = v7;
             if (cachedClient->playerStateExists)
                 MSG_ReadDeltaPlayerstate(0, &msg, cachedFrame->time, 0, &cachedClient->ps, 0);
-            if (svsHeaderValid)
-                MyAssertHandler(".\\server_mp\\sv_snapshot_mp.cpp", 1340, 0, "%s", "!svsHeaderValid");
+            iassert(!svsHeaderValid);
             if (++svs.nextCachedSnapshotClients >= 2147483646)
                 Com_Error(ERR_FATAL, "svs.nextCachedSnapshotClients wrapped");
             ++cachedFrame->num_clients;
@@ -836,8 +827,7 @@ cachedSnapshot_t *__cdecl SV_GetCachedSnapshotInternal(int archivedFrame)
         oldCachedFrame = SV_GetCachedSnapshotInternal(oldArchivedFrame);
         if (!oldCachedFrame)
             return 0;
-        if (oldCachedFrame->usesDelta)
-            MyAssertHandler(".\\server_mp\\sv_snapshot_mp.cpp", 1174, 0, "%s", "!oldCachedFrame->usesDelta");
+        iassert(!oldCachedFrame->usesDelta);
         cachedFrame = &svs.cachedSnapshotFrames[svs.nextCachedSnapshotFrames % 512];
         cachedFrame->archivedFrame = archivedFrame;
         cachedFrame->num_entities = 0;
@@ -862,8 +852,7 @@ cachedSnapshot_t *__cdecl SV_GetCachedSnapshotInternal(int archivedFrame)
         while (MSG_ReadBit(&msg))
         {
             newnum = MSG_ReadEntityIndex(&msg, 6u);
-            if (newnum < 0)
-                MyAssertHandler(".\\server_mp\\sv_snapshot_mp.cpp", 1209, 0, "%s\n\t(newnum) = %i", "(newnum >= 0)", newnum);
+            vassert((newnum >= 0), "(newnum) = %i", newnum);
             if (msg.overflowed)
                 Com_Error(ERR_DROP, "SV_GetCachedSnapshot: end of message");
             while (oldnum < newnum)
@@ -891,8 +880,7 @@ cachedSnapshot_t *__cdecl SV_GetCachedSnapshotInternal(int archivedFrame)
                     else
                         MSG_ReadDeltaPlayerstate(0, &msg, cachedFrame->time, 0, &cachedClient->ps, 0);
                 }
-                if (svsHeaderValid)
-                    MyAssertHandler(".\\server_mp\\sv_snapshot_mp.cpp", 1243, 0, "%s", "!svsHeaderValid");
+                iassert(!svsHeaderValid);
                 if (++svs.nextCachedSnapshotClients >= 2147483646)
                     Com_Error(ERR_FATAL, "svs.nextCachedSnapshotClients wrapped");
                 ++cachedFrame->num_clients;
@@ -908,16 +896,14 @@ cachedSnapshot_t *__cdecl SV_GetCachedSnapshotInternal(int archivedFrame)
             }
             else
             {
-                if (oldnum <= newnum)
-                    MyAssertHandler(".\\server_mp\\sv_snapshot_mp.cpp", 1264, 0, "%s", "oldnum > newnum");
+                iassert(oldnum > newnum);
                 cachedClient = &svs.cachedSnapshotClients[svs.nextCachedSnapshotClients % 4096];
                 MSG_ReadDeltaClient(&msg, cachedFrame->time, 0, &cachedClient->cs, newnum);
                 v5 = MSG_ReadBit(&msg);
                 cachedClient->playerStateExists = v5;
                 if (cachedClient->playerStateExists)
                     MSG_ReadDeltaPlayerstate(0, &msg, cachedFrame->time, 0, &cachedClient->ps, 0);
-                if (svsHeaderValid)
-                    MyAssertHandler(".\\server_mp\\sv_snapshot_mp.cpp", 1273, 0, "%s", "!svsHeaderValid");
+                iassert(!svsHeaderValid);
                 if (++svs.nextCachedSnapshotClients >= 2147483646)
                     Com_Error(ERR_FATAL, "svs.nextCachedSnapshotClients wrapped");
                 ++cachedFrame->num_clients;
@@ -1168,8 +1154,7 @@ void __cdecl SV_AddEntitiesVisibleFromPoint(float *org, int clientNum, snapshotE
     int i; // [esp+34h] [ebp-Ch]
     uint8_t *clientpvs; // [esp+3Ch] [ebp-4h]
 
-    if (!SV_Loaded())
-        MyAssertHandler(".\\server_mp\\sv_snapshot_mp.cpp", 907, 0, "%s", "SV_Loaded()");
+    iassert(SV_Loaded());
     leafnum = CM_PointLeafnum(org);
     clientcluster = CM_LeafCluster(leafnum);
     if (clientcluster >= 0)
@@ -1264,8 +1249,7 @@ void __cdecl SV_AddCachedEntitiesVisibleFromPoint(
     int i; // [esp+112Ch] [ebp-8h]
     uint8_t *v16; // [esp+1130h] [ebp-4h]
 
-    if (!SV_Loaded())
-        MyAssertHandler(".\\server_mp\\sv_snapshot_mp.cpp", 1027, 0, "%s", "SV_Loaded()");
+    iassert(SV_Loaded());
     leafnum = CM_PointLeafnum(org);
     cluster = CM_LeafCluster(leafnum);
     if (cluster >= 0)
@@ -1335,10 +1319,8 @@ void __cdecl SV_SendMessageToClient(msg_t *msg, client_t *client)
     if (client->dropReason)
     {
         SV_DropClient(client, client->dropReason, 1);
-        if (client->dropReason)
-            MyAssertHandler(".\\server_mp\\sv_snapshot_mp.cpp", 1926, 0, "%s", "!client->dropReason");
-        if (client->header.state != 1)
-            MyAssertHandler(".\\server_mp\\sv_snapshot_mp.cpp", 1927, 0, "%s", "client->header.state == CS_ZOMBIE");
+        iassert(!client->dropReason);
+        iassert(client->header.state == CS_ZOMBIE);
     }
     client->frames[client->header.netchan.outgoingSequence & 0x1F].messageSize = compressedSize;
     client->frames[client->header.netchan.outgoingSequence & 0x1F].messageSent = Sys_Milliseconds();
@@ -1347,8 +1329,7 @@ void __cdecl SV_SendMessageToClient(msg_t *msg, client_t *client)
     SV_Netchan_Transmit(client, svCompressedBuf, compressedSize);
     if (client->header.state == 4 && client->header.deltaMessage >= 0 && lastFrame >= 29)
     {
-        if (client->snapshotBackoffCount < 0)
-            MyAssertHandler(".\\server_mp\\sv_snapshot_mp.cpp", 1951, 0, "%s", "client->snapshotBackoffCount >= 0");
+        iassert(client->snapshotBackoffCount >= 0);
         //v3 = _Pow_int<double>(2.0, client->snapshotBackoffCount);
         v3 = pow(2.0, (double)client->snapshotBackoffCount);
         client->nextSnapshotTime = svs.time + irand(0, (int)v3) * client->snapshotMsec;
@@ -1449,8 +1430,7 @@ void __cdecl SV_BeginClientSnapshot(client_t *client, msg_t *msg)
 
 void __cdecl SV_Download_Clear(client_t *cl)
 {
-    if (!cl)
-        MyAssertHandler(".\\server_mp\\sv_client_mp.cpp", 1711, 0, "%s", "cl");
+    iassert(cl);
     cl->downloading = 0;
     cl->download = 0;
     cl->downloadName[0] = 0;
@@ -1745,27 +1725,9 @@ void __cdecl SV_GetServerStaticHeader()
             "%s",
             "Vec3Compare( svs.mapCenter, svsHeader.mapCenter )");
     }
-    if (svsHeader.cachedSnapshotEntities != svs.cachedSnapshotEntities)
-        MyAssertHandler(
-            ".\\server_mp\\sv_snapshot_mp.cpp",
-            2176,
-            0,
-            "%s",
-            "svsHeader.cachedSnapshotEntities == svs.cachedSnapshotEntities");
-    if (svsHeader.cachedSnapshotClients != svs.cachedSnapshotClients)
-        MyAssertHandler(
-            ".\\server_mp\\sv_snapshot_mp.cpp",
-            2177,
-            0,
-            "%s",
-            "svsHeader.cachedSnapshotClients == svs.cachedSnapshotClients");
-    if (svsHeader.archivedSnapshotBuffer != svs.archivedSnapshotBuffer)
-        MyAssertHandler(
-            ".\\server_mp\\sv_snapshot_mp.cpp",
-            2178,
-            0,
-            "%s",
-            "svsHeader.archivedSnapshotBuffer == svs.archivedSnapshotBuffer");
+    iassert(svsHeader.cachedSnapshotEntities == svs.cachedSnapshotEntities);
+    iassert(svsHeader.cachedSnapshotClients == svs.cachedSnapshotClients);
+    iassert(svsHeader.archivedSnapshotBuffer == svs.archivedSnapshotBuffer);
     if ((serverStatic_t *)svsHeader.cachedSnapshotFrames != &svs)
         MyAssertHandler(
             ".\\server_mp\\sv_snapshot_mp.cpp",
@@ -1774,26 +1736,12 @@ void __cdecl SV_GetServerStaticHeader()
             "%s",
             "svsHeader.cachedSnapshotFrames == svs.cachedSnapshotFrames");
     svs.nextCachedSnapshotFrames = svsHeader.nextCachedSnapshotFrames;
-    if (svsHeader.nextArchivedSnapshotFrames != svs.nextArchivedSnapshotFrames)
-        MyAssertHandler(
-            ".\\server_mp\\sv_snapshot_mp.cpp",
-            2181,
-            0,
-            "%s",
-            "svsHeader.nextArchivedSnapshotFrames == svs.nextArchivedSnapshotFrames");
+    iassert(svsHeader.nextArchivedSnapshotFrames == svs.nextArchivedSnapshotFrames);
     svs.nextCachedSnapshotEntities = svsHeader.nextCachedSnapshotEntities;
     svs.nextCachedSnapshotClients = svsHeader.nextCachedSnapshotClients;
-    if (svsHeader.num_entities != sv.num_entities)
-        MyAssertHandler(".\\server_mp\\sv_snapshot_mp.cpp", 2184, 0, "%s", "svsHeader.num_entities == sv.num_entities");
-    if (svsHeader.maxclients != sv_maxclients->current.integer)
-        MyAssertHandler(
-            ".\\server_mp\\sv_snapshot_mp.cpp",
-            2185,
-            0,
-            "%s",
-            "svsHeader.maxclients == sv_maxclients->current.integer");
-    if (svsHeader.fps != sv_fps->current.integer)
-        MyAssertHandler(".\\server_mp\\sv_snapshot_mp.cpp", 2186, 0, "%s", "svsHeader.fps == sv_fps->current.integer");
+    iassert(svsHeader.num_entities == sv.num_entities);
+    iassert(svsHeader.maxclients == sv_maxclients->current.integer);
+    iassert(svsHeader.fps == sv_fps->current.integer);
     if (svsHeader.clientArchive != sv_clientArchive->current.color[0])
         MyAssertHandler(
             ".\\server_mp\\sv_snapshot_mp.cpp",
@@ -1801,17 +1749,9 @@ void __cdecl SV_GetServerStaticHeader()
             0,
             "%s",
             "svsHeader.clientArchive == (qboolean)sv_clientArchive->current.enabled");
-    if (svsHeader.gentities != sv.gentities)
-        MyAssertHandler(".\\server_mp\\sv_snapshot_mp.cpp", 2188, 0, "%s", "svsHeader.gentities == sv.gentities");
-    if (svsHeader.gentitySize != sv.gentitySize)
-        MyAssertHandler(".\\server_mp\\sv_snapshot_mp.cpp", 2189, 0, "%s", "svsHeader.gentitySize == sv.gentitySize");
-    if (svsHeader.firstClientState != G_GetClientState(0))
-        MyAssertHandler(
-            ".\\server_mp\\sv_snapshot_mp.cpp",
-            2190,
-            0,
-            "%s",
-            "svsHeader.firstClientState == G_GetClientState( 0 )");
+    iassert(svsHeader.gentities == sv.gentities);
+    iassert(svsHeader.gentitySize == sv.gentitySize);
+    iassert(svsHeader.firstClientState == G_GetClientState( 0 ));
     if ((gclient_s *)svsHeader.firstPlayerState != G_GetPlayerState(0))
         MyAssertHandler(
             ".\\server_mp\\sv_snapshot_mp.cpp",
@@ -1819,8 +1759,7 @@ void __cdecl SV_GetServerStaticHeader()
             0,
             "%s",
             "svsHeader.firstPlayerState == G_GetPlayerState( 0 )");
-    if (svsHeader.clientSize != G_GetClientSize())
-        MyAssertHandler(".\\server_mp\\sv_snapshot_mp.cpp", 2192, 0, "%s", "svsHeader.clientSize == G_GetClientSize()");
+    iassert(svsHeader.clientSize == G_GetClientSize());
     svsHeaderValid = 0;
 }
 
@@ -1828,8 +1767,7 @@ void __cdecl SV_WriteVoiceDataToClient(client_t *client, msg_t *msg)
 {
     int packet; // [esp+0h] [ebp-4h]
 
-    if (client->voicePacketCount <= 0)
-        MyAssertHandler(".\\server_mp\\sv_voice_mp.cpp", 30, 0, "%s", "client->voicePacketCount > 0");
+    iassert(client->voicePacketCount > 0);
     if (client->voicePacketCount > 40)
         MyAssertHandler(
             ".\\server_mp\\sv_voice_mp.cpp",
@@ -1841,13 +1779,11 @@ void __cdecl SV_WriteVoiceDataToClient(client_t *client, msg_t *msg)
     for (packet = 0; packet < client->voicePacketCount; ++packet)
     {
         MSG_WriteByte(msg, client->voicePackets[packet].talker);
-        if (client->voicePackets[packet].dataSize >= 0x10000)
-            MyAssertHandler(".\\server_mp\\sv_voice_mp.cpp", 40, 0, "%s", "client->voicePackets[packet].dataSize < (2<<15)");
+        iassert(client->voicePackets[packet].dataSize < (2<<15));
         MSG_WriteByte(msg, client->voicePackets[packet].dataSize);
         MSG_WriteData(msg, client->voicePackets[packet].data, client->voicePackets[packet].dataSize);
     }
-    if (msg->overflowed)
-        MyAssertHandler(".\\server_mp\\sv_voice_mp.cpp", 50, 0, "%s", "!msg->overflowed");
+    iassert(!msg->overflowed);
 }
 
 void __cdecl SV_SendClientVoiceData(client_t *client)
@@ -1859,15 +1795,12 @@ void __cdecl SV_SendClientVoiceData(client_t *client)
     //LargeLocal::LargeLocal(&msg_buf_large_local, 0x20000);
     //msg_buf = LargeLocal::GetBuf(&msg_buf_large_local);
     msg_buf = msg_buf_large_local.GetBuf();
-    if (client->voicePacketCount < 0)
-        MyAssertHandler(".\\server_mp\\sv_voice_mp.cpp", 66, 0, "%s", "client->voicePacketCount >= 0");
+    iassert(client->voicePacketCount >= 0);
     if (client->header.state == 4 && client->voicePacketCount)
     {
         MSG_Init(&msg, msg_buf, 0x20000);
-        if (msg.cursize)
-            MyAssertHandler(".\\server_mp\\sv_voice_mp.cpp", 75, 0, "%s", "msg.cursize == 0");
-        if (msg.bit)
-            MyAssertHandler(".\\server_mp\\sv_voice_mp.cpp", 76, 0, "%s", "msg.bit == 0");
+        iassert(msg.cursize == 0);
+        iassert(msg.bit == 0);
         MSG_WriteString(&msg, "v");
         SV_WriteVoiceDataToClient(client, &msg);
         if (msg.overflowed)
@@ -2009,8 +1942,7 @@ void __cdecl SV_SendClientMessages()
         }
         else
         {
-            if (!svs.archivedSnapshotFrames)
-                MyAssertHandler(".\\server_mp\\sv_snapshot_mp.cpp", 2415, 0, "%s", "svs.archivedSnapshotFrames");
+            iassert(svs.archivedSnapshotFrames);
             frame = &svs.archivedSnapshotFrames[svs.nextArchivedSnapshotFrames % 1200];
             frame->start = svs.nextArchivedSnapshotBuffer;
             frame->size = g_archiveMsg.cursize;

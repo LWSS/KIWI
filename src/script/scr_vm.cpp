@@ -147,18 +147,15 @@ int __cdecl Scr_GetFunctionHandle(const char* filename, const char* name)
     uint nameId; // [esp+3Ch] [ebp-8h]
     uint id; // [esp+40h] [ebp-4h]
 
-    if (!scrCompilePub.scripts)
-        MyAssertHandler(".\\script\\scr_main.cpp", 69, 0, "%s", "scrCompilePub.scripts");
-    if (strlen(filename) >= 0x40)
-        MyAssertHandler(".\\script\\scr_main.cpp", 70, 0, "%s", "strlen( filename ) < MAX_QPATH");
+    iassert(scrCompilePub.scripts);
+    iassert(strlen( filename ) < MAX_QPATH);
     name2 = Scr_CreateCanonicalFilename(filename);
     fileId = FindVariable(scrCompilePub.scripts, name2);
     SL_RemoveRefToString(name2);
     if (!fileId)
         return 0;
     id = FindObject(fileId);
-    if (!id)
-        MyAssertHandler(".\\script\\scr_main.cpp", 80, 0, "%s", "id");
+    iassert(id);
     str = SL_FindLowercaseString(name);
     if (!str)
         return 0;
@@ -168,11 +165,9 @@ int __cdecl Scr_GetFunctionHandle(const char* filename, const char* name)
     if (GetValueType(nameId) != 1)
         return 0;
     threadId = FindObject(nameId);
-    if (!threadId)
-        MyAssertHandler(".\\script\\scr_main.cpp", 92, 0, "%s", "threadId");
+    iassert(threadId);
     posId = FindVariable(threadId, 1u);
-    if (!posId)
-        MyAssertHandler(".\\script\\scr_main.cpp", 95, 0, "%s", "posId");
+    iassert(posId);
     v3 = Scr_EvalVariable(posId);
     if (v3.type != 7 && v3.type != 12)
         MyAssertHandler(
@@ -216,8 +211,7 @@ void __cdecl Scr_ClearErrorMessage()
 
 void __cdecl Scr_Init()
 {
-    if (scrVarPub.bInited)
-        MyAssertHandler(".\\script\\scr_vm.cpp", 169, 0, "%s", "!scrVarPub.bInited");
+    iassert(!scrVarPub.bInited);
     Scr_InitClassMap();
     Scr_VM_Init();
     scrCompilePub.script_loading = 0;
@@ -553,8 +547,7 @@ char* __cdecl Scr_GetNextCodepos(VariableValue* top, const char* pos, int opcode
                 pos += 2;
                 if (scrVarPub.error_message)
                     goto LABEL_67;
-                if (value.type != 6)
-                    MyAssertHandler(".\\script\\scr_vm.cpp", 2452, 0, "%s", "value.type == VAR_INTEGER");
+                iassert(value.type == VAR_INTEGER);
                 if (value.u.intValue)
                     return (char*)pos;
                 else
@@ -570,8 +563,7 @@ char* __cdecl Scr_GetNextCodepos(VariableValue* top, const char* pos, int opcode
                 pos += 2;
                 if (scrVarPub.error_message)
                     goto LABEL_67;
-                if (value.type != 6)
-                    MyAssertHandler(".\\script\\scr_vm.cpp", 2468, 0, "%s", "value.type == VAR_INTEGER");
+                iassert(value.type == VAR_INTEGER);
                 if (value.u.intValue)
                     return (char*)&pos[v13];
                 else
@@ -600,8 +592,7 @@ char* __cdecl Scr_GetNextCodepos(VariableValue* top, const char* pos, int opcode
                 }
                 if (!v12)
                     return (char*)posa;
-                if (!caseValue)
-                    MyAssertHandler(".\\script\\scr_vm.cpp", 2516, 0, "%s", "caseValue");
+                iassert(caseValue);
                 break;
             case 125:
                 return (char*)&pos[8 * *(uint16_t*)pos + 2];
@@ -674,8 +665,7 @@ void __cdecl VM_CancelNotifyInternal(
     uint Variable; // eax
     uint v6; // eax
 
-    if (stringValue != Scr_GetThreadNotifyName(startLocalId))
-        MyAssertHandler(".\\script\\scr_vm.cpp", 2724, 0, "%s", "stringValue == Scr_GetThreadNotifyName( startLocalId )");
+    iassert(stringValue == Scr_GetThreadNotifyName( startLocalId ));
     Variable = FindVariable(notifyListOwnerId, 0x18000u);
     if (notifyListId != FindObject(Variable))
         MyAssertHandler(
@@ -713,11 +703,7 @@ bool __cdecl Scr_IsEndonThread(uint localId)
         return 0;
     stackId = Scr_GetWaittillThreadStackId(localId, localId);
     type = GetValueType(stackId);
-    if (type)
-    {
-        if (type != 10)
-            MyAssertHandler(".\\script\\scr_vm.cpp", 3348, 0, "%s", "(type == VAR_UNDEFINED) || (type == VAR_STACK)");
-    }
+    iassert((type == VAR_UNDEFINED) || (type == VAR_STACK));
     return type == 0;
 }
 
@@ -735,8 +721,7 @@ uint __cdecl Scr_GetWaittillThreadStackId(uint localId, uint startLocalId)
     VariableValueInternal_u notifyListId; // [esp+8h] [ebp-10h]
     uint selfId; // [esp+14h] [ebp-4h]
 
-    if (!scrVarPub.developer)
-        MyAssertHandler(".\\script\\scr_vm.cpp", 3318, 0, "%s", "scrVarPub.developer");
+    iassert(scrVarPub.developer);
     ThreadNotifyName = Scr_GetThreadNotifyName(startLocalId);
     stringValue = ThreadNotifyName;
     if (!ThreadNotifyName)
@@ -762,8 +747,7 @@ const char* __cdecl Scr_GetThreadPos(uint localId)
     uint stackId; // [esp+8h] [ebp-8h]
     uint startLocalId; // [esp+Ch] [ebp-4h]
 
-    if (!scrVarPub.developer)
-        MyAssertHandler(".\\script\\scr_vm.cpp", 3386, 0, "%s", "scrVarPub.developer");
+    iassert(scrVarPub.developer);
     startLocalId = GetStartLocalId(localId);
     ObjectType = GetObjectType(startLocalId);
     switch (ObjectType)
@@ -772,8 +756,7 @@ const char* __cdecl Scr_GetThreadPos(uint localId)
         return Scr_GetRunningThreadPos(localId);
     case 0xFu:
         stackId = Scr_GetWaittillThreadStackId(localId, startLocalId);
-        if (!stackId)
-            MyAssertHandler(".\\script\\scr_vm.cpp", 3396, 0, "%s", "stackId");
+        iassert(stackId);
         if (GetValueType(stackId) != 10)
         {
             ValueType = GetValueType(stackId);
@@ -788,8 +771,7 @@ const char* __cdecl Scr_GetThreadPos(uint localId)
         goto LABEL_21;
     case 0x10u:
         stackId = Scr_GetWaitThreadStackId(localId, startLocalId);
-        if (!stackId)
-            MyAssertHandler(".\\script\\scr_vm.cpp", 3402, 0, "%s", "stackId");
+        iassert(stackId);
         if (GetValueType(stackId) != 10)
         {
             v3 = GetValueType(stackId);
@@ -821,11 +803,9 @@ const char* __cdecl Scr_GetStackThreadPos(uint endLocalId, VariableStackBuffer* 
     uint parentLocalId; // [esp+14h] [ebp-Ch]
     VariableUnion u; // [esp+18h] [ebp-8h]
 
-    if (!scrVarPub.developer)
-        MyAssertHandler(".\\script\\scr_vm.cpp", 3009, 0, "%s", "scrVarPub.developer");
+    iassert(scrVarPub.developer);
     startLocalId = GetStartLocalId(endLocalId);
-    if (!startLocalId)
-        MyAssertHandler(".\\script\\scr_vm.cpp", 3012, 0, "%s", "startLocalId");
+    iassert(startLocalId);
     size = stackValue->size;
     localId = stackValue->localId;
     buf = &stackValue->buf[5 * size];
@@ -841,15 +821,13 @@ const char* __cdecl Scr_GetStackThreadPos(uint endLocalId, VariableStackBuffer* 
             parentLocalId = GetParentLocalId(localId);
             if (localId == endLocalId)
             {
-                if (startLocalId == localId)
-                    MyAssertHandler(".\\script\\scr_vm.cpp", 3044, 0, "%s", "startLocalId != localId");
+                iassert(startLocalId != localId);
                 break;
             }
             if (killThread)
                 Scr_DebugKillThread(localId, pos);
             localId = parentLocalId;
-            if (!u.codePosValue)
-                MyAssertHandler(".\\script\\scr_vm.cpp", 3039, 0, "%s", "u.codePosValue");
+            iassert(u.codePosValue);
             pos = (const char*)u.intValue;
         }
     }
@@ -864,10 +842,8 @@ const char* __cdecl Scr_GetRunningThreadPos(uint localId)
 {
     int function_count; // [esp+4h] [ebp-8h]
 
-    if (!scrVarPub.developer)
-        MyAssertHandler(".\\script\\scr_vm.cpp", 3177, 0, "%s", "scrVarPub.developer");
-    if (!scrVmPub.function_count)
-        MyAssertHandler(".\\script\\scr_vm.cpp", 3179, 0, "%s", "scrVmPub.function_count");
+    iassert(scrVarPub.developer);
+    iassert(scrVmPub.function_count);
     for (function_count = scrVmPub.function_count; function_count; --function_count)
     {
         if (scrVmPub.function_frame_start[function_count].fs.localId == localId)
@@ -886,8 +862,7 @@ uint __cdecl Scr_GetWaitThreadStackId(uint localId, uint startLocalId)
     uint time; // [esp+0h] [ebp-8h]
     VariableValueInternal_u id; // [esp+4h] [ebp-4h]
 
-    if (!scrVarPub.developer)
-        MyAssertHandler(".\\script\\scr_vm.cpp", 3231, 0, "%s", "scrVarPub.developer");
+    iassert(scrVarPub.developer);
     time = Scr_GetThreadWaitTime(startLocalId);
     Variable = FindVariable(scrVarPub.timeArrayId, time);
     id = FindObject(Variable);
@@ -913,10 +888,8 @@ void __cdecl Scr_NotifyNum(
     varUsagePos = scrVarPub.varUsagePos;
     if (!scrVarPub.varUsagePos)
         scrVarPub.varUsagePos = "<script notify variable>";
-    if (!scrVarPub.timeArrayId)
-        MyAssertHandler(".\\script\\scr_vm.cpp", 3670, 0, "%s", "scrVarPub.timeArrayId");
-    if (paramcount > scrVmPub.inparamcount)
-        MyAssertHandler(".\\script\\scr_vm.cpp", 3671, 0, "%s", "paramcount <= scrVmPub.inparamcount");
+    iassert(scrVarPub.timeArrayId);
+    iassert(paramcount <= scrVmPub.inparamcount);
     Scr_ClearOutParams();
     startTop = &scrVmPub.top[-(int)paramcount];
     paramcounta = scrVmPub.inparamcount - paramcount;
@@ -929,8 +902,7 @@ void __cdecl Scr_NotifyNum(
             scrVmPub.inparamcount = 0;
             Scr_CheckBreakonNotify(id, stringValue, scrVmPub.top, 0, 0);
             scrVmPub.top = top;
-            if (scrVmPub.outparamcount)
-                MyAssertHandler(".\\script\\scr_vm.cpp", 3690, 0, "%s", "!scrVmPub.outparamcount");
+            iassert(!scrVmPub.outparamcount);
         }
         type = startTop->type;
         startTop->type = VAR_PRECODEPOS;
@@ -944,8 +916,7 @@ void __cdecl Scr_NotifyNum(
         --scrVmPub.top;
     }
     scrVmPub.inparamcount = paramcounta;
-    if (scrVmPub.outparamcount)
-        MyAssertHandler(".\\script\\scr_vm.cpp", 3708, 0, "%s", "!scrVmPub.outparamcount");
+    iassert(!scrVmPub.outparamcount);
     scrVarPub.varUsagePos = varUsagePos;
     SL_CheckExists(stringValue);
 }
@@ -1233,10 +1204,8 @@ void __cdecl Scr_TerminateWaitThread(uint localId, uint startLocalId)
     Variable = FindVariable(scrVarPub.timeArrayId, time);
     id = FindObject(Variable);
     stackId = FindObjectVariable(id, startLocalId);
-    if (!stackId)
-        MyAssertHandler(".\\script\\scr_vm.cpp", 3208, 0, "%s", "stackId");
-    if (GetValueType(stackId) != 10)
-        MyAssertHandler(".\\script\\scr_vm.cpp", 3209, 0, "%s", "GetValueType( stackId ) == VAR_STACK");
+    iassert(stackId);
+    iassert(GetValueType( stackId ) == VAR_STACK);
     stackValue = GetVariableValueAddress(stackId)->u.stackValue;
     if (scrVarPub.developer)
         Scr_GetStackThreadPos(localId, stackValue, 1);
@@ -1260,8 +1229,7 @@ void __cdecl VM_TerminateStack(uint endLocalId, uint startLocalId, VariableStack
     const char* u; // [esp+14h] [ebp-10h]
     VariableValue tempValue; // [esp+1Ch] [ebp-8h] BYREF
 
-    if (!startLocalId)
-        MyAssertHandler(".\\script\\scr_vm.cpp", 2932, 0, "%s", "startLocalId");
+    iassert(startLocalId);
     size = stackValue->size;
     localId = stackValue->localId;
     buf = &stackValue->buf[5 * size];
@@ -1278,8 +1246,7 @@ void __cdecl VM_TerminateStack(uint endLocalId, uint startLocalId, VariableStack
             RemoveRefToObject(localId);
             if (localId == endLocalId)
             {
-                if (startLocalId == localId)
-                    MyAssertHandler(".\\script\\scr_vm.cpp", 2963, 0, "%s", "startLocalId != localId");
+                iassert(startLocalId != localId);
                 sizea = size + 1;
                 *buf = 0;
                 if (stackValue->size < sizea)
@@ -1305,10 +1272,8 @@ void __cdecl VM_TerminateStack(uint endLocalId, uint startLocalId, VariableStack
             RemoveRefToValue(*(uint8_t*)buf, (VariableUnion)u);
         }
     }
-    if (localId != endLocalId)
-        MyAssertHandler(".\\script\\scr_vm.cpp", 2984, 0, "%s", "localId == endLocalId");
-    if (startLocalId != localId)
-        MyAssertHandler(".\\script\\scr_vm.cpp", 2985, 0, "%s", "startLocalId == localId");
+    iassert(localId == endLocalId);
+    iassert(startLocalId == localId);
     Scr_KillThread(localId);
     RemoveRefToObject(localId);
     --scrVarPub.numScriptThreads;
@@ -1346,10 +1311,8 @@ void __cdecl Scr_TerminateWaittillThread(uint localId, uint startLocalId)
         v6 = FindVariable(notifyListId, stringValue);
         notifyNameListId = FindObject(v6);
         stackId = FindObjectVariable(notifyNameListId, startLocalId);
-        if (!stackId)
-            MyAssertHandler(".\\script\\scr_vm.cpp", 3276, 0, "%s", "stackId");
-        if (GetValueType(stackId) != 10)
-            MyAssertHandler(".\\script\\scr_vm.cpp", 3277, 0, "%s", "GetValueType( stackId ) == VAR_STACK");
+        iassert(stackId);
+        iassert(GetValueType( stackId ) == VAR_STACK);
         stackValue = (VariableStackBuffer*)GetVariableValueAddress(stackId)->u.intValue;
         if (scrVarPub.developer)
             Scr_GetStackThreadPos(localId, stackValue, 1);
@@ -1539,11 +1502,9 @@ VariableStackBuffer *__cdecl VM_ArchiveStack()
 
     top = fs.top;
     size = fs.top - fs.startTop;
-    if (size != (uint16_t)size)
-        MyAssertHandler(".\\script\\scr_vm.cpp", 2768, 0, "%s", "size == (unsigned short)size");
+    iassert(size == (unsigned short)size);
     bufLen = 5 * size + 11;
-    if (bufLen != (uint16_t)bufLen)
-        MyAssertHandler(".\\script\\scr_vm.cpp", 2770, 0, "%s", "bufLen == (unsigned short)bufLen");
+    iassert(bufLen == (unsigned short)bufLen);
     stackValue = (VariableStackBuffer*) MT_Alloc(bufLen, MT_TYPE_THREAD);
     ++scrVarPub.numScriptThreads;
     localId = fs.localId;
@@ -2669,8 +2630,7 @@ CallBuiltinMethod:
                     Scr_GetFileAndLine(fs.pos, &scrVmGlob.lastFileName, &scrVmGlob.lastLine);
                 if (scrVmDebugPub.func_table[builtinIndex].breakpointCount)
                 {
-                    if (scrVmPub.top != fs.top - 1)
-                        MyAssertHandler(".\\script\\scr_vm.cpp", 1084, 0, "%s", "scrVmPub.top == fs.top - 1");
+                    iassert(scrVmPub.top == fs.top - 1);
                     uint backup = scrVmPub.outparamcount;
                     Scr_HitBuiltinBreakpoint(fs.top, fs.pos, fs.localId, opcode, builtinIndex, scrVmPub.outparamcount + 1);
                     scrVmPub.outparamcount = scrVmPub.outparamcount;
@@ -3582,13 +3542,10 @@ uint16_t __cdecl Scr_ExecEntThreadNum(
         //Profile_Begin(332);
         Scr_ResetTimeout();
     }
-    if (!scrVarPub.timeArrayId)
-        MyAssertHandler(".\\script\\scr_vm.cpp", 4093, 0, "%s", "scrVarPub.timeArrayId");
-    if (!handle)
-        MyAssertHandler(".\\script\\scr_vm.cpp", 4094, 0, "%s", "handle");
+    iassert(scrVarPub.timeArrayId);
+    iassert(handle);
     ++scrVarPub.ext_threadcount;
-    if (!Scr_IsInOpcodeMemory(pos))
-        MyAssertHandler(".\\script\\scr_vm.cpp", 4100, 0, "%s", "Scr_IsInOpcodeMemory( pos )");
+    iassert(Scr_IsInOpcodeMemory( pos ));
     varUsagePos = scrVarPub.varUsagePos;
     scrVarPub.varUsagePos = pos + 1;
     objId = Scr_GetEntityId(entnum, classnum);
@@ -3626,12 +3583,9 @@ void __cdecl Scr_AddExecThread(int handle, uint paramcount)
         //Profile_Begin(332);
         Scr_ResetTimeout();
     }
-    if (!scrVarPub.timeArrayId)
-        MyAssertHandler(".\\script\\scr_vm.cpp", 4155, 0, "%s", "scrVarPub.timeArrayId");
-    if (!handle)
-        MyAssertHandler(".\\script\\scr_vm.cpp", 4156, 0, "%s", "handle");
-    if (!Scr_IsInOpcodeMemory(pos))
-        MyAssertHandler(".\\script\\scr_vm.cpp", 4158, 0, "%s", "Scr_IsInOpcodeMemory( pos )");
+    iassert(scrVarPub.timeArrayId);
+    iassert(handle);
+    iassert(Scr_IsInOpcodeMemory( pos ));
     varUsagePos = scrVarPub.varUsagePos;
     scrVarPub.varUsagePos = pos + 1;
     AddRefToObject(scrVarPub.levelId);
@@ -3651,10 +3605,8 @@ void __cdecl Scr_AddExecThread(int handle, uint paramcount)
 
 void __cdecl Scr_FreeThread(uint16_t handle)
 {
-    if (!scrVarPub.timeArrayId)
-        MyAssertHandler(".\\script\\scr_vm.cpp", 4236, 0, "%s", "scrVarPub.timeArrayId");
-    if (!handle)
-        MyAssertHandler(".\\script\\scr_vm.cpp", 4237, 0, "%s", "handle");
+    iassert(scrVarPub.timeArrayId);
+    iassert(handle);
     if (scrVarDebugPub)
         --scrVarDebugPub->extRefCount[handle];
     RemoveRefToObject(handle);
@@ -3666,16 +3618,11 @@ void __cdecl Scr_ExecCode(const char *pos, uint localId)
     uint localIda; // [esp+Ch] [ebp+Ch]
 
     Scr_ResetTimeout();
-    if (!scrVarPub.timeArrayId)
-        MyAssertHandler(".\\script\\scr_vm.cpp", 4256, 0, "%s", "scrVarPub.timeArrayId");
-    if (scrVmPub.inparamcount)
-        MyAssertHandler(".\\script\\scr_vm.cpp", 4257, 0, "%s", "!scrVmPub.inparamcount");
-    if (scrVmPub.outparamcount)
-        MyAssertHandler(".\\script\\scr_vm.cpp", 4258, 0, "%s", "!scrVmPub.outparamcount");
-    if (scrVarPub.evaluate)
-        MyAssertHandler(".\\script\\scr_vm.cpp", 4260, 0, "%s", "!scrVarPub.evaluate");
-    if (scrVmPub.debugCode)
-        MyAssertHandler(".\\script\\scr_vm.cpp", 4262, 0, "%s", "!scrVmPub.debugCode");
+    iassert(scrVarPub.timeArrayId);
+    iassert(!scrVmPub.inparamcount);
+    iassert(!scrVmPub.outparamcount);
+    iassert(!scrVarPub.evaluate);
+    iassert(!scrVmPub.debugCode);
     scrVmPub.debugCode = 1;
     if (localId)
     {
@@ -3689,13 +3636,10 @@ void __cdecl Scr_ExecCode(const char *pos, uint localId)
         Scr_KillThread(localIda);
         RemoveRefToObject(localIda);
     }
-    if (!scrVmPub.debugCode)
-        MyAssertHandler(".\\script\\scr_vm.cpp", 4278, 0, "%s", "scrVmPub.debugCode");
+    iassert(scrVmPub.debugCode);
     scrVmPub.debugCode = 0;
-    if (scrVmPub.inparamcount != 1)
-        MyAssertHandler(".\\script\\scr_vm.cpp", 4281, 0, "%s", "scrVmPub.inparamcount == 1");
-    if (scrVmPub.outparamcount)
-        MyAssertHandler(".\\script\\scr_vm.cpp", 4282, 0, "%s", "!scrVmPub.outparamcount");
+    iassert(scrVmPub.inparamcount == 1);
+    iassert(!scrVmPub.outparamcount);
     if (scrVmPub.function_count)
     {
         --scrVmPub.function_count;
@@ -3707,36 +3651,28 @@ void __cdecl Scr_ExecCode(const char *pos, uint localId)
 
 void __cdecl Scr_InitSystem(int sys)
 {
-    if (sys != 1)
-        MyAssertHandler(".\\script\\scr_vm.cpp", 4319, 0, "%s", "sys == SCR_SYS_GAME");
-    if (scrVarPub.timeArrayId)
-        MyAssertHandler(".\\script\\scr_vm.cpp", 4320, 0, "%s", "!scrVarPub.timeArrayId");
-    if (scrVarPub.ext_threadcount)
-        MyAssertHandler(".\\script\\scr_vm.cpp", 4322, 0, "%s", "!scrVarPub.ext_threadcount");
-    if (scrVarPub.varUsagePos)
-        MyAssertHandler(".\\script\\scr_vm.cpp", 4326, 0, "%s", "!scrVarPub.varUsagePos");
+    iassert(sys == SCR_SYS_GAME);
+    iassert(!scrVarPub.timeArrayId);
+    iassert(!scrVarPub.ext_threadcount);
+    iassert(!scrVarPub.varUsagePos);
     scrVarPub.varUsagePos = "<script init variable>";
     memset((uint8_t*)scrVmDebugPub.profileEnable, 0, sizeof(scrVmDebugPub.profileEnable));
     scrVarPub.timeArrayId = AllocObject();
     if (scrVarDebugPub)
         ++scrVarDebugPub->extRefCount[scrVarPub.timeArrayId];
-    if (scrVarPub.pauseArrayId)
-        MyAssertHandler(".\\script\\scr_vm.cpp", 4340, 0, "%s", "!scrVarPub.pauseArrayId");
+    iassert(!scrVarPub.pauseArrayId);
     scrVarPub.pauseArrayId = Scr_AllocArray();
     if (scrVarDebugPub)
         ++scrVarDebugPub->extRefCount[scrVarPub.pauseArrayId];
-    if (scrVarPub.levelId)
-        MyAssertHandler(".\\script\\scr_vm.cpp", 4347, 0, "%s", "!scrVarPub.levelId");
+    iassert(!scrVarPub.levelId);
     scrVarPub.levelId = AllocObject();
     if (scrVarDebugPub)
         ++scrVarDebugPub->extRefCount[scrVarPub.levelId];
-    if (scrVarPub.animId)
-        MyAssertHandler(".\\script\\scr_vm.cpp", 4354, 0, "%s", "!scrVarPub.animId");
+    iassert(!scrVarPub.animId);
     scrVarPub.animId = AllocObject();
     if (scrVarDebugPub)
         ++scrVarDebugPub->extRefCount[scrVarPub.animId];
-    if (scrVarPub.freeEntList)
-        MyAssertHandler(".\\script\\scr_vm.cpp", 4361, 0, "%s", "!scrVarPub.freeEntList");
+    iassert(!scrVarPub.freeEntList);
     scrVarPub.time = 0;
     g_script_error_level = -1;
     Scr_InitDebuggerSystem();
@@ -3781,37 +3717,31 @@ void __cdecl Scr_ShutdownSystem(uint8_t sys, int bComplete)
             Scr_CancelNotifyList(parentId.stringValue);
             RemoveRefToObject(parentId.stringValue);
         }
-        if (!scrVarPub.levelId)
-            MyAssertHandler(".\\script\\scr_vm.cpp", 4424, 0, "%s", "scrVarPub.levelId");
+        iassert(scrVarPub.levelId);
         ClearObject(scrVarPub.levelId);
         if (scrVarDebugPub)
             --scrVarDebugPub->extRefCount[scrVarPub.levelId];
         RemoveRefToEmptyObject(scrVarPub.levelId);
         scrVarPub.levelId = 0;
-        if (!scrVarPub.animId)
-            MyAssertHandler(".\\script\\scr_vm.cpp", 4433, 0, "%s", "scrVarPub.animId");
+        iassert(scrVarPub.animId);
         ClearObject(scrVarPub.animId);
         if (scrVarDebugPub)
             --scrVarDebugPub->extRefCount[scrVarPub.animId];
         RemoveRefToEmptyObject(scrVarPub.animId);
         scrVarPub.animId = 0;
-        if (!scrVarPub.timeArrayId)
-            MyAssertHandler(".\\script\\scr_vm.cpp", 4442, 0, "%s", "scrVarPub.timeArrayId");
+        iassert(scrVarPub.timeArrayId);
         ClearObject(scrVarPub.timeArrayId);
         if (scrVarDebugPub)
             --scrVarDebugPub->extRefCount[scrVarPub.timeArrayId];
         RemoveRefToEmptyObject(scrVarPub.timeArrayId);
         scrVarPub.timeArrayId = 0;
-        if (!scrVarPub.pauseArrayId)
-            MyAssertHandler(".\\script\\scr_vm.cpp", 4451, 0, "%s", "scrVarPub.pauseArrayId");
-        if (GetArraySize(scrVarPub.pauseArrayId))
-            MyAssertHandler(".\\script\\scr_vm.cpp", 4452, 0, "%s", "!GetArraySize( scrVarPub.pauseArrayId )");
+        iassert(scrVarPub.pauseArrayId);
+        iassert(!GetArraySize( scrVarPub.pauseArrayId ));
         if (scrVarDebugPub)
             --scrVarDebugPub->extRefCount[scrVarPub.pauseArrayId];
         RemoveRefToEmptyObject(scrVarPub.pauseArrayId);
         scrVarPub.pauseArrayId = 0;
-        if (scrVarPub.freeEntList)
-            MyAssertHandler(".\\script\\scr_vm.cpp", 4460, 0, "%s", "!scrVarPub.freeEntList");
+        iassert(!scrVarPub.freeEntList);
         Scr_FreeObjects();
         scrVarPub.varUsagePos = 0;
         if (function_count)
@@ -3823,10 +3753,8 @@ void __cdecl Scr_ShutdownSystem(uint8_t sys, int bComplete)
         }
         else
         {
-            if (scrVarPub.ext_threadcount)
-                MyAssertHandler(".\\script\\scr_vm.cpp", 4471, 0, "%s", "!scrVarPub.ext_threadcount");
-            if (!Scr_IsStackClear())
-                MyAssertHandler(".\\script\\scr_vm.cpp", 4473, 0, "%s", "Scr_IsStackClear()");
+            iassert(!scrVarPub.ext_threadcount);
+            iassert(Scr_IsStackClear());
         }
     }
     else
@@ -3841,10 +3769,8 @@ void __cdecl VM_TerminateTime(uint timeId)
     uint stackId; // [esp+4h] [ebp-8h]
     uint startLocalId; // [esp+8h] [ebp-4h]
 
-    if (!timeId)
-        MyAssertHandler(".\\script\\scr_vm.cpp", 3793, 0, "%s", "timeId");
-    if (scrVmPub.function_count)
-        MyAssertHandler(".\\script\\scr_vm.cpp", 3794, 0, "%s", "!scrVmPub.function_count");
+    iassert(timeId);
+    iassert(!scrVmPub.function_count);
     AddRefToObject(timeId);
     while (1)
     {
@@ -3852,10 +3778,8 @@ void __cdecl VM_TerminateTime(uint timeId)
         if (!stackId)
             break;
         startLocalId = GetVariableKeyObject(stackId);
-        if (!startLocalId)
-            MyAssertHandler(".\\script\\scr_vm.cpp", 3803, 0, "%s", "startLocalId");
-        if (GetValueType(stackId) != 10)
-            MyAssertHandler(".\\script\\scr_vm.cpp", 3805, 0, "%s", "GetValueType( stackId ) == VAR_STACK");
+        iassert(startLocalId);
+        iassert(GetValueType( stackId ) == VAR_STACK);
         stackValue = (VariableStackBuffer*)GetVariableValueAddress(stackId)->u.intValue;
         RemoveObjectVariable(timeId, startLocalId);
         Scr_ClearWaitTime(startLocalId);
@@ -4293,18 +4217,13 @@ void __cdecl Scr_AddUndefined()
 
 void __cdecl Scr_AddObject(uint id)
 {
-    if (!id)
-        MyAssertHandler(".\\script\\scr_vm.cpp", 4891, 0, "%s", "id");
-    if (GetObjectType(id) == 14)
-        MyAssertHandler(".\\script\\scr_vm.cpp", 4894, 0, "%s", "GetObjectType( id ) != VAR_THREAD");
+    iassert(id);
+    iassert(GetObjectType( id ) != VAR_THREAD);
     if (GetObjectType(id) == 15)
         MyAssertHandler(".\\script\\scr_vm.cpp", 4895, 0, "%s", "GetObjectType( id ) != VAR_NOTIFY_THREAD");
-    if (GetObjectType(id) == 16)
-        MyAssertHandler(".\\script\\scr_vm.cpp", 4896, 0, "%s", "GetObjectType( id ) != VAR_TIME_THREAD");
-    if (GetObjectType(id) == 17)
-        MyAssertHandler(".\\script\\scr_vm.cpp", 4897, 0, "%s", "GetObjectType( id ) != VAR_CHILD_THREAD");
-    if (GetObjectType(id) == 22)
-        MyAssertHandler(".\\script\\scr_vm.cpp", 4898, 0, "%s", "GetObjectType( id ) != VAR_DEAD_THREAD");
+    iassert(GetObjectType( id ) != VAR_TIME_THREAD);
+    iassert(GetObjectType( id ) != VAR_CHILD_THREAD);
+    iassert(GetObjectType( id ) != VAR_DEAD_THREAD);
     IncInParam();
     scrVmPub.top->type = VAR_POINTER;
     scrVmPub.top->u.intValue = id;
@@ -4335,8 +4254,7 @@ void __cdecl Scr_AddStruct()
 
 void __cdecl Scr_AddString(const char* value)
 {
-    if (!value)
-        MyAssertHandler(".\\script\\scr_vm.cpp", 4946, 0, "%s", "value");
+    iassert(value);
     IncInParam();
     scrVmPub.top->type = VAR_STRING;
     scrVmPub.top->u.intValue = SL_GetString(value, 0);
@@ -4344,8 +4262,7 @@ void __cdecl Scr_AddString(const char* value)
 
 void __cdecl Scr_AddIString(const char* value)
 {
-    if (!value)
-        MyAssertHandler(".\\script\\scr_vm.cpp", 4956, 0, "%s", "value");
+    iassert(value);
     IncInParam();
     scrVmPub.top->type = VAR_ISTRING;
     scrVmPub.top->u.intValue = SL_GetString(value, 0);
@@ -4353,8 +4270,7 @@ void __cdecl Scr_AddIString(const char* value)
 
 void __cdecl Scr_AddConstString(uint value)
 {
-    if (!value)
-        MyAssertHandler(".\\script\\scr_vm.cpp", 4966, 0, "%s", "value");
+    iassert(value);
     IncInParam();
     scrVmPub.top->type = VAR_STRING;
     scrVmPub.top->u.intValue = value;
@@ -4398,12 +4314,10 @@ void __cdecl Scr_AddArrayStringIndexed(uint stringValue)
 {
     uint id; // [esp+0h] [ebp-4h]
 
-    if (!scrVmPub.inparamcount)
-        MyAssertHandler(".\\script\\scr_vm.cpp", 5019, 0, "%s", "scrVmPub.inparamcount");
+    iassert(scrVmPub.inparamcount);
     --scrVmPub.top;
     --scrVmPub.inparamcount;
-    if (scrVmPub.top->type != 1)
-        MyAssertHandler(".\\script\\scr_vm.cpp", 5022, 0, "%s", "scrVmPub.top->type == VAR_POINTER");
+    iassert(scrVmPub.top->type == VAR_POINTER);
     id = GetNewVariable(scrVmPub.top->u.stringValue, stringValue);
     SetNewVariableValue(id, scrVmPub.top + 1);
 }
@@ -4444,8 +4358,7 @@ void __cdecl Scr_NeverTerminalError(const char* error)
 
 void __cdecl Scr_ParamError(uint index, const char* error)
 {
-    if (index >= scrVmPub.outparamcount)
-        MyAssertHandler(".\\script\\scr_vm.cpp", 5078, 0, "%s", "index < scrVmPub.outparamcount");
+    iassert(index < scrVmPub.outparamcount);
     scrVarPub.error_index = index + 1;
     Scr_Error(error);
 }
@@ -4458,36 +4371,18 @@ void __cdecl Scr_ObjectError(const char* error)
 
 char __cdecl SetEntityFieldValue(uint classnum, int entnum, int offset, VariableValue* value)
 {
-    if (value - scrVmPub.stack <= 0)
-        MyAssertHandler(
-            ".\\script\\scr_vm.cpp",
-            5093,
-            0,
-            "%s\n\t(value - scrVmPub.stack) = %i",
-            "(value - scrVmPub.stack > 0)",
-            value - scrVmPub.stack);
-    if (value - scrVmPub.maxstack > 0)
-        MyAssertHandler(
-            ".\\script\\scr_vm.cpp",
-            5094,
-            0,
-            "%s\n\t(value - scrVmPub.maxstack) = %i",
-            "(value - scrVmPub.maxstack <= 0)",
-            value - scrVmPub.maxstack);
-    if (scrVmPub.inparamcount)
-        MyAssertHandler(".\\script\\scr_vm.cpp", 5095, 0, "%s", "!scrVmPub.inparamcount");
-    if (scrVmPub.outparamcount)
-        MyAssertHandler(".\\script\\scr_vm.cpp", 5096, 0, "%s", "!scrVmPub.outparamcount");
+    vassert((value - scrVmPub.stack > 0), "(value - scrVmPub.stack) = %i", value - scrVmPub.stack);
+    vassert((value - scrVmPub.maxstack <= 0), "(value - scrVmPub.maxstack) = %i", value - scrVmPub.maxstack);
+    iassert(!scrVmPub.inparamcount);
+    iassert(!scrVmPub.outparamcount);
     scrVmPub.outparamcount = 1;
     scrVmPub.top = value;
     if (Scr_SetObjectField(classnum, entnum, offset))
     {
-        if (scrVmPub.inparamcount)
-            MyAssertHandler(".\\script\\scr_vm.cpp", 5108, 0, "%s", "!scrVmPub.inparamcount");
+        iassert(!scrVmPub.inparamcount);
         if (scrVmPub.outparamcount)
         {
-            if (scrVmPub.outparamcount != 1)
-                MyAssertHandler(".\\script\\scr_vm.cpp", 5112, 0, "%s", "scrVmPub.outparamcount == 1");
+            iassert(scrVmPub.outparamcount == 1);
             RemoveRefToValue(scrVmPub.top->type, scrVmPub.top->u);
             --scrVmPub.top;
             scrVmPub.outparamcount = 0;
@@ -4496,10 +4391,8 @@ char __cdecl SetEntityFieldValue(uint classnum, int entnum, int offset, Variable
     }
     else
     {
-        if (scrVmPub.inparamcount)
-            MyAssertHandler(".\\script\\scr_vm.cpp", 5102, 0, "%s", "!scrVmPub.inparamcount");
-        if (scrVmPub.outparamcount != 1)
-            MyAssertHandler(".\\script\\scr_vm.cpp", 5103, 0, "%s", "scrVmPub.outparamcount == 1");
+        iassert(!scrVmPub.inparamcount);
+        iassert(scrVmPub.outparamcount == 1);
         scrVmPub.outparamcount = 0;
         return 0;
     }
@@ -4527,23 +4420,17 @@ void __cdecl Scr_SetStructField(uint structId, uint index)
     uint fieldValueId; // [esp+0h] [ebp-8h]
     uint fieldValueIndex; // [esp+4h] [ebp-4h]
 
-    if (scrVmPub.outparamcount)
-        MyAssertHandler(".\\script\\scr_vm.cpp", 5146, 0, "%s", "!scrVmPub.outparamcount");
-    if (scrVmPub.inparamcount != 1)
-        MyAssertHandler(".\\script\\scr_vm.cpp", 5147, 0, "%s", "scrVmPub.inparamcount == 1");
-    if (scrVarPub.varUsagePos)
-        MyAssertHandler(".\\script\\scr_vm.cpp", 5150, 0, "%s", "!scrVarPub.varUsagePos");
+    iassert(!scrVmPub.outparamcount);
+    iassert(scrVmPub.inparamcount == 1);
+    iassert(!scrVarPub.varUsagePos);
     scrVarPub.varUsagePos = "<radiant field variable>";
     fieldValueIndex = Scr_GetVariableFieldIndex(structId, index);
     fieldValueId = Scr_GetVarId(fieldValueIndex);
-    if (scrVmPub.inparamcount != 1)
-        MyAssertHandler(".\\script\\scr_vm.cpp", 5157, 0, "%s", "scrVmPub.inparamcount == 1");
+    iassert(scrVmPub.inparamcount == 1);
     scrVmPub.inparamcount = 0;
     SetVariableFieldValue(fieldValueId, scrVmPub.top);
-    if (scrVmPub.inparamcount)
-        MyAssertHandler(".\\script\\scr_vm.cpp", 5162, 0, "%s", "!scrVmPub.inparamcount");
-    if (scrVmPub.outparamcount)
-        MyAssertHandler(".\\script\\scr_vm.cpp", 5163, 0, "%s", "!scrVmPub.outparamcount");
+    iassert(!scrVmPub.inparamcount);
+    iassert(!scrVmPub.outparamcount);
     --scrVmPub.top;
     scrVarPub.varUsagePos = 0;
 }
@@ -4552,12 +4439,10 @@ void __cdecl Scr_SetDynamicEntityField(uint entnum, uint classnum, uint index)
 {
     uint entId; // [esp+0h] [ebp-4h]
 
-    if (scrVarPub.varUsagePos)
-        MyAssertHandler(".\\script\\scr_vm.cpp", 5178, 0, "%s", "!scrVarPub.varUsagePos");
+    iassert(!scrVarPub.varUsagePos);
     scrVarPub.varUsagePos = "<radiant field variable>";
     entId = Scr_GetEntityId(entnum, classnum);
-    if (GetObjectType(entId) != 20)
-        MyAssertHandler(".\\script\\scr_vm.cpp", 5183, 0, "%s", "GetObjectType( entId ) == VAR_ENTITY");
+    iassert(GetObjectType( entId ) == VAR_ENTITY);
     scrVarPub.varUsagePos = 0;
     Scr_SetStructField(entId, index);
 }
@@ -4992,10 +4877,7 @@ char __cdecl Scr_PrintProfileBuiltinTimes(float minTime)
                 scrVmDebugPub.func_table[j].usage = 0;
                 scrVmDebugPub.func_table[j].prof = 0;
             }
-            else if (scrVmDebugPub.func_table[j].prof)
-            {
-                MyAssertHandler(".\\script\\scr_vm.cpp", 5421, 0, "%s", "!scrVmDebugPub.func_table[j].prof");
-            }
+            else iassert(!scrVmDebugPub.func_table[j].prof);
         }
         Z_VirtualFree(order);
         return 1;
@@ -5097,13 +4979,7 @@ uint Scr_GetFunc(uint index)
         value = &scrVmPub.top[-index];
         if (value->type == 9)
         {
-            if (!Scr_IsInOpcodeMemory(value->u.codePosValue))
-                MyAssertHandler(
-                    "c:\\trees\\cod3\\cod3src\\src\\script\\scr_vm.cpp",
-                    4746,
-                    0,
-                    "%s",
-                    "Scr_IsInOpcodeMemory( value->u.codePosValue )");
+            iassert(Scr_IsInOpcodeMemory( value->u.codePosValue ));
             return value->u.intValue - (uint)scrVarPub.programBuffer;
         }
         scrVarPub.error_index = index + 1;

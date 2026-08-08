@@ -207,10 +207,8 @@ int __cdecl Actor_Cover_NodeRangeValid(const float *pos, const pathnode_t *node,
 
 void __cdecl Actor_Cover_InitRange(pathnodeRange_t *rangeOut, const pathnode_t *node)
 {
-    if (!rangeOut)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_cover.cpp", 195, 0, "%s", "rangeOut");
-    if (!node)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_cover.cpp", 196, 0, "%s", "node");
+    iassert(rangeOut);
+    iassert(node);
     switch (node->constant.type)
     {
     case NODE_COVER_STAND:
@@ -267,8 +265,7 @@ bool __cdecl Actor_Cover_GetAttackScript(
 {
     bool result; // r3
 
-    if (!node)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_cover.cpp", 297, 0, "%s", "node");
+    iassert(node);
     switch (node->constant.type)
     {
     case NODE_COVER_STAND:
@@ -675,12 +672,9 @@ float __cdecl Actor_Cover_FromPoint_GetNodeMetric(actor_s *self, const pathnode_
     double v8; // fp1
     double v9; // fp0
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_cover.cpp", 692, 0, "%s", "self");
-    if (!self->sentient)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_cover.cpp", 693, 0, "%s", "self->sentient");
-    if (!node)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_cover.cpp", 694, 0, "%s", "node");
+    iassert(self);
+    iassert(self->sentient);
+    iassert(node);
     NodeDistMetric = Actor_Cover_GetNodeDistMetric(self, node);
     v5 = Actor_Cover_ScoreOnVisibility(self, node);
     if (((1 << node->constant.type) & 0x1C00) != 0)
@@ -744,12 +738,9 @@ int __cdecl Actor_Cover_IsValidCover(actor_s *self, const pathnode_t *node)
     sentient_s *TargetSentient; // r3
     scr_animscript_t *v6[12]; // [sp+50h] [-30h] BYREF
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_cover.cpp", 761, 0, "%s", "self");
-    if (!self->sentient)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_cover.cpp", 762, 0, "%s", "self->sentient");
-    if (!node)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_cover.cpp", 763, 0, "%s", "node");
+    iassert(self);
+    iassert(self->sentient);
+    iassert(node);
     if (!Path_CanClaimNode(node, self->sentient))
     {
         DebugDrawNodePicking("clm", self, node, (float *)colorRed);
@@ -935,10 +926,8 @@ int __cdecl Actor_Cover_FindBestCoverList(actor_s *self, pathnode_t **bestNodes,
     pathsort_t v29[262]; // [sp+50h] [-C50h] BYREF
 
     //Profile_Begin(356);
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_cover.cpp", 1003, 0, "%s", "self");
-    if (!self->sentient)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_cover.cpp", 1004, 0, "%s", "self->sentient");
+    iassert(self);
+    iassert(self->sentient);
     v8 = Path_NodesInCylinder(self->codeGoal.pos, self->codeGoal.radius, self->codeGoal.height, v29, 256, 270332);
     BestCoverListInList = Actor_Cover_FindBestCoverListInList(self, v29, v8, self->codeGoal.volume);
     v10 = BestCoverListInList;
@@ -1029,10 +1018,8 @@ pathnode_t *__cdecl Actor_Cover_GetCoverNode(actor_s *self)
 {
     int v2; // r11
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_cover.cpp", 1090, 0, "%s", "self");
-    if (!self->sentient)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_cover.cpp", 1091, 0, "%s", "self->sentient");
+    iassert(self);
+    iassert(self->sentient);
     if (!Actor_GetTargetEntity(self) || self->eState[self->stateLevel] != AIS_EXPOSED)
     {
     LABEL_11:
@@ -1057,14 +1044,10 @@ int __cdecl Actor_Cover_UseCoverNode(actor_s *self, pathnode_t *node)
     ai_state_t v4; // r11
     unsigned int v6; // r11
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_cover.cpp", 1122, 0, "%s", "self");
-    if (!self->sentient)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_cover.cpp", 1123, 0, "%s", "self->sentient");
-    if (!node)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_cover.cpp", 1124, 0, "%s", "node");
-    if (self->keepClaimedNode)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_cover.cpp", 1125, 0, "%s", "!self->keepClaimedNode");
+    iassert(self);
+    iassert(self->sentient);
+    iassert(node);
+    iassert(!self->keepClaimedNode);
     v4 = self->eState[self->stateLevel];
     if (v4 != AIS_EXPOSED && v4 != AIS_TURRET || !(unsigned __int8)Actor_Cover_IsValidCover(self, node))
         return 0;

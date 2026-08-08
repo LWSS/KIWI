@@ -401,21 +401,17 @@ void __cdecl CG_UpdateHelicopterKillCam(int localClientNum)
     iassert(cgameGlob->inKillCam);
 
     centHelicopter = CG_GetEntity(localClientNum, cgameGlob->predictedPlayerState.killCamEntity);
-    if (!centHelicopter->nextValid)
-        MyAssertHandler(".\\cgame_mp\\cg_view_mp.cpp", 945, 0, "%s", "centHelicopter->nextValid");
-    if (centHelicopter->pose.eType != ET_HELICOPTER)
-        MyAssertHandler(".\\cgame_mp\\cg_view_mp.cpp", 946, 0, "%s", "centHelicopter->pose.eType == ET_HELICOPTER");
+    iassert(centHelicopter->nextValid);
+    iassert(centHelicopter->pose.eType == ET_HELICOPTER);
     centTarget = CG_GetEntity(localClientNum, cgameGlob->clientNum);
-    if (centTarget->pose.eType != ET_PLAYER)
-        MyAssertHandler(".\\cgame_mp\\cg_view_mp.cpp", 949, 0, "%s", "centTarget->pose.eType == ET_PLAYER");
+    iassert(centTarget->pose.eType == ET_PLAYER);
     origin[0] = centHelicopter->pose.origin[0];
     origin[1] = centHelicopter->pose.origin[1];
     origin[2] = centHelicopter->pose.origin[2];
     origin[2] = origin[2] + cg_heliKillCamZDist->current.value;
     Vec3Sub(centTarget->pose.origin, origin, delta);
     distance = Vec3Normalize(delta);
-    if (distance <= 0.0)
-        MyAssertHandler(".\\cgame_mp\\cg_view_mp.cpp", 955, 0, "%s", "distance > 0.0f");
+    iassert(distance > 0.0f);
     Vec3Cross(up, delta, right);
     Vec3Normalize(right);
     v3 = cgameGlob->refdef.viewaxis[1];
@@ -1030,8 +1026,7 @@ void __cdecl CalcViewValuesVehicle(int localClientNum)
 {
     int slot; // [esp+4h] [ebp-4h]
 
-    if (!CG_VehLocalClientUsingVehicle(localClientNum))
-        MyAssertHandler(".\\cgame_mp\\cg_view_mp.cpp", 852, 0, "%s", "CG_VehLocalClientUsingVehicle( localClientNum )");
+    iassert(CG_VehLocalClientUsingVehicle( localClientNum ));
     slot = CG_VehLocalClientVehicleSlot(localClientNum);
     if (slot)
     {
@@ -1079,8 +1074,7 @@ void __cdecl CalcViewValuesVehicleDriver(int localClientNum)
     pitch = (v4 - v2) * 360.0;
     v1 = I_fabs(pitch);
     pitch = v1;
-    if (vehDriverViewHeightMax->current.value == 0.0)
-        MyAssertHandler(".\\cgame_mp\\cg_view_mp.cpp", 791, 0, "%s", "vehDriverViewHeightMax->current.value != 0");
+    iassert(vehDriverViewHeightMax->current.value != 0);
     focusPoint[2] = (vehDriverViewHeightMax->current.value - pitch)
         / vehDriverViewHeightMax->current.value
         * vehDriverViewFocusRange->current.value
@@ -1204,30 +1198,9 @@ const ClientViewParams *__cdecl CG_GetLocalClientViewParams(int localClientNum)
 
     activeClientIndex = CL_LocalActiveIndexFromClientNum(localClientNum);
     activeClientCountArrayIndex = CL_GetLocalClientActiveCount() - 1;
-    if (activeClientIndex)
-        MyAssertHandler(
-            ".\\cgame_mp\\cg_view_mp.cpp",
-            1323,
-            0,
-            "activeClientIndex doesn't index ARRAY_COUNT( clientViewParamsArray[0] )\n\t%i not in [0, %i)",
-            activeClientIndex,
-            1);
-    if (activeClientCountArrayIndex)
-        MyAssertHandler(
-            ".\\cgame_mp\\cg_view_mp.cpp",
-            1324,
-            0,
-            "activeClientCountArrayIndex doesn't index ARRAY_COUNT( clientViewParamsArray )\n\t%i not in [0, %i)",
-            activeClientCountArrayIndex,
-            1);
-    if (activeClientIndex > activeClientCountArrayIndex)
-        MyAssertHandler(
-            ".\\cgame_mp\\cg_view_mp.cpp",
-            1325,
-            0,
-            "activeClientIndex <= activeClientCountArrayIndex\n\t%i, %i",
-            activeClientIndex,
-            activeClientCountArrayIndex);
+    vassert((activeClientIndex) == 0, "%i not in [0, %i)", activeClientIndex, 1);
+    vassert((activeClientCountArrayIndex) == 0, "%i not in [0, %i)", activeClientCountArrayIndex, 1);
+    vassert(activeClientIndex <= activeClientCountArrayIndex, "%i, %i", activeClientIndex, activeClientCountArrayIndex);
     return &clientViewParamsArray[activeClientCountArrayIndex][activeClientIndex];
 }
 
@@ -1323,8 +1296,7 @@ int __cdecl CG_DrawActiveFrame(
     }
     CG_AddLagometerFrameInfo(cgameGlob);
     cgameGlob->bgs.frametime = cgameGlob->frametime;
-    if (bgs)
-        MyAssertHandler(".\\cgame_mp\\cg_view_mp.cpp", 1703, 0, "%s\n\t(bgs) = %p", "(bgs == 0)", bgs);
+    vassert((bgs == 0), "(bgs) = %p", bgs);
     if (cgameGlob->isLoading)
         return 0;
     bgs = &cgameGlob->bgs;
@@ -1337,20 +1309,16 @@ int __cdecl CG_DrawActiveFrame(
         {
             if (CL_IsServerLoadingMap())
             {
-                if (bgs != &cgameGlob->bgs)
-                    MyAssertHandler(".\\cgame_mp\\cg_view_mp.cpp", 1740, 0, "%s\n\t(bgs) = %p", "(bgs == &cgameGlob->bgs)", bgs);
+                vassert((bgs == &cgameGlob->bgs), "(bgs) = %p", bgs);
                 bgs = 0;
                 return 0;
             }
             else
             {
                 CL_SetWaitingOnServerToLoadMap(localClientNum, 0);
-                if (bgs != &cgameGlob->bgs)
-                    MyAssertHandler(".\\cgame_mp\\cg_view_mp.cpp", 1747, 0, "%s\n\t(bgs) = %p", "(bgs == &cgameGlob->bgs)", bgs);
-                if (!cgameGlob->snap)
-                    MyAssertHandler(".\\cgame_mp\\cg_view_mp.cpp", 1749, 0, "%s", "cgameGlob->snap");
-                if (!cgameGlob->nextSnap)
-                    MyAssertHandler(".\\cgame_mp\\cg_view_mp.cpp", 1750, 0, "%s", "cgameGlob->nextSnap");
+                vassert((bgs == &cgameGlob->bgs), "(bgs) = %p", bgs);
+                iassert(cgameGlob->snap);
+                iassert(cgameGlob->nextSnap);
                 CG_VisionSetsUpdate(localClientNum);
                 CG_UpdateViewOffset(localClientNum);
                 cgameGlob->refdef.vieworg[0] = cgameGlob->refdef.viewOffset[0];
@@ -1657,14 +1625,7 @@ void __cdecl DumpAnims(int localClientNum)
 {
     const DObj_s *obj; // [esp+0h] [ebp-4h]
 
-    if (cg_dumpAnims->current.integer < -1 || cg_dumpAnims->current.integer >= 1024)
-        MyAssertHandler(
-            ".\\cgame_mp\\cg_view_mp.cpp",
-            1407,
-            0,
-            "%s\n\t(cg_dumpAnims->current.integer) = %i",
-            "(cg_dumpAnims->current.integer >= -1 && cg_dumpAnims->current.integer < (1<<10))",
-            cg_dumpAnims->current.integer);
+    vassert((cg_dumpAnims->current.integer >= -1 && cg_dumpAnims->current.integer < (1<<10)), "(cg_dumpAnims->current.integer) = %i", cg_dumpAnims->current.integer);
     if (cg_dumpAnims->current.integer >= 0 && !cg_paused->current.integer)
     {
         obj = Com_GetClientDObj(cg_dumpAnims->current.unsignedInt, localClientNum);

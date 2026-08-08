@@ -127,14 +127,7 @@ const char *__cdecl SV_Cmd_Argv(int  argIndex)
             "sv_cmd_args.nesting doesn't index CMD_MAX_NESTING\n\t%i not in [0, %i)",
             sv_cmd_args.nesting,
             8);
-    if (argIndex < 0)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\src\\game_mp\\../qcommon/cmd.h",
-            183,
-            0,
-            "%s\n\t(argIndex) = %i",
-            "(argIndex >= 0)",
-            argIndex);
+    vassert((argIndex >= 0), "(argIndex) = %i", argIndex);
     if (argIndex >= sv_cmd_args.argc[sv_cmd_args.nesting])
         return "";
     else
@@ -737,14 +730,7 @@ void __cdecl Cbuf_ExecuteBuffer(int  localClientNum, int  controllerIndex, const
 void __cdecl Cbuf_Execute(int  localClientNum, int  controllerIndex)
 {
     PROF_SCOPED("Cbuf_Execute");
-    if (cmd_insideCBufExecute[localClientNum])
-        MyAssertHandler(
-            ".\\qcommon\\cmd.cpp",
-            583,
-            0,
-            "%s\n\t%s",
-            "!cmd_insideCBufExecute[localClientNum]",
-            "Nesting Cbuf_Execute() is not allowed.");
+    vassert(!cmd_insideCBufExecute[localClientNum], "%s", "Nesting Cbuf_Execute() is not allowed.");
     cmd_insideCBufExecute[localClientNum] = 1;
     Cbuf_ExecuteInternal(localClientNum, controllerIndex);
     cmd_insideCBufExecute[localClientNum] = 0;
@@ -1076,14 +1062,7 @@ void __cdecl AssertCmdArgsConsistency(const CmdArgs *args, const CmdArgsPrivate 
             args->argc[3]);
         MyAssertHandler(".\\qcommon\\cmd.cpp", 979, 0, "%s\n\t%s", "totalUsedArgvPool == argsPriv->totalUsedArgvPool", v2);
     }
-    if (totalUsedTextPool != argsPriv->totalUsedTextPool)
-        MyAssertHandler(
-            ".\\qcommon\\cmd.cpp",
-            980,
-            0,
-            "totalUsedTextPool == argsPriv->totalUsedTextPool\n\t%i, %i",
-            totalUsedTextPool,
-            argsPriv->totalUsedTextPool);
+    vassert(totalUsedTextPool == argsPriv->totalUsedTextPool, "%i, %i", totalUsedTextPool, argsPriv->totalUsedTextPool);
 }
 
 void __cdecl Cmd_TokenizeString(char *text_in)
@@ -1185,14 +1164,7 @@ void __cdecl Cmd_ExecuteSingleCommand(int  localClientNum, int  controllerIndex,
     cmd_function_s *itr; // [esp+28h] [ebp-4h]
 
     iassert( Sys_IsMainThread() );
-    if (localClientNum)
-        MyAssertHandler(
-            ".\\qcommon\\cmd.cpp",
-            1333,
-            0,
-            "localClientNum doesn't index STATIC_MAX_LOCAL_CLIENTS\n\t%i not in [0, %i)",
-            localClientNum,
-            1);
+    vassert((localClientNum) == 0, "%i not in [0, %i)", localClientNum, 1);
     //if (!PbTrapPreExecCmd(text))
     {
         Cmd_TokenizeString(text);

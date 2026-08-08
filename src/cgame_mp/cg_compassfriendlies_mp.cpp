@@ -130,8 +130,7 @@ void __cdecl GetRadarLine(cg_s *cgameGlob, float radarProgress, float *line)
     float v3; // [esp+0h] [ebp-18h]
     float margin; // [esp+14h] [ebp-4h]
 
-    if (!cgameGlob)
-        MyAssertHandler(".\\cgame_mp\\cg_compassfriendlies_mp.cpp", 113, 0, "%s", "cgameGlob");
+    iassert(cgameGlob);
     margin = GetRadarLineMargin(cgameGlob);
     *line = cgameGlob->compassNorth[1];
     line[1] = -cgameGlob->compassNorth[0];
@@ -148,10 +147,8 @@ double __cdecl GetRadarLineMargin(cg_s *cgameGlob)
     float marginForRadar; // [esp+4h] [ebp-Ch]
     float marginForMap; // [esp+8h] [ebp-8h]
 
-    if (!cgameGlob)
-        MyAssertHandler(".\\cgame_mp\\cg_compassfriendlies_mp.cpp", 83, 0, "%s", "cgameGlob");
-    if (cgameGlob->compassMapWorldSize[0] == 0.0)
-        MyAssertHandler(".\\cgame_mp\\cg_compassfriendlies_mp.cpp", 84, 0, "%s", "cgameGlob->compassMapWorldSize[0]");
+    iassert(cgameGlob);
+    iassert(cgameGlob->compassMapWorldSize[0]);
     marginForRadara = compassRadarLineThickness->current.value * compassMaxRange->current.value;
     marginForRadar = compassMaxRange->current.value * SQRT2 + marginForRadara;
     marginForMap = cg_hudMapRadarLineThickness->current.value * cgameGlob->compassMapWorldSize[0];
@@ -169,8 +166,7 @@ bool __cdecl DoLinesSurroundPoint(cg_s *cgameGlob, float *radarLine1, float *rad
     float v2; // [esp+10h] [ebp-8h]
     float v1; // [esp+14h] [ebp-4h]
 
-    if (!cgameGlob)
-        MyAssertHandler(".\\cgame_mp\\cg_compassfriendlies_mp.cpp", 148, 0, "%s", "cgameGlob");
+    iassert(cgameGlob);
     v6 = pos[1] * radarLine1[1] + *pos * *radarLine1;
     v1 = v6 - radarLine1[2];
     v5 = pos[1] * radarLine2[1] + *pos * *radarLine2;
@@ -180,8 +176,7 @@ bool __cdecl DoLinesSurroundPoint(cg_s *cgameGlob, float *radarLine1, float *rad
 
 void __cdecl RadarPingEnemyPlayer(CompassActor *actor, int time)
 {
-    if (!actor)
-        MyAssertHandler(".\\cgame_mp\\cg_compassfriendlies_mp.cpp", 159, 0, "%s", "actor");
+    iassert(actor);
     if (actor->lastUpdate > time)
         actor->lastUpdate = 0;
     if (actor->lastUpdate >= time - 1500 && (actor->perks & 1) == 0)
@@ -289,8 +284,7 @@ bool __cdecl DoesMovementCrossRadar(cg_s *cgameGlob, float radarProgress, const 
     float v2; // [esp+24h] [ebp-8h]
     float v1; // [esp+28h] [ebp-4h]
 
-    if (!cgameGlob)
-        MyAssertHandler(".\\cgame_mp\\cg_compassfriendlies_mp.cpp", 133, 0, "%s", "cgameGlob");
+    iassert(cgameGlob);
     GetRadarLine(cgameGlob, radarProgress, radarLine);
     v6 = p1[1] * radarLine[1] + *p1 * radarLine[0];
     v1 = v6 - radarLine[2];

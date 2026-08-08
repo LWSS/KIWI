@@ -16,14 +16,7 @@
 
 RagdollBody *__cdecl Ragdoll_HandleBody(int ragdollHandle)
 {
-    if ((uint)(ragdollHandle - 1) >= 0x20)
-        MyAssertHandler(
-            ".\\ragdoll\\ragdoll_controller.cpp",
-            31,
-            0,
-            "ragdollHandle - 1 doesn't index RAGDOLL_MAX\n\t%i not in [0, %i)",
-            ragdollHandle - 1,
-            32);
+    bcassert((uint)(ragdollHandle - 1), 0x20);
     return &ragdollBodies[ragdollHandle - 1];
 }
 

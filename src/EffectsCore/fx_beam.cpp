@@ -621,8 +621,7 @@ char  FX_GenerateBeam_GetFlatDelta(
     v27 = v37.v[1] * v30;
     v28 = v37.v[2] * v30;
     v29 = 1.0;
-    if (in.v[3] == 0.0)
-        MyAssertHandler("c:\\trees\\cod3\\src\\universal\\com_vector4_novec.h", 599, 0, "%s", "in.v[3]");
+    iassert(in.v[3]);
     v25 = 1.0 / in.v[3];
     v21 = in.v[0] * v25;
     v22 = in.v[1] * v25;

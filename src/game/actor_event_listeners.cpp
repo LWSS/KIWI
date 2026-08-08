@@ -155,14 +155,7 @@ void __cdecl RemoveSwapWithLast(unsigned int listenerIndex)
     unsigned int v5; // r8
     unsigned int v6; // r10
 
-    if (listenerIndex >= 0x20)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\actor_event_listeners.cpp",
-            161,
-            0,
-            "listenerIndex doesn't index MAX_AI_EV_LISTENERS\n\t%i not in [0, %i)",
-            listenerIndex,
-            32);
+    bcassert(listenerIndex, 0x20);
     v2 = listenerIndex;
     v3 = g_listenerCount - 1;
     if ((int)listenerIndex < --g_listenerCount)
@@ -240,14 +233,7 @@ int __cdecl Actor_EventListener_Next(int index, int event, int teamFlags)
 
 gentity_s *__cdecl Actor_EventListener_GetEntity(unsigned int index)
 {
-    if (index >= 0x20)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\actor_event_listeners.cpp",
-            272,
-            0,
-            "index doesn't index MAX_AI_EV_LISTENERS\n\t%i not in [0, %i)",
-            index,
-            32);
+    bcassert(index, 0x20);
     return &g_entities[g_AIEVlisteners[index].entIndex];
 }
 
@@ -257,8 +243,7 @@ void __cdecl Actor_EventListener_NotifyToListener(
     ai_event_t event,
     const float *position)
 {
-    if (!listener)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_event_listeners.cpp", 287, 0, "%s", "listener");
+    iassert(listener);
     if (listener->r.inuse)
     {
         Scr_AddVector(position);
@@ -266,13 +251,7 @@ void __cdecl Actor_EventListener_NotifyToListener(
             Scr_AddEntity(originator);
         else
             Scr_AddUndefined();
-        if (!g_AIEV_scrConst_table[event])
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\actor_event_listeners.cpp",
-                299,
-                0,
-                "%s",
-                "g_AIEV_scrConst_table[event]");
+        iassert(g_AIEV_scrConst_table[event]);
         Scr_Notify(listener, *g_AIEV_scrConst_table[event], 2u);
     }
 }

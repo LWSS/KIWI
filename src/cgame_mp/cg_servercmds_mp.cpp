@@ -137,14 +137,7 @@ void __cdecl CG_SetConfigValues(int localClientNum)
     ConfigString = CL_GetConfigString(localClientNum, 4u);
     cgameGlob->teamScores[1] = atoi(ConfigString);
     cgameGlob->teamScores[2] = atoi(CL_GetConfigString(localClientNum, 5));
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\src\\cgame_mp\\cg_local_mp.h",
-            1071,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     R_SwitchFog(0, cgameGlob->time, 0);
     for (i = 1970; i < 2002; ++i)
         CG_PrecacheScriptMenu(localClientNum, i);
@@ -194,14 +187,7 @@ void __cdecl CG_RegisterServerMaterial(int localClientNum, int configStringIndex
 {
     const char *materialName; // [esp+0h] [ebp-4h]
 
-    if (configStringIndex < 2002 || configStringIndex >= 2258)
-        MyAssertHandler(
-            ".\\cgame_mp\\cg_servercmds_mp.cpp",
-            606,
-            0,
-            "%s\n\t(configStringIndex) = %i",
-            "(configStringIndex >= CS_SERVER_MATERIALS && configStringIndex < CS_SERVER_MATERIALS + 256)",
-            configStringIndex);
+    vassert((configStringIndex >= CS_SERVER_MATERIALS && configStringIndex < CS_SERVER_MATERIALS + 256), "(configStringIndex) = %i", configStringIndex);
     materialName = CL_GetConfigString(localClientNum, configStringIndex);
     if (*materialName)
         Material_RegisterHandle(materialName, 7);
@@ -1241,14 +1227,7 @@ void __cdecl CG_SetChannelVolCmd(int localClientNum)
         shockIndex = atoi(v2);
         v3 = Cmd_Argv(3);
         fadetime = atof(v3);
-        if (localClientNum)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\src\\cgame_mp\\cg_local_mp.h",
-                1083,
-                0,
-                "%s\n\t(localClientNum) = %i",
-                "(localClientNum == 0)",
-                localClientNum);
+        vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
         if (SnapFloatToInt(fadetime * 1000.0f) > 0)
             fademsec = SnapFloatToInt(fadetime * 1000.0f);
         else
@@ -1388,8 +1367,7 @@ void __cdecl CG_SetDrawHud(cg_s *cgameGlob, uint value)
 
 void __cdecl CG_SetScriptMainMenu(cg_s *cgameGlob, char *text)
 {
-    if (!text)
-        MyAssertHandler(".\\cgame_mp\\cg_servercmds_mp.cpp", 1471, 0, "%s", "text");
+    iassert(text);
     I_strncpyz(cgameGlob->scriptMainMenu, text, 256);
 }
 

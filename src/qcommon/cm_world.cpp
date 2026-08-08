@@ -315,20 +315,8 @@ void __cdecl CM_SortNode(uint16_t nodeIndex, float *mins, float *maxs)
         {
         LABEL_14:
             entnum = ent->nextEntityInWorldSector;
-            if (!prevEnt && &sv.svEntities[node->contents.entities - 1] != ent)
-                MyAssertHandler(
-                    ".\\qcommon\\cm_world.cpp",
-                    671,
-                    0,
-                    "%s",
-                    "prevEnt || (&sv.svEntities[node->contents.entities - 1] == ent)");
-            if (prevEnt && &sv.svEntities[prevEnt->nextEntityInWorldSector - 1] != ent)
-                MyAssertHandler(
-                    ".\\qcommon\\cm_world.cpp",
-                    672,
-                    0,
-                    "%s",
-                    "!prevEnt || (&sv.svEntities[prevEnt->nextEntityInWorldSector - 1] == ent)");
+            iassert(prevEnt || (&sv.svEntities[node->contents.entities - 1] == ent));
+            iassert(!prevEnt || (&sv.svEntities[prevEnt->nextEntityInWorldSector - 1] == ent));
             CM_AddEntityToNode(ent, childNodeIndex);
             cm_world.sectors[childNodeIndex].contents.contentsEntities |= SV_GEntityForSvEntity(ent)->r.contents;
             cm_world.sectors[childNodeIndex].contents.linkcontentsEntities |= ent->linkcontents;
@@ -378,20 +366,8 @@ void __cdecl CM_SortNode(uint16_t nodeIndex, float *mins, float *maxs)
         {
         LABEL_38:
             modelnum = staticModel->writable.nextModelInWorldSector;
-            if (!prevStaticModel && &cm.staticModelList[node->contents.staticModels - 1] != staticModel)
-                MyAssertHandler(
-                    ".\\qcommon\\cm_world.cpp",
-                    724,
-                    0,
-                    "%s",
-                    "prevStaticModel || (&cm.staticModelList[node->contents.staticModels - 1] == staticModel)");
-            if (prevStaticModel && &cm.staticModelList[prevStaticModel->writable.nextModelInWorldSector - 1] != staticModel)
-                MyAssertHandler(
-                    ".\\qcommon\\cm_world.cpp",
-                    725,
-                    0,
-                    "%s",
-                    "!prevStaticModel || (&cm.staticModelList[prevStaticModel->writable.nextModelInWorldSector - 1] == staticModel)");
+            iassert(prevStaticModel || (&cm.staticModelList[node->contents.staticModels - 1] == staticModel));
+            iassert(!prevStaticModel || (&cm.staticModelList[prevStaticModel->writable.nextModelInWorldSector - 1] == staticModel));
             CM_AddStaticModelToNode(staticModel, childNodeIndexa);
             cm_world.sectors[childNodeIndexa].contents.contentsStaticModels |= XModelGetContents(staticModel->xmodel);
             if (prevStaticModel)
@@ -783,14 +759,7 @@ void __cdecl CM_ClipMoveToEntities(moveclip_t *clip, trace_t *trace)
 
     PROF_SCOPED("CM_ClipMoveToEntities");
 
-    if (trace->fraction > 1.0)
-        MyAssertHandler(
-            ".\\qcommon\\cm_world.cpp",
-            1334,
-            0,
-            "%s\n\t(trace->fraction) = %g",
-            "(trace->fraction <= 1.f)",
-            trace->fraction);
+    vassert((trace->fraction <= 1.f), "(trace->fraction) = %g", trace->fraction);
     start[0] = clip->extents.start[0];
     start[1] = clip->extents.start[1];
     start[2] = clip->extents.start[2];

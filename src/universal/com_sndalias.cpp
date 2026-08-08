@@ -123,8 +123,7 @@ void __cdecl Com_VolumeFalloffCurveGraphEventCallback(const DevGraph *graph, Dev
     char dest[32]; // [esp+201Ch] [ebp-28h] BYREF
     //int i; // [esp+2040h] [ebp-4h]
 
-    if (!graph)
-        MyAssertHandler(".\\universal\\com_sndalias.cpp", 213, 0, "%s", "graph");
+    iassert(graph);
     data = (int)graph->data;
     if (data <= 0 || data >= 16)
         MyAssertHandler(
@@ -183,14 +182,7 @@ void __cdecl Com_GetGraphList(XAssetHeader header, int *data)
 
 MSSChannelMap *__cdecl Com_GetSpeakerMap(SpeakerMap *speakerMap, int sourceChannelCount)
 {
-    if (sourceChannelCount != 1 && sourceChannelCount != 2)
-        MyAssertHandler(
-            ".\\universal\\com_sndalias.cpp",
-            410,
-            0,
-            "%s\n\t(sourceChannelCount) = %i",
-            "(sourceChannelCount == 1 || sourceChannelCount == 2)",
-            sourceChannelCount);
+    vassert((sourceChannelCount == 1 || sourceChannelCount == 2), "(sourceChannelCount) = %i", sourceChannelCount);
     return &speakerMap->channelMaps[sourceChannelCount == 2][SND_IsMultiChannel()];
 }
 
@@ -209,8 +201,7 @@ snd_alias_list_t *__cdecl Com_TryFindSoundAlias_LoadObj(const char *name)
 {
     uint hashIndex; // [esp+0h] [ebp-4h]
 
-    if (!name)
-        MyAssertHandler(".\\universal\\com_sndalias.cpp", 568, 0, "%s", "name");
+    iassert(name);
     for (hashIndex = Com_HashAliasName(name); g_sa.hash[hashIndex]; hashIndex = (hashIndex + 1) % g_sa.hashSize)
     {
         if (!I_stricmp(name, g_sa.hash[hashIndex]->aliasName))
@@ -231,8 +222,7 @@ snd_alias_list_t *__cdecl Com_FindSoundAlias_LoadObj(const char *name)
 {
     uint hashIndex; // [esp+0h] [ebp-4h]
 
-    if (!name)
-        MyAssertHandler(".\\universal\\com_sndalias.cpp", 586, 0, "%s", "name");
+    iassert(name);
     for (hashIndex = Com_HashAliasName(name); g_sa.hash[hashIndex]; hashIndex = (hashIndex + 1) % g_sa.hashSize)
     {
         if (!I_stricmp(name, g_sa.hash[hashIndex]->aliasName))
@@ -246,8 +236,7 @@ snd_alias_list_t *__cdecl Com_TryFindSoundAlias_FastFile(const char *name)
 {
     snd_alias_list_t *aliasList; // [esp+4h] [ebp-4h]
 
-    if (!name)
-        MyAssertHandler(".\\universal\\com_sndalias.cpp", 609, 0, "%s", "name");
+    iassert(name);
     aliasList = DB_FindXAssetHeader(ASSET_TYPE_SOUND, name).sound;
     if (DB_IsXAssetDefault(ASSET_TYPE_SOUND, name))
         return 0;
@@ -267,8 +256,7 @@ snd_alias_list_t *__cdecl Com_FindSoundAliasNoErrors_LoadObj(const char *name)
 {
     uint hashIndex; // [esp+0h] [ebp-4h]
 
-    if (!name)
-        MyAssertHandler(".\\universal\\com_sndalias.cpp", 655, 0, "%s", "name");
+    iassert(name);
     for (hashIndex = Com_HashAliasName(name); g_sa.hash[hashIndex]; hashIndex = (hashIndex + 1) % g_sa.hashSize)
     {
         if (!I_stricmp(name, g_sa.hash[hashIndex]->aliasName))
@@ -281,8 +269,7 @@ snd_alias_list_t *__cdecl Com_FindSoundAlias_FastFile(const char *name)
 {
     snd_alias_list_t *aliasList; // [esp+4h] [ebp-4h]
 
-    if (!name)
-        MyAssertHandler(".\\universal\\com_sndalias.cpp", 623, 0, "%s", "name");
+    iassert(name);
     aliasList = DB_FindXAssetHeader(ASSET_TYPE_SOUND, name).sound;
     if (!DB_IsXAssetDefault(ASSET_TYPE_SOUND, name))
         return aliasList;
@@ -302,8 +289,7 @@ snd_alias_list_t *__cdecl Com_FindSoundAliasNoErrors_FastFile(const char *name)
 {
     snd_alias_list_t *aliasList; // [esp+4h] [ebp-4h]
 
-    if (!name)
-        MyAssertHandler(".\\universal\\com_sndalias.cpp", 675, 0, "%s", "name");
+    iassert(name);
     aliasList = DB_FindXAssetHeader(ASSET_TYPE_SOUND, name).sound;
     return !DB_IsXAssetDefault(ASSET_TYPE_SOUND, name) ? aliasList : 0;
 }
@@ -314,8 +300,7 @@ int __cdecl SND_GetAliasOffset(const snd_alias_t *alias)
     snd_alias_list_t *aliasList; // [esp+4h] [ebp-8h]
     int index; // [esp+8h] [ebp-4h]
 
-    if (!alias->aliasName)
-        MyAssertHandler(".\\universal\\com_sndalias.cpp", 708, 0, "%s", "alias->aliasName");
+    iassert(alias->aliasName);
     aliasList = Com_FindSoundAlias(alias->aliasName);
     checkAlias = aliasList->head;
     for (index = 0; index < aliasList->count; ++index)
@@ -333,8 +318,7 @@ snd_alias_t *__cdecl SND_GetAliasWithOffset(const char *name, int offset)
     snd_alias_list_t *aliasList; // [esp+4h] [ebp-8h]
     int index; // [esp+8h] [ebp-4h]
 
-    if (!name)
-        MyAssertHandler(".\\universal\\com_sndalias.cpp", 733, 0, "%s", "name");
+    iassert(name);
     aliasList = Com_FindSoundAlias(name);
     if (!aliasList)
         goto LABEL_11;
@@ -361,10 +345,8 @@ void __cdecl Com_GetSoundFileName(const snd_alias_t *alias, char *filename, int 
 {
     SoundFile *soundFile; // [esp+0h] [ebp-4h]
 
-    if (!alias)
-        MyAssertHandler(".\\universal\\com_sndalias.cpp", 801, 0, "%s", "alias");
-    if (!alias->soundFile)
-        MyAssertHandler(".\\universal\\com_sndalias.cpp", 802, 0, "%s", "alias->soundFile");
+    iassert(alias);
+    iassert(alias->soundFile);
     soundFile = alias->soundFile;
     if (soundFile->type == 1)
         I_strncpyz(filename, (char *)soundFile->u.loadSnd->name, size);
@@ -691,20 +673,8 @@ void __cdecl Com_UnloadSoundAliases(snd_alias_system_t system)
     {
         if (system != SASYS_GAME)
             Com_UnloadSoundAliasSounds(system);
-        if (system == SASYS_UI && g_sa.initialized[1])
-            MyAssertHandler(
-                ".\\universal\\com_sndalias.cpp",
-                1032,
-                0,
-                "%s",
-                "system != SASYS_UI || !g_sa.initialized[SASYS_CGAME]");
-        if (system == SASYS_GAME && g_sa.initialized[1])
-            MyAssertHandler(
-                ".\\universal\\com_sndalias.cpp",
-                1033,
-                0,
-                "%s",
-                "system != SASYS_GAME || !g_sa.initialized[SASYS_CGAME]");
+        iassert(system != SASYS_UI || !g_sa.initialized[SASYS_CGAME]);
+        iassert(system != SASYS_GAME || !g_sa.initialized[SASYS_CGAME]);
         if (*(&g_sa.soundFileInfo[-4].count + 3 * system))
         {
             *(&g_sa.soundFileInfo[-4].count + 3 * system) = 0;
@@ -712,16 +682,7 @@ void __cdecl Com_UnloadSoundAliases(snd_alias_system_t system)
             memset((uint8_t *)g_sa.hash, 0, 4 * g_sa.hashSize);
             g_sa.hashUsed = 0;
         }
-        else if (g_sa.aliasInfo[system].count)
-        {
-            MyAssertHandler(
-                ".\\universal\\com_sndalias.cpp",
-                1049,
-                0,
-                "%s\n\t(g_sa.aliasInfo[system].count) = %i",
-                "(g_sa.aliasInfo[system].count == 0)",
-                g_sa.aliasInfo[system].count);
-        }
+        else vassert((g_sa.aliasInfo[system].count == 0), "(g_sa.aliasInfo[system].count) = %i", g_sa.aliasInfo[system].count);
         g_sa.initialized[system] = 0;
         if ((uint)system <= SASYS_CGAME && !g_sa.initialized[1] && !g_sa.initialized[0])
             Cmd_RemoveCommand("snd_list");
@@ -1247,8 +1208,7 @@ void __cdecl Com_RefreshSpeakerMaps_f()
 {
     int speakerMapIndex; // [esp+0h] [ebp-4h]
 
-    if (!g_sa.speakerMapsInitialized)
-        MyAssertHandler(".\\universal\\com_sndalias.cpp", 334, 0, "%s", "g_sa.speakerMapsInitialized");
+    iassert(g_sa.speakerMapsInitialized);
     for (speakerMapIndex = 1; *g_sa.speakerMaps[speakerMapIndex].speakerMap.name; ++speakerMapIndex)
     {
         if (!Com_LoadSpkrMapFile((char*)g_sa.speakerMaps[speakerMapIndex].speakerMap.name, &g_sa.speakerMaps[speakerMapIndex]))
@@ -1269,8 +1229,7 @@ void Com_InitSpeakerMaps()
     int len; // [esp+60h] [ebp-8h]
     int fileCount; // [esp+64h] [ebp-4h] BYREF
 
-    if (g_sa.speakerMapsInitialized)
-        MyAssertHandler(".\\universal\\com_sndalias.cpp", 360, 0, "%s", "!g_sa.speakerMapsInitialized");
+    iassert(!g_sa.speakerMapsInitialized);
     Com_InitDefaultSpeakerMap();
     fileNames = FS_ListFiles("soundaliases", "spkrmap", FS_LIST_PURE_ONLY, &fileCount);
     if (fileCount > 15)

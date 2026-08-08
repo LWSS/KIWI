@@ -40,22 +40,8 @@ void __cdecl Image_FreeTempMemory(uint8_t *mem, int bytes)
 void __cdecl Image_Generate2D(GfxImage *image, uint8_t *pixels, int width, int height, _D3DFORMAT imageFormat)
 {
     iassert( pixels );
-    if (width <= 0 || (width & (width - 1)) != 0)
-        MyAssertHandler(
-            ".\\r_image_load_obj.cpp",
-            861,
-            0,
-            "%s\n\t(width) = %i",
-            "(width > 0 && (((width) & ((width) - 1)) == 0))",
-            width);
-    if (height <= 0 || (height & (height - 1)) != 0)
-        MyAssertHandler(
-            ".\\r_image_load_obj.cpp",
-            862,
-            0,
-            "%s\n\t(height) = %i",
-            "(height > 0 && (((height) & ((height) - 1)) == 0))",
-            height);
+    vassert((width > 0 && (((width) & ((width) - 1)) == 0)), "(width) = %i", width);
+    vassert((height > 0 && (((height) & ((height) - 1)) == 0)), "(height) = %i", height);
     Image_Setup(image, width, height, 1, 3, imageFormat);
     iassert( image->cardMemory.platform[PICMIP_PLATFORM_USED] > 0 );
     Image_UploadData(image, imageFormat, D3DCUBEMAP_FACE_POSITIVE_X, 0, pixels);
@@ -283,30 +269,9 @@ void __cdecl Image_Generate3D(
     _D3DFORMAT imageFormat)
 {
     iassert( pixels );
-    if (width <= 0 || (width & (width - 1)) != 0)
-        MyAssertHandler(
-            ".\\r_image_load_obj.cpp",
-            896,
-            0,
-            "%s\n\t(width) = %i",
-            "(width > 0 && (((width) & ((width) - 1)) == 0))",
-            width);
-    if (height <= 0 || (height & (height - 1)) != 0)
-        MyAssertHandler(
-            ".\\r_image_load_obj.cpp",
-            897,
-            0,
-            "%s\n\t(height) = %i",
-            "(height > 0 && (((height) & ((height) - 1)) == 0))",
-            height);
-    if (depth <= 0 || (depth & (depth - 1)) != 0)
-        MyAssertHandler(
-            ".\\r_image_load_obj.cpp",
-            898,
-            0,
-            "%s\n\t(depth) = %i",
-            "(depth > 0 && (((depth) & ((depth) - 1)) == 0))",
-            depth);
+    vassert((width > 0 && (((width) & ((width) - 1)) == 0)), "(width) = %i", width);
+    vassert((height > 0 && (((height) & ((height) - 1)) == 0)), "(height) = %i", height);
+    vassert((depth > 0 && (((depth) & ((depth) - 1)) == 0)), "(depth) = %i", depth);
     Image_Setup(image, width, height, depth, 11, imageFormat);
     iassert( image->cardMemory.platform[PICMIP_PLATFORM_USED] > 0 );
     Image_UploadData(image, imageFormat, D3DCUBEMAP_FACE_POSITIVE_X, 0, pixels);
@@ -462,14 +427,7 @@ char __cdecl Image_LoadFromFileWithReader(GfxImage *image, int(__cdecl *OpenFile
                     }
                     Image_GetPicmip(image, &image->picmip);
                     picmip = image->picmip.platform[0];
-                    if (fileHeader.fileSizeForPicmip[0] != fileSize)
-                        MyAssertHandler(
-                            ".\\r_image_load_obj.cpp",
-                            684,
-                            0,
-                            "fileHeader.fileSizeForPicmip[0] == fileSize\n\t%i, %i",
-                            fileHeader.fileSizeForPicmip[0],
-                            fileSize);
+                    vassert(fileHeader.fileSizeForPicmip[0] == fileSize, "%i, %i", fileHeader.fileSizeForPicmip[0], fileSize);
                     readSize = fileHeader.fileSizeForPicmip[picmip] - 28;
                     imageData = Image_AllocTempMemory(readSize);
                     if (FS_Read(imageData, readSize, fileHandle) == readSize)

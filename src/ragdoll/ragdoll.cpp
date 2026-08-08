@@ -298,14 +298,7 @@ char __cdecl Ragdoll_BindDef(uint ragdollDef)
 
 bool __cdecl Ragdoll_ValidateDef(uint ragdollDef)
 {
-    if (ragdollDef >= 2)
-        MyAssertHandler(
-            ".\\ragdoll\\ragdoll.cpp",
-            257,
-            0,
-            "ragdollDef doesn't index RAGDOLL_MAX_DEFS\n\t%i not in [0, %i)",
-            ragdollDef,
-            2);
+    bcassert(ragdollDef, 2);
     return ragdollDefs[ragdollDef].numBones != 0;
 }
 

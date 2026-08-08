@@ -70,14 +70,7 @@ void __cdecl R_TrackPrims(GfxCmdBufState *state, GfxPrimStatsTarget target)
 {
     iassert( backupPrimStats == NULL );
     iassert( g_viewStats );
-    if (g_primStats && g_primStats != &g_viewStats->primStats[target])
-        MyAssertHandler(
-            ".\\rb_stats.cpp",
-            76,
-            0,
-            "%s\n\t(target) = %i",
-            "(g_primStats == 0 || g_primStats == &g_viewStats->primStats[target])",
-            target);
+    vassert((g_primStats == 0 || g_primStats == &g_viewStats->primStats[target]), "(target) = %i", target);
     g_primStats = &g_viewStats->primStats[target];
 }
 

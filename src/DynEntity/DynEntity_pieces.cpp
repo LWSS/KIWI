@@ -80,8 +80,7 @@ void __cdecl DynEntPieces_SpawnPieces(
 {
     int pieceIndex; // [esp+0h] [ebp-4h]
 
-    if (!pieces)
-        MyAssertHandler(".\\DynEntity\\DynEntity_pieces.cpp", 184, 0, "%s", "pieces");
+    iassert(pieces);
     for (pieceIndex = 0; pieceIndex < pieces->numpieces; ++pieceIndex)
         DynEntPieces_SpawnPhysicsModel(
             localClientNum,
@@ -112,8 +111,7 @@ bool __cdecl DynEntPieces_SpawnPhysicsModel(
     float maxs[3]; // [esp+54h] [ebp-18h] BYREF
     float worldOffset[3]; // [esp+60h] [ebp-Ch] BYREF
 
-    if (!model)
-        MyAssertHandler(".\\DynEntity\\DynEntity_pieces.cpp", 131, 0, "%s", "model");
+    iassert(model);
     XModelGetBounds(model, mins, maxs);
     if (maxs[0] == mins[0] || maxs[1] == mins[1] || maxs[2] == mins[2])
     {

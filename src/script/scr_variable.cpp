@@ -1032,8 +1032,7 @@ void __cdecl Scr_AddFields_LoadObj(const char *path, const char *extension)
 	for (i = 0; i < numFiles; ++i)
 	{
 		snprintf(filename, ARRAYSIZE(filename), "%s/%s", path, files[i]);
-		if (strlen(filename) >= 0x40)
-			MyAssertHandler(".\\script\\scr_variable.cpp", 5191, 0, "%s", "strlen( filename ) < MAX_QPATH");
+		iassert(strlen( filename ) < MAX_QPATH);
 		Scr_AddFieldsForFile(filename);
 	}
 	if (files)
@@ -1306,16 +1305,14 @@ void  Scr_DumpScriptVariables(bool spreadsheet,
 							}
 							else
 							{
-								if (summary)
-									MyAssertHandler(".\\script\\scr_variable.cpp", 746, 0, "%s", "!summary");
+								iassert(!summary);
 								Com_Printf(0, "count: %d\n", pInfob->varUsage);
 								Scr_PrintPrevCodePos(0, (char*)pInfob->pos, 0);
 							}
 						}
 					}
 				}
-				if (num != count)
-					MyAssertHandler(".\\script\\scr_variable.cpp", 753, 0, "%s", "num == count");
+				iassert(num == count);
 				Com_Printf(0, "********************************\n");
 				Com_Printf(0, "num vars:          %d\n", filteredCount);
 				NumScriptVars = Scr_GetNumScriptVars();
@@ -1492,8 +1489,7 @@ uint  Scr_FindAllVariableField(uint parentId, uint* names)
 		goto $LN18_17;
 	case 0x14u:
 		classnum = parentValue->w.status >> 8;
-		if (classnum >= CLASS_NUM_COUNT)
-			MyAssertHandler(".\\script\\scr_variable.cpp", 2558, 0, "%s", "classnum < CLASS_NUM_COUNT");
+		iassert(classnum < CLASS_NUM_COUNT);
 		for (id = FindFirstSibling(g_classMap[classnum].id); id; id = FindNextSibling(id))
 		{
 			name = (scrVarGlob.variableList[id + VARIABLELIST_CHILD_BEGIN].w.status >> 8) - 0x800000;

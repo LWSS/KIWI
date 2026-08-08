@@ -593,8 +593,7 @@ void __cdecl trigger_use_shared(gentity_s *self)
     const char *cursorhint; // [esp+43Ch] [ebp-8h] BYREF
     uint i; // [esp+440h] [ebp-4h]
 
-    if (self->s.eType == ET_MISSILE)
-        MyAssertHandler(".\\game\\g_mover.cpp", 749, 0, "%s", "self->s.eType != ET_MISSILE");
+    iassert(self->s.eType != ET_MISSILE);
     if (SV_SetBrushModel(self))
     {
         self->r.contents = 0x200000;

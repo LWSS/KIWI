@@ -18,8 +18,7 @@ bool __cdecl Actor_Dog_Exposed_Start(actor_s *self, ai_state_t ePrevState)
 {
     int time; // r11
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_dog_exposed.cpp", 18, 0, "%s", "self");
+    iassert(self);
     self->ProneInfo.prone = 1;
     self->ProneInfo.orientPitch = 1;
     time = level.time;
@@ -49,8 +48,7 @@ int __cdecl Actor_Dog_IsInSyncedMelee(actor_s *self, sentient_s *enemy)
     int result; // r3
     bool v6; // zf
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_dog_exposed.cpp", 63, 0, "%s", "self");
+    iassert(self);
     if (!enemy)
         return 0;
     p_syncedMeleeEnt = &enemy->syncedMeleeEnt;
@@ -65,10 +63,8 @@ int __cdecl Actor_Dog_IsInSyncedMelee(actor_s *self, sentient_s *enemy)
 
 void __cdecl Actor_Dog_Attack(actor_s *self)
 {
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_dog_exposed.cpp", 77, 0, "%s", "self");
-    if (!self->sentient)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_dog_exposed.cpp", 78, 0, "%s", "self->sentient");
+    iassert(self);
+    iassert(self->sentient);
     if (self->sentient->targetEnt.isDefined())
     {
         if ((AnimScriptList *)self->pAnimScriptFunc == &g_scr_data.dogAnim && !Actor_IsAnimScriptAlive(self))
@@ -260,10 +256,8 @@ void __cdecl Actor_UpdateMeleeGoalPos(actor_s *self, float *goalPos)
 {
     double pathEnemyFightDist; // fp1
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_dog_exposed.cpp", 262, 0, "%s", "self");
-    if (!goalPos)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_dog_exposed.cpp", 263, 0, "%s", "goalPos");
+    iassert(self);
+    iassert(goalPos);
     self->codeGoal.pos[0] = goalPos[0];
     self->codeGoal.pos[1] = goalPos[1];
     self->codeGoal.pos[2] = goalPos[2];
@@ -298,10 +292,8 @@ float __cdecl Actor_Dog_GetEnemyPos(actor_s *self, sentient_s *enemy, float *ene
     int isDefined; // r3
     double v12; // fp1
 
-    if (!enemy)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_dog_exposed.cpp", 295, 0, "%s", "enemy");
-    if (!enemyPos)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_dog_exposed.cpp", 296, 0, "%s", "enemyPos");
+    iassert(enemy);
+    iassert(enemyPos);
     ent = enemy->ent;
     *enemyPos = enemy->ent->r.currentOrigin[0];
     enemyPos[1] = ent->r.currentOrigin[1];
@@ -410,10 +402,8 @@ actor_think_result_t __cdecl Actor_Dog_Exposed_Think(actor_s *self)
     AISpecies species; // r10
     int v18; // [sp+50h] [-40h] BYREF
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_dog_exposed.cpp", 394, 0, "%s", "self");
-    if (!self->sentient)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_dog_exposed.cpp", 395, 0, "%s", "self->sentient");
+    iassert(self);
+    iassert(self->sentient);
     IsEnemyInAttackRange = 0;
     v3 = 1;
     v18 = 0;

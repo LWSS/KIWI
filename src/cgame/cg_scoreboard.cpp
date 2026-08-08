@@ -59,14 +59,7 @@ void __cdecl CG_DrawObjectiveHeader(
     double height; // fp30
     double v31; // fp1
 
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            910,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     fadeAlpha = CG_FadeObjectives(cgArray);
     if (fadeAlpha != 0.0)
     {
@@ -115,8 +108,7 @@ const char *__cdecl CG_WordWrap(
     int v19; // r30
     const char *v21; // [sp+50h] [-70h] BYREF
 
-    if (!inputText)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_scoreboard.cpp", 128, 0, "%s", "inputText != NULL");
+    iassert(inputText != NULL);
     v13 = inputText;
     v14 = inputText;
     v15 = 0;
@@ -261,14 +253,7 @@ void __cdecl CG_DrawObjectiveList(
     v11 = "(localClientNum == 0)";
     HIDWORD(v66) = (uintptr_t)"%s\n\t(localClientNum) = %i";
     v65 = "(localClientNum == 0)";
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            910,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     fadeAlpha = CG_FadeObjectives(cgArray);
     if (fadeAlpha != 0.0)
     {
@@ -454,14 +439,7 @@ int __cdecl CG_DrawScoreboard(int localClientNum)
 {
     if (cg_paused->current.integer && cg_drawpaused->current.enabled)
         return 0;
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            910,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     if (cgArray[0].predictedPlayerState.pm_type >= PM_DEAD || !cgArray[0].showScores)
         return 0;
     CG_HudMenuShowAllTimed(localClientNum);
@@ -488,23 +466,9 @@ void __cdecl CG_ParseObjectiveChange(int localClientNum, unsigned int num)
     int i;
     char key[16]; // [sp+50h] [-60h] BYREF
 
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            910,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     ConfigString = CL_GetConfigString(localClientNum, num);
-    if (num - 11 >= 0x10)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_scoreboard.cpp",
-            420,
-            0,
-            "objectiveIndex doesn't index MAX_OBJECTIVES\n\t%i not in [0, %i)",
-            num - 11,
-            16);
+    bcassert(num - 11, 0x10);
 
     obj = &cgArray[0].objectives[num - 11];
     if (!*ConfigString)

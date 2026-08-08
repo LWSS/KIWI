@@ -54,13 +54,10 @@ int __cdecl Add_Ammo(gentity_s *ent, uint weaponIndex, uint8_t weaponModel, int 
     WeaponDef *weapDef; // [esp+1Ch] [ebp-4h]
     int counta; // [esp+34h] [ebp+14h]
 
-    if (!ent)
-        MyAssertHandler(".\\game\\g_items.cpp", 82, 0, "%s", "ent");
-    if (!ent->client)
-        MyAssertHandler(".\\game\\g_items.cpp", 83, 0, "%s", "ent->client");
+    iassert(ent);
+    iassert(ent->client);
     ps = ent->client;
-    if (!ps)
-        MyAssertHandler("c:\\trees\\cod3\\src\\bgame\\../bgame/bg_weapons.h", 229, 0, "%s", "ps");
+    iassert(ps);
     if (!Com_BitCheckAssert(ps->ps.weapons, weaponIndex, 16) && !BG_PlayerHasCompatibleWeapon(&ps->ps, weaponIndex))
         return 0;
     clipOnly = 0;
@@ -193,12 +190,9 @@ int __cdecl WeaponPickup(gentity_s *weaponEnt, gentity_s *player, int *pickupEve
     int weapIdx; // [esp+0h] [ebp-Ch]
     WeaponDef *weapDef; // [esp+4h] [ebp-8h]
 
-    if (!weaponEnt)
-        MyAssertHandler(".\\game\\g_items.cpp", 503, 0, "%s", "weaponEnt");
-    if (!player)
-        MyAssertHandler(".\\game\\g_items.cpp", 504, 0, "%s", "player");
-    if (!player->client)
-        MyAssertHandler(".\\game\\g_items.cpp", 505, 0, "%s", "player->client");
+    iassert(weaponEnt);
+    iassert(player);
+    iassert(player->client);
     weapIdx = weaponEnt->s.index.brushmodel % 128;
     weapDef = BG_GetWeaponDef(weapIdx);
     if (!BG_PlayerCanPickUpWeaponType(weapDef, &player->client->ps))
@@ -270,10 +264,8 @@ int __cdecl WeaponPickup_AddWeapon(
     WeaponDef *weapDef; // [esp+5Ch] [ebp-8h]
     int playerWeapIdx; // [esp+60h] [ebp-4h]
 
-    if (!ent)
-        MyAssertHandler(".\\game\\g_items.cpp", 192, 0, "%s", "ent");
-    if (!other)
-        MyAssertHandler(".\\game\\g_items.cpp", 193, 0, "%s", "other");
+    iassert(ent);
+    iassert(other);
     ps = &other->client->ps;
     weapDef = BG_GetWeaponDef(weapon);
     if (weapDef->inventoryType)
@@ -281,8 +273,7 @@ int __cdecl WeaponPickup_AddWeapon(
     if (!ps->weapon)
         goto LABEL_12;
     bitNum = ps->weapon;
-    if (!ps)
-        MyAssertHandler("c:\\trees\\cod3\\src\\bgame\\../bgame/bg_weapons.h", 229, 0, "%s", "ps");
+    iassert(ps);
     if (!Com_BitCheckAssert(ps->weapons, bitNum, 16))
         return 0;
 LABEL_12:
@@ -295,8 +286,7 @@ LABEL_12:
     playerWeapIdx = CurrentPrimaryWeapon(ps);
     if (playerWeapIdx)
     {
-        if (!ps)
-            MyAssertHandler("c:\\trees\\cod3\\src\\bgame\\../bgame/bg_weapons.h", 229, 0, "%s", "ps");
+        iassert(ps);
         if (!Com_BitCheckAssert(ps->weapons, playerWeapIdx, 16))
             MyAssertHandler(".\\game\\g_items.cpp", 227, 0, "%s", "BG_PlayerHasWeapon( ps, playerWeapIdx )");
         droppedEnt = Drop_Weapon(other, playerWeapIdx, ps->weaponmodels[playerWeapIdx], 0);
@@ -369,8 +359,7 @@ int __cdecl CurrentPrimaryWeapon(playerState_s *ps)
     int weapIdx; // [esp+0h] [ebp-8h]
     WeaponDef *weapDef; // [esp+4h] [ebp-4h]
 
-    if (!ps)
-        MyAssertHandler(".\\game\\g_items.cpp", 148, 0, "%s", "ps");
+    iassert(ps);
     if (!ps->weapon)
         return 0;
     weapIdx = ps->weapon;
@@ -380,8 +369,7 @@ int __cdecl CurrentPrimaryWeapon(playerState_s *ps)
         weapIdx = weapDef->altWeaponIndex;
         weapDef = BG_GetWeaponDef(weapIdx);
     }
-    if (!ps)
-        MyAssertHandler("c:\\trees\\cod3\\src\\bgame\\../bgame/bg_weapons.h", 229, 0, "%s", "ps");
+    iassert(ps);
     if (!Com_BitCheckAssert(ps->weapons, weapIdx, 16))
         return 0;
     if (weapDef->inventoryType)
@@ -391,8 +379,7 @@ int __cdecl CurrentPrimaryWeapon(playerState_s *ps)
 
 int __cdecl G_ItemClipMask(gentity_s *ent)
 {
-    if (!ent)
-        MyAssertHandler(".\\game\\g_items.cpp", 176, 0, "%s", "ent");
+    iassert(ent);
     if (ent->clipmask)
         return ent->clipmask;
     else
@@ -416,10 +403,8 @@ bool __cdecl WeaponPickup_LeechFromWeaponEnt(
     int i; // [esp+18h] [ebp-8h]
     bool removedAnyAmmo; // [esp+1Fh] [ebp-1h]
 
-    if (!weaponEnt)
-        MyAssertHandler(".\\game\\g_items.cpp", 295, 0, "%s", "weaponEnt");
-    if (!player)
-        MyAssertHandler(".\\game\\g_items.cpp", 296, 0, "%s", "player");
+    iassert(weaponEnt);
+    iassert(player);
     removedAnyAmmo = 0;
     for (i = 0; i < 2; ++i)
     {
@@ -452,8 +437,7 @@ bool __cdecl WeaponPickup_LeechFromWeaponEnt(
     }
     if (!suppressNotifies && removedAnyAmmo)
     {
-        if (!pickupEvent)
-            MyAssertHandler(".\\game\\g_items.cpp", 345, 0, "%s", "pickupEvent");
+        iassert(pickupEvent);
         *pickupEvent = 9;
     }
     return haveExactWeapon && removedAnyAmmo;
@@ -504,8 +488,7 @@ void __cdecl WeaponPickup_AddAmmoForNewWeapon(gentity_s *weaponEnt, gentity_s *p
             clipAmmo = weaponEnt->item[i].clipAmmoCount;
             if (clipAmmo >= 0)
             {
-                if (clipAmmo > weapDef->iClipSize)
-                    MyAssertHandler(".\\game\\g_items.cpp", 379, 0, "%s", "clipAmmo <= weapDef->iClipSize");
+                iassert(clipAmmo <= weapDef->iClipSize);
                 client = player->client;
                 client->ps.ammoclip[BG_ClipForWeapon(weapon)] = clipAmmo;
             }
@@ -520,12 +503,9 @@ void __cdecl WeaponPickup_Notifies(
     gentity_s *player,
     WeaponDef *weapDef)
 {
-    if (!thisItem)
-        MyAssertHandler(".\\game\\g_items.cpp", 392, 0, "%s", "thisItem");
-    if (!player)
-        MyAssertHandler(".\\game\\g_items.cpp", 393, 0, "%s", "player");
-    if (!weapDef)
-        MyAssertHandler(".\\game\\g_items.cpp", 394, 0, "%s", "weapDef");
+    iassert(thisItem);
+    iassert(player);
+    iassert(weapDef);
     if (newDroppedItem)
         Scr_AddEntity(newDroppedItem);
     else
@@ -541,14 +521,10 @@ bool __cdecl WeaponPickup_Touch(gentity_s *weaponEnt, gentity_s *player, int wea
     bool removeWeaponFromWorld; // [esp+Fh] [ebp-5h]
     WeaponDef *weapDef; // [esp+10h] [ebp-4h]
 
-    if (!weaponEnt)
-        MyAssertHandler(".\\game\\g_items.cpp", 474, 0, "%s", "weaponEnt");
-    if (!player)
-        MyAssertHandler(".\\game\\g_items.cpp", 475, 0, "%s", "player");
-    if (!player->client)
-        MyAssertHandler(".\\game\\g_items.cpp", 476, 0, "%s", "player->client");
-    if (!pickupEvent)
-        MyAssertHandler(".\\game\\g_items.cpp", 477, 0, "%s", "pickupEvent");
+    iassert(weaponEnt);
+    iassert(player);
+    iassert(player->client);
+    iassert(pickupEvent);
     weapDef = BG_GetWeaponDef(weapIdx);
     client = player->client;
     if (!client)
@@ -831,8 +807,7 @@ int __cdecl GetFreeDropCueIdx()
 
 bool __cdecl PlayerHasAnyAmmoToTransferToWeapon(gentity_s *player, uint transferWeapon)
 {
-    if (!player->client)
-        MyAssertHandler(".\\game\\g_items.cpp", 890, 0, "%s", "player->client");
+    iassert(player->client);
     return player->client->ps.ammoclip[BG_ClipForWeapon(transferWeapon)] > 0
         || GetNonClipAmmoToTransferToWeaponEntity(player, transferWeapon) > 0;
 }
@@ -982,13 +957,11 @@ int __cdecl TransferRandomAmmoToWeaponEntity(gentity_s *weaponEnt, int transferW
             }
             if (iMax >= 0)
             {
-                if (iMax < iMin)
-                    MyAssertHandler(".\\game\\g_items.cpp", 976, 0, "%s", "iMax >= iMin");
+                iassert(iMax >= iMin);
                 iDropAmmoa = iMin + G_rand() % (iMax - iMin + 1);
                 if (iDropAmmoa > 0)
                 {
-                    if (weapDef->iClipSize < 0)
-                        MyAssertHandler(".\\game\\g_items.cpp", 986, 0, "%s", "weapDef->iClipSize >= 0");
+                    iassert(weapDef->iClipSize >= 0);
                     if (weapDef->iClipSize == 1)
                         iDropClip = 1;
                     else
@@ -1179,8 +1152,7 @@ void __cdecl G_RegisterWeapon(uint weapIndex)
     uint8_t weapModel; // [esp+7h] [ebp-5h]
     WeaponDef *weapDef; // [esp+8h] [ebp-4h]
 
-    if (itemRegistered[weapIndex])
-        MyAssertHandler(".\\game\\g_items.cpp", 1301, 0, "%s", "!itemRegistered[weapIndex]");
+    iassert(!itemRegistered[weapIndex]);
     itemRegistered[weapIndex] = 1;
     level.bRegisterItems = 1;
 #ifdef KISAK_MP
@@ -1377,8 +1349,7 @@ void __cdecl G_RunItem(gentity_s *ent)
                 "!IS_NAN((origin)[0]) && !IS_NAN((origin)[1]) && !IS_NAN((origin)[2])");
         }
         mask = G_ItemClipMask(ent);
-        if ((mask & ent->r.contents) != 0)
-            MyAssertHandler(".\\game\\g_items.cpp", 1511, 0, "%s", "!( ent->r.contents & mask )");
+        iassert(!( ent->r.contents & mask ));
         Vec3Sub(origin, ent->r.currentOrigin, diff);
         if (Vec3LengthSq(diff) < 0.1000000014901161)
             origin[2] = origin[2] - 1.0;

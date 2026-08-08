@@ -160,10 +160,8 @@ PhysPreset *__cdecl PhysPresetPrecache(const char *name, void *(__cdecl *Alloc)(
     PhysPreset *physPreset; // [esp+0h] [ebp-4h]
     PhysPreset *physPreseta; // [esp+0h] [ebp-4h]
 
-    if (!name)
-        MyAssertHandler(".\\physics\\physpreset_load_obj.cpp", 146, 0, "%s", "name");
-    if (!*name)
-        MyAssertHandler(".\\physics\\physpreset_load_obj.cpp", 147, 0, "%s", "name[0]");
+    iassert(name);
+    iassert(name[0]);
     physPreset = (PhysPreset *)Hunk_FindDataForFile(7, name);
     if (physPreset)
         return physPreset;

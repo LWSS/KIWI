@@ -40,14 +40,7 @@ void __cdecl CG_ParseServerInfo(int localClientNum)
 
     ConfigString = CL_GetConfigString(localClientNum, 0);
     v3 = Info_ValueForKey(ConfigString, "mapname");
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            917,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     Com_GetBspFilename(cgsArray[0].mapname, 64, v3);
 }
 
@@ -166,14 +159,7 @@ void __cdecl CG_RegisterServerMaterial(int localClientNum, int num)
 {
     const char *ConfigString; // r3
 
-    if (num < CS_SERVER_MATERIALS || num >= CS_ITEMS)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_servercmds.cpp",
-            180,
-            0,
-            "%s\n\t(num) = %i",
-            "(num >= CS_SERVER_MATERIALS && num < CS_SERVER_MATERIALS + 128)",
-            num);
+    vassert((num >= CS_SERVER_MATERIALS && num < CS_SERVER_MATERIALS + 128), "(num) = %i", num);
     ConfigString = CL_GetConfigString(localClientNum, num);
     if (*ConfigString)
         Material_RegisterHandle(ConfigString, 7);
@@ -210,14 +196,7 @@ void __cdecl CG_ConfigStringModifiedInternal(int localClientNum, unsigned int st
     const FxEffectDef *v9; // r3
     shellshock_parms_t *ShellshockParms; // r3
 
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            910,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     ConfigString = CL_GetConfigString(localClientNum, stringIndex);
     v5 = ConfigString;
     if (stringIndex == CS_ITEMS)
@@ -403,14 +382,7 @@ void __cdecl CG_MenuShowNotify(int localClientNum, int menuToShow)
 {
     int v6; // r11
 
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            910,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
 
     switch (menuToShow)
     {
@@ -474,14 +446,7 @@ void __cdecl CG_HudMenuShowAllTimed(int localClientNum)
 {
     int time; // r11
 
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            910,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     time = cgArray[0].time;
     if (cgArray[0].healthFadeTime < cgArray[0].time)
     {
@@ -714,14 +679,7 @@ void __cdecl CG_SetChannelVolCmd(int localClientNum)
         v8 = Cmd_Argv(3);
         v9 = atof(v8);
         v10 = (float)*(double *)&v9;
-        if (localClientNum)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-                917,
-                0,
-                "%s\n\t(localClientNum) = %i",
-                "(localClientNum == 0)",
-                localClientNum);
+        vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
         *(double *)&v9 = (float)((float)((float)v10 * (float)1000.0) + (float)0.5);
         v11 = floor(v9);
         v12 = (int)(float)*(double *)&v11;
@@ -1284,14 +1242,7 @@ void __cdecl CG_DispatchServerCommand(int localClientNum)
 
     v3 = Cmd_Argv(0);
 
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            910,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     if (*v3)
     {
         v4 = "sw";
@@ -2161,14 +2112,7 @@ void __cdecl CG_ExecuteNewServerCommands(int localClientNum, int latestSequence)
     int i; // r11
 
     nesting = cmd_args.nesting;
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            910,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     for (i = cgArray[0].serverCommandSequence;
         cgArray[0].serverCommandSequence < latestSequence;
         i = cgArray[0].serverCommandSequence)
@@ -2184,13 +2128,7 @@ void __cdecl CG_ExecuteNewServerCommands(int localClientNum, int latestSequence)
             CG_DispatchServerCommand(localClientNum);
             Cmd_EndTokenizedString();
         }
-        if (nesting != cmd_args.nesting)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_servercmds.cpp",
-                1360,
-                0,
-                "%s",
-                "nesting == cmd_args.nesting");
+        iassert(nesting == cmd_args.nesting);
     }
 }
 

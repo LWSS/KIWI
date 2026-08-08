@@ -39,16 +39,13 @@ void __cdecl DevGui_AddDvar(const char *path, const dvar_s *dvar)
     uint16_t handle; // [esp+0h] [ebp-8h]
     devguiGlob_t *menu; // [esp+4h] [ebp-4h]
 
-    if (!path)
-        MyAssertHandler(".\\devgui\\devgui.cpp", 443, 0, "%s", "path");
-    if (!dvar)
-        MyAssertHandler(".\\devgui\\devgui.cpp", 444, 0, "%s", "dvar");
+    iassert(path);
+    iassert(dvar);
     if (DevGui_IsValidPath(path))
     {
         handle = DevGui_ConstructPath_r(0, path);
         menu = DevGui_GetMenu(handle);
-        if (!menu)
-            MyAssertHandler(".\\devgui\\devgui.cpp", 451, 0, "%s", "menu");
+        iassert(menu);
         if (!menu->menus[0].childType && !menu->menus[0].child.menu
             || menu->menus[0].childType == 1 && menu->menus[0].child.dvar == dvar)
         {
@@ -89,8 +86,7 @@ uint16_t __cdecl DevGui_ConstructPath_r(uint16_t parent, const char *path)
     do
     {
         tokResult = (DevGuiTokenResult)DevGui_PathToken(&path, label, &sortKey);
-        if (tokResult == DEVGUI_TOKEN_ERROR)
-            MyAssertHandler(".\\devgui\\devgui.cpp", 393, 0, "%s", "tokResult != DEVGUI_TOKEN_ERROR");
+        iassert(tokResult != DEVGUI_TOKEN_ERROR);
         parent = DevGui_RegisterMenu(parent, label, sortKey);
     } while (tokResult != DEVGUI_TOKEN_LAST);
     return parent;
@@ -175,10 +171,8 @@ uint16_t __cdecl DevGui_GetMenuHandle(DevMenuItem *menu)
 
 int __cdecl DevGui_CompareMenus(const DevMenuItem *menu0, const DevMenuItem *menu1)
 {
-    if (!menu0)
-        MyAssertHandler(".\\devgui\\devgui.cpp", 175, 0, "%s", "menu0");
-    if (!menu1)
-        MyAssertHandler(".\\devgui\\devgui.cpp", 176, 0, "%s", "menu1");
+    iassert(menu0);
+    iassert(menu1);
     if (menu0->sortKey == menu1->sortKey)
         return I_stricmp(menu0->label, menu1->label);
     else
@@ -206,8 +200,7 @@ uint16_t __cdecl DevGui_FindMenu(uint16_t parentHandle, const char *label)
     for (childHandle = parentMenu->menus[0].child.menu; childHandle; childHandle = childMenu->menus[0].nextSibling)
     {
         childMenu = DevGui_GetMenu(childHandle);
-        if (!childMenu)
-            MyAssertHandler(".\\devgui\\devgui.cpp", 283, 0, "%s", "childMenu");
+        iassert(childMenu);
         if (!I_stricmp(label, (const char *)childMenu))
             return childHandle;
     }
@@ -221,14 +214,10 @@ DevGuiTokenResult __cdecl DevGui_PathToken(const char **pathInOut, char *label, 
     int labelLen; // [esp+8h] [ebp-8h]
     __int16 sortKey; // [esp+Ch] [ebp-4h]
 
-    if (!pathInOut)
-        MyAssertHandler(".\\devgui\\devgui.cpp", 310, 0, "%s", "pathInOut");
-    if (!*pathInOut)
-        MyAssertHandler(".\\devgui\\devgui.cpp", 311, 0, "%s", "*pathInOut");
-    if (!label)
-        MyAssertHandler(".\\devgui\\devgui.cpp", 312, 0, "%s", "label");
-    if (!sortKeyOut)
-        MyAssertHandler(".\\devgui\\devgui.cpp", 313, 0, "%s", "sortKeyOut");
+    iassert(pathInOut);
+    iassert(*pathInOut);
+    iassert(label);
+    iassert(sortKeyOut);
     path = *pathInOut;
     labelLen = 0;
     *sortKeyOut = 0x7FFF;
@@ -285,8 +274,7 @@ char __cdecl DevGui_IsValidPath(const char *path)
     DevGuiTokenResult tokResult; // [esp+44h] [ebp-8h]
     __int16 sortKey; // [esp+48h] [ebp-4h] BYREF
 
-    if (!path)
-        MyAssertHandler(".\\devgui\\devgui.cpp", 408, 0, "%s", "path");
+    iassert(path);
     if (strlen(path) <= 0x78)
     {
         originalPath = path;
@@ -325,16 +313,13 @@ void __cdecl DevGui_AddCommand(const char *path, char *command)
     uint16_t handle; // [esp+0h] [ebp-8h]
     devguiGlob_t *menu; // [esp+4h] [ebp-4h]
 
-    if (!path)
-        MyAssertHandler(".\\devgui\\devgui.cpp", 468, 0, "%s", "path");
-    if (!command)
-        MyAssertHandler(".\\devgui\\devgui.cpp", 469, 0, "%s", "command");
+    iassert(path);
+    iassert(command);
     if (DevGui_IsValidPath(path))
     {
         handle = DevGui_ConstructPath_r(0, path);
         menu = DevGui_GetMenu(handle);
-        if (!menu)
-            MyAssertHandler(".\\devgui\\devgui.cpp", 476, 0, "%s", "menu");
+        iassert(menu);
         if (!menu->menus[0].childType && !menu->menus[0].child.menu
             || menu->menus[0].childType == 2 && menu->menus[0].child.command == command)
         {
@@ -357,23 +342,12 @@ void __cdecl DevGui_AddGraph(const char *path, DevGraph *graph)
     uint16_t handle; // [esp+0h] [ebp-8h]
     devguiGlob_t *menu; // [esp+4h] [ebp-4h]
 
-    if (!graph)
-        MyAssertHandler(".\\devgui\\devgui.cpp", 493, 0, "%s", "graph");
-    if (!graph->knots)
-        MyAssertHandler(".\\devgui\\devgui.cpp", 493, 0, "%s", "graph->knots");
-    if (!graph->knotCount)
-        MyAssertHandler(".\\devgui\\devgui.cpp", 493, 0, "%s", "graph->knotCount");
-    if (graph->knotCountMax <= 0)
-        MyAssertHandler(".\\devgui\\devgui.cpp", 493, 0, "%s", "graph->knotCountMax > 0");
-    if (!path)
-        MyAssertHandler(".\\devgui\\devgui.cpp", 494, 0, "%s", "path");
-    if (*graph->knotCount < 2 || *graph->knotCount > graph->knotCountMax)
-        MyAssertHandler(
-            ".\\devgui\\devgui.cpp",
-            496,
-            0,
-            "%s",
-            "*graph->knotCount >= 2 && *graph->knotCount <= graph->knotCountMax");
+    iassert(graph);
+    iassert(graph->knots);
+    iassert(graph->knotCount);
+    iassert(graph->knotCountMax > 0);
+    iassert(path);
+    iassert(*graph->knotCount >= 2 && *graph->knotCount <= graph->knotCountMax);
     if (DevGui_IsValidPath(path))
     {
         handle = DevGui_ConstructPath_r(0, path);
@@ -411,16 +385,14 @@ void __cdecl DevGui_RemoveMenu(const char *path)
         while (1)
         {
             tokResult = DevGui_PathToken(&path, label, &sortKey);
-            if (tokResult == DEVGUI_TOKEN_ERROR)
-                MyAssertHandler(".\\devgui\\devgui.cpp", 587, 0, "%s", "tokResult != DEVGUI_TOKEN_ERROR");
+            iassert(tokResult != DEVGUI_TOKEN_ERROR);
             handle = DevGui_FindMenu(handle, label);
             if (!handle)
                 break;
             if (tokResult == DEVGUI_TOKEN_LAST)
             {
                 menu = (DevMenuItem *)DevGui_GetMenu(handle);
-                if (!menu)
-                    MyAssertHandler(".\\devgui\\devgui.cpp", 597, 0, "%s", "menu");
+                iassert(menu);
                 if (menu->nextSibling)
                 {
                     sibling = (DevMenuItem *)DevGui_GetMenu(menu->nextSibling);
@@ -433,11 +405,9 @@ void __cdecl DevGui_RemoveMenu(const char *path)
                 }
                 else
                 {
-                    if (!menu->parent)
-                        MyAssertHandler(".\\devgui\\devgui.cpp", 610, 0, "%s", "menu->parent");
+                    iassert(menu->parent);
                     parent = (DevMenuItem *)DevGui_GetMenu(menu->parent);
-                    if (!parent)
-                        MyAssertHandler(".\\devgui\\devgui.cpp", 612, 0, "%s", "parent");
+                    iassert(parent);
                     if (parent->childType)
                     {
                         v1 = va("menu %s type %i", parent->label, parent->childType);
@@ -467,8 +437,7 @@ void __cdecl DevGui_FreeMenu_r(uint16_t handle)
             devguiGlob.editingMenuItem = 0;
         }
         menu = DevGui_GetMenu(handle);
-        if (!menu)
-            MyAssertHandler(".\\devgui\\devgui.cpp", 199, 0, "%s", "menu");
+        iassert(menu);
         if (menu->menus[0].childType == 2)
         {
             FreeString(menu->menus[0].child.command);
@@ -498,8 +467,7 @@ void __cdecl DevGui_OpenMenu(const char *path)
         while (1)
         {
             tokResult = DevGui_PathToken(&path, label, &sortKey);
-            if (tokResult == DEVGUI_TOKEN_ERROR)
-                MyAssertHandler(".\\devgui\\devgui.cpp", 638, 0, "%s", "tokResult != DEVGUI_TOKEN_ERROR");
+            iassert(tokResult != DEVGUI_TOKEN_ERROR);
             handle = DevGui_FindMenu(handle, label);
             if (!handle)
                 break;
@@ -582,11 +550,9 @@ void __cdecl DevGui_DrawMenu(uint16_t menuHandle, uint16_t activeChild, int *ori
 {
     devguiGlob_t *menu; // [esp+0h] [ebp-4h]
 
-    if (!origin)
-        MyAssertHandler(".\\devgui\\devgui.cpp", 860, 0, "%s", "origin");
+    iassert(origin);
     menu = DevGui_GetMenu(menuHandle);
-    if (!menu)
-        MyAssertHandler(".\\devgui\\devgui.cpp", 863, 0, "%s", "menu");
+    iassert(menu);
     if (menu->menus[0].parent)
         DevGui_DrawMenu(menu->menus[0].parent, menuHandle, origin);
     else
@@ -611,8 +577,7 @@ void __cdecl DevGui_DrawMenuVertically(const DevMenuItem *menu, uint16_t activeC
     uint16_t childHandle; // [esp+3Ch] [ebp-8h]
     int w; // [esp+40h] [ebp-4h]
 
-    if (!menu)
-        MyAssertHandler((char *)".\\devgui\\devgui.cpp", 721, 0, "%s", "menu");
+    iassert(menu);
     x = *origin;
     y = origin[1];
     w = DevGui_MaxChildMenuWidth(menu);
@@ -707,8 +672,7 @@ int __cdecl DevGui_MaxChildMenuWidth(const DevMenuItem *menu)
     int widthMax; // [esp+8h] [ebp-8h]
     uint16_t childHandle; // [esp+Ch] [ebp-4h]
 
-    if (!menu)
-        MyAssertHandler(".\\devgui\\devgui.cpp", 689, 0, "%s", "menu");
+    iassert(menu);
     if (menu->childType)
         MyAssertHandler(".\\devgui\\devgui.cpp", 690, 0, "%s", "menu->childType == DEV_CHILD_MENU");
     widthMax = DevGui_MenuItemWidth(menu);
@@ -743,8 +707,7 @@ void __cdecl DevGui_DrawMenuHorizontally(const DevMenuItem *menu, uint16_t activ
     uint16_t childHandle; // [esp+20h] [ebp-8h]
     int w; // [esp+24h] [ebp-4h]
 
-    if (!menu)
-        MyAssertHandler((char *)".\\devgui\\devgui.cpp", 825, 0, "%s", "menu");
+    iassert(menu);
     x = *origin;
     y = origin[1];
     h = R_TextHeight(cls.consoleFont) + 8;
@@ -784,8 +747,7 @@ void __cdecl DevGui_ChooseOrigin(int *origin)
     for (handle = DevGui_GetMenuParent(devguiGlob.selectedMenu); handle; handle = menu->menus[0].parent)
     {
         menu = DevGui_GetMenu(handle);
-        if (!menu)
-            MyAssertHandler(".\\devgui\\devgui.cpp", 887, 0, "%s", "menu");
+        iassert(menu);
         w += DevGui_MaxChildMenuWidth(menu->menus);
         activeChild = handle;
     }
@@ -831,8 +793,7 @@ void __cdecl DevGui_DrawSliders(const DevMenuItem *menu)
         MyAssertHandler((char *)".\\devgui\\devgui.cpp", 998, 0, "%s\n\t%s", "menu->childType == DEV_CHILD_DVAR", v1);
     }
     dvar = menu->child.dvar;
-    if (!dvar)
-        MyAssertHandler((char *)".\\devgui\\devgui.cpp", 1000, 0, "%s\n\t(menu->label) = %s", "(dvar)", menu->label);
+    vassert((dvar), "(menu->label) = %s", menu->label);
     rowWidth = devguiGlob.sliderWidth;
     rowHeight = DevGui_GetFontHeight();
     rowCount = DevGui_DvarRowCount(dvar);
@@ -948,8 +909,7 @@ int __cdecl DevGui_GetSliderPath(uint16_t menuHandle, char *path, int pathLen)
     devguiGlob_t *menu; // [esp+10h] [ebp-8h]
 
     menu = DevGui_GetMenu(menuHandle);
-    if (!menu)
-        MyAssertHandler(".\\devgui\\devgui.cpp", 912, 0, "%s", "menu");
+    iassert(menu);
     if (menu->menus[0].parent)
     {
         SliderPath = DevGui_GetSliderPath(menu->menus[0].parent, path, pathLen);
@@ -1095,16 +1055,11 @@ void __cdecl DevGui_DrawGraph(const DevMenuItem *menu, int localClientNum)
         MyAssertHandler((char *)".\\devgui\\devgui.cpp", 1129, 0, "%s\n\t%s", "menu->childType == DEV_CHILD_GRAPH", v2);
     }
     graph = menu->child.graph;
-    if (!graph)
-        MyAssertHandler((char *)".\\devgui\\devgui.cpp", 1132, 0, "%s", "graph");
-    if (!graph->knots)
-        MyAssertHandler((char *)".\\devgui\\devgui.cpp", 1132, 0, "%s", "graph->knots");
-    if (!graph->knotCount)
-        MyAssertHandler((char *)".\\devgui\\devgui.cpp", 1132, 0, "%s", "graph->knotCount");
-    if (graph->knotCountMax <= 0)
-        MyAssertHandler((char *)".\\devgui\\devgui.cpp", 1132, 0, "%s", "graph->knotCountMax > 0");
-    if (!graph)
-        MyAssertHandler((char *)".\\devgui\\devgui.cpp", 1134, 0, "%s\n\t(menu->label) = %s", "(graph)", menu->label);
+    iassert(graph);
+    iassert(graph->knots);
+    iassert(graph->knotCount);
+    iassert(graph->knotCountMax > 0);
+    vassert((graph), "(menu->label) = %s", menu->label);
     rowWidth = devguiGlob.sliderWidth;
     rowHeight = DevGui_GetFontHeight();
     width = rowWidth + 8;
@@ -1355,8 +1310,7 @@ void __cdecl DevGui_KeyPressed(int key)
                 if (!devguiGlob.selectedMenu)
                     MyAssertHandler(".\\devgui\\devgui.cpp", 2035, 0, "%s", "handle");
                 menu = (DevMenuItem *)DevGui_GetMenu(handle);
-                if (!menu)
-                    MyAssertHandler(".\\devgui\\devgui.cpp", 2037, 0, "%s", "menu");
+                iassert(menu);
                 if (menu->parent && (!menu->childType || menu->childType == 1 && !devguiGlob.editingMenuItem))
                     handle = menu->parent;
                 DevGui_GetSliderPath(handle, path, 0);
@@ -1380,8 +1334,7 @@ void __cdecl DevGui_Update(int localClientNum, float deltaTime)
         else
         {
             selMenuItem = DevGui_GetMenu(devguiGlob.selectedMenu);
-            if (!selMenuItem)
-                MyAssertHandler(".\\devgui\\devgui.cpp", 2071, 0, "%s", "selMenuItem");
+            iassert(selMenuItem);
             if (devguiGlob.editingMenuItem && selMenuItem->menus[0].childType == 3)
             {
                 DevGui_UpdateGraph(localClientNum, deltaTime);
@@ -1426,8 +1379,7 @@ void DevGui_MoveLeft()
 {
     devguiGlob_t *menu; // [esp+0h] [ebp-4h]
 
-    if (!devguiGlob.selectedMenu)
-        MyAssertHandler(".\\devgui\\devgui.cpp", 1358, 0, "%s", "devguiGlob.selectedMenu");
+    iassert(devguiGlob.selectedMenu);
     for (menu = DevGui_GetMenu(devguiGlob.selectedMenu);
         menu->menus[0].parent;
         menu = DevGui_GetMenu(devguiGlob.selectedMenu))
@@ -1442,8 +1394,7 @@ void DevGui_SelectPrevMenuItem()
     devguiGlob_t *v0; // [esp+0h] [ebp-Ch]
     devguiGlob_t *menu; // [esp+4h] [ebp-8h]
 
-    if (!devguiGlob.selectedMenu)
-        MyAssertHandler(".\\devgui\\devgui.cpp", 1287, 0, "%s", "devguiGlob.selectedMenu");
+    iassert(devguiGlob.selectedMenu);
     menu = DevGui_GetMenu(devguiGlob.selectedMenu);
     if (menu->menus[0].parent)
         v0 = DevGui_GetMenu(menu->menus[0].parent);
@@ -1475,8 +1426,7 @@ void DevGui_SelectTopLevelChild()
     devguiGlob_t *menu; // [esp+0h] [ebp-4h]
 
     menu = DevGui_GetMenu(devguiGlob.selectedMenu);
-    if (!menu)
-        MyAssertHandler(".\\devgui\\devgui.cpp", 1270, 0, "%s", "menu");
+    iassert(menu);
     if (!menu->menus[0].parent)
     {
         if (menu->menus[0].childType)
@@ -1513,8 +1463,7 @@ void DevGui_MoveRight()
 {
     devguiGlob_t *menu; // [esp+0h] [ebp-4h]
 
-    if (!devguiGlob.selectedMenu)
-        MyAssertHandler(".\\devgui\\devgui.cpp", 1373, 0, "%s", "devguiGlob.selectedMenu");
+    iassert(devguiGlob.selectedMenu);
     for (menu = DevGui_GetMenu(devguiGlob.selectedMenu);
         menu->menus[0].parent;
         menu = DevGui_GetMenu(devguiGlob.selectedMenu))
@@ -1529,8 +1478,7 @@ void DevGui_SelectNextMenuItem()
     devguiGlob_t *menuParent; // [esp+0h] [ebp-8h]
     devguiGlob_t *menu; // [esp+4h] [ebp-4h]
 
-    if (!devguiGlob.selectedMenu)
-        MyAssertHandler(".\\devgui\\devgui.cpp", 1322, 0, "%s", "devguiGlob.selectedMenu");
+    iassert(devguiGlob.selectedMenu);
     menu = DevGui_GetMenu(devguiGlob.selectedMenu);
     if (menu->menus[0].parent)
     {
@@ -1572,8 +1520,7 @@ void DevGui_MoveUp()
 {
     devguiGlob_t *menu; // [esp+0h] [ebp-4h]
 
-    if (!devguiGlob.selectedMenu)
-        MyAssertHandler(".\\devgui\\devgui.cpp", 1392, 0, "%s", "devguiGlob.selectedMenu");
+    iassert(devguiGlob.selectedMenu);
     menu = DevGui_GetMenu(devguiGlob.selectedMenu);
     if (!menu->menus[0].parent)
     {
@@ -1595,8 +1542,7 @@ void DevGui_MoveDown()
 {
     devguiGlob_t *menu; // [esp+0h] [ebp-4h]
 
-    if (!devguiGlob.selectedMenu)
-        MyAssertHandler(".\\devgui\\devgui.cpp", 1409, 0, "%s", "devguiGlob.selectedMenu");
+    iassert(devguiGlob.selectedMenu);
     menu = DevGui_GetMenu(devguiGlob.selectedMenu);
     if (!menu->menus[0].parent)
     {
@@ -1619,8 +1565,7 @@ void __cdecl DevGui_Accept(int localClientNum)
     devguiGlob_t *menu; // [esp+4h] [ebp-4h]
 
     menu = DevGui_GetMenu(devguiGlob.selectedMenu);
-    if (!menu)
-        MyAssertHandler(".\\devgui\\devgui.cpp", 1463, 0, "%s", "menu");
+    iassert(menu);
     switch (menu->menus[0].childType)
     {
     case 0u:
@@ -1662,8 +1607,7 @@ void DevGui_Reject()
 {
     devguiGlob_t *menu; // [esp+0h] [ebp-4h]
 
-    if (!devguiGlob.selectedMenu)
-        MyAssertHandler(".\\devgui\\devgui.cpp", 1507, 0, "%s", "devguiGlob.selectedMenu");
+    iassert(devguiGlob.selectedMenu);
     menu = DevGui_GetMenu(devguiGlob.selectedMenu);
     if (devguiGlob.editingMenuItem)
     {
@@ -1706,8 +1650,7 @@ int DevGui_ScrollUp()
     if (menu->menus[0].childType != 1)
         MyAssertHandler(".\\devgui\\devgui.cpp", 1599, 0, "%s", "menu->childType == DEV_CHILD_DVAR");
     dvar = DevGui_SelectedDvar();
-    if (!dvar)
-        MyAssertHandler(".\\devgui\\devgui.cpp", 1602, 0, "%s", "dvar");
+    iassert(dvar);
     result = DevGui_DvarRowCount(dvar);
     rowCount = result;
     if (result == 1)
@@ -1731,16 +1674,14 @@ const dvar_s *__cdecl DevGui_SelectedDvar()
     const dvar_s *dvar; // [esp+4h] [ebp-4h]
 
     menu = DevGui_GetMenu(devguiGlob.selectedMenu);
-    if (!menu)
-        MyAssertHandler(".\\devgui\\devgui.cpp", 1565, 0, "%s", "menu");
+    iassert(menu);
     if (menu->menus[0].childType != 1)
     {
         v0 = va("menu %s type %i", (const char *)menu, menu->menus[0].childType);
         MyAssertHandler(".\\devgui\\devgui.cpp", 1566, 0, "%s\n\t%s", "menu->childType == DEV_CHILD_DVAR", v0);
     }
     dvar = menu->menus[0].child.dvar;
-    if (!dvar)
-        MyAssertHandler(".\\devgui\\devgui.cpp", 1568, 0, "%s\n\t(menu->label) = %s", "(dvar)", (const char *)menu);
+    vassert((dvar), "(menu->label) = %s", (const char *)menu);
     return dvar;
 }
 
@@ -1771,8 +1712,7 @@ int DevGui_ScrollDown()
     if (menu->menus[0].childType != 1)
         MyAssertHandler(".\\devgui\\devgui.cpp", 1642, 0, "%s", "menu->childType == DEV_CHILD_DVAR");
     dvar = DevGui_SelectedDvar();
-    if (!dvar)
-        MyAssertHandler(".\\devgui\\devgui.cpp", 1645, 0, "%s", "dvar");
+    iassert(dvar);
     rowCount = DevGui_DvarRowCount(dvar);
     if (rowCount == 1)
         return DevGui_ScrollDownInternal();
@@ -1812,8 +1752,7 @@ void __cdecl DevGui_UpdateDvar(float deltaTime)
     int intValue; // [esp+68h] [ebp-4h]
 
     dvar = DevGui_SelectedDvar();
-    if (!dvar)
-        MyAssertHandler(".\\devgui\\devgui.cpp", 1715, 0, "%s", "dvar");
+    iassert(dvar);
     switch (dvar->type)
     {
     case 0u:
@@ -1989,29 +1928,18 @@ void __cdecl DevGui_UpdateGraph(int localClientNum, float deltaTime)
     float deltaYa; // [esp+B4h] [ebp-4h]
 
     menu = DevGui_GetMenu(devguiGlob.selectedMenu);
-    if (!menu)
-        MyAssertHandler(".\\devgui\\devgui.cpp", 1882, 0, "%s", "menu");
+    iassert(menu);
     if (menu->menus[0].childType != 3)
         MyAssertHandler(".\\devgui\\devgui.cpp", 1883, 0, "%s", "menu->childType == DEV_CHILD_GRAPH");
     if (!menu->menus[0].child.command)
         MyAssertHandler(".\\devgui\\devgui.cpp", 1884, 0, "%s", "menu->child.graph");
     graph = menu->menus[0].child.graph;
-    if (!graph)
-        MyAssertHandler(".\\devgui\\devgui.cpp", 1888, 0, "%s", "graph");
-    if (!graph->knots)
-        MyAssertHandler(".\\devgui\\devgui.cpp", 1888, 0, "%s", "graph->knots");
-    if (!graph->knotCount)
-        MyAssertHandler(".\\devgui\\devgui.cpp", 1888, 0, "%s", "graph->knotCount");
-    if (graph->knotCountMax <= 0)
-        MyAssertHandler(".\\devgui\\devgui.cpp", 1888, 0, "%s", "graph->knotCountMax > 0");
+    iassert(graph);
+    iassert(graph->knots);
+    iassert(graph->knotCount);
+    iassert(graph->knotCountMax > 0);
     currentKnotCount = *graph->knotCount;
-    if (currentKnotCount < 2 || currentKnotCount > graph->knotCountMax)
-        MyAssertHandler(
-            ".\\devgui\\devgui.cpp",
-            1891,
-            0,
-            "%s",
-            "currentKnotCount >= 2 && currentKnotCount <= graph->knotCountMax");
+    iassert(currentKnotCount >= 2 && currentKnotCount <= graph->knotCountMax);
     if (graph->selectedKnot < 0 || graph->selectedKnot >= currentKnotCount)
         graph->selectedKnot = 0;
     if (DevGui_IsButtonPressed(INPUT_GRAPH_EDIT))
@@ -2149,18 +2077,12 @@ void __cdecl DevGui_AddGraphKnot(DevGraph *graph, int localClientNum)
     float averageY; // [esp+20h] [ebp-4h]
     float averageYa; // [esp+20h] [ebp-4h]
 
-    if (!graph)
-        MyAssertHandler(".\\devgui\\devgui.cpp", 1793, 0, "%s", "graph");
-    if (!graph->knots)
-        MyAssertHandler(".\\devgui\\devgui.cpp", 1793, 0, "%s", "graph->knots");
-    if (!graph->knotCount)
-        MyAssertHandler(".\\devgui\\devgui.cpp", 1793, 0, "%s", "graph->knotCount");
-    if (graph->knotCountMax <= 0)
-        MyAssertHandler(".\\devgui\\devgui.cpp", 1793, 0, "%s", "graph->knotCountMax > 0");
-    if (graph->selectedKnot < 0)
-        MyAssertHandler(".\\devgui\\devgui.cpp", 1794, 0, "%s", "graph->selectedKnot >= 0");
-    if (graph->selectedKnot >= *graph->knotCount)
-        MyAssertHandler(".\\devgui\\devgui.cpp", 1795, 0, "%s", "graph->selectedKnot < *graph->knotCount");
+    iassert(graph);
+    iassert(graph->knots);
+    iassert(graph->knotCount);
+    iassert(graph->knotCountMax > 0);
+    iassert(graph->selectedKnot >= 0);
+    iassert(graph->selectedKnot < *graph->knotCount);
     if (*graph->knotCount == graph->knotCountMax)
     {
         Com_Printf(11, "^3Maximum number of knots have reached for this graph\n");
@@ -2205,18 +2127,12 @@ void __cdecl DevGui_RemoveGraphKnot(DevGraph *graph, int localClientNum)
     int currentKnotCount; // [esp+8h] [ebp-8h]
     int knotIndex; // [esp+Ch] [ebp-4h]
 
-    if (!graph)
-        MyAssertHandler(".\\devgui\\devgui.cpp", 1843, 0, "%s", "graph");
-    if (!graph->knots)
-        MyAssertHandler(".\\devgui\\devgui.cpp", 1843, 0, "%s", "graph->knots");
-    if (!graph->knotCount)
-        MyAssertHandler(".\\devgui\\devgui.cpp", 1843, 0, "%s", "graph->knotCount");
-    if (graph->knotCountMax <= 0)
-        MyAssertHandler(".\\devgui\\devgui.cpp", 1843, 0, "%s", "graph->knotCountMax > 0");
-    if (graph->selectedKnot < 0)
-        MyAssertHandler(".\\devgui\\devgui.cpp", 1845, 0, "%s", "graph->selectedKnot >= 0");
-    if (graph->selectedKnot >= *graph->knotCount)
-        MyAssertHandler(".\\devgui\\devgui.cpp", 1846, 0, "%s", "graph->selectedKnot < *graph->knotCount");
+    iassert(graph);
+    iassert(graph->knots);
+    iassert(graph->knotCount);
+    iassert(graph->knotCountMax > 0);
+    iassert(graph->selectedKnot >= 0);
+    iassert(graph->selectedKnot < *graph->knotCount);
     currentKnotCount = *graph->knotCount;
     if (graph->selectedKnot && graph->selectedKnot + 1 != currentKnotCount)
     {
@@ -2240,8 +2156,7 @@ void __cdecl DevGui_Toggle()
     {
         if (devguiGlob.selectedMenu)
             goto LABEL_10;
-        if (devguiGlob.isActive)
-            MyAssertHandler(".\\devgui\\devgui.cpp", 2113, 0, "%s", "!devguiGlob.isActive");
+        iassert(!devguiGlob.isActive);
         devguiGlob.selectedMenu = devguiGlob.topmostMenu.child.menu;
         if (devguiGlob.topmostMenu.child.menu)
         {
@@ -2251,10 +2166,7 @@ void __cdecl DevGui_Toggle()
             devguiGlob.isActive = !devguiGlob.isActive;
         }
     }
-    else if (devguiGlob.isActive)
-    {
-        MyAssertHandler(".\\devgui\\devgui.cpp", 2107, 0, "%s", "!devguiGlob.isActive");
-    }
+    else iassert(!devguiGlob.isActive);
 }
 
 void DevGui_Reset()

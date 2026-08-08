@@ -492,8 +492,7 @@ void __cdecl Hunk_OverrideDataForFile(int type, const char *name, void *data)
 {
     fileData_s *searchFileData; // [esp+4h] [ebp-4h]
 
-    if (!Sys_IsMainThread())
-        MyAssertHandler(".\\universal\\com_memory.cpp", 1539, 0, "%s", "Sys_IsMainThread()");
+    iassert(Sys_IsMainThread());
     for (searchFileData = com_fileDataHashTable[FS_HashFileName(name, 1024)];
         searchFileData;
         searchFileData = searchFileData->next)
@@ -688,12 +687,9 @@ void __cdecl DB_EndRecoverLostDevice()
             "%s",
             "critSect->readCount > 0");
     InterlockedDecrement(&db_hashCritSect.readCount);
-    if (!Sys_IsMainThread())
-        MyAssertHandler(".\\database\\db_registry.cpp", 2929, 0, "%s", "Sys_IsMainThread()");
-    if (!g_isRecoveringLostDevice)
-        MyAssertHandler(".\\database\\db_registry.cpp", 2930, 0, "%s", "g_isRecoveringLostDevice");
-    if (!g_mayRecoverLostAssets)
-        MyAssertHandler(".\\database\\db_registry.cpp", 2931, 0, "%s", "g_mayRecoverLostAssets");
+    iassert(Sys_IsMainThread());
+    iassert(g_isRecoveringLostDevice);
+    iassert(g_mayRecoverLostAssets);
     g_mayRecoverLostAssets = !g_loadingZone;
     g_isRecoveringLostDevice = 0;
 }
@@ -702,10 +698,8 @@ void __cdecl DB_BeginRecoverLostDevice()
 {
     int zoneIter; // [esp+4h] [ebp-4h]
 
-    if (!Sys_IsMainThread())
-        MyAssertHandler(".\\database\\db_registry.cpp", 2896, 0, "%s", "Sys_IsMainThread()");
-    if (g_isRecoveringLostDevice)
-        MyAssertHandler(".\\database\\db_registry.cpp", 2897, 0, "%s", "!g_isRecoveringLostDevice");
+    iassert(Sys_IsMainThread());
+    iassert(!g_isRecoveringLostDevice);
     g_isRecoveringLostDevice = 1;
     while (!g_mayRecoverLostAssets)
         NET_Sleep(0);
@@ -726,8 +720,7 @@ void __cdecl DB_BeginRecoverLostDevice()
 
 void __cdecl DB_InitSingleton(void *pool, int size)
 {
-    if (size != 1)
-        MyAssertHandler(".\\database\\db_registry.cpp", 528, 0, "%s\n\t(size) = %i", "(size == 1)", size);
+    vassert((size == 1), "(size) = %i", size);
 }
 
 void __cdecl Load_PhysPresetAsset(XAssetHeader *physPreset)
@@ -1769,8 +1762,7 @@ void __cdecl PrintWaitedError(XAssetType type, const char *name, int waitedMsec)
 
 void __cdecl DB_Update()
 {
-    if (!Sys_IsMainThread())
-        MyAssertHandler(".\\database\\db_registry.cpp", 2805, 0, "%s", "Sys_IsMainThread()");
+    iassert(Sys_IsMainThread());
     if (!Sys_IsDatabaseReady2())
     {
         if (Sys_IsDatabaseReady())
@@ -1844,8 +1836,7 @@ int __cdecl DB_GetAllXAssetOfType_FastFile(XAssetType type, XAssetHeader *assets
             {
                 if (assets)
                 {
-                    if (assetCount >= maxCount)
-                        MyAssertHandler(".\\database\\db_registry.cpp", 2877, 0, "%s", "assetCount < maxCount");
+                    iassert(assetCount < maxCount);
                     assets[assetCount] = assetEntry->entry.asset.header;
                 }
                 ++assetCount;
@@ -1867,14 +1858,12 @@ void DB_SyncLostDevice()
 {
     if (g_isRecoveringLostDevice)
     {
-        if (g_mayRecoverLostAssets)
-            MyAssertHandler(".\\database\\db_registry.cpp", 2945, 0, "%s", "!g_mayRecoverLostAssets");
+        iassert(!g_mayRecoverLostAssets);
         g_mayRecoverLostAssets = 1;
         do
             NET_Sleep(0x19u);
         while (g_isRecoveringLostDevice);
-        if (g_mayRecoverLostAssets)
-            MyAssertHandler(".\\database\\db_registry.cpp", 2951, 0, "%s", "!g_mayRecoverLostAssets");
+        iassert(!g_mayRecoverLostAssets);
     }
 }
 
@@ -2122,10 +2111,8 @@ void __cdecl DB_DelayedCloneXAsset(XAssetEntry *newEntry)
 
 bool __cdecl DB_OverrideAsset(uint newZoneIndex, uint existingZoneIndex)
 {
-    if (!newZoneIndex)
-        MyAssertHandler(".\\database\\db_registry.cpp", 2959, 0, "%s", "newZoneIndex");
-    if (!existingZoneIndex)
-        MyAssertHandler(".\\database\\db_registry.cpp", 2960, 0, "%s", "existingZoneIndex");
+    iassert(newZoneIndex);
+    iassert(existingZoneIndex);
     return g_zones[newZoneIndex].flags >= g_zones[existingZoneIndex].flags;
 }
 
@@ -2141,8 +2128,7 @@ void __cdecl DB_GetXAsset(XAssetType type, XAssetHeader header)
     name = DB_GetXAssetName(&asset);
     for (assetEntryIndex = db_hashTable[DB_HashForName(name, type)]; ; assetEntryIndex = assetEntry->nextHash)
     {
-        if (!assetEntryIndex)
-            MyAssertHandler(".\\database\\db_registry.cpp", 3163, 0, "%s", "assetEntryIndex");
+        iassert(assetEntryIndex);
         assetEntry = &g_assetEntryPool[assetEntryIndex].entry;
         if (assetEntry->asset.type == type && assetEntry->asset.header.xmodelPieces == header.xmodelPieces)
             break;
@@ -2217,8 +2203,7 @@ void __cdecl DB_UpdateDebugZone()
 
 void __cdecl DB_SyncXAssets()
 {
-    if (!Sys_IsMainThread())
-        MyAssertHandler(".\\database\\db_registry.cpp", 3386, 0, "%s", "Sys_IsMainThread()");
+    iassert(Sys_IsMainThread());
     R_BeginRemoteScreenUpdate();
     Sys_SyncDatabase();
     R_EndRemoteScreenUpdate();
@@ -2324,10 +2309,8 @@ void __cdecl DB_LoadXZone(XZoneInfo *zoneInfo, uint zoneCount)
 
     if (g_zoneCount == 32)
         Com_Error(ERR_DROP, "Max zone count exceeded");
-    if (g_zoneInfoCount)
-        MyAssertHandler(".\\database\\db_registry.cpp", 3240, 0, "%s", "!g_zoneInfoCount");
-    if (g_loadingAssets)
-        MyAssertHandler(".\\database\\db_registry.cpp", 3241, 0, "%s", "!g_loadingAssets");
+    iassert(!g_zoneInfoCount);
+    iassert(!g_loadingAssets);
     zoneInfoCount = 0;
     for (j = 0; j < zoneCount; ++j)
     {
@@ -2408,26 +2391,20 @@ void DB_TryLoadXFile()
     {
         zoneInfoCount = g_zoneInfoCount;
         g_zoneInfoCount = 0;
-        if (g_loadingZone)
-            MyAssertHandler(".\\database\\db_registry.cpp", 3764, 0, "%s", "!g_loadingZone");
+        iassert(!g_loadingZone);
         for (j = 0; j < zoneInfoCount; ++j)
         {
             if (!DB_TryLoadXFileInternal(g_zoneInfo[j].name, g_zoneInfo[j].flags))
                 --g_loadingAssets;
         }
-        if (g_loadingZone)
-            MyAssertHandler(".\\database\\db_registry.cpp", 3772, 0, "%s", "!g_loadingZone");
-        if (g_loadingAssets)
-            MyAssertHandler(".\\database\\db_registry.cpp", 3773, 0, "%s", "!g_loadingAssets");
+        iassert(!g_loadingZone);
+        iassert(!g_loadingAssets);
         Sys_LockWrite(&s_dbReorder.critSect);
         DB_EndReorderZone();
         Sys_UnlockWrite(&s_dbReorder.critSect);
         Sys_DatabaseCompleted();
     }
-    else if (g_loadingAssets)
-    {
-        MyAssertHandler(".\\database\\db_registry.cpp", 3759, 0, "%s", "!g_loadingAssets");
-    }
+    else iassert(!g_loadingAssets);
 }
 
 char __cdecl DB_NextZoneCsvToken(const char **parse, char *token, uint tokenSize, bool allowNewLine)
@@ -2610,8 +2587,7 @@ char __cdecl DB_ShouldLoadFromModDir(const char *zoneName)
     const char *strPos; // [esp+0h] [ebp-8h]
     int i; // [esp+4h] [ebp-4h]
 
-    if (!zoneName)
-        MyAssertHandler(".\\database\\db_registry.cpp", 3523, 0, "%s", "zoneName");
+    iassert(zoneName);
     if (com_sv_running->current.enabled)
         return 1;
     if (!fs_numServerReferencedFFs)
@@ -2622,8 +2598,7 @@ char __cdecl DB_ShouldLoadFromModDir(const char *zoneName)
     {
         if (i >= fs_numServerReferencedFFs)
             return 0;
-        if (!fs_serverReferencedFFNames[i])
-            MyAssertHandler(".\\database\\db_registry.cpp", 3536, 0, "%s", "fs_serverReferencedFFNames[i]");
+        iassert(fs_serverReferencedFFNames[i]);
         strPos = I_stristr(fs_serverReferencedFFNames[i], zoneName);
         if (strPos)
             break;
@@ -2715,10 +2690,8 @@ int __cdecl DB_TryLoadXFileInternal(char *zoneName, int zoneFlags)
             }
         }
 
-        if (!g_zoneIndex)
-            MyAssertHandler(".\\database\\db_registry.cpp", 3667, 0, "%s", "g_zoneIndex");
-        if (!*zoneName)
-            MyAssertHandler(".\\database\\db_registry.cpp", 3668, 0, "%s", "zoneName[0]");
+        iassert(g_zoneIndex);
+        iassert(zoneName[0]);
         zone = &g_zones[g_zoneIndex];
         memset(zone, 0, sizeof(XZone));
         //v5 = g_zoneIndex;
@@ -2731,14 +2704,12 @@ int __cdecl DB_TryLoadXFileInternal(char *zoneName, int zoneFlags)
                 g_zoneIndex,
                 (uint8_t)g_zoneIndex);
         g_zoneHandles[g_zoneCount] = g_zoneIndex;
-        if (zone->name[0])
-            MyAssertHandler(".\\database\\db_registry.cpp", 3674, 0, "%s", "!zone->name[0]");
+        iassert(!zone->name[0]);
         I_strncpyz(zone->name, zoneName, 64);
         zone->flags = zoneFlags;
         zone->fileSize = GetFileSize(zoneFile, 0);
         zone->modZone = modZone;
-        if (g_loadingZone)
-            MyAssertHandler(".\\database\\db_registry.cpp", 3683, 0, "%s", "!g_loadingZone");
+        iassert(!g_loadingZone);
         if ((_S1 & 1) == 0)
         {
             _S1 |= 1u;
@@ -2768,13 +2739,11 @@ int __cdecl DB_TryLoadXFileInternal(char *zoneName, int zoneFlags)
         PMem_BeginAlloc(zone->name, g_zoneAllocType);
         zone->allocType = g_zoneAllocType;
         DB_ResetZoneSize((zoneFlags & 8) != 0);
-        if (!zone)
-            MyAssertHandler(".\\database\\db_registry.cpp", 3718, 0, "%s", "zone");
+        iassert(zone);
         DB_LoadXFile(filename, zoneFile, zone->name, &zone->mem, 0, g_fileBuf, g_zoneAllocType);
         DB_LoadXFileInternal();
         PMem_EndAlloc(zone->name, g_zoneAllocType);
-        if (!g_loadingZone)
-            MyAssertHandler(".\\database\\db_registry.cpp", 3725, 0, "%s", "g_loadingZone");
+        iassert(g_loadingZone);
         g_loadingZone = 0;
         g_mayRecoverLostAssets = 1;
         return 1;
@@ -2972,8 +2941,7 @@ void __cdecl DB_ReleaseXAssets()
     uint hash; // [esp+0h] [ebp-Ch]
     uint assetEntryIndex; // [esp+4h] [ebp-8h]
 
-    if (!Sys_IsMainThread())
-        MyAssertHandler(".\\database\\db_registry.cpp", 3998, 0, "%s", "Sys_IsMainThread()");
+    iassert(Sys_IsMainThread());
     Sys_SyncDatabase();
     for (hash = 0; hash < 0x8000; ++hash)
     {
@@ -3042,15 +3010,13 @@ void DB_FreeDefaultEntries()
                 MyAssertHandler(".\\database\\db_registry.cpp", 3950, 0, "%s", "!assetEntry->zoneIndex");
             if (assetEntry->entry.nextOverride)
                 MyAssertHandler(".\\database\\db_registry.cpp", 3951, 0, "%s", "!assetEntry->nextOverride");
-            if (!g_defaultAssetCount)
-                MyAssertHandler(".\\database\\db_registry.cpp", 3952, 0, "%s", "g_defaultAssetCount");
+            iassert(g_defaultAssetCount);
             --g_defaultAssetCount;
             DB_FreeXAssetEntry(assetEntry);
         }
         db_hashTable[hash] = 0;
     }
-    if (g_defaultAssetCount)
-        MyAssertHandler(".\\database\\db_registry.cpp", 3959, 0, "%s", "!g_defaultAssetCount");
+    iassert(!g_defaultAssetCount);
 }
 
 void __cdecl DB_UnloadXAssetsMemoryForZone(int zoneFreeFlags, int zoneFreeBit)
@@ -3103,8 +3069,7 @@ void __cdecl DB_ReplaceXAsset(XAssetType type, const char *original, const char 
 
 void __cdecl DB_CloneXAsset(const XAsset *from, XAsset *to)
 {
-    if (from->type != to->type)
-        MyAssertHandler(".\\database\\db_registry.cpp", 2504, 0, "%s", "from->type == to->type");
+    iassert(from->type == to->type);
     DB_DynamicCloneXAsset(to->header, from->header, to->type, 0);
     DB_CloneXAssetInternal(from, to);
 }
@@ -3180,8 +3145,7 @@ void DB_FreeUnusedResources()
                 if (assetEntry->entry.nextOverride)
                     MyAssertHandler(".\\database\\db_registry.cpp", 4200, 0, "%s", "!assetEntry->nextOverride");
                 *pAssetEntryIndex = assetEntry->entry.nextHash;
-                if (!g_defaultAssetCount)
-                    MyAssertHandler(".\\database\\db_registry.cpp", 4202, 0, "%s", "g_defaultAssetCount");
+                iassert(g_defaultAssetCount);
                 --g_defaultAssetCount;
                 DB_FreeXAssetEntry(assetEntry);
             }

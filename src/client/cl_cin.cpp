@@ -13,21 +13,13 @@ int __cdecl CIN_PlayCinematic(int localClientNum, char *arg)
 {
     float volume; // [esp+4h] [ebp-4h]
 
-    if (!arg)
-        MyAssertHandler(".\\client\\cl_cin.cpp", 33, 0, "%s", "arg");
+    iassert(arg);
     volume = SND_GetVolumeNormalized() * snd_cinematicVolumeScale->current.value;
     R_Cinematic_StartPlayback(arg, 5u, volume);
     if (cls.uiStarted)
         UI_SetActiveMenu(localClientNum, UIMENU_NONE);
     Con_Close(localClientNum);
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\src\\client\\../client_mp/client_mp.h",
-            1120,
-            0,
-            "client doesn't index STATIC_MAX_LOCAL_CLIENTS\n\t%i not in [0, %i)",
-            localClientNum,
-            1);
+    vassert((localClientNum) == 0, "%i not in [0, %i)", localClientNum, 1);
     clientUIActives[localClientNum].connectionState = CA_CINEMATIC;
     return 1;
 }
@@ -68,24 +60,10 @@ void __cdecl SCR_StopCinematic(int localClientNum)
     if (cin_skippable || R_Cinematic_IsFinished())
     {
         R_Cinematic_StopPlayback();
-        if (localClientNum)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\src\\client\\../client_mp/client_mp.h",
-                1112,
-                0,
-                "%s\n\t(localClientNum) = %i",
-                "(localClientNum == 0)",
-                localClientNum);
+        vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
         if (clientUIActives[0].connectionState == CA_CINEMATIC)
         {
-            if (localClientNum)
-                MyAssertHandler(
-                    "c:\\trees\\cod3\\src\\client\\../client_mp/client_mp.h",
-                    1120,
-                    0,
-                    "client doesn't index STATIC_MAX_LOCAL_CLIENTS\n\t%i not in [0, %i)",
-                    localClientNum,
-                    1);
+            vassert((localClientNum) == 0, "%i not in [0, %i)", localClientNum, 1);
             clientUIActives[localClientNum].connectionState = CA_DISCONNECTED;
             if (nextmap->current.integer)
             {

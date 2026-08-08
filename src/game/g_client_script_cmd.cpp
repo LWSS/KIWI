@@ -33,12 +33,9 @@ int __cdecl G_GetNeededStartAmmo(gentity_s *pSelf, WeaponDef *weapDef)
     int v6; // r28
     WeaponDef *otherWeapDef; // r31
 
-    if (!pSelf)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp", 44, 0, "%s", "pSelf");
-    if (!pSelf->client)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp", 45, 0, "%s", "pSelf->client");
-    if (!weapDef)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp", 46, 0, "%s", "weapDef");
+    iassert(pSelf);
+    iassert(pSelf->client);
+    iassert(weapDef);
     client = pSelf->client;
     v5 = 0;
     v6 = client->ps.ammo[weapDef->iAmmoIndex];
@@ -106,14 +103,7 @@ void __cdecl InitializeAmmo(gentity_s *pSelf, int weaponIndex, unsigned __int8 w
         weapons = client->ps.weapons;
         if (!weapons)
             MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\universal\\q_shared.h", 696, 0, "%s", "array");
-        if ((unsigned int)altWeaponIndex >= 0x80)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\universal\\q_shared.h",
-                697,
-                0,
-                "bitNum doesn't index size * 8\n\t%i not in [0, %i)",
-                altWeaponIndex,
-                128);
+        bcassert((unsigned int)altWeaponIndex, 0x80);
     } while (((1 << (altWeaponIndex & 0x1F)) & weapons[altWeaponIndex >> 5]) != 0);
 }
 
@@ -179,13 +169,7 @@ void __cdecl PlayerCmd_takeWeapon(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x880u)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-                170,
-                0,
-                "%s",
-                "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         v1 = &g_entities[v5];
         if (!v1->client)
         {
@@ -214,13 +198,7 @@ void __cdecl PlayerCmd_takeAllWeapons(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x880u)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-                194,
-                0,
-                "%s",
-                "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         v1 = &g_entities[v4];
         if (!v1->client)
         {
@@ -250,13 +228,7 @@ void __cdecl PlayerCmd_getCurrentWeapon(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x880u)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-                221,
-                0,
-                "%s",
-                "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         v1 = &g_entities[v6];
         if (!v1->client)
         {
@@ -289,13 +261,7 @@ void __cdecl PlayerCmd_getCurrentWeaponClipAmmo(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x880u)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-                256,
-                0,
-                "%s",
-                "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         v1 = &g_entities[v5];
         if (!v1->client)
         {
@@ -327,13 +293,7 @@ void __cdecl PlayerCmd_getCurrentOffhand(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x880u)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-                285,
-                0,
-                "%s",
-                "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         v1 = &g_entities[v5];
         if (!v1->client)
         {
@@ -365,13 +325,7 @@ void __cdecl PlayerCmd_setOffhandSecondaryClass(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x880u)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-                314,
-                0,
-                "%s",
-                "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         v1 = &g_entities[v5];
         if (!v1->client)
         {
@@ -416,13 +370,7 @@ void __cdecl PlayerCmd_getOffhandSecondaryClass(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x880u)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-                346,
-                0,
-                "%s",
-                "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         v1 = &g_entities[v4];
         if (!v1->client)
         {
@@ -466,13 +414,7 @@ void __cdecl PlayerCmd_hasWeapon(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x880u)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-                376,
-                0,
-                "%s",
-                "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         v1 = &g_entities[v7];
         if (!v1->client)
         {
@@ -505,13 +447,7 @@ void __cdecl PlayerCmd_switchToWeapon(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x880u)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-                405,
-                0,
-                "%s",
-                "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         v2 = &g_entities[v1];
         if (!v2->client)
         {
@@ -557,13 +493,7 @@ void __cdecl PlayerCmd_switchToOffhand(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x880u)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-                438,
-                0,
-                "%s",
-                "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         v2 = &g_entities[v1];
         if (!v2->client)
         {
@@ -611,13 +541,7 @@ void __cdecl PlayerCmd_giveStartAmmo(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x880u)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-                474,
-                0,
-                "%s",
-                "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         v1 = &g_entities[v6];
         if (!v1->client)
         {
@@ -656,13 +580,7 @@ void __cdecl PlayerCmd_giveMaxAmmo(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x880u)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-                506,
-                0,
-                "%s",
-                "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         v1 = &g_entities[v10];
         if (!v1->client)
         {
@@ -708,13 +626,7 @@ void __cdecl PlayerCmd_getFractionStartAmmo(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x880u)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-                540,
-                0,
-                "%s",
-                "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         v1 = &g_entities[v9];
         if (!v1->client)
         {
@@ -764,13 +676,7 @@ void __cdecl PlayerCmd_getFractionMaxAmmo(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x880u)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-                586,
-                0,
-                "%s",
-                "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         v1 = &g_entities[v9];
         if (!v1->client)
         {
@@ -836,13 +742,7 @@ void __cdecl PlayerCmd_setOrigin(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x880u)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-                645,
-                0,
-                "%s",
-                "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         v1 = &g_entities[v4];
         if (!v1->client)
         {
@@ -870,13 +770,7 @@ void __cdecl PlayerCmd_SetVelocity(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x880u)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-                668,
-                0,
-                "%s",
-                "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         v1 = &g_entities[v5];
         if (!v1->client)
         {
@@ -905,13 +799,7 @@ void __cdecl PlayerCmd_GetVelocity(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x880u)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-                688,
-                0,
-                "%s",
-                "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         v1 = &g_entities[v3];
         if (!v1->client)
         {
@@ -938,13 +826,7 @@ void __cdecl PlayerCmd_setAngles(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x880u)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-                709,
-                0,
-                "%s",
-                "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         v1 = &g_entities[v5];
         if (!v1->client)
         {
@@ -970,13 +852,7 @@ void __cdecl PlayerCmd_getAngles(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x880u)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-                729,
-                0,
-                "%s",
-                "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         v1 = &g_entities[v3];
         if (!v1->client)
         {
@@ -1001,13 +877,7 @@ void __cdecl PlayerCmd_getViewHeight(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x880u)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-                747,
-                0,
-                "%s",
-                "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         v1 = &g_entities[v3];
         if (!v1->client)
         {
@@ -1069,13 +939,7 @@ void __cdecl PlayerCmd_useButtonPressed(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x880u)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-                789,
-                0,
-                "%s",
-                "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         v1 = &g_entities[v3];
         if (!v1->client)
         {
@@ -1100,13 +964,7 @@ void __cdecl PlayerCmd_attackButtonPressed(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x880u)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-                810,
-                0,
-                "%s",
-                "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         v1 = &g_entities[v3];
         if (!v1->client)
         {
@@ -1131,13 +989,7 @@ void __cdecl PlayerCmd_adsButtonPressed(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x880u)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-                831,
-                0,
-                "%s",
-                "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         v1 = &g_entities[v3];
         if (!v1->client)
         {
@@ -1162,13 +1014,7 @@ void __cdecl PlayerCmd_meleeButtonPressed(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x880u)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-                852,
-                0,
-                "%s",
-                "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         v1 = &g_entities[v3];
         if (!v1->client)
         {
@@ -1230,14 +1076,7 @@ void __cdecl G_FlushCommandNotifies()
     //__lwsync();
     while (s_cmdNotify.read != s_cmdNotify.write)
     {
-        if (s_cmdNotify.write - s_cmdNotify.read < 2)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-                934,
-                0,
-                "s_cmdNotify.write - s_cmdNotify.read >= 2\n\t%i, %i",
-                s_cmdNotify.write - s_cmdNotify.read,
-                2);
+        vassert(s_cmdNotify.write - s_cmdNotify.read >= 2, "%i, %i", s_cmdNotify.write - s_cmdNotify.read, 2);
         ++s_cmdNotify.read;
         v0 = *(unsigned __int16 *)((char *)s_cmdNotify.data + ((2 * s_cmdNotify.read++) & 0x7E));
         if (!v0 || v0 > 0xA)
@@ -1279,14 +1118,7 @@ void __cdecl G_ProcessCommandNotifies()
     {
         while (s_cmdNotify.read != s_cmdNotify.write)
         {
-            if (s_cmdNotify.write - s_cmdNotify.read < 2)
-                MyAssertHandler(
-                    "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-                    979,
-                    0,
-                    "s_cmdNotify.write - s_cmdNotify.read >= 2\n\t%i, %i",
-                    s_cmdNotify.write - s_cmdNotify.read,
-                    2);
+            vassert(s_cmdNotify.write - s_cmdNotify.read >= 2, "%i, %i", s_cmdNotify.write - s_cmdNotify.read, 2);
             v0 = *(volatile unsigned __int16 *)((char *)s_cmdNotify.data + ((2 * s_cmdNotify.read++) & 0x7E));
             v1 = *(unsigned __int16 *)((char *)s_cmdNotify.data + ((2 * s_cmdNotify.read++) & 0x7E));
             if (!v1 || v1 > 0xA)
@@ -1352,13 +1184,7 @@ void __cdecl PlayerCmd_playerADS(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x880u)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-                1085,
-                0,
-                "%s",
-                "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         v1 = &g_entities[v3];
         if (!v1->client)
         {
@@ -1385,13 +1211,7 @@ void __cdecl PlayerCmd_isOnGround(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x880u)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-                1103,
-                0,
-                "%s",
-                "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         v1 = &g_entities[v5];
         if (!v1->client)
         {
@@ -1423,13 +1243,7 @@ void __cdecl PlayerCmd_SetViewmodel(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x880u)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-                1135,
-                0,
-                "%s",
-                "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         v1 = &g_entities[v6];
         if (!v1->client)
         {
@@ -1471,13 +1285,7 @@ void __cdecl PlayerCmd_AllowADS(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x880u)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-                1163,
-                0,
-                "%s",
-                "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         v1 = &g_entities[v6];
         if (!v1->client)
         {
@@ -1524,13 +1332,7 @@ void __cdecl PlayerCmd_AllowJump(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x880u)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-                1196,
-                0,
-                "%s",
-                "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         v1 = &g_entities[v7];
         if (!v1->client)
         {
@@ -1566,13 +1368,7 @@ void __cdecl PlayerCmd_AllowSprint(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x880u)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-                1218,
-                0,
-                "%s",
-                "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         v1 = &g_entities[v7];
         if (!v1->client)
         {
@@ -1608,13 +1404,7 @@ void __cdecl PlayerCmd_AllowMelee(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x880u)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-                1240,
-                0,
-                "%s",
-                "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         v1 = &g_entities[v7];
         if (!v1->client)
         {
@@ -1648,13 +1438,7 @@ void __cdecl PlayerCmd_SetSpreadOverride(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x880u)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-                1264,
-                0,
-                "%s",
-                "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         v1 = &g_entities[v5];
         if (!v1->client)
         {
@@ -1703,13 +1487,7 @@ void __cdecl PlayerCmd_ResetSpreadOverride(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x880u)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-                1302,
-                0,
-                "%s",
-                "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         v1 = &g_entities[v3];
         if (!v1->client)
         {
@@ -1736,13 +1514,7 @@ void __cdecl PlayerCmd_ShowViewmodel(scr_entref_t entref)
         goto LABEL_7;
     }
     v2 = entref.entnum;
-    if (entref.entnum >= 0x880u)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-            1324,
-            0,
-            "%s",
-            "entref.entnum < MAX_GENTITIES");
+    iassert(entref.entnum < MAX_GENTITIES);
     if (!g_entities[v2].client)
     {
         v3 = va("entity %i is not a player", v1);
@@ -1768,13 +1540,7 @@ void __cdecl PlayerCmd_HideViewmodel(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x880u)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-                1342,
-                0,
-                "%s",
-                "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         v2 = &g_entities[v1];
         if (!v2->client)
         {
@@ -1808,13 +1574,7 @@ void __cdecl PlayerCmd_AllowStand(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x880u)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-                1369,
-                0,
-                "%s",
-                "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         v1 = &g_entities[v7];
         if (!v1->client)
         {
@@ -1850,13 +1610,7 @@ void __cdecl PlayerCmd_AllowCrouch(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x880u)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-                1391,
-                0,
-                "%s",
-                "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         v1 = &g_entities[v7];
         if (!v1->client)
         {
@@ -1892,13 +1646,7 @@ void __cdecl PlayerCmd_AllowProne(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x880u)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-                1413,
-                0,
-                "%s",
-                "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         v1 = &g_entities[v7];
         if (!v1->client)
         {
@@ -1934,13 +1682,7 @@ void __cdecl PlayerCmd_AllowLean(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x880u)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-                1435,
-                0,
-                "%s",
-                "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         v1 = &g_entities[v7];
         if (!v1->client)
         {
@@ -1976,13 +1718,7 @@ void __cdecl PlayerCmd_OpenMenu(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x880u)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-                1459,
-                0,
-                "%s",
-                "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         v2 = &g_entities[v1];
         if (!v2->client)
         {
@@ -2027,13 +1763,7 @@ void __cdecl PlayerCmd_OpenMenuNoMouse(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x880u)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-                1489,
-                0,
-                "%s",
-                "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         v2 = &g_entities[v1];
         if (!v2->client)
         {
@@ -2073,13 +1803,7 @@ void __cdecl PlayerCmd_CloseMenu(scr_entref_t entref)
         goto LABEL_7;
     }
     v2 = entref.entnum;
-    if (entref.entnum >= 0x880u)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-            1517,
-            0,
-            "%s",
-            "entref.entnum < MAX_GENTITIES");
+    iassert(entref.entnum < MAX_GENTITIES);
     if (!g_entities[v2].client)
     {
         v3 = va("entity %i is not a player", v1);
@@ -2103,13 +1827,7 @@ void __cdecl PlayerCmd_FreezeControls(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x880u)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-                1536,
-                0,
-                "%s",
-                "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         v1 = &g_entities[v3];
         if (!v1->client)
         {
@@ -2139,13 +1857,7 @@ void __cdecl PlayerCmd_SetEQLerp(scr_entref_t entref)
         goto LABEL_7;
     }
     v2 = entref.entnum;
-    if (entref.entnum >= 0x880u)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-            1559,
-            0,
-            "%s",
-            "entref.entnum < MAX_GENTITIES");
+    iassert(entref.entnum < MAX_GENTITIES);
     if (!g_entities[v2].client)
     {
         v3 = va("entity %i is not a player", v1);
@@ -2248,13 +1960,7 @@ void __cdecl PlayerCmd_DeactivateEq(scr_entref_t entref)
         v2 = "not an entity";
         goto LABEL_7;
     }
-    if (entref.entnum >= 0x880u)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-            1691,
-            0,
-            "%s",
-            "entref.entnum < MAX_GENTITIES");
+    iassert(entref.entnum < MAX_GENTITIES);
     if (!g_entities[v1].client)
     {
         v2 = va("entity %i is not a player", v1);
@@ -2310,13 +2016,7 @@ void __cdecl PlayerCmd_SetReverb(scr_entref_t entref)
         v2 = "not an entity";
         goto LABEL_7;
     }
-    if (entref.entnum >= 0x880u)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-            1747,
-            0,
-            "%s",
-            "entref.entnum < MAX_GENTITIES");
+    iassert(entref.entnum < MAX_GENTITIES);
     if (!g_entities[v1].client)
     {
         v2 = va("entity %i is not a player", v1);
@@ -2378,13 +2078,7 @@ void __cdecl PlayerCmd_DeactivateReverb(scr_entref_t entref)
         goto LABEL_7;
     }
     v2 = entref.entnum;
-    if (entref.entnum >= 0x880u)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-            1802,
-            0,
-            "%s",
-            "entref.entnum < MAX_GENTITIES");
+    iassert(entref.entnum < MAX_GENTITIES);
     if (!g_entities[v2].client)
     {
         v3 = va("entity %i is not a player", v1);
@@ -2430,13 +2124,7 @@ void __cdecl PlayerCmd_SetChannelVolumes(scr_entref_t entref)
         v2 = "not an entity";
         goto LABEL_7;
     }
-    if (entref.entnum >= 0x880u)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-            1850,
-            0,
-            "%s",
-            "entref.entnum < MAX_GENTITIES");
+    iassert(entref.entnum < MAX_GENTITIES);
     if (!g_entities[v1].client)
     {
         v2 = va("entity %i is not a player", v1);
@@ -2496,13 +2184,7 @@ void __cdecl PlayerCmd_DeactivateChannelVolumes(scr_entref_t entref)
         goto LABEL_7;
     }
     v2 = entref.entnum;
-    if (entref.entnum >= 0x880u)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-            1900,
-            0,
-            "%s",
-            "entref.entnum < MAX_GENTITIES");
+    iassert(entref.entnum < MAX_GENTITIES);
     if (!g_entities[v2].client)
     {
         v3 = va("entity %i is not a player", v1);
@@ -2550,13 +2232,7 @@ void __cdecl ScrCmd_IsLookingAt(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x880u)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-                1943,
-                0,
-                "%s",
-                "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         v1 = &g_entities[v6];
         if (!v1->client)
         {
@@ -2589,13 +2265,7 @@ void __cdecl PlayerCmd_IsFiring(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x880u)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-                1963,
-                0,
-                "%s",
-                "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         v1 = &g_entities[v6];
         if (!v1->client)
         {
@@ -2635,13 +2305,7 @@ void __cdecl PlayerCmd_IsThrowingGrenade(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x880u)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-                1985,
-                0,
-                "%s",
-                "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         v1 = &g_entities[v6];
         if (!v1->client)
         {
@@ -2675,13 +2339,7 @@ void __cdecl PlayerCmd_IsMeleeing(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x880u)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-                2007,
-                0,
-                "%s",
-                "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         v1 = &g_entities[v6];
         if (!v1->client)
         {
@@ -2719,13 +2377,7 @@ void __cdecl ScrCmd_PlayLocalSound(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x880u)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-                2035,
-                0,
-                "%s",
-                "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         v2 = &g_entities[v1];
         if (!v2->client)
         {
@@ -2782,13 +2434,7 @@ void __cdecl ScrCmd_StopLocalSound(scr_entref_t entref)
         goto LABEL_7;
     }
     v2 = entref.entnum;
-    if (entref.entnum >= 0x880u)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-            2082,
-            0,
-            "%s",
-            "entref.entnum < MAX_GENTITIES");
+    iassert(entref.entnum < MAX_GENTITIES);
     if (!g_entities[v2].client)
     {
         v3 = va("entity %i is not a player", v1);
@@ -2822,13 +2468,7 @@ void __cdecl ScrCmd_SetAutoPickup(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x880u)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-                2112,
-                0,
-                "%s",
-                "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         v1 = &g_entities[v3];
         if (!v1->client)
         {
@@ -2858,13 +2498,7 @@ void __cdecl PlayerCmd_SetWeaponAmmoClip(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x880u)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-                2141,
-                0,
-                "%s",
-                "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         v1 = &g_entities[v8];
         if (!v1->client)
         {
@@ -2916,13 +2550,7 @@ void __cdecl PlayerCmd_SetWeaponAmmoStock(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x880u)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-                2182,
-                0,
-                "%s",
-                "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         v1 = &g_entities[v12];
         if (!v1->client)
         {
@@ -2981,13 +2609,7 @@ void __cdecl PlayerCmd_GetWeaponAmmoClip(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x880u)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-                2231,
-                0,
-                "%s",
-                "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         v1 = &g_entities[v6];
         if (!v1->client)
         {
@@ -3019,13 +2641,7 @@ void __cdecl PlayerCmd_GetWeaponAmmoStock(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x880u)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-                2258,
-                0,
-                "%s",
-                "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         v1 = &g_entities[v6];
         if (!v1->client)
         {
@@ -3061,13 +2677,7 @@ void __cdecl PlayerCmd_AnyAmmoForWeaponModes(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x880u)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-                2297,
-                0,
-                "%s",
-                "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         v1 = &g_entities[v7];
         if (!v1->client)
         {
@@ -3099,13 +2709,7 @@ void __cdecl PlayerCmd_EnableHealthShield(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x880u)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-                2328,
-                0,
-                "%s",
-                "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         v1 = &g_entities[v3];
         if (!v1->client)
         {
@@ -3133,13 +2737,7 @@ void __cdecl PlayerCmd_SetClientDvar(scr_entref_t entref)
         v2 = "not an entity";
         goto LABEL_7;
     }
-    if (entref.entnum >= 0x880u)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-            2356,
-            0,
-            "%s",
-            "entref.entnum < MAX_GENTITIES");
+    iassert(entref.entnum < MAX_GENTITIES);
     if (!g_entities[v1].client)
     {
         v2 = va("entity %i is not a player", v1);
@@ -3185,13 +2783,7 @@ void __cdecl PlayerCmd_SetClientDvars(scr_entref_t entref)
         v2 = "not an entity";
         goto LABEL_7;
     }
-    if (entref.entnum >= 0x880u)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-            2399,
-            0,
-            "%s",
-            "entref.entnum < MAX_GENTITIES");
+    iassert(entref.entnum < MAX_GENTITIES);
     if (!g_entities[v1].client)
     {
         v2 = va("entity %i is not a player", v1);
@@ -3242,13 +2834,7 @@ void __cdecl PlayerCmd_BeginLocationSelection(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x880u)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-                2439,
-                0,
-                "%s",
-                "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         v1 = &g_entities[v10];
         if (!v1->client)
         {
@@ -3261,15 +2847,7 @@ void __cdecl PlayerCmd_BeginLocationSelection(scr_entref_t entref)
     String = Scr_GetString(0);
     LocSelIndex = GScr_GetLocSelIndex(String);
     v5 = LocSelIndex;
-    if (LocSelIndex < 1 || LocSelIndex > 4)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-            2445,
-            0,
-            "locSelIndex not in [1, MAX_LOC_SEL_MTLS + 1]\n\t%i not in [%i, %i]",
-            LocSelIndex,
-            1,
-            4);
+    rangeassert(LocSelIndex, 1, 4);
     if (Scr_GetNumParam() < 2)
     {
         *(double *)&v6 = 0.15000001;
@@ -3287,14 +2865,7 @@ void __cdecl PlayerCmd_BeginLocationSelection(scr_entref_t entref)
     *(double *)&v6 = (float)((float)((float)*(double *)&v6 * (float)63.0) + (float)0.5);
     v8 = floor(v6);
     v9 = (int)(float)*(double *)&v8;
-    if (v9 >= 0x40)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-            2468,
-            0,
-            "radiusBits doesn't index (1 << LOC_SEL_RADIUS_BITS)\n\t%i not in [0, %i)",
-            (int)(float)*(double *)&v8,
-            64);
+    bcassert(v9, 0x40);
     v1->client->ps.locationSelectionInfo = (4 * v9) | v5;
 }
 
@@ -3312,13 +2883,7 @@ void __cdecl PlayerCmd_EndLocationSelection(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x880u)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-                2486,
-                0,
-                "%s",
-                "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         v1 = &g_entities[v3];
         if (!v1->client)
         {
@@ -3346,13 +2911,7 @@ void __cdecl PlayerCmd_WeaponLockStart(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x880u)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-                2507,
-                0,
-                "%s",
-                "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         v1 = &g_entities[v4];
         if (!v1->client)
         {
@@ -3394,13 +2953,7 @@ void __cdecl PlayerCmd_WeaponLockFinalize(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x880u)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-                2539,
-                0,
-                "%s",
-                "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         v1 = &g_entities[v8];
         if (!v1->client)
         {
@@ -3443,13 +2996,7 @@ void __cdecl PlayerCmd_WeaponLockFree(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x880u)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-                2573,
-                0,
-                "%s",
-                "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         v1 = &g_entities[v3];
         if (!v1->client)
         {
@@ -3482,13 +3029,7 @@ void __cdecl PlayerCmd_WeaponLockTargetTooClose(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x880u)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-                2596,
-                0,
-                "%s",
-                "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         v1 = &g_entities[v7];
         if (!v1->client)
         {
@@ -3524,13 +3065,7 @@ void __cdecl PlayerCmd_WeaponLockNoClearance(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x880u)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-                2618,
-                0,
-                "%s",
-                "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         v1 = &g_entities[v7];
         if (!v1->client)
         {
@@ -3568,13 +3103,7 @@ void __cdecl PlayerCmd_SetActionSlot(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x880u)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-                2648,
-                0,
-                "%s",
-                "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         v1 = &g_entities[v9];
         if (!v1->client)
         {
@@ -3638,13 +3167,7 @@ void __cdecl PlayerCmd_DisableWeapons(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x880u)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-                2703,
-                0,
-                "%s",
-                "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         v1 = &g_entities[v3];
         if (!v1->client)
         {
@@ -3669,13 +3192,7 @@ void __cdecl PlayerCmd_EnableWeapons(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x880u)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-                2720,
-                0,
-                "%s",
-                "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         v1 = &g_entities[v3];
         if (!v1->client)
         {
@@ -3700,13 +3217,7 @@ void __cdecl PlayerCmd_NightVisionForceOff(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x880u)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-                2737,
-                0,
-                "%s",
-                "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         v1 = &g_entities[v3];
         if (!v1->client)
         {
@@ -3735,13 +3246,7 @@ void __cdecl PlayerCmd_GetWeaponsList(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x880u)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-                2757,
-                0,
-                "%s",
-                "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         v1 = &g_entities[v7];
         if (!v1->client)
         {
@@ -3783,13 +3288,7 @@ void __cdecl PlayerCmd_GetWeaponsListPrimaries(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x880u)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-                2791,
-                0,
-                "%s",
-                "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         v1 = &g_entities[v7];
         if (!v1->client)
         {
@@ -3830,13 +3329,7 @@ void __cdecl PlayerCmd_EnableInvulnerability(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x880u)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-                2825,
-                0,
-                "%s",
-                "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         v1 = &g_entities[v3];
         if (!v1->client)
         {
@@ -3861,13 +3354,7 @@ void __cdecl PlayerCmd_DisableInvulnerability(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x880u)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-                2842,
-                0,
-                "%s",
-                "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         v1 = &g_entities[v3];
         if (!v1->client)
         {
@@ -3897,13 +3384,7 @@ void __cdecl PlayerCmd_ForceViewmodelAnimation(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x880u)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-                2866,
-                0,
-                "%s",
-                "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         v1 = &g_entities[v8];
         if (!v1->client)
         {
@@ -3957,13 +3438,7 @@ void __cdecl PlayerCmd_DisableTurretDismount(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x880u)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-                2905,
-                0,
-                "%s",
-                "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         v1 = &g_entities[v3];
         if (!v1->client)
         {
@@ -3988,13 +3463,7 @@ void __cdecl PlayerCmd_EnableTurretDismount(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x880u)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-                2922,
-                0,
-                "%s",
-                "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         v1 = &g_entities[v3];
         if (!v1->client)
         {
@@ -4021,13 +3490,7 @@ void __cdecl PlayerCmd_UploadScore(scr_entref_t entref)
         goto LABEL_7;
     }
     v2 = entref.entnum;
-    if (entref.entnum >= 0x880u)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-            2942,
-            0,
-            "%s",
-            "entref.entnum < MAX_GENTITIES");
+    iassert(entref.entnum < MAX_GENTITIES);
     if (!g_entities[v2].client)
     {
         v3 = va("entity %i is not a player", v1);
@@ -4063,13 +3526,7 @@ void __cdecl PlayerCmd_UploadTime(scr_entref_t entref)
         goto LABEL_7;
     }
     v2 = entref.entnum;
-    if (entref.entnum >= 0x880u)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp",
-            2978,
-            0,
-            "%s",
-            "entref.entnum < MAX_GENTITIES");
+    iassert(entref.entnum < MAX_GENTITIES);
     if (!g_entities[v2].client)
     {
         v3 = va("entity %i is not a player", v1);
@@ -4233,8 +3690,7 @@ void __cdecl G_AddCommandNotify(volatile unsigned __int16 notify)
     unsigned int String; // r7
     volatile unsigned __int16 v7; // r28
 
-    if (!Sys_IsMainThread())
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_client_script_cmd.cpp", 1012, 0, "%s", "Sys_IsMainThread()");
+    iassert(Sys_IsMainThread());
     nesting = cmd_args.nesting;
     if (cmd_args.nesting >= 8u)
     {

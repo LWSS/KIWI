@@ -25,14 +25,10 @@ void __cdecl Player_UseEntity(gentity_s *playerEnt, gentity_s *useEnt)
     void(__cdecl * touch)(gentity_s *, gentity_s *, gentity_s *); // r11
     gentity_s *v7; // r5
 
-    if (!playerEnt)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\player_use.cpp", 48, 0, "%s", "playerEnt");
-    if (!playerEnt->client)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\player_use.cpp", 49, 0, "%s", "playerEnt->client");
-    if (!useEnt)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\player_use.cpp", 50, 0, "%s", "useEnt");
-    if (!useEnt->r.inuse)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\player_use.cpp", 52, 0, "%s", "useEnt->r.inuse");
+    iassert(playerEnt);
+    iassert(playerEnt->client);
+    iassert(useEnt);
+    iassert(useEnt->r.inuse);
     eType = useEnt->s.eType;
     if (eType == 2)
     {
@@ -73,12 +69,9 @@ int __cdecl Player_ActivateCmd(gentity_s *ent)
     int weaponstate; // r10
     int cursorHintEntIndex; // r11
 
-    if (!ent)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\player_use.cpp", 90, 0, "%s", "ent");
-    if (!ent->r.inuse)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\player_use.cpp", 91, 0, "%s", "ent->r.inuse");
-    if (!ent->client)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\player_use.cpp", 92, 0, "%s", "ent->client");
+    iassert(ent);
+    iassert(ent->r.inuse);
+    iassert(ent->client);
     if (!Scr_IsSystemActive())
         return 0;
     ent->client->useHoldEntity.setEnt(NULL);
@@ -130,10 +123,8 @@ void __cdecl Player_ActivateHoldCmd(gentity_s *ent)
     gentity_s *useEnt; // r30
     unsigned int v4; // r3
 
-    if (!ent)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\player_use.cpp", 150, 0, "%s", "ent");
-    if (!ent->client)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\player_use.cpp", 151, 0, "%s", "ent->client");
+    iassert(ent);
+    iassert(ent->client);
     if (Scr_IsSystemActive())
     {
         if (ent->client->useHoldEntity.isDefined())
@@ -524,8 +515,7 @@ void __cdecl G_UpdateFriendlyOverlay(gentity_s *ent)
     v4 = SL_ConvertToString(actor->properName);
     v5 = va("%s", v4);
     SV_SetConfigstring(CS_FRIEND_OVERLAY, v5);
-    if (!ent->client)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\player_use.cpp", 455, 0, "%s", "ent->client");
+    iassert(ent->client);
     v6 = SL_ConvertToString(v2->actor->weaponName);
     WeaponIndexForName = G_GetWeaponIndexForName(v6);
     WeaponDef = BG_GetWeaponDef(WeaponIndexForName);
@@ -1152,13 +1142,7 @@ void __cdecl Player_UpdateLookAtEntity(gentity_s *ent)
                     }
                     else
                     {
-                        if (weapDef->enemyCrosshairRange > MAX_FRIENDLY_DIST)
-                            MyAssertHandler(
-                                "c:\\trees\\cod3\\cod3src\\src\\game\\player_use.cpp",
-                                1039,
-                                0,
-                                "%s",
-                                "weapDef->enemyCrosshairRange <= MAX_FRIENDLY_DIST");
+                        iassert(weapDef->enemyCrosshairRange <= MAX_FRIENDLY_DIST);
                         if ((float)((float)((float)v14 * (float)v14)
                             + (float)((float)((float)v16 * (float)v16) + (float)((float)v15 * (float)v15))) < (double)(float)(weapDef->enemyCrosshairRange * weapDef->enemyCrosshairRange))
                         {

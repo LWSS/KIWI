@@ -35,16 +35,8 @@ typedef struct dxJointGroup *dJointGroupID;
 
 int __cdecl Phys_GetSurfaceFlagsFromBrush(const cbrush_t *brush, uint brushSideIndex)
 {
-    if (!brush)
-        MyAssertHandler(".\\physics\\phys_world_collision.cpp", 37, 0, "%s", "brush");
-    if (brushSideIndex >= brush->numsides + 6)
-        MyAssertHandler(
-            ".\\physics\\phys_world_collision.cpp",
-            38,
-            0,
-            "brushSideIndex doesn't index brush->numsides + 6\n\t%i not in [0, %i)",
-            brushSideIndex,
-            brush->numsides + 6);
+    iassert(brush);
+    bcassert(brushSideIndex, brush->numsides + 6);
     if ((int)brushSideIndex >= 6)
         return cm.materials[brush->sides[brushSideIndex - 6].materialNum].surfaceFlags;
     if (brushSideIndex >= 6)
@@ -79,8 +71,7 @@ void __cdecl CM_ForEachBrushInLeafBrushNode_r(
     int k; // [esp+0h] [ebp-Ch]
     cbrush_t *b; // [esp+4h] [ebp-8h]
 
-    if (!node)
-        MyAssertHandler(".\\physics\\phys_world_collision.cpp", 102, 0, "%s", "node");
+    iassert(node);
     while (!testMask || (clipMask & node->contents) != 0)
     {
         if (node->leafBrushCount)
@@ -269,8 +260,7 @@ void __cdecl CM_TestGeomInLeafBrushNode(cLeaf_t *leaf, const objInfo *input, Res
     int i; // [esp+0h] [ebp-Ch]
     InputOutput io; // [esp+4h] [ebp-8h] BYREF
 
-    if (!leaf->leafBrushNode)
-        MyAssertHandler(".\\physics\\phys_world_collision.cpp", 162, 0, "%s", "leaf->leafBrushNode");
+    iassert(leaf->leafBrushNode);
     for (i = 0; i < 3; ++i)
     {
         if (leaf->mins[i] >= (double)input->bounds[1][i] || leaf->maxs[i] <= (double)input->bounds[0][i])
@@ -468,8 +458,7 @@ static int dCollideWorldGeom(dxGeom *o1, dxGeom *o2, int flags, dContactGeomExt 
     case GEOM_CLASS_BRUSHMODEL:
         input.type = PHYS_GEOM_BRUSHMODEL;
         brushInfo = (BrushInfo *)dGeomGetClassData(o2);
-        if (!brushInfo->u.brushModel)
-            MyAssertHandler(".\\physics\\phys_world_collision.cpp", 402, 0, "%s", "brushInfo->u.brushModel");
+        iassert(brushInfo->u.brushModel);
         if (brushInfo->u.brushModel == 4095)
             MyAssertHandler(
                 ".\\physics\\phys_world_collision.cpp",
@@ -606,17 +595,10 @@ static int dCollideWorldGeom(dxGeom *o1, dxGeom *o2, int flags, dContactGeomExt 
         results.maxContacts = flags;
         results.stride = skip;
         value = (TraceThreadInfo *)Sys_GetValue(3);
-        if (!value)
-            MyAssertHandler(".\\physics\\phys_world_collision.cpp", 524, 0, "%s", "value");
+        iassert(value);
         ++value->checkcount.global;
         input.threadInfo = *value;
-        if (!input.threadInfo.checkcount.partitions && cm.partitionCount)
-            MyAssertHandler(
-                ".\\physics\\phys_world_collision.cpp",
-                527,
-                0,
-                "%s",
-                "input.threadInfo.checkcount.partitions || cm.partitionCount == 0");
+        iassert(input.threadInfo.checkcount.partitions || cm.partitionCount == 0);
         //Profile_EndInternal(0);
 
         {
@@ -710,8 +692,7 @@ void __cdecl Phys_GetBrushmodelAABB(dxGeom *geom, float *aabb)
     float v4; // [esp+10h] [ebp-14h]
     BrushInfo *brushInfo; // [esp+1Ch] [ebp-8h]
 
-    if (!geom)
-        MyAssertHandler(".\\physics\\phys_world_collision.cpp", 588, 0, "%s", "geom");
+    iassert(geom);
     if (dGeomGetClass(geom) != 11)
         MyAssertHandler(
             ".\\physics\\phys_world_collision.cpp",
@@ -720,8 +701,7 @@ void __cdecl Phys_GetBrushmodelAABB(dxGeom *geom, float *aabb)
             "%s",
             "dGeomGetClass( geom ) == GEOM_CLASS_BRUSHMODEL");
     brushInfo = (BrushInfo *)dGeomGetClassData(geom);
-    if (!brushInfo->u.brushModel)
-        MyAssertHandler(".\\physics\\phys_world_collision.cpp", 592, 0, "%s", "brushInfo->u.brushModel");
+    iassert(brushInfo->u.brushModel);
     if (brushInfo->u.brushModel == 4095)
         MyAssertHandler(
             ".\\physics\\phys_world_collision.cpp",
@@ -763,8 +743,7 @@ void __cdecl Phys_InitBrushGeomClass()
 
 void __cdecl Phys_GetBrushAABB(dxGeom *geom, float *aabb)
 {
-    if (!geom)
-        MyAssertHandler(".\\physics\\phys_world_collision.cpp", 605, 0, "%s", "geom");
+    iassert(geom);
     if (dGeomGetClass(geom) != 12)
         MyAssertHandler(".\\physics\\phys_world_collision.cpp", 606, 0, "%s", "dGeomGetClass( geom ) == GEOM_CLASS_BRUSH");
     *aabb = -FLT_MAX;
@@ -813,8 +792,7 @@ void __cdecl Phys_GetCylinderAABB(dxGeom *geom, float *aabb)
     int i; // [esp+70h] [ebp-8h]
     float axisRange; // [esp+74h] [ebp-4h]
 
-    if (!geom)
-        MyAssertHandler(".\\physics\\phys_world_collision.cpp", 623, 0, "%s", "geom");
+    iassert(geom);
     if (dGeomGetClass(geom) != 13)
         MyAssertHandler(
             ".\\physics\\phys_world_collision.cpp",
@@ -895,8 +873,7 @@ void __cdecl Phys_GetCapsuleAABB(dxGeom *geom, float *aabb)
     int i; // [esp+70h] [ebp-8h]
     float axisRange; // [esp+74h] [ebp-4h]
 
-    if (!geom)
-        MyAssertHandler(".\\physics\\phys_world_collision.cpp", 660, 0, "%s", "geom");
+    iassert(geom);
     if (dGeomGetClass(geom) != 14)
         MyAssertHandler(".\\physics\\phys_world_collision.cpp", 661, 0, "%s", "dGeomGetClass( geom ) == GEOM_CLASS_CAPSULE");
     cyl = (GeomStateCylinder *)dGeomGetClassData(geom);
@@ -944,14 +921,10 @@ dxGeom *__cdecl Phys_CreateBrushmodelGeom(
     dxGeom *geom; // [esp+8h] [ebp-8h]
     const cmodel_t *cmod; // [esp+Ch] [ebp-4h]
 
-    if (!space)
-        MyAssertHandler(".\\physics\\phys_world_collision.cpp", 762, 0, "%s", "space");
-    if (!body)
-        MyAssertHandler(".\\physics\\phys_world_collision.cpp", 763, 0, "%s", "body");
-    if (!brushModel)
-        MyAssertHandler(".\\physics\\phys_world_collision.cpp", 764, 0, "%s", "brushModel");
-    if (!centerOfMass)
-        MyAssertHandler(".\\physics\\phys_world_collision.cpp", 765, 0, "%s", "centerOfMass");
+    iassert(space);
+    iassert(body);
+    iassert(brushModel);
+    iassert(centerOfMass);
     cmod = CM_ClipHandleToModel(brushModel);
     if (cmod->mins[0] > (double)cmod->maxs[0])
         MyAssertHandler(".\\physics\\phys_world_collision.cpp", 770, 0, "%s", "cmod->maxs[0] >= cmod->mins[0]");
@@ -975,14 +948,10 @@ dxGeom *__cdecl Phys_CreateBrushGeom(dxSpace *space, dxBody *body, const cbrush_
     GeomStateBrush *ClassData; // eax
     dxGeom *geom; // [esp+8h] [ebp-4h]
 
-    if (!space)
-        MyAssertHandler(".\\physics\\phys_world_collision.cpp", 792, 0, "%s", "space");
-    if (!body)
-        MyAssertHandler(".\\physics\\phys_world_collision.cpp", 793, 0, "%s", "body");
-    if (!brush)
-        MyAssertHandler(".\\physics\\phys_world_collision.cpp", 794, 0, "%s", "brush");
-    if (!centerOfMass)
-        MyAssertHandler(".\\physics\\phys_world_collision.cpp", 795, 0, "%s", "centerOfMass");
+    iassert(space);
+    iassert(body);
+    iassert(brush);
+    iassert(centerOfMass);
     if (brush->mins[0] > (double)brush->maxs[0])
         MyAssertHandler(".\\physics\\phys_world_collision.cpp", 796, 0, "%s", "brush->maxs[0] >= brush->mins[0]");
     if (brush->mins[1] > (double)brush->maxs[1])

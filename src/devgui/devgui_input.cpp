@@ -318,10 +318,8 @@ double __cdecl DevGui_UpdateFloatScroll(
     float valuea; // [esp+1Ch] [ebp+Ch]
 
     range = max - min;
-    if (range < 0.0)
-        MyAssertHandler(".\\devgui\\devgui_input.cpp", 547, 0, "%s", "range >= 0");
-    if (step == 0.0)
-        MyAssertHandler(".\\devgui\\devgui_input.cpp", 548, 0, "%s", "step");
+    iassert(range >= 0);
+    iassert(step);
     if ((uint)axis >= SCROLL_AXIS_COUNT)
         MyAssertHandler(".\\devgui\\devgui_input.cpp", 549, 0, "%s", "axis >= SCROLL_XAXIS && axis < SCROLL_AXIS_COUNT");
     analog = s_input.analogAxis[axis] * s_input.scrollScale / s_input.sliderScrollTime;

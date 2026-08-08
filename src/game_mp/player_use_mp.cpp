@@ -22,10 +22,8 @@ void __cdecl Player_UpdateActivate(gentity_s *ent)
 {
     bool useSucceeded; // [esp+3h] [ebp-1h]
 
-    if (!ent)
-        MyAssertHandler(".\\game_mp\\player_use_mp.cpp", 165, 0, "%s", "ent");
-    if (!ent->client)
-        MyAssertHandler(".\\game_mp\\player_use_mp.cpp", 166, 0, "%s", "ent->client");
+    iassert(ent);
+    iassert(ent->client);
     ent->client->ps.weapFlags &= ~1u;
     useSucceeded = 0;
     if (ent->client->useHoldEntity.isDefined()
@@ -87,13 +85,7 @@ char __cdecl Player_ActivateCmd(gentity_s *ent)
             }
             else
             {
-                if (!g_entities[ent->client->ps.cursorHintEntIndex].r.inuse)
-                    MyAssertHandler(
-                        ".\\game_mp\\player_use_mp.cpp",
-                        117,
-                        0,
-                        "%s",
-                        "g_entities[ ent->client->ps.cursorHintEntIndex ].r.inuse");
+                iassert(g_entities[ ent->client->ps.cursorHintEntIndex ].r.inuse);
                 ent->client->useHoldEntity.setEnt(&g_entities[ent->client->ps.cursorHintEntIndex]);
                 ent->client->useHoldTime = level.time;
                 return 1;
@@ -136,14 +128,10 @@ void __cdecl Player_UseEntity(gentity_s *playerEnt, gentity_s *useEnt)
     void(__cdecl * touch)(gentity_s *, gentity_s *, int); // [esp+0h] [ebp-8h]
     void(__cdecl * use)(gentity_s *, gentity_s *, gentity_s *); // [esp+4h] [ebp-4h]
 
-    if (!playerEnt)
-        MyAssertHandler(".\\game_mp\\player_use_mp.cpp", 41, 0, "%s", "playerEnt");
-    if (!playerEnt->client)
-        MyAssertHandler(".\\game_mp\\player_use_mp.cpp", 42, 0, "%s", "playerEnt->client");
-    if (!useEnt)
-        MyAssertHandler(".\\game_mp\\player_use_mp.cpp", 43, 0, "%s", "useEnt");
-    if (!useEnt->r.inuse)
-        MyAssertHandler(".\\game_mp\\player_use_mp.cpp", 45, 0, "%s", "useEnt->r.inuse");
+    iassert(playerEnt);
+    iassert(playerEnt->client);
+    iassert(useEnt);
+    iassert(useEnt->r.inuse);
     if (useEnt->s.eType == ET_ITEM)
     {
         Scr_AddEntity(playerEnt);
@@ -177,8 +165,7 @@ void __cdecl Player_UpdateCursorHints(gentity_s *ent)
     gentity_s *self; // [esp+2020h] [ebp-4h]
 
     self = 0;
-    if (!ent->client)
-        MyAssertHandler(".\\game_mp\\player_use_mp.cpp", 525, 0, "%s", "ent->client");
+    iassert(ent->client);
     ps = &ent->client->ps;
     ps->cursorHint = 0;
     if (!BG_ThrowingBackGrenade(ps))
@@ -452,10 +439,8 @@ int __cdecl Player_GetItemCursorHint(const gclient_s *client, const gentity_s *t
     int index; // [esp+Ch] [ebp-8h]
     int weapIndex; // [esp+10h] [ebp-4h]
 
-    if (!traceEnt)
-        MyAssertHandler(".\\game_mp\\player_use_mp.cpp", 436, 0, "%s", "traceEnt");
-    if (!client)
-        MyAssertHandler(".\\game_mp\\player_use_mp.cpp", 437, 0, "%s", "client");
+    iassert(traceEnt);
+    iassert(client);
     index = traceEnt->s.index.brushmodel;
     if ((uint)index >= 0x800)
         MyAssertHandler(
@@ -489,20 +474,16 @@ void __cdecl Player_SetTurretDropHint(gentity_s *ent)
     gentity_s *turret; // [esp+0h] [ebp-8h]
     gclient_s *ps; // [esp+4h] [ebp-4h]
 
-    if (!ent)
-        MyAssertHandler(".\\game_mp\\player_use_mp.cpp", 471, 0, "%s", "ent");
-    if (!ent->client)
-        MyAssertHandler(".\\game_mp\\player_use_mp.cpp", 472, 0, "%s", "ent->client");
-    if (!ent->active)
-        MyAssertHandler(".\\game_mp\\player_use_mp.cpp", 473, 0, "%s", "ent->active");
+    iassert(ent);
+    iassert(ent->client);
+    iassert(ent->active);
     ps = ent->client;
     if ((ps->ps.eFlags & 0x300) == 0)
         MyAssertHandler(".\\game_mp\\player_use_mp.cpp", 477, 0, "%s", "ps->eFlags & EF_TURRET_ACTIVE");
     if (ps->ps.viewlocked_entNum == ENTITYNUM_NONE)
         MyAssertHandler(".\\game_mp\\player_use_mp.cpp", 478, 0, "%s", "ps->viewlocked_entNum != ENTITYNUM_NONE");
     turret = &level.gentities[ps->ps.viewlocked_entNum];
-    if (turret->s.eType != ET_MG42)
-        MyAssertHandler(".\\game_mp\\player_use_mp.cpp", 481, 0, "%s", "turret->s.eType == ET_MG42");
+    iassert(turret->s.eType == ET_MG42);
     if (*BG_GetWeaponDef(turret->s.weapon)->dropHintString)
     {
         ps->ps.cursorHintEntIndex = ENTITYNUM_NONE;

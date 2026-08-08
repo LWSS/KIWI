@@ -47,8 +47,7 @@ void __cdecl EntHandleDissociateInternal(EntHandleList *entHandleList)
             }
             *(_DWORD *)info->handle = 0;
             info->handle = 0;
-            if (!g_usedEntHandle)
-                MyAssertHandler(".\\game\\enthandle.cpp", 142, 0, "%s", "g_usedEntHandle");
+            iassert(g_usedEntHandle);
             --g_usedEntHandle;
             infoIndex = info->next;
         } while (infoIndex != infoIndexHead);
@@ -76,8 +75,7 @@ void __cdecl RemoveEntHandleInfo(EntHandleList *entHandleList, uint oldInfoIndex
             MyAssertHandler(".\\game\\enthandle.cpp", 194, 0, "%s\n\t%s", "info->handle", v2);
         }
         info->handle = 0;
-        if (!g_usedEntHandle)
-            MyAssertHandler(".\\game\\enthandle.cpp", 196, 0, "%s", "g_usedEntHandle");
+        iassert(g_usedEntHandle);
         --g_usedEntHandle;
         prev = &g_entHandleInfoArray[info->prev];
         g_entHandleInfoArray[info->next].prev = info->prev;
@@ -204,14 +202,7 @@ void EntHandle::Shutdown()
             v0 = va("%d %d", usedEntHandle, g_usedEntHandle);
             MyAssertHandler(".\\game\\enthandle.cpp", 103, 0, "%s\n\t%s", "usedEntHandle == g_usedEntHandle", v0);
         }
-        if (g_usedEntHandle)
-            MyAssertHandler(
-                ".\\game\\enthandle.cpp",
-                104,
-                0,
-                "%s\n\t(g_usedEntHandle) = %i",
-                "(!g_usedEntHandle)",
-                g_usedEntHandle);
+        vassert((!g_usedEntHandle), "(g_usedEntHandle) = %i", g_usedEntHandle);
     }
 }
 

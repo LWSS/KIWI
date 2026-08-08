@@ -229,8 +229,7 @@ void __cdecl G_InitGame(int levelTime, int randomSeed, int restart, int savepers
     char buffer[1024]; // [esp+40Ch] [ebp-408h] BYREF
     int i; // [esp+810h] [ebp-4h]
 
-    if (!Sys_IsMainThread())
-        MyAssertHandler(".\\game_mp\\g_main_mp.cpp", 992, 0, "%s", "Sys_IsMainThread()");
+    iassert(Sys_IsMainThread());
     Com_Printf(15, "------- Game Initialization -------\n");
     Com_Printf(15, "gamename: %s\n", "KIWI");
     Com_Printf(15, "gamedate: %s\n", __DATE__);
@@ -791,8 +790,7 @@ void G_LoadAnimTreeInstances()
 
 void G_PrintAllFastFileErrors()
 {
-    if (!sv_mapname)
-        MyAssertHandler(".\\game_mp\\g_main_mp.cpp", 973, 0, "%s", "sv_mapname");
+    iassert(sv_mapname);
     G_PrintFastFileErrors("code_post_gfx_mp");
     G_PrintFastFileErrors("common_mp");
     G_PrintFastFileErrors(sv_mapname->current.string);
@@ -802,8 +800,7 @@ void __cdecl G_PrintFastFileErrors(const char *fastfile)
 {
     RawFile *rawfile; // [esp+4h] [ebp-4h]
 
-    if (!fastfile)
-        MyAssertHandler(".\\game_mp\\g_main_mp.cpp", 957, 0, "%s", "fastfile");
+    iassert(fastfile);
     rawfile = DB_FindXAssetHeader(ASSET_TYPE_RAWFILE, fastfile).rawfile;
     if (!rawfile)
         MyAssertHandler(".\\game_mp\\g_main_mp.cpp", 960, 1, "%s", "rawfile");
@@ -1065,8 +1062,7 @@ void __cdecl G_UpdateObjectiveToClients()
         ent = &level.gentities[clientNum];
         if (ent->r.inuse)
         {
-            if (!ent->client)
-                MyAssertHandler(".\\game_mp\\g_main_mp.cpp", 1544, 0, "%s", "ent->client");
+            iassert(ent->client);
             ps = &ent->client->ps;
             team = ent->client->sess.cs.team;
             for (objNum = 0; objNum < 16; ++objNum)
@@ -1091,8 +1087,7 @@ void __cdecl G_UpdateHudElemsToClients()
         ent = &level.gentities[clientNum];
         if (ent->r.inuse)
         {
-            if (!ent->client)
-                MyAssertHandler(".\\game_mp\\g_main_mp.cpp", 1575, 0, "%s", "ent->client");
+            iassert(ent->client);
             HudElem_UpdateClient(ent->client, ent->s.number, HUDELEM_UPDATE_ARCHIVAL_AND_CURRENT);
         }
     }
@@ -1230,13 +1225,11 @@ void __cdecl G_RunFrame(int levelTime)
                 ent = &g_entities[entnum];
                 if (ent->useCount == trigger_info->useCount)
                 {
-                    if (!ent->r.inuse)
-                        MyAssertHandler(".\\game_mp\\g_main_mp.cpp", 1930, 0, "%s", "ent->r.inuse");
+                    iassert(ent->r.inuse);
                     other = &g_entities[trigger_info->otherEntnum];
                     if (other->useCount == trigger_info->otherUseCount)
                     {
-                        if (!other->r.inuse)
-                            MyAssertHandler(".\\game_mp\\g_main_mp.cpp", 1934, 0, "%s", "other->r.inuse");
+                        iassert(other->r.inuse);
                         if (entIndex[entnum] == index)
                         {
                             bMoreTriggered = 1;
@@ -1289,8 +1282,7 @@ void __cdecl G_RunFrame(int levelTime)
     SV_ResetSkeletonCache();
     {
         PROF_SCOPED("G_RunFrameForEntity");
-        if (level.currentEntityThink != -1)
-            MyAssertHandler(".\\game_mp\\g_main_mp.cpp", 1984, 0, "%s", "level.currentEntityThink == -1");
+        iassert(level.currentEntityThink == -1);
         ent = g_entities;
         level.currentEntityThink = 0;
         while (level.currentEntityThink < level.num_entities)
@@ -1345,8 +1337,7 @@ void __cdecl G_RunFrame(int levelTime)
     if (level.bRegisterItems)
         SaveRegisteredItems();
     DebugDumpAnims();
-    if (bgs != &level_bgs)
-        MyAssertHandler(".\\game_mp\\g_main_mp.cpp", 2043, 0, "%s\n\t(bgs) = %p", "(bgs == &level_bgs)", bgs);
+    vassert((bgs == &level_bgs), "(bgs) = %p", bgs);
     bgs = 0;
     ShowEntityInfo();
 }
@@ -1361,13 +1352,10 @@ void __cdecl G_ClientDoPerFrameNotifies(gentity_s *ent)
     uint16_t sprint_end; // [esp-4h] [ebp-Ch]
     gclient_s *client; // [esp+4h] [ebp-4h]
 
-    if (!ent)
-        MyAssertHandler(".\\game_mp\\g_main_mp.cpp", 1649, 0, "%s", "ent");
+    iassert(ent);
     client = ent->client;
-    if (!client)
-        MyAssertHandler(".\\game_mp\\g_main_mp.cpp", 1653, 0, "%s", "client");
-    if (client->sess.connected == CON_DISCONNECTED)
-        MyAssertHandler(".\\game_mp\\g_main_mp.cpp", 1654, 0, "%s", "client->sess.connected != CON_DISCONNECTED");
+    iassert(client);
+    iassert(client->sess.connected != CON_DISCONNECTED);
     if (client->ps.weapon != client->lastWeapon)
     {
         WeaponDef = BG_GetWeaponDef(client->ps.weapon);
@@ -1465,8 +1453,7 @@ void __cdecl ShowEntityInfo_Items(gentity_s *ent)
     float origin[3]; // [esp+1Ch] [ebp-10h] BYREF
     int idx; // [esp+28h] [ebp-4h]
 
-    if (!ent)
-        MyAssertHandler(".\\game_mp\\g_main_mp.cpp", 1678, 0, "%s", "ent");
+    iassert(ent);
     if (ent == (gentity_s *)-436)
         MyAssertHandler(".\\game_mp\\g_main_mp.cpp", 1679, 0, "%s", "ent->item");
     origin[0] = ent->r.currentOrigin[0];

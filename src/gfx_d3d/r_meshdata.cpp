@@ -24,14 +24,7 @@ char __cdecl R_ReserveMeshIndices(GfxMeshData *mesh, int indexCount, r_double_in
         return 0;
     mesh->indexCount = indexCount + usedCodeMeshIndexCount;
     *indicesOut = (r_double_index_t *)&mesh->indices[usedCodeMeshIndexCount];
-    if (((uint)*indicesOut & 3) != 0)
-        MyAssertHandler(
-            ".\\r_meshdata.cpp",
-            67,
-            0,
-            "%s\n\t((uint)(*indicesOut)) = %i",
-            "(!((uint)(*indicesOut) & 3))",
-            *indicesOut);
+    vassert((!((uint)(*indicesOut) & 3)), "((uint)(*indicesOut)) = %i", *indicesOut);
     return 1;
 }
 

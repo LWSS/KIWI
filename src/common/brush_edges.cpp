@@ -368,18 +368,15 @@ char __cdecl IsConvex(const float (*pts)[3], uint ptCount)
     float normal2[3]; // [esp+48h] [ebp-10h] BYREF
     float normalMag; // [esp+54h] [ebp-4h]
 
-    if (ptCount <= 2)
-        MyAssertHandler("..\\common\\brush_edges.cpp", 424, 0, "%s", "ptCount > 2");
+    iassert(ptCount > 2);
     ptIndex2 = ptCount - 1;
     ptIndex1 = ptCount - 2;
     for (ptIndex3 = 0; ptIndex3 < ptCount; ++ptIndex3)
     {
         Vec3Sub(&(*pts)[3 * ptIndex2], &(*pts)[3 * ptIndex1], edge1);
         Vec3Sub(&(*pts)[3 * ptIndex3], &(*pts)[3 * ptIndex2], edge2);
-        if (Vec3LengthSq(edge1) <= 0.0)
-            MyAssertHandler("..\\common\\brush_edges.cpp", 434, 0, "%s", "Vec3LengthSq( edge1 ) > 0");
-        if (Vec3LengthSq(edge2) <= 0.0)
-            MyAssertHandler("..\\common\\brush_edges.cpp", 435, 0, "%s", "Vec3LengthSq( edge2 ) > 0");
+        iassert(Vec3LengthSq( edge1 ) > 0);
+        iassert(Vec3LengthSq( edge2 ) > 0);
         Vec3Cross(edge1, edge2, normal);
         normalMag = Vec3Normalize(normal);
         if (normalMag >= 0.01)
@@ -395,10 +392,8 @@ char __cdecl IsConvex(const float (*pts)[3], uint ptCount)
     {
         Vec3Sub(&(*pts)[3 * ptIndex2], &(*pts)[3 * ptIndex1], edge1);
         Vec3Sub(&(*pts)[3 * ptIndex3a], &(*pts)[3 * ptIndex2], edge2);
-        if (Vec3LengthSq(edge1) <= 0.0)
-            MyAssertHandler("..\\common\\brush_edges.cpp", 458, 0, "%s", "Vec3LengthSq( edge1 ) > 0");
-        if (Vec3LengthSq(edge2) <= 0.0)
-            MyAssertHandler("..\\common\\brush_edges.cpp", 459, 0, "%s", "Vec3LengthSq( edge2 ) > 0");
+        iassert(Vec3LengthSq( edge1 ) > 0);
+        iassert(Vec3LengthSq( edge2 ) > 0);
         Vec3Cross(edge1, edge2, normal2);
         normalMag = Vec3Normalize(normal2);
         if (normalMag >= 0.01)
@@ -474,14 +469,7 @@ int __cdecl ReduceToACycle(int basePlane, const SimplePlaneIntersection **pts, i
         {
             if (basePlane != pts[i]->planeIndex[j] && !IntAlreadyInList(list, listCount, pts[i]->planeIndex[j]))
             {
-                if (listCount >= 0x400)
-                    MyAssertHandler(
-                        "..\\common\\brush_edges.cpp",
-                        678,
-                        0,
-                        "planeCount doesn't index ARRAY_COUNT( planeList )\n\t%i not in [0, %i)",
-                        listCount,
-                        1024);
+                bcassert(listCount, 0x400);
                 list[listCount++] = pts[i]->planeIndex[j];
             }
         }
@@ -591,10 +579,8 @@ char __cdecl FindCycleBFS(
     int v20; // [esp+4020h] [ebp-8h]
     int v21; // [esp+4024h] [ebp-4h]
 
-    if (!IsPtFormedByThisPlane(connectingPlane, start))
-        MyAssertHandler("..\\common\\brush_edges.cpp", 266, 0, "%s", "IsPtFormedByThisPlane( connectingPlane, start )");
-    if (!IsPtFormedByThisPlane(connectingPlane, end))
-        MyAssertHandler("..\\common\\brush_edges.cpp", 267, 0, "%s", "IsPtFormedByThisPlane( connectingPlane, end )");
+    iassert(IsPtFormedByThisPlane( connectingPlane, start ));
+    iassert(IsPtFormedByThisPlane( connectingPlane, end ));
     v11 = start;
     planeIndex = ThirdPlane(start, basePlane, connectingPlane);
     v13 = 1;
@@ -627,14 +613,7 @@ LABEL_6:
                     ;
                 if (j >= v21)
                 {
-                    if (v21 >= 0x400)
-                        MyAssertHandler(
-                            "..\\common\\brush_edges.cpp",
-                            299,
-                            0,
-                            "queueHead doesn't index ARRAY_COUNT( queue )\n\t%i not in [0, %i)",
-                            v21,
-                            1024);
+                    bcassert(v21, 0x400);
                     *(&v11 + 4 * v21) = *i;
                     *(&planeIndex + 4 * v21) = v15;
                     v14[4 * v21 - 1] = v14[4 * v20 - 1] + 1;
@@ -691,8 +670,7 @@ int __cdecl NumberOfOccurancesOfPlane(int planeIndex, const SimplePlaneIntersect
     int occurances; // [esp+4h] [ebp-4h]
     const SimplePlaneIntersection **ptsa; // [esp+14h] [ebp+Ch]
 
-    if (!pts)
-        MyAssertHandler("..\\common\\brush_edges.cpp", 232, 0, "%s", "pts");
+    iassert(pts);
     if (!ptCount)
         return 0;
     end = &pts[ptCount];
@@ -717,10 +695,8 @@ int __cdecl GetPtsFormedByPlane(
     int occurances; // [esp+4h] [ebp-4h]
     const SimplePlaneIntersection **ptsa; // [esp+14h] [ebp+Ch]
 
-    if (!pts)
-        MyAssertHandler("..\\common\\brush_edges.cpp", 375, 0, "%s", "pts");
-    if (!result)
-        MyAssertHandler("..\\common\\brush_edges.cpp", 376, 0, "%s", "result");
+    iassert(pts);
+    iassert(result);
     if (!ptCount)
         return 0;
     end = &pts[ptCount];
@@ -729,8 +705,7 @@ int __cdecl GetPtsFormedByPlane(
         ptsa != end;
         ptsa = NextPointFormedByThisPlane(planeIndex, ptsa + 1, end))
     {
-        if (occurances >= maxResults)
-            MyAssertHandler("..\\common\\brush_edges.cpp", 387, 0, "%s", "occurances < maxResults");
+        iassert(occurances < maxResults);
         result[occurances++] = *ptsa;
     }
     return occurances;
@@ -852,10 +827,8 @@ int __cdecl NumberOfUniquePoints(const SimplePlaneIntersection **pts, int ptsCou
     int j; // [esp+1018h] [ebp-8h]
     int i; // [esp+101Ch] [ebp-4h]
 
-    if (!pts)
-        MyAssertHandler("..\\common\\brush_edges.cpp", 763, 0, "%s", "pts");
-    if (ptsCount <= 2)
-        MyAssertHandler("..\\common\\brush_edges.cpp", 764, 0, "%s", "ptsCount > 2");
+    iassert(pts);
+    iassert(ptsCount > 2);
     v4 = 0;
     for (i = 0; i < ptsCount; ++i)
     {

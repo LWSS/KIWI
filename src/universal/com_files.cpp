@@ -254,8 +254,7 @@ char *__cdecl FS_LoadedIwdPureChecksums()
 
 void __cdecl FS_CheckFileSystemStarted()
 {
-    if (!fs_searchpaths)
-        MyAssertHandler(".\\universal\\com_files.cpp", 708, 0, "%s", "fs_searchpaths");
+    iassert(fs_searchpaths);
 }
 
 int __cdecl FS_GetFileOsPath(const char *filename, char *ospath)
@@ -265,10 +264,8 @@ int __cdecl FS_GetFileOsPath(const char *filename, char *ospath)
     searchpath_s *search; // [esp+108h] [ebp-8h]
     FILE *fp; // [esp+10Ch] [ebp-4h]
 
-    if (!filename)
-        MyAssertHandler(".\\universal\\com_files.cpp", 2932, 0, "%s", "filename");
-    if (!ospath)
-        MyAssertHandler(".\\universal\\com_files.cpp", 2933, 0, "%s", "ospath");
+    iassert(filename);
+    iassert(ospath);
     if (!FS_SanitizeFilename(filename, sanitizedName, 256))
         return -1;
     for (search = fs_searchpaths; search; search = search->next)
@@ -298,8 +295,7 @@ int __cdecl FS_OpenFileOverwrite(char *qpath)
     uint attributes; // [esp+108h] [ebp-4h]
 
     FS_CheckFileSystemStarted();
-    if (!qpath)
-        MyAssertHandler(".\\universal\\com_files.cpp", 2971, 0, "%s", "qpath");
+    iassert(qpath);
     if (FS_GetFileOsPath(qpath, ospath) >= 0)
     {
         if (fs_debug->current.integer)
@@ -346,18 +342,9 @@ int __cdecl FS_HashFileName(const char *fname, int hashSize)
 
 FILE *__cdecl FS_FileForHandle(int f)
 {
-    if (f <= 0 || f >= 65)
-        MyAssertHandler(
-            ".\\universal\\com_files.cpp",
-            952,
-            0,
-            "%s\n\t(f) = %i",
-            "(f > 0 && f < (1 + 48 + 13 + 1 + 1 + 1))",
-            f);
-    if (fsh[f].zipFile)
-        MyAssertHandler(".\\universal\\com_files.cpp", 953, 0, "%s", "!fsh[f].zipFile");
-    if (!fsh[f].handleFiles.file.o)
-        MyAssertHandler(".\\universal\\com_files.cpp", 954, 0, "%s", "fsh[f].handleFiles.file.o");
+    vassert((f > 0 && f < (1 + 48 + 13 + 1 + 1 + 1)), "(f) = %i", f);
+    iassert(!fsh[f].zipFile);
+    iassert(fsh[f].handleFiles.file.o);
     return fsh[f].handleFiles.file.o;
 }
 
@@ -365,8 +352,7 @@ int __cdecl FS_filelength(int f)
 {
     FILE *h; // [esp+4h] [ebp-4h]
 
-    if (!f)
-        MyAssertHandler(".\\universal\\com_files.cpp", 968, 0, "%s", "f");
+    iassert(f);
     FS_CheckFileSystemStarted();
 
     if (fsh[f].zipFile)
@@ -419,12 +405,9 @@ void __cdecl FS_BuildOSPathForThread(const char *base, const char *game, const c
     uint v6; // [esp+10h] [ebp-2Ch]
     uint v7; // [esp+20h] [ebp-1Ch]
 
-    if (!base)
-        MyAssertHandler(".\\universal\\com_files.cpp", 1049, 0, "%s", "base");
-    if (!qpath)
-        MyAssertHandler(".\\universal\\com_files.cpp", 1050, 0, "%s", "qpath");
-    if (!ospath)
-        MyAssertHandler(".\\universal\\com_files.cpp", 1051, 0, "%s", "ospath");
+    iassert(base);
+    iassert(qpath);
+    iassert(ospath);
     if (!game || !*game)
         game = fs_gamedir;
     v7 = strlen(base);
@@ -483,8 +466,7 @@ void __cdecl FS_FCloseFile(int h)
     FILE *f; // [esp+0h] [ebp-4h]
 
     FS_CheckFileSystemStarted();
-    if (fsh[h].streamed)
-        MyAssertHandler(".\\universal\\com_files.cpp", 1275, 0, "%s", "!fsh[h].streamed");
+    iassert(!fsh[h].streamed);
     if (fsh[h].zipFile)
     {
         unzCloseCurrentFile(fsh[h].handleFiles.file.z);
@@ -494,8 +476,7 @@ void __cdecl FS_FCloseFile(int h)
         }
         else
         {
-            if (!fsh[h].zipFile->hasOpenFile)
-                MyAssertHandler(".\\universal\\com_files.cpp", 1287, 0, "%s", "fsh[h].zipFile->hasOpenFile");
+            iassert(fsh[h].zipFile->hasOpenFile);
             fsh[h].zipFile->hasOpenFile = 0;
         }
     }
@@ -609,8 +590,7 @@ int __cdecl FS_FOpenFileAppend(const char *filename)
     FILE *f; // [esp+108h] [ebp-8h]
     int h; // [esp+10Ch] [ebp-4h]
 
-    if (!Sys_IsMainThread() && !Sys_IsRenderThread())
-        MyAssertHandler(".\\universal\\com_files.cpp", 1486, 0, "%s", "Sys_IsMainThread() || Sys_IsRenderThread()");
+    iassert(Sys_IsMainThread() || Sys_IsRenderThread());
     FS_CheckFileSystemStarted();
     IsMainThread = Sys_IsMainThread();
     h = FS_HandleForFile(IsMainThread ? FS_THREAD_MAIN : FS_THREAD_BACKEND);
@@ -652,18 +632,9 @@ char __cdecl FS_SanitizeFilename(const char *filename, char *sanitizedName, int 
     int srcIndex; // [esp+14h] [ebp-8h]
     int dstIndex; // [esp+18h] [ebp-4h]
 
-    if (!filename)
-        MyAssertHandler(".\\universal\\com_files.cpp", 1707, 0, "%s", "filename");
-    if (!sanitizedName)
-        MyAssertHandler(".\\universal\\com_files.cpp", 1708, 0, "%s", "sanitizedName");
-    if (sanitizedNameSize <= 0)
-        MyAssertHandler(
-            ".\\universal\\com_files.cpp",
-            1709,
-            0,
-            "%s\n\t(sanitizedNameSize) = %i",
-            "(sanitizedNameSize > 0)",
-            sanitizedNameSize);
+    iassert(filename);
+    iassert(sanitizedName);
+    vassert((sanitizedNameSize > 0), "(sanitizedNameSize) = %i", sanitizedNameSize);
     for (srcIndex = 0; ; ++srcIndex)
     {
         v12 = filename[srcIndex];
@@ -763,8 +734,7 @@ uint __cdecl FS_FOpenFileReadForThread(const char *filename, int *file, FsThread
     impureIwd = 0;
     wasSkipped = 0;
     hash = 0;
-    if (!filename)
-        MyAssertHandler(".\\universal\\com_files.cpp", 1799, 0, "%s", "filename");
+    iassert(filename);
     FS_CheckFileSystemStarted();
     if (!FS_SanitizeFilename(filename, sanitizedName, 256))
     {
@@ -952,8 +922,7 @@ bool __cdecl FS_Delete(const char *filename)
     char ospath[260]; // [esp+0h] [ebp-108h] BYREF
 
     FS_CheckFileSystemStarted();
-    if (!filename)
-        MyAssertHandler(".\\universal\\com_files.cpp", 2205, 0, "%s", "filename");
+    iassert(filename);
     if (!*filename)
         return 0;
     FS_BuildOSPath((char *)fs_homepath->current.integer, fs_gamedir, filename, ospath);
@@ -1054,8 +1023,7 @@ int __cdecl FS_Seek(int f, int offset, int origin)
     uint iZipOffset; // [esp+Ch] [ebp-4h]
 
     FS_CheckFileSystemStarted();
-    if (fsh[f].streamed)
-        MyAssertHandler(".\\universal\\com_files.cpp", 2647, 0, "%s", "!fsh[f].streamed");
+    iassert(!fsh[f].streamed);
     if (!fsh[f].zipFile)
     {
         v6 = FS_FileForHandle(f);
@@ -1072,8 +1040,7 @@ int __cdecl FS_Seek(int f, int offset, int origin)
     switch (origin)
     {
     case 0:
-        if (!offset)
-            MyAssertHandler(".\\universal\\com_files.cpp", 2668, 0, "%s", "offset != 0");
+        iassert(offset != 0);
         if (offset >= 0)
         {
             CurrentFile = unzReadCurrentFile(fsh[f].handleFiles.file.z, 0, offset);
@@ -1167,8 +1134,7 @@ void __cdecl FS_ResetFiles()
 void __cdecl FS_FreeFile(char *buffer)
 {
     FS_CheckFileSystemStarted();
-    if (!buffer)
-        MyAssertHandler(".\\universal\\com_files.cpp", 2840, 0, "%s", "buffer");
+    iassert(buffer);
     --fs_loadStack;
     FS_FreeMem(buffer);
 }
@@ -1197,10 +1163,8 @@ int __cdecl FS_WriteFile(char *filename, char *buffer, uint size)
     uint actualSize; // [esp+4h] [ebp-4h]
 
     FS_CheckFileSystemStarted();
-    if (!filename)
-        MyAssertHandler(".\\universal\\com_files.cpp", 2896, 0, "%s", "filename");
-    if (!buffer)
-        MyAssertHandler(".\\universal\\com_files.cpp", 2897, 0, "%s", "buffer");
+    iassert(filename);
+    iassert(buffer);
     f = FS_FOpenFileWrite(filename);
     if (f)
     {
@@ -1239,8 +1203,7 @@ bool __cdecl FS_GameDirDomainFunc(dvar_s *dvar, DvarValue newValue)
     int v3; // eax
     int v4; // eax
 
-    if (!dvar)
-        MyAssertHandler(".\\universal\\com_files.cpp", 4241, 0, "%s", "dvar");
+    iassert(dvar);
     if (!*(_BYTE *)newValue.integer)
         return 1;
     if (I_strnicmp(newValue.string, "mods", 4))
@@ -2570,8 +2533,7 @@ const char **__cdecl FS_ListFilteredFilesInLocation(
         {
             pathDir = 0;
         }
-        if (!pathDir)
-            MyAssertHandler(".\\universal\\com_files.cpp", 3483, 0, "%s", "pathDir");
+        iassert(pathDir);
         if (FS_CheckLocation(pathDir, lookInFlags))
         {
             if (locationSearchPath)
@@ -2877,10 +2839,8 @@ int __cdecl FS_WriteFileToDir(const char *filename, const char *path, char *buff
     uint actualSize; // [esp+4h] [ebp-4h]
 
     FS_CheckFileSystemStarted();
-    if (!filename)
-        MyAssertHandler(".\\universal\\com_files.cpp", 2862, 0, "%s", "filename");
-    if (!buffer)
-        MyAssertHandler(".\\universal\\com_files.cpp", 2863, 0, "%s", "buffer");
+    iassert(filename);
+    iassert(buffer);
     f = FS_FOpenFileWriteToDir(filename, path);
     if (f)
     {
@@ -2952,8 +2912,7 @@ bool __cdecl FS_DeleteInDir(char *filename, char *dir)
     char ospath[260]; // [esp+0h] [ebp-108h] BYREF
 
     FS_CheckFileSystemStarted();
-    if (!filename)
-        MyAssertHandler(".\\universal\\com_files.cpp", 2231, 0, "%s", "filename");
+    iassert(filename);
     if (!*filename)
         return 0;
     FS_BuildOSPath(fs_homepath->current.string, dir, filename, ospath);

@@ -61,13 +61,7 @@ float __cdecl Actor_EventDefaultRadiusSqrd(ai_event_t eType)
     double v3; // fp1
 
     v1 = eType;
-    if (!g_ai_event_info[eType].defaultDistDvar)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\actor_events.cpp",
-            65,
-            0,
-            "%s",
-            "g_ai_event_info[eType].defaultDistDvar");
+    iassert(g_ai_event_info[eType].defaultDistDvar);
     v2 = *g_ai_event_info[v1].defaultDistDvar;
     if (!v2)
         MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_events.cpp", 68, 0, "%s", "dvar");
@@ -97,8 +91,7 @@ void __cdecl Actor_DumpEvents(actor_s *self, ai_event_t event, gentity_s *origin
     int number; // r5
     int v7; // r7
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_events.cpp", 90, 0, "%s", "self");
+    iassert(self);
     number = self->ent->s.number;
     if (g_dumpAIEvents->current.integer == number)
     {
@@ -146,10 +139,8 @@ void __cdecl Actor_WasAttackedBy(actor_s *self, sentient_s *pOther)
 {
     sentient_s *sentients; // r11
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_events.cpp", 149, 0, "%s", "self");
-    if (!pOther)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_events.cpp", 150, 0, "%s", "pOther");
+    iassert(self);
+    iassert(pOther);
     sentients = level.sentients;
     if (pOther < level.sentients || pOther >= &level.sentients[33])
     {
@@ -176,12 +167,9 @@ void __cdecl Actor_WasAttackedBy(actor_s *self, sentient_s *pOther)
 
 void __cdecl Actor_EventFootstep(actor_s *self, sentient_s *originator, const float *vOrigin)
 {
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_events.cpp", 488, 0, "%s", "self");
-    if (!originator)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_events.cpp", 489, 0, "%s", "originator");
-    if (!vOrigin)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_events.cpp", 490, 0, "%s", "vOrigin");
+    iassert(self);
+    iassert(originator);
+    iassert(vOrigin);
     Actor_UpdateLastKnownPos(self, originator);
 }
 
@@ -205,33 +193,25 @@ void __cdecl Actor_EventNewEnemy(actor_s *self, sentient_s *originator)
 
 void __cdecl Actor_EventPain(actor_s *self, sentient_s *pCasualty, sentient_s *pAttacker)
 {
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_events.cpp", 534, 0, "%s", "self");
-    if (!pCasualty)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_events.cpp", 535, 0, "%s", "pCasualty");
-    if (!pAttacker)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_events.cpp", 536, 0, "%s", "pAttacker");
+    iassert(self);
+    iassert(pCasualty);
+    iassert(pAttacker);
     Actor_WasAttackedBy(self, pAttacker);
     Actor_UpdateLastKnownPos(self, pAttacker);
 }
 
 void __cdecl Actor_EventDeath(actor_s *self, sentient_s *pCasualty, sentient_s *pAttacker)
 {
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_events.cpp", 552, 0, "%s", "self");
-    if (!pCasualty)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_events.cpp", 553, 0, "%s", "pCasualty");
-    if (!pAttacker)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_events.cpp", 554, 0, "%s", "pAttacker");
+    iassert(self);
+    iassert(pCasualty);
+    iassert(pAttacker);
     Actor_UpdateLastKnownPos(self, pAttacker);
 }
 
 void __cdecl Actor_EventExplosion(actor_s *self, gentity_s *originator, const float *vOrigin)
 {
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_events.cpp", 567, 0, "%s", "self");
-    if (!vOrigin)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_events.cpp", 568, 0, "%s", "vOrigin");
+    iassert(self);
+    iassert(vOrigin);
     if (originator)
         Scr_AddEntity(originator);
     else
@@ -242,23 +222,17 @@ void __cdecl Actor_EventExplosion(actor_s *self, gentity_s *originator, const fl
 
 void __cdecl Actor_EventGrenadePing(actor_s *self, gentity_s *originator, const float *vOrigin)
 {
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_events.cpp", 589, 0, "%s", "self");
-    if (!originator)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_events.cpp", 590, 0, "%s", "originator");
-    if (!vOrigin)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_events.cpp", 591, 0, "%s", "vOrigin");
+    iassert(self);
+    iassert(originator);
+    iassert(vOrigin);
     Actor_GrenadePing(self, originator);
 }
 
 void __cdecl Actor_EventGunshot(actor_s *self, sentient_s *originator, const float *vOrigin)
 {
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_events.cpp", 606, 0, "%s", "self");
-    if (!originator)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_events.cpp", 607, 0, "%s", "originator");
-    if (!vOrigin)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_events.cpp", 608, 0, "%s", "vOrigin");
+    iassert(self);
+    iassert(originator);
+    iassert(vOrigin);
     Actor_UpdateLastKnownPos(self, originator);
 }
 
@@ -274,23 +248,12 @@ void __cdecl Actor_EventBullet(
 {
     sentient_s *sentient; // r4
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_events.cpp", 623, 0, "%s", "self");
-    if (!originator)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_events.cpp", 624, 0, "%s", "originator");
-    if (!vStart)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_events.cpp", 625, 0, "%s", "vStart");
-    if (!vEnd)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_events.cpp", 626, 0, "%s", "vEnd");
-    if (!vClosest)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_events.cpp", 627, 0, "%s", "vClosest");
-    if (fDistSqrd < 0.0 || fDistSqrd > fRadiusSqrd)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\actor_events.cpp",
-            628,
-            0,
-            "%s",
-            "fDistSqrd >= 0 && fDistSqrd <= fRadiusSqrd");
+    iassert(self);
+    iassert(originator);
+    iassert(vStart);
+    iassert(vEnd);
+    iassert(vClosest);
+    iassert(fDistSqrd >= 0 && fDistSqrd <= fRadiusSqrd);
     sentient = originator->sentient;
     if (sentient)
     {
@@ -313,32 +276,16 @@ void __cdecl Actor_ReceivePointEvent(
     sentient_s *v13; // r4
     sentient_s *v14; // r4
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_events.cpp", 650, 0, "%s", "self");
-    if (!vOrigin)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_events.cpp", 651, 0, "%s", "vOrigin");
-    if (fDistSqrd < 0.0 || fDistSqrd > fRadiusSqrd)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\actor_events.cpp",
-            652,
-            0,
-            "%s",
-            "fDistSqrd >= 0 && fDistSqrd <= fRadiusSqrd");
-    if (eType <= AI_EV_FIRST_POINT_EVENT || eType >= AI_EV_LAST_POINT_EVENT)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\actor_events.cpp",
-            653,
-            0,
-            "%s",
-            "eType > AI_EV_FIRST_POINT_EVENT && eType < AI_EV_LAST_POINT_EVENT");
+    iassert(self);
+    iassert(vOrigin);
+    iassert(fDistSqrd >= 0 && fDistSqrd <= fRadiusSqrd);
+    iassert(eType > AI_EV_FIRST_POINT_EVENT && eType < AI_EV_LAST_POINT_EVENT);
     switch (eType)
     {
     case AI_EV_FOOTSTEP:
     case AI_EV_FOOTSTEP_LITE:
-        if (!originator)
-            MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_events.cpp", 659, 0, "%s", "originator");
-        if (!originator->sentient)
-            MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_events.cpp", 660, 0, "%s", "originator->sentient");
+        iassert(originator);
+        iassert(originator->sentient);
         if (Actor_CaresAboutInfo(self, originator->sentient))
         {
             if (!Actor_IsUsingTurret(self)
@@ -352,25 +299,15 @@ void __cdecl Actor_ReceivePointEvent(
         }
         break;
     case AI_EV_NEW_ENEMY:
-        if (!originator)
-            MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_events.cpp", 673, 0, "%s", "originator");
-        if (!originator->sentient)
-            MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_events.cpp", 674, 0, "%s", "originator->sentient");
+        iassert(originator);
+        iassert(originator->sentient);
         Actor_EventNewEnemy(self, originator->sentient);
         Actor_DumpEvents(self, eType, originator);
         break;
     case AI_EV_PAIN:
-        if (!originator)
-            MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_events.cpp", 680, 0, "%s", "originator");
-        if (!originator->sentient)
-            MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_events.cpp", 681, 0, "%s", "originator->sentient");
-        if (!originator->sentient->lastAttacker)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\actor_events.cpp",
-                682,
-                0,
-                "%s",
-                "originator->sentient->lastAttacker");
+        iassert(originator);
+        iassert(originator->sentient);
+        iassert(originator->sentient->lastAttacker);
         v13 = originator->sentient->lastAttacker->sentient;
         if (v13 && Actor_CaresAboutInfo(self, v13))
         {
@@ -379,17 +316,9 @@ void __cdecl Actor_ReceivePointEvent(
         }
         break;
     case AI_EV_DEATH:
-        if (!originator)
-            MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_events.cpp", 692, 0, "%s", "originator");
-        if (!originator->sentient)
-            MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_events.cpp", 693, 0, "%s", "originator->sentient");
-        if (!originator->sentient->lastAttacker)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\actor_events.cpp",
-                694,
-                0,
-                "%s",
-                "originator->sentient->lastAttacker");
+        iassert(originator);
+        iassert(originator->sentient);
+        iassert(originator->sentient->lastAttacker);
         v14 = originator->sentient->lastAttacker->sentient;
         if (v14 && Actor_CaresAboutInfo(self, v14))
         {
@@ -404,8 +333,7 @@ void __cdecl Actor_ReceivePointEvent(
     case AI_EV_GRENADE_PING:
         goto LABEL_50;
     case AI_EV_PROJECTILE_PING:
-        if (!originator)
-            MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_events.cpp", 712, 0, "%s", "originator");
+        iassert(originator);
         if (!originator->parent.isDefined() || originator->parent.ent() != self->ent)
         {
         LABEL_50:
@@ -415,10 +343,8 @@ void __cdecl Actor_ReceivePointEvent(
         break;
     case AI_EV_GUNSHOT:
     case AI_EV_SILENCED_SHOT:
-        if (!originator)
-            MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_events.cpp", 721, 0, "%s", "originator");
-        if (!originator->sentient)
-            MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_events.cpp", 722, 0, "%s", "originator->sentient");
+        iassert(originator);
+        iassert(originator->sentient);
         if (originator != self->ent && Actor_CaresAboutInfo(self, originator->sentient))
         {
             Actor_EventGunshot(self, originator->sentient, vOrigin);
@@ -448,28 +374,12 @@ void __cdecl Actor_ReceiveLineEvent(
 {
     int v17; // r10
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_events.cpp", 751, 0, "%s", "self");
-    if (!vStart)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_events.cpp", 752, 0, "%s", "vStart");
-    if (!vEnd)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_events.cpp", 753, 0, "%s", "vEnd");
-    if (!vClosest)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_events.cpp", 754, 0, "%s", "vClosest");
-    if (fDistSqrd < 0.0 || fDistSqrd > fRadiusSqrd)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\actor_events.cpp",
-            755,
-            0,
-            "%s",
-            "fDistSqrd >= 0 && fDistSqrd <= fRadiusSqrd");
-    if (eType <= AI_EV_FIRST_LINE_EVENT || eType >= AI_EV_LAST_LINE_EVENT)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\actor_events.cpp",
-            756,
-            0,
-            "%s",
-            "eType > AI_EV_FIRST_LINE_EVENT && eType < AI_EV_LAST_LINE_EVENT");
+    iassert(self);
+    iassert(vStart);
+    iassert(vEnd);
+    iassert(vClosest);
+    iassert(fDistSqrd >= 0 && fDistSqrd <= fRadiusSqrd);
+    iassert(eType > AI_EV_FIRST_LINE_EVENT && eType < AI_EV_LAST_LINE_EVENT);
     if (eType != AI_EV_BULLET)
     {
         if (eType != AI_EV_PROJECTILE_IMPACT)
@@ -497,8 +407,7 @@ void __cdecl Actor_ReceiveLineEvent(
         Actor_DumpEvents(self, eType, originator);
         return;
     }
-    if (!originator)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_events.cpp", 761, 0, "%s", "originator");
+    iassert(originator);
     if (originator != self->ent)
     {
         v17 = 0;
@@ -517,10 +426,8 @@ void __cdecl Actor_ReceiveArcEvent(
     double angle1,
     double halfHeight)
 {
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_events.cpp", 790, 0, "%s", "self");
-    if (!origin)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_events.cpp", 791, 0, "%s", "origin");
+    iassert(self);
+    iassert(origin);
     if (eType == AI_EV_BADPLACE_ARC)
     {
         Actor_Badplace_Ping(self);
@@ -545,8 +452,7 @@ void __cdecl Actor_ReceiveArcEvent(
 
 void __cdecl Actor_ReceiveVolumeEvent(actor_s *self, gentity_s *originator, ai_event_t eType)
 {
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_events.cpp", 819, 0, "%s", "self");
+    iassert(self);
     if (eType == AI_EV_BADPLACE_VOLUME)
     {
         Actor_Badplace_Ping(self);
@@ -591,24 +497,11 @@ void __cdecl Actor_BroadcastPointEvent(
     double v21; // fp12
 
     v6 = teamFlags;
-    if (teamFlags > 31)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\actor_events.cpp",
-            186,
-            0,
-            "%s",
-            "teamFlags <= (1 << TEAM_NUM_TEAMS) - 1");
-    if (eType <= 1 || eType >= 12)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\actor_events.cpp",
-            187,
-            0,
-            "%s",
-            "eType > AI_EV_FIRST_POINT_EVENT && eType < AI_EV_LAST_POINT_EVENT");
+    iassert(teamFlags <= (1 << TEAM_NUM_TEAMS) - 1);
+    iassert(eType > AI_EV_FIRST_POINT_EVENT && eType < AI_EV_LAST_POINT_EVENT);
     if (v6)
         goto LABEL_12;
-    if (!originator)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_events.cpp", 194, 0, "%s", "originator");
+    iassert(originator);
     sentient = originator->sentient;
     if (sentient)
     {
@@ -681,20 +574,8 @@ void __cdecl Actor_BroadcastLineEvent(
     float linePoint[3]; // was v36 (BYREF) + v37 + v38
 
     v7 = teamFlags;
-    if (teamFlags > 31)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\actor_events.cpp",
-            249,
-            0,
-            "%s",
-            "teamFlags <= (1 << TEAM_NUM_TEAMS) - 1");
-    if (eType <= 13 || eType >= 16)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\actor_events.cpp",
-            250,
-            0,
-            "%s",
-            "eType > AI_EV_FIRST_LINE_EVENT && eType < AI_EV_LAST_LINE_EVENT");
+    iassert(teamFlags <= (1 << TEAM_NUM_TEAMS) - 1);
+    iassert(eType > AI_EV_FIRST_LINE_EVENT && eType < AI_EV_LAST_LINE_EVENT);
     if (!v7)
     {
         sentient = originator->sentient;
@@ -848,8 +729,7 @@ void __cdecl Actor_BroadcastArcEvent(
             }
             return;
         }
-        if (!originator)
-            MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_events.cpp", 373, 0, "%s", "originator");
+        iassert(originator);
         sentient = originator->sentient;
         if (sentient)
         {
@@ -887,13 +767,7 @@ void __cdecl Actor_BroadcastVolumeEvent(
     double v23; // fp12
 
     v6 = teamFlags;
-    if (teamFlags > 31)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\actor_events.cpp",
-            427,
-            0,
-            "%s",
-            "teamFlags <= (1 << TEAM_NUM_TEAMS) - 1");
+    iassert(teamFlags <= (1 << TEAM_NUM_TEAMS) - 1);
     if (eventType != 21)
         MyAssertHandler(
             "c:\\trees\\cod3\\cod3src\\src\\game\\actor_events.cpp",
@@ -903,8 +777,7 @@ void __cdecl Actor_BroadcastVolumeEvent(
             "eventType > AI_EV_FIRST_VOLUME_EVENT && eventType < AI_EV_LAST_VOLUME_EVENT");
     if (v6)
         goto LABEL_11;
-    if (!originator)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_events.cpp", 438, 0, "%s", "originator");
+    iassert(originator);
     sentient = originator->sentient;
     if (sentient)
     {
@@ -948,10 +821,8 @@ void __cdecl Actor_BroadcastVolumeEvent(
 
 void __cdecl Actor_BroadcastTeamEvent(sentient_s *sentient, int eType)
 {
-    if (!sentient)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_events.cpp", 168, 0, "%s", "sentient");
-    if (!sentient->ent)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_events.cpp", 169, 0, "%s", "sentient->ent");
+    iassert(sentient);
+    iassert(sentient->ent);
     Actor_BroadcastPointEvent(sentient->ent, eType, 1 << sentient->eTeam, sentient->ent->r.currentOrigin, 0.0);
 }
 

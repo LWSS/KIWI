@@ -126,16 +126,13 @@ void __cdecl Phys_Init()
         for (worldIndex = PHYS_WORLD_DYNENT; worldIndex < PHYS_WORLD_COUNT; ++worldIndex)
         {
             physGlob.world[worldIndex] = dWorldCreate(worldIndex);
-            if (!physGlob.world[worldIndex])
-                MyAssertHandler(".\\physics\\phys_ode.cpp", 316, 0, "%s", "physGlob.world[worldIndex]");
+            iassert(physGlob.world[worldIndex]);
             physGlob.worldData[worldIndex].timeLastSnapshot = 0;
             physGlob.worldData[worldIndex].timeLastUpdate = 0;
             physGlob.space[worldIndex] = dGetSimpleSpace(worldIndex);
-            if (!physGlob.space[worldIndex])
-                MyAssertHandler(".\\physics\\phys_ode.cpp", 320, 0, "%s", "physGlob.space[worldIndex]");
+            iassert(physGlob.space[worldIndex]);
             physGlob.contactgroup[worldIndex] = dGetContactJointGroup(worldIndex);
-            if (!physGlob.contactgroup[worldIndex])
-                MyAssertHandler(".\\physics\\phys_ode.cpp", 322, 0, "%s", "physGlob.contactgroup[worldIndex]");
+            iassert(physGlob.contactgroup[worldIndex]);
             dWorldSetAutoDisableFlag(physGlob.world[worldIndex], 1);
             dWorldSetAutoDisableSteps(physGlob.world[worldIndex], 0);
             physGlob.worldData[worldIndex].collisionCallback = nullptr;
@@ -548,8 +545,7 @@ void __cdecl Phys_BodyAddGeomAndSetMass(
     dxGeom *geomTransform; // [esp+68h] [ebp-4h]
 
     dMassSetZero(&mass);
-    if (totalMass <= 0.0)
-        MyAssertHandler(".\\physics\\phys_ode.cpp", 498, 0, "%s", "totalMass > 0");
+    iassert(totalMass > 0);
     if (!dBodyGetData(body))
         MyAssertHandler(".\\physics\\phys_ode.cpp", 501, 0, "%s", "userData");
     geom = 0;
@@ -655,8 +651,7 @@ void __cdecl Phys_AdjustForNewCenterOfMass(dxBody *body, const float *newRelCent
     float rotatedRelCenterOfMass[3]; // [esp+78h] [ebp-Ch] BYREF
 
     bodyUserData = (PhysObjUserData *)dBodyGetData(body);
-    if (!bodyUserData)
-        MyAssertHandler(".\\physics\\phys_ode.cpp", 458, 0, "%s", "bodyUserData");
+    iassert(bodyUserData);
     Phys_BodyGetRotation(body, rotation);
     Phys_BodyGetCenterOfMass(body, oldAbsCenterOfMass);
     Phys_ObjGetPositionFromCenterOfMass(body, rotation, oldAbsCenterOfMass, objPosition);
@@ -688,8 +683,7 @@ void __cdecl Phys_BodyGetRotation(dxBody *body, float (*outRotation)[3])
 {
     const float *bodyRotation; // [esp+8h] [ebp-4h]
 
-    if (!body)
-        MyAssertHandler(".\\physics\\phys_ode.cpp", 246, 0, "%s", "body");
+    iassert(body);
     bodyRotation = dBodyGetRotation(body);
     Phys_OdeMatrix3ToAxis(bodyRotation, outRotation);
 }
@@ -716,8 +710,7 @@ void __cdecl Phys_ObjGetPositionFromCenterOfMass(
     float rotatedTrans[3]; // [esp+4h] [ebp-Ch] BYREF
 
     userData = (PhysObjUserData *)dBodyGetData(body);
-    if (!userData)
-        MyAssertHandler(".\\physics\\phys_ode.cpp", 437, 0, "%s", "userData");
+    iassert(userData);
     AxisTransformVec3(*(const mat3x3*)rotation, userData->translation, rotatedTrans);
     Vec3Add(rotatedTrans, centerOfGravity, objPos);
 }
@@ -764,43 +757,11 @@ dxBody *__cdecl Phys_ObjCreate(
 {
     float axis[3][3]; // [esp+24h] [ebp-24h] BYREF
 
-    if ((COERCE_UNSIGNED_INT(*position) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(position[1]) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(position[2]) & 0x7F800000) == 0x7F800000)
-    {
-        MyAssertHandler(
-            ".\\physics\\phys_ode.cpp",
-            677,
-            0,
-            "%s",
-            "!IS_NAN((position)[0]) && !IS_NAN((position)[1]) && !IS_NAN((position)[2])");
-    }
-    if ((COERCE_UNSIGNED_INT(*quat) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(quat[1]) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(quat[2]) & 0x7F800000) == 0x7F800000)
-    {
-        MyAssertHandler(
-            ".\\physics\\phys_ode.cpp",
-            678,
-            0,
-            "%s",
-            "!IS_NAN((quat)[0]) && !IS_NAN((quat)[1]) && !IS_NAN((quat)[2])");
-    }
-    if ((COERCE_UNSIGNED_INT(*velocity) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(velocity[1]) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(velocity[2]) & 0x7F800000) == 0x7F800000)
-    {
-        MyAssertHandler(
-            ".\\physics\\phys_ode.cpp",
-            679,
-            0,
-            "%s",
-            "!IS_NAN((velocity)[0]) && !IS_NAN((velocity)[1]) && !IS_NAN((velocity)[2])");
-    }
-    if (!physInited)
-        MyAssertHandler(".\\physics\\phys_ode.cpp", 681, 0, "%s", "physInited");
-    if (!physPreset)
-        MyAssertHandler(".\\physics\\phys_ode.cpp", 682, 0, "%s", "physPreset");
+    nanassertvec3(position);
+    nanassertvec3(quat);
+    nanassertvec3(velocity);
+    iassert(physInited);
+    iassert(physPreset);
     QuatToAxis(quat, axis);
     return Phys_ObjCreateAxis(worldIndex, position, axis, velocity, physPreset);
 }
@@ -824,8 +785,7 @@ void __cdecl Phys_ObjSetOrientation(
     if (!id)
         MyAssertHandler(".\\physics\\phys_ode.cpp", 702, 0, "%s", "body");
     bodyUserData = (PhysObjUserData *)dBodyGetData(body);
-    if (!bodyUserData)
-        MyAssertHandler(".\\physics\\phys_ode.cpp", 705, 0, "%s", "bodyUserData");
+    iassert(bodyUserData);
     Phys_ObjGetPosition(id, oldPosition, oldRotation);
     Phys_BodyGetRotation(body, oldRotation);
     QuatToAxis(newOrientation, newRotation);
@@ -848,8 +808,7 @@ void __cdecl Phys_ObjAddGeomBox(PhysWorld worldIndex, dxBody *id, const float *b
     dMass mass; // [esp+64h] [ebp-48h] BYREF
 
     dMassSetZero(&mass);
-    if (!id)
-        MyAssertHandler(".\\physics\\phys_ode.cpp", 731, 0, "%s", "id");
+    iassert(id);
     body = id;
     geomState.type = PHYS_GEOM_BOX;
     Vec3Avg(boxMin, boxMax, centerOfMass);
@@ -871,8 +830,7 @@ void __cdecl Phys_ObjAddGeomBoxRotated(
     dMass mass; // [esp+6Ch] [ebp-48h] BYREF
 
     dMassSetZero(&mass);
-    if (!id)
-        MyAssertHandler(".\\physics\\phys_ode.cpp", 753, 0, "%s", "id");
+    iassert(id);
     body = id;
     geomState.type = PHYS_GEOM_BOX;
     Vec3Scale(halfLengths, 2.0, geomState.u.boxState.extent);
@@ -901,8 +859,7 @@ void __cdecl Phys_ObjAddGeomBrushModel(
     dMass mass; // [esp+64h] [ebp-48h] BYREF
 
     dMassSetZero(&mass);
-    if (!id)
-        MyAssertHandler(".\\physics\\phys_ode.cpp", 777, 0, "%s", "id");
+    iassert(id);
     body = id;
     geomState.type = PHYS_GEOM_BRUSHMODEL;
     geomState.u.brushState.u.brushModel = brushModel;
@@ -924,8 +881,7 @@ void __cdecl Phys_ObjAddGeomBrush(PhysWorld worldIndex, dxBody *id, const cbrush
     dMass mass; // [esp+64h] [ebp-48h] BYREF
 
     dMassSetZero(&mass);
-    if (!id)
-        MyAssertHandler(".\\physics\\phys_ode.cpp", 798, 0, "%s", "id");
+    iassert(id);
     body = id;
     geomState.type = PHYS_GEOM_BRUSH;
     geomState.u.cylinderState.direction = (int)brush;
@@ -952,8 +908,7 @@ void __cdecl Phys_ObjAddGeomCylinder(PhysWorld worldIndex, dxBody *id, const flo
     float extent[3]; // [esp+C0h] [ebp-Ch] BYREF
 
     dMassSetZero(&mass);
-    if (!id)
-        MyAssertHandler(".\\physics\\phys_ode.cpp", 822, 0, "%s", "id");
+    iassert(id);
     body = id;
     geomState.type = PHYS_GEOM_CYLINDER;
     cyl = &geomState.u.cylinderState;
@@ -986,8 +941,7 @@ void __cdecl Phys_ObjAddGeomCylinderDirection(
     dMass mass; // [esp+5Ch] [ebp-48h] BYREF
 
     dMassSetZero(&mass);
-    if (!id)
-        MyAssertHandler(".\\physics\\phys_ode.cpp", 850, 0, "%s", "id");
+    iassert(id);
     body = id;
     geomState.type = PHYS_GEOM_CYLINDER;
     cyl = &geomState.u.cylinderState;
@@ -1016,8 +970,7 @@ void __cdecl Phys_ObjAddGeomCylinderRotated(
     dMass mass; // [esp+6Ch] [ebp-48h] BYREF
 
     dMassSetZero(&mass);
-    if (!id)
-        MyAssertHandler(".\\physics\\phys_ode.cpp", 877, 0, "%s", "id");
+    iassert(id);
     body = id;
     geomState.type = PHYS_GEOM_CYLINDER;
     cyl = &geomState.u.cylinderState;
@@ -1054,8 +1007,7 @@ void __cdecl Phys_ObjAddGeomCapsule(
     dMass mass; // [esp+5Ch] [ebp-48h] BYREF
 
     dMassSetZero(&mass);
-    if (!id)
-        MyAssertHandler(".\\physics\\phys_ode.cpp", 907, 0, "%s", "id");
+    iassert(id);
     body = id;
     geomState.type = PHYS_GEOM_CAPSULE;
     cyl = &geomState.u.cylinderState;
@@ -1126,22 +1078,19 @@ void __cdecl Phys_ObjSetCollisionFromXModel(const XModel *model, PhysWorld world
 
 void __cdecl Phys_ObjSetAngularVelocity(dxBody *id, float *angularVel)
 {
-    if (!id)
-        MyAssertHandler(".\\physics\\phys_ode.cpp", 973, 0, "%s", "id");
+    iassert(id);
     dBodySetAngularVel(id, angularVel[2], *angularVel, angularVel[1]);
 }
 
 void __cdecl Phys_ObjSetAngularVelocityRaw(dxBody *id, float *angularVel)
 {
-    if (!id)
-        MyAssertHandler(".\\physics\\phys_ode.cpp", 985, 0, "%s", "id");
+    iassert(id);
     dBodySetAngularVel(id, *angularVel, angularVel[1], angularVel[2]);
 }
 
 void __cdecl Phys_ObjSetVelocity(dxBody *id, float *velocity)
 {
-    if (!id)
-        MyAssertHandler(".\\physics\\phys_ode.cpp", 997, 0, "%s", "id");
+    iassert(id);
     dBodySetLinearVel(id, *velocity, velocity[1], velocity[2]);
 }
 
@@ -1150,10 +1099,8 @@ void __cdecl Phys_ObjGetPosition(dxBody *id, float *outPosition, float (*outRota
     const float *bodyRotation; // [esp+8h] [ebp-Ch]
     const float *bodyPosition; // [esp+Ch] [ebp-8h]
 
-    if (!physInited)
-        MyAssertHandler(".\\physics\\phys_ode.cpp", 1012, 0, "%s", "physInited");
-    if (!id)
-        MyAssertHandler(".\\physics\\phys_ode.cpp", 1013, 0, "%s", "id");
+    iassert(physInited);
+    iassert(id);
     bodyPosition = dBodyGetPosition(id);
     bodyRotation = dBodyGetRotation(id);
     Phys_OdeMatrix3ToAxis(bodyRotation, outRotation);
@@ -1165,8 +1112,7 @@ void __cdecl Phys_ObjGetPosition(dxBody *id, float *outPosition, float (*outRota
 
 void __cdecl Phys_ObjGetCenterOfMass(dxBody *id, float *outPosition)
 {
-    if (!id)
-        MyAssertHandler(".\\physics\\phys_ode.cpp", 1031, 0, "%s", "id");
+    iassert(id);
     Phys_BodyGetCenterOfMass(id, outPosition);
 }
 
@@ -1174,10 +1120,8 @@ void __cdecl Phys_ObjDestroy(PhysWorld worldIndex, dxBody *id)
 {
     PhysObjUserData *userData; // [esp+0h] [ebp-8h]
 
-    if (!physInited)
-        MyAssertHandler(".\\physics\\phys_ode.cpp", 1044, 0, "%s", "physInited");
-    if (!id)
-        MyAssertHandler(".\\physics\\phys_ode.cpp", 1045, 0, "%s", "id");
+    iassert(physInited);
+    iassert(id);
     if (id->world != physGlob.world[worldIndex])
         MyAssertHandler(".\\physics\\phys_ode.cpp", 1048, 0, "%s", "body->world == physGlob.world[worldIndex]");
     userData = (PhysObjUserData *)dBodyGetData(id);
@@ -1201,10 +1145,8 @@ void __cdecl Phys_ObjAddForce(PhysWorld worldIndex, dxBody *id, float *worldPos,
     dxWorld *odeWorld; // [esp+38h] [ebp-4h]
 
     SCALE = 1000.0 / (double)g_phys_msecStep[worldIndex];
-    if (!physInited)
-        MyAssertHandler(".\\physics\\phys_ode.cpp", 1068, 0, "%s", "physInited");
-    if (!id)
-        MyAssertHandler(".\\physics\\phys_ode.cpp", 1069, 0, "%s", "id");
+    iassert(physInited);
+    iassert(id);
     fz = impulse[2] * SCALE;
     fy = impulse[1] * SCALE;
     fx = *impulse * SCALE;
@@ -1264,10 +1206,8 @@ void __cdecl Phys_ObjBulletImpact(
 
     BULLET_MASS = 0.5;
     dMassSetZero(&mass);
-    if (!physInited)
-        MyAssertHandler(".\\physics\\phys_ode.cpp", 1132, 0, "%s", "physInited");
-    if (!id)
-        MyAssertHandler(".\\physics\\phys_ode.cpp", 1133, 0, "%s", "id");
+    iassert(physInited);
+    iassert(id);
     body = id;
     Phys_BodyGetCenterOfMass(id, centerOfMass);
     bulletDir[0] = *bulletDirRaw;
@@ -1291,8 +1231,7 @@ void __cdecl Phys_ObjBulletImpact(
     MatrixTransformVector(torqueAxis, rotation, torqueAxisRelativeToBody);
     MatrixTransformVector(torqueAxisRelativeToBody, ITensor, doubleDotTemp);
     momentOfInertia = Vec3Dot(doubleDotTemp, torqueAxisRelativeToBody);
-    if (momentOfInertia <= 0.0 && R != 0.0)
-        MyAssertHandler(".\\physics\\phys_ode.cpp", 1162, 0, "%s", "momentOfInertia > 0 || R == 0");
+    iassert(momentOfInertia > 0 || R == 0);
     AngularVel = dBodyGetAngularVel(body);
     bodyAngularVel[0] = *AngularVel;
     bodyAngularVel[1] = AngularVel[1];
@@ -1304,8 +1243,7 @@ void __cdecl Phys_ObjBulletImpact(
         denominator = mass.mass + BULLET_MASS;
         if (R != 0.0)
             denominator = R * R * mass.mass * BULLET_MASS / momentOfInertia + denominator;
-        if (denominator <= 0.0)
-            MyAssertHandler(".\\physics\\phys_ode.cpp", 1257, 0, "%s", "denominator > 0");
+        iassert(denominator > 0);
         v6 = scale * mass.mass * numerator / denominator;
         Vec3Scale(bulletDir, v6, changeInBodyMomentum);
         Phys_ObjAddForce(worldIndex, id, worldPos, changeInBodyMomentum);
@@ -1316,10 +1254,8 @@ void __cdecl Phys_TweakBulletImpact(float *worldPos, float *bulletDir, const flo
 {
     float offset[3]; // [esp+14h] [ebp-Ch] BYREF
 
-    if (!phys_bulletUpBias)
-        MyAssertHandler(".\\physics\\phys_ode.cpp", 1095, 0, "%s", "phys_bulletUpBias");
-    if (!phys_bulletSpinScale)
-        MyAssertHandler(".\\physics\\phys_ode.cpp", 1096, 0, "%s", "phys_bulletSpinScale");
+    iassert(phys_bulletUpBias);
+    iassert(phys_bulletSpinScale);
     bulletDir[2] = bulletDir[2] + phys_bulletUpBias->current.value;
     Vec3Normalize(bulletDir);
     Vec3Sub(worldPos, centerOfMass, offset);
@@ -1339,8 +1275,7 @@ void __cdecl Phys_PlayCollisionSound(int localClientNum, dxBody *body, uint sndC
     int i; // [esp+78h] [ebp-4h]
 
     dMassSetZero(&mass);
-    if (contactList->contactCount <= 0)
-        MyAssertHandler(".\\physics\\phys_ode.cpp", 1274, 0, "%s", "contactList->contactCount > 0");
+    iassert(contactList->contactCount > 0);
     impactVelocity = 0.0;
     pos[0] = 0.0;
     pos[1] = 0.0;
@@ -1358,22 +1293,8 @@ void __cdecl Phys_PlayCollisionSound(int localClientNum, dxBody *body, uint sndC
     Vec3Scale(pos, scale, pos);
     if (-phys_minImpactMomentum->current.value > impactVelocity * mass.mass)
     {
-        if (sndClass >= 0x32)
-            MyAssertHandler(
-                ".\\physics\\phys_ode.cpp",
-                1293,
-                0,
-                "sndClass doesn't index AUDIOPHYS_CLASSMAX\n\t%i not in [0, %i)",
-                sndClass,
-                50);
-        if (((contactList->contacts[0].surfFlags & 0x1F00000) >> 20) >= 0x1Du)
-            MyAssertHandler(
-                ".\\physics\\phys_ode.cpp",
-                1294,
-                0,
-                "SURF_TYPEINDEX( contactList->contacts[0].surfFlags ) doesn't index SURF_TYPECOUNT\n\t%i not in [0, %i)",
-                (contactList->contacts[0].surfFlags & 0x1F00000) >> 20,
-                29);
+        bcassert(sndClass, 0x32);
+        bcassert(((contactList->contacts[0].surfFlags & 0x1F00000) >> 20), 0x1Du);
         sound = cgMedia.physCollisionSound[sndClass][(contactList->contacts[0].surfFlags & 0x1F00000) >> 20];
         if (sound)
             SND_AddPhysicsSound(sound, pos);
@@ -1514,8 +1435,7 @@ void __cdecl Phys_CheckIfAliveTooLong(dxBody *body)
     int type; // [esp+6Ch] [ebp-4h]
 
     userData = (PhysObjUserData *)dBodyGetData(body);
-    if (!userData)
-        MyAssertHandler(".\\physics\\phys_ode.cpp", 1484, 0, "%s", "userData");
+    iassert(userData);
     geom = ODE_BodyGetFirstGeom(body);
     if (geom)
     {
@@ -1621,8 +1541,7 @@ void __cdecl Phys_GeomUserGetAAContainedBox(dxGeom *geom, float *mins, float *ma
     float lengthsa; // [esp+44h] [ebp-14h]
     float minlength; // [esp+54h] [ebp-4h]
 
-    if (!geom)
-        MyAssertHandler(".\\physics\\phys_ode.cpp", 1804, 0, "%s", "geom");
+    iassert(geom);
     switch (dGeomGetClass(geom))
     {
     case 11:
@@ -1673,8 +1592,7 @@ void __cdecl Phys_GeomUserGetAAContainedBox(dxGeom *geom, float *mins, float *ma
         minlength = lengths;
         if (cyl->halfHeight < (double)lengths)
             minlength = cyl->halfHeight;
-        if (minlength <= 0.0)
-            MyAssertHandler(".\\physics\\phys_ode.cpp", 1849, 0, "%s", "minlength > 0");
+        iassert(minlength > 0);
         goto LABEL_15;
     case 14:
         cyla = (GeomStateCylinder *)dGeomGetClassData(geom);
@@ -1682,8 +1600,7 @@ void __cdecl Phys_GeomUserGetAAContainedBox(dxGeom *geom, float *mins, float *ma
         minlength = lengthsa;
         if (lengthsa > cyla->radius + cyla->radius + cyla->halfHeight)
             minlength = cyla->radius + cyla->radius + cyla->halfHeight;
-        if (minlength <= 0.0)
-            MyAssertHandler(".\\physics\\phys_ode.cpp", 1860, 0, "%s", "minlength > 0");
+        iassert(minlength > 0);
     LABEL_15:
         *mins = -minlength;
         mins[1] = -minlength;
@@ -1798,8 +1715,7 @@ void __cdecl Phys_RunToTime(int localClientNum, PhysWorld worldIndex, int timeNo
         maxIter = 2;
         do
         {
-            if (!maxIter)
-                MyAssertHandler(".\\physics\\phys_ode.cpp", 2173, 0, "%s", "maxIter");
+            iassert(maxIter);
             if (g_phys_msecStep[worldIndex] < ((timeNow - data->timeLastUpdate) / maxIter))
                 v5 = (timeNow - data->timeLastUpdate) / maxIter;
             else
@@ -1814,15 +1730,7 @@ void __cdecl Phys_RunToTime(int localClientNum, PhysWorld worldIndex, int timeNo
     }
     if (phys_drawAwake->current.enabled || phys_drawCollisionObj->current.enabled)
         ODE_ForEachBody(world, Phys_ObjDraw);
-    if (data->timeLastSnapshot > timeNow || timeNow > data->timeLastUpdate)
-        MyAssertHandler(
-            ".\\physics\\phys_ode.cpp",
-            2201,
-            0,
-            "timeNow not in [data.timeLastSnapshot, data.timeLastUpdate]\n\t%i not in [%i, %i]",
-            timeNow,
-            data->timeLastSnapshot,
-            data->timeLastUpdate);
+    rangeassert(timeNow, data->timeLastSnapshot, data->timeLastUpdate);
     if (data->timeLastUpdate <= data->timeLastSnapshot)
     {
         if (data->timeLastUpdate != data->timeLastSnapshot)
@@ -1916,8 +1824,7 @@ void __cdecl Phys_ObjDraw(dxBody *body)
             if (type == 14)
             {
                 cyl = (GeomStateCylinder*)dGeomGetClassData(geom);
-                if (cyl->direction < 1 || cyl->direction > 3)
-                    MyAssertHandler(".\\physics\\phys_ode.cpp", 1459, 0, "%s", "cyl->direction >= 1 && cyl->direction <= 3");
+                iassert(cyl->direction >= 1 && cyl->direction <= 3);
             LABEL_22:
                 cylAxis = cyl->direction - 1;
                 Vec3Mad(pos, cyl->halfHeight, rotation[cylAxis], endpos[0]);
@@ -1930,8 +1837,7 @@ void __cdecl Phys_ObjDraw(dxBody *body)
             }
         }
         cyl = (GeomStateCylinder*)dGeomGetClassData(geom);
-        if (cyl->direction < 1 || cyl->direction > 3)
-            MyAssertHandler(".\\physics\\phys_ode.cpp", 1448, 0, "%s", "cyl->direction >= 1 && cyl->direction <= 3");
+        iassert(cyl->direction >= 1 && cyl->direction <= 3);
         goto LABEL_22;
     }
 }
@@ -2062,8 +1968,7 @@ void __cdecl Phys_RunFrame(int localClientNum, PhysWorld worldIndex, float secon
     float down[3]; // [esp+70h] [ebp-14h] BYREF
     FrameInfo frameInfo; // [esp+7Ch] [ebp-8h] BYREF
 
-    if (!physInited)
-        MyAssertHandler(".\\physics\\phys_ode.cpp", 1653, 0, "%s", "physInited");
+    iassert(physInited);
     world = physGlob.world[worldIndex];
     world->seconds = seconds;
 
@@ -2090,16 +1995,14 @@ void __cdecl Phys_RunFrame(int localClientNum, PhysWorld worldIndex, float secon
     {
         if (physGlob.visTrisGeom)
             dGeomEnable(physGlob.visTrisGeom);
-        if (!physGlob.worldGeom)
-            MyAssertHandler(".\\physics\\phys_ode.cpp", 1683, 0, "%s", "physGlob.worldGeom");
+        iassert(physGlob.worldGeom);
         dGeomDisable(physGlob.worldGeom);
     }
     else
     {
         if (physGlob.visTrisGeom)
             dGeomDisable(physGlob.visTrisGeom);
-        if (!physGlob.worldGeom)
-            MyAssertHandler(".\\physics\\phys_ode.cpp", 1690, 0, "%s", "physGlob.worldGeom");
+        iassert(physGlob.worldGeom);
         dGeomEnable(physGlob.worldGeom);
     }
     scale = -phys_gravity->current.value;
@@ -2126,57 +2029,15 @@ void __cdecl Phys_BodyGrabSnapshot(dxBody *body)
 {
     PhysObjUserData *userData; // [esp+30h] [ebp-4h]
 
-    if (!body)
-        MyAssertHandler(".\\physics\\phys_ode.cpp", 1783, 0, "%s", "body");
+    iassert(body);
     userData = (PhysObjUserData *)dBodyGetData(body);
-    if (!userData)
-        MyAssertHandler(".\\physics\\phys_ode.cpp", 1786, 0, "%s", "userData");
+    iassert(userData);
     Phys_BodyGetCenterOfMass(body, userData->savedPos);
-    if ((COERCE_UNSIGNED_INT(userData->savedPos[0]) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(userData->savedPos[1]) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(userData->savedPos[2]) & 0x7F800000) == 0x7F800000)
-    {
-        MyAssertHandler(
-            ".\\physics\\phys_ode.cpp",
-            1789,
-            0,
-            "%s",
-            "!IS_NAN((userData->savedPos)[0]) && !IS_NAN((userData->savedPos)[1]) && !IS_NAN((userData->savedPos)[2])");
-    }
+    nanassertvec3(userData->savedPos);
     Phys_BodyGetRotation(body, userData->savedRot);
-    if ((COERCE_UNSIGNED_INT(userData->savedRot[0][0]) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(userData->savedRot[0][1]) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(userData->savedRot[0][2]) & 0x7F800000) == 0x7F800000)
-    {
-        MyAssertHandler(
-            ".\\physics\\phys_ode.cpp",
-            1791,
-            0,
-            "%s",
-            "!IS_NAN((userData->savedRot[0])[0]) && !IS_NAN((userData->savedRot[0])[1]) && !IS_NAN((userData->savedRot[0])[2])");
-    }
-    if ((COERCE_UNSIGNED_INT(userData->savedRot[1][0]) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(userData->savedRot[1][1]) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(userData->savedRot[1][2]) & 0x7F800000) == 0x7F800000)
-    {
-        MyAssertHandler(
-            ".\\physics\\phys_ode.cpp",
-            1792,
-            0,
-            "%s",
-            "!IS_NAN((userData->savedRot[1])[0]) && !IS_NAN((userData->savedRot[1])[1]) && !IS_NAN((userData->savedRot[1])[2])");
-    }
-    if ((COERCE_UNSIGNED_INT(userData->savedRot[2][0]) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(userData->savedRot[2][1]) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(userData->savedRot[2][2]) & 0x7F800000) == 0x7F800000)
-    {
-        MyAssertHandler(
-            ".\\physics\\phys_ode.cpp",
-            1793,
-            0,
-            "%s",
-            "!IS_NAN((userData->savedRot[2])[0]) && !IS_NAN((userData->savedRot[2])[1]) && !IS_NAN((userData->savedRot[2])[2])");
-    }
+    nanassertvec3(userData->savedRot[0]);
+    nanassertvec3(userData->savedRot[1]);
+    nanassertvec3(userData->savedRot[2]);
 }
 
 void __cdecl Phys_DoBodyOncePerRun(dxBody *body)
@@ -2233,8 +2094,7 @@ void __cdecl Phys_ObjTraceNewPos(dxBody *body)
     if (dBodyIsEnabled(body))
     {
         userData = (PhysObjUserData *)dBodyGetData(body);
-        if (!userData)
-            MyAssertHandler(".\\physics\\phys_ode.cpp", 1890, 0, "%s", "userData");
+        iassert(userData);
         iassert(!IS_NAN((userData->savedPos)[0]) && !IS_NAN((userData->savedPos)[1]) && !IS_NAN((userData->savedPos)[2]));
         geom = ODE_BodyGetFirstGeom(body);
         if (geom)
@@ -2345,10 +2205,8 @@ void __cdecl Phys_ObjSetInertialTensor(dxBody *id, const PhysMass *physMass)
     dMass mass; // [esp+10h] [ebp-48h] BYREF
 
     dMassSetZero(&mass);
-    if (!id)
-        MyAssertHandler(".\\physics\\phys_ode.cpp", 2302, 0, "%s", "id");
-    if (!physMass)
-        MyAssertHandler(".\\physics\\phys_ode.cpp", 2303, 0, "%s", "physMass");
+    iassert(id);
+    iassert(physMass);
     dBodyGetMass(id, &mass);
     Phys_MassSetBrushTotal(&mass, mass.mass, (float*)physMass->momentsOfInertia, physMass->productsOfInertia);
     dBodySetMass(id, &mass);
@@ -2404,10 +2262,8 @@ void __cdecl Phys_ObjSave(dxBody *id, MemoryFile *memFile)
 {
     BodyState state; // [esp+0h] [ebp-70h] BYREF
 
-    if (!physInited)
-        MyAssertHandler(".\\physics\\phys_ode.cpp", 2439, 0, "%s", "physInited");
-    if (!id)
-        MyAssertHandler(".\\physics\\phys_ode.cpp", 2440, 0, "%s", "id");
+    iassert(physInited);
+    iassert(id);
     Phys_GetStateFromBody(id, &state);
     MemFile_WriteData(memFile, 112, &state);
 }
@@ -2572,8 +2428,7 @@ void __cdecl Phys_SetAngularMotorParams(
     int group; // [esp+8h] [ebp-8h]
     int i; // [esp+Ch] [ebp-4h]
 
-    if (!id)
-        MyAssertHandler(".\\physics\\phys_ode.cpp", 2551, 0, "%s", "id");
+    iassert(id);
     if (id->typenum != 8)
         MyAssertHandler(".\\physics\\phys_ode.cpp", 2555, 0, "%s", "joint->typenum == dJointTypeAMotor");
     i = 0;
@@ -2644,8 +2499,7 @@ dxJointAMotor *__cdecl Phys_CreateAngularMotor(
 
 void __cdecl Phys_JointDestroy(PhysWorld worldIndex, dxJointHinge *id)
 {
-    if (!id)
-        MyAssertHandler(".\\physics\\phys_ode.cpp", 2631, 0, "%s", "id");
+    iassert(id);
 
     dJointDestroy(id);
 
@@ -2669,14 +2523,7 @@ void __cdecl Phys_JointDestroy(PhysWorld worldIndex, dxJointHinge *id)
 
 void __cdecl Phys_SetCollisionCallback(PhysWorld worldIndex, void(__cdecl *callback)())
 {
-    if ((uint)worldIndex >= PHYS_WORLD_COUNT)
-        MyAssertHandler(
-            ".\\physics\\phys_ode.cpp",
-            2648,
-            0,
-            "worldIndex doesn't index PHYS_WORLD_COUNT\n\t%i not in [0, %i)",
-            worldIndex,
-            3);
+    bcassert((uint)worldIndex, PHYS_WORLD_COUNT);
     physGlob.worldData[worldIndex].collisionCallback = callback;
 }
 
@@ -2695,14 +2542,7 @@ void __cdecl Phys_AddJitterRegion(
     Jitter *jitter; // [esp+1Ch] [ebp-8h]
     dxBody *body; // [esp+20h] [ebp-4h]
 
-    if ((uint)worldIndex >= PHYS_WORLD_COUNT)
-        MyAssertHandler(
-            ".\\physics\\phys_ode.cpp",
-            2688,
-            0,
-            "worldIndex doesn't index PHYS_WORLD_COUNT\n\t%i not in [0, %i)",
-            worldIndex,
-            3);
+    bcassert((uint)worldIndex, PHYS_WORLD_COUNT);
     worldData = &physGlob.worldData[worldIndex];
     if (worldData->numJitterRegions < 5)
         jitter = &worldData->jitterRegions[worldData->numJitterRegions++];
@@ -2732,11 +2572,9 @@ void __cdecl Phys_ObjSetContactCentroid(dxBody *id, const float *worldPos)
 {
     PhysObjUserData *userData; // [esp+4h] [ebp-8h]
 
-    if (!id)
-        MyAssertHandler(".\\physics\\phys_ode.cpp", 2727, 0, "%s", "id");
+    iassert(id);
     userData = (PhysObjUserData *)dBodyGetData(id);
-    if (!userData)
-        MyAssertHandler(".\\physics\\phys_ode.cpp", 2731, 0, "%s", "userData");
+    iassert(userData);
     userData->contactCentroid[0] = *worldPos;
     userData->contactCentroid[1] = worldPos[1];
     userData->contactCentroid[2] = worldPos[2];

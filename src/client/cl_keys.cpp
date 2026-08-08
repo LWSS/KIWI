@@ -279,8 +279,7 @@ void __cdecl Field_DrawTextOverride(
     float yScale; // [esp+4Ch] [ebp-8h]
     char cursorChar; // [esp+53h] [ebp-1h]
 
-    if (drawLen <= 0)
-        MyAssertHandler(".\\client\\cl_keys.cpp", 401, 0, "%s", "drawLen > 0");
+    iassert(drawLen > 0);
 
     scrPlace = &scrPlaceView[localClientNum];
     if (edit->fixedSize)
@@ -338,8 +337,7 @@ void __cdecl Field_Draw(int localClientNum, field_t *edit, int x, int y, int hor
 
     if (!edit->drawWidth)
         edit->drawWidth = 256;
-    if (edit->scroll < 0)
-        MyAssertHandler(".\\client\\cl_keys.cpp", 463, 0, "%s\n\t(edit->scroll) = %i", "(edit->scroll >= 0)", edit->scroll);
+    vassert((edit->scroll >= 0), "(edit->scroll) = %i", edit->scroll);
     I_strncpyz(str, &edit->buffer[edit->scroll], 256 - edit->scroll);
     Field_DrawTextOverride(
         localClientNum,
@@ -967,8 +965,7 @@ void __cdecl ReplaceConsoleInputArgument(int replaceCount, char *replacement)
     const char *v2; // eax
     int cmdLineLen; // [esp+10h] [ebp-8h]
 
-    if (!replacement)
-        MyAssertHandler(".\\client\\cl_keys.cpp", 845, 0, "%s", "replacement");
+    iassert(replacement);
     if (*replacement)
     {
         //for (cmdLineLen = strlen(g_consoleField.buffer); cmdLineLen && isspace(*(char *)(cmdLineLen + 11748111)); --cmdLineLen);
@@ -992,8 +989,7 @@ void CompleteDvarArgument()
 
     dvarName = Con_TokenizeInput();
     dvar = Dvar_FindVar(dvarName);
-    if (!dvar)
-        MyAssertHandler(".\\client\\cl_keys.cpp", 898, 0, "%s", "dvar");
+    iassert(dvar);
     if (dvar->type == 6)
     {
         dvarValuePrefix = Cmd_Argv(1);
@@ -1166,22 +1162,8 @@ void __cdecl Key_SetBinding(int localClientNum, int keynum, char *binding)
 
 const char *__cdecl Key_GetBinding(int localClientNum, uint keynum)
 {
-    if (localClientNum)
-        MyAssertHandler(
-            ".\\client\\cl_keys.cpp",
-            1560,
-            0,
-            "localClientNum doesn't index STATIC_MAX_LOCAL_CLIENTS\n\t%i not in [0, %i)",
-            localClientNum,
-            1);
-    if (keynum >= 0x100)
-        MyAssertHandler(
-            ".\\client\\cl_keys.cpp",
-            1561,
-            0,
-            "keynum doesn't index MAX_KEYS\n\t%i not in [0, %i)",
-            keynum,
-            256);
+    vassert((localClientNum) == 0, "%i not in [0, %i)", localClientNum, 1);
+    bcassert(keynum, 0x100);
     return playerKeys[localClientNum].keys[keynum].binding;
 }
 
@@ -1498,14 +1480,7 @@ void __cdecl CL_KeyEvent(int localClientNum, int key, int down, uint time)
         if (--playerKeys[localClientNum].anyKeyDown < 0)
             playerKeys[localClientNum].anyKeyDown = 0;
     }
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\src\\client\\../client_mp/client_mp.h",
-            1063,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     if (CL_IsConsoleKey(key) || (clientUIActives[0].keyCatchers & 3) != 0)
     {
         if (DevGui_IsActive())
@@ -1580,14 +1555,7 @@ void __cdecl CL_KeyEvent(int localClientNum, int key, int down, uint time)
             return;
         }
         *locSelInputState = LOC_SEL_INPUT_NONE;
-        if (localClientNum)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\src\\client\\../client_mp/client_mp.h",
-                1112,
-                0,
-                "%s\n\t(localClientNum) = %i",
-                "(localClientNum == 0)",
-                localClientNum);
+        vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
         clcState = clientUIActives[0].connectionState;
         if (down)
         {
@@ -1784,14 +1752,7 @@ void __cdecl CL_KeyEvent(int localClientNum, int key, int down, uint time)
         if (--playerKeys[localClientNum].anyKeyDown < 0)
             playerKeys[localClientNum].anyKeyDown = 0;
     }
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\src\\client\\../client_mp/client_mp.h",
-            1063,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     if (CL_IsConsoleKey(key) || (clientUIActives[0].keyCatchers & 3) != 0)
     {
         if (DevGui_IsActive())
@@ -1865,14 +1826,7 @@ void __cdecl CL_KeyEvent(int localClientNum, int key, int down, uint time)
             return;
         }
         *locSelInputState = LOC_SEL_INPUT_NONE;
-        if (localClientNum)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\src\\client\\../client_mp/client_mp.h",
-                1112,
-                0,
-                "%s\n\t(localClientNum) = %i",
-                "(localClientNum == 0)",
-                localClientNum);
+        vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
         clcState = CL_GetLocalClientConnectionState(localClientNum);
         if (down)
         {
@@ -2034,14 +1988,7 @@ void __cdecl Message_Key(int localClientNum, int key)
     connstate_t clcState; // [esp+410h] [ebp-4h]
 
     chatField = &playerKeys[localClientNum].chatField;
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\src\\client\\../client_mp/client_mp.h",
-            1063,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     if (key == 27)
     {
         clientUIActives[0].keyCatchers &= ~0x20u;
@@ -2049,14 +1996,7 @@ void __cdecl Message_Key(int localClientNum, int key)
     }
     else if (key == 13 || key == 191)
     {
-        if (localClientNum)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\src\\client\\../client_mp/client_mp.h",
-                1112,
-                0,
-                "%s\n\t(localClientNum) = %i",
-                "(localClientNum == 0)",
-                localClientNum);
+        vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
         clcState = clientUIActives[0].connectionState;
         if (chatField->buffer[0] && clcState == CA_ACTIVE)
         {
@@ -2096,14 +2036,7 @@ void __cdecl CL_CharEvent(int localClientNum, int key)
 
     if (DevGui_IsActive() || key == '`' || key == '~')
         return;
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\src\\client\\../client_mp/client_mp.h",
-            1063,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     if ((clientUIActives[0].keyCatchers & 1) != 0)
     {
         if (key == 8 && Con_CancelAutoComplete())
@@ -2122,14 +2055,7 @@ void __cdecl CL_CharEvent(int localClientNum, int key)
         UI_KeyEvent(localClientNum, key | 0x400, 1);
         return;
     }
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\src\\client\\../client_mp/client_mp.h",
-            1112,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     if (clientUIActives[0].connectionState == CA_DISCONNECTED)
         goto LABEL_18;
 }
@@ -2209,14 +2135,7 @@ bool __cdecl Key_IsCatcherActive(int localClientNum, int mask)
 
 void __cdecl Key_AddCatcher(int localClientNum, int orMask)
 {
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\src\\client\\../client_mp/client_mp.h",
-            1063,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     clientUIActives[0].keyCatchers |= orMask;
 }
 
@@ -2224,14 +2143,7 @@ void __cdecl Key_RemoveCatcher(int localClientNum, int andMask)
 {
     if ((andMask & (andMask - 1)) == 0)
         MyAssertHandler(".\\client\\cl_keys.cpp", 2448, 0, "%s", "!IsPowerOf2( andMask )");
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\src\\client\\../client_mp/client_mp.h",
-            1063,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     clientUIActives[0].keyCatchers &= andMask;
     if ((clientUIActives[0].keyCatchers & 0x10) == 0)
         clientUIActives[0].displayHUDWithKeycatchUI = 0;
@@ -2239,14 +2151,7 @@ void __cdecl Key_RemoveCatcher(int localClientNum, int andMask)
 
 void __cdecl Key_SetCatcher(int localClientNum, int catcher)
 {
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\src\\client\\../client_mp/client_mp.h",
-            1063,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     if ((clientUIActives[0].keyCatchers & 1) != 0)
         clientUIActives[0].keyCatchers = catcher | 1;
     else

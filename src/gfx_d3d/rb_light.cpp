@@ -1399,14 +1399,7 @@ uint __cdecl R_GetPrimaryLightForModelVertex(
         if (checkLight[primaryLightIter])
         {
             light = Com_GetPrimaryLight(primaryLightIter);
-            if (light->type != 3 && light->type != 2)
-                MyAssertHandler(
-                    ".\\rb_light.cpp",
-                    1273,
-                    0,
-                    "%s\n\t(light->type) = %i",
-                    "(light->type == GFX_LIGHT_TYPE_OMNI || light->type == GFX_LIGHT_TYPE_SPOT)",
-                    light->type);
+            vassert((light->type == GFX_LIGHT_TYPE_OMNI || light->type == GFX_LIGHT_TYPE_SPOT), "(light->type) = %i", light->type);
             Vec3Sub(point, light->origin, relPoint);
             lenSq = Vec3LengthSq(relPoint);
             v5 = light->radius * light->radius;

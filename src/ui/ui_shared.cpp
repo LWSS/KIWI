@@ -303,16 +303,8 @@ const commandDef_t commandList[46] =
 
 bool __cdecl Window_IsVisible(int localClientNum, const windowDef_t *w)
 {
-    if (!w)
-        MyAssertHandler("c:\\trees\\cod3\\src\\ui\\../ui/ui_utils.h", 60, 0, "%s", "w");
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\src\\ui\\../ui/ui_utils.h",
-            23,
-            0,
-            "localClientNum doesn't index MAX_POSSIBLE_LOCAL_CLIENTS\n\t%i not in [0, %i)",
-            localClientNum,
-            1);
+    iassert(w);
+    vassert((localClientNum) == 0, "%i not in [0, %i)", localClientNum, 1);
     return (w->dynamicFlags[localClientNum] & 4) != 0;
 }
 
@@ -332,8 +324,7 @@ void __cdecl Script_StatClearPerkGetArg(
 {
     char arg[1028]; // [esp+0h] [ebp-408h] BYREF
 
-    if (!refString)
-        MyAssertHandler(".\\ui\\ui_shared.cpp", 1257, 0, "%s", "refString");
+    iassert(refString);
     String_Parse(args, arg, 1024);
     if (!I_stricmp(arg, "("))
         String_Parse(args, arg, 1024);
@@ -459,8 +450,7 @@ int __cdecl String_Parse(const char **p, char *out, int len)
     parseInfo_t *token; // [esp+4h] [ebp-4h]
 
     token = Com_ParseOnLine(p);
-    if (!token)
-        MyAssertHandler(".\\ui\\ui_shared.cpp", 275, 0, "%s", "token");
+    iassert(token);
     if (!*p)
         return 0;
     if (token->token[0] == 64)
@@ -679,10 +669,8 @@ void __cdecl Menus_HideByName(const UiContext *dc, const char *menuName)
 {
     menuDef_t *menu; // [esp+0h] [ebp-4h]
 
-    if (!dc)
-        MyAssertHandler(".\\ui\\ui_shared.cpp", 820, 0, "%s", "dc");
-    if (!menuName)
-        MyAssertHandler(".\\ui\\ui_shared.cpp", 821, 0, "%s", "menuName");
+    iassert(dc);
+    iassert(menuName);
     menu = Menus_FindByName(dc, menuName);
     if (menu)
         Window_RemoveDynamicFlags(dc->localClientNum, &menu->window, 4);
@@ -692,10 +680,8 @@ void __cdecl Menus_ShowByName(const UiContext *dc, const char *windowName)
 {
     menuDef_t *menu; // [esp+0h] [ebp-4h]
 
-    if (!dc)
-        MyAssertHandler(".\\ui\\ui_shared.cpp", 833, 0, "%s", "dc");
-    if (!windowName)
-        MyAssertHandler(".\\ui\\ui_shared.cpp", 834, 0, "%s", "windowName");
+    iassert(dc);
+    iassert(windowName);
     menu = Menus_FindByName(dc, windowName);
     if (menu)
         Window_AddDynamicFlags(dc->localClientNum, &menu->window, 4);
@@ -720,10 +706,8 @@ void __cdecl Menus_Close(UiContext *dc, menuDef_t *menu)
     menuDef_t *menuDef; // [esp+24h] [ebp-4h]
     menuDef_t *menuDefa; // [esp+24h] [ebp-4h]
 
-    if (!dc)
-        MyAssertHandler(".\\ui\\ui_shared.cpp", 934, 0, "%s", "dc");
-    if (!menu)
-        MyAssertHandler(".\\ui\\ui_shared.cpp", 935, 0, "%s", "menu");
+    iassert(dc);
+    iassert(menu);
     if (Menus_MenuIsInStack(dc, menu))
     {
         Menu_RunCloseScript(dc, menu);
@@ -756,8 +740,7 @@ void __cdecl Menus_Close(UiContext *dc, menuDef_t *menu)
             }
             if (noFocus)
             {
-                if (!menu->window.name)
-                    MyAssertHandler(".\\ui\\ui_shared.cpp", 976, 0, "%s", "menu->window.name");
+                iassert(menu->window.name);
                 Com_PrintWarning(13, "WARNING: No menu has focus after closing %s.\n Active menus: \n", menu->window.name);
                 for (menuNumb = 0; menuNumb < dc->openMenuCount; ++menuNumb)
                     Com_PrintWarning(13, "  %d:  %s\n", menuNumb, dc->menuStack[menuNumb]->window.name);
@@ -769,30 +752,15 @@ void __cdecl Menus_Close(UiContext *dc, menuDef_t *menu)
 
 bool __cdecl Window_HasFocus(int localClientNum, const windowDef_t *w)
 {
-    if (!w)
-        MyAssertHandler("c:\\trees\\cod3\\src\\ui\\../ui/ui_utils.h", 70, 0, "%s", "w");
+    iassert(w);
     if (Window_IsVisible(localClientNum, w))
     {
-        if (localClientNum)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\src\\ui\\../ui/ui_utils.h",
-                23,
-                0,
-                "localClientNum doesn't index MAX_POSSIBLE_LOCAL_CLIENTS\n\t%i not in [0, %i)",
-                localClientNum,
-                1);
+        vassert((localClientNum) == 0, "%i not in [0, %i)", localClientNum, 1);
         return (w->dynamicFlags[localClientNum] & 2) != 0;
     }
     else
     {
-        if (localClientNum)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\src\\ui\\../ui/ui_utils.h",
-                23,
-                0,
-                "localClientNum doesn't index MAX_POSSIBLE_LOCAL_CLIENTS\n\t%i not in [0, %i)",
-                localClientNum,
-                1);
+        vassert((localClientNum) == 0, "%i not in [0, %i)", localClientNum, 1);
         if ((w->dynamicFlags[localClientNum] & 2) != 0 && !alwaysfails)
             MyAssertHandler("c:\\trees\\cod3\\src\\ui\\../ui/ui_utils.h", 74, 0, "Hidden window has focus!");
         return 0;
@@ -821,12 +789,9 @@ int __cdecl Menus_RemoveFromStack(UiContext *dc, menuDef_t *pMenu)
 
 void __cdecl Menu_GainFocusDueToClose(UiContext *dc, menuDef_t *menu)
 {
-    if (!dc)
-        MyAssertHandler(".\\ui\\ui_shared.cpp", 904, 0, "%s", "dc");
-    if (!menu)
-        MyAssertHandler(".\\ui\\ui_shared.cpp", 905, 0, "%s", "menu");
-    if (Window_HasFocus(dc->localClientNum, &menu->window))
-        MyAssertHandler(".\\ui\\ui_shared.cpp", 907, 0, "%s", "!Window_HasFocus( dc->localClientNum, &menu->window )");
+    iassert(dc);
+    iassert(menu);
+    iassert(!Window_HasFocus( dc->localClientNum, &menu->window ));
     Window_AddDynamicFlags(dc->localClientNum, &menu->window, 2);
     Menu_CallOnFocusDueToOpen(dc, menu);
 }
@@ -843,8 +808,7 @@ void __cdecl Menu_CallOnFocusDueToOpen(UiContext *dc, menuDef_t *menu)
         {
             if (menu->items[i]->onFocus)
                 Item_RunScript(dc, menu->items[i], (char *)menu->items[i]->onFocus);
-            if (anyFound)
-                MyAssertHandler(".\\ui\\ui_shared.cpp", 893, 0, "%s", "!anyFound");
+            iassert(!anyFound);
             anyFound = 1;
         }
     }
@@ -854,8 +818,7 @@ void __cdecl Menu_RunCloseScript(UiContext *dc, menuDef_t *menu)
 {
     itemDef_s item; // [esp+4h] [ebp-178h] BYREF
 
-    if (!menu)
-        MyAssertHandler(".\\ui\\ui_shared.cpp", 916, 0, "%s", "menu");
+    iassert(menu);
     if (Window_IsVisible(dc->localClientNum, &menu->window))
     {
         if (menu->onClose)
@@ -1104,10 +1067,8 @@ void __cdecl Script_StatBitMaskGetArgs(UiContext *dc, itemDef_s *item, const cha
 {
     char arg[1028]; // [esp+0h] [ebp-408h] BYREF
 
-    if (!statNum)
-        MyAssertHandler(".\\ui\\ui_shared.cpp", 1229, 0, "%s", "statNum");
-    if (!bitMask)
-        MyAssertHandler(".\\ui\\ui_shared.cpp", 1230, 0, "%s", "bitMask");
+    iassert(statNum);
+    iassert(bitMask);
     String_Parse(args, arg, 1024);
     if (!I_stricmp(arg, "("))
         String_Parse(args, arg, 1024);
@@ -1195,8 +1156,7 @@ int __cdecl Item_ListBox_OverLB(int localClientNum, itemDef_s *item, float x, fl
     const rectDef_s *rect; // [esp+2Ch] [ebp-8h]
     int count; // [esp+30h] [ebp-4h]
 
-    if (!item)
-        MyAssertHandler(".\\ui\\ui_shared.cpp", 2467, 0, "%s", "item");
+    iassert(item);
     count = UI_FeederCount(localClientNum, item->special);
     if (!Item_GetListBoxDef(item))
         return 0;
@@ -1285,14 +1245,7 @@ void __cdecl Item_ListBox_MouseEnter(int localClientNum, itemDef_s *item, float 
             MyAssertHandler("c:\\trees\\cod3\\src\\ui\\../ui/ui_utils.h", 53, 0, "%s", "w");
         if ((item->window.staticFlags & 0x200000) != 0)
         {
-            if (localClientNum)
-                MyAssertHandler(
-                    "c:\\trees\\cod3\\src\\ui\\../ui/ui_utils.h",
-                    23,
-                    0,
-                    "localClientNum doesn't index MAX_POSSIBLE_LOCAL_CLIENTS\n\t%i not in [0, %i)",
-                    localClientNum,
-                    1);
+            vassert((localClientNum) == 0, "%i not in [0, %i)", localClientNum, 1);
             if ((item->window.dynamicFlags[localClientNum] & 0x1F00) == 0 && listPtr->elementStyle == 1)
             {
                 r.x = rect->x;
@@ -1313,14 +1266,7 @@ void __cdecl Item_ListBox_MouseEnter(int localClientNum, itemDef_s *item, float 
         }
         else
         {
-            if (localClientNum)
-                MyAssertHandler(
-                    "c:\\trees\\cod3\\src\\ui\\../ui/ui_utils.h",
-                    23,
-                    0,
-                    "localClientNum doesn't index MAX_POSSIBLE_LOCAL_CLIENTS\n\t%i not in [0, %i)",
-                    localClientNum,
-                    1);
+            vassert((localClientNum) == 0, "%i not in [0, %i)", localClientNum, 1);
             if ((item->window.dynamicFlags[localClientNum] & 0x1F00) == 0)
             {
                 r.x = rect->x;
@@ -1361,14 +1307,7 @@ void __cdecl Item_MouseEnter(UiContext *dc, itemDef_s *item, float x, float y)
             if (Item_IsVisible(dc->localClientNum, item))
             {
                 localClientNum = dc->localClientNum;
-                if (dc->localClientNum)
-                    MyAssertHandler(
-                        "c:\\trees\\cod3\\src\\ui\\../ui/ui_utils.h",
-                        23,
-                        0,
-                        "localClientNum doesn't index MAX_POSSIBLE_LOCAL_CLIENTS\n\t%i not in [0, %i)",
-                        localClientNum,
-                        1);
+                vassert((dc->localClientNum) == 0, "%i not in [0, %i)", localClientNum, 1);
                 flags = item->window.dynamicFlags[localClientNum];
                 if (Rect_ContainsPoint(dc->localClientNum, &r, x, y))
                 {
@@ -1410,14 +1349,7 @@ void __cdecl Item_MouseLeave(UiContext *dc, itemDef_s *item)
     if (item)
     {
         localClientNum = dc->localClientNum;
-        if (dc->localClientNum)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\src\\ui\\../ui/ui_utils.h",
-                23,
-                0,
-                "localClientNum doesn't index MAX_POSSIBLE_LOCAL_CLIENTS\n\t%i not in [0, %i)",
-                localClientNum,
-                1);
+        vassert((dc->localClientNum) == 0, "%i not in [0, %i)", localClientNum, 1);
         if ((item->window.dynamicFlags[localClientNum] & 0x40) != 0)
         {
             Item_RunScript(dc, item, (char *)item->mouseExitText);
@@ -1473,14 +1405,7 @@ BOOL __cdecl Menu_HandleMouseMove(UiContext *dc, menuDef_t *menu)
     if (!menu)
         return 0;
     localClientNum = dc->localClientNum;
-    if (dc->localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\src\\ui\\../ui/ui_utils.h",
-            23,
-            0,
-            "localClientNum doesn't index MAX_POSSIBLE_LOCAL_CLIENTS\n\t%i not in [0, %i)",
-            localClientNum,
-            1);
+    vassert((dc->localClientNum) == 0, "%i not in [0, %i)", localClientNum, 1);
     if ((menu->window.dynamicFlags[localClientNum] & 0x4004) == 0)
         return 0;
     if (itemCapture)
@@ -1495,14 +1420,7 @@ BOOL __cdecl Menu_HandleMouseMove(UiContext *dc, menuDef_t *menu)
         {
             v8 = menu->items[i];
             v9 = dc->localClientNum;
-            if (dc->localClientNum)
-                MyAssertHandler(
-                    "c:\\trees\\cod3\\src\\ui\\../ui/ui_utils.h",
-                    23,
-                    0,
-                    "localClientNum doesn't index MAX_POSSIBLE_LOCAL_CLIENTS\n\t%i not in [0, %i)",
-                    v9,
-                    1);
+            vassert((dc->localClientNum) == 0, "%i not in [0, %i)", v9, 1);
             if ((v8->window.dynamicFlags[v9] & 0x4004) != 0
                 && ((menu->items[i]->dvarFlags & 3) == 0 || Item_EnableShowViaDvar(menu->items[i], 1))
                 && ((menu->items[i]->dvarFlags & 0xC) == 0 || Item_EnableShowViaDvar(menu->items[i], 4))
@@ -1524,14 +1442,7 @@ BOOL __cdecl Menu_HandleMouseMove(UiContext *dc, menuDef_t *menu)
                                 Rect_ContainsPoint(dc->localClientNum, v3, x, y)))
                         {
                             v6 = dc->localClientNum;
-                            if (dc->localClientNum)
-                                MyAssertHandler(
-                                    "c:\\trees\\cod3\\src\\ui\\../ui/ui_utils.h",
-                                    23,
-                                    0,
-                                    "localClientNum doesn't index MAX_POSSIBLE_LOCAL_CLIENTS\n\t%i not in [0, %i)",
-                                    v6,
-                                    1);
+                            vassert((dc->localClientNum) == 0, "%i not in [0, %i)", v6, 1);
                             if (IsVisible(overItem->window.dynamicFlags[v6]))
                             {
                                 Item_MouseEnter(dc, overItem, x, y);
@@ -1549,14 +1460,7 @@ BOOL __cdecl Menu_HandleMouseMove(UiContext *dc, menuDef_t *menu)
                 {
                     v4 = menu->items[i];
                     v5 = dc->localClientNum;
-                    if (dc->localClientNum)
-                        MyAssertHandler(
-                            "c:\\trees\\cod3\\src\\ui\\../ui/ui_utils.h",
-                            23,
-                            0,
-                            "localClientNum doesn't index MAX_POSSIBLE_LOCAL_CLIENTS\n\t%i not in [0, %i)",
-                            v5,
-                            1);
+                    vassert((dc->localClientNum) == 0, "%i not in [0, %i)", v5, 1);
                     if ((v4->window.dynamicFlags[v5] & 1) != 0)
                     {
                         Item_MouseLeave(dc, menu->items[i]);
@@ -1580,23 +1484,9 @@ itemDef_s *__cdecl Menu_FocusFirstSelectableItem(UiContext *dc, menuDef_t *menu)
     if (Menu_HandleMouseMove(dc, menu))
     {
         localClientNum = dc->localClientNum;
-        if (dc->localClientNum)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\src\\ui\\../ui/ui_utils.h",
-                36,
-                0,
-                "localClientNum doesn't index MAX_POSSIBLE_LOCAL_CLIENTS\n\t%i not in [0, %i)",
-                localClientNum,
-                1);
+        vassert((dc->localClientNum) == 0, "%i not in [0, %i)", localClientNum, 1);
         cursor = menu->cursorItem[localClientNum];
-        if (cursor >= menu->itemCount)
-            MyAssertHandler(
-                ".\\ui\\ui_shared.cpp",
-                1387,
-                0,
-                "cursor doesn't index menu->itemCount\n\t%i not in [0, %i)",
-                cursor,
-                menu->itemCount);
+        bcassert(cursor, menu->itemCount);
         return menu->items[cursor];
     }
     else
@@ -1654,8 +1544,7 @@ void __cdecl Script_SetFocusByDvar(UiContext *dc, itemDef_s *item, const char **
     if (String_Parse(args, dvarName, 1024))
     {
         parent = item->parent;
-        if (!parent)
-            MyAssertHandler(".\\ui\\ui_shared.cpp", 1463, 0, "%s", "parent");
+        iassert(parent);
         for (i = 0; i < parent->itemCount; ++i)
         {
             focusItem = parent->items[i];
@@ -2159,16 +2048,8 @@ int __cdecl Item_SetFocus(UiContext *dc, itemDef_s *item, float x, float y)
 
 const rectDef_s *__cdecl Item_GetTextRect(int localClientNum, const itemDef_s *item)
 {
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\src\\ui\\../ui/ui_utils.h",
-            43,
-            0,
-            "localClientNum doesn't index MAX_POSSIBLE_LOCAL_CLIENTS\n\t%i not in [0, %i)",
-            localClientNum,
-            1);
-    if (!item)
-        MyAssertHandler("c:\\trees\\cod3\\src\\ui\\../ui/ui_utils.h", 44, 0, "%s", "item");
+    vassert((localClientNum) == 0, "%i not in [0, %i)", localClientNum, 1);
+    iassert(item);
     return &item->textRect[localClientNum];
 }
 
@@ -2184,8 +2065,7 @@ itemDef_s *__cdecl Menu_ClearFocus(UiContext *dc, menuDef_t *menu)
     {
         if (Window_HasFocus(dc->localClientNum, &menu->items[i]->window))
         {
-            if (ret)
-                MyAssertHandler(".\\ui\\ui_shared.cpp", 471, 0, "%s", "ret == NULL");
+            iassert(ret == NULL);
             ret = menu->items[i];
             Window_RemoveDynamicFlags(dc->localClientNum, &ret->window, 2);
             if (menu->items[i]->leaveFocus)
@@ -2202,8 +2082,7 @@ bool __cdecl Rect_ContainsPoint(int localClientNum, const rectDef_s *rect, float
     const ScreenPlacement *scrPlace; // [esp+24h] [ebp-8h]
     float compareX; // [esp+28h] [ebp-4h]
 
-    if (!rect)
-        MyAssertHandler(".\\ui\\ui_shared.cpp", 492, 0, "%s", "rect");
+    iassert(rect);
     compareRect.x = rect->x;
     compareRect.y = rect->y;
     compareRect.w = rect->w;
@@ -2256,8 +2135,7 @@ int __cdecl Item_ListBox_Viewmax(itemDef_s *item)
         MyAssertHandler("c:\\trees\\cod3\\src\\ui\\ui_utils_api.h", 36, 0, "%s", "w");
     }
     listPtr = Item_GetListBoxDef(item);
-    if (!listPtr)
-        MyAssertHandler(".\\ui\\ui_shared.cpp", 2311, 0, "%s", "listPtr");
+    iassert(listPtr);
     if (!item)
         MyAssertHandler("c:\\trees\\cod3\\src\\ui\\../ui/ui_utils.h", 53, 0, "%s", "w");
     if ((item->window.staticFlags & 0x200000) != 0)
@@ -2282,10 +2160,8 @@ int __cdecl Item_ListBox_Viewmax(itemDef_s *item)
         totalSize = v2;
         unitSize = listPtr->elementHeight;
     }
-    if (totalSize < 0.0)
-        MyAssertHandler(".\\ui\\ui_shared.cpp", 2324, 0, "%s\n\t(totalSize) = %g", "(totalSize >= 0)", totalSize);
-    if (unitSize < 0.0)
-        MyAssertHandler(".\\ui\\ui_shared.cpp", 2325, 0, "%s\n\t(unitSize) = %g", "(unitSize >= 0)", unitSize);
+    vassert((totalSize >= 0), "(totalSize) = %g", totalSize);
+    vassert((unitSize >= 0), "(unitSize) = %g", unitSize);
     return (int)(totalSize / unitSize);
 }
 
@@ -2332,28 +2208,14 @@ int __cdecl Menu_OverActiveItem(int localClientNum, menuDef_t *menu, float x, fl
 
     if (menu)
     {
-        if (localClientNum)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\src\\ui\\../ui/ui_utils.h",
-                23,
-                0,
-                "localClientNum doesn't index MAX_POSSIBLE_LOCAL_CLIENTS\n\t%i not in [0, %i)",
-                localClientNum,
-                1);
+        vassert((localClientNum) == 0, "%i not in [0, %i)", localClientNum, 1);
         if ((menu->window.dynamicFlags[localClientNum] & 0x4004) != 0
             && Rect_ContainsPoint(localClientNum, &menu->window.rect, x, y))
         {
             for (i = 0; i < menu->itemCount; ++i)
             {
                 v7 = menu->items[i];
-                if (localClientNum)
-                    MyAssertHandler(
-                        "c:\\trees\\cod3\\src\\ui\\../ui/ui_utils.h",
-                        23,
-                        0,
-                        "localClientNum doesn't index MAX_POSSIBLE_LOCAL_CLIENTS\n\t%i not in [0, %i)",
-                        localClientNum,
-                        1);
+                vassert((localClientNum) == 0, "%i not in [0, %i)", localClientNum, 1);
                 if ((v7->window.dynamicFlags[localClientNum] & 0x4004) != 0
                     && (menu->items[i]->window.staticFlags & 0x100000) == 0)
                 {
@@ -2392,14 +2254,7 @@ int __cdecl Display_VisibleMenuCount(UiContext *dc)
     {
         v2 = dc->Menus[i];
         localClientNum = dc->localClientNum;
-        if (dc->localClientNum)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\src\\ui\\../ui/ui_utils.h",
-                23,
-                0,
-                "localClientNum doesn't index MAX_POSSIBLE_LOCAL_CLIENTS\n\t%i not in [0, %i)",
-                localClientNum,
-                1);
+        vassert((dc->localClientNum) == 0, "%i not in [0, %i)", localClientNum, 1);
         if ((v2->window.dynamicFlags[localClientNum] & 0x4004) != 0)
             ++count;
     }
@@ -2446,8 +2301,7 @@ void __cdecl Item_TextField_BeginEdit(int localClientNum, itemDef_s *item)
     editFieldDef_s *editPtr; // [esp+18h] [ebp-8h]
     int i; // [esp+1Ch] [ebp-4h]
 
-    if (!item)
-        MyAssertHandler(".\\ui\\ui_shared.cpp", 3290, 0, "%s", "item");
+    iassert(item);
     editPtr = Item_GetEditFieldDef(item);
     if (editPtr)
         editPtr->paintOffset = 0;
@@ -2482,14 +2336,7 @@ void __cdecl Menus_Open(UiContext *dc, menuDef_t *menu)
     {
         v2 = dc->Menus[i];
         localClientNum = dc->localClientNum;
-        if (dc->localClientNum)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\src\\ui\\../ui/ui_utils.h",
-                23,
-                0,
-                "localClientNum doesn't index MAX_POSSIBLE_LOCAL_CLIENTS\n\t%i not in [0, %i)",
-                localClientNum,
-                1);
+        vassert((dc->localClientNum) == 0, "%i not in [0, %i)", localClientNum, 1);
         if ((v2->window.dynamicFlags[localClientNum] & 2) != 0)
             MyAssertHandler(
                 ".\\ui\\ui_shared.cpp",
@@ -2525,10 +2372,8 @@ void __cdecl Menu_LoseFocusDueToOpen(UiContext *dc, menuDef_t *menu)
     bool anyFound; // [esp+1Bh] [ebp-5h]
     int i; // [esp+1Ch] [ebp-4h]
 
-    if (!dc)
-        MyAssertHandler(".\\ui\\ui_shared.cpp", 849, 0, "%s", "dc");
-    if (!menu)
-        MyAssertHandler(".\\ui\\ui_shared.cpp", 850, 0, "%s", "menu");
+    iassert(dc);
+    iassert(menu);
     if (Window_HasFocus(dc->localClientNum, &menu->window))
     {
         Window_RemoveDynamicFlags(dc->localClientNum, &menu->window, 2);
@@ -2539,8 +2384,7 @@ void __cdecl Menu_LoseFocusDueToOpen(UiContext *dc, menuDef_t *menu)
             {
                 if (menu->items[i]->leaveFocus)
                     Item_RunScript(dc, menu->items[i], (char*)menu->items[i]->leaveFocus);
-                if (anyFound)
-                    MyAssertHandler(".\\ui\\ui_shared.cpp", 868, 0, "%s", "!anyFound");
+                iassert(!anyFound);
                 anyFound = 1;
             }
         }
@@ -2817,14 +2661,7 @@ bool __cdecl Item_TextField_HandleKey(UiContext *dc, itemDef_s *item, int key)
             {
                 cursorPos = item->cursorPos[dc->localClientNum];
                 memMoveCount = len + 1 - cursorPos;
-                if (memMoveCount <= 0 || memMoveCount > len)
-                    MyAssertHandler(
-                        ".\\ui\\ui_shared.cpp",
-                        3375,
-                        0,
-                        "%s\n\t(memMoveCount) = %i",
-                        "(memMoveCount > 0 && memMoveCount <= len)",
-                        memMoveCount);
+                vassert((memMoveCount > 0 && memMoveCount <= len), "(memMoveCount) = %i", memMoveCount);
                 memmove((uint8_t *)&buff[cursorPos - 1], (uint8_t *)&buff[cursorPos], memMoveCount);
             }
             Dvar_SetFromStringByName(item->dvar, buff);
@@ -2859,14 +2696,7 @@ bool __cdecl Item_TextField_HandleKey(UiContext *dc, itemDef_s *item, int key)
                 return 1;
             cursorPosa = item->cursorPos[dc->localClientNum];
             memMoveCount = len + 1 - cursorPosa;
-            if (memMoveCount <= 0 || memMoveCount > len + 1)
-                MyAssertHandler(
-                    ".\\ui\\ui_shared.cpp",
-                    3439,
-                    0,
-                    "%s\n\t(memMoveCount) = %i",
-                    "(memMoveCount > 0 && memMoveCount <= (len + 1))",
-                    memMoveCount);
+            vassert((memMoveCount > 0 && memMoveCount <= (len + 1)), "(memMoveCount) = %i", memMoveCount);
             memmove((uint8_t *)&buff[cursorPosa + 1], (uint8_t *)&buff[cursorPosa], memMoveCount);
             goto LABEL_54;
         }
@@ -3273,14 +3103,7 @@ int __cdecl Item_ListBox_HandleKey(UiContext *dc, itemDef_s *item, int key, int 
     else
         v12 = 0;
     localClientNum = dc->localClientNum;
-    if (dc->localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\src\\ui\\../ui/ui_utils.h",
-            23,
-            0,
-            "localClientNum doesn't index MAX_POSSIBLE_LOCAL_CLIENTS\n\t%i not in [0, %i)",
-            localClientNum,
-            1);
+    vassert((dc->localClientNum) == 0, "%i not in [0, %i)", localClientNum, 1);
     flags = item->window.dynamicFlags[localClientNum];
     if (!force && (!v13 || (flags & 2) == 0))
         return 0;
@@ -3452,8 +3275,7 @@ void __cdecl Item_ListBox_Page(int localClientNum, itemDef_s *item, int max, int
     listBoxDef_s *listPtr; // [esp+18h] [ebp-4h]
 
     listPtr = Item_GetListBoxDef(item);
-    if (!listPtr)
-        MyAssertHandler(".\\ui\\ui_shared.cpp", 2735, 0, "%s", "listPtr");
+    iassert(listPtr);
     if (delta + listPtr->startPos[localClientNum] < scrollmax)
         v8 = delta + listPtr->startPos[localClientNum];
     else
@@ -3484,8 +3306,7 @@ void __cdecl Item_ListBox_Scroll(int localClientNum, itemDef_s *item, int max, i
     listBoxDef_s *listPtr; // [esp+18h] [ebp-4h]
 
     listPtr = Item_GetListBoxDef(item);
-    if (!listPtr)
-        MyAssertHandler(".\\ui\\ui_shared.cpp", 2748, 0, "%s", "listPtr");
+    iassert(listPtr);
     if (listPtr->notselectable)
     {
         if (delta + listPtr->startPos[localClientNum] < scrollmax)
@@ -3567,12 +3388,9 @@ int __cdecl Item_Multi_HandleKey(UiContext *dc, itemDef_s *item, int key)
     int count; // [esp+10h] [ebp-8h]
     int current; // [esp+14h] [ebp-4h]
 
-    if (!dc)
-        MyAssertHandler(".\\ui\\ui_shared.cpp", 3219, 0, "%s", "dc");
-    if (!item)
-        MyAssertHandler(".\\ui\\ui_shared.cpp", 3220, 0, "%s", "item");
-    if (!item->dvar)
-        MyAssertHandler(".\\ui\\ui_shared.cpp", 3221, 0, "%s", "item->dvar");
+    iassert(dc);
+    iassert(item);
+    iassert(item->dvar);
     multiPtr = Item_GetMultiDef(item);
     if (!multiPtr)
         return 0;
@@ -3647,16 +3465,8 @@ int __cdecl Item_List_NextEntryForKey(int key, int current, int count)
     char v6; // [esp+Ah] [ebp-2h]
     char v7; // [esp+Bh] [ebp-1h]
 
-    if (count < 0)
-        MyAssertHandler(".\\ui\\ui_shared.cpp", 3199, 0, "%s\n\t(count) = %i", "(count >= 0)", count);
-    if (current < 0 || current >= count && count)
-        MyAssertHandler(
-            ".\\ui\\ui_shared.cpp",
-            3200,
-            0,
-            "%s\n\t(current) = %i",
-            "(current >= 0 && (current < count || count == 0))",
-            current);
+    vassert((count >= 0), "(count) = %i", count);
+    vassert((current >= 0 && (current < count || count == 0)), "(current) = %i", current);
     if (!count)
         return 0;
     if (key == 200 || key == 202)
@@ -3692,12 +3502,9 @@ int __cdecl Item_DvarEnum_HandleKey(UiContext *dc, itemDef_s *item, int key)
     int count; // [esp+4h] [ebp-8h]
     int current; // [esp+8h] [ebp-4h]
 
-    if (!dc)
-        MyAssertHandler(".\\ui\\ui_shared.cpp", 3250, 0, "%s", "dc");
-    if (!item)
-        MyAssertHandler(".\\ui\\ui_shared.cpp", 3251, 0, "%s", "item");
-    if (!item->dvar)
-        MyAssertHandler(".\\ui\\ui_shared.cpp", 3252, 0, "%s", "item->dvar");
+    iassert(dc);
+    iassert(item);
+    iassert(item->dvar);
     if (!Item_ShouldHandleKey(dc, item, key))
         return 0;
     current = Item_DvarEnum_EnumIndex(item);
@@ -3714,10 +3521,8 @@ int __cdecl Item_DvarEnum_CountSettings(itemDef_s *item)
 {
     const dvar_s *enumDvar; // [esp+0h] [ebp-4h]
 
-    if (!item)
-        MyAssertHandler(".\\ui\\ui_shared.cpp", 3052, 0, "%s", "item");
-    if (item->type != 13)
-        MyAssertHandler(".\\ui\\ui_shared.cpp", 3053, 0, "%s\n\t(item->type) = %i", "(item->type == 13)", item->type);
+    iassert(item);
+    vassert((item->type == 13), "(item->type) = %i", item->type);
     if (!item->typeData.listBox)
         MyAssertHandler(".\\ui\\ui_shared.cpp", 3054, 0, "%s", "item->typeData.enumDvarName");
     enumDvar = Dvar_FindVar(item->typeData.enumDvarName);
@@ -3798,8 +3603,7 @@ double __cdecl Item_GetRectPlacementX(int alignX, float x0, float containerWidth
     }
     else
     {
-        if (alignX != 2)
-            MyAssertHandler(".\\ui\\ui_shared.cpp", 180, 0, "alignX == ITEM_ALIGN_RIGHT\n\t%i, %i", alignX, 2);
+        vassert(alignX == ITEM_ALIGN_RIGHT, "%i, %i", alignX, 2);
         return (float)(containerWidth - selfWidth + x0);
     }
 }
@@ -4008,24 +3812,10 @@ itemDef_s *__cdecl Menu_SetPrevCursorItem(UiContext *dc, menuDef_t *menu)
 
     wrapped = 0;
     localClientNum = dc->localClientNum;
-    if (dc->localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\src\\ui\\../ui/ui_utils.h",
-            36,
-            0,
-            "localClientNum doesn't index MAX_POSSIBLE_LOCAL_CLIENTS\n\t%i not in [0, %i)",
-            localClientNum,
-            1);
+    vassert((dc->localClientNum) == 0, "%i not in [0, %i)", localClientNum, 1);
     oldCursor = menu->cursorItem[localClientNum];
     v9 = dc->localClientNum;
-    if (dc->localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\src\\ui\\../ui/ui_utils.h",
-            36,
-            0,
-            "localClientNum doesn't index MAX_POSSIBLE_LOCAL_CLIENTS\n\t%i not in [0, %i)",
-            v9,
-            1);
+    vassert((dc->localClientNum) == 0, "%i not in [0, %i)", v9, 1);
     if (menu->cursorItem[v9] < 0)
     {
         Menu_SetCursorItem(dc->localClientNum, menu, menu->itemCount - 1);
@@ -4034,49 +3824,21 @@ itemDef_s *__cdecl Menu_SetPrevCursorItem(UiContext *dc, menuDef_t *menu)
     do
     {
         v8 = dc->localClientNum;
-        if (dc->localClientNum)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\src\\ui\\../ui/ui_utils.h",
-                36,
-                0,
-                "localClientNum doesn't index MAX_POSSIBLE_LOCAL_CLIENTS\n\t%i not in [0, %i)",
-                v8,
-                1);
+        vassert((dc->localClientNum) == 0, "%i not in [0, %i)", v8, 1);
         if (menu->cursorItem[v8] <= -1)
             goto LABEL_27;
         v7 = dc->localClientNum;
-        if (dc->localClientNum)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\src\\ui\\../ui/ui_utils.h",
-                36,
-                0,
-                "localClientNum doesn't index MAX_POSSIBLE_LOCAL_CLIENTS\n\t%i not in [0, %i)",
-                v7,
-                1);
+        vassert((dc->localClientNum) == 0, "%i not in [0, %i)", v7, 1);
         Menu_SetCursorItem(dc->localClientNum, menu, menu->cursorItem[v7] - 1);
         v6 = dc->localClientNum;
-        if (dc->localClientNum)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\src\\ui\\../ui/ui_utils.h",
-                36,
-                0,
-                "localClientNum doesn't index MAX_POSSIBLE_LOCAL_CLIENTS\n\t%i not in [0, %i)",
-                v6,
-                1);
+        vassert((dc->localClientNum) == 0, "%i not in [0, %i)", v6, 1);
         if (menu->cursorItem[v6] < 0 && !wrapped)
         {
             wrapped = 1;
             Menu_SetCursorItem(dc->localClientNum, menu, menu->itemCount - 1);
         }
         v5 = dc->localClientNum;
-        if (dc->localClientNum)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\src\\ui\\../ui/ui_utils.h",
-                36,
-                0,
-                "localClientNum doesn't index MAX_POSSIBLE_LOCAL_CLIENTS\n\t%i not in [0, %i)",
-                v5,
-                1);
+        vassert((dc->localClientNum) == 0, "%i not in [0, %i)", v5, 1);
         if (menu->cursorItem[v5] < 0)
         {
         LABEL_27:
@@ -4084,24 +3846,10 @@ itemDef_s *__cdecl Menu_SetPrevCursorItem(UiContext *dc, menuDef_t *menu)
             return 0;
         }
         v4 = dc->localClientNum;
-        if (dc->localClientNum)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\src\\ui\\../ui/ui_utils.h",
-                36,
-                0,
-                "localClientNum doesn't index MAX_POSSIBLE_LOCAL_CLIENTS\n\t%i not in [0, %i)",
-                v4,
-                1);
+        vassert((dc->localClientNum) == 0, "%i not in [0, %i)", v4, 1);
     } while (!Item_SetFocus(dc, menu->items[menu->cursorItem[v4]], dc->cursor.x, dc->cursor.y));
     v3 = dc->localClientNum;
-    if (dc->localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\src\\ui\\../ui/ui_utils.h",
-            36,
-            0,
-            "localClientNum doesn't index MAX_POSSIBLE_LOCAL_CLIENTS\n\t%i not in [0, %i)",
-            v3,
-            1);
+    vassert((dc->localClientNum) == 0, "%i not in [0, %i)", v3, 1);
     return menu->items[menu->cursorItem[v3]];
 }
 
@@ -4119,24 +3867,10 @@ itemDef_s *__cdecl Menu_SetNextCursorItem(UiContext *dc, menuDef_t *menu)
 
     wrapped = 0;
     localClientNum = dc->localClientNum;
-    if (dc->localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\src\\ui\\../ui/ui_utils.h",
-            36,
-            0,
-            "localClientNum doesn't index MAX_POSSIBLE_LOCAL_CLIENTS\n\t%i not in [0, %i)",
-            localClientNum,
-            1);
+    vassert((dc->localClientNum) == 0, "%i not in [0, %i)", localClientNum, 1);
     oldCursor = menu->cursorItem[localClientNum];
     v8 = dc->localClientNum;
-    if (dc->localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\src\\ui\\../ui/ui_utils.h",
-            36,
-            0,
-            "localClientNum doesn't index MAX_POSSIBLE_LOCAL_CLIENTS\n\t%i not in [0, %i)",
-            v8,
-            1);
+    vassert((dc->localClientNum) == 0, "%i not in [0, %i)", v8, 1);
     if (menu->cursorItem[v8] == -1)
     {
         Menu_SetCursorItem(dc->localClientNum, menu, 0);
@@ -4145,38 +3879,17 @@ itemDef_s *__cdecl Menu_SetNextCursorItem(UiContext *dc, menuDef_t *menu)
     do
     {
         v7 = dc->localClientNum;
-        if (dc->localClientNum)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\src\\ui\\../ui/ui_utils.h",
-                36,
-                0,
-                "localClientNum doesn't index MAX_POSSIBLE_LOCAL_CLIENTS\n\t%i not in [0, %i)",
-                v7,
-                1);
+        vassert((dc->localClientNum) == 0, "%i not in [0, %i)", v7, 1);
         if (menu->cursorItem[v7] >= menu->itemCount)
         {
             Menu_SetCursorItem(dc->localClientNum, menu, oldCursor);
             return 0;
         }
         v6 = dc->localClientNum;
-        if (dc->localClientNum)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\src\\ui\\../ui/ui_utils.h",
-                36,
-                0,
-                "localClientNum doesn't index MAX_POSSIBLE_LOCAL_CLIENTS\n\t%i not in [0, %i)",
-                v6,
-                1);
+        vassert((dc->localClientNum) == 0, "%i not in [0, %i)", v6, 1);
         Menu_SetCursorItem(dc->localClientNum, menu, menu->cursorItem[v6] + 1);
         v5 = dc->localClientNum;
-        if (dc->localClientNum)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\src\\ui\\../ui/ui_utils.h",
-                36,
-                0,
-                "localClientNum doesn't index MAX_POSSIBLE_LOCAL_CLIENTS\n\t%i not in [0, %i)",
-                v5,
-                1);
+        vassert((dc->localClientNum) == 0, "%i not in [0, %i)", v5, 1);
         if (menu->cursorItem[v5] >= menu->itemCount)
         {
             if (wrapped)
@@ -4185,24 +3898,10 @@ itemDef_s *__cdecl Menu_SetNextCursorItem(UiContext *dc, menuDef_t *menu)
             Menu_SetCursorItem(dc->localClientNum, menu, 0);
         }
         v4 = dc->localClientNum;
-        if (dc->localClientNum)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\src\\ui\\../ui/ui_utils.h",
-                36,
-                0,
-                "localClientNum doesn't index MAX_POSSIBLE_LOCAL_CLIENTS\n\t%i not in [0, %i)",
-                v4,
-                1);
+        vassert((dc->localClientNum) == 0, "%i not in [0, %i)", v4, 1);
     } while (!Item_SetFocus(dc, menu->items[menu->cursorItem[v4]], dc->cursor.x, dc->cursor.y));
     v3 = dc->localClientNum;
-    if (dc->localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\src\\ui\\../ui/ui_utils.h",
-            36,
-            0,
-            "localClientNum doesn't index MAX_POSSIBLE_LOCAL_CLIENTS\n\t%i not in [0, %i)",
-            v3,
-            1);
+    vassert((dc->localClientNum) == 0, "%i not in [0, %i)", v3, 1);
     return menu->items[menu->cursorItem[v3]];
 }
 
@@ -4309,8 +4008,7 @@ void __cdecl DrawWrappedText(
     float xa; // [esp+490h] [ebp+18h]
     float ya; // [esp+494h] [ebp+1Ch]
 
-    if (rect == textRect)
-        MyAssertHandler(".\\ui\\ui_shared.cpp", 4656, 0, "%s", "rect != textRect");
+    iassert(rect != textRect);
     textRect->x = x + rect->w;
     textRect->y = y;
     textRect->w = 0.0;
@@ -4355,8 +4053,7 @@ void __cdecl DrawWrappedText(
         }
         if (subtitle)
         {
-            if (!subtitleGlowColor)
-                MyAssertHandler(".\\ui\\ui_shared.cpp", 4702, 0, "%s", "subtitleGlowColor");
+            iassert(subtitleGlowColor);
             UI_DrawTextWithGlow(
                 scrPlace,
                 buff,
@@ -4401,8 +4098,7 @@ double __cdecl Item_GetTextPlacementX(int alignX, float x0, float containerWidth
     }
     else
     {
-        if (alignX != 2)
-            MyAssertHandler(".\\ui\\ui_shared.cpp", 191, 0, "alignX == ITEM_ALIGN_RIGHT\n\t%i, %i", alignX, 2);
+        vassert(alignX == ITEM_ALIGN_RIGHT, "%i, %i", alignX, 2);
         return (float)(containerWidth - selfWidth + x0);
     }
 }
@@ -4418,8 +4114,7 @@ double __cdecl Item_GetTextPlacementY(int alignY, float y0, float containerHeigh
     case 8:
         return (float)((containerHeight + selfHeight) * 0.5 + y0);
     default:
-        if (alignY != 12)
-            MyAssertHandler(".\\ui\\ui_shared.cpp", 215, 0, "%s\n\t(alignY) = %i", "(alignY == 12)", alignY);
+        vassert((alignY == 12), "(alignY) = %i", alignY);
         return (float)(y0 + containerHeight);
     }
 }
@@ -4767,8 +4462,7 @@ void __cdecl Window_Paint(
     int flags; // [esp+9Ch] [ebp-8h] BYREF
     const rectDef_s *origRect; // [esp+A0h] [ebp-4h]
 
-    if (!w)
-        MyAssertHandler("c:\\trees\\cod3\\src\\ui\\ui_utils_api.h", 36, 0, "%s", "w");
+    iassert(w);
     origRect = &w->rect;
     fillRect = w->rect.x;
     fillRect_4 = w->rect.y;
@@ -4801,14 +4495,7 @@ void __cdecl Window_Paint(
             if (w->background)
             {
                 localClientNum = dc->localClientNum;
-                if (dc->localClientNum)
-                    MyAssertHandler(
-                        "c:\\trees\\cod3\\src\\ui\\../ui/ui_utils.h",
-                        23,
-                        0,
-                        "localClientNum doesn't index MAX_POSSIBLE_LOCAL_CLIENTS\n\t%i not in [0, %i)",
-                        localClientNum,
-                        1);
+                vassert((dc->localClientNum) == 0, "%i not in [0, %i)", localClientNum, 1);
                 flags = w->dynamicFlags[localClientNum];
                 Fade(&flags, &w->backColor[3], fadeClamp, &w->nextTime, (int)fadeCycle, 1, fadeAmount, fadeInAmount, dc);
                 Window_SetDynamicFlags(dc->localClientNum, w, flags);
@@ -4841,14 +4528,7 @@ void __cdecl Window_Paint(
             break;
         case 3:
             v11 = dc->localClientNum;
-            if (dc->localClientNum)
-                MyAssertHandler(
-                    "c:\\trees\\cod3\\src\\ui\\../ui/ui_utils.h",
-                    23,
-                    0,
-                    "localClientNum doesn't index MAX_POSSIBLE_LOCAL_CLIENTS\n\t%i not in [0, %i)",
-                    v11,
-                    1);
+            vassert((dc->localClientNum) == 0, "%i not in [0, %i)", v11, 1);
             if ((w->dynamicFlags[v11] & 0x10000) != 0)
                 v8 = w->foreColor;
             else
@@ -4869,14 +4549,7 @@ void __cdecl Window_Paint(
             if (w->background)
             {
                 v9 = dc->localClientNum;
-                if (dc->localClientNum)
-                    MyAssertHandler(
-                        "c:\\trees\\cod3\\src\\ui\\../ui/ui_utils.h",
-                        23,
-                        0,
-                        "localClientNum doesn't index MAX_POSSIBLE_LOCAL_CLIENTS\n\t%i not in [0, %i)",
-                        v9,
-                        1);
+                vassert((dc->localClientNum) == 0, "%i not in [0, %i)", v9, 1);
                 if ((w->dynamicFlags[v9] & 0x10000) != 0)
                     v6 = w->foreColor;
                 else
@@ -4896,14 +4569,7 @@ void __cdecl Window_Paint(
             break;
         case 6:
             v10 = dc->localClientNum;
-            if (dc->localClientNum)
-                MyAssertHandler(
-                    "c:\\trees\\cod3\\src\\ui\\../ui/ui_utils.h",
-                    23,
-                    0,
-                    "localClientNum doesn't index MAX_POSSIBLE_LOCAL_CLIENTS\n\t%i not in [0, %i)",
-                    v10,
-                    1);
+            vassert((dc->localClientNum) == 0, "%i not in [0, %i)", v10, 1);
             if ((w->dynamicFlags[v10] & 0x10000) != 0)
                 v7 = w->foreColor;
             else
@@ -5355,8 +5021,7 @@ void __cdecl Item_SetTextExtents(int localClientNum, itemDef_s *item, const char
     bool isDvarField; // [esp+5Bh] [ebp-5h]
     int xAlignMode; // [esp+5Ch] [ebp-4h]
 
-    if (!text)
-        MyAssertHandler(".\\ui\\ui_shared.cpp", 4525, 0, "%s", "text");
+    iassert(text);
     xAlignMode = item->textAlignMode & 3;
     isOwnerDraw = item->type == 8;
     v4 = item->type != 8 && item->dvar;
@@ -5373,14 +5038,7 @@ void __cdecl Item_SetTextExtents(int localClientNum, itemDef_s *item, const char
         newRect.vertAlign = item->window.rect.vertAlign;
         if (xAlignMode)
         {
-            if (xAlignMode != 2 && xAlignMode != 1)
-                MyAssertHandler(
-                    ".\\ui\\ui_shared.cpp",
-                    4550,
-                    0,
-                    "%s\n\t(xAlignMode) = %i",
-                    "(xAlignMode == 2 || xAlignMode == 1)",
-                    xAlignMode);
+            vassert((xAlignMode == 2 || xAlignMode == 1), "(xAlignMode) = %i", xAlignMode);
             xAdj = item->window.rect.w - (double)UI_TextWidth(text, 0, font, item->textscale);
             if (isOwnerDraw)
             {
@@ -5430,14 +5088,7 @@ void __cdecl Item_TextColor(UiContext *dc, itemDef_s *item, float (*newColor)[4]
 
     parent = item->parent;
     localClientNum = dc->localClientNum;
-    if (dc->localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\src\\ui\\../ui/ui_utils.h",
-            23,
-            0,
-            "localClientNum doesn't index MAX_POSSIBLE_LOCAL_CLIENTS\n\t%i not in [0, %i)",
-            localClientNum,
-            1);
+    vassert((dc->localClientNum) == 0, "%i not in [0, %i)", localClientNum, 1);
     flags = item->window.dynamicFlags[localClientNum];
     Fade(
         &flags,
@@ -5517,8 +5168,7 @@ void __cdecl Item_Text_AutoWrapped_Paint(
     ToWindowCoords(&x, &y, &item->window);
     if (subtitle)
     {
-        if (!subtitleGlowColor)
-            MyAssertHandler(".\\ui\\ui_shared.cpp", 4756, 0, "%s", "subtitleGlowColor");
+        iassert(subtitleGlowColor);
         UI_DrawWrappedTextSubtitled(
             &scrPlaceView[localClientNum],
             text,
@@ -5748,10 +5398,8 @@ const char *__cdecl Item_DvarEnum_Setting(itemDef_s *item)
     int enumIndex; // [esp+0h] [ebp-8h]
     const dvar_s *enumDvar; // [esp+4h] [ebp-4h]
 
-    if (!item)
-        MyAssertHandler(".\\ui\\ui_shared.cpp", 3159, 0, "%s", "item");
-    if (item->type != 13)
-        MyAssertHandler(".\\ui\\ui_shared.cpp", 3160, 0, "%s\n\t(item->type) = %i", "(item->type == 13)", item->type);
+    iassert(item);
+    vassert((item->type == 13), "(item->type) = %i", item->type);
     if (!item->typeData.listBox)
         return "<dvarEnumList not set>";
     enumDvar = Dvar_FindVar(item->typeData.enumDvarName);
@@ -5870,11 +5518,7 @@ double __cdecl Item_GetRectPlacementY(int alignY, float y0, float containerHeigh
     }
     else
     {
-        if (alignY != 4)
-        {
-            if (alignY)
-                MyAssertHandler(".\\ui\\ui_shared.cpp", 202, 0, "%s\n\t(alignY) = %i", "(alignY == 4 || alignY == 0)", alignY);
-        }
+        vassert((alignY == 4 || alignY == 0), "(alignY) = %i", alignY);
         return y0;
     }
 }
@@ -6350,8 +5994,7 @@ double __cdecl Item_GetTextAlignAdj(int alignment, float width, float textWidth)
     }
     else
     {
-        if (alignment)
-            MyAssertHandler(".\\ui\\ui_shared.cpp", 5243, 0, "%s\n\t(alignment) = %i", "(alignment == 0)", alignment);
+        vassert((alignment == 0), "(alignment) = %i", alignment);
         return 0.0;
     }
 }
@@ -6366,8 +6009,7 @@ void __cdecl Item_ListBox_PaintBackground(int localClientNum, itemDef_s *item, f
     if (!item->window.style)
     {
         listPtr = Item_GetListBoxDef(item);
-        if (!listPtr)
-            MyAssertHandler(".\\ui\\ui_shared.cpp", 5301, 0, "%s", "listPtr");
+        iassert(listPtr);
         if (!item)
             MyAssertHandler("c:\\trees\\cod3\\src\\ui\\ui_utils_api.h", 36, 0, "%s", "w");
         width = item->window.rect.w - 16.0 - 4.0;
@@ -6402,8 +6044,7 @@ void __cdecl Item_ListBox_PaintHighlight(int localClientNum, itemDef_s *item, fl
     Material *optionalImage; // [esp+54h] [ebp-8h]
 
     listPtr = Item_GetListBoxDef(item);
-    if (!listPtr)
-        MyAssertHandler(".\\ui\\ui_shared.cpp", 5318, 0, "%s", "listPtr");
+    iassert(listPtr);
     if (!item)
         MyAssertHandler("c:\\trees\\cod3\\src\\ui\\ui_utils_api.h", 36, 0, "%s", "w");
     scrPlace = &scrPlaceView[localClientNum];
@@ -6477,18 +6118,10 @@ void __cdecl Item_OwnerDraw_Paint(UiContext *dc, itemDef_s *item)
 
     PROF_SCOPED("Item_OwnerDraw_Paint");
 
-    if (!item)
-        MyAssertHandler(".\\ui\\ui_shared.cpp", 5521, 0, "%s", "item");
+    iassert(item);
     parent = item->parent;
     localClientNum = dc->localClientNum;
-    if (dc->localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\src\\ui\\../ui/ui_utils.h",
-            23,
-            0,
-            "localClientNum doesn't index MAX_POSSIBLE_LOCAL_CLIENTS\n\t%i not in [0, %i)",
-            localClientNum,
-            1);
+    vassert((dc->localClientNum) == 0, "%i not in [0, %i)", localClientNum, 1);
     flags = item->window.dynamicFlags[localClientNum];
     Fade(
         &flags,
@@ -6629,10 +6262,8 @@ void __cdecl Item_GameMsgWindow_Paint(UiContext *dc, itemDef_s *item)
 
     PROF_SCOPED("Item_GameMsgWindow_Paint");
 
-    if (!dc)
-        MyAssertHandler(".\\ui\\ui_shared.cpp", 5580, 0, "%s", "dc");
-    if (!item)
-        MyAssertHandler(".\\ui\\ui_shared.cpp", 5581, 0, "%s", "item");
+    iassert(dc);
+    iassert(item);
     if (CL_IsCgameInitialized(dc->localClientNum))
     {
         if (item->gameMsgWindowIndex >= 4u)
@@ -6790,8 +6421,7 @@ void __cdecl Menu_PaintAll(UiContext *dc)
     for (menuIndex = dc->openMenuCount - 1; menuIndex >= 0; --menuIndex)
     {
         menu = dc->menuStack[menuIndex];
-        if (!menu)
-            MyAssertHandler(".\\ui\\ui_shared.cpp", 6124, 0, "%s", "menu");
+        iassert(menu);
         if (menu->fullScreen)
         {
             drawStart = menuIndex;
@@ -6868,16 +6498,8 @@ void __cdecl UI_AddMenu(UiContext *dc, menuDef_t *menu)
 {
     if (dc->menuCount >= 640)
         Com_Error(ERR_DROP, "UI_AddMenu: EXE_ERR_OUT_OF_MEMORY");
-    if (!menu)
-        MyAssertHandler(".\\ui\\ui_shared.cpp", 6297, 0, "%s", "menu");
-    if (dc->menuCount >= 0x280u)
-        MyAssertHandler(
-            ".\\ui\\ui_shared.cpp",
-            6298,
-            0,
-            "dc->menuCount doesn't index ARRAY_COUNT( dc->Menus )\n\t%i not in [0, %i)",
-            dc->menuCount,
-            640);
+    iassert(menu);
+    bcassert(dc->menuCount, 0x280u);
     if (IsFastFileLoad() && DB_FindXAssetHeader(ASSET_TYPE_MENU, menu->window.name).menu != menu)
         MyAssertHandler(".\\ui\\ui_shared.cpp", 6304, 0, "%s", "touchMenu == menu");
     dc->Menus[dc->menuCount++] = menu;

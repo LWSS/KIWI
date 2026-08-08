@@ -144,14 +144,7 @@ void __cdecl CG_DrawSnapshotAnalysis(int localClientNum)
                 v10 = y - height;
                 UI_DrawHandlePic(&scrPlaceView[localClientNum], x, v10, width, height, 3, 1, colorBlack, cgMedia.whiteMaterial);
                 color = (const float (*)[4])colorWhite;
-                if (cg_packetAnalysisClient->current.integer >= 0x40u)
-                    MyAssertHandler(
-                        ".\\cgame_mp\\cg_draw_net_mp.cpp",
-                        260,
-                        0,
-                        "cg_packetAnalysisClient->current.integer doesn't index MAX_CLIENTS\n\t%i not in [0, %i)",
-                        cg_packetAnalysisClient->current.integer,
-                        64);
+                bcassert(cg_packetAnalysisClient->current.integer, 0x40u);
                 v9 = y + 15.0f;
                 v8 = x + 5.0f;
                 UI_DrawText(
@@ -352,8 +345,7 @@ int __cdecl CG_ComparePacketAnalysisSamples(int *a, int *b)
 
     field0 = *a;
     field1 = *b;
-    if (!s_clientAnalysisData)
-        MyAssertHandler(".\\cgame_mp\\cg_draw_net_mp.cpp", 164, 0, "%s", "s_clientAnalysisData");
+    iassert(s_clientAnalysisData);
     return s_clientAnalysisData[field1] - s_clientAnalysisData[field0];
 }
 
@@ -415,14 +407,7 @@ void __cdecl CG_DrawSnapshotEntityAnalysis(int localClientNum)
             v17 = 100.0f - 100.0f;
             UI_DrawHandlePic(&scrPlaceView[localClientNum], 10.0f, v17, 80.0f, 100.0, 1, 1, colorBlack, cgMedia.whiteMaterial);
             color = (const float (*)[4])colorWhite;
-            if (cg_packetAnalysisClient->current.integer >= 0x40u)
-                MyAssertHandler(
-                    ".\\cgame_mp\\cg_draw_net_mp.cpp",
-                    457,
-                    0,
-                    "cg_packetAnalysisClient->current.integer doesn't index MAX_CLIENTS\n\t%i not in [0, %i)",
-                    cg_packetAnalysisClient->current.integer,
-                    64);
+            bcassert(cg_packetAnalysisClient->current.integer, 0x40u);
             v16 = graphy + 15.0f;
             v15 = graphx + 5.0f;
             UI_DrawText(

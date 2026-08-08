@@ -58,8 +58,7 @@ bool __cdecl Dvar_ToggleInternal()
     if (Cmd_Argc() >= 2)
     {
         dvarName = Cmd_Argv(1);
-        if (!dvarName)
-            MyAssertHandler(".\\qcommon\\dvar_cmds.cpp", 218, 0, "%s", "dvarName");
+        iassert(dvarName);
         dvar = (dvar_s *)Dvar_FindVar(dvarName);
         if (dvar)
         {
@@ -105,8 +104,7 @@ bool __cdecl Dvar_ToggleInternal()
     }
     else
     {
-        if (!Cmd_Argv(0))
-            MyAssertHandler(".\\qcommon\\dvar_cmds.cpp", 212, 0, "%s", "Cmd_Argv( 0 )");
+        iassert(Cmd_Argv( 0 ));
         v0 = Cmd_Argv(0);
         Com_Printf(0, "USAGE: %s <variable> <optional value sequence>\n", v0);
         return 0;
@@ -118,8 +116,7 @@ bool __cdecl Dvar_ToggleSimple(dvar_s *dvar)
     bool result; // al
     const char *v2; // eax
 
-    if (!dvar)
-        MyAssertHandler(".\\qcommon\\dvar_cmds.cpp", 138, 0, "%s", "dvar");
+    iassert(dvar);
     switch (dvar->type)
     {
     case 0u:

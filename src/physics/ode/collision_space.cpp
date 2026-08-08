@@ -810,10 +810,8 @@ void __cdecl ODE_CollideSimpleSpaceWithGeomNoAABBTest(dxSpace *space, dxGeom *ge
 {
     dxGeom *geom2; // [esp+0h] [ebp-8h]
 
-    if (!geom)
-        MyAssertHandler(".\\physics\\ode\\src\\collision_space.cpp", 322, 0, "%s", "geom");
-    if (!space)
-        MyAssertHandler(".\\physics\\ode\\src\\collision_space.cpp", 323, 0, "%s", "space");
+    iassert(geom);
+    iassert(space);
     if (geom->body && (geom->body->flags & 4) != 0)
         MyAssertHandler(".\\physics\\ode\\src\\collision_space.cpp", 324, 0, "%s", "!GEOM_BODY_DISABLED( geom )");
     if ((geom->gflags & 8) == 0)
@@ -823,10 +821,8 @@ void __cdecl ODE_CollideSimpleSpaceWithGeomNoAABBTest(dxSpace *space, dxGeom *ge
     {
         if ((!geom2->body || (geom2->body->flags & 4) == 0) && (geom2->gflags & 8) != 0)
         {
-            if (geom == geom2)
-                MyAssertHandler(".\\physics\\ode\\src\\collision_space.cpp", 337, 0, "%s", "geom != geom2");
-            if (geom->body == geom2->body)
-                MyAssertHandler(".\\physics\\ode\\src\\collision_space.cpp", 338, 0, "%s", "geom->body != geom2->body");
+            iassert(geom != geom2);
+            iassert(geom->body != geom2->body);
             Phys_NearCallback(data, geom2, geom);
         }
     }

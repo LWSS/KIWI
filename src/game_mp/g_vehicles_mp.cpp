@@ -116,14 +116,7 @@ void __cdecl Veh_IncTurretBarrelRoll(int localClientNum, int entityNum, float ro
 
 uint16_t __cdecl CompressUnit(float unit)
 {
-    if (unit < 0.0 || unit > 1.0)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\src\\bgame\\../cgame_mp/cg_pose_mp.h",
-            102,
-            0,
-            "%s\n\t(unit) = %g",
-            "(unit >= 0.0f && unit <= 1.0f)",
-            unit);
+    vassert((unit >= 0.0f && unit <= 1.0f), "(unit) = %g", unit);
     return (int)(unit * 65535.0 + 0.5);
 }
 
@@ -262,8 +255,7 @@ void __cdecl VehicleClearRideSlotForPlayer(gentity_s *ent, int playerEntNum)
 {
     int i; // [esp+0h] [ebp-8h]
 
-    if (!ent->scr_vehicle)
-        MyAssertHandler(".\\game_mp\\g_vehicles_mp.cpp", 306, 0, "%s", "ent->scr_vehicle");
+    iassert(ent->scr_vehicle);
     for (i = 0; i < 3; ++i)
     {
         if (ent->scr_vehicle->boneIndex.riderSlots[i].entNum == playerEntNum)
@@ -319,10 +311,8 @@ void __cdecl G_VehiclesSetupSpawnedEnts()
         if (s_vehicles[i].entNum != ENTITYNUM_NONE)
         {
             ent = &g_entities[s_vehicles[i].entNum];
-            if (ent->classname != scr_const.script_vehicle)
-                MyAssertHandler(".\\game_mp\\g_vehicles_mp.cpp", 2751, 0, "%s", "ent->classname == scr_const.script_vehicle");
-            if (!ent->scr_vehicle)
-                MyAssertHandler(".\\game_mp\\g_vehicles_mp.cpp", 2752, 0, "%s", "ent->scr_vehicle");
+            iassert(ent->classname == scr_const.script_vehicle);
+            iassert(ent->scr_vehicle);
             SetupCollisionMap(ent);
         }
     }
@@ -555,8 +545,7 @@ char __cdecl VehicleHasSeatFree(gentity_s *ent)
 {
     int i; // [esp+0h] [ebp-8h]
 
-    if (!ent->scr_vehicle)
-        MyAssertHandler(".\\game_mp\\g_vehicles_mp.cpp", 266, 0, "%s", "ent->scr_vehicle");
+    iassert(ent->scr_vehicle);
     for (i = 0; i < 3; ++i)
     {
         if (ent->scr_vehicle->boneIndex.riderSlots[i].boneIdx != -1
@@ -575,8 +564,7 @@ bool __cdecl G_VehImmuneToDamage(gentity_s *ent, int mod, char damageFlags, uint
     scr_vehicle_s *veh; // [esp+8h] [ebp-8h]
 
     veh = ent->scr_vehicle;
-    if (!veh)
-        MyAssertHandler(".\\game_mp\\g_vehicles_mp.cpp", 3023, 0, "%s", "veh");
+    iassert(veh);
     info = &s_vehicleInfos[veh->infoIdx];
     switch (mod)
     {
@@ -687,10 +675,8 @@ void __cdecl VEH_TouchEntities_0(gentity_s *ent, float frameTime)
     float mins[3]; // [esp+10CCh] [ebp-18h] BYREF
     float diff[3]; // [esp+10D8h] [ebp-Ch] BYREF
 
-    if (!ent)
-        MyAssertHandler(".\\game_mp\\g_vehicles_mp.cpp", 1481, 0, "%s", "ent");
-    if (!ent->scr_vehicle)
-        MyAssertHandler(".\\game_mp\\g_vehicles_mp.cpp", 1482, 0, "%s", "ent->scr_vehicle");
+    iassert(ent);
+    iassert(ent->scr_vehicle);
     if (ent->r.bmodel)
     {
         scr_vehicle = ent->scr_vehicle;
@@ -809,10 +795,8 @@ void __cdecl G_VehEntHandler_Think(gentity_s *pSelf)
     scr_vehicle_s *veh; // [esp+1Ch] [ebp-8h]
     VehicleTags *rideTag; // [esp+20h] [ebp-4h]
 
-    if (!pSelf)
-        MyAssertHandler(".\\game_mp\\g_vehicles_mp.cpp", 3153, 0, "%s", "pSelf");
-    if (!pSelf->scr_vehicle)
-        MyAssertHandler(".\\game_mp\\g_vehicles_mp.cpp", 3154, 0, "%s", "pSelf->scr_vehicle");
+    iassert(pSelf);
+    iassert(pSelf->scr_vehicle);
     veh = pSelf->scr_vehicle;
     info = &s_vehicleInfos[veh->infoIdx];
     frameTime = (double)level.frametime * EQUAL_EPSILON;
@@ -827,8 +811,7 @@ void __cdecl G_VehEntHandler_Think(gentity_s *pSelf)
         }
         VEH_UpdateClients(pSelf);
         UpdateSimulation(pSelf);
-        if (veh->speed < 0.0)
-            MyAssertHandler(".\\game_mp\\g_vehicles_mp.cpp", 3185, 0, "%s", "veh->speed >= 0.0f");
+        iassert(veh->speed >= 0.0f);
         VEH_SetPosition(pSelf, veh->phys.origin, veh->phys.angles);
         VEH_TouchEntities_0(pSelf, frameTime);
         if (vehDebugServer->current.enabled)
@@ -851,8 +834,7 @@ void __cdecl G_VehEntHandler_Think(gentity_s *pSelf)
 
 VehicleTags *__cdecl RideTagFirst(gentity_s *ent)
 {
-    if (!ent->scr_vehicle)
-        MyAssertHandler(".\\game_mp\\g_vehicles_mp.cpp", 225, 0, "%s", "ent->scr_vehicle");
+    iassert(ent->scr_vehicle);
     return &ent->scr_vehicle->boneIndex;
 }
 
@@ -862,13 +844,10 @@ VehicleTags *__cdecl RideTagNext(gentity_s *ent, VehicleRideSlot_t *inTag)
     int i; // [esp+8h] [ebp-4h]
     int ia; // [esp+8h] [ebp-4h]
 
-    if (!ent)
-        MyAssertHandler(".\\game_mp\\g_vehicles_mp.cpp", 235, 0, "%s", "ent");
-    if (!inTag)
-        MyAssertHandler(".\\game_mp\\g_vehicles_mp.cpp", 236, 0, "%s", "inTag");
+    iassert(ent);
+    iassert(inTag);
     veh = ent->scr_vehicle;
-    if (!veh)
-        MyAssertHandler(".\\game_mp\\g_vehicles_mp.cpp", 239, 0, "%s", "veh");
+    iassert(veh);
     for (i = 0; i < 3; ++i)
     {
         if (&veh->boneIndex.riderSlots[i] == inTag)
@@ -912,10 +891,8 @@ void __cdecl InflictDamage(gentity_s *vehEnt, gentity_s *target, float *dir, int
 {
     int attackerNum; // [esp+4h] [ebp-4h]
 
-    if (!vehEnt)
-        MyAssertHandler(".\\game_mp\\g_vehicles_mp.cpp", 1327, 0, "%s", "vehEnt");
-    if (!target)
-        MyAssertHandler(".\\game_mp\\g_vehicles_mp.cpp", 1328, 0, "%s", "target");
+    iassert(vehEnt);
+    iassert(target);
     attackerNum = VehicleEntDriver(vehEnt);
     if (attackerNum == ENTITYNUM_NONE)
         attackerNum = ENTITYNUM_WORLD;
@@ -942,8 +919,7 @@ void __cdecl InflictDamage(gentity_s *vehEnt, gentity_s *target, float *dir, int
 
 int __cdecl VehicleEntDriver(gentity_s *ent)
 {
-    if (!ent->scr_vehicle)
-        MyAssertHandler(".\\game_mp\\g_vehicles_mp.cpp", 282, 0, "%s", "ent->scr_vehicle");
+    iassert(ent->scr_vehicle);
     return ent->scr_vehicle->boneIndex.riderSlots[0].entNum;
 }
 
@@ -961,8 +937,7 @@ void __cdecl UpdateTurret(gentity_s *ent)
     else
     {
         player = &g_entities[playerEntNum];
-        if (!player->client)
-            MyAssertHandler(".\\game_mp\\g_vehicles_mp.cpp", 1635, 0, "%s", "player->client");
+        iassert(player->client);
         ent->s.lerp.u.vehicle.gunYaw = player->client->ps.viewangles[1];
         ent->s.lerp.u.vehicle.gunPitch = player->client->ps.viewangles[0];
     }
@@ -982,8 +957,7 @@ void __cdecl FireTurret(gentity_s *ent, gentity_s *player)
     if (ent->s.weapon)
     {
         veh = ent->scr_vehicle;
-        if (!veh)
-            MyAssertHandler(".\\game_mp\\g_vehicles_mp.cpp", 1750, 0, "%s", "veh");
+        iassert(veh);
         FillWeaponParms(ent, player, &wp);
         if (wp.weapDef->weapType)
             Com_Error(ERR_DROP, "FireTurret(): WeapDef is not a bullet type.");
@@ -1025,10 +999,8 @@ void __cdecl FillWeaponParms(gentity_s *vehEnt, gentity_s *player, weaponParms *
 
 void __cdecl VEH_UpdateClients(gentity_s *ent)
 {
-    if (!ent)
-        MyAssertHandler(".\\game_mp\\g_vehicles_mp.cpp", 1956, 0, "%s", "ent");
-    if (!ent->scr_vehicle)
-        MyAssertHandler(".\\game_mp\\g_vehicles_mp.cpp", 1957, 0, "%s", "ent->scr_vehicle");
+    iassert(ent);
+    iassert(ent->scr_vehicle);
     VEH_UpdateClientDriver(ent);
     VEH_UpdateClientPassenger(ent);
     VEH_UpdateClientGunner(ent);
@@ -1041,8 +1013,7 @@ void __cdecl VEH_UpdateClientPassenger(gentity_s *ent)
 
 int __cdecl VehicleEntPassenger(gentity_s *ent)
 {
-    if (!ent->scr_vehicle)
-        MyAssertHandler(".\\game_mp\\g_vehicles_mp.cpp", 289, 0, "%s", "ent->scr_vehicle");
+    iassert(ent->scr_vehicle);
     return ent->scr_vehicle->boneIndex.riderSlots[1].entNum;
 }
 
@@ -1060,10 +1031,8 @@ void __cdecl VEH_UpdateClientDriver(gentity_s *ent)
     int playerEntNum; // [esp+18h] [ebp-8h]
     gentity_s *player; // [esp+1Ch] [ebp-4h]
 
-    if (!ent)
-        MyAssertHandler(".\\game_mp\\g_vehicles_mp.cpp", 1883, 0, "%s", "ent");
-    if (!ent->scr_vehicle)
-        MyAssertHandler(".\\game_mp\\g_vehicles_mp.cpp", 1884, 0, "%s", "ent->scr_vehicle");
+    iassert(ent);
+    iassert(ent->scr_vehicle);
     veh = ent->scr_vehicle;
     veh->phys.driverPedal = 0.0;
     veh->phys.driverSteer = 0.0;
@@ -1080,8 +1049,7 @@ void __cdecl VEH_UpdateClientDriver(gentity_s *ent)
     else
     {
         player = &g_entities[playerEntNum];
-        if (!player->client)
-            MyAssertHandler(".\\game_mp\\g_vehicles_mp.cpp", 1906, 0, "%s", "player->client");
+        iassert(player->client);
         if ((player->client->ps.pm_flags & (PMF_RESPAWNED | PMF_FROZEN)) == 0)
         {
             veh->phys.inputAccelerationOLD = player->client->sess.cmd.forwardmove;
@@ -1164,11 +1132,9 @@ void __cdecl IntegratePosAndRot(gentity_s *ent)
     scr_vehicle_s *veh; // [esp+30h] [ebp-10h]
     float frameTimea; // [esp+4Ch] [ebp+Ch]
 
-    if (!ent)
-        MyAssertHandler(".\\game_mp\\g_vehicles_mp.cpp", 2330, 0, "%s", "ent");
+    iassert(ent);
     veh = ent->scr_vehicle;
-    if (!veh)
-        MyAssertHandler(".\\game_mp\\g_vehicles_mp.cpp", 2332, 0, "%s", "veh");
+    iassert(veh);
     phys = &veh->phys;
     frameTimea = (double)level.frametime * EQUAL_EPSILON;
     AdvanceVehicleRotation(ent, frameTimea);
@@ -1211,11 +1177,9 @@ void __cdecl GetAccelerationForces(gentity_s *ent, float frameTime, float *resul
     scr_vehicle_s *veh; // [esp+10h] [ebp-8h]
     float driverAccel; // [esp+14h] [ebp-4h]
 
-    if (!ent)
-        MyAssertHandler(".\\game_mp\\g_vehicles_mp.cpp", 2223, 0, "%s", "ent");
+    iassert(ent);
     veh = ent->scr_vehicle;
-    if (!veh)
-        MyAssertHandler(".\\game_mp\\g_vehicles_mp.cpp", 2225, 0, "%s", "veh");
+    iassert(veh);
     driverAccel = veh->phys.driverPedal * vehTestHorsepower->current.value * 6600.0;
     PositionAccelForces(&veh->phys, driverAccel, resultPosition);
     KISAK_NULLSUB();
@@ -1307,11 +1271,9 @@ void __cdecl AdvanceVehiclePosition(gentity_s *ent, float frameTime)
     float v2; // [esp+4h] [ebp-20h]
     scr_vehicle_s *veh; // [esp+20h] [ebp-4h]
 
-    if (!ent)
-        MyAssertHandler(".\\game_mp\\g_vehicles_mp.cpp", 2241, 0, "%s", "ent");
+    iassert(ent);
     veh = ent->scr_vehicle;
-    if (!veh)
-        MyAssertHandler(".\\game_mp\\g_vehicles_mp.cpp", 2243, 0, "%s", "veh");
+    iassert(veh);
     VEH_GroundTrace(ent);
     veh->phys.onGround = s_phys.onGround;
     Vec3Add(veh->phys.vel, veh->phys.colVelDelta, veh->phys.vel);
@@ -1331,8 +1293,7 @@ void __cdecl AdvanceVehiclePosition(gentity_s *ent, float frameTime)
         VEH_GroundPlant(ent, 1, frameTime);
         v2 = I_fabs(veh->phys.bodyVel[0]);
         ent->scr_vehicle->speed = v2;
-        if (veh->speed < 0.0f)
-            MyAssertHandler(".\\game_mp\\g_vehicles_mp.cpp", 2269, 0, "%s", "veh->speed >= 0.0f");
+        iassert(veh->speed >= 0.0f);
     }
 }
 
@@ -1357,11 +1318,9 @@ void __cdecl AdvanceVehicleRotation(gentity_s *ent, float frameTime)
     float mph; // [esp+20h] [ebp-Ch]
     scr_vehicle_s *veh; // [esp+28h] [ebp-4h]
 
-    if (!ent)
-        MyAssertHandler(".\\game_mp\\g_vehicles_mp.cpp", 2278, 0, "%s", "ent");
+    iassert(ent);
     veh = ent->scr_vehicle;
-    if (!veh)
-        MyAssertHandler(".\\game_mp\\g_vehicles_mp.cpp", 2280, 0, "%s", "veh");
+    iassert(veh);
     mph = Vec3Length(veh->phys.vel) * 0.056818184f;
     if (mph > 0.1f)
     {
@@ -1422,8 +1381,7 @@ void __cdecl InitFirstThink(gentity_s *pSelf)
     {
         if (!alwaysfails)
             MyAssertHandler(".\\game_mp\\g_vehicles_mp.cpp", 3077, 0, "Initializing a driveable vehicle!");
-        if (info->type)
-            MyAssertHandler(".\\game_mp\\g_vehicles_mp.cpp", 3081, 0, "%s", "info->type == VEH_WHEELS_4");
+        iassert(info->type == VEH_WHEELS_4);
         VEH_GetWheelOrigin(pSelf, 0, wheelLeft);
         VEH_GetWheelOrigin(pSelf, 1, wheelRight);
         Vec3Sub(wheelRight, wheelLeft, diff);
@@ -1475,12 +1433,9 @@ void __cdecl G_VehEntHandler_Touch(gentity_s *pSelf, gentity_s *pOther, int bTou
     float dot; // [esp+28h] [ebp-10h]
     float moveDir[3]; // [esp+2Ch] [ebp-Ch] BYREF
 
-    if (!pSelf)
-        MyAssertHandler(".\\game_mp\\g_vehicles_mp.cpp", 3222, 0, "%s", "pSelf");
-    if (!pSelf->scr_vehicle)
-        MyAssertHandler(".\\game_mp\\g_vehicles_mp.cpp", 3223, 0, "%s", "pSelf->scr_vehicle");
-    if (!pOther)
-        MyAssertHandler(".\\game_mp\\g_vehicles_mp.cpp", 3224, 0, "%s", "pOther");
+    iassert(pSelf);
+    iassert(pSelf->scr_vehicle);
+    iassert(pOther);
     veh = pSelf->scr_vehicle;
     info = &s_vehicleInfos[veh->infoIdx];
     if (pOther->s.eType == ET_PLAYER || pOther->s.eType == ET_SCRIPTMOVER)
@@ -1554,8 +1509,7 @@ void __cdecl LinkPlayerToVehicle(gentity_s *ent, gentity_s *player)
 
     veh = ent->scr_vehicle;
     client = player->client;
-    if (!client)
-        MyAssertHandler(".\\game_mp\\g_vehicles_mp.cpp", 2487, 0, "%s", "client");
+    iassert(client);
     if (!alwaysfails)
         MyAssertHandler(".\\game_mp\\g_vehicles_mp.cpp", 2489, 0, "Trying to attach a player to a vehicle!");
     if ((client->ps.pm_flags & PMF_VEHICLE_ATTACHED) != 0)
@@ -1647,14 +1601,11 @@ void __cdecl G_VehEntHandler_Controller(const gentity_s *pSelf, int *partBits)
     float bodyAngles[3]; // [esp+24h] [ebp-18h] BYREF
     float turretAngles[3]; // [esp+30h] [ebp-Ch] BYREF
 
-    if (!pSelf)
-        MyAssertHandler(".\\game_mp\\g_vehicles_mp.cpp", 3336, 0, "%s", "pSelf");
-    if (!pSelf->scr_vehicle)
-        MyAssertHandler(".\\game_mp\\g_vehicles_mp.cpp", 3337, 0, "%s", "pSelf->scr_vehicle");
+    iassert(pSelf);
+    iassert(pSelf->scr_vehicle);
     veh = pSelf->scr_vehicle;
     obj = Com_GetServerDObj(pSelf->s.number);
-    if (!obj)
-        MyAssertHandler(".\\game_mp\\g_vehicles_mp.cpp", 3341, 0, "%s", "obj");
+    iassert(obj);
     //v3 = pSelf->s.lerp.u.turret.gunAngles[1];
     bodyAngles[0] = pSelf->s.lerp.u.vehicle.bodyPitch;
     bodyAngles[1] = 0.0f;

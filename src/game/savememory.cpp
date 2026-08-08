@@ -85,20 +85,8 @@ void *SaveMemory_ResetGameBuffers()
 
 void __cdecl SaveMemory_InitializeSaveSystem()
 {
-    if (saveMemoryGlob.committedGameSave)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\savememory.cpp",
-            226,
-            0,
-            "%s",
-            "!saveMemoryGlob.committedGameSave");
-    if (saveMemoryGlob.currentGameSave)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\savememory.cpp",
-            227,
-            0,
-            "%s",
-            "!saveMemoryGlob.currentGameSave");
+    iassert(!saveMemoryGlob.committedGameSave);
+    iassert(!saveMemoryGlob.currentGameSave);
     memset(&saveMemoryGlob.game0, 0, sizeof(saveMemoryGlob.game0));
     saveMemoryGlob.game0.isUsingGlobalBuffer = 1;
     memset(&saveMemoryGlob.game1, 0, sizeof(saveMemoryGlob.game1));
@@ -126,24 +114,19 @@ void __cdecl SaveMemory_ClearDemoSave()
 
 void __cdecl SaveMemory_AllocateTempMemory(SaveGame *save, int size, void *buffer)
 {
-    if (!save)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\savememory.cpp", 256, 0, "%s", "save");
-    if (save->saveState)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\savememory.cpp", 257, 0, "%s", "save->saveState == MEMCLEAR");
+    iassert(save);
+    iassert(save->saveState == MEMCLEAR);
     save->saveState = SAVING;
     if (buffer && size > 0)
         memset(buffer, 0, (size_t)size);
     MemFile_InitForWriting(&save->memFile, size, (byte*)buffer, 0, 0);
-    if (!save->memFile.buffer)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\savememory.cpp", 262, 0, "%s", "save->memFile.buffer");
+    iassert(save->memFile.buffer);
 }
 
 void __cdecl SaveMemory_AllocateHeapMemory(SaveGame *save, unsigned int size)
 {
-    if (!save)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\savememory.cpp", 273, 0, "%s", "save");
-    if (save->isUsingGlobalBuffer)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\savememory.cpp", 274, 0, "%s", "!save->isUsingGlobalBuffer");
+    iassert(save);
+    iassert(!save->isUsingGlobalBuffer);
     if (size >= 0x180000)
         Com_Error(ERR_DROP, "SaveMemory_AllocateHeapMemory: failed to alloc %d bytes", size);
     save->memFile.buffer = saveMemoryGlob.buffer2;
@@ -151,10 +134,8 @@ void __cdecl SaveMemory_AllocateHeapMemory(SaveGame *save, unsigned int size)
 
 void __cdecl SaveMemory_FreeMemory(SaveGame *save)
 {
-    if (!save)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\savememory.cpp", 292, 0, "%s", "save");
-    if (save->isUsingGlobalBuffer)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\savememory.cpp", 293, 0, "%s", "!save->isUsingGlobalBuffer");
+    iassert(save);
+    iassert(!save->isUsingGlobalBuffer);
     if (save->memFile.buffer)
     {
         MemFile_Shutdown(&save->memFile);
@@ -181,10 +162,8 @@ void __cdecl SaveMemory_MoveToSegment(SaveGame *save, int index)
 
 void __cdecl SaveMemory_InitializeGameSave(SaveGame *save)
 {
-    if (!save)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\savememory.cpp", 336, 0, "%s", "save");
-    if (!save->isUsingGlobalBuffer)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\savememory.cpp", 337, 0, "%s", "save->isUsingGlobalBuffer");
+    iassert(save);
+    iassert(save->isUsingGlobalBuffer);
     MemFile_InitForWriting(&save->memFile, 1572864, save->memFile.buffer, 1, 0);
     save->saveState = SAVING;
     saveMemoryGlob.recentLoadTime = 0;
@@ -192,10 +171,8 @@ void __cdecl SaveMemory_InitializeGameSave(SaveGame *save)
 
 void __cdecl SaveMemory_InitializeDemoSave(SaveGame *save)
 {
-    if (!save)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\savememory.cpp", 359, 0, "%s", "save");
-    if (save->isUsingGlobalBuffer)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\savememory.cpp", 360, 0, "%s", "!save->isUsingGlobalBuffer");
+    iassert(save);
+    iassert(!save->isUsingGlobalBuffer);
     SaveMemory_FreeMemory(save);
     SaveMemory_AllocateTempMemory(save, 1572864, saveMemoryGlob.buffer2);
     if (save->saveState != SAVING)
@@ -206,10 +183,8 @@ void __cdecl SaveMemory_FinalizeSave(SaveGame *save)
 {
     bool isUsingGlobalBuffer; // r10
 
-    if (!save)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\savememory.cpp", 375, 0, "%s", "save");
-    if (save->saveState != SAVING)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\savememory.cpp", 376, 0, "%s", "save->saveState == SAVING");
+    iassert(save);
+    iassert(save->saveState == SAVING);
     isUsingGlobalBuffer = save->isUsingGlobalBuffer;
     save->saveState = AWAITING_COMMIT;
     if (!isUsingGlobalBuffer)
@@ -218,18 +193,15 @@ void __cdecl SaveMemory_FinalizeSave(SaveGame *save)
 
 void __cdecl SaveMemory_InitializeLoad(SaveGame *save, int size)
 {
-    if (!save)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\savememory.cpp", 403, 0, "%s", "save");
+    iassert(save);
     MemFile_InitForReading(&save->memFile, size, save->memFile.buffer, 0);
     save->saveState = LOADING;
 }
 
 void __cdecl SaveMemory_FinalizeLoad(SaveGame *save)
 {
-    if (!save)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\savememory.cpp", 418, 0, "%s", "save");
-    if (save->saveState != LOADING)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\savememory.cpp", 419, 0, "%s", "save->saveState == LOADING");
+    iassert(save);
+    iassert(save->saveState == LOADING);
     if (save->isUsingGlobalBuffer)
     {
         save->saveState = COMMITTED;
@@ -245,8 +217,7 @@ void __cdecl SaveMemory_FinalizeSaveCommit(SaveGame *save)
 {
     SaveBufferState saveState; // r11
 
-    if (!save)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\savememory.cpp", 437, 0, "%s", "save");
+    iassert(save);
     saveState = save->saveState;
     if (saveState != AWAITING_COMMIT && saveState != COMMITTED)
         MyAssertHandler(
@@ -269,8 +240,7 @@ int __cdecl SaveMemory_IsSaving(SaveGame *save)
     unsigned __int8 v3; // r11
     bool v4; // zf
 
-    if (!save)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\savememory.cpp", 473, 0, "%s", "save");
+    iassert(save);
     saveState = save->saveState;
     if (saveState == SAVING)
         return 1;
@@ -283,38 +253,32 @@ int __cdecl SaveMemory_IsSaving(SaveGame *save)
 
 bool __cdecl SaveMemory_IsLoading(SaveGame *save)
 {
-    if (!save)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\savememory.cpp", 485, 0, "%s", "save");
+    iassert(save);
     return save->saveState == LOADING;
 }
 
 bool __cdecl SaveMemory_IsWaitingForCommit(SaveGame *save)
 {
-    if (!save)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\savememory.cpp", 497, 0, "%s", "save");
+    iassert(save);
     return save->saveState == AWAITING_COMMIT;
 }
 
 unsigned __int8 *__cdecl SaveMemory_GetBodyBuffer(SaveGame *save)
 {
-    if (!save)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\savememory.cpp", 511, 0, "%s", "save");
+    iassert(save);
     return save->memFile.buffer;
 }
 
 unsigned int __cdecl SaveMemory_CalculateChecksum(SaveGame *save)
 {
-    if (!save)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\savememory.cpp", 521, 0, "%s", "save");
-    if (!save->memFile.buffer)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\savememory.cpp", 522, 0, "%s", "save->memFile.buffer");
+    iassert(save);
+    iassert(save->memFile.buffer);
     return Com_BlockChecksumKey32(save->memFile.buffer, save->header.bodySize, 0);
 }
 
 void __cdecl SaveMemory_InitializeLoadFromBuffer(SaveGame *save, unsigned __int8 *buffer, int length)
 {
-    if (!save)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\savememory.cpp", 534, 0, "%s", "save");
+    iassert(save);
     MemFile_InitForReading(&save->memFile, length, buffer, 0);
     save->header.bodySize = length;
     save->header.saveCheckSum = SaveMemory_CalculateChecksum(save);
@@ -323,46 +287,27 @@ void __cdecl SaveMemory_InitializeLoadFromBuffer(SaveGame *save, unsigned __int8
 
 void __cdecl SaveMemory_SaveWrite(const void *buffer, int len, SaveGame *save)
 {
-    if (!save)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\savememory.cpp", 551, 0, "%s", "save");
-    if (save->saveState != SAVING)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\savememory.cpp", 552, 0, "%s", "save->saveState == SAVING");
-    if (save->isDirectWriteActive)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\savememory.cpp",
-            553,
-            0,
-            "%s",
-            "save->isDirectWriteActive == false");
+    iassert(save);
+    iassert(save->saveState == SAVING);
+    iassert(save->isDirectWriteActive == false);
     MemFile_WriteData(&save->memFile, len, buffer);
 }
 
 void __cdecl SaveMemory_SetBuffer(void *buffer, int len, SaveGame *save)
 {
-    if (!save)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\savememory.cpp", 567, 0, "%s", "save");
-    if (save->isUsingGlobalBuffer)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\savememory.cpp", 568, 0, "%s", "!save->isUsingGlobalBuffer");
+    iassert(save);
+    iassert(!save->isUsingGlobalBuffer);
     SaveMemory_FreeMemory(save);
-    if (save->saveState)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\savememory.cpp", 572, 0, "%s", "save->saveState == MEMCLEAR");
-    if (save->isDirectWriteActive)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\savememory.cpp",
-            573,
-            0,
-            "%s",
-            "save->isDirectWriteActive == false");
+    iassert(save->saveState == MEMCLEAR);
+    iassert(save->isDirectWriteActive == false);
     save->saveState = SAVING;
     MemFile_CommonInit(&save->memFile, len, (byte*)buffer, 0, 1);
 }
 
 void __cdecl SaveMemory_LoadRead(void *buffer, int size, SaveGame *save)
 {
-    if (!save)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\savememory.cpp", 590, 0, "%s", "save");
-    if (save->saveState != LOADING)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\savememory.cpp", 591, 0, "%s", "save->saveState == LOADING");
+    iassert(save);
+    iassert(save->saveState == LOADING);
     MemFile_ReadData(&save->memFile, size, (byte *)buffer);
 }
 
@@ -370,8 +315,7 @@ int __cdecl SaveMemory_GetTotalLoadSize(SaveGame *save)
 {
     SaveBufferState saveState; // r8
 
-    if (!save)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\savememory.cpp", 604, 0, "%s", "save");
+    iassert(save);
     saveState = save->saveState;
     if (saveState != LOADING)
         MyAssertHandler(
@@ -454,8 +398,7 @@ void __cdecl SaveMemory_CreateHeader(
 
 const SaveHeader *__cdecl SaveMemory_GetHeader(SaveGame *save)
 {
-    if (!save)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\savememory.cpp", 693, 0, "%s", "save");
+    iassert(save);
     return &save->header;
 }
 
@@ -466,8 +409,7 @@ void *__cdecl SaveMemory_ReadLoadFromDevice(
     int /*useLoadedSourceFiles*/,
     SaveGame **save)
 {
-    if (!save)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\savememory.cpp", 706, 0, "%s", "save");
+    iassert(save);
 
     memset(&saveMemoryGlob.game0, 0, sizeof(saveMemoryGlob.game0));
     saveMemoryGlob.game0.isUsingGlobalBuffer = 1;
@@ -592,35 +534,14 @@ int __cdecl SaveMemory_CommitSave(SaveGame *save, int saveId)
 {
     SaveGame *committedGameSave; // r10
 
-    if (!save)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\savememory.cpp", 497, 0, "%s", "save");
+    iassert(save);
     if (save->saveState == AWAITING_COMMIT)
     {
-        if (!save->isUsingGlobalBuffer)
-            MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\savememory.cpp", 833, 0, "%s", "save->isUsingGlobalBuffer");
-        if (!save->memFile.buffer)
-            MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\savememory.cpp", 834, 0, "%s", "save->memFile.buffer");
-        if (save != saveMemoryGlob.currentGameSave)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\savememory.cpp",
-                835,
-                0,
-                "%s",
-                "save == saveMemoryGlob.currentGameSave");
-        if (!saveMemoryGlob.committedGameSave)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\savememory.cpp",
-                836,
-                0,
-                "%s",
-                "saveMemoryGlob.committedGameSave");
-        if (!saveMemoryGlob.currentGameSave)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\savememory.cpp",
-                837,
-                0,
-                "%s",
-                "saveMemoryGlob.currentGameSave");
+        iassert(save->isUsingGlobalBuffer);
+        iassert(save->memFile.buffer);
+        iassert(save == saveMemoryGlob.currentGameSave);
+        iassert(saveMemoryGlob.committedGameSave);
+        iassert(saveMemoryGlob.currentGameSave);
         committedGameSave = saveMemoryGlob.committedGameSave;
         saveMemoryGlob.committedGameSave = saveMemoryGlob.currentGameSave;
         saveMemoryGlob.currentGameSave = committedGameSave;
@@ -648,17 +569,9 @@ void __cdecl SaveMemory_RollbackSave(SaveGame *save)
     }
     if (save->saveState == AWAITING_COMMIT)
     {
-        if (!save->isUsingGlobalBuffer)
-            MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\savememory.cpp", 865, 0, "%s", "save->isUsingGlobalBuffer");
-        if (!save->memFile.buffer)
-            MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\savememory.cpp", 866, 0, "%s", "save->memFile.buffer");
-        if (save != saveMemoryGlob.currentGameSave)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\savememory.cpp",
-                867,
-                0,
-                "%s",
-                "save == saveMemoryGlob.currentGameSave");
+        iassert(save->isUsingGlobalBuffer);
+        iassert(save->memFile.buffer);
+        iassert(save == saveMemoryGlob.currentGameSave);
         save->saveState = MEMCLEAR;
     }
 }
@@ -681,8 +594,7 @@ int __cdecl SaveMemory_WriteSaveToDevice(SaveGame *save)
                 0,
                 "%s",
                 "save->memFile.bufferSize == saveHeader->bodySize");
-        if (!save->memFile.buffer)
-            MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\savememory.cpp", 896, 0, "%s", "save->memFile.buffer");
+        iassert(save->memFile.buffer);
         if (save->isWrittenToDevice)
             Com_Printf(10, "** Save was already written to a device; it is being saved again.  This is not an error.\n");
         int t0 = Sys_Milliseconds();
@@ -728,10 +640,8 @@ void __cdecl SaveMemory_ClearForcedCommitFlag()
 
 void __cdecl SaveMemory_FinalizeSaveToDisk(SaveGame *save)
 {
-    if (!save)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\savememory.cpp", 386, 0, "%s", "save");
-    if (save->saveState != SAVING)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\savememory.cpp", 387, 0, "%s", "save->saveState == SAVING");
+    iassert(save);
+    iassert(save->saveState == SAVING);
     save->saveState = AWAITING_COMMIT;
     SaveMemory_WriteSaveToDevice(save);
     if (!save->isUsingGlobalBuffer)

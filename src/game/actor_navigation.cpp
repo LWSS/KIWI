@@ -484,8 +484,7 @@ path_t pathBackup;
 
 bool __cdecl Path_IsPathStanceNode(const pathnode_t *node)
 {
-    if (!node)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\pathnode.h", 166, 0, "%s", "node");
+    iassert(node);
     return ((1 << node->constant.type) & 0xC1FFC) == 0;
 }
 
@@ -501,10 +500,8 @@ float __cdecl Path_GetPathDir(float *delta, const float *vFrom, const float *vTo
     delta[1] = vTo[1] - vFrom[1];
     if ((LODWORD(v8) & 0x7F800000) == 0x7F800000)
         MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp", 56, 0, "%s", "!IS_NAN(delta[0])");
-    if ((COERCE_UNSIGNED_INT(delta[1]) & 0x7F800000) == 0x7F800000)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp", 57, 0, "%s", "!IS_NAN(delta[1])");
-    if (*delta == 0.0 && delta[1] == 0.0)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp", 58, 0, "%s", "delta[0] || delta[1]");
+    iassert(!IS_NAN(delta[1]));
+    iassert(delta[0] || delta[1]);
     v4 = sqrtf((float)((float)(delta[1] * delta[1]) + (float)(*delta * *delta)));
     if (v4 <= 0.0)
         MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp", 60, 0, "%s", "fDist > 0");
@@ -522,13 +519,7 @@ float __cdecl Path_GetPathDir(float *delta, const float *vFrom, const float *vTo
 
 pathnode_t *__cdecl Path_GetNegotiationNode(const path_t *pPath)
 {
-    if (pPath->wNegotiationStartNode <= 0)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp",
-            74,
-            0,
-            "%s",
-            "pPath->wNegotiationStartNode > 0");
+    iassert(pPath->wNegotiationStartNode > 0);
     return Path_ConvertIndexToNode(pPath->pts[pPath->wNegotiationStartNode].iNodeNum);
 }
 
@@ -561,8 +552,7 @@ void __cdecl Path_DecrementNodeUserCount(path_t *pPath)
 
 void __cdecl Path_Backup(const path_t *path)
 {
-    if (!path)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp", 123, 0, "%s", "path");
+    iassert(path);
     Com_Memcpy(&pathBackup, path, 996);
 }
 
@@ -572,17 +562,10 @@ float __cdecl Path_GetDistToPathSegment(const float *vStartPos, const pathpoint_
     double v5; // fp30
     double v6; // fp1
 
-    if (!pt)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp", 156, 0, "%s", "pt");
+    iassert(pt);
     v4 = (float)(pt->vOrigPoint[0] - *vStartPos);
     v5 = (float)(pt->vOrigPoint[1] - vStartPos[1]);
-    if (pt->fDir2D[0] == 0.0 && pt->fDir2D[1] == 0.0)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp",
-            159,
-            0,
-            "%s",
-            "pt->fDir2D[0] || pt->fDir2D[1]");
+    iassert(pt->fDir2D[0] || pt->fDir2D[1]);
     v6 = I_fabs((float)((float)(pt->fDir2D[0] * (float)v5) - (float)(pt->fDir2D[1] * (float)v4)));
     // KISAKFIX: wrong-half-of-double (see Path_GetPathDir). IDA tail = perpendicular
     // distance from start-pos to path-segment direction; the +1 cast reads garbage
@@ -673,13 +656,7 @@ void __cdecl Path_AddTrimmedAmount(path_t *pPath, const float *vStartPos)
         DistToPathSegment = Path_GetDistToPathSegment(vStartPos, v14);
         if (v14->fOrigLength <= 0.0)
             MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp", 223, 0, "%s", "pt->fOrigLength > 0");
-        if (pPath->fCurrLength <= 0.0)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp",
-                224,
-                0,
-                "%s",
-                "pPath->fCurrLength > 0");
+        iassert(pPath->fCurrLength > 0);
         fOrigLength = v14->fOrigLength;
         fCurrLength = pPath->fCurrLength;
         if (fOrigLength < fCurrLength)
@@ -725,13 +702,7 @@ void __cdecl Path_SubtractTrimmedAmount(path_t *pPath, const float *vStartPos)
         DistToPathSegment = Path_GetDistToPathSegment(vStartPos, v5);
         if (v5->fOrigLength <= 0.0)
             MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp", 257, 0, "%s", "pt->fOrigLength > 0");
-        if (pPath->fCurrLength <= 0.0)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp",
-                258,
-                0,
-                "%s",
-                "pPath->fCurrLength > 0");
+        iassert(pPath->fCurrLength > 0);
         fOrigLength = v5->fOrigLength;
         fCurrLength = pPath->fCurrLength;
         if (fOrigLength < fCurrLength)
@@ -771,10 +742,8 @@ void __cdecl Path_SubtractTrimmedAmount(path_t *pPath, const float *vStartPos)
 
 void __cdecl Path_BeginTrim(path_t *pPath, path_trim_t *pTrim)
 {
-    if (!pPath)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp", 2018, 0, "%s", "pPath");
-    if (!pTrim)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp", 2019, 0, "%s", "pTrim");
+    iassert(pPath);
+    iassert(pTrim);
     if (pPath->wPathLen)
     {
         pTrim->iDelta = -2;
@@ -791,8 +760,7 @@ void __cdecl Path_Begin(path_t *pPath)
 
 void __cdecl Path_Clear(path_t *pPath)
 {
-    if (!pPath)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp", 2142, 0, "%s", "pPath");
+    iassert(pPath);
     if (pPath->wNegotiationStartNode > 0)
     {
         Path_DecrementNodeUserCount(pPath);
@@ -804,26 +772,21 @@ void __cdecl Path_Clear(path_t *pPath)
 
 bool __cdecl Path_Exists(const path_t *pPath)
 {
-    if (!pPath)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp", 2164, 0, "%s", "pPath");
+    iassert(pPath);
     return pPath->wPathLen > 0;
 }
 
 int __cdecl Path_CompleteLookahead(const path_t *pPath)
 {
-    if (!pPath)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp", 2178, 0, "%s", "pPath");
-    if (pPath->wPathLen <= 0)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp", 2179, 0, "%s", "pPath->wPathLen > 0");
+    iassert(pPath);
+    iassert(pPath->wPathLen > 0);
     return pPath->flags & 1;
 }
 
 unsigned int __cdecl Path_AttemptedCompleteLookahead(const path_t *pPath)
 {
-    if (!pPath)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp", 2194, 0, "%s", "pPath");
-    if (pPath->wPathLen <= 0)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp", 2195, 0, "%s", "pPath->wPathLen > 0");
+    iassert(pPath);
+    iassert(pPath->wPathLen > 0);
     return ((unsigned int)pPath->flags >> 6) & 1;
 }
 
@@ -834,10 +797,8 @@ bool __cdecl Path_UsesObstacleNegotiation(const path_t *pPath)
     double v4; // fp2
     const char *v5; // r3
 
-    if (!pPath)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp", 2210, 0, "%s", "pPath");
-    if (pPath->wPathLen <= 0)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp", 2211, 0, "%s", "pPath->wPathLen > 0");
+    iassert(pPath);
+    iassert(pPath->wPathLen > 0);
     if ((unsigned __int16)pPath->wNegotiationStartNode >= 0x8000u)
         MyAssertHandler(
             "c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp",
@@ -845,20 +806,8 @@ bool __cdecl Path_UsesObstacleNegotiation(const path_t *pPath)
             0,
             "%s",
             "pPath->wNegotiationStartNode >= 0");
-    if (pPath->wNegotiationStartNode > pPath->lookaheadNextNode)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp",
-            2213,
-            0,
-            "%s",
-            "pPath->wNegotiationStartNode <= pPath->lookaheadNextNode");
-    if (pPath->lookaheadNextNode >= pPath->wPathLen)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp",
-            2214,
-            0,
-            "%s",
-            "pPath->lookaheadNextNode < pPath->wPathLen");
+    iassert(pPath->wNegotiationStartNode <= pPath->lookaheadNextNode);
+    iassert(pPath->lookaheadNextNode < pPath->wPathLen);
     wPathLen = pPath->wPathLen;
     if (wPathLen > 1)
     {
@@ -888,17 +837,14 @@ bool __cdecl Path_HasNegotiationNode(const path_t *path)
 
 bool __cdecl Path_AtEndOrNegotiation(const path_t *pPath)
 {
-    if (!pPath)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp", 2169, 0, "%s", "pPath");
+    iassert(pPath);
     return pPath->wPathLen > 0 && pPath->wNegotiationStartNode == pPath->wPathLen - 1;
 }
 
 unsigned int __cdecl Path_AllowsObstacleNegotiation(const path_t *pPath)
 {
-    if (!pPath)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp", 2246, 0, "%s", "pPath");
-    if (pPath->wPathLen <= 0)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp", 2247, 0, "%s", "pPath->wPathLen > 0");
+    iassert(pPath);
+    iassert(pPath->wPathLen > 0);
     return ((unsigned int)pPath->flags >> 4) & 1;
 }
 
@@ -910,29 +856,10 @@ void __cdecl Path_GetObstacleNegotiationScript(const path_t *pPath, scr_animscri
     const char *v7; // r3
     pathnode_t *v8; // r3
 
-    if (!pPath)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp", 2264, 0, "%s", "pPath");
-    if (pPath->wNegotiationStartNode <= 0)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp",
-            2265,
-            0,
-            "%s",
-            "pPath->wNegotiationStartNode > 0");
-    if (pPath->wNegotiationStartNode >= pPath->wPathLen)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp",
-            2266,
-            0,
-            "%s",
-            "pPath->wNegotiationStartNode < pPath->wPathLen");
-    if (pPath->pts[pPath->wNegotiationStartNode].iNodeNum < 0)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp",
-            2267,
-            0,
-            "%s",
-            "pPath->pts[pPath->wNegotiationStartNode].iNodeNum >= 0");
+    iassert(pPath);
+    iassert(pPath->wNegotiationStartNode > 0);
+    iassert(pPath->wNegotiationStartNode < pPath->wPathLen);
+    iassert(pPath->pts[pPath->wNegotiationStartNode].iNodeNum >= 0);
     wPathLen = pPath->wPathLen;
     if (wPathLen > 1)
     {
@@ -950,8 +877,7 @@ void __cdecl Path_GetObstacleNegotiationScript(const path_t *pPath, scr_animscri
                 v7);
         }
     }
-    if (!animscript)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp", 2269, 0, "%s", "animscript");
+    iassert(animscript);
     v8 = Path_ConvertIndexToNode(pPath->pts[pPath->wNegotiationStartNode].iNodeNum);
     animscript->func = v8->constant.animscriptfunc;
     Scr_SetString(&animscript->name, v8->constant.animscript);
@@ -961,10 +887,8 @@ int __cdecl Path_NeedsReevaluation(const path_t *pPath)
 {
     unsigned __int8 v2; // r11
 
-    if (!pPath)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp", 2286, 0, "%s", "pPath");
-    if (pPath->wPathLen <= 0)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp", 2289, 0, "%s", "pPath->wPathLen > 0");
+    iassert(pPath);
+    iassert(pPath->wPathLen > 0);
     if ((pPath->flags & 4) == 0)
         return 0;
     v2 = 1;
@@ -998,21 +922,11 @@ int __cdecl Path_EncroachesPoint2D(path_t *pPath, const float *vStart, const flo
     double v29; // fp13
     double v30; // fp0
 
-    if (!pPath)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp", 2310, 0, "%s", "pPath");
-    if (pPath->wPathLen <= 0)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp", 2311, 0, "%s", "pPath->wPathLen > 0");
-    if (!vPoint)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp", 2312, 0, "%s", "vPoint");
-    if (fMinDistSqrd < 0.0)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp", 2313, 0, "%s", "fMinDistSqrd >= 0");
-    if (pPath->lookaheadNextNode >= pPath->wPathLen)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp",
-            2314,
-            0,
-            "%s",
-            "pPath->lookaheadNextNode < pPath->wPathLen");
+    iassert(pPath);
+    iassert(pPath->wPathLen > 0);
+    iassert(vPoint);
+    iassert(fMinDistSqrd >= 0);
+    iassert(pPath->lookaheadNextNode < pPath->wPathLen);
     v10 = (float)((float)(pPath->lookaheadDir[0]
         * (float)(vPoint[1] - (float)((float)(pPath->lookaheadDir[1] * pPath->fLookaheadDist) + vStart[1])))
         - (float)(pPath->lookaheadDir[1]
@@ -1042,13 +956,7 @@ int __cdecl Path_EncroachesPoint2D(path_t *pPath, const float *vStart, const flo
     fLookaheadDistToNextNode = pPath->fLookaheadDistToNextNode;
     if (fLookaheadDistToNextNode != 0.0)
     {
-        if (pPath->lookaheadNextNode >= pPath->wPathLen - 1)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp",
-                2349,
-                0,
-                "%s",
-                "pPath->lookaheadNextNode < pPath->wPathLen - 1");
+        iassert(pPath->lookaheadNextNode < pPath->wPathLen - 1);
         vOrigPoint = pPath->pts[pPath->lookaheadNextNode].vOrigPoint;
         v15 = (float)(vPoint[1] - vOrigPoint[1]);
         v16 = (float)(*vPoint - *vOrigPoint);
@@ -1135,10 +1043,8 @@ int __cdecl Path_DistanceGreaterThan(path_t *pPath, float fDist)
     int v11; // r31
     float *i; // r30
 
-    if (!pPath)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp", 2449, 0, "%s", "pPath");
-    if (pPath->wPathLen <= 0)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp", 2450, 0, "%s", "pPath->wPathLen > 0");
+    iassert(pPath);
+    iassert(pPath->wPathLen > 0);
     if ((unsigned __int16)pPath->wNegotiationStartNode >= 0x8000u)
         MyAssertHandler(
             "c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp",
@@ -1146,20 +1052,8 @@ int __cdecl Path_DistanceGreaterThan(path_t *pPath, float fDist)
             0,
             "%s",
             "pPath->wNegotiationStartNode >= 0");
-    if (pPath->wNegotiationStartNode > pPath->lookaheadNextNode)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp",
-            2452,
-            0,
-            "%s",
-            "pPath->wNegotiationStartNode <= pPath->lookaheadNextNode");
-    if (pPath->lookaheadNextNode >= pPath->wPathLen)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp",
-            2453,
-            0,
-            "%s",
-            "pPath->lookaheadNextNode < pPath->wPathLen");
+    iassert(pPath->wNegotiationStartNode <= pPath->lookaheadNextNode);
+    iassert(pPath->lookaheadNextNode < pPath->wPathLen);
     wPathLen = pPath->wPathLen;
     if (wPathLen > 1)
     {
@@ -1188,13 +1082,7 @@ int __cdecl Path_DistanceGreaterThan(path_t *pPath, float fDist)
         v11 = lookaheadNextNode - 1;
         if (lookaheadNextNode - 1 == pPath->wPathLen - 2)
         {
-            if (pPath->fCurrLength < 0.0)
-                MyAssertHandler(
-                    "c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp",
-                    2470,
-                    0,
-                    "%s",
-                    "pPath->fCurrLength >= 0");
+            iassert(pPath->fCurrLength >= 0);
             v8 = (float)(pPath->fCurrLength + (float)v8);
             if (v8 > fDist)
                 return 1;
@@ -1411,10 +1299,8 @@ int __cdecl Path_IsTrimmed(path_t *pPath)
     int result; // r3
     int *v8; // r11
 
-    if (!pPath->wOrigPathLen)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp", 2782, 0, "%s", "pPath->wOrigPathLen");
-    if (!pPath->wPathLen)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp", 2783, 0, "%s", "pPath->wPathLen");
+    iassert(pPath->wOrigPathLen);
+    iassert(pPath->wPathLen);
     if ((unsigned __int16)pPath->wNegotiationStartNode >= 0x8000u)
         MyAssertHandler(
             "c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp",
@@ -1422,13 +1308,7 @@ int __cdecl Path_IsTrimmed(path_t *pPath)
             0,
             "%s",
             "pPath->wNegotiationStartNode >= 0");
-    if (pPath->wNegotiationStartNode >= pPath->wPathLen)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp",
-            2785,
-            0,
-            "%s",
-            "pPath->wNegotiationStartNode < pPath->wPathLen");
+    iassert(pPath->wNegotiationStartNode < pPath->wPathLen);
     wPathLen = pPath->wPathLen;
     if (wPathLen > 1)
     {
@@ -1482,8 +1362,7 @@ void __cdecl Path_RemoveCompletedPathPoints(path_t *pPath, __int16 pathPointInde
     const char *v17; // r3
     int *v18; // r11
 
-    if (!pPath)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp", 2820, 0, "%s", "pPath");
+    iassert(pPath);
     wDodgeCount = pPath->wDodgeCount;
     v5 = (__int16)(pathPointIndex + 2);
     if (wDodgeCount >= 0)
@@ -1592,10 +1471,8 @@ void __cdecl Path_TrimCompletedPath(path_t *pPath, const float *vStartPos)
     float d1; // [sp+54h] [-6Ch]
     float v25; // [sp+54h] [-6Ch]
 
-    if (!pPath)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp", 2865, 0, "%s", "pPath");
-    if (pPath->wPathLen <= 0)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp", 2866, 0, "%s", "pPath->wPathLen > 0");
+    iassert(pPath);
+    iassert(pPath->wPathLen > 0);
     if ((unsigned __int16)pPath->wNegotiationStartNode >= 0x8000u)
         MyAssertHandler(
             "c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp",
@@ -1603,13 +1480,7 @@ void __cdecl Path_TrimCompletedPath(path_t *pPath, const float *vStartPos)
             0,
             "%s",
             "pPath->wNegotiationStartNode >= 0");
-    if (pPath->wNegotiationStartNode >= pPath->wPathLen)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp",
-            2868,
-            0,
-            "%s",
-            "pPath->wNegotiationStartNode < pPath->wPathLen");
+    iassert(pPath->wNegotiationStartNode < pPath->wPathLen);
     wPathLen = pPath->wPathLen;
     if (wPathLen > 1)
     {
@@ -1694,13 +1565,7 @@ void __cdecl Path_TrimCompletedPath(path_t *pPath, const float *vStartPos)
                     0,
                     "%s",
                     "!IS_NAN(pPath->fCurrLength)");
-            if (pPath->fCurrLength <= 0.0)
-                MyAssertHandler(
-                    "c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp",
-                    2936,
-                    0,
-                    "%s",
-                    "pPath->fCurrLength > 0");
+            iassert(pPath->fCurrLength > 0);
             v21 = i[5];
             v22 = pPath->fCurrLength;
             if (v21 < v22)
@@ -1880,13 +1745,7 @@ void __cdecl Path_BacktrackCompletedPath(path_t *pPath, const float *vStartPos)
                     0,
                     "%s",
                     "!IS_NAN(pPath->fCurrLength)");
-            if (pPath->fCurrLength <= 0.0)
-                MyAssertHandler(
-                    "c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp",
-                    3024,
-                    0,
-                    "%s",
-                    "pPath->fCurrLength > 0");
+            iassert(pPath->fCurrLength > 0);
             pPath->vCurrPoint[0] = *v14;
             pPath->vCurrPoint[1] = v14[1];
             pPath->vCurrPoint[2] = v14[2];
@@ -2078,13 +1937,7 @@ handleFraction:
                 0,
                 "%s",
                 "!IS_NAN(pPath->fCurrLength)");
-        if (pPath->fCurrLength <= 0.0)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp",
-                3087,
-                0,
-                "%s",
-                "pPath->fCurrLength > 0");
+        iassert(pPath->fCurrLength > 0);
         v30 = v6[5];
         v31 = pPath->fCurrLength;
         if (v30 < v31)
@@ -2165,8 +2018,7 @@ void __cdecl PathCalcLookahead_CheckMinLookaheadNodes(path_t *pPath, const pathp
     // KISAKFIX: v7/v8 at sp+0x50/0x54 passed as &v7 to Vec2Normalize. Pack into float[2].
     float dir[2]; // was v7 (BYREF) + v8
 
-    if (!pPath)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp", 3199, 0, "%s", "pPath");
+    iassert(pPath);
     wPathLen = pPath->wPathLen;
     if (currentNode + 3 == wPathLen)
     {
@@ -2227,13 +2079,7 @@ void __cdecl Path_UpdateForwardLookahead_IncompletePath(
             HIDWORD(height),
             LODWORD(height));
     v10 = (float)((float)area / (float)height);
-    if (pt->fDir2D[0] == 0.0 && pt->fDir2D[1] == 0.0)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp",
-            3340,
-            0,
-            "%s",
-            "pt->fDir2D[0] || pt->fDir2D[1]");
+    iassert(pt->fDir2D[0] || pt->fDir2D[1]);
     pPath->forwardLookaheadDir2D[0] = (float)(pt->fDir2D[0] * (float)-v10) + pt->vOrigPoint[0];
     pPath->forwardLookaheadDir2D[1] = (float)(pt->fDir2D[1] * (float)-v10) + pt->vOrigPoint[1];
     pPath->forwardLookaheadDir2D[0] = pPath->forwardLookaheadDir2D[0] - *vForwardStartPos;
@@ -2434,8 +2280,7 @@ bool __cdecl Path_WithinApproxDist(path_t *pPath, double checkDist)
     int v7; // r31
     float *i; // r30
 
-    if (!pPath)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp", 3654, 0, "%s", "pPath");
+    iassert(pPath);
     if (pPath->wPathLen)
     {
         if ((unsigned __int16)pPath->wNegotiationStartNode >= 0x8000u)
@@ -2445,20 +2290,8 @@ bool __cdecl Path_WithinApproxDist(path_t *pPath, double checkDist)
                 0,
                 "%s",
                 "pPath->wNegotiationStartNode >= 0");
-        if (pPath->wNegotiationStartNode > pPath->lookaheadNextNode)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp",
-                3660,
-                0,
-                "%s",
-                "pPath->wNegotiationStartNode <= pPath->lookaheadNextNode");
-        if (pPath->lookaheadNextNode >= pPath->wPathLen)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp",
-                3661,
-                0,
-                "%s",
-                "pPath->lookaheadNextNode < pPath->wPathLen");
+        iassert(pPath->wNegotiationStartNode <= pPath->lookaheadNextNode);
+        iassert(pPath->lookaheadNextNode < pPath->wPathLen);
         lookaheadNextNode = pPath->lookaheadNextNode;
         v5 = (float)(pPath->fLookaheadDistToNextNode + pPath->fLookaheadDist);
         if (lookaheadNextNode == pPath->wNegotiationStartNode)
@@ -2466,13 +2299,7 @@ bool __cdecl Path_WithinApproxDist(path_t *pPath, double checkDist)
         v7 = lookaheadNextNode - 1;
         if (lookaheadNextNode - 1 == pPath->wPathLen - 2)
         {
-            if (pPath->fCurrLength <= 0.0)
-                MyAssertHandler(
-                    "c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp",
-                    3672,
-                    0,
-                    "%s",
-                    "pPath->fCurrLength > 0");
+            iassert(pPath->fCurrLength > 0);
             --v7;
             v5 = (float)(pPath->fCurrLength + (float)v5);
         }
@@ -2517,10 +2344,8 @@ ai_stance_e __cdecl Path_AllowedStancesForPath(path_t *pPath)
     const pathnode_t *v14; // r3
     pathnode_t *v15; // r3
 
-    if (!pPath)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp", 3703, 0, "%s", "pPath");
-    if (pPath->wPathLen <= 0)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp", 3704, 0, "%s", "pPath->wPathLen > 0");
+    iassert(pPath);
+    iassert(pPath->wPathLen > 0);
     if ((unsigned __int16)pPath->wNegotiationStartNode >= 0x8000u)
         MyAssertHandler(
             "c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp",
@@ -2528,20 +2353,8 @@ ai_stance_e __cdecl Path_AllowedStancesForPath(path_t *pPath)
             0,
             "%s",
             "pPath->wNegotiationStartNode >= 0");
-    if (pPath->wNegotiationStartNode > pPath->lookaheadNextNode)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp",
-            3706,
-            0,
-            "%s",
-            "pPath->wNegotiationStartNode <= pPath->lookaheadNextNode");
-    if (pPath->lookaheadNextNode >= pPath->wPathLen)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp",
-            3707,
-            0,
-            "%s",
-            "pPath->lookaheadNextNode < pPath->wPathLen");
+    iassert(pPath->wNegotiationStartNode <= pPath->lookaheadNextNode);
+    iassert(pPath->lookaheadNextNode < pPath->wPathLen);
     wPathLen = pPath->wPathLen;
     if (wPathLen > 1)
     {
@@ -2648,12 +2461,9 @@ int __cdecl Path_MayFaceEnemy(path_t *pPath, float *vEnemyDir, float *vOrg)
     const char *v8; // r3
     int result; // r3
 
-    if (!pPath)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp", 4034, 0, "%s", "pPath");
-    if (pPath->wPathLen <= 0)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp", 4035, 0, "%s", "pPath->wPathLen > 0");
-    if (!vEnemyDir)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp", 4036, 0, "%s", "vEnemyDir");
+    iassert(pPath);
+    iassert(pPath->wPathLen > 0);
+    iassert(vEnemyDir);
     if ((unsigned __int16)pPath->wNegotiationStartNode >= 0x8000u)
         MyAssertHandler(
             "c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp",
@@ -2661,20 +2471,8 @@ int __cdecl Path_MayFaceEnemy(path_t *pPath, float *vEnemyDir, float *vOrg)
             0,
             "%s",
             "pPath->wNegotiationStartNode >= 0");
-    if (pPath->wNegotiationStartNode > pPath->lookaheadNextNode)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp",
-            4038,
-            0,
-            "%s",
-            "pPath->wNegotiationStartNode <= pPath->lookaheadNextNode");
-    if (pPath->lookaheadNextNode >= pPath->wPathLen)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp",
-            4039,
-            0,
-            "%s",
-            "pPath->lookaheadNextNode < pPath->wPathLen");
+    iassert(pPath->wNegotiationStartNode <= pPath->lookaheadNextNode);
+    iassert(pPath->lookaheadNextNode < pPath->wPathLen);
     wPathLen = pPath->wPathLen;
     if (wPathLen > 1)
     {
@@ -2731,10 +2529,8 @@ int __cdecl Path_MayFaceEnemy(path_t *pPath, float *vEnemyDir, float *vOrg)
 
 void __cdecl Path_Restore(path_t *path)
 {
-    if (!path)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp", 135, 0, "%s", "path");
-    if (path->wPathLen)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp", 136, 0, "%s", "path->wPathLen == 0");
+    iassert(path);
+    iassert(path->wPathLen == 0);
     Com_Memcpy(path, &pathBackup, 996);
     if (Path_HasNegotiationNode(path))
         Path_IncrementNodeUserCount(path);
@@ -2963,17 +2759,9 @@ void __cdecl Path_TrimLastNodes(path_t *pPath, const int iNodeCount, bool bMaint
     const char *v21; // r3
     int *v22; // r11
 
-    if (!pPath)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp", 1896, 0, "%s", "pPath");
-    if (iNodeCount < 0)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp", 1897, 0, "%s", "iNodeCount >= 0");
-    if (iNodeCount >= pPath->wPathLen)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp",
-            1898,
-            0,
-            "%s",
-            "iNodeCount < pPath->wPathLen");
+    iassert(pPath);
+    iassert(iNodeCount >= 0);
+    iassert(iNodeCount < pPath->wPathLen);
     if ((unsigned __int16)pPath->wNegotiationStartNode >= 0x8000u)
         MyAssertHandler(
             "c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp",
@@ -2981,20 +2769,8 @@ void __cdecl Path_TrimLastNodes(path_t *pPath, const int iNodeCount, bool bMaint
             0,
             "%s",
             "pPath->wNegotiationStartNode >= 0");
-    if (pPath->wNegotiationStartNode > pPath->lookaheadNextNode)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp",
-            1900,
-            0,
-            "%s",
-            "pPath->wNegotiationStartNode <= pPath->lookaheadNextNode");
-    if (pPath->lookaheadNextNode >= pPath->wPathLen)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp",
-            1901,
-            0,
-            "%s",
-            "pPath->lookaheadNextNode < pPath->wPathLen");
+    iassert(pPath->wNegotiationStartNode <= pPath->lookaheadNextNode);
+    iassert(pPath->lookaheadNextNode < pPath->wPathLen);
     if (pPath->fLookaheadDistToNextNode > (double)pPath->pts[pPath->lookaheadNextNode].fOrigLength)
         MyAssertHandler(
             "c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp",
@@ -3050,17 +2826,10 @@ void __cdecl Path_TrimLastNodes(path_t *pPath, const int iNodeCount, bool bMaint
                 Path_DecrementNodeUserCount(pPath);
             pPath->wNegotiationStartNode = 0;
         }
-        if (pPath->wPathLen <= 0)
-            MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp", 1938, 0, "%s", "pPath->wPathLen > 0");
+        iassert(pPath->wPathLen > 0);
         if (pPath->wPathLen <= 1)
         {
-            if (pPath->wNegotiationStartNode)
-                MyAssertHandler(
-                    "c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp",
-                    1946,
-                    0,
-                    "%s",
-                    "!pPath->wNegotiationStartNode");
+            iassert(!pPath->wNegotiationStartNode);
             pPath->pts[0].vOrigPoint[0] = pPath->vCurrPoint[0];
             pPath->pts[0].vOrigPoint[1] = pPath->vCurrPoint[1];
             pPath->pts[0].vOrigPoint[2] = pPath->vCurrPoint[2];
@@ -3093,13 +2862,7 @@ void __cdecl Path_TrimLastNodes(path_t *pPath, const int iNodeCount, bool bMaint
                 0,
                 "%s",
                 "pPath->wNegotiationStartNode <= pPath->lookaheadNextNode");
-        if (pPath->lookaheadNextNode >= pPath->wPathLen)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp",
-                1965,
-                0,
-                "%s",
-                "pPath->lookaheadNextNode < pPath->wPathLen");
+        iassert(pPath->lookaheadNextNode < pPath->wPathLen);
         if (pPath->fLookaheadDistToNextNode > (double)pPath->pts[pPath->lookaheadNextNode].fOrigLength)
             MyAssertHandler(
                 "c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp",
@@ -3144,8 +2907,7 @@ int __cdecl Path_ClipToGoal(path_t *pPath, const actor_goal_s *goal)
     int v5; // r31
     const float *i; // r30
 
-    if (!pPath)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp", 1985, 0, "%s", "pPath");
+    iassert(pPath);
     if ((unsigned __int16)pPath->wPathLen >= 0x8000u)
         MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp", 1986, 0, "%s", "pPath->wPathLen >= 0");
     if (pPath->wPathLen)
@@ -3605,13 +3367,7 @@ void __cdecl Path_CheckNodeCountForDodge(path_t *pPath, int numNeeded, pathpoint
                 0,
                 "%s",
                 "pPath->wNegotiationStartNode >= 0");
-        if (pPath->wNegotiationStartNode > *startIndex)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp",
-                3744,
-                0,
-                "%s",
-                "pPath->wNegotiationStartNode <= *startIndex");
+        iassert(pPath->wNegotiationStartNode <= *startIndex);
     }
 }
 
@@ -3621,8 +3377,7 @@ void __cdecl Path_TrimToBadPlaceLink(path_t *pPath, team_t eTeam)
     int *i; // r31
     int v6; // r4
 
-    if (!pPath)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp", 4092, 0, "%s", "pPath");
+    iassert(pPath);
     v4 = pPath->wPathLen - 2;
     if (v4 >= 0)
     {
@@ -3722,13 +3477,7 @@ void __cdecl Path_UpdateLookahead(
             0,
             "%s",
             "pPath->wNegotiationStartNode >= 0");
-    if (pPath->wPathLen <= pPath->wNegotiationStartNode)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp",
-            3530,
-            0,
-            "%s",
-            "pPath->wPathLen > pPath->wNegotiationStartNode");
+    iassert(pPath->wPathLen > pPath->wNegotiationStartNode);
     wPathLen = pPath->wPathLen;
     if (wPathLen > 1)
     {
@@ -4012,19 +3761,10 @@ int __cdecl Path_GeneratePath(
     const char *v39; // r3
     int *v40; // r11
 
-    if (!pPath)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp", 454, 0, "%s", "pPath");
-    if (!pNodeFrom)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp", 455, 0, "%s", "pNodeFrom");
-    if (!pNodeTo)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp", 456, 0, "%s", "pNodeTo");
-    if (!vGoalPos && bIncludeGoalPos)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp",
-            457,
-            0,
-            "%s",
-            "vGoalPos || !bIncludeGoalPos");
+    iassert(pPath);
+    iassert(pNodeFrom);
+    iassert(pNodeTo);
+    iassert(vGoalPos || !bIncludeGoalPos);
     Path_AddTrimmedAmount(pPath, vStartPos);
     v16 = 0;
     if (!bIncludeGoalPos)
@@ -4036,8 +3776,7 @@ int __cdecl Path_GeneratePath(
         pPath->pts[0].iNodeNum = Path_ConvertNodeToIndex(pNodeTo);
         goto LABEL_18;
     }
-    if (!vGoalPos)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp", 471, 0, "%s", "vGoalPos");
+    iassert(vGoalPos);
     pPath->pts[0].vOrigPoint[0] = *vGoalPos;
     pPath->pts[0].vOrigPoint[1] = vGoalPos[1];
     pPath->pts[0].vOrigPoint[2] = vGoalPos[2];
@@ -4130,13 +3869,7 @@ LABEL_18:
         pPath->pts[0].vOrigPoint[2] = pNodeFrom->constant.vOrigin[2];
         pPath->pts[0].iNodeNum = Path_ConvertNodeToIndex(pNodeFrom);
     }
-    if (pPath->wNegotiationStartNode)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp",
-            566,
-            0,
-            "%s",
-            "pPath->wNegotiationStartNode == 0");
+    iassert(pPath->wNegotiationStartNode == 0);
     pPath->wNegotiationStartNode = v20;
     if ((v20 & 0x8000u) != 0)
         MyAssertHandler(
@@ -4217,20 +3950,8 @@ LABEL_18:
         {
             Path_TransferLookahead(pPath, vStartPos);
         }
-        if (pPath->wNegotiationStartNode > pPath->lookaheadNextNode)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp",
-                620,
-                0,
-                "%s",
-                "pPath->wNegotiationStartNode <= pPath->lookaheadNextNode");
-        if (pPath->lookaheadNextNode >= pPath->wPathLen)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp",
-                621,
-                0,
-                "%s",
-                "pPath->lookaheadNextNode < pPath->wPathLen");
+        iassert(pPath->wNegotiationStartNode <= pPath->lookaheadNextNode);
+        iassert(pPath->lookaheadNextNode < pPath->wPathLen);
         if (pPath->fLookaheadDistToNextNode > (double)pPath->pts[pPath->lookaheadNextNode].fOrigLength)
             MyAssertHandler(
                 "c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp",
@@ -4267,13 +3988,7 @@ LABEL_18:
                     "!pPath->wNegotiationStartNode || (pPath->pts[pPath->wNegotiationStartNode].iNodeNum >= 0 && pPath->pts[pPath->"
                     "wNegotiationStartNode - 1].iNodeNum >= 0)");
         }
-        if (pPath->fLookaheadDistToNextNode != 0.0 && pPath->lookaheadNextNode >= pPath->wPathLen - 1)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp",
-                625,
-                0,
-                "%s",
-                "!pPath->fLookaheadDistToNextNode || (pPath->lookaheadNextNode < pPath->wPathLen - 1)");
+        iassert(!pPath->fLookaheadDistToNextNode || (pPath->lookaheadNextNode < pPath->wPathLen - 1));
     }
     return 1;
 }
@@ -4285,12 +4000,9 @@ void __cdecl Path_UpdateLookahead_NonCodeMove(path_t *pPath, const float *vPrevP
     int v8; // r11
     float *vOrigPoint; // r10
 
-    if (!pPath)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp", 3477, 0, "%s", "pPath");
-    if (!vStartPos)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp", 3478, 0, "%s", "vStartPos");
-    if (!vPrevPos)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp", 3479, 0, "%s", "vPrevPos");
+    iassert(pPath);
+    iassert(vStartPos);
+    iassert(vPrevPos);
     v6 = (float)(vStartPos[1] - vPrevPos[1]);
     if ((float)((float)((float)(*vStartPos - *vPrevPos) * (float)(*vStartPos - *vPrevPos))
         + (float)((float)v6 * (float)v6)) != 0.0)

@@ -11,24 +11,21 @@
 
 void __cdecl Actor_SetDesiredLookAngles(ai_orient_t *pOrient, double fPitch, double fYaw)
 {
-    if (!pOrient)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_orientation.cpp", 24, 0, "%s", "pOrient");
+    iassert(pOrient);
     pOrient->fDesiredLookPitch = AngleNormalize360(fPitch);
     pOrient->fDesiredLookYaw = AngleNormalize360(fYaw);
 }
 
 void __cdecl Actor_SetDesiredBodyAngle(ai_orient_t *pOrient, double fAngle)
 {
-    if (!pOrient)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_orientation.cpp", 41, 0, "%s", "pOrient");
+    iassert(pOrient);
     pOrient->fDesiredBodyYaw = AngleNormalize360(fAngle);
 }
 
 void __cdecl Actor_SetDesiredAngles(ai_orient_t *pOrient, double fPitch, double fYaw)
 {
     Actor_SetDesiredLookAngles(pOrient, fPitch, fYaw);
-    if (!pOrient)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_orientation.cpp", 41, 0, "%s", "pOrient");
+    iassert(pOrient);
     pOrient->fDesiredBodyYaw = AngleNormalize360(fYaw);
 }
 
@@ -38,8 +35,7 @@ void __cdecl Actor_SetLookAngles(actor_s *self, double fPitch, double fYaw)
     double v7; // fp1
     float v8[4]; // [sp+50h] [-30h] BYREF
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_orientation.cpp", 70, 0, "%s", "self");
+    iassert(self);
     v6 = AngleNormalize360(fPitch);
     self->fLookPitch = v6;
     v8[0] = v6;
@@ -54,11 +50,9 @@ void __cdecl Actor_SetBodyAngle(actor_s *self, double fAngle)
 {
     gentity_s *ent; // r29
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_orientation.cpp", 94, 0, "%s", "self");
+    iassert(self);
     ent = self->ent;
-    if (!ent)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_orientation.cpp", 97, 0, "%s", "ent");
+    iassert(ent);
     ent->r.currentAngles[0] = 0.0;
     ent->r.currentAngles[1] = AngleNormalize360(fAngle);
     ent->r.currentAngles[2] = 0.0;
@@ -224,15 +218,8 @@ void __cdecl Actor_SetAnglesToLikelyEnemyPath(actor_s *self)
     // KISAKFIX: v4/v5/v6 vec3 passed as &v4 to vectoangles. Pack into array.
     float toEnemy[3]; // was v4 (BYREF) + v5 + v6
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_orientation.cpp", 265, 0, "%s", "self");
-    if (!self->faceLikelyEnemyPathNode)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\actor_orientation.cpp",
-            266,
-            0,
-            "%s",
-            "self->faceLikelyEnemyPathNode");
+    iassert(self);
+    iassert(self->faceLikelyEnemyPathNode);
     faceLikelyEnemyPathNode = self->faceLikelyEnemyPathNode;
     ent = self->ent;
     toEnemy[0] = faceLikelyEnemyPathNode->constant.vOrigin[0] - self->ent->r.currentOrigin[0];
@@ -572,10 +559,8 @@ void __cdecl Actor_DecideOrientation(actor_s *self)
     pathnode_t *pClaimedNode; // r31
     const char *v6; // r3
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_orientation.cpp", 632, 0, "%s", "self");
-    if (!self->sentient)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_orientation.cpp", 633, 0, "%s", "self->sentient");
+    iassert(self);
+    iassert(self->sentient);
     eMode = self->ScriptOrient.eMode;
     p_ScriptOrient = &self->ScriptOrient;
     if (eMode == AI_ORIENT_INVALID)
@@ -617,15 +602,8 @@ void __cdecl Actor_DecideOrientation(actor_s *self)
 
 void __cdecl Actor_SetOrientMode(actor_s *self, ai_orient_mode_t eMode)
 {
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_orientation.cpp", 683, 0, "%s", "self");
-    if (eMode <= AI_ORIENT_INVALID || eMode >= AI_ORIENT_COUNT)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\actor_orientation.cpp",
-            684,
-            0,
-            "%s",
-            "eMode > AI_ORIENT_INVALID && eMode < AI_ORIENT_COUNT");
+    iassert(self);
+    iassert(eMode > AI_ORIENT_INVALID && eMode < AI_ORIENT_COUNT);
     self->CodeOrient.eMode = eMode;
 }
 

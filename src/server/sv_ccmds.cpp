@@ -274,8 +274,7 @@ void SV_DifficultyFu()
 
 int __cdecl ReadSaveHeader(const char *filename, SaveHeader *header)
 {
-    if (!filename)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_ccmds.cpp", 143, 0, "%s", "filename");
+    iassert(filename);
 
     void *fileHandle = 0;
     if (OpenDevice(filename, &fileHandle) >= 0)
@@ -303,10 +302,8 @@ int __cdecl ExtractMapStringFromSaveGame(const char *filename, char *mapname)
     const dvar_s *v7; // r3
     SaveHeader v8; // [sp+50h] [-480h] BYREF
 
-    if (!mapname)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_ccmds.cpp", 189, 0, "%s", "mapname");
-    if (!filename)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_ccmds.cpp", 190, 0, "%s", "filename");
+    iassert(mapname);
+    iassert(filename);
     if (!(unsigned __int8)ReadSaveHeader(filename, &v8))
         return 0;
     v5 = v8.mapName;
@@ -423,10 +420,8 @@ int __cdecl CheckForSaveGame(char *mapname, char *filename)
     int v12; // r10
     SaveHeader v13; // [sp+50h] [-490h] BYREF
 
-    if (!mapname)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_ccmds.cpp", 396, 0, "%s", "mapname");
-    if (!filename)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_ccmds.cpp", 397, 0, "%s", "filename");
+    iassert(mapname);
+    iassert(filename);
     v4 = sv_save_filename;
     do
     {
@@ -437,11 +432,9 @@ int __cdecl CheckForSaveGame(char *mapname, char *filename)
     if ((unsigned __int8)SaveMemory_IsCommittedSaveAvailable(filename, sv.checksum))
     {
         lastCommittedSave = SaveMemory_GetSaveHandle(2);
-        if (!lastCommittedSave)
-            MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_ccmds.cpp", 406, 0, "%s", "lastCommittedSave");
+        iassert(lastCommittedSave);
         lastCommittedHeader = SaveMemory_GetHeader(lastCommittedSave);
-        if (!lastCommittedHeader)
-            MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_ccmds.cpp", 408, 0, "%s", "lastCommittedHeader");
+        iassert(lastCommittedHeader);
         v8 = (char*)lastCommittedHeader->mapName;
         do
         {
@@ -997,8 +990,7 @@ void SV_SaveGame_f()
                     SV_Cmd_ArgvBuffer(2, sv.cmd2, 1024);
                     SV_Cmd_ArgvBuffer(3, sv.cmd3, 1024);
                     SV_Cmd_ArgvBuffer(4, sv.cmd4, 1024);
-                    if (com_inServerFrame)
-                        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_ccmds.cpp", 910, 0, "%s", "!com_inServerFrame");
+                    iassert(!com_inServerFrame);
                     SV_AddPendingSave(sv.cmd, sv.cmd2, sv.cmd3, SAVE_TYPE_CONSOLE, 6u, 0);
                 }
             }

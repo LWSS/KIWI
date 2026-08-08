@@ -264,8 +264,7 @@ void __cdecl IN_ActivateMouse(int force)
 {
 	if (s_wmv.mouseInitialized)
 	{
-		if (!r_fullscreen)
-			MyAssertHandler(".\\win32\\win_input.cpp", 330, 0, "%s", "r_fullscreen");
+		iassert(r_fullscreen);
 		if (in_mouse->current.enabled)
 		{
 			if (force || !s_wmv.mouseActive)
@@ -403,10 +402,8 @@ int IN_MouseMove()
 	tagPOINT curPos; // [esp+4h] [ebp-Ch] BYREF
 	int dy; // [esp+Ch] [ebp-4h]
 
-	if (!s_wmv.mouseInitialized)
-		MyAssertHandler(".\\win32\\win_input.cpp", 466, 0, "%s", "s_wmv.mouseInitialized");
-	if (!r_fullscreen)
-		MyAssertHandler(".\\win32\\win_input.cpp", 467, 0, "%s", "r_fullscreen");
+	iassert(s_wmv.mouseInitialized);
+	iassert(r_fullscreen);
 	result = IN_IsForegroundWindow();
 	if (result)
 	{

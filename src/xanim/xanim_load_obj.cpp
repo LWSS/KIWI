@@ -70,8 +70,7 @@ uint __cdecl XAnimGetPartQuatType(uint animPartIndex)
     }
     else
     {
-        if (!quat)
-            MyAssertHandler(".\\xanim\\xanim_load_obj.cpp", 668, 0, "%s", "quat");
+        iassert(quat);
         if (quat->size)
             return 2;
         else
@@ -138,8 +137,7 @@ void __cdecl XAnimEmitFrameIndices(
         memcpy(indices->_1, frameIndices->_1, 2 * tableSize + 2);
         indices->_1 += 2 * tableSize + 2;
         longTableSize = ((tableSize - 1) >> 8) + 1;
-        if (frameIndices->_2[0])
-            MyAssertHandler(".\\xanim\\xanim_load_obj.cpp", 817, 0, "%s", "!frameIndices->_2[0]");
+        iassert(!frameIndices->_2[0]);
         for (i = 0; i < longTableSize; ++i)
             (*dataShort)[i] = frameIndices[256 * i]._2[0];
         (*dataShort)[longTableSize] = frameIndices[tableSize]._2[0];

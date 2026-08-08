@@ -105,14 +105,7 @@ GfxStaticModelId __cdecl R_GetStaticModelId(uint smodelIndex, int lod)
     lodInfo = XModelGetLodInfo(model, lod);
     if (!lodInfo->smcIndexPlusOne)
         goto LABEL_9;
-    if (smodelIndex >= rgp.world->dpvs.smodelCount)
-        MyAssertHandler(
-            ".\\r_add_staticmodel.cpp",
-            473,
-            0,
-            "smodelIndex doesn't index rgp.world->dpvs.smodelCount\n\t%i not in [0, %i)",
-            smodelIndex,
-            rgp.world->dpvs.smodelCount);
+    bcassert(smodelIndex, rgp.world->dpvs.smodelCount);
     staticModelId.objectId = R_CacheStaticModelSurface(lodInfo->smcIndexPlusOne - 1, smodelIndex, lodInfo);
     if (staticModelId.objectId)
     {
@@ -754,15 +747,7 @@ void __cdecl R_SkinStaticModelsShadowForLod(
     iassert( surfaceCount );
     materialForSurf = XModelGetSkins(model, lod);
     iassert( materialForSurf );
-    if (surfaceCount < 1 || surfaceCount > 48)
-        MyAssertHandler(
-            ".\\r_add_staticmodel.cpp",
-            258,
-            0,
-            "surfaceCount not in [1, XMODEL_MAX_SURFS]\n\t%i not in [%i, %i]",
-            surfaceCount,
-            1,
-            48);
+    rangeassert(surfaceCount, 1, 48);
     shadowmapBuildTechType = gfxMetrics.shadowmapBuildTechType;
     for (surfaceIndex = 0; surfaceIndex < surfaceCount; ++surfaceIndex)
     {

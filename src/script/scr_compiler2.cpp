@@ -4621,14 +4621,12 @@ void EmitForStatement(sval_u stmt1, sval_u expr, sval_u stmt2, sval_u stmt, sval
 
 	EmitShort(0);
 	offset = TempMalloc(0) - pos1;
-	if (offset >= 0x10000)
-		MyAssertHandler(".\\script\\scr_compiler.cpp", 3658, 0, "%s", "offset < 65536");
+	iassert(offset < 65536);
 	*(ushort*)scrCompileGlob.codePos = offset;
 	if (pos2)
 	{
 		offset = TempMalloc(0) - nextPos2;
-		if (offset >= 0x10000)
-			MyAssertHandler(".\\script\\scr_compiler.cpp", 3663, 0, "%s", "offset < 65536");
+		iassert(offset < 65536);
 		*(ushort *)pos2 = offset;
 	}
 	ConnectBreakStatements();
@@ -4745,14 +4743,12 @@ void EmitWhileStatement(sval_u expr, sval_u stmt, sval_u sourcePos, sval_u while
 
 	EmitShort(0);
 	offset = TempMalloc(0) - pos1;
-	if (offset >= 0x10000)
-		MyAssertHandler(".\\script\\scr_compiler.cpp", 3429, 0, "%s", "offset < 65536");
+	iassert(offset < 65536);
 	*(ushort*)scrCompileGlob.codePos = offset;
 	if (pos2)
 	{
 		offset = TempMalloc(0) - nextPos2;
-		if (offset >= 0x10000)
-			MyAssertHandler(".\\script\\scr_compiler.cpp", 3434, 0, "%s", "offset < 65536");
+		iassert(offset < 65536);
 		*(ushort *)pos2 = offset;
 	}
 	ConnectBreakStatements();

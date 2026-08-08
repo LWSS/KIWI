@@ -105,16 +105,8 @@ int __cdecl SV_HistoryAlloc(server_demo_history_t *history, unsigned __int8 **pD
     unsigned __int8 *v10; // r3
     int result; // r3
 
-    if (size <= 0)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\server\\sv_demo.cpp",
-            199,
-            0,
-            "%s\n\t(size) = %i",
-            "(size > 0)",
-            size);
-    if (!history)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_demo.cpp", 200, 0, "%s", "history");
+    vassert((size > 0), "(size) = %i", size);
+    iassert(history);
     HistoryIndex = SV_GetHistoryIndex(history);
     v7 = HistoryIndex;
     v8 = g_bufSize[HistoryIndex];
@@ -137,8 +129,7 @@ int __cdecl SV_HistoryAlloc(server_demo_history_t *history, unsigned __int8 **pD
 
 int __cdecl SV_MsgAlloc(unsigned int maxsize)
 {
-    if (sv.demo.msg.data)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_demo.cpp", 271, 0, "%s", "!sv.demo.msg.data");
+    iassert(!sv.demo.msg.data);
     if (maxsize > 0xA00000)
         return 0;
     sv.demo.msg.data = g_msgBuf;
@@ -152,13 +143,7 @@ void SV_CheckDemoSize()
     sv.demo.changed = 1;
     if (sv.demo.msg.data)
     {
-        if (sv.demo.msg.data != g_msgBuf)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\server\\sv_demo.cpp",
-                290,
-                0,
-                "%s",
-                "sv.demo.msg.data == g_msgBuf");
+        iassert(sv.demo.msg.data == g_msgBuf);
         if (sv.demo.msg.maxsize != 10485760)
             MyAssertHandler(
                 "c:\\trees\\cod3\\cod3src\\src\\server\\sv_demo.cpp",
@@ -310,8 +295,7 @@ void __cdecl SV_FreeHistoryData(server_demo_history_t *history)
     unsigned __int8 *cmBuf; // r3
     unsigned __int8 *buf; // r3
 
-    if (!history)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_demo.cpp", 717, 0, "%s", "history");
+    iassert(history);
     freeEntBuf = history->freeEntBuf;
     if (freeEntBuf)
     {
@@ -408,17 +392,13 @@ int __cdecl SV_AddDemoSave(SaveGame *savehandle, server_demo_save_t *save, int c
     }
     else
     {
-        if (g_historySaving)
-            MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_demo.cpp", 830, 0, "%s", "!g_historySaving");
+        iassert(!g_historySaving);
         history = g_historyBuffers;
     }
-    if (save->buf)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_demo.cpp", 837, 0, "%s", "!save->buf");
+    iassert(!save->buf);
     SaveGame *demohandle = SaveMemory_GetSaveHandle(1);
-    if (!demohandle)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_demo.cpp", 841, 0, "%s", "demohandle");
-    if (savehandle == demohandle)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_demo.cpp", 842, 0, "%s", "savehandle != demohandle");
+    iassert(demohandle);
+    iassert(savehandle != demohandle);
 
     SaveMemory_InitializeDemoSave(demohandle);
     Dvar_SaveDvars(SaveMemory_GetMemoryFile(demohandle), 4u);
@@ -482,8 +462,7 @@ _iobuf *__cdecl SV_DemoOpenFile(const char *fileName)
 void __cdecl SV_InitWriteDemo(int randomSeed)
 {
     ProfLoad_Begin("SV_InitWriteDemo");
-    if (sv.demo.nextLevelplaying)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_demo.cpp", 1030, 0, "%s", "!sv.demo.nextLevelplaying");
+    iassert(!sv.demo.nextLevelplaying);
     SV_FreeDemoMsg();
     if (CL_DemoPlaying())
     {
@@ -496,8 +475,7 @@ void __cdecl SV_InitWriteDemo(int randomSeed)
     {
         sv.demo.startTime = G_GetTime();
         sv.demo.recording = 1;
-        if (sv.demo.msg.data)
-            MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_demo.cpp", 1045, 0, "%s", "!sv.demo.msg.data");
+        iassert(!sv.demo.msg.data);
         MSG_Init(&sv.demo.msg, 0, 0);
         SV_CheckDemoSize();
         MSG_WriteLong(&sv.demo.msg, randomSeed);
@@ -510,10 +488,8 @@ void __cdecl SV_InitWriteDemo(int randomSeed)
 
 void __cdecl SV_InitReadDemoSavegame(SaveGame **saveHandle)
 {
-    if (!saveHandle)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_demo.cpp", 1074, 0, "%s", "saveHandle");
-    if (!sv.demo.nextLevelplaying)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_demo.cpp", 1075, 0, "%s", "sv.demo.nextLevelplaying");
+    iassert(saveHandle);
+    iassert(sv.demo.nextLevelplaying);
 
     server_demo_save_t *p_save;
     if (sv.demo.nextLevelSave)
@@ -556,8 +532,7 @@ void __cdecl SV_InitReadDemoSavegame(SaveGame **saveHandle)
 
 int __cdecl SV_InitDemoSavegame(SaveGame **save)
 {
-    if (!save)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_demo.cpp", 1222, 0, "%s", "save");
+    iassert(save);
     if (sv.demo.nextLevelplaying)
     {
         SV_InitReadDemoSavegame(save);
@@ -692,10 +667,8 @@ found:
 
 void __cdecl SV_SaveDemoImmediate(SaveImmediate *save)
 {
-    if (!sv.demo.msg.data)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_demo.cpp", 1689, 0, "%s", "sv.demo.msg.data");
-    if (!save)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_demo.cpp", 1690, 0, "%s", "save");
+    iassert(sv.demo.msg.data);
+    iassert(save);
     SaveMemory_SaveWriteImmediate(&sv.demo, 4, save);
     SaveMemory_SaveWriteImmediate(&sv.demo.endTime, 4, save);
     SaveMemory_SaveWriteImmediate(&sv.demo.msg.cursize, 4, save);
@@ -704,12 +677,9 @@ void __cdecl SV_SaveDemoImmediate(SaveImmediate *save)
 
 void __cdecl SV_WriteDemo(SaveGame *save)
 {
-    if (!sv.demo.save.bufLen)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_demo.cpp", 1707, 0, "%s", "sv.demo.save.bufLen");
-    if (!sv.demo.save.buf)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_demo.cpp", 1708, 0, "%s", "sv.demo.save.buf");
-    if (!save)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_demo.cpp", 1709, 0, "%s", "save");
+    iassert(sv.demo.save.bufLen);
+    iassert(sv.demo.save.buf);
+    iassert(save);
     SaveMemory_SetBuffer(sv.demo.save.buf, sv.demo.save.bufLen, save);
 }
 
@@ -878,8 +848,7 @@ void __cdecl SV_SaveDemo_f()
 
 void SV_DemoRestart()
 {
-    if (!sv.demo.msg.data)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_demo.cpp", 1863, 0, "%s", "sv.demo.msg.data");
+    iassert(sv.demo.msg.data);
     sv.demo.recording = 0;
     sv.demo.playing = 0;
     sv.demo.forwardMsec = 0;
@@ -914,8 +883,7 @@ int __cdecl SV_DemoHasMark()
 {
     unsigned __int8 v0; // r11
 
-    if (!sv.demo.playing)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_demo.cpp", 1899, 0, "%s", "sv.demo.playing");
+    iassert(sv.demo.playing);
     if (!g_history)
         return 0;
     v0 = 1;
@@ -932,8 +900,7 @@ void __cdecl SV_LoadDemo(SaveGame *save, void *fileHandle)
     MemoryFile *MemoryFile; // r3
     unsigned int v8; // [sp+50h] [-40h] BYREF
 
-    if (!save)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_demo.cpp", 1914, 0, "%s", "save");
+    iassert(save);
     sv.demo.recording = 0;
     sv.demo.playing = 0;
     sv.demo.forwardMsec = 0;
@@ -945,8 +912,7 @@ void __cdecl SV_LoadDemo(SaveGame *save, void *fileHandle)
     ReadFromDevice(&sv.demo, 4, fileHandle);
     ReadFromDevice(&sv.demo.endTime, 4, fileHandle);
     ReadFromDevice(&v8, 4, fileHandle);
-    if (sv.demo.msg.data)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_demo.cpp", 1927, 0, "%s", "!sv.demo.msg.data");
+    iassert(!sv.demo.msg.data);
     if (!(unsigned __int8)SV_MsgAlloc(v8))
         Sys_OutOfMemErrorInternal("c:\\trees\\cod3\\cod3src\\src\\server\\sv_demo.cpp", 1929);
     MSG_Init(&sv.demo.msg, sv.demo.msg.data, sv.demo.msg.maxsize);
@@ -1040,10 +1006,8 @@ int __cdecl SV_Demo_Dvar_Set(const char *var_name, const char *value)
 
 int __cdecl SV_WriteDemoSaveBuf(server_demo_save_t *save)
 {
-    if (!save)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_demo.cpp", 1994, 0, "%s", "save");
-    if (save->buf)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_demo.cpp", 1995, 0, "%s", "!save->buf");
+    iassert(save);
+    iassert(!save->buf);
     save->buf = 0;
     save->bufLen = 0;
     return SV_AddDemoSave(0, save, 1);
@@ -1055,8 +1019,7 @@ bool __cdecl SV_WriteHistory(_iobuf *fileHistory, const server_demo_history_t *h
     unsigned int cmBufLen; // r30
     unsigned int freeEntBufLen; // r30
 
-    if (!history)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_demo.cpp", 2005, 0, "%s", "history");
+    iassert(history);
     FS_FileSeek(fileHistory, 0, 0);
     if (FS_FileWrite(history, 0xACu, fileHistory) != 172)
         return 0;
@@ -1077,10 +1040,8 @@ void __cdecl SV_SaveHistoryTime(server_demo_history_t *history)
     int v4; // r3
     int v5; // r11
 
-    if (!history)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_demo.cpp", 2025, 0, "%s", "history");
-    if (history->manual)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_demo.cpp", 2026, 0, "%s", "!history->manual");
+    iassert(history);
+    iassert(!history->manual);
     v2 = g_fileTimeHistory;
     if (g_fileTimeHistory)
     {
@@ -1123,10 +1084,8 @@ void __cdecl SV_SaveHistoryMark(const server_demo_history_t *history)
     int v3; // r11
     _iobuf *v4; // r3
 
-    if (!history)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_demo.cpp", 2057, 0, "%s", "history");
-    if (!history->manual)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_demo.cpp", 2058, 0, "%s", "history->manual");
+    iassert(history);
+    iassert(history->manual);
     if (!g_fileMarkHistory)
     {
         Com_PrintError(1, "Failed to open demo cache file.\n");
@@ -1171,8 +1130,7 @@ void __cdecl SV_SaveHistoryLoop(unsigned int threadContext)
     while (1)
     {
         Sys_WaitForSaveHistory();
-        if (!g_historySaving)
-            MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_demo.cpp", 2114, 0, "%s", "g_historySaving");
+        iassert(g_historySaving);
         server_demo_history_t *volatile v1 = g_historySaving;
         if (v1->manual)
             SV_SaveHistoryMark(v1);
@@ -1191,10 +1149,8 @@ bool SV_InitHistorySaveThread()
 
 void __cdecl SV_InitDemoSystem()
 {
-    if (g_fileTimeHistory)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_demo.cpp", 2136, 0, "%s", "!g_fileTimeHistory");
-    if (g_fileMarkHistory)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_demo.cpp", 2137, 0, "%s", "!g_fileMarkHistory");
+    iassert(!g_fileTimeHistory);
+    iassert(!g_fileMarkHistory);
     g_fileTimeHistory = SV_DemoOpenFile("timeHistory.cache");
     g_fileMarkHistory = SV_DemoOpenFile("markHistory.cache");
     Sys_SpawnServerDemoThread((void(__cdecl *)(unsigned int))SV_SaveHistoryLoop);
@@ -1294,8 +1250,7 @@ server_demo_history_t *__cdecl SV_DemoGetBuffer()
                 //__lwsync();
                 if (g_historySaving)
                 {
-                    if (!replay_autosave)
-                        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_demo.cpp", 2213, 0, "%s", "replay_autosave");
+                    iassert(replay_autosave);
                     Com_PrintError(1, "Stalling for previous demo history to save.\n");
                     Com_PrintError(
                         1,
@@ -1310,8 +1265,7 @@ server_demo_history_t *__cdecl SV_DemoGetBuffer()
                     return result;
                 }
                 g_savingHistory = 0;
-                if (g_historySaving)
-                    MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_demo.cpp", 2227, 0, "%s", "!g_historySaving");
+                iassert(!g_historySaving);
                 v0 = g_history;
             }
             if (g_historySaving)
@@ -1353,18 +1307,14 @@ int __cdecl SV_DemoSaveHistory(server_demo_history_t *history)
     int v7; // r3
 
     p_save = &history->save;
-    if (history->save.buf)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_demo.cpp", 2279, 0, "%s", "!history->save.buf");
-    if (history->cmBuf)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_demo.cpp", 2280, 0, "%s", "!history->cmBuf");
-    if (history->freeEntBuf)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_demo.cpp", 2281, 0, "%s", "!history->freeEntBuf");
+    iassert(!history->save.buf);
+    iassert(!history->cmBuf);
+    iassert(!history->freeEntBuf);
     //Profile_Begin(405);
     playing = sv.demo.playing;
     if (sv.demo.playing)
     {
-        if (sv.demo.recording)
-            MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_demo.cpp", 2287, 0, "%s", "!sv.demo.recording");
+        iassert(!sv.demo.recording);
         history->nextFramePos = sv.demo.nextFramePos;
         history->readType = sv.demo.readType;
         v4 = 60060;
@@ -1479,10 +1429,8 @@ bool __cdecl SV_ReadHistory(_iobuf *fileHistory, server_demo_history_t *history)
     int freeEntBufLen; // r31
     bool v10; // r11
 
-    if (!fileHistory)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_demo.cpp", 2399, 0, "%s", "fileHistory");
-    if (!history)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_demo.cpp", 2400, 0, "%s", "history");
+    iassert(fileHistory);
+    iassert(history);
     if (FS_FileRead(history, 0xACu, fileHistory) != 172)
         return 0;
     bufLen = history->save.bufLen;
@@ -1836,8 +1784,7 @@ void __cdecl SV_DemoInfo_f()
     v3 = g_fileSkips;
     if (g_numFileMarkSkips > 0)
     {
-        if (!g_fileMarkHistory)
-            MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_demo.cpp", 2726, 0, "%s", "g_fileMarkHistory");
+        iassert(g_fileMarkHistory);
         Com_Printf(0, "Named Marks(%d):\n", g_numFileSkips);
         v4 = 0;
         if (g_numFileMarkSkips > 0)
@@ -1853,8 +1800,7 @@ void __cdecl SV_DemoInfo_f()
     }
     if (g_numFileSkips > 0)
     {
-        if (!g_fileTimeHistory)
-            MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_demo.cpp", 2738, 0, "%s", "g_fileTimeHistory");
+        iassert(g_fileTimeHistory);
         Com_Printf(0, "Time Marks(%d):\n", g_numFileSkips);
         for (i = 0; i < g_numFileSkips; ++v3)
         {
@@ -1944,10 +1890,8 @@ void __cdecl SV_EndDemo(bool error)
 {
     int Time; // r3
 
-    if (!sv.demo.playing)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_demo.cpp", 561, 0, "%s", "sv.demo.playing");
-    if (sv.demo.recording)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_demo.cpp", 562, 0, "%s", "!sv.demo.recording");
+    iassert(sv.demo.playing);
+    iassert(!sv.demo.recording);
     if (error)
     {
         Com_Printf(15, "Aborted replay due to inconsistency.\n");
@@ -1984,10 +1928,8 @@ void SV_ReadNextDemoType()
 {
     int Byte; // r3
 
-    if (!sv.demo.playing)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_demo.cpp", 634, 0, "%s", "sv.demo.playing");
-    if (sv.demo.recording)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_demo.cpp", 635, 0, "%s", "!sv.demo.recording");
+    iassert(sv.demo.playing);
+    iassert(!sv.demo.recording);
     if (sv.demo.startLive)
     {
         SV_EndDemo(0);
@@ -2026,10 +1968,8 @@ bool __cdecl SV_InitReadDemo(int *randomSeed)
     int v4; // r11
 
     ProfLoad_Begin("SV_InitReadDemo");
-    if (!randomSeed)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_demo.cpp", 1118, 0, "%s", "randomSeed");
-    if (!sv.demo.nextLevelplaying)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_demo.cpp", 1120, 0, "%s", "sv.demo.nextLevelplaying");
+    iassert(randomSeed);
+    iassert(sv.demo.nextLevelplaying);
     sv.demo.nextLevelplaying = 0;
     sv.demo.playing = 1;
     MSG_BeginReading(&sv.demo.msg);
@@ -2211,8 +2151,7 @@ const char *__cdecl SV_Demo_Dvar_GetVariantString()
 {
     char v1[1032]; // [sp+50h] [-420h] BYREF
 
-    if (!sv.demo.playing)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_demo.cpp", 1552, 0, "%s", "sv.demo.playing");
+    iassert(sv.demo.playing);
     if (sv.demo.readType == 3 && MSG_ReadString(&sv.demo.msg, v1, 1024))
     {
         SV_ReadNextDemoType();
@@ -2229,8 +2168,7 @@ int __cdecl SV_DemoButtonPressed()
 {
     int Byte; // r31
 
-    if (!sv.demo.playing)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_demo.cpp", 1601, 0, "%s", "sv.demo.playing");
+    iassert(sv.demo.playing);
     if (sv.demo.readType == 8)
     {
         Byte = MSG_ReadByte(&sv.demo.msg);

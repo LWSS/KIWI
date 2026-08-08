@@ -127,13 +127,7 @@ bool __cdecl R_BoundsInCell_r(mnode_t *node, int findCellIndex, const float *min
                 localmaxs[1] = maxs2[1];
                 localmaxs[2] = maxs2[2];
                 localmaxs[type] = dist;
-                if (BoxOnPlaneSide(localmins, maxs2, plane) != 1)
-                    MyAssertHandler(
-                        ".\\r_dpvs_entity.cpp",
-                        128,
-                        0,
-                        "%s",
-                        "BoxOnPlaneSide( localmins, maxs2, plane ) == BOXSIDE_FRONT");
+                iassert(BoxOnPlaneSide( localmins, maxs2, plane ) == BOXSIDE_FRONT);
                 if (maxs2[type] > (double)dist)
                 {
                     leftNode = node + 1;

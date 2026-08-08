@@ -56,14 +56,7 @@ void __cdecl CG_CompassAddWeaponPingInfo(int localClientNum, centity_s *cent, fl
                     0,
                     "%s",
                     "actorTeam == TEAM_ALLIES || actorTeam == TEAM_AXIS");
-            if (localClientNum)
-                MyAssertHandler(
-                    "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_compassfriendlies.cpp",
-                    68,
-                    0,
-                    "localClientNum doesn't index STATIC_MAX_LOCAL_CLIENTS\n\t%i not in [0, %i)",
-                    localClientNum,
-                    1);
+            vassert((localClientNum) == 0, "%i not in [0, %i)", localClientNum, 1);
             v9 = v14;
             if (v14 >= 0x20)
             {
@@ -94,8 +87,7 @@ void __cdecl CG_CompassAddWeaponPingInfo(int localClientNum, centity_s *cent, fl
 
 void __cdecl CG_CompassApplyPointerRadiusScale(float *radiusScale)
 {
-    if (!radiusScale)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_compassfriendlies.cpp", 81, 0, "%s", "radiusScale");
+    iassert(radiusScale);
     *radiusScale = (float)(compassSize->current.value * *radiusScale) * (float)55.0;
 }
 
@@ -105,8 +97,7 @@ void __cdecl CG_CalcCompassPointerRadius(float *radius, double dist)
     double v5; // fp0
     double v6; // fp0
 
-    if (!radius)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_compassfriendlies.cpp", 89, 0, "%s", "radius");
+    iassert(radius);
     v4 = compassMinRadius;
     v5 = (float)((float)((float)dist - compassMinRange->current.value)
         / (float)(compassMaxRange->current.value - compassMinRange->current.value));
@@ -124,14 +115,7 @@ void __cdecl CG_CompassUpdateActorInfo(int localClientNum, int entityIndex)
     int ClientActorFriendlyIndex; // r3
     CompassActor *v6; // r11
 
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            910,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     if (!cgArray[0].nextSnap)
         MyAssertHandler(
             "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_compassfriendlies.cpp",
@@ -252,14 +236,7 @@ void __cdecl CG_CompassUpdateVehicleInfo(int localClientNum, int entityIndex)
     centity_s *Entity; // r31
     CompassVehicle *Vehicle; // r3
 
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_local.h",
-            910,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     if (!cgArray[0].nextSnap)
         MyAssertHandler(
             "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_compassfriendlies.cpp",

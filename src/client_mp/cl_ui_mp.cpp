@@ -17,14 +17,7 @@ void __cdecl CL_GetClientState(int localClientNum, uiClientState_s *state)
     CL_GetLocalClientGlobals(localClientNum);
     clc = CL_GetLocalClientConnection(localClientNum);
     state->connectPacketCount = clc->connectPacketCount;
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\src\\client_mp\\client_mp.h",
-            1112,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     state->connState = clientUIActives[0].connectionState;
     I_strncpyz(state->servername, cls.servername, 1024);
     I_strncpyz(state->updateInfoString, cls.updateInfoString, 1024);
@@ -33,14 +26,7 @@ void __cdecl CL_GetClientState(int localClientNum, uiClientState_s *state)
 
 void __cdecl CL_SetDisplayHUDWithKeycatchUI(int localClientNum, bool display)
 {
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\src\\client_mp\\client_mp.h",
-            1063,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     clientUIActives[0].displayHUDWithKeycatchUI = display;
 }
 
@@ -48,14 +34,7 @@ bool __cdecl CL_AllowPopup(int localClientNum)
 {
     connstate_t connstate; // [esp+0h] [ebp-8h]
 
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\src\\client_mp\\client_mp.h",
-            1112,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     connstate = clientUIActives[0].connectionState;
     return !CL_GetLocalClientConnection(localClientNum)->demoplaying && connstate == CA_ACTIVE;
 }

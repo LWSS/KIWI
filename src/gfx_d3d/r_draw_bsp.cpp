@@ -177,14 +177,7 @@ void __cdecl R_DrawTrianglesLit(
         for (index = 0; index < count; ++index)
         {
             surfIndex = list[index];
-            if (surfIndex >= rgp.world->surfaceCount)
-                MyAssertHandler(
-                    ".\\r_draw_bsp.cpp",
-                    303,
-                    0,
-                    "surfIndex doesn't index rgp.world->surfaceCount\n\t%i not in [0, %i)",
-                    surfIndex,
-                    rgp.world->surfaceCount);
+            bcassert(surfIndex, rgp.world->surfaceCount);
             bspSurf = &rgp.world->dpvs.surfaces[surfIndex];
             tris = bspSurf;
             if (reflectionProbeIndex == bspSurf->reflectionProbeIndex && lightmapIndex == bspSurf->lightmapIndex)
@@ -219,14 +212,7 @@ void __cdecl R_DrawTrianglesLit(
                 lightmapIndex = bspSurf->lightmapIndex;
                 if (reflectionProbeFlag)
                 {
-                    if (reflectionProbeIndex >= drawStream->reflectionProbeCount)
-                        MyAssertHandler(
-                            ".\\r_draw_bsp.cpp",
-                            337,
-                            0,
-                            "reflectionProbeIndex doesn't index drawStream->reflectionProbeCount\n\t%i not in [0, %i)",
-                            reflectionProbeIndex,
-                            drawStream->reflectionProbeCount);
+                    bcassert(reflectionProbeIndex, drawStream->reflectionProbeCount);
                     newReflectionProbeTexture = &reflectionProbeTextures[reflectionProbeIndex];
                     if (reflectionProbeTexture != newReflectionProbeTexture)
                     {
@@ -236,33 +222,12 @@ void __cdecl R_DrawTrianglesLit(
                 }
                 if (lightmapIndex == 31)
                 {
-                    if (lightmapPrimaryFlag)
-                        MyAssertHandler(
-                            ".\\r_draw_bsp.cpp",
-                            390,
-                            0,
-                            "%s\n\t(bspSurf->material->info.name) = %s",
-                            "(!lightmapPrimaryFlag)",
-                            bspSurf->material->info.name);
-                    if (lightmapSecondaryFlag)
-                        MyAssertHandler(
-                            ".\\r_draw_bsp.cpp",
-                            391,
-                            0,
-                            "%s\n\t(bspSurf->material->info.name) = %s",
-                            "(!lightmapSecondaryFlag)",
-                            bspSurf->material->info.name);
+                    vassert((!lightmapPrimaryFlag), "(bspSurf->material->info.name) = %s", bspSurf->material->info.name);
+                    vassert((!lightmapSecondaryFlag), "(bspSurf->material->info.name) = %s", bspSurf->material->info.name);
                 }
                 else
                 {
-                    if (lightmapIndex >= drawStream->lightmapCount)
-                        MyAssertHandler(
-                            ".\\r_draw_bsp.cpp",
-                            348,
-                            0,
-                            "lightmapIndex doesn't index drawStream->lightmapCount\n\t%i not in [0, %i)",
-                            lightmapIndex,
-                            drawStream->lightmapCount);
+                    bcassert(lightmapIndex, drawStream->lightmapCount);
                     if (lightmapPrimaryFlag)
                     {
                         if (override)
@@ -430,14 +395,7 @@ void __cdecl R_DrawBspDrawSurfsPreTess(const uint *primDrawSurfPos, GfxCmdBufCon
         for (index = 0; index < count; ++index)
         {
             surfIndex = list[index].baseSurfIndex;
-            if (surfIndex >= rgp.world->surfaceCount)
-                MyAssertHandler(
-                    ".\\r_draw_bsp.cpp",
-                    675,
-                    0,
-                    "surfIndex doesn't index rgp.world->surfaceCount\n\t%i not in [0, %i)",
-                    surfIndex,
-                    rgp.world->surfaceCount);
+            bcassert(surfIndex, rgp.world->surfaceCount);
             bspSurf = &rgp.world->dpvs.surfaces[surfIndex];
             tris = &bspSurf->tris;
             if (baseVertex != bspSurf->tris.firstVertex)
@@ -482,14 +440,7 @@ void __cdecl R_DrawBspDrawSurfsLitPreTess(const uint *primDrawSurfPos, GfxCmdBuf
         for (index = 0; index < count; ++index)
         {
             surfIndex = list[index].baseSurfIndex;
-            if (surfIndex >= rgp.world->surfaceCount)
-                MyAssertHandler(
-                    ".\\r_draw_bsp.cpp",
-                    623,
-                    0,
-                    "surfIndex doesn't index rgp.world->surfaceCount\n\t%i not in [0, %i)",
-                    surfIndex,
-                    rgp.world->surfaceCount);
+            bcassert(surfIndex, rgp.world->surfaceCount);
             bspSurf = &rgp.world->dpvs.surfaces[surfIndex];
             tris = &bspSurf->tris;
             if (reflectionProbeIndex != bspSurf->reflectionProbeIndex || lightmapIndex != bspSurf->lightmapIndex)

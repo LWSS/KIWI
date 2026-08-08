@@ -208,10 +208,8 @@ void __cdecl Actor_Grenade_GetTossFromPosition(
     float v8[4]; // [sp+50h] [-70h] BYREF
     float v9[8][3]; // [sp+60h] [-60h] BYREF
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_grenade.cpp", 277, 0, "%s", "self");
-    if (!self->ent)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_grenade.cpp", 278, 0, "%s", "self->ent");
+    iassert(self);
+    iassert(self->ent);
     AnglesToAxis(self->ent->r.currentAngles, v9);
     MatrixTransformVector(vOffset, (const mat3x3&)v9, v8);
     *vFrom = *vStandPos + v8[0];
@@ -238,8 +236,7 @@ void __cdecl Actor_Grenade_GetTossPositions(
     trace_t v18; // [sp+70h] [-60h] BYREF
 
     weapDef = BG_GetWeaponDef(grenadeWPID);
-    if (!weapDef)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_grenade.cpp", 306, 0, "%s", "weapDef");
+    iassert(weapDef);
     v8 = vTargetPos[2];
     traceStart[0] = *vTargetPos;
     v17[0] = traceStart[0];
@@ -377,41 +374,12 @@ bool __cdecl Actor_Grenade_CheckMaximumEnergyToss(
     double v21; // fp0
     float v22; // [sp+50h] [-90h]
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_grenade.cpp", 413, 0, "%s", "self");
-    if (!vFrom)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_grenade.cpp", 414, 0, "%s", "vFrom");
-    if (!vLand)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_grenade.cpp", 415, 0, "%s", "vLand");
-    if (g_gravity->current.value <= 0.0)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\actor_grenade.cpp",
-            423,
-            0,
-            "%s",
-            "g_gravity->current.value > 0");
-    if ((COERCE_UNSIGNED_INT(*vFrom) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(vFrom[1]) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(vFrom[2]) & 0x7F800000) == 0x7F800000)
-    {
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\actor_grenade.cpp",
-            425,
-            0,
-            "%s",
-            "!IS_NAN((vFrom)[0]) && !IS_NAN((vFrom)[1]) && !IS_NAN((vFrom)[2])");
-    }
-    if ((COERCE_UNSIGNED_INT(*vLand) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(vLand[1]) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(vLand[2]) & 0x7F800000) == 0x7F800000)
-    {
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\actor_grenade.cpp",
-            426,
-            0,
-            "%s",
-            "!IS_NAN((vLand)[0]) && !IS_NAN((vLand)[1]) && !IS_NAN((vLand)[2])");
-    }
+    iassert(self);
+    iassert(vFrom);
+    iassert(vLand);
+    iassert(g_gravity->current.value > 0);
+    nanassertvec3(vFrom);
+    nanassertvec3(vLand);
     v10 = (float)(*vLand - *vFrom);
     v11 = (float)(vLand[1] - vFrom[1]);
     v12 = (float)(vLand[2] - vFrom[2]);
@@ -473,41 +441,12 @@ bool __cdecl Actor_Grenade_CheckInfiniteEnergyToss(actor_s *self, float *vFrom, 
     float v16; // [sp+50h] [-80h]
     float v17; // [sp+50h] [-80h]
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_grenade.cpp", 459, 0, "%s", "self");
-    if (!vFrom)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_grenade.cpp", 460, 0, "%s", "vFrom");
-    if (!vLand)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_grenade.cpp", 461, 0, "%s", "vLand");
-    if (g_gravity->current.value <= 0.0)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\actor_grenade.cpp",
-            468,
-            0,
-            "%s",
-            "g_gravity->current.value > 0");
-    if ((COERCE_UNSIGNED_INT(*vFrom) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(vFrom[1]) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(vFrom[2]) & 0x7F800000) == 0x7F800000)
-    {
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\actor_grenade.cpp",
-            470,
-            0,
-            "%s",
-            "!IS_NAN((vFrom)[0]) && !IS_NAN((vFrom)[1]) && !IS_NAN((vFrom)[2])");
-    }
-    if ((COERCE_UNSIGNED_INT(*vLand) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(vLand[1]) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(vLand[2]) & 0x7F800000) == 0x7F800000)
-    {
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\actor_grenade.cpp",
-            471,
-            0,
-            "%s",
-            "!IS_NAN((vLand)[0]) && !IS_NAN((vLand)[1]) && !IS_NAN((vLand)[2])");
-    }
+    iassert(self);
+    iassert(vFrom);
+    iassert(vLand);
+    iassert(g_gravity->current.value > 0);
+    nanassertvec3(vFrom);
+    nanassertvec3(vLand);
     v8 = (float)(vLand[1] - vFrom[1]);
     v9 = (float)(vLand[2] - vFrom[2]);
     v10 = (float)(*vLand - *vFrom);
@@ -606,41 +545,12 @@ int __cdecl Actor_Grenade_CheckGrenadeHintToss(actor_s *self, float *vFrom, floa
     float v33[28]; // [sp+68h] [-D8h] BYREF
 
     //Profile_Begin(352);
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_grenade.cpp", 547, 0, "%s", "self");
-    if (!vFrom)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_grenade.cpp", 548, 0, "%s", "vFrom");
-    if (!vLand)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_grenade.cpp", 549, 0, "%s", "vLand");
-    if (g_gravity->current.value <= 0.0)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\actor_grenade.cpp",
-            566,
-            0,
-            "%s",
-            "g_gravity->current.value > 0");
-    if ((COERCE_UNSIGNED_INT(*vFrom) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(vFrom[1]) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(vFrom[2]) & 0x7F800000) == 0x7F800000)
-    {
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\actor_grenade.cpp",
-            568,
-            0,
-            "%s",
-            "!IS_NAN((vFrom)[0]) && !IS_NAN((vFrom)[1]) && !IS_NAN((vFrom)[2])");
-    }
-    if ((COERCE_UNSIGNED_INT(*vLand) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(vLand[1]) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(vLand[2]) & 0x7F800000) == 0x7F800000)
-    {
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\actor_grenade.cpp",
-            569,
-            0,
-            "%s",
-            "!IS_NAN((vLand)[0]) && !IS_NAN((vLand)[1]) && !IS_NAN((vLand)[2])");
-    }
+    iassert(self);
+    iassert(vFrom);
+    iassert(vLand);
+    iassert(g_gravity->current.value > 0);
+    nanassertvec3(vFrom);
+    nanassertvec3(vLand);
     grenadeHintCount = level.grenadeHintCount;
     if (!level.grenadeHintCount)
     {
@@ -750,17 +660,9 @@ int __cdecl Actor_Grenade_CheckDesperateToss(actor_s *self, float *vFrom, float 
     float *v7; // r31
 
     //Profile_Begin(353);
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_grenade.cpp", 664, 0, "%s", "self");
-    if (!vFrom)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_grenade.cpp", 665, 0, "%s", "vFrom");
-    if (g_gravity->current.value <= 0.0)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\actor_grenade.cpp",
-            669,
-            0,
-            "%s",
-            "g_gravity->current.value > 0");
+    iassert(self);
+    iassert(vFrom);
+    iassert(g_gravity->current.value > 0);
     if (level.grenadeHintCount
         && (g_vRefPos[0] = *vFrom,
             g_vRefPos[1] = vFrom[1],
@@ -904,8 +806,7 @@ void __cdecl Actor_PredictGrenadeLandPos(gentity_s *pGrenade)
     int v7; // [sp+50h] [-30h] BYREF
     float v8[4]; // [sp+58h] [-28h] BYREF
 
-    if (!pGrenade)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_grenade.cpp", 967, 0, "%s", "pGrenade");
+    iassert(pGrenade);
     if (!pGrenade->missile.predictLandTime)
     {
         clipmask = pGrenade->clipmask;
@@ -1097,8 +998,7 @@ bool __cdecl Actor_Grenade_ShouldIgnore(actor_s *self, gentity_s *grenade)
 
 int __cdecl Actor_IsAwareOfGrenade(actor_s *self)
 {
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_grenade.cpp", 1515, 0, "%s", "self");
+    iassert(self);
     if (self->grenadeAwareness == 0.0)
         return 0;
     if (!Actor_GetTargetEntity(self))
@@ -1222,8 +1122,7 @@ void __cdecl Actor_Grenade_Detach(actor_s *self)
 
 int __cdecl Actor_Grenade_InActorHands(gentity_s *grenade)
 {
-    if (!grenade)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_grenade.cpp", 1745, 0, "%s", "grenade");
+    iassert(grenade);
     return grenade->r.svFlags & 1;
 }
 
@@ -1231,8 +1130,7 @@ bool __cdecl Actor_Grenade_Resume(actor_s *self, ai_state_t ePrevState)
 {
     int result; // r3
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_grenade.cpp", 1810, 0, "%s", "self");
+    iassert(self);
     if (!self->pGrenade.isDefined())
         return 0;
     result = 1;
@@ -1243,18 +1141,15 @@ bool __cdecl Actor_Grenade_Resume(actor_s *self, ai_state_t ePrevState)
 
 void __cdecl Actor_Grenade_Cower(actor_s *self)
 {
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_grenade.cpp", 1828, 0, "%s", "self");
+    iassert(self);
     Actor_SetOrientMode(self, AI_ORIENT_DONT_CHANGE);
     Actor_AnimStop(self, &g_animScriptTable[self->species]->grenade_cower);
 }
 
 void __cdecl Actor_Grenade_Combat(actor_s *self)
 {
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_grenade.cpp", 1844, 0, "%s", "self");
-    if (!self->sentient)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_grenade.cpp", 1845, 0, "%s", "self->sentient");
+    iassert(self);
+    iassert(self->sentient);
     if (Actor_GetTargetEntity(self))
     {
         Actor_SetOrientMode(self, AI_ORIENT_TO_ENEMY);
@@ -1287,8 +1182,7 @@ void __cdecl Actor_Grenade_CoverAttack(actor_s *self)
 
 void __cdecl Actor_Grenade_Flee(actor_s *self)
 {
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_grenade.cpp", 1893, 0, "%s", "self");
+    iassert(self);
     if (Actor_HasPath(self))
     {
         Actor_SetOrientMode(self, AI_ORIENT_TO_ENEMY_OR_MOTION);
@@ -1311,8 +1205,7 @@ void __cdecl Actor_Grenade_TakeCover(actor_s *self)
 {
     pathnode_t *pClaimedNode; // r4
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_grenade.cpp", 1926, 0, "%s", "self");
+    iassert(self);
     if (Actor_HasPath(self))
     {
         Actor_SetOrientMode(self, AI_ORIENT_TO_ENEMY_OR_MOTION);
@@ -1345,8 +1238,7 @@ actor_think_result_t __cdecl Actor_Grenade_ThrowBack(actor_s *self)
     double v5; // fp29
     const char *v6; // r3
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_grenade.cpp", 1961, 0, "%s", "self");
+    iassert(self);
     Actor_ClearPileUp(self);
     Actor_SetAnimScript(self, &g_animScriptTable[self->species]->grenade_return_throw, AI_MOVE_STOP, AI_ANIM_MOVE_CODE);
     self->bUseGoalWeight = 1;
@@ -1858,8 +1750,7 @@ void __cdecl Actor_Grenade_DropIfHeld(actor_s *self)
 
 void __cdecl Actor_Grenade_Finish(actor_s *self, ai_state_t eNextState)
 {
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_grenade.cpp", 1781, 0, "%s", "self");
+    iassert(self);
     Actor_Grenade_DropIfHeld(self);
 }
 
@@ -2126,13 +2017,7 @@ bool __cdecl Actor_Grenade_Start(actor_s *self, ai_state_t ePrevState)
     if (result)
     {
         Actor_Grenade_DecideResponse(self);
-        if (self->eSubState[self->stateLevel] < STATE_GRENADE_FLEE)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\actor_grenade.cpp",
-                1767,
-                0,
-                "%s",
-                "self->eSubState[self->stateLevel] >= STATE_GRENADE_FLEE");
+        iassert(self->eSubState[self->stateLevel] >= STATE_GRENADE_FLEE);
         return 1;
     }
     return result;
@@ -2207,13 +2092,7 @@ actor_think_result_t __cdecl Actor_Grenade_Acquire(actor_s *self)
         {
             if ((unsigned __int8)Actor_Grenade_ReevaluateResponse(self, REEVALUATE_NO_RETURN))
                 return ACTOR_THINK_REPEAT;
-            if (self->eSubState[self->stateLevel] == STATE_GRENADE_ACQUIRE)
-                MyAssertHandler(
-                    "c:\\trees\\cod3\\cod3src\\src\\game\\actor_grenade.cpp",
-                    2049,
-                    0,
-                    "%s",
-                    "self->eSubState[self->stateLevel] != STATE_GRENADE_ACQUIRE");
+            iassert(self->eSubState[self->stateLevel] != STATE_GRENADE_ACQUIRE);
         }
         ent = self->ent;
         v6 = self->pGrenade.ent();

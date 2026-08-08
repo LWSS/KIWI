@@ -176,8 +176,7 @@ void __cdecl Con_InitChannelsForDestFromList(print_msg_dest_t dest, const char *
     bool foundChannelName; // [esp+123h] [ebp-5h]
     uint channelNameStart; // [esp+124h] [ebp-4h]
 
-    if (!channelNames)
-        MyAssertHandler(".\\client\\con_channels.cpp", 319, 0, "%s", "channelNames");
+    iassert(channelNames);
     channelNamesLen = strlen(channelNames);
     foundChannelName = 0;
     channelNameStart = 0;
@@ -369,14 +368,7 @@ void __cdecl Con_CloseChannelInternal(uint channel)
 {
     uint filter; // [esp+0h] [ebp-4h]
 
-    if (channel >= 0x100)
-        MyAssertHandler(
-            ".\\client\\con_channels.cpp",
-            118,
-            0,
-            "channel doesn't index CON_MAX_CHANNELS\n\t%i not in [0, %i)",
-            channel,
-            256);
+    bcassert(channel, 0x100);
     if (pcGlob.openChannels[channel].name[0])
     {
         pcGlob.openChannels[channel].name[0] = 0;

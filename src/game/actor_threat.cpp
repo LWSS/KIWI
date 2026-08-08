@@ -76,8 +76,7 @@ int __cdecl Actor_FindThreatBiasGroupIndex(unsigned int name)
     int result; // r3
     threat_bias_t *v3; // r11
 
-    if (!name)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_threat.cpp", 163, 0, "%s", "name");
+    iassert(name);
     result = 0;
     v3 = &g_threatBias;
     if (g_threatBias.threatGroupCount <= 0)
@@ -96,8 +95,7 @@ void __cdecl Actor_CreateThreatBiasGroup(unsigned int name)
 {
     const char *v2; // r3
 
-    if (!name)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_threat.cpp", 183, 0, "%s", "name");
+    iassert(name);
     if (g_threatBias.threatGroupCount < 16)
     {
         if (Actor_FindThreatBiasGroupIndex(name) < 0)
@@ -115,13 +113,7 @@ void __cdecl Actor_CreateThreatBiasGroup(unsigned int name)
 
 void __cdecl Actor_SetThreatBiasEntireGroup(int group, int threatBias)
 {
-    if (group < 0 || group >= g_threatBias.threatGroupCount)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\actor_threat.cpp",
-            208,
-            0,
-            "%s",
-            "group >= 0 && group < g_threatBias.threatGroupCount");
+    iassert(group >= 0 && group < g_threatBias.threatGroupCount);
     memset(g_threatBias.threatTable[group], threatBias, sizeof(g_threatBias.threatTable[group]));
 }
 
@@ -201,10 +193,8 @@ void __cdecl Actor_FlagEnemyUnattackable(actor_s *self)
 {
     sentient_s *TargetSentient; // r3
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_threat.cpp", 271, 0, "%s", "self");
-    if (!self->sentient)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_threat.cpp", 272, 0, "%s", "self->sentient");
+    iassert(self);
+    iassert(self->sentient);
     TargetSentient = Actor_GetTargetSentient(self);
     if (TargetSentient)
     {
@@ -221,8 +211,7 @@ int __cdecl Actor_CaresAboutInfo(actor_s *self, sentient_s *pOther)
     int lastKnownPosTime; // r11
     int result; // r3
 
-    if (!pOther)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_threat.cpp", 298, 0, "%s", "pOther");
+    iassert(pOther);
     lastKnownPosTime = self->sentientInfo[pOther - level.sentients].lastKnownPosTime;
     if (lastKnownPosTime <= 0)
         return 1;
@@ -241,8 +230,7 @@ void __cdecl DebugResetThreatStrings(const actor_s *self)
 {
     char *v2; // r11
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_threat.cpp", 320, 0, "%s", "self");
+    iassert(self);
     if (ai_debugThreatSelection->current.enabled && ai_debugEntIndex->current.integer == self->ent->s.number)
     {
         g_skipDebugString = 0;
@@ -440,10 +428,8 @@ bool __cdecl Actor_IsFullyAware(actor_s *self, sentient_s *enemy, int isCurrentE
     const pathnode_t *v11; // r3
     pathnode_t *v12; // r28
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_threat.cpp", 512, 0, "%s", "self");
-    if (!enemy)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_threat.cpp", 513, 0, "%s", "enemy");
+    iassert(self);
+    iassert(enemy);
     if (isCurrentEnemy)
     {
         v6 = (float)(enemy->ent->r.currentOrigin[0] - self->sentientInfo[enemy - level.sentients].vLastKnownPos[0]);
@@ -524,10 +510,8 @@ int __cdecl Actor_ThreatFromAttackerCount(actor_s *self, sentient_s *enemy, int 
     int attackerCount; // r11
     int v7; // r31
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_threat.cpp", 584, 0, "%s", "self");
-    if (!enemy)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_threat.cpp", 585, 0, "%s", "enemy");
+    iassert(self);
+    iassert(enemy);
     attackerCount = enemy->attackerCount;
     if (isCurrentEnemy)
         --attackerCount;
@@ -590,10 +574,8 @@ int __cdecl Actor_ThreatCoveringFire(actor_s *self, sentient_s *enemy)
     actor_s *actor; // r30
     pathnode_t *pClaimedNode; // r31
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_threat.cpp", 633, 0, "%s", "self");
-    if (!enemy)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_threat.cpp", 634, 0, "%s", "enemy");
+    iassert(self);
+    iassert(enemy);
     if (!self->provideCoveringFire || (unsigned __int8)Actor_IsMoving(self))
         return 0;
     actor = enemy->ent->actor;
@@ -626,8 +608,7 @@ int __cdecl Actor_ThreatFlashed(sentient_s *enemy)
     actor_s *actor; // r11
     int flashBanged; // r11
 
-    if (!enemy)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_threat.cpp", 681, 0, "%s", "enemy");
+    iassert(enemy);
     actor = enemy->ent->actor;
     if (actor)
     {
@@ -635,8 +616,7 @@ int __cdecl Actor_ThreatFlashed(sentient_s *enemy)
     }
     else
     {
-        if (!enemy->ent->client)
-            MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_threat.cpp", 693, 0, "%s", "enemy->ent->client");
+        iassert(enemy->ent->client);
         flashBanged = G_ClientFlashbanged(enemy->ent->client);
     }
     if (!flashBanged)
@@ -806,8 +786,7 @@ void __cdecl Actor_CanAttackAll(actor_s *self)
     int v3; // r29
     sentient_s *i; // r3
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_threat.cpp", 1012, 0, "%s", "self");
+    iassert(self);
     v2 = Sentient_EnemyTeam(self->sentient->eTeam);
     if (v2)
     {
@@ -867,10 +846,8 @@ int __cdecl Actor_CheckIgnore(sentient_s *self, sentient_s *enemy)
     int result; // r3
     bool v5; // zf
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_threat.cpp", 114, 0, "%s", "self");
-    if (!enemy)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_threat.cpp", 115, 0, "%s", "enemy");
+    iassert(self);
+    iassert(enemy);
     if (enemy->bIgnoreMe)
         return 1;
     v5 = Actor_GetThreatBias(enemy->iThreatBiasGroupIndex, self->iThreatBiasGroupIndex) != 0x80000000;
@@ -909,10 +886,8 @@ void __cdecl Actor_UpdateThreat(actor_s *self)
     const char *v30; // r29
     gentity_s *v31; // r3
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_threat.cpp", 855, 0, "%s", "self");
-    if (!self->sentient)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_threat.cpp", 856, 0, "%s", "self->sentient");
+    iassert(self);
+    iassert(self->sentient);
     if (ai_threatUpdateInterval->current.integer)
     {
         if (level.time < self->threatUpdateTime)

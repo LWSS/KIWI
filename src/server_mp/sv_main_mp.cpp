@@ -172,13 +172,7 @@ int __cdecl SV_CanReplaceServerCommand(client_t *client, const char *cmd)
         index = i & 0x7F;
         if (client->reliableCommandInfo[index].type)
         {
-            if (client->reliableCommandInfo[index].type != 1)
-                MyAssertHandler(
-                    ".\\server_mp\\sv_main_mp.cpp",
-                    284,
-                    0,
-                    "%s",
-                    "client->reliableCommandInfo[index].type == SV_CMD_RELIABLE");
+            iassert(client->reliableCommandInfo[index].type == SV_CMD_RELIABLE);
             if (*cmd == client->reliableCommandInfo[index].cmd[0] && (*cmd < 120 || *cmd > 122))
                 break;
         }
@@ -745,8 +739,7 @@ void __cdecl SV_PacketEvent(netadr_t from, msg_t *msg)
     client_t *client; // [esp+0h] [ebp-Ch]
     int qport; // [esp+4h] [ebp-8h]
 
-    if (!Sys_IsMainThread())
-        MyAssertHandler(".\\server_mp\\sv_main_mp.cpp", 1336, 0, "%s", "Sys_IsMainThread()");
+    iassert(Sys_IsMainThread());
     if (msg->cursize >= 4 && *(uint *)msg->data == -1)
     {
         SV_ConnectionlessPacket(from, msg);
@@ -772,8 +765,7 @@ void __cdecl SV_PacketEvent(netadr_t from, msg_t *msg)
                         SV_Netchan_Decode(client, &msg->data[msg->readcount], msg->cursize - msg->readcount);
                         if (client->header.state != 1)
                         {
-                            if (bgs)
-                                MyAssertHandler(".\\server_mp\\sv_main_mp.cpp", 1406, 0, "%s\n\t(bgs) = %p", "(bgs == 0)", bgs);
+                            vassert((bgs == 0), "(bgs) = %p", bgs);
                             client->lastPacketTime = svs.time;
                             SV_ExecuteClientMessage(client, msg);
                         }
@@ -863,8 +855,7 @@ void __cdecl SV_CalcPings()
 void __cdecl SV_FreeClientScriptId(client_t *cl)
 {
     Com_Printf(15, "SV_FreeClientScriptId: %d, %d -> 0\n", cl - svs.clients, cl->scriptId);
-    if (!cl->scriptId)
-        MyAssertHandler(".\\server_mp\\sv_main_mp.cpp", 1555, 0, "%s", "cl->scriptId");
+    iassert(cl->scriptId);
     Scr_FreeValue(cl->scriptId);
     cl->scriptId = 0;
 }
@@ -1108,25 +1099,20 @@ void __cdecl SV_UpdateBots()
 
 void __cdecl SV_WaitServer()
 {
-    if (!Sys_IsMainThread())
-        MyAssertHandler(".\\server_mp\\sv_main_mp.cpp", 2156, 0, "%s", "Sys_IsMainThread()");
+    iassert(Sys_IsMainThread());
     if (com_inServerFrame)
     {
         com_inServerFrame = 0;
-        if (!com_sv_running)
-            MyAssertHandler(".\\server_mp\\sv_main_mp.cpp", 2163, 0, "%s", "com_sv_running");
-        if (!com_sv_running->current.enabled)
-            MyAssertHandler(".\\server_mp\\sv_main_mp.cpp", 2164, 0, "%s", "com_sv_running->current.enabled");
+        iassert(com_sv_running);
+        iassert(com_sv_running->current.enabled);
         SV_RunFrame();
     }
 }
 
 void __cdecl SV_InitSnapshot()
 {
-    if (com_inServerFrame)
-        MyAssertHandler(".\\server_mp\\sv_main_mp.cpp", 2186, 0, "%s", "!com_inServerFrame");
-    if (!Sys_IsMainThread())
-        MyAssertHandler(".\\server_mp\\sv_main_mp.cpp", 2188, 0, "%s", "Sys_IsMainThread()");
+    iassert(!com_inServerFrame);
+    iassert(Sys_IsMainThread());
     sv.inFrame = 0;
 }
 
@@ -1210,13 +1196,10 @@ void __cdecl SV_FrameInternal(int msec)
 {
     int frameMsec; // [esp+0h] [ebp-4h]
 
-    if (!Sys_IsMainThread())
-        MyAssertHandler(".\\server_mp\\sv_main_mp.cpp", 2343, 0, "%s", "Sys_IsMainThread()");
-    if (msec < 0)
-        MyAssertHandler(".\\server_mp\\sv_main_mp.cpp", 2344, 0, "%s", "msec >= 0");
+    iassert(Sys_IsMainThread());
+    iassert(msec >= 0);
     frameMsec = 1000 / sv_fps->current.integer;
-    if (sv.timeResidual >= frameMsec)
-        MyAssertHandler(".\\server_mp\\sv_main_mp.cpp", 2349, 0, "%s", "sv.timeResidual < frameMsec");
+    iassert(sv.timeResidual < frameMsec);
     sv.timeResidual += msec;
     if (sv.timeResidual >= frameMsec && !SV_CheckOverflow())
     {
@@ -1233,8 +1216,7 @@ void __cdecl SV_FrameInternal(int msec)
             SV_PostFrame();
         }
         SV_PostFrame();
-        if (sv.timeResidual >= frameMsec)
-            MyAssertHandler(".\\server_mp\\sv_main_mp.cpp", 2422, 0, "%s", "sv.timeResidual < frameMsec");
+        iassert(sv.timeResidual < frameMsec);
     }
 }
 

@@ -312,15 +312,13 @@ skipDelta:
 
 gentity_s *__cdecl SV_GentityNumLocal(int num)
 {
-    if (!svsHeaderValid)
-        MyAssertHandler(".\\server_mp\\sv_archive_mp.cpp", 35, 0, "%s", "svsHeaderValid");
+    iassert(svsHeaderValid);
     return (gentity_s *)((char *)svsHeader.gentities + num * svsHeader.gentitySize);
 }
 
 const clientState_s *__cdecl G_GetClientStateLocal(int clientNum)
 {
-    if (!svsHeaderValid)
-        MyAssertHandler(".\\server_mp\\sv_archive_mp.cpp", 42, 0, "%s", "svsHeaderValid");
+    iassert(svsHeaderValid);
     return (clientState_s *)((char *)svsHeader.firstClientState + clientNum * svsHeader.clientSize);
 }
 
@@ -329,8 +327,7 @@ int __cdecl GetFollowPlayerStateLocal(int clientNum, playerState_s *ps)
 {
     uint index; // [esp+8h] [ebp-8h]
 
-    if (!svsHeaderValid)
-        MyAssertHandler(".\\server_mp\\sv_archive_mp.cpp", 58, 0, "%s", "svsHeaderValid");
+    iassert(svsHeaderValid);
     if ((*(int *)((_BYTE *)&svsHeader.firstPlayerState->otherFlags + clientNum * svsHeader.clientSize) & 4) != 0)
     {
         memcpy(
@@ -340,8 +337,7 @@ int __cdecl GetFollowPlayerStateLocal(int clientNum, playerState_s *ps)
         for (index = 0; index < 0x1F && ps->hud.current[index].type; ++index)
         {
             memset((uint8_t *)&ps->hud.current[index], 0, sizeof(ps->hud.current[index]));
-            if (ps->hud.current[index].type)
-                MyAssertHandler(".\\server_mp\\sv_archive_mp.cpp", 74, 0, "%s", "ps->hud.current[index].type == HE_TYPE_FREE");
+            iassert(ps->hud.current[index].type == HE_TYPE_FREE);
         }
         while (index < 0x1F)
         {

@@ -135,16 +135,8 @@ void __cdecl Com_SetScriptWarningPrefix(const char *prefix)
 
     parse = Com_GetParseThreadInfo();
     pi = &parse->parseInfo[parse->parseInfoNum];
-    if (!prefix)
-        MyAssertHandler(".\\universal\\q_parse.cpp", 302, 0, "%s", "prefix");
-    if (parse->parseInfoNum <= 0)
-        MyAssertHandler(
-            ".\\universal\\q_parse.cpp",
-            303,
-            0,
-            "%s\n\t(parse->parseInfoNum) = %i",
-            "(parse->parseInfoNum > 0)",
-            parse->parseInfoNum);
+    iassert(prefix);
+    vassert((parse->parseInfoNum > 0), "(parse->parseInfoNum) = %i", parse->parseInfoNum);
     pi->warningPrefix = prefix;
 }
 
@@ -208,10 +200,8 @@ void __cdecl Com_ParseSetMark(const char **text, com_parse_mark_t *mark)
 
     parse = Com_GetParseThreadInfo();
     pi = &parse->parseInfo[parse->parseInfoNum];
-    if (!text)
-        MyAssertHandler(".\\universal\\q_parse.cpp", 386, 0, "%s", "text");
-    if (!mark)
-        MyAssertHandler(".\\universal\\q_parse.cpp", 387, 0, "%s", "mark");
+    iassert(text);
+    iassert(mark);
     mark->lines = pi->lines;
     mark->text = *text;
     mark->ungetToken = pi->ungetToken;
@@ -226,10 +216,8 @@ void __cdecl Com_ParseReturnToMark(const char **text, com_parse_mark_t *mark)
 
     parse = Com_GetParseThreadInfo();
     pi = &parse->parseInfo[parse->parseInfoNum];
-    if (!text)
-        MyAssertHandler(".\\universal\\q_parse.cpp", 410, 0, "%s", "text");
-    if (!mark)
-        MyAssertHandler(".\\universal\\q_parse.cpp", 411, 0, "%s", "mark");
+    iassert(text);
+    iassert(mark);
     pi->lines = mark->lines;
     *text = mark->text;
     pi->ungetToken = mark->ungetToken != 0;
@@ -347,8 +335,7 @@ parseInfo_t *__cdecl Com_ParseExt(const char **data_p, int allowLineBreaks)
     hasNewLines = 0;
     parse = Com_GetParseThreadInfo();
     pi = &parse->parseInfo[parse->parseInfoNum];
-    if (!data_p)
-        MyAssertHandler(".\\universal\\q_parse.cpp", 658, 0, "%s", "data_p");
+    iassert(data_p);
     data = *data_p;
     len = 0;
     pi->token[0] = 0;

@@ -189,14 +189,7 @@ float __cdecl CL_GetMenuBlurRadius(int localClientNum)
 {
     double BlurRadius; // fp1
 
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\client\\cl_scrn.cpp",
-            271,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     if (Key_IsCatcherActive(0, 16) && cls.uiStarted && clientUIActives[0].connectionState != CA_CINEMATIC)
         BlurRadius = UI_GetBlurRadius();
     else

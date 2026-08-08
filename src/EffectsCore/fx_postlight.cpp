@@ -57,14 +57,7 @@ void __cdecl FX_PostLight_GenerateVerts(FxPostLightInfo *postLightInfoAddr, FxSy
     for (postLightIter = 0; postLightIter != postLightInfo->postLightCount; ++postLightIter)
     {
         postLight = &postLightInfo->postLights[postLightIter];
-        if (postLight->radius < EQUAL_EPSILON)
-            MyAssertHandler(
-                ".\\EffectsCore\\fx_postlight.cpp",
-                100,
-                0,
-                "%s\n\t(postLight->radius) = %g",
-                "(postLight->radius >= 0.001f)",
-                postLight->radius);
+        vassert((postLight->radius >= 0.001f), "(postLight->radius) = %g", postLight->radius);
         Vec3Sub(postLight->end, postLight->begin, posDelta);
         posDeltaLenSq = Vec3LengthSq(posDelta);
         if (posDeltaLenSq >= 0.00009999999747378752)

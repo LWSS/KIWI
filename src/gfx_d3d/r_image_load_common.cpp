@@ -143,10 +143,7 @@ void __cdecl Image_Upload2D_CopyDataBlock_PC(
         srcStride = 8 * ((width + 3) >> 2);
         dy = 4;
     LABEL_20:
-        if (dstPitch < srcStride)
-        {
-            MyAssertHandler(".\\r_image_load_common.cpp", 525, 0, "%s\n\t%s", "dstPitch >= srcStride", va("%i x %i: %i < %i", width, height, dstPitch, srcStride));
-        }
+        vassert(dstPitch >= srcStride, "%s", va("%i x %i: %i < %i", width, height, dstPitch, srcStride));
         if (dstPitch == srcStride)
         {
             PROF_SCOPED("R_memcpy");

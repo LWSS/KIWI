@@ -1206,14 +1206,7 @@ void Com_ErrorCleanup()
     }
     else
     {
-        if (errorcode != ERR_DROP && errorcode != ERR_DISCONNECT)
-            MyAssertHandler(
-                ".\\qcommon\\common.cpp",
-                1163,
-                0,
-                "%s\n\t(errorcode) = %i",
-                "(errorcode == ERR_DROP || errorcode == ERR_DISCONNECT)",
-                errorcode);
+        vassert((errorcode == ERR_DROP || errorcode == ERR_DISCONNECT), "(errorcode) = %i", errorcode);
         if (errorcode == ERR_DROP)
         {
             Com_PrintError(16, "********************\nERROR: %s\n********************\n", com_errorMessage);
@@ -1720,22 +1713,8 @@ void Com_DedicatedModified()
                 "True if this is a dedicated server");
             if (com_dedicated->current.integer)
                 Dvar_RegisterEnum("dedicated", g_dedicatedEnumNames, 0, DVAR_ROM, "True if this is a dedicated server");
-            if (!com_dedicated->current.integer)
-                MyAssertHandler(
-                    ".\\qcommon\\common.cpp",
-                    3735,
-                    0,
-                    "%s\n\t(com_dedicated->current.integer) = %i",
-                    "(com_dedicated->current.integer != 0)",
-                    com_dedicated->current.integer);
-            if ((com_dedicated->flags & 0x40) == 0)
-                MyAssertHandler(
-                    ".\\qcommon\\common.cpp",
-                    3736,
-                    0,
-                    "%s\n\t(com_dedicated->flags) = %i",
-                    "(com_dedicated->flags & (1 << 6))",
-                    com_dedicated->flags);
+            vassert((com_dedicated->current.integer != 0), "(com_dedicated->current.integer) = %i", com_dedicated->current.integer);
+            vassert((com_dedicated->flags & (1 << 6)), "(com_dedicated->flags) = %i", com_dedicated->flags);
             Dvar_ClearModified((dvar_s*)com_dedicated);
             for (localClientNum = 0; localClientNum < 1; ++localClientNum)
                 CL_Shutdown(localClientNum);

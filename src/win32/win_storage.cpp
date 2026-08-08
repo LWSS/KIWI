@@ -332,8 +332,7 @@ void __cdecl LiveStorage_SetFromLocString(int controllerIndex, const char *dvarN
 {
     char *localizedText; // [esp+0h] [ebp-4h]
 
-    if (!Dvar_IsValidName(dvarName))
-        MyAssertHandler(".\\qcommon\\com_storage.cpp", 282, 0, "%s", "Dvar_IsValidName( dvarName )");
+    iassert(Dvar_IsValidName( dvarName ));
     localizedText = SEH_LocalizeTextMessage(preLocalizedText, "dvar string", LOCMSG_NOERR);
     if (localizedText && *localizedText)
         Dvar_SetCommand(dvarName, localizedText);
@@ -369,8 +368,7 @@ void __cdecl LiveStorage_ReadStatsFromDir(char *directory)
             statData.statWriteNeeded = 0;
             if (*(uint *)statData.playerStats != v2)
                 LiveStorage_HandleCorruptStats(path);
-            if (!stat_version)
-                MyAssertHandler(".\\win32\\win_storage.cpp", 300, 0, "%s", "stat_version");
+            iassert(stat_version);
             if (LiveStorage_GetStat(0, 299) != stat_version->current.integer)
             {
                 LiveStorage_NoStatsFound();
@@ -392,8 +390,7 @@ void __cdecl xxtea_enc(uint *v, uint n, const uint *k)
     uint q; // [esp+10h] [ebp-Ch]
     uint p; // [esp+18h] [ebp-4h]
 
-    if (n <= 1)
-        MyAssertHandler(".\\win32\\win_storage.cpp", 74, 0, "%s\n\t(n) = %i", "(n > 1)", n);
+    vassert((n > 1), "(n) = %i", n);
     z = v[n - 1];
     sum = 0;
     q = 0x34 / n + 6;
@@ -418,8 +415,7 @@ void __cdecl xxtea_dec(uint *v, uint n, const uint *k)
     uint y; // [esp+14h] [ebp-8h]
     uint p; // [esp+18h] [ebp-4h]
 
-    if (n <= 1)
-        MyAssertHandler(".\\win32\\win_storage.cpp", 99, 0, "%s\n\t(n) = %i", "(n > 1)", n);
+    vassert((n > 1), "(n) = %i", n);
     y = *v;
     for (sum = -1640531527 * (0x34 / n + 6); sum; sum += 1640531527)
     {
@@ -490,8 +486,7 @@ void LiveStorage_NoStatsFound()
     statData.statsFetched = 1;
     Com_Printf(16, "No stats found, zeroing out stats buffer\n");
     LiveStorage_StatsInit(0);
-    if (!stat_version)
-        MyAssertHandler(".\\win32\\win_storage.cpp", 208, 0, "%s", "stat_version");
+    iassert(stat_version);
     unsignedInt = stat_version->current.unsignedInt;
     v0 = CL_ControllerIndexFromClientNum(0);
     LiveStorage_SetStat(v0, 299, unsignedInt);
@@ -509,8 +504,7 @@ bool __cdecl LiveStorage_ReadStatsFile(const char *qpath, unsigned __int8 *buffe
     int h; // [esp+4h] [ebp-4h] BYREF
 
     FS_CheckFileSystemStarted();
-    if (!qpath && !qpath[0])
-        MyAssertHandler(".\\win32\\win_storage.cpp", 220, 0, "%s", "qpath || qpath[0]");
+    iassert(qpath || qpath[0]);
     len = FS_FOpenFileRead(qpath, &h);
     if (h && len == lenToRead)
     {
@@ -540,8 +534,7 @@ void __cdecl LiveStorage_HandleCorruptStats(char *filename)
 
 playerStatNetworkData *__cdecl LiveStorage_GetStatBuffer()
 {
-    if (!statData.statsFetched)
-        MyAssertHandler(".\\win32\\win_storage.cpp", 311, 0, "%s", "statData.statsFetched");
+    iassert(statData.statsFetched);
     return &statData;
 }
 
@@ -574,13 +567,7 @@ void __cdecl LiveStorage_UploadStats()
             I_strncpyz(statsFile.body.statsData.path, fs_gameDirVar->current.string, 260);
             LiveStorage_Encrypt(&statsFile);
             v2 = FS_WriteFileToDir(path, "players", (char *)&statsFile, 0x211Cu);
-            if (!LiveStorage_DecryptAndCheck(&statsFile, fs_gameDirVar->current.string))
-                MyAssertHandler(
-                    ".\\win32\\win_storage.cpp",
-                    359,
-                    0,
-                    "%s",
-                    "LiveStorage_DecryptAndCheck( &statsFile, fs_gameDirVar->current.string )");
+            iassert(LiveStorage_DecryptAndCheck( &statsFile, fs_gameDirVar->current.string ));
             if (v2)
             {
                 statData.statWriteNeeded = 0;
@@ -655,8 +642,7 @@ void __cdecl LiveStorage_SetStat(int __formal, int index, uint value)
         }
         else
         {
-            if (!debugStats)
-                MyAssertHandler(".\\win32\\win_storage.cpp", 434, 0, "%s", "debugStats");
+            iassert(debugStats);
             if (debugStats->current.enabled)
                 Com_Printf(14, "Setting stat %i from %i to %i\n", index, *(int*)&statData.playerStats[4 * index + 0x176C], value);
             if (*(int*)&statData.playerStats[4 * index + 0x176C] != value)
@@ -677,8 +663,7 @@ void __cdecl LiveStorage_SetStat(int __formal, int index, uint value)
                 index,
                 value);
         }
-        if (!debugStats)
-            MyAssertHandler(".\\win32\\win_storage.cpp", 420, 0, "%s", "debugStats");
+        iassert(debugStats);
         if (debugStats->current.enabled)
         {
             //Com_Printf(14, "Setting stat %i from %i to %i\n", index, *(unsigned __int8 *)(index + 231835788), value);

@@ -17,10 +17,8 @@ void __cdecl G_Trigger(gentity_s *self, gentity_s *other)
 {
     trigger_info_t *trigger_info; // [esp+0h] [ebp-4h]
 
-    if (!self->r.inuse)
-        MyAssertHandler(".\\game_mp\\g_trigger_mp.cpp", 8, 0, "%s", "self->r.inuse");
-    if (!other->r.inuse)
-        MyAssertHandler(".\\game_mp\\g_trigger_mp.cpp", 9, 0, "%s", "other->r.inuse");
+    iassert(self->r.inuse);
+    iassert(other->r.inuse);
     if (Scr_IsSystemActive())
     {
         if (level.pendingTriggerListSize == 256)
@@ -65,8 +63,7 @@ char __cdecl InitTrigger(gentity_s *self)
 
 void __cdecl InitSentientTrigger(gentity_s *self)
 {
-    if (!self)
-        MyAssertHandler(".\\game_mp\\g_trigger_mp.cpp", 73, 0, "%s", "self");
+    iassert(self);
     self->r.contents = 0;
     if ((self->spawnflags & 8) == 0)
         self->r.contents |= 0x40000000u;
@@ -194,8 +191,7 @@ void __cdecl hurt_touch(gentity_s *self, gentity_s *other, int extra)
         G_Damage(other, self, self, 0, 0, self->damage, 0, 13, 0xFFFFFFFF, HITLOC_NONE, 0, 0, 0);
         if ((self->spawnflags & 0x20) != 0)
         {
-            if (self->handler != 3)
-                MyAssertHandler(".\\game_mp\\g_trigger_mp.cpp", 236, 0, "%s", "self->handler == ENT_HANDLER_TRIGGER_HURT_TOUCH");
+            iassert(self->handler == ENT_HANDLER_TRIGGER_HURT_TOUCH);
             self->handler = ENT_HANDLER_TRIGGER_HURT;
         }
     }
@@ -324,14 +320,10 @@ void __cdecl G_CheckHitTriggerDamage(gentity_s *pActivator, float *vStart, float
     gentity_s *pEnt; // [esp+1030h] [ebp-10h]
     float maxs[3]; // [esp+1034h] [ebp-Ch] BYREF
 
-    if (iMOD >= 0x10)
-        MyAssertHandler(".\\game_mp\\g_trigger_mp.cpp", 505, 0, "iMOD doesn't index MOD_NUM\n\t%i not in [0, %i)", iMOD, 16);
-    if (!*modNames[iMOD])
-        MyAssertHandler(".\\game_mp\\g_trigger_mp.cpp", 506, 0, "%s", "*modNames[iMOD]");
-    if (!vStart)
-        MyAssertHandler(".\\game_mp\\g_trigger_mp.cpp", 507, 0, "%s", "vStart");
-    if (!vEnd)
-        MyAssertHandler(".\\game_mp\\g_trigger_mp.cpp", 508, 0, "%s", "vEnd");
+    bcassert(iMOD, 0x10);
+    iassert(*modNames[iMOD]);
+    iassert(vStart);
+    iassert(vEnd);
     mins[0] = *vStart;
     mins[1] = vStart[1];
     mins[2] = vStart[2];

@@ -299,14 +299,7 @@ void __cdecl CL_ParsePacketEntities(clientActive_t *cl, msg_t *msg, clSnapshot_t
     newframe->parseEntitiesNum = parseEntitiesNum;
     for (i = MSG_ReadBits(msg, 12); i != ENTITYNUM_NONE; i = MSG_ReadBits(msg, 12))
     {
-        if (i >= 0x880)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\client\\cl_parse.cpp",
-                78,
-                0,
-                "newnum doesn't index MAX_GENTITIES\n\t%i not in [0, %i)",
-                i,
-                2176);
+        bcassert(i, 0x880);
         cl->parseEntityNums[(*p_parseEntitiesNum)++ & 0x7FF] = i;
         ++*p_numEntities;
     }
@@ -399,8 +392,7 @@ void __cdecl CL_RecordServerCommands(serverCommands_s *serverCommands)
     msg_t v3; // [sp+50h] [-4050h] BYREF
     unsigned __int8 v4[32]; // [sp+80h] [-4020h] BYREF
 
-    if (!cls.demorecording)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\client\\cl_parse.cpp", 213, 0, "%s", "cls.demorecording");
+    iassert(cls.demorecording);
     MSG_Init(&v3, v4, 0x4000);
     MSG_WriteByte(&v3, 3);
     MSG_WriteShort(&v3, serverCommands->header.sequence - serverCommands->header.sent);
@@ -507,8 +499,7 @@ void __cdecl CL_ParseServerMessage(msg_t *msg)
         }
         else if (Byte == 3)
         {
-            if (!cls.demoplaying)
-                MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\client\\cl_parse.cpp", 341, 0, "%s", "cls.demoplaying");
+            iassert(cls.demoplaying);
             CL_ParseServerCommands(msg);
         }
         else

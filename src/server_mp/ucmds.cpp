@@ -39,8 +39,7 @@ void __cdecl SV_MutePlayer_f(client_t *cl)
 
 void __cdecl SV_WWWDownLoad_Clear(client_t *cl)
 {
-    if (!cl)
-        MyAssertHandler(".\\server_mp\\sv_client_mp.cpp", 1866, 0, "%s", "cl");
+    iassert(cl);
     SV_Download_Clear(cl);
     cl->clientDownloadingWWW = 0;
     cl->downloadingWWW = 0;

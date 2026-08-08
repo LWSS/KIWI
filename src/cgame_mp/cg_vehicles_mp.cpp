@@ -178,14 +178,7 @@ clientInfo_t *__cdecl ClientInfoForEntity(int localClientNum, uint entNum)
         return 0;
     if (cent->nextState.eType >= ET_EVENTS)
         return 0;
-    if (cent->nextState.clientNum >= 0x40u)
-        MyAssertHandler(
-            ".\\cgame_mp\\cg_vehicles_mp.cpp",
-            88,
-            0,
-            "cent->nextState.clientNum doesn't index MAX_CLIENTS\n\t%i not in [0, %i)",
-            cent->nextState.clientNum,
-            64);
+    bcassert(cent->nextState.clientNum, 0x40u);
     return &bgs->clientinfo[cent->nextState.clientNum];
 }
 
@@ -224,10 +217,8 @@ void __cdecl CG_VehSeatTransformForPlayer(
 
     ci = ClientInfoForEntity(localClientNum, entNum);
     centPlayer = CG_GetEntity(localClientNum, entNum);
-    if (centPlayer->nextState.eType != ET_PLAYER)
-        MyAssertHandler(".\\cgame_mp\\cg_vehicles_mp.cpp", 285, 0, "%s", "centPlayer->nextState.eType == ET_PLAYER");
-    if (centPlayer->nextState.eType >= ET_EVENTS)
-        MyAssertHandler(".\\cgame_mp\\cg_vehicles_mp.cpp", 286, 0, "%s", "centPlayer->nextState.eType < ET_EVENTS");
+    iassert(centPlayer->nextState.eType == ET_PLAYER);
+    iassert(centPlayer->nextState.eType < ET_EVENTS);
     SeatTransformForClientInfo(localClientNum, ci, resultOrigin, resultAngles);
 }
 
@@ -269,8 +260,7 @@ void __cdecl CG_VehSeatOriginForLocalClient(int localClientNum, float *result)
 {
     clientInfo_t *ci; // [esp+0h] [ebp-4h]
 
-    if (!result)
-        MyAssertHandler(".\\cgame_mp\\cg_vehicles_mp.cpp", 297, 0, "%s", "result");
+    iassert(result);
     ci = ClientInfoForLocalClient(localClientNum);
     SeatTransformForClientInfo(localClientNum, ci, result, 0);
 }

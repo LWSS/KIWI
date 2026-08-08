@@ -96,8 +96,7 @@ int __cdecl G_SpawnString(const SpawnVar *spawnVar, const char *key, const char 
 {
     int i; // [esp+0h] [ebp-4h]
 
-    if (!spawnVar->spawnVarsValid)
-        MyAssertHandler(".\\game\\g_load_utils.cpp", 161, 0, "%s", "spawnVar->spawnVarsValid");
+    iassert(spawnVar->spawnVarsValid);
     for (i = 0; i < spawnVar->numSpawnVars; ++i)
     {
         if (!I_stricmp(key, spawnVar->spawnVars[i][0]))

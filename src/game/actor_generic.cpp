@@ -18,14 +18,7 @@ void __cdecl Actor_Generic_Suspend(actor_s *self, ai_state_t eNextState)
     ai_state_t v6; // r8
 
     stateLevel = self->stateLevel;
-    if (stateLevel >= 5)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\actor_generic.cpp",
-            25,
-            0,
-            "self->stateLevel doesn't index ARRAY_COUNT( self->eState )\n\t%i not in [0, %i)",
-            stateLevel,
-            5);
+    bcassert(stateLevel, 5);
     v5 = self->eState[self->stateLevel];
     if (v5 <= AIS_INVALID || v5 >= AIS_COUNT)
         MyAssertHandler(
@@ -54,14 +47,7 @@ bool __cdecl Actor_Generic_Resume(actor_s *self, ai_state_t ePrevState)
     ai_state_t v6; // r8
 
     stateLevel = self->stateLevel;
-    if (stateLevel >= 4)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\actor_generic.cpp",
-            42,
-            0,
-            "self->stateLevel doesn't index ARRAY_COUNT( self->eState ) - 1\n\t%i not in [0, %i)",
-            stateLevel,
-            4);
+    bcassert(stateLevel, 4);
     v5 = self->eState[self->stateLevel];
     if (v5 <= AIS_INVALID || v5 >= AIS_COUNT)
         MyAssertHandler(

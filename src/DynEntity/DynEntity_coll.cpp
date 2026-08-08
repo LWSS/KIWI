@@ -28,14 +28,7 @@ void __cdecl DynEnt_ClearCollWorld(DynEntityCollType collType)
     uint16_t sectorIndex; // [esp+14h] [ebp-8h]
     DynEntityCollWorld *world; // [esp+18h] [ebp-4h]
 
-    if ((uint)collType >= DYNENT_COLL_COUNT)
-        MyAssertHandler(
-            ".\\DynEntity\\DynEntity_coll.cpp",
-            59,
-            0,
-            "collType doesn't index DYNENT_COLL_COUNT\n\t%i not in [0, %i)",
-            collType,
-            2);
+    bcassert((uint)collType, DYNENT_COLL_COUNT);
     world = &dynEntCollWorlds[collType];
     memset((uint8_t *)world, 0, sizeof(DynEntityCollWorld));
     CM_ModelBounds(0, world->mins, world->maxs);
@@ -78,14 +71,7 @@ void __cdecl DynEnt_UnlinkEntity(DynEntityCollType collType, uint16_t dynEntId)
             dynEntId,
             EntityCount);
     }
-    if ((uint)collType >= DYNENT_COLL_COUNT)
-        MyAssertHandler(
-            ".\\DynEntity\\DynEntity_coll.cpp",
-            59,
-            0,
-            "collType doesn't index DYNENT_COLL_COUNT\n\t%i not in [0, %i)",
-            collType,
-            2);
+    bcassert((uint)collType, DYNENT_COLL_COUNT);
     world = &dynEntCollWorlds[collType];
     dynEntColl = DynEnt_GetEntityColl(collType, dynEntId);
     sectorIndex = dynEntColl->sector;
@@ -106,8 +92,7 @@ void __cdecl DynEnt_UnlinkEntity(DynEntityCollType collType, uint16_t dynEntId)
                 next = DynEnt_GetEntityColl(collType, scan->nextEntInSector - 1);
                 if (next == dynEntColl)
                     break;
-                if (!scan->nextEntInSector)
-                    MyAssertHandler(".\\DynEntity\\DynEntity_coll.cpp", 441, 0, "%s", "scan->nextEntInSector");
+                iassert(scan->nextEntInSector);
             }
             scan->nextEntInSector = dynEntColl->nextEntInSector;
         }
@@ -194,24 +179,14 @@ void __cdecl DynEnt_LinkEntity(
             dynEntId,
             EntityCount);
     }
-    if (!absMins)
-        MyAssertHandler(".\\DynEntity\\DynEntity_coll.cpp", 532, 0, "%s", "absMins");
-    if (!absMaxs)
-        MyAssertHandler(".\\DynEntity\\DynEntity_coll.cpp", 533, 0, "%s", "absMaxs");
-    if ((uint)collType >= DYNENT_COLL_COUNT)
-        MyAssertHandler(
-            ".\\DynEntity\\DynEntity_coll.cpp",
-            59,
-            0,
-            "collType doesn't index DYNENT_COLL_COUNT\n\t%i not in [0, %i)",
-            collType,
-            2);
+    iassert(absMins);
+    iassert(absMaxs);
+    bcassert((uint)collType, DYNENT_COLL_COUNT);
     world = &dynEntCollWorlds[collType];
     dynEntDef = DynEnt_GetEntityDef(dynEntId, (DynEntityDrawType)(collType & 1));
     dynEntColl = DynEnt_GetEntityColl(collType, dynEntId);
     contents = DynEnt_GetContents(dynEntDef);
-    if (!contents)
-        MyAssertHandler(".\\DynEntity\\DynEntity_coll.cpp", 542, 0, "%s", "contents");
+    iassert(contents);
     while (1)
     {
         mins[0] = world->mins[0];
@@ -283,24 +258,9 @@ void __cdecl DynEnt_AddToCollSector(
             dynEntId,
             EntityCount);
     }
-    if (!sectorIndex)
-        MyAssertHandler(".\\DynEntity\\DynEntity_coll.cpp", 277, 0, "%s", "sectorIndex");
-    if (sectorIndex >= 0x400u)
-        MyAssertHandler(
-            ".\\DynEntity\\DynEntity_coll.cpp",
-            278,
-            0,
-            "%s\n\t(sectorIndex) = %i",
-            "(sectorIndex < 1024)",
-            sectorIndex);
-    if ((uint)collType >= DYNENT_COLL_COUNT)
-        MyAssertHandler(
-            ".\\DynEntity\\DynEntity_coll.cpp",
-            59,
-            0,
-            "collType doesn't index DYNENT_COLL_COUNT\n\t%i not in [0, %i)",
-            collType,
-            2);
+    iassert(sectorIndex);
+    vassert((sectorIndex < 1024), "(sectorIndex) = %i", sectorIndex);
+    bcassert((uint)collType, DYNENT_COLL_COUNT);
     dynEntColl = DynEnt_GetEntityColl(collType, dynEntId);
     for (prevListIndex = &dynEntCollWorlds[collType].sectors[sectorIndex].entListHead;
         (uint)*prevListIndex - 1 <= dynEntId;
@@ -329,28 +289,11 @@ void __cdecl DynEnt_SortCollSector(
     DynEntityColl *dynEntColl; // [esp+28h] [ebp-8h]
     uint16_t childSectorIndex; // [esp+2Ch] [ebp-4h]
 
-    if (!sectorIndex)
-        MyAssertHandler(".\\DynEntity\\DynEntity_coll.cpp", 321, 0, "%s", "sectorIndex");
-    if (sectorIndex >= 0x400u)
-        MyAssertHandler(
-            ".\\DynEntity\\DynEntity_coll.cpp",
-            322,
-            0,
-            "%s\n\t(sectorIndex) = %i",
-            "(sectorIndex < 1024)",
-            sectorIndex);
-    if (!mins)
-        MyAssertHandler(".\\DynEntity\\DynEntity_coll.cpp", 323, 0, "%s", "mins");
-    if (!maxs)
-        MyAssertHandler(".\\DynEntity\\DynEntity_coll.cpp", 324, 0, "%s", "maxs");
-    if ((uint)collType >= DYNENT_COLL_COUNT)
-        MyAssertHandler(
-            ".\\DynEntity\\DynEntity_coll.cpp",
-            59,
-            0,
-            "collType doesn't index DYNENT_COLL_COUNT\n\t%i not in [0, %i)",
-            collType,
-            2);
+    iassert(sectorIndex);
+    vassert((sectorIndex < 1024), "(sectorIndex) = %i", sectorIndex);
+    iassert(mins);
+    iassert(maxs);
+    bcassert((uint)collType, DYNENT_COLL_COUNT);
     world = &dynEntCollWorlds[collType];
     axis = world->sectors[sectorIndex].tree.axis;
     dist = world->sectors[sectorIndex].tree.dist;
@@ -393,13 +336,7 @@ void __cdecl DynEnt_SortCollSector(
                     "%s",
                     "prevDynEntColl || (DynEnt_GetEntityColl( collType, sector->entListHead - 1 ) == dynEntColl)");
             }
-            if (prevDynEntColl && DynEnt_GetEntityColl(collType, prevDynEntColl->nextEntInSector - 1) != dynEntColl)
-                MyAssertHandler(
-                    ".\\DynEntity\\DynEntity_coll.cpp",
-                    380,
-                    0,
-                    "%s",
-                    "!prevDynEntColl || (DynEnt_GetEntityColl( collType, prevDynEntColl->nextEntInSector - 1) == dynEntColl)");
+            iassert(!prevDynEntColl || (DynEnt_GetEntityColl( collType, prevDynEntColl->nextEntInSector - 1) == dynEntColl));
             DynEnt_AddToCollSector(collType, dynEntId, childSectorIndex);
             world->sectors[childSectorIndex].contents |= DynEnt_GetContents(dynEntDef);
             if (prevDynEntColl)
@@ -431,18 +368,9 @@ uint16_t __cdecl DynEnt_AllocCollSector(DynEntityCollType collType, const float 
     DynEntityCollWorld *world; // [esp+14h] [ebp-8h]
     uint16_t axis; // [esp+18h] [ebp-4h]
 
-    if (!mins)
-        MyAssertHandler(".\\DynEntity\\DynEntity_coll.cpp", 230, 0, "%s", "mins");
-    if (!maxs)
-        MyAssertHandler(".\\DynEntity\\DynEntity_coll.cpp", 231, 0, "%s", "maxs");
-    if ((uint)collType >= DYNENT_COLL_COUNT)
-        MyAssertHandler(
-            ".\\DynEntity\\DynEntity_coll.cpp",
-            59,
-            0,
-            "collType doesn't index DYNENT_COLL_COUNT\n\t%i not in [0, %i)",
-            collType,
-            2);
+    iassert(mins);
+    iassert(maxs);
+    bcassert((uint)collType, DYNENT_COLL_COUNT);
     world = &dynEntCollWorlds[collType];
     sectorIndex = world->freeHead;
     if (!sectorIndex)
@@ -455,35 +383,27 @@ uint16_t __cdecl DynEnt_AllocCollSector(DynEntityCollType collType, const float 
     sector = &world->sectors[sectorIndex];
     if (world->sectors[sectorIndex].contents)
         MyAssertHandler(".\\DynEntity\\DynEntity_coll.cpp", 247, 0, "%s", "!sector->contents");
-    if (sector->entListHead)
-        MyAssertHandler(".\\DynEntity\\DynEntity_coll.cpp", 248, 0, "%s", "!sector->entListHead");
+    iassert(!sector->entListHead);
     world->freeHead = sector->tree.u.parent;
     sector->tree.axis = axis;
     sector->tree.dist = (maxs[axis] + mins[axis]) * 0.5;
-    if (sector->tree.child[0])
-        MyAssertHandler(".\\DynEntity\\DynEntity_coll.cpp", 255, 0, "%s", "!sector->tree.child[0]");
-    if (sector->tree.child[1])
-        MyAssertHandler(".\\DynEntity\\DynEntity_coll.cpp", 256, 0, "%s", "!sector->tree.child[1]");
+    iassert(!sector->tree.child[0]);
+    iassert(!sector->tree.child[1]);
     return sectorIndex;
 }
 
 int __cdecl DynEnt_GetContents(const DynEntityDef *dynEntDef)
 {
-    if (!dynEntDef)
-        MyAssertHandler(".\\DynEntity\\DynEntity_coll.cpp", 625, 0, "%s", "dynEntDef");
+    iassert(dynEntDef);
     return dynEntDef->contents;
 }
 
 void __cdecl DynEnt_GetLocalBounds(const DynEntityDef *dynEntDef, float *mins, float *maxs)
 {
-    if (!dynEntDef)
-        MyAssertHandler(".\\DynEntity\\DynEntity_coll.cpp", 636, 0, "%s", "dynEntDef");
-    if (!dynEntDef->xModel && !dynEntDef->brushModel)
-        MyAssertHandler(".\\DynEntity\\DynEntity_coll.cpp", 637, 0, "%s", "dynEntDef->xModel || dynEntDef->brushModel");
-    if (!mins)
-        MyAssertHandler(".\\DynEntity\\DynEntity_coll.cpp", 638, 0, "%s", "mins");
-    if (!maxs)
-        MyAssertHandler(".\\DynEntity\\DynEntity_coll.cpp", 639, 0, "%s", "maxs");
+    iassert(dynEntDef);
+    iassert(dynEntDef->xModel || dynEntDef->brushModel);
+    iassert(mins);
+    iassert(maxs);
     if (dynEntDef->xModel)
         XModelGetBounds(dynEntDef->xModel, mins, maxs);
     else
@@ -495,12 +415,9 @@ void __cdecl DynEnt_GetWorldBounds(const DynEntityPose *dynEntPose, float *mins,
     float s; // [esp+0h] [ebp-Ch]
     float radius; // [esp+8h] [ebp-4h]
 
-    if (!dynEntPose)
-        MyAssertHandler(".\\DynEntity\\DynEntity_coll.cpp", 655, 0, "%s", "dynEntPose");
-    if (!mins)
-        MyAssertHandler(".\\DynEntity\\DynEntity_coll.cpp", 656, 0, "%s", "mins");
-    if (!maxs)
-        MyAssertHandler(".\\DynEntity\\DynEntity_coll.cpp", 657, 0, "%s", "maxs");
+    iassert(dynEntPose);
+    iassert(mins);
+    iassert(maxs);
     radius = dynEntPose->radius;
     s = -radius;
     Vec3AddScalar(dynEntPose->pose.origin, s, mins);
@@ -514,10 +431,8 @@ double __cdecl DynEnt_GetRadiusDistSqr(const DynEntityPose *dynEntPose, const fl
     int vecIndex; // [esp+18h] [ebp-10h]
     float absMins[3]; // [esp+1Ch] [ebp-Ch] BYREF
 
-    if (!dynEntPose)
-        MyAssertHandler(".\\DynEntity\\DynEntity_coll.cpp", 676, 0, "%s", "dynEntPose");
-    if (!origin)
-        MyAssertHandler(".\\DynEntity\\DynEntity_coll.cpp", 677, 0, "%s", "origin");
+    iassert(dynEntPose);
+    iassert(origin);
     DynEnt_GetWorldBounds(dynEntPose, absMins, absMaxs);
     for (vecIndex = 0; vecIndex < 3; ++vecIndex)
     {
@@ -543,10 +458,8 @@ double __cdecl DynEnt_GetCylindricalRadiusDistSqr(const DynEntityPose *dynEntPos
     int vecIndex; // [esp+18h] [ebp-10h]
     float absMins[3]; // [esp+1Ch] [ebp-Ch] BYREF
 
-    if (!dynEntPose)
-        MyAssertHandler(".\\DynEntity\\DynEntity_coll.cpp", 717, 0, "%s", "dynEntPose");
-    if (!origin)
-        MyAssertHandler(".\\DynEntity\\DynEntity_coll.cpp", 718, 0, "%s", "origin");
+    iassert(dynEntPose);
+    iassert(origin);
     DynEnt_GetWorldBounds(dynEntPose, absMins, absMaxs);
     for (vecIndex = 0; vecIndex < 2; ++vecIndex)
     {
@@ -575,14 +488,10 @@ bool __cdecl DynEnt_EntityInArea(
     float absMaxs[3]; // [esp+0h] [ebp-18h] BYREF
     float absMins[3]; // [esp+Ch] [ebp-Ch] BYREF
 
-    if (!dynEntDef)
-        MyAssertHandler(".\\DynEntity\\DynEntity_coll.cpp", 742, 0, "%s", "dynEntDef");
-    if (!dynEntPose)
-        MyAssertHandler(".\\DynEntity\\DynEntity_coll.cpp", 743, 0, "%s", "dynEntPose");
-    if (!mins)
-        MyAssertHandler(".\\DynEntity\\DynEntity_coll.cpp", 744, 0, "%s", "mins");
-    if (!maxs)
-        MyAssertHandler(".\\DynEntity\\DynEntity_coll.cpp", 745, 0, "%s", "maxs");
+    iassert(dynEntDef);
+    iassert(dynEntPose);
+    iassert(mins);
+    iassert(maxs);
     if ((contentMask & DynEnt_GetContents(dynEntDef)) == 0)
         return 0;
     DynEnt_GetWorldBounds(dynEntPose, absMins, absMaxs);
@@ -603,32 +512,13 @@ void __cdecl DynEnt_PointTraceToModel(
     float normal[3]; // [esp+50h] [ebp-18h] BYREF
     float localEnd[3]; // [esp+5Ch] [ebp-Ch] BYREF
 
-    if (!dynEntDef)
-        MyAssertHandler(".\\DynEntity\\DynEntity_coll.cpp", 772, 0, "%s", "dynEntDef");
-    if (!dynEntPose)
-        MyAssertHandler(".\\DynEntity\\DynEntity_coll.cpp", 773, 0, "%s", "dynEntPose");
-    if (!clip)
-        MyAssertHandler(".\\DynEntity\\DynEntity_coll.cpp", 774, 0, "%s", "clip");
-    if (!results)
-        MyAssertHandler(".\\DynEntity\\DynEntity_coll.cpp", 775, 0, "%s", "results");
-    if (!dynEntDef->xModel)
-        MyAssertHandler(".\\DynEntity\\DynEntity_coll.cpp", 776, 0, "%s", "dynEntDef->xModel");
-    if (results->fraction <= 0.0)
-        MyAssertHandler(
-            ".\\DynEntity\\DynEntity_coll.cpp",
-            778,
-            0,
-            "%s\n\t(results->fraction) = %g",
-            "(results->fraction > 0.0f)",
-            results->fraction);
-    if (results->fraction > 1.0)
-        MyAssertHandler(
-            ".\\DynEntity\\DynEntity_coll.cpp",
-            779,
-            0,
-            "%s\n\t(results->fraction) = %g",
-            "(results->fraction <= 1.0f)",
-            results->fraction);
+    iassert(dynEntDef);
+    iassert(dynEntPose);
+    iassert(clip);
+    iassert(results);
+    iassert(dynEntDef->xModel);
+    vassert((results->fraction > 0.0f), "(results->fraction) = %g", results->fraction);
+    vassert((results->fraction <= 1.0f), "(results->fraction) = %g", results->fraction);
     if (clip->bLocational)
     {
         dynEntAxis[3][0] = dynEntPose->pose.origin[0];
@@ -660,34 +550,14 @@ void __cdecl DynEnt_PointTraceToBrush(
     float oldFraction; // [esp+Ch] [ebp-28h]
     float axis[3][3]; // [esp+10h] [ebp-24h] BYREF
 
-    if (!dynEntDef)
-        MyAssertHandler(".\\DynEntity\\DynEntity_coll.cpp", 808, 0, "%s", "dynEntDef");
-    if (!dynEntPose)
-        MyAssertHandler(".\\DynEntity\\DynEntity_coll.cpp", 809, 0, "%s", "dynEntPose");
-    if (!clip)
-        MyAssertHandler(".\\DynEntity\\DynEntity_coll.cpp", 810, 0, "%s", "clip");
-    if (!results)
-        MyAssertHandler(".\\DynEntity\\DynEntity_coll.cpp", 811, 0, "%s", "results");
-    if (dynEntDef->xModel)
-        MyAssertHandler(".\\DynEntity\\DynEntity_coll.cpp", 812, 0, "%s", "!dynEntDef->xModel");
-    if (!dynEntDef->brushModel)
-        MyAssertHandler(".\\DynEntity\\DynEntity_coll.cpp", 813, 0, "%s", "dynEntDef->brushModel");
-    if (results->fraction <= 0.0)
-        MyAssertHandler(
-            ".\\DynEntity\\DynEntity_coll.cpp",
-            815,
-            0,
-            "%s\n\t(results->fraction) = %g",
-            "(results->fraction > 0.0f)",
-            results->fraction);
-    if (results->fraction > 1.0)
-        MyAssertHandler(
-            ".\\DynEntity\\DynEntity_coll.cpp",
-            816,
-            0,
-            "%s\n\t(results->fraction) = %g",
-            "(results->fraction <= 1.0f)",
-            results->fraction);
+    iassert(dynEntDef);
+    iassert(dynEntPose);
+    iassert(clip);
+    iassert(results);
+    iassert(!dynEntDef->xModel);
+    iassert(dynEntDef->brushModel);
+    vassert((results->fraction > 0.0f), "(results->fraction) = %g", results->fraction);
+    vassert((results->fraction <= 1.0f), "(results->fraction) = %g", results->fraction);
     oldFraction = results->fraction;
     UnitQuatToAxis(dynEntPose->pose.quat, axis);
     CM_TransformedBoxTraceRotated(
@@ -720,32 +590,13 @@ void __cdecl DynEnt_ClipMoveTraceToBrush(
     float oldFraction; // [esp+10h] [ebp-28h]
     float axis[3][3]; // [esp+14h] [ebp-24h] BYREF
 
-    if (!dynEntDef)
-        MyAssertHandler(".\\DynEntity\\DynEntity_coll.cpp", 838, 0, "%s", "dynEntDef");
-    if (!dynEntPose)
-        MyAssertHandler(".\\DynEntity\\DynEntity_coll.cpp", 839, 0, "%s", "dynEntPose");
-    if (!clip)
-        MyAssertHandler(".\\DynEntity\\DynEntity_coll.cpp", 840, 0, "%s", "clip");
-    if (!results)
-        MyAssertHandler(".\\DynEntity\\DynEntity_coll.cpp", 841, 0, "%s", "results");
-    if (results->fraction <= 0.0)
-        MyAssertHandler(
-            ".\\DynEntity\\DynEntity_coll.cpp",
-            843,
-            0,
-            "%s\n\t(results->fraction) = %g",
-            "(results->fraction > 0.0f)",
-            results->fraction);
-    if (results->fraction > 1.0)
-        MyAssertHandler(
-            ".\\DynEntity\\DynEntity_coll.cpp",
-            844,
-            0,
-            "%s\n\t(results->fraction) = %g",
-            "(results->fraction <= 1.0f)",
-            results->fraction);
-    if (!dynEntDef->brushModel)
-        MyAssertHandler(".\\DynEntity\\DynEntity_coll.cpp", 845, 0, "%s", "dynEntDef->brushModel");
+    iassert(dynEntDef);
+    iassert(dynEntPose);
+    iassert(clip);
+    iassert(results);
+    vassert((results->fraction > 0.0f), "(results->fraction) = %g", results->fraction);
+    vassert((results->fraction <= 1.0f), "(results->fraction) = %g", results->fraction);
+    iassert(dynEntDef->brushModel);
     if ((clip->contentmask & DynEnt_GetContents(dynEntDef)) != 0
         && DynEnt_GetEntityProps(dynEntDef->type)->clipMove
         && !CM_TraceSphere(&clip->extents, dynEntPose->pose.origin, dynEntPose->radius, results->fraction))

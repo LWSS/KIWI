@@ -124,8 +124,7 @@ void __cdecl XModelReadSurface_BuildCollisionTree(
                 {
                     if (!leafCount)
                         MyAssertHandler(".\\r_xsurface_load_obj.cpp", 284, 0, "%s", "leafCount > 0");
-                    if (leafCount - 1 >= allocedLeafCount)
-                        MyAssertHandler(".\\r_xsurface_load_obj.cpp", 285, 0, "%s", "(leafCount - 1) < allocedLeafCount");
+                    iassert((leafCount - 1) < allocedLeafCount);
                     v19 = options.mins[leafCount - 1];
                     v19[0] = prevMins[0];
                     v19[1] = prevMins[1];
@@ -136,14 +135,7 @@ void __cdecl XModelReadSurface_BuildCollisionTree(
                     v18[1] = prevMaxs[1];
                     v18[2] = prevMaxs[2];
 
-                    if (tree->leafs[leafCount - 1].triangleBeginIndex >= 0x8000u)
-                        MyAssertHandler(
-                            ".\\r_xsurface_load_obj.cpp",
-                            288,
-                            0,
-                            "%s\n\t(tree->leafs[leafCount - 1].triangleBeginIndex) = %i",
-                            "(tree->leafs[leafCount - 1].triangleBeginIndex < 0x8000)",
-                            tree->leafs[leafCount - 1].triangleBeginIndex);
+                    vassert((tree->leafs[leafCount - 1].triangleBeginIndex < 0x8000), "(tree->leafs[leafCount - 1].triangleBeginIndex) = %i", tree->leafs[leafCount - 1].triangleBeginIndex);
                     tree->leafs[leafCount - 1].triangleBeginIndex += 0x8000;
                 }
                 lastMergeable = 0;
@@ -152,8 +144,7 @@ void __cdecl XModelReadSurface_BuildCollisionTree(
             {
                 if (generateLeafsPass)
                 {
-                    if (leafCount >= allocedLeafCount)
-                        MyAssertHandler(".\\r_xsurface_load_obj.cpp", 297, 0, "%s", "leafCount < allocedLeafCount");
+                    iassert(leafCount < allocedLeafCount);
                     if (triIndex >= 0x8000)
                         MyAssertHandler(
                             ".\\r_xsurface_load_obj.cpp",
@@ -162,14 +153,7 @@ void __cdecl XModelReadSurface_BuildCollisionTree(
                             "%s",
                             "triIndex < XSURFACE_COLLISION_LEAF_TWO_TRIANGLES");
                     tree->leafs[leafCount].triangleBeginIndex = triIndex;
-                    if (tree->leafs[leafCount].triangleBeginIndex != triIndex)
-                        MyAssertHandler(
-                            ".\\r_xsurface_load_obj.cpp",
-                            300,
-                            0,
-                            "%s\n\t(triIndex) = %i",
-                            "(tree->leafs[leafCount].triangleBeginIndex == triIndex)",
-                            triIndex);
+                    vassert((tree->leafs[leafCount].triangleBeginIndex == triIndex), "(triIndex) = %i", triIndex);
                     v17 = options.mins[leafCount];
                     v17[0] = triMins[0];
                     v17[1] = triMins[1];
@@ -204,8 +188,7 @@ void __cdecl XModelReadSurface_BuildCollisionTree(
         options.itemSize = 2;
         allocedLeafCount = leafCount;
     }
-    if (leafCount != allocedLeafCount)
-        MyAssertHandler(".\\r_xsurface_load_obj.cpp", 313, 0, "%s", "leafCount == allocedLeafCount");
+    iassert(leafCount == allocedLeafCount);
     tree->trans[0] = -globalMins[0];
     tree->trans[1] = -globalMins[1];
     tree->trans[2] = -globalMins[2];
@@ -1083,10 +1066,7 @@ void __cdecl XModelLoadCollData(
             model->contents |= surf->contents;
         }
     }
-    else if (model->collSurfs)
-    {
-        MyAssertHandler(".\\xanim\\xmodel_load_obj.cpp", 323, 0, "%s", "!model->collSurfs");
-    }
+    else iassert(!model->collSurfs);
 }
 
 char __cdecl XModelLoadConfigFile(const char *name, unsigned __int8 **pos, XModelConfig *config)

@@ -256,30 +256,9 @@ void __cdecl R_AssertLightGridValid(const GfxLightGrid *lightGrid)
     const GfxLightGridRow *row; // [esp+4h] [ebp-8h]
     uint rowIndex; // [esp+8h] [ebp-4h]
 
-    if (lightGrid->mins[0] > lightGrid->maxs[0])
-        MyAssertHandler(
-            ".\\r_bsp_load_obj.cpp",
-            1425,
-            0,
-            "lightGrid->mins[0] <= lightGrid->maxs[0]\n\t%i, %i",
-            lightGrid->mins[0],
-            lightGrid->maxs[0]);
-    if (lightGrid->mins[1] > lightGrid->maxs[1])
-        MyAssertHandler(
-            ".\\r_bsp_load_obj.cpp",
-            1426,
-            0,
-            "lightGrid->mins[1] <= lightGrid->maxs[1]\n\t%i, %i",
-            lightGrid->mins[1],
-            lightGrid->maxs[1]);
-    if (lightGrid->mins[2] > lightGrid->maxs[2])
-        MyAssertHandler(
-            ".\\r_bsp_load_obj.cpp",
-            1427,
-            0,
-            "lightGrid->mins[2] <= lightGrid->maxs[2]\n\t%i, %i",
-            lightGrid->mins[2],
-            lightGrid->maxs[2]);
+    vassert(lightGrid->mins[0] <= lightGrid->maxs[0], "%i, %i", lightGrid->mins[0], lightGrid->maxs[0]);
+    vassert(lightGrid->mins[1] <= lightGrid->maxs[1], "%i, %i", lightGrid->mins[1], lightGrid->maxs[1]);
+    vassert(lightGrid->mins[2] <= lightGrid->maxs[2], "%i, %i", lightGrid->mins[2], lightGrid->maxs[2]);
     rowCount = lightGrid->maxs[lightGrid->rowAxis] + 1 - lightGrid->mins[lightGrid->rowAxis];
     if (rowCount > 0x2000)
         MyAssertHandler(
@@ -293,23 +272,9 @@ void __cdecl R_AssertLightGridValid(const GfxLightGrid *lightGrid)
     {
         if (lightGrid->rowDataStart[rowIndex] != 0xFFFF)
         {
-            if (4 * lightGrid->rowDataStart[rowIndex] >= lightGrid->rawRowDataSize)
-                MyAssertHandler(
-                    ".\\r_bsp_load_obj.cpp",
-                    1442,
-                    0,
-                    "lightGrid->rowDataStart[rowIndex] * 4 doesn't index lightGrid->rawRowDataSize\n\t%i not in [0, %i)",
-                    4 * lightGrid->rowDataStart[rowIndex],
-                    lightGrid->rawRowDataSize);
+            bcassert(4 * lightGrid->rowDataStart[rowIndex], lightGrid->rawRowDataSize);
             row = (const GfxLightGridRow *)&lightGrid->rawRowData[4 * lightGrid->rowDataStart[rowIndex]];
-            if (row->firstEntry >= lightGrid->entryCount)
-                MyAssertHandler(
-                    ".\\r_bsp_load_obj.cpp",
-                    1444,
-                    0,
-                    "row->firstEntry doesn't index lightGrid->entryCount\n\t%i not in [0, %i)",
-                    row->firstEntry,
-                    lightGrid->entryCount);
+            bcassert(row->firstEntry, lightGrid->entryCount);
         }
     }
 }
@@ -430,14 +395,7 @@ char __cdecl R_EmitLightGridBlock_Version15(
     height = zSubRange[1] - *zSubRange + 1;
     if (height <= 0xFF)
     {
-        if (height * runCount < endBlock - beginBlock)
-            MyAssertHandler(
-                ".\\r_bsp_load_obj.cpp",
-                1058,
-                0,
-                "runCount * height >= endBlock - beginBlock\n\t%i, %i",
-                height * runCount,
-                endBlock - beginBlock);
+        vassert(runCount * height >= endBlock - beginBlock, "%i, %i", height * runCount, endBlock - beginBlock);
         pointIndex = beginBlock;
         for (colOffset = 0; colOffset < runCount; ++colOffset)
         {
@@ -624,22 +582,9 @@ char __cdecl R_EncodeLightGrid_Version15(const AnnotatedLightGridPoint *pointsAr
                 s_world.lightGrid.rawRowDataSize);
         if (!R_CompressLightGridRow_Version15(pointsArray, pointIndex, pointCount + pointIndex, zRange))
             return 0;
-        if (s_world.lightGrid.rowDataStart[rowIndex] == s_world.lightGrid.rawRowDataSize)
-            MyAssertHandler(
-                ".\\r_bsp_load_obj.cpp",
-                1206,
-                0,
-                "%s",
-                "s_world.lightGrid.rowDataStart[rowIndex] != s_world.lightGrid.rawRowDataSize");
+        iassert(s_world.lightGrid.rowDataStart[rowIndex] != s_world.lightGrid.rawRowDataSize);
     }
-    if (s_world.lightGrid.entryCount < pointsArrayCount)
-        MyAssertHandler(
-            ".\\r_bsp_load_obj.cpp",
-            1209,
-            0,
-            "s_world.lightGrid.entryCount >= pointsArrayCount\n\t%i, %i",
-            s_world.lightGrid.entryCount,
-            pointsArrayCount);
+    vassert(s_world.lightGrid.entryCount >= pointsArrayCount, "%i, %i", s_world.lightGrid.entryCount, pointsArrayCount);
     return 1;
 }
 

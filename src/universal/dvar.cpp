@@ -267,14 +267,7 @@ void __cdecl Dvar_ForEachName(void(__cdecl *callback)(const char *))
 
 const dvar_s *__cdecl Dvar_GetAtIndex(uint index)
 {
-    if (index >= dvarCount)
-        MyAssertHandler(
-            ".\\universal\\dvar.cpp",
-            125,
-            0,
-            "index doesn't index dvarCount\n\t%i not in [0, %i)",
-            index,
-            dvarCount);
+    bcassert(index, dvarCount);
     return &dvarPool[index];
 }
 
@@ -306,18 +299,9 @@ char __cdecl Dvar_IsValidName(const char *dvarName)
 
 const char *__cdecl Dvar_EnumToString(const dvar_s *dvar)
 {
-    if (!dvar)
-        MyAssertHandler(".\\universal\\dvar.cpp", 278, 0, "%s", "dvar");
-    if (!dvar->name)
-        MyAssertHandler(".\\universal\\dvar.cpp", 279, 0, "%s", "dvar->name");
-    if (dvar->type != 6)
-        MyAssertHandler(
-            ".\\universal\\dvar.cpp",
-            280,
-            0,
-            "%s\n\t(dvar->name) = %s",
-            "(dvar->type == DVAR_TYPE_ENUM)",
-            dvar->name);
+    iassert(dvar);
+    iassert(dvar->name);
+    vassert((dvar->type == DVAR_TYPE_ENUM), "(dvar->name) = %s", dvar->name);
     if (!dvar->domain.integer.max)
         MyAssertHandler(
             ".\\universal\\dvar.cpp",
@@ -326,17 +310,7 @@ const char *__cdecl Dvar_EnumToString(const dvar_s *dvar)
             "%s\n\t(dvar->name) = %s",
             "(dvar->domain.enumeration.strings)",
             dvar->name);
-    if ((dvar->current.integer < 0 || dvar->current.integer >= dvar->domain.enumeration.stringCount)
-        && dvar->current.integer)
-    {
-        MyAssertHandler(
-            ".\\universal\\dvar.cpp",
-            282,
-            0,
-            "%s\n\t(dvar->current.integer) = %i",
-            "(dvar->current.integer >= 0 && dvar->current.integer < dvar->domain.enumeration.stringCount || dvar->current.integer == 0)",
-            dvar->current.integer);
-    }
+    vassert((dvar->current.integer >= 0 && dvar->current.integer < dvar->domain.enumeration.stringCount || dvar->current.integer == 0), "(dvar->current.integer) = %i", dvar->current.integer);
     if (dvar->domain.enumeration.stringCount)
         return *(const char **)(dvar->domain.integer.max + 4 * dvar->current.integer);
     else
@@ -349,18 +323,9 @@ const char *__cdecl Dvar_IndexStringToEnumString(const dvar_s *dvar, const char 
     int enumIndex; // [esp+14h] [ebp-8h]
     int indexStringIndex; // [esp+18h] [ebp-4h]
 
-    if (!dvar)
-        MyAssertHandler(".\\universal\\dvar.cpp", 296, 0, "%s", "dvar");
-    if (!dvar->name)
-        MyAssertHandler(".\\universal\\dvar.cpp", 297, 0, "%s", "dvar->name");
-    if (dvar->type != 6)
-        MyAssertHandler(
-            ".\\universal\\dvar.cpp",
-            298,
-            0,
-            "%s\n\t(dvar->name) = %s",
-            "(dvar->type == DVAR_TYPE_ENUM)",
-            dvar->name);
+    iassert(dvar);
+    iassert(dvar->name);
+    vassert((dvar->type == DVAR_TYPE_ENUM), "(dvar->name) = %s", dvar->name);
     if (!dvar->domain.integer.max)
         MyAssertHandler(
             ".\\universal\\dvar.cpp",
@@ -369,8 +334,7 @@ const char *__cdecl Dvar_IndexStringToEnumString(const dvar_s *dvar, const char 
             "%s\n\t(dvar->name) = %s",
             "(dvar->domain.enumeration.strings)",
             dvar->name);
-    if (!indexString)
-        MyAssertHandler(".\\universal\\dvar.cpp", 300, 0, "%s\n\t(dvar->name) = %s", "(indexString)", dvar->name);
+    vassert((indexString), "(dvar->name) = %s", dvar->name);
     if (!dvar->domain.enumeration.stringCount)
         return "";
     v3 = strlen(indexString);
@@ -388,8 +352,7 @@ const char *__cdecl Dvar_IndexStringToEnumString(const dvar_s *dvar, const char 
 
 const char *__cdecl Dvar_DisplayableValue(const dvar_s *dvar)
 {
-    if (!dvar)
-        MyAssertHandler(".\\universal\\dvar.cpp", 519, 0, "%s", "dvar");
+    iassert(dvar);
     return Dvar_ValueToString(dvar, dvar->current);
 }
 
@@ -424,14 +387,7 @@ const char *__cdecl Dvar_ValueToString(const dvar_s *dvar, DvarValue value)
         result = va("%i", value.integer);
         break;
     case 6u:
-        if ((value.integer < 0 || value.integer >= dvar->domain.enumeration.stringCount) && value.integer)
-            MyAssertHandler(
-                ".\\universal\\dvar.cpp",
-                346,
-                0,
-                "%s\n\t(value.integer) = %i",
-                "(value.integer >= 0 && value.integer < dvar->domain.enumeration.stringCount || value.integer == 0)",
-                value.integer);
+        vassert((value.integer >= 0 && value.integer < dvar->domain.enumeration.stringCount || value.integer == 0), "(value.integer) = %i", value.integer);
         if (dvar->domain.enumeration.stringCount)
             result = *(const char **)(dvar->domain.integer.max + 4 * value.integer);
         else
@@ -464,15 +420,13 @@ const char *__cdecl Dvar_ValueToString(const dvar_s *dvar, DvarValue value)
 
 const char *__cdecl Dvar_DisplayableResetValue(const dvar_s *dvar)
 {
-    if (!dvar)
-        MyAssertHandler(".\\universal\\dvar.cpp", 527, 0, "%s", "dvar");
+    iassert(dvar);
     return Dvar_ValueToString(dvar, dvar->reset);
 }
 
 const char *__cdecl Dvar_DisplayableLatchedValue(const dvar_s *dvar)
 {
-    if (!dvar)
-        MyAssertHandler(".\\universal\\dvar.cpp", 535, 0, "%s", "dvar");
+    iassert(dvar);
     return Dvar_ValueToString(dvar, dvar->latched);
 }
 
@@ -716,8 +670,7 @@ const char *Dvar_DomainToString_GetLines(
     uint outBufferLen,
     int *outLineCount)
 {
-    if (!outLineCount)
-        MyAssertHandler(".\\universal\\dvar.cpp", 812, 0, "%s", "outLineCount");
+    iassert(outLineCount);
     return Dvar_DomainToString_Internal(type, *domain, outBuffer, outBufferLen, outLineCount);
 }
 
@@ -836,15 +789,13 @@ const dvar_s *__cdecl Dvar_FindVar(const char *dvarName)
 
 void __cdecl Dvar_ClearModified(dvar_s *dvar)
 {
-    if (!dvar)
-        MyAssertHandler(".\\universal\\dvar.cpp", 1100, 0, "%s", "dvar");
+    iassert(dvar);
     dvar->modified = 0;
 }
 
 void __cdecl Dvar_SetModified(dvar_s *dvar)
 {
-    if (!dvar)
-        MyAssertHandler(".\\universal\\dvar.cpp", 1107, 0, "%s", "dvar");
+    iassert(dvar);
     dvar->modified = 1;
 }
 
@@ -857,12 +808,9 @@ void __cdecl Dvar_UpdateEnumDomain(dvar_s *dvar, const char **stringTable)
     int stringCount; // [esp+20h] [ebp-8h]
     dvar_s *malleableDvar; // [esp+24h] [ebp-4h]
 
-    if (!dvar)
-        MyAssertHandler(".\\universal\\dvar.cpp", 1117, 0, "%s", "dvar");
-    if (!dvar->name)
-        MyAssertHandler(".\\universal\\dvar.cpp", 1118, 0, "%s", "dvar->name");
-    if (!stringTable)
-        MyAssertHandler(".\\universal\\dvar.cpp", 1119, 0, "%s\n\t(dvar->name) = %s", "(stringTable)", dvar->name);
+    iassert(dvar);
+    iassert(dvar->name);
+    vassert((stringTable), "(dvar->name) = %s", dvar->name);
     if (dvar->type != 6)
     {
         v2 = va("dvar %s type %i", dvar->name, dvar->type);
@@ -1009,8 +957,7 @@ bool __cdecl Dvar_GetBool(const char *dvarName)
 
 bool __cdecl Dvar_StringToBool(const char *string)
 {
-    if (!string)
-        MyAssertHandler(".\\universal\\dvar.cpp", 365, 0, "%s", "string");
+    iassert(string);
     return atoi(string) != 0;
 }
 
@@ -1021,14 +968,7 @@ int __cdecl Dvar_GetInt(const char *dvarName)
     dvar = Dvar_FindVar(dvarName);
     if (!dvar)
         return 0;
-    if (dvar->type != 5 && dvar->type != 6 && (dvar->type != 7 || (dvar->flags & 0x4000) == 0))
-        MyAssertHandler(
-            ".\\universal\\dvar.cpp",
-            1159,
-            0,
-            "%s\n\t(dvar->type) = %i",
-            "(dvar->type == DVAR_TYPE_INT || dvar->type == DVAR_TYPE_ENUM || (dvar->type == DVAR_TYPE_STRING && (dvar->flags & (1 << 14))))",
-            dvar->type);
+    vassert((dvar->type == DVAR_TYPE_INT || dvar->type == DVAR_TYPE_ENUM || (dvar->type == DVAR_TYPE_STRING && (dvar->flags & (1 << 14)))), "(dvar->type) = %i", dvar->type);
     if (dvar->type == 5 || dvar->type == 6)
         return dvar->current.integer;
     else
@@ -1037,8 +977,7 @@ int __cdecl Dvar_GetInt(const char *dvarName)
 
 int __cdecl Dvar_StringToInt(const char *string)
 {
-    if (!string)
-        MyAssertHandler(".\\universal\\dvar.cpp", 372, 0, "%s", "string");
+    iassert(string);
     return atoi(string);
 }
 
@@ -1049,14 +988,7 @@ double __cdecl Dvar_GetFloat(const char *dvarName)
     dvar = Dvar_FindVar(dvarName);
     if (!dvar)
         return 0.0;
-    if (dvar->type != 1 && (dvar->type != 7 || (dvar->flags & 0x4000) == 0))
-        MyAssertHandler(
-            ".\\universal\\dvar.cpp",
-            1175,
-            0,
-            "%s\n\t(dvar->type) = %i",
-            "(dvar->type == DVAR_TYPE_FLOAT || (dvar->type == DVAR_TYPE_STRING && (dvar->flags & (1 << 14))))",
-            dvar->type);
+    vassert((dvar->type == DVAR_TYPE_FLOAT || (dvar->type == DVAR_TYPE_STRING && (dvar->flags & (1 << 14)))), "(dvar->type) = %i", dvar->type);
     if (dvar->type == 1)
         return dvar->current.value;
     else
@@ -1065,8 +997,7 @@ double __cdecl Dvar_GetFloat(const char *dvarName)
 
 double __cdecl Dvar_StringToFloat(const char *string)
 {
-    if (!string)
-        MyAssertHandler(".\\universal\\dvar.cpp", 379, 0, "%s", "string");
+    iassert(string);
     return (float)atof(string);
 }
 
@@ -1077,14 +1008,7 @@ const char *__cdecl Dvar_GetString(const char *dvarName)
     dvar = Dvar_FindVar(dvarName);
     if (!dvar)
         return "";
-    if (dvar->type != 7 && dvar->type != 6)
-        MyAssertHandler(
-            ".\\universal\\dvar.cpp",
-            1207,
-            0,
-            "%s\n\t(dvar->type) = %i",
-            "(dvar->type == DVAR_TYPE_STRING || dvar->type == DVAR_TYPE_ENUM)",
-            dvar->type);
+    vassert((dvar->type == DVAR_TYPE_STRING || dvar->type == DVAR_TYPE_ENUM), "(dvar->type) = %i", dvar->type);
     if (dvar->type == 6)
         return Dvar_EnumToString(dvar);
     else
@@ -1106,16 +1030,8 @@ void __cdecl Dvar_GetUnpackedColor(const dvar_s *dvar, float *expandedColor)
 {
     uint8_t color[4]; // [esp+10h] [ebp-4h] BYREF
 
-    if (!dvar)
-        MyAssertHandler(".\\universal\\dvar.cpp", 1230, 0, "%s", "dvar");
-    if (dvar->type != 8 && (dvar->type != 7 || (dvar->flags & 0x4000) == 0))
-        MyAssertHandler(
-            ".\\universal\\dvar.cpp",
-            1231,
-            0,
-            "%s\n\t(dvar->type) = %i",
-            "(dvar->type == DVAR_TYPE_COLOR || (dvar->type == DVAR_TYPE_STRING && (dvar->flags & (1 << 14))))",
-            dvar->type);
+    iassert(dvar);
+    vassert((dvar->type == DVAR_TYPE_COLOR || (dvar->type == DVAR_TYPE_STRING && (dvar->flags & (1 << 14)))), "(dvar->type) = %i", dvar->type);
     if (dvar->type == 8)
         *(uint *)color = dvar->current.integer;
     else
@@ -1227,18 +1143,9 @@ void __cdecl Dvar_FreeString(DvarValue *value)
 
 void __cdecl Dvar_ChangeResetValue(dvar_s *dvar, DvarValue value)
 {
-    if (!dvar)
-        MyAssertHandler(".\\universal\\dvar.cpp", 1379, 0, "%s", "dvar");
-    if (!dvar->name)
-        MyAssertHandler(".\\universal\\dvar.cpp", 1380, 0, "%s", "dvar->name");
-    if ((dvar->flags & 0x200) == 0)
-        MyAssertHandler(
-            ".\\universal\\dvar.cpp",
-            1381,
-            0,
-            "%s\n\t(dvar->name) = %s",
-            "(dvar->flags & (1 << 9))",
-            dvar->name);
+    iassert(dvar);
+    iassert(dvar->name);
+    vassert((dvar->flags & (1 << 9)), "(dvar->name) = %s", dvar->name);
     Dvar_UpdateResetValue(dvar, value);
 }
 
@@ -1284,8 +1191,7 @@ void __cdecl Dvar_UpdateResetValue(dvar_s *dvar, DvarValue value)
 
 void __cdecl Dvar_AssignResetStringValue(dvar_s *dvar, DvarValue *dest, const char *string)
 {
-    if (!string)
-        MyAssertHandler(".\\universal\\dvar.cpp", 266, 0, "%s", "string");
+    iassert(string);
     if (dvar->current.integer && (string == (char *)dvar->current.integer || !strcmp(string, dvar->current.string)))
     {
         Dvar_WeakCopyString(dvar->current.string, dest);
@@ -1302,15 +1208,13 @@ void __cdecl Dvar_AssignResetStringValue(dvar_s *dvar, DvarValue *dest, const ch
 
 void __cdecl Dvar_CopyString(const char *string, DvarValue *value)
 {
-    if (!string)
-        MyAssertHandler(".\\universal\\dvar.cpp", 203, 0, "%s", "string");
+    iassert(string);
     value->integer = (int)CopyString(string);
 }
 
 void __cdecl Dvar_WeakCopyString(const char *string, DvarValue *value)
 {
-    if (!string)
-        MyAssertHandler(".\\universal\\dvar.cpp", 210, 0, "%s", "string");
+    iassert(string);
     value->integer = (int)string;
 }
 
@@ -1346,14 +1250,7 @@ void __cdecl Dvar_SetVariant(dvar_s *dvar, DvarValue value, DvarSetSource source
         Dvar_PrintDomain(dvar->type, dvar->domain);
         if (dvar->type == 6)
         {
-            if (!Dvar_ValueInDomain(dvar->type, dvar->reset, dvar->domain))
-                MyAssertHandler(
-                    ".\\universal\\dvar.cpp",
-                    955,
-                    0,
-                    "%s\n\t(dvar->name) = %s",
-                    "(Dvar_ValueInDomain( dvar->type, dvar->reset, dvar->domain ))",
-                    dvar->name);
+            vassert((Dvar_ValueInDomain( dvar->type, dvar->reset, dvar->domain )), "(dvar->name) = %s", dvar->name);
             Dvar_SetVariant(dvar, dvar->reset, source);
         }
         return;
@@ -1429,8 +1326,7 @@ void __cdecl Dvar_SetVariant(dvar_s *dvar, DvarValue value, DvarSetSource source
             dvar->latched = value;
             break;
         case 7u:
-            if (!dvar->name)
-                MyAssertHandler(".\\universal\\dvar.cpp", 1020, 0, "%s", "dvar->name");
+            iassert(dvar->name);
             if (value.integer == dvar->current.integer
                 && value.integer != dvar->latched.integer
                 && value.integer != dvar->reset.integer)
@@ -1466,8 +1362,7 @@ void __cdecl Dvar_SetVariant(dvar_s *dvar, DvarValue value, DvarSetSource source
 
 void __cdecl Dvar_AssignCurrentStringValue(dvar_s *dvar, DvarValue *dest, char *string)
 {
-    if (!string)
-        MyAssertHandler(".\\universal\\dvar.cpp", 242, 0, "%s", "string");
+    iassert(string);
     if (dvar->latched.integer && (string == (char *)dvar->latched.integer || !strcmp(string, dvar->latched.string)))
     {
         Dvar_WeakCopyString(dvar->latched.string, dest);
@@ -1522,8 +1417,7 @@ void __cdecl Dvar_SetLatchedValue(dvar_s *dvar, DvarValue value)
 
 void __cdecl Dvar_AssignLatchedStringValue(dvar_s *dvar, DvarValue *dest, char *string)
 {
-    if (!string)
-        MyAssertHandler(".\\universal\\dvar.cpp", 254, 0, "%s", "string");
+    iassert(string);
     if (dvar->current.integer && (string == (char *)dvar->current.integer || !strcmp(string, dvar->current.string)))
     {
         Dvar_WeakCopyString(dvar->current.string, dest);
@@ -1646,8 +1540,7 @@ void __cdecl Dvar_PerformUnregistration(dvar_s *dvar)
     const char *v2; // eax
     DvarValue resetString; // [esp+0h] [ebp-14h] BYREF
 
-    if (!dvar)
-        MyAssertHandler(".\\universal\\dvar.cpp", 1305, 0, "%s", "dvar");
+    iassert(dvar);
     if ((dvar->flags & 0x4000) == 0)
     {
         dvar->flags |= 0x4000u;
@@ -1710,10 +1603,8 @@ void __cdecl Dvar_Reregister(
     const char *v10; // eax
     const char *v11; // [esp-4h] [ebp-8h]
 
-    if (!dvar)
-        MyAssertHandler(".\\universal\\dvar.cpp", 1547, 0, "%s", "dvar");
-    if (!dvarName)
-        MyAssertHandler(".\\universal\\dvar.cpp", 1548, 0, "%s", "dvarName");
+    iassert(dvar);
+    iassert(dvarName);
     if (dvar->type != type && (dvar->flags & 0x4000) == 0)
     {
         v7 = va("%s: %i != %i", dvarName, dvar->type, type);
@@ -1736,8 +1627,7 @@ void __cdecl Dvar_Reregister(
         }
         Dvar_MakeExplicitType(dvar, dvarName, type, flags, resetValue, domain);
     }
-    if (dvar->type != type)
-        MyAssertHandler(".\\universal\\dvar.cpp", 1560, 0, "%s\n\t(dvarName) = %s", "(dvar->type == type)", dvarName);
+    vassert((dvar->type == type), "(dvarName) = %s", dvarName);
     if ((dvar->flags & 0x9200) == 0 && !Dvar_ValuesEqual(type, dvar->reset, resetValue))
     {
         v11 = Dvar_ValueToString(dvar, resetValue);
@@ -1773,14 +1663,7 @@ const dvar_s *__cdecl Dvar_RegisterVariant(
 {
     dvar_s *dvar; // [esp+0h] [ebp-8h]
 
-    if ((flags & 0x4000) == 0 && !CanKeepStringPointer(dvarName))
-        MyAssertHandler(
-            ".\\universal\\dvar.cpp",
-            1662,
-            0,
-            "%s\n\t(dvarName) = %s",
-            "((flags & (1 << 14)) || CanKeepStringPointer( dvarName ))",
-            dvarName);
+    vassert(((flags & (1 << 14)) || CanKeepStringPointer( dvarName )), "(dvarName) = %s", dvarName);
     dvar = Dvar_FindMalleableVar(dvarName);
     if (!dvar)
         return Dvar_RegisterNew(dvarName, type, flags, value, domain, description);
@@ -1804,14 +1687,7 @@ void __cdecl Dvar_MakeExplicitType(
     bool wasString; // [esp+47h] [ebp-15h]
     DvarValue castValue; // [esp+48h] [ebp-14h]
 
-    if (dvar->type != 7)
-        MyAssertHandler(
-            ".\\universal\\dvar.cpp",
-            1445,
-            0,
-            "%s\n\t(dvar->type) = %i",
-            "(dvar->type == DVAR_TYPE_STRING)",
-            dvar->type);
+    vassert((dvar->type == DVAR_TYPE_STRING), "(dvar->type) = %i", dvar->type);
     dvar->type = type;
     dvar->domain = domain;
     if ((flags & 0x40) != 0 || (flags & 0x80) != 0 && dvar_cheats && !dvar_cheats->current.enabled)
@@ -1850,8 +1726,7 @@ DvarValue *__cdecl Dvar_StringToValue(DvarValue *result, uint8_t type, DvarLimit
     const char *v4; // eax
     DvarValue value; // [esp+4h] [ebp-14h] BYREF
 
-    if (!string)
-        MyAssertHandler(".\\universal\\dvar.cpp", 466, 0, "%s", "string");
+    iassert(string);
     switch (type)
     {
     case 0u:
@@ -1896,8 +1771,7 @@ DvarValue *__cdecl Dvar_StringToValue(DvarValue *result, uint8_t type, DvarLimit
 
 void __cdecl Dvar_StringToVec2(const char *string, float *vector)
 {
-    if (!string)
-        MyAssertHandler(".\\universal\\dvar.cpp", 386, 0, "%s", "string");
+    iassert(string);
     *vector = 0.0;
     vector[1] = 0.0;
     sscanf(string, "%g %g", vector, vector + 1);
@@ -1905,8 +1779,7 @@ void __cdecl Dvar_StringToVec2(const char *string, float *vector)
 
 void __cdecl Dvar_StringToVec3(const char *string, float *vector)
 {
-    if (!string)
-        MyAssertHandler(".\\universal\\dvar.cpp", 395, 0, "%s", "string");
+    iassert(string);
     *vector = 0.0;
     vector[1] = 0.0;
     vector[2] = 0.0;
@@ -1918,8 +1791,7 @@ void __cdecl Dvar_StringToVec3(const char *string, float *vector)
 
 void __cdecl Dvar_StringToVec4(const char *string, float *vector)
 {
-    if (!string)
-        MyAssertHandler(".\\universal\\dvar.cpp", 407, 0, "%s", "string");
+    iassert(string);
     *vector = 0.0;
     vector[1] = 0.0;
     vector[2] = 0.0;
@@ -1935,10 +1807,8 @@ int __cdecl Dvar_StringToEnum(const DvarLimits *domain, const char *string)
     int stringIndexb; // [esp+14h] [ebp-8h]
     const char *digit; // [esp+18h] [ebp-4h]
 
-    if (!domain)
-        MyAssertHandler(".\\universal\\dvar.cpp", 420, 0, "%s", "domain");
-    if (!string)
-        MyAssertHandler(".\\universal\\dvar.cpp", 421, 0, "%s", "string");
+    iassert(domain);
+    iassert(string);
     for (stringIndex = 0; stringIndex < domain->enumeration.stringCount; ++stringIndex)
     {
         if (!I_stricmp(string, *(const char **)(domain->integer.max + 4 * stringIndex)))
@@ -1968,8 +1838,7 @@ void __cdecl Dvar_UpdateValue(dvar_s *dvar, DvarValue value)
     bool shouldFree; // [esp+2Fh] [ebp-15h]
     DvarValue currentString; // [esp+30h] [ebp-14h] BYREF
 
-    if (!dvar)
-        MyAssertHandler(".\\universal\\dvar.cpp", 1393, 0, "%s", "dvar");
+    iassert(dvar);
     switch (dvar->type)
     {
     case 2u:
@@ -2171,18 +2040,9 @@ const dvar_s *__cdecl Dvar_RegisterString(
 {
     DvarValue v5 = {};
 
-    if (!dvarName)
-        MyAssertHandler(".\\universal\\dvar.cpp", 1751, 0, "%s", "dvarName");
-    if (!value)
-        MyAssertHandler(".\\universal\\dvar.cpp", 1752, 0, "%s", "value");
-    if ((flags & 0x4000) == 0 && !CanKeepStringPointer(value))
-        MyAssertHandler(
-            ".\\universal\\dvar.cpp",
-            1753,
-            0,
-            "%s\n\t(dvarName) = %s",
-            "((flags & (1 << 14)) || CanKeepStringPointer( value ))",
-            dvarName);
+    iassert(dvarName);
+    iassert(value);
+    vassert(((flags & (1 << 14)) || CanKeepStringPointer( value )), "(dvarName) = %s", dvarName);
     v5.integer = (int)value;
     return Dvar_RegisterVariant(dvarName, DVAR_TYPE_STRING, flags, v5, 0, description);
 }
@@ -2197,10 +2057,8 @@ const dvar_s *__cdecl Dvar_RegisterEnum(
     DvarLimits dvarDomain = {};
     DvarValue dvarValue = {};
 
-    if (!dvarName)
-        MyAssertHandler(".\\universal\\dvar.cpp", 1766, 0, "%s", "dvarName");
-    if (!valueList)
-        MyAssertHandler(".\\universal\\dvar.cpp", 1767, 0, "%s", "valueList");
+    iassert(dvarName);
+    iassert(valueList);
     dvarValue.integer = defaultIndex;
     dvarDomain.integer.max = (int)valueList;
     for (dvarDomain.enumeration.stringCount = 0;
@@ -2209,17 +2067,7 @@ const dvar_s *__cdecl Dvar_RegisterEnum(
     {
         ;
     }
-    if (defaultIndex < 0 || defaultIndex >= dvarDomain.enumeration.stringCount)
-    {
-        if (defaultIndex)
-            MyAssertHandler(
-                ".\\universal\\dvar.cpp",
-                1773,
-                0,
-                "%s\n\t(dvarName) = %s",
-                "(defaultIndex >= 0 && defaultIndex < dvarDomain.enumeration.stringCount || defaultIndex == 0)",
-                dvarName);
-    }
+    vassert((defaultIndex >= 0 && defaultIndex < dvarDomain.enumeration.stringCount || defaultIndex == 0), "(dvarName) = %s", dvarName);
     return Dvar_RegisterVariant(dvarName, DVAR_TYPE_ENUM, flags, dvarValue, dvarDomain, description);
 }
 
@@ -2302,10 +2150,8 @@ void __cdecl Dvar_SetBoolFromSource(dvar_s *dvar, bool value, DvarSetSource sour
     const char *v3; // [esp+0h] [ebp-18h]
     DvarValue newValue; // [esp+4h] [ebp-14h]
 
-    if (!dvar)
-        MyAssertHandler(".\\universal\\dvar.cpp", 1798, 0, "%s", "dvar");
-    if (!dvar->name)
-        MyAssertHandler(".\\universal\\dvar.cpp", 1799, 0, "%s", "dvar->name");
+    iassert(dvar);
+    iassert(dvar->name);
     if (dvar->type && (dvar->type != 7 || (dvar->flags & 0x4000) == 0))
         MyAssertHandler(
             ".\\universal\\dvar.cpp",
@@ -2334,18 +2180,9 @@ void __cdecl Dvar_SetIntFromSource(dvar_s *dvar, int value, DvarSetSource source
     char string[32]; // [esp+0h] [ebp-34h] BYREF
     DvarValue newValue; // [esp+20h] [ebp-14h]
 
-    if (!dvar)
-        MyAssertHandler(".\\universal\\dvar.cpp", 1816, 0, "%s", "dvar");
-    if (!dvar->name)
-        MyAssertHandler(".\\universal\\dvar.cpp", 1817, 0, "%s", "dvar->name");
-    if (dvar->type != 5 && dvar->type != 6 && (dvar->type != 7 || (dvar->flags & 0x4000) == 0))
-        MyAssertHandler(
-            ".\\universal\\dvar.cpp",
-            1818,
-            0,
-            "%s\n\t(dvar->name) = %s",
-            "(dvar->type == DVAR_TYPE_INT || dvar->type == DVAR_TYPE_ENUM || (dvar->type == DVAR_TYPE_STRING && (dvar->flags & (1 << 14))))",
-            dvar->name);
+    iassert(dvar);
+    iassert(dvar->name);
+    vassert((dvar->type == DVAR_TYPE_INT || dvar->type == DVAR_TYPE_ENUM || (dvar->type == DVAR_TYPE_STRING && (dvar->flags & (1 << 14)))), "(dvar->name) = %s", dvar->name);
     if (dvar->type == 5 || dvar->type == 6)
     {
         newValue.integer = value;
@@ -2363,18 +2200,9 @@ void __cdecl Dvar_SetFloatFromSource(dvar_s *dvar, float value, DvarSetSource so
     char string[32]; // [esp+8h] [ebp-34h] BYREF
     DvarValue newValue; // [esp+28h] [ebp-14h]
 
-    if (!dvar)
-        MyAssertHandler(".\\universal\\dvar.cpp", 1839, 0, "%s", "dvar");
-    if (!dvar->name)
-        MyAssertHandler(".\\universal\\dvar.cpp", 1840, 0, "%s", "dvar->name");
-    if (dvar->type != 1 && (dvar->type != 7 || (dvar->flags & 0x4000) == 0))
-        MyAssertHandler(
-            ".\\universal\\dvar.cpp",
-            1841,
-            0,
-            "%s\n\t(dvar->name) = %s",
-            "(dvar->type == DVAR_TYPE_FLOAT || (dvar->type == DVAR_TYPE_STRING && (dvar->flags & (1 << 14))))",
-            dvar->name);
+    iassert(dvar);
+    iassert(dvar->name);
+    vassert((dvar->type == DVAR_TYPE_FLOAT || (dvar->type == DVAR_TYPE_STRING && (dvar->flags & (1 << 14)))), "(dvar->name) = %s", dvar->name);
     if (dvar->type == 1)
     {
         newValue.value = value;
@@ -2392,18 +2220,9 @@ void __cdecl Dvar_SetVec2FromSource(dvar_s *dvar, float x, float y, DvarSetSourc
     char string[68]; // [esp+10h] [ebp-58h] BYREF
     DvarValue newValue; // [esp+54h] [ebp-14h]
 
-    if (!dvar)
-        MyAssertHandler(".\\universal\\dvar.cpp", 1862, 0, "%s", "dvar");
-    if (!dvar->name)
-        MyAssertHandler(".\\universal\\dvar.cpp", 1863, 0, "%s", "dvar->name");
-    if (dvar->type != 4 && (dvar->type != 7 || (dvar->flags & 0x4000) == 0))
-        MyAssertHandler(
-            ".\\universal\\dvar.cpp",
-            1864,
-            0,
-            "%s\n\t(dvar->name) = %s",
-            "(dvar->type == DVAR_TYPE_FLOAT_4 || (dvar->type == DVAR_TYPE_STRING && (dvar->flags & (1 << 14))))",
-            dvar->name);
+    iassert(dvar);
+    iassert(dvar->name);
+    vassert((dvar->type == DVAR_TYPE_FLOAT_4 || (dvar->type == DVAR_TYPE_STRING && (dvar->flags & (1 << 14)))), "(dvar->name) = %s", dvar->name);
     if (dvar->type == 4)
     {
         newValue.value = x;
@@ -2422,18 +2241,9 @@ void __cdecl Dvar_SetVec3FromSource(dvar_s *dvar, float x, float y, float z, Dva
     char string[100]; // [esp+18h] [ebp-78h] BYREF
     DvarValue newValue; // [esp+7Ch] [ebp-14h]
 
-    if (!dvar)
-        MyAssertHandler(".\\universal\\dvar.cpp", 1885, 0, "%s", "dvar");
-    if (!dvar->name)
-        MyAssertHandler(".\\universal\\dvar.cpp", 1886, 0, "%s", "dvar->name");
-    if (dvar->type != 3 && (dvar->type != 7 || (dvar->flags & 0x4000) == 0))
-        MyAssertHandler(
-            ".\\universal\\dvar.cpp",
-            1887,
-            0,
-            "%s\n\t(dvar->name) = %s",
-            "(dvar->type == DVAR_TYPE_FLOAT_3 || (dvar->type == DVAR_TYPE_STRING && (dvar->flags & (1 << 14))))",
-            dvar->name);
+    iassert(dvar);
+    iassert(dvar->name);
+    vassert((dvar->type == DVAR_TYPE_FLOAT_3 || (dvar->type == DVAR_TYPE_STRING && (dvar->flags & (1 << 14)))), "(dvar->name) = %s", dvar->name);
     if (dvar->type == 3)
     {
         newValue.value = x;
@@ -2453,18 +2263,9 @@ void __cdecl Dvar_SetVec4FromSource(dvar_s *dvar, float x, float y, float z, flo
     char string[132]; // [esp+20h] [ebp-98h] BYREF
     DvarValue newValue; // [esp+A4h] [ebp-14h]
 
-    if (!dvar)
-        MyAssertHandler(".\\universal\\dvar.cpp", 1908, 0, "%s", "dvar");
-    if (!dvar->name)
-        MyAssertHandler(".\\universal\\dvar.cpp", 1909, 0, "%s", "dvar->name");
-    if (dvar->type != 4 && (dvar->type != 7 || (dvar->flags & 0x4000) == 0))
-        MyAssertHandler(
-            ".\\universal\\dvar.cpp",
-            1910,
-            0,
-            "%s\n\t(dvar->name) = %s",
-            "(dvar->type == DVAR_TYPE_FLOAT_4 || (dvar->type == DVAR_TYPE_STRING && (dvar->flags & (1 << 14))))",
-            dvar->name);
+    iassert(dvar);
+    iassert(dvar->name);
+    vassert((dvar->type == DVAR_TYPE_FLOAT_4 || (dvar->type == DVAR_TYPE_STRING && (dvar->flags & (1 << 14)))), "(dvar->name) = %s", dvar->name);
     if (dvar->type == 4)
     {
         newValue.value = x;
@@ -2712,8 +2513,7 @@ void __cdecl Dvar_SetDomainFunc(dvar_s *dvar, bool(__cdecl *customFunc)(dvar_s *
     const char *v2; // eax
     const char *name; // [esp-4h] [ebp-4h]
 
-    if (!dvar)
-        MyAssertHandler(".\\universal\\dvar.cpp", 2198, 0, "%s", "dvar");
+    iassert(dvar);
     dvar->domainFunc = customFunc;
     if (customFunc)
     {
@@ -2734,23 +2534,14 @@ void __cdecl Dvar_SetDomainFunc(dvar_s *dvar, bool(__cdecl *customFunc)(dvar_s *
 
 void __cdecl Dvar_AddFlags(dvar_s *dvar, int flags)
 {
-    if (!dvar)
-        MyAssertHandler(".\\universal\\dvar.cpp", 2212, 0, "%s", "dvar");
-    if ((flags & 0x40F0) != 0)
-        MyAssertHandler(
-            ".\\universal\\dvar.cpp",
-            2213,
-            0,
-            "%s\n\t(flags) = %i",
-            "((flags & ((1 << 7) | (1 << 4) | (1 << 6) | (1 << 14) | (1 << 5))) == 0)",
-            flags);
+    iassert(dvar);
+    vassert(((flags & ((1 << 7) | (1 << 4) | (1 << 6) | (1 << 14) | (1 << 5))) == 0), "(flags) = %i", flags);
     dvar->flags |= flags;
 }
 
 void __cdecl Dvar_Reset(dvar_s *dvar, DvarSetSource setSource)
 {
-    if (!dvar)
-        MyAssertHandler(".\\universal\\dvar.cpp", 2220, 0, "%s", "dvar");
+    iassert(dvar);
     Dvar_SetVariant(dvar, dvar->reset, setSource);
 }
 
@@ -2869,8 +2660,7 @@ int __cdecl Com_SaveDvarsToBuffer(const char **dvarnames, uint numDvars, char *b
     for (i = 0; i < numDvars; ++i)
     {
         dvar = Dvar_FindVar(dvarnames[i]);
-        if (!dvar)
-            MyAssertHandler(".\\universal\\dvar.cpp", 2454, 0, "%s", "dvar");
+        iassert(dvar);
         string = Dvar_DisplayableValue(dvar);
         written = _snprintf(buffer, bufsize, "%s \"%s\"\n", dvar->name, string);
         if (written < 0)
@@ -2921,8 +2711,7 @@ int __cdecl Com_LoadDvarsFromBuffer(const char **dvarnames, uint numDvars, char 
                 break;
         }
         dvar = (dvar_s *)Dvar_FindVar(dvarnames[i]);
-        if (!dvar)
-            MyAssertHandler(".\\universal\\dvar.cpp", 2509, 0, "%s", "dvar");
+        iassert(dvar);
         s0 = (char *)Com_ParseOnLine((const char **)&buffer);
         Dvar_SetFromString(dvar, s0);
         if (!dst[i])

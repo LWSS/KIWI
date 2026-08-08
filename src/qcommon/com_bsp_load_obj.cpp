@@ -15,15 +15,7 @@ uint __cdecl Com_GetBspVersion()
 
 char __cdecl Com_CheckVersionLumpCountError(int version)
 {
-    if (version < 6 || version > 22)
-        MyAssertHandler(
-            ".\\qcommon\\com_bsp_load_obj.cpp",
-            269,
-            0,
-            "version not in [OLDEST_BSP_VERSION, BSP_VERSION]\n\t%i not in [%i, %i]",
-            version,
-            6,
-            22);
+    rangeassert(version, 6, 22);
     if (comBspGlob.header->version > 0x12)
     {
         if (comBspGlob.fileSize < 8 * comBspGlob.header->chunkCount + 12)
@@ -162,15 +154,7 @@ uint lumpsForVersion[13] =
 
 uint __cdecl Com_GetBspLumpCountForVersion(int version)
 {
-    if (version < 6 || version > 18)
-        MyAssertHandler(
-            ".\\qcommon\\com_bsp_load_obj.cpp",
-            58,
-            0,
-            "version not in [OLDEST_BSP_VERSION, 18]\n\t%i not in [%i, %i]",
-            version,
-            6,
-            18);
+    rangeassert(version, 6, 18);
     //return WeaponStateNames[version + 21];
     return lumpsForVersion[version - 6];
 }

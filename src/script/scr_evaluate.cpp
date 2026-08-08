@@ -85,8 +85,7 @@ void __cdecl Scr_ArchiveCanonicalStrings()
             ++i;
         }
     }
-    if (i != scrVarPub.canonicalStrCount)
-        MyAssertHandler(".\\script\\scr_evaluate.cpp", 160, 0, "%s", "i == scrVarPub.canonicalStrCount");
+    iassert(i == scrVarPub.canonicalStrCount);
     qsort(
         scrEvaluateGlob.archivedCanonicalStrings,
         scrVarPub.canonicalStrCount,
@@ -120,10 +119,8 @@ int __cdecl CompareCanonicalStrings(const char **arg1, const char **arg2)
 
 const char *__cdecl Scr_GetCanonicalString(uint fieldName)
 {
-    if (!fieldName)
-        MyAssertHandler(".\\script\\scr_evaluate.cpp", 183, 0, "%s", "fieldName");
-    if (fieldName > scrVarPub.canonicalStrCount)
-        MyAssertHandler(".\\script\\scr_evaluate.cpp", 184, 0, "%s", "fieldName <= scrVarPub.canonicalStrCount");
+    iassert(fieldName);
+    iassert(fieldName <= scrVarPub.canonicalStrCount);
     if (scrEvaluateGlob.canonicalStringLookup[fieldName] >= (uint)scrVarPub.canonicalStrCount)
         MyAssertHandler(
             ".\\script\\scr_evaluate.cpp",
@@ -334,8 +331,7 @@ void __cdecl Scr_EvalArrayVariable(uint arrayId, VariableValue *value)
 {
     VariableValue parentValue; // [esp+0h] [ebp-8h] BYREF
 
-    if (!scrVarPub.evaluate)
-        MyAssertHandler(".\\script\\scr_evaluate.cpp", 481, 0, "%s", "scrVarPub.evaluate");
+    iassert(scrVarPub.evaluate);
     parentValue.type = VAR_POINTER;
     parentValue.u.intValue = arrayId;
     AddRefToObject(arrayId);
@@ -362,8 +358,7 @@ void __cdecl Scr_EvalFieldVariableInternal(uint objectId, uint fieldName, Variab
     uint outparamcount; // [esp+8h] [ebp-8h]
     VariableValue *savedTop; // [esp+Ch] [ebp-4h]
 
-    if (!fieldName)
-        MyAssertHandler(".\\script\\scr_evaluate.cpp", 1087, 0, "%s", "fieldName");
+    iassert(fieldName);
     if (IsFieldObject(objectId))
     {
         outparamcount = scrVmPub.outparamcount;
@@ -384,8 +379,7 @@ void __cdecl Scr_EvalFieldVariableInternal(uint objectId, uint fieldName, Variab
 
 void __cdecl Scr_EvalFieldVariable(uint fieldName, VariableValue *value, uint objectId)
 {
-    if (!scrVarPub.evaluate)
-        MyAssertHandler(".\\script\\scr_evaluate.cpp", 1122, 0, "%s", "scrVarPub.evaluate");
+    iassert(scrVarPub.evaluate);
     Scr_EvalFieldVariableInternal(objectId, fieldName, value);
 }
 
@@ -753,8 +747,7 @@ void __cdecl Scr_CompileText(const char *text, ScriptExpression_t *scriptExpr)
     g_debugExprHead = 0;
     g_breakonExpr = 0;
     Scr_CompileTextInternal(text, scriptExpr);
-    if (!g_debugExprHead)
-        MyAssertHandler(".\\script\\scr_evaluate.cpp", 2191, 0, "%s", "g_debugExprHead");
+    iassert(g_debugExprHead);
     scriptExpr->exprHead = g_debugExprHead;
     scriptExpr->breakonExpr = g_breakonExpr;
 }
@@ -776,10 +769,8 @@ void __cdecl Scr_CompileTextInternal(const char *text, ScriptExpression_t *scrip
         Scr_InitAllocNode();
         scrCompilePub.in_ptr = "*";
         scrCompilePub.parseBuf = text;
-        if (scrVarPub.error_message)
-            MyAssertHandler(".\\script\\scr_evaluate.cpp", 2109, 0, "%s", "!scrVarPub.error_message");
-        if (!scrVarPub.evaluate)
-            MyAssertHandler(".\\script\\scr_evaluate.cpp", 2111, 0, "%s", "scrVarPub.evaluate");
+        iassert(!scrVarPub.error_message);
+        iassert(scrVarPub.evaluate);
         ScriptParse(&scriptExpr->parseData, 2u);
         if (scrVarPub.error_message)
         {
@@ -801,8 +792,7 @@ void __cdecl Scr_CompileTextInternal(const char *text, ScriptExpression_t *scrip
                     scrVarPub.varUsagePos = "<debug expression>";
                 Scr_CompileExpression(&scriptExpr->parseData);
                 scrVarPub.varUsagePos = varUsagePos;
-                if (scrVarPub.error_message)
-                    MyAssertHandler(".\\script\\scr_evaluate.cpp", 2137, 0, "%s", "!scrVarPub.error_message");
+                iassert(!scrVarPub.error_message);
                 SL_ShutdownSystem(2);
             }
             else
@@ -1339,8 +1329,7 @@ uint __cdecl Scr_EvalPrimitiveExpressionFieldObject(sval_u expr, uint localId)
         result = selfId;
         break;
     case 0x21:
-        if (!expr.node[2].idValue)
-            MyAssertHandler(".\\script\\scr_evaluate.cpp", 1016, 0, "%s", "expr.node[2].idValue");
+        iassert(expr.node[2].idValue);
         result = expr.node[2].idValue;
         break;
     case 0x22:
@@ -1383,14 +1372,7 @@ void __cdecl Scr_EvalFunction(sval_u func_name, sval_u params, uint localId, Var
 
     if (!setjmp(g_script_error[g_script_error_level]))
         ((void (*)(void))func_name.type)();
-    if (g_script_error_level < 0)
-        MyAssertHandler(
-            ".\\script\\scr_evaluate.cpp",
-            1646,
-            0,
-            "%s\n\t(g_script_error_level) = %i",
-            "(g_script_error_level >= 0)",
-            g_script_error_level);
+    vassert((g_script_error_level >= 0), "(g_script_error_level) = %i", g_script_error_level);
     --g_script_error_level;
     Scr_PostEvalBuiltin(value);
 }
@@ -1401,27 +1383,20 @@ void __cdecl Scr_PreEvalBuiltin(sval_u params, uint localId)
     uint expr_count; // [esp+4h] [ebp-8h]
     int index; // [esp+8h] [ebp-4h]
 
-    if (scrVmPub.outparamcount)
-        MyAssertHandler(".\\script\\scr_evaluate.cpp", 1574, 0, "%s", "!scrVmPub.outparamcount");
-    if (scrVmPub.inparamcount)
-        MyAssertHandler(".\\script\\scr_evaluate.cpp", 1575, 0, "%s", "!scrVmPub.inparamcount");
+    iassert(!scrVmPub.outparamcount);
+    iassert(!scrVmPub.inparamcount);
     expr_count = GetExpressionCount(params);
-    if (scrVmPub.top < scrVmPub.stack)
-        MyAssertHandler(".\\script\\scr_evaluate.cpp", 1578, 0, "%s", "scrVmPub.top >= scrVmPub.stack");
-    if (scrVmPub.top > scrVmPub.maxstack)
-        MyAssertHandler(".\\script\\scr_evaluate.cpp", 1579, 0, "%s", "scrVmPub.top <= scrVmPub.maxstack");
+    iassert(scrVmPub.top >= scrVmPub.stack);
+    iassert(scrVmPub.top <= scrVmPub.maxstack);
     scrVmPub.top += expr_count;
-    if (scrVmPub.top > scrVmPub.maxstack)
-        MyAssertHandler(".\\script\\scr_evaluate.cpp", 1581, 0, "%s", "scrVmPub.top <= scrVmPub.maxstack");
+    iassert(scrVmPub.top <= scrVmPub.maxstack);
     index = 0;
     for (node = *(sval_u **)params.type; node; node = node[1].node)
         Scr_EvalExpression((sval_u)node->type, localId, &scrVmPub.top[-index++]);
     scrVmPub.outparamcount = expr_count;
-    if (!scrVarPub.evaluate)
-        MyAssertHandler(".\\script\\scr_evaluate.cpp", 1593, 0, "%s", "scrVarPub.evaluate");
+    iassert(scrVarPub.evaluate);
     scrVarPub.evaluate = 0;
-    if (scrVmPub.debugCode)
-        MyAssertHandler(".\\script\\scr_evaluate.cpp", 1596, 0, "%s", "!scrVmPub.debugCode");
+    iassert(!scrVmPub.debugCode);
     scrVmPub.debugCode = 1;
 }
 
@@ -1429,17 +1404,14 @@ void __cdecl Scr_PostEvalBuiltin(VariableValue *value)
 {
     Vartype_t type; // ecx
 
-    if (!scrVmPub.debugCode)
-        MyAssertHandler(".\\script\\scr_evaluate.cpp", 1609, 0, "%s", "scrVmPub.debugCode");
+    iassert(scrVmPub.debugCode);
     scrVmPub.debugCode = 0;
-    if (scrVarPub.evaluate)
-        MyAssertHandler(".\\script\\scr_evaluate.cpp", 1612, 0, "%s", "!scrVarPub.evaluate");
+    iassert(!scrVarPub.evaluate);
     scrVarPub.evaluate = 1;
     Scr_ClearOutParams();
     if (scrVmPub.inparamcount)
     {
-        if (scrVmPub.inparamcount != 1)
-            MyAssertHandler(".\\script\\scr_evaluate.cpp", 1619, 0, "%s", "scrVmPub.inparamcount == 1");
+        iassert(scrVmPub.inparamcount == 1);
         scrVmPub.inparamcount = 0;
         type = scrVmPub.top->type;
         value->u.intValue = scrVmPub.top->u.intValue;
@@ -1495,14 +1467,7 @@ void __cdecl Scr_EvalMethod(sval_u expr, sval_u func_name, sval_u params, uint l
         RemoveRefToObject(objectId.stringValue);
         ((void(__cdecl *)(uint))func_name.type)(entref.entnum); // KISAKTODO: fubar'd union 'entref'
     }
-    if (g_script_error_level < 0)
-        MyAssertHandler(
-            ".\\script\\scr_evaluate.cpp",
-            1699,
-            0,
-            "%s\n\t(g_script_error_level) = %i",
-            "(g_script_error_level >= 0)",
-            g_script_error_level);
+    vassert((g_script_error_level >= 0), "(g_script_error_level) = %i", g_script_error_level);
     --g_script_error_level;
     Scr_PostEvalBuiltin(value);
 }
@@ -1589,11 +1554,9 @@ bool __cdecl Scr_RefScriptExpression(ScriptExpression_t *expr)
 {
     bool result; // [esp+3h] [ebp-1h]
 
-    if (!expr)
-        MyAssertHandler(".\\script\\scr_evaluate.cpp", 2250, 0, "%s", "expr");
+    iassert(expr);
     result = Scr_RefExpression(expr->parseData);
-    if (!expr->exprHead)
-        MyAssertHandler(".\\script\\scr_evaluate.cpp", 2253, 0, "%s", "expr->exprHead");
+    iassert(expr->exprHead);
     Scr_ClearDebugExpr(expr->exprHead);
     return result;
 }

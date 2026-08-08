@@ -290,16 +290,8 @@ void __cdecl dxProcessIslands(dxWorld *world, float stepsize)
     int n; // [esp+5028h] [ebp-8h]
     int bodyCount; // [esp+502Ch] [ebp-4h] BYREF
 
-    if (world->nb > 512)
-        MyAssertHandler(".\\physics\\ode\\src\\util.cpp", 217, 0, "%s\n\t(world->nb) = %i", "(world->nb <= 512)", world->nb);
-    if (world->nj > 4096)
-        MyAssertHandler(
-            ".\\physics\\ode\\src\\util.cpp",
-            218,
-            0,
-            "%s\n\t(world->nj) = %i",
-            "(world->nj <= 4096)",
-            world->nj);
+    vassert((world->nb <= 512), "(world->nb) = %i", world->nb);
+    vassert((world->nj <= 4096), "(world->nj) = %i", world->nj);
     if (world->nb > 0)
     {
         dInternalHandleAutoDisabling(world, stepsize);
@@ -355,22 +347,8 @@ void __cdecl dxProcessIslands(dxWorld *world, float stepsize)
                             "%s\n\t(stacksize) = %i",
                             "(stacksize <= world->nj)",
                             v6);
-                    if (bodyCount > world->nb)
-                        MyAssertHandler(
-                            ".\\physics\\ode\\src\\util.cpp",
-                            283,
-                            0,
-                            "%s\n\t(bodyCount) = %i",
-                            "(bodyCount <= world->nb)",
-                            bodyCount);
-                    if (jointCount > world->nj)
-                        MyAssertHandler(
-                            ".\\physics\\ode\\src\\util.cpp",
-                            284,
-                            0,
-                            "%s\n\t(jointCount) = %i",
-                            "(jointCount <= world->nj)",
-                            jointCount);
+                    vassert((bodyCount <= world->nb), "(bodyCount) = %i", bodyCount);
+                    vassert((jointCount <= world->nj), "(jointCount) = %i", jointCount);
                     if (!v6)
                         break;
                     i = (dxBody *)v7[--v6];

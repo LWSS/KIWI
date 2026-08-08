@@ -529,27 +529,17 @@ void __cdecl CG_ResetPlayerEntity(int localClientNum, cg_s *cgameGlob, centity_s
     DObj_s *obj; // [esp+1Ch] [ebp-Ch]
     clientInfo_t *ci; // [esp+24h] [ebp-4h]
 
-    if (cent->nextState.clientNum >= 0x40u)
-        MyAssertHandler(
-            ".\\cgame_mp\\cg_players_mp.cpp",
-            605,
-            0,
-            "es->clientNum doesn't index MAX_CLIENTS\n\t%i not in [0, %i)",
-            cent->nextState.clientNum,
-            64);
+    bcassert(cent->nextState.clientNum, 0x40u);
     ci = &cgameGlob->bgs.clientinfo[cent->nextState.clientNum];
     if ((cent->nextState.lerp.eFlags & 0x20000) == 0 && resetAnimation)
     {
         pAnimTree = cgameGlob->bgs.clientinfo[cent->nextState.clientNum].pXAnimTree;
-        if (!pAnimTree)
-            MyAssertHandler(".\\cgame_mp\\cg_players_mp.cpp", 613, 0, "%s", "pAnimTree");
+        iassert(pAnimTree);
         obj = Com_GetClientDObj(cent->nextState.number, localClientNum);
         if (obj)
         {
-            if (!DObjGetTree(obj))
-                MyAssertHandler(".\\cgame_mp\\cg_players_mp.cpp", 618, 0, "%s", "DObjGetTree( obj )");
-            if (DObjGetTree(obj) != pAnimTree)
-                MyAssertHandler(".\\cgame_mp\\cg_players_mp.cpp", 619, 0, "%s", "DObjGetTree( obj ) == pAnimTree");
+            iassert(DObjGetTree( obj ));
+            iassert(DObjGetTree( obj ) == pAnimTree);
             XAnimClearTreeGoalWeights(pAnimTree, 0, 0.0);
             XAnimSetCompleteGoalWeight(obj, cgameGlob->bgs.animScriptData.torsoAnim, 0.0, 0.0, 1.0, 0, 0, 0);
             XAnimSetCompleteGoalWeight(obj, cgameGlob->bgs.animScriptData.legsAnim, 1.0, 0.0, 1.0, 0, 0, 0);
@@ -640,14 +630,7 @@ const char *__cdecl CG_GetPlayerTeamName(int localClientNum)
 
     cgameGlob = CG_GetLocalClientGlobals(localClientNum);
 
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\src\\cgame_mp\\../client_mp/client_mp.h",
-            1112,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     if (clientUIActives[0].connectionState < CA_PRIMED)
         return CG_GetTeamName(TEAM_FREE);
 
@@ -665,14 +648,7 @@ const char *__cdecl CG_GetPlayerOpposingTeamName(int localClientNum)
 
     cgameGlob = CG_GetLocalClientGlobals(localClientNum);
 
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\src\\cgame_mp\\../client_mp/client_mp.h",
-            1112,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     if (clientUIActives[0].connectionState < CA_PRIMED)
         return CG_GetOpposingTeamName(TEAM_FREE);
 
@@ -690,14 +666,7 @@ bool __cdecl CG_IsPlayerDead(int localClientNum)
 
     cgameGlob = CG_GetLocalClientGlobals(localClientNum);
 
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\src\\cgame_mp\\../client_mp/client_mp.h",
-            1112,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     if (clientUIActives[0].connectionState < CA_PRIMED)
         return 0;
 
@@ -849,10 +818,8 @@ void __cdecl CG_CalcWeaponVisTrace(
     float maxs[3]; // [esp+1Ch] [ebp-10h] BYREF
     const DObjAnimMat *baseMat; // [esp+28h] [ebp-4h]
 
-    if (!weapModel)
-        MyAssertHandler(".\\cgame_mp\\cg_players_mp.cpp", 1005, 0, "%s", "weapModel");
-    if (!modelLen)
-        MyAssertHandler(".\\cgame_mp\\cg_players_mp.cpp", 1006, 0, "%s", "modelLen");
+    iassert(weapModel);
+    iassert(modelLen);
     XModelGetBounds(weapModel, mins, maxs);
     baseMat = XModelGetBasePose(weapModel);
     stockDist = mins[0] - baseMat->trans[0];

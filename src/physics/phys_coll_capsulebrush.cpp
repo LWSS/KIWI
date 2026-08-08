@@ -294,17 +294,7 @@ void __cdecl Phys_AddLocalContactData(float depth, float *normal, const float *p
 
     if (numLocalContacts < 32)
     {
-        if ((COERCE_UNSIGNED_INT(*normal) & 0x7F800000) == 0x7F800000
-            || (COERCE_UNSIGNED_INT(normal[1]) & 0x7F800000) == 0x7F800000
-            || (COERCE_UNSIGNED_INT(normal[2]) & 0x7F800000) == 0x7F800000)
-        {
-            MyAssertHandler(
-                ".\\physics\\phys_coll_capsulebrush.cpp",
-                78,
-                0,
-                "%s",
-                "!IS_NAN((normal)[0]) && !IS_NAN((normal)[1]) && !IS_NAN((normal)[2])");
-        }
+        nanassertvec3(normal);
         contact = &localContacts[numLocalContacts++];
         contact->pos[0] = *pos;
         contact->pos[1] = pos[1];

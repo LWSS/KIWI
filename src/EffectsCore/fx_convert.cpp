@@ -29,8 +29,7 @@ char __cdecl FX_ValidateAtlasSettings(const FxEditorEffectDef *editorEffect, con
     MaterialInfo mtlInfo; // [esp+18h] [ebp-20h] BYREF
     int visualIndex; // [esp+34h] [ebp-4h]
 
-    if (!edElemDef)
-        MyAssertHandler(".\\EffectsCore\\fx_convert.cpp", 627, 0, "%s", "edElemDef");
+    iassert(edElemDef);
     if (!edElemDef->visualCount)
         return 1;
     if (!FX_ElemUsesMaterial(edElemDef))
@@ -302,8 +301,7 @@ void __cdecl FX_InterpolateSamples(
     float lerp; // [esp+18h] [ebp-8h]
     int dimIndex; // [esp+1Ch] [ebp-4h]
 
-    if (dimensions <= 0)
-        MyAssertHandler(".\\EffectsCore\\fx_convert.cpp", 44, 0, "%s\n\t(dimensions) = %i", "(dimensions > 0)", dimensions);
+    vassert((dimensions > 0), "(dimensions) = %i", dimensions);
     if (time1 <= (double)time0)
         MyAssertHandler(".\\EffectsCore\\fx_convert.cpp", 45, 0, "time0 < time1\n\t%g, %g", time0, time1);
     if (timeEval < (double)time0 || time1 < (double)timeEval)
@@ -315,12 +313,9 @@ void __cdecl FX_InterpolateSamples(
             timeEval,
             time0,
             time1);
-    if (!samples0)
-        MyAssertHandler(".\\EffectsCore\\fx_convert.cpp", 47, 0, "%s", "samples0");
-    if (!samples1)
-        MyAssertHandler(".\\EffectsCore\\fx_convert.cpp", 48, 0, "%s", "samples1");
-    if (!result)
-        MyAssertHandler(".\\EffectsCore\\fx_convert.cpp", 49, 0, "%s", "result");
+    iassert(samples0);
+    iassert(samples1);
+    iassert(result);
     for (dimIndex = 0; dimIndex < dimensions; ++dimIndex)
     {
         lerp = (timeEval - time0) / (time1 - time0);
@@ -353,18 +348,9 @@ double __cdecl FX_MaxErrorForIntervalCount(
     float lerpedValuePrev[3]; // [esp+64h] [ebp-10h] BYREF
     const float *samplesFrom; // [esp+70h] [ebp-4h]
 
-    if (dimensions <= 0)
-        MyAssertHandler(".\\EffectsCore\\fx_convert.cpp", 98, 0, "%s\n\t(dimensions) = %i", "(dimensions > 0)", dimensions);
-    if (sampleCount <= 1)
-        MyAssertHandler(
-            ".\\EffectsCore\\fx_convert.cpp",
-            99,
-            0,
-            "%s\n\t(sampleCount) = %i",
-            "(sampleCount > 1)",
-            sampleCount);
-    if (!samples)
-        MyAssertHandler(".\\EffectsCore\\fx_convert.cpp", 100, 0, "%s", "samples");
+    vassert((dimensions > 0), "(dimensions) = %i", dimensions);
+    vassert((sampleCount > 1), "(sampleCount) = %i", sampleCount);
+    iassert(samples);
     componentCount = dimensions + 1;
     errorMax = 0.0;
     timePrev = 0.0;
@@ -520,8 +506,7 @@ int __cdecl FX_DecideVisualSampleCount(
                 curves[curveCount++] = edElem->rotationShape[1];
             break;
         default:
-            if (routing[chanIndex] != FX_CHAN_NONE)
-                MyAssertHandler(".\\EffectsCore\\fx_convert.cpp", 331, 0, "%s", "routing[chanIndex] == FX_CHAN_NONE");
+            iassert(routing[chanIndex] == FX_CHAN_NONE);
             break;
         }
     }
@@ -572,12 +557,10 @@ int __cdecl FX_FindEmission(const FxEffectDef *emission, const FxEditorEffectDef
 {
     int elemIndex; // [esp+0h] [ebp-4h]
 
-    if (!editorEffect)
-        MyAssertHandler(".\\EffectsCore\\fx_convert.cpp", 1109, 0, "%s", "editorEffect");
+    iassert(editorEffect);
     if (editorEffect == (const FxEditorEffectDef *)-68)
         MyAssertHandler(".\\EffectsCore\\fx_convert.cpp", 1110, 0, "%s", "editorEffect->elems");
-    if (!editorEffect->elemCount)
-        MyAssertHandler(".\\EffectsCore\\fx_convert.cpp", 1111, 0, "%s", "editorEffect->elemCount");
+    iassert(editorEffect->elemCount);
     for (elemIndex = 0; elemIndex < editorEffect->elemCount; ++elemIndex)
     {
         if (emission == editorEffect->elems[elemIndex].emission)
@@ -601,8 +584,7 @@ int __cdecl FX_AdditionalBytesNeededForEmission(const FxEffectDef *emission)
     int elemDefStop; // [esp+14h] [ebp-8h]
     int elemDefIndex; // [esp+18h] [ebp-4h]
 
-    if (!emission)
-        MyAssertHandler(".\\EffectsCore\\fx_convert.cpp", 1239, 0, "%s", "emission");
+    iassert(emission);
     bytesNeeded = 252 * emission->elemDefCountOneShot;
     elemDefStop = emission->elemDefCountOneShot + emission->elemDefCountLooping;
     for (elemDefIndex = emission->elemDefCountLooping; elemDefIndex != elemDefStop; ++elemDefIndex)
@@ -657,8 +639,7 @@ void __cdecl FX_BoundFloatRange(FxFloatRange *range, float lower, float upper)
 {
     float v3; // [esp+10h] [ebp-8h]
 
-    if (range->amplitude < 0.0)
-        MyAssertHandler(".\\EffectsCore\\fx_convert.cpp", 803, 0, "%s", "range->amplitude >= 0.0f");
+    iassert(range->amplitude >= 0.0f);
     if (lower > (double)range->base || upper < range->base + range->amplitude)
     {
         range->base = range->base + (float)0.000099999997;
@@ -683,10 +664,8 @@ void __cdecl FX_ConvertAtlas(FxElemDef *elemDef, const FxEditorElemDef *edElemDe
 {
     MaterialInfo mtlInfo; // [esp+0h] [ebp-18h] BYREF
 
-    if (!elemDef)
-        MyAssertHandler(".\\EffectsCore\\fx_convert.cpp", 660, 0, "%s", "elemDef");
-    if (!edElemDef)
-        MyAssertHandler(".\\EffectsCore\\fx_convert.cpp", 661, 0, "%s", "edElemDef");
+    iassert(elemDef);
+    iassert(edElemDef);
     if (edElemDef->visualCount && FX_ElemUsesMaterial(edElemDef))
     {
         elemDef->atlas.behavior = edElemDef->atlas.behavior;
@@ -720,14 +699,10 @@ void __cdecl FX_ConvertAtlas(FxElemDef *elemDef, const FxEditorElemDef *edElemDe
 
 void __cdecl FX_ReserveElemDefMemory(FxElemDef *elemDef, uint8_t **memPool)
 {
-    if (!elemDef)
-        MyAssertHandler(".\\EffectsCore\\fx_convert.cpp", 703, 0, "%s", "elemDef");
-    if (!memPool)
-        MyAssertHandler(".\\EffectsCore\\fx_convert.cpp", 704, 0, "%s", "memPool");
-    if (!*memPool)
-        MyAssertHandler(".\\EffectsCore\\fx_convert.cpp", 705, 0, "%s", "*memPool");
-    if (!elemDef->velIntervalCount)
-        MyAssertHandler(".\\EffectsCore\\fx_convert.cpp", 707, 0, "%s", "elemDef->velIntervalCount");
+    iassert(elemDef);
+    iassert(memPool);
+    iassert(*memPool);
+    iassert(elemDef->velIntervalCount);
     elemDef->velSamples = (FxElemVelStateSample *)*memPool;
     *memPool += 96 * elemDef->velIntervalCount + 96;
     if (elemDef->visStateIntervalCount)
@@ -952,8 +927,7 @@ void __cdecl FX_SampleVisualStateScalar(
         }
         break;
     default:
-        if (routing != FX_CHAN_NONE)
-            MyAssertHandler(".\\EffectsCore\\fx_convert.cpp", 507, 0, "%s", "routing == FX_CHAN_NONE");
+        iassert(routing == FX_CHAN_NONE);
         *base = 0.0;
         *amplitude = 0.0;
         break;
@@ -993,8 +967,7 @@ void __cdecl FX_SampleVisualState(FxElemDef *elemDef, const FxEditorElemDef *edE
         visStateRange = &elemDef->visSamples[sampleIndex];
         if (routing[0])
         {
-            if (routing[0] != FX_CHAN_NONE)
-                MyAssertHandler(".\\EffectsCore\\fx_convert.cpp", 561, 0, "%s", "routing[FX_CHAN_RGBA] == FX_CHAN_NONE");
+            iassert(routing[FX_CHAN_RGBA] == FX_CHAN_NONE);
             *(_DWORD *)visStateRange->base.color = -1;
             *(_DWORD *)visStateRange->amplitude.color = -1;
         }
@@ -1047,8 +1020,7 @@ void __cdecl FX_SampleVisualState(FxElemDef *elemDef, const FxEditorElemDef *edE
         }
         else
         {
-            if (routing[4] != FX_CHAN_NONE)
-                MyAssertHandler(".\\EffectsCore\\fx_convert.cpp", 589, 0, "%s", "routing[FX_CHAN_ROTATION] == FX_CHAN_NONE");
+            iassert(routing[FX_CHAN_ROTATION] == FX_CHAN_NONE);
             visStateRange->base.rotationDelta = 0.0;
             visStateRange->base.rotationTotal = 0.0;
             visStateRange->amplitude.rotationDelta = 0.0;
@@ -1142,8 +1114,7 @@ void __cdecl FX_ConvertTrail_CompileVertices(
     if (edElemDef == (const FxEditorElemDef *)-592)
         MyAssertHandler(".\\EffectsCore\\fx_convert.cpp", 862, 0, "%s", "trailDef");
     indCount = trailDef->indCount;
-    if ((indCount & 1) != 0)
-        MyAssertHandler(".\\EffectsCore\\fx_convert.cpp", 865, 0, "%s", "(indCount & 1) == 0");
+    iassert((indCount & 1) == 0);
     vertBytes = 20 * indCount;
     outVertPtrBegin = (FxTrailVertex *)*mempool;
     *mempool += 20 * indCount;
@@ -1193,8 +1164,7 @@ void __cdecl FX_ConvertTrail_CompileVertices(
         }
         outVertPtrIter += 2;
     }
-    if (outVertPtrIter != outVertPtrEnd)
-        MyAssertHandler(".\\EffectsCore\\fx_convert.cpp", 911, 0, "%s", "outVertPtrIter == outVertPtrEnd");
+    iassert(outVertPtrIter == outVertPtrEnd);
     emittedVertPtrBegin = outVertPtrBegin;
     emittedVertPtrEnd = outVertPtrBegin;
     indBytes = 2 * indCount;
@@ -1203,8 +1173,7 @@ void __cdecl FX_ConvertTrail_CompileVertices(
     emittedIndPtrEnd = emittedIndPtrBegin;
     for (outVertPtrIter = outVertPtrBegin; outVertPtrIter != outVertPtrEnd; ++outVertPtrIter)
     {
-        if (emittedVertPtrEnd > outVertPtrIter)
-            MyAssertHandler(".\\EffectsCore\\fx_convert.cpp", 923, 0, "%s", "emittedVertPtrEnd <= outVertPtrIter");
+        iassert(emittedVertPtrEnd <= outVertPtrIter);
         for (emittedVertPtrIter = emittedVertPtrBegin; emittedVertPtrIter != emittedVertPtrEnd; ++emittedVertPtrIter)
         {
             v5 = Vec2Distance(outVertPtrIter->pos, emittedVertPtrIter->pos);
@@ -1227,13 +1196,7 @@ void __cdecl FX_ConvertTrail_CompileVertices(
             ++emittedVertPtrEnd;
         }
         *emittedIndPtrEnd = emittedVertPtrIter - emittedVertPtrBegin;
-        if (*emittedIndPtrEnd != emittedVertPtrIter - emittedVertPtrBegin)
-            MyAssertHandler(
-                ".\\EffectsCore\\fx_convert.cpp",
-                943,
-                0,
-                "%s",
-                "*emittedIndPtrEnd == emittedVertPtrIter - emittedVertPtrBegin");
+        iassert(*emittedIndPtrEnd == emittedVertPtrIter - emittedVertPtrBegin);
         ++emittedIndPtrEnd;
     }
     outTrailDef->verts = emittedVertPtrBegin;
@@ -1263,10 +1226,8 @@ void __cdecl FX_ConvertTrail(FxTrailDef **outTrailDef, const FxEditorElemDef *ed
         *outTrailDef = (FxTrailDef *)*mempool;
         *mempool += 28;
         FX_ConvertTrail_CompileVertices(edElemDef, *outTrailDef, mempool);
-        if (edElemDef->trailSplitDist <= 0)
-            MyAssertHandler(".\\EffectsCore\\fx_convert.cpp", 968, 0, "%s", "edElemDef->trailSplitDist > 0");
-        if (edElemDef->trailRepeatDist <= 0)
-            MyAssertHandler(".\\EffectsCore\\fx_convert.cpp", 969, 0, "%s", "edElemDef->trailRepeatDist > 0");
+        iassert(edElemDef->trailSplitDist > 0);
+        iassert(edElemDef->trailRepeatDist > 0);
         (*outTrailDef)->splitDist = edElemDef->trailSplitDist;
         (*outTrailDef)->scrollTimeMsec = (int)(edElemDef->trailScrollTime * 1000.0);
         (*outTrailDef)->repeatDist = edElemDef->trailRepeatDist;
@@ -1297,26 +1258,10 @@ void __cdecl FX_ConvertElemDef(
     float v15; // [esp+54h] [ebp-8h]
     float v16; // [esp+58h] [ebp-4h]
 
-    if (!elemDef)
-        MyAssertHandler(".\\EffectsCore\\fx_convert.cpp", 979, 0, "%s", "elemDef");
-    if (!edElemDef)
-        MyAssertHandler(".\\EffectsCore\\fx_convert.cpp", 980, 0, "%s", "edElemDef");
-    if (velStateCount < 2)
-        MyAssertHandler(
-            ".\\EffectsCore\\fx_convert.cpp",
-            981,
-            0,
-            "%s\n\t(velStateCount) = %i",
-            "(velStateCount >= 2)",
-            velStateCount);
-    if (visStateCount && visStateCount < 2)
-        MyAssertHandler(
-            ".\\EffectsCore\\fx_convert.cpp",
-            982,
-            0,
-            "%s\n\t(visStateCount) = %i",
-            "(visStateCount == 0 || visStateCount >= 2)",
-            visStateCount);
+    iassert(elemDef);
+    iassert(edElemDef);
+    vassert((velStateCount >= 2), "(velStateCount) = %i", velStateCount);
+    vassert((visStateCount == 0 || visStateCount >= 2), "(visStateCount) = %i", visStateCount);
     elemDef->flags = edElemDef->flags;
     FX_CopyCanonicalFloatRange(&elemDef->spawnRange, &edElemDef->spawnRange);
     FX_CopyCanonicalFloatRange(&elemDef->fadeInRange, &edElemDef->fadeInRange);
@@ -1393,22 +1338,8 @@ void __cdecl FX_ConvertElemDef(
             elemDef->flags &= ~0x8000000u;
         }
     }
-    if (edElemDef->lightingFrac > 255.0f)
-        MyAssertHandler(
-            ".\\EffectsCore\\fx_convert.cpp",
-            1075,
-            0,
-            "%s\n\t(edElemDef->lightingFrac) = %g",
-            "(edElemDef->lightingFrac <= 255.0f)",
-            edElemDef->lightingFrac);
-    if ((int)(edElemDef->lightingFrac * 255.0f) >= 256)
-        MyAssertHandler(
-            ".\\EffectsCore\\fx_convert.cpp",
-            1076,
-            0,
-            "%s\n\t(edElemDef->lightingFrac) = %g",
-            "(static_cast< int32_t >( edElemDef->lightingFrac * 255.0f ) < 256)",
-            edElemDef->lightingFrac);
+    vassert((edElemDef->lightingFrac <= 255.0f), "(edElemDef->lightingFrac) = %g", edElemDef->lightingFrac);
+    vassert((static_cast< int32_t >( edElemDef->lightingFrac * 255.0f ) < 256), "(edElemDef->lightingFrac) = %g", edElemDef->lightingFrac);
     elemDef->lightingFrac = (int)(edElemDef->lightingFrac * 255.0f);
     elemDef->useItemClip = (edElemDef->editorFlags & 0x20000) != 0;
     if ((edElemDef->editorFlags & 0x10000) != 0)
@@ -1474,10 +1405,8 @@ int __cdecl FX_ConvertElemDefsOfType(
     int elemIndex; // [esp+4h] [ebp-8h]
     int elemCount; // [esp+8h] [ebp-4h]
 
-    if (!elemDefArray)
-        MyAssertHandler(".\\EffectsCore\\fx_convert.cpp", 1135, 0, "%s", "elemDefArray");
-    if (!editorEffect)
-        MyAssertHandler(".\\EffectsCore\\fx_convert.cpp", 1136, 0, "%s", "editorEffect");
+    iassert(elemDefArray);
+    iassert(editorEffect);
     if (loopingFlagState > 1)
         MyAssertHandler(
             ".\\EffectsCore\\fx_convert.cpp",
@@ -1486,10 +1415,8 @@ int __cdecl FX_ConvertElemDefsOfType(
             "%s\n\t(loopingFlagState) = %i",
             "(loopingFlagState == FX_ED_FLAG_LOOPING || loopingFlagState == 0)",
             loopingFlagState);
-    if (!velStateCount)
-        MyAssertHandler(".\\EffectsCore\\fx_convert.cpp", 1138, 0, "%s", "velStateCount");
-    if (!visStateCount)
-        MyAssertHandler(".\\EffectsCore\\fx_convert.cpp", 1139, 0, "%s", "visStateCount");
+    iassert(velStateCount);
+    iassert(visStateCount);
     elemCount = 0;
     for (elemIndex = 0; elemIndex < editorEffect->elemCount; ++elemIndex)
     {
@@ -1521,8 +1448,7 @@ int __cdecl FX_CopyEmittedElemDefs(
     int elemIndexStop; // [esp+20h] [ebp-8h]
     int elemCount; // [esp+24h] [ebp-4h]
 
-    if (!editorEffect)
-        MyAssertHandler(".\\EffectsCore\\fx_convert.cpp", 1167, 0, "%s", "editorEffect");
+    iassert(editorEffect);
     elemCount = 0;
     for (elemIndex = 0; elemIndex < editorEffect->elemCount; ++elemIndex)
     {
@@ -1600,8 +1526,7 @@ const FxEffectDef *__cdecl FX_Convert(const FxEditorEffectDef *editorEffect, voi
     FxSampleChannel routing[5]; // [esp+1DCh] [ebp-18h] BYREF
     const FxElemVisuals *elemVisual; // [esp+1F0h] [ebp-4h]
 
-    if (!editorEffect)
-        MyAssertHandler(".\\EffectsCore\\fx_convert.cpp", 1429, 0, "%s", "editorEffect");
+    iassert(editorEffect);
     memset((uint8_t *)emitIndex, 0xFFu, sizeof(emitIndex));
     totalBytesNeeded = 252 * editorEffect->elemCount + 32;
     elemCountTotal = editorEffect->elemCount;

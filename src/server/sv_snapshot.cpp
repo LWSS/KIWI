@@ -52,14 +52,7 @@ void __cdecl SV_WriteSnapshotToClient(client_t *client, msg_t *msg)
         snapshotEntities = sv.entityNumbers.snapshotEntities;
         do
         {
-            if ((unsigned int)*snapshotEntities >= 0x880)
-                MyAssertHandler(
-                    "c:\\trees\\cod3\\cod3src\\src\\server\\sv_snapshot.cpp",
-                    60,
-                    0,
-                    "sv.entityNumbers.snapshotEntities[i] doesn't index MAX_GENTITIES\n\t%i not in [0, %i)",
-                    *snapshotEntities,
-                    2176);
+            bcassert((unsigned int)*snapshotEntities, 0x880);
             MSG_WriteBits(msg, *snapshotEntities, 12);
             ++v6;
             ++snapshotEntities;

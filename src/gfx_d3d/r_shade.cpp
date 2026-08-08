@@ -226,14 +226,7 @@ void __cdecl R_SetupPassPerObjectArgs(GfxCmdBufContext context)
 
 void __cdecl R_SetPixelShaderConstantFromLiteral(GfxCmdBufState *state, uint dest, const float *literal)
 {
-    if (dest >= 0x100)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\src\\gfx_d3d\\r_state.h",
-            601,
-            0,
-            "dest doesn't index ARRAY_COUNT( state->pixelShaderConstState )\n\t%i not in [0, %i)",
-            dest,
-            256);
+    bcassert(dest, 0x100);
     LODWORD(state->pixelShaderConstState[dest]) = -1;
     HIDWORD(state->pixelShaderConstState[dest]) = -1;
     R_HW_SetPixelShaderConstant(state->prim.device, dest, literal, 1u);
@@ -508,14 +501,7 @@ void __cdecl R_SetupPass(GfxCmdBufContext context, uint passIndex)
     context.state->pass = pass;
     context.state->passIndex = passIndex;
     material = context.state->material;
-    if (material->stateBitsEntry[context.state->techType] >= (uint)material->stateBitsCount)
-        MyAssertHandler(
-            ".\\r_shade.cpp",
-            787,
-            0,
-            "material->stateBitsEntry[context.state->techType] doesn't index material->stateBitsCount\n\t%i not in [0, %i)",
-            material->stateBitsEntry[context.state->techType],
-            material->stateBitsCount);
+    bcassert(material->stateBitsEntry[context.state->techType], (uint)material->stateBitsCount);
     refStateBits = &material->stateBitsTable[passIndex + material->stateBitsEntry[context.state->techType]];
     stateBits[0] = refStateBits->loadBits[0];
     stateBits[1] = refStateBits->loadBits[1];
@@ -566,14 +552,7 @@ void __cdecl R_SetState(GfxCmdBufState *state, uint *stateBits)
 
 void __cdecl R_SetVertexShaderConstantFromLiteral(GfxCmdBufState *state, uint dest, const float *literal)
 {
-    if (dest >= 0x20)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\src\\gfx_d3d\\r_state.h",
-            591,
-            0,
-            "dest doesn't index ARRAY_COUNT( state->vertexShaderConstState )\n\t%i not in [0, %i)",
-            dest,
-            32);
+    bcassert(dest, 0x20);
     LODWORD(state->vertexShaderConstState[dest]) = -1;
     HIDWORD(state->vertexShaderConstState[dest]) = -1;
     R_HW_SetVertexShaderConstant(state->prim.device, dest, literal, 1u);

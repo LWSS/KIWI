@@ -1337,31 +1337,10 @@ void __cdecl R_SaveGameShot(const char *saveName)
 
 void __cdecl R_BeginCubemapShot(int pixelWidthHeight, int pixelBorder)
 {
-    if (pixelWidthHeight <= 0)
-        MyAssertHandler(
-            ".\\r_screenshot.cpp",
-            909,
-            0,
-            "%s\n\t(pixelWidthHeight) = %i",
-            "(pixelWidthHeight > 0)",
-            pixelWidthHeight);
-    if (pixelWidthHeight >= 0x10000)
-        MyAssertHandler(
-            ".\\r_screenshot.cpp",
-            910,
-            0,
-            "%s\n\t(pixelWidthHeight) = %i",
-            "(pixelWidthHeight < 65536)",
-            pixelWidthHeight);
+    vassert((pixelWidthHeight > 0), "(pixelWidthHeight) = %i", pixelWidthHeight);
+    vassert((pixelWidthHeight < 65536), "(pixelWidthHeight) = %i", pixelWidthHeight);
     iassert( (pixelBorder >= 0) );
-    if (pixelBorder >= pixelWidthHeight)
-        MyAssertHandler(
-            ".\\r_screenshot.cpp",
-            912,
-            0,
-            "%s\n\t(pixelBorder) = %i",
-            "(pixelBorder < pixelWidthHeight)",
-            pixelBorder);
+    vassert((pixelBorder < pixelWidthHeight), "(pixelBorder) = %i", pixelBorder);
     gfxMetrics.cubemapShotRes = pixelWidthHeight;
     gfxMetrics.cubemapShotPixelBorder = pixelBorder;
     R_CubemapShotSetInitialState();
@@ -1629,14 +1608,7 @@ void __cdecl R_CubemapShotFlipVerticalBuffer(uint8_t *buffer)
 void __cdecl R_CubemapShotCopySurfaceToBuffer(uint8_t *buffer, int bufferSizeInBytes)
 {
     iassert( buffer );
-    if (bufferSizeInBytes <= 0)
-        MyAssertHandler(
-            ".\\r_screenshot.cpp",
-            770,
-            0,
-            "%s\n\t(bufferSizeInBytes) = %i",
-            "(bufferSizeInBytes > 0)",
-            bufferSizeInBytes);
+    vassert((bufferSizeInBytes > 0), "(bufferSizeInBytes) = %i", bufferSizeInBytes);
     R_GetBackBufferData(
         gfxMetrics.cubemapShotPixelBorder,
         gfxMetrics.cubemapShotPixelBorder,
@@ -1667,14 +1639,7 @@ void __cdecl R_CubemapShotWriteTargaFile(char *filename, CubemapShot shotIndex, 
     uint8_t *targa; // [esp+14h] [ebp-4h]
 
     iassert( filename );
-    if (shotIndex <= CUBEMAPSHOT_NONE || shotIndex >= CUBEMAPSHOT_COUNT)
-        MyAssertHandler(
-            ".\\r_screenshot.cpp",
-            872,
-            0,
-            "%s\n\t(shotIndex) = %i",
-            "(shotIndex > CUBEMAPSHOT_NONE && shotIndex < CUBEMAPSHOT_COUNT)",
-            shotIndex);
+    vassert((shotIndex > CUBEMAPSHOT_NONE && shotIndex < CUBEMAPSHOT_COUNT), "(shotIndex) = %i", shotIndex);
     imgIndex = shotIndex - 1;
     fileSize = 4 * gfxMetrics.cubemapShotRes * gfxMetrics.cubemapShotRes + 18;
     targa = (uint8_t *)Z_VirtualAlloc(fileSize, "R_CubemapShotWriteTargaFile", 22);
@@ -1733,14 +1698,7 @@ void __cdecl R_CubemapShotApplyFresnelToTarga(CubemapShot shotIndex, float n0, f
     int dstIndex; // [esp+10h] [ebp-8h]
 
     iassert( targa );
-    if (shotIndex <= CUBEMAPSHOT_NONE || shotIndex >= CUBEMAPSHOT_COUNT)
-        MyAssertHandler(
-            ".\\r_screenshot.cpp",
-            835,
-            0,
-            "%s\n\t(shotIndex) = %i",
-            "(shotIndex > CUBEMAPSHOT_NONE && shotIndex < CUBEMAPSHOT_COUNT)",
-            shotIndex);
+    vassert((shotIndex > CUBEMAPSHOT_NONE && shotIndex < CUBEMAPSHOT_COUNT), "(shotIndex) = %i", shotIndex);
     for (rowIndex = 0; rowIndex < gfxMetrics.cubemapShotRes; ++rowIndex)
     {
         for (colIndex = 0; colIndex < gfxMetrics.cubemapShotRes; ++colIndex)
@@ -1764,40 +1722,12 @@ uint8_t __cdecl R_CubemapShotCalcReflectionFactor(
     float dir[3]; // [esp+44h] [ebp-10h] BYREF
     float refraction; // [esp+50h] [ebp-4h]
 
-    if (shotIndex <= 0)
-        MyAssertHandler(
-            ".\\r_screenshot.cpp",
-            719,
-            0,
-            "%s\n\t(shotIndex) = %i",
-            "(shotIndex > CUBEMAPSHOT_NONE)",
-            shotIndex);
-    if (shotIndex >= 7)
-        MyAssertHandler(
-            ".\\r_screenshot.cpp",
-            720,
-            0,
-            "%s\n\t(shotIndex) = %i",
-            "(shotIndex < CUBEMAPSHOT_COUNT)",
-            shotIndex);
+    vassert((shotIndex > CUBEMAPSHOT_NONE), "(shotIndex) = %i", shotIndex);
+    vassert((shotIndex < CUBEMAPSHOT_COUNT), "(shotIndex) = %i", shotIndex);
     iassert( (colIndex >= 0) );
-    if (colIndex >= gfxMetrics.cubemapShotRes)
-        MyAssertHandler(
-            ".\\r_screenshot.cpp",
-            722,
-            0,
-            "%s\n\t(colIndex) = %i",
-            "(colIndex < gfxMetrics.cubemapShotRes)",
-            colIndex);
+    vassert((colIndex < gfxMetrics.cubemapShotRes), "(colIndex) = %i", colIndex);
     iassert( (rowIndex >= 0) );
-    if (rowIndex >= gfxMetrics.cubemapShotRes)
-        MyAssertHandler(
-            ".\\r_screenshot.cpp",
-            724,
-            0,
-            "%s\n\t(rowIndex) = %i",
-            "(rowIndex < gfxMetrics.cubemapShotRes)",
-            rowIndex);
+    vassert((rowIndex < gfxMetrics.cubemapShotRes), "(rowIndex) = %i", rowIndex);
     iassert( (n0 != 0) );
     iassert( (n1 != 0) );
     scale = (double)gfxMetrics.cubemapShotRes * 0.5;

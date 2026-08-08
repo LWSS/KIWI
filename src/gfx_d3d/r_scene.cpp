@@ -106,14 +106,7 @@ uint __cdecl R_AllocSceneBrush()
 GfxBrushModel *__cdecl R_GetBrushModel(uint modelIndex)
 {
     iassert( rgp.world );
-    if (modelIndex >= rgp.world->modelCount)
-        MyAssertHandler(
-            ".\\r_scene.cpp",
-            181,
-            0,
-            "modelIndex doesn't index rgp.world->modelCount\n\t%i not in [0, %i)",
-            modelIndex,
-            rgp.world->modelCount);
+    bcassert(modelIndex, rgp.world->modelCount);
     return &rgp.world->models[modelIndex];
 }
 
@@ -399,22 +392,8 @@ void __cdecl R_AddBModelSurfacesCamera(
     iassert(bmodel);
     surfId = bmodelInfo->surfId;
     modelSurf = (BModelSurface *)((char *)frontEndDataOut + 4 * surfId);
-    if (reflectionProbeIndex >= 0x100)
-        MyAssertHandler(
-            ".\\r_scene.cpp",
-            548,
-            0,
-            "reflectionProbeIndex doesn't index 1 << MTL_SORT_ENVMAP_BITS\n\t%i not in [0, %i)",
-            reflectionProbeIndex,
-            256);
-    if (gfxDrawMethod.emissiveTechType >= (uint)TECHNIQUE_COUNT)
-        MyAssertHandler(
-            ".\\r_scene.cpp",
-            550,
-            0,
-            "gfxDrawMethod.emissiveTechType doesn't index TECHNIQUE_COUNT\n\t%i not in [0, %i)",
-            gfxDrawMethod.emissiveTechType,
-            34);
+    bcassert(reflectionProbeIndex, 0x100);
+    bcassert(gfxDrawMethod.emissiveTechType, (uint)TECHNIQUE_COUNT);
     if (r_drawDecals->current.enabled)
         surfaceCount = bmodel->surfaceCount;
     else
@@ -563,13 +542,7 @@ void __cdecl R_AddXModelSurfacesCamera(
         else
         {
             iassert( *material );
-            if (rgp.sortedMaterials[(*material)->info.drawSurf.fields.materialSortedIndex] != *material)
-                MyAssertHandler(
-                    ".\\r_scene.cpp",
-                    709,
-                    0,
-                    "%s",
-                    "rgp.sortedMaterials[(*material)->info.drawSurf.fields.materialSortedIndex] == *material");
+            iassert(rgp.sortedMaterials[(*material)->info.drawSurf.fields.materialSortedIndex] == *material);
             region = (*material)->cameraRegion;
             if (region == 3)
             {
@@ -589,14 +562,7 @@ void __cdecl R_AddXModelSurfacesCamera(
                 }
                 else
                 {
-                    if (skinnedCachedOffset != -1)
-                        MyAssertHandler(
-                            ".\\r_scene.cpp",
-                            728,
-                            0,
-                            "%s\n\t(skinnedCachedOffset) = %i",
-                            "(skinnedCachedOffset == (-1))",
-                            skinnedCachedOffset);
+                    vassert((skinnedCachedOffset == (-1)), "(skinnedCachedOffset) = %i", skinnedCachedOffset);
                     surfType = SF_XMODEL_RIGID_SKINNED;
                 }
                 modelSurf->surf.info.gfxEntIndex = gfxEntIndex;
@@ -1379,14 +1345,7 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
     iassert( refdef->tanHalfFovY > 0 );
     iassert( refdef->height > 0 );
     iassert( refdef->width > 0 );
-    if (refdef->localClientNum >= gfxCfg.maxClientViews)
-        MyAssertHandler(
-            ".\\r_scene.cpp",
-            2635,
-            0,
-            "refdef->localClientNum doesn't index gfxCfg.maxClientViews\n\t%i not in [0, %i)",
-            refdef->localClientNum,
-            gfxCfg.maxClientViews);
+    bcassert(refdef->localClientNum, gfxCfg.maxClientViews);
     if (rg.registered && !r_norefresh->current.enabled)
     {
         PROF_SCOPED("R_RenderScene");
@@ -1780,14 +1739,7 @@ void __cdecl R_SetDepthOfField(GfxViewInfo *viewInfo, const GfxSceneParms *scene
 
     if (r_dof_tweak->current.enabled)
     {
-        if (r_dof_nearBlur->current.value < 4.0)
-            MyAssertHandler(
-                ".\\r_scene.cpp",
-                1151,
-                0,
-                "%s\n\t(r_dof_nearBlur->current.value) = %g",
-                "(r_dof_nearBlur->current.value >= 4.0f)",
-                r_dof_nearBlur->current.value);
+        vassert((r_dof_nearBlur->current.value >= 4.0f), "(r_dof_nearBlur->current.value) = %g", r_dof_nearBlur->current.value);
         viewInfo->dof.viewModelStart = r_dof_viewModelStart->current.value;
         viewInfo->dof.viewModelEnd = r_dof_viewModelEnd->current.value;
         viewInfo->dof.nearStart = r_dof_nearStart->current.value;
@@ -2104,14 +2056,7 @@ void __cdecl R_GetPointLightShadowSurfs(GfxViewInfo *viewInfo, GfxVisibleLight *
     if (viewInfo->emissiveSpotLightCount)
     {
         iassert( viewInfo->emissiveSpotLightCount == 1 );
-        if (viewInfo->emissiveSpotLightIndex >= 4)
-            MyAssertHandler(
-                ".\\r_scene.cpp",
-                1650,
-                0,
-                "viewInfo->emissiveSpotLightIndex doesn't index MAX_VISIBLE_DLIGHTS\n\t%i not in [0, %i)",
-                viewInfo->emissiveSpotLightIndex,
-                4);
+        bcassert(viewInfo->emissiveSpotLightIndex, 4);
         iassert( viewInfo->emissiveSpotLightIndex == 0 );
         iassert( lights[0]->type == GFX_LIGHT_TYPE_SPOT );
         viewInfo->emissiveSpotDrawSurfCount = visibleLights->drawSurfCount;

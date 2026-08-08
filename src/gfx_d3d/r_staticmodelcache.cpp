@@ -94,13 +94,7 @@ void __cdecl R_CacheStaticModelIndices(uint smodelIndex, uint lod, uint cacheBas
         twoSrcIndices = (uint *)xsurf->triIndices;
         baseIndex = 3 * xsurf->baseTriIndex + 4 * cacheBaseVertIndex;
         iassert( baseIndex < SMC_MAX_INDEX_IN_CACHE );
-        if (baseIndex + 3 * xsurf->triCount > 0x100000)
-            MyAssertHandler(
-                ".\\r_staticmodelcache.cpp",
-                478,
-                0,
-                "%s",
-                "baseIndex + xsurf->triCount * 3 <= SMC_MAX_INDEX_IN_CACHE");
+        iassert(baseIndex + xsurf->triCount * 3 <= SMC_MAX_INDEX_IN_CACHE);
         twoDstIndices = (uint *)&gfxBuf.smodelCache.indices[baseIndex];
         iterationCount = xsurf->triCount / 2;
         iassert( iterationCount * 2 == xsurf->triCount );
@@ -158,28 +152,9 @@ char __cdecl SMC_GetFreeBlockOfSize(uint smcIndex, uint listIndex)
     uint index; // [esp+1Ch] [ebp-Ch]
     uint treeIndex; // [esp+24h] [ebp-4h]
 
-    if (listIndex >= 6)
-        MyAssertHandler(
-            ".\\r_staticmodelcache.cpp",
-            233,
-            0,
-            "listIndex doesn't index ARRAY_COUNT( s_cache.freelist[smcIndex] )\n\t%i not in [0, %i)",
-            listIndex,
-            6);
-    if (s_cache.freelist[smcIndex][listIndex].next != &s_cache.freelist[smcIndex][listIndex])
-        MyAssertHandler(
-            ".\\r_staticmodelcache.cpp",
-            234,
-            0,
-            "%s",
-            "s_cache.freelist[smcIndex][listIndex].next == &s_cache.freelist[smcIndex][listIndex]");
-    if (s_cache.freelist[smcIndex][listIndex].prev != &s_cache.freelist[smcIndex][listIndex])
-        MyAssertHandler(
-            ".\\r_staticmodelcache.cpp",
-            235,
-            0,
-            "%s",
-            "s_cache.freelist[smcIndex][listIndex].prev == &s_cache.freelist[smcIndex][listIndex]");
+    bcassert(listIndex, 6);
+    iassert(s_cache.freelist[smcIndex][listIndex].next == &s_cache.freelist[smcIndex][listIndex]);
+    iassert(s_cache.freelist[smcIndex][listIndex].prev == &s_cache.freelist[smcIndex][listIndex]);
     if (!listIndex)
         return SMC_ForceFreeBlock(smcIndex);
     freelist = &s_cache.leafs[511][6 * smcIndex + 31 + listIndex];

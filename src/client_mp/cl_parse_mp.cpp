@@ -58,14 +58,7 @@ void __cdecl CL_SavePredictedOriginForServerTime(
     uint lastIndex; // [esp+Ch] [ebp-4h]
 
     lastIndex = (cl->clientArchiveIndex + CLIENT_ARCHIVE_SIZE - 1) % CLIENT_ARCHIVE_SIZE;
-    if (lastIndex >= CLIENT_ARCHIVE_SIZE)
-        MyAssertHandler(
-            ".\\client_mp\\cl_parse_mp.cpp",
-            80,
-            0,
-            "lastIndex doesn't index CLIENT_ARCHIVE_SIZE\n\t%i not in [0, %i)",
-            lastIndex,
-            CLIENT_ARCHIVE_SIZE);
+    bcassert(lastIndex, CLIENT_ARCHIVE_SIZE);
     if (cl->clientArchive[lastIndex].serverTime != serverTime)
     {
         cl->clientArchive[cl->clientArchiveIndex].serverTime = serverTime;
@@ -84,14 +77,7 @@ void __cdecl CL_SavePredictedOriginForServerTime(
         v7[1] = viewangles[1];
         v7[2] = viewangles[2];
         cl->clientArchiveIndex = (cl->clientArchiveIndex + 1) % CLIENT_ARCHIVE_SIZE;
-        if (cl->clientArchiveIndex >= CLIENT_ARCHIVE_SIZE)
-            MyAssertHandler(
-                ".\\client_mp\\cl_parse_mp.cpp",
-                92,
-                0,
-                "cl->clientArchiveIndex doesn't index CLIENT_ARCHIVE_SIZE\n\t%i not in [0, %i)",
-                cl->clientArchiveIndex,
-                CLIENT_ARCHIVE_SIZE);
+        bcassert(cl->clientArchiveIndex, CLIENT_ARCHIVE_SIZE);
     }
 }
 
@@ -204,14 +190,7 @@ void __cdecl CL_SystemInfoChanged(int localClientNum)
     {
         if (!com_sv_running->current.enabled)
         {
-            if (localClientNum)
-                MyAssertHandler(
-                    "c:\\trees\\cod3\\src\\client_mp\\client_mp.h",
-                    1112,
-                    0,
-                    "%s\n\t(localClientNum) = %i",
-                    "(localClientNum == 0)",
-                    localClientNum);
+            vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
             if (clientUIActives[0].connectionState < CA_ACTIVE)
             {
                 s = Info_ValueForKey(systemInfo, "sv_cheats");
@@ -331,8 +310,7 @@ void __cdecl CL_NextDownload(int localClientNum)
     CL_GetLocalClientConnection(localClientNum);
     if (!cls.downloadList[0])
         goto LABEL_11;
-    if (com_sv_running->current.enabled)
-        MyAssertHandler(".\\client_mp\\cl_main_mp.cpp", 2721, 0, "%s", "!com_sv_running->current.enabled");
+    iassert(!com_sv_running->current.enabled);
     s = cls.downloadList;
     if (cls.downloadList[0] == '@')
         s = &cls.downloadList[1];

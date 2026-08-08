@@ -103,13 +103,11 @@ void __cdecl Scr_SetLoadedImpureScript(bool loadedImpureScript)
 void __cdecl Scr_BeginLoadScripts()
 {
     scrVarPub.varUsagePos = "<script compile variable>";
-    if (scrCompilePub.script_loading)
-        MyAssertHandler(".\\script\\scr_main.cpp", 156, 0, "%s", "!scrCompilePub.script_loading");
+    iassert(!scrCompilePub.script_loading);
     scrCompilePub.script_loading = 1;
     Scr_InitOpcodeLookup();
     Scr_InitDebuggerMain();
-    if (scrCompilePub.loadedscripts)
-        MyAssertHandler(".\\script\\scr_main.cpp", 164, 0, "%s", "!scrCompilePub.loadedscripts");
+    iassert(!scrCompilePub.loadedscripts);
     scrCompilePub.loadedscripts = Scr_AllocArray();
     if (scrVarDebugPub)
         ++scrVarDebugPub->extRefCount[scrCompilePub.loadedscripts];
@@ -117,18 +115,15 @@ void __cdecl Scr_BeginLoadScripts()
     {
         memset(profileScript.profileScriptNames, 0, sizeof(profileScript.profileScriptNames));
         scrVmPub.showError = scrVarPub.developer;
-        if (scrCompilePub.scripts)
-            MyAssertHandler(".\\script\\scr_main.cpp", 184, 0, "%s", "!scrCompilePub.scripts");
+        iassert(!scrCompilePub.scripts);
         scrCompilePub.scripts = Scr_AllocArray();
         if (scrVarDebugPub)
             ++scrVarDebugPub->extRefCount[scrCompilePub.scripts];
-        if (scrCompilePub.builtinFunc)
-            MyAssertHandler(".\\script\\scr_main.cpp", 191, 0, "%s", "!scrCompilePub.builtinFunc");
+        iassert(!scrCompilePub.builtinFunc);
         scrCompilePub.builtinFunc = Scr_AllocArray();
         if (scrVarDebugPub)
             ++scrVarDebugPub->extRefCount[scrCompilePub.builtinFunc];
-        if (scrCompilePub.builtinMeth)
-            MyAssertHandler(".\\script\\scr_main.cpp", 198, 0, "%s", "!scrCompilePub.builtinMeth");
+        iassert(!scrCompilePub.builtinMeth);
         scrCompilePub.builtinMeth = Scr_AllocArray();
         if (scrVarDebugPub)
             ++scrVarDebugPub->extRefCount[scrCompilePub.builtinMeth];
@@ -167,8 +162,7 @@ void __cdecl Scr_EndLoadScripts()
     }
     Scr_InitDebugger();
     scrCompilePub.script_loading = 0;
-    if (!scrCompilePub.loadedscripts)
-        MyAssertHandler(".\\script\\scr_main.cpp", 415, 0, "%s", "scrCompilePub.loadedscripts");
+    iassert(scrCompilePub.loadedscripts);
     ClearObject(scrCompilePub.loadedscripts);
     if (scrVarDebugPub)
         --scrVarDebugPub->extRefCount[scrCompilePub.loadedscripts];
@@ -176,22 +170,19 @@ void __cdecl Scr_EndLoadScripts()
     scrCompilePub.loadedscripts = 0;
     if (!Sys_IsRemoteDebugClient())
     {
-        if (!scrCompilePub.scripts)
-            MyAssertHandler(".\\script\\scr_main.cpp", 429, 0, "%s", "scrCompilePub.scripts");
+        iassert(scrCompilePub.scripts);
         ClearObject(scrCompilePub.scripts);
         if (scrVarDebugPub)
             --scrVarDebugPub->extRefCount[scrCompilePub.scripts];
         RemoveRefToObject(scrCompilePub.scripts);
         scrCompilePub.scripts = 0;
-        if (!scrCompilePub.builtinFunc)
-            MyAssertHandler(".\\script\\scr_main.cpp", 438, 0, "%s", "scrCompilePub.builtinFunc");
+        iassert(scrCompilePub.builtinFunc);
         ClearObject(scrCompilePub.builtinFunc);
         if (scrVarDebugPub)
             --scrVarDebugPub->extRefCount[scrCompilePub.builtinFunc];
         RemoveRefToObject(scrCompilePub.builtinFunc);
         scrCompilePub.builtinFunc = 0;
-        if (!scrCompilePub.builtinMeth)
-            MyAssertHandler(".\\script\\scr_main.cpp", 447, 0, "%s", "scrCompilePub.builtinMeth");
+        iassert(scrCompilePub.builtinMeth);
         ClearObject(scrCompilePub.builtinMeth);
         if (scrVarDebugPub)
             --scrVarDebugPub->extRefCount[scrCompilePub.builtinMeth];
@@ -325,8 +316,7 @@ void __cdecl Scr_EndLoadAnimTrees()
 
 void __cdecl Scr_FreeScripts(uint8_t sys)
 {
-    if (sys != 1)
-        MyAssertHandler(".\\script\\scr_main.cpp", 498, 0, "%s", "sys == SCR_SYS_GAME");
+    iassert(sys == SCR_SYS_GAME);
     Hunk_CheckTempMemoryClear();
     if (scrCompilePub.script_loading)
     {

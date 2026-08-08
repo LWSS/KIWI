@@ -97,8 +97,7 @@ void __cdecl LookAtKiller(gentity_s *self, gentity_s *inflictor, gentity_s *atta
         Vec3Sub(inflictor->r.currentOrigin, self->r.currentOrigin, dir);
         goto LABEL_10;
     }
-    if (!self->client)
-        MyAssertHandler(".\\game_mp\\g_combat_mp.cpp", 178, 0, "%s", "self->client");
+    iassert(self->client);
     self->client->ps.stats[1] = (int)self->r.currentAngles[1];
 }
 
@@ -134,14 +133,12 @@ void __cdecl player_die(
     int i; // [esp+10h] [ebp-4h]
 
     SV_CheckThread();
-    if (!self->client)
-        MyAssertHandler(".\\game_mp\\g_combat_mp.cpp", 312, 0, "%s", "self->client");
+    iassert(self->client);
     if (Com_GetServerDObj(self->client->ps.clientNum)
         && (self->client->ps.pm_type < PM_NOCLIP || self->client->ps.pm_type == PM_LASTSTAND)
         && (self->client->ps.otherFlags & 2) == 0)
     {
-        if (bgs != &level_bgs)
-            MyAssertHandler(".\\game_mp\\g_combat_mp.cpp", 328, 0, "%s\n\t(bgs) = %p", "(bgs == &level_bgs)", bgs);
+        vassert((bgs == &level_bgs), "(bgs) = %p", bgs);
         if (attacker->s.eType == ET_MG42 && attacker->r.ownerNum.isDefined())
             attacker = attacker->r.ownerNum.ent();
         DeathGrenadeDrop(self, meansOfDeath);
@@ -190,8 +187,7 @@ void __cdecl player_die(
         SV_LinkEntity(self);
         self->health = 0;
         self->handler = ENT_HANDLER_CLIENT_DEAD;
-        if (bgs != &level_bgs)
-            MyAssertHandler(".\\game_mp\\g_combat_mp.cpp", 389, 0, "%s\n\t(bgs) = %p", "(bgs == &level_bgs)", bgs);
+        vassert((bgs == &level_bgs), "(bgs) = %p", bgs);
     }
 }
 
@@ -333,8 +329,7 @@ uint __cdecl G_GetWeaponIndexForEntity(const gentity_s *ent)
 {
     gclient_s *client; // [esp+8h] [ebp-4h]
 
-    if (!ent)
-        MyAssertHandler(".\\game_mp\\g_combat_mp.cpp", 415, 0, "%s", "ent");
+    iassert(ent);
     client = ent->client;
     if (!client)
         return ent->s.weapon;
@@ -677,8 +672,7 @@ void __cdecl G_FlashbangBlast(float *origin, float radius_max, float radius_min,
     for (i = 0; i < entListCount; ++i)
     {
         ent = &g_entities[entList[i]];
-        if (!ent)
-            MyAssertHandler(".\\game_mp\\g_combat_mp.cpp", 1014, 0, "%s", "ent");
+        iassert(ent);
         FlashbangBlastEnt(ent, origin, radius_max, radius_min, attacker, team);
     }
 }
@@ -815,8 +809,7 @@ bool __cdecl G_WithinDamageRadius(const float *damageOrigin, float radiusSquared
 {
     float distSqrd; // [esp+4h] [ebp-4h]
 
-    if (!ent)
-        MyAssertHandler(".\\game_mp\\g_combat_mp.cpp", 1061, 0, "%s", "ent");
+    iassert(ent);
     distSqrd = G_GetRadiusDamageDistanceSquared(damageOrigin, ent);
     return radiusSquared > (double)distSqrd;
 }
@@ -826,8 +819,7 @@ double __cdecl G_GetRadiusDamageDistanceSquared(const float *damageOrigin, genti
     int i; // [esp+0h] [ebp-10h]
     float v[3]; // [esp+4h] [ebp-Ch] BYREF
 
-    if (!ent)
-        MyAssertHandler(".\\game_mp\\g_combat_mp.cpp", 1029, 0, "%s", "ent");
+    iassert(ent);
     if (ent->r.bmodel)
     {
         for (i = 0; i < 3; ++i)

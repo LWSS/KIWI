@@ -67,8 +67,7 @@ void __cdecl SV_AuthorizeRequest(netadr_t from, int challenge, const char *cdkey
     char game[1027]; // [esp+14h] [ebp-408h] BYREF
     bool allowAnonymous; // [esp+417h] [ebp-5h]
 
-    if (!SV_ShouldAuthorizeAddress(from))
-        MyAssertHandler(".\\server_mp\\sv_client_mp.cpp", 398, 0, "%s", "SV_ShouldAuthorizeAddress( from )");
+    iassert(SV_ShouldAuthorizeAddress( from ));
     if (svs.authorizeAddress.type != NA_BAD)
     {
         game[0] = 0;
@@ -355,13 +354,7 @@ void __cdecl SV_SetClientStat(int clientNum, int index, uint value)
             0,
             "%s",
             "svs.clients[clientNum].statPacketsReceived == ( 1 << MAX_STATPACKETS ) - 1");
-    if (svs.clients[clientNum].header.state < 2)
-        MyAssertHandler(
-            ".\\server_mp\\sv_client_mp.cpp",
-            336,
-            0,
-            "%s",
-            "svs.clients[clientNum].header.state >= CS_CONNECTED");
+    iassert(svs.clients[clientNum].header.state >= CS_CONNECTED);
     v4 = &svs.clients[clientNum];
     if (index >= 2000)
     {
@@ -402,13 +395,7 @@ int __cdecl SV_GetClientStat(int clientNum, int index)
             0,
             "%s",
             "svs.clients[clientNum].statPacketsReceived == ( 1 << MAX_STATPACKETS ) - 1");
-    if (svs.clients[clientNum].header.state < 2)
-        MyAssertHandler(
-            ".\\server_mp\\sv_client_mp.cpp",
-            370,
-            0,
-            "%s",
-            "svs.clients[clientNum].header.state >= CS_CONNECTED");
+    iassert(svs.clients[clientNum].header.state >= CS_CONNECTED);
     if (index < 2000)
         return svs.clients[clientNum].stats[index + 4];
     if (index < 3498)
@@ -451,8 +438,7 @@ void __cdecl SV_BanClient(client_t *cl)
     int file; // [esp+0h] [ebp-4Ch] BYREF
     char cleanName[68]; // [esp+4h] [ebp-48h] BYREF
 
-    if (!cl)
-        MyAssertHandler(".\\server_mp\\sv_client_mp.cpp", 461, 0, "%s", "cl");
+    iassert(cl);
     if (cl->header.netchan.remoteAddress.type == NA_LOOPBACK)
     {
         SV_SendServerCommand(0, SV_CMD_CAN_IGNORE, "%c \"EXE_CANNOTKICKHOSTPLAYER\"", 101);
@@ -548,8 +534,7 @@ void __cdecl SV_CloseDownload(client_t *cl)
 
 void __cdecl SV_FreeClient(client_t *cl)
 {
-    if (cl->header.state < 2)
-        MyAssertHandler(".\\server_mp\\sv_client_mp.cpp", 686, 0, "%s", "cl->header.state >= CS_CONNECTED");
+    iassert(cl->header.state >= CS_CONNECTED);
     SV_CloseDownload(cl);
     if (SV_Loaded())
         ClientDisconnect(cl - svs.clients);
@@ -754,16 +739,9 @@ void __cdecl SV_DirectConnect(netadr_t from)
         clientNum = newcl - svs.clients;
         ent = SV_GentityNum(clientNum);
         newcl->gentity = ent;
-        if (newcl->scriptId)
-            MyAssertHandler(".\\server_mp\\sv_client_mp.cpp", 1074, 0, "%s", "!newcl->scriptId");
+        iassert(!newcl->scriptId);
         scriptId = Scr_AllocArray();
-        if (scriptId != (uint16_t)scriptId)
-            MyAssertHandler(
-                ".\\server_mp\\sv_client_mp.cpp",
-                1077,
-                0,
-                "%s",
-                "scriptId == static_cast<unsigned short>( scriptId )");
+        iassert(scriptId == static_cast<unsigned short>( scriptId ));
         newcl->scriptId = scriptId;
         Com_Printf(15, "SV_DirectConnect: %d, 0 -> %d\n", newcl - svs.clients, newcl->scriptId);
         newcl->challenge = challenge;
@@ -842,13 +820,7 @@ void __cdecl SV_FreeClientScriptPers()
         {
             SV_FreeClientScriptId(clients);
             scriptId = Scr_AllocArray();
-            if (scriptId != (uint16_t)scriptId)
-                MyAssertHandler(
-                    ".\\server_mp\\sv_client_mp.cpp",
-                    1201,
-                    0,
-                    "%s",
-                    "scriptId == static_cast<unsigned short>( scriptId )");
+            iassert(scriptId == static_cast<unsigned short>( scriptId ));
             clients->scriptId = scriptId;
             Com_Printf(15, "SV_FreeClientScriptPers: %d, 0 -> %d\n", clients - svs.clients, clients->scriptId);
         }
@@ -866,12 +838,9 @@ void __cdecl SV_SendDisconnect(
 {
     const char *v5; // eax
 
-    if (!client)
-        MyAssertHandler(".\\server_mp\\sv_client_mp.cpp", 1221, 0, "%s", "client");
-    if (state < 2)
-        MyAssertHandler(".\\server_mp\\sv_client_mp.cpp", 1222, 0, "%s\n\t(state) = %i", "(state >= CS_CONNECTED)", state);
-    if (!reason)
-        MyAssertHandler(".\\server_mp\\sv_client_mp.cpp", 1223, 0, "%s", "reason");
+    iassert(client);
+    vassert((state >= CS_CONNECTED), "(state) = %i", state);
+    iassert(reason);
     if (state == 4)
     {
         if (translationForReason)
@@ -881,14 +850,7 @@ void __cdecl SV_SendDisconnect(
     }
     else
     {
-        if (state != 2 && state != 3)
-            MyAssertHandler(
-                ".\\server_mp\\sv_client_mp.cpp",
-                1242,
-                0,
-                "%s\n\t(state) = %i",
-                "(state == CS_CONNECTED || state == CS_CLIENTLOADING)",
-                state);
+        vassert((state == CS_CONNECTED || state == CS_CLIENTLOADING), "(state) = %i", state);
         v5 = va("disconnect %s", reason);
         NET_OutOfBandPrint(NS_SERVER, client->header.netchan.remoteAddress, v5);
     }
@@ -914,25 +876,16 @@ void __cdecl SV_DropClient(client_t *drop, const char *reason, bool tellThem)
     }
     // LWSS END
 
-    if (!drop->header.state)
-        MyAssertHandler(".\\server_mp\\sv_client_mp.cpp", 1267, 0, "%s", "drop->header.state != CS_FREE");
+    iassert(drop->header.state != CS_FREE);
     dropState = drop->header.state;
     if (drop->header.state == 1)
     {
-        if (drop->dropReason)
-            MyAssertHandler(
-                ".\\server_mp\\sv_client_mp.cpp",
-                1271,
-                0,
-                "%s\n\t(drop->dropReason) = %s",
-                "(drop->dropReason == 0)",
-                drop->dropReason);
+        vassert((drop->dropReason == 0), "(drop->dropReason) = %s", drop->dropReason);
     }
     else
     {
         drop->dropReason = 0;
-        if (dropState < 2)
-            MyAssertHandler(".\\server_mp\\sv_client_mp.cpp", 1276, 0, "%s", "dropState >= CS_CONNECTED");
+        iassert(dropState >= CS_CONNECTED);
         name = drop->name;
         v4 = droppedClientName;
         do
@@ -987,22 +940,12 @@ void __cdecl SV_DropClient(client_t *drop, const char *reason, bool tellThem)
 
 void __cdecl SV_DelayDropClient(client_t *drop, const char *reason)
 {
-    if (!drop)
-        MyAssertHandler(".\\server_mp\\sv_client_mp.cpp", 1356, 0, "%s", "drop");
-    if (!reason)
-        MyAssertHandler(".\\server_mp\\sv_client_mp.cpp", 1357, 0, "%s", "reason");
-    if (!drop->header.state)
-        MyAssertHandler(".\\server_mp\\sv_client_mp.cpp", 1359, 0, "%s", "drop->header.state != CS_FREE");
+    iassert(drop);
+    iassert(reason);
+    iassert(drop->header.state != CS_FREE);
     if (drop->header.state == 1)
     {
-        if (drop->dropReason)
-            MyAssertHandler(
-                ".\\server_mp\\sv_client_mp.cpp",
-                1362,
-                0,
-                "%s\n\t(drop->dropReason) = %s",
-                "(drop->dropReason == 0)",
-                drop->dropReason);
+        vassert((drop->dropReason == 0), "(drop->dropReason) = %s", drop->dropReason);
     }
     else if (!drop->dropReason)
     {
@@ -1103,8 +1046,7 @@ void __cdecl SV_SendClientGameState(client_t *client)
             }
             if (sv.configstrings[start] == sv.emptyConfigString)
             {
-                if (configStringCount < 0)
-                    MyAssertHandler(".\\server_mp\\sv_client_mp.cpp", 1556, 0, "%s", "configStringCount >= 0");
+                iassert(configStringCount >= 0);
                 MSG_WriteBit0(&msg);
                 MSG_WriteBits(&msg, start, 0xCu);
                 lastStringIndex = start;
@@ -1116,8 +1058,7 @@ void __cdecl SV_SendClientGameState(client_t *client)
         if (sv.configstrings[start] != sv.emptyConfigString)
         {
             configString = SL_ConvertToString(sv.configstrings[start]);
-            if (configStringCount < 0)
-                MyAssertHandler(".\\server_mp\\sv_client_mp.cpp", 1573, 0, "%s", "configStringCount >= 0");
+            iassert(configStringCount >= 0);
             if (start == lastStringIndex + 1)
             {
                 MSG_WriteBit1(&msg);
@@ -1137,8 +1078,7 @@ void __cdecl SV_SendClientGameState(client_t *client)
             ++numWritten;
         }
     }
-    if (configStringCount)
-        MyAssertHandler(".\\server_mp\\sv_client_mp.cpp", 1599, 0, "%s", "configStringCount == 0");
+    iassert(configStringCount == 0);
     Com_Printf(
         15,
         "Gamestate has %i bytes of config strings (%i total config strings)\n",
@@ -1369,10 +1309,8 @@ void __cdecl SV_UserMove(client_t *cl, msg_t *msg, int delta)
                         &v10->cmd[strlen(v10->cmd) + 1] - v9);
                 }
                 ps = SV_GameClientNum(cl - svs.clients);
-                if (!ps)
-                    MyAssertHandler(".\\server_mp\\sv_client_mp.cpp", 3012, 0, "%s", "ps");
-                if (!BG_ValidateWeaponNumber(ps->weapon))
-                    MyAssertHandler(".\\server_mp\\sv_client_mp.cpp", 3013, 0, "%s", "BG_ValidateWeaponNumber( ps->weapon )");
+                iassert(ps);
+                iassert(BG_ValidateWeaponNumber( ps->weapon ));
                 MSG_SetDefaultUserCmd(ps, &nullcmd);
                 cmd = &nullcmd;
                 oldcmd = &nullcmd;
@@ -1711,8 +1649,7 @@ gentity_s *__cdecl SV_AddTestClient()
     int i; // [esp+428h] [ebp-1Ch]
     netadr_t a; // [esp+42Ch] [ebp-18h] BYREF
 
-    if (!com_sv_running->current.enabled)
-        MyAssertHandler(".\\server_mp\\sv_client_mp.cpp", 3344, 0, "%s", "com_sv_running->current.enabled");
+    iassert(com_sv_running->current.enabled);
     i = 0;
     for (client = svs.clients; i < sv_maxclients->current.integer && client->header.state; ++client)
         ++i;

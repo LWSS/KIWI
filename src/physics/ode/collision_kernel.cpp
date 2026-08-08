@@ -626,8 +626,7 @@ void dCloseODE()
 
 void __cdecl dInitUserGeom(dxUserGeom *geom, int classnum, dxSpace *space, dxBody *body)
 {
-    if (!geom)
-        MyAssertHandler(".\\physics\\ode\\src\\collision_kernel.cpp", 749, 0, "%s", "geom");
+    iassert(geom);
     if (classnum < 11 || classnum > 15)
         MyAssertHandler(
             ".\\physics\\ode\\src\\collision_kernel.cpp",
@@ -708,14 +707,7 @@ dxGeom *ODE_CreateGeom(int classnum, dxSpace *space, dxBody *body)
 {
     dxUserGeom *geom;
 
-    if (classnum < dFirstUserClass || classnum > dLastUserClass)
-        MyAssertHandler(
-            ".\\physics\\ode\\src\\collision_kernel.cpp",
-            737,
-            0,
-            "%s\n\t%s",
-            "( classnum >= dFirstUserClass ) && ( classnum <= dLastUserClass )",
-            "not a custom class");
+    vassert(( classnum >= dFirstUserClass ) && ( classnum <= dLastUserClass ), "%s", "not a custom class");
     
     geom = (dxUserGeom *)ODE_AllocateGeom();
     if (!geom)

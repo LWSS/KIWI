@@ -303,8 +303,7 @@ void __cdecl Scr_PrintElementText(Scr_WatchElement_s *element, int bufLen, int d
 
     if (element->breakpoint)
     {
-        if (depth)
-            MyAssertHandler(".\\script\\scr_debugger.cpp", 3331, 0, "%s", "!depth");
+        iassert(!depth);
         I_strncpyz(buf + 1, element->valueText, bufLen - 1);
         return;
     }
@@ -577,8 +576,7 @@ void Scr_ScriptWatch::AddElement(Scr_WatchElement_s *element, char *text)
     ScriptExpression_t scriptExpr; // [esp+8h] [ebp-10h] BYREF
     ScriptExpression_t *expr; // [esp+14h] [ebp-4h]
 
-    if (!element)
-        MyAssertHandler(".\\script\\scr_debugger.cpp", 6608, 0, "%s", "element");
+    iassert(element);
     if (!element->breakpoint)
     {
         scriptExpr.exprHead = 0;
@@ -622,8 +620,7 @@ void Scr_ScriptWatch::AddElement(Scr_WatchElement_s *element, char *text)
             }
             goto LABEL_13;
         }
-        if (!scrVarPub.evaluate)
-            MyAssertHandler(".\\script\\scr_debugger.cpp", 6623, 0, "%s", "scrVarPub.evaluate");
+        iassert(scrVarPub.evaluate);
         scrVarPub.evaluate = 0;
         Scr_ExecCode(*(const char**)(scriptExpr.parseData.type + 4), this->localId);
         scrVarPub.evaluate = 1;
@@ -671,8 +668,7 @@ int __cdecl Scr_GetWatchElementSize(Scr_WatchElement_s *element)
 
 void Scr_ScriptWatch::DeleteElementInternal(Scr_WatchElement_s *element)
 {
-    if (!element)
-        MyAssertHandler(".\\script\\scr_debugger.cpp", 4396, 0, "%s", "element");
+    iassert(element);
     if (!element->parent)
     {
         *Scr_ScriptWatch::GetElementRef(element) = element->next;
@@ -759,14 +755,7 @@ void __thiscall Scr_ScriptWatch::ToggleBreakpointInternal(
                     element->breakpointType = 7;
                     if (!Sys_IsRemoteDebugClient())
                     {
-                        if (breakpoint->builtinIndex < 0 || breakpoint->builtinIndex >= scrCompilePub.func_table_size)
-                            MyAssertHandler(
-                                ".\\script\\scr_debugger.cpp",
-                                7510,
-                                0,
-                                "%s\n\t(breakpoint->builtinIndex) = %i",
-                                "(breakpoint->builtinIndex >= 0 && breakpoint->builtinIndex < scrCompilePub.func_table_size)",
-                                breakpoint->builtinIndex);
+                        vassert((breakpoint->builtinIndex >= 0 && breakpoint->builtinIndex < scrCompilePub.func_table_size), "(breakpoint->builtinIndex) = %i", breakpoint->builtinIndex);
                         --scrVmDebugPub.func_table[breakpoint->builtinIndex].breakpointCount;
                     }
                 }
@@ -777,14 +766,7 @@ void __thiscall Scr_ScriptWatch::ToggleBreakpointInternal(
                     element->breakpointType = 6;
                     if (!Sys_IsRemoteDebugClient())
                     {
-                        if (breakpoint->builtinIndex < 0 || breakpoint->builtinIndex >= scrCompilePub.func_table_size)
-                            MyAssertHandler(
-                                ".\\script\\scr_debugger.cpp",
-                                7493,
-                                0,
-                                "%s\n\t(breakpoint->builtinIndex) = %i",
-                                "(breakpoint->builtinIndex >= 0 && breakpoint->builtinIndex < scrCompilePub.func_table_size)",
-                                breakpoint->builtinIndex);
+                        vassert((breakpoint->builtinIndex >= 0 && breakpoint->builtinIndex < scrCompilePub.func_table_size), "(breakpoint->builtinIndex) = %i", breakpoint->builtinIndex);
                         ++scrVmDebugPub.func_table[breakpoint->builtinIndex].breakpointCount;
                     }
                 }
@@ -851,8 +833,7 @@ Scr_WatchElement_s **Scr_ScriptWatch::GetElementRef(Scr_WatchElement_s *element)
 
     for (pElement = &this->elementHead; *pElement != element; pElement = &(*pElement)->next)
     {
-        if (!*pElement)
-            MyAssertHandler(".\\script\\scr_debugger.cpp", 3677, 0, "%s", "*pElement");
+        iassert(*pElement);
     }
     return pElement;
 }
@@ -946,8 +927,7 @@ Scr_WatchElement_s *__thiscall Scr_ScriptWatch::BackspaceElementInternal(Scr_Wat
     Scr_WatchElement_s **pElement; // [esp+4h] [ebp-8h]
     Scr_WatchElement_s *prevElement; // [esp+8h] [ebp-4h]
 
-    if (!element)
-        MyAssertHandler(".\\script\\scr_debugger.cpp", 4486, 0, "%s", "element");
+    iassert(element);
     if (element->parent)
         return element;
     pElement = Scr_ScriptWatch::GetElementRef(element);
@@ -963,8 +943,7 @@ void Scr_ScriptWatch::ExpandElement(Scr_WatchElement_s *element, bool expand)
 {
     Scr_WatchElement_s *childHead; // [esp+0h] [ebp-Ch]
 
-    if (Sys_IsRemoteDebugClient())
-        MyAssertHandler((char *)".\\script\\scr_debugger.cpp", 3848, 0, "%s", "!Sys_IsRemoteDebugClient()");
+    iassert(!Sys_IsRemoteDebugClient());
     if (element->expand == expand)
     {
         if (expand)
@@ -1079,8 +1058,7 @@ void Scr_ScriptWatch::FreeWatchElement(Scr_WatchElement_s *element)
 {
     Scr_Breakpoint *breakpoint; // [esp+4h] [ebp-8h]
 
-    if (element->parent)
-        MyAssertHandler(".\\script\\scr_debugger.cpp", 5030, 0, "%s", "!element->parent");
+    iassert(!element->parent);
     breakpoint = element->breakpoint;
     if (breakpoint)
     {
@@ -1089,14 +1067,7 @@ void Scr_ScriptWatch::FreeWatchElement(Scr_WatchElement_s *element)
             Scr_FreeLineBreakpoint(breakpoint, 0);
         if (!Sys_IsRemoteDebugClient() && element->breakpointType == 6)
         {
-            if (breakpoint->builtinIndex < 0 || breakpoint->builtinIndex >= scrCompilePub.func_table_size)
-                MyAssertHandler(
-                    ".\\script\\scr_debugger.cpp",
-                    5046,
-                    0,
-                    "%s\n\t(breakpoint->builtinIndex) = %i",
-                    "(breakpoint->builtinIndex >= 0 && breakpoint->builtinIndex < scrCompilePub.func_table_size)",
-                    breakpoint->builtinIndex);
+            vassert((breakpoint->builtinIndex >= 0 && breakpoint->builtinIndex < scrCompilePub.func_table_size), "(breakpoint->builtinIndex) = %i", breakpoint->builtinIndex);
             --scrVmDebugPub.func_table[breakpoint->builtinIndex].breakpointCount;
         }
     }
@@ -1118,8 +1089,7 @@ void Scr_ScriptWatch::FreeWatchElement(Scr_WatchElement_s *element)
 
 Scr_WatchElement_s *__thiscall Scr_ScriptWatch::AddBreakpoint(Scr_WatchElement_s *element, uint8_t type)
 {
-    if (element->breakpointType == type)
-        MyAssertHandler(".\\script\\scr_debugger.cpp", 7396, 0, "%s", "element->breakpointType != type");
+    iassert(element->breakpointType != type);
     if (element->parent)
         element = Scr_ScriptWatch::CloneElement(element);
     element->breakpointType = type;
@@ -1194,8 +1164,7 @@ void __thiscall Scr_ScriptWatch::DisplayThreadPos(Scr_WatchElement_s *element)
     const char *codePos; // [esp+Ch] [ebp-8h]
     uint sourcePos; // [esp+10h] [ebp-4h]
 
-    if (Sys_IsRemoteDebugClient())
-        MyAssertHandler(".\\script\\scr_debugger.cpp", 7063, 0, "%s", "!Sys_IsRemoteDebugClient()");
+    iassert(!Sys_IsRemoteDebugClient());
     if (scrVarPub.evaluate && (element->objectType == 22 || element->objectType == 14 && element->directObject))
     {
         codePos = Scr_GetElementThreadPos(element);
@@ -1262,14 +1231,12 @@ void Scr_ScriptWatch::UpdateBreakpoint(bool add)
     Scr_WatchElement_s *element; // [esp+8h] [ebp-4h]
     Scr_WatchElement_s *elementa; // [esp+8h] [ebp-4h]
 
-    if (Sys_IsRemoteDebugClient())
-        MyAssertHandler((char *)".\\script\\scr_debugger.cpp", 7357, 0, "%s", "!Sys_IsRemoteDebugClient()");
+    iassert(!Sys_IsRemoteDebugClient());
     for (element = this->elementHead; element; element = element->next)
     {
         if (element->breakpointType == 1 || element->breakpointType == 3)
         {
-            if (element->breakpoint)
-                MyAssertHandler((char *)".\\script\\scr_debugger.cpp", 7365, 0, "%s", "!element->breakpoint");
+            iassert(!element->breakpoint);
             if (!element->expr.exprHead)
                 MyAssertHandler((char *)".\\script\\scr_debugger.cpp", 7367, 0, "%s", "expr->exprHead");
             scrDebuggerGlob.currentElement = element;
@@ -1625,8 +1592,7 @@ void __thiscall Scr_ScriptCallStack::UpdateStack()
     int i; // [esp+10h] [ebp-8h]
     char *codePos; // [esp+14h] [ebp-4h]
 
-    if (Sys_IsRemoteDebugClient())
-        MyAssertHandler(".\\script\\scr_debugger.cpp", 3193, 0, "%s", "!Sys_IsRemoteDebugClient()");
+    iassert(!Sys_IsRemoteDebugClient());
     if (scrVmPub.function_count)
     {
         this->numLines = scrVmPub.function_count + 1;
@@ -1837,34 +1803,13 @@ bool Scr_OpenScriptList::SetSelectedLineFocus(
         return 0;
     if ((newSelectedLine & 0x80000000) != 0)
         return 1;
-    if (newSelectedLine >= scrParserPub.sourceBufferLookupLen)
-        MyAssertHandler(
-            ".\\script\\scr_debugger.cpp",
-            2875,
-            0,
-            "newSelectedLine doesn't index scrParserPub.sourceBufferLookupLen\n\t%i not in [0, %i)",
-            newSelectedLine,
-            scrParserPub.sourceBufferLookupLen);
+    bcassert(newSelectedLine, scrParserPub.sourceBufferLookupLen);
     bufferIndex = this->scriptWindows[newSelectedLine]->bufferIndex;
     if (bufferIndex == -1)
         return 1;
-    if (bufferIndex >= scrParserPub.sourceBufferLookupLen)
-        MyAssertHandler(
-            ".\\script\\scr_debugger.cpp",
-            2881,
-            0,
-            "bufferIndex doesn't index scrParserPub.sourceBufferLookupLen\n\t%i not in [0, %i)",
-            bufferIndex,
-            scrParserPub.sourceBufferLookupLen);
+    bcassert(bufferIndex, scrParserPub.sourceBufferLookupLen);
     sortedIndex = scrParserPub.sourceBufferLookup[bufferIndex].sortedIndex;
-    if (sortedIndex >= scrParserPub.sourceBufferLookupLen)
-        MyAssertHandler(
-            ".\\script\\scr_debugger.cpp",
-            2886,
-            0,
-            "sortedIndex doesn't index scrParserPub.sourceBufferLookupLen\n\t%i not in [0, %i)",
-            sortedIndex,
-            scrParserPub.sourceBufferLookupLen);
+    bcassert(sortedIndex, scrParserPub.sourceBufferLookupLen);
     //UI_LinesComponent::SetSelectedLineFocus(&scrDebuggerGlob.scriptList, sortedIndex, 1);
    //((UI_LinesComponent*)&scrDebuggerGlob.scriptList).SetSelectedLineFocus(sortedIndex, 1);
     scrDebuggerGlob.scriptList.SetSelectedLineFocus(sortedIndex, 1);
@@ -1877,14 +1822,10 @@ void Scr_ScriptWatch::Evaluate()
     Scr_SelectedLineInfo info; // [esp+4h] [ebp-10h] BYREF
     Scr_WatchElement_s *element; // [esp+10h] [ebp-4h]
 
-    if (Sys_IsRemoteDebugClient())
-        MyAssertHandler(".\\script\\scr_debugger.cpp", 6860, 0, "%s", "!Sys_IsRemoteDebugClient()");
-    if (!scrVarPub.evaluate)
-        MyAssertHandler(".\\script\\scr_debugger.cpp", 6863, 0, "%s", "scrVarPub.evaluate");
-    if (scrVmPub.outparamcount)
-        MyAssertHandler(".\\script\\scr_debugger.cpp", 6864, 0, "%s", "!scrVmPub.outparamcount");
-    if (scrVmPub.inparamcount)
-        MyAssertHandler(".\\script\\scr_debugger.cpp", 6865, 0, "%s", "!scrVmPub.inparamcount");
+    iassert(!Sys_IsRemoteDebugClient());
+    iassert(scrVarPub.evaluate);
+    iassert(!scrVmPub.outparamcount);
+    iassert(!scrVmPub.inparamcount);
 
     Scr_ScriptWatch::SaveSelectedLine(&info);
 
@@ -2073,8 +2014,7 @@ Scr_WatchElement_s *__thiscall Scr_ScriptWatch::PasteNonBreakpointElement(
     newElement = Scr_ScriptWatch::CreateWatchElement(text, ElementRef, "Scr_ScriptWatch::PasteNonBreakpointElement");
     if (!Sys_IsRemoteDebugClient())
     {
-        if (newElement->breakpoint)
-            MyAssertHandler(".\\script\\scr_debugger.cpp", 4031, 0, "%s", "!newElement->breakpoint");
+        iassert(!newElement->breakpoint);
         Scr_CompileText(text, &newElement->expr);
         Scr_ScriptWatch::EvaluateWatchElement(newElement);
     }
@@ -2119,12 +2059,9 @@ bool Scr_ScriptWatch::EvaluateWatchChildElement(
     uint8_t objectType; // [esp+4h] [ebp-18h]
     VariableValue value; // [esp+14h] [ebp-8h] BYREF
 
-    if (Sys_IsRemoteDebugClient())
-        MyAssertHandler(".\\script\\scr_debugger.cpp", 6354, 0, "%s", "!Sys_IsRemoteDebugClient()");
-    if (element->breakpoint)
-        MyAssertHandler(".\\script\\scr_debugger.cpp", 6357, 0, "%s", "!element->breakpoint");
-    if (!scrVarPub.evaluate)
-        MyAssertHandler(".\\script\\scr_debugger.cpp", 6359, 0, "%s", "scrVarPub.evaluate");
+    iassert(!Sys_IsRemoteDebugClient());
+    iassert(!element->breakpoint);
+    iassert(scrVarPub.evaluate);
     childElement->fieldName = fieldName;
     if (hardcodedField)
     {
@@ -2225,39 +2162,32 @@ void Scr_ScriptWatch::EvaluateWatchChildren(Scr_WatchElement_s *parentElement)
     bool setChildCount; // [esp+12Eh] [ebp-2h]
     bool sameType; // [esp+12Fh] [ebp-1h]
 
-    if (Sys_IsRemoteDebugClient())
-        MyAssertHandler(".\\script\\scr_debugger.cpp", 5768, 0, "%s", "!Sys_IsRemoteDebugClient()");
+    iassert(!Sys_IsRemoteDebugClient());
     oldObjectType = parentElement->oldObjectType;
     parentElement->oldObjectType = parentElement->objectType;
     if (parentElement->expand && parentElement->objectType)
     {
-        if (!scrVarPub.evaluate)
-            MyAssertHandler(".\\script\\scr_debugger.cpp", 5780, 0, "%s", "scrVarPub.evaluate");
+        iassert(scrVarPub.evaluate);
         isArray = parentElement->objectType == 21;
         hardcodedCount = 0;
         if (parentElement->objectType == 24)
         {
-            if (!parentElement->parent)
-                MyAssertHandler(".\\script\\scr_debugger.cpp", 5787, 0, "%s", "parentElement->parent");
+            iassert(parentElement->parent);
             objectId = parentElement->parent->objectId;
-            if (!objectId)
-                MyAssertHandler(".\\script\\scr_debugger.cpp", 5789, 0, "%s", "objectId");
+            iassert(objectId);
             count = Scr_FindAllThreads(objectId, 0, this->localId);
         }
         else if (parentElement->objectType == 25)
         {
-            if (!parentElement->parent)
-                MyAssertHandler(".\\script\\scr_debugger.cpp", 5795, 0, "%s", "parentElement->parent");
+            iassert(parentElement->parent);
             objectId = parentElement->parent->objectId;
-            if (!objectId)
-                MyAssertHandler(".\\script\\scr_debugger.cpp", 5797, 0, "%s", "objectId");
+            iassert(objectId);
             count = Scr_FindAllEndons(objectId, 0);
         }
         else
         {
             objectId = parentElement->objectId;
-            if (!objectId)
-                MyAssertHandler(".\\script\\scr_debugger.cpp", 5804, 0, "%s", "objectId");
+            iassert(objectId);
             if (parentElement->directObject)
             {
                 objectType = parentElement->objectType;
@@ -2268,8 +2198,7 @@ void Scr_ScriptWatch::EvaluateWatchChildren(Scr_WatchElement_s *parentElement)
                     {
                         for (function_count = scrVmPub.function_count; ; --function_count)
                         {
-                            if (!function_count)
-                                MyAssertHandler(".\\script\\scr_debugger.cpp", 5824, 0, "%s", "function_count");
+                            iassert(function_count);
                             if (parentElement->objectId == scrVmPub.function_frame_start[function_count].fs.localId)
                                 break;
                         }
@@ -2399,8 +2328,7 @@ void Scr_ScriptWatch::EvaluateWatchChildren(Scr_WatchElement_s *parentElement)
                                     newElement->sourcePos = oldElement->sourcePos;
                                     newElement->changed = oldElement->changed;
                                     newElement->changedTime = oldElement->changedTime;
-                                    if (!oldElement->id)
-                                        MyAssertHandler(".\\script\\scr_debugger.cpp", 5991, 0, "%s", "oldElement->id");
+                                    iassert(oldElement->id);
                                     newElement->id = oldElement->id;
                                     for (childElement = oldElement->childHead; childElement; childElement = childElement->next)
                                         childElement->parent = newElement;
@@ -2525,14 +2453,11 @@ void  Scr_ScriptWatch::EvaluateWatchElementExpression(
     Scr_WatchElement_s *element,
     VariableValue *value)
 {
-    if (Sys_IsRemoteDebugClient())
-        MyAssertHandler(".\\script\\scr_debugger.cpp", 6441, 0, "%s", "!Sys_IsRemoteDebugClient()");
-    if (element->breakpoint)
-        MyAssertHandler(".\\script\\scr_debugger.cpp", 6444, 0, "%s", "!element->breakpoint");
+    iassert(!Sys_IsRemoteDebugClient());
+    iassert(!element->breakpoint);
     if (!element->expr.exprHead)
         MyAssertHandler(".\\script\\scr_debugger.cpp", 6447, 0, "%s", "expr->exprHead");
-    if (!scrVarPub.evaluate)
-        MyAssertHandler(".\\script\\scr_debugger.cpp", 6449, 0, "%s", "scrVarPub.evaluate");
+    iassert(scrVarPub.evaluate);
     if (element->valueDefined && (element->breakpointType == 1 || element->breakpointType == 3))
         Scr_EvalScriptExpression(&element->expr, this->localId, value, 1, 0);
     else
@@ -2548,10 +2473,8 @@ bool __thiscall Scr_ScriptWatch::PostEvaluateWatchElement(
     uint intValue; // [esp+0h] [ebp-118h]
     char valueText[268]; // [esp+8h] [ebp-110h] BYREF
 
-    if (Sys_IsRemoteDebugClient())
-        MyAssertHandler(".\\script\\scr_debugger.cpp", 6307, 0, "%s", "!Sys_IsRemoteDebugClient()");
-    if (!scrVarPub.evaluate)
-        MyAssertHandler(".\\script\\scr_debugger.cpp", 6310, 0, "%s", "scrVarPub.evaluate");
+    iassert(!Sys_IsRemoteDebugClient());
+    iassert(scrVarPub.evaluate);
     Scr_RemoveValue(element);
     if (scrVarPub.error_message)
     {
@@ -2813,14 +2736,12 @@ void Scr_ScriptWatch::UpdateBreakpoints(bool add)
     Scr_WatchElement_s *element; // [esp+8h] [ebp-4h]
     Scr_WatchElement_s *elementa; // [esp+8h] [ebp-4h]
 
-    if (Sys_IsRemoteDebugClient())
-        MyAssertHandler(".\\script\\scr_debugger.cpp", 7357, 0, "%s", "!Sys_IsRemoteDebugClient()");
+    iassert(!Sys_IsRemoteDebugClient());
     for (element = this->elementHead; element; element = element->next)
     {
         if (element->breakpointType == 1 || element->breakpointType == 3)
         {
-            if (element->breakpoint)
-                MyAssertHandler(".\\script\\scr_debugger.cpp", 7365, 0, "%s", "!element->breakpoint");
+            iassert(!element->breakpoint);
             if (!element->expr.exprHead)
                 MyAssertHandler(".\\script\\scr_debugger.cpp", 7367, 0, "%s", "expr->exprHead");
             scrDebuggerGlob.currentElement = element;
@@ -3076,10 +2997,8 @@ void UI_VerticalDivider::Draw(
     float v8; // [esp+2Ch] [ebp-10h]
     float topHeight; // [esp+38h] [ebp-4h]
 
-    if (compX != 0.0)
-        MyAssertHandler(".\\ui\\ui_component.cpp", 982, 0, "%s", "!compX");
-    if (compY != 0.0)
-        MyAssertHandler(".\\ui\\ui_component.cpp", 983, 0, "%s", "!compY");
+    iassert(!compX);
+    iassert(!compY);
     this->size[0] = width;
     this->size[1] = height;
     this->posY = (this->posY / UI_Component::g.charHeight) * UI_Component::g.charHeight;
@@ -3190,10 +3109,8 @@ void UI_ScrollPane::Draw(
     float thumbFiller; // [esp+90h] [ebp-8h]
     bool horScroll; // [esp+97h] [ebp-1h]
 
-    if (compX != 0.0)
-        MyAssertHandler(".\\ui\\ui_component.cpp", 346, 0, "%s", "!compX");
-    if (compY != 0.0)
-        MyAssertHandler(".\\ui\\ui_component.cpp", 347, 0, "%s", "!compY");
+    iassert(!compX);
+    iassert(!compY);
     this->size[0] = width;
     this->size[1] = height;
     if (!this->comp || this->comp->size[0] == 0.0 || this->comp->size[1] == 0.0)
@@ -3401,8 +3318,7 @@ void UI_ScrollPane::CheckMouseScroll(int index, float *thumbPos, float *thumbSiz
                         MyAssertHandler(".\\ui\\ui_component.cpp", 310, 0, "%s", "!mouseHeldScale[0]");
                     if (this->mouseHeldScale[1] != 0.0)
                         MyAssertHandler(".\\ui\\ui_component.cpp", 311, 0, "%s", "!mouseHeldScale[1]");
-                    if (thumbMaxSize == 0.0)
-                        MyAssertHandler(".\\ui\\ui_component.cpp", 312, 0, "%s", "thumbMaxSize");
+                    iassert(thumbMaxSize);
                     this->mouseHeldScale[index] = this->comp->size[index] / thumbMaxSize;
                     this->mouseHeldPos[0] = UI_Component::g.cursorPos[0];
                     this->mouseHeldPos[1] = UI_Component::g.cursorPos[1];
@@ -3600,8 +3516,7 @@ void Scr_ScriptWindow::Draw(float x,
             if (breakpoint && breakpoint->line == currentLine)
             {
                 element = breakpoint->element;
-                if (!element)
-                    MyAssertHandler(".\\script\\scr_debugger.cpp", 872, 0, "%s", "element");
+                iassert(element);
                 if (element->breakpointType == 5)
                 {
                     v14 = UI_Component::g.charHeight + UI_Component::g.charHeight;
@@ -4022,14 +3937,7 @@ void Scr_ScriptWindow::CopySelectedText()
 
     if (this->bufferIndex != -1 && this->selectedLine >= 0)
     {
-        if (this->bufferIndex >= scrParserPub.sourceBufferLookupLen)
-            MyAssertHandler(
-                ".\\script\\scr_debugger.cpp",
-                2032,
-                0,
-                "bufferIndex doesn't index scrParserPub.sourceBufferLookupLen\n\t%i not in [0, %i)",
-                this->bufferIndex,
-                scrParserPub.sourceBufferLookupLen);
+        bcassert(this->bufferIndex, scrParserPub.sourceBufferLookupLen);
         sourceBufData = &scrParserPub.sourceBufferLookup[this->bufferIndex];
         s = sourceBufData->sourceBuf;
         endPos = &s[sourceBufData->len];
@@ -4092,21 +4000,14 @@ char *__thiscall Scr_ScriptWindow::GetBreakpointCodePos()
     uint sourcePos; // [esp+18h] [ebp-8h] BYREF
     uint endSourcePos; // [esp+1Ch] [ebp-4h]
 
-    if (Sys_IsRemoteDebugClient())
-        MyAssertHandler(".\\script\\scr_debugger.cpp", 1355, 0, "%s", "!Sys_IsRemoteDebugClient()");
+    iassert(!Sys_IsRemoteDebugClient());
     if (this->selectedLine < 0)
         MyAssertHandler(".\\script\\scr_debugger.cpp", 1358, 0, "%s", "selectedLine >= 0");
     sourceBufData = &scrParserPub.sourceBufferLookup[this->bufferIndex];
     s = sourceBufData->sourceBuf;
     for (line = 0; ; ++line)
     {
-        if (s - sourceBufData->sourceBuf > sourceBufData->len)
-            MyAssertHandler(
-                ".\\script\\scr_debugger.cpp",
-                1366,
-                0,
-                "%s",
-                "s - sourceBufData->sourceBuf <= sourceBufData->len");
+        iassert(s - sourceBufData->sourceBuf <= sourceBufData->len);
         if (line == this->selectedLine)
             break;
     LABEL_18:
@@ -4124,8 +4025,7 @@ char *__thiscall Scr_ScriptWindow::GetBreakpointCodePos()
     if (this->selectedLine < this->numLines - 1)
     {
         ++this->selectedLine;
-        if (*s)
-            MyAssertHandler(".\\script\\scr_debugger.cpp", 1383, 0, "%s", "!(*s)");
+        iassert(!(*s));
         goto LABEL_18;
     }
     return 0;
@@ -4284,14 +4184,7 @@ void Scr_ScriptWindow::Init()
     }
     else
     {
-        if (this->bufferIndex >= scrParserPub.sourceBufferLookupLen)
-            MyAssertHandler(
-                (char *)".\\script\\scr_debugger.cpp",
-                2153,
-                0,
-                "bufferIndex doesn't index scrParserPub.sourceBufferLookupLen\n\t%i not in [0, %i)",
-                this->bufferIndex,
-                scrParserPub.sourceBufferLookupLen);
+        bcassert(this->bufferIndex, scrParserPub.sourceBufferLookupLen);
         sourceBufData = &scrParserPub.sourceBufferLookup[this->bufferIndex];
         s = sourceBufData->sourceBuf;
         this->numCols = 0;

@@ -400,14 +400,7 @@ void __cdecl R_AddAllBspDrawSurfacesSpotShadow(uint spotShadowIndex, uint primar
             triSurfCount = 0;
         }
         triSurfList[triSurfCount] = sortedSurfIndex;
-        if (triSurfList[triSurfCount] != sortedSurfIndex)
-            MyAssertHandler(
-                ".\\r_add_bsp.cpp",
-                688,
-                0,
-                "triSurfList[triSurfCount] == sortedSurfIndex\n\t%i, %i",
-                triSurfList[triSurfCount],
-                sortedSurfIndex);
+        vassert(triSurfList[triSurfCount] == sortedSurfIndex, "%i, %i", triSurfList[triSurfCount], sortedSurfIndex);
         if (++triSurfCount >= 0x80)
         {
             R_AddBspDrawSurfs(drawSurf, (uint8_t*)triSurfList, triSurfCount, &surfData);

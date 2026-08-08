@@ -20,11 +20,9 @@ void __cdecl FX_SpriteGenerateVerts(FxGenerateVertsCmd *cmd)
     int i; // [esp+0h] [ebp-8h]
     FxSpriteInfo *spriteInfo; // [esp+4h] [ebp-4h]
 
-    if (!cmd)
-        MyAssertHandler(".\\EffectsCore\\fx_sprite.cpp", 248, 0, "%s", "cmd");
+    iassert(cmd);
     spriteInfo = cmd->spriteInfo;
-    if (!spriteInfo)
-        MyAssertHandler(".\\EffectsCore\\fx_sprite.cpp", 253, 0, "%s", "spriteInfo");
+    iassert(spriteInfo);
     //for (i = 0; i < (int)spriteInfo->indices; ++i)
     for (i = 0; i < spriteInfo->indexCount; ++i)
         FX_GenerateSpriteCodeMeshVerts(&g_sprites[i], cmd); // LWSS: changed to `g_sprites`
@@ -327,14 +325,7 @@ void __cdecl FX_GenerateSpriteCodeMeshVertsFixedWorldSize(
     {
         if (!FX_HeightWorldToScreen(pos, radius, &screenRadius, cmd))
             return;
-        if (screenRadius <= 0.0)
-            MyAssertHandler(
-                ".\\EffectsCore\\fx_sprite.cpp",
-                222,
-                0,
-                "%s\n\t(screenRadius) = %g",
-                "(screenRadius > 0)",
-                screenRadius);
+        vassert((screenRadius > 0), "(screenRadius) = %g", screenRadius);
         if (minScreenRadius > (double)screenRadius)
         {
             screenScale = minScreenRadius / screenRadius;

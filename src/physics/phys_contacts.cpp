@@ -35,8 +35,7 @@ LABEL_2:
             userData = (PhysObjUserData *)dBodyGetData(body0);
             if (userData->debugContacts)
                 Com_Printf(0, "Body0 flagged stuck due to normals %d and %d\n", contactIdx0, contactIdx1);
-            if (!userData)
-                MyAssertHandler(".\\physics\\phys_contacts.cpp", 388, 0, "%s", "userData");
+            iassert(userData);
             userData->state = PHYS_OBJ_STATE_STUCK;
         }
         if (body1)
@@ -93,10 +92,8 @@ void __cdecl Phys_AssignInitialGroups(const ContactList *contacts, int *group)
     int bestDotContact; // [esp+40h] [ebp-8h]
     float dot2; // [esp+44h] [ebp-4h]
 
-    if (!contacts)
-        MyAssertHandler(".\\physics\\phys_contacts.cpp", 45, 0, "%s", "contacts");
-    if (contacts->contactCount <= 0)
-        MyAssertHandler(".\\physics\\phys_contacts.cpp", 46, 0, "%s", "contacts->contactCount > 0");
+    iassert(contacts);
+    iassert(contacts->contactCount > 0);
     initialPoint = 104729 % contacts->contactCount;
     ptPos[0][0] = contacts->contacts[initialPoint].contact.normal[0];
     ptPos[0][1] = contacts->contacts[initialPoint].contact.normal[1];
@@ -113,8 +110,7 @@ void __cdecl Phys_AssignInitialGroups(const ContactList *contacts, int *group)
             bestDotContact = contactIter;
         }
     }
-    if (bestDotContact == -1)
-        MyAssertHandler(".\\physics\\phys_contacts.cpp", 67, 0, "%s", "bestDotContact != -1");
+    iassert(bestDotContact != -1);
     group[initialPoint] = 0;
     group[bestDotContact] = 1;
     ptPos[1][0] = contacts->contacts[bestDotContact].contact.normal[0];
@@ -138,8 +134,7 @@ void __cdecl Phys_AssignInitialGroups(const ContactList *contacts, int *group)
             bestDotContact = contactItera;
         }
     }
-    if (bestDotContact == -1)
-        MyAssertHandler(".\\physics\\phys_contacts.cpp", 90, 0, "%s", "bestDotContact != -1");
+    iassert(bestDotContact != -1);
     group[bestDotContact] = 2;
 }
 
@@ -199,8 +194,7 @@ void __cdecl Phys_KMeans(const ContactList *contacts, float (*centroid)[3], int 
                     v3 = bestDot;
                 bestDot = v3;
             }
-            if (bestGroup == -1)
-                MyAssertHandler(".\\physics\\phys_contacts.cpp", 141, 0, "%s", "bestGroup != -1");
+            iassert(bestGroup != -1);
             group[contactItera] = bestGroup;
         }
     }
@@ -304,8 +298,7 @@ void __cdecl Phys_GenerateGroupContacts(
     }
     for (contactIter = 0; contactIter != inContacts->contactCount; ++contactIter)
     {
-        if (group[contactIter] == -1)
-            MyAssertHandler(".\\physics\\phys_contacts.cpp", 253, 0, "%s", "group[contactIter] != -1");
+        iassert(group[contactIter] != -1);
         Vec3Add(
             &(*centroid)[3 * group[contactIter]],
             inContacts->contacts[contactIter].contact.normal,
@@ -484,14 +477,7 @@ void __cdecl Phys_CreateJointForEachContact(
     bool useCentroids; // [esp+6Bh] [ebp-11h]
     float pointVel[4]; // [esp+6Ch] [ebp-10h] BYREF
 
-    if ((uint)worldIndex >= PHYS_WORLD_COUNT)
-        MyAssertHandler(
-            ".\\physics\\phys_contacts.cpp",
-            591,
-            0,
-            "worldIndex doesn't index PHYS_WORLD_COUNT\n\t%i not in [0, %i)",
-            worldIndex,
-            3);
+    bcassert((uint)worldIndex, PHYS_WORLD_COUNT);
     Phys_CheckOpposingNormals(body1, body2, contactList);
     useCentroids = physGlob.worldData[worldIndex].useContactCentroids;
     debug = 0;
@@ -503,8 +489,7 @@ void __cdecl Phys_CreateJointForEachContact(
         if (body)
         {
             userData = (PhysObjUserData *)dBodyGetData(body);
-            if (!userData)
-                MyAssertHandler(".\\physics\\phys_contacts.cpp", 607, 0, "%s", "userData");
+            iassert(userData);
             ignoreOpposingNormals[bodyIndex] = userData->state == PHYS_OBJ_STATE_STUCK;
             if (userData->debugContacts)
                 debug = 1;
@@ -757,10 +742,8 @@ void __cdecl Phys_AddCollisionContact(PhysWorld worldId, const PhysContact *phys
     else
         v4 = 0;
     surfParms.mode = 12316;
-    if (!phys_contact_cfm)
-        MyAssertHandler(".\\physics\\phys_contacts.cpp", 767, 0, "%s", "phys_contact_cfm");
-    if (!phys_contact_erp)
-        MyAssertHandler(".\\physics\\phys_contacts.cpp", 768, 0, "%s", "phys_contact_erp");
+    iassert(phys_contact_cfm);
+    iassert(phys_contact_erp);
     surfParms.soft_cfm = phys_contact_cfm->current.value;
     surfParms.soft_erp = phys_contact_erp->current.value;
     surfParms.mu = physContact->friction;
@@ -770,8 +753,7 @@ void __cdecl Phys_AddCollisionContact(PhysWorld worldId, const PhysContact *phys
     contactList.contactCount = 1;
     p_contactList = &contactList;
     contactList.contacts[0].contact.depth = physContact->depth;
-    if (!Vec3IsNormalized(physContact->normal))
-        MyAssertHandler(".\\physics\\phys_contacts.cpp", 781, 0, "%s", "Vec3IsNormalized( physContact->normal )");
+    iassert(Vec3IsNormalized( physContact->normal ));
     normal = p_contactList->contacts[0].contact.normal;
     p_contactList->contacts[0].contact.normal[0] = physContact->normal[0];
     normal[1] = physContact->normal[1];

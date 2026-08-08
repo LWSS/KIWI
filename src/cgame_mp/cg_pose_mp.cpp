@@ -69,8 +69,7 @@ void CG_VehPoseControllers(const cpose_t *pose, const DObj_s *obj, int *partBits
 
     //barrelAngles[4] = a1;
     //barrelAngles[5] = retaddr;
-    if (!obj)
-        MyAssertHandler(".\\cgame_mp\\cg_pose_mp.cpp", 70, 0, "%s", "obj");
+    iassert(obj);
     barrelAngles[0] = 0.0;
     barrelAngles[1] = 0.0;
     barrelAngles[2] = 0.0;

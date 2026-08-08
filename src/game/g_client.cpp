@@ -240,8 +240,7 @@ void __cdecl SetClientOrigin(gentity_s *ent, float *origin)
     gclient_s *client; // r11
     gclient_s *v5; // r11
 
-    if (!ent->client)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_client.cpp", 268, 0, "%s", "ent->client");
+    iassert(ent->client);
     client = ent->client;
     client->ps.origin[0] = *origin;
     client->ps.origin[1] = origin[1];
@@ -388,10 +387,8 @@ void __cdecl G_GetPlayerViewOrigin(const playerState_s *ps, float *origin)
 
 void __cdecl G_GetPlayerViewDirection(const gentity_s *ent, float *forward, float *right, float *up)
 {
-    if (!ent)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_client.cpp", 403, 0, "%s", "ent");
-    if (!ent->client)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_client.cpp", 404, 0, "%s", "ent->client");
+    iassert(ent);
+    iassert(ent->client);
     BG_GetPlayerViewDirection(&ent->client->ps, forward, right, up);
 }
 
@@ -434,10 +431,8 @@ void __cdecl Client_Touch(gentity_s *pSelf, gentity_s *pOther, int bTouched)
 {
     actor_s *actor; // r30
 
-    if (!pSelf->sentient)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_client.cpp", 456, 0, "%s", "pSelf->sentient");
-    if (!pSelf->client)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_client.cpp", 457, 0, "%s", "pSelf->client");
+    iassert(pSelf->sentient);
+    iassert(pSelf->client);
     if (!Client_GetPushed(pSelf, pOther))
         pSelf->client->inControlTime = level.time;
     pSelf->client->lastTouchTime = level.time;
@@ -448,8 +443,7 @@ void __cdecl Client_Touch(gentity_s *pSelf, gentity_s *pOther, int bTouched)
         && (actor->Physics.iTraceMask & 0x2000000) != 0
         && actor->eState[actor->stateLevel] != AIS_TURRET)
     {
-        if (!pOther->sentient)
-            MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_client.cpp", 470, 0, "%s", "pOther->sentient");
+        iassert(pOther->sentient);
         if (Actor_AtClaimNode(actor))
         {
             if (Vec2DistanceSq(pSelf->r.currentOrigin, pSelf->sentient->oldOrigin) >= 0.0099999998)
@@ -472,8 +466,7 @@ void __cdecl respawn(gentity_s *ent)
 
     if (!g_reloading->current.integer && (!Dvar_GetInt("arcademode") || Dvar_GetInt("arcademode_lives") >= 0))
     {
-        if (!ent->client)
-            MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_client.cpp", 501, 0, "%s", "ent->client");
+        iassert(ent->client);
         Dvar_SetInt(g_reloading, 1);
         v2 = g_deathDelay;
         level.absoluteReloadDelayTime = Sys_Milliseconds() + v2->current.integer;
@@ -561,8 +554,7 @@ void __cdecl ClientSpawn(gentity_s *ent)
             0,
             "%s",
             "client == &level.clients[index]");
-    if (!ent->r.inuse)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_client.cpp", 624, 0, "%s", "ent->r.inuse");
+    iassert(ent->r.inuse);
     if (client->ps.clientNum != v3)
         MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_client.cpp", 625, 0, "%s", "client->ps.clientNum == index");
     SelectInitialSpawnPoint(v12, v13);
@@ -683,8 +675,7 @@ void __cdecl G_UpdateHeadHitEnt(gentity_s *pSelf)
     gentity_s *pHitHitEnt; // r31
     float v3[12]; // [sp+50h] [-30h] BYREF
 
-    if (!pSelf->client)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_client.cpp", 773, 0, "%s", "pSelf->client");
+    iassert(pSelf->client);
     G_GetPlayerViewOrigin(&pSelf->client->ps, v3);
     pHitHitEnt = pSelf->client->pHitHitEnt;
     if (!pHitHitEnt)

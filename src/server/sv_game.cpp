@@ -79,8 +79,7 @@ bool __cdecl SV_EntityContact(const float *mins, const float *maxs, const gentit
         if ((gEnt->r.svFlags & 0x10) != 0)
         {
 #endif
-            if (gEnt->r.mins[2] != 0.0)
-                MyAssertHandler(".\\server\\sv_game.cpp", 337, 0, "%s", "!gEnt->r.mins[2]");
+            iassert(!gEnt->r.mins[2]);
             if (gEnt->r.currentOrigin[2] < (double)maxs[2])
             {
                 if (mins[2] < gEnt->r.currentOrigin[2] + gEnt->r.maxs[2])
@@ -396,11 +395,9 @@ void __cdecl SV_XModelDebugBoxes(gentity_s *ent)
     int modelIndex; // [esp+310h] [ebp-4h]
 
     obj = Com_GetServerDObj(ent->s.number);
-    if (!obj)
-        MyAssertHandler(".\\server\\sv_game.cpp", 869, 0, "%s", "obj");
+    iassert(obj);
     numBones = DObjNumBones(obj);
-    if (numBones > 128)
-        MyAssertHandler(".\\server\\sv_game.cpp", 872, 0, "%s", "numBones <= DOBJ_MAX_PARTS");
+    iassert(numBones <= DOBJ_MAX_PARTS);
     DObjGetBoneInfo(obj, boneInfoArray);
     boneMatrix = DObjGetRotTransArray(obj);
     color[0] = 1.0;
@@ -782,14 +779,7 @@ void __cdecl SV_SetMapCenter(float *mapCenter)
 
 void __cdecl SV_GameDropClient(int clientNum, const char *reason)
 {
-    if (sv_maxclients->current.integer < 1 || sv_maxclients->current.integer > 64)
-        MyAssertHandler(
-            ".\\server\\sv_game.cpp",
-            184,
-            0,
-            "%s\n\t(sv_maxclients->current.integer) = %i",
-            "(sv_maxclients->current.integer >= 1 && sv_maxclients->current.integer <= 64)",
-            sv_maxclients->current.integer);
+    vassert((sv_maxclients->current.integer >= 1 && sv_maxclients->current.integer <= 64), "(sv_maxclients->current.integer) = %i", sv_maxclients->current.integer);
     if (clientNum >= 0 && clientNum < sv_maxclients->current.integer)
         SV_DropClient(&svs.clients[clientNum], reason, 1);
 }
@@ -806,8 +796,7 @@ bool __cdecl SV_MapExists(char *name)
 
 char *__cdecl SV_GetGuid(int clientNum)
 {
-    if (!sv_maxclients)
-        MyAssertHandler(".\\server\\sv_game.cpp", 981, 0, "%s", "sv_maxclients");
+    iassert(sv_maxclients);
     if (clientNum < 0 || clientNum >= sv_maxclients->current.integer)
         return (char *)"";
     else
@@ -853,14 +842,7 @@ void __cdecl SV_InitGameVM(int restart, int savepersist)
     SV_ResetSkeletonCache();
     v2 = Sys_MillisecondsRaw();
     G_InitGame(svs.time, v2, restart, savepersist);
-    if (sv_maxclients->current.integer < 1 || sv_maxclients->current.integer > 64)
-        MyAssertHandler(
-            ".\\server\\sv_game.cpp",
-            1112,
-            0,
-            "%s\n\t(sv_maxclients->current.integer) = %i",
-            "(sv_maxclients->current.integer >= 1 && sv_maxclients->current.integer <= 64)",
-            sv_maxclients->current.integer);
+    vassert((sv_maxclients->current.integer >= 1 && sv_maxclients->current.integer <= 64), "(sv_maxclients->current.integer) = %i", sv_maxclients->current.integer);
     for (i = 0; i < sv_maxclients->current.integer; ++i)
         svs.clients[i].gentity = 0;
 }

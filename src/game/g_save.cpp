@@ -391,18 +391,9 @@ void __cdecl WriteCStyleString(const char *psz, int maxlen, SaveGame *save)
     char v11; // [sp+50h] [-40h] BYREF
     __int16 v12; // [sp+52h] [-3Eh] BYREF
 
-    if (!save)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_save.cpp", 610, 0, "%s", "save");
-    if (!psz)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_save.cpp", 611, 0, "%s", "psz");
-    if (maxlen > 0x10000)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\g_save.cpp",
-            612,
-            0,
-            "%s\n\t(maxlen) = %i",
-            "(maxlen <= 65536)",
-            maxlen);
+    iassert(save);
+    iassert(psz);
+    vassert((maxlen <= 65536), "(maxlen) = %i", maxlen);
     v6 = psz;
     while (*(unsigned __int8 *)v6++)
         ;
@@ -431,16 +422,8 @@ void __cdecl ReadCStyleString(char *psz, int maxlen, SaveGame *save)
     _BYTE v7[2]; // [sp+50h] [-30h] BYREF
     unsigned __int16 v8; // [sp+52h] [-2Eh] BYREF
 
-    if (!save)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_save.cpp", 640, 0, "%s", "save");
-    if (maxlen > 0x10000)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\g_save.cpp",
-            641,
-            0,
-            "%s\n\t(maxlen) = %i",
-            "(maxlen <= 65536)",
-            maxlen);
+    iassert(save);
+    vassert((maxlen <= 65536), "(maxlen) = %i", maxlen);
     if (maxlen > 256)
     {
         SaveMemory_LoadRead(&v8, 2, save);
@@ -461,8 +444,7 @@ void __cdecl WriteWeaponIndex(unsigned int weapon, SaveGame *save)
 {
     WeaponDef *WeaponDef; // r29
 
-    if (!save)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_save.cpp", 670, 0, "%s", "save");
+    iassert(save);
     if (weapon)
     {
         WeaponDef = BG_GetWeaponDef(weapon);
@@ -504,8 +486,7 @@ void __cdecl WriteItemIndex(int iIndex, SaveGame *save)
     gitem_s *v4; // r29
     char v5; // [sp+50h] [-40h] BYREF
 
-    if (!save)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_save.cpp", 714, 0, "%s", "save");
+    iassert(save);
     if (iIndex)
     {
         v4 = &bg_itemlist[iIndex];
@@ -547,8 +528,7 @@ void __cdecl WriteVehicleIndex(__int16 index, SaveGame *save)
 {
     const char *VehicleInfoName; // r3
 
-    if (!save)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_save.cpp", 771, 0, "%s", "save");
+    iassert(save);
     VehicleInfoName = G_GetVehicleInfoName(index);
     WriteCStyleString(VehicleInfoName, 256, save);
 }
@@ -793,8 +773,7 @@ void __cdecl WriteField2(const saveField_t *field, unsigned __int8 *base, SaveGa
     unsigned __int8 v20[96]; // [sp+50h] [-F0h] BYREF
     unsigned __int8 v21[144]; // [sp+B0h] [-90h] BYREF
 
-    if (!save)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_save.cpp", 961, 0, "%s", "save");
+    iassert(save);
     type = field->type;
     ofs = field->ofs;
     switch (type)
@@ -1047,8 +1026,7 @@ void __cdecl G_WriteStruct(
 
 void __cdecl G_ReadStruct(const saveField_t *fields, unsigned __int8 *dest, int tempsize, SaveGame *save)
 {
-    if (!save)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_save.cpp", 1214, 0, "%s", "save");
+    iassert(save);
     SaveMemory_LoadRead(dest, tempsize, save);
     for (; fields->type; ++fields)
         ReadField(fields, dest, save);
@@ -1056,8 +1034,7 @@ void __cdecl G_ReadStruct(const saveField_t *fields, unsigned __int8 *dest, int 
 
 void __cdecl WriteClient(gclient_s *cl, SaveGame *save)
 {
-    if (!save)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_save.cpp", 1232, 0, "%s", "save");
+    iassert(save);
     memcpy(&tempClient, cl, sizeof(tempClient));
     tempClient.ps.events[0] = 0;
     tempClient.ps.events[1] = 0;
@@ -1084,8 +1061,7 @@ void __cdecl ReadClient(gclient_s *client, SaveGame *save)
     unsigned __int8 v7; // r11
     int v8; // r5
 
-    if (!save)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_save.cpp", 1262, 0, "%s", "save");
+    iassert(save);
     G_ReadStruct(gclientFields, (unsigned __int8 *)client, 46104, save);
     SaveMemory_LoadRead(&client->pers.cmd.buttons, 4, save);
     client->pers.cmd.weapon = ReadWeaponIndex(save);
@@ -1180,8 +1156,7 @@ void __cdecl WriteActor(actor_s *pActor, SaveGame *save)
 {
     unsigned __int8 v4[3832]; // [sp+50h] [-F10h] BYREF
 
-    if (!save)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_save.cpp", 1365, 0, "%s", "save");
+    iassert(save);
     SaveMemory_SaveWrite(&pActor->inuse, 1, save);
     if (pActor->inuse)
     {
@@ -1193,14 +1168,12 @@ void __cdecl WriteActor(actor_s *pActor, SaveGame *save)
 
 void __cdecl ReadActor(actor_s *pActor, SaveGame *save)
 {
-    if (!save)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_save.cpp", 1385, 0, "%s", "save");
+    iassert(save);
     SaveMemory_LoadRead(&pActor->inuse, 1, save);
     if (pActor->inuse)
     {
         G_ReadStruct(actorFields, (unsigned __int8 *)pActor, 3820, save);
-        if (!pActor->inuse)
-            MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_save.cpp", 1394, 0, "%s", "pActor->inuse");
+        iassert(pActor->inuse);
         ReadActorPotentialCoverNodes(pActor, save);
         pActor->pszDebugInfo = "";
     }
@@ -1210,8 +1183,7 @@ void __cdecl WriteSentient(sentient_s *sentient, SaveGame *save)
 {
     unsigned __int8 v4[120]; // [sp+50h] [-90h] BYREF
 
-    if (!save)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_save.cpp", 1420, 0, "%s", "save");
+    iassert(save);
     SaveMemory_SaveWrite(&sentient->inuse, 1, save);
     if (sentient->inuse)
     {
@@ -1222,14 +1194,12 @@ void __cdecl WriteSentient(sentient_s *sentient, SaveGame *save)
 
 void __cdecl ReadSentient(sentient_s *sentient, SaveGame *save)
 {
-    if (!save)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_save.cpp", 1437, 0, "%s", "save");
+    iassert(save);
     SaveMemory_LoadRead(&sentient->inuse, 1, save);
     if (sentient->inuse)
     {
         G_ReadStruct(sentientFields, (unsigned __int8 *)sentient, 116, save);
-        if (!sentient->inuse)
-            MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_save.cpp", 1446, 0, "%s", "sentient->inuse");
+        iassert(sentient->inuse);
     }
 }
 
@@ -1254,8 +1224,7 @@ void __cdecl ReadVehicle(scr_vehicle_s *pVehicle, SaveGame *save)
     int v4; // [sp+50h] [-20h] BYREF
 
     v4 = 0;
-    if (!save)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_save.cpp", 1483, 0, "%s", "save");
+    iassert(save);
     SaveMemory_LoadRead(&v4, 4, save);
     if (v4)
     {
@@ -1268,8 +1237,7 @@ void __cdecl WriteTurretInfo(TurretInfo *pTurretInfo, SaveGame *save)
 {
     unsigned __int8 v5[200]; // [sp+60h] [-E0h] BYREF
 
-    if (!save)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_save.cpp", 1508, 0, "%s", "save");
+    iassert(save);
     memcpy(v5, pTurretInfo, 0xBCu);
     unsigned int v4 = pTurretInfo->inuse;
     SaveMemory_SaveWrite(&v4, 4, save);
@@ -1282,8 +1250,7 @@ void __cdecl ReadTurretInfo(TurretInfo *pTurretInfo, SaveGame *save)
     int v4; // [sp+50h] [-20h] BYREF
 
     v4 = 0;
-    if (!save)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_save.cpp", 1527, 0, "%s", "save");
+    iassert(save);
     SaveMemory_LoadRead(&v4, 4, save);
     if (v4)
         G_ReadStruct(turretFields, (unsigned __int8 *)pTurretInfo, 188, save);
@@ -1301,8 +1268,7 @@ void __cdecl WritePathNodes(SaveGame *save)
     unsigned int v9[4]; // [sp+50h] [-60h] BYREF
     unsigned __int8 v10[80]; // [sp+60h] [-50h] BYREF
 
-    if (!save)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_save.cpp", 1552, 0, "%s", "save");
+    iassert(save);
     for (i = Path_FirstNode(-1); i; i = Path_NextNode(i, -1))
     {
         v3 = v10;
@@ -1353,8 +1319,7 @@ void __cdecl ReadPathNodes(SaveGame *save)
     unsigned int *v15; // r11
     int v16; // [sp+50h] [-60h] BYREF
 
-    if (!save)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_save.cpp", 1584, 0, "%s", "save");
+    iassert(save);
     for (i = Path_FirstNode(-1); i; i = Path_NextNode(i, -1))
     {
         G_ReadStruct(pathnodeFields, (unsigned __int8 *)&i->dynamic, 32, save);
@@ -1400,8 +1365,7 @@ void __cdecl ReadPathNodes(SaveGame *save)
 
 const saveField_t *__cdecl BadPlaceParmSaveFields(const badplace_t *badplace)
 {
-    if (!badplace)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_save.cpp", 1618, 0, "%s", "badplace");
+    iassert(badplace);
     if (badplace->type == 2)
         return badplaceBrushParmsFields;
     else
@@ -1422,8 +1386,7 @@ void __cdecl WriteBadPlaces(SaveGame *save)
     unsigned __int8 v11[32]; // [sp+50h] [-90h] BYREF
     unsigned __int8 v12[112]; // [sp+70h] [-70h] BYREF
 
-    if (!save)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_save.cpp", 1641, 0, "%s", "save");
+    iassert(save);
     v2 = 32;
     v3 = (unsigned __int8 *)g_badplaces;
     do
@@ -1471,8 +1434,7 @@ void __cdecl ReadBadPlaces(SaveGame *save)
     do
     {
         G_ReadStruct(badplaceFields, (unsigned __int8 *)badplace, 12, save);
-        if (!badplace)
-            MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_save.cpp", 1618, 0, "%s", "badplace");
+        iassert(badplace);
         v4 = badplaceDefaultParmsFields;
         if (badplace->type == 2)
             v4 = badplaceBrushParmsFields;
@@ -1489,8 +1451,7 @@ void __cdecl WriteThreatBiasGroups(SaveGame *save)
     unsigned __int8 v2[1064]; // [sp+50h] [-440h] BYREF
 
     memcpy(v2, &g_threatBias, 0x424u);
-    if (!save)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_save.cpp", 1686, 0, "%s", "save");
+    iassert(save);
     G_WriteStruct(threatGroupFields, (unsigned __int8 *)&g_threatBias, v2, 1060, save);
 }
 
@@ -1513,13 +1474,7 @@ void __cdecl ReadAIEventListeners(SaveGame *save)
 {
     int v2[4]; // [sp+50h] [-20h] BYREF
 
-    if (Actor_EventListener_GetCount())
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\g_save.cpp",
-            1724,
-            0,
-            "%s",
-            "Actor_EventListener_GetCount() == 0");
+    iassert(Actor_EventListener_GetCount() == 0);
     SaveMemory_LoadRead(v2, 4, save);
     Actor_EventListener_SetCount(v2[0]);
     if (v2[0])
@@ -1543,13 +1498,11 @@ void __cdecl G_SaveConfigstrings(int iFirst, int iCount, SaveGame *save)
     _WORD v11[8]; // [sp+50h] [-460h] BYREF
     char v12[1104]; // [sp+60h] [-450h] BYREF
 
-    if (!save)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_save.cpp", 1773, 0, "%s", "save");
+    iassert(save);
     for (i = 0; i < iCount; ++i)
     {
         SV_GetConfigstring(i + iFirst, v12, 1024);
-        if (!save)
-            MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_save.cpp", 610, 0, "%s", "save");
+        iassert(save);
         v7 = v12;
         while (*v7++)
             ;
@@ -1570,12 +1523,10 @@ void __cdecl G_LoadConfigstrings(int iFirst, int iCount, SaveGame *save)
     _WORD v8[8]; // [sp+50h] [-470h] BYREF
     char v9[1120]; // [sp+60h] [-460h] BYREF
 
-    if (!save)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_save.cpp", 1795, 0, "%s", "save");
+    iassert(save);
     for (i = 0; i < iCount; ++i)
     {
-        if (!save)
-            MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_save.cpp", 640, 0, "%s", "save");
+        iassert(save);
         SaveMemory_LoadRead(v8, 2, save);
         v7 = v8[0];
         if (v8[0] >= 0x400u)
@@ -1594,13 +1545,11 @@ void __cdecl G_LoadModelPrecacheList(SaveGame *save)
     _WORD v5[8]; // [sp+50h] [-460h] BYREF
     char v6[1104]; // [sp+60h] [-450h] BYREF
 
-    if (!save)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_save.cpp", 1818, 0, "%s", "save");
+    iassert(save);
     modelMap = level.modelMap;
     do
     {
-        if (!save)
-            MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_save.cpp", 640, 0, "%s", "save");
+        iassert(save);
         SaveMemory_LoadRead(v5, 2, save);
         v3 = v5[0];
         if (v5[0] >= 0x400u)
@@ -1659,8 +1608,7 @@ void __cdecl G_ClearAllConfigstrings()
 
 void __cdecl G_SaveInitConfigstrings(SaveGame *save)
 {
-    if (!save)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_save.cpp", 1871, 0, "%s", "save");
+    iassert(save);
     G_SaveConfigstrings(1123, 512, save);    // CS_MODELS             (was Xbox 1155)
     G_SaveConfigstrings(2147, 100, save);    // CS_EFFECT_NAMES       (was Xbox 2179)
     G_SaveConfigstrings(2247, 256, save);    // CS_EFFECT_TAGS        (was Xbox 2279)
@@ -1679,8 +1627,7 @@ void __cdecl G_SaveInitConfigstrings(SaveGame *save)
 
 void __cdecl G_LoadInitConfigstrings(SaveGame *save)
 {
-    if (!save)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_save.cpp", 1896, 0, "%s", "save");
+    iassert(save);
     G_LoadModelPrecacheList(save);
     G_LoadConfigstrings(2147, 100, save);    // CS_EFFECT_NAMES       (was Xbox 2179)
     G_LoadConfigstrings(2247, 256, save);    // CS_EFFECT_TAGS        (was Xbox 2279)
@@ -1702,8 +1649,7 @@ void __cdecl G_SaveItems(SaveGame *save)
     int v2; // r31
     _BYTE v3[8]; // [sp+50h] [-20h] BYREF
 
-    if (!save)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_save.cpp", 1927, 0, "%s", "save");
+    iassert(save);
     v2 = 1;
     v3[0] = 0;
     do
@@ -1725,8 +1671,7 @@ void __cdecl G_SaveWeaponCue(SaveGame *save)
     int number; // r11
     unsigned int v4; // [sp+50h] [-50h] BYREF
 
-    if (!save)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_save.cpp", 1956, 0, "%s", "save");
+    iassert(save);
     droppedWeaponCue = level.droppedWeaponCue;
     do
     {
@@ -1756,8 +1701,7 @@ void __cdecl G_LoadWeaponCue(SaveGame *save)
     bool v5; // cr58
     int v6; // [sp+50h] [-70h] BYREF
 
-    if (!save)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_save.cpp", 1979, 0, "%s", "save");
+    iassert(save);
     droppedWeaponCue = level.droppedWeaponCue;
     do
     {
@@ -1795,8 +1739,7 @@ void __cdecl G_SaveDvars(SaveGame *save)
 {
     MemoryFile *MemoryFile; // r3
 
-    if (!save)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_save.cpp", 2001, 0, "%s", "save");
+    iassert(save);
     MemoryFile = SaveMemory_GetMemoryFile(save);
     Dvar_SaveDvars(MemoryFile, 0x1000u);
 }
@@ -1805,8 +1748,7 @@ void __cdecl G_LoadDvars(SaveGame *save)
 {
     MemoryFile *MemoryFile; // r3
 
-    if (!save)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_save.cpp", 2013, 0, "%s", "save");
+    iassert(save);
     MemoryFile = SaveMemory_GetMemoryFile(save);
     Dvar_LoadDvars(MemoryFile);
 }
@@ -2126,8 +2068,7 @@ void __cdecl G_SaveMainState(bool savegame, SaveGame *save)
 void __cdecl G_SaveState(bool savegame, SaveGame *save)
 {
     CM_ValidateWorld(); // LWSS: note stubbed for now!
-    if (!save)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_save.cpp", 2398, 0, "%s", "save");
+    iassert(save);
     G_SaveInitState(save);
     G_SaveMainState(savegame, save);
 }
@@ -2164,8 +2105,7 @@ int __cdecl G_WriteGame(const PendingSave *pendingSave, int checksum, SaveGame *
     if (pendingSave == (const PendingSave *)-320)
         MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_save.cpp", 2434, 0, "%s", "pendingSave->screenShotName");
     Com_Printf(10, "G_WriteGame '%s' '%s'\n", pendingSave->filename, pendingSave->description);
-    if (!save)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_save.cpp", 2438, 0, "%s", "save");
+    iassert(save);
     SaveMemory_InitializeGameSave(save);
     memFile = SaveMemory_GetMemoryFile(save);
     UsedSize = MemFile_GetUsedSize(memFile);
@@ -2241,10 +2181,8 @@ int __cdecl G_ProcessCommitActions(const PendingSave *pendingSave, SaveGame *sav
 {
     int v4; // r31
 
-    if (!pendingSave)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_save.cpp", 2543, 0, "%s", "pendingSave");
-    if (!save)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_save.cpp", 2544, 0, "%s", "save");
+    iassert(pendingSave);
+    iassert(save);
     v4 = 0;
     if ((pendingSave->commitLevel & 2) != 0)
         SaveMemory_ForceCommitSave(save);
@@ -2264,8 +2202,7 @@ int __cdecl G_SaveGame(const PendingSave *pendingSave, int checksum)
     char v4; // r11
     SaveGame *SaveHandle; // r31
 
-    if (!pendingSave)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_save.cpp", 2581, 0, "%s", "pendingSave");
+    iassert(pendingSave);
     if (pendingSave->saveType == SAVE_TYPE_INTERNAL || (v4 = 0, g_entities[0].health > 0))
         v4 = 1;
     if (!v4)
@@ -2294,8 +2231,7 @@ void __cdecl G_LoadItems(SaveGame *save)
 {
     _BYTE v2[16]; // [sp+50h] [-20h] BYREF
 
-    if (!save)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_save.cpp", 2627, 0, "%s", "save");
+    iassert(save);
     SaveMemory_LoadRead(v2, 1, save);
     while (!v2[0])
     {
@@ -2329,8 +2265,7 @@ void __cdecl G_PreLoadGame(int checksum, int *useLoadedSourceFiles, SaveGame **s
     int v21; // [sp+24h] [-ACh]
     unsigned int v22[24]; // [sp+70h] [-60h] BYREF
 
-    if (!save)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_save.cpp", 2660, 0, "%s", "save");
+    iassert(save);
     //Profile_Begin(244);
     //MemCard_SetUseDevDrive(g_useDevSaveArea);
     if (SaveMemory_IsCommittedSaveAvailable(g_pendingLoadName, checksum))
@@ -2397,16 +2332,14 @@ int __cdecl G_LoadWeapons(SaveGame *save)
     int v6[3]; // [sp+54h] [-15Ch] BYREF
     char v7[336]; // [sp+60h] [-150h] BYREF
 
-    if (!save)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_save.cpp", 2751, 0, "%s", "save");
+    iassert(save);
     SaveMemory_LoadRead(v6, 4, save);
     v2 = 1;
     if (v6[0] <= 1)
         return 1;
     while (1)
     {
-        if (!save)
-            MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_save.cpp", 640, 0, "%s", "save");
+        iassert(save);
         SaveMemory_LoadRead(v5, 1, save);
         v3 = v5[0];
         SaveMemory_LoadRead(v7, v5[0], save);
@@ -2422,8 +2355,7 @@ int __cdecl G_LoadWeapons(SaveGame *save)
 
 void __cdecl G_InitLoadGame(SaveGame *save)
 {
-    if (!save)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_save.cpp", 2774, 0, "%s", "save");
+    iassert(save);
     G_LoadInitConfigstrings(save);
 }
 

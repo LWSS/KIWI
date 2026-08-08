@@ -33,16 +33,8 @@ void __cdecl Path_UpdateBadPlaceCount(badplace_t *place, int delta)
     int type; // r4
     const char *v5; // r3
 
-    if (!place)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_badplace.cpp", 49, 0, "%s", "place");
-    if (delta != -1 && delta != 1)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\actor_badplace.cpp",
-            50,
-            0,
-            "%s\n\t(delta) = %i",
-            "(delta == -1 || delta == +1)",
-            delta);
+    iassert(place);
+    vassert((delta == -1 || delta == +1), "(delta) = %i", delta);
     type = place->type;
     if (type == 1)
     {
@@ -167,8 +159,7 @@ void __cdecl Path_MakeBadPlace(unsigned int name, int duration, int teamflags, i
     badplace_parms_t *v12; // r11
     int v13; // ctr
 
-    if (!parms)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_badplace.cpp", 171, 0, "%s", "parms");
+    iassert(parms);
     if (teamflags <= 0 || teamflags >= 16)
         MyAssertHandler(
             "c:\\trees\\cod3\\cod3src\\src\\game\\actor_badplace.cpp",
@@ -179,22 +170,8 @@ void __cdecl Path_MakeBadPlace(unsigned int name, int duration, int teamflags, i
             "ubBadPlaceCount[0] ) * (sizeof( ((pathlink_t *) 0)->ubBadPlaceCount ) != 4 || sizeof( ((pathlink_t *) 0)->ubBadPla"
             "ceCount[0] ) <= 4)))))",
             teamflags);
-    if (teamflags != (unsigned __int8)teamflags)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\actor_badplace.cpp",
-            173,
-            0,
-            "%s\n\t(teamflags) = %i",
-            "(teamflags == (byte) teamflags)",
-            teamflags);
-    if (type != (unsigned __int8)type)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\actor_badplace.cpp",
-            174,
-            0,
-            "%s\n\t(type) = %i",
-            "(type == (byte) type)",
-            type);
+    vassert((teamflags == (byte) teamflags), "(teamflags) = %i", teamflags);
+    vassert((type == (byte) type), "(type) = %i", type);
     v10 = Path_AllocBadPlace(name, duration);
     if (v10)
     {
@@ -223,8 +200,7 @@ void __cdecl Path_MakeArcBadPlace(unsigned int name, int duration, int teamflags
     int v10; // ctr
     badplace_parms_t v11[2]; // [sp+50h] [-50h] BYREF
 
-    if (!arc)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_badplace.cpp", 199, 0, "%s", "arc");
+    iassert(arc);
     v8 = v11;
     v9 = arc;
     v10 = 7;
@@ -242,8 +218,7 @@ void __cdecl Path_MakeBrushBadPlace(unsigned int name, int duration, int teamfla
 {
     badplace_parms_t v9; // [sp+50h] [-50h] BYREF
 
-    if (!volume)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_badplace.cpp", 215, 0, "%s", "volume");
+    iassert(volume);
     v9.brush.volume = volume;
     volume->flags |= FL_BADPLACE_VOLUME;
     v9.arc.origin[1] = RadiusFromBounds2D(volume->r.mins, volume->r.maxs);
@@ -257,8 +232,7 @@ void __cdecl Path_RemoveBadPlaceEntity(gentity_s *entity)
     badplace_parms_t *i; // r10
     int v5; // r31
 
-    if (!entity)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_badplace.cpp", 231, 0, "%s", "entity");
+    iassert(entity);
     v2 = 0;
     v3 = 0;
     for (i = &g_badplaces[0].parms;
@@ -381,8 +355,7 @@ void __cdecl Path_ShutdownBadPlaces()
 
 void __cdecl Actor_Badplace_Ping(actor_s *self)
 {
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_badplace.cpp", 398, 0, "%s", "self");
+    iassert(self);
     if (!self->flashBanged)
     {
         int randVal = G_rand();
@@ -501,10 +474,8 @@ int __cdecl Actor_BadPlace_HasPotentialNodeDuplicates(
     int v6; // r10
     pathsort_t *i; // r11
 
-    if (!potentialNodes)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_badplace.cpp", 517, 0, "%s", "potentialNodes");
-    if (!checkNode)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_badplace.cpp", 518, 0, "%s", "checkNode");
+    iassert(potentialNodes);
+    iassert(checkNode);
     v6 = 0;
     if (potentialNodeCount <= 0)
         return 0;
@@ -524,8 +495,7 @@ int __cdecl Actor_BadPlace_IsNodeInAnyBadPlace(pathnode_t *node)
     const char *v5; // r3
     int IsNodeInArc; // r3
 
-    if (!node)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_badplace.cpp", 542, 0, "%s", "node");
+    iassert(node);
     v2 = 0;
     for (i = &g_badplaces[0].parms.arc.angle1; ; i += 10)
     {
@@ -567,8 +537,7 @@ pathnode_t *__cdecl Actor_BadPlace_FindSafeNodeAlongPath(actor_s *self)
     pathnode_t *v4; // r3
     const pathnode_t *v5; // r31
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_badplace.cpp", 641, 0, "%s", "self");
+    iassert(self);
     if (!Actor_HasPath(self))
         return 0;
     v2 = self->Path.lookaheadNextNode + 1;
@@ -778,10 +747,8 @@ int __cdecl Actor_BadPlace_AttemptEscape(actor_s *self)
     pathsort_t *i; // r30
     pathsort_t v10[256]; // [sp+50h] [-C50h] BYREF
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_badplace.cpp", 684, 0, "%s", "self");
-    if (!self->sentient)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_badplace.cpp", 685, 0, "%s", "self->sentient");
+    iassert(self);
+    iassert(self->sentient);
     MaximumFleeRadius = Actor_BadPlace_GetMaximumFleeRadius();
     if (MaximumFleeRadius >= 0.0)
     {
@@ -817,8 +784,7 @@ int __cdecl Actor_BadPlace_AttemptEscape(actor_s *self)
 
 bool __cdecl Actor_BadPlace_Flee_Start(actor_s *self, ai_state_t ePrevState)
 {
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_badplace.cpp", 732, 0, "%s", "self");
+    iassert(self);
     self->isInBadPlace = Actor_BadPlace_AttemptEscape(self);
     return 1;
 }

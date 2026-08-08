@@ -358,18 +358,10 @@ void __cdecl Phys_GetWindingForBrushFace2(
         for (edgeIndex = 0; edgeIndex < edgeCount; ++edgeIndex)
         {
             side2 = edges[edgeIndex];
-            if (side2 >= brush->numsides + 6)
-                MyAssertHandler(
-                    ".\\physics\\phys_coll_boxbrush.cpp",
-                    872,
-                    0,
-                    "side2 doesn't index brush->numsides + 6\n\t%i not in [0, %i)",
-                    side2,
-                    brush->numsides + 6);
+            bcassert(side2, brush->numsides + 6);
             if (side2 >= 6)
             {
-                if (!brush->sides)
-                    MyAssertHandler(".\\physics\\phys_coll_boxbrush.cpp", 879, 0, "%s", "brush->sides");
+                iassert(brush->sides);
                 nonAxialSideIndex = side2 - 6;
                 v23 = planes[2];
                 v24 = brush->sides[side2 - 6].plane;
@@ -528,14 +520,10 @@ void __cdecl Phys_CollideBoxWithBrush(const cbrush_t *brush, const objInfo *info
     float sum[3]; // [esp+39A0h] [ebp-18h] BYREF
     float v47[3]; // [esp+39ACh] [ebp-Ch] BYREF
 
-    if (!brush)
-        MyAssertHandler(".\\physics\\phys_coll_boxbrush.cpp", 1233, 0, "%s", "brush");
-    if (!info)
-        MyAssertHandler(".\\physics\\phys_coll_boxbrush.cpp", 1234, 0, "%s", "info");
-    if (!results)
-        MyAssertHandler(".\\physics\\phys_coll_boxbrush.cpp", 1235, 0, "%s", "results");
-    if (results->contactCount >= results->maxContacts)
-        MyAssertHandler(".\\physics\\phys_coll_boxbrush.cpp", 1236, 0, "%s", "results->contactCount < results->maxContacts");
+    iassert(brush);
+    iassert(info);
+    iassert(results);
+    iassert(results->contactCount < results->maxContacts);
     if (Phys_TestBoxAgainstEachBrushPlane(brush, info, outBrushPlane, &outSideIndex, &outMaxSeparation))
     {
         PROF_SCOPED("BldWndingsForBrsh");
@@ -672,14 +660,7 @@ void __cdecl Phys_CollideBoxWithBrush(const cbrush_t *brush, const objInfo *info
                 outSideIndex = GetClosestBrushFace(normal, brush, outWinding, outBrushPlane);
                 if (outSideIndex >= 0)
                 {
-                    if (outSideIndex >= brush->numsides + 6)
-                        MyAssertHandler(
-                            ".\\physics\\phys_coll_boxbrush.cpp",
-                            1326,
-                            0,
-                            "brushSideIndex doesn't index static_cast< int >( brush->numsides ) + 6\n\t%i not in [0, %i)",
-                            outSideIndex,
-                            brush->numsides + 6);
+                    bcassert(outSideIndex, brush->numsides + 6);
                     surfaceFlags = Phys_GetSurfaceFlagsFromBrush(brush, outSideIndex);
                     Phys_ProjectBoxFaceOntoBrushFaceAndClip(
                         info,
@@ -796,16 +777,11 @@ void __cdecl Phys_ProjectBoxFaceOntoBrushFaceAndClip(
     float boxPlane[4]; // [esp+C98h] [ebp-20h] BYREF
     float choppingPlane[4]; // [esp+CA8h] [ebp-10h] BYREF
 
-    if (!winding)
-        MyAssertHandler(".\\physics\\phys_coll_boxbrush.cpp", 473, 0, "%s", "winding");
-    if (winding->ptCount <= 2)
-        MyAssertHandler(".\\physics\\phys_coll_boxbrush.cpp", 474, 0, "winding->ptCount > 2\n\t%i, %i", winding->ptCount, 2);
-    if (!info)
-        MyAssertHandler(".\\physics\\phys_coll_boxbrush.cpp", 475, 0, "%s", "info");
-    if (!brushPlane)
-        MyAssertHandler(".\\physics\\phys_coll_boxbrush.cpp", 476, 0, "%s", "brushPlane");
-    if (!results)
-        MyAssertHandler(".\\physics\\phys_coll_boxbrush.cpp", 477, 0, "%s", "results");
+    iassert(winding);
+    vassert(winding->ptCount > 2, "%i, %i", winding->ptCount, 2);
+    iassert(info);
+    iassert(brushPlane);
+    iassert(results);
     axisX = (boxAxis + 1) % 3;
     axisY = (axisX + 1) % 3;
     tempV[0] = info->u.sideExtents[0];
@@ -828,8 +804,7 @@ void __cdecl Phys_ProjectBoxFaceOntoBrushFaceAndClip(
         Vec3Mad(boxFaceCorners[cornerIndex], scale, brushPlane, boxFaceCorners[cornerIndex]);
     }
     pointCount = winding->ptCount;
-    if (pointCount <= 2)
-        MyAssertHandler(".\\physics\\phys_coll_boxbrush.cpp", 499, 0, "%s", "pointCount > 2");
+    iassert(pointCount > 2);
     if (pointCount + 4 > 0x100)
         MyAssertHandler(".\\physics\\phys_coll_boxbrush.cpp", 500, 0, "%s", "ARRAY_COUNT( clippedPoly ) >= 4 + pointCount");
     for (cornerIndex = 0; cornerIndex < pointCount; ++cornerIndex)
@@ -858,8 +833,7 @@ void __cdecl Phys_ProjectBoxFaceOntoBrushFaceAndClip(
                     return;
             }
         }
-        if (!pointCount)
-            MyAssertHandler(".\\physics\\phys_coll_boxbrush.cpp", 521, 0, "%s", "pointCount");
+        iassert(pointCount);
         if (boxSign)
         {
             boxPlane[0] = -info->R[boxAxis][0];
@@ -975,16 +949,11 @@ char __cdecl Phys_TestBoxAgainstEachBrushPlane(
     float maxs[3]; // [esp+A0h] [ebp-10h] BYREF
     float maxSeparation; // [esp+ACh] [ebp-4h]
 
-    if (!brush)
-        MyAssertHandler(".\\physics\\phys_coll_boxbrush.cpp", 989, 0, "%s", "brush");
-    if (!info)
-        MyAssertHandler(".\\physics\\phys_coll_boxbrush.cpp", 990, 0, "%s", "info");
-    if (!outBrushPlane)
-        MyAssertHandler(".\\physics\\phys_coll_boxbrush.cpp", 991, 0, "%s", "outBrushPlane");
-    if (!outSideIndex)
-        MyAssertHandler(".\\physics\\phys_coll_boxbrush.cpp", 992, 0, "%s", "outSideIndex");
-    if (!outMaxSeparation)
-        MyAssertHandler(".\\physics\\phys_coll_boxbrush.cpp", 993, 0, "%s", "outMaxSeparation");
+    iassert(brush);
+    iassert(info);
+    iassert(outBrushPlane);
+    iassert(outSideIndex);
+    iassert(outMaxSeparation);
     *outSideIndex = -1;
     *outBrushPlane = 0.0;
     outBrushPlane[1] = 0.0;
@@ -1099,19 +1068,8 @@ char __cdecl Phys_TestBoxAgainstEachBrushPlane(
     for (sideIndex = 0; sideIndex < brush->numsides; ++sideIndex)
     {
         brushPlane = brush->sides[sideIndex].plane;
-        if ((COERCE_UNSIGNED_INT(brushPlane->dist) & 0x7F800000) == 0x7F800000)
-            MyAssertHandler(".\\physics\\phys_coll_boxbrush.cpp", 1106, 0, "%s", "!IS_NAN(brushPlane->dist)");
-        if ((COERCE_UNSIGNED_INT(brushPlane->normal[0]) & 0x7F800000) == 0x7F800000
-            || (COERCE_UNSIGNED_INT(brushPlane->normal[1]) & 0x7F800000) == 0x7F800000
-            || (COERCE_UNSIGNED_INT(brushPlane->normal[2]) & 0x7F800000) == 0x7F800000)
-        {
-            MyAssertHandler(
-                ".\\physics\\phys_coll_boxbrush.cpp",
-                1107,
-                0,
-                "%s",
-                "!IS_NAN((brushPlane->normal)[0]) && !IS_NAN((brushPlane->normal)[1]) && !IS_NAN((brushPlane->normal)[2])");
-        }
+        iassert(!IS_NAN(brushPlane->dist));
+        nanassertvec3(brushPlane->normal);
         MatrixTransformVector(brushPlane->normal, info->RTransposed, rotatedNormal);
         v8 = I_fabs(rotatedNormal[0]);
         v7 = I_fabs(rotatedNormal[1]);
@@ -1161,14 +1119,7 @@ void __cdecl Phys_CollideBoxWithBrushFace(
     Poly boxPoly; // [esp+60h] [ebp-14h] BYREF
     float boxCorner[3]; // [esp+68h] [ebp-Ch] BYREF
 
-    if (brushSideIndex >= brush->numsides + 6)
-        MyAssertHandler(
-            ".\\physics\\phys_coll_boxbrush.cpp",
-            1149,
-            0,
-            "brushSideIndex doesn't index static_cast< int >( brush->numsides ) + 6\n\t%i not in [0, %i)",
-            brushSideIndex,
-            brush->numsides + 6);
+    bcassert(brushSideIndex, brush->numsides + 6);
     *collisionNormal = -*bestBrushPlane;
     collisionNormal[1] = -bestBrushPlane[1];
     collisionNormal[2] = -bestBrushPlane[2];
@@ -1296,16 +1247,8 @@ void __cdecl Phys_CollideOrientedBrushWithBrush(
     float outMaxSeparation; // [esp+39C0h] [ebp-8h] BYREF
     int fixedBrushSideIndex; // [esp+39C4h] [ebp-4h]
 
-    if (results->contactCount >= results->maxContacts)
-        MyAssertHandler(".\\physics\\phys_coll_boxbrush.cpp", 1562, 0, "%s", "results->contactCount < results->maxContacts");
-    if (orientedBrush->numsides >= 0x100)
-        MyAssertHandler(
-            ".\\physics\\phys_coll_boxbrush.cpp",
-            1565,
-            0,
-            "orientedBrush->numsides doesn't index ARRAY_COUNT( transformedPlanes )\n\t%i not in [0, %i)",
-            orientedBrush->numsides,
-            256);
+    iassert(results->contactCount < results->maxContacts);
+    bcassert(orientedBrush->numsides, 0x100);
     CM_BuildAxialPlanes(orientedBrush, (float (*)[6][4])axialPlanes);
     for (i = 0; i < 6; ++i)
         Phys_TransformPlane(axialPlanes[i], axialPlanes[i][3], input->pos, input->R, outPlane[i]);
@@ -1534,22 +1477,14 @@ uint __cdecl Phys_BuildWindingsForBrush(
     iassert(planes);
 
     CM_BuildAxialPlanes(brush, &axialPlanes);
-    if (brush->numsides + 6 > maxPolys)
-        MyAssertHandler(
-            ".\\physics\\phys_coll_boxbrush.cpp",
-            938,
-            0,
-            "brush->numsides + 6 <= maxPolys\n\t%i, %i",
-            brush->numsides + 6,
-            maxPolys);
+    vassert(brush->numsides + 6 <= maxPolys, "%i, %i", brush->numsides + 6, maxPolys);
     vertCount = 0;
     for (sideIndex = 0; sideIndex < brush->numsides + 6; ++sideIndex)
     {
         outPolys[sideIndex].pts = (float (*)[3]) & (*outVerts)[3 * vertCount];
         Phys_GetWindingForBrushFace(brush, planes, sideIndex, &outPolys[sideIndex], maxVerts - vertCount);
         vertCount += outPolys[sideIndex].ptCount;
-        if (vertCount > maxVerts)
-            MyAssertHandler(".\\physics\\phys_coll_boxbrush.cpp", 945, 0, "%s", "vertCount <= maxVerts");
+        iassert(vertCount <= maxVerts);
     }
     return vertCount;
 }
@@ -1595,20 +1530,14 @@ void __cdecl Phys_GetWindingForBrushFace(
     uint8_t *edges; // [esp+F8h] [ebp-8h]
     uint nonAxialSideIndex; // [esp+FCh] [ebp-4h]
 
-    if (!brush)
-        MyAssertHandler(".\\physics\\phys_coll_boxbrush.cpp", 731, 0, "%s", "brush");
-    if (brushSide >= brush->numsides + 6)
-        MyAssertHandler(".\\physics\\phys_coll_boxbrush.cpp", 732, 0, "%s", "brushSide < brush->numsides + 6");
-    if (!outWinding)
-        MyAssertHandler(".\\physics\\phys_coll_boxbrush.cpp", 733, 0, "%s", "outWinding");
-    if (!outWinding->pts)
-        MyAssertHandler(".\\physics\\phys_coll_boxbrush.cpp", 734, 0, "%s", "outWinding->pts");
-    if (!inPlanes)
-        MyAssertHandler(".\\physics\\phys_coll_boxbrush.cpp", 735, 0, "%s", "inPlanes");
+    iassert(brush);
+    iassert(brushSide < brush->numsides + 6);
+    iassert(outWinding);
+    iassert(outWinding->pts);
+    iassert(inPlanes);
     if (brushSide >= 6)
     {
-        if (!brush->sides)
-            MyAssertHandler(".\\physics\\phys_coll_boxbrush.cpp", 745, 0, "%s", "brush->sides");
+        iassert(brush->sides);
         nonAxialSideIndex = brushSide - 6;
         offset = brush->sides[brushSide - 6].firstAdjacentSideOffset;
         edgeCount = brush->sides[brushSide - 6].edgeCount;
@@ -1630,18 +1559,10 @@ void __cdecl Phys_GetWindingForBrushFace(
     }
     if (edgeCount >= 3 && edgeCount <= maxVerts)
     {
-        if (!brush->baseAdjacentSide)
-            MyAssertHandler(".\\physics\\phys_coll_boxbrush.cpp", 758, 0, "%s", "brush->baseAdjacentSide");
+        iassert(brush->baseAdjacentSide);
         edges = &brush->baseAdjacentSide[offset];
         side1 = edges[edgeCount - 1];
-        if (side1 >= brush->numsides + 6)
-            MyAssertHandler(
-                ".\\physics\\phys_coll_boxbrush.cpp",
-                762,
-                0,
-                "side1 doesn't index brush->numsides + 6\n\t%i not in [0, %i)",
-                side1,
-                brush->numsides + 6);
+        bcassert(side1, brush->numsides + 6);
         v25 = planes[1];
         v26 = (float *)&(*inPlanes)[4 * side1];
         planes[1][0] = *v26;
@@ -1652,14 +1573,7 @@ void __cdecl Phys_GetWindingForBrushFace(
         for (edgeIndex = 0; edgeIndex < edgeCount; ++edgeIndex)
         {
             side2 = edges[edgeIndex];
-            if (side2 >= brush->numsides + 6)
-                MyAssertHandler(
-                    ".\\physics\\phys_coll_boxbrush.cpp",
-                    769,
-                    0,
-                    "side2 doesn't index brush->numsides + 6\n\t%i not in [0, %i)",
-                    side2,
-                    brush->numsides + 6);
+            bcassert(side2, brush->numsides + 6);
             v23 = planes[2];
             v24 = (float *)&(*inPlanes)[4 * side2];
             planes[2][0] = *v24;
@@ -1774,22 +1688,14 @@ uint __cdecl Phys_BuildWindingsForBrush2(
     PROF_SCOPED("BldWndingsForBrsh");
 
     CM_BuildAxialPlanes(brush, &axialPlanes);
-    if (brush->numsides + 6 > maxPolys)
-        MyAssertHandler(
-            ".\\physics\\phys_coll_boxbrush.cpp",
-            963,
-            0,
-            "brush->numsides + 6 <= maxPolys\n\t%i, %i",
-            brush->numsides + 6,
-            maxPolys);
+    vassert(brush->numsides + 6 <= maxPolys, "%i, %i", brush->numsides + 6, maxPolys);
     vertCount = 0;
     for (sideIndex = 0; sideIndex < brush->numsides + 6; ++sideIndex)
     {
         outPolys[sideIndex].pts = (float (*)[3]) & (*outVerts)[3 * vertCount];
         Phys_GetWindingForBrushFace2(brush, sideIndex, &outPolys[sideIndex], maxVerts - vertCount, axialPlanes);
         vertCount += outPolys[sideIndex].ptCount;
-        if (vertCount > maxVerts)
-            MyAssertHandler(".\\physics\\phys_coll_boxbrush.cpp", 970, 0, "%s", "vertCount <= maxVerts");
+        iassert(vertCount <= maxVerts);
     }
     return vertCount;
 }
@@ -1820,8 +1726,7 @@ double __cdecl Phys_TestVertsAgainstPlane(const float (*verts)[3], uint vertCoun
             v5 = minDist;
         minDist = v5;
     }
-    if ((LODWORD(minDist) & 0x7F800000) == 0x7F800000)
-        MyAssertHandler(".\\physics\\phys_coll_boxbrush.cpp", 1401, 0, "%s", "!IS_NAN(minDist)");
+    iassert(!IS_NAN(minDist));
     return minDist;
 }
 
@@ -1896,14 +1801,7 @@ void __cdecl Phys_CollideOrientedBrushAgainstFixedBrushFace(
     float bestOrientedBrushPlane[4]; // [esp+8h] [ebp-1Ch] BYREF
     float collisionNormal[3]; // [esp+18h] [ebp-Ch] BYREF
 
-    if (fixedBrushSideIndex >= fixedBrush->numsides + 6)
-        MyAssertHandler(
-            ".\\physics\\phys_coll_boxbrush.cpp",
-            1488,
-            0,
-            "fixedBrushSideIndex doesn't index static_cast< int >( fixedBrush->numsides ) + 6\n\t%i not in [0, %i)",
-            fixedBrushSideIndex,
-            fixedBrush->numsides + 6);
+    bcassert(fixedBrushSideIndex, fixedBrush->numsides + 6);
     collisionNormal[0] = -*bestFixedBrushPlane;
     collisionNormal[1] = -bestFixedBrushPlane[1];
     collisionNormal[2] = -bestFixedBrushPlane[2];
@@ -1915,14 +1813,7 @@ void __cdecl Phys_CollideOrientedBrushAgainstFixedBrushFace(
         bestOrientedBrushPlane);
     if (orientedBrushSideIndex >= 0)
     {
-        if (orientedBrushSideIndex >= orientedBrush->numsides + 6)
-            MyAssertHandler(
-                ".\\physics\\phys_coll_boxbrush.cpp",
-                1493,
-                0,
-                "orientedBrushSideIndex doesn't index static_cast< int >( orientedBrush->numsides ) + 6\n\t%i not in [0, %i)",
-                orientedBrushSideIndex,
-                orientedBrush->numsides + 6);
+        bcassert(orientedBrushSideIndex, orientedBrush->numsides + 6);
         surfaceFlags = Phys_GetSurfaceFlagsFromBrush(fixedBrush, fixedBrushSideIndex);
         Phys_ProjectFaceOntoFaceAndClip(
             bestFixedBrushPlane,
@@ -1987,28 +1878,14 @@ int __cdecl Phys_CollideBrushAgainstBrushFace(
     float collisionNormal[3]; // [esp+14h] [ebp-10h] BYREF
     int fixedBrushSideIndex; // [esp+20h] [ebp-4h]
 
-    if (referenceBrushSideIndex >= referenceBrush->numsides + 6)
-        MyAssertHandler(
-            ".\\physics\\phys_coll_boxbrush.cpp",
-            1506,
-            0,
-            "referenceBrushSideIndex doesn't index static_cast< int >( referenceBrush->numsides ) + 6\n\t%i not in [0, %i)",
-            referenceBrushSideIndex,
-            referenceBrush->numsides + 6);
+    bcassert(referenceBrushSideIndex, referenceBrush->numsides + 6);
     collisionNormal[0] = *referenceBrushPlane;
     collisionNormal[1] = referenceBrushPlane[1];
     collisionNormal[2] = referenceBrushPlane[2];
     fixedBrushSideIndex = GetClosestBrushFace(collisionNormal, brush, brushPolys, bestFixedBrushPlane);
     if (fixedBrushSideIndex >= 0)
     {
-        if (fixedBrushSideIndex >= brush->numsides + 6)
-            MyAssertHandler(
-                ".\\physics\\phys_coll_boxbrush.cpp",
-                1511,
-                0,
-                "fixedBrushSideIndex doesn't index static_cast< int >( brush->numsides ) + 6\n\t%i not in [0, %i)",
-                fixedBrushSideIndex,
-                brush->numsides + 6);
+        bcassert(fixedBrushSideIndex, brush->numsides + 6);
         surfaceFlags = Phys_GetSurfaceFlagsFromBrush(brush, fixedBrushSideIndex);
         Phys_ProjectFaceOntoFaceAndClip(
             referenceBrushPlane,
@@ -2053,8 +1930,7 @@ void __cdecl Phys_CollideOrientedBrushModelWithBrush(const cbrush_t *fixedBrush,
     float mins[3]; // [esp+Ch] [ebp-18h] BYREF
     float maxs[3]; // [esp+18h] [ebp-Ch] BYREF
 
-    if (results->contactCount >= results->maxContacts)
-        MyAssertHandler(".\\physics\\phys_coll_boxbrush.cpp", 1691, 0, "%s", "results->contactCount < results->maxContacts");
+    iassert(results->contactCount < results->maxContacts);
     mins[0] = -FLT_MAX;
     mins[1] = -FLT_MAX;
     mins[2] = -FLT_MAX;
@@ -2078,8 +1954,7 @@ void __cdecl Phys_CollideOrientedBrushWithBrush_Wrapper(const cbrush_t *oriented
 {
     Results *results; // [esp+4h] [ebp-4h]
 
-    if (!userData)
-        MyAssertHandler(".\\physics\\phys_coll_boxbrush.cpp", 1673, 0, "%s", "userData");
+    iassert(userData);
     results = (Results *)*((uint *)userData + 2);
     if (results->contactCount < results->maxContacts)
         Phys_CollideOrientedBrushWithBrush(
@@ -2370,14 +2245,11 @@ void __cdecl Phys_CollideFixedBrushWithTriangle(const cbrush_t *brush, float (*t
     Results *results; // [esp+30F0h] [ebp-804h]
     Poly outPolys[256]; // [esp+30F4h] [ebp-800h] BYREF
 
-    if (!data)
-        MyAssertHandler(".\\physics\\phys_coll_boxbrush.cpp", 1719, 0, "%s", "data");
-    if (!brush)
-        MyAssertHandler(".\\physics\\phys_coll_boxbrush.cpp", 1720, 0, "%s", "brush");
+    iassert(data);
+    iassert(brush);
     input = data->input;
     results = data->results;
-    if (!brush)
-        MyAssertHandler("c:\\trees\\cod3\\src\\physics\\phys_coll_local.h", 175, 0, "%s", "brush");
+    iassert(brush);
     to[0] = 0.0;
     to[1] = 0.0;
     to[2] = 0.0;
@@ -2447,14 +2319,7 @@ LABEL_26:
                     ClosestBrushFace = GetClosestBrushFace(result, brush, outPolys, to);
                     if ((ClosestBrushFace & 0x80000000) == 0)
                     {
-                        if (ClosestBrushFace >= brush->numsides + 6)
-                            MyAssertHandler(
-                                ".\\physics\\phys_coll_boxbrush.cpp",
-                                1763,
-                                0,
-                                "brushSideIndex doesn't index static_cast< int >( brush->numsides ) + 6\n\t%i not in [0, %i)",
-                                ClosestBrushFace,
-                                brush->numsides + 6);
+                        bcassert(ClosestBrushFace, brush->numsides + 6);
                         Phys_ProjectFaceOntoFaceAndClip(
                             result,
                             &poly2,
@@ -2467,14 +2332,7 @@ LABEL_26:
                 else
                 {
                     bcassert(ClosestBrushFace, brush->numsides + 6);
-                    if (ClosestBrushFace >= brush->numsides + 6)
-                        MyAssertHandler(
-                            ".\\physics\\phys_coll_boxbrush.cpp",
-                            1753,
-                            0,
-                            "brushSideIndex doesn't index static_cast< int >( brush->numsides ) + 6\n\t%i not in [0, %i)",
-                            ClosestBrushFace,
-                            brush->numsides + 6);
+                    bcassert(ClosestBrushFace, brush->numsides + 6);
                     collisionNormal[0] = to[0];
                     collisionNormal[1] = to[1];
                     collisionNormal[2] = to[2];
@@ -2504,14 +2362,7 @@ void __cdecl Phys_GetPlaneForTriangle(const float (*triangle)[3], float *result)
 
 uint __cdecl Phys_AxialSideToJ(uint axialSide)
 {
-    if (axialSide >= 6)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\src\\physics\\phys_coll_local.h",
-            161,
-            0,
-            "axialSide doesn't index 6\n\t%i not in [0, %i)",
-            axialSide,
-            6);
+    bcassert(axialSide, 6);
     return axialSide >> 1;
 }
 
@@ -2591,8 +2442,7 @@ void __cdecl Phys_CollideOrientedBrushModelWithTriangleList(
 
 void __cdecl Phys_CollideOrientedBrushWithTriangleList_Wrapper(const cbrush_t *orientedBrush, void *userData)
 {
-    if (!userData)
-        MyAssertHandler(".\\physics\\phys_coll_boxbrush.cpp", 1855, 0, "%s", "userData");
+    iassert(userData);
     Phys_CollideOrientedBrushWithTriangleList(
         orientedBrush,
         *(const unsigned __int16 **)userData,
@@ -2652,24 +2502,9 @@ void __cdecl Phys_AxisToOdeMatrix3(const float (*inAxis)[3], float *outMatrix)
 
 int __cdecl CircularRemoveRange(float (*xyz)[3], int pointCount, int begin, int end)
 {
-    if (!xyz)
-        MyAssertHandler(".\\physics\\phys_coll_boxbrush.cpp", 108, 0, "%s", "xyz");
-    if (begin >= pointCount || begin < 0)
-        MyAssertHandler(
-            ".\\physics\\phys_coll_boxbrush.cpp",
-            109,
-            0,
-            "%s\n\t(begin) = %i",
-            "(begin < pointCount && begin >= 0)",
-            begin);
-    if (end >= pointCount || end < 0)
-        MyAssertHandler(
-            ".\\physics\\phys_coll_boxbrush.cpp",
-            110,
-            0,
-            "%s\n\t(end) = %i",
-            "(end < pointCount && end >= 0)",
-            end);
+    iassert(xyz);
+    vassert((begin < pointCount && begin >= 0), "(begin) = %i", begin);
+    vassert((end < pointCount && end >= 0), "(end) = %i", end);
     if ((begin + 1) % pointCount == end)
         return pointCount;
     if (begin >= end)
@@ -2734,23 +2569,10 @@ int __cdecl Phys_ClipPolyAgainstPlane(
     bool isCurrPointInside; // [esp+7Fh] [ebp-1h]
     uint polyCounta; // [esp+8Ch] [ebp+Ch]
 
-    if (polyCount <= 2)
-        MyAssertHandler(".\\physics\\phys_coll_boxbrush.cpp", 249, 0, "%s", "polyCount > 2");
-    if (polyCount > maxCount)
-        MyAssertHandler(".\\physics\\phys_coll_boxbrush.cpp", 250, 0, "%s", "polyCount <= maxCount");
-    if ((COERCE_UNSIGNED_INT(*choppingPlane) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(choppingPlane[1]) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(choppingPlane[2]) & 0x7F800000) == 0x7F800000)
-    {
-        MyAssertHandler(
-            ".\\physics\\phys_coll_boxbrush.cpp",
-            251,
-            0,
-            "%s",
-            "!IS_NAN((choppingPlane)[0]) && !IS_NAN((choppingPlane)[1]) && !IS_NAN((choppingPlane)[2])");
-    }
-    if ((COERCE_UNSIGNED_INT(choppingPlane[3]) & 0x7F800000) == 0x7F800000)
-        MyAssertHandler(".\\physics\\phys_coll_boxbrush.cpp", 252, 0, "%s", "!IS_NAN(choppingPlane[3])");
+    iassert(polyCount > 2);
+    iassert(polyCount <= maxCount);
+    nanassertvec3(choppingPlane);
+    iassert(!IS_NAN(choppingPlane[3]));
     exitPair = -1;
     exitPair_4 = -1;
     enterPair = -1;
@@ -2841,8 +2663,7 @@ int __cdecl Phys_ClipPolyAgainstPlane(
         }
         if (exitPair_4 == enterPair)
         {
-            if (polyCount >= maxCount)
-                MyAssertHandler(".\\physics\\phys_coll_boxbrush.cpp", 325, 0, "%s", "polyCount < maxCount");
+            iassert(polyCount < maxCount);
             InsertPoint(poly, polyCount, maxCount, exitPair_4);
             polyCounta = polyCount + 1;
             enterPaira = (enterPair + 1) % polyCounta;

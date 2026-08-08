@@ -109,16 +109,12 @@ void __cdecl DB_AllocXZoneMemory(
             zoneMem->blocks[blockIndex].data = buf;
         }
     }
-    if (zoneMem->vertexBuffer)
-        MyAssertHandler(".\\database\\db_memory.cpp", 104, 0, "%s", "zoneMem->vertexBuffer == NULL");
-    if (zoneMem->lockedVertexData)
-        MyAssertHandler(".\\database\\db_memory.cpp", 105, 0, "%s", "zoneMem->lockedVertexData == NULL");
+    iassert(zoneMem->vertexBuffer == NULL);
+    iassert(zoneMem->lockedVertexData == NULL);
     if (zoneMem->blocks[7].size)
         zoneMem->lockedVertexData = (uint8_t *)R_AllocStaticVertexBuffer((IDirect3DVertexBuffer9 **)&zoneMem->vertexBuffer, zoneMem->blocks[7].size);
-    if (zoneMem->indexBuffer)
-        MyAssertHandler(".\\database\\db_memory.cpp", 110, 0, "%s", "zoneMem->indexBuffer == NULL");
-    if (zoneMem->lockedIndexData)
-        MyAssertHandler(".\\database\\db_memory.cpp", 111, 0, "%s", "zoneMem->lockedIndexData == NULL");
+    iassert(zoneMem->indexBuffer == NULL);
+    iassert(zoneMem->lockedIndexData == NULL);
     if (zoneMem->blocks[8].size)
         zoneMem->lockedIndexData = (uint8_t *)R_AllocStaticIndexBuffer((IDirect3DIndexBuffer9 **)&zoneMem->indexBuffer, zoneMem->blocks[8].size);
 }

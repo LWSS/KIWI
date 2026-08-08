@@ -317,14 +317,7 @@ void __cdecl R_GetBspOmniLightSurfs(const GfxLight *light, int lightIndex, GfxBs
         std::sort(&surfaces[0][0], &surfaces[0][visLightDrawSurfCount], R_SortBspShadowReceiverSurfaces);
         for (listSurfIndex = 0; listSurfIndex < visLightDrawSurfCount; ++listSurfIndex)
         {
-            if (listSurfIndex >= rgp.world->surfaceCount)
-                MyAssertHandler(
-                    ".\\r_light.cpp",
-                    491,
-                    0,
-                    "listSurfIndex doesn't index rgp.world->surfaceCount\n\t%i not in [0, %i)",
-                    listSurfIndex,
-                    rgp.world->surfaceCount);
+            bcassert(listSurfIndex, rgp.world->surfaceCount);
             surfIndex = surfaces[0][listSurfIndex] - rgp.world->dpvs.surfaces;
             triSurfList[0] = surfIndex;
             R_AddBspDrawSurfs(surfaceMaterials[surfIndex], (uint8_t *)triSurfList, 1u, surfData);
@@ -395,14 +388,7 @@ void __cdecl R_GetBspSpotLightSurfs(const GfxLight *light, int lightIndex, GfxBs
         std::sort(&surfaces[0][0], &surfaces[0][surfCounts[0]], R_SortBspShadowReceiverSurfaces);
         for (listSurfIndex = 0; listSurfIndex < surfCounts[0]; ++listSurfIndex)
         {
-            if (listSurfIndex >= rgp.world->surfaceCount)
-                MyAssertHandler(
-                    ".\\r_light.cpp",
-                    557,
-                    0,
-                    "listSurfIndex doesn't index rgp.world->surfaceCount\n\t%i not in [0, %i)",
-                    listSurfIndex,
-                    rgp.world->surfaceCount);
+            bcassert(listSurfIndex, rgp.world->surfaceCount);
             surfIndex = surfaces[0][listSurfIndex] - rgp.world->dpvs.surfaces;
             triSurfList[0] = surfIndex;
             R_AddBspDrawSurfs(surfaceMaterials[surfIndex], (uint8_t *)triSurfList, 1u, surfData);
@@ -428,14 +414,7 @@ void __cdecl R_GetBspSpotLightSurfs(const GfxLight *light, int lightIndex, GfxBs
         std::sort(&surfaces[1][0], &surfaces[1][surfCounts[1]], R_SortBspShadowReceiverSurfaces);
         for (listSurfIndex = 0; listSurfIndex < surfCounts[1]; ++listSurfIndex)
         {
-            if (listSurfIndex >= rgp.world->surfaceCount)
-                MyAssertHandler(
-                    ".\\r_light.cpp",
-                    585,
-                    0,
-                    "listSurfIndex doesn't index rgp.world->surfaceCount\n\t%i not in [0, %i)",
-                    listSurfIndex,
-                    rgp.world->surfaceCount);
+            bcassert(listSurfIndex, rgp.world->surfaceCount);
             surfIndex = surfaces[1][listSurfIndex] - rgp.world->dpvs.surfaces;
             triSurfList[0] = surfIndex;
             R_AddBspDrawSurfs(surfaceMaterials[surfIndex], (uint8_t *)triSurfList, 1u, surfData + 1);
@@ -866,14 +845,7 @@ void __cdecl R_GetSceneEntLightSurfs(const GfxLight **visibleLights, int visible
                         && r_spotLightEntityShadows->current.enabled
                         && (frontEndDataOut->gfxEnts[sceneEnt->gfxEntIndex].renderFxFlags & 1) == 0)
                     {
-                        if (lightIndex)
-                            MyAssertHandler(
-                                ".\\r_light.cpp",
-                                938,
-                                0,
-                                "lightIndex doesn't index MAX_VISIBLE_SHADOWABLE_DLIGHTS\n\t%i not in [0, %i)",
-                                lightIndex,
-                                1);
+                        vassert((lightIndex) == 0, "%i not in [0, %i)", lightIndex, 1);
                         visLightShadow = &scene.visLightShadow[lightIndex];
                         lastDrawSurf = (GfxDrawSurf *)&visLightShadow[1];
                         visLightShadowDrawSurfCount = visLightShadow->drawSurfCount;
@@ -933,14 +905,7 @@ void __cdecl R_GetSceneEntLightSurfs(const GfxLight **visibleLights, int visible
             visLight->drawSurfCount += newDrawSurf - drawSurf;
             if (light->type == 2 && r_spotLightShadows->current.enabled && r_spotLightEntityShadows->current.enabled)
             {
-                if (lightIndex)
-                    MyAssertHandler(
-                        ".\\r_light.cpp",
-                        989,
-                        0,
-                        "lightIndex doesn't index MAX_VISIBLE_SHADOWABLE_DLIGHTS\n\t%i not in [0, %i)",
-                        lightIndex,
-                        1);
+                vassert((lightIndex) == 0, "%i not in [0, %i)", lightIndex, 1);
                 visLightShadow = &scene.visLightShadow[lightIndex];
                 lastDrawSurf = (GfxDrawSurf *)&visLightShadow[1];
                 visLightShadowDrawSurfCount = visLightShadow->drawSurfCount;
@@ -1007,14 +972,7 @@ void __cdecl R_GetSceneEntLightSurfs(const GfxLight **visibleLights, int visible
             visLight->drawSurfCount += newDrawSurf - drawSurf;
             if (light->type == 2 && r_spotLightShadows->current.enabled && r_spotLightEntityShadows->current.enabled)
             {
-                if (lightIndex)
-                    MyAssertHandler(
-                        ".\\r_light.cpp",
-                        1045,
-                        0,
-                        "lightIndex doesn't index MAX_VISIBLE_SHADOWABLE_DLIGHTS\n\t%i not in [0, %i)",
-                        lightIndex,
-                        1);
+                vassert((lightIndex) == 0, "%i not in [0, %i)", lightIndex, 1);
                 visLightShadow = &scene.visLightShadow[lightIndex];
                 lastDrawSurf = (GfxDrawSurf *)&visLightShadow[1];
                 visLightShadowDrawSurfCount = visLightShadow->drawSurfCount;
@@ -1079,14 +1037,7 @@ void __cdecl R_GetSceneEntLightSurfs(const GfxLight **visibleLights, int visible
             visLight->drawSurfCount += newDrawSurf - drawSurf;
             if (light->type == 2 && r_spotLightShadows->current.enabled && r_spotLightEntityShadows->current.enabled)
             {
-                if (lightIndex)
-                    MyAssertHandler(
-                        ".\\r_light.cpp",
-                        1099,
-                        0,
-                        "lightIndex doesn't index MAX_VISIBLE_SHADOWABLE_DLIGHTS\n\t%i not in [0, %i)",
-                        lightIndex,
-                        1);
+                vassert((lightIndex) == 0, "%i not in [0, %i)", lightIndex, 1);
                 visLightShadow = &scene.visLightShadow[lightIndex];
                 lastDrawSurf = (GfxDrawSurf *)&visLightShadow[1];
                 visLightShadowDrawSurfCount = visLightShadow->drawSurfCount;
@@ -1152,14 +1103,7 @@ void __cdecl R_GetSceneEntLightSurfs(const GfxLight **visibleLights, int visible
             visLight->drawSurfCount += newDrawSurf - drawSurf;
             if (light->type == 2 && r_spotLightShadows->current.enabled && r_spotLightEntityShadows->current.enabled)
             {
-                if (lightIndex)
-                    MyAssertHandler(
-                        ".\\r_light.cpp",
-                        1155,
-                        0,
-                        "lightIndex doesn't index MAX_VISIBLE_SHADOWABLE_DLIGHTS\n\t%i not in [0, %i)",
-                        lightIndex,
-                        1);
+                vassert((lightIndex) == 0, "%i not in [0, %i)", lightIndex, 1);
                 visLightShadow = &scene.visLightShadow[lightIndex];
                 lastDrawSurf = (GfxDrawSurf *)&visLightShadow[1];
                 visLightShadowDrawSurfCount = visLightShadow->drawSurfCount;

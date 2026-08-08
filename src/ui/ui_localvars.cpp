@@ -4,16 +4,14 @@
 
 void __cdecl UILocalVar_Init(UILocalVarContext *context)
 {
-    if (!context)
-        MyAssertHandler(".\\ui\\ui_localvars.cpp", 23, 0, "%s", "context");
+    iassert(context);
 }
 
 void __cdecl UILocalVar_Shutdown(UILocalVarContext *context)
 {
     uint hash; // [esp+4h] [ebp-4h]
 
-    if (!context)
-        MyAssertHandler(".\\ui\\ui_localvars.cpp", 31, 0, "%s", "context");
+    iassert(context);
     for (hash = 0; hash < 0x100; ++hash)
     {
         if (context->table[hash].name)
@@ -85,21 +83,18 @@ UILocalVarContext *__cdecl UILocalVar_FindOrCreate(UILocalVarContext *context, c
 
 bool __cdecl UILocalVar_GetBool(const UILocalVar *var)
 {
-    if (!var)
-        MyAssertHandler(".\\ui\\ui_localvars.cpp", 114, 0, "%s", "var");
+    iassert(var);
     if (var->type == UILOCALVAR_INT)
         return var->u.integer != 0;
     if (var->type == UILOCALVAR_FLOAT)
         return var->u.value != 0.0;
-    if (var->type != UILOCALVAR_STRING)
-        MyAssertHandler(".\\ui\\ui_localvars.cpp", 125, 0, "var->type == UILOCALVAR_STRING\n\t%i, %i", var->type, 2);
+    vassert(var->type == UILOCALVAR_STRING, "%i, %i", var->type, 2);
     return atoi(var->u.string) != 0;
 }
 
 UILocalVar_u __cdecl UILocalVar_GetInt(const UILocalVar *var)
 {
-    if (!var)
-        MyAssertHandler(".\\ui\\ui_localvars.cpp", 133, 0, "%s", "var");
+    iassert(var);
     if (var->type)
     {
         if (var->type == UILOCALVAR_FLOAT)
@@ -108,8 +103,7 @@ UILocalVar_u __cdecl UILocalVar_GetInt(const UILocalVar *var)
         }
         else
         {
-            if (var->type != UILOCALVAR_STRING)
-                MyAssertHandler(".\\ui\\ui_localvars.cpp", 144, 0, "var->type == UILOCALVAR_STRING\n\t%i, %i", var->type, 2);
+            vassert(var->type == UILOCALVAR_STRING, "%i, %i", var->type, 2);
             return (UILocalVar_u)atoi(var->u.string);
         }
     }
@@ -121,21 +115,18 @@ UILocalVar_u __cdecl UILocalVar_GetInt(const UILocalVar *var)
 
 double __cdecl UILocalVar_GetFloat(const UILocalVar *var)
 {
-    if (!var)
-        MyAssertHandler(".\\ui\\ui_localvars.cpp", 152, 0, "%s", "var");
+    iassert(var);
     if (var->type == UILOCALVAR_INT)
         return (double)var->u.integer;
     if (var->type == UILOCALVAR_FLOAT)
         return var->u.value;
-    if (var->type != UILOCALVAR_STRING)
-        MyAssertHandler(".\\ui\\ui_localvars.cpp", 163, 0, "var->type == UILOCALVAR_STRING\n\t%i, %i", var->type, 2);
+    vassert(var->type == UILOCALVAR_STRING, "%i, %i", var->type, 2);
     return (float)atof(var->u.string);
 }
 
 char *__cdecl UILocalVar_GetString(const UILocalVar *var, char *stringBuf, uint size)
 {
-    if (!var)
-        MyAssertHandler(".\\ui\\ui_localvars.cpp", 171, 0, "%s", "var");
+    iassert(var);
     if (var->type)
     {
         if (var->type == UILOCALVAR_FLOAT)
@@ -145,8 +136,7 @@ char *__cdecl UILocalVar_GetString(const UILocalVar *var, char *stringBuf, uint 
         }
         else
         {
-            if (var->type != UILOCALVAR_STRING)
-                MyAssertHandler(".\\ui\\ui_localvars.cpp", 184, 0, "var->type == UILOCALVAR_STRING\n\t%i, %i", var->type, 2);
+            vassert(var->type == UILOCALVAR_STRING, "%i, %i", var->type, 2);
             return (char *)var->u.integer;
         }
     }

@@ -51,12 +51,9 @@ void __cdecl TRACK_cl_cgame()
 
 void __cdecl CL_GetScreenDimensions(int *width, int *height, float *aspect)
 {
-    if (!width)
-        MyAssertHandler(".\\client_mp\\cl_cgame_mp.cpp", 93, 0, "%s", "width");
-    if (!height)
-        MyAssertHandler(".\\client_mp\\cl_cgame_mp.cpp", 94, 0, "%s", "height");
-    if (!aspect)
-        MyAssertHandler(".\\client_mp\\cl_cgame_mp.cpp", 95, 0, "%s", "aspect");
+    iassert(width);
+    iassert(height);
+    iassert(aspect);
     *width = cls.vidConfig.displayWidth;
     *height = cls.vidConfig.displayHeight;
     *aspect = cls.vidConfig.aspectRatioWindow;
@@ -414,14 +411,7 @@ void __cdecl CL_CM_LoadMap(char *mapname)
 void __cdecl CL_ShutdownCGame(int localClientNum)
 {
     Com_UnloadSoundAliases(SASYS_CGAME);
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\src\\client_mp\\client_mp.h",
-            1063,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     if (clientUIActives[0].cgameInitCalled)
     {
         CG_Shutdown(localClientNum);
@@ -442,8 +432,7 @@ bool __cdecl CL_DObjCreateSkelForBone(DObj_s *obj, int boneIndex)
     uint len; // [esp+4h] [ebp-8h]
     int timeStamp; // [esp+8h] [ebp-4h]
 
-    if (!obj)
-        MyAssertHandler(".\\client_mp\\cl_cgame_mp.cpp", 628, 0, "%s", "obj");
+    iassert(obj);
     timeStamp = CL_GetSkelTimeStamp();
     if (DObjSkelExists(obj, timeStamp))
         return DObjSkelIsBoneUpToDate(obj, boneIndex);
@@ -492,14 +481,7 @@ const char *__cdecl CL_GetConfigString(int localClientNum, uint configStringInde
 {
     clientActive_t *LocalClientGlobals; // [esp+0h] [ebp-4h]
 
-    if (configStringIndex >= 0x98A)
-        MyAssertHandler(
-            ".\\client_mp\\cl_cgame_mp.cpp",
-            726,
-            0,
-            "configStringIndex doesn't index MAX_CONFIGSTRINGS\n\t%i not in [0, %i)",
-            configStringIndex,
-            2442);
+    bcassert(configStringIndex, 0x98A);
     LocalClientGlobals = CL_GetLocalClientGlobals(localClientNum);
     if (LocalClientGlobals->gameState.stringData[0])
         MyAssertHandler(".\\client_mp\\cl_cgame_mp.cpp", 729, 0, "%s", "!cl->gameState.stringData[0]");
@@ -647,14 +629,7 @@ void __cdecl CL_CapTurnRate(int localClientNum, float maxPitchSpeed, float maxYa
 
 void __cdecl CL_SyncTimes(int localClientNum)
 {
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\src\\client_mp\\client_mp.h",
-            1112,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     if (clientUIActives[0].connectionState == CA_ACTIVE)
         CL_FirstSnapshot(localClientNum);
 }
@@ -698,8 +673,7 @@ void __cdecl CL_SetExpectedHunkUsage(const char *mapname)
         while (1)
         {
             token = (const char *)Com_Parse(&buftrav);
-            if (!token)
-                MyAssertHandler(".\\client_mp\\cl_cgame_mp.cpp", 536, 0, "%s", "token");
+            iassert(token);
             if (!*token)
                 break;
             if (!I_stricmp(token, mapname))
@@ -738,14 +712,7 @@ void __cdecl CL_InitCGame(int localClientNum)
     SND_ErrorCleanup();
     Con_Close(localClientNum);
     LocalClientGlobals = CL_GetLocalClientGlobals(localClientNum);
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\src\\client_mp\\client_mp.h",
-            1063,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     clientUIActive = clientUIActives;
     info = &LocalClientGlobals->gameState.stringData[LocalClientGlobals->gameState.stringOffsets[0]];
     v1 = Info_ValueForKey((char *)info, "mapname");
@@ -767,14 +734,7 @@ void __cdecl CL_InitCGame(int localClientNum)
             CL_SetExpectedHunkUsage(LocalClientGlobals->mapname);
         }
     }
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\src\\client_mp\\client_mp.h",
-            1120,
-            0,
-            "client doesn't index STATIC_MAX_LOCAL_CLIENTS\n\t%i not in [0, %i)",
-            localClientNum,
-            1);
+    vassert((localClientNum) == 0, "%i not in [0, %i)", localClientNum, 1);
     clientUIActives[localClientNum].connectionState = CA_LOADING;
     Com_Printf(14, "Setting state to CA_LOADING in CL_InitCGame\n");
     clientUIActive->cgameInitCalled = 1;
@@ -783,14 +743,7 @@ void __cdecl CL_InitCGame(int localClientNum)
     CG_Init(localClientNum, clc->serverMessageSequence, clc->lastExecutedServerCommand, clc->clientNum);
     clientUIActive->cgameInitialized = 1;
     R_BeginRemoteScreenUpdate();
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\src\\client_mp\\client_mp.h",
-            1120,
-            0,
-            "client doesn't index STATIC_MAX_LOCAL_CLIENTS\n\t%i not in [0, %i)",
-            localClientNum,
-            1);
+    vassert((localClientNum) == 0, "%i not in [0, %i)", localClientNum, 1);
     clientUIActives[localClientNum].connectionState = CA_PRIMED;
     t2 = Sys_Milliseconds();
     Com_Printf(14, "CL_InitCGame: %5.2f seconds\n", (double)(t2 - t1) / 1000.0);
@@ -819,14 +772,7 @@ void __cdecl CL_FirstSnapshot(int localClientNum)
     {
         CG_RegisterSounds();
         clc = CL_GetLocalClientConnection(localClientNum);
-        if (localClientNum)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\src\\client_mp\\client_mp.h",
-                1120,
-                0,
-                "client doesn't index STATIC_MAX_LOCAL_CLIENTS\n\t%i not in [0, %i)",
-                localClientNum,
-                1);
+        vassert((localClientNum) == 0, "%i not in [0, %i)", localClientNum, 1);
         clientUIActives[localClientNum].connectionState = CA_ACTIVE;
         clc->isServerRestarting = 0;
         UI_CloseAll(localClientNum);
@@ -1071,14 +1017,7 @@ void __cdecl CL_SetCGameTime(int localClientNum)
     clientActive_t *LocalClientGlobals; // [esp+0h] [ebp-Ch]
     clientConnection_t *clc; // [esp+8h] [ebp-4h]
 
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\src\\client_mp\\client_mp.h",
-            1112,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     if (clientUIActives[0].connectionState == CA_ACTIVE)
     {
         LocalClientGlobals = CL_GetLocalClientGlobals(localClientNum);
@@ -1120,14 +1059,7 @@ void __cdecl CL_SetCGameTime(int localClientNum)
                     if (LocalClientGlobals->serverTime < LocalClientGlobals->snap.serverTime)
                         break;
                     CL_ReadDemoMessage(localClientNum);
-                    if (localClientNum)
-                        MyAssertHandler(
-                            "c:\\trees\\cod3\\src\\client_mp\\client_mp.h",
-                            1112,
-                            0,
-                            "%s\n\t(localClientNum) = %i",
-                            "(localClientNum == 0)",
-                            localClientNum);
+                    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
                 } while (clientUIActives[0].connectionState == CA_ACTIVE);
             }
         }
@@ -1151,14 +1083,7 @@ void __cdecl CL_SetCGameTime(int localClientNum)
         LocalClientGlobals->newSnapshots = 0;
         CL_FirstSnapshot(localClientNum);
     }
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\src\\client_mp\\client_mp.h",
-            1112,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     if (clientUIActives[0].connectionState == CA_ACTIVE)
         goto LABEL_16;
 }
@@ -1350,14 +1275,7 @@ void __cdecl CL_UpdateColor(int localClientNum)
     team_t team; // [esp+0h] [ebp-8h]
     cg_s *cgameGlob;
 
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\src\\client_mp\\client_mp.h",
-            1112,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     if (clientUIActives[0].connectionState >= CA_CONNECTED)
     {
         cgameGlob = CG_GetLocalClientGlobals(localClientNum);
@@ -1381,14 +1299,7 @@ void __cdecl CL_UpdateColorInternal(const char *var_name, float *color)
 
 BOOL __cdecl CL_IsCgameInitialized(int localClientNum)
 {
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\src\\client_mp\\client_mp.h",
-            1063,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     return clientUIActives[0].cgameInitialized;
 }
 

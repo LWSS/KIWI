@@ -38,18 +38,15 @@ int __cdecl GetFollowPlayerState(int clientNum, playerState_s *ps)
     uint index; // [esp+Ch] [ebp-4h]
 
     client = &level.clients[clientNum];
-    if (!client)
-        MyAssertHandler(".\\game_mp\\g_active_mp.cpp", 1221, 0, "%s", "client");
-    if (client != g_entities[clientNum].client)
-        MyAssertHandler(".\\game_mp\\g_active_mp.cpp", 1222, 0, "%s", "client == g_entities[clientNum].client");
+    iassert(client);
+    iassert(client == g_entities[clientNum].client);
     if ((client->ps.otherFlags & 4) != 0)
     {
         memcpy(ps, client, sizeof(playerState_s));
         for (index = 0; index < 0x1F && ps->hud.current[index].type; ++index)
         {
             memset(&ps->hud.current[index], 0, sizeof(ps->hud.current[index]));
-            if (ps->hud.current[index].type)
-                MyAssertHandler(".\\game_mp\\g_active_mp.cpp", 1237, 0, "%s", "ps->hud.current[index].type == HE_TYPE_FREE");
+            iassert(ps->hud.current[index].type == HE_TYPE_FREE);
         }
         while (index < 0x1F)
         {
@@ -83,8 +80,7 @@ void __cdecl P_DamageFeedback(gentity_s *player)
 
     DAMAGE_COUNT_DURATION = 500;
     client = player->client;
-    if (!client)
-        MyAssertHandler(".\\game_mp\\g_active_mp.cpp", 41, 0, "%s", "client");
+    iassert(client);
     if (client->ps.pm_type < PM_DEAD)
     {
         if (level.time - client->damageTime > 500)
@@ -183,8 +179,7 @@ void __cdecl G_TouchTriggers(gentity_s *ent)
     int i; // [esp+105Ch] [ebp-4h]
 
     PROF_SCOPED("G_TouchTriggers");
-    if (!ent->client)
-        MyAssertHandler(".\\game_mp\\g_active_mp.cpp", 191, 0, "%s", "ent->client");
+    iassert(ent->client);
     if (ent->client->ps.pm_type > PM_NORMAL_LINKED)
     {
         return;
@@ -321,15 +316,11 @@ void __cdecl NotifyGrenadePullback(gentity_s *ent, uint weaponIndex)
 {
     WeaponDef *weapDef; // [esp+0h] [ebp-4h]
 
-    if (!ent)
-        MyAssertHandler(".\\game_mp\\g_active_mp.cpp", 376, 0, "%s", "ent");
-    if (!ent->client)
-        MyAssertHandler(".\\game_mp\\g_active_mp.cpp", 377, 0, "%s", "ent->client");
-    if (!weaponIndex)
-        MyAssertHandler(".\\game_mp\\g_active_mp.cpp", 378, 0, "%s", "weaponIndex != WP_NONE");
+    iassert(ent);
+    iassert(ent->client);
+    iassert(weaponIndex != WP_NONE);
     weapDef = BG_GetWeaponDef(weaponIndex);
-    if (!weapDef)
-        MyAssertHandler(".\\game_mp\\g_active_mp.cpp", 381, 0, "%s", "weapDef");
+    iassert(weapDef);
     Scr_AddString((char *)weapDef->szInternalName);
     Scr_Notify(ent, scr_const.grenade_pullback, 1u);
 }
@@ -414,10 +405,8 @@ void __cdecl AttemptLiveGrenadePickup(gentity_s *clientEnt)
     void(__cdecl * touch)(gentity_s *, gentity_s *, int); // [esp+0h] [ebp-8h]
     gentity_s *grenadeEnt; // [esp+4h] [ebp-4h]
 
-    if (!clientEnt)
-        MyAssertHandler(".\\game_mp\\g_active_mp.cpp", 410, 0, "%s", "clientEnt");
-    if (!clientEnt->client)
-        MyAssertHandler(".\\game_mp\\g_active_mp.cpp", 411, 0, "%s", "clientEnt->client");
+    iassert(clientEnt);
+    iassert(clientEnt->client);
     if (clientEnt->client->ps.cursorHintEntIndex >= 0x400u)
         MyAssertHandler(
             ".\\game_mp\\g_active_mp.cpp",
@@ -439,8 +428,7 @@ void __cdecl AttemptLiveGrenadePickup(gentity_s *clientEnt)
                     clientEnt->client->ps.throwBackGrenadeOwner = ENTITYNUM_WORLD;
                 clientEnt->client->ps.grenadeTimeLeft = clientEnt->client->ps.throwBackGrenadeTimeLeft;
                 touch(grenadeEnt, clientEnt, 0);
-                if (!clientEnt->client->ps.throwBackGrenadeTimeLeft)
-                    MyAssertHandler(".\\game_mp\\g_active_mp.cpp", 432, 0, "%s", "clientEnt->client->ps.throwBackGrenadeTimeLeft");
+                iassert(clientEnt->client->ps.throwBackGrenadeTimeLeft);
             }
         }
     }
@@ -453,8 +441,7 @@ bool __cdecl IsLiveGrenade(gentity_s *ent)
     if (ent->s.eType != ET_MISSILE)
         return 0;
     weapDef = BG_GetWeaponDef(ent->s.index.brushmodel % 128);
-    if (!weapDef)
-        MyAssertHandler(".\\game_mp\\g_active_mp.cpp", 396, 0, "%s", "weapDef");
+    iassert(weapDef);
     return weapDef->offhandClass == OFFHAND_CLASS_FRAG_GRENADE;
 }
 
@@ -477,8 +464,7 @@ void __cdecl G_SetLastServerTime(int clientNum, int lastServerTime)
     gentity_s *ent; // [esp+0h] [ebp-4h]
 
     ent = &g_entities[clientNum];
-    if (!ent->client)
-        MyAssertHandler(".\\game_mp\\g_active_mp.cpp", 579, 0, "%s", "ent->client");
+    iassert(ent->client);
     if (level.time - lastServerTime > 1000)
         lastServerTime = level.time - 1000;
     if (lastServerTime >= ent->client->lastServerTime || level.time <= lastServerTime)
@@ -487,8 +473,7 @@ void __cdecl G_SetLastServerTime(int clientNum, int lastServerTime)
 
 void __cdecl G_SetClientContents(gentity_s *pEnt)
 {
-    if (!pEnt->client)
-        MyAssertHandler(".\\game_mp\\g_active_mp.cpp", 601, 0, "%s", "pEnt->client");
+    iassert(pEnt->client);
     if (pEnt->client->noclip)
     {
         pEnt->r.contents = 0;
@@ -683,29 +668,17 @@ void __cdecl ClientThink_real(gentity_s *ent, usercmd_s *ucmd)
                 client->vGunSpeed[0] = ws.vGunSpeed[0];
                 vGunSpeed[1] = ws.vGunSpeed[1];
                 vGunSpeed[2] = ws.vGunSpeed[2];
-                if ((LODWORD(viewangles[0]) & 0x7F800000) == 0x7F800000
-                    || (LODWORD(viewangles[1]) & 0x7F800000) == 0x7F800000
-                    || (LODWORD(viewangles[2]) & 0x7F800000) == 0x7F800000)
-                {
-                    MyAssertHandler(
-                        ".\\game_mp\\g_active_mp.cpp",
-                        895,
-                        0,
-                        "%s",
-                        "!IS_NAN((viewangles)[0]) && !IS_NAN((viewangles)[1]) && !IS_NAN((viewangles)[2])");
-                }
+                nanassertvec3(viewangles);
                 client->fGunPitch = viewangles[0];
                 client->fGunYaw = viewangles[1];
-                if (pm.mantleStarted)
-                    MyAssertHandler(".\\game_mp\\g_active_mp.cpp", 899, 0, "%s", "!pm.mantleStarted");
+                iassert(!pm.mantleStarted);
                 {
                     PROF_SCOPED("G_Pmove");
                     Pmove(&pm);
                 }
                 if (pm.mantleStarted)
                 {
-                    if ((client->ps.pm_flags & PMF_MANTLE) == 0)
-                        MyAssertHandler(".\\game_mp\\g_active_mp.cpp", 907, 0, "%s", "client->ps.pm_flags & PMF_MANTLE");
+                    iassert(client->ps.pm_flags & PMF_MANTLE);
                     G_AddPlayerMantleBlockage(pm.mantleEndPos, pm.mantleDuration, &pm);
                 }
                 if (client->ps.eventSequence != oldEventSequence)
@@ -756,17 +729,7 @@ void __cdecl G_PlayerStateToEntityStateExtrapolate(playerState_s *ps, entityStat
     s->lerp.pos.trDelta[0] = ps->velocity[0];
     s->lerp.pos.trDelta[1] = ps->velocity[1];
     s->lerp.pos.trDelta[2] = ps->velocity[2];
-    if ((COERCE_UNSIGNED_INT(s->lerp.pos.trDelta[0]) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(s->lerp.pos.trDelta[1]) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(s->lerp.pos.trDelta[2]) & 0x7F800000) == 0x7F800000)
-    {
-        MyAssertHandler(
-            ".\\game_mp\\g_active_mp.cpp",
-            626,
-            0,
-            "%s",
-            "!IS_NAN((s->lerp.pos.trDelta)[0]) && !IS_NAN((s->lerp.pos.trDelta)[1]) && !IS_NAN((s->lerp.pos.trDelta)[2])");
-    }
+    nanassertvec3(s->lerp.pos.trDelta);
     s->lerp.pos.trTime = time;
     s->lerp.pos.trDuration = 50;
     BG_PlayerStateToEntityState(ps, s, snap, 1u);
@@ -802,21 +765,17 @@ void __cdecl ClientThink(int clientNum)
 {
     gentity_s *ent; // [esp+8h] [ebp-4h]
 
-    if (!Sys_IsMainThread())
-        MyAssertHandler(".\\game_mp\\g_active_mp.cpp", 972, 0, "%s", "Sys_IsMainThread()");
+    iassert(Sys_IsMainThread());
     ent = &g_entities[clientNum];
-    if (!ent->client)
-        MyAssertHandler(".\\game_mp\\g_active_mp.cpp", 976, 0, "%s", "ent->client");
-    if (bgs)
-        MyAssertHandler(".\\game_mp\\g_active_mp.cpp", 978, 0, "%s\n\t(bgs) = %p", "(bgs == 0)", bgs);
+    iassert(ent->client);
+    vassert((bgs == 0), "(bgs) = %p", bgs);
     bgs = &level_bgs;
     memcpy(&ent->client->sess.oldcmd, &ent->client->sess.cmd, sizeof(ent->client->sess.oldcmd));
     SV_GetUsercmd(clientNum, &ent->client->sess.cmd);
     ent->client->lastCmdTime = level.time;
     if (!g_synchronousClients->current.enabled)
         ClientThink_real(ent, &ent->client->sess.cmd);
-    if (bgs != &level_bgs)
-        MyAssertHandler(".\\game_mp\\g_active_mp.cpp", 993, 0, "%s\n\t(bgs) = %p", "(bgs == &level_bgs)", bgs);
+    vassert((bgs == &level_bgs), "(bgs) = %p", bgs);
     bgs = 0;
 }
 
@@ -930,14 +889,7 @@ void __cdecl SpectatorClientEndFrame(gentity_s *ent)
                     ps.killCamEntity = ENTITYNUM_NONE;
                 else
                     ps.killCamEntity = client->sess.killCamEntity;
-                if ((ps.otherFlags & 4) == 0)
-                    MyAssertHandler(
-                        ".\\game_mp\\g_active_mp.cpp",
-                        1119,
-                        0,
-                        "%s\n\t(ps.otherFlags) = %i",
-                        "(ps.otherFlags & (1<<2))",
-                        ps.otherFlags);
+                vassert((ps.otherFlags & (1<<2)), "(ps.otherFlags) = %i", ps.otherFlags);
                 if (G_ClientCanSpectateTeam(client, v3.team))
                     goto doFollow;
             }
@@ -1097,19 +1049,10 @@ void __cdecl G_PlayerController(const gentity_s *self, int *partBits)
     CEntPlayerInfo player; // [esp+Ch] [ebp-10h] BYREF
 
     SV_CheckThread();
-    if (self->s.clientNum >= 0x40u)
-        MyAssertHandler(
-            ".\\game_mp\\g_active_mp.cpp",
-            1353,
-            0,
-            "self->s.clientNum doesn't index MAX_CLIENTS\n\t%i not in [0, %i)",
-            self->s.clientNum,
-            64);
+    bcassert(self->s.clientNum, 0x40u);
     ci = &level_bgs.clientinfo[self->s.clientNum];
-    if (!ci->infoValid)
-        MyAssertHandler(".\\game_mp\\g_active_mp.cpp", 1355, 0, "%s", "ci->infoValid");
-    if (bgs != &level_bgs)
-        MyAssertHandler(".\\game_mp\\g_active_mp.cpp", 1357, 0, "%s\n\t(bgs) = %p", "(bgs == &level_bgs)", bgs);
+    iassert(ci->infoValid);
+    vassert((bgs == &level_bgs), "(bgs) = %p", bgs);
     BG_Player_DoControllersSetup(&self->s, ci, level.frametime);
     obj = Com_GetServerDObj(self->s.number);
     for (i = 0; i < 6; ++i)
@@ -1144,10 +1087,8 @@ void __cdecl ClientEndFrame(gentity_s *ent)
     float spawn_origin[3]; // [esp+15Ch] [ebp-Ch] BYREF
 
     client = ent->client;
-    if (!client)
-        MyAssertHandler(".\\game_mp\\g_active_mp.cpp", 1489, 0, "%s", "client");
-    if (client->sess.connected == CON_DISCONNECTED)
-        MyAssertHandler(".\\game_mp\\g_active_mp.cpp", 1490, 0, "%s", "client->sess.connected != CON_DISCONNECTED");
+    iassert(client);
+    iassert(client->sess.connected != CON_DISCONNECTED);
     ent->handler = ENT_HANDLER_CLIENT_SPECTATOR;
     client->ps.deltaTime = 0;
     client->ps.gravity = (int)g_gravity->current.value;
@@ -1265,17 +1206,9 @@ void __cdecl ClientEndFrame(gentity_s *ent)
                     ent->handler = ENT_HANDLER_CLIENT;
                 }
                 clientNum = ent->s.clientNum;
-                if ((uint)clientNum >= 0x40)
-                    MyAssertHandler(
-                        ".\\game_mp\\g_active_mp.cpp",
-                        1669,
-                        0,
-                        "clientNum doesn't index MAX_CLIENTS\n\t%i not in [0, %i)",
-                        clientNum,
-                        64);
+                bcassert((uint)clientNum, 0x40);
                 ci = &level_bgs.clientinfo[clientNum];
-                if (!ci->infoValid)
-                    MyAssertHandler(".\\game_mp\\g_active_mp.cpp", 1671, 0, "%s", "ci->infoValid");
+                iassert(ci->infoValid);
                 ci->lerpMoveDir = (float)ent->s.lerp.u.player.movementDir;
                 ci->lerpLean = ent->s.lerp.u.player.leanf;
                 playerAngles = ci->playerAngles;
@@ -1361,8 +1294,7 @@ void __cdecl ClientEndFrame(gentity_s *ent)
                 PROF_SCOPED("ClientSpawn");
                 ClientSpawn(ent, spawn_origin, spawn_angles);
             }
-            if (client->ps.clientNum != ent->s.number)
-                MyAssertHandler(".\\game_mp\\g_active_mp.cpp", 1544, 0, "%s", "client->ps.clientNum == ent->s.number");
+            iassert(client->ps.clientNum == ent->s.number);
             ent->client->buttonsSinceLastFrame = 0;
         }
     }
@@ -1388,22 +1320,12 @@ int __cdecl G_UpdateClientInfo(gentity_s *ent)
     uint clientNum; // [esp+54h] [ebp-4h]
 
     client = ent->client;
-    if (!client)
-        MyAssertHandler(".\\game_mp\\g_active_mp.cpp", 1386, 0, "%s", "client");
-    if (client->sess.connected == CON_DISCONNECTED)
-        MyAssertHandler(".\\game_mp\\g_active_mp.cpp", 1387, 0, "%s", "client->sess.connected != CON_DISCONNECTED");
+    iassert(client);
+    iassert(client->sess.connected != CON_DISCONNECTED);
     clientNum = ent->s.clientNum;
-    if (clientNum >= 0x40)
-        MyAssertHandler(
-            ".\\game_mp\\g_active_mp.cpp",
-            1390,
-            0,
-            "clientNum doesn't index MAX_CLIENTS\n\t%i not in [0, %i)",
-            clientNum,
-            64);
+    bcassert(clientNum, 0x40);
     ci = &level_bgs.clientinfo[clientNum];
-    if (!ci->infoValid)
-        MyAssertHandler(".\\game_mp\\g_active_mp.cpp", 1392, 0, "%s", "ci->infoValid");
+    iassert(ci->infoValid);
     bChanged = 0;
     v1 = G_ModelName(ent->model);
     modelName = SL_ConvertToString(v1);
@@ -1425,8 +1347,7 @@ int __cdecl G_UpdateClientInfo(gentity_s *ent)
                 bChanged = 1;
                 I_strncpyz(ci->attachModelNames[i], modelNamea, 64);
             }
-            if (!ent->attachTagNames[i])
-                MyAssertHandler(".\\game_mp\\g_active_mp.cpp", 1424, 0, "%s", "ent->attachTagNames[i]");
+            iassert(ent->attachTagNames[i]);
             tagName = SL_ConvertToString(ent->attachTagNames[i]);
             client->sess.cs.attachTagIndex[i] = G_TagIndex((char*)tagName);
             if (strcmp(ci->attachTagNames[i], tagName))

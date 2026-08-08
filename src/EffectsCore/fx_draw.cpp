@@ -124,8 +124,7 @@ void __cdecl FX_EvaluateVisualState(FxElemPreVisualState *preVisState, float mse
     float sampleLerp; // [esp+CCh] [ebp-8h]
 
     elemDef = preVisState->elemDef;
-    if (!elemDef)
-        MyAssertHandler(".\\EffectsCore\\fx_draw.cpp", 182, 0, "%s", "elemDef");
+    iassert(elemDef);
     refState = preVisState->refState;
     randomSeed = preVisState->randomSeed;
     valueLerp = fx_randomTable[randomSeed + 23];
@@ -188,8 +187,7 @@ void __cdecl FX_EvaluateVisualState_DoLighting(
     uint outColorIndex; // [esp+14h] [ebp-8h]
     uint8_t lightColor[4]; // [esp+18h] [ebp-4h] BYREF
 
-    if (!preVisState->effect)
-        MyAssertHandler(".\\EffectsCore\\fx_draw.cpp", 156, 0, "%s", "preVisState->effect");
+    iassert(preVisState->effect);
     FX_UnpackColor565(preVisState->effect->packedLighting, lightColor, &lightColor[1], &lightColor[2]);
     for (colorIndex = 0; colorIndex != 3; ++colorIndex)
     {
@@ -314,12 +312,9 @@ void __cdecl FX_GenSpriteVerts(FxDrawState *draw, const float *tangent, const fl
         MyAssertHandler(".\\EffectsCore\\fx_draw.cpp", 298, 0, "%s", "visuals.material");
     if (sprite->material != visuals.anonymous && sprite->indexCount)
     {
-        if (!sprite->name)
-            MyAssertHandler(".\\EffectsCore\\fx_draw.cpp", 304, 0, "%s", "sprite->name");
-        if (!sprite->material)
-            MyAssertHandler(".\\EffectsCore\\fx_draw.cpp", 305, 0, "%s", "sprite->material");
-        if (!sprite->indices)
-            MyAssertHandler(".\\EffectsCore\\fx_draw.cpp", 306, 0, "%s", "sprite->indices");
+        iassert(sprite->name);
+        iassert(sprite->material);
+        iassert(sprite->indices);
         R_AddCodeMeshDrawSurf(sprite->material, sprite->indices, sprite->indexCount, 0, 0, sprite->name);
         sprite->indexCount = 0;
     }
@@ -369,8 +364,7 @@ void __cdecl FX_GenSpriteVerts(FxDrawState *draw, const float *tangent, const fl
         index.value[1] = baseVertex;
         *indices++ = index;
         Vec3Cross(normal, rotatedTangent, testBinormal);
-        if (Vec3Dot(testBinormal, rotatedBinormal) > 0.0)
-            MyAssertHandler(".\\EffectsCore\\fx_draw.cpp", 361, 0, "%s", "Vec3Dot( testBinormal, rotatedBinormal ) <= 0.0f");
+        iassert(Vec3Dot( testBinormal, rotatedBinormal ) <= 0.0f);
         baseVerts = R_GetCodeMeshVerts(baseVertex);
         verts = baseVerts;
         Vec3Add(leftSide, up, baseVerts->xyz);
@@ -483,11 +477,9 @@ void __cdecl FX_GetSpriteTexCoords(const FxDrawState *draw, float *s0, float *ds
     int atlasCount; // [esp+20h] [ebp-8h]
     uint8_t rowBits; // [esp+24h] [ebp-4h]
 
-    if (!draw)
-        MyAssertHandler(".\\EffectsCore\\fx_draw.cpp", 215, 0, "%s", "draw");
+    iassert(draw);
     elemDef = draw->elemDef;
-    if (!elemDef)
-        MyAssertHandler(".\\EffectsCore\\fx_draw.cpp", 217, 0, "%s", "elemDef");
+    iassert(elemDef);
     atlasCount = elemDef->atlas.entryCount;
     if (atlasCount == 1)
     {
@@ -498,14 +490,7 @@ void __cdecl FX_GetSpriteTexCoords(const FxDrawState *draw, float *s0, float *ds
     }
     else
     {
-        if (atlasCount <= 1 || atlasCount > 256 || (atlasCount & (atlasCount - 1)) != 0)
-            MyAssertHandler(
-                ".\\EffectsCore\\fx_draw.cpp",
-                228,
-                0,
-                "%s\n\t(atlasCount) = %i",
-                "(atlasCount > 1 && atlasCount <= 256 && (((atlasCount) & ((atlasCount) - 1)) == 0))",
-                atlasCount);
+        vassert((atlasCount > 1 && atlasCount <= 256 && (((atlasCount) & ((atlasCount) - 1)) == 0)), "(atlasCount) = %i", atlasCount);
         if ((elemDef->atlas.behavior & 3) != 0)
         {
             if ((elemDef->atlas.behavior & 3) == 1)
@@ -574,13 +559,7 @@ bool __cdecl FX_CullElementForDraw_Sprite(const FxDrawState *draw)
 
 uint __cdecl FX_CullElementForDraw_FrustumPlaneCount(const FxDrawState *draw)
 {
-    if (!draw || !draw->camera || draw->camera->frustumPlaneCount < 5)
-        MyAssertHandler(
-            ".\\EffectsCore\\fx_draw.cpp",
-            537,
-            0,
-            "%s",
-            "draw && draw->camera && draw->camera->frustumPlaneCount >= 5");
+    iassert(draw && draw->camera && draw->camera->frustumPlaneCount >= 5);
     if ((draw->elemDef->flags & 0x400) != 0)
         return 5;
     else
@@ -654,8 +633,7 @@ char __cdecl FX_CullCylinder(
     float pointToPlaneDista; // [esp+28h] [ebp-8h]
     uint planeIndex; // [esp+2Ch] [ebp-4h]
 
-    if (!camera->isValid)
-        MyAssertHandler(".\\EffectsCore\\fx_draw.cpp", 620, 0, "%s", "camera->isValid");
+    iassert(camera->isValid);
     if (frustumPlaneCount != camera->frustumPlaneCount && frustumPlaneCount != 5)
     {
         v5 = va("%i, %i", frustumPlaneCount, camera->frustumPlaneCount);
@@ -909,10 +887,8 @@ void __cdecl FX_DrawNonSpriteElems(FxSystem *system)
     volatile int activeIndex; // [esp+40h] [ebp-4h]
 
     PROF_SCOPED("FX_DrawElems");
-    if (!system)
-        MyAssertHandler(".\\EffectsCore\\fx_draw.cpp", 1370, 0, "%s", "system");
-    if (!system->camera.isValid)
-        MyAssertHandler(".\\EffectsCore\\fx_draw.cpp", 1371, 0, "%s", "system->camera.isValid");
+    iassert(system);
+    iassert(system->camera.isValid);
     FX_BeginIteratingOverEffects_Cooperative(system);
     for (activeIndex = system->firstActiveEffect; activeIndex != system->firstNewEffect; ++activeIndex)
     {
@@ -927,8 +903,7 @@ void __cdecl FX_BeginIteratingOverEffects_Cooperative(FxSystem *system)
 {
     volatile int iteratorCount; // [esp+0h] [ebp-Ch]
 
-    if (system->isArchiving)
-        MyAssertHandler("c:\\trees\\cod3\\src\\effectscore\\fx_system.h", 479, 0, "%s", "!system->isArchiving");
+    iassert(!system->isArchiving);
     do
     {
         if (system->iteratorCount < 0)
@@ -955,8 +930,7 @@ void __cdecl FX_DrawNonSpriteEffect(FxSystem *system, FxEffect *effect, uint ele
         elemDefs = drawState.effect->def->elemDefs;
         while (elemHandle != 0xFFFF)
         {
-            if (!system)
-                MyAssertHandler("c:\\trees\\cod3\\src\\effectscore\\fx_system.h", 334, 0, "%s", "system");
+            iassert(system);
             elem = &FX_PoolFromHandle_Generic<FxElem, 2048>(system->elems, elemHandle)->item;
             elemDef = &elemDefs[elem->defIndex];
             if (elemDef->elemType <= 3u)
@@ -997,14 +971,7 @@ void __cdecl FX_DrawElement_Setup_1_(
         *outRealNormTime = normTime;
     if (msecElapsed < (int)draw->msecLifeSpan)
     {
-        if (msecElapsed > (int)draw->msecLifeSpan)
-            MyAssertHandler(
-                ".\\EffectsCore\\fx_draw.cpp",
-                972,
-                0,
-                "msecElapsed <= static_cast< int32_t >( draw->msecLifeSpan )\n\t%i, %i",
-                msecElapsed,
-                (int)draw->msecLifeSpan);
+        vassert(msecElapsed <= static_cast< int32_t >( draw->msecLifeSpan ), "%i, %i", msecElapsed, (int)draw->msecLifeSpan);
         draw->msecElapsed = msecElapsedFloat;
         draw->normTimeUpdateEnd = normTime;
     }
@@ -1065,8 +1032,7 @@ void __cdecl FX_DrawElement(FxSystem *system, const FxElemDef *elemDef, const Fx
         draw->elem = elem;
         draw->elemDef = elemDef;
         FX_DrawElement_Setup_1_(system, draw, elem->msecBegin, elem->sequence, elem->origin, 0);
-        if (!s_drawElemHandler[elemDef->elemType])
-            MyAssertHandler(".\\EffectsCore\\fx_draw.cpp", 1025, 0, "%s", "s_drawElemHandler[elemDef->elemType]");
+        iassert(s_drawElemHandler[elemDef->elemType]);
         s_drawElemHandler[elemDef->elemType](draw);
     }
 }
@@ -1076,17 +1042,13 @@ void __cdecl FX_DrawSpotLight(FxSystem *system)
     FxEffect *v1; // eax
     volatile int msecDraw; // [esp-4h] [ebp-Ch]
 
-    if (!system)
-        MyAssertHandler(".\\EffectsCore\\fx_draw.cpp", 1389, 0, "%s", "system");
-    if (!system->camera.isValid)
-        MyAssertHandler(".\\EffectsCore\\fx_draw.cpp", 1390, 0, "%s", "system->camera.isValid");
+    iassert(system);
+    iassert(system->camera.isValid);
     FX_BeginIteratingOverEffects_Cooperative(system);
     if (system->activeSpotLightElemCount > 0)
     {
-        if (system->activeSpotLightEffectCount != 1)
-            MyAssertHandler(".\\EffectsCore\\fx_draw.cpp", 1395, 0, "%s", "system->activeSpotLightEffectCount == 1");
-        if (system->activeSpotLightElemCount != 1)
-            MyAssertHandler(".\\EffectsCore\\fx_draw.cpp", 1396, 0, "%s", "system->activeSpotLightElemCount == 1");
+        iassert(system->activeSpotLightEffectCount == 1);
+        iassert(system->activeSpotLightElemCount == 1);
         msecDraw = system->msecDraw;
         v1 = FX_EffectFromHandle(system, system->activeSpotLightEffectHandle);
         FX_DrawSpotLightEffect(system, v1, msecDraw);
@@ -1103,17 +1065,14 @@ void __cdecl FX_DrawSpotLightEffect(FxSystem *system, FxEffect *effect, int draw
     const FxElemDef *elemDefs; // [esp+B4h] [ebp-8h]
     FxElem *elem; // [esp+B8h] [ebp-4h]
 
-    if (system->activeSpotLightEffectCount <= 0)
-        MyAssertHandler(".\\EffectsCore\\fx_draw.cpp", 1320, 0, "%s", "system->activeSpotLightEffectCount > 0");
-    if (system->activeSpotLightElemCount <= 0)
-        MyAssertHandler(".\\EffectsCore\\fx_draw.cpp", 1321, 0, "%s", "system->activeSpotLightElemCount > 0");
+    iassert(system->activeSpotLightEffectCount > 0);
+    iassert(system->activeSpotLightElemCount > 0);
     drawState.effect = effect;
     drawState.system = system;
     drawState.msecDraw = drawTime;
     elemDefs = effect->def->elemDefs;
     activeSpotLightElemHandle = system->activeSpotLightElemHandle;
-    if (!system)
-        MyAssertHandler("c:\\trees\\cod3\\src\\effectscore\\fx_system.h", 334, 0, "%s", "system");
+    iassert(system);
     elem = (FxElem *)FX_PoolFromHandle_Generic<FxElem, 2048>(system->elems, activeSpotLightElemHandle);
     elemDef = &elemDefs[elem->defIndex];
     if (elemDef->elemType != 7)
@@ -1133,10 +1092,8 @@ void __cdecl FX_DrawSpriteElems(FxSystem *system, int drawTime)
     int activeIndex; // [esp+854h] [ebp-4h]
 
     PROF_SCOPED("FX_DrawElems");
-    if (!system)
-        MyAssertHandler(".\\EffectsCore\\fx_draw.cpp", 1510, 0, "%s", "system");
-    if (!system->camera.isValid)
-        MyAssertHandler(".\\EffectsCore\\fx_draw.cpp", 1511, 0, "%s", "system->camera.isValid");
+    iassert(system);
+    iassert(system->camera.isValid);
     system->gfxCloudCount = 0;
     sprite = &system->sprite;
     system->sprite.indices = 0;
@@ -1170,8 +1127,7 @@ void __cdecl FX_DrawSpriteElems(FxSystem *system, int drawTime)
             MyAssertHandler(".\\EffectsCore\\fx_draw.cpp", 1555, 0, "%s", "sprite->name");
         if (!system->sprite.material)
             MyAssertHandler(".\\EffectsCore\\fx_draw.cpp", 1556, 0, "%s", "sprite->material");
-        if (!sprite->indices)
-            MyAssertHandler(".\\EffectsCore\\fx_draw.cpp", 1557, 0, "%s", "sprite->indices");
+        iassert(sprite->indices);
         R_AddCodeMeshDrawSurf(
             system->sprite.material,
             system->sprite.indices,
@@ -1195,8 +1151,7 @@ void __cdecl FX_DrawTrailsForEffect(FxSystem *system, FxEffect *effect, int draw
     drawState.msecDraw = drawTime;
     for (trailHandle = effect->firstTrailHandle; trailHandle != 0xFFFF; trailHandle = trail->nextTrailHandle)
     {
-        if (!system)
-            MyAssertHandler("c:\\trees\\cod3\\src\\effectscore\\fx_system.h", 362, 0, "%s", "system");
+        iassert(system);
         trail = (FxTrail *)FX_PoolFromHandle_Generic<FxTrail, 128>(system->trails, trailHandle);
         FX_DrawTrail(system, &drawState, trail);
     }
@@ -1238,8 +1193,7 @@ void __cdecl FX_DrawTrail(FxSystem *system, FxDrawState *draw, FxTrail *trail)
         trailElemHandle = trail->firstElemHandle;
         if (trailElemHandle != 0xFFFF)
         {
-            if (!system)
-                MyAssertHandler("c:\\trees\\cod3\\src\\effectscore\\fx_system.h", 348, 0, "%s", "system");
+            iassert(system);
             trailElem = (const FxTrailElem *)FX_PoolFromHandle_Generic<FxTrailElem, 2048>(system->trailElems, trailElemHandle);
             v6 = trailElem->spawnDist / (double)draw->elemDef->trailDef->repeatDist;
             v5 = floor(v6);
@@ -1262,8 +1216,7 @@ void __cdecl FX_DrawTrail(FxSystem *system, FxDrawState *draw, FxTrail *trail)
                 trailElemHandle != 0xFFFF;
                 trailElemHandle = trailElem->nextTrailElemHandle)
             {
-                if (!system)
-                    MyAssertHandler("c:\\trees\\cod3\\src\\effectscore\\fx_system.h", 348, 0, "%s", "system");
+                iassert(system);
                 trailElem = (const FxTrailElem *)FX_PoolFromHandle_Generic<FxTrailElem, 2048>(
                     system->trailElems,
                     trailElemHandle);
@@ -1282,8 +1235,7 @@ void __cdecl FX_DrawTrail(FxSystem *system, FxDrawState *draw, FxTrail *trail)
                     trailElemHandle != 0xFFFF;
                     trailElemHandle = trailElem->nextTrailElemHandle)
                 {
-                    if (!system)
-                        MyAssertHandler("c:\\trees\\cod3\\src\\effectscore\\fx_system.h", 348, 0, "%s", "system");
+                    iassert(system);
                     trailElem = (const FxTrailElem *)FX_PoolFromHandle_Generic<FxTrailElem, 2048>(
                         system->trailElems,
                         trailElemHandle);
@@ -1349,12 +1301,9 @@ void __cdecl FX_DrawTrail(FxSystem *system, FxDrawState *draw, FxTrail *trail)
                     visuals.anonymous = FX_GetElemVisuals(draw->elemDef, draw->randomSeed).anonymous;
                     if (sprite->material != visuals.anonymous && sprite->indexCount)
                     {
-                        if (!sprite->name)
-                            MyAssertHandler(".\\EffectsCore\\fx_draw.cpp", 1169, 0, "%s", "sprite->name");
-                        if (!sprite->material)
-                            MyAssertHandler(".\\EffectsCore\\fx_draw.cpp", 1170, 0, "%s", "sprite->material");
-                        if (!sprite->indices)
-                            MyAssertHandler(".\\EffectsCore\\fx_draw.cpp", 1171, 0, "%s", "sprite->indices");
+                        iassert(sprite->name);
+                        iassert(sprite->material);
+                        iassert(sprite->indices);
                         R_AddCodeMeshDrawSurf(sprite->material, sprite->indices, sprite->indexCount, 0, 0, sprite->name);
                         sprite->indexCount = 0;
                     }
@@ -1406,8 +1355,7 @@ void __cdecl FX_GenTrail_IndsForSegment(
     r_double_index_t *outIndicesa; // [esp+40h] [ebp+10h]
 
     trailDef = draw->elemDef->trailDef;
-    if (!trailDef)
-        MyAssertHandler(".\\EffectsCore\\fx_draw.cpp", 414, 0, "%s", "trailDef");
+    iassert(trailDef);
     inds = trailDef->inds;
     indCount = trailDef->indCount;
     if (2 * (indCount / 2) != indCount)
@@ -1495,10 +1443,8 @@ void __cdecl FX_GenTrail_VertsForSegment(const FxTrailSegmentDrawState *segmentD
     trailDef = segmentDrawState->trailDef;
     if (!segmentDrawState->trailDef)
         MyAssertHandler(".\\EffectsCore\\fx_draw.cpp", 499, 0, "%s", "trailDef");
-    if (trailDef->vertCount <= 0)
-        MyAssertHandler(".\\EffectsCore\\fx_draw.cpp", 500, 0, "%s", "trailDef->vertCount > 0");
-    if (trailDef->indCount <= 0)
-        MyAssertHandler(".\\EffectsCore\\fx_draw.cpp", 501, 0, "%s", "trailDef->indCount > 0");
+    iassert(trailDef->vertCount > 0);
+    iassert(trailDef->indCount > 0);
     rotation = segmentDrawState->rotation;
     cosRot = cos(rotation);
     sinRot = sin(rotation);
@@ -1574,8 +1520,7 @@ void __cdecl FX_DrawSpriteEffect(FxSystem *system, FxEffect *effect, int drawTim
         elemDefs = drawState.effect->def->elemDefs;
         while (elemHandle != 0xFFFF)
         {
-            if (!system)
-                MyAssertHandler("c:\\trees\\cod3\\src\\effectscore\\fx_system.h", 334, 0, "%s", "system");
+            iassert(system);
             elem = (FxElem *)FX_PoolFromHandle_Generic<FxElem, 2048>(system->elems, elemHandle);
             elemDef = &elemDefs[elem->defIndex];
             if (elemDef->elemType > 3u)

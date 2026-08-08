@@ -96,21 +96,10 @@ int __cdecl ScriptMover_UpdateMove(
         pTr->trBase[1] = vPos1[1];
         pTr->trBase[2] = vPos1[2];
         Vec3Sub(vPos2, vPos1, vMove);
-        if (!trDuration)
-            MyAssertHandler(".\\game\\g_scr_mover.cpp", 38, 0, "%s", "trDuration");
+        iassert(trDuration);
         fDelta = 1000.0 / (double)trDuration;
         Vec3Scale(vMove, fDelta, pTr->trDelta);
-        if ((COERCE_UNSIGNED_INT(pTr->trDelta[0]) & 0x7F800000) == 0x7F800000
-            || (COERCE_UNSIGNED_INT(pTr->trDelta[1]) & 0x7F800000) == 0x7F800000
-            || (COERCE_UNSIGNED_INT(pTr->trDelta[2]) & 0x7F800000) == 0x7F800000)
-        {
-            MyAssertHandler(
-                ".\\game\\g_scr_mover.cpp",
-                41,
-                0,
-                "%s",
-                "!IS_NAN((pTr->trDelta)[0]) && !IS_NAN((pTr->trDelta)[1]) && !IS_NAN((pTr->trDelta)[2])");
-        }
+        nanassertvec3(pTr->trDelta);
         pTr->trType = TR_LINEAR_STOP;
         return 0;
     }
@@ -127,17 +116,7 @@ int __cdecl ScriptMover_UpdateMove(
         pTr->trDelta[0] = vMove[0];
         pTr->trDelta[1] = vMove[1];
         pTr->trDelta[2] = vMove[2];
-        if ((COERCE_UNSIGNED_INT(pTr->trDelta[0]) & 0x7F800000) == 0x7F800000
-            || (COERCE_UNSIGNED_INT(pTr->trDelta[1]) & 0x7F800000) == 0x7F800000
-            || (COERCE_UNSIGNED_INT(pTr->trDelta[2]) & 0x7F800000) == 0x7F800000)
-        {
-            MyAssertHandler(
-                ".\\game\\g_scr_mover.cpp",
-                55,
-                0,
-                "%s",
-                "!IS_NAN((pTr->trDelta)[0]) && !IS_NAN((pTr->trDelta)[1]) && !IS_NAN((pTr->trDelta)[2])");
-        }
+        nanassertvec3(pTr->trDelta);
         pTr->trType = TR_DECELERATE;
         return 0;
     }
@@ -353,21 +332,10 @@ void __cdecl ScriptMover_SetupMove(
         pTr->trBase[0] = *vCurrPos;
         pTr->trBase[1] = vCurrPos[1];
         pTr->trBase[2] = vCurrPos[2];
-        if (!pTr->trDuration)
-            MyAssertHandler(".\\game\\g_scr_mover.cpp", 144, 0, "%s", "pTr->trDuration");
+        iassert(pTr->trDuration);
         fDelta = 1000.0 / (double)pTr->trDuration;
         Vec3Scale(vMove, fDelta, pTr->trDelta);
-        if ((COERCE_UNSIGNED_INT(pTr->trDelta[0]) & 0x7F800000) == 0x7F800000
-            || (COERCE_UNSIGNED_INT(pTr->trDelta[1]) & 0x7F800000) == 0x7F800000
-            || (COERCE_UNSIGNED_INT(pTr->trDelta[2]) & 0x7F800000) == 0x7F800000)
-        {
-            MyAssertHandler(
-                ".\\game\\g_scr_mover.cpp",
-                147,
-                0,
-                "%s",
-                "!IS_NAN((pTr->trDelta)[0]) && !IS_NAN((pTr->trDelta)[1]) && !IS_NAN((pTr->trDelta)[2])");
-        }
+        nanassertvec3(pTr->trDelta);
         pTr->trType = TR_LINEAR_STOP;
         BG_EvaluateTrajectory(pTr, level.time, vCurrPos);
     }
@@ -376,8 +344,7 @@ void __cdecl ScriptMover_SetupMove(
         *pfMidTime = fTotalTime - fAccelTime - fDecelTime;
         *pfDecelTime = fDecelTime;
         fDist = Vec3Length(vMove);
-        if (fTotalTime * 2.0 - fAccelTime - fDecelTime == 0.0)
-            MyAssertHandler(".\\game\\g_scr_mover.cpp", 159, 0, "%s", "(2.0f * fTotalTime) - fAccelTime - fDecelTime");
+        iassert((2.0f * fTotalTime) - fAccelTime - fDecelTime);
         *pfSpeed = fDist * 2.0 / (fTotalTime * 2.0 - fAccelTime - fDecelTime);
         Vec3NormalizeTo(vMove, vMaxSpeed);
         Vec3Scale(vMaxSpeed, *pfSpeed, vMaxSpeed);
@@ -396,17 +363,7 @@ void __cdecl ScriptMover_SetupMove(
                 pTr->trDelta[0] = vMaxSpeed[0];
                 pTr->trDelta[1] = vMaxSpeed[1];
                 pTr->trDelta[2] = vMaxSpeed[2];
-                if ((COERCE_UNSIGNED_INT(pTr->trDelta[0]) & 0x7F800000) == 0x7F800000
-                    || (COERCE_UNSIGNED_INT(pTr->trDelta[1]) & 0x7F800000) == 0x7F800000
-                    || (COERCE_UNSIGNED_INT(pTr->trDelta[2]) & 0x7F800000) == 0x7F800000)
-                {
-                    MyAssertHandler(
-                        ".\\game\\g_scr_mover.cpp",
-                        202,
-                        0,
-                        "%s",
-                        "!IS_NAN((pTr->trDelta)[0]) && !IS_NAN((pTr->trDelta)[1]) && !IS_NAN((pTr->trDelta)[2])");
-                }
+                nanassertvec3(pTr->trDelta);
                 pTr->trType = TR_DECELERATE;
             }
             else
@@ -417,21 +374,10 @@ void __cdecl ScriptMover_SetupMove(
                 pTr->trBase[1] = vCurrPos[1];
                 pTr->trBase[2] = vCurrPos[2];
                 Vec3Scale(vMaxSpeed, *pfMidTime, vMove);
-                if (!pTr->trDuration)
-                    MyAssertHandler(".\\game\\g_scr_mover.cpp", 188, 0, "%s", "pTr->trDuration");
+                iassert(pTr->trDuration);
                 fDeltaa = 1000.0f / (float)pTr->trDuration;
                 Vec3Scale(vMove, fDeltaa, pTr->trDelta);
-                if ((COERCE_UNSIGNED_INT(pTr->trDelta[0]) & 0x7F800000) == 0x7F800000
-                    || (COERCE_UNSIGNED_INT(pTr->trDelta[1]) & 0x7F800000) == 0x7F800000
-                    || (COERCE_UNSIGNED_INT(pTr->trDelta[2]) & 0x7F800000) == 0x7F800000)
-                {
-                    MyAssertHandler(
-                        ".\\game\\g_scr_mover.cpp",
-                        191,
-                        0,
-                        "%s",
-                        "!IS_NAN((pTr->trDelta)[0]) && !IS_NAN((pTr->trDelta)[1]) && !IS_NAN((pTr->trDelta)[2])");
-                }
+                nanassertvec3(pTr->trDelta);
                 pTr->trType = TR_LINEAR_STOP;
             }
         }
@@ -445,17 +391,7 @@ void __cdecl ScriptMover_SetupMove(
             pTr->trDelta[0] = vMaxSpeed[0];
             pTr->trDelta[1] = vMaxSpeed[1];
             pTr->trDelta[2] = vMaxSpeed[2];
-            if ((COERCE_UNSIGNED_INT(pTr->trDelta[0]) & 0x7F800000) == 0x7F800000
-                || (COERCE_UNSIGNED_INT(pTr->trDelta[1]) & 0x7F800000) == 0x7F800000
-                || (COERCE_UNSIGNED_INT(pTr->trDelta[2]) & 0x7F800000) == 0x7F800000)
-            {
-                MyAssertHandler(
-                    ".\\game\\g_scr_mover.cpp",
-                    171,
-                    0,
-                    "%s",
-                    "!IS_NAN((pTr->trDelta)[0]) && !IS_NAN((pTr->trDelta)[1]) && !IS_NAN((pTr->trDelta)[2])");
-            }
+            nanassertvec3(pTr->trDelta);
             pTr->trType = TR_ACCELERATE;
             BG_EvaluateTrajectory(pTr, pTr->trDuration + level.time, vPos1);
         }
@@ -509,19 +445,8 @@ void __cdecl ScriptMover_GravityMove(gentity_s *mover, float *velocity, float to
 {
     trajectory_t *trajectory; // [esp+24h] [ebp-4h]
 
-    if (!mover)
-        MyAssertHandler(".\\game\\g_scr_mover.cpp", 356, 0, "%s", "mover");
-    if ((COERCE_UNSIGNED_INT(*velocity) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(velocity[1]) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(velocity[2]) & 0x7F800000) == 0x7F800000)
-    {
-        MyAssertHandler(
-            ".\\game\\g_scr_mover.cpp",
-            357,
-            0,
-            "%s",
-            "!IS_NAN((velocity)[0]) && !IS_NAN((velocity)[1]) && !IS_NAN((velocity)[2])");
-    }
+    iassert(mover);
+    nanassertvec3(velocity);
     trajectory = &mover->s.lerp.pos;
     mover->s.lerp.pos.trTime = level.time;
     mover->s.lerp.pos.trDuration = (int)(totalTime * 1000.0f);
@@ -940,17 +865,7 @@ void __cdecl ScriptMover_SetupMoveSpeed(
         pTr->trDelta[0] = *vSpeed;
         pTr->trDelta[1] = vSpeed[1];
         pTr->trDelta[2] = vSpeed[2];
-        if ((COERCE_UNSIGNED_INT(pTr->trDelta[0]) & 0x7F800000) == 0x7F800000
-            || (COERCE_UNSIGNED_INT(pTr->trDelta[1]) & 0x7F800000) == 0x7F800000
-            || (COERCE_UNSIGNED_INT(pTr->trDelta[2]) & 0x7F800000) == 0x7F800000)
-        {
-            MyAssertHandler(
-                ".\\game\\g_scr_mover.cpp",
-                260,
-                0,
-                "%s",
-                "!IS_NAN((pTr->trDelta)[0]) && !IS_NAN((pTr->trDelta)[1]) && !IS_NAN((pTr->trDelta)[2])");
-        }
+        nanassertvec3(pTr->trDelta);
         pTr->trType = TR_LINEAR_STOP;
         BG_EvaluateTrajectory(pTr, level.time, vCurrPos);
         BG_EvaluateTrajectory(pTr, pTr->trDuration + level.time, vPos3);
@@ -975,17 +890,7 @@ void __cdecl ScriptMover_SetupMoveSpeed(
                 pTr->trDelta[0] = *vSpeed;
                 pTr->trDelta[1] = vSpeed[1];
                 pTr->trDelta[2] = vSpeed[2];
-                if ((COERCE_UNSIGNED_INT(pTr->trDelta[0]) & 0x7F800000) == 0x7F800000
-                    || (COERCE_UNSIGNED_INT(pTr->trDelta[1]) & 0x7F800000) == 0x7F800000
-                    || (COERCE_UNSIGNED_INT(pTr->trDelta[2]) & 0x7F800000) == 0x7F800000)
-                {
-                    MyAssertHandler(
-                        ".\\game\\g_scr_mover.cpp",
-                        309,
-                        0,
-                        "%s",
-                        "!IS_NAN((pTr->trDelta)[0]) && !IS_NAN((pTr->trDelta)[1]) && !IS_NAN((pTr->trDelta)[2])");
-                }
+                nanassertvec3(pTr->trDelta);
                 pTr->trType = TR_DECELERATE;
             }
             else
@@ -998,17 +903,7 @@ void __cdecl ScriptMover_SetupMoveSpeed(
                 pTr->trDelta[0] = *vSpeed;
                 pTr->trDelta[1] = vSpeed[1];
                 pTr->trDelta[2] = vSpeed[2];
-                if ((COERCE_UNSIGNED_INT(pTr->trDelta[0]) & 0x7F800000) == 0x7F800000
-                    || (COERCE_UNSIGNED_INT(pTr->trDelta[1]) & 0x7F800000) == 0x7F800000
-                    || (COERCE_UNSIGNED_INT(pTr->trDelta[2]) & 0x7F800000) == 0x7F800000)
-                {
-                    MyAssertHandler(
-                        ".\\game\\g_scr_mover.cpp",
-                        299,
-                        0,
-                        "%s",
-                        "!IS_NAN((pTr->trDelta)[0]) && !IS_NAN((pTr->trDelta)[1]) && !IS_NAN((pTr->trDelta)[2])");
-                }
+                nanassertvec3(pTr->trDelta);
                 pTr->trType = TR_LINEAR_STOP;
             }
         }
@@ -1022,17 +917,7 @@ void __cdecl ScriptMover_SetupMoveSpeed(
             pTr->trDelta[0] = *vSpeed;
             pTr->trDelta[1] = vSpeed[1];
             pTr->trDelta[2] = vSpeed[2];
-            if ((COERCE_UNSIGNED_INT(pTr->trDelta[0]) & 0x7F800000) == 0x7F800000
-                || (COERCE_UNSIGNED_INT(pTr->trDelta[1]) & 0x7F800000) == 0x7F800000
-                || (COERCE_UNSIGNED_INT(pTr->trDelta[2]) & 0x7F800000) == 0x7F800000)
-            {
-                MyAssertHandler(
-                    ".\\game\\g_scr_mover.cpp",
-                    282,
-                    0,
-                    "%s",
-                    "!IS_NAN((pTr->trDelta)[0]) && !IS_NAN((pTr->trDelta)[1]) && !IS_NAN((pTr->trDelta)[2])");
-            }
+            nanassertvec3(pTr->trDelta);
             pTr->trType = TR_ACCELERATE;
             BG_EvaluateTrajectory(pTr, pTr->trDuration + level.time, vPos1);
         }
@@ -1054,17 +939,7 @@ void __cdecl ScriptMover_SetupMoveSpeed(
             tr.trDelta[0] = *vSpeed;
             tr.trDelta[1] = vSpeed[1];
             tr.trDelta[2] = vSpeed[2];
-            if ((LODWORD(tr.trDelta[0]) & 0x7F800000) == 0x7F800000
-                || (LODWORD(tr.trDelta[1]) & 0x7F800000) == 0x7F800000
-                || (LODWORD(tr.trDelta[2]) & 0x7F800000) == 0x7F800000)
-            {
-                MyAssertHandler(
-                    ".\\game\\g_scr_mover.cpp",
-                    327,
-                    0,
-                    "%s",
-                    "!IS_NAN((tr.trDelta)[0]) && !IS_NAN((tr.trDelta)[1]) && !IS_NAN((tr.trDelta)[2])");
-            }
+            nanassertvec3(tr.trDelta);
             BG_EvaluateTrajectory(&tr, tr.trDuration + level.time, vPos3);
         }
         BG_EvaluateTrajectory(pTr, level.time, vCurrPos);

@@ -160,8 +160,7 @@ void __cdecl XAnimCalc(
 
 bool __cdecl IsInfoAdditive(const XAnimInfo *info)
 {
-    if (!info)
-        MyAssertHandler(".\\xanim\\xanim_calc.cpp", 147, 0, "%s", "info");
+    iassert(info);
     return !info->animToModel && (info->animParent.flags & 0x10) != 0;
 }
 

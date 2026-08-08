@@ -73,10 +73,8 @@ void __cdecl ClientScr_ReadOnly(gclient_s *pSelf, const client_fields_s *pField)
 {
     const char *v2; // eax
 
-    if (!pSelf)
-        MyAssertHandler(".\\game\\g_client_fields.cpp", 24, 0, "%s", "pSelf");
-    if (!pField)
-        MyAssertHandler(".\\game\\g_client_fields.cpp", 25, 0, "%s", "pField");
+    iassert(pSelf);
+    iassert(pField);
     v2 = va("player field %s is read-only", pField->name);
     Scr_Error(v2);
 }
@@ -85,8 +83,7 @@ void __cdecl ClientScr_SetSessionTeam(gclient_s *pSelf, const client_fields_s *p
 {
     uint16_t newTeam; // [esp+0h] [ebp-4h]
 
-    if (!pSelf)
-        MyAssertHandler(".\\game\\g_client_fields.cpp", 34, 0, "%s", "pSelf");
+    iassert(pSelf);
     newTeam = Scr_GetConstString(0);
     if (newTeam == scr_const.axis)
     {
@@ -116,8 +113,7 @@ void __cdecl ClientScr_SetSessionTeam(gclient_s *pSelf, const client_fields_s *p
 }
 void __cdecl ClientScr_GetSessionTeam(gclient_s *pSelf, const client_fields_s *pField)
 {
-    if (!pSelf)
-        MyAssertHandler(".\\game\\g_client_fields.cpp", 81, 0, "%s", "pSelf");
+    iassert(pSelf);
     switch (pSelf->sess.cs.team)
     {
     case TEAM_FREE:
@@ -141,10 +137,8 @@ void __cdecl ClientScr_SetSessionState(gclient_s *pSelf, const client_fields_s *
 {
     uint16_t newState; // [esp+0h] [ebp-4h]
 
-    if (!pSelf)
-        MyAssertHandler(".\\game\\g_client_fields.cpp", 110, 0, "%s", "pSelf");
-    if (pSelf->sess.connected == CON_DISCONNECTED)
-        MyAssertHandler(".\\game\\g_client_fields.cpp", 111, 0, "%s", "pSelf->sess.connected != CON_DISCONNECTED");
+    iassert(pSelf);
+    iassert(pSelf->sess.connected != CON_DISCONNECTED);
     newState = Scr_GetConstString(0);
     if (newState == scr_const.playing)
     {
@@ -171,10 +165,8 @@ void __cdecl ClientScr_SetSessionState(gclient_s *pSelf, const client_fields_s *
 
 void __cdecl ClientScr_GetSessionState(gclient_s *pSelf, const client_fields_s *pField)
 {
-    if (!pSelf)
-        MyAssertHandler(".\\game\\g_client_fields.cpp", 144, 0, "%s", "pSelf");
-    if (pSelf->sess.connected == CON_DISCONNECTED)
-        MyAssertHandler(".\\game\\g_client_fields.cpp", 145, 0, "%s", "pSelf->sess.connected != CON_DISCONNECTED");
+    iassert(pSelf);
+    iassert(pSelf->sess.connected != CON_DISCONNECTED);
     switch (pSelf->sess.sessionState)
     {
     case SESS_STATE_PLAYING:
@@ -211,8 +203,7 @@ void __cdecl ClientScr_GetHeadIcon(gclient_s *pSelf, const client_fields_s *pFie
     char szConfigString[1024]; // [esp+0h] [ebp-408h] BYREF
     gentity_s *pEnt; // [esp+404h] [ebp-4h]
 
-    if (!pSelf)
-        MyAssertHandler(".\\game\\g_client_fields.cpp", 317, 0, "%s", "pSelf");
+    iassert(pSelf);
     pEnt = &g_entities[pSelf - level.clients];
     if (pEnt->s.iHeadIcon)
     {
@@ -233,8 +224,7 @@ void __cdecl ClientScr_SetHeadIconTeam(gclient_s *pSelf, const client_fields_s *
     gentity_s *pEnt; // [esp+0h] [ebp-8h]
     uint16_t sTeam; // [esp+4h] [ebp-4h]
 
-    if (!pSelf)
-        MyAssertHandler(".\\game\\g_client_fields.cpp", 343, 0, "%s", "pSelf");
+    iassert(pSelf);
     pEnt = &g_entities[pSelf - level.clients];
     sTeam = Scr_GetConstString(0);
     if (sTeam == scr_const.none)
@@ -263,8 +253,7 @@ void __cdecl ClientScr_GetHeadIconTeam(gclient_s *pSelf, const client_fields_s *
 {
     int iHeadIconTeam; // [esp+0h] [ebp-8h]
 
-    if (!pSelf)
-        MyAssertHandler(".\\game\\g_client_fields.cpp", 370, 0, "%s", "pSelf");
+    iassert(pSelf);
     iHeadIconTeam = g_entities[pSelf - level.clients].s.iHeadIconTeam;
     switch (iHeadIconTeam)
     {
@@ -286,16 +275,14 @@ void __cdecl ClientScr_GetHeadIconTeam(gclient_s *pSelf, const client_fields_s *
 
 void __cdecl ClientScr_GetName(gclient_s *pSelf, const client_fields_s *pField)
 {
-    if (!pSelf)
-        MyAssertHandler(".\\game\\g_client_fields.cpp", 64, 0, "%s", "pSelf");
+    iassert(pSelf);
     Scr_AddString(pSelf->sess.cs.name);
 }
 
 
 void __cdecl ClientScr_SetMaxHealth(gclient_s *pSelf, const client_fields_s *pField)
 {
-    if (!pSelf)
-        MyAssertHandler(".\\game\\g_client_fields.cpp", 174, 0, "%s", "pSelf");
+    iassert(pSelf);
     pSelf->sess.maxHealth = Scr_GetInt(0);
     if (pSelf->sess.maxHealth < 1)
         pSelf->sess.maxHealth = 1;
@@ -315,8 +302,7 @@ void __cdecl ClientScr_SetSpectatorClient(gclient_s *pSelf, const client_fields_
 {
     int iNewSpectatorClient; // [esp+0h] [ebp-4h]
 
-    if (!pSelf)
-        MyAssertHandler(".\\game\\g_client_fields.cpp", 215, 0, "%s", "pSelf");
+    iassert(pSelf);
     iNewSpectatorClient = Scr_GetInt(0);
     if (iNewSpectatorClient < -1 || iNewSpectatorClient >= 64)
         Scr_Error("spectatorclient can only be set to -1, or a valid client number");
@@ -327,8 +313,7 @@ void __cdecl ClientScr_SetKillCamEntity(gclient_s *pSelf, const client_fields_s 
 {
     int iNewKillCamEntity; // [esp+0h] [ebp-4h]
 
-    if (!pSelf)
-        MyAssertHandler(".\\game\\g_client_fields.cpp", 236, 0, "%s", "pSelf");
+    iassert(pSelf);
     iNewKillCamEntity = Scr_GetInt(0);
     if (iNewKillCamEntity < -1 || iNewKillCamEntity >= 1024)
         Scr_Error("killcamentity can only be set to -1, or a valid entity number");
@@ -347,8 +332,7 @@ void __cdecl ClientScr_GetStatusIcon(gclient_s *pSelf, const client_fields_s *pF
 {
     char szConfigString[1028]; // [esp+0h] [ebp-408h] BYREF
 
-    if (!pSelf)
-        MyAssertHandler(".\\game\\g_client_fields.cpp", 272, 0, "%s", "pSelf");
+    iassert(pSelf);
     if (pSelf->sess.status_icon > 8u)
         MyAssertHandler(
             ".\\game\\g_client_fields.cpp",
@@ -370,8 +354,7 @@ void __cdecl ClientScr_GetStatusIcon(gclient_s *pSelf, const client_fields_s *pF
 
 void __cdecl ClientScr_SetArchiveTime(gclient_s *pSelf, const client_fields_s *pField)
 {
-    if (!pSelf)
-        MyAssertHandler(".\\game\\g_client_fields.cpp", 394, 0, "%s", "pSelf");
+    iassert(pSelf);
     pSelf->sess.archiveTime = (int)(Scr_GetFloat(0) * 1000.0);
 }
 
@@ -382,8 +365,7 @@ void __cdecl ClientScr_GetArchiveTime(gclient_s *pSelf, const client_fields_s *p
 
 void __cdecl ClientScr_SetPSOffsetTime(gclient_s *pSelf, const client_fields_s *pField)
 {
-    if (!pSelf)
-        MyAssertHandler(".\\game\\g_client_fields.cpp", 417, 0, "%s", "pSelf");
+    iassert(pSelf);
     pSelf->sess.psOffsetTime = Scr_GetInt(0);
 }
 
@@ -405,8 +387,7 @@ void __cdecl GScr_AddFieldsForClient()
     {
         if (((f - fields) & 0xC000) != 0)
             MyAssertHandler(".\\game\\g_client_fields.cpp", 478, 0, "%s", "!((f - fields) & ENTFIELD_MASK)");
-        if (f - fields != (uint16_t)(f - fields))
-            MyAssertHandler(".\\game\\g_client_fields.cpp", 479, 0, "%s", "(f - fields) == (unsigned short)( f - fields )");
+        iassert((f - fields) == (unsigned short)( f - fields ));
         Scr_AddClassField(CLASS_NUM_ENTITY, (char *)f->name, (uint16_t)(f - fields) | 0xC000);
     }
 #endif
@@ -416,8 +397,7 @@ void __cdecl Scr_SetClientField(gclient_s *client, int offset)
 {
     const client_fields_s *f; // [esp+0h] [ebp-4h]
 
-    if (!client)
-        MyAssertHandler(".\\game\\g_client_fields.cpp", 494, 0, "%s", "client");
+    iassert(client);
     if ((uint)offset >= 0x11)
         MyAssertHandler(
             ".\\game\\g_client_fields.cpp",
@@ -425,8 +405,7 @@ void __cdecl Scr_SetClientField(gclient_s *client, int offset)
             0,
             "%s",
             "static_cast<uint32_t>( offset ) < ARRAY_COUNT( fields ) - 1");
-    if (offset < 0)
-        MyAssertHandler(".\\game\\g_client_fields.cpp", 496, 0, "%s", "offset >= 0");
+    iassert(offset >= 0);
     f = &fields[offset];
     if (f->setter)
     {
@@ -434,8 +413,7 @@ void __cdecl Scr_SetClientField(gclient_s *client, int offset)
     }
     else
     {
-        if (!f->ofs)
-            MyAssertHandler(".\\game\\g_client_fields.cpp", 506, 0, "%s", "f->ofs");
+        iassert(f->ofs);
         Scr_SetGenericField((uint8_t *)client, f->type, f->ofs);
     }
 }
@@ -444,8 +422,7 @@ void __cdecl Scr_GetClientField(gclient_s *client, int offset)
 {
     const client_fields_s *f; // [esp+0h] [ebp-4h]
 
-    if (!client)
-        MyAssertHandler(".\\game\\g_client_fields.cpp", 520, 0, "%s", "client");
+    iassert(client);
     if ((uint)offset >= 0x11)
         MyAssertHandler(
             ".\\game\\g_client_fields.cpp",
@@ -453,8 +430,7 @@ void __cdecl Scr_GetClientField(gclient_s *client, int offset)
             0,
             "%s",
             "static_cast<uint32_t>( offset ) < ARRAY_COUNT( fields ) - 1");
-    if (offset < 0)
-        MyAssertHandler(".\\game\\g_client_fields.cpp", 522, 0, "%s", "offset >= 0");
+    iassert(offset >= 0);
     f = &fields[offset];
     if (f->getter)
     {
@@ -462,8 +438,7 @@ void __cdecl Scr_GetClientField(gclient_s *client, int offset)
     }
     else
     {
-        if (!f->ofs)
-            MyAssertHandler(".\\game\\g_client_fields.cpp", 532, 0, "%s", "f->ofs");
+        iassert(f->ofs);
         Scr_GetGenericField((uint8_t *)client, f->type, f->ofs);
     }
 }

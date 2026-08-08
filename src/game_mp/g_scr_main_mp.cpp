@@ -683,8 +683,7 @@ void __cdecl Scr_VerifyWeaponIndex(int weaponIndex, const char *weaponName)
 {
     const char *v2; // eax
 
-    if (!weaponName)
-        MyAssertHandler(".\\game_mp\\g_scr_main_mp.cpp", 517, 0, "%s", "weaponName");
+    iassert(weaponName);
     if (!weaponIndex)
     {
         if (I_stricmp("none", weaponName))
@@ -957,8 +956,7 @@ void GScr_SetDvar()
         if (v3)
         {
             dvar = Dvar_FindVar(dvarName);
-            if (!dvar)
-                MyAssertHandler(".\\game_mp\\g_scr_main_mp.cpp", 778, 0, "%s", "dvar");
+            iassert(dvar);
             Dvar_AddFlags(dvar, 1024);
         }
     }
@@ -1089,8 +1087,7 @@ gentity_s *__cdecl GetEntity(scr_entref_t entref)
     }
     else
     {
-        if (entref.entnum >= 0x400u)
-            MyAssertHandler(".\\game_mp\\g_scr_main_mp.cpp", 198, 0, "%s", "entref.entnum < MAX_GENTITIES");
+        iassert(entref.entnum < MAX_GENTITIES);
         return &g_entities[entref.entnum];
     }
 }
@@ -1180,14 +1177,7 @@ void GScr_SpawnPlane()
     currentOrigin[2] = origin[2];
     ent->spawnflags = iSpawnFlags;
     team = owner->client->sess.cs.team;
-    if ((uint )team >= 4)
-        MyAssertHandler(
-            ".\\game_mp\\g_scr_main_mp.cpp",
-            964,
-            0,
-            "team doesn't index (1 << 2)\n\t%i not in [0, %i)",
-            team,
-            4);
+    bcassert((uint )team, 4);
     ownerIndex = owner->client - level.clients;
     if (G_CallSpawnEntity(ent))
     {
@@ -1272,10 +1262,8 @@ void __cdecl ScrCmd_SetMoveSpeedScale(scr_entref_t entref)
     gentity_s *ent; // [esp+0h] [ebp-4h]
 
     ent = GetPlayerEntity(entref);
-    if (!ent)
-        MyAssertHandler(".\\game_mp\\g_scr_main_mp.cpp", 1086, 0, "%s", "ent");
-    if (!ent->client)
-        MyAssertHandler(".\\game_mp\\g_scr_main_mp.cpp", 1087, 0, "%s", "ent->client");
+    iassert(ent);
+    iassert(ent->client);
     ent->client->sess.moveSpeedScaleMultiplier = Scr_GetFloat(0);
 }
 
@@ -1381,8 +1369,7 @@ void __cdecl ScrCmd_GetAttachTagName(scr_entref_t entref)
     i = Scr_GetInt(0);
     if ((uint )i >= 0x13 || !ent->attachModelNames[i])
         Scr_ParamError(0, "bad index");
-    if (!ent->attachTagNames[i])
-        MyAssertHandler(".\\game_mp\\g_scr_main_mp.cpp", 1196, 0, "%s", "ent->attachTagNames[i]");
+    iassert(ent->attachTagNames[i]);
     Scr_AddConstString(ent->attachTagNames[i]);
 }
 
@@ -1400,8 +1387,7 @@ void __cdecl ScrCmd_GetAttachIgnoreCollision(scr_entref_t entref)
 
 void __cdecl G_EntityStateSetPartBits(gentity_s *ent, const uint  *partBits)
 {
-    if (!ent)
-        MyAssertHandler(".\\game_mp\\g_scr_main_mp.cpp", 1222, 0, "%s", "ent");
+    iassert(ent);
     ent->s.partBits[0] = *partBits;
     ent->s.partBits[1] = partBits[1];
     ent->s.partBits[2] = partBits[2];
@@ -1410,8 +1396,7 @@ void __cdecl G_EntityStateSetPartBits(gentity_s *ent, const uint  *partBits)
 
 void __cdecl G_EntityStateGetPartBits(const gentity_s *ent, uint  *partBits)
 {
-    if (!ent)
-        MyAssertHandler(".\\game_mp\\g_scr_main_mp.cpp", 1230, 0, "%s", "ent");
+    iassert(ent);
     *partBits = ent->s.partBits[0];
     partBits[1] = ent->s.partBits[1];
     partBits[2] = ent->s.partBits[2];
@@ -1547,8 +1532,7 @@ void __cdecl ScrCmd_LinkTo(scr_entref_t entref)
             Scr_Error("failed to link entity since parent has no model");
         Scr_Error(va("failed to link entity since parent model '%s' is invalid", SL_ConvertToString(G_ModelName(parent->model))));
     }
-    if (!parent->model)
-        MyAssertHandler(".\\game_mp\\g_scr_main_mp.cpp", 1384, 0, "%s", "parent->model");
+    iassert(parent->model);
     if (tagName)
     {
         if (SV_DObjGetBoneIndex(parent, tagName) < 0)
@@ -1737,8 +1721,7 @@ void __cdecl ScrCmd_PlaySoundToTeam(scr_entref_t entref)
     {
         if (clientEnt->r.inuse && clientEnt != ignoreClientEnt)
         {
-            if (!clientEnt->client)
-                MyAssertHandler(".\\game_mp\\g_scr_main_mp.cpp", 1597, 0, "%s", "clientEnt->client");
+            iassert(clientEnt->client);
             if (clientEnt->client->sess.cs.team == teamNum)
                 tempEnt->r.clientMask[clientEnt->s.number >> 5] &= ~(1 << (clientEnt->s.number & 0x1F));
         }
@@ -2811,8 +2794,7 @@ void GScr_WeaponAltWeaponName()
     if (altWeaponIndex)
     {
         altWeapDef = BG_GetWeaponDef(altWeaponIndex);
-        if (!altWeapDef)
-            MyAssertHandler(".\\game_mp\\g_scr_main_mp.cpp", 2990, 0, "%s", "altWeapDef");
+        iassert(altWeapDef);
         Scr_AddString((char *)altWeapDef->szInternalName);
     }
     else
@@ -2916,8 +2898,7 @@ int __cdecl GScr_GetLocSelIndex(const char *mtlName)
     int iConfigNum; // [esp+0h] [ebp-40Ch]
     char szConfigString[1028]; // [esp+4h] [ebp-408h] BYREF
 
-    if (!mtlName)
-        MyAssertHandler(".\\game_mp\\g_scr_main_mp.cpp", 3095, 0, "%s", "mtlName");
+    iassert(mtlName);
     if (!*mtlName)
         return 0;
     for (iConfigNum = 0; iConfigNum < 3; ++iConfigNum)
@@ -4205,8 +4186,7 @@ void __cdecl Scr_FxParamError(uint  paramIndex, const char *errorString, int fxI
     const char *v3; // eax
     char fxName[1028]; // [esp+0h] [ebp-408h] BYREF
 
-    if (!errorString)
-        MyAssertHandler(".\\game_mp\\g_scr_main_mp.cpp", 4328, 0, "%s", "errorString");
+    iassert(errorString);
     if (fxId)
         SV_GetConfigstring(fxId + 1598, fxName, 1024);
     else
@@ -4362,8 +4342,7 @@ void Scr_TriggerFX()
     if (!Scr_GetNumParam() || Scr_GetNumParam() > 2)
         Scr_Error("Incorrect number of parameters");
     ent = Scr_GetEntity(0);
-    if (!ent)
-        MyAssertHandler(".\\game_mp\\g_scr_main_mp.cpp", 4537, 0, "%s", "ent");
+    iassert(ent);
     if (ent->s.eType != ET_FX)
         Scr_ParamError(0, "entity wasn't created with 'newFx'");
     result = Scr_GetNumParam();
@@ -4495,14 +4474,7 @@ void Scr_SetExponentialFog()
     Dvar_SetColor((dvar_s *)g_fogColorReadOnly, red, green, blue, 1.0f);
     Dvar_SetFloat((dvar_s *)g_fogStartDistReadOnly, startDist);
     Dvar_SetFloat((dvar_s *)g_fogHalfDistReadOnly, halfwayDist);
-    if (density <= 0.0f || density >= 1.0f)
-        MyAssertHandler(
-            ".\\game_mp\\g_scr_main_mp.cpp",
-            4704,
-            0,
-            "%s\n\t(density) = %g",
-            "(density > 0 && density < 1)",
-            density);
+    vassert((density > 0 && density < 1), "(density) = %g", density);
     Scr_SetFog("setExpFog", startDist, density, red, green, blue, time);
 }
 
@@ -4918,8 +4890,7 @@ void __cdecl GScr_ShellShock(scr_entref_t entref)
         ent->client->ps.pm_flags |= PMF_SHELLSHOCKED;
         bgs = &level_bgs;
         BG_AnimScriptEvent(&ent->client->ps, ANIM_ET_SHELLSHOCK, 0, 1);
-        if (bgs != &level_bgs)
-            MyAssertHandler(".\\game_mp\\g_scr_main_mp.cpp", 5272, 0, "%s", "bgs == &level_bgs");
+        iassert(bgs == &level_bgs);
     }
 }
 
@@ -5544,16 +5515,7 @@ void GScr_CloseFile()
             Scr_AddInt(-1);
             return;
         }
-        if (level.openScriptIOFileHandles[filenum])
-        {
-            if (level.openScriptIOFileBuffers[filenum])
-                MyAssertHandler(
-                    ".\\game_mp\\g_scr_main_mp.cpp",
-                    6112,
-                    0,
-                    "%s",
-                    "!((level.openScriptIOFileHandles[filenum] != 0) && (level.openScriptIOFileBuffers[filenum] != NULL))");
-        }
+        iassert(!((level.openScriptIOFileHandles[filenum] != 0) && (level.openScriptIOFileBuffers[filenum] != NULL)));
         if (level.openScriptIOFileHandles[filenum])
         {
             FS_FCloseFile(level.openScriptIOFileHandles[filenum]);
@@ -6138,8 +6100,7 @@ void __cdecl ScrCmd_ItemWeaponSetAmmo(scr_entref_t entref)
     if (v2 > 0)
     {
         weapDef = BG_GetWeaponDef(v2);
-        if (weapDef->iClipSize < 0)
-            MyAssertHandler(".\\game_mp\\g_scr_main_mp.cpp", 7335, 0, "%s", "weapDef->iClipSize >= 0");
+        iassert(weapDef->iClipSize >= 0);
         if (weapDef->iClipSize < clipAmmo)
             v3.intValue = weapDef->iClipSize;
         else
@@ -6327,8 +6288,7 @@ XAssetHeader Scr_ParseGameTypeList_FastFile()
             iFileLength = v3;
             if (v3 > 0 && iFileLength < 1024)
             {
-                if (!rawfile)
-                    MyAssertHandler(".\\game_mp\\g_scr_main_mp.cpp", 8047, 0, "%s", "rawfile");
+                iassert(rawfile);
                 pBuffParse = rawfile->buffer;
                 pToken = (const char *)Com_Parse(&pBuffParse);
                 I_strncpyz(pGameType->pszName, (char *)pToken, 64);
@@ -6382,8 +6342,7 @@ void __cdecl Scr_LoadGameType()
 {
     uint16_t t; // [esp+0h] [ebp-4h]
 
-    if (!g_scr_data.gametype.main)
-        MyAssertHandler(".\\game_mp\\g_scr_main_mp.cpp", 8108, 0, "%s", "g_scr_data.gametype.main");
+    iassert(g_scr_data.gametype.main);
     t = Scr_ExecThread(g_scr_data.gametype.main, 0);
     Scr_FreeThread(t);
 }

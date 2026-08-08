@@ -185,14 +185,7 @@ uint8_t *__cdecl CM_ClusterPVS(int cluster)
 {
     if (!cm.vised)
         return cm.visibility;
-    if (cluster < 0 || cluster >= cm.numClusters)
-        MyAssertHandler(
-            ".\\qcommon\\cm_test.cpp",
-            355,
-            0,
-            "%s\n\t(cluster) = %i",
-            "(cluster >= 0 && cluster < cm.numClusters)",
-            cluster);
+    vassert((cluster >= 0 && cluster < cm.numClusters), "(cluster) = %i", cluster);
     return &cm.visibility[cm.clusterBytes * cluster];
 }
 

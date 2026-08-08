@@ -3974,15 +3974,7 @@ void __cdecl R_SetupAntiAliasing(const GfxWindowParms *wndParms)
     DWORD qualityLevels; // [esp+8h] [ebp-4h] BYREF
 
     iassert( wndParms );
-    if (wndParms->aaSamples < 1 || wndParms->aaSamples > 16)
-        MyAssertHandler(
-            ".\\r_init.cpp",
-            248,
-            0,
-            "wndParms->aaSamples not in [1, 16]\n\t%i not in [%i, %i]",
-            wndParms->aaSamples,
-            1,
-            16);
+    rangeassert(wndParms->aaSamples, 1, 16);
     if (r_reflectionProbeGenerate->current.enabled)
         multiSampleCount = D3DMULTISAMPLE_NONMASKABLE;
     else

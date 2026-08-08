@@ -105,14 +105,7 @@ void __cdecl R_SetShadowableLight(
         source->shadowableLightIndex = shadowableLightIndex;
         if (shadowableLightIndex)
         {
-            if (shadowableLightIndex >= viewInfo->shadowableLightCount)
-                MyAssertHandler(
-                    ".\\r_draw_shadowablelight.cpp",
-                    112,
-                    0,
-                    "shadowableLightIndex doesn't index viewInfo->shadowableLightCount\n\t%i not in [0, %i)",
-                    shadowableLightIndex,
-                    viewInfo->shadowableLightCount);
+            bcassert(shadowableLightIndex, viewInfo->shadowableLightCount);
             if (viewInfo->shadowableLights[shadowableLightIndex].type == 1)
             {
                 if (source->shadowableLightForShadowLookupMatrix != shadowableLightIndex)
@@ -131,14 +124,7 @@ void __cdecl R_SetShadowableLight(
                 spotShadowFade = 0.0;
                 if (Com_BitCheckAssert(source->input.data->shadowableLightHasShadowMap, shadowableLightIndex, 32))
                 {
-                    if (viewInfo->shadowableLights[shadowableLightIndex].spotShadowIndex >= 4)
-                        MyAssertHandler(
-                            ".\\r_draw_shadowablelight.cpp",
-                            137,
-                            0,
-                            "light->spotShadowIndex doesn't index R_SPOTSHADOW_TILE_COUNT\n\t%i not in [0, %i)",
-                            viewInfo->shadowableLights[shadowableLightIndex].spotShadowIndex,
-                            4);
+                    bcassert(viewInfo->shadowableLights[shadowableLightIndex].spotShadowIndex, 4);
                     spotShadow = &viewInfo->spotShadows[viewInfo->shadowableLights[shadowableLightIndex].spotShadowIndex];
                     lookupMatrix = &viewInfo->spotShadows[viewInfo->shadowableLights[shadowableLightIndex].spotShadowIndex].lookupMatrix;
                     if (source->shadowableLightForShadowLookupMatrix != shadowableLightIndex)

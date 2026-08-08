@@ -344,67 +344,23 @@ float __cdecl GraphGetValueFromFraction(int knotCount, const float (*knots)[2], 
     int knotIndex; // [esp+10h] [ebp-4h]
 
     result = -1.0;
-    if (!knots)
-        MyAssertHandler(".\\universal\\com_math.cpp", 460, 0, "%s", "knots");
-    if (knotCount < 2)
-        MyAssertHandler(".\\universal\\com_math.cpp", 461, 0, "%s\n\t(knotCount) = %i", "(knotCount >= 2)", knotCount);
-    if (fraction < 0.0 || fraction > 1.0)
-        MyAssertHandler(
-            ".\\universal\\com_math.cpp",
-            462,
-            0,
-            "%s\n\t(fraction) = %g",
-            "(fraction >= 0.0f && fraction <= 1.0f)",
-            fraction);
-    if (knots[knotCount - 1][0] != 1.0)
-        MyAssertHandler(
-            ".\\universal\\com_math.cpp",
-            463,
-            0,
-            "%s\n\t(knots[knotCount - 1][0]) = %g",
-            "(knots[knotCount - 1][0] == 1.0f)",
-            knots[knotCount - 1][0]);
+    iassert(knots);
+    vassert((knotCount >= 2), "(knotCount) = %i", knotCount);
+    vassert((fraction >= 0.0f && fraction <= 1.0f), "(fraction) = %g", fraction);
+    vassert((knots[knotCount - 1][0] == 1.0f), "(knots[knotCount - 1][0]) = %g", knots[knotCount - 1][0]);
     for (knotIndex = 1; knotIndex < knotCount; ++knotIndex)
     {
         if (knots[knotIndex][0] >= fraction)
         {
             adjustedFrac = (fraction - knots[knotIndex - 1][0]) / (knots[knotIndex][0] - knots[knotIndex - 1][0]);
-            if (adjustedFrac < 0.0 || adjustedFrac > 1.0)
-                MyAssertHandler(
-                    ".\\universal\\com_math.cpp",
-                    471,
-                    0,
-                    "%s\n\t(adjustedFrac) = %g",
-                    "(adjustedFrac >= 0.0f && adjustedFrac <= 1.0f)",
-                    adjustedFrac);
-            if (knots[knotIndex - 1][1] < 0.0 || knots[knotIndex - 1][1] > 1.0)
-                MyAssertHandler(
-                    ".\\universal\\com_math.cpp",
-                    472,
-                    0,
-                    "%s\n\t(knots[knotIndex - 1][1]) = %g",
-                    "(knots[knotIndex - 1][1] >= 0.0f && knots[knotIndex - 1][1] <= 1.0f)",
-                    knots[knotIndex - 1][1]);
-            if (knots[knotIndex][1] < 0.0 || knots[knotIndex][1] > 1.0)
-                MyAssertHandler(
-                    ".\\universal\\com_math.cpp",
-                    473,
-                    0,
-                    "%s\n\t(knots[knotIndex][1]) = %g",
-                    "(knots[knotIndex][1] >= 0.0f && knots[knotIndex][1] <= 1.0f)",
-                    knots[knotIndex][1]);
+            vassert((adjustedFrac >= 0.0f && adjustedFrac <= 1.0f), "(adjustedFrac) = %g", adjustedFrac);
+            vassert((knots[knotIndex - 1][1] >= 0.0f && knots[knotIndex - 1][1] <= 1.0f), "(knots[knotIndex - 1][1]) = %g", knots[knotIndex - 1][1]);
+            vassert((knots[knotIndex][1] >= 0.0f && knots[knotIndex][1] <= 1.0f), "(knots[knotIndex][1]) = %g", knots[knotIndex][1]);
             result = (knots[knotIndex][1] - knots[knotIndex - 1][1]) * adjustedFrac + knots[knotIndex - 1][1];
             break;
         }
     }
-    if (result < 0.0 || result > 1.0)
-        MyAssertHandler(
-            ".\\universal\\com_math.cpp",
-            480,
-            0,
-            "%s\n\t(result) = %g",
-            "(result >= 0.0f && result <= 1.0f)",
-            result);
+    vassert((result >= 0.0f && result <= 1.0f), "(result) = %g", result);
     return result;
 }
 
@@ -1043,14 +999,10 @@ mat4x4 identityMatrix44 = {
 
 void __cdecl OrthographicMatrix(mat4x4 &mtx, float width, float height, float depth)
 {
-    if (!mtx)
-        MyAssertHandler(".\\universal\\com_math.cpp", 2281, 0, "%s", "mtx");
-    if (width == 0.0)
-        MyAssertHandler(".\\universal\\com_math.cpp", 2282, 0, "%s", "width != 0");
-    if (height == 0.0)
-        MyAssertHandler(".\\universal\\com_math.cpp", 2283, 0, "%s", "height != 0");
-    if (depth == 0.0)
-        MyAssertHandler(".\\universal\\com_math.cpp", 2284, 0, "%s", "depth != 0");
+    iassert(mtx);
+    iassert(width != 0);
+    iassert(height != 0);
+    iassert(depth != 0);
     memset(&mtx, 0, sizeof(mat4x4));
     (mtx)[0][0] = 2.0 / width;
     (mtx)[1][1] = 2.0 / height;
@@ -1871,12 +1823,9 @@ void __cdecl ExpandBoundsToWidth(float *mins, float *maxs)
     float diff; // [esp+8h] [ebp-14h]
     float size[3]; // [esp+10h] [ebp-Ch] BYREF
 
-    if (*mins > *maxs)
-        MyAssertHandler(".\\universal\\com_math.cpp", 2455, 0, "%s", "maxs[0] >= mins[0]");
-    if (mins[1] > maxs[1])
-        MyAssertHandler(".\\universal\\com_math.cpp", 2456, 0, "%s", "maxs[1] >= mins[1]");
-    if (mins[2] > maxs[2])
-        MyAssertHandler(".\\universal\\com_math.cpp", 2457, 0, "%s", "maxs[2] >= mins[2]");
+    iassert(maxs[0] >= mins[0]);
+    iassert(maxs[1] >= mins[1]);
+    iassert(maxs[2] >= mins[2]);
     Vec3Sub(maxs, mins, size);
     v3 = size[0] - size[1];
     if (v3 < 0.0)
@@ -1897,12 +1846,9 @@ void __cdecl ShrinkBoundsToHeight(float *mins, float *maxs)
     float diffa; // [esp+10h] [ebp-10h]
     float size[3]; // [esp+14h] [ebp-Ch] BYREF
 
-    if (*mins > *maxs)
-        MyAssertHandler(".\\universal\\com_math.cpp", 2477, 0, "maxs[0] >= mins[0]\n\t%g, %g", *maxs, *mins);
-    if (mins[1] > maxs[1])
-        MyAssertHandler(".\\universal\\com_math.cpp", 2478, 0, "maxs[1] >= mins[1]\n\t%g, %g", maxs[1], mins[1]);
-    if (mins[2] > maxs[2])
-        MyAssertHandler(".\\universal\\com_math.cpp", 2479, 0, "maxs[2] >= mins[2]\n\t%g, %g", maxs[2], mins[2]);
+    vassert(maxs[0] >= mins[0], "%g, %g", *maxs, *mins);
+    vassert(maxs[1] >= mins[1], "%g, %g", maxs[1], mins[1]);
+    vassert(maxs[2] >= mins[2], "%g, %g", maxs[2], mins[2]);
     Vec3Sub(maxs, mins, size);
     if (size[2] < size[0])
     {
@@ -1959,12 +1905,9 @@ void __cdecl AddPointToBounds2D(const float *v, float *mins, float *maxs)
 
 bool __cdecl PointInBounds(const float *v, const float *mins, const float *maxs)
 {
-    if (!v)
-        MyAssertHandler(".\\universal\\com_math.cpp", 2560, 0, "%s", "v");
-    if (!mins)
-        MyAssertHandler(".\\universal\\com_math.cpp", 2561, 0, "%s", "mins");
-    if (!maxs)
-        MyAssertHandler(".\\universal\\com_math.cpp", 2562, 0, "%s", "maxs");
+    iassert(v);
+    iassert(mins);
+    iassert(maxs);
     if (*mins > *v || *maxs < *v)
         return 0;
     if (mins[1] > v[1] || maxs[1] < v[1])
@@ -2546,14 +2489,7 @@ void __cdecl AxisToQuat(const float (*mat)[3], float *out)
                 test[3][2] = test[1][1];
                 test[3][3] = test[0][1];
                 testSizeSq = Vec4LengthSq(test[3]);
-                if (testSizeSq < 1.0)
-                    MyAssertHandler(
-                        ".\\universal\\com_math.cpp",
-                        3832,
-                        0,
-                        "%s\n\t(testSizeSq) = %g",
-                        "(testSizeSq >= 1.0f)",
-                        testSizeSq);
+                vassert((testSizeSq >= 1.0f), "(testSizeSq) = %g", testSizeSq);
                 best = 3;
             }
             else
@@ -2676,8 +2612,7 @@ bool __cdecl CullBoxFromCone(
     float perpLenSq; // [esp+78h] [ebp-10h]
     float farCorner[3]; // [esp+7Ch] [ebp-Ch] BYREF
 
-    if (cosHalfFov < 0.0)
-        MyAssertHandler(".\\universal\\com_math.cpp", 3960, 0, "%s", "cosHalfFov >= 0.0f");
+    iassert(cosHalfFov >= 0.0f);
     Vec3Sub(boxCenter, coneOrg, deltaMid);
     if (*coneDir < 0.0)
         v14 = -1.0;
@@ -2814,8 +2749,7 @@ bool __cdecl CullBoxFromConicSectionOfSphere(
     float perpLenSq; // [esp+CCh] [ebp-10h]
     float farCorner[3]; // [esp+D0h] [ebp-Ch] BYREF
 
-    if (cosHalfFov < 0.0)
-        MyAssertHandler(".\\universal\\com_math.cpp", 4035, 0, "%s", "cosHalfFov >= 0.0f");
+    iassert(cosHalfFov >= 0.0f);
     Vec3Sub(boxCenter, coneOrg, deltaMid);
     v24 = I_fabs(deltaMid[0]);
     v30 = v24 - *boxHalfSize;
@@ -2902,8 +2836,7 @@ bool __cdecl CullSphereFromCone(
     float perpendicular[3]; // [esp+2Ch] [ebp-10h] BYREF
     float perpLenSq; // [esp+38h] [ebp-4h]
 
-    if (cosHalfFov < 0.0)
-        MyAssertHandler(".\\universal\\com_math.cpp", 4098, 0, "%s", "cosHalfFov >= 0.0f");
+    iassert(cosHalfFov >= 0.0f);
     Vec3Sub(sphereCenter, coneOrg, delta);
     dist = Vec3Dot(delta, coneDir);
     if (radius <= dist)

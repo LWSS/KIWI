@@ -888,13 +888,7 @@ void __cdecl CCS_InitConstantConfigStrings()
 
     for (index = 0; constantConfigStrings[index].configStringNum; ++index)
     {
-        if (index && constantConfigStrings[index - 1].configStringNum >= constantConfigStrings[index].configStringNum)
-            MyAssertHandler(
-                ".\\universal\\com_constantconfigstrings.cpp",
-                910,
-                0,
-                "%s",
-                "index == 0 || constantConfigStrings[index-1].configStringNum < constantConfigStrings[index].configStringNum");
+        iassert(index == 0 || constantConfigStrings[index-1].configStringNum < constantConfigStrings[index].configStringNum);
         if (constantConfigStrings[index].configStringNum < 821)
             constantConfigStrings[index].configStringHash = GetHashCode_0(
                 constantConfigStrings[index].configString,
@@ -938,14 +932,7 @@ int __cdecl CCS_GetConstConfigStringIndex(const char *configString)
 
 int __cdecl CCS_GetConfigStringNumForConstIndex(uint index)
 {
-    if (index >= constantConfigStringCount)
-        MyAssertHandler(
-            ".\\universal\\com_constantconfigstrings.cpp",
-            954,
-            0,
-            "index doesn't index constantConfigStringCount\n\t%i not in [0, %i)",
-            index,
-            constantConfigStringCount);
+    bcassert(index, constantConfigStringCount);
     return constantConfigStrings[index].configStringNum;
 }
 

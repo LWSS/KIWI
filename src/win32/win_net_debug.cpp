@@ -158,8 +158,7 @@ void __cdecl Sys_WriteDebugSocketData(unsigned __int8 *buffer, int len)
 		pos = g_debugPacketPos[0];
 		while (len)
 		{
-			if (len <= 0)
-				MyAssertHandler(".\\win32\\win_net.cpp", 1956, 0, "%s", "len > 0");
+			iassert(len > 0);
 			copyLen = len;
 			if (len > 0x2000 - pos)
 				copyLen = 0x2000 - pos;
@@ -241,8 +240,7 @@ int __cdecl Sys_ReadDebugSocketData(char *buffer, int len, int blocking)
 		{
 			if (!len)
 				return 1;
-			if (!ip_debugSocket[0])
-				MyAssertHandler(".\\win32\\win_net.cpp", 1764, 0, "%s", "ip_debugSocket[0]");
+			iassert(ip_debugSocket[0]);
 			read = recvfrom(ip_debugSocket[0], buffer, len, 0, 0, 0);
 			if (read)
 				break;
@@ -374,8 +372,7 @@ void __cdecl Sys_DebugSend(int channel, const char *buf, int len, const char *na
 			if (!Sys_DebugCanSend())
 				NET_Sleep(1);
 		}
-		if (!ip_debugSocket[channel])
-			MyAssertHandler(".\\win32\\win_net.cpp", 1911, 0, "%s", "ip_debugSocket[channel]");
+		iassert(ip_debugSocket[channel]);
 		while (send(ip_debugSocket[channel], buf, len, 0) == -1)
 		{
 			if (WSAGetLastError() != 10035)

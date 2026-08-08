@@ -71,10 +71,8 @@ bool __cdecl Actor_Turret_Start(actor_s *self, ai_state_t ePrevState)
     unsigned int v7; // r11
     unsigned int v8; // r11
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_turret.cpp", 27, 0, "%s", "self");
-    if (!self->sentient)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_turret.cpp", 28, 0, "%s", "self->sentient");
+    iassert(self);
+    iassert(self->sentient);
     pTurret = self->pTurret;
     if (!pTurret)
         return 0;
@@ -101,17 +99,10 @@ bool __cdecl Actor_Turret_Start(actor_s *self, ai_state_t ePrevState)
         Scr_Notify(pTurret, scr_const.turretownerchange, 0);
     if (!(unsigned __int8)Actor_IsUsingTurret(self))
         MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_turret.cpp", 46, 0, "%s", "Actor_IsUsingTurret( self )");
-    if (!G_EntIsLinkedTo(self->ent, pTurret))
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\actor_turret.cpp",
-            47,
-            0,
-            "%s",
-            "G_EntIsLinkedTo( self->ent, pTurret )");
+    iassert(G_EntIsLinkedTo( self->ent, pTurret ));
     turret_ClearTargetEnt(pTurret);
     pTurretInfo = pTurret->pTurretInfo;
-    if (!pTurretInfo)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_turret.cpp", 52, 0, "%s", "pTurretInfo");
+    iassert(pTurretInfo);
     initialYawmax = pTurretInfo->initialYawmax;
     v7 = pTurretInfo->flags & 0xFFFFFFF7;
     pTurretInfo->arcmin[1] = pTurretInfo->initialYawmin;
@@ -172,8 +163,7 @@ void __cdecl Actor_DetachTurret(actor_s *self)
             G_EntUnlink(ent);
     }
     pTurretInfo = pTurret->pTurretInfo;
-    if (!pTurretInfo)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_turret.cpp", 122, 0, "%s", "pTurretInfo");
+    iassert(pTurretInfo);
     pTurretInfo->flags &= ~0x200u;
 }
 
@@ -651,10 +641,8 @@ actor_think_result_t __cdecl Actor_Turret_Think(actor_s *self)
     pathnode_t *v16; // r30
     actor_think_result_t v17; // r31
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_turret.cpp", 555, 0, "%s", "self");
-    if (!self->sentient)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_turret.cpp", 556, 0, "%s", "self->sentient");
+    iassert(self);
+    iassert(self->sentient);
     Actor_ClearPath(self);
     Actor_ClearPileUp(self);
 
@@ -789,8 +777,7 @@ void __cdecl Actor_Turret_Pain(
         && (unsigned __int8)Actor_IsUsingTurret(self)
         && pAttacker->sentient->eTeam == Sentient_EnemyTeam(self->sentient->eTeam))
     {
-        if (!self->pTurret)
-            MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_turret.cpp", 708, 0, "%s", "self->pTurret");
+        iassert(self->pTurret);
         pTurretInfo = self->pTurret->pTurretInfo;
         flags = pTurretInfo->flags;
         if ((flags & 0x10) != 0)

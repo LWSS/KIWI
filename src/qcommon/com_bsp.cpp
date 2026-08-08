@@ -13,14 +13,7 @@ char __cdecl Com_CanPrimaryLightAffectPoint(const ComPrimaryLight *light, const 
     float distSq; // [esp+2Ch] [ebp-4h]
 
     iassert( light );
-    if (light->type != 2 && light->type != 3)
-        MyAssertHandler(
-            ".\\qcommon\\com_bsp.cpp",
-            25,
-            0,
-            "%s\n\t(light->type) = %i",
-            "(light->type == GFX_LIGHT_TYPE_SPOT || light->type == GFX_LIGHT_TYPE_OMNI)",
-            light->type);
+    vassert((light->type == GFX_LIGHT_TYPE_SPOT || light->type == GFX_LIGHT_TYPE_OMNI), "(light->type) = %i", light->type);
     iassert( point );
     Vec3Sub(light->origin, point, deltaToLight);
     distSq = Vec3LengthSq(deltaToLight);

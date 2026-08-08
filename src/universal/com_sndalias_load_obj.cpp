@@ -28,8 +28,7 @@ void __cdecl Com_LoadVolumeModGroups(VolumeModGroup *volumeModGroups)
 
     last = "VOLUMEMODGROUPS";
     len = strlen("VOLUMEMODGROUPS");
-    if (!volumeModGroups)
-        MyAssertHandler(".\\universal\\com_sndalias_load_obj.cpp", 1042, 0, "%s", "volumeModGroups");
+    iassert(volumeModGroups);
     strcpy(filename, "soundaliases/volumemodgroups.def");
     v6 = FS_FOpenFileRead(filename, &file);
     if (v6 >= 0)
@@ -162,10 +161,8 @@ BOOL __cdecl Com_IsValidName(
     snd_alias_members_t field,
     const char *sourceFile)
 {
-    if (!alias)
-        MyAssertHandler(".\\universal\\com_sndalias_load_obj.cpp", 675, 0, "%s", "alias");
-    if (!sourceFile)
-        MyAssertHandler(".\\universal\\com_sndalias_load_obj.cpp", 676, 0, "%s", "sourceFile");
+    iassert(alias);
+    iassert(sourceFile);
     if (strlen(token) <= maxLength)
     {
         if (validityFunction)
@@ -189,8 +186,7 @@ int __cdecl Com_IsValidAliasName(const char *pszName)
 {
     const char *pszNamea; // [esp+8h] [ebp+8h]
 
-    if (!pszName)
-        MyAssertHandler(".\\universal\\com_sndalias_load_obj.cpp", 359, 0, "%s", "pszName");
+    iassert(pszName);
     if (*pszName < 32 || !isalnum(*pszName) && *pszName != 95)
         return 0;
     for (pszNamea = pszName + 1; *pszNamea; ++pszNamea)
@@ -214,12 +210,9 @@ double __cdecl Com_ParseFloatInRange(
     float v10; // [esp+24h] [ebp-8h]
     float val; // [esp+28h] [ebp-4h]
 
-    if (!token)
-        MyAssertHandler(".\\universal\\com_sndalias_load_obj.cpp", 659, 0, "%s", "token");
-    if (!alias)
-        MyAssertHandler(".\\universal\\com_sndalias_load_obj.cpp", 660, 0, "%s", "alias");
-    if (!sourceFile)
-        MyAssertHandler(".\\universal\\com_sndalias_load_obj.cpp", 661, 0, "%s", "sourceFile");
+    iassert(token);
+    iassert(alias);
+    iassert(sourceFile);
     val = atof(token);
     if (min > val || max < val)
     {
@@ -249,10 +242,8 @@ double __cdecl Com_GetSoundAliasVolumeModGroupValue(const char *volumeModGroupNa
 {
     int i; // [esp+0h] [ebp-4h]
 
-    if (!volumeModGroupName)
-        MyAssertHandler(".\\universal\\com_sndalias_load_obj.cpp", 289, 0, "%s", "volumeModGroupName");
-    if (!sourceFile)
-        MyAssertHandler(".\\universal\\com_sndalias_load_obj.cpp", 290, 0, "%s", "sourceFile");
+    iassert(volumeModGroupName);
+    iassert(sourceFile);
     for (i = 0; i < 32; ++i)
     {
         if (!I_stricmp(volumeModGroupName, saLoadObjGlob.volumeModGroups[i].name))
@@ -268,12 +259,9 @@ void __cdecl Com_SoundAliasChannelForName(char *name, const char *sourceFile, sn
     char string[16384]; // [esp+4h] [ebp-4008h] BYREF
     int i; // [esp+4008h] [ebp-4h]
 
-    if (!alias)
-        MyAssertHandler(".\\universal\\com_sndalias_load_obj.cpp", 387, 0, "%s", "alias");
-    if (!sourceFile)
-        MyAssertHandler(".\\universal\\com_sndalias_load_obj.cpp", 388, 0, "%s", "sourceFile");
-    if (!name)
-        MyAssertHandler(".\\universal\\com_sndalias_load_obj.cpp", 389, 0, "%s", "name");
+    iassert(alias);
+    iassert(sourceFile);
+    iassert(name);
     for (i = 0; i < saLoadObjGlob.entChannelCount; ++i)
     {
         if (!I_stricmp(name, saLoadObjGlob.entChannels[i]))
@@ -302,12 +290,9 @@ void __cdecl Com_SoundAliasChannelForName(char *name, const char *sourceFile, sn
 
 void __cdecl Com_SoundAliasTypeForName(const char *name, const char *sourceFile, snd_alias_build_s *alias)
 {
-    if (!alias)
-        MyAssertHandler(".\\universal\\com_sndalias_load_obj.cpp", 422, 0, "%s", "alias");
-    if (!sourceFile)
-        MyAssertHandler(".\\universal\\com_sndalias_load_obj.cpp", 423, 0, "%s", "sourceFile");
-    if (!name)
-        MyAssertHandler(".\\universal\\com_sndalias_load_obj.cpp", 424, 0, "%s", "name");
+    iassert(alias);
+    iassert(sourceFile);
+    iassert(name);
     if (I_stricmp(name, "streamed"))
     {
         if (I_stricmp(name, "loaded"))
@@ -332,12 +317,9 @@ void __cdecl Com_SoundAliasTypeForName(const char *name, const char *sourceFile,
 
 void __cdecl Com_SoundAliasLoop(const char *token, const char *sourceFile, snd_alias_build_s *alias)
 {
-    if (!alias)
-        MyAssertHandler(".\\universal\\com_sndalias_load_obj.cpp", 449, 0, "%s", "alias");
-    if (!sourceFile)
-        MyAssertHandler(".\\universal\\com_sndalias_load_obj.cpp", 450, 0, "%s", "sourceFile");
-    if (!token)
-        MyAssertHandler(".\\universal\\com_sndalias_load_obj.cpp", 451, 0, "%s", "token");
+    iassert(alias);
+    iassert(sourceFile);
+    iassert(token);
     if (I_stricmp(token, "looping"))
     {
         if (I_stricmp(token, "rlooping"))
@@ -505,12 +487,9 @@ char __cdecl Com_SoundAliasLoadSpec(
 
 void __cdecl Com_SoundAliasMasterSlave(const char *token, const char *sourceFile, snd_alias_build_s *alias)
 {
-    if (!alias)
-        MyAssertHandler(".\\universal\\com_sndalias_load_obj.cpp", 615, 0, "%s", "alias");
-    if (!sourceFile)
-        MyAssertHandler(".\\universal\\com_sndalias_load_obj.cpp", 616, 0, "%s", "sourceFile");
-    if (!token)
-        MyAssertHandler(".\\universal\\com_sndalias_load_obj.cpp", 617, 0, "%s", "token");
+    iassert(alias);
+    iassert(sourceFile);
+    iassert(token);
     if (I_stricmp(token, "master"))
     {
         alias->bMaster = 0;
@@ -542,8 +521,7 @@ char __cdecl Com_FinishBuildingSoundAlias(snd_alias_build_s *build)
     float adjustedVol; // [esp+14h] [ebp-4h]
     float adjustedVola; // [esp+14h] [ebp-4h]
 
-    if (!build)
-        MyAssertHandler(".\\universal\\com_sndalias_load_obj.cpp", 846, 0, "%s", "build");
+    iassert(build);
     if (build->pitchMax < build->pitchMin)
     {
         fSwapTemp = build->pitchMax;
@@ -627,8 +605,7 @@ SndCurve *__cdecl Com_RegisterSoundAliasVolumeFalloffCurve(const char *filename,
 {
     int i; // [esp+0h] [ebp-4h]
 
-    if (!filename)
-        MyAssertHandler(".\\universal\\com_sndalias.cpp", 1173, 0, "%s", "filename");
+    iassert(filename);
     for (i = 0; i < 16; ++i)
     {
         // KISAKTODO: PSYCHO NEGA-ARRAY
@@ -645,8 +622,7 @@ SpeakerMap *__cdecl Com_RegisterSoundAliasSpeakerMap(const char *token, const ch
 {
     int i; // [esp+0h] [ebp-4h]
 
-    if (!token)
-        MyAssertHandler(".\\universal\\com_sndalias.cpp", 1197, 0, "%s", "token");
+    iassert(token);
     for (i = 0; i < 16; ++i)
     {
         if (!I_stricmp(token, g_sa.speakerMaps[i].speakerMap.name))
@@ -658,10 +634,8 @@ SpeakerMap *__cdecl Com_RegisterSoundAliasSpeakerMap(const char *token, const ch
 
 void __cdecl Com_SoundAliasReverb(char *token, snd_alias_build_s *alias)
 {
-    if (!alias)
-        MyAssertHandler(".\\universal\\com_sndalias_load_obj.cpp", 644, 0, "%s", "alias");
-    if (!token)
-        MyAssertHandler(".\\universal\\com_sndalias_load_obj.cpp", 645, 0, "%s", "token");
+    iassert(alias);
+    iassert(token);
     if (strstr(token, "fulldrylevel"))
         alias->bFullDryLevel = 1;
     if (strstr(token, "nowetlevel"))
@@ -712,10 +686,8 @@ void __cdecl Com_LoadSoundAliasField(
         else
         {
             isFieldSet[field] = 1;
-            if (!alias)
-                MyAssertHandler(".\\universal\\com_sndalias_load_obj.cpp", 715, 0, "%s", "alias");
-            if (!token)
-                MyAssertHandler(".\\universal\\com_sndalias_load_obj.cpp", 716, 0, "%s", "token");
+            iassert(alias);
+            iassert(token);
             switch (field)
             {
             case SA_NAME:
@@ -1022,12 +994,9 @@ bool __cdecl Com_ParseSndCurveFile(const char *buffer, const char *fileName, Snd
     parseInfo_t *token; // [esp+Ch] [ebp-4h]
     parseInfo_t *tokena; // [esp+Ch] [ebp-4h]
 
-    if (!buffer)
-        MyAssertHandler(".\\universal\\com_sndalias_load_obj.cpp", 1898, 0, "%s", "buffer");
-    if (!fileName)
-        MyAssertHandler(".\\universal\\com_sndalias_load_obj.cpp", 1899, 0, "%s", "fileName");
-    if (!curve)
-        MyAssertHandler(".\\universal\\com_sndalias_load_obj.cpp", 1900, 0, "%s", "curve");
+    iassert(buffer);
+    iassert(fileName);
+    iassert(curve);
     Com_BeginParseSession(fileName);
     tokenb = Com_Parse(&buffer);
     v3 = atoi(tokenb->token);
@@ -1150,10 +1119,8 @@ snd_alias_build_s *__cdecl Com_SortTempSoundAliases_r(
     snd_alias_build_s *pBackList; // [esp+10h] [ebp-8h]
     int i; // [esp+14h] [ebp-4h]
 
-    if (!pAliasList)
-        MyAssertHandler(".\\universal\\com_sndalias_load_obj.cpp", 1290, 0, "%s", "pAliasList");
-    if (*piAliasCount <= 0)
-        MyAssertHandler(".\\universal\\com_sndalias_load_obj.cpp", 1291, 0, "%s", "*piAliasCount > 0");
+    iassert(pAliasList);
+    iassert(*piAliasCount > 0);
     if (*piAliasCount == 1)
     {
         pAliasList->pNext = 0;
@@ -1260,15 +1227,8 @@ void __cdecl Com_SameFileWarning(snd_alias_build_s *alias1, snd_alias_build_s *a
 {
     const char *alias1TypeString; // [esp+20h] [ebp-Ch]
 
-    if (strcmp(alias1->soundFile, alias2->soundFile))
-        MyAssertHandler(
-            ".\\universal\\com_sndalias_load_obj.cpp",
-            1427,
-            0,
-            "%s",
-            "strcmp( alias1->soundFile, alias2->soundFile ) == 0");
-    if (alias1->eType == alias2->eType)
-        MyAssertHandler(".\\universal\\com_sndalias_load_obj.cpp", 1428, 0, "%s", "alias1->eType != alias2->eType");
+    iassert(strcmp( alias1->soundFile, alias2->soundFile ) == 0);
+    iassert(alias1->eType != alias2->eType);
     if (alias1->eType == SAT_STREAMED)
         alias1TypeString = "streamed";
     else
@@ -1312,10 +1272,8 @@ void __cdecl Com_AddSoundAlias(
     char *v14; // [esp+28h] [ebp-18h]
     char *secondaryAliasName; // [esp+2Ch] [ebp-14h]
 
-    if (!build->aliasName[0])
-        MyAssertHandler(".\\universal\\com_sndalias_load_obj.cpp", 1538, 0, "%s", "build->aliasName[0]");
-    if (!build->soundFile[0])
-        MyAssertHandler(".\\universal\\com_sndalias_load_obj.cpp", 1539, 0, "%s", "build->soundFile[0]");
+    iassert(build->aliasName[0]);
+    iassert(build->soundFile[0]);
     alias->aliasName = aliasName;
     if (build->secondaryAliasName[0])
     {
@@ -1367,8 +1325,7 @@ void __cdecl Com_AddSoundAlias(
     alias->flags = v5;
     if (build->bRandomLooping)
     {
-        if (!build->bLooping)
-            MyAssertHandler(".\\universal\\com_sndalias_load_obj.cpp", 1589, 0, "%s", "build->bLooping");
+        iassert(build->bLooping);
         alias->flags |= 0x20u;
     }
     else
@@ -1605,8 +1562,7 @@ void __cdecl Com_MakeSoundAliasesPermanent(snd_alias_list_t *aliasInfo, SoundFil
                             strings += strlen(strings) + 1;
                             currentSound = &soundFileInfo->files[soundFileInfo->count];
                             eType = buildb->eType;
-                            if (!fileName)
-                                MyAssertHandler(".\\universal\\com_sndalias_load_obj.cpp", 1521, 0, "%s", "fileName");
+                            iassert(fileName);
                             currentSound->type = eType;
                             if (eType == SAT_LOADED)
                                 Com_AddLoadedSoundFile(currentSound, fileName);
@@ -1639,23 +1595,14 @@ int __cdecl Com_LoadSoundAliasSounds(SoundFileInfo *soundFileInfo)
         soundFile = &soundFileInfo->files[soundIndex];
         if (soundFile->type == 1)
         {
-            if (!soundFile->u.loadSnd)
-                MyAssertHandler(".\\universal\\com_sndalias_load_obj.cpp", 2067, 0, "%s", "soundFile->u.loadSnd");
+            iassert(soundFile->u.loadSnd);
             if (!soundFile->exists)
                 ++numMissing;
         }
         else
         {
-            if (soundFile->type != 2)
-                MyAssertHandler(
-                    ".\\universal\\com_sndalias_load_obj.cpp",
-                    2073,
-                    0,
-                    "%s\n\t(soundFile->type) = %i",
-                    "(soundFile->type == SAT_STREAMED)",
-                    soundFile->type);
-            if (!soundFile->exists)
-                MyAssertHandler(".\\universal\\com_sndalias_load_obj.cpp", 2074, 0, "%s", "soundFile->exists");
+            vassert((soundFile->type == SAT_STREAMED), "(soundFile->type) = %i", soundFile->type);
+            iassert(soundFile->exists);
             if (snd_touchStreamFilesOnLoad->current.enabled || fs_copyfiles->current.enabled)
             {
                 ProfLoad_Begin("Verify streamed sound");
@@ -1681,8 +1628,7 @@ void __cdecl Com_ParseEntChannelFile(const char *buffer)
     int i; // [esp+20h] [ebp-8h]
     parseInfo_t *value; // [esp+24h] [ebp-4h]
 
-    if (!buffer)
-        MyAssertHandler(".\\universal\\com_sndalias_load_obj.cpp", 960, 0, "%s", "buffer");
+    iassert(buffer);
     saLoadObjGlob.entChannelCount = 0;
     Com_BeginParseSession("soundaliases/channels.def");
     Com_SetCSV(1);
@@ -1733,8 +1679,7 @@ void __cdecl Com_SetChannelMapEntry(
 {
     MSSSpeakerLevels *speaker; // [esp+0h] [ebp-4h]
 
-    if (!entry)
-        MyAssertHandler(".\\universal\\com_sndalias_load_obj.cpp", 2531, 0, "%s", "entry");
+    iassert(entry);
     if (inputChannel > 2)
         MyAssertHandler(
             ".\\universal\\com_sndalias_load_obj.cpp",
@@ -1761,8 +1706,7 @@ void Com_InitSoundDevGuiGraphs_LoadObj()
     char devguiPath[256]; // [esp+0h] [ebp-108h] BYREF
     int i; // [esp+104h] [ebp-4h]
 
-    if (!g_sa.curvesInitialized)
-        MyAssertHandler(".\\universal\\com_sndalias.cpp", 240, 0, "%s", "g_sa.curvesInitialized");
+    iassert(g_sa.curvesInitialized);
     for (i = 1; i < 16; ++i)
     {
         if (*(_DWORD *)&g_sa.volumeFalloffCurveNames[-18][72 * i])
@@ -1801,8 +1745,7 @@ char __cdecl Com_LoadSpkrMapParseBuffer(char *fileName, char *buffer)
     fileLength = FS_FOpenFileByMode(fileName, &fileHandle, FS_READ);
     if (fileLength > 0)
     {
-        if (identifierStrLength >= 0x2000)
-            MyAssertHandler(".\\universal\\com_sndalias_load_obj.cpp", 2620, 0, "%s", "identifierStrLength < BIG_INFO_STRING");
+        iassert(identifierStrLength < BIG_INFO_STRING);
         FS_Read((byte *)buffer, identifierStrLength, fileHandle);
         buffer[identifierStrLength] = 0;
         if (!strncmp(buffer, "SPKRMAP", identifierStrLength))
@@ -1861,12 +1804,9 @@ char __cdecl Com_ParseChannelMapEntry(
     parseInfo_t *tokena; // [esp+Ch] [ebp-4h]
     parseInfo_t *tokenb; // [esp+Ch] [ebp-4h]
 
-    if (!g_spkrMapParseBuffer)
-        MyAssertHandler(".\\universal\\com_sndalias_load_obj.cpp", 2656, 0, "%s", "g_spkrMapParseBuffer");
-    if (!fileName)
-        MyAssertHandler(".\\universal\\com_sndalias_load_obj.cpp", 2657, 0, "%s", "fileName");
-    if (!entry)
-        MyAssertHandler(".\\universal\\com_sndalias_load_obj.cpp", 2658, 0, "%s", "entry");
+    iassert(g_spkrMapParseBuffer);
+    iassert(fileName);
+    iassert(entry);
     token = Com_Parse(&g_spkrMapParseBuffer);
     if (I_stricmp(token->token, sa_spkrMapIdentifierStrings[inputChannel]))
     {
@@ -1931,12 +1871,9 @@ char __cdecl Com_ParseChannelMapEntry(
 
 bool __cdecl Com_ParseMonoSourceStereoOutput(const char *fileName, SpeakerMap *speakerMap)
 {
-    if (!g_spkrMapParseBuffer)
-        MyAssertHandler(".\\universal\\com_sndalias_load_obj.cpp", 2702, 0, "%s", "g_spkrMapParseBuffer");
-    if (!fileName)
-        MyAssertHandler(".\\universal\\com_sndalias_load_obj.cpp", 2703, 0, "%s", "fileName");
-    if (!speakerMap)
-        MyAssertHandler(".\\universal\\com_sndalias_load_obj.cpp", 2704, 0, "%s", "speakerMap");
+    iassert(g_spkrMapParseBuffer);
+    iassert(fileName);
+    iassert(speakerMap);
     return Com_ParseChannelMapEntry(fileName, speakerMap->channelMaps[0], SA_MONOSOURCE, SA_LEFTSPEAKER)
         && Com_ParseChannelMapEntry(fileName, speakerMap->channelMaps[0], SA_MONOSOURCE, SA_RIGHTSPEAKER) != 0;
 }
@@ -1945,12 +1882,9 @@ bool __cdecl Com_ParseStereoSourceStereoOutput(const char *fileName, SpeakerMap 
 {
     MSSChannelMap *entries; // [esp+0h] [ebp-4h]
 
-    if (!g_spkrMapParseBuffer)
-        MyAssertHandler(".\\universal\\com_sndalias_load_obj.cpp", 2725, 0, "%s", "g_spkrMapParseBuffer");
-    if (!fileName)
-        MyAssertHandler(".\\universal\\com_sndalias_load_obj.cpp", 2726, 0, "%s", "fileName");
-    if (!speakerMap)
-        MyAssertHandler(".\\universal\\com_sndalias_load_obj.cpp", 2727, 0, "%s", "speakerMap");
+    iassert(g_spkrMapParseBuffer);
+    iassert(fileName);
+    iassert(speakerMap);
     entries = speakerMap->channelMaps[1];
     if (!Com_ParseChannelMapEntry(fileName, speakerMap->channelMaps[1], SA_LEFTSOURCE, SA_LEFTSPEAKER))
         return 0;
@@ -1965,12 +1899,9 @@ bool __cdecl Com_ParseMonoSource51Output(const char *fileName, SpeakerMap *speak
 {
     MSSChannelMap *entries; // [esp+0h] [ebp-4h]
 
-    if (!g_spkrMapParseBuffer)
-        MyAssertHandler(".\\universal\\com_sndalias_load_obj.cpp", 2752, 0, "%s", "g_spkrMapParseBuffer");
-    if (!fileName)
-        MyAssertHandler(".\\universal\\com_sndalias_load_obj.cpp", 2753, 0, "%s", "fileName");
-    if (!speakerMap)
-        MyAssertHandler(".\\universal\\com_sndalias_load_obj.cpp", 2754, 0, "%s", "speakerMap");
+    iassert(g_spkrMapParseBuffer);
+    iassert(fileName);
+    iassert(speakerMap);
     entries = &speakerMap->channelMaps[0][1];
     if (!Com_ParseChannelMapEntry(fileName, &speakerMap->channelMaps[0][1], SA_MONOSOURCE, SA_LEFTSPEAKER))
         return 0;
@@ -1989,12 +1920,9 @@ bool __cdecl Com_ParseStereoSource51Output(const char *fileName, SpeakerMap *spe
 {
     MSSChannelMap *entries; // [esp+0h] [ebp-4h]
 
-    if (!g_spkrMapParseBuffer)
-        MyAssertHandler(".\\universal\\com_sndalias_load_obj.cpp", 2783, 0, "%s", "g_spkrMapParseBuffer");
-    if (!fileName)
-        MyAssertHandler(".\\universal\\com_sndalias_load_obj.cpp", 2784, 0, "%s", "fileName");
-    if (!speakerMap)
-        MyAssertHandler(".\\universal\\com_sndalias_load_obj.cpp", 2785, 0, "%s", "speakerMap");
+    iassert(g_spkrMapParseBuffer);
+    iassert(fileName);
+    iassert(speakerMap);
     entries = &speakerMap->channelMaps[1][1];
     if (!Com_ParseChannelMapEntry(fileName, &speakerMap->channelMaps[1][1], SA_LEFTSOURCE, SA_LEFTSPEAKER))
         return 0;
@@ -2023,12 +1951,9 @@ bool __cdecl Com_ParseStereoSource51Output(const char *fileName, SpeakerMap *spe
 
 char __cdecl Com_ParseSpkrMapFile(const char *buffer, const char *fileName, SpeakerMap *speakerMap)
 {
-    if (!buffer)
-        MyAssertHandler(".\\universal\\com_sndalias_load_obj.cpp", 2824, 0, "%s", "buffer");
-    if (!fileName)
-        MyAssertHandler(".\\universal\\com_sndalias_load_obj.cpp", 2825, 0, "%s", "fileName");
-    if (!speakerMap)
-        MyAssertHandler(".\\universal\\com_sndalias_load_obj.cpp", 2826, 0, "%s", "speakerMap");
+    iassert(buffer);
+    iassert(fileName);
+    iassert(speakerMap);
     g_spkrMapParseBuffer = buffer;
     Com_BeginParseSession(fileName);
     if (Com_ParseMonoSourceStereoOutput(fileName, speakerMap)

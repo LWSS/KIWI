@@ -473,13 +473,10 @@ int __cdecl GetSplashMethodOfDeath(gentity_s *ent)
 {
     WeaponDef *weapDef; // [esp+4h] [ebp-4h]
 
-    if (!ent)
-        MyAssertHandler(".\\game\\g_missile.cpp", 452, 0, "%s", "ent");
-    if (!ent->s.weapon)
-        MyAssertHandler(".\\game\\g_missile.cpp", 453, 0, "%s", "ent->s.weapon");
+    iassert(ent);
+    iassert(ent->s.weapon);
     weapDef = BG_GetWeaponDef(ent->s.weapon);
-    if (!weapDef)
-        MyAssertHandler(".\\game\\g_missile.cpp", 456, 0, "%s", "weapDef");
+    iassert(weapDef);
     if (entityHandlers[ent->handler].splashMethodOfDeath == 4 && weapDef->projExplosion == WEAPPROJEXP_HEAVY)
         return 14;
     else
@@ -664,12 +661,10 @@ void __cdecl RunMissile_BroadcastActorEvents(gentity_s *missile)
     int methodOfDeath; // r27
     WeaponDef *weapDef; // r28
 
-    if (!missile)
-        MyAssertHandler(".\\game\\g_missile.cpp", 1415, 0, "%s", "missile");
+    iassert(missile);
     methodOfDeath = entityHandlers[missile->handler].methodOfDeath;
     weapDef = BG_GetWeaponDef(missile->s.weapon);
-    if (!weapDef)
-        MyAssertHandler(".\\game\\g_missile.cpp", 1419, 0, "%s", "weapDef");
+    iassert(weapDef);
     if (methodOfDeath == 3)
     {
         if (weapDef->offhandClass)
@@ -725,16 +720,13 @@ void __cdecl G_RunMissile(gentity_s *ent)
     trace_t trDown; // [esp+144h] [ebp-30h] BYREF
     WeaponDef *weapDef; // [esp+170h] [ebp-4h]
 
-    if (!ent)
-        MyAssertHandler(".\\game\\g_missile.cpp", 2080, 0, "%s", "ent");
-    if (ent->s.eType != ET_MISSILE)
-        MyAssertHandler(".\\game\\g_missile.cpp", 2081, 0, "%s", "ent->s.eType == ET_MISSILE");
+    iassert(ent);
+    iassert(ent->s.eType == ET_MISSILE);
 #ifdef KISAK_SP
     RunMissile_BroadcastActorEvents(ent);
 #endif
     weapDef = BG_GetWeaponDef(ent->s.weapon);
-    if (!weapDef)
-        MyAssertHandler(".\\game\\g_missile.cpp", 2088, 0, "%s", "weapDef");
+    iassert(weapDef);
     if (ent->s.groundEntityNum != ENTITYNUM_NONE && ent->s.groundEntityNum != ENTITYNUM_WORLD && weapDef->stickiness == WEAPSTICKINESS_ALL)
     {
         groundEnt = &g_entities[ent->s.groundEntityNum];
@@ -942,13 +934,7 @@ void __cdecl G_RunMissile(gentity_s *ent)
                     }
                     else
                     {
-                        if (attrGlob.attractors[attractorIndex].entnum >= MAX_GENTITIES)
-                            MyAssertHandler(
-                                ".\\game\\g_missile.cpp",
-                                2265,
-                                0,
-                                "%s",
-                                "attrGlob.attractors[attractorIndex].entnum < MAX_GENTITIES");
+                        iassert(attrGlob.attractors[attractorIndex].entnum < MAX_GENTITIES);
                         ent = &g_entities[attrGlob.attractors[attractorIndex].entnum];
                         center = ent->r.currentOrigin[0];
                         v23 = ent->r.currentOrigin[1];
@@ -1032,17 +1018,13 @@ void __cdecl MissileImpact(gentity_s *ent, trace_t *trace, float *dir, float *en
     float traceStart[3]; // [esp+ECh] [ebp-Ch] BYREF
 
     hitClient = 0;
-    if (!ent)
-        MyAssertHandler(".\\game\\g_missile.cpp", 493, 0, "%s", "ent");
-    if (ent->s.eType != ET_MISSILE)
-        MyAssertHandler(".\\game\\g_missile.cpp", 494, 0, "%s", "ent->s.eType == ET_MISSILE");
-    if (!ent->s.weapon)
-        MyAssertHandler(".\\game\\g_missile.cpp", 495, 0, "%s", "ent->s.weapon");
+    iassert(ent);
+    iassert(ent->s.eType == ET_MISSILE);
+    iassert(ent->s.weapon);
     hitEntId = Trace_GetEntityHitId(trace);
     other = &g_entities[hitEntId];
     weapDef = BG_GetWeaponDef(ent->s.weapon);
-    if (!weapDef)
-        MyAssertHandler(".\\game\\g_missile.cpp", 501, 0, "%s", "weapDef");
+    iassert(weapDef);
     explodeOnImpact = weapDef->bProjImpactExplode;
     explosionType = weapDef->projExplosion;
     damage = weapDef->damage;
@@ -1340,11 +1322,9 @@ bool __cdecl CheckCrumpleMissile(gentity_s *ent, trace_t *trace)
     float speed; // [esp+30h] [ebp-8h]
     WeaponDef *weapDef; // [esp+34h] [ebp-4h]
 
-    if (!ent->s.weapon)
-        MyAssertHandler(".\\game\\g_missile.cpp", 233, 0, "%s", "ent->s.weapon");
+    iassert(ent->s.weapon);
     weapDef = BG_GetWeaponDef(ent->s.weapon);
-    if (!weapDef)
-        MyAssertHandler(".\\game\\g_missile.cpp", 235, 0, "%s", "weapDef");
+    iassert(weapDef);
     if (weapDef->weapType != WEAPTYPE_PROJECTILE)
         return 0;
     if (trace->surfaceFlags == 0x700000)
@@ -1377,11 +1357,9 @@ bool __cdecl BounceMissile(gentity_s *ent, trace_t *trace)
     float dot; // [esp+80h] [ebp-10h]
     float vDelta[3]; // [esp+84h] [ebp-Ch] BYREF
 
-    if (!ent->s.weapon)
-        MyAssertHandler(".\\game\\g_missile.cpp", 308, 0, "%s", "ent->s.weapon");
+    iassert(ent->s.weapon);
     weapDef = BG_GetWeaponDef(ent->s.weapon);
-    if (!weapDef)
-        MyAssertHandler(".\\game\\g_missile.cpp", 310, 0, "%s", "weapDef");
+    iassert(weapDef);
     contents = SV_PointContents(ent->r.currentOrigin, -1, 32);
     surfType = (trace->surfaceFlags & 0x1F00000) >> 20;
     hitTime = level.previousTime + (int)((double)(level.time - level.previousTime) * trace->fraction);
@@ -1389,17 +1367,7 @@ bool __cdecl BounceMissile(gentity_s *ent, trace_t *trace)
     dot = Vec3Dot(velocity, trace->normal);
     scale = dot * -2.0;
     Vec3Mad(velocity, scale, trace->normal, ent->s.lerp.pos.trDelta);
-    if ((COERCE_UNSIGNED_INT(ent->s.lerp.pos.trDelta[0]) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(ent->s.lerp.pos.trDelta[1]) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(ent->s.lerp.pos.trDelta[2]) & 0x7F800000) == 0x7F800000)
-    {
-        MyAssertHandler(
-            ".\\game\\g_missile.cpp",
-            320,
-            0,
-            "%s",
-            "!IS_NAN((ent->s.lerp.pos.trDelta)[0]) && !IS_NAN((ent->s.lerp.pos.trDelta)[1]) && !IS_NAN((ent->s.lerp.pos.trDelta)[2])");
-    }
+    nanassertvec3(ent->s.lerp.pos.trDelta);
     v3 = weapDef->stickiness == WEAPSTICKINESS_NONE || Trace_GetEntityHitId(trace) >= 0x40u;
     mayStop = v3;
     if (g_entities[Trace_GetEntityHitId(trace)].s.eType == ET_MISSILE)
@@ -1418,17 +1386,7 @@ bool __cdecl BounceMissile(gentity_s *ent, trace_t *trace)
         bounceFactor = (weapDef->perpendicularBounce[surfType] - weapDef->parallelBounce[surfType]) * dot
             + weapDef->parallelBounce[surfType];
         Vec3Scale(ent->s.lerp.pos.trDelta, bounceFactor, ent->s.lerp.pos.trDelta);
-        if ((COERCE_UNSIGNED_INT(ent->s.lerp.pos.trDelta[0]) & 0x7F800000) == 0x7F800000
-            || (COERCE_UNSIGNED_INT(ent->s.lerp.pos.trDelta[1]) & 0x7F800000) == 0x7F800000
-            || (COERCE_UNSIGNED_INT(ent->s.lerp.pos.trDelta[2]) & 0x7F800000) == 0x7F800000)
-        {
-            MyAssertHandler(
-                ".\\game\\g_missile.cpp",
-                347,
-                0,
-                "%s",
-                "!IS_NAN((ent->s.lerp.pos.trDelta)[0]) && !IS_NAN((ent->s.lerp.pos.trDelta)[1]) && !IS_NAN((ent->s.lerp.pos.trDelta)[2])");
-        }
+        nanassertvec3(ent->s.lerp.pos.trDelta);
     }
     if (mayStop
         && (weapDef->stickiness == WEAPSTICKINESS_ALL
@@ -1624,21 +1582,17 @@ void __cdecl CheckGrenadeDanger(gentity_s *grenadeEnt)
     int i; // [esp+14h] [ebp-8h]
     WeaponDef *weapDef; // [esp+18h] [ebp-4h]
 
-    if (!grenadeEnt)
-        MyAssertHandler(".\\game\\g_missile.cpp", 267, 0, "%s", "grenadeEnt");
-    if (!grenadeEnt->s.weapon)
-        MyAssertHandler(".\\game\\g_missile.cpp", 268, 0, "%s", "grenadeEnt->s.weapon != WP_NONE");
+    iassert(grenadeEnt);
+    iassert(grenadeEnt->s.weapon != WP_NONE);
     weapDef = BG_GetWeaponDef(grenadeEnt->s.weapon);
-    if (!weapDef)
-        MyAssertHandler(".\\game\\g_missile.cpp", 270, 0, "%s", "weapDef");
+    iassert(weapDef);
     iExplosionRadius = (float)weapDef->iExplosionRadius;
     ent = g_entities;
     for (i = 0; i < level.maxclients; ++i)
     {
         if (ent->r.inuse)
         {
-            if (!ent->client)
-                MyAssertHandler(".\\game\\g_missile.cpp", 278, 0, "%s", "ent->client");
+            iassert(ent->client);
             damageRadiusSquared = iExplosionRadius * iExplosionRadius;
             if (G_WithinDamageRadius(grenadeEnt->r.currentOrigin, damageRadiusSquared, ent))
             {
@@ -1661,28 +1615,22 @@ void __cdecl CheckGrenadeDanger(gentity_s *grenadeEnt)
 
 bool __cdecl GrenadeDud(gentity_s *ent, WeaponDef *weapDef)
 {
-    if (!ent)
-        MyAssertHandler(".\\game\\g_missile.cpp", 406, 0, "%s", "ent");
-    if (!weapDef)
-        MyAssertHandler(".\\game\\g_missile.cpp", 407, 0, "%s", "weapDef");
+    iassert(ent);
+    iassert(weapDef);
     return weapDef->iProjectileActivateDist > 0 && ent->missile.travelDist < (double)weapDef->iProjectileActivateDist;
 }
 
 bool __cdecl JavelinProjectile(gentity_s *ent, WeaponDef *weapDef)
 {
-    if (!ent)
-        MyAssertHandler(".\\game\\g_missile.cpp", 421, 0, "%s", "ent");
-    if (!weapDef)
-        MyAssertHandler(".\\game\\g_missile.cpp", 422, 0, "%s", "weapDef");
+    iassert(ent);
+    iassert(weapDef);
     return ent->s.eType == ET_MISSILE && weapDef->guidedMissileType == MISSILE_GUIDANCE_JAVELIN;
 }
 
 bool __cdecl JavelinDud(gentity_s *ent, WeaponDef *weapDef)
 {
-    if (!ent)
-        MyAssertHandler(".\\game\\g_missile.cpp", 435, 0, "%s", "ent");
-    if (!weapDef)
-        MyAssertHandler(".\\game\\g_missile.cpp", 436, 0, "%s", "weapDef");
+    iassert(ent);
+    iassert(weapDef);
     return JavelinProjectile(ent, weapDef) && ent->missile.stage == MISSILESTAGE_SOFTLAUNCH;
 }
 
@@ -1702,14 +1650,10 @@ void __cdecl Missile_PenetrateGlass(
     hitLocation_t hitLoc; // [esp+20h] [ebp-8h]
     uint16_t hitEntId; // [esp+24h] [ebp-4h]
 
-    if (!results)
-        MyAssertHandler(".\\game\\g_missile.cpp", 943, 0, "%s", "results");
-    if (!ent)
-        MyAssertHandler(".\\game\\g_missile.cpp", 944, 0, "%s", "ent");
-    if (!start)
-        MyAssertHandler(".\\game\\g_missile.cpp", 945, 0, "%s", "start");
-    if (!end)
-        MyAssertHandler(".\\game\\g_missile.cpp", 946, 0, "%s", "end");
+    iassert(results);
+    iassert(ent);
+    iassert(start);
+    iassert(end);
     hitEntId = Trace_GetEntityHitId(results);
     if (hitEntId < ENTITYNUM_WORLD)
     {
@@ -1786,10 +1730,8 @@ void __cdecl RunMissile_Destabilize(gentity_s *missile)
     int axis; // [esp+44h] [ebp-10h]
     float newAPos[3]; // [esp+48h] [ebp-Ch] BYREF
 
-    if (!missile)
-        MyAssertHandler(".\\game\\g_missile.cpp", 1335, 0, "%s", "missile");
-    if (missile->s.eType != ET_MISSILE)
-        MyAssertHandler(".\\game\\g_missile.cpp", 1336, 0, "%s", "missile->s.eType == ET_MISSILE");
+    iassert(missile);
+    iassert(missile->s.eType == ET_MISSILE);
     if ((missile->flags & 0x20000) != 0)
         MyAssertHandler(".\\game\\g_missile.cpp", 1337, 0, "%s", "!(missile->flags & FL_STABLE_MISSILES)");
     weaponDef = BG_GetWeaponDef(missile->s.weapon);
@@ -1853,14 +1795,7 @@ void __cdecl RunMissile_Destabilize(gentity_s *missile)
 
 double __cdecl RunMissile_GetPerturbation(float destabilizationCurvatureMax)
 {
-    if (destabilizationCurvatureMax >= 1000000000.0f || destabilizationCurvatureMax < 0.0f)
-        MyAssertHandler(
-            ".\\game\\g_missile.cpp",
-            997,
-            0,
-            "%s\n\t(destabilizationCurvatureMax) = %g",
-            "(destabilizationCurvatureMax < 1000000000.0f && destabilizationCurvatureMax >= 0.0f)",
-            destabilizationCurvatureMax);
+    vassert((destabilizationCurvatureMax < 1000000000.0f && destabilizationCurvatureMax >= 0.0f), "(destabilizationCurvatureMax) = %g", destabilizationCurvatureMax);
     return destabilizationCurvatureMax;
 }
 
@@ -1909,13 +1844,7 @@ void __cdecl Missile_ApplyAttractorsRepulsors(gentity_s *missile)
             }
             else
             {
-                if (attrGlob.attractors[attractorIndex].entnum >= MAX_GENTITIES)
-                    MyAssertHandler(
-                        ".\\game\\g_missile.cpp",
-                        1262,
-                        0,
-                        "%s",
-                        "attrGlob.attractors[attractorIndex].entnum < MAX_GENTITIES");
+                iassert(attrGlob.attractors[attractorIndex].entnum < MAX_GENTITIES);
                 ent = &g_entities[attrGlob.attractors[attractorIndex].entnum];
                 attractorOrigin[0] = ent->r.currentOrigin[0];
                 attractorOrigin[1] = ent->r.currentOrigin[1];
@@ -1946,8 +1875,7 @@ void __cdecl Missile_ApplyAttractorsRepulsors(gentity_s *missile)
                 totalDist = Vec3Length(delta);
                 if (attrGlob.attractors[attractorIndex].maxDist >= (double)totalDist)
                 {
-                    if (attrGlob.attractors[attractorIndex].maxDist <= 0.0)
-                        MyAssertHandler(".\\game\\g_missile.cpp", 1294, 0, "%s", "attrGlob.attractors[attractorIndex].maxDist > 0");
+                    iassert(attrGlob.attractors[attractorIndex].maxDist > 0);
                     force = 1.0 - totalDist / attrGlob.attractors[attractorIndex].maxDist;
                     force = force * attrGlob.attractors[attractorIndex].strength;
                     v9 = I_fabs(perpDist);
@@ -1990,10 +1918,8 @@ void __cdecl RunMissile_CreateWaterSplash(const gentity_s *missile, const trace_
     gentity_s *tent; // [esp+0h] [ebp-10h]
     float reflect[3]; // [esp+4h] [ebp-Ch] BYREF
 
-    if (!missile)
-        MyAssertHandler(".\\game\\g_missile.cpp", 1393, 0, "%s", "missile");
-    if (!trace)
-        MyAssertHandler(".\\game\\g_missile.cpp", 1394, 0, "%s", "trace");
+    iassert(missile);
+    iassert(trace);
     Vec3NormalizeTo(missile->s.lerp.pos.trDelta, reflect);
     if (reflect[2] < 0.0f)
         reflect[2] = reflect[2] * -1.0f;
@@ -2015,13 +1941,10 @@ void __cdecl MissileTrajectory(gentity_s *ent, float *result)
     WeaponDef *weapDef; // [esp+38h] [ebp-8h]
     float accel; // [esp+3Ch] [ebp-4h]
 
-    if (!ent)
-        MyAssertHandler(".\\game\\g_missile.cpp", 1980, 0, "%s", "ent");
-    if (!result)
-        MyAssertHandler(".\\game\\g_missile.cpp", 1981, 0, "%s", "result");
+    iassert(ent);
+    iassert(result);
     weapDef = BG_GetWeaponDef(ent->s.weapon);
-    if (!weapDef)
-        MyAssertHandler(".\\game\\g_missile.cpp", 1984, 0, "%s", "weapDef");
+    iassert(weapDef);
     if (level.time > ent->s.lerp.u.missile.launchTime && ent->s.lerp.pos.trType != TR_LINEAR && ent->handler == ENT_HANDLER_ROCKET)
     {
         if (weapDef->timeToAccelerate > 0.0)
@@ -2180,8 +2103,7 @@ void __cdecl MissileHorzSteerToTarget(
         v11 = toTargetRelative[1] * toTargetRelative[1] + *toTargetRelative * *toTargetRelative;
         radius = v11 / (toTargetRelative[1] * 2.0);
     }
-    if (weapDef->maxSteeringAccel <= 0.0)
-        MyAssertHandler(".\\game\\g_missile.cpp", 1471, 0, "%s", "weapDef->maxSteeringAccel > 0");
+    iassert(weapDef->maxSteeringAccel > 0);
     tightestRadius = (float)weapDef->iProjectileSpeed * (float)weapDef->iProjectileSpeed / weapDef->maxSteeringAccel;
     if (*toTargetRelative <= 0.0f)
     {
@@ -2208,8 +2130,7 @@ void __cdecl MissileHorzSteerToTarget(
         v10 = I_fabs(radius);
         if (tightestRadius <= v10)
         {
-            if (radius == 0.0f)
-                MyAssertHandler(".\\game\\g_missile.cpp", 1482, 0, "%s", "radius != 0");
+            iassert(radius != 0);
             accel = currentHorzSpeed * 2.0f * currentHorzSpeed / radius;
             v15 = weapDef->maxSteeringAccel;
             v9 = accel - v15;
@@ -2273,16 +2194,14 @@ void __cdecl MissileVerticalSteering(
         }
         if (*toTargetRelative <= 0.0f || currentHorzSpeed == 0.0f)
         {
-            if (!weapDef->iProjectileSpeed)
-                MyAssertHandler(".\\game\\g_missile.cpp", 1552, 0, "%s", "weapDef->iProjectileSpeed != 0");
+            iassert(weapDef->iProjectileSpeed != 0);
             minTimeToTarg = horzDistToTarg / (float)weapDef->iProjectileSpeed;
         }
         else
         {
             minTimeToTarg = *toTargetRelative / (float)weapDef->iProjectileSpeed;
         }
-        if (minTimeToTarg <= 0.0f)
-            MyAssertHandler(".\\game\\g_missile.cpp", 1556, 0, "%s", "minTimeToTarg > 0");
+        iassert(minTimeToTarg > 0);
         maxVertSpeedAtMaxAccel = toTargetRelative[2] / minTimeToTarg;
         maxVertSpeedAtMaxAccel = weapDef->maxSteeringAccel * 0.5f * minTimeToTarg + maxVertSpeedAtMaxAccel;
         maxVertSpeedAtMaxAccel = maxVertSpeedAtMaxAccel * 0.8999999761581421f;
@@ -2434,14 +2353,11 @@ void __cdecl JavelinClimbOffset(gentity_s *ent, float *targetPos)
     gentity_s *target; // [esp+14h] [ebp-Ch]
     float ownerDir[2]; // [esp+18h] [ebp-8h] BYREF
 
-    if (!ent)
-        MyAssertHandler(".\\game\\g_missile.cpp", 1673, 0, "%s", "ent");
-    if (ent->s.eType != ET_MISSILE)
-        MyAssertHandler(".\\game\\g_missile.cpp", 1674, 0, "%s", "ent->s.eType == ET_MISSILE");
+    iassert(ent);
+    iassert(ent->s.eType == ET_MISSILE);
     if (ent->missile.flightMode)
     {
-        if (ent->missile.flightMode != MISSILEFLIGHTMODE_DIRECT)
-            MyAssertHandler(".\\game\\g_missile.cpp", 1682, 0, "%s", "ent->missile.flightMode == MISSILEFLIGHTMODE_DIRECT");
+        iassert(ent->missile.flightMode == MISSILEFLIGHTMODE_DIRECT);
         targetPos[2] = targetPos[2] + missileJavClimbHeightDirect->current.value;
 
         if (ent->r.ownerNum.isDefined())
@@ -2486,8 +2402,7 @@ void __cdecl JavelinRotateVelocity(gentity_s *ent, const float *currentVel, cons
         }
         else
         {
-            if (ent->missile.stage != MISSILESTAGE_DESCENT)
-                MyAssertHandler(".\\game\\g_missile.cpp", 1804, 0, "%s", "ent->missile.stage == MISSILESTAGE_DESCENT");
+            iassert(ent->missile.stage == MISSILESTAGE_DESCENT);
             len = missileJavAccelDescend->current.value * 0.05f + len;
             if (missileJavSpeedLimitDescend->current.value < len)
                 len = missileJavSpeedLimitDescend->current.value;
@@ -2508,8 +2423,7 @@ double __cdecl JavelinRotateDir(gentity_s *ent, const float *currentDir, const f
     float currentQuat[4]; // [esp+58h] [ebp-14h] BYREF
     float dot; // [esp+68h] [ebp-4h]
 
-    if (!ent)
-        MyAssertHandler(".\\game\\g_missile.cpp", 1730, 0, "%s", "ent");
+    iassert(ent);
     maxDPS = JavelinMaxDPS(ent);
     dot = Vec3Dot(targetDir, currentDir);
     dot = (1.0 - (dot + 1.0) * 0.5) * 180.0;
@@ -2560,14 +2474,11 @@ double __cdecl JavelinRotateDir(gentity_s *ent, const float *currentDir, const f
 
 double __cdecl JavelinMaxDPS(gentity_s *ent)
 {
-    if (!ent)
-        MyAssertHandler(".\\game\\g_missile.cpp", 1698, 0, "%s", "ent");
-    if (ent->s.eType != ET_MISSILE)
-        MyAssertHandler(".\\game\\g_missile.cpp", 1699, 0, "%s", "ent->s.eType == ET_MISSILE");
+    iassert(ent);
+    iassert(ent->s.eType == ET_MISSILE);
     if (ent->missile.flightMode == MISSILEFLIGHTMODE_TOP)
         return missileJavTurnRateTop->current.value;
-    if (ent->missile.flightMode != MISSILEFLIGHTMODE_DIRECT)
-        MyAssertHandler(".\\game\\g_missile.cpp", 1703, 0, "%s", "ent->missile.flightMode == MISSILEFLIGHTMODE_DIRECT");
+    iassert(ent->missile.flightMode == MISSILEFLIGHTMODE_DIRECT);
     return missileJavTurnRateDirect->current.value;
 }
 
@@ -2583,14 +2494,11 @@ void __cdecl VecToQuat(const float *vec, float *quat)
 
 double __cdecl JavelinClimbCeiling(gentity_s *ent)
 {
-    if (!ent)
-        MyAssertHandler(".\\game\\g_missile.cpp", 1819, 0, "%s", "ent");
-    if (ent->s.eType != ET_MISSILE)
-        MyAssertHandler(".\\game\\g_missile.cpp", 1820, 0, "%s", "ent->s.eType == ET_MISSILE");
+    iassert(ent);
+    iassert(ent->s.eType == ET_MISSILE);
     if (ent->missile.flightMode == MISSILEFLIGHTMODE_DIRECT)
         return missileJavClimbCeilingDirect->current.value;
-    if (ent->missile.flightMode)
-        MyAssertHandler(".\\game\\g_missile.cpp", 1828, 0, "%s", "ent->missile.flightMode == MISSILEFLIGHTMODE_TOP");
+    iassert(ent->missile.flightMode == MISSILEFLIGHTMODE_TOP);
     return missileJavClimbCeilingTop->current.value;
 }
 
@@ -2614,14 +2522,11 @@ char __cdecl JavelinClimbExceededAngle(gentity_s *ent, const float *targetPos)
     float deltaHorz; // [esp+28h] [ebp-8h]
     float deg; // [esp+2Ch] [ebp-4h]
 
-    if (!ent)
-        MyAssertHandler(".\\game\\g_missile.cpp", 1615, 0, "%s", "ent");
-    if (ent->s.eType != ET_MISSILE)
-        MyAssertHandler(".\\game\\g_missile.cpp", 1616, 0, "%s", "ent->s.eType == ET_MISSILE");
+    iassert(ent);
+    iassert(ent->s.eType == ET_MISSILE);
     if (ent->missile.flightMode)
     {
-        if (ent->missile.flightMode != MISSILEFLIGHTMODE_DIRECT)
-            MyAssertHandler(".\\game\\g_missile.cpp", 1624, 0, "%s", "ent->missile.flightMode == MISSILEFLIGHTMODE_DIRECT");
+        iassert(ent->missile.flightMode == MISSILEFLIGHTMODE_DIRECT);
         limit = missileJavClimbAngleDirect->current.value;
     }
     else
@@ -2647,10 +2552,8 @@ char __cdecl JavelinClimbWithinDistance(gentity_s *ent, const float *targetPos)
 {
     float distance; // [esp+0h] [ebp-4h]
 
-    if (!ent)
-        MyAssertHandler(".\\game\\g_missile.cpp", 1651, 0, "%s", "ent");
-    if (ent->s.eType != ET_MISSILE)
-        MyAssertHandler(".\\game\\g_missile.cpp", 1652, 0, "%s", "ent->s.eType == ET_MISSILE");
+    iassert(ent);
+    iassert(ent->s.eType == ET_MISSILE);
     distance = Vec2Distance(ent->s.lerp.pos.trBase, targetPos);
     if (distance >= 400.0)
         return 0;
@@ -2664,10 +2567,8 @@ bool __cdecl JavelinClimbIsAboveCeiling(gentity_s *ent, const float *targetPos)
     float limit; // [esp+0h] [ebp-8h]
     float height; // [esp+4h] [ebp-4h]
 
-    if (!ent)
-        MyAssertHandler(".\\game\\g_missile.cpp", 1839, 0, "%s", "ent");
-    if (ent->s.eType != ET_MISSILE)
-        MyAssertHandler(".\\game\\g_missile.cpp", 1840, 0, "%s", "ent->s.eType == ET_MISSILE");
+    iassert(ent);
+    iassert(ent->s.eType == ET_MISSILE);
     height = ent->s.lerp.pos.trBase[2] - targetPos[2] - ent->missile.targetOffset[2];
     limit = JavelinClimbCeiling(ent);
     return limit < (double)height;
@@ -2744,8 +2645,7 @@ void __cdecl G_InitGrenadeMovement(gentity_s *grenade, const float *start, const
     double v5; // [esp+18h] [ebp-40h]
     float angle; // [esp+20h] [ebp-38h]
 
-    if (!grenade)
-        MyAssertHandler(".\\game\\g_missile.cpp", 2548, 0, "%s", "grenade");
+    iassert(grenade);
     grenade->missile.travelDist = 0.0f;
     grenade->s.lerp.pos.trType = TR_GRAVITY;
     grenade->s.lerp.pos.trTime = level.time;
@@ -2812,11 +2712,9 @@ gentity_s *__cdecl G_FireGrenade(
     gentity_s *grenade; // [esp+Ch] [ebp-8h]
     WeaponDef *weapDef; // [esp+10h] [ebp-4h]
 
-    if (!parent)
-        MyAssertHandler(".\\game\\g_missile.cpp", 2638, 0, "%s", "parent");
+    iassert(parent);
     weapDef = BG_GetWeaponDef(grenadeWPID);
-    if (!weapDef)
-        MyAssertHandler(".\\game\\g_missile.cpp", 2641, 0, "%s", "weapDef");
+    iassert(weapDef);
     grenade = G_Spawn();
     Scr_SetString(&grenade->classname, scr_const.grenade);
     grenade->s.weapon = grenadeWPID;
@@ -2832,8 +2730,7 @@ gentity_s *__cdecl G_FireGrenade(
         grenade->s.lerp.u.missile.launchTime += CalcMissileNoDrawTime(speed);
     }
     InitGrenadeTimer(parent, grenade, weapDef, time);
-    if (grenade->model)
-        MyAssertHandler(".\\game\\g_missile.cpp", 2662, 0, "%s", "!grenade->model");
+    iassert(!grenade->model);
     if (weapDef->projectileModel)
     {
         Name = (char *)XModelGetName(weapDef->projectileModel);
@@ -2931,11 +2828,9 @@ gentity_s *__cdecl G_FireRocket(
     gentity_s *bolt; // [esp+A4h] [ebp-8h]
     WeaponDef *weapDef; // [esp+A8h] [ebp-4h]
 
-    if (!parent)
-        MyAssertHandler(".\\game\\g_missile.cpp", 2700, 0, "%s", "parent");
+    iassert(parent);
     weapDef = BG_GetWeaponDef(weaponIndex);
-    if (!weapDef)
-        MyAssertHandler(".\\game\\g_missile.cpp", 2703, 0, "%s", "weapDef");
+    iassert(weapDef);
     Vec3Normalize(dir);
     if (weapDef->guidedMissileType == MISSILE_GUIDANCE_JAVELIN)
     {
@@ -3016,17 +2911,7 @@ gentity_s *__cdecl G_FireRocket(
     trBase[1] = start[1];
     trBase[2] = start[2];
     Vec3Add(bolt->s.lerp.pos.trDelta, gunVel, bolt->s.lerp.pos.trDelta);
-    if ((COERCE_UNSIGNED_INT(bolt->s.lerp.pos.trDelta[0]) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(bolt->s.lerp.pos.trDelta[1]) & 0x7F800000) == 0x7F800000
-        || (COERCE_UNSIGNED_INT(bolt->s.lerp.pos.trDelta[2]) & 0x7F800000) == 0x7F800000)
-    {
-        MyAssertHandler(
-            ".\\game\\g_missile.cpp",
-            2770,
-            0,
-            "%s",
-            "!IS_NAN((bolt->s.lerp.pos.trDelta)[0]) && !IS_NAN((bolt->s.lerp.pos.trDelta)[1]) && !IS_NAN((bolt->s.lerp.pos.trDelta)[2])");
-    }
+    nanassertvec3(bolt->s.lerp.pos.trDelta);
 #ifdef KISAK_MP
     bolt->s.lerp.pos.trDelta[0] = (float)(int)bolt->s.lerp.pos.trDelta[0];
     bolt->s.lerp.pos.trDelta[1] = (float)(int)bolt->s.lerp.pos.trDelta[1];
@@ -3051,17 +2936,7 @@ gentity_s *__cdecl G_FireRocket(
         Vec3Scale(v, v13, bolt->missile.curvature);
         scale = r * sinT;
         Vec3Mad(bolt->missile.curvature, scale, up, bolt->missile.curvature);
-        if ((COERCE_UNSIGNED_INT(bolt->missile.curvature[0]) & 0x7F800000) == 0x7F800000
-            || (COERCE_UNSIGNED_INT(bolt->missile.curvature[1]) & 0x7F800000) == 0x7F800000
-            || (COERCE_UNSIGNED_INT(bolt->missile.curvature[2]) & 0x7F800000) == 0x7F800000)
-        {
-            MyAssertHandler(
-                ".\\game\\g_missile.cpp",
-                2797,
-                0,
-                "%s",
-                "!IS_NAN((bolt->missile.curvature)[0]) && !IS_NAN((bolt->missile.curvature)[1]) && !IS_NAN((bolt->missile.curvature)[2])");
-        }
+        nanassertvec3(bolt->missile.curvature);
     }
     if (weapDef->guidedMissileType)
     {
@@ -3081,13 +2956,11 @@ gentity_s *__cdecl G_FireRocket(
         }
     }
 #ifdef KISAK_SP
-    if (bolt->model)
-        MyAssertHandler(".\\game\\g_missile.cpp", 2822, 0, "%s", "!bolt->model");
+    iassert(!bolt->model);
     if (weapDef->projectileModel)
         G_SetModel(bolt, XModelGetName(weapDef->projectileModel));
 #endif
-    if (!weapDef->iProjectileSpeed)
-        MyAssertHandler(".\\game\\g_missile.cpp", 2827, 0, "%s", "weapDef->iProjectileSpeed");
+    iassert(weapDef->iProjectileSpeed);
     bolt->missile.time = (double)weapDef->destabilizeDistance / (double)weapDef->iProjectileSpeed * 1000.0;
     if (weapDef->destabilizationRateTime == 0.0)
         v8 = bolt->flags | FL_STABLE_MISSILES;
@@ -3103,10 +2976,8 @@ gentity_s *__cdecl G_FireRocket(
 
 void __cdecl InitRocketTimer(gentity_s *bolt, WeaponDef *weapDef)
 {
-    if (!bolt)
-        MyAssertHandler(".\\game\\g_missile.cpp", 2684, 0, "%s", "bolt");
-    if (!weapDef)
-        MyAssertHandler(".\\game\\g_missile.cpp", 2685, 0, "%s", "weapDef");
+    iassert(bolt);
+    iassert(weapDef);
     bolt->nextthink = level.time + (int)(weapDef->projLifetime * 1000.0);
     if (bolt->nextthink > level.time + 60000)
         bolt->nextthink = level.time + 60000;
@@ -3135,8 +3006,7 @@ static void PredictBounceMissile(
     double v25; // fp0
     float delta[3]; // [sp+58h] [-88h] BYREF // v26
 
-    if (!ent->s.weapon)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_missile.cpp", 2304, 0, "%s", "ent->s.weapon");
+    iassert(ent->s.weapon);
     WeaponDef = BG_GetWeaponDef(ent->s.weapon);
     if (!WeaponDef)
         MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_missile.cpp", 2306, 0, "%s", "weapDef");
@@ -3182,17 +3052,7 @@ static void PredictBounceMissile(
         pos->trDelta[0] = pos->trDelta[0] * (float)v22;
         pos->trDelta[1] = pos->trDelta[1] * (float)v22;
         pos->trDelta[2] = pos->trDelta[2] * (float)v22;
-        if ((COERCE_UNSIGNED_INT(pos->trDelta[0]) & 0x7F800000) == 0x7F800000
-            || (COERCE_UNSIGNED_INT(pos->trDelta[1]) & 0x7F800000) == 0x7F800000
-            || (COERCE_UNSIGNED_INT(pos->trDelta[2]) & 0x7F800000) == 0x7F800000)
-        {
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\game\\g_missile.cpp",
-                2327,
-                0,
-                "%s",
-                "!IS_NAN((pos->trDelta)[0]) && !IS_NAN((pos->trDelta)[1]) && !IS_NAN((pos->trDelta)[2])");
-        }
+        nanassertvec3(pos->trDelta);
     }
     stickiness = WeaponDef->stickiness;
     if (stickiness == WEAPSTICKINESS_ALL

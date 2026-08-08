@@ -31,26 +31,10 @@ double __cdecl FxCurve_Interpolate1d(const float *key, float intermediateTime)
 
 void __cdecl FxCurveIterator_Create(FxCurveIterator *createe, const FxCurve *master)
 {
-    if (!createe)
-        MyAssertHandler(".\\EffectsCore\\FxCurve.cpp", 62, 0, "%s", "createe");
-    if (!master)
-        MyAssertHandler(".\\EffectsCore\\FxCurve.cpp", 64, 0, "%s", "master");
-    if (master->keyCount <= 0)
-        MyAssertHandler(
-            ".\\EffectsCore\\FxCurve.cpp",
-            65,
-            0,
-            "%s\n\t(master->keyCount) = %i",
-            "(master->keyCount > 0)",
-            master->keyCount);
-    if (master->dimensionCount <= 0)
-        MyAssertHandler(
-            ".\\EffectsCore\\FxCurve.cpp",
-            66,
-            0,
-            "%s\n\t(master->dimensionCount) = %i",
-            "(master->dimensionCount > 0)",
-            master->dimensionCount);
+    iassert(createe);
+    iassert(master);
+    vassert((master->keyCount > 0), "(master->keyCount) = %i", master->keyCount);
+    vassert((master->dimensionCount > 0), "(master->dimensionCount) = %i", master->dimensionCount);
     if (master == (const FxCurve *)-8)
         MyAssertHandler(".\\EffectsCore\\FxCurve.cpp", 67, 0, "%s", "master->keys");
     createe->master = master;
@@ -59,10 +43,8 @@ void __cdecl FxCurveIterator_Create(FxCurveIterator *createe, const FxCurve *mas
 
 void __cdecl FxCurveIterator_Release(FxCurveIterator *releasee)
 {
-    if (!releasee)
-        MyAssertHandler(".\\EffectsCore\\FxCurve.cpp", 83, 0, "%s", "releasee");
-    if (!releasee->master)
-        MyAssertHandler(".\\EffectsCore\\FxCurve.cpp", 84, 0, "%s", "releasee->master");
+    iassert(releasee);
+    iassert(releasee->master);
     releasee->master = 0;
 }
 
@@ -103,18 +85,9 @@ const FxCurve *__cdecl FxCurve_AllocAndCreateWithKeys(float *keyArray, int dimen
     int elementIndex; // [esp+2Ch] [ebp-4h]
     int elementIndexa; // [esp+2Ch] [ebp-4h]
 
-    if (!keyArray)
-        MyAssertHandler(".\\EffectsCore\\FxCurve_load_obj.cpp", 19, 0, "%s", "keyArray");
-    if (keyCount <= 0)
-        MyAssertHandler(".\\EffectsCore\\FxCurve_load_obj.cpp", 20, 0, "%s\n\t(keyCount) = %i", "(keyCount > 0)", keyCount);
-    if (dimensionCount <= 0)
-        MyAssertHandler(
-            ".\\EffectsCore\\FxCurve_load_obj.cpp",
-            21,
-            0,
-            "%s\n\t(dimensionCount) = %i",
-            "(dimensionCount > 0)",
-            dimensionCount);
+    iassert(keyArray);
+    vassert((keyCount > 0), "(keyCount) = %i", keyCount);
+    vassert((dimensionCount > 0), "(dimensionCount) = %i", dimensionCount);
     keySize = dimensionCount + 1;
     addKeyAtStart = *keyArray != 0.0;
     addKeyAtEnd = keyArray[(dimensionCount + 1) * (keyCount - 1)] != 1.0;
@@ -128,8 +101,7 @@ const FxCurve *__cdecl FxCurve_AllocAndCreateWithKeys(float *keyArray, int dimen
             "(createdKeyCount >= 2)",
             createdKeyCount);
     newCurve = Hunk_AllocAlign(4 * createdKeyCount * keySize + 8, 4, "FxCurve_AllocAndCreateWithKeys", 8);
-    if (!newCurve)
-        MyAssertHandler(".\\EffectsCore\\FxCurve_load_obj.cpp", 38, 0, "%s", "newCurve");
+    iassert(newCurve);
     *(_DWORD *)newCurve = dimensionCount;
     keyIndex = 0;
     if (addKeyAtStart)
@@ -180,28 +152,14 @@ const FxCurve *__cdecl FxCurve_AllocAndCreateWithKeys(float *keyArray, int dimen
 void __cdecl FxCurveIterator_SampleTimeVec3(FxCurveIterator *source, float *replyVector, float time)
 {
     FxCurveIterator_MoveToTime(source, time);
-    if (source->currentKeyIndex >= (uint)(source->master->keyCount - 1))
-        MyAssertHandler(
-            "c:\\trees\\cod3\\src\\effectscore\\FxCurve.h",
-            148,
-            0,
-            "source->currentKeyIndex doesn't index source->master->keyCount - 1\n\t%i not in [0, %i)",
-            source->currentKeyIndex,
-            source->master->keyCount - 1);
+    bcassert(source->currentKeyIndex, (uint)(source->master->keyCount - 1));
     FxCurve_Interpolate3d(&source->master->keys[4 * source->currentKeyIndex], time, replyVector);
 }
 
 double __cdecl FxCurveIterator_SampleTime(FxCurveIterator *source, float time)
 {
     FxCurveIterator_MoveToTime(source, time);
-    if (source->currentKeyIndex >= (uint)(source->master->keyCount - 1))
-        MyAssertHandler(
-            "c:\\trees\\cod3\\src\\effectscore\\FxCurve.h",
-            126,
-            0,
-            "source->currentKeyIndex doesn't index source->master->keyCount - 1\n\t%i not in [0, %i)",
-            source->currentKeyIndex,
-            source->master->keyCount - 1);
+    bcassert(source->currentKeyIndex, (uint)(source->master->keyCount - 1));
     return (float)FxCurve_Interpolate1d(&source->master->keys[2 * source->currentKeyIndex], time);
 }
 
@@ -211,44 +169,14 @@ void __cdecl FxCurveIterator_MoveToTime(FxCurveIterator *source, float time)
     int keySize; // [esp+8h] [ebp-8h]
     const float *key; // [esp+Ch] [ebp-4h]
 
-    if (!source)
-        MyAssertHandler("c:\\trees\\cod3\\src\\effectscore\\FxCurve.h", 85, 0, "%s", "source");
-    if (!source->master)
-        MyAssertHandler("c:\\trees\\cod3\\src\\effectscore\\FxCurve.h", 86, 0, "%s", "source->master");
+    iassert(source);
+    iassert(source->master);
     if (source->master == (const FxCurve *)-8)
         MyAssertHandler("c:\\trees\\cod3\\src\\effectscore\\FxCurve.h", 87, 0, "%s", "source->master->keys");
-    if (time < 0.0 || time > 1.0)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\src\\effectscore\\FxCurve.h",
-            88,
-            0,
-            "%s\n\t(time) = %g",
-            "(time >= 0.0f && time <= 1.0f)",
-            time);
-    if (source->master->keyCount <= 0)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\src\\effectscore\\FxCurve.h",
-            89,
-            0,
-            "%s\n\t(source->master->keyCount) = %i",
-            "(source->master->keyCount > 0)",
-            source->master->keyCount);
-    if (source->master->dimensionCount <= 0)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\src\\effectscore\\FxCurve.h",
-            90,
-            0,
-            "%s\n\t(source->master->dimensionCount) = %i",
-            "(source->master->dimensionCount > 0)",
-            source->master->dimensionCount);
-    if (source->currentKeyIndex >= (uint)source->master->keyCount)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\src\\effectscore\\FxCurve.h",
-            91,
-            0,
-            "source->currentKeyIndex doesn't index source->master->keyCount\n\t%i not in [0, %i)",
-            source->currentKeyIndex,
-            source->master->keyCount);
+    vassert((time >= 0.0f && time <= 1.0f), "(time) = %g", time);
+    vassert((source->master->keyCount > 0), "(source->master->keyCount) = %i", source->master->keyCount);
+    vassert((source->master->dimensionCount > 0), "(source->master->dimensionCount) = %i", source->master->dimensionCount);
+    bcassert(source->currentKeyIndex, (uint)source->master->keyCount);
     keySize = source->master->dimensionCount + 1;
     key = &source->master->keys[keySize * source->currentKeyIndex];
     if (*key > (double)time)

@@ -139,14 +139,7 @@ int __cdecl CL_GetSnapshot(int localClientNum, snapshot_s *snapshot)
         {
             v6 = *(int *)((char *)clients[0].parseEntityNums + ((4 * (clients[0].snapshots[0].parseEntitiesNum + v4)) & 0x1FFC));
             *entityNums = v6;
-            if (v6 >= 0x880)
-                MyAssertHandler(
-                    "c:\\trees\\cod3\\cod3src\\src\\client\\cl_cgame.cpp",
-                    181,
-                    0,
-                    "snapshot->entityNums[i] doesn't index MAX_GENTITIES\n\t%i not in [0, %i)",
-                    v6,
-                    2176);
+            bcassert(v6, 0x880);
             ++v4;
             ++entityNums;
         } while (v4 < numEntities);
@@ -156,14 +149,7 @@ int __cdecl CL_GetSnapshot(int localClientNum, snapshot_s *snapshot)
 
 void __cdecl CL_SetUserCmdWeapons(int localClientNum, int weapon, int offHandIndex)
 {
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\client\\client.h",
-            555,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     clients[0].cgameUserCmdWeapon = weapon;
     clients[0].cgameUserCmdOffHandIndex = offHandIndex;
 }
@@ -176,14 +162,7 @@ void __cdecl CL_SetUserCmdAimValues(
     double gunYOfs,
     double gunZOfs)
 {
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\client\\client.h",
-            555,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     clients[0].cgameUserCmdGunPitch = gunPitch;
     clients[0].cgameUserCmdGunYaw = gunYaw;
     clients[0].cgameUserCmdGunXOfs = gunXOfs;
@@ -193,27 +172,13 @@ void __cdecl CL_SetUserCmdAimValues(
 
 void __cdecl CL_SetFOVSensitivityScale(int localClientNum, double scale)
 {
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\client\\client.h",
-            555,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     clients[0].cgameFOVSensitivityScale = scale;
 }
 
 void __cdecl CL_SetExtraButtons(int localClientNum, int buttons)
 {
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\client\\client.h",
-            555,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     clients[0].cgameExtraButtons |= buttons;
 }
 
@@ -491,27 +456,13 @@ void __cdecl CL_ArchiveServerCommands(MemoryFile *memFile)
         i <= clientConnections[0].serverCommands.header.sequence;
         ++i)
     {
-        if (!memFile)
-            MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\client\\../universal/memfile.h", 188, 0, "%s", "memFile");
-        if (!memFile->archiveProc)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\client\\../universal/memfile.h",
-                189,
-                0,
-                "%s",
-                "memFile->archiveProc");
+        iassert(memFile);
+        iassert(memFile->archiveProc);
         memFile->archiveProc(memFile, 4, (byte *)clientConnections[0].serverCommands.commands + ((4 * i) & 0x3FC));
     }
     rover = clientConnections[0].serverCommands.header.rover;
-    if (!memFile)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\client\\../universal/memfile.h", 188, 0, "%s", "memFile");
-    if (!memFile->archiveProc)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\client\\../universal/memfile.h",
-            189,
-            0,
-            "%s",
-            "memFile->archiveProc");
+    iassert(memFile);
+    iassert(memFile->archiveProc);
     memFile->archiveProc(memFile, rover, (byte*)clientConnections[0].serverCommands.buf);
 }
 
@@ -519,8 +470,7 @@ void __cdecl CL_LoadServerCommands(SaveGame *save)
 {
     int i; // r31
 
-    if (!save)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\client\\cl_cgame.cpp", 409, 0, "%s", "save");
+    iassert(save);
     SaveMemory_LoadRead(&clientConnections[0].serverCommands, 12, save);
     for (i = clientConnections[0].serverCommands.header.sent + 1;
         i <= clientConnections[0].serverCommands.header.sequence;
@@ -558,8 +508,7 @@ int __cdecl CL_DObjCreateSkelForBone(DObj_s *obj, int boneIndex)
     unsigned int AllocSkelSize; // r3
     char *v7; // r4
 
-    if (!obj)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\client\\cl_cgame.cpp", 461, 0, "%s", "obj");
+    iassert(obj);
     SkelTimeStamp = CL_GetSkelTimeStamp();
     if (DObjSkelExists(obj, SkelTimeStamp))
         return DObjSkelIsBoneUpToDate(obj, boneIndex);
@@ -803,28 +752,14 @@ void __cdecl CL_ProjectionSet3D()
 
 void __cdecl CL_CapTurnRate(int localClientNum, double maxPitchSpeed, double maxYawSpeed)
 {
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\client\\client.h",
-            555,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     clients[0].cgameMaxPitchSpeed = maxPitchSpeed;
     clients[0].cgameMaxYawSpeed = maxYawSpeed;
 }
 
 void __cdecl CL_SetViewAngles(int localClientNum, float *angles)
 {
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\client\\client.h",
-            555,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     clients[0].viewangles[0] = *angles;
     clients[0].viewangles[1] = angles[1];
     clients[0].viewangles[2] = angles[2];
@@ -857,13 +792,7 @@ void __cdecl CL_InitCGame(int localClientNum, int savegame)
 
     startTime = Sys_Milliseconds();
     SND_ErrorCleanup();
-    if (!com_sv_running->current.enabled)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\client\\cl_cgame.cpp",
-            821,
-            0,
-            "%s",
-            "com_sv_running->current.enabled");
+    iassert(com_sv_running->current.enabled);
     if (localClientNum)
     {
         MyAssertHandler(
@@ -893,20 +822,12 @@ void __cdecl CL_InitCGame(int localClientNum, int savegame)
         v5 = clients[0].configstrings[0];
     }
     info = SL_ConvertToString(v5);
-    if (!info)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\client\\cl_cgame.cpp", 828, 0, "%s", "info");
+    iassert(info);
     v7 = Info_ValueForKey(info, "mapname");
     Com_GetBspFilename(clients[0].mapname, 64, v7);
     //Live_SetCurrentMapname(v7);
     clientUIActives[0].isLoadComplete = 1;
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\client\\client.h",
-            569,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     if (clientUIActives[0].connectionState != CA_LOADING)
         MyAssertHandler(
             "c:\\trees\\cod3\\cod3src\\src\\client\\cl_cgame.cpp",
@@ -914,14 +835,7 @@ void __cdecl CL_InitCGame(int localClientNum, int savegame)
             0,
             "%s",
             "CL_GetLocalClientConnectionState( localClientNum ) == CA_LOADING");
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\client\\client.h",
-            562,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     if (clientConnections[0].serverMessageSequence)
         MyAssertHandler(
             "c:\\trees\\cod3\\cod3src\\src\\client\\cl_cgame.cpp",
@@ -929,14 +843,7 @@ void __cdecl CL_InitCGame(int localClientNum, int savegame)
             0,
             "%s",
             "!CL_GetLocalClientConnection( localClientNum )->serverMessageSequence");
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\client\\client.h",
-            562,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     if (clientConnections[0].serverCommands.header.sent && !cls.demoplaying)
         MyAssertHandler(
             "c:\\trees\\cod3\\cod3src\\src\\client\\cl_cgame.cpp",
@@ -1054,24 +961,10 @@ void __cdecl CL_SetCGameTime(int localClientNum)
 {
     int serverTime; // r11
 
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\client\\client.h",
-            569,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     if (clientUIActives[0].connectionState == CA_ACTIVE)
     {
-        if (localClientNum)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\client\\client.h",
-                555,
-                0,
-                "%s\n\t(localClientNum) = %i",
-                "(localClientNum == 0)",
-                localClientNum);
+        vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
         serverTime = com_time;
         clients[0].serverTime = com_time;
         if (cls.demoplaying)
@@ -1093,14 +986,7 @@ void __cdecl CL_SetCGameTime(int localClientNum)
 
 void __cdecl CL_SetADS(int localClientNum, bool ads)
 {
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\client\\client.h",
-            555,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     clients[0].usingAds = ads;
 }
 
@@ -1171,14 +1057,7 @@ void __cdecl CL_LookupColor(unsigned __int8 c, float *color)
 
 bool __cdecl CL_IsCgameInitialized(int localClientNum)
 {
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\client\\client.h",
-            548,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
+    vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     return clientUIActives[0].cgameInitialized;
 }
 

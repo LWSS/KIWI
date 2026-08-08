@@ -116,10 +116,7 @@ void __cdecl SV_SetConfigstring(int index, const char *val)
             }
         }
     }
-    else if (val)
-    {
-        MyAssertHandler(".\\server_mp\\sv_init_mp.cpp", 114, 0, "%s", "!val");
-    }
+    else iassert(!val);
 }
 
 void __cdecl SV_GetConfigstring(uint index, char *buffer, int bufferSize)
@@ -361,8 +358,7 @@ void __cdecl SV_SetExpectedHunkUsage(char *mapname)
         while (1)
         {
             token = Com_Parse(&buftrav)->token;
-            if (!token)
-                MyAssertHandler(".\\server_mp\\sv_init_mp.cpp", 573, 0, "%s", "token");
+            iassert(token);
             if (!*token)
                 break;
             if (!I_stricmp(token, mapname))
@@ -849,8 +845,7 @@ void __cdecl SV_Shutdown(const char *finalmsg)
 {
     int client; // [esp+0h] [ebp-4h]
 
-    if (!Sys_IsMainThread())
-        MyAssertHandler(".\\server_mp\\sv_init_mp.cpp", 1554, 0, "%s", "Sys_IsMainThread()");
+    iassert(Sys_IsMainThread());
     if (com_sv_running && com_sv_running->current.enabled)
     {
         Com_SyncThreads();
@@ -910,8 +905,7 @@ void __cdecl SV_FinalMessage(const char *message)
 
 void __cdecl SV_CheckThread()
 {
-    if (!Sys_IsMainThread())
-        MyAssertHandler(".\\server_mp\\sv_init_mp.cpp", 1663, 0, "%s", "Sys_IsMainThread()");
+    iassert(Sys_IsMainThread());
 }
 
 

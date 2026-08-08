@@ -64,8 +64,7 @@ void __cdecl FX_GetOriginForTrailElem(
 {
     float effectFrameAxis[3][3]; // [esp+8h] [ebp-24h] BYREF
 
-    if (!outRight || !outUp)
-        MyAssertHandler(".\\EffectsCore\\fx_update_util.cpp", 143, 0, "%s", "(outRight != NULL) && (outUp != NULL)");
+    iassert((outRight != NULL) && (outUp != NULL));
     if ((elemDef->flags & 0xC0) != 0)
         MyAssertHandler(
             ".\\EffectsCore\\fx_update_util.cpp",
@@ -122,8 +121,7 @@ void __cdecl FX_SpatialFrameToOrientation(const FxSpatialFrame *frame, orientati
 
 void __cdecl FX_OrientationDirToWorldDir(const orientation_t *orient, const float *dir, float *out)
 {
-    if (dir == out)
-        MyAssertHandler(".\\EffectsCore\\fx_update_util.cpp", 184, 0, "%s", "dir != out");
+    iassert(dir != out);
     *out = *dir * orient->axis[0][0] + dir[1] * orient->axis[1][0] + dir[2] * orient->axis[2][0];
     out[1] = *dir * orient->axis[0][1] + dir[1] * orient->axis[1][1] + dir[2] * orient->axis[2][1];
     out[2] = *dir * orient->axis[0][2] + dir[1] * orient->axis[1][2] + dir[2] * orient->axis[2][2];
@@ -275,10 +273,8 @@ void __cdecl FX_GetVelocityAtTime(
     float rangeLerp[3]; // [esp+60h] [ebp-10h] BYREF
     float sampleLerp; // [esp+6Ch] [ebp-4h]
 
-    if (!elemDef)
-        MyAssertHandler(".\\EffectsCore\\fx_update_util.cpp", 281, 0, "%s", "elemDef");
-    if (!elemDef->velSamples)
-        MyAssertHandler(".\\EffectsCore\\fx_update_util.cpp", 282, 0, "%s", "elemDef->velSamples");
+    iassert(elemDef);
+    iassert(elemDef->velSamples);
     if (!elemDef->velIntervalCount)
         MyAssertHandler(
             ".\\EffectsCore\\fx_update_util.cpp",
@@ -364,8 +360,7 @@ void __cdecl FX_GetVelocityAtTimeInFrame(
 
 void __cdecl FX_OrientationPosToWorldPos(const orientation_t *orient, const float *pos, float *out)
 {
-    if (pos == out)
-        MyAssertHandler(".\\EffectsCore\\fx_update_util.cpp", 323, 0, "%s", "pos != out");
+    iassert(pos != out);
     *out = *pos * orient->axis[0][0] + orient->origin[0] + pos[1] * orient->axis[1][0] + pos[2] * orient->axis[2][0];
     out[1] = *pos * orient->axis[0][1] + orient->origin[1] + pos[1] * orient->axis[1][1] + pos[2] * orient->axis[2][1];
     out[2] = *pos * orient->axis[0][2] + orient->origin[2] + pos[1] * orient->axis[1][2] + pos[2] * orient->axis[2][2];
@@ -377,8 +372,7 @@ void __cdecl FX_OrientationPosFromWorldPos(const orientation_t *orient, const fl
     float dir_4; // [esp+4h] [ebp-8h]
     float dir_8; // [esp+8h] [ebp-4h]
 
-    if (pos == out)
-        MyAssertHandler(".\\EffectsCore\\fx_update_util.cpp", 334, 0, "%s", "pos != out");
+    iassert(pos != out);
     dir = *pos - orient->origin[0];
     dir_4 = pos[1] - orient->origin[1];
     dir_8 = pos[2] - orient->origin[2];
@@ -430,8 +424,7 @@ void __cdecl FX_ToggleVisBlockerFrame(FxSystem *system)
 {
     FxVisState *visStateSwapCache; // [esp+0h] [ebp-4h]
 
-    if (!system)
-        MyAssertHandler(".\\EffectsCore\\fx_update_util.cpp", 400, 0, "%s", "system");
+    iassert(system);
     visStateSwapCache = (FxVisState *)system->visStateBufferRead;
     system->visStateBufferRead = system->visStateBufferWrite;
     system->visStateBufferWrite = visStateSwapCache;
@@ -447,8 +440,7 @@ char __cdecl FX_CullSphere(const FxCamera *camera, uint frustumPlaneCount, const
     float pointToPlaneDist; // [esp+28h] [ebp-8h]
     uint planeIndex; // [esp+2Ch] [ebp-4h]
 
-    if (!camera->isValid)
-        MyAssertHandler(".\\EffectsCore\\fx_update_util.cpp", 439, 0, "%s", "camera->isValid");
+    iassert(camera->isValid);
     if (frustumPlaneCount != camera->frustumPlaneCount && frustumPlaneCount != 5)
     {
         v4 = va("%i, %i", frustumPlaneCount, camera->frustumPlaneCount);

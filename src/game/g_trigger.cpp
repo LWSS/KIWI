@@ -14,10 +14,8 @@ void __cdecl G_Trigger(gentity_s *self, gentity_s *other)
     int pendingTriggerListSize; // r11
     trigger_info_t *v5; // r11
 
-    if (!self->r.inuse)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_trigger.cpp", 10, 0, "%s", "self->r.inuse");
-    if (!other->r.inuse)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_trigger.cpp", 11, 0, "%s", "other->r.inuse");
+    iassert(self->r.inuse);
+    iassert(other->r.inuse);
     if (Scr_IsSystemActive())
     {
         pendingTriggerListSize = level.pendingTriggerListSize;
@@ -80,8 +78,7 @@ void __cdecl InitSentientTrigger(gentity_s *self)
 {
     int spawnflags; // r11
 
-    if (!self)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_trigger.cpp", 77, 0, "%s", "self");
+    iassert(self);
     spawnflags = self->spawnflags;
     self->r.contents = 0;
     if ((spawnflags & 8) == 0)
@@ -209,8 +206,7 @@ void __cdecl SP_trigger_disk(gentity_s *ent)
 
 void __cdecl Touch_FriendlyChain(gentity_s *self, gentity_s *other, int bTouched)
 {
-    if (!other->sentient)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_trigger.cpp", 239, 0, "%s", "other->sentient");
+    iassert(other->sentient);
     Path_AttachSentientToChainNode(other->sentient, self->target);
     G_Trigger(self, other);
 }
@@ -274,13 +270,7 @@ void __cdecl hurt_touch(gentity_s *self, gentity_s *other, int bTouched)
             0);
         if ((self->spawnflags & 0x20) != 0)
         {
-            if (self->handler != 7)
-                MyAssertHandler(
-                    "c:\\trees\\cod3\\cod3src\\src\\game\\g_trigger.cpp",
-                    319,
-                    0,
-                    "%s",
-                    "self->handler == ENT_HANDLER_TRIGGER_HURT_TOUCH");
+            iassert(self->handler == ENT_HANDLER_TRIGGER_HURT_TOUCH);
             self->handler = ENT_HANDLER_TRIGGER_HURT;
         }
     }
@@ -340,8 +330,7 @@ bool __cdecl Respond_trigger_damage(gentity_s *trigger, int damageType)
 {
     int spawnflags; // r11
 
-    if (!trigger)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_trigger.cpp", 434, 0, "%s", "trigger");
+    iassert(trigger);
     spawnflags = trigger->spawnflags;
     return ((spawnflags & 1) == 0 || damageType != 1)
         && ((spawnflags & 2) == 0 || damageType != 2)
@@ -462,20 +451,10 @@ void __cdecl G_CheckHitTriggerDamage(
     float v25[4]; // [sp+70h] [-2290h] BYREF
     int v26[MAX_GENTITIES];
 
-    if (iMOD >= 0x10)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\g_trigger.cpp",
-            600,
-            0,
-            "iMOD doesn't index MOD_NUM\n\t%i not in [0, %i)",
-            iMOD,
-            16);
-    if (!*modNames[iMOD])
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_trigger.cpp", 601, 0, "%s", "*modNames[iMOD]");
-    if (!vStart)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_trigger.cpp", 602, 0, "%s", "vStart");
-    if (!vEnd)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_trigger.cpp", 603, 0, "%s", "vEnd");
+    bcassert(iMOD, 0x10);
+    iassert(*modNames[iMOD]);
+    iassert(vStart);
+    iassert(vEnd);
     v10 = *vStart;
     v11 = vStart[1];
     v12 = vStart[2];

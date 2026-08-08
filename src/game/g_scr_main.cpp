@@ -747,10 +747,8 @@ void __cdecl GScr_SetSingleAnimScript(ScriptFunctions *functions, scr_animscript
 {
     char v6[112]; // [sp+50h] [-70h] BYREF
 
-    if (!pAnim)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_scr_main.cpp", 283, 0, "%s", "pAnim");
-    if (!name)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_scr_main.cpp", 284, 0, "%s", "name");
+    iassert(pAnim);
+    iassert(name);
     Com_sprintf(v6, 64, "animscripts/%s", name);
     pAnim->func = GScr_SetScriptAndLabel(functions, v6, "main", 1);
     pAnim->name = Scr_AllocString((char*)name, 1);
@@ -965,10 +963,8 @@ void __cdecl Scr_ValidateLocalizedStringRef(unsigned int parmIndex, const char *
     int v6; // r31
     const char *v7; // r3
 
-    if (!token)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_scr_main.cpp", 571, 0, "%s", "token");
-    if (tokenLen < 0)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_scr_main.cpp", 572, 0, "%s", "tokenLen >= 0");
+    iassert(token);
+    iassert(tokenLen >= 0);
     if (tokenLen > 1)
     {
         v6 = 0;
@@ -997,8 +993,7 @@ int __cdecl Scr_ValidateNonLocalizedStringRef(
     const char *v10; // r3
     const char *v12; // r3
 
-    if (!token)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_scr_main.cpp", 590, 0, "%s", "token");
+    iassert(token);
     v8 = 0;
     if (tokenLen <= 0)
         return 1;
@@ -1168,8 +1163,7 @@ void __cdecl Scr_VerifyWeaponIndex(int weaponIndex, const char *weaponName)
 {
     const char *v4; // r3
 
-    if (!weaponName)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_scr_main.cpp", 723, 0, "%s", "weaponName");
+    iassert(weaponName);
     if (!weaponIndex)
     {
         if (I_stricmp("none", weaponName))
@@ -2641,10 +2635,7 @@ void __cdecl ScrCmd_PlayerLinkToDelta(scr_entref_t entref)
         Scr_ParamError(0, "not an entity");
     if (!ent->client)
         Scr_ObjectError("not a player entity");
-    if ((ent->flags & FL_SUPPORTS_LINKTO) == 0)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\g_scr_main.cpp",
-            2760, 0, "%s", "ent->flags & FL_SUPPORTS_LINKTO");
+    iassert(ent->flags & FL_SUPPORTS_LINKTO);
 
     v2 = Scr_GetEntity(0);
     NumParam = Scr_GetNumParam();
@@ -3358,8 +3349,7 @@ int __cdecl GScr_UpdateTagInternal(
     const char *v13; // r3
     const char *v14; // r3
 
-    if (!ent)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_scr_main.cpp", 3557, 0, "%s", "ent");
+    iassert(ent);
     if (ent->s.number == cachedTag->entnum && level.time == cachedTag->time && tagName == cachedTag->name)
         return 1;
     if (!SV_DObjExists(ent))
@@ -4096,8 +4086,7 @@ void __cdecl GScr_StartFiring(scr_entref_t entref)
         Scr_Error(v4);
     }
     pTurretInfo = v2->pTurretInfo;
-    if (!pTurretInfo)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_scr_main.cpp", 4502, 0, "%s", "pTurretInfo");
+    iassert(pTurretInfo);
     pTurretInfo->flags |= 4u;
 }
 
@@ -4118,8 +4107,7 @@ void __cdecl GScr_StopFiring(scr_entref_t entref)
         Scr_Error(v4);
     }
     pTurretInfo = v2->pTurretInfo;
-    if (!pTurretInfo)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_scr_main.cpp", 4528, 0, "%s", "pTurretInfo");
+    iassert(pTurretInfo);
     pTurretInfo->flags &= ~4u;
 }
 
@@ -4159,8 +4147,7 @@ void __cdecl GScr_SetMode(scr_entref_t entref)
         Scr_Error(v4);
     }
     pTurretInfo = v2->pTurretInfo;
-    if (!pTurretInfo)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_scr_main.cpp", 4580, 0, "%s", "pTurretInfo");
+    iassert(pTurretInfo);
     ConstString = Scr_GetConstString(0);
     if (ConstString == scr_const.auto_ai)
     {
@@ -6491,8 +6478,7 @@ int __cdecl GScr_GetLocSelIndex(const char *mtlName)
     const char *v3; // r3
     char v5[1032]; // [sp+50h] [-420h] BYREF
 
-    if (!mtlName)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_scr_main.cpp", 7315, 0, "%s", "mtlName");
+    iassert(mtlName);
     if (!*mtlName)
         return 0;
     v2 = 0;
@@ -7579,8 +7565,7 @@ void __cdecl Scr_FxParamError(unsigned int paramIndex, const char *errorString, 
     const char *v6; // r3
     char v7[1056]; // [sp+50h] [-420h] BYREF
 
-    if (!errorString)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_scr_main.cpp", 8822, 0, "%s", "errorString");
+    iassert(errorString);
     if (fxId)
         SV_GetConfigstring(fxId + 2147, v7, 1024); // CS_EFFECT_NAMES (PC SP, was Xbox 2179)
     else
@@ -8956,8 +8941,7 @@ void __cdecl GScr_SetFlaggedAnimKnobInternal(scr_entref_t entref, unsigned int f
     animIndex = Scr_GetAnim(1, EntAnimTree).index;
 
     unsigned int notifyName = Scr_GetConstString(0);
-    if (!notifyName)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_scr_main.cpp", 10930, 0, "%s", "notifyName");
+    iassert(notifyName);
     Anims = XAnimGetAnims(EntAnimTree);
     if (!XAnimHasTime(Anims, animIndex))
         Scr_ParamError(1u, "blended nonsynchronized animation has no concept of time");
@@ -9070,8 +9054,7 @@ void __cdecl GScr_SetFlaggedAnimKnobAllInternal(scr_entref_t entref, unsigned in
     rootanim = Scr_GetAnim(1, EntAnimTree);
 
     unsigned int notifyName = Scr_GetConstString(0);
-    if (!notifyName)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_scr_main.cpp", 11122, 0, "%s", "notifyName");
+    iassert(notifyName);
     Anims = XAnimGetAnims(EntAnimTree);
 
     if (!XAnimHasTime(Anims, rootanim.index))
@@ -9199,8 +9182,7 @@ LABEL_9:
             funcName = "SetFlaggedAnimRestart";
             break;
         default:
-            if (flags)
-                MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_scr_main.cpp", 11306, 0, "%s", "flags == 0");
+            iassert(flags == 0);
             funcName = "SetFlaggedAnimLimited";
             break;
         }
@@ -11483,16 +11465,9 @@ void __cdecl G_SetAnimTree(gentity_s *ent, scr_animtree_t *animtree)
 {
     XAnimTree_s *pAnimTree; // r30
 
-    if (G_GetEntAnimTree(ent) != ent->pAnimTree)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\g_scr_main.cpp",
-            11421,
-            0,
-            "%s",
-            "G_GetEntAnimTree( ent ) == ent->pAnimTree");
+    iassert(G_GetEntAnimTree( ent ) == ent->pAnimTree);
     G_StopAnimScripted(ent);
-    if (ent->scripted)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_scr_main.cpp", 11424, 0, "%s", "!ent->scripted");
+    iassert(!ent->scripted);
     pAnimTree = ent->pAnimTree;
     if (!animtree)
     {

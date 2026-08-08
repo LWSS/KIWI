@@ -130,8 +130,7 @@ gentity_s *__cdecl SpawnActor(gentity_s *ent, unsigned int targetname, enumForce
         spawn->spawnflags &= ~1u;
         if (SP_actor(spawn))
         {
-            if (!spawn->actor)
-                MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_spawner.cpp", 132, 0, "%s", "spawn->actor");
+            iassert(spawn->actor);
             if ((ent->spawnflags & 8) != 0)
             {
                 for (i = Sentient_FirstSentient(-1); i; i = Sentient_NextSentient(i, -1))
@@ -232,13 +231,7 @@ int __cdecl SP_actor_spawner(gentity_s *pEnt)
     int v3; // r31
     const char **i; // r30
 
-    if (!level.spawnVar.spawnVarsValid)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\actor_spawner.cpp",
-            244,
-            0,
-            "%s",
-            "level.spawnVar.spawnVarsValid");
+    iassert(level.spawnVar.spawnVarsValid);
     count = pEnt->count;
     pEnt->clipmask = 0;
     pEnt->r.contents = 0;

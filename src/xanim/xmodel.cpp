@@ -331,8 +331,7 @@ void __cdecl PrefetchArray_XSurfaceCollisionNode_(const XSurfaceCollisionNode *m
 {
     const unsigned __int8 *memIter; // [esp+0h] [ebp-8h]
 
-    if (!elementCount)
-        MyAssertHandler(".\\xanim\\xmodel.cpp", 883, 0, "%s", "elementCount");
+    iassert(elementCount);
     for (memIter = (const unsigned __int8 *)((uintptr_t)mem & 0xFFFFFF80); 
         memIter <= (const unsigned __int8 *)(((uintptr_t) & mem[elementCount - 1].childCount + 1) & 0xFFFFFF80);
         memIter += 128)
@@ -350,8 +349,7 @@ char __cdecl XSurfaceVisitTrianglesInAabb(
     XSurfaceGetTriCandidatesLocals locals; // [esp+6Ch] [ebp-2B0h] BYREF
     XRigidVertList *vertList; // [esp+318h] [ebp-4h]
 
-    if (surface->deformed)
-        MyAssertHandler(".\\xanim\\xmodel.cpp", 1093, 0, "%s", "!surface->deformed");
+    iassert(!surface->deformed);
     if (vertListIndex >= surface->vertListCount)
         MyAssertHandler(
             ".\\xanim\\xmodel.cpp",
@@ -362,8 +360,7 @@ char __cdecl XSurfaceVisitTrianglesInAabb(
             vertListIndex);
     vertList = &surface->vertList[vertListIndex];
     locals.tree = vertList->collisionTree;
-    if (!locals.tree)
-        MyAssertHandler(".\\xanim\\xmodel.cpp", 1098, 0, "%s", "locals.tree");
+    iassert(locals.tree);
     PrefetchArray_XSurfaceCollisionNode_(locals.tree->nodes, 1u);
     locals.visitorFunc = visitorFunc;
     locals.visitorContext = visitorContext;
@@ -442,8 +439,7 @@ void __cdecl PrefetchArray_GfxPackedVertex_(const GfxPackedVertex *mem, uint ele
 {
     const unsigned __int8 *memIter; // [esp+0h] [ebp-8h]
 
-    if (!elementCount)
-        MyAssertHandler(".\\xanim\\xmodel.cpp", 883, 0, "%s", "elementCount");
+    iassert(elementCount);
     for (memIter = (const unsigned __int8*)((uintptr_t)mem & 0xFFFFFF80); 
         memIter <= (const unsigned __int8*)(((uintptr_t) & mem[elementCount - 1].tangent + 3) & 0xFFFFFF80);
         memIter += 128)
@@ -483,8 +479,7 @@ void __cdecl PrefetchArray_XSurfaceCollisionLeaf_(const XSurfaceCollisionLeaf *m
 {
     const unsigned __int8 *memIter; // [esp+0h] [ebp-8h]
 
-    if (!elementCount)
-        MyAssertHandler(".\\xanim\\xmodel.cpp", 883, 0, "%s", "elementCount");
+    iassert(elementCount);
     for (memIter = (const unsigned __int8*)((uintptr_t)mem & 0xFFFFFF80);
         memIter <= (const unsigned __int8*)(((uintptr_t) & mem[elementCount - 1].triangleBeginIndex + 1) & 0xFFFFFF80);
         memIter += 128)

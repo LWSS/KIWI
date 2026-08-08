@@ -289,8 +289,7 @@ dxWorld *__cdecl ODE_BodyGetWorld(dxBody *b)
 }
 dxGeom *__cdecl ODE_GeomTransformUpdateGeomOrientation(dxGeomTransform *g)
 {
-	if (!g)
-		MyAssertHandler(".\\physics\\ode\\src\\collision_transform.cpp", 310, 0, "%s", "g");
+	iassert(g);
 	if (g->type != 6)
 		MyAssertHandler(".\\physics\\ode\\src\\collision_transform.cpp", 311, 0, "%s", "g->type == dGeomTransformClass");
 	if (!g->obj)

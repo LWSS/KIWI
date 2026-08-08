@@ -672,8 +672,7 @@ void __cdecl CG_UpdateClientDobjPartBits(centity_s *cent, int entnum, int localC
     DObj_s *obj; // [esp+0h] [ebp-14h]
     uint oldPartBits[4]; // [esp+4h] [ebp-10h] BYREF
 
-    if (!cent)
-        MyAssertHandler(".\\cgame_mp\\cg_ents_mp.cpp", 632, 0, "%s", "cent");
+    iassert(cent);
     obj = Com_GetClientDObj(entnum, localClientNum);
     if (obj)
     {
@@ -958,12 +957,9 @@ void __cdecl CG_InterpolateEntityPosition(cg_s *cgameGlob, centity_s *cent)
     clientInfo_t *ci; // [esp+ACh] [ebp-10h]
     float current[3]; // [esp+B0h] [ebp-Ch] BYREF
 
-    if (!cgameGlob->snap)
-        MyAssertHandler(".\\cgame_mp\\cg_ents_mp.cpp", 1186, 0, "%s", "cgameGlob->snap");
-    if (!cgameGlob->nextSnap)
-        MyAssertHandler(".\\cgame_mp\\cg_ents_mp.cpp", 1187, 0, "%s", "cgameGlob->nextSnap");
-    if (cent->nextState.lerp.pos.trType == TR_PHYSICS)
-        MyAssertHandler(".\\cgame_mp\\cg_ents_mp.cpp", 1188, 0, "%s", "cent->nextState.lerp.pos.trType != TR_PHYSICS");
+    iassert(cgameGlob->snap);
+    iassert(cgameGlob->nextSnap);
+    iassert(cent->nextState.lerp.pos.trType != TR_PHYSICS);
     f = cgameGlob->frameInterpolation;
     BG_EvaluateTrajectory(&cent->currentState.pos, cgameGlob->snap->serverTime, current);
     BG_EvaluateTrajectory(&cent->nextState.lerp.pos, cgameGlob->nextSnap->serverTime, next);
@@ -993,14 +989,7 @@ void __cdecl CG_InterpolateEntityPosition(cg_s *cgameGlob, centity_s *cent)
     cent->pose.angles[2] = v10 * f + v28;
     if (cent->nextState.eType == ET_PLAYER)
     {
-        if (cent->nextState.clientNum >= 0x40u)
-            MyAssertHandler(
-                ".\\cgame_mp\\cg_ents_mp.cpp",
-                1208,
-                0,
-                "cent->nextState.clientNum doesn't index MAX_CLIENTS\n\t%i not in [0, %i)",
-                cent->nextState.clientNum,
-                64);
+        bcassert(cent->nextState.clientNum, 0x40u);
         ci = &cgameGlob->bgs.clientinfo[cent->nextState.clientNum];
         movementDir = (float)cent->currentState.u.player.movementDir;
         v26 = (float)cent->nextState.lerp.u.player.movementDir;
@@ -1084,8 +1073,7 @@ void __cdecl CG_CreatePhysicsObject(int localClientNum, centity_s *cent)
     position[2] = cent->currentState.pos.trBase[2];
     AnglesToQuat(cent->currentState.apos.trBase, quat);
     obj = Com_GetClientDObj(cent->nextState.number, localClientNum);
-    if (!obj)
-        MyAssertHandler(".\\cgame_mp\\cg_ents_mp.cpp", 1237, 0, "%s", "obj");
+    iassert(obj);
     physPreset = DObjGetPhysPreset(obj);
     if (physPreset)
     {
@@ -1155,15 +1143,8 @@ char __cdecl CG_ExpiredLaunch(int localClientNum, centity_s *cent)
 
 void __cdecl CG_CalcEntityRagdollPositions(int localClientNum, centity_s *cent)
 {
-    if (!cent)
-        MyAssertHandler(".\\cgame_mp\\cg_ents_mp.cpp", 1400, 0, "%s", "cent");
-    if (!CG_IsRagdollTrajectory(&cent->currentState.pos) && !CG_IsRagdollTrajectory(&cent->currentState.apos))
-        MyAssertHandler(
-            ".\\cgame_mp\\cg_ents_mp.cpp",
-            1401,
-            0,
-            "%s",
-            "CG_IsRagdollTrajectory( &cent->currentState.pos ) || CG_IsRagdollTrajectory( &cent->currentState.apos )");
+    iassert(cent);
+    iassert(CG_IsRagdollTrajectory( &cent->currentState.pos ) || CG_IsRagdollTrajectory( &cent->currentState.apos ));
     if (!cent->pose.ragdollHandle && !cent->pose.killcamRagdollHandle)
         CG_CreateRagdollObject(localClientNum, cent);
     if (cent->pose.ragdollHandle || cent->pose.killcamRagdollHandle)
@@ -1242,8 +1223,7 @@ DObj_s *__cdecl CG_PreProcess_GetDObj(int localClientNum, int entIndex, int entT
     }
     if (!obj && model)
     {
-        if (cent->tree)
-            MyAssertHandler(".\\cgame_mp\\cg_ents_mp.cpp", 1568, 0, "%s", "!cent->tree");
+        iassert(!cent->tree);
         anims = CG_GetAnimations(localClientNum, entIndex, entType);
         if (anims)
             Tree = XAnimCreateTree(anims, (void *(__cdecl *)(int))CG_AllocAnimTree);
@@ -1306,12 +1286,10 @@ XAnim_s *__cdecl CG_GetHelicopterAnims(centity_s *cent)
 {
     XAnim_s *pAnims; // [esp+4h] [ebp-4h]
 
-    if (!cent->nextState.weapon)
-        MyAssertHandler(".\\cgame_mp\\cg_ents_mp.cpp", 230, 0, "%s", "cent->nextState.weapon");
+    iassert(cent->nextState.weapon);
     BG_GetWeaponDef(cent->nextState.weapon);
     pAnims = XAnimCreateAnims("helicopter", 2u, (void *(__cdecl *)(int))Hunk_AllocXAnimClient);
-    if (!pAnims)
-        MyAssertHandler(".\\cgame_mp\\cg_ents_mp.cpp", 234, 0, "%s", "pAnims");
+    iassert(pAnims);
     XAnimBlend(pAnims, 0, "root", 1u, 1u, 0);
     BG_CreateXAnim(pAnims, 1u, "bh_rotors");
     return pAnims;
@@ -1387,8 +1365,7 @@ void __cdecl CG_SetUnionType(int localClientNum, centity_s *cent)
     case ET_HELICOPTER:
     case ET_VEHICLE:
         cent->pose.eTypeUnion = cent->nextState.eType;
-        if (cent->pose.eTypeUnion != cent->nextState.eType)
-            MyAssertHandler(".\\cgame_mp\\cg_ents_mp.cpp", 1674, 0, "%s", "cent->pose.eTypeUnion == cent->nextState.eType");
+        iassert(cent->pose.eTypeUnion == cent->nextState.eType);
         break;
     default:
         cent->pose.eTypeUnion = ET_GENERAL;
@@ -1520,8 +1497,7 @@ void __cdecl CG_Item(int localClientNum, centity_s *cent)
         weapIdx = cent->nextState.index.brushmodel % 128;
         weapModel = cent->nextState.index.brushmodel / 128;
         weapDef = BG_GetWeaponDef(weapIdx);
-        if (!weapDef)
-            MyAssertHandler(".\\cgame_mp\\cg_ents_mp.cpp", 127, 0, "%s", "weapDef");
+        iassert(weapDef);
         if (!weapDef->worldModel[weapModel])
             Com_Error(ERR_DROP, "No XModel loaded for item index %i, weap index %i, model %i (%s)", cent->nextState.index.brushmodel, weapIdx, weapModel, weapDef->szDisplayName);
         obj = CG_PreProcess_GetDObj(
@@ -1624,14 +1600,7 @@ void __cdecl CG_Missile(int localClientNum, centity_s *cent)
         {
             if (cent->nextState.weapon >= BG_GetNumWeapons())
                 cent->nextState.weapon = 0;
-            if (localClientNum)
-                MyAssertHandler(
-                    "c:\\trees\\cod3\\src\\cgame_mp\\cg_local_mp.h",
-                    1095,
-                    0,
-                    "%s\n\t(localClientNum) = %i",
-                    "(localClientNum == 0)",
-                    localClientNum);
+            vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
             weapDef = BG_GetWeaponDef(cent->nextState.weapon);
             if (weapDef->projectileSound)
                 CG_PlaySoundAlias(localClientNum, cent->nextState.number, cent->pose.origin, weapDef->projectileSound);
@@ -1761,15 +1730,7 @@ FxEffect *__cdecl CG_StartFx(int localClientNum, centity_s *cent, int startAtTim
 
     AnglesToAxis(cent->nextState.lerp.apos.trBase, axis);
     fxId = cent->nextState.un1.scale;
-    if (fxId < 1 || fxId > 99)
-        MyAssertHandler(
-            ".\\cgame_mp\\cg_ents_mp.cpp",
-            1024,
-            0,
-            "fxId not in [1, MAX_EFFECT_NAMES - 1]\n\t%i not in [%i, %i]",
-            fxId,
-            1,
-            99);
+    rangeassert(fxId, 1, 99);
     cgs = CG_GetLocalClientStaticGlobals(localClientNum);
     fxDef = cgs->fxs[fxId];
     iassert(fxDef);
@@ -1885,16 +1846,8 @@ void __cdecl CG_PrimaryLight(int localClientNum, centity_s *cent)
 
 const ComPrimaryLight *__cdecl Com_GetPrimaryLight(uint primaryLightIndex)
 {
-    if (!comWorld.isInUse)
-        MyAssertHandler("c:\\trees\\cod3\\src\\cgame_mp\\../qcommon/com_bsp_api.h", 31, 0, "%s", "comWorld.isInUse");
-    if (primaryLightIndex >= comWorld.primaryLightCount)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\src\\cgame_mp\\../qcommon/com_bsp_api.h",
-            32,
-            0,
-            "primaryLightIndex doesn't index comWorld.primaryLightCount\n\t%i not in [0, %i)",
-            primaryLightIndex,
-            comWorld.primaryLightCount);
+    iassert(comWorld.isInUse);
+    bcassert(primaryLightIndex, comWorld.primaryLightCount);
     return &comWorld.primaryLights[primaryLightIndex];
 }
 
@@ -1960,8 +1913,7 @@ void __cdecl CG_ClampPrimaryLightDir(GfxLight *light, const ComPrimaryLight *ref
 
 void __cdecl CG_GetPoseOrigin(const cpose_t *pose, float *origin)
 {
-    if (!pose)
-        MyAssertHandler(".\\cgame_mp\\cg_ents_mp.cpp", 1769, 0, "%s", "pose");
+    iassert(pose);
     *origin = pose->origin[0];
     origin[1] = pose->origin[1];
     origin[2] = pose->origin[2];
@@ -1969,8 +1921,7 @@ void __cdecl CG_GetPoseOrigin(const cpose_t *pose, float *origin)
 
 void __cdecl CG_GetPoseAngles(const cpose_t *pose, float *angles)
 {
-    if (!pose)
-        MyAssertHandler(".\\cgame_mp\\cg_ents_mp.cpp", 1776, 0, "%s", "pose");
+    iassert(pose);
     *angles = pose->angles[0];
     angles[1] = pose->angles[1];
     angles[2] = pose->angles[2];
@@ -1985,8 +1936,7 @@ void __cdecl CG_PredictiveSkinCEntity(GfxSceneEntity *sceneEnt)
 {
     cpose_t *pose; // [esp+0h] [ebp-4h]
 
-    if (!sceneEnt)
-        MyAssertHandler(".\\cgame_mp\\cg_ents_mp.cpp", 1810, 0, "%s", "sceneEnt");
+    iassert(sceneEnt);
     pose = sceneEnt->info.pose;
     if (pose->cullIn == 1)
     {

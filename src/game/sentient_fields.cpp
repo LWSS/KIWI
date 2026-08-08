@@ -31,8 +31,7 @@ void __cdecl SentientScr_ReadOnly(sentient_s *pSelf, const sentient_fields_s *pF
 {
     const char *v3; // r3
 
-    if (!pSelf)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\sentient_fields.cpp", 48, 0, "%s", "pSelf");
+    iassert(pSelf);
     v3 = va("sentient property '%s' is read-only", pField->name);
     Scr_Error(v3);
 }
@@ -126,8 +125,7 @@ void __cdecl Scr_SetSentientField(sentient_s *sentient, unsigned int offset)
     const sentient_fields_s *v4; // r4
     void(__cdecl * setter)(sentient_s *, const sentient_fields_s *); // r11
 
-    if (!sentient)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\sentient_fields.cpp", 135, 0, "%s", "sentient");
+    iassert(sentient);
     if (offset >= 0xD)
         MyAssertHandler(
             "c:\\trees\\cod3\\cod3src\\src\\game\\sentient_fields.cpp",
@@ -148,8 +146,7 @@ void __cdecl Scr_GetSentientField(sentient_s *sentient, unsigned int offset)
     const sentient_fields_s *v4; // r4
     void(__cdecl * getter)(sentient_s *, const sentient_fields_s *); // r11
 
-    if (!sentient)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\sentient_fields.cpp", 159, 0, "%s", "sentient");
+    iassert(sentient);
     if (offset >= 0xD)
         MyAssertHandler(
             "c:\\trees\\cod3\\cod3src\\src\\game\\sentient_fields.cpp",
