@@ -410,7 +410,6 @@ void __cdecl SnapAngles(float *vAngles)
 void __cdecl SV_PointTraceToEntity(const pointtrace_t *clip, svEntity_s *check, trace_t *trace)
 {
     const char *v3; // eax
-    __int64 v4; // [esp+8h] [ebp-F8h]
     float v5; // [esp+1Ch] [ebp-E4h]
     uint16_t number; // [esp+22h] [ebp-DEh]
     float v7; // [esp+28h] [ebp-D8h]
@@ -545,15 +544,14 @@ void __cdecl SV_PointTraceToEntity(const pointtrace_t *clip, svEntity_s *check, 
         if (!touch->r.bmodel)
             angles = vec3_origin;
         oldFraction = trace->fraction;
-        HIDWORD(v4) = clip->contentmask;
-        LODWORD(v4) = clipHandle;
         CM_TransformedBoxTrace(
             trace,
             clip->extents.start,
             clip->extents.end,
             vec3_origin,
             vec3_origin,
-            v4,
+            clipHandle,
+            clip->contentmask,
             touch->r.currentOrigin,
             angles);
         if (oldFraction > trace->fraction)
@@ -582,7 +580,6 @@ void __cdecl SV_PointTraceToEntity(const pointtrace_t *clip, svEntity_s *check, 
 
 void __cdecl SV_ClipMoveToEntity(const moveclip_t *clip, svEntity_s *check, trace_t *trace)
 {
-    __int64 v3; // [esp-Ch] [ebp-40h]
     uint16_t number; // [esp+6h] [ebp-2Eh]
     gentity_s *touch; // [esp+8h] [ebp-2Ch]
     uint clipHandle; // [esp+Ch] [ebp-28h]
@@ -610,15 +607,14 @@ void __cdecl SV_ClipMoveToEntity(const moveclip_t *clip, svEntity_s *check, trac
             if (!touch->r.bmodel)
                 angles = vec3_origin;
             oldFraction = trace->fraction;
-            HIDWORD(v3) = clip->contentmask;
-            LODWORD(v3) = clipHandle;
             CM_TransformedBoxTrace(
                 trace,
                 clip->extents.start,
                 clip->extents.end,
                 clip->mins,
                 clip->maxs,
-                v3,
+                clipHandle,
+                clip->contentmask,
                 touch->r.currentOrigin,
                 angles);
             if (oldFraction > (double)trace->fraction)

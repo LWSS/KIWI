@@ -443,7 +443,6 @@ void __cdecl CG_ClipMoveToEntities_r(
 
 void __cdecl CG_ClipMoveToEntity(const moveclip_t *clip, uint entIndex, trace_t *results)
 {
-    int64_t v3; // [esp-Ch] [ebp-6Ch]
     uint16_t number; // [esp+6h] [ebp-5Ah]
     int contents; // [esp+Ch] [ebp-54h]
     float mins[3]; // [esp+10h] [ebp-50h] BYREF
@@ -491,15 +490,14 @@ void __cdecl CG_ClipMoveToEntity(const moveclip_t *clip, uint entIndex, trace_t 
                     angles[2] = 0.0;
                 }
                 oldFraction = results->fraction;
-                HIDWORD(v3) = clip->contentmask;
-                LODWORD(v3) = cmodel;
                 CM_TransformedBoxTrace(
                     results,
                     clip->extents.start,
                     clip->extents.end,
                     clip->mins,
                     clip->maxs,
-                    v3,
+                    cmodel,
+                    clip->contentmask,
                     cent->pose.origin,
                     angles);
                 if (oldFraction > (double)results->fraction)
@@ -631,7 +629,6 @@ void __cdecl CG_PointTraceToEntities_r(
 
 void __cdecl CG_PointTraceToEntity(const pointtrace_t *clip, uint entIndex, trace_t *results)
 {
-    int64_t v3; // [esp-Ch] [ebp-C4h]
     DObj_s *v4; // [esp+8h] [ebp-B0h]
     uint16_t number; // [esp+Eh] [ebp-AAh]
     float mins[3]; // [esp+18h] [ebp-A0h] BYREF
@@ -733,15 +730,14 @@ void __cdecl CG_PointTraceToEntity(const pointtrace_t *clip, uint entIndex, trac
                             angles[2] = 0.0;
                         }
                         oldFraction = results->fraction;
-                        HIDWORD(v3) = clip->contentmask;
-                        LODWORD(v3) = cmodel;
                         CM_TransformedBoxTrace(
                             results,
                             clip->extents.start,
                             clip->extents.end,
                             vec3_origin,
                             vec3_origin,
-                            v3,
+                            cmodel,
+                            clip->contentmask,
                             cent->pose.origin,
                             angles);
                         if (oldFraction > (double)results->fraction)

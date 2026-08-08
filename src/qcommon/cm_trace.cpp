@@ -1523,7 +1523,8 @@ void __cdecl CM_TransformedBoxTrace(
     const float *end,
     const float *mins,
     const float *maxs,
-    __int64 model,
+    uint model,
+    int brushmask,
     const float *origin,
     const float *angles)
 {
@@ -1565,12 +1566,12 @@ void __cdecl CM_TransformedBoxTrace(
                 v8);
         }
         oldFraction = results->fraction;
-        CM_Trace(results, start_l, end_l, symetricSize[0], symetricSize[1], model, SHIDWORD(model));
+        CM_Trace(results, start_l, end_l, symetricSize[0], symetricSize[1], model, brushmask);
     }
     else
     {
         AnglesToAxis(angles, matrix);
-        CM_TransformedBoxTraceRotated(results, start, end, mins, maxs, model, SHIDWORD(model), origin, matrix);
+        CM_TransformedBoxTraceRotated(results, start, end, mins, maxs, model, brushmask, origin, matrix);
     }
 }
 
@@ -1580,13 +1581,14 @@ void __cdecl CM_TransformedBoxTraceExternal(
     const float *end,
     const float *mins,
     const float *maxs,
-    __int64 model,
+    uint model,
+    int brushmask,
     const float *origin,
     const float *angles)
 {
     memset((uint8_t *)results, 0, sizeof(trace_t));
     results->fraction = 1.0;
-    CM_TransformedBoxTrace(results, start, end, mins, maxs, model, origin, angles);
+    CM_TransformedBoxTrace(results, start, end, mins, maxs, model, brushmask, origin, angles);
 }
 
 int __cdecl CM_BoxSightTrace(

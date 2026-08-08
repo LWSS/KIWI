@@ -918,7 +918,8 @@ void __cdecl CM_TransformedBoxTrace(
     const float *end,
     const float *mins,
     const float *maxs,
-    __int64 model,
+    uint model,
+    int brushmask,
     const float *origin,
     const float *angles);
 void __cdecl CM_TransformedBoxTraceExternal(
@@ -927,7 +928,8 @@ void __cdecl CM_TransformedBoxTraceExternal(
     const float *end,
     const float *mins,
     const float *maxs,
-    __int64 model,
+    uint model,
+    int brushmask,
     const float *origin,
     const float *angles);
 int __cdecl CM_BoxSightTrace(

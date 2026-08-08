@@ -129,7 +129,8 @@ bool __cdecl SV_EntityContact(const float *mins, const float *maxs, const gentit
             vec3_origin,
             mins,
             maxs,
-            model | 0xFFFFFFFF00000000uLL,
+            model,
+            -1,
             gEnt->r.currentOrigin,
             gEnt->r.currentAngles);
         return trace.startsolid;
