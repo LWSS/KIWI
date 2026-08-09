@@ -6,11 +6,14 @@
 // Save: Map_SaveFile 0x486c00 -> Map_SaveFileToPerforce -> MapFile_WriteEntity.
 
 #include "stdafx.h"
-#include <afxdlgs.h>             // CFileDialog — TU-local, NOT in the shared PCH (it reorders
-                                 // <windows.h> ahead of the DXSDK headers and breaks gfx_d3d).
+#include <commdlg.h>             // GetSaveFileNameA (Map_SaveFile's save-as picker; was
+                                 // <afxdlgs.h>/CFileDialog — U-GUARD-2 raw rewrite)
 #include "qe3.h"
 #include "mainfrm.h"
+#include "xywnd.h"               // xywndState_t / Ed_ActiveXY (U-GLOBALS)
 #include "prefs.h"               // g_PrefsDlg (m_bCleanTinyBrushes / m_fTinySize)
+#include <map>                   // target-name remap (was MFC CMapStringToString before U-SHIM removal)
+#include <string>
 #include <universal/q_parse.h>  // Com_ParseExt, parseInfo_t, Com_GetParseThreadInfo
 
 // ─── Assert and Sys_Printf from engine / radiant ──────────────────────────────
@@ -34,7 +37,6 @@ extern void        *zero;               // empty string sentinel (engine_stubs.c
 
 // ─── globals from engine (qe3.h) ──────────────────────────────────────────────
 extern qeglobals_t  g_qeglobals;        // 0x25F39C0
-extern CMainFrame  *g_pParentWnd;       // 0x25D5A70
 
 entity_s    *world_entity = nullptr;    // 0x25D5B30
 
@@ -189,9 +191,23 @@ extern void         OrientationPosToWorldPos( float *out, const float *pos, cons
 // sub_4BA6B0 (0x4BA6B0) — VectorRotate: out[i] = matrix_row(i+1) · dir.  Ported in draw.cpp.
 extern void         VectorRotateByAxis( float *out, const float *axisMatrix, const float *dir );
 
-// CXYWnd class methods — map.cpp calls these via g_pParentWnd->m_pXYWnd
-// They are member functions; map.cpp calls them as CXYWnd::Paste(ptr) etc.
-// Since mainfrm.h includes CXYWnd class declarations, these are resolved.
+// U-GLOBALS: the shell-agnostic viewport accessors (camwnd.cpp / xywnd.h).  Neither returns
+// NULL, so the old `g_pParentWnd->m_pCamWnd` / `->m_pXYWnd` guards around pure state access are
+// gone.  U-GUARD-2: the last four — the CXYWnd methods Copy/Paste/PositionView/SetViewType —
+// now go through U-CMD-1's free functions below, so their `g_pParentWnd &&` liveness guards are
+// gone too (same reasoning: the XY view is a singleton and Ed_ActiveXY() is never NULL).
+extern camera_s    *Ed_Camera();                      // camwnd.cpp
+extern void         CamWnd_ClearLightPreviews();      // camwnd.cpp (was m_pCamWnd->light_preview_count = 0)
+
+// U-CMD-1's extracted CXYWnd command bodies (mainfrm.cpp) — the shell-agnostic replacements
+// for m_pActiveXY->Copy() / ->Paste() / m_pXYWnd->PositionView() / ->SetViewType().  Each is
+// the SAME body the MFC method now forwards to (mainfrm.cpp:5994-5997), so the retarget is
+// behaviour-identical in both shells.  SetViewType takes the plain ED_VIEW_* int (xywnd.h),
+// which is exactly the value CXYWnd::EViewType carried.
+extern void         XYWnd_CopyClip();                 // was CXYWnd::Copy
+extern void         XYWnd_PasteClip();                // was CXYWnd::Paste
+extern void         XYWnd_PositionView();             // was CXYWnd::PositionView (0x46DE10)
+extern void         XYWnd_SetViewType( int vt );      // was CXYWnd::SetViewType  (0x46DF90)
 
 // VA — radiant rotating-buffer va() with slot index
 extern char *VA( int slot, const char *fmt, ... );
@@ -259,11 +275,8 @@ void Map_Free()
         HWND activeWnd = GetActiveWindow();
         if ( MessageBoxA( activeWnd, "Copy selection?", "Radiant", 0x24u ) == IDYES )
         {
-            if ( g_pParentWnd && g_pParentWnd->m_pActiveXY )
-            {
-                g_bRestoreBetween = true;
-                g_pParentWnd->m_pActiveXY->Copy();
-            }
+            g_bRestoreBetween = true;
+            XYWnd_CopyClip();   // U-GUARD-2: was g_pParentWnd->m_pActiveXY->Copy()
         }
     }
 }
@@ -475,42 +488,36 @@ void Map_LoadFromFile( const char *path )
     if ( !startEnt )
         startEnt = Entity_GetClass( "info_player_deathmatch" );
 
-    // Position camera from start entity
-    if ( g_pParentWnd && g_pParentWnd->m_pCamWnd )
+    // Position camera from start entity (U-GLOBALS: Ed_Camera()/Ed_ActiveXY(), never NULL)
     {
-        g_pParentWnd->m_pCamWnd->camera.angles[0] = 0.0f;
+        camera_s     *cam = Ed_Camera();
+        xywndState_t *xy  = Ed_ActiveXY();
+        cam->angles[0] = 0.0f;
         if ( startEnt )
         {
             float origin[3] = { 0.0f, 0.0f, 0.0f };
             Entity_GetVec3ForKey( startEnt, origin, "origin" );
             origin[2] += 60.0f;
 
-            g_pParentWnd->m_pCamWnd->camera.origin[0] = origin[0];
-            g_pParentWnd->m_pCamWnd->camera.origin[1] = origin[1];
-            g_pParentWnd->m_pCamWnd->camera.origin[2] = origin[2];
+            cam->origin[0] = origin[0];
+            cam->origin[1] = origin[1];
+            cam->origin[2] = origin[2];
 
-            if ( g_pParentWnd->m_pXYWnd )
-            {
-                g_pParentWnd->m_pXYWnd->m_vOrigin[0] = origin[0];
-                g_pParentWnd->m_pXYWnd->m_vOrigin[1] = origin[1];
-                g_pParentWnd->m_pXYWnd->m_vOrigin[2] = origin[2];
-            }
+            xy->m_vOrigin[0] = origin[0];
+            xy->m_vOrigin[1] = origin[1];
+            xy->m_vOrigin[2] = origin[2];
 
-            Entity_GetVec3ForKey( startEnt,
-                                  g_pParentWnd->m_pCamWnd->camera.angles, "angles" );
+            Entity_GetVec3ForKey( startEnt, cam->angles, "angles" );
         }
         else
         {
-            g_pParentWnd->m_pCamWnd->camera.angles[1] = 0.0f;
-            g_pParentWnd->m_pCamWnd->camera.origin[0] = 0.0f;
-            g_pParentWnd->m_pCamWnd->camera.origin[1] = 0.0f;
-            g_pParentWnd->m_pCamWnd->camera.origin[2] = 0.0f;
-            if ( g_pParentWnd->m_pXYWnd )
-            {
-                g_pParentWnd->m_pXYWnd->m_vOrigin[0] = 0.0f;
-                g_pParentWnd->m_pXYWnd->m_vOrigin[1] = 0.0f;
-                g_pParentWnd->m_pXYWnd->m_vOrigin[2] = 0.0f;
-            }
+            cam->angles[1] = 0.0f;
+            cam->origin[0] = 0.0f;
+            cam->origin[1] = 0.0f;
+            cam->origin[2] = 0.0f;
+            xy->m_vOrigin[0] = 0.0f;
+            xy->m_vOrigin[1] = 0.0f;
+            xy->m_vOrigin[2] = 0.0f;
         }
     }
 
@@ -548,8 +555,8 @@ void Map_LoadFromFile( const char *path )
     Layers_02();
 
     // ── Between-map clipboard paste ───────────────────────────────────────────
-    if ( g_pParentWnd && g_pParentWnd->m_pActiveXY && g_bRestoreBetween )
-        g_pParentWnd->m_pActiveXY->Paste();
+    if ( g_bRestoreBetween )
+        XYWnd_PasteClip();   // U-GUARD-2: was g_pParentWnd->m_pActiveXY->Paste()
     g_bRestoreBetween = false;
 
     if ( hCursor )
@@ -584,14 +591,21 @@ void Map_SaveFile( const char *path, char a1, char a2 )
     char *savedPathHeap = nullptr;        // _strdup'd copy (binary's v25/var_9F4)
     if ( !path || !path[0] )
     {
-        // The binary takes the parent from AfxGetThread(); the port uses g_pParentWnd,
-        // as every other CFileDialog site does.
-        CFileDialog dlg( FALSE, "map", nullptr,
-                         OFN_HIDEREADONLY | OFN_OVERWRITEPROMPT,
-                         "Map Files (*.map)|*.map||", g_pParentWnd );
-        if ( dlg.DoModal() != IDOK )      // 0x486ca1: DoModal()!=1 → cancel
+        // Raw Save picker (was CFileDialog — same filter/flags/def-ext; CFileDialog is
+        // a GetSaveFileNameA wrapper, so behavior is identical and the site is
+        // shell-agnostic; owner = d_hwndMain, live in both shells).
+        char picked[MAX_PATH] = { 0 };
+        OPENFILENAMEA ofn = { 0 };
+        ofn.lStructSize = sizeof( ofn );
+        ofn.hwndOwner   = g_qeglobals.d_hwndMain;
+        ofn.lpstrFilter = "Map Files (*.map)\0*.map\0\0";
+        ofn.lpstrFile   = picked;
+        ofn.nMaxFile    = sizeof( picked );
+        ofn.lpstrDefExt = "map";
+        ofn.Flags       = OFN_HIDEREADONLY | OFN_OVERWRITEPROMPT;
+        if ( !GetSaveFileNameA( &ofn ) )  // 0x486ca1: DoModal()!=1 → cancel
             return;
-        savedPathHeap = _strdup( dlg.GetPathName() );  // 0x486cbf: m_ofn.lpstrFile
+        savedPathHeap = _strdup( picked );             // 0x486cbf: m_ofn.lpstrFile
         path = savedPathHeap;
         if ( !path || !path[0] )          // 0x486cec: empty pick → fall through (no-op)
         {
@@ -864,7 +878,7 @@ extern void       Select_GetBounds( float *mins, float *maxs );  // select.cpp (
 void Map_RegionXY()
 {
     Map_RegionOff();
-    CXYWnd *xy = g_pParentWnd->m_pXYWnd;
+    xywndState_t *xy = Ed_ActiveXY();   // U-GLOBALS: was g_pParentWnd->m_pXYWnd
     // Half the view extent in world units, centred on m_vOrigin.
     region_mins[0] = xy->m_vOrigin[0] - (double)xy->m_nWidth  * 0.5 / xy->m_fScale;
     region_maxs[0] = (double)xy->m_nWidth  * 0.5 / xy->m_fScale + xy->m_vOrigin[0];
@@ -1211,12 +1225,12 @@ char MapFile_WriteEntity( entity_s_def *a1, FILE *a2, char a3 )
         {
             float camOri[3] = { 0, 0, 0 };
             float camAng[3] = { 0, 0, 0 };
-            if ( g_pParentWnd && g_pParentWnd->m_pCamWnd )
             {
-                camOri[0] = g_pParentWnd->m_pCamWnd->camera.origin[0];
-                camOri[1] = g_pParentWnd->m_pCamWnd->camera.origin[1];
-                camOri[2] = g_pParentWnd->m_pCamWnd->camera.origin[2];
-                camAng[1] = g_pParentWnd->m_pCamWnd->camera.angles[1];
+                const camera_s *cam = Ed_Camera();   // U-GLOBALS (never NULL — guard dropped)
+                camOri[0] = cam->origin[0];
+                camOri[1] = cam->origin[1];
+                camOri[2] = cam->origin[2];
+                camAng[1] = cam->angles[1];
             }
             fprintf( a2, "{\n" );
             fprintf( a2, "\"classname\" \"info_player_start\"\n" );
@@ -1389,8 +1403,7 @@ void Prefab_NextLevel( void *a1 )
 
     // 0x489267: drop the cached light previews — they belong to the parent map's brushes,
     // which are about to be swapped out (same reset as CMainFrame::OnClearPreviewList).
-    if ( g_pParentWnd && g_pParentWnd->m_pCamWnd )
-        g_pParentWnd->m_pCamWnd->light_preview_count = 0;
+    CamWnd_ClearLightPreviews();   // U-GLOBALS: was m_pCamWnd->light_preview_count = 0
 
     // Free any previously-realized prefab instances for this owner (recursive).
     sub_4890F0( (int)v1->owner, (int)modelClass );
@@ -1444,23 +1457,22 @@ void Prefab_NextLevel( void *a1 )
         slot->selectedPrev = nullptr;
     }
 
-    // ── GUI camera / XY reframe (guarded; NULL in the headless gate) ──────────
-    if ( g_pParentWnd && g_pParentWnd->m_pXYWnd && g_pParentWnd->m_pCamWnd )
+    // ── camera / XY reframe (U-GLOBALS: Ed_ActiveXY()/Ed_Camera(), never NULL) ──────
     {
-        CXYWnd  *xy  = g_pParentWnd->m_pXYWnd;
-        CCamWnd *cam = g_pParentWnd->m_pCamWnd;
+        xywndState_t *xy  = Ed_ActiveXY();
+        camera_s     *cam = Ed_Camera();
 
         // Save the parent view (PrevLevel reads these back at +525..534).
         slot->xyOrigin[0]  = xy->m_vOrigin[0];
         slot->xyOrigin[1]  = xy->m_vOrigin[1];
         slot->xyScale      = xy->m_fScale;
         slot->xyViewType   = (int)xy->m_nViewType;
-        slot->camOrigin[0] = cam->camera.origin[0];
-        slot->camOrigin[1] = cam->camera.origin[1];
-        slot->camOrigin[2] = cam->camera.origin[2];
-        slot->camAngles[0] = cam->camera.angles[0];
-        slot->camAngles[1] = cam->camera.angles[1];
-        slot->camAngles[2] = cam->camera.angles[2];
+        slot->camOrigin[0] = cam->origin[0];
+        slot->camOrigin[1] = cam->origin[1];
+        slot->camOrigin[2] = cam->origin[2];
+        slot->camAngles[0] = cam->angles[0];
+        slot->camAngles[1] = cam->angles[1];
+        slot->camAngles[2] = cam->angles[2];
 
         // Reframe the live camera into the prefab's local space.  entAxis is the entity
         // orientation matrix, origin-first [4][3] (row0 = origin, rows 1..3 = rotation).
@@ -1476,16 +1488,16 @@ void Prefab_NextLevel( void *a1 )
             entAxis[0][2] = v1->owner->origin[2];
         }
         // localOrigin = rows1..3 · (camOrigin − entOrigin)   [== sub_4BA610]
-        float d[3] = { cam->camera.origin[0] - entAxis[0][0],
-                       cam->camera.origin[1] - entAxis[0][1],
-                       cam->camera.origin[2] - entAxis[0][2] };
+        float d[3] = { cam->origin[0] - entAxis[0][0],
+                       cam->origin[1] - entAxis[0][1],
+                       cam->origin[2] - entAxis[0][2] };
         float localOrigin[3];
         localOrigin[0] = entAxis[1][0] * d[0] + entAxis[1][1] * d[1] + entAxis[1][2] * d[2];
         localOrigin[1] = entAxis[2][0] * d[0] + entAxis[2][1] * d[1] + entAxis[2][2] * d[2];
         localOrigin[2] = entAxis[3][0] * d[0] + entAxis[3][1] * d[1] + entAxis[3][2] * d[2];
 
         float camAxis[3][3];
-        AnglesToAxis( cam->camera.angles, camAxis );
+        AnglesToAxis( cam->angles, camAxis );
         float rotAxis[3][3];
         VectorRotateByAxis( rotAxis[0], &entAxis[0][0], camAxis[0] );
         VectorRotateByAxis( rotAxis[1], &entAxis[0][0], camAxis[1] );
@@ -1498,12 +1510,12 @@ void Prefab_NextLevel( void *a1 )
         newAngles[0] = ( wrapped - floorf( wrapped + 0.5f ) ) * 360.0f;
         newAngles[2] = 0.0f;
 
-        cam->camera.origin[0] = localOrigin[0];
-        cam->camera.origin[1] = localOrigin[1];
-        cam->camera.origin[2] = localOrigin[2];
-        cam->camera.angles[0] = newAngles[0];
-        cam->camera.angles[1] = newAngles[1];
-        cam->camera.angles[2] = newAngles[2];
+        cam->origin[0] = localOrigin[0];
+        cam->origin[1] = localOrigin[1];
+        cam->origin[2] = localOrigin[2];
+        cam->angles[0] = newAngles[0];
+        cam->angles[1] = newAngles[1];
+        cam->angles[2] = newAngles[2];
 
         // Re-centre the 2D view: 0x48951d zeroes exactly the TWO in-plane m_vOrigin
         // components — indices (viewType==0) and (viewType!=2)+1 — depth axis untouched.
@@ -1706,39 +1718,41 @@ void Prefab_PrevLevel()
     g_activeLayer_string[255] = '\0';
     sub_41C9C0( g_activeLayer_string );
 
-    // Camera restore
-    if ( g_pParentWnd && g_pParentWnd->m_pCamWnd )
+    // Camera restore (U-GLOBALS: Ed_Camera(), never NULL)
     {
-        g_pParentWnd->m_pCamWnd->camera.origin[0] = slot->camOrigin[0];
-        g_pParentWnd->m_pCamWnd->camera.origin[1] = slot->camOrigin[1];
-        g_pParentWnd->m_pCamWnd->camera.origin[2] = slot->camOrigin[2];
-        g_pParentWnd->m_pCamWnd->camera.angles[0] = slot->camAngles[0];
-        g_pParentWnd->m_pCamWnd->camera.angles[1] = slot->camAngles[1];
-        g_pParentWnd->m_pCamWnd->camera.angles[2] = slot->camAngles[2];
+        camera_s *cam = Ed_Camera();
+        cam->origin[0] = slot->camOrigin[0];
+        cam->origin[1] = slot->camOrigin[1];
+        cam->origin[2] = slot->camOrigin[2];
+        cam->angles[0] = slot->camAngles[0];
+        cam->angles[1] = slot->camAngles[1];
+        cam->angles[2] = slot->camAngles[2];
     }
 
-    if ( g_pParentWnd && g_pParentWnd->m_pXYWnd )
+    // U-GLOBALS: the field restores go through Ed_ActiveXY().  U-GUARD-2: PositionView /
+    // SetViewType are now U-CMD-1 free functions, so the `g_pParentWnd && m_pXYWnd` liveness
+    // guard is gone with the last CXYWnd method call (Ed_ActiveXY() is never NULL).
     {
+        xywndState_t *xy = Ed_ActiveXY();
         // 0x489c23: PositionView() runs BEFORE the m_vOrigin/m_fScale restore — it
         // overwrites m_vOrigin[nDim1/nDim2], so the restore afterwards is what wins.
-        g_pParentWnd->m_pXYWnd->PositionView();
-        g_pParentWnd->m_pXYWnd->m_vOrigin[0] = slot->xyOrigin[0];
-        g_pParentWnd->m_pXYWnd->m_vOrigin[1] = slot->xyOrigin[1];
+        XYWnd_PositionView();
+        xy->m_vOrigin[0] = slot->xyOrigin[0];
+        xy->m_vOrigin[1] = slot->xyOrigin[1];
         // BINARY BUG (faithful): 0x489c46/0x489c4f load the scale slot TWICE — m_vOrigin[2]
         // gets the saved m_fScale.  NextLevel only ever saved origin[0]/[1]/scale.
-        g_pParentWnd->m_pXYWnd->m_vOrigin[2] = slot->xyScale;
-        g_pParentWnd->m_pXYWnd->m_fScale      = slot->xyScale;
-        g_pParentWnd->m_pXYWnd->SetViewType( (CXYWnd::EViewType)slot->xyViewType );
+        xy->m_vOrigin[2] = slot->xyScale;
+        xy->m_fScale     = slot->xyScale;
+        XYWnd_SetViewType( slot->xyViewType );   // was SetViewType((CXYWnd::EViewType)…)
     }
 
     // 0x489c67: `if (surfDlgGlob.hwnd) { SetTexMods(); Select_SetTexture_2(&g_dlgSurface); }` —
     // Surf_UpdateInspector is exactly that pair, and a no-op when the inspector is closed.
     Surf_UpdateInspector();
-    if ( g_pParentWnd && g_pParentWnd->m_hWnd )
-    {
-        if ( g_pParentWnd->m_wndTextureBar.m_hWnd )
-            CTextureBar::GetSurfaceAttributes( &g_pParentWnd->m_wndTextureBar );
-    }
+    // NO-MFC: the texture-bar push is skipped — CTextureBar is an MFC CWnd embedded in
+    // CMainFrame (texturebar.cpp) and dies with the frame; the ImGui texture-bar panel
+    // re-gathers from the current texdef, so there is nothing to push.  Same treatment as
+    // the sibling sites in surfacedlg.cpp:633 and texwnd.cpp:1358.
 
     sub_47D060( (int)&active_brushes );
     sub_47D060( (int)&selected_brushes );
@@ -1771,20 +1785,27 @@ void Prefab_LevelBack()
 }
 
 
-// 0x42BF70  CMainFrame::OnPrefabEnter (menu 33173, Edit→Enter Prefab) — body lives here
-// with Prefab_NextLevel.
-void CMainFrame::OnPrefabEnter()
+// U-CMD-2: the two prefab-nesting command bodies, FREE functions now (they sit next to their
+// Prefab_NextLevel / Prefab_PrevLevel cores, which is why they live in this TU rather than in
+// mainfrm.cpp).  The only shell bind was the dirty-prefab prompt, and that is
+// Radiant_ConfirmModified since mainfrm.cpp lifted it out of CMainFrame — so ONE body serves
+// Radiant_DispatchCommandDirect (33173 / 33174) and the MFC members, which forward below.
+extern bool Radiant_ConfirmModified();   // mainfrm.cpp (was CMainFrame::ConfirmModified 0x49A030)
+
+// 0x42BF70  Edit→Enter Prefab (menu 33173).
+void Radiant_PrefabEnter()
 {
     Prefab_NextLevel( nullptr );
 }
 
-// 0x42BF80  CMainFrame::OnPrefabLeave — likewise, with Prefab_PrevLevel.
-void CMainFrame::OnPrefabLeave()
+// 0x42BF80  Edit→Leave Prefab (menu 33174).
+void Radiant_PrefabLeave()
 {
     iassert( prefabStackLevel >= 0 );
-    if ( prefabStackLevel > 0 && ( !modified || ConfirmModified() ) )
+    if ( prefabStackLevel > 0 && ( !modified || Radiant_ConfirmModified() ) )
         Prefab_PrevLevel();
 }
+
 
 // 0x488C70  Map_ImportFile — File→Load: merge another .map into the current one.  Runs the
 // shared parse session (spaceDelimited=0 / negativeNumbers=1, plus the iwmap<4 space-delimit
@@ -2041,8 +2062,9 @@ char *Map_ImportBuffer( const char **text, int version )
     }
 
     // old target/targetname → fresh "auto%i" name, shared across all pasted entities
-    // (IDB 0x48804f — CMapStringToString, default block size 10).
-    CMapStringToString targetRemap;
+    // (IDB 0x48804f — was MFC CMapStringToString; std::map<std::string,std::string> here.
+    //  Only used for keyed lookup/insert, so the CMap's hash-bucket order is irrelevant.)
+    std::map<std::string, std::string> targetRemap;
 
     g_qeglobals.d_num_entities = 0;
 
@@ -2129,23 +2151,28 @@ char *Map_ImportBuffer( const char **text, int version )
         {
             // target: colliding with an existing entity's "target" → remapped "auto%i".
             // Only values that themselves start with "auto" are rewritten (0x488405).
-            CString oldVal = ValueForKey2( (int)(intptr_t)eDef, "target" );
-            if ( !oldVal.IsEmpty() )
+            std::string oldVal = ValueForKey2( (int)(intptr_t)eDef, "target" );
+            if ( !oldVal.empty() )
             {
                 entity_s *match = entities.next;
-                while ( match != &entities && !Entity_HasEpairMatch( match, "target", oldVal ) )
+                while ( match != &entities && !Entity_HasEpairMatch( match, "target", oldVal.c_str() ) )
                     match = match->next;
                 if ( match != &entities )
                 {
-                    CString newName;
-                    if ( !targetRemap.Lookup( oldVal, newName ) )
+                    std::string newName;
+                    auto it = targetRemap.find( oldVal );
+                    if ( it != targetRemap.end() )
+                    {
+                        newName = it->second;
+                    }
+                    else
                     {
                         newName = VA( 0, "auto%i", autoTarget );
                         ++autoTarget;
-                        targetRemap.SetAt( oldVal, newName );
+                        targetRemap[ oldVal ] = newName;
                     }
-                    if ( !strncmp( oldVal, "auto", 4 ) )
-                        SetKeyValue( eDef, "target", newName );
+                    if ( !strncmp( oldVal.c_str(), "auto", 4 ) )
+                        SetKeyValue( eDef, "target", newName.c_str() );
                 }
             }
 
@@ -2156,24 +2183,29 @@ char *Map_ImportBuffer( const char **text, int version )
             // targetname: same remap table as target (a target/targetname PAIR maps to
             // the same fresh name, keeping intra-paste references wired together).
             oldVal = ValueForKey2( (int)(intptr_t)eDef, "targetname" );
-            if ( !oldVal.IsEmpty() )
+            if ( !oldVal.empty() )
             {
                 entity_s *match = entities.next;
-                while ( match != &entities && !Entity_HasEpairMatch( match, "targetname", oldVal ) )
+                while ( match != &entities && !Entity_HasEpairMatch( match, "targetname", oldVal.c_str() ) )
                     match = match->next;
                 if ( match != &entities )
                 {
-                    CString newName;
-                    if ( !targetRemap.Lookup( oldVal, newName ) )
+                    std::string newName;
+                    auto it = targetRemap.find( oldVal );
+                    if ( it != targetRemap.end() )
+                    {
+                        newName = it->second;
+                    }
+                    else
                     {
                         newName = VA( 0, "auto%i", autoTarget );
                         ++autoTarget;
-                        targetRemap.SetAt( oldVal, newName );
+                        targetRemap[ oldVal ] = newName;
                     }
-                    if ( !strncmp( oldVal, "auto", 4 ) )
-                        SetKeyValue( eDef, "targetname", newName );
+                    if ( !strncmp( oldVal.c_str(), "auto", 4 ) )
+                        SetKeyValue( eDef, "targetname", newName.c_str() );
                     else
-                        SetKeyValue( eDef, "targetname", oldVal );   // binary re-sets the original (0x488622)
+                        SetKeyValue( eDef, "targetname", oldVal.c_str() );   // binary re-sets the original (0x488622)
                 }
             }
 

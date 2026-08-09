@@ -339,7 +339,9 @@ uint __cdecl Com_ConvexHull(float (*points)[2], uint pointCount, float (*hull)[2
     uint pointOrder[64]; // [esp+110h] [ebp-108h] BYREF
     uint hullPointCount; // [esp+214h] [ebp-4h]
 
-    iassert(pointCount >= 3 && pointCount < ARRAY_COUNT(pointOrder));
+    // Native 0x466AE0 accepts the complete 64-element local order buffer;
+    // only values above that capacity are rejected.
+    iassert(pointCount >= 3 && pointCount <= ARRAY_COUNT(pointOrder));
     iassert(hull != points);
     iassert(hull >= points + pointCount || points >= hull + pointCount);
 

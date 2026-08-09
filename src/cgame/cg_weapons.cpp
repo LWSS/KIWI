@@ -568,12 +568,14 @@ void __cdecl CG_AddPlayerWeapon(
     else
         weaponNum = cent->nextState.weapon;
 
-    // KISAKFIX: IDA CG_AddPlayerWeapon (sub_8215C3B8) gates on BOTH
-    // `(eFlags & 0x300) == 0` (not turret) AND `(eFlags & 0x20000) == 0` (not in vehicle).
-    // Kisak port missing the vehicle gate so viewmodel renders while driving.
+#ifdef KISAK_MP
+    if (weaponNum > 0
+        && (cent->nextState.lerp.eFlags & 0x300) == 0)
+#elif KISAK_SP
     if (weaponNum > 0
         && (cent->nextState.lerp.eFlags & 0x300) == 0
         && (cent->nextState.lerp.eFlags & 0x20000) == 0)
+#endif
     {
         iassert(localClientNum == 0);
         weapInfo = &cg_weaponsArray[0][weaponNum];

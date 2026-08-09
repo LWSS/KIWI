@@ -2647,6 +2647,15 @@ GfxIndexBufferState *RB_SwapBuffers()
 
     iassert(dx.targetWindowIndex >= 0 && dx.targetWindowIndex < dx.windowCount);
 
+    hr = 0;
+#ifdef KISAK_RADIANT
+    // RTT viewports (Phase 5): a viewport renders into an offscreen texture that ImGui
+    // samples later — it must NOT Present (only the final compositing frame Presents).
+    // drawType welds EndScene to Present, so the render still runs BeginScene..EndScene;
+    // only the Present itself is skipped. The fence + dynamic-IB reset below still run.
+    extern bool g_rbSuppressPresent;   // radiant_rtt.cpp
+    if ( !g_rbSuppressPresent )
+#endif
     {
         PROF_SCOPED("Present");
         hr = dx.windows[dx.targetWindowIndex].swapChain->Present(0, 0, 0, 0, 0);
@@ -2819,6 +2828,15 @@ void __cdecl RB_CallExecuteRenderCommands()
         R_ClearAllStreamSources(&gfxCmdBufState.prim);
         vassert((!g_primStats), "(g_primStats - g_viewStats->primStats) = %i", ((char *)g_primStats - (char *)g_viewStats) / 24);
         vassert((!tess.indexCount), "(tess.indexCount) = %i", tess.indexCount);
+#ifdef KISAK_RADIANT
+        // KISAK UI-rework Phase 2a: ImGui overlay — submit inside the scene bracket,
+        // just before EndScene, for the active target window only. No-op without -imgui.
+        {
+            extern void ImGuiShell_DrawOverlay( IDirect3DDevice9 *device, HWND activeHwnd );   // radiant/imgui_shell.cpp
+            if ( dx.targetWindowIndex >= 0 && dx.targetWindowIndex < dx.windowCount )
+                ImGuiShell_DrawOverlay( dx.device, dx.windows[dx.targetWindowIndex].hwnd );
+        }
+#endif
         iassert( dx.device );
         iassert( dx.inScene );
         do

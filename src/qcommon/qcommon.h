@@ -598,7 +598,9 @@ inline void Dvar_SetFloat(const dvar_s *dvar, float value)
 {
     Dvar_SetFloat((dvar_s *)dvar, value);
 }
+void __cdecl Dvar_SetVec2(dvar_s *dvar, float x, float y);
 void __cdecl Dvar_SetVec3(dvar_s *dvar, float x, float y, float z);
+void __cdecl Dvar_SetVec4(dvar_s *dvar, float x, float y, float z, float w);
 void __cdecl Dvar_SetString(dvar_s *dvar, char *value);
 inline void Dvar_SetString(const dvar_s *dvar, char* value)
 {

@@ -426,13 +426,41 @@ GfxCmdHeader *__cdecl R_GetCommandBuffer(GfxRenderCommand renderCmd, int bytes)
     iassert( s_cmdList );
     iassert( s_cmdList->cmds );
     iassert( rg.inFrame );
+#ifdef KISAK_RADIANT
+    // EDITOR: these thresholds are crossed EVERY FRAME on a big map (the editor draws the
+    // whole map, the game draws one scene) — the per-frame Com_PrintWarning flooded the
+    // console with thousands of lines per minute (each line also churns the hidden EDIT
+    // control via EM_REPLACESEL and can block on a piped/undrained stdout, e.g. under a
+    // debugger — a blackout/mp_backlot load looked "stuck forever"). Warn ONCE per run.
+    static bool s_warnedCritical = false, s_warnedTotal = false;
+    if (renderCmd < RC_FIRST_NONCRITICAL && s_cmdList->usedCritical < 7680 && bytes + s_cmdList->usedCritical >= 7680 && !s_warnedCritical)
+    {
+        s_warnedCritical = true;
+        Com_PrintWarning(8, "RENDERCOMMAND_CRITICAL_WARN_SIZE (%i bytes) reached (further warnings suppressed)\n", 7680);
+    }
+    if (s_cmdList->usedTotal < s_renderCmdWarnSize && bytes + s_cmdList->usedTotal >= s_renderCmdWarnSize && !s_warnedTotal)
+    {
+        s_warnedTotal = true;
+        Com_PrintWarning(8, "RENDERCOMMAND_WARN_SIZE (%.0f KB) reached (further warnings suppressed)\n", (double)s_renderCmdWarnSize / 1024.0);
+    }
+#else
     if (renderCmd < RC_FIRST_NONCRITICAL && s_cmdList->usedCritical < 7680 && bytes + s_cmdList->usedCritical >= 7680)
         Com_PrintWarning(8, "RENDERCOMMAND_CRITICAL_WARN_SIZE (%i bytes) reached\n", 7680);
     if (s_cmdList->usedTotal < s_renderCmdWarnSize && bytes + s_cmdList->usedTotal >= s_renderCmdWarnSize)
         Com_PrintWarning(8, "RENDERCOMMAND_WARN_SIZE (%.0f KB) reached\n", (double)s_renderCmdWarnSize / 1024.0);
+#endif
     sizeLimit = s_renderCmdBufferSize - s_cmdList->usedTotal;
     if (renderCmd >= RC_FIRST_NONCRITICAL)
         sizeLimit -= 0x2000 - s_cmdList->usedCritical;
+#ifdef KISAK_RADIANT
+    // EDITOR: always keep room for the RC_END_OF_LIST terminator. On a huge map (blackout) the
+    // buffer can fill; if the terminator can't be written, RB_ExecuteRenderCommandsLoop
+    // (rb_backend.cpp:2731 — it stops when header->id==0) reads PAST the allocation and crashes.
+    // Every non-terminator command stops 16 bytes early so RC_END_OF_LIST (id 0, exempt) always
+    // fits and the list is terminable even after an overflow drop.
+    if (renderCmd != RC_END_OF_LIST)
+        sizeLimit -= 16;
+#endif
     if (bytes <= sizeLimit)
     {
         header = (GfxCmdHeader *)&s_cmdList->cmds[s_cmdList->usedTotal];
@@ -445,6 +473,35 @@ GfxCmdHeader *__cdecl R_GetCommandBuffer(GfxRenderCommand renderCmd, int bytes)
     }
     else
     {
+#ifdef KISAK_RADIANT
+        // EDITOR OVERFLOW SAFETY: the game never overflows a CRITICAL command (the buffer is
+        // sized for one game frame), but the editor draws the ENTIRE map — a huge map (blackout)
+        // can exhaust even the 48 MB buffer. The binary asserts + returns NULL here, and the
+        // CRITICAL command adders (R_AddCmdClearScreen / SetMaterialColor / …) write to the
+        // returned pointer WITHOUT a null check, so NULL = crash. Instead, hand back a throwaway
+        // scratch slot: the command is written but NOT linked into the list (usedTotal is not
+        // advanced, lastCmd is cleared so nothing merges onto it), i.e. silently DROPPED. The
+        // frame renders whatever fit before the wall instead of crashing. (Non-critical adders
+        // already null-check, so they keep dropping cleanly on their own.)
+        static uint8_t s_overflowScratch[0x10000];   // >= any single command's byte size
+        static bool    s_warned = false;
+        if ( !s_warned )
+        {
+            s_warned = true;
+            Com_PrintWarning( 8, "render command buffer overflow (map too large for the %u MB "
+                                 "editor buffer) — dropping commands this frame\n",
+                              s_renderCmdBufferSize / ( 1024u * 1024u ) );
+        }
+        s_cmdList->lastCmd = 0;
+        if ( (uint)bytes <= sizeof( s_overflowScratch ) )
+        {
+            GfxCmdHeader *scratch = (GfxCmdHeader *)s_overflowScratch;
+            scratch->id = renderCmd;
+            scratch->byteCount = bytes;
+            return scratch;
+        }
+        return 0;   // command larger than the scratch (should never happen for editor commands)
+#else
         if (renderCmd < RC_FIRST_NONCRITICAL)
         {
             v2 = va("rc %i used %i critical %i bytes %i", renderCmd, s_cmdList->usedTotal, s_cmdList->usedCritical, bytes);
@@ -452,6 +509,7 @@ GfxCmdHeader *__cdecl R_GetCommandBuffer(GfxRenderCommand renderCmd, int bytes)
         }
         s_cmdList->lastCmd = 0;
         return 0;
+#endif
     }
 }
 

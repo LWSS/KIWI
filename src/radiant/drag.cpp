@@ -20,6 +20,7 @@
 #include "qe3.h"
 #include "prefs.h"       // g_PrefsDlg (prefData_t* — real settings)
 #include "mainfrm.h"     // CMainFrame / CXYWnd (m_pActiveXY->m_fScale in rotate/bend path)
+#include "xywnd.h"       // xywndState_t / Ed_ActiveXY (U-GLOBALS)
 #include <math.h>
 #include <stdlib.h>
 
@@ -76,7 +77,7 @@ extern void    Select_ApplyMatrix( float *matrix, selbrush_t *b, int bSnap, floa
 
 // mainfrm / status
 extern void        MainFrm_SetStatusText( int pane, const char *text );
-extern CMainFrame *g_pParentWnd;                          // 0x25d5a70
+// (g_pParentWnd extern retired — U-GLOBALS swept every use onto Ed_ActiveXY())
 extern void        CMainFrame_UpdatePatchToolbarButtons();// select.cpp (FATAL until P5)
 extern void        sub_43E6F0( int buttons, int origin, int dir ); // addpoint-drag helper
 
@@ -635,9 +636,17 @@ LABEL_29:
         goto LABEL_33;
     }
 LABEL_34:
-    // Alt + LMB/RMB terrain-paint start. sub_401D50() is a 0-stub (terrain paint
-    // mode off) so this never enters in the current build; Alt+drag falls through
-    // to Drag_Setup. (CurvEditDlg / Patch_Paint_Start are Phase-5 deps inside.)
+    // Alt + LMB/RMB terrain-paint start. Now reachable — sub_401D50() reads the ImGui
+    // AdvPatch mode/channel store (was a 0-stub). DIAG: report which sub-condition gates
+    // the stroke, so a "terrain paint does nothing" can be pinned to alt/buttons/mode/
+    // sub_401D50/selection/Patch_Paint_Start. Remove once terrain paint is verified.
+    {
+        extern void Radiant_FL_Log( const char *fmt, ... );   // mainfrm.cpp
+        const bool altD = GetAsyncKeyState( VK_MENU ) < 0;
+        if ( altD && ( buttons == 1 || buttons == 2 ) )
+            Radiant_FL_Log( "PAINTGATE alt=%d btn=%u mode=%d d50=%d onlyPatch=%d",
+                            (int)altD, buttons, (int)mode, sub_401D50(), OnlyPatchesSelected() );
+    }
     if ( GetAsyncKeyState( VK_MENU ) < 0
          && ( buttons == 1 || buttons == 2 )
          && ( mode == sel_brush || mode == sel_addpoint )
@@ -648,6 +657,8 @@ LABEL_34:
         {
             if ( Patch_Paint_Start() )
             {
+                extern void Radiant_FL_Log( const char *fmt, ... );
+                Radiant_FL_Log( "PAINTGATE -> entered sel_addpoint (stroke armed)" );
                 bool wasCycle = ( g_qeglobals.d_select_mode == sel_cycle_edge_direction_quad );
                 g_qeglobals.d_select_mode = sel_addpoint;
                 if ( wasCycle )
@@ -1270,7 +1281,7 @@ ROTATE_OR_BEND:
         int   axisIdx       = 0;
         float rotAxisAngle  = -move[2];
         float rotationDelta =  move[2];
-        CXYWnd *activeXY = g_pParentWnd->m_pActiveXY;
+        xywndState_t *activeXY = Ed_ActiveXY();  // U-GLOBALS: was g_pParentWnd->m_pActiveXY
         if ( activeXY->m_nViewType == 2 )        // XY (top) → rotate about Z
         {
             rotAxisAngle  = -move[1];
@@ -1438,7 +1449,7 @@ void Drag_MouseMoved( int a1, int a2, int buttons, float *a4, float *a5 )
 
         if ( rotate || g_bPatchBendMode )
         {
-            w *= g_pParentWnd->m_pActiveXY->m_fScale;     // scale only in rotate/bend
+            w *= Ed_ActiveXY()->m_fScale;                 // scale only in rotate/bend (U-GLOBALS)
             drag_vec[i] = w;
             int c = ClampGridSize();
             if ( c == 1 )      drag_vec[i] = w * 0.5f;
@@ -1478,7 +1489,7 @@ void Drag_MouseMoved( int a1, int a2, int buttons, float *a4, float *a5 )
 
 // ── marquee box-select wiring (select.cpp / xywnd.cpp) ───────────────────────
 extern void Select_FlipFilteredBrushes( const float *boxMins, const float *boxMaxs, char bActiveList );
-extern void Ed_XY_ToPoint( CXYWnd *wnd, int x, int y, float *start, float *dir );
+extern void Ed_XY_ToPoint( xywndState_t *wnd, int x, int y, float *start, float *dir );  // U-GLOBALS (was CXYWnd*)
 
 // ── sel_area control-point rect-select (pmesh.cpp 0x448460 / 0x448620) ────────
 extern void Terrain_SelectAreaPoints( const void *planes, char select );
@@ -1595,7 +1606,7 @@ void Drag_MouseUp( unsigned int buttons )
     else if ( ( mode == sel_areabrush || mode == sel_areabrush_sub )
               && g_nPatchClickedView != W_CAMERA )
     {
-        CXYWnd *xy = g_pParentWnd ? g_pParentWnd->m_pActiveXY : nullptr;
+        xywndState_t *xy = Ed_ActiveXY();   // U-GLOBALS: was g_pParentWnd->m_pActiveXY (never NULL now)
 
         // mode 13 (box deselect) with a sub-pixel drag = a click → single face/brush
         // pick via SelectFaceSth (IDA 0x4803a5..0x48047a).
@@ -1609,9 +1620,8 @@ void Drag_MouseUp( unsigned int buttons )
             {
                 float start[3] = { 0.0f, 0.0f, 0.0f };
                 float dir[3];
-                if ( xy )
-                    Ed_XY_ToPoint( xy, g_qeglobals.drag_selectionbox_x_1,
-                                       g_qeglobals.drag_selectionbox_x_2, start, dir );
+                Ed_XY_ToPoint( xy, g_qeglobals.drag_selectionbox_x_1,
+                                   g_qeglobals.drag_selectionbox_x_2, start, dir );
                 // Alt+LMB(==4) selects a single FACE (flag 4); else the whole brush (64).
                 int flag = 64;
                 if ( buttons == 4 && GetAsyncKeyState( VK_MENU ) < 0
@@ -1633,13 +1643,10 @@ void Drag_MouseUp( unsigned int buttons )
             float c1[3] = { 0.0f, 0.0f, 0.0f };   // press corner (x_1, x_2)
             float c2[3] = { 0.0f, 0.0f, 0.0f };   // current corner (y_1, y_2)
             float dir[3];
-            if ( xy )
-            {
-                Ed_XY_ToPoint( xy, g_qeglobals.drag_selectionbox_x_1,
-                                   g_qeglobals.drag_selectionbox_x_2, c1, dir );
-                Ed_XY_ToPoint( xy, g_qeglobals.drag_selectionbox_y_1,
-                                   g_qeglobals.drag_selectionbox_y_2, c2, dir );
-            }
+            Ed_XY_ToPoint( xy, g_qeglobals.drag_selectionbox_x_1,
+                               g_qeglobals.drag_selectionbox_x_2, c1, dir );
+            Ed_XY_ToPoint( xy, g_qeglobals.drag_selectionbox_y_1,
+                               g_qeglobals.drag_selectionbox_y_2, c2, dir );
             float boxMins[3], boxMaxs[3];
             for ( int i = 0; i < 3; ++i )
             {

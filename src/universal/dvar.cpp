@@ -2327,9 +2327,19 @@ void __cdecl Dvar_SetFloat(dvar_s *dvar, float value)
     Dvar_SetFloatFromSource(dvar, value, DVAR_SOURCE_INTERNAL);
 }
 
+void __cdecl Dvar_SetVec2(dvar_s *dvar, float x, float y)
+{
+    Dvar_SetVec2FromSource(dvar, x, y, DVAR_SOURCE_INTERNAL);
+}
+
 void __cdecl Dvar_SetVec3(dvar_s *dvar, float x, float y, float z)
 {
     Dvar_SetVec3FromSource(dvar, x, y, z, DVAR_SOURCE_INTERNAL);
+}
+
+void __cdecl Dvar_SetVec4(dvar_s *dvar, float x, float y, float z, float w)
+{
+    Dvar_SetVec4FromSource(dvar, x, y, z, w, DVAR_SOURCE_INTERNAL);
 }
 
 void __cdecl Dvar_SetString(dvar_s *dvar, char *value)
@@ -2573,7 +2583,6 @@ void __cdecl Dvar_Init()
 {
     isDvarSystemActive = 1;
     dvar_cheats = Dvar_RegisterBool("sv_cheats", 1, DVAR_SYSTEMINFO | DVAR_INIT, "External Dvar");
-    Dvar_AddCommands();
 }
 
 void __cdecl Dvar_ResetScriptInfo()

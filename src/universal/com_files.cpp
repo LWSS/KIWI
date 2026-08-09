@@ -1233,12 +1233,13 @@ void FS_RegisterDvars()
     fs_cdpath = Dvar_RegisterString("fs_cdpath", v1, DVAR_INIT, "CD path");
     v2 = Sys_Cwd();
 #ifdef KISAK_RADIANT
-    // The shipping editor lives in <install>\bin\ (the dev build in <install>\bin\Debug\),
-    // with the game data (raw\, main\, ...) at <install>\.  Derive fs_basepath from the EXE
-    // location by walking up from its directory to the first ancestor that actually contains
-    // a `raw\` folder — so the editor finds its materials/textures wherever it is run from,
-    // as long as it sits under the install's `bin` (the expected layout).  Falls back to the
-    // known CoD4 install when run from a build tree with no game data beside it (repo bin\Debug).
+    // KISAK: game data lives NEXT TO THE EXE.  Derive fs_basepath from the EXE location:
+    // use the exe's own directory if it contains a `raw\` folder, else walk up to the first
+    // ancestor that does (tolerates the <install>\bin\ / repo bin\Debug\ layouts where data
+    // sits at the tree root).  NO other fallback: the old hardcoded Steam-install path (and
+    // the registry/.prj basepath overrides, now also removed) silently loaded data from a
+    // remote directory, which was error-prone.  No raw\ anywhere above the exe is a FATAL
+    // ERROR (on request) — a visible message box beats an editor full of missing assets.
     {
         static char s_fsBase[MAX_PATH];
         int   foundBase = 0;
@@ -1247,6 +1248,7 @@ void FS_RegisterDvars()
         {
             char *slash = strrchr( exeDir, '\\' );
             if ( slash ) *slash = 0;                       // strip the exe name -> its directory
+            I_strncpyz( s_fsBase, exeDir, sizeof( s_fsBase ) );   // remember the exe directory
             for ( int up = 0; up < 6 && !foundBase; ++up )
             {
                 char probe[MAX_PATH];
@@ -1254,7 +1256,6 @@ void FS_RegisterDvars()
                 if ( GetFileAttributesA( probe ) != INVALID_FILE_ATTRIBUTES )
                 {
                     I_strncpyz( s_fsBase, exeDir, sizeof( s_fsBase ) );
-                    v2 = s_fsBase;
                     foundBase = 1;
                 }
                 else
@@ -1266,7 +1267,16 @@ void FS_RegisterDvars()
             }
         }
         if ( !foundBase )
-            v2 = (char *)"F:\\SteamLibrary\\steamapps\\common\\Call of Duty 4";
+        {
+            char msg[MAX_PATH + 128];
+            Com_sprintf( msg, sizeof( msg ),
+                         "No raw\\ folder found beside the exe (or up to 6 levels above it).\n\n"
+                         "Game data must sit next to the exe:\n%s\\raw\\",
+                         s_fsBase[0] ? s_fsBase : "<exe directory>" );
+            MessageBoxA( NULL, msg, "KIWI-Radiant - missing game data", MB_OK | MB_ICONERROR );
+            Com_Error( ERR_FATAL, "%s", msg );
+        }
+        v2 = s_fsBase;
     }
 #endif
     fs_basepath = Dvar_RegisterString("fs_basepath", v2, DVAR_INIT | DVAR_AUTOEXEC, "Base game path");

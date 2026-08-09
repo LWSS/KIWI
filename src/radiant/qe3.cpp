@@ -7,6 +7,7 @@
 #include "qe3.h"   // Phase 3: editor object model + permanent layout static_asserts
 #include "prefs.h" // g_PrefsDlg / prefData_t (m_strLastProject, m_bLoadLast) — QE_LoadProject
 #include "mainfrm.h" // CMainFrame (g_pParentWnd->OkToDiscard) — DoMru
+#include "radiant_registry.h" // Radiant_IniPath — MRU persistence (kiwi_radiant.ini)
 #include <universal/q_parse.h>  // Com_BeginParseSession/EndParseSession/SetCSV/ParseExt/
                                 // SkipRestOfLine + parseInfo_t (Get_MaterialNames)
 #include <cstdlib>              // malloc / free / atol
@@ -334,25 +335,43 @@ void QE_CountBrushesAndUpdateStatusBar( void )
 // ═════════════════════════════════════════════════════════════════════════════
 extern int Sys_Printf( const char *fmt, ... );
 
-signed int QE_SingleBrush()
+// Silent predicate half (KISAK, consolidation): the same two tests with no console
+// output — for polling callers (the ImGui panels re-gather per frame; Sys_Printf here
+// EM_REPLACESELs the console edit and would flood it). QE_SingleBrush keeps the
+// binary's printing behavior by calling this and printing on the failing arm.
+// Returns 0 = not exactly one brush, 1 = fixed-size entity, 2 = OK.
+int QE_SingleBrush_Check()
 {
     if ( selected_brushes.next == &selected_brushes ||
          selected_brushes.next->next != &selected_brushes )
-    {
-        Sys_Printf( "Error: you must have a single brush selected\n" );
         return 0;
-    }
     // eclass is on the entity DEF, not the 0x54-byte instance: read it via the
     // instance's def (IDB QE_SingleBrush 0x48C8B0). Reading
     // selected_brushes.next->owner->eclass directly walks past the instance and can
     // fault on freed adjacent heap (the delete-path UAF class).
+    if ( !selected_brushes.next->owner )
+        return 0;
     entity_s *eDef = (entity_s *)selected_brushes.next->owner->def;
+    if ( !eDef || !eDef->eclass )
+        return 0;
     if ( eDef->eclass->fixedsize )
+        return 1;
+    return 2;
+}
+
+signed int QE_SingleBrush()
+{
+    switch ( QE_SingleBrush_Check() )
     {
+    case 0:
+        Sys_Printf( "Error: you must have a single brush selected\n" );
+        return 0;
+    case 1:
         Sys_Printf( "Error: you cannot manipulate fixed size entities\n" );
         return 0;
+    default:
+        return 1;
     }
-    return 1;
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -374,7 +393,6 @@ extern void   Com_BeginParseSession( const char *name );                   // q_
 extern entity_s *ParseEntity( const char **text, int version, char a2, char a3 ); // entity.cpp 0x483E70
 extern void   SetKeyValue( entity_s_def *e, const char *key, const char *value ); // entity.cpp 0x483690
 extern char  *ValueForKey2( int e, const char *key );                      // entity.cpp 0x4825C0
-extern CMainFrame *g_pParentWnd;                                           // mainfrm.cpp 0x25D5A70
 extern void   Prefab_LevelBack();                                          // errorfile.cpp 0x489D50
 extern void   Map_LoadFromFile( const char *path );                        // map.cpp 0x486680
 // Com_Error / ERR_FATAL come from qcommon.h (via qe3.h → r_material.h).
@@ -523,28 +541,16 @@ signed int QE_LoadProject_ParseFile( const char *path )
             SetKeyValue( (entity_s_def *)g_qeglobals.d_project_entity, s_projectPathKeys[i], full );
     }
 
-    // FS_RegisterDvars(basepath, basegame, game) @0x48bce5.  KISAK: the stock cod4.prj's
-    // basepath ".." was resolved above against the PROCESS CWD - the install root in a real
-    // install, but `bin` in the dev build (bin\Debug), where there is no game data.  So only
-    // override fs_basepath when the resolved directory actually holds data (raw\ or main\);
-    // otherwise keep the port's fs_basepath heuristic (com_files.cpp).
+    // FS_RegisterDvars(basepath, basegame, game) @0x48bce5.  KISAK: the .prj `basepath`
+    // override of fs_basepath is REMOVED — together with the registry LastProject tier
+    // (mainfrm.cpp Radiant_LoadProjectAtStartup) it let a project file silently redirect
+    // ALL game-data loads to a remote directory, which was error-prone.  fs_basepath is
+    // ALWAYS the exe-derived path (com_files.cpp); game data lives next to the exe.  The
+    // .prj's other keys (mapspath/autosave/basegame/game) keep their meaning.
     {
         const char *base = ValueForKey2( (int)(intptr_t)g_qeglobals.d_project_entity, "basepath" );
         if ( base && *base )
-        {
-            char probe[1028];
-            _snprintf( probe, sizeof( probe ), "%s\\raw", base ); probe[sizeof( probe ) - 1] = 0;
-            bool hasData = ( GetFileAttributesA( probe ) != INVALID_FILE_ATTRIBUTES );
-            if ( !hasData )
-            {
-                _snprintf( probe, sizeof( probe ), "%s\\main", base ); probe[sizeof( probe ) - 1] = 0;
-                hasData = ( GetFileAttributesA( probe ) != INVALID_FILE_ATTRIBUTES );
-            }
-            if ( hasData )
-                Project_RegisterFsDvar( "fs_basepath", base );
-            else
-                Sys_Printf( "QE_LoadProject: .prj basepath '%s' has no game data — keeping fs_basepath heuristic\n", base );
-        }
+            Sys_Printf( "QE_LoadProject: ignoring .prj basepath '%s' (fs_basepath is exe-derived)\n", base );
     }
     Project_RegisterFsDvar( "fs_basegame", ValueForKey2( (int)(intptr_t)g_qeglobals.d_project_entity, "basegame" ) );
     Project_RegisterFsDvar( "fs_game",     ValueForKey2( (int)(intptr_t)g_qeglobals.d_project_entity, "game" ) );
@@ -662,17 +668,16 @@ static signed int DelMenuItem( ushort nID, LPMRUMENU *mru )
     return 1;
 }
 
-// ── 0x48A750  SaveMruInReg — write the MRU list to HKCU\...\MRU\File1..File9 ───
+// ── 0x48A750  SaveMruInReg — persist the MRU list (File1..File9).  KISAK: was
+// HKCU\...\MRU in the binary; ALL registry usage removed on request — now the [MRU]
+// section of kiwi_radiant.ini beside the exe (radiant_registry.h Radiant_IniPath).
+// The function names keep their binary-anchored spelling ("InReg") for greppability.
 void SaveMruInReg( LPMRUMENU *mru )
 {
     HGLOBAL h = GlobalAlloc( GHND, mru->wMaxSizeLruItem + 20 );
     char *buf = (char *)GlobalLock( h );
     if ( !buf )
         return;
-    HKEY hKey = 0;
-    DWORD disp = 0;
-    RegCreateKeyExA( HKEY_CURRENT_USER, "Software\\iw\\CoD4Radiant\\MRU", 0, 0, 0,
-                     KEY_ALL_ACCESS, 0, &hKey, &disp );
     for ( ushort i = 0; i < mru->wNbLruMenu; ++i )
     {
         char valueName[16];
@@ -687,31 +692,26 @@ void SaveMruInReg( LPMRUMENU *mru )
         {
             buf[0] = 0;
         }
-        RegSetValueExA( hKey, valueName, 0, REG_SZ, (const BYTE *)buf, lstrlenA( buf ) );
+        ::WritePrivateProfileStringA( "MRU", valueName, buf, Radiant_IniPath() );
     }
-    RegCloseKey( hKey );
     GlobalUnlock( GlobalHandle( buf ) );
     GlobalFree( GlobalHandle( buf ) );
 }
 
-// ── 0x48A870  LoadMruInReg — read the MRU list from the registry ──────────────
+// ── 0x48A870  LoadMruInReg — read the MRU list back (see SaveMruInReg's KISAK note) ──
 void LoadMruInReg( LPMRUMENU *mru )
 {
     HGLOBAL h = GlobalAlloc( GHND, mru->wMaxSizeLruItem + 20 );
     char *buf = (char *)GlobalLock( h );
     if ( !buf )
         return;
-    HKEY hKey = 0;
-    RegOpenKeyExA( HKEY_CURRENT_USER, "Software\\iw\\CoD4Radiant\\MRU", 0, KEY_READ, &hKey );
     for ( ushort i = 0; i < mru->wNbLruMenu; ++i )
     {
         char valueName[16];
         wsprintfA( valueName, "File%lu", i + 1 );
         buf[0] = 0;
-        DWORD type = 0;
-        DWORD cbData = mru->wMaxSizeLruItem + 10;
-        RegQueryValueExA( hKey, valueName, 0, &type, (BYTE *)buf, &cbData );
-        buf[cbData] = 0;
+        ::GetPrivateProfileStringA( "MRU", valueName, "", buf, mru->wMaxSizeLruItem + 10,
+                                    Radiant_IniPath() );
         if ( !buf[0] )
             break;                               // first empty slot ends the list
         if ( i < 9 )
@@ -721,7 +721,6 @@ void LoadMruInReg( LPMRUMENU *mru )
                 mru->wNbItemFill = (ushort)( i + 1 );
         }
     }
-    RegCloseKey( hKey );
     GlobalUnlock( GlobalHandle( buf ) );
     GlobalFree( GlobalHandle( buf ) );
 }
@@ -733,7 +732,11 @@ BOOL DoMru( short nID, HWND hWnd )
     // Unsaved-changes / inside-prefab guard (binary inlines HasUnsavedChangesOrInsidePrefab
     // + layered-material CRC check + ConfirmModified; the port consolidates that exact test
     // in CMainFrame::OkToDiscard).
-    if ( g_pParentWnd && !g_pParentWnd->OkToDiscard() )
+    // NO-MFC: the same guard, now that U-CMD-2 lifted it out of CMainFrame.  The
+    // g_pParentWnd liveness half has no analog (the prompt is a MessageBoxA over
+    // ::GetActiveWindow(), not a frame method), so it drops out.
+    extern bool Radiant_OkToDiscard();        // mainfrm.cpp (was CMainFrame::OkToDiscard)
+    if ( !Radiant_OkToDiscard() )
         return 0;
     Prefab_LevelBack();
 

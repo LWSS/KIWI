@@ -11,6 +11,7 @@
 #include "linearmapping.h"          // LinearMapping_Setup/Apply (texture-lock reproject)
 #include <gfx_d3d/r_rendercmds.h>   // R_AddCmd_Line3D, GfxPointVertex, GfxColor
 #include <universal/assertive.h>    // iassert (USE_ASSERTS always on; same handler as Assert)
+#include <string>                   // SelectedAssociated's matchValue (was MFC CString)
 
 // faceVisuals_s / faceVis_s are now in qe3.h (moved so select.cpp can use them).
 // The static_asserts remain in qe3.h.
@@ -41,13 +42,15 @@ namespace SurfaceInspector { void UpdateSurfaceDialog(); }
 
 // ─── MFC parent window (CMainFrame) ─────────────────────────────────────────
 #include "mainfrm.h"
-extern CMainFrame *g_pParentWnd;
-extern int CCamWnd_RemoveLightPreview( selbrush_t *removed, CCamWnd *cam );   // camwnd.cpp (sub_4062D0 0x4062d0)
+#include "xywnd.h"                   // xywndState_t / Ed_ActiveXY (U-GLOBALS)
+extern int CamWnd_RemoveLightPreview( selbrush_t *removed );   // camwnd.cpp (sub_4062D0 0x4062d0)
 
-// ─── patch dialog (patchdialog.cpp, not yet ported) ─────────────────────────
+// ─── patch dialog (patchdialog.cpp) ─────────────────────────────────────────
 // IDB: g_PatchDialog (0x436ba0 = CPatchDialog::GetPatchInfo).
-// Stubs return a null HWND so the `if (m_hWnd)` check is always false at runtime.
-extern CWnd *g_PatchDialog_GetHwnd();
+// PatchDialog_IsOpen (U-GUARD-2) IS the binary's `if (CWnd_PatchDialog.m_hWnd)` gate — the
+// shell-agnostic replacement for the old CWnd*-returning g_PatchDialog_GetHwnd(); false in
+// the no-MFC shell, so the guarded refresh is skipped exactly as with the inspector closed.
+extern bool  PatchDialog_IsOpen();
 extern void  g_PatchDialog_GetPatchInfo();
 
 // ─── Entity_RebuildBounds (0x485390, entity.cpp) — was sub_485390 ───────────
@@ -928,7 +931,7 @@ void Brush_AddToList2( selbrush_t *b )
 
     UpdateSelection( -1, 0 );
     SurfaceInspector::UpdateSurfaceDialog();
-    if ( g_PatchDialog_GetHwnd() )
+    if ( PatchDialog_IsOpen() )
         g_PatchDialog_GetPatchInfo();
 }
 
@@ -959,7 +962,7 @@ void Brush_RemoveFromList( selbrush_t *b )
             b->patch->selected = 0;
         UpdateSelection( -1, 0 );
         SurfaceInspector::UpdateSurfaceDialog();
-        if ( g_PatchDialog_GetHwnd() )
+        if ( PatchDialog_IsOpen() )
             g_PatchDialog_GetPatchInfo();
     }
 }
@@ -972,9 +975,8 @@ void Brush_Free( selbrush_t *b )
 {
     // IDA 0x475ba3: drop this brush's cached light-preview record from the camera window
     // (a2@<ebx> = g_pParentWnd->m_pCamWnd, offset 0x7C0; only when the cam window exists).
-    CCamWnd *camWnd = g_pParentWnd ? g_pParentWnd->m_pCamWnd : nullptr;
-    if ( camWnd )
-        CCamWnd_RemoveLightPreview( b, camWnd );
+    // U-GLOBALS: the record array lives in the shell-agnostic camera state — no guard needed.
+    CamWnd_RemoveLightPreview( b );
 
     if ( b->next )
         Brush_RemoveFromList( b );
@@ -2836,7 +2838,7 @@ void sub_476ED0( brush_t *a1, MaterialDef *a2, char a3, float a4, char a5 )
             pmDst->lyrMtl = ( (patchMesh_material *)a2 )->lyrMtl;   // 0x476fc0
             pmDst->radMtl = ( (patchMesh_material *)a2 )->radMtl;   // 0x476fcd
             ++patch->version;                                                // 0x476fd1
-            if ( g_PatchDialog_GetHwnd() )                                   // 0x476fd8 CWnd_PatchDialog.m_hWnd
+            if ( PatchDialog_IsOpen() )                                   // 0x476fd8 CWnd_PatchDialog.m_hWnd
             {
                 g_PatchDialog_GetPatchInfo();                               // 0x476fe6
                 Brush_UpdateSpecialMaterialFlag( a1 );                      // 0x476fec
@@ -3596,16 +3598,13 @@ void Brush_MakeSided_Prolog( unsigned int sides, char snap )
     }
 
     int axis = 2;
-    CXYWnd *xy = g_pParentWnd ? g_pParentWnd->m_pActiveXY : nullptr;
-    if ( xy )
+    // U-GLOBALS: Ed_ActiveXY() is never NULL, so the "no active view → axis 2" arm is gone.
+    switch ( Ed_ActiveXY()->m_nViewType )
     {
-        switch ( xy->m_nViewType )
-        {
-        case 0: axis = 0; break;
-        case 1: axis = 1; break;
-        case 2: axis = 2; break;
-        default: axis = 0; break;   // IDA 0x4735E0: baseline re-inits to 0 when an XY view exists
-        }
+    case 0: axis = 0; break;
+    case 1: axis = 1; break;
+    case 2: axis = 2; break;
+    default: axis = 0; break;   // IDA 0x4735E0: baseline re-inits to 0 when an XY view exists
     }
     Brush_MakeSided( (int)selected_brushes.next->def, sides, axis, snap );
 }
@@ -5410,7 +5409,7 @@ void DisassociateEntities()
         iassert( b->owner->def == b->def->owner );
 
         entity_s_def *def = (entity_s_def *)b->owner->def;
-        const char *ScriptGroupKey = g_PrefsDlg->ScriptGroupKey;
+        const char *ScriptGroupKey = g_PrefsDlg->ScriptGroupKey.c_str();
         if ( HasKeyValuePair( def, ScriptGroupKey ) )
         {
             DeleteKey( &def->epairs, ScriptGroupKey );
@@ -5431,7 +5430,7 @@ void DisassociateEntities()
 // ─────────────────────────────────────────────────────────────────────────────
 void SelectedAssociated()
 {
-    CString matchValue;   // IDA: the str_set-built CString holding the compared value
+    std::string matchValue;   // IDA: the str_set-built CString holding the compared value (std::string here)
 
     if ( selected_brushes.next == &selected_brushes )
         return;
@@ -5443,7 +5442,7 @@ void SelectedAssociated()
     else if ( prevMode == sel_addpoint )
         sub_43ECB0();                                    // Patch_FinishCurveDrag
 
-    if ( !strcmp( g_PrefsDlg->ScriptGroupKey, g_PrefsDlg->ScriptColorTeamKey ) )
+    if ( !strcmp( g_PrefsDlg->ScriptGroupKey.c_str(), g_PrefsDlg->ScriptColorTeamKey.c_str() ) )
     {
         ScriptGroup_Type();
         return;
@@ -5458,7 +5457,7 @@ void SelectedAssociated()
             iassert( brush->def->owner == brush->owner->def );
 
             entity_s *owner = brush->def->owner;
-            const char *ScriptGroupKey = g_PrefsDlg->ScriptGroupKey;
+            const char *ScriptGroupKey = g_PrefsDlg->ScriptGroupKey.c_str();
             if ( !HasKeyValuePair( owner, ScriptGroupKey ) )
                 continue;
 
@@ -5490,7 +5489,7 @@ void SelectedAssociated()
                     iassert( match->def->owner == match->owner->def );
 
                     if ( Entity_HasEpairMatch( (entity_s *)match->owner->def,
-                                               g_PrefsDlg->ScriptGroupKey, matchValue ) )
+                                               g_PrefsDlg->ScriptGroupKey.c_str(), matchValue.c_str() ) )
                     {
                         Brush_RemoveFromList( match );
                         Brush_AddToList2( match );
@@ -6603,10 +6602,10 @@ extern void  __cdecl R_AddRenderCmdDrawTris(
 static bool sub_479690_HasScriptGroupKey( selbrush_t *b )
 {
     entity_s_def *eDef = (entity_s_def *)b->owner->def;
-    const char *sgKey = g_PrefsDlg->ScriptGroupKey;
+    const char *sgKey = g_PrefsDlg->ScriptGroupKey.c_str();
     if ( !HasKeyValuePair( eDef, sgKey ) )
         return false;
-    return strcmp( sgKey, g_PrefsDlg->ScriptColorTeamKey ) != 0;
+    return strcmp( sgKey, g_PrefsDlg->ScriptColorTeamKey.c_str() ) != 0;
 }
 
 // flt_73B098 (0x73B098) — the 7 script-colour token colours (r/b/y/c/g/p/o), indexed by
@@ -6959,7 +6958,7 @@ static void DrawModels_Decorations( selbrush_t *b, const orientation_t *orient,
     // colour-team key), draw a colour quad keyed off atol(ScriptGroupKey value)&0xF.
     if ( sub_479690_HasScriptGroupKey( b ) )
     {
-        const char *sgKey = g_PrefsDlg->ScriptGroupKey;
+        const char *sgKey = g_PrefsDlg->ScriptGroupKey.c_str();
         const char *val = "";
         for ( epair_t *ep = eDef->epairs; ep; ep = ep->next )
             if ( !_stricmp( ep->key, sgKey ) ) { val = ep->value; break; }
@@ -7062,21 +7061,20 @@ static void DrawBrush_PrefabContents( selbrush_t *bboxBrush, entity_s_def *eDef,
     // and silently dropping ~7.7k models (XY cull ported 2026-07-05, XY_CullBrush).
     // Guarded on the wnd pointers — NULL headless → no cull (the headless selftest never
     // draws prefab contents anyway).
-    extern CMainFrame *g_pParentWnd;                          // 0x25D5A70
-    extern char CullCubic( selbrush_t *brush, CCamWnd *cam ); // camwnd.cpp 0x4056d0
-    extern char XY_CullBrush( CXYWnd *xy, selbrush_t *b );    // xywnd.cpp 0x46cd80
-    CCamWnd *cullCam = ( viewType < 0 && g_pParentWnd ) ? g_pParentWnd->m_pCamWnd : nullptr;
+    // U-GLOBALS: both views' state comes from the shell-agnostic accessors, so the
+    // g_pParentWnd / m_pCamWnd / m_pActiveXY guards (and the m_pXYWnd fallback) are gone —
+    // the view SELECTION is purely `viewType < 0` (camera) vs `>= 0` (XY), as in the binary.
+    extern char CamWnd_CullCubic( selbrush_t *brush );                          // camwnd.cpp 0x4056d0
+    extern void CamWnd_SetupClipPlanes( const float *orient );                  // camwnd.cpp 0x405620
+    extern char XYWnd_CullBrush( xywndState_t *xy, selbrush_t *b );             // xywnd.cpp 0x46cd80
+    extern void XYWnd_SetupClipPlanes( xywndState_t *xy, const float *orient ); // xywnd.cpp 0x46cca0
+    const bool cullCam = ( viewType < 0 );
     if ( cullCam )
-        cullCam->Cam_SetupClipPlanes( (const float *)&prefabOrient );   // 0x478c3f
-    // 0x478c65/0x478c7d — the XY branch: g_pParentWnd->m_pActiveXY (fall back to the main
-    // XY pane when no view has taken focus yet — the binary asserts non-NULL instead).
-    CXYWnd *cullXY = nullptr;
-    if ( viewType >= 0 && g_pParentWnd )
-    {
-        cullXY = g_pParentWnd->m_pActiveXY ? g_pParentWnd->m_pActiveXY : g_pParentWnd->m_pXYWnd;
-        if ( cullXY )
-            cullXY->XY_SetupClipPlanes( (const float *)&prefabOrient ); // 0x478c7d
-    }
+        CamWnd_SetupClipPlanes( (const float *)&prefabOrient );          // 0x478c3f
+    // 0x478c65/0x478c7d — the XY branch (Ed_ActiveXY() IS the one XY view).
+    xywndState_t *cullXY = ( viewType >= 0 ) ? Ed_ActiveXY() : nullptr;
+    if ( cullXY )
+        XYWnd_SetupClipPlanes( cullXY, (const float *)&prefabOrient );   // 0x478c7d
 
     // Iterate the prefab's instanced brush list (active_brushlist_next .. sentinel
     // &active_brushlist, linked via selbrush_t.next) and draw each.
@@ -7088,12 +7086,12 @@ static void DrawBrush_PrefabContents( selbrush_t *bboxBrush, entity_s_def *eDef,
     {
         // 0x478cbb — CullCubic per content brush (camera view, in the prefab's local
         // space set up above).  Cull → skip skinning this content brush entirely.
-        if ( cullCam && CullCubic( pb, cullCam ) )
+        if ( cullCam && CamWnd_CullCubic( pb ) )
             continue;
         // 0x478cff — sub_46CD80 per content brush (XY view): outside the 2D view rect
         // (planes in prefab-local space) → skip.  This is the cull whose absence made the
         // XY pass queue every content model map-wide (the blackout FRAMEDROP overflow).
-        if ( cullXY && XY_CullBrush( cullXY, pb ) )
+        if ( cullXY && XYWnd_CullBrush( cullXY, pb ) )
             continue;
         // 0x478d9a — the binary's draw gate: draw UNLESS FilterBrush hides it, OR
         // (drawFlags bit 1 set AND it's a clip brush).  A misc_prefab placed with a
@@ -7129,9 +7127,9 @@ static void DrawBrush_PrefabContents( selbrush_t *bboxBrush, entity_s_def *eDef,
     // 0x478df3 — restore the clip planes to the CALLER's orientation (recursion-safe
     // for nested prefabs).  Binary: sub_405620(m_pCamWnd, a4) / CXYWnd_SetupClipPlanes(a4, xy).
     if ( cullCam )
-        cullCam->Cam_SetupClipPlanes( (const float *)orient );          // 0x478dfa
+        CamWnd_SetupClipPlanes( (const float *)orient );                // 0x478dfa
     if ( cullXY )
-        cullXY->XY_SetupClipPlanes( (const float *)orient );            // 0x478e19
+        XYWnd_SetupClipPlanes( cullXY, (const float *)orient );         // 0x478e19
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -8038,8 +8036,8 @@ char ExportTo3D( selbrush_t *b, const orientation_t *orient, FILE *f,
 //  ValueForKey2 returns the "" global, never null, so the *v guard handles it.)
 void ScriptGroup_AssignNextNumber()
 {
-    const char *groupKey = (const char *)g_PrefsDlg->ScriptGroupKey;
-    if ( !strcmp( groupKey, (const char *)g_PrefsDlg->ScriptColorTeamKey ) )
+    const char *groupKey = g_PrefsDlg->ScriptGroupKey.c_str();
+    if ( !strcmp( groupKey, g_PrefsDlg->ScriptColorTeamKey.c_str() ) )
         return;   // ScriptGroupKey == ScriptColorTeamKey → the colour-token path owns it.
 
     // PASS 1 — find the highest existing number under groupKey across active brushes.

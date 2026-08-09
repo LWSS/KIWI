@@ -28,7 +28,9 @@ extern int           modified;                  // map.cpp (0x23F179C) — dirty
 extern void         *zero;                      // engine_stubs.cpp (MFC empty string)
 extern void         *lpBuffer;                  // engine_stubs.cpp
 #include "mainfrm.h"
-extern CMainFrame   *g_pParentWnd;             // engine_stubs.cpp
+#include "xywnd.h"                             // xywndState_t / Ed_ActiveXY (U-GLOBALS)
+extern void XYWnd_PasteClip();                 // mainfrm.cpp (U-CMD-1 free fn)
+extern camera_s     *Ed_Camera();              // camwnd.cpp — THE editor camera (never NULL)
 
 // ─── forward declarations for functions defined later in this file ────────────
 struct prefab_s;  // defined further below; forward-declare for use in Prefab_Init decl
@@ -1852,29 +1854,24 @@ void Map_New()
     entity_s *v3  = Prefab_Init( (prefab_s *)&entityInsts, e, &active_brushes );
     world_entity  = v3;
 
-    // Reset the camera + XY view to the new-map default (faithful 0x4871AB-end;
-    // GUI-only — guarded on g_pParentWnd so the headless gate skips it). Camera goes
+    // Reset the camera + XY view to the new-map default (faithful 0x4871AB-end). Camera goes
     // to origin (0,0,48), pitch/yaw 0 (roll untouched); the active XY view recentres.
-    if ( g_pParentWnd )
+    // U-GLOBALS: the camera + XY state come from Ed_Camera()/Ed_ActiveXY() (never NULL), so the
+    // GUI guards fall away; only the CXYWnd::Paste call still needs the MFC shell.
     {
-        if ( g_pParentWnd->m_pCamWnd )
-        {
-            camera_s &cam = g_pParentWnd->m_pCamWnd->camera;
-            cam.angles[0] = 0.0f;
-            cam.angles[1] = 0.0f;
-            cam.origin[0] = 0.0f;
-            cam.origin[1] = 0.0f;
-            cam.origin[2] = 48.0f;
-        }
-        if ( g_pParentWnd->m_pXYWnd )
-        {
-            g_pParentWnd->m_pXYWnd->m_vOrigin[0] = 0.0f;
-            g_pParentWnd->m_pXYWnd->m_vOrigin[1] = 0.0f;
-            g_pParentWnd->m_pXYWnd->m_vOrigin[2] = 0.0f;
-        }
-        if ( g_pParentWnd->m_pActiveXY && g_bRestoreBetween )
-            g_pParentWnd->m_pActiveXY->Paste();   // carry a selection across File→New
+        camera_s &cam = *Ed_Camera();
+        cam.angles[0] = 0.0f;
+        cam.angles[1] = 0.0f;
+        cam.origin[0] = 0.0f;
+        cam.origin[1] = 0.0f;
+        cam.origin[2] = 48.0f;
     }
+    Ed_ActiveXY()->m_vOrigin[0] = 0.0f;
+    Ed_ActiveXY()->m_vOrigin[1] = 0.0f;
+    Ed_ActiveXY()->m_vOrigin[2] = 0.0f;
+    if ( g_bRestoreBetween )
+        XYWnd_PasteClip();   // carry a selection across File→New (U-CMD-1 free fn; was
+                             // g_pParentWnd->m_pActiveXY->Paste(), liveness guard dropped)
 
     g_bRestoreBetween = false;
     modified          = 0;     // a fresh map is clean

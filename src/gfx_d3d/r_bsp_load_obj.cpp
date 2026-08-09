@@ -1808,9 +1808,9 @@ mnode_t *__cdecl R_SortNodes_r(mnode_load_t *node, mnode_t *out)
 
         outb = R_SortNodes_r(&rgl.nodes[node->children[0]], out + 1);
 
-        out->rightChildOffset = ((char*)outb - (char*)out) / 2;
+        out->rightChildOffset = ((char*)outb - (char*)out) >> 1;
 
-        if (out->rightChildOffset != (outb - out) >> 1)
+        if (out->rightChildOffset != ((char*)outb - (char*)out) >> 1)
             Com_Error(ERR_DROP, "Max cells exceeded");
 
         return R_SortNodes_r(&rgl.nodes[node->children[1]], outb);

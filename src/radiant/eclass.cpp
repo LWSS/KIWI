@@ -4,11 +4,14 @@
 // cod3src\radiant\eclass.cpp
 
 #include "stdafx.h"
-#include <afxcoll.h>                 // CStringList (Eclass_LoadModel)
+// (afxcoll.h include retired with U-RIP; the CStringList it once provided is now a
+//  std::vector<std::string> in Eclass_LoadModel — see <vector>/<string> below)
 #include <io.h>                      // _findfirst64i32 / _findnext64i32 / _findclose
 #include <universal/q_parse.h>       // ParseThreadInfo, Com_ParseExt, parseInfo_t
 #include <universal/com_files.h>     // FS_ListFiles / FS_FreeFileList / FsListBehavior_e (weapon scan)
 #include <gfx_d3d/r_model.h>         // R_RegisterModel
+#include <string>                    // CString-era locals now std::string (Prefab_Load/Init_CStr)
+#include <vector>                    // Eclass_LoadModel: was MFC CStringList, now std::vector<std::string>
 
 // ── external Radiant/engine function declarations ─────────────────────────────
 // These are functions in other Radiant compilation units or the engine subset
@@ -103,9 +106,11 @@ static char g_eclassToken[1024];          // byte_2409CE0
 static int  g_eclassTokenEof = 0;         // dword_23F1CDC
 static char *Eclass_GetToken(char *text);
 
-// unknown_libname_321 / _322 (CFile::Write / ~CFile trampolines, IDB 0x596502/0x596993)
+// unknown_libname_321 / _322 (CFile::Write / ~CFile trampolines, IDB 0x596502/0x596993).
+// Dead IDB-provenance decls: never called or defined (the g_bBuildList newdefs.def dump that
+// used them was deleted in U-RIP). The CFile* is retyped FILE* now that the MFC shim is gone.
 void unknown_libname_321(LPCVOID data, DWORD len);
-void unknown_libname_322(CFile *f);
+void unknown_libname_322(FILE *f);
 
 // ── globals ────────────────────────────────────────────────────────────────────
 // Primary eclass linked list (alphabetized).  Corresponds to GtkRadiant 'eclass'.
@@ -389,20 +394,20 @@ char Prefab_Load(const char *a1, int *a2)
     // assigned only in mainfrm.cpp (CMainFrame project load), which the headless selftest gate
     // never runs -> it is NULL there. So this NULL guard is sanctioned headless-safety (same class
     // as the g_pParentWnd guards in map.cpp), NOT an invented behavioral divergence.
-    CString path;
+    std::string path;
     if ( g_qeglobals.d_project_entity )
     {
         for ( epair_t *ep = g_qeglobals.d_project_entity->epairs; ep; ep = ep->next )
-            if ( _stricmp( ep->key, "mapspath" ) == 0 ) { path = ep->value; break; }
+            if ( _stricmp( ep->key, "mapspath" ) == 0 ) { path = ( ep->value ? ep->value : "" ); break; }   // NULL-safe like MFC CString=
     }
 
     // Ensure a trailing backslash (IDA: if length>0 and last char != '\\', append '\\').
-    if ( !path.IsEmpty() && path[path.GetLength() - 1] != '\\' )
+    if ( !path.empty() && path[path.length() - 1] != '\\' )
         path += '\\';
 
     path += ( a1 ? a1 : "" );
 
-    if ( Eclass_RealizeModel( a2, (const char *)(LPCSTR)path ) )
+    if ( Eclass_RealizeModel( a2, path.c_str() ) )
     {
         Sys_Printf( " successful.\n" );
         return 1;
@@ -629,8 +634,10 @@ static void Init_CStr(eclass_t *ec, void **out, const char *key)
     if ( !key )
         return;
 
-    CString comments( ec->comments ? ec->comments : "" );   // cstr(&v11, ec->comments)
-    int pos = comments.Find( key );                          // cstr_find(v11, key)
+    std::string comments( ec->comments ? ec->comments : "" );   // cstr(&v11, ec->comments)
+    // MFC Find: -1 when absent (std::string::find returns npos, mapped to -1).  cstr_find(v11, key)
+    std::string::size_type foundAt = comments.find( key );
+    int pos = ( foundAt == std::string::npos ) ? -1 : (int)foundAt;
     if ( pos < 0 )
         return;
 
@@ -640,12 +647,12 @@ static void Init_CStr(eclass_t *ec, void **out, const char *key)
     if ( *p == '"' )            // skip an opening quote if present
         ++p;
 
-    CString value;
+    std::string value;
     for ( ; *p && *p != '"'; ++p )   // read until closing quote / end
         value += *p;
 
-    if ( value.GetLength() > 0 )
-        *out = AllocMaterialString( (LPCSTR)value );
+    if ( (int)value.length() > 0 )
+        *out = AllocMaterialString( value.c_str() );
 }
 
 
@@ -976,7 +983,7 @@ LABEL_4:
 void Eclass_LoadModel(int a1)
 {
     eclass_t *ec = (eclass_t *)a1;
-    CStringList list;   // IDA sub_5AC540(&v9, 10) — 10 is only an allocation hint
+    std::vector<std::string> list;   // was MFC CStringList; IDA sub_5AC540(&v9, 10) — 10 is only an allocation hint
 
     // ec->xx1 (+0x160) heads the sub-model node list; create the first node if absent.
     if ( !ec->xx1 )
@@ -989,20 +996,20 @@ void Eclass_LoadModel(int a1)
     // Split modelpath on ';' into the list (operate on a copy — strtok is destructive).
     char *copy = (char *)AllocMaterialString( (const char *)ec->modelpath );
     for ( char *tok = strtok( copy, ";" ); tok; tok = strtok( nullptr, ";" ) )
-        list.AddTail( tok );
+        list.push_back( tok );
 
-    int      v4    = ec->xx1;          // current (tail) node
-    int      j     = v4;               // node handed to the loader
-    POSITION pos   = list.GetHeadPosition();
-    int      count = (int)list.GetCount();
+    int v4 = ec->xx1;                  // current (tail) node
+    int j  = v4;                       // node handed to the loader
 
-    for ( int idx = 0; idx < count; ++idx )
+    // Forward head->tail walk (was CStringList GetHeadPosition/GetNext; == IDA's GetAt(idx)).
+    // Each `name` is a mutable copy, matching the binary's per-iteration CString copy, so the
+    // (char *) hand-off to Model_load still points at a writable buffer.
+    for ( std::string name : list )
     {
-        CString name = list.GetNext( pos );   // forward walk == IDA's GetAt(idx)
         if ( ec->classtype & 0x10 )
-            Prefab_Load( (LPCSTR)name, &j );
+            Prefab_Load( name.c_str(), &j );
         else
-            Model_load( (char *)(LPCSTR)name, (int)&j );
+            Model_load( (char *)name.c_str(), (int)&j );
 
         int newNode = (int)operator new( 0x98u );
         *(int *)v4 = newNode;          // link: *v4 = newNode
@@ -1014,7 +1021,7 @@ void Eclass_LoadModel(int a1)
     j__free_0( copy );
     j__free_0( (void *)ec->modelpath );
     ec->modelpath = 0;
-    // CStringList destructor (sub_5AC676) runs automatically here.
+    // std::vector<std::string> (was the CStringList; IDA dtor sub_5AC676) frees automatically here.
 }
 
 
@@ -1586,25 +1593,6 @@ eclass_t *Eclass_InitForSourceDirectory(char *path)
     }
 
 LABEL_72:
-    if ( g_bBuildList )
-    {
-        // Write accumulated QUAKED blocks to "newdefs.def".
-        // IDB: CFile::Open (instance method), Write, Close, ~CFile.
-        CFile v47;
-        if ( v47.Open("newdefs.def", 0x1001u) )
-        {
-            LPCVOID v44 = lpBuffer;
-            DWORD   v45 = *((DWORD *)lpBuffer - 3);
-            if ( ((1 - *((int *)lpBuffer - 1)) | *((int *)lpBuffer - 2)) < 0 )
-            {
-                __strcpy(&lpBuffer, 0);
-                v44 = lpBuffer;
-            }
-            v47.Write(v44, v45);
-            v47.Close();
-        }
-        // v47 destructor called automatically at end of scope.
-    }
 
     eclass_t *result = Eclass_InitFromText((void *)"/*QUAKED UNKNOWN_CLASS (0 0.5 0) ?");
     eclass_bad = result;

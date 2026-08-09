@@ -45,3 +45,4 @@ add_subdirectory(${SCRIPTS_DIR}/mp)
 #add_subdirectory(${SCRIPTS_DIR}/sp) # Disabled SP in KIWI
 add_subdirectory(${SCRIPTS_DIR}/dedi)
 add_subdirectory(${SCRIPTS_DIR}/radiant)
+add_subdirectory(${SCRIPTS_DIR}/cod4map)

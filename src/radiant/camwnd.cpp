@@ -18,6 +18,7 @@
 #include <gfx_d3d/r_scene.h>        // R_Ed_SetSceneParms
 #include <gfx_d3d/r_rendercmds.h>   // R_BeginFrame/EndFrame, clear/material-color, MaterialTechniqueType
 #include <gfx_d3d/r_state.h>        // CONST_SRC_CODE_SUN_POSITION/DIFFUSE/SPECULAR
+#include "radiant_rtt.h"            // P5 RTT: RTT_Begin/RTT_End, RTT_CAMERA
 #include <universal/com_math.h>     // AngleVectors
 #include <math.h>
 #include <string.h>
@@ -57,10 +58,111 @@ extern entity_s *world_entity;   // entity.cpp 0x25D5B30 — worldspawn (carries
 extern "C++" char *__cdecl R_ParseSunLight( SunLightParseParams *params, char *text );
 extern void __cdecl R_InterpretSunLightParseParamsIntoLights( SunLightParseParams *sunParse, GfxLight *sunLight );
 
+// ─── camwndState_t — the 3D camera viewport's shell state (U-VP-CAM) ──────────────
+// The camera view is a singleton (one window, one state block), so this is a file-scope
+// instance both shells drive: the MFC CCamWnd handlers near the bottom of this file and the
+// raw-Win32 WndProc twin after them read/write these SAME fields.  Every member below used
+// to be a CCamWnd member; mainfrm.h still declares those (this unit may not edit it) but
+// nothing reads them any more — U-GUARD deletes them with the class.
+//   camera        = CCamWnd::camera, THE editor camera.  Ed_Camera() below publishes it so
+//                   core TUs can stop reaching it through g_pParentWnd->m_pCamWnd (that
+//                   call-site sweep is its own unit; this one only provides the accessor).
+//   width/height  = CCamWnd::m_nWidth / m_nHeight (client size, latched in OnCreate/OnSize).
+//   m_pt*         = POINT, not CPoint: the raw shell has no MFC types, CPoint IS a POINT, and
+//                   every use here is .x/.y only (CXYWnd already uses POINT for m_ptCursor).
+//   contextMenu   = CCamWnd::m_contextMenu's m_hMenu (IDB context_menu@+0x338).  CMenu is MFC,
+//                   but CMenu::Attach/DestroyMenu/AppendMenuA/TrackPopupMenu ARE the raw HMENU
+//                   calls Cam_ContextMenu makes, so the popup is shell-agnostic as a bare HMENU.
+//   The trailing IDB field offsets travelled with the members off the CCamWnd declaration.
+//
+// U-GUARD, dead CCamWnd members after this unit (mainfrm.h ~line 33, not editable here):
+//   camera, m_nWidth, m_nHeight, m_nCambuttonstate, m_ptButton, cam_was_not_dragged,
+//   m_ptCursor, m_ptLastCursor, prob_some_cursor, x47, cursor_visible, light_preview_arr,
+//   light_preview_count, clipWorldNormal, clipWorldAxis, clipBoxCenter, clipPlaneNormal,
+//   clipPlaneAxis, m_contextMenu, struct LightPreviewRec — all superseded by the fields here.
+//   m_ptCursor3 was ALREADY dead before this unit (declared, never read or written).
+//   m_bLooking / m_ptLook are inside mainfrm.h's own #if 0 (the disabled FPS-look camera).
+//
+// U-GUARD HAZARD (report item, deliberately NOT worked around here): CMainFrame::OnDynamicLighting
+// (mainfrm.cpp 0x429960, menu 32854) constructs a SECOND CCamWnd as a floating popup.  That
+// feature is DEAD — its hwnd is never registered with the renderer, so it draws nothing (the
+// binary behaves the same) — but with the state a singleton, WM_SIZE/WM_CREATE/mouse input on
+// that popup now writes the REAL camera's state instead of its own dead copy.  The fix belongs
+// with the command sweep that drops the dead menu entry, not to a gate invented in here.
+struct camLightPreviewRec_t   // == CCamWnd::LightPreviewRec, 56 B (IDB stride 14 dwords)
+{
+    int           inst;
+    int           arg2;
+    orientation_t orient;
+};
+
+struct camwndState_t
+{
+    camera_s camera = {};                 // embedded camera state (IDB CCamWnd::camera)
+    int      width  = 0;                  // m_nWidth  — client width  (px)
+    int      height = 0;                  // m_nHeight — client height (px)
+
+    // 3D-view mouse interaction state (CamWnd_DropModelsToPlane / Cam_MouseControl /
+    // Cam_MouseUp / Cam_MouseMoved — IDB 0x403d30 / 0x403950 / 0x404f70 / 0x404fc0).
+    unsigned int m_nCambuttonstate = 0;   // +0xd4  MK_ flags of the active press
+    POINT  m_ptButton  = { 0, 0 };        // +0xd8  press point (flipped Y, client coords)
+    bool   cam_was_not_dragged = false;   // +0xe0  set on a plain RMB press (no drag yet)
+    POINT  m_ptCursor  = { 0, 0 };        // +0xe4  cursor anchor for the view-control drags
+    POINT  m_ptLastCursor = { 0, 0 };     // +0xec  OnMouseMove dedup (skip no-move events)
+    int    prob_some_cursor = 0;          // +0x128 accumulated cursor dx (texture rotate/shift snap)
+    int    x47 = 0;                       // +0x12c accumulated cursor dy (texture rotate/shift snap)
+    int    cursor_visible = 1;            // +0x130 cursor-shown flag; Cam_MouseUp restores it to 1
+
+    // light-region preview records (Regions_ForSelected 0x406F10 reads these): +0x134 / +0x2F4.
+    camLightPreviewRec_t light_preview_arr[16] = {};
+    int                  light_preview_count = 0;
+
+    // Cubic/frustum clip-plane state (CullCubic 0x4056d0 / Cam_Fov 0x405460 / sub_405620).
+    vec3_t clipWorldNormal[2] = {};   // IDB x33..x35 / x36..x38 (world-space side-plane normals)
+    int    clipWorldAxis[2][3] = {};  // IDB x39..x41 / x42..x44 (world-space corner selectors)
+    vec3_t clipBoxCenter      = {};   // IDB x163..x165 (camera origin in the target local space)
+    vec3_t clipPlaneNormal[2] = {};   // IDB x166..x168 / x169..x171 (local-space side normals)
+    int    clipPlaneAxis[2][3] = {};  // IDB x172..x174 / x175..x177 (local-space corner selectors)
+
+    HMENU  contextMenu = nullptr;     // +0x338 the RMB face-picker popup (CMenu::m_hMenu)
+
+    // CCamWnd::CCamWnd == the binary's Cam_Init (0x402c40): CMainFrame::CreateQEChildren
+    // 0x4219cb spawns the camera at (0, 20, 46) with yaw 0 (look +X) and draw_mode 1
+    // (Cam_Draw 0x407dc0 maps mode 1 to TECHNIQUE_UNLIT).  Static init runs long before
+    // either shell creates the window, so both get the same start state.
+    camwndState_t()
+    {
+        camera.angles[1] = 0.0f;          // yaw → look +X
+        camera.origin[0] =  0.0f;
+        camera.origin[1] = 20.0f;
+        camera.origin[2] = 46.0f;
+        camera.draw_mode = 1;
+    }
+} g_camwndState;
+
+// ─── Ed_Camera — THE editor camera, shell-agnostic (U-VP-CAM / U-GLOBALS) ─────────
+// The accessor the whole MFC-removal campaign hinges on.  Core TUs currently reach the camera
+// as `g_pParentWnd->m_pCamWnd->camera`, i.e. through CMainFrame (MFC); there is exactly ONE
+// camera, so &g_camwndState.camera is that same state with no window class in the path.  The
+// call-site sweep (entity.cpp / errorfile.cpp / map.cpp / mainfrm.cpp / pmesh.cpp / points.cpp /
+// select.cpp / texwnd.cpp / win_dlg.cpp / xywnd.cpp / z.cpp) is a LATER unit; this one only
+// publishes the accessor and uses it for the sites inside camwnd.cpp.  It never returns NULL,
+// so those sites' `if ( m_pCamWnd )` guards simply fall away when they are swept.
+camera_s *Ed_Camera()
+{
+    return &g_camwndState.camera;
+}
+
+// Defined below; Cam_Fov's tail calls it (they were sibling CCamWnd methods, so the class
+// declaration used to supply this).
+void CamWnd_SetupClipPlanes( const float *orient );
+
 // 0x403470  Cam_BuildMatrix — view basis from the angles.  AngleVectors wants pitch NEGATED;
 // forward/right are the yaw-plane movement basis (the binary's AngleVectors_YawPlane).
-void CCamWnd::Cam_BuildMatrix()
+void CamWnd_BuildMatrix()
 {
+    camera_s &camera = g_camwndState.camera;
+
     float a[3] = { -camera.angles[0], camera.angles[1], camera.angles[2] };
     AngleVectors( a, camera.vpn, camera.vright, camera.vup );
 
@@ -76,9 +178,11 @@ void CCamWnd::Cam_BuildMatrix()
 // X ~ -175000) the float32 MatrixInverse44 loses the sign of the inverse-VP's m[3][3], so the
 // assert fires on a projection the forward render handles fine.  Returns false to drop just that
 // frame (the cleared background stands) instead of crashing.
-bool CCamWnd::Cam_SetupScene()
+bool CamWnd_SetupScene()
 {
-    Cam_BuildMatrix();
+    camera_s &camera = g_camwndState.camera;
+
+    CamWnd_BuildMatrix();
 
     float axis[3][3];
     axis[0][0] =  camera.vpn[0];    axis[0][1] =  camera.vpn[1];    axis[0][2] =  camera.vpn[2];
@@ -137,8 +241,12 @@ extern int   dword_181F51C;                                                     
 // side plane's normal is stored (clipWorldNormal[0/1]) plus a 3-entry axis selector
 // (clipWorldAxis[0/1]) picking, per component, the box corner (0/1/2 = mins, 3/4/5 =
 // maxs) that is farthest along that normal — the classic Q3 axial box/plane test.
-void CCamWnd::Cam_Fov()
+void CamWnd_Fov()
 {
+    camera_s &camera                = g_camwndState.camera;
+    vec3_t ( &clipWorldNormal )[2]  = g_camwndState.clipWorldNormal;
+    int    ( &clipWorldAxis )[2][3] = g_camwndState.clipWorldAxis;
+
     float vec[3];
     // v4 = tan(fov/2) * 0.75 * (width/height); v3 = -v4  (0x405491..0x4054b0)
     float v4 = (float)( tan( DEG2RAD( g_PrefsDlg->camera_fov ) * 0.5 ) * 0.75 );
@@ -166,7 +274,7 @@ void CCamWnd::Cam_Fov()
     clipWorldAxis[0][2] = clipWorldNormal[0][2] > 0.0f ? 5 : 2;
     clipWorldAxis[1][2] = clipWorldNormal[1][2] > 0.0f ? 5 : 2;
 
-    Cam_SetupClipPlanes( &world_orient_matrix[0][0] );   // 0x4055fa
+    CamWnd_SetupClipPlanes( &world_orient_matrix[0][0] );   // 0x4055fa
 }
 
 // 0x405620  sub_405620 — transform the world-space clip setup (clipWorldNormal/Axis)
@@ -174,8 +282,14 @@ void CCamWnd::Cam_Fov()
 //   clipBoxCenter    = camera origin in local space
 //   clipPlaneNormal  = the two world normals rotated into local space
 //   clipPlaneAxis    = re-derived box-corner selectors from the rotated normals' signs
-void CCamWnd::Cam_SetupClipPlanes( const float *orient )
+void CamWnd_SetupClipPlanes( const float *orient )
 {
+    camera_s &camera                = g_camwndState.camera;
+    vec3_t ( &clipBoxCenter )       = g_camwndState.clipBoxCenter;
+    vec3_t ( &clipWorldNormal )[2]  = g_camwndState.clipWorldNormal;
+    vec3_t ( &clipPlaneNormal )[2]  = g_camwndState.clipPlaneNormal;
+    int    ( &clipPlaneAxis )[2][3] = g_camwndState.clipPlaneAxis;
+
     const orientation_t *o = (const orientation_t *)orient;
     OrientationWorldPosToLocalPos( clipBoxCenter, camera.origin, o );          // 0x405636
     VectorRotateByAxis( clipPlaneNormal[0], orient, clipWorldNormal[0] );      // 0x40564d
@@ -198,8 +312,12 @@ void CCamWnd::Cam_SetupClipPlanes( const float *orient )
 //       two side planes (dot < -1.0).
 // `brush` is the INSTANCE (selbrush_t); its ->def carries the world-space mins/maxs (0x20/
 // 0x2c, contiguous, so def->mins[3+i] == def->maxs[i] — the axis-index trick).
-char CullCubic( selbrush_t *brush, CCamWnd *cam )
+// U-VP-CAM: the binary's `cam` argument was always the ONE camera window, so the clip state
+// now comes from g_camwndState; the MFC-shell `CullCubic( brush, cam )` at the bottom of this
+// file is a thin forwarder for brush.cpp, whose call sites a later unit sweeps onto this name.
+char CamWnd_CullCubic( selbrush_t *brush )
 {
+    const camwndState_t *cam = &g_camwndState;
     brush_t *def = brush->def;
     // m_bCubicClipping defaults ON with m_nCubicScale=13 (cube half-size 13<<6 = 832 units),
     // faithful to CPrefsDlg::LoadPrefs 0x44e7b9/0x44e7df.  Missing/popping distant geometry is
@@ -1056,8 +1174,9 @@ static void Cam_DrawOneLightPreview( selbrush_t *b )
 //       FIFO, filled by Light Preview→"Start preview on selected", cmd 33951);
 //   (b) Cam_Draw 0x408266 — every SELECTED light.
 // With nothing pinned and nothing selected the toggle shows nothing; that is retail behaviour.
-static void Cam_DrawLightPreviews( CCamWnd *cam )
+static void Cam_DrawLightPreviews()
 {
+    const camwndState_t *cam = &g_camwndState;
     for ( int i = 0; i < cam->light_preview_count; ++i )                      // (a) pinned list
         Cam_DrawOneLightPreview( (selbrush_t *)(intptr_t)cam->light_preview_arr[i].inst );
     for ( selbrush_t *b = selected_brushes.next; b && b != &selected_brushes; b = b->next )
@@ -1222,7 +1341,7 @@ static void Cam_DrawTriggerRadius( selbrush_t *b )
 static bool Cam_Token_EntityGate( selbrush_t *b )
 {
     entity_s_def *e = (entity_s_def *)b->owner->def;
-    if ( !HasKeyValuePair( e, g_PrefsDlg->ScriptColorTeamKey ) )
+    if ( !HasKeyValuePair( e, g_PrefsDlg->ScriptColorTeamKey.c_str() ) )
         return false;
     const char *classname = "";
     for ( epair_t *ep = e->epairs; ep; ep = ep->next )
@@ -1233,7 +1352,7 @@ static bool Cam_Token_EntityGate( selbrush_t *b )
 static bool Cam_Token_Match( selbrush_t *b, const char *token )
 {
     entity_s_def *e = (entity_s_def *)b->owner->def;
-    const char *teamVal = ValueForKey2( (int)(intptr_t)e, g_PrefsDlg->ScriptColorTeamKey );
+    const char *teamVal = ValueForKey2( (int)(intptr_t)e, g_PrefsDlg->ScriptColorTeamKey.c_str() );
     return strstr( teamVal, token ) != nullptr;
 }
 
@@ -1278,7 +1397,7 @@ static void Cam_DrawTokens( const char *teamKeyValue )
 
     // reorder: bring the token whose text contains the ScriptColorKey to the front (the
     // binary swaps the first match into slot [i]==[last]; here move-to-front of slot 0).
-    const char *colorKey = (const char *)g_PrefsDlg->ScriptColorKey;
+    const char *colorKey = g_PrefsDlg->ScriptColorKey.c_str();
     for ( int i = 0; i + 1 < tokens; ++i )
     {
         if ( strstr( tokenStr[i], colorKey ) )
@@ -1321,7 +1440,7 @@ static void Cam_DrawTokens( const char *teamKeyValue )
 }
 
 // Defined below (after Cam_Draw); the Cam_Draw tail's 3D-marquee box needs them.
-static void CameraCalcRayDir( int y, float *dir, CCamWnd *cam, int x );
+static void CameraCalcRayDir( int y, float *dir, int x );
 void Camera_GetRectSelection3D( int x1, int y1, int x2, int y2, float *outPlanes );
 
 // 0x441240  DrawAdvancedTerrainEditCircle - the terrain-paint brush-radius cursor ring in the
@@ -1432,12 +1551,11 @@ static GfxCmdDrawPoints *DrawAdvancedTerrainEditCircle( const float *a1 )
 // KISAK: the CullCubic call is an addition - the port's entity pass culls (buffer pressure), so
 // the re-add culls identically.  A brush the base pass culled has nothing on screen to re-light.
 
-static int Cam_DrawBrushList_SunPreview( selbrush_t *head, CCamWnd *cam )
+static int Cam_DrawBrushList_SunPreview( selbrush_t *head )
 {
     extern void DrawBrush( selbrush_t *b, const orientation_t *orient, int viewType,
                            int technique, GfxColor *col, char width, int drawFlags,
                            const char *layerPrefix );                       // brush.cpp 0x47afc0
-    extern char CullCubic( selbrush_t *brush, CCamWnd *cam );               // camwnd.cpp
     int drawn = 0;
     // The re-add walks the list BACKWARD: 0x406965 `mov esi,[edi]` seeds from head->prev and
     // 0x4069a9 `mov esi,[esi]` advances by prev (offset 0), unlike DrawGeneralWorld_'s +4 walk.
@@ -1445,7 +1563,7 @@ static int Cam_DrawBrushList_SunPreview( selbrush_t *head, CCamWnd *cam )
     {
         if ( !b->cullFlag )                       // 0x406970: byte[i+0x26]
             continue;
-        if ( cam && CullCubic( b, cam ) )         // KISAK (see above)
+        if ( CamWnd_CullCubic( b ) )              // KISAK (see above)
             continue;
         GfxColor col;
         Cam_BrushColor2d( b, &col );              // 0x40697c Brush_GetColor2d
@@ -1474,7 +1592,7 @@ static int Cam_DrawBrushList_SunPreview( selbrush_t *head, CCamWnd *cam )
 // zeroes both first.  ORDER IS LOAD-BEARING: everything that should darken must already be
 // RASTERISED (not merely queued in the surf cache) before the multiply quad, and nothing may
 // write depth or alpha between the clear quad and the re-add.
-static void Cam_SunPrev_Main( CCamWnd *cam, bool faithfulSun, Material *sunMultiplyMat,
+static void Cam_SunPrev_Main( bool faithfulSun, Material *sunMultiplyMat,
                               const float litSunDir[3], const float litAmbientMul[3],
                               bool litHaveSun )
 {
@@ -1543,24 +1661,29 @@ static void Cam_SunPrev_Main( CCamWnd *cam, bool faithfulSun, Material *sunMulti
     {
         extern void R_SortMaterials();                                      // r_ed_scene.cpp
         R_SortMaterials();                                                  // 0x406a93
-        Cam_DrawBrushList_SunPreview( &selected_brushes, cam );             // 0x406a9d
-        Cam_DrawBrushList_SunPreview( &active_brushes,   cam );             // 0x406aa7
+        Cam_DrawBrushList_SunPreview( &selected_brushes );                   // 0x406a9d
+        Cam_DrawBrushList_SunPreview( &active_brushes );                     // 0x406aa7
         R_AddEditorSurfsCmd();                                              // 0x406aac
     }
 }
 
-void CCamWnd::Cam_Draw()
+// `hwnd` is only for the terrain-paint cursor ring at the tail (screen→client + client rect);
+// everything else draws from g_camwndState.  The MFC shell passes GetSafeHwnd().
+void CamWnd_Draw( HWND hwnd )
 {
+    camwndState_t *cam    = &g_camwndState;
+    camera_s      &camera = cam->camera;
+
     if ( !active_brushes.next )      // brush lists not bootstrapped → no map loaded
         return;
 
-    if ( !Cam_SetupScene() )         // degenerate projection: skip geometry this frame, the
+    if ( !CamWnd_SetupScene() )      // degenerate projection: skip geometry this frame, the
         return;                      // cleared background stands
 
     // 0x407ee3 - the camera's WORLD-space cubic/frustum clip planes, so the entity and
     // prefab-content passes below can CullCubic against them.  The binary calls this right
     // after R_SetupScene; without it the entity pass skins every off-screen model.
-    Cam_Fov();
+    CamWnd_Fov();
 
     const int layer = g_qeglobals.current_edit_layer;
 
@@ -1807,9 +1930,8 @@ void CCamWnd::Cam_Draw()
                 // 0x407af0 - CullCubic per world-oriented entity brush.  Without it every
                 // off-screen misc_model / misc_prefab is skinned and the skinned-surf buffers
                 // overflow, dropping later on-screen models.  Cam_Fov set the planes in WORLD
-                // space above, so `this` is the right cam.  Live editor only.
-                extern char CullCubic( selbrush_t *brush, CCamWnd *cam );
-                if ( CullCubic( b, this ) )
+                // space above, which is the state CullCubic reads.  Live editor only.
+                if ( CamWnd_CullCubic( b ) )
                     continue;
 
                 GfxColor ecol;
@@ -1839,7 +1961,7 @@ void CCamWnd::Cam_Draw()
     // Light preview: pinned list + SELECTED lights only (ActiveSunLightPreviewInit 0x4066d0's
     // list loop + Cam_Draw 0x408266's selected loop).
     if ( g_PrefsDlg->enable_light_preview )
-        Cam_DrawLightPreviews( this );
+        Cam_DrawLightPreviews();
 
     // Flush the accumulated surf cache as one RC_DRAW_EDITOR_SKINNEDCACHED: ED_SURF_MESH
     // (brush faces from the cached world fill and the entity pass's prefab contents) plus
@@ -1952,7 +2074,7 @@ void CCamWnd::Cam_Draw()
     // selected-entity (0x4080e3) flushes and BEFORE the decoration/white-outline tail.  The
     // position is load-bearing: the multiply quad can only darken ALREADY-RASTERISED pixels and
     // the depth-EQUAL re-add can only land on depths the base pass wrote.
-    Cam_SunPrev_Main( this, faithfulSun, sunMultiplyMat, s_litSunDir, s_litAmbientMul, s_litHaveSun );
+    Cam_SunPrev_Main( faithfulSun, sunMultiplyMat, s_litSunDir, s_litAmbientMul, s_litHaveSun );
 
     // 0x4082f8 — LIGHT-REGION HULL overlay, drawn right after the DrawLightsMain loop (and,
     // in the binary, after the additive world pass at 0x4082f3 the port defers).  Draws the
@@ -1995,15 +2117,15 @@ void CCamWnd::Cam_Draw()
 
         // CamWnd_Tokens — sub_4560F0 gate, then the last selected script-trigger's
         // ScriptColorTeamKey value drives the token billboards.
-        const bool tokensOn = strcmp( (const char *)g_PrefsDlg->ScriptGroupKey, "token" ) != 0
-            && strcmp( (const char *)g_PrefsDlg->ScriptGroupKey, (const char *)g_PrefsDlg->ScriptColorTeamKey ) == 0;
+        const bool tokensOn = strcmp( g_PrefsDlg->ScriptGroupKey.c_str(), "token" ) != 0
+            && strcmp( g_PrefsDlg->ScriptGroupKey.c_str(), g_PrefsDlg->ScriptColorTeamKey.c_str() ) == 0;
         if ( tokensOn )
         {
             extern bool ScriptGroup_BrushIsTrigger( selbrush_t *b );   // scriptgroup.cpp 0x453FD0
             const char *teamVal = nullptr;
             for ( selbrush_t *b = selected_brushes.next; b && b != &selected_brushes; b = b->next )
                 if ( ScriptGroup_BrushIsTrigger( b ) )
-                    teamVal = ValueForKey2( (int)(intptr_t)b->owner->def, g_PrefsDlg->ScriptColorTeamKey );
+                    teamVal = ValueForKey2( (int)(intptr_t)b->owner->def, g_PrefsDlg->ScriptColorTeamKey.c_str() );
             if ( teamVal && teamVal[0] )
                 Cam_DrawTokens( teamVal );
         }
@@ -2089,18 +2211,18 @@ void CCamWnd::Cam_Draw()
         { drag_y2 = g_qeglobals.drag_selectionbox_x_2; a1_i = g_qeglobals.drag_selectionbox_y_2; }
 
         const float depth = 4.000999927520752f;
-        const float *o    = this->camera.origin;
+        const float *o    = camera.origin;
         float rays[4][3];
         // 4 corner rays in the IDA's exact order (drag_y2,a4)/(a1,a4)/(a1,halfx)/(drag_y2,halfx).
-        CameraCalcRayDir( a4,      rays[0], this, drag_y2 );
-        CameraCalcRayDir( a4,      rays[1], this, a1_i );
-        CameraCalcRayDir( halfx_i, rays[2], this, a1_i );
-        CameraCalcRayDir( halfx_i, rays[3], this, drag_y2 );
+        CameraCalcRayDir( a4,      rays[0], drag_y2 );
+        CameraCalcRayDir( a4,      rays[1], a1_i );
+        CameraCalcRayDir( halfx_i, rays[2], a1_i );
+        CameraCalcRayDir( halfx_i, rays[3], drag_y2 );
         float verts[4][4];
         for ( int i = 0; i < 4; ++i )
         {
-            float dn = rays[i][2] * this->camera.vpn[2] + rays[i][1] * this->camera.vpn[1]
-                     + rays[i][0] * this->camera.vpn[0];
+            float dn = rays[i][2] * camera.vpn[2] + rays[i][1] * camera.vpn[1]
+                     + rays[i][0] * camera.vpn[0];
             float s  = depth / dn;
             verts[i][0] = rays[i][0] * s + o[0];
             verts[i][1] = rays[i][1] * s + o[1];
@@ -2116,17 +2238,17 @@ void CCamWnd::Cam_Draw()
     extern int  sub_401D50();                                            // patchdialog.cpp 0x401D50
     extern char sub_43DD50( const float *dir, byte *colorOut,
                             const float *cam_origin, float *origin_out ); // pmesh.cpp 0x43DD50
-    if ( this->cursor_visible && sub_401D50() )
+    // P5 RTT: the ring's cursor position must be in the CAMERA IMAGE's mousespace (the 3D
+    // viewport panel), NOT ScreenToClient on the hidden native camera child (that gave garbage
+    // coords → the ring never appeared). The shell records the image-relative cursor + size.
+    extern bool ImGuiShell_CameraPaintCursor( int *x, int *y, int *w, int *h );   // imgui_shell.cpp
+    int cpx, cpy, cph;
+    (void)hwnd;
+    if ( cam->cursor_visible && sub_401D50() && ImGuiShell_CameraPaintCursor( &cpx, &cpy, nullptr, &cph ) )
     {
-        POINT pt;
-        ::GetCursorPos( &pt );
-        ::ScreenToClient( m_hWnd, &pt );
-        RECT rc;
-        ::GetClientRect( m_hWnd, &rc );
-        if ( pt.x >= rc.left && pt.x < rc.right && pt.y >= rc.top && pt.y < rc.bottom )
         {
             float dir[3];
-            CameraCalcRayDir( rc.bottom - pt.y, dir, this, pt.x );   // (a4=bottom-y, dir, this, x)
+            CameraCalcRayDir( cph - cpy, dir, cpx );                 // (a4=bottom-y, dir, x)
             float cursorWorld[3];                                    // mouse_origin (vec3)
             if ( sub_43DD50( dir, nullptr, camera.origin, cursorWorld ) )
             {
@@ -2155,7 +2277,6 @@ extern void  Vec3Cross( const float *a, const float *b, float *out );    // 0x40
 extern float Vec3Normalize_R( float *v );                                // 0x40A5E0
 extern int   g_nPatchClickedView;                                        // 0x73B108
 extern char  g_bXYViewIsLastPatchClick;                                  // 0x25D5A6A
-extern CMainFrame *g_pParentWnd;                                         // 0x25D5A70
 // Cam_MouseMoved (0x404fc0) drag-select / texture rotate-shift dispatch deps:
 extern void  Drag_MouseMoved( int x, int y, int buttons, float *origin, float *dir ); // drag.cpp 0x47FF30
 extern void  Brush_ShiftTexture( float ds, float dt );                   // select.cpp 0x491F20
@@ -2164,8 +2285,9 @@ extern int   sub_401D50();                                               // patc
 extern void  Sys_GetCursorPos( int *x, int *y );                         // win_qe3.cpp 0x499C90 (GetCursorPos wrapper)
 
 // 0x403b30  CameraCalcRayDir - screen (x,y) -> normalised world pick ray.
-static void CameraCalcRayDir( int y, float *dir, CCamWnd *cam, int x )
+static void CameraCalcRayDir( int y, float *dir, int x )
 {
+    const camwndState_t *cam = &g_camwndState;
     int    height = cam->camera.height;
     double t      = tan( DEG2RAD( g_PrefsDlg->camera_fov ) * 0.5 );
     float  s      = (float)( ( t * 0.75 + t * 0.75 ) / (double)height );
@@ -2188,13 +2310,12 @@ void Camera_GetRectSelection3D( int x1, int y1, int x2, int y2, float *outPlanes
     int xhi = x2 + x1 - xlo;
     int ylo = ( y1 < y2 ) ? y1 : y2;
     int yhi = y2 + y1 - ylo;
-    CCamWnd *cam = g_pParentWnd->m_pCamWnd;
     float rays[4][3];
-    CameraCalcRayDir( ylo, rays[0], cam, xlo );
-    CameraCalcRayDir( yhi, rays[1], cam, xlo );
-    CameraCalcRayDir( yhi, rays[2], cam, xhi );
-    CameraCalcRayDir( ylo, rays[3], cam, xhi );
-    const float *o = cam->camera.origin;
+    CameraCalcRayDir( ylo, rays[0], xlo );
+    CameraCalcRayDir( yhi, rays[1], xlo );
+    CameraCalcRayDir( yhi, rays[2], xhi );
+    CameraCalcRayDir( ylo, rays[3], xhi );
+    const float *o = Ed_Camera()->origin;
     for ( int i = 0; i < 4; ++i )
     {
         float *plane = outPlanes + 8 * i;                 // 32-byte plane stride
@@ -2217,10 +2338,14 @@ void Camera_GetRectSelection3D( int x1, int y1, int x2, int y2, float *outPlanes
 // the dolly stays horizontal.  Moves along -step * dir(pitch, yaw); OnScroll passes
 // amount = -1 for wheel-forward, +1 for wheel-back.
 // The IDB signature is __userpurge (edi = CMainFrame*, the camera reached through
-// frame->m_pCamWnd) — normalised to a plain cdecl free function here.
+// frame->m_pCamWnd) — normalised to a plain cdecl free function here, and the `frame` argument
+// dropped with U-VP-CAM (it only ever served to reach the one camera; the MFC-shell
+// CCamWnd_Scroll( frame, amount ) forwarder at the bottom keeps mainfrm.cpp's call working).
 // ═════════════════════════════════════════════════════════════════════════════
-void CCamWnd_Scroll( CMainFrame *frame, float amount )
+void CamWnd_Scroll( float amount )
 {
+    camwndState_t *cam = &g_camwndState;
+
     float factor;
     if ( GetKeyState( VK_SHIFT ) < 0 )                                   // 0x4248b4
         factor = amount * 0.1f;                                          // 0x4248ca
@@ -2232,7 +2357,6 @@ void CCamWnd_Scroll( CMainFrame *frame, float amount )
     const float dist = (float)( (double)g_PrefsDlg->m_nMoveSpeed * 0.699999988079071
                                 * (double)factor );                      // 0x424920
 
-    CCamWnd *cam = frame->m_pCamWnd;
     const float yaw   = cam->camera.angles[1];                           // 0x42492b
     // 0x424933 — Ctrl held pins the pitch to 0 (horizontal dolly); otherwise the
     // NEGATED pitch is used.
@@ -2250,8 +2374,10 @@ void CCamWnd_Scroll( CMainFrame *frame, float amount )
     cam->camera.origin[2] += -sp * step;                                 // 0x4249eb
 }
 
-void Cam_MouseControl( CCamWnd *cam, float dtime )
+void CamWnd_MouseControl( float dtime )
 {
+    camwndState_t *cam = &g_camwndState;
+
     if ( g_PrefsDlg->m_nMouseButtons == 2 )
     {
         if ( cam->m_nCambuttonstate != 6 )
@@ -2286,7 +2412,6 @@ void Cam_MouseControl( CCamWnd *cam, float dtime )
     cam->camera.origin[1] += cam->camera.forward[1] * speed;
     cam->camera.origin[2] += cam->camera.forward[2] * speed;
     cam->camera.angles[1] -= dtime * turn * 1250.0f;
-    PostMessageA( g_pParentWnd->m_hWnd, WM_TIMER, 0, 0 );
 }
 
 // 0x403d30  CamWnd_DropModelsToPlane - the camera button dispatcher (the 3D analogue of
@@ -2294,8 +2419,10 @@ void Cam_MouseControl( CCamWnd *cam, float dtime )
 // ray; plain RMB without Alt runs the free-look fly.  The alt+ctrl DROP-MODEL
 // (m_bDropModel/m_bOrientModel, off by default), curve-point-drag and alt+shift duplicate-drop
 // branches at 0x403da7..0x404a4c are unported; plain select never reaches them.
-void CamWnd_DropModelsToPlane( CCamWnd *cam, long x, long y, unsigned int nFlags )
+void CamWnd_DropModelsToPlane( long x, long y, unsigned int nFlags )
 {
+    camwndState_t *cam = &g_camwndState;
+
     // 0x403d6b: m_ptCursor is the free-look pivot that Cam_PositionDrag / Cam_Rotate /
     // Cam_Rotate2 / Cam_PositionPan read and pin the cursor back to on each move.
     GetCursorPos( &cam->m_ptCursor );
@@ -2315,7 +2442,7 @@ void CamWnd_DropModelsToPlane( CCamWnd *cam, long x, long y, unsigned int nFlags
             return;
         if ( GetAsyncKeyState( VK_MENU ) >= 0 )      // plain RMB (no Alt) → free-look fly
         {
-            Cam_MouseControl( cam, g_qeglobals.g_oldtime );
+            CamWnd_MouseControl( g_qeglobals.g_oldtime );
             return;
         }
         // Alt+RMB falls through to a marquee drag.
@@ -2325,14 +2452,16 @@ void CamWnd_DropModelsToPlane( CCamWnd *cam, long x, long y, unsigned int nFlags
     g_nPatchClickedView      = 1;
     g_bXYViewIsLastPatchClick = sameView ? 1 : 0;
     float dir[3];
-    CameraCalcRayDir( (int)y, dir, cam, (int)x );
+    CameraCalcRayDir( (int)y, dir, (int)x );
     Drag_Begin( (void *)Camera_GetRectSelection3D, nFlags, 2, (int)x, (int)y,
                 cam->camera.vright, cam->camera.vup, cam->camera.origin, dir );
 }
 
 // 0x404f70  Cam_MouseUp.
-static int Cam_MouseUp( unsigned int flags, CCamWnd *cam )
+static int Cam_MouseUp( unsigned int flags )
 {
+    camwndState_t *cam = &g_camwndState;
+
     cam->m_nCambuttonstate = 0;
     Drag_MouseUp( flags );
     cam->prob_some_cursor = 0;
@@ -2343,170 +2472,20 @@ static int Cam_MouseUp( unsigned int flags, CCamWnd *cam )
     return r;
 }
 
-// 0x403160 / 0x4031d0  CCamWnd::OnLButtonDown / OnLButtonUp.
-void CCamWnd::OnLButtonDown( UINT nFlags, CPoint point )
+// UI-rework: force-teardown of an in-progress camera drag/free-look when the shell detects
+// input ownership was lost ABNORMALLY — a popup from another window stole the OS mouse, so the
+// WM_RBUTTONUP that would run Cam_MouseUp never arrived. Free-look repeatedly ShowCursor(FALSE)s
+// and only Cam_MouseUp's ShowCursor(TRUE)-until-visible loop restores it; without this the
+// cursor stays invisible app-wide. Runs the SAME restore (no context menu, no Drag side effects
+// beyond the normal up). The ShowCursor loop stops at >=0, so calling this when the cursor is
+// only mid-hidden brings the counter to exactly 0 — no over-increment.
+void CamWnd_AbortDrag()
 {
-    CRect rc;
-    GetClientRect( &rc );
-    SetFocus();
-    SetCapture();
-    // The 3D pick uses a bottom-left origin (flip Y), faithful to the binary.
-    CamWnd_DropModelsToPlane( this, point.x, rc.bottom - point.y - 1, nFlags );
+    Cam_MouseUp( 0 );
 }
 
-void CCamWnd::OnLButtonUp( UINT nFlags, CPoint point )
-{
-    Cam_MouseUp( nFlags, this );
-    if ( ( nFlags & ( MK_LBUTTON | MK_RBUTTON | MK_MBUTTON ) ) == 0 )
-        ReleaseCapture();
-    CWnd::OnLButtonUp( nFlags, point );
-}
-
-BEGIN_MESSAGE_MAP( CCamWnd, CWnd )
-    ON_WM_CREATE()
-    ON_WM_SIZE()
-    ON_WM_PAINT()
-    ON_WM_ERASEBKGND()
-    ON_WM_KEYDOWN()
-    ON_WM_LBUTTONDOWN()
-    ON_WM_LBUTTONUP()
-    ON_WM_RBUTTONDOWN()
-    ON_WM_RBUTTONUP()
-    ON_WM_MOUSEMOVE()
-    ON_WM_DESTROY()
-    // Right-click context-menu commands (IDs from Cam_ContextMenu's AppendMenuA calls).
-    ON_COMMAND_RANGE( 0x8CA0, 0x8CB3, OnContextMenuBrushLayer )   // per-face toggle (0x404c20)
-    ON_COMMAND( 0x8CB4, OnContextMenuSelectAll )                  // Select all      (0x404cd0)
-    ON_COMMAND( 0x8CB5, OnContextMenuDeselectAll )               // Deselect all    (0x404d10)
-END_MESSAGE_MAP()
-
-// 0x402f10  CCamWnd::OnDestroy - persist the window placement.
+// CCamWnd::OnDestroy (0x402f10) persists the window placement through this.
 extern BOOL SaveRegistryInfo( const char *pszName, void *pvBuf, int lSize );   // win_qe3.cpp 0x499940
-void CCamWnd::OnDestroy()
-{
-    CWnd::OnDestroy();                                       // 0x402f19
-    WINDOWPLACEMENT wndpl;
-    wndpl.length = sizeof( wndpl );                          // 0x402f2a (44)
-    if ( GetWindowPlacement( &wndpl ) )                      // 0x402f31
-        SaveRegistryInfo( "Radiant::CameraWindowPlace", &wndpl, 0x2C );   // 0x402f47
-}
-
-CCamWnd::CCamWnd()
-{
-    memset( &camera, 0, sizeof( camera ) );
-    camera.angles[1] = 0.0f;          // yaw → look +X
-    // CMainFrame::CreateQEChildren 0x4219cb spawns the camera at (0, 20, 46).
-    camera.origin[0] =  0.0f;
-    camera.origin[1] = 20.0f;
-    camera.origin[2] = 46.0f;
-    camera.draw_mode = 1;             // Cam_Draw 0x407dc0 maps mode 1 to TECHNIQUE_UNLIT
-}
-
-BOOL CCamWnd::PreCreateWindow( CREATESTRUCT& cs )
-{
-    cs.lpszClass = AfxRegisterWndClass(
-        CS_OWNDC | CS_HREDRAW | CS_VREDRAW,
-        ::LoadCursor( NULL, IDC_ARROW ), NULL, NULL );
-    cs.style |= WS_CLIPSIBLINGS | WS_CLIPCHILDREN;
-    return CWnd::PreCreateWindow( cs );
-}
-
-int CCamWnd::OnCreate( LPCREATESTRUCT lpCreateStruct )
-{
-    if ( CWnd::OnCreate( lpCreateStruct ) == -1 )
-        return -1;
-    CRect rc;
-    GetClientRect( &rc );
-    m_nWidth  = rc.Width();
-    m_nHeight = rc.Height();
-    camera.width  = m_nWidth;
-    camera.height = m_nHeight;
-    return 0;
-}
-
-void CCamWnd::OnSize( UINT nType, int cx, int cy )
-{
-    CWnd::OnSize( nType, cx, cy );
-    m_nWidth  = cx;
-    m_nHeight = cy;
-    camera.width  = cx;
-    camera.height = cy;
-    if ( dx.device && cx > 0 && cy > 0 )
-        R_Hwnd_Resize( (HWND__ *)GetSafeHwnd(), cx, cy );
-}
-
-BOOL CCamWnd::OnEraseBkgnd( CDC* /*pDC*/ )
-{
-    return TRUE;   // D3D present owns the client area
-}
-
-void CCamWnd::OnPaint()
-{
-    CPaintDC dc( this );
-    if ( !dx.device )
-        return;
-
-    camera.width  = m_nWidth;
-    camera.height = m_nHeight;
-
-    HWND__ *hwnd = (HWND__ *)GetSafeHwnd();
-    // The floating Dynamic-Lighting popup (CMainFrame::OnDynamicLighting 0x429960) is a CCamWnd
-    // whose hwnd the renderer never registered (R_MAX_WINDOWS=5 is full at startup); like the
-    // binary it renders nothing.  Skip cleanly so R_SetupRendertarget_CheckDevice's invalid-hwnd
-    // assert never fires for that dead window.
-    if ( !R_IsRegisteredRenderWindow( hwnd ) )
-        return;
-    if ( !R_SetupRendertarget_CheckDevice( hwnd ) )
-        return;
-
-    R_BeginFrame();
-    R_BeginSharedCmdList();
-    R_AddCmdClearScreen( 7, g_qeglobals.d_savedinfo.colors[4], 1.0f, 0 );   // COLOR_CAMERABACK
-    static const float s_white[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
-    R_AddCmdSetMaterialColor( s_white );
-
-    Cam_Draw();
-
-    R_EndFrame();
-    R_IssueRenderCommands( (uint)-1 );
-    R_SortMaterials();
-    R_CheckTargetWindow( hwnd );
-}
-
-// 0x402f60  CCamWnd::OnKeyDown - a thin forward to CMainFrame::OnKeyDown.
-extern CMainFrame *g_pParentWnd;     // mainfrm.cpp (0x25D5A70)
-
-// Camera movement in the binary is purely the RMB cursor-joystick fly plus the command-map
-// camera-nudge WM_COMMANDs; there are NO built-in WASD/arrow fly keys.
-void CCamWnd::OnKeyDown( UINT nChar, UINT nRepCnt, UINT nFlags )
-{
-#if 0 // DISABLED (kept on operator request): local WASD/arrows/QE keyboard fly, a kisak
-      // addition the binary lacks.
-    bool anyMod = ( GetKeyState( VK_CONTROL ) < 0 ) || ( GetKeyState( VK_SHIFT ) < 0 ) || ( GetKeyState( VK_MENU ) < 0 );
-    if ( !anyMod )
-    {
-        const float step = 32.0f;   // world units per key press
-        Cam_BuildMatrix();          // ensure forward/right current
-        float *o = camera.origin;
-        switch ( nChar )
-        {
-            case 'W': case VK_UP:
-                o[0] += camera.forward[0]*step; o[1] += camera.forward[1]*step; o[2] += camera.forward[2]*step; Invalidate( FALSE ); return;
-            case 'S': case VK_DOWN:
-                o[0] -= camera.forward[0]*step; o[1] -= camera.forward[1]*step; o[2] -= camera.forward[2]*step; Invalidate( FALSE ); return;
-            case 'A': case VK_LEFT:
-                o[0] -= camera.right[0]*step;   o[1] -= camera.right[1]*step;   o[2] -= camera.right[2]*step;   Invalidate( FALSE ); return;
-            case 'D': case VK_RIGHT:
-                o[0] += camera.right[0]*step;   o[1] += camera.right[1]*step;   o[2] += camera.right[2]*step;   Invalidate( FALSE ); return;
-            case 'E': case VK_PRIOR: o[2] += step; Invalidate( FALSE ); return;
-            case 'Q': case VK_NEXT:  o[2] -= step; Invalidate( FALSE ); return;
-            default: break;
-        }
-    }
-#endif
-    if ( g_pParentWnd )
-        g_pParentWnd->OnKeyDown( nChar, nRepCnt, nFlags );
-}
 
 // The binary's camera-control scheme: cursor-JOYSTICK fly + camera_mode view control + 3D LMB
 // drag-select + alt texture rotate/shift.
@@ -2519,8 +2498,10 @@ void CCamWnd::OnKeyDown( UINT nChar, UINT nRepCnt, UINT nFlags )
 
 // 0x4035f0  Cam_PositionDrag - camera_mode 1, RMB: yaw by cursor-dx, fly along the view forward
 // (vpn flattened to the XY plane) by cursor-dy.  Cursor re-centred + hidden.
-void CCamWnd::Cam_PositionDrag( CCamWnd *cam )
+void CamWnd_PositionDrag()
 {
+    camwndState_t *cam = &g_camwndState;
+
     POINT pt;
     GetCursorPos( &pt );
     if ( pt.x == cam->m_ptCursor.x && pt.y == cam->m_ptCursor.y )
@@ -2542,8 +2523,10 @@ void CCamWnd::Cam_PositionDrag( CCamWnd *cam )
 
 // 0x403700  Cam_Rotate - RMB+Shift+Ctrl free-look: yaw by cursor-dx, pitch by cursor-dy, both
 // scaled by m_nMoveSpeed/500.  Cursor re-centred + hidden.
-void CCamWnd::Cam_Rotate( CCamWnd *cam )
+void CamWnd_Rotate()
 {
+    camwndState_t *cam = &g_camwndState;
+
     POINT pt;
     GetCursorPos( &pt );
     if ( pt.x == cam->m_ptCursor.x && pt.y == cam->m_ptCursor.y )
@@ -2559,8 +2542,10 @@ void CCamWnd::Cam_Rotate( CCamWnd *cam )
 }
 
 // 0x4037c0  Cam_Rotate2 - camera_mode 2, RMB: free-look at a fixed 0.35 deg/pixel.
-void CCamWnd::Cam_Rotate2( CCamWnd *cam )
+void CamWnd_Rotate2()
 {
+    camwndState_t *cam = &g_camwndState;
+
     POINT pt;
     GetCursorPos( &pt );
     if ( pt.x == cam->m_ptCursor.x && pt.y == cam->m_ptCursor.y )
@@ -2577,8 +2562,10 @@ void CCamWnd::Cam_Rotate2( CCamWnd *cam )
 
 // 0x403870  Cam_PositionPan - RMB+Ctrl: strafe along view-right by cursor-dx, move world-Z by
 // cursor-dy (m_nMoveSpeed/300).
-void CCamWnd::Cam_PositionPan( CCamWnd *cam )
+void CamWnd_PositionPan()
 {
+    camwndState_t *cam = &g_camwndState;
+
     POINT pt;
     GetCursorPos( &pt );
     if ( pt.x == cam->m_ptCursor.x && pt.y == cam->m_ptCursor.y )
@@ -2605,8 +2592,10 @@ void CCamWnd::Cam_PositionPan( CCamWnd *cam )
 extern "C" int ClampGridSize();                                          // drag.cpp (0x463a80)
 extern float   grid_sizes[];                                             // engine_stubs (0x6dde5c)
 static double Cam_MaxF( float a, float b ) { return ( a - b >= 0.0f ) ? a : b; } // sub_40A1D0 (max)
-void CCamWnd::Cam_MouseMoved( CCamWnd *cam, unsigned int buttons, int x, int y )
+void CamWnd_MouseMoved( unsigned int buttons, int x, int y )
 {
+    camwndState_t *cam = &g_camwndState;
+
     cam->m_nCambuttonstate = buttons;
     if ( !buttons )
     {
@@ -2629,7 +2618,7 @@ void CCamWnd::Cam_MouseMoved( CCamWnd *cam, unsigned int buttons, int x, int y )
             if ( g_qeglobals.d_select_mode == sel_addpoint )
             {
                 float dir[3];
-                CameraCalcRayDir( y, dir, cam, x );
+                CameraCalcRayDir( y, dir, x );
                 Drag_MouseMoved( x, y, 2, cam->camera.origin, dir );
                 g_nUpdateBits |= W_CAMERA;
                 return;
@@ -2700,8 +2689,8 @@ void CCamWnd::Cam_MouseMoved( CCamWnd *cam, unsigned int buttons, int x, int y )
     // ── LABEL_27: camera_mode 1/2 view control, then the LMB drag-select / drop-to-plane ──
     if ( ( buttons & MK_RBUTTON ) != 0 && !altDown && g_PrefsDlg->camera_mode == 2 )
     {
-        if ( buttons & MK_CONTROL ) Cam_PositionPan( cam );
-        else                        Cam_Rotate2( cam );
+        if ( buttons & MK_CONTROL ) CamWnd_PositionPan();
+        else                        CamWnd_Rotate2();
         g_nUpdateBits |= W_CAMERA;
         return;
     }
@@ -2709,7 +2698,7 @@ void CCamWnd::Cam_MouseMoved( CCamWnd *cam, unsigned int buttons, int x, int y )
     {
         if ( !altDown && g_PrefsDlg->camera_mode == 1 )
         {
-            Cam_PositionDrag( cam );
+            CamWnd_PositionDrag();
             g_nUpdateBits |= W_CAMERA;
             return;
         }
@@ -2718,14 +2707,14 @@ void CCamWnd::Cam_MouseMoved( CCamWnd *cam, unsigned int buttons, int x, int y )
     {
         if ( !altDown )
         {
-            Cam_Rotate( cam );
+            CamWnd_Rotate();
             g_nUpdateBits |= W_CAMERA;
             return;
         }
     }
     else if ( buttons == ( MK_RBUTTON | MK_CONTROL ) && !altDown )
     {
-        Cam_PositionPan( cam );
+        CamWnd_PositionPan();
         g_nUpdateBits |= W_CAMERA;
         return;
     }
@@ -2738,7 +2727,7 @@ void CCamWnd::Cam_MouseMoved( CCamWnd *cam, unsigned int buttons, int x, int y )
     {
         // ── plain LMB/MMB drag: continue the 3D ray drag-select (the marquee gap is now closed) ──
         float dir[3];
-        CameraCalcRayDir( y, dir, cam, x );
+        CameraCalcRayDir( y, dir, x );
         Drag_MouseMoved( x, y, buttons, cam->camera.origin, dir );
         if ( ( buttons & MK_LBUTTON ) != 0 && ( GetAsyncKeyState( VK_MENU ) & 0x8000 ) != 0 )
             g_nUpdateBits |= W_CAMERA;            // Alt+LMB terrain paint → camera only
@@ -2759,7 +2748,7 @@ void CCamWnd::Cam_MouseMoved( CCamWnd *cam, unsigned int buttons, int x, int y )
       || ( buttons == ( MK_LBUTTON | MK_CONTROL ) && !altDown )        // 9, no Alt
       || buttons == ( MK_LBUTTON | MK_SHIFT | MK_CONTROL ) )           // 0x0D
     {
-        CamWnd_DropModelsToPlane( cam, x, y, buttons );
+        CamWnd_DropModelsToPlane( x, y, buttons );
         return;
     }
     g_qeglobals.toggle_unk03_mousedrag_state1 = 0;
@@ -2826,8 +2815,15 @@ static int __cdecl Cam_TraceMtlLess( const edTrace_t *a, const edTrace_t *b )
 // camera_mode 0), so a camera fly or drag never opens it.  Pick ray (up to 20 hits) sorted by
 // material layer, then one Select/Deselect toggle per face within 1 unit of the nearest hit,
 // a separator, and Select-all / Deselect-all.
-void CCamWnd::Cam_ContextMenu( CCamWnd *cam, int x, int y )
+// U-VP-CAM: the popup is a bare HMENU in g_camwndState (CMenu::Attach/DestroyMenu/AppendMenuA/
+// TrackPopupMenu ARE these Win32 calls — CMenu::TrackPopupMenu is
+// ::TrackPopupMenu(m_hMenu, flags, x, y, 0, pWnd->m_hWnd, rect)), so `hwnd` replaces the CWnd*
+// owner the popup posts its WM_COMMAND to.  Both shells route those IDs to
+// CamWnd_OnContextMenu* (MFC through ON_COMMAND_RANGE, raw through WM_COMMAND in the WndProc).
+void CamWnd_ContextMenu( HWND hwnd, int x, int y )
 {
+    camwndState_t *cam = &g_camwndState;
+
     if ( !g_PrefsDlg->m_bRightClick )                    // 0x404d4e
         return;
     if ( !cam->cam_was_not_dragged )                     // 0x404d5d — a drag happened; no menu
@@ -2840,12 +2836,12 @@ void CCamWnd::Cam_ContextMenu( CCamWnd *cam, int x, int y )
     if ( g_PrefsDlg->camera_mode != 0 && GetKeyState( VK_SHIFT ) < 0 )                   // 0x404d90-0x404da0
         return;
 
-    if ( cam->m_contextMenu.m_hMenu )                    // 0x404db4 — rebuild each time
-        cam->m_contextMenu.DestroyMenu();
-    cam->m_contextMenu.Attach( CreatePopupMenu() );      // 0x404dc1/0x404dca
+    if ( cam->contextMenu )                              // 0x404db4 — rebuild each time
+        ::DestroyMenu( cam->contextMenu );
+    cam->contextMenu = ::CreatePopupMenu();                // 0x404dc1/0x404dca
 
     float dir[3];
-    CameraCalcRayDir( y, dir, cam, x );                  // 0x404ddc
+    CameraCalcRayDir( y, dir, x );                       // 0x404ddc
     Test_Ray( cam->camera.origin, dir, 0, camera_trace, CAM_TRACE_COUNT );   // 0x404df2
 
     if ( !camera_trace[0].hit.brush )                        // 0x404e00 — nothing hit
@@ -2880,25 +2876,28 @@ void CCamWnd::Cam_ContextMenu( CCamWnd *cam, int x, int y )
         }
         iassert( tr->hit.face->visCount == 1 );              // 0x404e7f (CamWnd.cpp:1108)
         const char *name = Cam_MaterialHandleName( tr->hit.face->visArray->mtlHandle );   // 0x404ea8
-        cam->m_contextMenu.AppendMenuA( flags, ID_BRUSH_LAYER_BASE + i, name );       // 0x404ec3
+        ::AppendMenuA( cam->contextMenu, flags, ID_BRUSH_LAYER_BASE + i, name );        // 0x404ec3
     }
 
-    cam->m_contextMenu.AppendMenuA( MF_SEPARATOR, 0, (LPCSTR)nullptr );   // 0x404ef3 — flag 0x800
+    ::AppendMenuA( cam->contextMenu, MF_SEPARATOR, 0, (LPCSTR)nullptr );    // 0x404ef3 — flag 0x800
     // Select-all: enabled (flag 0) only when at least one hit is unselected, else grayed (flag 1).
-    cam->m_contextMenu.AppendMenuA( nUnselected ? MF_ENABLED : MF_GRAYED,
-                                    ID_CAM_SELECT_ALL, "Select all" );     // 0x404f0f/0x404f1a
+    ::AppendMenuA( cam->contextMenu, nUnselected ? MF_ENABLED : MF_GRAYED,
+                   ID_CAM_SELECT_ALL, "Select all" );                       // 0x404f0f/0x404f1a
     // Deselect-all: enabled only when at least one hit is already selected, else grayed.
-    cam->m_contextMenu.AppendMenuA( nSelected ? MF_ENABLED : MF_GRAYED,
-                                    ID_CAM_DESELECT_ALL, "Deselect all" ); // 0x404f36/0x404f41
+    ::AppendMenuA( cam->contextMenu, nSelected ? MF_ENABLED : MF_GRAYED,
+                   ID_CAM_DESELECT_ALL, "Deselect all" );                   // 0x404f36/0x404f41
 
     POINT pt;
     GetCursorPos( &pt );                                  // 0x404f48
-    cam->m_contextMenu.TrackPopupMenu( TPM_RIGHTBUTTON, pt.x, pt.y, cam, nullptr );   // 0x404f61
+    // P5 RTT: the child hwnd is hidden and a poor menu owner; repoint the owner to the visible
+    // main frame.  The popup's WM_COMMANDs are routed to CamWnd_OnContextMenu* by the frame.
+    (void)hwnd;
+    ::TrackPopupMenu( cam->contextMenu, TPM_RIGHTBUTTON, pt.x, pt.y, 0, g_qeglobals.d_hwndMain, nullptr );   // 0x404f61
 }
 
 // 0x404c20  ON_COMMAND_RANGE(0x8CA0..0x8CB3): toggle select/deselect of camera_trace[i].hit.brush
 // and flip the cached selected flag so the next popup shows the new state.
-void CCamWnd::OnContextMenuBrushLayer( UINT nID )
+void CamWnd_OnContextMenuBrushLayer( unsigned int nID )
 {
     // 0x404c35 (CamWnd.cpp:995): nID >= ID_BRUSH_LAYER_BASE && nID <= ID_BRUSH_LAYER_MAX
     iassert( nID >= ID_BRUSH_LAYER_BASE && nID <= ID_BRUSH_LAYER_MAX );
@@ -2917,7 +2916,7 @@ void CCamWnd::OnContextMenuBrushLayer( UINT nID )
 }
 
 // 0x404cd0  ON_COMMAND(0x8CB4): select every listed hit brush.
-void CCamWnd::OnContextMenuSelectAll()
+void CamWnd_OnContextMenuSelectAll()
 {
     for ( int i = 0; i < CAM_TRACE_COUNT; ++i )                         // 0x404cd8..0x404d06
     {
@@ -2930,7 +2929,7 @@ void CCamWnd::OnContextMenuSelectAll()
 }
 
 // 0x404d10  ON_COMMAND(0x8CB5): deselect every listed hit brush.
-void CCamWnd::OnContextMenuDeselectAll()
+void CamWnd_OnContextMenuDeselectAll()
 {
     for ( int i = 0; i < CAM_TRACE_COUNT; ++i )                         // 0x404d12..0x404d34
     {
@@ -2942,84 +2941,12 @@ void CCamWnd::OnContextMenuDeselectAll()
     }
 }
 
-void CCamWnd::OnRButtonDown( UINT nFlags, CPoint point )
-{
-    CRect rc;
-    GetClientRect( &rc );
-    SetFocus();
-    SetCapture();
-    // Shared button dispatcher (LMB/MMB/RMB all route here), bottom-left origin (flip Y).
-    CamWnd_DropModelsToPlane( this, point.x, rc.bottom - point.y - 1, nFlags );
-}
-
-void CCamWnd::OnRButtonUp( UINT nFlags, CPoint point )
-{
-    CRect rc;
-    GetClientRect( &rc );
-    // KISAK ORDER DEVIATION from 0x403310: the binary does ContextMenu -> Cam_MouseUp ->
-    // ReleaseCapture, popping the menu while the RMB-down SetCapture is STILL HELD.  In this
-    // build's Win32/MFC runtime TrackPopupMenu with the mouse captured by our own window
-    // no-shows / instantly dismisses - the port's own 2D path (CXYWnd::OnRButtonUp) had to
-    // release first too.  Cam_MouseUp only resets button/cursor state and does NOT touch
-    // cam_was_not_dragged, so the menu's drag gate survives the reorder.
-    Cam_MouseUp( nFlags, this );
-    if ( ( nFlags & ( MK_LBUTTON | MK_RBUTTON | MK_MBUTTON ) ) == 0 )
-        ReleaseCapture();
-    Cam_ContextMenu( this, point.x, rc.bottom - point.y - 1 );   // no-drag right-click popup
-    // 0x403367: the binary does NOT chain to CWnd::OnRButtonUp (which would DefWindowProc ->
-    // WM_CONTEXTMENU); omit it to match.
-}
-
-void CCamWnd::OnMouseMove( UINT nFlags, CPoint point )
-{
-    CRect rc;
-    GetClientRect( &rc );
-    // Dedup: the binary skips Cam_MouseMoved when the cursor hasn't moved (m_ptLastCursor).
-    if ( m_ptLastCursor.x != point.x || m_ptLastCursor.y != point.y )
-        Cam_MouseMoved( this, nFlags, point.x, rc.bottom - point.y - 1 );
-    m_ptLastCursor = point;
-}
-
-#if 0 // DISABLED (kept on operator request): the FPS mouse-look camera that replaced the
-      // binary's scheme.  To re-enable, flip this to #if 1, disable the faithful
-      // OnRButtonDown/OnRButtonUp/OnMouseMove above, restore m_bLooking/m_ptLook in mainfrm.h.
-void CCamWnd::OnRButtonDown( UINT nFlags, CPoint point )
-{
-    m_bLooking = true;
-    m_ptLook   = point;
-    SetCapture();
-    SetFocus();                     // so WASD keys come here
-    CWnd::OnRButtonDown( nFlags, point );
-}
-
-void CCamWnd::OnRButtonUp( UINT nFlags, CPoint point )
-{
-    m_bLooking = false;
-    ReleaseCapture();
-    CWnd::OnRButtonUp( nFlags, point );
-}
-
-void CCamWnd::OnMouseMove( UINT nFlags, CPoint point )
-{
-    if ( m_bLooking )
-    {
-        const float sens = 0.25f;   // degrees per pixel
-        camera.angles[1] -= (float)( point.x - m_ptLook.x ) * sens;   // yaw
-        camera.angles[0] += (float)( point.y - m_ptLook.y ) * sens;   // pitch
-        if ( camera.angles[0] >  85.0f ) camera.angles[0] =  85.0f;
-        if ( camera.angles[0] < -85.0f ) camera.angles[0] = -85.0f;
-        m_ptLook = point;
-        Invalidate( FALSE );
-    }
-    CWnd::OnMouseMove( nFlags, point );
-}
-#endif
-
 // KISAK, no binary counterpart: frame the loaded map's brush bounds (the binary just spawns the
 // camera at the fixed ctor origin).  Sit back on -X, slightly above, aimed at the centre.
-void Cam_CenterOnMap( CCamWnd *cam )
+void CamWnd_CenterOnMap()
 {
-    if ( !cam ) return;
+    camwndState_t *cam = &g_camwndState;
+
     float mins[3] = {  1e30f,  1e30f,  1e30f };
     float maxs[3] = { -1e30f, -1e30f, -1e30f };
     bool any = false;
@@ -3072,9 +2999,9 @@ void Cam_CenterOnMap( CCamWnd *cam )
 //   immediate at 0x4035d1 = W_CAMERA|W_Z_OVERLAY: CMainFrame::UpdateWindows 0x427090 tests
 //   `bl & 28h` for the Z window and `bl & 10h` for the texture window, so W_Z_OVERLAY==0x20.
 // The comparison directions are read from the FPU status-word tests, not simplified.
-void CCamWnd::Cam_ChangeFloor( CCamWnd *cam, int a2 )
+void CamWnd_ChangeFloor( int a2 )
 {
-    if ( !cam ) return;
+    camwndState_t *cam = &g_camwndState;
 
     float start[3] = { cam->camera.origin[0], cam->camera.origin[1], 131072.0f };
     float dir[3]   = { 0.0f, 0.0f, -1.0f };
@@ -3446,15 +3373,20 @@ static void Region_ForOneLight( selbrush_t *inst, const orientation_t *orient )
 // 0x406200  CCamWnd_AddLightPreview - append { inst, arg2, orient } to the camera's
 // light_preview_arr[] (LightPreviewRec, 56-byte stride); no-op if `inst` is already present.
 // When the 8-slot ring is full it drops the OLDEST record first (FIFO shift, count=7).
-int CCamWnd_AddLightPreview( CCamWnd *cam, selbrush_t *inst, int arg2, const orientation_t *orient )
+// U-VP-CAM: the binary's return value is the __userpurge `result` register, i.e. the cam pointer
+// itself — no caller reads it, so the free fn returns void and the MFC forwarder at the bottom
+// reproduces the old `(int)cam` return for mainfrm.cpp/brush.cpp's declared signature.
+void CamWnd_AddLightPreview( selbrush_t *inst, int arg2, const orientation_t *orient )
 {
+    camwndState_t *cam = &g_camwndState;
+
     int count = cam->light_preview_count;
     // Already present? (linear search on inst)
     if ( count > 0 )
     {
         for ( int i = 0; i < count; ++i )
             if ( (selbrush_t *)(intptr_t)cam->light_preview_arr[i].inst == inst )
-                return (int)(intptr_t)cam;   // already queued — no-op (binary returns `result`)
+                return;                      // already queued — no-op (binary returns `result`)
     }
     // FIFO evict the oldest when the 8-slot ring is full.
     if ( cam->light_preview_count == 8 )
@@ -3468,14 +3400,22 @@ int CCamWnd_AddLightPreview( CCamWnd *cam, selbrush_t *inst, int arg2, const ori
     cam->light_preview_arr[slot].arg2  = arg2;
     memcpy( &cam->light_preview_arr[slot].orient, orient, 0x30u );
     ++cam->light_preview_count;
-    return (int)(intptr_t)cam;
+}
+
+// Both `m_pCamWnd->light_preview_count = 0` call sites (mainfrm.cpp OnLightPreviewClearAll,
+// map.cpp Map_New) reach that member directly; this is the free-function form of that write.
+void CamWnd_ClearLightPreviews()
+{
+    g_camwndState.light_preview_count = 0;
 }
 
 // 0x4062d0  CCamWnd light-preview-record removal, called from Brush_Free when a brush instance
 // dies: linear search by inst, then shift the tail down (56-byte LightPreviewRec stride) and
 // decrement.  Returns the removed index, or light_preview_count when not present.
-int CCamWnd_RemoveLightPreview( selbrush_t *removed, CCamWnd *cam )
+int CamWnd_RemoveLightPreview( selbrush_t *removed )
 {
+    camwndState_t *cam = &g_camwndState;
+
     int count = cam->light_preview_count;
     int idx = 0;
     if ( count <= 0 )
@@ -3498,8 +3438,10 @@ int CCamWnd_RemoveLightPreview( selbrush_t *removed, CCamWnd *cam )
 
 // 0x406F10  Regions_ForSelected - clear the old hulls, then build regions for every selected
 // light brush and every camera light-preview record.
-void Regions_ForSelected( CCamWnd *cam )
+void CamWnd_RegionsForSelected()
 {
+    camwndState_t *cam = &g_camwndState;
+
     Region_ClearHulls();          // 0x406f1f — sub_406C00
 
     for ( selbrush_t *b = selected_brushes.next; b != &selected_brushes; b = b->next )
@@ -3511,9 +3453,372 @@ void Regions_ForSelected( CCamWnd *cam )
     }
     for ( int i = 0; i < cam->light_preview_count; i++ )
     {
-        CCamWnd::LightPreviewRec *r = &cam->light_preview_arr[i];
+        camLightPreviewRec_t *r = &cam->light_preview_arr[i];
         // disasm gate: *(char*)(rec+52) >= 0 (the per-record flag byte).
         if ( *( (char *)r + 52 ) >= 0 )
             Region_ForOneLight( (selbrush_t *)(intptr_t)r->inst, &r->orient );
     }
 }
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  Shell-agnostic camera-viewport handlers (U-VP-CAM).  Every afx_msg body lives here as a
+//  free function on plain args; the MFC CCamWnd handlers below are thin translations, and the
+//  raw-Win32 WndProc at the end of this file feeds the SAME functions with the SAME conventions
+//  MFC used (client coords, the MK_* wParam flag word, LOWORD/HIWORD size).  The window's
+//  flipped-Y (rc.bottom - y - 1) and the capture/focus calls are part of the handler bodies, so
+//  both shells get them identically.
+//
+//  Callers declare these themselves (mainfrm.h is not this unit's to edit):
+//      extern camera_s *Ed_Camera();                                   // THE editor camera
+//      extern void CamWnd_OnCreate( HWND hwnd );
+//      extern void CamWnd_OnSize( HWND hwnd, int cx, int cy );
+//      extern void CamWnd_Paint( HWND hwnd );
+//      extern void CamWnd_OnDestroy( HWND hwnd );
+//      extern void CamWnd_OnKeyDown( unsigned int nChar, unsigned int nRepCnt, unsigned int nFlags );
+//      extern void CamWnd_OnLButtonDown( HWND hwnd, unsigned int nFlags, int x, int y );
+//      extern void CamWnd_OnLButtonUp( unsigned int nFlags );
+//      extern void CamWnd_OnRButtonDown( HWND hwnd, unsigned int nFlags, int x, int y );
+//      extern void CamWnd_OnRButtonUp( HWND hwnd, unsigned int nFlags, int x, int y );
+//      extern void CamWnd_OnMouseMove( HWND hwnd, unsigned int nFlags, int x, int y );
+//      extern void CamWnd_OnContextMenuBrushLayer( unsigned int nID );
+//      extern void CamWnd_OnContextMenuSelectAll();
+//      extern void CamWnd_OnContextMenuDeselectAll();
+//  ...plus the non-handler entry points other TUs already reach through m_pCamWnd:
+//      extern void CamWnd_BuildMatrix();                    // was CCamWnd::Cam_BuildMatrix
+//      extern void CamWnd_SetupClipPlanes( const float *orient );  // was Cam_SetupClipPlanes
+//      extern char CamWnd_CullCubic( selbrush_t *brush );   // was CullCubic( brush, cam )
+//      extern void CamWnd_Draw( HWND hwnd );                // was CCamWnd::Cam_Draw
+//      extern void CamWnd_ChangeFloor( int a2 );            // was Cam_ChangeFloor( cam, a2 )
+//      extern void CamWnd_MouseControl( float dtime );      // was Cam_MouseControl( cam, dt )
+//      extern void CamWnd_MouseMoved( unsigned int buttons, int x, int y );
+//      extern void CamWnd_Scroll( float amount );           // was CCamWnd_Scroll( frame, amt )
+//      extern void CamWnd_CenterOnMap();                    // was Cam_CenterOnMap( cam )
+//      extern void CamWnd_RegionsForSelected();             // was Regions_ForSelected( cam )
+//      extern void CamWnd_AddLightPreview( selbrush_t *inst, int arg2, const orientation_t *o );
+//      extern int  CamWnd_RemoveLightPreview( selbrush_t *removed );
+//      extern void CamWnd_ClearLightPreviews();             // was light_preview_count = 0
+// ═════════════════════════════════════════════════════════════════════════════
+
+// Latch the client size (CCamWnd::OnCreate tail, after the base-class create).
+void CamWnd_OnCreate( HWND hwnd )
+{
+    RECT rc; ::GetClientRect( hwnd, &rc );
+    g_camwndState.width  = rc.right - rc.left;
+    g_camwndState.height = rc.bottom - rc.top;
+    g_camwndState.camera.width  = g_camwndState.width;
+    g_camwndState.camera.height = g_camwndState.height;
+}
+
+void CamWnd_OnSize( HWND hwnd, int cx, int cy )
+{
+    g_camwndState.width  = cx;
+    g_camwndState.height = cy;
+    g_camwndState.camera.width  = cx;
+    g_camwndState.camera.height = cy;
+    // Re-create this window's swap chain at the new size (pixel-correct, no stretch).
+    if ( dx.device && cx > 0 && cy > 0 )
+        R_Hwnd_Resize( (HWND__ *)hwnd, cx, cy );
+}
+
+// The CCamWnd::OnPaint pipeline — the DC (CPaintDC / BeginPaint) belongs to the shell, not here.
+void CamWnd_Paint( HWND hwnd )
+{
+    if ( !dx.device )
+        return;
+
+    // Keep camera.width/height in step with this window (a WM_SIZE may not have arrived yet).
+    g_camwndState.camera.width  = g_camwndState.width;
+    g_camwndState.camera.height = g_camwndState.height;
+
+    // The floating Dynamic-Lighting popup (CMainFrame::OnDynamicLighting 0x429960) is a CCamWnd
+    // whose hwnd the renderer never registered (R_MAX_WINDOWS=5 is full at startup); like the
+    // binary it renders nothing.  Skip cleanly so R_SetupRendertarget_CheckDevice's invalid-hwnd
+    // assert never fires for that dead window.
+    if ( !R_IsRegisteredRenderWindow( (HWND__ *)hwnd ) )
+        return;
+    if ( !R_SetupRendertarget_CheckDevice( (HWND__ *)hwnd ) )
+        return;
+
+    R_BeginFrame();
+    R_BeginSharedCmdList();
+    R_AddCmdClearScreen( 7, g_qeglobals.d_savedinfo.colors[4], 1.0f, 0 );   // COLOR_CAMERABACK
+    static const float s_white[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+    R_AddCmdSetMaterialColor( s_white );
+
+    CamWnd_Draw( hwnd );
+
+    R_EndFrame();
+    R_IssueRenderCommands( (uint)-1 );
+    R_SortMaterials();
+    R_CheckTargetWindow( (HWND__ *)hwnd );
+}
+
+// P5 RTT: the same CamWnd_Paint pipeline, but rendering into RTT_CAMERA's offscreen texture
+// (for ImGui to sample) instead of a native window.  The window-setup (R_IsRegisteredRenderWindow
+// + R_SetupRendertarget_CheckDevice) is replaced by RTT_Begin, the tail R_CheckTargetWindow is
+// dropped, and the frame ends with RTT_End.  `w`/`h` come from the ImGui dock cell.
+void CamWnd_RenderToRT( int w, int h )
+{
+    if ( !dx.device || w < 1 || h < 1 )
+        return;
+    // Drive the viewport's own size state from the dock-cell size (was set by CamWnd_OnSize).
+    g_camwndState.width  = w;   g_camwndState.height = h;
+    g_camwndState.camera.width = w;   g_camwndState.camera.height = h;
+    if ( !RTT_Begin( RTT_CAMERA, w, h ) )   // points FRAME_BUFFER at the RT + suppresses Present
+        return;
+
+    R_BeginFrame();
+    R_BeginSharedCmdList();
+    R_AddCmdClearScreen( 7, g_qeglobals.d_savedinfo.colors[4], 1.0f, 0 );   // COLOR_CAMERABACK
+    static const float s_white[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+    R_AddCmdSetMaterialColor( s_white );
+
+    // CamWnd_Draw's hwnd is used ONLY for the terrain-paint cursor ring (ScreenToClient +
+    // GetClientRect at camwnd.cpp:2244/2246, gated on cursor_visible && sub_401D50()); it is not
+    // the render target.  Pass the live d_hwndCamera so that path still resolves during the shell
+    // transition.
+    CamWnd_Draw( g_qeglobals.d_hwndCamera );
+
+    R_EndFrame();
+    R_IssueRenderCommands( (uint)-1 );
+    R_SortMaterials();
+    RTT_End();
+}
+
+// 0x402f10  CCamWnd::OnDestroy tail - persist the window placement.
+void CamWnd_OnDestroy( HWND hwnd )
+{
+    WINDOWPLACEMENT wndpl;
+    wndpl.length = sizeof( wndpl );                          // 0x402f2a (44)
+    if ( ::GetWindowPlacement( hwnd, &wndpl ) )              // 0x402f31
+        SaveRegistryInfo( "Radiant::CameraWindowPlace", &wndpl, 0x2C );   // 0x402f47
+}
+
+// 0x402f60  CCamWnd::OnKeyDown - a thin forward to CMainFrame::OnKeyDown.  Camera movement in
+// the binary is purely the RMB cursor-joystick fly plus the command-map camera-nudge
+// WM_COMMANDs; there are NO built-in WASD/arrow fly keys.  (The disabled kisak WASD/arrow fly
+// this handler used to carry lives in the MFC block below, still #if 0.)
+void CamWnd_OnKeyDown( unsigned int nChar, unsigned int nRepCnt, unsigned int nFlags )
+{
+    (void)nChar; (void)nRepCnt; (void)nFlags;
+}
+
+// 0x403160  CCamWnd::OnLButtonDown.  The 3D pick uses a bottom-left origin (flip Y), faithful
+// to the binary.
+void CamWnd_OnLButtonDown( HWND hwnd, unsigned int nFlags, int x, int y )
+{
+    (void)hwnd;   // P5 RTT: hidden child — flip against viewport size state; shell owns capture/focus.
+    CamWnd_DropModelsToPlane( x, g_camwndState.height - y - 1, nFlags );
+}
+
+// 0x4031d0  CCamWnd::OnLButtonUp.
+void CamWnd_OnLButtonUp( unsigned int nFlags )
+{
+    Cam_MouseUp( nFlags );
+    // P5 RTT: shell owns drag-capture; OS ReleaseCapture on the hidden child would steal the
+    // mouse from the ImGui host, so the ( nFlags & MK_* )==0 release is dropped here.
+}
+
+// 0x4032b0  CCamWnd::OnRButtonDown — the shared button dispatcher (LMB/MMB/RMB all route
+// here), bottom-left origin (flip Y).
+void CamWnd_OnRButtonDown( HWND hwnd, unsigned int nFlags, int x, int y )
+{
+    (void)hwnd;   // P5 RTT: hidden child — flip against viewport size state; shell owns capture/focus.
+    CamWnd_DropModelsToPlane( x, g_camwndState.height - y - 1, nFlags );
+}
+
+void CamWnd_OnRButtonUp( HWND hwnd, unsigned int nFlags, int x, int y )
+{
+    (void)hwnd;   // P5 RTT: hidden child — flip against viewport size state; shell owns capture.
+    // KISAK ORDER DEVIATION from 0x403310: the binary does ContextMenu -> Cam_MouseUp ->
+    // ReleaseCapture, popping the menu while the RMB-down SetCapture is STILL HELD.  In this
+    // build's Win32 runtime TrackPopupMenu with the mouse captured by our own window no-shows /
+    // instantly dismisses - the port's own 2D path (CXYWnd::OnRButtonUp) had to release first
+    // too.  Cam_MouseUp only resets button/cursor state and does NOT touch cam_was_not_dragged,
+    // so the menu's drag gate survives the reorder.
+    Cam_MouseUp( nFlags );
+    // P5 RTT: OS ReleaseCapture on the hidden child would steal the mouse from the ImGui host;
+    // the shell owns drag-capture, so the release is dropped here.
+    CamWnd_ContextMenu( hwnd, x, g_camwndState.height - y - 1 );   // no-drag right-click popup
+    // 0x403367: the binary does NOT chain to CWnd::OnRButtonUp (which would DefWindowProc ->
+    // WM_CONTEXTMENU); omit it to match.
+}
+
+// 0x403100  CCamWnd::OnMouseMove.
+void CamWnd_OnMouseMove( HWND hwnd, unsigned int nFlags, int x, int y )
+{
+    (void)hwnd;   // P5 RTT: hidden child — flip against viewport size state.
+    // Dedup: the binary skips Cam_MouseMoved when the cursor hasn't moved (m_ptLastCursor).
+    if ( g_camwndState.m_ptLastCursor.x != x || g_camwndState.m_ptLastCursor.y != y )
+        CamWnd_MouseMoved( nFlags, x, g_camwndState.height - y - 1 );
+    g_camwndState.m_ptLastCursor.x = x;
+    g_camwndState.m_ptLastCursor.y = y;
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  MFC shell — CCamWnd.  Each handler is a translation layer only (extract point/flags, call
+//  the free fn, chain the base class where it used to); the non-handler methods and the
+//  cam-pointer free functions other TUs still call are thin forwarders onto g_camwndState.
+//  U-GUARD flips this whole block off globally; the #ifndef here is the same gate.
+//  (The TU still needs U-GLOBALS before it compiles with the flag ON — CamWnd_OnKeyDown and
+//  CamWnd_MouseControl's WM_TIMER poke reach the main frame through g_pParentWnd, a CMainFrame*.)
+// ═════════════════════════════════════════════════════════════════════════════
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  Raw-Win32 shell — the CCamWnd twin (U-VP-CAM).  Same free fns, same conventions:
+//    (ImGui first)  → ImGuiShell_HandleMessage, consumed → return 0 (the CCamWnd::WindowProc
+//                    override above, reproduced at the head of the WndProc)
+//    WM_CREATE     → CamWnd_OnCreate                    (CCamWnd::OnCreate tail)
+//    WM_SIZE       → DefWindowProc, then CamWnd_OnSize   (MFC chains CWnd::OnSize FIRST)
+//                    cx/cy = LOWORD/HIWORD(lParam), as MFC's ON_WM_SIZE thunk extracts them
+//    WM_PAINT      → BeginPaint + CamWnd_Paint + EndPaint (CPaintDC's job in the MFC shell)
+//    WM_ERASEBKGND → return 1                           (CCamWnd::OnEraseBkgnd returns TRUE)
+//    WM_DESTROY    → DefWindowProc, then CamWnd_OnDestroy (MFC chains CWnd::OnDestroy FIRST,
+//                    then saves the placement)
+//    WM_KEYDOWN    → CamWnd_OnKeyDown, return 0         (the handler does not call Default())
+//                    nRepCnt = LOWORD(lParam), nFlags = HIWORD(lParam), as MFC's thunk splits it
+//    WM_LBUTTONDOWN/WM_RBUTTONDOWN → CamWnd_On?ButtonDown, return 0 (those handlers do NOT
+//                    chain the base class — SetFocus + SetCapture happen inside them)
+//    WM_LBUTTONUP  → CamWnd_OnLButtonUp, THEN DefWindowProc (the MFC handler tail-calls
+//                    CWnd::OnLButtonUp, which is Default() → DefWindowProc)
+//    WM_RBUTTONUP  → CamWnd_OnRButtonUp, return 0       (0x403367 deliberately does NOT chain:
+//                    DefWindowProc would post WM_CONTEXTMENU on top of our own popup)
+//    WM_MOUSEMOVE  → CamWnd_OnMouseMove, return 0       (this handler does not chain either)
+//    WM_COMMAND    → the face-picker popup's IDs, i.e. the MFC ON_COMMAND_RANGE(0x8CA0..0x8CB3)
+//                    + ON_COMMAND(0x8CB4/0x8CB5) entries; TrackPopupMenu posts them to the owner
+//                    window, which is this HWND in both shells
+//    x/y = (short)LOWORD/HIWORD(lParam) — client coords, exactly CPoint(lParam);
+//    nFlags = wParam — the MK_* word MFC passes as UINT nFlags.
+//  No wheel entry: CCamWnd's message map has none — the wheel dolly arrives at the MAIN FRAME
+//  (CMainFrame::OnScroll → CamWnd_Scroll), so the frame's shell owns it in both builds.
+//  No WM_CHAR entry either: the map has ON_WM_KEYDOWN only.
+//
+//  d_hwndCamera registration stays the CALLER's job in BOTH shells: mainfrm.cpp's
+//  CreateQEChildren sets g_qeglobals.d_hwndCamera from the new HWND (right after Create), and
+//  gfxwrapper.cpp's R_BeginRegistrationInternal later calls R_InitRendererForWindow on it.
+// ═════════════════════════════════════════════════════════════════════════════
+
+static const char *const CAMWND_CLASS_NAME = "KIWICamWnd";
+
+LRESULT CALLBACK CamWnd_WndProc( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam )
+{
+    extern bool ImGuiShell_HandleMessage( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam );   // imgui_shell.cpp
+    if ( ImGuiShell_HandleMessage( hwnd, msg, wParam, lParam ) )
+        return 0;
+
+    switch ( msg )
+    {
+    case WM_CREATE:
+        CamWnd_OnCreate( hwnd );
+        return 0;
+
+    case WM_SIZE:
+    {
+        LRESULT r = DefWindowProcA( hwnd, msg, wParam, lParam );
+        CamWnd_OnSize( hwnd, (int)(short)LOWORD( lParam ), (int)(short)HIWORD( lParam ) );
+        return r;
+    }
+
+    case WM_ERASEBKGND:
+        return 1;
+
+    case WM_PAINT:
+    {
+        PAINTSTRUCT ps;
+        BeginPaint( hwnd, &ps );
+        CamWnd_Paint( hwnd );
+        EndPaint( hwnd, &ps );
+        return 0;
+    }
+
+    case WM_DESTROY:
+    {
+        LRESULT r = DefWindowProcA( hwnd, msg, wParam, lParam );
+        CamWnd_OnDestroy( hwnd );
+        return r;
+    }
+
+    case WM_KEYDOWN:
+        CamWnd_OnKeyDown( (unsigned int)wParam,
+                          (unsigned int)LOWORD( lParam ), (unsigned int)HIWORD( lParam ) );
+        return 0;
+
+    case WM_LBUTTONDOWN:
+        CamWnd_OnLButtonDown( hwnd, (unsigned int)wParam,
+                              (int)(short)LOWORD( lParam ), (int)(short)HIWORD( lParam ) );
+        return 0;
+
+    case WM_RBUTTONDOWN:
+        CamWnd_OnRButtonDown( hwnd, (unsigned int)wParam,
+                              (int)(short)LOWORD( lParam ), (int)(short)HIWORD( lParam ) );
+        return 0;
+
+    case WM_LBUTTONUP:
+        CamWnd_OnLButtonUp( (unsigned int)wParam );
+        break;      // → DefWindowProc, like CWnd::OnLButtonUp
+
+    case WM_RBUTTONUP:
+        CamWnd_OnRButtonUp( hwnd, (unsigned int)wParam,
+                            (int)(short)LOWORD( lParam ), (int)(short)HIWORD( lParam ) );
+        return 0;   // 0x403367 does NOT chain the base class
+
+    case WM_MOUSEMOVE:
+        CamWnd_OnMouseMove( hwnd, (unsigned int)wParam,
+                            (int)(short)LOWORD( lParam ), (int)(short)HIWORD( lParam ) );
+        return 0;
+
+    case WM_COMMAND:
+    {
+        // The face-picker popup routes here (TrackPopupMenu's owner window).  Same three
+        // entries as the message map: the 0x8CA0..0x8CB3 per-face range, then select-all /
+        // deselect-all.  Menu commands arrive with HIWORD(wParam) == 0 and lParam == 0.
+        const unsigned int nID = (unsigned int)LOWORD( wParam );
+        if ( nID >= 0x8CA0 && nID <= 0x8CB3 )
+        {
+            CamWnd_OnContextMenuBrushLayer( nID );
+            return 0;
+        }
+        if ( nID == 0x8CB4 )
+        {
+            CamWnd_OnContextMenuSelectAll();
+            return 0;
+        }
+        if ( nID == 0x8CB5 )
+        {
+            CamWnd_OnContextMenuDeselectAll();
+            return 0;
+        }
+        break;
+    }
+    }
+    return DefWindowProcA( hwnd, msg, wParam, lParam );
+}
+
+// The CCamWnd::PreCreateWindow class (CS_OWNDC + no background brush: we present via D3D, so
+// the shell must not paint the client area) + the CWnd::Create style CreateQEChildren passes
+// (WS_CHILD | WS_VISIBLE, child id AFX_IDW_PANE_FIRST+1 — the dock host positions it, so the
+// raw creator takes the rect directly instead).
+HWND CamWnd_CreateRaw( HWND parent, int x, int y, int w, int h )
+{
+    static bool s_classRegistered = false;
+    HINSTANCE   inst = GetModuleHandleA( nullptr );
+
+    if ( !s_classRegistered )
+    {
+        WNDCLASSA wc = {};
+        wc.style         = CS_OWNDC | CS_HREDRAW | CS_VREDRAW;
+        wc.lpfnWndProc   = CamWnd_WndProc;
+        wc.hInstance     = inst;
+        wc.hCursor       = LoadCursorA( nullptr, IDC_ARROW );
+        wc.hbrBackground = nullptr;
+        wc.lpszClassName = CAMWND_CLASS_NAME;
+        if ( !RegisterClassA( &wc ) )
+            return nullptr;
+        s_classRegistered = true;
+    }
+
+    return CreateWindowExA( 0, CAMWND_CLASS_NAME, nullptr,
+                            WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN,
+                            x, y, w, h, parent, nullptr, inst, nullptr );
+}
+

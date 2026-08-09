@@ -33,6 +33,18 @@
 #define ID_FILE_SAVEAS_RAD                                 32952   // 0x80B8 "Save as..."
 #define ID_FILE_EXIT_RAD                                   32951   // 0x80B7 "Exit"
 #define ID_FILE_SAVE_SELECTED                              32845   // 0x804D "Save selected..."
+// MFC-standard ids the menu/dispatcher reuse — afxres.h owns them in the MFC build;
+// defined here (guarded) so the NO-MFC build and the winres.h-based .rc see the same
+// values (documented above: 0xE100/01/03, 0xE12B/2C).
+#ifndef ID_FILE_NEW
+#define ID_FILE_NEW                                        0xE100
+#define ID_FILE_OPEN                                       0xE101
+#define ID_FILE_SAVE                                       0xE103
+#endif
+#ifndef ID_EDIT_UNDO
+#define ID_EDIT_UNDO                                       0xE12B
+#define ID_EDIT_REDO                                       0xE12C
+#endif
 // ── Dialogs ──────────────────────────────────────────────────────────────────
 #define IDD_FIND_TEXTURE                                   105     
 #define IDD_ENTITY                                         106     

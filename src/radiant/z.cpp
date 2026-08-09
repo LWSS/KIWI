@@ -12,6 +12,7 @@
 #include <gfx_d3d/r_init.h>         // dx, R_SetupRendertarget_CheckDevice, R_Hwnd_Resize
 #include <gfx_d3d/r_scene.h>        // R_Ed_SetSceneParms
 #include <gfx_d3d/r_rendercmds.h>   // R_AddCmd_Line3D, R_BeginFrame/R_EndFrame, clear/material-color
+#include "radiant_rtt.h"           // P5 RTT: RTT_Begin/RTT_End, RTT_Z
 #include <math.h>
 
 // ─── Editor globals shared with xywnd.cpp / engine_stubs / map.cpp ───────────────
@@ -23,6 +24,9 @@ extern char  Byte4PackPixelColor(float *from, GfxColor *out); // engine_stubs.cp
 extern selbrush_t active_brushes;                             // map.cpp          (0x23F189C)
 extern selbrush_t selected_brushes;                           // engine_stubs     (0x23F1864)
 extern void  Radiant_FL_Log( const char *fmt, ... );          // mainfrm.cpp
+// U-GLOBALS: THE editor camera, shell-agnostic (camwnd.cpp).  Never NULL — it replaces the
+// `g_pParentWnd->m_pCamWnd->camera` reach-throughs the Z view used to make.
+extern camera_s *Ed_Camera();                                 // camwnd.cpp
 
 // R_Add3DLine (draw.cpp, IDB 0x40c110): append one line segment (p1→p2, through `orient`)
 // into a caller batch; flushes via R_AddCmd_Line3D on overflow; returns the new vert count.
@@ -40,7 +44,6 @@ extern bool Ed_BrushFloorRay( brush_t *def, const float *start, const float *dir
 // Brush_GetEntityLineColor (brush.cpp 0x47aa20): RGBA of a brush's entity line (worldspawn→0,
 //   _color epair / actor / node_path overrides).  Canonical body, now non-static.
 extern char Brush_GetEntityLineColor( float *outRgba, brush_t *brushDef, const float *inRgba );    // brush.cpp
-extern CMainFrame *g_pParentWnd;                                                                   // 0x25D5A70 (also re-declared in the input cluster below)
 // colorWhite[4] = {1,1,1,1} is static const float in q_shared.h (via stdafx.h → qe3.h).
 
 // ─── Z-view globals (IDB z.cpp: z_width 0x241a598 / z_height 0x241a59c / z_scale 0x241a5b0
@@ -49,8 +52,27 @@ extern CMainFrame *g_pParentWnd;                                                
 //     m_Camera with CCamWnd. The defaults centre an empty view on the origin. ──────────────
 int   z_width  = 0;                       // Z window client width  (px), set in OnSize
 int   z_height = 0;                       // Z window client height (px)
-float z_scale  = 1.0f;                    // pixels per world Z unit
+float z_scale  = 1.0f;                    // pixels per world Z unit (mainfrm.cpp Z zoom in/out)
 float m_Camera_origin[3] = { 0, 0, 0 };   // editor camera world position (origin0/1/2)
+
+// ─── zwndState_t — the Z viewport's shell state (U-VP-Z) ──────────────────────────
+// The Z view is a singleton (one window, one state block), so this is a file-scope
+// instance both shells drive: the MFC CZWnd handlers and the raw-Win32 WndProc twin at
+// the bottom of this file read/write these SAME fields.
+//   width/height  = CZWnd::m_nWidth / m_nHeight.  mainfrm.h still declares those members
+//                   (this unit may not edit it) but nothing outside z.cpp ever read them,
+//                   so the handlers no longer write them — the state lives here.  The IDB
+//                   globals z_width/z_height above stay the values the draw path reads
+//                   (faithful names), fed from these exactly as before.
+//   cursorx/cursory = screen cursor latched at button press (IDB 0x241a594/0x241a590),
+//                   the anchor of the RMB scroll-drag.
+struct zwndState_t
+{
+    int width   = 0;
+    int height  = 0;
+    int cursorx = 0;
+    int cursory = 0;
+} g_zwndState;
 
 // ─── Z_SetupScene — CXYWnd::SetupScene (IDB 0x5064c0) with the Z view's explicit org/axis ─
 // org = {0, cameraZ, 0}; axis = the XY-top basis (forward=+Z, right=-X, up=+Y). The ortho
@@ -66,9 +88,13 @@ static void Z_SetupScene()
     axis[1][0] = -1.0f;   // right   = -X
     axis[2][1] =  1.0f;   // up      = +Y
 
+    // Ortho size from the Z view's own pixel dims (z_width/z_height, set by ZWnd_OnSize /
+    // ZWnd_RenderToRT), NOT dx.windows[targetWindowIndex] — under RTT the target index is a
+    // fixed host slot unrelated to this viewport's cell (was stretching the Z ruler). These
+    // globals equal the window dims on the legacy path, so it stays correct there too.
     const float invScale = 1.0f / z_scale;
-    const float projW = invScale * (float)dx.windows[dx.targetWindowIndex].width;
-    const float projH = invScale * (float)dx.windows[dx.targetWindowIndex].height;
+    const float projW = invScale * (float)z_width;
+    const float projH = invScale * (float)z_height;
 
     GfxMatrix proj;
     XY_SetupProjectionMtx(&proj, projW, projH, -262144.0f);
@@ -344,10 +370,7 @@ static void Z_DrawSelectedColumns( int v0 )
 // camera sits on the Z ruler.
 static void Z_DrawCameraMarker()
 {
-    if ( !g_pParentWnd || !g_pParentWnd->m_pCamWnd )
-        return;
-
-    const float camZ = g_pParentWnd->m_pCamWnd->camera.origin[2];
+    const float camZ = Ed_Camera()->origin[2];   // U-GLOBALS (never NULL — guard dropped)
     const float hw   = (float)( z_width / 4 );     // IDB v12 = z_width/4
     const float x    =  hw;                        // v8 = +hw
     const float xn   = -hw;                        // v9 = -hw
@@ -431,9 +454,8 @@ extern void  Drag_Begin( void *pressFunc, unsigned int buttons, int viewz, int p
 extern void  Drag_MouseMoved( int a1, int a2, int buttons, float *a4, float *a5 );          // 0x47FF30
 extern void  Drag_MouseUp( unsigned int buttons );                                          // 0x4802A0
 extern int   g_nUpdateBits;                                                                 // 0x25D5A74
-extern CMainFrame *g_pParentWnd;                                                            // 0x25D5A70
 
-static int cursorx = 0, cursory = 0;     // screen cursor at RMB press (IDB 0x241a594/0x241a590)
+// The screen cursor latched at RMB press (IDB 0x241a594/0x241a590) lives in g_zwndState.
 
 // ── Drag_MouseOrigin (0x49aa60) — build the Z-view pick ray (X = sel brush centre,
 //    Z = cursor world height, pointing +Y into the scene) ───────────────────────
@@ -453,7 +475,7 @@ static void Drag_MouseOrigin( int flippedY, float *outOrigin, float *outDir )
 static void Z_MouseDown( int flippedY, unsigned int nFlags, int x )
 {
     POINT pt; GetCursorPos( &pt );
-    cursorx = pt.x; cursory = pt.y;
+    g_zwndState.cursorx = pt.x; g_zwndState.cursory = pt.y;
     // xvec={0,0,0}, yvec={0,0,1/z_scale}: the Z view's screen→world drag basis (IDB 0x49aae0
     // builds yvec from the contiguous v10/Point.x/Point.y stack floats = {0,0,1/z_scale}).
     // Drag_Setup AxializeVectors yvec → {0,0,±1}, so mouse-Y maps to world-Z. A zero yvec
@@ -468,8 +490,7 @@ static void Z_MouseDown( int flippedY, unsigned int nFlags, int x )
     }
     else if ( nFlags == (unsigned)( v5 | 8 ) || nFlags == 9 )   // Ctrl+click → set camera height
     {
-        if ( g_pParentWnd && g_pParentWnd->m_pCamWnd )
-            g_pParentWnd->m_pCamWnd->camera.origin[2] = origin[2];
+        Ed_Camera()->origin[2] = origin[2];   // U-GLOBALS (never NULL — guard dropped)
         g_nUpdateBits |= W_CAMERA | W_XY_OVERLAY | W_Z;
     }
 }
@@ -497,10 +518,10 @@ static void Z_MouseMoved( unsigned int buttons, int flippedY, int x )
     else if ( buttons == MK_RBUTTON )            // RMB drag → scroll the Z view
     {
         POINT pt; GetCursorPos( &pt );
-        if ( pt.y != cursory )
+        if ( pt.y != g_zwndState.cursory )
         {
-            m_Camera_origin[2] += (float)( pt.y - cursory );
-            SetCursorPos( cursorx, cursory );
+            m_Camera_origin[2] += (float)( pt.y - g_zwndState.cursory );
+            SetCursorPos( g_zwndState.cursorx, g_zwndState.cursory );
             g_nUpdateBits |= W_Z;
         }
     }
@@ -510,126 +531,65 @@ static void Z_MouseMoved( unsigned int buttons, int flippedY, int x )
         if ( buttons == ctrlCombo || buttons == (unsigned)( MK_LBUTTON | MK_CONTROL ) )
         {
             float z = (float)( (double)( flippedY - z_height / 2 ) / z_scale );
-            if ( g_pParentWnd && g_pParentWnd->m_pCamWnd )
-                g_pParentWnd->m_pCamWnd->camera.origin[2] = z;
+            Ed_Camera()->origin[2] = z;   // U-GLOBALS (never NULL — guard dropped)
             g_nUpdateBits |= W_CAMERA | W_XY_OVERLAY | W_Z;
         }
     }
 }
 
-void CZWnd::OnLButtonDown( UINT nFlags, CPoint point )
+// ═════════════════════════════════════════════════════════════════════════════
+//  Shell-agnostic Z-viewport handlers (U-VP-Z).  Every afx_msg body lives here as a free
+//  function on plain args; the MFC CZWnd handlers below are thin translations, and the
+//  raw-Win32 WndProc at the end of this file feeds the SAME functions with the SAME
+//  conventions MFC used (client coords, the MK_* wParam flag word, LOWORD/HIWORD size).
+//  The window's flipped-Y (rc.Height() - y - 1) and the capture/focus calls are part of the
+//  handler bodies, so both shells get them identically.
+//
+//  Callers declare these themselves (mainfrm.h is not this unit's to edit):
+//      extern void ZWnd_OnCreate( HWND hwnd );
+//      extern void ZWnd_OnSize( HWND hwnd, int cx, int cy );
+//      extern void ZWnd_Paint( HWND hwnd );
+//      extern void ZWnd_OnLButtonDown( HWND hwnd, unsigned int nFlags, int x, int y );
+//      extern void ZWnd_OnRButtonDown( HWND hwnd, unsigned int nFlags, int x, int y );
+//      extern void ZWnd_OnMouseMove( HWND hwnd, unsigned int nFlags, int x, int y );
+//      extern void ZWnd_OnLButtonUp( unsigned int nFlags );
+//      extern void ZWnd_OnRButtonUp( unsigned int nFlags );
+// ═════════════════════════════════════════════════════════════════════════════
+
+// Latch the client size (CZWnd::OnCreate tail, after the base-class create).
+void ZWnd_OnCreate( HWND hwnd )
 {
-    SetFocus();
-    SetCapture();
-    CRect rc; GetClientRect( &rc );
-    Z_MouseDown( rc.Height() - point.y - 1, nFlags, point.x );
+    RECT rc; GetClientRect( hwnd, &rc );
+    g_zwndState.width  = rc.right - rc.left;
+    g_zwndState.height = rc.bottom - rc.top;
+    z_width  = g_zwndState.width;
+    z_height = g_zwndState.height;
 }
 
-void CZWnd::OnRButtonDown( UINT nFlags, CPoint point )
+void ZWnd_OnSize( HWND hwnd, int cx, int cy )
 {
-    SetFocus();
-    SetCapture();
-    CRect rc; GetClientRect( &rc );
-    Z_MouseDown( rc.Height() - point.y - 1, nFlags, point.x );
-}
-
-void CZWnd::OnMouseMove( UINT nFlags, CPoint point )
-{
-    CRect rc; GetClientRect( &rc );
-    // (Binary also writes the "Z:: %.1f" status-bar text here; deferred — cosmetic.)
-    Z_MouseMoved( nFlags, rc.Height() - point.y - 1, point.x );
-    CWnd::OnMouseMove( nFlags, point );
-}
-
-void CZWnd::OnLButtonUp( UINT nFlags, CPoint point )
-{
-    Drag_MouseUp( nFlags );
-    if ( ( nFlags & ( MK_LBUTTON | MK_RBUTTON | MK_MBUTTON ) ) == 0 )
-        ReleaseCapture();
-    CWnd::OnLButtonUp( nFlags, point );
-}
-
-void CZWnd::OnRButtonUp( UINT nFlags, CPoint point )
-{
-    Drag_MouseUp( nFlags );
-    if ( ( nFlags & ( MK_LBUTTON | MK_RBUTTON | MK_MBUTTON ) ) == 0 )
-        ReleaseCapture();
-    CWnd::OnRButtonUp( nFlags, point );
-}
-
-BEGIN_MESSAGE_MAP(CZWnd, CWnd)
-    ON_WM_CREATE()
-    ON_WM_SIZE()
-    ON_WM_PAINT()
-    ON_WM_ERASEBKGND()
-    ON_WM_LBUTTONDOWN()
-    ON_WM_LBUTTONUP()
-    ON_WM_MOUSEMOVE()
-    ON_WM_RBUTTONDOWN()
-    ON_WM_RBUTTONUP()
-END_MESSAGE_MAP()
-
-CZWnd::CZWnd()
-{
-}
-
-BOOL CZWnd::PreCreateWindow( CREATESTRUCT& cs )
-{
-    // Own DC + no background brush: we present via D3D, MFC must not paint the client area.
-    cs.lpszClass = AfxRegisterWndClass(
-        CS_OWNDC | CS_HREDRAW | CS_VREDRAW,
-        ::LoadCursor( NULL, IDC_ARROW ),
-        NULL,
-        NULL );
-    cs.style |= WS_CLIPSIBLINGS | WS_CLIPCHILDREN;
-    return CWnd::PreCreateWindow( cs );
-}
-
-int CZWnd::OnCreate( LPCREATESTRUCT lpCreateStruct )
-{
-    if ( CWnd::OnCreate( lpCreateStruct ) == -1 )
-        return -1;
-    CRect rc;
-    GetClientRect( &rc );
-    m_nWidth = rc.Width();
-    m_nHeight = rc.Height();
-    z_width  = m_nWidth;
-    z_height = m_nHeight;
-    return 0;
-}
-
-void CZWnd::OnSize( UINT nType, int cx, int cy )
-{
-    CWnd::OnSize( nType, cx, cy );
-    m_nWidth  = cx;
-    m_nHeight = cy;
+    g_zwndState.width  = cx;
+    g_zwndState.height = cy;
     z_width   = cx;
     z_height  = cy;
     // P5.3: re-create this window's swap chain at the new size (pixel-correct, no stretch).
     if ( dx.device && cx > 0 && cy > 0 )
-        R_Hwnd_Resize( (HWND__ *)GetSafeHwnd(), cx, cy );
-}
-
-BOOL CZWnd::OnEraseBkgnd( CDC* /*pDC*/ )
-{
-    return TRUE;   // suppress GDI erase — the D3D present owns the client area
+        R_Hwnd_Resize( (HWND__ *)hwnd, cx, cy );
 }
 
 // The CZWnd::OnPaint pipeline (IDB 0x46eec0) — identical structure to CXYWnd::OnPaint,
-// targeting d_hwndZ. Grid + selected Z-extents subset.
-void CZWnd::OnPaint()
+// targeting d_hwndZ. Grid + selected Z-extents subset.  The DC (CPaintDC / BeginPaint)
+// belongs to the shell, not to this pipeline.
+void ZWnd_Paint( HWND hwnd )
 {
-    CPaintDC dc( this );
-
     if ( !dx.device )
         return;
 
     // Keep z_width/z_height in step with this window (a WM_SIZE may not have arrived yet).
-    z_width  = m_nWidth;
-    z_height = m_nHeight;
+    z_width  = g_zwndState.width;
+    z_height = g_zwndState.height;
 
-    HWND__ *hwnd = (HWND__ *)GetSafeHwnd();
-    if ( !R_SetupRendertarget_CheckDevice( hwnd ) )
+    if ( !R_SetupRendertarget_CheckDevice( (HWND__ *)hwnd ) )
         return;
 
     R_BeginFrame();
@@ -643,5 +603,180 @@ void CZWnd::OnPaint()
     R_EndFrame();
     R_IssueRenderCommands( (uint)-1 );
     R_SortMaterials();
-    R_CheckTargetWindow( hwnd );
+    R_CheckTargetWindow( (HWND__ *)hwnd );
 }
+
+// P5 RTT: the same ZWnd_Paint pipeline, rendering into RTT_Z's offscreen texture (for ImGui to
+// sample) instead of a native window.  The window-setup (R_SetupRendertarget_CheckDevice) is
+// replaced by RTT_Begin, the tail R_CheckTargetWindow is dropped, and the frame ends with RTT_End.
+// Z_Draw() takes no HWND (reaches everything through z_width/z_height + Ed_Camera()).  `w`/`h`
+// come from the ImGui dock cell.
+void ZWnd_RenderToRT( int w, int h )
+{
+    if ( !dx.device || w < 1 || h < 1 )
+        return;
+    // Drive the viewport's own size state from the dock-cell size (was set by ZWnd_OnSize).
+    g_zwndState.width  = w;
+    g_zwndState.height = h;
+    z_width  = w;
+    z_height = h;
+    if ( !RTT_Begin( RTT_Z, w, h ) )   // points FRAME_BUFFER at the RT + suppresses Present
+        return;
+
+    R_BeginFrame();
+    R_BeginSharedCmdList();
+    R_AddCmdClearScreen( 7, g_qeglobals.d_savedinfo.colors[1], 1.0f, 0 );
+    static const float s_edWhite[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+    R_AddCmdSetMaterialColor( s_edWhite );
+
+    Z_Draw();
+
+    R_EndFrame();
+    R_IssueRenderCommands( (uint)-1 );
+    R_SortMaterials();
+    RTT_End();
+}
+
+void ZWnd_OnLButtonDown( HWND hwnd, unsigned int nFlags, int x, int y )
+{
+    (void)hwnd;   // P5 RTT: hidden child — flip against viewport size state; shell owns capture/focus.
+    Z_MouseDown( g_zwndState.height - y - 1, nFlags, x );
+}
+
+void ZWnd_OnRButtonDown( HWND hwnd, unsigned int nFlags, int x, int y )
+{
+    (void)hwnd;   // P5 RTT: hidden child — flip against viewport size state; shell owns capture/focus.
+    Z_MouseDown( g_zwndState.height - y - 1, nFlags, x );
+}
+
+void ZWnd_OnMouseMove( HWND hwnd, unsigned int nFlags, int x, int y )
+{
+    (void)hwnd;   // P5 RTT: hidden child — flip against viewport size state.
+    // (Binary also writes the "Z:: %.1f" status-bar text here; deferred — cosmetic.)
+    Z_MouseMoved( nFlags, g_zwndState.height - y - 1, x );
+}
+
+void ZWnd_OnLButtonUp( unsigned int nFlags )
+{
+    Drag_MouseUp( nFlags );
+    // P5 RTT: shell owns drag-capture; OS ReleaseCapture on the hidden child would steal the
+    // mouse from the ImGui host, so the ( nFlags & MK_* )==0 release is dropped here.
+}
+
+void ZWnd_OnRButtonUp( unsigned int nFlags )
+{
+    Drag_MouseUp( nFlags );
+    // P5 RTT: shell owns drag-capture; OS ReleaseCapture on the hidden child would steal the
+    // mouse from the ImGui host, so the ( nFlags & MK_* )==0 release is dropped here.
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  MFC shell — CZWnd.  Each handler is a translation layer only (extract point/flags,
+//  call the free fn, chain the base class where it used to).  U-GUARD flips this whole
+//  block off globally; the #ifndef here is the same gate.  (U-GLOBALS DONE: Z_MouseDown /
+//  Z_MouseMoved / Z_DrawCameraMarker now reach the camera through Ed_Camera(), so nothing
+//  outside this block needs CMainFrame.)
+// ═════════════════════════════════════════════════════════════════════════════
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  Raw-Win32 shell — the CZWnd twin (U-VP-Z).  Same free fns, same conventions:
+//    WM_CREATE     → ZWnd_OnCreate                     (CZWnd::OnCreate tail)
+//    WM_SIZE       → DefWindowProc, then ZWnd_OnSize    (MFC chains CWnd::OnSize FIRST)
+//                    cx/cy = LOWORD/HIWORD(lParam), as MFC's ON_WM_SIZE thunk extracts them
+//    WM_PAINT      → BeginPaint + ZWnd_Paint + EndPaint (CPaintDC's job in the MFC shell)
+//    WM_ERASEBKGND → return 1                          (CZWnd::OnEraseBkgnd returns TRUE)
+//    WM_LBUTTONDOWN/WM_RBUTTONDOWN → ZWnd_On?ButtonDown, return 0 (those handlers do NOT
+//                    chain the base class, so MFC never reaches DefWindowProc either)
+//    WM_MOUSEMOVE / WM_LBUTTONUP / WM_RBUTTONUP → free fn, THEN DefWindowProc (the MFC
+//                    handlers tail-call CWnd::On*, which is Default() → DefWindowProc)
+//    x/y = (short)LOWORD/HIWORD(lParam) — client coords, exactly CPoint(lParam);
+//    nFlags = wParam — the MK_* word MFC passes as UINT nFlags.
+//  No key/wheel entries: CZWnd's message map has none, so the Z view swallows keys and the
+//  wheel in the MFC shell too (pre-existing gap, not introduced here).
+//
+//  d_hwndZ registration stays the CALLER's job in BOTH shells: mainfrm.cpp's
+//  Radiant_CreateRenderWindows sets g_qeglobals.d_hwndZ from the new HWND, and
+//  gfxwrapper.cpp's R_BeginRegistrationInternal later calls R_InitRendererForWindow on it.
+// ═════════════════════════════════════════════════════════════════════════════
+
+static const char *const ZWND_CLASS_NAME = "KIWIZWnd";
+
+LRESULT CALLBACK ZWnd_WndProc( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam )
+{
+    switch ( msg )
+    {
+    case WM_CREATE:
+        ZWnd_OnCreate( hwnd );
+        return 0;
+
+    case WM_SIZE:
+    {
+        LRESULT r = DefWindowProcA( hwnd, msg, wParam, lParam );
+        ZWnd_OnSize( hwnd, (int)(short)LOWORD( lParam ), (int)(short)HIWORD( lParam ) );
+        return r;
+    }
+
+    case WM_ERASEBKGND:
+        return 1;
+
+    case WM_PAINT:
+    {
+        PAINTSTRUCT ps;
+        BeginPaint( hwnd, &ps );
+        ZWnd_Paint( hwnd );
+        EndPaint( hwnd, &ps );
+        return 0;
+    }
+
+    case WM_LBUTTONDOWN:
+        ZWnd_OnLButtonDown( hwnd, (unsigned int)wParam,
+                            (int)(short)LOWORD( lParam ), (int)(short)HIWORD( lParam ) );
+        return 0;
+
+    case WM_RBUTTONDOWN:
+        ZWnd_OnRButtonDown( hwnd, (unsigned int)wParam,
+                            (int)(short)LOWORD( lParam ), (int)(short)HIWORD( lParam ) );
+        return 0;
+
+    case WM_MOUSEMOVE:
+        ZWnd_OnMouseMove( hwnd, (unsigned int)wParam,
+                          (int)(short)LOWORD( lParam ), (int)(short)HIWORD( lParam ) );
+        break;      // → DefWindowProc, like CWnd::OnMouseMove
+
+    case WM_LBUTTONUP:
+        ZWnd_OnLButtonUp( (unsigned int)wParam );
+        break;      // → DefWindowProc, like CWnd::OnLButtonUp
+
+    case WM_RBUTTONUP:
+        ZWnd_OnRButtonUp( (unsigned int)wParam );
+        break;      // → DefWindowProc, like CWnd::OnRButtonUp
+    }
+    return DefWindowProcA( hwnd, msg, wParam, lParam );
+}
+
+// The CZWnd::PreCreateWindow class (CS_OWNDC + no background brush: we present via D3D, so
+// the shell must not paint the client area) + the CWnd::Create style mainfrm.cpp passes.
+HWND ZWnd_CreateRaw( HWND parent, int x, int y, int w, int h )
+{
+    static bool s_classRegistered = false;
+    HINSTANCE   inst = GetModuleHandleA( nullptr );
+
+    if ( !s_classRegistered )
+    {
+        WNDCLASSA wc = {};
+        wc.style         = CS_OWNDC | CS_HREDRAW | CS_VREDRAW;
+        wc.lpfnWndProc   = ZWnd_WndProc;
+        wc.hInstance     = inst;
+        wc.hCursor       = LoadCursorA( nullptr, IDC_ARROW );
+        wc.hbrBackground = nullptr;
+        wc.lpszClassName = ZWND_CLASS_NAME;
+        if ( !RegisterClassA( &wc ) )
+            return nullptr;
+        s_classRegistered = true;
+    }
+
+    return CreateWindowExA( 0, ZWND_CLASS_NAME, nullptr,
+                            WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN,
+                            x, y, w, h, parent, nullptr, inst, nullptr );
+}
+

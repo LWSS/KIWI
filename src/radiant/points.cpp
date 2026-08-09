@@ -14,6 +14,7 @@
 #include "stdafx.h"
 #include "mainfrm.h"
 #include "qe3.h"
+#include "xywnd.h"          // xywndState_t / Ed_ActiveXY (U-GLOBALS)
 #include <gfx_d3d/r_gfx.h>  // GfxPointVertex, GfxColor
 
 // ── externs from other radiant TUs ───────────────────────────────────────────
@@ -21,7 +22,8 @@ extern void  Assert( const char *file, int line, int type, const char *fmt, ... 
 extern int   Sys_Printf( const char *fmt, ... );
 extern char  currentmap[];            // map.cpp 0x23F18D8
 extern void  StripExtension( char *path );  // cmdlib.cpp 0x40AE90
-extern CMainFrame *g_pParentWnd;     // engine_stubs.cpp
+// (g_pParentWnd extern retired — U-GLOBALS swept every use onto Ed_Camera()/Ed_ActiveXY())
+extern camera_s   *Ed_Camera();      // camwnd.cpp — THE editor camera (never NULL, U-GLOBALS)
 
 void Pointfile_Next();
 void Pointfile_Prev();
@@ -161,27 +163,27 @@ void Pointfile_Next()
 {
     if ( s_startpoint < s_num_points - 2 )
     {
-        CCamWnd *cam = g_pParentWnd->m_pCamWnd;
-        CXYWnd  *xy  = g_pParentWnd->m_pXYWnd;
+        camera_s     *cam = Ed_Camera();          // U-GLOBALS: was g_pParentWnd->m_pCamWnd
+        xywndState_t *xy  = Ed_ActiveXY();        // U-GLOBALS: was g_pParentWnd->m_pXYWnd
         int      idx = s_startpoint + 1;          // IDB 6*(v1+1) then *2 = point index v1+1
         ++s_startpoint;
 
-        cam->camera.origin[0] = s_pointFile[idx][0];
-        cam->camera.origin[1] = s_pointFile[idx][1];
-        cam->camera.origin[2] = s_pointFile[idx][2];
+        cam->origin[0] = s_pointFile[idx][0];
+        cam->origin[1] = s_pointFile[idx][1];
+        cam->origin[2] = s_pointFile[idx][2];
         xy->m_vOrigin[0] = s_pointFile[idx][0];
         xy->m_vOrigin[1] = s_pointFile[idx][1];
         xy->m_vOrigin[2] = s_pointFile[idx][2];
 
         float normal[3];
-        normal[0] = s_pointFile[idx + 1][0] - cam->camera.origin[0];
-        normal[1] = s_pointFile[idx + 1][1] - cam->camera.origin[1];
-        normal[2] = s_pointFile[idx + 1][2] - cam->camera.origin[2];
+        normal[0] = s_pointFile[idx + 1][0] - cam->origin[0];
+        normal[1] = s_pointFile[idx + 1][1] - cam->origin[1];
+        normal[2] = s_pointFile[idx + 1][2] - cam->origin[2];
         Vec3Normalize_R( normal );
 
-        cam->camera.angles[1] = (float)( atan2( (double)normal[1], (double)normal[0] ) * 180.0 / 3.14159 );
+        cam->angles[1] = (float)( atan2( (double)normal[1], (double)normal[0] ) * 180.0 / 3.14159 );
         g_nUpdateBits = -1;
-        cam->camera.angles[0] = (float)( asin( (double)normal[2] ) * 180.0 / 3.14159 );
+        cam->angles[0] = (float)( asin( (double)normal[2] ) * 180.0 / 3.14159 );
     }
     else
     {
@@ -196,27 +198,27 @@ void Pointfile_Prev()
 {
     if ( s_startpoint )
     {
-        CCamWnd *cam = g_pParentWnd->m_pCamWnd;
-        CXYWnd  *xy  = g_pParentWnd->m_pXYWnd;
+        camera_s     *cam = Ed_Camera();          // U-GLOBALS: was g_pParentWnd->m_pCamWnd
+        xywndState_t *xy  = Ed_ActiveXY();        // U-GLOBALS: was g_pParentWnd->m_pXYWnd
         int      idx = s_startpoint - 1;          // IDB 6*(v1-1) then *2 = point index v1-1
         --s_startpoint;
 
-        cam->camera.origin[0] = s_pointFile[idx][0];
-        cam->camera.origin[1] = s_pointFile[idx][1];
-        cam->camera.origin[2] = s_pointFile[idx][2];
+        cam->origin[0] = s_pointFile[idx][0];
+        cam->origin[1] = s_pointFile[idx][1];
+        cam->origin[2] = s_pointFile[idx][2];
         xy->m_vOrigin[0] = s_pointFile[idx][0];
         xy->m_vOrigin[1] = s_pointFile[idx][1];
         xy->m_vOrigin[2] = s_pointFile[idx][2];
 
         float normal[3];
-        normal[0] = s_pointFile[idx + 1][0] - cam->camera.origin[0];
-        normal[1] = s_pointFile[idx + 1][1] - cam->camera.origin[1];
-        normal[2] = s_pointFile[idx + 1][2] - cam->camera.origin[2];
+        normal[0] = s_pointFile[idx + 1][0] - cam->origin[0];
+        normal[1] = s_pointFile[idx + 1][1] - cam->origin[1];
+        normal[2] = s_pointFile[idx + 1][2] - cam->origin[2];
         Vec3Normalize_R( normal );
 
-        cam->camera.angles[1] = (float)( atan2( (double)normal[1], (double)normal[0] ) * 180.0 / 3.14159 );
+        cam->angles[1] = (float)( atan2( (double)normal[1], (double)normal[0] ) * 180.0 / 3.14159 );
         g_nUpdateBits = -1;
-        cam->camera.angles[0] = (float)( asin( (double)normal[2] ) * 180.0 / 3.14159 );
+        cam->angles[0] = (float)( asin( (double)normal[2] ) * 180.0 / 3.14159 );
     }
     else
     {

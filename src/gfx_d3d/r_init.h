@@ -296,7 +296,10 @@ struct GfxWindowTarget // sizeof=0x10
 // R_CreateSwapChains/R_CreateWindow assert windowCount <= 5. KISAK_RADIANT-only: this
 // is an engine-struct dimension change, so it is gated (SP/MP keep windows[1]).
 #ifdef KISAK_RADIANT
-#define R_MAX_WINDOWS 5
+// 6th slot (KISAK, beyond the IDB's [5]): the UI-rework Phase-2b ImGui dockspace
+// host window. The binary's five views are unchanged; asserts keyed on
+// R_MAX_WINDOWS scale with it.
+#define R_MAX_WINDOWS 6
 #else
 #define R_MAX_WINDOWS 1
 #endif
@@ -408,6 +411,9 @@ void __cdecl R_SetupTargetWindow(int windowIndex);
 // Distinct from kisak's game R_Init, which creates its own window via R_InitGraphicsApi.
 void __cdecl R_InitEditor();
 char __cdecl R_SetupRendertarget_CheckDevice(HWND__ *hwnd);
+#ifdef KISAK_RADIANT
+void __cdecl R_SetupRenderTargetTexture(IDirect3DSurface9 *rtColor, int width, int height);   // Phase-5 RTT
+#endif
 // Non-asserting test for "is this hwnd a registered render target with a live swap chain".
 // (KISAK_RADIANT — used by CCamWnd::OnPaint to skip painting a window the renderer never
 // registered, e.g. the dead Dynamic-Lighting popup, instead of tripping the CheckDevice

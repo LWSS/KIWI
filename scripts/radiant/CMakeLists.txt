@@ -1,10 +1,9 @@
 message("----- KIWI Radiant -----")
 
-# MFC: static MFC (matches the original binary, statically linked MFC 7.1).
-# Enabled once Microsoft.VisualStudio.Component.VC.ATLMFC was installed (afxwin.h
-# present). stdafx.h includes the afx headers; CMainFrame is a real CFrameWnd and
-# CRadiantApp a CWinApp (MFC provides WinMain). Static MFC requires /MT (set below).
-set(CMAKE_MFC_FLAG 1)
+# Phase 4 / U-RIP: MFC is DELETED from the tree — there is no MFC shell and no
+# CMAKE_MFC_FLAG any more. The editor is plain Win32 + kisak_mfc_shim.h (which
+# supplies the CString/CStringList/CMap/CFile compat types the faithful port uses).
+# /MT stays (static CRT, set below) — that is independent of MFC.
 
 project(KIWI-Radiant)
 
@@ -66,9 +65,13 @@ add_executable(${PROJECT_NAME} WIN32
 
 # KISAK_RADIANT guards all editor additions.
 # _MBCS / not UNICODE: the binary was built ANSI; all decompiled code is char*.
-# _WINDOWS / _AFXAPP: standard MFC flags (CMAKE_MFC_FLAG=1 adds _AFX implicitly, but be explicit).
 target_compile_definitions(${PROJECT_NAME} PUBLIC
     KISAK_RADIANT
+    # KISAK_NO_MFC is now UNCONDITIONAL and TRANSITIONAL: MFC is gone, but U-RIP-2 is
+    # still stripping the last `#ifdef KISAK_NO_MFC` guards out of src/radiant. The
+    # define keeps those already-stripped-elsewhere TUs on the (only) Win32 path until
+    # the final guard is removed — at which point this line gets deleted too.
+    KISAK_NO_MFC
     WIN32
     _WINDOWS
     _MBCS
@@ -76,14 +79,14 @@ target_compile_definitions(${PROJECT_NAME} PUBLIC
     MAX_GENTITIES=2176
 )
 
-# Compile flags — match the SP/MP builds (/MT static CRT to match static MFC)
+# Compile flags — match the SP/MP builds (/MT static CRT, as the original binary used)
 set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /MT /O2 /Ot /MP4 /W3 /Z7 /permissive-")
 set(CMAKE_CXX_FLAGS_DEBUG   "${CMAKE_CXX_FLAGS_DEBUG}   /MTd /Od /MP4 /W3 /Z7 /permissive-")
 
 # Warnings as Errors
 target_compile_options(${PROJECT_NAME} PRIVATE /we4700) # Uninit'd variable used in logic
 
-# Static MSVC runtime (required for static MFC)
+# Static MSVC runtime
 set_property(TARGET ${PROJECT_NAME} PROPERTY
     MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
@@ -100,6 +103,8 @@ target_link_options(${PROJECT_NAME} PRIVATE "$<$<CONFIG:Release>:/OPT:ICF>")
 # Include paths
 target_include_directories(${PROJECT_NAME} PUBLIC ${SRC_DIR})
 target_include_directories(${PROJECT_NAME} PUBLIC ${DEPS_DIR})
+# imgui backends do `#include "imgui.h"` — the imgui root must be on the path.
+target_include_directories(${PROJECT_NAME} PUBLIC ${DEPS_DIR}/imgui)
 target_include_directories(${PROJECT_NAME} PUBLIC ${DXSDK_INC_DIR})
 
 # Library search paths

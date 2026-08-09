@@ -600,6 +600,7 @@ extern RadiantFilterEntry filter_surfacetype_array[29];  // IDB 0x73AF80 (this T
 #include "mainfrm.h"                  // CTexWnd
 #include <gfx_d3d/r_init.h>           // dx, R_SetupRendertarget_CheckDevice, R_Hwnd_Resize, R_CheckTargetWindow
 #include <gfx_d3d/r_rendercmds.h>     // R_BeginFrame/EndFrame, clear, ProjectionSet2D, Draw2DImage, DrawText
+#include "radiant_rtt.h"             // P5 RTT: RTT_Begin/RTT_End, RTT_TEXTURE
 
 extern void  R_SortMaterials();                                   // r_ed_scene.cpp
 extern void  Brush_SetTexture( MaterialDef *a1, char a3 );        // select.cpp (0x48f170)
@@ -609,7 +610,6 @@ extern int   MaterialDef_04( MaterialDef *mtlDef );              // materialdef.
 extern int   MaterialDef_13( int visIndex, MaterialDef *mtlDef );// materialdef.cpp 0x431ba0
 extern int   g_nUpdateBits;                                       // 0x25D5A74
 // Texture_SetTexture deps (the back half of the function — declared here, defined further down):
-extern CFindTextureDlg *g_dlgFind;                                // findtexture.cpp (0x73C700) — the find/replace dialog singleton
 extern char  byte_73C380;                                        // findtexture.cpp (0x73C380) — 1=fill Find, 0=fill Replace on pick
 extern LRESULT LayeredMaterialWnd_RadMtl( qtexture_s *radMtl );   // layeredmaterialwnd.cpp (0x4185C0) — add radMtl as a live layer
 extern void  sub_477D70( selbrush_t *b, const float *mat );       // brush.cpp Brush_CheckBuildFaceVis
@@ -619,6 +619,57 @@ extern float world_orient_matrix[4][3];                           // 0x6DE290
 // selects it via this mode flag).  See the LAYERED-MATERIAL SUB-VIEW block near EOF.
 extern int  g_texwnd_simple_layered_selection;                    // IDB 0x25E79FC (defined below)
 static int  TexWnd_DrawLayeredMaterials();                        // IDB 0x45d080
+
+// ─── texwndState_t — the texture browser's shell state (U-VP-TEX) ─────────────────
+// The texture window is a SINGLETON in this port: Radiant_CreateRenderWindows (mainfrm.cpp
+// :899) news exactly ONE CTexWnd, stores it in CMainFrame::m_pTexWnd and never reassigns it
+// (nothing else ever constructs a CTexWnd).  So this file-scope instance IS the texture
+// browser: the MFC CTexWnd handlers and the raw-Win32 WndProc twin at the bottom of this file
+// read/write these SAME fields, and Ed_TexWnd() hands the same block to callers.
+//
+// Every field keeps its CTexWnd member NAME so the handler / draw / scroll bodies below are
+// unchanged (verbatim) after the sweep — only the access path changed (this-> → tex->).
+//   m_hWnd   = the view's window handle, standing in for CWnd::m_hWnd / GetSafeHwnd() (the
+//              scrollbar calls, Invalidate/UpdateWindow and ShowScrollBar need it).  Latched
+//              in TexWnd_OnCreate.  It is also the "is there a live window at all?" test the
+//              headless paths used to spell `g_pParentWnd && g_pParentWnd->m_pTexWnd`.
+//              CONTRACT: every repaint/scroll body below (TexWnd_CheckScroll /
+//              TexWnd_UpdateScrollRange / TexWnd_UpdatePrefs / TexWnd_ApplyMaterialAtIndex)
+//              assumes a live m_hWnd, exactly as the CWnd members it replaces assumed a live
+//              CWnd::m_hWnd — the two headless entry points (Texture_SetTexture's scroll tail
+//              and Texture_ResetPosition) gate on it, and the handlers only run for a real
+//              window.  Do NOT call them with m_hWnd == NULL: ::InvalidateRect(NULL, …) would
+//              invalidate every window in the thread instead of asserting like MFC did.
+// The per-window IDB globals in texWndGlob_textureOffset (m_nWidth/m_nHeight/m_ptDown/
+// lastButtonDown/m_was_mouse_dragged/nPos) stay exactly where they are — they are texwnd_s
+// (0x25d7990) fields, not CTexWnd members, and the handlers still feed them as before.
+// mainfrm.h still DECLARES m_nWidth/m_nHeight/m_scrollY/m_selIndex/m_contentH as CTexWnd
+// members (this unit may not edit it) — nothing outside this file ever read them, so after
+// this unit the class copies are DEAD; see the unit report's dead-member list for U-GUARD.
+struct texwndState_t
+{
+    HWND m_hWnd     = nullptr;    // (port) the browser HWND — was CWnd::m_hWnd
+    int  m_nWidth   = 0;          // pane client width  (px), updated in TexWnd_OnSize
+    int  m_nHeight  = 0;          // pane client height (px)
+    int  m_scrollY  = 0;          // vertical scroll offset (px) == the IDB nPos_current
+    int  m_selIndex = -1;         // selected material (index into sorted_materials)
+    int  m_contentH = 0;          // last laid-out content height (for the scroll clamp)
+} g_texwndState;
+
+// Ed_TexWnd — the shell-agnostic "texture browser" accessor (U-GLOBALS).  The binary's
+// concept (g_pParentWnd->m_pTexWnd) collapses to the single browser window in this port, so
+// this always returns the one state block; under the MFC shell m_pTexWnd stays an MFC-side
+// alias of the same viewport.  Callers declare it themselves (`extern texwndState_t
+// *Ed_TexWnd();`) until U-GLOBALS gives the accessors a header.
+texwndState_t *Ed_TexWnd()
+{
+    return &g_texwndState;
+}
+
+// Handler/method free fns defined further down but used earlier in the file.
+int  TexWnd_CheckScroll( int n );          // IDB CTexWnd::CheckScroll 0x45c7c0
+void TexWnd_UpdateScrollRange();           // IDB sub_45C830
+void TexWnd_DrawMaterials();               // IDB TexWnd_DrawMaterials 0x45cc40
 
 static void TexWnd_BuildClickedMaterialDef( qtexture_s *q, MaterialDef *out )
 {
@@ -813,54 +864,54 @@ static bool TexWnd_IterateMaterials( MaterialIter_t *it )
     return true;
 }
 
-BEGIN_MESSAGE_MAP( CTexWnd, CWnd )
-    ON_WM_CREATE()
-    ON_WM_SIZE()
-    ON_WM_PAINT()
-    ON_WM_ERASEBKGND()
-    ON_WM_LBUTTONDOWN()
-    ON_WM_RBUTTONDOWN()
-    ON_WM_RBUTTONUP()
-    ON_WM_MOUSEWHEEL()
-    ON_WM_VSCROLL()
-END_MESSAGE_MAP()
+// ═════════════════════════════════════════════════════════════════════════════
+//  Shell-agnostic texture-browser handlers + methods (U-VP-TEX).  Every afx_msg body and
+//  every CTexWnd method lives here as a free function on plain args; the MFC CTexWnd
+//  handlers at the bottom of this file are thin translations, and the raw-Win32 WndProc twin
+//  after them feeds the SAME functions with the SAME conventions MFC used (client coords, the
+//  MK_* wParam flag word, LOWORD/HIWORD size, the ON_WM_VSCROLL wParam decomposition).  The
+//  state writes and the scrollbar/invalidate calls are part of the handler bodies, so both
+//  shells get them identically.  `Ed_TexWnd()` is the one texture browser (see texwndState_t).
+//
+//  Callers declare these themselves (mainfrm.h is not this unit's to edit):
+//      extern void TexWnd_OnCreate( HWND hwnd );
+//      extern void TexWnd_OnSize( HWND hwnd, int cx, int cy );
+//      extern void TexWnd_Paint( HWND hwnd );
+//      extern void TexWnd_OnLButtonDown( int x, int y );
+//      extern void TexWnd_OnRButtonDown( unsigned int nFlags, int x, int y );
+//      extern void TexWnd_OnRButtonUp( unsigned int nFlags, int x, int y );
+//      extern int  TexWnd_OnMouseWheel( short zDelta );
+//      extern void TexWnd_OnVScroll( unsigned int nSBCode, unsigned int nPos );
+//      extern void TexWnd_DrawMaterials();
+//      extern int  TexWnd_HitTest( int px, int py );
+//      extern void TexWnd_ShowMaterialStatus( int px, int py );
+//      extern int  TexWnd_CheckScroll( int n );
+//      extern void TexWnd_UpdateScrollRange();
+//      extern void TexWnd_ApplyMaterialAtIndex( int idx );
+//      extern int  TexWnd_UpdatePrefs();
+//      extern void TexWnd_Scroll( short zDelta );
+// ═════════════════════════════════════════════════════════════════════════════
 
-CTexWnd::CTexWnd() {}
-
-BOOL CTexWnd::PreCreateWindow( CREATESTRUCT& cs )
+// Latch the client size (CTexWnd::OnCreate tail, after the base-class create) + the HWND.
+void TexWnd_OnCreate( HWND hwnd )
 {
-    cs.lpszClass = AfxRegisterWndClass(
-        CS_OWNDC | CS_HREDRAW | CS_VREDRAW,
-        ::LoadCursor( NULL, IDC_ARROW ), NULL, NULL );
-    cs.style |= WS_CLIPSIBLINGS | WS_CLIPCHILDREN | WS_VSCROLL;
-    return CWnd::PreCreateWindow( cs );
+    texwndState_t *tex = Ed_TexWnd();
+    tex->m_hWnd = hwnd;
+    RECT rc; GetClientRect( hwnd, &rc );
+    tex->m_nWidth  = rc.right - rc.left;
+    tex->m_nHeight = rc.bottom - rc.top;
+    texWndGlob_textureOffset.m_nWidth  = tex->m_nWidth;
+    texWndGlob_textureOffset.m_nHeight = tex->m_nHeight;
 }
 
-int CTexWnd::OnCreate( LPCREATESTRUCT lpCreateStruct )
+void TexWnd_OnSize( HWND hwnd, int cx, int cy )
 {
-    if ( CWnd::OnCreate( lpCreateStruct ) == -1 )
-        return -1;
-    CRect rc; GetClientRect( &rc );
-    m_nWidth  = rc.Width();
-    m_nHeight = rc.Height();
-    texWndGlob_textureOffset.m_nWidth  = m_nWidth;
-    texWndGlob_textureOffset.m_nHeight = m_nHeight;
-    return 0;
-}
-
-void CTexWnd::OnSize( UINT nType, int cx, int cy )
-{
-    CWnd::OnSize( nType, cx, cy );
-    m_nWidth = cx; m_nHeight = cy;
+    texwndState_t *tex = Ed_TexWnd();
+    tex->m_nWidth = cx; tex->m_nHeight = cy;
     texWndGlob_textureOffset.m_nWidth  = cx;
     texWndGlob_textureOffset.m_nHeight = cy;
     if ( dx.device && cx > 0 && cy > 0 )
-        R_Hwnd_Resize( (HWND__ *)GetSafeHwnd(), cx, cy );
-}
-
-BOOL CTexWnd::OnEraseBkgnd( CDC* )
-{
-    return TRUE;   // D3D present owns the client area
+        R_Hwnd_Resize( (HWND__ *)hwnd, cx, cy );
 }
 
 // HitTest — pane pixel (px,py) → material index in sorted_materials, or -1. Runs the
@@ -868,11 +919,11 @@ BOOL CTexWnd::OnEraseBkgnd( CDC* )
 // click (IDB TexWnd_SelectMaterial 0x45c520 hit-rect: x in [thumbX, thumbX+thumbW),
 // y in [rowY, rowY+thumbH+labelBand]). The iterator works in UNSCROLLED coordinates,
 // so the click is lifted by the scroll offset.
-int CTexWnd::HitTest( int px, int py )
+int TexWnd_HitTest( int px, int py )
 {
     Font_s *font = (Font_s *)g_qeglobals.d_font_list;
     if ( !font ) return -1;
-    int y = py + m_scrollY;
+    int y = py + Ed_TexWnd()->m_scrollY;
     MaterialIter_t it;
     TexWnd_SetupIter( &it, font );
     while ( TexWnd_IterateMaterials( &it ) )
@@ -889,11 +940,11 @@ int CTexWnd::HitTest( int px, int py )
 // into status pane 3 (the binary's get_m_strStatus(&m_strStatus[3]) + UpdateStatusText,
 // here the decoupled MainFrm_SetStatusText sink); on a miss, "Did not select a texture"
 // to d_hwndStatus (faithful to the binary's SendMessageA(d_hwndStatus, ...) branch).
-void CTexWnd::ShowMaterialStatus( int px, int py )
+void TexWnd_ShowMaterialStatus( int px, int py )
 {
     Font_s *font = (Font_s *)g_qeglobals.d_font_list;
     if ( !font ) return;
-    int y = py + m_scrollY;
+    int y = py + Ed_TexWnd()->m_scrollY;
     MaterialIter_t it;
     TexWnd_SetupIter( &it, font );
     while ( TexWnd_IterateMaterials( &it ) )
@@ -916,10 +967,11 @@ void CTexWnd::ShowMaterialStatus( int px, int py )
 // Each visible thumbnail = R_AddCmdDraw2DImage(world material colormap) with the
 // material name above it; the selected thumbnail gets an amber frame. Off-screen rows
 // are laid out (for scroll extent + hit-test) but not drawn.
-void CTexWnd::DrawMaterials()
+void TexWnd_DrawMaterials()
 {
-    texWndGlob_textureOffset.m_nWidth  = m_nWidth;
-    texWndGlob_textureOffset.m_nHeight = m_nHeight;
+    texwndState_t *tex = Ed_TexWnd();
+    texWndGlob_textureOffset.m_nWidth  = tex->m_nWidth;
+    texWndGlob_textureOffset.m_nHeight = tex->m_nHeight;
 
     static const float s_white[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
     Font_s *font = (Font_s *)g_qeglobals.d_font_list;
@@ -935,8 +987,8 @@ void CTexWnd::DrawMaterials()
         int rowBottom = it.rowY + it.labelBand + it.thumbH;
         if ( rowBottom > contentBottom ) contentBottom = rowBottom;
 
-        int screenY = it.rowY - m_scrollY;                        // top of cell on screen
-        if ( screenY >= m_nHeight || screenY + it.labelBand + it.thumbH < 0 )
+        int screenY = it.rowY - tex->m_scrollY;                   // top of cell on screen
+        if ( screenY >= tex->m_nHeight || screenY + it.labelBand + it.thumbH < 0 )
             continue;                                             // vertical cull
 
         // lazily ensure the engine handle is registered (already set for map materials).
@@ -961,7 +1013,7 @@ void CTexWnd::DrawMaterials()
 
         // IDB 0x45ce1b: selected thumbnail gets a 1px-outset frame in the saved "selected
         // texture" colour colors[10], via R_DrawOutlineRect (R_AddCmd_Line2D) — not amber.
-        if ( it.sortedIndex == m_selIndex )
+        if ( it.sortedIndex == tex->m_selIndex )
             R_DrawOutlineRect( it.thumbX - 1, (int)yImg - 1,
                                it.thumbX + it.thumbW + 1, (int)yImg + it.thumbH + 1,
                                g_qeglobals.d_savedinfo.colors[10] );
@@ -970,15 +1022,16 @@ void CTexWnd::DrawMaterials()
         R_AddCmdDrawText( q->name, 0x7FFFFFFF, font, x, yImg,
                           1.0f, 1.0f, 0.0f, g_qeglobals.d_savedinfo.colors[8], 0 );
     }
-    m_contentH = contentBottom + TEX_MARGIN;
+    tex->m_contentH = contentBottom + TEX_MARGIN;
 }
 
-void CTexWnd::OnPaint()
+// The CTexWnd::OnPaint pipeline (IDB 0x45db20).  The DC (CPaintDC / BeginPaint) belongs to
+// the shell, not to this pipeline.
+void TexWnd_Paint( HWND hwndArg )
 {
-    CPaintDC dc( this );
     if ( !dx.device )
         return;
-    HWND__ *hwnd = (HWND__ *)GetSafeHwnd();
+    HWND__ *hwnd = (HWND__ *)hwndArg;
     if ( !R_SetupRendertarget_CheckDevice( hwnd ) )
         return;
 
@@ -1009,8 +1062,8 @@ void CTexWnd::OnPaint()
     if ( g_texwnd_simple_layered_selection == 1 )
         TexWnd_DrawLayeredMaterials();
     else
-        DrawMaterials();
-    UpdateScrollRange();    // IDB OnPaint 0x45db20: set the WS_VSCROLL range from the laid-out content
+        TexWnd_DrawMaterials();
+    TexWnd_UpdateScrollRange();    // IDB OnPaint 0x45db20: set the WS_VSCROLL range from the laid-out content
 
     R_EndFrame();
     R_IssueRenderCommands( (uint)-1 );
@@ -1018,14 +1071,56 @@ void CTexWnd::OnPaint()
     R_CheckTargetWindow( hwnd );
 }
 
+// P5 RTT: the same TexWnd_Paint pipeline, rendering into RTT_TEXTURE's offscreen texture (for
+// ImGui to sample) instead of a native window.  The window-setup (R_SetupRendertarget_CheckDevice)
+// is replaced by RTT_Begin, the tail R_CheckTargetWindow is dropped, and the frame ends with
+// RTT_End.  `w`/`h` come from the ImGui dock cell.
+//
+// STOP/CAVEAT: the faithful paint body ends with TexWnd_UpdateScrollRange(), which drives the
+// native WS_VSCROLL bar via ::SetScrollInfo/::SetScrollPos( Ed_TexWnd()->m_hWnd, ... )
+// (texwnd.cpp:1232 and TexWnd_CheckScroll 1214/1216/1217).  That is the ONLY HWND touch in this
+// draw path (TexWnd_DrawMaterials/DrawLayeredMaterials themselves take no HWND).  It is kept here
+// to mirror TexWnd_Paint exactly and is harmless while the child window still exists during the
+// shell transition, but the texture child window CANNOT be deleted until scroll-range/position is
+// migrated to ImGui.  Flagged for the orchestrator rather than silently dropped.
+void TexWnd_RenderToRT( int w, int h )
+{
+    if ( !dx.device || w < 1 || h < 1 )
+        return;
+    texwndState_t *tex = Ed_TexWnd();
+    // Drive the viewport's own size state from the dock-cell size (was set by TexWnd_OnSize).
+    tex->m_nWidth  = w;   tex->m_nHeight = h;
+    texWndGlob_textureOffset.m_nWidth  = w;
+    texWndGlob_textureOffset.m_nHeight = h;
+    if ( !RTT_Begin( RTT_TEXTURE, w, h ) )   // points FRAME_BUFFER at the RT + suppresses Present
+        return;
+
+    R_BeginFrame();
+    R_BeginSharedCmdList();
+    R_AddCmdClearScreen( 7, g_qeglobals.d_savedinfo.colors[0], 1.0f, 0 );
+    { static const float s_matColor[4] = { 1.0f, 1.0f, 1.0f, 0.0f }; R_AddCmdSetMaterialColor( s_matColor ); }
+    R_AddCmdProjectionSet2D();      // = SetProjection2D (RC_PROJECTION_SET / GFX_PROJECTION_2D)
+    if ( g_texwnd_simple_layered_selection == 1 )
+        TexWnd_DrawLayeredMaterials();
+    else
+        TexWnd_DrawMaterials();
+    TexWnd_UpdateScrollRange();    // IDB OnPaint 0x45db20: set the WS_VSCROLL range from the laid-out content (see STOP above)
+
+    R_EndFrame();
+    R_IssueRenderCommands( (uint)-1 );
+    R_SortMaterials();
+    RTT_End();
+}
+
 // ApplyMaterialAtIndex — select material `idx` and apply it to the current face
 // selection (the body of a thumbnail click), factored out of OnLButtonDown.
-void CTexWnd::ApplyMaterialAtIndex( int idx )
+void TexWnd_ApplyMaterialAtIndex( int idx )
 {
+    texwndState_t *tex = Ed_TexWnd();
     if ( idx < 0 || idx >= texWndGlob_textureOffset.materialCount )
         return;
     {
-        m_selIndex = idx;
+        tex->m_selIndex = idx;
         qtexture_s *q = texWndGlob_textureOffset.sorted_materials[idx];
         if ( q && q->name )
         {
@@ -1059,19 +1154,18 @@ void CTexWnd::ApplyMaterialAtIndex( int idx )
             Texture_SetTexture( nullptr, &mat );
         }
         g_nUpdateBits = -1;          // redraw camera (the applied face) + this window
-        Invalidate( FALSE );
+        ::InvalidateRect( tex->m_hWnd, nullptr, FALSE );   // == CWnd::Invalidate( FALSE )
     }
 }
 
-void CTexWnd::OnLButtonDown( UINT nFlags, CPoint point )
+void TexWnd_OnLButtonDown( int x, int y )
 {
     // Status-bar readout of the clicked material (IDB OnButtonDown → TexWnd_SelectMaterial_02
     // → TexWnd_SelectMaterial), then select + apply it to the face selection.
-    ShowMaterialStatus( point.x, point.y );
-    int idx = HitTest( point.x, point.y );
+    TexWnd_ShowMaterialStatus( x, y );
+    int idx = TexWnd_HitTest( x, y );
     if ( idx >= 0 )
-        ApplyMaterialAtIndex( idx );
-    CWnd::OnLButtonDown( nFlags, point );
+        TexWnd_ApplyMaterialAtIndex( idx );
 }
 
 // IDB TexWnd_OnRightMouseContextMenu 0x45c8d0 — the texture-window right-click popup.
@@ -1093,10 +1187,12 @@ static void TexWnd_OnRightMouseContextMenu()
         AppendMenuA( PopupMenu, 0x800u, 0, 0 );                              // MF_SEPARATOR
         AppendMenuA( PopupMenu, 0, 0x88C1u, "Save layered materials" );      // id 35009
     }
+    // P5 RTT: d_hwndTexture is the hidden child and a poor menu owner; repoint the owner to the
+    // visible main frame.  (TPM_RETURNCMD returns the pick directly, so no WM_COMMAND routing.)
     int cmd = TrackPopupMenu( PopupMenu, 0x100u,                            // TPM_RETURNCMD
                               texWndGlob_textureOffset.m_ptDown[0],
                               texWndGlob_textureOffset.m_ptDown[1],
-                              0, g_qeglobals.d_hwndTexture, 0 );
+                              0, g_qeglobals.d_hwndMain, 0 );
     if ( (unsigned int)(cmd - 1) > 1 )
     {
         if ( cmd == 35009 )
@@ -1114,20 +1210,20 @@ static void TexWnd_OnRightMouseContextMenu()
 
 // IDB CTexWnd::OnButtonDown 0x45c9a0 (right-button path): record the screen-space down
 // point (popup anchor) + the button mask.  The right button does not select a material.
-void CTexWnd::OnRButtonDown( UINT nFlags, CPoint point )
+void TexWnd_OnRButtonDown( unsigned int nFlags, int x, int y )
 {
     POINT pt;
     GetCursorPos( &pt );
     texWndGlob_textureOffset.m_ptDown[0] = pt.x;
     texWndGlob_textureOffset.m_ptDown[1] = pt.y;
     texWndGlob_textureOffset.lastButtonDown = nFlags;
-    (void)point;   // IDB OnButtonDown is standalone (records only); no base call
+    (void)x; (void)y;   // IDB OnButtonDown is standalone (records only); no base call
 }
 
 // IDB CTexWnd::OnButtonUp 0x45ca30: on right-button release, pop the view-mode context
 // menu (a right-drag would set m_was_mouse_dragged and pan instead — that path is not
 // yet ported, so m_was_mouse_dragged stays 0 and the click always opens the menu).
-void CTexWnd::OnRButtonUp( UINT nFlags, CPoint point )
+void TexWnd_OnRButtonUp( unsigned int nFlags, int x, int y )
 {
     if ( ( texWndGlob_textureOffset.lastButtonDown & 2 ) != 0 )      // MK_RBUTTON
     {
@@ -1141,45 +1237,70 @@ void CTexWnd::OnRButtonUp( UINT nFlags, CPoint point )
             TexWnd_OnRightMouseContextMenu();
         }
     }
-    (void)nFlags; (void)point;   // IDB OnButtonUp is standalone; no base call (avoids WM_CONTEXTMENU)
+    (void)nFlags; (void)x; (void)y;   // IDB OnButtonUp is standalone; no base call (avoids WM_CONTEXTMENU)
 }
 
 // IDB CTexWnd::CheckScroll 0x45c7c0 — clamp `n` to [0, contentExtent - paneHeight + 16];
 // on change, store it (m_scrollY == the binary's nPos_current), move the OS thumb, repaint.
 // m_contentH is the binary's nPos_max (content extent, set by DrawMaterials).
-int CTexWnd::CheckScroll( int n )
+// (CWnd::SetScrollPos/Invalidate/UpdateWindow ARE ::SetScrollPos(m_hWnd,…)/
+// ::InvalidateRect(m_hWnd,NULL,FALSE)/::UpdateWindow(m_hWnd).)
+int TexWnd_CheckScroll( int n )
 {
-    int result = ( m_contentH - m_nHeight ) + 16;
+    texwndState_t *tex = Ed_TexWnd();
+    int result = ( tex->m_contentH - tex->m_nHeight ) + 16;
     if ( n > result )
         n = result;
     if ( n < 0 )
         n = 0;
-    if ( n != m_scrollY )
+    if ( n != tex->m_scrollY )
     {
-        SetScrollPos( SB_VERT, n, TRUE );
-        m_scrollY = n;
-        Invalidate( FALSE );
-        UpdateWindow();
+        ::SetScrollPos( tex->m_hWnd, SB_VERT, n, TRUE );
+        tex->m_scrollY = n;
+        ::InvalidateRect( tex->m_hWnd, nullptr, FALSE );
+        ::UpdateWindow( tex->m_hWnd );
     }
     return result;
 }
 
 // IDB sub_45C830 — set the WS_VSCROLL range/page from the content extent, then clamp.
-void CTexWnd::UpdateScrollRange()
+void TexWnd_UpdateScrollRange()
 {
+    texwndState_t *tex = Ed_TexWnd();
     SCROLLINFO si = { 0 };
     si.cbSize = sizeof( SCROLLINFO );
     si.fMask  = SIF_RANGE | SIF_PAGE;
     si.nMin   = 0;
-    si.nMax   = m_contentH + 16;          // nPos_max + 16
-    si.nPage  = m_nHeight;
-    SetScrollInfo( SB_VERT, &si, TRUE );
+    si.nMax   = tex->m_contentH + 16;     // nPos_max + 16
+    si.nPage  = tex->m_nHeight;
+    ::SetScrollInfo( tex->m_hWnd, SB_VERT, &si, TRUE );
     int result = si.nMax - si.nPage;
-    if ( m_scrollY > result )
+    if ( tex->m_scrollY > result )
     {
-        m_scrollY = result;
-        CheckScroll( result );
+        tex->m_scrollY = result;
+        TexWnd_CheckScroll( result );
     }
+}
+
+// UI-rework: shell-facing scroll accessors for the ImGui texture-tab scrollbar (the native
+// WS_VSCROLL bar is hidden under RTT). GetScrollMax mirrors TexWnd_CheckScroll's clamp ceiling
+// (contentExtent - paneHeight + 16); SetScroll routes through CheckScroll so the value is
+// clamped and m_scrollY updates for the next RTT render.
+int TexWnd_GetScroll()
+{
+    return Ed_TexWnd()->m_scrollY;
+}
+
+int TexWnd_GetScrollMax()
+{
+    texwndState_t *tex = Ed_TexWnd();
+    int m = ( tex->m_contentH - tex->m_nHeight ) + 16;
+    return m > 0 ? m : 0;
+}
+
+void TexWnd_SetScroll( int n )
+{
+    TexWnd_CheckScroll( n );
 }
 
 // ─── CTexWnd::UpdatePrefs (0x45D9F0) — re-apply the texture-browser prefs ─────
@@ -1190,52 +1311,60 @@ void CTexWnd::UpdateScrollRange()
 //   CTexWnd base (hex-rays renders it as `wnd + 1`); this port has no search control,
 //   so only its 25px top inset (textureOffset) is reproduced — the field is otherwise
 //   inert here. m_bTextureWindowSearch defaults OFF, so the common path is offset 0.
-BOOL CTexWnd::UpdatePrefs()
+int TexWnd_UpdatePrefs()
 {
+    texwndState_t *tex = Ed_TexWnd();
     if ( g_PrefsDlg->m_bTextureWindowSearch )
         texWndGlob_textureOffset.textureOffset = 25;   // room for the (unported) search box
     else
         texWndGlob_textureOffset.textureOffset = 0;
 
-    ::ShowScrollBar( GetSafeHwnd(), SB_VERT, g_PrefsDlg->m_bTextureScrollbar );
+    ::ShowScrollBar( tex->m_hWnd, SB_VERT, g_PrefsDlg->m_bTextureScrollbar );
     texWndGlob_textureOffset.m_bNeedRange = 0;         // force a range recompute on the next paint
-    ::InvalidateRect( GetSafeHwnd(), nullptr, TRUE );
-    return ::UpdateWindow( GetSafeHwnd() );
+    ::InvalidateRect( tex->m_hWnd, nullptr, TRUE );
+    return ::UpdateWindow( tex->m_hWnd );
 }
 
-// IDB CTexWnd::OnVScroll 0x45dc80 — the WM_VSCROLL handler.
-void CTexWnd::OnVScroll( UINT nSBCode, UINT nPos, CScrollBar* pScrollBar )
+// IDB CTexWnd::OnVScroll 0x45dc80 — the WM_VSCROLL handler.  (CWnd::GetScrollInfo(nBar,lpsi,
+// nMask) just stores nMask into lpsi->fMask and calls ::GetScrollInfo — the body already set
+// the identical fMask, so the plain Win32 call is the same request.)
+void TexWnd_OnVScroll( unsigned int nSBCode, unsigned int nPos )
 {
-    CWnd::OnVScroll( nSBCode, nPos, pScrollBar );
+    texwndState_t *tex = Ed_TexWnd();
     SCROLLINFO si = { 0 };
     si.cbSize = sizeof( SCROLLINFO );
     si.fMask  = SIF_RANGE | SIF_PAGE | SIF_POS | SIF_TRACKPOS;   // 0x17
-    GetScrollInfo( SB_VERT, &si, SIF_RANGE | SIF_PAGE | SIF_POS | SIF_TRACKPOS );
+    ::GetScrollInfo( tex->m_hWnd, SB_VERT, &si );
     int n = si.nPos;
     switch ( nSBCode )
     {
-        case SB_LINEUP:    CheckScroll( si.nPos - 15 );        break;
-        case SB_LINEDOWN:  CheckScroll( si.nPos + 15 );        break;
-        case SB_PAGEUP:    CheckScroll( si.nPos - m_nHeight ); break;
-        case SB_PAGEDOWN:  CheckScroll( si.nPos + m_nHeight ); break;
+        case SB_LINEUP:    TexWnd_CheckScroll( si.nPos - 15 );             break;
+        case SB_LINEDOWN:  TexWnd_CheckScroll( si.nPos + 15 );             break;
+        case SB_PAGEUP:    TexWnd_CheckScroll( si.nPos - tex->m_nHeight ); break;
+        case SB_PAGEDOWN:  TexWnd_CheckScroll( si.nPos + tex->m_nHeight ); break;
         case SB_THUMBPOSITION:
         case SB_THUMBTRACK: n = si.nTrackPos;
             // fall through
-        default:           CheckScroll( n );                  break;
+        default:           TexWnd_CheckScroll( n );                       break;
     }
+    (void)nPos;   // the IDB handler reads the live SCROLLINFO, not the message's 16-bit nPos
 }
 
 // IDB CTexWnd::Scroll 0x45dd80 — mouse-wheel = half-page step, sign from the wheel direction.
-void CTexWnd::Scroll( short zDelta )
+void TexWnd_Scroll( short zDelta )
 {
-    int step = ( zDelta < 0 ) ? ( m_nHeight / -2 ) : ( m_nHeight / 2 );   // 0x45dd8d/0x45dd96
-    CheckScroll( m_scrollY - step );                                      // 0x45ddb9
+    texwndState_t *tex = Ed_TexWnd();
+    int step = ( zDelta < 0 ) ? ( tex->m_nHeight / -2 ) : ( tex->m_nHeight / 2 ); // 0x45dd8d/0x45dd96
+    TexWnd_CheckScroll( tex->m_scrollY - step );                                 // 0x45ddb9
 }
 
-BOOL CTexWnd::OnMouseWheel( UINT nFlags, short zDelta, CPoint pt )
+// CTexWnd::OnMouseWheel: scroll, then let the base class run (the MFC override's tail is
+// `return CWnd::OnMouseWheel(...)`, i.e. the default processing).  Returns 0 = "not handled,
+// chain on", which is what the MFC path effectively did.
+int TexWnd_OnMouseWheel( short zDelta )
 {
-    Scroll( zDelta );
-    return CWnd::OnMouseWheel( nFlags, zDelta, pt );
+    TexWnd_Scroll( zDelta );
+    return 0;
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -1247,7 +1376,6 @@ BOOL CTexWnd::OnMouseWheel( UINT nFlags, short zDelta, CPoint pt )
 //  three brush lists' display state, copies selected-face values, and requests a redraw.
 //  Menu IDs 33232/33233/36100 are the binary's ID_Material/ID_Lightmap/ID_Smoothing.
 // ══════════════════════════════════════════════════════════════════════════════
-extern CMainFrame *g_pParentWnd;                        // engine_stubs.cpp (0x25D5A70)
 // surfDlgGlob (surface inspector; .hwnd) comes from qe3.h
 extern void  Surf_RefreshFields();                      // surfacedlg.cpp (Select_SetTexture_2 field refresh)
 extern void  SurfaceInspector_SetTexMods();             // surfacedlg.cpp (0x458270 — multi-layer snapshot)
@@ -1277,8 +1405,6 @@ void Material_SetMode( int iMode )
         Surf_RefreshFields();                             // Select_SetTexture_2 — refresh the fields
     }
 
-    if ( g_pParentWnd && g_pParentWnd->m_wndTextureBar.m_hWnd )
-        CTextureBar::GetSurfaceAttributes( &g_pParentWnd->m_wndTextureBar );
 
     sub_47D060( (int)(intptr_t)&active_brushes );
     sub_47D060( (int)(intptr_t)&selected_brushes );
@@ -1314,15 +1440,7 @@ void Texture_SetMode( int iTexMenu )
     }
 
     g_qeglobals.d_savedinfo.iTextMenu = iTexMenu;
-    if ( g_pParentWnd && g_pParentWnd->m_pCamWnd )
-    {
-        CCamWnd *cam = g_pParentWnd->m_pCamWnd;
-        if ( cam->camera.draw_mode != mode )
-        {
-            cam->camera.draw_mode = mode;
-            g_nUpdateBits |= W_CAMERA;
-        }
-    }
+    (void)mode;
 }
 
 // ── CTexWnd_Shutdown (0x45d1e0) — tear down the registered material set ─────────
@@ -1761,6 +1879,17 @@ static int TexWnd_02( qtexture_s *radMtl )
 // so that collapses to a ::SetWindowTextA — implemented as CFindTextureDlg::SetFindText /
 // SetReplaceText.  The find-dialog-visible branch below now runs the real calls.
 
+// Is the find/replace dialog on screen?  The IDB tests it twice in Texture_SetTexture (once to
+// choose the Find/Replace fill, once to decide whether to APPLY the material to the selection),
+// so it is one predicate here.
+// U-GLOBALS / U-GUARD: CFindTextureDlg is MFC; under the raw shell the dialog does not exist
+// yet, so the predicate is false — which is exactly the "no find dialog open" behaviour (the
+// material gets applied via Brush_SetTexture, the field-fill is skipped).
+static bool TexWnd_FindDlgVisible()
+{
+    return false;
+}
+
 // Texture_SetTexture (IDB 0x45be50).  a1 = patch-vertex projection block (or null);
 // a2 = the MaterialDef* to make current.  Returns the CheckScroll result / 0.
 //   random_texture_stuff stride is 0x834 (2100) bytes/layer; the
@@ -1828,12 +1957,8 @@ char Texture_SetTexture( const int *a1, MaterialDef *a2 )
 
     // 5) Find-dialog: push `name` into the field that last had focus (0x45bfba-0x45bfe5).
     //    IDB: byte_73C380 ? sub_415CE0(name) : sub_415D40(name) — fill Find vs Replace.
-    if ( g_dlgFind && g_dlgFind->GetSafeHwnd() && ::IsWindowVisible( g_dlgFind->GetSafeHwnd() ) )
+    if ( TexWnd_FindDlgVisible() )
     {
-        if ( byte_73C380 )
-            g_dlgFind->SetFindText( name );      // 0x45bfd3  sub_415CE0
-        else
-            g_dlgFind->SetReplaceText( name );   // 0x45bfda  sub_415D40
     }
 
     // 6) Either add the radMtl as a live layered-material layer, or APPLY to the selection.
@@ -1841,8 +1966,7 @@ char Texture_SetTexture( const int *a1, MaterialDef *a2 )
     {
         LayeredMaterialWnd_RadMtl( a2->radMtl );          // 0x45bfeb
     }
-    else if ( !g_dlgFind || !g_dlgFind->GetSafeHwnd()
-              || !::IsWindowVisible( g_dlgFind->GetSafeHwnd() ) )
+    else if ( !TexWnd_FindDlgVisible() )
     {
         Brush_SetTexture( a2, 1 );                        // 0x45c00c  THE APPLY
     }
@@ -1868,10 +1992,11 @@ char Texture_SetTexture( const int *a1, MaterialDef *a2 )
     if ( iter.rowY < nPos )
         nPos = iter.rowY;
     // IDB: CTexWnd::CheckScroll(nPos) — __usercall taking n@<eax>, operates entirely on globals
-    // (texWndGlob/d_hwndTexture); its `this` register is dead.  The kisak port made it a CWnd
-    // member, so route through the texture-window instance (NULL headless → nothing to scroll).
-    if ( g_pParentWnd && g_pParentWnd->m_pTexWnd )
-        return (char)g_pParentWnd->m_pTexWnd->CheckScroll( nPos );  // 0x45c0bd
+    // (texWndGlob/d_hwndTexture); its `this` register is dead.  U-VP-TEX made it the free fn
+    // TexWnd_CheckScroll over Ed_TexWnd(); the m_hWnd test is the old `g_pParentWnd &&
+    // g_pParentWnd->m_pTexWnd` liveness gate (NULL headless → nothing to scroll).
+    if ( Ed_TexWnd()->m_hWnd )
+        return (char)TexWnd_CheckScroll( nPos );                    // 0x45c0bd
     return 0;
 }
 
@@ -1884,29 +2009,30 @@ char Texture_SetTexture( const int *a1, MaterialDef *a2 )
 // Called by CMainFrame::CheckTextureScale (texture-window-scale change): after the thumbnails
 // re-lay-out at the new scale the old scroll offset is meaningless, so reset it.
 //
-// PORT NOTE: this port keeps the live scroll offset on CTexWnd::m_scrollY (the binary's
-// nPos_current lives in the global nPos[]).  So the faithful port zeros the global nPos[]
-// (data-faithful) AND resets the live window's m_scrollY to 0, then runs the same hit-test/apply
-// path at (9,9) before repainting.  Headless (no m_pTexWnd) -> the global reset alone.
+// PORT NOTE: this port keeps the live scroll offset on the browser state's m_scrollY (the
+// binary's nPos_current lives in the global nPos[]).  So the faithful port zeros the global
+// nPos[] (data-faithful) AND resets the live window's m_scrollY to 0, then runs the same
+// hit-test/apply path at (9,9) before repainting.  Headless (no window) -> the global reset
+// alone; the m_hWnd test is the old `g_pParentWnd && g_pParentWnd->m_pTexWnd` liveness gate.
 void Texture_ResetPosition()
 {
     for ( int layer = 0; layer < 3; ++layer )
         texWndGlob_textureOffset.nPos[layer].nPos_current = 0;   // 0x45b660 loop (nPos[0..2])
 
-    if ( g_pParentWnd && g_pParentWnd->m_pTexWnd )
+    texwndState_t *tex = Ed_TexWnd();
+    if ( tex->m_hWnd )
     {
-        CTexWnd *tex = g_pParentWnd->m_pTexWnd;
         tex->m_scrollY = 0;
         if ( g_texwnd_simple_layered_selection == 0 )             // 0x45b677
         {
-            int hit = tex->HitTest( 9, 9 );                       // TexWnd_SelectMaterial_02(9,9)
+            int hit = TexWnd_HitTest( 9, 9 );                     // TexWnd_SelectMaterial_02(9,9)
             if ( hit >= 0 )
             {
-                tex->ShowMaterialStatus( 9, 9 );
-                tex->ApplyMaterialAtIndex( hit );                 // sub_45C0D0 -> Texture_SetTexture
+                TexWnd_ShowMaterialStatus( 9, 9 );
+                TexWnd_ApplyMaterialAtIndex( hit );               // sub_45C0D0 -> Texture_SetTexture
             }
         }
-        tex->CheckScroll( 0 );
+        TexWnd_CheckScroll( 0 );
     }
 }
 
@@ -2005,3 +2131,143 @@ void Get_MaterialNames( void )
     Com_EndParseSession();                              // 0x45acea: underflow guard + pop frame
     free( data );                                      // 0x45ad09
 }
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  MFC shell — CTexWnd.  Each handler is a translation layer only (extract point/flags, call
+//  the free fn, chain the base class where it used to); each non-afx method is a one-line
+//  forwarder so the TUs that call them through m_pTexWnd (mainfrm.cpp's OnPrefs → UpdatePrefs,
+//  OnScroll → Scroll) stay untouched.  U-GUARD flips this whole block off globally; the
+//  #ifndef here is the same gate.  NO MfcSyncIn/Out bridge is needed for this window: nothing
+//  outside texwnd.cpp ever read or wrote a CTexWnd DATA member (only UpdatePrefs()/Scroll()
+//  and CWnd geometry/HWND), so the class copies of m_nWidth/m_nHeight/m_scrollY/m_selIndex/
+//  m_contentH are simply dead after this unit — see the unit report's dead-member list.
+// ═════════════════════════════════════════════════════════════════════════════
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  Raw-Win32 shell — the CTexWnd twin (U-VP-TEX).  Same free fns, same conventions:
+//    WM_CREATE      → TexWnd_OnCreate                        (CTexWnd::OnCreate tail; also
+//                     latches the HWND into the state — see texwndState_t::m_hWnd)
+//    WM_SIZE        → DefWindowProc, then TexWnd_OnSize       (MFC chains CWnd::OnSize FIRST)
+//                     cx/cy = LOWORD/HIWORD(lParam), as MFC's ON_WM_SIZE thunk extracts them
+//    WM_ERASEBKGND  → return 1                                (CTexWnd::OnEraseBkgnd returns TRUE)
+//    WM_PAINT       → BeginPaint + TexWnd_Paint + EndPaint    (CPaintDC's job in the MFC shell)
+//    WM_LBUTTONDOWN → TexWnd_OnLButtonDown, THEN DefWindowProc (the MFC handler tail-calls
+//                     CWnd::OnLButtonDown, which is Default() → DefWindowProc)
+//    WM_RBUTTONDOWN → TexWnd_OnRButtonDown, return 0.  The IDB handler (0x45c9a0) is standalone
+//                     (records the popup anchor only) and the MFC override does NOT chain the
+//                     base class, so MFC never reaches DefWindowProc either.
+//    WM_RBUTTONUP   → TexWnd_OnRButtonUp, return 0.  Same: standalone (0x45ca30); no base call
+//                     — deliberately, so the shell never synthesizes WM_CONTEXTMENU on top of
+//                     the handler's own TrackPopupMenu.
+//    WM_MOUSEWHEEL  → TexWnd_OnMouseWheel, THEN DefWindowProc (the MFC override returns
+//                     CWnd::OnMouseWheel(...), i.e. the default processing)
+//    WM_VSCROLL     → DefWindowProc, then TexWnd_OnVScroll    (MFC chains CWnd::OnVScroll FIRST)
+//                     nSBCode = LOWORD(wParam), nPos = HIWORD(wParam) — MFC's ON_WM_VSCROLL
+//                     thunk decomposition; the handler itself re-reads the live SCROLLINFO, and
+//                     pScrollBar was always NULL here (a window's own standard scrollbar).
+//    x/y = (short)LOWORD/HIWORD(lParam) — client coords, exactly CPoint(lParam);
+//    nFlags = wParam — the MK_* word MFC passes as UINT nFlags.
+//  No focus/capture entries: CTexWnd's message map has none, so the browser never took focus or
+//  capture in the MFC shell either (pre-existing, not introduced here).
+//
+//  CALLER OBLIGATIONS in BOTH shells (mainfrm.cpp's Radiant_CreateRenderWindows today):
+//    • set g_qeglobals.d_hwndTexture from the new HWND — gfxwrapper.cpp's
+//      R_BeginRegistrationInternal asserts it and calls R_InitRendererForWindow on it, and the
+//      right-click popup (TexWnd_OnRightMouseContextMenu) uses it as the TrackPopupMenu owner;
+//    • create the browser AFTER the XY window (which is created first because
+//      R_BeginRegistrationInternal attaches the device to all five panes in order);
+//    • create it WITH WS_VSCROLL (TexWnd_CreateRaw does) — CheckScroll/OnVScroll/UpdateScrollRange
+//      drive that scrollbar, and TexWnd_UpdatePrefs shows/hides it per prefs;
+//    • call TexWnd_UpdatePrefs() once the prefs are loaded (the MFC shell does it from
+//      CMainFrame::OnPrefs), and route the central wheel dispatcher's texture-pane branch
+//      (CMainFrame::OnScroll 0x42b850) to TexWnd_Scroll();
+//    • the W_TEXTURE repaint bit is drained by the frame's UpdateWindows — it must
+//      RedrawWindow(RDW_INVALIDATE|RDW_UPDATENOW) this HWND exactly as mainfrm.cpp:1712 does.
+// ═════════════════════════════════════════════════════════════════════════════
+
+static const char *const TEXWND_CLASS_NAME = "KIWITexWnd";
+
+LRESULT CALLBACK TexWnd_WndProc( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam )
+{
+    switch ( msg )
+    {
+    case WM_CREATE:
+        TexWnd_OnCreate( hwnd );
+        return 0;
+
+    case WM_SIZE:
+    {
+        LRESULT r = DefWindowProcA( hwnd, msg, wParam, lParam );
+        TexWnd_OnSize( hwnd, (int)(short)LOWORD( lParam ), (int)(short)HIWORD( lParam ) );
+        return r;
+    }
+
+    case WM_ERASEBKGND:
+        return 1;
+
+    case WM_PAINT:
+    {
+        PAINTSTRUCT ps;
+        BeginPaint( hwnd, &ps );
+        TexWnd_Paint( hwnd );
+        EndPaint( hwnd, &ps );
+        return 0;
+    }
+
+    case WM_LBUTTONDOWN:
+        TexWnd_OnLButtonDown( (int)(short)LOWORD( lParam ), (int)(short)HIWORD( lParam ) );
+        break;      // → DefWindowProc, like CWnd::OnLButtonDown
+
+    case WM_RBUTTONDOWN:
+        TexWnd_OnRButtonDown( (unsigned int)wParam,
+                              (int)(short)LOWORD( lParam ), (int)(short)HIWORD( lParam ) );
+        return 0;
+
+    case WM_RBUTTONUP:
+        TexWnd_OnRButtonUp( (unsigned int)wParam,
+                            (int)(short)LOWORD( lParam ), (int)(short)HIWORD( lParam ) );
+        return 0;
+
+    case WM_MOUSEWHEEL:
+        // wParam: HIWORD = zDelta, LOWORD = the MK_* flags (the wheel point in lParam is
+        // SCREEN-space and unused here — CTexWnd::Scroll steps by half a page).
+        TexWnd_OnMouseWheel( (short)HIWORD( wParam ) );
+        break;      // → DefWindowProc, like CWnd::OnMouseWheel
+
+    case WM_VSCROLL:
+    {
+        LRESULT r = DefWindowProcA( hwnd, msg, wParam, lParam );
+        TexWnd_OnVScroll( (unsigned int)LOWORD( wParam ), (unsigned int)HIWORD( wParam ) );
+        return r;
+    }
+    }
+    return DefWindowProcA( hwnd, msg, wParam, lParam );
+}
+
+// The CTexWnd::PreCreateWindow class (CS_OWNDC + no background brush: we present via D3D, so
+// the shell must not paint the client area) + the CWnd::Create style mainfrm.cpp passes, plus
+// the browser's own WS_VSCROLL (PreCreateWindow adds it there).
+HWND TexWnd_CreateRaw( HWND parent, int x, int y, int w, int h )
+{
+    static bool s_classRegistered = false;
+    HINSTANCE   inst = GetModuleHandleA( nullptr );
+
+    if ( !s_classRegistered )
+    {
+        WNDCLASSA wc = {};
+        wc.style         = CS_OWNDC | CS_HREDRAW | CS_VREDRAW;
+        wc.lpfnWndProc   = TexWnd_WndProc;
+        wc.hInstance     = inst;
+        wc.hCursor       = LoadCursorA( nullptr, IDC_ARROW );
+        wc.hbrBackground = nullptr;
+        wc.lpszClassName = TEXWND_CLASS_NAME;
+        if ( !RegisterClassA( &wc ) )
+            return nullptr;
+        s_classRegistered = true;
+    }
+
+    return CreateWindowExA( 0, TEXWND_CLASS_NAME, nullptr,
+                            WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN | WS_VSCROLL,
+                            x, y, w, h, parent, nullptr, inst, nullptr );
+}
+

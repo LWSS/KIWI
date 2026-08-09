@@ -43,13 +43,19 @@ void Log(char const *format, ...)
     static bool bFirst = true;
     FILE* logFile = NULL;
 
+    // KISAK: was a hardcoded "F:\\swaglord.txt" — dev-machine-specific absolute paths are
+    // banned; the log now lands beside the exe (CWD) and a failed open is a silent no-op.
     if (bFirst) {
-        logFile = fopen("F:\\swaglord.txt", "w"); // create new log
-        fprintf(logFile, "--Start of log--\n");
+        logFile = fopen("swaglord.txt", "w"); // create new log
         bFirst = false;
+        if (!logFile)
+            return;
+        fprintf(logFile, "--Start of log--\n");
     }
     else {
-        logFile = fopen("F:\\swaglord.txt", "a"); // append to log
+        logFile = fopen("swaglord.txt", "a"); // append to log
+        if (!logFile)
+            return;
     }
     setbuf(logFile, NULL); // Turn off buffered I/O, decreases performance but if crash occurs, no unflushed buffer.
     va_list args;

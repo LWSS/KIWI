@@ -69,168 +69,19 @@ void AdvPatchEdit_ApplyPaintAlpha( COLORREF c )
     g_paintColorA = (byte)( ( ( c & 0xFF ) + ( ( c >> 16 ) & 0xFF ) + ( ( c >> 8 ) & 0xFF ) ) / 3 );
 }
 
-class CAdvPatchEditDlg : public CDialog
-{
-public:
-    CAdvPatchEditDlg( CWnd *parent ) : CDialog( IDD_ADVPATCHEDIT, parent ) {}
-
-protected:
-    // Push a slot's stored value out to its slider thumb + buddy-edit text (sub_401000 + TBM_SETPOS).
-    void RefreshSlot( int slot )
-    {
-        HWND hTb = ::GetDlgItem( m_hWnd, CurveEdit_TrackbarId( slot ) );
-        if ( hTb ) ::SendMessageA( hTb, KRAD_TBM_SETPOS, TRUE, CurveEdit_StepIndex( slot ) );
-        char s[64];
-        sprintf( s, "%g", CurveEdit_DisplayValue( slot ) );
-        SetDlgItemText( CurveEdit_EditId( slot ), s );
-    }
-    // Buddy edit changed: read text -> value (sub_401CF0 transform for amplitude) -> clamp+snap -> refresh.
-    void SyncCtrl( int slot )
-    {
-        CString s;
-        GetDlgItemText( CurveEdit_EditId( slot ), s );
-        AdvPatchEdit_ApplySlotValue( slot, (float)atof( (LPCSTR)s ) );
-        RefreshSlot( slot );
-    }
-
-    virtual BOOL OnInitDialog()
-    {
-        CDialog::OnInitDialog();
-        // Bind the 3 param slots with the binary's baked ids / defaults / ranges / steps
-        // (trackbar 1424/1425/1426, buddy edit 1428/1429/1430), then size the sliders + show values.
-        CurveEdit_BindData( 0, 1424, 1428, 16.0f, 0.0f, 1024.0f, 16.0f );  // inner radius
-        CurveEdit_BindData( 1, 1425, 1429, 64.0f, 0.0f, 1024.0f, 16.0f );  // outer radius
-        CurveEdit_BindData( 2, 1426, 1430,  8.0f, 0.0f,   16.0f,  1.0f );  // amplitude exponent
-        for ( int slot = 0; slot < 3; ++slot )
-        {
-            HWND hTb = ::GetDlgItem( m_hWnd, CurveEdit_TrackbarId( slot ) );
-            HWND hEd = ::GetDlgItem( m_hWnd, CurveEdit_EditId( slot ) );
-            if ( hTb ) ::SendMessageA( hTb, KRAD_TBM_SETRANGE, TRUE, (LPARAM)( CurveEdit_StepCount( slot ) << 16 ) );
-            CurveEdit_SetHwnds( slot, hTb, hEd );
-            RefreshSlot( slot );
-        }
-        SetDlgItemInt( 1482, 1024 );  SetDlgItemInt( 1483, 1024 );   // inner/outer slider max (range edits)
-        CheckDlgButton( 1435, BST_CHECKED );   // default mode: Paint Height (sub_401DB0 -> 0)
-        CheckDlgButton( 1469, BST_CHECKED );   // default channel: Height (mask & 1)
-        return TRUE;
-    }
-
-    afx_msg void OnEditInner()    { SyncCtrl( 0 ); }
-    afx_msg void OnEditOuter()    { SyncCtrl( 1 ); }
-    afx_msg void OnEditStrength() { SyncCtrl( 2 ); }
-    // Slider-range edits (1482/1483, IDC_SURF_DLG_TBOX_INNER/OUTER_RAD_2): set the inner/outer
-    // slider's max, rebuild its [0,64] range and re-snap the value (sub_4015C0 flt_73C6B0/D0).
-    void SyncRange( int slot, int rangeEditId )
-    {
-        CString s;
-        GetDlgItemText( rangeEditId, s );
-        float mx = (float)atof( (LPCSTR)s );
-        if ( mx == 0.0f ) { mx = 1024.0f; SetDlgItemText( rangeEditId, "1024" ); }
-        AdvPatchEdit_ApplySlotRange( slot, mx );
-        HWND hTb = ::GetDlgItem( m_hWnd, CurveEdit_TrackbarId( slot ) );
-        if ( hTb ) ::SendMessageA( hTb, KRAD_TBM_SETRANGE, TRUE, (LPARAM)( CurveEdit_StepCount( slot ) << 16 ) );
-        RefreshSlot( slot );
-    }
-    afx_msg void OnRangeInner() { SyncRange( 0, 1482 ); }
-    afx_msg void OnRangeOuter() { SyncRange( 1, 1483 ); }
-    // Slider dragged (WM_HSCROLL): map thumb pos -> value, refresh the buddy edit.
-    afx_msg void OnHScroll( UINT nSBCode, UINT nPos, CScrollBar *pScrollBar )
-    {
-        if ( pScrollBar )
-        {
-            int id = pScrollBar->GetDlgCtrlID();
-            for ( int slot = 0; slot < 3; ++slot )
-                if ( CurveEdit_TrackbarId( slot ) == id )
-                {
-                    int pos = (int)::SendMessageA( pScrollBar->m_hWnd, KRAD_TBM_GETPOS, 0, 0 );
-                    AdvPatchEdit_ApplySlotStep( slot, pos );
-                    RefreshSlot( slot );
-                    return;
-                }
-        }
-        CDialog::OnHScroll( nSBCode, nPos, pScrollBar );
-    }
-    // sub_4021E0 — "Color..." button (real id 1460).  Seeds CColorDialog with the current
-    // paint colour and on OK stores the raw COLORREF verbatim (this[323] = m_cc.rgbResult),
-    // then redraws the owner-draw swatch.  NOTE: the binary stores the raw COLORREF, so we
-    // do NOT re-pack channel order here (the eyedropper writes a different byte order — that
-    // is a pre-existing inconsistency in the original, preserved for fidelity).
-    afx_msg void OnSetColor()
-    {
-        CColorDialog dlg( (COLORREF)g_paintColorBGR, 0, this );
-        if ( dlg.DoModal() == IDOK )
-            AdvPatchEdit_ApplyPaintColor( dlg.GetColor() );
-    }
-    // sub_4022A0 — "Alpha..." button (real id 1464).  Seeds the dialog with the current alpha
-    // as a grey, and on OK sets alpha = (R+G+B)/3 of the chosen colour.
-    afx_msg void OnSetAlpha()
-    {
-        unsigned int a = g_paintColorA;
-        CColorDialog dlg( (COLORREF)( a | ( ( a | ( a << 8 ) ) << 8 ) ), 0, this );
-        if ( dlg.DoModal() == IDOK )
-            AdvPatchEdit_ApplyPaintAlpha( dlg.GetColor() );
-    }
-    // sub_402490 — CurvEditDlg::OnColorAlpha (WM_DRAWITEM): paint the two owner-draw swatches.
-    afx_msg void OnDrawItem( int nIDCtl, LPDRAWITEMSTRUCT dis )
-    {
-        if ( nIDCtl == 1462 )                                  // IDC_SURF_DLG_COLOR_OWNER
-        {
-            HBRUSH b = CreateSolidBrush( (COLORREF)g_paintColorBGR );
-            FillRect( dis->hDC, &dis->rcItem, b );
-            DeleteObject( b );
-        }
-        else if ( nIDCtl == 1466 )                             // IDC_SURF_DLG_ALPA_OWNER
-        {
-            unsigned int a = g_paintColorA;
-            HBRUSH b = CreateSolidBrush( (COLORREF)( a | ( ( a | ( a << 8 ) ) << 8 ) ) );
-            FillRect( dis->hDC, &dis->rcItem, b );
-            DeleteObject( b );
-        }
-        else
-            CDialog::OnDrawItem( nIDCtl, dis );
-    }
-public:
-    // sub_4023D0 — CurvEditDlg::OnHeightText: show the picked height in the 1467 edit box.
-    void OnHeightText( float h )
-    {
-        char s[64];
-        sprintf( s, "%.0f", h );
-        SetDlgItemText( 1467, s );
-    }
-protected:
-
-    virtual void OnCancel()       { ShowWindow( SW_HIDE ); }   // modeless: hide, don't EndDialog
-    afx_msg void OnClose()        { ShowWindow( SW_HIDE ); }
-
-    DECLARE_MESSAGE_MAP()
-};
-
-BEGIN_MESSAGE_MAP( CAdvPatchEditDlg, CDialog )
-    ON_EN_KILLFOCUS( 1428, OnEditInner )    // buddy edits (sliders are 1424/1425/1426)
-    ON_EN_KILLFOCUS( 1429, OnEditOuter )
-    ON_EN_KILLFOCUS( 1430, OnEditStrength )
-    ON_EN_KILLFOCUS( 1482, OnRangeInner )   // inner/outer slider max range
-    ON_EN_KILLFOCUS( 1483, OnRangeOuter )
-    ON_WM_HSCROLL()                         // slider drags -> param values
-    ON_BN_CLICKED( 1460, OnSetColor )       // sub_4021E0  "Color..."
-    ON_BN_CLICKED( 1464, OnSetAlpha )       // sub_4022A0  "Alpha..."
-    ON_WM_DRAWITEM()                        // sub_402490  owner-draw swatches
-    ON_WM_CLOSE()
-END_MESSAGE_MAP()
-
-static CAdvPatchEditDlg *g_pAdvPatchDlg = nullptr;
-
-// Accessor used by sub_401DB0 / sub_43E6F0 (piece 7) — returns the live dialog (or null,
-// in which case those fall back to their not-found defaults).  Mirrors the binary's
-// global AdvPatchEditDlg (0x25D6098).
-CWnd *AdvPatchEdit_GetDlg() { return g_pAdvPatchDlg; }
+// ── MFC shell — CAdvPatchEditDlg itself + the singleton + its raw accessor ────────
+// The five AdvPatchEdit_Apply* cores above stay COMMON (imgui_panel_advpatch.cpp drives
+// them).  The live-control readers below this block (AdvDlg_IsChecked /
+// CurvEditDlg_OnSomeSetting / AdvPatchEdit_SetMode / AdvPatchEdit_ShowHeight) keep their
+// symbols — core TUs call them — with per-body NO-MFC fences.
 
 // Forwarder so the free paint-drag (sub_43E6F0) can push the eyedroppered height into the
 // dialog's 1467 edit box (CurvEditDlg::OnHeightText) without befriending the class.
 static void AdvPatchEdit_ShowHeight( float h )
 {
-    if ( g_pAdvPatchDlg && g_pAdvPatchDlg->GetSafeHwnd() )
-        g_pAdvPatchDlg->OnHeightText( h );
+    // NO-MFC: no-op — there is no dialog edit to push into; the eyedropper still stores the
+    // picked height/colour in g_paintChannelVal / g_paintColor* for the panel to re-read.
+    (void)h;
 }
 
 // CurvEditDlg::OnSomeSetting (0x401F90) — is the "apply to unselected patches too" checkbox
@@ -238,43 +89,41 @@ static void AdvPatchEdit_ShowHeight( float h )
 // (unselected) brush list (sub_43E4F0 / sub_43DD00) and the no-selection paint start (Drag_Begin).
 int CurvEditDlg_OnSomeSetting()
 {
-    return ( g_pAdvPatchDlg && g_pAdvPatchDlg->GetSafeHwnd()
-             && ::IsDlgButtonChecked( g_pAdvPatchDlg->m_hWnd, 1432 ) ) ? 1 : 0;
+    // NO-MFC: returns 0 (unchecked) — same as the MFC shell reports with the dialog never
+    // created, so paint/soft-sel stay restricted to the SELECTED brushes.
+    return 0;
 }
 
 // sub_401E10 — programmatically select the mode radio whose value == `mode` (walks the
 // mode table, BM_SETCHECKs each), then repaint.  Used by Patch_FinishCurveDrag to switch
 // from "Grab Value" (5) to "Flatten" (2) after an eyedropper drag.
+// ── AdvPatchEdit control store (UI-rework) ──────────────────────────────────────
+// The binary read the mode radios + channel checkboxes LIVE off the modeless dialog's HWND
+// via BM_GETCHECK. With no MFC dialog those reads returned "unchecked" → mode 6 (Disabled) →
+// terrain paint permanently OFF. This store is the shell-agnostic replacement: the ImGui
+// AdvPatch panel writes it, and AdvDlg_IsChecked / sub_401DB0 read it, so paint mode + channel
+// selection actually take effect. Defaults match a fresh dialog: mode 6 (Disabled), no channels.
+static int  s_advMode        = 6;                          // 0..6 (sub_401DB0 index); 6 = Disabled
+// Channel defaults: HEIGHT on. The stroke's mask is built from these (sub_43E6F0); with none
+// ticked the mask is 0 and paint touches nothing. Height-on makes Raise/Lower/Smooth/Noise
+// sculpt the terrain immediately once a mode is picked, which is the common case. [Height,
+// Color(all), Blue, Green, Red, Alpha].
+static bool s_advChan[6]     = { true, false, false, false, false, false };
+// Channel-checkbox ids in panel order: Height, Color(all), Blue, Green, Red, Alpha.
+static const int s_advChanIds[6] = { 1469, 1470, 1471, 1472, 1473, 1474 };
+
+// sub_401E10 — programmatically select the mode radio whose value == `mode` (Patch_FinishCurve-
+// Drag switches "Grab Value" 5 → "Flatten" 2 after an eyedropper drag). Now writes the store.
 void AdvPatchEdit_SetMode( int mode )
 {
-    static const struct { int id, val; } modes[7] =
-        { {1435,0},{1439,1},{1437,2},{1436,3},{1438,4},{1468,5},{1440,6} };
-    if ( !g_pAdvPatchDlg || !g_pAdvPatchDlg->GetSafeHwnd() )
-        return;
-    for ( int i = 0; i < 7; ++i )
-        g_pAdvPatchDlg->CheckDlgButton( modes[i].id, modes[i].val == mode ? BST_CHECKED : BST_UNCHECKED );
-    g_pAdvPatchDlg->InvalidateRect( nullptr, FALSE );
+    s_advMode = mode;
 }
 
-// Show (creating on first use) the modeless terrain-paint settings dialog.
-void AdvPatchEdit_Show( CWnd *parent )
-{
-    if ( !g_pAdvPatchDlg )
-    {
-        g_pAdvPatchDlg = new CAdvPatchEditDlg( parent );
-        g_pAdvPatchDlg->Create( IDD_ADVPATCHEDIT, parent );
-    }
-    g_pAdvPatchDlg->ShowWindow( SW_SHOW );
-}
+// Panel accessors (imgui_panel_advpatch.cpp).
+int  AdvPatchEdit_GetMode()                 { return s_advMode; }
+bool AdvPatchEdit_GetChannel( int idx )     { return ( idx >= 0 && idx < 6 ) ? s_advChan[idx] : false; }
+void AdvPatchEdit_SetChannel( int idx, bool on ) { if ( idx >= 0 && idx < 6 ) s_advChan[idx] = on; }
 
-// CMainFrame::OnAdvancedEditDlg (0x42BC90, cmd 33130) toggle: hide if visible, else show.
-void AdvPatchEdit_Toggle( CWnd *parent )
-{
-    if ( g_pAdvPatchDlg && g_pAdvPatchDlg->GetSafeHwnd() && g_pAdvPatchDlg->IsWindowVisible() )
-        g_pAdvPatchDlg->ShowWindow( SW_HIDE );
-    else
-        AdvPatchEdit_Show( parent );
-}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  ShowInfoDialog (0x40BE90) — the modeless "Information" state prompt.
@@ -304,31 +153,19 @@ const char *g_pBendStateMsg[4] =
 // Insert/delete (redisperse) prompt (IDB off_73B128[0] 0x73B128).
 const char *g_pInsDelStateMsg = "Use TAB to cycle through available rows/columns for insertion/deletion. Press INS to insert at the highlight, DEL to remove the pair";
 
-static CDialog *g_pInfoDlg = nullptr;   // IDB off_25D5BF0
 
 void ShowInfoDialog( const char *msg )
 {
-    if ( !g_pInfoDlg || !g_pInfoDlg->GetSafeHwnd() )       // IDB: if ( !dword_25D5C10 )
-    {
-        if ( !g_pInfoDlg )
-            g_pInfoDlg = new CDialog();
-        g_pInfoDlg->Create( IDD_INFORMATION, AfxGetMainWnd() );
-    }
-    if ( !g_pInfoDlg->GetSafeHwnd() )
-        return;                                            // PORT guard: headless / no resources
-    g_pInfoDlg->SetDlgItemTextA( IDC_INFO_TEXT, msg );     // IDB off_25D5C64 = the edit member
-    g_pInfoDlg->ShowWindow( SW_SHOW );
-    // 0x40bec7: SetFocus(g_pParentWnd). g_pParentWnd IS the main frame, and mainfrm.h is
-    // only included further down this TU, so go through AfxGetMainWnd() (same window).
-    if ( CWnd *mainWnd = AfxGetMainWnd() )
-        mainWnd->SetFocus();
+    // NO-MFC: no-op — IDD_INFORMATION is an MFC CDialog; the bend / insert-delete state
+    // prompt text is unreachable in this shell (the modes themselves still work).  The
+    // ImGui shell will show g_pBendStateMsg / g_pInsDelStateMsg itself.
+    (void)msg;
 }
 
 // The hide half (CWnd::ShowWindow(&off_25D5BF0, SW_HIDE), guarded by dword_25D5C10).
 void HideInfoDialog()
 {
-    if ( g_pInfoDlg && g_pInfoDlg->GetSafeHwnd() )
-        g_pInfoDlg->ShowWindow( SW_HIDE );
+    // NO-MFC: no-op — ShowInfoDialog never created a prompt to hide.
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -358,14 +195,21 @@ extern float grid_sizes[];                                      // engine_stubs
 unsigned int  g_paintColorBGR = 0x00FFFFFFu;   // 0x25D65A4
 byte g_paintColorA   = 0xFFu;         // 0x25D65A8
 
-// Is an AdvPatchEditDlg control checked? (live read, BM_GETCHECK = WM_USER... = 0xF0).
+// Is an AdvPatchEditDlg control checked? The binary did a live BM_GETCHECK on the dialog's
+// HWND; here it reads the UI-independent store the ImGui panel drives (see above). Mode radios
+// resolve against s_advMode; channel checkboxes against s_advChan[]. Controls with no store
+// yet (soft-select 1431/1432) stay false, exactly as the never-created MFC dialog reported.
 static bool AdvDlg_IsChecked( int id )
 {
-    CWnd *dlg = AdvPatchEdit_GetDlg();
-    if ( !dlg || !dlg->GetSafeHwnd() )
-        return false;
-    CWnd *c = dlg->GetDlgItem( id );
-    return c && c->SendMessage( BM_GETCHECK, 0, 0 ) != 0;
+    static const struct { int id, mode; } s_modes[7] =
+        { { 1435, 0 }, { 1439, 1 }, { 1437, 2 }, { 1436, 3 }, { 1438, 4 }, { 1468, 5 }, { 1440, 6 } };
+    for ( int i = 0; i < 7; ++i )
+        if ( s_modes[i].id == id )
+            return s_advMode == s_modes[i].mode;
+    for ( int i = 0; i < 6; ++i )
+        if ( s_advChanIds[i] == id )
+            return s_advChan[i];
+    return false;
 }
 
 // sub_401DB0 (0x401DB0) — return the checked mode radio's index (6 = none/off).
@@ -393,6 +237,7 @@ int sub_401D50()
 // origin/dir are float* ray endpoints (int-cast by Drag_MouseMoved).
 void sub_43E6F0( int buttons, int origin, int dir )
 {
+    extern void Radiant_FL_Log( const char *fmt, ... );   // mainfrm.cpp — DIAG (terrain paint)
     if ( buttons != 1 && buttons != 2 )
         return;
     float *org = (float *)(intptr_t)origin;
@@ -400,7 +245,10 @@ void sub_43E6F0( int buttons, int origin, int dir )
 
     float center[3];
     if ( !sub_43DD50( dr, nullptr, org, center ) )      // pick the terrain cell under the cursor
+    {
+        Radiant_FL_Log( "PAINT sub_43E6F0 btn=%d: cell pick MISSED (no terrain under cursor)", buttons );
         return;
+    }
     const float sign = ( buttons == 1 ) ? 1.0f : -1.0f;
 
     // Channel mask from the dialog checkboxes (1469 Height, 1470 Color-all, 1471/72/73 B/G/R, 1474 A).
@@ -415,6 +263,10 @@ void sub_43E6F0( int buttons, int origin, int dir )
     }
     if ( AdvDlg_IsChecked( 1474 ) )
         mask |= 0x10;
+
+    // DIAG: the pick hit — report the mode + channel mask actually applied. mask==0 means NO
+    // channel is ticked, so the stroke touches nothing (a common "nothing happens" cause).
+    Radiant_FL_Log( "PAINT sub_43E6F0 btn=%d: HIT mode=%d mask=0x%X", buttons, sub_401DB0(), mask );
 
     switch ( sub_401DB0() )
     {
@@ -510,32 +362,8 @@ extern void       Patch_SetTexturing( float sx, float sy, int mode );           
 //  (sub_459860 ctor / sub_436980).  Enter a texture x/y scale (default 4) + pick a layout mode,
 //  then OK -> Patch_SetTexturing(x, y, mode).  Modes: 2D distance->0 (natural), 3D distance->1
 //  (arc-length), emulates curves->2 (grid).
-class CTextureLayout : public CDialog
-{
-public:
-    CTextureLayout( CWnd *parent ) : CDialog( IDD_PATCH_TEXTURE_LAYOUT, parent ),
-        m_x( 4.0f ), m_y( 4.0f ), m_mode( 0 ) {}
-    float m_x, m_y;     // texture x/y scale (ctor defaults 4.0, sub_459860 +116/+120)
-    int   m_mode;       // 0=2D distance, 1=3D distance, 2=emulates curves (+124)
-
-protected:
-    virtual BOOL OnInitDialog()
-    {
-        CDialog::OnInitDialog();
-        SetDlgItemText( 1089, "4" );  SetDlgItemText( 1142, "4" );
-        CheckDlgButton( 1449, BST_CHECKED );    // default: 2D distance (good for ground)
-        return TRUE;
-    }
-    virtual void OnOK()
-    {
-        CString sx, sy;
-        GetDlgItemText( 1089, sx );  GetDlgItemText( 1142, sy );
-        m_x = (float)atof( (LPCSTR)sx );
-        m_y = (float)atof( (LPCSTR)sy );
-        m_mode = IsDlgButtonChecked( 1475 ) ? 1 : ( IsDlgButtonChecked( 1476 ) ? 2 : 0 );
-        CDialog::OnOK();
-    }
-};
+// MFC shell — CTextureLayout (the modal "Set..." helper).  PatchInspector_SetTexturing
+// below is the COMMON core the ImGui patch panel calls with its own scale/mode inputs.
 
 // One patch control point as the inspector shows and edits it: which cell (the Row/Column
 // combo selections), its position, and its current-layer texture coords.
@@ -654,161 +482,47 @@ void PatchInspector_SpinTexdef( UINT id, bool up, const texdefSpinState_t &step 
     g_nUpdateBits |= 1;
 }
 
-class CPatchInspectorDlg : public CDialog
-{
-public:
-    CPatchInspectorDlg() : CDialog( IDD_PATCH_PROPERTIES, nullptr ), m_def( nullptr ) {}
-    patchMesh_t *m_def;                  // the inspected patch (binary this+116)
-
-protected:
-    void SetField( int id, float v ) { CString s; s.Format( "%g", v ); SetDlgItemText( id, s ); }
-    void FillCombo( int id, int count )
-    {
-        SendDlgItemMessage( id, CB_RESETCONTENT, 0, 0 );
-        for ( int i = 0; i < count; ++i )
-        {
-            char s[16]; sprintf( s, "%i", i );
-            SendDlgItemMessage( id, CB_ADDSTRING, 0, (LPARAM)s );
-        }
-        if ( count > 0 ) SendDlgItemMessage( id, CB_SETCURSEL, 0, 0 );
-    }
-    // sub_436E10 — show the selected control point's X/Y/Z + current-layer S/T.
-    void ShowSelectedPoint()
-    {
-        static const int fields[5] = { 1089, 1142, 1147, 1102, 1106 };   // X Y Z S T
-        for ( int i = 0; i < 5; ++i )
-            SetDlgItemText( fields[i], "" );
-        patchPointState_t pt;
-        pt.row = (int)SendDlgItemMessage( 1301, CB_GETCURSEL, 0, 0 );    // Row combo (0..height-1)
-        pt.col = (int)SendDlgItemMessage( 1302, CB_GETCURSEL, 0, 0 );    // Column combo (0..width-1)
-        if ( !PatchInspector_GatherPoint( m_def, pt ) )
-            return;
-        SetField( 1089, pt.xyz[0] );  SetField( 1142, pt.xyz[1] );  SetField( 1147, pt.xyz[2] );
-        SetField( 1102, pt.st[0] );  SetField( 1106, pt.st[1] );
-    }
-
-public:
-    // g_PatchDialog.GetPatchInfo — bind to the selected single patch + repopulate the combos.
-    void GetPatchInfo()
-    {
-        m_def = PatchInspector_GatherSelectedPatch();
-        FillCombo( 1301, m_def ? m_def->height : 0 );   // Row    0..height-1
-        FillCombo( 1302, m_def ? m_def->width  : 0 );   // Column 0..width-1
-        ShowSelectedPoint();
-    }
-
-    float GetFieldF( int id ) { CString s; GetDlgItemText( id, s ); return (float)atof( (LPCSTR)s ); }
-
-protected:
-    virtual BOOL OnInitDialog()
-    {
-        CDialog::OnInitDialog();
-        // Texdef spin STEP defaults (binary ctor flt_25D75A8..75B8): stretch/shift 0.05, rotate 45.
-        SetDlgItemText( 1211, "0.05" );  SetDlgItemText( 1195, "0.05" );  SetDlgItemText( 1217, "45" );
-        SetDlgItemText( 1213, "0.05" );  SetDlgItemText( 1196, "0.05" );
-        GetPatchInfo();
-        return TRUE;
-    }
-    afx_msg void OnRowColChange() { ShowSelectedPoint(); }
-    afx_msg void OnApply()                         // "Apply" (3) -> PatchInspector_ApplyPoint
-    {
-        patchPointState_t pt;
-        pt.row = (int)SendDlgItemMessage( 1301, CB_GETCURSEL, 0, 0 );
-        pt.col = (int)SendDlgItemMessage( 1302, CB_GETCURSEL, 0, 0 );
-        pt.xyz[0] = GetFieldF( 1089 );  pt.xyz[1] = GetFieldF( 1142 );  pt.xyz[2] = GetFieldF( 1147 );
-        pt.st[0] = GetFieldF( 1102 );   pt.st[1] = GetFieldF( 1106 );
-        PatchInspector_ApplyPoint( m_def, pt );
-    }
-    afx_msg void OnCap()          { PatchInspector_Cap(); }        // CAP     (1282)
-    afx_msg void OnNatural()      { PatchInspector_Natural(); }    // Natural (1284)
-    afx_msg void OnFit()          { PatchInspector_Fit(); }        // Fit     (1286)
-    afx_msg void OnSetTexturing()                  // "Set..." (1283) -> sub_436980
-    {
-        CTextureLayout dlg( this );                // modal "Patch texture layout"
-        bool bAccepted = ( dlg.DoModal() == IDOK );
-        PatchInspector_SetTexturing( bAccepted, dlg.m_x, dlg.m_y, dlg.m_mode );
-    }
-    afx_msg void OnSpin( UINT id, NMHDR *pNMHDR, LRESULT *pResult )
-    {
-        bool up = ( (NMUPDOWN *)pNMHDR )->iDelta > 0;
-        texdefSpinState_t step;
-        step.rotate       = GetFieldF( 1217 );
-        step.stretchHoriz = GetFieldF( 1211 );
-        step.stretchVert  = GetFieldF( 1213 );
-        step.shiftHoriz   = GetFieldF( 1195 );
-        step.shiftVert    = GetFieldF( 1196 );
-        PatchInspector_SpinTexdef( id, up, step );
-        *pResult = 0;
-    }
-    virtual void OnOK()           { ShowWindow( SW_HIDE ); }   // "Done" (IDOK): modeless -> hide
-    virtual void OnCancel()       { ShowWindow( SW_HIDE ); }
-    afx_msg void OnDestroy();     // 0x436DD0 — save "Radiant::PatchWindow" (audit U8/D4)
-    DECLARE_MESSAGE_MAP()
-};
-
-// CPatchInspectorDlg OnDestroy (0x436DD0) — persist the dialog rect.  [audit U8/D4 —
-// handler was absent; the load side is in DoPatchInspector below.]
-extern BOOL SaveRegistryInfo( const char *pszName, void *pvBuf, int lSize );   // win_qe3.cpp
-extern BOOL LoadRegistryInfo( const char *pszName, void *pvBuf, long *plSize );
-void CPatchInspectorDlg::OnDestroy()
-{
-    if ( GetSafeHwnd() )
-    {
-        RECT rect;
-        ::GetWindowRect( GetSafeHwnd(), &rect );             // 0x436DD0–0x436E0D
-        SaveRegistryInfo( "Radiant::PatchWindow", &rect, 0x10 );
-    }
-    CDialog::OnDestroy();
-}
-
-BEGIN_MESSAGE_MAP( CPatchInspectorDlg, CDialog )
-    ON_WM_DESTROY()
-    ON_CBN_SELCHANGE( 1301, OnRowColChange )
-    ON_CBN_SELCHANGE( 1302, OnRowColChange )
-    ON_BN_CLICKED( 3, OnApply )            // "Apply" button (0x436ef0)
-    ON_BN_CLICKED( 1282, OnCap )           // CAP     (0x4368d0)
-    ON_BN_CLICKED( 1284, OnNatural )       // Natural (0x436940)
-    ON_BN_CLICKED( 1286, OnFit )           // Fit     (0x436910)
-    ON_BN_CLICKED( 1283, OnSetTexturing )  // Set...  (0x436980 -> CTextureLayout)
-    ON_NOTIFY_RANGE( UDN_DELTAPOS, 1248, 1259, OnSpin )   // texdef spins (0x436ae0 -> sub_4370E0)
-END_MESSAGE_MAP()
-
-static CPatchInspectorDlg *g_pPatchInspector = nullptr;
+// ── MFC shell — CPatchInspectorDlg (IDD_PATCH_PROPERTIES) ────────────────────────
+// Every PatchInspector_* core above stays COMMON (imgui_panel_patch.cpp calls them).  The
+// four free entry points after the class (DoPatchInspector / UpdatePatchInspector /
+// g_PatchDialog_GetHwnd / g_PatchDialog_GetPatchInfo) are reached from CORE TUs, so they
+// keep their symbols with per-body fences — except g_PatchDialog_GetHwnd, whose RETURN TYPE
+// is CWnd* (see the U-GUARD report: brush.cpp / pmesh.cpp need a shell-agnostic accessor).
 
 // DoPatchInspector (0x436d30) — create (first use) + show the modeless inspector, then populate.
 void DoPatchInspector()
 {
-    if ( !g_pPatchInspector )
-    {
-        g_pPatchInspector = new CPatchInspectorDlg();
-        g_pPatchInspector->Create( IDD_PATCH_PROPERTIES, AfxGetMainWnd() );
-        // Restore the saved position (binary DoPatchInspector 0x436d30:
-        // LoadRegistryInfo("Radiant::PatchWindow") → SetWindowPos(x,y,SWP_NOSIZE)).
-        RECT rect;  long size = sizeof( rect );              // [audit U8/D4]
-        if ( LoadRegistryInfo( "Radiant::PatchWindow", &rect, &size ) && size >= (long)sizeof( rect ) )
-            g_pPatchInspector->SetWindowPos( nullptr, rect.left, rect.top, 0, 0,
-                                             SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE );
-    }
-    g_pPatchInspector->ShowWindow( SW_SHOW );
-    g_pPatchInspector->GetPatchInfo();
+    // NO-MFC: no-op — the ImGui patch panel (imgui_panel_patch.cpp) IS the inspector and
+    // pull-populates from PatchInspector_Gather*; nothing to create or show here.
 }
 
 // UpdatePatchInspector (0x436db0) — refresh the inspector if it is open.
 void UpdatePatchInspector()
 {
-    if ( g_pPatchInspector && g_pPatchInspector->GetSafeHwnd() && g_pPatchInspector->IsWindowVisible() )
-        g_pPatchInspector->GetPatchInfo();
+    // NO-MFC: no-op — the panel re-gathers every frame, so there is no push to make.
 }
 
 // Global Patch Inspector accessors used by brush, patch, and selection refresh paths.
-CWnd *g_PatchDialog_GetHwnd()
+
+// PatchDialog_IsOpen (U-GUARD-2) — the shell-agnostic choke point for the binary's
+// `if (CWnd_PatchDialog.m_hWnd)` gate, in the AdvDlg_IsChecked style: constant false under
+// KISAK_NO_MFC, so every guarded GetPatchInfo() push is skipped exactly as it is in the MFC
+// shell with the inspector never opened (the ImGui patch panel re-gathers every frame, so
+// there is no push to make).  Semantics are EXISTENCE, not visibility — deliberately the
+// same test g_PatchDialog_GetHwnd's null-check performed, because the binary tests the
+// dialog's m_hWnd and all 22 call sites (brush.cpp/pmesh.cpp/select.cpp) are pure boolean
+// gates that must keep firing after CPatchInspectorDlg::OnOK hides (not destroys) it.
+bool PatchDialog_IsOpen()
 {
-    return ( g_pPatchInspector && g_pPatchInspector->GetSafeHwnd() ) ? g_pPatchInspector : nullptr;
+    return false;
 }
+
+// The pre-U-GUARD-2 accessor.  Its RETURN TYPE is CWnd*, so it cannot survive into the
+// no-MFC shell; MFC-side callers may still want the object, so it keeps its symbol behind
+// the fence.  Core TUs use PatchDialog_IsOpen() above.
 void g_PatchDialog_GetPatchInfo()
 {
-    if ( g_pPatchInspector && g_pPatchInspector->GetSafeHwnd() )
-        g_pPatchInspector->GetPatchInfo();
+    // NO-MFC: no-op — the panel re-gathers every frame (same as UpdatePatchInspector).
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -834,7 +548,7 @@ void g_PatchDialog_GetPatchInfo()
 //  added line vs the binary, so the feature actually works.
 // ═══════════════════════════════════════════════════════════════════════════════
 #include "mainfrm.h"                  // CMainFrame / CXYWnd (m_pActiveXY->m_nViewType)
-extern CMainFrame *g_pParentWnd;      // mainfrm.cpp (0x25D5A70)
+#include "xywnd.h"                    // xywndState_t / Ed_ActiveXY (U-GLOBALS)
 extern int         Sys_Printf( const char *fmt, ... );          // win_qe3.cpp (0x499E90)
 extern int         QE_SingleBrush();                            // qe3.cpp (0x48C8B0)
 extern selbrush_t  selected_brushes;                            // engine_stubs (0x23F1864)
@@ -872,10 +586,10 @@ void PatchDensity_Apply( bool terrain, int wSel, int hSel )
     {
         if ( terrain )
             Create_Terrain( wSel + 2, hSel + 2,                         // 0x458FB0
-                            g_pParentWnd->m_pActiveXY->m_nViewType );
+                            Ed_ActiveXY()->m_nViewType );
         else
             Patch_GenericMesh( s_patchDensityDims[wSel], s_patchDensityDims[hSel],
-                               g_pParentWnd->m_pActiveXY->m_nViewType, 1, 0 ); // 0x436400
+                               Ed_ActiveXY()->m_nViewType, 1, 0 ); // 0x436400
         g_nUpdateBits = -1;
     }
     if ( terrain )
@@ -890,67 +604,40 @@ void PatchDensity_Apply( bool terrain, int wSel, int hSel )
     }
 }
 
-class CPatchDensityDlg : public CDialog
+// ImGui shell — imgui_panel_patchdensity.cpp replaces CPatchDensityDlg.  PatchDensity_Apply
+// above is the COMMON create core; PatchDensity_Commit below is the undo-bracketed commit the
+// panel's "Create" button calls (the body of the binary's OnOK path + OnCurveSimplepatchmesh's
+// Undo bracket, minus the modal DoModal).  The menu commands now just OPEN the panel.
+extern void ImGuiPanel_PatchDensity_Open( bool terrain );   // imgui_panel_patchdensity.cpp
+
+// The "Create" commit: re-check the single-brush precondition (the panel is non-modal, so the
+// selection could have changed since it opened), then run the create inside the SAME single
+// Undo op the binary's OnCurveSimplepatchmesh (0x429a20) wrapped around the modal dialog.
+void PatchDensity_Commit( bool terrain, int wSel, int hSel )
 {
-public:
-    CPatchDensityDlg( bool terrain, CWnd *parent = nullptr )
-        : CDialog( IDD_PATCH_DENSITY, parent ), m_terrain( terrain ) {}
-
-protected:
-    CComboBox m_wndWidth;   // this+0x74 (DDX 1280)
-    CComboBox m_wndHeight;  // this+0xC8 (DDX 1281)
-    bool m_terrain;
-
-    virtual void DoDataExchange( CDataExchange *pDX )       // 0x436330
+    if ( !QE_SingleBrush() )
     {
-        CDialog::DoDataExchange( pDX );
-        DDX_Control( pDX, 1280, m_wndWidth );
-        DDX_Control( pDX, 1281, m_wndHeight );
+        Sys_Printf( "Simple %s: select exactly one brush first.\n",
+                    terrain ? "terrain patch" : "patch mesh" );
+        return;
     }
+    Undo_ClearRedo();
+    Undo_GeneralStart( terrain ? "make simple terrain patch" : "make simple patch mesh" );
+    Undo_AddBrushList( &selected_brushes );
+    PatchDensity_Apply( terrain, wSel, hSel );   // Patch_GenericMesh / Create_Terrain + g_nUpdateBits
+    Undo_EndBrushList( &selected_brushes );
+    Undo_End();
+}
 
-    virtual BOOL OnInitDialog()                            // 0x436440
-    {
-        CDialog::OnInitDialog();
-        // The curve dialog indexes g_patchDensityDims. TerrainDlg uses selection+2,
-        // exposing every valid terrain dimension from 2 through 16.
-        const int itemCount = m_terrain ? 15 : 7;
-        for ( int i = 0; i < itemCount; ++i )
-        {
-            char s[16];
-            sprintf( s, "%d", m_terrain ? i + 2 : s_patchDensityDims[i] );
-            m_wndWidth.AddString( s );
-            m_wndHeight.AddString( s );
-        }
-        m_wndWidth.SetCurSel( m_terrain ? g_terrainLastWidthSel : g_patchDensityLastWidthSel );
-        m_wndHeight.SetCurSel( m_terrain ? g_terrainLastHeightSel : g_patchDensityLastHeightSel );
-        return TRUE;
-    }
-
-    virtual void OnOK()                                    // 0x436390
-    {
-        int wSel = m_wndWidth.GetCurSel();
-        int hSel = m_wndHeight.GetCurSel();
-        PatchDensity_Apply( m_terrain, wSel, hSel );
-        CDialog::OnOK();
-    }
-};
-
-// CMainFrame::OnCurveSimplepatchmesh (0x429a20, menu cmd 32856 / 0x8058 — verified from
-// the CMainFrame command table {cmdId,cmdId,0x38,pfn}).  Brackets the patch create in a
-// single Undo op and runs the density dialog modally.
+// CMainFrame::OnCurveSimplepatchmesh (0x429a20, menu cmd 32856 / 0x8058 — verified from the
+// CMainFrame command table {cmdId,cmdId,0x38,pfn}).  The binary ran the density dialog MODALLY
+// inside an Undo bracket; here the (non-modal) ImGui panel owns the density pick and its
+// "Create" button runs PatchDensity_Commit, so this just guards the precondition and opens it.
 void DoSimpleTerrainPatchMesh( bool terrain )
 {
     if ( !QE_SingleBrush() )
         return;
-    Undo_ClearRedo();
-    Undo_GeneralStart( terrain ? "make simple terrain patch" : "make simple patch mesh" );
-    Undo_AddBrushList( &selected_brushes );
-    {
-        CPatchDensityDlg dlg( terrain );
-        dlg.DoModal();
-    }
-    Undo_EndBrushList( &selected_brushes );
-    Undo_End();
+    ImGuiPanel_PatchDensity_Open( terrain );
 }
 
 void DoSimplePatchMesh()

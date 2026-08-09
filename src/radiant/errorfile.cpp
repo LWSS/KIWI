@@ -16,7 +16,8 @@ extern void  Assert( const char *file, int line, int type, const char *fmt, ... 
 extern int   Sys_Printf( const char *fmt, ... );
 extern char  currentmap[];            // map.cpp 0x23F18D8
 extern int   g_nUpdateBits;          // engine_stubs.cpp 0x25D5A74
-extern CMainFrame *g_pParentWnd;     // engine_stubs.cpp
+extern bool  Radiant_ConfirmModified();   // mainfrm.cpp — U-CMD-2's free twin of CMainFrame::ConfirmModified
+extern camera_s *Ed_Camera();        // camwnd.cpp — THE editor camera (never NULL, U-GLOBALS)
 extern void  Select_Deselect( int bits ); // select.cpp 0x48E800
 
 // ── forward declarations ──────────────────────────────────────────────────────
@@ -201,7 +202,10 @@ have_value:
            || CheckLayeredMaterial_Modifications( lyrMtlGlob.Layers,
                                                   84 * lyrMtlGlob.entryCount,
                                                   0 ) != lyrMtlGlob.crcToken )
-         && !( g_pParentWnd && g_pParentWnd->ConfirmModified() ) )
+         // NO-MFC: the same prompt, now that U-CMD-2 lifted it out of CMainFrame.  The
+         // g_pParentWnd liveness half of the MFC expression has no analog (the prompt is a
+         // MessageBoxA over ::GetActiveWindow(), not a frame method), so it drops out.
+         && !Radiant_ConfirmModified() )
     {
         return 0;
     }
@@ -235,22 +239,21 @@ do_position:
         }
 
         // Position the camera at the error origin and orient it toward the
-        // error direction. Phase 5 dep: g_pParentWnd->m_pCamWnd.
-        CCamWnd *cam = g_pParentWnd ? g_pParentWnd->m_pCamWnd : NULL;
-        if ( cam )
+        // error direction.  U-GLOBALS: Ed_Camera() is never NULL, so the guard is gone.
         {
-            cam->camera.origin[0] = s_errLog[v7].origin[0];
-            cam->camera.origin[1] = s_errLog[v7].origin[1];
-            cam->camera.origin[2] = s_errLog[v7].origin[2];
+            camera_s *cam = Ed_Camera();
+            cam->origin[0] = s_errLog[v7].origin[0];
+            cam->origin[1] = s_errLog[v7].origin[1];
+            cam->origin[2] = s_errLog[v7].origin[2];
 
             // vectoangles converts a direction vector into (pitch, yaw, 0).
             // IDA: vectoangles(m_pCamWnd->camera.angles, (int)&unk_180AD04 + 40*v7)
-            vectoangles( cam->camera.angles, (int)(intptr_t)&s_errLog[v7].dir[0] );
+            vectoangles( cam->angles, (int)(intptr_t)&s_errLog[v7].dir[0] );
 
             // Negate pitch (IDA: *angles = -v12 where v12 = *angles before g_nUpdateBits).
-            float pitch = cam->camera.angles[0];
+            float pitch = cam->angles[0];
             g_nUpdateBits |= 0x104u;  // request camera + XY view updates
-            cam->camera.angles[0] = -pitch;
+            cam->angles[0] = -pitch;
         }
     }
 

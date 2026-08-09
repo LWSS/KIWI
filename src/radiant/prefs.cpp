@@ -1,6 +1,7 @@
 // Radiant preferences, registry persistence, and settings dialog.
 #include "stdafx.h"
 #include "prefs.h"
+#include "radiant_registry.h"   // Radiant_Profile* (was AfxGetApp()->*Profile* before U-SHIM removal)
 #include <stdlib.h>   // atof
 
 // ── the one editor-wide preference instance ──────────────────────────────────
@@ -115,107 +116,103 @@ void Prefs_SetDefaults( prefData_t *p )
 // CPrefsDlg::LoadPrefs (0x44e330). Section "Prefs" except RunBefore ("Internals").
 void Prefs_LoadPrefs( prefData_t *p )
 {
-    CWinApp *app = AfxGetApp();
-    if ( !app )
-        return;
-
-    p->m_nMouse_unsure        = app->GetProfileInt( "Prefs", "MouseButtons", 1 );
+    p->m_nMouse_unsure        = Radiant_ProfileGetInt( "Prefs", "MouseButtons", 1 );
     p->m_nMouseButtons        = ( p->m_nMouse_unsure != 0 ) + 2;        // 2 or 3
-    p->m_nView                = app->GetProfileInt( "Prefs", "QE4StyleWindows", 0 );
-    p->m_bTextureLock         = app->GetProfileInt( "Prefs", "TextureLock", 1 );
-    p->m_bRotateLock          = app->GetProfileInt( "Prefs", "RotateLock", 1 );
-    p->m_bLightmapLock        = app->GetProfileInt( "Prefs", "LightmapLock", 0 );
-    p->m_strLastProject       = app->GetProfileString( "Prefs", "LastProject", "" );
-    p->m_strLastMap           = app->GetProfileString( "Prefs", "LastMap", "" );
-    p->m_bLoadLast            = app->GetProfileInt( "Prefs", "LoadLast", 1 );
-    p->m_bRunBefore           = app->GetProfileInt( "Internals", "RunBefore", 0 );
-    p->camera_mode            = app->GetProfileInt( "Prefs", "CameraMode", 1 );
-    p->camera_masked          = app->GetProfileInt( "Prefs", "CameraMasked", 1 );
-    p->m_bFace                = app->GetProfileInt( "Prefs", "NewFaceGrab", 1 );
-    p->m_bRightClick          = app->GetProfileInt( "Prefs", "NewRightClick", 1 );
-    p->m_bAutoSave            = app->GetProfileInt( "Prefs", "Autosave", 1 );
-    p->m_bNewApplyHandling    = app->GetProfileInt( "Prefs", "ApplyDismissesSurface", 0 );
-    p->m_bLoadLastMap         = app->GetProfileInt( "Prefs", "LoadLastMap", 0 );
-    p->m_bTextureWindowSearch = app->GetProfileInt( "Prefs", "NewTextureWindowStuff", 0 );
-    p->m_bCleanTinyBrushes    = app->GetProfileInt( "Prefs", "CleanTinyBrushes", 0 );
-    p->m_fTinySize            = (float)atof( app->GetProfileString( "Prefs", "CleanTinyBrusheSize", "0.5" ) );
-    p->m_nAutoSave            = app->GetProfileInt( "Prefs", "AutosaveMinutes", 5 );
-    p->m_bSnapShots           = app->GetProfileInt( "Prefs", "Snapshots", 0 );
-    p->loose_changes          = app->GetProfileInt( "Prefs", "DefaultSaveNo", 0 );
-    p->m_nStatusSize          = app->GetProfileInt( "Prefs", "StatusPointSize", 10 );
-    p->m_nMoveSpeed           = app->GetProfileInt( "Prefs", "MoveSpeed", 350 );
-    p->m_nAngleSpeed          = app->GetProfileInt( "Prefs", "AngleSpeed", 150 );
-    p->m_bCamXYUpdate         = app->GetProfileInt( "Prefs", "CamXYUpdate", 0 );
-    p->m_bCubicClipping       = app->GetProfileInt( "Prefs", "CubicClipping", 1 ) != 0;
-    p->m_nCubicScale          = app->GetProfileInt( "Prefs", "CubicScale", 13 );
-    p->m_bALTEdge             = app->GetProfileInt( "Prefs", "ALTEdgeDrag", 1 );
-    p->m_bTextureBar          = app->GetProfileInt( "Prefs", "UseTextureBar", 0 );
-    p->which_game             = app->GetProfileString( "Prefs", "WhichGame", "" );
-    p->m_bSnapTToGrid         = app->GetProfileInt( "Prefs", "SnapT", 0 );
-    p->linking_keeps_selection= app->GetProfileInt( "Prefs", "LinkSelect", 0 );
-    p->m_bXZVis               = app->GetProfileInt( "Prefs", "XZVIS", 0 );
-    p->m_bYZVis               = app->GetProfileInt( "Prefs", "YZVIS", 0 );
-    p->m_bZVis                = app->GetProfileInt( "Prefs", "ZVIS", 1 );
-    p->m_bSizePaint           = app->GetProfileInt( "Prefs", "SizePainting", 1 );
-    p->b_mCullSky             = app->GetProfileInt( "Prefs", "CullSkies", 1 );
-    p->m_dropHeight           = app->GetProfileInt( "Prefs", "DropHeight", 28 );
-    p->m_bNoClamp             = app->GetProfileInt( "Prefs", "NoClamp", 0 );
-    p->m_bDropModel           = app->GetProfileInt( "Prefs", "DropModel", 0 );
-    p->m_bOrientModel         = app->GetProfileInt( "Prefs", "OrientModel", 0 );
-    p->ScriptGroupKey         = app->GetProfileString( "Prefs", "ScriptGroupKey", "script_group" );
-    p->ScriptGroupTokenKey    = app->GetProfileString( "Prefs", "ScriptGroupTokenKey", "script_group_tokens" );
-    p->ScriptColorTeamKey     = app->GetProfileString( "Prefs", "ScriptColorTeamKey", "script_color_allies" );
-    p->ScriptColorKey         = app->GetProfileString( "Prefs", "ScriptColorKey", "red" );
-    p->ScriptSubKey_key       = app->GetProfileString( "Prefs", "ScriptSubKey_key", "script_objective_active" );
-    p->ScriptSubValue_key     = app->GetProfileString( "Prefs", "ScriptSubValue_key", "" );
-    p->m_strUserIniPath       = app->GetProfileString( "Prefs", "UserINIPath", "" );
-    p->m_strUserFilterPath    = app->GetProfileString( "Prefs", "UserFiltersPath", "" );
-    p->m_nRotation            = app->GetProfileInt( "Prefs", "Rotation", 45 );
-    p->farplane               = app->GetProfileInt( "Prefs", "Farplane", 8192 );
-    p->tolerant_weld          = app->GetProfileInt( "Prefs", "TolerantWeldThreshold", 24 );
-    p->vehicle_arrow_time     = app->GetProfileInt( "Prefs", "VehArrowTime", 1000 );
-    p->vehicle_arrow_size     = app->GetProfileInt( "Prefs", "VehArrowSize", 128 );
-    p->splay                  = app->GetProfileInt( "Prefs", "SplayDistance", 128 );
-    p->m_bChaseMouse          = app->GetProfileInt( "Prefs", "ChaseMouse", 1 );
-    p->m_nEntityShowState     = app->GetProfileInt( "Prefs", "EntityShow", 0 );
+    p->m_nView                = Radiant_ProfileGetInt( "Prefs", "QE4StyleWindows", 0 );
+    p->m_bTextureLock         = Radiant_ProfileGetInt( "Prefs", "TextureLock", 1 );
+    p->m_bRotateLock          = Radiant_ProfileGetInt( "Prefs", "RotateLock", 1 );
+    p->m_bLightmapLock        = Radiant_ProfileGetInt( "Prefs", "LightmapLock", 0 );
+    p->m_strLastProject       = Radiant_ProfileGetString( "Prefs", "LastProject", "" );
+    p->m_strLastMap           = Radiant_ProfileGetString( "Prefs", "LastMap", "" );
+    p->m_bLoadLast            = Radiant_ProfileGetInt( "Prefs", "LoadLast", 1 );
+    p->m_bRunBefore           = Radiant_ProfileGetInt( "Internals", "RunBefore", 0 );
+    p->camera_mode            = Radiant_ProfileGetInt( "Prefs", "CameraMode", 1 );
+    p->camera_masked          = Radiant_ProfileGetInt( "Prefs", "CameraMasked", 1 );
+    p->m_bFace                = Radiant_ProfileGetInt( "Prefs", "NewFaceGrab", 1 );
+    p->m_bRightClick          = Radiant_ProfileGetInt( "Prefs", "NewRightClick", 1 );
+    p->m_bAutoSave            = Radiant_ProfileGetInt( "Prefs", "Autosave", 1 );
+    p->m_bNewApplyHandling    = Radiant_ProfileGetInt( "Prefs", "ApplyDismissesSurface", 0 );
+    p->m_bLoadLastMap         = Radiant_ProfileGetInt( "Prefs", "LoadLastMap", 0 );
+    p->m_bTextureWindowSearch = Radiant_ProfileGetInt( "Prefs", "NewTextureWindowStuff", 0 );
+    p->m_bCleanTinyBrushes    = Radiant_ProfileGetInt( "Prefs", "CleanTinyBrushes", 0 );
+    p->m_fTinySize            = (float)atof( Radiant_ProfileGetString( "Prefs", "CleanTinyBrusheSize", "0.5" ).c_str() );
+    p->m_nAutoSave            = Radiant_ProfileGetInt( "Prefs", "AutosaveMinutes", 5 );
+    p->m_bSnapShots           = Radiant_ProfileGetInt( "Prefs", "Snapshots", 0 );
+    p->loose_changes          = Radiant_ProfileGetInt( "Prefs", "DefaultSaveNo", 0 );
+    p->m_nStatusSize          = Radiant_ProfileGetInt( "Prefs", "StatusPointSize", 10 );
+    p->m_nMoveSpeed           = Radiant_ProfileGetInt( "Prefs", "MoveSpeed", 350 );
+    p->m_nAngleSpeed          = Radiant_ProfileGetInt( "Prefs", "AngleSpeed", 150 );
+    p->m_bCamXYUpdate         = Radiant_ProfileGetInt( "Prefs", "CamXYUpdate", 0 );
+    p->m_bCubicClipping       = Radiant_ProfileGetInt( "Prefs", "CubicClipping", 1 ) != 0;
+    p->m_nCubicScale          = Radiant_ProfileGetInt( "Prefs", "CubicScale", 13 );
+    p->m_bALTEdge             = Radiant_ProfileGetInt( "Prefs", "ALTEdgeDrag", 1 );
+    p->m_bTextureBar          = Radiant_ProfileGetInt( "Prefs", "UseTextureBar", 0 );
+    p->which_game             = Radiant_ProfileGetString( "Prefs", "WhichGame", "" );
+    p->m_bSnapTToGrid         = Radiant_ProfileGetInt( "Prefs", "SnapT", 0 );
+    p->linking_keeps_selection= Radiant_ProfileGetInt( "Prefs", "LinkSelect", 0 );
+    p->m_bXZVis               = Radiant_ProfileGetInt( "Prefs", "XZVIS", 0 );
+    p->m_bYZVis               = Radiant_ProfileGetInt( "Prefs", "YZVIS", 0 );
+    p->m_bZVis                = Radiant_ProfileGetInt( "Prefs", "ZVIS", 1 );
+    p->m_bSizePaint           = Radiant_ProfileGetInt( "Prefs", "SizePainting", 1 );
+    p->b_mCullSky             = Radiant_ProfileGetInt( "Prefs", "CullSkies", 1 );
+    p->m_dropHeight           = Radiant_ProfileGetInt( "Prefs", "DropHeight", 28 );
+    p->m_bNoClamp             = Radiant_ProfileGetInt( "Prefs", "NoClamp", 0 );
+    p->m_bDropModel           = Radiant_ProfileGetInt( "Prefs", "DropModel", 0 );
+    p->m_bOrientModel         = Radiant_ProfileGetInt( "Prefs", "OrientModel", 0 );
+    p->ScriptGroupKey         = Radiant_ProfileGetString( "Prefs", "ScriptGroupKey", "script_group" );
+    p->ScriptGroupTokenKey    = Radiant_ProfileGetString( "Prefs", "ScriptGroupTokenKey", "script_group_tokens" );
+    p->ScriptColorTeamKey     = Radiant_ProfileGetString( "Prefs", "ScriptColorTeamKey", "script_color_allies" );
+    p->ScriptColorKey         = Radiant_ProfileGetString( "Prefs", "ScriptColorKey", "red" );
+    p->ScriptSubKey_key       = Radiant_ProfileGetString( "Prefs", "ScriptSubKey_key", "script_objective_active" );
+    p->ScriptSubValue_key     = Radiant_ProfileGetString( "Prefs", "ScriptSubValue_key", "" );
+    p->m_strUserIniPath       = Radiant_ProfileGetString( "Prefs", "UserINIPath", "" );
+    p->m_strUserFilterPath    = Radiant_ProfileGetString( "Prefs", "UserFiltersPath", "" );
+    p->m_nRotation            = Radiant_ProfileGetInt( "Prefs", "Rotation", 45 );
+    p->farplane               = Radiant_ProfileGetInt( "Prefs", "Farplane", 8192 );
+    p->tolerant_weld          = Radiant_ProfileGetInt( "Prefs", "TolerantWeldThreshold", 24 );
+    p->vehicle_arrow_time     = Radiant_ProfileGetInt( "Prefs", "VehArrowTime", 1000 );
+    p->vehicle_arrow_size     = Radiant_ProfileGetInt( "Prefs", "VehArrowSize", 128 );
+    p->splay                  = Radiant_ProfileGetInt( "Prefs", "SplayDistance", 128 );
+    p->m_bChaseMouse          = Radiant_ProfileGetInt( "Prefs", "ChaseMouse", 1 );
+    p->m_nEntityShowState     = Radiant_ProfileGetInt( "Prefs", "EntityShow", 0 );
     if ( !p->m_nEntityShowState )
         p->m_nEntityShowState = 65552;
-    p->m_nTextureWindowScale  = app->GetProfileInt( "Prefs", "TextureScale", 50 );
-    p->m_bTextureScrollbar    = app->GetProfileInt( "Prefs", "TextureScrollbar", 1 );
-    p->m_bSwitchClip          = app->GetProfileInt( "Prefs", "SwitchClipKey", 1 );
-    p->m_bSelectWholeEntities = app->GetProfileInt( "Prefs", "SelectWholeEntitiesKey", 1 );
-    p->thick_selection_lines  = app->GetProfileInt( "Prefs", "ThickLines", 1 );
-    p->m_bColoredEnts         = app->GetProfileInt( "Prefs", "ColoredEnts", 0 );
-    p->m_bTolerantWeld        = app->GetProfileInt( "Prefs", "TolerantWeld", 0 );
-    p->m_bVertSnapModel       = app->GetProfileInt( "Prefs", "VertSnapModel", 0 );
-    p->m_bVertSnapBrush       = app->GetProfileInt( "Prefs", "VertSnapBrush", 0 );
-    p->m_bVertSnapPrefab      = app->GetProfileInt( "Prefs", "VertSnapPrefab", 0 );
-    p->m_bSelectableModels    = app->GetProfileInt( "Prefs", "ModelSelection", 0 );
-    p->m_bSelectCurves        = app->GetProfileInt( "Prefs", "SelectCurves", 1 );
-    p->texture_brush_2d       = app->GetProfileInt( "Prefs", "2dTextured", 0 );
-    p->texture_mesh_2d        = app->GetProfileInt( "Prefs", "2dMeshTextured", 0 );
-    p->fast_2d_view_dragging  = app->GetProfileInt( "Prefs", "Fast2dDragging", 1 );
-    p->detatch_windows        = app->GetProfileInt( "Prefs", "FloatingWindows", 0 );
-    p->transparent_background = app->GetProfileInt( "Prefs", "TransparentBackground", 0 );
-    p->m_nUndoLevels          = app->GetProfileInt( "Prefs", "UndoLevels", 10 );
-    p->patch_wireframe        = app->GetProfileInt( "Prefs", "PatchWireframe", 0 );
-    p->g_bPatchWeld           = app->GetProfileInt( "Prefs", "PatchWeld", 1 ) != 0;
-    p->patch_drill_down       = app->GetProfileInt( "Prefs", "PatchDrillDown", 1 ) != 0;
-    p->entities_off           = app->GetProfileInt( "Prefs", "EntitiesOff", 0 );
-    p->sky_brush_off          = app->GetProfileInt( "Prefs", "SkyBrushOff", 0 );
-    p->draw_toggle            = app->GetProfileInt( "Prefs", "DrawToggle", 0 );
-    p->scale_base             = app->GetProfileInt( "Prefs", "ScaleBase", 100 );
-    p->scale_range            = app->GetProfileInt( "Prefs", "ScaleRange", 30 );
-    p->camera_fov             = (float)(unsigned int)app->GetProfileInt( "Prefs", "Fov", 65 );
-    p->camera_use_wheel       = app->GetProfileInt( "Prefs", "CameraUseWheel", 1 );
-    p->model_origin_size      = (float)(unsigned int)app->GetProfileInt( "Prefs", "ModelOrgSize", 4 );
-    p->prefab_origin_size     = (float)(unsigned int)app->GetProfileInt( "Prefs", "PrefabOrgSize", 16 );
-    p->enable_light_preview   = app->GetProfileInt( "Prefs", "LightPreviewEnable", 1 );
-    p->preview_sun_aswell     = app->GetProfileInt( "Prefs", "SunLightPreviewEnable", 0 );
+    p->m_nTextureWindowScale  = Radiant_ProfileGetInt( "Prefs", "TextureScale", 50 );
+    p->m_bTextureScrollbar    = Radiant_ProfileGetInt( "Prefs", "TextureScrollbar", 1 );
+    p->m_bSwitchClip          = Radiant_ProfileGetInt( "Prefs", "SwitchClipKey", 1 );
+    p->m_bSelectWholeEntities = Radiant_ProfileGetInt( "Prefs", "SelectWholeEntitiesKey", 1 );
+    p->thick_selection_lines  = Radiant_ProfileGetInt( "Prefs", "ThickLines", 1 );
+    p->m_bColoredEnts         = Radiant_ProfileGetInt( "Prefs", "ColoredEnts", 0 );
+    p->m_bTolerantWeld        = Radiant_ProfileGetInt( "Prefs", "TolerantWeld", 0 );
+    p->m_bVertSnapModel       = Radiant_ProfileGetInt( "Prefs", "VertSnapModel", 0 );
+    p->m_bVertSnapBrush       = Radiant_ProfileGetInt( "Prefs", "VertSnapBrush", 0 );
+    p->m_bVertSnapPrefab      = Radiant_ProfileGetInt( "Prefs", "VertSnapPrefab", 0 );
+    p->m_bSelectableModels    = Radiant_ProfileGetInt( "Prefs", "ModelSelection", 0 );
+    p->m_bSelectCurves        = Radiant_ProfileGetInt( "Prefs", "SelectCurves", 1 );
+    p->texture_brush_2d       = Radiant_ProfileGetInt( "Prefs", "2dTextured", 0 );
+    p->texture_mesh_2d        = Radiant_ProfileGetInt( "Prefs", "2dMeshTextured", 0 );
+    p->fast_2d_view_dragging  = Radiant_ProfileGetInt( "Prefs", "Fast2dDragging", 1 );
+    p->detatch_windows        = Radiant_ProfileGetInt( "Prefs", "FloatingWindows", 0 );
+    p->transparent_background = Radiant_ProfileGetInt( "Prefs", "TransparentBackground", 0 );
+    p->m_nUndoLevels          = Radiant_ProfileGetInt( "Prefs", "UndoLevels", 10 );
+    p->patch_wireframe        = Radiant_ProfileGetInt( "Prefs", "PatchWireframe", 0 );
+    p->g_bPatchWeld           = Radiant_ProfileGetInt( "Prefs", "PatchWeld", 1 ) != 0;
+    p->patch_drill_down       = Radiant_ProfileGetInt( "Prefs", "PatchDrillDown", 1 ) != 0;
+    p->entities_off           = Radiant_ProfileGetInt( "Prefs", "EntitiesOff", 0 );
+    p->sky_brush_off          = Radiant_ProfileGetInt( "Prefs", "SkyBrushOff", 0 );
+    p->draw_toggle            = Radiant_ProfileGetInt( "Prefs", "DrawToggle", 0 );
+    p->scale_base             = Radiant_ProfileGetInt( "Prefs", "ScaleBase", 100 );
+    p->scale_range            = Radiant_ProfileGetInt( "Prefs", "ScaleRange", 30 );
+    p->camera_fov             = (float)(unsigned int)Radiant_ProfileGetInt( "Prefs", "Fov", 65 );
+    p->camera_use_wheel       = Radiant_ProfileGetInt( "Prefs", "CameraUseWheel", 1 );
+    p->model_origin_size      = (float)(unsigned int)Radiant_ProfileGetInt( "Prefs", "ModelOrgSize", 4 );
+    p->prefab_origin_size     = (float)(unsigned int)Radiant_ProfileGetInt( "Prefs", "PrefabOrgSize", 16 );
+    p->enable_light_preview   = Radiant_ProfileGetInt( "Prefs", "LightPreviewEnable", 1 );
+    p->preview_sun_aswell     = Radiant_ProfileGetInt( "Prefs", "SunLightPreviewEnable", 0 );
     // The binary re-reads VertSnap* under the Snap* keys (the later read wins).
-    p->m_bVertSnapModel       = app->GetProfileInt( "Prefs", "SnapModel", 0 );
-    p->m_bVertSnapBrush       = app->GetProfileInt( "Prefs", "SnapBrush", 0 );
-    p->m_bVertSnapPrefab      = app->GetProfileInt( "Prefs", "SnapPrefab", 0 );
+    p->m_bVertSnapModel       = Radiant_ProfileGetInt( "Prefs", "SnapModel", 0 );
+    p->m_bVertSnapBrush       = Radiant_ProfileGetInt( "Prefs", "SnapBrush", 0 );
+    p->m_bVertSnapPrefab      = Radiant_ProfileGetInt( "Prefs", "SnapPrefab", 0 );
     // NOTE: the binary's "if (!RunBefore) SavePrefs()" first-run cascade is omitted
     // here to keep load side-effect-free (the GUI Save-on-OK / toggle handlers create
     // the keys on first change). Behaviour at defaults is identical.
@@ -224,111 +221,107 @@ void Prefs_LoadPrefs( prefData_t *p )
 // CPrefsDlg::SavePrefs (0x44f280) — clamp the few validated fields, then write all.
 void Prefs_SavePrefs( prefData_t *p )
 {
-    CWinApp *app = AfxGetApp();
-    if ( !app )
-        return;
-
-    app->WriteProfileInt( "Prefs", "MouseButtons", p->m_nMouse_unsure );
+    Radiant_ProfileSetInt( "Prefs", "MouseButtons", p->m_nMouse_unsure );
     p->m_nMouseButtons = ( p->m_nMouse_unsure != 0 ) + 2;
-    app->WriteProfileInt( "Prefs", "QE4StyleWindows", p->m_nView );
-    app->WriteProfileInt( "Prefs", "TextureLock", p->m_bTextureLock );
-    app->WriteProfileInt( "Prefs", "RotateLock", p->m_bRotateLock );
-    app->WriteProfileInt( "Prefs", "LightmapLock", p->m_bLightmapLock );
-    app->WriteProfileInt( "Prefs", "LoadLast", p->m_bLoadLast );
-    app->WriteProfileString( "Prefs", "LastProject", p->m_strLastProject );
-    app->WriteProfileString( "Prefs", "LastMap", p->m_strLastMap );
-    app->WriteProfileInt( "Internals", "RunBefore", p->m_bRunBefore );
-    app->WriteProfileInt( "Prefs", "CameraMode", p->camera_mode );
-    app->WriteProfileInt( "Prefs", "CameraMasked", p->camera_masked );
-    app->WriteProfileInt( "Prefs", "NewFaceGrab", p->m_bFace );
-    app->WriteProfileInt( "Prefs", "NewRightClick", p->m_bRightClick );
-    app->WriteProfileInt( "Prefs", "Autosave", p->m_bAutoSave );
-    app->WriteProfileInt( "Prefs", "LoadLastMap", p->m_bLoadLastMap );
-    app->WriteProfileInt( "Prefs", "NewTextureWindowStuff", p->m_bTextureWindowSearch );
-    app->WriteProfileInt( "Prefs", "AutosaveMinutes", p->m_nAutoSave );
-    app->WriteProfileInt( "Prefs", "Snapshots", p->m_bSnapShots );
-    app->WriteProfileInt( "Prefs", "DefaultSaveNo", p->loose_changes );
-    app->WriteProfileInt( "Prefs", "StatusPointSize", p->m_nStatusSize );
-    app->WriteProfileInt( "Prefs", "CamXYUpdate", p->m_bCamXYUpdate );
-    app->WriteProfileInt( "Prefs", "MoveSpeed", p->m_nMoveSpeed );
-    app->WriteProfileInt( "Prefs", "AngleSpeed", p->m_nAngleSpeed );
-    app->WriteProfileInt( "Prefs", "CubicClipping", p->m_bCubicClipping );
-    app->WriteProfileInt( "Prefs", "CubicScale", p->m_nCubicScale );
-    app->WriteProfileInt( "Prefs", "ALTEdgeDrag", p->m_bALTEdge );
-    app->WriteProfileInt( "Prefs", "UseTextureBar", p->m_bTextureBar );
-    app->WriteProfileString( "Prefs", "WhichGame", p->which_game );
-    app->WriteProfileInt( "Prefs", "SnapT", p->m_bSnapTToGrid );
-    app->WriteProfileInt( "Prefs", "LinkSelect", p->linking_keeps_selection );
-    app->WriteProfileInt( "Prefs", "XZVIS", p->m_bXZVis );
-    app->WriteProfileInt( "Prefs", "YZVIS", p->m_bYZVis );
-    app->WriteProfileInt( "Prefs", "ZVIS", p->m_bZVis );
-    app->WriteProfileInt( "Prefs", "SizePainting", p->m_bSizePaint );
-    app->WriteProfileInt( "Prefs", "CullSkies", p->b_mCullSky );
-    app->WriteProfileInt( "Prefs", "DropHeight", p->m_dropHeight );
-    app->WriteProfileInt( "Prefs", "NoClamp", p->m_bNoClamp );
-    app->WriteProfileInt( "Prefs", "DropModel", p->m_bDropModel );
-    app->WriteProfileInt( "Prefs", "OrientModel", p->m_bOrientModel );
-    app->WriteProfileString( "Prefs", "ScriptGroupKey", p->ScriptGroupKey );
-    app->WriteProfileString( "Prefs", "ScriptGroupTokenKey", p->ScriptGroupTokenKey );
-    app->WriteProfileString( "Prefs", "ScriptColorTeamKey", p->ScriptColorTeamKey );
-    app->WriteProfileString( "Prefs", "ScriptColorKey", p->ScriptColorKey );
-    app->WriteProfileString( "Prefs", "ScriptSubKey_key", p->ScriptSubKey_key );
-    app->WriteProfileString( "Prefs", "ScriptSubValue_key", p->ScriptSubValue_key );
-    app->WriteProfileString( "Prefs", "UserINIPath", p->m_strUserIniPath );
-    app->WriteProfileString( "Prefs", "UserFiltersPath", p->m_strUserFilterPath );
-    app->WriteProfileInt( "Prefs", "Rotation", p->m_nRotation );
-    app->WriteProfileInt( "Prefs", "Farplane", p->farplane );
-    app->WriteProfileInt( "Prefs", "TolerantWeldThreshold", p->tolerant_weld );
-    app->WriteProfileInt( "Prefs", "VehArrowTime", p->vehicle_arrow_time );
-    app->WriteProfileInt( "Prefs", "VehArrowSize", p->vehicle_arrow_size );
-    app->WriteProfileInt( "Prefs", "SplayDistance", p->splay );
-    app->WriteProfileInt( "Prefs", "ModelSelection", p->m_bSelectableModels );
+    Radiant_ProfileSetInt( "Prefs", "QE4StyleWindows", p->m_nView );
+    Radiant_ProfileSetInt( "Prefs", "TextureLock", p->m_bTextureLock );
+    Radiant_ProfileSetInt( "Prefs", "RotateLock", p->m_bRotateLock );
+    Radiant_ProfileSetInt( "Prefs", "LightmapLock", p->m_bLightmapLock );
+    Radiant_ProfileSetInt( "Prefs", "LoadLast", p->m_bLoadLast );
+    Radiant_ProfileSetString( "Prefs", "LastProject", p->m_strLastProject.c_str() );
+    Radiant_ProfileSetString( "Prefs", "LastMap", p->m_strLastMap.c_str() );
+    Radiant_ProfileSetInt( "Internals", "RunBefore", p->m_bRunBefore );
+    Radiant_ProfileSetInt( "Prefs", "CameraMode", p->camera_mode );
+    Radiant_ProfileSetInt( "Prefs", "CameraMasked", p->camera_masked );
+    Radiant_ProfileSetInt( "Prefs", "NewFaceGrab", p->m_bFace );
+    Radiant_ProfileSetInt( "Prefs", "NewRightClick", p->m_bRightClick );
+    Radiant_ProfileSetInt( "Prefs", "Autosave", p->m_bAutoSave );
+    Radiant_ProfileSetInt( "Prefs", "LoadLastMap", p->m_bLoadLastMap );
+    Radiant_ProfileSetInt( "Prefs", "NewTextureWindowStuff", p->m_bTextureWindowSearch );
+    Radiant_ProfileSetInt( "Prefs", "AutosaveMinutes", p->m_nAutoSave );
+    Radiant_ProfileSetInt( "Prefs", "Snapshots", p->m_bSnapShots );
+    Radiant_ProfileSetInt( "Prefs", "DefaultSaveNo", p->loose_changes );
+    Radiant_ProfileSetInt( "Prefs", "StatusPointSize", p->m_nStatusSize );
+    Radiant_ProfileSetInt( "Prefs", "CamXYUpdate", p->m_bCamXYUpdate );
+    Radiant_ProfileSetInt( "Prefs", "MoveSpeed", p->m_nMoveSpeed );
+    Radiant_ProfileSetInt( "Prefs", "AngleSpeed", p->m_nAngleSpeed );
+    Radiant_ProfileSetInt( "Prefs", "CubicClipping", p->m_bCubicClipping );
+    Radiant_ProfileSetInt( "Prefs", "CubicScale", p->m_nCubicScale );
+    Radiant_ProfileSetInt( "Prefs", "ALTEdgeDrag", p->m_bALTEdge );
+    Radiant_ProfileSetInt( "Prefs", "UseTextureBar", p->m_bTextureBar );
+    Radiant_ProfileSetString( "Prefs", "WhichGame", p->which_game.c_str() );
+    Radiant_ProfileSetInt( "Prefs", "SnapT", p->m_bSnapTToGrid );
+    Radiant_ProfileSetInt( "Prefs", "LinkSelect", p->linking_keeps_selection );
+    Radiant_ProfileSetInt( "Prefs", "XZVIS", p->m_bXZVis );
+    Radiant_ProfileSetInt( "Prefs", "YZVIS", p->m_bYZVis );
+    Radiant_ProfileSetInt( "Prefs", "ZVIS", p->m_bZVis );
+    Radiant_ProfileSetInt( "Prefs", "SizePainting", p->m_bSizePaint );
+    Radiant_ProfileSetInt( "Prefs", "CullSkies", p->b_mCullSky );
+    Radiant_ProfileSetInt( "Prefs", "DropHeight", p->m_dropHeight );
+    Radiant_ProfileSetInt( "Prefs", "NoClamp", p->m_bNoClamp );
+    Radiant_ProfileSetInt( "Prefs", "DropModel", p->m_bDropModel );
+    Radiant_ProfileSetInt( "Prefs", "OrientModel", p->m_bOrientModel );
+    Radiant_ProfileSetString( "Prefs", "ScriptGroupKey", p->ScriptGroupKey.c_str() );
+    Radiant_ProfileSetString( "Prefs", "ScriptGroupTokenKey", p->ScriptGroupTokenKey.c_str() );
+    Radiant_ProfileSetString( "Prefs", "ScriptColorTeamKey", p->ScriptColorTeamKey.c_str() );
+    Radiant_ProfileSetString( "Prefs", "ScriptColorKey", p->ScriptColorKey.c_str() );
+    Radiant_ProfileSetString( "Prefs", "ScriptSubKey_key", p->ScriptSubKey_key.c_str() );
+    Radiant_ProfileSetString( "Prefs", "ScriptSubValue_key", p->ScriptSubValue_key.c_str() );
+    Radiant_ProfileSetString( "Prefs", "UserINIPath", p->m_strUserIniPath.c_str() );
+    Radiant_ProfileSetString( "Prefs", "UserFiltersPath", p->m_strUserFilterPath.c_str() );
+    Radiant_ProfileSetInt( "Prefs", "Rotation", p->m_nRotation );
+    Radiant_ProfileSetInt( "Prefs", "Farplane", p->farplane );
+    Radiant_ProfileSetInt( "Prefs", "TolerantWeldThreshold", p->tolerant_weld );
+    Radiant_ProfileSetInt( "Prefs", "VehArrowTime", p->vehicle_arrow_time );
+    Radiant_ProfileSetInt( "Prefs", "VehArrowSize", p->vehicle_arrow_size );
+    Radiant_ProfileSetInt( "Prefs", "SplayDistance", p->splay );
+    Radiant_ProfileSetInt( "Prefs", "ModelSelection", p->m_bSelectableModels );
     // IDA SavePrefs 0x44f280 does NOT write "SelectCurves" here (LoadPrefs reads it, but the
     // binary never persists it — a latent quirk); matched by omitting the write.  The binary
     // instead re-writes "ModelSelection" a SECOND time later (after VertSnapPrefab — restored
     // below), so this was a swapped/invented write.
-    app->WriteProfileInt( "Prefs", "ChaseMouse", p->m_bChaseMouse );
-    app->WriteProfileInt( "Prefs", "EntityShow", p->m_nEntityShowState );
-    app->WriteProfileInt( "Prefs", "TextureScale", p->m_nTextureWindowScale );
-    app->WriteProfileInt( "Prefs", "TextureScrollbar", p->m_bTextureScrollbar );
-    app->WriteProfileInt( "Prefs", "SwitchClipKey", p->m_bSwitchClip );
-    app->WriteProfileInt( "Prefs", "SelectWholeEntitiesKey", p->m_bSelectWholeEntities );
-    app->WriteProfileInt( "Prefs", "ThickLines", p->thick_selection_lines );
-    app->WriteProfileInt( "Prefs", "ColoredEnts", p->m_bColoredEnts );
-    app->WriteProfileInt( "Prefs", "TolerantWeld", p->m_bTolerantWeld );
-    app->WriteProfileInt( "Prefs", "VertSnapModel", p->m_bVertSnapModel );
-    app->WriteProfileInt( "Prefs", "VertSnapBrush", p->m_bVertSnapBrush );
-    app->WriteProfileInt( "Prefs", "VertSnapPrefab", p->m_bVertSnapPrefab );
-    app->WriteProfileInt( "Prefs", "ModelSelection", p->m_bSelectableModels );  // IDA v78: binary writes ModelSelection a 2nd time here
-    app->WriteProfileInt( "Prefs", "2dTextured", p->texture_brush_2d );
-    app->WriteProfileInt( "Prefs", "2dMeshTextured", p->texture_mesh_2d );
-    app->WriteProfileInt( "Prefs", "Fast2dDragging", p->fast_2d_view_dragging );
-    app->WriteProfileInt( "Prefs", "FloatingWindows", p->detatch_windows );
-    app->WriteProfileInt( "Prefs", "TransparentBackground", p->transparent_background );
-    app->WriteProfileInt( "Prefs", "UndoLevels", p->m_nUndoLevels );
-    app->WriteProfileInt( "Prefs", "PatchWireframe", p->patch_wireframe );
-    app->WriteProfileInt( "Prefs", "PatchWeld", p->g_bPatchWeld );
-    app->WriteProfileInt( "Prefs", "PatchDrillDown", p->patch_drill_down );
-    app->WriteProfileInt( "Prefs", "DrawToggle", p->draw_toggle );
-    app->WriteProfileInt( "Prefs", "EntitiesOff", p->entities_off );
-    app->WriteProfileInt( "Prefs", "SkyBrushOff", p->sky_brush_off );
-    app->WriteProfileInt( "Prefs", "CameraUseWheel", p->camera_use_wheel );
-    app->WriteProfileInt( "Prefs", "ModelOrgSize", (int)p->model_origin_size );
-    app->WriteProfileInt( "Prefs", "PrefabOrgSize", (int)p->prefab_origin_size );
-    app->WriteProfileInt( "Prefs", "LightPreviewEnable", p->enable_light_preview );
-    app->WriteProfileInt( "Prefs", "SunLightPreviewEnable", p->preview_sun_aswell );
-    app->WriteProfileInt( "Prefs", "SnapModel", p->m_bVertSnapModel );
-    app->WriteProfileInt( "Prefs", "SnapBrush", p->m_bVertSnapBrush );
-    app->WriteProfileInt( "Prefs", "SnapPrefab", p->m_bVertSnapPrefab );
+    Radiant_ProfileSetInt( "Prefs", "ChaseMouse", p->m_bChaseMouse );
+    Radiant_ProfileSetInt( "Prefs", "EntityShow", p->m_nEntityShowState );
+    Radiant_ProfileSetInt( "Prefs", "TextureScale", p->m_nTextureWindowScale );
+    Radiant_ProfileSetInt( "Prefs", "TextureScrollbar", p->m_bTextureScrollbar );
+    Radiant_ProfileSetInt( "Prefs", "SwitchClipKey", p->m_bSwitchClip );
+    Radiant_ProfileSetInt( "Prefs", "SelectWholeEntitiesKey", p->m_bSelectWholeEntities );
+    Radiant_ProfileSetInt( "Prefs", "ThickLines", p->thick_selection_lines );
+    Radiant_ProfileSetInt( "Prefs", "ColoredEnts", p->m_bColoredEnts );
+    Radiant_ProfileSetInt( "Prefs", "TolerantWeld", p->m_bTolerantWeld );
+    Radiant_ProfileSetInt( "Prefs", "VertSnapModel", p->m_bVertSnapModel );
+    Radiant_ProfileSetInt( "Prefs", "VertSnapBrush", p->m_bVertSnapBrush );
+    Radiant_ProfileSetInt( "Prefs", "VertSnapPrefab", p->m_bVertSnapPrefab );
+    Radiant_ProfileSetInt( "Prefs", "ModelSelection", p->m_bSelectableModels );  // IDA v78: binary writes ModelSelection a 2nd time here
+    Radiant_ProfileSetInt( "Prefs", "2dTextured", p->texture_brush_2d );
+    Radiant_ProfileSetInt( "Prefs", "2dMeshTextured", p->texture_mesh_2d );
+    Radiant_ProfileSetInt( "Prefs", "Fast2dDragging", p->fast_2d_view_dragging );
+    Radiant_ProfileSetInt( "Prefs", "FloatingWindows", p->detatch_windows );
+    Radiant_ProfileSetInt( "Prefs", "TransparentBackground", p->transparent_background );
+    Radiant_ProfileSetInt( "Prefs", "UndoLevels", p->m_nUndoLevels );
+    Radiant_ProfileSetInt( "Prefs", "PatchWireframe", p->patch_wireframe );
+    Radiant_ProfileSetInt( "Prefs", "PatchWeld", p->g_bPatchWeld );
+    Radiant_ProfileSetInt( "Prefs", "PatchDrillDown", p->patch_drill_down );
+    Radiant_ProfileSetInt( "Prefs", "DrawToggle", p->draw_toggle );
+    Radiant_ProfileSetInt( "Prefs", "EntitiesOff", p->entities_off );
+    Radiant_ProfileSetInt( "Prefs", "SkyBrushOff", p->sky_brush_off );
+    Radiant_ProfileSetInt( "Prefs", "CameraUseWheel", p->camera_use_wheel );
+    Radiant_ProfileSetInt( "Prefs", "ModelOrgSize", (int)p->model_origin_size );
+    Radiant_ProfileSetInt( "Prefs", "PrefabOrgSize", (int)p->prefab_origin_size );
+    Radiant_ProfileSetInt( "Prefs", "LightPreviewEnable", p->enable_light_preview );
+    Radiant_ProfileSetInt( "Prefs", "SunLightPreviewEnable", p->preview_sun_aswell );
+    Radiant_ProfileSetInt( "Prefs", "SnapModel", p->m_bVertSnapModel );
+    Radiant_ProfileSetInt( "Prefs", "SnapBrush", p->m_bVertSnapBrush );
+    Radiant_ProfileSetInt( "Prefs", "SnapPrefab", p->m_bVertSnapPrefab );
     if ( p->scale_base <= 1 )
         p->scale_base = 100;
-    app->WriteProfileInt( "Prefs", "ScaleBase", p->scale_base );
+    Radiant_ProfileSetInt( "Prefs", "ScaleBase", p->scale_base );
     if ( p->scale_base - p->scale_range <= 0 )
         p->scale_range = p->scale_base - 1;
-    app->WriteProfileInt( "Prefs", "ScaleRange", p->scale_range );
+    Radiant_ProfileSetInt( "Prefs", "ScaleRange", p->scale_range );
     if ( p->camera_fov < 2.0f )          p->camera_fov = 2.0f;
     else if ( p->camera_fov > 160.0f )   p->camera_fov = 160.0f;
-    app->WriteProfileInt( "Prefs", "Fov", (int)p->camera_fov );
+    Radiant_ProfileSetInt( "Prefs", "Fov", (int)p->camera_fov );
 }
 
 void Prefs_Init( bool loadFromRegistry )
@@ -362,11 +355,11 @@ struct prefsDlgState_t
     int   nTolerantWeld, nSplay, nDropHeight, nScaleBase, nScaleRange;
     int   nVehArrowTime, nVehArrowSize;
     float fFov, fModelOrg, fPrefabOrg;
-    CString sUserIni, sUserFilters;
+    std::string sUserIni, sUserFilters;   // was MFC CString before U-SHIM removal
 };
 
 // UI-independent load pass behind the dialog's OnInitDialog: prefData_t → control state.
-static void PrefsDlg_Gather( const prefData_t *p, prefsDlgState_t &out )
+void PrefsDlg_Gather( const prefData_t *p, prefsDlgState_t &out )
 {
     out.rMouse         = ( p->m_nMouseButtons == 3 ) ? 1 : 0;
     out.rView          = p->m_nView;
@@ -416,7 +409,7 @@ static void PrefsDlg_Gather( const prefData_t *p, prefsDlgState_t &out )
 }
 
 // UI-independent action behind the dialog's OK: control state → prefData_t, then persist.
-static void Prefs_ApplyFromDialogState( prefData_t *p, const prefsDlgState_t &st )
+void Prefs_ApplyFromDialogState( prefData_t *p, const prefsDlgState_t &st )
 {
     p->m_nMouse_unsure    = st.rMouse;                // raw registry value (0/1)
     p->m_nMouseButtons    = st.rMouse ? 3 : 2;
@@ -478,254 +471,8 @@ static void Prefs_ApplyFromDialogState( prefData_t *p, const prefsDlgState_t &st
 //  features but are still BOUND (persist their field) per the operator directive.
 //  The 4-checkbox IDD_RADIANT_PREFS_MINI stand-in is retired.
 // ─────────────────────────────────────────────────────────────────────────────
-class CPrefsDlg : public CDialog
-{
-public:
-    CPrefsDlg( CWnd *parent ) : CDialog( IDD_COD4RADIANT_PREFERENCES, parent ) {}
-
-protected:
-    // Radio group indices (DDX_Radio): 0-based position of the checked button.
-    int  m_rMouse;      // 1003/1005  "2 button"/"3 button"  → m_nMouseButtons (2→0, 3→1)
-    int  m_rView;       // 1006..     view-mode radio         → m_nView
-    // Checkboxes (BOOL) — control id ↔ prefData_t field (via 0x44de40 DDX + text/LoadPrefs).
-    BOOL m_bLoadLast, m_bFace, m_bRightClick, m_bAutoSave, m_bLoadLastMap, m_bTexSubset;
-    BOOL m_bSnapshots, m_bLoseChanges, m_bCamXYUpdate, m_bUseWheel, m_bAltAlwaysMove;
-    BOOL m_bSnapTGrid, m_bLinkKeepSel, m_bPaintSizing, m_bCullSky, m_bDontClamp;
-    BOOL m_bTexToolbar;   // IDC 1047 "Texture toolbar" ↔ m_bTextureBar (UseTextureBar)
-    BOOL m_bChaseMouse, m_bTexScrollbar, m_bThickLines, m_bColoredEnts, m_bTexBrush2d;
-    BOOL m_bTexMesh2d, m_bFast2dDrag, m_bDetachWin, m_bTransBg;
-    // Edit fields (ints / floats).
-    int   m_nAutoSaveMin, m_nStatusSize, m_nRotation, m_nFarplane, m_nUndoLevels;
-    int   m_nTolerantWeld, m_nSplay, m_nDropHeight, m_nScaleBase, m_nScaleRange;
-    int   m_nVehArrowTime, m_nVehArrowSize;
-    float m_fFov, m_fModelOrg, m_fPrefabOrg;
-    CString m_sUserIni, m_sUserFilters;
-
-    virtual void DoDataExchange( CDataExchange *pDX )
-    {
-        CDialog::DoDataExchange( pDX );
-        // 0x44de9d/af: radios.
-        DDX_Radio( pDX, 1003, m_rMouse );          // 2/3 button
-        DDX_Radio( pDX, 1006, m_rView );           // view mode
-        // Checkboxes (id → field).
-        DDX_Check( pDX, 1021, m_bLoadLast );       // Load last project on open   (LoadLast)
-        DDX_Check( pDX, 1040, m_bFace );           // Face selection              (NewFaceGrab)
-        DDX_Check( pDX, 1042, m_bRightClick );     // Right click to drop entities(NewRightClick)
-        DDX_Check( pDX, 1023, m_bAutoSave );       // Auto save every             (Autosave)
-        DDX_Text ( pDX, 1065, m_nAutoSaveMin );    // autosave minutes            (AutosaveMinutes)
-        DDX_Check( pDX, 1024, m_bLoadLastMap );    // Load last map on open       (LoadLastMap)
-        DDX_Check( pDX, 1045, m_bTexSubset );      // Texture subset              (NewTextureWindowStuff)
-        DDX_Check( pDX, 1094, m_bSnapshots );      // Snapshots                   (Snapshots)
-        DDX_Check( pDX, 1095, m_bLoseChanges );    // Lose changes?               (DefaultSaveNo)
-        DDX_Text ( pDX, 1201, m_nStatusSize );     // Status point size           (StatusPointSize)
-        DDX_Check( pDX, 1223, m_bCamXYUpdate );    // Update XY on drag           (CamXYUpdate)
-        DDX_Check( pDX, 1538, m_bUseWheel );       // Use mouse wheel in camera   (CameraUseWheel)
-        DDX_Check( pDX, 1246, m_bAltAlwaysMove );  // ALT always move             (ALTEdgeDrag)
-        DDX_Check( pDX, 1047, m_bTexToolbar );     // Texture toolbar             (UseTextureBar) [0x44de40 this+143]
-        DDX_Check( pDX, 1051, m_bSnapTGrid );      // Snap T to Grid              (SnapT)
-        DDX_Check( pDX, 1085, m_bLinkKeepSel );    // Linking keeps selection     (LinkSelect)
-        DDX_Check( pDX, 1084, m_bPaintSizing );    // Paint sizing info           (SizePainting)
-        DDX_Check( pDX, 1517, m_bCullSky );        // Cull sky on clip            (CullSkies)
-        DDX_Check( pDX, 1255, m_bDontClamp );      // Don't clamp plane points    (NoClamp)
-        DDX_Text ( pDX, 1026, m_sUserIni );        // User INI path               (UserINIPath)
-        DDX_Text ( pDX, 1685, m_sUserFilters );    // User Filters path           (UserFiltersPath)
-        DDX_Text ( pDX, 1204, m_nRotation );       // Rotation inc                (Rotation)
-        DDX_Text ( pDX, 1027, m_nFarplane );       // Farplane                    (Farplane)
-        DDX_Text ( pDX, 1456, m_nTolerantWeld );   // Tolerant Weld               (TolerantWeldThreshold)
-        DDX_Text ( pDX, 1480, m_nVehArrowTime );   // Vehicle Arrow Time          (VehArrowTime)
-        DDX_Text ( pDX, 1481, m_nVehArrowSize );   // Vehicle Arrow Size          (VehArrowSize)
-        DDX_Text ( pDX, 1457, m_nSplay );          // Splay Distance              (SplayDistance)
-        DDX_Text ( pDX, 1459, m_nDropHeight );     // Drop Height                 (DropHeight)
-        DDX_Check( pDX, 1249, m_bChaseMouse );     // Mouse chaser                (ChaseMouse)
-        DDX_Check( pDX, 1054, m_bTexScrollbar );   // Texture scrollbar           (TextureScrollbar)
-        DDX_Check( pDX, 1486, m_bThickLines );     // Thick selection lines       (ThickLines)
-        DDX_Check( pDX, 1420, m_bColoredEnts );    // Ents use '_color' value     (ColoredEnts)
-        DDX_Check( pDX, 1423, m_bTexBrush2d );     // Texture brushes in 2d       (2dTextured)
-        DDX_Check( pDX, 1424, m_bTexMesh2d );      // Texture meshes in 2d        (2dMeshTextured)
-        DDX_Check( pDX, 1672, m_bFast2dDrag );     // Fast 2d view dragging       (Fast2dDragging)
-        DDX_Check( pDX, 1674, m_bDetachWin );      // Detached Windows            (FloatingWindows)
-        DDX_Check( pDX, 1687, m_bTransBg );        // Transparent background      (TransparentBackground)
-        DDX_Text ( pDX, 1208, m_nUndoLevels );     // Undo Levels                 (UndoLevels)
-        DDX_Text ( pDX, 1461, m_nScaleBase );      // Scale Base                  (ScaleBase)
-        DDX_Text ( pDX, 1463, m_nScaleRange );     // Scale Range                 (ScaleRange)
-        DDX_Text ( pDX, 1700, m_fFov );            // FOV                         (Fov)
-        DDX_Text ( pDX, 1559, m_fModelOrg );       // Model Origin Size           (ModelOrgSize)
-        DDX_Text ( pDX, 1560, m_fPrefabOrg );      // Prefab Origin Size          (PrefabOrgSize)
-    }
-
-    virtual BOOL OnInitDialog()
-    {
-        CDialog::OnInitDialog();
-        prefsDlgState_t st;
-        PrefsDlg_Gather( g_PrefsDlg, st );
-        m_rMouse         = st.rMouse;
-        m_rView          = st.rView;
-        m_bLoadLast      = st.bLoadLast;
-        m_bFace          = st.bFace;
-        m_bRightClick    = st.bRightClick;
-        m_bAutoSave      = st.bAutoSave;
-        m_nAutoSaveMin   = st.nAutoSaveMin;
-        m_bLoadLastMap   = st.bLoadLastMap;
-        m_bTexSubset     = st.bTexSubset;
-        m_bSnapshots     = st.bSnapshots;
-        m_bLoseChanges   = st.bLoseChanges;
-        m_nStatusSize    = st.nStatusSize;
-        m_bCamXYUpdate   = st.bCamXYUpdate;
-        m_bUseWheel      = st.bUseWheel;
-        m_bAltAlwaysMove = st.bAltAlwaysMove;
-        m_bTexToolbar    = st.bTexToolbar;
-        m_bSnapTGrid     = st.bSnapTGrid;
-        m_bLinkKeepSel   = st.bLinkKeepSel;
-        m_bPaintSizing   = st.bPaintSizing;
-        m_bCullSky       = st.bCullSky;
-        m_bDontClamp     = st.bDontClamp;
-        m_sUserIni       = st.sUserIni;
-        m_sUserFilters   = st.sUserFilters;
-        m_nRotation      = st.nRotation;
-        m_nFarplane      = st.nFarplane;
-        m_nTolerantWeld  = st.nTolerantWeld;
-        m_nVehArrowTime  = st.nVehArrowTime;
-        m_nVehArrowSize  = st.nVehArrowSize;
-        m_nSplay         = st.nSplay;
-        m_nDropHeight    = st.nDropHeight;
-        m_bChaseMouse    = st.bChaseMouse;
-        m_bTexScrollbar  = st.bTexScrollbar;
-        m_bThickLines    = st.bThickLines;
-        m_bColoredEnts   = st.bColoredEnts;
-        m_bTexBrush2d    = st.bTexBrush2d;
-        m_bTexMesh2d     = st.bTexMesh2d;
-        m_bFast2dDrag    = st.bFast2dDrag;
-        m_bDetachWin     = st.bDetachWin;
-        m_bTransBg       = st.bTransBg;
-        m_nUndoLevels    = st.nUndoLevels;
-        m_nScaleBase     = st.nScaleBase;
-        m_nScaleRange    = st.nScaleRange;
-        m_fFov           = st.fFov;
-        m_fModelOrg      = st.fModelOrg;
-        m_fPrefabOrg     = st.fPrefabOrg;
-        UpdateData( FALSE );   // push settings → controls
-        return TRUE;
-    }
-
-    virtual void OnOK()
-    {
-        UpdateData( TRUE );    // pull controls → members
-        prefsDlgState_t st;
-        st.rMouse         = m_rMouse;
-        st.rView          = m_rView;
-        st.bLoadLast      = m_bLoadLast;
-        st.bFace          = m_bFace;
-        st.bRightClick    = m_bRightClick;
-        st.bAutoSave      = m_bAutoSave;
-        st.nAutoSaveMin   = m_nAutoSaveMin;
-        st.bLoadLastMap   = m_bLoadLastMap;
-        st.bTexSubset     = m_bTexSubset;
-        st.bSnapshots     = m_bSnapshots;
-        st.bLoseChanges   = m_bLoseChanges;
-        st.nStatusSize    = m_nStatusSize;
-        st.bCamXYUpdate   = m_bCamXYUpdate;
-        st.bUseWheel      = m_bUseWheel;
-        st.bAltAlwaysMove = m_bAltAlwaysMove;
-        st.bTexToolbar    = m_bTexToolbar;
-        st.bSnapTGrid     = m_bSnapTGrid;
-        st.bLinkKeepSel   = m_bLinkKeepSel;
-        st.bPaintSizing   = m_bPaintSizing;
-        st.bCullSky       = m_bCullSky;
-        st.bDontClamp     = m_bDontClamp;
-        st.sUserIni       = m_sUserIni;
-        st.sUserFilters   = m_sUserFilters;
-        st.nRotation      = m_nRotation;
-        st.nFarplane      = m_nFarplane;
-        st.nTolerantWeld  = m_nTolerantWeld;
-        st.nVehArrowTime  = m_nVehArrowTime;
-        st.nVehArrowSize  = m_nVehArrowSize;
-        st.nSplay         = m_nSplay;
-        st.nDropHeight    = m_nDropHeight;
-        st.bChaseMouse    = m_bChaseMouse;
-        st.bTexScrollbar  = m_bTexScrollbar;
-        st.bThickLines    = m_bThickLines;
-        st.bColoredEnts   = m_bColoredEnts;
-        st.bTexBrush2d    = m_bTexBrush2d;
-        st.bTexMesh2d     = m_bTexMesh2d;
-        st.bFast2dDrag    = m_bFast2dDrag;
-        st.bDetachWin     = m_bDetachWin;
-        st.bTransBg       = m_bTransBg;
-        st.nUndoLevels    = m_nUndoLevels;
-        st.nScaleBase     = m_nScaleBase;
-        st.nScaleRange    = m_nScaleRange;
-        st.fFov           = m_fFov;
-        st.fModelOrg      = m_fModelOrg;
-        st.fPrefabOrg     = m_fPrefabOrg;
-        Prefs_ApplyFromDialogState( g_PrefsDlg, st );
-        CDialog::OnOK();
-    }
-
-    // ── The binary's CPrefsDlg message map (entries @0x6E1900) — 6 entries, ALL of
-    //    which were missing from the port (the map was empty), so the two "..." browse
-    //    buttons and the view-mode radio group were inert.  Ported verbatim.
-    //      1029 → OnBtnBrowseuserini     0x44FE80
-    //      1673 → OnBtnBrowseuserfilter  0x44FF90
-    //      1006 / 1009 / 1014 → SetGamePrefs 0x4500A0   (the 3 view-mode radios)
-    //      1095 → nullsub_117            0x450110       (genuinely empty in the binary)
-    afx_msg void OnBtnBrowseuserini()      // 0x44FE80
-    {
-        UpdateData( TRUE );
-        CFileDialog dlg( TRUE, nullptr, nullptr,
-                         OFN_OVERWRITEPROMPT | OFN_HIDEREADONLY,   // idb dwFlags 6
-                         "INI files (*.ini)|*.ini||", this );
-        if ( dlg.DoModal() == IDOK )
-        {
-            m_sUserIni = dlg.GetPathName();
-            UpdateData( FALSE );
-        }
-    }
-
-    afx_msg void OnBtnBrowseuserfilter()   // 0x44FF90
-    {
-        UpdateData( TRUE );
-        CFileDialog dlg( TRUE, nullptr, nullptr,
-                         OFN_OVERWRITEPROMPT | OFN_HIDEREADONLY,   // idb dwFlags 6
-                         "TXT files (*.txt)|*.txt||", this );
-        if ( dlg.DoModal() == IDOK )
-        {
-            m_sUserFilters = dlg.GetPathName();
-            UpdateData( FALSE );
-        }
-    }
-
-    // 0x4500A0 — the view-mode radio group: only the QE4-style layout (index 1) supports
-    // the detached-windows / transparent-background options, so those two checkboxes are
-    // enabled iff m_nView == 1.  (m_rView IS the binary's m_nView — same DDX_Radio 1006.)
-    afx_msg void OnSetGamePrefs()          // 0x4500A0
-    {
-        UpdateData( TRUE );
-        const BOOL enable = ( m_rView == 1 );
-        GetDlgItem( 1674 )->EnableWindow( enable );   // Detached Windows
-        GetDlgItem( 1687 )->EnableWindow( enable );   // Transparent background
-    }
-
-    // 0x450110 — nullsub_117.  Genuinely EMPTY in the binary (the "Lose changes?"
-    // checkbox 1095 is bound by DDX only); wired so the map matches entry-for-entry.
-    afx_msg void OnPrefsNullsub1095() {}
-
-    DECLARE_MESSAGE_MAP()
-};
-
-BEGIN_MESSAGE_MAP( CPrefsDlg, CDialog )
-    ON_BN_CLICKED( 1029, OnBtnBrowseuserini )     // "..." browse User INI      (0x44FE80)
-    ON_BN_CLICKED( 1673, OnBtnBrowseuserfilter )  // "..." browse User Filters  (0x44FF90)
-    ON_BN_CLICKED( 1006, OnSetGamePrefs )         // view-mode radio 0          (0x4500A0)
-    ON_BN_CLICKED( 1009, OnSetGamePrefs )         // view-mode radio 1          (0x4500A0)
-    ON_BN_CLICKED( 1014, OnSetGamePrefs )         // view-mode radio 2          (0x4500A0)
-    ON_BN_CLICKED( 1095, OnPrefsNullsub1095 )     // "Lose changes?"            (0x450110 nullsub)
-END_MESSAGE_MAP()
-
-int Prefs_ShowDialog( CWnd *parent )
-{
-    // Refresh from the registry first (mirrors OnPrefs 0x426950 → LoadPrefs), so the
-    // dialog reflects what is actually persisted.
-    Prefs_LoadPrefs( g_PrefsDlg );
-    CPrefsDlg dlg( parent );
-    INT_PTR r = dlg.DoModal();
-    return ( r == IDOK ) ? IDOK : IDCANCEL;
-}
+// U-GUARD: the class + its message map + Prefs_ShowDialog are MFC; everything above
+// (prefData_t, Prefs_Load/SavePrefs, prefsDlgState_t, PrefsDlg_Gather,
+// Prefs_ApplyFromDialogState) stays COMMON — imgui_panel_prefs.cpp calls the last two, and
+// the AfxGetApp()/CString profile usage is exactly what kisak_mfc_shim.h covers, so those
+// lines are deliberately NOT fenced.

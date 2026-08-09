@@ -52,6 +52,7 @@ extern void  Vec3Cross( const float *a, const float *b, float *out );   // engin
 // materialdef.cpp
 extern void        SetMaterial( const char *name, patchMesh_material *out );
 extern qtexture_s *MaterialDef_GetLayeredMaterial( MaterialDef *def );
+extern LayerMaterialDef *Materialdef_GetName( MaterialDef *def );   // name string (lyrMtl@0 or radMtl->name)
 namespace LayerMat { int GetCurrentLayer( MaterialDef *def ); }
 
 // brush.cpp
@@ -120,11 +121,12 @@ static int   Patch_CalcVertColors( patchMesh_t *p );
 static curvePatchDef_t *Patch_TerrainTexProject( patchMesh_t *p, int layer, float sampleSize ); // sub_439350
 static void  PMESH_02( patchMesh_t *p, int layer, float sampleSize );                            // 0x439580
 
-// Patch-inspector dialog refresh hooks (patchdialog.cpp SHIPPED — GetHwnd() returns the
-// live modeless CPatchInspectorDlg when open, null when it is not / headless; comment
-// below predates that port and is kept for the headless-behaviour note. GetHwnd() returns
-// null headless; GetPatchInfo() is a no-op).  Used by Patch_Move's GUI-guard tail.
-extern CWnd *g_PatchDialog_GetHwnd();
+// Patch-inspector dialog refresh hooks (patchdialog.cpp SHIPPED).  PatchDialog_IsOpen()
+// (U-GUARD-2) IS the binary's `if (CWnd_PatchDialog.m_hWnd)` gate — true only while the
+// modeless CPatchInspectorDlg exists, false headless AND false in the no-MFC shell (the ImGui
+// patch panel re-gathers, so there is no push to make).  Replaced the CWnd*-returning
+// g_PatchDialog_GetHwnd(), whose return type cannot exist without MFC.
+extern bool  PatchDialog_IsOpen();
 extern void  g_PatchDialog_GetPatchInfo();
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -1126,12 +1128,16 @@ int Patch_Write( WriteWriter_t writer, patchMesh_t *p )
     MapLoad_ParseBrush_Content( (int)"toolFlags", (int (**)(int, const char *, ...))writer,
                                 p->flags,    toolflags_table );
 
-    // texture / lightmap / smoothing names (shim stores the name in lyrMtl).
-    const char *texName = (const char *)p->texture.lyrMtl;
+    // texture / lightmap / smoothing NAMES. Must go through Materialdef_GetName, NOT a raw
+    // (char*)lyrMtl cast: when the renderer is up, SetMaterial resolves a real material and
+    // stores it in lyrMtl — but pseudo-materials ("$default", "lightmap_gray",
+    // "smoothing_smooth") aren't layered assets, so lyrMtl comes back NULL and the name lives
+    // in radMtl->name. The old direct cast read NULL and strcmp() crashed when copying a patch.
+    const char *texName = (const char *)Materialdef_GetName( (MaterialDef *)&p->texture );
     WRITE( writer, "   %s\n", texName );
-    const char *lmName = (const char *)p->lightmap.lyrMtl;
+    const char *lmName = (const char *)Materialdef_GetName( (MaterialDef *)&p->lightmap );
     WRITE( writer, "   %s\n", lmName );
-    const char *smName = (const char *)p->smoothing.lyrMtl;
+    const char *smName = (const char *)Materialdef_GetName( (MaterialDef *)&p->smoothing );
     if ( strcmp( smName, "smoothing_smooth" ) )
         WRITE( writer, "   smoothing %s\n", smName );
 
@@ -2087,7 +2093,7 @@ void Patch_ToggleInverted()
     // IDA 0x44666b: refresh the patch-inspector dialog (unconditional tail, outside the selection
     // block).  Parked GUI no-op headless (GetHwnd() returns null); ported here for 1:1 control flow
     // + consistency with Patch_Move's identical tail.
-    if ( g_PatchDialog_GetHwnd() )
+    if ( PatchDialog_IsOpen() )
         g_PatchDialog_GetPatchInfo();
 }
 
@@ -2419,7 +2425,7 @@ static void Patch_ST( const float *params, const float *faceNormal, patchMesh_t 
 //      row), identical to Patch_Naturalize2's `&p->ctrl[i][j].texCoord.st[2*a2]`.
 // ════════════════════════════════════════════════════════════════════════════
 extern char Ed_Patch_PlanarTest( patchMesh_t *patch, void *outBlk );   // brush.cpp (0x4382D0)
-extern CWnd *g_PatchDialog_GetHwnd();                                  // patchdialog.cpp shim
+extern bool  PatchDialog_IsOpen();                                     // patchdialog.cpp (U-GUARD-2)
 extern void  g_PatchDialog_GetPatchInfo();
 static curvePatchDef_t *Patch_ApplyCapST( patchMesh_t *p, const float *faceNormal, const float *params ); // sub_439280 (below)
 
@@ -2496,7 +2502,7 @@ char PMESH_34( MaterialDef *a1, patchMesh_t *a2, char a3, float a4 )
         }
     }
 
-    if ( g_PatchDialog_GetHwnd() )                                                 // 0x442add CWnd_PatchDialog.m_hWnd
+    if ( PatchDialog_IsOpen() )                                                 // 0x442add CWnd_PatchDialog.m_hWnd
         g_PatchDialog_GetPatchInfo();                                             // 0x442aeb refresh patch inspector
     return 0;
 }
@@ -2704,7 +2710,7 @@ void Patch_DisperseColumns()
 
     Undo_EndBrushList( &selected_brushes );
     Undo_End();
-    if ( g_PatchDialog_GetHwnd() )               // 0x444533: refresh patch inspector
+    if ( PatchDialog_IsOpen() )               // 0x444533: refresh patch inspector
         g_PatchDialog_GetPatchInfo();
 }
 
@@ -2746,7 +2752,7 @@ void Patch_DisperseRows()
 
     Undo_EndBrushList( &selected_brushes );
     Undo_End();
-    if ( g_PatchDialog_GetHwnd() )               // 0x44437a: refresh patch inspector
+    if ( PatchDialog_IsOpen() )               // 0x44437a: refresh patch inspector
         g_PatchDialog_GetPatchInfo();
 }
 
@@ -2820,7 +2826,7 @@ void Patch_InvertTexture( char axis )
     }
     if ( did )
         g_nUpdateBits = -1;
-    if ( g_PatchDialog_GetHwnd() )               // 0x446ac2: refresh patch inspector
+    if ( PatchDialog_IsOpen() )               // 0x446ac2: refresh patch inspector
         g_PatchDialog_GetPatchInfo();
 }
 
@@ -2847,7 +2853,7 @@ void Patch_Scale( patchMesh_t *p, const float *mid, const float *scale, char doR
         }
     if ( doRebuild )
         Patch_Rebuild( p, 1 );
-    if ( g_PatchDialog_GetHwnd() )               // 0x4428b9: refresh patch inspector
+    if ( PatchDialog_IsOpen() )               // 0x4428b9: refresh patch inspector
         g_PatchDialog_GetPatchInfo();
 }
 
@@ -2881,7 +2887,7 @@ curvePatchDef_t *Patch_Move( const float *move, patchMesh_t *p )
 
     // IDA: if (CWnd_PatchDialog.m_hWnd) return g_PatchDialog_GetPatchInfo(&CWnd_PatchDialog);
     // The patch dialog is parked (GetHwnd() == null headless), so return the new curveDef.
-    if ( g_PatchDialog_GetHwnd() )
+    if ( PatchDialog_IsOpen() )
         g_PatchDialog_GetPatchInfo();
     return p->curveDef;
 }
@@ -3352,6 +3358,7 @@ void Patch_ApplyMatrix( const orientation_t *orient, patchMesh_t *p, char snap )
 
 #include "prefs.h"     // g_PrefsDlg (m_bTextureLock / g_bPatchWeld / patch_drill_down)
 #include "mainfrm.h"   // CMainFrame / CXYWnd (g_pParentWnd->m_pActiveXY->m_nViewType)
+#include "xywnd.h"     // xywndState_t / Ed_ActiveXY (U-GLOBALS)
 
 // patch_t (the patch INSTANCE node; .def @0, .selected @6) is the shared struct in qe3.h.
 
@@ -3365,7 +3372,7 @@ void sub_43ECB0();   // Patch_FinishCurveDrag — drag-END hook (keeps the IDB s
 // "second click in the same view" flag XY_MouseDown sets before Drag_Begin.
 char         g_bXYViewIsLastPatchClick = 0;     // byte_25D5A6A (def here; extern in xywnd.cpp)
 extern int   g_nPatchClickedView;               // 0x73B108 (engine_stubs.cpp)
-extern CMainFrame *g_pParentWnd;                // 0x25D5A70 — only m_pActiveXY->m_nViewType read
+extern camera_s   *Ed_Camera();                 // camwnd.cpp — THE editor camera (never NULL)
 extern void  CMainFrame_UpdatePatchToolbarButtons();        // select.cpp (no-op, no toolbar)
 extern void  Undo_End();                                    // undo.cpp 0x45EA20
 
@@ -3485,8 +3492,7 @@ static void Patch_RemoveMovePoint( const float *pt )
 static void Patch_SelectCtrlPoint( patchMesh_t *def, drawVert_t *cp, char processWeld )
 {
     // The clicked view's two on-screen axes (the depth axis is excluded for drill-down).
-    int nViewType = ( g_pParentWnd && g_pParentWnd->m_pActiveXY )
-                        ? g_pParentWnd->m_pActiveXY->m_nViewType : 0;
+    int nViewType = Ed_ActiveXY()->m_nViewType;   // U-GLOBALS (never NULL — no shell fallback)
     int axisA = ( nViewType == 0 );               // IDB v24 = (m_nViewType==0) — first screen axis index
     int axisB = ( nViewType != 2 ) + 1;           // IDB v29 = (m_nViewType!=2)+1 — second screen axis index
 
@@ -4708,7 +4714,7 @@ static int sub_43ED50( const float *a1, const float *a2, const float *a3,
                             + a2[0] * a3[1] - a3[0] * a2[1];      // 2*signed-area
             if ( det != 0.0f )
             {
-                const float *vpn = g_pParentWnd->m_pCamWnd->camera.vpn;
+                const float *vpn = Ed_Camera()->vpn;   // U-GLOBALS: was m_pCamWnd->camera.vpn
                 nx = ( ( a3[2] - a2[2] ) * a1[1] + ( a2[1] - a3[1] ) * a1[2]
                      + a2[2] * a3[1] - a2[1] * a3[2] ) / det;     // var_30
                 ny = ( ( a2[2] - a3[2] ) * a1[0] + a1[2] * ( a3[0] - a2[0] )
@@ -5533,7 +5539,7 @@ void Patch_InsDelHandleTAB()
 //  it into g_vRotateOrigin.  Returns the depth-axis index.
 static int Patch_SetBendRotateOrigin()
 {
-    int axis = g_pParentWnd->m_pActiveXY->m_nViewType;
+    int axis = Ed_ActiveXY()->m_nViewType;   // U-GLOBALS: was g_pParentWnd->m_pActiveXY
     if ( axis != 2 )
         axis = ( axis != 0 );
     g_vBendOrigin[axis]   = 0.0f;
@@ -7261,18 +7267,8 @@ int Cap_Apply( patchMesh_t *def, int nType, selbrush_t **caps )
 //   over the 4-button group {1285 Bevel, 1287 Endcap, 1289 Inverted Bevel, 1291
 //   Inverted Endcap} → index 0..3.  No OnInitDialog / OnOK overrides (default MFC).
 //   Hand-built like CDialogThick / CPatchDensityDlg.
-class CCapDialog : public CDialog
-{
-public:
-    CCapDialog( CWnd *parent = nullptr ) : CDialog( IDD_CAP, parent ), m_nType( 0 ) {}
-    int m_nType;   // this+0x74 (DDX_Radio group base 1285): 0=bevel 1=endcap 2=invbevel 3=invendcap
-protected:
-    virtual void DoDataExchange( CDataExchange *pDX )   // 0x40A900
-    {
-        CDialog::DoDataExchange( pDX );
-        DDX_Radio( pDX, 1285, m_nType );
-    }
-};
+// U-GUARD-2: MFC-only (a straggler U-GUARD-DIALOGS missed in this TU).  Cap_Apply above is
+// the COMMON core, ready for the ImGui replacement.
 
 // ── Patch_CapCurrent (0x43AA20) — Curve→Cap: cap the single selected patch ──────
 //   Auto-cap all four "closed" edges (VectorCompare tests the seam), each becoming a
@@ -7329,10 +7325,9 @@ void Patch_CapCurrent()
         // No closed edge → pop CCapDialog (sub_40A8A0, IDD 0xA1) to pick the special-cap
         // shape, then build two Patch_CapSpecial brushes (bFirst 0 and 1) — verbatim from
         // Patch_CapCurrent 0x43abaf-0x43abf3.
-        CCapDialog dlg;
-        dlg.m_nType = 0;
-        if ( dlg.DoModal() == IDOK )
-            n = Cap_Apply( def, dlg.m_nType, caps );
+        // NO-MFC: the special-cap type prompt is MFC-modal, so no cap is built — exactly a
+        // Cancel in the MFC shell (n stays 0, the func_group grouping below is skipped).
+        // Cap_Apply is the ready core for the ImGui prompt.
     }
 
     if ( n > 0 )
@@ -7543,7 +7538,7 @@ void Patch_Thicken( int a1, char bseam )
     v4->curveDef = Patch_GenericMesh2( v4, g_qeglobals.current_edit_layer, 0, 0 );
     ++v4->version;
 
-    if ( g_PatchDialog_GetHwnd() )
+    if ( PatchDialog_IsOpen() )
         g_PatchDialog_GetPatchInfo();
 
     // undo id-stamp tail (identical idiom to PMESH_18).
@@ -7902,7 +7897,7 @@ restartWeld:
         }
     }
     Undo_End();
-    if ( g_PatchDialog_GetHwnd() )
+    if ( PatchDialog_IsOpen() )
         g_PatchDialog_GetPatchInfo();
     g_nUpdateBits = -1;
     return 1;
@@ -8077,7 +8072,7 @@ restartSplit:
     Undo_End();
     if ( didSplit )
     {
-        if ( g_PatchDialog_GetHwnd() )
+        if ( PatchDialog_IsOpen() )
             g_PatchDialog_GetPatchInfo();
         g_nUpdateBits = -1;
     }
@@ -8284,7 +8279,7 @@ void ExtrudeTerrainRow()
 
     if ( didEdit )
     {
-        if ( g_PatchDialog_GetHwnd() )
+        if ( PatchDialog_IsOpen() )
             g_PatchDialog_GetPatchInfo();
         g_nUpdateBits = -1;
     }
@@ -8408,7 +8403,7 @@ void RemoveTerrainRowCol()
                 }
             }
             Undo_End();
-            if ( g_PatchDialog_GetHwnd() )
+            if ( PatchDialog_IsOpen() )
                 g_PatchDialog_GetPatchInfo();
 
             // re-select everything that carries the pushed targetname (the new head).
@@ -8432,7 +8427,7 @@ void RemoveTerrainRowCol()
 
     if ( !didEdit )
         return;
-    if ( g_PatchDialog_GetHwnd() )
+    if ( PatchDialog_IsOpen() )
         g_PatchDialog_GetPatchInfo();
     g_nUpdateBits = -1;
 }
@@ -8468,7 +8463,7 @@ void Patch_InsertRemoveFromVertPair()
         {
             if ( didEdit )
             {
-                if ( g_PatchDialog_GetHwnd() )
+                if ( PatchDialog_IsOpen() )
                     g_PatchDialog_GetPatchInfo();
                 g_nUpdateBits = -1;
             }
@@ -8505,7 +8500,7 @@ void Patch_InsertRemoveFromVertPair()
     def->curveDef = Patch_GenericMesh2( def, g_qeglobals.current_edit_layer, 0, 0 );
     ++def->version;
 
-    if ( g_PatchDialog_GetHwnd() )
+    if ( PatchDialog_IsOpen() )
         g_PatchDialog_GetPatchInfo();
     g_nUpdateBits = -1;
 }
@@ -9815,7 +9810,7 @@ void PMESH_33( patch_t *p )
     iassert( p->def );   // pmesh.cpp:4550
     Patch_Fill_FreeVisuals( p );                            // 0x4427a7  PMESH_21_Indices
     free( p );                                              // 0x4427ad
-    if ( g_PatchDialog_GetHwnd() )                          // 0x4427bc  CWnd_PatchDialog.m_hWnd
+    if ( PatchDialog_IsOpen() )                          // 0x4427bc  CWnd_PatchDialog.m_hWnd
         g_PatchDialog_GetPatchInfo();                       // 0x4427c4
 }
 
@@ -9835,7 +9830,7 @@ void PMESH_32_Symbiot( int patchDef )
     if ( p->curveDef )                                      // 0x44272a
         free( p->curveDef );                                // 0x442735
     free( p );                                              // 0x44273e
-    if ( g_PatchDialog_GetHwnd() )                          // 0x44274d
+    if ( PatchDialog_IsOpen() )                          // 0x44274d
         g_PatchDialog_GetPatchInfo();                       // 0x442754
 }
 

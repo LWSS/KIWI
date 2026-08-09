@@ -6,7 +6,8 @@
 set(RADIANT_SRCS
 
     # ── App scaffold ─────────────────────────────────────────────────────────
-    "${SRC_DIR}/radiant/radiantapp.cpp"
+    "${SRC_DIR}/radiant/radiant_main.cpp"   # U-BOOT: WinMain + frame WndProc + message pump
+    "${SRC_DIR}/radiant/radiant_frame.h"    # U-BOOT: the shell-agnostic frame API (both shells)
     "${SRC_DIR}/radiant/prefs.cpp"          # CPrefsDlg settings object + registry persistence (P6)
     "${SRC_DIR}/radiant/prefs.h"
     "${SRC_DIR}/radiant/stdafx.h"
@@ -70,6 +71,27 @@ set(RADIANT_SRCS
     "${SRC_DIR}/radiant/findtexture.cpp"    # CFindTextureDlg + FindReplaceTextures (find/replace texture)
     "${SRC_DIR}/radiant/patchdialog.cpp"
     "${SRC_DIR}/radiant/win_dlg.cpp"
+    "${SRC_DIR}/radiant/imgui_shell.cpp"    # UI-rework Phase 2a — ImGui overlay shell (-imgui flag)
+    # (imgui_dockhost.cpp retired — the main frame is the dockspace surface now)
+    "${SRC_DIR}/radiant/radiant_registry.cpp"     # HKCU profile helpers (replaced the shim CWinApp)
+    "${SRC_DIR}/radiant/radiant_rtt.cpp"          # Phase 5 — offscreen render-target viewport textures
+    "${SRC_DIR}/radiant/imgui_panels.cpp"   # UI-rework Phase 3 — panels over the Phase-1 actions
+    "${SRC_DIR}/radiant/imgui_panel_surface.cpp"  # Phase 3 — surface inspector panel
+    "${SRC_DIR}/radiant/imgui_panel_entity.cpp"   # Phase 3 — entity inspector panel
+    "${SRC_DIR}/radiant/imgui_panel_findtex.cpp"  # Phase 3 — find/replace texture panel
+    "${SRC_DIR}/radiant/imgui_panel_layers.cpp"   # Phase 3 — layers panel
+    "${SRC_DIR}/radiant/imgui_panel_dynent.cpp"   # Phase 3 — dynamic entity panel
+    "${SRC_DIR}/radiant/imgui_panel_vehicle.cpp"  # Phase 3 — vehicle panel
+    "${SRC_DIR}/radiant/imgui_panel_model.cpp"    # Phase 3 — model replace panel
+    "${SRC_DIR}/radiant/imgui_panel_vertedit.cpp" # Phase 3 — vertex edit panel
+    "${SRC_DIR}/radiant/imgui_panel_kvselect.cpp" # Phase 3 — select by key/value panel
+    "${SRC_DIR}/radiant/imgui_panel_mapinfo.cpp"  # Phase 3 — map info panel
+    "${SRC_DIR}/radiant/imgui_panel_prefs.cpp"    # Phase 3 — preferences panel
+    "${SRC_DIR}/radiant/imgui_panel_patch.cpp"    # Phase 3 — patch inspector panel
+    "${SRC_DIR}/radiant/imgui_panel_patchdensity.cpp" # Phase 5 — Simple Patch/Terrain density prompt
+    "${SRC_DIR}/radiant/imgui_panel_filters.cpp"  # Filters panel (F) — CFilterWnd replacement
+    "${SRC_DIR}/radiant/imgui_panel_commands.cpp" # Phase 3 — command list panel
+    "${SRC_DIR}/radiant/imgui_panel_advpatch.cpp" # Phase 3 — advanced patch edit panel
     "${SRC_DIR}/radiant/verteditdlg.cpp"
     "${SRC_DIR}/radiant/layersdlg.cpp"
     "${SRC_DIR}/radiant/dynentitydlg.cpp"

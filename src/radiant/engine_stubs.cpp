@@ -639,7 +639,6 @@ void __cdecl CM_ShowBrushCollision(int contentMask, cplane_s *frustumPlanes,
 // ═════════════════════════════════════════════════════════════════════════════
 #include "qe3.h"           // entity_s, brush_t, eclass_t, models_t
 #include "prefs.h"         // g_PrefsDlg (prefData_t* — the real settings object)
-#include "mainfrm.h"       // CMainFrame
 
 // 0x49cea0 — the editor's Assert.  Routed to iassert so the port's assert handling is
 // uniform; the binary pops a message box and lets you continue.
@@ -722,8 +721,6 @@ int g_qeglobals_redispersePatchVerts = 0;   // 0x25d5a6b — "redisperse control
 // 0x181f51c — MaterialDef realize-state word (materialdef.cpp clears it on success;
 // brush.cpp seeds/tests it for the special-material check).
 int dword_181F51C = 0;
-
-CMainFrame *g_pParentWnd = nullptr;         // 0x25d5a70
 
 // prefab-edit stack (IDB byte_25EB240 @ 0x25eb240). KISAK BUG FIX: the binary's
 // storage is 16 levels (runs to exactly g_qeglobals @0x25F39C0) and the full-check

@@ -35,6 +35,7 @@ extern "C" void free( void * );
 
 // prefs.cpp — for the user filter path (g_PrefsDlg->m_strUserFilterPath).
 #include "prefs.h"
+#include "radiant_registry.h"   // Radiant_ProfileGet/SetInt — the non-MFC CWinApp profile replacement
 
 // ═════════════════════════════════════════════════════════════════════════════
 //  CONDITION-TREE PARSER (DynamicFilter_ParseCondition + leaf parsers + qe3_cpp_01)
@@ -1038,8 +1039,8 @@ void Load_RadiantFilters()        // g_PrefsDlg / prefData_t from prefs.h (inclu
     RadiantFilters( "RadiantFilters.txt" );
 
     // The user's extra filter file, if one is configured in preferences.
-    if ( g_PrefsDlg && g_PrefsDlg->m_strUserFilterPath.GetLength() > 0 )
-        RadiantFilters( (const char *)(LPCSTR)g_PrefsDlg->m_strUserFilterPath );
+    if ( g_PrefsDlg && (int)g_PrefsDlg->m_strUserFilterPath.length() > 0 )
+        RadiantFilters( g_PrefsDlg->m_strUserFilterPath.c_str() );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1081,24 +1082,20 @@ void RadiantFilters_ToggleEntry( filter_entry_s *cb, bool show )
 //        encodes as `(d_xyShowFlags >> 6) & 1`).
 // ═════════════════════════════════════════════════════════════════════════════
 
-// Registry "Filters\<name>" saved isShown default (1 = shown).  CWinApp::GetProfileInt
+// Registry "Filters\<name>" saved isShown default (1 = shown).  Radiant_ProfileGetInt
 // reads HKCU\...\<app>\Filters; defaults to 1 if absent — matching the binary's
-// GetProfileIntA(., "Filters", name, 1) at 0x41104e.  Headless-safe (returns 1 if no app).
+// GetProfileIntA(., "Filters", name, 1) at 0x41104e.  Headless-safe: the free-function
+// profile helper needs no CWinApp and just returns the default when the key is absent.
 int CFilterWnd_GetSavedCheck( const char *name )
 {
-    CWinApp *app = AfxGetApp();
-    if ( !app )
-        return 1;                                    // no MFC app (headless) → default shown
-    return (int)app->GetProfileIntA( "Filters", name, 1 );
+    return Radiant_ProfileGetInt( "Filters", name, 1 );
 }
 
 // Persist a filter's checkbox state (the binary writes it on dialog close via
 // CWinApp::WriteProfileInt; we write on each toggle so it survives a restart).
 void CFilterWnd_SaveCheck( const char *name, bool shown )
 {
-    CWinApp *app = AfxGetApp();
-    if ( app )
-        app->WriteProfileInt( "Filters", name, shown ? 1 : 0 );
+    Radiant_ProfileSetInt( "Filters", name, shown ? 1 : 0 );
 }
 
 // Enumerate: return the head of one category's filter list (0..3 = geo/trig/ent/other),

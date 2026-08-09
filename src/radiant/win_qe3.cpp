@@ -75,6 +75,13 @@ void console_print( const char *fmt, va_list args )
 
     fputs( buf, stdout );
 
+    // Tee to the ImGui console panel (imgui_shell.cpp). It renders the raw \n directly, so it
+    // needs no \r\n translation. This is the console the user actually sees now; the native
+    // EDIT below stays fed but hidden (kept only so the legacy SendMessage paths still no-op
+    // cleanly). Headless/selftest has no shell inited — the append is a cheap string op.
+    extern void ImGuiConsole_Append( const char *s );
+    ImGuiConsole_Append( buf );
+
     HWND edit = g_qeglobals.d_hwndEdit;
     if ( !edit )
         return;                       // headless / pre-OnCreate — stdout only
@@ -246,75 +253,70 @@ void Sys_Beep( void )
 // ─────────────────────────────────────────────────────────────────────────────
 void Sys_ClearPrintf( void )
 {
+    extern void ImGuiConsole_Clear();      // imgui_shell.cpp — clear the visible ImGui console
+    ImGuiConsole_Clear();
     SendMessageA( g_qeglobals.d_hwndEdit, WM_SETTEXT, 0, (LPARAM)"" );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 0x499930  SaveRegistryInfo - write a binary blob to
-// HKCU\Software\iw\CoD4Radiant\CoD4Radiant (or g_qeglobals.use_ini_registry when
-// use_ini is set) under value `pszName`: RegCreateKeyExA(KEY_ALL_ACCESS) ->
-// RegSetValueExA(REG_BINARY) -> RegCloseKey, TRUE iff the set succeeded.  The binary
-// inlines the raw Win32 calls, NOT CWinApp::WriteProfileBinary.  Every dialog/window
-// close in the editor saves its placement through here.
+// 0x499930  SaveRegistryInfo / 0x4999c0  LoadRegistryInfo — the binary wrote these blobs
+// as REG_BINARY values under HKCU\Software\iw\CoD4Radiant\CoD4Radiant (or the
+// use_ini_registry key).  KISAK: ALL registry usage removed on request — the blobs
+// (window placements, SavedInfo, dialog rects) are hex-encoded into the [Blobs] section
+// of kiwi_radiant.ini beside the exe (radiant_registry.cpp Radiant_IniPath), so the
+// editor is fully portable and nothing machine-global redirects or persists state.
+// The largest caller blob is SavedInfo (0x2c4 = 708 bytes → 1416 hex chars), well inside
+// private-profile line limits.  Call-site semantics preserved: SaveRegistryInfo returns
+// TRUE iff written; LoadRegistryInfo fills pvBuf, returns TRUE iff the value exists, and
+// plSize is in/out (seed = buffer capacity, out = stored byte count; NULL discards it —
+// the binary's 1-byte scratch-cell case, only hit by callers that know the exact size).
 // ─────────────────────────────────────────────────────────────────────────────
+#include "radiant_registry.h"   // Radiant_IniPath()
+
 BOOL SaveRegistryInfo( const char *pszName, void *pvBuf, int lSize )
 {
-    HKEY  phkResult;
-    DWORD dwDisposition;
-    LSTATUS status;
-
-    if ( g_qeglobals.use_ini )   // 0x49993d
-    {
-        status = RegCreateKeyExA( HKEY_CURRENT_USER, g_qeglobals.use_ini_registry,
-                                  0, 0, 0, 0xF003F, 0, &phkResult, &dwDisposition );
-    }
-    else
-    {
-        status = RegCreateKeyExA( HKEY_CURRENT_USER,
-                                  "Software\\iw\\CoD4Radiant\\CoD4Radiant",
-                                  0, 0, 0, 0xF003F, 0, &phkResult, &dwDisposition );
-    }
-    if ( status )                // 0x499982 — create failed → FALSE
+    if ( !pszName || !pvBuf || lSize < 0 || lSize > 8192 )
         return FALSE;
-
-    LSTATUS setStatus = RegSetValueExA( phkResult, pszName, 0, REG_BINARY /*3*/,
-                                        (const BYTE *)pvBuf, (DWORD)lSize );
-    RegCloseKey( phkResult );
-    return setStatus == 0;       // 0x499986
+    char hex[8192 * 2 + 1];
+    static const char digits[] = "0123456789abcdef";
+    const unsigned char *src = (const unsigned char *)pvBuf;
+    for ( int i = 0; i < lSize; ++i )
+    {
+        hex[i * 2]     = digits[src[i] >> 4];
+        hex[i * 2 + 1] = digits[src[i] & 0xF];
+    }
+    hex[lSize * 2] = 0;
+    return ::WritePrivateProfileStringA( "Blobs", pszName, hex, Radiant_IniPath() ) != 0;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 0x4999c0  LoadRegistryInfo - read value `pszName` from the key SaveRegistryInfo writes:
-// RegOpenKeyExA(KEY_READ) -> RegQueryValueExA -> RegCloseKey, TRUE iff the query
-// succeeded.  `plSize` is in/out (seed it with the buffer size, get the byte count back);
-// NULL means the binary substitutes a 1-byte scratch cell and discards the size.
-// The IDB renders it __usercall with plSize@<eax> and (pszName, pvBuf) on the stack, i.e.
-// C order (plSize, pszName, pvBuf); we keep (pszName, pvBuf, plSize) - same values.
-// ─────────────────────────────────────────────────────────────────────────────
 BOOL LoadRegistryInfo( const char *pszName, void *pvBuf, long *plSize )
 {
-    char  scratch;             // [ebp-8] — the binary's 1-byte fallback size cell
-    DWORD lType;               // [ebp-Ch] — discarded
-    HKEY  hKey;                // [ebp-4]
-    DWORD *size = (DWORD *)plSize;
-
-    if ( !plSize )             // 0x4999cb — NULL → point at the scratch cell
-        size = (DWORD *)&scratch;
-
-    if ( g_qeglobals.use_ini ) // 0x4999d7
+    if ( !pszName || !pvBuf )
+        return FALSE;
+    char hex[8192 * 2 + 1];
+    DWORD n = ::GetPrivateProfileStringA( "Blobs", pszName, "", hex, sizeof( hex ),
+                                          Radiant_IniPath() );
+    if ( n == 0 || ( n & 1 ) )
+        return FALSE;                       // absent or malformed
+    long stored = (long)( n / 2 );
+    long cap    = plSize ? *plSize : stored;   // NULL plSize: caller knows the exact size
+    long count  = stored < cap ? stored : cap;
+    unsigned char *dst = (unsigned char *)pvBuf;
+    for ( long i = 0; i < count; ++i )
     {
-        RegOpenKeyExA( HKEY_CURRENT_USER, g_qeglobals.use_ini_registry, 0,
-                       0x20019 /*KEY_READ*/, &hKey );
+        int hi, lo;
+        char a = hex[i * 2], b = hex[i * 2 + 1];
+        hi = ( a >= '0' && a <= '9' ) ? a - '0' : ( a >= 'a' && a <= 'f' ) ? a - 'a' + 10
+           : ( a >= 'A' && a <= 'F' ) ? a - 'A' + 10 : -1;
+        lo = ( b >= '0' && b <= '9' ) ? b - '0' : ( b >= 'a' && b <= 'f' ) ? b - 'a' + 10
+           : ( b >= 'A' && b <= 'F' ) ? b - 'A' + 10 : -1;
+        if ( hi < 0 || lo < 0 )
+            return FALSE;                   // not our hex — treat as absent
+        dst[i] = (unsigned char)( ( hi << 4 ) | lo );
     }
-    else
-    {
-        RegOpenKeyExA( HKEY_CURRENT_USER, "Software\\iw\\CoD4Radiant\\CoD4Radiant",
-                       0, 0x20019 /*KEY_READ*/, &hKey );
-    }
-
-    LSTATUS status = RegQueryValueExA( hKey, pszName, 0, &lType, (BYTE *)pvBuf, size );
-    RegCloseKey( hKey );
-    return status == 0;        // 0x499a32
+    if ( plSize )
+        *plSize = stored;                   // registry semantics: report the stored size
+    return TRUE;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

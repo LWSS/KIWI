@@ -79,7 +79,6 @@ extern int  Sys_Printf( const char *fmt, ... );       // win_qe3.cpp (status/con
 SurfDlgGlob_t surfDlgGlob = { 0 };
 char g_bNewFace  = 1;
 
-CSurfaceDlg *g_pSurfDlg = nullptr;     // the hand-built inspector instance (NULL until opened)
 
 // ══════════════════════════════════════════════════════════════════════════════
 //  texdef CORE — read / apply a face's texture alignment (headless-safe).
@@ -382,44 +381,8 @@ struct surfaceDlgState_t
     char  sampleDirty;     // m_sampleDirty
 };
 
-// %.6g float → control (SprintFormat_SetText 0x457270 essence).
-static void SI_SetDlgFloat( CWnd *dlg, int id, float v )
-{
-    char buf[64];
-    sprintf( buf, "%.6g", v );
-    dlg->SetDlgItemText( id, buf );
-}
-static float SI_GetDlgFloat( CWnd *dlg, int id )
-{
-    char buf[128] = { 0 };
-    ::GetDlgItemTextA( dlg->GetSafeHwnd(), id, buf, sizeof( buf ) - 1 );
-    return (float)atof( buf );
-}
-
-// Snapshot the inspector's edit controls + dialog flags into a surfaceDlgState_t.
-static void SI_ReadState( CSurfaceDlg *dlg, surfaceDlgState_t &st )
-{
-    memset( &st, 0, sizeof( st ) );
-    ::GetDlgItemTextA( dlg->GetSafeHwnd(), IDC_SURFACE_INSP_CURR_TEX, st.currTex, 127 );
-    st.horzShift   = SI_GetDlgFloat( dlg, IDC_SURFACE_INSP_HORZ_SHIFT_IN );
-    st.vertShift   = SI_GetDlgFloat( dlg, IDC_SURFACE_INSP_VERT_SHIFT_IN );
-    st.horzStretch = SI_GetDlgFloat( dlg, IDC_SURFACE_INSP_HORZ_STRETCH );
-    st.vertStretch = SI_GetDlgFloat( dlg, IDC_SURFACE_INSP_VERT_STRETCH );
-    st.rotate      = SI_GetDlgFloat( dlg, IDC_SURFACE_INSP_ROTATE );
-    st.sampleSize  = SI_GetDlgFloat( dlg, IDC_SURFACE_INSP_SAMPLE_SIZE );
-    st.bPatchMode  = dlg->m_bPatchMode;
-    st.texdefDirty = dlg->m_texdefDirty;
-    st.sampleDirty = dlg->m_sampleDirty;
-}
-
-// Push a state's dialog-member half (m_bPatchMode + the two dirty flags) back onto the dialog;
-// the edit fields + "Repeats in" readouts are populated by the action's trailing Surf_RefreshFields.
-static void SI_WriteState( CSurfaceDlg *dlg, const surfaceDlgState_t &st )
-{
-    dlg->m_bPatchMode  = st.bPatchMode;
-    dlg->m_texdefDirty = st.texdefDirty;
-    dlg->m_sampleDirty = st.sampleDirty;
-}
+// MFC shell — the four control<->state shuttles (CWnd / CSurfaceDlg typed).  The panel
+// builds its own surfaceDlgState_t instead, so nothing outside this block needs them.
 
 // UI-independent action behind the inspector's read-fields-into-texdef pass.
 // SurfaceInspector_GetMaterialDef (0x457950) — READ the dialog's edit controls into the
@@ -567,37 +530,9 @@ bool SurfaceDlg_Gather( surfaceDlgState_t &out )
 // shared g_patch_texdef.sample_size ("" when 0).  Also fills the "Repeats in" readouts (raw size).
 void Surf_RefreshFields()
 {
-    if ( !surfDlgGlob.hwnd || !g_pSurfDlg || !::IsWindow( g_pSurfDlg->GetSafeHwnd() ) )
-        return;
-    CSurfaceDlg *dlg = g_pSurfDlg;
-
-    surfaceDlgState_t st;
-    memset( &st, 0, sizeof( st ) );
-    bool haveTexdef = SurfaceDlg_Gather( st );
-    dlg->m_bPatchMode = st.bPatchMode;
-    if ( !haveTexdef )
-        return;
-
-    ::SendMessageA( dlg->GetSafeHwnd(), WM_SETREDRAW, 0, 0 );
-
-    dlg->SetDlgItemText( IDC_SURFACE_INSP_CURR_TEX, st.currTex );
-
-    SI_SetDlgFloat( dlg, IDC_SURFACE_INSP_HORZ_SHIFT_IN, st.horzShift );
-    SI_SetDlgFloat( dlg, IDC_SURFACE_INSP_VERT_SHIFT_IN, st.vertShift );
-
-    SI_SetDlgFloat( dlg, IDC_SURFACE_INSP_HORZ_STRETCH, st.horzStretch );
-    SI_SetDlgFloat( dlg, IDC_SURFACE_INSP_TXT_REPEATS_X, st.repeatsX );
-    SI_SetDlgFloat( dlg, IDC_SURFACE_INSP_VERT_STRETCH, st.vertStretch );
-    SI_SetDlgFloat( dlg, IDC_SURFACE_INSP_TXT_REPEATS_Y, st.repeatsY );
-    SI_SetDlgFloat( dlg, IDC_SURFACE_INSP_ROTATE, st.rotate );
-
-    if ( st.sampleSize == 0.0f )
-        dlg->SetDlgItemText( IDC_SURFACE_INSP_SAMPLE_SIZE, "" );
-    else
-        SI_SetDlgFloat( dlg, IDC_SURFACE_INSP_SAMPLE_SIZE, st.sampleSize );
-
-    ::SendMessageA( dlg->GetSafeHwnd(), WM_SETREDRAW, 1, 0 );
-    ::InvalidateRect( dlg->GetSafeHwnd(), nullptr, TRUE );
+    // NO-MFC: no-op — identical to the MFC shell with the inspector closed (the g_pSurfDlg
+    // gate below); imgui_panel_surface.cpp re-gathers through SurfaceDlg_Gather every frame.
+    return;
 }
 
 // SurfaceInspector::UpdateSurfaceDialog (0x458590) — the global "selection/texture changed"
@@ -605,7 +540,6 @@ void Surf_RefreshFields()
 // Binary body: if (surfDlgGlob.hwnd) { SurfaceInspector::SetTexMods(); Select_SetTexture_2(&g_dlgSurface); }
 // then if (g_pParentWnd && m_wndTextureBar.m_hWnd) CTextureBar::GetSurfaceAttributes(&bar).
 // Port names: SetTexMods → SurfaceInspector_SetTexMods; Select_SetTexture_2 → Surf_RefreshFields.
-extern CMainFrame *g_pParentWnd;                                 // 0x25D5A70
 namespace SurfaceInspector
 {
     void UpdateSurfaceDialog()
@@ -615,8 +549,8 @@ namespace SurfaceInspector
             SurfaceInspector_SetTexMods();          // 0x45859a  SurfaceInspector::SetTexMods
             Surf_RefreshFields();                   // 0x4585a4  Select_SetTexture_2
         }
-        if ( g_pParentWnd && g_pParentWnd->m_wndTextureBar.m_hWnd )     // 0x4585b7
-            CTextureBar::GetSurfaceAttributes( &g_pParentWnd->m_wndTextureBar );   // 0x4585bd
+        // NO-MFC: texture-bar push skipped — CTextureBar is an MFC CWnd (texturebar.cpp);
+        // the ImGui texture-bar panel re-gathers, so there is nothing to push.
     }
 }
 
@@ -733,138 +667,11 @@ void SurfaceDlg_Spin( surfaceDlgState_t &st, int idFrom, bool up )
     st.texdefDirty = 0;
 }
 
-BEGIN_MESSAGE_MAP( CSurfaceDlg, CDialog )
-    // WM_COMMAND / BN_CLICKED (binary msgmap 0x6e2e58):
-    ON_BN_CLICKED( IDC_SURFACE_INSP_BTN_DONE,    &CSurfaceDlg::OnDone )       // 1489 → OnOK   (0x4589e0)
-    ON_BN_CLICKED( IDC_SURFACE_INSP_BTN_CANCEL,  &CSurfaceDlg::OnCancel2 )    // 1198 → sub_458AB0
-    ON_BN_CLICKED( IDC_SURFACE_INSP_BTN_CAP,     &CSurfaceDlg::OnCap )        // 1282 → OnCap  (0x458b40)
-    ON_BN_CLICKED( IDC_SURFACE_INSP_BTN_NATURAL, &CSurfaceDlg::OnNaturalize ) // 1284 → OnNaturalize (0x458c60)
-    ON_BN_CLICKED( IDC_SURFACE_INSP_BTN_SET,     &CSurfaceDlg::OnSet )        // 1283 → OnSet  (0x458cb0)
-    ON_BN_CLICKED( IDC_SURFACE_INSP_BTN_FIT,     &CSurfaceDlg::OnFit )        // 1286 → OnFit  (0x458de0)
-    ON_BN_CLICKED( IDC_SURFACE_INSP_BTN_LMAP,    &CSurfaceDlg::OnLightmap )   // 1287 → OnLightmap (0x458ca0)
-    // WM_COMMAND / EN_CHANGE (0x458e10 / 0x458e20 — set the "edit changed" dirty flags):
-    ON_EN_CHANGE( IDC_SURFACE_INSP_HORZ_STRETCH,  &CSurfaceDlg::OnTexdefEdited )  // 1211
-    ON_EN_CHANGE( IDC_SURFACE_INSP_VERT_STRETCH,  &CSurfaceDlg::OnTexdefEdited )  // 1213
-    ON_EN_CHANGE( IDC_SURFACE_INSP_HORZ_SHIFT_IN, &CSurfaceDlg::OnTexdefEdited )  // 1195
-    ON_EN_CHANGE( IDC_SURFACE_INSP_VERT_SHIFT_IN, &CSurfaceDlg::OnTexdefEdited )  // 1196
-    ON_EN_CHANGE( IDC_SURFACE_INSP_ROTATE,        &CSurfaceDlg::OnTexdefEdited )  // 1217
-    ON_EN_CHANGE( IDC_SURFACE_INSP_SAMPLE_SIZE,   &CSurfaceDlg::OnSampleEdited )  // 1035
-    // WM_NOTIFY / UDN_DELTAPOS spin arrows (0x458b10 → UpdateSpinners 0x457cf0):
-    ON_NOTIFY( UDN_DELTAPOS, IDC_SURFACE_INSP_HORZ_SHIFT_SPIN,   &CSurfaceDlg::OnDeltaPosSpin )  // 1248
-    ON_NOTIFY( UDN_DELTAPOS, IDC_SURFACE_INSP_VERT_SHIFT_SPIN,   &CSurfaceDlg::OnDeltaPosSpin )  // 1251
-    ON_NOTIFY( UDN_DELTAPOS, IDC_SURFACE_INSP_HORZ_STRETCH_SPIN, &CSurfaceDlg::OnDeltaPosSpin )  // 1257
-    ON_NOTIFY( UDN_DELTAPOS, IDC_SURFACE_INSP_VERT_STRETCH_SPIN, &CSurfaceDlg::OnDeltaPosSpin )  // 1254
-    ON_NOTIFY( UDN_DELTAPOS, IDC_SURFACE_INSP_ROTATE_SPIN,       &CSurfaceDlg::OnDeltaPosSpin )  // 1259
-    ON_NOTIFY( UDN_DELTAPOS, IDC_SURFACE_INSP_SAMPLE_SIZE_SPIN,  &CSurfaceDlg::OnDeltaPosSpin )  // 1260
-    ON_WM_DESTROY()
-    ON_WM_CLOSE()               // [X] title button → OnClose → OnCancel (real destroy)
-END_MESSAGE_MAP()
-
-CSurfaceDlg::CSurfaceDlg()
-    : CDialog( IDD_SURFACE_INSPECTOR, nullptr ),
-      m_bPatchMode( 0 ), m_texdefDirty( 0 ), m_sampleDirty( 0 )
-{
-}
-
-// DoDataExchange (0x456c00) — DDX_Control on the six spin controls (so their buddy
-// arrows drive the edits) + DDX_Text on the tex-repeat x/y edits.  The spins are simple
-// child controls here; the up-down notifications are routed by the message map, so the
-// DDX_Control bindings only need to exist to satisfy MFC's subclassing of the up-downs.
-void CSurfaceDlg::DoDataExchange( CDataExchange *pDX )
-{
-    CDialog::DoDataExchange( pDX );
-    // (Binary binds the spins to CSpinButtonCtrl members via DDX_Control; the deltas are
-    //  handled through the message map, so no member spinners are needed here.)
-}
-
-// OnInitDialog (0x458710) — set the up-down ranges, seed the tex-repeat edits + terrain-mode
-// radio from the cached g_qeglobals values, then refresh the fields from the selection.
-BOOL CSurfaceDlg::OnInitDialog()
-{
-    CDialog::OnInitDialog();
-    surfDlgGlob.hwnd = (int)(intptr_t)GetSafeHwnd();
-    Surf_RefreshFields();
-
-    // Up-down ranges (binary sets 0..1000 for the texdef spins, 0..1024 for tex-repeat).
-    static const int spins[] = {
-        IDC_SURFACE_INSP_VERT_SHIFT_SPIN, IDC_SURFACE_INSP_HORZ_SHIFT_SPIN,
-        IDC_SURFACE_INSP_ROTATE_SPIN, IDC_SURFACE_INSP_VERT_STRETCH_SPIN,
-        IDC_SURFACE_INSP_HORZ_STRETCH_SPIN
-    };
-    // UDM_SETRANGE lParam: LOWORD = upper bound, HIWORD = lower bound (0).
-    for ( int s : spins )
-        SendDlgItemMessage( s, UDM_SETRANGE, 0, (LPARAM)1000 );
-    SendDlgItemMessage( IDC_SURFACE_INSP_TEX_REP_X_SPIN, UDM_SETRANGE, 0, (LPARAM)1024 );
-    SendDlgItemMessage( IDC_SURFACE_INSP_TEX_REP_Y_SPIN, UDM_SETRANGE, 0, (LPARAM)1024 );
-
-    CheckDlgButton( IDC_SURFACE_INSP_PATCH_2D, 0 );
-    CheckDlgButton( IDC_SURFACE_INSP_PATCH_3D, 0 );
-    CheckDlgButton( IDC_SURFACE_INSP_PATCH_CURVE, 0 );
-
-    if ( !g_qeglobals.surfInsp_tex_repeatx ) g_qeglobals.surfInsp_tex_repeatx = 1;
-    if ( !g_qeglobals.surfInsp_tex_repeaty ) g_qeglobals.surfInsp_tex_repeaty = 1;
-    char buf[32];
-    _itoa( g_qeglobals.surfInsp_tex_repeatx, buf, 10 );
-    SetDlgItemText( IDC_SURFACE_INSP_TEX_REP_X, buf );
-    _itoa( g_qeglobals.surfInsp_tex_repeaty, buf, 10 );
-    SetDlgItemText( IDC_SURFACE_INSP_TEX_REP_Y, buf );
-
-    if ( !g_qeglobals.surfInsp_nIDButton )
-        g_qeglobals.surfInsp_nIDButton = IDC_SURFACE_INSP_PATCH_2D;
-    switch ( g_qeglobals.surfInsp_nIDButton )
-    {
-        case IDC_SURFACE_INSP_PATCH_2D:    CheckDlgButton( IDC_SURFACE_INSP_PATCH_2D, 1 );    break;
-        case IDC_SURFACE_INSP_PATCH_3D:    CheckDlgButton( IDC_SURFACE_INSP_PATCH_3D, 1 );    break;
-        case IDC_SURFACE_INSP_PATCH_CURVE: CheckDlgButton( IDC_SURFACE_INSP_PATCH_CURVE, 1 ); break;
-    }
-
-    m_texdefDirty = 0;
-    m_sampleDirty = 0;
-    return TRUE;
-}
-
-// EN_CHANGE handlers (0x458e10 / 0x458e20) — mark pending edits so GetTexMods commits them.
-void CSurfaceDlg::OnTexdefEdited() { m_texdefDirty = 1; }
-void CSurfaceDlg::OnSampleEdited() { m_sampleDirty = 1; }
-
-// OnOK (Done 1489 / Enter, 0x4589e0): commit pending edits (GetTexMods), then close.  This is
-// DestroyWindow fires OnDestroy (surfDlgGlob.hwnd=0) then PostNcDestroy (g_pSurfDlg=0,
-// delete this).  Do NOT call CDialog::OnOK (it ::EndDialog-hides a modeless dialog).
-void CSurfaceDlg::OnOK()
-{
-    surfaceDlgState_t st;
-    SI_ReadState( this, st );
-    SurfaceDlg_Apply( st );
-    SI_WriteState( this, st );
-    SurfaceInspector_Wnd02();   // commit the scratch back (SurfaceDlg_Wnd02 0x4583f0)
-    surfDlgGlob.hwnd = 0;
-    DestroyWindow();
-}
-
-// OnCancel (Cancel 1198 / Esc / [X], sub_458AB0): restore the template + flush pending dirty
-// face/patch edits (Wnd02) WHILE surfDlgGlob.hwnd is still set, then really close.  Do NOT call
-// CDialog::OnCancel (it ::EndDialog-hides a modeless dialog, leaving surfDlgGlob.hwnd/g_pSurfDlg set).
-void CSurfaceDlg::OnCancel()
-{
-    SurfaceInspector_Wnd02();
-    surfDlgGlob.hwnd = 0;
-    DestroyWindow();
-}
-
-// The two on-screen buttons route to the real close handlers above.
-void CSurfaceDlg::OnDone()    { OnOK();     }   // "Done"   button 1489
-void CSurfaceDlg::OnCancel2() { OnCancel(); }   // "Cancel" button 1198
-
-// Title-bar [X] (WM_CLOSE → SurfaceInspector::OnClose2 0x458a10): surfDlgGlob.hwnd=0 +
-// CWnd::OnClose ONLY — the binary does NOT commit pending texmods on [X]; the Wnd02
-// flush belongs to the Cancel button path (1198, 0x458ab0) alone (decoded msgmap
-// 0x6E2E58).  [audit U8/D6 — the port routed [X] to OnCancel, silently COMMITTING
-// scratch texdef edits the binary discards.]
-void CSurfaceDlg::OnClose()
-{
-    surfDlgGlob.hwnd = 0;                  // 0x458a10
-    DestroyWindow();                // modeless port-form CWnd::OnClose (fires OnDestroy/PostNcDestroy)
-}
+// ══════════════════════════════════════════════════════════════════════════════
+//  MFC shell — the CSurfaceDlg handler bodies.  Each is a thin wrapper over the
+//  Surface*_Apply / SurfaceDlg_* core above it (which imgui_panel_surface.cpp calls), so
+//  the fences below interleave with those cores rather than wrapping one block.
+// ══════════════════════════════════════════════════════════════════════════════
 
 // UI-independent action behind CSurfaceDlg's "Fit" button.
 // "Fit" (SurfaceInspector::OnFit 0x458DE0): fit the texture to the selected face(s) —
@@ -877,18 +684,6 @@ void SurfaceFit_Apply()
     Surf_RefreshFields();
 }
 
-void CSurfaceDlg::OnFit()
-{
-    SurfaceFit_Apply();
-}
-
-// Read a tex-repeat edit field as a float (0 if empty / unparseable).
-static float SI_ReadEditFloat( HWND self, int id )
-{
-    char buf[128] = "";
-    ::GetDlgItemTextA( self, id, buf, sizeof( buf ) - 1 );
-    return (float)atof( buf );
-}
 
 // UI-independent action behind CSurfaceDlg's "Natural" button.
 // "Natural" (SurfaceInspector::OnNaturalize 0x458C60): patch 1:1 natural projection at the
@@ -902,10 +697,6 @@ void SurfaceNaturalize_Apply()
     g_nUpdateBits = -1;
 }
 
-void CSurfaceDlg::OnNaturalize()
-{
-    SurfaceNaturalize_Apply();
-}
 
 // UI-independent action behind CSurfaceDlg's "CAP" button.
 // "CAP" (SurfaceInspector::OnCap 0x458B40): patch cap texturing — scale the layer sample
@@ -927,12 +718,6 @@ void SurfaceCap_Apply( float xSize, float ySize )
     }
 }
 
-void CSurfaceDlg::OnCap()
-{
-    float xSize = SI_ReadEditFloat( GetSafeHwnd(), IDC_SURFACE_INSP_TEX_REP_X );
-    float ySize = SI_ReadEditFloat( GetSafeHwnd(), IDC_SURFACE_INSP_TEX_REP_Y );
-    SurfaceCap_Apply( xSize, ySize );
-}
 
 // UI-independent action behind CSurfaceDlg's "Lmap" button.
 // "Lmap" (SurfaceInspector::OnLightmap 0x458CA0): re-align the lightmap layer's texCoords
@@ -943,10 +728,6 @@ void SurfaceLightmap_Apply()
     g_nUpdateBits = -1;
 }
 
-void CSurfaceDlg::OnLightmap()
-{
-    SurfaceLightmap_Apply();
-}
 
 // UI-independent action behind CSurfaceDlg's "Set..." button.
 // "Set..." (SurfaceInspector::OnSet 0x458CB0): read the tex-repeat X/Y + the terrain-distance
@@ -969,91 +750,14 @@ void SurfaceSet_Apply( float v5, float v6, int checked )
     g_nUpdateBits = -1;
 }
 
-void CSurfaceDlg::OnSet()
-{
-    HWND self = GetSafeHwnd();
-    float v5 = SI_ReadEditFloat( self, IDC_SURFACE_INSP_TEX_REP_X );
-    float v6 = SI_ReadEditFloat( self, IDC_SURFACE_INSP_TEX_REP_Y );
-
-    int checked = 0;                         // GetCheckedRadioButton(2D..Curve)
-    if ( IsDlgButtonChecked( IDC_SURFACE_INSP_PATCH_2D ) )         checked = IDC_SURFACE_INSP_PATCH_2D;
-    else if ( IsDlgButtonChecked( IDC_SURFACE_INSP_PATCH_3D ) )    checked = IDC_SURFACE_INSP_PATCH_3D;
-    else if ( IsDlgButtonChecked( IDC_SURFACE_INSP_PATCH_CURVE ) ) checked = IDC_SURFACE_INSP_PATCH_CURVE;
-
-    SurfaceSet_Apply( v5, v6, checked );
-}
-
-// UDN_DELTAPOS (OnDeltaPosSpin 0x458b10) — a spin arrow stepped; step the texdef by the
-// binary's per-spin delta (UpdateSpinners).  Up-arrow = iDelta > 0.
-void CSurfaceDlg::OnDeltaPosSpin( NMHDR *pNMHDR, LRESULT *pResult )
-{
-    NMUPDOWN *ud = (NMUPDOWN *)pNMHDR;
-    surfaceDlgState_t st;
-    SI_ReadState( this, st );
-    SurfaceDlg_Spin( st, (int)pNMHDR->idFrom, ud->iDelta > 0 );
-    SI_WriteState( this, st );
-    if ( pResult )
-        *pResult = 0;
-}
-
-// OnDestroy (0x458a50) — save the window rect + clear surfDlgGlob.hwnd + invalidate the views.
-// [audit U8/D2 — the rect save was missing (this comment already claimed it); binary
-// order is save BEFORE CWnd::OnDestroy (0x458a69/0x458a7a → 0x458a84).]
-extern BOOL SaveRegistryInfo( const char *pszName, void *pvBuf, int lSize );   // win_qe3.cpp
-void CSurfaceDlg::OnDestroy()
-{
-    if ( GetSafeHwnd() )                                     // 0x458a62
-    {
-        RECT rect;
-        ::GetWindowRect( GetSafeHwnd(), &rect );             // 0x458a69
-        SaveRegistryInfo( "Radiant::SurfaceWindow", &rect, 0x10 );   // 0x458a7a
-    }
-    CDialog::OnDestroy();                                    // 0x458a84
-    surfDlgGlob.hwnd = 0;                                           // 0x458a89
-    g_nUpdateBits = -1;                                      // 0x458a93
-}
-
-void CSurfaceDlg::PostNcDestroy()
-{
-    surfDlgGlob.hwnd  = 0;
-    g_pSurfDlg = nullptr;
-    delete this;                 // modeless self-cleanup
-}
 
 // DoSurface (0x4585d0) — open/show the inspector.  Toggling: closed → CDialog::Create(IDD 116);
 // open → bring to front + refresh.  Faithful to the binary (a modeless CDialog on IDD_SURFACE_INSP).
 void Surf_OpenInspector()
 {
-    CWnd *parent = AfxGetMainWnd();
-
-    if ( g_pSurfDlg && ::IsWindow( g_pSurfDlg->GetSafeHwnd() ) )
-    {
-        surfDlgGlob.hwnd = (int)(intptr_t)g_pSurfDlg->GetSafeHwnd();
-        Surf_RefreshFields();
-        g_pSurfDlg->ShowWindow( SW_SHOW );
-        g_pSurfDlg->SetForegroundWindow();
-        SurfaceInspector_SetTexMods();   // DoSurface re-open path: re-snapshot the scratch
-        return;
-    }
-
-    g_bNewFace = 1;
-    // Seed g_patch_texdef defaults (DoSurface 0x4585d0: size/shift 0.05, rotate = prefs rotation).
-    g_patch_texdef.mtlDef.mat_texDef.size[0]  = 0.05f;
-    g_patch_texdef.mtlDef.mat_texDef.size[1]  = 0.05f;
-    g_patch_texdef.mtlDef.mat_texDef.shift[0] = 0.05f;
-    g_patch_texdef.mtlDef.mat_texDef.shift[1] = 0.05f;
-
-    g_pSurfDlg = new CSurfaceDlg();
-    if ( !g_pSurfDlg->Create( IDD_SURFACE_INSPECTOR, parent ) )
-    {
-        delete g_pSurfDlg;
-        g_pSurfDlg = nullptr;
-        return;
-    }
-    g_pSurfDlg->ShowWindow( SW_SHOW );
-    surfDlgGlob.hwnd = (int)(intptr_t)g_pSurfDlg->GetSafeHwnd();
-    Surf_RefreshFields();
-    SurfaceInspector_SetTexMods();   // DoSurface: snapshot the current edit-layer into the scratch
+    // NO-MFC: no-op — imgui_panel_surface.cpp IS the inspector in this shell (it is opened
+    // from the panels menu, not from here), and it re-gathers instead of being populated.
+    return;
 }
 
 // The selection→inspector refresh hook (UpdateSurfaceDialog 0x458590) — re-snapshot the
@@ -1068,10 +772,6 @@ void Surf_UpdateInspector()
     // Only when the inspector is a live, visible window.  The IsWindow/IsWindowVisible guard is
     // defensive: a proper close now destroys the dialog (clearing surfDlgGlob.hwnd/g_pSurfDlg), so this
     // is a true no-op once closed — but never operate on a hidden/dead HWND.
-    if ( surfDlgGlob.hwnd && g_pSurfDlg && ::IsWindow( g_pSurfDlg->GetSafeHwnd() )
-         && g_pSurfDlg->IsWindowVisible() )
-    {
-        SurfaceInspector_SetTexMods();   // 0x458270 — re-snapshot (UpdateSurfaceDialog)
-        Surf_RefreshFields();            // 0x4572D0 — refresh the dialog fields
-    }
+    // NO-MFC: no-op — surfDlgGlob.hwnd is never set without the MFC dialog, so this is the
+    // same "inspector not up" path the MFC shell takes; the panel re-gathers per frame.
 }

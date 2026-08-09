@@ -90,27 +90,9 @@ static texdef_sub_t *TexBar_TargetTexdef()
 //  CTextureBar — the hand-built docked bar (CVehicleDlg / CSurfaceDlg plumbing pattern).
 // ══════════════════════════════════════════════════════════════════════════════
 
-// Control ids for the hand-built bar (the binary's are dialog-template resource ids; ours
-// are a private contiguous block, matched to the spin→field routing in OnDeltaPos).
-enum
-{
-    IDC_TB_TEXNAME = 1810,     // current texture name (read-only)
-    IDC_TB_SHIFT_H, IDC_TB_SHIFT_H_SPIN,
-    IDC_TB_SHIFT_V, IDC_TB_SHIFT_V_SPIN,
-    IDC_TB_SCALE_H, IDC_TB_SCALE_H_SPIN,
-    IDC_TB_SCALE_V, IDC_TB_SCALE_V_SPIN,
-    IDC_TB_ROTATE,  IDC_TB_ROTATE_SPIN,
-};
-
-static HFONT s_tbFont = nullptr;
-
-static HWND s_tbName    = nullptr;
-static HWND s_tbShiftH  = nullptr, s_tbShiftHspin = nullptr;
-static HWND s_tbShiftV  = nullptr, s_tbShiftVspin = nullptr;
-static HWND s_tbScaleH  = nullptr, s_tbScaleHspin = nullptr;
-static HWND s_tbScaleV  = nullptr, s_tbScaleVspin = nullptr;
-static HWND s_tbRotate  = nullptr, s_tbRotateSpin = nullptr;
-static bool s_tbRefreshing = false;   // guard: SetWindowText during a refresh must not re-apply
+// MFC shell — the control ids + the child-HWND statics.  The texdef cores above and the
+// TextureBar_Gather / _Apply / _Spin actions below stay COMMON (they are what a future
+// ImGui texture-bar panel drives), as do g_tbRotateAmt and g_texBarHeight.
 
 // CTextureBar member ints (the binary lays them out at +0x248..; here they are real fields,
 // but the read/write helpers below transcribe the exact field→member mapping from the disasm).
@@ -119,104 +101,9 @@ static bool s_tbRefreshing = false;   // guard: SetWindowText during a refresh m
 
 static int g_tbRotateAmt = 45;        // CTextureBar member @0x25C (the Rotate spin step)
 
-static HWND TB_MakeChild( HWND parent, const char *cls, DWORD style, int id,
-                          int x, int y, int w, int hgt, const char *text = nullptr )
-{
-    HWND h = CreateWindowExA( 0, cls, text, WS_CHILD | WS_VISIBLE | style,
-                              x, y, w, hgt, parent, (HMENU)(INT_PTR)id,
-                              AfxGetInstanceHandle(), NULL );
-    if ( h && s_tbFont )
-        SendMessageA( h, WM_SETFONT, (WPARAM)s_tbFont, 0 );
-    return h;
-}
-
-BEGIN_MESSAGE_MAP( CTextureBar, CWnd )
-    ON_WM_CREATE()
-    ON_NOTIFY( UDN_DELTAPOS, IDC_TB_SHIFT_H_SPIN, &CTextureBar::OnDeltaPos )
-    ON_NOTIFY( UDN_DELTAPOS, IDC_TB_SHIFT_V_SPIN, &CTextureBar::OnDeltaPos )
-    ON_NOTIFY( UDN_DELTAPOS, IDC_TB_SCALE_H_SPIN, &CTextureBar::OnDeltaPos )
-    ON_NOTIFY( UDN_DELTAPOS, IDC_TB_SCALE_V_SPIN, &CTextureBar::OnDeltaPos )
-    ON_NOTIFY( UDN_DELTAPOS, IDC_TB_ROTATE_SPIN,  &CTextureBar::OnDeltaPos )
-    ON_EN_KILLFOCUS( IDC_TB_SHIFT_H, &CTextureBar::OnFieldEdited )
-    ON_EN_KILLFOCUS( IDC_TB_SHIFT_V, &CTextureBar::OnFieldEdited )
-    ON_EN_KILLFOCUS( IDC_TB_SCALE_H, &CTextureBar::OnFieldEdited )
-    ON_EN_KILLFOCUS( IDC_TB_SCALE_V, &CTextureBar::OnFieldEdited )
-    ON_EN_KILLFOCUS( IDC_TB_ROTATE,  &CTextureBar::OnFieldEdited )
-END_MESSAGE_MAP()
-
-CTextureBar::CTextureBar()
-{
-}
-
-// One labelled "edit + up-down spinner" cell laid out horizontally across the bar.
-static void TB_MakeCell( HWND self, int &x, int y, const char *label, int lblW,
-                         int editId, HWND *editOut, int spinId, HWND *spinOut )
-{
-    const int editW = 52, spinW = 15, h = 20;
-    TB_MakeChild( self, "static", SS_LEFT, 0, x, y + 3, lblW, 16, label );
-    x += lblW + 2;
-    HWND e = TB_MakeChild( self, "edit", WS_BORDER | ES_AUTOHSCROLL, editId, x, y, editW, h );
-    x += editW;
-    // A bare up-down (no buddy auto-int): we read iDelta in UDN_DELTAPOS and forward the
-    // ±gridsize nudge to the ported Brush_*Texture op ourselves.
-    HWND s = TB_MakeChild( self, UPDOWN_CLASSA, UDS_ARROWKEYS, spinId, x, y, spinW, h );
-    x += spinW + 10;
-    if ( editOut ) *editOut = e;
-    if ( spinOut ) *spinOut = s;
-}
-
-// 0x459250  CTextureBar::Init — the ctor.  Here: build the child controls across the bar.
-int CTextureBar::OnCreate( LPCREATESTRUCT lpCreateStruct )
-{
-    if ( CWnd::OnCreate( lpCreateStruct ) == -1 )
-        return -1;
-    if ( !s_tbFont )
-        s_tbFont = (HFONT)GetStockObject( DEFAULT_GUI_FONT );
-
-    INITCOMMONCONTROLSEX icc = { sizeof( icc ), ICC_UPDOWN_CLASS };
-    InitCommonControlsEx( &icc );
-
-    g_tbRotateAmt = 45;     // member @0x25C init (CTextureBar::Init sets [esi+25Ch]=45)
-
-    HWND self = GetSafeHwnd();
-    int x = 6, y = 4;
-
-    TB_MakeChild( self, "static", SS_LEFT, 0, x, y + 3, 30, 16, "Tex" );
-    x += 32;
-    s_tbName = TB_MakeChild( self, "edit", WS_BORDER | ES_READONLY | ES_AUTOHSCROLL,
-                             IDC_TB_TEXNAME, x, y, 150, 20 );
-    x += 160;
-
-    TB_MakeCell( self, x, y, "SH", 22, IDC_TB_SHIFT_H, &s_tbShiftH, IDC_TB_SHIFT_H_SPIN, &s_tbShiftHspin );
-    TB_MakeCell( self, x, y, "SV", 22, IDC_TB_SHIFT_V, &s_tbShiftV, IDC_TB_SHIFT_V_SPIN, &s_tbShiftVspin );
-    TB_MakeCell( self, x, y, "ScH", 26, IDC_TB_SCALE_H, &s_tbScaleH, IDC_TB_SCALE_H_SPIN, &s_tbScaleHspin );
-    TB_MakeCell( self, x, y, "ScV", 26, IDC_TB_SCALE_V, &s_tbScaleV, IDC_TB_SCALE_V_SPIN, &s_tbScaleVspin );
-    TB_MakeCell( self, x, y, "Rot", 26, IDC_TB_ROTATE, &s_tbRotate, IDC_TB_ROTATE_SPIN, &s_tbRotateSpin );
-
-    // No initial GetSurfaceAttributes here: the bar is created during CMainFrame::OnCreate,
-    // before the current-texture template / a map is up.  The first real refresh comes from
-    // CMainFrame::UpdateWindows / the post-load broadcast (faithful to the binary, which
-    // refreshes the bar via UpdateTextureBar after init, never from the ctor).
-    return 0;
-}
 
 // ── format / read helpers (the binary's DDX_Text int<->edit; we keep them %d, the bar
 //    shows integer texels/degrees exactly like the IDB member ints) ─────────────
-static void TB_SetInt( HWND h, int v )
-{
-    if ( !h ) return;
-    char buf[32];
-    sprintf( buf, "%d", v );
-    ::SetWindowTextA( h, buf );
-}
-
-static int TB_GetInt( HWND h )
-{
-    if ( !h ) return 0;
-    char buf[32] = { 0 };
-    ::GetWindowTextA( h, buf, sizeof( buf ) - 1 );
-    return atoi( buf );
-}
 
 // One texture-bar control snapshot: the current-material readout plus the five member ints
 // the bar exchanges with the picked face's texdef (the binary's CTextureBar members
@@ -264,28 +151,6 @@ bool TextureBar_Gather( textureBarState_t &out )
     return true;
 }
 
-void CTextureBar::GetSurfaceAttributes( CTextureBar *bar )
-{
-    if ( !bar || !bar->GetSafeHwnd() || !s_tbShiftH )
-        return;
-
-    textureBarState_t st;
-    memset( &st, 0, sizeof( st ) );
-    if ( !TextureBar_Gather( st ) )
-        return;
-
-    s_tbRefreshing = true;
-
-    ::SetWindowTextA( s_tbName, st.texName );
-
-    TB_SetInt( s_tbShiftH, st.hShift );
-    TB_SetInt( s_tbShiftV, st.vShift );
-    TB_SetInt( s_tbScaleH, st.hScale );
-    TB_SetInt( s_tbScaleV, st.vScale );
-    TB_SetInt( s_tbRotate, st.rotate );
-
-    s_tbRefreshing = false;
-}
 
 // UI-independent action behind the texture bar's live field commit.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -317,26 +182,20 @@ void TextureBar_Apply( const textureBarState_t &st )
     g_nUpdateBits |= 1;
 }
 
-void CTextureBar::ApplyFields()
+
+// The five spin control ids TextureBar_Spin dispatches on. These lived in the MFC
+// bar's control-id enum (deleted with the CTextureBar shell in U-RIP); TextureBar_Spin
+// is common code called by both the old bar and any future ImGui spin, so the ids it
+// switches on live out here. Values verbatim from that enum (IDC_TB_TEXNAME = 1810, the
+// bar's controls counting up in cell order).
+enum
 {
-    if ( s_tbRefreshing )
-        return;
-
-    textureBarState_t st;
-    memset( &st, 0, sizeof( st ) );
-    st.hShift = TB_GetInt( s_tbShiftH );
-    st.vShift = TB_GetInt( s_tbShiftV );
-    st.hScale = TB_GetInt( s_tbScaleH );
-    st.vScale = TB_GetInt( s_tbScaleV );
-    st.rotate = TB_GetInt( s_tbRotate );
-
-    TextureBar_Apply( st );
-}
-
-void CTextureBar::OnFieldEdited()
-{
-    ApplyFields();
-}
+    IDC_TB_SHIFT_H_SPIN = 1812,
+    IDC_TB_SHIFT_V_SPIN = 1814,
+    IDC_TB_SCALE_H_SPIN = 1816,
+    IDC_TB_SCALE_V_SPIN = 1818,
+    IDC_TB_ROTATE_SPIN  = 1820,
+};
 
 // UI-independent action behind the texture bar's spin-arrow nudges.
 // ── the five spin handlers (sub_459470/4594C0/459510/459550/459590) ───────────
@@ -374,47 +233,16 @@ bool TextureBar_Spin( int idFrom, bool negate )
 }
 
 // `iDelta>=0` (down arrow) = negative step (disasm `if (*(int*)(a2+16) >= 0) v4 = -v4`).
-void CTextureBar::OnDeltaPos( NMHDR *pNMHDR, LRESULT *pResult )
-{
-    NMUPDOWN *ud = (NMUPDOWN *)pNMHDR;
-    bool negate  = ( ud->iDelta >= 0 );    // faithful: positive delta negates the step
-
-    if ( TextureBar_Spin( (int)pNMHDR->idFrom, negate ) )
-        GetSurfaceAttributes( this );      // refresh the member ints (disasm tail)
-    if ( pResult )
-        *pResult = 0;
-}
 
 // ══════════════════════════════════════════════════════════════════════════════
 //  CMainFrame integration — the bar is created across the top strip of the frame.
 //  CMainFrame::UpdateTextureBar (0x429150) refreshes it; the QE4 layout insets below it.
 // ══════════════════════════════════════════════════════════════════════════════
-static CTextureBar *g_pTextureBarWnd = nullptr;   // points at CMainFrame::m_wndTextureBar
 int g_texBarHeight = 0;                            // top inset consumed by the bar (0 = none)
+                                                   // (COMMON: mainfrm.h:376 externs it for the
+                                                   //  QE4 layout inset in BOTH shells)
 
 // Create the embedded texture bar across the top of the frame.  Returns its height (so the
 // caller can inset the QE4 layout).  Hand-built (radiant.rc has no template) — a child window
 // of the frame holding the name static + the five edit/spin cells.
-int CTextureBar::CreateBar( CWnd *frame, CTextureBar *bar, int frameWidth )
-{
-    if ( !frame || !bar )
-        return 0;
-    const int barH = 28;
-    if ( !bar->CreateEx( 0,
-             AfxRegisterWndClass( CS_HREDRAW | CS_VREDRAW, ::LoadCursor( NULL, IDC_ARROW ),
-                                  (HBRUSH)( COLOR_BTNFACE + 1 ), NULL ),
-             "", WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS,
-             CRect( 0, 0, frameWidth, barH ), frame, 0 ) )
-        return 0;
-    g_pTextureBarWnd = bar;
-    g_texBarHeight   = barH;
-    return barH;
-}
-
-// Reposition the bar across the top when the frame resizes.
-void CTextureBar::LayoutBar( int frameWidth )
-{
-    if ( g_pTextureBarWnd && g_pTextureBarWnd->GetSafeHwnd() && g_texBarHeight > 0 )
-        g_pTextureBarWnd->MoveWindow( 0, 0, frameWidth, g_texBarHeight );
-}
 

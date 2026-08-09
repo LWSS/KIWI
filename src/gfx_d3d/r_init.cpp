@@ -4254,6 +4254,15 @@ bool __cdecl R_CanRecoverLostDevice()
 
 void R_ReleaseForShutdownOrReset()
 {
+#ifdef KISAK_RADIANT
+    // KISAK UI-rework Phase 2a: ImGui's DX9 objects must go before dx.device->Reset().
+    extern void ImGuiShell_InvalidateDeviceObjects();   // radiant/imgui_shell.cpp
+    ImGuiShell_InvalidateDeviceObjects();
+    // Phase 5: the RTT viewport textures are D3DPOOL_DEFAULT — release before Reset,
+    // recreated lazily on the next RTT_Begin.
+    extern void RTT_ReleaseForReset();                  // radiant/radiant_rtt.cpp
+    RTT_ReleaseForReset();
+#endif
     IDirect3DSurface9 *pixelCountQuery; // [esp+0h] [ebp-18h]
     IDirect3DSurface9 *v1; // [esp+4h] [ebp-14h]
     IDirect3DSurface9 *var; // [esp+8h] [ebp-10h]
@@ -4263,6 +4272,10 @@ void R_ReleaseForShutdownOrReset()
 
     for (windowIndex = 0; windowIndex < dx.windowCount; ++windowIndex)
     {
+#ifdef KISAK_RADIANT
+        if (!dx.windows[windowIndex].swapChain)   // KISAK: already released (reset-retry path) → skip;
+            continue;                             // R_ReleaseAndSetNULL AVs/asserts on NULL.
+#endif
         do
         {
             if (r_logFile)
@@ -4335,7 +4348,16 @@ void R_ReleaseForShutdownOrReset()
 #endif
 }
 
-void R_ResetDevice()
+#ifdef KISAK_RADIANT
+// KISAK reset-retry state: set once R_ReleaseForShutdownOrReset has run for a reset attempt
+// whose Reset() then FAILED. The release cascade is destructive and NOT idempotent (NULLed
+// swap chains, destroyed dynamic buffers), so a retry must skip straight to Reset() — see
+// R_RecoverLostDevice. Cleared when a Reset() finally succeeds.
+static bool s_releasedForReset = false;
+static int  s_resetFailCount   = 0;      // failed-Reset attempts this loss episode (log throttle)
+#endif
+
+bool R_ResetDevice()
 {
     const char *v0; // eax
     const char *v1; // eax
@@ -4354,15 +4376,94 @@ void R_ResetDevice()
     wndParms.fullscreen = vidConfig.isFullscreen != 0;
     wndParms.aaSamples = r_aaSamples->current.integer;
     R_SetD3DPresentParameters(&d3dpp, &wndParms);
+#ifdef KISAK_RADIANT
+    // Drop the device's implicit ref on its CURRENT render target + depth-stencil before we
+    // release everything and Reset(). On a device-loss recovery the active RT can be an app-
+    // created D3DPOOL_DEFAULT surface — a leftover RTT viewport surface (RTT_End doesn't restore
+    // the RT), or an editor per-window ADDITIONAL swap-chain backbuffer. The device holds a ref
+    // on its current RT/DS, so Reset() returns D3DERR_INVALIDCALL ("Couldn't reset a lost
+    // Direct3D device") even after we release OUR refs. Rebinding to the DEVICE-OWNED implicit
+    // swap-chain backbuffer (which Reset recreates itself, and which is not an outstanding app
+    // resource) means no app DEFAULT surface is bound at Reset time, so the reset succeeds
+    // regardless of what the last frame left bound. (Editor-only: the SP/MP build's active RT is
+    // already the implicit backbuffer, so this is a harmless no-op there — hence the guard.)
+    //
+    // MAP-LOAD reset crash fix: the RT/DS rebind above is NECESSARY but not SUFFICIENT. Reset()
+    // also fails D3DERR_INVALIDCALL while any app-created DEFAULT-pool resource is still BOUND
+    // to the device — sampler textures, stream sources, indices, extra MRT slots — because the
+    // device's binding holds a ref that outlives our R_ReleaseForShutdownOrReset releases. With
+    // no map loaded the samplers only ever held MANAGED UI textures, so the RT/DS rebind alone
+    // was enough (the alt-tab fix "worked"); the first frame after real map content leaves
+    // DEFAULT-pool refs bound (model-lighting image, RTT viewport textures ImGui sampled,
+    // float-z, world/static-model VBs, dynamic IB) → every recovery Reset() died fatally while
+    // loading big maps (which is exactly when the device gets lost — VRAM churn/TDR). Unbind
+    // EVERYTHING; the post-reset R_InitCmdBufState/R_CreateForInitOrReset rebuilds all state
+    // caches so nothing downstream trusts the old bindings.
+    if (dx.device && !s_releasedForReset)
+    {
+        IDirect3DSurface9 *implicitBB = nullptr;
+        if (dx.device->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &implicitBB) >= 0 && implicitBB)
+        {
+            dx.device->SetRenderTarget(0, implicitBB);
+            implicitBB->Release();
+        }
+        dx.device->SetDepthStencilSurface(nullptr);
+        for (DWORD rt = 1; rt < 4; ++rt)
+            dx.device->SetRenderTarget(rt, nullptr);            // extra MRT slots (hr ignored past caps)
+        for (DWORD stage = 0; stage < 16; ++stage)
+            dx.device->SetTexture(stage, nullptr);
+        dx.device->SetTexture(D3DDMAPSAMPLER, nullptr);
+        for (DWORD vtxStage = D3DVERTEXTEXTURESAMPLER0; vtxStage <= D3DVERTEXTEXTURESAMPLER3; ++vtxStage)
+            dx.device->SetTexture(vtxStage, nullptr);
+        for (UINT src = 0; src < 16; ++src)
+            dx.device->SetStreamSource(src, nullptr, 0, 0);
+        dx.device->SetIndices(nullptr);
+        // A scene left open (e.g. a Com_Error longjmp between Begin/EndScene) also makes
+        // Reset() return D3DERR_INVALIDCALL.
+        if (dx.inScene)
+        {
+            dx.device->EndScene();
+            dx.inScene = 0;
+        }
+    }
+    if (!s_releasedForReset)
+    {
+        R_ReleaseForShutdownOrReset();
+        s_releasedForReset = true;
+    }
+#else
     R_ReleaseForShutdownOrReset();
+#endif
     //hr = dx.device->Reset(dx.device, &d3dpp);
     hr = dx.device->Reset(&d3dpp);
     if (hr < 0)
     {
+#ifdef KISAK_RADIANT
+        // EDITOR: never fatal on a failed Reset — a device mid-loss can legitimately refuse
+        // (still DEVICELOST, driver mid-TDR, another app holds the GPU). Everything is already
+        // released (s_releasedForReset stays set), so the next paint's R_TestDevice →
+        // R_RecoverLostDevice retries the Reset() alone until the device comes back. Views
+        // simply stop repainting while the device is down instead of killing the editor.
+        // Log the FIRST failure of an episode + every 300th retry (~5s at 60Hz) — a retry can
+        // fire every paint tick, and an unthrottled per-attempt print floods the console and
+        // can stall the main thread on a piped/undrained stdout (seen live under the VS
+        // debugger: main thread parked in Com_Printf→vprintf from this very call).
+        if (s_resetFailCount++ % 300 == 0)
+        {
+            v0 = R_ErrorDescription(hr);
+            Com_Printf(8, "IDirect3DDevice9::Reset failed: 0x%08x (%s) - attempt %i, will retry\n", hr, v0, s_resetFailCount);
+        }
+        return false;
+#else
         v0 = R_ErrorDescription(hr);
         v1 = va("Couldn't reset a lost Direct3D device - IDirect3DDevice9::Reset returned 0x%08x (%s)", hr, v0);
         R_FatalInitError(v1);
+#endif
     }
+#ifdef KISAK_RADIANT
+    s_releasedForReset = false;
+    s_resetFailCount   = 0;
+#endif
     dx.deviceLost = 0;
     if (!R_CreateForInitOrReset())
         R_FatalInitError("Couldn't reinitialize after a lost Direct3D device");
@@ -4385,6 +4486,7 @@ void R_ResetDevice()
     for (int w = 0; w < dx.windowCount; ++w)
         R_Hwnd_Resize(dx.windows[w].hwnd, dx.windows[w].width, dx.windows[w].height);
 #endif
+    return true;
 }
 
 char __cdecl R_RecoverLostDevice()
@@ -4409,20 +4511,39 @@ char __cdecl R_RecoverLostDevice()
 
     iassert( dx.device );
     iassert( dx.deviceLost );
-    iassert( gfxBuf.dynamicVertexBuffer->buffer );
-    iassert( gfxBuf.dynamicIndexBuffer->buffer );
     if (!R_CanRecoverLostDevice())
         return 0;
-    Com_Printf(8, "Recovering lost device...\n");
-    remoteScreenUpdateNesting = R_PopRemoteScreenUpdate();
-    R_SyncRenderThread();
-    R_Cinematic_BeginLostDevice();
-    DB_BeginRecoverLostDevice();
-    R_ResetModelLighting();
-    R_ReleaseLostImages();
-    Material_ReleaseAll();
-    R_ReleaseWorld();
+#ifdef KISAK_RADIANT
+    // Reset-retry (see R_ResetDevice): a prior attempt already ran the release cascade but
+    // Reset() itself failed (transient). Everything below down to R_ResetDevice is destructive
+    // and non-idempotent (dynamic buffers destroyed, images/materials already released), so on
+    // a retry skip straight to the Reset() attempt; the reload tail runs once it succeeds.
+    static int s_savedRemoteNesting = 0;
+    if (!s_releasedForReset)
+#endif
+    {
+        iassert( gfxBuf.dynamicVertexBuffer->buffer );
+        iassert( gfxBuf.dynamicIndexBuffer->buffer );
+        Com_Printf(8, "Recovering lost device...\n");
+        remoteScreenUpdateNesting = R_PopRemoteScreenUpdate();
+#ifdef KISAK_RADIANT
+        s_savedRemoteNesting = remoteScreenUpdateNesting;
+#endif
+        R_SyncRenderThread();
+        R_Cinematic_BeginLostDevice();
+        DB_BeginRecoverLostDevice();
+        R_ResetModelLighting();
+        R_ReleaseLostImages();
+        Material_ReleaseAll();
+        R_ReleaseWorld();
+    }
+#ifdef KISAK_RADIANT
+    if (!R_ResetDevice())
+        return 0;   // transient Reset failure — retried on the next paint's R_TestDevice
+    remoteScreenUpdateNesting = s_savedRemoteNesting;
+#else
     R_ResetDevice();
+#endif
     R_ReloadWorld();
     Material_ReloadAll();
     R_ReloadLostImages();
@@ -4612,6 +4733,34 @@ void __cdecl R_SetupTargetWindow(int windowIndex)
     // window. (The keystone above still drives the backend's R_SetRenderTarget bind.)
     R_SetRenderTargetSize(&gfxCmdBufSourceState, R_RENDERTARGET_FRAME_BUFFER);
 }
+
+#ifdef KISAK_RADIANT
+// Phase-5 RTT: point FRAME_BUFFER at an OFFSCREEN render-target surface instead of a
+// window's swap-chain back buffer, so a viewport renders into a sampleable texture. Same
+// body as R_SetupTargetWindow minus GetBackBuffer: the depth/stencil (shared, desktop-
+// sized) and the viewport size flow from the GfxRenderTarget fields, so only color +
+// width/height change. AddRef because the caller (radiant_rtt.cpp) owns the surface via its
+// texture; the next R_Setup* call's "release previous color" balances this AddRef. Present
+// is suppressed by g_rbSuppressPresent (rb_backend.cpp). targetWindowIndex stays a valid
+// slot (0 = the host frame) only to satisfy RB_SwapBuffers' range assert.
+void __cdecl R_SetupRenderTargetTexture(IDirect3DSurface9 *rtColor, int width, int height)
+{
+    dx.targetWindowIndex = 0;
+
+    GfxRenderTarget *fb = &gfxRenderTargets[R_RENDERTARGET_FRAME_BUFFER];
+    fb->width  = (uint)width;
+    fb->height = (uint)height;
+
+    if (fb->surface.color)
+        fb->surface.color->Release();
+    fb->surface.color = rtColor;
+    if (rtColor)
+        rtColor->AddRef();
+
+    gfxCmdBufState.renderTargetId = R_RENDERTARGET_NONE;   // keystone: force the backend rebind
+    R_SetRenderTargetSize(&gfxCmdBufSourceState, R_RENDERTARGET_FRAME_BUFFER);
+}
+#endif
 
 // IDB R_SetupRendertarget_CheckDevice @ 0x501a70 — verbatim. Returns 0 (skip the
 // frame) when already targeting a window, rendering disabled, or the device test

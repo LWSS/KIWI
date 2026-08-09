@@ -4,6 +4,8 @@
 #error this file is only for Radiant!
 #endif
 
+#include <string>   // prefData_t string members (was MFC CString before U-SHIM removal)
+
 // prefData_t — the editor preference set. Field names + default values are the
 // binary's CPrefsDlg members (LoadPrefs/SavePrefs registry keys in the comments).
 struct prefData_t
@@ -96,17 +98,17 @@ struct prefData_t
     int   preview_sun_aswell;     // "SunLightPreviewEnable"   (0) — sun shading in preview
     // ── string settings (CString; not consumed by the wired band-aids yet, but
     //    persisted faithfully so the round-trip is complete) ──────────────────────
-    CString m_strLastProject;     // "LastProject"
-    CString m_strLastMap;         // "LastMap"
-    CString which_game;           // "WhichGame"
-    CString ScriptGroupKey;       // "ScriptGroupKey"          ("script_group")
-    CString ScriptGroupTokenKey;  // "ScriptGroupTokenKey"     ("script_group_tokens")
-    CString ScriptColorTeamKey;   // "ScriptColorTeamKey"      ("script_color_allies")
-    CString ScriptColorKey;       // "ScriptColorKey"          ("red")
-    CString ScriptSubKey_key;     // "ScriptSubKey_key"        ("script_objective_active")
-    CString ScriptSubValue_key;   // "ScriptSubValue_key"
-    CString m_strUserIniPath;     // "UserINIPath"
-    CString m_strUserFilterPath;  // "UserFiltersPath"
+    std::string m_strLastProject;     // "LastProject"
+    std::string m_strLastMap;         // "LastMap"
+    std::string which_game;           // "WhichGame"
+    std::string ScriptGroupKey;       // "ScriptGroupKey"          ("script_group")
+    std::string ScriptGroupTokenKey;  // "ScriptGroupTokenKey"     ("script_group_tokens")
+    std::string ScriptColorTeamKey;   // "ScriptColorTeamKey"      ("script_color_allies")
+    std::string ScriptColorKey;       // "ScriptColorKey"          ("red")
+    std::string ScriptSubKey_key;     // "ScriptSubKey_key"        ("script_objective_active")
+    std::string ScriptSubValue_key;   // "ScriptSubValue_key"
+    std::string m_strUserIniPath;     // "UserINIPath"
+    std::string m_strUserFilterPath;  // "UserFiltersPath"
 
     prefData_t();                 // sets the binary's defaults (Prefs_SetDefaults)
 };
@@ -128,4 +130,6 @@ void Prefs_Init( bool loadFromRegistry );
 
 // GUI: open the preferences dialog (Edit→Preferences). Returns IDOK if the user
 // applied (and the new settings were saved), IDCANCEL otherwise. parent may be NULL.
-int  Prefs_ShowDialog( CWnd *parent );
+// U-GUARD-2: MFC-only — CPrefsDlg + Prefs_ShowDialog's definition are already fenced in
+// prefs.cpp (:486-740), and the CWnd* parameter type does not exist under KISAK_NO_MFC.
+// The ImGui prefs panel (imgui_panel_prefs.cpp) drives prefData_t directly instead.

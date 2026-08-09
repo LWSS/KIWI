@@ -9,6 +9,7 @@
 #include <universal/assertive.h>    // iassert (USE_ASSERTS always on; same handler as Assert)
 #include "qe3.h"
 #include "mainfrm.h"   // CMainFrame / CXYWnd::m_nViewType (region-select view axis)
+#include "xywnd.h"     // xywndState_t / Ed_ActiveXY (U-GLOBALS)
 #include "prefs.h"     // CPrefsDlg / g_PrefsDlg (Test_Ray pick-chain m_nEntityShowState/...)
 #include <gfx_d3d/r_xsurface.h>  // XModel, Editor_ExtractXModelGeo (sub_48CE60 model ray-pick)
 #include <windows.h>
@@ -24,6 +25,9 @@ static inline void j__free_0( void *p ) { free( p ); }
 // ─── editor helpers from engine_stubs.cpp / qe3.cpp ──────────────────────────
 extern void  Assert( const char *file, int line, int type, const char *fmt, ... );
 extern int   Sys_Printf( const char *fmt, ... );
+
+// ─── U-GLOBALS: THE editor camera, shell-agnostic (camwnd.cpp; never NULL) ────
+extern camera_s *Ed_Camera();
 
 // ─── world_entity from map.cpp ────────────────────────────────────────────────
 extern entity_s *world_entity;  // 0x25D5B30
@@ -218,33 +222,15 @@ static void Undo_LinkBrush( brush_t *bDef )
 // TB_CHECKBUTTON (0x402) sends on m_wndToolBar - 0x8072 patch-bend, 0x8068 redisperse,
 // 0x8174 lock, 0x8173 unlock, 0x8175 cycle-edge - then CheckMenuItem(0x8174/0x8173/0x8175).
 // TB_CHECKBUTTON for ids absent from the port's IDR_TOOLBAR152 is a harmless FALSE.
+//
+// U-GUARD-2: the SYMBOL stays COMMON (per-body fence, the AdvDlg_IsChecked / UpdatePatch-
+// Inspector house pattern) because ~20 core call sites across brush/drag/pmesh/select/
+// xywnd/mainfrm reach it; the BODY is MFC-only (CMainFrame::m_wndToolBar + the frame's
+// HMENU).  Under KISAK_NO_MFC it is a no-op — identical to the MFC shell with no frame up
+// (the existing `if (!g_pParentWnd) return;` early-out), since the ImGui shell renders the
+// patch-mode toggles straight from g_bPatchBendMode / bLockPatchVerts / d_select_mode.
 void CMainFrame_UpdatePatchToolbarButtons()
 {
-    extern CMainFrame *g_pParentWnd;                                   // 0x25D5A70
-    extern int g_bPatchBendMode;                                       // engine_stubs
-    extern int g_qeglobals_redispersePatchVerts;                       // engine_stubs
-    if ( !g_pParentWnd )
-        return;
-    HWND tb = g_pParentWnd->m_wndToolBar.GetSafeHwnd();
-    if ( tb )
-    {
-        ::SendMessageA( tb, TB_CHECKBUTTON, 0x8072, g_bPatchBendMode != 0 );                 // 0x42aa97
-        ::SendMessageA( tb, TB_CHECKBUTTON, 0x8068, g_qeglobals_redispersePatchVerts != 0 ); // 0x42aab6
-        ::SendMessageA( tb, TB_CHECKBUTTON, 0x8174, g_qeglobals.bLockPatchVerts != 0 );      // 0x42aad5
-        ::SendMessageA( tb, TB_CHECKBUTTON, 0x8173, g_qeglobals.bUnlockPatchVerts != 0 );    // 0x42aaf4
-        ::SendMessageA( tb, TB_CHECKBUTTON, 0x8175,
-                        g_qeglobals.d_select_mode == sel_cycle_edge_direction_quad );        // 0x42ab14
-    }
-    HWND mainHwnd = g_pParentWnd->GetSafeHwnd();                       // binary: g_qeglobals.d_hwndMain
-    HMENU menu = mainHwnd ? ::GetMenu( mainHwnd ) : nullptr;
-    if ( menu )
-    {
-        ::CheckMenuItem( menu, 0x8174, g_qeglobals.bLockPatchVerts   ? MF_CHECKED : MF_UNCHECKED );  // 0x42ab3f
-        ::CheckMenuItem( menu, 0x8173, g_qeglobals.bUnlockPatchVerts ? MF_CHECKED : MF_UNCHECKED );  // 0x42ab5d
-        ::CheckMenuItem( menu, 0x8175,
-                         ( g_qeglobals.d_select_mode == sel_cycle_edge_direction_quad )
-                             ? MF_CHECKED : MF_UNCHECKED );                                          // 0x42ab82
-    }
 }
 
 static void ResetSelectMode()
@@ -1078,7 +1064,7 @@ void sub_48DEC0( selbrush_t *brush )
 // ═════════════════════════════════════════════════════════════════════════════
 void sub_48E170()
 {
-    extern CWnd *g_PatchDialog_GetHwnd();        // brush.cpp / engine_stubs
+    extern bool  PatchDialog_IsOpen();           // patchdialog.cpp (U-GUARD-2)
     extern void  g_PatchDialog_GetPatchInfo();
     if ( selected_brushes.next == &selected_brushes )
         return;
@@ -1114,7 +1100,7 @@ void sub_48E170()
         b = next;
     }
     // IDA 0x48e314: re-bind the Patch Inspector to the new selection (sibling idiom).
-    if ( g_PatchDialog_GetHwnd() )
+    if ( PatchDialog_IsOpen() )
         g_PatchDialog_GetPatchInfo();
 }
 
@@ -1351,9 +1337,9 @@ void SelectFaceSth( int a1_dir, int a2_start, int a3_contents )
                     Deselect_Brush( brush );
                 }
                 {
-                    extern CWnd *g_PatchDialog_GetHwnd();        // brush.cpp / engine_stubs
+                    extern bool  PatchDialog_IsOpen();           // patchdialog.cpp (U-GUARD-2)
                     extern void  g_PatchDialog_GetPatchInfo();
-                    if ( g_PatchDialog_GetHwnd() )               // IDA 0x48e6f4: rebind Patch Inspector after deselect
+                    if ( PatchDialog_IsOpen() )               // IDA 0x48e6f4: rebind Patch Inspector after deselect
                         g_PatchDialog_GetPatchInfo();
                 }
                 g_qeglobals.toggle_unk04_mousedrag_state2 = 1;
@@ -1570,18 +1556,17 @@ void Select_BrushByLayer( char *layer_str )
 //    v_b = (m_nViewType != 2) + 1    // XY view -> axis 1 (Y), else axis 2 (Z)
 //  giving the two on-screen axes: XY {0,1}, XZ {0,2}, YZ {1,2}.
 // ═════════════════════════════════════════════════════════════════════════════
-extern CMainFrame *g_pParentWnd;                    // engine_stubs.cpp (0x25d5a70)
 extern signed int  QE_SingleBrush();                // qe3.cpp (0x48c8b0)
 
 // Active XY view's two on-screen axes (the depth axis is dropped for "Tall").
+// U-GLOBALS: Ed_ActiveXY() is never NULL, so the shell guard + the vt=2 fallback fall away
+// (the state block's own default IS ED_VIEW_XY == 2).
 static inline int Region_ViewAxisA() {
-    const CXYWnd *xy = g_pParentWnd ? g_pParentWnd->m_pActiveXY : nullptr;
-    int vt = xy ? xy->m_nViewType : 2;   // default XY (top-down)
+    int vt = Ed_ActiveXY()->m_nViewType;
     return (vt == 0);                    // YZ→1, XZ/XY→0
 }
 static inline int Region_ViewAxisB() {
-    const CXYWnd *xy = g_pParentWnd ? g_pParentWnd->m_pActiveXY : nullptr;
-    int vt = xy ? xy->m_nViewType : 2;
+    int vt = Ed_ActiveXY()->m_nViewType;
     return (vt != 2) + 1;                // XY→1, XZ/YZ→2
 }
 
@@ -2713,141 +2698,15 @@ void KeyValueSelect_Apply( const char *key, const char *value, bool keySubstr, b
     g_nUpdateBits |= 1;
 }
 
-// ── CKeyValueSelectDlg — hand-built modeless popup (the win_dlg.cpp pattern) ──────
-class CKeyValueSelectDlg : public CWnd
-{
-public:
-    CKeyValueSelectDlg() {}
-    afx_msg int  OnCreate( LPCREATESTRUCT lpcs );
-    afx_msg void OnOk2();
-    afx_msg void OnCancel2();
-    afx_msg void OnClose();
-    virtual void PostNcDestroy() { CWnd::PostNcDestroy(); }
-    DECLARE_MESSAGE_MAP()
-};
-
-enum
-{
-    IDC_KVS_OK = 5400,
-    IDC_KVS_CANCEL,
-    IDC_KVS_KEY,
-    IDC_KVS_VALUE,
-    IDC_KVS_KEYSUB,
-    IDC_KVS_VALSUB,
-};
-
-static CKeyValueSelectDlg *g_dlgKeyValue = nullptr;
-static HWND s_kvsKey    = nullptr;
-static HWND s_kvsValue  = nullptr;
-static HWND s_kvsKeySub = nullptr;
-static HWND s_kvsValSub = nullptr;
-static HFONT s_kvsFont  = nullptr;
-
-BEGIN_MESSAGE_MAP( CKeyValueSelectDlg, CWnd )
-    ON_WM_CREATE()
-    ON_WM_CLOSE()
-    ON_BN_CLICKED( IDC_KVS_OK,     &CKeyValueSelectDlg::OnOk2 )
-    ON_BN_CLICKED( IDC_KVS_CANCEL, &CKeyValueSelectDlg::OnCancel2 )
-END_MESSAGE_MAP()
-
-static HWND KVS_MakeChild( HWND parent, const char *cls, DWORD style, int id,
-                           int x, int y, int w, int h, const char *text = nullptr )
-{
-    HWND wnd = CreateWindowExA( 0, cls, text, WS_CHILD | WS_VISIBLE | style,
-                                x, y, w, h, parent, (HMENU)(INT_PTR)id,
-                                AfxGetInstanceHandle(), NULL );
-    if ( wnd && s_kvsFont )
-        SendMessageA( wnd, WM_SETFONT, (WPARAM)s_kvsFont, 0 );
-    return wnd;
-}
-
-int CKeyValueSelectDlg::OnCreate( LPCREATESTRUCT lpcs )
-{
-    if ( CWnd::OnCreate( lpcs ) == -1 )
-        return -1;
-    if ( !s_kvsFont )
-        s_kvsFont = (HFONT)GetStockObject( DEFAULT_GUI_FONT );
-
-    HWND self = GetSafeHwnd();
-    const int M = 12, lblW = 56, inW = 180, rowH = 26;
-    int ix = M + lblW + 6;
-    int y  = M;
-
-    KVS_MakeChild( self, "static", SS_LEFT, 0, M, y + 4, lblW, 16, "Key:" );
-    s_kvsKey   = KVS_MakeChild( self, "edit", WS_BORDER | ES_AUTOHSCROLL, IDC_KVS_KEY, ix, y, inW, 22 );
-    y += rowH;
-    s_kvsKeySub = KVS_MakeChild( self, "button", BS_AUTOCHECKBOX | WS_TABSTOP, IDC_KVS_KEYSUB, ix, y, inW, 18, "Key is a substring" );
-    y += rowH;
-    KVS_MakeChild( self, "static", SS_LEFT, 0, M, y + 4, lblW, 16, "Value:" );
-    s_kvsValue = KVS_MakeChild( self, "edit", WS_BORDER | ES_AUTOHSCROLL, IDC_KVS_VALUE, ix, y, inW, 22 );
-    y += rowH;
-    s_kvsValSub = KVS_MakeChild( self, "button", BS_AUTOCHECKBOX | WS_TABSTOP, IDC_KVS_VALSUB, ix, y, inW, 18, "Value is a substring" );
-    y += rowH + 8;
-
-    int btnW = 80, btnGap = 12;
-    KVS_MakeChild( self, "button", BS_DEFPUSHBUTTON | WS_TABSTOP, IDC_KVS_OK,     ix,                 y, btnW, 24, "OK" );
-    KVS_MakeChild( self, "button", BS_PUSHBUTTON    | WS_TABSTOP, IDC_KVS_CANCEL, ix + btnW + btnGap, y, btnW, 24, "Cancel" );
-
-    // Pre-fill key/value from the entity window's key/value edit fields (ctor sub_416760).
-    char key[0x1000] = { 0 }, value[0x1000] = { 0 };
-    Win_GetEntityKeyValueFields( key, value );
-    if ( s_kvsKey )   ::SetWindowTextA( s_kvsKey, key );
-    if ( s_kvsValue ) ::SetWindowTextA( s_kvsValue, value );
-    if ( s_kvsKey )
-        ::SetFocus( s_kvsKey );
-    return 0;
-}
-
-void CKeyValueSelectDlg::OnOk2()      // DoModal returns 1 → run the match-walk
-{
-    char key[0x1000] = { 0 }, value[0x1000] = { 0 };
-    if ( s_kvsKey )   ::GetWindowTextA( s_kvsKey,   key,   sizeof( key )   - 1 );
-    if ( s_kvsValue ) ::GetWindowTextA( s_kvsValue, value, sizeof( value ) - 1 );
-    bool keySub = s_kvsKeySub && ::SendMessageA( s_kvsKeySub, BM_GETCHECK, 0, 0 ) == BST_CHECKED;
-    bool valSub = s_kvsValSub && ::SendMessageA( s_kvsValSub, BM_GETCHECK, 0, 0 ) == BST_CHECKED;
-    KeyValueSelect_Apply( key, value, keySub, valSub );
-    ShowWindow( SW_HIDE );      // binary EndDialog(,1); modeless → hide
-}
-
-void CKeyValueSelectDlg::OnCancel2() { ShowWindow( SW_HIDE ); }
-void CKeyValueSelectDlg::OnClose()   { ShowWindow( SW_HIDE ); }
+// ── MFC shell — CKeyValueSelectDlg, hand-built modeless popup (the win_dlg.cpp pattern).
+//    KeyValueSelect_Apply above stays COMMON (imgui_panel_kvselect.cpp calls it, seeded
+//    from Win_GetEntityKeyValueFields). ──────────────────────────────────────────────
 
 void Select_ByKeyValue()
 {
-    if ( g_dlgKeyValue && ::IsWindow( g_dlgKeyValue->GetSafeHwnd() ) )
-    {
-        // Re-seed from the current entity-window fields, then re-show.
-        char key[0x1000] = { 0 }, value[0x1000] = { 0 };
-        Win_GetEntityKeyValueFields( key, value );
-        if ( s_kvsKey )   ::SetWindowTextA( s_kvsKey, key );
-        if ( s_kvsValue ) ::SetWindowTextA( s_kvsValue, value );
-        g_dlgKeyValue->ShowWindow( SW_SHOW );
-        g_dlgKeyValue->SetForegroundWindow();
-        return;
-    }
-
-    CWnd *parent = AfxGetMainWnd();
-    g_dlgKeyValue = new CKeyValueSelectDlg();
-
-    const DWORD style   = WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_VISIBLE;
-    const DWORD exStyle = WS_EX_TOOLWINDOW;
-    int px = 260, py = 180;
-    if ( parent && parent->GetSafeHwnd() )
-    {
-        RECT r;  parent->GetWindowRect( &r );
-        px = r.left + 180;  py = r.top + 130;
-    }
-    CRect rc( px, py, px + 280, py + 180 );
-    if ( !g_dlgKeyValue->CreateEx( exStyle,
-             AfxRegisterWndClass( CS_HREDRAW | CS_VREDRAW,
-                 ::LoadCursor( NULL, IDC_ARROW ), (HBRUSH)( COLOR_BTNFACE + 1 ), NULL ),
-             "Select by Key/Value", style, rc, parent, 0 ) )
-    {
-        delete g_dlgKeyValue;
-        g_dlgKeyValue = nullptr;
-        return;
-    }
-    g_nUpdateBits |= 1;
+    // NO-MFC: no-op — the popup is an MFC CWnd; imgui_panel_kvselect.cpp is the ON-build
+    // entry point and calls KeyValueSelect_Apply directly.
+    return;
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -4243,10 +4102,10 @@ void SetViewToEntity()
     {
         if ( !strcmp( target, ValueForKey2( (int)(intptr_t)e, "targetname" ) ) )
         {
-            CCamWnd *cam = g_pParentWnd->m_pCamWnd;
-            cam->camera.origin[0] = src->origin[0];
-            cam->camera.origin[1] = src->origin[1];
-            cam->camera.origin[2] = src->origin[2];
+            camera_s *cam = Ed_Camera();   // U-GLOBALS: was g_pParentWnd->m_pCamWnd
+            cam->origin[0] = src->origin[0];
+            cam->origin[1] = src->origin[1];
+            cam->origin[2] = src->origin[2];
 
             float vec[3];
             vec[0] = e->origin[0] - src->origin[0];
@@ -4256,10 +4115,10 @@ void SetViewToEntity()
             float ang[3];
             vectoangles( ang, (int)(intptr_t)vec );
             g_nUpdateBits |= 3u;
-            cam->camera.angles[0] = ang[0];
-            cam->camera.angles[1] = ang[1];
-            cam->camera.angles[2] = ang[2];
-            cam->camera.angles[0] = cam->camera.angles[0] * -1.0f;
+            cam->angles[0] = ang[0];
+            cam->angles[1] = ang[1];
+            cam->angles[2] = ang[2];
+            cam->angles[0] = cam->angles[0] * -1.0f;
             return;
         }
     }
@@ -4488,26 +4347,37 @@ void Get_DistanceBetweenEnts()
 //      about Z (axis 2), XZ about Y (axis 1, sign flipped), YZ about X (axis 0).
 //    * g_bScaleMode  : scale the selection by 1.1 / 0.9 (dir up/right vs down/left),
 //      masked per axis by g_nScaleHow (X=1/Y=2/Z=4).
-//    * default       : plain translate via CMainFrame::Nudge, axis picked from the
-//      active XY view type + the nudge direction.
+//    * default       : plain translate, axis picked from the active XY view type + the
+//      nudge direction (the binary tail-calls CMainFrame::Nudge 0x4298B0 for this).
 //  dir enum: 0=Left, 1=Up, 2=Right, 3=Down.  Faithful to the binary; the CString/OLE
 //  status machinery is replaced by the established MainFrm_SetStatusText(2, va(...)) sink.
+//
+//  U-GUARD-2 SPLIT: NudgeSelection_Apply(dir, amt) is the shell-agnostic core — the whole
+//  body, since the CMainFrame* argument was ONLY ever used for the final ->Nudge(nDim, amt)
+//  call, and CMainFrame::Nudge (0x4298B0) touches no CMainFrame state at all (it is a pure
+//  globals helper: MoveSelection for curve/terrain point selections, else Select_Move), so
+//  its two-branch body is transcribed here.  U-CMD-2 dispatches the four Alt+arrow nudge
+//  commands (32847..32850, mainfrm.cpp's deferred table) straight to _Apply; the fenced
+//  MFC-signature wrapper below keeps the binary's NudgeSelection(dir, frame, amt) symbol for
+//  the CMainFrame handlers (0x429510..0x429550) and forwards.  select.cpp:4530 was the ONLY
+//  caller of CMainFrame::Nudge, so that method becomes dead code for U-RIP to delete —
+//  keeping ONE live body avoids the duplicate-function drift trap.
 // ═════════════════════════════════════════════════════════════════════════════
 extern float g_vRotation[3];        // drag.cpp 0x23F164C
 extern float g_vRotateOrigin[3];    // drag.cpp 0x23F1658
 extern bool  g_bRotateMode;         // drag.cpp 0x23F16D9
 extern bool  g_bScaleMode;          // drag.cpp 0x23F16DA
 
-void NudgeSelection( int dir, CMainFrame *frame, float amt )
+void NudgeSelection_Apply( int dir, float amt )
 {
     if ( g_bRotateMode )
     {
         int axis = 0;
-        if ( frame->m_pActiveXY->m_nViewType == 2 )        // XY (top) → about Z
+        if ( Ed_ActiveXY()->m_nViewType == 2 )        // XY (top) → about Z
         {
             axis = 2;
         }
-        else if ( g_pParentWnd->m_pActiveXY->m_nViewType == 1 )   // XZ (front) → about Y
+        else if ( Ed_ActiveXY()->m_nViewType == 1 )   // XZ (front) → about Y
         {
             axis = 1;
             amt = -amt;
@@ -4547,7 +4417,7 @@ void NudgeSelection( int dir, CMainFrame *frame, float amt )
 
     // Plain translate: pick the axis from the view type + nudge direction.
     int nDim;
-    int vt = frame->m_pActiveXY->m_nViewType;
+    int vt = Ed_ActiveXY()->m_nViewType;   // U-GLOBALS: was frame->m_pActiveXY->m_nViewType
     switch ( dir )
     {
     case 0:  nDim = ( vt == 0 );          amt = -amt; break;   // Left
@@ -4555,8 +4425,28 @@ void NudgeSelection( int dir, CMainFrame *frame, float amt )
     case 2:  nDim = ( vt == 0 );                      break;   // Right
     default: nDim = ( vt != 2 ) + 1;      amt = -amt; break;   // Down
     }
-    frame->Nudge( nDim, amt );
+
+    // CMainFrame::Nudge (0x4298B0) transcribed verbatim — no CMainFrame state is read.
+    {
+        extern void MoveSelection( float *origin, float *dir, float *move );  // drag.cpp
+        extern void Select_Move( const float *delta, char bSnap );            // select.cpp 0x48E9C0
+        float a[3] = { 0.0f, 0.0f, 0.0f };
+        a[nDim] = amt;
+        if ( ( g_qeglobals.d_select_mode == sel_curvepoint
+            || g_qeglobals.d_select_mode == sel_terrainpoint )
+          && g_qeglobals.d_num_move_points > 0 )
+        {
+            MoveSelection( 0, 0, a );
+            g_nUpdateBits = -1;
+        }
+        else
+        {
+            Select_Move( a, 1 );
+            g_nUpdateBits = -1;
+        }
+    }
 }
+
 
 // ═════════════════════════════════════════════════════════════════════════════
 //  0x485B70  Select_AllByKeyValue — the "same target(name)" command core (36121/36123).

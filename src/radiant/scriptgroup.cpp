@@ -328,8 +328,8 @@ extern void sub_47D060( int listSentinel );          // brush.cpp (brush-list di
 // `&match->next->prev` before Brush_RemoveFromList/AddToList2 relink the node.
 void ScriptGroup_Type()
 {
-    const char *scriptColorTeamKey = g_PrefsDlg->ScriptColorTeamKey;
-    const char *scriptColorKey     = g_PrefsDlg->ScriptColorKey;
+    const char *scriptColorTeamKey = g_PrefsDlg->ScriptColorTeamKey.c_str();
+    const char *scriptColorKey     = g_PrefsDlg->ScriptColorKey.c_str();
 
     int colorGroups[MAX_COLORGROUPS];
     int colors = 0;
@@ -475,7 +475,7 @@ static bool ScriptGroup_BrushIsTurret( selbrush_t *b )
 static bool ScriptGroup_IsValidColorCode()
 {
     static const char *const codes[7] = { "r", "b", "y", "c", "g", "p", "o" };
-    const char *key = (const char *)g_PrefsDlg->ScriptColorKey;
+    const char *key = g_PrefsDlg->ScriptColorKey.c_str();
     for ( int i = 0; i < 7; ++i )
     {
         if ( !strcmp( key, codes[i] ) )
@@ -492,7 +492,7 @@ static bool ScriptGroup_TeamKeyContains( const char *code, entity_s_def *def )
     const char *value = zero;       // IDB `zero` = ""
     for ( epair_t *ep = def->epairs; ep; ep = ep->next )
     {
-        if ( !_stricmp( ep->key, (const char *)g_PrefsDlg->ScriptColorTeamKey ) ) { value = ep->value; break; }
+        if ( !_stricmp( ep->key, g_PrefsDlg->ScriptColorTeamKey.c_str() ) ) { value = ep->value; break; }
     }
     char buf[1024];
     strcpy( buf, value );
@@ -505,12 +505,12 @@ static bool ScriptGroup_TeamKeyContains( const char *code, entity_s_def *def )
 static int ScriptGroup_TriggerColorNumber( selbrush_t *b )
 {
     entity_s_def *def = (entity_s_def *)b->owner->def;
-    const char *scriptColorKey = (const char *)g_PrefsDlg->ScriptColorKey;
+    const char *scriptColorKey = g_PrefsDlg->ScriptColorKey.c_str();
 
     const char *value = zero;
     for ( epair_t *ep = def->epairs; ep; ep = ep->next )
     {
-        if ( !_stricmp( ep->key, (const char *)g_PrefsDlg->ScriptColorTeamKey ) ) { value = ep->value; break; }
+        if ( !_stricmp( ep->key, g_PrefsDlg->ScriptColorTeamKey.c_str() ) ) { value = ep->value; break; }
     }
     char buf[1024];
     strcpy( buf, value );
@@ -567,7 +567,7 @@ static bool ScriptGroup_SelectedHasColorTeam( selbrush_t *b, const char *code )
         return false;
 
     char buf[1024];
-    strcpy( buf, ValueForKey2( (int)(intptr_t)def, (const char *)g_PrefsDlg->ScriptColorTeamKey ) );
+    strcpy( buf, ValueForKey2( (int)(intptr_t)def, g_PrefsDlg->ScriptColorTeamKey.c_str() ) );
     return buf[0] && strstr( buf, code ) != nullptr;
 }
 
@@ -579,7 +579,7 @@ static int ScriptGroup_Color()
 {
     char used[MAX_COLORGROUPS];
     memset( used, 0, sizeof( used ) );
-    const char *scriptColorKey = (const char *)g_PrefsDlg->ScriptColorKey;
+    const char *scriptColorKey = g_PrefsDlg->ScriptColorKey.c_str();
 
     // Pass 1 — active brushes.
     for ( selbrush_t *b = active_brushes.next; b != &active_brushes; b = b->next )
@@ -593,7 +593,7 @@ static int ScriptGroup_Color()
         const char *value = zero;
         for ( epair_t *ep = def->epairs; ep; ep = ep->next )
         {
-            if ( !_stricmp( ep->key, (const char *)g_PrefsDlg->ScriptColorTeamKey ) ) { value = ep->value; break; }
+            if ( !_stricmp( ep->key, g_PrefsDlg->ScriptColorTeamKey.c_str() ) ) { value = ep->value; break; }
         }
         char buf[1024];
         strcpy( buf, value );
@@ -623,7 +623,7 @@ static int ScriptGroup_Color()
         const char *value = zero;
         for ( epair_t *ep = def->epairs; ep; ep = ep->next )
         {
-            if ( !_stricmp( ep->key, (const char *)g_PrefsDlg->ScriptColorTeamKey ) ) { value = ep->value; break; }
+            if ( !_stricmp( ep->key, g_PrefsDlg->ScriptColorTeamKey.c_str() ) ) { value = ep->value; break; }
         }
         char buf[1024];
         strcpy( buf, value );
@@ -681,9 +681,9 @@ static void ScriptGroup_SetKey2( selbrush_t *b, int colorNumber )
     iassert( b->owner->def == b->def->owner );
     entity_s_def *def = (entity_s_def *)owner->def;
 
-    const char *scriptColorKey = (const char *)g_PrefsDlg->ScriptColorKey;
+    const char *scriptColorKey = g_PrefsDlg->ScriptColorKey.c_str();
     char buf[1024];
-    strcpy( buf, ValueForKey2( (int)(intptr_t)def, (const char *)g_PrefsDlg->ScriptColorTeamKey ) );
+    strcpy( buf, ValueForKey2( (int)(intptr_t)def, g_PrefsDlg->ScriptColorTeamKey.c_str() ) );
     if ( !buf[0] || !strstr( buf, scriptColorKey ) )
         return;
 
@@ -706,9 +706,9 @@ static void ScriptGroup_SetKey2( selbrush_t *b, int colorNumber )
         ScriptGroup_JoinTokens( out, scratch, kept );
 
     if ( strlen( out ) )
-        SetKeyValue( def, (const char *)g_PrefsDlg->ScriptColorTeamKey, out );
+        SetKeyValue( def, g_PrefsDlg->ScriptColorTeamKey.c_str(), out );
     else
-        DeleteKey( &def->epairs, (const char *)g_PrefsDlg->ScriptColorTeamKey );
+        DeleteKey( &def->epairs, g_PrefsDlg->ScriptColorTeamKey.c_str() );
     Sys_Printf( "Set entity key value to %s\n", out );
 }
 
@@ -717,7 +717,7 @@ static void ScriptGroup_SetKey2( selbrush_t *b, int colorNumber )
 static void ScriptGroup_RemoveUnused( int colorNumber )
 {
     Sys_Printf( "Removing unused %s %i from all entities:\n",
-                (const char *)g_PrefsDlg->ScriptColorKey, colorNumber );
+                g_PrefsDlg->ScriptColorKey.c_str(), colorNumber );
     for ( selbrush_t *b = selected_brushes.next; b != &selected_brushes; b = b->next )
         ScriptGroup_SetKey2( b, colorNumber );
     for ( selbrush_t *b = active_brushes.next; b != &active_brushes; b = b->next )
@@ -731,7 +731,7 @@ static void ScriptGroup_RemoveUnused( int colorNumber )
 static bool ScriptGroup_RemoveUnusedIfOrphaned( int colorNumber )
 {
     char token[1024];
-    strcpy( token, va( "%s%i ", (const char *)g_PrefsDlg->ScriptColorKey, colorNumber ) );
+    strcpy( token, va( "%s%i ", g_PrefsDlg->ScriptColorKey.c_str(), colorNumber ) );
 
     for ( selbrush_t *b = selected_brushes.next; b != &selected_brushes; b = b->next )
     {
@@ -771,7 +771,7 @@ static bool ScriptGroup_RemoveColors( int colorNumber, const char *colorCode )
         const char *value = zero;
         for ( epair_t *ep = def->epairs; ep; ep = ep->next )
         {
-            if ( !_stricmp( ep->key, (const char *)g_PrefsDlg->ScriptColorTeamKey ) ) { value = ep->value; break; }
+            if ( !_stricmp( ep->key, g_PrefsDlg->ScriptColorTeamKey.c_str() ) ) { value = ep->value; break; }
         }
         char buf[1024];
         strcpy( buf, value );
@@ -795,9 +795,9 @@ static bool ScriptGroup_RemoveColors( int colorNumber, const char *colorCode )
             ScriptGroup_JoinTokens( out, scratch, kept );
 
         if ( strlen( out ) )
-            SetKeyValue( def, (const char *)g_PrefsDlg->ScriptColorTeamKey, out );
+            SetKeyValue( def, g_PrefsDlg->ScriptColorTeamKey.c_str(), out );
         else
-            DeleteKey( &def->epairs, (const char *)g_PrefsDlg->ScriptColorTeamKey );
+            DeleteKey( &def->epairs, g_PrefsDlg->ScriptColorTeamKey.c_str() );
         modified = true;
         Sys_Printf( "Set entity key value %s\n", out );
     }
@@ -810,8 +810,8 @@ static bool ScriptGroup_RemoveColors( int colorNumber, const char *colorCode )
 static void ScriptGroup_RemoveColors_02( int colorNumber )
 {
     Sys_Printf( "Removing colorNumber %s %i\n",
-                (const char *)g_PrefsDlg->ScriptColorKey, colorNumber );
-    const char *scriptColorKey = (const char *)g_PrefsDlg->ScriptColorKey;
+                g_PrefsDlg->ScriptColorKey.c_str(), colorNumber );
+    const char *scriptColorKey = g_PrefsDlg->ScriptColorKey.c_str();
 
     for ( selbrush_t *b = selected_brushes.next; b != &selected_brushes; b = b->next )
     {
@@ -827,7 +827,7 @@ static void ScriptGroup_RemoveColors_02( int colorNumber )
         const char *value = zero;
         for ( epair_t *ep = def->epairs; ep; ep = ep->next )
         {
-            if ( !_stricmp( ep->key, (const char *)g_PrefsDlg->ScriptColorTeamKey ) ) { value = ep->value; break; }
+            if ( !_stricmp( ep->key, g_PrefsDlg->ScriptColorTeamKey.c_str() ) ) { value = ep->value; break; }
         }
         char buf[1024];
         strcpy( buf, value );
@@ -851,9 +851,9 @@ static void ScriptGroup_RemoveColors_02( int colorNumber )
             ScriptGroup_JoinTokens( out, scratch, kept );
 
         if ( strlen( out ) )
-            SetKeyValue( def, (const char *)g_PrefsDlg->ScriptColorTeamKey, out );
+            SetKeyValue( def, g_PrefsDlg->ScriptColorTeamKey.c_str(), out );
         else
-            DeleteKey( &def->epairs, (const char *)g_PrefsDlg->ScriptColorTeamKey );
+            DeleteKey( &def->epairs, g_PrefsDlg->ScriptColorTeamKey.c_str() );
         Sys_Printf( "Set entity key value %s\n", out );
     }
 }
@@ -866,7 +866,7 @@ static void ScriptGroup_RemoveColors_02( int colorNumber )
 // const char* directly — behaviour-identical, the fork/release pair is dropped.)
 void ScriptGroup_TriggerNumber()
 {
-    const char *scriptColorKey = (const char *)g_PrefsDlg->ScriptColorKey;
+    const char *scriptColorKey = g_PrefsDlg->ScriptColorKey.c_str();
 
     for ( selbrush_t *b = selected_brushes.next; b != &selected_brushes; b = b->next )
     {
@@ -882,7 +882,7 @@ void ScriptGroup_TriggerNumber()
         const char *value = zero;
         for ( epair_t *ep = def->epairs; ep; ep = ep->next )
         {
-            if ( !_stricmp( ep->key, (const char *)g_PrefsDlg->ScriptColorTeamKey ) ) { value = ep->value; break; }
+            if ( !_stricmp( ep->key, g_PrefsDlg->ScriptColorTeamKey.c_str() ) ) { value = ep->value; break; }
         }
         char buf[1024];
         strcpy( buf, value );
@@ -925,7 +925,7 @@ void ScriptGroup_TriggerNumber()
 //   RemoveUnused(j) — drop a colour group a selected trigger used that no active one does.
 static void ScriptGroup_Trigger( int colorNumber )
 {
-    const char *scriptColorKey = (const char *)g_PrefsDlg->ScriptColorKey;
+    const char *scriptColorKey = g_PrefsDlg->ScriptColorKey.c_str();
     char selSeen[MAX_COLORGROUPS];   // var_604 — PASS 1 (selected)
     char actSeen[MAX_COLORGROUPS];   // var_804 — PASS 2 (active)
     memset( selSeen, 0, sizeof( selSeen ) );
@@ -946,7 +946,7 @@ static void ScriptGroup_Trigger( int colorNumber )
         const char *value = zero;
         for ( epair_t *ep = def->epairs; ep; ep = ep->next )
         {
-            if ( !_stricmp( ep->key, (const char *)g_PrefsDlg->ScriptColorTeamKey ) ) { value = ep->value; break; }
+            if ( !_stricmp( ep->key, g_PrefsDlg->ScriptColorTeamKey.c_str() ) ) { value = ep->value; break; }
         }
         char buf[1024];
         strcpy( buf, value );
@@ -986,7 +986,7 @@ static void ScriptGroup_Trigger( int colorNumber )
         const char *value = zero;
         for ( epair_t *ep = def->epairs; ep; ep = ep->next )
         {
-            if ( !_stricmp( ep->key, (const char *)g_PrefsDlg->ScriptColorTeamKey ) ) { value = ep->value; break; }
+            if ( !_stricmp( ep->key, g_PrefsDlg->ScriptColorTeamKey.c_str() ) ) { value = ep->value; break; }
         }
         char buf[1024];
         strcpy( buf, value );
@@ -1029,7 +1029,7 @@ static void ScriptGroup_Trigger( int colorNumber )
 // token (exactly one allowed: "!hasColor" assert) while keeping non-colour tokens.
 static void ScriptGroup_ApplyColorToSelected( int colorNumber )
 {
-    const char *scriptColorKey = (const char *)g_PrefsDlg->ScriptColorKey;
+    const char *scriptColorKey = g_PrefsDlg->ScriptColorKey.c_str();
 
     for ( selbrush_t *b = selected_brushes.next; b != &selected_brushes; b = b->next )
     {
@@ -1045,7 +1045,7 @@ static void ScriptGroup_ApplyColorToSelected( int colorNumber )
         const char *value = zero;
         for ( epair_t *ep = def->epairs; ep; ep = ep->next )
         {
-            if ( !_stricmp( ep->key, (const char *)g_PrefsDlg->ScriptColorTeamKey ) ) { value = ep->value; break; }
+            if ( !_stricmp( ep->key, g_PrefsDlg->ScriptColorTeamKey.c_str() ) ) { value = ep->value; break; }
         }
         char buf[1024];
         strcpy( buf, value );
@@ -1080,9 +1080,9 @@ static void ScriptGroup_ApplyColorToSelected( int colorNumber )
         strcat( out, va( "%s%i ", scriptColorKey, colorNumber ) );
 
         if ( strlen( out ) )
-            SetKeyValue( def, (const char *)g_PrefsDlg->ScriptColorTeamKey, out );
+            SetKeyValue( def, g_PrefsDlg->ScriptColorTeamKey.c_str(), out );
         else
-            DeleteKey( &def->epairs, (const char *)g_PrefsDlg->ScriptColorTeamKey );
+            DeleteKey( &def->epairs, g_PrefsDlg->ScriptColorTeamKey.c_str() );
         Sys_Printf( "Set trigger key value to %s\n", out );
     }
 }
@@ -1095,7 +1095,7 @@ static void ScriptGroup_ApplyColorToSelected( int colorNumber )
 // now owns.  (Called from ScriptGroup_SetKey for each freshly-written token.)
 static void ScriptGroup_01( entity_s_def *def, int colorNumber )
 {
-    const char *scriptColorKey = (const char *)g_PrefsDlg->ScriptColorKey;
+    const char *scriptColorKey = g_PrefsDlg->ScriptColorKey.c_str();
 
     for ( selbrush_t *b = selected_brushes.next; b != &selected_brushes; b = b->next )
     {
@@ -1117,7 +1117,7 @@ static void ScriptGroup_01( entity_s_def *def, int colorNumber )
             continue;
 
         char list[1024];
-        strcpy( list, ValueForKey2( (int)(intptr_t)trigDef, (const char *)g_PrefsDlg->ScriptColorTeamKey ) );
+        strcpy( list, ValueForKey2( (int)(intptr_t)trigDef, g_PrefsDlg->ScriptColorTeamKey.c_str() ) );
         for ( char *token = strtok( list, " " ); token; token = strtok( nullptr, " " ) )
         {
             iassert( token[0] );
@@ -1132,7 +1132,7 @@ static void ScriptGroup_01( entity_s_def *def, int colorNumber )
                     // team key (e.g. "script_color_allies").  Passing the same "%s%" reproduces it
                     // byte-for-byte (do NOT write "%s%%" — that would append a literal '%').
                     char teamKeyArg[256];
-                    strcpy( teamKeyArg, va( "%s%", (const char *)g_PrefsDlg->ScriptColorTeamKey ) );
+                    strcpy( teamKeyArg, va( "%s%", g_PrefsDlg->ScriptColorTeamKey.c_str() ) );
                     ScriptGroup_HasKey( token, teamKeyArg, def );
                 }
             }
@@ -1146,7 +1146,7 @@ static void ScriptGroup_01( entity_s_def *def, int colorNumber )
 // info_volume; a "node" with no radius gets radius=64.
 static void ScriptGroup_SetKey( int colorNumber )
 {
-    const char *scriptColorKey = (const char *)g_PrefsDlg->ScriptColorKey;
+    const char *scriptColorKey = g_PrefsDlg->ScriptColorKey.c_str();
 
     for ( selbrush_t *b = selected_brushes.next; b != &selected_brushes; b = b->next )
     {
@@ -1180,7 +1180,7 @@ static void ScriptGroup_SetKey( int colorNumber )
         const char *value = zero;
         for ( epair_t *ep = def->epairs; ep; ep = ep->next )
         {
-            if ( !_stricmp( ep->key, (const char *)g_PrefsDlg->ScriptColorTeamKey ) ) { value = ep->value; break; }
+            if ( !_stricmp( ep->key, g_PrefsDlg->ScriptColorTeamKey.c_str() ) ) { value = ep->value; break; }
         }
         char tempString[1024];
         strcpy( tempString, value );
@@ -1190,7 +1190,7 @@ static void ScriptGroup_SetKey( int colorNumber )
             // Append " <code><n> " (the binary's leading-and-trailing-space variant).
             strcat( tempString, va( " %s%i ", scriptColorKey, colorNumber ) );
             iassert( strlen( tempString ) );      // "strlen(tempString)"
-            SetKeyValue( def, (const char *)g_PrefsDlg->ScriptColorTeamKey, tempString );
+            SetKeyValue( def, g_PrefsDlg->ScriptColorTeamKey.c_str(), tempString );
             Sys_Printf( "Set node/AI key value to %s\n", tempString );
             // Reconcile each token (binary strtok's tempString and calls ScriptGroup_01 per token).
             for ( char *token = strtok( tempString, " " ); token; token = strtok( nullptr, " " ) )
@@ -1204,9 +1204,9 @@ static void ScriptGroup_SetKey( int colorNumber )
             // Create the value as "<code><n> " (trailing space).
             strcpy( tempString, va( "%s%i ", scriptColorKey, colorNumber ) );
             if ( strlen( tempString ) == 0 )
-                DeleteKey( &def->epairs, (const char *)g_PrefsDlg->ScriptColorTeamKey );
+                DeleteKey( &def->epairs, g_PrefsDlg->ScriptColorTeamKey.c_str() );
             else
-                SetKeyValue( def, (const char *)g_PrefsDlg->ScriptColorTeamKey, tempString );
+                SetKeyValue( def, g_PrefsDlg->ScriptColorTeamKey.c_str(), tempString );
             Sys_Printf( "Set node/AI key value to %s\n", tempString );
         }
     }
@@ -1232,7 +1232,7 @@ void ScriptGroup_AddColorToSelection()
         }
         iassert( triggerNumber < MAX_COLORGROUPS );   // scriptgroup.cpp:1284
         Sys_Printf( "Adding %s%i to entities:\n",
-                    (const char *)g_PrefsDlg->ScriptColorKey, triggerNumber );
+                    g_PrefsDlg->ScriptColorKey.c_str(), triggerNumber );
         ScriptGroup_ApplyColorToSelected( triggerNumber );
         ScriptGroup_SetKey( triggerNumber );
         UpdateSelection( 0xFFFFFFFF, 0 );
@@ -1254,7 +1254,7 @@ void ScriptGroup_AddColorToSelection()
                 if ( !_stricmp( ep->key, "classname" ) ) { classname = ep->value; break; }
             }
             if ( strstr( classname, "actor" ) )
-                SetKeyValue( def, "script_forcecolor", (const char *)g_PrefsDlg->ScriptColorKey );
+                SetKeyValue( def, "script_forcecolor", g_PrefsDlg->ScriptColorKey.c_str() );
         }
     }
     else
@@ -1370,7 +1370,7 @@ void ScriptGroup_SyncGroupKeyToTeam()
     if ( g_qeglobals.d_hwndMedia )
     {
         HWND hCtl = GetDlgItem( g_qeglobals.d_hwndMedia, 1441 );
-        ::SetWindowTextA( hCtl, (const char *)g_PrefsDlg->ScriptGroupKey );
+        ::SetWindowTextA( hCtl, g_PrefsDlg->ScriptGroupKey.c_str() );
         ::SetFocus( g_qeglobals.d_hwndCamera );
     }
 }
@@ -1540,12 +1540,12 @@ static void ScriptGroupDlg_SetColorCode( HWND hDlg, const char *code )
 // ScriptGroupDlg_AddSubKey (which adds the token+export to every selected entity).
 static void ScriptGroupDlg_TurretShare()   // 0x455b60
 {
-    CString exportStr;   // IDB local CString (str_set scratch)
+    std::string exportStr;   // IDB local CString (str_set scratch); std::string here
 
     g_PrefsDlg->ScriptGroupKey      = "token";                  // str_set(&ScriptGroupKey,"token",5)
     g_PrefsDlg->ScriptGroupTokenKey = "script_turret_share";    // str_set(&ScriptGroupTokenKey,...)
     ::SetWindowTextA( GetDlgItem( g_qeglobals.d_hwndMedia, 0x65F ),
-                      (const char *)g_PrefsDlg->ScriptGroupTokenKey );
+                      g_PrefsDlg->ScriptGroupTokenKey.c_str() );
 
     for ( selbrush_t *b = selected_brushes.next; b != &selected_brushes; b = b->next )
     {
@@ -1567,10 +1567,10 @@ static void ScriptGroupDlg_TurretShare()   // 0x455b60
             if ( !_stricmp( ep->key, "export" ) ) { value = ep->value ? ep->value : zero; break; }
         }
         exportStr = value;
-        if ( atol( (const char *)exportStr ) > 0 )
+        if ( atol( exportStr.c_str() ) > 0 )
         {
             ::SetWindowTextA( GetDlgItem( g_qeglobals.d_hwndMedia, 0x663 ),
-                              (const char *)exportStr );
+                              exportStr.c_str());
             ScriptGroupDlg_AddSubKey( g_qeglobals.d_hwndMedia );
         }
     }
@@ -1590,14 +1590,14 @@ static void ScriptGroupDlg_TurretShare()   // 0x455b60
 // gathered export writes it into the sub-value edit 0x663 and calls ScriptGroupDlg_AddSubKey.
 static void ScriptGroupDlg_TurretKey( const char *turretKey )   // 0x455d80
 {
-    CString exportStr;   // IDB local CString (str_set scratch)
+    std::string exportStr;   // IDB local CString (str_set scratch); std::string here
     char    String[MAX_COLORENTREES][16];   // IDB String[512] = export-token table, stride 16
     int     exports = 0;
 
     g_PrefsDlg->ScriptGroupKey      = "token";                                  // str_set(...,"token",5)
-    g_PrefsDlg->ScriptGroupTokenKey = turretKey ? turretKey : (const char *)0;  // str_set(&...,Src,strlen)
+    g_PrefsDlg->ScriptGroupTokenKey = ( turretKey ? turretKey : "" );           // str_set(&...,Src,strlen); NULL-safe like MFC's CString=
     ::SetWindowTextA( GetDlgItem( g_qeglobals.d_hwndMedia, 0x65F ),
-                      (const char *)g_PrefsDlg->ScriptGroupTokenKey );
+                      g_PrefsDlg->ScriptGroupTokenKey.c_str() );
 
     selbrush_t *first = selected_brushes.next;
     if ( first == &selected_brushes )
@@ -1632,9 +1632,9 @@ static void ScriptGroupDlg_TurretKey( const char *turretKey )   // 0x455d80
             if ( !_stricmp( ep->key, "export" ) ) { exp = ep->value ? ep->value : zero; break; }
         }
         exportStr = exp;
-        if ( atol( (const char *)exportStr ) > 0 )
+        if ( atol( exportStr.c_str() ) > 0 )
         {
-            strcpy( String[exports], (const char *)exportStr );
+            strcpy( String[exports], exportStr.c_str());
             ++exports;
             iassert( exports < MAX_COLORENTREES );   // ScriptGroup.cpp:1818
         }
@@ -1689,13 +1689,13 @@ INT_PTR CALLBACK ScriptGroupDlgProc( HWND hDlg, UINT message, WPARAM wParam, LPA
     {
         g_qeglobals.d_hwndMedia = hDlg;
         HWND hGroupEdit = GetDlgItem( hDlg, 1441 );
-        ::SetDlgItemTextA( hDlg, 1441, (const char *)g_PrefsDlg->ScriptGroupKey );
-        ::SetDlgItemTextA( hDlg, 1631, (const char *)g_PrefsDlg->ScriptSubKey_key );
-        ::SetDlgItemTextA( hDlg, 1635, (const char *)g_PrefsDlg->ScriptSubValue_key );
+        ::SetDlgItemTextA( hDlg, 1441, g_PrefsDlg->ScriptGroupKey.c_str() );
+        ::SetDlgItemTextA( hDlg, 1631, g_PrefsDlg->ScriptSubKey_key.c_str() );
+        ::SetDlgItemTextA( hDlg, 1635, g_PrefsDlg->ScriptSubValue_key.c_str() );
         ::SetFocus( hGroupEdit );
         ::ShowWindow( hDlg, SW_SHOW );
 
-        const char *code = (const char *)g_PrefsDlg->ScriptColorKey;
+        const char *code = g_PrefsDlg->ScriptColorKey.c_str();
         if ( !strcmp( code, "r" ) ) ::CheckDlgButton( hDlg, 1661, BST_CHECKED );
         if ( !strcmp( code, "b" ) ) ::CheckDlgButton( hDlg, 1662, BST_CHECKED );
         if ( !strcmp( code, "y" ) ) ::CheckDlgButton( hDlg, 1663, BST_CHECKED );
@@ -1703,7 +1703,7 @@ INT_PTR CALLBACK ScriptGroupDlgProc( HWND hDlg, UINT message, WPARAM wParam, LPA
         if ( !strcmp( code, "g" ) ) ::CheckDlgButton( hDlg, 1665, BST_CHECKED );
         if ( !strcmp( code, "p" ) ) ::CheckDlgButton( hDlg, 1666, BST_CHECKED );
         if ( !strcmp( code, "o" ) ) ::CheckDlgButton( hDlg, 1667, BST_CHECKED );
-        const char *team = (const char *)g_PrefsDlg->ScriptColorTeamKey;
+        const char *team = g_PrefsDlg->ScriptColorTeamKey.c_str();
         if ( !strcmp( team, "script_color_axis" ) )   ::CheckDlgButton( hDlg, 1670, BST_CHECKED );
         if ( !strcmp( team, "script_color_allies" ) ) ::CheckDlgButton( hDlg, 1668, BST_CHECKED );
         return TRUE;
@@ -1754,12 +1754,12 @@ INT_PTR CALLBACK ScriptGroupDlgProc( HWND hDlg, UINT message, WPARAM wParam, LPA
         case 0x5AB: ScriptGroupDlg_TurretKey( "script_turret_ambush" ); return TRUE;
         case 0x669: // "script_objective_active" sub-key row.
             ScriptGroupSubKeyPreset_Apply( "script_objective_active" );
-            ::SetDlgItemTextA( hDlg, 1631, (const char *)g_PrefsDlg->ScriptSubKey_key );
+            ::SetDlgItemTextA( hDlg, 1631, g_PrefsDlg->ScriptSubKey_key.c_str() );
             ::SetFocus( g_qeglobals.d_hwndCamera );
             return TRUE;
         case 0x66A: // "script_objective_inactive" sub-key row.
             ScriptGroupSubKeyPreset_Apply( "script_objective_inactive" );
-            ::SetDlgItemTextA( hDlg, 1631, (const char *)g_PrefsDlg->ScriptSubKey_key );
+            ::SetDlgItemTextA( hDlg, 1631, g_PrefsDlg->ScriptSubKey_key.c_str() );
             ::SetFocus( g_qeglobals.d_hwndCamera );
             return TRUE;
         default:
@@ -1807,8 +1807,8 @@ extern void  Ed_DrawScriptColorQuad( int entDef, const float *color );// brush.c
 // the same test.
 bool PrefsDlg_ScriptTeamColorEnabled()
 {
-    return strcmp( (const char *)g_PrefsDlg->ScriptGroupKey, "token" ) != 0
-        && strcmp( (const char *)g_PrefsDlg->ScriptGroupKey,
-                   (const char *)g_PrefsDlg->ScriptColorTeamKey ) == 0;
+    return strcmp( g_PrefsDlg->ScriptGroupKey.c_str(), "token" ) != 0
+        && strcmp( g_PrefsDlg->ScriptGroupKey.c_str(),
+                   g_PrefsDlg->ScriptColorTeamKey.c_str() ) == 0;
 }
 

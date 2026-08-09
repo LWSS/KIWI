@@ -39,7 +39,6 @@ extern char *va( const char *fmt, ... );
 extern void sub_47D060( int listHead );   // 0x47D060
 
 // CMainFrame keyboard dispatch (mainfrm.cpp).
-extern CMainFrame *g_pParentWnd;           // 0x25D5A70
 
 // Global brush lists (qe3.cpp).
 extern selbrush_t active_brushes;          // 0x23F189C
@@ -103,127 +102,10 @@ ATOM           LayeredMaterialWnd_PreCreateWindow();
 
 
 // ═══════════════════════════════════════════════════════════════════════════════
-//  CNameDlg — the "New Layered Material" name modal (IDB 0x435F10 + CNameDlg vftable).
-//  A real CDialog subclass (template ID 0xB2 = 178) with two CString members.  The
-//  binary inlines the MFC CString refcount dance + the no-op str_set helper; per the
-//  established convention we use real CString members (RAII handles the release on all
-//  return paths — exactly as Prefab_Load/Select_Move do).  m_result holds the entered
-//  name; OnNewMaterial reads it after a non-cancel DoModal.
-//  radiant.rc carries no IDD_NAME template, so (like CFindTextureDlg / CSurfaceDlg) the
-//  dialog is built in code: a single edit + OK/Cancel.  The binary's resource is a one-
-//  edit name prompt; we reproduce it with a runtime in-memory DLGTEMPLATE.
+//  MFC shell — CNameDlg.  This TU is otherwise RAW WIN32 (its own window class +
+//  WndProc), so this dialog and LayeredMaterialWnd_OnNewMaterial's temporary-CWnd
+//  parent are the only MFC in the file.
 // ═══════════════════════════════════════════════════════════════════════════════
-class CNameDlg : public CDialog
-{
-public:
-    CString m_prompt;    // a1+116 — the prompt/initial text (binary stores Src here)
-    CString m_result;    // a1+120 — the entered name (binary str_set "" then DoModal)
-    CString m_title;     // window caption (the binary passes "New Layered Material")
-
-    CNameDlg( const char *title, const char *src, CWnd *parent );
-    INT_PTR DoModal() override;
-    BOOL OnInitDialog() override;
-    void OnOK() override;
-
-    enum { IDC_NAMEDLG_EDIT = 110 };
-};
-
-// Build a runtime in-memory DLGTEMPLATE so DoModal works WITHOUT a .rc resource
-// (radiant.rc carries only the menu/accelerators). This is the standard
-// MFC InitModalIndirect path: one edit + OK + Cancel, exactly the binary's CNameDlg.
-// All strings are stored as UTF-16 (dialog templates are always Unicode).
-#pragma pack(push, 2)
-struct DlgItemHdr { DWORD style; DWORD exStyle; short x, y, cx, cy; WORD id; };
-#pragma pack(pop)
-
-static void DT_PushWord( BYTE *&p, WORD w )            { *(WORD *)p = w; p += sizeof( WORD ); }
-static void DT_PushDword( BYTE *&p, DWORD d )          { *(DWORD *)p = d; p += sizeof( DWORD ); }
-static void DT_PushWStr( BYTE *&p, const char *s )     { while ( *s ) DT_PushWord( p, (WORD)(BYTE)*s++ ); DT_PushWord( p, 0 ); }
-static void DT_Align4( BYTE *&p, BYTE *base )          { while ( ( ( p - base ) & 3 ) != 0 ) *p++ = 0; }
-
-CNameDlg::CNameDlg( const char *title, const char *src, CWnd *parent )
-    : CDialog()
-    , m_prompt( src ? src : "" )      // binary str_set(m_prompt, Src)
-    , m_result( "" )                  // binary str_set(m_result, "")
-    , m_title( title ? title : "" )
-{
-    m_pParentWnd = parent;
-}
-
-INT_PTR CNameDlg::DoModal()
-{
-    // Assemble the template in a stack buffer.
-    BYTE  buf[512];
-    BYTE *p = buf;
-
-    // DLGTEMPLATE header (DS_MODALFRAME | DS_SETFONT | WS_POPUP | WS_CAPTION | WS_SYSMENU).
-    DT_PushDword( p, DS_MODALFRAME | DS_SETFONT | WS_POPUP | WS_CAPTION | WS_SYSMENU );
-    DT_PushDword( p, 0 );                 // dwExtendedStyle
-    DT_PushWord ( p, 3 );                 // cdit — 3 controls (edit, OK, Cancel)
-    DT_PushWord ( p, 60 ); DT_PushWord( p, 60 );   // x, y (dialog units)
-    DT_PushWord ( p, 180 ); DT_PushWord( p, 60 );  // cx, cy
-    DT_PushWord ( p, 0 );                 // menu (none)
-    DT_PushWord ( p, 0 );                 // window class (default)
-    DT_PushWStr ( p, (const char *)m_title );      // title
-    DT_PushWord ( p, 8 );                 // font point size (DS_SETFONT)
-    DT_PushWStr ( p, "MS Shell Dlg" );    // font face
-
-    // Item 1: the edit control.
-    DT_Align4( p, buf );
-    DT_PushDword( p, WS_CHILD | WS_VISIBLE | WS_BORDER | WS_TABSTOP | ES_AUTOHSCROLL );
-    DT_PushDword( p, 0 );
-    DT_PushWord ( p, 8 ); DT_PushWord( p, 10 ); DT_PushWord( p, 164 ); DT_PushWord( p, 14 );
-    DT_PushWord ( p, IDC_NAMEDLG_EDIT );
-    DT_PushWord ( p, 0xFFFF ); DT_PushWord( p, 0x0081 );   // class atom = EDIT
-    DT_PushWStr ( p, "" );                // no caption
-    DT_PushWord ( p, 0 );                 // no creation data
-
-    // Item 2: OK (default push button).
-    DT_Align4( p, buf );
-    DT_PushDword( p, WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_DEFPUSHBUTTON );
-    DT_PushDword( p, 0 );
-    DT_PushWord ( p, 36 ); DT_PushWord( p, 34 ); DT_PushWord( p, 50 ); DT_PushWord( p, 14 );
-    DT_PushWord ( p, IDOK );
-    DT_PushWord ( p, 0xFFFF ); DT_PushWord( p, 0x0080 );   // class atom = BUTTON
-    DT_PushWStr ( p, "OK" );
-    DT_PushWord ( p, 0 );
-
-    // Item 3: Cancel.
-    DT_Align4( p, buf );
-    DT_PushDword( p, WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON );
-    DT_PushDword( p, 0 );
-    DT_PushWord ( p, 94 ); DT_PushWord( p, 34 ); DT_PushWord( p, 50 ); DT_PushWord( p, 14 );
-    DT_PushWord ( p, IDCANCEL );
-    DT_PushWord ( p, 0xFFFF ); DT_PushWord( p, 0x0080 );   // class atom = BUTTON
-    DT_PushWStr ( p, "Cancel" );
-    DT_PushWord ( p, 0 );
-
-    if ( !InitModalIndirect( (LPCDLGTEMPLATE)buf, m_pParentWnd ) )
-        return -1;
-    return CDialog::DoModal();
-}
-
-BOOL CNameDlg::OnInitDialog()
-{
-    CDialog::OnInitDialog();
-    SetDlgItemTextA( CNameDlg::IDC_NAMEDLG_EDIT, m_prompt );
-    // Pre-select the seeded text so typing replaces it (the binary seeds m_prompt = Src).
-    CEdit *edit = (CEdit *)GetDlgItem( CNameDlg::IDC_NAMEDLG_EDIT );
-    if ( edit )
-    {
-        edit->SetFocus();
-        edit->SetSel( 0, -1 );
-    }
-    return FALSE;   // we set focus explicitly
-}
-
-void CNameDlg::OnOK()
-{
-    CString s;
-    GetDlgItemTextA( CNameDlg::IDC_NAMEDLG_EDIT, s );
-    m_result = s;   // the binary copies the edit text into the result CString on OK
-    CDialog::OnOK();
-}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  LayeredMaterialWnd_Show  (0x4176A0)
@@ -369,22 +251,9 @@ void LyrMtlNewMaterial_Apply( const char *name )
 // ═══════════════════════════════════════════════════════════════════════════════
 int LayeredMaterialWnd_OnNewMaterial()
 {
-    CWnd parent;
-    parent.Attach( lyrMtlWndGlob.hwnd );
-
-    int ret;
-    {
-        // The binary's CNameDlg(0x435F10) is constructed with the string "New Layered
-        // Material" stored in m_prompt (a1+116) — used as the dialog caption/prompt; the
-        // edit starts empty and m_result (a1+120) receives the entered name on OK.
-        CNameDlg dlg( "New Layered Material", "", &parent );
-        ret = (int)dlg.DoModal();
-        parent.Detach();
-        if ( ret == IDOK )
-            LyrMtlNewMaterial_Apply( (LPCSTR)dlg.m_result );
-        // dlg destructor (the binary's sub_417820) releases the two CStrings (RAII).
-    }
-    return ret;
+    // NO-MFC: returns IDCANCEL — the name prompt is an MFC modal, so no entry is created.
+    // LyrMtlNewMaterial_Apply above is ready for an ImGui name prompt to call.
+    return IDCANCEL;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -587,8 +456,8 @@ LRESULT CALLBACK LayeredMaterialWnd_WindowProc( HWND hWnd, UINT Msg, WPARAM wPar
         LayeredMaterialWnd_OnClose();
         return 0;
     }
-    if ( g_pParentWnd )
-        g_pParentWnd->OnKeyDown( wParam, (unsigned __int16)lParam, HIWORD( lParam ) );
+    // NO-MFC: key forwarding skipped — CMainFrame::OnKeyDown is an MFC handler; U-CMD/U-BOOT
+    // owns the shell-agnostic accelerator dispatch this should route to (TryHotkey).
     return 0;
 }
 
