@@ -1,0 +1,5 @@
+Dear ImGui, docking branch
+commit 83f668625ad45364de71d385aeb6a5dd04bee02e (2026-08-06)
+https://github.com/ocornut/imgui
+Copied files: core (imgui*.cpp/h, imstb_*.h, imconfig.h) + win32/dx9 backends + LICENSE.
+Update procedure: shallow-clone docking, copy the same file set over, bump this line.
