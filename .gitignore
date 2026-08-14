@@ -35,6 +35,15 @@ build-radiant-selftest/
 [Ll]og/
 [Ll]ogs/
 
+# Disposable out-of-tree CMake and regression builds
+/build-*/
+/build_*/
+
+# Local reverse-engineering workspaces and downloaded references
+/.cod4map-querybounds-*/
+/.cod4rad-reference/
+/.ida-mcp/
+
 # Build results on 'Bin' directories
 **/[Bb]in/*
 # Uncomment if you have tasks that rely on *.refresh files to move binaries
@@ -432,3 +441,4 @@ KIWI/.idea/*
 build-radiant/
 KIWI/
 radiant_artifacts/
+/plasticity

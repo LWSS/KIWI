@@ -1,0 +1,4 @@
+# Local cod4rad differential/parity output
+/sealed_v22_*.json
+/parity-results/
+/runs/
