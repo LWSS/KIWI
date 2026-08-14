@@ -86,10 +86,16 @@ void SetupTriSide(float *vertA, float *vertB, int axisX, int axisY, double *side
   double inv;
 
   side[TRISIDE_LENGTH] = len;
-  Assert(len > 0.0, s_assertDisable_SetupTriSide);
-  inv = 1.0 / len;
-  nx *= inv;
-  ny *= inv;
+  /* Native 0x45C3C0 deliberately leaves the normal at zero for a
+     zero-length projected side.  The caller rejects the resulting ear via
+     its distance/tolerance checks; asserting or dividing here changes that
+     control path on coincident projected vertices. */
+  if (len > 0.0)
+  {
+    inv = 1.0 / len;
+    nx *= inv;
+    ny *= inv;
+  }
   side[0] = nx;
   side[1] = ny;
   side[2] = MulAdd2(vertA[axisX], nx, vertA[axisY], ny);
@@ -434,6 +440,31 @@ TesselateFindSplitCandidates
 Finds vertices close to edges, generates split points for T-junction fixing
 ================
 */
+/* Native 0x45B3D0.  Measure how far the candidate vertex lies from the chord
+   through its two winding neighbours in the same 2D projection.  0x45AEC0
+   rejects a remote-edge split whose distance is more than twice this local
+   corner distance; without that gate every nearby collinear vertex can be
+   inserted into an unrelated edge. */
+static float TesselateSplitCandidateNeighborDistance(const Winding_t *w,
+  int testIndex, int axisX, int axisY)
+{
+  int previousIndex = testIndex ? testIndex - 1 : w->numpoints - 1;
+  int nextIndex = testIndex + 1 == w->numpoints ? 0 : testIndex + 1;
+  float direction[2];
+  float perpendicularOffset;
+  float perpendicularDistance;
+
+  direction[0] = w->points[nextIndex][axisX] - w->points[previousIndex][axisX];
+  direction[1] = w->points[nextIndex][axisY] - w->points[previousIndex][axisY];
+  Vec2Normalize(direction);
+  perpendicularOffset = direction[1] * w->points[previousIndex][axisX]
+                      - direction[0] * w->points[previousIndex][axisY];
+  perpendicularDistance = direction[1] * w->points[testIndex][axisX]
+                        - direction[0] * w->points[testIndex][axisY]
+                        - perpendicularOffset;
+  return fabsf(perpendicularDistance);
+}
+
 void *TesselateFindSplitCandidates( float *surfNormal, Winding_t **wPtr, Winding_t **wOrigPtr, void **auxDataPtr, unsigned int auxElemSize )
 {
   Winding_t *w;
@@ -447,11 +478,12 @@ void *TesselateFindSplitCandidates( float *surfNormal, Winding_t **wPtr, Winding
 #endif
   double edgeProjOfs, edgePerpOfs;
   double perpDist, projDist;
+  float candidatePerpDistance;
   tessSplitPoint_t *sp;
   char splitBuf[MAX_SPLIT_BUF_SIZE];
   volatile float edgeDir[2];
 
-  #define TESS_PERP_THRESHOLD   0.015006251
+  #define TESS_PERP_THRESHOLD   0.1225000023841858f
   #define TESS_EDGE_MARGIN      0.061250001
 
   GetProjectionAxes( surfNormal, &axisX, &axisY );
@@ -478,12 +510,16 @@ void *TesselateFindSplitCandidates( float *surfNormal, Winding_t **wPtr, Winding
       testIdx = (edge + inner) % numPts;
 
       perpDist = Det2x2(edgeDir[1], pts[3 * testIdx + axisX], edgeDir[0], pts[3 * testIdx + axisY]) - edgePerpOfs;
-      if ( perpDist * perpDist >= TESS_PERP_THRESHOLD )
+      candidatePerpDistance = fabsf((float)perpDist);
+      if ( candidatePerpDistance >= TESS_PERP_THRESHOLD )
         continue;
 
       projDist = MulAdd2(edgeDir[0], pts[3 * testIdx + axisX], edgeDir[1], pts[3 * testIdx + axisY]) - edgeProjOfs;
       proj = projDist;
       if ( projDist <= TESS_EDGE_MARGIN || (double)edgeLen - TESS_EDGE_MARGIN <= (double)proj )
+        continue;
+      if ( candidatePerpDistance > 2.0f * TesselateSplitCandidateNeighborDistance(
+             w, testIdx, axisX, axisY) )
         continue;
 
       sp = (tessSplitPoint_t *)&splitBuf[sizeof(tessSplitPoint_t) * numSplits];
@@ -624,7 +660,7 @@ TesselateEdgesIntersect
 2D edge-edge intersection test with hit point computation
 ================
 */
-int TesselateEdgesIntersect( float *edgeA0, float *edgeB0, float *edgeB1, int axisX, float *edgeA1, int axisY, float *hitPoint, float *tB, float *tA )
+int TesselateEdgesIntersect( float *edgeA0, float *edgeA1, float *edgeB0, int axisX, float *edgeB1, int axisY, float *hitPoint, float *tA, float *tB )
 {
   vec3_t dir;
   double crossA0, crossA1, crossB0, crossB1;
@@ -659,9 +695,12 @@ int TesselateEdgesIntersect( float *edgeA0, float *edgeB0, float *edgeB1, int ax
     return 2;
 
   /* compute intersection parameters and hit point (average of both) */
+  /* 0x45BF40 returns the first fraction on (edgeA0,edgeA1), then the
+     second on (edgeB0,edgeB1).  0x45BC80 uses those fractions to choose
+     the respective snap endpoints. */
+  *tA = DIVS(crossA0, crossA0, crossA1);
   *tB = DIVS(crossB0, crossB0, crossB1);
-  ta = DIVS(crossA0, crossA0, crossA1);
-  *tA = ta;
+  ta = *tA;
   tb = *tB;
   hitBx = FMA1(edgeB0[0], edgeB1[0] - edgeB0[0], tb);
   hitBy = FMA1(edgeB0[1], edgeB1[1] - edgeB0[1], tb);
@@ -713,7 +752,7 @@ char TesselateFixIntersections( TriSurf_t *ts, int axisX, int axisY, float toler
     {
       edgeA = (prev + t) % numPts;
       edgeB = (edgeA + 1) % numPts;
-      if ( TesselateEdgesIntersect( w->points[edgeA], w->points[prev], w->points[cur], axisX, w->points[edgeB], axisY, hitPoint, &hitTA, &hitTB ) != 1 )
+      if ( TesselateEdgesIntersect( w->points[prev], w->points[cur], w->points[edgeA], axisX, w->points[edgeB], axisY, hitPoint, &hitTA, &hitTB ) != 1 )
       {
         w = ts->winding;
         numPts = w->numpoints;
@@ -1007,11 +1046,13 @@ static int TrisLmap_TessRemoveDegenerateEdges(TrisLmapTessWork_t *work)
           {
             Assert(work->count + 2 - current > 0, s_assertDisable_TesselateRemoveDegenerateEdges);
             Assert(before < current, s_assertDisable_TesselateRemoveDegenerateEdges);
-            memmove(&work->indices[before], &work->indices[current], sizeof(work->indices[0]) * (work->count - before));
+            /* Native 0x45CC50 uses the CRT memcpy entry for this forward
+               compaction. */
+            memcpy(&work->indices[before], &work->indices[current], sizeof(work->indices[0]) * (work->count - before));
           }
           else
           {
-            memmove(work->indices, &work->indices[2], sizeof(work->indices[0]) * work->count);
+            memcpy(work->indices, &work->indices[2], sizeof(work->indices[0]) * work->count);
           }
         }
         break;
@@ -1057,7 +1098,7 @@ static int TrisLmap_TessFixIntersections(TrisLmapTessWork_t *work, TriSurfProps_
     {
       edgeA = (prev + step) % ordered->numpoints;
       edgeB = (edgeA + 1) % ordered->numpoints;
-      if (TesselateEdgesIntersect(ordered->points[edgeA], ordered->points[prev], ordered->points[current], axisX,
+      if (TesselateEdgesIntersect(ordered->points[prev], ordered->points[current], ordered->points[edgeA], axisX,
                                   ordered->points[edgeB], axisY, hitPoint, &hitTA, &hitTB) != 1)
         continue;
       snapA = hitTA >= 0.5f ? current : prev;
@@ -1111,6 +1152,8 @@ static int TrisLmap_TessClipEar(TrisLmapTessWork_t *work, TriSurfProps_t *props,
   float tolerance;
   int beforeClip;
   int afterClip;
+  int prevClip;
+  int checkIdx;
 
   for (;;)
   {
@@ -1155,11 +1198,30 @@ static int TrisLmap_TessClipEar(TrisLmapTessWork_t *work, TriSurfProps_t *props,
               visGroupIndex, userData);
   --work->count;
   if (bestEar != work->count)
-    memmove(&work->indices[bestEar], &work->indices[bestEar + 1], sizeof(work->indices[0]) * (work->count - bestEar));
-  /* 0x45CAF0/0x45CC50 may reduce the worklist below three points after a
-     successful callback.  That is still a successful clip; 0x45B6F0 simply
-     skips its final triangle in that case. */
-  TrisLmap_TessRemoveDegenerateEdges(work);
+    /* 0x45CDF0 calls the CRT memcpy entry here.  Its source begins one
+       element after the destination; retain the native operation rather
+       than substituting a different overlap policy. */
+    memcpy(&work->indices[bestEar], &work->indices[bestEar + 1], sizeof(work->indices[0]) * (work->count - bestEar));
+
+  /* 0x45CAF0 only runs 0x45CC50 when clipping has exposed a coincident
+     pair across the removed ear.  Removing every pre-existing degenerate
+     pair here changes the native worklist (and therefore later callback
+     indices) on complex windings. */
+  if (bestEar != work->count)
+  {
+    --afterClip;
+    if (!bestEar)
+      --beforeClip;
+  }
+  prevClip = (beforeClip + work->count - 1) % work->count;
+  checkIdx = (afterClip + 1) % work->count;
+  if (VectorCompare(work->w->points[work->indices[beforeClip]],
+                    work->w->points[work->indices[checkIdx]])
+   || VectorCompare(work->w->points[work->indices[prevClip]],
+                    work->w->points[work->indices[afterClip]]))
+  {
+    TrisLmap_TessRemoveDegenerateEdges(work);
+  }
   return 1;
 }
 
@@ -1241,7 +1303,9 @@ int TrisNative_TesselateWinding(const TriSurf_t *surf, int visGroupIndex,
 
   memset(&work, 0, sizeof(work));
   work.w = surf->winding;
-  work.wOrig = surf->origWinding;
+  /* 0x45B6F0 exposes the original winding to callbacks only while the
+     transient tris mode is 1; other modes pass NULL. */
+  work.wOrig = GetTrisTransientMode() == 1 ? surf->origWinding : NULL;
   work.count = surf->winding->numpoints;
   if (work.count == 3)
   {

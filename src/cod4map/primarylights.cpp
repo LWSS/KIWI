@@ -105,7 +105,7 @@ typedef struct PrimaryLightSurfaceAabbNode_s {
 } PrimaryLightSurfaceAabbNode_t;
 typedef char primarylight_surfaceaabbnode_size_must_be_0x28[
     sizeof(PrimaryLightSurfaceAabbNode_t) == 0x28 ? 1 : -1];
-static PrimaryLightSurfaceAabbNode_t s_primaryLightSurfaceAabbRoot;
+static PrimaryLightSurfaceAabbNode_t *s_primaryLightSurfaceAabbNodes;
 
 /* Native 0x434550/0x4344F0 K-DOP payload.  0x4360A0 owns allocation and
    population; these predicates deliberately only consume the packed record. */
@@ -331,9 +331,13 @@ static MapDrawSurf_t *TraversePrimaryLightAabb(PrimaryLightSurfaceAabbNode_t *no
 
   for (index = 0; index < node->childCount; ++index)
   {
+    PrimaryLightSurfaceAabbNode_t *child = node->children + index;
+
+    /* Native 0x433869 deliberately re-tests the current node bounds for
+       every child (a1 / a1+12), then visits the children in stored order. */
     if (SegmentIntersectsAabb(segment, node->center, node->halfSize))
     {
-      surface = TraversePrimaryLightAabb(node->children + index, segment);
+      surface = TraversePrimaryLightAabb(child, segment);
       if (surface)
         return surface;
     }
@@ -341,15 +345,25 @@ static MapDrawSurf_t *TraversePrimaryLightAabb(PrimaryLightSurfaceAabbNode_t *no
   return NULL;
 }
 
-/* Native 0x432DF0.  The native generic builder partitions this contiguous
-   prefix for acceleration; a single leaf preserves its query ordering and
-   intersection semantics while retaining the exact 0x28 carrier. */
+/* Native 0x432DF0.  Shared builder 0x465730 both partitions this prefix and
+   permutes its 68-byte MapDrawSurf records.  The permutation is observable:
+   0x4337E0 returns the first intersecting blocker in leaf order. */
 static int BuildPrimaryLightSurfaceAabbTree(void)
 {
+  typedef struct PrimaryLightSurfacePair_s {
+    MapDrawSurf_t native;
+    DrawSurf_t expanded;
+  } PrimaryLightSurfacePair_t;
+
+  AabbTreeBuilder_t options;
+  AabbTreeNode_t *genericNodes;
+  PrimaryLightSurfacePair_t *surfacePairs;
+  float (*surfaceMins)[3];
+  float (*surfaceMaxs)[3];
+  int nodeCount;
+  int nodeIndex;
   int surfaceCount;
   int surfaceIndex;
-  float mins[3];
-  float maxs[3];
 
   Assert(g_entities[0].firstDrawSurf == 0, s_assertDisable_PrimaryLightRegionSurfaceEligible);
   for (surfaceCount = 0;
@@ -362,22 +376,88 @@ static int BuildPrimaryLightSurfaceAabbTree(void)
   if (!surfaceCount)
     Com_Error("ERROR: Map must have at least one visible non-sky surface\n");
 
-  ClearBounds(mins, maxs);
+  surfaceMins = (float (*)[3])malloc(sizeof(*surfaceMins) * surfaceCount);
+  surfaceMaxs = (float (*)[3])malloc(sizeof(*surfaceMaxs) * surfaceCount);
+  genericNodes = (AabbTreeNode_t *)malloc(sizeof(*genericNodes) * surfaceCount);
+  surfacePairs = (PrimaryLightSurfacePair_t *)malloc(sizeof(*surfacePairs) * surfaceCount);
+  if (!surfaceMins || !surfaceMaxs || !genericNodes || !surfacePairs)
+    Com_Error("ERROR: out of memory");
+
   for (surfaceIndex = 0; surfaceIndex < surfaceCount; ++surfaceIndex)
   {
     MapDrawSurf_t *surface = &g_nativeMapDrawSurfs[surfaceIndex];
     int vertexIndex;
+
+    surfacePairs[surfaceIndex].native = *surface;
+    surfacePairs[surfaceIndex].expanded = g_drawSurfs[surfaceIndex];
+
+    ClearBounds(surfaceMins[surfaceIndex], surfaceMaxs[surfaceIndex]);
     for (vertexIndex = 0; vertexIndex < surface->vertCount; ++vertexIndex)
-      AddPointToBounds(surface->verts[vertexIndex].pos, mins, maxs);
+      AddPointToBounds(surface->verts[vertexIndex].pos,
+                       surfaceMins[surfaceIndex], surfaceMaxs[surfaceIndex]);
   }
-  s_primaryLightSurfaceAabbRoot.center[0] = (mins[0] + maxs[0]) * 0.5f;
-  s_primaryLightSurfaceAabbRoot.center[1] = (mins[1] + maxs[1]) * 0.5f;
-  s_primaryLightSurfaceAabbRoot.center[2] = (mins[2] + maxs[2]) * 0.5f;
-  VectorSubtract(maxs, s_primaryLightSurfaceAabbRoot.center, s_primaryLightSurfaceAabbRoot.halfSize);
-  s_primaryLightSurfaceAabbRoot.firstSurface = g_nativeMapDrawSurfs;
-  s_primaryLightSurfaceAabbRoot.surfaceCount = surfaceCount;
-  s_primaryLightSurfaceAabbRoot.children = NULL;
-  s_primaryLightSurfaceAabbRoot.childCount = 0;
+
+  memset(&options, 0, sizeof(options));
+  /* Native permutes its complete 0x44-byte surface records in place.  KIWI
+     keeps donor-expanded DrawSurf records in a parallel array, so carry both
+     representations through the one native partition.  A second partition
+     would not preserve equal-key ordering. */
+  options.itemData = surfacePairs;
+  options.itemCount = surfaceCount;
+  options.itemStride = sizeof(*surfacePairs);
+  options.hasBoundsData = (void *)1;
+  options.itemMins = (float *)surfaceMins;
+  options.itemMaxs = (float *)surfaceMaxs;
+  options.nodes = genericNodes;
+  options.maxNodes = surfaceCount;
+  options.minPartitionSize = 2;
+  options.minLeafItems = 4;
+  nodeCount = AabbBuildTree(&options);
+
+  for (surfaceIndex = 0; surfaceIndex < surfaceCount; ++surfaceIndex)
+  {
+    g_nativeMapDrawSurfs[surfaceIndex] = surfacePairs[surfaceIndex].native;
+    g_drawSurfs[surfaceIndex] = surfacePairs[surfaceIndex].expanded;
+  }
+  free(surfacePairs);
+
+  free(s_primaryLightSurfaceAabbNodes);
+  s_primaryLightSurfaceAabbNodes = (PrimaryLightSurfaceAabbNode_t *)malloc(
+      sizeof(*s_primaryLightSurfaceAabbNodes) * nodeCount);
+  if (!s_primaryLightSurfaceAabbNodes)
+    Com_Error("ERROR: out of memory");
+
+  for (nodeIndex = 0; nodeIndex < nodeCount; ++nodeIndex)
+  {
+    AabbTreeNode_t *source = &genericNodes[nodeIndex];
+    PrimaryLightSurfaceAabbNode_t *destination =
+        &s_primaryLightSurfaceAabbNodes[nodeIndex];
+    float mins[3];
+    float maxs[3];
+    int itemIndex;
+
+    Assert(source->itemCount > 0, s_assertDisable_PrimaryLightRegionSurfaceEligible);
+    VectorCopy(surfaceMins[source->firstItem], mins);
+    VectorCopy(surfaceMaxs[source->firstItem], maxs);
+    for (itemIndex = 1; itemIndex < source->itemCount; ++itemIndex)
+    {
+      int surface = source->firstItem + itemIndex;
+
+      AddBoundsToBounds(surfaceMins[surface], surfaceMaxs[surface], mins, maxs);
+    }
+    destination->center[0] = (mins[0] + maxs[0]) * 0.5f;
+    destination->center[1] = (mins[1] + maxs[1]) * 0.5f;
+    destination->center[2] = (mins[2] + maxs[2]) * 0.5f;
+    VectorSubtract(maxs, destination->center, destination->halfSize);
+    destination->firstSurface = &g_nativeMapDrawSurfs[source->firstItem];
+    destination->surfaceCount = source->itemCount;
+    destination->children = s_primaryLightSurfaceAabbNodes + source->firstChild;
+    destination->childCount = source->childCount;
+  }
+
+  free(genericNodes);
+  free(surfaceMaxs);
+  free(surfaceMins);
   return surfaceCount;
 }
 
@@ -398,7 +478,7 @@ static MapDrawSurf_t *QueryPrimaryLightSurfaceAabb(const float *start, const flo
   segment[8] = fabsf(segment[5]);
   if (previousSurface && DispatchDrawSurfaceIntersection(segment, previousSurface))
     return previousSurface;
-  return TraversePrimaryLightAabb(&s_primaryLightSurfaceAabbRoot, segment);
+  return TraversePrimaryLightAabb(s_primaryLightSurfaceAabbNodes, segment);
 }
 
 /* Native 0x434000. */
@@ -1066,8 +1146,9 @@ static int PrimaryLightMaterialEligible(const MapDrawSurf_t *surface)
       && (surface->material->surfaceFlags & 0x40000) == 0;
 }
 
-/* Native 0x434F40.  Kept callable but not enabled from EmitWorldBSP until
-   the surrounding native world-emission route is switched as a whole. */
+/* Native 0x434F40.  EmitWorldBSP invokes this only for the world model,
+   immediately after 0x432DF0 has prepared the direct visible-surface
+   acceleration data. */
 void BuildPrimaryLightRegions(void)
 {
   int directCount;
@@ -1082,6 +1163,7 @@ void BuildPrimaryLightRegions(void)
 
   Assert(g_currentEntityIndex == 0, s_assertDisable_PrimaryLightRegionSurfaceEligible);
   Assert(g_entities[0].firstDrawSurf == 0, s_assertDisable_PrimaryLightRegionSurfaceEligible);
+  BuildPrimaryLightSurfaceAabbTree(); /* native 0x432DF0 predecessor */
   for (directCount = 0;
        directCount < numMapDrawSurfs
        && (g_nativeMapDrawSurfs[directCount].material->toolFlagsWord & 0x70) == 0x10

@@ -487,9 +487,24 @@ BEGIN
     END
 END
 
+// KIWI-UX (ROUND S) - Ctrl+X NO LONGER QUITS THE EDITOR.
+// USER DIRECTIVE, verbatim: "Ctrl-X should not quit the app!!!"
+//
+// It did.  The removed line, which used to be the FIRST entry below, was
+//     "X", 32951, VIRTKEY, CONTROL, NOINVERT
+// and 32951 is ID_FILE_EXIT_RAD (res/resource.h:34), dispatched at
+// mainfrm.cpp:5646 as `case ID_FILE_EXIT_RAD: Radiant_FileExit();`.  So the stock
+// binary really does put "quit, now" one slipped key away from Ctrl+C and Ctrl+Z,
+// with no confirmation of its own beyond the save prompt.
+//
+// The ENTRY is removed rather than the id being intercepted, because the id is
+// ALSO File->Exit (this file, :46) and that menu item must keep working.  With the
+// accelerator gone, Ctrl+X falls through TranslateAccelerator (radiant_main.cpp:651)
+// to the editor command map, where the MODERN profile binds it to the clipboard CUT
+// (kiwi_keymap.cpp; "KiwiClipCut" = KIWI_CMD_CLIP_CUT 34112).  In the CLASSIC
+// profile Ctrl+X is left UNBOUND - "should not quit" read the safe way.
 IDR_MAIN_ACCEL ACCELERATORS
 BEGIN
-    "X", 32951, VIRTKEY, CONTROL, NOINVERT
     "O", 57601, VIRTKEY, CONTROL, NOINVERT
     "S", 57603, VIRTKEY, CONTROL, NOINVERT
     "L", 33024, VIRTKEY, CONTROL, NOINVERT

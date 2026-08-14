@@ -246,6 +246,70 @@ void Brush_RealizeFaceMaterialsGuarded(brush_t *def)
 // still shows who raised it; no-op when no debugger is attached.
 #define RADIANT_BREAK_BEFORE_FATAL_EXIT()  do { if (IsDebuggerPresent()) __debugbreak(); } while (0)
 
+// ═════════════════════════════════════════════════════════════════════════════
+// KIWI-UX (ROUND V) — the one notifier every fatal path funnels through
+// ═════════════════════════════════════════════════════════════════════════════
+// USER REPORT (verbatim): *"After going AFK for a while and coming back I get this
+// crash ... it ruins all progress of your map."*
+//
+// Every way this editor dies on purpose ends in ExitProcess/exit with the map only in
+// RAM.  Kiwi_RescueSave (map.cpp) writes it to `<mapname>_rescue.map` — see the design
+// block there for why it is NOT Map_SaveFile and what it is allowed to touch.  This
+// wrapper owns the two things the writer must not do: telling the operator, and being
+// re-entrant-safe across the several death paths that can chain into each other.
+//
+// WHY A MESSAGE BOX.  Com_Error's existing outputs are stderr (invisible in a windowed
+// editor — the reason %TEMP%\radiant_firstlight.log exists at all) and that log.  A
+// rescue file nobody knows about is the same as no rescue file.  The box is popped ONLY
+// when a rescue actually reached disk, so it is rare and always carries the path.  It
+// runs a nested message pump, which is survivable here for a reason established in
+// round U: an unauthorized WM_PAINT no longer draws or presents anything
+// (radiant_main.cpp:193 ImGuiShell_FrameAuthorized), and a paint that does try the
+// device is stopped by R_SetupRendertarget_CheckDevice (r_init.cpp:4786/4803 — the
+// R_TestDevice gate and the NULL-swap-chain gate).  Owner is NULL, not our frame, so
+// the box does not re-enter the frame WndProc as an owner.
+//
+// GUARDS: one shot (s_notified), and the writer behind it is separately one-shot and
+// SEH-wrapped.  Re-entry — a second Com_Error raised from inside the box's pump, or
+// Sys_Error chaining after Com_Error — returns immediately.
+void Kiwi_FatalRescue(const char *why)
+{
+    static bool s_notified = false;
+    if (s_notified)
+        return;
+    s_notified = true;
+
+    extern bool Kiwi_RescueSave(char *outPath, int outPathSize);   // radiant/map.cpp
+
+    char rescuePath[MAX_PATH] = "";
+    if (!Kiwi_RescueSave(rescuePath, sizeof(rescuePath)) || !rescuePath[0])
+        return;
+
+    {
+        char tmp[MAX_PATH], logPath[MAX_PATH];
+        GetTempPathA(sizeof(tmp), tmp);
+        _snprintf(logPath, sizeof(logPath), "%sradiant_firstlight.log", tmp);
+        FILE *lf = fopen(logPath, "a");
+        if (lf)
+        {
+            fprintf(lf, "RESCUE SAVE WRITTEN: %s\n", rescuePath);
+            fclose(lf);
+        }
+    }
+    fprintf(stderr, "RESCUE SAVE WRITTEN: %s\n", rescuePath);
+
+    char box[2048];
+    _snprintf(box, sizeof(box),
+              "Radiant hit a fatal error and has to close:\n\n%s\n\n"
+              "YOUR MAP WAS RESCUED TO:\n%s\n\n"
+              "Your original .map file was NOT touched.  Open the rescue file "
+              "(File > Open) to get your work back, or rename it over the original.",
+              why ? why : "(no message)", rescuePath);
+    box[sizeof(box) - 1] = 0;
+    MessageBoxA(NULL, box, "CoD4Radiant - map rescued",
+                MB_OK | MB_ICONERROR | MB_SETFOREGROUND | MB_TOPMOST);
+}
+
 void QDECL Com_Error(errorParm_t code, const char *fmt, ...)
 {
     va_list args;
@@ -278,6 +342,13 @@ void QDECL Com_Error(errorParm_t code, const char *fmt, ...)
     }
 
     fprintf(stderr, "COM_ERROR(%d): %s\n", (int)code, msg);
+    // KIWI-UX (ROUND V): this is the death arm — ERR_FATAL, and any ERR_DROP that no
+    // asset-load guard caught.  Both reach the ExitProcess below with the map still only
+    // in RAM, so the rescue hook is UPSTREAM of process exit for every code that gets
+    // here.  (The AFK crash is Com_Error(ERR_FATAL) from R_Hwnd_Resize, r_init.cpp:5043 —
+    // it lands exactly here.)  Anything already recovered above has longjmp'd out and
+    // never reaches this line.
+    Kiwi_FatalRescue(msg);
     RADIANT_BREAK_BEFORE_FATAL_EXIT();
     ExitProcess(1);
 }
@@ -336,10 +407,12 @@ void __cdecl Sys_Error(const char *fmt, ...)
 {
     va_list args;
     va_start(args, fmt);
-    fprintf(stderr, "SYS_ERROR: ");
-    vfprintf(stderr, fmt, args);
+    char msg[1024];
+    _vsnprintf(msg, sizeof(msg), fmt ? fmt : "", args);
+    msg[sizeof(msg) - 1] = 0;
     va_end(args);
-    fputc('\n', stderr);
+    fprintf(stderr, "SYS_ERROR: %s\n", msg);
+    Kiwi_FatalRescue(msg);   // KIWI-UX (ROUND V): the other unconditional death path
     RADIANT_BREAK_BEFORE_FATAL_EXIT();
     ExitProcess(1);
 }
@@ -347,6 +420,13 @@ void __cdecl Sys_Error(const char *fmt, ...)
 void __cdecl Sys_OutOfMemErrorInternal(const char *file, int line)
 {
     fprintf(stderr, "OUT_OF_MEMORY: %s:%d\n", file ? file : "?", line);
+    // KIWI-UX (ROUND V): out-of-memory is the one fatal where the rescue itself may
+    // fail — it is still worth the attempt (the writer allocates nothing but a FILE*).
+    {
+        char m[MAX_PATH + 32];
+        _snprintf(m, sizeof(m), "Out of memory (%s:%d)", file ? file : "?", line);
+        Kiwi_FatalRescue(m);
+    }
     RADIANT_BREAK_BEFORE_FATAL_EXIT();
     ExitProcess(1);
 }

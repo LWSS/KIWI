@@ -402,7 +402,7 @@ int WindingPlaneSide(Winding_t *w, float *normal, float dist)
 
   for ( i = 0; i < w->numpoints; i++ )
   {
-    d = DotProduct021(w->points[i], normal) - dist;
+    d = DotProduct(w->points[i], normal) - dist;
     if ( d > ON_EPSILON )
     {
       if ( back )
@@ -461,7 +461,7 @@ static float WindingSmallestEdgeDistance(const Winding_t *w, const float *planeN
 
     VectorSubtract(w->points[current], w->points[previous], edge);
     CrossProduct(edge, planeNormal, edgePlane);
-    edgeLength = VectorLength(edgePlane);
+    edgeLength = (float)VecNormalize(edgePlane);
     edgeDist = DotProduct(edgePlane, w->points[previous]);
 
     do
@@ -867,22 +867,13 @@ double WindingLargestTriangleArea(Winding_t *w, float *planeNormal, int *outIdx0
   return bestArea;
 }
 
-/* CoD4 0x42C0A0.  The map tool keeps this separate from the donor's
- * incremental CheckWinding helper: it creates one consistently oriented
- * convex winding from an arbitrary (up to 64 point) point set. */
-static float WindingHullCross(const float projected[64][2], int a, int b, int c)
-{
-  return (projected[b][0] - projected[a][0]) * (projected[c][1] - projected[a][1])
-       - (projected[b][1] - projected[a][1]) * (projected[c][0] - projected[a][0]);
-}
-
-static Winding_t *WindingFromPoints(const float *planeNormal, const vec3_t *points, int pointCount)
+/* CoD4 0x42C0A0. */
+Winding_t *WindingFromPoints(const float *planeNormal, const vec3_t *points, int pointCount)
 {
   float projected[64][2];
-  int pointOrder[64];
-  int hullOrder[128];
-  int axisU, axisV, hullCount, i, j, tri0, tri1, tri2;
-  vec3_t orientNormal;
+  unsigned int hullOrder[64], hullCount, pointIndex;
+  int axisU, axisV, tri0, tri1, tri2;
+  vec4_t plane;
   Winding_t *winding;
 
   Assert(pointCount <= 64, g_assertFlags4);
@@ -890,67 +881,30 @@ static Winding_t *WindingFromPoints(const float *planeNormal, const vec3_t *poin
     return NULL;
 
   GetProjectionAxes((float *)planeNormal, &axisU, &axisV);
-  for ( i = 0; i < pointCount; ++i )
+  for ( pointIndex = 0; pointIndex < (unsigned int)pointCount; ++pointIndex )
   {
-    projected[i][0] = points[i][axisU];
-    projected[i][1] = points[i][axisV];
-    pointOrder[i] = i;
+    projected[pointIndex][0] = points[pointIndex][axisU];
+    projected[pointIndex][1] = points[pointIndex][axisV];
   }
-
-  /* This is the same 2D convex-hull role as the CoD4 com_convexhull call at
-   * 0x42C163.  The final orientation is normalized below, so its start vertex
-   * is intentionally not observable. */
-  for ( i = 1; i < pointCount; ++i )
-  {
-    int point = pointOrder[i];
-    for ( j = i; j > 0 && (projected[point][0] < projected[pointOrder[j - 1]][0]
-         || (projected[point][0] == projected[pointOrder[j - 1]][0]
-          && projected[point][1] < projected[pointOrder[j - 1]][1])); --j )
-      pointOrder[j] = pointOrder[j - 1];
-    pointOrder[j] = point;
-  }
-
-  hullCount = 0;
-  for ( i = 0; i < pointCount; ++i )
-  {
-    while ( hullCount >= 2 && WindingHullCross(projected, hullOrder[hullCount - 2], hullOrder[hullCount - 1], pointOrder[i]) <= 0.0f )
-      --hullCount;
-    hullOrder[hullCount++] = pointOrder[i];
-  }
-  for ( i = pointCount - 2, j = hullCount + 1; i >= 0; --i )
-  {
-    while ( hullCount >= j && WindingHullCross(projected, hullOrder[hullCount - 2], hullOrder[hullCount - 1], pointOrder[i]) <= 0.0f )
-      --hullCount;
-    hullOrder[hullCount++] = pointOrder[i];
-  }
-  if ( hullCount > 1 )
-    --hullCount; /* duplicated first point */
-  if ( hullCount < 3 )
-    return NULL;
+  hullCount = Com_ConvexHullIndices(projected, pointCount, hullOrder);
+  Assert(hullCount <= (unsigned int)pointCount, g_assertFlags4);
 
   winding = AllocWinding(hullCount);
   winding->numpoints = hullCount;
-  for ( i = 0; i < hullCount; ++i )
-    VectorCopy(points[hullOrder[i]], winding->points[i]);
+  for ( pointIndex = 0; pointIndex < hullCount; ++pointIndex )
+    VectorCopy(points[hullOrder[pointIndex]], winding->points[pointIndex]);
 
-  if ( WindingLargestTriangleArea(winding, (float *)planeNormal, &tri0, &tri1, &tri2) < 0.001f )
+  if ( WindingLargestTriangleArea(winding, (float *)planeNormal, &tri0, &tri1, &tri2) < 0.001000000047497451f )
   {
     FreeWinding(winding);
     return NULL;
   }
-
-  VectorSubtract(winding->points[tri1], winding->points[tri0], orientNormal);
+  PlaneFromPoints(plane, winding->points[tri0], winding->points[tri1], winding->points[tri2]);
+  if ( DotProduct(plane, planeNormal) < 0.0f )
   {
-    vec3_t edge, cross;
-    Winding_t *reversed;
-    VectorSubtract(winding->points[tri2], winding->points[tri0], edge);
-    CrossProduct(edge, orientNormal, cross);
-    if ( DotProduct(cross, planeNormal) < 0.0f )
-    {
-      reversed = ReverseWinding(winding);
-      FreeWinding(winding);
-      winding = reversed;
-    }
+    Winding_t *reversed = ReverseWinding(winding);
+    FreeWinding(winding);
+    winding = reversed;
   }
   return winding;
 }
@@ -985,37 +939,58 @@ Winding_t *WindingFromWindingList(const float *planeNormal, const WindingList_t 
   return WindingFromPoints(planeNormal, points, pointCount);
 }
 
-/* CoD4 0x42C660: emits the up-to-four intersections made by a plane and the
- * two selected bounds-axis pairs. */
-static int AddPlaneBoxIntersectionPoints(const float *plane, const float *mins, const float *maxs, int axisA, int axisB, vec3_t *out)
+/* CoD4 0x42C660: emit the four ordered intersections of an input plane with
+ * the selected pairs of the six axial bounds planes. */
+static int AddPlaneBoxIntersectionPoints(const float *plane, const float *mins, const float *maxs,
+                                         float boundsPlanes[6][4], int axisA, int axisB, vec3_t *out)
 {
-  int signA, signB, axisC = 3 - axisA - axisB, count = 0;
-  for ( signA = 0; signA != 2; ++signA )
-  {
-    for ( signB = 0; signB != 2; ++signB )
-    {
-      vec3_t point;
-      if ( fabsf(plane[axisC]) <= FLT_EPSILON )
-        continue;
-      point[axisA] = signA ? maxs[axisA] : mins[axisA];
-      point[axisB] = signB ? maxs[axisB] : mins[axisB];
-      point[axisC] = (plane[3] - plane[axisA] * point[axisA] - plane[axisB] * point[axisB]) / plane[axisC];
-      if ( point[axisC] >= mins[axisC] && point[axisC] <= maxs[axisC] )
-        VectorCopy(point, out[count++]);
-    }
-  }
+  float *planes[3];
+  int count = 0;
+
+  planes[0] = (float *)plane;
+  planes[1] = boundsPlanes[axisA];
+  planes[2] = boundsPlanes[axisB];
+  if ( PlaneIntersection3(planes, out[count]) && PointInBounds(out[count], (float *)mins, (float *)maxs) )
+    ++count;
+
+  planes[2] = boundsPlanes[axisB + 3];
+  if ( PlaneIntersection3(planes, out[count]) && PointInBounds(out[count], (float *)mins, (float *)maxs) )
+    ++count;
+
+  planes[1] = boundsPlanes[axisA + 3];
+  if ( PlaneIntersection3(planes, out[count]) && PointInBounds(out[count], (float *)mins, (float *)maxs) )
+    ++count;
+
+  planes[2] = boundsPlanes[axisB];
+  if ( PlaneIntersection3(planes, out[count]) && PointInBounds(out[count], (float *)mins, (float *)maxs) )
+    ++count;
+
   return count;
 }
 
 /* CoD4 0x42C470. */
-static Winding_t *WindingFromPlaneAndBounds(const float *plane, const float *mins, const float *maxs)
+Winding_t *WindingFromPlaneAndBounds(const float *plane, const float *mins, const float *maxs)
 {
+  float boundsPlanes[6][4] = {};
   vec3_t points[12];
   int pointCount = 0;
 
-  pointCount += AddPlaneBoxIntersectionPoints(plane, mins, maxs, 0, 1, &points[pointCount]);
-  pointCount += AddPlaneBoxIntersectionPoints(plane, mins, maxs, 1, 2, &points[pointCount]);
-  pointCount += AddPlaneBoxIntersectionPoints(plane, mins, maxs, 2, 0, &points[pointCount]);
+  boundsPlanes[0][0] = 1.0f;
+  boundsPlanes[0][3] = maxs[0];
+  boundsPlanes[1][1] = 1.0f;
+  boundsPlanes[1][3] = maxs[1];
+  boundsPlanes[2][2] = 1.0f;
+  boundsPlanes[2][3] = maxs[2];
+  boundsPlanes[3][0] = -1.0f;
+  boundsPlanes[3][3] = -mins[0];
+  boundsPlanes[4][1] = -1.0f;
+  boundsPlanes[4][3] = -mins[1];
+  boundsPlanes[5][2] = -1.0f;
+  boundsPlanes[5][3] = -mins[2];
+
+  pointCount += AddPlaneBoxIntersectionPoints(plane, mins, maxs, boundsPlanes, 0, 1, &points[pointCount]);
+  pointCount += AddPlaneBoxIntersectionPoints(plane, mins, maxs, boundsPlanes, 1, 2, &points[pointCount]);
+  pointCount += AddPlaneBoxIntersectionPoints(plane, mins, maxs, boundsPlanes, 2, 0, &points[pointCount]);
   return pointCount >= 3 ? WindingFromPoints(plane, points, pointCount) : NULL;
 }
 
@@ -1427,7 +1402,7 @@ int ClipWinding(
 
   for ( i = 0; i < numPoints; i++ )
   {
-    signedDist = DotProduct021(inWinding->points[i], planeNormal) - planeDist;
+    signedDist = DotProduct(inWinding->points[i], planeNormal) - planeDist;
     dists[i] = signedDist;
 
     if ( signedDist <= epsilon )

@@ -1152,10 +1152,9 @@ int InsertHole(WindingAuxPair_t *verts, float area, float *plane,
   }
 
   /* no diagonal — insert this hole sorted by area (descending by magnitude) */
-  /* CoD4 0x458780 reduces a concave hole through the opaque-brush tree
-     before accepting it.  The normal concave path has no aux payload; keep
-     a legacy aux carrier intact because clipping cannot synthesize it. */
-  if (!auxElemSize && !HoleAreaSkipsVisibilityReduction(verts->winding, -area))
+  /* CoD4 0x458780 reduces every eligible concave hole through the
+     opaque-brush tree; its final parameter is unused. */
+  if (!HoleAreaSkipsVisibilityReduction(verts->winding, -area))
   {
     Winding_t *reversed = ReverseWinding(verts->winding);
 
@@ -1182,9 +1181,20 @@ int InsertHole(WindingAuxPair_t *verts, float area, float *plane,
         if (visibleArea >= -area - 0.001000000047497451f
             || HoleAreaSkipsVisibilityReduction(visible, visibleArea))
         {
+          Winding_t *reduced = ReverseWinding(visible);
+          void *reducedAux = NULL;
+
+          /* The only compatibility auxiliary route through concave merging
+             is the shadow-caster SmAuxVert carrier.  Reprojecting the
+             retained hull vertices reconstructs its original/projected
+             pairs after native's geometry-only visibility reduction. */
+          if (auxElemSize == sizeof(SmAuxVert_t))
+            reducedAux = SM_AllocProjectedPoints(reduced);
+          else if (auxElemSize)
+            Com_Error("InsertHole: unsupported auxiliary vertex size %i", auxElemSize);
           FreeVerts(verts);
-          verts->winding = ReverseWinding(visible);
-          verts->auxData = NULL;
+          verts->winding = reduced;
+          verts->auxData = reducedAux;
           FreeWinding(visible);
           area = -visibleArea;
         }
@@ -1418,14 +1428,13 @@ void CollectHoles(TriSurf_t *ts, Tree_t *bspHead, int auxElemSize)
       memcpy(ts->holes, holesBuf, sz);
     }
 
-    FreeVerts(src);
-    src->winding = copyPair.winding;
-    src->auxData = copyPair.auxData;
   }
-  else
-  {
-    FreeVerts(&copyPair);
-  }
+
+  /* Native 0x458110 always publishes the copied/processed carrier for a
+     winding above the eight-point gate, even when FindHoles found none. */
+  FreeVerts(src);
+  src->winding = copyPair.winding;
+  src->auxData = copyPair.auxData;
   #undef MAX_HOLE_BUF
 }
 
@@ -2084,7 +2093,10 @@ static float NotchSmallestEdgeDistance(const Winding_t *winding,
 
     VectorSubtract(winding->points[current], winding->points[previous], edge);
     CrossProduct(edge, planeNormal, edgePlane);
-    edgeLength = (float)VectorLength(edgePlane);
+    /* Native 0x42E110 normalizes the edge plane in place before all dot
+       distances.  The returned pre-normalization length is retained only
+       for the degenerate-edge assertion below. */
+    edgeLength = (float)VecNormalize(edgePlane);
     edgeDist = (float)DotProduct(edgePlane, winding->points[previous]);
 
     do

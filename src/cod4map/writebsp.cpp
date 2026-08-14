@@ -40,6 +40,8 @@ int BeginBSPFile(void)
   numBSPLeafSurfaces = 0;
   numBSPLeafBrushes = 0;
   numBSPLeafs = 1;
+  if ( TrisLmap_NativeRouteEnabled() )
+    numLightmaps = 0;
   Tris_InitDrawSurfaceContexts();
   return 0;
 }
@@ -252,7 +254,7 @@ Emits a BSP material/shader entry. Searches existing materials for a match
 by name and surface flags; if not found, adds a new entry to the material table.
 ================
 */
-static int AddBspMaterial(const char *materialName, int surfaceFlags, int contentFlags)
+int AddBspMaterial(const char *materialName, int surfaceFlags, int contentFlags)
 {
   int i;
 
@@ -598,7 +600,6 @@ void EmitPlanes(void)
   RemapNodePlanes(planeMap);
   RemapBrushSidePlanes(planeMap);
   CreateLeafNode(planeMap);
-  CreateNode(planeMap);
   free(planeMap);
 }
 
@@ -662,9 +663,11 @@ int EmitCollisionAABBs_r( CmCollideBox_t *nodeList )
       /* leaf node: reference brush partition and material */
       CmPartition_t *part = node->partition;
       DrawSurf_t *ds = part->triArray->drawSurf;
+      MapDrawSurf_t *nativeDrawSurf = NativeMapDrawSurfFor(ds);
       aabb->u.partitionIndex = part->emitIndex;
       aabb->childCount = 0;
-      aabb->materialIndex = EmitMaterial( ds->shaderInfo, ds->surfaceFlags );
+      aabb->materialIndex = EmitMaterial(ds->shaderInfo,
+        nativeDrawSurf ? nativeDrawSurf->contentFlags : ds->surfaceFlags);
     }
   }
 
@@ -698,7 +701,8 @@ int EmitLeaf( Node_t *node )
   /* emit leaf brushes — skip detail brushes */
   for ( b = node->leafBrushes; b; b = b->next )
   {
-    if ( b->detail || b->original->detail )
+    /* CoD4 0x4640D0 filters occluders, not detail brushes. */
+    if ( b->isOccluder || b->original->isOccluder )
       continue;
     if ( numBSPLeafBrushes >= MAX_MAP_LEAFBRUSHES )
       Com_Error( "MAX_MAP_LEAFBRUSHES" );

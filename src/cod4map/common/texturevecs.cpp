@@ -128,9 +128,9 @@ float *BuildTextureVecs(float *normal, float *scale, float *shift, float rotatio
   scaleX = scale[0];
   scaleY_stored = scale[1];
   if ( scaleX == 0.0 )
-    scaleX = LIGHTMAP_SIZE;
+    scaleX = 128.0f;
   if ( scaleY_stored == 0.0 )
-    scaleY_stored = LIGHTMAP_SIZE;
+    scaleY_stored = 128.0f;
 
   TextureVecsForNormal(normal, xVec, yVec, &svIdx, &tvIdx);
   sv = svIdx;
@@ -169,8 +169,8 @@ float *BuildTextureVecs(float *normal, float *scale, float *shift, float rotatio
   texVecs[2] = (float)((double)texVecs[2] + (double)skew * (double)texVecs[6]);
 
   /* shift */
-  texVecs[3] = -(invScaleX * shift[0]);
-  texVecs[7] = -(invScaleY * shift[1]);
+  texVecs[3] = -shift[0] / scaleX;
+  texVecs[7] = -shift[1] / scaleY_stored;
 
   return texVecs;
 }

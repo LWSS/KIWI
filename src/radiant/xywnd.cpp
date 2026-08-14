@@ -161,11 +161,29 @@ static void XY_DrawCoordText(const XYViewState *wnd,
     char  text[32];
     float a4[3], yp[3], org[3];
 
+    // ── KIWI-UX DEVIATION (shakeout B) — RULER LABEL DENSITY CAP ─────────────
+    // USER DIRECTIVE: "try to cleanup the clutter when zoomed out (deviate from
+    // original in this regard)".  The ruler steps with the MAJOR grid, and the major
+    // step is chosen as the next power of two >= 6.4/scale (XY_DrawGrid) — so its
+    // on-screen spacing bottoms out around 6-13 px while the numbers it prints GROW
+    // to 5-6 characters.  The result at far zoom is two solid smears of digits along
+    // the top and left edges.  Fix: double the LABEL step (never the line step) until
+    // consecutive labels are at least 40 px apart.
+    // Identical at classic zoom: the stock scale 1.0 gives stepSize 64 -> 64 px, well
+    // over the threshold, so the loop below does not run and the output is unchanged.
+    // Anything at or above scale 0.625 is likewise untouched.
+    int labelStep = stepSize;
+    while ( (float)labelStep * wnd->scale < 40.0f && labelStep < ( 1 << 24 ) )
+        labelStep *= 2;
+
     // TOP labels — X coords along the top edge (rotated: xPixelStep along -nDim2).
     a4[0]=a4[1]=a4[2]=0.0f; a4[nDim2] = -inv;
     yp[0]=yp[1]=yp[2]=0.0f; yp[nDim1] = -inv;
     const float topV = wnd->origin[nDim2] + h - inv;
-    for (float v = xmin; v < xmax; v += (float)stepSize)
+    // KIWI-UX DEVIATION: `labelStep` in place of `stepSize` here and in the LEFT loop
+    // below.  They are the SAME VALUE except when the cap above widened it, and the
+    // start point is still xmin, so the label positions stay on the original lattice.
+    for (float v = xmin; v < xmax; v += (float)labelStep)
     {
         sprintf(text, "%.0f", v);
         org[nDim1] = v + halfX;
@@ -178,7 +196,7 @@ static void XY_DrawCoordText(const XYViewState *wnd,
     a4[0]=a4[1]=a4[2]=0.0f; a4[nDim1] =  inv;
     yp[0]=yp[1]=yp[2]=0.0f; yp[nDim2] = -inv;
     const float leftV = wnd->origin[nDim1] - w + inv;
-    for (float v = ymin; v < ymax; v += (float)stepSize)
+    for (float v = ymin; v < ymax; v += (float)labelStep)   // KIWI-UX DEVIATION (see above)
     {
         sprintf(text, "%.0f", v);
         org[nDim1] = leftV + halfX;
@@ -255,6 +273,9 @@ void XY_DrawGrid(const XYViewState *wnd)
 
     // Minor grid (snap-size lines) — only when zoomed in enough to be legible and
     // the minor colour differs from the background.
+    // KIWI-UX (shakeout B): the "minor lines need >= 4 px of spacing" rule the
+    // declutter pass called for ALREADY EXISTS here, as `minorStep * scale >= 4.0f`
+    // below (plus the scale > 0.1 floor).  Extended, not duplicated — nothing to add.
     const float minorStep = grid_sizes[g_qeglobals.d_gridsize];
     const bool minorSameAsBack =
         colMinor[0] == colBack[0] && colMinor[1] == colBack[1] &&
@@ -368,6 +389,34 @@ static void DrawZIcon( const XYViewState *wnd )
 // (yaw for XY, pitch for XZ/YZ); drawn in all three views, in-plane axes chosen per view.
 // KISAK: out-of-plane depth uses ED_GRID_DEPTH(-131072) vs the binary's +131072 (cosmetic).
 // No null-guard, matching the binary - reached only post-init from OnPaint.
+//
+// ── KIWI-UX DEVIATION (shakeout B) — RED, FIXED SCREEN SIZE ────────────────────
+// USER DIRECTIVE (verbatim): "the 2D xy view gets unusable when zoomed out too far
+// and it's impossible to tell where the camera is.  Make the camera bigger, a fixed
+// size with zoom, and red."
+//
+// The binary draws this glyph in WORLD units (16 / 8 / 48), so at scale 0.02 the whole
+// marker is under two pixels across — invisible, which is precisely the complaint.
+// Every extent below is multiplied by `px` = 1/scale, i.e. it is specified in SCREEN
+// PIXELS and converted to world units for the ortho projection.  The SHAPE is
+// unchanged: the same 4-corner diamond, the same diagonal, the same 2-line FOV wedge
+// along the same facing angle.
+//
+// ── ROUND M: HALVED ─────────────────────────────────────────────────────────
+// USER DIRECTIVE, verbatim: "The red camera indicator is too big in the 2d view,
+// make it 50% smaller."  Shakeout B multiplied the binary's 16/8/48 by 1.5 to get
+// 24/12/64 screen px; this round halves those to 12/6/32.  The SCREEN-CONSTANT
+// property — the actual content of shakeout B's fix, and the reason the marker is
+// findable at all when zoomed out — is untouched: only the three literals move.
+// At 12x6 px the diamond is still four times the area it had at scale 0.02 under
+// the binary's world-unit sizing, so nothing regresses toward "impossible to tell
+// where the camera is".
+// The colour moves from the binary's flt_6DE160 blue to red; DrawZIcon keeps the blue,
+// so the two markers are now told apart at a glance instead of being the same colour.
+// Drawn ON TOP of the map: the XY paint calls DrawCameraIcon AFTER XY_DrawBrushes and
+// the turret highlights (xywnd.cpp:3960-3961), and the 2D views are depth-test-free
+// ortho, so emission order IS paint order.  Draw ORDER is not changed by this deviation
+// — the icon keeps its existing slot, just before DrawZIcon.
 static void DrawCameraIcon( const XYViewState *wnd )
 {
     auto &cam = *Ed_Camera();      // U-GLOBALS: was g_pParentWnd->m_pCamWnd->camera
@@ -383,30 +432,59 @@ static void DrawCameraIcon( const XYViewState *wnd )
     const float oh  = cam.origin[v5];                             // origin, in-plane horizontal
     const float ov  = cam.origin[v2];                            // origin, in-plane vertical
 
+    // KIWI-UX DEVIATION: world units per screen pixel.  wnd->scale is guarded non-zero
+    // by XY_SetupScene's iassert and clamped to [0.01, 32] by the wheel handler
+    // (xywnd.cpp:3102-3104), so this cannot divide by zero.
+    const float px    = 1.0f / wnd->scale;
+    const float bodyH = 12.0f * px;      // ROUND M: was 24 screen px (shakeout B), binary 16 world
+    const float bodyV =  6.0f * px;      // ROUND M: was 12,  binary 8
+    const float wedge = 32.0f * px;      // ROUND M: was 64,  binary 48
+
     GfxColor col;
-    static float s_blue[4] = { 0.0f, 0.0f, 1.0f, 1.0f };          // flt_6DE160 (camera-icon blue)
-    Byte4PackPixelColor( s_blue, &col );
+    static float s_camRed[4] = { 1.0f, 0.0f, 0.0f, 1.0f };        // KIWI-UX DEVIATION (was flt_6DE160 blue)
+    Byte4PackPixelColor( s_camRed, &col );
 
     GfxPointVertex verts[16];
     int n = 0;
-    // diamond body (corners: -16h / +8v / +16h / -8v) then the -16h→+16h diagonal
-    edGridLine( verts, n, v5, v2, d3, oh - 16, ov,     oh,      ov + 8, col.packed );
-    edGridLine( verts, n, v5, v2, d3, oh,      ov + 8, oh + 16, ov,     col.packed );
-    edGridLine( verts, n, v5, v2, d3, oh + 16, ov,     oh,      ov - 8, col.packed );
-    edGridLine( verts, n, v5, v2, d3, oh,      ov - 8, oh - 16, ov,     col.packed );
-    edGridLine( verts, n, v5, v2, d3, oh - 16, ov,     oh + 16, ov,     col.packed );
+    // diamond body (corners: -bodyH / +bodyV / +bodyH / -bodyV) then the -h→+h diagonal
+    edGridLine( verts, n, v5, v2, d3, oh - bodyH, ov,         oh,         ov + bodyV, col.packed );
+    edGridLine( verts, n, v5, v2, d3, oh,         ov + bodyV, oh + bodyH, ov,         col.packed );
+    edGridLine( verts, n, v5, v2, d3, oh + bodyH, ov,         oh,         ov - bodyV, col.packed );
+    edGridLine( verts, n, v5, v2, d3, oh,         ov - bodyV, oh - bodyH, ov,         col.packed );
+    edGridLine( verts, n, v5, v2, d3, oh - bodyH, ov,         oh + bodyH, ov,         col.packed );
     // FOV cone: two lines from the origin along the facing angle (±)
-    edGridLine( verts, n, v5, v2, d3, oh + c * 48.0f, ov + s * 48.0f, oh, ov, col.packed );
-    edGridLine( verts, n, v5, v2, d3, oh + s * 48.0f, ov - c * 48.0f, oh, ov, col.packed );
-    R_AddCmd_Line3D( (short)( n / 2 ), 1, verts );
+    edGridLine( verts, n, v5, v2, d3, oh + c * wedge, ov + s * wedge, oh, ov, col.packed );
+    edGridLine( verts, n, v5, v2, d3, oh + s * wedge, ov - c * wedge, oh, ov, col.packed );
+
+    // KIWI-UX DEVIATION: width 2 (the binary passes 1) — a one-pixel red wireframe was
+    // still easy to lose against a dense wireframe map.  Same call, same vert layout.
+    R_AddCmd_Line3D( (short)( n / 2 ), 2, verts );
 }
 
 // XY_DrawBlockGrid - CXYWnd::XY_DrawBlockGrid 0x4690f0.  View->Show->Blocks (d_xyShowFlags bit
 // 0x10 SET = blocks HIDDEN): the QE4 1024-unit block subdivision (colour slot 7) plus a
 // "bx,by" index label at each block centre.  Labels use +131072 depth (matches the binary);
 // the lines go through edGridLine's -131072 (the cosmetic depth-sign divergence).
+//
+// ── KIWI-UX DEVIATION (shakeout B) — ZOOM-BASED SUPPRESSION ───────────────────
+// USER DIRECTIVE (verbatim): "Also try to cleanup the clutter when zoomed out
+// (deviate from original in this regard)".  The binary draws every block line and a
+// "bx,by" label at every block CENTRE regardless of zoom, so once a 1024-unit block is
+// a few pixels wide the whole view is a solid mat of overlapping blue text with the map
+// somewhere underneath.  Two thresholds, both expressed in SCREEN PIXELS PER BLOCK
+// (= 1024 * scale), both of which only ever REMOVE things at far zoom:
+//     labels  need >= 48 px per block   (scale >= 0.0469)
+//     lines   need >= 12 px per block   (scale >= 0.0117)
+// At the classic zoom levels nothing changes: even at scale 0.25 a block is 256 px, so
+// the first threshold a user meets going out is the label cut at ~21x zoom-out.  The
+// existing View->Show->Blocks toggle (d_xyShowFlags 0x10) is untouched and still wins.
 void XY_DrawBlockGrid(const XYViewState *wnd)
 {
+    // KIWI-UX DEVIATION: the whole block grid is dropped when it is pure noise.
+    const float blockPx = 1024.0f * wnd->scale;
+    if ( blockPx < 12.0f )
+        return;
+
     const int nDim1 = (wnd->viewType == ED_VIEW_YZ);     // horizontal world axis (v54)
     const int nDim2 = (wnd->viewType != ED_VIEW_XY) + 1; // vertical world axis   (v7)
     const int nDim3 = 3 - nDim2 - nDim1;                 // depth (out-of-screen)  (v8)
@@ -457,6 +535,13 @@ void XY_DrawBlockGrid(const XYViewState *wnd)
     // the subtraction must stay in double.
     Font_s *font = (Font_s *)g_qeglobals.d_font_list;
     if (!font)
+        return;
+
+    // KIWI-UX DEVIATION (see the header note): the "bx,by" labels are the worst of the
+    // zoomed-out clutter — one per block, ~30 px wide whatever the zoom.  Below 48 px
+    // per block they overlap each other and everything under them, so drop them and
+    // keep the lines.
+    if ( blockPx < 48.0f )
         return;
 
     const float inv   = 1.0f / wnd->scale;
@@ -1479,6 +1564,15 @@ static void Ed_EnsureCurrentMaterial()
     SetMaterial( "caulk", (patchMesh_material *)cur );
 }
 
+// KIWI-UX (RADIANT_UX_DESIGN §23, Phase 4): public forwarder for the static above,
+// so region extrusion (kiwi_extrude.cpp) seeds a new brush's material through the
+// SAME lazy path the ported creator Ed_NewBrushDrag uses instead of re-deriving
+// it.  Pure forwarder — no behaviour change, and the static keeps its file scope.
+void Ed_EnsureCurrentMaterial_Kiwi()
+{
+    Ed_EnsureCurrentMaterial();
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Ed_NewBrushDrag - XYWnd::NewBrushDrag 0x467fa0, the brush-creation path.  Called from
 // XY_MouseMoved while a plain-LMB drag is in progress and nothing was selected at press
@@ -2118,6 +2212,70 @@ static bool Ed_ClipMouseMoved( xywndState_t *wnd, int x, int y )
     return false;   // hover doesn't consume the move; the normal XY_MouseMoved still runs
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// KIWI-UX (shakeout G) FORWARDER — the CLIP FACE's material synthesis, hoisted
+// out of Ed_ProduceSplitLists BYTE FOR BYTE and called from there.
+//
+// WHY IT EXISTS.  The modern Cut (C) and Face Split (Ctrl+R) verbs
+// (kiwi_split.cpp) split a brush with the SAME ported core the clipper uses,
+// Brush_SplitBrushByFace (brush.cpp 0x471960), which takes a TEMPLATE face_t and
+// Face_Alloc's a copy of it onto each half.  That template's `mtldef[0..2]` is
+// what the two new cut faces are textured with, and a zeroed one would hand the
+// halves an unrealised MaterialDef.  The synthesis is a CoD divergence with three
+// channels and three different texture scales — exactly the kind of thing that
+// must not exist twice.
+//
+// NOTHING IS CHANGED, only moved: the decal classification, the three
+// SetMaterial calls and the three size writes are the original statements in the
+// original order.  The PLANEPTS stay at the call site, because those are the
+// clipper's own view-depth rule and have nothing to do with the material.
+void Ed_BuildClipFaceMaterial_Kiwi( face_t *out, const brush_t *src )
+{
+    if ( !out || !src )
+        return;
+
+    // Source material classification: nodraw_decal if ANY source face is a decal, else
+    // caulk. (The IDB realizes each face's MaterialDef and stops on the first decal.)
+    bool anyDecal = false;
+    const int layer = g_qeglobals.current_edit_layer;
+    for ( int f = 0; f < src->faceCount; ++f )
+    {
+        MaterialDef *md = &src->faces[f].mtldef[layer];
+        const char *nm = ( md->lyrMtl ) ? (const char *)md->lyrMtl
+                                        : ( md->radMtl ? md->radMtl->name : nullptr );
+        if ( nm && !_stricmp( nm, "nodraw_decal" ) ) { anyDecal = true; break; }
+    }
+    const char *clipMtl = anyDecal ? "nodraw_decal" : "caulk";
+
+    // Channel 0 (colormap) at the current layer; scale = tex dims * 0.25.
+    SetMaterial( clipMtl, (patchMesh_material *)&out->mtldef[0] );
+    {
+        qtexture_s *t = MaterialDef_GetLayeredMaterial( &out->mtldef[0] );
+        int w = t ? t->width : 512, h = t ? t->height : 512;
+        int l0 = LayerMat::GetCurrentLayer( &out->mtldef[0] );
+        out->mtldef[0].mat_texDef.size[l0 * 7 + 0] = (float)w * 0.25f;
+        out->mtldef[0].mat_texDef.size[l0 * 7 + 1] = (float)h * 0.25f;
+    }
+    // Channel 1 (lightmap_gray); scale = tex dims * 16.
+    SetMaterial( "lightmap_gray", (patchMesh_material *)&out->mtldef[1] );
+    {
+        qtexture_s *t = MaterialDef_GetLayeredMaterial( &out->mtldef[1] );
+        int w = t ? t->width : 512, h = t ? t->height : 512;
+        int l1 = LayerMat::GetCurrentLayer( &out->mtldef[1] );
+        out->mtldef[1].mat_texDef.size[l1 * 7 + 0] = (float)w * 16.0f;
+        out->mtldef[1].mat_texDef.size[l1 * 7 + 1] = (float)h * 16.0f;
+    }
+    // Channel 2 (smoothing_hard); scale = tex dims * 0.25.
+    SetMaterial( "smoothing_hard", (patchMesh_material *)&out->mtldef[2] );
+    {
+        qtexture_s *t = MaterialDef_GetLayeredMaterial( &out->mtldef[2] );
+        int w = t ? t->width : 512, h = t ? t->height : 512;
+        int l2 = LayerMat::GetCurrentLayer( &out->mtldef[2] );
+        out->mtldef[2].mat_texDef.size[l2 * 7 + 0] = (float)w * 0.25f;
+        out->mtldef[2].mat_texDef.size[l2 * 7 + 1] = (float)h * 0.25f;
+    }
+}
+
 // CXYWnd::ProduceSplitLists (IDB 0x464040) -- rebuild g_brFrontSplits / g_brBackSplits
 // by splitting every selected brush along the clip plane (through g_Clip1/2/3). First
 // de-selects clip-incompatible brushes (patches / physics primitives / fixed-size
@@ -2180,46 +2338,12 @@ void Ed_ProduceSplitLists()
         // degenerate-lyrMtl path (g_radiantFirstLightRendererReady==false).
         face_t clipFace{};
 
-        // Source material classification: nodraw_decal if ANY source face is a decal, else
-        // caulk. (The IDB realizes each face's MaterialDef and stops on the first decal.)
-        bool anyDecal = false;
-        const int layer = g_qeglobals.current_edit_layer;
-        for ( int f = 0; f < i->def->faceCount; ++f )
-        {
-            MaterialDef *md = &i->def->faces[f].mtldef[layer];
-            const char *nm = ( md->lyrMtl ) ? (const char *)md->lyrMtl
-                                            : ( md->radMtl ? md->radMtl->name : nullptr );
-            if ( nm && !_stricmp( nm, "nodraw_decal" ) ) { anyDecal = true; break; }
-        }
-        const char *clipMtl = anyDecal ? "nodraw_decal" : "caulk";
-
-        // Channel 0 (colormap) at the current layer; scale = tex dims * 0.25.
-        SetMaterial( clipMtl, (patchMesh_material *)&clipFace.mtldef[0] );
-        {
-            qtexture_s *t = MaterialDef_GetLayeredMaterial( &clipFace.mtldef[0] );
-            int w = t ? t->width : 512, h = t ? t->height : 512;
-            int l0 = LayerMat::GetCurrentLayer( &clipFace.mtldef[0] );
-            clipFace.mtldef[0].mat_texDef.size[l0 * 7 + 0] = (float)w * 0.25f;
-            clipFace.mtldef[0].mat_texDef.size[l0 * 7 + 1] = (float)h * 0.25f;
-        }
-        // Channel 1 (lightmap_gray); scale = tex dims * 16.
-        SetMaterial( "lightmap_gray", (patchMesh_material *)&clipFace.mtldef[1] );
-        {
-            qtexture_s *t = MaterialDef_GetLayeredMaterial( &clipFace.mtldef[1] );
-            int w = t ? t->width : 512, h = t ? t->height : 512;
-            int l1 = LayerMat::GetCurrentLayer( &clipFace.mtldef[1] );
-            clipFace.mtldef[1].mat_texDef.size[l1 * 7 + 0] = (float)w * 16.0f;
-            clipFace.mtldef[1].mat_texDef.size[l1 * 7 + 1] = (float)h * 16.0f;
-        }
-        // Channel 2 (smoothing_hard); scale = tex dims * 0.25.
-        SetMaterial( "smoothing_hard", (patchMesh_material *)&clipFace.mtldef[2] );
-        {
-            qtexture_s *t = MaterialDef_GetLayeredMaterial( &clipFace.mtldef[2] );
-            int w = t ? t->width : 512, h = t ? t->height : 512;
-            int l2 = LayerMat::GetCurrentLayer( &clipFace.mtldef[2] );
-            clipFace.mtldef[2].mat_texDef.size[l2 * 7 + 0] = (float)w * 0.25f;
-            clipFace.mtldef[2].mat_texDef.size[l2 * 7 + 1] = (float)h * 0.25f;
-        }
+        // KIWI-UX (shakeout G): the material half of this block moved VERBATIM into
+        // Ed_BuildClipFaceMaterial_Kiwi (just below Ed_SplitClip), so the modern
+        // Cut / Face-Split verbs (kiwi_split.cpp) build the SAME caulk /
+        // nodraw_decal clip face this clipper does instead of a second copy of it.
+        // Only the planepts stay here: they are the CLIPPER's own view-depth logic.
+        Ed_BuildClipFaceMaterial_Kiwi( &clipFace, i->def );
 
         // Plane points: clip1, clip2, and clip3 (or a view-depth synthetic third point).
         clipFace.planepts[0][0] = g_Clip1.m_ptClip[0];

@@ -19,6 +19,9 @@
 #include <gfx_d3d/r_rendercmds.h>   // R_BeginFrame/EndFrame, clear/material-color, MaterialTechniqueType
 #include <gfx_d3d/r_state.h>        // CONST_SRC_CODE_SUN_POSITION/DIFFUSE/SPECULAR
 #include "radiant_rtt.h"            // P5 RTT: RTT_Begin/RTT_End, RTT_CAMERA
+#include "kiwi_camera.h"            // KIWI-UX (ROUND M): KiwiCam_Ortho / KiwiCam_OrthoHalfHeight
+#include "kiwi_pick.h"              // KIWI-UX (ROUND AQ, ITEM 3): ray_t / Pick_RayFromImagePos
+#include "kiwi_material.h"          // KIWI-UX (ROUND Y): kiwiMatDiag_t (the KiwiMatInfo readout)
 #include <universal/com_math.h>     // AngleVectors
 #include <math.h>
 #include <string.h>
@@ -157,6 +160,29 @@ camera_s *Ed_Camera()
 // declaration used to supply this).
 void CamWnd_SetupClipPlanes( const float *orient );
 
+// KIWI-UX (ROUND M): half-depth of the ORTHOGRAPHIC view volume, measured either
+// side of the eye along the view axis.  131072 is the engine's own world bound
+// (Brush_BuildWindings seeds its AABB at ±131072, brush.cpp:1459), so the slab
+// spans everything that can exist in front of OR behind an ortho eye.
+static const float KCAM_ORTHO_DEPTH = 131072.0f;
+
+// KIWI-UX (ROUND M): how far BEHIND the eye plane an orthographic PICK ray starts.
+//
+// Why it is needed at all: the ortho view volume is symmetric about the eye, so
+// geometry behind the eye plane is DRAWN — unlike perspective, where it is simply
+// gone.  A pick ray that started at the eye plane would therefore miss things the
+// user can plainly see (the near wall of a room you have zoomed inside), and worse,
+// the screen-space vertex/edge pass (kiwi_pick.cpp ProjectRaw, which has no
+// behind-the-eye rejection in ortho) WOULD find them — two picks disagreeing.
+//
+// Why 16384 and not KCAM_ORTHO_DEPTH: the lead is pure numerical cost.  Test_Ray
+// seeds its hit distance at 262144 (select.cpp:757) so anything up to that is
+// legal, but the returned point is `start + dir*dist`, and float32 resolution at
+// 131072 is ~0.0078 units where at 16384 it is ~0.00098.  16384 units is 1365 feet
+// of lead — past any room the near-geometry case is about — for an eighth of the
+// error.
+static const float KCAM_ORTHO_PICK_LEAD = 16384.0f;
+
 // 0x403470  Cam_BuildMatrix — view basis from the angles.  AngleVectors wants pitch NEGATED;
 // forward/right are the yaw-plane movement basis (the binary's AngleVectors_YawPlane).
 void CamWnd_BuildMatrix()
@@ -207,6 +233,73 @@ bool CamWnd_SetupScene()
     proj.m[2][2] = 0.99951172f;
     proj.m[2][3] = 1.0f;
     proj.m[3][2] = 0.99951171875f * -zNear;
+
+    // ═════════════════════════════════════════════════════════════════════════
+    //  KIWI-UX (ROUND M) — ORTHOGRAPHIC PROJECTION.  The ONE ported-code change
+    //  the ortho toggle needs, and it replaces exactly the four matrix stores
+    //  above; nothing else in Cam_Draw is touched.
+    // ═════════════════════════════════════════════════════════════════════════
+    // USER DIRECTIVE: "while at the perfect axis align plane angle, it doesn't
+    // show a box as just a square ... We need an orthographic and perspective
+    // camera toggle."
+    //
+    // WHY THIS IS SAFE, verified before it was written rather than assumed: the
+    // 2D views already drive an ORTHOGRAPHIC GfxMatrix through this very entry
+    // point (xywnd.cpp XY_SetupScene -> XY_SetupProjectionMtx -> the same
+    // R_Ed_ProjectionWouldBeValid / R_Ed_SetSceneParms pair), so every consumer
+    // downstream — R_SetupViewProjectionMatrices, the inverse-VP,
+    // R_DeriveNearPlaneConstantsForView — already handles a w-free projection.
+    //
+    // THE MATRIX.  The row-vector convention is read straight off the
+    // perspective build above: m[2][3] = 1 is what puts view-space Z into clip w,
+    // so component 2 is FORWARD depth and 0/1 are horizontal/vertical.  Ortho is
+    // therefore that same matrix with the w row zeroed and m[3][3] = 1:
+    //     m[0][0] = C / halfWidth        (halfWidth = halfHeight * aspect)
+    //     m[1][1] = C / halfHeight
+    //     m[2][2] = C / (zFar - zNear)
+    //     m[3][2] = C * -zNear / (zFar - zNear)
+    //     m[3][3] = 1
+    // with C the SAME 0.99951171875 guard-band constant the perspective path
+    // carries, so the two projections frame identically rather than differing by
+    // a 2047/2048 hair at the toggle.
+    //
+    // halfHeight is KiwiCam_OrthoHalfHeight() == distance-to-pivot * tanY, so the
+    // toggle is scale-continuous AT THE PIVOT and the wheel keeps zooming (it
+    // moves s_dist; see kiwi_camera.h).  The aspect uses tanX/tanY, which is
+    // width/height by construction two lines up.
+    //
+    // DEPTH is SYMMETRIC about the eye (zNear = -KCAM_ORTHO_DEPTH, zFar =
+    // +KCAM_ORTHO_DEPTH).  In an orthographic view the eye POINT is arbitrary
+    // along the view axis — there is no "behind the camera" the way a frustum
+    // has one — so a one-sided near plane would clip away geometry the user is
+    // looking straight at after any dolly.  262144 units of LINEAR depth over a
+    // 24-bit buffer is ~1/64 unit per step, far finer than the perspective
+    // path's hyperbolic distribution ever manages at range.
+    //
+    // The inverse-VP guard below still runs and still passes by construction: an
+    // ortho proj has m[0..2][3] = 0 and m[3][3] = 1, the viewer matrix is affine,
+    // so the product's last column is (0,0,0,1) and so is its inverse's — which
+    // is exactly the (|m03|,|m13|) << m33 relation r_state_utils.cpp:21-22
+    // asserts on.
+    //
+    // ACCEPTED LIMITATION, logged in RADIANT_KNOWN_ISSUES: CamWnd_Fov's cubic
+    // cull planes (used by the fixedsize MODEL/PREFAB pass only — the world brush
+    // pass has CullCubic elided) are still the PERSPECTIVE cone, so a model very
+    // close to the eye and far off-axis can be culled while an ortho view would
+    // show it.  Brush geometry is unaffected.
+    const bool kiwiOrtho = KiwiCam_Ortho();
+    if ( kiwiOrtho )
+    {
+        const float halfH = KiwiCam_OrthoHalfHeight();
+        const float halfW = halfH * ( tanX / tanY );          // == halfH * w/h
+        const float depth = KCAM_ORTHO_DEPTH;                  // zFar = +depth, zNear = -depth
+        memset( &proj, 0, sizeof( proj ) );
+        proj.m[0][0] = 0.99951171875f / halfW;
+        proj.m[1][1] = 0.99951171875f / halfH;
+        proj.m[2][2] = 0.99951171875f / ( 2.0f * depth );
+        proj.m[3][2] = 0.99951171875f * 0.5f;                  // -zNear/(zFar-zNear) = 0.5
+        proj.m[3][3] = 1.0f;
+    }
 
     if ( !R_Ed_ProjectionWouldBeValid( camera.origin, (const float (*)[3])axis, &proj ) )
     {
@@ -459,6 +552,486 @@ static bool Cam_EditorMaterialColor( const char *name, float out[4] )
     return false;
 }
 
+// ═════════════════════════════════════════════════════════════════════════════
+//  KIWI-UX (ROUND M) — DOES THIS MATERIAL WRITE DEPTH AT THIS TECHNIQUE?
+// ═════════════════════════════════════════════════════════════════════════════
+// USER REPORT: "There is a bug somewhere where textures are drawing over other
+// boxes (wrong z order) after cutting.  See if you can find and fix that, could
+// be related to how it was caulk after cutting."
+//
+// THE DIAGNOSIS, read out of the shipped assets rather than guessed:
+//   1. A Cut/Split gives its two new faces the CAULK material — the clipper's own
+//      synthesis, hoisted into Ed_BuildClipFaceMaterial_Kiwi (xywnd.cpp:2239
+//      picks "caulk" unless a source face is nodraw_decal).
+//   2. The world fill below routes ANY tool-class material — and
+//      Cam_EditorMaterialColor's table (this file, "caulk" row) classes caulk as
+//      one — down the flat-colour arm, which DRAWS IT WITH g_qeglobals.d_white
+//      instead of its own material.  d_white is Material_RegisterHandle
+//      ("white_tools") (gfxwrapper.cpp:77).
+//   3. main/materials/white_tools has refStateBits[0] = 0x08128965: srcBlend
+//      SrcAlpha(5), dstBlend InvSrcAlpha(6), blendOp Add(0x100) — an ALPHA-BLENDED
+//      material — and refStateBits[1] = 0x0000000c, i.e. GFXS1_DEPTHWRITE CLEAR.
+//      main/statemaps/default.sm agrees and explains why:
+//          depthWrite { mtlBlendOp == Disable: Enable;  default: Disable; }
+//   4. main/materials/caulk has refStateBits[0] = 0x08128812 (blendOp Disable —
+//      opaque) and refStateBits[1] = 0x0000000d, i.e. GFXS1_DEPTHWRITE SET.
+// So substituting white_tools for caulk silently turns a SOLID, depth-writing
+// world surface into a blended one that leaves the depth buffer untouched.  It
+// still looks opaque (the vertex colour is 0xFFFFFFFF), but nothing behind it is
+// ever occluded — so a box further away renders straight through it.  That is
+// exactly the report, and it appears "after cutting" because a cut is how an
+// ordinary brush acquires caulk faces in the first place.
+//
+// The predicate below is the general form of "would the substitution cost this
+// face its depth write".  It reads the SAME quantity the backend does —
+// stateBitsTable[stateBitsEntry[techType]] is what RB_SetTessTechnique ->
+// RB_BeginSurface -> Material_GetTechnique bottoms out on — using the identical
+// access pattern rb_backend.cpp:1291-1295 already uses for its line probe.
+static bool Cam_MaterialWritesDepth( Material *handle, MaterialTechniqueType tech )
+{
+    if ( !handle )
+        return false;
+    const Material *m = Material_FromHandle( handle );   // r_material.cpp:866 (identity + asserts)
+    if ( !m || !m->stateBitsTable )
+        return false;
+    if ( (int)tech < 0 || (int)tech >= 34 )              // stateBitsEntry[34] (r_material.h:463)
+        return false;
+    const uint8_t e = m->stateBitsEntry[tech];
+    if ( e == 0xFF )                                     // technique absent for this material
+        return false;
+    return ( m->stateBitsTable[e].loadBits[1] & GFXS1_DEPTHWRITE ) != 0;
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  KIWI-UX (ROUND O) — THE MISSING-MATERIAL CHECKERBOARD DRAWS WITH NO DEPTH
+//                      AT ALL, AND THAT IS BOTH REPORTED BUGS.
+// ═════════════════════════════════════════════════════════════════════════════
+// USER REPORTS, verbatim:
+//   (1) "texture drawing is still buggy. (z order).  even without operations, I
+//       assume this is because it was copied."   [checkerboard boxes drawing
+//       through each other]
+//   (2) "grid drawing still looks bad.  It needs to not draw over my shapes."
+//
+// THEY ARE ONE BUG.  Read out of the shipped assets, byte by byte:
+//
+//   1. A brush face names a material; Texture_GetHandle -> Register_WorldMaterial
+//      (texwnd.cpp:239) registers "wc/<name>".  Material_Load strips the "wc/"
+//      prefix (r_material_load_obj.cpp:5988-5993, g_materialTypeInfo[4]) and opens
+//      "materials/<name>".  When that file does not exist, Material_Register_LoadObj
+//      falls to Material_MakeDefault (r_material.cpp:568-569), which returns
+//      Material_Duplicate( rgp.defaultMaterial, name ) — a per-name CLONE of
+//      $default that SHARES its techniqueSet pointer (Material_Duplicate deep-copies
+//      only the texture/constant/stateBits tables, r_material_load_obj.cpp:4670-4688;
+//      techniqueSet comes across in the flat 0x50-byte struct copy at :4671).
+//      That clone's colorMap is main/images/default.iwi — 16x16, the checkerboard
+//      in the screenshots.
+//
+//   2. main/materials/$default, header bytes:
+//         +0x34 techSetNameOffset  -> "2d"
+//         +0x28 refStateBits[0]    =  0x08124812  (blendOp Disable -> OPAQUE,
+//                                                  cull NONE, colorWrite RGB)
+//         +0x2C refStateBits[1]    =  0x00000002  = GFXS1_DEPTHTEST_DISABLE,
+//                                                  GFXS1_DEPTHWRITE *CLEAR*
+//      (Compare main/materials/$default3d, byte-for-byte the same material with
+//       techSet "default" and refStateBits[1] = 0x0000000d = DEPTHWRITE SET +
+//       DEPTHTEST LESSEQUAL.  Same refImage "default", same refStateBits[0].)
+//
+//   3. main/techsets/2d.techset carries exactly ONE technique — "unlit":
+//      vertcol_simple2d — and main/techniques/vertcol_simple2d.tech declares
+//      stateMap "default2d".  main/statemaps/default2d.sm is unconditional:
+//          depthTest  { default: Disable; }
+//          depthWrite { default: Disable; }
+//      Material_BuildStateBitsTable (r_material_load_obj.cpp:5748) runs every
+//      refStateBit through that state map, so the per-technique loadBits the backend
+//      binds (RB_SetTessTechnique <- RB_DrawTriangles_Internal, rb_backend.cpp:1423)
+//      have NO depth test and NO depth write.
+//
+// PIXEL-LEVEL CONSEQUENCE.  A face whose material is missing neither occludes nor
+// is occluded.  Every such face paints over whatever colour is already in the
+// target, in SUBMISSION ORDER, and leaves the depth buffer exactly as it found it:
+//   * two checkerboard boxes render "through" each other, the later one winning
+//     wholesale — and a COPY is appended to active_brushes after its original, so
+//     the copy always wins.  That is report (1), including why it needs no
+//     "operation" to appear.
+//   * the world writes no depth at all, so KiwiGrid_Draw — which round O left AFTER
+//     all world/entity geometry and BEFORE the selected-outline depth clear — found
+//     an empty depth buffer.  $line is depthTest LESSEQUAL / depthWrite ON
+//     (main/materials/$line refStateBits[1] = 0x0d, techSet "tools" ->
+//     vertcol_shaded_tools -> statemap "default", whose depthWrite rule
+//     "mtlBlendOp == Disable: Enable" fires on $line's blendOp Disable), so every
+//     grid segment passed and painted over the boxes.  That is report (2).
+//
+// ROUND S AMENDS THE LAST SENTENCE.  Round O concluded "the grid is innocent and its
+// hook order is right".  The first half stands; the second does not.  The fix below
+// only reaches faces whose material resolves to a $default CLONE and only when the
+// asset set ships $default3d — so the grid's visibility was still a function of the
+// world's material state.  ROUND S moves KiwiGrid_Draw to run BEFORE the world, where
+// painter's order makes it independent of that state.  The full argument, including
+// why the depth WRITE is still harmless and why $line_nodepth is not the answer, is
+// on the hook itself (search "ROUND S" in CamWnd_Draw).
+//
+// ROUND M IS NOT AT FAULT AND IS NOT CHANGED.  Its diagnosis (caulk/nodraw were
+// losing their depth write to the d_white substitution) and its fix both stand;
+// they simply only covered the TOOL-material arm.  This is the WORLD arm, and a
+// different mechanism: the material never loaded in the first place.
+//
+// THE FIX is the smallest one the shipped asset set allows: draw those faces with
+// $default3d — the same checkerboard image, the same blend state, the 3D techset —
+// instead of $default.  No render-state override exists on the editor command path
+// (state comes only from material x technique), so the substitution IS the fix.
+//
+// DETECTION is by techniqueSet IDENTITY, not by Material_IsDefault: IsDefault
+// (r_material.cpp:481) compares textureTable POINTERS, and Material_Duplicate
+// allocates a fresh textureTable for every clone, so it answers false for exactly
+// the materials we need to catch.  The techniqueSet pointer, by contrast, is shared
+// by construction.  A world material that really loaded can never collide with it:
+// it registers through the "wc/" prefix and so resolves techset "wc_2d", a
+// different MaterialTechniqueSet object than the built-in $default's "2d".
+// The depth-write test is ANDed in as a second gate so that an asset set whose
+// $default does write depth leaves this code a no-op — and, more importantly, so
+// that a legitimately alpha-blended world material (which correctly does not write
+// depth) can never be dragged in by a future edit to the first test.
+//
+// ═════════════════════════════════════════════════════════════════════════════
+//  KIWI-UX (ROUND X, ITEM 6) — THE POINTER GATE WAS THE BUG, NOT THE FIX.
+// ═════════════════════════════════════════════════════════════════════════════
+// USER REPORT, verbatim: "The Z ordering of surfaces after doing an extrusion is
+// still wrong. Need to fix this. This is a really big bug." + "The Z order is only
+// messed up when looking from 1 direction. (see 2 pics)"
+//
+// Direction-dependent occlusion is the signature of a face drawn with NO DEPTH
+// WRITE — painter's order decides, so one camera side happens to agree with depth
+// and the other does not.  Round O found that mechanism and fixed HALF of it.
+//
+// The paragraph directly above is factually correct and is exactly what breaks:
+// "a world material that really loaded ... resolves techset wc_2d, a DIFFERENT
+// MaterialTechniqueSet object".  That sentence was written as a safety argument.
+// It is also a description of the hole, because the editor's own current-material
+// template is `$default` — Radiant_SeedCurrentTexdefs (mainfrm.cpp:701) seeds
+// `SetMaterial("$default", &rts[0].mtl)` at boot, and nothing changes it until the
+// user clicks a thumbnail.  That name registers through Register_WorldMaterial
+// (texwnd.cpp:239-242) as "wc/$default", and materials/$default EXISTS, so this is
+// a SUCCESSFUL LOAD, not a Material_MakeDefault clone.  Material_Load then builds
+// the techset name with the type prefix — Com_sprintf(techniqueSetName, "%s%s",
+// techniqueSetVertDeclPrefix, ...) at r_material_load_obj.cpp:5514, prefix "wc_"
+// from g_materialTypeInfo[4] (r_material_load_obj.cpp:5266-5273) — so the techset
+// is "wc_2d" while rgp.defaultMaterial's (registered unprefixed by name "$default",
+// r_material.cpp:219) is "2d".  Two different interned objects, the pointer test
+// returns false on the line above the depth test, and the depth test NEVER RUNS.
+//
+// The face keeps $default's real state: techset 2d -> vertcol_simple2d -> statemap
+// default2d, depthTest Disable + depthWrite Disable (the byte-level decode is in
+// the block above).  So EVERY face carrying the editor's default material draws
+// with no depth at all, and the newest brush wins in submission order.  Extrusion
+// makes it obvious because BuildPieceDef stamps the template onto a fresh brush and
+// LandDef tail-inserts it (kiwi_extrude.cpp:275-338, brush.cpp:7641 memcpy from
+// random_texture_stuff[0].mtl, Brush_AddToList2 brush.cpp:921-927) — but it is not
+// an extrusion bug and the user's own "even without operations" report from round O
+// was the same defect seen from the other end.
+//
+// THE FIX: compare the techset by NAME with the material-type prefix stripped, so
+// "wc_2d" and "2d" are recognised as the same techset — which they are; the prefix
+// only selects a vertex-declaration variant.  The pointer test is kept as the fast
+// path (it is still exactly right for the clone case round O was built for), and
+// the depth-write gate is UNCHANGED and still ANDed in, so the widened first test
+// cannot drag in a material that legitimately writes depth.  What it now also
+// catches is the one thing round O's comment promised could never happen.
+//
+// NOT DONE, deliberately: reseeding Radiant_SeedCurrentTexdefs with "$default3d"
+// (what the engine's own BSP loader does, r_material_load_obj.cpp:4704).  That
+// would change what gets WRITTEN INTO .map files, and map serialization is on the
+// IDA-faithful side of the line.  Fixing the draw gate fixes every existing map
+// too, which reseeding would not.
+//
+// ═════════════════════════════════════════════════════════════════════════════
+//  KIWI-UX (ROUND Y, ITEM 1) — THE FACE MATERIAL WAS NEVER `$default`.
+// ═════════════════════════════════════════════════════════════════════════════
+// USER REPORT, verbatim: "z-order bug is still here.  All I did was split a cube
+// in half.  All extrusions get this on top drawing bug too. (Maybe material
+// related??)" — after building round X's widened gate.
+//
+// ROUND X'S PREMISE WAS FALSE.  Its comment says the template "is `$default` …
+// and nothing changes it until the user clicks a thumbnail".  THE BOOT CHANGES
+// IT.  Radiant_ApplyStartupTextureScale (mainfrm.cpp:763-773, the OnCreate tail)
+// runs Radiant_CheckTextureScale, whose tail is Texture_ResetPosition
+// (mainfrm.cpp:2914).  Texture_ResetPosition ends in
+// TexWnd_ApplyMaterialAtIndex( TexWnd_HitTest( 9, 9 ) ) (texwnd.cpp:2028-2033) —
+// i.e. it makes THE FIRST VISIBLE THUMBNAIL the current brush texture, and says
+// so in its own header comment (texwnd.cpp:2006-2008).  The browser lists
+// materials alphabetically, so in this asset set the editor's template at boot is
+// the first material in main/materials: **aa_default**.
+//
+// THE ASSET DECODE (main/materials/aa_default, MaterialRaw, r_material.h:589):
+//     +0x00 nameOffset        -> "aa_default"
+//     +0x09 sortKey           =  0x2B (43)   — the TRANSLUCENT/tool sort class,
+//                                              byte-identical to clip / trigger /
+//                                              origin / white_tools
+//     +0x28 refStateBits[0]   =  0x08128965  — srcBlend SrcAlpha, dstBlend
+//                                              InvSrcAlpha, blendOp ADD, cull BACK
+//     +0x2C refStateBits[1]   =  0x0000000C  — GFXS1_DEPTHTEST_LESSEQUAL,
+//                                              GFXS1_DEPTHWRITE **CLEAR**
+//     +0x34 techSetNameOffset -> "tools"     — NOT "2d"
+// main/techsets/tools.techset maps "unlit" -> vertcol_shaded_tools, whose
+// main/techniques/vertcol_shaded_tools.tech declares stateMap "default", and
+// main/statemaps/default.sm reads
+//     depthWrite { mtlBlendOp == Disable: Enable;  default: Disable; }
+// aa_default's blendOp is ADD, so the bound state is depth TEST on, depth WRITE
+// OFF.  That is the exact direction-dependent signature: the brush drawn FIRST
+// stamps no depth, so the brush drawn SECOND passes the test wherever they
+// overlap and wins — which looks correct from the side where the newer brush is
+// genuinely in front, and wrong from the other.  A split makes two brushes and an
+// extrusion tail-inserts one, which is why both reproduce it every time.
+//
+// Round X's gate compared the techset BASE NAME against rgp.defaultMaterial's
+// ("2d").  "tools" != "2d", so aa_default sailed straight through it.
+//
+// THE PREDICATE MOVES ONTO THE RIGHT AXIS.  Enumerating techset names one report
+// at a time is the losing game the last three rounds played, so the gate is now:
+//
+//     the material's techset base name is an EDITOR/HUD techset ("2d" or
+//     "tools")  AND  the technique the camera binds does not write depth.
+//
+// Both halves are checked in the shipped assets, not assumed.  A census of all
+// 4355 materials in main/materials shows techsets "2d" (862) and "tools" (98) are
+// used by HUD art and editor tool materials ONLY; every world surface class lives
+// on l_sm_* / unlit* / effect* / sky / water / ambient_* / distortion_* techsets.
+// So the predicate cannot reach a legitimately-translucent WORLD material (glass,
+// foliage, water) — those keep their own material and their own blend state.
+//
+// WHY NOT THE SORT KEY.  "Opaque sort + no depth write" was the obvious general
+// axis and it does NOT hold: aa_default declares sortKey 43, i.e. it calls itself
+// translucent.  So does clip, so does trigger.  Sorting is a statement about the
+// GAME's draw order, and the editor camera has no sorted pass at all — it submits
+// brush faces in list order into one immediate stream.  What actually breaks the
+// editor is a face that does not write depth, and what makes that safe to fix is
+// knowing the material was never meant to be a world surface, which is what the
+// techset says.
+//
+// d_white IS EXCLUDED BY NAME OF POINTER.  white_tools is itself a "tools"
+// techset material with no depth write, and it is the editor's DELIBERATE
+// flat-colour handle for the see-through tool volumes (round M's arm, below in
+// Cam_Draw).  Substituting a checkerboard for it would turn every clip/trigger
+// volume into an opaque box.  One pointer test, at the top.
+//
+// NOT DONE, still: reseeding what gets written into .map files (D-X4 stands).
+// The boot-time template clobber is fixed SEPARATELY and at the source —
+// Radiant_ApplyStartupTextureScale now restores the seeded `$default`
+// (mainfrm.cpp) — so new geometry stops acquiring a tool material at all, while
+// this gate keeps every map that already has one drawing correctly.
+
+// The techset name with the vertex-declaration prefix removed.  The prefix table is
+// g_materialTypeInfo (r_material_load_obj.cpp:5266-5273): "", "m_", "mc_", "w_",
+// "wc_".  Tested longest-first so "mc_" is never eaten as "m_" + "c_...".
+static const char *Cam_TechSetBaseName( const MaterialTechniqueSet *ts )
+{
+    if ( !ts || !ts->name )
+        return nullptr;
+    static const char *const kPrefix[] = { "mc_", "wc_", "m_", "w_" };
+    for ( int i = 0; i < (int)( sizeof( kPrefix ) / sizeof( kPrefix[0] ) ); ++i )
+    {
+        const size_t n = strlen( kPrefix[i] );
+        if ( strncmp( ts->name, kPrefix[i], n ) == 0 )
+            return ts->name + n;
+    }
+    return ts->name;
+}
+
+// KIWI-UX (ROUND Y, ITEM 1): the EDITOR/HUD techset set.  Census of the shipped
+// main/materials (4355 files): "2d" and "tools" carry HUD art and editor tool
+// materials exclusively — no world surface class uses either.  $default lives on
+// "2d"; aa_default, white_tools, clip, trigger, origin, caulk, nodraw and $line
+// all live on "tools".  (Two of those — caulk and nodraw — DO write depth and are
+// therefore never substituted; the depth gate is what separates them.)
+// ── KIWI-UX (ROUND Y, ITEM 1): THE OPAQUE SORT CLASS, MEASURED ──────────────
+// The obvious reading of "opaque sorts before decal" is sortKey < SORTKEY_DECAL
+// (24, r_bsp_load_obj.cpp:2065).  THAT IS WRONG AND IT WAS CHECKED: a census of
+// main/materials puts the shipped WORLD DECALS at sortKeys 9..12 — 434 of them,
+// alpha-blended and correctly depth-write-free (ch_decal_mural, sk 12;
+// ch_cliff02_decal, sk 9; every *_dec / *_decal in the set) — so a `< 24` gate
+// would substitute a checkerboard for every decal in the game.
+//
+// The real opaque world sort is the single value 4.  The engine says so:
+// Material_FinishLoadingTexdef special-cases exactly
+// `material->info.sortKey == 4 && R_IsWorldMaterialType(materialType)`
+// (r_material_load_obj.cpp:5458), and the census agrees — 2131 of the non-editor
+// materials sit on sortKey 4 and they are the ordinary opaque world surfaces.
+// Below it are only sortKey 0 and 3 (52 FX/distortion/sky materials).
+//
+// Arm B therefore catches exactly 13 non-editor materials in this asset set
+// (particle_cloud, distortion_scale_zfeather, glow/grain overlays) — FX materials
+// that declare themselves opaque and blend anyway, none of which is a brush-face
+// material anyone applies from the texture browser.  That is an acceptable and
+// fully enumerated blast radius for a rule that generalises the fix beyond the
+// techset list.
+static const int CAM_SORTKEY_OPAQUE = 4;
+
+static bool Cam_TechSetIsEditorClass( const MaterialTechniqueSet *ts )
+{
+    const char *base = Cam_TechSetBaseName( ts );
+    if ( !base )
+        return false;
+    return strcmp( base, "2d" ) == 0 || strcmp( base, "tools" ) == 0;
+}
+
+// "Would drawing a WORLD BRUSH FACE with this material break depth ordering?"
+// (round O named it Cam_MaterialIsMissing when a missing material was the only
+// known cause; round Y's block above is why the name is now narrower than the
+// predicate).  Kept as one function because every caller — the world fill, the
+// surf cache, the substitute's own validation — asks exactly this question.
+static bool Cam_MaterialIsMissing( Material *handle )
+{
+    if ( !handle )
+        return false;
+    // KIWI-UX (ROUND Y, ITEM 1): the editor's OWN flat-colour handle is never
+    // substituted.  white_tools is a "tools" material with no depth write, and
+    // round M's tool arm picks it deliberately for the see-through volumes.
+    if ( handle == g_qeglobals.d_white )
+        return false;
+    const Material *m = Material_FromHandle( handle );
+    if ( !m )
+        return false;
+    // The FAST PATH round O built, still exactly right for a Material_MakeDefault
+    // clone (which shares rgp.defaultMaterial's techniqueSet POINTER).
+    const bool sameAsDefault = rgp.defaultMaterial
+                            && m->techniqueSet == rgp.defaultMaterial->techniqueSet;
+    // ARM A — an EDITOR/HUD techset.  Catches aa_default, $default and every
+    // other tool/browser material, and provably cannot reach a world surface.
+    // ARM B — the material DECLARES ITSELF FULLY OPAQUE.  A world material that
+    // says "opaque" and then does not write depth is broken by its own
+    // declaration, whatever techset it is on, so substituting is right on its own
+    // terms.  See CAM_SORTKEY_OPAQUE for why the threshold is 4 and not 24.
+    if ( !sameAsDefault
+      && !Cam_TechSetIsEditorClass( m->techniqueSet )
+      && m->info.sortKey > CAM_SORTKEY_OPAQUE )
+        return false;
+    return !Cam_MaterialWritesDepth( handle, TECHNIQUE_UNLIT );
+}
+
+// The 3D twin of $default, registered once through the same "wc/" world-material
+// path every brush face uses (Material_Load strips the prefix and picks the
+// "wc_default" techset, which maps "unlit" to the same textured_simple technique
+// the unprefixed "default" techset does).  Returns null — leaving the caller to
+// draw the broken material unchanged — if $default3d is itself absent, which the
+// same missing-material test detects.
+// ── KIWI-UX (ROUND Y, ITEM 1): A FALLBACK LADDER, NOT ONE NAME ──────────────
+// Round X's note warned that "$default3d must exist in the asset set or nothing
+// improves", and left the no-substitute case silently drawing the broken
+// material.  There is no render-state override on this path — state comes only
+// from material x technique (round O), and every technique in the "tools" techset
+// routes through the same statemap, so forcing the depth bit is not available
+// either.  What IS available is a second shipped material that is opaque and
+// depth-writing.  The ladder, in order:
+//   1. "$default3d" — the checkerboard twin of $default: same refImage "default",
+//      same refStateBits[0], refStateBits[1] = 0x0D (DEPTHWRITE | LESSEQUAL),
+//      techset "default".  Visually nearest to what the face already wore.
+//   2. "caulk"      — refStateBits[0] = 0x08128812 (blendOp Disable -> opaque),
+//      refStateBits[1] = 0x0D, techset "tools".  Ships in every CoD4 asset set by
+//      construction (the compiler requires it), so this rung is the guarantee that
+//      a world face ALWAYS ends up depth-writing.
+// Both are validated with the SAME predicate, so a rung that is itself broken is
+// skipped rather than trusted.
+static Material *Cam_MissingMaterialSubstitute()
+{
+    static bool      s_tried = false;
+    static Material *s_mtl   = nullptr;
+    if ( !s_tried )
+    {
+        s_tried = true;
+        static const char *const kLadder[] = { "wc/$default3d", "wc/caulk" };
+        for ( int i = 0; i < (int)( sizeof( kLadder ) / sizeof( kLadder[0] ) ); ++i )
+        {
+            Material *cand = Material_RegisterHandle( kLadder[i], 0 );
+            if ( cand && !Cam_MaterialIsMissing( cand ) )
+            {
+                s_mtl = cand;
+                if ( i != 0 )
+                    Sys_Printf( "WARNING: no usable \"$default3d\" material - depth-less faces "
+                                "will draw as \"%s\" instead.\n", kLadder[i] );
+                break;
+            }
+        }
+        if ( !s_mtl )
+            Sys_Printf( "WARNING: no depth-writing substitute material found - faces whose "
+                        "material does not write depth will draw in submission order "
+                        "(z-order will be wrong).  Run \"KiwiMatInfo\" from the command "
+                        "palette on such a face for the decode.\n" );
+    }
+    return s_mtl;
+}
+
+// The one-liner the face emitters call.  ACCEPTED COST, stated rather than hidden:
+// textured_simple has no vertex.color and no MATERIAL_COLOR term, so a missing-
+// material face no longer takes the selected-brush red tint (it did not take a
+// useful one before either — vertcol_simple2d colours from the vertex stream, and
+// the tint pass drives MATERIAL_COLOR).  Selection stays legible through the white
+// wireframe outline pass and the KIWI selection accents.
+static Material *Cam_DrawMaterial( Material *handle )
+{
+    if ( !Cam_MaterialIsMissing( handle ) )
+        return handle;
+    Material *sub = Cam_MissingMaterialSubstitute();
+    return sub ? sub : handle;
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  KIWI-UX (ROUND Y, ITEM 1) — THE PERMANENT DIAGNOSTIC
+// ═════════════════════════════════════════════════════════════════════════════
+// Three rounds have now guessed at what state a face is actually drawn with, and
+// two of those guesses were wrong.  This is the ground truth, read out of the
+// SAME fields the backend binds (Cam_MaterialWritesDepth documents the access
+// pattern) and printed by "KiwiMatInfo" (kiwi_material.cpp).  It lives here
+// because the predicates it reports are this file's and must not be duplicated.
+bool KiwiMtl_Diagnose( Material *handle, kiwiMatDiag_t *out )
+{
+    if ( !out )
+        return false;
+    memset( out, 0, sizeof( *out ) );
+    if ( !handle )
+        return false;
+    const Material *m = Material_FromHandle( handle );   // r_material.cpp:866
+    if ( !m )
+        return false;
+
+    out->name        = m->info.name;
+    out->techSet     = m->techniqueSet ? m->techniqueSet->name : nullptr;
+    out->techSetBase = Cam_TechSetBaseName( m->techniqueSet );
+    out->sortKey     = (int)m->info.sortKey;             // r_material.h:438
+
+    // The technique the CAMERA binds for this face, arrived at exactly as the
+    // world draw does: draw_mode -> Cam_TechForDrawMode, then demoted to UNLIT
+    // when the loaded techset does not carry it (Cam_TechAvailable).
+    MaterialTechniqueType tech = Cam_TechForDrawMode( Ed_Camera()->draw_mode );
+    if ( tech != TECHNIQUE_UNLIT
+      && ( !m->techniqueSet || !m->techniqueSet->techniques[tech] ) )
+        tech = TECHNIQUE_UNLIT;
+    out->cameraTech = (int)tech;
+
+    if ( m->stateBitsTable && (int)tech >= 0 && (int)tech < 34 )
+    {
+        const uint8_t e = m->stateBitsEntry[tech];       // 0xFF = absent
+        if ( e != 0xFF )
+        {
+            out->techPresent = true;
+            const uint bits1 = m->stateBitsTable[e].loadBits[1];
+            out->depthWrite  = ( bits1 & GFXS1_DEPTHWRITE ) != 0;
+            out->depthTest   = ( bits1 & GFXS1_DEPTHTEST_DISABLE ) == 0;
+            out->loadBits0   = m->stateBitsTable[e].loadBits[0];
+            out->loadBits1   = bits1;
+        }
+    }
+
+    out->substituted = Cam_MaterialIsMissing( handle );
+    if ( out->substituted )
+    {
+        // Material_FromHandle asserts on a null handle (r_material.cpp:866), and the
+        // ladder legitimately returns null when the asset set ships neither rung.
+        Material       *subH = Cam_MissingMaterialSubstitute();
+        const Material *sub  = subH ? Material_FromHandle( subH ) : nullptr;
+        out->substituteName = sub ? sub->info.name : "(none - z-order WILL be wrong)";
+    }
+    return true;
+}
+
 // Draw one face's winding as a textured triangle fan with technique `tech`. bgra
 // modulates it (0xFFFFFFFF = white = the world path); push displaces each vertex along
 // the face normal (selection overlay, to sit just in front of the coplanar world face).
@@ -469,6 +1042,8 @@ static void Cam_DrawFaceTinted( const face_t *f, Material *mtl, uint bgra, float
     int nv = w->numpoints;
     if ( nv < 3 || nv > CAM_MAXFACEVERTS )
         return;
+
+    mtl = Cam_DrawMaterial( mtl );      // KIWI-UX (ROUND O) — see Cam_DrawMaterial
 
     float    xyzw[CAM_MAXFACEVERTS][4];
     float    normal[CAM_MAXFACEVERTS][3];
@@ -555,7 +1130,29 @@ static bool Cam_SunPrevEnabled()
 // the GPU half on the device, mirroring the R_Ed_SetSceneParms device gate.  brush.cpp externs.
 bool Radiant_FaceVisGpuReady()
 {
-    return dx.device != nullptr;
+    // KIWI-UX (ROUND AB, ITEM 1): also refuse while the device is LOST.  The upload chain
+    // ends at Editor_CreateAdditionalVertexBuffer (r_ed_vertbuf.cpp:244), whose
+    // CreateVertexBuffer failure is a FatalError — and CreateVertexBuffer on a lost device
+    // fails by definition.  Since kiwi_devicereset.cpp arms a rebuild for EVERY brush at
+    // reset time, the first post-loss draw would otherwise walk straight into it.  Refusing
+    // leaves the identity faceVis (visCount = 0, vertcount = winding count) exactly as the
+    // headless gates do; the version stays armed, so the rebuild happens on the first frame
+    // after the device comes back.
+    return dx.device != nullptr && !dx.deviceLost;
+}
+
+// KIWI-UX (ROUND AB, ITEM 1).  The two reasons Radiant_FaceVisGpuReady says no are NOT the
+// same reason, and Brush_MakeFaceVisuals has to tell them apart:
+//   * NO DEVICE  — a headless gate.  There will never be a device; the identity faceVis is
+//     the final answer and the instance version must be synced, or every gate re-enters the
+//     rebuild forever.  This is the faithful behaviour and it stays.
+//   * DEVICE LOST — transient.  Syncing the version here would mark the brush "cached" while
+//     its cache is empty, and nothing would ever rebuild it once the device came back: the
+//     map would render permanently untextured after one monitor sleep.
+// Only the second case leaves the rebuild armed.
+bool Radiant_FaceVisDeviceLost()
+{
+    return dx.device != nullptr && dx.deviceLost;
 }
 
 // 0x406760  R_SunPrev_SetSunConstants — parse the worldspawn sun keys and push the sun
@@ -686,10 +1283,13 @@ static void Cam_DrawFaceCached( face_t *f )
         if ( !Face_BuildLayerGeom( f, (const orientation_t *)world_orient_matrix, L, &g )
              || !g.material || g.vertcount < 3 )
             continue;
-        unsigned int handle = Editor_VB_Upload( g.material, g.vertcount,
+        // KIWI-UX (ROUND O): same substitution as the immediate path, applied BEFORE the
+        // upload so the VB pool is keyed on the material the draw will actually bind.
+        Material *drawMtl = Cam_DrawMaterial( g.material );
+        unsigned int handle = Editor_VB_Upload( drawMtl, g.vertcount,
             (const float *)g.xyz, (const float *)g.tangent, (const float *)g.binormal,
             (const float *)g.normal, (const float *)g.st, (const float *)g.color );
-        Editor_AddGeoFace( g.material, TECHNIQUE_UNLIT, 0, g.vertcount, (int)handle );
+        Editor_AddGeoFace( drawMtl, TECHNIQUE_UNLIT, 0, g.vertcount, (int)handle );
     }
 }
 
@@ -722,7 +1322,11 @@ static void Cam_DrawFaceFaithfulImmediate( face_t *f, MaterialTechniqueType tech
         if ( !Face_BuildLayerGeom( f, (const orientation_t *)world_orient_matrix, L, &g )
              || !g.material || g.vertcount < 3 )
             continue;
-        MaterialTechniqueType useTech = Cam_TechAvailable( g.material, tech );
+        // KIWI-UX (ROUND O): substitute BEFORE choosing the technique — the broken
+        // material's techset carries only "unlit", the substitute's carries the whole
+        // set, so asking the substitute is what lets draw_mode 2/3 keep FAKELIGHT.
+        Material *drawMtl = Cam_DrawMaterial( g.material );
+        MaterialTechniqueType useTech = Cam_TechAvailable( drawMtl, tech );
 
         float    xyzw[CAM_MAXFACEVERTS][4];
         uint16_t indices[3 * CAM_MAXFACEVERTS];
@@ -737,7 +1341,7 @@ static void Cam_DrawFaceFaithfulImmediate( face_t *f, MaterialTechniqueType tech
             indices[ic++] = 0; indices[ic++] = (uint16_t)i; indices[ic++] = (uint16_t)( i + 1 );
         }
 
-        R_AddRenderCmdDrawTris( g.material, useTech, (short)ic, indices,
+        R_AddRenderCmdDrawTris( drawMtl, useTech, (short)ic, indices,
                                 (short)g.vertcount, xyzw, g.normal, (float *)g.color, g.st );
     }
 }
@@ -787,6 +1391,24 @@ static void Cam_DrawSelectedFaces()
 {
     int count = g_SelectedFaces.GetSize();
     if ( count <= 0 || !g_SelectedFaces.m_pData )
+        return;
+    // KIWI-UX (ROUND K): USER DIRECTIVE, verbatim — "When Selecting the face of a
+    // solid (brush), it still creates a pink outline on the face.  Stop doing
+    // that."  THIS IS THE PINK OUTLINE.  It is the port's own selected-face
+    // highlight (the binary tints picked faces through DrawGeo's editor surf-cache;
+    // the port could not, so it outlines each picked winding in magenta 0xFFFF00FF
+    // at width 3 — see the KISAK note above).  Shakeout G replaced face feedback
+    // with a translucent FILL (kiwi_hover.cpp DrawFaceFills) precisely so a face
+    // accent would stop looking like an edge one, and this pass is what kept
+    // drawing the boundary anyway.
+    //
+    // Gated on the modern layer rather than deleted: with the master toggle OFF
+    // there is no KIWI fill pass at all, and removing this outright would leave the
+    // classic profile with NO selected-face feedback whatsoever.
+    // Cam_DrawSelectedFaceFill (the ported FILL, immediately below) is untouched in
+    // both profiles — a fill was never the complaint.
+    extern bool KiwiUX_ModernInput();     // kiwi_ux.cpp
+    if ( KiwiUX_ModernInput() )
         return;
 
     static GfxPointVertex s_hlVerts[4096];
@@ -1461,6 +2083,81 @@ extern int   PMESH_19_Radius( patchMesh_t *patch, const float *cursor, float inn
 extern int   PMESH_20_Radius_2( int count, patchMesh_t *patch, const float *cursor,
                                 float innerR, float outerR, GfxPointVertex *outVerts );          // pmesh.cpp 0x43F580
 
+// KIWI-UX (ROUND AQ, ITEM 1; REWRITTEN ROUND AT, ITEM 1): which patches the paint ring is
+// drawn for.
+//
+// AQ's gate was `(int)def->type == PATCH_TERRAIN`, and it refused EVERYTHING the user
+// actually paints on.  PATCH_TERRAIN (0x40) is not "this patch is a terrain sheet" — it is
+// set by exactly three creation paths: Patch_ParseMesh's "mesh"/patchTerrainDef3 branch
+// (pmesh.cpp:1002), Create_Terrain, i.e. the Terrain dialog (pmesh.cpp:1810), and the
+// curve→terrain conversion (pmesh.cpp:9311).  Every OTHER patch — Patch_GenericMesh's
+// "simple patch mesh" (pmesh.cpp:1702 sets type 0), every patch KIWI's own verbs build
+// (loft / fillet / bevel), every patch pasted or cloned from those — has type 0, so the
+// `== PATCH_TERRAIN` test answered false for a perfectly ordinary flat sheet and the cyan
+// ring stopped rendering.  (mapinfo.cpp:78 tests the same field bitwise, `type & 0x40`;
+// even that spelling would have refused a type-0 sheet.)
+//
+// The gate was also narrower than the verb it visualises: the paint stroke itself —
+// sub_43E4B0 → PMESH_16 (pmesh.cpp:5404 / 5351) — tests only `if ( i->patch )` and edits
+// the control points of ANY patch.  A ring that refuses what the brush will paint is a lie
+// about the tool's reach.
+//
+// The crash AQ was really fixing is fixed elsewhere and stays fixed: PMESH_19_Radius's
+// turned_edge lookup is now a typed, index-checked ctrl[col][row] access (pmesh.cpp:5068-
+// 5075) that falls back to the untorn diagonal whenever the tessellated index leaves the
+// 16x16 control grid.  That guard — not this predicate — is what stopped round AG's patch
+// cylinder from AV'ing.  So this test can be about MEANING instead of memory safety:
+//
+//   * the control grid must be walkable — PMESH_20_Radius_2 (pmesh.cpp:5158) iterates
+//     ctrl[0..width)[0..height) directly, so width/height must be in [2,16];
+//   * there must be a tessellated mesh to clip the ring against (curveDef + verts);
+//   * CLOSED / WRAPPING families are refused: a cylinder wraps a full 360 degrees and a
+//     cone / hemisphere closes to a point or a pole, so there is no single sheet-like
+//     surface for a flat XY cursor ring to sit on and the tessellated columns wrap far
+//     past the control grid.  This is the case AQ was written for (the crash was a patch
+//     CYLINDER).
+//
+// BEVEL and ENDCAP are deliberately NOT in that list even though AQ's console line named
+// them: a bevel is a quarter turn and an endcap a half turn — both are OPEN sheets a ring
+// sits on perfectly well — and, decisively, KIWI's own swept surfaces stamp PATCH_BEVEL on
+// themselves (the loft's CURVE strips, kiwi_loft.cpp; the patch fillet's arc,
+// kiwi_patchfillet.cpp), so refusing that bit would refuse the geometry the user just
+// built with this editor's own verbs.
+//
+// Sheets — type 0 (Patch_GenericMesh / KIWI verbs), PATCH_TERRAIN (dialog / .map),
+// PATCH_TRIANGLE, PATCH_BEVEL / PATCH_ENDCAP — all pass.  ONE console line per editor run
+// when something is refused, so the refusal is never silent.
+static bool KiwiTerrainRing_PatchEligible( patchMesh_t *def )
+{
+    if ( !def )
+        return false;
+
+    // PMESH_20_Radius_2 walks ctrl[col][row] over the DECLARED control dims.
+    if ( def->width < 2 || def->width > 16 || def->height < 2 || def->height > 16 )
+        return false;
+
+    // PMESH_19_Radius clips the rings against the tessellated curveDef quads.
+    const curvePatchDef_t *cdef = def->curveDef;
+    if ( !cdef || !cdef->verts || cdef->width < 2 || cdef->height < 2 )
+        return false;
+
+    // Closed/wrapping families (Patch_BrushToMesh, pmesh.cpp:1293-1436).
+    const int closedKinds = PATCH_CYLINDER | PATCH_HEMISPHERE | PATCH_CONE;
+    if ( ( (int)def->type & closedKinds ) != 0 )
+    {
+        static bool s_toldOnce = false;
+        if ( !s_toldOnce )
+        {
+            s_toldOnce = true;
+            // Sys_Printf: camwnd.cpp:55 (extern, win_qe3.cpp:112 definition).
+            Sys_Printf( "Terrain edit: the paint ring is drawn on patch SHEETS; CLOSED patches "
+                        "(cylinder/cone/hemisphere) are skipped.\n" );
+        }
+        return false;
+    }
+    return true;
+}
+
 static GfxCmdDrawPoints *DrawAdvancedTerrainEditCircle( const float *a1 )
 {
     const float innerR = sub_401BB0();        // v19
@@ -1497,7 +2194,7 @@ static GfxCmdDrawPoints *DrawAdvancedTerrainEditCircle( const float *a1 )
         {
             if ( i == &active_brushes )
                 break;
-            if ( i->patch )
+            if ( i->patch && KiwiTerrainRing_PatchEligible( i->patch->def ) )   // KIWI-UX (AQ, ITEM 1)
                 lineCount = PMESH_19_Radius( i->patch->def, a1, innerR, outerR,
                                              innerRing, outerRing,
                                              (const unsigned int *)&color, lineCount, verts );
@@ -1508,7 +2205,7 @@ static GfxCmdDrawPoints *DrawAdvancedTerrainEditCircle( const float *a1 )
     {
         if ( j == &selected_brushes )
             break;
-        if ( j->patch )
+        if ( j->patch && KiwiTerrainRing_PatchEligible( j->patch->def ) )       // KIWI-UX (AQ, ITEM 1)
             lineCount = PMESH_19_Radius( j->patch->def, a1, innerR, outerR,
                                          innerRing, outerRing,
                                          (const unsigned int *)&color, lineCount, verts );
@@ -1527,7 +2224,7 @@ static GfxCmdDrawPoints *DrawAdvancedTerrainEditCircle( const float *a1 )
         {
             if ( k == &selected_brushes )
                 break;
-            if ( k->patch )
+            if ( k->patch && KiwiTerrainRing_PatchEligible( k->patch->def ) )   // KIWI-UX (AQ, ITEM 1)
                 ptCount = PMESH_20_Radius_2( ptCount, k->patch->def, a1, innerR, outerR, verts );
         }
         if ( ptCount )
@@ -1775,6 +2472,70 @@ void CamWnd_Draw( HWND hwnd )
     // World fill = active_brushes ONLY, matching DrawGeneralWorld_: SELECTED brushes are drawn
     // separately by the red-tint pass below, so drawing them here too would z-fight that fill.
     extern selbrush_t selected_brushes;
+    // ═════════════════════════════════════════════════════════════════════════════
+    //  KIWI-UX (ROUND S) — THE §17 GRID NOW DRAWS *BEFORE* THE WORLD.
+    // ═════════════════════════════════════════════════════════════════════════════
+    // USER REPORT, verbatim: "grid should never render on top of shapes".
+    //
+    // WHY THE OLD POSITION COULD NOT GUARANTEE THAT.  Round O established (see
+    // Cam_MaterialIsMissing above, and the asset decode next to it) that a face whose
+    // material failed to load draws through $default: techSet "2d" -> statemap
+    // default2d.sm, whose depthTest AND depthWrite rules are both an unconditional
+    // "Disable".  Such a face neither tests nor writes depth.  With the grid drawn
+    // AFTER the world, "does the world hide the grid?" was therefore a question about
+    // the world's material state — and for every scene that still has a missing
+    // material the answer was no, whatever the grid did.  Round O's $default3d
+    // substitution fixes the depth state where the substitute asset exists; it cannot
+    // fix an asset set that does not ship one, and it cannot fix a legitimately
+    // depth-write-free world material.
+    //
+    // PAINTER'S ORDER MAKES THE QUESTION GO AWAY.  Every world / entity / patch /
+    // selected pass below submits AFTER this one, so a face that ignores depth simply
+    // paints over the grid.  That is true for any material state whatsoever, which is
+    // the property the report asks for.
+    //
+    // THE DEPTH STATE, CHECKED IN THE ASSETS RATHER THAN ASSUMED.  KiwiLines_* emits
+    // through R_AddCmd_Line3D -> RB_DrawLines3D(depthTest=true) -> rgp.lineMaterial,
+    // i.e. main/materials/$line: refStateBits[0] = 0x08128812 (blendOp field
+    // (>>8)&7 == 0 = Disable), refStateBits[1] = 0x0000000d = GFXS1_DEPTHWRITE |
+    // GFXS1_DEPTHTEST_LESSEQUAL, techSet "tools" -> vertcol_shaded_tools ->
+    // stateMap "default".  default.sm passes depthTest through and forces depthWrite
+    // Enable for blendOp == Disable, so the bound state IS depthTest LESSEQUAL +
+    // depthWrite ON.  So the grid does write depth here.  It still cannot occlude
+    // world geometry, in either direction:
+    //   * a world pixel NEARER than the grid line passes LESSEQUAL and covers it;
+    //   * a world pixel at the SAME depth (a floor brush lying on Z=0 — the common
+    //     case, and the one the old order got wrong) also passes LESSEQUAL, because
+    //     it is submitted LATER and LESSEQUAL admits ties.  The world wins ties now;
+    //     with the grid drawn last it used to;
+    //   * a world pixel strictly BEHIND a grid line is rejected — but that is correct
+    //     occlusion by a line that really is in front, and it is pixel-identical to
+    //     what the old post-world position already produced.
+    //
+    // WHY NOT R_AddCmd_Line3DNoDepth.  It exists (r_rendercmds.cpp:2022, dimension 4
+    // -> RB_DrawLines3D(depthTest=false) -> rgp.lineMaterialNoDepth = the registered
+    // built-in "$line_nodepth", r_material.cpp:225) and it is the WRONG tool here.
+    // main/materials/$line_nodepth carries refStateBits[1] = 0x00000002 =
+    // GFXS1_DEPTHTEST_DISABLE with DEPTHWRITE clear — but its refStateBits[0] is the
+    // same 0x08128812 and its techSet is the same "tools", so the same default.sm
+    // depthWrite rule forces the write back ON.  The bound state is therefore depth
+    // test OFF, depth write ON: it would paint over everything AND stamp depth,
+    // i.e. exactly backwards for a pre-world pass.  There is no shipped line material
+    // with depthWrite disabled, so $line it is, and the argument above is what makes
+    // that safe rather than a compromise.
+    //
+    // POSITION: after CamWnd_SetupScene (the view exists) and CamWnd_Fov, before the
+    // first R_SortMaterials.  The grid is an IMMEDIATE RC_DRAW_LINES command, not an
+    // editor surf, so it neither opens nor disturbs the surf accumulation the
+    // R_SortMaterials pairs demarcate.  It leaves MATERIAL_COLOR at its last line
+    // colour (Ed_EmitLineBatch pushes one per colour run); every world arm below
+    // re-emits its own (lastMC starts at {-1,-1,-1,-1}, and the cached path pushes the
+    // neutral before its flush), so nothing downstream inherits a grid grey.
+    {
+        extern void KiwiGrid_Draw();      // kiwi_grid.cpp
+        KiwiGrid_Draw();
+    }
+
     // 0x407ab9 - R_SortMaterials opens the world accumulation so the main R_AddEditorSurfsCmd
     // flush is demarcated and the later selected/white flushes do not re-draw these surfs.
     { extern void R_SortMaterials(); R_SortMaterials(); }
@@ -1842,7 +2603,27 @@ void CamWnd_Draw( HWND hwnd )
                     // EXCEPT sky, whose colormap is real content the editor should show.
                     const char *sl = mn ? strrchr( mn, '/' ) : nullptr;
                     const bool isSky = mn && strstr( sl ? sl + 1 : mn, "sky" ) != nullptr;
-                    Material *flat = ( !isSky && g_qeglobals.d_white ) ? g_qeglobals.d_white : mtl;
+                    // ── KIWI-UX (ROUND M): ...AND EXCEPT WHEN IT WOULD COST THE DEPTH WRITE.
+                    // The full diagnosis is on Cam_MaterialWritesDepth above.  In one line:
+                    // white_tools is alpha-blended and therefore depthWrite-DISABLED, caulk and
+                    // nodraw are opaque and depthWrite-ENABLED, and swapping the first in for the
+                    // second turned every cut face into a surface that occludes nothing.
+                    //
+                    // The test is on the PROPERTY, not on a name list, so it keeps working if the
+                    // asset set changes: substitute only when the face's own material does not
+                    // write depth, or when d_white does.  In practice that leaves the see-through
+                    // TOOL VOLUMES (clip / trigger / hint / skip / portal / origin /
+                    // lightgrid_volume — all 0x08128965 like white_tools, i.e. already blended and
+                    // already depth-write-free) going through d_white exactly as before, and takes
+                    // only the two SOLID tool materials out of the substitution.  Those two keep
+                    // their flat editor colour anyway: MATERIAL_COLOR is emitted with .w = 1 just
+                    // above, and the "tools" techset's UNLIT technique is the same
+                    // vertcol_shaded_tools for caulk as for white_tools, so the colormap is
+                    // lerped away regardless of which handle carries it.
+                    const bool losesDepth = Cam_MaterialWritesDepth( mtl, TECHNIQUE_UNLIT )
+                                     && !Cam_MaterialWritesDepth( g_qeglobals.d_white, TECHNIQUE_UNLIT );
+                    Material *flat = ( !isSky && !losesDepth && g_qeglobals.d_white )
+                                     ? g_qeglobals.d_white : mtl;
                     Cam_DrawFace( f, flat, TECHNIQUE_UNLIT );
                 }
                 else                                            // world -> faithful + FAKELIGHT
@@ -2004,6 +2785,38 @@ void CamWnd_Draw( HWND hwnd )
             {
                 if ( !b->def || !b->patch )                     // instance field — see 0x47B018
                     continue;
+                // ── KIWI-UX (ROUND AF, ITEM 9): PATCHES OBEY FilterBrush TOO ────
+                // USER REPORT, verbatim: "When hiding selected objects, q3 curves
+                // don't hide. actually they aren't selectable at all. Fix this."
+                //
+                // THE HIDE HALF IS THIS LINE'S ABSENCE.  `FilterBrush` (filters.cpp
+                // :724) folds the HIDDEN bit (brushFlags & 4) into the same answer as
+                // every filter entry — `return (a1->brushFlags & 5) != 0;` — and it
+                // gates the convex world pass 230 lines above (:2477, "FilterBrush is
+                // load-bearing"), BOTH of xywnd.cpp's brush loops (:1085 active,
+                // :1163 selected), and all three pick entries (select.cpp:672,
+                // kiwi_pick.cpp:167, kiwi_boxselect.cpp via Pick_BrushPickable).
+                // The patch pass asked NOTHING but `!b->def || !b->patch`.
+                //
+                // So `Select_Hide` set brushFlags |= 4 on the patch node correctly
+                // (select.cpp:4168), the 2D views dropped it, every pick path dropped
+                // it — and the 3D camera kept drawing it. "Hiding does nothing" and
+                // "it cannot be clicked" were ONE defect seen from two windows.
+                //
+                // NOT A DEVIATION: the binary has no separate patch pass at all —
+                // DrawGeneralWorld_ (0x407af0) runs ONE loop over the world brushes
+                // gated on `!CullCubic && !FilterBrush` and lets DrawBrush (0x47B018)
+                // dispatch patches out of it.  The port split that loop in two so the
+                // patch surfs could be self-bracketed (see the note above), and the
+                // split dropped the gate on one side.  This restores it.
+                //
+                // Both sub-passes are gated, matching xywnd.cpp's pair.  A hidden
+                // brush is normally deselected on the way in (Cmd_OnHideSelected =
+                // Select_Hide + Select_Deselect(1), mainfrm.cpp:5055), so pass 1
+                // rarely sees one — but "rarely" is how the first version of this bug
+                // was written.
+                if ( FilterBrush( b, 0 ) )
+                    continue;
                 GfxColor pcol;
                 Cam_BrushColor2d( b, &pcol );
                 DrawBrush( b, orient, /*viewType*/ -1, (int)worldTech, &pcol,
@@ -2132,6 +2945,10 @@ void CamWnd_Draw( HWND hwnd )
 
     }
 
+    // (KIWI-UX ROUND S: the §17 grid + axes USED to be drawn here, after every world
+    //  pass.  They now run BEFORE the world — see the hook near the top of this
+    //  function for the whole argument.  Nothing else moved.)
+
     // 0x4084bd  SELECTED-BRUSH WHITE OUTLINE (!dontDrawSelectedOutlines), 1:1 with
     // 0x4084c3..0x408535: R_AddClearCmd(6 = depth+stencil) -> DrawRegions -> pack colorWhite ->
     // each selected non-patch brush at WIREFRAME tech 29 through the SAME DrawBrush the world
@@ -2244,13 +3061,33 @@ void CamWnd_Draw( HWND hwnd )
     extern bool ImGuiShell_CameraPaintCursor( int *x, int *y, int *w, int *h );   // imgui_shell.cpp
     int cpx, cpy, cph;
     (void)hwnd;
+    (void)cph;
     if ( cam->cursor_visible && sub_401D50() && ImGuiShell_CameraPaintCursor( &cpx, &cpy, nullptr, &cph ) )
     {
         {
-            float dir[3];
-            CameraCalcRayDir( cph - cpy, dir, cpx );                 // (a4=bottom-y, dir, x)
+            // ── KIWI-UX (ROUND AQ, ITEM 3): THE RING WAS OFFSET FROM THE CURSOR ──
+            // This site used to build the ray itself: `CameraCalcRayDir( cph - cpy, dir,
+            // cpx )` + `camera.origin`.  CameraCalcRayDir is deliberately byte-identical
+            // to the binary and is therefore PERSPECTIVE-ONLY — it diverges a ray from
+            // the eye — while KIWI's camera is ORTHOGRAPHIC by default (kiwi_camera.cpp
+            // KCAM_ORTHO_ENTRY, "default ON", and CamWnd_SetupScene really does swap the
+            // projection).  Under a parallel projection the correct mapping moves the
+            // ray's ORIGIN per pixel and keeps dir == vpn, so the eye-ray hit point was
+            // displaced laterally by the whole parallax: zero at the image centre and
+            // growing toward the edges — exactly the reported offset.  The flip was also
+            // one pixel off (`cph - cpy` where every other site uses `height - y - 1`).
+            // Both halves are already solved, once, in the canonical modern picker that
+            // hover/gizmo/box-select/snap all use, and it reads the SAME
+            // ImGuiShell_CameraPaintCursor mousespace, so the gate semantics are
+            // unchanged.  RADIANT_KNOWN_ISSUES listed this exact gap under "Ortho: two
+            // CLASSIC-profile paths still build perspective rays"; this closes the
+            // terrain-ring half of it.
+            ray_t ray;                                               // kiwi_pick.h:72
+            if ( Pick_RayFromImagePos( cpx, cpy, &ray ) )            // kiwi_pick.h:91
+            {
+            const float *dir = ray.dir;
             float cursorWorld[3];                                    // mouse_origin (vec3)
-            if ( sub_43DD50( dir, nullptr, camera.origin, cursorWorld ) )
+            if ( sub_43DD50( dir, nullptr, ray.origin, cursorWorld ) )
             {
                 // The binary's terrain tail rides after the selected-outline prelude's
                 // R_AddClearCmd(6); the port's filled patch pass can leave depth under the
@@ -2259,7 +3096,122 @@ void CamWnd_Draw( HWND hwnd )
                 R_AddCmdClearScreen( 6, colorWhite, 1.0f, 0 );
                 DrawAdvancedTerrainEditCircle( cursorWorld );
             }
+            }
         }
+    }
+
+    // KIWI-UX (RADIANT_UX_DESIGN §18): hover outline + active-item accent.  LAST on purpose —
+    // it rides after the selected-outline pass's depth clear, so the highlight shows through
+    // geometry the same way the ported selection outline and vertex handles do.  Additive
+    // only: it never re-renders selected brushes, and it is bounded to one hovered item plus
+    // one active item (kiwi_hover.cpp).
+    {
+        extern void KiwiHover_DrawWorld();    // kiwi_hover.cpp
+        KiwiHover_DrawWorld();
+        // Phase 4 (§7/§8/§16): construction geometry — the region fills (a triangle
+        // draw, bracketed exactly as the ported selected-face fill brackets itself),
+        // then the construction lines, their point markers and, while a drawing tool
+        // runs, the finite construction-plane grid patch.  BEFORE the active command's
+        // overlay so a live tool's rubber band reads on top of its own scaffolding.
+        // Self-budgeted (KCON_DRAW_SEGMENTS) and emits nothing when the store is
+        // empty or the toggle is off.
+        extern void KiwiCon_DrawWorld();      // kiwi_construct.cpp
+        KiwiCon_DrawWorld();
+        // KIWI-UX (ROUND AG, ITEM 6): the LIVE MARQUEE PREVIEW — what the box
+        // select would take if the button came up now, outlined in the §18 hover
+        // cyan.  Here, after the construction pass and before the active command's
+        // overlay, for the same reason KiwiCon_DrawWorld sits where it does: a
+        // marquee is scaffolding, and a live tool's rubber band reads on top of
+        // it.  Self-budgeted, throttled to rect CHANGES, and emits nothing when no
+        // marquee is live (kiwi_boxselect.h).
+        extern void KiwiBox_DrawPreview();    // kiwi_boxselect.cpp
+        KiwiBox_DrawPreview();
+        // KIWI-UX (ROUND AI, ITEM 6): PATCH VERTEX MODE's control lattice and its
+        // point markers.  Drawn from the mode's OWN latched patch list rather than
+        // through the ported Patch_DrawControlPoints, because that one is gated on
+        // the patch still being on `selected_brushes` — and the instant the user
+        // clicks a control point the modern selection replaces the object item with
+        // a vertex item and the patch leaves that list, so the ported draw would
+        // stop exactly when the points are needed most (kiwi_patchverts.h).
+        // Self-budgeted; emits nothing when the mode is off.
+        extern void KiwiPatchVerts_DrawWorld();   // kiwi_patchverts.cpp
+        KiwiPatchVerts_DrawWorld();
+        // Phase 2 (§4/§6): the ACTIVE modal command's live overlay plus its snap marker,
+        // in the same tail and under the same rules (bounded batch, additive only).
+        // Emits nothing when no command is running.
+        // ROUND N (§6): the hovered face's SNAP ACCENTS — small dark dots at the
+        // corners, edge midpoints and centre of whatever face is under the cursor
+        // while a PLACEMENT tool is live, so the tool advertises where it can land
+        // before the cursor is near any of them (kiwi_snap.h).  BEFORE the command's
+        // own overlay so the live rubber band and the marker read on top of the
+        // guidance rather than under it.  Self-budgeted; emits nothing when no
+        // click-taking command is running or the marker toggle is off.
+        extern void KiwiSnap_DrawFaceAccents();   // kiwi_snap.cpp
+        KiwiSnap_DrawFaceAccents();
+        // ROUND P (§6): the AXIS GUIDES — dashed grey lines along world Z and the
+        // working plane's own axes, through the drawing tool's LAST PLACED POINT,
+        // shown while the cursor is near one of them.  This is the "make drawing a
+        // vertical Z line easy, the camera angle should help" directive
+        // (kiwi_snap.h).  Same slot and same rules as the accents above: its own
+        // budgeted batch, nothing emitted unless a click-taking command is live,
+        // the marker toggle is on and the last query actually found an axis.
+        extern void KiwiSnap_DrawAxisGuides();    // kiwi_snap.cpp
+        KiwiSnap_DrawAxisGuides();
+        // ══════════════════════════════════════════════════════════════════
+        //  KIWI-UX (ROUND AQ, ITEM 2) — THE REGION FILLS, RELOCATED.
+        // ══════════════════════════════════════════════════════════════════
+        // USER REPORT, verbatim: "You seriously need to fix the light blue
+        // construction plane visibility!"  Fifth round on it, and no console
+        // diagnostic has ever come back, so this round stops waiting for one and
+        // removes the LAST difference between this fill and the one fill in this
+        // editor that is CONFIRMED VISIBLE — the boolean's red operand preview.
+        //
+        // That preview draws from HERE: KiwiCmd_DrawWorld -> the active command's
+        // DrawWorld -> kiwi_boolean.cpp FillBrush.  The region fills used to draw
+        // from KiwiCon_DrawWorld, three calls earlier in this same block, and
+        // round AM's audit had already equalised everything else about the two
+        // submissions (same material, same TECHNIQUE_UNLIT, same 0.22 alpha, same
+        // per-vertex colour under the same neutral MATERIAL_COLOR bracket, same
+        // KiwiTris_OrientToEye).  Pass LOCATION was what was left, so the fills
+        // move into the boolean's slot: same relative order to the selected-
+        // outline depth clear and its R_SortMaterials above, same bracket
+        // discipline, and inside an OPEN-then-flushed KiwiLines batch exactly as
+        // the boolean's fill is (KiwiCmd_DrawWorld's own Begin/Flush pair).  The
+        // empty batch costs one flush of zero vertices, which emits nothing.
+        //
+        // IF THE FILL APPEARS, location was the bug.  IF IT DOES NOT, there are
+        // now ZERO differences between a visible fill and an invisible one, the
+        // whole submission-side model is falsified, and the next round starts at
+        // the renderer instead of at this layer.
+        {
+            extern bool KiwiCon_ShowConstruction();   // kiwi_construct.h:695
+            extern void KiwiRegion_DrawFills( int highlightIndex );  // kiwi_region.h:332
+            extern void KiwiLines_Begin( int maxSegments, int width );   // kiwi_lines.h:34
+            extern void KiwiLines_Flush();                               // kiwi_lines.h:43
+            if ( KiwiCon_ShowConstruction() )
+            {
+                KiwiLines_Begin( 8, 2 );
+                KiwiRegion_DrawFills( -1 );
+                KiwiLines_Flush();
+            }
+        }
+        extern void KiwiCmd_DrawWorld();      // kiwi_command.cpp
+        KiwiCmd_DrawWorld();
+        // Shakeout A (§14): the translate gizmo — three axis arrows, three plane
+        // corners and the free-move square, screen-constant in size. LAST so its
+        // handles read on top of everything else in this block; self-budgeted
+        // (KGIZMO_MAX_SEGMENTS) and emits nothing while a modal command it did not
+        // start is running, while its own toggle is off, or with nothing movable
+        // selected.
+        extern void KiwiGizmo_DrawWorld();    // kiwi_gizmo.cpp
+        KiwiGizmo_DrawWorld();
+        // ROUND K (§14): the Plasticity LOLLIPOP — a thin circle on the face being
+        // pushed, a stem out along its (signed) normal and a ball on the end.  It
+        // REPLACES the gizmo for face push/pull and both extrudes rather than
+        // joining it: kiwi_gizmo.cpp's GizmoUsable() refuses outright while one is
+        // wanted, so exactly one of these two ever emits (kiwi_lollipop.h).
+        extern void KiwiLollipop_DrawWorld(); // kiwi_lollipop.cpp
+        KiwiLollipop_DrawWorld();
     }
 }
 
@@ -2297,6 +3249,101 @@ static void CameraCalcRayDir( int y, float *dir, int x )
     dir[1] = cam->camera.vright[1] * xf + cam->camera.vpn[1] + cam->camera.vup[1] * yf;
     dir[2] = yf * cam->camera.vup[2] + xf * cam->camera.vright[2] + cam->camera.vpn[2];
     Vec3Normalize_R( dir );
+}
+
+// KIWI-UX: public forwarder for CameraCalcRayDir (static above), so the unified pick API
+// (kiwi_pick.cpp) builds its ray with the SAME math the ported picker uses instead of a
+// second copy.  `y` is bottom-left origin, exactly as CameraCalcRayDir wants it (the shell
+// flips with g_camwndState.height - imageY - 1).
+//
+// ═════════════════════════════════════════════════════════════════════════════
+//  KIWI-UX (ROUND M) — THE ORTHOGRAPHIC PICK RAY, AND ITS INVERSE
+// ═════════════════════════════════════════════════════════════════════════════
+// This forwarder is KIWI code (the ported static above is untouched), so the
+// ortho branch lives HERE and the binary's CameraCalcRayDir keeps its perspective
+// math for its own callers (Camera_GetRectSelection3D's marquee frustum, the
+// 3D-marquee quad and the terrain cursor, all inside camwnd.cpp).
+//
+// WRITE THE PAIR DOWN, because a picker whose forward and inverse disagree breaks
+// every click and every snap silently.  Let
+//     s   = ( 2 * tan(fov/2) * 0.75 ) / height          (the per-pixel scale)
+//     xf  = ( x - width/2  ) * s                        (INTEGER halves — as in
+//     yf  = ( y - height/2 ) * s                         CameraCalcRayDir)
+//     H   = KiwiCam_OrthoHalfHeight() = dist * tan(fov/2) * 0.75
+// Note H = dist * s * height/2, i.e. yf * dist is exactly the world offset from
+// the view axis at the pivot plane — which is why the two projections agree there.
+//
+//   PERSPECTIVE                              ORTHOGRAPHIC
+//     org = camera.origin                      org = camera.origin
+//                                                  + vright*xf*dist + vup*yf*dist
+//     dir = norm( vpn + vright*xf + vup*yf )   dir = vpn                (unit)
+//
+//   FORWARD  (world -> pixel), kiwi_pick.cpp ProjectRaw:
+//     rel = world - camera.origin
+//     z   = dot(rel,vpn)                       z   = dot(rel,vpn)   [depth only]
+//     xf  = dot(rel,vright) / z                xf  = dot(rel,vright) / dist
+//     yf  = dot(rel,vup)    / z                yf  = dot(rel,vup)    / dist
+//     x   = xf/s + width/2                     x   = xf/s + width/2      (same)
+//     y   = yf/s + height/2                    y   = yf/s + height/2     (same)
+//
+// So the ONLY difference is that the perspective divide by the point's own depth
+// becomes a divide by the CONSTANT pivot distance — and correspondingly the ray
+// gains a lateral origin offset instead of a lateral direction.  Round-tripping
+// pixel -> ray -> (a point on it) -> pixel is exact in both modes.
+//
+// `dist` above is the ORBIT distance, but it is recovered as H / tanY rather than
+// read from KiwiCam_Distance() — that way the half-height's own clamps apply
+// identically here, in kiwi_pick.cpp's inverse and in the projection matrix, and
+// the four consumers cannot drift apart.
+void Ed_CameraCalcRayDir( int x, int y, float *dir )
+{
+    if ( KiwiCam_Ortho() )
+    {
+        const camera_s *c = Ed_Camera();
+        dir[0] = c->vpn[0];
+        dir[1] = c->vpn[1];
+        dir[2] = c->vpn[2];          // already unit (AngleVectors), no normalise needed
+        return;
+    }
+    CameraCalcRayDir( y, dir, x );
+}
+
+// KIWI-UX (ROUND M): the ORIGIN half of the pair above.  Perspective rays all
+// start at the eye, so this is the eye; ortho rays are parallel and start on the
+// image plane, so this offsets by the pixel's lateral world position.  `y` is
+// bottom-left origin, same as Ed_CameraCalcRayDir.
+void Ed_CameraCalcRayOrigin( int x, int y, float *org )
+{
+    const camera_s *c = Ed_Camera();
+    org[0] = c->origin[0];
+    org[1] = c->origin[1];
+    org[2] = c->origin[2];
+    if ( !KiwiCam_Ortho() )
+        return;
+
+    const int    height = c->height > 0 ? c->height : 1;
+    const double t      = tan( DEG2RAD( g_PrefsDlg->camera_fov ) * 0.5 );
+    const float  tanY   = (float)( t * 0.75 );
+    if ( !( tanY > 1.0e-6f ) )
+        return;                                   // degenerate FOV pref — eye ray
+    const float  s   = (float)( ( t * 0.75 + t * 0.75 ) / (double)height );
+    const float  yf  = (float)( y - c->height / 2 ) * s;
+    const float  xf  = (float)( x - c->width  / 2 ) * s;
+    // xf/yf are the PER-UNIT-DEPTH offsets, so they scale by the distance at which
+    // the ortho and perspective images agree — the pivot.  `dist` is recovered from
+    // the half-height (H = dist * tanY) rather than read from KiwiCam_Distance() so
+    // that the half-height's own clamps apply here too; kiwi_pick.cpp's ProjectRaw
+    // recovers it with the SAME expression.
+    //
+    // NOTE the offset is along vright/vup, both PERPENDICULAR to vpn, so this moves
+    // the ray sideways WITHOUT changing its depth: the parallel rays all start on
+    // the plane through the eye.  The lead below is the only depth change, and it is
+    // there so an ortho pick can reach the geometry an ortho view draws behind the
+    // eye plane (see KCAM_ORTHO_PICK_LEAD).
+    const float  dist = KiwiCam_OrthoHalfHeight() / tanY;
+    for ( int k = 0; k < 3; ++k )
+        org[k] += c->vright[k] * ( xf * dist ) + c->vup[k] * ( yf * dist )
+                - c->vpn[k] * KCAM_ORTHO_PICK_LEAD;
 }
 
 // 0x403c10  Camera_GetRectSelection3D - Drag_Begin's 3D marquee-frustum callback: 4 corner rays

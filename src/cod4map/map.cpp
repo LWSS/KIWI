@@ -1012,6 +1012,18 @@ ShaderInfo_t *ParseBrushSideTexture(char **parsePtr, float *texVecs, double a3, 
   if ( texScale[0] == 0.0 || texScale[1] == 0.0 || texScale[0] != texScale[0] || texScale[1] != texScale[1] )
     Com_Error("Map %s, Entity %i, Brush %i:  Material with 0 texture scale.\nOpen and re-save '%s' from Radiant to fix this.", g_mapSourceFile, g_parseEntityCount - 1, g_numBrushes, g_mapSourceFile);
 
+  if ( !strcmp(materialName, "lightmap_gray") )
+  {
+    float roundedStep;
+
+    texOffset[0] = 0.0f;
+    texOffset[1] = 0.0f;
+    roundedStep = (float)(floor(((double)texRotation + 45.0) / 90.0) * 90.0);
+    texRotation -= roundedStep;
+    texScale[0] = (float)fabs((double)texScale[0]);
+    texScale[1] = (float)fabs((double)texScale[1]);
+  }
+
   BuildTextureVecs(rawPlane, texScale, texOffset, texRotation, texAngle, texBuf[0]);
 
   /* transform and scale S texture vector */
@@ -1232,6 +1244,37 @@ AdjustBrushesForOrigin
 Adjusts brush planes and patch vertices for entity origin.
 ================
 */
+static void ComputeEntityOrigin(Entity_t *ent)
+{
+  Brush_t *brush;
+  Patch_t *patch;
+  float mins[3], maxs[3], origin[3];
+  char originText[32];
+  int vertex, vertexCount;
+
+  Assert(ent, s_assertDisable_AdjustBrushesForOrigin);
+  ClearBounds(mins, maxs);
+  for (brush = ent->brushes; brush; brush = brush->next)
+  {
+    if (brush->numSides)
+    {
+      AddPointToBounds(brush->eMins, mins, maxs);
+      AddPointToBounds(brush->eMaxs, mins, maxs);
+    }
+  }
+  for (patch = ent->patches; patch; patch = patch->next)
+  {
+    vertexCount = patch->height * patch->width;
+    for (vertex = 0; vertex < vertexCount; ++vertex)
+      AddPointToBounds(patch->vertexData[vertex].pos, mins, maxs);
+  }
+  for (vertex = 0; vertex < 3; ++vertex)
+    origin[vertex] = floorf((mins[vertex] + maxs[vertex]) * 0.5f + 0.5f);
+  sprintf(originText, "%.0f %.0f %.0f", origin[0], origin[1], origin[2]);
+  SetKeyValue(ent, "origin", originText);
+  VectorCopy(origin, ent->origin);
+}
+
 void AdjustBrushesForOrigin(Entity_t *ent)
 {
   Brush_t *b;
@@ -1379,16 +1422,34 @@ int ParseMapEntity(char **parsePtr, float *transformMtx, float brushScale,
     val = ValueForKey(g_currentEntity, "classname");
   }
 
-  /* adjust brushes/patches for entity origin */
-  if ( g_currentEntity->origin[0] != 0.0 || g_currentEntity->origin[1] != 0.0 || g_currentEntity->origin[2] != 0.0 )
+  /* Native 0x41CB20 gives every non-world brush model a rounded bounds
+     center when the map did not supply an origin brush, then localizes its
+     geometry.  func_group geometry remains in its parent coordinate space. */
+  if ( strcmp(val, "func_group") )
   {
-    if ( g_currentEntity->brushes || g_currentEntity->patches )
+    if ( g_currentEntity->origin[0] == 0.0
+      && g_currentEntity->origin[1] == 0.0
+      && g_currentEntity->origin[2] == 0.0 )
+    {
+      if ( strcmp(val, "worldspawn")
+        && (g_currentEntity->brushes || g_currentEntity->patches) )
+      {
+        Assert(num_entities != 1, s_assertDisable_AdjustBrushesForOrigin);
+        ComputeEntityOrigin(g_currentEntity);
+        AdjustBrushesForOrigin(g_currentEntity);
+      }
+    }
+    else if ( g_currentEntity->brushes || g_currentEntity->patches )
+    {
       AdjustBrushesForOrigin(g_currentEntity);
+    }
     else
-      Com_Error(
-        "Map %s, Entity %i, Brush 0, Origin %f %f %f: Model is an origin brush only",
-        mapName, g_parseEntityCount - 1,
-        g_currentEntity->origin[0], g_currentEntity->origin[1], g_currentEntity->origin[2]);
+    {
+        Com_Error(
+          "Map %s, Entity %i, Brush 0, Origin %f %f %f: Model is an origin brush only",
+          mapName, g_parseEntityCount - 1,
+          g_currentEntity->origin[0], g_currentEntity->origin[1], g_currentEntity->origin[2]);
+    }
   }
 
   /* compute child transform matrix */

@@ -13,6 +13,7 @@ as triSoup entries.
 */
 
 #include "cod4map.h"
+
 #include "fixedpoint.h"
 
 void (*g_lerpAuxDataCallback)(float *from, float *to, double frac, float *result) = &NullLerpAuxDataCallback;
@@ -75,6 +76,42 @@ int     tesselateDegenerateCount;
 int     triFirstVertIndex;
 void   *triSurfFreeList;
 int     trisTransientMode;
+
+/* CoD4 0x44C060.  Native evaluates both products in x87 precision, then
+   explicitly stores the sum through a 32-bit float before returning it. */
+double Vec2LengthSquared(const float *value)
+{
+  volatile float lengthSquared = value[0] * value[0] + value[1] * value[1];
+  return lengthSquared;
+}
+
+/* CoD4 0x44C300.  This is the positive-side cell conversion paired with
+   the subtract-half helper at 0x42AC10. */
+int RoundPositiveFloatToInt(float value)
+{
+  return fistp_add(value, FISTP_HALF_BIAS);
+}
+
+/* CoD4 0x44B610.  The native cast temporarily selects x87 truncate mode;
+   every clamped result is positive, so the ordinary integer cast matches. */
+unsigned char PackNormalBasisComponent(float value)
+{
+  return (unsigned char)(int)(I_fclamp(value, -1.0f, 1.0f) * 127.5 + 128.0);
+}
+
+/* CoD4 0x445FC0.  The warning aggregator deliberately uses the reversed
+   edge order relative to the common triangle-normal helper. */
+void ComputeLayeredGroupTriangleNormal(const float *point0, const float *point1,
+                                       const float *point2, float *outNormal)
+{
+  float edge21[3];
+  float edge10[3];
+
+  VectorSubtract(point2, point1, edge21);
+  VectorSubtract(point1, point0, edge10);
+  CrossProduct(edge21, edge10, outNormal);
+  VecNormalize(outNormal);
+}
 
 char s_assertDisable_AdjustTriangleUVs_r;
 char s_assertDisable_AuxDataCopy;
@@ -194,9 +231,11 @@ char s_assertDisable_ValidateTriSurfLmapCoords;
 */
 typedef struct DrawSurfaceContext_s
 {
+  int type; /* native 72-byte context +0: 0=layered, 1=unlayered */
   BspTriSoup_t *triangles;
   BspDrawVert_t *drawVerts;
   BspDrawVert_t *triSoupVerts;
+  unsigned char *triSoupVertexLayerData; /* native context +20, 80 bytes/vertex */
   unsigned short *drawIndexes;
   BspAabbTreeEntry_t *aabbTrees;
   int *numTriSoups;
@@ -209,13 +248,13 @@ typedef struct DrawSurfaceContext_s
 static DrawSurfaceContext_t s_drawSurfaceContexts[2] =
 {
   {
-    bspTriangles, bspDrawVerts, g_drawVertexBuf, bspDrawIndexes, bspAabbTrees,
+    0, bspTriangles, bspDrawVerts, g_drawVertexBuf, NULL, bspDrawIndexes, bspAabbTrees,
     &numBSPTriSoups, &numBSPDrawVerts, &numBSPDrawVertsEmitted,
     &numBSPDrawIndexes, &numBSPAabbTrees
   },
   {
-    bspUnlayeredTriangles, bspUnlayeredDrawVerts, g_unlayeredDrawVertexBuf,
-    bspUnlayeredDrawIndexes, bspUnlayeredAabbTrees,
+    1, bspUnlayeredTriangles, bspUnlayeredDrawVerts, g_unlayeredDrawVertexBuf,
+    NULL, bspUnlayeredDrawIndexes, bspUnlayeredAabbTrees,
     &numBSPUnlayeredTriSoups, &numBSPUnlayeredDrawVerts,
     &numBSPUnlayeredDrawVertsEmitted, &numBSPUnlayeredDrawIndexes,
     &numBSPUnlayeredAabbTrees
@@ -223,6 +262,312 @@ static DrawSurfaceContext_t s_drawSurfaceContexts[2] =
 };
 
 static DrawSurfaceContext_t *s_drawSurfaceContext = &s_drawSurfaceContexts[0];
+
+#define TRIS_VERTEX_LAYER_SCRATCH_STRIDE 80
+static unsigned char *s_layeredVertexScratch;
+
+/* The retail 104-byte layered-material carrier owns a linked list of
+   warning locations at +100.  The compatibility descriptor has a different
+   layout, but the lifetime and accumulation rules are the same: retain one
+   location for every subgroup until the combination has reached the allowed
+   use count. */
+typedef struct LayeredMaterialUseWarning_s
+{
+  float origin[3];
+  float direction[3];
+  struct LayeredMaterialUseWarning_s *next;
+} LayeredMaterialUseWarning_t;
+
+/* Native 0x4437C0 caches these 104-byte records by their generated BSP
+   material name.  The name and material index are the serialized material
+   identity; mtlRaw[] is kept as the KIWI ShaderInfo sidecar for the native
+   raw-material pointers. */
+typedef struct LayeredMaterialDescriptor_s
+{
+  char name[64];
+  unsigned short materialIndex;
+  unsigned char layerCount;
+  unsigned char normalMapLayerCount;
+  unsigned char normalMapLayerIndices[4];
+  ShaderInfo_t *mtlRaw[5];
+  int combinationUseCount;
+  float combinationArea;
+  LayeredMaterialUseWarning_t *useWarnings;
+} LayeredMaterialDescriptor_t;
+
+typedef char static_assert_layered_material_descriptor_size[
+  sizeof(LayeredMaterialDescriptor_t) == 104 ? 1 : -1];
+
+#define MAX_LAYERED_MATERIAL_DESCRIPTORS 1224
+static LayeredMaterialDescriptor_t s_layeredMaterialDescriptors[MAX_LAYERED_MATERIAL_DESCRIPTORS];
+static int s_layeredMaterialDescriptorCount;
+
+static void Tris_ClearLayeredMaterialUseWarnings(
+  LayeredMaterialDescriptor_t *descriptor)
+{
+  LayeredMaterialUseWarning_t *warning = descriptor->useWarnings;
+
+  while (warning)
+  {
+    LayeredMaterialUseWarning_t *next = warning->next;
+    free(warning);
+    warning = next;
+  }
+  descriptor->useWarnings = NULL;
+}
+
+/* Native 0x43E6F0.  Do not use the generated BSP material name here: the
+   diagnostic deliberately names each source material in its original order. */
+static void Tris_FormatLayeredMaterialCombinationName(
+  const LayeredMaterialDescriptor_t *descriptor, char *buffer, size_t bufferSize)
+{
+  int layerIndex;
+  int length = 0;
+
+  Assert(descriptor->layerCount >= 2 && descriptor->layerCount <= 5,
+    s_assertDisable_TriangulateSurf);
+  for (layerIndex = 0; layerIndex < descriptor->layerCount - 2; ++layerIndex)
+  {
+    int written = _snprintf(buffer + length, bufferSize - length, "%s, ",
+      descriptor->mtlRaw[layerIndex]->name);
+    if (written < 0 || (size_t)written >= bufferSize - length)
+      Com_Error("layered material combination name is too long");
+    length += written;
+  }
+  _snprintf(buffer + length, bufferSize - length, "%s and %s",
+    descriptor->mtlRaw[descriptor->layerCount - 2]->name,
+    descriptor->mtlRaw[descriptor->layerCount - 1]->name);
+  buffer[bufferSize - 1] = '\0';
+}
+
+/* Native 0x446060. */
+static void Tris_StoreLayeredMaterialUseWarnings(
+  LayeredMaterialDescriptor_t *descriptor, const float *origins,
+  const float *directions, int groupCount)
+{
+  int groupIndex;
+
+  for (groupIndex = 0; groupIndex < groupCount; ++groupIndex)
+  {
+    LayeredMaterialUseWarning_t *warning =
+      (LayeredMaterialUseWarning_t *)malloc(sizeof(*warning));
+    if (!warning)
+      Com_Error("Tris_StoreLayeredMaterialUseWarnings: out of memory");
+    VectorAdd(g_entities[g_currentEntityIndex].origin,
+      origins + 3 * groupIndex, warning->origin);
+    VectorCopy(directions + 3 * groupIndex, warning->direction);
+    warning->next = descriptor->useWarnings;
+    descriptor->useWarnings = warning;
+  }
+}
+
+/* Native 0x445C50.  `groupId` is normalized by 0x445240 before this runs,
+   so each reported use corresponds to one connected direct-triangle subgroup
+   rather than to an arbitrary triangle count. */
+static void Tris_ReportLayeredMaterialCombinationUse(
+  LayeredMaterialDescriptor_t *descriptor, TriRecord_t *records, int recordCount,
+  int groupCount)
+{
+  float *origins;
+  float *directions;
+  int groupIndex;
+  char combinationName[1028];
+
+  Assert(descriptor && descriptor->layerCount > 1,
+    s_assertDisable_Tris_EmitTriangles);
+  Assert(groupCount > 0, s_assertDisable_Tris_EmitTriangles);
+  origins = (float *)malloc(sizeof(float) * 3 * groupCount);
+  directions = (float *)malloc(sizeof(float) * 3 * groupCount);
+  if (!origins || !directions)
+    Com_Error("Tris_ReportLayeredMaterialCombinationUse: out of memory");
+
+  for (groupIndex = 0; groupIndex < groupCount; ++groupIndex)
+  {
+    float groupArea = 0.0f;
+    float largestArea = 0.0f;
+    int recordIndex;
+
+    VectorClear(origins + 3 * groupIndex);
+    VectorClear(directions + 3 * groupIndex);
+    for (recordIndex = 0; recordIndex < recordCount; ++recordIndex)
+    {
+      TriRecord_t *record = &records[recordIndex];
+      const float *point0;
+      const float *point1;
+      const float *point2;
+      float edge21[3];
+      float edge10[3];
+      float normal[3];
+      float doubleArea;
+
+      if (record->groupId != groupIndex)
+        continue;
+      point0 = DRAW_VERT(record->vertIdx[0]).pos;
+      point1 = DRAW_VERT(record->vertIdx[1]).pos;
+      point2 = DRAW_VERT(record->vertIdx[2]).pos;
+      VectorSubtract(point2, point1, edge21);
+      VectorSubtract(point1, point0, edge10);
+      CrossProduct(edge21, edge10, normal);
+      doubleArea = (float)VectorLength(normal);
+      groupArea += doubleArea * 0.5f;
+      descriptor->combinationArea += doubleArea * 0.5f;
+      if (doubleArea > largestArea)
+      {
+        largestArea = doubleArea;
+        ComputeLayeredGroupTriangleNormal(point0, point1, point2,
+          directions + 3 * groupIndex);
+        VectorAdd(point0, point1, origins + 3 * groupIndex);
+        VectorAdd(origins + 3 * groupIndex, point2,
+          origins + 3 * groupIndex);
+        VectorScale(origins + 3 * groupIndex, 0.3333333432674408f,
+          origins + 3 * groupIndex);
+      }
+    }
+    Assert(groupArea > 0.0f, s_assertDisable_Tris_EmitTriangles);
+    if (groupArea < warnLayerArea)
+    {
+      Tris_FormatLayeredMaterialCombinationName(descriptor, combinationName,
+        sizeof(combinationName));
+      Error(0, origins + 3 * groupIndex, directions + 3 * groupIndex,
+        0, -1, -1, "little area used by layered material combination %s",
+        combinationName);
+    }
+  }
+
+  descriptor->combinationUseCount += groupCount;
+  if (descriptor->combinationUseCount >= warnLayerUses)
+    Tris_ClearLayeredMaterialUseWarnings(descriptor);
+  else
+    Tris_StoreLayeredMaterialUseWarnings(descriptor, origins, directions,
+      groupCount);
+  free(directions);
+  free(origins);
+}
+
+/* Native 0x43E5E0. */
+void Tris_ReportLayeredMaterialCombinationErrors(void)
+{
+  int descriptorIndex;
+  char combinationName[1028];
+
+  for (descriptorIndex = 0;
+       descriptorIndex < s_layeredMaterialDescriptorCount;
+       ++descriptorIndex)
+  {
+    LayeredMaterialDescriptor_t *descriptor =
+      &s_layeredMaterialDescriptors[descriptorIndex];
+    LayeredMaterialUseWarning_t *warning;
+    int useIndex = 0;
+
+    if (!descriptor->useWarnings)
+      continue;
+    Tris_FormatLayeredMaterialCombinationName(descriptor, combinationName,
+      sizeof(combinationName));
+    for (warning = descriptor->useWarnings; warning; warning = warning->next)
+    {
+      Error(0, warning->origin, warning->direction, 0, -1, -1,
+        "use %i of %i for layered material combination %s", ++useIndex,
+        descriptor->combinationUseCount, combinationName);
+    }
+  }
+}
+
+/* tris_combinelayers.cpp in the retail tree.  The compatibility carrier is
+   wider than the retail 96-byte record, so the implementation lives below
+   the layer-record helpers rather than treating TriRecord_t as packed data. */
+static void CombineLayeredTriangleGroups(int *indexMap);
+
+static LayeredMaterialDescriptor_t *Tris_CreateLayeredMaterialDescriptor(
+  ShaderInfo_t *const *materials, int layerCount)
+{
+  LayeredMaterialDescriptor_t *descriptor;
+  char name[64];
+  int i;
+  int nameLength;
+
+  Assert(layerCount >= 1 && layerCount <= 5, s_assertDisable_TriangulateSurf);
+  if (layerCount == 1)
+    nameLength = _snprintf(name, sizeof(name), "%s", materials[0]->name);
+  else
+  {
+    name[0] = '*';
+    name[1] = 0;
+    nameLength = 1;
+    for (i = 0; i < layerCount; ++i)
+    {
+      int materialIndex = EmitMaterial(materials[i], materials[i]->contentFlags);
+      int written = _snprintf(name + nameLength, sizeof(name) - nameLength,
+        "%d%s%s", materialIndex, HasNonIdentityNormalMap(materials[i]) ? "n" : "",
+        i + 1 == layerCount ? "" : "_");
+      if (written < 0 || written >= (int)sizeof(name) - nameLength)
+        Com_Error("layered material name is too long");
+      nameLength += written;
+    }
+  }
+  if (nameLength < 0 || nameLength >= (int)sizeof(name))
+    Com_Error("layered material name is too long");
+
+  for (i = 0; i < s_layeredMaterialDescriptorCount; ++i)
+  {
+    if (!strcmp(s_layeredMaterialDescriptors[i].name, name))
+      return &s_layeredMaterialDescriptors[i];
+  }
+  if (s_layeredMaterialDescriptorCount == MAX_LAYERED_MATERIAL_DESCRIPTORS)
+    Com_Error("MAX_MAP_LAYERED_MATERIALS (%i) exceeded -- too many unique materials and/or unique combinations of layered materials\n",
+      MAX_LAYERED_MATERIAL_DESCRIPTORS);
+
+  descriptor = &s_layeredMaterialDescriptors[s_layeredMaterialDescriptorCount];
+  memset(descriptor, 0, sizeof(*descriptor));
+  descriptor->materialIndex = (unsigned short)AddBspMaterial(name,
+    materials[0]->surfaceFlags, materials[0]->contentFlags);
+
+  /* 0x4437C0 allocates the descriptor only if AddBspMaterial retained the
+     generated name.  At the material limit it instead recurses through the
+     $default one-layer descriptor. */
+  if (strcmp(bspMaterials[descriptor->materialIndex].material, name))
+  {
+    ShaderInfo_t *defaultMaterial;
+
+    Assert(layerCount != 1 || strcmp(name, "$default"),
+      s_assertDisable_TriangulateSurf);
+    Assert(!strcmp(bspMaterials[descriptor->materialIndex].material, "$default"),
+      s_assertDisable_TriangulateSurf);
+    defaultMaterial = LoadMaterial("$default");
+    return Tris_CreateLayeredMaterialDescriptor(&defaultMaterial, 1);
+  }
+
+  ++s_layeredMaterialDescriptorCount;
+  strcpy(descriptor->name, name);
+  descriptor->layerCount = (unsigned char)layerCount;
+  for (i = 0; i < layerCount; ++i)
+  {
+    descriptor->mtlRaw[i] = materials[i];
+    if (HasNonIdentityNormalMap(materials[i]))
+    {
+      Assert(descriptor->normalMapLayerCount < 4,
+        s_assertDisable_TriangulateSurf);
+      descriptor->normalMapLayerIndices[descriptor->normalMapLayerCount++] = (unsigned char)i;
+    }
+  }
+  return descriptor;
+}
+
+static const LayeredMaterialDescriptor_t *Tris_FindLayeredMaterialDescriptor(
+  unsigned short materialSort)
+{
+  int descriptorIndex;
+
+  for (descriptorIndex = 0;
+       descriptorIndex < s_layeredMaterialDescriptorCount;
+       ++descriptorIndex)
+  {
+    const LayeredMaterialDescriptor_t *descriptor =
+      &s_layeredMaterialDescriptors[descriptorIndex];
+    if (descriptor->layerCount > 1 && descriptor->materialIndex == materialSort)
+      return descriptor;
+  }
+  return NULL;
+}
 
 /* CoD4 0x449CF0.  The pointer/capacity part of the native 72-byte
    descriptor is static in KIWI; the output counters must still begin each
@@ -239,6 +584,14 @@ static void Tris_InitDrawSurfaceContext(DrawSurfaceContext_t *context)
 /* CoD4 0x449CA0. */
 void Tris_InitDrawSurfaceContexts(void)
 {
+  if (!s_layeredVertexScratch)
+  {
+    s_layeredVertexScratch = (unsigned char *)malloc(
+      (MAX_MAP_DRAW_VERTS + 1) * TRIS_VERTEX_LAYER_SCRATCH_STRIDE);
+    if (!s_layeredVertexScratch)
+      Com_Error("Tris_InitDrawSurfaceContexts: out of memory for layered vertex scratch");
+  }
+  s_drawSurfaceContexts[0].triSoupVertexLayerData = s_layeredVertexScratch;
   Tris_InitDrawSurfaceContext(&s_drawSurfaceContexts[0]);
   Tris_InitDrawSurfaceContext(&s_drawSurfaceContexts[1]);
   s_drawSurfaceContext = &s_drawSurfaceContexts[0];
@@ -252,6 +605,7 @@ static void Tris_SelectDrawSurfaceContext(int unlayered)
 #define bspTriangles              (s_drawSurfaceContext->triangles)
 #define bspDrawVerts              (s_drawSurfaceContext->drawVerts)
 #define g_drawVertexBuf           (s_drawSurfaceContext->triSoupVerts)
+#define g_drawVertexLayerData     (s_drawSurfaceContext->triSoupVertexLayerData)
 #define bspDrawIndexes            (s_drawSurfaceContext->drawIndexes)
 #define bspAabbTrees              (s_drawSurfaceContext->aabbTrees)
 #define numBSPTriSoups            (*s_drawSurfaceContext->numTriSoups)
@@ -259,6 +613,9 @@ static void Tris_SelectDrawSurfaceContext(int unlayered)
 #define numBSPDrawVertsEmitted    (*s_drawSurfaceContext->numDrawVertsEmitted)
 #define numBSPDrawIndexes         (*s_drawSurfaceContext->numDrawIndexes)
 #define numBSPAabbTrees           (*s_drawSurfaceContext->numAabbTrees)
+
+#define bspTriSoupLayerData       (g_drawVertexLayerData \
+  ? g_drawVertexLayerData + TRIS_VERTEX_LAYER_SCRATCH_STRIDE : NULL)
 
 
 /*
@@ -764,7 +1121,23 @@ void FreeTriSurfProps(void)
 
 int *FreeAllTriSurfs(void)
 {
-  /* Retained donor-facing entry point; CoD4 0x43D450 is FreeTriSurfProps. */
+  int cell;
+  int cellCount;
+
+  /* CoD4 0x43E960 owns the transient lists until both output contexts have
+     tessellated them.  FreeTriSurf repairs the active cell head, so consume
+     each list from its head rather than caching links across the free. */
+  if ( g_currentEntityIndex <= 0 )
+    cellCount = numBSPCells + numBSPCullGroups;
+  else
+    cellCount = 1;
+
+  for ( cell = 0; cell < cellCount; ++cell )
+  {
+    while ( triSurfCellArray[cell] )
+      FreeTriSurf(triSurfCellArray[cell]);
+  }
+
   FreeTriSurfProps();
   return 0;
 }
@@ -794,30 +1167,21 @@ TriSurfPlanesMatchScaled
 Scaled plane distance match with optional wrap-around check.
 ================
 */
-bool TriSurfPlanesMatchScaled(float *point, float *plane1, float *plane2, int scale, float tolerance, char wrapAround)
+bool TriSurfPlanesMatchScaled(float *point, float *plane1, float *plane2, int scale, float tolerance, char globalTexture)
 {
-  long double scaledDiff;
-  bool result;
+  float diff;
+  float offset;
   float scaleFloat;
-  float wrappedDiff;
 
+  /* CoD4 0x43DA40 is floorf(diff + 0.5f), and 0x43DAD0 tests
+     fabsf(diff - offset) * autoTexScale <= 0.5.  The offset is enabled
+     only for TOOL_GLOBAL_TEXTURE (material toolFlags bit 7), allowing an
+     arbitrary integral UV translation rather than just a single wrap. */
+  diff = (float)(DotProduct120(plane1, point) + plane1[3]
+               - (DotProduct120(plane2, point) + plane2[3]));
+  offset = globalTexture ? floorf(diff + 0.5f) : 0.0f;
   scaleFloat = (float)scale;
-  scaledDiff = fabs(DotProduct120(plane1, point) + plane1[3]
-                  - (DotProduct120(plane2, point) + plane2[3]))
-             * scaleFloat;
-  result = 1;
-  if ( scaledDiff > tolerance )
-  {
-    if ( !wrapAround ) {
-      result = 0;
-    } else {
-      wrappedDiff = scaledDiff;
-      if ( fabs((double)wrappedDiff - scaleFloat) > tolerance )
-        result = 0;
-    }
-  }
-
-  return result;
+  return fabsf(diff - offset) * scaleFloat <= tolerance;
 }
 
 /*
@@ -891,6 +1255,10 @@ char TriSurfPropsGroupable(TriSurfProps_t *s1, TriSurfProps_t *s2, int *testPoin
   #define GROUP_COLOR_TOLERANCE  0.25f
   int i, n;
   float *pt;
+  TriSurfPropsSidecar_t *sidecar1;
+  TriSurfPropsSidecar_t *sidecar2;
+  MapDrawSurf_t *drawSurf1;
+  MapDrawSurf_t *drawSurf2;
 
   if ( s1 == s2 )
     return 1;
@@ -900,6 +1268,26 @@ char TriSurfPropsGroupable(TriSurfProps_t *s1, TriSurfProps_t *s2, int *testPoin
     return s2->coalesceChain ? CoalesceChainGroupable(s1->coalesceChain, s2->coalesceChain, testPoints) : 0;
   if ( s2->coalesceChain )
     return 0;
+
+  /* Native 0x43D550 compares the source MapDrawSurf material, reflection
+     probe and transient +12 lightmap/primary-light field before the props
+     lightmap assignment.  Comparing only the ShaderInfo adapter allowed
+     unrelated source surfaces to merge and erased triangles on large maps. */
+  sidecar1 = TrisPropsSidecar_Get(s1);
+  sidecar2 = TrisPropsSidecar_Get(s2);
+  drawSurf1 = sidecar1 ? sidecar1->mapDrawSurf : NULL;
+  drawSurf2 = sidecar2 ? sidecar2->mapDrawSurf : NULL;
+  if (drawSurf1 || drawSurf2)
+  {
+    if (!drawSurf1 || !drawSurf2
+      || drawSurf1->material != drawSurf2->material
+      || drawSurf1->reflectionProbeIndex != drawSurf2->reflectionProbeIndex
+      || drawSurf1->lightmapIndex != drawSurf2->lightmapIndex
+      /* Native byte_52969C is initialized to one and has no writers, so
+         0x43D550 always includes MapDrawSurf +52 in the key. */
+      || drawSurf1->castsSunShadow != drawSurf2->castsSunShadow)
+      return 0;
+  }
 
   /* basic property checks */
   if ( s1->si != s2->si || s1->lmapIndex != s2->lmapIndex
@@ -916,16 +1304,16 @@ char TriSurfPropsGroupable(TriSurfProps_t *s1, TriSurfProps_t *s2, int *testPoin
   for ( i = 0, pt = (float *)(testPoints + 1); i < n; i++, pt += 3 )
   {
     double d;
-    int noClamp;
+    int globalTexture;
 
     d = DotProduct210(pt, s2->plane) - s2->plane[3];
     if ( d * d > GROUP_PLANE_DIST_SQ ) return 0;
     d = DotProduct210(pt, s1->plane) - s1->plane[3];
     if ( d * d > GROUP_PLANE_DIST_SQ ) return 0;
 
-    noClamp = !s2->si->globalTexture;
-    if ( !TriSurfPlanesMatchScaled(pt, &s1->texVecs[0], &s2->texVecs[0], s2->si->autoTexScaleW, GROUP_TEX_TOLERANCE, noClamp) ) return 0;
-    if ( !TriSurfPlanesMatchScaled(pt, &s1->texVecs[4], &s2->texVecs[4], s2->si->autoTexScaleH, GROUP_TEX_TOLERANCE, noClamp) ) return 0;
+    globalTexture = s2->si->globalTexture;
+    if ( !TriSurfPlanesMatchScaled(pt, &s1->texVecs[0], &s2->texVecs[0], s2->si->autoTexScaleW, GROUP_TEX_TOLERANCE, globalTexture) ) return 0;
+    if ( !TriSurfPlanesMatchScaled(pt, &s1->texVecs[4], &s2->texVecs[4], s2->si->autoTexScaleH, GROUP_TEX_TOLERANCE, globalTexture) ) return 0;
 
     /* Native 0x43D550 gates lmap-vector compatibility on material game flag
        bit 2.  lmapIndex is still an independent basic-property comparison
@@ -1056,7 +1444,8 @@ TriSurfProps_t *EmitTriSurface( float *texVecs, float *lmapVecs, float *colorVec
   props->lmapGroupId = -1;
   props->lmapIndex = 31;
   props->subdivisions = si->subdivisions;
-  props->contentFlagBit8 = (drawOrder >> 8) & 1;
+  /* Native 0x43FB60 stores one unconditionally at byte +145. */
+  props->contentFlagBit8 = 1;
   props->surfFlagBit7 = si->surfFlags_bit7 != 0;
   VectorCopy(plane, props->plane);
   props->plane[3] = plane[3];
@@ -1567,6 +1956,10 @@ float *PickBestTriangle(float *normal, float *verts, int numVerts, float planeDi
   for ( i = 0; i < 3; i++ )
   {
     v = &verts[best[i] * VERT_STRIDE];
+    /* Native 0x4419B8/0x441A42/0x441AD5 computes a plane projection, but
+       each result is immediately overwritten by a raw VectorCopy at
+       0x4419CE/0x441A5B/0x441AEE.  The selected MeshVert positions are
+       therefore the inputs to vector derivation. */
     VectorCopy(v, &outPositions[i * 3]);
     outTexCoords[i * 2]      = v[3];
     outTexCoords[i * 2 + 1]  = v[4];
@@ -1796,12 +2189,12 @@ bool TrisCheckLightmapCellMatch( int axis, TriSurf_t *ts1, TriSurf_t *ts2, float
   #define LMAP_CELL_EPSILON 0.0020000001f
   float min1 = MULF(inv, ts1->mins[axis], LMAP_CELL_EPSILON);
   float min2 = MULF(inv, ts2->mins[axis], LMAP_CELL_EPSILON);
-  if ( fistp_sub(min1, -FISTP_HALF_BIAS) != fistp_sub(min2, -FISTP_HALF_BIAS) )
+  if ( fistp_sub(min1, FISTP_HALF_BIAS) != fistp_sub(min2, FISTP_HALF_BIAS) )
     return 0;
 
   float max1 = MULF(inv, ts1->maxs[axis], -LMAP_CELL_EPSILON);
   float max2 = MULF(inv, ts2->maxs[axis], -LMAP_CELL_EPSILON);
-  return fistp_sub(max1, FISTP_HALF_BIAS) == fistp_sub(max2, FISTP_HALF_BIAS);
+  return RoundPositiveFloatToInt(max1) == RoundPositiveFloatToInt(max2);
 }
 
 /*
@@ -2060,7 +2453,7 @@ void TrisSnapNearbyVertices( int a1_unused )
       int propsCount, projAxis1, projAxis2;
       int outer, inner, p;
       CoalesceNode_t *chain;
-      double d1, d2;
+      float delta[2];
 
       GetProjectionAxes(ts->props->plane, &projAxis1, &projAxis2);
 
@@ -2084,11 +2477,11 @@ void TrisSnapNearbyVertices( int a1_unused )
           if ( indexMap[outerGlobal] == indexMap[innerGlobal] )
             continue;
 
-          d1 = drawVertBuffer[outerGlobal].pos[projAxis1] - drawVertBuffer[innerGlobal].pos[projAxis1];
-          d2 = drawVertBuffer[outerGlobal].pos[projAxis2] - drawVertBuffer[innerGlobal].pos[projAxis2];
+          delta[0] = drawVertBuffer[outerGlobal].pos[projAxis1] - drawVertBuffer[innerGlobal].pos[projAxis1];
+          delta[1] = drawVertBuffer[outerGlobal].pos[projAxis2] - drawVertBuffer[innerGlobal].pos[projAxis2];
 
           #define SNAP_DIST_SQ 0.0000019083022f
-          if ( MulAdd2(d2,d2, d1,d1) >= SNAP_DIST_SQ )
+          if ( Vec2LengthSquared(delta) >= SNAP_DIST_SQ )
             continue;
 
           /* merge index maps across all props layers */
@@ -2312,48 +2705,17 @@ void SmoothVertexNormals(int *indexMap)
 }
 
 /*
-================
-CompareTrisByMaterialAndVertexIndices
-
-Qsort comparator that orders triangles by material index, then by vertex indices
-================
-*/
-int CompareTrisByMaterialAndVertexIndices( int *a, int *b )
-{
-  TriRecord_t *tri0 = (TriRecord_t *)a;
-  TriRecord_t *tri1 = (TriRecord_t *)b;
-  int d;
-
-  d = tri0->drawOrder - tri1->drawOrder;
-  if ( d ) return d;
-  d = tri0->cullGroupIdx - tri1->cullGroupIdx;
-  if ( d ) return d;
-  d = (int)((char *)tri0->si - (char *)tri1->si);
-  if ( d ) return d;
-  d = (int)tri0->reflectionProbeIndex - (int)tri1->reflectionProbeIndex;
-  if ( d ) return d;
-  d = (int)tri0->primaryLightIndex - (int)tri1->primaryLightIndex;
-  if ( d ) return d;
-  d = (int)tri0->castsSunShadow - (int)tri1->castsSunShadow;
-  if ( d ) return d;
-  return tri0->lightStyle - tri1->lightStyle;
-}
-
-/*
  * CoD4 0x444D20 invokes VS2005's std::sort wrapper (0x44C1C0) over a
  * 96-byte direct-triangle record.  KIWI's TriRecord_t is intentionally
  * wider, so never sort it as though it were the native carrier.  This
  * adapter preserves the native key offsets and carries only a source-record
  * index; the resulting permutation is applied back to the expanded records.
- * It is deliberately not a 0x449BB0 combine carrier: native 0x44F250 needs
- * lyrMtlDesc at +8, three direct-vertex indices at +12/+16/+20, and the
- * referenced 104-byte multi-UV/weight/color vertices.  None exist in this
- * sort-only adapter or in TriRecord_t's single-layer DrawVert_t payload.
- *
- * The <=32 native path was deliberately not substituted for KIWI's qsort:
- * doing so regressed the sealed oracle because the expanded record does not
- * yet preserve all native direct-emission semantics.  Only the >32 path uses
- * this isolated carrier.
+ * The direct carrier keys map 0x444120 exactly: +0 is the combined visibility
+ * group, +4 is the first nonzero MapDrawSurf reflection-probe byte across
+ * the selected layers, +5 is the owner lightmap byte, +6 is primary light,
+ * +7 is castsSunShadow, and +8 is the layered-material descriptor.
+ * 0x449BB0/0x44FD20 still use the expanded record's three DrawVert_t entries
+ * plus extraLayerUvs as the equivalent of the native 104-byte vertices.
  */
 typedef struct NativeDirectTriSortCarrier_s {
   short         visGroup;       /* [0] native signed short key */
@@ -2362,7 +2724,7 @@ typedef struct NativeDirectTriSortCarrier_s {
   unsigned char key5;           /* [5] */
   unsigned char key6;           /* [6] */
   unsigned char key7;           /* [7] optional sun-shadow key */
-  ShaderInfo_t *material;       /* [8] */
+  const void   *material;       /* [8] native layered-material descriptor */
   int           sourceIndex;    /* [12] adapter-only payload */
   unsigned char unused[80];     /* [16..95] native carrier extent */
 } NativeDirectTriSortCarrier_t;
@@ -2383,8 +2745,6 @@ static bool NativeDirectTriCarrierLess(const NativeDirectTriSortCarrier_t *left,
     return left->key6 < right->key6;
   if (left->key5 != right->key5)
     return left->key5 < right->key5;
-  if (left->unused[0] != right->unused[0])
-    return left->unused[0] < right->unused[0];
   return left->key7 < right->key7;
 }
 
@@ -2628,32 +2988,69 @@ static void NativeDirectTriCarrierSortRange(NativeDirectTriSortCarrier_t *record
   }
 }
 
-static void Tris_SortLargeDirectRecordCarrier(TriRecord_t *records, int count)
+static short Tris_GetNativeDirectVisGroup(const TriRecord_t *record)
+{
+  return (short)(record->drawOrder >= 0
+    ? record->drawOrder : numBSPCells + record->cullGroupIdx);
+}
+
+/* Native 0x444120 initializes direct-record byte +4 to zero, then visits the
+   selected coalesce leaves in descriptor order.  While the byte is still
+   zero it reads that leaf's MapDrawSurf +8 reflection-probe byte;
+   consequently this is the first nonzero selected probe, or zero when every
+   selected layer uses the default probe.  0x443310 is the one-layer case. */
+static unsigned char Tris_GetNativeDirectLayerReflectionProbe(
+  const TriRecord_t *record)
+{
+  unsigned char reflectionProbeIndex = 0;
+  int layerIndex;
+
+  Assert(record && record->layerCount >= 1 && record->layerCount <= 5,
+    s_assertDisable_Tris_EmitTriangles);
+  for (layerIndex = 0; layerIndex < record->layerCount; ++layerIndex)
+  {
+    TriSurfPropsSidecar_t *sidecar;
+
+    Assert(record->layerProps[layerIndex],
+      s_assertDisable_Tris_EmitTriangles);
+    sidecar = TrisPropsSidecar_Get(record->layerProps[layerIndex]);
+    Assert(sidecar && sidecar->mapDrawSurf,
+      s_assertDisable_Tris_EmitTriangles);
+    if (!reflectionProbeIndex)
+      reflectionProbeIndex =
+        (unsigned char)sidecar->mapDrawSurf->reflectionProbeIndex;
+  }
+  return reflectionProbeIndex;
+}
+
+static void Tris_SortDirectRecordCarrier(TriRecord_t *records, int count)
 {
   NativeDirectTriSortCarrier_t *carriers;
   int *originAtPosition;
   int *positionForOrigin;
   int i;
 
-  Assert(count > 32, s_assertDisable_Tris_EmitTriangles);
+  if (count < 2)
+    return;
   carriers = (NativeDirectTriSortCarrier_t *)malloc(sizeof(*carriers) * count);
   originAtPosition = (int *)malloc(sizeof(*originAtPosition) * count);
   positionForOrigin = (int *)malloc(sizeof(*positionForOrigin) * count);
   if (!carriers || !originAtPosition || !positionForOrigin)
-    Com_Error("Tris_SortLargeDirectRecordCarrier: out of memory");
+    Com_Error("Tris_SortDirectRecordCarrier: out of memory");
 
   for (i = 0; i < count; ++i)
   {
     TriRecord_t *record = &records[i];
     NativeDirectTriSortCarrier_t *carrier = &carriers[i];
     memset(carrier, 0, sizeof(*carrier));
-    carrier->visGroup = (short)record->drawOrder;
-    carrier->key4 = (unsigned char)record->cullGroupIdx;
-    carrier->key5 = (unsigned char)record->lightStyle;
-    carrier->key6 = record->reflectionProbeIndex;
+    carrier->visGroup = Tris_GetNativeDirectVisGroup(record);
+    Assert(record->baseProps && record->layerProps[0],
+      s_assertDisable_Tris_EmitTriangles);
+    carrier->key4 = Tris_GetNativeDirectLayerReflectionProbe(record);
+    carrier->key5 = (unsigned char)record->baseProps->lmapIndex;
+    carrier->key6 = record->primaryLightIndex;
     carrier->key7 = record->castsSunShadow;
-    carrier->unused[0] = record->primaryLightIndex;
-    carrier->material = record->si;
+    carrier->material = record->materialIdentity;
     carrier->sourceIndex = i;
     originAtPosition[i] = i;
     positionForOrigin[i] = i;
@@ -2936,6 +3333,9 @@ int GroupAndMergeTriSubgroups(TriRecord_t *tris, int triCount, int *indexMap)
   result = GroupAdjacentTris(tris, triCount, indexMap);
   if ( result > 1 )
     return GroupTriSurfsIntoSubgroups(tris, triCount, result);
+  /* 0x445240 also normalizes the sole direct subgroup to zero. */
+  for (int triIndex = 0; triIndex < triCount; ++triIndex)
+    tris[triIndex].groupId = 0;
   return result;
 }
 
@@ -3003,22 +3403,99 @@ static const float k_mergeLmScale     = (float)LIGHTMAP_SIZE;
 /* CoD4 0x447290. */
 static bool MatchLightmapUVs(const BspDrawVert_t *dvA, const BspDrawVert_t *dvB)
 {
-  volatile float scaledDu = MULF(k_mergeLmScale, dvB->lmUv[0], -dvA->lmUv[0]);
-  double scaledDv = MULF(k_mergeLmScale, dvB->lmUv[1], -dvA->lmUv[1]);
+  float scaledDelta[2];
 
-  return MulAdd2(scaledDv, scaledDv, scaledDu, scaledDu) <= k_mergeUvThresh;
+  scaledDelta[0] = MULF(k_mergeLmScale, dvB->lmUv[0], -dvA->lmUv[0]);
+  scaledDelta[1] = MULF(k_mergeLmScale, dvB->lmUv[1], -dvA->lmUv[1]);
+  return Vec2LengthSquared(scaledDelta) <= k_mergeUvThresh;
 }
+
+static bool MatchTextureUVValues(const float *uvA, const float *uvB,
+                                 const ShaderInfo_t *material);
 
 /* CoD4 0x4481B0. */
 static bool MatchTextureUVs(const BspDrawVert_t *dvA, const BspDrawVert_t *dvB,
                             const ShaderInfo_t *material)
 {
+  return MatchTextureUVValues(dvA->uv, dvB->uv, material);
+}
+
+static bool MatchTextureUVValues(const float *uvA, const float *uvB,
+                                 const ShaderInfo_t *material)
+{
   volatile float scaledDu = (float)((double)material->autoTexScaleW *
-                                    (dvA->uv[0] - dvB->uv[0]));
-  double scaledDv = (double)material->autoTexScaleH * (dvA->uv[1] - dvB->uv[1]);
+                                    (uvA[0] - uvB[0]));
+  double scaledDv = (double)material->autoTexScaleH * (uvA[1] - uvB[1]);
   double distSq = (double)scaledDu * scaledDu + scaledDv * scaledDv;
 
   return distSq <= (double)k_mergeUvThresh;
+}
+
+/* CoD4 0x4481E0.  Texture coordinates need stitching/centering when any
+   material in the selected descriptor is non-global, not just its base
+   layer. */
+static bool HasNonGlobalTextureLayer(const TriRecord_t *record)
+{
+  int layerIndex;
+
+  if (record->layerCount <= 1)
+    return !record->si->globalTexture;
+  else
+  {
+    const LayeredMaterialDescriptor_t *descriptor =
+      (const LayeredMaterialDescriptor_t *)record->materialIdentity;
+
+    Assert(descriptor && descriptor->layerCount >= 1 && descriptor->layerCount <= 5,
+      s_assertDisable_EmitTriangleSoup);
+    for (layerIndex = 0; layerIndex < descriptor->layerCount; ++layerIndex)
+    {
+      if (!descriptor->mtlRaw[layerIndex]->globalTexture)
+        return true;
+    }
+  }
+  return false;
+}
+
+/* Native 0x447ED0 compares every extra layer UV and, across different
+   source triangles, both texture directions for each normal-mapped layer. */
+static bool CanMergeVertexLayerData(const unsigned char *cmpLayer,
+                                    const unsigned char *curLayer,
+                                    const TriRecord_t *cmpTri,
+                                    const TriRecord_t *curTri)
+{
+  int layerIndex;
+
+  if (cmpTri->layerCount != curTri->layerCount)
+    return false;
+  if (cmpTri->layerCount <= 1)
+    return true;
+  Assert(cmpLayer && curLayer, s_assertDisable_EmitTriangleSoup);
+
+  for (layerIndex = 1; layerIndex < cmpTri->layerCount; ++layerIndex)
+  {
+    const float *cmpUv = (const float *)(cmpLayer + 8 * (layerIndex - 1));
+    const float *curUv = (const float *)(curLayer + 8 * (layerIndex - 1));
+    ShaderInfo_t *material = cmpTri->layerProps[layerIndex]->si;
+    if (!MatchTextureUVValues(cmpUv, curUv, material))
+      return false;
+  }
+
+  if (cmpTri != curTri)
+  {
+    for (layerIndex = 0; layerIndex < cmpTri->layerCount; ++layerIndex)
+    {
+      const TriSurfProps_t *cmpProps = cmpTri->layerProps[layerIndex];
+      const TriSurfProps_t *curProps = curTri->layerProps[layerIndex];
+      if (HasNonIdentityNormalMap(cmpProps->si)
+          && (DotProduct210(cmpProps->texVecs, curProps->texVecs) <= 0.0
+              || DotProduct210(cmpProps->texVecs + 4, curProps->texVecs + 4) <= 0.0))
+      {
+        ++numUnmergeableTexVerts;
+        return false;
+      }
+    }
+  }
+  return true;
 }
 
 /* CoD4 0x447ED0. */
@@ -3086,6 +3563,8 @@ Original passes a1 in EBX register; now uses g_emitDrawVertCount static global.
 ================
 */
 static TriSoup_t *g_emitDrawVertCount;
+static const TriRecord_t *g_emitTriRecord;
+static int g_emitTriRecordVertex;
 
 int EmitDrawVert( int a1_unused, DrawVert_t *src )
 {
@@ -3105,13 +3584,34 @@ int EmitDrawVert( int a1_unused, DrawVert_t *src )
   tmp.lmUv[0] = src->lmUv[0];
   tmp.lmUv[1] = src->lmUv[1];
 
-  if ( numBSPDrawVertsEmitted == MAX_MAP_DRAW_VERTS )
+  /* 0x446980 uses the soup-local count before incrementing it.  The native
+     context's vertex pointer is the logical bspTriSoupData base (the KIWI
+     backing allocation reserves element zero), so keep both arrays in that
+     coordinate system. */
+  destIdx = emitHdr->numVerts;
+  if ( destIdx + emitHdr->firstVert == MAX_MAP_DRAW_VERTS )
     Com_Error("MAX_MAP_DRAW_VERTS (%i) exceeded\n", MAX_MAP_DRAW_VERTS);
-
-  destIdx = emitHdr->numVerts + 1;
-  emitHdr->numVerts = destIdx;
-  memcpy(&g_drawVertexBuf[destIdx + emitHdr->firstVert], &tmp, sizeof(BspDrawVert_t));
-  return emitHdr->numVerts - 1;
+  ++emitHdr->numVerts;
+  memcpy(&bspTriSoupData[destIdx + emitHdr->firstVert], &tmp, sizeof(BspDrawVert_t));
+  if (g_drawVertexLayerData)
+  {
+    unsigned char *scratch = bspTriSoupLayerData
+      + TRIS_VERTEX_LAYER_SCRATCH_STRIDE * (destIdx + emitHdr->firstVert);
+    memset(scratch, 0, TRIS_VERTEX_LAYER_SCRATCH_STRIDE);
+    if (g_emitTriRecord && g_emitTriRecord->layerCount > 1)
+    {
+      int layerIndex;
+      Assert(g_emitTriRecordVertex >= 0 && g_emitTriRecordVertex < 3,
+        s_assertDisable_EmitTriangleSoup);
+      for (layerIndex = 1; layerIndex < g_emitTriRecord->layerCount; ++layerIndex)
+      {
+        memcpy(scratch + 8 * (layerIndex - 1),
+          g_emitTriRecord->extraLayerUvs[g_emitTriRecordVertex][layerIndex - 1],
+          sizeof(float) * 2);
+      }
+    }
+  }
+  return destIdx;
 }
 
 /* CoD4 0x4470A0.
@@ -3148,13 +3648,24 @@ bool MatchVertWithUVOffset( int *outUOffset, BspDrawVert_t *dvA, BspDrawVert_t *
   if ( colA[0] != colB[0] || colA[1] != colB[1] || colA[2] != colB[2] || colA[3] != colB[3] )
     return 0;
 
-  /* compute integer UV tile offset and check fractional residual */
-#ifdef _WIN64
+  /* CoD4 0x447300 stores the UV subtraction before choosing a texture
+     tile with floor(delta + 0.5). */
+  {
+    float delta[2];
+    float scaledDelta[2];
+
+    delta[0] = dvB->uv[0] - dvA->uv[0];
+    delta[1] = dvB->uv[1] - dvA->uv[1];
+    outUOffset[0] = (int)floorf(delta[0] + 0.5f);
+    outVOffset[0] = (int)floorf(delta[1] + 0.5f);
+    scaledDelta[0] = (delta[0] - (float)outUOffset[0])
+      * (float)material->autoTexScaleW;
+    scaledDelta[1] = (delta[1] - (float)outVOffset[0])
+      * (float)material->autoTexScaleH;
+    return Vec2LengthSquared(scaledDelta) <= k_mergeUvThresh;
+  }
   /* x87 inlines RoundFloatToInt, keeping float-float subtraction at 53-bit.
      Match by computing subtraction at double before rounding. */
-  outUOffset[0] = xs_RoundToInt((double)dvB->uv[0] - (double)dvA->uv[0] + FISTP_BIAS);
-  outVOffset[0] = xs_RoundToInt((double)dvB->uv[1] - (double)dvA->uv[1] + FISTP_BIAS);
-#else
 	
   /* Original inlines: fld B; fsub A; fadd BIAS; fistp — subtraction at 80-bit,
      no truncation to float before adding bias. Must NOT use RoundFloatToInt
@@ -3162,23 +3673,6 @@ bool MatchVertWithUVOffset( int *outUOffset, BspDrawVert_t *dvA, BspDrawVert_t *
      Original: fld B; fsub A; fadd BIAS; fistp — 80-bit throughout.
      xs_RoundToInt truncates to 64-bit double, causing 1-ULP rounding diffs.
      Use fistp_add which matches the original's fistp pattern. */
-  outUOffset[0] = fistp_add(dvB->uv[0] - dvA->uv[0], FISTP_BIAS);
-  outVOffset[0] = fistp_add(dvB->uv[1] - dvA->uv[1], FISTP_BIAS);
-#endif
-  {
-#ifdef _WIN64
-    float adj_du = (float)((double)dvB->uv[0] - (double)dvA->uv[0] - (double)(float)(int)outUOffset[0]);
-    double adj_dv = (double)dvB->uv[1] - (double)dvA->uv[1] - (double)(float)(int)outVOffset[0];
-#else
-    float adj_du = (float)((double)dvB->uv[0] - (double)dvA->uv[0] - (double)(int)outUOffset[0]);
-    double adj_dv = (double)dvB->uv[1] - (double)dvA->uv[1] - (double)(int)outVOffset[0];
-#endif
-    double scaled_du = (double)material->autoTexScaleW * adj_du;
-    double scaled_dv = (double)material->autoTexScaleH * adj_dv;
-    if ( MulAdd2(scaled_du,scaled_du, scaled_dv,scaled_dv) <= k_mergeUvThresh )
-      return 1;
-  }
-  return 0;
 }
 
 /* CoD4 0x446F30.
@@ -3340,66 +3834,259 @@ void StitchTriangleUVs( BspDrawVert_t *verts, signed int indexCount, int unused,
   free(neighbors);
 }
 
-/* Native 0x447560 dispatches every non-global material layer to 0x447610.
-   KIWI retains only the base 68-byte BSP vertex stream; its simpler global
-   centering path is recorded as a pending range/fallback port. */
-/*
-================
-CenterTextureCoordinates
+static float *Tris_GetLayerUv(unsigned char *layerData, int vertexIndex,
+                              int layerIndex)
+{
+  Assert(layerData && layerIndex >= 1 && layerIndex <= 4,
+    s_assertDisable_EmitTriangleSoup);
+  return (float *)(layerData
+    + vertexIndex * TRIS_VERTEX_LAYER_SCRATCH_STRIDE
+    + 8 * (layerIndex - 1));
+}
 
-Centers UV coordinates around origin for numerical stability
-================
-*/
-
-/* BSP vertices are 68 bytes (17 floats). UV at float offsets 7 and 8. */
-#define BSP_VERT_FLOATS 17
-#define BSP_UV_U 7
-#define BSP_UV_V 8
-
-void CenterTextureCoordinates(int numVerts, float *vertArray)
+static char CheckTriangleLayerUVCompatibility(unsigned short *idx,
+  int triOffset1, BspDrawVert_t *verts, unsigned char *layerData,
+  int layerIndex, ShaderInfo_t *material, int flags, int triOffset2,
+  int *outUOffset, int *outVOffset)
 {
   int i;
-  float *v;
-  float maxU, maxV, minU, minV;
-  float midU, midV, centerU, centerV;
+  int j;
+  int tempU;
+  int tempV;
+  char foundMatch = 0;
 
-  /* find min/max UV bounds */
-  minU = vertArray[BSP_UV_U];
-  maxU = vertArray[BSP_UV_U];
-  minV = vertArray[BSP_UV_V];
-  maxV = minV;
-
-  for ( i = 1; i < numVerts; i++ )
+  for (i = 0; i < 3; ++i)
   {
-    v = &vertArray[i * BSP_VERT_FLOATS];
-    if ( v[BSP_UV_U] < minU )
-      minU = v[BSP_UV_U];
-    else if ( v[BSP_UV_U] > maxU )
-      maxU = v[BSP_UV_U];
-    if ( v[BSP_UV_V] < minV )
-      minV = v[BSP_UV_V];
-    else if ( v[BSP_UV_V] > maxV )
-      maxV = v[BSP_UV_V];
+    int vertex2Index = idx[triOffset2 + i];
+    BspDrawVert_t *vertex2 = &verts[vertex2Index];
+    for (j = 0; j < 3; ++j)
+    {
+      int vertex1Index = idx[triOffset1 + j];
+      BspDrawVert_t *vertex1 = &verts[vertex1Index];
+      BspDrawVert_t projected1;
+      BspDrawVert_t projected2;
+
+      if (vertex2->pos[0] != vertex1->pos[0]
+          || vertex2->pos[1] != vertex1->pos[1]
+          || vertex2->pos[2] != vertex1->pos[2])
+        continue;
+      projected1 = *vertex1;
+      projected2 = *vertex2;
+      Vector2Copy(Tris_GetLayerUv(layerData, vertex1Index, layerIndex),
+                  projected1.uv);
+      Vector2Copy(Tris_GetLayerUv(layerData, vertex2Index, layerIndex),
+                  projected2.uv);
+      if (!MatchVertWithUVOffset(&tempU, &projected2, &projected1,
+                                 material, flags, &tempV))
+        return 0;
+      if (foundMatch)
+      {
+        if (*outUOffset != tempU || *outVOffset != tempV)
+          return 0;
+      }
+      else
+      {
+        *outUOffset = tempU;
+        *outVOffset = tempV;
+        foundMatch = 1;
+      }
+    }
   }
+  return 1;
+}
 
-  /* compute center and snap to integer boundary */
-  midU = MIDF(minU, maxU);
-  centerU = (float)fistp_sub(midU, FISTP_HALF_BIAS);
-  midV = MIDF(minV, maxV);
-  centerV = (float)fistp_sub(midV, FISTP_HALF_BIAS);
+static void AdjustTriangleLayerUVs_r(BspDrawVert_t *verts,
+  unsigned short *idx, unsigned char *layerData, int layerIndex,
+  ShaderInfo_t *material, int flags, int *neighbors, int triIdx,
+  char *visited)
+{
+  int edge;
 
-  /* shift all UVs by the offset */
-  for ( i = 0; i < numVerts; i++ )
+  Assert(!(triIdx % 3), s_assertDisable_AdjustTriangleUVs_r);
+  visited[triIdx] = 1;
+  for (edge = 0; edge < 3; ++edge)
   {
-    v = &vertArray[i * BSP_VERT_FLOATS];
-    v[BSP_UV_U] -= centerU;
-    v[BSP_UV_V] -= centerV;
+    int neighborTri = neighbors[triIdx + edge];
+    int uvOffsetU;
+    int uvOffsetV;
+    int vertex;
+
+    if (neighborTri < 0 || visited[neighborTri])
+      continue;
+    if (!CheckTriangleLayerUVCompatibility(idx, neighborTri, verts,
+          layerData, layerIndex, material, flags, triIdx,
+          &uvOffsetU, &uvOffsetV))
+      continue;
+    for (vertex = 0; vertex < 3; ++vertex)
+    {
+      float *uv = Tris_GetLayerUv(layerData, idx[neighborTri + vertex],
+                                  layerIndex);
+      uv[0] -= (float)uvOffsetU;
+      uv[1] -= (float)uvOffsetV;
+    }
+    AdjustTriangleLayerUVs_r(verts, idx, layerData, layerIndex, material,
+      flags, neighbors, neighborTri, visited);
   }
 }
 
-#undef BSP_VERT_FLOATS
-#undef BSP_UV_U
-#undef BSP_UV_V
+static void StitchTriangleLayerUVs(BspDrawVert_t *verts, int indexCount,
+  int numVerts, unsigned short *idx, unsigned char *layerData,
+  int layerIndex, ShaderInfo_t *material, int flags)
+{
+  int *neighbors = (int *)malloc(sizeof(int) * indexCount);
+  char *visited = (char *)malloc(indexCount);
+  int triangle;
+
+  (void)numVerts;
+  FindTriangleNeighbors(verts, idx, indexCount, neighbors);
+  memset(visited, 0, indexCount);
+  for (triangle = 0; triangle < indexCount; triangle += 3)
+  {
+    if (!visited[triangle])
+      AdjustTriangleLayerUVs_r(verts, idx, layerData, layerIndex, material,
+        flags, neighbors, triangle, visited);
+  }
+  free(visited);
+  free(neighbors);
+}
+
+/* CoD4 0x447860.  The global shift is valid only when it keeps both
+   dimensions inside the material's coordinate half-limits. */
+static bool TexCoordBoundsNeedPerTriangleCentering(const float *mins,
+  const float *maxs, const float *shift, const float *halfLimit)
+{
+  return mins[0] - shift[0] < -halfLimit[0]
+      || mins[1] - shift[1] < -halfLimit[1]
+      || maxs[0] - shift[0] > halfLimit[0]
+      || maxs[1] - shift[1] > halfLimit[1];
+}
+
+/* CoD4 0x447A70. */
+static float FindSafeTextureCoordinateShift(float mins, float maxs,
+  float initialShift, float halfLimit)
+{
+  const float rangeTolerance = 0.01f / 1024.0f;
+  float snappedMins = (float)SnapToIntegralPowerOf2(mins, 2, 10);
+  float snappedMaxs = (float)SnapToIntegralPowerOf2(maxs, 2, 10);
+  float doubleHalfLimit = halfLimit * 2.0f;
+  float shift = floorf((snappedMins - initialShift) / doubleHalfLimit)
+    * doubleHalfLimit + initialShift + halfLimit;
+
+  Assert(snappedMins - shift >= -halfLimit - rangeTolerance,
+    s_assertDisable_EmitTriangleSoup);
+  if (snappedMaxs - shift <= halfLimit)
+    return shift;
+
+  shift += halfLimit;
+  if (snappedMins - shift >= -halfLimit)
+    return shift;
+
+  shift -= halfLimit * 0.5f;
+  if (snappedMins - shift < -halfLimit)
+  {
+    do
+      shift -= 1.0f;
+    while (snappedMins - shift < -halfLimit);
+    Assert(snappedMaxs - shift <= halfLimit + rangeTolerance,
+      s_assertDisable_EmitTriangleSoup);
+  }
+  else
+  {
+    while (snappedMaxs - shift > halfLimit)
+      shift += 1.0f;
+    Assert(snappedMins - shift >= -halfLimit - rangeTolerance,
+      s_assertDisable_EmitTriangleSoup);
+  }
+  return shift;
+}
+
+/* CoD4 0x4478F0. */
+static void CenterTextureCoordinatesPerTriangle(float *vertArray, int stride,
+  int numVerts, const float *initialShift, const float *halfLimit)
+{
+  int vertexIndex;
+
+  Assert(numVerts % 3 == 0, s_assertDisable_EmitTriangleSoup);
+  for (vertexIndex = 0; vertexIndex < numVerts; vertexIndex += 3)
+  {
+    float mins[2];
+    float maxs[2];
+    float shift[2];
+    float *vert0 = vertArray + vertexIndex * stride;
+    float *vert1 = vert0 + stride;
+    float *vert2 = vert1 + stride;
+
+    Vector2Copy(vert0, mins);
+    Vector2Copy(vert0, maxs);
+    AddPointToBounds2D(vert1, mins, maxs);
+    AddPointToBounds2D(vert2, mins, maxs);
+    shift[0] = FindSafeTextureCoordinateShift(mins[0], maxs[0],
+      initialShift[0], halfLimit[0]);
+    shift[1] = FindSafeTextureCoordinateShift(mins[1], maxs[1],
+      initialShift[1], halfLimit[1]);
+    vert0[0] -= shift[0];
+    vert0[1] -= shift[1];
+    vert1[0] -= shift[0];
+    vert1[1] -= shift[1];
+    vert2[0] -= shift[0];
+    vert2[1] -= shift[1];
+  }
+}
+
+/* CoD4 0x447610.  Native gets these from a small helper which currently
+   returns 0x2000 regardless of the material dimension. */
+static void CenterTextureCoordinateRange(ShaderInfo_t *material,
+  float *vertArray, int stride, int numVerts)
+{
+  float mins[2];
+  float maxs[2];
+  float shift[2];
+  float halfLimit[2] = { 8192.0f, 8192.0f };
+  int vertexIndex;
+
+  (void)material;
+  Assert(numVerts > 0, s_assertDisable_EmitTriangleSoup);
+  Vector2Copy(vertArray, mins);
+  Vector2Copy(vertArray, maxs);
+  for (vertexIndex = 1; vertexIndex < numVerts; ++vertexIndex)
+    AddPointToBounds2D(vertArray + vertexIndex * stride, mins, maxs);
+
+  shift[0] = floorf(MIDF(mins[0], maxs[0]));
+  shift[1] = floorf(MIDF(mins[1], maxs[1]));
+  if (TexCoordBoundsNeedPerTriangleCentering(mins, maxs, shift, halfLimit))
+  {
+    float initialShift[2] = { floorf(mins[0]), floorf(mins[1]) };
+    CenterTextureCoordinatesPerTriangle(vertArray, stride, numVerts,
+      initialShift, halfLimit);
+    return;
+  }
+  for (vertexIndex = 0; vertexIndex < numVerts; ++vertexIndex)
+  {
+    float *uv = vertArray + vertexIndex * stride;
+    uv[0] -= shift[0];
+    uv[1] -= shift[1];
+  }
+}
+
+/* CoD4 0x447560 dispatches both the base 68-byte record and every selected
+   non-global material layer held in the 80-byte layered scratch record. */
+static void CenterDirectTextureCoordinates(BspDrawVert_t *verts,
+  unsigned char *layerData, int numVerts, const TriRecord_t *record)
+{
+  int layerIndex;
+
+  if (!record->si->globalTexture)
+    CenterTextureCoordinateRange(record->si, &verts[0].uv[0], 17, numVerts);
+  for (layerIndex = 1; layerIndex < record->layerCount; ++layerIndex)
+  {
+    ShaderInfo_t *layerMaterial = record->layerProps[layerIndex]->si;
+    if (!layerMaterial->globalTexture)
+    {
+      CenterTextureCoordinateRange(layerMaterial,
+        Tris_GetLayerUv(layerData, 0, layerIndex), 20, numVerts);
+    }
+  }
+}
 
 /* CoD4 0x447CC0. */
 /*
@@ -3416,11 +4103,19 @@ triSurfMap[] maps each vertex slot to its triSurf index.
 int MergeDuplicateVerts( BspDrawVert_t *verts, int numVerts, unsigned short *indices, int numIndices, TriRecord_t *triRecs, int flags )
 {
   int triMap[MAX_MERGE_VERTS + 4];  /* maps each vertex to its triangle index */
+  unsigned char *layerData = NULL;
   unsigned short cur, cmp;
   int i;
 
   if ( numVerts > MAX_MERGE_VERTS )
     Com_Error("MergeDuplicateVerts: %i vertices > %i\n", numVerts, MAX_MERGE_VERTS);
+  if (bspTriSoupLayerData)
+  {
+    ptrdiff_t firstVertex = verts - bspTriSoupData;
+    Assert(firstVertex >= 0, s_assertDisable_EmitTriangleSoup);
+    layerData = bspTriSoupLayerData
+      + firstVertex * TRIS_VERTEX_LAYER_SCRATCH_STRIDE;
+  }
 
   /* assign each vertex to its triangle (3 consecutive verts per triangle) */
   for ( i = 0; i < numVerts; i++ )
@@ -3437,12 +4132,20 @@ int MergeDuplicateVerts( BspDrawVert_t *verts, int numVerts, unsigned short *ind
 
     for ( cmp = 0; cmp < cur; cmp++ )
     {
-      if ( CanMergeVerts(&verts[cmp], &verts[cur],
+      if ( (!layerData || CanMergeVertexLayerData(
+              layerData + cmp * TRIS_VERTEX_LAYER_SCRATCH_STRIDE,
+              layerData + cur * TRIS_VERTEX_LAYER_SCRATCH_STRIDE,
+              &triRecs[triMap[cmp]], &triRecs[triMap[cur]]))
+        && CanMergeVerts(&verts[cmp], &verts[cur],
                          &triRecs[triMap[cmp]], &triRecs[triMap[cur]], flags) )
       {
         /* swap-remove: move last vertex into cur's slot */
         numVerts--;
         verts[cur] = verts[numVerts];
+        if (layerData)
+          memcpy(layerData + cur * TRIS_VERTEX_LAYER_SCRATCH_STRIDE,
+                 layerData + numVerts * TRIS_VERTEX_LAYER_SCRATCH_STRIDE,
+                 TRIS_VERTEX_LAYER_SCRATCH_STRIDE);
         triMap[cur] = triMap[numVerts];
 
         /* remap indices: cur→cmp (merged), last→cur (moved) */
@@ -3477,7 +4180,42 @@ static int StitchAndMergeTriangleVerts(BspDrawVert_t *verts, int numVerts,
   if (!material->globalTexture)
   {
     StitchTriangleUVs(verts, numIndices, numVerts, indices, material, flags);
-    CenterTextureCoordinates(numVerts, (float *)verts);
+  }
+
+  if (firstRec->layerCount > 1)
+  {
+    ptrdiff_t firstVertex = verts - bspTriSoupData;
+    unsigned char *layerData;
+    int layerIndex;
+
+    Assert(bspTriSoupLayerData && firstVertex >= 0,
+      s_assertDisable_EmitTriangleSoup);
+    layerData = bspTriSoupLayerData
+      + firstVertex * TRIS_VERTEX_LAYER_SCRATCH_STRIDE;
+    for (layerIndex = 1; layerIndex < firstRec->layerCount; ++layerIndex)
+    {
+      ShaderInfo_t *layerMaterial = firstRec->layerProps[layerIndex]->si;
+      if (!layerMaterial->globalTexture)
+      {
+        StitchTriangleLayerUVs(verts, numIndices, numVerts, indices,
+          layerData, layerIndex, layerMaterial, flags);
+      }
+    }
+  }
+
+  if (HasNonGlobalTextureLayer(firstRec))
+  {
+    ptrdiff_t firstVertex = verts - bspTriSoupData;
+    unsigned char *layerData = NULL;
+
+    if (firstRec->layerCount > 1)
+    {
+      Assert(bspTriSoupLayerData && firstVertex >= 0,
+        s_assertDisable_EmitTriangleSoup);
+      layerData = bspTriSoupLayerData
+        + firstVertex * TRIS_VERTEX_LAYER_SCRATCH_STRIDE;
+    }
+    CenterDirectTextureCoordinates(verts, layerData, numVerts, firstRec);
   }
 
   return MergeDuplicateVerts(verts, numVerts, indices, numIndices, firstRec, flags);
@@ -3592,6 +4330,7 @@ char GroupTriangles( TriSoup_t *ts )
   int numGroups, numTris, totalIndexCount;
   short *groupIds;
   BspDrawVert_t *savedVerts;
+  unsigned char *savedLayerData;
   unsigned short *savedIndices;
   unsigned short *remap;
   int grp, groupId, tri, v, srcVert;
@@ -3620,6 +4359,15 @@ char GroupTriangles( TriSoup_t *ts )
   numTris = totalIndexCount / 3;
   savedVerts = malloc(sizeof(BspDrawVert_t) * ts->numVerts);
   memcpy(savedVerts, &bspTriSoupData[ts->firstVert], sizeof(BspDrawVert_t) * ts->numVerts);
+  savedLayerData = NULL;
+  if (bspTriSoupLayerData)
+  {
+    savedLayerData = (unsigned char *)malloc(
+      TRIS_VERTEX_LAYER_SCRATCH_STRIDE * ts->numVerts);
+    memcpy(savedLayerData,
+      bspTriSoupLayerData + TRIS_VERTEX_LAYER_SCRATCH_STRIDE * ts->firstVert,
+      TRIS_VERTEX_LAYER_SCRATCH_STRIDE * ts->numVerts);
+  }
   savedIndices = malloc(sizeof(unsigned short) * totalIndexCount);
   memcpy(savedIndices, &bspDrawIndexes[ts->firstIndex], sizeof(unsigned short) * totalIndexCount);
   remap = malloc(sizeof(unsigned short) * totalIndexCount);
@@ -3655,6 +4403,13 @@ char GroupTriangles( TriSoup_t *ts )
           {
             remap[srcVert] = (unsigned short)grpSoup.vertCount;
             bspTriSoupData[grpSoup.firstVert + grpSoup.vertCount] = savedVerts[srcVert];
+            if (savedLayerData)
+              memcpy(bspTriSoupLayerData
+                       + TRIS_VERTEX_LAYER_SCRATCH_STRIDE
+                         * (grpSoup.firstVert + grpSoup.vertCount),
+                     savedLayerData
+                       + TRIS_VERTEX_LAYER_SCRATCH_STRIDE * srcVert,
+                     TRIS_VERTEX_LAYER_SCRATCH_STRIDE);
             Assert((unsigned short)grpSoup.vertCount == grpSoup.vertCount, s_assertDisable_GroupTriangles);
             ++grpSoup.vertCount;
           }
@@ -3671,6 +4426,7 @@ char GroupTriangles( TriSoup_t *ts )
 
   free(remap);
   free(savedIndices);
+  free(savedLayerData);
   free(savedVerts);
   free(groupIds);
   return 1;
@@ -3745,9 +4501,12 @@ SplitTrisByClassification
 Splits tris into below/above sets by vertex classification
 ================
 */
-int SplitTrisByClassification( int *vertCounts, TriSoup_t *ts, char *belowArr, char *aboveArr, unsigned short **remapBufs, unsigned short **idxBufsArr, int *indexCounts, BspDrawVert_t **vBufsArr )
+int SplitTrisByClassification( int *vertCounts, TriSoup_t *ts, char *belowArr, char *aboveArr, unsigned short **remapBufs, unsigned short **idxBufsArr, int *indexCounts, BspDrawVert_t **vBufsArr, unsigned char **layerBufsArr )
 {
   BspDrawVert_t *srcVerts = &bspTriSoupData[ts->firstVert];
+  unsigned char *srcLayerData = bspTriSoupLayerData
+    ? bspTriSoupLayerData + TRIS_VERTEX_LAYER_SCRATCH_STRIDE * ts->firstVert
+    : NULL;
   int triOfs, j, side;
   int v[3];
 
@@ -3793,6 +4552,12 @@ int SplitTrisByClassification( int *vertCounts, TriSoup_t *ts, char *belowArr, c
         {
           remap[origVert] = vertCounts[side];
           vBufsArr[side][vertCounts[side]] = srcVerts[origVert];
+          if (srcLayerData && layerBufsArr)
+            memcpy(layerBufsArr[side]
+                     + TRIS_VERTEX_LAYER_SCRATCH_STRIDE * vertCounts[side],
+                   srcLayerData
+                     + TRIS_VERTEX_LAYER_SCRATCH_STRIDE * origVert,
+                   TRIS_VERTEX_LAYER_SCRATCH_STRIDE);
           ++vertCounts[side];
         }
         idx = remap[origVert];
@@ -3830,6 +4595,7 @@ char SplitSoupOnAxis( TriSoup_t *ts, int axis, float splitValue )
 
   /* per-side buffers: [0]=below, [1]=above */
   BspDrawVert_t *vertBufs[2];
+  unsigned char *layerBufs[2];
   unsigned short *indexBufs[2], *vertRemaps[2];
   int indexCounts[2], vertCounts[2];
   char *belowFlags, *aboveFlags;
@@ -3838,6 +4604,9 @@ char SplitSoupOnAxis( TriSoup_t *ts, int axis, float splitValue )
   for ( i = 0; i < 2; i++ )
   {
     vertBufs[i] = malloc(sizeof(BspDrawVert_t) * ts->numVerts);
+    layerBufs[i] = bspTriSoupLayerData
+      ? (unsigned char *)malloc(TRIS_VERTEX_LAYER_SCRATCH_STRIDE * ts->numVerts)
+      : NULL;
     indexBufs[i] = malloc(sizeof(unsigned short) * ts->numIndices);
     vertRemaps[i] = malloc(sizeof(unsigned short) * ts->numVerts);
   }
@@ -3852,7 +4621,9 @@ char SplitSoupOnAxis( TriSoup_t *ts, int axis, float splitValue )
   vertCounts[1] = 0;
   #define SPLIT_COPY_VERT_THRESHOLD 5450
   shouldCopyVerts = ts->numVerts > SPLIT_COPY_VERT_THRESHOLD;
-  SplitTrisByClassification(vertCounts, ts, belowFlags, aboveFlags, vertRemaps, indexBufs, indexCounts, shouldCopyVerts ? vertBufs : NULL);
+  SplitTrisByClassification(vertCounts, ts, belowFlags, aboveFlags,
+    vertRemaps, indexBufs, indexCounts, shouldCopyVerts ? vertBufs : NULL,
+    shouldCopyVerts ? layerBufs : NULL);
 
   if ( indexCounts[0] && indexCounts[1] )
   {
@@ -3871,6 +4642,11 @@ char SplitSoupOnAxis( TriSoup_t *ts, int axis, float splitValue )
         subSoup.firstVert = numBSPDrawVertsEmitted;
         subSoup.vertCount = vertCounts[i];
         memcpy(&bspTriSoupData[numBSPDrawVertsEmitted], vertBufs[i], sizeof(BspDrawVert_t) * subSoup.vertCount);
+        if (bspTriSoupLayerData)
+          memcpy(bspTriSoupLayerData
+                   + TRIS_VERTEX_LAYER_SCRATCH_STRIDE * numBSPDrawVertsEmitted,
+                 layerBufs[i],
+                 TRIS_VERTEX_LAYER_SCRATCH_STRIDE * subSoup.vertCount);
       }
       else
       {
@@ -3898,6 +4674,7 @@ char SplitSoupOnAxis( TriSoup_t *ts, int axis, float splitValue )
   {
     free(vertRemaps[i]);
     free(indexBufs[i]);
+    free(layerBufs[i]);
     free(vertBufs[i]);
   }
   return result;
@@ -3929,6 +4706,7 @@ intptr_t EmitTriSoupRecord(TriSoup_t *ts)
   tris->reflectionProbeIndex = g_emitReflectionProbeIndex;
   tris->primaryLightIndex = g_emitPrimaryLightIndex;
   tris->castsSunShadow = CastsSunShadowConfirmed(g_emitCastsSunShadow);
+  tris->vertexLayerData = 0;
   tris->firstVertex = ts->firstVert;
   tris->vertexCount = (unsigned short)ts->numVerts;
   tris->indexCount = (unsigned short)ts->numIndices;
@@ -4054,28 +4832,82 @@ Emits triangles as draw verts, stitches UVs,
 merges duplicates, generates tangents, then partitions
 ================
 */
+static void Tris_GenerateSoupTangents(BspDrawVert_t *base,
+  unsigned char *layerData, int vertCount, unsigned short *indices,
+  int indexCount, const TriRecord_t *firstRecord)
+{
+  const LayeredMaterialDescriptor_t *descriptor = NULL;
+  int tangentSetCount = 1;
+  int tangentSet;
+
+  if (firstRecord->layerCount > 1)
+  {
+    descriptor = (const LayeredMaterialDescriptor_t *)firstRecord->materialIdentity;
+    Assert(descriptor && descriptor->layerCount == firstRecord->layerCount,
+      s_assertDisable_EmitTriangleSoup);
+    if (descriptor->normalMapLayerCount)
+      tangentSetCount = descriptor->normalMapLayerCount;
+  }
+
+  for (tangentSet = 0; tangentSet < tangentSetCount; ++tangentSet)
+  {
+    TangentSources_t tangentData;
+    int layerIndex = descriptor && descriptor->normalMapLayerCount
+      ? descriptor->normalMapLayerIndices[tangentSet]
+      : 0;
+
+    tangentData.pos = (char *)base->pos;
+    tangentData.normal = (char *)base->normal;
+    tangentData.posStride = sizeof(BspDrawVert_t);
+    tangentData.normalStride = sizeof(BspDrawVert_t);
+    if (!layerIndex)
+    {
+      tangentData.uv = (char *)base->uv;
+      tangentData.uvStride = sizeof(BspDrawVert_t);
+    }
+    else
+    {
+      Assert(layerData, s_assertDisable_EmitTriangleSoup);
+      tangentData.uv = (char *)(layerData + 8 * (layerIndex - 1));
+      tangentData.uvStride = TRIS_VERTEX_LAYER_SCRATCH_STRIDE;
+    }
+
+    if (!tangentSet)
+    {
+      tangentData.tangent = (char *)base->binormal;
+      tangentData.bitangent = (char *)base->tangent;
+      tangentData.tangentStride = sizeof(BspDrawVert_t);
+      tangentData.bitangentStride = sizeof(BspDrawVert_t);
+    }
+    else
+    {
+      tangentData.tangent = (char *)(layerData + 56 + 12 * (tangentSet - 1));
+      tangentData.bitangent = (char *)(layerData + 32 + 12 * (tangentSet - 1));
+      tangentData.tangentStride = TRIS_VERTEX_LAYER_SCRATCH_STRIDE;
+      tangentData.bitangentStride = TRIS_VERTEX_LAYER_SCRATCH_STRIDE;
+    }
+    TangentSpaceGenerate(&tangentData, vertCount, indices, indexCount);
+  }
+}
+
 int EmitTriangleSoup(TriRecord_t *triRecs, int triCount, Tree_t *bspTree)
 {
   TriRecord_t *firstRec, *rec;
   int triIdx, batchEnd, v;
   unsigned short *indexBase;
-  ShaderInfo_t *mat;
-  TangentSources_t tangentData;
   TriSoup_t soup;
   float plane[4];
-
-  tangentData.posStride = sizeof(BspDrawVert_t);
-  tangentData.normalStride = sizeof(BspDrawVert_t);
-  tangentData.uvStride = sizeof(BspDrawVert_t);
-  tangentData.tangentStride = sizeof(BspDrawVert_t);
-  tangentData.bitangentStride = sizeof(BspDrawVert_t);
 
   triIdx = 0;
   while ( triIdx < triCount )
   {
+    const LayeredMaterialDescriptor_t *descriptor;
+
     firstRec = &triRecs[triIdx];
-    mat = firstRec->si;
-    soup.materialSort = EmitMaterial(mat, mat->contentFlags);
+    descriptor = (const LayeredMaterialDescriptor_t *)firstRec->materialIdentity;
+    Assert(descriptor && descriptor->layerCount >= 1 && descriptor->layerCount <= 5,
+      s_assertDisable_EmitTriangleSoup);
+    soup.materialSort = descriptor->materialIndex;
     soup.lightmapSort = (unsigned short)firstRec->lightStyle;
     g_emitReflectionProbeIndex = firstRec->reflectionProbeIndex;
     g_emitPrimaryLightIndex = firstRec->primaryLightIndex;
@@ -4097,6 +4929,8 @@ int EmitTriangleSoup(TriRecord_t *triRecs, int triCount, Tree_t *bspTree)
       for ( v = 0; v < 3; v++ )
       {
         g_emitDrawVertCount = &soup;
+        g_emitTriRecord = rec;
+        g_emitTriRecordVertex = v;
         bspDrawIndexes[soup.firstIndex + soup.numIndices] = EmitDrawVert(0, &DRAW_VERT(rec->vertIdx[v]));
         soup.numIndices++;
       }
@@ -4116,6 +4950,7 @@ int EmitTriangleSoup(TriRecord_t *triRecs, int triCount, Tree_t *bspTree)
       }
     }
     Assert(soup.numVerts > 0, s_assertDisable_EmitTriangleSoup);
+    g_emitTriRecord = NULL;
 
     /* stitch UVs for non-lightmapped surfaces and merge duplicates */
     indexBase = &bspDrawIndexes[soup.firstIndex];
@@ -4125,14 +4960,14 @@ int EmitTriangleSoup(TriRecord_t *triRecs, int triCount, Tree_t *bspTree)
                                                   firstRec->lightStyle);
     Assert(soup.numVerts > 0, s_assertDisable_EmitTriangleSoup);
 
-    /* generate tangent space */
-    { BspDrawVert_t *base = &bspTriSoupData[soup.firstVert];
-    tangentData.pos       = (char *)base->pos;
-    tangentData.normal    = (char *)base->normal;
-    tangentData.uv        = (char *)base->uv;
-    tangentData.tangent   = (char *)base->binormal;
-    tangentData.bitangent = (char *)base->tangent; }
-    TangentSpaceGenerate(&tangentData, soup.numVerts, indexBase, soup.numIndices);
+    /* Native generates the base basis from the descriptor's first normal
+       layer, then stores additional normal-layer bases in scratch. */
+    Tris_GenerateSoupTangents(&bspTriSoupData[soup.firstVert],
+      bspTriSoupLayerData
+        ? bspTriSoupLayerData
+            + TRIS_VERTEX_LAYER_SCRATCH_STRIDE * soup.firstVert
+        : NULL,
+      soup.numVerts, indexBase, soup.numIndices, firstRec);
 
     PartitionTriSoupRecursive(&soup, 1);
     triIdx = batchEnd;
@@ -4269,14 +5104,26 @@ void Tris_EmitTriangles(double unusedFpu, Tree_t *bspTree, int *indexMap)
       bspCells[i].aabbTreeIndex = -1;
   }
 
-  /* Keep the proven qsort route for small expanded-record batches.  The
-     native VS2005 introsort carrier is isolated to larger batches, where it
-     never changes the sealed fixture's <=32 ordering semantics. */
-  if (numTriangles > 32)
-    Tris_SortLargeDirectRecordCarrier(triRecords, (int)numTriangles);
-  else
-    qsort(triRecords, numTriangles, sizeof(TriRecord_t),
-      (int (*)(const void *, const void *))CompareTrisByMaterialAndVertexIndices);
+  if (numTriangles > 1)
+    Tris_SortDirectRecordCarrier(triRecords, (int)numTriangles);
+
+  /* 0x442F90 sorts the type-0 transient records and then calls
+     0x449BB0.  This is deliberately after normal smoothing: the combine
+     pass uses the same index map as 0x43DF00 to identify connected triangle
+     components while it promotes compatible material descriptors. */
+  /* The 104-byte direct-vertex carrier is only populated by the native
+     lightmap route.  Without it, promoting a descriptor would expose empty
+     layer/tangent slots in KIWI's donor-family output buffers. */
+  if (s_drawSurfaceContext->type == 0 && TrisLmap_NativeRouteEnabled()
+      && numTriangles > 1)
+    CombineLayeredTriangleGroups(indexMap);
+
+  /* Native 0x444D20 sorts the direct-triangle carrier again before either
+     output context is emitted.  For the layered context this restores the
+     final batching order after 0x449BB0 promotes descriptors and rotates
+     component ranges; the unlayered context takes the same entry path. */
+  if (numTriangles > 1)
+    Tris_SortDirectRecordCarrier(triRecords, (int)numTriangles);
 
 
   curBrushModel = -1;
@@ -4287,26 +5134,29 @@ void Tris_EmitTriangles(double unusedFpu, Tree_t *bspTree, int *indexMap)
   {
     startRec = &triRecords[batchStart];
 
-    /* find end of batch: same drawOrder, cullGroup, material, lightStyle */
+    /* Native 0x444D20 receives only the recombined signed-short
+       visibility-group key at direct-record +0.  KIWI retains its donor
+       cell/cull split, but it must not make that split an additional batch
+       boundary. */
     for ( batchEnd = batchStart + 1; batchEnd < (int)numTriangles && batchEnd - batchStart < MAX_BATCH_TRIS; batchEnd++ )
     {
       TriRecord_t *r = &triRecords[batchEnd];
-      if ( r->drawOrder != startRec->drawOrder || r->cullGroupIdx != startRec->cullGroupIdx
-        || r->si != startRec->si || r->lightStyle != startRec->lightStyle
-        || r->reflectionProbeIndex != startRec->reflectionProbeIndex
+      if ( Tris_GetNativeDirectVisGroup(r) != Tris_GetNativeDirectVisGroup(startRec)
+        || r->materialIdentity != startRec->materialIdentity
+        || Tris_GetNativeDirectLayerReflectionProbe(r)
+           != Tris_GetNativeDirectLayerReflectionProbe(startRec)
         || r->primaryLightIndex != startRec->primaryLightIndex
+        || (unsigned char)r->baseProps->lmapIndex
+           != (unsigned char)startRec->baseProps->lmapIndex
         || r->castsSunShadow != startRec->castsSunShadow )
         break;
     }
     batchSize = batchEnd - batchStart;
-
-    /* nodraw surfaces only emit shadows */
-    if ( (startRec->si->surfaceFlags & SURF_NODRAW) != 0 )
-    {
-      if ( !g_currentEntityIndex )
-        Tris_AddNoDrawShadowTris(batchSize, startRec);
+    /* Native 0x444D20 suppresses only the combined 0x40080 material class.
+       SURF_NODRAW on its own remains a normal direct-triangle batch (for
+       example House01's shadowcaster material). */
+    if ( (startRec->si->surfaceFlags & 0x40080) == 0x40080 )
       continue;
-    }
 
     Assert(batchSize >= 1, s_assertDisable_Tris_EmitTriangles);
 
@@ -4341,8 +5191,15 @@ void Tris_EmitTriangles(double unusedFpu, Tree_t *bspTree, int *indexMap)
       }
     }
 
-    /* group, merge subgroups, emit */
-    GroupAndMergeTriSubgroups(startRec, batchSize, indexMap);
+    /* 0x4451E0 performs direct-subgroup construction before soup emission;
+       multi-layered descriptors then account for exactly those subgroups. */
+    {
+      int subgroupCount = GroupAndMergeTriSubgroups(startRec, batchSize, indexMap);
+      if (startRec->layerCount > 1)
+        Tris_ReportLayeredMaterialCombinationUse(
+          (LayeredMaterialDescriptor_t *)startRec->materialIdentity,
+          startRec, batchSize, subgroupCount);
+    }
     EmitTriangleSoup(startRec, batchSize, bspTree);
 
     /* update soup counts */
@@ -4431,6 +5288,51 @@ int Tris_CopyVertexToDrawVerts(int srcIndex, int dstIndex)
   return sizeof(bspDrawVerts[0]) * dstIndex;
 }
 
+/* Native 0x44B610: clamp a tangent-basis dot product and bias it into one
+   unsigned byte. */
+static unsigned char Tris_PackLayerBasisDot(float value)
+{
+  if (value < -1.0f) value = -1.0f;
+  else if (value > 1.0f) value = 1.0f;
+  return (unsigned char)(int)(value * 127.5f + 128.0f);
+}
+
+/* Native 0x44ACA0/0x44B4D0/0x44B560. */
+static void Tris_CopyVertexLayerData(int srcIndex, unsigned char *destination,
+  const LayeredMaterialDescriptor_t *descriptor)
+{
+  const unsigned char *scratch;
+  const BspDrawVert_t *source;
+  int layerUvBytes;
+  int normalSet;
+
+  if (!descriptor || descriptor->layerCount <= 1)
+    return;
+  Assert(g_drawVertexLayerData && destination,
+    s_assertDisable_Tris_ReorderAndOptimizeVerts);
+  source = &bspTriSoupData[srcIndex];
+  scratch = bspTriSoupLayerData
+    + TRIS_VERTEX_LAYER_SCRATCH_STRIDE * srcIndex;
+  layerUvBytes = 8 * (descriptor->layerCount - 1);
+  memcpy(destination, scratch, layerUvBytes);
+  destination += layerUvBytes;
+
+  for (normalSet = 1; normalSet < descriptor->normalMapLayerCount; ++normalSet)
+  {
+    const float *extraTangent = (const float *)(scratch + 56 + 12 * (normalSet - 1));
+    const float *extraBitangent = (const float *)(scratch + 32 + 12 * (normalSet - 1));
+    destination[0] = Tris_PackLayerBasisDot(
+      (float)DotProduct(extraTangent, source->binormal));
+    destination[1] = Tris_PackLayerBasisDot(
+      (float)DotProduct(extraBitangent, source->binormal));
+    destination[2] = Tris_PackLayerBasisDot(
+      (float)DotProduct(extraTangent, source->tangent));
+    destination[3] = Tris_PackLayerBasisDot(
+      (float)DotProduct(extraBitangent, source->tangent));
+    destination += 4;
+  }
+}
+
 /*
 ================
 Tris_ReorderAddSurfaceVerts
@@ -4507,12 +5409,24 @@ for triangle surfaces
 int Tris_ReorderAndOptimizeVerts(TrisReorderEntry_t *reorderList, int reorderCount)
 {
   BspTriSoup_t *soup;
+  const LayeredMaterialDescriptor_t *layerDescriptor;
+  unsigned char *layerOutput;
+  unsigned int layerOutputOffset;
+  int perVertexLayerDataSize;
   int i, j, t, numProcessed, totalVerts, totalIndices;
   int firstIndex, surfCount, newFirstVert, oldVert, newIdx;
   int optimizedIndexBase;
 
   Assert(reorderList, s_assertDisable_Tris_ReorderAndOptimizeVerts);
   Assert(reorderCount > 0, s_assertDisable_Tris_ReorderAndOptimizeVerts);
+  layerDescriptor = s_drawSurfaceContext->type == 0
+    ? (const LayeredMaterialDescriptor_t *)reorderList[0].context
+    : NULL;
+  perVertexLayerDataSize = layerDescriptor
+    ? 8 * (layerDescriptor->layerCount - 1)
+      + 4 * (layerDescriptor->normalMapLayerCount > 0
+             ? layerDescriptor->normalMapLayerCount - 1 : 0)
+    : 0;
   memset(reorderVertexRemap, 0xFF, sizeof(int) * numBSPDrawVertsEmitted);
 
   /* phase 1: gather surfaces that fit within the index limit */
@@ -4523,6 +5437,8 @@ int Tris_ReorderAndOptimizeVerts(TrisReorderEntry_t *reorderList, int reorderCou
   {
     soup = reorderList[i].triSurf;
     Assert(soup, s_assertDisable_Tris_ReorderAndOptimizeVerts);
+    Assert(reorderList[i].context == reorderList[0].context,
+      s_assertDisable_Tris_ReorderAndOptimizeVerts);
     if ( totalIndices + soup->indexCount > MAX_MAP_DRAW_VERTS )
       break;
     if ( !Tris_ReorderAddSurfaceVerts((intptr_t)soup, reorderIndexBuffer, &totalIndices, &totalVerts) )
@@ -4576,6 +5492,10 @@ int Tris_ReorderAndOptimizeVerts(TrisReorderEntry_t *reorderList, int reorderCou
 
   /* phase 3: copy vertices to draw vert buffer in optimized order */
   newFirstVert = numBSPDrawVerts;
+  layerOutputOffset = perVertexLayerDataSize ? GetBspVertexLayerDataCount() : 0;
+  layerOutput = perVertexLayerDataSize
+    ? AllocBspVertexLayerData(perVertexLayerDataSize * totalVerts)
+    : NULL;
   for ( i = 0; i < numBSPDrawVertsEmitted; i++ )
   {
     if ( reorderVertexRemap[i] >= 0 )
@@ -4584,6 +5504,9 @@ int Tris_ReorderAndOptimizeVerts(TrisReorderEntry_t *reorderList, int reorderCou
       Assert(reorderVertexRemap[i] < totalVerts, s_assertDisable_Tris_ReorderAndOptimizeVerts);
       Assert((unsigned int)newIdx < (unsigned int)totalVerts, s_assertDisable_Tris_ReorderAndOptimizeVerts);
       Tris_CopyVertexToDrawVerts(i, newFirstVert + newIdx);
+      if (perVertexLayerDataSize)
+        Tris_CopyVertexLayerData(i,
+          layerOutput + perVertexLayerDataSize * newIdx, layerDescriptor);
       numBSPDrawVerts++;
     }
   }
@@ -4611,6 +5534,8 @@ int Tris_ReorderAndOptimizeVerts(TrisReorderEntry_t *reorderList, int reorderCou
     }
     soup->vertexCount = totalVerts;
     soup->firstVertex = newFirstVert;
+    soup->vertexLayerData = perVertexLayerDataSize
+      ? (int)layerOutputOffset : 0;
     optimizedIndexBase += soup->indexCount;
   }
   return numProcessed;
@@ -4672,15 +5597,26 @@ Finds next entity with non-zero firstTriSurf
 int Tris_FindNextEntity( int entityIndex )
 {
   int next;
+  int currentFirstTriSoup;
+
+  currentFirstTriSoup = s_drawSurfaceContext->type
+    ? g_entities[entityIndex].firstTriSoupSimple
+    : g_entities[entityIndex].firstTriSoup;
 
   /* scan forward for the next entity that has triangle soups */
   for ( next = entityIndex + 1; next < num_entities; next++ )
   {
-    if ( g_entities[next].firstTriSoup )
+    int firstTriSoup = s_drawSurfaceContext->type
+      ? g_entities[next].firstTriSoupSimple
+      : g_entities[next].firstTriSoup;
+    if ( firstTriSoup )
       break;
   }
 
-  Assert(next == num_entities || g_entities[next].firstTriSoup > g_entities[entityIndex].firstTriSoup, s_assertDisable_Tris_FindNextEntity);
+  Assert(next == num_entities
+      || (s_drawSurfaceContext->type ? g_entities[next].firstTriSoupSimple
+                                    : g_entities[next].firstTriSoup) > currentFirstTriSoup,
+    s_assertDisable_Tris_FindNextEntity);
   return next;
 }
 
@@ -4702,6 +5638,8 @@ void Tris_ReorderDrawVerts(void)
   int s, k;
 
   Assert(numBSPTriSoups <= MAX_MAP_TRISOUPS, s_assertDisable_Tris_ReorderDrawVerts);
+  if (s_drawSurfaceContext->type == 0)
+    BeginBspVertexLayerData();
 
   /* allocate reorder work buffers */
   reorderVertexRemap = malloc(sizeof(int) * numBSPDrawVertsEmitted);
@@ -4734,7 +5672,10 @@ void Tris_ReorderDrawVerts(void)
     for ( s = 0; s < numBSPTriSoups; s++ )
     {
       /* check for entity boundary */
-      if ( nextEntity != num_entities && g_entities[nextEntity].firstTriSoup == s )
+      if ( nextEntity != num_entities
+        && (s_drawSurfaceContext->type
+          ? g_entities[nextEntity].firstTriSoupSimple
+          : g_entities[nextEntity].firstTriSoup) == s )
       {
         if ( reorderCount )
         {
@@ -4757,7 +5698,9 @@ void Tris_ReorderDrawVerts(void)
         int minVert, maxVert;
 
         entry->triSurf = &soups[s];
-        entry->context = s_drawSurfaceContext;
+        entry->context = s_drawSurfaceContext->type == 0
+          ? (void *)Tris_FindLayeredMaterialDescriptor(soups[s].materialIndex)
+          : NULL;
 
         /* find min/max draw index for this soup */
         minVert = (unsigned short)bspDrawIndexes[soups[s].firstIndex];
@@ -4791,22 +5734,10 @@ void Tris_ReorderDrawVerts(void)
    The shared reorder implementation intentionally remains context-agnostic. */
 void Tris_ReorderUnlayeredDrawVerts(void)
 {
-  int savedFirstTriSoups[MAX_MAP_ENTITIES];
-  int i;
-
-  for ( i = 0; i < num_entities; ++i )
-  {
-    savedFirstTriSoups[i] = g_entities[i].firstTriSoup;
-    g_entities[i].firstTriSoup = g_entities[i].firstTriSoupSimple;
-  }
-
   Tris_SelectDrawSurfaceContext(1);
   if ( numBSPTriSoups )
     Tris_ReorderDrawVerts();
   Tris_SelectDrawSurfaceContext(0);
-
-  for ( i = 0; i < num_entities; ++i )
-    g_entities[i].firstTriSoup = savedFirstTriSoups[i];
 }
 
 /*
@@ -4816,6 +5747,70 @@ TryMergeWindingPair
 Tries merging winding pairs that share edges
 ================
 */
+/* CoD4 0x44BE80/0x44BDB0.  Reject a merge when the two integer windings,
+   projected through one constituent's texture vectors, would span more
+   than twice the native 0x2000 texture-coordinate limit. */
+static bool TrisMergeProjectedExtentExceeded(const IntWinding_t *first,
+                                              const IntWinding_t *second,
+                                              const TriSurfProps_t *props)
+{
+  const IntWinding_t *windings[2] = { first, second };
+  float mins[2];
+  float maxs[2];
+  int windingIndex;
+
+  ClearBounds2D(mins, maxs);
+  for ( windingIndex = 0; windingIndex < 2; ++windingIndex )
+  {
+    const IntWinding_t *winding = windings[windingIndex];
+    int pointIndex;
+
+    for ( pointIndex = 0; pointIndex < winding->numpoints; ++pointIndex )
+    {
+      const float *point = (const float *)mergeVertMap
+                         + 3 * winding->indices[pointIndex];
+      float st[2];
+
+      st[0] = (float)DotProduct(point, props->texVecs) + props->texVecs[3];
+      st[1] = (float)DotProduct(point, props->texVecs + 4) + props->texVecs[7];
+      AddPointToBounds2D(st, mins, maxs);
+    }
+  }
+
+  return (int)((float)ceil(maxs[0]) - (float)floor(mins[0])) > 0x4000
+      || (int)((float)ceil(maxs[1]) - (float)floor(mins[1])) > 0x4000;
+}
+
+/* CoD4 0x44BD40: a coalesced property wrapper applies the projected-extent
+   test to every leaf; an ordinary wrapper applies it to itself. */
+static bool TrisMergePropsProjectedExtentExceeded(const IntWinding_t *first,
+                                                   const IntWinding_t *second,
+                                                   const TriSurfProps_t *props)
+{
+  const CoalesceNode_t *node;
+
+  if ( !props->coalesceChain )
+    return TrisMergeProjectedExtentExceeded(first, second, props);
+  for ( node = props->coalesceChain; node; node = node->next )
+  {
+    if ( TrisMergeProjectedExtentExceeded(first, second,
+          (const TriSurfProps_t *)node->value) )
+      return true;
+  }
+  return false;
+}
+
+/* CoD4 0x44C320: both surfaces' material sets must accept the merged UV
+   extent before TryMergeWindingPair mutates either carrier. */
+static bool TrisMergeCandidateCompatible(const TriSurf_t *firstSurf,
+                                          const TriSurf_t *secondSurf,
+                                          const IntWinding_t *first,
+                                          const IntWinding_t *second)
+{
+  return !TrisMergePropsProjectedExtentExceeded(first, second, firstSurf->props)
+      && !TrisMergePropsProjectedExtentExceeded(second, first, secondSurf->props);
+}
+
 int TryMergeWindingPair( int startIdx, intptr_t *surfArray, IntWinding_t **windingArray, int count, int epsilon )
 {
   IntWinding_t *curWinding;
@@ -4833,7 +5828,9 @@ int TryMergeWindingPair( int startIdx, intptr_t *surfArray, IntWinding_t **windi
     IntWinding_t *otherWinding = windingArray[i];
 
     if ( !TrisCanCoalesceWindings(curSurf, otherSurf)
-      || !(sharedCount = FindSharedEdge(curWinding, otherWinding, &edgeA, &edgeB)) )
+      || !(sharedCount = FindSharedEdge(curWinding, otherWinding, &edgeA, &edgeB))
+      || !TrisMergeCandidateCompatible(curSurf, otherSurf,
+                                       curWinding, otherWinding) )
     {
       i++;
       continue;
@@ -4852,6 +5849,25 @@ int TryMergeWindingPair( int startIdx, intptr_t *surfArray, IntWinding_t **windi
       { int adjEdge = (edgeA + sharedCount - 1) % otherWinding->numpoints;
       edgeA = (curWinding->numpoints - sharedCount + edgeB + 1) % curWinding->numpoints;
       edgeB = adjEdge; }
+    }
+
+    /* 0x44BA4D selects the post-swap survivors from the surface array. */
+    curSurf = (TriSurf_t *)surfArray[startIdx];
+    otherSurf = (TriSurf_t *)surfArray[i];
+    {
+      TriSurfPropsSidecar_t *curSidecar = TrisPropsSidecar_Get(curSurf->props);
+      TriSurfPropsSidecar_t *otherSidecar = TrisPropsSidecar_Get(otherSurf->props);
+      MapDrawSurf_t *curDrawSurf = curSidecar ? curSidecar->mapDrawSurf : NULL;
+      MapDrawSurf_t *otherDrawSurf = otherSidecar ? otherSidecar->mapDrawSurf : NULL;
+
+      /* Native 0x44BA73 compares unsigned source MapDrawSurf byte +52. */
+      if (curDrawSurf && otherDrawSurf
+        && curDrawSurf->castsSunShadow < otherDrawSurf->castsSunShadow)
+      {
+        TriSurfProps_t *tmp = curSurf->props;
+        curSurf->props = otherSurf->props;
+        otherSurf->props = tmp;
+      }
     }
 
     if ( sharedCount == otherWinding->numpoints )
@@ -5341,7 +6357,8 @@ texture coords, lightmap coords, normals, and RGBA color
 */
 int EmitTriangleRecord( TriSurf_t *sourceSurf, Winding_t *origWinding, Winding_t *windingVerts,
   TriSurfProps_t *baseProps, TriSurfProps_t *material, int vertIdx0, int vertIdx1,
-  int vertIdx2, int drawOrder, int triFlags, float *triPlane )
+  int vertIdx2, int drawOrder, int triFlags, float *triPlane,
+  LayeredMaterialDescriptor_t *descriptor )
 {
   float texS[4], texT[4];
   const TrisLmapAssignmentPayload_t *assignment;
@@ -5355,6 +6372,9 @@ int EmitTriangleRecord( TriSurf_t *sourceSurf, Winding_t *origWinding, Winding_t
     Com_Error("MAX_MAP_TRIANGLES (%i) exceeded\n", MAX_MAP_TRIANGLES);
   if ( numDrawVertices + 3 > MAX_MAP_VERTEXES )
     Com_Error("MAX_MAP_VERTEXES (%i) exceeded\n", MAX_MAP_VERTEXES);
+  Assert(descriptor && descriptor->layerCount >= 1 && descriptor->layerCount <= 5,
+    s_assertDisable_TriangulateSurf);
+  Assert(descriptor->mtlRaw[0] == material->si, s_assertDisable_TriangulateSurf);
   sidecar = TrisPropsSidecar_Get(material);
   if (!sidecar)
     Com_Error("EmitTriangleRecord: missing TriSurfProps sidecar");
@@ -5432,15 +6452,21 @@ int EmitTriangleRecord( TriSurf_t *sourceSurf, Winding_t *origWinding, Winding_t
   { TriRecord_t *tri = &triRecords[numTriangles];
   tri->drawOrder = drawOrder;
   tri->cullGroupIdx = triFlags;
-  tri->si = material->si;
+  tri->si = descriptor->mtlRaw[0];
   tri->lightStyle = lightStyle;
-  tri->reflectionProbeIndex = sidecar->reflectionProbeIndex;
-  Assert(sidecar->mapDrawSurf, s_assertDisable_TriangulateSurf);
+  tri->reflectionProbeIndex = baseSidecar->reflectionProbeIndex;
+  Assert(baseSidecar->mapDrawSurf, s_assertDisable_TriangulateSurf);
   tri->primaryLightIndex = (unsigned char)(baseSidecar->mapDrawSurf->lightmapIndex == 256
       ? 0 : baseSidecar->mapDrawSurf->lightmapIndex);
   Assert(!tri->primaryLightIndex || tri->primaryLightIndex < numBspPrimaryLights,
          s_assertDisable_TriangulateSurf);
-  tri->castsSunShadow = sidecar->mapDrawSurf->castsSunShadow;
+  tri->castsSunShadow = baseSidecar->mapDrawSurf->castsSunShadow;
+  tri->materialIdentity = descriptor;
+  tri->layerCount = descriptor->layerCount;
+  tri->baseProps = baseProps;
+  tri->layerProps[0] = material;
+  memset(&tri->layerProps[1], 0, sizeof(tri->layerProps) - sizeof(tri->layerProps[0]));
+  memset(tri->extraLayerUvs, 0, sizeof(tri->extraLayerUvs));
   tri->vertIdx[0] = numDrawVertices;
   tri->vertIdx[1] = numDrawVertices + 1;
   tri->vertIdx[2] = numDrawVertices + 2;
@@ -5459,6 +6485,730 @@ int EmitTriangleRecord( TriSurf_t *sourceSurf, Winding_t *origWinding, Winding_t
   return numDrawVertices;
 }
 
+/* Native 0x443B90.  This deliberately evaluates each channel independently:
+   EmitLayeredTriangleRecords calls it once for every source layer and uses
+   the resulting bytes both for material weighting and the packed vertex
+   colour. */
+static void Tris_ComputeLayerVertexColor(const TriSurfProps_t *props,
+  const float *position, unsigned char color[4])
+{
+  int channel;
+
+  for (channel = 0; channel < 4; ++channel)
+  {
+    const float *colorVec = &props->colorVecs[channel * 4];
+    float dot = DotProduct(position, colorVec);
+    float value = dot + colorVec[3];
+    int component = xs_RoundToInt((double)value + FISTP_BIAS);
+
+    if (component < 0)
+      component = 0;
+    else if (component > 255)
+      component = 255;
+    color[channel] = (unsigned char)component;
+  }
+}
+
+/* Native 0x444810.  Ordinary layers contribute their computed alpha.  The
+   tool-flag 0x60 material class instead derives a normalized RGB intensity
+   relative to its colorTint constant.  colorTint is stored in native BGRA
+   byte order, but the sum is deliberately order-independent. */
+static unsigned char Tris_GetLayerVertexWeight(const TriSurfProps_t *props,
+  const unsigned char color[4])
+{
+  const unsigned char *tint;
+  int tintSum;
+
+  Assert(props && props->si, s_assertDisable_TriangulateSurf);
+  if ((props->si->toolFlagsWord & 0x70) != 0x60)
+    return color[3];
+
+  tint = props->si->colorTint;
+  tintSum = tint[0] + tint[1] + tint[2];
+  /* The real compiler has no zero-denominator fallback.  A material with a
+     zero RGB tint is invalid for this class; retain a deterministic zero in
+     the compatibility path rather than invoking undefined integer division. */
+  if (!tintSum)
+    return 0;
+  return (unsigned char)((255 * (color[0] + color[1] + color[2]) + 127)
+                         / tintSum);
+}
+
+/* Native 0x44C0D0 -> 0x44C100.  It stores the four selected weights as
+   B,G,R,A rather than the regular RGBA packing used by sub_44C090. */
+static int Tris_PackLayerWeightsBGRA(const unsigned char *weights)
+{
+  unsigned char packed[4];
+  int result;
+
+  packed[0] = weights[2];
+  packed[1] = weights[1];
+  packed[2] = weights[0];
+  packed[3] = weights[3];
+  memcpy(&result, packed, sizeof(result));
+  return result;
+}
+
+/* Native 0x444120 computes every selected layer's UV from the original
+   winding position before replacing xyz with the t-junction-fixed winding.
+   DrawVert_t carries layer zero, so retain layers 1..4 directly on the
+   expanded triangle record until 0x446A10-style soup emission. */
+static void Tris_SetLayeredRecordData(TriRecord_t *record,
+  Winding_t *origWinding, TriSurfProps_t *const *layerProps, int layerCount,
+  int vertIdx0, int vertIdx1, int vertIdx2)
+{
+  int triangleVerts[3];
+  int layerIndex;
+  int vertexIndex;
+
+  Assert(record, s_assertDisable_TriangulateSurf);
+  Assert(origWinding, s_assertDisable_TriangulateSurf);
+  Assert(layerCount >= 2 && layerCount <= 5, s_assertDisable_TriangulateSurf);
+  triangleVerts[0] = vertIdx0;
+  triangleVerts[1] = vertIdx1;
+  triangleVerts[2] = vertIdx2;
+  record->layerCount = (unsigned char)layerCount;
+
+  for (layerIndex = 0; layerIndex < layerCount; ++layerIndex)
+    record->layerProps[layerIndex] = layerProps[layerIndex];
+
+  for (layerIndex = 1; layerIndex < layerCount; ++layerIndex)
+  {
+    float texS[4];
+    float texT[4];
+    TriSurfProps_t *props = layerProps[layerIndex];
+
+    Vector4Copy(&props->texVecs[0], texS);
+    Vector4Copy(&props->texVecs[4], texT);
+    if (!props->si->globalTexture)
+    {
+      texS[3] = (float)(texS[3] - (double)fistp_sub(texS[3], FISTP_HALF_BIAS));
+      texT[3] = (float)(texT[3] - (double)fistp_sub(texT[3], FISTP_HALF_BIAS));
+    }
+    for (vertexIndex = 0; vertexIndex < 3; ++vertexIndex)
+    {
+      const float *position = origWinding->points[triangleVerts[vertexIndex]];
+      record->extraLayerUvs[vertexIndex][layerIndex - 1][0] =
+        DotProduct120(position, texS) + texS[3];
+      record->extraLayerUvs[vertexIndex][layerIndex - 1][1] =
+        DotProduct(position, texT) + texT[3];
+    }
+  }
+
+  /* 0x444120 does not use the first layer's regular vertex colour.  It
+     evaluates every layer at the original winding point, converts each to a
+     blend weight, then packs the final four weights into the base draw-vert
+     colour.  For 2/3-layer descriptors the untouched weights remain 255;
+     for five layers the first weight is intentionally omitted. */
+  for (vertexIndex = 0; vertexIndex < 3; ++vertexIndex)
+  {
+    unsigned char weights[5] = { 255, 255, 255, 255, 255 };
+    const float *position = origWinding->points[triangleVerts[vertexIndex]];
+    int weightOffset = layerCount > 4 ? layerCount - 4 : 0;
+
+    for (layerIndex = 0; layerIndex < layerCount; ++layerIndex)
+    {
+      unsigned char layerColor[4];
+
+      Tris_ComputeLayerVertexColor(layerProps[layerIndex], position, layerColor);
+      weights[layerIndex] = Tris_GetLayerVertexWeight(layerProps[layerIndex], layerColor);
+    }
+    DRAW_VERT(record->vertIdx[vertexIndex]).color =
+      Tris_PackLayerWeightsBGRA(&weights[weightOffset]);
+  }
+}
+
+/* Retail 0x449BB0 / 0x44F250 (tris_combinelayers.cpp).  0x443FA0 greedily
+   constructs descriptors while walking a coalesce chain, then this post-pass
+   promotes connected short-descriptor components into a compatible descriptor
+   with one extra ordinary layer.  It never discards geometry. */
+typedef struct LayerCombineSortEntry_s
+{
+  intptr_t sortedIndex[3];
+  TriRecord_t *record;
+} LayerCombineSortEntry_t;
+
+static int LayerCombineSortEntryCompare(const void *left, const void *right)
+{
+  const LayerCombineSortEntry_t *a = (const LayerCombineSortEntry_t *)left;
+  const LayerCombineSortEntry_t *b = (const LayerCombineSortEntry_t *)right;
+  intptr_t difference = a->sortedIndex[0] - b->sortedIndex[0];
+  if (difference) return difference;
+  difference = a->sortedIndex[1] - b->sortedIndex[1];
+  if (difference) return difference;
+  return a->sortedIndex[2] - b->sortedIndex[2];
+}
+
+/* 0x43DF00 generalized from two native record ranges to an explicit pointer
+   list.  Group zero remains the native unassigned value. */
+static int Tris_GroupLayerCombineRecords(TriRecord_t **records, int recordCount,
+                                         const int *indexMap)
+{
+  LayerCombineSortEntry_t *entries;
+  int lowScan = 0, nextGroup = 1, groupCount = 0;
+  int i;
+
+  Assert(recordCount > 0, s_assertDisable_GroupAdjacentTris);
+  entries = (LayerCombineSortEntry_t *)malloc(sizeof(*entries) * recordCount);
+  if (!entries) Com_Error("Tris_GroupLayerCombineRecords: out of memory");
+  for (i = 0; i < recordCount; ++i)
+  {
+    int unsorted[3];
+    records[i]->groupId = 0;
+    unsorted[0] = indexMap[records[i]->vertIdx[0]];
+    unsorted[1] = indexMap[records[i]->vertIdx[1]];
+    unsorted[2] = indexMap[records[i]->vertIdx[2]];
+    SortTriIndices(entries[i].sortedIndex, unsorted);
+    entries[i].record = records[i];
+  }
+  qsort(entries, recordCount, sizeof(*entries), LayerCombineSortEntryCompare);
+
+  for (i = 0; i < recordCount; ++i)
+  {
+    TriRecord_t *current = entries[i].record;
+    int j;
+    while (lowScan < i && entries[lowScan].sortedIndex[2] < entries[i].sortedIndex[1])
+      ++lowScan;
+    for (j = lowScan; j < i; ++j)
+    {
+      TriRecord_t *prior = entries[j].record;
+      if (prior->groupId == current->groupId
+          || !SortedTriIndicesShareEdge(entries[i].sortedIndex,
+                                        entries[j].sortedIndex))
+        continue;
+      if (current->groupId)
+      {
+        int oldGroup = current->groupId, newGroup = prior->groupId, k;
+        for (k = 0; k <= i; ++k)
+          if (entries[k].record->groupId == oldGroup)
+            entries[k].record->groupId = newGroup;
+        --groupCount;
+      }
+      current->groupId = prior->groupId;
+    }
+    if (!current->groupId)
+    {
+      if (groupCount == 0xFFFF) Com_Error("MAX_TRI_SUBGROUPS");
+      current->groupId = nextGroup++;
+      ++groupCount;
+    }
+  }
+  free(entries);
+  Assert(groupCount >= 1, s_assertDisable_GroupAdjacentTris);
+  return groupCount;
+}
+
+static int Tris_RecordLayerCount(const TriRecord_t *record)
+{
+  Assert(record && record->layerCount >= 1 && record->layerCount <= 5,
+    s_assertDisable_TriangulateSurf);
+  return record->layerCount;
+}
+
+/* 0x44F690: exactly one extra layer, no normal-map count change, and one
+   insertion after the common base layer. */
+static bool Tris_CanCombineLayeredRecords(const TriRecord_t *shortRecord,
+                                          const TriRecord_t *longRecord)
+{
+  const LayeredMaterialDescriptor_t *shortDescriptor;
+  const LayeredMaterialDescriptor_t *longDescriptor;
+  int shortCount, longCount, shifted = 0, layer;
+
+  Assert(shortRecord->baseProps && shortRecord->layerProps[0]
+      && longRecord->baseProps && longRecord->layerProps[0],
+    s_assertDisable_TriangulateSurf);
+  if (Tris_GetNativeDirectLayerReflectionProbe(shortRecord)
+        != Tris_GetNativeDirectLayerReflectionProbe(longRecord)
+      || shortRecord->primaryLightIndex != longRecord->primaryLightIndex
+      || (unsigned char)shortRecord->baseProps->lmapIndex
+        != (unsigned char)longRecord->baseProps->lmapIndex)
+    return false;
+  shortDescriptor = (const LayeredMaterialDescriptor_t *)shortRecord->materialIdentity;
+  longDescriptor = (const LayeredMaterialDescriptor_t *)longRecord->materialIdentity;
+  Assert(shortDescriptor && longDescriptor, s_assertDisable_TriangulateSurf);
+  shortCount = shortDescriptor->layerCount;
+  longCount = longDescriptor->layerCount;
+  if (shortCount + 1 != longCount
+      || shortDescriptor->normalMapLayerCount != longDescriptor->normalMapLayerCount
+      || shortDescriptor->mtlRaw[0] != longDescriptor->mtlRaw[0])
+    return false;
+  for (layer = 1; layer < shortCount; ++layer)
+  {
+    if (shortDescriptor->mtlRaw[layer] != longDescriptor->mtlRaw[layer + shifted])
+    {
+      if (shifted) return false;
+      shifted = 1;
+      if (shortDescriptor->mtlRaw[layer] != longDescriptor->mtlRaw[layer + 1])
+        return false;
+    }
+  }
+  return true;
+}
+
+/* Native 0x450210 groups descriptor runs by descriptor plus carrier bytes
+   +5, +4, and +6: owner lmap index, selected reflection probe, and primary
+   light.  The optional +7 shadow key participates in the sort but not this
+   boundary. */
+static bool Tris_SameLayerCombineDescriptorGroup(const TriRecord_t *left,
+                                                  const TriRecord_t *right)
+{
+  Assert(left->baseProps && left->layerProps[0]
+      && right->baseProps && right->layerProps[0],
+    s_assertDisable_TriangulateSurf);
+  return left->materialIdentity == right->materialIdentity
+      && (unsigned char)left->baseProps->lmapIndex
+           == (unsigned char)right->baseProps->lmapIndex
+      && Tris_GetNativeDirectLayerReflectionProbe(left)
+           == Tris_GetNativeDirectLayerReflectionProbe(right)
+      && left->primaryLightIndex == right->primaryLightIndex;
+}
+
+/* 0x444C40's ordering for the fields represented by the expanded carrier.
+   Keep this local to 0x449BB0: later KIWI batching additionally needs its
+   donor cull-group key, which is not present in the native direct record. */
+static int Tris_CompareLayerCombineCarrier(const void *left, const void *right)
+{
+  const TriRecord_t *a = (const TriRecord_t *)left;
+  const TriRecord_t *b = (const TriRecord_t *)right;
+  int difference;
+
+  difference = a->drawOrder - b->drawOrder;
+  if (difference) return difference;
+  if (a->materialIdentity != b->materialIdentity)
+    return (a->materialIdentity > b->materialIdentity) ? 1 : -1;
+  difference = (int)a->reflectionProbeIndex - (int)b->reflectionProbeIndex;
+  if (difference) return difference;
+  difference = (int)a->primaryLightIndex - (int)b->primaryLightIndex;
+  if (difference) return difference;
+  difference = a->lightStyle - b->lightStyle;
+  if (difference) return difference;
+  return (int)a->castsSunShadow - (int)b->castsSunShadow;
+}
+
+/* 0x44FD20 on KIWI's expanded record.  The native source vertex stores its
+   extra UVs inline; ours keeps the equivalent state on the triangle. */
+static void Tris_PromoteLayeredRecord(TriRecord_t *record,
+                                      const TriRecord_t *longRecord)
+{
+  const LayeredMaterialDescriptor_t *oldDescriptor;
+  const LayeredMaterialDescriptor_t *descriptor;
+  int oldCount, newCount, insertion, layer, vertex;
+
+  Assert(record && longRecord && Tris_CanCombineLayeredRecords(record, longRecord),
+    s_assertDisable_TriangulateSurf);
+  descriptor = (const LayeredMaterialDescriptor_t *)longRecord->materialIdentity;
+  oldDescriptor = (const LayeredMaterialDescriptor_t *)record->materialIdentity;
+  oldCount = Tris_RecordLayerCount(record);
+  newCount = Tris_RecordLayerCount(longRecord);
+  Assert(oldDescriptor && oldDescriptor->layerCount == oldCount,
+    s_assertDisable_TriangulateSurf);
+  Assert(descriptor && descriptor->layerCount == newCount,
+    s_assertDisable_TriangulateSurf);
+  insertion = 1;
+  while (insertion < oldCount
+      && oldDescriptor->mtlRaw[insertion] == descriptor->mtlRaw[insertion])
+    ++insertion;
+
+  for (vertex = 0; vertex < 3; ++vertex)
+  {
+    unsigned char *packed = (unsigned char *)&DRAW_VERT(record->vertIdx[vertex]).color;
+    int destinationLayer;
+    for (destinationLayer = oldCount; destinationLayer > insertion; --destinationLayer)
+      memcpy(record->extraLayerUvs[vertex][destinationLayer - 1],
+             record->extraLayerUvs[vertex][destinationLayer - 2],
+             sizeof(record->extraLayerUvs[vertex][0]));
+    Vector2Clear(record->extraLayerUvs[vertex][insertion - 1]);
+
+    if (newCount == 2)
+    {
+      unsigned char oldAlpha = packed[3];
+      packed[0] = 255; packed[1] = 0; packed[2] = oldAlpha; packed[3] = 255;
+    }
+    else
+    {
+      unsigned char weights[4] = { packed[2], packed[1], packed[0], packed[3] };
+      int weightStart = newCount - 1, weightStop = insertion, weight;
+      if (newCount > 4) { weightStart -= newCount - 4; weightStop -= newCount - 4; }
+      Assert(weightStart >= weightStop, s_assertDisable_TriangulateSurf);
+      for (weight = weightStart; weight > weightStop; --weight) weights[weight] = weights[weight - 1];
+      weights[weightStop] = 0;
+      packed[0] = weights[2]; packed[1] = weights[1]; packed[2] = weights[0]; packed[3] = weights[3];
+    }
+  }
+
+  /* Retain concrete source props for KIWI's later tangent generator. */
+  for (layer = 1; layer < newCount; ++layer)
+  {
+    int oldLayer;
+    TriSurfProps_t *selected = NULL;
+    for (oldLayer = 1; oldLayer < oldCount; ++oldLayer)
+      if (record->layerProps[oldLayer]->si == longRecord->layerProps[layer]->si)
+      { selected = record->layerProps[oldLayer]; break; }
+    record->layerProps[layer] = selected ? selected : longRecord->layerProps[layer];
+  }
+  for (; layer < 5; ++layer) record->layerProps[layer] = NULL;
+  record->layerCount = (unsigned char)newCount;
+  record->materialIdentity = descriptor;
+  record->si = descriptor->mtlRaw[0];
+}
+
+/* `triDescGroups` in 0x44F250 is an eight-byte pair of native-record
+   indices.  It is deliberately represented in logical record indices here:
+   TriRecord_t is wider than the native 96-byte storage. */
+typedef struct LayerCombineDescriptorGroup_s
+{
+  int firstRecord;
+  int recordCount;
+} LayerCombineDescriptorGroup_t;
+
+typedef struct LayerCombineActivePair_s
+{
+  int sourceGroup;
+  int destinationGroup;
+  bool active;
+} LayerCombineActivePair_t;
+
+static const LayerCombineDescriptorGroup_t *s_layerCombineSortGroups;
+
+/* 0x44F4F0.  Its CRT qsort compares the current total population of the two
+   participating descriptor runs; zero is intentionally left as an equal key. */
+static int Tris_CompareLayerCombineActivePairs(const void *left, const void *right)
+{
+  const LayerCombineActivePair_t *a = (const LayerCombineActivePair_t *)left;
+  const LayerCombineActivePair_t *b = (const LayerCombineActivePair_t *)right;
+  return (s_layerCombineSortGroups[a->sourceGroup].recordCount
+        + s_layerCombineSortGroups[a->destinationGroup].recordCount)
+       - (s_layerCombineSortGroups[b->sourceGroup].recordCount
+        + s_layerCombineSortGroups[b->destinationGroup].recordCount);
+}
+
+/* Native 0x44FCD0: count the consecutive connected-component members that
+   begin at `firstRecord`, bounded by this descriptor group's live tail. */
+static int Tris_CountLayerCombineComponent(const TriRecord_t *records,
+                                           int firstRecord, int recordCount)
+{
+  int count;
+  Assert(recordCount > 0, s_assertDisable_TriangulateSurf);
+  for (count = 1; count < recordCount
+       && records[firstRecord + count].groupId == records[firstRecord].groupId;
+       ++count)
+    ;
+  return count;
+}
+
+/* Native 0x44FFB0, expressed in elements rather than `96 * index` bytes.
+   The temporary buffer retains complete expanded records so all KIWI-only
+   fields move with the native descriptor identity and source vertices. */
+static void Tris_RotateLayerCombineRecords(TriRecord_t *records, int from,
+                                           int to, int count)
+{
+  TriRecord_t *temporary;
+
+  Assert(records && count > 0 && from >= 0 && to >= 0,
+    s_assertDisable_TriangulateSurf);
+  temporary = (TriRecord_t *)malloc(sizeof(*temporary) * count);
+  if (!temporary) Com_Error("Tris_RotateLayerCombineRecords: out of memory");
+  memcpy(temporary, &records[from], sizeof(*temporary) * count);
+  if (from >= to)
+  {
+    memmove(&records[to + count], &records[to],
+      sizeof(*records) * (from - to));
+    memcpy(&records[to], temporary, sizeof(*temporary) * count);
+  }
+  else
+  {
+    Assert(from + count <= to, s_assertDisable_TriangulateSurf);
+    memmove(&records[from], &records[from + count],
+      sizeof(*records) * (to - (from + count)));
+    memcpy(&records[to - count], temporary, sizeof(*temporary) * count);
+  }
+  free(temporary);
+}
+
+/* 0x44F7E0's transfer loop.  It performs one chosen descriptor-pair merge;
+   the caller then rebuilds the native descriptor-run and active-pair arrays,
+   exactly as 0x44F250 jumps back to LABEL_12 after a successful call. */
+static bool Tris_MergeLayerCombineActivePair(TriRecord_t *records,
+                                             LayerCombineDescriptorGroup_t *groups,
+                                             int *groupCount,
+                                             LayerCombineActivePair_t *pairs,
+                                             int pairIndex,
+                                             int *pairCount,
+                                             int *indexMap)
+{
+  LayerCombineActivePair_t pair = pairs[pairIndex];
+  int sourceRecord = groups[pair.sourceGroup].firstRecord;
+  int destinationRecord = groups[pair.destinationGroup].firstRecord;
+  int sourceRemaining = groups[pair.sourceGroup].recordCount;
+  int destinationRemaining = groups[pair.destinationGroup].recordCount;
+  int totalShift = 0;
+  int componentCount;
+  bool promoted = false;
+
+  Assert(Tris_CanCombineLayeredRecords(&records[sourceRecord],
+    &records[destinationRecord]), s_assertDisable_TriangulateSurf);
+  {
+    int total = sourceRemaining + destinationRemaining;
+    TriRecord_t **componentRecords =
+      (TriRecord_t **)malloc(sizeof(*componentRecords) * total);
+    int entry = 0;
+    int i;
+
+    if (!componentRecords)
+      Com_Error("Tris_MergeLayerCombineActivePair: out of memory");
+    for (i = 0; i < sourceRemaining; ++i)
+      componentRecords[entry++] = &records[sourceRecord + i];
+    for (i = 0; i < destinationRemaining; ++i)
+      componentRecords[entry++] = &records[destinationRecord + i];
+    componentCount = Tris_GroupLayerCombineRecords(componentRecords, total, indexMap);
+    free(componentRecords);
+  }
+
+  /* Native 0x43DF00 physically orders each descriptor run by component ID
+     before 0x44F7E0 consumes consecutive component members. */
+  if (componentCount > 1)
+  {
+    qsort(&records[sourceRecord], sourceRemaining, sizeof(*records),
+      (int (*)(const void *, const void *))CompareTrisByGroupId);
+    qsort(&records[destinationRecord], destinationRemaining, sizeof(*records),
+      (int (*)(const void *, const void *))CompareTrisByGroupId);
+  }
+
+  while (sourceRemaining && destinationRemaining)
+  {
+    int sourceCount = Tris_CountLayerCombineComponent(records, sourceRecord,
+      sourceRemaining);
+    int destinationCount = Tris_CountLayerCombineComponent(records,
+      destinationRecord, destinationRemaining);
+    int sourceId = records[sourceRecord].groupId;
+    int destinationId = records[destinationRecord].groupId;
+
+    if (sourceId < destinationId)
+    {
+      sourceRecord += sourceCount;
+      sourceRemaining -= sourceCount;
+      continue;
+    }
+    if (sourceId > destinationId)
+    {
+      destinationRecord += destinationCount;
+      destinationRemaining -= destinationCount;
+      continue;
+    }
+
+    {
+      int member;
+      TriRecord_t *destinationDescriptorRecord = &records[destinationRecord];
+      for (member = 0; member < sourceCount; ++member)
+        Tris_PromoteLayeredRecord(&records[sourceRecord + member],
+          destinationDescriptorRecord);
+    }
+    Tris_RotateLayerCombineRecords(records, sourceRecord,
+      destinationRecord + destinationCount, sourceCount);
+    groups[pair.sourceGroup].recordCount -= sourceCount;
+    groups[pair.destinationGroup].recordCount += sourceCount;
+    promoted = true;
+
+    /* This is the native `v21/v22` update following 0x44FFB0.  It preserves
+       the live scan positions after the records have been rotated. */
+    if (sourceRecord >= destinationRecord)
+    {
+      Assert(totalShift >= 0, s_assertDisable_TriangulateSurf);
+      totalShift += sourceCount;
+      sourceRecord += sourceCount;
+      destinationRecord += destinationCount + sourceCount;
+    }
+    else
+    {
+      Assert(totalShift <= 0, s_assertDisable_TriangulateSurf);
+      totalShift -= sourceCount;
+      destinationRecord += destinationCount;
+    }
+    sourceRemaining -= sourceCount;
+    destinationRemaining -= destinationCount;
+  }
+
+  if (!promoted)
+    return false;
+
+  /* Native 0x44F7E0 keeps the single 0x44F560 pair snapshot alive.  A
+     destination whose population changed reactivates every pair that names
+     it; no new descriptor pair is introduced. */
+  {
+    int activePairIndex;
+
+    for (activePairIndex = 0; activePairIndex < *pairCount; ++activePairIndex)
+    {
+      if (pairs[activePairIndex].sourceGroup == pair.destinationGroup
+          || pairs[activePairIndex].destinationGroup == pair.destinationGroup)
+        pairs[activePairIndex].active = true;
+    }
+  }
+
+  /* 0x44F7E0 adjusts the original descriptor-run starts that lie between
+     the source and destination after 0x44FFB0 rotates transferred records. */
+  if (totalShift >= 0)
+  {
+    int group;
+
+    Assert(pair.sourceGroup > pair.destinationGroup,
+      s_assertDisable_TriangulateSurf);
+    for (group = pair.destinationGroup + 1; group <= pair.sourceGroup; ++group)
+      groups[group].firstRecord += totalShift;
+  }
+  else
+  {
+    int group;
+
+    Assert(pair.sourceGroup < pair.destinationGroup,
+      s_assertDisable_TriangulateSurf);
+    for (group = pair.sourceGroup + 1; group <= pair.destinationGroup; ++group)
+      groups[group].firstRecord += totalShift;
+  }
+
+  /* Native 0x4500C0 retires a depleted source descriptor, removes every
+     pair that named it, and renumbers all retained pair indices above it. */
+  if (!groups[pair.sourceGroup].recordCount)
+  {
+    int group;
+    int readPair;
+    int writePair = 0;
+
+    --*groupCount;
+    for (group = pair.sourceGroup; group < *groupCount; ++group)
+      groups[group] = groups[group + 1];
+    for (readPair = 0; readPair < *pairCount; ++readPair)
+    {
+      LayerCombineActivePair_t retained = pairs[readPair];
+
+      if (retained.sourceGroup == pair.sourceGroup
+          || retained.destinationGroup == pair.sourceGroup)
+        continue;
+      if (retained.sourceGroup > pair.sourceGroup)
+        --retained.sourceGroup;
+      if (retained.destinationGroup > pair.sourceGroup)
+        --retained.destinationGroup;
+      pairs[writePair++] = retained;
+    }
+    *pairCount = writePair;
+  }
+  return true;
+}
+
+/* 0x44F250, with native run descriptors and rotations represented against
+   expanded TriRecord_t elements. */
+static bool Tris_CombineLayeredTriangleGroupRange(TriRecord_t *records,
+                                                   int recordCount, int *indexMap)
+{
+  LayerCombineDescriptorGroup_t *groups;
+  LayerCombineActivePair_t *pairs;
+  int groupCount = 0;
+  int pairCount = 0;
+  int record;
+  int destination;
+
+  groups = (LayerCombineDescriptorGroup_t *)malloc(sizeof(*groups) * recordCount);
+  pairs = (LayerCombineActivePair_t *)malloc(sizeof(*pairs) * 2048);
+  if (!groups || !pairs)
+    Com_Error("CombineLayeredTriangleGroups: out of memory");
+
+  for (record = 0; record < recordCount; )
+  {
+    int firstRecord = record;
+    do ++record; while (record < recordCount &&
+      Tris_SameLayerCombineDescriptorGroup(&records[firstRecord], &records[record]));
+    if (groupCount == 19584)
+      Com_Error("MAX_LAYER_COMBINE_GROUPS");
+    groups[groupCount].firstRecord = firstRecord;
+    groups[groupCount].recordCount = record - firstRecord;
+    ++groupCount;
+  }
+  if (groupCount == 1)
+  {
+    free(pairs);
+    free(groups);
+    return false;
+  }
+
+  /* Native 0x44F560 considers earlier groups only while their original
+     descriptor run is below 64 records, then orders each pair short -> long. */
+  for (destination = 1; destination < groupCount; ++destination)
+  {
+    int source;
+    for (source = 0; source < destination && groups[source].recordCount < 64;
+         ++source)
+    {
+      int shortGroup = source;
+      int longGroup = destination;
+      if (!Tris_CanCombineLayeredRecords(&records[groups[shortGroup].firstRecord],
+          &records[groups[longGroup].firstRecord]))
+      {
+        if (!Tris_CanCombineLayeredRecords(&records[groups[longGroup].firstRecord],
+            &records[groups[shortGroup].firstRecord]))
+          continue;
+        shortGroup = destination;
+        longGroup = source;
+      }
+      if (pairCount == 2048)
+        break;
+      pairs[pairCount].sourceGroup = shortGroup;
+      pairs[pairCount].destinationGroup = longGroup;
+      pairs[pairCount].active = true;
+      ++pairCount;
+    }
+  }
+
+  for (;;)
+  {
+    bool restart = false;
+
+    s_layerCombineSortGroups = groups;
+    qsort(pairs, pairCount, sizeof(*pairs), Tris_CompareLayerCombineActivePairs);
+    s_layerCombineSortGroups = NULL;
+    for (record = 0; record < pairCount; ++record)
+    {
+      if (pairs[record].active
+          && Tris_MergeLayerCombineActivePair(records, groups, &groupCount,
+                                               pairs, record, &pairCount,
+                                               indexMap))
+      {
+        restart = true;
+        break;
+      }
+    }
+    if (!restart)
+      break;
+  }
+  free(pairs);
+  free(groups);
+  return true;
+}
+
+static void CombineLayeredTriangleGroups(int *indexMap)
+{
+  Assert(indexMap, s_assertDisable_TriangulateSurf);
+  /* 0x442F90 has already applied the native carrier ordering.  Native
+     0x449BB0 calls 0x44F250 once for each original visibility run, including
+     streams whose records all begin with one-layer descriptors.  Those are
+     precisely the runs that can be promoted into a layered descriptor. */
+  {
+    int rangeStart;
+    for (rangeStart = 0; rangeStart < (int)numTriangles; )
+    {
+      int rangeEnd = rangeStart + 1;
+      /* 0x449BB0 passes one contiguous native +0 visibility-group run at a
+         time.  KIWI keeps that signed-short key split across drawOrder and
+         the donor-only cullGroupIdx field. */
+      while (rangeEnd < (int)numTriangles
+          && Tris_GetNativeDirectVisGroup(&triRecords[rangeEnd])
+             == Tris_GetNativeDirectVisGroup(&triRecords[rangeStart])) ++rangeEnd;
+      Tris_CombineLayeredTriangleGroupRange(&triRecords[rangeStart],
+                                            rangeEnd - rangeStart, indexMap);
+      rangeStart = rangeEnd;
+    }
+  }
+}
+
 /*
 ================
 TriangulateSurf
@@ -5467,6 +7217,14 @@ Computes a triangle plane from three vertex indices and emits
 the triangle through the material's coalesce chain
 ================
 */
+static void *Tris_GetLayerMaterialKey(TriSurfProps_t *props)
+{
+  TriSurfPropsSidecar_t *sidecar = TrisPropsSidecar_Get(props);
+
+  Assert(sidecar && sidecar->mapDrawSurf, s_assertDisable_TriangulateSurf);
+  return sidecar->mapDrawSurf->lightmapMaterial;
+}
+
 static int TriangulateSurfImpl(TriSurf_t *sourceSurf, Winding_t *windingData,
   Winding_t *origWinding, TriSurfProps_t *matProps, int vertIdx0, int vertIdx1,
   int vertIdx2, int drawOrder, int triFlags)
@@ -5484,15 +7242,95 @@ static int TriangulateSurfImpl(TriSurf_t *sourceSurf, Winding_t *windingData,
   {
     if ( matProps->coalesceChain )
     {
-      for ( chainPtr = matProps->coalesceChain; chainPtr; chainPtr = chainPtr->next )
-        result = EmitTriangleRecord(sourceSurf, origWinding, windingData, matProps,
-          (TriSurfProps_t *)chainPtr->value, vertIdx0, vertIdx1, vertIdx2,
-          drawOrder, triFlags, triPlane);
+      /* CoD4 0x443FA0 keys this split off assembleTrisContext->type.  The
+         unlayered pass emits every leaf; the layered pass consumes as many
+         as five consecutive leaves with one MapDrawSurf +4 lightmap-material
+         carrier, then asks the material table how many can share a
+         descriptor. */
+      if (s_drawSurfaceContext->type == 1)
+      {
+        for (chainPtr = matProps->coalesceChain; chainPtr; chainPtr = chainPtr->next)
+        {
+          TriSurfProps_t *layerProps = (TriSurfProps_t *)chainPtr->value;
+          ShaderInfo_t *materials[1] = { layerProps->si };
+          LayeredMaterialDescriptor_t *descriptor =
+            Tris_CreateLayeredMaterialDescriptor(materials, 1);
+
+          result = EmitTriangleRecord(sourceSurf, origWinding, windingData, matProps,
+            layerProps, vertIdx0, vertIdx1, vertIdx2, drawOrder, triFlags,
+            triPlane, descriptor);
+        }
+      }
+      else
+      {
+        int preserveDetailLayers = 1;
+        chainPtr = matProps->coalesceChain;
+        while (chainPtr)
+        {
+          CoalesceNode_t *groupNodes[5];
+          ShaderInfo_t *groupMaterials[5];
+          TriSurfProps_t *groupProps[5];
+          TriSurfProps_t *firstProps;
+          void *layerMaterialKey;
+          int available = 0;
+          int selected;
+
+          firstProps = (TriSurfProps_t *)chainPtr->value;
+          layerMaterialKey = Tris_GetLayerMaterialKey(firstProps);
+          while (chainPtr && available < 5
+                 && Tris_GetLayerMaterialKey(
+                      (TriSurfProps_t *)chainPtr->value) == layerMaterialKey)
+          {
+            groupNodes[available] = chainPtr;
+            groupProps[available] = (TriSurfProps_t *)chainPtr->value;
+            groupMaterials[available] = groupProps[available]->si;
+            ++available;
+            chainPtr = chainPtr->next;
+          }
+          selected = SelectCoalescibleLayerCount(groupMaterials, available,
+            preserveDetailLayers);
+          Assert(selected >= 1 && selected <= available, s_assertDisable_TriangulateSurf);
+          if (selected == 1)
+          {
+            ShaderInfo_t *materials[1] = { firstProps->si };
+            LayeredMaterialDescriptor_t *descriptor =
+              Tris_CreateLayeredMaterialDescriptor(materials, 1);
+
+            result = EmitTriangleRecord(sourceSurf, origWinding, windingData, matProps,
+              firstProps, vertIdx0, vertIdx1, vertIdx2, drawOrder, triFlags,
+              triPlane, descriptor);
+          }
+          else
+          {
+            LayeredMaterialDescriptor_t *descriptor;
+            TriRecord_t *record;
+
+            descriptor = Tris_CreateLayeredMaterialDescriptor(groupMaterials, selected);
+            result = EmitTriangleRecord(sourceSurf, origWinding, windingData, matProps,
+              firstProps, vertIdx0, vertIdx1, vertIdx2, drawOrder, triFlags,
+              triPlane, descriptor);
+            record = &triRecords[numTriangles - 1];
+            Tris_SetLayeredRecordData(record, origWinding, groupProps, selected,
+              vertIdx0, vertIdx1, vertIdx2);
+          }
+
+          /* 0x443FA0 returns the node after the selected prefix, not the
+             end of the five-leaf lookahead. */
+          if (selected < available)
+            chainPtr = groupNodes[selected];
+          preserveDetailLayers = 0;
+        }
+      }
     }
     else
     {
+      ShaderInfo_t *materials[1] = { matProps->si };
+      LayeredMaterialDescriptor_t *descriptor =
+        Tris_CreateLayeredMaterialDescriptor(materials, 1);
+
       result = EmitTriangleRecord(sourceSurf, origWinding, windingData, matProps,
-        matProps, vertIdx0, vertIdx1, vertIdx2, drawOrder, triFlags, triPlane);
+        matProps, vertIdx0, vertIdx1, vertIdx2, drawOrder, triFlags, triPlane,
+        descriptor);
     }
   }
   return result;
@@ -5636,6 +7474,13 @@ void Tris_EmitWindingAsDrawSurf(
     && colorVecs[14] == 0.0f && colorVecs[15] == 0.0f )
     return;
 
+  /* Native 0x43FAC0 calls 0x408750 before allocating the TriSurf.  Besides
+     removing hidden area, that pass rebuilds split fragments into a visible
+     hull and contributes its intersection vertices to tessellation. */
+  Block = BrushSides_BuildVisibleHull(Block, surf, plane);
+  if (!Block)
+    return;
+
   /* inlined EmitTriSurfaceForDrawSurf — original was __usercall (EAX=ds) */
   Assert(surf, s_assertDisable_EmitTriSurfaceForDrawSurf);
   emittedSurf = EmitTriSurface(texOutput, lmapOutput, colorVecs, plane, surf->shaderInfo, surf->lightStyle, surf->contentFlags, smoothAngle);
@@ -5646,26 +7491,19 @@ void Tris_EmitWindingAsDrawSurf(
   sidecar->reflectionCellMode = (unsigned char)(surf->isPatch || surf->isTerrain);
   sidecar->reflectionProbeIndex = sidecar->mapDrawSurf->reflectionProbeIndex;
 
-  if ( surf->shaderInfo->noClip )
+  cellIndex = surf->outputNum;
+  if ( cellIndex < 0 )
   {
-    EmitTriSurfForProps(Block, bspTree, emittedSurf, surf->outputNum);
+    if ( g_currentEntityIndex <= 0 ) {
+      EmitPatchSurface((int *)Block, emittedSurf, bspTree->headnode);
+    }
+    else {
+      PrependTriSurf(Block, 0, 0, emittedSurf, triSurfCellArray);
+    }
   }
   else
   {
-    cellIndex = surf->outputNum;
-    if ( cellIndex < 0 )
-    {
-      if ( g_currentEntityIndex <= 0 ) {
-        EmitPatchSurface((int *)Block, emittedSurf, bspTree->headnode);
-      }
-      else {
-        PrependTriSurf(Block, 0, 0, emittedSurf, triSurfCellArray);
-      }
-    }
-    else
-    {
-      PrependTriSurf(Block, 0, 0, emittedSurf, &triSurfCellArray[numBSPCells + cellIndex]);
-    }
+    PrependTriSurf(Block, 0, 0, emittedSurf, &triSurfCellArray[numBSPCells + cellIndex]);
   }
 }
 
@@ -6101,30 +7939,87 @@ static int RemoveDegenerateTriSurfs(void)
   return totalCells;
 }
 
+/* CoD4 0x4428F0.  This is deliberately a diagnostic predicate: 0x442870
+   only reports a failing static-listed surface and does not remove it. */
+static bool TriSurfShouldEmitNative(const TriSurf_t *surf)
+{
+  const ShaderInfo_t *material;
+  TriSurfPropsSidecar_t *sidecar;
+  MapDrawSurf_t *source;
+
+  Assert(surf && surf->props && !surf->props->coalesceChain,
+    s_assertDisable_ValidateTriSurfLmapCoords);
+  material = surf->props->si;
+  if ((material->toolFlagsWord & 0x70) == 0x10)
+    return true;
+  if ((material->toolFlagsWord & 0x70) == 0x70)
+    return false;
+  if ((material->surfaceFlags & 0x30) != 0)
+    return true;
+  /* Native 0x4428F0 reads byte +53 from props->MapDrawSurf, not from the
+     raw Material.  Coalescing marks that source carrier at 0x44ED20. */
+  sidecar = TrisPropsSidecar_Get((TriSurfProps_t *)surf->props);
+  source = sidecar ? sidecar->mapDrawSurf : NULL;
+  return !source || source->hasCoalesceChain == 0;
+}
+
+/* CoD4 0x442870 / 0x44D420.  The native call occurs after vertex snapping,
+   and checks only non-coalesced source surfaces. */
+static void ValidateTriSurfEmission(void)
+{
+  int cellCount = g_currentEntityIndex <= 0 ? numBSPCullGroups + numBSPCells : 1;
+  int cellIndex;
+
+  for (cellIndex = 0; cellIndex < cellCount; ++cellIndex)
+  {
+    TriSurf_t *surf;
+
+    for (surf = triSurfCellArray[cellIndex]; surf; surf = surf->next)
+    {
+      TriSurfPropsSidecar_t *sidecar;
+      MapDrawSurf_t *source;
+
+      if (surf->props->coalesceChain || TriSurfShouldEmitNative(surf)
+          || !MaterialNameInStaticList(surf->props->si))
+        continue;
+      sidecar = TrisPropsSidecar_Get(surf->props);
+      source = sidecar ? sidecar->mapDrawSurf : NULL;
+      WindingError(0, surf->winding,
+        source ? source->sourceInfo.mapInfoIndex : 0,
+        source ? source->entityNum : -1,
+        source ? source->sourceIndex.brushNum : -1,
+        "surface '%s' is partially floating or needs to be aligned",
+        surf->props->si->name);
+    }
+  }
+}
+
 int Tris_TriangulateWindings(void)
 {
   int totalCells, cell;
-  TriSurf_t *ts, *next;
+  TriSurf_t *ts;
 
   if ( g_currentEntityIndex <= 0 )
     totalCells = numBSPCells + numBSPCullGroups;
   else
     totalCells = 1;
 
+  /* Native 0x443110 constructs a fresh final vertex/triangle carrier for
+     each type pass.  The preceding mode-1 stream was only snap input. */
+  Assert(trisTransientMode == 1, s_assertDisable_SetTrisTransientMode);
+  numTriangles = 0;
+  numDrawVertices = 0;
+
   for ( cell = 0; cell < totalCells; cell++ )
   {
     /* CoD4 0x443110 passes the combined visibility-group index to the
-       non-mutating 0x45B6F0 tessellator. */
-    for ( ts = triSurfCellArray[cell]; ts; ts = next )
+       non-mutating 0x45B6F0 tessellator.  These lists remain live for the
+       second (layered/unlayered) output pass and are released by 0x43E960. */
+    for ( ts = triSurfCellArray[cell]; ts; ts = ts->next )
     {
       if ( !TrisNative_TesselateWinding(ts, cell, Tris_TriangulateNativeCallback, ts) )
-      {
         TesselateWindingFailure(ts);
-      }
-      next = ts->next;
-      FreeTriSurf(ts);
     }
-    triSurfCellArray[cell] = NULL;
   }
 
   return totalCells;
@@ -6623,6 +8518,12 @@ void TriangulateEntity( Entity_t *entityData, Tree_t *bspTree )
 
   /* Native removes fully occluded fragments immediately after the
      coincident-winding coalesce pass, before any downstream topology work. */
+  if ( !g_currentEntityIndex )
+  {
+    TrisTimerCheck(NULL);
+    printf("%s...\n", "removing occluded winding fragments");
+    g_trisTimerStart = I_FloatTime();
+  }
   RemoveInvalidTriSurfs();
   ForEachSurf(ValidateTriSurfLmapCoordsNative, NULL);
 
@@ -6639,7 +8540,12 @@ void TriangulateEntity( Entity_t *entityData, Tree_t *bspTree )
 
   if (g_currentEntityIndex)
   {
-    DisableSunShadowTrisForEntityRange();
+    /* Native 0x43EAEC dispatches 0x442470 over the entity's active
+       tri-surfaces.  Confirm the coalesced leaf categories carried by those
+       surfaces; the donor range helper touches unrelated later DrawSurfs. */
+    TriSurf_t *surf;
+    for (surf = triSurfCellArray[0]; surf; surf = surf->next)
+      ConfirmCoalescedSunShadowCategory(surf);
   }
   else
   {
@@ -6687,11 +8593,15 @@ void TriangulateEntity( Entity_t *entityData, Tree_t *bspTree )
   ForEachSurf((void (*)(TriSurf_t *, bool))MergeHoles, (TriSurf_t *)g_largeBuf);
   /* Native 0x43EB6D..0x43EB95: create mode-4 lmap carriers after all
      topology operations, assign them, then return to a preserved neutral
-     state before the existing mode-1 snap/triangulate consumers.  This is
-     intentionally runtime-off until the complete native grouping pass is
-     reconciled on real maps. */
+     state before the existing mode-1 snap/triangulate consumers. */
   if (TrisLmap_NativeRouteEnabled())
   {
+    if ( !g_currentEntityIndex )
+    {
+      TrisTimerCheck(NULL);
+      printf("%s...\n", "building lightmap groups");
+      g_trisTimerStart = I_FloatTime();
+    }
     SetTrisTransientMode(4, 0);
     TrisLmap_BuildAndAssign();
     SetTrisTransientMode(0, 1);
@@ -6712,22 +8622,52 @@ void TriangulateEntity( Entity_t *entityData, Tree_t *bspTree )
   ApplyMergeMap((char *)drawVertBuffer, sizeof(DrawVert_t), numDrawVertices, triFirstVertIndex, mergeMap);
   TrisSnapWindingToVertices(mergeMap);
   FreeSurface(mergeMap);
-  RemoveDegenerateTriSurfs();
 
-  /* step 7: triangulate */
-  if ( !g_currentEntityIndex )
-  {
-    TrisTimerCheck(NULL);
-    printf("%s...\n", "triangulating all windings");
-    g_trisTimerStart = I_FloatTime();
-  }
-  Tris_TriangulateWindings();
-  if ( !g_currentEntityIndex )
-    printf("%i self-tjunctions fixed\n%i degenerate tris removed\n", numSelfTjunctions, numDegenerateTrisRemoved);
-
-  trisTransientMode = 0;
   TrisTimerCheck(NULL);
+  ValidateTriSurfEmission();
   GridTree_Shutdown();
+}
+
+/* CoD4 0x442F90.  Both output families consume the one snapped mode-1
+   TriSurf list created by TriangulateEntity; only their output carriers are
+   selected independently. */
+static int *EmitDrawSurfacesForType(int trisType, Entity_t *entity, Tree_t *tree)
+{
+  int *mergeMap;
+  int *firstTriSoup = trisType ? &entity->firstTriSoupSimple : &entity->firstTriSoup;
+
+  Tris_SelectDrawSurfaceContext(trisType);
+  Assert(trisTransientMode == 1, s_assertDisable_SetTrisTransientMode);
+
+  TrisTimerCheck(NULL);
+  if (!g_currentEntityIndex)
+    printf("triangulating all windings...\n");
+  g_trisTimerStart = I_FloatTime();
+  Tris_TriangulateWindings();
+
+  if (!g_currentEntityIndex)
+    printf("%i self-tjunctions fixed\n%i degenerate tris removed\n",
+      numSelfTjunctions, numDegenerateTrisRemoved);
+
+  TrisTimerCheck(NULL);
+  if (!g_currentEntityIndex)
+    printf("smoothing normals...\n");
+  g_trisTimerStart = I_FloatTime();
+  mergeMap = BuildMergeMap((char *)drawVertBuffer, 3, sizeof(DrawVert_t),
+    numDrawVertices, EDGE_LENGTH);
+  SmoothVertexNormals(mergeMap);
+  TrisTimerCheck(NULL);
+
+  TrisTimerCheck(NULL);
+  if (!g_currentEntityIndex)
+    printf("emitting triangles...\n");
+  g_trisTimerStart = I_FloatTime();
+  Assert(*firstTriSoup == numBSPTriSoups, s_assertDisable_Tris_EmitTriangles);
+  Tris_EmitTriangles(0.0, tree, mergeMap);
+  if (*firstTriSoup == numBSPTriSoups)
+    *firstTriSoup = 0;
+  FreeSurface(mergeMap);
+  return 0;
 }
 
 /*
@@ -6741,7 +8681,6 @@ smoothing normals, and emitting triangle data to BSP
 int *EmitDrawSurfaces(Entity_t *entity, Tree_t *tree)
 {
   int result;
-  int *mergeMap;
   int *freeResult;
 
   result = entity->firstDrawSurf;
@@ -6752,61 +8691,24 @@ int *EmitDrawSurfaces(Entity_t *entity, Tree_t *tree)
   }
   else
   {
-    /* Native 0x442F90 emits type 1 first.  It is an independently executed
-       context, not a byte-for-byte copy of the layered output. */
+    /* Native 0x43E7C0 prepares one mode-1 TriSurf set, then 0x442F90 emits
+       type 1 followed by type 0 from that same set. */
     entity->firstTriSoupSimple = numBSPUnlayeredTriSoups;
     entity->firstTriSoup = numBSPTriSoups;
-    if ( TrisLmap_NativeRouteEnabled() )
-      TrisLmap_SaveAllocatorCheckpoint();
     TJunc_SetBounds(tree->mins, tree->maxs);
     TriangulateEntity(entity, tree);
-    if ( !g_currentEntityIndex )
-      printf("smoothing normals...\n");
-    mergeMap = BuildMergeMap((char *)drawVertBuffer, 3, sizeof(DrawVert_t), numDrawVertices, EDGE_LENGTH);
-    SmoothVertexNormals(mergeMap);
-    if ( !g_currentEntityIndex )
-      printf("emitting triangles...\n");
+    /* Native 0x43E8B0 sits between 0x43EA70 and the two type emitters. */
+    RemoveDegenerateTriSurfs();
 
-    Tris_SelectDrawSurfaceContext(1);
-    Tris_EmitTriangles(0.0, tree, mergeMap);
-    if ( entity->firstTriSoupSimple == numBSPTriSoups )
-      entity->firstTriSoupSimple = 0;
-    FreeSurface(mergeMap);
-    FreeAllTriSurfs();
-
-    /* Type 0 is the layered path.  Native additionally combines layered
-       materials here; that producer has no reconstructed counterpart yet,
-       so this context rebuilds and consumes the shared source geometry
-       independently.  EmitTriangleSoup mutates its TriRecord/vertex input,
-       which is why reusing the first pass's records is not valid. */
-    /* Native 0x43E7C0 emits both types from one prior 0x43EA70 pass.  This
-       donor reconstruction must rebuild for type 0, so replay the exact
-       pre-pass allocator state; the second native-route assignment then
-       occupies the same blocks while leaving the allocator at its native
-       post-pass state. */
-    if ( TrisLmap_NativeRouteEnabled() )
-      TrisLmap_RestoreAllocatorCheckpoint();
-    TJunc_SetBounds(tree->mins, tree->maxs);
-    TriangulateEntity(entity, tree);
-    if ( !g_currentEntityIndex )
-      printf("smoothing normals...\n");
-    mergeMap = BuildMergeMap((char *)drawVertBuffer, 3, sizeof(DrawVert_t), numDrawVertices, EDGE_LENGTH);
-    SmoothVertexNormals(mergeMap);
-    if ( !g_currentEntityIndex )
-      printf("emitting triangles...\n");
-    Tris_SelectDrawSurfaceContext(0);
-    Tris_EmitTriangles(0.0, tree, mergeMap);
+    EmitDrawSurfacesForType(1, entity, tree);
+    EmitDrawSurfacesForType(0, entity, tree);
     if ( !g_currentEntityIndex )
     {
       printf("%i vertices couldn't be merged because the textures point different ways\n", numUnmergeableTexVerts);
       LeafNode(entity, tree->headnode);
     }
-    if ( entity->firstTriSoup == numBSPTriSoups )
-      entity->firstTriSoup = 0;
-    FreeSurface(mergeMap);
     freeResult = FreeAllTriSurfs();
-    if ( TrisLmap_NativeRouteEnabled() )
-      TrisLmap_ClearAllocatorCheckpoint();
+    SetTrisTransientMode(0, 1);
     return freeResult;
   }
   return (int *)(intptr_t)result;

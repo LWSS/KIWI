@@ -43,119 +43,6 @@ static const float s_primaryLightKdopDirs[26][3] =
   { 0.57735026f, -0.57735026f, -0.57735026f }, { -0.57735026f, 0.57735026f, 0.57735026f }
 };
 
-/* Local exact copies of the private 0x42C0A0/0x42C470 polylib chain.  The
- * original symbols are private to polylib.cpp, while 0x4367F0 calls them. */
-static float PrimaryLightRegionHullCross(const float projected[64][2], int a, int b, int c)
-{
-  return (projected[b][0] - projected[a][0]) * (projected[c][1] - projected[a][1])
-       - (projected[b][1] - projected[a][1]) * (projected[c][0] - projected[a][0]);
-}
-
-static Winding_t *PrimaryLightRegionWindingFromPoints(const float *planeNormal, const vec3_t *points, int pointCount)
-{
-  float projected[64][2];
-  int pointOrder[64];
-  int hullOrder[128];
-  int axisU, axisV, hullCount, pointIndex, sortIndex, tri0, tri1, tri2;
-  vec3_t orientNormal;
-  Winding_t *winding;
-
-  if (pointCount < 3)
-    return NULL;
-
-  GetProjectionAxes((float *)planeNormal, &axisU, &axisV);
-  for (pointIndex = 0; pointIndex < pointCount; ++pointIndex)
-  {
-    projected[pointIndex][0] = points[pointIndex][axisU];
-    projected[pointIndex][1] = points[pointIndex][axisV];
-    pointOrder[pointIndex] = pointIndex;
-  }
-
-  for (pointIndex = 1; pointIndex < pointCount; ++pointIndex)
-  {
-    int point = pointOrder[pointIndex];
-    for (sortIndex = pointIndex; sortIndex > 0 && (projected[point][0] < projected[pointOrder[sortIndex - 1]][0]
-         || (projected[point][0] == projected[pointOrder[sortIndex - 1]][0]
-          && projected[point][1] < projected[pointOrder[sortIndex - 1]][1])); --sortIndex)
-      pointOrder[sortIndex] = pointOrder[sortIndex - 1];
-    pointOrder[sortIndex] = point;
-  }
-
-  hullCount = 0;
-  for (pointIndex = 0; pointIndex < pointCount; ++pointIndex)
-  {
-    while (hullCount >= 2 && PrimaryLightRegionHullCross(projected, hullOrder[hullCount - 2], hullOrder[hullCount - 1], pointOrder[pointIndex]) <= 0.0f)
-      --hullCount;
-    hullOrder[hullCount++] = pointOrder[pointIndex];
-  }
-  for (pointIndex = pointCount - 2, sortIndex = hullCount + 1; pointIndex >= 0; --pointIndex)
-  {
-    while (hullCount >= sortIndex && PrimaryLightRegionHullCross(projected, hullOrder[hullCount - 2], hullOrder[hullCount - 1], pointOrder[pointIndex]) <= 0.0f)
-      --hullCount;
-    hullOrder[hullCount++] = pointOrder[pointIndex];
-  }
-  if (hullCount > 1)
-    --hullCount;
-  if (hullCount < 3)
-    return NULL;
-
-  winding = AllocWinding(hullCount);
-  winding->numpoints = hullCount;
-  for (pointIndex = 0; pointIndex < hullCount; ++pointIndex)
-    VectorCopy(points[hullOrder[pointIndex]], winding->points[pointIndex]);
-
-  if (WindingLargestTriangleArea(winding, (float *)planeNormal, &tri0, &tri1, &tri2) < 0.001f)
-  {
-    FreeWinding(winding);
-    return NULL;
-  }
-
-  VectorSubtract(winding->points[tri1], winding->points[tri0], orientNormal);
-  {
-    vec3_t edge, cross;
-    VectorSubtract(winding->points[tri2], winding->points[tri0], edge);
-    CrossProduct(edge, orientNormal, cross);
-    if (DotProduct(cross, planeNormal) < 0.0f)
-    {
-      Winding_t *reversed = ReverseWinding(winding);
-      FreeWinding(winding);
-      winding = reversed;
-    }
-  }
-  return winding;
-}
-
-static int PrimaryLightRegionAddPlaneBoxIntersectionPoints(const float *plane, const float *mins, const float *maxs, int axisA, int axisB, vec3_t *out)
-{
-  int signA, signB, axisC = 3 - axisA - axisB, count = 0;
-  for (signA = 0; signA != 2; ++signA)
-  {
-    for (signB = 0; signB != 2; ++signB)
-    {
-      vec3_t point;
-      if (fabsf(plane[axisC]) <= FLT_EPSILON)
-        continue;
-      point[axisA] = signA ? maxs[axisA] : mins[axisA];
-      point[axisB] = signB ? maxs[axisB] : mins[axisB];
-      point[axisC] = (plane[3] - plane[axisA] * point[axisA] - plane[axisB] * point[axisB]) / plane[axisC];
-      if (point[axisC] >= mins[axisC] && point[axisC] <= maxs[axisC])
-        VectorCopy(point, out[count++]);
-    }
-  }
-  return count;
-}
-
-static Winding_t *PrimaryLightRegionWindingFromPlaneAndBounds(const float *plane, const float *mins, const float *maxs)
-{
-  vec3_t points[12];
-  int pointCount = 0;
-
-  pointCount += PrimaryLightRegionAddPlaneBoxIntersectionPoints(plane, mins, maxs, 0, 1, &points[pointCount]);
-  pointCount += PrimaryLightRegionAddPlaneBoxIntersectionPoints(plane, mins, maxs, 1, 2, &points[pointCount]);
-  pointCount += PrimaryLightRegionAddPlaneBoxIntersectionPoints(plane, mins, maxs, 2, 0, &points[pointCount]);
-  return pointCount >= 3 ? PrimaryLightRegionWindingFromPoints(plane, points, pointCount) : NULL;
-}
-
 /* Local exact copy of private 0x42C980. */
 static int PrimaryLightRegionClipWinding(Winding_t *inWinding, float *planeNormal, float planeDist, float epsilon, Winding_t **outFront, Winding_t **outBack)
 {
@@ -223,14 +110,22 @@ static int PrimaryLightRegionClipWinding(Winding_t *inWinding, float *planeNorma
     currentSide = sides[pointIndex];
     if (currentSide == SIDE_ON)
     {
-      VectorCopy(inWinding->points[pointIndex], front->points[front->numpoints++]);
-      VectorCopy(inWinding->points[pointIndex], back->points[back->numpoints++]);
+      VectorCopy(inWinding->points[pointIndex], front->points[front->numpoints]);
+      ++front->numpoints;
+      VectorCopy(inWinding->points[pointIndex], back->points[back->numpoints]);
+      ++back->numpoints;
       continue;
     }
     if (currentSide == SIDE_FRONT)
-      VectorCopy(inWinding->points[pointIndex], front->points[front->numpoints++]);
+    {
+      VectorCopy(inWinding->points[pointIndex], front->points[front->numpoints]);
+      ++front->numpoints;
+    }
     else
-      VectorCopy(inWinding->points[pointIndex], back->points[back->numpoints++]);
+    {
+      VectorCopy(inWinding->points[pointIndex], back->points[back->numpoints]);
+      ++back->numpoints;
+    }
 
     nextSide = sides[pointIndex + 1];
     if (nextSide == SIDE_ON || nextSide == currentSide)
@@ -246,8 +141,10 @@ static int PrimaryLightRegionClipWinding(Winding_t *inWinding, float *planeNorma
     }
     if (isExactAxialPlane)
       mid[axialAxis] = axialSnapValue;
-    VectorCopy(mid, front->points[front->numpoints++]);
-    VectorCopy(mid, back->points[back->numpoints++]);
+    VectorCopy(mid, front->points[front->numpoints]);
+    ++front->numpoints;
+    VectorCopy(mid, back->points[back->numpoints]);
+    ++back->numpoints;
   }
   *outFront = front;
   *outBack = back;
@@ -269,7 +166,7 @@ static float PrimaryLightRegionSmallestEdgeDistance(const Winding_t *winding, co
 
     VectorSubtract(winding->points[current], winding->points[previous], edge);
     CrossProduct(edge, planeNormal, edgePlane);
-    edgeLength = VectorLength(edgePlane);
+    edgeLength = (float)VecNormalize(edgePlane);
     edgeDist = DotProduct(edgePlane, winding->points[previous]);
     do
     {
@@ -427,7 +324,7 @@ void GenerateEnclosingPrimaryLightHull(PrimaryLightRegionNode_t **outList, const
   {
     VectorCopy(s_primaryLightKdopDirs[directionIndex], plane);
     plane[3] = -light->radius;
-    winding = PrimaryLightRegionWindingFromPlaneAndBounds(plane, mins, maxs);
+    winding = WindingFromPlaneAndBounds(plane, mins, maxs);
     for (clipDirectionIndex = 6; clipDirectionIndex < 26; ++clipDirectionIndex)
     {
       if (clipDirectionIndex != directionIndex)
@@ -632,36 +529,64 @@ static PrimaryLightRegionNode_t **ClipHullListAgainstCaster(PrimaryLightRegionNo
 PrimaryLightRegionNode_t *MergeCoplanarPrimaryLightHulls(PrimaryLightRegionNode_t *list)
 {
   PrimaryLightRegionNode_t *node;
-  WindingList_t *windingList;
-  WindingList_t **tail;
   Winding_t *merged;
+  float pointBuffers[2][64][2];
   float plane[4];
+  unsigned int activeBuffer = 0;
+  unsigned int scratchBuffer = 1;
+  unsigned int pointCount = 0;
+  unsigned int hullCount;
+  int axis0;
+  int axis1;
+  int axis2;
+  int pointIndex;
 
   if (!list || !list->next)
     return list;
 
-  windingList = NULL;
-  tail = &windingList;
+  GetProjectionAxes(list->plane, &axis0, &axis1);
+  axis2 = 3 - axis0 - axis1;
   for (node = list; node; node = node->next)
   {
-    *tail = AllocWindingListNode();
-    (*tail)->winding = node->w;
-    tail = &(*tail)->next;
+    for (pointIndex = 0; pointIndex < node->w->numpoints; ++pointIndex)
+    {
+      pointBuffers[activeBuffer][pointCount][0] = node->w->points[pointIndex][axis0];
+      pointBuffers[activeBuffer][pointCount][1] = node->w->points[pointIndex][axis1];
+      if (++pointCount == 64)
+      {
+        unsigned int swapBuffer;
+
+        pointCount = Com_ConvexHull(pointBuffers[activeBuffer], 64,
+                                    pointBuffers[scratchBuffer]);
+        if (pointCount == 64)
+          Com_Error("Too many vertices on convex hull of partially occluded primary light portal");
+        swapBuffer = activeBuffer;
+        activeBuffer = scratchBuffer;
+        scratchBuffer = swapBuffer;
+      }
+    }
   }
 
-  merged = WindingFromWindingList(list->plane, windingList);
-  while (windingList)
+  hullCount = Com_ConvexHull(pointBuffers[activeBuffer], pointCount,
+                             pointBuffers[scratchBuffer]);
+  merged = AllocWinding(hullCount);
+  merged->numpoints = hullCount;
+  for (pointIndex = 0; pointIndex < (int)hullCount; ++pointIndex)
   {
-    WindingList_t *next = windingList->next;
-    FreeWindingListNode(windingList);
-    windingList = next;
+    const float projected0 = pointBuffers[scratchBuffer][pointIndex][0];
+    const float projected1 = pointBuffers[scratchBuffer][pointIndex][1];
+
+    merged->points[pointIndex][axis0] = projected0;
+    merged->points[pointIndex][axis1] = projected1;
+    merged->points[pointIndex][axis2] =
+        (list->plane[3] - projected0 * list->plane[axis0]
+         - projected1 * list->plane[axis1]) / list->plane[axis2];
   }
 
-  if (!merged || !WindingHasPlane(merged, plane))
+  if (!WindingHasPlane(merged, plane))
   {
     FreePrimaryLightHullList(list);
-    if (merged)
-      FreeWinding(merged);
+    FreeWinding(merged);
     return NULL;
   }
 
@@ -1016,22 +941,32 @@ static int PrimaryLightKdopTripleCorners(const float (*axes)[5], unsigned int ax
   const float *a = axes[axis0];
   const float *b = axes[axis1];
   const float *c = axes[axis2];
-  float crossBC[3], crossCA[3], crossAB[3];
-  float determinant;
+  /* 0x438650 evaluates the determinant and all nine cofactors directly on
+     the x87 stack.  Do not materialize CrossProduct results as vec3_t here:
+     doing so rounds the intermediate cofactors to single precision before
+     the slab-corner solve used by the 0.999 K-DOP axis-selection test. */
+  double crossBC[3], crossCA[3], crossAB[3];
+  double determinant;
   unsigned int cornerIndex;
 
-  CrossProduct((float *)b, (float *)c, crossBC);
-  determinant = DotProduct(a, crossBC);
-  if (fabsf(determinant) < 0.001000000047497451f)
+  crossBC[0] = (double)b[1] * c[2] - (double)c[1] * b[2];
+  crossBC[1] = (double)c[0] * b[2] - (double)b[0] * c[2];
+  crossBC[2] = (double)b[0] * c[1] - (double)c[0] * b[1];
+  determinant = crossBC[0] * a[0] + crossBC[1] * a[1] + crossBC[2] * a[2];
+  if (fabs(determinant) < 0.001000000047497451f)
     return 0;
-  CrossProduct((float *)c, (float *)a, crossCA);
-  CrossProduct((float *)a, (float *)b, crossAB);
+  crossCA[0] = (double)c[1] * a[2] - (double)a[1] * c[2];
+  crossCA[1] = (double)a[0] * c[2] - (double)c[0] * a[2];
+  crossCA[2] = (double)c[0] * a[1] - (double)a[0] * c[1];
+  crossAB[0] = (double)a[1] * b[2] - (double)b[1] * a[2];
+  crossAB[1] = (double)b[0] * a[2] - (double)a[0] * b[2];
+  crossAB[2] = (double)a[0] * b[1] - (double)b[0] * a[1];
 
   for (cornerIndex = 0; cornerIndex < 8; ++cornerIndex)
   {
-    float distanceA = a[3] + ((cornerIndex & 1) ? a[4] : -a[4]);
-    float distanceB = b[3] + ((cornerIndex & 2) ? b[4] : -b[4]);
-    float distanceC = c[3] + ((cornerIndex & 4) ? c[4] : -c[4]);
+    double distanceA = (double)a[3] + ((cornerIndex & 1) ? a[4] : -a[4]);
+    double distanceB = (double)b[3] + ((cornerIndex & 2) ? b[4] : -b[4]);
+    double distanceC = (double)c[3] + ((cornerIndex & 4) ? c[4] : -c[4]);
     corners[cornerIndex][0] = (distanceA * crossBC[0] + distanceB * crossCA[0] + distanceC * crossAB[0]) / determinant;
     corners[cornerIndex][1] = (distanceA * crossBC[1] + distanceB * crossCA[1] + distanceC * crossAB[1]) / determinant;
     corners[cornerIndex][2] = (distanceA * crossBC[2] + distanceB * crossCA[2] + distanceC * crossAB[2]) / determinant;
@@ -1091,7 +1026,7 @@ static Winding_t *PrimaryLightKdopFaceWinding(const float *normal, vec3_t *point
   unsigned int firstCount;
 
   if (pointCount <= 64)
-    return PrimaryLightRegionWindingFromPoints(normal, points, (int)pointCount);
+    return WindingFromPoints(normal, points, (int)pointCount);
 
   firstCount = pointCount / 2;
   first = PrimaryLightKdopFaceWinding(normal, points, firstCount);
@@ -1132,7 +1067,8 @@ static unsigned int PrimaryLightKdopBuildFaces(const float (*axes)[5], unsigned 
       if (points[pointIndex].faceAxis[0] == (int)faceIndex || points[pointIndex].faceAxis[1] == (int)faceIndex || points[pointIndex].faceAxis[2] == (int)faceIndex)
       {
         Assert(facePointCount < 136, s_assertDisable_PrimaryLightCandidateDirectionLimit);
-        VectorCopy(points[pointIndex].point, facePoints[facePointCount++]);
+        VectorCopy(points[pointIndex].point, facePoints[facePointCount]);
+        ++facePointCount;
       }
     }
     if (facePointCount < 3)

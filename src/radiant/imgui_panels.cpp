@@ -64,6 +64,48 @@ void ImGuiPanels_Menu()
         ImGuiPanel_AdvPatch_MenuItem();
     }
     ImGui::Checkbox( "ImGui demo",         &s_showDemo );
+
+    // KIWI-UX: RADIANT_UX_DESIGN Phase-1b switches — the modern-input master toggle,
+    // the grid/axes/hover additions and the §17 units + grid-spacing prefs.  Phase 2 adds
+    // the §11 keymap-profile switcher and the §6 snap-marker toggle inside the same block,
+    // plus the §15 palette entry so CLASSIC-keymap users reach it without the modern F.
+    {
+        extern void KiwiUX_DrawSettings();   // kiwi_ux.cpp
+        extern void KiwiPalette_MenuItem();  // kiwi_palette.cpp
+        KiwiUX_DrawSettings();
+        KiwiPalette_MenuItem();
+        // Phase 4 (§7/§16/§23): the "Construct" submenu — the drawing tools, the
+        // construction planes and Extrude Region.  None of them binds a key this
+        // phase (kiwi_construct.h KEYS note), so this and the palette ARE the route
+        // in BOTH keymap profiles.
+        extern void KiwiCon_MenuItems();     // kiwi_construct.cpp
+        KiwiCon_MenuItems();
+        // Shakeout C (§16b): the four SOLID primitives — the one-gesture answer
+        // to "how do I make a brush in the 3D view" — and the Shift+A add menu
+        // that lists every creator, so the CLASSIC keymap reaches it too.
+        extern void KiwiPrim_MenuItems();    // kiwi_primitive.cpp
+        extern void KiwiAdd_MenuItem();      // kiwi_addmenu.cpp
+        KiwiPrim_MenuItems();
+        KiwiAdd_MenuItem();
+        // Phase 5 (§24/§25): CSG workflow, bevel/inset, mirror + arrays and the
+        // selection-expansion helpers.  Same ruling as the Construct block — none
+        // of them binds a key this phase, so this block and the command palette
+        // ARE the route in BOTH keymap profiles.
+        extern void KiwiCsg_MenuItems();     // kiwi_csg.cpp
+        extern void KiwiBevel_MenuItems();   // kiwi_bevel.cpp
+        extern void KiwiDupe_MenuItems();    // kiwi_dupe.cpp
+        extern void KiwiSelExt_MenuItems();  // kiwi_selext.cpp
+        KiwiCsg_MenuItems();
+        KiwiBevel_MenuItems();
+        KiwiDupe_MenuItems();
+        KiwiSelExt_MenuItems();
+        // Phase 6 (§26): the UV workflow v1 — texture shift/rotate/scale + the
+        // texture pick.  Same ruling again: no new key bindings this phase, so
+        // this block and the command palette ARE the route in BOTH profiles (the
+        // classic middle-button pick over the 3D view still works too).
+        extern void KiwiUv_MenuItems();      // kiwi_uv.cpp
+        KiwiUv_MenuItems();
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -226,5 +268,20 @@ void ImGuiPanels_Draw()
         }
         ImGuiShell_CloseOnFocusLoss( &s_showThicken );
         ImGui::End();
+    }
+
+    // KIWI-UX (RADIANT_UX_DESIGN §15, Phase 2): the command palette.  Drawn LAST and at TOP
+    // LEVEL (not inside a viewport window) so it centres over the whole dockspace and paints
+    // above everything else.  Deliberately NOT run through ImGuiShell_CloseOnFocusLoss — the
+    // palette closes on Esc / on running a row, and a click-off close would fight its own
+    // auto-focus (the panel auto-close latch is for docked tool panels, not a transient popup).
+    {
+        extern void KiwiPalette_Draw();   // kiwi_palette.cpp
+        KiwiPalette_Draw();
+        // KIWI-UX (§16b, shakeout C): the Shift+A add menu, same placement rule —
+        // top level, drawn last, so it paints above every docked window.  It is
+        // cursor-anchored rather than centred, which is the only difference.
+        extern void KiwiAdd_Draw();       // kiwi_addmenu.cpp
+        KiwiAdd_Draw();
     }
 }

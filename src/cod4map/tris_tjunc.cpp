@@ -40,6 +40,27 @@ int   *triVertexIndexMap;
 static void *tjuncMergeScratch;
 #define TJUNC_MERGE_SCRATCH_SIZE 0xD30300u
 
+/* Native 0x4052D0/0x4054A0 finish their x87 expression with an fstp to a
+   float local.  TJunction matching consumes those rounded values in branch
+   decisions, so generic reordered dot helpers are not interchangeable. */
+static float TJunc_DotNativeRound(const float *a, const float *b)
+{
+  volatile float result = a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  return result;
+}
+
+static float TJunc_SquareNativeRound(float value)
+{
+  volatile float result = value * value;
+  return result;
+}
+
+static float TJunc_LenSq2NativeRound(float x, float y)
+{
+  volatile float result = x * x + y * y;
+  return result;
+}
+
 char s_assertDisable_FixSurfaceJunctions;
 char s_assertDisable_RemoveDegenerateEdges;
 char s_assertDisable_RemoveDegenerateEdges;
@@ -264,6 +285,26 @@ void *TJunc_MergeScratchInit(void)
   if ( !tjuncMergeScratch )
     Com_Error("Out of memory allocating T-junction merge scratch");
   memset(tjuncMergeScratch, 0, TJUNC_MERGE_SCRATCH_SIZE);
+
+  /* Native 0x45CE40 stores these four carriers contiguously in the freshly
+     allocated 0xD30300-byte arena:
+
+       0x000000  0x600000  edge lines
+       0x600000  0x700000  points
+       0xD00000  0x030000  non-axial spatial hash
+       0xD30000  0x000300  axial node hash
+
+     KIWI exposes typed static arrays instead.  Clear the arrays themselves,
+     not merely the ownership-token allocation, so every native arena
+     lifetime starts with identical operational state.  In particular this
+     must clear the spatial hash unconditionally: TjuncReset intentionally
+     skips it while non-axial creation is disabled. */
+  memset(tjuncEdgeLines, 0, sizeof(tjuncEdgeLines));
+  memset(tjuncPoints, 0, sizeof(tjuncPoints));
+  memset(tjuncSpatialHash, 0, sizeof(tjuncSpatialHash));
+  memset(tjuncNodeHash, 0, sizeof(tjuncNodeHash));
+  tjuncLineCount = 0;
+  tjuncPointCount = 0;
   return tjuncMergeScratch;
 }
 
@@ -282,24 +323,24 @@ Update snap point XYZ if new vertex is closer to edge line
 */
 void TJunc_UpdateSnapPoint( float *newVertex, TjuncPoint_t *pt, int flags, TjuncEdgeLine_t *el )
 {
-  double dOldA, dOldB, dNewA, dNewB;
+  float dOldA, dOldB, dNewA, dNewB;
+  float distOld, distNew;
 
   pt->flags |= flags;
 
   /* perpendicular distance of existing snap point to edge planes */
-  dOldA = DotProduct120(pt->pos, el->normalA) - (double)el->distA;
-  dOldB = DotProduct210(pt->pos, el->normalB) - (double)el->distB;
+  dOldA = TJunc_DotNativeRound(pt->pos, el->normalA) - el->distA;
+  dOldB = TJunc_DotNativeRound(pt->pos, el->normalB) - el->distB;
 
   /* perpendicular distance of new vertex to edge planes */
-  dNewA = DotProduct210(newVertex, el->normalA) - (double)el->distA;
-  dNewB = DotProduct210(newVertex, el->normalB) - (double)el->distB;
+  dNewA = TJunc_DotNativeRound(newVertex, el->normalA) - el->distA;
+  dNewB = TJunc_DotNativeRound(newVertex, el->normalB) - el->distB;
 
   /* update if new vertex is closer to edge line */
-  { double distNew = MulAdd2(dNewA,dNewA, dNewB,dNewB);
-    double distOld = MulAdd2(dOldA,dOldA, dOldB,dOldB);
-    if ( distNew < distOld )
-      VectorCopy(newVertex, pt->pos);
-  }
+  distOld = TJunc_LenSq2NativeRound(dOldA, dOldB);
+  distNew = TJunc_LenSq2NativeRound(dNewA, dNewB);
+  if ( distNew < distOld )
+    VectorCopy(newVertex, pt->pos);
 }
 
 /*
@@ -327,9 +368,9 @@ void TJunc_InsertPoint(float *vertex, float intercept, int flags, TjuncEdgeLine_
   scan = edgeLine->sentinel.next;
   while ( scan != &edgeLine->sentinel )
   {
-    double diff = scan->intercept - intercept;
+    float diff = scan->intercept - intercept;
 
-    if ( diff * diff < edgeLine->tolerance )
+    if ( TJunc_SquareNativeRound(diff) < edgeLine->tolerance )
     {
       TJunc_UpdateSnapPoint(vertex, scan, flags, edgeLine);
       return;
@@ -356,12 +397,13 @@ Classifies edge direction, inserts both endpoints
 */
 void TJunc_ClassifyAndInsertEdge(float *vertA, float *vertB, TjuncEdgeLine_t *el, float tolerance)
 {
-  float dotA = DotProduct210(vertA, el->edgeDir);
-  float dotB = DotProduct210(vertB, el->edgeDir);
-  double diff = (double)dotB - dotA;
+  float dotA = TJunc_DotNativeRound(vertA, el->edgeDir);
+  float dotB = TJunc_DotNativeRound(vertB, el->edgeDir);
+  float diff = dotB - dotA;
+  float diffSq = TJunc_SquareNativeRound(diff);
   int dirFlags;
 
-  if ( diff * diff >= tolerance )
+  if ( diffSq >= tolerance )
     dirFlags = (diff >= 0.0) ? 1 : 2;
   else
     dirFlags = 4;
@@ -448,8 +490,8 @@ void TJunc_AddEdgeLine(float *vertA, float *vertB, int hashAxis, float tolerance
 
   VectorCopy(vertA, el->startVert);
   MakeNormalVectors(el->edgeDir, el->normalA, el->normalB);
-  el->distA = DotProduct120(el->normalA, vertA);
-  el->distB = DotProduct120(el->normalB, vertA);
+  el->distA = TJunc_DotNativeRound(vertA, el->normalA);
+  el->distB = TJunc_DotNativeRound(vertA, el->normalB);
   el->sentinel.prev = &el->sentinel;
   el->sentinel.next = &el->sentinel;
   el->tolerance = tolerance;
@@ -481,27 +523,27 @@ Max squared perpendicular distance of two vertices to edge line.
 */
 double TJunc_DistToEdgeLine(TjuncEdgeLine_t *el, float *vertB, float *vertA, float epsilon)
 {
-  double d;
+  float d;
   float sq, maxSq;
 
   /* test each vertex against both perpendicular planes — early out if too far */
-  d = DotProduct120(vertA, el->normalA) - (double)el->distA;
-  maxSq = d * d;
-  if ( maxSq > (double)epsilon ) return maxSq;
+  d = TJunc_DotNativeRound(vertA, el->normalA) - el->distA;
+  maxSq = TJunc_SquareNativeRound(d);
+  if ( maxSq > epsilon ) return maxSq;
 
-  d = DotProduct210(vertA, el->normalB) - (double)el->distB;
-  sq = d * d;
-  if ( sq > (double)epsilon ) return sq;
+  d = TJunc_DotNativeRound(vertA, el->normalB) - el->distB;
+  sq = TJunc_SquareNativeRound(d);
+  if ( sq > epsilon ) return sq;
   if ( sq > maxSq ) maxSq = sq;
 
-  d = DotProduct120(vertB, el->normalA) - (double)el->distA;
-  sq = d * d;
-  if ( sq > (double)epsilon ) return sq;
+  d = TJunc_DotNativeRound(vertB, el->normalA) - el->distA;
+  sq = TJunc_SquareNativeRound(d);
+  if ( sq > epsilon ) return sq;
   if ( sq > maxSq ) maxSq = sq;
 
-  d = DotProduct210(vertB, el->normalB) - (double)el->distB;
-  sq = d * d;
-  if ( sq > (double)epsilon ) return sq;
+  d = TJunc_DotNativeRound(vertB, el->normalB) - el->distB;
+  sq = TJunc_SquareNativeRound(d);
+  if ( sq > epsilon ) return sq;
   if ( sq > maxSq ) maxSq = sq;
 
   return maxSq;
@@ -556,14 +598,29 @@ TjuncEdgeLine_t *TJunc_FindEdgeLineByHash(float *direction, float *firstVertex,
   return bestLine;
 }
 
-/* CoD4 0x45DBF0: the low-magnitude route performs its full distance walk
-   without selecting an edge for the caller. */
-void TJunc_FindEdgeLineBrute(float *firstVertex, float *secondVertex, float tolerance)
+/* CoD4 0x45DBF0: select the closest line across the complete arena.  IDA's
+   pseudocode used to lose the local best-line return carrier here; the x87
+   comparison at 0x45DC41..0x45DC62 updates both the running tolerance and
+   the selected line whenever distance < tolerance. */
+TjuncEdgeLine_t *TJunc_FindEdgeLineBrute(float *firstVertex, float *secondVertex,
+                                         float tolerance)
 {
   int lineIndex;
+  TjuncEdgeLine_t *bestLine = NULL;
 
   for ( lineIndex = 0; lineIndex < tjuncLineCount; ++lineIndex )
-    (void)TJunc_DistToEdgeLine(&tjuncEdgeLines[lineIndex], firstVertex, secondVertex, tolerance);
+  {
+    TjuncEdgeLine_t *line = &tjuncEdgeLines[lineIndex];
+    float distance = (float)TJunc_DistToEdgeLine(
+      line, firstVertex, secondVertex, tolerance);
+
+    if ( distance < tolerance )
+    {
+      tolerance = distance;
+      bestLine = line;
+    }
+  }
+  return bestLine;
 }
 
 /*
@@ -577,25 +634,32 @@ larger directions use the cube-face directional hash.
 TjuncEdgeLine_t *TJunc_FindMatchingEdgeLine(float *firstVertex, float *secondVertex,
                                              float *direction, float epsilon)
 {
-  if ( tjuncHashTolSq >= DotProduct(direction, direction) )
-  {
-    TJunc_FindEdgeLineBrute(firstVertex, secondVertex, epsilon);
-    return NULL;
-  }
+  if ( tjuncHashTolSq >= TJunc_DotNativeRound(direction, direction) )
+    return TJunc_FindEdgeLineBrute(firstVertex, secondVertex, epsilon);
   return TJunc_FindEdgeLineByHash(direction, firstVertex, secondVertex, epsilon);
 }
 
-/* CoD4 0x45DC70: examine every axis-spatial bucket entry without promoting
-   a selected edge to the caller. */
-void TJunc_FindEdgeLineByIndex(int hashAxis, float *firstVertex,
-                               float *secondVertex, float tolerance)
+/* CoD4 0x45DC70: select the closest line in the axial spatial bucket. */
+TjuncEdgeLine_t *TJunc_FindEdgeLineByIndex(int hashAxis, float *firstVertex,
+                                           float *secondVertex, float tolerance)
 {
   TjuncEdgeLine_t *line;
+  TjuncEdgeLine_t *bestLine = NULL;
 
   for ( line = (TjuncEdgeLine_t *)*TJunc_HashLookup(hashAxis, firstVertex);
         line;
         line = line->hashNext2 )
-    (void)TJunc_DistToEdgeLine(line, firstVertex, secondVertex, tolerance);
+  {
+    float distance = (float)TJunc_DistToEdgeLine(
+      line, firstVertex, secondVertex, tolerance);
+
+    if ( distance < tolerance )
+    {
+      tolerance = distance;
+      bestLine = line;
+    }
+  }
+  return bestLine;
 }
 
 /*
@@ -612,19 +676,14 @@ TjuncEdgeLine_t *TJunc_FindEdge(float *curVertex, float *outEpsilon, float *last
   float epsilon;
 
   VectorSubtract(curVertex, lastVertex, dir);
-  lenSqScaled = DotProduct(dir, dir) * 0.25;
+  lenSqScaled = TJunc_DotNativeRound(dir, dir) * 0.25;
   epsilon = (tjuncSnapTolSq > lenSqScaled) ? (float)lenSqScaled : tjuncSnapTolSq;
 
   Assert(outEpsilon, s_assertDisable_TJunc_FindEdge);
   *outEpsilon = epsilon;
 
   if ( hashAxis >= 0 )
-  {
-    /* 0x45DC70 performs the axis-bucket distance walk for this route, but
-       like the native helper it leaves no selected-edge return value. */
-    TJunc_FindEdgeLineByIndex(hashAxis, curVertex, lastVertex, epsilon);
-    return NULL;
-  }
+    return TJunc_FindEdgeLineByIndex(hashAxis, curVertex, lastVertex, epsilon);
   return TJunc_FindMatchingEdgeLine(curVertex, lastVertex, dir, epsilon);
 }
 
@@ -645,14 +704,14 @@ int TJunc_ClassifyEdgeAxis(float *vertA, float *vertB)
   volatile float threshold = tjuncSnapTolSq * 0.25f;
 
   /* compute per-axis significance flags */
-  double dx = (double)vertB[0] - vertA[0];
+  volatile float dx = vertB[0] - vertA[0];
   volatile float dy = vertB[1] - vertA[1];
   volatile float dz = vertB[2] - vertA[2];
   int flags = 0;
 
-  if (dx * dx > threshold) flags |= 1;
-  if ((double)dy * dy > threshold) flags |= 2;
-  if ((double)dz * dz > threshold) flags |= 4;
+  if (TJunc_SquareNativeRound(dx) > threshold) flags |= 1;
+  if (TJunc_SquareNativeRound(dy) > threshold) flags |= 2;
+  if (TJunc_SquareNativeRound(dz) > threshold) flags |= 4;
 
   /* return axis only if exactly one axis is significant */
   if (flags == 1) return 0;
@@ -715,7 +774,6 @@ int TJunc_ProcessSurface(WindingAuxPair_t *surface)
 
   Assert(surface, s_assertDisable_TJunc_ProcessSurface);
   ts = (TriSurf_t *)((char *)surface - offsetof(TriSurf_t, winding));
-  Assert(ts->auxElemSize == tjuncAuxElemSize || !tjuncAuxElemSize, s_assertDisable_TJunc_ProcessSurface);
 
   TJunc_ProcessWinding(surface->winding);
   for ( holeIndex = 0; holeIndex < ts->holeCount; ++holeIndex )
@@ -896,10 +954,12 @@ static void FixSurfaceJunctionsNative(Winding_t **windingPtr, float *surfPlane)
 
     if ( tolerance < edge->tolerance )
       edge->tolerance = tolerance;
-    toleranceLog = (float)log(edge->tolerance);
+    /* Native 0x45E229 calls the local float wrapper at 0x407720; despite
+       IDA's `log` symbol, that wrapper returns sqrtf(X). */
+    toleranceLog = sqrtf(edge->tolerance);
 
-    pointIntercept = DotProduct210(point, edge->edgeDir);
-    nextIntercept = DotProduct210(nextPoint, edge->edgeDir);
+    pointIntercept = TJunc_DotNativeRound(point, edge->edgeDir);
+    nextIntercept = TJunc_DotNativeRound(nextPoint, edge->edgeDir);
     sentinel = &edge->sentinel;
     node = nextIntercept <= pointIntercept ? sentinel->prev : sentinel->next;
 
@@ -918,7 +978,7 @@ static void FixSurfaceJunctionsNative(Winding_t **windingPtr, float *surfPlane)
       if ( (nextIntercept > pointIntercept && node->intercept > pointIntercept + toleranceLog)
         || (nextIntercept < pointIntercept && node->intercept < pointIntercept - toleranceLog) )
       {
-        float planeDistance = DotProduct210(node->pos, surfPlane) - surfPlane[3];
+        float planeDistance = TJunc_DotNativeRound(node->pos, surfPlane) - surfPlane[3];
 
         if ( planeDistance > -toleranceLog && toleranceLog > planeDistance )
         {

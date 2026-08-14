@@ -141,6 +141,14 @@ extern bool        Model_SetModel( entity_brush_s *b, int orientMatrix );       
 extern LayerMaterialDef *Materialdef_GetName( MaterialDef *mtlDef );            // materialdef.cpp 0x431640
 extern char        sub_46FCF0( Material *faceMtl );                             // filters.cpp 0x46fcf0
 extern void        Select_Deselect( int updateScene );                         // select.cpp 0x48e800
+
+// KIWI-UX: the typed selection core's legacy-change notification (kiwi_selection.cpp).
+// Hooked at the funnels that bypass Brush_AddToList2 / Brush_RemoveFromList (the two
+// direct list splices) and at every g_SelectedFaces size change.  O(1).
+extern void        Sel_InvalidateFromLegacy();
+// KIWI-UX (shakeout D): the same notification PLUS "this was a wholesale deselect",
+// used only by Select_Deselect.  See the call site at the tail of that function.
+extern void        Sel_NoteLegacyDeselect();
 // g_PrefsDlg (prefData_t*) comes from prefs.h; Editor_ExtractXModelGeo from r_xsurface.h.
 
 // prefab_s (brush.cpp): the recursed prefab brush list passed to sub_48D460 is the
@@ -918,6 +926,7 @@ SelectedFaceArray g_SelectedFaces;
 
 void SelectedFaceArray::SetSize( int n )        // sub_494610
 {
+    Sel_InvalidateFromLegacy();   // KIWI-UX (every face-selection size change, incl. ::Add)
     if ( n < 0 ) { unknown_libname_291(); return; }
     if ( n == 0 )
     {
@@ -971,6 +980,7 @@ int SelectedFaceArray::Add( const selface_t &f )
 // CArray::RemoveAt (sub_480670): drop `count` entries starting at index i.
 void SelectedFaceArray::RemoveAt( int i, int count )
 {
+    Sel_InvalidateFromLegacy();   // KIWI-UX (the one face removal that does not call SetSize)
     int end = i + count;
     if ( i < 0 || count < 0 || end > m_nSize || end < i || end < count )
         unknown_libname_291();
@@ -1209,6 +1219,8 @@ void Select_Invert()
     }
     g_nUpdateBits = -1;
     Sys_Printf( "done.\n" );
+
+    Sel_InvalidateFromLegacy();   // KIWI-UX (both list heads swapped directly)
 }
 
 
@@ -1470,6 +1482,15 @@ void Select_Deselect( int a1 )
         UpdateSelection( 0xFFFFFFFF, 0 );
     }
     g_nUpdateBits = 0xFFFFFFFF;
+
+    // KIWI-UX (shakeout D): the selected→active splice bypasses the brush.cpp
+    // funnels, AND this is the one legacy path that means "drop everything" —
+    // which the typed layer can no longer infer from an empty selected_brushes,
+    // because since shakeout D an edge/vertex-only selection legitimately leaves
+    // that list empty (kiwi_selection.cpp, the carry rule).  So it is said
+    // explicitly here instead.  Sel_NoteLegacyDeselect self-suppresses while
+    // Sel_SyncToLegacy is driving this function itself.
+    Sel_NoteLegacyDeselect();     // KIWI-UX (implies Sel_InvalidateFromLegacy)
 }
 
 // ═════════════════════════════════════════════════════════════════════════════

@@ -1475,7 +1475,7 @@ int FilterPointsOnPlane(int numPoints, int targetPlaneIdx, BrushPoint_t *pointsB
     isDuplicate = 0;
     for ( j = 0; j < currentOutput; j++ )
     {
-      if ( VectorCompareEpsilon(outPoints[j], srcPoints[i].xyz, ON_EPSILON, 3) )
+      if ( VectorCompareEpsilon(outPoints[j], srcPoints[i].xyz, 0.001f, 3) )
       {
         isDuplicate = 1;
         break;
@@ -1503,74 +1503,23 @@ Creates a winding polygon from brush vertex points for a specific plane.
 
 Process:
   1. Filter points that lie on this plane (FilterPointsOnPlane)
-  2. Allocate winding for the filtered points
-  3. Add points to winding in sorted order (AddPointToWinding)
-  4. Check if winding is non-degenerate (WindingLargestTriangleArea)
-  5. Ensure winding orientation matches plane normal (reverse if needed)
+  2. Build the canonical convex hull and orient it to the plane
 ================
 */
 Winding_t *GetWindingFromPoints(BrushPoint_t *pointBuffer, int planeIdx, int numPoints)
 {
   Plane_t *plane;
-  long double absNormalX, absNormalY;
-  int dominantAxis, sortByX, sortAxis2;
-  Winding_t *winding;
   vec3_t filteredPoints[MAX_POINTS_ON_WINDING];
-  vec4_t computedNormal;
-  int triVertex0, triVertex1, triVertex2;
   int filteredCount;
-  int i;
 
   /* filter points that lie on this plane */
   filteredCount = FilterPointsOnPlane(numPoints, planeIdx, pointBuffer, filteredPoints, MAX_POINTS_ON_WINDING);
   if ( filteredCount < 3 )
     return NULL;
 
-  /* get plane normal and determine sort axes */
+  /* Native uses the shared signed-axis convex hull builder here. */
   plane = MAP_PLANE(planeIdx);
-
-  absNormalX = fabs(plane->normal[0]);
-  absNormalY = fabs(plane->normal[1]);
-
-  /* find dominant axis for 2D projection */
-  dominantAxis = absNormalY > absNormalX;
-  if ( fabs(plane->normal[2]) > fabs(plane->normal[dominantAxis]) )
-    dominantAxis = 2;
-
-  sortByX = (dominantAxis & 1) == 0;
-  sortAxis2 = ~dominantAxis & 2;
-
-  /* allocate winding */
-  winding = AllocWinding(filteredCount);
-  Assert(winding->numpoints == 0, g_assertWindingZero);
-
-  /* copy first 2 points */
-  VectorCopy(filteredPoints[0], winding->points[0]);
-  VectorCopy(filteredPoints[1], winding->points[1]);
-  winding->numpoints = 2;
-
-  /* add remaining points in sorted order */
-  for ( i = 2; i < filteredCount; i++ )
-    AddPointToWinding(filteredPoints[i], winding, sortByX, sortAxis2);
-
-  /* check if winding is non-degenerate */
-  if ( WindingLargestTriangleArea(winding, plane->normal, &triVertex0, &triVertex1, &triVertex2) < PLANESIDE_EPSILON )
-  {
-    FreeWinding(winding);
-    return NULL;
-  }
-
-  /* check orientation — reverse if computed normal opposes plane normal */
-  PlaneFromPoints(computedNormal, winding->points[triVertex0], winding->points[triVertex1], winding->points[triVertex2]);
-
-  if ( DotProduct120(computedNormal, plane->normal) < 0.0 )
-  {
-    Winding_t *reversed = ReverseWinding(winding);
-    FreeWinding(winding);
-    return reversed;
-  }
-
-  return winding;
+  return WindingFromPoints(plane->normal, filteredPoints, filteredCount);
 }
 
 /*

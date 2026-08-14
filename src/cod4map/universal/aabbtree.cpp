@@ -114,7 +114,7 @@ qboolean AabbFindBestSplitPlane(float *itemMins, float *itemMaxs, int *indices, 
   for ( j = 0; j < 3; ++j )
   {
     candidateRange = (overallMaxs[j] - overallMins[j] + 1.0) * 10.0 / (overallMaxs[longestAxis] - overallMins[longestAxis] + 1.0);
-    axisScale[j] = xs_RoundToInt(candidateRange + FISTP_HALF_BIAS);
+    axisScale[j] = RoundPositiveFloatToInt(candidateRange);
   }
 
   bestScore = INT_MIN;
@@ -560,7 +560,7 @@ Entry point for AABB tree construction.
 5. Returns total number of tree nodes
 ================
 */
-#define AABB_STACK_ITEMS 0x8000 /* items threshold for stack vs heap sort buffers */
+#define AABB_STACK_ITEMS 0x1000 /* native 0x465748 stack/heap threshold */
 
 int AabbBuildTree(AabbTreeBuilder_t *builder)
 {

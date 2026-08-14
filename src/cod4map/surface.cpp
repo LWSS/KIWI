@@ -6,7 +6,6 @@ Reconstructed from cod2map.exe by Rose.
 
 #include "cod4map.h"
 
-
 /*
 ================
 AllocDrawSurface
@@ -17,9 +16,17 @@ Allocates a new draw surface from the global pool.
 DrawSurf_t *AllocDrawSurface(void)
 {
   MapDrawSurf_t *nativeDrawSurf;
+  DrawSurf_t *drawSurf;
 
   nativeDrawSurf = AllocMapDrawSurf();
-  return &g_drawSurfs[nativeDrawSurf - g_nativeMapDrawSurfs];
+  drawSurf = &g_drawSurfs[nativeDrawSurf - g_nativeMapDrawSurfs];
+  /* These are donor-only mirrors of native MapDrawSurf defaults.  Set them
+     at allocation so BSP orchestration does not need the unmatched CoD2
+     AllocateLightmaps pre-pass. */
+  drawSurf->lightStyle = LIGHTSTYLE_NONE;
+  drawSurf->ownerGroup = NULL;
+  drawSurf->nextInGroup = NULL;
+  return drawSurf;
 }
 
 MapDrawSurf_t *NativeMapDrawSurfFor(DrawSurf_t *drawSurf)
@@ -381,11 +388,14 @@ void SubdivideDrawSurfs(Entity_t *entity)
   BrushSide_t *side;
   ShaderInfo_t *si;
   Winding_t *w;
+  float tessSize;
+  int end;
   int i;
 
   Com_DPrintf("----- SubdivideDrawSurfs -----\n");
 
-  for ( i = entity->firstDrawSurf; i < numMapDrawSurfs; i++ )
+  end = numMapDrawSurfs;
+  for ( i = entity->firstDrawSurf; i < end; i++ )
   {
     surf = &g_drawSurfs[i];
     side = surf->sideRef;
@@ -396,13 +406,19 @@ void SubdivideDrawSurfs(Entity_t *entity)
     if ( !si )
       continue;
 
-    if ( si->subdivisions == 0.0f )
-      continue;
+    tessSize = si->subdivisions;
+    if ( tessSize == 0.0f )
+    {
+      if ( g_matExpandRegion.defaultTessSize == 0.0f )
+        continue;
+      tessSize = g_matExpandRegion.defaultTessSize;
+    }
 
     /* subdivide this face */
     w = WindingFromDrawSurf(surf);
     surf->numVerts = 0;
-    SubdivideFace_r(surf, w, si->subdivisions);
+    NativeMapDrawSurfFor(surf)->vertCount = 0;
+    SubdivideFace_r(surf, w, tessSize);
   }
 }
 

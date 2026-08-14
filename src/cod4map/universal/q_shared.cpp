@@ -916,10 +916,16 @@ Transforms a vector by a 3x4 matrix (rotation + translation).
 float *MatrixTransformVector43(float *mat, float *in, float *out)
 {
   Assert(in != out, s_assertDisable_MatrixTransformVector43);
-  /* x87 80-bit precision: double intermediates match original fstp truncation */
-  out[0] = (float)((double)mat[9] * (double)in[2] + (double)mat[3] * (double)in[0] + (double)mat[6] * (double)in[1] + (double)mat[0]);
-  out[1] = (float)((double)mat[10] * (double)in[2] + (double)mat[4] * (double)in[0] + (double)mat[7] * (double)in[1] + (double)mat[1]);
-  out[2] = (float)((double)mat[11] * (double)in[2] + (double)mat[5] * (double)in[0] + (double)mat[8] * (double)in[1] + (double)mat[2]);
+  /* Preserve native x87 accumulation order before the final float store. */
+  out[0] = (float)((((double)in[0] * (double)mat[3] + (double)mat[0])
+                  + (double)in[1] * (double)mat[6])
+                  + (double)in[2] * (double)mat[9]);
+  out[1] = (float)((((double)in[0] * (double)mat[4] + (double)mat[1])
+                  + (double)in[1] * (double)mat[7])
+                  + (double)in[2] * (double)mat[10]);
+  out[2] = (float)((((double)in[0] * (double)mat[5] + (double)mat[2])
+                  + (double)in[1] * (double)mat[8])
+                  + (double)in[2] * (double)mat[11]);
   return out;
 }
 
@@ -936,9 +942,15 @@ float *MatrixTransformNormal43(float *mat, float *in, float *out)
 #ifdef _WIN64
   x87_MatTransVec2(mat, in, out);
 #else
-  out[0] = (float)((double)mat[9] * (double)in[2] + (double)mat[3] * (double)in[0] + (double)mat[6] * (double)in[1]);
-  out[1] = (float)((double)mat[10] * (double)in[2] + (double)mat[4] * (double)in[0] + (double)mat[7] * (double)in[1]);
-  out[2] = (float)((double)mat[11] * (double)in[2] + (double)mat[5] * (double)in[0] + (double)mat[8] * (double)in[1]);
+  out[0] = (float)(((double)in[0] * (double)mat[3]
+                  + (double)in[1] * (double)mat[6])
+                  + (double)in[2] * (double)mat[9]);
+  out[1] = (float)(((double)in[0] * (double)mat[4]
+                  + (double)in[1] * (double)mat[7])
+                  + (double)in[2] * (double)mat[10]);
+  out[2] = (float)(((double)in[0] * (double)mat[5]
+                  + (double)in[1] * (double)mat[8])
+                  + (double)in[2] * (double)mat[11]);
 #endif
   return out;
 }
@@ -1030,18 +1042,49 @@ matrix = 12-float [tx,ty,tz, r00,r10,r20, r01,r11,r21, r02,r12,r22]
 inPlane/outPlane = [nx, ny, nz, dist]
 ================
 */
+static double TransformPlaneTranslationDotNative(const float *left,
+                                                 const float *right)
+{
+  float rounded;
+
+#if defined(_M_IX86)
+  __asm
+  {
+    mov eax, left
+    mov ecx, right
+    fld dword ptr [eax]
+    fmul dword ptr [ecx]
+    fld dword ptr [eax+4]
+    fmul dword ptr [ecx+4]
+    faddp st(1), st
+    fld dword ptr [eax+8]
+    fmul dword ptr [ecx+8]
+    faddp st(1), st
+    fstp rounded
+  }
+#else
+  rounded = (float)((double)left[0] * (double)right[0]
+                  + (double)left[1] * (double)right[1]
+                  + (double)left[2] * (double)right[2]);
+#endif
+  return rounded;
+}
+
 void TransformPlane(float *matrix, float scale, float *inPlane, float *outPlane)
 {
+  volatile double scaledDist;
+
   Assert(inPlane != outPlane, s_assertDisable_TransformPlane);
 
   MatrixTransformNormal43(matrix, inPlane, outPlane);
 
-  /* x87 80-bit precision: long double intermediates match original fstp truncation */
-  { long double dist = (long double)matrix[2] * (long double)outPlane[2]
-              + (long double)matrix[1] * (long double)outPlane[1]
-              + (long double)scale * (long double)inPlane[3]
-              + (long double)matrix[0] * (long double)outPlane[0];
-  outPlane[3] = (float)dist; }
+  /* Native 0x481210 materializes the translation/normal dot through a
+     32-bit float and the scaled source distance through a 64-bit double
+     before their final add.  Those stores are significant near the plane
+     deduplication tolerances used by transformed nested prefabs. */
+  scaledDist = (double)inPlane[3] * (double)scale;
+  outPlane[3] = (float)(TransformPlaneTranslationDotNative(matrix, outPlane)
+                      + scaledDist);
 
 }
 

@@ -37,7 +37,6 @@ OptionEntry_t optionsTable[] = {
     { "-expandBullet",       "Writes a map for Radiant to see bullet-to-brush collision", (OptionHandler)Opt_ExpandBullet       }, 
     { "-debugPortals",       "Writes a _portals.map showing portal/structural geometry",  (OptionHandler)Opt_DebugPortals       }, 
     { "-debugLightmaps",     "Fills lightmaps with random colors to show seams",          (OptionHandler)Opt_DebugLightmaps     },
-    { "-nativeLmap",         "Enables the dormant native CoD4 lightmap grouping route",   (OptionHandler)Opt_NativeLmap         },
     { "-noReorderTris",      "Disables reordering of optimized triangles for T&L cache",  (OptionHandler)Opt_NoReorderTris      }, 
     { "-listSlowEntities",   "Lists entities that process in more than this many seconds", (OptionHandler)Opt_ListSlowEntities   },
     { "-warnLayerUses",      "Generates warnings for layer combos used this many or fewer times", (OptionHandler)Opt_WarnLayerUses },
@@ -278,7 +277,10 @@ int EmitWorldBSP(void)
   AssignReflectionProbesToCells(tree);
   AssignReflectionProbesToTriSurfaces(tree, 0);
   SortEntityTransientDrawSurfaces();
-  AllocateLightmaps(g_entities);
+  /* Native 0x409C53/0x409C58: build the world-only primary-light regions
+     after the native draw-surface ordering has settled and before emission.
+     This produces BSP lumps 52-54 (region counts, packed hulls, axes). */
+  BuildPrimaryLightRegions();
   EmitDrawSurfaces(g_entities, tree);
   EmitLeafBrushes(g_entities, tree);
   AddBrushNeighborBevels(g_entities[0].brushes);
@@ -332,7 +334,6 @@ void EmitEntityBSP(void)
   if ( !nosubdivide )
     SubdivideDrawSurfs(e);
   AssignReflectionProbesToTriSurfaces(tree, e->firstDrawSurf);
-  AllocateLightmaps(e);
   EmitDrawSurfaces(e, tree);
   EmitLeafBrushes(e, tree);
   AddBrushNeighborBevels(e->brushes);
@@ -463,8 +464,9 @@ int ProcessModels(void)
     }
   }
 
-  /* Native 0x43E5E0 reports queued layered-material combination conflicts
-     here.  KIWI does not yet own that 104-byte producer/queue carrier. */
+  /* Native 0x43E5E0 reports the queued source locations for layered
+     material combinations which never reached their configured use count. */
+  Tris_ReportLayeredMaterialCombinationErrors();
   for (int modelIndex = 1; modelIndex < numBSPModels; ++modelIndex)
   {
     const BspModel_t *model = &bspModels[modelIndex];
@@ -951,12 +953,6 @@ int Opt_DebugLightmaps()
   return 1;
 }
 
-int Opt_NativeLmap()
-{
-  TrisLmap_SetNativeRouteEnabled(1);
-  return 1;
-}
-
 int Opt_StaticModelCollMaps()
 {
   Com_Printf("staticModelCollMaps = true\n");
@@ -1124,7 +1120,7 @@ static void LoadExistingBspIfPresentAndSaveReflectionProbes(void)
   if ( fp )
   {
     fclose(fp);
-    LoadBSPFile(bspPath);
+    LoadExistingBSPReflectionProbes(bspPath);
     SaveExistingReflectionProbes();
   }
 }

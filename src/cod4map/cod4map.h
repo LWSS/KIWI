@@ -125,6 +125,7 @@ Dependencies
 
 #include "zlib.h"
 #include "unzip.h"
+#include "../common/cod4_bsp_format.h"
 
 
 
@@ -358,10 +359,7 @@ typedef int qboolean;
 #define LIGHTMAP_TEXELS           (LIGHTMAP_SIZE * LIGHTMAP_SIZE)
 #define MAX_LIGHTMAP_BYTES        (LIGHTMAP_SIZE * LIGHTMAP_SIZE * 4 * 4)
 
-/* Bsp file format */
-#define BSP_IDENT      0x50534249  /* 'IBSP' little-endian */
-#define BSP_IDENT_SWAP 0x49425350  /* 'IBSP' big-endian */
-#define BSP_VERSION    22          /* CoD4 tagged-chunk BSP version */
+/* Bsp file format is shared with CoD4Rad in common/cod4_bsp_format.h. */
 #define IWMAP_VERSION  4           /* CoD2 .map version */
 
 /* Collision */
@@ -530,7 +528,6 @@ enum FsThread
 #define MAX_MAP_LIGHTMAPS      124
 #define LIGHTSTYLE_NONE        31
 #define LIGHTMAP_BYTES         0x400000
-#define BSP_CHUNK_LIMIT        100
 #define MAX_SEPERATORS         64
 #define VIS_WINDING_MAX_POINTS 12
 #define VIS_WINDING_SLOT_SIZE  (sizeof(int) + VIS_WINDING_MAX_POINTS * sizeof(vec3_t))
@@ -566,72 +563,6 @@ typedef enum Vstatus_e {
     stat_working,
     stat_done
 } Vstatus_t;
-
-typedef enum LumpType_e {
-    LUMP_MATERIALS           = 0,
-    LUMP_LIGHTBYTES          = 1,
-    LUMP_LIGHTGRIDENTRIES    = 2,
-    LUMP_LIGHTGRIDCOLORS     = 3,
-    LUMP_PLANES              = 4,
-    LUMP_BRUSHSIDES          = 5,
-    LUMP_BRUSHSIDEEDGECOUNTS = 6,
-    LUMP_BRUSHEDGES          = 7,
-    LUMP_BRUSHES             = 8,
-    LUMP_TRIANGLES           = 9,
-    LUMP_DRAWVERTS           = 10,
-    LUMP_DRAWINDICES         = 11,
-    LUMP_CULLGROUPS          = 12,
-    LUMP_CULLGROUPINDICES    = 13,
-    LUMP_OBSOLETE_1          = 14,
-    LUMP_OBSOLETE_2          = 15,
-    LUMP_OBSOLETE_3          = 16,
-    LUMP_OBSOLETE_4          = 17,
-    LUMP_OBSOLETE_5          = 18,
-    LUMP_PORTALVERTS         = 19,
-    LUMP_OBSOLETE_6          = 20,
-    LUMP_OBSOLETE_7          = 21,
-    LUMP_OBSOLETE_8          = 22,
-    LUMP_OBSOLETE_9          = 23,
-    LUMP_AABBTREES           = 24,
-    LUMP_CELLS               = 25,
-    LUMP_PORTALS             = 26,
-    LUMP_NODES               = 27,
-    LUMP_LEAFS               = 28,
-    LUMP_LEAFBRUSHES         = 29,
-    LUMP_LEAFSURFACES        = 30,
-    LUMP_COLLISIONVERTS      = 31,
-    LUMP_COLLISIONTRIS       = 32,
-    LUMP_COLLISIONEDGEWALKABLE = 33,
-    LUMP_COLLISIONBORDERS    = 34,
-    LUMP_COLLISIONPARTITIONS = 35,
-    LUMP_COLLISIONAABBS      = 36,
-    LUMP_MODELS              = 37,
-    LUMP_VISIBILITY          = 38,
-    LUMP_ENTITIES            = 39,
-    LUMP_PATHCONNECTIONS     = 40,
-    LUMP_REFLECTION_PROBES   = 41,
-    LUMP_VERTEX_LAYER_DATA   = 42,
-    LUMP_PRIMARY_LIGHTS      = 43,
-    LUMP_LIGHTGRIDHEADER     = 44,
-    LUMP_LIGHTGRIDROWS       = 45,
-    LUMP_OBSOLETE_10         = 46,
-    LUMP_UNLAYERED_TRIANGLES = 47,
-    LUMP_UNLAYERED_DRAWVERTS = 48,
-    LUMP_UNLAYERED_DRAWINDICES = 49,
-    LUMP_UNLAYERED_CULLGROUPS = 50,
-    LUMP_UNLAYERED_AABBTREES = 51,
-    LUMP_LIGHTREGIONS        = 52,
-    LUMP_LIGHTREGION_HULLS   = 53,
-    LUMP_LIGHTREGION_AXES    = 54,
-    LUMP_COUNT               = 55,
-
-    /* Temporary source-compatibility aliases for donor-only data paths. */
-    LUMP_OCCLUDER            = LUMP_OBSOLETE_6,
-    LUMP_OCCLUDERPLANES      = LUMP_OBSOLETE_7,
-    LUMP_OCCLUDEREDGES       = LUMP_OBSOLETE_8,
-    LUMP_OCCLUDERINDICES     = LUMP_OBSOLETE_9,
-    LUMP_COLLISIONEDGES      = LUMP_COLLISIONEDGEWALKABLE
-} LumpType_t;
 
 typedef enum DvarType_e {
     DVAR_TYPE_BOOL   = 0,
@@ -691,22 +622,7 @@ typedef struct AssertStringTable_s {
 
 
 /* --------------- On-disk bsp file types --------------- */
-
-/* CoD4 stores only non-empty lumps as sequential tagged chunks. */
-typedef struct BspChunk_s {
-    LumpType_t type;
-    unsigned int length;
-} BspChunk_t;
-
-typedef struct BspFileHeader_s {
-    unsigned int magic;                    /* [0] 'IBSP' */
-    unsigned int version;                  /* [4] */
-    unsigned int chunkCount;               /* [8] */
-    BspChunk_t chunks[BSP_CHUNK_LIMIT];     /* [12] */
-} BspFileHeader_t;
-
-typedef char static_assert_bsp_chunk_size[sizeof(BspChunk_t) == 8 ? 1 : -1];
-typedef char static_assert_bsp_header_size[sizeof(BspFileHeader_t) == 0x32C ? 1 : -1];
+/* Shared CoD4 tagged-chunk types are declared by cod4_bsp_format.h. */
 
 /* CoD4 BSP reflection-probe lump entry (0x20044 bytes). */
 typedef struct DiskGfxReflectionProbe_s {
@@ -1094,40 +1010,50 @@ typedef struct ShaderInfo_s {
     unsigned char  techniqueHasEmissive;
     unsigned char  _padSortInfo;
     unsigned int   techniqueDepthClass;
+    /* Retain raw Material_t byte +53 for native ordering predicates.  It is
+       the second byte of the technique-set file offset, not textureCount. */
+    unsigned char  rawTextureCountHighByte;
+    unsigned char  _padTextureCount[3];
+    /* Native HasNonIdentityNormalMap (0x4246F0) is consulted while names
+       for layered-material descriptors are made.  Keep the result next to
+       the expanded material so the tris emitter never has to reinterpret
+       the retained raw material buffer. */
+    int            hasNonIdentityNormalMap;
 } ShaderInfo_t;
 
 /* MaterialInfo_t */
 typedef struct MaterialInfo_s {
     int32_t name;                    /* [0]  offset to name string */
     int32_t referenceImageName;      /* [4]  offset to reference image name */
-    int16_t hashIndex;               /* [8]  material hash index */
-    int16_t sortedIndex;             /* [10] material sorted index */
-    int8_t  gameFlags;               /* [12] game flags */
-    int8_t  sortKey;                 /* [13] sort key */
-    int8_t  textureAtlasRowCount;    /* [14] texture atlas row count */
-    int8_t  textureAtlasColumnCount; /* [15] texture atlas column count */
-    int32_t maxDeformMove;           /* [16] max deform movement */
-    int8_t  deformFlags;             /* [20] deform flags */
-    int8_t  usage;                   /* [21] usage type */
-    int16_t toolFlags;               /* [22] tool flags */
-    int32_t locale;                  /* [24] locale flags */
-    int16_t autoTexScaleWidth;       /* [28] auto texture scale width */
-    int16_t autoTexScaleHeight;      /* [30] auto texture scale height */
-    int32_t tessSize;                /* [32] tessellation size */
-    int32_t surfaceFlags;            /* [36] surface flags */
-    int32_t contents;                /* [40] content flags */
+    int8_t  gameFlags;               /* [8]  game flags */
+    int8_t  sortKey;                 /* [9]  sort key */
+    int8_t  textureAtlasRowCount;    /* [10] texture atlas row count */
+    int8_t  textureAtlasColumnCount; /* [11] texture atlas column count */
+    float   maxDeformMove;           /* [12] max deform movement */
+    int8_t  deformFlags;             /* [16] deform flags */
+    int8_t  usage;                   /* [17] usage type */
+    int16_t toolFlags;               /* [18] tool flags */
+    int32_t locale;                  /* [20] locale flags */
+    int16_t autoTexScaleWidth;       /* [24] auto texture scale width */
+    int16_t autoTexScaleHeight;      /* [26] auto texture scale height */
+    float   tessSize;                /* [28] tessellation size */
+    int32_t surfaceFlags;            /* [32] surface flags */
+    int32_t contents;                /* [36] content flags */
 } MaterialInfo_t;
 
 /* Material_t */
 typedef struct Material_s {
     MaterialInfo_t info;          /* [0]  material info header */
-    uint32_t       stateBits[2];  /* [44] state bits */
-    int16_t        textureCount;  /* [52] texture count */
-    int16_t        constantCount; /* [54] constant count */
-    int32_t        techniqueSet;  /* [56] offset to technique set name */
-    int32_t        textures;      /* [60] offset to texture definitions */
-    int32_t        constants;     /* [64] offset to constants */
+    uint32_t       stateBits[2];  /* [40] state bits */
+    int16_t        textureCount;  /* [48] texture count */
+    int16_t        constantCount; /* [50] constant count */
+    int32_t        techniqueSet;  /* [52] offset to technique set name */
+    int32_t        textures;      /* [56] offset to texture definitions */
+    int32_t        constants;     /* [60] offset to constants */
 } Material_t;
+
+typedef char static_assert_material_info_size[sizeof(MaterialInfo_t) == 0x28 ? 1 : -1];
+typedef char static_assert_material_size[sizeof(Material_t) == 0x40 ? 1 : -1];
 
 /* MaterialTextureDefInfo_t */
 typedef union MaterialTextureDefInfo_u {
@@ -1532,7 +1458,7 @@ typedef struct MapDrawSurf_s {
     MeshVert_t           *verts;             /* [44] native 44-byte vertices */
     int                   outputNum;         /* [48] */
     unsigned char         castsSunShadow;    /* [52] native transient category */
-    unsigned char         nativePad53;       /* [53] */
+    unsigned char         hasCoalesceChain;  /* [53] set by 0x44ED20 for each chain leaf */
     unsigned char         isPatch;           /* [54] */
     unsigned char         isTerrain;         /* [55] */
     MapDrawSurfUnion_t    u;                 /* [56] */
@@ -1609,7 +1535,7 @@ typedef struct TriSurfProps_s {
     float                  colorVecs[16];   /* [76]  color channel vectors: R.xyzw, G.xyzw, B.xyzw, A.xyzw */
     float                  subdivisions;    /* [140] copy of si->subdivisions */
     char                   surfFlagBit7;    /* [144] si->surfFlags_bit7 (set but never read) */
-    char                   contentFlagBit8; /* [145] (contentFlags >> 8) & 1 */
+    char                   contentFlagBit8; /* [145] native creator always writes 1 */
     unsigned char          nativePad92[2];  /* [0x92] native padding; not KIWI state */
     float                  plane[4];        /* [0x94] surface plane (normal[3] + dist) */
     CoalesceNode_t        *coalesceChain;   /* [0xA4] init 0; linked list chain */
@@ -1685,8 +1611,8 @@ typedef struct TrisLmapGroup_s {
     struct TrisLmapGroup_s *next;            /* [32] */
 } TrisLmapGroup_t;
 
-/* The local outputs of tris_lightmap.cpp:0x454340.  They remain transient
-   until 0x454F90 (property emission) is ported. */
+/* Local outputs of tris_lightmap.cpp:0x454340.  0x454F90 publishes their
+   final group/index/vector state to TriSurfProps_t. */
 typedef struct TrisLmapAllocation_s {
     int lightmapIndex;
     int allocY;
@@ -1696,9 +1622,9 @@ typedef struct TrisLmapAllocation_s {
     int height;
 } TrisLmapAllocation_t;
 
-/* Native props store these at +4/+8/+44, but KIWI's donor-compatible props
-   layout cannot.  Keep the exact assignment payload out-of-line until the
-   native lightmap path owns every final emission consumer. */
+/* A compatibility mirror of the native +4/+8/+44 assignment.  The property
+   carrier is authoritative; this only serves legacy consumers that still
+   request an assignment object explicitly. */
 typedef struct TrisLmapAssignmentPayload_s {
     int   groupId;
     int   lightmapIndex;
@@ -1817,6 +1743,21 @@ typedef struct TriRecord_s {
     unsigned char primaryLightIndex; /* [161] native MapDrawSurf +12, 256 remapped to 0 */
     unsigned char castsSunShadow; /* [162] native MapDrawSurf +52 classification */
     unsigned char _pad163;      /* [163] explicit alignment */
+    /* The native direct record stores a 104-byte layered-material descriptor
+       at +8.  KIWI retains its source shader separately for flags and
+       tangent generation; this identity is always that descriptor, including
+       ordinary one-layer triangles. */
+    const void    *materialIdentity;
+    /* Type-0 source carrier for native 0x444120 -> 0x446A10.  Layer zero
+       remains in DrawVert_t; these pointers and UVs preserve the selected
+       descriptor's additional per-surface projections until soup emission. */
+    unsigned char  layerCount;
+    unsigned char  _layerPad[3];
+    TriSurfProps_t *baseProps;       /* owning props: native direct-record +5 lightmap key */
+    /* Native direct-record +4 is derived from these layers' MapDrawSurf +8
+       reflection-probe bytes, not from a layer property's atlas index. */
+    TriSurfProps_t *layerProps[5];
+    float           extraLayerUvs[3][4][2];
 } TriRecord_t;
 
 /* TriGroup_t */
@@ -2572,6 +2513,11 @@ static inline int fistp_add(float value, double bias) {
 
 int fistp_sub(float val, double bias);
 int RoundFloatToInt(float value);
+double Vec2LengthSquared(const float *value);
+int RoundPositiveFloatToInt(float value);
+unsigned char PackNormalBasisComponent(float value);
+void ComputeLayeredGroupTriangleNormal(const float *point0, const float *point1,
+                                       const float *point2, float *outNormal);
 
 /* --------------- Accessor macros --------------- */
 
@@ -2670,7 +2616,6 @@ int Opt_ExpandPlayer();
 int Opt_ExpandBullet();
 int Opt_DebugPortals();
 int Opt_DebugLightmaps();
-int Opt_NativeLmap();
 int Opt_StaticModelCollMaps();
 int Opt_DisplayCollMapWarnings();
 int Opt_NoReorderTris();
@@ -2807,7 +2752,14 @@ int SwapBSPFile(int a1);
 void SwapAndLoadLump(BspFileHeader_t *header, int lumpIdx, int elemSize, int swapFlag);
 int CopyLump(BspFileHeader_t *header, int lumpIdx, void *dest, int elemSize, int maxSize);
 void LoadBSPFile(char *g_outputBasePath);
+void LoadExistingBSPReflectionProbes(char *filename);
 void AddLump(FILE *fp, BspFileHeader_t *header, int lumpIdx, void *data, int length);
+/* Layered type-0 reorder owns this byte stream.  The accessors deliberately
+   keep it out of the generic BSP vertex contexts until the native 104/80-byte
+   producer bridge supplies exact payloads. */
+void BeginBspVertexLayerData(void);
+unsigned char *AllocBspVertexLayerData(unsigned int byteCount);
+unsigned int GetBspVertexLayerDataCount(void);
 unsigned int GetCollisionEdgeWalkableSize(int collisionTriCount);
 unsigned int GetLightGridRowCount(void);
 unsigned int GetLightGridHeaderSize(void);
@@ -2839,6 +2791,11 @@ void FreeWinding(Winding_t *w);
 WindingList_t *AllocWindingListNode(void);
 void FreeWindingListNode(WindingList_t *node);
 Winding_t *WindingFromWindingList(const float *planeNormal, const WindingList_t *list);
+Winding_t *WindingFromPoints(const float *planeNormal, const vec3_t *points, int pointCount);
+Winding_t *WindingFromPlaneAndBounds(const float *plane, const float *mins, const float *maxs);
+unsigned int Com_ConvexHull(float (*points)[2], unsigned int pointCount, float (*hull)[2]);
+unsigned int Com_ConvexHullIndices(float points[64][2], unsigned int pointCount,
+                                   unsigned int *hullOrder);
 Winding_t *CopyWinding(Winding_t *w);
 Winding_t *ReverseWinding(Winding_t *w);
 float *Vector2Copy(const float *in, float *out);
@@ -3028,11 +2985,16 @@ int ParseToolFlags(char **parsePtr);
 ShaderInfo_t *LoadMaterial(const char *materialName);
 ShaderInfo_t *FindMaterialInCache(const char *materialName);
 int SortLoadedMaterials();
+int FindLoadedMaterialIndex(const ShaderInfo_t *material);
+bool LoadedMaterialsShareTechniqueSet(const ShaderInfo_t *first,
+                                      const ShaderInfo_t *second);
 int CompareLoadedMaterials(const ShaderInfo_t *first, const ShaderInfo_t *second);
 unsigned int GetLoadedMaterialDepthClass(const ShaderInfo_t *material);
 int IsLoadedMaterialBefore(const ShaderInfo_t *first, const ShaderInfo_t *second);
 int SelectCoalescibleLayerCount(ShaderInfo_t *const *materials, int layerCount,
                                 int preserveDetailLayers);
+int HasNonIdentityNormalMap(const ShaderInfo_t *material);
+int MaterialNameInStaticList(const ShaderInfo_t *material);
 
 /* Mesh.c */
 void LerpDrawVert(MeshVert_t *a, MeshVert_t *b, MeshVert_t *out);
@@ -3242,6 +3204,7 @@ int GroupTriSurfsIntoSubgroups(TriRecord_t *records, int numTris, int groupCount
 TriSurfProps_t *EmitShadowcasterTriSurface(double unusedFpu, Winding_t *winding);
 int *EmitDrawSurfaces(Entity_t *entity, Tree_t *tree);
 void Tris_InitDrawSurfaceContexts(void);
+void Tris_ReportLayeredMaterialCombinationErrors(void);
 int GetTrisTransientMode();
 void SetTrisTransientMode(int mode, int preserveSurfaces);
 TrisLmapGroup_t *TrisLmap_CreateSurface(TriSurf_t *surf);
@@ -3298,7 +3261,6 @@ void TrisTimerCheck(void *this);
 void SmoothVertexNormalsForGroup(int *sortedVerts, int groupSize);
 int CompareVertsByIndexMap(int *a1, int *a2);
 void SmoothVertexNormals(int *indexMap);
-int CompareTrisByMaterialAndVertexIndices(int *a1, int *a2);
 int CompareTrisByGroupId(int *tri0, int *tri1);
 int CompareSortedTriIndices(intptr_t *tri0, intptr_t *tri1);
 int GroupAdjacentTris(TriRecord_t *records, int NumOfElements, int *indexMap);
@@ -3440,7 +3402,7 @@ TriSurf_t *TrisLoadWindingBin();
 void *TesselateFindSplitCandidates(float *surfNormal, Winding_t **wPtr, Winding_t **wOrigPtr, void **auxDataPtr, unsigned int auxElemSize);
 int TesselateRemoveDegenerateEdges(Winding_t *w, Winding_t *wOrig, char *auxData, int auxElemSize);
 int PreprocessLmapWinding(TriSurf_t *surf);
-int TesselateEdgesIntersect(float *edgeA0, float *edgeB0, float *edgeB1, int axisX, float *edgeA1, int axisY, float *hitPoint, float *tB, float *tA);
+int TesselateEdgesIntersect(float *edgeA0, float *edgeA1, float *edgeB0, int axisX, float *edgeB1, int axisY, float *hitPoint, float *tA, float *tB);
 char TesselateFixIntersections(TriSurf_t *ts, int axisX, int axisY, float tolerance);
 int TesselateRemoveVertex(int vertIdx, TriSurf_t *ts);
 void TesselateClipEar(TriSurf_t *ts, int cellIndex, int cullGroupIndex, int axisX, int axisY, void (*triCallback)(TriSurf_t *, int, int, int, int, int));
@@ -3480,9 +3442,9 @@ int TJunc_DirectionToHashKey(int *outS, float *direction, int *outAxis, int *out
 void TJunc_AddEdgeLine(float *vertA, float *vertB, int hashAxis, float tolerance);
 double TJunc_DistToEdgeLine(TjuncEdgeLine_t *el, float *vertB, float *vertA, float epsilon);
 TjuncEdgeLine_t *TJunc_FindEdgeLineByHash(float *direction, float *firstVertex, float *secondVertex, float tolerance);
-void TJunc_FindEdgeLineBrute(float *firstVertex, float *secondVertex, float tolerance);
+TjuncEdgeLine_t *TJunc_FindEdgeLineBrute(float *firstVertex, float *secondVertex, float tolerance);
 TjuncEdgeLine_t *TJunc_FindMatchingEdgeLine(float *firstVertex, float *secondVertex, float *direction, float epsilon);
-void TJunc_FindEdgeLineByIndex(int hashAxis, float *firstVertex, float *secondVertex, float tolerance);
+TjuncEdgeLine_t *TJunc_FindEdgeLineByIndex(int hashAxis, float *firstVertex, float *secondVertex, float tolerance);
 TjuncEdgeLine_t *TJunc_FindEdge(float *curVertex, float *outEpsilon, float *lastVertex, int hashAxis);
 int TJunc_ClassifyEdgeAxis(float *vertA, float *vertB);
 int TJunc_ProcessWinding(Winding_t *winding);
@@ -3904,6 +3866,7 @@ qboolean Sys_IsMainThread(void);
 int EndModel(Node_t *headnode);
 int EndPhysicsModel(void);
 int EmitMaterial(ShaderInfo_t *material, int contentFlags);
+int AddBspMaterial(const char *materialName, int surfaceFlags, int contentFlags);
 int RemapNodePlanes(int *planeMap);
 void RemapBrushSidePlanes(int *planeMap);
 void EmitBrushes(double unusedFpu, Brush_t *brushes);
@@ -4435,6 +4398,7 @@ extern int               mergeSurfCapacity;
 extern int               mergeTraversalStamp;
 extern int             (*mergeGroupableCallback)(TriSurf_t *, TriSurf_t *);
 extern void            (*g_lerpAuxDataCallback)(float *from, float *to, double frac, float *result);
+extern void             *mergeVertMap;
 extern int               mergeVertMapCount;
 extern int               numTriSurfs;
 extern int               tesselateDegenerateCount;

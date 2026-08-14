@@ -1194,14 +1194,49 @@ Convert Euler angles to a 3x3 axis matrix.
 Calls AngleVectors for forward/right/up, then negates the right vector.
 ================
 */
+static void AnglesToMatrixSinCos(float radians, float *sinOut, float *cosOut)
+{
+#if defined(_M_IX86)
+  __asm
+  {
+    fld radians
+    fsincos
+    mov eax, cosOut
+    fstp dword ptr [eax]
+    mov eax, sinOut
+    fstp dword ptr [eax]
+  }
+#else
+  *cosOut = (float)cos(radians);
+  *sinOut = (float)sin(radians);
+#endif
+}
+
 float *AnglesToMatrix(float *angles, float *axis)
 {
-  float right[3];
-  float *result;
+  float radians;
+  float sinYaw, cosYaw;
+  float sinPitch, cosPitch;
+  float sinRoll, cosRoll;
 
-  result = AngleVectors(angles, axis, right, axis + 6);
-  VectorNegate(right, axis + 3);
-  return result;
+  radians = (float)((double)angles[1] * 0.01745329238474369);
+  AnglesToMatrixSinCos(radians, &sinYaw, &cosYaw);
+  radians = (float)((double)angles[0] * 0.01745329238474369);
+  AnglesToMatrixSinCos(radians, &sinPitch, &cosPitch);
+
+  axis[0] = cosPitch * cosYaw;
+  axis[1] = cosPitch * sinYaw;
+  axis[2] = -sinPitch;
+
+  radians = (float)((double)angles[2] * 0.01745329238474369);
+  AnglesToMatrixSinCos(radians, &sinRoll, &cosRoll);
+  axis[3] = sinRoll * sinPitch * cosYaw + -sinYaw * cosRoll;
+  axis[4] = sinRoll * sinPitch * sinYaw + cosRoll * cosYaw;
+  axis[5] = sinRoll * cosPitch;
+  axis[6] = cosRoll * sinPitch * cosYaw + -sinRoll * -sinYaw;
+  axis[7] = cosRoll * sinPitch * sinYaw + -sinRoll * cosYaw;
+  axis[8] = cosRoll * cosPitch;
+  return axis;
 }
 
 /*
@@ -1402,17 +1437,106 @@ PlaneFromPoints
 Returns 0 if the triangle is degenerate.
 ================
 */
+#if defined(_MSC_VER)
+__declspec(noinline)
+#endif
+static float PlaneVectorLengthSquaredNative(const float *vector)
+{
+	float lengthSquared;
+
+#if defined(_M_IX86)
+	__asm
+	{
+		mov eax, vector
+		fld dword ptr [eax]
+		fmul dword ptr [eax]
+		fld dword ptr [eax+4]
+		fmul dword ptr [eax+4]
+		faddp st(1), st
+		fld dword ptr [eax+8]
+		fmul dword ptr [eax+8]
+		faddp st(1), st
+		fstp lengthSquared
+	}
+#else
+	lengthSquared = (float)((double)vector[0] * vector[0]
+		+ (double)vector[1] * vector[1]
+		+ (double)vector[2] * vector[2]);
+#endif
+	return lengthSquared;
+}
+
+static void PlaneNormalizeDirectNative(float *plane, float normalLength)
+{
+#if defined(_M_IX86)
+	__asm
+	{
+		mov eax, plane
+		fld normalLength
+		fld dword ptr [eax]
+		fdiv st, st(1)
+		fstp dword ptr [eax]
+		fld dword ptr [eax+4]
+		fdiv st, st(1)
+		fstp dword ptr [eax+4]
+		fld dword ptr [eax+8]
+		fdiv st, st(1)
+		fstp dword ptr [eax+8]
+		fstp st(0)
+	}
+#else
+	plane[0] = plane[0] / normalLength;
+	plane[1] = plane[1] / normalLength;
+	plane[2] = plane[2] / normalLength;
+#endif
+}
+
 int PlaneFromPoints( float *planeOut, float *point0, float *point1, float *point2 )
 {
 	vec3_t	d1, d2;
+	float lengthSquared;
+	float length;
 
 	VectorSubtract( point1, point0, d1 );
 	VectorSubtract( point2, point0, d2 );
 
 	CrossProduct( d2, d1, planeOut );
+	lengthSquared = PlaneVectorLengthSquaredNative( planeOut );
 
-	if ( VecNormalize( planeOut ) == 0.0 )
-		return 0;
+	/* 0x473871..0x47393A: small crosses must also be large enough relative
+	   to their source edges.  Retry about point1 before declaring a nearly
+	   collinear triangle degenerate; the original cross length remains the
+	   normalization scale exactly as in the native routine. */
+	if ( lengthSquared < 2.0f )
+	{
+		const double relativeEpsilon = 0.00000100000011116208;
+		double firstEdgeLengthSquared;
+		double secondEdgeLengthSquared;
+
+		if ( lengthSquared == 0.0f )
+			return 0;
+		firstEdgeLengthSquared = PlaneVectorLengthSquaredNative( d1 );
+		secondEdgeLengthSquared = PlaneVectorLengthSquaredNative( d2 );
+		if ( (double)lengthSquared <=
+			secondEdgeLengthSquared * firstEdgeLengthSquared * relativeEpsilon )
+		{
+			VectorSubtract( point2, point1, d1 );
+			VectorSubtract( point0, point1, d2 );
+			CrossProduct( d2, d1, planeOut );
+			firstEdgeLengthSquared = PlaneVectorLengthSquaredNative( d1 );
+			secondEdgeLengthSquared = PlaneVectorLengthSquaredNative( d2 );
+			if ( (double)lengthSquared <=
+				secondEdgeLengthSquared * firstEdgeLengthSquared * relativeEpsilon )
+				return 0;
+		}
+	}
+
+	/* Native 0x473820 deliberately divides every component by the computed
+	   length.  VectorNormalize instead forms one reciprocal and multiplies;
+	   that rounding difference is large enough to defeat FindFloatPlane's
+	   strict 1e-7 comparison for equal planes produced at different scales. */
+	length = sqrtf( lengthSquared );
+	PlaneNormalizeDirectNative( planeOut, length );
 
 	planeOut[3] = DotProductDP(planeOut, point0);
 	return 1;

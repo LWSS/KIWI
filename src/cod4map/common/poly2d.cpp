@@ -180,8 +180,8 @@ int Subdivide2DPolygonGrid(
     Poly2DSubdivideCallback callback,
     void *userData)
 {
-  float logAreaThresholdMin;
-  float logAreaThresholdMax;
+  float areaThresholdMin;
+  float areaThresholdMax;
   int currentRowBuffer;
   int remainingRowVertCount;
   int columnInputBuffer;
@@ -196,12 +196,12 @@ int Subdivide2DPolygonGrid(
   int cellVertCount;
   float splitX;
   float area;
-  float logArea;
+  float areaMagnitude;
   float centroid[2];
   int result;
 
-  logAreaThresholdMin = gridSizeX * 0.000002000000222324161f * gridSizeY;
-  logAreaThresholdMax = gridSizeX * 0.5f * gridSizeY;
+  areaThresholdMin = gridSizeX * 0.000002000000222324161f * gridSizeY;
+  areaThresholdMax = gridSizeX * 0.5f * gridSizeY;
   currentRowBuffer = 0;
   remainingRowVertCount = vertCount;
   columnInputBuffer = 1;
@@ -257,10 +257,10 @@ int Subdivide2DPolygonGrid(
       if ( frontCount >= 3 )
       {
         area = Poly2DAreaAndCentroid(polyBuffers + POLY2D_BUFFER_FLOATS * columnOutputBuffer, frontCount, centroid);
-        logArea = logf(area);
-        if ( logAreaThresholdMin <= logArea )
+        areaMagnitude = (float)fabs((double)area);
+        if ( areaThresholdMin <= areaMagnitude )
         {
-          if ( logAreaThresholdMax > logArea )
+          if ( areaThresholdMax > areaMagnitude )
           {
             centroid[0] = 0.0f;
             centroid[1] = 0.0f;
@@ -272,7 +272,7 @@ int Subdivide2DPolygonGrid(
             centroid[0] *= 1.0f / (float)frontCount;
             centroid[1] *= 1.0f / (float)frontCount;
           }
-          callback(logArea, centroid, polyBuffers + POLY2D_BUFFER_FLOATS * columnOutputBuffer, frontCount, userData, polygonIndex++);
+          callback(areaMagnitude, centroid, polyBuffers + POLY2D_BUFFER_FLOATS * columnOutputBuffer, frontCount, userData, polygonIndex++);
         }
       }
       result = j + 1;

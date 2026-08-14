@@ -578,6 +578,17 @@ static int CLayermatWnd_OnPaint()
 
     R_BeginFrame();
     R_AddCmdClearScreen( 7, g_qeglobals.d_savedinfo.colors[0], 1.0f, 0 );   // IDB R_AddClearCmd
+    // ── KIWI-UX (ROUND AI, ITEM 1): SEED MATERIAL_COLOR LIKE EVERY OTHER PAINT ──
+    // MATERIAL_COLOR is BACKEND state that persists across frames AND across windows
+    // (r_rendercmds.cpp:1920 says so in as many words).  This paint draws thumbnails
+    // through R_AddCmdDraw2DImage / TECHNIQUE_UNLIT — whose flat-override weight is
+    // matColor.w — and was the one such path in the editor that seeded nothing, so it
+    // inherited whatever the previously painted window happened to park.  With round
+    // AI's texwnd fix that is much less likely to be a hostile value, but "much less
+    // likely" is not an invariant; this makes it one.  Same {1,1,1,0} and the same
+    // reasoning as TexWnd_Paint's seed (texwnd.cpp:1052-1066) — w == 0 means the
+    // sampled texture shows through instead of being replaced by a flat colour.
+    { static const float s_matColor[4] = { 1.0f, 1.0f, 1.0f, 0.0f }; R_AddCmdSetMaterialColor( s_matColor ); }
     sub_417D60();
     R_EndFrame();
     R_IssueRenderCommands( (unsigned)-1 );

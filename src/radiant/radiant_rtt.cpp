@@ -58,6 +58,24 @@ namespace
     }
 }
 
+// KIWI-UX (ROUND AB, ITEM 1).  RTT_Begin's device test, callable on its own so the pump
+// can skip the WHOLE viewport pass rather than have four viewports each discover the loss
+// and each leave a half-built state behind.  Two reasons it is worth hoisting:
+//   * ONE TestCooperativeLevel per frame instead of four.
+//   * A partially-rendered pass is worse than none: CamWnd_RenderToRT can succeed and
+//     XYWnd_RenderToRT then fail, leaving three stale RT images composited against one
+//     fresh one.  The white-flicker guard (ImGuiShell_FrameAuthorized, imgui_shell.cpp:1101)
+//     already tolerates a tick with no scene render at all, so skipping is free.
+// It does NOT replace RTT_Begin's own check — the device can be lost between this call and
+// any one viewport's Begin, and that check is the one that keeps a lost-device reset from
+// running with an app-created D3DPOOL_DEFAULT surface as the active render target.
+bool RTT_DeviceHealthy()
+{
+    if ( !dx.device || dx.deviceLost )
+        return false;
+    return dx.device->TestCooperativeLevel() == D3D_OK;
+}
+
 bool RTT_Begin( rttViewport_t id, int w, int h )
 {
     if ( id < 0 || id >= RTT_COUNT )

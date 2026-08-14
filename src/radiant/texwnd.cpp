@@ -812,7 +812,16 @@ static bool TexWnd_FilterAccept( const qtexture_s *tex )
     if ( texWndGlob_textureOffset.searchbar_filter && texWndGlob_textureOffset.searchbar_buffer )
     {
         const char *q = texWndGlob_textureOffset.searchbar_buffer;
-        return _strnicmp( q, tex->name, strlen( q ) ) == 0;
+        if ( _strnicmp( q, tex->name, strlen( q ) ) == 0 )     // IDB 0x45bcdd: prefix, verbatim
+            return true;
+        // KIWI-UX (ROUND AE): SUBSTRING superset of the binary's prefix match.  The
+        // prefix arm above is the faithful one and still runs first; this arm exists
+        // because nearly every shipped material name starts with a family prefix
+        // ("ch_", "ac_", "me_"), so a user typing "brick" means ch_brick_* and the
+        // prefix rule alone would show nothing.  Case handling is free: names are
+        // lowercased at registration (Texture_GetHandle's _strlwr) and
+        // TexWnd_SetSearchFilter lowercases the query the same way.
+        return strstr( tex->name, q ) != nullptr;
     }
 
     // base predicate (0x45bd89): show the textures the map actually references.
@@ -1114,6 +1123,11 @@ void TexWnd_RenderToRT( int w, int h )
 
 // ApplyMaterialAtIndex — select material `idx` and apply it to the current face
 // selection (the body of a thumbnail click), factored out of OnLButtonDown.
+// KIWI-UX (ROUND AK, ITEM 3): the patch density re-lay that composes with the
+// ported texture apply.  Defined in pmesh.cpp beside Patch_KiwiFinishNewLike,
+// because it needs that file's static Patch_WidthDistanceTo / HeightDistanceTo.
+extern void Patch_KiwiReNaturalizeSelected();                  // pmesh.cpp (ROUND AK)
+
 void TexWnd_ApplyMaterialAtIndex( int idx )
 {
     texwndState_t *tex = Ed_TexWnd();
@@ -1152,6 +1166,25 @@ void TexWnd_ApplyMaterialAtIndex( int idx )
             MaterialDef mat{};
             TexWnd_BuildClickedMaterialDef( q, &mat );         // IDB sub_45C0D0
             Texture_SetTexture( nullptr, &mat );
+
+            // ── KIWI-UX (ROUND AK, ITEM 3): PATCHES KEEP THEIR DENSITY ──────
+            // USER REPORT, verbatim: "bevel is good, but I can't select the curve
+            // parts to retexture them.  See how it's messed up?"
+            //
+            // Texture_SetTexture reaches a patch through sub_476ED0 with a5 == 1,
+            // whose patch branch swaps the two material POINTERS and returns
+            // (brush.cpp:2852-2871).  It never re-lays ctrl[][].texCoord, so the
+            // world-units-per-repeat rescales by newWidth/oldWidth and the surface
+            // comes out stretched — which is the second half of the report and is
+            // faithful to 0x476ED0, so the ported function is NOT touched.  The
+            // composition is done HERE instead, in the one funnel a thumbnail click
+            // goes through, over the SAME selected_brushes list the apply walked.
+            // The derivation (why nothing needs capturing before the apply) is on
+            // Patch_KiwiReNaturalize itself.  Faces are unaffected: the sweep skips
+            // every non-patch node.  (The declaration is at FILE scope above this
+            // function on purpose — kiwi_ux round AI shipped a link error from a
+            // block-scope extern that MSVC mangled with its enclosing namespace.)
+            Patch_KiwiReNaturalizeSelected();
         }
         g_nUpdateBits = -1;          // redraw camera (the applied face) + this window
         ::InvalidateRect( tex->m_hWnd, nullptr, FALSE );   // == CWnd::Invalidate( FALSE )
@@ -1301,6 +1334,35 @@ int TexWnd_GetScrollMax()
 void TexWnd_SetScroll( int n )
 {
     TexWnd_CheckScroll( n );
+}
+
+// ── KIWI-UX (ROUND AE): the search UI the searchbar arm was waiting for ─────
+// USER DIRECTIVE, verbatim: "add a small searchbar in the textures bar next to
+// the new buttons".  The BINARY's filter machinery is already ported and live —
+// TexWnd_FilterAccept's searchbar arm (above, IDB 0x45bcdd) reads
+// texWndGlob.searchbar_filter/searchbar_buffer, and the layout, hit-test and
+// scroll range all flow through that predicate per paint — so the whole "wire a
+// search UI" job is this setter plus an ImGui input box in the shell
+// (imgui_shell.cpp, next to the round-AC Show All / In Use buttons).  The query
+// is lowercased exactly as Texture_GetHandle lowercases names at registration
+// (_strlwr), which is what makes the substring arm's plain strstr
+// case-insensitive in practice.  Scroll resets to the top on every edit: the
+// filtered content is almost always shorter than the previous view, and a stale
+// offset would show an empty window below the results.
+void TexWnd_SetSearchFilter( const char *q )
+{
+    static char s_buf[64];
+    if ( q )
+    {
+        _snprintf( s_buf, sizeof( s_buf ), "%s", q );
+        s_buf[sizeof( s_buf ) - 1] = '\0';
+        _strlwr( s_buf );
+    }
+    else
+        s_buf[0] = '\0';
+    texWndGlob_textureOffset.searchbar_buffer = s_buf;
+    texWndGlob_textureOffset.searchbar_filter = ( s_buf[0] != '\0' );
+    TexWnd_CheckScroll( 0 );
 }
 
 // ─── CTexWnd::UpdatePrefs (0x45D9F0) — re-apply the texture-browser prefs ─────
@@ -1747,6 +1809,58 @@ static void R_DrawOutlineRect( int xL, int yT, int xR, int yB, const float *rgba
         *(unsigned int *)verts[i].color = col.packed;
     }
     R_AddCmd_Line2D( 4, 1, verts );
+
+    // ── KIWI-UX (ROUND AI, ITEM 1): RESTORE THE WINDOW'S NEUTRAL MATERIAL_COLOR ──
+    // USER REPORT, verbatim: "bug in textures view where when selecting a texture,
+    // it sometimes turn the other textures in the viewport solid red".
+    //
+    // ROOT CAUSE.  `R_AddCmd_Line2D` is STATE-DESTRUCTIVE in this port and says so
+    // at its own definition (r_rendercmds.cpp:2028-2035): under KISAK_RADIANT it
+    // routes through `Ed_EmitLineBatch` (r_rendercmds.cpp:1976), which pushes the
+    // run's first vertex colour as the MATERIAL colour (r_rendercmds.cpp:2004) and
+    // NEVER puts it back — the binary never needed to, because it parks the neutral
+    // {0,0,0,0} once per pass and lets the per-vertex colour drive $line.  The
+    // selected-thumbnail frame is drawn in `colors[10]` = {1,0,0,1} (win_qe3.cpp:423),
+    // so after this call MATERIAL_COLOR is RED WITH w == 1 — and w is exactly the
+    // flat-override weight the thumbnail shader lerps by
+    // (`rgb = w*(matColor.rgb - vColor*colorMap) + colorMap*vColor`, the derivation
+    // written out at TexWnd_Paint's own seed above).  Every `R_AddCmdDraw2DImage`
+    // emitted LATER IN THE SAME FRAME therefore collapses to flat red: the thumbnail
+    // is not drawing its texture at all, it is drawing the border's colour over its
+    // whole quad.
+    //
+    // WHY "SOMETIMES", and it is not random — it is POSITIONAL.  The per-frame seed
+    // at TexWnd_Paint:1066 / TexWnd_RenderToRT:1110 re-neutralises MATERIAL_COLOR at
+    // the top of every paint, so the damage never survives a frame; within a frame it
+    // reaches exactly the thumbnails emitted AFTER the selected one.  Scroll the
+    // selection off the top (the `continue` cull in TexWnd_DrawMaterials skips its
+    // border entirely) or land it on the last visible cell and the grid looks
+    // perfect.  That is why the same material appears correct-with-a-red-border in
+    // one screenshot and solid red in the next: in the second it is not the selected
+    // one, it is merely downstream of it.
+    //
+    // THE FIX IS THE BRACKET DISCIPLINE EVERY OTHER PASS IN THIS EDITOR ALREADY
+    // FOLLOWS — set, draw, put it back: xywnd.cpp:1148/1190 ("restore for subsequent
+    // passes/frames"), camwnd.cpp:1437/1439, kiwi_hover.cpp:497/521,
+    // kiwi_region.cpp:1290/1409.  texwnd.cpp was the one drawing path in the repo
+    // that set a non-neutral colour and never restored it.
+    //
+    // It is done HERE rather than at the two call sites because both callers
+    // (TexWnd_DrawMaterials' selected frame and TexWnd_DrawLayeredMaterialEntry's
+    // per-row frame) have the identical hazard, and the second is worse: its frame
+    // colour is `colors[8]` = black for a non-active row, which would tint the NEXT
+    // entry's layer thumbnails solid black by the same mechanism.  Restoring inside
+    // the helper makes the helper safe for any future caller too.
+    //
+    // The value is the same {1,1,1,0} the two frame openers seed, and the w == 0 is
+    // the load-bearing half (see the long note on TexWnd_Paint's seed).  COST: one
+    // extra RC_SET_MATERIAL_COLOR per outline drawn — at most one per frame in the
+    // grid (only the selected cell is framed), one per row in the layered sub-view.
+    // `R_AddCmdSetMaterialColor` does NOT itself dedup (r_rendercmds.cpp:2201); it
+    // updates `s_edLastMatColor`, which is what lets the NEXT line batch skip its
+    // own push when the colour is unchanged, so the command count is a wash.
+    { static const float s_restore[4] = { 1.0f, 1.0f, 1.0f, 0.0f };
+      R_AddCmdSetMaterialColor( s_restore ); }
 }
 
 // TexWnd_DrawLayeredMaterialEntry (IDB sub_45CEA0) — draw ONE layered-material entry at

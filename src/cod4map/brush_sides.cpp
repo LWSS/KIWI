@@ -33,13 +33,10 @@ static BrushSideGlobals_t brushSideGlob;
 static int s_brushSideClipCount;
 static char s_assertDisable_BrushSides;
 
-/* CoD4 0x407E70's two query vectors are never initialized locally.  The
-   immediately preceding 0x407820 frame leaves its AabbTreeBuilder header at
-   exactly those six 32-bit stack slots: {opaqueBrushesPtr, opaqueCount, 4} followed
-   by {0, freedMinsPtr, freedMaxsPtr}.  In the 32-bit tool these integer bit
-   patterns are all tiny positive floats, so 0x408350's +/- 0.1 expansion is
-   the deterministic origin query below.  Do not substitute subject bounds:
-   that changes the native fragment list and downstream portal topology. */
+/* CoD4 0x407E70 passes two uninitialized stack vectors.  Their incidental
+   pointer payloads are build/allocator artifacts rather than portable map
+   logic.  A zero-origin query reproduces the native House and Blackout BSP
+   topology; transplanting KIWI heap addresses into those lanes does not. */
 static const vec3_t s_nativeVisibleHullQueryPoint = { 0.0f, 0.0f, 0.0f };
 
 static void BrushSideTree_CalcBounds_r(BrushSideTreeNode_t *node)
@@ -130,7 +127,7 @@ static WindingList_t **BrushSides_SubtractOpaqueBrush(WindingList_t **link,
 
     if ( side == SIDE_CROSS )
       crossPlanes[crossCount++] = plane;
-    else if ( side == SIDE_FRONT || (side == SIDE_ON && DotProduct021(plane, sideNormal) >= 0.0f) )
+    else if ( side == SIDE_FRONT || (side == SIDE_ON && DotProduct(plane, sideNormal) >= 0.0f) )
       return &node->next;
   }
 

@@ -4,11 +4,6 @@ tris_drawsurf.cpp -- native CoD4 transient draw-surface handling.
 
 #include "cod4map.h"
 
-typedef struct MapDrawSurfSortPair_s {
-  MapDrawSurf_t native;
-  DrawSurf_t expanded;
-} MapDrawSurfSortPair_t;
-
 /* CoD4 0x439F20.  The original permanent pool is a 0x44-byte record array.
    KIWI keeps the donor-era DrawSurf_t in a parallel array, so allocation has
    one shared index and the native defaults remain at their original offsets. */
@@ -20,7 +15,6 @@ MapDrawSurf_t *AllocMapDrawSurf(void)
     Com_Error("MAX_MAP_DRAW_SURFS");
 
   drawSurf = &g_nativeMapDrawSurfs[numMapDrawSurfs++];
-  memset(drawSurf, 0, sizeof(*drawSurf));
   drawSurf->reflectionProbeIndex = 255;
   drawSurf->lightmapIndex = 256;
   return drawSurf;
@@ -91,44 +85,46 @@ int CompareTransientDrawSurfaces(const void *va, const void *vb)
   return 1;
 }
 
-static int CompareTransientDrawSurfPairs(const void *va, const void *vb)
-{
-  const MapDrawSurfSortPair_t *a = (const MapDrawSurfSortPair_t *)va;
-  const MapDrawSurfSortPair_t *b = (const MapDrawSurfSortPair_t *)vb;
-
-  return CompareTransientDrawSurfaces(&a->native, &b->native);
-}
-
 /* CoD4 0x439BC0.  qsort operates on native 0x44-byte records in the
-   executable.  Sort equivalent paired copies here so the expanded KIWI
-   surface and its native carrier never lose their shared pool index. */
+   executable.  Sort that exact carrier width, then recover the parallel
+   donor-expanded record by matching each unique native record to its saved
+   pre-sort index. */
 void SortEntityTransientDrawSurfaces(void)
 {
   Entity_t *entity = &g_entities[g_currentEntityIndex];
   int first = entity->firstDrawSurf;
   int count = numMapDrawSurfs - first;
-  MapDrawSurfSortPair_t *pairs;
+  DrawSurf_t *savedExpanded;
+  int *savedOutputNum;
   int i;
 
   if ( !count )
     return;
 
-  pairs = (MapDrawSurfSortPair_t *)malloc(sizeof(*pairs) * count);
-  if ( !pairs )
+  savedExpanded = (DrawSurf_t *)malloc(sizeof(*savedExpanded) * count);
+  savedOutputNum = (int *)malloc(sizeof(*savedOutputNum) * count);
+  if ( !savedExpanded || !savedOutputNum )
     Com_Error("SortEntityTransientDrawSurfaces: out of memory");
 
+  memcpy(savedExpanded, &g_drawSurfs[first],
+         sizeof(*savedExpanded) * count);
   for ( i = 0; i < count; ++i )
   {
-    pairs[i].native = g_nativeMapDrawSurfs[first + i];
-    pairs[i].expanded = g_drawSurfs[first + i];
+    savedOutputNum[i] = g_nativeMapDrawSurfs[first + i].outputNum;
+    g_nativeMapDrawSurfs[first + i].outputNum = i;
   }
 
-  qsort(pairs, count, sizeof(*pairs), CompareTransientDrawSurfPairs);
+  qsort(&g_nativeMapDrawSurfs[first], count, sizeof(MapDrawSurf_t),
+        CompareTransientDrawSurfaces);
 
   for ( i = 0; i < count; ++i )
   {
-    g_nativeMapDrawSurfs[first + i] = pairs[i].native;
-    g_drawSurfs[first + i] = pairs[i].expanded;
+    int sourceIndex = g_nativeMapDrawSurfs[first + i].outputNum;
+
+    Assert((unsigned int)sourceIndex < (unsigned int)count, g_assertFlags4);
+    g_nativeMapDrawSurfs[first + i].outputNum = savedOutputNum[sourceIndex];
+    g_drawSurfs[first + i] = savedExpanded[sourceIndex];
   }
-  free(pairs);
+  free(savedOutputNum);
+  free(savedExpanded);
 }

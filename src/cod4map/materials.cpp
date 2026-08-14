@@ -122,6 +122,55 @@ static const char *MaterialFileString(const void *fileData, int fileSize, int of
   return value;
 }
 
+/* CoD4 0x4246F0.  The raw material allocation is retained by the native
+   loaded-material sidecar, but layered-descriptor construction only needs
+   this stable boolean.  Resolve it while the file bounds are still known. */
+static int Material_HasNonIdentityNormalMap(const void *fileData, int fileSize)
+{
+  const Material_t *material;
+  int textureCount;
+  int textureOffset;
+  int textureIndex;
+
+  if (!fileData || fileSize < (int)sizeof(Material_t))
+    return 0;
+
+  material = (const Material_t *)fileData;
+  textureCount = material->textureCount;
+  textureOffset = material->textures;
+  if (textureCount < 0 || textureCount > 256
+      || textureOffset < 0
+      || textureOffset > fileSize - textureCount * (int)sizeof(MaterialTextureDef_t))
+    return 0;
+
+  for (textureIndex = 0; textureIndex < textureCount; ++textureIndex)
+  {
+    const MaterialTextureDef_t *texture = (const MaterialTextureDef_t *)
+      ((const char *)fileData + textureOffset
+       + textureIndex * (int)sizeof(MaterialTextureDef_t));
+    const char *name = MaterialFileString(fileData, fileSize, texture->name);
+
+    if (!strcmp(name, "normalMap"))
+    {
+      const char *value = MaterialFileString(fileData, fileSize, texture->u.image);
+      return *value && strcmp(value, "$identitynormalmap") != 0;
+    }
+  }
+  return 0;
+}
+
+int HasNonIdentityNormalMap(const ShaderInfo_t *material)
+{
+  return material && material->hasNonIdentityNormalMap;
+}
+
+/* Native 0x424FB0.  Keep this public because the post-snap triangle
+   validation uses the same static technique-set table as layer selection. */
+int MaterialNameInStaticList(const ShaderInfo_t *material)
+{
+  return material && FindMaterialNameInStaticList(material) != NULL;
+}
+
 static int ExtractTechniqueName(const char *text, const char *token, char *name, int nameSize)
 {
   const char *tokenPos;
@@ -398,6 +447,42 @@ int SortLoadedMaterials()
     s_loadedMaterialOrder[insert] = material;
   }
   return s_loadedMaterialOrderCount;
+}
+
+/* CoD4 0x4245D0.  The lightmap grouper indexes the sorted native
+   loaded-material table, not the insertion-order expanded cache. */
+int FindLoadedMaterialIndex(const ShaderInfo_t *material)
+{
+  int materialIndex;
+
+  for ( materialIndex = 0; materialIndex < s_loadedMaterialOrderCount; ++materialIndex )
+  {
+    if ( s_loadedMaterialOrder[materialIndex] == material )
+      return materialIndex;
+  }
+  AssertFatal(0, g_matExpandRegion.assertFlag_info);
+  return INT_MAX;
+}
+
+/* Native 0x451CB0 compares the canonical technique-set-info pointers in the
+   12-byte loaded-material cache, rather than requiring identical materials. */
+bool LoadedMaterialsShareTechniqueSet(const ShaderInfo_t *first,
+                                      const ShaderInfo_t *second)
+{
+  const NativeTechniqueSetInfo_t *firstTechnique = NULL;
+  const NativeTechniqueSetInfo_t *secondTechnique = NULL;
+  int materialIndex;
+
+  for (materialIndex = 0; materialIndex < s_nativeLoadedMaterialCount;
+       ++materialIndex)
+  {
+    if (s_nativeMaterialExpanded[materialIndex] == first)
+      firstTechnique = s_nativeLoadedMaterials[materialIndex].techniqueSetInfo;
+    if (s_nativeMaterialExpanded[materialIndex] == second)
+      secondTechnique = s_nativeLoadedMaterials[materialIndex].techniqueSetInfo;
+  }
+  Assert(firstTechnique && secondTechnique, g_matExpandRegion.assertFlag_info);
+  return firstTechnique == secondTechnique;
 }
 
 /* CoD4 0x424550. */
@@ -697,7 +782,9 @@ static ShaderInfo_t *LoadMaterialForTarget(const char *materialName, int targetI
         matEntry->nativeStateBits = fileSize >= 48
                                   ? *(const unsigned int *)((const char *)fileData + 44)
                                   : 0;
-
+        matEntry->rawTextureCountHighByte = fileSize > 53
+                                          ? *((const unsigned char *)fileData + 53)
+                                          : 0;
         matEntry->surfaceFlags = matData->surfaceFlags;
         matEntry->contentFlags = matData->contentFlags;
         toolFlagsWord = matData->toolFlags;
@@ -732,6 +819,7 @@ static ShaderInfo_t *LoadMaterialForTarget(const char *materialName, int targetI
         matEntry->reserved120 = 0;
         Material_LoadColorTint(fileData, fileSize, matEntry);
         LoadTechniqueSetSortInfo(matEntry);
+        matEntry->hasNonIdentityNormalMap = Material_HasNonIdentityNormalMap(fileData, fileSize);
       }
 
       /* Native 0x424760 retains the raw FS buffer in its 12-byte record.

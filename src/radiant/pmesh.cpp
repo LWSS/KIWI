@@ -1462,6 +1462,194 @@ void Patch_BrushToMesh( char bCone, byte bBevel, byte bEndcap, char bSquare )
 }
 
 // ════════════════════════════════════════════════════════════════════════════
+//  KIWI-UX (ROUND Q) — Patch_KiwiFinishNew
+//
+//  The TEXTURE + TESSELLATION TAIL every patch primitive in this file runs after
+//  it has filled ctrl[][], factored out so a KIWI command can create a patch
+//  through the SAME sequence instead of carrying a second copy of it.
+//
+//  It is the block at 0x43b18c-0x43b204 (Patch_BrushToMesh above, lines
+//  "float natScale …" through "++p->version") lifted VERBATIM — same order, same
+//  constants, same bDirty handling.  The sibling creators Patch_GenericMesh
+//  (:1553-1570) and Create_Terrain (:1655-1672) run the identical block, so this
+//  is the shape all three agree on and not one of them generalised.
+//
+//  It exists because the two workers it needs — Patch_Naturalize2 (0x439840) and
+//  PMESH_02 (0x439580) — are file-static and must stay that way: they are ported
+//  internals with IDA-pinned float behaviour, and widening them into the public
+//  header to serve one caller would be worse than one forwarder.
+//
+//  NOT included, deliberately: the ctrl[][] fill (the caller's whole job), the
+//  material inheritance (the caller knows which face it is copying), and the
+//  AddBrushForPatch / Brush_AddToList / Brush_AddToList2 landing (the caller owns
+//  the undo bracket those must sit inside).
+//
+//  NO PORTED CALLER IS CHANGED.  Patch_BrushToMesh et al keep their inlined copy,
+//  so the ported creation paths are byte-for-byte what they were.
+// ════════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════════════
+//  KIWI-UX (ROUND AJ, ITEM 2) — Patch_KiwiFinishNewLike
+//
+//  USER DIRECTIVE, verbatim: "Also the Texture should be fixed so it looks
+//  natural with the parent solid edge area."
+//
+//  WHAT WAS WRONG, and it is a SCALE, not a projection.  Patch_Naturalize2 lays S
+//  from the cumulative WIDTH DISTANCE in world units (Patch_WidthDistanceTo,
+//  :1183) divided by `texWidth * a3`, so `texWidth * a3` IS the number of world
+//  units one full texture repeat covers.  A brush FACE expresses the same quantity
+//  directly as its texdef `size[0]` (brush.cpp:3327 / pmesh.cpp:855 both seed it
+//  as `texWidth * 0.25`, i.e. exactly this product at the default sample size).
+//  Patch_KiwiFinishNew hardcoded `random_texture_stuff[0].sampleSize` instead, so a
+//  patch created against a wall whose texdef had been scaled — which is every wall
+//  a mapper has actually worked on — came out at the EDITOR DEFAULT density while
+//  the face it grows out of was at some other one.  The seam between them read as a
+//  texture change, which is exactly what "doesn't look natural with the parent
+//  solid edge area" describes.
+//
+//  So: a3 = srcTex->size[0] / texWidth reproduces the face's own texel density on
+//  the patch, in the patch's own arc-length parametrisation.  Both are read from
+//  the SAME material (the patch has already inherited the face's), so the widths
+//  cancel and the two surfaces agree by construction rather than by luck.
+//
+//  Patch_KiwiFinishNew is unchanged in behaviour — it is now a one-line forwarder
+//  passing a null texdef, which takes the identical default path.  No ported caller
+//  is touched.
+// ════════════════════════════════════════════════════════════════════════════
+void Patch_KiwiFinishNewLike( patchMesh_t *p, const texdef_sub_t *srcTex )
+{
+    if ( !p )
+        return;
+
+    float natScale = g_qeglobals.random_texture_stuff[0].sampleSize;
+    if ( natScale == 0.0f )
+        natScale = 0.25f;
+    float sScale = natScale;
+    float tScale = natScale;
+    if ( srcTex )
+    {
+        // The SAME material the patch is about to be textured with — layer 0, the
+        // channel Patch_Naturalize2 is called on below.
+        qtexture_s *lm = MaterialDef_GetLayeredMaterial( (MaterialDef *)&p->texture );
+        const int w = lm ? lm->width  : 512;
+        const int h = lm ? lm->height : 512;
+        if ( srcTex->size[0] > 0.0f && w > 0 ) sScale = srcTex->size[0] / (float)w;
+        if ( srcTex->size[1] > 0.0f && h > 0 ) tScale = srcTex->size[1] / (float)h;
+        if ( !( sScale > 0.0f ) ) sScale = natScale;
+        if ( !( tScale > 0.0f ) ) tScale = natScale;
+    }
+    Patch_Naturalize2( p, 0, sScale, tScale );
+
+    const bool terrain = ( p->type & PATCH_TERRAIN ) != 0;
+    if ( terrain ) Patch_TerrainTexProject( p, 1, 16.0f );
+    else           PMESH_02( p, 1, 16.0f );
+    *(float *)&p->size_of_struct_0x504C = 16.0f;
+    p->bDirty = 1;                       // gates `size` in Patch_Write (:1146)
+    if ( terrain ) Patch_TerrainTexProject( p, 2, 0.25f );
+    else           PMESH_02( p, 2, 0.25f );
+
+    if ( p->curveDef )
+        free( p->curveDef );
+    p->curveDef = Patch_GenericMesh2( p, g_qeglobals.current_edit_layer, 0, 0 );
+    ++p->version;
+}
+
+// The ROUND Q entry point, unchanged in behaviour: a null texdef takes the
+// editor-default `random_texture_stuff[0].sampleSize` path exactly as before.
+void Patch_KiwiFinishNew( patchMesh_t *p )
+{
+    Patch_KiwiFinishNewLike( p, 0 );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+//  KIWI-UX (ROUND AK, ITEM 3) — Patch_KiwiReNaturalize
+//
+//  USER REPORT, verbatim: "bevel is good, but I can't select the curve parts to
+//  retexture them.  See how it's messed up?"  The screenshot's second half — the
+//  stretched texture on the fillet — is a SEPARATE, CERTAIN defect from the
+//  selectability chain (fixed in kiwi_pick.cpp), and this is it.
+//
+//  WHAT THE PORTED APPLY DOES, AND WHY IT STRETCHES.  Texture_SetTexture reaches a
+//  patch through sub_476ED0 (brush.cpp:2852-2871) with a5 == 1, whose patch branch
+//  copies the two material POINTERS (lyrMtl, radMtl) and bumps p->version.  It
+//  never touches ctrl[][].texCoord and it never naturalizes — faithful to 0x476ED0
+//  and NOT to be changed there.  So the per-control-point S/T stay exactly as
+//  Patch_Naturalize2 laid them against the OLD material's width/height, and the
+//  world-units-per-repeat silently rescales by newWidth/oldWidth.  Swap a 512 px
+//  wall material for a 128 px one and the patch comes out four times denser.  On a
+//  fillet — whose S runs along the arc at the parent wall's inherited density
+//  (Patch_KiwiFinishNewLike above) — that reads as exactly the reported stretch.
+//
+//  THE COMPOSITION RULE, AND IT IS RECOVERABLE WITHOUT CAPTURING ANYTHING FIRST.
+//  Patch_Naturalize2 lays a LINEAR map: st[0]_i = widthDist(i) / (w * a3), and
+//  `w * a3` IS the world units one repeat covers.  Since the apply does not touch
+//  ctrl[][], the OLD product survives the swap in the coordinates themselves:
+//
+//      WUPR_s = widthDist ( width  - 1 ) /  ctrl[width -1][0].texCoord.st[0]
+//      WUPR_t = heightDist( height - 1 ) / -ctrl[0][height-1].texCoord.st[1]
+//
+//  (the T sign comes from Patch_Naturalize2's negated tScale, :1233).  Feeding
+//  those back as a synthesized texdef_sub_t.size[] makes Patch_KiwiFinishNewLike
+//  compute a3 = WUPR_s / newWidth, and Patch_Naturalize2 then re-lays at
+//  1 / (newWidth * WUPR_s / newWidth) = 1 / WUPR_s — the density the patch already
+//  had, against the material it now has.  The old width cancels out, so nothing has
+//  to be captured before the apply runs.
+//
+//  ROUND AJ'S INHERITANCE AND A MANUAL RETEXTURE THEREFORE COMPOSE: the fillet is
+//  born at its parent face's density, and re-texturing it KEEPS that density
+//  instead of resetting to the editor default.  A patch whose coordinates are
+//  degenerate (a zero span, or an S that never advanced) falls back to
+//  Patch_KiwiFinishNew's editor default, which is what stock Patch→Naturalize does
+//  and is always better than leaving the stretch in place.
+//
+//  It also rebuilds curveDef (Patch_KiwiFinishNewLike's tail), which is what
+//  PMESH_51's pick needs — so this is self-healing on that axis too.
+static void Patch_KiwiReNaturalize( patchMesh_t *p )
+{
+    if ( !p || p->width < 2 || p->height < 2 )
+        return;
+
+    const float sEnd = p->ctrl[p->width  - 1][0].texCoord.st[0];
+    const float tEnd = p->ctrl[0][p->height - 1].texCoord.st[1];
+    const float wDist = (float)Patch_WidthDistanceTo ( p->width  - 1, p );
+    const float hDist = (float)Patch_HeightDistanceTo( p->height - 1, p );
+
+    texdef_sub_t td;
+    memset( &td, 0, sizeof( td ) );
+    bool have = false;
+    if ( wDist > 0.0f && sEnd > 1.0e-6f )
+    {
+        td.size[0] = wDist / sEnd;
+        have = true;
+    }
+    if ( hDist > 0.0f && tEnd < -1.0e-6f )
+    {
+        td.size[1] = hDist / -tEnd;
+        have = true;
+    }
+    // A zero size[] component is the "no bound" answer Patch_KiwiFinishNewLike
+    // already documents (`srcTex->size[0] > 0.0f` gates each axis independently),
+    // so a patch with only one recoverable axis keeps that one and takes the
+    // editor default on the other.
+    Patch_KiwiFinishNewLike( p, have ? &td : 0 );
+}
+
+// The selection sweep.  Called from the KIWI texture-apply fence (texwnd.cpp)
+// immediately after Texture_SetTexture, because that is the one funnel a thumbnail
+// click goes through and it is above every ported apply path.  Walks the SAME
+// sentinel list Brush_SetTexture's brush pass walks, so anything the apply reached
+// is exactly what this re-lays and nothing else.
+void Patch_KiwiReNaturalizeSelected()
+{
+    // Sentinel walk: init from .next, advance via ->next.
+    for ( selbrush_t *b = selected_brushes.next; b && b != &selected_brushes; b = b->next )
+    {
+        if ( !b->patch || !b->def )
+            continue;
+        Patch_KiwiReNaturalize( b->def->patch );
+    }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
 //  Patch_GenericMesh  (0x43b310)
 //
 //  The "Simple Patch Mesh" backend (Curve→Simple Patch Mesh, cmd 32856 → the
@@ -2658,6 +2846,75 @@ void Patch_Lightmap_Texturing()
 
     Undo_EndBrushList( &selected_brushes );
     Undo_End();
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+//  KIWI-UX (ROUND AM) — Patch_KiwiLmapAlign
+//
+//  USER DIRECTIVE, verbatim: "Please set the texture alignment to 'lmap' when
+//  doing a fillet curve (for all parts).  It's the setting that makes it lineup
+//  perfect."
+//
+//  THE SAME FORWARDER SHAPE ROUND Q ESTABLISHED and for the same reason: the
+//  primitive the directive names, Patch_Lightmap_Texturing_Sub (0x4397B0), is
+//  file-static ported internal with IDA-pinned float behaviour, and the PUBLIC
+//  spelling of it — Patch_Lightmap_Texturing (0x448110), what the Surface
+//  Inspector's "Lmap" button runs — walks `selected_brushes` and opens its OWN
+//  Undo_GeneralStart/Undo_End bracket.  Calling that from inside a command's
+//  commit would put a second undo record inside one gesture, which is the one
+//  thing kiwi_command.h does not allow.  So the per-patch primitive gets a
+//  forwarder and the CALLER keeps owning the bracket.
+//
+//  NOTHING IS REIMPLEMENTED: this is one call to the ported sub, on one patch.
+//  It reads the layer sample size through Select_SetTexture and the current edit
+//  layer exactly as the button path does, so a patch aligned here and a patch
+//  aligned by pressing "Lmap" go through identical code.
+//
+//  NO PORTED CALLER IS CHANGED.
+// ════════════════════════════════════════════════════════════════════════════
+void Patch_KiwiLmapAlign( patchMesh_t *p )
+{
+    if ( !p )
+        return;
+    Patch_Lightmap_Texturing_Sub( p );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+//  KIWI-UX (ROUND AN) — Patch_KiwiCapAlign
+//
+//  USER DIRECTIVE, verbatim: "the main surface needs the 'CAP' button pressed
+//  in texture inspector.  Do this automatically please."
+//
+//  Same forwarder shape and same reason as Patch_KiwiLmapAlign above: the
+//  primitive behind the Surface Inspector's CAP button is Patch_CapTexture
+//  (0x439B10, this file :2717), but its public route
+//  (Patch_NaturalizeSelected's unk=1 arm) walks `selected_brushes` and opens
+//  its own undo bracket — unusable inside a command's commit.  One call to the
+//  ported primitive at the button path's default 1.0/1.0 scale, plus the same
+//  curveDef rebuild Patch_Naturalize does (:2890-2893) because the cap arm's
+//  own rebuild is deferred to its caller.
+// ════════════════════════════════════════════════════════════════════════════
+void Patch_KiwiCapAlign( patchMesh_t *p )
+{
+    if ( !p )
+        return;
+    // ROUND AS (crash fix, defense in depth): CAP's reference face comes from the
+    // SYMBIONT brush (Patch_GetAxisFace / PMESH_03 read p->pSymbiot) — a patch not
+    // yet handed to AddBrushForPatch has none, and the ported pickers deref it
+    // unguarded (the user's AV: `b was nullptr`).  Callers must align AFTER
+    // AddBrushForPatch; this guard turns a future ordering mistake into a console
+    // line instead of a crash.
+    if ( !p->pSymbiot )
+    {
+        Sys_Printf( "Patch_KiwiCapAlign: patch has no symbiont brush yet - "
+                    "call after AddBrushForPatch; CAP alignment skipped.\n" );
+        return;
+    }
+    Patch_CapTexture( p, 1, 1.0f, 1.0f );
+    if ( p->curveDef )
+        free( p->curveDef );
+    p->curveDef = Patch_GenericMesh2( p, g_qeglobals.current_edit_layer, 0, 0 );
+    ++p->version;
 }
 
 // ─── Patch_Naturalize (0x439920) — natural texturing at the editor default scale ──
@@ -4786,19 +5043,36 @@ int PMESH_19_Radius( patchMesh_t *patch, const float *cursor, float innerR, floa
 
     // turned_edge flags live in the patchMesh CONTROL grid (ctrl[*][*].turned_edge @ +132);
     // the binary indexes ctrl[j][i].turned_edge (col by row-stride 1280, row by col-stride 80).
-    const char *turnBase = (const char *)patch + 132;
+    //
+    // KIWI-UX (ROUND AQ, ITEM 1) — the crash fix.  The binary walks that flag as a raw
+    // pointer: `*(patch + 132 + 80*row + 1280*col)`, where 1280 == sizeof(drawVert_t[16])
+    // == ONE ROW of the 16x16 CONTROL grid `ctrl[16][16]` @ patchMesh_t+0x38 (drawVert_t is
+    // 80 bytes; +132 == ctrl[0][0].turned_edge).  That walk is in bounds only while the
+    // TESSELLATED dims (cdef->width/height, what this loop iterates) are <= the control
+    // dims — which holds for a terrain SHEET, stored unsubdivided, and for nothing else.
+    // A patch CYLINDER tessellates to far more columns than 16, so col >= 16 read
+    // 1280*col bytes past ctrl — past the end of patchMesh_t (20556 B) entirely — and the
+    // read AV'd (`turnRow` a garbage pointer) the moment a cylinder was in the selection
+    // with the advanced terrain-edit ring live.  Index the grid as the typed array it is,
+    // and consult turned_edge only for a TERRAIN patch whose control indices are actually
+    // in range; every other patch takes the untorn diagonal — exactly the rule
+    // Patch_Fill_BuildFrontIndices (0x43FB70) already applies to the same flag, so the
+    // ring clips against the same triangulation the patch is drawn with.
+    const bool isTerrain = ( (int)patch->type == PATCH_TERRAIN );   // 0x43FB70's own predicate
 
     for ( int i = 0; i < cdef->height - 1; ++i )       // v41 (outer)
     {
         const int width = cdef->width;                 // *cdef (reloaded each row)
         if ( width - 1 <= 0 )
             continue;
-        const char *turnRow = turnBase + 80 * i;
+        const bool rowInCtrl = isTerrain && ( i < 16 );
         for ( int j = 0; j < width - 1; ++j )          // v43 (inner)
         {
             const int   base    = j + i * width;       // v18
             const int   nextRow = base + width;         // v19
-            const char  turned  = *(turnRow + 1280 * j);// ctrl[j][i].turned_edge
+            const int   turned  = ( rowInCtrl && j < 16 )
+                                  ? patch->ctrl[j][i].turned_edge   // ctrl[col][row]
+                                  : 0;
 
             // The 4 quad corners (curveVert xyz, 44-byte stride).
             const float *vB  = (const float *)( (char *)cdef->verts + 44 * base );        // base

@@ -639,7 +639,10 @@ void FilterBrushIntoTree_r(BrushSide_t *face, Brush_t *brush, float *sidePlanes,
     {
       side = (p->nodes[1] == n);
 
-      if ( !p->nodes[0]->opaque && !p->nodes[1]->opaque && WindingPlaneSide(p->winding, plane, plane[3]) == SIDE_ON )
+      if ( !p->nodes[0]->opaque
+        && !p->nodes[1]->opaque
+        && !IsTinyWinding(p->winding)
+        && WindingPlaneSide(p->winding, plane, plane[3]) == SIDE_ON )
       {
         /* portal on the face plane — copy winding and clip */
         w = CopyWinding(p->winding);
@@ -1361,10 +1364,10 @@ Rebuilds BSP tree and generates leaf brush data for entity.
 */
 int LeafNode(Entity_t *entityData, Node_t *node)
 {
+  (void)entityData;
   memset(g_cellPortalLinks, 0, sizeof(g_cellPortalLinks));
   Assert(s_portalErrorCount == 0, s_assertDisable_FreeBspTree_r);
   FreeBspTree_r(node);
-  BspTreeForMap(entityData);
   return GetLeafBrushes();
 }
 

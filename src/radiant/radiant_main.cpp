@@ -54,8 +54,15 @@ extern bool ImGuiShell_PrimaryActive();
 extern void ImGuiShell_ApplyViewportDocks();
 extern void ImGuiShell_RenderPlatformWindows();   // popped-out panel OS windows (post-present)
 extern void ImGuiShell_BeginFrame();              // authorize this tick's single ImGui frame
+extern bool ImGuiShell_FrameAuthorized();         // ROUND U: will this paint draw a scene?
 extern void ImGuiShell_RenderViewportsToRT();     // Phase 5: render the 4 viewports to their RTs
 extern void ImGuiShell_DispatchViewportInput();   // Phase 5: viewport mouse input (post-present)
+
+// ── KIWI-UX (ROUND AD): device-health reporting for the frame's own paint ──────
+// Declared against kiwi_devicereset.h (the definition is kiwi_devicereset.cpp); that
+// header is not included here because it declares nothing else this file needs and
+// carries a large analysis block.
+extern void KiwiDevice_FrameHealthWatch( HWND frame, bool authorized, bool painted );  // kiwi_devicereset.cpp
 
 // mainfrm.h is deliberately NOT included: it is the MFC class header (CMainFrame + the
 // C*Wnd/C*Dlg family behind its own fences), and this shell must not depend on it —
@@ -97,6 +104,16 @@ static HWND   s_hwndLayMat  = nullptr;   // lyrMtlWndGlob.layerList placeholder
 static HACCEL s_hAccel      = nullptr;   // IDR_MAIN_ACCEL (was CMainFrame::m_hAccel)
 static HMENU  s_hMenu       = nullptr;   // IDR_MENU_QUAKE3
 static bool   s_bootDone    = false;     // gate the WndProc's layout/idle work during creation
+
+// KIWI-UX (RADIANT_UX_DESIGN §11, Phase 2): re-annotate the menu bar after a keymap-profile
+// switch.  s_hMenu is file-static, so kiwi_keymap.cpp cannot reach the ported
+// Radiant_ShowMenuItemKeyBindings itself.  Pure forwarder — the annotation call is idempotent
+// (it strips any existing "\t..." before rebuilding it, mainfrm.cpp).
+void Radiant_RefreshMenuKeyBindings()
+{
+    if ( s_hMenu )
+        Radiant_ShowMenuItemKeyBindings( s_hMenu );
+}
 
 // ═════════════════════════════════════════════════════════════════════════════
 //  Layout — CMainFrame::RelayoutPanes (mainfrm.cpp:1662) minus the two docked MFC bars.
@@ -156,9 +173,35 @@ static LRESULT CALLBACK Radiant_FrameWndProc( HWND hwnd, UINT msg, WPARAM wParam
         // present (their WM_SIZE → R_Hwnd_Resize must not run inside the scene bracket).
         if ( ImGuiShell_PrimaryActive() )
         {
+            // ── KIWI-UX (ROUND U): NEVER PRESENT A FRAME WITH NO SCENE ──────
+            // USER REPORT: "There is a flicker on some actions that turns the
+            // whole window white."  The clear below uses colors[1], which
+            // win_qe3.cpp:415 sets to { 1, 1, 1, 1 } — pure white — and the ImGui
+            // scene that is supposed to cover it is submitted by a DIFFERENT
+            // function (ImGuiShell_DrawOverlay, pre-EndScene) that refuses to run
+            // on any paint the pump did not authorize.  So an unauthorized
+            // WM_PAINT — one caused by a nested TrackPopupMenu / MessageBox
+            // message loop, a window move, an OS repaint — cleared the whole
+            // client area to white and presented it empty.  The full chain is on
+            // ImGuiShell_FrameAuthorized (imgui_shell.cpp).
+            //
+            // The fix is to do NOTHING on such a paint but validate the region:
+            // under DWM the window keeps its last presented content, so the
+            // correct frame simply stays on screen until the pump's next tick
+            // (<= 16 ms away) draws a real one.  There is no case where clearing
+            // to white and presenting is better than leaving the last good frame.
+            //
+            // s_framePresented is the ONE exception, and it is the boot instant:
+            // before the pump has ever driven a frame there is no "last good
+            // frame" to keep, so the first paint still clears — exactly the
+            // pre-round-U behaviour, for exactly one paint.
+            static bool s_framePresented = false;
+            const bool  drawScene = ImGuiShell_FrameAuthorized() || !s_framePresented;
+
             PAINTSTRUCT ps;
             ::BeginPaint( hwnd, &ps );
-            if ( dx.device && R_SetupRendertarget_CheckDevice( hwnd ) )
+            bool scenePainted = false;
+            if ( drawScene && dx.device && R_SetupRendertarget_CheckDevice( hwnd ) )
             {
                 R_BeginFrame();
                 R_BeginSharedCmdList();
@@ -167,8 +210,23 @@ static LRESULT CALLBACK Radiant_FrameWndProc( HWND hwnd, UINT msg, WPARAM wParam
                 R_IssueRenderCommands( (uint)-1 );
                 R_SortMaterials();
                 R_CheckTargetWindow( hwnd );
+                s_framePresented = true;
+                scenePainted     = true;
             }
             ::EndPaint( hwnd, &ps );
+            // ── KIWI-UX (ROUND AD): THE BLACK SCREEN NOW SAYS SOMETHING ─────
+            // USER REPORT: *"I had it hang while loading a map"* — main thread
+            // idle in MsgWaitForMultipleObjects, screen black, never recovers.
+            // The pump was fine; the `if` above was answering FALSE on every
+            // tick, forever, and printing nothing.  This is the one place that
+            // knows a tick rendered nothing, so it is the one place that reports
+            // it (throttled) and, after ~15 s of unbroken black, writes the
+            // rescue save and tells the operator.  It MUST be after ::EndPaint:
+            // the escape hatch pops a message box, whose nested pump would
+            // otherwise re-deliver an unvalidated WM_PAINT forever.  `drawScene`
+            // is passed so a paint the pump did not ask for — which draws nothing
+            // by design since round U — is not mistaken for a black frame.
+            KiwiDevice_FrameHealthWatch( hwnd, drawScene, scenePainted );
             ImGuiShell_ApplyViewportDocks();
             // NOTE: the pop-out platform windows are rendered by the PUMP (once per tick,
             // right after this synchronous paint), NOT here — calling UpdatePlatformWindows
@@ -479,8 +537,44 @@ static bool Radiant_BootFrame( HWND frame )
     //     [Commands] overrides onto the built-in defaults, then annotate the menu items with
     //     their current key bindings (mainfrm.cpp:1562-1564).
     Radiant_LoadCommandMap();
+    // KIWI-UX (RADIANT_UX_DESIGN §11, Phase 2): the keymap PROFILE lands on top of the
+    // radiant.ini overrides, so an explicit user remap sits under the profile and the
+    // classic profile is literally "defaults + radiant.ini".  Must run BEFORE the menu
+    // annotation below, or the menu would advertise the pre-profile bindings.
+    {
+        extern void KiwiKeymap_ApplyBoot();   // kiwi_keymap.cpp
+        KiwiKeymap_ApplyBoot();
+    }
     if ( s_hMenu )
         Radiant_ShowMenuItemKeyBindings( s_hMenu );
+
+    // 4a-bis) KIWI-UX (RADIANT_UX_DESIGN §9, shakeout B): append the native "Windows"
+    //     popup — one check-marked item per hideable dock window (2D View, Z, Textures,
+    //     Console, the shell panel), each carrying a KIWI instant command id so its
+    //     WM_COMMAND lands in this file's `case WM_COMMAND` and routes through the
+    //     ordinary Radiant_ExecCommand -> Radiant_DispatchCommandDirect KIWI arm.
+    //     Deliberately AFTER Radiant_ShowMenuItemKeyBindings: that annotator walks the
+    //     command table and rewrites any menu item whose id it finds, appending a bare
+    //     "\t" for an unbound command — which these five are by default.  Running it
+    //     first means it cannot see them, so their captions stay clean.  (The same
+    //     annotator runs again on a keymap-profile switch, when they DO exist; see
+    //     RADIANT_KNOWN_ISSUES.)  KiwiWindows_BuildMenu seeds the check marks itself.
+    if ( s_hMenu )
+    {
+        extern void KiwiWindows_BuildMenu( void *frameMenu );   // kiwi_windows.cpp
+        KiwiWindows_BuildMenu( s_hMenu );
+
+        // 4a-ter) KIWI-UX (RADIANT_UX_DESIGN §17, shakeout C, user directive "add a
+        //     disable grid option in the View Dropdown at the topbar"): a separator
+        //     plus "Show Grid" / "Show Axes" check items appended INTO the existing
+        //     View popup (index 2).  Appending ITEMS to a popup cannot shift the
+        //     menu bar's POPUP indices, which is all the index-based consumers read
+        //     (texwnd.cpp:1600 index 5, radiant_main.cpp:529 index 0) — the argument
+        //     is written out in kiwi_windows.h.  Same post-annotator placement as
+        //     the Windows popup above, and for the same caption-cleanliness reason.
+        extern void KiwiWindows_BuildViewMenu( void *frameMenu );
+        KiwiWindows_BuildViewMenu( s_hMenu );
+    }
 
     // 4b) Build the Textures-menu Usage / Locale / Surface-type filter submenus.  MUST run
     //     AFTER ::SetMenu so GetMenu(d_hwndMain) is live (mainfrm.cpp:1571).
@@ -536,6 +630,24 @@ static bool Radiant_BootFrame( HWND frame )
     // The startup CheckTextureScale (SetButtonMenuStates 0x420000) — mainfrm.cpp:1636.
     Radiant_ApplyStartupTextureScale();
 
+    // ── KIWI-UX (ROUND AA, ITEM 1): RE-ASSERT THE FULL LISTING, LAST ──────────────
+    // USER REPORT: "you broke the textures window!  It only shows 4 materials now."
+    // "Show all" is the intent of the call above (mainfrm.cpp:1633) but it is made
+    // BEFORE the scale pass, and the scale pass is a whole subtree —
+    // Radiant_CheckTextureScale -> Texture_ResetPosition -> TexWnd_HitTest /
+    // TexWnd_ApplyMaterialAtIndex -> Texture_SetTexture -> Brush_SetTexture — every
+    // level of which touches browser state (is_in_use via Texture_GetHandle, the
+    // per-layer nPos, the scroll position, m_selIndex).  The base accept predicate
+    // is `tex->is_in_use` (texwnd.cpp:819), so ANY of that leaving flags clear
+    // leaves the browser showing a handful of materials, and nothing later in the
+    // boot re-opens it.  Asking for "show all" AFTER the last thing that can narrow
+    // it makes the boot state unconditional instead of order-dependent.  It is the
+    // same ported call, it is idempotent (texwnd.cpp:574 — one flag write per
+    // qtexture plus a W_TEXTURE dirty bit), and it changes nothing a user does
+    // later: Textures->Show In Use still narrows the browser on demand, and a map
+    // load still narrows it (map.cpp:546).
+    Texture_ShowAll();
+
     // mainfrm.cpp:1638-1644 — counts, grid status line, grid radio-check, and the
     // Light-Preview submenu check marks seeded from the LOADED prefs.
     QE_CountBrushesAndUpdateStatusBar();
@@ -583,8 +695,120 @@ static bool Radiant_PreTranslateMessage( MSG *pMsg )
     {
         extern bool ImGuiShell_WantsKeyboard();   // imgui_shell.cpp
         if ( ( pMsg->message == WM_KEYDOWN || pMsg->message == WM_CHAR ||
-               pMsg->message == WM_KEYUP ) && ImGuiShell_WantsKeyboard() )
+               pMsg->message == WM_KEYUP ||
+               // KIWI-UX (ROUND AM, ITEM 7b): the SYS twins too, now that Alt
+               // chords are routed below — a focused ImGui field still outranks
+               // everything, and that must not become false for Alt+<key>.
+               pMsg->message == WM_SYSKEYDOWN || pMsg->message == WM_SYSKEYUP )
+             && ImGuiShell_WantsKeyboard() )
             return false;                          // TranslateMessage/Dispatch as normal
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    //  KIWI-UX (ROUND AM, ITEM 7b) — ALT CHORDS REACH THE HOTKEY TABLE
+    // ═════════════════════════════════════════════════════════════════════════
+    // USER REPORT, verbatim: "the alt-s bind to open the surface inspector window
+    // doesn't work because the win32 topbar steals the input and then locks alt
+    // pressed down."  Exactly right, and it is the long-standing
+    // RADIANT_KNOWN_ISSUES entry ("Alt-chords dead").
+    //
+    // THE MECHANISM.  Windows delivers a key pressed WITH Alt as WM_SYSKEYDOWN,
+    // not WM_KEYDOWN.  Every hotkey path in this shell filtered on WM_KEYDOWN —
+    // this function at the two tests below, and the frame WndProc's own
+    // ON_WM_KEYDOWN arm — so an Alt chord reached NEITHER Radiant_TryHotkey NOR
+    // KiwiUX_KeyFunnel.  It fell through to DefWindowProc, which is the menu-bar
+    // mnemonic handler: no menu has an S mnemonic at top level, so the chord was
+    // swallowed with a beep and the window was left in menu-activation mode with
+    // Alt latched.  Alt+S (Surface Inspector, kiwi_keymap.cpp:97), Shift+Alt+S
+    // (Patch Inspector, :85), Alt+V (centre rect, :372), Alt+F, Alt+R, Alt+H and
+    // every Ctrl+Alt row were all unreachable for the same reason.
+    //
+    // THE FIX, AND WHY IT IS SAFE.  Route WM_SYSKEYDOWN through the SAME
+    // Radiant_TryHotkey the WM_KEYDOWN path uses.  That function builds its
+    // modifier mask from GetKeyState (mainfrm.cpp:1590-1614), so Alt is already
+    // in the mask and a row only matches if it was BOUND with Alt — an UNBOUND
+    // Alt chord returns false and falls straight through to the native menu,
+    // unchanged.  Consuming a MATCHED chord (returning true) means the pump calls
+    // neither TranslateMessage nor DispatchMessage, so the menu loop never sees
+    // it and there is nothing to latch.
+    //
+    // THE THREE THINGS THAT MUST KEEP WORKING, each guarded explicitly:
+    //   * BARE Alt and every other bare modifier fall through — round U's law
+    //     (kiwi_command.cpp:1738-1788), reproduced here rather than assumed,
+    //     because a swallowed modifier also starves ImGui's modifier state.
+    //   * F10 opens the menu.  F10 arrives as WM_SYSKEYDOWN with NO Alt down, so
+    //     the `alt` test below excludes it by construction — this path only ever
+    //     looks at chords that actually hold Alt.
+    //   * The SYSTEM chords stay the system's: Alt+F4 (close), Alt+Space (window
+    //     menu), Alt+Tab, Alt+Enter, Alt+Esc.  Refused by name rather than by
+    //     trusting that nothing is bound to them.
+    //
+    // AND THE LATCH ITSELF.  Consuming the chord is not enough on its own: the
+    // Alt KEY-UP that follows is what DefWindowProc turns into "activate the menu
+    // bar", so after Alt+S the menu would still drop and take the focus.  When a
+    // chord is consumed, the trailing bare-Alt release is consumed with it — and
+    // ONLY then, so an Alt tap with no chord still opens the menu (accessibility).
+    // Alt+MMB is a MOUSE gesture and never enters this path at all.
+    {
+        static bool s_altChordConsumed = false;
+
+        if ( pMsg->message == WM_SYSKEYUP || pMsg->message == WM_KEYUP )
+        {
+            const unsigned vkUp = (unsigned)pMsg->wParam;
+            if ( vkUp == VK_MENU || vkUp == VK_LMENU || vkUp == VK_RMENU )
+            {
+                if ( s_altChordConsumed )
+                {
+                    s_altChordConsumed = false;
+                    return true;               // swallow the release that opens the bar
+                }
+            }
+        }
+
+        if ( pMsg->message == WM_SYSKEYDOWN )
+        {
+            const unsigned vk  = (unsigned)pMsg->wParam;
+            const bool     alt = ( ::GetKeyState( VK_MENU ) < 0 );
+
+            bool routable = alt;
+            switch ( vk )
+            {
+            // ROUND U's law — a bare modifier is never swallowed.
+            case VK_SHIFT:   case VK_CONTROL: case VK_MENU:
+            case VK_LSHIFT:  case VK_RSHIFT:
+            case VK_LCONTROL:case VK_RCONTROL:
+            case VK_LMENU:   case VK_RMENU:
+            case VK_LWIN:    case VK_RWIN:
+            // The system's own Alt chords, refused by name.
+            case VK_F4:      case VK_SPACE:   case VK_TAB:
+            case VK_RETURN:  case VK_ESCAPE:  case VK_F10:
+                routable = false;
+                break;
+            default:
+                break;
+            }
+
+            if ( routable && pMsg->hwnd != g_qeglobals.d_hwndEdit
+              && Radiant_TryHotkey( vk ) )
+            {
+                s_altChordConsumed = true;     // …and eat the Alt release with it
+                return true;
+            }
+        }
+    }
+
+    // KIWI-UX (RADIANT_UX_DESIGN §4/§5/§15, Phase 2): the modal-command + palette key
+    // intercept.  Deliberately placed HERE — after the WantTextInput gate above (a focused
+    // ImGui field still outranks everything, unchanged) and BEFORE both TranslateAccelerator
+    // and Radiant_TryHotkey, so a live gesture's Esc/Enter/digits can never also fire an
+    // editor hotkey and staple an unrelated undo record onto a half-finished edit.  Returns
+    // false whenever no command is active and the palette is closed, i.e. the ordinary path
+    // below is bit-for-bit what it was.  Swallowing the WM_KEYDOWN also suppresses its WM_CHAR
+    // (the pump only calls TranslateMessage when this function returns false).
+    {
+        extern bool KiwiUX_KeyFunnel( unsigned int vk );   // kiwi_command.cpp
+        if ( pMsg->message == WM_KEYDOWN && KiwiUX_KeyFunnel( (unsigned int)pMsg->wParam ) )
+            return true;
     }
 
     // mainfrm.cpp:2344 — IDR_MAIN_ACCEL first.

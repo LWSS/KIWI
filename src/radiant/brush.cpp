@@ -187,7 +187,14 @@ static void Brush_MakeFaceVisuals( selbrush_t *b, const float *orientArg )
             fv->vertcount = b->def->faces[i].w ? b->def->faces[i].w->numpoints : 0;
     }
 
-    b->version = b->def->version;
+    // KIWI-UX (ROUND AB, ITEM 1): a rebuild that was skipped because the DEVICE IS LOST has
+    // not actually cached anything, so it must not claim the version — leave it armed and let
+    // the first frame after recovery do the real build.  Every other case (device present, or
+    // headless with no device at all) syncs exactly as the binary does.  See camwnd.cpp
+    // Radiant_FaceVisDeviceLost.
+    extern bool Radiant_FaceVisDeviceLost();          // camwnd.cpp
+    if ( !Radiant_FaceVisDeviceLost() )
+        b->version = b->def->version;
 }
 
 // Brush_CheckBuildFaceVis (0x477d70) — rebuild the instance faceVis when the def
@@ -200,7 +207,11 @@ void sub_477D70( selbrush_t *b, const float *orient )
     if ( b->version != b->def->version )
     {
         Brush_MakeFaceVisuals( b, orient );
-        iassert( b->version == b->def->version );   // brush.cpp:3491 (level 0, post-rebuild invariant)
+        // KIWI-UX (ROUND AB, ITEM 1): the invariant holds except while the device is LOST,
+        // where the rebuild deliberately stays armed (see Brush_MakeFaceVisuals' tail).
+        extern bool Radiant_FaceVisDeviceLost();    // camwnd.cpp
+        if ( !Radiant_FaceVisDeviceLost() )
+            iassert( b->version == b->def->version );   // brush.cpp:3491 (level 0, post-rebuild invariant)
     }
 }
 
@@ -899,6 +910,10 @@ void Brush_Select_Helper( selbrush_t *b )
              + g_qeglobals.d_select_info.numFixedSize) );   // brush.cpp:2758
 }
 
+// KIWI-UX: the typed selection core's legacy-change notification (kiwi_selection.cpp).
+// O(1) — these two funnels run per-brush inside bulk loops.
+extern void Sel_InvalidateFromLegacy();
+
 // ────────────────────────────────────────────────────────────────────────────
 // Brush_AddToList2  (0x4765A0) — links an existing selbrush_t into the
 // selected_brushes display list (tail-insertion, circular doubly-linked).
@@ -933,6 +948,8 @@ void Brush_AddToList2( selbrush_t *b )
     SurfaceInspector::UpdateSurfaceDialog();
     if ( PatchDialog_IsOpen() )
         g_PatchDialog_GetPatchInfo();
+
+    Sel_InvalidateFromLegacy();   // KIWI-UX
 }
 
 // IDA name alias for Brush_Select_Helper.
@@ -964,6 +981,8 @@ void Brush_RemoveFromList( selbrush_t *b )
         SurfaceInspector::UpdateSurfaceDialog();
         if ( PatchDialog_IsOpen() )
             g_PatchDialog_GetPatchInfo();
+
+        Sel_InvalidateFromLegacy();   // KIWI-UX
     }
 }
 
@@ -7572,6 +7591,68 @@ static void Face_TexLock_Reproject( face_t *face, const float *saveBuf,
         chanSave += 0x18;                                  // (channel base advances 6 floats)
         chanTd   += 0x24;                                  // next MaterialDef
     }
+}
+
+// KIWI-UX (RADIANT_UX_DESIGN §20, Phase 3): public forwarders for the two statics
+// above, so the face push/pull command (kiwi_transform.cpp) can wrap its OWN
+// planept edit in the SAME texture-lock bracket Brush_Move uses instead of
+// re-deriving the reprojection.  Pure forwarders — no behaviour change, and the
+// statics keep their file scope for every existing caller.
+//
+// The call pattern the caller must mirror is Brush_Move's (brush.cpp, 0x47ba40):
+//     byte  lockFlags[3] = { texLock, lightmapLock, 1 };   // built ONCE
+//     float saveBuf[19];                                   // per face, reused
+//     for each face with a winding:
+//         Ed_FaceTexLockSave( saveBuf, face );
+//         ...move face->planepts...
+//         Ed_FaceTexLockReproject( face, saveBuf, lockFlags );
+//     Brush_BuildWindings( def, bSnap );
+// saveBuf MUST be 19 floats (the binary's `int a3[19]` stack buffer) and lockFlags
+// MUST be 3 bytes with [2] == 1.
+void Ed_FaceTexLockSave( float *saveBuf, face_t *face )
+{
+    Face_TexLock_Save( saveBuf, face );
+}
+
+void Ed_FaceTexLockReproject( face_t *face, const float *saveBuf, const byte *lockFlags )
+{
+    Face_TexLock_Reproject( face, saveBuf, lockFlags );
+}
+
+// KIWI-UX (RADIANT_UX_DESIGN §23, Phase 4): public forwarder for the IN-PLACE
+// face-array resize the ported primitive Brush_MakeSided (0x4731E0) performs, so
+// region extrusion (kiwi_extrude.cpp) can build an N+2-faced prism.
+//
+// WHY IT IS NEEDED: Brush_Alloc always allocates SIX faces (eight for a
+// classtype-bit-0 eclass) and Brush_Create writes a box into them.  A prism over
+// an n-gon needs n + 2 faces, which for a triangle is FIVE — Face_Alloc can only
+// GROW the array, so there is no way to reach it through the existing exports.
+//
+// The body is Brush_MakeSided's own sequence, lifted verbatim from 0x4731E0's
+// re-allocation prologue (brush.cpp:3413-3420 + its per-face MaterialDef stamp
+// and the Brush_SetDefaultMaterials tail).  Nothing new is invented; the ported
+// primitive's face-array swap is simply made reachable.  The caller writes the
+// planepts afterwards and rebuilds.
+void Ed_BrushSetFaceCount( brush_t *def, int faceCount )
+{
+    iassert( def );
+    if ( !def || faceCount < 4 || faceCount >= 1020 )   // 1020 = MAX_POINTS_ON_WINDING - 4
+        return;
+
+    if ( def->faces )
+        Face_Free( def->faceCount, def->faces );
+    def->faceCount = faceCount;
+    def->faces     = Face_Alloc_R( faceCount );
+
+    GfxColor white;
+    Byte4PackPixelColor( const_cast<float *>( colorWhite ), &white );
+    for ( int i = 0; i < faceCount; ++i )
+    {
+        face_t *f = &def->faces[i];
+        memcpy( f->mtldef, &g_qeglobals.random_texture_stuff[0].mtl, sizeof( MaterialDef ) );
+        f->field_0xE4 = white.packed;
+    }
+    Brush_SetDefaultMaterials( def );
 }
 
 

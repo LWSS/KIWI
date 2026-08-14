@@ -364,6 +364,18 @@ void __cdecl Sys_DirectXFatalError()
 
     iassert(0); // lwss add
 
+#ifdef KISAK_RADIANT
+    // ── KIWI-UX (ROUND V): RESCUE THE MAP BEFORE THIS exit(-1) ───────────────────
+    // R_FatalInitError (:2731) and R_FatalLockError (:2740) both funnel here and this
+    // function ends in exit(-1) — a second unconditional death path that never passed
+    // through Com_Error, so hooking Com_Error alone would leave it uncovered.  The
+    // hook is one-shot and internally SEH-guarded (engine_stubs.cpp Kiwi_FatalRescue);
+    // it is placed BEFORE Sys_EnterCriticalSection so it cannot deadlock against a
+    // fatal raised while that section is already held.
+    extern void Kiwi_FatalRescue(const char *why);   // radiant/engine_stubs.cpp
+    Kiwi_FatalRescue("DirectX returned an unrecoverable error (see the console log).");
+#endif
+
     Sys_EnterCriticalSection(CRITSECT_FATAL_ERROR);
     v2 = Win_LocalizeRef("WIN_DIRECTX_INIT_TITLE");
     v1 = Win_LocalizeRef("WIN_DIRECTX_INIT_BODY");
@@ -4341,10 +4353,37 @@ void R_ReleaseForShutdownOrReset()
     // The editor's immediate-mode VB pool (r_ed_vertbuf) allocates D3DPOOL_DEFAULT vertex buffers,
     // which must ALSO be released before Reset() or the reset fails (→ R_FatalInitError → the
     // alt-tab crash).  Not in the faithful shutdown (editor-only).  The pool re-creates buffers
-    // lazily after the device returns; the immediate camera draw re-uploads per frame and holds
-    // no persistent vertHandles (faceVis visCount stays 0 in all build modes), so nothing dangles.
+    // lazily after the device returns.
+    //
+    // KIWI-UX (ROUND AB, ITEM 1): the sentence that used to stand here — "the immediate camera
+    // draw re-uploads per frame and holds no persistent vertHandles (faceVis visCount stays 0 in
+    // all build modes), so nothing dangles" — IS FALSE.  Radiant_FaceVisGpuReady() is
+    // `dx.device != nullptr` (camwnd.cpp:1130), so Visuals_InitFaceVis (brush.cpp:2676) and
+    // Patch_BuildInstanceVisuals (pmesh.cpp:9768) DO cache persistent handles into the editor
+    // surf cache.  Releasing the pool under them left every one of those handles dangling; the
+    // next frame resolved one to a NULL vertex buffer, which makes
+    // RB_DrawEditorSkinnedCached_Sub skip its final tess flush (r_ed_scene.cpp:805) and leak
+    // tess.indexCount out of the command handler with g_primStats still 0 — the monitor-sleep
+    // crash at RB_EndSurfacePrologue (rb_shade.cpp:202).  Drop the cache FIRST, in the same
+    // breath, so no cached handle can outlive the pool it indexes.  See kiwi_devicereset.h.
+    extern void KiwiDevice_InvalidateEditorSurfCache();   // radiant/kiwi_devicereset.cpp
+    KiwiDevice_InvalidateEditorSurfCache();
     extern void Editor_VB_ReleaseForReset();
     Editor_VB_ReleaseForReset();
+    // ── KIWI-UX (ROUND AD): THE LAST D3DPOOL_DEFAULT CLASS NOBODY RELEASED ───
+    // R_ReleaseLostImages (r_image.cpp:1134) is the engine's release for UNMANAGED
+    // images (category >= IMG_CATEGORY_FIRST_UNMANAGED), and it is
+    // DB_EnumXAssets(ASSET_TYPE_IMAGE, R_FreeLostImage, ...) — which is a NO-OP
+    // STUB in the editor (engine_stubs.cpp:537; db_registry.cpp is not in
+    // radiant_files.cmake).  A water image is category 5 and
+    // Image_BuildWaterMap → Image_GetUsage → D3DUSAGE_DYNAMIC → **D3DPOOL_DEFAULT**
+    // (r_image.cpp:1355-1363), so ONE water material anywhere in a loaded map made
+    // every recovery Reset() return D3DERR_INVALIDCALL, forever, silently: the
+    // black-screen-after-a-map-load report.  The editor's images live in
+    // imageGlobals.imageHashTable, not the DB, so this walks that instead.  See
+    // kiwi_devicereset.h (ROUND AD) / RADIANT_UX_DESIGN §59.
+    extern void KiwiDevice_ReleaseUnmanagedImages();      // radiant/kiwi_devicereset.cpp
+    KiwiDevice_ReleaseUnmanagedImages();
 #endif
 }
 
@@ -4355,6 +4394,13 @@ void R_ReleaseForShutdownOrReset()
 // R_RecoverLostDevice. Cleared when a Reset() finally succeeds.
 static bool s_releasedForReset = false;
 static int  s_resetFailCount   = 0;      // failed-Reset attempts this loss episode (log throttle)
+// KIWI-UX (ROUND AD): the HRESULT of the LAST Reset() attempt.  The retry latch above was
+// written for D3DERR_DEVICELOST ("not ready yet — try again in a moment"), which is the one
+// failure a bare retry can fix.  D3DERR_INVALIDCALL is the opposite: it means an app-created
+// D3DPOOL_DEFAULT resource is still alive or still BOUND, and a retry that releases nothing
+// and unbinds nothing gets the same answer every tick until the process dies.  Remembering
+// which failure it was is what lets the retry choose an arm.  See RADIANT_UX_DESIGN §59.
+static HRESULT s_lastResetHr = S_OK;
 #endif
 
 bool R_ResetDevice()
@@ -4399,7 +4445,18 @@ bool R_ResetDevice()
     // loading big maps (which is exactly when the device gets lost — VRAM churn/TDR). Unbind
     // EVERYTHING; the post-reset R_InitCmdBufState/R_CreateForInitOrReset rebuilds all state
     // caches so nothing downstream trusts the old bindings.
-    if (dx.device && !s_releasedForReset)
+    //
+    // ── KIWI-UX (ROUND AD): AN INVALIDCALL RETRY MUST NOT BE A BARE RETRY ────────
+    // The unbind below and the release cascade under it used to run ONLY on the first
+    // attempt of a loss episode (`!s_releasedForReset`).  For a D3DERR_DEVICELOST failure
+    // that is correct and deliberate — the cascade is destructive and non-idempotent, and
+    // the device simply is not ready yet.  For D3DERR_INVALIDCALL it guarantees the editor
+    // can never recover: the reason Reset() refused is state that only a release/unbind can
+    // change, and the retry changed neither.  So an INVALIDCALL retry re-runs the unbind
+    // (pure SetX(nullptr) — always safe, on any device state) and, below, a SECOND-CHANCE
+    // release limited to the classes that are idempotent AND can have come back since.
+    const bool retryAfterInvalidCall = ( s_releasedForReset && s_lastResetHr == D3DERR_INVALIDCALL );
+    if (dx.device && (!s_releasedForReset || retryAfterInvalidCall))
     {
         IDirect3DSurface9 *implicitBB = nullptr;
         if (dx.device->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &implicitBB) >= 0 && implicitBB)
@@ -4426,16 +4483,73 @@ bool R_ResetDevice()
             dx.inScene = 0;
         }
     }
+    int releasePass = 0;                 // KIWI-UX (ROUND AD): 0 none, 1 full, 2 second-chance
     if (!s_releasedForReset)
     {
         R_ReleaseForShutdownOrReset();
         s_releasedForReset = true;
+        releasePass = 1;
+    }
+    else if (retryAfterInvalidCall)
+    {
+        // ── KIWI-UX (ROUND AD): THE SECOND-CHANCE DEFAULT-POOL RELEASE ───────────
+        // NOT R_ReleaseForShutdownOrReset() again: its middle is not idempotent
+        // (R_ShutdownRenderBuffers → R_ShutdownDynamicMesh → R_FreeGlobalVariable would
+        // free already-freed blocks), and those subsystems provably cannot have come
+        // back — nothing recreates them until R_CreateForInitOrReset, which only runs
+        // after a Reset() that SUCCEEDED.  What CAN come back between two retries is
+        // exactly the list below, and every entry is written to tolerate being run
+        // twice:
+        //   • ImGui's DX9 vertex/index buffers — recreated inside any NewFrame;
+        //     ImGui_ImplDX9_InvalidateDeviceObjects null-checks each handle.
+        //   • the RTT viewport textures — FreeSlot null-checks (radiant_rtt.cpp:24).
+        //   • the unmanaged (default-pool) images — Image_Release NULLs basemap
+        //     (r_image.cpp:185-192); a map load that is still running registers more of
+        //     them while the device is down, which is precisely how this failure got
+        //     latched in the first place.
+        //   • the editor VB pool — Editor_VB_ReleaseForReset (r_ed_vertbuf.cpp:132) walks
+        //     vbCount (now 0) and NULL pool lists, so a second call does nothing.
+        //   • the render targets — R_ShutdownRenderTargets (r_rendertarget.cpp:561) is
+        //     null-checked + memset; it also drops gfxRenderTargets[FRAME_BUFFER].
+        //     surface.color, the classic INVALIDCALL culprit.
+        //   • the per-window ADDITIONAL swap chains — the loop skips NULL slots (:4288).
+        // The editor surf cache is NOT re-dropped: it cannot repopulate while the device
+        // is lost (Radiant_FaceVisGpuReady refuses, camwnd.cpp:1130), so a second drop
+        // would only reprint its console line every retry.
+        extern void ImGuiShell_InvalidateDeviceObjects();     // radiant/imgui_shell.cpp
+        extern void RTT_ReleaseForReset();                    // radiant/radiant_rtt.cpp
+        extern void KiwiDevice_ReleaseUnmanagedImages();      // radiant/kiwi_devicereset.cpp
+        extern void Editor_VB_ReleaseForReset();              // radiant/r_ed_vertbuf.cpp
+        ImGuiShell_InvalidateDeviceObjects();
+        RTT_ReleaseForReset();
+        KiwiDevice_ReleaseUnmanagedImages();
+        Editor_VB_ReleaseForReset();
+        R_ShutdownRenderTargets();
+        for (int w = 0; w < dx.windowCount; ++w)
+        {
+            if (!dx.windows[w].swapChain)
+                continue;
+            IDirect3DSwapChain9 *sc = dx.windows[w].swapChain;
+            dx.windows[w].swapChain = 0;
+            sc->Release();
+        }
+        releasePass = 2;
     }
 #else
     R_ReleaseForShutdownOrReset();
 #endif
     //hr = dx.device->Reset(dx.device, &d3dpp);
     hr = dx.device->Reset(&d3dpp);
+#ifdef KISAK_RADIANT
+    // KIWI-UX (ROUND AD): remember the failure KIND (the next attempt picks its arm from it)
+    // and hand the attempt to the editor's one-line reporter — this chain is never allowed to
+    // fail silently again.  See kiwi_devicereset.cpp / RADIANT_UX_DESIGN §59.
+    s_lastResetHr = hr;
+    {
+        extern void KiwiDevice_NoteResetResult(long hr, int releasePass);   // radiant/kiwi_devicereset.cpp
+        KiwiDevice_NoteResetResult((long)hr, releasePass);
+    }
+#endif
     if (hr < 0)
     {
 #ifdef KISAK_RADIANT
@@ -4448,11 +4562,15 @@ bool R_ResetDevice()
         // fire every paint tick, and an unthrottled per-attempt print floods the console and
         // can stall the main thread on a piped/undrained stdout (seen live under the VS
         // debugger: main thread parked in Com_Printf→vprintf from this very call).
-        if (s_resetFailCount++ % 300 == 0)
-        {
-            v0 = R_ErrorDescription(hr);
-            Com_Printf(8, "IDirect3DDevice9::Reset failed: 0x%08x (%s) - attempt %i, will retry\n", hr, v0, s_resetFailCount);
-        }
+        //
+        // KIWI-UX (ROUND AD): the counter is kept (the reporter prints the attempt number),
+        // but the CONSOLE line moved to KiwiDevice_NoteResetResult above — one throttled
+        // line for the whole recovery chain instead of one per participant, and it also
+        // reaches OutputDebugStringA, which is the only channel that survives a black
+        // window and an undrained stdout.  An INVALIDCALL failure now re-runs the unbind
+        // and a second-chance release on the next attempt (see the head of this function)
+        // instead of retrying the identical call forever.
+        ++s_resetFailCount;      // episode counter, still cleared on the Reset that succeeds
         return false;
 #else
         v0 = R_ErrorDescription(hr);
@@ -4463,6 +4581,7 @@ bool R_ResetDevice()
 #ifdef KISAK_RADIANT
     s_releasedForReset = false;
     s_resetFailCount   = 0;
+    s_lastResetHr      = S_OK;   // KIWI-UX (ROUND AD): episode over — the next one picks its own arm
 #endif
     dx.deviceLost = 0;
     if (!R_CreateForInitOrReset())
@@ -4547,6 +4666,16 @@ char __cdecl R_RecoverLostDevice()
     R_ReloadWorld();
     Material_ReloadAll();
     R_ReloadLostImages();
+#ifdef KISAK_RADIANT
+    // KIWI-UX (ROUND AD): R_ReloadLostImages is DB_EnumXAssets(ASSET_TYPE_IMAGE, ...) and
+    // DB_EnumXAssets is a no-op stub in the editor (engine_stubs.cpp:537), so the line above
+    // rebuilds nothing here.  This is its editor twin: it walks imageGlobals.imageHashTable
+    // and reproduces R_RebuildLostImage's UNMANAGED arm (r_image.cpp:1108-1125) for every
+    // image the round-AD release pass dropped — without it a recovered device would render
+    // every water surface against a NULL texture for the rest of the session.
+    extern void KiwiDevice_RebuildUnmanagedImages();      // radiant/kiwi_devicereset.cpp
+    KiwiDevice_RebuildUnmanagedImages();
+#endif
     dx.sunSpriteSamples = RB_CalcSunSpriteSamples();
     DB_EndRecoverLostDevice();
     R_Cinematic_EndLostDevice();
@@ -4659,7 +4788,19 @@ char __cdecl R_TestDevice()
 {
     if ( !dx.deviceLost )
     {
+#ifdef KISAK_RADIANT
+        // KIWI-UX (ROUND AD): the verbatim port throws the HRESULT away, and it is the single
+        // most useful fact when the editor sits black forever — D3DERR_DEVICELOST means "keep
+        // waiting", D3DERR_DEVICENOTRESET means "the Reset path owns this now", anything else
+        // means something quite different is wrong.  Record it for the health watch; the test
+        // itself is unchanged.  See kiwi_devicereset.cpp / RADIANT_UX_DESIGN §59.
+        extern void KiwiDevice_NoteCoopLevel( long hr );   // radiant/kiwi_devicereset.cpp
+        const HRESULT coopHr = dx.device->TestCooperativeLevel();
+        KiwiDevice_NoteCoopLevel( (long)coopHr );
+        if ( coopHr >= 0 )
+#else
         if ( dx.device->TestCooperativeLevel() >= 0 )
+#endif
         {
             if ( !dx.deviceLost )
                 return 1;
@@ -4785,10 +4926,30 @@ char __cdecl R_SetupRendertarget_CheckDevice(HWND__ *hwnd)
             break;
     }
     if ( dx.windows[i].width <= 0 || dx.windows[i].height <= 0 )
-        return 0;
-    if ( !dx.windows[i].swapChain )   // defensive: a window left without a swap chain (e.g. a
-        return 0;                     // 0-size window skipped during device-loss recovery) → skip
-                                      // the frame rather than null-deref in R_SetupTargetWindow.
+        return 0;                     // degenerate size (minimised / 0-height pane): never a
+                                      // recreation candidate — a 0-extent swap chain is invalid.
+                                      // R_Hwnd_Resize refuses the same case at its head (:4964).
+    if ( !dx.windows[i].swapChain )
+    {
+        // ── KIWI-UX (ROUND V): DEFERRED SWAP-CHAIN RECREATION ────────────────────
+        // A window can be sitting here with a NULL swap chain for two reasons, and the
+        // second one is new in round V:
+        //   • R_ReleaseForShutdownOrReset released them all for a device Reset that has
+        //     not finished — the pre-existing case this guard was written for.
+        //   • R_Hwnd_Resize (:4993) hit a LOST device and deferred the recreation
+        //     rather than Com_Error'ing the process (the AFK crash).
+        // Normally R_ResetDevice's tail (:4498-4499) rebuilds them all; but a loss can
+        // also resolve WITHOUT a Reset ever running (TestCooperativeLevel goes straight
+        // back to D3D_OK), and then nothing would ever recreate this one and the view
+        // would stay blank for the rest of the session.  Control only reaches this line
+        // after R_TestDevice() returned 1 above, i.e. the device is CONFIRMED HEALTHY —
+        // so recreating right here is exactly the same call R_ResetDevice's tail makes,
+        // at the same size, and its healthy-device failure arm is the real fatal.
+        R_Hwnd_Resize(hwnd, dx.windows[i].width, dx.windows[i].height);
+        if ( !dx.windows[i].swapChain )
+            return 0;                 // still lost (raced) → skip the frame rather than
+                                      // null-deref in R_SetupTargetWindow.
+    }
     R_SetupTargetWindow(i);
     return 1;
 }
@@ -4891,6 +5052,41 @@ HWND __cdecl R_CreateSwapChains(int hz, GfxWindowParms *wnd, int sharedHandle)
 //
 // §11: the IDB's R_SetD3DPresentParameters(&wnd, dx.windowCount, &d3dpp) AA-count arg is
 // dropped (kisak signature is (d3dpp, wnd)); x/y/hz are left unset (unread in windowed mode).
+//
+// ── KIWI-UX (ROUND V): "the device is LOST" is not a fatal condition ─────────────────
+// USER REPORT (verbatim): *"After going AFK for a while and coming back I get this crash
+// ... it ruins all progress of your map."*  Confirmed chain, every hop:
+//   1. AFK → screensaver / monitor sleep / lock / a full-screen app takes the GPU.  The
+//      D3D9 device goes LOST.  Nothing in the editor notices, because nothing paints.
+//   2. The operator clicks the title bar to restore/activate.  DefWindowProc's
+//      OnDwpNcLButtonDown → OnDwpSysCommand nest SendMessage down to WM_SIZE (this is the
+//      uxtheme frame in the reported stack).
+//   3. Radiant_FrameWndProc's WM_SIZE arm (radiant_main.cpp:236-250) chains DefWindowProc
+//      then calls R_Hwnd_Resize (radiant_main.cpp:244).
+//   4. Here: the window's swap chain is released and CreateAdditionalSwapChain is called
+//      on a LOST device.  It cannot succeed — the device owns no resources to hand out
+//      until it is Reset.
+//   5. hr < 0 → Com_Error(ERR_FATAL) (below) → engine_stubs.cpp Com_Error → ExitProcess.
+//      The map dies with it.
+// Step 5 is the bug.  Steps 1-4 are normal Windows.  A lost device is the ONE failure this
+// call has a documented recovery for, and the editor already implements the whole of it:
+// R_TestDevice (:4670) tests the device on every paint, R_RecoverLostDevice (:4504) →
+// R_ResetDevice (:4372) resets it, and R_ResetDevice's KISAK_RADIANT tail (:4498-4499)
+// RE-CREATES EVERY WINDOW'S ADDITIONAL SWAP CHAIN by calling this very function again with
+// dx.windows[w].width/height.  So the deferred recreation already exists and already lands
+// in the right place — this arm only has to (a) not kill the process, (b) leave the slot in
+// the state that tail expects (swapChain NULL, width/height = the NEW size, so the window
+// comes back at the size the operator resized it to, not the pre-AFK one).
+//
+// The NULL swap chain in between is already safe: R_SetupRendertarget_CheckDevice (:4803)
+// skips any paint for a window without one, so the view simply holds its last presented
+// frame under DWM until the device returns.
+//
+// The FATAL IS KEPT when the device is HEALTHY.  A create that fails with a fine device is
+// a genuine out-of-memory / invalid-parameters failure with no recovery path, and silently
+// swallowing it would trade a loud crash for a permanently black viewport.
+static bool s_deferLogged = false;   // KIWI-UX (ROUND V): one deferral line per loss episode
+
 void __cdecl R_Hwnd_Resize(HWND__ *hwnd, int width, int height)
 {
     iassert( hwnd );
@@ -4926,12 +5122,59 @@ void __cdecl R_Hwnd_Resize(HWND__ *hwnd, int width, int height)
     HRESULT hr = dx.device->CreateAdditionalSwapChain(&d3dpp, &dx.windows[idx].swapChain);
     if ( hr < 0 )
     {
+        // ── KIWI-UX (ROUND V) — see the block above this function ────────────────
+        // "Lost" is read from THREE places because they disagree in timing: hr itself
+        // (what this call just said), dx.deviceLost (what the engine already believes),
+        // and a fresh TestCooperativeLevel (the authority — the same test R_TestDevice
+        // :4674 and R_CanRecoverLostDevice :4262 use).
+        const HRESULT coop  = dx.device->TestCooperativeLevel();
+        const bool    lost  = dx.deviceLost != 0
+                           || hr   == D3DERR_DEVICELOST || hr   == D3DERR_DEVICENOTRESET
+                           || coop == D3DERR_DEVICELOST || coop == D3DERR_DEVICENOTRESET;
+        if ( lost )
+        {
+            // Release whatever half-state the failed create left.  D3D9 is documented to
+            // NULL the out-param on failure but this is a death path — do not trust it.
+            if ( dx.windows[idx].swapChain )
+            {
+                dx.windows[idx].swapChain->Release();
+                dx.windows[idx].swapChain = nullptr;
+            }
+            // The marker the deferred recreation reads: a NULL swapChain with a VALID
+            // size.  R_ResetDevice's tail (:4498-4499) re-runs this function for every
+            // window at exactly these numbers once the device comes back, and
+            // R_SetupRendertarget_CheckDevice (:4803) retries it directly if the loss
+            // resolves without ever needing a Reset.
+            dx.windows[idx].width  = width;
+            dx.windows[idx].height = height;
+            // NOT ++g_disableRendering: that counter is never decremented, so taking it
+            // here would leave rendering off forever after a recoverable stall.
+            // NOT dx.deviceLost = 1 either: R_TestDevice (:4672-4682) runs its own
+            // TestCooperativeLevel on the next paint and arms the flag itself, and
+            // pre-arming it would trip the iassert(!dx.deviceLost) at :4686 if the reset
+            // tail re-entered this arm.
+            //
+            // Throttled to ONE line per loss episode (s_deferLogged, cleared on the next
+            // successful create below).  A resize storm — the operator dragging the frame
+            // edge while the device is down — would otherwise print per WM_SIZE, and this
+            // build's Com_Printf is a bare vprintf that can stall the main thread on an
+            // undrained stdout (the hazard R_ResetDevice documents at :4460).
+            if ( !s_deferLogged )
+            {
+                s_deferLogged = true;
+                Com_Printf(8, "R_Hwnd_Resize: device lost (0x%08x) - swap chain for %dx%d "
+                              "deferred to the next device recovery\n", (unsigned)hr, width, height);
+            }
+            return;
+        }
+
         ++g_disableRendering;
         Com_Error(ERR_FATAL,
             ".\\r_init.cpp (2163) dx.device->CreateAdditionalSwapChain( &d3dpp, "
             "&dx.windows[windowIndex].swapChain ) failed: %s\n",
             R_ErrorDescription(hr));
     }
+    s_deferLogged = false;   // KIWI-UX (ROUND V): episode over — re-arm the one-line log
     dx.windows[idx].width  = width;
     dx.windows[idx].height = height;
 }

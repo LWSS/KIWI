@@ -34,6 +34,16 @@ extern void        Entity_Free( char *e );
 extern void        Entity_Free_R( entity_s *e );
 extern void        Entity_LinkBrush( brush_t *b, entity_s *world_ent );
 extern void        Entity_UnlinkBrush( brush_t *def );
+// KIWI-UX: the typed selection core's legacy-change notification (kiwi_selection.cpp).
+extern void        Sel_InvalidateFromLegacy();
+// KIWI-UX (shakeout I): the unified undo journal's four hooks (kiwi_undo.h).  Each
+// is ONE line at the tail of an existing function and changes no ported behaviour;
+// see kiwi_undo.h for the ticket model and the eviction-sync argument.
+extern void        KiwiUndo_NoteLegacyRecord( const char *operation );
+extern void        KiwiUndo_NoteLegacyEvicted();
+extern void        KiwiUndo_NoteLegacyCleared();
+extern void        KiwiUndo_NoteLegacyRedoCleared();
+
 extern void        IncRef( entity_s *e, entity_s *list );   // entity.cpp 0x483bf0
 extern void        DecRef( entity_s *e );                   // entity.cpp 0x483c30
 extern entity_s   *Prefab_Init( prefab_s *instList, entity_s_def *def, selbrush_t *activeList );
@@ -200,6 +210,8 @@ void Undo_ClearRedo()
     g_redolist  = nullptr;
     g_lastredo  = nullptr;
     g_redoId    = 1;
+
+    KiwiUndo_NoteLegacyRedoCleared();   // KIWI-UX (shakeout I)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -251,6 +263,11 @@ void Undo_Clear()
     g_undoSize       = 0;
     g_undoMemorySize = 0;
     g_undoId         = 1;
+
+    // KIWI-UX (shakeout I): the whole legacy stack just died in this function's own
+    // loop (it does NOT go through Undo_FreeFirstUndo), so the journal's LEGACY
+    // tickets have to die with it.  Map New / Map Load / Undo_SetMax*Size.
+    KiwiUndo_NoteLegacyCleared();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -334,6 +351,12 @@ void Undo_FreeFirstUndo()
     g_undoMemorySize -= 256; // sizeof(undo_s)
     ::operator delete( undo );
     --g_undoSize;
+
+    // KIWI-UX (shakeout I): THE eviction point (kiwi_undo.h EVICTION SYNC).  Called
+    // from Undo_GeneralStart's record-count cap and from Undo_End's memory-cap trim
+    // loop, and from nowhere else — so one hook here keeps the journal's LEGACY
+    // ticket count equal to the legacy record count, always.
+    KiwiUndo_NoteLegacyEvicted();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -690,6 +713,19 @@ void Undo_End()
         MainFrm_BrushList( (int)(intptr_t)s2, &selected_brushes );
         MainFrm_EntList( &entityInsts, g_lastundo->operation );
     }
+
+    // KIWI-UX (shakeout I): THE single close point, and therefore the one place a
+    // LEGACY ticket can honestly be minted (kiwi_undo.h WHERE THE TICKETS COME
+    // FROM).  This function is the ONLY writer of `done`, both early-outs above
+    // mean "there is no record to close", and both Undo_Undo and Undo_Redo consume
+    // records only in the `done` state — so a ticket here names a record that can
+    // actually be undone.  `operation` is a literal/static by the same contract the
+    // record itself relies on (line 390 stores the POINTER), so the journal keeps
+    // the pointer rather than copying.
+    // The hook is deaf while KiwiCmd_UndoCancel is unwinding its own bracket
+    // (KiwiUndo_SuppressBegin/End, kiwi_command.cpp) — that close is followed
+    // immediately by an Undo_Undo that destroys the record again.
+    KiwiUndo_NoteLegacyRecord( g_lastundo->operation );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -971,6 +1007,8 @@ void Undo_Undo()
     Layers_SetMapLayers();
     Layers_02();
     g_nUpdateBits = -1;
+
+    Sel_InvalidateFromLegacy();   // KIWI-UX (wholesale brush-list rebuild)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1193,4 +1231,6 @@ void Undo_Redo()
     MainFrm_BrushList( (int)(intptr_t)v25, &selected_brushes );
     MainFrm_EntList( &entityInsts, "after redo" );
     g_nUpdateBits = -1;
+
+    Sel_InvalidateFromLegacy();   // KIWI-UX (wholesale brush-list rebuild)
 }

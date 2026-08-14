@@ -1866,6 +1866,18 @@ void Map_New()
         cam.origin[1] = 0.0f;
         cam.origin[2] = 48.0f;
     }
+    // KIWI-UX (shakeout I): a POST-INIT hook over the ported placement above, not a
+    // replacement for it — the classic profile still gets (0,0,48) looking down +X.
+    // USER DIRECTIVE: "Scale of the map (3d view) is still way too big."  Starting a
+    // fresh map standing AT the origin looking at empty space is the worst case of
+    // that: nothing is in frame, so nothing gives the world a size.  See
+    // KiwiCam_DefaultSpawn (kiwi_camera.h) for the standoff and the angles.
+    {
+        extern bool KiwiUX_ModernInput();     // kiwi_ux.cpp
+        extern void KiwiCam_DefaultSpawn();   // kiwi_camera.cpp
+        if ( KiwiUX_ModernInput() )
+            KiwiCam_DefaultSpawn();
+    }
     Ed_ActiveXY()->m_vOrigin[0] = 0.0f;
     Ed_ActiveXY()->m_vOrigin[1] = 0.0f;
     Ed_ActiveXY()->m_vOrigin[2] = 0.0f;

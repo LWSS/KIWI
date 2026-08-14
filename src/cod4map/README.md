@@ -1,3 +1,5 @@
+Adapted from cod2map, Credits to https://github.com/7894752
+
 # KIWI cod4map
 
 This directory is the native x86 CoD4 map-compiler port.  Its first-party

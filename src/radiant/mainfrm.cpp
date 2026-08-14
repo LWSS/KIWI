@@ -58,6 +58,11 @@ extern void       Z_CenterOnMap();                               // z.cpp
 // (Cam_CenterOnMap(CCamWnd*) extern retired with U-RIP â€” the forwarder died with the class)
 extern void       Undo_Undo();                                   // undo.cpp
 extern void       Undo_Redo();                                   // undo.cpp
+// KIWI-UX (shakeout I): the unified undo/redo journal's two entry points
+// (kiwi_undo.h).  Both return false when the journal is empty, which is what lets
+// the ID_EDIT_UNDO / ID_EDIT_REDO arms fall through to the ported handlers.
+extern bool       KiwiUndo_Undo();                               // kiwi_undo.cpp
+extern bool       KiwiUndo_Redo();                               // kiwi_undo.cpp
 extern int        g_nUpdateBits;                                 // engine_stubs.cpp (0x25D5A74)
 
 // â”€â”€â”€ U-GLOBALS: the shell-agnostic viewport entry points (camwnd.cpp) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -683,6 +688,36 @@ void Radiant_OpenMap( const char *path )
 //     materials + sample sizes.  Without it the current texdef stays ZERO (radMtl == NULL),
 //     so a brush drawn before the first texture-window click gets a degenerate MaterialDef -
 //     it renders untextured AND is unpickable.
+// ── KIWI-UX (ROUND AA, ITEM 1) — the seeded layer-0 template, kept as BYTES ──────
+// The round-Y restore in Radiant_ApplyStartupTextureScale re-ran SetMaterial +
+// Init_MaterialLayer to put `$default` back.  Both are ported material-subsystem
+// entry points with reach beyond the 36-byte template they were being used to
+// write: SetMaterial (materialdef.cpp:101) dispatches into Texture_GetHandle
+// (texwnd.cpp:313), which REGISTERS a material into the browser's own
+// texWndGlob list (Editor_AddRadiantMaterial, texwnd.cpp:273-306: it prepends to
+// ->qtextures and appends to sorted_materials[materialCount++]) and flags
+// is_in_use.  Running that AFTER the browser has populated and after
+// Texture_ShowAll (radiant_main.cpp) mutates browser state at a point in the boot
+// where nothing re-establishes the listing.  Step 6a-pre runs the identical calls
+// BEFORE Load_Materials, which is why the seed itself never had this problem.
+//
+// The template does not need those calls at all.  Everything the restore wants is
+// already sitting in random_texture_stuff[0] when the seed finishes; the scale
+// pass just overwrites it.  So: SNAPSHOT it there, memcpy it back here.  Zero
+// calls into the material or browser subsystem, byte-identical to what step
+// 6a-pre produced (so .map output is untouched — D-X4 holds), and it cannot have
+// a side effect of any kind because it makes no call.
+static MaterialDef s_kiwiSeedLayer0Mtl;
+static float       s_kiwiSeedLayer0SampleSize = 0.0f;
+static bool        s_kiwiSeedLayer0Have       = false;
+
+static void Radiant_Kiwi_SeedSnapshotLayer0( const curTexWndLayer_t *src )
+{
+    s_kiwiSeedLayer0Mtl        = src->mtl;
+    s_kiwiSeedLayer0SampleSize = src->sampleSize;
+    s_kiwiSeedLayer0Have       = true;
+}
+
 void Radiant_SeedCurrentTexdefs()
 {
     extern void SetMaterial( const char *name, patchMesh_material *out );          // materialdef.cpp 0x4315c0
@@ -702,6 +737,13 @@ void Radiant_SeedCurrentTexdefs()
     Init_MaterialLayer( &rts[0].mtl, *(MaterialDef **)&s0 );   // 0x45d1ac
     Init_MaterialLayer( &rts[1].mtl, *(MaterialDef **)&s1 );   // 0x45d1bf
     Init_MaterialLayer( &rts[2].mtl, *(MaterialDef **)&s2 );   // 0x45d1cf
+
+    // KIWI-UX (ROUND AA, ITEM 1) — SNAPSHOT, so the restore below needs no calls.
+    // See Radiant_ApplyStartupTextureScale for why the round-Y restore could not
+    // stay as a second SetMaterial + Init_MaterialLayer pair.  Taken here, at the
+    // END of the seed, so it captures exactly what step 6a-pre produced: the
+    // resolved handles AND the mat_texDef that Init_MaterialLayer just wrote.
+    Radiant_Kiwi_SeedSnapshotLayer0( &rts[0] );
 }
 
 // OnCreate step 6a-ter) Scan the AI-type + gametype def folders, then the weapon defs, into
@@ -764,6 +806,56 @@ void Radiant_ApplyStartupTextureScale()
         case 50:  Radiant_CheckTextureScale( 32896 ); break;
         case 200: Radiant_CheckTextureScale( 32894 ); break;
         default:  Radiant_CheckTextureScale( 32895 ); break;
+    }
+
+    // KIWI-UX (ROUND Y, ITEM 1) — PUT THE TEMPLATE BACK.
+    //
+    // USER REPORT: "z-order bug is still here.  All I did was split a cube in
+    // half.  All extrusions get this on top drawing bug too. (Maybe material
+    // related??)"
+    //
+    // The switch above ends in Texture_ResetPosition (via Radiant_CheckTextureScale
+    // -> mainfrm.cpp:2914), whose documented tail is
+    // TexWnd_ApplyMaterialAtIndex( TexWnd_HitTest( 9, 9 ) ) (texwnd.cpp:2028-2033):
+    // it makes THE FIRST VISIBLE THUMBNAIL the current brush texture.  The browser
+    // lists alphabetically, so on this asset set the editor booted with the current
+    // material template set to `aa_default` — techset "tools", blendOp Add,
+    // statemap "default" => depthWrite DISABLED (the full asset decode is on
+    // camwnd.cpp's Cam_MaterialIsMissing).  Every brush created from then on wore a
+    // material that cannot write depth, which is the z-order report, and it was
+    // being SAVED INTO .map files as well.
+    //
+    // Step 6a-pre already seeded the intended template (`$default`,
+    // Radiant_SeedCurrentTexdefs above); this restores it after the scale pass has
+    // clobbered it.  Restoring, not choosing: the name and the sample size are step
+    // 6a-pre's own, so .map output is exactly what the un-clobbered boot produced
+    // and D-X4 ("do not change what is written to disk") is untouched.  Layer 0
+    // only — Texture_ResetPosition applies to current_edit_layer, which
+    // Radiant_SeedCurrentTexdefs has just set to 0.
+    //
+    // NOT reverted in Texture_ResetPosition itself: that function is IDA-faithful
+    // and is also the correct behaviour when the user changes the texture scale
+    // MID-SESSION on a browser they are looking at.  It is only the BOOT call that
+    // picks a material nobody asked for.
+    //
+    // KIWI-UX (ROUND AA, ITEM 1) — THE RESTORE IS NOW A COPY, NOT TWO CALLS.
+    // USER REPORT, verbatim: "you broke the textures window! It only shows 4
+    // materials now.  Revert whatever you did."
+    // Round Y wrote this as a verbatim excerpt of Radiant_SeedCurrentTexdefs'
+    // layer-0 arm — SetMaterial("$default") + Init_MaterialLayer.  Those are the
+    // right calls in the SEED's position (before Load_Materials) and the wrong
+    // ones here: SetMaterial reaches Texture_GetHandle, which is a REGISTERING
+    // call against the browser's material list, and here it lands after the list
+    // is built and after Texture_ShowAll has un-hidden it.  See the snapshot next
+    // to Radiant_SeedCurrentTexdefs for the full argument.  The template that goes
+    // back is byte-for-byte the one the seed produced, so this keeps the round-Y
+    // fix ($default, not aa_default, so nothing is SAVED with a tool material)
+    // without touching the browser at all.
+    if ( s_kiwiSeedLayer0Have )
+    {
+        curTexWndLayer_t *rts = g_qeglobals.random_texture_stuff;
+        rts[0].mtl        = s_kiwiSeedLayer0Mtl;          // as 0x45d17a + 0x45d1ac, replayed
+        rts[0].sampleSize = s_kiwiSeedLayer0SampleSize;   // as 0x45d14e
     }
 }
 
@@ -1170,14 +1262,60 @@ static const RadiantCommand g_radiantCommandsDefault[] = {
 
 // Mutable runtime binding table (the port's analog of the LoadCommands_stdmap std::map).
 // Seeded from the defaults; LoadCommandMap patches vk/mods in place from radiant.ini.
-static RadiantCommand g_radiantCommands[ ARRAYSIZE( g_radiantCommandsDefault ) ];
+//
+// KIWI-UX (RADIANT_UX_DESIGN sec 3 / sec 11, Phase 2): the array is sized "the binary's 187 rows
+// PLUS a small extension block", so the new UX/modal commands live in the SAME table.  That
+// is what makes "one command id = one behaviour everywhere" true for them as well: the
+// hotkey lookup, the palette, the command-list panel and the radiant.ini [Commands] remap all
+// read this one table.  The binary's rows keep their exact contents AND their exact order
+// (first-match lookup depends on it); extension rows only ever APPEND, and every walker below
+// is bounded by g_radiantCommandCount instead of ARRAYSIZE.
+// KIWI-UX (Phase 4): raised 24 -> 48.  The block is now 38 rows deep (10 core +
+// 3 transforms + 12 construction/plane + 1 extrude + Phase 5's 2 bevel/inset,
+// 2 arrays and 4 selection-expansion helpers + Phase 6's 3 texture modals and
+// 1 texture pick) and Radiant_RegisterCommand
+// FAILS SILENTLY once it is full, so a too-small block would quietly drop the
+// last commands registered — they would vanish from the palette, the hotkey
+// table and the command-list panel with no diagnostic.
+// KIWI-UX (shakeout B): raised 48 -> 64.  The block is 44 rows deep now (the 38
+// above + the 5 §9 window toggles + the Delete-Selection alias row), and 4 spare
+// rows is too thin a margin for a table whose overflow mode is silence.
+// KIWI-UX (shakeout F): raised 64 -> 80.  Shakeout C/D/F added the four extra
+// curve tools, the four solids, the add menu, the two View toggles, the four
+// selection conversions and now the two construction-selection verbs
+// (KiwiConstructJoin / KiwiConstructDelete), taking the block to 61 rows.  Three
+// spare is not a margin at all, and the failure mode is still silence: a command
+// that does not fit vanishes from the palette, the hotkey table AND the
+// command-list panel with no diagnostic anywhere.
+// KIWI-UX (ROUND N): raised 80 -> 112.  Rounds G through N took the block to 77
+// rows (the shakeout-G/H/J/K/L/M verbs, plus round N's two grid alias rows for
+// PageUp / PageDown), leaving THREE spare — exactly the margin the note above
+// already called "not a margin at all", for a table whose overflow mode is
+// silence.  112 is a round 32 rows of headroom and costs 32 * sizeof(RadiantCommand)
+// = 512 bytes of BSS in each of the two arrays.
+#define RADIANT_COMMANDS_KIWI_EXTRA 112
+static RadiantCommand g_radiantCommands[ ARRAYSIZE( g_radiantCommandsDefault )
+                                       + RADIANT_COMMANDS_KIWI_EXTRA ];
+// The registered-at-boot binding of each extension row, i.e. its "compiled-in default" -- the
+// twin of g_radiantCommandsDefault for the KIWI block (Radiant_ResetCommandBindings).
+static RadiantCommand g_radiantCommandsKiwiDefault[ RADIANT_COMMANDS_KIWI_EXTRA ];
+static int            g_radiantCommandCount = 0;
 static bool           g_radiantCommandsInit = false;
 static void Radiant_SeedCommandTable()
 {
     if ( g_radiantCommandsInit )
         return;
-    memcpy( g_radiantCommands, g_radiantCommandsDefault, sizeof( g_radiantCommands ) );
-    g_radiantCommandsInit = true;
+    memset( g_radiantCommands, 0, sizeof( g_radiantCommands ) );
+    memcpy( g_radiantCommands, g_radiantCommandsDefault, sizeof( g_radiantCommandsDefault ) );
+    g_radiantCommandCount = (int)ARRAYSIZE( g_radiantCommandsDefault );
+    g_radiantCommandsInit = true;   // BEFORE the hook: Radiant_RegisterCommand re-enters here
+
+    // KIWI-UX: let the UX layer append its own rows now, so every reader of this table sees
+    // them regardless of boot order (same reason the accessor below seeds).
+    {
+        extern void KiwiCmd_RegisterCommands();   // kiwi_command.cpp
+        KiwiCmd_RegisterCommands();
+    }
 }
 
 // Shell-agnostic read access to the LIVE command table (the mutable copy LoadCommandMap
@@ -1187,7 +1325,88 @@ int Radiant_GetCommandTable( const RadiantCommand **out )
 {
     Radiant_SeedCommandTable();
     *out = g_radiantCommands;
-    return (int)ARRAYSIZE( g_radiantCommands );
+    return g_radiantCommandCount;
+}
+
+// KIWI-UX (Phase 2, sec 11): WRITE access to the same live table, for the keymap profiles
+// (kiwi_keymap.cpp).  A profile is applied by rewriting vk/mods here -- exactly the field pair
+// LoadCommandMap patches -- so there is never a second binding store to drift out of sync.
+int Radiant_GetCommandTableMutable( RadiantCommand **out )
+{
+    Radiant_SeedCommandTable();
+    *out = g_radiantCommands;
+    return g_radiantCommandCount;
+}
+
+// KIWI-UX: append one row to the extension block.  `name` must have static lifetime (the
+// table stores the pointer, exactly as the compiled-in rows do).  Returns false when the
+// block is full or the id is already present.
+bool Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId )
+{
+    Radiant_SeedCommandTable();
+    if ( !name )
+        return false;
+    for ( int i = 0; i < g_radiantCommandCount; ++i )
+        if ( g_radiantCommands[i].commandId == commandId )
+            return false;
+    if ( g_radiantCommandCount >= (int)ARRAYSIZE( g_radiantCommands ) )
+        return false;
+
+    const int extra = g_radiantCommandCount - (int)ARRAYSIZE( g_radiantCommandsDefault );
+    RadiantCommand c;
+    c.name      = name;
+    c.vk        = vk;
+    c.mods      = mods;
+    c.commandId = commandId;
+    g_radiantCommands[ g_radiantCommandCount++ ] = c;
+    g_radiantCommandsKiwiDefault[ extra ]        = c;
+    return true;
+}
+
+// KIWI-UX (shakeout B): the same append, MINUS the duplicate-id guard — a deliberate
+// SECOND binding row for a command that already exists.  The table has always allowed
+// this (the binary itself binds 33089 "Patch TAB" twice), and Radiant_TryHotkey's
+// first-match-wins walk plus the palette's dedup-by-id both behave correctly with it;
+// Radiant_RegisterCommand keeps its guard because an accidental double registration of
+// a NEW command is a bug, whereas an alias is a request.  Used for the modern keymap's
+// VK_DELETE -> Delete Selection row, which must not disturb the classic Backspace row.
+bool Radiant_RegisterCommandAlias( const char *name, byte vk, byte mods, int commandId )
+{
+    Radiant_SeedCommandTable();
+    if ( !name )
+        return false;
+    if ( g_radiantCommandCount >= (int)ARRAYSIZE( g_radiantCommands ) )
+        return false;
+
+    const int extra = g_radiantCommandCount - (int)ARRAYSIZE( g_radiantCommandsDefault );
+    RadiantCommand c;
+    c.name      = name;
+    c.vk        = vk;
+    c.mods      = mods;
+    c.commandId = commandId;
+    g_radiantCommands[ g_radiantCommandCount++ ] = c;
+    g_radiantCommandsKiwiDefault[ extra ]        = c;
+    return true;
+}
+
+// KIWI-UX: restore EVERY binding to its compiled-in default (the binary's table for the base
+// rows, the registered binding for the extension rows).  The keymap-profile switch runs this
+// and then re-applies radiant.ini + the profile, so switching is idempotent in both
+// directions and "classic" really is the default table.
+void Radiant_ResetCommandBindings()
+{
+    Radiant_SeedCommandTable();
+    const int base = (int)ARRAYSIZE( g_radiantCommandsDefault );
+    for ( int i = 0; i < base; ++i )
+    {
+        g_radiantCommands[i].vk   = g_radiantCommandsDefault[i].vk;
+        g_radiantCommands[i].mods = g_radiantCommandsDefault[i].mods;
+    }
+    for ( int i = base; i < g_radiantCommandCount; ++i )
+    {
+        g_radiantCommands[i].vk   = g_radiantCommandsKiwiDefault[i - base].vk;
+        g_radiantCommands[i].mods = g_radiantCommandsKiwiDefault[i - base].mods;
+    }
 }
 
 // The named-key table (binary g_Keys @0x73BDF8, 47 entries, ends at g_KeysExceeded 0x73BF74).
@@ -1234,8 +1453,15 @@ void Radiant_LoadCommandMap()
         _snprintf( iniPath, sizeof( iniPath ), "%s\\radiant.ini", exeDir );
     }
 
-    for ( RadiantCommand &c : g_radiantCommands )
+    // KIWI-UX: bounded by the live count, not ARRAYSIZE -- the tail of the array is the
+    // extension block (see Radiant_SeedCommandTable).  Unregistered slots have name == NULL,
+    // and GetPrivateProfileStringA with a NULL key name means "enumerate the whole section",
+    // which must never happen here.
+    for ( int ci = 0; ci < g_radiantCommandCount; ++ci )
     {
+        RadiantCommand &c = g_radiantCommands[ci];
+        if ( !c.name )
+            continue;
         char buf[1024];
         if ( !GetPrivateProfileStringA( "Commands", c.name, "", buf, sizeof( buf ), iniPath ) )
             continue;   // no override for this command â†’ keep the default binding
@@ -1302,8 +1528,11 @@ BOOL Radiant_ShowMenuItemKeyBindings( HMENU hMenu )
 {
     Radiant_SeedCommandTable();
     BOOL result = FALSE;
-    for ( const RadiantCommand &c : g_radiantCommands )
+    // KIWI-UX: count-bounded (see Radiant_SeedCommandTable).  The extension rows carry ids
+    // that no IDR_MENU_QUAKE3 item owns, so GetMenuItemInfoA simply fails and they skip.
+    for ( int ci = 0; ci < g_radiantCommandCount; ++ci )
     {
+        const RadiantCommand &c = g_radiantCommands[ci];
         MENUITEMINFOA mii;
         char caption[1028];
         memset( &mii, 0, sizeof( mii ) );
@@ -1369,8 +1598,12 @@ bool Radiant_TryHotkey( unsigned int vk )
     if ( GetKeyState( VK_CONTROL ) < 0 ) mods |= 4;   // Ctrl
     if ( GetKeyState( VK_SHIFT )   < 0 ) mods |= 1;   // Shift
     if ( GetKeyState( VK_LWIN )    < 0 ) mods |= 8;   // Win
-    for ( const RadiantCommand &c : g_radiantCommands )
+    // KIWI-UX: count-bounded (see Radiant_SeedCommandTable).  Order is unchanged, so the
+    // binary's first-match-wins duplicate behaviour is unchanged; the extension rows sit
+    // AFTER every compiled-in row and therefore can only ever win a key the profile freed.
+    for ( int ci = 0; ci < g_radiantCommandCount; ++ci )
     {
+        const RadiantCommand &c = g_radiantCommands[ci];
         if ( c.vk == vk && c.mods == mods )
         {
             Radiant_ExecCommand( (unsigned int)c.commandId );
@@ -1809,6 +2042,14 @@ extern void    Undo_End();
 extern void    Select_Deselect( int bDeselectFaces );    // select.cpp (0x48E800)
 extern void    CSG_MakeHollow();                          // csg.cpp    (0x47D3C0)
 extern int     CSG_Merge();                               // csg.cpp    (0x47DA40)
+// KIWI-UX (RADIANT_UX_DESIGN sec 24, Phase 5): the CSG console-feedback pair
+// (kiwi_csg.cpp).  PURE OBSERVATION -- NoteBefore snapshots the selected-brush
+// count, NoteAfter reports the delta.  Neither touches geometry, the selection or
+// the undo stack, and NoteAfter with no pending NoteBefore is a no-op (which is
+// what makes the hollow handler's early "more than 1 brush" return safe to leave
+// exactly as it is).  It exists because CSG_MakeHollow is completely silent.
+extern void    KiwiCsg_NoteBefore();
+extern void    KiwiCsg_NoteAfter( const char *label );
 extern void    Sys_UpdateWindows( int bits );             // win_qe3.cpp
 extern int     Sys_Printf( const char *fmt, ... );        // win_qe3.cpp (0x499E90)
 extern float   z_scale;                                   // z.cpp       (0x241A5B0)
@@ -1972,6 +2213,32 @@ extern void CMainFrame_UpdatePatchToolbarButtons();   // select.cpp (0x42AA70)
 
 static void Cmd_OnSelectionDragVertices()
 {
+    // ── KIWI-UX (ROUND AI, ITEM 6): PATCH VERTEX MODE ON V ──────────────────
+    // USER DIRECTIVE, verbatim: "Vertex Mode (V) (Legacy Feature).  I want you to
+    // enable use of the old vertex mode that allows you to move points.  This is
+    // used for q3 curve manipulation.  Right now pressing V opens it but it
+    // doesn't allow dragging.  Fix it so it works and give it the modern gizmos
+    // that make it easier to handle."
+    //
+    // "Pressing V opens it but it doesn't allow dragging" is precisely the arm 20
+    // lines below: a pure-patch selection reaches `Patch_EditPatch()`, which sets
+    // `d_select_mode = sel_curvepoint` and fills `d_points` — so the ported control
+    // points DRAW and nothing can move them, because every route to `Drag_Begin`
+    // and every legacy handle list is unreachable from the modern viewport.  The
+    // three separate reasons are written out in full on kiwi_patchverts.h.
+    //
+    // THE BINDING RULE, and it changes no chord:
+    //   V while a modal command runs   = the movable pivot (§29, command-local).
+    //   V here, selection HAS a patch  = patch vertex mode (kiwi_patchverts.h).
+    //   V here, selection has no patch = everything below, byte for byte.
+    // The interception returns false when there is no patch, so the brush-vertex
+    // toggle is completely undisturbed.
+    {
+        extern bool KiwiPatchVerts_ToggleForSelection();   // kiwi_patchverts.cpp
+        if ( KiwiPatchVerts_ToggleForSelection() )
+            return;                                        // it set g_nUpdateBits itself
+    }
+
     select_t prevMode = g_qeglobals.d_select_mode;
     if ( prevMode == sel_vertex || prevMode == sel_curvepoint )
     {
@@ -2154,24 +2421,28 @@ static void Cmd_OnSelectionMakehollow()
         Sys_Printf( "Can't hollow more than 1 brush at a time.\n" );
         return;
     }
+    KiwiCsg_NoteBefore();   // KIWI-UX
     Undo_ClearRedo();
     Undo_GeneralStart( "hollow" );
     Undo_AddBrushList( &selected_brushes );
     CSG_MakeHollow();
     Undo_EndBrushList( &selected_brushes );
     Undo_End();
+    KiwiCsg_NoteAfter( "CSG hollow" );   // KIWI-UX
 }
 
 // CMainFrame::OnSelectionCsgmerge (0x4255d0): undo-wrapped CSG merge of the
 // selection into one convex brush. (Selectionâ†’CSGâ†’Merge, ID 32927.)
 static void Cmd_OnSelectionCsgmerge()
 {
+    KiwiCsg_NoteBefore();   // KIWI-UX
     Undo_ClearRedo();
     Undo_GeneralStart( "CSG merge" );
     Undo_AddBrushList( &selected_brushes );
     CSG_Merge();
     Undo_EndBrushList( &selected_brushes );
     Undo_End();
+    KiwiCsg_NoteAfter( "CSG merge" );   // KIWI-UX
 }
 
 // â”€â”€ CLIPPER command handlers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -4808,21 +5079,34 @@ extern void Select_Hide();                  // select.cpp 0x493D50
 extern void Select_HideUnselected();        // select.cpp 0x493DD0
 extern void ShowHidden();                   // select.cpp 0x493E50
 extern void ShowLastHidden();               // select.cpp 0x493EA0
+// KIWI-UX (ROUND AG, ITEM 7) — kiwi_visibility.cpp, declared kiwi_visibility.h:
+//   void KiwiVis_UndoPush( const char *label );
+extern void KiwiVis_UndoPush( const char *label );
+// KIWI-UX (ROUND AG, ITEM 7): one KiwiVis_UndoPush per handler, at the head,
+// BEFORE the ported core writes a bit.  USER DIRECTIVE: "making something hidden
+// should be an un-doable action."  The cores themselves are untouched — the whole
+// change is one line each, and the argument for why the hidden bit needs its own
+// undo domain (rather than a legacy record, which cannot carry it and in fact
+// destroys it) is in kiwi_undo.h at KUNDO_VISIBILITY.
 static void Cmd_OnHideSelected()           // cmd 32923 (0x42B6A0)
 {
+    KiwiVis_UndoPush( "hide selected" );    // KIWI-UX
     Select_Hide();
     Select_Deselect( 1 );
 }
 static void Cmd_OnHideUnselected()         // cmd 32934 (0x42B6C0)
 {
+    KiwiVis_UndoPush( "isolate" );          // KIWI-UX
     Select_HideUnselected();
 }
 static void Cmd_OnShowHidden()             // cmd 32924 (0x42B6D0)
 {
+    KiwiVis_UndoPush( "unhide all" );       // KIWI-UX
     ShowHidden();
 }
 static void Cmd_OnShowLastHidden()         // cmd 33246 (0x42B6E0)
 {
+    KiwiVis_UndoPush( "show last hidden" ); // KIWI-UX
     ShowLastHidden();
 }
 
@@ -5079,6 +5363,20 @@ extern void ImGuiPanel_FindBrush_Toggle();   // 33023  was CFindBrushDlg::Show()
 extern void ImGuiPanel_Scale_Toggle();       // 32809  was CScaleDialog::DoModal()
 extern void ImGuiPanel_Thicken_Toggle();     // 32904  was CDialogThick::DoModal()
 
+// KIWI-UX (shakeout G): the post-dispatch tail on Paste 33040 / Clone 33001 —
+// starts a PAUSED Move over whatever they just selected.  Declared at file scope
+// because a `case` label cannot carry a block-scope extern; kiwi_command.h owns
+// the real declaration and kiwi_command.cpp the note explaining the placement.
+extern void KiwiCmd_AfterPaste();                         // kiwi_command.cpp
+
+// KIWI-UX (ROUND AR, ITEM 1): the CONSTRUCTION half of Copy 33039 / Paste 33040.
+// The brush halves are the ported cores and are untouched; these run beside them
+// so there is ONE Copy and ONE Paste in the editor.  Declared at file scope for
+// the same reason KiwiCmd_AfterPaste is (a `case` label cannot carry a block-scope
+// extern); kiwi_conclip.h owns the real declarations and the reasoning.
+extern int  KiwiConClip_Copy();                           // kiwi_conclip.cpp
+extern int  KiwiConClip_Paste();                          // kiwi_conclip.cpp
+
 // The two command bodies that live in other TUs next to their cores.
 extern void NudgeSelection_Apply( int dir, float amt );   // select.cpp (0x429570 minus the frame arg)
 extern void Radiant_PrefabEnter();                        // map.cpp (0x42BF70, with Prefab_NextLevel)
@@ -5086,6 +5384,26 @@ extern void Radiant_PrefabLeave();                        // map.cpp (0x42BF80, 
 
 bool Radiant_DispatchCommandDirect( unsigned int cmdId )
 {
+    // KIWI-UX (RADIANT_UX_DESIGN sec 3, Phase 2): the reserved id range for the UX overhaul's own
+    // commands, 34000..34199.  Verified free: no `case` in this switch, no id in
+    // g_radiantCommandsDefault, and no #define in res/resource.h falls in it (the compiled-in
+    // ids cluster at 9/10/189-213/1085/32xxx/33xxx/35001-35042/36100-36127/57601-57644, plus
+    // the 8000-8009 MRU and 60000-60767 filter ranges handled just below).  Routed FIRST so a
+    // KIWI id can never be shadowed, and through the SAME entry point as everything else, so
+    // menu / hotkey / palette all reach one behaviour.
+    //
+    // KIWI-UX (shakeout D): WIDENED 34099 -> 34199.  The 34001..34029 instant block filled up
+    // in shakeout C, so the Ctrl+1..4 selection conversion opened a second instant block at
+    // 34100 (kiwi_command.h THE SECOND INSTANT BLOCK explains why it could not simply take the
+    // free tail of the MODAL block instead).  Without this widening those four ids would fall
+    // past every arm of this switch and be silently dropped.  The non-collision proof above
+    // was already stated for the whole of 34000..34999, so the added hundred needs no new one.
+    if ( cmdId >= 34000 && cmdId <= 34199 )
+    {
+        extern bool KiwiCmd_Dispatch( unsigned int cmdId );   // kiwi_command.cpp
+        return KiwiCmd_Dispatch( cmdId );
+    }
+
     // FillTextureMenu-built filter submenus: id ranges, not discrete ids.
     if ( cmdId >= 60000 && cmdId <= 60255 ) { Cmd_OnFilterUsage( cmdId ); return true; }   // Textures->Usage filter submenu       0x4243E0
     if ( cmdId >= 60256 && cmdId <= 60511 ) { Cmd_OnFilterLocale( cmdId ); return true; }   // Textures->Locale filter submenu      0x424400
@@ -5098,10 +5416,58 @@ bool Radiant_DispatchCommandDirect( unsigned int cmdId )
 
     switch ( cmdId )
     {
-    case ID_EDIT_UNDO: Cmd_OnEditUndo(); return true;   // Edit->Undo
-    case ID_EDIT_REDO: Cmd_OnEditRedo(); return true;   // Edit->Redo
-    case 33039: Cmd_OnEditCopybrush(); return true;   // Edit->Copy            0x4286B0
-    case 33040: Cmd_OnEditPastebrush(); return true;   // Edit->Paste           0x4286D0
+    // KIWI-UX (shakeout I, RADIANT_UX_DESIGN §39): the UNIFIED undo/redo pre-hook.
+    // USER DIRECTIVE: "Redo the whole undo/redo system so that it works with every
+    // action."  The journal (kiwi_undo.h) interleaves the ported brush/entity
+    // records with the construction store's snapshots and forwards each Ctrl+Z to
+    // whichever domain genuinely owns the newest step.
+    //
+    // WHY THE HOOK IS HERE AND NOT IN THE KEY FUNNEL.  Radiant_DispatchCommandDirect
+    // is the ONE point every route converges on: the Ctrl+Z/Ctrl+Y arm in
+    // Radiant_PreTranslateMessage (radiant_main.cpp:663-664) posts ID_EDIT_UNDO/REDO
+    // through Radiant_ExecCommand, the Edit menu posts the same ids from
+    // WM_COMMAND, the command palette runs classic ids through Radiant_ExecCommand,
+    // and radiant.ini can remap the keys to anything.  Intercepting in
+    // KiwiUX_KeyFunnel would catch only the keyboard and leave the menu on the old
+    // split behaviour — two undos again, in a new place.
+    //
+    // FALLBACK IS THE CLASSIC PATH, UNCHANGED.  KiwiUndo_Undo/Redo return false
+    // when the journal has nothing (an empty journal, or a legacy record minted
+    // before this layer was linked in), and the ported handler then runs exactly as
+    // it always did.  With only LEGACY tickets in flight the two behaviours are
+    // identical by construction — the journal forwards to the same Undo_Undo.
+    case ID_EDIT_UNDO:
+        if ( KiwiUndo_Undo() )
+        {
+            QE_CountBrushesAndUpdateStatusBar();
+            g_nUpdateBits = W_ALL;
+            return true;
+        }
+        Cmd_OnEditUndo(); return true;   // Edit->Undo
+    case ID_EDIT_REDO:
+        if ( KiwiUndo_Redo() )
+        {
+            QE_CountBrushesAndUpdateStatusBar();
+            g_nUpdateBits = W_ALL;
+            return true;
+        }
+        Cmd_OnEditRedo(); return true;   // Edit->Redo
+    // KIWI-UX (ROUND AR, ITEM 1): the ported Copy runs UNCHANGED and the
+    // construction clipboard takes its own half of the selection beside it.  Both
+    // are no-ops when their side of the selection is empty, so a brush-only or a
+    // line-only Ctrl+C behaves exactly as it did.
+    case 33039: Cmd_OnEditCopybrush(); KiwiConClip_Copy(); return true;   // Edit->Copy            0x4286B0
+    // KIWI-UX (shakeout G): the ported handler runs UNCHANGED and then the modern
+    // layer starts a PAUSED Move over what it just selected.  See the long note on
+    // KiwiCmd_AfterPaste (kiwi_command.cpp) for why the hook is a tail here and not
+    // inside the handler (the internal XYWnd_PasteClip callers in map.cpp /
+    // entity.cpp must NOT trigger it) — and it self-guards on KiwiUX_ModernInput,
+    // so the classic profile is byte-identical.
+    // KIWI-UX (ROUND AR, ITEM 1): …and the construction clipboard pastes between
+    // the two, so that by the time KiwiCmd_AfterPaste looks at the world BOTH
+    // kinds of pasted geometry are landed and selected and it can decide what one
+    // Move gesture may carry.  Order matters: AfterPaste must run LAST.
+    case 33040: Cmd_OnEditPastebrush(); KiwiConClip_Paste(); KiwiCmd_AfterPaste(); return true;   // Edit->Paste           0x4286D0
     case 32818: Cmd_OnFileProjectsettings(); return true;   // File->Project Settings 0x428DE0
     case 32995: Cmd_OnViewZoomin(); return true;   // View->Zoom->XY Zoom In  0x424750
     case 32996: Cmd_OnViewZoomout(); return true;   // View->Zoom->XY Zoom Out 0x4247E0
@@ -5153,7 +5519,10 @@ bool Radiant_DispatchCommandDirect( unsigned int cmdId )
     case 33018: Cmd_OnViewTextureMode(); return true;   // inspector->Texture 0x424440
     case 33016: Cmd_OnViewConsole(); return true;   // inspector->Console 0x423E10
     case 33104: Cmd_OnFilterDlg(); return true;   // inspector->Filters 0x42B7A0
-    case 33001: Cmd_OnSelectionClone(); return true;   // Selection->Clone 0x425480
+    // KIWI-UX (shakeout G): Clone gets the SAME tail as Paste (33040 above) — it
+    // produces new brushes and leaves them selected (Clone_Selection, select.cpp:
+    // 2513-2531), so the very next act is always to place them.
+    case 33001: Cmd_OnSelectionClone(); KiwiCmd_AfterPaste(); return true;   // Selection->Clone 0x425480
     case 32956: Cmd_OnBrushFlipx(); return true;   // Brush->Flip->X  0x4250A0
     case 32957: Cmd_OnBrushFlipy(); return true;   // Brush->Flip->Y  0x4250C0
     case 32958: Cmd_OnBrushFlipz(); return true;   // Brush->Flip->Z  0x4250E0
@@ -5444,8 +5813,9 @@ bool Radiant_DispatchCommandDirect( unsigned int cmdId )
     // under the same caption.
     case 33038:
         ::MessageBoxA( g_qeglobals.d_hwndMain,
-                       "Kisak Radiant\n\n"
-                       "AI Decompiled and based on Call of Duty 4's map editor (CoD4Radiant)\n\n"
+                       "KIWI Radiant\n\n"
+                       "AI Decompiled and based on Call of Duty 4's map editor (CoD4Radiant)\n"
+                       "**AI Enhanced for the KIWI Project**\n"
                        "Special Thanks to xoxor4d for providing his IDA file, which had at least "
                        "60% of the functions named by hand!",
                        "About CoD4Radiant", MB_OK | MB_ICONINFORMATION );

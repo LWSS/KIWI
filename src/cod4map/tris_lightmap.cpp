@@ -11,8 +11,7 @@ emission. Uses SmAuxVert_t for projected vertex data.
 
 #include "cod4map.h"
 
-/* Native TRIS_TRANSIENT_LMAP state, recovered from 0x451980.  This coexists
-   with the older donor lightmap pass until the native caller order is wired. */
+/* Native TRIS_TRANSIENT_LMAP state, recovered from 0x451980. */
 static TrisLmapGroup_t *s_trisLmapGroupList;
 static int s_trisLmapGroupCount;
 static char s_assertDisable_TrisLmapCreateSurface;
@@ -26,7 +25,14 @@ static TriSurf_t *s_trisLmapMaterialHeads[TRIS_LMAP_MAX_MATERIALS];
 static int s_trisLmapMaterialCount;
 static TrisLmapAssignmentSidecar_t *s_trisLmapAssignments;
 static TrisLmapRasterScratch_t s_trisLmapRasterScratch;
-static int s_trisLmapNativeRouteEnabled;
+/* COD4 always executes the mode-4 grouping route from TriangulateEntity.
+   Keep the option-facing setter for command-line compatibility, but make
+   the native path the ordinary compiler behavior. */
+static int s_trisLmapNativeRouteEnabled = 1;
+/* 0x453C60's temporary surface array and its two exact collection counts. */
+static TriSurf_t **s_trisLmapSeparateSurfs;
+static int s_trisLmapSeparateLmapCount;
+static int s_trisLmapSeparateNoLmapCount;
 
 #define TRIS_LMAP_GROUP_EPSILON 0.00007324219f
 #define TRIS_LMAP_ASSIGNMENT_EPSILON 0.000097656251f
@@ -60,44 +66,26 @@ const TrisLmapAssignmentPayload_t *TrisLmap_GetAssignment(const TriSurf_t *surf,
     return NULL;
 }
 
-/* 0x455070: a native clone is needed only after a property has an assignment
-   and its group/index/vectors cease to agree with the requested assignment. */
+/* 0x455070.  The clone predicate reads the native 0xAC property carrier
+   directly.  In particular, an unassigned (-1) group never needs cloning;
+   sidecars are output-bridge mirrors and must not participate here. */
 int TrisLmap_AssignmentNeedsClone(const TriSurf_t *surf, const TriSurfProps_t *props,
                                   const TrisLmapAssignmentPayload_t *payload)
 {
-    const TrisLmapAssignmentPayload_t *existing;
-    TrisLmapAssignmentSidecar_t *entry;
-
     Assert(surf, s_assertDisable_TrisLmapCreateSurface);
     Assert(props, s_assertDisable_TrisLmapCreateSurface);
     Assert(payload, s_assertDisable_TrisLmapCreateSurface);
 
-    /* Native 0x455070 observes the property object, not just the current
-       surface.  Once one surface has claimed a shared props object, another
-       group must clone on any incompatible assignment. */
-    existing = TrisLmap_GetAssignment(surf, props);
-    if (!existing)
-    {
-        for (entry = s_trisLmapAssignments; entry; entry = entry->next)
-        {
-            if (entry->props == props)
-            {
-                existing = &entry->payload;
-                break;
-            }
-        }
-    }
-    if (!existing)
-        return 0; /* native props->groupId == -1 */
-    if (existing->groupId != payload->groupId)
+    if (props->lmapGroupId == -1)
+        return 0;
+    if (props->lmapGroupId != payload->groupId)
         return 1;
-    if (existing->lightmapIndex != LIGHTSTYLE_NONE
-        && existing->lightmapIndex != payload->lightmapIndex)
-    {
+    if (props->lmapIndex != LIGHTSTYLE_NONE && props->lmapIndex != payload->lightmapIndex)
         return 1;
-    }
-    return !VectorCompareEpsilon((float *)existing->vecs[0], (float *)payload->vecs[0], TRIS_LMAP_ASSIGNMENT_EPSILON, 4)
-        || !VectorCompareEpsilon((float *)existing->vecs[1], (float *)payload->vecs[1], TRIS_LMAP_ASSIGNMENT_EPSILON, 4);
+    return !VectorCompareEpsilon((float *)&props->lmapVecs[0], (float *)payload->vecs[0],
+                                 TRIS_LMAP_ASSIGNMENT_EPSILON, 4)
+        || !VectorCompareEpsilon((float *)&props->lmapVecs[4], (float *)payload->vecs[1],
+                                 TRIS_LMAP_ASSIGNMENT_EPSILON, 4);
 }
 
 void TrisLmap_SetAssignment(TriSurf_t *surf, TriSurfProps_t *props,
@@ -434,70 +422,83 @@ static int TrisLmap_CompareSurfPropsAndGroup(const void *left, const void *right
     const TriSurf_t *leftSurf = *(const TriSurf_t * const *)left;
     const TriSurf_t *rightSurf = *(const TriSurf_t * const *)right;
 
-    if (leftSurf->props < rightSurf->props)
-        return -1;
-    if (leftSurf->props > rightSurf->props)
-        return 1;
-    if (leftSurf->lmap->group->id < rightSurf->lmap->group->id)
-        return -1;
-    if (leftSurf->lmap->group->id > rightSurf->lmap->group->id)
-        return 1;
-    return 0;
+    /* 0x453E80 compares the fixed-size carriers with the native division
+       form.  On the 32-bit heap distinct 0xAC/0x24 allocations have the
+       same sign ordering as this, while retaining the original comparator
+       (and its zero result for a shared carrier). */
+    if (leftSurf->props != rightSurf->props)
+        return (int)(((intptr_t)leftSurf->props - (intptr_t)rightSurf->props)
+                     / (int)sizeof(*leftSurf->props));
+    /* 0x453E80 sorts equal property records by the native group carrier's
+       address, rather than its diagnostic id.  This chooses which group
+       retains the original property object. */
+    Assert(leftSurf->lmap, s_assertDisable_TrisLmapCreateSurface);
+    Assert(rightSurf->lmap, s_assertDisable_TrisLmapCreateSurface);
+    return (int)(((intptr_t)leftSurf->lmap->group - (intptr_t)rightSurf->lmap->group)
+                 / (int)sizeof(*leftSurf->lmap->group));
 }
 
-/* 0x453C60.  Native code gathers every lmap surface, sorts by props then
-   group id, and keeps the first group's props while cloning the original
-   props for every additional group.  This function is intentionally dormant
-   until group creation and sidecar assignment are wired as one pipeline. */
+/* 0x453E40: retain every surface with an LMAP carrier and count the rest.
+   The caller preallocates this array to GetTrisCount(), exactly as native. */
+static void TrisLmap_CollectSeparateCandidate(TriSurf_t *surf, bool isTarget)
+{
+    (void)isTarget;
+    if (surf->lmap)
+        s_trisLmapSeparateSurfs[s_trisLmapSeparateLmapCount++] = surf;
+    else
+        ++s_trisLmapSeparateNoLmapCount;
+}
+
+/* 0x453C60.  Native code gathers every active LMAP surface, sorts by props
+   then group carrier, and keeps the first group's props while cloning the
+   original props for every additional group. */
 int TrisLmap_SeparatePropsByGroup(void)
 {
-    TrisLmapGroup_t *group;
-    TriSurf_t *surf;
     TriSurf_t **surfs;
-    int count;
+    int surfCount;
     int index;
 
-    count = 0;
-    for (group = s_trisLmapGroupList; group; group = group->next)
-    {
-        for (surf = group->firstSurf; surf; surf = surf->lmap->nextInGroup)
-            ++count;
-    }
-    if (!count)
+    surfCount = GetTrisCount();
+    if (!surfCount)
         return 0;
-
-    surfs = (TriSurf_t **)malloc(count * sizeof(*surfs));
+    surfs = (TriSurf_t **)malloc(surfCount * sizeof(*surfs));
     if (!surfs)
         Com_Error("TrisLmap_SeparatePropsByGroup: out of memory");
-    index = 0;
-    for (group = s_trisLmapGroupList; group; group = group->next)
-    {
-        for (surf = group->firstSurf; surf; surf = surf->lmap->nextInGroup)
-            surfs[index++] = surf;
-    }
-    Assert(index == count, s_assertDisable_TrisLmapCreateSurface);
-    qsort(surfs, count, sizeof(*surfs), TrisLmap_CompareSurfPropsAndGroup);
 
-    for (index = 0; index < count; )
+    s_trisLmapSeparateSurfs = surfs;
+    s_trisLmapSeparateLmapCount = 0;
+    s_trisLmapSeparateNoLmapCount = 0;
+    ForEachSurf(TrisLmap_CollectSeparateCandidate, NULL);
+    Assert(s_trisLmapSeparateLmapCount + s_trisLmapSeparateNoLmapCount == surfCount,
+           s_assertDisable_TrisLmapCreateSurface);
+    s_trisLmapSeparateSurfs = NULL;
+    if (!s_trisLmapSeparateLmapCount)
+    {
+        free(surfs);
+        return 0;
+    }
+    qsort(surfs, s_trisLmapSeparateLmapCount, sizeof(*surfs), TrisLmap_CompareSurfPropsAndGroup);
+
+    for (index = 0; index < s_trisLmapSeparateLmapCount; )
     {
         TriSurfProps_t *sourceProps = surfs[index]->props;
         TriSurfProps_t *assignedProps = sourceProps;
-        int groupId = surfs[index]->lmap->group->id;
+        TrisLmapGroup_t *sourceGroup = surfs[index]->lmap->group;
 
-        do
+        ++index;
+        while (index < s_trisLmapSeparateLmapCount && surfs[index]->props == sourceProps)
         {
-            if (surfs[index]->lmap->group->id != groupId)
+            if (surfs[index]->lmap->group != sourceGroup)
             {
-                groupId = surfs[index]->lmap->group->id;
+                sourceGroup = surfs[index]->lmap->group;
                 assignedProps = TrisLmap_CloneProps(surfs[index], sourceProps);
             }
             surfs[index]->props = assignedProps;
             ++index;
         }
-        while (index < count && surfs[index]->props == sourceProps);
     }
     free(surfs);
-    return count;
+    return s_trisLmapSeparateLmapCount;
 }
 
 /* 0x451290 — validate each surface coordinate against both its local and
@@ -512,8 +513,15 @@ void TrisLmap_ValidateSurface(TriSurf_t *surf)
     Assert(surf->lmap, s_assertDisable_TrisLmapValidateSurface);
     Assert(surf->lmap->group, s_assertDisable_TrisLmapValidateSurface);
     Assert(surf->props, s_assertDisable_TrisLmapValidateSurface);
+    Assert(GetTrisTransientMode() == 4, s_assertDisable_TrisLmapValidateSurface);
 
     lmap = surf->lmap;
+    Assert(lmap->vecs[0][0] != 0.0f || lmap->vecs[0][1] != 0.0f
+        || lmap->vecs[0][2] != 0.0f || lmap->vecs[0][3] != 0.0f,
+        s_assertDisable_TrisLmapValidateSurface);
+    Assert(lmap->vecs[1][0] != 0.0f || lmap->vecs[1][1] != 0.0f
+        || lmap->vecs[1][2] != 0.0f || lmap->vecs[1][3] != 0.0f,
+        s_assertDisable_TrisLmapValidateSurface);
     for (index = 0; index < surf->winding->numpoints; ++index)
     {
         uv[0] = DotProduct(surf->winding->points[index], lmap->vecs[0]) + lmap->vecs[0][3];
@@ -535,6 +543,13 @@ TrisLmapGroup_t *TrisLmap_CreateSurface(TriSurf_t *surf)
     Assert(surf->props, s_assertDisable_TrisLmapCreateSurface);
     Assert(surf->winding, s_assertDisable_TrisLmapCreateSurface);
     Assert(!surf->lmap, s_assertDisable_TrisLmapCreateSurface);
+    Assert(GetTrisTransientMode() == 4, s_assertDisable_TrisLmapCreateSurface);
+    Assert(surf->props->lmapVecs[0] != 0.0f || surf->props->lmapVecs[1] != 0.0f
+        || surf->props->lmapVecs[2] != 0.0f || surf->props->lmapVecs[3] != 0.0f,
+        s_assertDisable_TrisLmapCreateSurface);
+    Assert(surf->props->lmapVecs[4] != 0.0f || surf->props->lmapVecs[5] != 0.0f
+        || surf->props->lmapVecs[6] != 0.0f || surf->props->lmapVecs[7] != 0.0f,
+        s_assertDisable_TrisLmapCreateSurface);
 
     group = (TrisLmapGroup_t *)malloc(sizeof(*group));
     lmap = (TrisLmapTransient_t *)malloc(sizeof(*lmap));
@@ -921,13 +936,17 @@ static int TrisLmap_ClearAllowedLightmaps(void)
     return count;
 }
 
-/* Native 0x454F90 mapped into the sidecar ABI.  It retains the native clone
-   decision while never writing CoD4's incompatible fields into donor props. */
+/* 0x454F90.  Assignment is published to the native property carrier first;
+   the sidecar is retained only as a compatibility mirror for output paths
+   which still explicitly request an assignment payload. */
 static void TrisLmap_SetGroupAssignment(TrisLmapGroup_t *group, const TrisLmapAllocation_t *allocation)
 {
     TriSurf_t *surf;
     TrisLmapAssignmentPayload_t payload;
 
+    if ((unsigned int)allocation->lightmapIndex >= LIGHTSTYLE_NONE)
+        Com_Error("lmapIndex doesn't index LIGHTMAP_NONE\n\t%i not in [0, %i)",
+                  allocation->lightmapIndex, LIGHTSTYLE_NONE);
     payload.groupId = group->id;
     payload.lightmapIndex = allocation->lightmapIndex;
     for (surf = group->firstSurf; surf; surf = surf->lmap->nextInGroup)
@@ -942,11 +961,11 @@ static void TrisLmap_SetGroupAssignment(TrisLmapGroup_t *group, const TrisLmapAl
             props->lmapIndex = 31;
             surf->props = props;
         }
-        /* These are native TriSurfProps_t +04/+08 fields.  The assignment
-           sidecar below retains the accompanying vector payload without
-           expanding the 0xAC property carrier. */
+        /* 0x45502D..0x455057: the group/index and both four-float lightmap
+           rows live in the native carrier and become authoritative here. */
         props->lmapGroupId = payload.groupId;
         props->lmapIndex = payload.lightmapIndex;
+        memcpy(&props->lmapVecs[0], payload.vecs[0], sizeof(payload.vecs));
         TrisLmap_SetAssignment(surf, props, &payload);
     }
 }
@@ -1089,8 +1108,6 @@ static int TrisLmap_SurfSortBefore(const TriSurf_t *left, const TriSurf_t *right
     double leftArea;
     double rightArea;
     int compare;
-    int leftTessSizeBits;
-    int rightTessSizeBits;
 
     if (left->props->si != right->props->si)
     {
@@ -1111,17 +1128,17 @@ static int TrisLmap_SurfSortBefore(const TriSurf_t *left, const TriSurf_t *right
     rightArea = WindingSignedArea(right->winding, right->props->plane);
     if (leftArea != rightArea)
         return leftArea < rightArea;
-    if (left->winding != right->winding)
-        return left->winding < right->winding;
+    /* 0x453ADF..0x453AF6 compares the first winding dword, i.e. its point
+       count.  It does not compare the winding allocation address. */
+    if (left->winding->numpoints != right->winding->numpoints)
+        return left->winding->numpoints < right->winding->numpoints;
+    /* MaterialInfo is the native carrier reached through props[0].  Its
+       dwords +36 and +32 are contents then surfaceFlags respectively;
+       adapter ShaderInfo_t retains them as contentFlags/surfaceFlags. */
+    if (left->props->si->contentFlags != right->props->si->contentFlags)
+        return left->props->si->contentFlags < right->props->si->contentFlags;
     if (left->props->si->surfaceFlags != right->props->si->surfaceFlags)
         return left->props->si->surfaceFlags < right->props->si->surfaceFlags;
-    /* Native follows MaterialInfo::surfaceFlags (+36) with the raw dword at
-       +32 (tessSize).  ShaderInfo_t carries the same value as subdivisions;
-       compare its representation, not the unrelated contentFlags field. */
-    memcpy(&leftTessSizeBits, &left->props->si->subdivisions, sizeof(leftTessSizeBits));
-    memcpy(&rightTessSizeBits, &right->props->si->subdivisions, sizeof(rightTessSizeBits));
-    if (leftTessSizeBits != rightTessSizeBits)
-        return leftTessSizeBits < rightTessSizeBits;
     return left < right;
 }
 
@@ -1181,16 +1198,12 @@ static void TrisLmap_RebuildCellPrevLinks(TriSurf_t *head)
 
 static int TrisLmap_LoadedMaterialIndex(const TriSurf_t *surf)
 {
-    ptrdiff_t index;
+    int index;
 
     Assert(surf && surf->props && surf->props->si, s_assertDisable_TrisLmapCreateSurface);
-    /* `TriSurfProps_t` deliberately retains KIWI's ShaderInfo_t rather than
-       the executable's Material*.  The material-cache slot is its native
-       FindLoadedMaterialIndex analogue: it is assigned in loaded-material
-       order and is bounded here by 0x4c8, exactly as 0x451600's table is. */
-    index = surf->props->si - g_matExpandRegion.materialCache;
+    index = FindLoadedMaterialIndex(surf->props->si);
     Assert(index >= 0 && index < TRIS_LMAP_MAX_MATERIALS, s_assertDisable_TrisLmapCreateSurface);
-    return (int)index;
+    return index;
 }
 
 static int TrisLmap_GroupPairWasTested(const TrisLmapGroup_t *group0, const TrisLmapGroup_t *group1)
@@ -1544,7 +1557,8 @@ static int TrisLmap_ClipWindingToPlane(const Winding_t *winding, const float *di
         if (currentSide == 2)
         {
             Assert(outputCount < pointLimit, s_assertDisable_TrisLmapCreateSurface);
-            VectorCopy(winding->points[pointIndex], points[outputCount++]);
+            VectorCopy(winding->points[pointIndex], points[outputCount]);
+            ++outputCount;
         }
         else if (nextSide != 2 && nextSide != currentSide)
         {
@@ -1664,7 +1678,8 @@ static void TrisLmap_TouchGridCandidate(TriSurf_t *candidate)
     }
     if (TrisLmap_GroupPairWasTested(current->lmap->group, candidate->lmap->group))
         return;
-    if (current->props->si != candidate->props->si)
+    if (!LoadedMaterialsShareTechniqueSet(current->props->si,
+                                          candidate->props->si))
         return;
     TrisLmap_TryTouch(candidate, current);
 }
@@ -1851,6 +1866,12 @@ int TrisLmap_BuildAndAssign(void)
     Assert(GetTrisTransientMode() == 4, s_assertDisable_TrisLmapCreateSurface);
     TrisLmap_GroupCells();
     carrierCount = TrisLmap_SeparatePropsByGroup();
+    if (!g_currentEntityIndex)
+    {
+        TrisTimerCheck(NULL);
+        printf("%s...\n", "assigning lightmaps");
+        g_trisTimerStart = I_FloatTime();
+    }
     if (carrierCount)
         TrisLmap_AssignAll();
     ForEachSurf(TrisLmap_ValidateAssignmentCallback, NULL);

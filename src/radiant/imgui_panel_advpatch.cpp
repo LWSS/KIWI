@@ -286,7 +286,19 @@ void ImGuiPanel_AdvPatch_Draw()
         // (patchdialog.cpp:385-392) refuses to start a stroke unless the mode is not
         // "Disabled" AND outer radius > inner radius.
         ImGui::TextDisabled( "Pick a mode (not Disabled), tick channels, set outer > inner radius," );
-        ImGui::TextDisabled( "then Alt+drag in a view to paint (LMB raise, RMB lower)." );
+        ImGui::TextDisabled( "select the patch(es), then ALT+LEFT-DRAG in the 3D view to paint." );
+        // KIWI-UX (ROUND AO, ITEM Y): this line used to promise "LMB raise, RMB
+        // lower", which is what the BINARY does — sub_43E6F0 takes buttons 1 or 2
+        // and signs the stroke by which (patchdialog.cpp:246).  In the modern
+        // viewport ALT+RMB is the mouselook (kiwi_viewport.cpp's RMB arm), so only
+        // the LMB half is routed and the panel now says only what is true.  The
+        // "lower" half is NOT otherwise reachable and the panel says so rather than
+        // offering a workaround that does not exist: mode 0's amount is
+        // `grid_sizes[gridsize] * sign * 0.5` (patchdialog.cpp:274) and `sign` comes
+        // ONLY from the button, so no slot in this panel can invert it.  Smooth (3)
+        // is the one mode that can bring terrain down, by averaging.
+        ImGui::TextDisabled( "(Alt+RIGHT-drag is the camera mouselook in this shell, so the" );
+        ImGui::TextDisabled( " RMB \"lower\" half is not bound; Smooth is the way down.)" );
 
         // ── paint mode radios (1435..1440) — drives sub_401DB0 via the store ───
         // Labels follow sub_43E6F0's switch behaviour (patchdialog.cpp): the operation the

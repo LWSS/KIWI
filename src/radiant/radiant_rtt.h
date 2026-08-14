@@ -26,3 +26,8 @@ IDirect3DTexture9 *RTT_GetTexture( rttViewport_t id );
 // Device-loss bracket: release every RT texture (recreated lazily on the next RTT_Begin).
 // Called from R_ReleaseForShutdownOrReset (r_init.cpp).
 void RTT_ReleaseForReset();
+
+// KIWI-UX (ROUND AB, ITEM 1): the same three-part test RTT_Begin makes, hoisted so the
+// whole viewport-render pass can be skipped as ONE decision instead of four independent
+// ones.  See RADIANT_UX_DESIGN.md §58.1.
+bool RTT_DeviceHealthy();

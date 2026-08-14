@@ -406,6 +406,28 @@ void __cdecl R_AddCmdEndOfList()
     R_GetCommandBuffer(RC_END_OF_LIST, 4);
 }
 
+#ifdef KISAK_RADIANT
+// ── KIWI-UX (ROUND AM, ITEM 1) — the render-command buffer HEADROOM probe ────
+// R_AddRenderCmdDrawTris returns void and drops silently on two gates: the
+// material lacking the technique, and R_GetCommandBuffer running out of room.
+// Round AK's fill counter incremented AFTER that void call and therefore could
+// not see either drop (documented as D-AL6).  The technique gate is readable
+// from the editor already (Cam_MaterialWritesDepth reads stateBitsEntry the same
+// way), the buffer gate was not — this exposes it so a KIWI overlay pass can
+// name it BEFORE it submits.  Read-only; it changes no state and emits nothing.
+// Returns bytes of usable room for a NON-critical command, i.e. exactly the
+// `sizeLimit` R_GetCommandBuffer computes below for RC_DRAW_TRIANGLES.
+int __cdecl R_Ed_CmdBufferHeadroom()
+{
+    if ( !s_cmdList || !s_cmdList->cmds )
+        return 0;
+    int sizeLimit = (int)s_renderCmdBufferSize - s_cmdList->usedTotal;
+    sizeLimit -= 0x2000 - s_cmdList->usedCritical;   // the non-critical reserve
+    sizeLimit -= 16;                                 // the RC_END_OF_LIST terminator reserve
+    return ( sizeLimit > 0 ) ? sizeLimit : 0;
+}
+#endif
+
 GfxCmdHeader *__cdecl R_GetCommandBuffer(GfxRenderCommand renderCmd, int bytes)
 {
     const char *v2; // eax

@@ -199,6 +199,17 @@ GfxPrimStats *RB_EndSurfacePrologue()
     iassert(gfxCmdBufState.material);
     tess.finishedFilling = 1;
     iassert(g_primStats);
+    // KIWI-UX (ROUND AB, ITEM 1): iassert is NON-FATAL in the editor build
+    // (assertive.cpp logs and falls through), so the assert above never stopped the
+    // NULL write below — it just made a silent log line and then an access
+    // violation, killing the editor with an unsaved map (an AV is not a Com_Error,
+    // so Kiwi_FatalRescue at engine_stubs.cpp:275 never runs).  g_primStats is only
+    // ever NULL or a static address (rb_stats.cpp:69-75), so this is the only
+    // pointer that can fault here.  The stats are a diagnostic; the DRAW is not.
+    // Losing a frame's prim counters beats losing the map.  The real cause is fixed
+    // upstream in kiwi_devicereset.cpp + r_ed_scene.cpp:735.
+    if (!g_primStats)
+        return 0;
     g_primStats->dynamicIndexCount += tess.indexCount;
     result = g_primStats;
     g_primStats->dynamicVertexCount += tess.vertexCount;

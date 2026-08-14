@@ -262,6 +262,16 @@ void Map_NewMap()
         entityInsts.prev         = &entityInsts;
     }
     world_entity = nullptr;
+
+    // KIWI-UX (RADIANT_UX_DESIGN §7, Phase 4): the construction store holds
+    // editor-only scaffolding for the map that is being torn down here, so it goes
+    // with it.  Map_NewMap is the ONE point both File->New (via Map_New) and
+    // Map_LoadFromFile pass through, and the load path re-fills the store from the
+    // sidecar at its own tail afterwards — so this can never race it.
+    {
+        extern void KiwiCon_ClearAll();       // kiwi_construct.cpp
+        KiwiCon_ClearAll();
+    }
 }
 
 
@@ -518,6 +528,17 @@ void Map_LoadFromFile( const char *path )
             xy->m_vOrigin[0] = 0.0f;
             xy->m_vOrigin[1] = 0.0f;
             xy->m_vOrigin[2] = 0.0f;
+
+            // KIWI-UX (shakeout I): POST-INIT hook, this branch ONLY.  A map WITH a
+            // start entity already has a meaningful placement and keeps it; a map
+            // without one lands the camera at (0,0,0) looking down +X — inside the
+            // world with nothing in frame, which is the "scale is way too big"
+            // complaint in its purest form.  Modern-input gated, so the classic
+            // profile is byte-identical.  See KiwiCam_DefaultSpawn (kiwi_camera.h).
+            extern bool KiwiUX_ModernInput();     // kiwi_ux.cpp
+            extern void KiwiCam_DefaultSpawn();   // kiwi_camera.cpp
+            if ( KiwiUX_ModernInput() )
+                KiwiCam_DefaultSpawn();
         }
     }
 
@@ -576,6 +597,28 @@ void Map_LoadFromFile( const char *path )
     MainFrm_BrushList( (int)VA( 0, "%s - active_brushes",   "loaded map" ), &active_brushes );
     MainFrm_BrushList( (int)VA( 1, "%s - active_brushes", "loaded map" ), &selected_brushes );
     MainFrm_EntList( &entityInsts, "loaded map" );
+
+    // KIWI-UX (RADIANT_UX_DESIGN §7, Phase 4): load the construction sidecar
+    // `<mapname>.kiwi` that sits next to this .map.  At the TAIL, after the map is
+    // fully live, because a sidecar must never be able to affect the map load: a
+    // missing one is the normal case and a corrupt one warns and is ignored.
+    {
+        extern bool KiwiCon_LoadSidecar( const char *mapPath );   // kiwi_construct.cpp
+        KiwiCon_LoadSidecar( path );
+
+        // KIWI-UX (ROUND AO) — "Hidden solids are not respected on save and unhide
+        // on load."  The sidecar now also carries which SOLIDS were hidden, as
+        // ordinals into Map_SaveFile's own brush walk; KiwiCon_LoadSidecar has just
+        // parsed those lines into a pending set and this applies them.  It MUST run
+        // here and not inside the sidecar reader: the hidden bit lives on the
+        // selbrush_t INSTANCE, and the instances only exist once the map load has
+        // finished building them — which, at the tail of Map_LoadFromFile, it has.
+        // Reads nothing but its own pending set, writes nothing but brushFlags bit 2
+        // and the hide depth, and is a no-op for every sidecar written before this
+        // round.  Design + the honest limits: kiwi_visibility.h ROUND AO.
+        extern void KiwiVis_SidecarLoadApply();                   // kiwi_visibility.h:257
+        KiwiVis_SidecarLoadApply();
+    }
 
     g_nUpdateBits = -1;
 }
@@ -683,6 +726,19 @@ void Map_SaveFile( const char *path, char a1, char a2 )
             Brush_Free( region_sides[i] );   // IDA 0x486fd1 frees all 4 region walls unconditionally
     }
 
+    // KIWI-UX (RADIANT_UX_DESIGN §7 / decision D-5, Phase 4): write the construction
+    // sidecar `<mapname>.kiwi` beside the .map that was just written.  AFTER the
+    // fclose above, so it only ever follows a .map that actually reached disk, and
+    // NEVER for a region save (a1) — a region save writes a deliberate SUBSET of the
+    // map to a scratch path, and stamping the full construction store next to it
+    // would leave a sidecar that does not describe its file.  The .map itself is
+    // untouched: stock compilers and stock Radiant must keep loading our maps.
+    if ( !a1 )
+    {
+        extern bool KiwiCon_SaveSidecar( const char *mapPath );   // kiwi_construct.cpp
+        KiwiCon_SaveSidecar( path );
+    }
+
     Sys_Printf( "Saved.\n" );
     modified = 0;
 
@@ -704,6 +760,163 @@ void Map_SaveFile( const char *path, char a1, char a2 )
     }
 
     if ( savedPathHeap ) free( savedPathHeap );   // release the save-as dialog pick
+}
+
+
+// ═════════════════════════════════════════════════════════════════════════════
+// KIWI-UX (ROUND V) — EMERGENCY RESCUE SAVE
+// ═════════════════════════════════════════════════════════════════════════════
+// USER REPORT (verbatim): *"After going AFK for a while and coming back I get this
+// crash ... it ruins all progress of your map."*  Round V's other half makes the
+// specific AFK crash non-fatal (r_init.cpp R_Hwnd_Resize), but "a fatal error can
+// destroy an afternoon of unsaved work" is a class of failure, not one bug — so the
+// death path itself now writes the map out before the process goes away.
+//
+// WHY THIS IS NOT Map_SaveFile.  Map_SaveFile (above, 0x486c00) is the operator-
+// attended save and it is unusable from a fatal handler.  Reading it top to bottom,
+// four things in it are disqualifying — NONE of them are renderer state (it touches
+// no D3D object, no gfx global, nothing in dx.*; the write core is pure fprintf over
+// the brush lists), but all four are lethal on a dying process:
+//   1. Map_SaveFileToPerforce (map.cpp:1321) pops MessageBoxA TWICE — "Add file to
+//      Perforce?" (:1333) and the read-only "open for edit" prompt (:1359).  A modal
+//      box runs a NESTED MESSAGE PUMP, which delivers WM_PAINT into the renderer we
+//      are dying inside.  On the AFK path the device is LOST when we get here.
+//   2. LayeredMaterials_Save (:665 → layeredmaterials.cpp:554) can ABORT the whole
+//      save (returns 0 → Map_SaveFile returns having written nothing) and itself
+//      goes through Map_SaveFileToPerforce, i.e. the same modal boxes.
+//   3. SetWindowTextA (:733) / SendMessageA to d_hwndStatus (:746) / MessageBeep
+//      (:737) are more window messages into a half-dead shell.
+//   4. `modified = 0` (:730) LIES: a rescue file is not a save of the real file, and
+//      the flag must not claim the operator's work reached its real path.
+// So the rescue reproduces Map_SaveFile's WRITE CORE ONLY (:678-708 — the iwmap
+// header, Layers_WriteToFile, the entity gate + MapFile_WriteEntity walk), which IS
+// pure file I/O: MapFile_WriteEntity (:1390) is fprintf + SetKeyValue + Brush_Write
+// (brush.cpp:4204), and Brush_Write is formatting.  a3 (region) is hard 0, so the
+// region filter and its Ed_Camera() read (:1429) are never reached.
+//
+// THE REAL PATH IS NEVER TOUCHED.  We write `<mapname>_rescue.map` beside it — the
+// operator diffs or renames.  Untitled/unnamed maps go to `<exe dir>\rescue.map`
+// (data-next-to-exe rule).
+//
+// GUARDS.  A crash inside the rescue must not mask the error that caused it:
+//   • ONE attempt, ever — s_tried is set BEFORE anything can fault.
+//   • SEH (__try/__except) around the whole body; a torn brush list that would AV
+//     here simply ends the rescue instead of replacing the user's error with 0xC0000005.
+//     (No C++ objects with destructors in this frame — required by MSVC for __try.)
+//   • No Sys_Printf (win_qe3.cpp:112 → console_print → SendMessageA into the console
+//     EDIT), no message boxes, no window messages, no `modified` write.
+//
+// GATE.  A map is rescued whenever the entity list is non-empty.  Deliberately NOT
+// gated on `modified`: MarkMapModified (win_qe3.cpp:189) is called from 73 ported
+// edit sites but only two KIWI-UX files (kiwi_transform.cpp, kiwi_validity.cpp), so a
+// `modified == 0` reading is not evidence the session is clean — and a false "clean"
+// would throw away exactly the work this exists to save.  A redundant rescue file
+// costs one write on a path that is already fatal.
+//
+// Returns true and fills outPath when a file reached disk.
+extern bool KiwiCon_SaveSidecar( const char *mapPath );   // kiwi_construct.cpp:3460
+
+static int Kiwi_RescueSave_Write( const char *path )
+{
+    FILE *fout = fopen( path, "wb" );          // NOT Map_SaveFileToPerforce (modal boxes)
+    if ( !fout )
+        return 0;
+
+    fprintf( fout, "iwmap %i\n", 4 );          // Map_SaveFile:678
+    Layers_WriteToFile( fout );                // Map_SaveFile:681
+
+    int entIdx = 0;
+    for ( entity_s *eIter = entities.next; eIter != &entities; eIter = eIter->next )
+    {
+        entity_s_def *eDef = (entity_s_def *)eIter;
+        if ( !eDef->eclass )                   // rescue-only guard: Map_SaveFile:698 derefs
+            continue;                          // eclass unconditionally (faithful); a fatal
+                                               // may have caught the list mid-edit.
+        bool hasDefBrushes = ( (void *)eDef->brushes.prev != (void *)&eDef->def );
+        bool isWorld       = ( strcmp( eDef->eclass->name, "worldspawn" ) == 0 );
+        if ( hasDefBrushes || isWorld )
+        {
+            fprintf( fout, "// entity %i\n", entIdx );
+            ++entIdx;
+            MapFile_WriteEntity( eDef, fout, 0 );   // a3 = 0: never the region writer
+        }
+    }
+
+    fclose( fout );
+    return 1;
+}
+
+bool Kiwi_RescueSave( char *outPath, int outPathSize )
+{
+    static bool s_tried = false;               // ONE attempt, ever
+    if ( s_tried )
+        return false;
+    s_tried = true;
+
+    if ( !outPath || outPathSize < 4 )
+        return false;
+    outPath[0] = '\0';
+
+    if ( entities.next == &entities )          // no map loaded → nothing to rescue
+        return false;
+
+    int wrote = 0;
+    __try
+    {
+        char path[1100] = "";
+
+        // <mapname>_rescue.map beside the real file, when there IS a real file.
+        // currentmap (map.cpp:44) is "" before any map and "unnamed.map" after Map_New
+        // (map.cpp:239); Map_LoadFromFile writes the real path (map.cpp:421).
+        if ( currentmap[0] && _stricmp( currentmap, "unnamed.map" ) != 0 )
+        {
+            _snprintf( path, sizeof( path ), "%s", currentmap );
+            path[sizeof( path ) - 1] = '\0';
+            size_t n = strlen( path );
+            if ( n > 4 && _stricmp( path + n - 4, ".map" ) == 0 )
+                path[n - 4] = '\0';
+            strncat( path, "_rescue.map", sizeof( path ) - strlen( path ) - 1 );
+            wrote = Kiwi_RescueSave_Write( path );
+        }
+
+        // Untitled — or the map's own directory refused the write (read-only tree,
+        // network share gone).  Fall back to the exe's directory: KIWI data lives next
+        // to the exe, never behind a registry redirection.
+        if ( !wrote )
+        {
+            char exeDir[MAX_PATH] = "";
+            if ( ::GetModuleFileNameA( NULL, exeDir, sizeof( exeDir ) ) )
+            {
+                char *slash = strrchr( exeDir, '\\' );
+                if ( slash ) *slash = '\0';
+                _snprintf( path, sizeof( path ), "%s\\rescue.map", exeDir );
+            }
+            else
+            {
+                _snprintf( path, sizeof( path ), "rescue.map" );
+            }
+            path[sizeof( path ) - 1] = '\0';
+            wrote = Kiwi_RescueSave_Write( path );
+        }
+
+        if ( wrote )
+        {
+            // The construction sidecar next to it, under the same one-shot SEH frame.
+            // KiwiCon_SaveSidecar (kiwi_construct.cpp:3460) is tmp-file + rename, pure
+            // file I/O, and no-ops (deleting a stale file) when the store is empty.
+            KiwiCon_SaveSidecar( path );
+            _snprintf( outPath, outPathSize, "%s", path );
+            outPath[outPathSize - 1] = '\0';
+        }
+    }
+    __except ( EXCEPTION_EXECUTE_HANDLER )
+    {
+        // A fault inside the rescue must not replace the original error.  Whatever
+        // reached disk before the fault stays; we simply stop.
+        return false;
+    }
+
+    return wrote != 0;
 }
 
 

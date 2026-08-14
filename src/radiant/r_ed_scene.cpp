@@ -726,6 +726,19 @@ static void RB_DrawEditorSkinnedCached_Sub(int index, int amount)
         if (edSurf->type == ED_SURF_MESH) {
             mesh = (editorMesh_s *)edSurf->mesh_or_surfSub;
             Editor_GetVertexBufferAndIndex(mesh->handle, &vb, &firstIndex);
+            // KIWI-UX (ROUND AB, ITEM 1): a MESH surf whose vertex buffer does not
+            // resolve MUST be dropped here and not merely not-drawn.  Falling through
+            // takes the vb==0 arm below (VERTDECL_PACKED, boundVb = 0) while the
+            // indices are still copied into tess at :787 — and the final flush at
+            // :805 is `if (haveBatch && boundVb)`, so tess.indexCount ESCAPES this
+            // handler with g_primStats still 0 (this handler never calls
+            // R_TrackPrims).  The next RC_SET_MATERIAL_COLOR then flushes it and
+            // dereferences NULL in RB_EndSurfacePrologue (rb_shade.cpp:202) — the
+            // monitor-sleep crash.  A mesh with no VB has nothing to draw, so
+            // skipping the surf is both the safe and the correct answer.
+            if (!vb) {
+                continue;
+            }
             material   = mesh->material;
             techType   = mesh->techType;
             indexCount = (uint16_t)mesh->indexCount;

@@ -72,8 +72,15 @@ static struct {
 } editorGlobals;
 
 // vb[] is addressed 1-based via the handle's HIWORD: buffer index B → vb[B-1].
+// KIWI-UX (ROUND AB, ITEM 1): the binary's unchecked `return vb[buffer-1];` reads
+// vb[-1] for a zero handle and reads a slot beyond vbCount for a handle cached
+// before Editor_VB_ReleaseForReset restarted the pool.  kiwi_devicereset.cpp now
+// stops such handles from existing at all; this is the belt to that braces, and it
+// costs one compare on a path that is already a memory load.
 static inline IDirect3DVertexBuffer9 *Editor_VB_ForBuffer(unsigned buffer)
 {
+    if (buffer == 0 || buffer > editorGlobals.vbCount)
+        return nullptr;
     return editorGlobals.vb[buffer - 1];
 }
 
@@ -335,6 +342,13 @@ static void Editor_VB_WriteVertices(unsigned int handle, const float *tangent, i
     uint16_t firstIndex = 0;
     Editor_GetVertexBufferAndIndex(handle, &vb, &firstIndex);
     iassert(vb);                                              // 0x51ce9d (level 0)
+    // KIWI-UX (ROUND AB, ITEM 1): iassert is non-fatal in this build, so the assert
+    // above cannot stop the vb->Lock below.  Editor_VB_ForBuffer is now range-checked
+    // and can legitimately answer NULL; a write to a buffer that does not exist has
+    // nowhere to go, so drop the upload rather than AV.  The face just draws
+    // unshaded until the next rebuild.
+    if (!vb)
+        return;
 
     int offset = sizeof(GfxWorldVertex) * firstIndex;
     GfxWorldVertex *out = 0;
