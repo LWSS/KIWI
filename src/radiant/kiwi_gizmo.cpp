@@ -60,6 +60,7 @@
 #include "kiwi_transform.h"
 #include "kiwi_ux.h"
 #include "radiant_registry.h"
+#include "kiwi_vec.h"     // KIWI-UX (CLEANUP, A-15): the one spelling of Dot3/Sub3/...
 
 #include <math.h>
 
@@ -79,10 +80,12 @@ extern void  __cdecl R_AddRenderCmdDrawTris(
                  const float ( *xyzw )[4], const float ( *normal )[3], float *color,
                  const float ( *st )[2] );                               // 0x4fd1c0
 // KIWI-UX (ROUND AL, ITEM 2): the ALWAYS-ON-TOP mechanism is R_AddCmdClearScreen,
-// which needs no extern here — it is declared __cdecl in r_rendercmds.h:884,
-// included above, and its definition is r_rendercmds.cpp:1491.  The two existing
-// editor uses are camwnd.cpp:2889 (the binary's own selected-outline prelude,
-// 0x4084d2) and camwnd.cpp:3000 (the port's terrain-ring re-clear).
+// which needs no extern here — it is declared __cdecl in r_rendercmds.h:938,
+// included above, and its definition is r_rendercmds.cpp:1513.  The two existing
+// editor uses are camwnd.cpp:3399 (the binary's own selected-outline prelude,
+// 0x4084d2) and camwnd.cpp:3538 (the port's terrain-ring re-clear).
+// (KIWI-UX (ROUND BM): all four numbers re-checked and corrected — three of them
+//  were already stale before this round shifted the two files again.)
 
 namespace
 {
@@ -215,13 +218,6 @@ namespace
     float s_ringPrev  = 0.0f;              // last RAW in-plane angle, degrees
     float s_ringTotal = 0.0f;              // accumulated sweep since the grab, degrees
 
-    inline void  Copy3( const float *a, float *o ) { o[0]=a[0]; o[1]=a[1]; o[2]=a[2]; }
-    inline void  Sub3( const float *a, const float *b, float *o )
-    { o[0]=a[0]-b[0]; o[1]=a[1]-b[1]; o[2]=a[2]-b[2]; }
-    inline float Dot3( const float *a, const float *b )
-    { return a[0]*b[0] + a[1]*b[1] + a[2]*b[2]; }
-    inline void  Mad3( const float *a, const float *d, float s, float *o )
-    { o[0]=a[0]+d[0]*s; o[1]=a[1]+d[1]*s; o[2]=a[2]+d[2]*s; }
 
     // ray ∩ plane(point, normal).  A local copy of the same three lines
     // kiwi_transform.cpp's RayPlane runs: this file cannot reach into that
@@ -428,21 +424,12 @@ namespace
     }
 
     // Point→segment distance in pixels; `outT` is the clamped parameter along a→b.
-    float SegDist2D( float px, float py, float ax, float ay,
-                     float bx, float by, float *outT )
+    // KIWI-UX (CLEANUP, A-12): a sixth copy of the loop the finding counted five
+    // of — byte-identical, so it forwards to the one spelling in kiwi_pick.h.
+    inline float SegDist2D( float px, float py, float ax, float ay,
+                            float bx, float by, float *outT )
     {
-        const float dx = bx - ax, dy = by - ay;
-        const float len2 = dx * dx + dy * dy;
-        float t = 0.0f;
-        if ( len2 > 1.0e-6f )
-        {
-            t = ( ( px - ax ) * dx + ( py - ay ) * dy ) / len2;
-            if ( t < 0.0f )      t = 0.0f;
-            else if ( t > 1.0f ) t = 1.0f;
-        }
-        if ( outT )
-            *outT = t;
-        return Dist2D( px, py, ax + dx * t, ay + dy * t );
+        return Pick_SegDist2D( px, py, ax, ay, bx, by, outT );
     }
 
     // ── the translate hit test ──────────────────────────────────────────────
@@ -715,18 +702,21 @@ namespace
     // The hover/held states gain opacity as well as the tint the lines already
     // carry — on a FILL, "lighter colour" alone is a weak signal.
     const float KGZ_FILL_A_EMPH   = 0.72f;   // the plane square, hovered or held
-    const int   KGZ_CONE_SEGS     = 10;      // base ring of one arrowhead cone
 
     // ── the staging buffers ─────────────────────────────────────────────────
+    // KIWI-UX (CLEANUP, C-45): retallied against the CURRENT emitters — round AN
+    // replaced both arrowhead cones with single billboarded triangles, so nothing
+    // stages more than the origin disc any more.
+    //
     // ONE ELEMENT AT A TIME: FillFlush emits and resets, so these are sized by the
     // largest single element and not by the gizmo.  That is the origin DISC —
-    // KGZ_CENTER_SEGS (24) rim points + 1 centre = 25 verts, 24 triangles.  The
-    // cone is 1 + KGZ_CONE_SEGS + 1 = 12 verts and 2 * KGZ_CONE_SEGS = 20 tris.
-    // 40 / 40 leaves headroom for both and is 1 KB of statics.
+    // KGZ_CENTER_SEGS (24) rim points + 1 centre = 25 verts, 24 triangles.  Every
+    // other element is 1 tri (an arrowhead) or 2 (a plane quad).  40 / 40 leaves
+    // headroom and is 1 KB of statics.
     //
-    // BUDGET: at most 3 axis cones + 1 normal cone + 3 plane quads + 1 disc = 8
-    // R_AddRenderCmdDrawTris per frame, 4 * 20 + 3 * 2 + 24 = 110 triangles.  The
-    // rotate arm fills nothing (its rings are lines and always were).
+    // BUDGET: at most 3 axis heads + 1 normal head + 3 plane quads + 1 disc = 8
+    // R_AddRenderCmdDrawTris per frame, 3 * 1 + 1 + 3 * 2 + 24 = 34 triangles.
+    // The rotate arm fills nothing (its rings are lines and always were).
     enum { KGZ_FILL_MAX_VERTS = 40, KGZ_FILL_MAX_TRIS = 40 };
 
     float    s_fXyzw  [KGZ_FILL_MAX_VERTS][4];
@@ -755,7 +745,9 @@ namespace
     // question.  0.80 sits between the two with no constant near it.
     const float KGZ_FILL_FLAT_MIN = 0.80f;
 
-    void FillBegin( const camera_s *c, const float *rgb, float alpha )
+    // KIWI-UX (CLEANUP, C-53): no camera parameter — round AL replaced the `-vpn`
+    // normal with the constant s_fNrm (below), which is what made it dead.
+    void FillBegin( const float *rgb, float alpha )
     {
         float rgba[4] = { rgb[0], rgb[1], rgb[2], alpha };
         GfxColor packed;
@@ -779,7 +771,6 @@ namespace
         // lerps the whole vertex term away.  "The fills vanish and the outlines
         // stay" is that asymmetry, exactly.  A constant world normal removes it.
         KiwiTris_FillNormal( s_fNrm );
-        (void)c;
     }
 
     int FillVertex( const float *p )
@@ -831,39 +822,6 @@ namespace
         // ROUND AM: hand the pass's neutral bracket back, so the next element (and
         // every line pass after this one) starts from exactly what it did before.
         if ( s_fFlat ) { KiwiTris_FillNeutral(); s_fFlat = false; }
-    }
-
-    // A CLOSED cone: `tip`, a base ring of KGZ_CONE_SEGS points of `radius` about
-    // `base` in the (u, v) plane, and a base cap fan.  Closed so the head reads as
-    // a solid from behind as well as from in front — the outline pass alone always
-    // did, and a fill that vanished at some angles would be worse than none.
-    void FillCone( const camera_s *c, const float *tip, const float *base,
-                   const float *u, const float *v, float radius )
-    {
-        const int iTip  = FillVertex( tip );
-        const int iBase = FillVertex( base );
-        int first = -1, prev = -1;
-        for ( int k = 0; k < KGZ_CONE_SEGS; ++k )
-        {
-            const float th = ( 6.283185307179586f * (float)k ) / (float)KGZ_CONE_SEGS;
-            const float cs = cosf( th ) * radius;
-            const float sn = sinf( th ) * radius;
-            float p[3];
-            for ( int a = 0; a < 3; ++a )
-                p[a] = base[a] + u[a] * cs + v[a] * sn;
-            const int i = FillVertex( p );
-            if ( first < 0 )
-                first = i;
-            if ( prev >= 0 )
-            {
-                FillTri( iTip,  prev, i );      // side
-                FillTri( iBase, i,    prev );   // cap
-            }
-            prev = i;
-        }
-        FillTri( iTip,  prev,  first );
-        FillTri( iBase, first, prev );
-        FillFlush( c );
     }
 
     void EmitPlane( const gizmoGeo_t &g, int n )
@@ -972,7 +930,7 @@ namespace
         Mad3( base, side,  g.headWide, b1 );
         Mad3( base, side, -g.headWide, b2 );
 
-        FillBegin( c, HandleRgb( KGZ_AXIS_X + axis, axis ), KGZ_FILL_A_HEAD );
+        FillBegin( HandleRgb( KGZ_AXIS_X + axis, axis ), KGZ_FILL_A_HEAD );
         FillTri( FillVertex( tip ), FillVertex( b1 ), FillVertex( b2 ) );
         FillFlush( c );
     }
@@ -1016,7 +974,7 @@ namespace
         float b1[3], b2[3];
         Mad3( base, u,  g.headWide, b1 );
         Mad3( base, u, -g.headWide, b2 );
-        FillBegin( c, rgb, KGZ_FILL_A_HEAD );
+        FillBegin( rgb, KGZ_FILL_A_HEAD );
         FillTri( FillVertex( tip ), FillVertex( b1 ), FillVertex( b2 ) );
         FillFlush( c );
     }
@@ -1029,7 +987,7 @@ namespace
         float q[4][3];
         PlaneSquare( g, n, q );
         const int handle = KGZ_PLANE_X + n;
-        FillBegin( c, HandleRgb( handle, n ),
+        FillBegin( HandleRgb( handle, n ),
                    HandleEmph( handle ) ? KGZ_FILL_A_EMPH : KGZ_FILL_A_PLANE );
         const int i0 = FillVertex( q[0] );
         const int i1 = FillVertex( q[1] );
@@ -1044,7 +1002,7 @@ namespace
     // so the fill is exactly the ring's interior and the ring is exactly its edge.
     void FillCentreDisc( const gizmoGeo_t &g, const camera_s *c )
     {
-        FillBegin( c, HandleRgb( KGZ_CENTER, -1 ),
+        FillBegin( HandleRgb( KGZ_CENTER, -1 ),
                    HandleEmph( KGZ_CENTER ) ? 1.0f : KGZ_FILL_A_CENTRE );
         const int iC = FillVertex( g.anchor );
         int first = -1, prev = -1;
@@ -1082,15 +1040,15 @@ namespace
     // THE MECHANISM IS THE EDITOR'S OWN, not a material trick.  The binary's
     // selected-brush white outline opens with R_AddClearCmd(6 = depth|stencil)
     // "so the selected wireframe passes the depth test against the coplanar
-    // geometry and shows THROUGH" (camwnd.cpp:2883-2889, 0x4084d2), and the port
+    // geometry and shows THROUGH" (camwnd.cpp:2969-2975, 0x4084d2), and the port
     // already re-issues exactly that call a second time when a later pass has
-    // dirtied the buffer under an overlay (camwnd.cpp:2996-3001, the terrain-paint
+    // dirtied the buffer under an overlay (camwnd.cpp:3082-3087, the terrain-paint
     // ring: "the port's filled patch pass can leave depth under the cursor, so
     // re-clear to preserve that overlay relationship").  This is the third use and
     // it is the same sentence.
     //
     // WHAT IT BUYS THAT THE EXISTING CLEAR DID NOT.  The KIWI overlay block
-    // (camwnd.cpp:3007-3095) runs a long way after that prelude, and EVERY line
+    // (camwnd.cpp:3093-3181) runs a long way after that prelude, and EVERY line
     // pass in it writes depth — $line is depthTest LESSEQUAL / depthWrite ON
     // (main/materials/$line refStateBits[1] = 0x0d, decoded at camwnd.cpp:2422-
     // 2432).  Hover outlines, construction lines, the marquee, the patch lattice,

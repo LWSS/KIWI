@@ -19,6 +19,7 @@
 #include "kiwi_pick.h"
 #include "kiwi_trim.h"
 #include "kiwi_units.h"
+#include "kiwi_vec.h"     // KIWI-UX (CLEANUP, A-15): the one spelling of Dot3/Sub3/...
 
 #include <math.h>
 #include <stdarg.h>
@@ -67,12 +68,6 @@ namespace
     //      against 200 nearby segments.
     const int KTRIM_MAX_PAIRS = 40000;
 
-    inline void  Copy3( const float *a, float *o ) { o[0]=a[0]; o[1]=a[1]; o[2]=a[2]; }
-    inline void  Sub3 ( const float *a, const float *b, float *o )
-    { o[0]=a[0]-b[0]; o[1]=a[1]-b[1]; o[2]=a[2]-b[2]; }
-    inline float Dot3 ( const float *a, const float *b )
-    { return a[0]*b[0] + a[1]*b[1] + a[2]*b[2]; }
-    inline float Len3 ( const float *a ) { return sqrtf( Dot3( a, a ) ); }
 
     // ══════════════════════════════════════════════════════════════════════════
     //  KIWI-UX (ROUND AF, ITEM 4) — THE TYPE GATE WAS THE WHOLE BLOCKER
@@ -118,6 +113,26 @@ namespace
     bool IsParametricShape( const kconObject_t &o )
     {
         return o.type == KCON_CIRCLE || o.type == KCON_ARC || o.type == KCON_RECT;
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    //  KIWI-UX (ROUND BL, ITEM 2) — WHOSE SEGMENTS ARE THE USER'S OWN EDGES?
+    // ══════════════════════════════════════════════════════════════════════════
+    // The round-BK directive — *"if I create a triangle, it eats only 1 line of
+    // that triangle"* — is a statement about the edges the USER DREW.  For a LINE,
+    // a POLYLINE and a RECT those are exactly the stored points' segments: three
+    // clicks make three edges, and KiwiCon_SegmentWorld hands them back one for one.
+    //
+    // A CIRCLE or an ARC has no stored points at all (KiwiCon_VertCount tessellates
+    // them, kiwi_construct.cpp:726-733) and its "segments" are 1/64ths of a curve
+    // nobody placed.  Clamping a trim to one of those would eat 5.6 degrees of a
+    // ring per click and would silently undo round AF item 4, whose whole directive
+    // was *"a circle to make a half circle by eating half the links"* — i.e. the arc
+    // between two crossings.  So the clamp below applies to the stored-point types
+    // and the crossing-span machinery keeps the parametric ones, unchanged.
+    bool StoredSegments( const kconObject_t &o )
+    {
+        return o.type == KCON_LINE || o.type == KCON_POLYLINE || o.type == KCON_RECT;
     }
 
     // ── the flattened object: world points + cumulative arc length ───────────
@@ -419,6 +434,11 @@ namespace
         // here, so the destructive fallback round T removed cannot come back.
         // A stray highlights WHOLE and a click deletes the object outright.
         bool  whole  = false;
+        // KIWI-UX (ROUND BL, ITEM 2): the span came from the STORED-SEGMENT clamp,
+        // i.e. it is one edge the user drew (possibly narrowed by crossings inside
+        // it) rather than an arc between crossings.  Read by the HUD only — the
+        // trim itself has one span and does not care where it came from.
+        bool  segment = false;
     };
 
     // Which object the "too much geometry" refusal was last announced for, so the
@@ -442,6 +462,12 @@ namespace
         int   bestObj  = -1;
         float bestDist = 0.0f;
         float bestPar  = 0.0f;
+        // ── KIWI-UX (ROUND BK, ITEM 3): THE HOVERED SEGMENT'S OWN BOUNDS ─────
+        // The arc-length parameters of the two VERTICES the cursor's segment runs
+        // between.  Latched in the same inner loop that finds `bestPar`, so it can
+        // never disagree with it about which segment was hovered.
+        float bestSegLo = 0.0f;
+        float bestSegHi = 0.0f;
         chain_t bestChain;
 
         const int count = KiwiCon_Count();
@@ -462,17 +488,9 @@ namespace
                 if ( !Pick_WorldToImage( &c.p[(size_t)k * 3], &ax, &ay )
                   || !Pick_WorldToImage( &c.p[( (size_t)k + 1 ) * 3], &bx, &by ) )
                     continue;                    // an end behind the eye — skip whole
-                const float ex = bx - ax, ey = by - ay;
-                const float len2 = ex * ex + ey * ey;
-                float t = 0.0f;
-                if ( len2 > 1.0e-6f )
-                {
-                    t = ( ( curX - ax ) * ex + ( curY - ay ) * ey ) / len2;
-                    if ( t < 0.0f ) t = 0.0f;
-                    if ( t > 1.0f ) t = 1.0f;
-                }
-                const float dx = ax + ex * t - curX, dy = ay + ey * t - curY;
-                const float d  = sqrtf( dx * dx + dy * dy );
+                // KIWI-UX (CLEANUP, A-12): one spelling, kiwi_pick.h.
+                float       t = 0.0f;
+                const float d = Pick_SegDist2D( curX, curY, ax, ay, bx, by, &t );
                 // KIWI-UX (ROUND K): KCON_LINE_PIXELS — Trim aims at the same
                 // hairline the click and the hover aim at (kiwi_construct.h).
                 if ( d > KCON_LINE_PIXELS )
@@ -482,6 +500,8 @@ namespace
                 bestObj   = i;
                 bestDist  = d;
                 bestPar   = c.cum[k] + ( c.cum[k + 1] - c.cum[k] ) * t;
+                bestSegLo = c.cum[k];                    // ROUND BK, ITEM 3
+                bestSegHi = c.cum[k + 1];
                 bestChain = c;
             }
         }
@@ -513,48 +533,82 @@ namespace
         out->cuts   = (int)cuts.size();
         const float total = bestChain.Total();
 
+        // ══════════════════════════════════════════════════════════════════════
+        //  KIWI-UX (ROUND BL, ITEM 2) — THE SEGMENT CLAMP IS AN INVARIANT NOW,
+        //                                NOT A ZERO-CROSSING FALLBACK.
+        // ══════════════════════════════════════════════════════════════════════
+        // USER REPORT, verbatim: *"The trim tool still deletes the entire triangle
+        // when used."*  Round BK answered the same report and did not fix it, and
+        // the reason is one word in its own code: the segment bounds it latched
+        // (`bestSegLo`/`bestSegHi`) were only ever CONSULTED inside `if
+        // ( cuts.empty() )`.  Any chain with a crossing fell straight back through
+        // to the round-T span logic below, which bounds the span by the object's
+        // ENDS and improves those bounds only with a cut STRICTLY inside them.
+        //
+        // THE USER'S TRIANGLE HAS CROSSINGS.  A triangle sketched with the chained
+        // curve tool and finished with Enter/RMB rather than by clicking the first
+        // point again is stored as an OPEN four-point chain v0,v1,v2,v0 — the close
+        // arm is `PointCount() >= 3 && NearFirstPoint()` on the CLICK
+        // (kiwi_construct.cpp:3187-3192) and nothing else sets `closed`, while
+        // NormalizePoints deliberately does NOT weld a seam on an open chain
+        // (kiwi_construct.cpp:977-988: *"an OPEN chain that happens to come back to
+        // its own start is a legal shape"*).  GatherCuts then finds the pair
+        // (segment 0, segment 2): they are non-adjacent, they share the point v0, so
+        // it records crossings at parameters 0 and `total`.  The open arm below
+        // starts at lo = 0 / hi = total and cannot improve either bound with a cut
+        // that IS 0 and a cut that IS total — so the span became the whole chain,
+        // both keep-ranges came back empty and CommitTrim deleted the object.  That
+        // is the report, exactly, and it is reproducible from the store alone.
+        //
+        // The fix is not another special case: WHAT THE TICK MARKS IS WHAT DIES.
+        // The hovered SEGMENT's own two vertices bound the span unconditionally, and
+        // crossings may only narrow it FURTHER (a line crossing one edge of the
+        // triangle splits that edge, and the click takes the piece under the cursor).
+        // So it no longer matters which of the two spellings of "triangle" the user
+        // drew, whether anything crosses it, or whether the loop is flagged closed —
+        // one click, one segment, every time.
+        const kconObject_t *hoverObj = KiwiCon_At( bestObj );
+        if ( hoverObj && StoredSegments( *hoverObj ) )
+        {
+            out->wrap    = false;              // a segment never crosses the seam:
+            out->segment = true;               // the wrap point is a chain VERTEX
+            out->lo      = bestSegLo;
+            out->hi      = bestSegHi;
+            for ( size_t i = 0; i < cuts.size(); ++i )
+            {
+                const float c = cuts[i];
+                if ( c <= bestSegLo + 1.0e-4f || c >= bestSegHi - 1.0e-4f )
+                    continue;                  // outside this segment: not our business
+                if ( c <= bestPar && c > out->lo ) out->lo = c;
+                if ( c >  bestPar && c < out->hi ) out->hi = c;
+            }
+            // DERIVED, exactly as round BK left it: "this click removes the whole
+            // object", which for a one-segment stray line it does — round AQ's
+            // stray delete survives untouched, and only for that shape.
+            out->whole = ( out->lo <= 1.0e-4f ) && ( out->hi >= total - 1.0e-4f );
+            return true;
+        }
+
+        // ── everything below is the PARAMETRIC arm (circle / arc) ────────────
+        // Its segments are tessellation, not edges, so the span stays the arc
+        // between crossings (round AF item 4) and a ring nothing crosses is a stray
+        // that goes whole (round AQ item 5).  Round BK's segment answer was wrong
+        // for BOTH of those and is withdrawn here.
+        if ( cuts.empty() )
+        {
+            out->wrap  = false;
+            out->lo    = 0.0f;
+            out->hi    = total;
+            out->whole = true;
+            return true;
+        }
+
         if ( !bestChain.closed )
         {
-            // ── ROUND T: NO CROSSINGS IS NOT A REASON TO EAT THE WHOLE CURVE ──
-            // USER REPORT: "it tries to trim the entire curve instead of just the
-            // parts that extend past a colliding line."
-            //
-            // Shakeout H made a zero-crossing chain trim to lo = 0 / hi = total,
-            // i.e. a click deleted the object, and said so out loud: "Plasticity
-            // makes it a no-op (TrimFactory.ts:52).  KIWI deletes, because a line
-            // with nothing crossing it has no excess bit to remove."  That reading
-            // is wrong in exactly the way the user found: whenever a crossing was
-            // MISSED for any reason (and the self-crossing skip above was missing
-            // them wholesale), the fallback turned a trim into a delete — the most
-            // destructive possible answer to "I could not find the boundary".
-            //
-            // KIWI now agrees with Plasticity: no crossings, no trim.  The console
-            // says why and points at the key that does mean "get rid of this one".
-            //
-            // ── KIWI-UX (ROUND AQ, ITEM 5): …EXCEPT THAT IT IS NOW A DELETE ──
-            // The round-T argument above is about a MISSED crossing being turned
-            // into a delete, and every one of its examples is a chain that HAS
-            // crossings the scan failed to find.  A chain that genuinely has none
-            // is a different object: a stray, left over from trimming everything
-            // around it, and the user's answer to it was "select it, press
-            // Delete" — three inputs and a mode change for something they are
-            // already hovering with the tool that removes geometry.  So the
-            // zero-crossing case becomes a WHOLE-OBJECT delete rather than a
-            // refusal.  The distinction round T needed is preserved intact,
-            // because the INCOMPLETE-scan case (GatherCuts returning false) is
-            // refused above this point and never reaches here — a missed crossing
-            // still cannot become a delete.
-            if ( cuts.empty() )
-            {
-                out->whole = true;
-                out->lo    = 0.0f;
-                out->hi    = total;
-                return true;
-            }
-
-            // OPEN: bounded by the nearest cut below and above, falling back to the
-            // object's own ends — which is now only ever ONE end, because the
-            // zero-crossing case is refused above.
+            // OPEN ARC: bounded by the nearest cut below and above, falling back to
+            // the object's own ends.  The zero-crossing case is the whole-object
+            // stray delete above (round AQ item 5), so at most ONE of these two
+            // bounds is ever an end.
             out->lo = 0.0f;
             out->hi = total;
             for ( size_t i = 0; i < cuts.size(); ++i )
@@ -586,27 +640,25 @@ namespace
         // crossed ring does not fill the console.
         // KIWI-UX (ROUND AQ, ITEM 5): a closed loop that NOTHING crosses is a stray
         // in exactly the same sense as an open one — a circle drawn and orphaned —
-        // so it takes the whole-object delete too.  A loop with EXACTLY ONE
-        // crossing is NOT a stray: something does cross it, the span is simply
-        // ill-defined, and that keeps the round-AF explanation below.
-        if ( cuts.empty() )
-        {
-            out->whole = true;
-            out->wrap  = false;
-            out->lo    = 0.0f;
-            out->hi    = total;
-            return true;
-        }
+        // so it takes the whole-object delete too (handled above, before this arm).
+        // A loop with EXACTLY ONE crossing is NOT a stray: something does cross it,
+        // the span is simply ill-defined, and that keeps the round-AF explanation.
+        // KIWI-UX (ROUND BL, ITEM 2): the round-BK "one edge" answer that used to
+        // sit here has moved UP, into the stored-segment clamp, where it now covers
+        // every polyline and rect whether or not anything crosses them.  A CIRCLE
+        // reaching this point is a ring whose "edges" are tessellation, and the
+        // round-AF arc-between-crossings answer is the right one for it.
         if ( cuts.size() < 2 )
         {
             if ( s_loopWarnedObj != bestObj )
             {
                 s_loopWarnedObj = bestObj;
-                Sys_Printf( "Trim: that is a CLOSED loop and %s crosses it — a loop "
-                            "needs TWO crossings before an arc between them exists. "
-                            " Draw a second line across it (a diameter gives you two "
-                            "halves).\n",
-                            cuts.empty() ? "nothing" : "only one line" );
+                // KIWI-UX (CLEANUP, A-20): the empty case returned above (round AQ's
+                // whole-object stray delete), so cuts.size() is exactly 1 here.
+                Sys_Printf( "Trim: that is a CLOSED loop and only one line crosses "
+                            "it — a loop needs TWO crossings before an arc between "
+                            "them exists.  Draw a second line across it (a diameter "
+                            "gives you two halves).\n" );
             }
             out->valid = false;
             return false;
@@ -760,10 +812,17 @@ namespace
             s_loopWarnedObj  = -1;         // ROUND AF, ITEM 4
             // KIWI-UX (ROUND AQ, ITEM 5): the stray delete is advertised here, in
             // the one string the tool shows before anything is hovered.
-            SetHud( "trim  ·  hover a line: click removes the span between crossings, "
-                    "or the WHOLE object when nothing crosses it  ·  RMB/Enter: done" );
-            Sys_Printf( "Trim: click the overhanging piece of a line.  "
-                        "RMB or Enter when finished.\n" );
+            // KIWI-UX (ROUND BL, ITEM 2): the advertised rule is now the rule the
+            // tool actually follows — on anything drawn point by point, the click
+            // takes THE SEGMENT UNDER THE CURSOR, crossed or not, closed or not.
+            SetHud( "trim  ·  hover a line: click removes the ONE SEGMENT under the "
+                    "cursor (a crossing inside it shortens the piece)  ·  circles "
+                    "lose the arc between crossings  ·  RMB/Enter: done" );
+            Sys_Printf( "Trim: click a segment to remove it — a triangle loses that "
+                        "one edge and stays a chain, a lone line goes whole.  A line "
+                        "crossing the segment shortens what goes.  Circles and arcs "
+                        "lose the arc between two crossings.  RMB or Enter when "
+                        "finished.\n" );
             return true;
         }
 
@@ -799,9 +858,9 @@ namespace
                 // cursor" plus the one remaining refusal (a loop with exactly one
                 // crossing), which prints its own line from HoverAt.
                 Sys_Printf( "Trim: nothing to trim there — no construction line is "
-                            "under the cursor.  Hovering one removes the span between "
-                            "its crossings, or the whole object when nothing crosses "
-                            "it.\n" );
+                            "under the cursor.  Hovering one removes the segment "
+                            "under the cursor (an arc between crossings on a circle "
+                            "or arc).\n" );
                 return true;
             }
             // ── KIWI-UX (ROUND AQ, ITEM 5): THE STRAY, DELETED WHOLE ────────
@@ -822,8 +881,11 @@ namespace
                 KiwiCon_UndoPush();               // kiwi_construct.h:636
                 KiwiCon_RemoveAt( m_hover.object );// kiwi_construct.h:549
                 ++m_trims;
-                Sys_Printf( "Trim: stray removed (nothing crossed it, so the whole "
-                            "object went).\n" );
+                // KIWI-UX (ROUND BK, ITEM 3): `whole` is derived now — it means the
+                // hovered SEGMENT is the whole object, i.e. a one-segment stray (or,
+                // on the parametric arm, a ring nothing crosses).
+                Sys_Printf( "Trim: stray removed (the piece under the cursor WAS the "
+                            "whole object, so all of it went).\n" );
                 m_hover = hover_t();
                 UpdateHud();
                 g_nUpdateBits |= 1;
@@ -915,8 +977,27 @@ namespace
             // the highlight covers the whole object and the click is not a trim.
             if ( m_hover.whole )
             {
-                SetHud( "trim  ·  STRAY (nothing crosses it)  ·  click: DELETE WHOLE  "
-                        "·  %i removed  ·  RMB/Enter: done", m_trims );
+                SetHud( "trim  ·  STRAY (one segment, nothing crosses it)  ·  "
+                        "click: DELETE WHOLE  ·  %i removed  ·  RMB/Enter: done", m_trims );
+                return;
+            }
+            // KIWI-UX (ROUND BK, ITEM 3 / ROUND BL, ITEM 2): on a line, polyline or
+            // rect the span IS one drawn edge — crossings inside it can only make it
+            // shorter — and the readout says SEGMENT so that "3 crossings" plus a
+            // length can never read as "this is about to eat everything".
+            if ( m_hover.segment )
+            {
+                char sb[32];
+                KiwiUnits_Format( sb, sizeof( sb ), m_hover.hi - m_hover.lo );
+                // ROUND AF, ITEM 4's warning belongs here too: a RECT reaches this
+                // branch (its four segments ARE its edges) and does not survive the
+                // trim as a rect.  Said BEFORE the click, same as the other arm.
+                const kconObject_t *so = KiwiCon_At( m_hover.object );
+                SetHud( "trim  SEGMENT %s  (%i crossing%s on this line)%s  ·  "
+                        "click: REMOVE that segment  ·  %i removed  ·  RMB/Enter: done",
+                        sb, m_hover.cuts, ( m_hover.cuts == 1 ) ? "" : "s",
+                        ( so && IsParametricShape( *so ) ) ? "  ·  becomes a polyline" : "",
+                        m_trims );
                 return;
             }
             const float span = m_hover.wrap ? 0.0f : ( m_hover.hi - m_hover.lo );

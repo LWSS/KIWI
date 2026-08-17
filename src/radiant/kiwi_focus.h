@@ -84,5 +84,32 @@ bool KiwiFocus_SelectionBounds( float mins[3], float maxs[3] );
 // §3 palette predicate — greys the row on an empty world.
 bool KiwiFocus_CanFocus();
 
+// ── KIWI-UX (ROUND BK, ITEM 7): SPACE — THE CAMERA GOES IN FRONT OF A FACE ──
+//
+//     KIWI_CMD_VIEW_FACE  34132   INSTANT, modern key Space
+//
+// USER DIRECTIVE, verbatim: *"Pressing [Space] on a face should mimic what
+// Plasticity does.  It moves the camera in front of that face (similar to /)."*
+//
+// THIS IS THE VERB THE HEADER ABOVE SAYS WAS NOT SHIPPED.  Round J identified it
+// correctly — Plasticity's `viewport:navigate:selection`, space,
+// default-keymap.ts:231 — and declined it because Space was classic Radiant's
+// Clone (33001).  The user has asked for the key by name, so the MODERN keymap
+// moves Clone to Shift+Space (kiwi_keymap.cpp carries the audit) and the classic
+// profile is untouched.  KIWI ships the CAMERA half only: unlike Plasticity's, it
+// does not swap the construction plane (KIWI has five explicit commands for that)
+// and does not change the projection.
+//
+// THE MATH IS `/`'S.  The face's winding AABB goes through the same
+// KiwiCam_FrameBounds fit (margin, radius floor, the smaller of the two tangents),
+// after a KiwiCam_LookAlong that points the view axis down -normal.  So a face
+// whose normal is a world axis lands on that axis view exactly, and an angled face
+// is viewed square-on.
+//
+// WHICH FACE: the ACTIVE selected face, else the first selected face, else the one
+// under the cursor.  Nothing selected and nothing hovered prints a line naming
+// FACE mode.
+bool KiwiFocus_CanViewFace();      // §3 palette predicate
+
 void KiwiFocus_RegisterCommands();
 bool KiwiFocus_DispatchInstant( unsigned int cmdId );

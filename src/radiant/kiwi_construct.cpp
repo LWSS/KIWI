@@ -3,9 +3,10 @@
 #endif
 // ─────────────────────────────────────────────────────────────────────────────
 // kiwi_construct.cpp — RADIANT_UX_DESIGN §7 / §16 / Phase-4 items 21+22.
-// See kiwi_construct.h for the four scope rulings this file is built on
-// (construction geometry is outside selection_t, it has its own undo stack, its
-// points live in plane space, and its persistence is a sidecar).
+// See kiwi_construct.h for the three scope rulings this file is built on
+// (construction geometry is outside selection_t, it has its own undo stack, and
+// its points live in WORLD space — shakeout H).  Its persistence is a sidecar.
+// KIWI-UX (CLEANUP, A-43)
 //
 // NEW code over the ported cores.  Nothing here mutates map data; the only
 // ported entry points it touches are the camera accessors, the pick API and the
@@ -76,6 +77,7 @@
 #include "kiwi_viewcube.h"            // ROUND Y: KiwiViewCube_ViewAxis (the axis-view rung)
 #include "kiwi_visibility.h"          // ROUND AO: the §7 sidecar also carries hidden SOLIDS
 #include "radiant_registry.h"
+#include "kiwi_vec.h"     // KIWI-UX (CLEANUP, A-15): the one spelling of Dot3/Sub3/...
 
 #include <math.h>
 #include <stdarg.h>
@@ -84,12 +86,15 @@
 #include <string.h>
 
 // ── ported entry points (each verified against its definition) ──────────────
-extern int       Sys_Printf( const char *fmt, ... );          // win_qe3.cpp
-extern camera_s *Ed_Camera();                                 // camwnd.cpp
-extern void      CamWnd_BuildMatrix();                        // camwnd.cpp 0x403470
-extern int       g_nUpdateBits;                               // 0x25D5A74 (mainfrm.cpp)
-extern bool      ImGuiShell_CameraPaintCursor( int *x, int *y, int *w, int *h );  // imgui_shell.cpp
-extern bool      Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId );  // mainfrm.cpp
+// KIWI-UX (CLEANUP, A-67): cites re-derived from the tree, and Radiant_ExecCommand
+// moved here from KiwiCon_MenuItems' body -- file scope is the house rule.
+extern int       Sys_Printf( const char *fmt, ... );          // win_qe3.cpp:112
+extern camera_s *Ed_Camera();                                 // camwnd.cpp:156
+extern void      CamWnd_BuildMatrix();                        // camwnd.cpp:209 (0x403470)
+extern int       g_nUpdateBits;                               // engine_stubs.cpp:773 (0x25D5A74)
+extern bool      ImGuiShell_CameraPaintCursor( int *x, int *y, int *w, int *h );  // imgui_shell.cpp:290
+extern bool      Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId );  // mainfrm.cpp:1340
+extern void      Radiant_ExecCommand( unsigned int cmdId );   // mainfrm.cpp:4083
 
 namespace
 {
@@ -155,32 +160,26 @@ namespace
 
     kconPlane_t s_plane;                          // the ACTIVE construction plane
     bool        s_planeSeeded = false;
-
-    // ── small vector helpers (same spelling as kiwi_transform.cpp) ──────────
-    inline float Dot3( const float *a, const float *b )
-    {
-        return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-    }
-    inline void Copy3( const float *a, float *o ) { o[0]=a[0]; o[1]=a[1]; o[2]=a[2]; }
-    inline void Sub3( const float *a, const float *b, float *o )
-    { o[0]=a[0]-b[0]; o[1]=a[1]-b[1]; o[2]=a[2]-b[2]; }
-    inline void Mad3( const float *a, const float *d, float s, float *o )
-    { o[0]=a[0]+d[0]*s; o[1]=a[1]+d[1]*s; o[2]=a[2]+d[2]*s; }
-    inline void Cross3( const float *a, const float *b, float *o )
-    {
-        o[0] = a[1]*b[2] - a[2]*b[1];
-        o[1] = a[2]*b[0] - a[0]*b[2];
-        o[2] = a[0]*b[1] - a[1]*b[0];
-    }
-    inline float Len3( const float *a ) { return sqrtf( Dot3( a, a ) ); }
-    bool Norm3( float *v )
-    {
-        const float l = Len3( v );
-        if ( !( l > 1.0e-6f ) )
-            return false;
-        v[0] /= l; v[1] /= l; v[2] /= l;
-        return true;
-    }
+    // ── KIWI-UX (ROUND BP, ITEM 3): THE PLANE IS EXPLICIT, OR IT IS THE DEFAULT ──
+    // USER RULING, verbatim: *"construction planes should only be made with
+    // [space], usually, the current behavior is too strict.  That's what it is."*
+    // s_planeExplicit is true only when a plane arrived through a gesture the user
+    // MADE — Space on a face, the §16 palette rows, or a face they had selected.
+    // Everything else draws on the default plane, recomputed from scratch at each
+    // tool start so nothing can latch.  s_planeDesc is what the PLANE chip says.
+    bool        s_planeExplicit = false;
+    char        s_planeDesc[64] = { 0 };
+    // ── KIWI-UX (ROUND BR): THE SELECTED-FACE RUNG IS ARMED, NOT AMBIENT ────────
+    // USER RULING: planes come from [Space], the §16 palette rows and the Shift+A
+    // flow — and from nothing else.  Round BP kept "exactly ONE face SELECTED sets
+    // the plane and marks it EXPLICIT" as a standing rung of
+    // KiwiCon_AutoPlaneForTool, but selecting a face is ROUTINE in Face mode (one
+    // click does it — kiwi_boxselect.cpp ClickSelect), so that rung fired on the
+    // ordinary path and silently minted an explicit plane the user never asked for.
+    // It is now a ONE-SHOT ARM, set only by the gesture the exception was written
+    // for (a creation chord preempting a parked face — kiwi_command.cpp's round-U
+    // rung) and consumed by the next tool start whether it fires or not.
+    bool        s_selFacePlaneArmed = false;
 
     void Touch()
     {
@@ -233,6 +232,110 @@ namespace
         return CardinalSegs( n );      // ROUND AG, ITEM 5(b)
     }
 
+    // ── KIWI-UX (CLEANUP, A-60): THE ROUND-TOOL PREVIEW WALK, ONCE ──────────
+    // The three round tools (circle, arc, 2-point circle) each spelled the same
+    // KiwiCon_SegmentCount / KiwiCon_SegmentWorld / KiwiLines_Add walk over a
+    // throwaway preview object.  Round AQ item 6 had to fix the SAME
+    // `preview.segs = m_sidesOverride` omission at all three — the copy-paste tax,
+    // already paid once — so the walk is one body now.  The caller still sets the
+    // colour and still owns everything around it: the arc's stage-1 radius handle
+    // and the 2-point circle's diameter handle are genuinely their own and are NOT
+    // folded in here.  Returns false when the line budget ran out mid-walk, which
+    // is what the callers' `return` meant.
+    bool DrawObjectPreview( const kconObject_t &preview )
+    {
+        const int segs = KiwiCon_SegmentCount( preview );
+        for ( int i = 0; i < segs; ++i )
+        {
+            float a[3], b[3];
+            if ( !KiwiCon_SegmentWorld( preview, i, a, b ) )
+                break;
+            if ( !KiwiLines_Add( a, b ) )
+                return false;
+        }
+        return true;
+    }
+
+    // ── KIWI-UX (CLEANUP, A-58): "u FROM THE LONGEST EDGE", ONCE ────────────
+    // The seed direction for a construction plane's u axis: the longest edge of a
+    // closed ring of `count` world points (3 floats each, first point NOT
+    // repeated — the scan WRAPS).  It is the numerically safest in-plane
+    // direction available and it lines the object's own grid up with the object.
+    // Returns false when there is no edge above 1e-3, i.e. when there is no
+    // meaningful hint and KiwiCon_MakePlane should pick its own basis.
+    //
+    // It was written three times — KiwiCon_FitPlane over a flat point array,
+    // PlaneFromFacePick and KiwiCon_SetPlaneFromSelectedFace over a winding —
+    // and the third's comment already said it copies the second.  A `winding_t`
+    // holds its points as `float p[][3]`, contiguous, so all three are the same
+    // walk over the same layout; only the accessor spelling differed.
+    //
+    // The WRAP is load-bearing and is the thing that had already drifted once:
+    // shakeout H fixed FitPlane's scan to include the closing edge (it stopped at
+    // count-1), and only that copy carried the note.  One body, one wrap.
+    bool LongestEdgeHint( const float *pts, int count, float out[3] )
+    {
+        out[0] = out[1] = out[2] = 0.0f;
+        if ( !pts || count < 2 )
+            return false;
+        float bestLen = 0.0f;
+        for ( int i = 0; i < count; ++i )
+        {
+            float e[3];
+            Sub3( &pts[(size_t)( ( i + 1 ) % count ) * 3], &pts[(size_t)i * 3], e );
+            const float l = Len3( e );
+            if ( l > bestLen ) { bestLen = l; Copy3( e, out ); }
+        }
+        return bestLen > 1.0e-3f;
+    }
+
+    // ── KIWI-UX (CLEANUP, A-61): THE RECT QUAD, BUILT ONCE AND DRAWN ONCE ───
+    // KiwiRectTool and KiwiRectCenterTool each spelled the plane-space -> world
+    // push loop in Finish and the `& 3` wrap loop in DrawWorld, with near-identical
+    // comments about the CCW convention.  What genuinely differs between them is
+    // only how the four (u,v) corners are DERIVED — min/max of two clicks versus
+    // centre +/- half — so the tables stay at their own sites and the loops live
+    // here.  CCW in plane space, so a region derived from the object needs no
+    // rewind.
+    void EmitRectQuad( const kconPlane_t &plane, const float uv[4][2], kconObject_t *o )
+    {
+        for ( int i = 0; i < 4; ++i )
+        {
+            float w[3];
+            KiwiCon_PlaneToWorld( plane, uv[i], w );
+            o->pts.push_back( w[0] );  o->pts.push_back( w[1] );  o->pts.push_back( w[2] );
+        }
+    }
+
+    void DrawRectQuad( const kconPlane_t &plane, const float uv[4][2] )
+    {
+        for ( int i = 0; i < 4; ++i )
+        {
+            float w0[3], w1[3];
+            KiwiCon_PlaneToWorld( plane, uv[i], w0 );
+            KiwiCon_PlaneToWorld( plane, uv[( i + 1 ) & 3], w1 );
+            if ( !KiwiLines_Add( w0, w1 ) )
+                return;
+        }
+    }
+
+    // KIWI-UX (CLEANUP, A-59): the KCON_SIDES_MIN..KCON_SEGS_MAX ladder, once.
+    // It was written out verbatim at FIVE sites (CircleSegsFor, the Tab sides
+    // field, the profile read, KiwiCon_SetToolSides and the sidecar's `sides`
+    // arm), which is what makes A-46 the kind of bug it is: reading one ladder and
+    // not the others gives the wrong answer about what a typed count does.
+    //
+    // PolySides() is deliberately NOT folded in — it clamps to
+    // KCON_POLY_SIDES_MIN/MAX, which are different bounds for a different shape
+    // (a polygon really can be a triangle), and merging them would be merging two
+    // questions.
+    int ClampSides( int n )
+    {
+        if ( n < KCON_SIDES_MIN ) n = KCON_SIDES_MIN;
+        if ( n > KCON_SEGS_MAX  ) n = KCON_SEGS_MAX;
+        return n;
+    }
+
     // ── KIWI-UX (ROUND AF, ITEM 7): THE USER'S COUNT OUTRANKS THE RULE ──────
     // A full circle's segment count: the object's own `segs` when it has one, else
     // the radius-driven rule.  ONE choke point, so every reader — VertCount,
@@ -242,9 +345,7 @@ namespace
     {
         if ( o.segs <= 0 )
             return CircleSegs( o.radius );
-        int n = o.segs;
-        if ( n < KCON_SIDES_MIN ) n = KCON_SIDES_MIN;
-        if ( n > KCON_SEGS_MAX  ) n = KCON_SEGS_MAX;
+        int n = ClampSides( o.segs );
         // ROUND AG, ITEM 5(b): a TYPED count rounds up to a multiple of four for
         // exactly the same reason the automatic one does — the user asked for the
         // cardinals, not for their count to be honoured to the unit.  The HUD and
@@ -252,9 +353,13 @@ namespace
         // typing 30 and seeing 32 is a statement the editor makes out loud rather
         // than a discrepancy the mapper has to discover from the geometry.
         //
-        // The ARC deliberately does NOT get this: ArcSegs takes this count PRO RATA
-        // over its own sweep, which is arbitrary, so there are no cardinals to hit
-        // and forcing a multiple of four there would only coarsen it.
+        // KIWI-UX (CLEANUP, A-45): the ARC does NOT escape this.  Its FULL-CIRCLE
+        // density is rounded here like any other — ArcSegs calls this function —
+        // and ArcSegs then pro-rates the rounded number by the sweep, so it is the
+        // arc's OWN segment count that is not itself a multiple of four.  Nothing
+        // rounds after the pro-rata step, because an arbitrary sweep has no
+        // cardinals to hit.  KiwiArcTool::ToolSides reports the ROUNDED full-circle
+        // number, which is what the field sets.
         return CardinalSegs( n );
     }
 
@@ -271,7 +376,7 @@ namespace
     void ArcPointUV( const kconObject_t &o, float t, float outUV[2] )
     {
         const float deg = o.ang0 + ( o.ang1 - o.ang0 ) * t;
-        const float rad = deg * 0.01745329252f;
+        const float rad = deg * KCON_DEG2RAD;
         outUV[0] = o.centre[0] + cosf( rad ) * o.radius;
         outUV[1] = o.centre[1] + sinf( rad ) * o.radius;
     }
@@ -532,26 +637,13 @@ bool KiwiCon_FitPlane( const float *worldPts, int count, kconPlane_t *out )
     for ( int k = 0; k < 3; ++k )
         c[k] /= (float)count;
 
-    // Seed u from the LONGEST edge, the same choice PlaneFromFacePick makes for a
-    // brush face: it is the numerically safest in-plane direction available and it
-    // lines the object's own grid up with the object.
-    // SHAKEOUT H FIX: the scan WRAPS, exactly as the Newell sum above does.  It
-    // used to stop at count-1 and skip the closing edge, so a loop whose longest
-    // edge happened to be the closing one seeded u from a shorter edge instead —
-    // harmless (any in-plane direction is a legal basis) but gratuitously different
-    // from the normal it is paired with.
-    float longest[3] = { 0.0f, 0.0f, 0.0f };
-    float bestLen    = 0.0f;
-    for ( int i = 0; i < count; ++i )
-    {
-        float e[3];
-        Sub3( &worldPts[(size_t)( ( i + 1 ) % count ) * 3], &worldPts[(size_t)i * 3], e );
-        const float l = Len3( e );
-        if ( l > bestLen ) { bestLen = l; Copy3( e, longest ); }
-    }
+    // Seed u from the LONGEST edge (KIWI-UX CLEANUP, A-58 — one spelling, and the
+    // SHAKEOUT H wrap fix is now in the one body rather than in this copy alone).
+    float longest[3];
+    const bool haveHint = LongestEdgeHint( worldPts, count, longest );
 
     kconPlane_t p;
-    if ( !KiwiCon_MakePlane( c, n, ( bestLen > 1.0e-3f ) ? longest : 0, &p ) )
+    if ( !KiwiCon_MakePlane( c, n, haveHint ? longest : 0, &p ) )
         return false;
 
     // THE GATE.  Every point must sit within KCON_PLANE_FIT_DIST of the fit, or
@@ -669,7 +761,7 @@ bool KiwiCon_VertWorld( const kconObject_t &o, int i, float out[3] )
     {
         // A full ring regardless of ang0/ang1 — a circle IS 360°, and storing the
         // pair keeps one parametric block for both types.
-        const float rad = ( (float)i / (float)n ) * 6.283185307f;
+        const float rad = ( (float)i / (float)n ) * KCON_TWO_PI;
         const float uv[2] = { o.centre[0] + cosf( rad ) * o.radius,
                               o.centre[1] + sinf( rad ) * o.radius };
         KiwiCon_PlaneToWorld( o.plane, uv, out );
@@ -695,6 +787,39 @@ int KiwiCon_SegmentCount( const kconObject_t &o )
     return closed ? n : ( n - 1 );
 }
 
+// KIWI-UX (CLEANUP, A-73): the sidecar's ONE quoted-field read.
+// `congroup` and `name` both take "whatever lies between the FIRST and the LAST
+// quote on the line" — so a value may contain spaces but not a quote — and both
+// clamp into a fixed buffer.  It was written out twice with two different
+// destination types and two different cap macros; a parser is exactly the place
+// a second copy goes wrong quietly.  Returns false when the line carries no
+// quoted field at all, which both callers treat as "leave it unnamed" rather
+// than as a load failure.
+static bool KiwiCon_QuotedField( const char *line, char *out, int cap )
+{
+    if ( !out || cap < 1 )
+        return false;
+    out[0] = '\0';
+    if ( !line )
+        return false;
+    const char *q0 = strchr( line, '"' );
+    const char *q1 = q0 ? strrchr( line, '"' ) : 0;
+    if ( !q0 || !q1 || q1 <= q0 )
+        return false;
+    int n = (int)( q1 - q0 - 1 );
+    if ( n > cap - 1 )
+        n = cap - 1;
+    memcpy( out, q0 + 1, (size_t)n );
+    out[n] = '\0';
+    return true;
+}
+
+// KIWI-UX (CLEANUP, B-9): the §18 construction-ROSE preview pair — see
+// kiwi_construct.h.  Defined here rather than in a header so the two commands
+// share one object, not one value each.
+extern const float KCON_PREVIEW_OK [3] = { 1.00f, 0.55f, 0.72f };
+extern const float KCON_PREVIEW_BAD[3] = { 1.00f, 0.22f, 0.18f };
+
 bool KiwiCon_SegmentWorld( const kconObject_t &o, int i, float a[3], float b[3] )
 {
     const int segs = KiwiCon_SegmentCount( o );
@@ -702,6 +827,61 @@ bool KiwiCon_SegmentWorld( const kconObject_t &o, int i, float a[3], float b[3] 
         return false;
     const int n = KiwiCon_VertCount( o );
     return KiwiCon_VertWorld( o, i, a ) && KiwiCon_VertWorld( o, ( i + 1 ) % n, b );
+}
+
+// KIWI-UX (CLEANUP, PickLineAt): the ONE segment scan — see kiwi_construct.h for
+// why it lives here and what the two callers keep on top of it.  Body is
+// kiwi_split.cpp's PickLineAt with its cut-specific payload lifted out; the pixel
+// measure is the shared Pick_SegDist2D (CLEANUP, A-12).
+bool KiwiCon_PickSegmentAt( int imgX, int imgY, float outA[3], float outB[3],
+                            int *outObj, int *outSeg, float *outPixels )
+{
+    if ( !KiwiCon_ShowConstruction() )
+        return false;                           // hidden geometry is not clickable
+
+    const float curX = (float)imgX;
+    const float curY = (float)imgY;
+    float bestA[3] = { 0.0f, 0.0f, 0.0f };
+    float bestB[3] = { 0.0f, 0.0f, 0.0f };
+    float bestDist = 0.0f;
+    int   bestObj  = -1;
+    int   bestSeg  = -1;
+    bool  have     = false;
+
+    const int count = KiwiCon_Count();
+    for ( int i = 0; i < count; ++i )
+    {
+        const kconObject_t *o = KiwiCon_At( i );
+        // A hidden object is INERT, not merely invisible (kiwi_construct.h
+        // HIDDEN) — it is not drawn, so it must not be pickable either.
+        if ( !o || o->hidden )
+            continue;
+        const int segs = KiwiCon_SegmentCount( *o );
+        for ( int s = 0; s < segs; ++s )
+        {
+            float wa[3], wb[3], ax, ay, bx, by;
+            if ( !KiwiCon_SegmentWorld( *o, s, wa, wb ) )
+                break;
+            if ( !Pick_WorldToImage( wa, &ax, &ay ) || !Pick_WorldToImage( wb, &bx, &by ) )
+                continue;                       // an end behind the eye — skip whole
+            const float d = Pick_SegDist2D( curX, curY, ax, ay, bx, by, 0 );
+            if ( d > KCON_LINE_PIXELS )
+                continue;
+            if ( have && d >= bestDist )
+                continue;
+            have = true;  bestDist = d;
+            Copy3( wa, bestA );  Copy3( wb, bestB );
+            bestObj = i;  bestSeg = s;
+        }
+    }
+    if ( !have )
+        return false;
+    if ( outA )      Copy3( bestA, outA );
+    if ( outB )      Copy3( bestB, outB );
+    if ( outObj )    *outObj = bestObj;
+    if ( outSeg )    *outSeg = bestSeg;
+    if ( outPixels ) *outPixels = bestDist;
+    return true;
 }
 
 int KiwiCon_AnchorCount( const kconObject_t &o )
@@ -844,32 +1024,71 @@ namespace
         const float n[3] = { 0.0f, 0.0f, 1.0f };
         if ( KiwiCon_MakePlane( o, n, 0, &s_plane ) )
             s_planeSeeded = true;
+        // ROUND BP: a document teardown clears the EXPLICIT latch as well.  A plane
+        // the user set in one map means nothing in the next, and an explicit plane
+        // that outlives its document is the same invisible-latch shape the round-BP
+        // autopsy is about.
+        s_planeExplicit = false;
+        s_planeDesc[0]  = '\0';
     }
 }
 
-int KiwiCon_Add( const kconObject_t &o )
+// KIWI-UX (CLEANUP, A-50): the ONE spelling of "will the store take this?", so a
+// caller can ask before it mints an undo record.  Hands the caller the NORMALISED
+// copy, because normalisation is what the budget is measured against (round R
+// below) and re-running it is idempotent.  Prints its own refusal line.
+static bool AcceptForStore( const kconObject_t &in, kconObject_t *out )
 {
     // KIWI-UX (ROUND R): normalise BEFORE the budget checks, so a chain whose only
     // "extra" points were duplicates is measured — and accepted or refused — on the
     // points it will actually be stored with.
-    kconObject_t obj = o;
+    kconObject_t obj = in;
     NormalizePoints( obj );
     // A tool must never be able to push a runaway object into the store — the
     // draw pass, the snap scan and the region walk are all sized off these counts.
     if ( (int)( obj.pts.size() / 3 ) > KCON_MAX_POINTS )
     {
         Sys_Printf( "Construction: object rejected (over %i points).\n", KCON_MAX_POINTS );
-        return -1;
+        return false;
     }
     if ( KiwiCon_VertCount( obj ) < 2 )
     {
         Sys_Printf( "Construction: object rejected (fewer than 2 points).\n" );
-        return -1;
+        return false;
     }
+    if ( out )
+        *out = obj;
+    return true;
+}
+
+int KiwiCon_Add( const kconObject_t &o )
+{
+    kconObject_t obj;
+    if ( !AcceptForStore( o, &obj ) )
+        return -1;
     s_objects.push_back( obj );
     RefitPlane( s_objects.back() );               // shakeout H: the cached fit
     Touch();
     return (int)s_objects.size() - 1;
+}
+
+// KIWI-UX (CLEANUP, A-50) — BUILD, VALIDATE, PUSH, ADD, in that order.
+// Every tool commit used to spell `KiwiCon_UndoPush(); KiwiCon_Add( o );` and
+// discard the return, so a REFUSED object still opened an undo record that
+// changed nothing and the user's next Ctrl+Z was spent doing nothing visible.
+// The validation runs first here; the ticket is only minted once the store has
+// agreed to take the object.  The second AcceptForStore inside KiwiCon_Add
+// cannot fail — NormalizePoints is idempotent (its note on the sidecar path says
+// so) — so this costs one extra normalise per commit and nothing else.
+// Returns KiwiCon_Add's index, or -1 when the object was refused (in which case
+// NO undo record was opened and the refusal has already been printed).
+int KiwiCon_AddWithUndo( const kconObject_t &o )
+{
+    kconObject_t obj;
+    if ( !AcceptForStore( o, &obj ) )
+        return -1;
+    KiwiCon_UndoPush();
+    return KiwiCon_Add( obj );
 }
 
 bool KiwiCon_RemoveAt( int index )
@@ -893,7 +1112,11 @@ void KiwiCon_ClearAll()
     // root-cause chain is on KiwiCon_SnapUV in kiwi_construct.h.
     ResetActivePlaneToGround();
 
-    if ( s_objects.empty() )
+    // KIWI-UX (CLEANUP, A-47): the early-out asks about BOTH tables.  An empty
+    // group is a first-class object here (KiwiCon_SaveSidecar writes one, and
+    // kiwi_construct.h:621-622 says a group with no members still exists), so a
+    // store with no objects but a live folder must still be cleared.
+    if ( s_objects.empty() && s_groups.empty() )
         return;
     s_objects.clear();
     // ROUND W: the group TABLE goes with the objects.  "File -> New" means the
@@ -903,6 +1126,24 @@ void KiwiCon_ClearAll()
     s_nextGroupId = 1;
     KiwiConSel_NoteStoreReplaced();
     Touch();
+}
+
+// KIWI-UX (CLEANUP, A-48) — THE NEW-DOCUMENT ENTRY POINT.
+// KiwiCon_ClearAll empties the store but deliberately does NOT touch s_undo /
+// s_redo, because the palette's "Construction: Clear All" verb pushes its own
+// undo record and THEN calls it — putting the reset inside ClearAll would have
+// that verb destroy the record it just minted.  A new DOCUMENT is a different
+// question: the previous map's snapshots are still sitting on both stacks, and
+// the unified journal still holds their tickets, so a Ctrl+Z in the fresh map
+// resurrects the deleted map's scaffolding.  This is the same reset
+// KiwiCon_LoadSidecar performs (:4758-4764) on the branch a File->New never
+// reaches.  Called from Map_NewMap's existing KIWI-UX fence (map.cpp:266-274).
+void KiwiCon_ResetForNewMap()
+{
+    KiwiCon_ClearAll();
+    s_undo.clear();
+    s_redo.clear();
+    KiwiUndo_Reset();
 }
 
 // ── ROUND U: the HIDDEN flag (kiwi_construct.h) ─────────────────────────────
@@ -1194,11 +1435,6 @@ int KiwiCon_UndoDepth()
     return (int)s_undo.size();
 }
 
-int KiwiCon_RedoDepth()
-{
-    return (int)s_redo.size();
-}
-
 // ─── the active construction plane (§16) ─────────────────────────────────────
 const kconPlane_t &KiwiCon_ActivePlane()
 {
@@ -1219,6 +1455,89 @@ void KiwiCon_SetActivePlane( const kconPlane_t &p )
     s_plane       = p;
     s_planeSeeded = true;
     g_nUpdateBits |= 1;
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  KIWI-UX (ROUND BP, ITEM 3) — THE EXPLICIT LATCH
+// ═════════════════════════════════════════════════════════════════════════════
+// Marking a plane EXPLICIT is a separate call from installing one, deliberately:
+// KiwiDrawTool::PushPoint re-seats the active plane through every placed point
+// (and Leave() puts it back), and that in-gesture move must never turn a default
+// plane into a latched one.  Only the four gestures listed on
+// KiwiCon_AutoPlaneForTool mark.
+void KiwiCon_MarkPlaneExplicit( const char *desc )
+{
+    s_planeExplicit = true;
+    _snprintf( s_planeDesc, sizeof( s_planeDesc ), "%s", desc ? desc : "custom" );
+    s_planeDesc[sizeof( s_planeDesc ) - 1] = '\0';
+    g_nUpdateBits |= 1;
+}
+
+bool KiwiCon_PlaneIsExplicit() { return s_planeExplicit; }
+
+const char *KiwiCon_PlaneDesc()
+{
+    return s_planeExplicit ? s_planeDesc : "";
+}
+
+void KiwiCon_ClearPlaneToDefault()
+{
+    const bool was = s_planeExplicit;
+    s_planeExplicit = false;
+    s_planeDesc[0]  = '\0';
+    KiwiCon_DefaultPlaneForView();
+    if ( was )
+        Sys_Printf( "Construction plane: back to the default (%s).\n",
+                    KiwiCon_PlaneDescLive() );
+    g_nUpdateBits |= 1;
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  THE DEFAULT PLANE — recomputed, never inherited
+// ═════════════════════════════════════════════════════════════════════════════
+// The ruling's own words: *"drawing tools place on the DEFAULT plane (world ground
+// / the axis plane appropriate to the view) unless a plane was set EXPLICITLY."*
+//
+// TWO ARMS AND NO OFFSET INHERITANCE, which is the whole point:
+//   * the camera is snapped to an AXIS VIEW  -> that view's world axis plane
+//     THROUGH THE WORLD ORIGIN.  Drawing Z from a TOP view is still impossible and
+//     still must be (round Y's directive), so the orientation half of round Y's
+//     rung 0 survives — it is not an inference about what the user wants, it is
+//     the only plane that view can draw in.
+//   * anything else -> WORLD GROUND, z = 0.
+// The ELEVATION is always 0.  Round AT's "a major plane's offset is a working
+// height" is exactly the arm that produced the reported 61-ft teleport: it copied
+// `origin[axis]` forward from whatever the previous plane was, so one sketch drawn
+// on a roof made every later tool start at roof height with nothing on screen
+// saying so.  A height the user wants is one keystroke away (Space on a face) and
+// is announced by the PLANE chip when it is in force.
+void KiwiCon_DefaultPlaneForView()
+{
+    int   axis = 2;
+    float sign = 1.0f;
+    if ( !KiwiViewCube_ViewAxis( &axis, &sign ) )
+        axis = 2;                                   // free view -> world ground
+    (void)sign;                                     // the plane has no facing
+
+    float o[3] = { 0.0f, 0.0f, 0.0f };
+    float n[3] = { 0.0f, 0.0f, 0.0f };
+    n[axis] = 1.0f;
+
+    kconPlane_t p;
+    if ( KiwiCon_MakePlane( o, n, 0, &p ) )
+        KiwiCon_SetActivePlane( p );
+}
+
+// What the chip and the console say about the plane in force RIGHT NOW.
+const char *KiwiCon_PlaneDescLive()
+{
+    if ( s_planeExplicit )
+        return s_planeDesc;
+    const kconPlane_t &p = KiwiCon_ActivePlane();
+    if ( fabsf( p.normal[2] ) > KCON_PLANE_PARALLEL ) return "ground XY (default)";
+    if ( fabsf( p.normal[1] ) > KCON_PLANE_PARALLEL ) return "XZ (default)";
+    if ( fabsf( p.normal[0] ) > KCON_PLANE_PARALLEL ) return "YZ (default)";
+    return "default";
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -1270,7 +1589,14 @@ static float KiwiCon_MajorPlaneOffset( int axis )
         return 0.0f;
     const kconPlane_t &cur = KiwiCon_ActivePlane();
     float h = 0.0f;
-    if ( fabsf( cur.normal[axis] ) > KCON_PLANE_PARALLEL )      // rule 1
+    // KIWI-UX (ROUND BP, ITEM 3): rule 1 now also requires the plane being replaced
+    // to be an EXPLICIT one.  Inheriting a working height off a plane the user set
+    // themselves is the documented intent; inheriting it off one that some demoted
+    // rung left behind is how the 61-ft teleport happened.  With the ladder gone the
+    // only planes that reach here at all are explicit ones and the default (offset
+    // 0), so this is belt-and-braces — and it is the belt that keeps the AT
+    // inheritance from creeping back in through the palette rows.
+    if ( s_planeExplicit && fabsf( cur.normal[axis] ) > KCON_PLANE_PARALLEL )   // rule 1
         h = cur.origin[axis];
     float in[3]  = { 0.0f, 0.0f, 0.0f };
     float out[3] = { 0.0f, 0.0f, 0.0f };
@@ -1436,26 +1762,12 @@ namespace
         if ( !FaceFacesTheRay( f, ray ) )
             return false;
 
-        const float *hint = 0;
-        float longest[3] = { 0.0f, 0.0f, 0.0f };
+        const float *hint = 0;                    // KIWI-UX (CLEANUP, A-58)
+        float longest[3];
         winding_t *w = f->w;
-        if ( w && w->numpoints >= 2 && w->numpoints <= MAX_POINTS_ON_WINDING )
-        {
-            float bestLen = 0.0f;
-            for ( int i = 0; i < w->numpoints; ++i )
-            {
-                float e[3];
-                Sub3( w->p[( i + 1 ) % w->numpoints], w->p[i], e );
-                const float l = Len3( e );
-                if ( l > bestLen )
-                {
-                    bestLen = l;
-                    Copy3( e, longest );
-                }
-            }
-            if ( bestLen > 1.0e-3f )
-                hint = longest;
-        }
+        if ( w && w->numpoints >= 2 && w->numpoints <= MAX_POINTS_ON_WINDING
+          && LongestEdgeHint( &w->p[0][0], w->numpoints, longest ) )
+            hint = longest;
         return KiwiCon_MakePlane( pick.point, f->plane.normal, hint, out );
     }
 }
@@ -1506,10 +1818,23 @@ bool KiwiCon_SetPlaneFromSelectedFace()
     if ( !face || !Sel_BrushLive( face->brush ) )
         return false;
 
-    selbrush_t *node = face->brush;
+    return KiwiCon_SetPlaneFromFace( face->brush, face->faceIndex, true );
+}
+
+// ── KIWI-UX (ROUND BP, ITEM 3): THE ONE "THAT FACE IS THE PLANE" ────────────
+// Extracted verbatim from the body of KiwiCon_SetPlaneFromSelectedFace above so
+// the [Space] verb (kiwi_focus.cpp) reaches the SAME construction — winding
+// centre, face normal, longest edge as the u hint — instead of carrying a second
+// copy that can drift.  `requireReach` is the round-AT "the face has to be
+// somewhere the user could be drawing on it" test: TRUE for the sticky-selection
+// path that needs it, FALSE for [Space], where the camera has just been flown to
+// the face and a reach test against the pre-flight cursor means nothing.
+bool KiwiCon_SetPlaneFromFace( selbrush_t *node, int fi, bool requireReach )
+{
+    if ( !node || !Sel_BrushLive( node ) )
+        return false;
     if ( !node->def || !node->def->faces )
         return false;
-    const int fi = face->faceIndex;
     if ( fi < 0 || fi >= node->def->faceCount )
         return false;
     face_t    *f = &node->def->faces[fi];
@@ -1530,7 +1855,7 @@ bool KiwiCon_SetPlaneFromSelectedFace()
     // question cannot be asked and the round-U answer stands unchanged.  Refusing
     // there would break the flow this rung exists for.
     ray_t ray;
-    if ( Pick_RayFromCursor( &ray ) && !RayReachesFace( f, w, ray ) )
+    if ( requireReach && Pick_RayFromCursor( &ray ) && !RayReachesFace( f, w, ray ) )
         return false;
 
     float centre[3] = { 0.0f, 0.0f, 0.0f };
@@ -1540,116 +1865,13 @@ bool KiwiCon_SetPlaneFromSelectedFace()
     for ( int k = 0; k < 3; ++k )
         centre[k] /= (float)w->numpoints;
 
-    const float *hint = 0;
-    float longest[3] = { 0.0f, 0.0f, 0.0f };
-    float bestLen    = 0.0f;
-    for ( int i = 0; i < w->numpoints; ++i )
-    {
-        float e[3];
-        Sub3( w->p[( i + 1 ) % w->numpoints], w->p[i], e );
-        const float l = Len3( e );
-        if ( l > bestLen ) { bestLen = l; Copy3( e, longest ); }
-    }
-    if ( bestLen > 1.0e-3f )
+    const float *hint = 0;                        // KIWI-UX (CLEANUP, A-58)
+    float longest[3];
+    if ( LongestEdgeHint( &w->p[0][0], w->numpoints, longest ) )
         hint = longest;
 
     kconPlane_t p;
     if ( !KiwiCon_MakePlane( centre, f->plane.normal, hint, &p ) )
-        return false;
-    KiwiCon_SetActivePlane( p );
-    return true;
-}
-
-// ── SHAKEOUT F: "continue what I was drawing" beats "the face I am pointing at" ─
-// USER REPORT this round: a loop drawn as separate lines on a NON-axis-aligned
-// face does not become a region.  The chain/plane machinery in kiwi_region turned
-// out to be sound (see the SamePlane note there — the plane constant is derived
-// from the origin every time, so two objects derived from the same face at
-// different cursor points compare EQUAL).  THIS is where it actually broke.
-//
-// Every drawing tool re-derives its plane from the face under the cursor at
-// Begin().  Draw line 1 on a slanted face, then start line 2 from line 1's
-// endpoint: if that endpoint sits over a DIFFERENT face — an adjacent wall, the
-// floor behind the brush, anything the ray reaches first once the cursor has
-// moved to the corner — the new tool silently adopts THAT face's plane.  The two
-// lines are then not coplanar, SamePlane rejects them, no chain, no region, and
-// nothing on screen says why.
-//
-// The fix is the rule a user would state themselves: if the cursor is ON an
-// existing construction object (within the POINT radius of one of its anchors, or
-// the EDGE radius of one of its segments), the new tool inherits THAT OBJECT'S
-// plane.  Pointing somewhere else still derives from the face, so deliberately
-// changing planes is unaffected — you change plane by starting somewhere else,
-// which is exactly what starting somewhere else means.
-static bool KiwiCon_PlaneFromCursorConstruction()
-{
-    int   curX = 0, curY = 0, w = 0, h = 0;
-    if ( !ImGuiShell_CameraPaintCursor( &curX, &curY, &w, &h ) )
-        return false;
-
-    const int count = KiwiCon_Count();
-    int   best     = -1;
-    float bestDist = 0.0f;
-
-    for ( int i = 0; i < count; ++i )
-    {
-        const kconObject_t *o = KiwiCon_At( i );
-        if ( !o )
-            continue;
-
-        // Anchors first, at the point radius — the endpoint a continuing chain is
-        // actually aimed at.
-        const int anchors = KiwiCon_AnchorCount( *o );
-        for ( int a = 0; a < anchors; ++a )
-        {
-            float p[3], px, py;
-            if ( !KiwiCon_AnchorWorld( *o, a, p ) )
-                break;
-            if ( !Pick_WorldToImage( p, &px, &py ) )
-                continue;
-            const float dx = px - (float)curX, dy = py - (float)curY;
-            const float d  = sqrtf( dx * dx + dy * dy );
-            if ( d > PICK_VERT_PIXELS )
-                continue;
-            if ( best < 0 || d < bestDist ) { best = i; bestDist = d; }
-        }
-
-        // …then the segments, at the edge radius.
-        const int segs = KiwiCon_SegmentCount( *o );
-        for ( int s = 0; s < segs; ++s )
-        {
-            float wa[3], wb[3], ax, ay, bx, by;
-            if ( !KiwiCon_SegmentWorld( *o, s, wa, wb ) )
-                break;
-            if ( !Pick_WorldToImage( wa, &ax, &ay ) || !Pick_WorldToImage( wb, &bx, &by ) )
-                continue;
-            const float ex = bx - ax, ey = by - ay;
-            const float len2 = ex * ex + ey * ey;
-            float t = 0.0f;
-            if ( len2 > 1.0e-6f )
-            {
-                t = ( ( (float)curX - ax ) * ex + ( (float)curY - ay ) * ey ) / len2;
-                if ( t < 0.0f ) t = 0.0f;
-                if ( t > 1.0f ) t = 1.0f;
-            }
-            const float dx = ax + ex * t - (float)curX;
-            const float dy = ay + ey * t - (float)curY;
-            const float d  = sqrtf( dx * dx + dy * dy );
-            // KIWI-UX (ROUND K): KCON_LINE_PIXELS, so "continue the object under the
-            // cursor" reaches as far as clicking it does.
-            if ( d > KCON_LINE_PIXELS )
-                continue;
-            if ( best < 0 || d < bestDist ) { best = i; bestDist = d; }
-        }
-    }
-
-    if ( best < 0 )
-        return false;
-    // SHAKEOUT H: an object's plane is DERIVED now and may not exist at all (a
-    // non-planar polyline has none).  Inheriting nothing is the honest answer —
-    // the active plane simply stands, which is what pointing at empty space does.
-    kconPlane_t p;
-    if ( !KiwiCon_ObjectPlane( *KiwiCon_At( best ), &p ) )
         return false;
     KiwiCon_SetActivePlane( p );
     return true;
@@ -1712,103 +1934,15 @@ bool KiwiCon_SetPlaneFromViewDominantAxis()
     return true;
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-//  ROUND Y, ITEM 4 — AN AXIS VIEW OWNS THE PLANE
-// ═════════════════════════════════════════════════════════════════════════════
-// USER DIRECTIVE, verbatim: "the line tool is still way out of whack.  IT doesn't
-// respect the camera angle.  When snapping to top or bottom it is IMPOSSIBLE for
-// me to represent a Z direction.  Take that into account and apply it on the
-// other views too (see how plasticity does it)."
-//
-// ROUND T ALREADY DERIVED A PLANE FROM THE CAMERA — and it was rung FOUR, below
-// three rungs that answer from geometry.  So the reported failure is not "the
-// camera is ignored", it is "the camera loses".  Snap to FRONT, put the cursor
-// anywhere over the floor or select a floor face, start the line tool, and rung 2
-// or rung 3 hands back XY — the one plane in which Z cannot be drawn at all,
-// from the one camera angle where the user is unambiguously asking for XZ.
-// The same trap on TOP/BOTTOM is what the directive names.
-//
-// PLASTICITY DOES NOT ARBITRATE THIS, IT DECIDES IT.  Navigating to an axis view
-// enters ortho mode, and in ortho mode the construction plane becomes a hard
-// restriction whether or not anything else asked for one —
-// `else if (this._restriction === undefined && isOrtho) return
-// baseConstructionPlane;` (plasticity/src/command/point-picker/
-// PointPickerModel.ts:61-62) — while FACE snaps are dropped from the candidate
-// set outright: `if (isOrthoMode) results = results.filter(r => !(r.snap
-// instanceof FaceSnap))` in spirit at
-// plasticity/src/editor/snaps/SnapPickerStrategy.ts:95-109 (`:98`), and every
-// surviving snap is re-oriented into the plane's own basis,
-// `const effectiveOrientation = isOrthoMode ? constructionPlaneOrientation :
-// orientation;` (SnapPickerStrategy.ts:82).  In other words: on an axis view, the
-// face under the cursor stops being an answer to "which plane".
-//
-// SO THE RUNG IS PROMOTED, not re-weighted.  When the camera is on an axis view
-// (KiwiViewCube_ViewAxis — the live cos(3 deg) test, no latch), the view plane is
-// taken FIRST and the two face rungs are skipped entirely.  Off an axis view
-// nothing changes at all: the ladder is round T's, in round T's order.
-//
-// RUNG 1 SURVIVES, CONDITIONALLY.  Continuing the chain under the cursor is
-// Plasticity's `restrictionPlane`, which outranks even ortho mode
-// (PointPickerModel.ts:68).  But a chain drawn in some OTHER plane cannot be
-// continued in this view either — that is the same "you cannot draw Z from the
-// top" the directive is about — so it is honoured only when its plane is PARALLEL
-// to the view plane, which is precisely when continuing is possible.  Its offset
-// along the axis is then kept, so a sketch stays coplanar with itself.
-//
-// The plane's POSITION along the axis is otherwise the active plane's, exactly as
-// KiwiCon_SetPlaneAxis and rung 4 already do it — which is Plasticity's ortho
-// rule as well (`if (isOrtho && pickedPointSnaps.length > 0) constructionPlane =
-// constructionPlane.move(last.point)`, PointPickerModel.ts:73-78: the plane
-// follows the work rather than snapping back to the world origin).
-static bool KiwiCon_SetPlaneFromAxisView()
-{
-    int   axis = 2;
-    float sign = 1.0f;
-    if ( !KiwiViewCube_ViewAxis( &axis, &sign ) )
-        return false;
-
-    // Rung 1, conditionally: adopt the construction object under the cursor only
-    // when its plane is PARALLEL to the view plane (|n . axis| ~ 1).  That keeps a
-    // multi-segment sketch coplanar with itself — including its OFFSET along the
-    // axis, which is the whole reason to take it rather than to re-derive.
-    //
-    // KIWI-UX (ROUND AT, ITEM 2b): THE PROBE PUTS THE PLANE BACK WHEN IT LOSES.
-    // KiwiCon_PlaneFromCursorConstruction WRITES the active plane before this test
-    // can reject it, so a non-parallel object used to leave its own plane installed
-    // and the fall-through below then read ITS origin as "where the work is".  That
-    // is a height the user never chose, arriving by a path that had already been
-    // ruled irrelevant.  A probe that loses must leave no trace.
-    const kconPlane_t before = KiwiCon_ActivePlane();
-    if ( KiwiCon_PlaneFromCursorConstruction() )
-    {
-        const kconPlane_t &p = KiwiCon_ActivePlane();
-        if ( fabsf( p.normal[axis] ) > KCON_PLANE_PARALLEL )
-        {
-            Sys_Printf( "Construction plane: continuing the object under the cursor "
-                        "(%s view).\n", KiwiViewCube_ViewAxisName() );
-            return true;
-        }
-        KiwiCon_SetActivePlane( before );
-    }
-
-    // KIWI-UX (ROUND AT, ITEM 2b): a working height, inherited only from a
-    // PARALLEL plane and grid-quantised — so TOP over empty space is z = 0 exactly
-    // unless the user was already working at a height on this same plane.
-    float o[3];
-    KiwiCon_MajorPlaneOrigin( axis, o );
-    float n[3] = { 0.0f, 0.0f, 0.0f };
-    n[axis] = 1.0f;
-
-    kconPlane_t p;
-    if ( !KiwiCon_MakePlane( o, n, 0, &p ) )
-        return false;
-    KiwiCon_SetActivePlane( p );
-    Sys_Printf( "Construction plane: %s, from the %s view, at %g\n",
-                ( axis == 2 ) ? "XY" : ( axis == 1 ) ? "XZ" : "YZ",
-                KiwiViewCube_ViewAxisName() ? KiwiViewCube_ViewAxisName() : "axis",
-                (double)o[axis] );
-    return true;
-}
+// ── KIWI-UX (ROUND BP, ITEM 3): ROUND Y'S "AN AXIS VIEW OWNS THE PLANE" IS GONE ─
+// Not weakened — DELETED, together with shakeout F's
+// KiwiCon_PlaneFromCursorConstruction, under the user's ruling that construction
+// planes are made with [Space] and nothing else.  What round Y was protecting (you
+// cannot draw Z from a TOP view) survives as the ORIENTATION half of the DEFAULT
+// plane in KiwiCon_DefaultPlaneForView; what it was carrying that had to go is the
+// OFFSET, which it inherited from whatever plane happened to be active and which
+// is the mechanism behind the reported 61-ft teleport.  The demoted/kept table with
+// a reason per rung is RADIANT_UX_DESIGN §16.
 
 // ═════════════════════════════════════════════════════════════════════════════
 //  KIWI-UX (ROUND AA, ITEM 6) — WHEN THIS RUNS, AND WHY THAT IS THE HYSTERESIS
@@ -1851,62 +1985,152 @@ static bool KiwiCon_SetPlaneFromAxisView()
 // "never derive", but "derive once, then never again for this gesture".
 void KiwiCon_AutoPlaneForTool()
 {
-    // ── ROUND Y, ITEM 4: RUNG 0 — an AXIS VIEW owns the plane ───────────────
-    // See the block above.  On an axis-snapped camera this takes the whole
-    // decision and the face rungs never run; off one, nothing below changes.
-    if ( KiwiCon_SetPlaneFromAxisView() )
-        return;
+    // ═════════════════════════════════════════════════════════════════════════
+    //  KIWI-UX (ROUND BP, ITEM 3) — THE LADDER IS DEMOTED.  THE USER'S RULING.
+    // ═════════════════════════════════════════════════════════════════════════
+    // USER, verbatim: *"construction planes should only be made with [space],
+    // usually, the current behavior is too strict.  That's what it is."*
+    //
+    // WHAT THE LADDER BELOW WAS DOING, from the round-BP autopsy: every rung wrote
+    // the FILE-STATIC active plane, and three of them carried an ELEVATION forward
+    // (KiwiCon_MajorPlaneOffset's "inherit from a parallel plane").  Draw once on a
+    // roof at 61 ft and a TOP-view line tool started on an XY plane at 61 ft
+    // forever after — so every point placed in empty space landed at 61 ft, and the
+    // 61-ft construction endpoints from that sketch were then the top-ranked snap
+    // candidates (kiwi_snap.cpp arm 1 outranks brush vertices) and were NOT
+    // occluded by anything.  A corner under the cursor could not win.  That is the
+    // reported "it should snap to the corner here but the line flies way down".
+    //
+    // SO: nothing derives a plane any more.  Either the user set one — and then it
+    // STANDS, untouched, and the PLANE chip says so — or the tool gets the DEFAULT
+    // plane, recomputed from the view with no memory at all.
+    //
+    // THE FOUR EXPLICIT GESTURES, and they are the complete list:
+    //   * Space on a face      (kiwi_focus.cpp — flies the camera AND sets the
+    //                           plane, the Plasticity "navigate to selection" shape)
+    //   * the §16 palette rows  XY / XZ / YZ / From face / From view
+    //   * exactly ONE brush face SELECTED, within its own extent
+    //                          (round U's Shift+A flow — the user selected that
+    //                           face; kept by the ruling's own exception)
+    //   * a numeric/typed plane, if one is ever added
+    // Everything else — the view-dominant quantiser (round T), the construction
+    // object under the cursor (shakeout F), the face merely under the cursor (§16
+    // rung 3), and every offset-inheritance arm (round AT) — is DEMOTED.  The table
+    // with the reason for each is in RADIANT_UX_DESIGN §16.
+    // ═════════════════════════════════════════════════════════════════════════
+    //  KIWI-UX (ROUND BR) — …AND THE SELECTED-FACE RUNG IS DEMOTED WITH THEM.
+    // ═════════════════════════════════════════════════════════════════════════
+    // USER REPORT, verbatim: *"Still impossible to snap lines.  The auto
+    // construction planes are ruining it."*
+    //
+    // Round BP kept rung 2 — "exactly ONE brush face SELECTED sets the plane and
+    // MARKS IT EXPLICIT" — as the ruling's own exception, on the strength of round
+    // U's flow (*"I should be able to press Shift-A while a face is selected"*).
+    // The exception is fine; its SCOPE was not.  Selecting a face is the most
+    // routine act there is in Face mode, and this rung fired at EVERY tool start
+    // that happened to have one selected, so it
+    //   * installed a plane the user never asked for, and
+    //   * marked it EXPLICIT — which is not just a banner: KiwiSnap_Query's
+    //     working-plane gate is scoped to explicit planes (round BQ,
+    //     kiwi_snap.cpp:1470), so a routine face click silently ARMED a filter
+    //     that refuses every candidate more than ~24 px of world off that plane,
+    //   * and the latch OUTLIVED the gesture (Leave() restores the plane's
+    //     geometry, nothing clears s_planeExplicit), so one face click poisoned
+    //     every later tool until Space over empty space was pressed.
+    //
+    // THE RULING: [Space], the §16 palette rows and the Shift+A flow are the only
+    // plane setters.  The exception therefore fires only INSIDE that gesture — the
+    // arm below is set by kiwi_command.cpp's round-U preempt rung, i.e. exactly
+    // when a CREATION CHORD is pressed with a face parked, which is the flow round
+    // U described end to end (face -> Shift+A -> draw -> RMB -> region -> E -> Q).
+    // A drawing tool reached any other way (the palette, the Add menu's rows, the
+    // legacy menu, a re-entry with the same face still selected) gets the DEFAULT
+    // plane and no latch.
+    //
+    // CONSUMED UNCONDITIONALLY, before the explicit early-out: an arm that was set
+    // by a chord which then failed to start a tool must not survive to surprise the
+    // next one.  One gesture, one shot.
+    const bool selFaceArmed = s_selFacePlaneArmed;
+    s_selFacePlaneArmed = false;
 
-    // §16's "kills most explicit management", as it now stands — FIVE rungs, most
-    // specific first, each one a strictly better answer than the one below it:
-    //
-    //   1. a construction object under the cursor  -> its plane      (shakeout F)
-    //   2. exactly ONE brush face SELECTED         -> its plane      (ROUND U)
-    //   3. a brush FACE under the cursor           -> its plane      (§16)
-    //   4. the VIEW-DOMINANT world axis            -> XY / XZ / YZ   (ROUND T)
-    //   5. nothing                                 -> the active plane stands,
-    //                                                 which is XY at the last
-    //                                                 placement height
-    //
-    // Rung 2 is ROUND U's and sits where it does deliberately.  ABOVE rung 3
-    // because SELECTING a face is a deliberate act and a face merely under the
-    // cursor is incidental — with a face selected and the cursor drifted onto the
-    // floor behind it, "draw on the face I selected" is the only reading.  BELOW
-    // rung 1 because continuing an existing chain is more specific still, and
-    // because rung 1 is what keeps a multi-segment sketch coplanar (see the
-    // shakeout-F note on KiwiCon_PlaneFromCursorConstruction).
-    //
-    // Rung 4 slots BELOW all three "you are pointing at / holding something"
-    // answers on purpose: those are explicit statements about where to draw and
-    // must keep outranking a guess made from the camera.  Rung 5 is reached only
-    // when the view matrix itself is degenerate.
-    if ( KiwiCon_PlaneFromCursorConstruction() )
+    if ( s_planeExplicit )
     {
-        Sys_Printf( "Construction plane: continuing the object under the cursor.\n" );
+        // AN EXPLICIT PLANE IS NOT NEGOTIABLE.  No rung re-derives over it — that is
+        // the whole ruling — and it is announced at every tool start so the user is
+        // never drawing on a plane they have forgotten they set.  The PLANE chip
+        // (kiwi_viewport.cpp DrawStateBanner) says the same thing continuously.
+        Sys_Printf( "Construction plane: %s (explicit - press Space over empty space "
+                    "to clear it).\n", KiwiCon_PlaneDescLive() );
         return;
     }
-    if ( KiwiCon_SetPlaneFromSelectedFace() )
+    if ( selFaceArmed && KiwiCon_SetPlaneFromSelectedFace() )
     {
+        KiwiCon_MarkPlaneExplicit( "the SELECTED face" );
         Sys_Printf( "Construction plane: from the SELECTED face.\n" );
         return;
     }
-    if ( KiwiCon_SetPlaneFromCursorFace() )
-    {
-        Sys_Printf( "Construction plane: from face under cursor.\n" );
-        return;
-    }
-    KiwiCon_SetPlaneFromViewDominantAxis();
+    KiwiCon_DefaultPlaneForView();
+}
+
+// KIWI-UX (ROUND BR): arm the selected-face rung for the NEXT tool start.  The
+// full argument is in KiwiCon_AutoPlaneForTool above; the one caller is
+// kiwi_command.cpp's creation-chord preempt rung.
+void KiwiCon_ArmSelectedFacePlane()
+{
+    s_selFacePlaneArmed = true;
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-//  The drawing tools (§7 item 22).  One base class holds everything the five
-//  share: the active plane, the point chain, the snap→plane projection, the
-//  numeric field, the Esc ladder and the store's own Ctrl+Z.
+//  The drawing tools (§7 item 22).  One base class holds everything they share:
+//  the point chain, the numeric field, the Esc ladder and the store's own Ctrl+Z.
+//  KIWI-UX (ROUND BS): "the active plane and the snap→plane projection" used to be
+//  on that list and are now the PLANAR subclasses' business alone — see Begin(),
+//  MouseMove() and PushPoint().
 // ═════════════════════════════════════════════════════════════════════════════
 namespace
 {
     class KiwiDrawTool;
     KiwiDrawTool *s_activeTool = 0;
+    // KIWI-UX (ROUND BS): is the live tool one whose SHAPE needs a plane?  Latched
+    // beside s_activeTool (from PlanarOnly(), in Begin) rather than asked through
+    // the pointer, because KiwiCon_PlanePlacement is reached from the snap query
+    // before this file's class definitions are visible.  Cleared in Leave().
+    bool          s_activeToolPlanar = false;
+
+    // KIWI-UX (ROUND BS): the WORLD GROUND frame — origin at the world origin,
+    // normal +Z, u +X, v +Y.  Not a construction plane and never installed as one:
+    // it is the fixed basis the free-3D tools measure a TYPED BEARING in, so that
+    // "45 deg" means 45 degrees off world +X instead of off a plane they no longer
+    // have.  Built rather than declared so the u/v come out of the one
+    // orthonormalisation everything else in this file uses.
+    void WorldGroundBasis( kconPlane_t *out )
+    {
+        const float o[3] = { 0.0f, 0.0f, 0.0f };
+        const float n[3] = { 0.0f, 0.0f, 1.0f };
+        const float u[3] = { 1.0f, 0.0f, 0.0f };
+        KiwiCon_MakePlane( o, n, u, out );
+    }
+
+    // KIWI-UX (ROUND BS): the ORIENTATION of the face under the cursor, seated at
+    // `origin` (the point that was just placed, which came off the snap and is
+    // therefore exactly where the user aimed — the ray hit is not).  This is
+    // KiwiCon_SetPlaneFromCursorFace's construction with the origin substituted and
+    // nothing installed, so a planar tool and [Space] cannot derive different planes
+    // from the same face.  False when no face is under the cursor: the caller then
+    // uses the world ground, which is the "ground in void" half of the ruling.
+    bool PlaneFromCursorFaceAt( const float origin[3], kconPlane_t *out )
+    {
+        ray_t ray;
+        if ( !Pick_RayFromCursor( &ray ) )
+            return false;
+        const pick_result_t pick = Pick( ray, SEL_MASK_FACE );
+        kconPlane_t p;
+        if ( !PlaneFromFacePick( pick, ray, &p ) )
+            return false;
+        Copy3( origin, p.origin );
+        *out = p;
+        return true;
+    }
 
     // ── shakeout E: the numeric FIELD tables (kiwi_command.h NumericFields) ──
     // STATIC storage — the numeric layer copies the structs but never the labels.
@@ -2044,7 +2268,7 @@ namespace
                 const float inPlane = sqrtf( du * du + dv * dv );
                 if ( inPlane < 1.0e-4f || fabsf( dn ) > inPlane )
                     return false;                         // no meaningful bearing
-                *out = atan2f( dv, du ) * 57.29577951308232f;
+                *out = atan2f( dv, du ) * KCON_RAD2DEG;
                 return true;
             }
             return false;
@@ -2081,9 +2305,8 @@ namespace
             {
                 if ( has )
                 {
-                    int n = (int)floorf( Units_ToDisplay( world ) + 0.5f );
-                    if ( n < KCON_SIDES_MIN ) n = KCON_SIDES_MIN;
-                    if ( n > KCON_SEGS_MAX  ) n = KCON_SEGS_MAX;
+                    const int n = ClampSides(                  // CLEANUP, A-59
+                        (int)floorf( Units_ToDisplay( world ) + 0.5f ) );
                     m_sidesOverride = n;
                     KiwiCon_SetToolSides( n );    // remembered for the next gesture
                 }
@@ -2116,17 +2339,38 @@ namespace
             m_lastClickY  = -9999;
             m_hud[0]    = '\0';
 
-            KiwiCon_AutoPlaneForTool();
-            m_plane     = KiwiCon_ActivePlane();
+            // ═══════════════════════════════════════════════════════════════
+            //  KIWI-UX (ROUND BS) — ONLY A PLANAR TOOL ASKS FOR A PLANE
+            // ═══════════════════════════════════════════════════════════════
+            // USER RULING: *"get rid of the construction plane […] it just needs to
+            // be wherever a ray trace hits against an object OR a snapping point."*
+            // The LINE, POLYLINE and SPLINE tools do not touch the active plane at
+            // all now — they do not derive one, do not install one, do not restore
+            // one and do not project onto one.  Their m_plane is a FIXED WORLD
+            // GROUND frame kept for the TYPED-BEARING arithmetic only (the Tab
+            // "angle" field and its readout, which need SOME u/v to mean degrees
+            // in); it is not state, nothing writes it, and no point ever lands on it.
+            //
+            // A PLANAR tool still asks, because a rect with one corner 40 units off
+            // its own plane is not a rect.  Its plane is the explicit one when the
+            // user set one, and otherwise it is DERIVED FROM THE FIRST POINT'S
+            // SURFACE at PushPoint — see there.
+            WorldGroundBasis( &m_plane );
+            if ( PlanarOnly() )
+            {
+                KiwiCon_AutoPlaneForTool();
+                m_plane = KiwiCon_ActivePlane();
+            }
             // SHAKEOUT H FIX: remember the plane THIS GESTURE STARTED FROM, so
             // Leave() can put it back.  Latched AFTER AutoPlaneForTool on purpose:
-            // deriving the plane from the face (or from the construction object)
-            // under the cursor is a DELIBERATE, documented §16 change to the active
-            // plane and has persisted since shakeout F.  What must NOT persist is
-            // the per-point re-seat PushPoint does inside the gesture — see the
-            // note there.
-            m_planeOnEntry = m_plane;
-            s_activeTool = this;
+            // deriving the plane from the face the user pressed [Space] on is a
+            // DELIBERATE, documented §16 change to the active plane.  What must NOT
+            // persist is the per-point re-seat PushPoint does inside the gesture —
+            // see the note there.
+            m_planeOnEntry     = m_plane;
+            m_planeFromSurface = false;         // ROUND BS — armed by PushPoint
+            s_activeTool       = this;
+            s_activeToolPlanar = PlanarOnly();  // ROUND BS — KiwiCon_PlanePlacement
 
             // Latch a first cursor point so the very first frame already draws.
             LatchFromCursor();
@@ -2172,65 +2416,33 @@ namespace
                 Copy3( snap.position, m_cur );
                 m_haveCur = true;
 
-                // …except for the intrinsically planar shapes, which still project.
-                if ( PlanarOnly() )
+                // ═════════════════════════════════════════════════════════
+                //  KIWI-UX (ROUND BS) — EVERY POINT IS VERBATIM.  THE END.
+                // ═════════════════════════════════════════════════════════
+                // TOMBSTONE for the round-AA chain latch and for round BR's
+                // SnapPlacesVerbatim conditional that narrowed it.  Both are gone.
+                //
+                // USER RULING, verbatim: *"It just needs to be wherever a fucking
+                // ray trace hits against an object OR a snapping point."*  There is
+                // no longer a class of point that gets projected: the resolution
+                // (kiwi_snap.h "THE PLACEMENT RESOLUTION") already answers with a
+                // snap, else the surface under the cursor, else the ground, and
+                // every one of those three is a place the user aimed at.  The latch
+                // existed to keep a ring coplanar for kiwi_region.cpp; round BR
+                // already accepted the trade ("chains are 3D by construction") and
+                // this round completes it — a ring that must be flat is drawn with a
+                // PLANAR tool, or with the Z lock, or on one surface.
+                //
+                // WHAT REMAINS IS THE PLANAR TOOLS' OWN PROJECTION, and it is not
+                // the plane coming back: a rect/circle/arc/n-gon is a shape that
+                // only exists in a plane, and its plane is DERIVED FROM ITS OWN
+                // FIRST POINT'S SURFACE (PushPoint).  Point 1 is therefore free and
+                // verbatim like everybody else's — projecting it would flatten the
+                // very click the plane is about to be taken from — unless the user
+                // set an EXPLICIT plane, which is a declaration that outranks the
+                // surface under the cursor.
+                if ( PlanarOnly() && ( PointCount() >= 1 || KiwiCon_PlaneIsExplicit() ) )
                     ProjectCurOntoPlane();
-                // ═════════════════════════════════════════════════════════════
-                //  KIWI-UX (ROUND AA, ITEMS 3b + 6) — THE CHAIN LATCHES ITS PLANE
-                // ═════════════════════════════════════════════════════════════
-                // USER REPORT, verbatim: "Also it's not registering as a square
-                // when floating it off the brush."  (Screenshot: a rectangle drawn
-                // as a chain, its lower edge lying on the ground and its upper part
-                // held against a wall, with part of it overhanging the brush's
-                // edge.)  And, the same round: "line plane recognition could use
-                // some more work.  Seems iffy."
-                //
-                // THE MECHANISM, and it is one line above this one.  Shakeout H
-                // made the free-3D tools take `snap.position` VERBATIM, which was
-                // the right fix for ITS bug (aim at a corner 64 units up and the
-                // point used to land at that corner's shadow on the plane).  But
-                // "verbatim" has no plane in it at all: as the cursor crosses from
-                // the brush face to the ground, successive points come off
-                // DIFFERENT surfaces, so a ring drawn part-on and part-off a brush
-                // is not one polygon — it is four points that do not share a plane.
-                // Some rungs land within a hair of coplanar and some do not, which
-                // is exactly the "seems iffy" report: it worked when the surfaces
-                // happened to agree and silently did not when they did not.
-                //
-                // kiwi_region.cpp will not accept a non-planar ring (KVALID_PLANE_DOT
-                // and the coplanarity tests it runs before an arrangement), and it
-                // is RIGHT not to — a skew quadrilateral is not a face.  So the
-                // shape "did not register as a square".
-                //
-                // THE FIX IS AT THE SOURCE, NOT AT THE ACCEPTANCE TEST.  Loosening
-                // the region tolerance would take a genuinely skew ring and pretend
-                // it was flat; every consumer downstream (the extrude prism, the
-                // brush the region becomes) would then be built off a plane that
-                // does not contain its own outline.  Instead the chain LATCHES:
-                //
-                //   point 1  free.  It may come from anywhere — a corner 64 units
-                //            up, a face centre, the grid — and PushPoint re-seats
-                //            the working plane's ORIGIN through it, so the plane
-                //            now passes through where the user started.
-                //   point 2+ ON THAT PLANE.  The snap still chooses WHERE in the
-                //            plane (its u,v are taken from the snapped position),
-                //            it just cannot leave it.
-                //
-                // So a closed ring is coplanar BY CONSTRUCTION and the region test
-                // can stay strict.  This is also what makes the plane PREDICTABLE
-                // (item 6): within one gesture there is exactly one plane, chosen
-                // once, and no later rung can change it under the user.
-                //
-                // THE ESCAPE IS THE Z LOCK, unchanged and deliberately the only
-                // one.  ApplyZLock runs immediately below and outranks this — it is
-                // an explicit constraint the user turned on, and it is how a
-                // genuinely non-planar polyline is drawn.  The cost is recorded in
-                // RADIANT_KNOWN_ISSUES: a free 3D polyline now needs Z per rising
-                // segment, where before it came out of wherever the snaps landed.
-                else if ( PointCount() >= 1 )
-                {
-                    ProjectCurOntoPlane();
-                }
             }
             // SHAKEOUT H: the Z lock outranks the snap — it is an explicit
             // constraint the user turned on, and a constraint that a snap could
@@ -2371,7 +2583,7 @@ namespace
             // fixed-arity tools the framework's Enter-commits is right as-is.
             if ( vk == 0x0D && WantsEnterFinish() )     // VK_RETURN
             {
-                Finish( false );
+                Finish();
                 return true;
             }
             return false;
@@ -2381,7 +2593,7 @@ namespace
         {
             // Enter / an ending click arrive here.  Finish() is idempotent: a tool
             // that already stored its object on the ending click stores nothing.
-            Finish( false );
+            Finish();
             Leave();
         }
 
@@ -2394,7 +2606,13 @@ namespace
 
         void DrawWorld() override
         {
-            DrawWorkingPlane();
+            // KIWI-UX (ROUND BS): the plane INDICATOR is planar-tool-only, and only
+            // once that tool actually has a plane (its first point, or an explicit
+            // one).  Drawing an amber square on the ground for a LINE tool would be
+            // advertising a surface the line does not use — the visual half of the
+            // thing the user asked to be removed.
+            if ( PlanarOnly() && ( PointCount() >= 1 || KiwiCon_PlaneIsExplicit() ) )
+                DrawWorkingPlane();
             DrawChain();
         }
 
@@ -2407,10 +2625,10 @@ namespace
             int cx = 0, cy = 0;
             const bool haveCur = KiwiCmd_LastCursor( &cx, &cy );
             const unsigned nowMs = (unsigned)::GetTickCount();
-            const bool dbl = haveCur
-                          && ( nowMs - m_lastClickMs ) <= 400u
-                          && abs( cx - m_lastClickX ) <= 4
-                          && abs( cy - m_lastClickY ) <= 4;
+            const bool dbl = haveCur                            // KIWI-UX (CLEANUP, A-72)
+                          && ( nowMs - m_lastClickMs ) <= KCON_DBLCLICK_MS
+                          && abs( cx - m_lastClickX ) <= KCON_DBLCLICK_SLOP_PX
+                          && abs( cy - m_lastClickY ) <= KCON_DBLCLICK_SLOP_PX;
             m_lastClickMs = nowMs;
             m_lastClickX  = cx;
             m_lastClickY  = cy;
@@ -2423,26 +2641,37 @@ namespace
         virtual void Recompute() = 0;
         virtual void UpdateHud() = 0;
         virtual bool WantsEnterFinish() const { return false; }
-        // Store whatever the tool has, if anything is storable.  `fromEnter` is
-        // informational (a polyline ended by Enter stays open).
-        virtual void Finish( bool fromEnter ) { (void)fromEnter; }
+        // Store whatever the tool has, if anything is storable.
+        // KIWI-UX (CLEANUP, A-55): this used to take a `fromEnter` flag documented
+        // as "informational (a polyline ended by Enter stays open)".  Nothing ever
+        // passed true and no override read it, so the distinction had no mechanism
+        // behind it and the parameter is gone.  Enter-vs-click is NOT discriminated
+        // anywhere — wire it here if it is ever wanted.
+        virtual void Finish() {}
         // SHAKEOUT H FIX: the Esc rung has just dropped the in-progress chain.  A
         // tool holding per-stage state of its own resets it here.
         virtual void OnChainCleared() {}
 
         // ── shared helpers ──────────────────────────────────────────────────
+        // ── KIWI-UX (ROUND BS): THE SEED IS THE SAME RESOLUTION AS EVERY POINT ──
+        // This used to cast the cursor ray at the WORKING PLANE and grid-snap it in
+        // plane — a SECOND placement path, answering on the surface the ruling has
+        // just deleted, and the reason a tool's very first preview frame could sit
+        // somewhere no click would ever land.  It now asks the one resolver
+        // (kiwi_snap.h KiwiSnap_ResolvePoint): snap, else the surface hit, else the
+        // ground.  A PLANAR tool then projects, exactly as MouseMove does, so the
+        // seed and the first mouse move agree by construction rather than by luck.
         bool LatchFromCursor()
         {
             ray_t ray;
             if ( !Pick_RayFromCursor( &ray ) )
                 return false;
-            float w[3];
-            if ( !KiwiCon_RayPlaneBounded( m_plane, ray, w ) )
+            int cx = 0, cy = 0;
+            (void)KiwiCmd_LastCursor( &cx, &cy ); // label anchor only; the ray drives
+            if ( !KiwiSnap_ResolvePoint( ray, cx, cy, m_cur ) )
                 return false;
-            float uv[2];
-            KiwiCon_WorldToPlane( m_plane, w, uv );
-            KiwiCon_SnapUV( m_plane, uv );        // ROUND R: world-anchored lattice
-            KiwiCon_PlaneToWorld( m_plane, uv, m_cur );
+            if ( PlanarOnly() && KiwiCon_PlaneIsExplicit() )
+                ProjectCurOntoPlane();
             m_haveCur = true;
             return true;
         }
@@ -2450,21 +2679,24 @@ namespace
         void Leave()
         {
             if ( s_activeTool == this )
-                s_activeTool = 0;
+            {
+                s_activeTool       = 0;
+                s_activeToolPlanar = false;       // ROUND BS
+            }
             // ── SHAKEOUT H FIX: PUT THE GLOBAL ACTIVE PLANE BACK ────────────────
-            // PushPoint re-seats it at every placed point (see the note there), and
-            // nothing used to undo that.  The consequences were both permanent:
+            // PushPoint re-seats it at the first placed point (see the note there),
+            // and nothing used to undo that.  The consequences were both permanent:
             // draw one line up at z = 128 and EVERY later tool started on a plane at
             // z = 128 — so the next tool's first point landed 128 units off the
-            // ground with nothing on screen saying why.  (Shakeout H also noticed it
-            // through the cplane grid patch, which never went away again; ROUND M
-            // deleted that patch, but the leak it exposed is real and this is still
-            // the fix for it.)
+            // ground with nothing on screen saying why.
             //
-            // The re-seat INSIDE the gesture stays: it is what makes the second
-            // point of a rising segment fall back to the height being worked at.
-            // Only its escape is closed.
-            KiwiCon_SetActivePlane( m_planeOnEntry );
+            // KIWI-UX (ROUND BS): only a PLANAR tool can have touched it at all now,
+            // so only a planar tool puts it back.  A line/polyline/spline gesture
+            // never reads, writes or restores the active plane — there is nothing to
+            // restore, and calling this for them would be the one remaining way a
+            // free tool could still move a plane under the user.
+            if ( PlanarOnly() )
+                KiwiCon_SetActivePlane( m_planeOnEntry );
             m_pts.clear();
             m_haveCur = false;
             m_zLock   = false;
@@ -2489,6 +2721,14 @@ namespace
             CurUV( uv );
             SetCurUV( uv );
         }
+
+        // ── KIWI-UX (ROUND BS): SnapPlacesVerbatim IS DELETED ────────────────
+        // TOMBSTONE.  Round BR asked "did the user aim at something REAL?" so that
+        // only those points escaped the chain latch.  EVERY point is verbatim now —
+        // the latch is gone (MouseMove above) and the resolution answers with a
+        // snap, else the surface hit, else the ground, all three of which are places
+        // the user aimed at — so the predicate has no question left to ask and its
+        // one caller no longer exists.
 
         // ── SHAKEOUT H: the vertical constraint (see the Z rung in KeyDown) ─
         // The placement is the CLOSEST POINT ON THE VERTICAL LINE through the last
@@ -2525,9 +2765,26 @@ namespace
             float t = 0.0f;
             KiwiCon_SegSegClosest( vlo, vhi, ray.origin, rayEnd, &t, 0, 0 );
             float z = vlo[2] + ( vhi[2] - vlo[2] ) * t;
-            const float s = KiwiUnits_GridSpacingWorld();
-            if ( s > 0.0f )
-                z = floorf( z / s + 0.5f ) * s;
+            // KIWI-UX (CLEANUP, A-52): through KiwiGrid_Snap, not a hand-rolled
+            // lattice.  The bare KiwiUnits_GridSpacingWorld quantiser this used to
+            // be ignored the round-AJ grid-snap MASTER SWITCH, so a vertical segment
+            // was still quantised with snapping switched off.  KiwiGrid_Snap copies
+            // through in exactly that case, which is what every other caller in this
+            // file already relies on (see the note on KiwiCon_SnapUV's neighbour).
+            // KIWI-UX (ROUND BO, ITEM 3): …and only while snapping is ENGAGED.
+            // A construction tool snaps by DEFAULT and Ctrl frees it (USER: *"with
+            // construction-line based operations […] they snap by default, but ctrl
+            // unsnaps them"*).  Every other candidate this tool has goes through
+            // the ranked query, which arm 0 already gates; this lattice sits OUTSIDE
+            // that query, so it needs the same gate stated here or Ctrl would free
+            // everything except the vertical segment.
+            if ( KiwiCmd_SnapEngaged() )
+            {
+                const float zin [3] = { a[0], a[1], z };
+                float       zout[3];
+                KiwiGrid_Snap( zin, zout );
+                z = zout[2];
+            }
             m_cur[0] = a[0];
             m_cur[1] = a[1];
             m_cur[2] = z;
@@ -2558,7 +2815,7 @@ namespace
             const float len = sqrtf( du * du + dv * dv );
             if ( !( len > 1.0e-4f ) )
                 return;                       // no in-plane length: nothing to swing
-            const float rad = m_angleDeg * 0.01745329252f;
+            const float rad = m_angleDeg * KCON_DEG2RAD;
             const float nu  = cosf( rad ) * len;
             const float nv  = sinf( rad ) * len;
             for ( int k = 0; k < 3; ++k )
@@ -2566,33 +2823,58 @@ namespace
                                 + m_plane.normal[k] * dn;
         }
 
-        // SHAKEOUT H: placing a point RE-SEATS THE WORKING PLANE THROUGH IT.  The
-        // fallback plane (what ray∩plane answers over empty space, and what the
-        // grid patch draws) has to follow the height the user is actually working
-        // at, or the second point of a segment that went up 128 units would fall
-        // back to the ORIGINAL height the moment the cursor left a snap target.
-        // Pushed to the ACTIVE plane as well, because the snap layer reads
-        // KiwiCon_ActivePlane() and not this tool's copy.
+        // ═════════════════════════════════════════════════════════════════════
+        //  KIWI-UX (ROUND BS) — THE RE-SEAT IS DELETED.  A PLANAR TOOL DERIVES
+        //  ITS PLANE FROM THE FIRST POINT'S SURFACE INSTEAD.
+        // ═════════════════════════════════════════════════════════════════════
+        // TOMBSTONE for shakeout H's *"placing a point RE-SEATS THE WORKING PLANE
+        // THROUGH IT"* and round AA item 6's first-point narrowing of it.  A
+        // line, polyline or spline no longer writes the active plane AT ALL:
+        // there is no fallback plane left for it to keep up to date (its fallback
+        // is the surface under the cursor, then the ground), and the write is
+        // exactly the mechanism the user has been reporting for four rounds —
+        // *"the auto construction planes are ruining it"* — one click on a roof
+        // corner silently minting a horizontal plane at roof height that every
+        // later point was then measured against.
+        //
+        // WHAT A PLANAR TOOL DOES INSTEAD, per the brief: *"planar tools derive
+        // their plane from the FIRST point's surface (the face the first click
+        // landed on; ground in void)"*.  So at the first point, and only there:
+        //   * an EXPLICIT plane ([Space] on a face, a §16 palette row, Shift+A)
+        //     is a declaration and STANDS untouched — the user already answered
+        //     this question;
+        //   * else the FACE under the cursor gives the plane its ORIENTATION
+        //     (normal + the winding's longest edge as u, the same construction
+        //     KiwiCon_SetPlaneFromCursorFace makes) and the placed point gives it
+        //     its ORIGIN — so a rect drawn on a wall lies on that wall;
+        //   * else (void) the world GROUND orientation through the placed point.
+        // The active plane is written because the snap layer's arms 7-8 read
+        // KiwiCon_ActivePlane() and not this copy; Leave() restores it, and only
+        // a planar tool ever gets here.
         void PushPoint( const float w[3] )
         {
-            // KIWI-UX (ROUND AA, ITEM 6): THE RE-SEAT IS THE FIRST POINT'S ONLY.
-            // With the chain latch above in force, every point after the first is
-            // already ON m_plane, so re-seating the origin through it is a no-op
-            // by construction — writing it anyway would only be a chance for float
-            // drift to walk the plane one epsilon per point across a long chain,
-            // which is the same class of defect as the one the latch just fixed.
-            // Doing it on the first point is what shakeout H's note is about and
-            // is still exactly right: it puts the fallback plane (what ray-plane
-            // answers over empty space) at the height the user is working at.
             const bool first = m_pts.empty();
             m_pts.push_back( w[0] );
             m_pts.push_back( w[1] );
             m_pts.push_back( w[2] );
-            if ( first )
+            if ( !first || !PlanarOnly() || KiwiCon_PlaneIsExplicit() )
+                return;
+
+            kconPlane_t p;
+            m_planeFromSurface = PlaneFromCursorFaceAt( w, &p );
+            if ( !m_planeFromSurface )
             {
-                Copy3( w, m_plane.origin );
-                KiwiCon_SetActivePlane( m_plane );
+                WorldGroundBasis( &p );
+                Copy3( w, p.origin );
             }
+            m_plane = p;
+            KiwiCon_SetActivePlane( m_plane );
+            // Said out loud, because a derived plane that is invisible is the whole
+            // complaint this round answers.  One line, at the one moment it is
+            // decided; the indicator square (DrawWorkingPlane) shows it from here on.
+            Sys_Printf( "%s: plane taken from %s.\n", Name(),
+                        m_planeFromSurface ? "the surface under the first point"
+                                           : "the world ground at the first point" );
         }
 
         int PointCount() const { return (int)( m_pts.size() / 3 ); }
@@ -2605,6 +2887,22 @@ namespace
         void FirstPoint( float out[3] ) const
         {
             Copy3( &m_pts[0], out );
+        }
+
+        // KIWI-UX (CLEANUP, A-74): the point BEFORE the last, through an accessor
+        // rather than a hand-computed stride at the reader (KiwiCon_ToolPrevAnchor
+        // used to spell `&m_pts[p.size() - 6]` itself).  Guarded here on its own
+        // because a size_t subtraction on a short chain wraps rather than going
+        // negative — the caller's own PointCount test is not the thing that makes
+        // this safe for the next subclass that reaches for it.
+        void PrevPoint( float out[3] ) const
+        {
+            if ( m_pts.size() < 6 )
+            {
+                out[0] = out[1] = out[2] = 0.0f;
+                return;
+            }
+            Copy3( &m_pts[m_pts.size() - 6], out );
         }
 
         // "Did the user click near the first point?" — in PIXELS, never world
@@ -2676,7 +2974,7 @@ namespace
             // single bright smear along one screen row.
             const float d   = Dot3( m_plane.normal, c->vpn );
             const float fade = d * d;
-            if ( fade < 0.06f )
+            if ( fade < KCON_PLANE_FADE_MIN )                   // KIWI-UX (CLEANUP, A-72)
                 return;
 
             // The anchor: where the work IS.  The chain's first point once the
@@ -2723,7 +3021,7 @@ namespace
                 if ( !KiwiLines_Add( corner[i], corner[( i + 1 ) % 4] ) )
                     return;
 
-            const float cross = half * 0.18f;
+            const float cross = half * KCON_PLANE_CROSS_FRAC;   // KIWI-UX (CLEANUP, A-72)
             float a[3], b[3];
             for ( int kk = 0; kk < 3; ++kk ) { a[kk] = o[kk] - m_plane.u[kk] * cross;
                                                b[kk] = o[kk] + m_plane.u[kk] * cross; }
@@ -2748,10 +3046,21 @@ namespace
                 KiwiLines_Add( &m_pts[( (size_t)n - 1 ) * 3], m_cur );
         }
 
+        // KIWI-UX (ROUND BS): for a PLANAR tool this is the plane its shape lives
+        // in — explicit, else derived from the first point's surface (PushPoint).
+        // For a LINE / POLYLINE / SPLINE it is the fixed WORLD GROUND basis and is
+        // read by exactly two things, both of which are typed-bearing arithmetic:
+        // ApplyAngleOverride and NumericFieldValue's "angle" readout.  No point ever
+        // lands on it and nothing ever writes it.
         kconPlane_t        m_plane;
         // SHAKEOUT H FIX: the ACTIVE plane as this gesture found it, restored by
-        // Leave().  See the notes on Begin() and Leave().
+        // Leave().  See the notes on Begin() and Leave().  PLANAR tools only.
         kconPlane_t        m_planeOnEntry;
+        // KIWI-UX (ROUND BS): did the first point's SURFACE give a planar tool its
+        // plane (as opposed to the world ground)?  Set and announced in PushPoint;
+        // kept as state so a later reader (a HUD row, a repeat of the console line)
+        // does not have to re-pick the face to find out.
+        bool               m_planeFromSurface = false;
         std::vector<float> m_pts;                 // placed points, 3 floats, WORLD
         float              m_cur[3] = { 0.0f, 0.0f, 0.0f };
         bool               m_haveCur = false;
@@ -2855,9 +3164,51 @@ namespace
 
         const char *BeginHint() const override
         {
-            return "click to chain points, click the first point to close, "
-                   "RMB/Enter finishes, Esc drops the last point.";
+            // KIWI-UX (ROUND BK, ITEM 2): RMB no longer places anything once the
+            // chain has started, and the hint has to say so or the change is
+            // invisible until the user counts their strays.
+            // KIWI-UX (ROUND BN, ITEM 8): the entry hint states the RMB meaning that
+            // is true AT ENTRY — no LMB point has been placed yet, so RMB places one
+            // and ends.  UpdateHud below states the CURRENT one every frame after.
+            return "LMB chains points, click the first point to close, "
+                   "RMB places a point and ends (once you have left-clicked, it ends "
+                   "WITHOUT placing), Enter finishes at the cursor, "
+                   "Esc drops the last point.";
         }
+
+        // ══════════════════════════════════════════════════════════════════════
+        //  KIWI-UX (ROUND BK, ITEM 2) — RMB ENDS, IT DOES NOT PLACE.
+        // ══════════════════════════════════════════════════════════════════════
+        // USER DIRECTIVE, verbatim: *"When using the line tool, right click should
+        // only confirm a point if it's the 1st point.  Otherwise right click just
+        // ends the operation and left click sets the points.  This is leading to
+        // some extra strays that the trimming tool has to take care of."*
+        //
+        // WHERE THE STRAY COMES FROM, exactly: `Finish()` below appends `m_cur` —
+        // the point under the cursor — whenever the chain is not being closed and
+        // the cursor is somewhere ELSE than the last placed point.  That is right
+        // for ENTER ("finish at the cursor", the drawing-tool grammar every other
+        // tool here shares) and wrong for RMB, because the hand that right-clicks
+        // has already moved off the last point.  Every RMB finish therefore left
+        // one extra segment running out to wherever the cursor happened to be, and
+        // the user has been trimming those away ever since.
+        //
+        // SCOPED TO THIS TOOL AND TO ">= 1 POINT PLACED", which is the directive
+        // read literally: with NOTHING placed yet, RMB behaves exactly as it did
+        // (it takes the cursor point, the chain comes out at one point, and
+        // Finish's own `< 2 points` rung says "needs at least two points" — i.e.
+        // nothing is created either way; the grammar simply is not changed for a
+        // case the user described as "the 1st point").
+        //
+        // AN RMB **DRAG** IS STILL THE CAMERA and never reaches here — the
+        // click-vs-drag threshold is upstream, in kiwi_viewport.cpp
+        // (KVP_RMB_CONFIRM_PIXELS, the round-Z two-slop rule), and only a near-click
+        // release with a modal command live calls KiwiCmd_Confirm at all.
+        //
+        // ENTER IS UNCHANGED, which is what the confirm-source latch is for
+        // (kiwi_command.h KiwiCmd_ConfirmIsRmb).  Both still END the object; they
+        // differ only in whether the cursor point joins it.  The decision is taken
+        // in KeyDown (below) and read by Finish (further below).
 
         // The base advertises "Esc: Clear chain", which is no longer what Esc does.
         int HudPrompts( const kiwiPrompt_t **out ) const override
@@ -2873,12 +3224,38 @@ namespace
 
         bool Begin() override
         {
-            m_wantClosed = false;
+            m_wantClosed   = false;
+            m_noTailPoint  = false;                // ROUND BK, ITEM 2
+            m_anyLmbPoint  = false;                // ROUND BN, ITEM 8
             return KiwiDrawTool::Begin();
         }
 
         bool KeyDown( int vk, unsigned int mods ) override
         {
+            // ── KIWI-UX (ROUND BK, ITEM 2): RMB ENDS WITHOUT PLACING ─────────
+            // The whole argument is on BeginHint above.  This does NOT consume the
+            // key — it records the source and falls through to the base, so the
+            // framework's Enter rung still runs Commit() = Finish + Leave and there
+            // is exactly one way out of this tool.
+            // ── KIWI-UX (ROUND BN, ITEM 8): …AND THE GATE IS "ANY LMB POINT" ──
+            // USER DIRECTIVE, verbatim: *"You didn't listen to my instructions
+            // clearly from last time.  The line tool needs a small detail: it should
+            // allow right-click completion (AND insert a point) if left click was
+            // never used while making the line.  It's an odd quirk, but accurate to
+            // Plasticity and kinda makes sense."*
+            //
+            // Round BK gated on `!m_pts.empty()` — "has anything been placed" — and
+            // the directive asks a NARROWER question: "has anything been placed BY
+            // LEFT CLICK".  The two differ for any chain that grew without LMB, so
+            // the answer is a latch on the chain rather than a count of it:
+            // m_anyLmbPoint is set by OnClick (the only LMB route into PushPoint) and
+            // cleared by Begin and by Finish, i.e. it lives exactly as long as one
+            // chain does.  Esc'ing every point back off does NOT clear it — the
+            // user did use the left button while making this line, which is the
+            // question being asked.
+            if ( vk == 0x0D && KiwiCmd_ConfirmIsRmb() && m_anyLmbPoint )
+                m_noTailPoint = true;
+
             // ── Esc REMOVES THE LAST POINT ───────────────────────────────────
             // ABOVE the base class, whose Esc rung drops the WHOLE chain — which is
             // the wrong granularity for a tool whose whole point is that a chain is
@@ -2896,7 +3273,8 @@ namespace
             if ( vk == 0x1B && !m_pts.empty() )         // VK_ESCAPE
             {
                 m_pts.resize( m_pts.size() - 3 );
-                ReseatPlane();
+                // KIWI-UX (ROUND BS): ReseatPlane() is DELETED — the curve tool
+                // never seats a plane now, so popping a point has nothing to undo.
                 if ( m_pts.empty() )
                     m_zLock = false;                    // nothing to go up FROM
                 UpdateHud();
@@ -2921,21 +3299,22 @@ namespace
             if ( PointCount() >= 3 && NearFirstPoint() )
             {
                 m_wantClosed = true;
-                Finish( false );
+                Finish();
                 return false;                      // closing the loop ENDS the object
             }
             if ( doubleClick && PointCount() >= 2 )
             {
-                Finish( false );
+                Finish();
                 return false;
             }
             if ( PointCount() >= KCON_MAX_POINTS )
             {
                 Sys_Printf( "Curve: %i point limit reached — ending here.\n", KCON_MAX_POINTS );
-                Finish( false );
+                Finish();
                 return false;
             }
             PushPoint( m_cur );
+            m_anyLmbPoint = true;                  // ROUND BN, ITEM 8
             UpdateHud();
             return true;
         }
@@ -2966,7 +3345,11 @@ namespace
             const int n = PointCount();
             if ( n == 0 )
             {
-                SetHud( "curve  ·  click: first point  ·  keep clicking to chain" );
+                // KIWI-UX (ROUND BN, ITEM 8): with no LMB point in the chain, RMB is
+                // still a PLACE-and-end, so the empty-chain line says so.
+                SetHud( "curve  ·  click: first point  ·  keep clicking to chain  ·  %s",
+                        m_anyLmbPoint ? "RMB: end (no point)"
+                                      : "RMB: place a point and end" );
                 return;
             }
             float a[3], d[3];
@@ -2979,23 +3362,39 @@ namespace
             // guide (kiwi_snap.h arm 4c) is now the primary one — it needs no mode
             // and no key — and the shakeout-H Z toggle is still here for the times
             // the camera cannot give a usable angle at all.
-            SetHud( "curve  %i pts  seg %s  dz %s%s  ·  %s  ·  RMB/Enter: finish  ·  "
+            // KIWI-UX (ROUND BK, ITEM 2): the two finishes are named separately now
+            // because they no longer do the same thing.
+            // KIWI-UX (ROUND BN, ITEM 8): the RMB fragment is the LIVE meaning, not a
+            // constant — the two readings differ and the user must be able to see
+            // which one is armed without counting their strays afterwards.
+            SetHud( "curve  %i pts  seg %s  dz %s%s  ·  %s  ·  %s  ·  "
+                    "Enter: finish here  ·  "
                     "Esc: drop last  ·  vertical: aim the Z guide%s",
                     n, b, dz, m_zLock ? "  [Z LOCK]" : "",
                     ( n >= 3 && NearFirstPoint() )
                         ? "click: CLOSE the loop"
                         : "click: next point",
+                    m_anyLmbPoint ? "RMB: end (no point)"
+                                  : "RMB: place a point and end",
                     m_zLock ? ", or Z (LOCKED)" : ", or press Z" );
         }
 
-        void Finish( bool ) override
+        void Finish() override
         {
             // The point under the cursor is only taken when the chain is not being
             // closed: closing means "join back to the first point", and appending
             // the near-first cursor point as well would leave a duplicate vertex
             // that the region loop-finder would then have to dedup.
             std::vector<float> pts = m_pts;
-            if ( !m_wantClosed && m_haveCur )
+            // KIWI-UX (CLEANUP, A-49): …and never when the chain is already AT the
+            // cap.  OnClick ends a 256-point chain with "point limit reached —
+            // ending here", and appending the cursor point on top of that made 257,
+            // which KiwiCon_Add refuses — destroying the whole curve at the exact
+            // moment the HUD said it was finishing it.
+            // KIWI-UX (ROUND BK, ITEM 2): …and never when the finish came from an
+            // RMB with a chain already started.  See the argument on BeginHint.
+            if ( !m_wantClosed && m_haveCur && !m_noTailPoint
+              && PointCount() < KCON_MAX_POINTS )
             {
                 // …and it is only taken when it is somewhere ELSE.  RMB immediately
                 // after placing a point (the "I am done, this last one was the end"
@@ -3022,7 +3421,9 @@ namespace
                 if ( !m_pts.empty() )
                     Sys_Printf( "Curve: needs at least two points — nothing placed.\n" );
                 m_pts.clear();
-                m_wantClosed = false;
+                m_wantClosed  = false;
+                m_noTailPoint = false;             // ROUND BK, ITEM 2
+                m_anyLmbPoint = false;             // ROUND BN, ITEM 8
                 return;
             }
             kconObject_t o;
@@ -3032,34 +3433,32 @@ namespace
             o.plane  = m_plane;                    // seed only; refit on Add
             o.pts    = pts;
             o.closed = m_wantClosed;
-            KiwiCon_UndoPush();
-            KiwiCon_Add( o );
-            Sys_Printf( "Curve: %i points%s.\n", (int)( pts.size() / 3 ),
-                        m_wantClosed ? ", closed" : "" );
+            // KIWI-UX (CLEANUP, A-50): the success line only when the store took it
+            // — AddWithUndo prints its own refusal and mints no record on failure.
+            if ( KiwiCon_AddWithUndo( o ) >= 0 )
+                Sys_Printf( "Curve: %i points%s.\n", (int)( pts.size() / 3 ),
+                            m_wantClosed ? ", closed" : "" );
             m_pts.clear();
-            m_wantClosed = false;
+            m_wantClosed  = false;
+            m_noTailPoint = false;                 // ROUND BK, ITEM 2
+            m_anyLmbPoint = false;                 // ROUND BN, ITEM 8
         }
 
     private:
-        // PushPoint re-seats the working plane through every placed point (see the
-        // note there); popping one has to put it back, or the fallback plane keeps
-        // the height of a point that no longer exists.
-        void ReseatPlane()
-        {
-            if ( m_pts.empty() )
-            {
-                m_plane = m_planeOnEntry;
-            }
-            else
-            {
-                float w[3];
-                LastPoint( w );
-                Copy3( w, m_plane.origin );
-            }
-            KiwiCon_SetActivePlane( m_plane );
-        }
-
-        bool m_wantClosed = false;
+        // ── KIWI-UX (ROUND BS): ReseatPlane IS DELETED ──────────────────────
+        // TOMBSTONE.  It was the inverse of PushPoint's re-seat — pop a point, put
+        // the plane back where that point had dragged it.  PushPoint no longer moves
+        // any plane for this tool (a curve has none), so there is nothing to invert
+        // and both halves of the mechanism are gone together.
+        bool m_wantClosed  = false;
+        // KIWI-UX (ROUND BK, ITEM 2): set by KeyDown when the finish came from RMB
+        // with at least one point already placed; read once by Finish and cleared
+        // there.  Not a preference and not persisted — it is one gesture's answer.
+        bool m_noTailPoint = false;
+        // KIWI-UX (ROUND BN, ITEM 8): has the LEFT button placed a point in THIS
+        // chain?  It is what decides the meaning of RMB (see KeyDown), and it is
+        // what the hint line reports, so the grammar is never a secret.
+        bool m_anyLmbPoint = false;
     };
 
     // ── RECT — two corners, axis-aligned IN PLANE ───────────────────────────
@@ -3076,7 +3475,7 @@ namespace
                 UpdateHud();
                 return true;
             }
-            Finish( false );
+            Finish();
             return false;
         }
 
@@ -3114,7 +3513,7 @@ namespace
             SetHud( "rect  %s x %s  ·  click: opposite corner  ·  type = square size", bu, bv );
         }
 
-        void Finish( bool ) override
+        void Finish() override
         {
             if ( PointCount() != 1 || !m_haveCur )
                 return;
@@ -3139,14 +3538,8 @@ namespace
             const float v0 = ( a[1] < c[1] ) ? a[1] : c[1];
             const float v1 = ( a[1] < c[1] ) ? c[1] : a[1];
             const float uv[4][2] = { { u0, v0 }, { u1, v0 }, { u1, v1 }, { u0, v1 } };
-            for ( int i = 0; i < 4; ++i )
-            {
-                float w[3];
-                KiwiCon_PlaneToWorld( m_plane, uv[i], w );
-                o.pts.push_back( w[0] );  o.pts.push_back( w[1] );  o.pts.push_back( w[2] );
-            }
-            KiwiCon_UndoPush();
-            KiwiCon_Add( o );
+            EmitRectQuad( m_plane, uv, &o );          // KIWI-UX (CLEANUP, A-61)
+            KiwiCon_AddWithUndo( o );      // KIWI-UX (CLEANUP, A-50)
             m_pts.clear();
         }
 
@@ -3163,14 +3556,7 @@ namespace
             const float c[4][2] = { { a[0], a[1] }, { cu[0], a[1] },
                                     { cu[0], cu[1] }, { a[0], cu[1] } };
             KiwiLines_Color( KCON_COL_ACTIVE[0], KCON_COL_ACTIVE[1], KCON_COL_ACTIVE[2] );
-            for ( int i = 0; i < 4; ++i )
-            {
-                float w0[3], w1[3];
-                KiwiCon_PlaneToWorld( m_plane, c[i], w0 );
-                KiwiCon_PlaneToWorld( m_plane, c[( i + 1 ) & 3], w1 );
-                if ( !KiwiLines_Add( w0, w1 ) )
-                    return;
-            }
+            DrawRectQuad( m_plane, c );               // KIWI-UX (CLEANUP, A-61)
         }
     };
 
@@ -3223,7 +3609,7 @@ namespace
                 UpdateHud();
                 return true;
             }
-            Finish( false );
+            Finish();
             return false;
         }
 
@@ -3269,7 +3655,7 @@ namespace
                     b, hudSegs );
         }
 
-        void Finish( bool ) override
+        void Finish() override
         {
             if ( PointCount() != 1 )
                 return;
@@ -3291,8 +3677,7 @@ namespace
             o.ang0      = 0.0f;
             o.ang1      = 360.0f;
             o.segs      = m_sidesOverride;    // ROUND AF, ITEM 7 (0 = automatic)
-            KiwiCon_UndoPush();
-            KiwiCon_Add( o );
+            KiwiCon_AddWithUndo( o );      // KIWI-UX (CLEANUP, A-50)
             m_pts.clear();
         }
 
@@ -3327,15 +3712,7 @@ namespace
             // moment of the gesture, and 0 still means AUTO for both.
             preview.segs      = m_sidesOverride;
             KiwiLines_Color( KCON_COL_ACTIVE[0], KCON_COL_ACTIVE[1], KCON_COL_ACTIVE[2] );
-            const int segs = KiwiCon_SegmentCount( preview );
-            for ( int i = 0; i < segs; ++i )
-            {
-                float a[3], b[3];
-                if ( !KiwiCon_SegmentWorld( preview, i, a, b ) )
-                    break;
-                if ( !KiwiLines_Add( a, b ) )
-                    return;
-            }
+            DrawObjectPreview( preview );          // KIWI-UX (CLEANUP, A-60)
         }
 
     private:
@@ -3385,33 +3762,9 @@ namespace
                 return true;
             }
             if ( m_stage == 1 )                    // radius + start angle
-            {
-                if ( !( m_radius > 1.0e-3f ) )
-                {
-                    Sys_Printf( "Arc: zero radius — pick a point away from the centre.\n" );
-                    return true;
-                }
-                m_lockRadius = m_radius;
-                m_lockA0     = m_a0;
-                m_stage      = 2;
-                // SHAKEOUT C: clear the typed buffer on the stage change.  Stage 1's
-                // number is a RADIUS and stage 2's is a SWEEP IN DEGREES; carrying
-                // the radius across silently reinterpreted it as an angle the moment
-                // the second click landed.  The framework resets per COMMAND
-                // (KiwiCmd_Start), which is the right granularity for a one-scalar
-                // gesture and the wrong one for a staged tool — so a staged tool
-                // clears it itself.  kiwi_primitive.cpp does the same.
-                //
-                // SHAKEOUT E: KiwiNum_ClearEntry, not KiwiNum_Reset — Reset also
-                // reinstalls the DEFAULT field table and would throw this tool's
-                // own fields away mid-gesture (kiwi_numeric.h).
-                KiwiNum_ClearEntry();
-                m_hasNum   = false;
-                m_numWorld = 0.0f;
-                UpdateHud();
-                return true;
-            }
-            Finish( false );                       // third click closes the sweep
+                return AdvanceToSweep( "Arc: zero radius — pick a point away "
+                                       "from the centre." );
+            Finish();                              // third click closes the sweep
             return false;
         }
 
@@ -3433,23 +3786,41 @@ namespace
                 return true;
             }
             if ( m_stage == 1 )
-            {
-                if ( !( m_radius > 1.0e-3f ) )
-                {
-                    Sys_Printf( "Arc: zero radius — type one, or pick a point away "
-                                "from the centre.\n" );
-                    return true;                   // consumed; do NOT fall through to Finish
-                }
-                m_lockRadius = m_radius;
-                m_lockA0     = m_a0;
-                m_stage      = 2;
-                KiwiNum_ClearEntry();
-                m_hasNum   = false;
-                m_numWorld = 0.0f;
-                UpdateHud();
-                return true;
-            }
+                return AdvanceToSweep( "Arc: zero radius — type one, or pick a point "
+                                       "away from the centre." );
             return false;                          // stage 2 is final — Enter confirms
+        }
+
+        // ── KIWI-UX (CLEANUP, A-57): STAGE 1 -> STAGE 2, ONCE ───────────────
+        // OnClick and AdvanceStage spelled the same seven statements in the same
+        // order — the zero-radius refusal, the two latches, the stage bump, the
+        // typed-buffer clear and the HUD — differing only in the refusal wording,
+        // which is now the argument.  Always returns TRUE: the rung is consumed
+        // whether it advanced or refused, which is what both callers did.
+        //
+        // The buffer clear, unchanged from SHAKEOUT C: stage 1's number is a
+        // RADIUS and stage 2's is a SWEEP IN DEGREES, so carrying it across would
+        // silently reinterpret one as the other.  The framework resets per COMMAND
+        // (KiwiCmd_Start), which is the right granularity for a one-scalar gesture
+        // and the wrong one for a staged tool, so a staged tool clears it itself
+        // (kiwi_primitive.cpp does the same).  SHAKEOUT E: KiwiNum_ClearEntry, NOT
+        // KiwiNum_Reset — Reset also reinstalls the DEFAULT field table and would
+        // throw this tool's own fields away mid-gesture (kiwi_numeric.h).
+        bool AdvanceToSweep( const char *refusalMsg )
+        {
+            if ( !( m_radius > 1.0e-3f ) )
+            {
+                Sys_Printf( "%s\n", refusalMsg );
+                return true;                       // consumed; do NOT fall through to Finish
+            }
+            m_lockRadius = m_radius;
+            m_lockA0     = m_a0;
+            m_stage      = 2;
+            KiwiNum_ClearEntry();
+            m_hasNum   = false;
+            m_numWorld = 0.0f;
+            UpdateHud();
+            return true;
         }
 
         void Recompute() override
@@ -3460,7 +3831,7 @@ namespace
                 LastPointUV( c );
                 CurUV( cur );
                 const float d0 = cur[0] - c[0], d1 = cur[1] - c[1];
-                const float ang = atan2f( d1, d0 ) * 57.29577951f;
+                const float ang = atan2f( d1, d0 ) * KCON_RAD2DEG;
                 if ( m_stage == 1 )
                 {
                     m_radius = m_hasNum ? m_numWorld : sqrtf( d0 * d0 + d1 * d1 );
@@ -3500,7 +3871,7 @@ namespace
                         b, (double)( m_a1 - m_a0 ) );
         }
 
-        void Finish( bool ) override
+        void Finish() override
         {
             if ( m_stage < 2 || PointCount() != 1 )
             {
@@ -3525,8 +3896,7 @@ namespace
             o.ang0      = m_a0;
             o.ang1      = m_a1;
             o.segs      = m_sidesOverride;    // ROUND AF, ITEM 7 (0 = automatic)
-            KiwiCon_UndoPush();
-            KiwiCon_Add( o );
+            KiwiCon_AddWithUndo( o );      // KIWI-UX (CLEANUP, A-50)
             m_pts.clear();
             m_stage = 0;
         }
@@ -3559,15 +3929,7 @@ namespace
                 KiwiLines_Add( w0, m_cur );
                 return;
             }
-            const int segs = KiwiCon_SegmentCount( preview );
-            for ( int i = 0; i < segs; ++i )
-            {
-                float a[3], b[3];
-                if ( !KiwiCon_SegmentWorld( preview, i, a, b ) )
-                    break;
-                if ( !KiwiLines_Add( a, b ) )
-                    return;
-            }
+            DrawObjectPreview( preview );          // KIWI-UX (CLEANUP, A-60)
         }
 
     private:
@@ -3601,7 +3963,7 @@ namespace
                 UpdateHud();
                 return true;
             }
-            Finish( false );
+            Finish();
             return false;
         }
 
@@ -3643,7 +4005,7 @@ namespace
             SetHud( "rect (center)  %s x %s  ·  click: corner  ·  type = half-size", bu, bv );
         }
 
-        void Finish( bool ) override
+        void Finish() override
         {
             if ( PointCount() != 1 || !m_haveCur )
                 return;
@@ -3666,14 +4028,8 @@ namespace
             // CCW, same convention as KiwiRectTool; out to WORLD as the store wants.
             const float uv[4][2] = { { c[0] - hu, c[1] - hv }, { c[0] + hu, c[1] - hv },
                                      { c[0] + hu, c[1] + hv }, { c[0] - hu, c[1] + hv } };
-            for ( int i = 0; i < 4; ++i )
-            {
-                float w[3];
-                KiwiCon_PlaneToWorld( m_plane, uv[i], w );
-                o.pts.push_back( w[0] );  o.pts.push_back( w[1] );  o.pts.push_back( w[2] );
-            }
-            KiwiCon_UndoPush();
-            KiwiCon_Add( o );
+            EmitRectQuad( m_plane, uv, &o );          // KIWI-UX (CLEANUP, A-61)
+            KiwiCon_AddWithUndo( o );      // KIWI-UX (CLEANUP, A-50)
             m_pts.clear();
         }
 
@@ -3692,14 +4048,7 @@ namespace
             const float q[4][2] = { { c[0] - hu, c[1] - hv }, { c[0] + hu, c[1] - hv },
                                     { c[0] + hu, c[1] + hv }, { c[0] - hu, c[1] + hv } };
             KiwiLines_Color( KCON_COL_ACTIVE[0], KCON_COL_ACTIVE[1], KCON_COL_ACTIVE[2] );
-            for ( int i = 0; i < 4; ++i )
-            {
-                float w0[3], w1[3];
-                KiwiCon_PlaneToWorld( m_plane, q[i], w0 );
-                KiwiCon_PlaneToWorld( m_plane, q[( i + 1 ) & 3], w1 );
-                if ( !KiwiLines_Add( w0, w1 ) )
-                    return;
-            }
+            DrawRectQuad( m_plane, q );               // KIWI-UX (CLEANUP, A-61)
         }
     };
 
@@ -3730,7 +4079,7 @@ namespace
                 UpdateHud();
                 return true;
             }
-            Finish( false );
+            Finish();
             return false;
         }
 
@@ -3780,7 +4129,7 @@ namespace
                     bd, br, ToolSides() );
         }
 
-        void Finish( bool ) override
+        void Finish() override
         {
             if ( PointCount() != 1 )
                 return;
@@ -3800,8 +4149,7 @@ namespace
             o.ang0      = 0.0f;
             o.ang1      = 360.0f;
             o.segs      = m_sidesOverride;    // ROUND AF, ITEM 7 (0 = automatic)
-            KiwiCon_UndoPush();
-            KiwiCon_Add( o );
+            KiwiCon_AddWithUndo( o );      // KIWI-UX (CLEANUP, A-50)
             m_pts.clear();
         }
 
@@ -3821,15 +4169,8 @@ namespace
             preview.radius    = m_radius;
             preview.segs      = m_sidesOverride;   // KIWI-UX (ROUND AQ, ITEM 6) — see KiwiCircleTool
             KiwiLines_Color( KCON_COL_ACTIVE[0], KCON_COL_ACTIVE[1], KCON_COL_ACTIVE[2] );
-            const int segs = KiwiCon_SegmentCount( preview );
-            for ( int i = 0; i < segs; ++i )
-            {
-                float a[3], b[3];
-                if ( !KiwiCon_SegmentWorld( preview, i, a, b ) )
-                    break;
-                if ( !KiwiLines_Add( a, b ) )
-                    return;
-            }
+            if ( !DrawObjectPreview( preview ) )   // KIWI-UX (CLEANUP, A-60)
+                return;
             // The diameter handle, so the gesture reads as "two ends", not "rim".
             float first[3];
             FirstPoint( first );
@@ -3909,7 +4250,7 @@ namespace
                 UpdateHud();
                 return true;
             }
-            Finish( false );
+            Finish();
             return false;
         }
 
@@ -3956,7 +4297,7 @@ namespace
                     m_sides, b );
         }
 
-        void Finish( bool ) override
+        void Finish() override
         {
             if ( PointCount() != 1 )
                 return;
@@ -3980,15 +4321,14 @@ namespace
             o.pts.reserve( (size_t)m_sides * 3 );
             for ( int i = 0; i < m_sides; ++i )
             {
-                const float a = m_ang0 + 6.283185307f * (float)i / (float)m_sides;
+                const float a = m_ang0 + KCON_TWO_PI * (float)i / (float)m_sides;
                 const float uv[2] = { c[0] + cosf( a ) * m_radius,
                                       c[1] + sinf( a ) * m_radius };
                 float w[3];
                 KiwiCon_PlaneToWorld( m_plane, uv, w );
                 o.pts.push_back( w[0] );  o.pts.push_back( w[1] );  o.pts.push_back( w[2] );
             }
-            KiwiCon_UndoPush();
-            KiwiCon_Add( o );
+            KiwiCon_AddWithUndo( o );      // KIWI-UX (CLEANUP, A-50)
             m_pts.clear();
         }
 
@@ -4004,8 +4344,8 @@ namespace
             KiwiLines_Color( KCON_COL_ACTIVE[0], KCON_COL_ACTIVE[1], KCON_COL_ACTIVE[2] );
             for ( int i = 0; i < m_sides; ++i )
             {
-                const float a0 = m_ang0 + 6.283185307f * (float)i / (float)m_sides;
-                const float a1 = m_ang0 + 6.283185307f * (float)( i + 1 ) / (float)m_sides;
+                const float a0 = m_ang0 + KCON_TWO_PI * (float)i / (float)m_sides;
+                const float a1 = m_ang0 + KCON_TWO_PI * (float)( i + 1 ) / (float)m_sides;
                 const float uv0[2] = { c[0] + cosf( a0 ) * m_radius, c[1] + sinf( a0 ) * m_radius };
                 const float uv1[2] = { c[0] + cosf( a1 ) * m_radius, c[1] + sinf( a1 ) * m_radius };
                 float w0[3], w1[3];
@@ -4059,12 +4399,12 @@ namespace
             if ( PointCount() >= 3 && NearFirstPoint() )
             {
                 m_wantClosed = true;
-                Finish( false );
+                Finish();
                 return false;
             }
             if ( doubleClick && PointCount() >= 2 )
             {
-                Finish( false );
+                Finish();
                 return false;
             }
             // The CONTROL-POINT cap, not the store's point cap: the tessellation
@@ -4074,7 +4414,7 @@ namespace
             if ( PointCount() >= KCON_MAX_POINTS / KCON_SPLINE_SEGS )
             {
                 Sys_Printf( "Spline: control-point limit reached — ending here.\n" );
-                Finish( false );
+                Finish();
                 return false;
             }
             PushPoint( m_cur );
@@ -4112,7 +4452,7 @@ namespace
                     m_zLock ? "ON" : "off" );
         }
 
-        void Finish( bool ) override
+        void Finish() override
         {
             std::vector<float> ctrl = m_pts;
             if ( !m_wantClosed && m_haveCur )
@@ -4123,6 +4463,11 @@ namespace
             }
             if ( (int)( ctrl.size() / 3 ) < 2 )
             {
+                // KIWI-UX (CLEANUP, A-65): say so, with the curve tool's nuance —
+                // only worth saying when the user HAD started a chain; opening the
+                // tool and dismissing it immediately is not an error.
+                if ( !m_pts.empty() )
+                    Sys_Printf( "Spline: needs at least two control points — nothing placed.\n" );
                 m_pts.clear();
                 return;
             }
@@ -4134,12 +4479,16 @@ namespace
             TessellateSpline( ctrl, m_wantClosed, &o.pts );
             if ( (int)( o.pts.size() / 3 ) < 2 )
             {
+                // KIWI-UX (CLEANUP, A-65): the tessellation collapsed (coincident
+                // control points).  Same gesture, now audible.
+                if ( !m_pts.empty() )
+                    Sys_Printf( "Spline: %i control points tessellated to nothing — nothing placed.\n",
+                                (int)( ctrl.size() / 3 ) );
                 m_pts.clear();
                 m_wantClosed = false;
                 return;
             }
-            KiwiCon_UndoPush();
-            KiwiCon_Add( o );
+            KiwiCon_AddWithUndo( o );      // KIWI-UX (CLEANUP, A-50)
             m_pts.clear();
             m_wantClosed = false;
         }
@@ -4200,9 +4549,17 @@ void KiwiCon_SetPlanePlacement( bool on )
 
 bool KiwiCon_PlanePlacement()
 {
-    // A drawing tool IS a plane-placing command; asking one question keeps the two
-    // from ever disagreeing about the snap arm they share.
-    return s_activeTool != 0 || s_planePlacement;
+    // ── KIWI-UX (ROUND BS): A **PLANAR** PLACER, NOT ANY DRAWING TOOL ────────
+    // USER RULING: *"get rid of the construction plane […] it just needs to be
+    // wherever a ray trace hits against an object OR a snapping point."*  The line,
+    // polyline and spline tools no longer place on a plane, so they must not answer
+    // this question true — everything plane-shaped downstream (kiwi_snap.cpp's raw
+    // fallback, its occlusion relaxation, its arm-6 suppression and arms 7 + 8;
+    // kiwi_hints.cpp's working-plane chip; kiwi_viewport.cpp's PLANE banner) is
+    // gated on it and nothing else.  A rect/circle/arc/n-gon still does, because a
+    // rect with one corner 40 units off its own plane is not a rect, and so does a
+    // §16b primitive through s_planePlacement.
+    return ( s_activeTool != 0 && s_activeToolPlanar ) || s_planePlacement;
 }
 
 bool KiwiCon_ToolAnchor( float out[3] )
@@ -4229,28 +4586,20 @@ bool KiwiCon_ToolPrevAnchor( float out[3] )
 {
     if ( !s_activeTool || s_activeTool->PointCount() < 2 )
         return false;
-    const std::vector<float> &p = s_activeTool->m_pts;
-    // Three floats per point, so the point before the last starts six back.
-    Copy3( &p[p.size() - 6], out );
+    s_activeTool->PrevPoint( out );   // KIWI-UX (CLEANUP, A-74)
     return true;
 }
 
 // ─── draw (Cam_Draw tail) ────────────────────────────────────────────────────
 namespace
 {
-    // World units per screen pixel at `world`.
-    // ROUND M: this WAS a fourth private copy of the perspective per-pixel scale.
-    // It is now a thin alias over KiwiCam_WorldPerPixel (as kiwi_hover.cpp's has
-    // been since shakeout A), because that body carries the ORTHOGRAPHIC arm — in
-    // an ortho view the scale is depth-INDEPENDENT, and a private copy would have
-    // gone on shrinking these markers with distance in a projection that does not
-    // shrink anything.  `c` is redundant (the shared body reads Ed_Camera()) but
-    // keeps every call site below unchanged.
-    inline float WorldPerPixel( const camera_s *c, const float *world )
-    {
-        (void)c;
-        return KiwiCam_WorldPerPixel( world );
-    }
+    // KIWI-UX (CLEANUP, A-68): the per-pixel scale is KiwiCam_WorldPerPixel and
+    // nothing else.  This file used to wrap it (a leftover from ROUND M, when the
+    // private perspective-only copy was retired); the wrapper's camera argument was
+    // dead and it had one caller, so it is gone.  Keep calling the shared body: it
+    // carries the ORTHOGRAPHIC arm, where the scale is depth-INDEPENDENT, and any
+    // private copy would go on shrinking markers with distance in a projection that
+    // does not shrink anything.
 
     // ── KIWI-UX (ROUND U): THE ANCHOR IS A FILLED DOT, NOT AN X ─────────────
     // USER DIRECTIVE, verbatim: "instead of small x's on points of lines, could you
@@ -4261,8 +4610,8 @@ namespace
     // to make a small polygon read as a SOLID dot with a LINE renderer and no fill
     // primitive.  At this size the diagonals overlap enough to look solid.
     //
-    // SIZES, in pixels (screen-scaled through WorldPerPixel, so they hold at any
-    // distance and in ortho):
+    // SIZES, in pixels (screen-scaled through KiwiCam_WorldPerPixel, so they
+    // hold at any distance and in ortho):
     //     unselected   radius 2.5 px, 8 sides   (rose, KCON_COL_POINT)
     //     selected     radius 3.5 px, 8 sides   (white, KCON_COL_SEL_POINT)
     // "Slightly larger" and not a second glyph: the two passes already draw in
@@ -4279,11 +4628,11 @@ namespace
 
     void DrawFilledDot( const camera_s *c, const float *p, float pixRadius )
     {
-        const float r = WorldPerPixel( c, p ) * pixRadius;
+        const float r = KiwiCam_WorldPerPixel( p ) * pixRadius;   // KIWI-UX (CLEANUP, A-68)
         float prev[3], pt[3];
         for ( int i = 0; i <= KCON_DOT_SEGS; ++i )
         {
-            const float th = ( 6.283185307179586f * (float)( i % KCON_DOT_SEGS ) )
+            const float th = ( KCON_TWO_PI * (float)( i % KCON_DOT_SEGS ) )
                            / (float)KCON_DOT_SEGS;
             const float cx = cosf( th ) * r;
             const float cy = sinf( th ) * r;
@@ -4296,8 +4645,8 @@ namespace
         // The long diagonals: chord i to chord i+segs/2, which is what fills it.
         for ( int i = 0; i < KCON_DOT_SEGS / 2; ++i )
         {
-            const float th0 = ( 6.283185307179586f * (float)i ) / (float)KCON_DOT_SEGS;
-            const float th1 = th0 + 3.14159265358979f;
+            const float th0 = ( KCON_TWO_PI * (float)i ) / (float)KCON_DOT_SEGS;
+            const float th1 = th0 + KCON_PI;
             float a[3], b[3];
             for ( int k = 0; k < 3; ++k )
             {
@@ -4347,22 +4696,11 @@ void KiwiCon_DrawWorld()
     if ( c->width < 1 || c->height < 1 )
         return;
 
-    // ══════════════════════════════════════════════════════════════════════
-    //  KIWI-UX (ROUND AQ, ITEM 2) — THE REGION FILLS NO LONGER DRAW FROM HERE.
-    // ══════════════════════════════════════════════════════════════════════
-    // `KiwiRegion_DrawFills( -1 )` used to be the first thing this pass did.  It
-    // now runs from the COMMAND-OVERLAY SLOT in Cam_Draw's tail instead
-    // (camwnd.cpp, immediately before KiwiCmd_DrawWorld) — the slot the BOOLEAN's
-    // red operand preview draws from, which is the one fill in this editor the
-    // user has confirmed visible.  Draw-pass LOCATION was the last structural
-    // difference left between the two emitters after round AM equalised their
-    // submission state; every other difference is now gone as well
-    // (RADIANT_UX_DESIGN §69 carries the diff table).  If the fill appears, the
-    // location was it.  If it does not, the submission-side model is dead and the
-    // next round starts from the renderer.
-    //
-    // The gate is unchanged: the new call site re-checks KiwiCon_ShowConstruction()
-    // exactly as this function does above, so the toggle still owns both.
+    // KIWI-UX (CLEANUP, A-66): the region fills do NOT draw from here.
+    // `KiwiRegion_DrawFills( -1 )` runs from the COMMAND-OVERLAY SLOT in Cam_Draw's
+    // tail (camwnd.cpp, immediately before KiwiCmd_DrawWorld), and that slot
+    // re-checks KiwiCon_ShowConstruction() exactly as this function does above, so
+    // the toggle still owns both.
 
     KiwiLines_Begin( KCON_DRAW_SEGMENTS, 1 );
 
@@ -4391,10 +4729,21 @@ void KiwiCon_DrawWorld()
             const kconObject_t &o = s_objects[i];
             if ( o.hidden )                       // ROUND U — hidden is inert
                 continue;
+            // KIWI-UX (CLEANUP, A-63): one selection query per OBJECT instead of
+            // one per SEGMENT for the common case.  KiwiConSel_ObjectSelected is
+            // true when ANY item names this object (whole-object, point OR
+            // segment), so an object with nothing selected has SegmentSelected
+            // false at every segment: the selected pass skips it whole and the
+            // unselected pass draws every segment without asking again.  Objects
+            // that DO carry a selection keep the per-segment scan, so this is
+            // behaviour-identical.
+            const bool anySel = KiwiConSel_ObjectSelected( (int)i );
+            if ( wantSel && !anySel )
+                continue;
             const int segs = KiwiCon_SegmentCount( o );
             for ( int s = 0; s < segs; ++s )
             {
-                if ( KiwiConSel_SegmentSelected( (int)i, s ) != wantSel )
+                if ( anySel && KiwiConSel_SegmentSelected( (int)i, s ) != wantSel )
                     continue;
                 float a[3], b[3];
                 if ( !KiwiCon_SegmentWorld( o, s, a, b ) )
@@ -4456,10 +4805,13 @@ void KiwiCon_DrawWorld()
             const kconObject_t &o = s_objects[i];
             if ( o.hidden )                       // ROUND U — hidden is inert
                 continue;
+            const bool anySel = KiwiConSel_ObjectSelected( (int)i );   // KIWI-UX (CLEANUP, A-63)
+            if ( wantSel && !anySel )
+                continue;
             const int anchors = KiwiCon_AnchorCount( o );
             for ( int a = 0; a < anchors; ++a )
             {
-                if ( KiwiConSel_PointSelected( (int)i, a ) != wantSel )
+                if ( anySel && KiwiConSel_PointSelected( (int)i, a ) != wantSel )
                     continue;
                 float p[3];
                 if ( !KiwiCon_AnchorWorld( o, a, p ) )
@@ -4499,10 +4851,7 @@ int KiwiCon_ToolSides()
     {
         int n = Radiant_ProfileGetInt( KCON_SECTION, "RoundToolSides", 0 );
         if ( n != 0 )
-        {
-            if ( n < KCON_SIDES_MIN ) n = KCON_SIDES_MIN;
-            if ( n > KCON_SEGS_MAX  ) n = KCON_SEGS_MAX;
-        }
+            n = ClampSides( n );                               // CLEANUP, A-59
         s_toolSides = n;
     }
     return s_toolSides;
@@ -4512,10 +4861,7 @@ void KiwiCon_SetToolSides( int sides )
 {
     int n = sides;
     if ( n != 0 )
-    {
-        if ( n < KCON_SIDES_MIN ) n = KCON_SIDES_MIN;
-        if ( n > KCON_SEGS_MAX  ) n = KCON_SEGS_MAX;
-    }
+        n = ClampSides( n );                                   // CLEANUP, A-59
     if ( n == s_toolSides )
         return;
     s_toolSides = n;
@@ -4726,7 +5072,23 @@ bool KiwiCon_SaveSidecar( const char *mapPath )
         }
         fprintf( f, "end\n" );
     }
-    fclose( f );
+
+    // ── KIWI-UX (CLEANUP, A-53): THE FULL-DISK HALF OF THE PROMISE ─────────────
+    // The tmp+rename dance above only covers the CRASH case on its own.  Nothing
+    // checked whether the writes landed, so a short write (disk full, quota, a
+    // network path going away) produced a TRUNCATED tmp that the rename below then
+    // promoted over a perfectly good sidecar — losing every construction object and
+    // every hidden-brush record for the map, with the success line as the only
+    // feedback.  `ferror` is the aggregate of every fprintf above, and `fclose` is
+    // where a buffered write finally reaches the disk, so both have to be asked.
+    // Non-short-circuit `|` deliberately: fclose MUST run either way.
+    if ( ferror( f ) | ( fclose( f ) != 0 ) )
+    {
+        Sys_Printf( "WARNING: could not write construction sidecar %s (disk full?) — "
+                    "the existing sidecar was left untouched.\n", tmp );
+        ::DeleteFileA( tmp );
+        return false;
+    }
 
     if ( !::MoveFileExA( tmp, path, MOVEFILE_REPLACE_EXISTING ) )
     {
@@ -4826,17 +5188,8 @@ bool KiwiCon_LoadSidecar( const char *mapPath )
             int gid = -1;
             if ( sscanf( line, "%*s %i", &gid ) == 1 && gid >= 0 )
             {
-                char        nm[KCON_GROUPNAME_MAX] = { 0 };
-                const char *q0 = strchr( line, '"' );
-                const char *q1 = q0 ? strrchr( line, '"' ) : 0;
-                if ( q0 && q1 && q1 > q0 )
-                {
-                    int n = (int)( q1 - q0 - 1 );
-                    if ( n > KCON_GROUPNAME_MAX - 1 )
-                        n = KCON_GROUPNAME_MAX - 1;
-                    memcpy( nm, q0 + 1, (size_t)n );
-                    nm[n] = '\0';
-                }
+                char nm[KCON_GROUPNAME_MAX] = { 0 };
+                KiwiCon_QuotedField( line, nm, KCON_GROUPNAME_MAX );   // CLEANUP, A-73
                 if ( GroupSlot( gid ) < 0 )
                 {
                     kconGroup_t g;
@@ -4924,15 +5277,9 @@ bool KiwiCon_LoadSidecar( const char *mapPath )
             // own name.  A `name` line with no quotes at all is a malformed line and
             // simply leaves the object unnamed rather than failing the load — a
             // label is not worth refusing a user's scaffolding over.
-            const char *q0 = strchr( line, '"' );
-            const char *q1 = q0 ? strrchr( line, '"' ) : 0;
-            if ( q0 && q1 && q1 > q0 )
-            {
-                int n = (int)( q1 - q0 - 1 );
-                if ( n > KCON_NAME_MAX - 1 )
-                    n = KCON_NAME_MAX - 1;
-                cur.name.assign( q0 + 1, (size_t)n );
-            }
+            char nm[KCON_NAME_MAX] = { 0 };
+            if ( KiwiCon_QuotedField( line, nm, KCON_NAME_MAX ) )      // CLEANUP, A-73
+                cur.name = nm;
         }
         else if ( !strcmp( kw, "wpt" ) )                 // KIWI2 — WORLD, verbatim
         {
@@ -4971,9 +5318,7 @@ bool KiwiCon_LoadSidecar( const char *mapPath )
             int n = 0;
             if ( sscanf( line, "%*s %i", &n ) == 1 && n > 0 )
             {
-                if ( n < KCON_SIDES_MIN ) n = KCON_SIDES_MIN;
-                if ( n > KCON_SEGS_MAX  ) n = KCON_SEGS_MAX;
-                cur.segs = n;
+                cur.segs = ClampSides( n );                    // CLEANUP, A-59
             }
         }
         else if ( !strcmp( kw, "arc" ) )
@@ -5038,23 +5383,21 @@ bool KiwiCon_LoadSidecar( const char *mapPath )
 }
 
 // ─── commands ────────────────────────────────────────────────────────────────
-bool KiwiCon_CanDraw()
-{
-    return true;                          // a drawing tool always has a plane to draw on
-}
-
 void KiwiCon_RegisterCommands()
 {
-    // Unbound: these are the CLASSIC-profile bindings, and the modern profile
-    // deliberately claims NO new key this phase (see the KEYS note in the header).
+    // Registered UNBOUND (the 0, 0 pair): the profiles own the keys, not this
+    // table.  KIWI-UX (CLEANUP, A-54) — the modern profile binds eight creation
+    // chords directly (Shift+A/S/Q/C/W/V/X/Z), see kiwi_construct.h's SHAKEOUT F
+    // REVERSAL and kiwi_keymap.h's chain table.
     Radiant_RegisterCommand( "KiwiConstructLine",      0, 0, KIWI_CMD_DRAW_LINE );
     Radiant_RegisterCommand( "KiwiConstructPolyline",  0, 0, KIWI_CMD_DRAW_POLYLINE );
     Radiant_RegisterCommand( "KiwiConstructRect",      0, 0, KIWI_CMD_DRAW_RECT );
     Radiant_RegisterCommand( "KiwiConstructCircle",    0, 0, KIWI_CMD_DRAW_CIRCLE );
     Radiant_RegisterCommand( "KiwiConstructArc",       0, 0, KIWI_CMD_DRAW_ARC );
-    // §16b shakeout C — the rest of the curve inventory.  Also unbound: the ONE
-    // key this round claims is Shift+A for the add menu (kiwi_addmenu.cpp), which
-    // is how all nine of these are reached in one keystroke.
+    // §16b shakeout C — the rest of the curve inventory.  Also registered unbound.
+    // KIWI-UX (CLEANUP, A-54): the four below keep NO chord and are reached from
+    // the add menu (itself unbound — palette + KIWI panel) and the palette, which
+    // is what §11 says is enough.  Shift+A starts the LINE tool, not the add menu.
     Radiant_RegisterCommand( "KiwiConstructRectCenter", 0, 0, KIWI_CMD_DRAW_RECT_CENTER );
     Radiant_RegisterCommand( "KiwiConstructCircle2Pt",  0, 0, KIWI_CMD_DRAW_CIRCLE_2PT );
     Radiant_RegisterCommand( "KiwiConstructPolygon",    0, 0, KIWI_CMD_DRAW_POLYGON );
@@ -5093,15 +5436,36 @@ bool KiwiCon_DispatchInstant( unsigned int commandId )
 {
     switch ( commandId )
     {
-    case KIWI_CMD_CPLANE_XY:   KiwiCon_SetPlaneAxis( 2 );  return true;
-    case KIWI_CMD_CPLANE_XZ:   KiwiCon_SetPlaneAxis( 1 );  return true;
-    case KIWI_CMD_CPLANE_YZ:   KiwiCon_SetPlaneAxis( 0 );  return true;
-    case KIWI_CMD_CPLANE_VIEW: KiwiCon_SetPlaneFromView(); return true;
+    // KIWI-UX (ROUND BP, ITEM 3): the §16 palette rows are EXPLICIT by definition —
+    // the user named the plane — so each one marks the latch and the PLANE chip
+    // lights up.  They are also the only remaining way to reach the round-AT
+    // working-height inheritance, and it now needs an explicit plane to inherit
+    // FROM (KiwiCon_MajorPlaneOffset).
+    // ── KIWI-UX (ROUND BS): …AND THEY NOW SERVE THE PLANAR TOOLS ONLY ────────
+    // Kept functioning exactly as they were — the rows still install and announce a
+    // plane, and a rect/circle/arc/n-gon or a §16b primitive started afterwards
+    // draws on it.  What changed is what they DO NOT do: a line, polyline or spline
+    // ignores the active plane entirely now, so choosing "XZ" no longer changes
+    // where a line lands.  No stub and no KNOWN_ISSUES entry was needed; the rows
+    // cost the line path nothing because nothing in it reads the plane.
+    case KIWI_CMD_CPLANE_XY:
+        KiwiCon_SetPlaneAxis( 2 );  KiwiCon_MarkPlaneExplicit( "XY (chosen)" );  return true;
+    case KIWI_CMD_CPLANE_XZ:
+        KiwiCon_SetPlaneAxis( 1 );  KiwiCon_MarkPlaneExplicit( "XZ (chosen)" );  return true;
+    case KIWI_CMD_CPLANE_YZ:
+        KiwiCon_SetPlaneAxis( 0 );  KiwiCon_MarkPlaneExplicit( "YZ (chosen)" );  return true;
+    case KIWI_CMD_CPLANE_VIEW:
+        KiwiCon_SetPlaneFromView(); KiwiCon_MarkPlaneExplicit( "the view plane" ); return true;
     case KIWI_CMD_CPLANE_FACE:
         if ( KiwiCon_SetPlaneFromCursorFace() )
+        {
+            KiwiCon_MarkPlaneExplicit( "a face (chosen)" );
             Sys_Printf( "Construction plane: from face under cursor.\n" );
+        }
         else
+        {
             Sys_Printf( "Construction plane: no face under the cursor.\n" );
+        }
         return true;
     case KIWI_CMD_CONSTRUCT_CLEAR:
         if ( KiwiCon_HasObjects() )
@@ -5129,12 +5493,12 @@ bool KiwiCon_DispatchInstant( unsigned int commandId )
 // NOT an ImGui menu: ImGuiPanels_Menu draws inside an ordinary ImGui::Begin
 // window, so BeginMenu/MenuItem would be illegal there.  Same shape as
 // KiwiPalette_MenuItem — buttons, in a labelled section.  §11 requires every new
-// feature to be reachable in BOTH keymap profiles, and since nothing here binds a
-// key this phase, this block and the command palette ARE the route.
+// feature to be reachable in BOTH keymap profiles.  KIWI-UX (CLEANUP, A-54): the
+// modern profile chords eight of these (kiwi_construct.h SHAKEOUT F REVERSAL) and
+// the CLASSIC profile chords none, so this block and the command palette are the
+// route that always exists.
 void KiwiCon_MenuItems()
 {
-    extern void Radiant_ExecCommand( unsigned int cmdId );   // mainfrm.cpp
-
     ImGui::SeparatorText( "Construct" );
 
     struct row_t { const char *label; int id; };

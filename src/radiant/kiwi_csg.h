@@ -78,6 +78,35 @@
 // These attach to the EXISTING metadata rows for 32982 / 32927 / 33220 — no new
 // command id is minted, so the palette still shows exactly one row per operation
 // and the classic menu / hotkey / palette routes all reach the same handler.
+struct selbrush_t;   // qe3.h:429 — pointer-only below
+
+// ── KIWI-UX (CLEANUP, B-10): "A BRUSH THIS VERB MAY CONSUME", ONCE ─────────
+// The four tests every CSG-family verb in this layer runs on a candidate brush,
+// which are in turn the ported cores' own (csg.cpp's validation loop refuses
+// patches and fixed-size entities outright):
+//   * the instance has a def;
+//   * it is not a PATCH ("Cannot add patches.");
+//   * it has an owner entity WITH a def;
+//   * that entity's eclass exists and is not fixedsize ("Cannot add fixed size
+//     entities.").
+// `entity_s_def` IS `entity_s` (qe3.h `typedef entity_s entity_s_def;`), so this
+// and the ported spelling `((entity_s_def*)b->owner->def)->eclass->fixedsize` are
+// the same read.
+//
+// It was written out four times — kiwi_csg.cpp CsgUsable and kiwi_autobool.cpp
+// Usable byte-identically, kiwi_dupe.cpp Cloneable with the same tests in a
+// different conjunction order, and kiwi_boolean.cpp Usable with `faceCount >= 4`
+// on top — plus kiwi_loft.cpp UsableFace, which is these four tests plus a
+// winding check.  The verbs that need MORE keep their extra test at their own
+// site; this is the floor they all share.
+bool KiwiCsg_BrushUsable( const selbrush_t *b );
+
+// The walk built on it: at least two brushes selected, ALL usable, and all owned
+// by ONE entity ("different entities" is the cores' own refusal).  KiwiCsg_CanMerge
+// and KiwiAutoBool_CanExecute were the same fifteen lines with two spellings of
+// the owner read.
+bool KiwiCsg_SelectionMergeable();
+
 bool KiwiCsg_CanHollow();     // 32982
 bool KiwiCsg_CanMerge();      // 32927
 bool KiwiCsg_CanAutoCaulk();  // 33220

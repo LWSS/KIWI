@@ -20,6 +20,7 @@
 #include "kiwi_lines.h"
 #include "kiwi_pick.h"
 #include "kiwi_ux.h"
+#include "kiwi_vec.h"     // KIWI-UX (CLEANUP, A-15): the one spelling of Dot3/Sub3/...
 
 #include <math.h>
 
@@ -98,11 +99,6 @@ namespace
     bool s_hot     = false;
     bool s_grabbed = false;
 
-    inline void  Copy3( const float *a, float *o ) { o[0]=a[0]; o[1]=a[1]; o[2]=a[2]; }
-    inline float Dot3( const float *a, const float *b )
-    { return a[0]*b[0] + a[1]*b[1] + a[2]*b[2]; }
-    inline void  Mad3( const float *a, const float *d, float s, float *o )
-    { o[0]=a[0]+d[0]*s; o[1]=a[1]+d[1]*s; o[2]=a[2]+d[2]*s; }
 
     struct lolGeo_t
     {
@@ -281,11 +277,6 @@ bool KiwiLollipop_MouseDown( int imgX, int imgY )
     return true;
 }
 
-bool KiwiLollipop_Grabbed()
-{
-    return s_grabbed;
-}
-
 void KiwiLollipop_Release()
 {
     if ( !s_grabbed )
@@ -329,8 +320,9 @@ void KiwiLollipop_DrawWorld()
     // ── the circle ON the face ──────────────────────────────────────────────
     // In the FACE PLANE, not camera-facing: the picture shows a ring lying on the
     // surface, and a camera-facing ring would read as a halo floating in front of
-    // it.  It is NOT a face outline — it is a fixed 18 px circle at the centroid
-    // and has nothing to do with the winding (ROUND K's "no face outlines" audit).
+    // it.  It is NOT a face outline — it is a fixed KLOL_RING_PIX (14 px, KIWI-UX
+    // (CLEANUP, C-46): this line said 18, round U's number) circle at the centroid,
+    // with nothing to do with the winding (ROUND K's "no face outlines" audit).
     // ROUND Y, ITEM 7: out-of-range paints the WHOLE glyph, ring included — a red
     // ball on a yellow ring would read as a hover state, not as a refusal.
     KiwiEditorCommand *lolCmd = KiwiCmd_Active();

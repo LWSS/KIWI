@@ -62,7 +62,7 @@ struct mapInfoStats_t
 // (mapinfo.cpp:181), and the only symbol this panel needs â€” MapInfo_01/_02 are reached
 // through it, and MapInfo_03_Item / MapInfo_PopulateDialog are HWND-side, so neither is
 // bound here. Reminder: it DESELECTS before counting.
-extern void MapInfo_Gather( mapInfoStats_t &out );                        // mapinfo.cpp:181
+extern void MapInfo_Gather( mapInfoStats_t &out );                        // mapinfo.cpp:178
 
 // â”€â”€ panel state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 static bool s_showMapInfo = false;

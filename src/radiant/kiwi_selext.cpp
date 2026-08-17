@@ -18,6 +18,7 @@
 #include "kiwi_command.h"
 #include "kiwi_pick.h"
 #include "kiwi_selection.h"
+#include "kiwi_vec.h"     // KIWI-UX (CLEANUP, A-15): the one spelling of Dot3/Sub3/...
 
 #include <imgui/imgui.h>
 #include <math.h>
@@ -27,16 +28,17 @@
 // ── ported entry points (each verified against its definition) ──────────────
 extern int  Sys_Printf( const char *fmt, ... );          // win_qe3.cpp:112
 extern int  g_nUpdateBits;                               // 0x25D5A74 (mainfrm.cpp)
-extern void Radiant_ExecCommand( unsigned int cmdId );   // mainfrm.cpp:3894
+extern void Radiant_ExecCommand( unsigned int cmdId );   // mainfrm.cpp:4083
+// KIWI-UX (CLEANUP, C-55): at FILE scope, like every peer (kiwi_selconv.cpp,
+// kiwi_visibility.cpp, kiwi_outliner.cpp) — it was declared inside
+// KiwiSelExt_RegisterCommands' body with no cite.
+// mainfrm.cpp — the shared command table's append hook (// KIWI-UX there).
+extern bool Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId );
 
 // active_brushes / selected_brushes are the qe3.h sentinels (qe3.h:1053-1054).
 
 namespace
 {
-    inline float Dot3( const float *a, const float *b )
-    {
-        return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-    }
 
     int EditLayer()
     {
@@ -192,8 +194,13 @@ namespace
             return;
         }
         const brush_t *adef = act.brush->def;
+        // KIWI-UX (CLEANUP, C-54): audible, same early-out.  The arm right above
+        // reports its refusal; this one refused the same command in silence.
         if ( !adef || !adef->faces || act.faceIndex < 0 || act.faceIndex >= adef->faceCount )
+        {
+            Sys_Printf( "Select Coplanar: the active face is stale — reselect it.\n" );
             return;
+        }
 
         float n0[3];
         n0[0] = adef->faces[act.faceIndex].plane.normal[0];
@@ -399,7 +406,6 @@ bool KiwiSelExt_CanMaterial()
 // ─── registration + dispatch ─────────────────────────────────────────────────
 void KiwiSelExt_RegisterCommands()
 {
-    extern bool Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId );
     // Unbound: the CLASSIC-profile bindings, and the modern profile deliberately
     // claims NO new key this phase.  KEY CANDIDATES, logged rather than taken:
     //   Select Coplanar Faces      — Shift+C (0x43 mods 1; C alone is unbound)

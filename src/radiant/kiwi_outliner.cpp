@@ -84,7 +84,7 @@
 
 // ── ported entry points (each verified against its definition) ──────────────
 extern int         Sys_Printf( const char *fmt, ... );                       // win_qe3.cpp:112   int Sys_Printf(const char*,...)
-extern int         g_nUpdateBits;                                            // engine_stubs.cpp:693  int g_nUpdateBits
+extern int         g_nUpdateBits;                                            // engine_stubs.cpp:773  int g_nUpdateBits
 extern entity_s   *world_entity;                                             // map.cpp:41        entity_s *world_entity
 extern entity_s    entityInsts;                                              // entity.cpp:286    entity_s entityInsts{}
 extern eclass_t   *Eclass_ForName( int hasBrushes, const char *name );       // eclass.cpp:1090   eclass_t *Eclass_ForName(int,const char*)
@@ -92,12 +92,12 @@ extern entity_s   *Entity_Create( eclass_t *eclass );                        // 
 extern void        Entity_Free( char *a1 );                                  // entity.cpp:1485   void Entity_Free(char*)
 extern void        Entity_LinkBrush( brush_t *b, entity_s *world_ent );      // entity.cpp:432    void Entity_LinkBrush(brush_t*,entity_s*)
 extern void        Entity_UnlinkBrush( brush_t *b );                         // entity.cpp:465    void Entity_UnlinkBrush(brush_t*)
-extern selbrush_t *Entity_LinkBrush_0_extern( entity_s *e, entity_brush_s *b );// brush.cpp:620   selbrush_t *Entity_LinkBrush_0_extern(entity_s*,entity_brush_s*)
-extern void        Brush_BuildWindings( brush_t *def, int bFull );           // brush.cpp:1407    void Brush_BuildWindings(brush_t*,int)
+extern selbrush_t *Entity_LinkBrush_0_extern( entity_s *e, entity_brush_s *b );// brush.cpp:623   selbrush_t *Entity_LinkBrush_0_extern(entity_s*,entity_brush_s*)
+extern void        Brush_BuildWindings( brush_t *def, int bFull );           // brush.cpp:1418    void Brush_BuildWindings(brush_t*,int)
 extern void        SetupVertexSelection();                                   // engine_stubs      void SetupVertexSelection()
 extern void        MarkMapModified();                                        // win_qe3.cpp       void MarkMapModified()
-extern void        sub_476330( selbrush_t *b );                              // brush.cpp:835     void sub_476330(selbrush_t*)  Brush_Deselect_Helper
-extern void        sub_476470( selbrush_t *b );                              // brush.cpp:946     void sub_476470(selbrush_t*)  Brush_Select_Helper
+extern void        sub_476330( selbrush_t *b );                              // brush.cpp:846     void sub_476330(selbrush_t*)  Brush_Deselect_Helper
+extern void        sub_476470( selbrush_t *b );                              // brush.cpp:957     void sub_476470(selbrush_t*)  Brush_Select_Helper
 extern void        SetKeyValue( entity_s_def *e, const char *key, const char *value ); // entity.cpp:209  void SetKeyValue(entity_s_def*,const char*,const char*)
 extern char       *ValueForKey2( int e, const char *key );                   // entity.cpp:86     char *ValueForKey2(int,const char*)  ("" when absent)
 extern void        Undo_ClearRedo();                                         // undo.cpp:176      void Undo_ClearRedo()
@@ -107,7 +107,7 @@ extern void        Undo_AddBrushList( selbrush_t *sb );                      // 
 extern void        Undo_AddEntity_W( entity_s *a1 );                         // undo.cpp:633      void Undo_AddEntity_W(entity_s*)
 extern void        Undo_SetIdForEntity( entity_s_def *ent );                 // undo.cpp:663      void Undo_SetIdForEntity(entity_s_def*)
 extern void        Undo_End();                                               // undo.cpp:686      void Undo_End()
-extern bool        Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId ); // mainfrm.cpp:1257
+extern bool        Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId ); // mainfrm.cpp:1340
 // KIWI-UX (ROUND W): the live dockspace id, so the JustOpened latch can re-dock
 // this window the way the shell re-docks its own (imgui_shell.cpp:474).
 extern ImGuiID     ImGuiShell_DockRoot();                                    // imgui_shell.cpp
@@ -564,6 +564,41 @@ void Flatten()
     s_rows[curvesRow].count = curvesCount;
 }
 
+// ── KIWI-UX (ROUND BL, ITEM 1): THE MAP-LOAD COLLAPSE ───────────────────────
+// USER DIRECTIVE, verbatim: *"When loading a map, load with all the groups in the
+// outliner collapsed."*
+//
+// s_collapsed holds the keys that are CLOSED, so an untouched key is OPEN — which
+// is exactly right for a session (a folder the user opened stays open) and exactly
+// wrong for the first frame of a map nobody has touched yet.  Rather than invert
+// the default — which would break "manual expand/collapse persists for the session"
+// — the load arms a one-shot and this closes every key the scene HAS.  Keys are
+// minted the same way Flatten mints them (EntKey / ConGroupKey / the two section
+// constants) so nothing can be closed under a key the panel will not look up.
+//
+// Enumerated from the SCENE, not from s_rows: the flatten stops descending into a
+// collapsed folder, so a pass over the rows would leave every nested folder
+// untouched — the user would open Solids and find the func_groups hanging open
+// again, which is the complaint one level down.
+bool s_collapseAllPending = false;
+
+void CollapseAllFolders()
+{
+    SetCollapsed( KOUT_KEY_SOLIDS, true );
+    SetCollapsed( KOUT_KEY_CURVES, true );
+    for ( entity_s *e = entityInsts.next; e && e != &entityInsts; e = e->next )
+    {
+        if ( e == world_entity )
+            continue;
+        entity_s_def *def = DefOf( e );
+        if ( def )
+            SetCollapsed( EntKey( def->numberId ), true );
+    }
+    const int nGroups = KiwiCon_GroupCount();
+    for ( int g = 0; g < nGroups; ++g )
+        SetCollapsed( ConGroupKey( KiwiCon_GroupIdAt( g ) ), true );
+}
+
 // Outliner.tsx:89-100: anything that becomes selected has its ancestors expanded,
 // so a viewport selection is never hiding inside a closed folder.  Cheap and only
 // runs when the selection generation actually moved.
@@ -609,8 +644,13 @@ void AutoExpandForSelection()
 // not a second selection owner and holds no list of its own.
 void SelectBrushRow( selbrush_t *b, bool additive, bool toggle )
 {
+    // KIWI-UX (CLEANUP, C-54): a click on a row whose brush has been deleted under
+    // the list did nothing and said nothing.  Same early-out, now audible.
     if ( !b || !Sel_BrushLive( b ) )
+    {
+        Sys_Printf( "Outliner: that brush no longer exists — nothing selected.\n" );
         return;
+    }
     selection_t &sel = KiwiSel();
     if ( !additive && !toggle )
     {
@@ -629,8 +669,14 @@ void SelectBrushRow( selbrush_t *b, bool additive, bool toggle )
 
 void SelectConRow( int index, bool additive, bool toggle )
 {
+    // KIWI-UX (CLEANUP, C-54): the construction store shrank under the list, so the
+    // row names an object that is gone.  Same early-out, now audible.
     if ( index < 0 || index >= KiwiCon_Count() )
+    {
+        Sys_Printf( "Outliner: that curve row is stale (index %i of %i) — "
+                    "nothing selected.\n", index, KiwiCon_Count() );
         return;
+    }
     if ( !additive && !toggle )
     {
         // Same rule as above, from the other side: a plain click on a curve row
@@ -722,11 +768,18 @@ void SetAnchor( const koutRow_t &r )
 // relink so the record stores the OLD owner (see the file header).
 bool ReparentBrushes( std::vector<selbrush_t *> &insts, entity_s *targetInst, const char *op )
 {
+    // KIWI-UX (CLEANUP, C-54): audible, same early-out.
     if ( !targetInst )
+    {
+        Sys_Printf( "Outliner: the drop target no longer exists — move cancelled.\n" );
         return false;
+    }
     entity_s_def *targetDef = DefOf( targetInst );
     if ( !targetDef )
+    {
+        Sys_Printf( "Outliner: the drop target has no definition — move cancelled.\n" );
         return false;
+    }
     // A point entity's brush is its bounding box and is not the user's to move —
     // Entity_Create refuses the same case (entity.cpp:1640-1645).
     if ( targetDef->eclass && targetDef->eclass->fixedsize )
@@ -748,7 +801,14 @@ bool ReparentBrushes( std::vector<selbrush_t *> &insts, entity_s *targetInst, co
         move.push_back( sb );
     }
     if ( move.empty() )
+    {
+        // KIWI-UX (CLEANUP, C-54): this arm prints because the SUCCESS arm does.
+        // Dragging a row onto the folder it already belongs to used to produce
+        // nothing at all, which reads as "the outliner ignored my drag".
+        Sys_Printf( "Outliner: nothing to move — the %i dragged brush(es) are "
+                    "already in %s.\n", (int)insts.size(), ClassOf( targetInst ) );
         return false;
+    }
 
     Undo_ClearRedo();
     Undo_GeneralStart( op );
@@ -767,7 +827,7 @@ bool ReparentBrushes( std::vector<selbrush_t *> &insts, entity_s *targetInst, co
         brush_t *bDef = sb->def;
         Entity_UnlinkBrush( bDef );                          // entity.cpp:465
         Entity_LinkBrush( bDef, (entity_s *)targetDef );     // entity.cpp:432
-        Entity_LinkBrush_0_extern( targetInst, sb );         // brush.cpp:620
+        Entity_LinkBrush_0_extern( targetInst, sb );         // brush.cpp:623
 
         Brush_BuildWindings( bDef, 1 );
         if ( g_qeglobals.d_select_mode == sel_vertex || g_qeglobals.d_select_mode == sel_edge )
@@ -809,11 +869,20 @@ void GatherSelectedBrushes( std::vector<selbrush_t *> &out )
 // group come back with its members, not just its name.
 bool UngroupEntity( entity_s *inst, const char *op )
 {
+    // KIWI-UX (CLEANUP, C-54): audible, same early-out.  "Ungroup did nothing and
+    // said nothing" is indistinguishable from "ungroup is broken".
     if ( !inst || inst == world_entity || !world_entity )
+    {
+        Sys_Printf( "Outliner: worldspawn is not a group — nothing to ungroup.\n" );
         return false;
+    }
     entity_s_def *def = DefOf( inst );
     if ( !def || !def->eclass || def->eclass->fixedsize )
+    {
+        Sys_Printf( "Outliner: %s is a point entity — it holds no brushes to "
+                    "ungroup.\n", ClassOf( inst ) );
         return false;
+    }
 
     entity_s_def *worldDef = (entity_s_def *)world_entity->def;
 
@@ -963,8 +1032,14 @@ void ApplyDrop( const koutDrag_t &drag, const koutRow_t &target )
             Sys_Printf( "Outliner: the construction store changed — drop cancelled.\n" );
             return;
         }
+        // KIWI-UX (CLEANUP, C-54): the generation matched but the index is out of
+        // range anyway — say so, as the generation arm above already does.
         if ( drag.conIndex < 0 || drag.conIndex >= KiwiCon_Count() )
+        {
+            Sys_Printf( "Outliner: the dragged curve is gone (index %i of %i) — "
+                        "drop cancelled.\n", drag.conIndex, KiwiCon_Count() );
             return;
+        }
 
         const int gid = ( target.kind == KOUT_SECTION_CURVES ) ? -1 : target.conGroup;
 
@@ -990,6 +1065,16 @@ void ApplyDrop( const koutDrag_t &drag, const koutRow_t &target )
 }
 
 } // namespace
+
+// KIWI-UX (ROUND BL, ITEM 1): the map-load arm.  Defined OUTSIDE the anonymous
+// namespace (it is header-declared) and doing nothing but setting the one-shot —
+// the panel may not even be open when a map loads, and the collapse must happen on
+// its next draw whenever that is, not on a scene walk from the loader's thread of
+// control.
+void KiwiOutliner_CollapseAllOnNextDraw()
+{
+    s_collapseAllPending = true;
+}
 
 // ═════════════════════════════════════════════════════════════════════════════
 //  THE PANEL
@@ -1038,6 +1123,14 @@ void KiwiOutliner_Draw()
 
         s_structural = false;
         AutoExpandForSelection();
+        // KIWI-UX (ROUND BL, ITEM 1): the map-load one-shot, consumed AFTER the
+        // auto-expand pass (which re-opens SOLIDS on any selection-generation move,
+        // and a map load is one) and BEFORE the flatten that reads the state.
+        if ( s_collapseAllPending )
+        {
+            s_collapseAllPending = false;
+            CollapseAllFolders();
+        }
         Flatten();
 
         ImGuiIO &io = ImGui::GetIO();
@@ -1053,7 +1146,18 @@ void KiwiOutliner_Draw()
         // told rowH, which is itemH + the spacing it cannot see.
         const float itemH   = ImGui::GetTextLineHeight();
         const float rowH    = ImGui::GetTextLineHeightWithSpacing();
-        const float indentW = 14.0f;
+        // ── KIWI-UX (CLEANUP, C-55): the row layout, NAMED ──────────────────
+        // `indentW` was already named and the rest of the row was bare literals.
+        // The two HALF constants are written as arithmetic rather than as their own
+        // literals, because each is the CENTRE of the gutter above it — changing a
+        // gutter width and forgetting its centre is how a glyph ends up off-centre.
+        const float indentW    = 14.0f;   // per indent level
+        const float eyeW       = 18.0f;   // the eye column's hit width
+        const float eyeCx      = eyeW * 0.5f;
+        const float arrowW     = indentW; // the disclosure arrow shares the indent step
+        const float arrowCx    = arrowW * 0.5f;
+        const float glyphR     = 4.0f;    // eye + arrow glyph radius
+        const float colGapX    = 2.0f;    // arrow/spacer -> label
 
         ImGui::BeginChild( "##outlinerrows", ImVec2( 0, 0 ), 0,
                            ImGuiWindowFlags_HorizontalScrollbar );
@@ -1073,7 +1177,26 @@ void KiwiOutliner_Draw()
                     continue;
                 const koutRow_t r = s_rows[i];       // by value: the row list must not
                                                      // be re-entered mid-draw
-                ImGui::PushID( i );
+                // ── KIWI-UX (CLEANUP, C-43): A STABLE WIDGET ID, NOT THE ROW INDEX ──
+                // This file refuses to store an index for the selection anchor
+                // (:184-186, "an index into last frame's array is a lie the moment it
+                // does") and for the rename target (:224-226) — and then handed that
+                // very index to ImGui as the identity of every widget scoped under it
+                // (the rename box, both context menus, the drag source).  Collapsing a
+                // folder above an open rename box shifted `i` and ImGui lost the
+                // widget's state.  The identity each row already carries is used
+                // instead: the collapse KEY for a folder (which is exactly what
+                // koutRename_t keys on), the instance POINTER for a brush, and a
+                // tagged store index for a construction object (which is what
+                // koutAnchor_t / koutRename_t key on).
+                if ( r.key != 0 )
+                    ImGui::PushID( (int)r.key );
+                else if ( r.kind == KOUT_BRUSH && r.inst )
+                    ImGui::PushID( (const void *)r.inst );
+                else if ( r.kind == KOUT_CON_OBJECT )
+                    ImGui::PushID( (int)( 0xC0000000u | (unsigned)r.conIndex ) );
+                else
+                    ImGui::PushID( i );
 
                 // ── the eye ────────────────────────────────────────────────
                 bool hidden = false;
@@ -1127,12 +1250,12 @@ void KiwiOutliner_Draw()
                 }
 
                 const ImVec2 eyePos = ImGui::GetCursorScreenPos();
-                ImGui::InvisibleButton( "##eye", ImVec2( 18.0f, itemH ) );
+                ImGui::InvisibleButton( "##eye", ImVec2( eyeW, itemH ) );
                 const bool eyeHover = ImGui::IsItemHovered();
                 if ( hasEye )
                 {
-                    DrawEye( dl, ImVec2( eyePos.x + 9.0f, eyePos.y + itemH * 0.5f ),
-                             4.0f, hidden, ( hidden || !eyeHover ) ? dim : lit );
+                    DrawEye( dl, ImVec2( eyePos.x + eyeCx, eyePos.y + itemH * 0.5f ),
+                             glyphR, hidden, ( hidden || !eyeHover ) ? dim : lit );
                     if ( ImGui::IsItemClicked( ImGuiMouseButton_Left ) )
                     {
                         const bool want = !hidden;
@@ -1144,6 +1267,7 @@ void KiwiOutliner_Draw()
                             // "Ctrl+Z undoes hiding a line but not a brush".
                             KiwiVis_UndoPush( "hide (outliner)" );
                             SetBrushHidden( r.inst, want );
+                            KiwiVis_UndoCommit();      // KIWI-UX (CLEANUP, C-41)
                         }
                         else if ( r.kind == KOUT_CON_OBJECT )
                         {
@@ -1159,6 +1283,7 @@ void KiwiOutliner_Draw()
                             for ( selbrush_t *b = r.ent->brushes.ownerNext;
                                   b && b != &r.ent->brushes; b = b->ownerNext )
                                 SetBrushHidden( b, want );
+                            KiwiVis_UndoCommit();      // KIWI-UX (CLEANUP, C-41)
                         }
                         else if ( r.kind == KOUT_CON_GROUP )
                         {
@@ -1183,17 +1308,17 @@ void KiwiOutliner_Draw()
                 if ( isFolder )
                 {
                     const ImVec2 ap = ImGui::GetCursorScreenPos();
-                    ImGui::InvisibleButton( "##arrow", ImVec2( 14.0f, itemH ) );
-                    DrawArrow( dl, ImVec2( ap.x + 7.0f, ap.y + itemH * 0.5f ), 4.0f,
+                    ImGui::InvisibleButton( "##arrow", ImVec2( arrowW, itemH ) );
+                    DrawArrow( dl, ImVec2( ap.x + arrowCx, ap.y + itemH * 0.5f ), glyphR,
                                !Collapsed( r.key ), dim );
                     if ( ImGui::IsItemClicked( ImGuiMouseButton_Left ) )
                         SetCollapsed( r.key, !Collapsed( r.key ) );
-                    ImGui::SameLine( 0.0f, 2.0f );
+                    ImGui::SameLine( 0.0f, colGapX );
                 }
                 else
                 {
-                    ImGui::Dummy( ImVec2( 14.0f, itemH ) );
-                    ImGui::SameLine( 0.0f, 2.0f );
+                    ImGui::Dummy( ImVec2( arrowW, itemH ) );      // the arrow's own slot
+                    ImGui::SameLine( 0.0f, colGapX );
                 }
 
                 // ── the label ──────────────────────────────────────────────

@@ -49,11 +49,15 @@
 // the general case for the three-arrow gizmo is round L's.
 //
 // ── SIZES (screen-constant, like every other handle in this layer) ───────────
-//   ring   18 px radius, drawn IN THE FACE PLANE (not camera-facing) so it reads
+// KIWI-UX (CLEANUP, C-46): synced to the SHIPPED values.  These were the pre-round-U
+// numbers (18 / 48 / 7); round U restyled the glyph and kiwi_lollipop.cpp's
+// KLOL_*_PIX block records size by size why.
+//   ring   14 px radius, drawn IN THE FACE PLANE (not camera-facing) so it reads
 //          as lying on the surface, which is what the picture shows.
-//   stem   48 px along the (signed) normal.
-//   ball   7 px radius — the directive's "~14 px" across.
-//   pick   12 px around the ball's projected centre.
+//   stem   42 px along the (signed) normal.
+//   ball    5 px radius — the directive's "~10 px" across.
+//   pick   12 px around the ball's projected centre (unchanged by round U — it is
+//          a fingertip target, not a drawn thing).
 // ─────────────────────────────────────────────────────────────────────────────
 
 // True when the ACTIVE command wants a lollipop; fills the live anchor (world)
@@ -71,7 +75,6 @@ void KiwiLollipop_Hover( int imgX, int imgY, bool over );
 // the release).  Resumes a PAUSED command and Rebase()s it first — see above.
 bool KiwiLollipop_MouseDown( int imgX, int imgY );
 
-bool KiwiLollipop_Grabbed();
 void KiwiLollipop_Release();      // release edge: ungrab, then PAUSE the gesture
 void KiwiLollipop_Abort();        // lost-capture edge: ungrab, then CANCEL it
 

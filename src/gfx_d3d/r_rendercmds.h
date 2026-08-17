@@ -56,7 +56,15 @@ enum GfxRenderCommand : int
     // renderer has no equivalent (the game sets sun constants in-scene). Appended so
     // existing values hold; RC_COUNT bumps.
     RC_SET_CUSTOM_CONSTANT = 0x18,
-    RC_COUNT = 0x19,
+    // KIWI-UX (ROUND BM): SECTION ANALYSIS — a D3D9 USER CLIP PLANE around the
+    // editor's world passes (kiwi_section.cpp / camwnd.cpp's CamWnd_Draw bracket).
+    // No CoD4Radiant or kisak counterpart: the editor is the only thing in either
+    // tree that clips a view against an arbitrary world plane.  Appended so every
+    // existing value holds; RC_COUNT bumps so R_GetCommandBuffer's
+    // `renderCmd < RC_COUNT` guard admits it and RB_RenderCommandTable is sized for
+    // it.  The whole feature is one enable/disable pair per camera frame.
+    RC_SET_CLIP_PLANE = 0x19,
+    RC_COUNT = 0x1A,
 #else
     RC_COUNT = 0x16,
 #endif
@@ -662,6 +670,64 @@ void __cdecl R_AddCmdSetMaterialColor(const float *color);
 // @ 0x4fd330 (#26 layer C2). Injects the parsed worldspawn sun (CONST_SRC_CODE_SUN_*) into
 // the source-state for the SUNLIGHT_PREVIEW pass; RB_SetCustomConstantCmd consumes it.
 void __cdecl R_AddCmdSetCustomShaderConstant(unsigned int constant, float x, float y, float z, float w);
+// ══════════════════════════════════════════════════════════════════════════════
+//  KIWI-UX (ROUND BM) — SECTION ANALYSIS: THE USER CLIP PLANE COMMAND
+// ══════════════════════════════════════════════════════════════════════════════
+// `plane` is a WORLD-SPACE plane in the standard (a,b,c,d) form, and the half-space
+// that SURVIVES is  a*x + b*y + c*z + d >= 0.  The front end hands world space
+// because it is the only space it knows; the backend handler does the one
+// transform D3D9 requires (see below) using the ACTIVE view's own matrices, so the
+// command cannot go stale against a view it was not emitted for.
+//
+// THE D3D9 CONTRACT, and it is the whole reason this is a render command and not a
+// SetClipPlane call at the draw site.  Direct3D 9 interprets the planes given to
+// IDirect3DDevice9::SetClipPlane in WORLD space only while the FIXED-FUNCTION
+// pipeline is transforming vertices.  With a PROGRAMMABLE vertex shader — which is
+// every draw CoD4 issues (R_HW_SetVertexShader, rb_shade.cpp:103) — the runtime has
+// no world matrix to speak of and the planes are interpreted in CLIP SPACE, i.e.
+// the space the vertex shader writes oPos in.  So the plane must be transformed by
+// the inverse of the composed view-projection before it is handed over.
+//
+// THE TRANSFORM, derived in this tree's own convention rather than copied.  These
+// matrices are ROW-VECTOR (camwnd.cpp's projection builds put the translate in
+// m[3][*], and R_SetupViewProjectionMatrices composes viewProj = view * proj), so
+//     clip = world * VP        and        world = clip * VP^-1.
+// A plane P is tested as the dot product `world . P` with world = (x,y,z,1), so
+//     world . P = (clip * VP^-1) . P = clip . (VP^-1 * P)
+// and the clip-space plane is VP^-1 applied to P AS A COLUMN VECTOR:
+//     Pclip[k] = sum_j inverseViewProjectionMatrix.m[k][j] * P[j].
+// (That is the same operation the D3D docs describe as "transform the plane by the
+// inverse-transpose of the view-projection" — a plane is a covector, so in the
+// row-vector convention used here the transpose is already accounted for by
+// multiplying VP^-1 on the LEFT of the column P instead of on the right of a row.)
+//
+// `enable` false disables clipping entirely and ignores `plane`.  The editor emits
+// exactly one enable at the head of CamWnd_Draw's geometry and one disable at its
+// tail, so the state can never leak into the ImGui overlay or a 2D view.
+struct GfxCmdSetClipPlane // sizeof=0x18
+{
+    GfxCmdHeader header;
+    int   enable;
+    float plane[4];       // WORLD space; the backend transforms it to clip space
+};
+// Returns FALSE when the command buffer had no room for it.  That matters and is
+// not decoration: RC_SET_CLIP_PLANE is above RC_FIRST_NONCRITICAL, so
+// R_GetCommandBuffer is allowed to drop it on a full frame (which a big map reaches
+// every frame — see the KISAK_RADIANT headroom notes in r_rendercmds.cpp).  A
+// dropped ENABLE costs one unclipped frame and needs no repair; a dropped DISABLE
+// would leave the plane enabled for the ImGui overlay and for every later frame, so
+// the caller (kiwi_section.cpp) tracks the acknowledged state and re-issues the
+// disable at the head of the next camera frame until one lands.
+// ── KIWI-UX (ROUND BO, ITEM 1): …AND UNTIL THIS ROUND IT COULD NOT RETURN FALSE.
+// A NULL check is not the test in the EDITOR build: R_GetCommandBuffer's
+// KISAK_RADIANT overflow arm hands back an unlinked scratch slot rather than NULL,
+// so every drop was reported as a success and the repair above never ran.  The
+// definition tests `s_cmdList->lastCmd` instead, which the two failure paths clear.
+// Any future editor command that needs to know whether it landed must copy that
+// test — every other non-critical adder in this file still returns void and still
+// cannot tell.
+bool __cdecl R_AddCmdSetClipPlane(int enable, const float *plane);
+void __cdecl RB_SetClipPlaneCmd(GfxRenderCommandExecState *execState);
 // Editor full-screen colored quad — IDB R_AddCmdDrawFullScreenColoredQuad @ 0x4fc260
 // (#26 sun-preview, R_SunPrev_Main). Emits RC_DRAW_FULL_SCREEN_COLORED_QUAD (the backend
 // RB_DrawFullScreenColoredQuadCmd already exists in the CoD3 base). Used for the black-world

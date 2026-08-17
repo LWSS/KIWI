@@ -12,19 +12,15 @@
 #include <imgui/imgui.h>
 
 #include "kiwi_keymap.h"
+#include "radiant_frame.h"          // KIWI-UX (CLEANUP, C-6): struct RadiantCommand + the table API
 #include "kiwi_command.h"
 #include "radiant_registry.h"
 
 #include <string.h>                        // strcmp — BindName
 
-// MUST MATCH mainfrm.cpp's definition verbatim (same reasoning as
-// imgui_panel_commands.cpp:46 / kiwi_palette.cpp).
-struct RadiantCommand { const char *name; byte vk; byte mods; int commandId; };
-
-// ── mainfrm.cpp bindings — the // KIWI-UX accessors added for this file ─────
-extern int  Radiant_GetCommandTableMutable( RadiantCommand **out );
-extern void Radiant_ResetCommandBindings();
-extern void Radiant_LoadCommandMap();          // radiant_frame.h — the ported 0x421230
+// KIWI-UX (CLEANUP, C-6): the struct AND these declarations now live in
+// radiant_frame.h, included above.  This file used to carry a verbatim copy of
+// `struct RadiantCommand` plus its own externs, as six other TUs did.
 // radiant_main.cpp — re-annotate the menu bar with the current bindings.
 extern void Radiant_RefreshMenuKeyBindings();
 
@@ -428,9 +424,10 @@ namespace
         // Box primitive, so the free C chords are 6 and 7.
         // CameraDown goes to Ctrl+Alt+C (mods 6).  It is one of the classic TANK
         // CAMERA keys — the same family whose four bare arrows this profile already
-        // UNBINDS in favour of the smooth fly (kiwi_camera.cpp), and whose modern
-        // equivalent is the fly's own Q/E — so it is displaced rather than kept on a
-        // prime key.  It stays on the Camera menu and in the palette.
+        // UNBINDS in favour of the smooth fly (kiwi_camera.cpp), which is where the
+        // modern up/down lives — so it is displaced rather than kept on a prime key.
+        // It stays on the Camera menu and in the palette.
+        // KIWI-UX (CLEANUP, C-30): the fly is ARROWS ONLY; it has no Q/E rung.
         Bind( table, count, 33056, 0x43, 6 );   // CameraDown -> Ctrl+Alt+C (frees C)
         Bind( table, count, KIWI_CMD_CUT, 0x43, 0 );                // C
 
@@ -466,12 +463,9 @@ namespace
         // · 4 SelectTargettedEntities 36110 (:1081) · 5 RedisperseCols 32889 (:1010)
         // · 6 SelectConnectedEntities 33134 (:1080).  mods 2, 3, 7 free.
         // DragEdges -> Shift+Alt+E (mods 3), the house destination.
-        // NOTE: E is ALSO one of the six keys the RMB-mouselook fly swallows
-        // (kiwi_camera.cpp KiwiCam_FlySwallowKey, W/A/S/D/Q/E).  That is not a
-        // collision: the fly polls with GetAsyncKeyState and its swallow rung sits
-        // BELOW the active-command arm in KiwiUX_KeyFunnel, so E extrudes when the
-        // user is not flying and flies when they are — exactly as S already both
-        // scales and strafes.
+        // KIWI-UX (CLEANUP, C-30): the fly is ARROWS ONLY — KiwiCam_FlySwallowKey
+        // (kiwi_camera.cpp:1284-1289) swallows VK_UP/DOWN/LEFT/RIGHT and nothing
+        // else — so a bare letter cannot collide with it.  E is free for Extrude.
         Bind( table, count, 33006, 0x45, 3 );   // DragEdges -> Shift+Alt+E (frees E)
         Bind( table, count, KIWI_CMD_EXTRUDE_FACE, 0x45, 0 );       // E
 
@@ -510,9 +504,9 @@ namespace
         //  TranslateAccelerator runs BEFORE the hotkey table and a collision there
         //  would have been silent.
         //
-        //  T is also not one of the six keys the RMB-mouselook fly swallows
-        //  (W/A/S/D/Q/E — kiwi_camera.cpp KiwiCam_FlySwallowKey), so unlike E there
-        //  is nothing to arbitrate.
+        //  KIWI-UX (CLEANUP, C-30): the fly is ARROWS ONLY
+        //  (KiwiCam_FlySwallowKey, kiwi_camera.cpp:1284-1289), so no bare letter —
+        //  T included — has anything to arbitrate with it.
         //
         //  FINAL OCCUPANCY on 0x54 after this profile: 0 = Trim, 1 =
         //  ToggleTexMoveLock, 3 = ViewTextures, 5 = ThickenPatch.  No (vk, mods)
@@ -618,13 +612,9 @@ namespace
         //  two-step.  FINAL OCCUPANCY on 0x51: 0 = Boolean, 1 = Rectangle,
         //  2 = LinkSelected, 5 = RemoveTerrainRow.  No (vk, mods) pair carries two.
         //
-        //  Q IS one of the six keys the RMB-mouselook fly swallows (W/A/S/D/Q/E —
-        //  kiwi_camera.cpp KiwiCam_FlySwallowKey; Q/E are its up/down pair).  That
-        //  is NOT a collision, and it is the same arbitration E already lives with
-        //  (see the E block above): the fly polls with GetAsyncKeyState and its
-        //  swallow rung sits BELOW the active-command arm in KiwiUX_KeyFunnel, so Q
-        //  starts a boolean when the user is not flying and descends when they are.
-        //  It is also why the LIVE toggle is Q and not Plasticity's q/w/e trio —
+        //  KIWI-UX (CLEANUP, C-30): the fly is ARROWS ONLY (KiwiCam_FlySwallowKey,
+        //  kiwi_camera.cpp:1284-1289), so bare Q cannot collide with it either.
+        //  The LIVE toggle is still Q rather than Plasticity's q/w/e trio —
         //  kiwi_boolean.h deviation 1.
         // ═══════════════════════════════════════════════════════════════════════
         Bind( table, count, KIWI_CMD_BOOLEAN, 0x51, 0 );           // Q
@@ -671,8 +661,9 @@ namespace
         //  Neither key is in res/radiant.rc's IDR_MAIN_ACCEL (:490-501 — Ctrl+X/O/
         //  S/L/P/K/M and Ctrl+Delete / Ctrl+Insert), which matters because
         //  TranslateAccelerator runs BEFORE the hotkey table and a collision there
-        //  would have been silent.  Neither is one of the six keys the RMB fly
-        //  swallows (W/A/S/D/Q/E), so there is nothing to arbitrate.
+        //  would have been silent.  KIWI-UX (CLEANUP, C-30): the fly swallows the
+        //  four ARROW keys only (KiwiCam_FlySwallowKey, kiwi_camera.cpp:1284-1289)
+        //  and PageUp/PageDown are not among them, so there is nothing to arbitrate.
         //
         //  So the house two-step applies, exactly as it has for S/R/G/C/Z/J/E/T/O/B:
         //  the occupants move to Shift+Alt+key (mods 3, free on both), and they stay
@@ -701,6 +692,85 @@ namespace
         Bind( table, count, 32955, 0x22, 3 );   // DownFloor -> Shift+Alt+PageDown
         BindName( table, count, "KiwiGridDoublePage", 0x21, 0 );   // PageUp   -> 34021
         BindName( table, count, "KiwiGridHalvePage",  0x22, 0 );   // PageDown -> 34020
+
+        // ═══════════════════════════════════════════════════════════════════════
+        //  KIWI-UX (ROUND BH, ITEM 1) — End = CAULK SELECTION
+        // ═══════════════════════════════════════════════════════════════════════
+        // USER DIRECTIVE, verbatim: *"Make (End) key on a solid face = set texture
+        // to caulk (caulk is a flag to the compiler to tell it to optimize out the
+        // face)."*
+        //
+        // END WAS NOT FREE, and the directive is taken literally: End wins.
+        // AUDITED OCCUPANCY of vk 0x23 in the whole default table (mainfrm.cpp:
+        // 1082-1270): exactly ONE row, `{ "CenterView", 0x23, 0, 32953 }` at
+        // mainfrm.cpp:1155.  No modified End chord exists at all, and no KIWI row
+        // and no alias row claims 0x23 either (every Radiant_RegisterCommand /
+        // Radiant_RegisterCommandAlias call in the tree registers UNBOUND and its
+        // only claims are the ones made in this function).  res/radiant.rc's
+        // IDR_MAIN_ACCEL does not carry End, so TranslateAccelerator — which runs
+        // BEFORE the hotkey table — cannot swallow it either.
+        //
+        // SO CENTER VIEW MOVES, and it moves to Shift+End (mods 1), which the audit
+        // above proves free: it is the same house two-step every other displaced
+        // command in this function takes, and it keeps the two on one key so the
+        // muscle memory is one modifier away rather than somewhere else entirely.
+        // View->Center is also still on the View menu and in the palette.
+        //
+        // CLASSIC IS UNTOUCHED: this whole function only runs for KEYMAP_MODERN,
+        // so in the classic profile End is Center View exactly as it always was and
+        // Caulk Selection is palette-only there.
+        //
+        // FINAL OCCUPANCY — 0x23: mods 0 = Caulk Selection (34131),
+        //                         mods 1 = View->Center (32953).
+        Bind( table, count, 32953, 0x23, 1 );                  // CenterView -> Shift+End
+        Bind( table, count, KIWI_CMD_CAULK_FACES, 0x23, 0 );   // End -> Caulk Selection
+
+        // ═══════════════════════════════════════════════════════════════════════
+        //  KIWI-UX (ROUND BK, ITEM 7) — SPACE = VIEW FACE HEAD-ON
+        // ═══════════════════════════════════════════════════════════════════════
+        // USER DIRECTIVE, verbatim: *"Pressing [Space] on a face should mimic what
+        // Plasticity does.  It moves the camera in front of that face (similar to
+        // /)."*  It is also Plasticity's own key, bare:
+        // `"space": "viewport:navigate:selection"` (default-keymap.ts:231).
+        //
+        // SPACE WAS NOT FREE, AND WHAT IT DISPLACES IS NAMED HERE IN FULL.
+        // AUDITED OCCUPANCY of vk 0x20 across everything that can claim a key:
+        //   * g_radiantCommandsDefault (mainfrm.cpp, the binary's own rows):
+        //       mods 0  CloneSelection  33001  (mainfrm.cpp:1151)
+        //     and NOTHING else on 0x20 at any modifier — no Shift/Ctrl/Alt Space
+        //     row exists in the table at all.
+        //   * the KIWI extension block: every row registers vk 0 (unbound) and gets
+        //     its chord from THIS function, so the only 0x20 claim in it is the one
+        //     made below.
+        //   * res/radiant.rc's IDR_MAIN_ACCEL (:490-501) is Ctrl+X/O/S/L/P/K/M and
+        //     Ctrl+Delete / Ctrl+Insert.  No Space.  This matters because
+        //     TranslateAccelerator runs BEFORE the hotkey table and a collision
+        //     there would have been silent.
+        //   * kiwi_camera.cpp's fly swallows the four ARROW keys only
+        //     (KiwiCam_FlySwallowKey), so it cannot take Space either.
+        //
+        // SO CLONE MOVES, to Shift+Space (mods 1, proven free above) — the house
+        // two-step every displaced command in this function takes.  It is the
+        // LEAST-SURPRISING resolution available and it costs the user nothing they
+        // will notice, because the MODERN profile already has a better clone on a
+        // better key: KIWI_CMD_DUPLICATE on Shift+D (round Z), which clones AND
+        // hands the copies to Move so they can be placed.  Classic Clone drops a
+        // copy in place and leaves it selected.  Both stay reachable, Clone keeps
+        // its Edit-menu row and its palette row, and the CLASSIC profile is
+        // untouched — this whole function only runs for KEYMAP_MODERN.
+        //
+        // ONE LIVE INTERACTION, checked rather than assumed: while a MODAL command
+        // is running, the key funnel routes every key to KiwiCmd_KeyDown, whose
+        // numeric rung consumes Space as the "10ft 6in" separator
+        // (kiwi_numeric.cpp:602).  That is unchanged and correct — Space inside a
+        // typed value is part of the value — so this binding is what Space means
+        // with NO command running, which is when a face is selected and the user
+        // wants to look at it.
+        //
+        // FINAL OCCUPANCY — 0x20: mods 0 = View Face Head-on (34132),
+        //                         mods 1 = CloneSelection (33001).
+        Bind( table, count, 33001, 0x20, 1 );                  // Clone -> Shift+Space
+        Bind( table, count, KIWI_CMD_VIEW_FACE, 0x20, 0 );     // Space -> View Face
 
         // ── V IS NOT BOUND HERE, AND MUST NOT BE ────────────────────────────
         // The movable pivot's V (kiwi_transform.h) is a COMMAND-LOCAL key, matching
@@ -780,6 +850,9 @@ void KiwiKeymap_DrawSettings()
             "and the creation chords: Shift+A line, Shift+S spline,\n"
             "Shift+Q rect, Shift+C circle, Shift+W box, Shift+V box(centre),\n"
             "Alt+V rect(centre), Shift+X cylinder, Shift+Z sphere.\n"
+            // KIWI-UX (ROUND BH, ITEM 1): the one key this profile takes that was
+            // already occupied by a still-wanted command, so both are named.
+            "End caulks the selection (View->Center moves to Shift+End).\n"
             "The displaced commands move to Shift/Alt chords, never dropped.\n"
             "Classic: the stock table plus your radiant.ini remaps, unchanged.\n"
             "Every new feature stays reachable from the command palette in both." );

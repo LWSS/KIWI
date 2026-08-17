@@ -71,10 +71,11 @@ set(RADIANT_SRCS
     "${SRC_DIR}/radiant/findtexture.cpp"    # CFindTextureDlg + FindReplaceTextures (find/replace texture)
     "${SRC_DIR}/radiant/patchdialog.cpp"
     "${SRC_DIR}/radiant/win_dlg.cpp"
-    "${SRC_DIR}/radiant/imgui_shell.cpp"    # UI-rework Phase 2a — ImGui overlay shell (-imgui flag)
+    "${SRC_DIR}/radiant/imgui_shell.cpp"    # KIWI-UX (CLEANUP, C-10): the ImGui dockspace shell — the editor UI, unconditional (was "Phase 2a overlay, -imgui flag")
     # (imgui_dockhost.cpp retired — the main frame is the dockspace surface now)
     "${SRC_DIR}/radiant/radiant_registry.cpp"     # HKCU profile helpers (replaced the shim CWinApp)
     "${SRC_DIR}/radiant/radiant_rtt.cpp"          # Phase 5 — offscreen render-target viewport textures
+    "${SRC_DIR}/radiant/radiant_rtt.h"            # KIWI-UX (CLEANUP, C-16): registered for IDE visibility, like every other header here
     "${SRC_DIR}/radiant/imgui_panels.cpp"   # UI-rework Phase 3 — panels over the Phase-1 actions
     "${SRC_DIR}/radiant/imgui_panel_surface.cpp"  # Phase 3 — surface inspector panel
     "${SRC_DIR}/radiant/imgui_panel_entity.cpp"   # Phase 3 — entity inspector panel
@@ -97,6 +98,7 @@ set(RADIANT_SRCS
     "${SRC_DIR}/radiant/kiwi_selection.cpp"  # §1 legacy adapter (Sel_SyncToLegacy / RebuildFromLegacy)
     "${SRC_DIR}/radiant/kiwi_pick.h"         # §2 unified pick API (Pick / ray + projection helpers)
     "${SRC_DIR}/radiant/kiwi_pick.cpp"       # §2 Test_Ray surface pick + screen-space vert/edge pick
+    "${SRC_DIR}/radiant/kiwi_vec.h"          # CLEANUP A-15 — the one spelling of Dot3/Sub3/Cross3/... (header only)
     # ── UX overhaul Phase 1b — camera, grid/units, chips, hover tints, box select ──
     "${SRC_DIR}/radiant/kiwi_units.h"        # §17 display-units layer (inches) + modern grid spacing
     "${SRC_DIR}/radiant/kiwi_units.cpp"
@@ -129,6 +131,9 @@ set(RADIANT_SRCS
     "${SRC_DIR}/radiant/kiwi_cmdoptions.cpp"
     "${SRC_DIR}/radiant/kiwi_patchverts.h"   # §62.6 patch vertex mode on V (round AI, item 6)
     "${SRC_DIR}/radiant/kiwi_patchverts.cpp"
+    "${SRC_DIR}/radiant/kiwi_cmdui.h"        # CLEANUP C-72 — palette/add-menu shared list bits (header only)
+    "${SRC_DIR}/radiant/kiwi_str.h"          # CLEANUP C-66 — the one case-insensitive substring test (header only)
+    "${SRC_DIR}/radiant/kiwi_texcache.h"     # CLEANUP C-65 — the by-name D3D texture cache (header only)
     "${SRC_DIR}/radiant/kiwi_palette.h"      # §15 F command palette over g_radiantCommands
     "${SRC_DIR}/radiant/kiwi_palette.cpp"
     "${SRC_DIR}/radiant/kiwi_keymap.h"       # §11 keymap profiles (classic / modern)
@@ -291,6 +296,11 @@ set(RADIANT_SRCS
     "${SRC_DIR}/radiant/kiwi_gizmo.cpp"
     "${SRC_DIR}/radiant/kiwi_viewcube.h"     # orientation widget (six axis balls, top-right)
     "${SRC_DIR}/radiant/kiwi_viewcube.cpp"
+    # KIWI-UX (ROUND BM, ITEM 1b): Section Analysis — the world clip plane, its
+    # lollipop and the pick clamp.  Beside the view cube because the button that
+    # drives it lives in that widget's strip.
+    "${SRC_DIR}/radiant/kiwi_section.h"      # section analysis (the Plasticity cross-section)
+    "${SRC_DIR}/radiant/kiwi_section.cpp"
     "${SRC_DIR}/radiant/kiwi_hints.h"        # contextual hotkey panel, read live from g_radiantCommands
     "${SRC_DIR}/radiant/kiwi_hints.cpp"
 
@@ -315,6 +325,45 @@ set(RADIANT_SRCS
     "${SRC_DIR}/radiant/kiwi_outliner.h"     # the scene list + the two group verbs
     "${SRC_DIR}/radiant/kiwi_outliner.cpp"
 
+    # ROUND AU — the TrenchBroom-style ENTITY BROWSER.  USER DIRECTIVE: "a new
+    # panel that's in the same viewport (tabbed) with the textures tab ... shows
+    # each entity as a 3d preview and you can add them into the scene by dragging
+    # from the entity viewer to the 3d scene."  Tiles are an isometric projection
+    # of each eclass's own [mins,maxs] in its own colour (ImDrawList only — the
+    # honest scoping of "3d preview" is in kiwi_entbrowser.h); the drop is an
+    # ImGui drag-drop onto the camera image, deferred through PostMessage and
+    # landed by the PORTED create path (CreateEntityFromName + its undo bracket).
+    "${SRC_DIR}/radiant/kiwi_entbrowser.h"   # the Entities dock window + the drop
+    "${SRC_DIR}/radiant/kiwi_entbrowser.cpp"
+
+    # ROUND AV — the REAL 3D thumbnails round AU scoped out.  USER DIRECTIVE: "I
+    # would really like 3d previews in the entities viewer, try to get that to
+    # work."  One standalone 128x128 RTT slot (NOT a fifth rttViewport_t), one
+    # thumbnail rendered per frame on demand, copied RT -> SYSTEMMEM -> a per-entry
+    # MANAGED texture so the cache adds no default-pool object of its own.  The
+    # model is registered WITHOUT an entity (AddModelToModelInstBuff +
+    # SkinModelInst); the isometric bbox tile remains the fallback for every class
+    # with no class-level model.  Device-reset coverage is RTT_ReleaseForReset's,
+    # inherited rather than re-declared.  See kiwi_entthumb.h.
+    "${SRC_DIR}/radiant/kiwi_entthumb.h"     # the thumbnail cache + the render tick
+    "${SRC_DIR}/radiant/kiwi_entthumb.cpp"
+
+    # ROUND AZ — the SKY TAB.  USER DIRECTIVE: "We need a skybox feature.  Invent
+    # a nice way to show a skybox and allow the camera to ignore it's there so we
+    # can fly inside of the skybox and see the sky.  Make this a separate tab like
+    # the entity tab."  A third tab of the Textures/Entities dock node listing every
+    # SURF_SKY material with its real colormap; two verbs (apply to the selection,
+    # build the six-brush enclosing shell); and a per-face see-through treatment
+    # that films any sky face standing between the eye and the orbit pivot, through
+    # the SAME d_white tool-volume path clip/trigger already take, so the sky stops
+    # hiding the map without ever stopping being visible.  KIWI-UX (CLEANUP, C-60):
+    # adds no DEFAULT-pool D3D object — the MAPTYPE_2D arm re-reads
+    # GfxImage::texture.map off the engine's already-loaded material every frame and
+    # stores nothing, while the CUBE arm (every real sky material) owns a MANAGED
+    # per-face copy released from KiwiSky_ReleaseForReset.
+    "${SRC_DIR}/radiant/kiwi_skybox.h"       # the Sky dock window + THE sky predicate
+    "${SRC_DIR}/radiant/kiwi_skybox.cpp"
+
     # ROUND AB — the MONITOR-SLEEP crash.  A D3D9 device reset destroys the editor
     # vertex-buffer pool (r_ed_vertbuf) but nothing invalidated the per-face and
     # per-patch vertHandles cached in the surf cache, so the first frame after the
@@ -328,6 +377,62 @@ set(RADIANT_SRCS
     # ROUND AB — Auto Bool: greedy convex-pair consolidation over the ported CSG_Merge.
     "${SRC_DIR}/radiant/kiwi_autobool.h"     # Auto Bool — reduce brush count by merging pairs
     "${SRC_DIR}/radiant/kiwi_autobool.cpp"
+
+    # ROUND BD — the TrenchBroom-style UV EDITOR window.  A 2D canvas in texture-repeat
+    # space: every selected face (and every selected patch's control grid) drawn as a UV
+    # wireframe over the active material tiled behind it, with TrenchBroom's gesture
+    # ladder (rotate / origin / scale / skew / offset / pan) adapted to that frame.
+    # Faces are written by matrix surgery on Face_MoveTexture's output, decomposed back
+    # through the binary's own texturevecs_02; patches by direct control-point ST
+    # transforms.  Adds no D3D object at all — the background re-reads the engine's own
+    # MAPTYPE_2D GfxImage::texture.map every frame and stores nothing, so unlike the Sky
+    # tab there is no reset hook to register.  Portions derived from TrenchBroom (GPLv3,
+    # Kristian Duske); the notice is at the top of both files.
+    "${SRC_DIR}/radiant/kiwi_uveditor.h"     # the UV editor dock window + its design
+    "${SRC_DIR}/radiant/kiwi_uveditor.cpp"
+
+    # ROUND BE — DRAG-AND-DROP TEXTURE IMPORT + the CoD4 material wizard.  Three pairs,
+    # split by what they are responsible for: kiwi_iwi is the image writer (D3DX decode ->
+    # the .iwi container, every field derived from Image_LoadFromFileWithReader and
+    # validated against all 6268 shipped .iwi files), kiwi_matwriter is the binary material
+    # writer (template-cloning a shipped material through Material_LoadRaw's exact offsets,
+    # so the techset name and refStateBits stay a known-good tuple), and kiwi_import is the
+    # Win32 WM_DROPFILES plumbing + the modal wizard + the orchestration.  The import proves
+    # its own output: the .iwi goes back through the engine's Image_ValidateHeader /
+    # Image_CountMipmapsForFile, and the material through Material_RegisterHandle, which
+    # drags the whole loader chain down onto the new .iwi, before anything reaches the
+    # browser.  Adds no D3D object that outlives the wizard — the preview texture is
+    # D3DPOOL_MANAGED, so there is no reset hook to register.
+    "${SRC_DIR}/radiant/kiwi_iwi.h"          # the .iwi container, derived from its reader
+    "${SRC_DIR}/radiant/kiwi_iwi.cpp"
+    "${SRC_DIR}/radiant/kiwi_matwriter.h"    # the binary material writer (template cloning)
+    "${SRC_DIR}/radiant/kiwi_matwriter.cpp"
+    "${SRC_DIR}/radiant/kiwi_import.h"       # the drop plumbing + the material wizard
+    "${SRC_DIR}/radiant/kiwi_import.cpp"
+
+    # ROUND BF — the BUILD & RUN launch dialog.  cod4map and cod4rad stay SEPARATE .exe
+    # (cod4rad is x64; cod4map owns its process, its file system and its exit codes) and
+    # this window drives them: Build BSP, Build Light, Run Map, and the BSP -> Light -> Run
+    # chain, with the child's stdout+stderr streamed into a log pane.  No thread — the
+    # radiant is a single-threaded WM_PAINT pump, so the pipe is polled per frame from the
+    # shell's draw (PeekNamedPipe + bounded ReadFile + GetExitCodeProcess).  Compiles the
+    # editor's saved .map through -loadFrom while targeting raw\maps\mp\<name>.map, the one
+    # directory that satisfies both the compilers' "two folders below maps" rule and the MP
+    # game's maps/mp/<name>.d3dbsp lookup.  Failure feeds the EXISTING compiler contract:
+    # <base>.errlog -> Pointfile_Errorfile, <base>.lin -> Pointfile_Check.  src/cod4map/
+    # and src/cod4rad/ are read-only reference for this file and are NOT touched.
+    "${SRC_DIR}/radiant/kiwi_launch.h"       # the dialog + the invocation contracts (D-BF-A..G)
+    "${SRC_DIR}/radiant/kiwi_launch.cpp"
+
+    # ── UX overhaul ROUND BH — the caulk workflow ───────────────────────────────
+    # "End = set texture to caulk" plus "caulk is always fit".  An INSTANT verb over
+    # the texture-browser apply funnel (TexWnd_ApplyMaterialAtIndex), so it inherits
+    # Brush_SetTexture's single undo record, round AK's patch re-naturalize fence and
+    # ROUND BH ITEM 3's live-gesture end; the fit is the Surface Inspector's own
+    # Brush_FitTexture( 1, 1, 0 ).  Its own TU because kiwi_uv.cpp owns the three
+    # MODAL texdef gestures and their shared state, and this shares none of it.
+    "${SRC_DIR}/radiant/kiwi_caulk.h"        # the verb + the auto-fit hook (D-BH-A..E)
+    "${SRC_DIR}/radiant/kiwi_caulk.cpp"
 
     "${SRC_DIR}/radiant/verteditdlg.cpp"
     "${SRC_DIR}/radiant/layersdlg.cpp"

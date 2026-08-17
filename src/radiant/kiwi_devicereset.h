@@ -11,7 +11,7 @@
 //     RB_ExecuteRenderCommandsLoop(...)      rb_backend.cpp:2736
 //     RB_CallExecuteRenderCommands()         rb_backend.cpp:2820
 //     R_IssueRenderCommands(...)             r_rendercmds.cpp:298
-//     CamWnd_RenderToRT( w, h )              camwnd.cpp:4422
+//     CamWnd_RenderToRT( w, h )              camwnd.cpp:4508
 //     ImGuiShell_RenderViewportsToRT()       imgui_shell.cpp:757
 //     Radiant_RunMessageLoop()               radiant_main.cpp:801
 //
@@ -138,6 +138,17 @@ void KiwiDevice_RebuildUnmanagedImages();   // after a Reset() that succeeded
 // run of black frames into ONE throttled line (console + OutputDebugStringA).
 void KiwiDevice_NoteCoopLevel( long hr );                    // R_TestDevice
 void KiwiDevice_NoteResetResult( long hr, int releasePass ); // R_ResetDevice
+
+// KIWI-UX (ROUND AX, ITEM 1) — name the LOSS, not just the failed recovery.
+// Round AD made the recovery chain loud and left the loss itself silent, so a report
+// could establish that Reset() kept failing without establishing what took the device
+// down in the first place.  Called from BOTH sites that set dx.deviceLost
+// (r_init.cpp R_CheckLostDevice and R_TestDevice) with the site name and the
+// TestCooperativeLevel HRESULT that decided it.  ONE line per loss episode — the first
+// HRESULT is the discriminator (DEVICELOST / DRIVERINTERNALERROR is the driver; anything
+// else points back at the editor) and the ones after it are noise.  Re-arms when a
+// Reset() finally succeeds.
+void KiwiDevice_NoteLoss( const char *where, long hr );
                                                              // releasePass: 0 none, 1 full, 2 second-chance
 
 // Called from the frame WM_PAINT, AFTER ::EndPaint.

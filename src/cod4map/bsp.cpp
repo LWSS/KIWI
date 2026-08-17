@@ -1236,10 +1236,12 @@ int main(int argc, const char **argv, const char **envp)
 
   /* BSP compilation pipeline */
   LoadExistingBspIfPresentAndSaveReflectionProbes();
+  OnlyEnts_BeginMapLoad();
   if ( strlen(g_loadFromPath) )
     LoadMapFile(g_loadFromPath);
   else
     LoadMapFile(g_mapSourceFile);
+  OnlyEnts_EndMapLoad();
 
   FreeSavedReflectionProbes();
   CreatePrimaryLights();

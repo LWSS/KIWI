@@ -14,6 +14,7 @@
 #include "qe3.h"
 
 #include "kiwi_command.h"
+#include "radiant_frame.h"          // KIWI-UX (CLEANUP, C-6): struct RadiantCommand + the table API
 #include "kiwi_addmenu.h"                // §16b the Shift+A add menu
 #include "kiwi_bevel.h"
 #include "kiwi_boolean.h"                // ROUND L — Q (difference / union)
@@ -51,14 +52,24 @@
 #include "kiwi_ux.h"                     // KiwiUX_ModernInput (the paste/clone hook's gate)
 #include "kiwi_undo.h"                   // shakeout I — the unified journal (cancel suppression)
 #include "kiwi_uv.h"
+#include "kiwi_entbrowser.h"            // ROUND AU — the entity browser + its deferred drop
+#include "kiwi_skybox.h"                // ROUND AZ — the Sky tab + its two verbs
+#include "kiwi_uveditor.h"              // KIWI-UX (ROUND BD) — the UV editor window row
+#include "kiwi_import.h"                // KIWI-UX (ROUND BE) — texture import (drop + wizard)
+#include "kiwi_launch.h"                // KIWI-UX (ROUND BF) — the Build & Run launch dialog
+#include "kiwi_caulk.h"                 // KIWI-UX (ROUND BH) — Caulk Selection (End)
+#include "kiwi_section.h"               // KIWI-UX (ROUND BM) — Section Analysis (the view-cube button)
 #include "kiwi_outliner.h"              // ROUND W — the outliner's two group verbs
 #include "kiwi_windows.h"
 
 #include <string.h>
 
 // ── ported entry points (verified against their definitions) ────────────────
-extern int  Sys_Printf( const char *fmt, ... );                  // win_qe3.cpp (undo.cpp:50)
+extern int  Sys_Printf( const char *fmt, ... );                  // win_qe3.cpp:112 (undo.cpp:57 declares it the same way)
 extern void Undo_ClearRedo();                                    // undo.cpp 0x45e2b0
+// KIWI-UX (CLEANUP, UndoCoverBrush): the two the per-brush cover needs.
+extern void Undo_AddBrush( entity_brush_s *pBrushInst );         // undo.cpp:494  (0x45E680)
+extern void Undo_AddEntity( int a1 );                            // undo.cpp:601  (0x45E8B0)
 extern void Undo_GeneralStart( const char *operation );          // undo.cpp 0x45e3f0
 extern void Undo_AddBrushList( selbrush_t *sb );                 // undo.cpp 0x45e7c0
 extern void Undo_EndBrushList( selbrush_t *brushlist );          // undo.cpp 0x45e870
@@ -76,11 +87,9 @@ extern bool Radiant_RegisterCommand( const char *name, byte vk, byte mods, int c
 // made before the chord is dispatched.  Radiant_TryHotkey (mainfrm.cpp:1497) is
 // lookup-and-execute in one, so this reads the same table it walks.
 //
-// The struct MUST MATCH mainfrm.cpp:985 verbatim — the same rule and the same
-// wording kiwi_keymap.cpp:22 and imgui_panel_commands.cpp:46 already carry, for
-// the same reason: the table is a raw array of these and there is no shared header.
-struct RadiantCommand { const char *name; byte vk; byte mods; int commandId; };
-extern int Radiant_GetCommandTableMutable( RadiantCommand **out );   // mainfrm.cpp:1241
+// KIWI-UX (CLEANUP, C-6): the struct AND these declarations now live in
+// radiant_frame.h, included above.  This file used to carry a verbatim copy of
+// `struct RadiantCommand` plus its own externs, as six other TUs did.
 
 namespace
 {
@@ -307,6 +316,46 @@ namespace
         }
     }
 
+    // ── KIWI-UX (ROUND BR): WHICH OF THOSE ARE THE *CREATION* HALF ──────────
+    // USER RULING: *"construction planes should only be made with [space],
+    // usually"* — so the selected-face working plane (round U's exception) may no
+    // longer be a standing rung of KiwiCon_AutoPlaneForTool.  It fires for THIS
+    // gesture and no other: a CREATION chord pressed with a face parked, which is
+    // the flow round U wrote the exception for ("face -> Shift+A -> draw"), and
+    // which the rung above already recognises.  The face-context VERBS
+    // (Ctrl+R / Z / E / J / C / Q / Loft) and the Ctrl+1..4 CONVERSIONS are not
+    // creation and must not arm anything — none of them starts a drawing tool, and
+    // the conversions deselect the face outright (kiwi_selconv.cpp Convert).
+    //
+    // Deliberately a SECOND switch rather than a flag threaded through the first:
+    // the allow-list above is a safety argument about CANCELLING a parked gesture
+    // and has nothing to do with planes.  Fusing them would make one edit to either
+    // question silently answer the other.
+    bool CreationVerb( int id )
+    {
+        switch ( id )
+        {
+        case KIWI_CMD_DRAW_LINE:
+        case KIWI_CMD_DRAW_POLYLINE:
+        case KIWI_CMD_DRAW_RECT:
+        case KIWI_CMD_DRAW_RECT_CENTER:
+        case KIWI_CMD_DRAW_CIRCLE:
+        case KIWI_CMD_DRAW_CIRCLE_2PT:
+        case KIWI_CMD_DRAW_ARC:
+        case KIWI_CMD_DRAW_POLYGON:
+        case KIWI_CMD_DRAW_SPLINE:
+        case KIWI_CMD_PRIM_BOX:
+        case KIWI_CMD_PRIM_BOX_CENTER:
+        case KIWI_CMD_PRIM_CYLINDER:
+        case KIWI_CMD_PRIM_SPHERE:
+        case KIWI_CMD_PRIM_CONE:
+        case KIWI_CMD_ADD_MENU:
+            return true;
+        default:
+            return false;
+        }
+    }
+
     // ── ROUND Z, ITEM 1: WHICH VERBS MAY SWAP INTO A LIVE GESTURE ───────────
     // USER REPORT, verbatim: "when pasting a brush, it goes into move mode
     // automatically, however if I want to paste and rotate(or similar) a brush, it
@@ -397,17 +446,21 @@ namespace
         // selection in v1 (kiwi_construct.h scope ruling 1), so no selection kind
         // makes these more or less meaningful.
         // ROUND P: both ids run the ONE chained curve tool (kiwi_construct.cpp).
-        { KIWI_CMD_DRAW_LINE,       { "Construct: Line (chained curve)", "Construct", 0, KiwiCon_CanDraw   } },
-        { KIWI_CMD_DRAW_POLYLINE,   { "Construct: Polyline (= Line)",    "Construct", 0, KiwiCon_CanDraw   } },
-        { KIWI_CMD_DRAW_RECT,       { "Construct: Rectangle",        "Construct", 0, KiwiCon_CanDraw       } },
-        { KIWI_CMD_DRAW_CIRCLE,     { "Construct: Circle",           "Construct", 0, KiwiCon_CanDraw       } },
-        { KIWI_CMD_DRAW_ARC,        { "Construct: Arc",              "Construct", 0, KiwiCon_CanDraw       } },
+        // KIWI-UX (CLEANUP, A-69): canExecute 0 rather than KiwiCon_CanDraw, which
+        // was a predicate that could only answer true.  KiwiCmd_CanExecute treats a
+        // null pointer as "always executable" (:815), so this is the same answer
+        // with nothing to maintain.
+        { KIWI_CMD_DRAW_LINE,       { "Construct: Line (chained curve)", "Construct", 0, 0                 } },
+        { KIWI_CMD_DRAW_POLYLINE,   { "Construct: Polyline (= Line)",    "Construct", 0, 0                 } },
+        { KIWI_CMD_DRAW_RECT,       { "Construct: Rectangle",        "Construct", 0, 0                     } },
+        { KIWI_CMD_DRAW_CIRCLE,     { "Construct: Circle",           "Construct", 0, 0                     } },
+        { KIWI_CMD_DRAW_ARC,        { "Construct: Arc",              "Construct", 0, 0                     } },
         // §16b (shakeout C): the rest of the Plasticity curve inventory, plus the
         // four SOLID primitives and the add menu that lists all of them.
-        { KIWI_CMD_DRAW_RECT_CENTER,{ "Construct: Rectangle (center)","Construct",0, KiwiCon_CanDraw       } },
-        { KIWI_CMD_DRAW_CIRCLE_2PT, { "Construct: Circle (2-point)", "Construct", 0, KiwiCon_CanDraw       } },
-        { KIWI_CMD_DRAW_POLYGON,    { "Construct: Polygon (n-gon)",  "Construct", 0, KiwiCon_CanDraw       } },
-        { KIWI_CMD_DRAW_SPLINE,     { "Construct: Spline",           "Construct", 0, KiwiCon_CanDraw       } },
+        { KIWI_CMD_DRAW_RECT_CENTER,{ "Construct: Rectangle (center)","Construct",0, 0                     } },
+        { KIWI_CMD_DRAW_CIRCLE_2PT, { "Construct: Circle (2-point)", "Construct", 0, 0                     } },
+        { KIWI_CMD_DRAW_POLYGON,    { "Construct: Polygon (n-gon)",  "Construct", 0, 0                     } },
+        { KIWI_CMD_DRAW_SPLINE,     { "Construct: Spline",           "Construct", 0, 0                     } },
         { KIWI_CMD_PRIM_BOX,        { "Box (corner)",                "Solids",    0, nullptr               } },
         // ROUND AF, ITEM 8 — Plasticity ships corner-box and centre-box as two
         // commands (BoxCommand.ts:60 / :155), so the palette lists two rows.
@@ -533,6 +586,30 @@ namespace
         // and the current template, both of which exist at all times.
         { KIWI_CMD_MATINFO,         { "Material info (under cursor)", "Textures",  0, 0 } },
 
+        // ── ROUND AW: the xmodel-surface readout (kiwi_command.h:KIWI_CMD_MODELINFO)
+        // No mask and no predicate for the same reason: it reads whatever the NEXT
+        // frame draws, which needs neither a selection nor a cursor ray.
+        { KIWI_CMD_MODELINFO,       { "Model info (next frame's models)", "Textures", 0, 0 } },
+
+        // ── ROUND BE: the texture-import entry point (kiwi_import.h) ────────
+        // No mask and no predicate: importing art needs neither a selection nor a
+        // cursor.  Only the BROWSE id is listed — KIWI_CMD_IMPORT_DROPPED is an
+        // internal continuation and must not be reachable by name.
+        { KIWI_CMD_IMPORT_BROWSE,   { "Import Textures...",           "Textures",  0, 0 } },
+
+        // ── ROUND BF: the Build & Run dialog (kiwi_launch.h) ────────────────
+        // No mask and no predicate: opening the dialog needs neither a selection
+        // nor a saved map — the dialog itself greys the build buttons and says
+        // why (an untitled map, a missing tool exe, a build already running).
+        { KIWI_CMD_BUILD_RUN,       { "Build & Run...",               "Build",     0, 0 } },
+
+        // ── ROUND BH: Caulk Selection (kiwi_caulk.h) ───────────────────────
+        // The mask is SEL_MASK_FACE | SEL_MASK_OBJECT for the same reason the UV
+        // rows below carry it: the apply funnel bottoms out on Brush_SetTexture,
+        // which does BOTH passes (every face of a whole-selected brush, and each
+        // entry of g_SelectedFaces).  The predicate is KiwiUv_CanEdit itself.
+        { KIWI_CMD_CAULK_FACES,     { "Caulk Selection",              "Textures",  SEL_MASK_FACE | SEL_MASK_OBJECT, KiwiCaulk_CanExecute } },
+
         // ── §26 Phase 6: the UV workflow v1 (kiwi_uv.cpp) ───────────────────
         // The mask is SEL_MASK_FACE | SEL_MASK_OBJECT because the cores take BOTH
         // (whole brushes get every face, g_SelectedFaces entries get one face
@@ -561,6 +638,14 @@ namespace
         { 33246, { "Show Last Hidden",          "View",      0, KiwiVis_HasHidden } },
         { KIWI_CMD_HIDE_INVERT,     { "Invert Hidden",       "View",      0, KiwiVis_CanInvert } },
         { KIWI_CMD_FOCUS_SELECTION, { "Focus On Selection",  "View",      0, KiwiFocus_CanFocus } },
+        // KIWI-UX (ROUND BK, ITEM 7): the FACE twin of the row above.  SEL_MASK_FACE
+        // because it is meaningless without one, and its own predicate because a
+        // hovered face counts (kiwi_focus.h).
+        { KIWI_CMD_VIEW_FACE,       { "View Face Head-on",   "View",      SEL_MASK_FACE, KiwiFocus_CanViewFace } },
+        // KIWI-UX (ROUND BM, ITEM 1b): the section toggle.  NO selection mask and no
+        // predicate — it is always available, because arming it is what starts the
+        // pick that decides what it cuts (kiwi_section.h).
+        { KIWI_CMD_SECTION_TOGGLE,  { "Section Analysis",    "View",      0, nullptr } },
         { KIWI_CMD_REPEAT_LAST,     { "Repeat Last Command", "Edit",      0, KiwiCmd_HasRepeatable } },
         // ROUND S: the clipboard Cut.  SEL_MASK_OBJECT + the same "is anything
         // selected" predicate the other whole-object edits use.
@@ -845,6 +930,13 @@ void KiwiCmd_RegisterCommands()
     KiwiUv_RegisterCommands();          // §26 texture shift/rotate/scale + Pick Texture
     KiwiWindows_RegisterCommands();     // §9 shakeout B — the window toggles (+ ROUND W's)
     KiwiOutliner_RegisterCommands();    // ROUND W    — Group / Ungroup Selection
+    KiwiEntBrowser_RegisterCommands();  // ROUND AU   — the Entities window toggle
+    KiwiSky_RegisterCommands();         // ROUND AZ   — the Sky window toggle + two verbs
+    KiwiUvEd_RegisterCommands();        // ROUND BD   — the UV editor window toggle
+    KiwiImport_RegisterCommands();      // ROUND BE   — "Import Textures..." (the drop's twin)
+    KiwiLaunch_RegisterCommands();      // ROUND BF   — "Build & Run..." (cod4map / cod4rad / game)
+    KiwiCaulk_RegisterCommands();       // ROUND BH   — "Caulk Selection" (End, modern profile)
+    KiwiSection_RegisterCommands();     // ROUND BM   — "Section Analysis" (the view-cube button)
     // ── ROUND J — the last Plasticity verbs (kiwi_offset/fillet/focus/visibility)
     KiwiOffset_RegisterCommands();      // O       offset a construction chain
     KiwiFillet_RegisterCommands();      // B       round its corners
@@ -856,6 +948,30 @@ void KiwiCmd_RegisterCommands()
     // profiles — it is a diagnostic reached by name from the §15 palette, and a
     // key spent on it would be a key not spent on a modelling verb.
     Radiant_RegisterCommand( "KiwiMatInfo", 0, 0, KIWI_CMD_MATINFO );
+    // ROUND AW: the model-surface twin of KiwiMatInfo.  Unbound for the same reason.
+    Radiant_RegisterCommand( "KiwiModelInfo", 0, 0, KIWI_CMD_MODELINFO );
+    // ── KIWI-UX (ROUND BB, ITEM 4): CSG HOLLOW REACHES THE PALETTE ──────────────
+    // USER DIRECTIVE, verbatim: *"Add the hollow operation from legacy radiant to
+    // the search (F) menu as a command."*
+    //
+    // THE HANDLER IS ALREADY THERE AND IS NOT A STUB.  Selection->CSG->Hollow is
+    // classic id 32982: Cmd_OnSelectionMakehollow (mainfrm.cpp:2412, the ported
+    // CMainFrame::OnSelectionMakehollow 0x425570) opens its own "hollow" undo
+    // record and calls the ported CSG_MakeHollow (csg.cpp:318, 0x47D3C0), which
+    // insets every face of the one selected brush by a grid step into a new thin
+    // brush and deletes the original.  It is dispatched at mainfrm.cpp:5478 and it
+    // already has a §15 label and predicate in the table above ("CSG: Hollow",
+    // KiwiCsg_CanHollow) and a button in the CSG panel (kiwi_csg.cpp:150).
+    //
+    // WHAT WAS MISSING IS ONLY THE REGISTRY ROW.  The palette lists the RADIANT
+    // COMMAND TABLE (kiwi_palette.cpp:87-95) and the shipped table binds CSGMerge
+    // (32927) and AutoCaulk (33220) but NOT hollow — faithfully, because the binary
+    // gave hollow a menu item and no key.  So the row existed everywhere except in
+    // the one place the F menu reads.  UNBOUND, exactly like the binary: this adds
+    // a way to FIND the command, not a key that was never there.  The name follows
+    // the two neighbours' spelling (mainfrm.cpp:1076-1077, "CSGMerge"/"AutoCaulk"),
+    // and the palette's search matches the label, the category and this name.
+    Radiant_RegisterCommand( "CSGHollow", 0, 0, 32982 );
     // ROUND S: unbound in the CLASSIC profile — Ctrl+X's accelerator was removed
     // from res/radiant.rc (it ran File->Exit), and the classic profile's rule is
     // "leave the key alone" rather than "invent a binding".  kiwi_keymap.cpp's
@@ -928,11 +1044,20 @@ namespace
         case KIWI_CMD_WINDOW_CONSOLE:
         case KIWI_CMD_WINDOW_SHELL:
         case KIWI_CMD_WINDOW_OUTLINER:                  // ROUND W — a window toggle
+        case KIWI_CMD_WINDOW_ENTITIES:                  // ROUND AU — likewise
+        // ROUND AU: the entity DROP is the tail of a drag that has already
+        // happened and carries its argument in kiwi_entbrowser.cpp's one-shot
+        // pending slot.  Repeating it would re-run a gesture with no payload —
+        // and, worse, "Repeat Last" would silently become the drop instead of the
+        // modelling verb the user actually last ran.
+        case KIWI_CMD_ENT_DROP:
         case KIWI_CMD_VIEW_SHOW_GRID:
         case KIWI_CMD_VIEW_SHOW_AXES:
         case KIWI_CMD_VIEW_ORTHO:                       // ROUND M — a view toggle, not a verb
         case KIWI_CMD_CONSTRUCT_UNDO:                   // edit:undo
         case KIWI_CMD_FOCUS_SELECTION:                  // viewport:focus
+        case KIWI_CMD_VIEW_FACE:                        // ROUND BK — a view verb too
+        case KIWI_CMD_SECTION_TOGGLE:                   // ROUND BM — view state, and its own inverse
         // Invert Hidden is a VIEW verb by kiwi_visibility.h's own argument (it
         // takes no undo bracket for exactly that reason), and it is its own
         // inverse — repeating it would undo the thing the user just did.  Its
@@ -948,6 +1073,10 @@ namespace
         // ROUND S: Cut is an edit: action on the clipboard, not a modelling verb —
         // the same class as Copy/Paste, which are classic ids and never recorded.
         case KIWI_CMD_CLIP_CUT:
+        // ROUND BF: "Build & Run..." TOGGLES A WINDOW — same class as the window
+        // toggles at the top of this list, and repeating it would close the dialog
+        // the user just opened rather than repeat the last modelling verb.
+        case KIWI_CMD_BUILD_RUN:
         case KIWI_CMD_SELFTEST:                         // a diagnostic, not a verb
             return false;
         default:
@@ -1018,7 +1147,7 @@ bool KiwiCmd_RepeatLast()
 // console says so, which is also what makes Ctrl+X harmless on an empty selection.
 void KiwiCmd_ClipCut()
 {
-    extern void Radiant_ExecCommand( unsigned int cmdId );   // mainfrm.cpp:3955
+    extern void Radiant_ExecCommand( unsigned int cmdId );   // mainfrm.cpp:4083
 
     if ( selected_brushes.next == &selected_brushes )
     {
@@ -1033,6 +1162,14 @@ void KiwiCmd_ClipCut()
 
 // ─── §3 dispatch tail for the reserved range ─────────────────────────────────
 static bool KiwiCmd_DispatchInner( unsigned int cmdId );
+
+// KIWI-UX (CLEANUP, C-4): the range test mainfrm.cpp's gate asks before calling
+// KiwiCmd_Dispatch below.  ONE spelling of "is this id ours" — the two #defines
+// in kiwi_command.h are the only place the numbers appear.
+bool KiwiCmd_IsKiwiId( int id )
+{
+    return id >= KIWI_CMD_FIRST && id <= KIWI_CMD_LAST;
+}
 
 bool KiwiCmd_Dispatch( unsigned int cmdId )
 {
@@ -1127,7 +1264,13 @@ static bool KiwiCmd_DispatchInner( unsigned int cmdId )
         // ── ROUND J: the three new instant verbs ────────────────────────────
         if ( KiwiDupe_DispatchInstant( cmdId ) )        // Shift+D duplicate + Move
             return true;
-        if ( KiwiFocus_DispatchInstant( cmdId ) )       // /       frame the selection
+        // ROUND BK, ITEM 7: …and Space (KIWI_CMD_VIEW_FACE), which the same
+        // function owns because it is the same framing math.
+        if ( KiwiFocus_DispatchInstant( cmdId ) )       // /  frame  ·  Space  face
+            return true;
+        // ROUND BM, ITEM 1b: the SECTION ANALYSIS toggle — a view verb like the two
+        // above it, and the only entry point the view-cube button uses too.
+        if ( KiwiSection_DispatchInstant( cmdId ) )
             return true;
         if ( KiwiVis_DispatchInstant( cmdId ) )         // Ctrl+H  invert hidden
             return true;
@@ -1137,6 +1280,30 @@ static bool KiwiCmd_DispatchInner( unsigned int cmdId )
         // flag belongs to the §9 table, the verbs belong to the feature.
         if ( KiwiOutliner_DispatchInstant( cmdId ) )
             return true;
+        // ROUND AU: the entity browser's DEFERRED DROP (KIWI_CMD_ENT_DROP).  The
+        // window TOGGLE is not here — KiwiWindows_DispatchInstant above owns every
+        // §9 flag, this file owns only the verb, which is the same split round W
+        // made between the Outliner's window id and its two group verbs.
+        if ( KiwiEntBrowser_DispatchInstant( cmdId ) )
+            return true;
+        // ROUND AZ: the Sky tab's two VERBS (apply / create shell).  Its window
+        // toggle is not here for the same reason the entity browser's is not —
+        // KiwiWindows_DispatchInstant above owns every §9 flag.
+        if ( KiwiSky_DispatchInstant( cmdId ) )
+            return true;
+        // ROUND BE: texture import — the internal drop continuation (34128, posted by the
+        // WM_DROPFILES handler in radiant_main.cpp) and the browse verb (34129).  Same split
+        // as the entity browser above: this file owns nothing, the feature owns both ids.
+        if ( KiwiImport_DispatchInstant( cmdId ) )
+            return true;
+        // ROUND BF: the Build & Run dialog's one id (34130).  Same split again — the
+        // feature owns its id; this file owns nothing but the route to it.
+        if ( KiwiLaunch_DispatchInstant( cmdId ) )
+            return true;
+        // ROUND BH: "Caulk Selection" (34131).  Same split again — the feature owns its
+        // id and its whole body; this file owns only the route to it.
+        if ( KiwiCaulk_DispatchInstant( cmdId ) )
+            return true;
         // ROUND Y: the material-state readout.  A pure diagnostic — no undo, no
         // mutation, no selection change; it prints and returns.
         if ( cmdId == (unsigned int)KIWI_CMD_MATINFO )
@@ -1144,6 +1311,16 @@ static bool KiwiCmd_DispatchInner( unsigned int cmdId )
             // kiwi_material.h:206 (definition kiwi_material.cpp:288)
             extern void KiwiMtl_InfoCommand();
             KiwiMtl_InfoCommand();
+            return true;
+        }
+        // ROUND AW: the model-surface readout.  Also a pure diagnostic — it only arms a
+        // one-shot flag that r_ed_scene.cpp's SkinModelInst reads and that its own
+        // per-frame reset clears, so nothing is drawn, mutated or selected here.
+        if ( cmdId == (unsigned int)KIWI_CMD_MODELINFO )
+        {
+            // r_ed_scene.cpp — definition beside Editor_ModelSurfTech.
+            extern void KiwiEdScene_ArmModelInfoDump();
+            KiwiEdScene_ArmModelInfoDump();
             return true;
         }
         return false;                     // an unwired id in the reserved range
@@ -1342,11 +1519,6 @@ void KiwiCmd_StartDeferred( int commandId, bool paused )
 }
 
 // ─── §4 HOT / PAUSED (shakeout E) ────────────────────────────────────────────
-bool KiwiCmd_IsHot()
-{
-    return g_activeCommand != nullptr && s_hot;
-}
-
 void KiwiCmd_Pause()
 {
     if ( !g_activeCommand || !s_hot )
@@ -1372,10 +1544,34 @@ void KiwiCmd_Resume()
     g_nUpdateBits |= 1;
 }
 
-// ── ROUND Z, ITEM 2: the one-axis gestures' inverted Ctrl (kiwi_command.h) ────
-bool KiwiCmd_SnapOptIn()
+// ── KIWI-UX (ROUND BO, ITEM 3): THE ONE SNAP MODIFIER RULE (kiwi_command.h) ──
+// Ctrl INVERTS the active context's default.  GetAsyncKeyState is the physical
+// read every ported drag path uses (drag.cpp:308) and the one kiwi_snap.cpp's arm
+// 0 already made — this layer runs post-present from the pump, same as those, so
+// there is no message-queue latch to go stale.  Polled, never latched, which is
+// Plasticity's own discipline (it clears `snaps.xor` on every command teardown —
+// plasticity/src/command/CommandExecutor.ts:125).
+bool KiwiCmd_SnapEngaged()
 {
-    return g_activeCommand && g_activeCommand->SnapOptIn();
+    const bool ctrl = ( ::GetAsyncKeyState( VK_CONTROL ) & 0x8000 ) != 0;
+    const KiwiEditorCommand::kiwiSnapCtx_t ctx =
+        g_activeCommand ? g_activeCommand->SnapContext()
+                        : KiwiEditorCommand::KSNAPCTX_TRANSFORM;
+    if ( ctx == KiwiEditorCommand::KSNAPCTX_ALWAYS )
+        return true;
+    return ( ctx == KiwiEditorCommand::KSNAPCTX_CONSTRUCT ) != ctrl;
+}
+
+// ── KIWI-UX (ROUND BK, ITEM 2): the confirm-source latch (kiwi_command.h) ────
+// File-scope rather than a parameter on KiwiCmd_KeyDown, because the ladder is
+// re-entered from several places (the numeric layer, kiwi_cmdoptions.cpp) and
+// only the ONE call below is an RMB.  Restored on every exit path, including the
+// one where the dispatch re-enters this layer (a Commit can start a new command).
+namespace { bool s_confirmIsRmb = false; }
+
+bool KiwiCmd_ConfirmIsRmb()
+{
+    return s_confirmIsRmb;
 }
 
 void KiwiCmd_Confirm()
@@ -1385,7 +1581,10 @@ void KiwiCmd_Confirm()
     // Deliberately the ENTER path, not KiwiCmd_Commit: a command that consumes
     // VK_RETURN (the polyline's "end the chain") must see an RMB confirm the same
     // way, and that veto lives in exactly one place — KiwiCmd_KeyDown's ladder.
+    const bool prev = s_confirmIsRmb;      // nested confirms cannot lie to each other
+    s_confirmIsRmb  = true;
     KiwiCmd_KeyDown( 0x0D, 0 );            // VK_RETURN, no modifiers
+    s_confirmIsRmb  = prev;
 }
 
 // ─── §4 keys ─────────────────────────────────────────────────────────────────
@@ -1910,6 +2109,16 @@ bool KiwiUX_KeyFunnel( unsigned int vk )
         const int id = LookupBinding( vk, CurrentMods() );
         if ( id && PreemptVerb( id ) && KiwiCmd_CanExecute( id ) )
         {
+            // KIWI-UX (ROUND BR): THIS is the Shift+A gesture, and the only place
+            // the selected-face working plane may be minted from now on.  The face
+            // survives the cancel below (Cancel restores geometry and never clears
+            // the selection — the rung's own argument, above), so the tool that the
+            // chord is about to start still finds it; the arm is what tells
+            // KiwiCon_AutoPlaneForTool that the user ASKED for that face's plane
+            // rather than merely having a face selected.  One shot: it is consumed
+            // by the next tool start whether or not the rung fires.
+            if ( CreationVerb( id ) )
+                KiwiCon_ArmSelectedFacePlane();
             KiwiCmd_Cancel();
             return false;                   // …and let the hotkey table run it
         }
@@ -1994,6 +2203,106 @@ bool KiwiUX_KeyFunnel( unsigned int vk )
             return true;
     }
 
+    // ── KIWI-UX (ROUND BJ, ITEM 1): END (CAULK) REACHES A PARKED FACE AUTO-ENTER ──
+    //
+    // USER REPORT, verbatim: *"The End bind for caulking needs to work on faces.
+    // Currently it only works for solids."*
+    //
+    // THE EXACT SWALLOW POINT is the line immediately below this rung, and the
+    // chain is the same one round N found for Ctrl+R, round U for Ctrl+1..4 and
+    // round AA for DELETE.  In Face mode a face selection and a live PAUSED
+    // push/pull are THE SAME STATE — clicking a face auto-enters KIWI_CMD_MOVE and
+    // pauses it (kiwi_boxselect.cpp:884-891, gated `!shift && !ctrl` and Face mode
+    // only) — so `g_activeCommand` is set in exactly the state the caulk verb is
+    // FOR.  End (VK_END 0x23) is not a bare modifier, not a PreemptVerb (the caulk
+    // id is not in that list), not a SwapVerb (only G/R/S) and not DELETE, so it
+    // fell to KiwiCmd_KeyDown, which is not Tab, not numeric, not Esc/Enter and not
+    // one of Move's own keys, and died on its catch-all "Everything else is
+    // SWALLOWED" rung (:1615-1619).  With WHOLE BRUSHES selected nothing
+    // auto-enters, `g_activeCommand` is NULL, the key falls through to
+    // Radiant_TryHotkey and the verb runs — which is precisely "it only works for
+    // solids".  Nothing in kiwi_caulk.cpp was ever reached on a face selection.
+    //
+    // WHY THIS RUNG DOES *NOT* CANCEL, unlike round N's.  The caulk verb goes
+    // through TexWnd_ApplyMaterialAtIndex, whose head already runs the round-BH
+    // handshake KiwiUv_EndGestureBeforeApply / …RestoreGestureAfterApply
+    // (texwnd.cpp:1259/:1330).  That pair cancels the parked push AND RE-ARMS it
+    // afterwards with a fresh BeginFaces baseline, so the face gizmo survives the
+    // caulk.  Cancelling here would end the gesture without the latch that brings
+    // it back, and the user would lose the push/pull gizmo on every End press.  So
+    // this rung only DECLINES to swallow: it returns false and the chord takes the
+    // ordinary Radiant_TryHotkey route, exactly as round N's does after its cancel.
+    //
+    // The gate is still PreemptIdle — a gesture that has APPLIED something is not
+    // yielded to a texture write here any more than anywhere else; the handshake
+    // itself refuses that case and says so on the console.
+    if ( g_activeCommand && g_activeCommand->PreemptIdle() )
+    {
+        const int id = LookupBinding( vk, CurrentMods() );
+        if ( id == KIWI_CMD_CAULK_FACES && KiwiCmd_CanExecute( id ) )
+            return false;                   // …the BH handshake owns the gesture
+    }
+
+    // ── KIWI-UX (ROUND BN, ITEM 5): A **VIEW** VERB REACHES A PARKED FACE ────
+    //    AUTO-ENTER.  THE §82.3 TRAP, FIFTH OCCURRENCE.
+    //
+    // USER REPORT, verbatim: *"The spacebar feature I asked for isn't here.
+    // Pressing spacebar does nothing.  Does the input get eaten somewhere?  Used
+    // for something else?  What's going on."*
+    //
+    // THE ANSWER IS "EATEN, ONE LINE BELOW THIS RUNG", and it is the same chain
+    // round N found for Ctrl+R, round U for Ctrl+1..4, round AA for DELETE and
+    // round BJ for End.  Space is meaningful exactly when a FACE is selected — and
+    // in Face mode a face selection and a live PAUSED push/pull are THE SAME STATE
+    // (kiwi_boxselect.cpp ClickSelect auto-enters KIWI_CMD_MOVE on the click that
+    // makes the selection).  So `g_activeCommand` is set in exactly the state
+    // KiwiFocus_CanViewFace requires, the key fell to KiwiCmd_KeyDown, and Space is
+    // not Tab, not Esc/Enter, not one of Move's own keys and — with an EMPTY
+    // numeric buffer — not numeric either (kiwi_numeric.cpp:602-603 declines Space
+    // when `s_text[f][0]` is 0).  It therefore died on the catch-all "Everything
+    // else is SWALLOWED" rung, on EVERY press.  Round BK bound the key one round
+    // AFTER round BJ wrote the rule down (UX_DESIGN §82.3) and did not add a rung;
+    // its own audit note said "this binding is what Space means with NO command
+    // running", which is precisely the state a face selection can never be in.
+    //
+    // A DECLINE-TO-SWALLOW RUNG, NOT A PreemptVerb ENTRY, and the choice follows
+    // the verb's semantics.  PreemptVerb CANCELS the parked gesture before letting
+    // the chord through — right for a verb that is about to REBUILD the geometry
+    // the gesture is holding (split, extrude, boolean), wrong for a verb that only
+    // moves the CAMERA: cancelling would cost the user the face gizmo on every
+    // Space press, for a command that does not touch the selection, the geometry or
+    // the undo journal at all.  So this rung is round BJ's shape: it returns FALSE
+    // and the chord takes the ordinary TranslateAccelerator -> Radiant_TryHotkey
+    // route, with the parked push left exactly as it was.
+    //
+    // ── AND THE NUMERIC SEPARATOR IS FENCED OFF, WHICH IS THE OTHER HALF ─────
+    // `!KiwiNum_Has()` is what keeps "10ft 6in" working: a modal command with a
+    // half-typed value in ANY field keeps every key, so Space inside a typed value
+    // is still part of the value (kiwi_numeric.cpp:602) and Enter/Esc still resolve
+    // it.  The guard is on the RUNG rather than in kiwi_numeric.cpp because the
+    // numeric layer's own gate is already correct and per-FIELD; this one has to be
+    // per-ENTRY, and it is what lets the same rung carry `/` (Focus On Selection)
+    // safely — 0xBF is ALSO the division operator in a typed expression.
+    //
+    // BOTH VIEW VERBS, because they are one class and had one defect: `/` (Focus
+    // On Selection, kiwi_focus.h) was swallowed by the identical mechanism in the
+    // identical state and nobody had reported it yet.
+    //
+    // STILL GATED ON PreemptIdle, like all four rungs above it.  Not because a
+    // camera move could corrupt anything — it cannot; it writes no geometry, no
+    // selection and no undo record — but because a gesture that is genuinely BEING
+    // DRAGGED maps the cursor into the world every MouseMove, and re-aiming the
+    // camera underneath it would teleport the drag.  "Auto-entered and has applied
+    // nothing" is exactly the parked state the report is about, and it is the state
+    // in which there is no drag to disturb.
+    if ( g_activeCommand && g_activeCommand->PreemptIdle() && !KiwiNum_Has() )
+    {
+        const int id = LookupBinding( vk, CurrentMods() );
+        if ( ( id == KIWI_CMD_VIEW_FACE || id == KIWI_CMD_FOCUS_SELECTION )
+          && KiwiCmd_CanExecute( id ) )
+            return false;                   // …the camera verb runs, the gesture stays
+    }
+
     if ( g_activeCommand )
         return KiwiCmd_KeyDown( (int)vk, CurrentMods() );
 
@@ -2040,6 +2349,16 @@ bool KiwiUX_KeyFunnel( unsigned int vk )
     // "Esc again to deselect" readable.  Leaving hands the patches back as whole
     // objects, so the second Escape reaches 33002 with something to drop.
     if ( vk == 0x1B && KiwiPatchVerts_HandleEscape() )               // VK_ESCAPE
+        return true;
+
+    // ── KIWI-UX (ROUND BM, ITEM 1b): ESCAPE CANCELS A SECTION *PICK* ────────
+    // It consumes the key, on the same terms as the patch-vertex rung above: the
+    // pick is a MODE the user just entered and backing out one level at a time is
+    // what makes "Escape again to deselect" readable.  It does NOT turn a live
+    // section off — Escape means "drop the selection" and a section is not one; the
+    // button (or the palette row) is what clears it.  Self-gated: false in every
+    // state but PICKING, so Escape is untouched the rest of the time.
+    if ( vk == 0x1B && KiwiSection_HandleEscape() )                  // VK_ESCAPE
         return true;
 
     if ( ( vk == 0x2E || vk == 0x08 ) && KiwiConSel_OwnsDelete() )   // VK_DELETE / VK_BACK
@@ -2144,10 +2463,32 @@ void KiwiCmd_UndoBegin( const char *operation )
 {
     if ( s_undoOpen )
         return;                             // one bracket per gesture, always
+    // ── KIWI-UX (ROUND BJ, ITEM 4): SNAPSHOT THE SELECTION FOR THE JOURNAL ──────
+    // Taken HERE because this is the one place every KIWI gesture opens its
+    // bracket, and because it has to be the selection as it stood BEFORE the first
+    // mutation.  The snapshot is by VALUE (brush ordinal + bounds fingerprint +
+    // indices, never a pointer — Undo_Undo re-creates the brushes), it rides the
+    // ticket the closing Undo_End mints, and it is re-applied after the legacy
+    // undo/redo completes.  kiwi_undo.h "THE FACE-GRANULAR RESTORE" has the
+    // root-cause chain.  Ported records never call this function, so classic undo
+    // behaviour is untouched.
+    KiwiUndo_ArmSelectionSnapshot();
     Undo_ClearRedo();
     Undo_GeneralStart( operation );         // stores the POINTER — literals only
     Undo_AddBrushList( &selected_brushes );
     s_undoOpen = true;
+}
+
+// KIWI-UX (CLEANUP, UndoCoverBrush): the ONE per-brush cover — see the note on
+// the declaration in kiwi_command.h for why it is here and what it mirrors.
+void KiwiCmd_UndoCoverBrush( selbrush_t *node )
+{
+    if ( !node || !node->def )
+        return;
+    entity_s *owner = node->def->owner;
+    if ( owner && owner->eclass && owner->eclass->fixedsize )
+        Undo_AddEntity( (int)(intptr_t)owner );
+    Undo_AddBrush( (entity_brush_s *)node->def );
 }
 
 void KiwiCmd_UndoCommit()
@@ -2182,9 +2523,4 @@ void KiwiCmd_UndoCancel()
     Undo_ClearRedo();
     KiwiUndo_SuppressEnd();
     g_nUpdateBits = -1;
-}
-
-bool KiwiCmd_UndoOpen()
-{
-    return s_undoOpen;
 }

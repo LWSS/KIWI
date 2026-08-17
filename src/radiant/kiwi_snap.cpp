@@ -31,6 +31,7 @@
 #include "kiwi_lines.h"
 #include "kiwi_units.h"
 #include "radiant_registry.h"
+#include "kiwi_vec.h"     // KIWI-UX (CLEANUP, A-15): the one spelling of Dot3/Sub3/...
 
 #include <math.h>
 #include <stdio.h>
@@ -149,23 +150,6 @@ namespace
     bool  s_angleIsRel = false;
     float s_angleRel   = 0.0f;
 
-    inline float Dot3( const float *a, const float *b )
-    {
-        return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-    }
-
-    // SHAKEOUT H FIX: the two the intersection arm's parallel/shared-endpoint
-    // rejections need.  Same spelling as every other copy in this layer
-    // (kiwi_construct.cpp, kiwi_transform.cpp) — three lines each, duplicated
-    // rather than exported for the same reason WorldPerPixel below is.
-    inline void Sub3( const float *a, const float *b, float *o )
-    { o[0]=a[0]-b[0]; o[1]=a[1]-b[1]; o[2]=a[2]-b[2]; }
-    inline void Cross3( const float *a, const float *b, float *o )
-    {
-        o[0] = a[1]*b[2] - a[2]*b[1];
-        o[1] = a[2]*b[0] - a[0]*b[2];
-        o[2] = a[0]*b[1] - a[1]*b[0];
-    }
 
     // World units per screen pixel at the depth of `world` — the scale that makes
     // a marker screen-constant.
@@ -284,28 +268,11 @@ namespace
         out[2] = ray.origin[2] + ray.dir[2] * dist;
     }
 
-    // The two world endpoints of the edge a SEL_EDGE item names (kiwi_selection.h
-    // DESIGN NOTE 3: w->p[e] → w->p[(e+1) % numpoints] of def->faces[f].w).
-    bool EdgeEndpoints( const sel_item_t &it, float *a, float *b )
-    {
-        if ( !it.brush || !it.brush->def )
-            return false;
-        brush_t *def = it.brush->def;
-        if ( !def->faces || it.faceIndex < 0 || it.faceIndex >= def->faceCount )
-            return false;
-        winding_t *w = def->faces[it.faceIndex].w;
-        if ( !w || w->numpoints < 2 )
-            return false;
-        if ( it.edgeIndex < 0 || it.edgeIndex >= w->numpoints )
-            return false;
-        const int j = ( it.edgeIndex + 1 ) % w->numpoints;
-        for ( int k = 0; k < 3; ++k )
-        {
-            a[k] = w->p[it.edgeIndex][k];
-            b[k] = w->p[j][k];
-        }
-        return true;
-    }
+    // KIWI-UX (CLEANUP, A-13): EdgeEndpoints was one of four copies of
+    // "w->p[e] → w->p[(e+1) % numpoints] of def->faces[f].w" (kiwi_selection.h
+    // DESIGN NOTE 3).  It is Sel_EdgeEnds now; the one call site below takes the
+    // default checkLive = true, which is a guard this copy did not have and costs
+    // ONE display-list walk per snap query (not per candidate).
 
     // ═════════════════════════════════════════════════════════════════════════
     //  v3 — the CONSTRUCTION candidate scans (kiwi_construct.h scope ruling 1:
@@ -360,7 +327,7 @@ namespace
         return !KiwiConSel_SnapMuted( i );
     }
 
-    // Arm 1: the nearest construction ANCHOR within PICK_VERT_PIXELS.
+    // Arm 1: the nearest construction ANCHOR within KSNAP_R_CON_POINT (round BN).
     void ScanConAnchors( float curX, float curY, conBest_t *best )
     {
         const int count = KiwiCon_Count();
@@ -379,7 +346,7 @@ namespace
                 if ( !Pick_WorldToImage( w, &px, &py ) )   // false = behind the eye
                     continue;
                 const float d = PixelDist( px, py, curX, curY );
-                if ( d > PICK_VERT_PIXELS )
+                if ( d > KSNAP_R_CON_POINT )   // ROUND BN, ITEM 7 — its own class radius
                     continue;
                 if ( best->hit && d >= best->dist )
                     continue;
@@ -412,19 +379,12 @@ namespace
                 float ax, ay, bx, by;
                 if ( !Pick_WorldToImage( wa, &ax, &ay ) || !Pick_WorldToImage( wb, &bx, &by ) )
                     continue;                 // either end behind the eye — skip whole
-                const float ex = bx - ax, ey = by - ay;
-                const float len2 = ex * ex + ey * ey;
-                float t = 0.0f;
-                if ( len2 > 1.0e-6f )
-                {
-                    t = ( ( curX - ax ) * ex + ( curY - ay ) * ey ) / len2;
-                    if ( t < 0.0f ) t = 0.0f;
-                    if ( t > 1.0f ) t = 1.0f;
-                }
-                const float d = PixelDist( ax + ex * t, ay + ey * t, curX, curY );
+                // KIWI-UX (CLEANUP, A-12): one spelling, kiwi_pick.h.
+                float       t = 0.0f;
+                const float d = Pick_SegDist2D( curX, curY, ax, ay, bx, by, &t );
                 // KIWI-UX (ROUND K): the construction clickbox is KCON_LINE_PIXELS (10),
                 // not the brush-edge PICK_EDGE_PIXELS (6) — kiwi_construct.h.
-                if ( d > KCON_LINE_PIXELS )
+                if ( d > KSNAP_R_CON_SEG )     // ROUND BN, ITEM 7 — the SNAP box, not the click box
                     continue;
                 if ( best->hit && d >= best->dist )
                     continue;
@@ -453,7 +413,6 @@ namespace
     {
         float       dir[3];
         const char *name;
-        bool        vertical;
     };
 
     // Name a direction the way the world axes are named, so the label says "Z"
@@ -520,7 +479,6 @@ namespace
         int n = 0;
         out[n].dir[0] = 0.0f; out[n].dir[1] = 0.0f; out[n].dir[2] = 1.0f;
         out[n].name = "Z";
-        out[n].vertical = true;
         ++n;
 
         const float *pa[3] = { plane.u, plane.v, plane.normal };
@@ -535,7 +493,6 @@ namespace
                 continue;                    // it IS the vertical — Plasticity's dedup
             out[n].dir[0] = d[0]; out[n].dir[1] = d[1]; out[n].dir[2] = d[2];
             out[n].name = AxisName( d, pn[i] );
-            out[n].vertical = false;
             ++n;
         }
         return n;
@@ -596,10 +553,12 @@ namespace
             if ( len2 < KSNAP_AXIS_MIN_PROJ * KSNAP_AXIS_MIN_PROJ )
                 continue;                    // edge-on: it is a dot, not a line
 
-            float t = ( ( curX - ax ) * ex + ( curY - ay ) * ey ) / len2;
-            if ( t < 0.0f ) t = 0.0f;
-            if ( t > 1.0f ) t = 1.0f;
-            const float d = PixelDist( ax + ex * t, ay + ey * t, curX, curY );
+            // KIWI-UX (CLEANUP, A-12): one spelling, kiwi_pick.h.  The guard
+            // above already refuses everything the helper's own 1e-6 length
+            // guard would (KSNAP_AXIS_MIN_PROJ is 8 px), so the two are the same
+            // computation here.
+            float       t = 0.0f;
+            const float d = Pick_SegDist2D( curX, curY, ax, ay, bx, by, &t );
             if ( d > AxisRadius( c, cand[i] ) )
                 continue;
             if ( best->hit && d >= best->dist )
@@ -677,7 +636,7 @@ namespace
                 if ( !Pick_WorldToImage( mid, &px, &py ) )
                     continue;
                 const float d = PixelDist( px, py, curX, curY );
-                if ( d > PICK_VERT_PIXELS )
+                if ( d > KSNAP_R_CON_POINT )   // ROUND BN, ITEM 7 — its own class radius
                     continue;
                 if ( best->hit && d >= best->dist )
                     continue;
@@ -832,7 +791,7 @@ namespace
                 if ( !Pick_WorldToImage( w, &px, &py ) )
                     continue;
                 const float d = PixelDist( px, py, curX, curY );
-                if ( d > PICK_VERT_PIXELS )
+                if ( d > KSNAP_R_CON_POINT )   // ROUND BN, ITEM 7 — its own class radius
                     continue;
                 if ( best->hit && d >= best->dist )
                     continue;
@@ -868,7 +827,7 @@ namespace
         if ( !it.brush || !it.brush->def )
             return false;
         // def->faces (face_t, GEOMETRY), never node->faces (faceVis_s, VISIBILITY)
-        // — the same distinction EdgeEndpoints above depends on.
+        // — the same distinction Sel_EdgeEnds (kiwi_selection.cpp) depends on.
         brush_t *def = it.brush->def;
         if ( !def->faces || it.faceIndex < 0 || it.faceIndex >= def->faceCount )
             return false;
@@ -1138,11 +1097,19 @@ bool KiwiSnap_AxisDepth( const snap_result_t &r, const float *ref,
     return true;
 }
 
-// ─── ROUND AG, ITEM 11: the light grid magnet ────────────────────────────────
-// See kiwi_snap.h LIGHT GRID SNAPPING for the directive, for why this is not a
-// walk-back of D-Z2, and for the "band, not quantiser" argument.
-float KiwiSnap_LightGridAxis( float d, const float *ref, const float *axis )
+// KIWI-UX (ROUND BO, ITEM 3): KiwiSnap_LightGridAxis is DELETED.  It was round
+// AG's "light snapping to the global grid" magnet, and its three call sites were
+// all the branch a gesture took when the ranked query was SUPPRESSED — i.e. it was
+// snapping that happened precisely when the user had asked for none.  That is the
+// *"impossible to get fine details"* report.  Its SOFT mode survives inside
+// KiwiSnap_LatticeAxis, which the object move still reaches with `hard=false` for
+// a SNAP_FACE hit (kiwi_transform.cpp) — under Ctrl, where it belongs.
+
+float KiwiSnap_LatticeAxis( float d, const float *ref, const float *axis,
+                            bool hard, bool *outMajor )
 {
+    if ( outMajor )
+        *outMajor = false;
     // ROUND AJ, ITEM 5: the grid-snap master switch (kiwi_grid.h) covers the BAND
     // as well as the quantiser — a "disable snapping to grid" that left a magnet
     // pulling the value around would not be the checkbox the user asked for.  The
@@ -1169,7 +1136,8 @@ float KiwiSnap_LightGridAxis( float d, const float *ref, const float *axis )
         scale = 1.0f / axis[worldAxis];               // |axis[k]| ~ 1, so +-1
     }
 
-    const float snapped = floorf( value / g + 0.5f ) * g;
+    const float cell    = floorf( value / g + 0.5f );
+    const float snapped = cell * g;
 
     // The band, in screen pixels at the gesture's CURRENT point, capped so that
     // zooming out cannot turn the magnet into a quantiser.
@@ -1180,10 +1148,48 @@ float KiwiSnap_LightGridAxis( float d, const float *ref, const float *axis )
     const float maxBand = g * KSNAP_LIGHT_MAX_FRAC;
     if ( !( band > 0.0f ) )  band = maxBand;          // NaN / degenerate camera
     if ( band > maxBand )    band = maxBand;
+    // KIWI-UX (ROUND BL, ITEM 4): HARD mode rounds unconditionally, so the band no
+    // longer decides WHETHER to snap — it only sizes the MAJOR preference below.
+    // HALF A CELL, deliberately, and the arithmetic is the whole argument: the major
+    // then owns +-0.75 of a cell (KSNAP_MAJOR_BAND_MUL), which is less than the
+    // distance to the next cell, so EVERY lattice value is still reachable by aiming
+    // — the major only wins where the rounding was going to be a coin-flip anyway.
+    // A full-cell band here would have given the major +-1.5 cells and made the two
+    // cells either side of every major UNREACHABLE, which is a worse bug than the
+    // one this round is fixing.
+    if ( hard )
+        band = g * 0.5f;
 
-    if ( fabsf( value - snapped ) > band )
+    // ── KIWI-UX (ROUND BK, ITEM 6d): THE MAJOR LINES ARE STICKIER ───────────
+    // See KSNAP_MAJOR_BAND_MUL (kiwi_snap.h).  The NEAREST major is computed
+    // independently of the nearest cell — they are not the same line — and it is
+    // preferred whenever it is inside the widened band, even when a minor is
+    // nearer.  That is the whole "easier to lock to the major lines": at the same
+    // distance the major wins, and it keeps winning half a band further out.
+    const float gMajor  = g * (float)KSNAP_MAJOR_STRIDE;
+    const float majorAt = floorf( value / gMajor + 0.5f ) * gMajor;
+    const float majBand = band * KSNAP_MAJOR_BAND_MUL;
+    if ( fabsf( value - majorAt ) <= majBand )
+    {
+        if ( outMajor )
+            *outMajor = true;
+        return d + ( majorAt - value ) * scale;
+    }
+
+    if ( !hard && fabsf( value - snapped ) > band )
         return d;                                     // outside the band: untouched
     return d + ( snapped - value ) * scale;
+}
+
+// ─── KIWI-UX (ROUND BK, ITEM 6a/6c): the AREA magnet (kiwi_snap.h) ───────────
+float KiwiSnap_AreaMagnet( float cur, float target, const float *at )
+{
+    if ( !at )
+        return cur;
+    const float band = KSNAP_AREA_BAND_PIX * KiwiCam_WorldPerPixel( at );
+    if ( !( band > 0.0f ) )                 // NaN / degenerate camera: keep the cursor
+        return cur;
+    return ( fabsf( target - cur ) <= band ) ? target : cur;
 }
 
 // ─── the query ───────────────────────────────────────────────────────────────
@@ -1209,30 +1215,42 @@ bool KiwiSnap_Query( const ray_t &ray, int imgX, int imgY, snap_result_t *out,
     float curX = 0.0f, curY = 0.0f;
     const bool haveCursorPx = Pick_WorldToImage( ahead, &curX, &curY );
 
-    // ── v3: the active construction plane, when a drawing tool owns the gesture ─
+    // ── the PLANAR PLACER's plane, when one owns the gesture ─────────────────
     // KIWI-UX (ROUND K): PlanePlacement, not ToolActive — the §16b primitives place
     // on the working plane exactly as the drawing tools do, and gating arms 6/7/8
     // on "is a KiwiDrawTool running" is the whole box-creation bug
-    // (kiwi_construct.h KiwiCon_SetPlanePlacement).  With no primitive live the two
-    // predicates are identical, so every other answer is unchanged.
-    const bool toolActive = KiwiCon_PlanePlacement();
+    // (kiwi_construct.h KiwiCon_SetPlanePlacement).
+    //
+    // ── KIWI-UX (ROUND BS): …AND THAT PREDICATE IS NOW *PLANAR* PLACEMENT ────
+    // USER RULING: *"You seriously need to get rid of the construction plane. […]
+    // It just needs to be wherever a ray trace hits against an object OR a snapping
+    // point."*  KiwiCon_PlanePlacement() answers true only for a tool whose SHAPE
+    // cannot exist off a plane — rect / circle / arc / n-gon and the §16b
+    // primitives (kiwi_construct.cpp KiwiCon_PlanePlacement).  The line, polyline
+    // and spline tools answer FALSE, so for them `haveCPlane` is false and every
+    // plane-borne branch in this function — the raw fallback, the occlusion
+    // relaxation, the arm-6 suppression and arms 7 + 8 — is unreachable.  That is
+    // the removal: not a gate around the plane, an absent plane.
+    const bool planarPlacer = KiwiCon_PlanePlacement();
     const kconPlane_t &cplane = KiwiCon_ActivePlane();
-    float cplaneHit[3];
+    float cplaneHit[3] = { 0.0f, 0.0f, 0.0f };
     // KIWI-UX (ROUND X, ITEM 2): the BOUNDED form.  The infinite one resolved a
     // grazing ray a hundred thousand units out (so the placed point left the drawn
     // grid) and failed outright when the plane was a hair behind the eye (so arms
     // 7+8 dropped and a drawing tool placed OFF its own plane).  Both are the
     // directive's "impossible to snap/guide the line onto the xy plane".  The
     // bounded form is Plasticity's finite quad — see kiwi_construct.h.
-    const bool haveCPlane = toolActive && KiwiCon_RayPlaneBounded( cplane, ray, cplaneHit );
+    const bool haveCPlane = planarPlacer && KiwiCon_RayPlaneBounded( cplane, ray, cplaneHit );
 
     // ── the surface hit (arm 6) + the RAW point arms 0 and 9 fall back to ─────
     const pick_result_t surf = Pick( ray, SEL_MASK_OBJECT, pickFlags );
     float raw[3];
     if ( haveCPlane )
     {
-        // A drawing tool places on ITS OWN plane — even with snapping suppressed,
-        // and even when the ray happens to hit a wall behind it.
+        // A PLANAR PLACER places on ITS OWN plane — even with snapping suppressed,
+        // and even when the ray happens to hit a wall behind it.  ROUND BS: this
+        // branch is unreachable for the line tools; theirs is the surface hit
+        // below, then the ground.
         raw[0] = cplaneHit[0];
         raw[1] = cplaneHit[1];
         raw[2] = cplaneHit[2];
@@ -1248,29 +1266,30 @@ bool KiwiSnap_Query( const ray_t &ray, int imgX, int imgY, snap_result_t *out,
         RayPoint( ray, KSNAP_FALLBACK_DIST, raw );
     }
 
-    // ── arm 0: CTRL suppresses snapping (§6) ─────────────────────────────────
-    // GetAsyncKeyState is the physical-state read every ported drag path uses
-    // (drag.cpp:308 etc.); this file runs post-present from the pump, same as those.
+    // ── arm 0: IS SNAPPING ENGAGED AT ALL? (§6) ──────────────────────────────
+    // ── KIWI-UX (ROUND BO, ITEM 3): ONE MODIFIER, ONE MEANING ────────────────
+    // USER DIRECTIVE, verbatim: *"with dragging, there is no snapping unless ctrl
+    // is held.  Respect that.  with extruding, same thing, no snapping unless
+    // ctrl"* and *"with construction-line based operations it's the opposite
+    // however, they snap by default, but ctrl unsnaps them."*
     //
-    // ── KIWI-UX (ROUND Z, ITEM 2): …AND FOR ONE-AXIS GESTURES IT ENABLES IT ──
-    // USER DIRECTIVE, verbatim: "When extruding, it should not snap by default.
-    // Make it snap only when holding CTRL.  It's just not good to use in a
-    // cluttered scene."
+    // Round Z's per-command XOR (`ctrlHeld != KiwiCmd_SnapOptIn()`, three opted-in
+    // commands and everybody else the other way) is what produced the "some
+    // operations it's the opposite, it's confusing" report.  The whole decision now
+    // lives in KiwiCmd_SnapEngaged (kiwi_command.h SnapContext), which is the SAME
+    // xor Plasticity's SnapManager runs — only the thing it is xor'd against is a
+    // CONTEXT (transform vs construction) instead of a per-command opt-in flag.
+    // The Plasticity citations and the one deliberate divergence are on SnapContext.
     //
-    // The test is an XOR against the ACTIVE COMMAND'S DEFAULT rather than a second
-    // arm, which is exactly Plasticity's shape:
-    // `get enabled() { return this._enabled !== this.xor }` (SnapManager.ts:28-49),
-    // with Ctrl driving `xor` on keydown/keyup (default-keymap.ts:353,365-366).
-    // Ctrl still means "the other one"; only what "the one" is has changed, and only
-    // for the commands that ask (kiwi_command.h SnapOptIn — the face push/pull, the
-    // region extrude and the face extrude / un-extrude, and nothing else).
+    // THIS IS THE ONE CHOKE POINT.  Every ranked arm below it, the grid arm (9), and
+    // every consumer's own lattice pass are all downstream of the `SNAP_NONE` answer
+    // this returns, so no gesture needs its own copy of the rule.
     //
     // SUPPRESSED IS AN ANSWER, NOT A FAILURE (the header's arm 9 note): `valid` stays
     // true and `position` is the raw point, so every consumer that tests
-    // `type != SNAP_NONE` — which is all three one-axis gestures — falls back to its
-    // own raw cursor mapping, ungridded, with the numeric field untouched.
-    const bool ctrlHeld = ( ::GetAsyncKeyState( VK_CONTROL ) & 0x8000 ) != 0;
-    if ( ctrlHeld != KiwiCmd_SnapOptIn() )
+    // `type != SNAP_NONE` falls back to its own raw cursor mapping, ungridded, with
+    // the numeric field untouched.
+    if ( !KiwiCmd_SnapEngaged() )
     {
         out->valid = true;
         out->type  = SNAP_NONE;
@@ -1279,6 +1298,113 @@ bool KiwiSnap_Query( const ray_t &ray, int imgX, int imgY, snap_result_t *out,
         out->position[2] = raw[2];
         return true;
     }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    //  KIWI-UX (ROUND BN, ITEM 7) — THE OCCLUSION GATE
+    // ═════════════════════════════════════════════════════════════════════════
+    // Plasticity's `findAllIntersectionsVeryCloseTogether` (SnapPickerStrategy.ts:
+    // 93-105 / 135-146), in the weaker form kiwi_snap.h argues for: a candidate
+    // BEHIND the surface under the cursor is not a candidate.  Everything about
+    // WHY is on the header; this is the arithmetic.
+    //
+    //   `surfT`  the surface hit's distance along the ray.  ray.dir is unit (every
+    //            producer normalises it — kiwi_pick.h), so a plain dot is the
+    //            parameter and no divide is needed.
+    //   `slop`   KSNAP_OCCLUDE_SLOP_PX pixels of DEPTH at the candidate's own
+    //            depth, so the tolerance is one visual size everywhere.  Screen
+    //            scale is world-per-pixel, which is exactly what
+    //            KiwiCam_WorldPerPixel returns (and its ortho arm is depth-free,
+    //            which is correct — there is no perspective divide to be fooled by
+    //            in the first place).
+    //
+    // It is OFF when nothing is under the cursor: with no surface there is nothing
+    // to be behind, and every candidate stands.
+    const bool haveSurfDepth = surf.valid;
+    float      surfT         = 0.0f;
+    if ( haveSurfDepth )
+    {
+        const float rel[3] = { surf.point[0] - ray.origin[0],
+                               surf.point[1] - ray.origin[1],
+                               surf.point[2] - ray.origin[2] };
+        surfT = Dot3( rel, ray.dir );
+    }
+    // ── ONE RELAXATION, and it is the PLANAR PLACERS' ───────────────────────
+    // KIWI-UX (ROUND BS): unchanged arithmetic, narrower reach — `haveCPlane` is
+    // now planar-placement only, so this cannot fire during line work (or during a
+    // transform, where it never could).
+    // A tool placing on its OWN construction plane has already been told, by the
+    // user, which depth the work is happening at (kiwi_construct.h ruling 3).  If
+    // that plane is FURTHER down the ray than the surface — the case where the user
+    // has deliberately set a plane behind a wall, or is drawing inside a building —
+    // then the wall is not an occluder for this gesture and the tool's own
+    // scaffolding out at plane depth must stay reachable.  So the reference depth
+    // becomes the further of the two.  With no tool running, or with the plane in
+    // front of the surface, this changes nothing.
+    if ( haveSurfDepth && haveCPlane )
+    {
+        const float rel[3] = { cplaneHit[0] - ray.origin[0],
+                               cplaneHit[1] - ray.origin[1],
+                               cplaneHit[2] - ray.origin[2] };
+        const float t = Dot3( rel, ray.dir );
+        if ( t > surfT )
+            surfT = t;
+    }
+    // ═════════════════════════════════════════════════════════════════════════
+    //  KIWI-UX (ROUND BS) — THE WORKING-PLANE DEPTH GATE IS DELETED
+    // ═════════════════════════════════════════════════════════════════════════
+    // TOMBSTONE for round BP item 3 / round BQ / round BR: the `planeOn` half of
+    // this gate — "a candidate must be ON the working plane, or within
+    // KSNAP_OFFPLANE_PX of the plane hit" — is GONE, with KSNAP_ONPLANE_PX,
+    // KSNAP_OFFPLANE_PX and the KiwiCon_PlaneIsExplicit scoping.
+    //
+    // USER RULING, verbatim: *"Snapping is broken when extruding.  You seriously
+    // need to fucking get rid of the construction plane.  It's getting worse every
+    // update.  Go back to pre-construction plane.  This is not hard.  It just needs
+    // to be wherever a fucking ray trace hits against an object OR a snapping
+    // point."*
+    //
+    // ITS PREMISE DIED WITH THE PLANE.  The gate said *"that plane IS the depth the
+    // user is working at"*, and the drawing path no longer HAS a working plane: a
+    // line/polyline/spline point is the snap, else the surface hit, else the ground
+    // (kiwi_snap.h "THE PLACEMENT RESOLUTION").  A filter that refuses candidates
+    // for being off a plane that does not exist can only ever subtract.
+    //
+    // WHAT REPLACES IT: NOTHING, AND THAT IS THE POINT.  The round-BN OCCLUSION
+    // gate below is the one depth rule, it applies in every context, and it is the
+    // one the user approved (*"Dragging is a lot better.  Keep it the same."*).
+    // The 61-ft teleport round BP was written for is dead at its ROOT — the stale
+    // auto plane that put those endpoints at 61 ft is gone (round BP demoted the
+    // ladder, round BR the selected-face rung, and this round the per-point
+    // re-seat), so the candidate that beat the corner is never created.
+    struct CandGate
+    {
+        bool         on;                 // the round-BN occlusion half — all of it
+        float        surfT;
+        const ray_t *ray;
+        bool operator()( const float *p ) const
+        {
+            if ( !p )
+                return true;
+            if ( on )
+            {
+                const float rel[3] = { p[0] - ray->origin[0],
+                                       p[1] - ray->origin[1],
+                                       p[2] - ray->origin[2] };
+                const float t = Dot3( rel, ray->dir );
+                if ( t > surfT )
+                {
+                    const float slop = KSNAP_OCCLUDE_SLOP_PX * KiwiCam_WorldPerPixel( p );
+                    if ( ( t - surfT ) > slop )
+                        return false;    // behind the surface under the cursor
+                }
+            }
+            return true;
+        }
+    };
+    CandGate visible;
+    visible.on      = haveSurfDepth;
+    visible.surfT   = surfT;
+    visible.ray     = &ray;
 
     // ── the construction candidates, gathered once (kiwi_snap.h budget note) ──
     conBest_t conAnchor, conSeg, conIsect, conMid;
@@ -1369,8 +1495,11 @@ bool KiwiSnap_Query( const ray_t &ray, int imgX, int imgY, snap_result_t *out,
         }
     }
 
-    // ── arm 1: POINT — a CONSTRUCTION anchor (8 px) ──────────────────────────
-    if ( conAnchor.hit )
+    // ── arm 1: POINT — a CONSTRUCTION anchor (KSNAP_R_CON_POINT) ─────────────
+    // ROUND BN, ITEM 7: …and only if it is not behind the surface under the cursor.
+    // This is THE arm the reported teleport came through: construction scaffolding
+    // is everywhere in the user's screenshot and it outranks every brush target.
+    if ( conAnchor.hit && visible( conAnchor.pos ) )
     {
         out->valid = true;
         out->type  = SNAP_ENDPOINT;
@@ -1382,7 +1511,7 @@ bool KiwiSnap_Query( const ray_t &ray, int imgX, int imgY, snap_result_t *out,
 
     // ── arm 2: POINT — a winding corner / patch control point (8 px) ─────────
     const pick_result_t vert = Pick( ray, SEL_MASK_VERTEX, pickFlags );
-    if ( vert.valid )
+    if ( vert.valid && visible( vert.point ) )   // ROUND BN, ITEM 7
     {
         out->valid  = true;
         out->type   = SNAP_VERTEX;
@@ -1394,7 +1523,7 @@ bool KiwiSnap_Query( const ray_t &ray, int imgX, int imgY, snap_result_t *out,
     }
 
     // ── arm 3: POINT — a construction segment crossing (8 px) ────────────────
-    if ( conIsect.hit )
+    if ( conIsect.hit && visible( conIsect.pos ) )   // ROUND BN, ITEM 7
     {
         out->valid = true;
         out->type  = SNAP_INTERSECTION;
@@ -1408,7 +1537,7 @@ bool KiwiSnap_Query( const ray_t &ray, int imgX, int imgY, snap_result_t *out,
     // Above the brush midpoint for the same reason arm 1 sits above arm 2:
     // construction geometry is scaffolding the user placed on purpose and is
     // aiming at on purpose.
-    if ( conMid.hit )
+    if ( conMid.hit && visible( conMid.pos ) )       // ROUND BN, ITEM 7
     {
         out->valid = true;
         out->type  = SNAP_EDGE_MID;
@@ -1428,7 +1557,7 @@ bool KiwiSnap_Query( const ray_t &ray, int imgX, int imgY, snap_result_t *out,
     if ( edge.valid )
     {
         float ea[3], eb[3];
-        const bool haveEnds = EdgeEndpoints( edge.item, ea, eb );
+        const bool haveEnds = Sel_EdgeEnds( edge.item, ea, eb );
         if ( haveEnds )
         {
             for ( int k = 0; k < 3; ++k )
@@ -1447,7 +1576,8 @@ bool KiwiSnap_Query( const ray_t &ray, int imgX, int imgY, snap_result_t *out,
                                    ( ea[2] + eb[2] ) * 0.5f };
             float mx, my;
             if ( haveCursorPx && Pick_WorldToImage( mid, &mx, &my )
-              && PixelDist( mx, my, curX, curY ) <= PICK_VERT_PIXELS )
+              && PixelDist( mx, my, curX, curY ) <= KSNAP_R_EDGE_MID     // ROUND BN, ITEM 7
+              && visible( mid ) )
             {
                 out->valid  = true;
                 out->type   = SNAP_EDGE_MID;
@@ -1480,7 +1610,8 @@ bool KiwiSnap_Query( const ray_t &ray, int imgX, int imgY, snap_result_t *out,
         float cx, cy;
         if ( faceHit.valid && FaceCentroid( faceHit.item, centre )
           && Pick_WorldToImage( centre, &cx, &cy )
-          && PixelDist( cx, cy, curX, curY ) <= PICK_VERT_PIXELS )
+          && PixelDist( cx, cy, curX, curY ) <= KSNAP_R_FACE_CENTER     // ROUND BN, ITEM 7
+          && visible( centre ) )
         {
             out->valid  = true;
             out->type   = SNAP_FACE_CENTER;
@@ -1496,12 +1627,41 @@ bool KiwiSnap_Query( const ray_t &ray, int imgX, int imgY, snap_result_t *out,
     // Gathered here, immediately above the LINE rank it belongs to, and resolved
     // as part of arm 5's "closest pixel wins" below — see kiwi_snap.h for why it
     // competes rather than taking a fixed priority the way Plasticity's does.
+    //
+    // ── KIWI-UX (ROUND BS): THE GUIDES SURVIVE, AND THEIR BASIS IS THE WORLD ──
+    // The brief keeps arm 4c and the Z lock by name — they are SNAP CANDIDATES,
+    // not planes.  What changes is where the two non-vertical axes come from: a
+    // PLANAR PLACER still offers its own plane's U/V/N (they are the axes of the
+    // shape it is drawing), and a LINE tool, which now has no plane, offers the
+    // WORLD triple instead — X, Y and Z through its last placed point.  That is
+    // Plasticity's own default set (`straightSnaps` = X/Y/Z, AxisSnap.ts:29-31)
+    // and it is strictly more useful than a plane basis nobody chose.  The gate is
+    // now the ANCHOR itself: KiwiCon_ToolAnchor answers only while a drawing tool
+    // has placed a point, which is exactly when an axis through it can exist.
     axisBest_t axisBest;
-    if ( haveCursorPx && toolActive )
+    if ( haveCursorPx )
     {
         float anchor[3];
         if ( KiwiCon_ToolAnchor( anchor ) )
-            ScanAxes( Ed_Camera(), anchor, cplane, curX, curY, &axisBest );
+        {
+            kconPlane_t axisBasis;
+            if ( planarPlacer )
+            {
+                axisBasis = cplane;
+            }
+            else
+            {
+                const float o[3] = { 0.0f, 0.0f, 0.0f };
+                const float n[3] = { 0.0f, 0.0f, 1.0f };
+                const float u[3] = { 1.0f, 0.0f, 0.0f };
+                // World ground basis: u = +X, v = +Y, normal = +Z.  The normal is
+                // dropped by GatherAxisCandidates' own dedup (it IS world Z, which
+                // is always offered first), so the set comes out X / Y / Z.
+                if ( !KiwiCon_MakePlane( o, n, u, &axisBasis ) )
+                    axisBasis = cplane;          // degenerate: fall back, never crash
+            }
+            ScanAxes( Ed_Camera(), anchor, axisBasis, curX, curY, &axisBest );
+        }
         if ( axisBest.hit )
         {
             s_axisHave    = true;
@@ -1516,11 +1676,20 @@ bool KiwiSnap_Query( const ray_t &ray, int imgX, int imgY, snap_result_t *out,
     }
 
     // ── arm 5: LINE — brush edge vs construction segment vs AXIS, closest wins ─
-    if ( edge.valid || conSeg.hit || axisBest.hit )
+    // ── KIWI-UX (ROUND BN, ITEM 7): each LINE source is gated on the same
+    //    occlusion test the point arms take, and it is applied HERE rather than in
+    //    the scans because the three sources compete: dropping an occluded
+    //    construction segment must let the brush edge behind it win the comparison,
+    //    not lose the whole arm.  The AXIS guide is exempt — it is a line THROUGH
+    //    the tool's own last placed point, i.e. the user's own scaffolding, and it
+    //    legitimately runs off through the scene in both directions.
+    const bool edgeVis = edge.valid && visible( edge.point );
+    const bool conSegVis = conSeg.hit && visible( conSeg.pos );
+    if ( edgeVis || conSegVis || axisBest.hit )
     {
-        const bool useCon = conSeg.hit && ( !edge.valid || conSeg.dist < edge.screenDist );
+        const bool useCon = conSegVis && ( !edgeVis || conSeg.dist < edge.screenDist );
         const float lineDist = useCon ? conSeg.dist
-                                      : ( edge.valid ? edge.screenDist : 1.0e9f );
+                                      : ( edgeVis ? edge.screenDist : 1.0e9f );
         if ( axisBest.hit && axisBest.dist <= lineDist )
         {
             out->valid = true;
@@ -1563,9 +1732,20 @@ bool KiwiSnap_Query( const ray_t &ray, int imgX, int imgY, snap_result_t *out,
     }
 
     // ── arm 6: AREA — the Test_Ray surface point, UNSNAPPED (see the header) ──
-    // Suppressed while a drawing tool runs: the tool places on its own plane, and
-    // an area snap would quietly move the point off it.
-    if ( surf.valid && !toolActive )
+    // ── KIWI-UX (ROUND BS): THIS IS "WHEREVER A RAY TRACE HITS AN OBJECT" ────
+    // USER RULING: a drawn point is the snap, ELSE THE SURFACE UNDER THE CURSOR,
+    // else the ground.  This arm IS that middle rung, and it used to be switched
+    // off for every drawing tool ("the tool places on its own plane, and an area
+    // snap would quietly move the point off it") — which is precisely the rule the
+    // user is throwing out.  A line, polyline or spline now falls through to the
+    // surface hit and lands ON THE ROOF IT IS AIMED AT.
+    //
+    // STILL SUPPRESSED FOR A PLANAR PLACER, and only there: a rect/circle/arc/n-gon
+    // or a §16b primitive PROJECTS whatever it is handed onto its own plane, so an
+    // area hit on some OTHER surface would be flattened to that surface's shadow —
+    // under the wall instead of under the cursor.  Those tools take arm 8 (their own
+    // plane's hit) instead, which tracks the cursor exactly.
+    if ( surf.valid && !planarPlacer )
     {
         out->valid  = true;
         out->type   = SNAP_FACE;
@@ -1577,6 +1757,21 @@ bool KiwiSnap_Query( const ray_t &ray, int imgX, int imgY, snap_result_t *out,
     }
 
     // ── arms 7 + 8: the construction plane, with the 15° angle lock on top ────
+    // ── KIWI-UX (ROUND BS): PLANAR PLACERS ONLY, AND THE LINE TOOLS' LOSS ────
+    // `haveCPlane` is now planar-placement only, so BOTH arms are unreachable for a
+    // line, polyline or spline.  Arm 8 is no loss to them — its job was "work over
+    // empty space", which the ground grid (arm 9) does without a plane.  ARM 7 IS A
+    // REAL LOSS AND IT IS STATED RATHER THAN HIDDEN: a free 3D chain no longer gets
+    // the 15° angle lock, because an angle stop is only defined IN a plane and an
+    // angle stop is also exactly the thing the ruling forbids — a candidate that
+    // MOVES the point off where the cursor is pointing without naming a place that
+    // exists.  Two things cover it:
+    //   * arm 4c now offers WORLD X / Y / Z through the tool's last point (see
+    //     there), so 0 / 90 / 180 / 270 are reachable by AIMING, as ranked snap
+    //     candidates rather than as an override; and
+    //   * the Tab "angle" field still types an exact bearing and still composes with
+    //     a typed length (kiwi_construct.cpp ApplyAngleOverride), measured in the
+    //     world ground basis.
     if ( haveCPlane )
     {
         float uv[2];
@@ -1663,13 +1858,38 @@ bool KiwiSnap_Query( const ray_t &ray, int imgX, int imgY, snap_result_t *out,
     }
 
     // ── arm 9: the ground-plane grid ─────────────────────────────────────────
+    // KIWI-UX (ROUND BS): the user's third rung, verbatim — *"else the world ground
+    // plane z=0, grid-snapped"*.  It is not a system and it is not state; it is the
+    // floor, and it is reached only when nothing was snapped and the ray hit nothing.
     out->valid = true;
     out->type  = SNAP_GRID;
     if ( !KiwiGrid_Snap( raw, out->position ) )
     {
-        // Unusable spacing — report the raw point rather than lying about a grid.
+        // Unusable spacing (or the §17 grid-snap master switch is off) — report the
+        // raw point rather than lying about a grid.  The label then reads "off",
+        // which means "not snapped", not "refused" (kiwi_snap.h KiwiSnap_TypeName).
         out->type = SNAP_NONE;
     }
+    return true;
+}
+
+// ─── KIWI-UX (ROUND BS): the ONE placement resolution (kiwi_snap.h) ──────────
+// A thin, named front door onto the query above so that PREVIEW and PLACEMENT
+// cannot diverge: everything that needs "where does a point go for this cursor
+// ray" asks here and gets the snap, else the surface hit, else the ground.  It
+// replaces the hand-rolled ray-cast-at-the-working-plane that KiwiDrawTool::
+// LatchFromCursor used to run at Begin() — a SECOND resolution path, and one that
+// answered on a plane the ruling has just deleted.
+bool KiwiSnap_ResolvePoint( const ray_t &ray, int imgX, int imgY, float out[3] )
+{
+    if ( !out )
+        return false;
+    snap_result_t r;
+    if ( !KiwiSnap_Query( ray, imgX, imgY, &r ) || !r.valid )
+        return false;
+    out[0] = r.position[0];
+    out[1] = r.position[1];
+    out[2] = r.position[2];
     return true;
 }
 
@@ -1783,6 +2003,27 @@ void KiwiSnap_EmitMarker( const snap_result_t &r )
     // enough that it never competes with the point/line glyphs above.
     if ( r.type == SNAP_FACE )
     {
+        // ── KIWI-UX (ROUND BN, ITEM 7): …AND THE PLANE SAYS WHICH PLANE ──────
+        // The ladder's third rung ("glue to the surface under the cursor") is the
+        // one the user asked to be reachable, and a bare dot is not enough to tell
+        // it apart from the grid's cross at a glance: the whole point of the rung
+        // is WHICH surface took the drag.  So the hit face's own winding is traced
+        // as well, in the same near-black marker colour, which is the accent
+        // language this file already uses for "the thing that snapped" — the tick
+        // along an edge, one rank up, is exactly the same idea.
+        //
+        // Bounded by construction: ONE face's winding, and the batch's own
+        // KiwiLines_Add returns false when the budget is spent (AddNudged forwards
+        // that), so a pathological winding costs the marker and nothing else.
+        if ( r.source.brush && r.source.brush->def && r.source.faceIndex >= 0
+          && r.source.faceIndex < r.source.brush->def->faceCount
+          && r.source.brush->def->faces )
+        {
+            const winding_t *w = r.source.brush->def->faces[r.source.faceIndex].w;
+            if ( w && w->numpoints >= 3 )
+                for ( int i = 0, j = w->numpoints - 1; i < w->numpoints; j = i++ )
+                    AddNudged( c, w->p[j], w->p[i] );
+        }
         const float d = h * 0.45f;
         float p[4][3];
         const float sx[4] = { -1.0f, 0.0f, 1.0f, 0.0f };
@@ -1852,8 +2093,32 @@ void KiwiSnap_DrawFaceAccents()
     if ( !KiwiSnap_ShowMarkers() )
         return;
 
+    // ── KIWI-UX (ROUND BK, ITEM 6b): …AND WHILE HUNTING FOR A PIVOT ─────────
+    // USER DIRECTIVE, verbatim: *"when hunting for a pivot point, the obvious
+    // spots (centers, corners, points, midways, etc.) need to have a black dot to
+    // show where they are."*  That is this feature exactly — the dots below ARE
+    // the corners, the edge midpoints and the face centre, and they are already
+    // "every point KiwiSnap_Query will actually return for this face", which is
+    // why nothing new is enumerated here (round AP's ConCandidateUsable rule: one
+    // enumeration, not two).  The only thing missing was permission to draw during
+    // a TRANSFORM, so the gate gains the two states the directive names and
+    // nothing else (kiwi_transform.h KiwiXform_WantsSnapDots): V-placement, and a
+    // held handle.  A parked gesture still draws none, which is the clutter round
+    // Y's note refused.
+    //
+    // (A BBOX CENTRE IS DELIBERATELY NOT ADDED.  No snap arm answers one, and this
+    // function's own rule is "a dot the query could not honour would be worse than
+    // no dot at all".  Adding the dot without the arm would be advertising a
+    // target that does not exist.)
+    // (kiwi_transform.h is already included at the top of this file.)
     KiwiEditorCommand *cmd = KiwiCmd_Active();
-    if ( !cmd || !cmd->WantsClicks() )
+    if ( !cmd || ( !cmd->WantsClicks() && !KiwiXform_WantsSnapDots() ) )
+        return;
+    // KIWI-UX (ROUND BO, ITEM 3): THE ACCENTS FOLLOW THE ENGAGEMENT.  These dots
+    // advertise where the query CAN land; with snapping disengaged it can land
+    // nowhere, so drawing them would be advertising a target that does not exist —
+    // which is this function's own stated rule, applied to the new modifier.
+    if ( !KiwiCmd_SnapEngaged() )
         return;
 
     camera_s *c = Ed_Camera();
@@ -1953,8 +2218,10 @@ void KiwiSnap_EmitSpot( const float *p, float pixRadius, bool solid )
 {
     if ( !p || !( pixRadius > 0.0f ) )
         return;
+    // KIWI-UX (CLEANUP, A-21): no null test, matching the file's three other
+    // Ed_Camera sites — it never returns NULL (camwnd.cpp:153).
     camera_s *c = Ed_Camera();
-    if ( !c || c->width < 1 || c->height < 1 )
+    if ( c->width < 1 || c->height < 1 )
         return;
     float n[3];
     Nudge( c, p, n );
@@ -1985,6 +2252,10 @@ void KiwiSnap_DrawAxisGuides()
 
     KiwiEditorCommand *cmd = KiwiCmd_Active();
     if ( !cmd || !cmd->WantsClicks() )
+        return;
+    // KIWI-UX (ROUND BO, ITEM 3): the axis guides are snap candidates (arm 4c), so
+    // they follow the engagement exactly as the face accents do.
+    if ( !KiwiCmd_SnapEngaged() )
         return;
 
     camera_s *c = Ed_Camera();
@@ -2069,6 +2340,33 @@ void KiwiSnap_DrawLabel( const snap_result_t &r, float imgMinX, float imgMinY,
         // tells the user they are on the vertical rather than merely near it.
         _snprintf( text, sizeof( text ), "%s axis   %s, %s, %s",
                    s_axisName, bx, by, bz );
+    // ═════════════════════════════════════════════════════════════════════════
+    //  KIWI-UX (ROUND BS) — THE `off` CHIP IN THE EXTRUDE SCREENSHOT
+    // ═════════════════════════════════════════════════════════════════════════
+    // THE AUTOPSY, and it is not what it looked like.  The reported chip —
+    // *"extruding … the snap chip shows an `off …` row"* — was read as an OFF-PLANE
+    // REFUSAL leaking into a transform.  It is not: "off" is
+    // KiwiSnap_TypeName(SNAP_NONE) (this file's `default:` arm), and SNAP_NONE is
+    // arm 0's answer, *"snapping is not engaged"*.  An extrude is a TRANSFORM
+    // (kiwi_command.h SnapContext -> KSNAPCTX_TRANSFORM, because WantsClicks() is
+    // false), and a transform snaps only while CTRL IS HELD — which is the user's
+    // own round-BO directive, verbatim: *"with extruding, same thing, no snapping
+    // unless ctrl"*.  So the chip was telling the truth in a word that reads like a
+    // failure.  No plane state reached that gesture: KiwiCon_PlanePlacement() is
+    // false with no drawing tool live, so `haveCPlane` was false and the deleted
+    // gate could not have run even before this round deleted it.
+    //
+    // THE FIX IS THE SENTENCE, THEREFORE.  The label now says which state it is in
+    // and how to change it, instead of one ambiguous word.
+    else if ( r.type == SNAP_NONE )
+    {
+        const KiwiEditorCommand *cmd = KiwiCmd_Active();
+        const bool construct = cmd
+            && cmd->SnapContext() == KiwiEditorCommand::KSNAPCTX_CONSTRUCT;
+        _snprintf( text, sizeof( text ), "%s   %s, %s, %s",
+                   construct ? "snap free (Ctrl)" : "snap off - hold Ctrl",
+                   bx, by, bz );
+    }
     else
         _snprintf( text, sizeof( text ), "%s   %s, %s, %s",
                    KiwiSnap_TypeName( r.type ), bx, by, bz );
@@ -2087,8 +2385,10 @@ void KiwiSnap_DrawLabel( const snap_result_t &r, float imgMinX, float imgMinY,
     if ( x < imgMinX ) x = imgMinX;
     if ( y < imgMinY ) y = imgMinY;
 
-    // Same rank→colour mapping as the world marker, so the label and the glyph
-    // always agree about how strong a snap this is.
+    // KIWI-UX (CLEANUP, A-6): the LABEL is the only per-type colour in the layer —
+    // the world marker has been one colour (KSNAP_COL_MARK) for every type since
+    // shakeout E.  The grouping is by SOURCE, not by snap rank: brush point, brush
+    // line, brush area, construction, grid.
     ImU32 tint = IM_COL32( 220, 220, 235, 255 );                       // grid / off
     if ( r.type == SNAP_VERTEX || r.type == SNAP_EDGE_MID
       || r.type == SNAP_FACE_CENTER )                                  // shakeout F

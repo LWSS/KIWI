@@ -19,7 +19,7 @@
 //
 // NO HWND/MFC anywhere in this file: the only binds are KeyValueSelect_Apply (declared in
 // radiant_ui_actions.h) and Win_GetEntityKeyValueFields, both UI-independent and both
-// non-static — the latter extern'd exactly as select.cpp:2614 does, since win_ent.cpp's
+// non-static — the latter extern'd exactly as select.cpp:2636 does, since win_ent.cpp's
 // entwnd_* handles are TU-static and reachable only through that accessor.
 #include "stdafx.h"
 #include "qe3.h"

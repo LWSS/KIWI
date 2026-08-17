@@ -6522,6 +6522,18 @@ static const float kAngleArrowDefault[4] = { 0.5f, 0.5f, 0.5f, 1.0f };
 // thread it through this single-threaded-editor global so DrawAngles keeps the IDB shape).
 selbrush_t *g_drawAnglesBrush = nullptr;
 
+// ── KIWI-UX (ROUND AV, ITEMS 1+2): draw_meth2 — the xmodel MESH technique ────────────
+// The binary's DrawBrush (0x47afc0) takes TWO techniques: draw_meth1 (geometry / prefab
+// contents / the placeholder bbox) and draw_meth2 (the xmodel MESH — SkinModelInst at
+// 0x479735 reads draw_meth2 for BOTH its techType and its `draw_meth2 != 29 ? 0 : color`
+// per-vertex colour arm).  This port collapsed them into one `technique` parameter, so
+// every caller forced the mesh to whatever the geometry wanted.  That is what made
+// View->Entities-as... dead: the show state could not reach the mesh.
+// Published the way g_drawAnglesBrush publishes DrawAngles' ECX argument.  -1 means
+// "draw_meth2 == draw_meth1", which is what every caller except the camera's two entity
+// passes wants (the 2D views and the selected-white-outline pass genuinely do want 29).
+int g_drawBrushMeshTech = -1;
+
 void DrawAngles( int drawType, const orientation_t *orient, GfxColor *col )
 {
     // `b` is the selbrush_t whose owner entity supplies the angles.  The binary passes it
@@ -7267,9 +7279,16 @@ void DrawBrush( selbrush_t *b, const orientation_t *orient, int viewType,
         extern int  Editor_InstanceAndSkinModel( selbrush_t *b, const orientation_t *orient,
                                                  int meshTech, GfxColor *col, int drawFlags ); // camwnd.cpp
         const bool prefabClass = ( eclass->classtype & 0x10 /* CLASS_PREFAB */ ) != 0;
+        // ── KIWI-UX (ROUND AV, ITEMS 1+2) ────────────────────────────────────────────
+        // The MESH takes draw_meth2, not draw_meth1.  g_drawBrushMeshTech (see its
+        // definition above) carries the camera's View->Entities-as choice; -1 = "same as
+        // draw_meth1", which keeps the 2D views and the selected-white-outline pass at
+        // their own 29 exactly as before.
+        extern int g_drawBrushMeshTech;
+        const int meshTech = ( g_drawBrushMeshTech >= 0 ) ? g_drawBrushMeshTech : technique;
         if ( ( prefabClass || Editor_ModelsEnabled() )
              && !( b->def->unk01 & 0xFF )               // LOBYTE = modelFailed (0x47b102)
-             && Editor_InstanceAndSkinModel( b, orient, technique, col, drawFlags ) )
+             && Editor_InstanceAndSkinModel( b, orient, meshTech, col, drawFlags ) )
         {
             // DrawModels 0x47974c: prefab CONTENTS.  spawnflags != 0 → drawFlags |= 2
             // (the MaterialDef_15_Drawflag_Multiply skip bit), per 0x479785.
@@ -7287,8 +7306,14 @@ void DrawBrush( selbrush_t *b, const orientation_t *orient, int viewType,
                                           width, contentFlags, layerPrefix );
             }
             // DrawModels' decoration tail (origin box / ScriptGroup quad) — default-off.
+            // KIWI-UX (ROUND AV, ITEM 1): ...EXCEPT under View->Entities-as->"Skinned and
+            // Boxed" (m_nEntityShowState & 0x1000).  The BOX half of that mode IS this
+            // tail: DrawOriginBox's third arm (:6739) is the only code in the build gated
+            // on that bit, and a model that drew RETURNS here before the placeholder bbox,
+            // so with the decoration layer off the "and Boxed" half was inert.  The binary
+            // reaches DrawOriginBox unconditionally from DrawModels (0x4796f0).
             extern bool Radiant_DecorEnabled();   // camwnd.cpp
-            if ( Radiant_DecorEnabled() )
+            if ( Radiant_DecorEnabled() || ( g_PrefsDlg->m_nEntityShowState & 0x1000 ) != 0 )
                 DrawModels_Decorations( b, orient, width, col );
             return;                              // model/prefab drawn — no bbox (0x47b151)
         }

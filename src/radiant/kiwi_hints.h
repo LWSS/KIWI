@@ -36,9 +36,18 @@
 // the palette's own live binding — because the palette IS how it is reached.
 //
 // ── DRAWN WITH ImDrawList ONLY ──────────────────────────────────────────────
-// Same rule as the chips and the view-cube: no ImGui items inside the camera
-// image (the End() cursor-extent assert class fixed in eead8b7).  The panel is
-// not interactive, so it does not claim the image's hover either.
+// KIWI-UX (CLEANUP, C-37): THE RULE, STATED CORRECTLY.  It is NOT "no ImGui items
+// inside the camera image" — the selection-mode chips are five real ImGui::Buttons
+// inside it, and they are the cited precedent.  The actual invariant is narrower:
+//   * no trailing SetCursorScreenPos with no item after it, and
+//   * no item that changes the window's CONTENT EXTENT after the image.
+// Either one trips ImGui::End's ErrorCheckUsingSetCursorPosToExtendParentBoundaries
+// (the assert class fixed in eead8b7) or feeds a scrollbar loop.  The canonical
+// statement, with the full reasoning, is the "NO cursor restore here" block in
+// kiwi_viewport.cpp's DrawChips.
+//
+// THIS panel is ImDrawList-only anyway, which satisfies the invariant trivially,
+// and it is not interactive, so it does not claim the image's hover either.
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Draw, from KiwiVP_DrawCameraOverlay.  Emits nothing when the toggle is off or

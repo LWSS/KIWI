@@ -27,6 +27,7 @@
 #include "kiwi_snap.h"
 #include "kiwi_units.h"
 #include "kiwi_validity.h"
+#include "kiwi_vec.h"     // KIWI-UX (CLEANUP, A-15): the one spelling of Dot3/Sub3/...
 
 #include <imgui/imgui.h>
 #include <math.h>
@@ -38,22 +39,24 @@
 extern int          Sys_Printf( const char *fmt, ... );                       // win_qe3.cpp:112
 extern int          g_nUpdateBits;                                            // 0x25D5A74 (mainfrm.cpp)
 
-extern face_t      *Face_Alloc( brush_t *b, face_t *f );                      // brush.cpp:291  0x471500
-extern unsigned int Brush_RemoveFace( brush_t *b, unsigned int faceIndex );   // brush.cpp:332  0x471640
-extern brush_t     *Brush_Clone( brush_t *def );                              // brush.cpp:712  0x475D20
-extern void         Brush_Free_R( brush_t *def );                             // brush.cpp:689  0x475AF0
-extern selbrush_t  *Brush_AddToList( brush_t *def, entity_s *owner );         // brush.cpp:656  0x475980
-extern void         Brush_AddToList2( selbrush_t *b );                        // brush.cpp:910  0x4765A0
+extern face_t      *Face_Alloc( brush_t *b, face_t *f );                      // brush.cpp:302  0x471500
+extern unsigned int Brush_RemoveFace( brush_t *b, unsigned int faceIndex );   // brush.cpp:343  0x471640
+extern brush_t     *Brush_Clone( brush_t *def );                              // brush.cpp:723  0x475D20
+extern void         Brush_Free_R( brush_t *def );                             // brush.cpp:700  0x475AF0
+extern selbrush_t  *Brush_AddToList( brush_t *def, entity_s *owner );         // brush.cpp:667  0x475980
+extern void         Brush_AddToList2( selbrush_t *b );                        // brush.cpp:921  0x4765A0
 extern void         Entity_LinkBrush( brush_t *b, entity_s *world_ent );      // entity.cpp:432 0x484FC0
-extern void         Select_Deselect( int a1 );                                // select.cpp:1428 0x48E800 (int, NOT char — mangling)
-extern void         Select_Delete();                                          // select.cpp:1504 0x48E9A0
+extern void         Select_Deselect( int a1 );                                // select.cpp:1445 0x48E800 (int, NOT char — mangling)
+extern void         Select_Delete();                                          // select.cpp:1521 0x48E9A0
 
-// undo.cpp — the bracket head KiwiCmd_UndoBegin does not cover for face/edge
-// selections (kiwi_transform.h rule 2 documents the same requirement).
-extern void         Undo_AddBrush( entity_brush_s *pBrushInst );              // undo.cpp:494  0x45E680
-extern void         Undo_AddEntity( int a1 );                                 // undo.cpp:601  0x45E8B0
+extern void         Radiant_ExecCommand( unsigned int cmdId );                // mainfrm.cpp:4083
 
-extern void         Radiant_ExecCommand( unsigned int cmdId );                // mainfrm.cpp:3955
+// KIWI-UX (CLEANUP, B-28): FILE SCOPE, not block scope.  Round AI shipped a link
+// error from a block-scope extern that MSVC mangled with its enclosing namespace;
+// kiwi_uv.cpp carries the full account.  This is the declaration that used to sit
+// inside KiwiBevel_RegisterCommands.
+extern bool         Radiant_RegisterCommand( const char *name, byte vk, byte mods,
+                                             int commandId );                 // mainfrm.cpp:1340
 
 namespace
 {
@@ -63,33 +66,7 @@ namespace
     const float KBV_COL_OK[3]    = { 0.55f, 0.85f, 1.00f };
     const float KBV_COL_BAD[3]   = { 1.00f, 0.30f, 0.25f };
 
-    // ── small vector helpers (same spellings as kiwi_transform.cpp) ─────────
-    inline float Dot3( const float *a, const float *b )
-    {
-        return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-    }
-    inline void Copy3( const float *a, float *o ) { o[0]=a[0]; o[1]=a[1]; o[2]=a[2]; }
-    inline void Sub3( const float *a, const float *b, float *o )
-    { o[0]=a[0]-b[0]; o[1]=a[1]-b[1]; o[2]=a[2]-b[2]; }
-    inline void Add3( const float *a, const float *b, float *o )
-    { o[0]=a[0]+b[0]; o[1]=a[1]+b[1]; o[2]=a[2]+b[2]; }
-    inline void Mad3( const float *a, const float *d, float s, float *o )
-    { o[0]=a[0]+d[0]*s; o[1]=a[1]+d[1]*s; o[2]=a[2]+d[2]*s; }
-    inline void Cross3( const float *a, const float *b, float *o )
-    {
-        o[0] = a[1]*b[2] - a[2]*b[1];
-        o[1] = a[2]*b[0] - a[0]*b[2];
-        o[2] = a[0]*b[1] - a[1]*b[0];
-    }
-    inline float Len3( const float *a ) { return sqrtf( Dot3( a, a ) ); }
-    bool Norm3( float *v )
-    {
-        const float l = Len3( v );
-        if ( !( l > 1.0e-6f ) )
-            return false;
-        v[0] /= l; v[1] /= l; v[2] /= l;
-        return true;
-    }
+    // ── local predicate over the shared vec helpers (kiwi_vec.h) ────────────
     inline bool PointNear( const float *a, const float *b, float tol )
     {
         float d[3];
@@ -129,21 +106,9 @@ namespace
         return true;
     }
 
-    // undo: cover a brush the bracket's Undo_AddBrushList did not.  Mirrors
-    // Undo_AddBrushList's per-element body (undo.cpp:531) — a fixed-size entity's
-    // brush needs the ENTITY saved too, and the entity goes in FIRST (undo.cpp
-    // warns when brushes precede entities).  Identical to kiwi_transform.cpp's
-    // UndoCoverBrush; duplicated rather than exported because it is four lines and
-    // an export would put a private undo detail in a public header.
-    void UndoCoverBrush( selbrush_t *node )
-    {
-        if ( !node || !node->def )
-            return;
-        entity_s *owner = node->def->owner;
-        if ( owner && owner->eclass && owner->eclass->fixedsize )
-            Undo_AddEntity( (int)(intptr_t)owner );
-        Undo_AddBrush( (entity_brush_s *)node->def );
-    }
+    // KIWI-UX (CLEANUP, UndoCoverBrush): the local copy is gone — this was one
+    // of five verbatim bodies.  It is KiwiCmd_UndoCoverBrush (kiwi_command.h)
+    // now, beside the bracket whose blind spot it exists to fill.
 
     // ── shakeout E: the numeric FIELD table (kiwi_command.h NumericFields) ──
     // STATIC storage — the numeric layer copies the struct but never the label.
@@ -200,7 +165,12 @@ namespace
             return Pick_RayFromImagePos( x, y, out );
         }
 
-        bool SnapActive() const { return m_snap.valid && m_snap.type != SNAP_NONE; }
+        // KIWI-UX (CLEANUP, SnapActive / B-24): KiwiBevelBase::SnapActive had NO
+        // caller — the bevel command that used it was folded into
+        // kiwi_patchfillet.cpp in round T (kiwi_bevel.h) and the one surviving
+        // subclass, KiwiInsetCommand, never asked.  Deleted rather than re-pointed
+        // at KiwiSnap_Active; `m_snap` stays, because MouseMove writes it and a
+        // future subclass would want it.
 
         void OpenUndo( const char *literalOp )
         {
@@ -251,31 +221,10 @@ namespace
         char          m_hud[192] = { 0 };
     };
 
-    // ═══════════════════════════════════════════════════════════════════════════
-    //  §25 BEVEL EDGE — DELETED IN ROUND T, AND WHERE IT WENT
-    // ═══════════════════════════════════════════════════════════════════════════
-    // USER DIRECTIVE, verbatim: "The default bevel mode should be chamfer, make
-    // it a Curve(Fillet) if (D) is pressed during the operation of the tool."
-    //
-    // KiwiBevelCommand used to live here: a modal drag that appended ONE chamfer
-    // face per selected edge, live, baseline-disciplined, §19-gated.  The ROUND Q
-    // patch fillet (kiwi_patchfillet.cpp) is THAT COMMAND PLUS A PATCH — it runs
-    // the same KiwiBevel_MakeFrame / KiwiBevel_AppendFace pair on the same
-    // schedule and only differs at commit.  Two commands cannot be "one tool with
-    // a mode key", so the chamfer half was folded INTO the fillet command rather
-    // than a third copy of the drag being written to host the toggle.
-    //
-    // WHAT THAT MEANS FOR ANYONE LOOKING FOR IT:
-    //   * KIWI_CMD_BEVEL_EDGE still exists, still registers, still appears in the
-    //     palette and the command list, and still means CHAMFER — it is simply
-    //     answered by kiwi_patchfillet.cpp's command, which STARTS in chamfer
-    //     mode.  A user who never presses D sees exactly the old behaviour.
-    //   * D toggles chamfer <-> patch fillet mid-gesture, with the depth carried
-    //     across by the r = d·k/(1-k²) relation so the solid does not jump.
-    //   * the drag mapping, the §19 gate, the baseline discipline and the undo
-    //     bracket are the fillet command's, unchanged — they were already the
-    //     same code.
-    // Nothing was lost and nothing was duplicated; see kiwi_patchfillet.h.
+    // KIWI-UX (CLEANUP, B-31): KiwiBevelCommand used to live here; round T folded
+    // it into kiwi_patchfillet.cpp's command.  kiwi_bevel.h states the merge and
+    // what it means for anyone looking for the old command.
+
     // ═════════════════════════════════════════════════════════════════════════
     //  §25 INSET FACE — the CLONE compound (kiwi_bevel.h says why).
     // ═════════════════════════════════════════════════════════════════════════
@@ -546,6 +495,26 @@ namespace
             m_invalid = false;
             m_why     = 0;
 
+            // ── KIWI-UX (CLEANUP, B-40): THE DEPTH GATE IS PRE-LOOP ──────────
+            // It was inside the per-unit loop, re-testing a value that cannot
+            // change inside it and short-circuiting KiwiValid_CheckBrush on EVERY
+            // unit rather than on none.  Hoisted to one explicit early branch,
+            // mirroring kiwi_patchfillet.cpp's shape.  TWO deliberate consequences:
+            //   * an empty m_units at depth zero is now INVALID, where before the
+            //     flag stayed false because the loop body never ran;
+            //   * when the depth IS legal, KiwiValid_CheckBrush runs for units
+            //     after the first — it used not to, because the first unit's
+            //     `m_invalid = true` was set by this same test.  That is the
+            //     intended reading: §19 gates every unit, not just unit 0.
+            // The planes below are still written at every depth, so the live
+            // preview is unchanged; only the verdict is.
+            const bool tooShallow = ( m_dist < KBEV_MIN_DIST );
+            if ( tooShallow )
+            {
+                m_invalid = true;
+                m_why     = "depth too small";
+            }
+
             for ( size_t i = 0; i < m_units.size(); ++i )
             {
                 unit_t &u = m_units[i];
@@ -565,12 +534,7 @@ namespace
 
                 KiwiValid_Rebuild( u.clone );
                 const char *why = 0;
-                if ( m_dist < KBEV_MIN_DIST )
-                {
-                    m_invalid = true;
-                    m_why     = "depth too small";
-                }
-                else if ( !KiwiValid_CheckBrush( u.clone, &why ) )
+                if ( !tooShallow && !KiwiValid_CheckBrush( u.clone, &why ) )
                 {
                     m_invalid = true;
                     m_why     = why;
@@ -579,9 +543,9 @@ namespace
             g_nUpdateBits |= 1;
         }
 
-        // The kiwi_extrude.h creation sequence, in its order.  Deselect FIRST so
-        // the bracket clones nothing, then open it, then create — everything the
-        // bracket cloned must still be on selected_brushes at commit.
+        // The kiwi_extrude.h creation sequence, in its order.
+        // KIWI-UX (CLEANUP, B-20): deselect before landing — the rule and its
+        // reasons are stated once, at kiwi_patchfillet.cpp's LandPatches.
         void Land()
         {
             Select_Deselect( 1 );
@@ -606,6 +570,15 @@ namespace
                 u.clone = 0;                     // ownership handed to the map
                 ++landed;
             }
+            // KIWI-UX (CLEANUP, B-17): the typed selection is resynced, exactly as
+            // every other landing path in this layer does (kiwi_bevel.cpp:814-815 in
+            // the OTHER verb in this same file, kiwi_loft.cpp:1902-1903 / :2246-2247,
+            // kiwi_patchfillet.cpp:1582-1583, kiwi_matchface.cpp:540-541).  Without it
+            // the typed side kept the pre-gesture SEL_FACE items — faces of the source
+            // brushes — while selected_brushes held the new clones.
+            Sel_Clear( KiwiSel() );
+            Sel_RebuildFromLegacy();
+
             Sys_Printf( "Inset: %i brush(es) created (the originals are unchanged).\n", landed );
             g_nUpdateBits = -1;
         }
@@ -637,7 +610,9 @@ bool KiwiBevel_CanBevel()
 {
     const selection_t &sel = KiwiSel();
     for ( size_t i = 0; i < sel.items.size(); ++i )
-        if ( sel.items[i].kind == SEL_EDGE && sel.items[i].brush && !sel.items[i].brush->patch )
+        // KIWI-UX (CLEANUP, B-5): liveness first, same shape as
+        // KiwiPatchFillet_CanFillet — kiwi_bevel.h:267 already promises "live".
+        if ( sel.items[i].kind == SEL_EDGE && Sel_BrushLive( sel.items[i].brush ) && !sel.items[i].brush->patch )
             return true;
     return false;
 }
@@ -646,7 +621,8 @@ bool KiwiBevel_CanInset()
 {
     const selection_t &sel = KiwiSel();
     for ( size_t i = 0; i < sel.items.size(); ++i )
-        if ( sel.items[i].kind == SEL_FACE && sel.items[i].brush && !sel.items[i].brush->patch )
+        // KIWI-UX (CLEANUP, B-5): liveness first, as above.
+        if ( sel.items[i].kind == SEL_FACE && Sel_BrushLive( sel.items[i].brush ) && !sel.items[i].brush->patch )
             return true;
     return false;
 }
@@ -753,7 +729,7 @@ bool KiwiBevel_RemoveFaceRestoreEdge()
     // ONE record for the face removal AND any paired patches (a fillet is a
     // chamfer plus a patch; selecting both and pressing DEL undoes as one thing).
     KiwiCmd_UndoBegin( "remove face" );     // string LITERAL — stored by pointer
-    UndoCoverBrush( r.node );               // the face's brush is NOT on the legacy list
+    KiwiCmd_UndoCoverBrush( r.node );               // the face's brush is NOT on the legacy list
 
     Brush_RemoveFace( def, (unsigned int)r.faceIndex );
     KiwiValid_Rebuild( def );
@@ -822,7 +798,6 @@ bool KiwiBevel_RemoveFaceRestoreEdge()
 // ─── registration + lookup ───────────────────────────────────────────────────
 void KiwiBevel_RegisterCommands()
 {
-    extern bool Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId );
     // Unbound: the CLASSIC-profile bindings, and the modern profile deliberately
     // claims NO new key this phase.  KEY CANDIDATES, logged rather than taken:
     //   Bevel Edge  — Ctrl+B (classic 0x42 is free with mods 4; B alone is
@@ -838,12 +813,8 @@ void KiwiBevel_RegisterCommands()
 
 KiwiEditorCommand *KiwiBevel_CommandForId( int commandId )
 {
-    // ── KIWI-UX (ROUND T): BEVEL EDGE IS ANSWERED BY THE FILLET COMMAND ─────
-    // The two were the same drag with different commits, so they are now one
-    // command with a mode key (see the headstone where KiwiBevelCommand was).
-    // The ID survives so the palette row, the command list, the keymap table and
-    // Repeat Last all keep working and still mean CHAMFER — the merged command
-    // starts in chamfer mode and only becomes a fillet if D is pressed.
+    // KIWI-UX (CLEANUP, B-31): BEVEL EDGE is answered by the fillet command —
+    // the round-T merge, stated in kiwi_bevel.h.
     if ( commandId == KIWI_CMD_BEVEL_EDGE )
         return KiwiPatchFillet_CommandForId( KIWI_CMD_FILLET_EDGE );
     if ( commandId == KIWI_CMD_INSET_FACE )
@@ -857,10 +828,8 @@ void KiwiBevel_MenuItems()
     const bool canBevel = KiwiBevel_CanBevel();
     const bool canInset = KiwiBevel_CanInset();
 
-    // ROUND T: ONE button for ONE tool.  The old "Bevel Edge" / "Fillet Edge
-    // (patch)" pair were the same drag with different commits and are now the
-    // same command with a mode key, so a second button would be a second way to
-    // start the same thing in the same mode.
+    // KIWI-UX (CLEANUP, B-31): ONE button for ONE tool — the round-T merge,
+    // stated in kiwi_bevel.h.
     ImGui::BeginDisabled( !canBevel );
     if ( ImGui::Button( "Bevel / Fillet Edge" ) )
         Radiant_ExecCommand( (unsigned int)KIWI_CMD_BEVEL_EDGE );

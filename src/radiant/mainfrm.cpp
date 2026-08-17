@@ -487,6 +487,13 @@ void MainFrm_SetStatusText( int pane, const char *text )
 // â”€â”€ Map open (Fileâ†’Open + the cmdline startup share this) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 static char s_currentMapPath[MAX_PATH] = "";
 
+// KIWI-UX (ROUND BF): read-only view of the authoritative saved map path.
+// The Build & Run dialog (kiwi_launch.cpp) compiles THIS path -- it is what File>Open
+// (:628) and Save-As (:4447) write and what the Save funnel below consumes -- and it must
+// not use `currentmap` (map.cpp:44), which prefab editing stomps (map.cpp:1797-1813).
+// Returns "" for an untitled map, the same emptiness test Radiant_FileSave makes below.
+const char *Radiant_CurrentMapPath() { return s_currentMapPath; }
+
 // (Radiant_CenterXYOnMap deleted with U-RIP: dead since HEAD per U-GLOBALS, and the
 // last writer of the deleted CXYWnd class members.)
 
@@ -816,7 +823,7 @@ void Radiant_ApplyStartupTextureScale()
     //
     // The switch above ends in Texture_ResetPosition (via Radiant_CheckTextureScale
     // -> mainfrm.cpp:2914), whose documented tail is
-    // TexWnd_ApplyMaterialAtIndex( TexWnd_HitTest( 9, 9 ) ) (texwnd.cpp:2028-2033):
+    // TexWnd_ApplyMaterialAtIndex( TexWnd_HitTest( 9, 9 ) ) (texwnd.cpp:2066-2071):
     // it makes THE FIRST VISIBLE THUMBNAIL the current brush texture.  The browser
     // lists alphabetically, so on this asset set the editor booted with the current
     // material template set to `aa_default` — techset "tools", blendOp Add,
@@ -1069,7 +1076,9 @@ void Radiant_RoutineProcessing()
 // matches the binary.  g_radiantCommands is a MUTABLE copy of g_radiantCommandsDefault (the
 // binary's table, verbatim): LoadCommandMap (0x421230) overrides individual entries BY NAME
 // from radiant.ini [Commands]; ShowMenuItemKeyBindings (0x420460) annotates the menu items.
-struct RadiantCommand { const char *name; byte vk; byte mods; int commandId; };
+// KIWI-UX (CLEANUP, C-6): struct RadiantCommand moved to radiant_frame.h (included
+// at the top of this file) so the seven translation units that walk this raw array
+// share ONE layout instead of seven copies that merely agreed.
 static const RadiantCommand g_radiantCommandsDefault[] = {
     { "ToggleOutlineDraw", 0x4A, 0, 33103 },
     { "ToggleTintDraw", 0x4A, 1, 33172 },
@@ -1270,29 +1279,11 @@ static const RadiantCommand g_radiantCommandsDefault[] = {
 // read this one table.  The binary's rows keep their exact contents AND their exact order
 // (first-match lookup depends on it); extension rows only ever APPEND, and every walker below
 // is bounded by g_radiantCommandCount instead of ARRAYSIZE.
-// KIWI-UX (Phase 4): raised 24 -> 48.  The block is now 38 rows deep (10 core +
-// 3 transforms + 12 construction/plane + 1 extrude + Phase 5's 2 bevel/inset,
-// 2 arrays and 4 selection-expansion helpers + Phase 6's 3 texture modals and
-// 1 texture pick) and Radiant_RegisterCommand
-// FAILS SILENTLY once it is full, so a too-small block would quietly drop the
-// last commands registered — they would vanish from the palette, the hotkey
-// table and the command-list panel with no diagnostic.
-// KIWI-UX (shakeout B): raised 48 -> 64.  The block is 44 rows deep now (the 38
-// above + the 5 §9 window toggles + the Delete-Selection alias row), and 4 spare
-// rows is too thin a margin for a table whose overflow mode is silence.
-// KIWI-UX (shakeout F): raised 64 -> 80.  Shakeout C/D/F added the four extra
-// curve tools, the four solids, the add menu, the two View toggles, the four
-// selection conversions and now the two construction-selection verbs
-// (KiwiConstructJoin / KiwiConstructDelete), taking the block to 61 rows.  Three
-// spare is not a margin at all, and the failure mode is still silence: a command
-// that does not fit vanishes from the palette, the hotkey table AND the
-// command-list panel with no diagnostic anywhere.
-// KIWI-UX (ROUND N): raised 80 -> 112.  Rounds G through N took the block to 77
-// rows (the shakeout-G/H/J/K/L/M verbs, plus round N's two grid alias rows for
-// PageUp / PageDown), leaving THREE spare — exactly the margin the note above
-// already called "not a margin at all", for a table whose overflow mode is
-// silence.  112 is a round 32 rows of headroom and costs 32 * sizeof(RadiantCommand)
-// = 512 bytes of BSS in each of the two arrays.
+// KIWI-UX (CLEANUP, C-2): the block has been raised four times (24 -> 48 -> 64 -> 80 -> 112).
+// Each raise left a paragraph behind, and every one of them stated a row count that the next
+// round made stale.  The count is no longer tracked in prose: Radiant_RegisterCommand prints a
+// loud line when the block is full (CLEANUP, C-1), so the remaining margin reports itself.
+// 112 rows costs 112 * sizeof( RadiantCommand ) of BSS in each of the two arrays.
 #define RADIANT_COMMANDS_KIWI_EXTRA 112
 static RadiantCommand g_radiantCommands[ ARRAYSIZE( g_radiantCommandsDefault )
                                        + RADIANT_COMMANDS_KIWI_EXTRA ];
@@ -1338,6 +1329,11 @@ int Radiant_GetCommandTableMutable( RadiantCommand **out )
     return g_radiantCommandCount;
 }
 
+// KIWI-UX (CLEANUP, C-1): the overflow arms below report.  Declared here because the
+// file's own extern sits further down (mainfrm.cpp:2054, and again at :2618) -- an
+// identical redeclaration, which is what those two already are to each other.
+extern int Sys_Printf( const char *fmt, ... );        // win_qe3.cpp (0x499E90)
+
 // KIWI-UX: append one row to the extension block.  `name` must have static lifetime (the
 // table stores the pointer, exactly as the compiled-in rows do).  Returns false when the
 // block is full or the id is already present.
@@ -1350,7 +1346,18 @@ bool Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandI
         if ( g_radiantCommands[i].commandId == commandId )
             return false;
     if ( g_radiantCommandCount >= (int)ARRAYSIZE( g_radiantCommands ) )
+    {
+        // KIWI-UX (CLEANUP, C-1): NOT SILENT.  No caller in the tree checks this
+        // return value, and the comment stack above says the failure mode is silence
+        // three separate times -- so a full block dropped the last commands
+        // registered and nothing said so.  The duplicate-id arm above stays quiet:
+        // that one is a legitimate refusal used by design.
+        Sys_Printf(
+            "Radiant_RegisterCommand: extension block FULL (%i rows) -- \"%s\" "
+            "(id %i) was DROPPED\n",
+            (int)ARRAYSIZE( g_radiantCommands ), name, commandId );
         return false;
+    }
 
     const int extra = g_radiantCommandCount - (int)ARRAYSIZE( g_radiantCommandsDefault );
     RadiantCommand c;
@@ -1376,7 +1383,15 @@ bool Radiant_RegisterCommandAlias( const char *name, byte vk, byte mods, int com
     if ( !name )
         return false;
     if ( g_radiantCommandCount >= (int)ARRAYSIZE( g_radiantCommands ) )
+    {
+        // KIWI-UX (CLEANUP, C-1): the alias registrar's overflow is just as silent,
+        // and just as unchecked, as the one above.
+        Sys_Printf(
+            "Radiant_RegisterCommandAlias: extension block FULL (%i rows) -- \"%s\" "
+            "(id %i) was DROPPED\n",
+            (int)ARRAYSIZE( g_radiantCommands ), name, commandId );
         return false;
+    }
 
     const int extra = g_radiantCommandCount - (int)ARRAYSIZE( g_radiantCommandsDefault );
     RadiantCommand c;
@@ -2114,7 +2129,7 @@ static void Cmd_OnViewZoomout()
 //   CWnd::FromHandle(..) == m_pXWnd  -> the HWND compare that test always reduced to
 //   GetClientRect + ClientToScreen   -> ::GetClientRect + ::MapWindowPoints( h, 0, .., 2 )
 //        (CWnd::ClientToScreen(RECT*) maps both corners â€” that is this call)
-//   m_pTexWnd->Scroll( zDelta )      -> TexWnd_Scroll (texwnd.cpp:2217 is its forwarder)
+//   m_pTexWnd->Scroll( zDelta )      -> TexWnd_Scroll (texwnd.cpp:2255 is its forwarder)
 // `focusOrHover` is the window the WM_MOUSEWHEEL was delivered to.  The binary's hover test
 // consults ::WindowFromPoint ONLY (the wheel is dispatched by CURSOR position, not focus), so
 // it is deliberately not read here; it stays in the signature because the raw pump's call
@@ -5082,6 +5097,9 @@ extern void ShowLastHidden();               // select.cpp 0x493EA0
 // KIWI-UX (ROUND AG, ITEM 7) — kiwi_visibility.cpp, declared kiwi_visibility.h:
 //   void KiwiVis_UndoPush( const char *label );
 extern void KiwiVis_UndoPush( const char *label );
+// KIWI-UX (CLEANUP, C-41): the far side of that push -- the record and its journal
+// ticket are only created when the core below actually moved a hide bit.
+extern void KiwiVis_UndoCommit();                    // kiwi_visibility.h
 // KIWI-UX (ROUND AG, ITEM 7): one KiwiVis_UndoPush per handler, at the head,
 // BEFORE the ported core writes a bit.  USER DIRECTIVE: "making something hidden
 // should be an un-doable action."  The cores themselves are untouched — the whole
@@ -5092,22 +5110,26 @@ static void Cmd_OnHideSelected()           // cmd 32923 (0x42B6A0)
 {
     KiwiVis_UndoPush( "hide selected" );    // KIWI-UX
     Select_Hide();
+    KiwiVis_UndoCommit();                   // KIWI-UX (CLEANUP, C-41)
     Select_Deselect( 1 );
 }
 static void Cmd_OnHideUnselected()         // cmd 32934 (0x42B6C0)
 {
     KiwiVis_UndoPush( "isolate" );          // KIWI-UX
     Select_HideUnselected();
+    KiwiVis_UndoCommit();                   // KIWI-UX (CLEANUP, C-41)
 }
 static void Cmd_OnShowHidden()             // cmd 32924 (0x42B6D0)
 {
     KiwiVis_UndoPush( "unhide all" );       // KIWI-UX
     ShowHidden();
+    KiwiVis_UndoCommit();                   // KIWI-UX (CLEANUP, C-41)
 }
 static void Cmd_OnShowLastHidden()         // cmd 33246 (0x42B6E0)
 {
     KiwiVis_UndoPush( "show last hidden" ); // KIWI-UX
     ShowLastHidden();
+    KiwiVis_UndoCommit();                   // KIWI-UX (CLEANUP, C-41)
 }
 
 // â”€â”€ Selection draw toggles: crosshair / no-outline / no-tint.  IDB 0x42B690/0x425630/50.
@@ -5398,7 +5420,13 @@ bool Radiant_DispatchCommandDirect( unsigned int cmdId )
     // free tail of the MODAL block instead).  Without this widening those four ids would fall
     // past every arm of this switch and be silently dropped.  The non-collision proof above
     // was already stated for the whole of 34000..34999, so the added hundred needs no new one.
-    if ( cmdId >= 34000 && cmdId <= 34199 )
+    // KIWI-UX (CLEANUP, C-4): the gate asks kiwi_command.h's own predicate now.
+    // It used to spell the range as the bare literals 34000 / 34199, so the range
+    // lived in three places and a KIWI_CMD_LAST bump would not have reached here.
+    // File-scope extern would be tidier, but the sibling KiwiCmd_Dispatch below is
+    // declared at block scope for this same switch and this matches it.
+    extern bool KiwiCmd_IsKiwiId( int id );               // kiwi_command.cpp
+    if ( KiwiCmd_IsKiwiId( (int)cmdId ) )
     {
         extern bool KiwiCmd_Dispatch( unsigned int cmdId );   // kiwi_command.cpp
         return KiwiCmd_Dispatch( cmdId );

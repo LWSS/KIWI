@@ -11,6 +11,8 @@
 #include <imgui/imgui.h>
 
 #include "kiwi_palette.h"
+#include "radiant_frame.h"          // KIWI-UX (CLEANUP, C-6): struct RadiantCommand + the table API
+#include "kiwi_cmdui.h"             // KIWI-UX (CLEANUP, C-72): the palette/add-menu shared bits
 #include "kiwi_command.h"
 
 #include <ctype.h>
@@ -18,20 +20,24 @@
 #include <string.h>
 #include <vector>
 
-// MUST MATCH mainfrm.cpp's definition verbatim — same reasoning as
-// imgui_panel_commands.cpp:46 (this is the parameter type of the two extern
-// formatters below, so field offsets and mangled names both have to agree).
-//   `byte` is universal/q_shared.h's typedef (stdafx.h), the same one mainfrm sees.
-struct RadiantCommand { const char *name; byte vk; byte mods; int commandId; };
+// KIWI-UX (CLEANUP, C-6): the struct AND these declarations now live in
+// radiant_frame.h, included above.  This file used to carry a verbatim copy of
+// `struct RadiantCommand` plus its own externs, as six other TUs did.
 
 // ── mainfrm.cpp bindings (verified against their definitions) ───────────────
-extern int         Radiant_GetCommandTable( const RadiantCommand **out );
-extern const char *CommandList_KeyName( const RadiantCommand &c, char keybuf[8] );
-extern void        CommandList_Mods( const RadiantCommand &c, char mods[64] );
 extern void        Radiant_ExecCommand( unsigned int cmdId );
 
 namespace
 {
+    // ── KIWI-UX (CLEANUP, C-73): window layout, named file-locally ──────────────
+    // Same convention kiwi_cmdoptions.cpp's KOPT_WIDTH / KOPT_INSET / KOPT_TOPFRAC
+    // follows.  The palette is a fixed-size centred sheet (NoResize), so these ARE
+    // the window, not a starting size.
+    const float KPAL_WIDTH   = 620.0f;
+    const float KPAL_HEIGHT  = 420.0f;
+    const float KPAL_TOPFRAC = 0.16f;   // down from the viewport's work top
+    const int   KPAL_PAGE    = 10;      // rows PageUp/PageDown moves
+
     bool  s_open        = false;
     bool  s_focusNext   = false;
     bool  s_scrollToSel = false;
@@ -49,37 +55,19 @@ namespace
 
     std::vector<row_t> s_rows;
 
-    // Subsequence fuzzy match, case-insensitive: every character of `pat` must
-    // appear in `str` in order.  Deliberately the simplest thing that works — the
-    // rows are ~200, and a ranking model is not what makes a palette feel good at
-    // this size.
-    bool FuzzyMatch( const char *str, const char *pat )
-    {
-        if ( !pat || !*pat )
-            return true;
-        const char *s = str;
-        for ( const char *p = pat; *p; ++p )
-        {
-            if ( *p == ' ' )
-                continue;                    // spaces are separators, not literals
-            const int pc = tolower( (unsigned char)*p );
-            for ( ;; )
-            {
-                if ( !*s )
-                    return false;
-                const int sc = tolower( (unsigned char)*s );
-                ++s;
-                if ( sc == pc )
-                    break;
-            }
-        }
-        return true;
-    }
+    // KIWI-UX (CLEANUP, C-72): the fuzzy match, the shortcut formatter and the
+    // right-aligned hint moved to kiwi_cmdui.h — the add menu carried a
+    // character-identical copy of all three, and the two lists have to accept the
+    // same queries and render the same rows or the difference is a bug nobody can
+    // report.  This body IS the one that moved.
 
-    // Rebuild the row list from the LIVE table + the §3 metadata.  Cheap enough to
-    // do every frame the palette is open (≈200 rows, no allocation churn after the
-    // first frame) — and doing it every frame is what makes a keymap-profile switch
-    // or a canExecute() change show up instantly.
+    // Rebuild the row list from the LIVE table + the §3 metadata.  Runs once per
+    // frame the palette is VISIBLE (KIWI-UX CLEANUP, C-62 moved the call below
+    // ImGui::Begin's early-out — it used to run even on a frame the window was
+    // clipped away).  It stays per-frame rather than being cached on the filter
+    // string, because `enabled` (KiwiCmd_CanExecute) and the shortcut text are
+    // LIVE: caching the rows would freeze a keymap-profile switch or a selection
+    // change out of the list, which is the behaviour this file was written for.
     void Rebuild()
     {
         s_rows.clear();
@@ -90,19 +78,41 @@ namespace
             return;
         s_rows.reserve( (size_t)count );
 
+        // KIWI-UX (CLEANUP, C-62): the duplicate-id test was `for ( j = 0; j < i; )`
+        // — O(n²) over ~200 rows, ~20 000 compares every frame.  Same answer, one
+        // pass: a bit per command id, set for EVERY row as it is passed (including
+        // the ones skipped below, which is what the old inner loop compared
+        // against), so "have I already emitted this id" is one test.  Ids fit
+        // LOWORD (the Run() note below), and anything outside that range falls
+        // back to the linear scan rather than indexing out of the map.
+        const int KPAL_ID_CAP = 65536;
+        static unsigned char seen[KPAL_ID_CAP / 8];
+        memset( seen, 0, sizeof( seen ) );
+
         char haystack[256];
         for ( int i = 0; i < count; ++i )
         {
             const RadiantCommand &c = table[i];
-            if ( !c.name || !c.commandId )
+            const int  id      = c.commandId;
+            const bool inRange = ( id > 0 && id < KPAL_ID_CAP );
+            bool dupe = false;
+            if ( inRange )
+            {
+                dupe = ( seen[id >> 3] & ( 1u << ( id & 7 ) ) ) != 0;
+                seen[id >> 3] |= (unsigned char)( 1u << ( id & 7 ) );
+            }
+            else if ( id != 0 )
+            {
+                for ( int j = 0; j < i; ++j )
+                    if ( table[j].commandId == id ) { dupe = true; break; }
+            }
+
+            if ( !c.name || !id )
                 continue;
 
             // The table legitimately holds one id twice ("Patch TAB" 33089, two bindings —
             // faithful to the binary).  The command-list panel shows both because it mirrors
             // a listbox; a PALETTE lists commands, so the first binding wins.
-            bool dupe = false;
-            for ( int j = 0; j < i; ++j )
-                if ( table[j].commandId == c.commandId ) { dupe = true; break; }
             if ( dupe )
                 continue;
 
@@ -113,23 +123,13 @@ namespace
             r.category  = info ? info->category    : "Classic";
             r.enabled   = KiwiCmd_CanExecute( c.commandId );
 
-            // Shortcut text from the LIVE binding, through mainfrm's own formatters
-            // (CommandList_Mods leaves a trailing " + ", hence the plain concat).
-            r.shortcut[0] = '\0';
-            if ( c.vk )
-            {
-                char mods[64];
-                char keybuf[8];
-                CommandList_Mods( c, mods );
-                const char *key = CommandList_KeyName( c, keybuf );
-                _snprintf( r.shortcut, sizeof( r.shortcut ), "%s%s", mods, key ? key : "" );
-                r.shortcut[sizeof( r.shortcut ) - 1] = '\0';
-            }
+            // Shortcut text from the LIVE binding (KIWI-UX CLEANUP, C-72).
+            KiwiCmdUI_ShortcutText( c, r.shortcut, (int)sizeof( r.shortcut ) );
 
             _snprintf( haystack, sizeof( haystack ), "%s %s %s",
                        r.display, r.category, c.name );
             haystack[sizeof( haystack ) - 1] = '\0';
-            if ( !FuzzyMatch( haystack, s_filter ) )
+            if ( !KiwiCmdUI_Fuzzy( haystack, s_filter ) )
                 continue;
 
             s_rows.push_back( r );
@@ -214,12 +214,10 @@ void KiwiPalette_Draw()
         s_scrollToSel = true;
     }
 
-    Rebuild();
-
     const ImGuiViewport *vp = ImGui::GetMainViewport();
-    const ImVec2 size( 620.0f, 420.0f );
+    const ImVec2 size( KPAL_WIDTH, KPAL_HEIGHT );
     ImGui::SetNextWindowPos( ImVec2( vp->WorkPos.x + ( vp->WorkSize.x - size.x ) * 0.5f,
-                                     vp->WorkPos.y + vp->WorkSize.y * 0.16f ),
+                                     vp->WorkPos.y + vp->WorkSize.y * KPAL_TOPFRAC ),
                              ImGuiCond_Always );
     ImGui::SetNextWindowSize( size, ImGuiCond_Always );
     if ( s_focusNext )
@@ -233,6 +231,18 @@ void KiwiPalette_Draw()
         ImGui::End();
         return;
     }
+
+    // KIWI-UX (CLEANUP, C-62): BELOW the early-out.  This used to run above
+    // SetNextWindowPos, so a frame on which Begin returned false still paid for a
+    // full rebuild of ~200 rows.  Nothing between the old call site and here has a
+    // side effect the rebuild depends on: SetNextWindowPos / SetNextWindowSize /
+    // SetNextWindowFocus are pure ImGui state, and the ONE latch — the filter-change
+    // detector above, which zeroes s_selected and arms s_scrollToSel — deliberately
+    // stays where it was, ahead of the early-out.  It cannot mis-fire there: s_filter
+    // is only written by the InputText BELOW, inside this same Begin body, so it
+    // cannot change on a frame the window is not drawn.  The rebuild still reads
+    // LAST frame's filter, exactly as it did from the old position.
+    Rebuild();
 
     // ── the filter field ────────────────────────────────────────────────────
     // Auto-focused, so io.WantTextInput is true and the pump's WantsKeyboard gate
@@ -259,9 +269,9 @@ void KiwiPalette_Draw()
         if ( ImGui::IsKeyPressed( ImGuiKey_UpArrow, true ) )
             s_selected = ( s_selected + rowCount - 1 ) % rowCount;
         if ( ImGui::IsKeyPressed( ImGuiKey_PageDown, true ) )
-            s_selected = ( s_selected + 10 < rowCount ) ? s_selected + 10 : rowCount - 1;
+            s_selected = ( s_selected + KPAL_PAGE < rowCount ) ? s_selected + KPAL_PAGE : rowCount - 1;
         if ( ImGui::IsKeyPressed( ImGuiKey_PageUp, true ) )
-            s_selected = ( s_selected - 10 > 0 ) ? s_selected - 10 : 0;
+            s_selected = ( s_selected - KPAL_PAGE > 0 ) ? s_selected - KPAL_PAGE : 0;
         if ( s_selected != before )
             s_scrollToSel = true;            // keyboard moved it — follow it (see below)
     }
@@ -309,15 +319,8 @@ void KiwiPalette_Draw()
             if ( !r.enabled && ImGui::IsItemHovered() )
                 ImGui::SetTooltip( "Unavailable with the current selection." );
 
-            // Shortcut, RIGHT-ALIGNED on the same line (§15).
-            if ( r.shortcut[0] )
-            {
-                float x = rowW - ImGui::CalcTextSize( r.shortcut ).x - 8.0f;
-                if ( x < 0.0f )
-                    x = 0.0f;
-                ImGui::SameLine( x );
-                ImGui::TextDisabled( "%s", r.shortcut );
-            }
+            // Shortcut, RIGHT-ALIGNED on the same line (§15; CLEANUP, C-72).
+            KiwiCmdUI_RightAlignedHint( r.shortcut, rowW );
 
             if ( !r.enabled )
                 ImGui::PopStyleColor();

@@ -73,7 +73,9 @@
 #include "kiwi_grid.h"               // ROUND AJ, ITEM 5 — the grid-snap master switch
 #include "kiwi_numeric.h"            // ROUND AQ, ITEM 4 — KiwiNum_EvalDisplay (the one parser)
 #include "kiwi_units.h"              // ROUND N — KiwiUnits_GridSpacingInches
+#include "kiwi_section.h"            // ROUND BM, ITEM 1b — the Section Analysis toggle
 #include "radiant_registry.h"
+#include "kiwi_vec.h"     // KIWI-UX (CLEANUP, A-15): the one spelling of Dot3/Sub3/...
 
 #include <math.h>
 #include <stdio.h>                   // _snprintf — the grid readout
@@ -90,7 +92,45 @@ namespace
     const float KVC_MARGIN = 10.0f;    // inset from the image's top-right corner
     const float KVC_HALF   = 29.0f;    // cube half-size in pixels (see THE PROJECTION)
     const float KVC_CORNER = 8.0f;     // corner-click grab radius, pixels
-    const float KVC_DEG    = 57.29577951308232f;   // 180 / pi
+    // ═══════════════════════════════════════════════════════════════════════
+    //  KIWI-UX (ROUND BM, ITEMS 1b + 2) — THE STRIP ABOVE THE CUBE
+    // ═══════════════════════════════════════════════════════════════════════
+    // Two new widgets, and the user placed both by name: *"a button above the
+    // cube"* (section analysis) and *"a zoom threshold bar at the top above the
+    // cube"*.  So the whole cluster moves DOWN by a fixed strip and the strip holds,
+    // top to bottom: the zoom bar, its "1px = ..." readout, and the section button.
+    //
+    // The strip height is a CONSTANT rather than a measured sum, because every other
+    // y in this file is an offset chain off imgMinY + KVC_MARGIN and a measured
+    // height would make the cube's position depend on the font.  The sub-offsets
+    // below add up to it exactly; the label is drawn at a fixed y inside its slot.
+    const float KVC_ZOOM_W    = 90.0f;   // the directive's "~90x8" bar
+    const float KVC_ZOOM_H    = 8.0f;
+    const float KVC_ZOOM_GAP  = 2.0f;    // bar -> label
+    const float KVC_ZOOM_TEXT = 14.0f;   // the label's slot (one default-font line)
+    const float KVC_SEC_W     = 104.0f;  // == KVC_BOX, so the button lines up with
+    const float KVC_SEC_H     = 20.0f;   //    the cube's backdrop disc under it
+    const float KVC_SEC_GAP   = 4.0f;    // label -> button
+    const float KVC_STRIP_GAP = 6.0f;    // button -> cube
+    const float KVC_TOP_STRIP = KVC_ZOOM_H + KVC_ZOOM_GAP + KVC_ZOOM_TEXT
+                              + KVC_SEC_GAP + KVC_SEC_H + KVC_STRIP_GAP;
+
+    // A viewport too short to hold the strip AND the cube simply does not get the
+    // strip — the same rule the grid pill's own third-row guard applies, rather than
+    // pushing the cube off the bottom of the image.
+    float KVC_StripH( float imgH )
+    {
+        return ( imgH >= KVC_BOX * 1.5f + KVC_TOP_STRIP ) ? KVC_TOP_STRIP : 0.0f;
+    }
+    // THE one expression for "where the cube cluster starts".  Every y in this file
+    // that used to read `imgMinY + KVC_MARGIN` reads this instead, so the cube, the
+    // projection pill and the grid pill cannot drift apart from the strip.
+    float KVC_ClusterTop( float imgMinY, float imgH )
+    {
+        return imgMinY + KVC_MARGIN + KVC_StripH( imgH );
+    }
+    // KIWI-UX (CLEANUP, C-39): the local 180/pi constant is gone — RAD2DEG
+    // (q_shared.h, reachable through stdafx.h) is the tree's one spelling.
 
     int s_show = -1;                   // -1 = not read from the profile yet
 
@@ -189,6 +229,18 @@ namespace
     const float KVC_PROJ_H   = 20.0f;
     const float KVC_PROJ_GAP = 6.0f;    // below the disc
 
+    // ── KIWI-UX (ROUND BN, ITEM 1): the PERSPECTIVE GRID button ─────────────
+    // USER DIRECTIVE, verbatim: *"When in 'P' camera mode, show another button next
+    // to it that enables the ortho Grid while in 'P' mode."*  "Next to it" is taken
+    // literally: same row as the P/O pill, immediately to its LEFT, which is the
+    // slot the snap checkbox already occupies relative to the grid pill one row
+    // down — so the cluster keeps one layout rule instead of gaining a second.
+    // It exists ONLY in perspective (in ortho the lattice is unconditional and a
+    // control for it would be a lie), and it rides the same left-edge clamp the
+    // snap box does: a viewport too narrow simply does not get it.
+    const float KVC_PGRID_W   = 20.0f;
+    const float KVC_PGRID_GAP = 5.0f;
+
     // ── ROUND N: the GRID SPACING readout + stepper ─────────────────────────
     // USER DIRECTIVE, verbatim: "the gridsize needs to be changeable.  Put that in
     // the top right somewhere and maybe put it on pageup/pagedown if they aren't
@@ -231,10 +283,6 @@ namespace
     // line), which is what makes a fixed-size NoResize window honest.
     const float KVC_GRID_EDIT_W = 250.0f;
 
-    inline float Dot3( const float *a, const float *b )
-    {
-        return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-    }
 
     inline ImU32 Grey( float v, int alpha )
     {
@@ -340,7 +388,7 @@ namespace
         float z = d[2];
         if ( z >  1.0f ) z =  1.0f;
         if ( z < -1.0f ) z = -1.0f;
-        float pitch = asinf( z ) * KVC_DEG;
+        float pitch = (float)RAD2DEG( asinf( z ) );
         if ( pitch >  89.0f ) pitch =  89.0f;   // the camera's own clamp
         if ( pitch < -89.0f ) pitch = -89.0f;
         // A CORNER click is 35.264 degrees by construction (asin(1/sqrt3)); a FACE
@@ -363,7 +411,7 @@ namespace
         // derive — snap what the camera ALREADY has to the lattice (point 1 above).
         const bool degenerate = ( fabsf( d[0] ) < 1.0e-4f && fabsf( d[1] ) < 1.0e-4f );
         const float raw = degenerate ? c->angles[1]
-                                     : atan2f( d[1], d[0] ) * KVC_DEG;
+                                     : (float)RAD2DEG( atan2f( d[1], d[0] ) );
         KiwiCam_LookAlong( pitch, SnapAngle( raw, quantum ) );
     }
 
@@ -392,13 +440,189 @@ namespace
     // the top view, and far too tight for any orbited view to match by accident.
     const float KVC_VIEW_ALIGNED = 0.99863f;
 
+    // ═══════════════════════════════════════════════════════════════════════
+    //  KIWI-UX (ROUND BM, ITEM 2) — THE ZOOM METER
+    // ═══════════════════════════════════════════════════════════════════════
+    // USER DIRECTIVE, verbatim: *"Add a zoom threshold bar at the top above the
+    // cube, this basically shows how far zoomed in/out you are in accordance with
+    // the camera and how bad the mouse sensitivity will be."*
+    //
+    // THE FILL is KiwiCam_ZoomMeter's fraction: the LOG position of the camera's
+    // zoom driver inside the range the wheel can actually reach, which makes the bar
+    // linear in wheel notches (kiwi_camera.h states why log is the only honest
+    // scale for a multiplicative control).  Empty = as zoomed in as the camera goes;
+    // full = the ceiling, where the wheel stops.
+    //
+    // THE COLOUR RAMP answers the second half of the directive.  Sensitivity is
+    // WORLD UNITS PER PIXEL, which grows with the zoom-out, so the bar ramps
+    // green -> amber -> red toward the far end.  The ramp is over the SAME fraction
+    // as the fill, so the colour and the length can never disagree.
+    //
+    // AND THE NUMBER IS PRINTED, because a colour is a hint and a number is an
+    // answer: "1px = 2ft 3in" through KiwiUnits_Format, the editor's one formatter
+    // (kiwi_units.h), so it reads in whatever units everything else does.
+    //
+    // DISPLAY ONLY in v1.  Click-to-set-zoom was considered and left out: the bar is
+    // 8 px tall and sits directly under the mouse's path to the section button, so a
+    // stray click would teleport the zoom — a readout that cannot be misfired is
+    // worth more here than one more way to zoom.  It still reports its hover so the
+    // image does not start a marquee under it.
+    bool DrawZoomBar( float imgMinX, float imgMinY, float imgW, float imgH )
+    {
+        if ( KVC_StripH( imgH ) <= 0.0f )
+            return false;                    // no room: the strip is not drawn at all
+
+        float frac = 0.0f, wpp = 0.0f;
+        if ( !KiwiCam_ZoomMeter( &frac, &wpp ) )
+            return false;
+
+        const float x1 = imgMinX + imgW - KVC_MARGIN;
+        const float x0 = x1 - KVC_ZOOM_W;
+        const float y0 = imgMinY + KVC_MARGIN;
+        const float y1 = y0 + KVC_ZOOM_H;
+
+        const ImVec2 mouse = ImGui::GetIO().MousePos;
+        const bool   hot   = ImGui::IsWindowHovered( ImGuiHoveredFlags_ChildWindows )
+                          && mouse.x >= x0 && mouse.x <= x1
+                          && mouse.y >= y0 && mouse.y <= y1 + KVC_ZOOM_GAP + KVC_ZOOM_TEXT;
+
+        ImDrawList *dl = ImGui::GetWindowDrawList();
+        dl->AddRectFilled( ImVec2( x0, y0 ), ImVec2( x1, y1 ),
+                           IM_COL32( 18, 18, 22, 175 ), 2.0f );
+
+        // green (0) -> amber (0.5) -> red (1), two linear legs so the middle is a
+        // real amber rather than the muddy olive a single green->red lerp gives.
+        float r, g, b;
+        if ( frac < 0.5f )
+        {
+            const float t = frac * 2.0f;
+            r = 0.36f + ( 0.98f - 0.36f ) * t;
+            g = 0.80f + ( 0.75f - 0.80f ) * t;
+            b = 0.36f + ( 0.22f - 0.36f ) * t;
+        }
+        else
+        {
+            const float t = ( frac - 0.5f ) * 2.0f;
+            r = 0.98f + ( 0.95f - 0.98f ) * t;
+            g = 0.75f + ( 0.24f - 0.75f ) * t;
+            b = 0.22f + ( 0.20f - 0.22f ) * t;
+        }
+        const ImU32 col = IM_COL32( (int)( r * 255.0f ), (int)( g * 255.0f ),
+                                    (int)( b * 255.0f ), 235 );
+
+        // A minimum sliver so "fully zoomed in" still reads as a bar and not as an
+        // empty box the user has to decode.
+        float fillW = ( x1 - x0 ) * frac;
+        if ( fillW < 2.0f ) fillW = 2.0f;
+        dl->AddRectFilled( ImVec2( x0, y0 ), ImVec2( x0 + fillW, y1 ), col, 2.0f );
+        dl->AddRect( ImVec2( x0, y0 ), ImVec2( x1, y1 ),
+                     IM_COL32( 80, 84, 96, 150 ), 2.0f, 0, 1.0f );
+
+        char num[64];
+        char label[96];
+        KiwiUnits_Format( num, sizeof( num ), wpp );
+        _snprintf( label, sizeof( label ), "1px = %s", num );
+        label[sizeof( label ) - 1] = 0;
+        const ImVec2 ts = ImGui::CalcTextSize( label );
+        dl->AddText( ImVec2( x1 - ts.x, y1 + KVC_ZOOM_GAP ),
+                     hot ? IM_COL32( 255, 226, 110, 255 ) : IM_COL32( 190, 196, 208, 225 ),
+                     label );
+        return hot;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  KIWI-UX (ROUND BM, ITEM 1b) — THE SECTION ANALYSIS BUTTON
+    // ═══════════════════════════════════════════════════════════════════════
+    // The directive puts it here by name: *"It's a button above the cube"*.  It is a
+    // three-state readout, because the feature has three states and a button that
+    // only said on/off would leave the middle one — "click something to place the
+    // plane" — invisible:
+    //     SECTION        off
+    //     PICK A PLANE   armed, waiting for the click (amber)
+    //     SECTION ON     live (amber fill, so it reads as engaged at a glance)
+    // Same rules as every other widget in this file: ImDrawList only, own hover, own
+    // click, hover reported back.  The click routes through KiwiSection_Toggle, the
+    // SAME entry point the palette row dispatches to, so the two can never diverge.
+    bool DrawSectionButton( float imgMinX, float imgMinY, float imgW, float imgH )
+    {
+        if ( KVC_StripH( imgH ) <= 0.0f )
+            return false;
+
+        const float x1 = imgMinX + imgW - KVC_MARGIN;
+        const float x0 = x1 - KVC_SEC_W;
+        const float y0 = imgMinY + KVC_MARGIN + KVC_ZOOM_H + KVC_ZOOM_GAP
+                       + KVC_ZOOM_TEXT + KVC_SEC_GAP;
+        const float y1 = y0 + KVC_SEC_H;
+
+        const ImVec2 mouse = ImGui::GetIO().MousePos;
+        const bool   hot   = ImGui::IsWindowHovered( ImGuiHoveredFlags_ChildWindows )
+                          && mouse.x >= x0 && mouse.x <= x1
+                          && mouse.y >= y0 && mouse.y <= y1;
+
+        const bool on   = KiwiSection_Active();
+        const bool pick = KiwiSection_Picking();
+
+        ImDrawList *dl = ImGui::GetWindowDrawList();
+        ImU32 fill = hot ? IM_COL32( 62, 66, 78, 225 ) : IM_COL32( 18, 18, 22, 175 );
+        if ( on )
+            fill = hot ? IM_COL32( 150, 110, 30, 235 ) : IM_COL32( 118, 86, 22, 215 );
+        else if ( pick )
+            fill = hot ? IM_COL32( 96, 84, 44, 235 ) : IM_COL32( 74, 64, 34, 205 );
+        dl->AddRectFilled( ImVec2( x0, y0 ), ImVec2( x1, y1 ), fill, 4.0f );
+        dl->AddRect( ImVec2( x0, y0 ), ImVec2( x1, y1 ),
+                     ( on || pick ) ? IM_COL32( 240, 200, 90, 200 )
+                                    : IM_COL32( 80, 84, 96, 150 ), 4.0f, 0, 1.0f );
+
+        // ── KIWI-UX (ROUND BP, ITEM 1/3): ARMED IS LOUD, AND IT CARRIES THE LEVEL ──
+        // The round-BP autopsy's first correction: "the SECTION chip is visible" was
+        // taken as evidence the section was armed, and it never was evidence — this
+        // button is drawn UNCONDITIONALLY and read "SECTION" while OFF.  An armed
+        // section that could not be told apart from a disarmed one at a glance is
+        // exactly how an invisible cut clamped the user's picks for a whole session.
+        // So the label now STATES the state and the number: "SECTION  Z 61 ft" while
+        // live, and "SECTION (no cut)" when it is armed but the frame refused the
+        // fold (a level ortho view, or the camera below the cut) — which is also the
+        // state in which the pick clamp is off, so the two readouts cannot disagree.
+        char label[64];
+        if ( on )
+        {
+            char zb[32];
+            KiwiUnits_Format( zb, sizeof( zb ), KiwiSection_Level() );
+            _snprintf( label, sizeof( label ),
+                       KiwiSection_Cutting() ? "SECTION  Z %s" : "SECTION (no cut)", zb );
+        }
+        else
+        {
+            _snprintf( label, sizeof( label ), "%s", pick ? "CLICK A HEIGHT" : "SECTION" );
+        }
+        label[sizeof( label ) - 1] = 0;
+        const ImVec2 ts = ImGui::CalcTextSize( label );
+        dl->AddText( ImVec2( ( x0 + x1 ) * 0.5f - ts.x * 0.5f,
+                             ( y0 + y1 ) * 0.5f - ts.y * 0.5f ),
+                     ( hot || on || pick ) ? IM_COL32( 255, 234, 150, 255 )
+                                           : IM_COL32( 210, 214, 224, 235 ),
+                     label );
+
+        if ( hot )
+            ImGui::SetTooltip( "Section analysis - cut the 3D view at a Z LEVEL.\n"
+                               "Click, then click anything: everything above that\n"
+                               "point's height disappears.  Drag the lollipop to\n"
+                               "slide the level.  Click again to clear." );
+
+        if ( hot && ImGui::IsMouseClicked( ImGuiMouseButton_Left ) )
+            KiwiSection_Toggle();
+        return hot;
+    }
+
     // ROUND M: the P/O pill.  Returns true when the cursor is over it (the caller
     // ORs that into the image's hover claim, exactly as it does for the cube).
-    bool DrawProjButton( float imgMinX, float imgMinY, float imgW )
+    bool DrawProjButton( float imgMinX, float imgMinY, float imgW, float imgH )
     {
         const float x1 = imgMinX + imgW - KVC_MARGIN;
         const float x0 = x1 - KVC_PROJ_W;
-        const float y0 = imgMinY + KVC_MARGIN + KVC_BOX + KVC_PROJ_GAP;
+        // KIWI-UX (ROUND BM): off KVC_ClusterTop, not off imgMinY + KVC_MARGIN — the
+        // whole cluster sits below the new strip now.
+        const float y0 = KVC_ClusterTop( imgMinY, imgH ) + KVC_BOX + KVC_PROJ_GAP;
         const float y1 = y0 + KVC_PROJ_H;
 
         const ImVec2 mouse = ImGui::GetIO().MousePos;
@@ -432,7 +656,57 @@ namespace
 
         if ( hot && ImGui::IsMouseClicked( ImGuiMouseButton_Left ) )
             KiwiCam_SetOrtho( !ortho );
-        return hot;
+
+        // ── KIWI-UX (ROUND BN, ITEM 1): the perspective-grid box, left of the pill ──
+        // Drawn from INSIDE this function rather than as a fifth top-level widget
+        // because its position is defined relative to the pill and its visibility is
+        // defined by the pill's own state — two reasons to keep the two together, and
+        // the same call shape DrawGridButton uses for the snap box it owns.
+        bool pgHot = false;
+        if ( !ortho )
+        {
+            const float gx1 = x0 - KVC_PGRID_GAP;
+            const float gx0 = gx1 - KVC_PGRID_W;
+            if ( gx0 >= imgMinX + KVC_MARGIN )
+            {
+                const bool on   = KiwiGrid_PerspGrid();
+                const bool over = ImGui::IsWindowHovered( ImGuiHoveredFlags_ChildWindows )
+                               && mouse.x >= gx0 && mouse.x <= gx1
+                               && mouse.y >= y0  && mouse.y <= y1;
+                pgHot = over;
+
+                dl->AddRectFilled( ImVec2( gx0, y0 ), ImVec2( gx1, y1 ),
+                                   over ? IM_COL32( 62, 66, 78, 225 )
+                                        : IM_COL32( 18, 18, 22, 175 ), 4.0f );
+                dl->AddRect( ImVec2( gx0, y0 ), ImVec2( gx1, y1 ),
+                             IM_COL32( 80, 84, 96, 150 ), 4.0f, 0, 1.0f );
+
+                // A 2x2 LATTICE glyph rather than a letter: the box is 20 px and the
+                // thing it switches on is literally this shape.  Lit when on, dim
+                // when off, which is the same on/off language the snap box uses.
+                const ImU32 ink = on ? IM_COL32( 255, 226, 110, 255 )
+                                     : IM_COL32( 120, 126, 138, 220 );
+                const float gx  = ( gx0 + gx1 ) * 0.5f;
+                const float gy  = ( y0  + y1  ) * 0.5f;
+                const float r   = 5.0f;
+                for ( int i = -1; i <= 1; ++i )
+                {
+                    const float f = (float)i * r;
+                    dl->AddLine( ImVec2( gx - r, gy + f ), ImVec2( gx + r, gy + f ), ink, 1.0f );
+                    dl->AddLine( ImVec2( gx + f, gy - r ), ImVec2( gx + f, gy + r ), ink, 1.0f );
+                }
+
+                if ( over && ImGui::IsMouseClicked( ImGuiMouseButton_Left ) )
+                    KiwiGrid_SetPerspGrid( !on );
+                if ( over )
+                    ImGui::SetTooltip( "Ground grid in PERSPECTIVE (off by default).\n"
+                                       "Spacing is chosen at the ORBIT PIVOT's depth and the\n"
+                                       "lattice stops where its own cells stop resolving, so\n"
+                                       "near the horizon you get the major lines and then\n"
+                                       "nothing.  Ortho is unaffected." );
+            }
+        }
+        return hot || pgHot;
     }
 
     // ROUND N: the grid readout + stepper.  Returns true when the cursor is over it
@@ -442,8 +716,8 @@ namespace
     {
         const float x1 = imgMinX + imgW - KVC_MARGIN;
         const float x0 = x1 - KVC_GRID_W;
-        const float y0 = imgMinY + KVC_MARGIN + KVC_BOX + KVC_PROJ_GAP
-                       + KVC_PROJ_H + KVC_PROJ_GAP;
+        const float y0 = KVC_ClusterTop( imgMinY, imgH ) + KVC_BOX + KVC_PROJ_GAP
+                       + KVC_PROJ_H + KVC_PROJ_GAP;   // KIWI-UX (ROUND BM): the strip
         const float y1 = y0 + KVC_GRID_H;
         // The cluster is three widgets tall now and the caller's own size guard
         // (KVC_BOX * 1.5) only covers two.  A viewport too short for the third
@@ -946,8 +1220,16 @@ void KiwiViewCube_SwipeAxisView( int dir )
         s_vertStep = 0;
     }
 
+    // KIWI-UX (CLEANUP, C-39): `target` is provably 0..5, so this guard cannot fire
+    // — but it INDEXES A TABLE, so it stays rather than becoming an out-of-bounds
+    // read the day a caller regresses.  What changes is that it stops being silent:
+    // a bail here would have meant "the view snap did nothing, for no stated
+    // reason".  Same early-out, now audible.
     if ( target < 0 || target > 5 )
-        return;                                  // unreachable; never index off the table
+    {
+        Sys_Printf( "View cube: refused an out-of-range view index (%i).\n", target );
+        return;
+    }
 
     LookAlongDirection( c, KVC_VIEWS[target].vpn );
     Sys_Printf( "View: %s.\n", KVC_VIEWS[target].name );
@@ -963,7 +1245,13 @@ bool KiwiViewCube_Draw( float imgMinX, float imgMinY, float imgW, float imgH )
     // toggle — hiding the orientation cube is a decluttering choice and must not
     // take the projection control away with it.  Its hover is OR-ed into the
     // return so the caller's claim covers both widgets.
-    const bool projHot = DrawProjButton( imgMinX, imgMinY, imgW );
+    // KIWI-UX (ROUND BM, ITEMS 2 + 1b): the strip above the cube — the zoom meter
+    // and the Section Analysis button.  FIRST, on the same terms as the pills: both
+    // are drawn OUTSIDE KiwiViewCube_Show() because hiding the orientation cube is a
+    // decluttering choice and must not take a control away with it.
+    const bool zoomHot = DrawZoomBar( imgMinX, imgMinY, imgW, imgH );
+    const bool secHot  = DrawSectionButton( imgMinX, imgMinY, imgW, imgH );
+    const bool projHot = DrawProjButton( imgMinX, imgMinY, imgW, imgH );
     // ROUND N: the grid readout, on the same terms — the user asked for it "in the
     // top right somewhere", and hiding the orientation cube must not take a grid
     // control away with it either.
@@ -974,13 +1262,13 @@ bool KiwiViewCube_Draw( float imgMinX, float imgMinY, float imgW, float imgH )
     const bool gridEditHot = DrawGridEditPopup();
 
     if ( !KiwiViewCube_Show() )
-        return projHot || gridHot || gridEditHot;
+        return zoomHot || secHot || projHot || gridHot || gridEditHot;
 
     camera_s *c = Ed_Camera();
     CamWnd_BuildMatrix();                        // vpn/vright/vup for THIS frame's angles
 
     const float cx = imgMinX + imgW - KVC_MARGIN - KVC_BOX * 0.5f;
-    const float cy = imgMinY + KVC_MARGIN + KVC_BOX * 0.5f;
+    const float cy = KVC_ClusterTop( imgMinY, imgH ) + KVC_BOX * 0.5f;   // ROUND BM: the strip
 
     const ImVec2 mouse = ImGui::GetIO().MousePos;
     const bool   winHovered = ImGui::IsWindowHovered( ImGuiHoveredFlags_ChildWindows );
@@ -1204,5 +1492,5 @@ bool KiwiViewCube_Draw( float imgMinX, float imgMinY, float imgW, float imgH )
     // ROUND N: the two pills claim the image too — a click on either must never
     // also start a marquee behind them.  ROUND R adds the grid pill's type-in popup
     // on exactly the same terms.
-    return overWidget || projHot || gridHot || gridEditHot;
+    return overWidget || zoomHot || secHot || projHot || gridHot || gridEditHot;
 }

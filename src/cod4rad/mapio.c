@@ -290,7 +290,7 @@ void ProcessEntity(Entity_t *entity)
             }
             else
             {
-                Com_Printf("\nusing map radiosityScale %g\n\n", (double)g_radiosityScale); /* IW copy-paste bug: binary prints radiosityScale in contrastGain path */
+                Com_Printf("\nusing map contrastGain %g\n\n", (double)g_contrastGain);
             }
         }
     }
@@ -402,9 +402,9 @@ void ProcessEntity(Entity_t *entity)
         extern float DegammaColorChannel(float color);
         extern float g_ambientR, g_ambientG, g_ambientB;
         float *ambientOut[3] = { &g_ambientR, &g_ambientG, &g_ambientB };
-        float *diffuseOut[3] = { &g_backfaceLightR, &g_backfaceLightG, &g_backfaceLightB };
+        float *radiosityOut[3] = { &g_backfaceLightR, &g_backfaceLightG, &g_backfaceLightB };
         float *directOut[3] = { &g_sunColorR, &g_sunColorG, &g_sunColorB };
-        float *radiosityOut[3] = { &g_sunRadiosityR, &g_sunRadiosityG, &g_sunRadiosityB };
+        float *diffuseOut[3] = { &g_sunRadiosityR, &g_sunRadiosityG, &g_sunRadiosityB };
         float diffuseAmount;
         float directAmount;
         float radiosityAmount;
@@ -478,8 +478,12 @@ void ProcessEntity(Entity_t *entity)
             else
             {
                 float delta = DegammaColorChannel(radiosityTotal + ambientCh) - ambientDegamma;
-                *diffuseOut[ch] = delta * diffuseCh / radiosityTotal;
+                /* Native globals 0x11622E8C and 0x11622E98 are easy to
+                 * mislabel: E8C is the sun-radiosity component injected into
+                 * the bounce ping buffer, while E98 is the diffuse sky field
+                 * used by 0x406BA0/0x406A80. */
                 *radiosityOut[ch] = delta * radiosityCh / radiosityTotal;
+                *diffuseOut[ch] = delta * diffuseCh / radiosityTotal;
             }
         }
     }
@@ -678,7 +682,7 @@ void ProcessLightEntity(Entity_t *entity)
     if (!targetValue)
     {
         /* no target → point light */
-        AddPointLight(origin, radius, color, defName);
+        AddPointLight(0, origin, radius, color, defName);
         return;
     }
 
@@ -761,7 +765,8 @@ void ProcessLightEntity(Entity_t *entity)
             kv = kv->next;
         }
 
-        AddSpotLight(origin, radius, color, defName, dir, outerCos, innerCos, exponent);
+        AddSpotLight(0, origin, radius, color, defName, dir, outerCos, innerCos,
+                     exponent);
     }
 }
 /* strtof_wrap declared at top of file */

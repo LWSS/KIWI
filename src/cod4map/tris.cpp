@@ -3298,7 +3298,10 @@ int MergeTriGroups(TriRecord_t *triRecs, int triCount, int firstGroup, int secon
     { unsigned int bufSize = sizeof(TriRecord_t) * secondCount;
     void *temp = malloc(bufSize);
     memcpy(temp, &triRecs[groupB->firstTri], bufSize);
-    memcpy(&triRecs[firstEnd + secondCount], &triRecs[firstEnd], sizeof(TriRecord_t) * (groupB->firstTri - firstEnd));
+    /* The source and destination ranges overlap while rotating group B
+       beside group A.  Retail's CRT helper preserves the moved middle
+       range; C memcpy is undefined for this overlap. */
+    memmove(&triRecs[firstEnd + secondCount], &triRecs[firstEnd], sizeof(TriRecord_t) * (groupB->firstTri - firstEnd));
     memcpy(&triRecs[firstEnd], temp, bufSize);
     free(temp); }
 
@@ -3470,7 +3473,6 @@ static bool CanMergeVertexLayerData(const unsigned char *cmpLayer,
   if (cmpTri->layerCount <= 1)
     return true;
   Assert(cmpLayer && curLayer, s_assertDisable_EmitTriangleSoup);
-
   for (layerIndex = 1; layerIndex < cmpTri->layerCount; ++layerIndex)
   {
     const float *cmpUv = (const float *)(cmpLayer + 8 * (layerIndex - 1));
@@ -3482,13 +3484,28 @@ static bool CanMergeVertexLayerData(const unsigned char *cmpLayer,
 
   if (cmpTri != curTri)
   {
-    for (layerIndex = 0; layerIndex < cmpTri->layerCount; ++layerIndex)
+    /* Native 0x447ED0 walks the descriptor's compact normal-map index list
+       (+68, count at +67), not every live layer's material flags.  The list
+       is part of the generated layered-material identity, so it remains
+       stable when source props have been promoted/reordered. */
+    const LayeredMaterialDescriptor_t *descriptor =
+      (const LayeredMaterialDescriptor_t *)cmpTri->materialIdentity;
+    Assert(descriptor && descriptor->layerCount == cmpTri->layerCount,
+      s_assertDisable_EmitTriangleSoup);
+    for (layerIndex = 0; layerIndex < descriptor->normalMapLayerCount; ++layerIndex)
     {
-      const TriSurfProps_t *cmpProps = cmpTri->layerProps[layerIndex];
-      const TriSurfProps_t *curProps = curTri->layerProps[layerIndex];
-      if (HasNonIdentityNormalMap(cmpProps->si)
-          && (DotProduct210(cmpProps->texVecs, curProps->texVecs) <= 0.0
-              || DotProduct210(cmpProps->texVecs + 4, curProps->texVecs + 4) <= 0.0))
+      const int materialLayer = descriptor->normalMapLayerIndices[layerIndex];
+      const TriSurfProps_t *cmpProps = cmpTri->layerProps[materialLayer];
+      const TriSurfProps_t *curProps = curTri->layerProps[materialLayer];
+
+      Assert(materialLayer < cmpTri->layerCount && cmpProps && curProps,
+        s_assertDisable_EmitTriangleSoup);
+      if (DotProduct210(cmpProps->texVecs, curProps->texVecs) <= 0.0)
+      {
+        ++numUnmergeableTexVerts;
+        return false;
+      }
+      if (DotProduct210(cmpProps->texVecs + 4, curProps->texVecs + 4) <= 0.0)
       {
         ++numUnmergeableTexVerts;
         return false;
@@ -4137,7 +4154,7 @@ int MergeDuplicateVerts( BspDrawVert_t *verts, int numVerts, unsigned short *ind
               layerData + cur * TRIS_VERTEX_LAYER_SCRATCH_STRIDE,
               &triRecs[triMap[cmp]], &triRecs[triMap[cur]]))
         && CanMergeVerts(&verts[cmp], &verts[cur],
-                         &triRecs[triMap[cmp]], &triRecs[triMap[cur]], flags) )
+                          &triRecs[triMap[cmp]], &triRecs[triMap[cur]], flags) )
       {
         /* swap-remove: move last vertex into cur's slot */
         numVerts--;

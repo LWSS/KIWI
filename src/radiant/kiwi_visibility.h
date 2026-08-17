@@ -113,16 +113,23 @@
 //
 // ONE RECORD PER GESTURE.  The push happens once, at the top of each of H,
 // Shift+H, Alt+H, Shift+Ctrl+H, Ctrl+H and each outliner eye click — never per
-// brush.  KiwiVis_UndoPush is a no-op when the resulting snapshot would be
-// identical to the last one pushed, so a hide that changes nothing does not cost
-// the user a Ctrl+Z.
+// brush.  A gesture that changes NO hide bit leaves no record at all, so pressing
+// H with nothing left to hide does not cost the user a Ctrl+Z — see
+// KIWI-UX (CLEANUP, C-41) in kiwi_visibility.cpp for why that needs the post-state
+// and therefore a two-call pair.
 // ─────────────────────────────────────────────────────────────────────────────
 
 // ── ROUND AG, ITEM 7: the hide/unhide undo domain (kiwi_undo.h KUNDO_VISIBILITY)
-// Snapshot the CURRENT hidden state and mint one journal ticket, then mutate.
-// `label` must be a literal / static — the journal keeps the pointer, exactly as
-// undo.cpp's own records do.  Call it BEFORE the first write of a gesture.
+// CAPTURE the current hidden state.  `label` must be a literal / static — the
+// journal keeps the pointer, exactly as undo.cpp's own records do.  Call it BEFORE
+// the first write of a gesture, and KiwiVis_UndoCommit() AFTER the last one:
+// KIWI-UX (CLEANUP, C-41) — the record and its journal ticket are only created if
+// the gesture actually moved a hide bit, which cannot be known at push time.
 void KiwiVis_UndoPush( const char *label );
+// The far side of the pair.  Idempotent; a no-op with nothing captured.  A caller
+// that forgets it does not lose its record (the next Push / stack read flushes the
+// capture) — it only loses the "changed nothing ⇒ no step" suppression.
+void KiwiVis_UndoCommit();
 // The journal's forwards.  Mirror KiwiCon_UndoPop / RedoPop / ClearRedo.
 bool KiwiVis_UndoPop();
 bool KiwiVis_RedoPop();
@@ -132,9 +139,9 @@ void KiwiVis_UndoReset();
 // Apply `hidden` to ONE brush instance, writing the same two fields the ported
 // family writes.  Exported so the outliner's eye stops carrying its own copy.
 void KiwiVis_SetHidden( selbrush_t *b, bool hidden );
-
-// ROUND AG, ITEM 7: named by KiwiVis_SetHidden below.
-struct selbrush_t;
+// KIWI-UX (CLEANUP, C-55): the `struct selbrush_t;` that sat HERE — after its own
+// first use, and saying it was named "below" — is gone.  qe3.h:31 already forward-
+// declares it, and every TU that includes this header includes qe3.h first.
 
 // The KIWI-owned fourth member of the family (Ctrl+H).
 void KiwiVis_InvertHidden();
@@ -149,9 +156,6 @@ bool KiwiVis_HasHidden();
 // Invert is meaningful whenever there is ANY brush at all — with nothing hidden it
 // hides everything, which is a legitimate (and instantly reversible) act.
 bool KiwiVis_CanInvert();
-
-// How many brushes are currently hidden — the HUD / console readout.
-int  KiwiVis_HiddenCount();
 
 // ═════════════════════════════════════════════════════════════════════════════
 //  ROUND AO — HIDDEN SOLIDS SURVIVE SAVE / LOAD

@@ -170,3 +170,55 @@ void KiwiUv_DrawReadout( float imgMinX, float imgMinY, float imgW, float imgH );
 
 // The "Textures" block in the shell's panel window.
 void KiwiUv_MenuItems();
+
+// ── KIWI-UX (ROUND BD): THE PER-FACE TEXDEF ACCESSOR, EXPORTED ───────────────
+// Round BD's UV editor window (kiwi_uveditor.h) reads and writes exactly the slot
+// this file's readout reads, and a second spelling of the two-level layer walk —
+// `mtldef[current_edit_layer]` selects the CHANNEL, then
+// `+ LayerMat::GetCurrentLayer(md)` selects the SUB-LAYER, deliberately walking
+// into the following MaterialDefs of the mtldef[4] block — is exactly the kind of
+// duplicate the cleanup pass spent a wave removing.  So it moved out of this
+// file's anonymous namespace to file scope; see the definition for the layout
+// note.  Returns NULL when the face has no valid MaterialDef on the current
+// layer (it TESTS the MtlDef_IsValid invariant rather than tripping its L0
+// assert).  `outMtl` (optional) receives the owning MaterialDef, which is what
+// TexMatToFakeTexCoords and Materialdef_GetName both want.
+struct brush_t;
+struct MaterialDef;
+struct texdef_sub_t;
+texdef_sub_t *KiwiUv_FaceTexdef( brush_t *def, int faceIndex, MaterialDef **outMtl );
+// ── KIWI-UX end ─────────────────────────────────────────────────────────────
+
+// ── KIWI-UX (ROUND BH, ITEM 3): END A LIVE GESTURE BEFORE WRITING A MATERIAL ─
+// USER REPORT, verbatim: *"Make it so texture applications dont require a
+// right-click/enter to confirm, they are just an operation that goes through
+// when you click the new texture (same with UVs).  Leave them undoable."*
+//
+// The apply was never gated — it was being REVERTED by the face gesture that a
+// face click auto-enters, whose baseline snapshot covers the whole MaterialDef
+// block and is written back by both Cancel and every push frame.  The full
+// mechanism chain (with the file:line for every link) is on the definition in
+// kiwi_uv.cpp; the short form is: KiwiMoveCommand::BeginFaces memcpys
+// `u.baseMtl` from the face at kiwi_transform.cpp:1663, and RestoreAll (:1573)
+// and ApplyFaces (:2638) memcpy it back.
+//
+// CALL THIS BEFORE ANY MATERIAL / TEXDEF WRITE THAT COMES FROM OUTSIDE THE
+// MODAL FRAMEWORK — never after (Cancel would undo the write it was meant to
+// protect).  Returns FALSE when a live gesture refused to yield, in which case
+// the caller must NOT apply; a line naming the command has already been
+// printed.  `what` names the caller for that line ("Texture", "UV editor").
+// Callers today: TexWnd_ApplyMaterialAtIndex (texwnd.cpp — the browser click,
+// the Sky tab's apply and the End-key caulk all funnel through it) and the UV
+// editor's UndoOpen (kiwi_uveditor.cpp).
+bool KiwiUv_EndGestureBeforeApply( const char *what );
+
+// The other half, for callers that want the FACE push/pull gizmo back afterwards.
+// Re-enters KIWI_CMD_MOVE paused under exactly kiwi_boxselect.cpp's own auto-enter
+// gate, and ONLY when the call above actually ended an auto-entered face push — so
+// it can never start a gesture the user did not have.  The restart also takes a
+// FRESH BeginFaces baseline, which is what makes the material that was just applied
+// survive the next Cancel.  Call it at the END of the apply, after every mutation.
+// A caller that does not want it simply never calls it (the UV editor does not: its
+// gestures are its own, and it would be restarting a command over a window that is
+// still being dragged in).
+void KiwiUv_RestoreGestureAfterApply();

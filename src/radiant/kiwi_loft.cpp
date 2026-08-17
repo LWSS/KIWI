@@ -20,6 +20,7 @@
 #include <gfx_d3d/r_rendercmds.h>   // MaterialTechniqueType, TECHNIQUE_UNLIT
 
 #include "kiwi_loft.h"
+#include "kiwi_csg.h"                 // KIWI-UX (CLEANUP, B-10): KiwiCsg_BrushUsable
 #include "kiwi_command.h"
 #include "kiwi_extrude.h"           // KiwiExtrude_LandDef (the ported creation tail)
 #include "kiwi_lines.h"
@@ -30,6 +31,7 @@
 #include "kiwi_units.h"
 #include "kiwi_validity.h"
 #include "radiant_registry.h"       // ROUND AT, ITEM 3 — the sticky CURVE settings
+#include "kiwi_vec.h"     // KIWI-UX (CLEANUP, A-15): the one spelling of Dot3/Sub3/...
 
 #include <math.h>
 #include <stdint.h>
@@ -38,11 +40,15 @@
 
 // ── ported entry points (each verified against its DEFINITION) ──────────────
 extern int         Sys_Printf( const char *fmt, ... );                        // win_qe3.cpp
-extern camera_s   *Ed_Camera();                                               // camwnd.cpp:153
+extern camera_s   *Ed_Camera();                                               // camwnd.cpp:156
 extern int         g_nUpdateBits;                                             // 0x25D5A74 (mainfrm.cpp)
-extern brush_t    *Brush_Alloc( const void *materialDefSrc, eclass_t *ecls );  // brush.cpp 0x4751e0
-extern void        Brush_Free_R( brush_t *def );                              // brush.cpp 0x475af0
-extern void        Select_Deselect( int bAlsoFreeFaces );                     // select.cpp 0x48E800
+// KIWI-UX (CLEANUP, B-34): the parameter name is `planeptsSrc`, copied verbatim
+// from the definition (brush.cpp:463) as the house rule requires.  The name is
+// the ported one and it is misleading: every caller in this layer passes
+// g_qeglobals.random_texture_stuff, i.e. the MATERIAL-DEF source, not plane points.
+extern brush_t    *Brush_Alloc( const void *planeptsSrc, eclass_t *ecls );    // brush.cpp:463  0x4751e0
+extern void        Brush_Free_R( brush_t *def );                              // brush.cpp:700  0x475af0
+extern void        Select_Deselect( int bAlsoFreeFaces );                     // select.cpp:1445 0x48E800
 
 // brush.cpp / xywnd.cpp // KIWI-UX forwarders — the same pair kiwi_extrude.cpp:61-63
 // declares, copied verbatim (a drift here is a link error, which is the point).
@@ -52,10 +58,10 @@ extern void Ed_EnsureCurrentMaterial_Kiwi();
 // ── KIWI-UX (ROUND AO, ITEM 1c) — THE PATCH MEDIUM ─────────────────────────
 // The CURVE bridge lands q3 bezier patches, and it does so through exactly the
 // sequence kiwi_patchfillet.cpp already uses.  Every declaration below is copied
-// VERBATIM from kiwi_patchfillet.cpp:45-64, comments included, so a drift between
-// the two files is a link error rather than a silent second spelling.
-extern selbrush_t  *Brush_AddToList( brush_t *def, entity_s *owner );         // brush.cpp:656  0x475980
-extern void         Brush_AddToList2( selbrush_t *b );                        // brush.cpp:910  0x4765A0
+// VERBATIM from kiwi_patchfillet.cpp's own block, comments included, so a drift
+// between the two files is a link error rather than a silent second spelling.
+extern selbrush_t  *Brush_AddToList( brush_t *def, entity_s *owner );         // brush.cpp:667  0x475980
+extern void         Brush_AddToList2( selbrush_t *b );                        // brush.cpp:921  0x4765A0
 extern patchMesh_t *MakeNewPatch();                                           // pmesh.cpp:136  0x437AC0
 extern brush_t     *AddBrushForPatch( patchMesh_t *p, entity_s *world_ent );  // pmesh.cpp:840  0x4386A0
 // ROUND AJ, ITEM 2 — the creation tail with the naturalize scale taken from the
@@ -72,6 +78,13 @@ extern void        __cdecl R_AddRenderCmdDrawTris(
                        const uint16_t *indices, short vertexCount,
                        const float ( *xyzw )[4], const float ( *normal )[3], float *color,
                        const float ( *st )[2] );                               // 0x4fd1c0
+
+// KIWI-UX (CLEANUP, B-28): FILE SCOPE, not block scope.  Round AI shipped a link
+// error from a block-scope extern that MSVC mangled with its enclosing namespace;
+// kiwi_uv.cpp carries the full account.  This is the declaration that used to sit
+// inside KiwiLoft_RegisterCommands.
+extern bool        Radiant_RegisterCommand( const char *name, byte vk, byte mods,
+                                            int commandId );                   // mainfrm.cpp:1340
 
 namespace
 {
@@ -100,9 +113,22 @@ namespace
 
     const float KLOFT_EPS = 1.0e-6f;
 
+    // KIWI-UX (CLEANUP, B-11): the format bound expressed as spans.  Bound it to
+    // the bound, so raising one without the other is a compile error rather than a
+    // runtime refusal.
+    // KIWI-UX (ROUND BN, ITEM 2): it now binds the PER-PATCH constant, which is the
+    // one the format actually constrains — the DENSITY ceiling above it is a
+    // multiple of patches and is bounded by KLOFT_MAX_CURVE_PATCHES instead.
+    static_assert( KLOFT_CURVE_SPANS_PER_PATCH * 2 + 1 == KPATCH_MAX_WIDTH,
+                   "KLOFT_CURVE_SPANS_PER_PATCH must be (KPATCH_MAX_WIDTH - 1) / 2" );
+    static_assert( KLOFT_MAX_CURVE_SEGS >= KLOFT_CURVE_SPANS_PER_PATCH,
+                   "the CURVE density ceiling cannot be below one patch's worth" );
+
     // ROUND AO, ITEM 1(c): "is this point on that face's plane".  0.01 world units
-    // — the same on-plane tolerance kiwi_boolean.cpp's KiwiBool_PointInSolid uses
-    // for the same question, and the same order as KVALID_PLANE_DIST.
+    // — the editor's own on-plane tolerance, named as KBOOL_ONPLANE_EPS in
+    // kiwi_boolean.h (CLEANUP, BoolPointTol), and the same order as
+    // KVALID_PLANE_DIST.  Kept as a local constant so this file's tolerance stays
+    // its own to tune; the cite is to the name now, not to a literal.
     const float KLOFT_ONPLANE_EPS = 0.01f;
 
     // ROUND AO, ITEM 1(c): a span's arc handle is refused and replaced by the
@@ -112,25 +138,6 @@ namespace
     // 2.0 admits every sane bend (a 90-degree quarter arc's handle sits at about
     // 0.71 of the chord from either end) and refuses the pathological ones.
     const float KLOFT_HANDLE_MAX = 2.0f;
-
-    // ── vector helpers, spelled as every other file in this layer spells them ──
-    inline float Dot3( const float *a, const float *b )
-    { return a[0]*b[0] + a[1]*b[1] + a[2]*b[2]; }
-    inline void Copy3( const float *a, float *o ) { o[0]=a[0]; o[1]=a[1]; o[2]=a[2]; }
-    inline void Sub3( const float *a, const float *b, float *o )
-    { o[0]=a[0]-b[0]; o[1]=a[1]-b[1]; o[2]=a[2]-b[2]; }
-    inline void Mad3( const float *a, const float *d, float s, float *o )
-    { o[0]=a[0]+d[0]*s; o[1]=a[1]+d[1]*s; o[2]=a[2]+d[2]*s; }
-    inline void Cross3( const float *a, const float *b, float *o )
-    { o[0]=a[1]*b[2]-a[2]*b[1]; o[1]=a[2]*b[0]-a[0]*b[2]; o[2]=a[0]*b[1]-a[1]*b[0]; }
-    inline float Len3( const float *a ) { return sqrtf( Dot3( a, a ) ); }
-    inline bool Norm3( float *v )
-    {
-        const float l = Len3( v );
-        if ( l < KLOFT_EPS ) return false;
-        v[0] /= l; v[1] /= l; v[2] /= l;
-        return true;
-    }
 
     typedef std::vector<float> ring_t;      // 3 floats per point, WORLD space
 
@@ -233,29 +240,6 @@ namespace
         }
     }
 
-    // Step 4 — CORRESPONDENCE.  The cyclic offset k that minimises the total squared
-    // distance between the two rings once both are CENTRED and the loft-axis
-    // component is projected out.  Centring removes the translation the loft is
-    // supposed to have; projecting out the axis removes the length of the bridge,
-    // which is not information about which corner meets which.  What is left is
-    // exactly "which rotation of B lines its corners up with A's", i.e. no twist.
-    //
-    // O(n²) over n <= KLOFT_MAX_RING (64) = 4096 distance terms, once per
-    // re-tessellation.  A closed-form angular match would be O(n log n) and would be
-    // wrong for a ring whose vertices are not angularly uniform — which, after
-    // SubdivideTo has split the long edges of a rectangle, is every ring here.
-    // ── KIWI-UX (ROUND AO, ITEM 1): REPLACED BY BestOffset2D ────────────────
-    // This function projected both rings along the STRAIGHT AXIS and compared what
-    // was left.  kiwi_loft.h carries the full account of why that is the wrong
-    // plane for two faces that are not parallel — it squashes each ring along a
-    // different in-plane direction, inverts their aspect ratios at 90 degrees, and
-    // picks a cyclic offset that is routinely one vertex out, i.e. a twist that no
-    // density or mode can then rescue.  The replacement compares the rings as 2D
-    // coordinates in a pair of frames the transport has already aligned, and it
-    // reduces to this function's answer exactly when the two faces are parallel.
-    // The body is gone rather than kept dead: a second correspondence rule in the
-    // file is the duplicate-function drift this codebase keeps paying for.
-
     void RotateRing( ring_t *r, int k )
     {
         const int n = RingN( *r );
@@ -351,10 +335,19 @@ namespace
         }
     }
 
-    // Step 4, RE-STATED IN THE FRAME.  Identical in shape to the old BestOffset —
-    // same O(n²) sweep, same early-out — but the two rings are compared as 2D
-    // coordinates in their OWN frames, which the transport has already aligned.
-    // For parallel faces the two frames are the same and this is the old answer.
+    // Step 4 — CORRESPONDENCE.  The cyclic offset k that minimises the total
+    // squared distance between the two rings, compared as 2D coordinates in their
+    // OWN frames, which the transport has already aligned.  What is left after the
+    // frames is exactly "which rotation of B lines its corners up with A's", i.e.
+    // no twist.  O(n²) over n <= KLOFT_MAX_RING (64), once per re-tessellation; a
+    // closed-form angular match would be O(n log n) and wrong for a ring whose
+    // vertices are not angularly uniform, which after SubdivideTo is every ring.
+    //
+    // KIWI-UX (CLEANUP, B-18): the predecessor (BestOffset, round AO) projected
+    // both rings along the STRAIGHT AXIS instead.  That squashes each ring along a
+    // different in-plane direction when the faces are not parallel, so it picked an
+    // offset routinely one vertex out — a twist no density or mode could rescue.
+    // For parallel faces the two frames coincide and this is the old answer.
     int BestOffset2D( const std::vector<float> &a2, const std::vector<float> &b2 )
     {
         const int n = (int)( a2.size() / 2 );
@@ -668,21 +661,19 @@ namespace
     // all (kiwi_pick.cpp:584-599 refuses to resolve one) and a fixed-size entity's
     // bbox is not model geometry — the same two tests every CSG-ish path in this
     // layer runs (kiwi_boolean.cpp Usable, kiwi_split.cpp Splittable).
+    // KIWI-UX (CLEANUP, B-10): the brush-level half is KiwiCsg_BrushUsable
+    // (kiwi_csg.h) — the same four tests kiwi_csg / kiwi_autobool / kiwi_dupe /
+    // kiwi_boolean run.  The WINDING test on top is this verb's own: a bridge
+    // needs a real polygon with a ring this file can hold.
     bool UsableFace( const selbrush_t *b, int face )
     {
-        if ( !b || !b->def || b->patch )
+        if ( !KiwiCsg_BrushUsable( b ) )
             return false;
         const brush_t *def = b->def;
         if ( !def->faces || face < 0 || face >= def->faceCount )
             return false;
         const winding_t *w = def->faces[face].w;
         if ( !w || w->numpoints < 3 || w->numpoints > KLOFT_MAX_RING )
-            return false;
-        const entity_s *owner = b->owner;
-        if ( !owner || !owner->def )
-            return false;
-        const entity_s *ownerDef = owner->def;
-        if ( !ownerDef->eclass || ownerDef->eclass->fixedsize )
             return false;
         return true;
     }
@@ -715,6 +706,37 @@ namespace
     // it.  The read validates, because an ini is a text file a user can edit.
     int  s_contStart = KLOFT_CONT_G1;
     int  s_contEnd   = KLOFT_CONT_G1;
+    // ── KIWI-UX (ROUND AY): TWO-SIDED IS THE **DEFAULT** IN CURVE MODE ───────
+    // USER REPORT, verbatim: "looks like the loft is still one sided, see pics."
+    // The mechanism round AT shipped is correct and was verified again this round
+    // (see the block on ApplyCurve); what was wrong was the DEFAULT.  A patch is
+    // one-sided BY CONSTRUCTION in this editor — DrawPatches (pmesh.cpp:10240)
+    // emits the PM_BACK_FACE list at TECHNIQUE_WIREFRAME_SHADED, never textured,
+    // and while the fresh patches are still SELECTED that back pass is skipped
+    // entirely (the `drawFlags & 1` arm, pmesh.cpp:10233-10237) so the concave
+    // side of a just-built curved wall shows the white selected wireframe and
+    // nothing else.  That is exactly the screenshot.  A mapper who asks for a
+    // curved WALL means a wall, so the option now arrives ON and stays a toggle
+    // for the case where one sheet is what is wanted (a backdrop, a ceiling seen
+    // from one room only) and the patch count matters.
+    // ── KIWI-UX (ROUND BN, ITEM 2): …AND IT GOES BACK OFF, BECAUSE THE WINDING ──
+    //    IS FIXED AT SOURCE NOW.
+    // USER REPORT, verbatim: *"2-sided was a hack checkbox feature added to fix
+    // this, but now I can't edit the UVs because it's needed.  Make it so it's not
+    // needed by fixing the face alignment."*  Round AY's paragraph above is a
+    // correct diagnosis of a SYMPTOM: the sides really were invisible from the
+    // outside, and doubling the sheet really did cover it.  The CAUSE was the row
+    // order (see BuildStations' m_outFlip), and with that fixed a single-sided loft
+    // is correct from the outside for any input ring direction — so the second sheet
+    // is no longer a fix for anything.  It stays as an OPTION, renamed for what it
+    // actually does — "Interior visible", i.e. the sheet is wanted from BOTH sides
+    // (a fence, a canopy, a wall you walk through) — and it defaults OFF.
+    //
+    // WHY OFF MATTERS BEYOND TIDINESS: the two copies are COINCIDENT patches, which
+    // is exactly the sortKey saga of round BK (§86.1) — two surfaces at one depth
+    // whose draw order is decided by material sort, not by geometry — and it is
+    // also why the UV editor could not be used on a loft: every strip appeared
+    // twice, in mirrored parameterisations, and a canvas gesture moved one of them.
     bool s_twoSided  = false;
     bool s_prefsRead = false;
 
@@ -725,7 +747,17 @@ namespace
         s_prefsRead = true;
         s_contStart = Radiant_ProfileGetInt( KLOFT_SECTION, "ContStart", KLOFT_CONT_G1 );
         s_contEnd   = Radiant_ProfileGetInt( KLOFT_SECTION, "ContEnd",   KLOFT_CONT_G1 );
-        s_twoSided  = ( Radiant_ProfileGetInt( KLOFT_SECTION, "TwoSided", 0 ) != 0 );
+        // ROUND AY: the ini DEFAULT moves with the constant above.  A profile that
+        // was never toggled has no key at all (LoftPrefs_Write is the only writer
+        // and it only runs on a change), so an existing user picks the new default
+        // up; a user who deliberately turned it off keeps their 0.
+        // KIWI-UX (ROUND BN, ITEM 2): the default is 0 now, and the KEY MOVES with
+        // it — "TwoSided2".  A user who toggled the old key ON did so to work around
+        // the backwards winding, which no longer exists, so honouring that stored 1
+        // would hand them the bug's workaround forever.  The old key is left in the
+        // profile untouched rather than deleted: it costs nothing and it is the only
+        // record of what a downgrade would need.
+        s_twoSided  = ( Radiant_ProfileGetInt( KLOFT_SECTION, "TwoSided2", 0 ) != 0 );
         if ( s_contStart < 0 || s_contStart >= KLOFT_CONT_COUNT ) s_contStart = KLOFT_CONT_G1;
         if ( s_contEnd   < 0 || s_contEnd   >= KLOFT_CONT_COUNT ) s_contEnd   = KLOFT_CONT_G1;
     }
@@ -738,7 +770,7 @@ namespace
         s_twoSided  = twoSided;
         Radiant_ProfileSetInt( KLOFT_SECTION, "ContStart", contStart );
         Radiant_ProfileSetInt( KLOFT_SECTION, "ContEnd",   contEnd );
-        Radiant_ProfileSetInt( KLOFT_SECTION, "TwoSided",  twoSided ? 1 : 0 );
+        Radiant_ProfileSetInt( KLOFT_SECTION, "TwoSided2", twoSided ? 1 : 0 );  // ROUND BN
     }
 
     const char *ContName( int c )
@@ -785,7 +817,25 @@ namespace
                 // ROUND AO, ITEM 1(c): the ceiling is MODE-DEPENDENT now — CURVE is
                 // bounded by the patch control grid, not by taste — so the clamp
                 // goes through ClampSegs, which is the one place that knows.
-                m_segs      = ClampSegs( (int)floorf( Units_ToDisplay( world ) + 0.5f ) );
+                const int asked = (int)floorf( Units_ToDisplay( world ) + 0.5f );
+                m_segs      = ClampSegs( asked );
+                // KIWI-UX (CLEANUP, B-16): a silent clamp is a lie —
+                // kiwi_patchfillet.cpp's bias field says exactly that.  This is the
+                // ONLY site that reports: it is the one place a clamp answers a
+                // TYPED request.  SetBridge's re-clamp is a mode flip, not a
+                // request, and stays quiet.
+                if ( asked > m_segs )
+                    Sys_Printf( "Loft: density %i reduced to %i — %s.\n",
+                                asked, m_segs,
+                                UsePatches()
+                                // KIWI-UX (ROUND BN, ITEM 2): the reason moved with
+                                // the ceiling.  A strip is several patches long now,
+                                // so what bounds the density is the PATCH COUNT one
+                                // gesture may create, not one control grid's width.
+                                ? "that is the CURVE density ceiling — a strip is cut "
+                                  "into patches of 7 spans each and one loft may not "
+                                  "exceed the patch budget"
+                                : "that is this tool's density ceiling" );
                 m_segsTyped = true;            // …and a mode flip must not re-seed it
                 Rebuild();
                 UpdateHud();
@@ -877,7 +927,10 @@ namespace
                   0.0f, 0.0f, -1 },
                 { "End continuity",   KOPT_ENUM,   s_cont, KLOFT_CONT_COUNT, 0,
                   0.0f, 0.0f, -1 },
-                { "Two-sided",        KOPT_TOGGLE, 0, 0, 0,
+                // KIWI-UX (ROUND BN, ITEM 2): renamed.  It is not a facing FIX any
+                // more (the winding is derived at generation), it is a request for
+                // the sheet to be textured from the INSIDE as well.
+                { "Interior visible", KOPT_TOGGLE, 0, 0, 0,
                   0.0f, 0.0f, -1 },
             };
             static kiwiOption_t s_opts[7];
@@ -970,10 +1023,23 @@ namespace
                 m_twoSided = ( value != 0 );
                 LoftPrefs_Write( m_cont[0], m_cont[1], m_twoSided );
                 UpdateHud();
-                Sys_Printf( "Loft: two-sided %s — each strip is emitted %s.%s\n",
+                // ROUND AY: the OFF line now says what OFF COSTS.  A patch's back
+                // is never textured in this editor (DrawPatches draws the
+                // PM_BACK_FACE list as wireframe, pmesh.cpp:10240), so "off" is
+                // not "the engine will figure it out" — it is a surface that
+                // disappears when you walk round it.
+                // KIWI-UX (ROUND BN, ITEM 2): the line says what the option IS now
+                // that it is not a fix.  A single-sided loft faces OUT (the winding
+                // is derived, not assumed — BuildStations' m_outFlip), so "off" is
+                // the right answer for a wall and "on" is for a sheet that has to be
+                // visible from INSIDE too.
+                Sys_Printf( "Loft: interior visible %s — each strip is emitted %s.%s\n",
                             m_twoSided ? "ON" : "off",
-                            m_twoSided ? "TWICE, the second copy flipped"
-                                       : "once, visible from one side",
+                            m_twoSided ? "TWICE, the second copy row-mirrored so the "
+                                         "INSIDE of the shape is textured too (two "
+                                         "coincident sheets — see kiwi_loft.h)"
+                                       : "once, facing OUTWARD: the inside of the "
+                                         "shape will show wireframe, not texture",
                             m_twoSided ? "  (Patches carry no collision either way: "
                                          "put caulk inside the wall if the player has "
                                          "to hit it.)" : "" );
@@ -1086,8 +1152,10 @@ namespace
                 m_segs  = DefaultSegs();
                 Rebuild();
                 UpdateHud();
-                Sys_Printf( "Loft: bridging the two selected faces — D switches "
-                            "RULED / TANGENT, Tab picks density or tension, "
+                // KIWI-UX (CLEANUP, B-13): D is a THREE-way cycle since round AO.
+                // The wording matches the prompt strip's "Ruled / Tangent / Curve".
+                Sys_Printf( "Loft: bridging the two selected faces — D cycles "
+                            "RULED / TANGENT / CURVE, Tab picks density or tension, "
                             "RMB / Enter applies.\n" );
                 return true;
             }
@@ -1370,7 +1438,10 @@ namespace
 
         // CURVE mode's whole gate.  A patch has no §19 to fail, so the only things
         // that can refuse it are structural.
-        bool CurveRefusal( const char **why ) const
+        // KIWI-UX (CLEANUP, B-27): was CurveRefusal, which returned TRUE when there
+        // was no refusal.  This is KiwiValid_CheckBrush's polarity — true means
+        // good, `**why` is set on false — and the call sites read as English again.
+        bool CurveIsBuildable( const char **why ) const
         {
             if ( m_stations.size() < 2 )
             { *why = "no stations"; return false; }
@@ -1378,10 +1449,23 @@ namespace
             if ( n < 3 )
             { *why = "the profile has fewer than three corners"; return false; }
             const int segs = (int)m_stations.size() - 1;
-            if ( segs * 2 + 1 > 15 )
-            { *why = "too many spans for a patch control grid — lower the density"; return false; }
             if ( n > KLOFT_MAX_RING )
             { *why = "the profiles have more corners than the ring cap"; return false; }
+            // ── KIWI-UX (ROUND BN, ITEM 2): THE GATE IS THE PATCH COUNT NOW ──
+            // The old test — `segs*2 + 1 > KPATCH_MAX_WIDTH` — asked whether the
+            // WHOLE span fits one control grid, which is no longer the question: the
+            // strip is cut into chunks of at most KLOFT_CURVE_SPANS_PER_PATCH spans
+            // and every chunk fits by construction (7*2 + 1 == 15 == KPATCH_MAX_WIDTH,
+            // kiwi_validity.h:135).  What CAN still be refused is the PRODUCT — a
+            // dense loft over a 64-gon profile is hundreds of patches — so that is
+            // what the gate counts, both copies included, and the refusal names the
+            // two numbers the user can actually change.
+            const int chunks = ( segs + KLOFT_CURVE_SPANS_PER_PATCH - 1 )
+                             / KLOFT_CURVE_SPANS_PER_PATCH;
+            const int total  = chunks * n * ( m_twoSided ? 2 : 1 );
+            if ( total > KLOFT_MAX_CURVE_PATCHES )
+            { *why = "too many patches for one loft — lower the density, use a simpler "
+                     "profile, or turn Interior visible off"; return false; }
             return true;
         }
 
@@ -1402,11 +1486,19 @@ namespace
             m_cont[1]    = s_contEnd;
             m_twoSided   = s_twoSided;
             m_haveEndTan = false;
+            m_outFlip    = false;             // ROUND BN, ITEM 2
             m_ok        = false;
             m_fellBack  = false;              // ROUND AO, ITEM 1(a)
             m_why       = "no loft yet";
             m_stations.clear();
             m_edgeFace.clear();
+            // KIWI-UX (CLEANUP, B-32): m_planeN / m_planeD are the other two members of
+            // the same per-station structure (BuildStations .assign()s all four together
+            // at :1574-1575) and were the only two Reset left behind.  Unreachable today
+            // — BuildAll is gated on m_stations.size() < 2 — but three of four cleared is
+            // exactly how the fourth becomes stale data nobody expected.
+            m_planeN.clear();
+            m_planeD.clear();
             m_hud[0] = '\0';
         }
 
@@ -1481,6 +1573,61 @@ namespace
             for ( int kk = 0; kk < 3; ++kk )
                 m_endTan[1][kk] = -outB[kk];
             m_haveEndTan = true;
+
+            // ═══════════════════════════════════════════════════════════════
+            //  KIWI-UX (ROUND BN, ITEM 2) — WHICH ROW ORDER FACES **OUT**
+            // ═══════════════════════════════════════════════════════════════
+            // USER REPORT, verbatim: *"When lofting a curve, the sides are still
+            // backwards.  They need to be outward facing.  2-sided was a hack
+            // checkbox feature added to fix this […] Make it so it's not needed by
+            // fixing the face alignment.  (Invisible faces on one side and vice
+            // versa, wrong winding?)"*
+            //
+            // ── THE DERIVATION, from the two conventions that decide it ─────
+            // (1) A PATCH'S NORMAL IS cross( dCol, dRow ).  Patch_MeshNormals
+            //     (pmesh.cpp:2408-2500, the binary's 0x437c80) walks the eight
+            //     neighbours in the order { (0,+1), (+1,+1), (+1,0), … } and
+            //     accumulates `Vec3Cross( edges[d+1], edges[d], fn )`; taking
+            //     d = 0 (the +ROW neighbour, R) and d+1 = 1 (the +col+row
+            //     diagonal, ~(C+R)/sqrt2) gives fn = (C+R)x R / sqrt2 = (C x R)
+            //     / sqrt2, and d = 2/3 gives the same vector.  So the surface
+            //     normal is +COLUMN cross +ROW, and WriteCurveStrip's `flip`
+            //     (which writes row -> KLOFT_CURVE_ROWS-1-row) reverses exactly
+            //     that, as its own comment says.
+            // (2) WHAT THIS STRIP'S TWO AXES ARE.  Column s*2 walks the STATIONS,
+            //     i.e. along the loft path A; row 0..2 walks from ring point e to
+            //     ring point e+1, i.e. along the ring edge E in traversal order.
+            //     So the UNFLIPPED normal is A x E.
+            //
+            // For a closed ring with Newell normal N, the OUTWARD direction at edge
+            // E is E x N.  (Check it on the canonical case: a CCW square in XY has
+            // N = +Z; at the y = 0 wall E = +X and E x N = X x Z = -Y, which points
+            // away from the interior.  It holds for the opposite winding too — that
+            // wall is then traversed as E = -X with N = -Z, and (-X) x (-Z) = -Y
+            // again.)  Writing A in the orthonormal triad (E, N, O = E x N) as
+            // A = aE + bN + cO gives A x E = -bO + cN, whose outward component is
+            // -b.  So:
+            //
+            //     THE STRIP FACES INWARD  <=>  dot( A, N ) > 0
+            //
+            // and the row order must be flipped exactly then.  Nothing about the
+            // input curve's point order enters the rule: it is derived from the
+            // ring's own signed area (Newell) measured against the loft direction,
+            // which is what makes it correct for a CW ring and a CCW one alike.
+            //
+            // ── AND THAT IS WHY IT WAS ALWAYS BACKWARDS ─────────────────────
+            // Step 2 above ("SENSE — both rings CCW about the loft axis") rewinds
+            // every ring until `Dot3( nA, axis ) >= 0`.  So the antecedent of the
+            // rule is UNCONDITIONALLY TRUE by the time a strip is written, for any
+            // input ring direction whatsoever — every CURVE loft this editor has
+            // ever produced has had its sides facing INTO the tube.  Two-sided was
+            // covering it by drawing the strip twice, which is why turning
+            // two-sided off "lost" one side and why the UVs could not be edited.
+            //
+            // Stored rather than recomputed at write time because `axis` and `nA`
+            // are in scope HERE and nowhere else — the same reason ResolveEdgeFaces
+            // is called from this function.
+            m_outFlip = ( Dot3( axis, nA ) > 0.0f );
 
             // 3. COUNTS.
             int n = RingN( A ) > RingN( B ) ? RingN( A ) : RingN( B );
@@ -1663,8 +1810,7 @@ namespace
         // ADJACENT face exactly when both of that edge's endpoints satisfy the
         // plane equation, so this is two dot products per candidate — no winding
         // walk and no shared-edge bookkeeping.  The epsilon is the editor's own
-        // on-plane tolerance (kiwi_boolean.cpp's KiwiBool_PointInSolid uses 0.01
-        // for the same question).
+        // on-plane tolerance (KBOOL_ONPLANE_EPS, kiwi_boolean.h).
         void ResolveEdgeFaces( const ring_t &A )
         {
             const int n = RingN( A );
@@ -1702,7 +1848,7 @@ namespace
         // every segment, gate it against §19 — ran only inside Apply.  They run
         // here now as a DRY RUN: every def is built, gated and FREED, which costs
         // nothing to reject (kiwi_extrude.h's "REJECTION IS FREE"; kiwi_boolean's
-        // KiwiBool_WouldCarve is the same dry run one subsystem over).
+        // CarveByOneTool is the same build-gate-free shape one subsystem over).
         //
         // AND IT PREVIEWS WHAT WILL ACTUALLY BE BUILT.  Apply's TANGENT->RULED
         // retry is run here too, so when the retry is what will happen the stations
@@ -1713,7 +1859,7 @@ namespace
         //
         // CURVE mode does not go through §19 at all: a patch is not a brush and
         // has no half-space validity to fail.  Its gate is the control-grid bound
-        // and the station count, both checked in ClampSegs / CurveRefusal.
+        // and the station count, both checked in ClampSegs / CurveIsBuildable.
         void Rebuild()
         {
             m_fellBack = false;
@@ -1724,7 +1870,7 @@ namespace
             if ( m_bridge == KLOFT_BRIDGE_CURVE )
             {
                 const char *why = 0;
-                if ( !CurveRefusal( &why ) )
+                if ( !CurveIsBuildable( &why ) )
                 {
                     m_ok  = false;
                     m_why = why ? why : "the curve cannot be swept";
@@ -1865,11 +2011,10 @@ namespace
                             "bridge shown in the preview was built — raise the "
                             "density and re-run if you wanted the curve.\n" );
 
-            // ── UNDO (kiwi_extrude.h's ordering, for the same reason) ───────
-            // The bracket opens over an EMPTY selection and the new brushes land
-            // selected, so KiwiCmd_UndoCommit's Undo_EndBrushList stamps precisely
-            // them and one Ctrl+Z removes the whole bridge.  The two SOURCE brushes
-            // are never in the bracket because they are never touched.
+            // KIWI-UX (CLEANUP, B-20): deselect before landing — the rule and its
+            // reasons are stated once, at kiwi_patchfillet.cpp's LandPatches.  Here
+            // the bracket therefore opens over an EMPTY selection and the new
+            // brushes land selected, so one Ctrl+Z removes the whole bridge.
             Select_Deselect( 1 );
             KiwiCmd_UndoBegin( "loft" );
             for ( size_t i = 0; i < defs.size(); ++i )
@@ -1889,12 +2034,15 @@ namespace
         // ═════════════════════════════════════════════════════════════════════
         // kiwi_loft.h states the design (why a strip per edge, where the thickness
         // comes from, which alignment, and the control-grid bound).  The LANDING
-        // SEQUENCE below is kiwi_patchfillet.cpp:1441-1559 verbatim in order —
+        // SEQUENCE below is kiwi_patchfillet.cpp:1441-1571 verbatim in order —
         // MakeNewPatch -> width/height/type -> contents/flags -> ctrl -> texture /
         // lightmap -> KiwiMtl_RealizePatch -> Patch_KiwiFinishNewLike ->
-        // Patch_KiwiCapAlign -> AddBrushForPatch -> Brush_AddToList ->
+        // AddBrushForPatch -> Patch_KiwiCapAlign -> Brush_AddToList ->
         // Brush_AddToList2 — because there is one right order and it is already
-        // written down once.
+        // written down once.  (ROUND AY corrected the last two swaps of that list:
+        // CAP has to come AFTER AddBrushForPatch, which is round AS's fix and is
+        // what the fillet has done since; this file was still describing — and
+        // running — the pre-AS order.)
         //
         // THE ARC HANDLE.  Column 2s sits on station s.  Column 2s+1 is the point
         // where the two stations' PATH TANGENTS meet, which is what makes the
@@ -2070,11 +2218,23 @@ namespace
         // reverses cross(dCol, dRow) and therefore the surface normal — the
         // two-sided second copy, and the same swap kiwi_patchfillet.cpp:1437-1443
         // performs for its `rowFlip`.
-        void WriteCurveStrip( patchMesh_t *p, int e, int n, int segs, bool flip ) const
+        // ── KIWI-UX (ROUND BN, ITEM 2): …AND IT WRITES A CHUNK, NOT THE WHOLE ──
+        //    STRIP.
+        // `s0` is the first STATION this patch starts at and `spans` is how many
+        // spans it covers, so the whole strip is [0, segs] cut into runs of at most
+        // KLOFT_CURVE_SPANS_PER_PATCH.  The only change to the body is that the
+        // control column index is now relative (`s - s0`) while every station /
+        // tangent lookup stays ABSOLUTE — which is precisely what makes the join
+        // between two chunks G1 rather than G0 (kiwi_loft.h CURVE DENSITY).
+        // A single-chunk loft is s0 = 0, spans = segs, i.e. bit-for-bit what this
+        // function did before.
+        void WriteCurveStrip( patchMesh_t *p, int e, int n, int segs,
+                              int s0, int spans, bool flip ) const
         {
-            for ( int s = 0; s <= segs; ++s )
+            for ( int s = s0; s <= s0 + spans; ++s )
             {
-                const ring_t &st = m_stations[(size_t)s];
+                const int     col = ( s - s0 ) * 2;
+                const ring_t &st  = m_stations[(size_t)s];
                 const float  *r0 = RingP( st, e );
                 const float  *r1 = RingP( st, ( e + 1 ) % n );
                 // EVEN column: the station itself.  Rows are the edge's two
@@ -2085,11 +2245,11 @@ namespace
                     const int   dst = flip ? ( KLOFT_CURVE_ROWS - 1 - row ) : row;
                     const float f   = (float)row / (float)( KLOFT_CURVE_ROWS - 1 );
                     for ( int k = 0; k < 3; ++k )
-                        p->ctrl[s * 2][dst].xyz[k] = r0[k] + ( r1[k] - r0[k] ) * f;
+                        p->ctrl[col][dst].xyz[k] = r0[k] + ( r1[k] - r0[k] ) * f;
                 }
 
-                if ( s == segs )
-                    continue;
+                if ( s == s0 + spans )
+                    continue;                  // this chunk's last column
 
                 // ODD column: the arc handle for span s -> s+1, computed
                 // independently on each rail so the strip bends with the path.
@@ -2108,7 +2268,7 @@ namespace
                     const int   dst = flip ? ( KLOFT_CURVE_ROWS - 1 - row ) : row;
                     const float f   = (float)row / (float)( KLOFT_CURVE_ROWS - 1 );
                     for ( int k = 0; k < 3; ++k )
-                        p->ctrl[s * 2 + 1][dst].xyz[k] = ha[k] + ( hb[k] - ha[k] ) * f;
+                        p->ctrl[col + 1][dst].xyz[k] = ha[k] + ( hb[k] - ha[k] ) * f;
                 }
             }
         }
@@ -2120,26 +2280,34 @@ namespace
                 Sys_Printf( "Loft: the source solid went away — nothing was created.\n" );
                 return;
             }
-            const int segs = (int)m_stations.size() - 1;
-            const int n    = RingN( m_stations[0] );
-            const int w    = segs * 2 + 1;
-            if ( segs < 1 || n < 3 || w > 15 )
+            // KIWI-UX (CLEANUP, B-12): this WAS a second, independently written
+            // gate — `segs < 1 || n < 3 || w > 15` with a differently worded
+            // refusal — over the same question CurveIsBuildable already answers for
+            // the preview.  Two answers to one question inside one command is
+            // exactly what the honest-preview rule above Apply() forbids: the
+            // commit must refuse when and only when the preview said it would,
+            // in the same words.  CurveIsBuildable is also the STRICTLY STRONGER
+            // test (it covers n > KLOFT_MAX_RING too), so the commit gate can
+            // only have got tighter, and Rebuild() has already run it.
+            const char *curveWhy = "invalid geometry";
+            if ( !CurveIsBuildable( &curveWhy ) )
             {
-                Sys_Printf( "Loft: the curve bridge needs 1..%i spans over a 3+ gon.\n",
-                            KLOFT_MAX_CURVE_SEGS );
+                Sys_Printf( "Loft: refused — %s.  Nothing was created.\n", curveWhy );
                 return;
             }
+            const int segs = (int)m_stations.size() - 1;
+            const int n    = RingN( m_stations[0] );
 
             entity_s      *owner = m_a->owner;
             const brush_t *adef  = m_a->def;
 
-            // Same rule and same reason as kiwi_patchfillet.cpp:1421: everything on
-            // selected_brushes at COMMIT is stamped "added by this record", and a
-            // SOURCE brush carrying that stamp would be DELETED by the undo.
+            // KIWI-UX (CLEANUP, B-20): deselect before landing — the rule and its
+            // reasons are stated once, at kiwi_patchfillet.cpp's LandPatches.
             Select_Deselect( 1 );
             KiwiCmd_UndoBegin( "loft (curve)" );
 
-            int made = 0;
+            int made    = 0;
+            int dropped = 0;   // KIWI-UX (CLEANUP, B-15)
             for ( int e = 0; e < n; ++e )
             {
                 // The material this strip CONTINUES (kiwi_loft.h): the face of brush
@@ -2159,12 +2327,41 @@ namespace
                 // else about it — material, alignment, landing — is identical, so
                 // it goes through the same block rather than a second spelling of
                 // it, and both copies land inside the one undo bracket.
+                //
+                // ROUND AY re-verified this against the binary's own inverter:
+                // WriteCurveStrip's `flip` writes ctrl[col][height-1-row] where it
+                // would have written ctrl[col][row], which is precisely the swap
+                // patchInvert2 (pmesh.cpp:2232-2241, the Curve->Negative menu item)
+                // performs on a live selection.  The two sheets are COINCIDENT and
+                // that is correct, not a z-fight waiting to happen: each one is
+                // culled from the side the other is drawn from, so exactly one of
+                // them rasterises per view direction.  Offsetting them would put a
+                // visible seam at every silhouette edge and solve nothing.
+                //
+                // ── KIWI-UX (ROUND BN, ITEM 2): …AND THE STRIP MAY BE SEVERAL ──
+                //    PATCHES LONG.
+                // The span is cut into runs of at most KLOFT_CURVE_SPANS_PER_PATCH
+                // (kiwi_loft.h CURVE DENSITY), which is what lets the density go past
+                // one control grid's worth of columns.  Chunks share their boundary
+                // station and their tangents are computed globally, so the joins are
+                // G1; each chunk is a patch in its own right and gets the same
+                // material / realize / CAP-align / landing sequence.
                 const int copies = m_twoSided ? 2 : 1;
+                for ( int chunkStart = 0; chunkStart < segs;
+                      chunkStart += KLOFT_CURVE_SPANS_PER_PATCH )
+                {   // (body left at its original indent so the round-BN diff is the
+                    //  loop and nothing else — the matching brace is marked below)
+                const int spans = ( segs - chunkStart < KLOFT_CURVE_SPANS_PER_PATCH )
+                                ? ( segs - chunkStart ) : KLOFT_CURVE_SPANS_PER_PATCH;
+                const int w     = spans * 2 + 1;
                 for ( int copy = 0; copy < copies; ++copy )
                 {
                     patchMesh_t *p = MakeNewPatch();
                     if ( !p )
+                    {
+                        ++dropped;             // KIWI-UX (CLEANUP, B-15)
                         continue;
+                    }
                     p->width  = w;
                     p->height = KLOFT_CURVE_ROWS;
                     p->type   = PATCH_BEVEL;  // a swept quadratic, same as the fillet arc
@@ -2172,7 +2369,12 @@ namespace
                     p->contents = src->contents;
                     p->flags    = src->toolflags;
 
-                    WriteCurveStrip( p, e, n, segs, copy != 0 );
+                    // KIWI-UX (ROUND BN, ITEM 2): the base copy takes the OUTWARD row
+                    // order (m_outFlip, derived in BuildStations — the whole argument
+                    // is there); the two-sided second copy is still "the other one",
+                    // so the two remain each other's mirror whichever way out is.
+                    WriteCurveStrip( p, e, n, segs, chunkStart, spans,
+                                     m_outFlip != ( copy != 0 ) );
 
                     // The material, realized, naturalized at the parent's density and
                     // then CAP-aligned — kiwi_patchfillet.cpp:1502-1554's order and its
@@ -2183,24 +2385,54 @@ namespace
                     p->lightmap = *(patchMesh_material *)&src->mtldef[1].lyrMtl;
                     KiwiMtl_RealizePatch( p );
                     Patch_KiwiFinishNewLike( p, &src->mtldef[0].mat_texDef );
-                    Patch_KiwiCapAlign( p );
 
                     brush_t    *pdef = AddBrushForPatch( p, (entity_s *)owner->def );
+                    // ── KIWI-UX (ROUND AY): CAP **AFTER** AddBrushForPatch ───
+                    // Round AS moved this call in kiwi_patchfillet.cpp:1569 and
+                    // said why: CAP's reference face is a face of the patch's
+                    // SYMBIONT brush (Patch_GetAxisFace / PMESH_03 read
+                    // p->pSymbiot), and AddBrushForPatch is what creates it
+                    // (pmesh.cpp:869).  This file copied the fillet's landing
+                    // sequence BEFORE that move and kept the old position, so
+                    // round AS's guard in Patch_KiwiCapAlign (pmesh.cpp:2907)
+                    // was taking the early-out on EVERY loft strip: the CURVE
+                    // bridge has never actually been CAP-aligned, it has been
+                    // printing "patch has no symbiont brush yet" once per strip
+                    // and keeping FinishNewLike's naturalize instead.  Both
+                    // copies of a two-sided strip align identically because CAP
+                    // projects from world position and the mirror is coincident.
+                    Patch_KiwiCapAlign( p );
                     selbrush_t *inst = Brush_AddToList( pdef, owner );
                     Brush_AddToList2( inst );
                     ++made;
                 }
+                }                              // ROUND BN, ITEM 2 — the chunk loop
             }
+
+            // KIWI-UX (CLEANUP, B-15): a strip that could not be allocated is a
+            // failure, not a design decision — say so once, with the count, the way
+            // kiwi_primitive.cpp's "out of memory" line does for the same event.
+            if ( dropped )
+                Sys_Printf( "Loft: %i patch(es) could not be allocated and were "
+                            "skipped — out of patch handles.\n", dropped );
+
+            // KIWI-UX (CLEANUP, B-15): the bracket above opened unconditionally.  If
+            // nothing landed it covers nothing, and an empty record is one phantom
+            // Ctrl+Z — close it the way a cancelled gesture does.  UndoCancel
+            // self-guards and the framework's later KiwiCmd_UndoCommit is then a
+            // no-op, so the pair is never split.
+            if ( made == 0 )
+                KiwiCmd_UndoCancel();
 
             Sel_Clear( KiwiSel() );
             Sel_RebuildFromLegacy();
 
-            Sys_Printf( "Loft: CURVE bridge — %i patch strip(s) over a %i-gon, %i "
+            Sys_Printf( "Loft: CURVE bridge — %i patch(es) over a %i-gon, %i "
                         "span(s), continuity %s/%s%s.  Patches are RENDER SURFACES: "
                         "they have no collision, so put a caulk brush inside the "
                         "curve if the player has to hit it.\n",
                         made, n, segs, ContName( m_cont[0] ), ContName( m_cont[1] ),
-                        m_twoSided ? ", TWO-SIDED (each strip emitted twice)" : "" );
+                        m_twoSided ? ", INTERIOR VISIBLE (each strip emitted twice)" : "" );
         }
 
         void UpdateHud()
@@ -2259,7 +2491,7 @@ namespace
         // persist (KLOFT_SECTION) — Reset() re-seeds from the store, not from a
         // constant, because Reset() runs on every Begin().
         int         m_cont[2]    = { KLOFT_CONT_G1, KLOFT_CONT_G1 };
-        bool        m_twoSided   = false;
+        bool        m_twoSided   = true;   // ROUND AY — see s_twoSided
         // The two ends' PATH tangents, both pointing forward along the path (A ->
         // B).  Filled by BuildStations from the source faces' plane normals — the
         // same `outA` / `-outB` the Hermite uses — and the whole of the item 3(a)
@@ -2267,6 +2499,11 @@ namespace
         // difference that is parallel to the chord.
         float       m_endTan[2][3] = { { 0.0f, 0.0f, 1.0f }, { 0.0f, 0.0f, 1.0f } };
         bool        m_haveEndTan = false;
+        // KIWI-UX (ROUND BN, ITEM 2): the row order that makes a CURVE strip face
+        // OUTWARD.  Derived once per BuildStations from the ring's Newell normal
+        // against the loft direction (the derivation is on that assignment); read
+        // by ApplyCurve.  A per-BUILD fact, not a preference — Reset clears it.
+        bool        m_outFlip    = false;
         bool        m_ok         = false;
         bool        m_fellBack   = false;  // ROUND AO, ITEM 1(a) — tangent -> ruled
         const char *m_why        = "no loft yet";
@@ -2301,7 +2538,6 @@ bool KiwiLoft_CanExecute()
 // ─── registration + lookup ───────────────────────────────────────────────────
 void KiwiLoft_RegisterCommands()
 {
-    extern bool Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId );
     // Unbound here — this is the CLASSIC-profile row.  kiwi_keymap.cpp puts it on
     // bare L in the modern profile (Plasticity's own chord, default-keymap.ts:270);
     // the vk 0x4C displacement audit is in kiwi_keymap.h.

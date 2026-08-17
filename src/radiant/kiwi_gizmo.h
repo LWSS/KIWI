@@ -45,9 +45,9 @@
 //
 // (plus the two gates that were always there: modern input on, and this file's
 // own persisted toggle, which is now an ADDITIONAL gate rather than the main
-// one.)  The anchor is the LIVE command's own anchor — KiwiXform_ActivePivot, not
-// KiwiXform_ReferencePoint, because the latter re-derives from the selection and
-// answers a different question entirely.
+// one.)  The anchor is the LIVE command's own anchor — KiwiXform_ActivePivot, and
+// only that: a point re-derived from the selection answers a different question
+// entirely.  KIWI-UX (CLEANUP, A-17).
 //
 // ROUND L: that anchor now RIDES the applied translation (the latched reference
 // point plus this gesture's delta), because "the gizmo doesn't move with the
@@ -86,7 +86,9 @@
 
 // Hover feedback.  Called from the viewport's move arms; recomputes which handle
 // (if any) is under the cursor for the next DrawWorld.  Cheap: one pivot query
-// plus at most 7 projections (move) or 3 * 48 (rotate, only while R is live).
+// plus at most 17 Pick_WorldToImage projections in the move HitTest — KIWI-UX
+// (CLEANUP, C-45) recounted: 1 anchor + 3 planes * 4 corners + 1 normal tip +
+// 3 axis tips — or 3 * (1 + 48) in RingHitTest (rotate, only while R is live).
 void KiwiGizmo_Hover( int imgX, int imgY, bool over );
 
 // LMB-down hit test.  True = a handle was grabbed and the LIVE command has been
@@ -135,13 +137,20 @@ void KiwiGizmo_SetShow( bool on );
 // Hard per-frame segment budget for whichever gizmo is up (kiwi_lines.h TRAP 1).
 // Only ONE of the two can be visible at a time (they key off two mutually
 // exclusive active commands), so the budget is the larger of:
-//   MOVE    3 axes * (shaft + 2 chevron) = 9
-//         + 3 plane corners * 2          = 6
-//         + 1 centre square              = 4      = 19
-//   ROTATE  3 rings * KGZ_RING_SEGMENTS (48)      = 144
-// RAISED 48 -> 192 in shakeout D for the rings, with headroom for the ring
-// tick marks.  KiwiCmd_DrawWorld's own 192-segment gesture batch is UNCHANGED —
-// the rings live in this file's batch, not in the command's.
+//   MOVE    3 axes  * (shaft + 3 chevron)          = 12   (EmitAxis)
+//         + 3 planes * 4 perimeter                 = 12   (EmitPlane)
+//         + 1 origin ring * KGZ_CENTER_SEGS (24)   = 24   (EmitCentreRing)
+//         + 1 face-normal arrow (shaft + 3)        =  4   (EmitNormalArrow,
+//                                                          only while pushing
+//                                                   faces)      = 52
+//   ROTATE  3 rings * KGZ_RING_SEGMENTS (48)       = 144
+//         + 1 view ring * KGZ_VIEW_RING_SEG (40)   =  40         = 184
+// KIWI-UX (CLEANUP, C-45): the MOVE row above was retallied against the current
+// emitters; it used to read 9 / 6 / 4 = 19 and named the origin ring a "centre
+// square".  RAISED 48 -> 192 in shakeout D for the rings, with headroom for the
+// ring tick marks.  The hover re-emphasis pass opens its OWN 32-segment batch, so
+// it does not consume this one.  KiwiCmd_DrawWorld's own 192-segment gesture
+// batch is UNCHANGED — the rings live in this file's batch, not in the command's.
 #define KGIZMO_MAX_SEGMENTS 192
 
 // ── ROUND AK, ITEM 4: THE FILL BUDGET, SEPARATELY ───────────────────────────
@@ -152,10 +161,12 @@ void KiwiGizmo_SetShow( bool on );
 // consume KGIZMO_MAX_SEGMENTS at all — the line budget above is untouched and
 // every outline round AJ shipped still draws.  Their own bound, from
 // kiwi_gizmo.cpp THE FILLS:
-//   MOVE   3 axis cones      * 2*KGZ_CONE_SEGS (10) tris  = 60
-//        + 1 face-normal cone (only while pushing faces)  = 20
+// KIWI-UX (CLEANUP, C-45): retallied — round AN replaced both cone fills with
+// single billboarded triangles, so the old 60 + 20 cone rows are gone.
+//   MOVE   3 axis heads      * 1 tri                      =  3
+//        + 1 face-normal head (only while pushing faces)  =  1
 //        + 3 plane squares   * 2                          =  6
-//        + 1 origin disc     * KGZ_CENTER_SEGS (24)       = 24   = 110 tris
+//        + 1 origin disc     * KGZ_CENTER_SEGS (24)       = 24   =  34 tris
 //          in 8 R_AddRenderCmdDrawTris commands, one per element
 //   ROTATE nothing — its rings are lines and always were.
 // One MATERIAL_COLOR bracket opens and closes the whole pass, and the staging

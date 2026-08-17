@@ -22,6 +22,11 @@
 #include "kiwi_command.h"
 #include "kiwi_conselect.h"          // shakeout F — the construction move arm
 #include "kiwi_extrude.h"            // ROUND X — KEXT_SELF_SNAP_BAND (the ONE self-snap rule)
+// KIWI-UX (ROUND BL, ITEM 4): the object move's quantiser is KiwiSnap_LatticeAxis
+// now (one lattice rule, majors included), so this file makes no KiwiGrid_ call at
+// all.  The include stays because the header is what documents the lattice this
+// file's comments argue about, and dropping it would be a build change for a
+// documentation reason.
 #include "kiwi_grid.h"
 #include "kiwi_lines.h"
 #include "kiwi_numeric.h"
@@ -31,6 +36,7 @@
 #include "kiwi_snap.h"
 #include "kiwi_units.h"
 #include "kiwi_validity.h"
+#include "kiwi_vec.h"     // KIWI-UX (CLEANUP, A-15): the one spelling of Dot3/Sub3/...
 
 #include <math.h>
 #include <stdarg.h>
@@ -69,23 +75,26 @@ extern void  Undo_AddEntity( int a1 );                                 // undo.c
 // entity variant is what Cmd_OnSelectionDelete (mainfrm.cpp) feeds for the same
 // reason: Select_Delete frees an owner entity left with no brushes.
 extern void  Undo_AddEntity_W( entity_s *a1 );                         // undo.cpp:633
-extern void  Select_Deselect( int bAlsoFreeFaces );                    // select.cpp:1428 (0x48E800)
+extern void  Select_Deselect( int bAlsoFreeFaces );                    // select.cpp:1445 (0x48E800)
 extern void  Select_Brush( selbrush_t *brush, char some_overwrite,
                            char bStatus, char center_grid_on_selection ); // select.cpp:884
-extern void  Select_Delete();                                          // select.cpp:1504 (0x48E760)
+extern void  Select_Delete();                                          // select.cpp:1521 (0x48E760)
 
 extern bool  ImGuiShell_CameraPaintCursor( int *x, int *y, int *w, int *h );   // imgui_shell.cpp
 
 namespace
 {
     // ── tuning (spec §13's numbers, in one place) ───────────────────────────
-    // KIWI-UX (shakeout G): R's KX_DEG_PER_PIXEL is GONE — see KiwiRotateCommand::
-    // Recompute.  The free horizontal-pixel mapping it fed was applying a yaw to
-    // every mouse move after R was pressed, with no handle ever grabbed.
+    // KIWI-UX (CLEANUP, A-35): RULE — R has NO degrees-per-pixel constant.  A
+    // rotation comes only from a grabbed ring (KiwiRotateCommand::Recompute); a
+    // free mapping would yaw on every mouse move after R was pressed.
     const float KX_SCALE_PER_PIXEL = 0.005f;   // S
     const float KX_SCALE_MIN       = 0.01f;    // S clamp
     const float KX_ANGLE_STEP      = 5.0f;     // R snap increment, degrees
-    const float KX_EPS             = 1.0e-4f;
+    // KIWI-UX (CLEANUP, A-26): defined FROM the exported KXPUSH_EPS
+    // (kiwi_transform.h), which kiwi_extrude.cpp's HUD reads for the same
+    // push-versus-delete comparison.  Same value it has always been.
+    const float KX_EPS             = KXPUSH_EPS;
 
     enum { KX_MAX_EDGE_FACES = 8 };            // faces one brush edge may touch
 
@@ -118,33 +127,7 @@ namespace
     const kiwiNumField_t KXF_ROTATE[1] = { { "angle",  KNUM_ANGLE,  false } };
     const kiwiNumField_t KXF_SCALE [1] = { { "factor", KNUM_FACTOR, false } };
 
-    // ── small vector helpers ────────────────────────────────────────────────
-    inline float Dot3( const float *a, const float *b )
-    {
-        return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-    }
-    inline void Copy3( const float *a, float *o ) { o[0]=a[0]; o[1]=a[1]; o[2]=a[2]; }
-    inline void Sub3( const float *a, const float *b, float *o )
-    { o[0]=a[0]-b[0]; o[1]=a[1]-b[1]; o[2]=a[2]-b[2]; }
-    inline void Add3( const float *a, const float *b, float *o )
-    { o[0]=a[0]+b[0]; o[1]=a[1]+b[1]; o[2]=a[2]+b[2]; }
-    inline void Mad3( const float *a, const float *d, float s, float *o )
-    { o[0]=a[0]+d[0]*s; o[1]=a[1]+d[1]*s; o[2]=a[2]+d[2]*s; }
-    inline void Cross3( const float *a, const float *b, float *o )
-    {
-        o[0] = a[1]*b[2] - a[2]*b[1];
-        o[1] = a[2]*b[0] - a[0]*b[2];
-        o[2] = a[0]*b[1] - a[1]*b[0];
-    }
-    inline float Len3( const float *a ) { return sqrtf( Dot3( a, a ) ); }
-    bool Norm3( float *v )
-    {
-        const float l = Len3( v );
-        if ( !( l > 1.0e-6f ) )
-            return false;
-        v[0] /= l; v[1] /= l; v[2] /= l;
-        return true;
-    }
+    // ── local predicate over the shared vec helpers (kiwi_vec.h) ────────────
     inline bool PointNear( const float *a, const float *b, float tol )
     {
         float d[3];
@@ -267,29 +250,10 @@ namespace
         return true;
     }
 
-    // Closest point on the line (pt, axis) to the ray.  The classic two-line
-    // closest-approach solve; `axis` and ray.dir are unit, so a = c = 1 and the
-    // determinant is 1 - (axis·dir)², which vanishes exactly when the axis points
-    // at the camera — the one case where an axis drag has no usable mapping.
-    bool RayAxis( const ray_t &ray, const float *pt, const float *axis, float *out )
-    {
-        float w0[3];
-        Sub3( pt, ray.origin, w0 );
-        const float b = Dot3( axis, ray.dir );
-        const float d = Dot3( axis, w0 );
-        const float e = Dot3( ray.dir, w0 );
-        const float den = 1.0f - b * b;
-        // ── KIWI-UX (ROUND AI, ITEM 2): THE SAMPLE GATE ─────────────────────
-        // den is sin^2(theta) and the solve is amplified by 1/den, so the old
-        // 1.0e-4 only refused theta < 0.6 degrees and happily returned a point
-        // hundreds of units away for anything steeper.  KCAM_RAYAXIS_MIN_DEN is
-        // the same 14-degree cone the view gate uses (kiwi_camera.h).
-        if ( fabsf( den ) < KCAM_RAYAXIS_MIN_DEN )
-            return false;
-        const float s = ( b * e - d ) / den;
-        Mad3( pt, axis, s, out );
-        return true;
-    }
+    // KIWI-UX (CLEANUP, RayAxis): the local copy is gone - it was one of four
+    // byte-identical bodies, and THIS file's was the one the other three
+    // mirrored.  It moved verbatim to KiwiCam_RayAxis (kiwi_camera.h), beside
+    // the KCAM_RAYAXIS_MIN_DEN gate every copy already cited.
 
     // ── geometry readers ────────────────────────────────────────────────────
     winding_t *WindingOf( const selbrush_t *b, int faceIndex )
@@ -313,41 +277,19 @@ namespace
         return true;
     }
 
-    bool EdgeEnds( const sel_item_t &it, float *a, float *b )
-    {
-        winding_t *w = WindingOf( it.brush, it.faceIndex );
-        if ( !w || w->numpoints < 2 )
-            return false;
-        if ( it.edgeIndex < 0 || it.edgeIndex >= w->numpoints )
-            return false;
-        Copy3( w->p[it.edgeIndex], a );
-        Copy3( w->p[( it.edgeIndex + 1 ) % w->numpoints], b );
-        return true;
-    }
-
-    bool VertexPos( const sel_item_t &it, float *out )
-    {
-        if ( !it.brush || !it.brush->def )
-            return false;
-        if ( it.faceIndex < 0 )                       // patch control point
-        {
-            patchMesh_t *pm = it.brush->def->patch;
-            if ( !pm || pm->width <= 0 || pm->height <= 0
-              || pm->width > 16 || pm->height > 16 )
-                return false;
-            const int col = it.vertIndex / pm->height;
-            const int row = it.vertIndex % pm->height;
-            if ( col < 0 || col >= pm->width || row < 0 || row >= pm->height )
-                return false;
-            Copy3( pm->ctrl[col][row].xyz, out );
-            return true;
-        }
-        winding_t *w = WindingOf( it.brush, it.faceIndex );
-        if ( !w || it.vertIndex < 0 || it.vertIndex >= w->numpoints )
-            return false;
-        Copy3( w->p[it.vertIndex], out );
-        return true;
-    }
+    // KIWI-UX (CLEANUP, A-13 / A-14 / C-49): EdgeEnds and VertexPos were copies
+    // three and four of two resolutions that now live in kiwi_selection.h as
+    // Sel_EdgeEnds / Sel_ItemWorldPos (the latter carries A-14's named
+    // KIWI_PATCH_MAX_DIM instead of the bare 16 this copy had).
+    //
+    // THE checkLive ARGUMENT, per site: the four SELECTION-LOOP callers pass
+    // false because each has ALREADY run Sel_BrushLive on the same item one line
+    // above, and asking twice would put a second display-list walk inside a
+    // per-item loop — the exact cost DominantKind's own checkLive parameter
+    // exists to avoid (see :330 below).  The two ACTIVE-ITEM callers that never
+    // tested liveness at all (the G reference point and the S/R vertex anchor)
+    // take the default true: one walk per gesture start, and it closes a real
+    // deref-a-freed-node hole.
 
     // ── the selection's dominant kind (spec §13, mixed selections) ──────────
     // objects > faces > edges > verts.  Returns false for an empty/unusable one.
@@ -382,20 +324,9 @@ namespace
         return selected_brushes.next != &selected_brushes;
     }
 
-    // ── undo: cover a brush the bracket's Undo_AddBrushList did not ─────────
-    // Mirrors Undo_AddBrushList's per-element body (undo.cpp 0x45E7C0): a
-    // fixed-size entity's brush needs the ENTITY saved too, and the entity goes in
-    // first (undo.cpp warns when brushes follow entities, and the ported list
-    // walker orders them exactly this way).
-    void UndoCoverBrush( selbrush_t *node )
-    {
-        if ( !node || !node->def )
-            return;
-        entity_s *owner = node->def->owner;
-        if ( owner && owner->eclass && owner->eclass->fixedsize )
-            Undo_AddEntity( (int)(intptr_t)owner );
-        Undo_AddBrush( (entity_brush_s *)node->def );
-    }
+    // KIWI-UX (CLEANUP, UndoCoverBrush): the local copy is gone — this was one
+    // of five verbatim bodies.  It is KiwiCmd_UndoCoverBrush (kiwi_command.h)
+    // now, beside the bracket whose blind spot it exists to fill.
 
     // ═════════════════════════════════════════════════════════════════════════
     //  The shared modal base: constraint state, numeric state, HUD, undo latch.
@@ -649,10 +580,9 @@ namespace
         float NumRaw() const { return Units_ToDisplay( m_numWorld ); }
 
         // Snapping is live unless CTRL suppressed it (kiwi_snap.h arm 0).
-        bool SnapActive() const
-        {
-            return m_snap.valid && m_snap.type != SNAP_NONE;
-        }
+        // KIWI-UX (CLEANUP, SnapActive): one spelling, KiwiSnap_Active in
+        // kiwi_snap.h — this member is the accessor over THIS command's result.
+        bool SnapActive() const { return KiwiSnap_Active( m_snap ); }
 
         void OpenUndo( const char *literalOp )
         {
@@ -712,11 +642,13 @@ namespace
             return ( a == 0 ) ? "X" : ( a == 1 ) ? "Y" : "Z";
         }
 
-        const char *ConstraintText() const
+        // KIWI-UX (CLEANUP, A-42): the buffer is the CALLER'S.  This used to return
+        // a pointer to a function-local static, which is correct only while no one
+        // format string uses it twice — an invisible failure the moment one does.
+        const char *ConstraintText( char *buf, size_t n ) const
         {
-            static char buf[24];
-            if ( m_con == CON_AXIS )  { _snprintf( buf, sizeof(buf), "axis %s",  AxisName( m_axis ) ); return buf; }
-            if ( m_con == CON_PLANE ) { _snprintf( buf, sizeof(buf), "plane %s", AxisName( m_axis ) ); return buf; }
+            if ( m_con == CON_AXIS )  { _snprintf( buf, n, "axis %s",  AxisName( m_axis ) ); buf[n - 1] = '\0'; return buf; }
+            if ( m_con == CON_PLANE ) { _snprintf( buf, n, "plane %s", AxisName( m_axis ) ); buf[n - 1] = '\0'; return buf; }
             return "free";
         }
 
@@ -883,6 +815,13 @@ namespace
         // ROUND L: raised by the shared arm for every handle this command owns.
         void HandleGrab( bool held ) override { NoteGrab( held ); }
 
+        // KIWI-UX (ROUND BK, ITEM 6b): "is a handle actually held right now?",
+        // published on the same terms as PivotPlacingNow — KiwiXform_WantsSnapDots
+        // asks it and nothing outside may SET the flag.  `m_grabbed` rather than
+        // GrabLive(): the dots are guidance and must appear on the press, not one
+        // pixel of travel later.
+        bool HandleHeld() const { return m_grabbed; }
+
         // The DRIVE face's own normal, for the gizmo's fourth arrow.  False unless
         // this gesture is actually pushing faces.
         bool PushDir( float *out3 ) const
@@ -984,14 +923,24 @@ namespace
         // the two callers can never drift apart.
         bool PreemptIdle() const override { return IdleUnmovedFace(); }
 
-        // ── KIWI-UX (ROUND Z, ITEM 2): THE FACE PUSH SNAPS ON CTRL ONLY ─────
-        // The push/pull IS the "extruding" the directive names — §20's one-axis
-        // gesture, the one wearing the lollipop.  An OBJECT / EDGE / VERTEX move is
-        // a three-axis drag with no start plane and keeps the editor-wide
-        // convention (Ctrl suppresses), because nothing about it was reported and a
-        // blanket inversion would be a second grammar nobody asked for.
-        bool SnapOptIn() const override
-        { return m_kind == SEL_FACE && !m_construct && !m_faces.empty(); }
+        // ══════════════════════════════════════════════════════════════════
+        //  KIWI-UX (ROUND BO, ITEM 3) — THE SNAP CONTEXT, AND THE ONE EXCEPTION
+        // ══════════════════════════════════════════════════════════════════
+        // Round Z's asymmetry is gone: this command is a TRANSFORM in every arm —
+        // object move, edge/vertex drag, gizmo axis drag AND the face push/pull —
+        // so all of them are RAW until Ctrl is held.  USER DIRECTIVE, verbatim:
+        // *"with dragging, there is no snapping unless ctrl is held.  Respect
+        // that."*  The BN occlusion-gated ladder the user praised is not watered
+        // down by this; it is what Ctrl now switches ON.
+        //
+        // THE ONE EXCEPTION, and it is the whole reason SnapContext has a third
+        // value: PIVOT PLACEMENT (V).  The pivot exists to be put exactly on a
+        // corner — "able to snap corners together easily by placing a pivot" is the
+        // directive that created it — so a raw pivot placement would be a feature
+        // with no purpose.  It snaps always, Ctrl included; the contract page says
+        // so out loud so it does not read as the old inconsistency coming back.
+        kiwiSnapCtx_t SnapContext() const override
+        { return m_pivotPlacing ? KSNAPCTX_ALWAYS : KSNAPCTX_TRANSFORM; }
 
         // ── KIWI-UX (ROUND Z, ITEM 1): G / R / S MAY TAKE THIS OVER ─────────
         // kiwi_command.h CanSwapTo carries the argument and the Plasticity cites.
@@ -1311,65 +1260,10 @@ namespace
                 Add3( m_ref, m_total, out3 );
         }
 
-        // ── KIWI-UX (ROUND T): THE SNAP QUERY FOLLOWS THE **PIVOT** ──────────
-        // USER REPORT, verbatim: "when I move the pivot point, and then try to
-        // snap to another object, my mouse should just be able to snap onto it
-        // while I'm dragging […] I want the pivot to change where the gizmo RIDES
-        // on the object and lets me snap directly using the gizmo basically."
-        //
-        // Round L made the pivot the MAPPING reference and gave it a riding draw
-        // anchor, and a geometry snap already resolves to `snapPos - m_ref`, i.e.
-        // "put the pivot on that target".  The half that was missing is that the
-        // snap QUERY is a screen-space question (kiwi_snap.h: every arm ranks by
-        // pixel distance from the query point) and it was being asked AT THE
-        // CURSOR.  Grab an axis arrow with the pivot on a far corner and the
-        // cursor is centimetres away from the pivot on screen — so the query
-        // offered whatever was near the ARROW, and the corner the pivot was
-        // sliding through was never even a candidate.  The user's picture is
-        // exactly that: the snap label reading "end 0,0,0" at the pivot, because
-        // the pivot is where the answer is supposed to come from.
-        //
-        // So this names the PIVOT'S CURRENT SCREEN POSITION as the query point,
-        // and the framework re-asks the snap there (kiwi_command.h
-        // SnapQueryAnchor).  Three deliberate limits:
-        //
-        //   * OBJECT MOVES ONLY, and only while a pivot override is in force.
-        //     Without a pivot the reference already IS under the cursor's control
-        //     and nothing needs redirecting; a face/edge/vertex drag reshapes the
-        //     solid and has no single riding point (PivotRide says the same).
-        //   * NOT while the pivot is being PLACED (m_pivotPlacing): that gesture
-        //     is the one thing whose snap genuinely belongs to the cursor.
-        //   * the position is the PRE-SNAP mapped one (m_snapAnchor, written by
-        //     Recompute from the cursor mapping BEFORE the snap arm runs), so the
-        //     query cannot feed on its own output.  It is therefore one frame
-        //     behind — which is the correct behaviour and not a compromise: the
-        //     anchor converges onto a target while the cursor keeps pushing
-        //     toward it and lets go as soon as the cursor pulls away.
-        //
-        // ── KIWI-UX (ROUND Z, ITEM 4): **REVERSED**.  THE QUERY IS AT THE CURSOR ─
-        // USER REPORT, verbatim: "the snapping needs to respect my mouse more in
-        // this aspect as well.  I should be able to hover exactly where the corner
-        // of another brush is, but I have to guess where an invisible offset is
-        // currently."
-        //
-        // Round T's redirect is the thing that made the offset invisible.  Asking
-        // the query at the PIVOT means the mouse is no longer pointing at the
-        // candidates — the user has to steer a point they can only infer, one frame
-        // behind, until it happens to graze a target.  That is a strictly harder
-        // game than the one it replaced, and it was aimed at the WRONG defect: the
-        // pivot really was in the wrong place, but because ApplyPivot double-counted
-        // the applied delta (see above), not because the query was at the cursor.
-        //
-        // With the double-count fixed the round-L mapping is already the whole
-        // answer.  The geometry-snap arm resolves `total = snapPos - m_ref`, and the
-        // invariant `live == m_ref + total` then puts the PIVOT exactly on whatever
-        // the CURSOR is hovering.  So: point at the corner, the pivot goes to the
-        // corner.  The redirect is gone and the override returns false always, which
-        // is the framework's default — kiwi_command.h SnapQueryAnchor keeps the hook
-        // for a future command that genuinely needs it.
-        //
-        // (m_snapAnchor / m_snapAnchorHave went with it: their only reader was the
-        // projection above.)
+        // KIWI-UX (CLEANUP, A-35): RULE — the snap query is asked AT THE CURSOR
+        // (kiwi_command.h's SnapQueryAnchor default); this command installs no
+        // override.  Do not redirect it at the pivot: the mapping already resolves
+        // `total = snapPos - m_ref`, so pointing at a corner puts the pivot there.
 
         // The vector the SESSION PIVOT rode this gesture, or nothing.  Only a
         // WHOLE-SELECTION translation carries the pivot with it: a face push, an
@@ -1623,15 +1517,49 @@ namespace
             m_hud[0] = '\0';
         }
 
-        bool AllLive() const
+        // KIWI-UX (CLEANUP, A-30): the ONE liveness sweep of the frame.  Walks each
+        // unit exactly once, stamps the answer, and reports whether every unit was
+        // live — the same question, and the same answer, AllLive gave here before.
+        bool StampLiveness()
         {
+            m_liveFace.assign( m_faces.size(), 0 );
+            m_liveEdge.assign( m_edges.size(), 0 );
+            m_liveVert.assign( m_verts.size(), 0 );
+            bool all = true;
             for ( size_t i = 0; i < m_faces.size(); ++i )
-                if ( !Sel_BrushLive( m_faces[i].node ) ) return false;
+                if ( Sel_BrushLive( m_faces[i].node ) ) m_liveFace[i] = 1; else all = false;
             for ( size_t i = 0; i < m_edges.size(); ++i )
-                if ( !Sel_BrushLive( m_edges[i].node ) ) return false;
+                if ( Sel_BrushLive( m_edges[i].node ) ) m_liveEdge[i] = 1; else all = false;
             for ( size_t i = 0; i < m_verts.size(); ++i )
-                if ( !Sel_BrushLive( m_verts[i].node ) ) return false;
-            return true;
+                if ( Sel_BrushLive( m_verts[i].node ) ) m_liveVert[i] = 1; else all = false;
+            m_liveStamped = true;
+            return all;
+        }
+
+        // The stamp's lifetime, on EVERY exit path out of Recompute (it has several).
+        struct liveScope_t
+        {
+            KiwiMoveCommand *c;
+            explicit liveScope_t( KiwiMoveCommand *cmd ) : c( cmd ) {}
+            ~liveScope_t() { c->m_liveStamped = false; }
+        };
+
+        // One unit's liveness: the stamp inside a Recompute, the direct display-list
+        // test everywhere else.  Same answer either way; only the cost differs.
+        bool FaceLive( size_t i ) const
+        {
+            if ( m_liveStamped && i < m_liveFace.size() ) return m_liveFace[i] != 0;
+            return Sel_BrushLive( m_faces[i].node );
+        }
+        bool EdgeLive( size_t i ) const
+        {
+            if ( m_liveStamped && i < m_liveEdge.size() ) return m_liveEdge[i] != 0;
+            return Sel_BrushLive( m_edges[i].node );
+        }
+        bool VertLive( size_t i ) const
+        {
+            if ( m_liveStamped && i < m_liveVert.size() ) return m_liveVert[i] != 0;
+            return Sel_BrushLive( m_verts[i].node );
         }
 
         // Snapshot one brush def once, however many items of the gesture name it.
@@ -1661,7 +1589,7 @@ namespace
             for ( size_t i = 0; i < m_faces.size(); ++i )
             {
                 faceUnit_t &u = m_faces[i];
-                if ( !Sel_BrushLive( u.node ) || !u.def->faces
+                if ( !FaceLive( i ) || !u.def->faces      // KIWI-UX (CLEANUP, A-30)
                   || u.faceIndex >= u.def->faceCount )
                     continue;
                 memcpy( &u.def->faces[u.faceIndex].mtldef[0], u.baseMtl, sizeof( u.baseMtl ) );
@@ -1688,12 +1616,15 @@ namespace
 
         bool BaseNodeLive( const brush_t *def ) const
         {
+            // KIWI-UX (CLEANUP, A-30): the terminal test is the frame's stamp when
+            // there is one, so a rollback is O(base x units) rather than
+            // O(base x units x brushes).
             for ( size_t i = 0; i < m_faces.size(); ++i )
-                if ( m_faces[i].def == def ) return Sel_BrushLive( m_faces[i].node );
+                if ( m_faces[i].def == def ) return FaceLive( i );
             for ( size_t i = 0; i < m_edges.size(); ++i )
-                if ( m_edges[i].def == def ) return Sel_BrushLive( m_edges[i].node );
+                if ( m_edges[i].def == def ) return EdgeLive( i );
             for ( size_t i = 0; i < m_verts.size(); ++i )
-                if ( m_verts[i].def == def ) return Sel_BrushLive( m_verts[i].node );
+                if ( m_verts[i].def == def ) return VertLive( i );
             return false;
         }
 
@@ -1752,7 +1683,10 @@ namespace
                 Copy3( def->faces[it.faceIndex].plane.normal, u.normal );
                 memcpy( u.basePts, &def->faces[it.faceIndex].planepts[0][0], sizeof( float ) * 9 );
                 memcpy( u.baseMtl, &def->faces[it.faceIndex].mtldef[0], sizeof( u.baseMtl ) );
-                u.depth  = FaceDepth( def, u.normal, u.basePts );   // shakeout G
+                // SHAKEOUT G — the push-through-delete threshold (faceUnit_t::depth).
+                // ROUND Q hoisted the body to namespace scope, so the E-extrude's
+                // negative arm measures the brush with this exact ruler.
+                u.depth  = FaceDepthAlong( def, u.normal, u.basePts );  // KIWI-UX (CLEANUP, A-41)
                 u.doomed = false;
                 m_faces.push_back( u );
                 AddBaseline( def );
@@ -1781,14 +1715,6 @@ namespace
             return true;
         }
 
-        // SHAKEOUT G — the push-through-delete threshold (faceUnit_t::depth).
-        // ROUND Q: the body now lives at namespace scope as FaceDepthAlong, so the
-        // E-extrude's negative arm measures the brush with this exact ruler.
-        static float FaceDepth( const brush_t *def, const float n[3], const float basePts[9] )
-        {
-            return FaceDepthAlong( def, n, basePts );
-        }
-
         bool BeginEdges()
         {
             const selection_t &sel = KiwiSel();
@@ -1798,7 +1724,7 @@ namespace
                 if ( it.kind != SEL_EDGE || !Sel_BrushLive( it.brush ) || it.brush->patch )
                     continue;
                 float a[3], b[3];
-                if ( !EdgeEnds( it, a, b ) )
+                if ( !Sel_EdgeEnds( it, a, b, false ) )   // live: tested above
                     continue;
 
                 // ── THE DEDUP (RADIANT_KNOWN_ISSUES "UX overhaul" debt) ──────
@@ -1867,7 +1793,7 @@ namespace
             if ( act.kind == SEL_EDGE )
             {
                 float a[3], b[3];
-                if ( EdgeEnds( act, a, b ) )
+                if ( Sel_EdgeEnds( act, a, b ) )          // live: not tested above
                     for ( size_t i = 0; i < m_edges.size(); ++i )
                         if ( ( PointNear( m_edges[i].e0, a, 0.1f ) && PointNear( m_edges[i].e1, b, 0.1f ) )
                           || ( PointNear( m_edges[i].e0, b, 0.1f ) && PointNear( m_edges[i].e1, a, 0.1f ) ) )
@@ -1949,7 +1875,7 @@ namespace
                 if ( it.kind != SEL_VERTEX || !Sel_BrushLive( it.brush ) || !it.brush->def )
                     continue;
                 float p[3];
-                if ( !VertexPos( it, p ) )
+                if ( !Sel_ItemWorldPos( it, p, false ) )  // live: tested above
                     continue;
 
                 vertUnit_t u;
@@ -2007,7 +1933,7 @@ namespace
 
             const sel_item_t &act = KiwiSel().active;
             float p[3];
-            if ( act.kind == SEL_VERTEX && VertexPos( act, p ) )
+            if ( act.kind == SEL_VERTEX && Sel_ItemWorldPos( act, p ) )   // live: not tested above
                 Copy3( p, m_ref );
             else
                 Copy3( m_verts[0].basePos, m_ref );
@@ -2043,7 +1969,7 @@ namespace
             if ( m_kind == SEL_FACE )
             {
                 float p[3];
-                if ( !RayAxis( ray, m_ref, m_pushDir, p ) )
+                if ( !KiwiCam_RayAxis( ray, m_ref, m_pushDir, p ) )
                     return false;
                 float rel[3];
                 Sub3( p, m_ref, rel );
@@ -2056,7 +1982,7 @@ namespace
             {
                 float ax[3] = { 0.0f, 0.0f, 0.0f };
                 ax[m_axis] = 1.0f;
-                return RayAxis( ray, m_ref, ax, out );
+                return KiwiCam_RayAxis( ray, m_ref, ax, out );
             }
             if ( m_con == CON_PLANE )
             {
@@ -2131,8 +2057,27 @@ namespace
             else
             {
                 Copy3( m_total, m_lockBase );
+                // KIWI-UX (ROUND BL, ITEM 4): every GRAB and every constraint change
+                // re-arms the pivot rebase.  It is consumed on the first frame the
+                // grab is LIVE (Recompute), not here: the cursor has not necessarily
+                // moved yet, and a rebase on the press edge would move geometry on a
+                // press — the exact thing the round-L grab-freshness latch exists to
+                // forbid ("It should ONLY move with gizmo drag, no pre existing
+                // mouse offset").
+                m_pivotRebase = true;
             }
             LatchMapStart();
+        }
+
+        // KIWI-UX (ROUND BL, ITEM 4): "does THIS gesture own world axis k?" — the
+        // predicate three separate loops in Recompute spelled out by hand, and which
+        // the rebase and the lattice pass added this round both need as well.  A
+        // fourth hand-rolled copy is how the axis sets drift apart.
+        bool OwnsAxis( int k ) const
+        {
+            return ( m_con == CON_FREE )
+                || ( m_con == CON_AXIS  && k == m_axis )
+                || ( m_con == CON_PLANE && k != m_axis );
         }
 
         // Project a delta onto the active constraint.
@@ -2211,7 +2156,10 @@ namespace
         // spelled out is as explicit an act as a grab.
         void Recompute() override
         {
-            if ( !AllLive() )
+            // KIWI-UX (CLEANUP, A-30): the frame's ONE liveness sweep, taken here —
+            // where AllLive used to run — and dropped again on every exit path.
+            liveScope_t liveThisFrame( this );
+            if ( !StampLiveness() )
             {
                 // The map freed something under us: abandon the gesture rather
                 // than write through a dangling node.  Cancel() skips dead nodes.
@@ -2235,6 +2183,51 @@ namespace
             float p[3];
             if ( GrabLive() && m_haveMapStart && MapCursor( p ) )
             {
+                // ══════════════════════════════════════════════════════════════
+                //  KIWI-UX (ROUND BL, ITEM 4) — THE PIVOT RIDES THE CURSOR
+                // ══════════════════════════════════════════════════════════════
+                // USER REPORT, verbatim: *"You need to keep the pivot point in line
+                // with the cursor like this and snap it."*  Round BK answered the
+                // same report ("the center of the gizmo should always track my
+                // mouse") INSIDE THE SNAP ARM — KiwiSnap_AreaMagnet — and that arm
+                // is downstream of this mapping, which is where the offset lives.
+                //
+                // THE MAPPING IS RELATIVE and always has been: `d = p - m_mapStart`
+                // moves the selection by the cursor's TRAVEL since the grab, so
+                // whatever gap there was between the cursor and the pivot at the
+                // instant of the grab is carried, unchanged, for the whole drag.
+                // Grab a gizmo arrow 50 px out along its shaft, or grab a big
+                // cylinder anywhere but its centre, and the pivot is 50 px (or half
+                // a cylinder) away from the crosshair for ever after.  That is the
+                // user's screenshot, and it is also why "snap to the major grid
+                // line" felt impossible: every snap band in this command is measured
+                // around THE PIVOT, so the user was aiming a cursor that was not the
+                // thing being snapped.  Nothing was wrong with the magnet; it was
+                // being aimed with the wrong hand.
+                //
+                // THE REBASE, ONCE PER GRAB.  On the first LIVE frame of a grab the
+                // components this constraint OWNS are re-based so that the pivot
+                // sits exactly at the cursor's constrained projection; the delta
+                // math below is then untouched, so round AN's "a constraint owns the
+                // delta of THIS grab, the base rides through" still holds exactly —
+                // the off-constraint components of m_lockBase are not written here,
+                // and neither is anything else.  Round Z's invariant
+                // (`live == m_ref + m_total`) is what MAKES the rebase expressible:
+                // wanting pivot == p is wanting total == p - m_ref.
+                //
+                // MapCursor IS the constrained projection, for every constraint:
+                // KiwiCam_RayAxis onto the locked axis through m_ref (CON_AXIS), the
+                // ray/plane hit for CON_PLANE, and the camera-facing move plane for
+                // CON_FREE.  So "the pivot tracks the cursor's constrained
+                // projection" needs no new geometry — only the one-time rebase.
+                if ( m_pivotRebase )
+                {
+                    m_pivotRebase = false;
+                    for ( int k = 0; k < 3; ++k )
+                        if ( OwnsAxis( k ) )
+                            m_lockBase[k] = p[k] - m_ref[k];
+                    Copy3( p, m_mapStart );
+                }
                 float d[3];
                 Sub3( p, m_mapStart, d );
                 // ── KIWI-UX (ROUND AN, ITEM 2): CONSTRAIN THE DELTA, NOT THE TOTAL ──
@@ -2258,9 +2251,10 @@ namespace
             // previous frame's.
             Copy3( total, m_total );
 
-            // (ROUND Z, ITEM 4: round T's pre-snap anchor publish is GONE with the
-            //  redirect it fed — the snap query is asked at the CURSOR again.  See
-            //  the SnapQueryAnchor note above.)
+            // KIWI-UX (ROUND BL, ITEM 4): the HUD's major-line lamp is recomputed
+            // from scratch every frame, HERE, so a typed value or a released grab
+            // cannot leave it lit (the lattice pass below only ever sets it).
+            m_majorLock = false;
 
             if ( m_hasNum )
             {
@@ -2312,6 +2306,33 @@ namespace
                     // means keeping the latched total rather than snapping to zero
                     // (the caller contract in kiwi_snap.h, and what the three
                     // round-Z consumers do).
+                    // ══════════════════════════════════════════════════════════
+                    //  KIWI-UX (ROUND BK, ITEM 6a + 6c) — AN AREA HIT IS A
+                    //                                     MAGNET, NOT A TELEPORT.
+                    // ══════════════════════════════════════════════════════════
+                    // USER REPORTS, verbatim: *"I can no longer snap to the grid
+                    // when moving with the gizmo."* and *"the center of the gizmo
+                    // should always track my mouse."*
+                    //
+                    // ONE root cause, two symptoms, and it is a RANKING rather than
+                    // a regression in this function: kiwi_snap.cpp's arm 6 answers
+                    // SNAP_FACE for ANY surface under the cursor and returns before
+                    // arm 9 (the grid) can, so in a built scene the `else` branch
+                    // below — the whole grid quantiser — is unreachable, and this
+                    // branch drags the selection onto whatever plane the ray landed
+                    // on instead of tracking the cursor.  kiwi_snap.h carries the
+                    // full derivation and the reason the NAMED arms keep their
+                    // absolute behaviour.
+                    //
+                    // SO SNAP_FACE — and only SNAP_FACE — is applied through
+                    // KiwiSnap_AreaMagnet (it wins only within a screen-space band
+                    // of the cursor's own answer).  KIWI-UX (ROUND BL, ITEM 4): the
+                    // grid half of round BK's answer used to be a second loop at the
+                    // bottom of THIS branch, which meant a drag only met the lattice
+                    // when the ray happened to hit a surface.  It is the unified
+                    // lattice pass below now, outside this `if`, so every arm reaches
+                    // it — and the pivot it snaps is under the cursor.
+                    const bool areaOnly = ( m_snap.type == SNAP_FACE );
                     bool axisDepthDone = false;
                     if ( m_con == CON_AXIS )
                     {
@@ -2325,9 +2346,18 @@ namespace
                             // grabs' travel (m_lockBase, already sitting in `total`)
                             // and an axis lock does not own them.  Writing all three
                             // was the "teleports back to the start" on chained grabs.
-                            total[m_axis] = t;
+                            if ( areaOnly )
+                            {
+                                float at[3];
+                                Add3( m_ref, total, at );
+                                total[m_axis] = KiwiSnap_AreaMagnet( total[m_axis], t, at );
+                            }
+                            else
+                            {
+                                total[m_axis] = t;
+                            }
                         }
-                        else
+                        else if ( !areaOnly )
                         {
                             Copy3( m_total, total );   // refused: leave it where it is
                         }
@@ -2341,11 +2371,20 @@ namespace
                         // replaces everything — unchanged behavior).
                         float absT[3];
                         Sub3( m_snap.position, m_ref, absT );
+                        float at[3];
+                        Add3( m_ref, total, at );
                         if ( m_con == CON_PLANE )
                         {
                             for ( int k = 0; k < 3; ++k )
                                 if ( k != m_axis )
-                                    total[k] = absT[k];
+                                    total[k] = areaOnly
+                                             ? KiwiSnap_AreaMagnet( total[k], absT[k], at )
+                                             : absT[k];
+                        }
+                        else if ( areaOnly )
+                        {
+                            for ( int k = 0; k < 3; ++k )
+                                total[k] = KiwiSnap_AreaMagnet( total[k], absT[k], at );
                         }
                         else
                         {
@@ -2353,51 +2392,62 @@ namespace
                             Constrain( total );
                         }
                     }
+
+                    // KIWI-UX (ROUND BL, ITEM 4): the grid pass that used to sit here
+                    // — round BK's, and reachable only from this areaOnly arm — is
+                    // now the UNIFIED lattice pass below, which every arm reaches.
                 }
-                else
+
+                // ══════════════════════════════════════════════════════════════
+                //  KIWI-UX (ROUND BL, ITEM 4) — THE PIVOT'S ABSOLUTE LATTICE LOCK
+                // ══════════════════════════════════════════════════════════════
+                // USER REPORT, verbatim: *"It's still not possible to snap to the
+                // major grid lines while using a tool.  This makes it really hard to
+                // align things."*
+                //
+                // WHERE THE GRID WAS, BEFORE THIS ROUND.  Two separate arms, and
+                // which one a drag got was decided by what the ray happened to hit:
+                //   * with a surface under the cursor the query answers SNAP_FACE
+                //     (kiwi_snap.cpp arm 6), and round BK's grid loop ran INSIDE the
+                //     geometry branch, gated on `areaOnly`;
+                //   * with nothing under the cursor it answers SNAP_GRID and a
+                //     COMPLETELY DIFFERENT quantiser ran in the `else` branch —
+                //     KiwiGrid_Snap, which rounds to the nearest CELL and has never
+                //     heard of a MAJOR line.
+                // So "can I land on the red line" had two answers in one gesture,
+                // one of which was structurally no, and both were aimed at a pivot
+                // that was not under the cursor (see the rebase above).
+                //
+                // ONE PASS NOW, on the axes this constraint owns, always absolute
+                // (round P's rule: the moved PIVOT lands on the lattice, so an
+                // off-grid start does not drag its offset along), with the MAJOR
+                // preference from KiwiSnap_LatticeAxis in both modes.  `hard` is the
+                // only thing the arm decides: the grid arm quantises (there is
+                // nothing else it could mean), the area arm keeps its capture band
+                // so free dragging over a surface still feels continuous.
+                //
+                // A NAMED GEOMETRY TARGET IS EXEMPT, unchanged: a vertex, an edge
+                // midpoint, a face centre, a construction endpoint or an
+                // intersection is a place the user pointed at and must never be
+                // rounded off it.  SNAP_FACE names nothing (it is wherever the ray
+                // landed), which is why it is on the lattice side of this line —
+                // exactly the distinction round BK drew for the magnet.
+                const bool namedTarget = KiwiSnap_IsGeometry( m_snap.type )
+                                      && m_snap.type != SNAP_FACE;
+                if ( !namedTarget )
                 {
-                    // ── ROUND P: THE GRID SNAP IS ABSOLUTE NOW ───────────────
-                    // USER DIRECTIVE, verbatim: "when moving something offgrid,
-                    // the snaps no longer are aligned to the grid.  Fix this, the
-                    // grid snaps should only be for the grid, no offset, custom
-                    // offsets are done each time."
-                    //
-                    // It used to quantise the DELTA — KiwiGrid_Snap(total) — which
-                    // means an object sitting 3 units off a 10-unit grid moved in
-                    // clean multiples of 10 and stayed 3 units off it FOREVER.  The
-                    // grid then guaranteed nothing except that the error was
-                    // preserved, which is the exact complaint.
-                    //
-                    // Now the MOVED REFERENCE POINT is snapped to an ABSOLUTE grid
-                    // position and the delta is whatever gets it there:
-                    //     total = snap( ref + total ) - ref
-                    // so one grid-snapped move puts the object ON the grid and
-                    // every later one keeps it there.  m_ref is the pivot when the
-                    // user has placed one and the natural reference otherwise
-                    // (Begin's m_pivotOverridden = PivotActive(m_ref)), so "which
-                    // point lands on the grid" is a thing the user can CHOOSE —
-                    // which is the "custom offsets are done each time" half.
-                    //
-                    // GEOMETRY snaps are untouched (the arm above): those name an
-                    // exact target and were never about the grid.
-                    float want[3], snapped[3];
-                    Add3( m_ref, total, want );
-                    if ( KiwiGrid_Snap( want, snapped ) )
+                    const bool hard = !KiwiSnap_IsGeometry( m_snap.type );
+                    for ( int k = 0; k < 3; ++k )
                     {
-                        // ROUND AN, ITEM 2: quantise only the axes this constraint
-                        // OWNS.  `total` already carries m_lockBase's off-axis
-                        // travel; the old Constrain() here zeroed it — with the
-                        // light grid snap default-on since round AG, merely dragging
-                        // a second arrow through this arm wiped the first arrow's
-                        // work.
-                        for ( int k = 0; k < 3; ++k )
-                        {
-                            const bool owned = ( m_con == CON_FREE )
-                                            || ( m_con == CON_AXIS  && k == m_axis )
-                                            || ( m_con == CON_PLANE && k != m_axis );
-                            if ( owned )
-                                total[k] = snapped[k] - m_ref[k];
-                        }
+                        if ( !OwnsAxis( k ) )
+                            continue;
+                        float ax[3] = { 0.0f, 0.0f, 0.0f };
+                        ax[k] = 1.0f;
+                        bool major = false;
+                        total[k] = KiwiSnap_LatticeAxis( total[k], m_ref, ax,
+                                                         hard, &major );
+                        if ( major )
+                            m_majorLock = true;
                     }
                 }
             }
@@ -2411,16 +2461,57 @@ namespace
         {
             float dist = m_scalar;
             float p[3];
+            // KIWI-UX (ROUND BN, ITEM 6): the major lamp is this frame's answer here
+            // too — same rule, same place in the flow, as the object move's reset.
+            m_majorLock = false;
+            // ── KIWI-UX (ROUND BP, ITEM 2): CTRL = ABSOLUTE (kiwi_extrude.h) ──
+            // The third of the three one-axis gestures, on exactly the same terms as
+            // the two extrudes.  MapCursor's SEL_FACE arm already hands back
+            // `dot( cursorOnAxis - m_ref, m_pushDir )` — the pushed plane's own
+            // position measured from the face it started on — so ABSOLUTE is that
+            // value with the `- m_scalarStart` rebase term dropped.  Only the CTRL-UP
+            // edge re-latches, so releasing Ctrl never moves the face.
+            const bool absNow = KiwiExt_AbsoluteHeld();
+            if ( !absNow && m_absPrev && GrabLive() && m_haveMapStart )
+            {
+                float q[3];
+                if ( MapCursor( q ) )
+                {
+                    m_scalarStart = q[0];
+                    m_scalarBase  = m_scalar;
+                }
+            }
+            m_absPrev  = absNow;
+            m_absolute = false;
             // SHAKEOUT G: the grab gate, exactly as above.  The face push is driven
             // by the gizmo's NORMAL ARROW (or any of its three world arrows, which
             // axis-lock the push), never by bare cursor travel.  ROUND L: …and not
             // until the cursor has left the grab pixel either (GrabLive).
+            float rawAbs  = dist;
+            bool  haveRaw = false;
             if ( GrabLive() && m_haveMapStart && MapCursor( p ) )
-                dist = m_scalarBase + ( p[0] - m_scalarStart );
+            {
+                rawAbs  = p[0];
+                haveRaw = true;
+                dist    = absNow ? rawAbs : ( m_scalarBase + ( p[0] - m_scalarStart ) );
+                m_absolute = absNow;
+            }
 
             if ( m_hasNum )
             {
                 dist = m_numWorld;
+            }
+            else if ( m_absolute && haveRaw )
+            {
+                // ── KIWI-UX (ROUND BT): THE FULL LADDER (kiwi_extrude.h) ──────
+                // The third of the four one-axis gestures, on exactly the same terms.
+                // Round BP's nearest-value contest is gone — the hard lattice is never
+                // more than half a cell from the cursor, so it beat every real face on
+                // a fine grid and the push *"only snapped to the grid"*.  Geometry
+                // ranks first (and is aim-gated by the ladder's own pixel radii), a
+                // face plane is a magnet, the lattice with its majors is the fallback.
+                dist = KiwiExt_LadderDepth( m_snap, m_ref, m_pushDir, rawAbs,
+                                            &m_majorLock );
             }
             else if ( GrabLive() && SnapActive() )
             {
@@ -2477,39 +2568,33 @@ namespace
                     // narrowly.  (m_ref is the DRIVE face's winding centre, which is
                     // ON the plane being pushed, so its coordinate along an
                     // axis-aligned normal IS the plane's position.)
-                    const float g = KiwiUnits_GridSpacingWorld();
-                    if ( g > 0.0f )
-                    {
-                        int axis = -1;
-                        for ( int k = 0; k < 3; ++k )
-                            if ( fabsf( m_pushDir[k] ) > 0.999f )
-                                axis = k;
-                        if ( axis >= 0 )
-                        {
-                            const float sgn  = ( m_pushDir[axis] > 0.0f ) ? 1.0f : -1.0f;
-                            const float pos  = m_ref[axis] + sgn * dist;
-                            const float snap = floorf( pos / g + 0.5f ) * g;
-                            dist = ( snap - m_ref[axis] ) * sgn;
-                        }
-                        else
-                        {
-                            dist = floorf( dist / g + 0.5f ) * g;
-                        }
-                    }
+                    //
+                    // ── KIWI-UX (ROUND BN, ITEM 6): ONE LATTICE, MAJORS INCLUDED ──
+                    // USER DIRECTIVE, verbatim: *"Holding Ctrl should allow snapping
+                    // to the major lines of the grid as well… (in this case, while
+                    // extruding)."*  Everything the sixteen lines this replaces did —
+                    // find the world axis, snap the ABSOLUTE coordinate on one,
+                    // quantise the DELTA otherwise — is what KiwiSnap_LatticeAxis
+                    // already does, and round BL taught THAT function the major
+                    // preference for the object move.  The face push was the last
+                    // owned-axis gesture still running its own copy of half the rule,
+                    // and it is the gesture with the strongest claim on landing
+                    // exactly on a red line.  Same numbers on a minor, majors added.
+                    bool major = false;
+                    dist = KiwiSnap_LatticeAxis( dist, m_ref, m_pushDir, true, &major );
+                    if ( major )
+                        m_majorLock = true;
                 }
             }
-            else if ( GrabLive() )
-            {
-                // ── KIWI-UX (ROUND AG, ITEM 11): THE LIGHT GRID MAGNET ──────
-                // USER DIRECTIVE: "There should be light snapping to the global
-                // grid (disabled with ctrl)."  Round Z's opt-in leaves this
-                // branch fully raw; the magnet gives the lattice back WITHOUT
-                // giving the ranked geometry query back with it.  A capture band,
-                // not a quantiser — outside it `dist` passes through untouched.
-                // Same absolute-vs-delta rule as the Ctrl arm above, because
-                // KiwiSnap_LightGridAxis is where that rule now lives once.
-                dist = KiwiSnap_LightGridAxis( dist, m_ref, m_pushDir );
-            }
+            // KIWI-UX (ROUND BO, ITEM 3): ROUND AG'S LIGHT GRID MAGNET IS GONE.
+            // USER REPORT, verbatim: *"the grid snapping is better, but now it's
+            // impossible to get fine details."*  This was the third arm — a
+            // capture band that pulled the push onto the lattice even with the
+            // ranked query suppressed — and it is exactly what made a Ctrl-free
+            // drag unable to stop between two lattice values.  "No snapping unless
+            // Ctrl" has to mean NO snapping, so the raw mapped `dist` now stands.
+            // The lattice (with its majors) is still one Ctrl away, on the arm
+            // above.
 
             m_scalar = dist;
 
@@ -2886,9 +2971,9 @@ namespace
             OpenUndo( ( m_kind == SEL_FACE ) ? "push face"
                     : ( m_kind == SEL_EDGE ) ? "move edge"
                                              : "move vertex" );
-            for ( size_t i = 0; i < m_faces.size(); ++i ) UndoCoverBrush( m_faces[i].node );
-            for ( size_t i = 0; i < m_edges.size(); ++i ) UndoCoverBrush( m_edges[i].node );
-            for ( size_t i = 0; i < m_verts.size(); ++i ) UndoCoverBrush( m_verts[i].node );
+            for ( size_t i = 0; i < m_faces.size(); ++i ) KiwiCmd_UndoCoverBrush( m_faces[i].node );
+            for ( size_t i = 0; i < m_edges.size(); ++i ) KiwiCmd_UndoCoverBrush( m_edges[i].node );
+            for ( size_t i = 0; i < m_verts.size(); ++i ) KiwiCmd_UndoCoverBrush( m_verts[i].node );
         }
 
         // §19: rebuild, check, and roll the baseline back when the check fails.
@@ -2981,31 +3066,71 @@ namespace
               && ( ( m_kind == SEL_FACE ) ? ( fabsf( m_scalar ) <= KX_EPS )
                                           : ( Len3( m_total ) <= KX_EPS ) ) )
             {
-                SetHud( "%s  %s  drag a handle / type a value", what, ConstraintText() );
+                char cbuf[24];
+                SetHud( "%s  %s  drag a handle / type a value", what, ConstraintText( cbuf, sizeof( cbuf ) ) );
                 return;
             }
 
             if ( m_invalid )
             {
-                SetHud( "%s  %s  INVALID: %s", what, ConstraintText(),
+                char cbuf[24];
+                SetHud( "%s  %s  INVALID: %s", what, ConstraintText( cbuf, sizeof( cbuf ) ),
                         m_why ? m_why : "rejected" );
                 return;
             }
 
             if ( m_kind == SEL_FACE )
             {
-                char b[32];
+                char b[32], cbuf[24];
                 KiwiUnits_Format( b, sizeof( b ), m_scalar );
-                SetHud( "%s  %s  %s", what,
-                        ( m_con == CON_AXIS ) ? ConstraintText() : "normal", b );
+                // KIWI-UX (ROUND BN, ITEM 6): the face push gets the same MAJOR lamp
+                // the object move has had since round BL — it is the same lattice
+                // now, so it must be the same readout.
+                // ── KIWI-UX (ROUND BP, ITEM 2): ABSOLUTE SHOWS BOTH NUMBERS ─────
+                // Position first (that is what the cursor is aiming at while Ctrl is
+                // down), delta in parentheses so the familiar reading survives.  On a
+                // slanted push direction there is no world coordinate to name, so the
+                // absolute label falls back to the distance and says so.
+                if ( m_absolute )
+                {
+                    char abso[32];
+                    int  worldAxis = -1;
+                    for ( int k = 0; k < 3; ++k )
+                        if ( fabsf( m_pushDir[k] ) > 0.999f )
+                            worldAxis = k;
+                    if ( worldAxis >= 0 )
+                    {
+                        char v[32];
+                        KiwiUnits_Format( v, sizeof( v ),
+                                          m_ref[worldAxis] + m_pushDir[worldAxis] * m_scalar );
+                        _snprintf( abso, sizeof( abso ), "%c %s", "XYZ"[worldAxis], v );
+                    }
+                    else
+                    {
+                        _snprintf( abso, sizeof( abso ), "out %s", b );
+                    }
+                    abso[sizeof( abso ) - 1] = '\0';
+                    SetHud( "%s  %s  %s  (%s)%s  CTRL", what,
+                            ( m_con == CON_AXIS ) ? ConstraintText( cbuf, sizeof( cbuf ) ) : "normal",
+                            abso, b, m_majorLock ? "  ·  MAJOR GRID" : "" );
+                    return;
+                }
+                SetHud( "%s  %s  %s%s", what,
+                        ( m_con == CON_AXIS ) ? ConstraintText( cbuf, sizeof( cbuf ) ) : "normal", b,
+                        m_majorLock ? "  ·  MAJOR GRID" : "" );
                 return;
             }
 
-            char bx[32], by[32], bz[32];
+            char bx[32], by[32], bz[32], cbuf[24];
             KiwiUnits_Format( bx, sizeof( bx ), m_total[0] );
             KiwiUnits_Format( by, sizeof( by ), m_total[1] );
             KiwiUnits_Format( bz, sizeof( bz ), m_total[2] );
-            SetHud( "%s  %s  %s, %s, %s", what, ConstraintText(), bx, by, bz );
+            // KIWI-UX (ROUND BL, ITEM 4): say when a MAJOR grid line took the pivot.
+            // The lock is otherwise only legible as "the number went round", which is
+            // exactly the feedback the user said was missing ("really hard to align
+            // things") — the snap accents show WHERE, this says WHAT.
+            SetHud( "%s  %s  %s, %s, %s%s", what, ConstraintText( cbuf, sizeof( cbuf ) ),
+                    bx, by, bz, m_majorLock ? "  ·  MAJOR GRID" : "" );
         }
 
         // ─── state ──────────────────────────────────────────────────────────
@@ -3022,6 +3147,26 @@ namespace
         std::vector<vertUnit_t>      m_verts;
         std::vector<kiwiBaseBrush_t> m_base;
 
+        // ── KIWI-UX (CLEANUP, A-30): THE PER-FRAME LIVENESS STAMP ───────────
+        // Sel_BrushLive is a display-list walk, which is exactly why DominantKind
+        // takes a `checkLive` parameter rather than sweeping every palette frame.
+        // The same sweep used to run per unit, per Recompute, and again per
+        // baseline entry inside RestoreAll — O(base x units x brushes) on a big
+        // map, on every mouse-move frame of a live drag.
+        //
+        // So it is asked ONCE, at the TOP of Recompute (exactly where AllLive ran
+        // before, so the observation point does not move), and stamped into three
+        // byte vectors parallel to the unit vectors above.  The stamp is valid ONLY
+        // for the duration of that Recompute call (liveScope_t clears it on every
+        // exit path), so RestoreAll and BaseNodeLive read it when they are reached
+        // THROUGH Recompute and fall back to the direct Sel_BrushLive test when
+        // they are reached from Cancel or Commit — where no stamp was taken and a
+        // stale one could put a write through a freed node.
+        std::vector<unsigned char> m_liveFace;
+        std::vector<unsigned char> m_liveEdge;
+        std::vector<unsigned char> m_liveVert;
+        bool                       m_liveStamped = false;
+
         float m_ref[3]      = { 0.0f, 0.0f, 0.0f };   // the moved reference point
         float m_planeN[3]   = { 0.0f, 0.0f, 1.0f };   // latched movement-plane normal
         float m_pushDir[3]  = { 0.0f, 0.0f, 1.0f };   // face push direction (live)
@@ -3031,6 +3176,10 @@ namespace
         float m_total[3]    = { 0.0f, 0.0f, 0.0f };
         float m_applied[3]  = { 0.0f, 0.0f, 0.0f };   // objects only
         float m_scalar      = 0.0f;                   // faces only
+        // ROUND BP, ITEM 2: the Ctrl-absolute pair — m_absPrev is the edge detector
+        // (the rebase happens on CTRL UP only) and m_absolute is this frame's mode.
+        bool  m_absPrev     = false;
+        bool  m_absolute    = false;
         float m_scalarBase  = 0.0f;
         float m_scalarStart = 0.0f;
         bool  m_haveMapStart = false;
@@ -3052,6 +3201,14 @@ namespace
         // KIWI-UX (shakeout G): this frame's push annihilates at least one brush, so
         // a confirm DELETES rather than reshapes.  See RecomputeFace / CommitDelete.
         bool  m_deleting     = false;
+        // ── KIWI-UX (ROUND BL, ITEM 4) ──────────────────────────────────────
+        // m_pivotRebase: armed by every grab / constraint change, consumed on the
+        // first LIVE frame, where it re-bases the owned components so the pivot sits
+        // at the cursor's constrained projection (Recompute).
+        // m_majorLock:   this frame's lattice pass landed an owned axis on a MAJOR
+        // grid line.  HUD only — the geometry is already where it says it is.
+        bool  m_pivotRebase  = false;
+        bool  m_majorLock    = false;
     };
 
     // ═════════════════════════════════════════════════════════════════════════
@@ -3445,8 +3602,11 @@ namespace
 
         void MouseMove( const pick_result_t &pick, const snap_result_t &snap ) override
         {
+            // KIWI-UX (CLEANUP, A-23): S has no snap arm — the mapping is a pure
+            // 1 + dx*k in pixels (kiwi_transform.h), so the base's m_snap is not
+            // latched here; nothing in this class would read it.
             (void)pick;
-            m_snap = snap;
+            (void)snap;
             Recompute();
             g_nUpdateBits |= 1;
         }
@@ -3605,92 +3765,6 @@ bool KiwiXform_DominantKind( sel_kind_t *out )
     return DominantKind( out );                 // liveness-checked (the Begin-rate path)
 }
 
-// The reference point KiwiMoveCommand::Begin WOULD latch, per kind.  Each arm is
-// the same rule as the matching Begin* above — deliberately duplicated rather than
-// refactored into the command, because the gizmo must know the anchor BEFORE any
-// command exists and Begin's arms also build the units they will mutate (which
-// this must not do).  The rules are three lines each; the units are not.
-bool KiwiXform_ReferencePoint( float *out3 )
-{
-    if ( !out3 )
-        return false;
-    sel_kind_t kind;
-    if ( !DominantKind( &kind ) )
-        return false;
-
-    const selection_t &sel = KiwiSel();
-    const sel_item_t  &act = sel.active;
-
-    if ( kind == SEL_OBJECT )
-    {
-        // BeginObjects: the active object's own centre, else Select_GetTrueMid
-        // (NOT Select_GetMid — that floor-snaps to the legacy grid).
-        if ( act.kind == SEL_OBJECT && Sel_BrushLive( act.brush ) && act.brush->def )
-        {
-            for ( int k = 0; k < 3; ++k )
-                out3[k] = ( act.brush->def->mins[k] + act.brush->def->maxs[k] ) * 0.5f;
-            return true;
-        }
-        if ( !SelectionHasObjects() )
-            return false;
-        Select_GetTrueMid( out3 );
-        return true;
-    }
-
-    if ( kind == SEL_FACE )
-    {
-        // BeginFaces: the ACTIVE face's winding centre, else the first usable face's.
-        if ( act.kind == SEL_FACE && Sel_BrushLive( act.brush ) && !act.brush->patch )
-            if ( WindingCentre( WindingOf( act.brush, act.faceIndex ), out3 ) )
-                return true;
-        for ( size_t i = 0; i < sel.items.size(); ++i )
-        {
-            const sel_item_t &it = sel.items[i];
-            if ( it.kind != SEL_FACE || !Sel_BrushLive( it.brush ) || it.brush->patch )
-                continue;
-            if ( WindingCentre( WindingOf( it.brush, it.faceIndex ), out3 ) )
-                return true;
-        }
-        return false;
-    }
-
-    if ( kind == SEL_EDGE )
-    {
-        // BeginEdges: the active edge's midpoint, else the first edge's.
-        float a[3], b[3];
-        if ( act.kind == SEL_EDGE && Sel_BrushLive( act.brush ) && !act.brush->patch
-          && EdgeEnds( act, a, b ) )
-        {
-            for ( int k = 0; k < 3; ++k ) out3[k] = ( a[k] + b[k] ) * 0.5f;
-            return true;
-        }
-        for ( size_t i = 0; i < sel.items.size(); ++i )
-        {
-            const sel_item_t &it = sel.items[i];
-            if ( it.kind != SEL_EDGE || !Sel_BrushLive( it.brush ) || it.brush->patch )
-                continue;
-            if ( !EdgeEnds( it, a, b ) )
-                continue;
-            for ( int k = 0; k < 3; ++k ) out3[k] = ( a[k] + b[k] ) * 0.5f;
-            return true;
-        }
-        return false;
-    }
-
-    // BeginVerts: the active vertex, else the first usable one.
-    if ( act.kind == SEL_VERTEX && Sel_BrushLive( act.brush ) && VertexPos( act, out3 ) )
-        return true;
-    for ( size_t i = 0; i < sel.items.size(); ++i )
-    {
-        const sel_item_t &it = sel.items[i];
-        if ( it.kind != SEL_VERTEX || !Sel_BrushLive( it.brush ) )
-            continue;
-        if ( VertexPos( it, out3 ) )
-            return true;
-    }
-    return false;
-}
-
 void KiwiXform_PresetMoveConstraint( int con, int axis )
 {
     // Guarded, not asserted: the ONLY legal caller is the gizmo, immediately after
@@ -3752,10 +3826,9 @@ void KiwiXform_FeedRotateDegrees( bool active, float degrees )
 }
 
 // ─── shakeout G: the movable pivot ──────────────────────────────────────────
-// (KiwiXform_NoteMoveGrab is GONE — ROUND L.  The grab gate is raised through the
-//  framework's own KiwiEditorCommand::HandleGrab, by the ONE arm every handle in
-//  the editor now shares, so a file-specific entry point for one command's gate
-//  would be a second way to do the same thing and a second thing to keep in step.)
+// KIWI-UX (CLEANUP, A-35): RULE — the grab gate is raised ONLY through the
+// framework's KiwiEditorCommand::HandleGrab, the one arm every handle shares; no
+// file-specific entry point for one command's gate.
 bool KiwiXform_ActivePushDir( float *out3 )
 {
     if ( !out3 || KiwiCmd_Active() != &s_move )
@@ -3768,9 +3841,35 @@ bool KiwiXform_PivotOverride( float *out3 )
     return PivotActive( out3 );
 }
 
-void KiwiXform_ClearPivot()
+// ── KIWI-UX (ROUND BK, ITEM 6b): "WHERE COULD I SNAP TO?" ───────────────────
+// USER DIRECTIVE, verbatim: *"Also when hunting for a pivot point, the obvious
+// spots (centers, corners, points, midways, etc.) need to have a black dot to show
+// where they are."*
+//
+// The dots already exist and already enumerate EXACTLY the snap set
+// (KiwiSnap_DrawFaceAccents, kiwi_snap.cpp — winding corners = arm 2, edge
+// midpoints = arm 4, the face centroid = arm 4b).  What they did not have was a
+// reason to be drawn during a TRANSFORM: their gate is `cmd->WantsClicks()`, which
+// is the placement tools and nothing else, and round Y's note says why that gate
+// is deliberately tight ("forty dots on every face during every drag gesture").
+//
+// So the gate is widened by exactly the two states the directive names, and the
+// predicate lives HERE because both are this file's own state:
+//   * PIVOT PLACEMENT (V) — "hunting for a pivot point", word for word;
+//   * a HELD HANDLE — the gizmo drag itself, where the snap query is live and the
+//     user is aiming at a corner to land on.
+// A PARKED gesture with nothing held draws none, so the editor is not permanently
+// speckled the way round Y refused to make it.
+bool KiwiXform_WantsSnapDots()
 {
-    s_pivotHave = false;
+    if ( KiwiCmd_Active() == &s_move )
+        return s_move.PivotPlacingNow() || s_move.HandleHeld();
+    // ROTATE has no HandleHeld twin: its grab latch is the RING drag, which lives
+    // in KiwiRotateCommand's own state and aims at an ANGLE, not at a point — so
+    // only its pivot placement earns the dots.
+    if ( KiwiCmd_Active() == &s_rotate )
+        return s_rotate.PivotPlacingNow();
+    return false;
 }
 
 bool KiwiXform_PivotPlacing()
@@ -3879,7 +3978,7 @@ int KiwiXform_PushFaceOnce( selbrush_t *node, int faceIndex, float dist,
 
         KiwiCmd_UndoBegin( undoOp );              // Undo_ClearRedo + GeneralStart +
                                                   // AddBrushList(&selected_brushes)
-        UndoCoverBrush( node );                   // …which covers nothing for a FACE
+        KiwiCmd_UndoCoverBrush( node );                   // …which covers nothing for a FACE
                                                   // selection, so the brush by hand
         // AFTER the brush: undo.cpp warns when brushes are added to a record that
         // already carries entities.  `node->owner->def` is the entity DEF, cast —
@@ -3899,7 +3998,7 @@ int KiwiXform_PushFaceOnce( selbrush_t *node, int faceIndex, float dist,
 
     // ── the ordinary carve/push ─────────────────────────────────────────────
     KiwiCmd_UndoBegin( undoOp );
-    UndoCoverBrush( node );          // the same per-brush cover OpenUndoForBrushes
+    KiwiCmd_UndoCoverBrush( node );          // the same per-brush cover OpenUndoForBrushes
                                      // adds, because a FACE selection is not on
                                      // selected_brushes (kiwi_selection.h NOTE 2)
 

@@ -25,9 +25,11 @@
 #include "kiwi_material.h"          // ROUND AG, ITEM 8 - KiwiMtl_RealizePatch
 #include "kiwi_numeric.h"
 #include "kiwi_pick.h"
+#include "kiwi_selection.h"          // ROUND BK, ITEM 5 - Sel_* / KiwiSel_SetModeMask
 #include "kiwi_snap.h"
 #include "kiwi_units.h"
 #include "kiwi_validity.h"
+#include "kiwi_vec.h"     // KIWI-UX (CLEANUP, A-15): the one spelling of Dot3/Sub3/...
 
 #include <imgui/imgui.h>
 
@@ -39,33 +41,46 @@
 // ── ported entry points (each verified against its definition) ──────────────
 extern int       Sys_Printf( const char *fmt, ... );                    // win_qe3.cpp
 extern int       g_nUpdateBits;                                         // 0x25D5A74 (mainfrm.cpp)
-extern brush_t  *Brush_Alloc( const void *planeptsSrc, eclass_t *ecls ); // brush.cpp:452 (0x4751e0)
-extern void      Brush_Create( float *mins, float *maxs, brush_t *b, eclass_t *ecls ); // brush.cpp:497 (0x475300)
-extern void      Brush_Free_R( brush_t *def );                          // brush.cpp:689 (0x475af0)
-extern void      Select_Deselect( int bAlsoFreeFaces );                 // select.cpp:1425 (0x48E800)
-extern bool      Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId ); // mainfrm.cpp:1236
+// KIWI-UX (CLEANUP, B-34): `planeptsSrc` is the definition's own parameter name
+// (brush.cpp:463), copied verbatim as the house rule requires.  It is misleading:
+// every caller in this layer passes g_qeglobals.random_texture_stuff, i.e. the
+// MATERIAL-DEF source, not plane points.
+extern brush_t  *Brush_Alloc( const void *planeptsSrc, eclass_t *ecls ); // brush.cpp:463 (0x4751e0)
+extern void      Brush_Create( float *mins, float *maxs, brush_t *b, eclass_t *ecls ); // brush.cpp:508 (0x475300)
+extern void      Brush_Free_R( brush_t *def );                          // brush.cpp:700 (0x475af0)
+extern void      Select_Deselect( int bAlsoFreeFaces );                 // select.cpp:1445 (0x48E800)
+extern bool      Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId ); // mainfrm.cpp:1340
+// KIWI-UX (CLEANUP, B-28): FILE SCOPE, not block scope.  Round AI shipped a link
+// error from a block-scope extern that MSVC mangled with its enclosing namespace;
+// kiwi_uv.cpp carries the full account.  This is the declaration that used to sit
+// inside KiwiPrim_RegisterCommands.
+extern void      Radiant_ExecCommand( unsigned int cmdId );             // mainfrm.cpp:4083
+// KIWI-UX (ROUND BK, ITEM 5): the height sign is "toward the camera", so the
+// auto-height arm needs the view axis.  `camera_s` comes from mainfrm.h, included
+// above; the accessor never returns NULL (contract at camwnd.cpp:148-154).
+extern camera_s *Ed_Camera();                                           // camwnd.cpp:156
 
 // The three ported primitives.  Signatures copied from their definitions, not
 // from the call sites: Brush_MakeSided's first parameter really is an `int`
-// carrying the brush_t* (brush.cpp:3381, faithful to 0x4731E0).
-extern void      Brush_MakeSided( int a1, unsigned int sides, int axis, char snap ); // brush.cpp:3381 (0x4731E0)
-extern void      Brush_MakeSidedCone( int sides );                      // brush.cpp:3625 (0x47BC10)
-extern void      Brush_MakeSidedSphere( int sides );                    // brush.cpp:3704 (0x47BE90)
+// carrying the brush_t* (brush.cpp:3392, faithful to 0x4731E0).
+extern void      Brush_MakeSided( int a1, unsigned int sides, int axis, char snap ); // brush.cpp:3392 (0x4731E0)
+extern void      Brush_MakeSidedCone( int sides );                      // brush.cpp:3636 (0x47BC10)
+extern void      Brush_MakeSidedSphere( int sides );                    // brush.cpp:3715 (0x47BE90)
 
 // xywnd.cpp:1562 // KIWI-UX forwarder (see kiwi_extrude.h).
 extern void      Ed_EnsureCurrentMaterial_Kiwi();
-// entity.cpp 0x25D5B30 - worldspawn (same extern brush.cpp:39 / camwnd.cpp:57 use).
+// entity.cpp 0x25D5B30 - worldspawn (same extern brush.cpp:39 / camwnd.cpp:59 use).
 extern entity_s *world_entity;
 
 // ── ROUND AG, ITEM 8: the EXPERIMENTAL PATCH MODE's entry points ───────────
 // Every one copied from its DEFINITION, and the same set kiwi_patchfillet.cpp
-// declares at :44-54 (that file is the precedent this follows in full — see the
-// long note at MakePatchCylinder).
-extern selbrush_t  *Brush_AddToList( brush_t *def, entity_s *owner );        // brush.cpp:656  0x475980
-extern void         Brush_AddToList2( selbrush_t *b );                       // brush.cpp:910  0x4765A0
+// declares in its own extern block (that file is the precedent this follows in
+// full — see the long note at MakePatchCylinder).
+extern selbrush_t  *Brush_AddToList( brush_t *def, entity_s *owner );        // brush.cpp:667  0x475980
+extern void         Brush_AddToList2( selbrush_t *b );                       // brush.cpp:921  0x4765A0
 extern patchMesh_t *MakeNewPatch();                                          // pmesh.cpp:136  0x437AC0
 extern brush_t     *AddBrushForPatch( patchMesh_t *p, entity_s *world_ent );  // pmesh.cpp:840  0x4386A0
-extern void         Patch_KiwiFinishNew( patchMesh_t *p );                    // pmesh.cpp:1490 (ROUND Q)
+extern void         Patch_KiwiFinishNew( patchMesh_t *p );                    // pmesh.cpp:1558 (ROUND Q)
 // radiant_registry.cpp:31 / :44 — the preference pair the whole KIWI layer uses.
 extern int          Radiant_ProfileGetInt( const char *section, const char *entry, int defVal );
 extern bool         Radiant_ProfileSetInt( const char *section, const char *entry, int value );
@@ -107,35 +122,10 @@ namespace
         KPRIM_BOX_CENTER
     };
 
-    inline float Dot3( const float *a, const float *b )
-    {
-        return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-    }
-    inline void Sub3( const float *a, const float *b, float *o )
-    { o[0]=a[0]-b[0]; o[1]=a[1]-b[1]; o[2]=a[2]-b[2]; }
-    inline void Mad3( const float *a, const float *d, float s, float *o )
-    { o[0]=a[0]+d[0]*s; o[1]=a[1]+d[1]*s; o[2]=a[2]+d[2]*s; }
 
-    // Closest point on the line (pt, axis) to the ray — the SAME solve face
-    // push/pull and region-extrude use (kiwi_extrude.cpp RayAxis, itself the
-    // kiwi_transform.cpp one).  Kept as a local copy rather than exported for the
-    // same reason those two are: it is five lines of algebra whose inputs are
-    // both unit vectors, and a shared header for it would be a header for nothing.
-    bool RayAxis( const ray_t &ray, const float *pt, const float *axis, float *out )
-    {
-        float w0[3];
-        Sub3( pt, ray.origin, w0 );
-        const float b = Dot3( axis, ray.dir );
-        const float d = Dot3( axis, w0 );
-        const float e = Dot3( ray.dir, w0 );
-        const float den = 1.0f - b * b;
-        // ROUND AI, ITEM 2 — the sample gate; see kiwi_camera.h.  This is the copy
-        // the BOX HEIGHT STAGE runs through, i.e. the one the -140 yd came out of.
-        if ( fabsf( den ) < KCAM_RAYAXIS_MIN_DEN )
-            return false;
-        Mad3( pt, axis, ( b * e - d ) / den, out );
-        return true;
-    }
+    // KIWI-UX (CLEANUP, RayAxis): the local copy is gone — it was one of four
+    // byte-identical bodies.  It is KiwiCam_RayAxis (kiwi_camera.h) now, beside
+    // the KCAM_RAYAXIS_MIN_DEN gate every copy already cited.
 
     // The plane normal's WORLD axis, or -1 when the plane is not axis-aligned.
     // 0.999 rather than an exact compare because KiwiCon_MakePlane normalises and
@@ -306,6 +296,13 @@ namespace
             m_invalid  = false;
             m_haveHeightStart = false;
             m_zBlocked = false;                // ROUND AI, ITEM 2
+            m_autoHeight = false;              // ROUND BK, ITEM 5
+            // KIWI-UX (ROUND BT): these commands are file-static singletons, so the
+            // Ctrl edge detector has to start each gesture cleared or a gesture that
+            // ENDED with Ctrl down would hand the next one a phantom CTRL-UP rebase.
+            m_snap     = snap_result_t();
+            m_absPrev  = false;
+            m_absolute = false;
             m_hud[0]   = '\0';
             m_sides    = ( m_kind == KPRIM_SPHERE ) ? KPRIM_SPH_SIDES_DEF : KPRIM_CYL_SIDES_DEF;
             // ROUND AG, ITEM 8: seeded from the remembered preference, so "I work
@@ -354,6 +351,10 @@ namespace
         void MouseMove( const pick_result_t &pick, const snap_result_t &snap ) override
         {
             (void)pick;
+            // KIWI-UX (ROUND BT): kept for the HEIGHT stage's ladder as well as the
+            // base stages' own arm below — the answer was previously discarded the
+            // moment the base was placed, which is why the height could only ever
+            // find the grid (kiwi_extrude.h KiwiExt_LadderDepth).
             m_snap = snap;
             if ( m_stage < 2 )
             {
@@ -550,6 +551,11 @@ namespace
                 RelabelStageField();           // shakeout E: field 0 is "height" now
                 LatchHeightStart();
                 Recompute();
+                // KIWI-UX (ROUND BK, ITEM 5): the height stage is USELESS in this
+                // view — finish the solid instead of parking in it.  See
+                // AutoHeightIfBlocked; returning false COMMITS.
+                if ( AutoHeightIfBlocked() )
+                    return false;
                 return true;
             }
             // ── ROUND AI, ITEM 2: DO NOT COMMIT A HEIGHT THE VIEW COULD NOT SET ──
@@ -628,6 +634,57 @@ namespace
             RelabelStageField();
             LatchHeightStart();
             Recompute();
+            // KIWI-UX (ROUND BK, ITEM 5): the same completion Click() takes.
+            // `false` here means "Enter commits", which is exactly what is wanted
+            // once the height has been supplied.
+            if ( AutoHeightIfBlocked() )
+                return false;
+            return true;
+        }
+
+        // ══════════════════════════════════════════════════════════════════════
+        //  KIWI-UX (ROUND BK, ITEM 5) — 5 FT, AND THE LOLLIPOP ALREADY ARMED.
+        // ══════════════════════════════════════════════════════════════════════
+        // The directive and the units are on KPRIM_AUTO_HEIGHT (kiwi_primitive.h).
+        // Called at the instant the HEIGHT STAGE is entered, and only then — the
+        // gate it reads (`m_zBlocked`, round AI ITEM 2) is recomputed on every
+        // Recompute, so if the user orbits mid-gesture the ordinary height drag is
+        // live again and this never runs.
+        //
+        //   * NOTHING when the view CAN portray the axis — the normal two-stage
+        //     gesture is untouched, and so is every non-height primitive (the
+        //     sphere never reaches stage 2, FinalStage()==1).
+        //   * NOTHING when a height has been TYPED: a number works at any angle
+        //     (Recompute's own exemption) and it outranks a default.
+        //   * OTHERWISE the height becomes KPRIM_AUTO_HEIGHT, signed so the solid
+        //     grows TOWARD THE CAMERA — the top cap is then "the one that was
+        //     facing the locked camera", which is the face the directive wants the
+        //     lollipop on.  `m_invalid` is re-derived (Recompute already ran with
+        //     height 0 and would otherwise leave Commit refusing a degenerate
+        //     placement), and the caller commits.
+        //
+        // Returns true when it supplied a height, i.e. "commit now".
+        bool AutoHeightIfBlocked()
+        {
+            if ( !m_zBlocked || m_hasNum || m_stage < 2 )
+                return false;
+
+            const camera_s *c = Ed_Camera();
+            // The plane normal points one way; the camera looks along vpn.  The cap
+            // facing the camera is the one on the -vpn side, so the height takes the
+            // sign that puts it there.  A dead-on tie cannot happen: m_zBlocked IS
+            // "the view axis and this normal are within KiwiCam_AxisPortrayable's
+            // cone", so the dot product is large.
+            const float away = Dot3( m_plane.normal, c->vpn );
+            m_height     = ( away < 0.0f ) ? KPRIM_AUTO_HEIGHT : -KPRIM_AUTO_HEIGHT;
+            m_autoHeight = true;
+            m_invalid    = !PlacementUsable();
+
+            char hb[32];
+            KiwiUnits_Format( hb, sizeof( hb ), KPRIM_AUTO_HEIGHT );
+            Sys_Printf( "%s: this view looks straight along %s, so the height was set "
+                        "to %s and the top face's push handle is armed — orbit and pull "
+                        "the lollipop to change it.\n", Name(), HeightAxisName(), hb );
             return true;
         }
 
@@ -645,6 +702,75 @@ namespace
                 return;
             }
             Create();
+            // KIWI-UX (ROUND BK, ITEM 5): …and only for the auto-height path, hand
+            // the new solid's top cap to the face push.  AFTER Create, because
+            // that is what puts the brush on the map.
+            if ( m_autoHeight )
+                ArmTopFacePush();
+        }
+
+        // ── the arming half (ROUND BK, ITEM 5) ──────────────────────────────
+        // The lollipop is not a thing that can be "turned on": it is drawn whenever
+        // the ACTIVE COMMAND wants one (kiwi_lollipop.h KiwiLollipop_Wanted), and a
+        // Move over a FACE selection is what wants one.  So arming it is exactly
+        // the state a face CLICK produces — the shakeout-G auto-enter
+        // (kiwi_boxselect.cpp ClickSelect): mode FACE, that face selected, Move
+        // started and PAUSED so nothing follows the cursor until the ball is
+        // grabbed.  This reproduces that state and nothing else; there is no second
+        // code path and no second undo shape.
+        void ArmTopFacePush()
+        {
+            // The landed brush.  Create() runs Select_Deselect(1) immediately
+            // before Brush_AddToList2, so `selected_brushes` holds exactly what
+            // this gesture just made (kiwi_extrude.cpp LandDef :521-527).
+            selbrush_t *inst = ( selected_brushes.next != &selected_brushes )
+                             ? selected_brushes.next : nullptr;
+            if ( !inst || !inst->def || inst->patch || !inst->def->faces )
+                return;                       // a patch cylinder has no face to push
+
+            // The cap facing the camera: the face whose outward normal is closest to
+            // the direction the height went.  `m_height`'s sign already encodes that
+            // (AutoHeightIfBlocked), so the wanted direction is normal * sign.
+            const float s = ( m_height >= 0.0f ) ? 1.0f : -1.0f;
+            const float want[3] = { m_plane.normal[0] * s,
+                                    m_plane.normal[1] * s,
+                                    m_plane.normal[2] * s };
+            int   best = -1;
+            float bestDot = 0.70710678f;      // 45 degrees — below this it is not a cap
+            for ( int f = 0; f < inst->def->faceCount; ++f )
+            {
+                const float d = Dot3( inst->def->faces[f].plane.normal, want );
+                if ( d > bestDot )
+                {
+                    bestDot = d;
+                    best    = f;
+                }
+            }
+            if ( best < 0 )
+                return;                       // no cap found: leave the solid selected
+
+            sel_item_t item;
+            item.kind      = SEL_FACE;
+            item.brush     = inst;
+            item.faceIndex = best;
+            if ( !Sel_ItemValid( item ) )
+                return;
+
+            selection_t &sel = KiwiSel();
+            Sel_Clear( sel );
+            Sel_Add( sel, item );
+            Sel_SyncToLegacy();
+            KiwiSel_SetModeMask( SEL_MASK_FACE );
+            g_nUpdateBits |= ( W_CAMERA | W_XY | W_Z );
+
+            // …and the Move itself through the SHAKEOUT-G HANDOFF, which exists for
+            // exactly this: KiwiCmd_Start cannot be called from inside Commit()
+            // (the bracket close would land on the new command and KiwiNum_Reset
+            // would throw away its field table), so the request is parked and
+            // drained at the very end of KiwiCmd_Commit.  PAUSED, so the lollipop
+            // is up and nothing follows the cursor until the ball is grabbed —
+            // the same state a face click produces.
+            KiwiCmd_StartDeferred( KIWI_CMD_MOVE, /*paused*/ true );
         }
 
         void Cancel() override
@@ -802,7 +928,7 @@ namespace
                 return;                        // no usable mapping — try again next frame
             ray_t ray;
             float p[3];
-            if ( !CursorRay( &ray ) || !RayAxis( ray, m_ref, m_plane.normal, p ) )
+            if ( !CursorRay( &ray ) || !KiwiCam_RayAxis( ray, m_ref, m_plane.normal, p ) )
                 return;
             float rel[3];
             Sub3( p, m_ref, rel );
@@ -933,15 +1059,37 @@ namespace
                 }
                 m_zBlocked = !canZ;
 
+                // ── KIWI-UX (ROUND BT): CTRL = ABSOLUTE, HERE TOO ───────────────
+                // The FOURTH member of the extrude family (kiwi_extrude.h): this
+                // stage pulls a cap along one axis exactly as the three others do,
+                // and round BP's claim that it was "covered by the lattice half" was
+                // never true — everything below used to be `floorf( h/g + 0.5 )*g`
+                // with no modifier and no ladder at all.  Same two transitions as the
+                // siblings: CTRL DOWN is the feature and lets the cap jump to the
+                // cursor's own height, CTRL UP re-latches `m_heightStart` so relative
+                // resumes from where absolute left it and NOTHING moves.
+                const bool absNow = KiwiExt_AbsoluteHeld();
+                if ( !absNow && m_absPrev )
+                    LatchHeightStart();
+                m_absPrev  = absNow;
+                m_absolute = absNow && canZ && m_haveHeightStart;
+
                 float h = m_height;
+                float rawAbs  = h;               // the cursor's own height, absolute
+                bool  haveRaw = false;
                 ray_t ray;
                 float p[3];
                 if ( canZ && m_haveHeightStart && CursorRay( &ray )
-                  && RayAxis( ray, m_ref, m_plane.normal, p ) )
+                  && KiwiCam_RayAxis( ray, m_ref, m_plane.normal, p ) )
                 {
                     float rel[3];
                     Sub3( p, m_ref, rel );
-                    h = Dot3( rel, m_plane.normal ) - m_heightStart;
+                    // `m_ref` is the base point ON the plane (LatchHeightStart), so
+                    // this projection IS the cap's height above the base — the
+                    // "absolute reading" round BP said a primitive did not have.
+                    rawAbs  = Dot3( rel, m_plane.normal );
+                    haveRaw = true;
+                    h = absNow ? rawAbs : ( rawAbs - m_heightStart );
                 }
                 // A TYPED HEIGHT WORKS AT ANY ANGLE, gate or no gate — it never
                 // went through the cursor mapping in the first place.
@@ -949,10 +1097,33 @@ namespace
                 {
                     h = m_numWorld;
                 }
+                else if ( m_absolute && haveRaw )
+                {
+                    // ── AND THE SNAP HALF IS THIS COMMAND'S OWN CONTRACT ────────
+                    // A primitive is a CREATION gesture, so round BO makes snapping
+                    // its DEFAULT and Ctrl the release (kiwi_command.h SnapContext) —
+                    // the opposite of the three transform siblings.  Composed rather
+                    // than overridden: with Ctrl held the cap rides the cursor
+                    // EXACTLY, unquantised, which is the directive's *"match … exactly
+                    // where my mouse is"* and is also what "snapping freed" has to
+                    // mean.  The ladder runs in the ENGAGED state below.
+                }
+                else if ( haveRaw )
+                {
+                    // ── THE FULL LADDER, ENGAGED (kiwi_extrude.h) ───────────────
+                    // Replaces the blind `floorf( h/g + 0.5 )*g`: a corner or an edge
+                    // the user is pointing at now takes the height, a face plane is a
+                    // magnet, and the lattice — absolute on a world axis and aware of
+                    // the MAJOR lines, neither of which the old quantiser was — is the
+                    // fallback.  Note the source-plane refusal comes free with it
+                    // (KEXT_SELF_SNAP_BAND): the base outline's own corners sit at
+                    // height 0 and can no longer glue the cap shut.
+                    h = KiwiExt_LadderDepth( m_snap, m_ref, m_plane.normal, h, nullptr );
+                }
                 else
                 {
-                    // §6 numeric hygiene: quantise the SCALAR, never the cursor
-                    // point — the same rule region-extrude follows.
+                    // No cursor mapping this frame (the view gate, or a degenerate
+                    // ray): the held height stands, quantised exactly as before.
                     const float g = KiwiUnits_GridSpacingWorld();
                     if ( g > 0.0f )
                         h = floorf( h / g + 0.5f ) * g;
@@ -1106,6 +1277,14 @@ namespace
                                "%s  height %s  ·  ORBIT to set height — this view looks "
                                "straight along %s  ·  or type = height",
                                LowerName(), a, HeightAxisName() );
+                // KIWI-UX (ROUND BT): the ABSOLUTE badge, for the same reason its
+                // three siblings carry one — a mapping mode the user cannot see is a
+                // mapping mode they will not trust (kiwi_extrude.h).
+                else if ( m_absolute )
+                    _snprintf( m_hud, sizeof( m_hud ),
+                               "%s  height %s  %s·  CTRL: the cap rides the cursor  ·  "
+                               "click/Enter: commit",
+                               LowerName(), a, m_invalid ? "TOO THIN  " : "" );
                 else
                     _snprintf( m_hud, sizeof( m_hud ),
                                "%s  height %s  %s·  click/Enter: commit  ·  type = height",
@@ -1166,10 +1345,8 @@ namespace
                 return;
             }
 
-            // The §23 undo ordering: deselect FIRST so the bracket clones nothing,
-            // then open it, then create.  Everything the bracket clones must still
-            // be on selected_brushes at commit or its clone would be restored
-            // alongside the live original (kiwi_extrude.h UNDO).
+            // KIWI-UX (CLEANUP, B-20): deselect before landing — the rule and its
+            // reasons are stated once, at kiwi_patchfillet.cpp's LandPatches.
             Select_Deselect( 1 );
             KiwiCmd_UndoBegin( "create box" );
             KiwiExtrude_LandDef( def );
@@ -1357,11 +1534,8 @@ namespace
 
             Patch_KiwiFinishNew( p );
 
-            // The undo ordering every creation in this layer uses: deselect FIRST
-            // so the bracket clones nothing, then open it, then create.  The patch
-            // lands on selected_brushes via Brush_AddToList2, which is where
-            // Undo_EndBrushList stamps "added by this record" — kiwi_patchfillet.h
-            // states the same trap.
+            // KIWI-UX (CLEANUP, B-20): deselect before landing — the rule and its
+            // reasons are stated once, at kiwi_patchfillet.cpp's LandPatches.
             Select_Deselect( 1 );
             KiwiCmd_UndoBegin( "create patch cylinder" );
             brush_t    *pdef = AddBrushForPatch( p, (entity_s *)world_entity->def );
@@ -1509,7 +1683,18 @@ namespace
         float         m_heightStart = 0.0f;
         bool          m_haveHeightStart = false;
         bool          m_zBlocked = false;     // ROUND AI, ITEM 2 — the view gate
+        // KIWI-UX (ROUND BK, ITEM 5): this gesture's height was supplied by
+        // AutoHeightIfBlocked rather than by the cursor, so Commit hands the new
+        // solid's top cap to the face push.  Reset in Begin(); never persisted.
+        bool          m_autoHeight = false;
+        // ── KIWI-UX (ROUND BT): the height stage joins the extrude family ───
+        // (kiwi_extrude.h).  `m_snap` is this frame's ranked answer — the stage-2
+        // ladder needs it and MouseMove used to throw it away past stage 1;
+        // `m_absPrev` is the Ctrl edge detector (the rebase is on CTRL UP only) and
+        // `m_absolute` is this frame's mode, read by the HUD.
         snap_result_t m_snap;
+        bool          m_absPrev  = false;
+        bool          m_absolute = false;
         char          m_hud[192] = { 0 };
     };
 
@@ -1569,27 +1754,39 @@ KiwiEditorCommand *KiwiPrim_CommandForId( int commandId )
 // ─── the "Solids" block in the shell's panel window ──────────────────────────
 void KiwiPrim_MenuItems()
 {
-    extern void Radiant_ExecCommand( unsigned int cmdId );   // mainfrm.cpp
-
-    struct row_t { const char *label; int id; };
-    static const row_t KSOLIDS[4] =
+    // KIWI-UX (CLEANUP, B-21): the tip belongs to the BUTTON it describes.  It used to
+    // sit after the loop, where ImGui::IsItemHovered() refers to the LAST item
+    // submitted — so a tip about Cylinder AND Cone only ever appeared over Cone.  It is
+    // per-row now, inside the loop, and each row carries its own text (0 = no tip).
+    struct row_t { const char *label; int id; const char *tip; };
+    // KIWI-UX (CLEANUP, B-36): FIVE kinds, five buttons.  The centre box was
+    // registered, dispatched and instantiated but reachable only by Shift+V or the
+    // palette, so this block offered four of the five.  It is a table row and
+    // nothing else — the dispatch below already handles every id in the table.
+    static const row_t KSOLIDS[5] =
     {
-        { "Box",      KIWI_CMD_PRIM_BOX      },
-        { "Cylinder", KIWI_CMD_PRIM_CYLINDER },
-        { "Sphere",   KIWI_CMD_PRIM_SPHERE   },
-        { "Cone",     KIWI_CMD_PRIM_CONE     },
+        { "Box",      KIWI_CMD_PRIM_BOX,      0 },
+        { "Centre Box", KIWI_CMD_PRIM_BOX_CENTER,
+          "Places the box from its CENTRE and half-extents rather than from a\n"
+          "corner (Shift+V)." },
+        { "Cylinder", KIWI_CMD_PRIM_CYLINDER,
+          "Needs an axis-aligned construction plane (XY/XZ/YZ) — the ported\n"
+          "primitive fixes its own axes." },
+        { "Sphere",   KIWI_CMD_PRIM_SPHERE,   0 },
+        { "Cone",     KIWI_CMD_PRIM_CONE,
+          "Needs the XY construction plane — the ported primitive fixes its\n"
+          "own axes." },
     };
     ImGui::TextDisabled( "Solids (land real brushes)" );
-    for ( int i = 0; i < 4; ++i )
+    for ( int i = 0; i < 5; ++i )
     {
         if ( i )
             ImGui::SameLine();
         ImGui::PushID( 940 + i );
         if ( ImGui::Button( KSOLIDS[i].label ) )
             Radiant_ExecCommand( (unsigned int)KSOLIDS[i].id );
+        if ( KSOLIDS[i].tip && ImGui::IsItemHovered() )
+            ImGui::SetTooltip( "%s", KSOLIDS[i].tip );
         ImGui::PopID();
     }
-    if ( ImGui::IsItemHovered() )
-        ImGui::SetTooltip( "Cylinder needs an axis-aligned construction plane (XY/XZ/YZ);\n"
-                           "Cone needs XY — the ported primitives fix their own axes." );
 }

@@ -19,20 +19,19 @@
 #include "kiwi_conselect.h"
 #include "kiwi_selection.h"
 #include "kiwi_validity.h"          // KVALID_PLANE_DOT / KVALID_PLANE_DIST (§19's own)
+#include "kiwi_vec.h"     // KIWI-UX (CLEANUP, A-15): the one spelling of Dot3/Sub3/...
 
 #include <math.h>
 
 // ── ported entry points (each verified against its definition) ──────────────
 extern int  Sys_Printf( const char *fmt, ... );                        // win_qe3.cpp
-extern void Select_Deselect( int bAlsoFreeFaces );                     // select.cpp:1428 (0x48E800)
+extern void Select_Deselect( int bAlsoFreeFaces );                     // select.cpp:1445 (0x48E800)
 extern void Select_Brush( selbrush_t *brush, char some_overwrite,
                           char bStatus, char center_grid_on_selection ); // select.cpp:884
-extern void Radiant_ExecCommand( unsigned int cmdId );                 // mainfrm.cpp:3944
+extern void Radiant_ExecCommand( unsigned int cmdId );                 // mainfrm.cpp:4083
 
 namespace
 {
-    inline float Dot3( const float *a, const float *b )
-    { return a[0]*b[0] + a[1]*b[1] + a[2]*b[2]; }
 
     // The two selected FACE items, when there are EXACTLY two of them.  Returns
     // false for any other count, which is the whole precondition of arm (a).

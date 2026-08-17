@@ -56,12 +56,15 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Per-frame draw.  MUST be called at TOP-LEVEL ImGui window scope (imgui_shell.cpp
-// calls it beside KiwiOutliner_Draw), never from inside KiwiVP_DrawCameraOverlay —
-// that runs inside the viewport window's Begin/End and is ImDrawList-only by
-// contract (kiwi_hints.h).  No-op when no command is live or the live one declares
-// no options.
+// calls it beside KiwiOutliner_Draw), never from inside KiwiVP_DrawCameraOverlay.
+//
+// KIWI-UX (CLEANUP, C-37): the reason is NOT "the overlay is ImDrawList-only" —
+// DrawChips emits five real ImGui::Buttons in there.  THE INVARIANT the overlay
+// keeps is: no trailing SetCursorScreenPos with no item after it, and no item that
+// changes the window's CONTENT EXTENT after the image (kiwi_viewport.cpp's
+// DrawChips carries the canonical statement).  THIS panel is its own ImGui window
+// with its own SetNextWindowPos/Size, which is exactly what a nested Begin inside
+// the viewport window would break — so it stays at top level.
+//
+// No-op when no command is live or the live one declares no options.
 void KiwiCmdOpts_Draw();
-
-// True while the panel is on screen.  For anything that wants to know the pointer
-// may be over a command surface rather than the image.
-bool KiwiCmdOpts_Visible();

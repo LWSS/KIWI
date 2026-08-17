@@ -579,6 +579,89 @@ LRESULT Texture_ShowAll()
     return Sys_Printf( "Showing all textures...\n" );
 }
 
+// ═════════════════════════════════════════════════════════════════════════════
+//  KIWI-UX (ROUND BE): LIVE REGISTRATION OF ONE JUST-WRITTEN MATERIAL.
+// ═════════════════════════════════════════════════════════════════════════════
+// The texture-import wizard (kiwi_import.cpp) writes materials/<name> + images/<name>.iwi
+// and then has to make the browser show it WITHOUT a restart.  That is exactly the
+// Load_Materials per-file body above (:436-471) for a single name — header read, the
+// non-zero gate, the toolFlags&0x1000 "_editor" override, Material_ConvertToEditorMaterial —
+// so this reuses those four steps rather than duplicating them, which is also why it lives
+// here: Material_ReadEditorVariant / Material_ConvertToEditorMaterial / Editor_DoesMaterial-
+// Exist / Tex_stricmp and texwnd_s itself are all TU-local (the accessor pattern at :94).
+//
+// The one thing Load_Materials does NOT have to do is refresh an EXISTING entry.  An
+// overwrite import re-uses the same name, so Material_ConvertToEditorMaterial (:400) would
+// hand back the old qtexture with the old width/height/usage/locale still on it.  The
+// refresh below re-stamps exactly the eleven fields :405-415 sets, in the same order, and
+// drops the cached render handle so the next TexWnd_DrawMaterials re-registers the material
+// through Texture_GetHandle.
+qtexture_s *TexWnd_RegisterMaterialByName( const char *name )
+{
+    if ( !name || !name[0] )
+        return nullptr;
+
+    MaterialInfoRaw raw;
+    int             h = 0;
+    com_fileAccessed = 1;
+    FS_FOpenFileRead( va( "materials/%s", name ), &h );
+    if ( !h )
+        return nullptr;
+    uint got = FS_Read( (uint8_t *)&raw, sizeof( raw ), h );
+    FS_FCloseFile( h );
+    if ( got != sizeof( raw ) )
+        return nullptr;
+
+    // The same gate Load_Materials applies at :455.
+    if ( !raw.usage || !raw.locale || !raw.autoTexScaleWidth || !raw.autoTexScaleHeight )
+        return nullptr;
+
+    if ( raw.toolFlags & 0x1000 )                                   // :459-468
+    {
+        char editorName[80];
+        strncpy( editorName, name, 64 );
+        editorName[64] = '\0';
+        I_strncat( editorName, sizeof( editorName ), "_editor" );
+        MaterialInfoRaw editorRaw;
+        if ( Material_ReadEditorVariant( editorName, &editorRaw ) )
+            raw = editorRaw;
+    }
+
+    qtexture_s *existing = Editor_DoesMaterialExist( name );
+    qtexture_s *q        = Material_ConvertToEditorMaterial( &raw, name );
+    if ( !q )
+        return nullptr;
+
+    if ( existing )
+    {
+        // Re-stamp, field for field, what :405-415 stamps on a fresh entry.
+        q->next                        = nullptr;                   // drop the stale handle
+        q->is_in_use                   = true;
+        q->unk1                        = (char)raw.gameFlags;
+        q->usage_index                 = (char)raw.usage;
+        q->unk_flags2                  = (uint16_t)raw.toolFlags;
+        q->tex_num_or_localefilter     = (int)raw.locale;
+        q->width                       = raw.autoTexScaleWidth;
+        q->height                      = raw.autoTexScaleHeight;
+        q->color_or_surfacetype_filter = raw.surfaceFlags;
+        q->in_use                      = raw.contents;
+    }
+    else
+    {
+        // Keep sorted_materials[] ordered the way Load_Materials leaves it, so the browser's
+        // flow layout does not put the new tile at a random place in the grid.
+        qsort( texWndGlob_textureOffset.sorted_materials,
+               texWndGlob_textureOffset.materialCount, sizeof( qtexture_s * ), Tex_stricmp );
+    }
+
+    g_nUpdateBits |= W_TEXTURE;
+    return q;
+}
+
+// (TexWnd_MakeMaterialCurrentByName, this round's second accessor, lives just below
+//  TexWnd_BuildClickedMaterialDef — it needs that builder and the Texture_SetTexture
+//  extern, both of which are declared further down this file.)
+
 // The Usage/Locale/Surface-type filter name→index tables the LABEL_37 chain reads.
 // filter_usage_array/filter_locale_array (engine_stubs.cpp, loaded by FillTextureMenu);
 // filter_surfacetype_array (defined below in this TU).  RadiantFilterEntry = IDB
@@ -693,6 +776,28 @@ static void TexWnd_BuildClickedMaterialDef( qtexture_s *q, MaterialDef *out )
         td->unk3 = 0;
         *(int *)&td->sample_size = MaterialDef_13( i, out );
     }
+}
+
+// KIWI-UX (ROUND BE): make a registered material the CURRENT one, by name — the second of
+// this round's two additive accessors (the first, TexWnd_RegisterMaterialByName, sits with
+// the Load_Materials block it reuses).  The recipe is the click path's, verbatim:
+// TexWnd_BuildClickedMaterialDef above builds the MaterialDef a thumbnail click would build,
+// and Texture_SetTexture (defined at the bottom of this file, IDB 0x45be50) stamps it into
+// random_texture_stuff and applies it.  Note the DOCUMENTED SIDE EFFECT — Texture_SetTexture's
+// tail calls Brush_SetTexture(a2,1), i.e. it RETEXTURES THE SELECTION, exactly as clicking
+// the thumbnail would.  The import wizard therefore puts this behind an opt-in checkbox
+// rather than doing it on every import.
+bool TexWnd_MakeMaterialCurrentByName( const char *name )
+{
+    if ( !name || !name[0] )
+        return false;
+    qtexture_s *q = Editor_DoesMaterialExist( name );
+    if ( !q )
+        return false;
+    MaterialDef mat;
+    TexWnd_BuildClickedMaterialDef( q, &mat );
+    Texture_SetTexture( nullptr, &mat );
+    return true;
 }
 
 // ── grid layout constants (pane pixel space) ─────────────────────────────────
@@ -1127,11 +1232,31 @@ void TexWnd_RenderToRT( int w, int h )
 // ported texture apply.  Defined in pmesh.cpp beside Patch_KiwiFinishNewLike,
 // because it needs that file's static Patch_WidthDistanceTo / HeightDistanceTo.
 extern void Patch_KiwiReNaturalizeSelected();                  // pmesh.cpp (ROUND AK)
+// ── KIWI-UX (ROUND BH, ITEMS 2 + 3): the two hooks this funnel now carries ──────
+// ITEM 3 at the HEAD: a face click in Face mode auto-enters KIWI_CMD_MOVE and parks
+//   it, and that gesture's baseline covers the face's whole MaterialDef block — so a
+//   material applied while it is parked is written back out by the gesture's Cancel
+//   (kiwi_transform.cpp:1573) or by its next push frame (:2638).  That is the entire
+//   "texture applications require a right-click/enter to confirm" report.  The full
+//   chain is on KiwiUv_EndGestureBeforeApply (kiwi_uv.cpp).  It must run BEFORE the
+//   apply — a Cancel afterwards would revert the apply it exists to protect.
+// ITEM 2 at the TAIL: caulk is always fitted one repeat per face (kiwi_caulk.h D-BH-C).
+// Declared at FILE scope for the same reason Patch_KiwiReNaturalizeSelected above is
+// (round AI's MSVC namespace-mangling link error on a block-scope extern).
+extern bool KiwiUv_EndGestureBeforeApply( const char *what );  // kiwi_uv.cpp (ROUND BH)
+extern void KiwiUv_RestoreGestureAfterApply();                 // kiwi_uv.cpp (ROUND BH)
+extern void KiwiCaulk_AutoFitApplied( const char *appliedName ); // kiwi_caulk.cpp (ROUND BH)
 
 void TexWnd_ApplyMaterialAtIndex( int idx )
 {
     texwndState_t *tex = Ed_TexWnd();
     if ( idx < 0 || idx >= texWndGlob_textureOffset.materialCount )
+        return;
+    // KIWI-UX (ROUND BH, ITEM 3) — see the note above.  A live gesture that refuses to
+    // yield (one that has applied something and does not opt into the round-Z swap
+    // protocol) blocks the apply and says so on the console, rather than letting the
+    // apply land and be silently rolled back.
+    if ( !KiwiUv_EndGestureBeforeApply( "Texture" ) )
         return;
     {
         tex->m_selIndex = idx;
@@ -1185,6 +1310,24 @@ void TexWnd_ApplyMaterialAtIndex( int idx )
             // function on purpose — kiwi_ux round AI shipped a link error from a
             // block-scope extern that MSVC mangled with its enclosing namespace.)
             Patch_KiwiReNaturalizeSelected();
+
+            // ── KIWI-UX (ROUND BH, ITEM 2): CAULK IS ALWAYS FIT ─────────────
+            // USER DIRECTIVE, verbatim: *"Also make it so caulk is always
+            // stretched (fit?).  I can't see caulk when I apply it manually
+            // atm."*  Placed HERE, in the one funnel every apply goes through
+            // (the browser click, the Sky tab's apply and the End-key verb), so
+            // there is one place that decides it.  It is a NO-OP for every
+            // material that is not caulk — kiwi_caulk.h D-BH-D says why the
+            // scope is deliberately that narrow — and it runs AFTER the patch
+            // re-lay so a patch's density is settled before its texdef is fit.
+            KiwiCaulk_AutoFitApplied( q->name );
+
+            // ── KIWI-UX (ROUND BH, ITEM 3): give the face gizmo back ────────
+            // AFTER every mutation, so the restarted gesture's BeginFaces
+            // baseline captures the material AND the texdef this apply (and the
+            // caulk fit above) just wrote.  No-op unless the head of this
+            // function actually ended an auto-entered face push.
+            KiwiUv_RestoreGestureAfterApply();
         }
         g_nUpdateBits = -1;          // redraw camera (the applied face) + this window
         ::InvalidateRect( tex->m_hWnd, nullptr, FALSE );   // == CWnd::Invalidate( FALSE )
@@ -2385,3 +2528,39 @@ HWND TexWnd_CreateRaw( HWND parent, int x, int y, int w, int h )
                             x, y, w, h, parent, nullptr, inst, nullptr );
 }
 
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  KIWI-UX (ROUND AZ, ITEM 3): THE SORTED-ARRAY ACCESSORS, FOR THE SKY TAB
+// ═════════════════════════════════════════════════════════════════════════════
+// `TexWnd_GetMaterialListHead` (:94) walks the registry as an UNSORTED linked list; the
+// browser itself indexes `sorted_materials`, which `Load_Materials` sorts with Tex_stricmp,
+// and the Sky tab needs that same INDEX because its apply goes through
+// `TexWnd_ApplyMaterialAtIndex` — the identical funnel a thumbnail click takes, so it
+// inherits the ported Brush_SetTexture apply (one undo record over both selected_brushes
+// and g_SelectedFaces) and round AK's patch re-naturalize fence, rather than growing a
+// second spelling of either.  `texwnd_s` is TU-local, hence accessors — the same pattern
+// the listhead one at :94 uses.  See kiwi_skybox.h D-AZ-C / D-AZ-D.
+//
+// AT THE END OF THE FILE ON PURPOSE.  These first went in beside their sibling at :95 and
+// that shifted every line in this file below it by 32, which silently invalidated every
+// `texwnd.cpp:NNN` citation in the rest of the tree — and this codebase's comments are
+// load-bearing citations.  New non-ported helpers in a ported file belong at the bottom.
+int TexWnd_MaterialCount() { return texWndGlob_textureOffset.materialCount; }
+
+qtexture_s *TexWnd_MaterialAt( int idx )
+{
+    if ( idx < 0 || idx >= texWndGlob_textureOffset.materialCount )
+        return nullptr;
+    return texWndGlob_textureOffset.sorted_materials[idx];
+}
+
+// The MaterialDef a thumbnail CLICK would build for `q` (sub_45C0D0's fresh 36-byte def:
+// texdef size = the qtexture auto-scale * the current layer's sampleSize).  Exposed so the
+// Sky tab's shell brushes are created with exactly the def a click would have applied,
+// instead of a hand-rolled one that would drift from it.  The builder stays static.
+void TexWnd_MaterialDefFor( qtexture_s *q, MaterialDef *out )
+{
+    if ( !q || !out )
+        return;
+    TexWnd_BuildClickedMaterialDef( q, out );
+}

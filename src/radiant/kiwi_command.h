@@ -35,8 +35,20 @@
 //   34030..34069  MODAL commands   (dispatch = KiwiCmd_Start, then a live gesture)
 //   34100..34199  instant commands, BLOCK 2 (shakeout D onward)
 // Allocated so far: instant-1 34001..34029 (FULL), modal 34030..34065,
-//                   instant-2 34100..34120.
-//                   Next free: instant 34121, modal 34066.
+//                   instant-2 34100..34133.
+//                   Next free: instant 34134, modal 34066.
+// (ROUND BM took instant 34133 for SECTION ANALYSIS — kiwi_section.h.  The ledger
+//  said "next free: instant 34132" while round BK had already taken 34132 for
+//  KIWI_CMD_VIEW_FACE, so this line is also the correction of that drift.)
+// KIWI-UX (CLEANUP, C-3): keep this ledger in step with the #defines below — the
+// top of instant-2 is KIWI_CMD_SECTION_TOGGLE 34133.
+// (ROUND BH took instant 34131 for CAULK SELECTION — kiwi_caulk.h.)
+// (ROUND BF took instant 34130 for the BUILD & RUN dialog — kiwi_launch.h.)
+// (ROUND BE took instant 34128 / 34129 for TEXTURE IMPORT — kiwi_import.h.)
+// (ROUND BD took instant 34127 for the UV EDITOR window — kiwi_uveditor.h.)
+// (ROUND AZ took instant 34124 / 34125 / 34126 for the SKY tab — kiwi_skybox.h.)
+// (ROUND AW took instant 34123 for KiwiModelInfo — the xmodel-surface readout.)
+// (ROUND AU took instant 34121 / 34122 for the ENTITY BROWSER — kiwi_entbrowser.h.)
 // (ROUND AF took modal 34064 for the Centre Box and 34065 for Loft — kiwi_loft.h.
 //  FOUR modal ids are left, 34066..34069, and the modal block cannot grow: any id
 //  inside 34030..34069 is routed to KiwiCmd_Start by KiwiCmd_Dispatch regardless of
@@ -349,11 +361,108 @@
 // ITEM 6: LOFT — bridge two brush faces (kiwi_loft.h).  Bare L, Plasticity's own
 // chord (default-keymap.ts:270); the vk 0x4C audit is in kiwi_keymap.h.
 #define KIWI_CMD_LOFT               34065   // MODAL: L        face + face -> a bridge
+// ── ROUND AU — the ENTITY BROWSER (kiwi_entbrowser.h) ───────────────────────
+// USER DIRECTIVE: "a new panel that's in the same viewport (tabbed) with the
+// textures tab … shows each entity as a 3d preview and you can add them into the
+// scene by dragging from the entity viewer to the 3d scene."  Two ids: the §9
+// window toggle (the table in kiwi_windows.cpp owns the flag, as it does for the
+// Outliner) and the DEFERRED DROP.
+//
+// KIWI_CMD_ENT_DROP is NOT a verb and is deliberately never registered — it is
+// the post-present continuation of a drag that has already finished, posted to the
+// frame by the drop handler because entity creation must not run inside the
+// compositing scene bracket (the kiwi_palette.cpp:151 deferral, same reasoning).
+// It carries no argument: the classname and the drop PIXEL are held in
+// kiwi_entbrowser.cpp and consumed once.
+#define KIWI_CMD_WINDOW_ENTITIES    34121   // "Entities" (the browser dock window)
+#define KIWI_CMD_ENT_DROP           34122   // internal: place the dragged eclass
+// ── ROUND AW — the xmodel-surface readout (r_ed_scene.cpp) ──────────────────
+// USER REPORT: "one character renders solid WHITE ... one has a harsh black/white
+// pattern on the shirt".  KiwiMatInfo answers that question for a BRUSH FACE; the
+// same question about a MODEL surface had no answer at all, because a model's
+// materials come from the xmodel asset and are never picked.  This arms a one-shot
+// dump: the next frame prints every skinned model with, per surface, its material,
+// techset, the technique it is queued at and its colorMap name + dimensions — which
+// is enough to separate "the shipped asset really is white/checkered" from "the
+// editor is drawing it wrong".  Unbound, palette-only, exactly like KiwiMatInfo.
+#define KIWI_CMD_MODELINFO          34123   // "Model info (next frame's models)"
+// ── ROUND AZ, ITEM 3 — the SKY tab (kiwi_skybox.h) ──────────────────────────
+// USER DIRECTIVE: "We need a skybox feature ... Make this a separate tab like
+// the entity tab."  Unlike the entity browser's KIWI_CMD_ENT_DROP — an internal
+// continuation of a finished gesture that is deliberately never registered —
+// BOTH sky verbs are real things a mapper means on purpose, so both are
+// registered (unbound) and both are searchable in the §15 palette.  The window
+// toggle is dispatched by the §9 table like every other one; only the two verbs
+// reach KiwiSky_DispatchInstant.
+#define KIWI_CMD_WINDOW_SKY         34124   // "Sky" (the sky-material dock window)
+#define KIWI_CMD_SKY_APPLY          34125   // "Apply sky material to selection"
+#define KIWI_CMD_SKY_SHELL          34126   // "Create skybox shell"
+// ── KIWI-UX (ROUND BD): the UV EDITOR window toggle ─────────────────────────
+// The window's own file (kiwi_uveditor.h) names this row; the TOGGLE itself is
+// dispatched by KiwiWindows_DispatchInstant, because the §9 table owns every
+// window flag.  There is no verb id beside it — every UV operation in that
+// window is a canvas gesture or a toolbar button, and neither is a command.
+#define KIWI_CMD_WINDOW_UVEDITOR    34127   // "UV editor" (the TrenchBroom-style UV window)
+// ── KIWI-UX (ROUND BE): the TEXTURE IMPORT pair (kiwi_import.h) ─────────────
+// KIWI_CMD_IMPORT_DROPPED is INTERNAL and deliberately never registered — the
+// WM_DROPFILES handler posts it to move the work out of the message handler and
+// into the normal pump, exactly the way round AU's KIWI_CMD_ENT_DROP continues a
+// finished ImGui drag.  Binding a key to "finish the drop you did not make" would
+// be nonsense.  KIWI_CMD_IMPORT_BROWSE is the opposite: "import some textures" is
+// a thing a mapper means on purpose, so it is registered, unbound, and searchable
+// in the §15 palette, and it feeds the SAME queue and the SAME wizard.
+#define KIWI_CMD_IMPORT_DROPPED     34128   // internal: run the wizard on the dropped-file queue
+#define KIWI_CMD_IMPORT_BROWSE      34129   // "Import Textures..." (the no-drag entry point)
+// ── KIWI-UX (ROUND BF): the BUILD & RUN dialog (kiwi_launch.h) ──────────────
+// USER DIRECTIVE: "Hook the cod4map and cod4rad projects natively into the KIWI
+// radiant.  Keep them as separate .exe, but add a launch pop-up dialog..."  ONE
+// id, because the dialog is one thing a mapper asks for by name and everything
+// inside it (Build BSP / Build Light / Run Map / Build & Run) is a button on a
+// window, not a command with a binding.  Registered UNBOUND and searchable in the
+// §15 palette; the window itself is a FLOATING ImGui window with its own file-
+// scope open flag, NOT a §9 dock row — so this round adds no kiwiWindow_t entry
+// and does not bump KIWI_LAYOUT_VERSION.
+#define KIWI_CMD_BUILD_RUN          34130   // "Build & Run..." (cod4map / cod4rad / the game)
+
+// ── KIWI-UX (ROUND BH, ITEM 1): CAULK SELECTION (kiwi_caulk.h) ──────────────
+// USER DIRECTIVE, verbatim: *"Make (End) key on a solid face = set texture to
+// caulk (caulk is a flag to the compiler to tell it to optimize out the face)."*
+// ONE instant id: the verb has no gesture, no options and no window.  Registered
+// UNBOUND; the MODERN keymap gives it End and moves that key's classic occupant
+// (View->Center 32953, mainfrm.cpp:1155 — the ONLY row on vk 0x23 in the whole
+// default table) to Shift+End in that profile only.  The classic profile keeps
+// End = Center View exactly as it was.
+#define KIWI_CMD_CAULK_FACES        34131   // "Caulk Selection" (End, modern profile)
+
+// ── KIWI-UX (ROUND BK, ITEM 7): SPACE = LOOK AT THIS FACE (kiwi_focus.h) ────
+// USER DIRECTIVE, verbatim: *"Pressing [Space] on a face should mimic what
+// Plasticity does.  It moves the camera in front of that face (similar to /)."*
+// ONE instant id: it is a view verb with no gesture, no options and no window —
+// the same shape as Focus (34108), which it shares its framing math with.
+// Registered UNBOUND; the MODERN keymap gives it Space and moves that key's
+// classic occupant (CloneSelection 33001, mainfrm.cpp:1151) to Shift+Space in
+// that profile only.  The CLASSIC profile keeps Space = Clone exactly as it was.
+#define KIWI_CMD_VIEW_FACE          34132   // "View Face Head-on" (Space, modern profile)
+// ── KIWI-UX (ROUND BM, ITEM 1b): SECTION ANALYSIS ───────────────────────────
+// ONE instant id, and deliberately an INSTANT rather than one of the four free
+// modal ids: a section is VIEW STATE that must survive while the user models
+// inside what it revealed, and a modal command would own the single active-command
+// slot for exactly that whole time.  kiwi_section.h carries the full argument.
+// Registered UNBOUND — it is reached by the button above the view cube and by name
+// from the palette, the same rule KiwiMatInfo / KiwiModelInfo follow.
+#define KIWI_CMD_SECTION_TOGGLE     34133   // "Section Analysis" (view-cube button)
 // §25 mirror is NOT here: Select_FlipAxis / DoFlip are already ported AND already
 // wired to the classic ids 32956 / 32957 / 32958, so Phase 5 adds only palette
 // metadata over those (kiwi_dupe.h explains).
 
-inline bool KiwiCmd_IsKiwiId ( int id ) { return id >= KIWI_CMD_FIRST && id <= KIWI_CMD_LAST; }
+// KIWI-UX (CLEANUP, C-4 / C-5): NOT inline any more, and no longer dead.
+// mainfrm.cpp's dispatch gate spelled this range as the bare literals
+// `cmdId >= 34000 && cmdId <= 34199`, so the range existed in three places (the
+// two #defines, this predicate, and that literal pair) and bumping KIWI_CMD_LAST
+// alone would silently drop every id past 34199 — which is exactly the shakeout-D
+// bug mainfrm.cpp records above the gate.  The gate calls this now, so it needs
+// external linkage; the body is in kiwi_command.cpp beside the dispatcher.
+bool KiwiCmd_IsKiwiId ( int id );
 inline bool KiwiCmd_IsModalId( int id ) { return id >= KIWI_CMD_MODAL_FIRST && id <= KIWI_CMD_MODAL_LAST; }
 
 // ── §3 metadata, keyed by EXISTING command ids ───────────────────────────────
@@ -944,27 +1053,65 @@ public:
     // silently discard.
     virtual bool GestureMoved() const { return true; }
 
-    // ── ROUND Z, ITEM 2: SNAPPING IS OPT-IN FOR THE ONE-AXIS GESTURES ───────
-    // USER REPORT, verbatim: "When extruding, it should not snap by default.  Make
-    // it snap only when holding CTRL.  It's just not good to use in a cluttered
-    // scene."
+    // ══════════════════════════════════════════════════════════════════════
+    //  KIWI-UX (ROUND BO, ITEM 3) — THE SNAP CONTEXT.  ONE MODIFIER, ONE RULE.
+    // ══════════════════════════════════════════════════════════════════════
+    // USER DIRECTIVE, verbatim, in three parts:
+    //   *"the grid snapping is better, but now it's impossible to get fine
+    //    details.  Make it so it only snaps while holding Ctrl (some operations
+    //    it's the opposite, it's confusing — copy Plasticity if you can)"*,
+    //   *"with dragging, there is no snapping unless ctrl is held.  Respect that.
+    //    with extruding, same thing, no snapping unless ctrl"*, and
+    //   *"with construction-line based operations it's the opposite however, they
+    //    snap by default, but ctrl unsnaps them."*
     //
-    // A command that returns true here INVERTS arm 0 of the snap layer for as long
-    // as it is running: the plain drag gets `SNAP_NONE` + the raw point (no
-    // geometry arms, no grid quantisation — the numeric field is untouched and
-    // still the way to be exact), and CTRL HELD runs the full ranked query.
+    // So there are exactly TWO contexts and Ctrl INVERTS whichever one you are in.
+    // Round Z's per-command `SnapOptIn` opt-in (three commands, everybody else the
+    // other way) is what made this confusing and it is gone: the context is a
+    // property of the KIND of tool, not a flag a tool remembers to set.
     //
-    // THAT IS PLASTICITY'S OWN SHAPE, not an invention.  Ctrl is bound to
-    // `snaps:temporarily-disable` / `-enable` on keydown/keyup
-    // (default-keymap.ts:353,365-366) and sets `snaps.xor`; the manager then reads
-    // `get enabled() { return this._enabled !== this.xor }`
-    // (SnapManager.ts:28-49) — a genuine XOR, so the modifier INVERTS whatever the
-    // context's default is rather than always meaning "off".  KIWI's default was
-    // "on everywhere"; for these three gestures it is "off", and Ctrl means the
-    // same thing it always did: the other one.
+    // PLASTICITY'S SOURCE SAYS THE SAME THING FOR THE CONSTRUCTION HALF, and this
+    // is the citation rather than a paraphrase of its manual:
+    //   * `SnapManager._enabled = true` and
+    //     `get enabled() { return this._enabled !== this.xor }`
+    //     (plasticity/src/editor/snaps/SnapManager.ts:29-33) — snapping is ON by
+    //     default and `xor` INVERTS it;
+    //   * Ctrl drives `xor`, and the binding exists in exactly ONE keymap scope —
+    //     `"body[gizmo=point-picker]": { "ctrl": "snaps:temporarily-disable",
+    //      "^ctrl": "snaps:temporarily-enable" }`
+    //     (plasticity/src/startup/default-keymap.ts:353,365-366, via
+    //      plasticity/src/selection/CommandRegistrar.ts:34-35).
+    //     A POINT PICKER is what Plasticity calls a tool that is asking you to
+    //     place points — its curve/line/primitive stages — i.e. exactly KIWI's
+    //     construction/drawing family.  There, snapping is on and Ctrl turns it
+    //     off.  THAT IS THE USER'S THIRD SENTENCE, from the source.
+    //   * `snaps.xor = false` on command teardown
+    //     (plasticity/src/command/CommandExecutor.ts:125) — the inversion is
+    //     never sticky, which is why this is polled and never latched.
     //
-    // DELIBERATELY ASYMMETRIC, and only here — see RADIANT_UX_DESIGN D-Z2.
-    virtual bool SnapOptIn() const { return false; }
+    // THE ONE DELIBERATE DIVERGENCE, stated here because the report has to be able
+    // to point at it: Plasticity has NO Ctrl binding outside the point picker, so
+    // its gizmo/transform drags snap to geometry unconditionally
+    // (`if (!snaps.enabled) return []` — plasticity/src/editor/snaps/SnapPicker.ts:
+    // 74 — with `enabled` true and no way to invert it during a gizmo drag).  The
+    // user asked for the opposite in so many words ("with dragging, there is no
+    // snapping unless ctrl is held.  Respect that."), and the user wins.
+    enum kiwiSnapCtx_t
+    {
+        KSNAPCTX_TRANSFORM = 0,   // move / push-pull / extrude / gizmo: RAW, Ctrl snaps
+        KSNAPCTX_CONSTRUCT,       // draw / place / construct: SNAPS, Ctrl frees
+        KSNAPCTX_ALWAYS           // the pivot placement: snapping is the whole point
+    };
+
+    // WantsClicks IS the discriminator, and it is not a coincidence: a command that
+    // takes clicks to place points IS Plasticity's point picker (kiwi_construct,
+    // kiwi_primitive, kiwi_loft, kiwi_trim, kiwi_matchface, kiwi_split's click arm,
+    // kiwi_boolean).  Everything else is a drag that moves geometry that already
+    // exists.  A command needs no override to be in the right context.
+    virtual kiwiSnapCtx_t SnapContext() const
+    {
+        return WantsClicks() ? KSNAPCTX_CONSTRUCT : KSNAPCTX_TRANSFORM;
+    }
 
     // A PAUSED → HOT edge (shakeout E).  The framework has already latched the
     // cursor at the press pixel; re-latch whatever "where the drag started"
@@ -994,9 +1141,6 @@ void KiwiCmd_Cancel();
 void KiwiCmd_StartDeferred( int commandId, bool paused );
 
 // ── §4 the HOT / PAUSED gesture state (shakeout E — see the state table above) ─
-// True while the geometry follows the cursor.  A command always starts HOT.
-bool KiwiCmd_IsHot();
-
 // Park the gesture: the preview stays, the value stays, MouseMove stops reaching
 // the command.  No-op when nothing is active, when it is already paused, or when
 // the active command WantsClicks (those keep their click grammar).
@@ -1046,6 +1190,22 @@ void KiwiCmd_HandleRelease();
 // (KiwiCmd_KeyDown with VK_RETURN), so a command that vetoes Enter — the polyline
 // "finish the chain" rung — vetoes an RMB click identically, in one place.
 void KiwiCmd_Confirm();
+
+// ── KIWI-UX (ROUND BK, ITEM 2): WHICH INPUT IS SPEAKING ─────────────────────
+// USER DIRECTIVE, verbatim: *"When using the line tool, right click should only
+// confirm a point if it's the 1st point.  Otherwise right click just ends the
+// operation and left click sets the points.  This is leading to some extra strays
+// that the trimming tool has to take care of."*
+//
+// RMB and Enter deliberately arrive at the SAME rung (see KiwiCmd_Confirm above),
+// and that is still the right shape — but the chained curve tool now has to tell
+// them apart for ONE decision: whether to take the cursor point as the chain's
+// tail.  Rather than split the ladder (which is what the comment above exists to
+// prevent), the confirm SOURCE is latched for the duration of the dispatch and a
+// command may ask.  True ONLY inside a KiwiCmd_Confirm() call; every other path
+// into KiwiCmd_KeyDown( VK_RETURN ) — the real Enter key, kiwi_cmdoptions.cpp's
+// panel Enter — reads false.
+bool KiwiCmd_ConfirmIsRmb();
 
 // Key funnel entry.  True = CONSUMED (the caller must not run the hotkey table).
 // Feeds the numeric entry first, then the command, then Esc/Enter.
@@ -1113,11 +1273,19 @@ void KiwiCmd_DrawWorld();
 #define KCMD_LINE_BUDGET      288
 #define KCMD_LINE_BUDGET_MAX  1536
 
-// ── ROUND Z, ITEM 2: does the ACTIVE command want snapping on Ctrl only? ─────
-// The one reader is kiwi_snap.cpp's arm 0, which is a free function with no
-// command in hand.  False when nothing is running, so the idle editor and every
-// non-opted-in command see arm 0 exactly as they always did.
-bool KiwiCmd_SnapOptIn();
+// ── KIWI-UX (ROUND BO, ITEM 3): THE ONE SNAP MODIFIER RULE ──────────────────
+// "Is snapping ENGAGED right now?"  Reads the physical Ctrl key and the active
+// command's SnapContext(), and it is the ONLY place the two are combined:
+//
+//     KSNAPCTX_TRANSFORM   default RAW,  Ctrl held = snapping ON
+//     KSNAPCTX_CONSTRUCT   default ON,   Ctrl held = snapping OFF
+//     KSNAPCTX_ALWAYS      on, Ctrl irrelevant (pivot placement)
+//
+// i.e. CTRL INVERTS THE CONTEXT DEFAULT.  With nothing running the answer is the
+// TRANSFORM one, which is the conservative reading (no command, no snapping).
+// The readers are kiwi_snap.cpp arm 0, the snap accents, the HUD chip and the two
+// construction quantisers that sit outside the ranked query.
+bool KiwiCmd_SnapEngaged();
 
 // ── §5 the shell key funnel (called from Radiant_PreTranslateMessage) ────────
 // True = swallow the key.  Sits AFTER the ImGuiShell_WantsKeyboard gate (so a
@@ -1130,4 +1298,20 @@ bool KiwiUX_KeyFunnel( unsigned int vk );
 void KiwiCmd_UndoBegin ( const char *operation );
 void KiwiCmd_UndoCommit();
 void KiwiCmd_UndoCancel();
-bool KiwiCmd_UndoOpen();
+
+// KIWI-UX (CLEANUP, UndoCoverBrush): cover ONE brush the bracket's own
+// Undo_AddBrushList did not.  KiwiCmd_UndoBegin clones `selected_brushes`; a
+// brush named only by a FACE / EDGE / VERTEX item is deliberately NOT on that
+// list (kiwi_selection.h DESIGN NOTE 2), so a gesture that mutates one must cover
+// it by hand BEFORE the first write.  This mirrors Undo_AddBrushList's own
+// per-element body (undo.cpp 0x45E7C0): a fixed-size entity's brush needs the
+// ENTITY saved too, and the entity goes in FIRST (undo.cpp warns when brushes
+// precede entities).  Undo_AddBrush self-dedupes, so covering the same brush
+// twice costs one clone.
+//
+// It was written out verbatim in FIVE files (kiwi_transform, kiwi_bevel,
+// kiwi_matchface, kiwi_patchfillet, kiwi_uv), each with a comment justifying the
+// copy on the grounds that "it is four lines".  At five copies of an UNDO
+// ordering rule that argument has expired: this is the file that owns the
+// bracket, so it owns the cover too.
+void KiwiCmd_UndoCoverBrush( selbrush_t *node );

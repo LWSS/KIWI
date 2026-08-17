@@ -42,6 +42,7 @@
 #include "kiwi_transform.h"             // ROUND Q — KiwiXform_PushFaceOnce (negative E)
 #include "kiwi_units.h"
 #include "kiwi_validity.h"
+#include "kiwi_vec.h"     // KIWI-UX (CLEANUP, A-15): the one spelling of Dot3/Sub3/...
 
 #include <math.h>
 #include <stdarg.h>
@@ -54,6 +55,66 @@
 extern int         Sys_Printf( const char *fmt, ... );                     // win_qe3.cpp
 extern camera_s   *Ed_Camera();                                            // camwnd.cpp
 extern int         g_nUpdateBits;                                          // 0x25D5A74 (mainfrm.cpp)
+
+// ── KIWI-UX (ROUND BP, ITEM 2): the shared "is Ctrl making this absolute" read ──
+// The physical key, exactly as KiwiCmd_SnapEngaged reads it (kiwi_command.cpp:1554
+// — KIWI-UX (ROUND BT): re-cited, round BR shifted it)
+// and as every ported drag path does (drag.cpp:308) — polled, never latched, so it
+// cannot go stale against a message queue this layer does not run off.  It is the
+// SAME key that turns the ranked snap query on for a transform, which is the point:
+// one modifier, one meaning (round BO, item 3), now with the depth mapping joining
+// the things it changes.  Not a member of any command, because all three one-axis
+// gestures ask it and two of them live in another file.
+bool KiwiExt_AbsoluteHeld()
+{
+    return ( ::GetAsyncKeyState( VK_CONTROL ) & 0x8000 ) != 0;
+}
+
+// ── KIWI-UX (ROUND BT): THE ONE-AXIS LADDER (kiwi_extrude.h) ────────────────
+// The full argument, the autopsy and the ranking are on the declaration.  Every
+// rule here is an EXISTING shipped rule, moved rather than invented: the named-
+// target exemption is kiwi_transform.cpp's `namedTarget` (round BL, item 4), the
+// area magnet is KiwiSnap_AreaMagnet (round BK, items 6a/6c) and the lattice with
+// its major preference is KiwiSnap_LatticeAxis (round BL, item 4).  What round BT
+// changes is the ORDER they are consulted in: geometry ranks above the grid, which
+// is what kiwi_snap.h has said in prose since v1 and what round BP's nearest-value
+// comparison quietly inverted for every one-axis gesture.
+float KiwiExt_LadderDepth( const snap_result_t &snap, const float *ref,
+                           const float *axis, float rawAbs, bool *outMajor )
+{
+    if ( outMajor )
+        *outMajor = false;
+    if ( !ref || !axis )
+        return rawAbs;
+
+    // Rung 1/2 — the geometry answer, resolved onto THIS gesture's axis so a face
+    // gives the same depth everywhere on it (kiwi_snap.h KiwiSnap_AxisDepth), and
+    // refused when it is glued to the source plane (KEXT_SELF_SNAP_BAND).
+    float sd = 0.0f;
+    const bool haveGeom = snap.valid && KiwiSnap_IsGeometry( snap.type )
+                       && KiwiSnap_AxisDepth( snap, ref, axis, &sd )
+                       && fabsf( sd ) >= KEXT_SELF_SNAP_BAND;
+    if ( haveGeom )
+    {
+        if ( snap.type != SNAP_FACE )
+            return sd;                     // a place the user aimed at: never rounded
+
+        float at[3];
+        for ( int k = 0; k < 3; ++k )
+            at[k] = ref[k] + axis[k] * rawAbs;
+        // An area hit is a MAGNET, not a teleport: it takes the depth as the cursor
+        // sweeps across the plane and passes through to the lattice outside the band.
+        if ( KiwiSnap_AreaMagnet( rawAbs, sd, at ) == sd )
+            return sd;
+    }
+
+    // Rung 3 — the lattice, absolute on a world axis, majors preferred.
+    bool major = false;
+    const float ld = KiwiSnap_LatticeAxis( rawAbs, ref, axis, true, &major );
+    if ( outMajor )
+        *outMajor = major;
+    return ld;
+}
 
 extern brush_t    *Brush_Alloc( const void *materialDefSrc, eclass_t *ecls ); // brush.cpp 0x4751e0
 extern selbrush_t *Brush_AddToList( brush_t *def, entity_s *owner );          // brush.cpp 0x475980
@@ -95,11 +156,12 @@ namespace
     const float KEXT_COL_CARVE[3]   = { 1.00f, 0.72f, 0.35f };
     const float KEXT_COL_DOOMED[3]  = { 0.60f, 0.13f, 0.13f };
 
-    // ROUND Q — the slack on the push-through test.  Numerically identical to
-    // kiwi_transform.cpp's KX_EPS, which is what KiwiXform_PushFaceOnce compares
-    // with; kept as its own named constant here rather than exported, because one
-    // shared float would tie two files together for a tolerance neither owns.
-    const float KEXT_PUSH_EPS = 1.0e-4f;
+    // ROUND Q — the slack on the push-through test.  KIWI-UX (CLEANUP, A-26):
+    // this WAS a private 1.0e-4f "numerically identical to kiwi_transform.cpp's
+    // KX_EPS".  The HUD's correctness depends on the two being the SAME number,
+    // not on two literals agreeing, so it is now the exported KXPUSH_EPS
+    // (kiwi_transform.h) that KiwiXform_PushFaceOnce itself compares with.
+    const float KEXT_PUSH_EPS = KXPUSH_EPS;
 
     // ROUND Q — which of the three things E is about to do (KiwiExtrudeFaceCommand).
     enum kiwiExtrudeFaceMode_t
@@ -110,35 +172,10 @@ namespace
         KEXTF_DESTROY,    // IN, all the way through: the brush is removed
     };
 
-    inline float Dot3( const float *a, const float *b )
-    {
-        return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-    }
-    inline void Copy3( const float *a, float *o ) { o[0]=a[0]; o[1]=a[1]; o[2]=a[2]; }
-    inline void Sub3( const float *a, const float *b, float *o )
-    { o[0]=a[0]-b[0]; o[1]=a[1]-b[1]; o[2]=a[2]-b[2]; }
-    inline void Mad3( const float *a, const float *d, float s, float *o )
-    { o[0]=a[0]+d[0]*s; o[1]=a[1]+d[1]*s; o[2]=a[2]+d[2]*s; }
 
-    // Closest point on the line (pt, axis) to the ray — the same solve face
-    // push/pull uses (kiwi_transform.cpp RayAxis); `axis` and ray.dir are unit, so
-    // the determinant is 1 - (axis·dir)², which vanishes exactly when the axis
-    // points at the camera.
-    bool RayAxis( const ray_t &ray, const float *pt, const float *axis, float *out )
-    {
-        float w0[3];
-        Sub3( pt, ray.origin, w0 );
-        const float b = Dot3( axis, ray.dir );
-        const float d = Dot3( axis, w0 );
-        const float e = Dot3( ray.dir, w0 );
-        const float den = 1.0f - b * b;
-        // ROUND AI, ITEM 2 — the sample gate; see kiwi_camera.h and the copy in
-        // kiwi_transform.cpp.  1.0e-4 refused only theta < 0.6 degrees.
-        if ( fabsf( den ) < KCAM_RAYAXIS_MIN_DEN )
-            return false;
-        Mad3( pt, axis, ( b * e - d ) / den, out );
-        return true;
-    }
+    // KIWI-UX (CLEANUP, RayAxis): the local copy is gone — it was one of four
+    // byte-identical bodies.  It is KiwiCam_RayAxis (kiwi_camera.h) now, beside
+    // the KCAM_RAYAXIS_MIN_DEN gate every copy already cited.
 
     // ── the prism builder ───────────────────────────────────────────────────
     // `loop` is a CCW plane-space ring, `dist` the signed travel along
@@ -745,13 +782,12 @@ namespace
             return m_region >= 0 && !m_hasNum && !( fabsf( m_dist ) >= KEXT_MIN_DIST );
         }
 
-        // ── KIWI-UX (ROUND Z, ITEM 2): SNAPPING IS OPT-IN HERE ──────────────
-        // USER DIRECTIVE, verbatim: "When extruding, it should not snap by default.
-        // Make it snap only when holding CTRL.  It's just not good to use in a
-        // cluttered scene."  kiwi_command.h SnapOptIn carries the full argument and
-        // the Plasticity citation; the plain drag now reports SNAP_NONE, so the
-        // whole `else if` below is skipped and `d` keeps its raw mapped value.
-        bool SnapOptIn() const override { return true; }
+        // KIWI-UX (ROUND BO, ITEM 3): round Z's `SnapOptIn() { return true; }` is
+        // GONE — not because the behaviour changed (an extrude is still raw until
+        // Ctrl is held: *"with extruding, same thing, no snapping unless ctrl"*) but
+        // because it is no longer a per-command exception.  This command WantsClicks
+        // false, so kiwi_command.h SnapContext already puts it in KSNAPCTX_TRANSFORM,
+        // which IS "raw, Ctrl snaps".  One rule, nothing to remember.
 
         bool IdlePressReselect( int imgX, int imgY, bool shift ) override
         {
@@ -785,7 +821,7 @@ namespace
             // Round AF, item 2 forked HERE on a point probe (DragsIntoSolid: is
             // there solid one KEXT_MIN_DIST along the drag direction from the
             // profile centroid?), and when it said yes the prism pieces became
-            // TOOLS for KiwiBool_DifferenceByDef instead of bodies.  The probe was
+            // boolean TOOLS instead of bodies.  The probe was
             // deliberately not the sign of the distance, so an extrude drawn on a
             // wall silently changed verb depending on which side of that wall the
             // centroid was — which is exactly the surprise the user is refusing.
@@ -796,7 +832,8 @@ namespace
             // its own preview and its own undo record, and reaches the SAME
             // CarveTarget subtract the cascade did — so the geometry a user gets by
             // extruding and then pressing Q is the geometry the auto-carve produced.
-            // kiwi_boolean.h keeps every entry point; only this caller is gone.
+            // KIWI-UX (CLEANUP, A-16): kiwi_boolean's by-def entry points were
+            // deleted once this caller went; Q's own path is the whole surface now.
             //
             // (The FACE command's round-Q KEXTF_CARVE/KEXTF_DESTROY is a DIFFERENT
             // feature and STAYS: it moves one face PLANE of one brush through
@@ -894,10 +931,9 @@ namespace
         }
 
     private:
-        // ROUND AG, ITEM 1: MakeBuild (the PRIMARY-region-only build) is gone —
-        // every consumer now asks MakeBuildFor with the source it is actually
-        // working on, so there is no way for one of them to be left reading
-        // m_plane while its sibling reads the region's.
+        // KIWI-UX (CLEANUP, A-35): RULE — every consumer builds through
+        // MakeBuildFor with the source it is working on; none of them may read a
+        // per-command plane, or two sources on two walls diverge.
 
         // ═══════════════════════════════════════════════════════════════════
         //  ROUND AG, ITEM 1 — ONE GESTURE, MANY SOURCES
@@ -988,6 +1024,33 @@ namespace
             return true;
         }
 
+        // ── KIWI-UX (ROUND BP, ITEM 2): what the ABSOLUTE bubble prints ─────────
+        // On a world-aligned axis the extruded end has a world coordinate and that
+        // is the honest "absolute" — "Z 10 ft" is a number the user can check
+        // against the grid.  On a slanted normal there is no single axis to name,
+        // so it falls back to the distance from the source plane, prefixed so the
+        // two readings can never be confused.
+        void AbsoluteLabel( char *buf, int bufSize ) const
+        {
+            int worldAxis = -1;
+            for ( int k = 0; k < 3; ++k )
+                if ( fabsf( m_plane.normal[k] ) > 0.999f )
+                    worldAxis = k;
+            char v[32];
+            if ( worldAxis >= 0 )
+            {
+                const float pos = m_ref[worldAxis] + m_plane.normal[worldAxis] * m_dist;
+                KiwiUnits_Format( v, sizeof( v ), pos );
+                _snprintf( buf, bufSize, "%c %s", "XYZ"[worldAxis], v );
+            }
+            else
+            {
+                KiwiUnits_Format( v, sizeof( v ), m_dist );
+                _snprintf( buf, bufSize, "out %s", v );
+            }
+            buf[bufSize - 1] = '\0';
+        }
+
         bool CursorRay( ray_t *out ) const
         {
             int x, y;
@@ -1008,7 +1071,7 @@ namespace
                 return;
             ray_t ray;
             float p[3];
-            if ( !CursorRay( &ray ) || !RayAxis( ray, m_ref, m_plane.normal, p ) )
+            if ( !CursorRay( &ray ) || !KiwiCam_RayAxis( ray, m_ref, m_plane.normal, p ) )
                 return;
             float rel[3];
             Sub3( p, m_ref, rel );
@@ -1019,6 +1082,7 @@ namespace
         void Recompute()
         {
             float d = m_dist;
+            m_gridMajor = false;               // ROUND BN, ITEM 6 — one frame's answer
 
             // ── KIWI-UX (ROUND AI, ITEM 2): THE VIEW GATE ───────────────────
             // Same degeneracy the box's height stage hit, same fix — a region
@@ -1035,19 +1099,48 @@ namespace
                 LatchStart();
             m_axisBlocked = !canAxis;
 
+            // ── KIWI-UX (ROUND BP, ITEM 2): CTRL = ABSOLUTE (kiwi_extrude.h) ──
+            // The CTRL-UP edge is the only one that rebases: relative has to resume
+            // from wherever absolute left the face, so `m_start` is re-latched to
+            // make the mapping evaluate to the current `d`.  CTRL-DOWN deliberately
+            // does not — "match the mouse absolutely" IS the jump, and it is exactly
+            // `m_start`, which is small for a gesture grabbed at its own lollipop.
+            const bool absNow = KiwiExt_AbsoluteHeld();
+            if ( !absNow && m_absPrev )
+                LatchStart();
+            m_absPrev  = absNow;
+            m_absolute = absNow && canAxis && m_haveStart;
+
             ray_t ray;
             float p[3];
+            float rawAbs  = d;                 // the cursor's own axis position
+            bool  haveRaw = false;
             if ( canAxis && m_haveStart && CursorRay( &ray )
-              && RayAxis( ray, m_ref, m_plane.normal, p ) )
+              && KiwiCam_RayAxis( ray, m_ref, m_plane.normal, p ) )
             {
                 float rel[3];
                 Sub3( p, m_ref, rel );
-                d = Dot3( rel, m_plane.normal ) - m_start;
+                rawAbs  = Dot3( rel, m_plane.normal );
+                haveRaw = true;
+                d = absNow ? rawAbs : ( rawAbs - m_start );
             }
 
             if ( m_hasNum )
             {
                 d = m_numWorld;
+            }
+            else if ( m_absolute && haveRaw )
+            {
+                // ── KIWI-UX (ROUND BT): THE FULL LADDER (kiwi_extrude.h) ──────
+                // Round BP's nearest-value contest between the geometry answer and
+                // the hard lattice is GONE: a hard lattice answer is never further
+                // than half a cell from the cursor, so on the user's 6-inch grid it
+                // won every comparison and the extrude *"only snapped to the grid"*.
+                // Geometry ranks first (aim-gated), the face plane is a magnet, and
+                // the lattice with its majors catches everything else — one function,
+                // shared by all four one-axis gestures.
+                d = KiwiExt_LadderDepth( m_snap, m_ref, m_plane.normal, rawAbs,
+                                         &m_gridMajor );
             }
             else if ( m_snap.valid && m_snap.type != SNAP_NONE )
             {
@@ -1078,23 +1171,39 @@ namespace
                 {
                     // §6 numeric hygiene: quantise the SCALAR, never the cursor
                     // point, so an axis-aligned region extrudes exactly on-grid.
-                    const float g = KiwiUnits_GridSpacingWorld();
-                    if ( g > 0.0f )
-                        d = floorf( d / g + 0.5f ) * g;
+                    //
+                    // ── KIWI-UX (ROUND BN, ITEM 6): …THROUGH THE MAJOR-AWARE ────
+                    //    LATTICE, WHICH IS THE ONE THE MOVE ALREADY USES.
+                    // USER DIRECTIVE, verbatim: *"Holding Ctrl should allow snapping
+                    // to the major lines of the grid as well… (in this case, while
+                    // extruding)."*
+                    //
+                    // This branch IS "Ctrl is held" for an extrude: an extrude is a
+                    // TRANSFORM, so the ranked query only answers at all with Ctrl
+                    // down (kiwi_command.h SnapContext), and SNAP_GRID lands here.
+                    // KIWI-UX (ROUND BO, ITEM 3): that sentence was true under round
+                    // Z's per-command opt-in and it is still true under the one
+                    // context rule — only the reason changed.  The hand-
+                    // rolled `floorf(d/g + 0.5)*g` it replaces had never heard of a
+                    // MAJOR line and quantised the DELTA rather than the absolute
+                    // world coordinate — both of which round BL had already fixed
+                    // ONCE, in KiwiSnap_LatticeAxis, for the object move.  Same
+                    // function, `hard` = true (Ctrl means quantise, not nudge), so a
+                    // major within KSNAP_MAJOR_BAND_MUL cells takes the value and an
+                    // off-grid start does not drag its offset along.
+                    //
+                    // THE GATE IS UNTOUCHED.  This decides WHAT the lattice answers,
+                    // never WHEN it is consulted: the gate above is still
+                    // `m_snap.valid && type != SNAP_NONE`, which is arm 0's answer.
+                    bool major = false;
+                    d = KiwiSnap_LatticeAxis( d, m_ref, m_plane.normal, true, &major );
+                    m_gridMajor = major;
                 }
             }
-            else
-            {
-                // ── KIWI-UX (ROUND AG, ITEM 11): THE LIGHT GRID MAGNET ──────
-                // USER DIRECTIVE: "There should be light snapping to the global
-                // grid (disabled with ctrl)."  This is the branch round Z's
-                // opt-in leaves behind — SNAP_NONE, raw cursor mapping — and it
-                // is exactly where a mapper lost the ability to land on a round
-                // number without also switching the ranked geometry query back
-                // on.  A BAND, not a quantiser: outside it `d` is untouched, so
-                // the drag still feels continuous.  See kiwi_snap.h.
-                d = KiwiSnap_LightGridAxis( d, m_ref, m_plane.normal );
-            }
+            // KIWI-UX (ROUND BO, ITEM 3): ROUND AG'S LIGHT GRID MAGNET IS GONE —
+            // see the twin note in kiwi_transform.cpp RecomputeFace.  *"no
+            // snapping unless ctrl"* has to mean no snapping, so the raw mapped
+            // `d` stands and fine detail is reachable again.
 
             m_dist    = d;
             m_invalid = ( fabsf( d ) < KEXT_MIN_DIST );
@@ -1132,29 +1241,32 @@ namespace
                            verts, many, b );
             // ROUND AP, ITEM 1: the CARVE (cavity) rung is gone with the fork it
             // was advertising — there is only one outcome now.
+            // KIWI-UX (ROUND BN, ITEM 6): a MAJOR lock says so, exactly as the object
+            // move's HUD does (kiwi_transform.cpp m_majorLock) — a lattice preference
+            // the user cannot see is a lattice preference they will not trust.
+            // ── KIWI-UX (ROUND BP, ITEM 2): ABSOLUTE SAYS SO, AND SHOWS BOTH ──
+            // The bubble reads the ABSOLUTE position first because that is the number
+            // the user is aiming at while Ctrl is down, with the delta in parentheses
+            // so the familiar reading is not taken away.  "Absolute" here is the
+            // extruded end's own world coordinate along the gesture axis when that
+            // axis is a world one — which is exactly when a lattice line is a plane
+            // it can land on — and the distance from the source otherwise.
+            else if ( m_absolute )
+            {
+                char abso[32];
+                AbsoluteLabel( abso, sizeof( abso ) );
+                _snprintf( m_hud, sizeof( m_hud ), "extrude  %i-gon%s  %s  (%s)%s  CTRL",
+                           verts, many, abso, b, m_gridMajor ? "  [MAJOR]" : "" );
+            }
             else
-                _snprintf( m_hud, sizeof( m_hud ), "extrude  %i-gon%s  %s",
-                           verts, many, b );
+                _snprintf( m_hud, sizeof( m_hud ), "extrude  %i-gon%s  %s%s",
+                           verts, many, b, m_gridMajor ? "  [MAJOR]" : "" );
             m_hud[sizeof( m_hud ) - 1] = '\0';
         }
 
-        // ══════════════════════════════════════════════════════════════════
-        //  KIWI-UX (ROUND AP, ITEM 1) — THE CAVE IS THE USER'S OWN BOOLEAN
-        // ══════════════════════════════════════════════════════════════════
-        // Round AF, item 2 lived here: DragsIntoSolid() (a KiwiBool_PointInSolid
-        // probe one KEXT_MIN_DIST along the drag from the profile centroid) and
-        // Carve() (build the same convex pieces the grow path builds, dry-run them
-        // through KiwiBool_WouldCarve, then hand each to KiwiBool_DifferenceByDef
-        // inside one "carve region" bracket and free them).  Both are DELETED by
-        // user directive — see the AUTO-CARVE WITHDRAWN note over Commit().
-        //
-        // The cascade itself is NOT deleted.  KiwiBool_DifferenceByDef,
-        // KiwiBool_WouldCarve and KiwiBool_PointInSolid stay as kiwi_boolean.h's
-        // public surface (see the ROUND AP note there for why they are kept with no
-        // caller); Q reaches the SAME CarveTarget subtract by its own route, so the
-        // user's boolean produces exactly the geometry the auto-carve did.
-        // Extruding into a solid now lands a prism inside that solid — overlapping
-        // brushes are legal in a .map, and Q afterwards is one keypress.
+        // KIWI-UX (CLEANUP, A-35/A-16): RULE — an extrude never carves.  It lands
+        // its prism even inside a solid (overlapping brushes are legal in a .map);
+        // carving is the user's own Q boolean.  See the note over Commit().
 
         // ── the commit ──────────────────────────────────────────────────────
         void Extrude()
@@ -1228,6 +1340,15 @@ namespace
         bool          m_hasNum  = false;
         float         m_numWorld = 0.0f;
         bool          m_invalid = false;
+        // KIWI-UX (ROUND BN, ITEM 6): did a MAJOR grid line take the distance?  Set by
+        // the Ctrl (hard-lattice) arm of Recompute, read by UpdateHud, and cleared on
+        // every pass through the other arms — it is one frame's answer, not a mode.
+        bool          m_gridMajor = false;
+        // ROUND BP, ITEM 2: the Ctrl-absolute pair.  m_absPrev is the edge detector
+        // (the rebase happens on CTRL UP only) and m_absolute is this frame's mode,
+        // read by the HUD.
+        bool          m_absPrev   = false;
+        bool          m_absolute  = false;
         snap_result_t m_snap;
         char          m_hud[192] = { 0 };
     };
@@ -1306,12 +1427,9 @@ namespace
             return true;
         }
 
-        // ── KIWI-UX (ROUND Z, ITEM 2): SNAPPING IS OPT-IN HERE TOO ──────────
-        // E on a face is the gesture the directive names by name, in both
-        // directions: the positive arm grows a body, the negative one un-extrudes.
-        // One flag covers both — they share this Recompute.  kiwi_command.h
-        // SnapOptIn has the argument.
-        bool SnapOptIn() const override { return true; }
+        // KIWI-UX (ROUND BO, ITEM 3): round Z's opt-in flag is gone here too — the
+        // face extrude / un-extrude is a TRANSFORM (kiwi_command.h SnapContext), so
+        // both directions are raw until Ctrl is held, which is what it already did.
 
         // ROUND AG, ITEM 1: the preview costs 3 segments per profile vertex per
         // SOURCE, so the command names what it needs and the framework scales its
@@ -1774,6 +1892,33 @@ namespace
             return BuildProfileInto( node, faceIndex, true, &m_plane, &m_loop, m_ref );
         }
 
+        // ── KIWI-UX (ROUND BP, ITEM 2): what the ABSOLUTE bubble prints ─────────
+        // On a world-aligned axis the extruded end has a world coordinate and that
+        // is the honest "absolute" — "Z 10 ft" is a number the user can check
+        // against the grid.  On a slanted normal there is no single axis to name,
+        // so it falls back to the distance from the source plane, prefixed so the
+        // two readings can never be confused.
+        void AbsoluteLabel( char *buf, int bufSize ) const
+        {
+            int worldAxis = -1;
+            for ( int k = 0; k < 3; ++k )
+                if ( fabsf( m_plane.normal[k] ) > 0.999f )
+                    worldAxis = k;
+            char v[32];
+            if ( worldAxis >= 0 )
+            {
+                const float pos = m_ref[worldAxis] + m_plane.normal[worldAxis] * m_dist;
+                KiwiUnits_Format( v, sizeof( v ), pos );
+                _snprintf( buf, bufSize, "%c %s", "XYZ"[worldAxis], v );
+            }
+            else
+            {
+                KiwiUnits_Format( v, sizeof( v ), m_dist );
+                _snprintf( buf, bufSize, "out %s", v );
+            }
+            buf[bufSize - 1] = '\0';
+        }
+
         bool CursorRay( ray_t *out ) const
         {
             int x, y;
@@ -1790,7 +1935,7 @@ namespace
                 return;
             ray_t ray;
             float p[3];
-            if ( !CursorRay( &ray ) || !RayAxis( ray, m_ref, m_plane.normal, p ) )
+            if ( !CursorRay( &ray ) || !KiwiCam_RayAxis( ray, m_ref, m_plane.normal, p ) )
                 return;
             float rel[3];
             Sub3( p, m_ref, rel );
@@ -1801,6 +1946,7 @@ namespace
         void Recompute()
         {
             float d = m_dist;
+            m_gridMajor = false;               // ROUND BN, ITEM 6 — one frame's answer
 
             // ROUND AI, ITEM 2 — the view gate.  A FACE extrude hits this harder
             // than the region one does, because the axis is the FACE NORMAL: aim
@@ -1814,19 +1960,48 @@ namespace
                 LatchStart();
             m_axisBlocked = !canAxis;
 
+            // ── KIWI-UX (ROUND BP, ITEM 2): CTRL = ABSOLUTE (kiwi_extrude.h) ──
+            // The CTRL-UP edge is the only one that rebases: relative has to resume
+            // from wherever absolute left the face, so `m_start` is re-latched to
+            // make the mapping evaluate to the current `d`.  CTRL-DOWN deliberately
+            // does not — "match the mouse absolutely" IS the jump, and it is exactly
+            // `m_start`, which is small for a gesture grabbed at its own lollipop.
+            const bool absNow = KiwiExt_AbsoluteHeld();
+            if ( !absNow && m_absPrev )
+                LatchStart();
+            m_absPrev  = absNow;
+            m_absolute = absNow && canAxis && m_haveStart;
+
             ray_t ray;
             float p[3];
+            float rawAbs  = d;                 // the cursor's own axis position
+            bool  haveRaw = false;
             if ( canAxis && m_haveStart && CursorRay( &ray )
-              && RayAxis( ray, m_ref, m_plane.normal, p ) )
+              && KiwiCam_RayAxis( ray, m_ref, m_plane.normal, p ) )
             {
                 float rel[3];
                 Sub3( p, m_ref, rel );
-                d = Dot3( rel, m_plane.normal ) - m_start;
+                rawAbs  = Dot3( rel, m_plane.normal );
+                haveRaw = true;
+                d = absNow ? rawAbs : ( rawAbs - m_start );
             }
 
             if ( m_hasNum )
             {
                 d = m_numWorld;
+            }
+            else if ( m_absolute && haveRaw )
+            {
+                // ── KIWI-UX (ROUND BT): THE FULL LADDER (kiwi_extrude.h) ──────
+                // Round BP's nearest-value contest between the geometry answer and
+                // the hard lattice is GONE: a hard lattice answer is never further
+                // than half a cell from the cursor, so on the user's 6-inch grid it
+                // won every comparison and the extrude *"only snapped to the grid"*.
+                // Geometry ranks first (aim-gated), the face plane is a magnet, and
+                // the lattice with its majors catches everything else — one function,
+                // shared by all four one-axis gestures.
+                d = KiwiExt_LadderDepth( m_snap, m_ref, m_plane.normal, rawAbs,
+                                         &m_gridMajor );
             }
             else if ( m_snap.valid && m_snap.type != SNAP_NONE )
             {
@@ -1852,17 +2027,17 @@ namespace
                 }
                 else
                 {
-                    const float g = KiwiUnits_GridSpacingWorld();
-                    if ( g > 0.0f )
-                        d = floorf( d / g + 0.5f ) * g;
+                    // KIWI-UX (ROUND BN, ITEM 6): the major-aware HARD lattice, same
+                    // as the region sibling above — the whole argument is there.  This
+                    // is the FACE extrude / un-extrude, which is the gesture the user's
+                    // screenshot was taken during.
+                    bool major = false;
+                    d = KiwiSnap_LatticeAxis( d, m_ref, m_plane.normal, true, &major );
+                    m_gridMajor = major;
                 }
             }
-            else
-            {
-                // ROUND AG, ITEM 11: the light grid magnet, same as the region
-                // sibling above — see the note there and kiwi_snap.h.
-                d = KiwiSnap_LightGridAxis( d, m_ref, m_plane.normal );
-            }
+            // KIWI-UX (ROUND BO, ITEM 3): round AG's light grid magnet is gone,
+            // same as the region sibling above — the raw mapped `d` stands.
 
             m_dist = d;
 
@@ -1874,6 +2049,8 @@ namespace
             // KiwiXform_PushFaceOnce's own test does (its KX_EPS), so the HUD can
             // never promise a carve the helper then turns into a delete or the
             // other way round — the two comparisons are the same comparison.
+            // KIWI-UX (CLEANUP, A-26): and they are now literally the same
+            // constant, KXPUSH_EPS, rather than two literals that agreed.
             m_mode = KEXTF_IDLE;
             if ( d >= KEXT_MIN_DIST )
                 m_mode = KEXTF_GROW;
@@ -1939,6 +2116,28 @@ namespace
                            "extrude face  %i-gon  %s  (pull OUT for a new body, "
                            "IN to carve)", verts, b );
                 break;
+            }
+            // KIWI-UX (ROUND BN, ITEM 6): the MAJOR-lock badge, appended rather than
+            // woven into four format strings — the lock is a property of the DISTANCE,
+            // which every arm above has already printed.
+            if ( m_gridMajor )
+            {
+                const size_t n = strlen( m_hud );
+                if ( n + 9 < sizeof( m_hud ) )
+                    _snprintf( m_hud + n, sizeof( m_hud ) - n, "  [MAJOR]" );
+            }
+            // ── KIWI-UX (ROUND BP, ITEM 2): the ABSOLUTE badge, appended the same
+            // way and for the same reason: the mode is a property of the DISTANCE
+            // every arm above has already printed, so it does not need four more
+            // format strings.  It carries the absolute position, which is the number
+            // the user is aiming at while Ctrl is held.
+            if ( m_absolute )
+            {
+                char abso[32];
+                AbsoluteLabel( abso, sizeof( abso ) );
+                const size_t n = strlen( m_hud );
+                if ( n + 24 < sizeof( m_hud ) )
+                    _snprintf( m_hud + n, sizeof( m_hud ) - n, "  CTRL @ %s", abso );
             }
             m_hud[sizeof( m_hud ) - 1] = '\0';
         }
@@ -2051,6 +2250,13 @@ namespace
         bool               m_hasNum  = false;
         float              m_numWorld = 0.0f;
         bool               m_invalid = true;
+        // KIWI-UX (ROUND BN, ITEM 6): the face twin of the region command's flag —
+        // did a MAJOR line take the distance?  One frame's answer, cleared in
+        // Recompute and read by UpdateHud.
+        bool               m_gridMajor = false;
+        // ROUND BP, ITEM 2: the Ctrl-absolute pair (see the region sibling).
+        bool               m_absPrev   = false;
+        bool               m_absolute  = false;
         snap_result_t      m_snap;
         char               m_hud[192] = { 0 };
 

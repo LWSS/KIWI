@@ -29,6 +29,11 @@ extern int   Sys_Printf( const char *fmt, ... );
 // ─── U-GLOBALS: THE editor camera, shell-agnostic (camwnd.cpp; never NULL) ────
 extern camera_s *Ed_Camera();
 
+// KIWI-UX (ROUND AZ, ITEM 3): THE sky predicate — kiwi_skybox.h D-AZ-A.  Declared
+// here rather than by including the header, because this is the file's ONLY use of
+// it and select.cpp includes no kiwi_* header today.
+extern bool KiwiSky_IsSkyMaterial( const qtexture_s *q );   // kiwi_skybox.cpp  bool KiwiSky_IsSkyMaterial(const qtexture_s*)
+
 // ─── world_entity from map.cpp ────────────────────────────────────────────────
 extern entity_s *world_entity;  // 0x25D5B30
 
@@ -704,9 +709,21 @@ static void sub_48D460( const float *start, const float *dir, int contents,
         // material name contains "sky_".
         if ( g_PrefsDlg->sky_brush_off )
         {
-            LayerMaterialDef *nm = Materialdef_GetName(
-                &sbn->def->faces->mtldef[g_qeglobals.current_edit_layer] );
-            if ( strstr( (const char *)nm, "sky_" ) )
+            MaterialDef *skyMd = &sbn->def->faces->mtldef[g_qeglobals.current_edit_layer];
+            LayerMaterialDef *nm = Materialdef_GetName( skyMd );
+            // ── KIWI-UX (ROUND AZ, ITEM 3): WIDENED, NOT REPLACED ────────────────
+            // The `"sky_"` substring is the binary's own test and stays exactly as it
+            // was.  What is OR'd in is the SURF_SKY predicate (kiwi_skybox.h D-AZ-A),
+            // so this preference finally means what its menu item says — "disable
+            // selection of sky" — for a sky material that simply is not named `sky_*`.
+            //
+            // THIS IS THE ONLY PLACE THE EXCLUSION CAN LIVE, and that is worth stating
+            // because the obvious alternative is wrong: `Pick`'s area arm keeps ONE
+            // nearest hit (kiwi_pick.cpp:606-607), so rejecting a sky hit after
+            // `Test_Ray` returns would mean "nothing is under the cursor", not "select
+            // what is behind it".  Only this walker's `continue` moves on to the next
+            // brush, which is what click-THROUGH means.
+            if ( strstr( (const char *)nm, "sky_" ) || KiwiSky_IsSkyMaterial( skyMd->radMtl ) )
                 continue;
         }
 

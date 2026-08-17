@@ -213,13 +213,18 @@ bool KiwiConSel_HideSelected();
 //     selecting "the edges of a face" and then its neighbour selects the shared
 //     one twice; two identical construction lines on top of each other would
 //     double every snap candidate and confuse the region walk.  "Coincident" is
-//     KREG_JOIN_DIST on both ends, in either order — §8's one weld tolerance;
+//     KREG_JOIN_DIST on both ends, in either order;
 //   * contiguous RUNS are joined into POLYLINES.  Four edges round a face become
 //     ONE closed polyline, which PASS 1 of the region walk turns into a region
 //     immediately — rather than four separate lines that only PASS 2 could chain.
-//     The chaining rule is the store's own: endpoints within KREG_JOIN_DIST.
+//     The chaining rule is the same one: endpoints within KREG_JOIN_DIST.
 // ONE construction undo push covers the whole thing (kiwi_undo.h), so one Ctrl+Z
 // removes every line the press created.
+//
+// KIWI-UX (CLEANUP, A-10): §8 no longer has ONE weld tolerance.  KREG_JOIN_DIST is
+// the FLOOR; the tolerance is KiwiRegion_WeldFor( finestEdge ), which scales the
+// floor with the grid (kiwi_region.h).  KiwiConSel_Join uses the SCALED value; the
+// edge-duplicate and run-chaining paths above use the BARE floor, through SamePoint.
 //
 // False (with a message) when nothing edge-shaped is selected.
 bool KiwiConSel_CanDuplicateEdges();

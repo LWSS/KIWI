@@ -9,7 +9,42 @@
 // the modern-input master toggle — each has its own switch in kiwi_ux.h.
 //
 // ═════════════════════════════════════════════════════════════════════════════
-//  ROUND M — GRID v3.  THE EMISSION STRATEGY IS REPLACED WHOLESALE.
+//  KIWI-UX (CLEANUP, C-26/27/28) — READ THIS BEFORE THE HISTORY BELOW
+// ═════════════════════════════════════════════════════════════════════════════
+// THE LATTICE IS ORTHO-ONLY.  Round AJ item 5 ANDed `gridOn` with KiwiCam_Ortho,
+// which made every perspective-only mechanism in this file unreachable BY
+// CONSTRUCTION.  Those mechanisms have been DELETED from kiwi_grid.cpp, together
+// with the constants that fed only them:
+//   * the ALTITUDE LOD ladder (PickLod) and its KGRID_CELLS_PER_HEIGHT /
+//     KGRID_LOD_UP / KGRID_LOD_DOWN thresholds,
+//   * the altitude-derived window (BuildWindow) and its KGRID_FWD_BIAS,
+//   * the frustum far-ring probe (FarGroundDistance / BuildFarWindow), its
+//     KGRID_FAR_MAX_MUL cap and the Ed_CameraCalcRayDir edge it needed,
+//   * the width-2 MAJOR HALO (DrawMajorHalo, KGRID_HALO_SEGMENTS /
+//     KGRID_HALO_MUL) — round AN had already switched it off in ortho,
+//   * the THREE DISTANCE BANDS (BandOf, KGRID_BAND_COUNT / KGRID_BAND_NEAR /
+//     KGRID_BAND_MID / KGRID_PASS_ORDER, and the table's mid row).
+// WHAT SURVIVES is the round-AK ortho path: PickLodOrtho, BuildWindowOrtho,
+// BuildFarWindowOrtho, DrawFarRing, DrawGround, DrawAxes.
+//
+// EVERY SECTION BELOW MARKED "HISTORY" DESCRIBES DELETED CODE.  It is kept
+// because the diagnoses in it are why the ortho path is shaped the way it is —
+// but nothing in a HISTORY block is a statement about what runs today, and a
+// perspective grid would be a NEW design measured against the ortho one, not a
+// resurrection of this one.
+//
+// ── KIWI-UX (ROUND BN, ITEM 1): …AND THAT NEW DESIGN NOW EXISTS ─────────────
+// The paragraph above still describes what was deleted and it is still true that
+// none of it came back.  What HAS changed is the first sentence: the lattice is
+// ortho-only BY DEFAULT.  In perspective it draws behind an explicit session
+// toggle, through BuildWindowPersp — a new window builder that shares
+// PickLodOrtho and nothing else.  Its design, the pivot-depth choice and its
+// honest limits are at THE PERSPECTIVE GRID, BACK, AND OPT-IN near the bottom of
+// this header.  WHAT SURVIVES, updated: PickLodOrtho, BuildWindowOrtho,
+// BuildWindowPersp, BuildFarWindowOrtho, DrawFarRing, DrawGround, DrawAxes.
+//
+// ═════════════════════════════════════════════════════════════════════════════
+//  HISTORY — ROUND M — GRID v3.  THE EMISSION STRATEGY IS REPLACED WHOLESALE.
 // ═════════════════════════════════════════════════════════════════════════════
 // USER REPORT, verbatim: "The grid is still buggy. at shallow camera angles it
 // doesn't render.  The density also changes with angle, it shouldn't do that.
@@ -18,8 +53,9 @@
 // ── WHY v2 FAILED AT SHALLOW ANGLES — THE EXACT MATH ────────────────────────
 // v2 (shakeout C) derived its FOOTPRINT from the view frustum: four corner rays
 // through the ported CameraCalcRayDir, each intersected with Z=0, and a ray that
-// missed the plane was walked KGRID_MAX_EXTENT (131072) along itself and its XY
-// taken.  Both arms of that collapse as the pitch flattens:
+// missed the plane was walked KGRID_MAX_EXTENT (131072 at the time; ROUND BC
+// raised it) along itself and its XY taken.  Both arms of that collapse as the
+// pitch flattens:
 //
 //   * MISS ARM.  Pitch near 0 means the upper corner rays point at or above the
 //     horizon, so `t` stays at 131072 and the corner lands ~131072 units away in
@@ -63,20 +99,15 @@
 // the emitter reads camera.angles[0].  A camera at 192 units draws 10-unit cells
 // out to 1200 units whether it is looking straight down or straight ahead.
 //
-// ── THE LINE BUDGET (bounded by construction) ───────────────────────────────
-//   window on one axis      2R = 2 * KGRID_HALF_CELLS * spacing
-//   indices in it           floor(hi/s) - ceil(lo/s) + 1  <=  2*KGRID_HALF_CELLS + 1
-//                           = 241 with KGRID_HALF_CELLS = 120
-//   both axes               482
-//   axes overlay            6 (each world axis split at the origin — shakeout A)
-//   MAIN BATCH worst case   488  <=  KGRID_MAX_SEGMENTS (500)
-//   majors (every 10th)     ceil(241/10) = 25 per axis -> 50
-//   HALO BATCH worst case   50   <=  KGRID_HALO_SEGMENTS (56)
-//   TOTAL                   538 segments, two RC_DRAW_LINES commands.
-// The `axesOn` skip of index 0 and the behind-the-eye cull only ever REMOVE
-// lines, so 538 stands after them too.
+// ── THE LINE BUDGET ─────────────────────────────────────────────────────────
+// KIWI-UX (CLEANUP, C-32): round M's table lived here and stated a 500-segment
+// cap and a second (halo) batch, both superseded.  THE CURRENT BUDGET IS THE ONE
+// UNDER "THE BUDGET, RESTATED" BELOW — one batch, cap KGRID_MAX_SEGMENTS (1024).
+// Two budget tables in one header disagreeing is how the next round mis-sizes a
+// batch (kiwi_lines.h TRAP 1), so there is only one.
 //
-// ── "ANTI ALIASING", HONESTLY ───────────────────────────────────────────────
+// ── HISTORY: "ANTI ALIASING", HONESTLY ──────────────────────────────────────
+// The halo pass this section argues for is DELETED (see the CLEANUP banner).
 // Real AA is not available on this path and that was VERIFIED, not assumed:
 //   * kiwi_lines.h TRAP 2 — the editor $line technique consumes the run colour as
 //     MATERIAL_COLOR and LERPS toward it, so a sub-1 alpha means "blend less of
@@ -127,7 +158,7 @@
 //
 //     a cell of size S at ground distance d subtends about  (S/d) * f  pixels
 //     across, where f = (height/2) / (tan(fov/2)*0.75) is the pixel focal length
-//     (CameraCalcRayDir's own scale, camwnd.cpp:3090).  For a 65-degree fov at
+//     (CameraCalcRayDir's own scale, camwnd.cpp:3176).  For a 65-degree fov at
 //     900 px that is f ~ 940, so a 4-pixel floor puts d_max ~ 235 * S — the same
 //     order as the 120 * S the window already reaches.
 //
@@ -163,36 +194,42 @@
 // cannot resolve as lines at any brightness, so the ring draws the one thing
 // that can: its majors — <=25 per axis, ~50 segments.
 //
-// ── HOW "IS THERE VISIBLE GROUND OUT THERE" IS ANSWERED ─────────────────────
+// ── HISTORY: HOW "IS THERE VISIBLE GROUND OUT THERE" WAS ANSWERED ───────────
+// KIWI-UX (CLEANUP, C-26): the frustum probe below is DELETED.  It was only ever
+// reachable in perspective — ROUND AK (below) establishes that its ray math is
+// meaningless under a parallel projection, and the ortho ring answers the same
+// question exactly, with `need[a] > reach[a]`, out of numbers the near window
+// already computed.  Kept because it records what the probe was ALLOWED to
+// decide, which is the rule the ortho ring still obeys.
+//
 // By the frustum, and yes, that is the machinery v2 died of.  The difference is
 // what it is allowed to decide.  v2 fed the frustum footprint into the SPACING
 // (`while (span/spacing > 200) spacing *= 2`), so a shallow angle coarsened the
-// grid under the viewer's feet — the near field emptied out.  Here the frustum
-// answers ONE boolean, "is there ground past R", and the far ring it turns on has
-// a FIXED spacing and a FIXED reach.  A pitch change can add or remove the far
-// ring; it can never change a single line of the near lattice.
+// grid under the viewer's feet — the near field emptied out.  There the frustum
+// answered ONE boolean, "is there ground past R", and the far ring it turned on
+// had a FIXED spacing and a FIXED reach.  A pitch change could add or remove the
+// far ring; it could never change a single line of the near lattice.
 //
-// The probe is four rays through Ed_CameraCalcRayDir (camwnd.cpp:3144, the same
-// forwarder the picker uses, so ortho is handled for free): the three along the
-// TOP edge (the shallowest the frustum has) and one at the bottom centre.
+// The probe was four rays through Ed_CameraCalcRayDir: the three along the TOP
+// edge (the shallowest the frustum has) and one at the bottom centre.
 //   * bottom ray points AWAY from the plane   -> no ground in view at all -> off
 //   * top rays point away, bottom toward      -> the HORIZON is on screen ->
 //                                                unbounded -> clamp to the cap
 //   * all toward                              -> d = h * |horiz| / |dz|, max of
 //                                                the three top rays
-// The result is clamped to KGRID_FAR_MAX_MUL * R and passed through a Schmitt
-// latch (KGRID_FAR_ON / KGRID_FAR_OFF) so a camera parked at the threshold cannot
-// blink the ring on and off.
+// The result was clamped to 8R and passed through the same Schmitt latch the
+// ortho ring still uses (KGRID_FAR_ON / KGRID_FAR_OFF), so a camera parked at the
+// threshold could not blink the ring on and off.
 //
-// ── THE BUDGET, RESTATED (ROUND AH) ─────────────────────────────────────────
-//   near window, both axes    482        (unchanged, 2*120+1 per axis)
+// ── THE BUDGET (ROUND AH; retallied by KIWI-UX (CLEANUP, C-26/27/28)) ───────
+// THIS IS THE ONLY BUDGET TABLE IN THIS HEADER.  ONE batch — the width-2 halo
+// pass is deleted, so KiwiGrid_Draw opens exactly one KiwiLines_Begin:
+//   near window, both axes    482        (2*120+1 per axis, majors and minors)
 //   axes overlay                6
 //   FAR ring, MAJORS ONLY      50        (<=25 per axis: i % 10 == 0 in 241)
-//   MAIN BATCH worst case     538  <=  KGRID_MAX_SEGMENTS (1024)
-//   halo: NEAR MAJORS ONLY     50  <=  KGRID_HALO_SEGMENTS (56)   (unchanged)
-// The far ring gets no halo: it is a dim, distant tier and doubling its cost to
-// soften it would be the wrong trade.  The width-1 cap stays at 1024 — the slack
-// is headroom, not a plan.
+//   BATCH worst case          538  <=  KGRID_MAX_SEGMENTS (1024)
+// The far ring is a dim, distant tier and never had a halo of its own.  The cap
+// stays at 1024 — the slack is headroom, not a plan.
 // ─────────────────────────────────────────────────────────────────────────────
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -371,7 +408,7 @@
 //
 // ── AND THE SNAP IS NOT THE DISPLAY TIER (checked, not assumed) ────────────
 // `KiwiGrid_Snap` quantises with `KiwiUnits_GridSpacingWorld()` (kiwi_grid.cpp,
-// below) and `KiwiSnap_LightGridAxis` with the same call (kiwi_snap.cpp:1111).
+// below) and `KiwiSnap_LatticeAxis` with the same call (kiwi_snap.cpp).
 // NEITHER reads `s_lod`, which is a file-static of this file's anonymous
 // namespace and is never exported.  The display tier coarsening as you zoom out
 // therefore cannot move a vertex: you still land on the spacing the units pill
@@ -395,22 +432,18 @@
 #define KGRID_ORTHO_MIN_SIN  KGRID_EDGE_FULL
 
 // ── budget ──────────────────────────────────────────────────────────────────
-// Two batches, because KiwiLines_Begin fixes ONE width for a batch and the halo
-// needs a different one.  Both are hard caps; the math above says neither binds.
-// (Round AG: the width-1 cap went 500 -> 1024 to hold the far ring.  KiwiLines'
-// own 512-vertex staging array auto-flushes, so a bigger batch costs extra
-// RC_DRAW_LINES commands and nothing else — kiwi_lines.cpp KLINES_VERTS.)
+// ONE batch — KIWI-UX (CLEANUP, C-27) deleted the width-2 halo pass and its own
+// cap with it.  A hard cap; the math above says it does not bind.  (Round AG: it
+// went 500 -> 1024 to hold the far ring.  KiwiLines' own 512-vertex staging array
+// auto-flushes, so a bigger batch costs extra RC_DRAW_LINES commands and nothing
+// else — kiwi_lines.cpp KLINES_VERTS.)
 #define KGRID_MAX_SEGMENTS   1024       // width-1 batch: near grid + far ring + axes
-#define KGRID_HALO_SEGMENTS  56         // width-2 batch: the major-line halo
 
 // ── ROUND AG: the far ring ──────────────────────────────────────────────────
 // Spacing/reach multiplier, as a shift.  3 = 8x: one ring buys 8x the reach for
 // the same line count, which covers a 9600-unit ground span from the default
 // 192-unit eye height — past the far side of any CoD4 map.
 #define KGRID_FAR_STEP       3
-// The reach cap, in units of the NEAR reach R.  Equal to 1 << KGRID_FAR_STEP by
-// construction: the ring cannot usefully claim more ground than it draws.
-#define KGRID_FAR_MAX_MUL    8.0f
 // Schmitt latch on (visible ground distance / R).  1.30 / 1.05 leaves a 1.24x
 // dead band — the same shape as the LOD's, for the same reason.
 #define KGRID_FAR_ON         1.30f
@@ -426,12 +459,12 @@
 //
 // WHICH PASS THEY ARE, identified rather than guessed.  They are the FAR RING's
 // majors, and four properties of that pass pin it:
-//   * DARK.  The ring paints KGRID_BANDS[2][1] — the FAR band's major colour,
-//     the dimmest tier there is — times KGRID_FAR_MUL (0.62).  Nothing else in
-//     the ortho arm draws that dim; DrawGround uses band 0 (:767-780) and the
-//     axes are saturated colours.
+//   * DARK.  The ring paints KGRID_BANDS[KGRID_TIER_FAR][1] — the far tier's
+//     major colour, the dimmer of the two — times KGRID_FAR_MUL (0.62).  Nothing
+//     else draws that dim; DrawGround uses KGRID_TIER_NEAR and the axes are
+//     saturated colours.
 //   * LONG, and stopping in mid-air.  Its reach is ClampAxis-clamped exactly as
-//     the near window's is (:494), so at grazing angles each line ends at the
+//     the near window's is, so at grazing angles each line ends at the
 //     window edge rather than at the screen edge — the round-AK/AL reach-clamp
 //     regime, on the pass with the longest lines.
 //   * DIAGONAL.  They are world-axis-aligned and the view is yawed.
@@ -440,7 +473,7 @@
 //     bottom (the count arithmetic is at KiwiGrid_Draw).
 //
 // AND WHY THE EXISTING FADE DOES NOT CATCH THEM — the hole is exact.  EdgeFade
-// (:678-686) returns 1.0 for every |vpn.Z| >= KGRID_EDGE_FULL (0.08), so the
+// returns 1.0 for every |vpn.Z| >= KGRID_EDGE_FULL (0.08), so the
 // ring's `KGRID_FAR_MUL * fade` is at FULL strength everywhere above about 4.6
 // degrees.  Between there and roughly 9 degrees the near lattice is reach-clamped
 // into a small patch, and the ring is the only thing left drawing across the rest
@@ -464,35 +497,23 @@
 // Half-width of the lattice window, in CELLS.  This is the one number that sets
 // the budget: 2*120 + 1 = 241 lines per axis.
 #define KGRID_HALF_CELLS     120
-// How far the window centre is pushed along the yaw-plane forward, as a fraction
-// of R.  0.45 puts 1.45R in front and 0.55R behind.
-#define KGRID_FWD_BIAS       0.45f
 
-// ── the LOD, from ALTITUDE ONLY ─────────────────────────────────────────────
-// Nominal relation: a cell should be about 1/KGRID_CELLS_PER_HEIGHT of the
-// camera's height above the ground plane, so the grid reads the same at 100 units
-// up and at 10000.  The Schmitt band is asymmetric on purpose:
-//     coarsen (k -> k+1)  when  h >  base*2^k     * C * KGRID_LOD_UP   (2.0)
-//     refine  (k -> k-1)  when  h <  base*2^(k-1) * C * KGRID_LOD_DOWN (1.2)
-// The two thresholds are measured against DIFFERENT levels, and 2.0/1.2 leaves a
-// 1.67x dead band, so a camera parked on a boundary cannot oscillate.  This is
-// hysteresis on ONE scalar (height) for the WHOLE grid — v2's per-line Schmitt
-// table, with its slot-ownership problem, is gone entirely.
-#define KGRID_CELLS_PER_HEIGHT 16.0f
-#define KGRID_LOD_UP           2.0f
-#define KGRID_LOD_DOWN         1.2f
+// ── the LOD ceiling ─────────────────────────────────────────────────────────
+// KIWI-UX (CLEANUP, C-26): the ALTITUDE ladder's own thresholds
+// (KGRID_CELLS_PER_HEIGHT / KGRID_LOD_UP / KGRID_LOD_DOWN) went with PickLod; the
+// surviving ortho ladder's are KGRID_PX_MIN / KGRID_PX_REFINE above.  Only the
+// shared ceiling is left, and it bounds both the tier and the ladder's guard loop.
 #define KGRID_LOD_MAX          20       // 2^20 * base — far past any real map
 
 // ── brightness ──────────────────────────────────────────────────────────────
-// THREE distance bands, and they are BRIGHTNESS ONLY: every band draws both its
-// minors and its majors, so a line never appears or disappears with camera
-// motion.  (v2's outer bands dropped minors outright and culled on projected
-// pixel gap; both were sources of the twinkle they were meant to cure.)
-#define KGRID_BAND_COUNT     3
-#define KGRID_BAND_NEAR      0.40f      // fraction of R
-#define KGRID_BAND_MID       0.75f
-// The halo pass's share of the major colour it sits under.
-#define KGRID_HALO_MUL       0.35f
+// KIWI-UX (CLEANUP, C-28): the THREE distance bands and their thresholds
+// (KGRID_BAND_COUNT / KGRID_BAND_NEAR / KGRID_BAND_MID) are gone with the banded
+// emitter, as is the halo's KGRID_HALO_MUL.  What is left is TWO TIERS — near
+// lattice and far ring — spelled as KGRID_BANDS in kiwi_grid.cpp, and they are
+// still BRIGHTNESS ONLY: a tier draws both its minors and its majors, so a line
+// never appears or disappears with camera motion.  (v2's outer bands dropped
+// minors outright and culled on projected pixel gap; both were sources of the
+// twinkle they were meant to cure.)
 
 // ── ROUND S: THE EDGE-ON FADE ───────────────────────────────────────────────
 // USER REPORT: an axis view down the grid PLANE (the BOT / TOP-side views, where
@@ -524,10 +545,31 @@
 #define KGRID_EDGE_FULL      0.08f
 #define KGRID_EDGE_MINOR     0.5f
 
-// Axis half-length.  Finite on purpose (spec §17 "long but finite"): the engine's
-// own world bound — Brush_BuildWindings seeds its AABB at ±131072
-// (brush.cpp:1459) — so nothing that can ever be built lies outside it.
-#define KGRID_MAX_EXTENT     131072.0f
+// Axis half-length, and the hard ceiling on the lattice window's reach.  Finite on
+// purpose (spec §17 "long but finite"): 131072 was the engine's own world bound —
+// Brush_BuildWindings seeds its AABB at ±131072 (brush.cpp:1459) — so nothing that
+// can ever be BUILT lay outside it.
+//
+// ── KIWI-UX (ROUND BC, ITEM 3): IT IS A RULER, NOT GEOMETRY ─────────────────
+// USER REPORT, verbatim: "the grid disappears totally altogether" at extreme
+// zoom-out.  The world bound is the right ceiling for a BRUSH and the wrong one
+// for a RULER: round BC raises the ortho zoom ceiling to 262144 of standoff
+// (kiwi_camera.cpp), which at the default fov frames ~445,000 units across, and a
+// lattice clamped to ±131072 covers barely half of that — the grid becomes a
+// patch floating in an empty viewport, and the far ring cannot help because it is
+// clamped by the same number and so never comes out BIGGER than the near window
+// (BuildFarWindowOrtho's `bigger` test, kiwi_grid.cpp).  524288 matches the new
+// ortho depth slab (camwnd.cpp:183), i.e. the lattice can now reach exactly as
+// far as the projection can still show it, and no further.
+//
+// IT DOES NOT COST A SINGLE EXTRA SEGMENT.  The line COUNT is bounded by
+// KGRID_HALF_CELLS (the window is at most 2*HALF_CELLS cells wide whatever it is
+// centred on — kiwi_grid.cpp EmitRun says so in as many words); this constant
+// only TRUNCATES that window.  Raising it lets the window be the size the
+// footprint asks for instead of a clipped subset, at the same 241-lines-per-axis
+// budget.  It also keeps the three world AXES spanning the frame at full
+// zoom-out, where ±131072 would have ended them mid-screen.
+#define KGRID_MAX_EXTENT     524288.0f      // ROUND BC: was 131072
 
 // Cam_Draw tail hook (// KIWI-UX in camwnd.cpp).  Emits nothing when both
 // toggles are off.
@@ -551,8 +593,10 @@ bool KiwiGrid_Snap( const float in[3], float out[3] );
 // exception:
 //   * KiwiGrid_Snap itself, the FULL quantiser (kiwi_snap.cpp arm 9 / SNAP_GRID,
 //     kiwi_transform.cpp's move quantise, kiwi_split.cpp, kiwi_dupe.cpp);
-//   * KiwiSnap_LightGridAxis, the round-AG magnet BAND (kiwi_extrude.cpp x2,
-//     kiwi_transform.cpp's push/pull).
+//   * KiwiSnap_LatticeAxis, the one lattice rule in both its HARD and SOFT modes
+//     (kiwi_transform.cpp's move + push/pull, kiwi_extrude.cpp x2).  KIWI-UX
+//     (ROUND BO): round AG's KiwiSnap_LightGridAxis wrapper is deleted; the
+//     enforcement point is unchanged because SOFT was always the same function.
 // Both already have a documented "leave the value alone" answer for a degenerate
 // spacing, so switching off reuses a path that was always there.
 //
@@ -566,3 +610,56 @@ bool KiwiGrid_Snap( const float in[3], float out[3] );
 // one the user has to find.
 bool KiwiGrid_SnapEnabled();
 void KiwiGrid_SetSnapEnabled( bool on );
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  KIWI-UX (ROUND BN, ITEM 1) — THE PERSPECTIVE GRID, BACK, AND OPT-IN
+// ═════════════════════════════════════════════════════════════════════════════
+// USER DIRECTIVE, verbatim: *"When in 'P' camera mode, show another button next
+// to it that enables the ortho Grid while in 'P' mode."*
+//
+// ── THE HISTORY IS AT THE TOP OF THIS FILE AND IT IS NOT BEING RE-RUN ───────
+// Round AJ item 5 made the lattice ortho-only on the user's own instruction
+// ("the bugs are even worse"), and CLEANUP wave 3 then DELETED every
+// perspective-only mechanism as unreachable: the altitude LOD ladder, the
+// altitude-derived window, the frustum far-ring probe, the major halo and the
+// three distance bands.  NONE of that comes back.  This is a NEW window builder
+// measured against the ladder that exists today, and it is deliberately the
+// SIMPLEST thing that can be honest:
+//
+//   SPACING.  The ortho ladder, unchanged (PickLodOrtho), fed the world-per-pixel
+//     AT THE PIVOT DEPTH — KiwiCam_WorldPerPixel( KiwiCam_LookAt() ), which is the
+//     camera contract's own formula (z * s, kiwi_camera.cpp) evaluated at the
+//     point the user is orbiting around, i.e. the depth at which the scene is
+//     actually being worked on.  Under a perspective divide there is no single
+//     world-per-pixel for the frame; picking the PIVOT's is a choice, it is
+//     stated here, and it is the same number every other screen-scaled marker in
+//     the editor uses at that depth.  The |vpn·Z| foreshortening divisor is round
+//     AL's, unchanged — the derivation is exact for a parallel projection and an
+//     approximation here, applied at that same one depth.
+//   REACH.  Two bounds, whichever is smaller: the LOD's own cell cap (spacing *
+//     KGRID_HALF_CELLS, which is what bounds the LINE COUNT and therefore the
+//     budget — identical to ortho), and the depth at which a cell stops being
+//     RESOLVABLE, spacing * |vpn·Z| / ( s * KGRID_PX_MIN ) with s = wpp / zPivot.
+//     The second is the AH SCREEN-DENSITY LAW applied as a reach instead of as a
+//     brightness: rather than drawing a thousand lines into ten pixels near the
+//     horizon and fading them, the lattice simply STOPS where its own cells fall
+//     below the floor the ladder already refuses to go under.  That is also why
+//     there is NO far ring in perspective: the far ring is a coarser tier drawn
+//     BEYOND the near one, and beyond this reach there is nothing a coarser tier
+//     could resolve either.
+//   CENTRE.  The pivot's ground point, not the eye's.  The pivot is what the view
+//     is built around and it is where the reach is measured from.
+//   GRAZING.  Round S's EdgeFade governs perspective exactly as it governs ortho
+//     — same ramp, same constants — so the minors drop out first (KGRID_EDGE_MINOR)
+//     and the majors carry the lattice alone before the whole thing fades.  The
+//     honest limit, stated: at a near-horizon pitch the perspective lattice is a
+//     handful of major lines and then nothing.  That is the correct picture, and
+//     it is why this is OPT-IN.
+//
+// SESSION STATE, DEFAULT OFF, NOT PERSISTED.  The grid-snap toggle above is a
+// preference; this is a per-session view choice with known limits, and a view
+// choice with known limits should not silently follow the user into tomorrow's
+// session.  The button that drives it is drawn beside the P/O pill and only in
+// perspective (kiwi_viewcube.cpp).
+bool KiwiGrid_PerspGrid();
+void KiwiGrid_SetPerspGrid( bool on );

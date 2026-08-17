@@ -38,12 +38,11 @@
 #include <string>
 #include <vector>
 #include "radiant_ui_actions.h"
+#include "radiant_frame.h"          // KIWI-UX (CLEANUP, C-6): struct RadiantCommand + the table API
 
-// MUST MATCH mainfrm.cpp:1764 verbatim (shared-header consolidation pending). Layout-identical
-// is not optional: this is the parameter type of the two extern helpers below, so both the
-// mangled names and the field offsets have to agree with the definition in mainfrm.cpp.
-//   `byte` is universal/q_shared.h's typedef (stdafx.h:78), the same one mainfrm.cpp sees.
-struct RadiantCommand { const char *name; byte vk; byte mods; int commandId; };
+// KIWI-UX (CLEANUP, C-6): the struct AND these declarations now live in
+// radiant_frame.h, included above.  This file used to carry a verbatim copy of
+// `struct RadiantCommand` plus its own externs, as six other TUs did.
 
 // ── mainfrm.cpp bindings ──────────────────────────────────────────────────────
 // The two UI-independent halves of a command-list line, split out of sub_40BBC0. Both
@@ -51,8 +50,6 @@ struct RadiantCommand { const char *name; byte vk; byte mods; int commandId; };
 //   KeyName: the g_radiantKeys entry for c.vk, else the raw character written into keybuf.
 //   Mods:    "" or "Shift[ + Alt][ + Control][ + Left Win] + " — note the TRAILING " + ",
 //            which is why the binding cell is a plain mods-then-key concatenation.
-extern const char *CommandList_KeyName( const RadiantCommand &c, char keybuf[8] );  // mainfrm.cpp:5274
-extern void        CommandList_Mods( const RadiantCommand &c, char mods[64] );      // mainfrm.cpp:5284
 
 // ── BLOCKED BINDING — ORCHESTRATOR TO-DO (plan P-8) ───────────────────────────
 // The rows themselves cannot be reached yet. All three symbols OnInitDialog uses to walk the
@@ -84,7 +81,6 @@ extern void        CommandList_Mods( const RadiantCommand &c, char mods[64] );  
 // OnInitDialog does first (mainfrm.cpp:5328) and what the panel's first-open must inherit;
 // keeping it inside the accessor is what makes this panel independent of whether CMainFrame
 // has run LoadCommandMap yet (it will not have, once Phase 4 drops CMainFrame).
-extern int Radiant_GetCommandTable( const RadiantCommand **out );   // mainfrm.cpp (seeds inside)
 static int CommandList_GetTable( const RadiantCommand **out )
 {
     return Radiant_GetCommandTable( out );

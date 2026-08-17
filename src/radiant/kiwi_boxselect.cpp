@@ -43,7 +43,9 @@
 #include <vector>
 
 // ── ported entry points (verified against their definitions) ────────────────
-extern selbrush_t active_brushes;    // map.cpp (0x23F189C)
+// KIWI-UX (CLEANUP, C-55): no local `extern selbrush_t active_brushes;` — qe3.h
+// (included above) declares both display-list sentinels, and the local copy also
+// cited map.cpp, which is itself only an extern.
 extern int        g_nUpdateBits;     // 0x25D5A74 (mainfrm.cpp)
 // ROUND AG: camwnd.cpp:151 camera_s *Ed_Camera(); :162 void CamWnd_BuildMatrix();
 extern camera_s  *Ed_Camera();
@@ -52,6 +54,17 @@ extern void       CamWnd_BuildMatrix();
 namespace
 {
     struct rect2_t { float x0, y0, x1, y1; };
+
+    // ── KIWI-UX (CLEANUP, C-55): the coincident-corner tolerance, NAMED ──────
+    // Two faces of one brush name the SAME corner as two winding points, so a
+    // marquee over a vertex would otherwise emit one SEL_VERTEX item per face that
+    // touches it.  0.1 world units is a tenth of the finest useful grid — far below
+    // anything a modeller places deliberately, far above float noise on a winding
+    // rebuilt from planes.  kiwi_selconv.cpp names the SAME number KSC_TOL for the
+    // SAME question; that one is TU-local (an anonymous-namespace const in a .cpp),
+    // so it cannot be shared without promoting it to a header this cleanup does not
+    // own — the two are a documented pair, not an accident.
+    const float KBOX_COINCIDENT_TOL = 0.1f;
 
     bool  s_active   = false;
     bool  s_shift    = false;
@@ -153,7 +166,10 @@ namespace
 
     void TestPatchPoints( const rect2_t &r, patchMesh_t *pm, shapeTest_t &t )
     {
-        if ( !pm || pm->width <= 0 || pm->height <= 0 || pm->width > 16 || pm->height > 16 )
+        // KIWI-UX (CLEANUP, C-55): the shared predicate, not a bare 16 —
+        // Patch_DimsSane (kiwi_selection.h) is this exact test against
+        // KIWI_PATCH_MAX_DIM.
+        if ( !Patch_DimsSane( pm ) )
             return;
         for ( int col = 0; col < pm->width; ++col )
             for ( int row = 0; row < pm->height; ++row )
@@ -309,7 +325,29 @@ namespace
         if ( !BrushMaybeInRect( r, def ) )
             return;
 
-        if ( kind == SEL_OBJECT )
+        // ── KIWI-UX (ROUND AZ, ITEM 1): A PATCH IN A FACE MARQUEE IS THE PATCH ──
+        // USER DIRECTIVE, verbatim: "allow shift clicking of patch sides like
+        // they're faces, so can they be textured at the same time as the faces."
+        //
+        // Round AM already made this ruling for the CLICK (kiwi_pick.cpp:641-669:
+        // a patch has no faces, its symbiont brush is a bounding box, so the patch
+        // ITSELF is the finest texturable thing there is and mode 3 resolves it as
+        // SEL_OBJECT).  The MARQUEE never got the same ruling: the face/edge arm
+        // below opens `if ( b->patch || !def->faces ) return;`, so a shift-DRAG
+        // over a curve in mode 3 collected nothing while a shift-CLICK on the same
+        // curve collected it.  Two gestures, one grammar — the drag now answers the
+        // way the click does.
+        //
+        // IT DELEGATES TO THE OBJECT ARM RATHER THAN REIMPLEMENTING THE TEST, which
+        // matters: that arm carries round AF's crossing-only bbox widen (the fillet
+        // fix, :339-368) and `Contained()` vs `Crossed()` already mean the right
+        // things there.  A second containment test written here would be the round-AF
+        // bug again, in a new place.
+        //
+        // SEL_EDGE IS NOT INCLUDED.  A patch has no windings, so there is no edge to
+        // name; edge mode keeps skipping patches exactly as before.
+        const bool patchAsObject = ( kind == SEL_FACE ) && ( b->patch != nullptr );
+        if ( kind == SEL_OBJECT || patchAsObject )
         {
             shapeTest_t t;
             if ( b->patch )
@@ -359,8 +397,7 @@ namespace
             if ( b->patch )
             {
                 patchMesh_t *pm = def->patch;
-                if ( !pm || pm->width <= 0 || pm->height <= 0
-                  || pm->width > 16 || pm->height > 16 )
+                if ( !Patch_DimsSane( pm ) )     // KIWI-UX (CLEANUP, C-55)
                     return;
                 for ( int col = 0; col < pm->width; ++col )
                     for ( int row = 0; row < pm->height; ++row )
@@ -393,9 +430,9 @@ namespace
                         continue;
                     bool dup = false;
                     for ( size_t k = 0; k < seen.size() && !dup; ++k )
-                        dup = fabsf( seen[k][0] - w->p[i][0] ) < 0.1f
-                           && fabsf( seen[k][1] - w->p[i][1] ) < 0.1f
-                           && fabsf( seen[k][2] - w->p[i][2] ) < 0.1f;
+                        dup = fabsf( seen[k][0] - w->p[i][0] ) < KBOX_COINCIDENT_TOL
+                           && fabsf( seen[k][1] - w->p[i][1] ) < KBOX_COINCIDENT_TOL
+                           && fabsf( seen[k][2] - w->p[i][2] ) < KBOX_COINCIDENT_TOL;
                     if ( dup )
                         continue;
                     seen.push_back( w->p[i] );
@@ -1038,11 +1075,6 @@ void KiwiBox_Cancel()
     s_active = false;
 }
 
-bool KiwiBox_Active()
-{
-    return s_active;
-}
-
 // ═════════════════════════════════════════════════════════════════════════════
 //  ROUND AG, ITEM 6 — THE LIVE MARQUEE PREVIEW
 // ═════════════════════════════════════════════════════════════════════════════
@@ -1155,38 +1187,12 @@ namespace
                 return;
     }
 
-    // The world position of a SEL_VERTEX item — a patch control point when
-    // faceIndex is negative (kiwi_pick.h's indexing), otherwise a winding corner.
-    bool PreviewVertexPos( const sel_item_t &it, float *out )
-    {
-        brush_t *def = it.brush ? it.brush->def : 0;
-        if ( !def )
-            return false;
-        if ( it.faceIndex < 0 )
-        {
-            patchMesh_t *pm = def->patch;
-            if ( !pm || pm->height <= 0 || pm->width <= 0
-              || pm->width > 16 || pm->height > 16 )
-                return false;
-            const int col = it.vertIndex / pm->height;
-            const int row = it.vertIndex % pm->height;
-            if ( col < 0 || col >= pm->width || row < 0 || row >= pm->height )
-                return false;
-            out[0] = pm->ctrl[col][row].xyz[0];
-            out[1] = pm->ctrl[col][row].xyz[1];
-            out[2] = pm->ctrl[col][row].xyz[2];
-            return true;
-        }
-        if ( !def->faces || it.faceIndex >= def->faceCount )
-            return false;
-        winding_t *w = def->faces[it.faceIndex].w;
-        if ( !w || it.vertIndex < 0 || it.vertIndex >= w->numpoints )
-            return false;
-        out[0] = w->p[it.vertIndex][0];
-        out[1] = w->p[it.vertIndex][1];
-        out[2] = w->p[it.vertIndex][2];
-        return true;
-    }
+    // KIWI-UX (CLEANUP, C-49): PreviewVertexPos was the fourth copy of "the world
+    // position of a SEL_VERTEX item"; it is Sel_ItemWorldPos (kiwi_selection.h)
+    // now, which additionally bounds the winding at MAX_POINTS_ON_WINDING and
+    // names the patch bound KIWI_PATCH_MAX_DIM.  The one call site passes
+    // checkLive = false — the preview loop tests Sel_BrushLive on the same item
+    // before entering the arm, and this runs once per previewed item per frame.
 }
 
 void KiwiBox_DrawPreview()
@@ -1269,7 +1275,7 @@ void KiwiBox_DrawPreview()
         {
             // ROUND AJ, ITEM 1 — see PreviewPoint for why this arm had to exist.
             float p[3];
-            if ( PreviewVertexPos( it, p ) )
+            if ( Sel_ItemWorldPos( it, p, false ) )
                 PreviewPoint( c, p );
         }
         // EDGE previews stay deliberately absent: at that granularity the marquee

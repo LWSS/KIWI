@@ -23,8 +23,11 @@
 //   RMB click       -> mid-command CONFIRM, else the CLASSIC context menu
 //                      (kiwi_viewport.cpp decides; neither reaches this file)
 //   Shift+MMB drag  -> KiwiCam_PanDrag
-//   W/A/S/D/Q/E     -> KiwiCam_FlyTick    (while RMB is held over the image)
-//   arrow keys      -> KiwiCam_FlyTick    (no RMB needed)
+//   arrow keys      -> KiwiCam_FlyTick    (ARROWS ONLY — see that declaration; bare
+//                      arrows while merely hovering, any modifier while RMB-look
+//                      is held.  KIWI-UX (CLEANUP, C-30): the WASD/QE fly was
+//                      removed by user directive, W/A/S/D/Q/E reach this file
+//                      through nothing.)
 //
 // All input coordinates are camera-RTT-IMAGE relative with a TOP-LEFT origin —
 // the same space ImGuiShell_CameraPaintCursor and kiwi_pick.h use.
@@ -93,15 +96,43 @@ void KiwiCam_OrbitBegin( int imgX, int imgY );
 // the press).  Pitch clamped to +-89 degrees; the eye's offset from the pivot is
 // rotated by the same rigid rotation the angles undergo, so the orbit radius and
 // the pivot's screen position are both preserved.
+// ── KIWI-UX (ROUND BM, ITEM 3): THE RATE IS PLASTICITY'S, NOT A CONSTANT ────
+// The degrees-per-pixel used to be a flat KCAM_DEG_PER_PX (0.35, the ported
+// Cam_Rotate2 rate).  Plasticity's orbit is RESOLUTION-RELATIVE — a drag of one
+// viewport HEIGHT is exactly one full turn, on BOTH axes:
+//     left = 2*PI*rotateDelta.x / domElement.clientHeight;  // yes, height
+//     up   = 2*PI*rotateDelta.y / domElement.clientHeight;
+//     sphericalDelta.theta -= left;  sphericalDelta.phi -= up;
+//   (plasticity/src/components/viewport/OrbitControls.ts:671-678, rotateSpeed = 1
+//    by default — plasticity/src/startup/default-settings.js:11.)
+// KIWI uses the same 360/height degrees per pixel now, so the orbit feels the same
+// on a 4K viewport as on a small one.  At a ~1030 px camera image that IS 0.35
+// deg/px, so the shipped feel is unchanged for the common case; only the extremes
+// move.  KiwiCam_LookDrag keeps the flat 0.35 — it is the CLASSIC free-look and
+// must stay bit-comparable with the ported Cam_Rotate2 it mirrors.
 void KiwiCam_OrbitDrag( int dx, int dy );
 
 // Drop the latch.  MUST be called on the gesture's release AND abort edges.
 void KiwiCam_OrbitEnd();
-bool KiwiCam_OrbitLive();
 
-// Dolly along the cursor ray.  `wheelSteps` is positive toward the scene; each
-// step scales the orbit distance by 0.85 and the camera moves the difference
-// along the ray, so zooming converges on whatever is under the cursor.
+// The wheel zoom.  `wheelSteps` is positive toward the scene.
+//
+// ── KIWI-UX (ROUND BM, ITEM 3): ONE CURVE, AND TWO HONEST ARMS ─────────────
+// The per-notch factor is KCAM_DOLLY_STEP, now Plasticity's own
+// `zoomScale = Math.pow(0.95, zoomSpeed)` with zoomSpeed = 1
+// (plasticity/src/components/viewport/OrbitControls.ts:648 +
+//  plasticity/src/startup/default-settings.js:10) — a FLAT five percent a notch at
+// every distance.  Rounds AJ/AN's near-field eases (a step easing 0.90 -> 0.985 and
+// a cursor-aim fading to zero) are GONE: they were treating a symptom whose cause
+// was the ORTHO arm referencing the wrong distance.  See kiwi_camera.cpp.
+//
+//   ORTHO (the default projection).  The image scale is s_dist and nothing else,
+//   so a notch scales s_dist and the view is PANNED so that the world point under
+//   the cursor stays under the cursor — exact anchoring, closed form, no ray
+//   marching, no lateral surprise at any zoom.  The pivot is NOT re-derived.
+//   PERSPECTIVE.  The eye moves along the CURSOR RAY toward the surface under it
+//   (the zoom-to-mouse this editor deliberately has and Plasticity does not —
+//   `onMouseWheel` never reads clientX/Y, OrbitControls.ts:423-443).
 void KiwiCam_Dolly( float wheelSteps, int imgX, int imgY );
 
 // The current orbit pivot (world space) — for HUD/gizmo consumers later.
@@ -112,7 +143,7 @@ float        KiwiCam_Distance();
 //
 // MOUSELOOK.  Rotates camera.angles from a pixel delta at the same 0.35 deg/px
 // and the same signs as the orbit drag and as the ported free-look
-// (CamWnd_Rotate2, camwnd.cpp:2598 `angles[1] -= dx*0.35; angles[0] -= dy*0.35`),
+// (CamWnd_Rotate2, camwnd.cpp:4094 `angles[1] -= dx*0.35; angles[0] -= dy*0.35`),
 // pitch clamped to +-89.  The camera POSITION is not touched; the orbit pivot is
 // re-seated in front so a following MMB orbit is still sane.
 //
@@ -144,6 +175,26 @@ void KiwiCam_LookDrag( int dx, int dy );
 // to the pivot on a miss), and the whole gesture uses that one number.  The
 // grabbed point then tracks the cursor ~1:1, which is the Plasticity feel, and it
 // cannot drift mid-drag because the cache is per-gesture.
+//
+// ── KIWI-UX (ROUND BM, ITEM 3): THE REFERENCE IS THE PIVOT AGAIN ───────────
+// "Copy Plasticity more."  Plasticity's pan is world-per-pixel AT THE TARGET, in
+// both projections, and nowhere else:
+//     targetDistance = |position - target|;
+//     targetDistance *= tan((fov/2) * PI/180);       // half fov = centre to top
+//     factor = 2 * targetDistance / clientHeight;    // height only, so the
+//     delta.x *= -factor;  delta.y *= factor;        //   aspect cannot distort it
+//   (plasticity/src/components/viewport/OrbitControls.ts:265-275; the ORTHOGRAPHIC
+//    arm at :276-279 is `(right-left)/zoom/clientWidth`, i.e. world-per-pixel too.)
+// Shakeout E moved KIWI off that onto a per-gesture surface pick, because the
+// PIVOT was unreliable: the old dolly re-seated it at s_dist on every notch, so it
+// wandered.  Round BM's ortho dolly does not re-seat the pivot at all (see
+// KiwiCam_Dolly), and in ortho KiwiCam_WorldPerPixel is depth-INDEPENDENT — the
+// surface pick could never have changed the answer there, which is the default
+// projection.  So the pick goes and the reference is `s_lookAt`, exactly as
+// Plasticity's is `this.target`.  It is still cached at PanBegin: Plasticity's
+// target distance is invariant during a pan (target and camera both move by
+// panOffset, OrbitControls.ts:228-234) and so is ours (KiwiCam_Translate moves the
+// eye and the pivot together), so caching and recomputing are the same number.
 void KiwiCam_PanBegin( int imgX, int imgY );
 void KiwiCam_PanDrag ( int dx, int dy );
 void KiwiCam_PanEnd  ();
@@ -199,7 +250,7 @@ float KiwiCam_WorldPerPixel( const float *world );
 // ONE poll per input tick, from the shell's post-present camera arm.  Both arms
 // are decided by the CALLER (kiwi_viewport.cpp) because the conditions are input
 // arbitration, not camera state:
-//   wasd   — RMB is held in the camera image (mouselook is live)
+//   lookHeld — RMB is held in the camera image (mouselook is live)
 //   arrows — the cursor is over the camera image, no modal command is running and
 //            ImGui wants no text input
 // Keys are read with GetAsyncKeyState, so they never enter the message queue and
@@ -207,20 +258,39 @@ float KiwiCam_WorldPerPixel( const float *world );
 // (the pump is 60 fps-capped but the tick is not guaranteed, so 1/60 would be a
 // lie); a stall is clamped to 0.1 s so an alt-tab cannot teleport the camera.
 //
-// Speed = g_PrefsDlg->m_nMoveSpeed (prefs.h:38, "MoveSpeed", default 350) units
-// per second, times KiwiCam_FlySpeedScale(), times 3 while Shift is held.
-// USER DIRECTIVE: the fly is ARROW KEYS ONLY (WASD clashed with the modern
-// bindings — S = Scale).  Param 1 (`wasd`) now means "RMB-look held": arrows fly
-// with modifiers ignored (Shift = boost) and are swallowed from the message
-// path; param 2 = hover-arrows, bare arrows only.
-void KiwiCam_FlyTick( bool wasd, bool arrows );
+// PERSPECTIVE speed = g_PrefsDlg->m_nMoveSpeed (prefs.h:38, "MoveSpeed", default
+// 350) units per second, times KiwiCam_FlySpeedScale(), times 3 while Shift is
+// held.  USER DIRECTIVE: the fly is ARROW KEYS ONLY (WASD clashed with the modern
+// bindings — S = Scale).  With `lookHeld` the arrows fly with modifiers ignored
+// (Shift = boost) and are swallowed from the message path; `arrows` is the
+// hover case, bare arrows only.
+//
+// ── KIWI-UX (ROUND BM, ITEM 1a + 3): THE ORTHO ARM IS A PAN, AT A PIXEL RATE ──
+// In a PARALLEL projection sliding the eye along the view axis changes nothing an
+// eye can see — that is the whole reason round BK reached for a clip plane — so in
+// ortho the arrows PAN THE VIEW instead of walking the eye:
+//     Left / Right  ->  -/+ camera.vright     (screen-horizontal)
+//     Down  / Up    ->  -/+ camera.vup        (screen-vertical)
+// The rate is expressed in SCREEN PIXELS PER SECOND and converted to world units
+// through KiwiCam_WorldPerPixel, which in ortho is exactly `2H/height` — the same
+// world-per-pixel Plasticity's own orthographic pan uses
+// (plasticity/src/components/viewport/OrbitControls.ts:276-279, `delta.x *=
+// -(object.right - object.left) / object.zoom / domElement.clientWidth`).  So the
+// arrows move the view at a CONSTANT number of screens per second at every zoom,
+// which is what BK wanted, without BK's double-applied multiplier.
+//
+// Reaching interiors is NOT this function's job any more — that is the section
+// plane (kiwi_section.h), which is aimed, parked and toggled instead of being a
+// side effect of holding an arrow key.
+void KiwiCam_FlyTick( bool lookHeld, bool arrows );
 
 // True while the RMB look owns this vk (the four ARROWS) — the key funnel
 // swallows it so look + arrow cannot also fire a hotkey-table binding.
 bool KiwiCam_FlySwallowKey( unsigned int vk );
 
-// Persisted fly-speed multiplier over the classic MoveSpeed pref (default 10 —
-// user directive: 1x was "incredibly slow").
+// Persisted fly-speed multiplier over the classic MoveSpeed pref.  KIWI-UX
+// (CLEANUP, C-31): the default is 4x — shakeout A's 10x (this line's old number)
+// was cut in shakeout I once the dolly and the default standoff were fixed.
 float KiwiCam_FlySpeedScale();
 void  KiwiCam_SetFlySpeedScale( float mul );
 
@@ -250,15 +320,104 @@ void  KiwiCam_SetFlySpeedScale( float mul );
 // further.  It also means the WHEEL still zooms: KiwiCam_Dolly already changes
 // s_dist, so H follows it, and the ortho image scales the way the perspective one
 // did.  (What the dolly's origin translation stops doing in ortho is changing the
-// image at all — in an orthographic view sliding the eye along the view axis is a
-// no-op.  The zoom comes entirely from s_dist.)
+// image SCALE — in an orthographic view sliding the eye along the view axis does
+// not resize anything.  The zoom comes entirely from s_dist.)
+//
+// ── KIWI-UX (ROUND AZ, ITEM 2): …BUT IT IS NOT A NO-OP FOR DEPTH ────────────
+// The parenthesis above used to end "sliding the eye along the view axis is a
+// no-op", full stop, and that sentence is why a real failure hid for thirteen
+// rounds.  Sliding the eye is a no-op for the IMAGE.  It is not a no-op for the
+// DEPTH RANGE, because CamWnd_SetupScene's ortho arm anchors a slab of
+// ±KCAM_ORTHO_DEPTH (camwnd.cpp:187) ON THE EYE.  Dolly far enough out
+// and the geometry you framed passes beyond zFar and the viewport empties —
+// which is exactly the report "when zooming out extremely far, it breaks the 3d
+// camera completely".  The ceiling (kiwi_camera.cpp) is now DERIVED from that
+// slab rather than picked, and KiwiCam_Dolly saturates the eye's MOVE at the
+// ceiling instead of only the recorded distance.
+//
+// ── KIWI-UX (ROUND BC, ITEM 1): THE SLAB IS A KIWI NUMBER, SO IT MOVED ──────
+// USER REPORT: "The zoom out limit is too restrictive.  Allow more zoom out."
+// KCAM_ORTHO_DEPTH is now 524288 and the ortho ceiling 262144 — four times AZ's
+// range, with the SAME depth/2 derivation.  There are TWO ceilings now, because
+// the two projections are bounded by different things: ortho by the slab,
+// PERSPECTIVE by the float32 inverse-VP degeneracy (camwnd.cpp:224-229), which
+// keeps AZ's 65536.  Both are read through KCam_MaxDist(), which also folds in
+// the half-height cap so a large fov cannot create a wheel dead zone.  Read the
+// block at KCAM_MAX_DIST_ORTHO (kiwi_camera.cpp) before changing any of these
+// numbers.
+//
+// ── KIWI-UX (CLEANUP, C-24): ONE SPELLING, AND THE PACT IS RETIRED ──────────
+// The slab half-depth used to be written TWICE — `KCAM_ORTHO_DEPTH` in
+// camwnd.cpp and `KCAM_ORTHO_DEPTH_HALF` in kiwi_camera.cpp — with two names for
+// one number and one meaning (a HALF-depth, either side of the eye), coupled by
+// nothing but a "MUST equal camwnd.cpp:187" comment on each side.  Four further
+// constants are derived from it, so a one-sided edit desynced the zoom ceiling
+// from the clip slab — the failure round BC spent a whole round diagnosing.
+// It is one definition now; camwnd.cpp's local reads THIS, and the derived
+// ceilings in kiwi_camera.cpp read it as they always did.  Value unchanged.
+#define KCAM_ORTHO_DEPTH_HALF 524288.0f
+
 bool  KiwiCam_Ortho();
 void  KiwiCam_SetOrtho( bool on );
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  KIWI-UX (ROUND BM, ITEM 2) — THE ZOOM METER
+// ═════════════════════════════════════════════════════════════════════════════
+// USER DIRECTIVE, verbatim: *"Add a zoom threshold bar at the top above the cube,
+// this basically shows how far zoomed in/out you are in accordance with the camera
+// and how bad the mouse sensitivity will be."*
+//
+// It lives HERE rather than in the widget that draws it because every quantity it
+// needs is one of this file's private constants — the floor (KCAM_MIN_DIST), the
+// per-projection ceiling (KCam_MaxDist) and the driver (s_dist).  The BC discipline
+// is "derive from the named constants, in one place"; a bar that re-typed 262144
+// would silently stop meaning anything the first time a ceiling moved.
+//
+//   *outFrac  0 at maximum zoom-IN, 1 at the ceiling, on a LOG scale.  Log because
+//             the wheel is MULTIPLICATIVE (KCAM_DOLLY_STEP per notch), so a log
+//             position makes the bar LINEAR IN WHEEL NOTCHES: half-way along the
+//             bar is half the notches from either end, which is the only mapping
+//             that answers "how far zoomed out am I" honestly.
+//   *outWpp   world units per screen pixel at the pivot, i.e. exactly how much a
+//             one-pixel mouse move is worth — which IS the "how bad the mouse
+//             sensitivity will be" the directive asks for, as a number rather than
+//             as a colour.
+// Either pointer may be null.  False when the camera has no usable size or range
+// yet, and the caller then draws nothing.
+bool  KiwiCam_ZoomMeter( float *outFrac, float *outWpp );
 
 // The ortho view volume's half-HEIGHT in world units, > 0.  Every consumer of the
 // ortho projection (the matrix, the ray builder, the projection inverse and the
 // screen scale) derives from THIS ONE function so they cannot drift apart.
 float KiwiCam_OrthoHalfHeight();
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  KIWI-UX (ROUND BM, ITEM 1a) — ROUND BK'S ARROW-KEY SECTION IS GONE
+// ═════════════════════════════════════════════════════════════════════════════
+// USER DIRECTIVE, verbatim: *"Get rid of this arrow key cross section feature,
+// it's awful."*
+//
+// WHAT BK BUILT AND WHY IT WENT.  Round BK answered "the arrows do nothing in
+// ortho" with TWO couplings, and both were wrong shapes for the problem:
+//
+//   1. FORWARD-ARROW ARMED A CLIP SLAB.  `KiwiCam_OrthoBackDepth()` pulled the
+//      ortho projection's near plane up to 16 units behind the EYE while the user
+//      held Up, so geometry vanished as a side effect of NAVIGATING.  A cutting
+//      plane welded to the eye cannot be aimed, cannot be parked, and cannot be
+//      left on while you orbit to look at what it revealed — every camera move
+//      re-cuts the scene somewhere else.  Its three accessors, the camwnd.cpp
+//      matrix back-depth terms and the ortho pick-lead clamp are all deleted; the
+//      ortho projection is bit-for-bit the symmetric slab it was before BK.
+//   2. THE FLY RATE BECAME `halfHeight * 1.0 * KiwiCam_FlySpeedScale()`, i.e.
+//      FOUR SCREEN-HEIGHTS PER SECOND at the shipped 4x default, because the
+//      multiplier was applied to a rate that was already expressed in screens.
+//      That is the "awful" in the report as much as the clipping is.
+//
+// WHAT REPLACES IT.  A real SECTION ANALYSIS command (kiwi_section.h): a world
+// plane you place by clicking a face, slide with a lollipop, and toggle off — the
+// Plasticity feature the arrow coupling was imitating.  The arrows go back to
+// being NAVIGATION and nothing else; see KiwiCam_FlyTick below for the ortho rate
+// that replaced BK's.
 
 // ── KIWI-UX (ROUND AI, ITEM 2): CAN THIS VIEW PORTRAY MOTION ALONG AN AXIS? ──
 // USER REPORT, verbatim: "when creating a box (or other shape) with the camera
@@ -273,7 +432,7 @@ float KiwiCam_OrthoHalfHeight();
 // where theta is the angle between the axis and the ray.  The solve is therefore
 // amplified by 1/sin^2(theta): a one-pixel cursor move at ground distance d moves
 // the answer by roughly  d / (f * sin^2 theta)  world units, where f ~ 940 is
-// CameraCalcRayDir's own pixel scale (camwnd.cpp:3090).  At theta = 5 degrees that
+// CameraCalcRayDir's own pixel scale (camwnd.cpp:4094).  At theta = 5 degrees that
 // is 70 units per pixel at d = 500 — and the local `den < 1e-4` guards in the six
 // RayAxis copies only refuse at theta < 0.6 degrees, so everything between 0.6 and
 // ~10 degrees SOLVES, loudly and wrongly.  That is the -140 yd: it is not a stale
@@ -305,6 +464,22 @@ float KiwiCam_OrthoHalfHeight();
 // cannot drift apart.
 #define KCAM_AXIS_PORTRAY_DOT   0.97f
 #define KCAM_RAYAXIS_MIN_DEN    0.0594f
+
+// ── KIWI-UX (CLEANUP, RayAxis): THE SOLVE ITSELF, ONCE ──────────────────────
+// Closest point on the line (pt, axis) to `ray`, written into `out`; false when
+// the axis is too close to pointing at the camera to sample.  The classic
+// two-line closest-approach solve: `axis` and ray.dir are unit, so a = c = 1 and
+// the determinant is 1 - (axis.dir)^2 = sin^2(theta), which is why the refusal
+// threshold is KCAM_RAYAXIS_MIN_DEN above — same cone, same number, and now the
+// same code.  It lived as FOUR byte-identical private copies (kiwi_transform,
+// kiwi_extrude, kiwi_patchfillet, kiwi_primitive), each arguing it was "five
+// lines of algebra" not worth a header.  The gate they all cite is already in
+// this header, so the solve belongs beside it.
+//
+// `ray_t` is kiwi_pick.h's; it is forward-declared rather than included so this
+// header keeps its current dependency set.  Every caller already has the type.
+struct ray_t;
+bool  KiwiCam_RayAxis( const ray_t &ray, const float *pt, const float *axis, float *out );
 
 // True when the current view can portray motion along the unit vector `axis`.
 // `outDot`, when given, receives |vpn . axis| so a caller can drive a meter or a

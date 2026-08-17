@@ -54,8 +54,6 @@ void KiwiBox_End   ( int imgX, int imgY );
 // release edge.
 void KiwiBox_Cancel();
 
-bool KiwiBox_Active();
-
 // The live rect for the screen-space overlay.  x0/y0 is the PRESS point and x1/y1
 // the current cursor (not normalised — the caller draws the direction), and
 // `crossing` is true for a right-to-left drag.

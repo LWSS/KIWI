@@ -22,7 +22,10 @@
 #include <vector>
 
 // ── ported entry points (verified against their definitions) ────────────────
-extern camera_s  *Ed_Camera();                       // camwnd.cpp:153
+// KIWI-UX (CLEANUP, B-6): Ed_Camera returns &g_camwndState.camera and NEVER
+// returns NULL (camwnd.cpp:153, and the contract note at :148-155 says so).  The
+// deref at :422 is therefore correct as written; a `!c` guard would be dead code.
+extern camera_s  *Ed_Camera();                       // camwnd.cpp:156
 extern void       CamWnd_BuildMatrix();              // camwnd.cpp 0x403470
 extern int        g_nUpdateBits;                     // mainfrm.cpp
 extern selbrush_t selected_brushes;                  // brush.cpp
@@ -79,6 +82,14 @@ namespace
     void GatherPatches( std::vector<selbrush_t *> &out )
     {
         out.clear();
+        // KIWI-UX (CLEANUP, B-38): the cap is announced.  A 17th selected patch was
+        // dropped with no console line and no HUD note, and the status line then
+        // read "N point(s) on 16 patch(es)" for a 20-patch selection — while the
+        // ADOPTION path below prints when it widens the set, so the two halves of
+        // one cap disagreed about whether the user is told.  Counted, then printed
+        // ONCE at the end: GatherPatches is only reached from
+        // KiwiPatchVerts_ToggleForSelection, i.e. once per Begin, never per frame.
+        int overflow = 0;
         const selection_t &sel = KiwiSel();
         for ( size_t i = 0; i < sel.items.size(); ++i )
         {
@@ -88,8 +99,14 @@ namespace
             bool dup = false;
             for ( size_t k = 0; k < out.size() && !dup; ++k )
                 dup = ( out[k] == b );
-            if ( !dup && (int)out.size() < KPV_MAX_PATCHES )
-                out.push_back( b );
+            if ( dup )
+                continue;
+            if ( (int)out.size() >= KPV_MAX_PATCHES )
+            {
+                ++overflow;                   // KIWI-UX (CLEANUP, B-38)
+                continue;
+            }
+            out.push_back( b );
         }
         // The legacy list too: a patch selected through a ported path (a menu
         // command, the XY pane) is on `selected_brushes` and may not have reached
@@ -102,9 +119,21 @@ namespace
             bool dup = false;
             for ( size_t k = 0; k < out.size() && !dup; ++k )
                 dup = ( out[k] == b );
-            if ( !dup && (int)out.size() < KPV_MAX_PATCHES )
-                out.push_back( b );
+            if ( dup )
+                continue;
+            if ( (int)out.size() >= KPV_MAX_PATCHES )
+            {
+                ++overflow;                   // KIWI-UX (CLEANUP, B-38)
+                continue;
+            }
+            out.push_back( b );
         }
+
+        if ( overflow )
+            Sys_Printf( "Patch vertex mode: %i selected patch(es) beyond the "
+                        "KPV_MAX_PATCHES limit of %i were left out — their control "
+                        "points are not editable in this session.\n",
+                        overflow, (int)KPV_MAX_PATCHES );
     }
 
     // The nudge every accent in this layer uses — 0.25 world units toward the eye,
@@ -203,7 +232,19 @@ namespace
     // `reselect`    — false when something else now owns the selection (the user
     // clicked another object, or the patches are gone); handing the patches back
     // as objects there would fight the selection that caused the exit.
-    void ExitInternal( bool restoreMask, bool reselect, const char *why )
+    //
+    // ── KIWI-UX (CLEANUP, B-33): AND ITS THIRD, `quiet` ─────────────────────
+    // KiwiPatchVerts_DrawWorld used to inline a partial second teardown rather
+    // than call this, because it runs INSIDE Cam_Draw, which is walking the two
+    // brush sentinel lists — and this function's reselect arm ends in
+    // Sel_SyncToLegacy -> Select_Deselect, which RELINKS brushes between them.
+    // Re-entering that from the draw is the classic list-mutated-under-the-walker
+    // crash.  The reasoning was right; the shape was not: the copy already missed
+    // s_selGen, so the mode's state had two teardowns and one of them was already
+    // wrong.  `quiet` skips the reselect arm ENTIRELY (not just Sel_SyncToLegacy —
+    // Sel_Clear / Sel_Add are equally off-limits there) and the console line,
+    // which is exactly what the draw path was hand-writing.
+    void ExitInternal( bool restoreMask, bool reselect, const char *why, bool quiet = false )
     {
         if ( !s_active )
             return;
@@ -212,7 +253,7 @@ namespace
         if ( restoreMask )
             KiwiSel_SetModeMask( s_prevMask );
 
-        if ( reselect )
+        if ( reselect && !quiet )
         {
             // Leaving the user with an empty selection after they press V would be
             // the wrong end of "toggle off": they were editing that patch and still
@@ -227,6 +268,9 @@ namespace
 
         s_patches.clear();
         s_status[0] = '\0';
+        s_selGen    = 0;          // KIWI-UX (CLEANUP, B-33): the field the copy missed
+        if ( quiet )
+            return;               // no console line, no repaint request — see above
         Sys_Printf( "Patch vertex mode: off%s%s.\n", why ? " — " : "", why ? why : "" );
         g_nUpdateBits = -1;
     }
@@ -407,15 +451,16 @@ void KiwiPatchVerts_DrawWorld()
     // draw is the classic list-mutated-under-the-walker crash.  Restoring the mask
     // and dropping the latch is all that is needed here; there is nothing left to
     // re-select anyway, which is why we are exiting.
+    //
+    // KIWI-UX (CLEANUP, B-33): this WAS a hand-inlined second teardown that had
+    // already drifted (it never cleared s_selGen).  ExitInternal's `quiet` flag
+    // now expresses exactly the same restriction, so the mode has ONE teardown.
     bool anyLive = false;
     for ( size_t i = 0; i < s_patches.size() && !anyLive; ++i )
         anyLive = ( PatchOf( s_patches[i] ) != 0 );
     if ( !anyLive )
     {
-        s_active = false;
-        KiwiSel_SetModeMask( s_prevMask );
-        s_patches.clear();
-        s_status[0] = '\0';
+        ExitInternal( true, false, 0, true );
         return;
     }
 

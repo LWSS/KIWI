@@ -66,13 +66,13 @@ Constants
 
 #define MAX_QPATH                       64
 #define MAX_OSPATH                      256
-#define MAX_VERTS_PER_POLY              8
+#define MAX_VERTS_PER_POLY              10
 #define MAX_THREADS                     32
 #define MAX_FILE_HANDLES                64
 #define MAX_IWD_FILES                   1024
 #define MAX_WORLD_COORD                 131072.0f
 #define MIN_WORLD_COORD                 -131072.0f
-#define POLY_SLOT_STRIDE                96
+#define POLY_SLOT_STRIDE                112
 #define NUM_NATIVE_CMDLINE_SWITCHES     22
 #define NUM_EXTENSION_CMDLINE_SWITCHES  10
 #define NUM_CMDLINE_SWITCHES            (NUM_NATIVE_CMDLINE_SWITCHES + NUM_EXTENSION_CMDLINE_SWITCHES)
@@ -175,29 +175,27 @@ Struct Definitions — trace_types.h
 ------------------------------------------------------------------------------- */
 
 /*
- * MaterialInfo_t — material file header (matches cod2map MaterialInfo_t).
- * 44 bytes, name/refImage offsets are file-relative byte offsets.
+ * MaterialInfo_t — CoD4 material file header, 40 bytes.
+ * CoD4 removed the CoD2 hash/sorted indices, shifting all later fields.
  */
 typedef struct MaterialInfo_s
 {
     int name;                       /* +0x00: offset to name string */
     int referenceImageName;         /* +0x04: offset to reference image name */
-    short hashIndex;                /* +0x08: material hash index */
-    short sortedIndex;              /* +0x0A: sorted index */
-    unsigned char gameFlags;        /* +0x0C: game flags */
-    unsigned char sortKey;          /* +0x0D: sort key */
-    unsigned char texAtlasRows;     /* +0x0E: texture atlas row count */
-    unsigned char texAtlasCols;     /* +0x0F: texture atlas column count */
-    int maxDeformMove;              /* +0x10: max deform movement (float bits) */
-    unsigned char deformFlags;      /* +0x14: deform flags */
-    unsigned char usage;            /* +0x15: usage type */
-    unsigned short toolFlags;       /* +0x16: tool flags */
-    int locale;                     /* +0x18: locale flags */
-    unsigned short autoTexScaleW;   /* +0x1C: auto texture scale width */
-    unsigned short autoTexScaleH;   /* +0x1E: auto texture scale height */
-    float tessSize;                 /* +0x20: tessellation size */
-    int surfaceFlags;               /* +0x24: surface flags */
-    int contents;                   /* +0x28: content flags */
+    unsigned char gameFlags;        /* +0x08: game flags */
+    unsigned char sortKey;          /* +0x09: sort key */
+    unsigned char texAtlasRows;     /* +0x0A: texture atlas row count */
+    unsigned char texAtlasCols;     /* +0x0B: texture atlas column count */
+    float maxDeformMove;            /* +0x0C: max deform movement */
+    unsigned char deformFlags;      /* +0x10: deform flags */
+    unsigned char usage;            /* +0x11: usage type */
+    unsigned short toolFlags;       /* +0x12: tool flags */
+    int locale;                     /* +0x14: locale flags */
+    unsigned short autoTexScaleW;   /* +0x18: auto texture scale width */
+    unsigned short autoTexScaleH;   /* +0x1A: auto texture scale height */
+    float tessSize;                 /* +0x1C: tessellation size */
+    int surfaceFlags;               /* +0x20: surface flags */
+    int contents;                   /* +0x24: content flags */
 } MaterialInfo_t;
 
 /*
@@ -223,8 +221,13 @@ typedef struct MaterialDef_s {
     int             _pad54;           /* [84] */
     float           subdivisions;     /* [88]  tessellation size (0 → default) */
     int             reserved92;       /* [92]  always 0 */
-    int             globalTexture;    /* [96]  (fileData[0x16] >> 7) & 1 */
-    int             unused100;        /* [100] nonColliding computed flag — set, never read */
+    union {
+        struct {
+            int     globalTexture;    /* [96]  legacy material flag */
+            int     unused100;        /* [100] legacy cache field */
+        };
+        void       *colorMask;        /* [96]  quarter-resolution RGB reflectivity */
+    };
     int             _pad68;           /* [104] */
     int             surfFlags_bit7;   /* [108] (contents >> 7) & 1 — cod2map name */
     int             width;            /* [112] alpha mask width — assert si->width */
@@ -503,8 +506,18 @@ Struct Definitions — lighting_types.h
 
 typedef struct TransferBlock_s TransferBlock_t; /* forward decl for SampleVars_t */
 
+/* Native compile.cpp stores directional direct-light influences as packed
+ * 24-byte records at SampleVars +82/+84.  Keeping the record itself native-
+ * sized while widening only the owning pointer preserves the producer math on
+ * x64 without changing the fixed 32-byte LightmapSample slots. */
+typedef struct DirectTransport_s {
+    float color[3];
+    float direction[3];
+} DirectTransport_t;
+
 /*
- * SampleVars — per-sample lighting variable data, 96 bytes.
+ * SampleVars — per-sample lighting variable data.  The x64 port widens the
+ * native sky-influence pointer into an explicit trailing field.
  * +0x10: incident[12] — 4 SH bands x 3 channels (48 bytes)
  * +0x40: scattered[3] — accumulated scattered light (12 bytes)
  * +0x4C: unscattered[3] — accumulated unscattered light (12 bytes)
@@ -519,6 +532,19 @@ typedef struct SampleVars_s {
     };
     float          unscattered[3]; /* [76] unscattered light */
     TransferBlock_t *transferHead;   /* [88] first transfer block */
+    float          *skyInfluences;   /* [96] one normalized weight per trace */
+    /* Native +32..+40: direct and bounced incident RGB accumulated for use
+     * as a source by this sample's neighbours.  Kept trailing in the x64
+     * representation so the recovered pointer-bearing fields stay aligned. */
+    float           gatheredIncident[3];
+    /* Native +68..+76: direction-independent light (coincident point-light
+     * hits).  Native +82/+84 follows with a growable DirectTransport array. */
+    float             coincident[3];
+    DirectTransport_t *directTransports;
+    unsigned int       directTransportCount;
+    unsigned int       directTransportCapacity;
+    /* Native SampleVars +0x50: one validity bit for each 2x2 subsample. */
+    unsigned char      validMask;
 } SampleVars_t;
 
 /*
@@ -569,6 +595,7 @@ typedef struct Triangle_s {
     float          baryVec0[4];  /* [48] barycentric S vector + offset */
     float          baryVec1[4];  /* [64] barycentric T vector + offset */
     MaterialDef_t *material;     /* [80] surface material */
+    unsigned char  primaryLightIndex; /* CoD4 source tri-soup primary light */
 } Triangle_t;
 
 /*
@@ -663,6 +690,8 @@ typedef struct LightTransferMapping_s {
     float normConst[3]; /* [116] normal constant */
     float normUCoeff[3];/* [128] normal U coefficient */
     float normVCoeff[3];/* [140] normal V coefficient */
+    int   triangleIndex; /* source triangle used by relight suppression keys */
+    unsigned char primaryLightIndex; /* source surface primary light */
 } LightTransferMapping_t;
 
 /*
@@ -776,7 +805,7 @@ typedef struct ImageDecodeState_s {
  */
 typedef struct ImageInfo_s {
     char          magic[3]; /* [0]  "IWi" */
-    unsigned char version;  /* [3]  must be 5 */
+    unsigned char version;  /* [3]  CoD4 IWI version 6 */
     unsigned char format;   /* [4]  image format */
     unsigned char flags;    /* [5]  image flags */
     short         width;    /* [6]  image width */
@@ -850,23 +879,23 @@ Struct Definitions — pointlights.c
 ------------------------------------------------------------------------------- */
 
 /*
- * LightDef — light definition loaded from image files, 192 bytes.
+ * LightDef — decoded one-dimensional attenuation curve.
+ *
+ * The retail x86 layout is 16 bytes: name, width, height, RGB-float data.
+ * Pointer widening makes the native logical layout 24 bytes in this x64 port.
  */
 typedef struct LightDef_s {
-    char          *name;            /* [0]   light def asset name */
-    void          *image1;          /* [8]   primary image */
-    void          *image2;          /* [16]  secondary image */
-    unsigned char  _pad[80];        /* [24] */
-    char           falloffName[72]; /* [104] falloff curve name */
-    int            dimension;       /* [176] dimension */
-    int            type;            /* [180] type */
-    void          *data;            /* [184] data pointer */
+    char  *name;
+    int    width;
+    int    height;
+    float *data;
 } LightDef_t;
 
 /*
  * PointLight — point/spot light instance, 72 bytes.
  */
 typedef struct PointLight_s {
+    int           primaryLightIndex; /* -1 for ordinary entity lights */
     float         origin[3];    /* [0]  light origin */
     float         radius;       /* [12] influence radius */
     float         falloffScale; /* [16] falloff scale */
@@ -1167,7 +1196,8 @@ Struct Definitions — poly2d.c
 ------------------------------------------------------------------------------- */
 
 typedef void (*ForEach2dAreaCallback)(float areaX2, float *centroid,
-                                     float *polyVerts, int vertCount, void *userData);
+                                     float *polyVerts, int vertCount,
+                                     void *userData, int areaIndex);
 
 
 
@@ -1247,6 +1277,10 @@ extern int g_lightmapHeight;
 extern int g_traceFilter;
 extern int g_basisDirCount;
 extern int g_maxBounces;
+/* Compile phase selector: direct radiosity rasterization precedes transport,
+ * matching the two native dispatcher passes at 0x40C6E0 and 0x40C700. */
+extern int g_lightingTransportPass;
+extern int g_lightingSeedSkyPass;
 extern int g_unusedInt1;           /* 0x4808AC: set to 32 in init, never read */
 extern int g_unusedInt2;           /* 0x4808B0: set to 24 in init, never read */
 extern int g_unusedInt3;           /* 0x4808B4: set to 16 in init, never read */
@@ -1263,6 +1297,9 @@ extern float g_sunRadiosityB;      /* bounced directional sunlight B */
 extern float g_backfaceLightR;     /* 0x4808D4: backface light R (default 0.3) */
 extern float g_backfaceLightG;     /* 0x4808D8: backface light G (default 0.3) */
 extern float g_backfaceLightB;     /* 0x4808DC: backface light B (default 0.3) */
+extern float g_ambientR;
+extern float g_ambientG;
+extern float g_ambientB;
 extern float g_radiosityScale;
 extern float g_gamma;
 extern float g_contrastGain;
@@ -1310,6 +1347,10 @@ Global Variables — bspfile.c data arrays
 #define MAX_MAP_LIGHTGRIDCOLORS      0xFFFF
 #define MAX_RAD_GRIDSAMPLE_BYTES     0x168A213
 #define MAX_RAD_GRIDCOLOR_BYTES      (0x2FFFD * 8)
+/* CoD4 v22 stores 56 RGB byte samples (168 bytes) per light-grid color.
+ * The native palette index is 16-bit, so keep a full-size modern output
+ * buffer separate from the 24-byte legacy color table above. */
+#define MAX_COD4_GRIDCOLOR_BYTES     (0xFFFF * 168)
 #define MAX_RAD_LIGHTMAP_BYTES       0x5D00000
 #define MAX_MAP_BRUSHSIDES           655360
 #define MAX_MAP_BRUSHES              0x8000
@@ -1368,6 +1409,21 @@ typedef struct { float mins[3]; float maxs[3]; int firstTriSoup; int numTriSoups
 typedef struct { union { int planeNum; float dist; }; int shaderNum; } BspBrushSide_t;
 typedef struct { short numSides; short shaderNum; } BspBrush_t;
 typedef struct { unsigned short materialIndex; unsigned short lightmapIndex; int firstVertex; unsigned short vertexCount; unsigned short indexCount; int firstIndex; } BspTriSoup_t;
+typedef struct {
+    unsigned char type;
+    unsigned char canUseShadowMap;
+    unsigned char unused[2];
+    float color[3];
+    float dir[3];
+    float origin[3];
+    float radius;
+    float cosHalfFovOuter;
+    float cosHalfFovInner;
+    int exponent;
+    float rotationLimit;
+    float translationLimit;
+    char defName[64];
+} BspPrimaryLight_t;
 typedef struct { float pos[3]; float normal[3]; int color; float uv[2]; float lmUv[2]; float tangent[3]; float binormal[3]; } BspDrawVert_t;
 typedef struct { float mins[3]; float maxs[3]; int firstTriSoup; int triSoupCount; } BspCullGroup_t;
 typedef struct { float mins[3]; float maxs[3]; int aabbTreeIndex; int firstPortal; int portalCount; int firstCullGroup; int cullGroupCount; int firstOccluder; int occluderCount; } BspCell_t;
@@ -1397,6 +1453,9 @@ extern int numBSPPlanes;               extern BspPlane_disk_t         bspPlanes[
 extern int numBSPBrushSides;           extern BspBrushSide_t          bspBrushSidesData[];
 extern int numBSPBrushes;              extern BspBrush_t              bspBrushes[];
 extern int numBSPTriSoups;             extern BspTriSoup_t            bspTriangles[];
+extern unsigned char bspTriSoupPrimaryLightIndices[];
+extern int numBSPPrimaryLights;        extern BspPrimaryLight_t        bspPrimaryLights[];
+extern int g_sunPrimaryLightIndex;
 extern int numBSPDrawVerts;            extern BspDrawVert_t           bspDrawVerts[];
 extern int numBSPDrawIndexes;          extern unsigned short          bspDrawIndexes[];
 extern int numBSPCullGroups;           extern BspCullGroup_t          bspCullGroups[];
@@ -1756,16 +1815,19 @@ extern void GatherSurfaceIncidentEnergyForLightFromDir(float *lightColor, float 
 extern void AllocLightingTransfer(Sample_t *fromSample, void *toSample, int lightIdx, float weight);
 extern void NormalizeLightTransfers(Sample_t *sample);
 extern int FindLightingSamplesAndNormal(int sampleIdx, float *position, float *normal, float offset, void *outputLighting, float *outputNormal);
-extern void GatherSkyLighting(int sampleIdx, float *position, float *basis, float skyWeight, float subAreaFactor, SubSample_t *subSample);
+extern int FindLightingSamplesAndNormalNearest(int sampleIdx, float *position, float *normal, float offset, void *outputLighting, float *outputNormal);
+extern void GatherSkyLighting(int sampleIdx, float *position, float *basis, float skyWeight, float subAreaFactor, unsigned char primaryLightIndex, SubSample_t *subSample);
 extern void BounceGatherCallback(Sample_t *sample);
 extern void Compile(int threadCount);
-extern void GatherPointLightForSample(int sampleIdx, int lightIdx, float *position, float *basis, float subAreaFactor, Sample_t *sample);
+extern void GatherPointLightForSample(int sampleIdx, int lightIdx, float *position, float *basis, float subAreaFactor, unsigned char primaryLightIndex, SubSample_t *subSample);
 extern void SetupSampleRadii(void);
 extern void BuildLightingTransfersForSample(float *bouncedLight, float weight, Sample_t *sample);
 extern void GatherBounceForSample(Sample_t *sourceSample, int threadIdx);
 extern void RadiosityBounce(float epsilon, int threadCount);
-extern void FindLightingTransfersForDirection(int sampleIdx, Sample_t *sample, float *position, float *basis, float subAreaFactor, int dirIdx);
-extern void FindLightingTransfers_inner(int sampleIdx, float *position, float *normal, float subAreaFactor, float skyFactor, SubSample_t *subSample);
+extern int FindLightingTransfersForDirection(int sampleIdx, Sample_t *sample, float *position, float *basis, float subAreaFactor, int dirIdx);
+extern int FindLightingTransfers_inner(int sampleIdx, float *position, float *normal, float subAreaFactor, float skyFactor, unsigned char primaryLightIndex, SubSample_t *subSample);
+extern int Relight_IsSuppressed(int triangleIndex, int areaIndex);
+extern void Relight_RecordSuppressed(int triangleIndex, int areaIndex);
 
 
 
@@ -1776,7 +1838,7 @@ Function Prototypes — geometry.c
 ------------------------------------------------------------------------------- */
 
 extern float BuildTriangleNormal(Triangle_t *tri);
-extern void AddTriangle(SurfaceInfo_t *surface, unsigned short materialIdx, void *texcoordData, void *material, int initialTriCount, int triIndex);
+extern void AddTriangle(SurfaceInfo_t *surface, unsigned short materialIdx, void *texcoordData, void *material, int initialTriCount, int triIndex, unsigned char primaryLightIndex);
 extern void AddTrianglesForSurface(SurfaceInfo_t *surface, int modelIndex, void *texcoordData);
 extern int InitGeometry_AddVerts(float *position, float *texcoord);
 extern void AddInvisibleOpaqueTriangle(MaterialDef_t *si, float *pos1, float *pos2, float *pos3, float *tc1, float *tc2, float *tc3);
@@ -1790,7 +1852,9 @@ extern int TraceVisibility_r(int nodeIndex, float *endPos, float *startPos, RayT
 extern void TraceSetup_and_Dispatch(int cacheIndex, float *startPos, float *endPos, RayHitResult_t *hitResult);
 extern int TraceVisibility(int cacheIndex, float *startPos, float *endPos);
 extern int ScoreTrianglesAgainstPlane(Triangle_t **triArray, int triCount, float *plane);
-extern void GatherLightingSampleWithLock(float area, float *samplePos, int unused1, int unused2, Triangle_t *tri);
+extern void GatherLightingSampleWithLock(float area, float *samplePos,
+                                         float *polyVerts, int vertCount,
+                                         void *userData, int areaIndex);
 extern void SetLightingSampleAreas_Callback(int triIndex, int unused);
 extern void BuildLightTransfers_Callback(int triIndex, int unused);
 extern void SetLightingSampleAreas(int threadCount);
@@ -1813,7 +1877,7 @@ extern void TraceSetup_Embree(int cacheIndex, float *startPos, float *endPos, Ra
 extern void BuildLightTransfers_PerTri(int triIndex, int param, int transferCount, void *mapping);
 extern int ComputeLinearMappingForTriangle(Triangle_t *tri, void *outMapping);
 extern void ForEachLightingSampleInTriangle(Triangle_t *tri, int count, void *callback, void *userData);
-extern void ProcessLightingSampleArea(float areaX2, float *centroid, float *polyVerts, int vertCount, void *userData);
+extern void ProcessLightingSampleArea(float areaX2, float *centroid, float *polyVerts, int vertCount, void *userData, int areaIndex);
 
 
 
@@ -1831,6 +1895,7 @@ extern float DegammaColorChannel(float color);
 extern float GammaCorrectColorChannel(float color);
 extern void DegammaColor(float *color);
 extern void Lighting_InitSamples(void);
+extern void Lighting_ApplyRadiosityScale(LightingSample_t *sample);
 extern void Lighting_InitAntiBleed(void);
 extern void InitBleeding(int threadCount);
 extern unsigned char EncodeGammaCorrectedByte(float value);
@@ -1915,10 +1980,11 @@ Function Prototypes — pointlights.c
 ------------------------------------------------------------------------------- */
 
 extern LightDef_t *LoadLightDef(const char *name);
-extern void AddPointLight(float *origin, float radius, float *color, const char *defName);
-extern void AddSpotLight(float *origin, float radius, float *color, const char *defName, float *spotDir, float outerCos, float innerCos, int exponent);
+extern void AddPointLight(int primaryLightIndex, float *origin, float radius, float *color, const char *defName);
+extern void AddSpotLight(int primaryLightIndex, float *origin, float radius, float *color, const char *defName, float *spotDir, float outerCos, float innerCos, int exponent);
 extern int GetPointLightCount(void);
-extern int PointLightEvaluatePoint(int flags, int lightIndex, float *pos, float *normal, float *outColor, float *outDir);
+extern int PointLightEvaluatePoint(int surfacePrimaryLightIndex, int traceIndex, int lightIndex, float *pos, float *normal,
+                                   float *outDir, float *outColor, float *outDot);
 
 
 
@@ -2150,7 +2216,9 @@ extern void Image_ConvertPixels(ImageDecodeState_t *dst, ImageInfo_t *srcInfo, u
 extern void Image_DecodeCompressed(ImageDecodeState_t *dst, ImageInfo_t *srcInfo, unsigned char *srcData, int srcLen);
 extern void Image_DecodeDXT(ImageDecodeState_t *dst, ImageInfo_t *srcInfo, unsigned char *srcData, int srcLen);
 extern void Image_LoadIWI(const char *imageName, ImageDecodeState_t *dst);
-extern int r_light_load_obj(const char *name, int *outType, ImageDecodeState_t *outImage2, ImageDecodeState_t *outImage1);
+/* gfx_d3d/r_light_load_obj.cpp: resolve the single attenuation image
+ * referenced by a `lights/<name>` asset. */
+extern int LoadLightDefImages(const char *name, ImageDecodeState_t *outImage);
 extern void Image_DecodeUncompressed(ImageDecodeState_t *dst, ImageInfo_t *srcInfo, unsigned char *srcData, int srcLen);
 
 

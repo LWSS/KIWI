@@ -40,12 +40,16 @@
 
 // ── legacy entry points (verified against their definitions) ────────────────
 extern float world_orient_matrix[4][3];                          // entity.cpp(0x6DE290)
-extern selbrush_t active_brushes;                                // map.cpp    (0x23F189C)
+// KIWI-UX (CLEANUP, C-55): no local `extern selbrush_t active_brushes;` — qe3.h
+// (included above) declares both display-list sentinels.
 
 extern void Select_Deselect( int bAlsoFreeFaces );               // select.cpp 0x48E800
 extern void Select_Brush( selbrush_t *brush, char some_overwrite,
                           char bStatus, char center_grid_on_selection ); // select.cpp 0x48DCC0
 extern void sub_477D70( selbrush_t *b, const float *mat );       // brush.cpp  Brush_CheckBuildFaceVis
+// KIWI-UX (CLEANUP, C-40): the ONE per-brush hide writer, used to re-assert a hide
+// that Brush_AddToList2's `brushFlags &= ~0x1Fu` clears — see Sel_SyncToLegacy.
+extern void KiwiVis_SetHidden( selbrush_t *b, bool hidden );     // kiwi_visibility.h:141 / kiwi_visibility.cpp:289
 // (SetupVertexSelection, select.cpp 0x494BC0, is NO LONGER called from here —
 //  see the note in Sel_SyncToLegacy pass 1.)
 
@@ -206,6 +210,83 @@ sel_item_t Sel_MakePatchPoint( selbrush_t *b, int ctrlIndex )
     return Sel_MakeVertex( b, -1, ctrlIndex );
 }
 
+// ─── KIWI-UX (CLEANUP, A-14 / A-13 / C-49) — item → world geometry ───────────
+// The three questions the layer used to answer in nine private copies.  See
+// kiwi_selection.h for what each guard is and which copy it came from.
+bool Patch_DimsSane( const patchMesh_t *pm )
+{
+    return pm && pm->width > 0 && pm->height > 0
+        && pm->width <= KIWI_PATCH_MAX_DIM && pm->height <= KIWI_PATCH_MAX_DIM;
+}
+
+namespace
+{
+    // The winding behind (brush, faceIndex), with the numpoints bound the strict
+    // copies carried.  `minPoints` is 2 for an edge, 1 for a vertex — the only
+    // difference between the two resolutions' winding guards.
+    const winding_t *StrictWinding( const sel_item_t &it, int minPoints )
+    {
+        if ( !it.brush || !it.brush->def )
+            return nullptr;
+        const brush_t *def = it.brush->def;
+        if ( !def->faces || it.faceIndex < 0 || it.faceIndex >= def->faceCount )
+            return nullptr;
+        const winding_t *w = def->faces[it.faceIndex].w;
+        if ( !w || w->numpoints < minPoints || w->numpoints > MAX_POINTS_ON_WINDING )
+            return nullptr;
+        return w;
+    }
+}
+
+bool Sel_EdgeEnds( const sel_item_t &it, float outA[3], float outB[3], bool checkLive )
+{
+    if ( it.kind != SEL_EDGE )
+        return false;
+    if ( checkLive && !Sel_BrushLive( it.brush ) )
+        return false;
+    const winding_t *w = StrictWinding( it, 2 );
+    if ( !w )
+        return false;
+    if ( it.edgeIndex < 0 || it.edgeIndex >= w->numpoints )
+        return false;
+    const int j = ( it.edgeIndex + 1 ) % w->numpoints;
+    for ( int k = 0; k < 3; ++k )
+    {
+        outA[k] = w->p[it.edgeIndex][k];
+        outB[k] = w->p[j][k];
+    }
+    return true;
+}
+
+bool Sel_ItemWorldPos( const sel_item_t &it, float out[3], bool checkLive )
+{
+    if ( checkLive && !Sel_BrushLive( it.brush ) )
+        return false;
+    if ( !it.brush || !it.brush->def )
+        return false;
+    if ( it.faceIndex < 0 )                          // patch control point
+    {
+        const patchMesh_t *pm = it.brush->def->patch;
+        if ( !Patch_DimsSane( pm ) )
+            return false;
+        const int col = it.vertIndex / pm->height;
+        const int row = it.vertIndex % pm->height;
+        if ( col < 0 || col >= pm->width || row < 0 || row >= pm->height )
+            return false;
+        out[0] = pm->ctrl[col][row].xyz[0];
+        out[1] = pm->ctrl[col][row].xyz[1];
+        out[2] = pm->ctrl[col][row].xyz[2];
+        return true;
+    }
+    const winding_t *w = StrictWinding( it, 1 );
+    if ( !w || it.vertIndex < 0 || it.vertIndex >= w->numpoints )
+        return false;
+    out[0] = w->p[it.vertIndex][0];
+    out[1] = w->p[it.vertIndex][1];
+    out[2] = w->p[it.vertIndex][2];
+    return true;
+}
+
 // ─── globals ─────────────────────────────────────────────────────────────────
 selection_t &KiwiSel()
 {
@@ -291,15 +372,6 @@ bool Sel_Toggle( selection_t &sel, const sel_item_t &item )
     return true;
 }
 
-int Sel_CountOfKind( const selection_t &sel, sel_kind_t kind )
-{
-    int n = 0;
-    for ( size_t i = 0; i < sel.items.size(); ++i )
-        if ( sel.items[i].kind == kind )
-            ++n;
-    return n;
-}
-
 // ─── selection_t → legacy ────────────────────────────────────────────────────
 // Order matters: Select_Brush asserts `g_SelectedFaces.GetSize() == 0 || patch`
 // (select.cpp:426), so the whole-brush selection MUST be pushed before any face
@@ -359,8 +431,28 @@ void Sel_SyncToLegacy()
             brushes.push_back( it.brush );
     }
 
+    // ── KIWI-UX (CLEANUP, C-40): SELECTING A BRUSH MUST NOT UN-HIDE IT ────────
+    // Select_Brush -> Brush_AddToList2 ends with `b->brushFlags &= ~0x1Fu`
+    // (brush.cpp:940), which clears bits 0..4 — and the hide bit is VALUE 4
+    // (bit index 2: select.cpp:4168 `|= 4u`, KVIS_HIDDEN_BIT), inside that mask.  It does
+    // not clear `xx5`, so the brush landed bit-clear/depth-1, a pair
+    // KiwiVis_SetHidden never produces, and nothing re-asserted it afterwards:
+    // one outliner click on a hidden brush destroyed the hide that
+    // KiwiVis_SidecarLoadApply had just restored.  The ported mask is FAITHFUL
+    // and is not touched; the state is re-applied here instead, through the one
+    // writer, AFTER the sync (before it, and Brush_AddToList2 would stomp it).
+    // Only the brushes being ADDED can lose it — Select_Deselect / the deselect
+    // helper leave brushFlags bit 4 alone.
+    std::vector<char> wasHidden( brushes.size(), 0 );
+    for ( size_t i = 0; i < brushes.size(); ++i )
+        wasHidden[i] = ( ( (unsigned)brushes[i]->brushFlags & 4u ) != 0 ) ? 1 : 0;
+
     for ( size_t i = 0; i < brushes.size(); ++i )
         Select_Brush( brushes[i], 0, 0, 0 );   // 0 = this brush only, never the entity group
+
+    for ( size_t i = 0; i < brushes.size(); ++i )
+        if ( wasHidden[i] )
+            KiwiVis_SetHidden( brushes[i], true );
 
     // ── pass 2: face selection ───────────────────────────────────────────────
     // The selface_t the legacy ops read wants the INSTANCE faceVis_s pointer, so

@@ -29,8 +29,8 @@
 
 // ── ported entry points (each verified against its DEFINITION) ─────────────
 //   win_qe3.cpp:112        int  Sys_Printf( const char *fmt, ... )
-//   engine_stubs.cpp:693   int  g_nUpdateBits = 0;   // 0x25d5a74
-//   mainfrm.cpp:1251       bool Radiant_RegisterCommand( const char *name, byte vk,
+//   engine_stubs.cpp:773   int  g_nUpdateBits = 0;   // 0x25d5a74
+//   mainfrm.cpp:1340       bool Radiant_RegisterCommand( const char *name, byte vk,
 //                                                        byte mods, int commandId )
 extern int  Sys_Printf( const char *fmt, ... );
 extern int  g_nUpdateBits;
@@ -38,17 +38,20 @@ extern bool Radiant_RegisterCommand( const char *name, byte vk, byte mods, int c
 
 namespace
 {
-    // §18: the same two colours kiwi_offset.cpp uses, for the same reason — one
-    // "this will commit" and one "this is refused".
-    const float KFIL_COL_OK [3] = { 1.00f, 0.55f, 0.72f };
-    const float KFIL_COL_BAD[3] = { 1.00f, 0.22f, 0.18f };
+    // §18: KIWI-UX (CLEANUP, B-9) — the construction-ROSE preview pair is ONE
+    // palette entry now, shared with kiwi_offset.cpp (kiwi_construct.h).  The
+    // local names stay so this file's draw code reads unchanged.
+    #define KFIL_COL_OK  KCON_PREVIEW_OK
+    #define KFIL_COL_BAD KCON_PREVIEW_BAD
 
     const kiwiNumField_t KFIL_FIELDS[1] = { { "radius", KNUM_LENGTH, false } };
 
     const float KFIL_PI = 3.14159265358979323846f;
 
     // Two plane-space points closer than this are the same point.
-    const float KFIL_WELD_2D = 0.01f;
+    // KIWI-UX (CLEANUP, B-9): one number, KCON_WELD_2D (kiwi_construct.h) —
+    // kiwi_offset.h spelled the same value as KOFF_WELD_2D for the same question.
+    const float KFIL_WELD_2D = KCON_WELD_2D;
 
     // ── the source, resolved from the construction selection ────────────────
     int SelectedObject()
@@ -159,7 +162,18 @@ namespace
     {
         int rounded = 0;        // corners that produced an arc
         int clamped = 0;        // …of which were limited by their own edges
-        int skipped = 0;        // chosen but too flat / too sharp
+        // ── KIWI-UX (CLEANUP, B-14): THE REFUSALS ARE COUNTED **AND REPORTED** ──
+        // `skipped` was one number written on five paths and read by nobody, so a
+        // user who chose eight corners and got three was told "3 of 8" with no way
+        // to tell a refusal from a clamp.  Split by REASON, the way this file's
+        // sibling kiwi_patchfillet.cpp splits Gather()'s three refusals, and now
+        // named in both the HUD and the commit line.  Reporting only — every
+        // early-out is byte for byte the one that was there before.
+        int skipFlat  = 0;      // too flat or too sharp to be a corner (KFIL_FLAT_DOT)
+        int skipTight = 0;      // the radius fell below KFIL_MIN_RADIUS after the clamp
+        int skipDegen = 0;      // a degenerate edge, half-angle or bisector
+
+        int Skipped() const { return skipFlat + skipTight + skipDegen; }
     };
 
     // ── THE FILLET (ContourFilletFactory's job, in plane space) ─────────────
@@ -201,7 +215,7 @@ namespace
             const float wlen = sqrtf( wx*wx + wy*wy );
             if ( ulen < 1.0e-4f || wlen < 1.0e-4f )
             {
-                ++stats->skipped;
+                ++stats->skipDegen;
                 out->push_back( B[0] );  out->push_back( B[1] );
                 continue;
             }
@@ -216,7 +230,7 @@ namespace
             // are outside what a fillet means.
             if ( cosT <= -KFIL_FLAT_DOT || cosT >= KFIL_FLAT_DOT )
             {
-                ++stats->skipped;
+                ++stats->skipFlat;
                 out->push_back( B[0] );  out->push_back( B[1] );
                 continue;
             }
@@ -226,7 +240,7 @@ namespace
             const float sinHalf = sinf( theta * 0.5f );
             if ( tanHalf < 1.0e-4f || sinHalf < 1.0e-4f )
             {
-                ++stats->skipped;
+                ++stats->skipDegen;
                 out->push_back( B[0] );  out->push_back( B[1] );
                 continue;
             }
@@ -244,7 +258,7 @@ namespace
             }
             if ( r < KFIL_MIN_RADIUS )
             {
-                ++stats->skipped;
+                ++stats->skipTight;
                 out->push_back( B[0] );  out->push_back( B[1] );
                 continue;
             }
@@ -258,7 +272,7 @@ namespace
             const float blen = sqrtf( bx*bx + by*by );
             if ( blen < 1.0e-5f )
             {
-                ++stats->skipped;
+                ++stats->skipDegen;
                 out->push_back( B[0] );  out->push_back( B[1] );
                 continue;
             }
@@ -494,9 +508,22 @@ namespace
             {
                 char b[32];
                 KiwiUnits_Format( b, sizeof( b ), m_radius );
-                Sys_Printf( "Fillet: %i corner%s rounded at %s%s.\n",
+                // KIWI-UX (CLEANUP, B-14): the refusals, by reason.  Without this a
+                // count lower than the chosen-corner count reads as a clamp.
+                char skips[192];
+                skips[0] = '\0';
+                if ( m_stats.Skipped() )
+                    _snprintf( skips, sizeof( skips ),
+                               "  %i corner(s) skipped: %i too flat or too sharp, "
+                               "%i below the %g minimum radius after the edge clamp, "
+                               "%i degenerate.",
+                               m_stats.Skipped(), m_stats.skipFlat, m_stats.skipTight,
+                               (double)KFIL_MIN_RADIUS, m_stats.skipDegen );
+                skips[sizeof( skips ) - 1] = '\0';
+                Sys_Printf( "Fillet: %i corner%s rounded at %s%s.%s\n",
                             m_stats.rounded, ( m_stats.rounded == 1 ) ? "" : "s", b,
-                            m_stats.clamped ? " (some clamped by their edges)" : "" );
+                            m_stats.clamped ? " (some clamped by their edges)" : "",
+                            skips );
             }
             Reset();
             g_nUpdateBits |= 1;
@@ -654,9 +681,19 @@ namespace
             if ( m_invalid )
                 SetHud( "fillet %s  ·  REFUSED: %s", b, m_why ? m_why : "invalid" );
             else
-                SetHud( "fillet %s  ·  %i of %i corner%s%s  ·  RMB/Enter: commit",
+            {
+                // KIWI-UX (CLEANUP, B-14): "3 of 8" with five REFUSED corners and
+                // "3 of 8" with five clamped ones are different situations; the HUD
+                // now separates them.  The commit line carries the per-reason split.
+                char sk[24];
+                sk[0] = '\0';
+                if ( m_stats.Skipped() )
+                    _snprintf( sk, sizeof( sk ), "  %i skipped", m_stats.Skipped() );
+                sk[sizeof( sk ) - 1] = '\0';
+                SetHud( "fillet %s  ·  %i of %i corner%s%s%s  ·  RMB/Enter: commit",
                         b, m_stats.rounded, m_corners, ( m_corners == 1 ) ? "" : "s",
-                        m_stats.clamped ? "  (clamped)" : "" );
+                        m_stats.clamped ? "  (clamped)" : "", sk );
+            }
         }
 
         void SetHud( const char *fmt, ... )

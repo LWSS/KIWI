@@ -41,6 +41,8 @@
                                        // under KISAK_NO_MFC — it breaks EVERY includer, not
                                        // just this one.  U-GUARD owns the fence.
 
+#include <shellapi.h>                  // KIWI-UX (ROUND BE): DragAcceptFiles / WM_DROPFILES
+
 #include <qcommon/qcommon.h>           // Com_Printf
 #include <gfx_d3d/r_init.h>            // dx (windowCount, for the first-light log)
 #include <gfx_d3d/r_material.h>        // Material — R_BeginRegistrationInternal's return
@@ -246,13 +248,35 @@ static LRESULT CALLBACK Radiant_FrameWndProc( HWND hwnd, UINT msg, WPARAM wParam
         // (mainfrm.cpp:5484 — it forks to Radiant_DispatchCommandDirect under KISAK_NO_MFC).
         // Menu + accelerator commands arrive with HIWORD(wParam) == 0 and lParam == 0; a
         // non-zero lParam means a CHILD CONTROL notification (the console EDIT's EN_*), which
-        // is not a command id — same gate the raw camera WndProc documents (camwnd.cpp:3954).
+        // is not a command id — same gate the raw camera WndProc documents (camwnd.cpp:4040).
         if ( lParam == 0 )
         {
             Radiant_ExecCommand( (unsigned int)LOWORD( wParam ) );
             return 0;
         }
         break;
+
+    // ── KIWI-UX (ROUND BE): FILES DROPPED FROM EXPLORER ─────────────────────────
+    // Armed by the DragAcceptFiles in Radiant_BootFrame.  The handler does exactly two
+    // things: copy the HDROP's path list out (it is invalid the moment DragFinish returns,
+    // so this cannot be deferred) and POST the work id.  Everything after that — opening the
+    // wizard, decoding, writing, registering — happens on the pump's next tick, because a
+    // WM_ handler can fire from inside the compositing scene bracket or a nested modal pump
+    // and running an ImGui popup from there would re-enter the frame.  Same discipline as
+    // round AU's entity drop (kiwi_entbrowser.cpp:946-949); the whole argument is in
+    // kiwi_import.h D-BE-J.
+    case WM_DROPFILES:
+        {
+            // Block-scope extern + a local id constant, the same shape every other KIWI
+            // hook in this file takes: kiwi_command.h cannot be included here (it pulls in
+            // kiwi_pick.h / kiwi_snap.h, which need qe3.h, which this shell file
+            // deliberately does not take — see the mainfrm.h note above).
+            extern bool      KiwiImport_HandleDropFiles( void *hDropOpaque );  // kiwi_import.h
+            const unsigned int kImportDropped = 34128;                         // KIWI_CMD_IMPORT_DROPPED, kiwi_command.h
+            if ( KiwiImport_HandleDropFiles( (void *)wParam ) )
+                ::PostMessageA( hwnd, WM_COMMAND, (WPARAM)kImportDropped, 0 );
+            return 0;
+        }
 
     case WM_SIZE:
         // CMainFrame::OnSize (mainfrm.cpp:1750): chain the default first, then relayout.
@@ -378,9 +402,9 @@ static LRESULT CALLBACK Radiant_BlankPaneWndProc( HWND hwnd, UINT msg, WPARAM wP
 //  five windows, and the XY view is created FIRST (xywnd.cpp:4601).  Each viewport's
 //  caller-obligation block spells out the d_hwnd* registration this function owes it:
 //    XY  — xywnd.cpp:4600   (d_hwndXY  + seed Ed_ActiveXY()->m_nViewType = ED_VIEW_XY)
-//    Cam — camwnd.cpp:3881  (d_hwndCamera)
+//    Cam — camwnd.cpp:3967  (d_hwndCamera)
 //    Z   — z.cpp:751        (d_hwndZ)
-//    Tex — texwnd.cpp:2248  (d_hwndTexture, created AFTER XY, WS_VSCROLL supplied by the
+//    Tex — texwnd.cpp:2286  (d_hwndTexture, created AFTER XY, WS_VSCROLL supplied by the
 //                            creator, W_TEXTURE drained by Radiant_UpdateWindows)
 // ═════════════════════════════════════════════════════════════════════════════
 static bool Radiant_CreateRenderWindows( HWND frame, const EdLayout &L )
@@ -569,11 +593,24 @@ static bool Radiant_BootFrame( HWND frame )
         //     plus "Show Grid" / "Show Axes" check items appended INTO the existing
         //     View popup (index 2).  Appending ITEMS to a popup cannot shift the
         //     menu bar's POPUP indices, which is all the index-based consumers read
-        //     (texwnd.cpp:1600 index 5, radiant_main.cpp:529 index 0) — the argument
+        //     (texwnd.cpp:1638 index 5, radiant_main.cpp:529 index 0) — the argument
         //     is written out in kiwi_windows.h.  Same post-annotator placement as
         //     the Windows popup above, and for the same caption-cleanliness reason.
         extern void KiwiWindows_BuildViewMenu( void *frameMenu );
         KiwiWindows_BuildViewMenu( s_hMenu );
+
+        // 4a-quater) KIWI-UX (ROUND BH, ITEM 5), user directive "Build and run needs
+        //     to be in the win32 toolbar somewhere": a top-level, popup-less
+        //     "Build & Run (F9)" item at the RIGHT END of the menu bar, carrying
+        //     KIWI_CMD_BUILD_RUN so its WM_COMMAND lands in this file's `case
+        //     WM_COMMAND` and routes through the ordinary Radiant_ExecCommand KIWI
+        //     arm.  There is no CToolBar in this shell (step 1b above), and the menu
+        //     bar is this shell's stated command source; kiwi_launch.h has the full
+        //     argument.  LAST of the three menu builders so the two popups keep the
+        //     bar positions they have had since shakeout B/C, and appending after
+        //     them cannot move any POPUP INDEX the index-based consumers read.
+        extern void KiwiLaunch_BuildMenu( void *frameMenu );   // kiwi_launch.cpp
+        KiwiLaunch_BuildMenu( s_hMenu );
     }
 
     // 4b) Build the Textures-menu Usage / Locale / Surface-type filter submenus.  MUST run
@@ -655,10 +692,24 @@ static bool Radiant_BootFrame( HWND frame )
     Radiant_CheckGridMenu();
     Radiant_CheckMenu( 33950, g_PrefsDlg->enable_light_preview != 0 );
     Radiant_CheckMenu( 36108, g_PrefsDlg->preview_sun_aswell   != 0 );
+    // KIWI-UX (ROUND AV, ITEM 1): seed View->Entities-as... from the LOADED prefs too.
+    // Radiant_SetEntityCheck (mainfrm.cpp:3275, the binary's SetEntityCheck 0x42B1F0) was
+    // only ever called BY the six setters, so the submenu opened with nothing ticked and
+    // the persisted mode was invisible until the user picked one.
+    Radiant_SetEntityCheck();
 
     // CMainFrame::OnCreateClient tail, 0x4232E3: apply the persisted render mode after the
     // camera window exists (mainfrm.cpp:1650).
     Texture_SetMode( g_qeglobals.d_savedinfo.iTextMenu );
+
+    // ── KIWI-UX (ROUND BE): ACCEPT FILES DROPPED FROM EXPLORER ───────────────────
+    // The one-line half of the texture-import feature.  Nothing in src/ registered for
+    // WM_DROPFILES before this round (kiwi_import.h D-BE-J), and this is the last point in
+    // boot where the frame is fully built, so a drop can never arrive before the shell can
+    // service it.  The frame is the only window that registers: the render "windows" are
+    // hidden children the dockspace draws over, so a drop anywhere on the editor lands here
+    // (D-BE-K).  Handled in Radiant_FrameWndProc's WM_DROPFILES case.
+    ::DragAcceptFiles( frame, TRUE );
 
     // OnCreate tail (mainfrm.cpp:1653-1654): arm RoutineProcessing and the status timer.
     g_radiantFrameState.doLoop = true;   // was m_bDoLoop
@@ -674,15 +725,15 @@ static bool Radiant_BootFrame( HWND frame )
 //
 //  Why the hotkey feed lives HERE: in the MFC shell every view forwarded its WM_KEYDOWN to
 //  CMainFrame::OnKeyDown (CXYWnd::OnKeyDown 0x465c90 → xywnd.cpp:3368; CCamWnd::OnKeyDown
-//  0x402f60 → camwnd.cpp:3562), and both of those forwards are compiled OUT under
+//  0x402f60 → camwnd.cpp:3648), and both of those forwards are compiled OUT under
 //  KISAK_NO_MFC (the bodies are `#ifndef KISAK_NO_MFC ... #else (void)nChar;` — they say
 //  outright "Raw shell: keys reach the frame's own pump instead").  So the pump does the
 //  lookup, gated to EXACTLY the windows that fed the frame in MFC:
 //     the frame itself      (ON_WM_KEYDOWN, mainfrm.cpp:229)
 //     the XY grid           (xywnd.cpp:3368)
-//     the camera view       (camwnd.cpp:3562)
+//     the camera view       (camwnd.cpp:3648)
 //  Z and the texture browser are deliberately EXCLUDED: neither CZWnd nor CTexWnd has an
-//  ON_WM_KEYDOWN entry (z.cpp:748 / texwnd.cpp:2245 both note the gap), so they swallowed
+//  ON_WM_KEYDOWN entry (z.cpp:748 / texwnd.cpp:2283 both note the gap), so they swallowed
 //  keys in the MFC shell and must keep swallowing them here.  The console EDIT is excluded
 //  by the same rule, which is what keeps typed text out of the hotkey table (the equivalent
 //  of CEntityWnd::PreTranslateMessage's "not an Edit control" gate, win_ent.cpp:1689).

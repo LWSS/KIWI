@@ -665,6 +665,48 @@ void EclassInfo_Gather( eclass_t *cls, entEclassInfo_t &out )
 // (the eclass-list selchange).  The 8 spawnflag checkboxes are PARKED.
 int UpdateSelection( int wParam, eclass_t *cls )
 {
+    // ── KIWI-UX (ROUND AU): edit_entity IS NOT A GUI FIELD ───────────────────
+    // USER DIRECTIVE: "make sure the legacy entity inspector (N) bind works so we
+    // can change their properties."  It could not, and this guard is the whole of
+    // why.  `hwndEnt_entlist` is the MFC CEntityWnd's eclass LISTBOX and it is
+    // never assigned in this shell (win_ent.cpp:86 initialises it to nullptr and
+    // nothing writes it — the MFC inspector is gone).  So this function returned
+    // at line one on EVERY selection change, and `edit_entity` — the def every one
+    // of the *_Apply editors writes through (EntSetKey_Apply :278, EntDeleteKey_
+    // Apply :358, SpawnFlags_Apply :476, EntAngle_Apply :908) — stayed at whatever
+    // EclassCreate_Apply last left it, i.e. nullptr for a session that never
+    // created an entity.  The ImGui inspector therefore printed "(no entity
+    // selected)" forever, with a perfectly good selection sitting in front of it.
+    //
+    // The three lines below are the SAME three the binary runs (they are just
+    // below, unchanged, for the MFC path) — hoisted ABOVE the port guard so the
+    // two globals track the selection with or without a listbox.  Nothing else is
+    // hoisted: the LB_* calls that follow really do need the window, and the
+    // remaining PARKED spawnflag work is untouched.  Ordering note: this is a
+    // plain pair of global writes, not a subsystem setter, so hoisting it cannot
+    // reach anything the way a ported setter replayed at a different phase would.
+    //
+    // The two NULL tests are the price of running BEFORE the guard rather than
+    // after it: the binary reaches this code only from a live GUI, where the
+    // sentinel is linked and worldspawn exists, and this path now also runs during
+    // boot / Map_Free, where neither is guaranteed (map.cpp:264 nulls
+    // world_entity).  Neither test can fire once a map is up.
+    if ( selected_brushes.prev )
+    {
+        selbrush_t *sel = selected_brushes.prev;
+        if ( sel == &selected_brushes )
+        {
+            edit_entity            = world_entity ? (entity_s_def *)world_entity->def
+                                                  : nullptr;
+            multiple_edit_entities = 0;
+        }
+        else
+        {
+            edit_entity            = (entity_s_def *)sel->owner->def;
+            multiple_edit_entities = ( sel->prev != &selected_brushes );
+        }
+    }
+
     if ( !hwndEnt_entlist )       // the window is not up (headless / selftest) — PORT guard
         return 1;
 

@@ -21,6 +21,7 @@
 #include "kiwi_pick.h"
 #include "kiwi_selection.h"
 #include "kiwi_validity.h"
+#include "kiwi_vec.h"     // KIWI-UX (CLEANUP, A-15): the one spelling of Dot3/Sub3/...
 
 #include <math.h>
 #include <stdint.h>
@@ -30,12 +31,16 @@
 // ── ported entry points (each verified against its definition) ──────────────
 extern int   Sys_Printf( const char *fmt, ... );                       // win_qe3.cpp
 extern int   g_nUpdateBits;                                            // 0x25D5A74 (mainfrm.cpp)
-extern int   Face_MakePlane( face_t *face );                           // brush.cpp:4467 (0x470470)
-extern void  Undo_AddBrush( entity_brush_s *pBrushInst );              // undo.cpp:474  (0x45E680)
-extern void  Undo_AddEntity( int a1 );                                 // undo.cpp:581  (0x45E8B0)
+extern int   Face_MakePlane( face_t *face );                           // brush.cpp:4478 (0x470470)
 // ROUND AA, ITEM 4 — the planarize-away path.  Declaration copied from
-// kiwi_bevel.cpp:42, which is the other verb that drops a half-space.
-extern unsigned int Brush_RemoveFace( brush_t *b, unsigned int faceIndex );   // brush.cpp:332  0x471640
+// kiwi_bevel.cpp's extern block, which is the other verb that drops a half-space.
+extern unsigned int Brush_RemoveFace( brush_t *b, unsigned int faceIndex );   // brush.cpp:343  0x471640
+// KIWI-UX (CLEANUP, B-28): FILE SCOPE, not block scope.  Round AI shipped a link
+// error from a block-scope extern that MSVC mangled with its enclosing namespace;
+// kiwi_uv.cpp carries the full account.  This is the declaration that used to sit
+// inside KiwiMatch_RegisterCommands.
+extern bool  Radiant_RegisterCommand( const char *name, byte vk, byte mods,
+                                      int commandId );                 // mainfrm.cpp:1340
 
 // ── ROUND AN (deferred) — the PATCH SOURCE arm ──────────────────────────────
 // The post-control-point-edit bookkeeping, and the map-dirty flag that goes with
@@ -97,28 +102,6 @@ namespace
     // denominator flip with it), so there is nothing to orient here.
     const float KMATCH_MIN_COS = 0.1f;
 
-    inline float Dot3( const float *a, const float *b )
-    { return a[0]*b[0] + a[1]*b[1] + a[2]*b[2]; }
-    inline void Copy3( const float *a, float *o ) { o[0]=a[0]; o[1]=a[1]; o[2]=a[2]; }
-    inline void Sub3( const float *a, const float *b, float *o )
-    { o[0]=a[0]-b[0]; o[1]=a[1]-b[1]; o[2]=a[2]-b[2]; }
-    inline void Mad3( const float *a, const float *d, float s, float *o )
-    { o[0]=a[0]+d[0]*s; o[1]=a[1]+d[1]*s; o[2]=a[2]+d[2]*s; }
-    inline void Cross3( const float *a, const float *b, float *o )
-    {
-        o[0] = a[1]*b[2] - a[2]*b[1];
-        o[1] = a[2]*b[0] - a[0]*b[2];
-        o[2] = a[0]*b[1] - a[1]*b[0];
-    }
-    inline float Len3( const float *a ) { return sqrtf( Dot3( a, a ) ); }
-    bool Norm3( float *v )
-    {
-        const float l = Len3( v );
-        if ( !( l > 1.0e-6f ) )
-            return false;
-        v[0] /= l; v[1] /= l; v[2] /= l;
-        return true;
-    }
 
     // ── ROUND AA, ITEM 4: "is this face's plane now somebody else's plane?" ──
     // The V5 predicate, spelled with the V5 thresholds (kiwi_validity.h) so the
@@ -290,19 +273,9 @@ namespace
         Mad3( p, n, t, out );
     }
 
-    // Mirrors kiwi_transform.cpp's UndoCoverBrush, which mirrors Undo_AddBrushList's
-    // per-element body (undo.cpp 0x45E7C0): a fixed-size entity's brush needs the
-    // ENTITY saved too, and the entity goes FIRST (undo.cpp warns when brushes
-    // precede entities).
-    void UndoCoverBrush( selbrush_t *node )
-    {
-        if ( !node || !node->def )
-            return;
-        entity_s *owner = node->def->owner;
-        if ( owner && owner->eclass && owner->eclass->fixedsize )
-            Undo_AddEntity( (int)(intptr_t)owner );
-        Undo_AddBrush( (entity_brush_s *)node->def );
-    }
+    // KIWI-UX (CLEANUP, UndoCoverBrush): the local copy is gone — this was one
+    // of five verbatim bodies.  It is KiwiCmd_UndoCoverBrush (kiwi_command.h)
+    // now, beside the bracket whose blind spot it exists to fill.
 
     // ═════════════════════════════════════════════════════════════════════════
     //  Z — MATCH FACE.
@@ -379,7 +352,7 @@ namespace
             // KiwiValid_Snapshot only knows planepts / control points.
             if ( !KiwiValid_Snapshot( def, &m_base ) )
                 return false;
-            memcpy( m_baseMtl, &def->faces[m_face].mtldef[0], sizeof( m_baseMtl ) );
+            memcpy( m_baseMtl, def->faces[m_face].mtldef, sizeof( m_baseMtl ) );   // CLEANUP, B-35
             Copy3( def->faces[m_face].plane.normal, m_srcNormal );
 
             UpdateHud();
@@ -503,7 +476,7 @@ namespace
 
             // ── the real apply: bracket, then the §20 texture-lock sequence ──
             KiwiCmd_UndoBegin( "match face" );      // clones the untouched original
-            UndoCoverBrush( m_node );               // …a FACE selection is not on
+            KiwiCmd_UndoCoverBrush( m_node );               // …a FACE selection is not on
                                                     //   selected_brushes, so the
                                                     //   bracket head covered nothing
 
@@ -555,7 +528,7 @@ namespace
             float saveBuf[19];
 
             face_t *f = &m_node->def->faces[m_face];
-            memcpy( &f->mtldef[0], m_baseMtl, sizeof( m_baseMtl ) );
+            memcpy( f->mtldef, m_baseMtl, sizeof( m_baseMtl ) );                   // CLEANUP, B-35
             Face_MakePlane( f );                    // the plane must describe the
                                                     // BASELINE planepts before the save
             if ( f->w )
@@ -818,7 +791,7 @@ namespace
             // cover is free when the object selection already put it there and
             // load-bearing when — as after a mode change — it did not.
             KiwiCmd_UndoBegin( "match face" );
-            UndoCoverBrush( m_node );
+            KiwiCmd_UndoCoverBrush( m_node );
 
             for ( int col = 0; col < pm->width; ++col )
                 for ( int row = 0; row < pm->height; ++row )
@@ -994,7 +967,11 @@ namespace
         float           m_pts[3][3]    = { { 0.0f, 0.0f, 0.0f }, { 0.0f, 0.0f, 0.0f },
                                            { 0.0f, 0.0f, 0.0f } };
         kiwiBaseBrush_t m_base;
-        byte            m_baseMtl[sizeof( MaterialDef ) * 4];
+        // KIWI-UX (CLEANUP, B-35): a TYPED array, not a raw byte buffer.  It
+        // mirrors face_t::mtldef (`MaterialDef mtldef[4]`, qe3.h:148), so the
+        // sizeof() at both memcpy sites is derived from the type rather than
+        // restating the element count as a literal 4.
+        MaterialDef     m_baseMtl[4];
         char            m_hud[128] = { 0 };
     };
 
@@ -1016,7 +993,9 @@ bool KiwiMatch_CanMatch()
     for ( size_t i = 0; i < sel.items.size(); ++i )
     {
         const sel_item_t &it = sel.items[i];
-        if ( !it.brush )
+        // KIWI-UX (CLEANUP, B-5): a stored selbrush_t* is only safe to deref after
+        // Sel_BrushLive — same shape as KiwiPatchFillet_CanFillet.
+        if ( !Sel_BrushLive( it.brush ) )
             continue;
         if ( it.kind == SEL_FACE )
             ++faces;
@@ -1029,7 +1008,6 @@ bool KiwiMatch_CanMatch()
 // ─── registration + lookup ───────────────────────────────────────────────────
 void KiwiMatch_RegisterCommands()
 {
-    extern bool Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId );
     Radiant_RegisterCommand( "KiwiMatchFace", 0, 0, KIWI_CMD_MATCH_FACE );
 }
 

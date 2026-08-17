@@ -22,7 +22,7 @@
 
 // ── ported entry points (verified against their definitions) ────────────────
 extern int Sys_Printf( const char *fmt, ... );   // win_qe3.cpp:112  int Sys_Printf(const char*,...)
-extern int g_nUpdateBits;                        // engine_stubs.cpp:693  int g_nUpdateBits = 0  (0x25D5A74)
+extern int g_nUpdateBits;                        // engine_stubs.cpp:773  int g_nUpdateBits = 0  (0x25D5A74)
 
 namespace
 {
@@ -45,11 +45,6 @@ int KiwiConClip_TakeJustPasted()
     const int n = s_justPasted;
     s_justPasted = 0;
     return n;
-}
-
-int KiwiConClip_Count()
-{
-    return (int)s_clip.size();
 }
 
 int KiwiConClip_Copy()

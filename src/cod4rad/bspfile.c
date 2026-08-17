@@ -13,7 +13,15 @@ BspPlane_disk_t bspPlanes[MAX_MAP_PLANES];
 /* surfaces */
 BspDrawVert_t  bspDrawVerts[MAX_MAP_DRAW_VERTS];
 BspTriSoup_t   bspTriangles[MAX_MAP_TRISOUPS];
+unsigned char  bspTriSoupPrimaryLightIndices[MAX_MAP_TRISOUPS];
 unsigned short bspDrawIndexes[MAX_MAP_DRAW_INDEXES];
+
+/* CoD4 primary lights are retained as native 128-byte disk records.  Rad
+ * consumes the sun record and the per-surface indexes while the writer keeps
+ * the input chunk byte-exact. */
+BspPrimaryLight_t bspPrimaryLights[255];
+int               numBSPPrimaryLights;
+int               g_sunPrimaryLightIndex;
 
 /* brushes */
 BspBrushSide_t bspBrushSidesData[MAX_MAP_BRUSHSIDES];
@@ -49,6 +57,14 @@ extern unsigned char g_gridSampleArray[];
 extern unsigned char g_gridColorEntries[];
 extern int g_gridSampleArrayCount;
 extern int g_gridColorCount;
+extern unsigned char g_cod4LightGridHeader[];
+extern int g_cod4LightGridHeaderSize;
+extern unsigned char g_cod4LightGridRows[];
+extern int g_cod4LightGridRowsSize;
+extern unsigned char g_cod4LightGridEntries[];
+extern int g_cod4LightGridEntryCount;
+extern unsigned char g_cod4LightGridColors[];
+extern int g_cod4LightGridColorCount;
 /* Data buffers and counts are shared — grid computation overwrites loaded data */
 #define bspLightGridHash       ((BspLightGridEntry_t *)g_gridSampleArray)
 #define bspLightGridColors     ((BspLightGridColor_t *)g_gridColorEntries)
@@ -661,6 +677,7 @@ static int LoadCod4TriSoups(bspFileHeader_t *header)
         bspTriangles[i].vertexCount = source[i].vertexCount;
         bspTriangles[i].indexCount = source[i].indexCount;
         bspTriangles[i].firstIndex = source[i].firstIndex;
+        bspTriSoupPrimaryLightIndices[i] = source[i].primaryLightIndex;
     }
 
     return count;
@@ -757,6 +774,8 @@ void LoadBspFile(const char *filename)
     numBSPBrushSides      = CopyLump(header, LUMP_BRUSHSIDES,          bspBrushSidesData,     sizeof(bspBrushSidesData[0]),     sizeof(bspBrushSidesData));
     numBSPBrushes         = CopyLump(header, LUMP_BRUSHES,             bspBrushes,            sizeof(bspBrushes[0]),            sizeof(bspBrushes));
     numBSPTriSoups        = LoadCod4TriSoups(header);
+    numBSPPrimaryLights   = CopyLump(header, LUMP_PRIMARY_LIGHTS,       bspPrimaryLights,      sizeof(bspPrimaryLights[0]),      sizeof(bspPrimaryLights));
+    g_sunPrimaryLightIndex = numBSPPrimaryLights > 1 && bspPrimaryLights[1].type == 1 ? 1 : 0;
     numBSPDrawVerts       = CopyLump(header, LUMP_DRAWVERTS,           bspDrawVerts,          sizeof(bspDrawVerts[0]),          sizeof(bspDrawVerts));
     numBSPDrawIndexes     = CopyLump(header, LUMP_DRAWINDICES,         bspDrawIndexes,        sizeof(bspDrawIndexes[0]),        sizeof(bspDrawIndexes));
     numBSPCullGroups      = CopyLump(header, LUMP_CULLGROUPS,          bspCullGroups,         sizeof(bspCullGroups[0]),         sizeof(bspCullGroups));
@@ -917,12 +936,47 @@ static void SelectOutputChunk(
             *outputLength = numBSPLightBytes;
             break;
         case LUMP_LIGHTGRIDENTRIES:
-            *outputData = bspLightGridHash;
-            *outputLength = numBSPLightGridHash * (int)sizeof(bspLightGridHash[0]);
+            /* A map can legitimately yield no usable grid points (for
+             * example when its vis-cache is absent and none of its static
+             * models load).  Do not turn a valid CoD4 grid into an absent
+             * chunk in that case: retail retains usable grid data, and the
+             * untouched input is a safer fallback than an empty table. */
+            if (g_cod4LightGridEntryCount != 0)
+            {
+                *outputData = g_cod4LightGridEntries;
+                *outputLength = g_cod4LightGridEntryCount * 4;
+            }
+            else if (numBSPLightGridHash != 0 || inputLength == 0)
+            {
+                *outputData = bspLightGridHash;
+                *outputLength = numBSPLightGridHash * (int)sizeof(bspLightGridHash[0]);
+            }
             break;
         case LUMP_LIGHTGRIDCOLORS:
-            *outputData = bspLightGridColors;
-            *outputLength = numBSPLightGridColors * (int)sizeof(bspLightGridColors[0]);
+            if (g_cod4LightGridColorCount != 0)
+            {
+                *outputData = g_cod4LightGridColors;
+                *outputLength = g_cod4LightGridColorCount * 168;
+            }
+            else if (numBSPLightGridColors != 0 || inputLength == 0)
+            {
+                *outputData = bspLightGridColors;
+                *outputLength = numBSPLightGridColors * (int)sizeof(bspLightGridColors[0]);
+            }
+            break;
+        case LUMP_LIGHTGRIDHEADER:
+            if (g_cod4LightGridHeaderSize != 0)
+            {
+                *outputData = g_cod4LightGridHeader;
+                *outputLength = g_cod4LightGridHeaderSize;
+            }
+            break;
+        case LUMP_LIGHTGRIDROWS:
+            if (g_cod4LightGridRowsSize != 0)
+            {
+                *outputData = g_cod4LightGridRows;
+                *outputLength = g_cod4LightGridRowsSize;
+            }
             break;
         case LUMP_ENTITIES:
             *outputData = bspEntData;

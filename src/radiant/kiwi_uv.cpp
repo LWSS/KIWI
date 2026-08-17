@@ -35,31 +35,32 @@
 extern int   Sys_Printf( const char *fmt, ... );                        // win_qe3.cpp
 extern int   g_nUpdateBits;                                             // 0x25D5A74 (mainfrm.cpp)
 
-extern void  Brush_ShiftTexture ( float a1, float a2 );                 // select.cpp:3058  0x491F20
-extern void  Brush_ScaleTexture ( int   a1, int   a2 );                 // select.cpp:3231  0x492650
-extern void  Brush_RotateTexture( int   a1 );                           // select.cpp:3313  0x4929F0
+extern void  Brush_ShiftTexture ( float a1, float a2 );                 // select.cpp:3085  0x491F20
+extern void  Brush_ScaleTexture ( int   a1, int   a2 );                 // select.cpp:3258  0x492650
+extern void  Brush_RotateTexture( int   a1 );                           // select.cpp:3340  0x4929F0
 
-extern char  Texture_SetTexture( const int *a1, MaterialDef *a2 );      // texwnd.cpp:1899  0x45BE50
+extern char  Texture_SetTexture( const int *a1, MaterialDef *a2 );      // texwnd.cpp:2156  0x45BE50
 extern char  Radiant_PatchGetTexdef( patchMesh_t *patch,
-                                     texdef_sub_t *texdef );            // brush.cpp:2220   0x44B620
+                                     texdef_sub_t *texdef );            // brush.cpp:2231   0x44B620
 extern LayerMaterialDef *Materialdef_GetName( MaterialDef *mtlDef );    // materialdef.cpp:159  0x431640
 namespace LayerMat       { int  GetCurrentLayer( MaterialDef *mtlDef ); }  // materialdef.cpp:252  0x431B30
 namespace SurfaceInspector { void UpdateSurfaceDialog(); }                 // surfacedlg.cpp:545   0x458590
 extern void  UpdatePatchInspector();                                    // patchdialog.cpp:500  0x436DB0
+// KIWI-UX (ROUND AZ, ITEM 1): the round-AK patch re-naturalize, applied to the
+// pick-texture funnel as well as the browser one.  See PickTexture for why.  At
+// FILE scope on purpose (round AI's MSVC namespace-mangling link error) — the
+// same reason texwnd.cpp:1129 declares it here rather than in its caller.
+extern void  Patch_KiwiReNaturalizeSelected();                          // pmesh.cpp:1641 (ROUND AK)
 
-// undo.cpp — the bracket head KiwiCmd_UndoBegin does not cover for face selections.
-extern void  Undo_AddBrush ( entity_brush_s *pBrushInst );              // undo.cpp:474  0x45E680
-extern void  Undo_AddEntity( int a1 );                                  // undo.cpp:581  0x45E8B0
+extern float grid_sizes[];                                              // engine_stubs.cpp:771  0x6DDE5C
 
-extern float grid_sizes[];                                              // engine_stubs.cpp:691  0x6DDE5C
-
-extern bool  ImGuiShell_CameraPaintCursor( int *x, int *y, int *w, int *h );  // imgui_shell.cpp:200
-extern bool  Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId ); // mainfrm.cpp:1235
-extern void  Radiant_ExecCommand( unsigned int cmdId );                 // mainfrm.cpp:3907
+extern bool  ImGuiShell_CameraPaintCursor( int *x, int *y, int *w, int *h );  // imgui_shell.cpp:290
+extern bool  Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId ); // mainfrm.cpp:1340
+extern void  Radiant_ExecCommand( unsigned int cmdId );                 // mainfrm.cpp:4083
 
 namespace
 {
-    const int   KUV_GRID_COUNT = 11;    // grid_sizes[11] (engine_stubs.cpp:691)
+    const int   KUV_GRID_COUNT = 11;    // grid_sizes[11] (engine_stubs.cpp:771)
     const float KUV_EPS        = 1.0e-3f;
 
     enum uvcon_t { UVC_FREE = 0, UVC_S, UVC_T };
@@ -148,20 +149,9 @@ namespace
         return ( v < lo ) ? lo : ( v > hi ) ? hi : v;
     }
 
-    // ── undo: cover a brush the bracket's Undo_AddBrushList did not ─────────
-    // Verbatim the body kiwi_transform.cpp:254 uses, which mirrors
-    // Undo_AddBrushList's per-element form (undo.cpp:531): a fixed-size entity's
-    // brush needs the ENTITY saved too, and the entity goes in FIRST (undo.cpp
-    // warns when brushes precede entities).
-    void UndoCoverBrush( selbrush_t *node )
-    {
-        if ( !node || !node->def )
-            return;
-        entity_s *owner = node->def->owner;
-        if ( owner && owner->eclass && owner->eclass->fixedsize )
-            Undo_AddEntity( (int)(intptr_t)owner );
-        Undo_AddBrush( (entity_brush_s *)node->def );
-    }
+    // KIWI-UX (CLEANUP, UndoCoverBrush): the local copy is gone — this was one
+    // of five verbatim bodies.  It is KiwiCmd_UndoCoverBrush (kiwi_command.h)
+    // now, beside the bracket whose blind spot it exists to fill.
 
     // Every brush named by g_SelectedFaces — the set KiwiCmd_UndoBegin's
     // Undo_AddBrushList(&selected_brushes) provably misses (kiwi_selection.h
@@ -171,36 +161,19 @@ namespace
     {
         const int n = SelectedFaceCount();
         for ( int i = 0; i < n; ++i )
-            UndoCoverBrush( g_SelectedFaces.GetAt( i ).brush );
+            KiwiCmd_UndoCoverBrush( g_SelectedFaces.GetAt( i ).brush );
     }
 
-    // ── the per-face texdef the cores actually read/write ────────────────────
-    // MaterialDef (qe3.h:109, 36 bytes): lyrMtl@0x00, radMtl@0x04, mat_texDef@0x08.
-    // texdef_sub_t (qedefs.h:178, 28 bytes): size[2]@0x00, shift[2]@0x08,
-    // rotate@0x10, crossterm@0x14, sample_size@0x18.
-    // face_t.mtldef[4] lives at face_t+0x24 (qe3.h:152, stride 36).
-    // The slot is `(&md->mat_texDef)[LayerMat::GetCurrentLayer(md)]` — the SAME
-    // 28-byte-stride sub-layer walk every core does (select.cpp:3086, and the
-    // "shift[7*N] == (&mat_texDef)[N].shift[0]" note there); it deliberately walks
-    // INTO the following MaterialDefs of the mtldef[4] block.
-    texdef_sub_t *FaceTexdef( brush_t *def, int faceIndex, MaterialDef **outMtl )
-    {
-        if ( !def || !def->faces || faceIndex < 0 || faceIndex >= def->faceCount )
-            return 0;
-        int layer = g_qeglobals.current_edit_layer;
-        if ( layer < 0 || layer > 3 )
-            return 0;
-        MaterialDef *md = &def->faces[faceIndex].mtldef[layer];
-        // MtlDef_IsValid (materialdef.cpp:53) is an L0 assert inside both
-        // GetCurrentLayer and Materialdef_GetName: EXACTLY ONE of the two pointers.
-        // The readout runs every frame over whatever is selected, so it checks the
-        // invariant instead of tripping it.
-        if ( ( ( md->lyrMtl != 0 ) + ( md->radMtl != 0 ) ) != 1 )
-            return 0;
-        if ( outMtl )
-            *outMtl = md;
-        return &md->mat_texDef + LayerMat::GetCurrentLayer( md );
-    }
+    // ── KIWI-UX (ROUND BD) ──────────────────────────────────────────────────
+    // The per-face texdef accessor used to live HERE, in the anonymous namespace.
+    // Round BD's UV editor window needs the same slot and must not carry a second
+    // spelling of a two-level layer walk, so it moved to FILE SCOPE as
+    // `KiwiUv_FaceTexdef` (below the namespace, declared in kiwi_uv.h).  Nothing
+    // inside this namespace called it — its one user, KiwiUv_DrawReadout, is at
+    // file scope already — so the move is a rename and a scope change, nothing else.
+    // The header-declared definition is deliberately NOT in an anonymous namespace:
+    // that is the MSVC mangling LNK2019 the round-AI note on kiwi_uv.cpp:52 records.
+    // ── KIWI-UX end ─────────────────────────────────────────────────────────
 
     // ═════════════════════════════════════════════════════════════════════════
     //  Shared modal base: S/T constraint, numeric state, HUD.
@@ -265,10 +238,9 @@ namespace
         // (kiwi_transform.h says the same about R and S).
         float NumRaw() const { return Units_ToDisplay( m_numWorld ); }
 
-        bool SnapActive() const
-        {
-            return m_snap.valid && m_snap.type != SNAP_NONE;
-        }
+        // KIWI-UX (CLEANUP, SnapActive): one spelling, KiwiSnap_Active
+        // (kiwi_snap.h) — this member is the accessor over THIS command's result.
+        bool SnapActive() const { return KiwiSnap_Active( m_snap ); }
 
         void SetHud( const char *fmt, ... )
         {
@@ -634,7 +606,7 @@ namespace
     //  in the same order.
     //
     //  SIDE EFFECT THAT IS KEPT (and is the classic behaviour): Texture_SetTexture
-    //  ends in Brush_SetTexture( a2, 1 ) (texwnd.cpp:1971), which APPLIES the
+    //  ends in Brush_SetTexture( a2, 1 ) (texwnd.cpp:2009), which APPLIES the
     //  picked material to the CURRENT SELECTION under its own undo bracket
     //  ("set face textures" / "set brush textures", select.cpp:1787).  Picking with
     //  something selected therefore also retextures it.  The menu tooltip says so.
@@ -694,6 +666,30 @@ namespace
 
         const int *patchDef = inst->patch ? (const int *)inst->patch->def : 0;
         Texture_SetTexture( patchDef, md );
+
+        // ── KIWI-UX (ROUND AZ, ITEM 1): THE ROUND-AK FENCE, ON THIS FUNNEL TOO ──
+        // `Texture_SetTexture` ends in `Brush_SetTexture` (texwnd.cpp:2123), which
+        // reaches a patch through `sub_476ED0` with a5 == 1 — that branch swaps the
+        // two material POINTERS and returns (brush.cpp:2852-2866) without re-laying
+        // `ctrl[][].texCoord`, so the patch comes out STRETCHED by
+        // newWidth/oldWidth.  Round AK diagnosed that and hung the re-naturalize on
+        // the texture-browser funnel (texwnd.cpp:1187); this funnel applies the same
+        // material to the same selection through the same call and never got it, so
+        // a patch retextured by MMB pick stretched where one retextured by a
+        // thumbnail click did not.
+        //
+        // ROUND AZ MAKES THAT VISIBLE rather than merely inconsistent: item 1 is
+        // about a selection holding patches AND faces at once, so a mixed selection
+        // picked onto would have textured the faces correctly and stretched the
+        // patches in the same gesture.  The sweep walks the SAME `selected_brushes`
+        // list the apply walked and skips every non-patch node (pmesh.cpp:1641-1650),
+        // so the face half is untouched.
+        //
+        // FILE SCOPE, not block scope: round AI shipped a link error from a
+        // block-scope extern that MSVC mangled with its enclosing namespace, which
+        // is why texwnd.cpp:1129 declares this at file scope too.  See below.
+        Patch_KiwiReNaturalizeSelected();
+
         SurfaceInspector::UpdateSurfaceDialog();
         UpdatePatchInspector();
 
@@ -703,6 +699,35 @@ namespace
         return true;
     }
 }
+
+// ─── KIWI-UX (ROUND BD): the per-face texdef accessor, at FILE SCOPE ─────────
+// MaterialDef (qe3.h:109, 36 bytes): lyrMtl@0x00, radMtl@0x04, mat_texDef@0x08.
+// texdef_sub_t (qedefs.h:178, 28 bytes): size[2]@0x00, shift[2]@0x08,
+// rotate@0x10, crossterm@0x14, sample_size@0x18.
+// face_t.mtldef[4] lives at face_t+0x24 (qe3.h:152, stride 36).
+// The slot is `(&md->mat_texDef)[LayerMat::GetCurrentLayer(md)]` — the SAME
+// 28-byte-stride sub-layer walk every core does (select.cpp:3086, and the
+// "shift[7*N] == (&mat_texDef)[N].shift[0]" note there); it deliberately walks
+// INTO the following MaterialDefs of the mtldef[4] block.
+texdef_sub_t *KiwiUv_FaceTexdef( brush_t *def, int faceIndex, MaterialDef **outMtl )
+{
+    if ( !def || !def->faces || faceIndex < 0 || faceIndex >= def->faceCount )
+        return 0;
+    int layer = g_qeglobals.current_edit_layer;
+    if ( layer < 0 || layer > 3 )
+        return 0;
+    MaterialDef *md = &def->faces[faceIndex].mtldef[layer];
+    // MtlDef_IsValid (materialdef.cpp:53) is an L0 assert inside both
+    // GetCurrentLayer and Materialdef_GetName: EXACTLY ONE of the two pointers.
+    // The readout runs every frame over whatever is selected, so it checks the
+    // invariant instead of tripping it.
+    if ( ( ( md->lyrMtl != 0 ) + ( md->radMtl != 0 ) ) != 1 )
+        return 0;
+    if ( outMtl )
+        *outMtl = md;
+    return &md->mat_texDef + LayerMat::GetCurrentLayer( md );
+}
+// ── KIWI-UX end ─────────────────────────────────────────────────────────────
 
 // ─── §3 canExecute predicates ────────────────────────────────────────────────
 bool KiwiUv_CanEdit()
@@ -777,7 +802,7 @@ void KiwiUv_DrawReadout( float imgMinX, float imgMinY, float imgW, float imgH )
         return;
 
     MaterialDef  *md = 0;
-    texdef_sub_t *td = FaceTexdef( act.brush->def, act.faceIndex, &md );
+    texdef_sub_t *td = KiwiUv_FaceTexdef( act.brush->def, act.faceIndex, &md );   // KIWI-UX (ROUND BD)
     if ( !td || !md )
         return;
 
@@ -867,4 +892,163 @@ void KiwiUv_MenuItems()
                            "Uses the last cursor position over the 3D view.\n"
                            "As in the classic middle-button pick, this ALSO\n"
                            "applies the picked material to the current selection." );
+
+    // ── KIWI-UX (ROUND BH, ITEM 1): the mouse route to Caulk Selection ──────
+    // The key is End, and only in the MODERN profile (kiwi_keymap.cpp moves
+    // View->Center to Shift+End there and leaves the classic profile alone), so a
+    // user on classic needs a surface that is not the palette.  This block is it.
+    // No kiwi_caulk.h include: the predicate IS KiwiUv_CanEdit (kiwi_caulk.h's
+    // canExecute note says why they are the same function) and the verb goes
+    // through the ordinary command route like every other button here.
+    ImGui::SameLine();
+    ImGui::BeginDisabled( !canEdit );
+    if ( ImGui::Button( "Caulk Selection" ) )
+        Radiant_ExecCommand( (unsigned int)KIWI_CMD_CAULK_FACES );
+    ImGui::EndDisabled();
+    if ( ImGui::IsItemHovered() )
+        ImGui::SetTooltip( canEdit
+            ? "End - set every selected face (and every face of a selected\n"
+              "brush, and selected patches) to the caulk material, then FIT\n"
+              "it one repeat per face.  Caulk tells the BSP compiler the face\n"
+              "can be optimised away.  Two undo steps: the fit, then the apply."
+            : "Select brushes or faces first." );
 }
+
+// ═════════════════════════════════════════════════════════════════════════════════════
+//  KIWI-UX (ROUND BH, ITEM 3) — A TEXTURE APPLY IS AN OPERATION, NOT A PENDING EDIT.
+// ═════════════════════════════════════════════════════════════════════════════════════
+// USER REPORT, verbatim: *"Make it so texture applications dont require a right-click/
+// enter to confirm, they are just an operation that goes through when you click the new
+// texture (same with UVs).  Leave them undoable."*
+//
+// ── THE APPLY WAS NEVER GATED.  IT WAS BEING SILENTLY REVERTED. ────────────────────
+// The click path itself is direct and always was: ImGuiShell_ViewportInput ->
+// VP_Down( RTT_TEXTURE ) -> TexWnd_OnLButtonDown -> TexWnd_ApplyMaterialAtIndex ->
+// Texture_SetTexture -> Brush_SetTexture (imgui_shell.cpp:363-366, texwnd.cpp:1337-1345).
+// No modal command sees that press — KiwiCmd_MouseButton is only offered CAMERA input
+// (kiwi_viewport.cpp:577) — and Brush_SetTexture opens and CLOSES its own undo record
+// ("set face textures" / "set brush textures", select.cpp:1814-1815/:1879).  So the
+// material really is written the instant the thumbnail is clicked.
+//
+// WHAT TAKES IT BACK is the gesture the face selection auto-entered.  In Face mode a
+// click on a face starts KIWI_CMD_MOVE and PAUSES it (kiwi_boxselect.cpp:884-891), and
+// KiwiMoveCommand::BeginFaces SNAPSHOTS THE WHOLE MaterialDef BLOCK of every face it
+// latches:
+//     memcpy( u.baseMtl, &def->faces[it.faceIndex].mtldef[0], sizeof( u.baseMtl ) );
+//         kiwi_transform.cpp:1663   (baseMtl is byte[ sizeof(MaterialDef) * 4 ], :1013)
+// and TWO paths write that snapshot back over the live face:
+//     RestoreAll()  kiwi_transform.cpp:1567-1574   — run by Cancel() (:1389) and by the
+//                                                    invalid-commit arm (:1280)
+//     ApplyFaces()  kiwi_transform.cpp:2638        — run EVERY drag frame, before the push
+// Both predate this round and both are correct for what they were written for (texture
+// lock rewrites the texdef during a push, so the baseline has to carry it).  What they
+// assume is round K's proof that "Cancel here is RestoreAll over an UNTOUCHED brush"
+// (kiwi_transform.cpp:889-897) — true of the GEOMETRY, and no longer true of the
+// MATERIAL once a browser click has landed while the gesture was parked.
+//
+// So the user's sequence was: click a face (gesture parks, snapshot taken) -> click a
+// texture (applied, one undo record) -> click the NEXT face, or press Esc, or start any
+// other verb -> the parked gesture CANCELS -> RestoreAll puts the old material back.  The
+// only exits that do NOT run RestoreAll are Commit's normal arm (:1319-1385) — which is
+// RMB / Enter.  That is exactly "texture applications require a right-click/enter to
+// confirm", and it applies to UV EDITOR writes for the same reason: a texdef lives inside
+// the MaterialDef that baseMtl covers.
+//
+// ── THE FIX: END THE GESTURE FIRST, THEN APPLY.  (Round Z's SwapVerb shape.) ───────
+// kiwi_command.h's CanSwapTo note already settled what "take a live gesture over" means:
+// GestureMoved() true -> COMMIT (its record closes on its own edit, exactly as Enter
+// would have); false -> CANCEL (provably record-free — no bracket was opened).  This is
+// that fork, asked by an APPLY instead of by a chord, and it leaves the modal framework's
+// own confirm untouched: nothing here runs unless something outside the viewport is about
+// to write a material, and a real gesture still confirms with RMB / Enter as before.
+//
+// THE ONE EXTRA CLAUSE is the after-confirm deselect.  A committed FACE push clears the
+// selection (round K, kiwi_transform.cpp:1341/:1379-1383) — which is precisely why
+// KiwiMoveCommand::CanSwapTo refuses a MOVED face gesture (:943-944) — and an apply into
+// an empty selection is a no-op.  So the selection is captured first and re-seeded when
+// the commit emptied it, item by item, skipping anything the commit invalidated.
+//
+// ORDER GUARANTEE: this must run BEFORE the apply, never after.  Cancel() restores the
+// baseline; running it afterwards would undo the very material that was just applied.
+//
+// ── AND THE FACE GESTURE COMES BACK, WITH A FRESH BASELINE ────────────────────────
+// Ending the gesture would otherwise cost the user the push/pull gizmo on every
+// texture click — click a face (gizmo up), click a thumbnail, gizmo gone, click the
+// face again.  So the browser funnel pairs this with KiwiUv_RestoreGestureAfterApply
+// below, which re-runs kiwi_boxselect.cpp's own two calls (KiwiCmd_Start(
+// KIWI_CMD_MOVE ) + KiwiCmd_Pause, :889-890) under the same gate.  That is not merely
+// cosmetic: the restart takes a NEW BeginFaces snapshot, so the material that was just
+// applied IS the baseline from that moment on and the next Cancel keeps it.
+namespace
+{
+    // Set by EndGestureBeforeApply when it ended an auto-entered FACE push, consumed
+    // by RestoreGestureAfterApply.  Cleared on entry so a caller that does not pair
+    // the two (the UV editor) can never leave a stale latch for a later texture click.
+    bool s_reenterFacePush = false;
+}
+
+bool KiwiUv_EndGestureBeforeApply( const char *what )
+{
+    s_reenterFacePush = false;
+    KiwiEditorCommand *live = KiwiCmd_Active();
+    if ( !live )
+        return true;                       // nothing running — the common case
+
+    // PreemptIdle == "an auto-entered face gesture that has applied nothing" — the
+    // reported state, and the one the entity browser already cancels on the same
+    // argument (kiwi_entbrowser.cpp:654-666).  Cancel is record-free and Cancel never
+    // clears a selection, so nothing else is needed.
+    if ( live->PreemptIdle() )
+    {
+        KiwiCmd_Cancel();
+        s_reenterFacePush = true;          // PreemptIdle IS "auto-entered face push"
+        return true;
+    }
+
+    // Anything else must have OPTED IN to being taken over.  CanSwapTo defaults to
+    // false (kiwi_command.h:1016) and GestureMoved defaults to TRUE (:1022), so without
+    // this gate a live extrude / bevel / loft would be COMMITTED by a texture click.
+    if ( !live->CanSwapTo( KIWI_CMD_PICK_TEXTURE ) )
+    {
+        Sys_Printf( "%s: finish or cancel \"%s\" first (Enter confirms, Esc cancels).\n",
+                    what ? what : "Texture", live->Name() );
+        return false;
+    }
+
+    selection_t saved = KiwiSel();         // items + active, by value
+    if ( live->GestureMoved() ) KiwiCmd_Commit();
+    else                        KiwiCmd_Cancel();
+
+    if ( KiwiSel().items.empty() && !saved.items.empty() )
+    {
+        selection_t &sel = KiwiSel();
+        for ( size_t i = 0; i < saved.items.size(); ++i )
+            if ( Sel_ItemValid( saved.items[i] ) && Sel_BrushLive( saved.items[i].brush ) )
+                Sel_Add( sel, saved.items[i] );
+        if ( Sel_ItemValid( saved.active ) && Sel_BrushLive( saved.active.brush ) )
+            sel.active = saved.active;
+        Sel_SyncToLegacy();
+    }
+    return true;
+}
+
+void KiwiUv_RestoreGestureAfterApply()
+{
+    if ( !s_reenterFacePush )
+        return;
+    s_reenterFacePush = false;
+    // The SAME gate kiwi_boxselect.cpp:884-891 applies before auto-entering, minus the
+    // shift/ctrl clauses (there is no click here to be additive): Face mode ONLY, a live
+    // face is the active item, and nothing else is running.  Mode 5 (EVERYTHING) does not
+    // auto-enter there and must not acquire the behaviour here either.
+    if ( KiwiCmd_Active() )
+        return;
+    if ( KiwiSel_GetModeMask() != SEL_MASK_FACE )
+        return;
+    const sel_item_t &act = KiwiSel().active;
+    if ( act.kind != SEL_FACE || !Sel_ItemValid( act ) || !Sel_BrushLive( act.brush ) )
+        return;
+    if ( KiwiCmd_Start( KIWI_CMD_MOVE ) )
+        KiwiCmd_Pause();
+}
+// ── KIWI-UX end ─────────────────────────────────────────────────────────────────────

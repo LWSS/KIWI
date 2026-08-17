@@ -115,9 +115,10 @@
 //
 // i.e. 8 segments at radius 32, 32 at radius 128, 64 at radius 256 and above.
 // An arc gets the same density pro-rata over its sweep, never below 2.
-// The profile cap in §23's extrusion (KEXT_MAX_PROFILE, 64) and KCON_SEGS_MAX
-// are deliberately the same number: the densest circle this store can produce is
-// exactly the largest profile the extruder accepts.
+// The profile cap in §23's extrusion is KEXT_MAX_PROFILE (128, via KREG_MAX_LOOP
+// — kiwi_extrude.h:139, kiwi_region.h:228); KCON_SEGS_MAX (64) is deliberately
+// HALF of it, so the densest circle this store can produce is comfortably inside
+// the largest profile the extruder accepts.  KIWI-UX (CLEANUP, A-44)
 //
 // ── PERSISTENCE (§7, decision D-5) ──────────────────────────────────────────
 // A SIDECAR file `<mapname>.kiwi`, written next to the .map, never into it —
@@ -176,6 +177,7 @@
 
 struct ray_t;                       // kiwi_pick.h
 struct pick_result_t;               // kiwi_pick.h
+struct selbrush_t;                  // qe3.h:31 (the brush INSTANCE / list node)
 class  KiwiEditorCommand;           // kiwi_command.h
 
 // ── tessellation + budgets ───────────────────────────────────────────────────
@@ -184,10 +186,16 @@ class  KiwiEditorCommand;           // kiwi_command.h
 #define KCON_SEGS_MAX        64
 // ROUND AF, ITEM 7: the floor for a USER-TYPED side count.  Deliberately 3 rather
 // than KCON_SEGS_MIN (8): the automatic rule is choosing a smoothness and 8 is the
-// right floor for that, but a user typing "3" into a circle is asking for a
-// triangle and means it.  The ceiling stays KCON_SEGS_MAX, which is the same 64
-// KEXT_MAX_PROFILE caps an extruded profile at — a circle that cannot be extruded
-// is not a circle worth drawing.
+// right floor for that, but a typed count is a request and is honoured much lower.
+// KIWI-UX (CLEANUP, A-46) — WHAT A TYPED 3 ACTUALLY PRODUCES.  On the CIRCLE/ARC
+// path this floor is not the last word: CircleSegsFor clamps to it and then hands
+// the count to CardinalSegs (kiwi_construct.cpp:218-226), which opens with
+// `if ( n < 4 ) n = 4` for round AG item 5(b)'s cardinal rule.  So typing 3 into a
+// circle yields a SQUARE, not a triangle, and the HUD reports the rounded 4.  A
+// three-sided POLYGON is reachable — the polygon tool clamps to
+// KCON_POLY_SIDES_MIN and never goes through CardinalSegs.
+// The ceiling stays KCON_SEGS_MAX (64), half of the KEXT_MAX_PROFILE (128) cap an
+// extruded profile is held to.
 #define KCON_SIDES_MIN       3
 #define KCON_MAX_POINTS      256    // per object; a polyline that long is a mistake
 #define KCON_UNDO_DEPTH      32     // whole-store snapshots (ruling 2)
@@ -195,12 +203,38 @@ class  KiwiEditorCommand;           // kiwi_command.h
 #define KCON_ANGLE_STEP      15.0f  // §6 SNAP_ANGLE increment, degrees, in-plane
 #define KCON_JOIN_PIXELS     10.0f  // "click near the first point" closes a polyline
 
+// ── KIWI-UX (CLEANUP, A-72): THE DOUBLE-CLICK GRAMMAR ───────────────────────
+// The window and the movement slop KiwiDrawTool::Click uses to read two clicks as
+// one double-click.  400 ms is a system UI constant in spirit — GetDoubleClickTime()
+// is the value the shell would give — and it sits here with the other pixel
+// tolerances rather than as a bare literal in the click path.
+#define KCON_DBLCLICK_MS     400u
+#define KCON_DBLCLICK_SLOP_PX 4     // per axis, in pixels
+
+// ── KIWI-UX (CLEANUP, A-71): THE MATHS CONSTANTS, ONE SPELLING EACH ─────────
+// kiwi_construct.cpp used to carry seven hand-typed spellings of four constants,
+// two of which disagreed with their own twin in the same file at a different
+// precision.  These are the ONE spelling of each, and the more precise of the two
+// literals wins wherever they differed.  Per the project's rule there are no
+// precision variants: no _F/_DBL pairs, one name, one value.
+#define KCON_PI              3.14159265358979f
+#define KCON_TWO_PI          6.283185307179586f
+#define KCON_DEG2RAD         0.01745329252f
+#define KCON_RAD2DEG         57.29577951308232f
+
 // KIWI-UX (ROUND AA, ITEM 6.3): the half-extent, IN PIXELS AT THE ANCHOR, of the
 // bounded working-plane indicator a live drawing tool draws (KiwiDrawTool::
 // DrawWorkingPlane).  Big enough to read the plane's orientation at a glance,
 // small enough that it never reads as a piece of the map — the same "sized on
 // screen, not in the world" rule every other accent in this layer follows.
 #define KCON_PLANE_HALF_PIXELS  110.0f
+// KIWI-UX (CLEANUP, A-72): the rest of that indicator's appearance, named.
+// KCON_PLANE_FADE_MIN is the floor on Plasticity's grazing dot² fade below which
+// the indicator is not drawn at all (it would be one bright smear along a screen
+// row).  KCON_PLANE_CROSS_FRAC is the anchor cross's arm length as a fraction of
+// the square's half-extent.
+#define KCON_PLANE_FADE_MIN     0.06f
+#define KCON_PLANE_CROSS_FRAC   0.18f
 
 // ── SHAKEOUT H: the two WORLD-SPACE tolerances ruling 3 now needs ────────────
 // KCON_PLANE_FIT_DIST is the max distance a point may sit off its object's
@@ -215,6 +249,29 @@ class  KiwiEditorCommand;           // kiwi_command.h
 // says "these two ends are the same end", an intersection says "these two lines
 // genuinely meet", and the second deserves the stricter test.
 #define KCON_ISECT_DIST      0.25f
+
+// ── KIWI-UX (CLEANUP, B-9): THE PLANE-SPACE WELD, AND THE PREVIEW PALETTE ───
+// "Two PLANE-SPACE points closer than this are the same point" — the tolerance
+// the construction-plane drag commands use while walking a chain they are about
+// to fillet or offset.  It was two constants at one value with one meaning:
+// kiwi_fillet.cpp's KFIL_WELD_2D and kiwi_offset.h's KOFF_WELD_2D, in what are
+// otherwise two copies of the same command (B-8).  Weld tolerances are the thing
+// this codebase has been burned by most often, so it is one number now.
+//
+// It is DELIBERATELY NOT KiwiRegion_WeldFor: that one is grid-scaled and bounded
+// by the finest edge, which is the right rule for deriving a REGION from user
+// geometry.  This is a fixed plane-space epsilon inside one gesture's own solve,
+// and switching it to the grid-scaled rule would be a behaviour change, not a
+// consolidation — flagged here rather than folded in.
+#define KCON_WELD_2D         0.01f
+
+// §18: the construction-ROSE preview pair — one "this will commit", one "this is
+// refused".  kiwi_fillet.cpp and kiwi_offset.cpp each spelled both literals; they
+// are one palette entry, shared by the two commands that draw the same kind of
+// preview over the same kind of geometry.  (kiwi_bevel.cpp is a DIFFERENT §18
+// family — blue OK, its own red — and is deliberately not folded in here.)
+extern const float KCON_PREVIEW_OK[3];
+extern const float KCON_PREVIEW_BAD[3];
 // ── ROUND K: the CONSTRUCTION LINE CLICKBOX ─────────────────────────────────
 // USER DIRECTIVE: the construction segment click tolerance goes 6 px -> 10 px.
 // A DEDICATED number rather than widening PICK_EDGE_PIXELS, because that macro is
@@ -256,10 +313,11 @@ class  KiwiEditorCommand;           // kiwi_command.h
 // would be a sidecar format change (and a version bump) bought for nothing,
 // since neither shape needs to be re-editable in v1.
 #define KCON_POLY_SIDES_MIN  3
-// ROUND AF, ITEM 7: 32 -> 64, matching KCON_SEGS_MAX and KEXT_MAX_PROFILE.  A
-// 64-gon is the largest profile the region extruder will take, so an n-gon that
-// cannot be extruded is an n-gon that cannot be used.
-#define KCON_POLY_SIDES_MAX  64     // == the extruder's comfort zone, well under KEXT_MAX_PROFILE
+// ROUND AF, ITEM 7: 32 -> 64, matching KCON_SEGS_MAX.  KIWI-UX (CLEANUP, A-44):
+// KEXT_MAX_PROFILE is 128 (via KREG_MAX_LOOP), so 64 is deliberately half of the
+// largest profile the region extruder will take — an n-gon drawn here is always
+// extrudable, with room to spare.
+#define KCON_POLY_SIDES_MAX  64     // == the extruder's comfort zone, half of KEXT_MAX_PROFILE
 #define KCON_POLY_SIDES_DEF  6
 // Spline tessellation: this many segments per CONTROL-POINT SPAN, the same
 // "one rule in one place" shape the circle's KCON_SEGS_PER_UNIT has.  A span is
@@ -546,6 +604,26 @@ bool KiwiCon_VertWorld   ( const kconObject_t &o, int i, float out[3] );
 int  KiwiCon_SegmentCount( const kconObject_t &o );
 bool KiwiCon_SegmentWorld( const kconObject_t &o, int i, float a[3], float b[3] );
 
+// ── KIWI-UX (CLEANUP, PickLineAt): the ONE "which segment is under the cursor" ─
+// The plain question, at the plain tolerance: scan every VISIBLE object's
+// tessellated segments and return the nearest one within KCON_LINE_PIXELS, in
+// camera-image pixels.  Returns false when construction geometry is hidden or
+// nothing is close enough.  Any out-parameter may be null.
+//
+// It existed twice — kiwi_split.cpp's PickLineAt and kiwi_dupe.cpp's
+// PickConstructionSegment, the second documented as "a DELIBERATE second copy"
+// on the grounds that the two tools want different PAYLOADS.  They do; the
+// payloads are what differ, and the twenty-line SCAN under them was identical
+// including the hidden test, the behind-the-eye skip and the tolerance.  So the
+// scan is here and each caller keeps its own payload on top.
+//
+// NOT KiwiConSel_PickAt, deliberately, and for the reason both copies already
+// wrote down: that entry point answers at the granularity the current SELECTION
+// MODE asks for, and in Object / Face / All mode it names a whole polyline with
+// no segment.  These callers need ONE segment whatever mode the user is in.
+bool KiwiCon_PickSegmentAt( int imgX, int imgY, float outA[3], float outB[3],
+                            int *outObj, int *outSeg, float *outPixels );
+
 // ── snap ANCHORS — the point-rank snap targets (kiwi_snap.cpp v3) ────────────
 // Deliberately NOT the tessellated vertices: 64 rim points on one circle would
 // bury every other snap candidate.  For LINE/POLYLINE/RECT the anchors ARE the
@@ -573,6 +651,11 @@ bool KiwiCon_AnchorWorld( const kconObject_t &o, int i, float out[3] );
 int                 KiwiCon_Count();
 const kconObject_t *KiwiCon_At( int index );
 int                 KiwiCon_Add( const kconObject_t &o );   // index, or -1 when rejected
+// KIWI-UX (CLEANUP, A-50): what every TOOL COMMIT should call.  Validates first
+// and only then mints the undo record, so a refused object cannot leave an empty
+// undo record behind (a Ctrl+Z that does nothing visible).  Same return as
+// KiwiCon_Add; on -1 nothing was pushed and the refusal has already been printed.
+int                 KiwiCon_AddWithUndo( const kconObject_t &o );
 bool                KiwiCon_RemoveAt( int index );
 // ROUND R: ALSO resets the active construction plane to ground XY through the
 // world origin.  Map_NewMap (map.cpp) calls this on File->New AND at the head of
@@ -582,6 +665,12 @@ bool                KiwiCon_RemoveAt( int index );
 // does to every later snap, and for why the user could not clear it by deleting
 // the scene).  Unconditional: it must run even when the store is already empty.
 void                KiwiCon_ClearAll();
+
+// KIWI-UX (CLEANUP, A-48): ClearAll PLUS both construction undo stacks and the
+// unified journal (KiwiUndo_Reset).  Use this on a NEW DOCUMENT — the palette's
+// "Construction: Clear All" verb must keep using KiwiCon_ClearAll, because it
+// pushes its own undo record first.  Called from Map_NewMap's KIWI-UX fence.
+void                KiwiCon_ResetForNewMap();
 
 // ── ROUND U: the HIDDEN flag, read and written through the store ────────────
 // Index-safe: an out-of-range index reads as HIDDEN, which is the answer that
@@ -665,7 +754,43 @@ bool KiwiCon_UndoPop();
 bool KiwiCon_RedoPop();
 void KiwiCon_ClearRedo();
 int  KiwiCon_UndoDepth();
-int  KiwiCon_RedoDepth();
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  KIWI-UX (ROUND BS) — THE CONSTRUCTION PLANE IS OUT OF THE DRAWING PATH
+// ═════════════════════════════════════════════════════════════════════════════
+// USER RULING, verbatim, after four rounds of snapping reports: *"Snapping is
+// broken when extruding.  You seriously need to fucking get rid of the
+// construction plane.  It's getting worse every update.  Go back to
+// pre-construction plane.  This is not hard.  It just needs to be wherever a
+// fucking ray trace hits against an object OR a snapping point."*
+//
+// WHERE A POINT GOES, EVERYWHERE, IN THIS ORDER (kiwi_snap.h, and one function —
+// KiwiSnap_ResolvePoint — answers it for preview AND placement):
+//   1. the engaged SNAP point (the BN ladder; construction context snaps by
+//      default and Ctrl frees it, per the BO contract);
+//   2. else the RAY'S SURFACE HIT on geometry;
+//   3. else the world GROUND, z = 0, grid-snapped.
+// Rung 3 is not a system and not a plane object.  It is the floor.
+//
+// WHAT THE PLANE API BELOW IS STILL FOR, and it is a short list:
+//   * the PLANAR draw tools (rect / rect-from-centre / circle / 2-point circle /
+//     arc / n-gon — KiwiDrawTool::PlanarOnly) and the §16b primitives, whose
+//     SHAPES cannot exist off a plane.  A planar tool's plane is the EXPLICIT one
+//     when the user set one, and otherwise is derived from the FIRST POINT'S
+//     SURFACE (KiwiDrawTool::PushPoint) — the face that click landed on, the world
+//     ground in void.
+//   * [Space] on a face (kiwi_focus.cpp) and the §16 palette rows, which set an
+//     EXPLICIT plane for those tools to use.  They cost the line path nothing:
+//     nothing in the line/polyline/spline path reads the active plane.
+//   * the entity-browser drop and kiwi_offset.cpp, which are neither drawing nor
+//     transform and were never part of the report.
+//
+// WHAT IS GONE: PushPoint's per-point re-seat and KiwiCurveTool::ReseatPlane, the
+// round-AA chain latch and round BR's SnapPlacesVerbatim that narrowed it,
+// LatchFromCursor's ray∩plane seed, the working-plane off-plane snap gate
+// (kiwi_snap.cpp CandGate::planeOn, KSNAP_ONPLANE_PX, KSNAP_OFFPLANE_PX), the
+// arm-6 suppression for the free tools, and the PLANE banner for line work.
+// ═════════════════════════════════════════════════════════════════════════════
 
 // ── the active construction plane (§16) ──────────────────────────────────────
 const kconPlane_t &KiwiCon_ActivePlane();
@@ -679,30 +804,76 @@ bool KiwiCon_SetPlaneFromCursorFace();          // false when no face is under t
 // selection holds no face or more than one (see the body for why "more than one"
 // has no honest answer).  Rung 2 of KiwiCon_AutoPlaneForTool — this is what makes
 // "click a face, Shift+A, draw" put the sketch ON that face.
+// KIWI-UX (ROUND BR): …and it now fires ONLY when KiwiCon_ArmSelectedFacePlane has
+// armed it, i.e. inside the Shift+A gesture itself.  See the arm below.
 bool KiwiCon_SetPlaneFromSelectedFace();
+// ROUND BP: the ONE construction behind it — winding centre, face normal, longest
+// edge as the u hint.  `requireReach` applies round AT's "the face has to be
+// somewhere the user could be drawing on it" cursor test; [Space] passes false
+// because the camera has just been flown to the face.  Does NOT mark the plane
+// explicit — the caller decides that (KiwiCon_MarkPlaneExplicit).
+bool KiwiCon_SetPlaneFromFace( selbrush_t *node, int faceIndex, bool requireReach );
 // ROUND T: the plane NORMAL becomes the world axis most aligned with the camera's
 // view direction (look down -> XY, at a wall along X -> YZ, along Y -> XZ), kept
 // at the current plane's position along that axis.  False only when the view
 // matrix is degenerate.  See the definition for why it quantises to a world axis
 // instead of taking the view plane itself.
+// KIWI-UX (ROUND BP, ITEM 3): DEMOTED — no longer a rung of KiwiCon_AutoPlaneForTool.
+// It survives as a named operation (nothing calls it today) because the round-T flow
+// it serves — "face a wall, draw a circle, pull it toward you" — is now reached by
+// pressing Space ON that wall, which flies the camera there AND sets the plane.
 bool KiwiCon_SetPlaneFromViewDominantAxis();
-// §16's default behaviour, in rung order (see the definition, which is the
-// authority — this list has been stale once already):
-//   0. the camera is ON AN AXIS VIEW      -> that view's plane   (ROUND Y)
-//      …taking the construction object under the cursor first when, and only
-//      when, its plane is PARALLEL to the view plane.
-//   1. a construction object under the cursor -> its plane       (shakeout F)
-//   2. exactly ONE brush face SELECTED        -> its plane       (ROUND U)
-//   3. a brush FACE under the cursor          -> its plane       (§16)
-//   4. the VIEW-DOMINANT world axis           -> XY / XZ / YZ    (ROUND T)
-//   5. nothing                                -> the active plane stands
-// Rung 0 is the ROUND Y answer to "the line tool doesn't respect the camera
-// angle": rungs 2 and 3 were handing back XY from a FRONT view, which is the one
-// plane in which Z cannot be drawn.  It is Plasticity's ortho mode, whose whole
-// point is that on an axis view the construction plane stops being negotiable
-// (PointPickerModel.ts:61-62; face snaps are dropped outright,
-// SnapPickerStrategy.ts:98).
+// ── KIWI-UX (ROUND BP, ITEM 3) — THE LADDER IS GONE.  THE USER'S RULING. ─────
+// USER, verbatim: *"construction planes should only be made with [space], usually,
+// the current behavior is too strict.  That's what it is."*
+//
+// What a tool start does now, in full:
+//   1. a plane was set EXPLICITLY  -> it STANDS, untouched, and says so
+//   2. exactly ONE brush face SELECTED, within its own extent, AND THE RUNG ARMED
+//      -> that face's plane, MARKED EXPLICIT   (round U's Shift+A flow)
+//   3. otherwise             -> KiwiCon_DefaultPlaneForView(), which has no memory
+// The demoted rungs — the axis-view rung (round Y), the construction object under
+// the cursor (shakeout F), the face merely under the cursor (§16 rung 3), the
+// view-dominant quantiser (round T) and every offset-inheritance arm (round AT) —
+// are DELETED, not disabled.  The table with a reason per rung is
+// RADIANT_UX_DESIGN §16.
+//
+// ── KIWI-UX (ROUND BR): RUNG 2 IS ARMED, NOT AMBIENT ────────────────────────
+// USER RULING: *"construction planes should only be made with [space], usually"* —
+// and a face SELECTION is not a plane request.  Round BP's rung 2 fired at every
+// tool start with one face selected, which in Face mode is the ordinary state
+// (one click selects a face), so it minted an EXPLICIT plane — banner, the round-BQ
+// off-plane snap gate armed, and a latch that outlived the gesture — from a click
+// the user meant as a selection.  It now fires only for the ONE gesture the
+// exception exists for: a creation chord pressed with a face parked (Shift+A and
+// its siblings), which arms it through KiwiCon_ArmSelectedFacePlane.  Every other
+// route into a drawing tool gets the default plane.
 void KiwiCon_AutoPlaneForTool();
+
+// KIWI-UX (ROUND BR): arm rung 2 for the NEXT KiwiCon_AutoPlaneForTool, and for
+// that one only — it is consumed there unconditionally, before the explicit-plane
+// early-out.  The single caller is kiwi_command.cpp's round-U preempt rung, which
+// is the Shift+A-with-a-face-parked gesture and nothing else.
+void KiwiCon_ArmSelectedFacePlane();
+
+// The default plane: on an AXIS VIEW that view's world-axis plane, otherwise world
+// ground — always THROUGH THE WORLD ORIGIN.  No elevation is ever inherited; that
+// inheritance is what put a drawing plane at 61 ft with nothing on screen saying so.
+void KiwiCon_DefaultPlaneForView();
+
+// ── the EXPLICIT latch ───────────────────────────────────────────────────────
+// A plane is explicit only when a gesture the user MADE installed it: Space on a
+// face (kiwi_focus.cpp), a §16 palette row, or a selected face.  Marking is a
+// SEPARATE call from installing, because KiwiDrawTool::PushPoint re-seats the
+// active plane at every placed point and that must never latch anything.
+void        KiwiCon_MarkPlaneExplicit( const char *desc );
+bool        KiwiCon_PlaneIsExplicit();
+const char *KiwiCon_PlaneDesc();          // "" when the plane is the default
+// What the PLANE chip and the console print: the explicit description, or the
+// default plane named ("ground XY (default)" / "XZ (default)" / "YZ (default)").
+const char *KiwiCon_PlaneDescLive();
+// Drop the latch and re-derive the default.  Space over empty space runs this.
+void        KiwiCon_ClearPlaneToDefault();
 
 // ── draw (Cam_Draw tail) ─────────────────────────────────────────────────────
 // Construction lines + points + region fills + (while a tool runs) the finite
@@ -722,8 +893,11 @@ void KiwiCon_SetToolSides( int sides );
 bool KiwiCon_ShowConstruction();
 void KiwiCon_SetShowConstruction( bool on );
 
-// True while one of the drawing tools owns the gesture — the plane patch and the
-// SNAP_CPLANE / SNAP_ANGLE snap arms are gated on it.
+// True while one of the drawing tools owns the gesture — ANY of them, planar or
+// free.  KIWI-UX (ROUND BS): the SNAP_CPLANE / SNAP_ANGLE arms are no longer gated
+// on this (they are gated on KiwiCon_PlanePlacement, i.e. planar placers only);
+// this predicate now means only "a chain is being drawn", which is what its other
+// readers — the construction draw pass and the tool-anchor accessors — ask.
 bool KiwiCon_ToolActive();
 
 // ── ROUND K: PLANE PLACEMENT, FOR COMMANDS THAT ARE NOT DRAWING TOOLS ────────
@@ -755,8 +929,23 @@ bool KiwiCon_ToolActive();
 // Set/cleared from Begin() and Commit()/Cancel().  Idempotent and self-clearing:
 // KiwiCon_SetPlanePlacement(false) with nothing set is a no-op, so a command that
 // refuses inside Begin cannot leave it latched.
+//
+// ── KIWI-UX (ROUND BS): THIS PREDICATE NOW MEANS **PLANAR** PLACEMENT ────────
+// USER RULING, verbatim: *"You seriously need to get rid of the construction
+// plane. […] It just needs to be wherever a ray trace hits against an object OR a
+// snapping point."*
+//
+// It answers TRUE for exactly the placers whose SHAPE cannot exist off a plane —
+// the rect / rect-from-centre / circle / 2-point circle / arc / n-gon draw tools
+// (KiwiDrawTool::PlanarOnly) and the §16b primitives, which announce themselves
+// through KiwiCon_SetPlanePlacement — and FALSE for the LINE, POLYLINE and SPLINE
+// tools, which now have no working plane at all.  It is the ONE switch that keeps
+// every plane-borne branch of kiwi_snap.cpp (the raw fallback, the occlusion
+// relaxation, the arm-6 suppression, arms 7 + 8) and kiwi_hints.cpp's working-plane
+// chip out of the line path, and it is the reason those branches did not need a
+// second gate each.
 void KiwiCon_SetPlanePlacement( bool on );
-bool KiwiCon_PlanePlacement();      // a drawing tool OR a plane-placing command
+bool KiwiCon_PlanePlacement();      // a PLANAR draw tool OR a plane-placing command
 
 // The point the active tool is drawing FROM (its last placed point, or the
 // rubber-band origin).  This is what SNAP_ANGLE measures its 15° increments
@@ -803,8 +992,9 @@ bool KiwiCon_LoadSidecar( const char *mapPath );
 void KiwiCon_RegisterCommands();
 KiwiEditorCommand *KiwiCon_CommandForId( int commandId );   // the 9 drawing tools
 bool KiwiCon_DispatchInstant( unsigned int commandId );     // the plane / clear commands
-bool KiwiCon_CanDraw();                                     // palette canExecute
 bool KiwiCon_HasObjects();                                  // palette canExecute
+// KIWI-UX (CLEANUP, A-69): KiwiCon_CanDraw is gone -- it could only answer true.
+// The nine drawing rows in kiwi_command.cpp pass a null canExecute instead.
 
 // The View-menu "Construct" submenu (drawn inside the KiwiUX settings block).
 void KiwiCon_MenuItems();

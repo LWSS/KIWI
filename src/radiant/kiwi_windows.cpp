@@ -9,7 +9,7 @@
 
 #include "stdafx.h"
 #include "qe3.h"
-#include "radiant_frame.h"         // Radiant_CheckMenu (radiant_frame.h:92)
+#include "radiant_frame.h"         // Radiant_CheckMenu (radiant_frame.h:120)
 
 #include "kiwi_windows.h"
 #include "kiwi_command.h"          // KIWI_CMD_WINDOW_* (the reserved instant ids)
@@ -17,11 +17,11 @@
 #include "kiwi_camera.h"           // ROUND M: KiwiCam_Ortho / KiwiCam_SetOrtho
 #include "radiant_registry.h"      // Radiant_ProfileGetInt/SetInt (radiant_registry.h:13/15)
 
-// mainfrm.cpp:1690 — void Radiant_CheckMenu( UINT id, bool checked ) (radiant_frame.h:92).
-// Declared by radiant_frame.h, which qe3.h already pulls in; re-stating it here would risk
-// a signature drift, so it is used as declared.
-// mainfrm.cpp:1236 — bool Radiant_RegisterCommand( const char *, byte, byte, int ).
-extern bool Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId );
+// Radiant_CheckMenu is NOT re-declared here: radiant_frame.h:120 declares it (and qe3.h
+// already pulls that in), so re-stating it would risk a signature drift.  Its definition
+// is mainfrm.cpp:1832.
+extern bool Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId ); // mainfrm.cpp:1340  bool Radiant_RegisterCommand(const char*,byte,byte,int)
+extern int  Sys_Printf( const char *fmt, ... );                                             // win_qe3.cpp:112   int Sys_Printf(const char*,...)
 
 namespace
 {
@@ -31,7 +31,7 @@ namespace
         const char *entry;      // kiwi_radiant.ini [KiwiWindows] key
         const char *menuText;   // the native menu caption
         int         commandId;  // the KIWI instant id the menu item posts
-        int         defOpen;    // the shakeout-B default
+        int         defOpen;    // THE default (kiwi_windows.h points here for it)
     };
 
     // THE table.  Order == kiwiWindow_t.
@@ -53,6 +53,16 @@ namespace
         // ROUND W: the outliner.  Default OPEN — the directive asks for the list to
         // be there, and KW_VERSION is bumped below so existing profiles get it once.
         { "Outliner",         "Outliner","&Outliner (scene list)",  KIWI_CMD_WINDOW_OUTLINER,1 },
+        // ROUND AU: the entity browser.  Default OPEN — it is a tab beside the
+        // texture browser, which is where the directive puts it, and KW_VERSION
+        // is bumped below so existing profiles get it once.
+        { "Entities",         "Entities","&Entity Browser",         KIWI_CMD_WINDOW_ENTITIES,1 },
+        // ROUND AZ: the Sky tab.  Third tab of the same node, same reasoning as the
+        // Entities row above it, and KW_VERSION goes to 7 with it.
+        { "Sky",              "Sky",     "S&ky Browser",            KIWI_CMD_WINDOW_SKY,     1 },
+        // ROUND BD: the UV editor.  Fourth tab of the same node, same reasoning as the
+        // three rows above it, and KIWI_LAYOUT_VERSION goes to 11 with it.
+        { "UV editor",        "UvEditor","&UV Editor",              KIWI_CMD_WINDOW_UVEDITOR,1 },
     };
 
     // KIWI-UX (shakeout I): the defaults above only bite on a FRESH profile, and an
@@ -65,7 +75,11 @@ namespace
     // a default change is ever visible to an existing install.
     const char *KW_SECTION  = "KiwiWindows";
     const char *KW_VER_KEY  = "DefaultsVersion";
-    const int   KW_VERSION  = 5;          // 1 = shakeout B (all closed but Console)
+    // KIWI-UX (CLEANUP, C-8): ONE number, shared with the dock-ini filename — see
+    // KIWI_LAYOUT_VERSION in kiwi_windows.h.  Was a private 7 that had to be
+    // hand-bumped in step with imgui_shell.cpp's kiwi_dockN.ini.
+    const int   KW_VERSION  = KIWI_LAYOUT_VERSION;
+                                          // 1 = shakeout B (all closed but Console)
                                           // 2 = shakeout I (2D View + Textures back on)
                                           // 3 = ROUND W    (the Outliner, on by default)
                                           // 4 = ROUND X    (full-width console strip; the
@@ -77,6 +91,15 @@ namespace
                                           // 5 = ROUND Y    (skinnier Outliner column; same
                                           //     deal — the dock ini goes to kiwi_dock8 and
                                           //     this keeps the window set in step with it)
+                                          // 6 = ROUND AU   (the Entities browser joins the
+                                          //     Textures node as a tab; kiwi_dock9)
+                                          // 7 = ROUND AZ   (the SKY tab joins the same node
+                                          //     as a third tab; kiwi_dock10)
+                                          // 8 = ROUND BD   (the UV EDITOR joins it as a
+                                          //     fourth tab; kiwi_dock11.  The counter and
+                                          //     the ini number are the SAME number since
+                                          //     C-8 — this column is the history, not the
+                                          //     value; KIWI_LAYOUT_VERSION is the value.)
 
     bool s_open[KIWI_WIN_COUNT];        // the LIVE flag (ImGui's p_open target)
     bool s_last[KIWI_WIN_COUNT];        // what we last persisted — the ✕-box detector
@@ -184,7 +207,7 @@ void KiwiWindows_CommitPending()
 // Win32 usage mirrored from the two menu sites already in this shell:
 //   * ::LoadMenuA + ::SetMenu on the frame  (radiant_main.cpp:482-484)
 //   * ::CheckMenuItem( HMENU, id, MF_CHECKED|MF_UNCHECKED ) with MF_BYCOMMAND
-//     (the default) — Radiant_CheckMenu, mainfrm.cpp:1690-1695.
+//     (the default) — Radiant_CheckMenu, mainfrm.cpp:1832-1837.
 // AppendMenuA with MF_POPUP takes the sub-menu handle in the UINT_PTR slot; the
 // items use MF_STRING and carry the KIWI command id, so their WM_COMMAND lands in
 // Radiant_FrameWndProc's `case WM_COMMAND` (radiant_main.cpp:196-207) exactly like
@@ -198,7 +221,17 @@ void KiwiWindows_BuildMenu( void *frameMenu )
 
     HMENU popup = ::CreatePopupMenu();
     if ( !popup )
+    {
+        // KIWI-UX (CLEANUP, C-68): this returned silently, and the whole "Windows"
+        // menu — the ONLY way to reopen a closed dock window from the menu bar —
+        // then never appeared, with nothing said.  Same early-out, now audible.
+        // No spam risk: KiwiWindows_BuildMenu runs exactly once, from
+        // radiant_main.cpp's boot sequence, not per frame.
+        Sys_Printf( "KIWI: CreatePopupMenu failed - the \"Windows\" menu is not "
+                    "available this session (%i windows unreachable from the menu "
+                    "bar; the palette still reaches them).\n", (int)KIWI_WIN_COUNT );
         return;
+    }
     for ( int i = 0; i < KIWI_WIN_COUNT; ++i )
         ::AppendMenuA( popup, MF_STRING, (UINT_PTR)s_def[i].commandId, s_def[i].menuText );
 
@@ -226,7 +259,7 @@ void KiwiWindows_SyncMenu()
 // ─── shakeout C: Show Grid / Show Axes in the NATIVE View popup ──────────────
 // See kiwi_windows.h for the index-safety argument.  Same Win32 vocabulary as
 // KiwiWindows_BuildMenu above: AppendMenuA + MF_STRING carrying a KIWI instant
-// id, and Radiant_CheckMenu (mainfrm.cpp:1690, MF_BYCOMMAND) for the check marks.
+// id, and Radiant_CheckMenu (mainfrm.cpp:1832, MF_BYCOMMAND) for the check marks.
 namespace
 {
     const int KVIEW_POPUP_INDEX = 2;    // File 0, Edit 1, VIEW 2 (res/radiant.rc:65)
@@ -274,6 +307,12 @@ void KiwiWindows_RegisterCommands()
     Radiant_RegisterCommand( "KiwiWindowConsole", 0, 0, KIWI_CMD_WINDOW_CONSOLE );
     Radiant_RegisterCommand( "KiwiWindowShell",   0, 0, KIWI_CMD_WINDOW_SHELL );
     Radiant_RegisterCommand( "KiwiWindowOutliner",0, 0, KIWI_CMD_WINDOW_OUTLINER );  // ROUND W
+    // ROUND AU: the entity browser's own row is registered by kiwi_entbrowser.cpp
+    // (KiwiEntBrowser_RegisterCommands), beside the file that owns the window —
+    // the same split the Outliner's group verbs use.  The TOGGLE still dispatches
+    // through the loop below, because the §9 table owns the flag.
+    // ROUND AZ: and the Sky tab's row likewise, by KiwiSky_RegisterCommands —
+    // same split, same reason, same loop below for the flag itself.
     // Shakeout C: the two View-menu toggles.  Unbound for the same reason as the
     // five above — a view toggle is not worth a key — but registered so they are
     // searchable in the §15 palette and remappable from radiant.ini.

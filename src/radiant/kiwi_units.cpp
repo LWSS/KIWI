@@ -18,6 +18,8 @@
 #include <stdlib.h>
 #include <math.h>
 
+extern int Sys_Printf( const char *fmt, ... );   // win_qe3.cpp:112
+
 namespace
 {
     const char *KUX_SECTION = "KiwiUX";
@@ -56,8 +58,11 @@ namespace
 
     void WriteFloat( const char *entry, float v )
     {
+        // KIWI-UX (CLEANUP, C-55): _snprintf, like KiwiUnits_Format below.  Not a
+        // live overflow (%.6g of a float is <= 13 chars into 64), but one spelling.
         char buf[64];
-        sprintf( buf, "%.6g", (double)v );
+        _snprintf( buf, sizeof( buf ), "%.6g", (double)v );
+        buf[sizeof( buf ) - 1] = '\0';
         Radiant_ProfileSetString( KUX_SECTION, entry, buf );
     }
 
@@ -81,8 +86,16 @@ float KiwiUnits_PerInch()
 void KiwiUnits_SetPerInch( float unitsPerInch )
 {
     Load();
+    // KIWI-UX (CLEANUP, C-54): a typed 0 or NaN used to be dropped in silence while
+    // the field kept showing the rejected text -- the worst of the three options the
+    // finding lists.  The refusal is unchanged; it just says so now, and names the
+    // value that is still in force.
     if ( !( unitsPerInch >= KUNITS_MIN ) )
+    {
+        Sys_Printf( "Units: %g units/inch refused (minimum is %g) — still %g.\n",
+                    (double)unitsPerInch, (double)KUNITS_MIN, (double)s_perInch );
         return;
+    }
     if ( unitsPerInch == s_perInch )
         return;
     s_perInch = unitsPerInch;
@@ -150,8 +163,13 @@ float KiwiUnits_GridSpacingInches()
 void KiwiUnits_SetGridSpacingInches( float inches )
 {
     Load();
+    // KIWI-UX (CLEANUP, C-54): same rule as KiwiUnits_SetPerInch — refuse, and say so.
     if ( !( inches >= KUNITS_MIN ) )
+    {
+        Sys_Printf( "Units: grid spacing %g in refused (minimum is %g) — still %g in.\n",
+                    (double)inches, (double)KUNITS_MIN, (double)s_gridInches );
         return;
+    }
     if ( inches == s_gridInches )
         return;
     s_gridInches = inches;

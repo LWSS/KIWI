@@ -461,6 +461,219 @@ void __cdecl Editor_AddSurfCmd(int drawFlags, Material *material, model_inst *in
     }
 }
 
+// ═════════════════════════════════════════════════════════════════════════════════════
+//  KIWI-UX (ROUND AW, ITEM 2) — PER-SURF TECHNIQUE FALLBACK + THE MODEL/MATERIAL REPORT
+// ═════════════════════════════════════════════════════════════════════════════════════
+// USER REPORT on the round-AV build, verbatim: "one character renders solid WHITE (whole
+// body, ghost-like), one has a harsh black/white pattern on the shirt".
+//
+// ROUND AV'S OWN KNOWN LIMIT WAS THE FIRST SUSPECT AND IT IS ADDRESSED HERE.
+// Editor_AddSurfCmd above queues a surf ONLY when the material carries the requested
+// technique (:444, the binary's gate at 0x4fdff3); a material that lacks it is DROPPED,
+// with no per-surf demotion of the kind Cam_TechAvailable gives world faces
+// (camwnd.cpp:1004-1006).  Dropped means INVISIBLE, which is not either symptom — but a
+// silently invisible surf is a bad failure mode on its own, so the ladder is added:
+//   requested -> TECHNIQUE_UNLIT (4) -> TECHNIQUE_WIREFRAME_SHADED (29) -> leave the
+//   request alone and let the gate drop it, exactly as before.
+// Both rungs are chosen because the editor ALREADY draws models at them: 4 is the
+// camera's own technique at draw_mode 1 (camwnd.cpp:518) and 29 is what the 2D views and
+// the white-outline pass ask for (xywnd.cpp:4055/:4156, camwnd.cpp:3071).
+//
+// AND THE REPORT IS THE POINT, BECAUSE NEITHER SYMPTOM TURNED OUT TO BE A DROPPED SURF.
+// Decoding the shipped assets (IRON RULE: material state comes from material x technique,
+// so decode before blaming code) says both symptoms are the materials themselves:
+//   * SOLID WHITE — the two AC130 spawner models (body_complete_sp_sas_ct_ac130,
+//     body_complete_sp_spetsnaz_boris_sp_ac130) are the ONLY character models whose
+//     materials sit outside the l_sm_* family: mtl_sas_urban_ac130 /
+//     mtl_sas_urban_head_ac130 / mtl_spetsnaz_body_sp_ac130 / mtl_spetsnaz_head_sp_ac130
+//     carry the techset literally named "unlit", whose "unlit" technique is
+//     vertcol_simple_fog_dtex (pixel shader vertcol_simple_fog — FLAT, no shading term),
+//     they declare ONLY a colorMap, and that colorMap is the AC130 THERMAL texture
+//     (sas_ct_bodies_sp_col_ac130 512x256, first DXT block (255,242,255)).  A near-white
+//     ghost IS what that asset draws as.  Nothing to fix; something to be able to SEE.
+//   * A missing material is not it either: every material named by every one of the 4372
+//     raw/xmodel assets in this install exists in raw/materials, so no model here can
+//     become the $default clone (Material_MakeDefault, r_material.cpp:520-531) whose
+//     colorMap is the 16x16 checkerboard main/images/default.iwi.
+// So what was actually missing was the ability to TELL, which is what this prints.
+//
+// TWO OUTPUTS, ONE DECODE:
+//   * automatic, once per (model, material): only when something is wrong — a demotion, a
+//     drop, or a $default clone.  Silent on a healthy map.
+//   * on demand: "KiwiModelInfo" (KIWI_CMD_MODELINFO) toggles g_kiwiModelInfoDump, which
+//     prints EVERY skinned model's surface table — material, techset, the technique it is
+//     actually queued at, and the colorMap's name and dimensions — once per (model,
+//     material) pair, so the user can point at the white one / the checkered one and read
+//     what it is made of.  A 1x1 or 16x16 colorMap in that readout IS a fallback image.
+// ─────────────────────────────────────────────────────────────────────────────────────
+extern int Sys_Printf(const char *fmt, ...);          // win_qe3.cpp:112 (0x499e90)
+
+// The "KiwiModelInfo" arm/disarm flag.  NOT tied to the frame counter: R_SortMaterials'
+// per-frame reset runs at the TOP of Cam_Draw (camwnd.cpp:2603), i.e. BEFORE any model is
+// skinned, so a "clear on the next frame reset" one-shot would clear itself before it ever
+// printed.  It is a toggle instead, and it is self-limiting because every line it prints is
+// deduped per (model, material) pair.
+int g_kiwiModelInfoDump = 0;
+
+namespace {
+
+// Reported (model, material) pairs.  Asset name POINTERS are stable for the lifetime of the
+// asset, so identity comparison is enough and nothing is copied.  Fixed size on purpose:
+// this is a diagnostic, not a log — when it fills, both outputs go quiet.
+struct kiwiSurfNote_t { const char *model; const char *material; bool warned; bool dumped; };
+kiwiSurfNote_t s_kiwiNotes[256];
+int            s_kiwiNoteCount = 0;
+
+// Find-or-add.  Null when the table is full, which both callers read as "stay quiet".
+kiwiSurfNote_t *KiwiNoteFind(const char *model, const char *material)
+{
+    for (int i = 0; i < s_kiwiNoteCount; ++i)
+        if (s_kiwiNotes[i].model == model && s_kiwiNotes[i].material == material)
+            return &s_kiwiNotes[i];
+    if (s_kiwiNoteCount == (int)ARRAY_COUNT(s_kiwiNotes))
+        return 0;
+    kiwiSurfNote_t *n = &s_kiwiNotes[s_kiwiNoteCount++];
+    n->model    = model;
+    n->material = material;
+    n->warned   = false;
+    n->dumped   = false;
+    return n;
+}
+
+// The automatic warning fires at most once per pair, whatever the dump is doing.
+bool KiwiWarnOnce(const char *model, const char *material)
+{
+    kiwiSurfNote_t *n = KiwiNoteFind(model, material);
+    if (!n || n->warned)
+        return false;
+    n->warned = true;
+    return true;
+}
+
+// The same presence test Editor_AddSurfCmd's gate makes (:444), so the ladder can never
+// pick a rung the gate would then drop.
+bool KiwiTechPresent(const Material *m, int tech)
+{
+    if (tech >= 34)
+        return true;
+    return m && m->techniqueSet && m->techniqueSet->techniques[tech] != 0;
+}
+
+// The colorMap texdef — semantic 2, the value R_OverrideImage switches on
+// (r_shade.cpp:326).  Returns null when the material declares no colorMap at all.
+const GfxImage *KiwiColorMap(const Material *m)
+{
+    if (!m || !m->textureTable)
+        return 0;
+    for (int i = 0; i < (int)m->textureCount; ++i)
+        if (m->textureTable[i].semantic == 2)
+            return m->textureTable[i].u.image;
+    return 0;
+}
+
+const char *KiwiStr(const char *s) { return (s && *s) ? s : "?"; }
+
+// Material_IsDefault dereferences rgp.defaultMaterial behind an iassert that is empty in
+// release (r_material.cpp:481-490, assertive.h:26), so the null case is guarded HERE rather
+// than trusted.  Radiant registers $default during Material_Init, but a diagnostic must not
+// be the thing that crashes an editor whose asset set is broken enough to be worth
+// diagnosing.
+bool KiwiIsDefaultMaterial(const Material *m)
+{
+    return m && rgp.defaultMaterial && Material_IsDefault(m);
+}
+
+// The on-demand dump, also once per pair — a map with 300 placed models has only a few
+// dozen distinct (model, material) pairs, so one arm prints the whole picture and then
+// falls silent until a model the user has not seen yet comes into view.
+bool KiwiDumpOnce(const char *model, const char *material)
+{
+    kiwiSurfNote_t *n = KiwiNoteFind(model, material);
+    if (!n || n->dumped)
+        return false;
+    n->dumped = true;
+    return true;
+}
+
+} // namespace
+
+// Resolve the technique one model surface will actually be queued at, and report anything
+// worth reporting on the way.  Returns `techType` unchanged on the overwhelmingly common
+// path, so a healthy model pays one pointer test per surface.
+static int Editor_ModelSurfTech(const XModel *xmodel, Material *handle, int surfIndex, int techType)
+{
+    const Material *m = handle ? Material_FromHandle(handle) : 0;
+    if (!m)
+        return techType;
+
+    const char *mdlName = KiwiStr(xmodel ? xmodel->name : 0);
+    const char *mtlName = KiwiStr(m->info.name);
+    const char *tsName  = KiwiStr(m->techniqueSet ? m->techniqueSet->name : 0);
+
+    int use = techType;
+    if (!KiwiTechPresent(m, techType)) {
+        static const int kLadder[2] = { 4 /*TECHNIQUE_UNLIT*/, 29 /*TECHNIQUE_WIREFRAME_SHADED*/ };
+        use = -1;
+        for (int i = 0; i < 2; ++i) {
+            if (kLadder[i] != techType && KiwiTechPresent(m, kLadder[i])) { use = kLadder[i]; break; }
+        }
+        if (KiwiWarnOnce(mdlName, mtlName)) {
+            if (use < 0)
+                Sys_Printf("KIWI model \"%s\" surf %i: material \"%s\" [techset \"%s\"] has no "
+                           "technique %i and no fallback - the surface is DROPPED (invisible).\n",
+                           mdlName, surfIndex, mtlName, tsName, techType);
+            else
+                Sys_Printf("KIWI model \"%s\" surf %i: material \"%s\" [techset \"%s\"] has no "
+                           "technique %i - drawing at %i instead.\n",
+                           mdlName, surfIndex, mtlName, tsName, techType, use);
+        }
+        if (use < 0)
+            use = techType;              // let Editor_AddSurfCmd's own gate drop it
+    }
+    else if (KiwiIsDefaultMaterial(m) && KiwiWarnOnce(mdlName, mtlName)) {
+        // Material_Register_LoadObj could not find the asset and handed back a clone of
+        // $default (r_material.cpp:566-569 -> :520-531).  Its colorMap is the 16x16
+        // checkerboard, so this line and the CHECKERBOARD ON SCREEN are the same event.
+        Sys_Printf("KIWI model \"%s\" surf %i: material \"%s\" IS THE $default FALLBACK "
+                   "(the asset was not found) - it draws as the 16x16 checkerboard.\n",
+                   mdlName, surfIndex, mtlName);
+    }
+
+    if (g_kiwiModelInfoDump && KiwiDumpOnce(mdlName, mtlName)) {
+        const GfxImage *cm = KiwiColorMap(m);   // only walked when the dump asks for it
+        Sys_Printf("  %-34s surf %-2i  \"%s\"\n", mdlName, surfIndex, mtlName);
+        Sys_Printf("      techset \"%s\"   tech %i%s   sortKey %i\n",
+                   tsName, use, KiwiTechPresent(m, use) ? "" : " (ABSENT - will be dropped)",
+                   (int)m->info.sortKey);
+        if (cm)
+            Sys_Printf("      colorMap \"%s\"  %ix%i%s\n", KiwiStr(cm->name),
+                       (int)cm->width, (int)cm->height,
+                       KiwiIsDefaultMaterial(m) ? "   ($default clone - ASSET NOT FOUND)" : "");
+        else
+            Sys_Printf("      colorMap (none declared)\n");
+    }
+    return use;
+}
+
+// "KiwiModelInfo" — TOGGLE the dump.  Deliberately not a frame-scoped one-shot: the only
+// per-frame hook in this file is R_SortMaterials' reset, and Cam_Draw calls that at the TOP
+// of the frame (camwnd.cpp:2603), BEFORE a single model is skinned — a one-shot cleared
+// there would clear itself before it printed anything.  Instead the flag stays on and every
+// line is deduped per (model, material) pair, so one arm lists the whole scene once and then
+// goes quiet by itself; a second invocation turns it off, a third re-lists from scratch.
+void KiwiEdScene_ArmModelInfoDump()
+{
+    if (g_kiwiModelInfoDump) {
+        g_kiwiModelInfoDump = 0;
+        Sys_Printf("--- KiwiModelInfo: OFF ---\n");
+        return;
+    }
+    g_kiwiModelInfoDump = 1;
+    s_kiwiNoteCount     = 0;             // a fresh arm re-lists (and re-warns) everything
+    Sys_Printf("--- KiwiModelInfo: ON.  Every model surface prints as it is drawn; each\n"
+               "    (model, material) pair prints ONCE.  Run it again to stop. ---\n");
+}
+
 // 0x4FE2E0  SkinModelInst — build + queue every surface of a placed model instance.
 //   instanceHandle = 1-based handle into edMapGlobals.modelInst[]
 //   checkhandle    = optional material override (Material handle), else use model's own
@@ -500,7 +713,11 @@ void __cdecl SkinModelInst(int instanceHandle, Material *checkhandle, int techTy
             mi->colorOverride = -1;
         }
         Material *useMat = checkhandle ? (Material *)Material_FromHandle(checkhandle) : material;
-        Editor_AddSurfCmd(drawFlags, useMat, mi, &skinned[i], techType);
+        // KIWI-UX (ROUND AW, ITEM 2): resolve this surface's technique (DEMOTE rather than
+        // vanish) and report the first time a model/material pair needs it.  Returns
+        // techType unchanged whenever the material carries it, which is the normal case.
+        const int surfTech = Editor_ModelSurfTech(mi->model, useMat, (int)i, techType);
+        Editor_AddSurfCmd(drawFlags, useMat, mi, &skinned[i], surfTech);
         iassert(skinnedSurf->skinnedCachedOffset != RIGID_SKINNED_CACHE_OFFSET);   // r_ed_scene.cpp:522
         iassert(skinnedSurf->skinnedCachedOffset != HIDDEN_SURFACE_OFFSET);        // r_ed_scene.cpp:523
     }

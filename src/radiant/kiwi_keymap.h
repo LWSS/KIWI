@@ -171,9 +171,9 @@
 //               mods 2/3/4/6/7 free.  33018 -> Shift+Alt+T (mods 3), the house
 //               destination.  Bare T: KIWI_CMD_TRIM 34059 — the key Plasticity
 //               itself uses bare (default-keymap.ts:267 `"t": "command:trim"`).
-//               T is NOT in res/radiant.rc's accelerator table (:490-501) and is
-//               NOT one of the fly's swallowed keys (W/A/S/D/Q/E), so there is
-//               nothing further to arbitrate.
+//               T is NOT in res/radiant.rc's accelerator table (:490-501), and
+//               the fly swallows ARROWS ONLY (KiwiCam_FlySwallowKey), so no bare
+//               letter arbitrates with it.  KIWI-UX (CLEANUP, C-30)
 //               FINAL 0x54 occupancy: 0 Trim · 1 ToggleTexMoveLock ·
 //               3 ViewTextures · 5 ThickenPatch.  No pair carries two rows.
 //
@@ -302,9 +302,8 @@
 //               5 RemoveTerrainRow 33154 (mainfrm.cpp:1007)
 //               mods 1 FREE — nothing displaced.  Shift+Q: DRAW_RECT 34036
 //               mods 0 FREE TOO — ROUND L takes it for BOOLEAN 34062, again with
-//               nothing displaced.  Q is a fly key (W/A/S/D/Q/E) and that is the
-//               same non-collision E already lives with: the fly's swallow rung
-//               sits below the active-command arm in KiwiUX_KeyFunnel.
+//               nothing displaced.  KIWI-UX (CLEANUP, C-30): the fly is ARROWS
+//               ONLY (KiwiCam_FlySwallowKey), so bare Q is not a fly key.
 //               FINAL 0x51: 0 Boolean · 1 Rectangle · 2 LinkSelected ·
 //               5 RemoveTerrainRow.
 //

@@ -1349,7 +1349,12 @@ int WriteBSPFile(const char *filename, int swapFlag)
   {
     header.magic = BSP_IDENT;
     header.version = BSP_VERSION;
-    lightRegionCount = s_loadedLightRegionChunks ? s_numBspLightRegions : numBspPrimaryLights;
+    /* Light-region entries are cell-owned.  A map that stops before world
+       processing can retain the sentinel primary light but has no cells; the
+       native writer omits LUMP_LIGHTREGIONS in that case. */
+    lightRegionCount = s_loadedLightRegionChunks
+        ? s_numBspLightRegions
+        : (numBSPCells ? numBspPrimaryLights : 0);
     lightRegionHullCount = s_loadedLightRegionChunks ? s_numBspLightRegionHulls : 0;
     lightRegionAxisCount = s_loadedLightRegionChunks ? s_numBspLightRegionAxes : 0;
     lightGridRowCount = s_loadedLightGridRows ? s_numBspLightGridRows : 0;

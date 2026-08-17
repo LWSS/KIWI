@@ -148,6 +148,41 @@ void KiwiTris_OrientToEye( const float *xyz, int stride,
 // an OPAQUE SLAB) cannot be read from this tree, and round AH already paid for
 // one opaque-slab regression.  If a constant normal is ever shown to be
 // insufficient, THAT is the next probe and this is the risk it carries.
+// ── KIWI-UX (CLEANUP, BoxEdges / C-71): THE AABB, ONCE ──────────────────────
+// The eight corners of [mins,maxs] in the canonical bit order — bit 0 = x,
+// bit 1 = y, bit 2 = z, 0 = min and 1 = max — and the twelve edges that index
+// them.  Both were written out verbatim in three places (kiwi_entbrowser.cpp's
+// isometric tile AND its world drag ghost, 700 lines apart, plus kiwi_dupe.cpp's
+// array preview DrawBox), and kiwi_entbrowser.cpp's own comment already said the
+// three "are literally the same box".  kiwi_entthumb.cpp expands the same eight
+// corners for its framing pass and uses this too.
+//
+// They live in kiwi_lines.h because the overlay batcher is what every world-space
+// consumer already includes, and because a box outline IS twelve KiwiLines_Add
+// calls; the ImGui tile consumer needs only the table, which costs it nothing.
+#define KIWI_BOX_CORNERS 8
+#define KIWI_BOX_EDGES   12
+
+// z-min ring, z-max ring, then the four verticals.  The two rings are wound so a
+// projection of either reads convex.
+const int KIWI_BOX_EDGE[KIWI_BOX_EDGES][2] =
+{
+    { 0,1 },{ 1,3 },{ 3,2 },{ 2,0 },      // z min ring
+    { 4,5 },{ 5,7 },{ 7,6 },{ 6,4 },      // z max ring
+    { 0,4 },{ 1,5 },{ 2,6 },{ 3,7 },      // verticals
+};
+
+inline void KiwiBox_Corners( const float *mins, const float *maxs,
+                             float out[KIWI_BOX_CORNERS][3] )
+{
+    for ( int i = 0; i < KIWI_BOX_CORNERS; ++i )
+    {
+        out[i][0] = ( i & 1 ) ? maxs[0] : mins[0];
+        out[i][1] = ( i & 2 ) ? maxs[1] : mins[1];
+        out[i][2] = ( i & 4 ) ? maxs[2] : mins[2];
+    }
+}
+
 inline void KiwiTris_FillNormal( float *out )
 {
     out[0] = 0.0f;
@@ -158,6 +193,13 @@ inline void KiwiTris_FillNormal( float *out )
 // ─────────────────────────────────────────────────────────────────────────────
 // KIWI-UX (ROUND AM, ITEMS 1/2/4) — TRAP 5: THE FLAT-COLOUR OVERRIDE, i.e. THE
 //                                   IMMUNITY THE LINES HAVE HAD ALL ALONG.
+//
+// KIWI-UX (CLEANUP, A-2) — CORRECTION, READ THIS FIRST.  The translucent probe
+// scheduled below WAS RUN (round AQ) and the ~0.32x neutral-bracket model below
+// is FALSIFIED — the live explanation is at kiwi_region.cpp:1541+.  Everything
+// after this paragraph is the superseded argument, kept for its measurements.
+// KiwiTris_FillFlatColor survives only for the gizmo's opaque-by-design elements
+// (kiwi_gizmo.cpp), which is its one remaining caller.
 //
 // THREE OF THIS ROUND'S SEVEN REPORTS ARE ONE BUG, and seeing that is what
 // finally makes the diagnosis falsifiable:
@@ -209,9 +251,6 @@ inline void KiwiTris_FillNormal( float *out )
 //     fill first").  If it comes back as a solid light-blue slab, the model is
 //     CONFIRMED and one constant reverts it; if it comes back translucent, the
 //     model is confirmed and the rest of the layer follows next round.
-//   * EVERYTHING ELSE (hover face fills, plane squares, extrude/split/loft)
-//     stays on the neutral bracket this round, so the layer cannot go uniformly
-//     opaque on one unproven assumption.
 //
 // The caller still owns the surrounding neutral bracket; this replaces it for the
 // duration of ONE element and KiwiTris_FillNeutral puts it back.

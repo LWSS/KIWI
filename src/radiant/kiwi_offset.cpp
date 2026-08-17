@@ -21,6 +21,7 @@
 #include "kiwi_pick.h"
 #include "kiwi_region.h"
 #include "kiwi_units.h"
+#include "kiwi_vec.h"     // KIWI-UX (CLEANUP, A-15): the one spelling of Dot3/Sub3/...
 
 #include <math.h>
 #include <stdarg.h>
@@ -29,8 +30,8 @@
 
 // ── ported entry points (each verified against its DEFINITION) ─────────────
 //   win_qe3.cpp:112        int  Sys_Printf( const char *fmt, ... )
-//   engine_stubs.cpp:693   int  g_nUpdateBits = 0;   // 0x25d5a74
-//   mainfrm.cpp:1251       bool Radiant_RegisterCommand( const char *name, byte vk,
+//   engine_stubs.cpp:773   int  g_nUpdateBits = 0;   // 0x25d5a74
+//   mainfrm.cpp:1340       bool Radiant_RegisterCommand( const char *name, byte vk,
 //                                                        byte mods, int commandId )
 extern int  Sys_Printf( const char *fmt, ... );
 extern int  g_nUpdateBits;
@@ -40,20 +41,18 @@ namespace
 {
     // §18 palette: the live offset preview is construction ROSE like the geometry
     // it parallels, and turns RED the moment the result is refused — the same two
-    // colours kiwi_bevel.cpp uses for exactly the same "this will / will not
-    // commit" message.
-    const float KOFF_COL_OK [3] = { 1.00f, 0.55f, 0.72f };
-    const float KOFF_COL_BAD[3] = { 1.00f, 0.22f, 0.18f };
+    // colours kiwi_fillet.cpp:43-44 uses for exactly the same "this will / will
+    // not commit" message.  (kiwi_bevel.cpp is a DIFFERENT §18 family: blue OK,
+    // its own red.)  KIWI-UX (CLEANUP, B-2)
+    // KIWI-UX (CLEANUP, B-9): ONE palette entry now, shared with kiwi_fillet.cpp
+    // (KCON_PREVIEW_OK / _BAD, kiwi_construct.h).  Local names kept.
+    #define KOFF_COL_OK  KCON_PREVIEW_OK
+    #define KOFF_COL_BAD KCON_PREVIEW_BAD
 
     // ONE named LENGTH field (shakeout E).  Static storage: the numeric layer
     // copies the structs but never the label string (kiwi_numeric.h).
     const kiwiNumField_t KOFF_FIELDS[1] = { { "offset", KNUM_LENGTH, false } };
 
-    inline void  Sub3 ( const float *a, const float *b, float *o )
-    { o[0]=a[0]-b[0]; o[1]=a[1]-b[1]; o[2]=a[2]-b[2]; }
-    inline float Dot3 ( const float *a, const float *b )
-    { return a[0]*b[0] + a[1]*b[1] + a[2]*b[2]; }
-    inline float Len3 ( const float *a ) { return sqrtf( Dot3( a, a ) ); }
 
     inline float Cross2( float ax, float ay, float bx, float by ) { return ax*by - ay*bx; }
 

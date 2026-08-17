@@ -199,80 +199,17 @@ KiwiEditorCommand *KiwiBool_CommandForId( int commandId );
 // the same shape ROUND L gave Cut.
 bool KiwiBool_CanBoolean();
 
-struct brush_t;
+// KIWI-UX (CLEANUP, A-16): round AF's by-def cascade (DifferenceByDef, WouldCarve,
+// PointInSolid) was withdrawn by round AP and deleted here — the extrude was its
+// only caller, and Q carves a brush the user CLICKED through CarveTarget directly.
+// The design record is in RADIANT_UX_DESIGN §19; the one part siblings depend on
+// is the on-plane tolerance, which outlives it as KBOOL_ONPLANE_EPS below.
 
-// ═════════════════════════════════════════════════════════════════════════════
-//  ROUND AF, ITEM 2 — THE CASCADE, LENT TO ANOTHER VERB
-//  ── SUPERSEDED BY ROUND AP, ITEM 1: THE LOAN IS RECALLED ──────────────────
-//  USER DIRECTIVE, verbatim: "when extruding, dont automatically bool diff the
-//  solid.  It can be done by the user with a boolean after."  kiwi_extrude.cpp is
-//  no longer a caller of ANY function below; an extrude lands its prism and Q is
-//  the only difference in the editor again.
-//
-//  NOTHING HERE IS DELETED, deliberately, and the honest statement is that all
-//  THREE entry points below now have no in-tree caller: Q's interactive command
-//  carves with a brush the user CLICKED and goes through CarveTarget directly, so
-//  the by-DEF trio existed for the extrude and only for it.  They are kept because
-//  (a) they are this file's stated public surface and the by-def difference is the
-//  documented way for any future tool to cut with scaffolding it built, (b) they
-//  are pure over the map except for DifferenceByDef, which is exercised by the
-//  same CarveTarget/CarveTargets code Q runs every time, and (c) two sibling
-//  subsystems (kiwi_loft.h, kiwi_patchfillet.cpp) cite WouldCarve and
-//  PointInSolid by name as the definition of the dry-run and the on-plane
-//  tolerance.  The text below is retained as the record of what the cascade was
-//  lent out for and on what terms.
-// ═════════════════════════════════════════════════════════════════════════════
-// USER DIRECTIVE (ROUND AF, since withdrawn), verbatim: "While doing an extrusion
-// operation, if you push inwards to make an indentation/cave, I want you to make
-// that work.  It might require a brush extrusion/difference double combo operation
-// to accomplish it."
-//
-// That is EXACTLY this file's difference, with an UNLANDED prism as the tool
-// instead of a brush the user clicked.  Nothing about the carve changes: the same
-// CarveByOneTool N-plane subtract, the same all-or-nothing §19 policy per target,
-// the same kiwi_material.h R4 (the hole belongs to the solid it was cut into,
-// never to the tool), the same "land every piece BEFORE freeing the source" order
-// so an owner entity never transiently runs out of brushes.
-//
-// WHAT THE CALLER OWNS, and it is all of it:
-//   * `toolDef` is a def the caller BUILT and still owns.  This function never
-//     lands it, never links it and never frees it — a tool is scaffolding and the
-//     caller decides what happens to it.  (The example used to be kiwi_extrude.cpp;
-//     round AP removed that caller.  Q's own path builds no tool at all — it
-//     carves with a brush the user clicked, which it owns and keeps.)
-//   * THE UNDO BRACKET.  This must be called inside an OPEN one; it covers every
-//     target it is about to free with Undo_AddBrush itself, because a brush the
-//     prism happens to penetrate is by definition NOT on `selected_brushes` and so
-//     was never cloned by the bracket head.  That cover is the same pair
-//     kiwi_transform.cpp:355 UndoCoverBrush uses and in the same order.
-//   * the console line.  The counts come back; the sentence is the caller's, since
-//     "cave" and "boolean difference" are the same act under two names.
-//
-// TARGETS are every CSG-usable brush on either display list whose bounds meet the
-// tool's — the same `Usable` test the Q boolean applies to a clicked solid, so a
-// patch, a fixed-size entity and a sub-4-face brush are all refused here exactly
-// as they are there.
-//
-// Returns the number of brushes actually carved.  Zero means nothing was touched
-// AT ALL and the caller may still safely close an empty bracket (or, better, not
-// have opened one — which is what kiwi_extrude.cpp does by asking the DRY-RUN
-// below first).
-int KiwiBool_DifferenceByDef( brush_t *toolDef, int *outPieces,
-                              int *outMissed, int *outRefused );
-
-// The DRY RUN: would `toolDef` carve anything?  Builds nothing and mutates
-// nothing; it exists so a caller can decide between "carve" and its own ordinary
-// behaviour BEFORE opening an undo bracket, which kiwi_command.h requires (a
-// command that mutates nothing must not open a bracket at all).
-bool KiwiBool_WouldCarve( brush_t *toolDef );
-
-// Is `p` inside a CSG-usable solid?  The half-space test over every usable brush
-// on both display lists, with the same `Usable` filter as above.
-//
-// ROUND AF, ITEM 2 used it for the one decision that separated "grow a new body
-// off the region" from "hollow out the solid the region is drawn on": whether the
-// direction the user is dragging goes INTO something.  ROUND AP, ITEM 1 removed
-// that decision entirely (the extrude never carves now), so this currently has NO
-// CALLER — it is kept as a query, not as an extrude hook.  kiwi_loft.cpp and
-// kiwi_patchfillet.cpp cite its 0.01 on-plane tolerance as the editor's own.
-bool KiwiBool_PointInSolid( const float p[3] );
+// KIWI-UX (CLEANUP, BoolPointTol): THE EDITOR'S ON-PLANE EPSILON, NAMED.
+// "n·p - dist is this small, so the point counts as ON the face rather than
+// outside it" — the tolerance the boolean's half-space tests carry, and the one
+// kiwi_loft.cpp (KLOFT_ONPLANE_EPS) and kiwi_patchfillet.cpp (KFIL_ONPLANE_EPS)
+// both cite as normative for their own copies.  It is named HERE, on the header,
+// so those cites resolve to a constant rather than to a function.  Same value it
+// has always been.
+#define KBOOL_ONPLANE_EPS 0.01f

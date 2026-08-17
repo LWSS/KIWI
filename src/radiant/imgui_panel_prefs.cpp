@@ -81,8 +81,8 @@ struct prefsDlgState_t
 // any header yet (prefsDlgState_t is still local to prefs.cpp). Verified non-static at
 // prefs.cpp:369 and prefs.cpp:419. Everything else the dialog owns is HWND-side
 // (DoDataExchange, the CFileDialog browse handlers, OnSetGamePrefs), so nothing else is bound.
-extern void PrefsDlg_Gather( const prefData_t *p, prefsDlgState_t &out );        // prefs.cpp:369
-extern void Prefs_ApplyFromDialogState( prefData_t *p, const prefsDlgState_t &st ); // prefs.cpp:419
+extern void PrefsDlg_Gather( const prefData_t *p, prefsDlgState_t &out );        // prefs.cpp:362
+extern void Prefs_ApplyFromDialogState( prefData_t *p, const prefsDlgState_t &st ); // prefs.cpp:412
 
 // ── panel state ───────────────────────────────────────────────────────────────
 static bool s_showPrefs = false;

@@ -99,14 +99,15 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Copy every WHOLE selected construction object into the KIWI-side clipboard.
-// REPLACES whatever was there.  Returns how many objects were stored; 0 means the
-// construction selection was empty and the clipboard is UNCHANGED — a Copy with
-// nothing selected must not destroy a clipboard, which is the same rule
-// KiwiCmd_ClipCut applies brush-side.
+// REPLACES whatever was there.  Returns how many objects were stored; 0 means
+// nothing construction-side was copied, and there are TWO such cases:
+//   - the ported Copy took SOLIDS (`selected_brushes` non-empty) — the construction
+//     clipboard is CLEARED so the two clipboards agree about what was copied;
+//   - nothing at all was selected — BOTH clipboards are left untouched, the same
+//     rule KiwiCmd_ClipCut applies brush-side.
+// The body's reasoning is at kiwi_conclip.cpp:88-105.
+// KIWI-UX (CLEANUP, A-1)
 int KiwiConClip_Copy();
-
-// How many objects the construction clipboard is holding.
-int KiwiConClip_Count();
 
 // Paste them into the store: one KiwiCon_UndoPush, visible and ungrouped, and the
 // construction selection is REPLACED with exactly the pasted set.  Returns how many

@@ -15,6 +15,22 @@ unsigned char            g_gridSampleArray[MAX_RAD_GRIDSAMPLE_BYTES];
 int                      g_gridSampleArrayCount;
 int                      g_gridColorCount;
 unsigned char            g_gridColorEntries[MAX_RAD_GRIDCOLOR_BYTES];
+/* CoD4 stores the runtime light-grid as compact cells plus a row stream, not
+ * the temporary GridSampleResult array used while tracing. */
+unsigned char            g_cod4LightGridHeader[16404];
+int                      g_cod4LightGridHeaderSize;
+unsigned char            g_cod4LightGridRows[0x300000];
+int                      g_cod4LightGridRowsSize;
+unsigned char            g_cod4LightGridEntries[MAX_RAD_GRIDSAMPLE_BYTES];
+int                      g_cod4LightGridEntryCount;
+unsigned char            g_cod4LightGridColors[MAX_COD4_GRIDCOLOR_BYTES];
+int                      g_cod4LightGridColorCount;
+/* Retail allocates 168 bytes per annotated grid point before quantization:
+ * 56 RGB samples in the renderer-facing byte domain.  Keep that lifetime
+ * separate from the temporary compact BSP lumps. */
+unsigned char           *g_cod4LightGridVectors;
+unsigned short          *g_cod4LightGridAssignments;
+static float             s_cod4LightGridBasis[56 * 3];
 /* Must be contiguous — the sky-gather path passes &g_gridLightScale0 as a
  * float[3] color pointer to GatherIncidentEnergyInSpaceForLightFromDir,
  * which reads lightColor[0..2]. C doesn't guarantee layout of separately-
@@ -39,20 +55,622 @@ typedef struct GridSampleResult
     unsigned char coordBits;    /* +0x04: low bits of x/y/z */
     unsigned char skyVis;       /* +0x05: octant sky visibility bits */
     short colorIndex;           /* +0x06: index into grid color table */
+    unsigned int producerIndex; /* +0x08: preserves color ownership across qsort */
 } GridSampleResult;
+
+static void LightGrid_BuildCod4Basis(void)
+{
+    int x, y, z, basisIndex;
+
+    basisIndex = 0;
+    for (z = 0; z < 4; ++z)
+    {
+        for (y = 0; y < 4; ++y)
+        {
+            for (x = 0; x < 4; ++x)
+            {
+                float *basis;
+                float length;
+
+                /* Native 0x411AA0 builds the normalized outer shell of a
+                 * 4x4x4 cube: all 64 lattice points except the central 2x2x2. */
+                if ((x == 1 || x == 2) && (y == 1 || y == 2)
+                    && (z == 1 || z == 2))
+                {
+                    continue;
+                }
+
+                basis = &s_cod4LightGridBasis[basisIndex * 3];
+                basis[0] = (float)x * (2.0f / 3.0f) - 1.0f;
+                basis[1] = (float)y * (2.0f / 3.0f) - 1.0f;
+                basis[2] = (float)z * (2.0f / 3.0f) - 1.0f;
+                length = sqrtf(basis[0] * basis[0] + basis[1] * basis[1]
+                             + basis[2] * basis[2]);
+                basis[0] /= length;
+                basis[1] /= length;
+                basis[2] /= length;
+                ++basisIndex;
+            }
+        }
+    }
+
+    Assert("basisIndex == GFX_LIGHTGRID_SAMPLE_COUNT",
+           ".\\lightgrid.cpp", 1170, 0, basisIndex == 56);
+}
+
+static void LightGrid_AccumulateCod4Vector(const float *color,
+                                            const float *direction,
+                                            float *vector)
+{
+    int sample;
+
+    for (sample = 0; sample < 56; ++sample)
+    {
+        const float *basis = &s_cod4LightGridBasis[sample * 3];
+        /* The retail x86 build evaluates each dot and color multiply-add in
+         * the x87 register stack, rounding only when it stores the float.
+         * Use double intermediates on x64 to preserve that boundary. */
+        float dot = (float)((double)basis[0] * (double)direction[0]
+                          + (double)basis[1] * (double)direction[1]
+                          + (double)basis[2] * (double)direction[2]);
+        if (dot > 0.0f)
+        {
+            vector[sample * 3 + 0] = (float)(
+                (double)vector[sample * 3 + 0] + (double)color[0] * dot);
+            vector[sample * 3 + 1] = (float)(
+                (double)vector[sample * 3 + 1] + (double)color[1] * dot);
+            vector[sample * 3 + 2] = (float)(
+                (double)vector[sample * 3 + 2] + (double)color[2] * dot);
+        }
+    }
+}
+
+static void LightGrid_AddUniformCod4Vector(const float *color, float *vector)
+{
+    int sample;
+
+    for (sample = 0; sample < 56; ++sample)
+    {
+        vector[sample * 3 + 0] += color[0];
+        vector[sample * 3 + 1] += color[1];
+        vector[sample * 3 + 2] += color[2];
+    }
+}
+
+static void LightGrid_AdjustCod4Contrast(float *colors)
+{
+    float intensity[56];
+    float minIntensity = 3.402823466e+38f;
+    float maxIntensity = -3.402823466e+38f;
+    float baseIntensity;
+    float contrast;
+    int sample;
+
+    for (sample = 0; sample < 56; ++sample)
+    {
+        const float *color = &colors[sample * 3];
+        float value = color[0] * 0.298999995f
+                    + color[1] * 0.587000012f
+                    + color[2] * 0.114000000f;
+        intensity[sample] = value;
+        if (value < minIntensity) minIntensity = value;
+        if (value > maxIntensity) maxIntensity = value;
+    }
+
+    baseIntensity = (maxIntensity + minIntensity) * 0.5f;
+    contrast = maxIntensity - minIntensity;
+    if (contrast != 0.0f && contrast < 0.5f)
+    {
+        float contrastScale = powf(contrast * 2.0f, -g_contrastGain);
+        for (sample = 0; sample < 56; ++sample)
+        {
+            float adjusted = (intensity[sample] - baseIntensity) * contrastScale
+                           + baseIntensity;
+            float *color = &colors[sample * 3];
+            if (adjusted <= 0.0f)
+            {
+                color[0] = color[1] = color[2] = 0.0f;
+            }
+            else if (intensity[sample] != 0.0f)
+            {
+                float scale = adjusted / intensity[sample];
+                color[0] *= scale;
+                color[1] *= scale;
+                color[2] *= scale;
+            }
+        }
+    }
+}
+
+static unsigned char LightGrid_EncodeCod4Byte(float value)
+{
+    if (value <= 0.0f) return 0;
+    if (value >= 1.0f) return 255;
+    return (unsigned char)(int)(value * 255.0f + 9.313225746e-10f);
+}
+
+static void LightGrid_StoreProducerVector(int gridIndex, const float *producer)
+{
+    float adjusted[56 * 3];
+    unsigned char *out;
+    int component;
+
+    if (!g_cod4LightGridVectors)
+        return;
+
+    /* Native 0x411630 gamma-corrects all 56 colors, adjusts contrast in
+     * place, halves the result, then truncates it into the byte domain. */
+    for (component = 0; component < 56 * 3; ++component)
+        adjusted[component] = GammaCorrectColorChannel(producer[component]);
+    LightGrid_AdjustCod4Contrast(adjusted);
+
+    out = g_cod4LightGridVectors + (unsigned long long)gridIndex * 168;
+    for (component = 0; component < 56 * 3; ++component)
+        out[component] = LightGrid_EncodeCod4Byte(adjusted[component] * 0.5f);
+}
+
+typedef struct Cod4LightGridCluster_s {
+    int first, count, splitDimension;
+    float splitValue, maxStdDev;
+} Cod4LightGridCluster_t;
+
+static void LightGrid_QuantizeVectors(void)
+{
+    Cod4LightGridCluster_t *clusters;
+    int *indices;
+    int vectorCount, clusterLimit, clusterCount, i;
+
+    if (!g_cod4LightGridVectors || g_gridPointCount <= 0)
+        return;
+
+    /* 0x411970 appends one reserved sky/default vector.  It participates in
+     * quantization, is moved to palette slot 1, then is omitted from LUMP 2. */
+    /* The native quantizer consumes the expanded twelve-byte sample list,
+     * not the source point list.  They normally have the same cardinality,
+     * but using the produced list matters when a point was suppressed before
+     * the worker stage.  0x411970 appends the sky sample after that list. */
+    vectorCount = g_gridSampleArrayCount + 1;
+    clusterLimit = vectorCount < 0xFFFF ? vectorCount : 0xFFFF;
+    clusters = (Cod4LightGridCluster_t *)malloc(
+        (unsigned long long)clusterLimit * sizeof(*clusters));
+    indices = (int *)malloc((unsigned long long)vectorCount * sizeof(*indices));
+    g_cod4LightGridAssignments = (unsigned short *)malloc(
+        (unsigned long long)vectorCount * sizeof(*g_cod4LightGridAssignments));
+    if (!clusters || !indices || !g_cod4LightGridAssignments)
+        ErrorMsg("Couldn't allocate light grid quantizer state\n");
+
+    for (i = 0; i < vectorCount; ++i)
+        indices[i] = i;
+    clusters[0].first = 0;
+    clusters[0].count = vectorCount;
+    clusterCount = 1;
+
+    for (;;)
+    {
+        int bestCluster = 0;
+        int clusterIndex;
+
+        for (clusterIndex = 0; clusterIndex < clusterCount; ++clusterIndex)
+        {
+            Cod4LightGridCluster_t *cluster = &clusters[clusterIndex];
+            float greatestVariance = -1.0f;
+            int dimension;
+
+            cluster->splitDimension = 0;
+            cluster->splitValue = 0.0f;
+            for (dimension = 0; dimension < 168; ++dimension)
+            {
+                unsigned int sum = 0;
+                float variance = 0.0f;
+                float mean;
+                int member;
+
+                for (member = 0; member < cluster->count; ++member)
+                {
+                    int vectorIndex = indices[cluster->first + member];
+                    sum += g_cod4LightGridVectors[
+                        (unsigned long long)vectorIndex * 168 + dimension];
+                }
+                /* 0x411C50 performs the integer mean in x87 precision and
+                 * stores one float result. */
+                mean = (float)((double)sum / (double)(unsigned int)cluster->count);
+                for (member = 0; member < cluster->count; ++member)
+                {
+                    int vectorIndex = indices[cluster->first + member];
+                    float delta = (float)((double)g_cod4LightGridVectors[
+                        (unsigned long long)vectorIndex * 168 + dimension]
+                        - (double)mean);
+                    variance = (float)((double)variance
+                                     + (double)delta * (double)delta);
+                }
+                variance = (float)((double)variance
+                                 / (double)(unsigned int)cluster->count);
+                if (variance > greatestVariance)
+                {
+                    greatestVariance = variance;
+                    cluster->splitDimension = dimension;
+                    cluster->splitValue = mean;
+                }
+            }
+            cluster->maxStdDev = sqrtf(greatestVariance);
+            if (cluster->maxStdDev > clusters[bestCluster].maxStdDev)
+                bestCluster = clusterIndex;
+        }
+
+        /* Native defaults: 65,535 colors maximum and 3.5 byte standard
+         * deviation.  It always permits the initial cluster to split once. */
+        if (clusterCount >= clusterLimit
+            || (clusterCount >= 2 && clusters[bestCluster].maxStdDev <= 3.5f))
+        {
+            break;
+        }
+
+        {
+            Cod4LightGridCluster_t *cluster = &clusters[bestCluster];
+            int head, tail, end, dimension;
+            float splitValue;
+
+            head = cluster->first;
+            end = cluster->first + cluster->count;
+            tail = end - 1;
+            dimension = cluster->splitDimension;
+            splitValue = cluster->splitValue;
+
+            if (cluster->maxStdDev <= 0.0f)
+            {
+                head = cluster->first + ((cluster->count + 1) >> 1);
+            }
+            else
+            {
+                while (head <= tail)
+                {
+                    while (head <= tail
+                        && (float)g_cod4LightGridVectors[
+                            (unsigned long long)indices[head] * 168 + dimension]
+                            <= splitValue)
+                    {
+                        ++head;
+                    }
+                    while (head <= tail
+                        && (float)g_cod4LightGridVectors[
+                            (unsigned long long)indices[tail] * 168 + dimension]
+                            >= splitValue)
+                    {
+                        --tail;
+                    }
+                    if (head < tail)
+                    {
+                        int temp = indices[head];
+                        indices[head++] = indices[tail];
+                        indices[tail--] = temp;
+                    }
+                }
+            }
+
+            if (head == cluster->first || head == end)
+                head = cluster->first + ((cluster->count + 1) >> 1);
+            clusters[clusterCount].first = head;
+            clusters[clusterCount].count = end - head;
+            cluster->count = head - cluster->first;
+            ++clusterCount;
+        }
+    }
+
+    for (i = 0; i < clusterCount; ++i)
+    {
+        Cod4LightGridCluster_t *cluster = &clusters[i];
+        int dimension, member;
+
+        for (dimension = 0; dimension < 168; ++dimension)
+        {
+            unsigned int sum = 0;
+            for (member = 0; member < cluster->count; ++member)
+            {
+                int vectorIndex = indices[cluster->first + member];
+                sum += g_cod4LightGridVectors[
+                    (unsigned long long)vectorIndex * 168 + dimension];
+            }
+            g_cod4LightGridColors[i * 168 + dimension] =
+                (unsigned char)(int)((double)sum
+                    / (double)(unsigned int)cluster->count + 0.5);
+        }
+        for (member = 0; member < cluster->count; ++member)
+        {
+            int vectorIndex = indices[cluster->first + member];
+            g_cod4LightGridAssignments[vectorIndex] = (unsigned short)i;
+        }
+    }
+
+    /* 0x412AD0 finishes by exchanging two complete palettes.  Palette zero
+     * is the cluster containing the most samples tagged with the primary
+     * light index; palette one is the cluster owning the final, appended sky
+     * sample.  0x412650 exchanges both the 168-byte colors and every 16-bit
+     * assignment (it also exchanges the now-dead cluster records). */
+    if (clusterCount > 1)
+    {
+        int *primaryCounts = (int *)calloc((unsigned long long)clusterCount, sizeof(int));
+        int primaryCluster = 0;
+        int sampleIndex;
+
+        if (!primaryCounts)
+            ErrorMsg("Couldn't allocate light grid palette counters\n");
+        for (sampleIndex = 0; sampleIndex < g_gridSampleArrayCount; ++sampleIndex)
+        {
+            GridSampleResult *sample = &((GridSampleResult *)g_gridSampleArray)[sampleIndex];
+            /* Native 0x412A60 counts byte +10 of the twelve-byte working
+             * sample against the selected primary light index, while
+             * deliberately ignoring the appended final sky sample. */
+            if (sample->coordBits & 1)
+                ++primaryCounts[g_cod4LightGridAssignments[sample->producerIndex]];
+        }
+        for (i = 1; i < clusterCount; ++i)
+            if (primaryCounts[i] > primaryCounts[primaryCluster]) primaryCluster = i;
+        free(primaryCounts);
+
+        if (primaryCluster != 0)
+        {
+            unsigned char tempColor[168];
+            memcpy(tempColor, g_cod4LightGridColors, 168);
+            memcpy(g_cod4LightGridColors,
+                   g_cod4LightGridColors + primaryCluster * 168, 168);
+            memcpy(g_cod4LightGridColors + primaryCluster * 168, tempColor, 168);
+            for (i = 0; i < vectorCount; ++i)
+            {
+                if (g_cod4LightGridAssignments[i] == 0)
+                    g_cod4LightGridAssignments[i] = (unsigned short)primaryCluster;
+                else if (g_cod4LightGridAssignments[i] == primaryCluster)
+                    g_cod4LightGridAssignments[i] = 0;
+            }
+        }
+
+        {
+            int skyCluster = g_cod4LightGridAssignments[vectorCount - 1];
+            if (skyCluster != 1)
+            {
+                unsigned char tempColor[168];
+                memcpy(tempColor, g_cod4LightGridColors + 168, 168);
+                memcpy(g_cod4LightGridColors + 168,
+                       g_cod4LightGridColors + skyCluster * 168, 168);
+                memcpy(g_cod4LightGridColors + skyCluster * 168, tempColor, 168);
+                for (i = 0; i < vectorCount; ++i)
+                {
+                    if (g_cod4LightGridAssignments[i] == 1)
+                        g_cod4LightGridAssignments[i] = (unsigned short)skyCluster;
+                    else if (g_cod4LightGridAssignments[i] == skyCluster)
+                        g_cod4LightGridAssignments[i] = 1;
+                }
+            }
+        }
+    }
+
+    g_cod4LightGridColorCount = clusterCount;
+    free(indices);
+    free(clusters);
+}
 
 /* external functions not in master header */
 extern void qsort(void *base, unsigned long long count, unsigned long long size, void *cmp);
-/* BuildFilePath — copies base path to out buffer. Inlined from binary. */
-static void BuildFilePath(const char *basePath, char *outPath)
-{
-    while ((*outPath++ = *basePath++) != '\0') { }
-}
 extern void *fopen_wrap(const char *path, const char *mode);
 extern void fseek_wrap(void *file, int offset, int whence);
 extern int ftell_wrap(void *file);
 extern long long fread_wrap(void *dst, int elemSize, long long count, void *file);
 extern void fclose_wrap(void *file);
+/* BuildFilePath — copies base path to out buffer. Inlined from binary. */
+static void BuildFilePath(const char *basePath, char *outPath)
+{
+    while ((*outPath++ = *basePath++) != '\0') { }
+}
+
+/* 0x410160 / 0x410280.  Retail performs this lookup over its expanded
+ * twelve-byte working records.  At this stage the x64 port still owns the
+ * canonical six-byte point list, so use the same coordinate conversion and
+ * binary-search semantics directly on that list.  CalculateLightGrid_SortPoints
+ * has established x/y/z order before any light-grid worker is dispatched. */
+static int LightGrid_HasPointAtWorldPos(const float *worldPos)
+{
+    GridSamplePoint_t key;
+    int lo = 0, hi = g_gridPointCount - 1;
+
+    if (g_gridPointCount <= 0)
+        return 0;
+    key.x = (unsigned short)(int)floorf((worldPos[0] + 131072.0f) * 0.03125f + 0.5f);
+    key.y = (unsigned short)(int)floorf((worldPos[1] + 131072.0f) * 0.03125f + 0.5f);
+    key.z = (unsigned short)(int)floorf((worldPos[2] + 131072.0f) * 0.015625f + 0.5f);
+    while (lo <= hi)
+    {
+        int mid = lo + ((hi - lo) >> 1);
+        GridSamplePoint_t *point = &g_gridPoints[mid];
+        if (point->x < key.x ||
+            (point->x == key.x && (point->y < key.y ||
+             (point->y == key.y && point->z < key.z))))
+        {
+            lo = mid + 1;
+        }
+        else if (point->x > key.x || point->y > key.y || point->z > key.z)
+        {
+            hi = mid - 1;
+        }
+        else
+        {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* geometry.cpp 0x40A040: classify an AABB (centre followed by extents)
+ * against a plane.  The occupancy tree's recursive collector uses these
+ * exact three return values: 0=back, 1=front, 3=straddling. */
+static int LightGrid_ClassifyAabbAgainstPlane(const float *plane,
+                                              const float *centre,
+                                              float planeDist)
+{
+    float radius = fabsf(centre[0]) * plane[3] +
+                   fabsf(centre[1]) * plane[4] +
+                   fabsf(centre[2]) * plane[5];
+    float distance = plane[0] * centre[0] + plane[1] * centre[1] +
+                     plane[2] * centre[2] - planeDist;
+
+    if (distance >= radius)
+        return 0;
+    if (distance <= -radius)
+        return 1;
+    return 3;
+}
+
+/* The retail 0x409E70/0x409F70 query walks a second triangle occupancy
+ * tree and rejects a point inside its 0.1-unit expanded triangle volume.
+ * Cod4Rad already owns a native, pointer-safe collision BSP (the tree used
+ * by TraceSetup_and_Dispatch), so reuse it instead of maintaining a second
+ * 32-bit triangle pool solely for this light-grid predicate. */
+static int LightGrid_PointNearGeometry(const float *point)
+{
+    static const float axes[3][3] = {
+        { 0.1f, 0.0f, 0.0f }, { 0.0f, 0.1f, 0.0f }, { 0.0f, 0.0f, 0.1f }
+    };
+    int axis;
+
+    for (axis = 0; axis < 3; ++axis)
+    {
+        float start[3], end[3];
+        RayHitResult_t hit;
+        start[0] = point[0] - axes[axis][0];
+        start[1] = point[1] - axes[axis][1];
+        start[2] = point[2] - axes[axis][2];
+        end[0] = point[0] + axes[axis][0];
+        end[1] = point[1] + axes[axis][1];
+        end[2] = point[2] + axes[axis][2];
+        TraceSetup_and_Dispatch(0, start, end, &hit);
+        if (hit.triangle)
+            return 1;
+    }
+    return 0;
+}
+
+/* Logical equivalent of the final candidate loop in 0x40DA70.  The retail
+ * implementation builds a transient triangle partition (0x40CF50 through
+ * 0x40D9E0) to answer the same occupancy question.  Reusing the compiler's
+ * collision BSP preserves the predicate without duplicating a fragile
+ * 32-bit pool and its polygon-clipping allocator. */
+static int LightGrid_OctantNeedsTrace(const float *point, int octant)
+{
+    int candidate;
+    int opposite = octant ^ 7;
+
+    for (candidate = 0; candidate < 8; ++candidate)
+    {
+        float neighbour[3];
+        if (candidate == opposite)
+            continue;
+        neighbour[0] = point[0] + ((candidate & 1) ? -16.0f : 16.0f);
+        neighbour[1] = point[1] + ((candidate & 2) ? -16.0f : 16.0f);
+        neighbour[2] = point[2] + ((candidate & 4) ? -32.0f : 32.0f);
+        if (LightGrid_HasPointAtWorldPos(neighbour) &&
+            !LightGrid_PointNearGeometry(neighbour))
+            return 1;
+    }
+    return 0;
+}
+
+/* 0x410CF0.  The producer stores the octant decision in the renderer's
+ * axis-relative bit ordering rather than the ordinal octant order. */
+static unsigned char LightGrid_ComputeNeedsTraceMask(const float *point, int rowAxis)
+{
+    unsigned char result = 0;
+    int octant;
+
+    for (octant = 0; octant < 8; ++octant)
+    {
+        int bit = 0;
+        if (!LightGrid_OctantNeedsTrace(point, octant))
+            continue;
+        if (octant & 1)
+            bit = 2 * (rowAxis == 0) + 2;
+        if (octant & 2)
+            bit |= 2 * (rowAxis != 0) + 2;
+        if (octant & 4)
+            bit |= 1;
+        result |= (unsigned char)(1u << bit);
+    }
+    return result;
+}
+
+/* 0x410870 reads a second six-byte point list, then removes every point at
+ * those coordinates and runs the normal sort/dedup pass.  Its in-place
+ * neighbour overwrite is only needed to retain a compact sorted array on
+ * the original 32-bit implementation; stable removal has the same remaining
+ * point set and is safer when duplicate authored points are present. */
+static void LightGrid_ApplyGridNot(void)
+{
+    char filePath[0x400];
+    void *file;
+    int fileSize, suppressCount, i, outCount;
+    GridSamplePoint_t *suppressPoints;
+
+    if (!g_gridPoints || g_gridPointCount <= 0)
+        return;
+
+    BuildFilePath(g_gridLogBasePath, filePath);
+    {
+        char *end = filePath;
+        while (*end) ++end;
+        memcpy(end, ".grid_not", sizeof(".grid_not"));
+    }
+    file = fopen_wrap(filePath, "rb");
+    if (!file)
+        return;
+
+    fseek_wrap(file, 0, 2);
+    fileSize = ftell_wrap(file);
+    fseek_wrap(file, 0, 0);
+    if (fileSize <= 0 || (fileSize % 6) != 0)
+    {
+        Com_Printf("Ignoring grid exclusion file '%s': size %i is not a multiple of %i\n",
+                   filePath, fileSize, 6);
+        fclose_wrap(file);
+        return;
+    }
+    suppressCount = fileSize / 6;
+    suppressPoints = (GridSamplePoint_t *)malloc((unsigned long long)fileSize);
+    if (!suppressPoints)
+    {
+        fclose_wrap(file);
+        ErrorMsg("couldn't allocate %.2f MB for the light grid exclusions\n",
+                 (double)((float)fileSize * (1.0f / (1024.0f * 1024.0f))));
+        return;
+    }
+    if (fread_wrap(suppressPoints, 6, suppressCount, file) != suppressCount)
+    {
+        fclose_wrap(file);
+        free(suppressPoints);
+        ErrorMsg("Error while reading %s\n", filePath);
+        return;
+    }
+    fclose_wrap(file);
+
+    outCount = 0;
+    for (i = 0; i < g_gridPointCount; ++i)
+    {
+        GridSamplePoint_t point = g_gridPoints[i];
+        int j, suppressed = 0;
+        for (j = 0; j < suppressCount; ++j)
+        {
+            if (point.x == suppressPoints[j].x && point.y == suppressPoints[j].y &&
+                point.z == suppressPoints[j].z)
+            {
+                suppressed = 1;
+                break;
+            }
+        }
+        if (!suppressed)
+            g_gridPoints[outCount++] = point;
+    }
+    if (outCount != g_gridPointCount)
+        Com_Printf("Suppressed %i light grid points from '%s'\n",
+                   g_gridPointCount - outCount, filePath);
+    g_gridPointCount = outCount;
+    free(suppressPoints);
+}
 extern int rand_int(void);
 extern int FindLightingSamplesAndNormal(int sampleIdx, float *position, float *normal,
     float offset, void *outputLighting, float *outputNormal);
@@ -72,10 +690,82 @@ extern float g_sunDirZ;
 /* forward declarations for lightgrid internal functions */
 extern void CalculateLightGrid_Setup(void);
 GridSampleResult *AllocGridSample(int flags, GridSamplePoint_t *pt);
+static void CalculateLightGrid_GatherLightInternal(int flags, int gridIndex,
+                                                   float *outBuffer,
+                                                   float *cod4Vector);
 
 #define GRID_ORIGIN_OFFSET  (-131072.0f)  /* dword_458A90 = 0xC8000000 */
 #define GRID_SCALE_XY       0.03125f      /* dword_458784 = 0x3D000000 = 1/32 */
 #define GRID_SCALE_Z        0.015625f     /* dword_458A8C = 0x3C800000 = 1/64 */
+
+static void LightGrid_BuildCod4Compact(void)
+{
+    int i, axis, row, entryCount = 0;
+    unsigned short mins[3] = { 0xffff, 0xffff, 0xffff };
+    unsigned short maxs[3] = { 0, 0, 0 };
+    unsigned short *header16 = (unsigned short *)g_cod4LightGridHeader;
+
+    if (!g_gridPointCount || !g_gridSampleArrayCount)
+        return;
+    for (i = 0; i < g_gridPointCount; ++i) {
+        unsigned short *p = (unsigned short *)&g_gridPoints[i];
+        for (axis = 0; axis < 3; ++axis) {
+            if (p[axis] < mins[axis]) mins[axis] = p[axis];
+            if (p[axis] > maxs[axis]) maxs[axis] = p[axis];
+        }
+    }
+    /* Retail chooses the broadest horizontal axis as rows. */
+    axis = 0;
+    if (maxs[1] - mins[1] > maxs[0] - mins[0]) axis = 1;
+    memcpy(header16, mins, sizeof(mins));
+    memcpy(header16 + 3, maxs, sizeof(maxs));
+    *(unsigned int *)(g_cod4LightGridHeader + 12) = (unsigned int)axis;
+    *(unsigned int *)(g_cod4LightGridHeader + 16) = (unsigned int)(axis ^ 1);
+    g_cod4LightGridRowsSize = 0;
+    for (row = mins[axis]; row <= maxs[axis]; ++row) {
+        unsigned char *rowData = g_cod4LightGridRows + g_cod4LightGridRowsSize;
+        unsigned short columnCount = (unsigned short)(maxs[axis ^ 1] - mins[axis ^ 1] + 1);
+        unsigned short height = (unsigned short)(maxs[2] - mins[2] + 1);
+        header16[10 + row - mins[axis]] = (unsigned short)(g_cod4LightGridRowsSize >> 2);
+        /* 0x413160/0x412E80 regular-row encoding: a 12-byte row header,
+         * followed by one 4-byte run descriptor.  Entry offsets address the
+         * packed four-byte LUMP 2 cells, hence the 19*4 (=0x4c) stride on
+         * the paired fixture. */
+        *(unsigned short *)(rowData + 0) = mins[axis ^ 1];
+        *(unsigned short *)(rowData + 2) = columnCount;
+        *(unsigned short *)(rowData + 4) = mins[2];
+        *(unsigned short *)(rowData + 6) = height;
+        *(unsigned int *)(rowData + 8) =
+            (unsigned int)((row - mins[axis]) * columnCount * 4);
+        *(unsigned short *)(rowData + 12) = (unsigned short)((height << 8) | columnCount);
+        *(unsigned short *)(rowData + 14) = 0;
+        g_cod4LightGridRowsSize += 16;
+    }
+    g_cod4LightGridHeaderSize = 20 + 2 * (maxs[axis] - mins[axis] + 1);
+    /* 0x412AD0 clusters the producer's 56 RGB samples into modern 168-byte
+     * renderer colors and attaches the resulting 16-bit index to each cell. */
+    LightGrid_QuantizeVectors();
+
+    /* LUMP 2 is an array of four-byte runtime cells (color index, trace
+     * mask, sky visibility), not the Cod2 temporary eight-byte sort record.
+     * 0x412E80 writes exactly this representation. */
+    for (i = 0; i < g_gridSampleArrayCount; ++i) {
+        GridSampleResult *sample = &((GridSampleResult *)g_gridSampleArray)[i];
+        unsigned char *entry = g_cod4LightGridEntries + entryCount * 4;
+        *(unsigned short *)(entry + 0) = g_cod4LightGridAssignments
+            ? g_cod4LightGridAssignments[sample->producerIndex] : 0;
+        /* Legacy coordBits bit zero is the recovered sun-primary visibility
+         * result.  Modern v22 stores the primary-light index directly. */
+        entry[2] = (sample->coordBits & 1) ? 1
+                 : (sample->skyVis ? 0 : 255);
+        entry[3] = 0;
+        ++entryCount;
+    }
+    g_cod4LightGridEntryCount = entryCount;
+
+    free(g_cod4LightGridAssignments);
+    g_cod4LightGridAssignments = NULL;
+}
 
 /*
  * CalculateLightGrid_Worker — calculate light grid for a single point.
@@ -89,6 +779,7 @@ void CalculateLightGrid_Worker(int gridIndex, int flags)
     void *gridPoint;
     GridSampleResult *sample;
     float lightBuffer[24]; /* 96 bytes = 0x60, zeroed */
+    float cod4Vector[56 * 3];
 
     gridPoint = (void *)&g_gridPoints[gridIndex];
     sample = (GridSampleResult *)AllocGridSample(flags, gridPoint);
@@ -96,7 +787,10 @@ void CalculateLightGrid_Worker(int gridIndex, int flags)
         return;
 
     memset(lightBuffer, 0, 0x60);
-    CalculateLightGrid_GatherLight(flags, gridIndex, lightBuffer);
+    CalculateLightGrid_GatherLightInternal(flags, gridIndex, lightBuffer,
+                                           cod4Vector);
+
+    LightGrid_StoreProducerVector(gridIndex, cod4Vector);
 
     sample->colorIndex = LightGrid_EncodeSH(1.0f, lightBuffer);
 }
@@ -139,6 +833,7 @@ void AllocGridTraceDirections(void)
     /* LST 0x411AA6: jmp com_math_428EF0 = UniformPointsOnSphere(count, arr, 12).
      * Deterministic golden-angle spiral; overwrites the random array above. */
     UniformPointsOnSphere(g_numTraceDirections, g_traceDirections, 12);
+    LightGrid_BuildCod4Basis();
 }
 
 /*
@@ -175,12 +870,22 @@ void AddStaticModelLightGridSamples(void)
         memcpy(end, ".grid", 6);
     }
 
-    /* open file */
+    /* The normal CoD4Map workflow emits a six-byte-point `.grid_auto`
+     * companion.  Retail tries it when an authored `.grid` is absent. */
     file = fopen_wrap(filePath, "rb");
     if (!file)
     {
-        Com_Printf("Light grid sample point file '%s' not found, trying legacy .vclog.\n", filePath);
-        goto done;
+        char *end = filePath;
+        while (*end)
+            end++;
+        /* Replace the just-appended `.grid` suffix. */
+        memcpy(end - 5, ".grid_auto", sizeof(".grid_auto"));
+        file = fopen_wrap(filePath, "rb");
+        if (!file)
+        {
+            Com_Printf("Light grid sample point file '%s' not found, trying legacy .vclog.\n", filePath);
+            goto done;
+        }
     }
 
     /* get file size */
@@ -220,6 +925,8 @@ void AddStaticModelLightGridSamples(void)
         goto close_done;
     }
 
+    LightGrid_ApplyGridNot();
+
 close_file:
     fclose_wrap(file);
 
@@ -233,7 +940,7 @@ done:
  * Address: 0x410F50 | Size: 266 bytes
  *
  * ecx=flags, rdx=gridPoint (GridSamplePoint*)
- * Returns pointer to 8-byte entry in global sample array.
+ * Returns a temporary annotated entry in the global sample array.
  */
 GridSampleResult *AllocGridSample(int flags, GridSamplePoint_t *pt)
 {
@@ -252,6 +959,9 @@ GridSampleResult *AllocGridSample(int flags, GridSamplePoint_t *pt)
     g_gridSampleArrayCount++;
 
     ReleaseThreadLock((unsigned int)(uintptr_t)g_gridSampleArray);
+
+    memset(entry, 0, sizeof(*entry));
+    entry->producerIndex = (unsigned int)(pt - g_gridPoints);
 
     /* pack grid coordinates */
     packed = ((int)pt->x << 19) & (int)0xFFE003FF;
@@ -342,6 +1052,11 @@ void GatherIncidentEnergyInSpaceForLightFromDir(float *lightColor, float *direct
     }
 }
 
+void CalculateLightGrid_GatherLight(int flags, int gridIndex, float *outBuffer)
+{
+    CalculateLightGrid_GatherLightInternal(flags, gridIndex, outBuffer, NULL);
+}
+
 /*
  * CalculateLightGrid_GatherLight — gather all lighting for a grid point.
  * Address: 0x411280 | Size: 937 bytes
@@ -353,7 +1068,9 @@ void GatherIncidentEnergyInSpaceForLightFromDir(float *lightColor, float *direct
  *   2. Point lights (via PointLightEvaluatePoint)
  * Results accumulated into outBuffer via GatherIncidentEnergyInSpaceForLightFromDir.
  */
-void CalculateLightGrid_GatherLight(int flags, int gridIndex, float *outBuffer)
+static void CalculateLightGrid_GatherLightInternal(int flags, int gridIndex,
+                                                   float *outBuffer,
+                                                   float *cod4Vector)
 {
     float pos[3];
     float localColor[3];
@@ -369,8 +1086,17 @@ void CalculateLightGrid_GatherLight(int flags, int gridIndex, float *outBuffer)
     pos[1] = (float)((int)pt->y - 0x1000) * 32.0f;
     pos[2] = (float)((int)pt->z - 0x800) * 64.0f;
 
-    /* zero output buffer */
+    /* Native 0x4116B0 starts all 56 renderer samples at world ambient. */
     memset(outBuffer, 0, 0x60);
+    if (cod4Vector)
+    {
+        for (i = 0; i < 56; ++i)
+        {
+            cod4Vector[i * 3 + 0] = g_ambientR;
+            cod4Vector[i * 3 + 1] = g_ambientG;
+            cod4Vector[i * 3 + 2] = g_ambientB;
+        }
+    }
 
     /* gather from trace directions */
     for (i = 0; i < g_numTraceDirections; i++)
@@ -378,7 +1104,7 @@ void CalculateLightGrid_GatherLight(int flags, int gridIndex, float *outBuffer)
         float *dir = g_traceDirections + i * 3;
         int hitCount;
 
-        hitCount = FindLightingSamplesAndNormal(flags, pos, dir, 262144.0f,
+        hitCount = FindLightingSamplesAndNormalNearest(flags, pos, dir, 262144.0f,
             hitData, NULL);
 
         if (hitCount == 0)
@@ -389,6 +1115,9 @@ void CalculateLightGrid_GatherLight(int flags, int gridIndex, float *outBuffer)
             /* sky hit — use global sky light scale */
             GatherIncidentEnergyInSpaceForLightFromDir(
                 &g_gridLightScale0, dir, outBuffer);
+            if (cod4Vector)
+                LightGrid_AccumulateCod4Vector(&g_gridLightScale0, dir,
+                                                cod4Vector);
             continue;
         }
 
@@ -406,6 +1135,8 @@ void CalculateLightGrid_GatherLight(int flags, int gridIndex, float *outBuffer)
             localColor[2] *= g_gridLightScale3 * weight;
 
             GatherIncidentEnergyInSpaceForLightFromDir(localColor, dir, outBuffer);
+            if (cod4Vector)
+                LightGrid_AccumulateCod4Vector(localColor, dir, cod4Vector);
         }
     }
 
@@ -421,6 +1152,9 @@ void CalculateLightGrid_GatherLight(int flags, int gridIndex, float *outBuffer)
             {
                 /* far light — use directional SH accumulation */
                 GatherIncidentEnergyInSpaceForLightFromDir(lightColor, lightDir, outBuffer);
+                if (cod4Vector)
+                    LightGrid_AccumulateCod4Vector(lightColor, lightDir,
+                                                    cod4Vector);
             }
             else if (result == 2)
             {
@@ -429,6 +1163,8 @@ void CalculateLightGrid_GatherLight(int flags, int gridIndex, float *outBuffer)
                 {
                     outBuffer[j] += lightColor[j % 3];
                 }
+                if (cod4Vector)
+                    LightGrid_AddUniformCod4Vector(lightColor, cod4Vector);
             }
         }
     }
@@ -573,6 +1309,30 @@ insert_new:
  *
  * ecx=flags
  */
+static void LightGrid_AppendDefaultProducerVector(void)
+{
+    float vector[56 * 3];
+    int sample, directionIndex;
+
+    for (sample = 0; sample < 56; ++sample)
+    {
+        vector[sample * 3 + 0] = g_ambientR;
+        vector[sample * 3 + 1] = g_ambientG;
+        vector[sample * 3 + 2] = g_ambientB;
+    }
+    for (directionIndex = 0; directionIndex < g_numTraceDirections;
+         ++directionIndex)
+    {
+        float *direction = &g_traceDirections[directionIndex * 3];
+        if (direction[2] > 0.0f)
+            LightGrid_AccumulateCod4Vector(&g_gridLightScale0, direction,
+                                            vector);
+    }
+    /* 0x411970 appends after the produced sample array, rather than after
+     * the pre-worker source-point allocation. */
+    LightGrid_StoreProducerVector(g_gridSampleArrayCount, vector);
+}
+
 void CalculateLightGrid(int flags)
 {
     int numDirs;
@@ -581,6 +1341,8 @@ void CalculateLightGrid(int flags)
     /* clear counters */
     g_gridColorCount = 0;
     g_gridSampleArrayCount = 0;
+    g_cod4LightGridColorCount = 0;
+    g_cod4LightGridEntryCount = 0;
 
     /* assert: pointCount == 0 (line 0x142) */
     Assert("lightGridGlob.pointCount == 0", ".\\lightgrid.cpp", 0x142, 0, 1);
@@ -617,19 +1379,32 @@ void CalculateLightGrid(int flags)
 
     /* compute lighting scale factors */
     numDirs = g_numTraceDirections;
-    dirScale = g_lightScale / (float)numDirs;
+    dirScale = 4.0f / (float)numDirs;
 
-    g_gridLightScale0 = g_backfaceLightR * dirScale;
-    g_gridLightScale1 = g_backfaceLightG * dirScale;
-    g_gridLightScale2 = g_backfaceLightB * dirScale;
-    g_gridLightScale3 = g_radiosityScale * g_lightScale / (float)numDirs;
+    /* Native 0x413630 copies E98/E9C/EA0 into the grid sky scale.  Those
+     * globals are the diffuse sky/radiosity colour, not the E8C bounce-ping
+     * colour used while seeding surface radiosity. */
+    g_gridLightScale0 = g_sunRadiosityR * dirScale;
+    g_gridLightScale1 = g_sunRadiosityG * dirScale;
+    g_gridLightScale2 = g_sunRadiosityB * dirScale;
+    g_gridLightScale3 = dirScale;
+
+    g_cod4LightGridVectors = (unsigned char *)malloc(
+        (unsigned long long)(g_gridPointCount + 1) * 168);
+    if (!g_cod4LightGridVectors)
+        ErrorMsg("Couldn't allocate %i bytes for light grid producer vectors\n",
+                 (g_gridPointCount + 1) * 168);
 
     /* calculate lighting for each grid point */
     ForEachLightmapPixel(g_gridPointCount, (void *)CalculateLightGrid_Worker, flags);
+    LightGrid_AppendDefaultProducerVector();
 
     /* sort results */
-    qsort(g_gridSampleArray, g_gridSampleArrayCount, 8,
+    qsort(g_gridSampleArray, g_gridSampleArrayCount, sizeof(GridSampleResult),
           (void *)GridSamplePoint_CompareForSort);
+    LightGrid_BuildCod4Compact();
+    free(g_cod4LightGridVectors);
+    g_cod4LightGridVectors = NULL;
 
 done:
     return;
@@ -981,7 +1756,10 @@ void TraceOctantSkyVisibility(int flags, float *pos, unsigned char *outResult)
             traceEnd2[1] = hitPos[1];
             traceEnd2[2] = hitPos[2] - largeZOffset;
 
-            TraceSetup_and_Dispatch(0, traceStart2, traceEnd2, &hit2);
+            /* This executes inside the parallel grid worker.  Slot zero is
+             * shared with worker zero and races the triangle cache stamps;
+             * keep both traces on the caller's per-worker cache slot. */
+            TraceSetup_and_Dispatch(flags, traceStart2, traceEnd2, &hit2);
 
             if (!hit2.triangle)
                 goto next_octant;

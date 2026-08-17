@@ -24,8 +24,11 @@
 //   V2  DEGENERATE PLANE  |plane.normal| is not ~1 after Face_MakePlane's
 //                         normalise, i.e. the 3 planepts became collinear /
 //                         coincident and the cross product collapsed.
-//   V3  NULL / SHORT WINDING
-//                         a face has w == NULL, or w->numpoints < 3.  This is the
+//   V3  NULL / SHORT / OVERFLOWED WINDING
+//                         a face has w == NULL or w->numpoints < 3 (reported as
+//                         "face collapsed"), or w->numpoints is past
+//                         MAX_POINTS_ON_WINDING (reported as "winding overflow" —
+//                         KIWI-UX (CLEANUP, A-38)).  This is the
 //                         single most important check: Brush_BuildWindings drops
 //                         the winding of any face that the OTHER planes clipped
 //                         away entirely, which is exactly what "you pushed this
@@ -114,6 +117,22 @@ struct patchMesh_t;
 #define KVALID_MIN_THICKNESS   0.01f      // world units, opposed-plane slab
 #define KVALID_MAX_SPAN        65536.0f   // spec §19 "map bound"
 #define KVALID_MAX_COORD       131072.0f  // the editor's own sentinel box
+
+// ── KIWI-UX (CLEANUP, B-11): THE PATCH CONTROL-GRID WIDTH BOUND, NAMED ──────
+// Patch_GenericMesh refuses a control-grid width outside 3..15 (pmesh.cpp:1550).
+// That ONE format constraint was spelled as the bare literal 15 in five places
+// across kiwi_loft.cpp and kiwi_patchfillet.cpp — one of which SIZED A STACK
+// ARRAY (`float top[15][3], bot[15][3]`) — and encoded a sixth and seventh time
+// as the derived KLOFT_MAX_CURVE_SEGS (7) and KPF_MAX_SPANS (7), each with a
+// comment doing the 2*7+1 arithmetic by hand.  Named here, in the header that
+// owns "is this geometry acceptable", and static_asserted against those two
+// derived constants at their use sites so they cannot drift apart.
+//
+// NOT the same number as KIWI_PATCH_MAX_DIM (16, kiwi_selection.h): that one is
+// `patchMesh_t::ctrl`'s ARRAY EXTENT, i.e. what can be indexed; this one is what
+// the mesh BUILDER accepts.  15 <= 16 is the invariant between them.
+#define KPATCH_MIN_WIDTH       3
+#define KPATCH_MAX_WIDTH       15
 
 // V8 (ROUND AA, ITEM 4).  The probe box is the brush's own bounds grown by
 // MARGIN; a winding point within TOUCH of that box's surface means the face was

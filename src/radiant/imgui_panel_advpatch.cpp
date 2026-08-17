@@ -113,16 +113,16 @@ extern void AdvPatchEdit_SetChannel( int idx, bool on );
 // The paint target, for the two owner-draw swatch equivalents + the pickers' seed values
 // (the CColorDialog ctor arguments, patchdialog.cpp:160/169).  Both are file-scope globals,
 // not statics (patchdialog.cpp:358-359 = IDB dword_25D65A4 / byte_25D65A8).
-extern unsigned int g_paintColorBGR;                                 // patchdialog.cpp:358
-extern byte         g_paintColorA;                                   // patchdialog.cpp:359
+extern unsigned int g_paintColorBGR;                                 // patchdialog.cpp:195
+extern byte         g_paintColorA;                                   // patchdialog.cpp:196
 
 // ── pmesh.cpp bindings (the CurvEditDlg control table; all non-static) ──────────
 extern void  CurveEdit_BindData( int slot, int trackbarId, int editId, float defVal,
                                  float mn, float mx, float step );   // pmesh.cpp:4942 (sub_4010D0 bind half)
-extern int   CurveEdit_Slots();                                      // pmesh.cpp:4960 (== 3)
-extern int   CurveEdit_StepCount( int slot );                        // pmesh.cpp:4966 (TBM_SETRANGE max)
-extern int   CurveEdit_StepIndex( int slot );                        // pmesh.cpp:4972 (TBM_SETPOS pos)
-extern float CurveEdit_DisplayValue( int slot );                     // pmesh.cpp:4990 (sub_401000 text)
+extern int   CurveEdit_Slots();                                      // pmesh.cpp:5240 (== 3)
+extern int   CurveEdit_StepCount( int slot );                        // pmesh.cpp:5246 (TBM_SETRANGE max)
+extern int   CurveEdit_StepIndex( int slot );                        // pmesh.cpp:5252 (TBM_SETPOS pos)
+extern float CurveEdit_DisplayValue( int slot );                     // pmesh.cpp:5270 (sub_401000 text)
 
 // The 3 param slots exactly as OnInitDialog binds them (patchdialog.cpp:101-103), plus the
 // group labels from the template (res/radiant.rc:723/725/727, ampersands dropped) and the

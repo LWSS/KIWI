@@ -2,6 +2,7 @@
 #ifndef KISAK_RADIANT
 #error this file is only for Radiant!
 #endif
+#include "kiwi_construct.h"   // KIWI-UX (CLEANUP, B-9): KCON_WELD_2D
 // ─────────────────────────────────────────────────────────────────────────────
 // kiwi_offset.h — ROUND J: OFFSET CURVE.
 //
@@ -123,7 +124,10 @@ class KiwiEditorCommand;
 // A circle may not be offset down to (or through) a point.
 #define KOFF_MIN_RADIUS      1.0f
 // Two plane-space points closer than this are the same point (duplicate cull).
-#define KOFF_WELD_2D         0.01f
+// KIWI-UX (CLEANUP, B-9): one number, KCON_WELD_2D (kiwi_construct.h, included
+// at the top) —
+// kiwi_fillet.cpp spelled the same value as KFIL_WELD_2D for the same question.
+#define KOFF_WELD_2D         KCON_WELD_2D
 
 // §3 palette predicate: exactly one offsettable construction object is selected.
 bool KiwiOffset_CanOffset();

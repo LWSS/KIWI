@@ -18,6 +18,23 @@
 // the id to it.  Everything else in this file — the frame, the appender, the
 // inset, the exports below — is unchanged and is what both modes run on.
 //
+// KIWI-UX (CLEANUP, B-31): THIS IS THE ONE TELLING OF THAT MERGE.  It was
+// asserted at four more sites (twice in kiwi_bevel.cpp, once in
+// kiwi_patchfillet.cpp, once above the panel button); those are now one-line
+// pointers here.  What it means for anyone looking for the old command:
+//   * KIWI_CMD_BEVEL_EDGE still exists, still registers, still appears in the
+//     palette and the command list, and still means CHAMFER — it is answered by
+//     kiwi_patchfillet.cpp's command, which STARTS in chamfer mode.  A user who
+//     never presses D sees exactly the old behaviour.
+//   * D toggles chamfer <-> patch fillet mid-gesture, with the depth carried
+//     across by the r = d·k/(1-k²) relation so the solid does not jump.
+//   * the drag mapping, the §19 gate, the baseline discipline and the undo
+//     bracket are the fillet command's, unchanged — they were already the same
+//     code.  Two commands cannot be "one tool with a mode key", so the chamfer
+//     half was folded in rather than a third copy of the drag being written.
+//   * ONE button, for the same reason: a second one would be a second way to
+//     start the same thing in the same mode.
+//
 // Both follow kiwi_transform.h's three rules verbatim (apply from baseline, one
 // gesture = one undo record opened at the FIRST mutation, reuse the ported cores)
 // and kiwi_validity.h's §19 gate (rebuild → check → reject, HUD red, commit while

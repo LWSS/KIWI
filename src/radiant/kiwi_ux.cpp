@@ -17,11 +17,15 @@
 #include "kiwi_units.h"
 #include "kiwi_selection.h"
 #include "kiwi_viewcube.h"
+#include "kiwi_windows.h"         // KIWI-UX (CLEANUP, C-73): KiwiWindows_SyncViewMenu,
+                                  // which KiwiUX_DrawSettings used to re-declare at
+                                  // BLOCK scope.  No include cycle: kiwi_windows.h
+                                  // includes nothing at all.
 #include "radiant_registry.h"
 
 #include <imgui/imgui.h>
 
-extern int g_nUpdateBits;                  // 0x25D5A74 (mainfrm.cpp)
+extern int g_nUpdateBits;                  // engine_stubs.cpp:773 (0x25D5A74)
 
 namespace
 {
@@ -86,7 +90,7 @@ void KiwiUX_DrawSettings()
     // KIWI-UX (shakeout C): these two are ALSO native View-menu check items now,
     // so a flip here has to re-stamp the menu — otherwise the two UIs disagree
     // about the same flag, which is the §9 ✕-box problem in a different costume.
-    extern void KiwiWindows_SyncViewMenu();   // kiwi_windows.cpp
+    // (Declared by kiwi_windows.h, included above — CLEANUP, C-73.)
     bool grid = KiwiUX_ShowGrid();
     if ( ImGui::Checkbox( "Ground grid", &grid ) )
     {

@@ -13,7 +13,9 @@
 #include "stdafx.h"
 #include "qe3.h"
 
+#include "kiwi_selection.h"  // KIWI-UX (CLEANUP, A-14): Patch_DimsSane / KIWI_PATCH_MAX_DIM
 #include "kiwi_validity.h"
+#include "kiwi_vec.h"     // KIWI-UX (CLEANUP, A-15): the one spelling of Dot3/Sub3/...
 
 #include <math.h>
 #include <string.h>
@@ -26,15 +28,11 @@ extern void MarkMapModified();                                // win_qe3.cpp 0x4
 
 // ROUND AA, ITEM 4 — V8's two halves.  The Brush_MakeFaceWinding declaration is
 // select.cpp:4510's, verbatim, with the definition line added.
-extern winding_t *Brush_MakeFaceWinding( face_t *f, brush_t *def );   // brush.cpp:4684 (0x471260)
+extern winding_t *Brush_MakeFaceWinding( face_t *f, brush_t *def );   // brush.cpp:4695 (0x471260)
 extern void       Winding_Free( winding_t *w );                      // winding.cpp:153
 
 namespace
 {
-    inline float Dot3( const float *a, const float *b )
-    {
-        return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-    }
 
     // Area of a planar polygon: half the magnitude of the summed edge cross
     // products about p[0].  Exact for any convex winding, which is all
@@ -104,8 +102,10 @@ bool KiwiValid_Snapshot( brush_t *def, kiwiBaseBrush_t *out )
     // write into freed/replaced memory.  The control grid IS the patch's geometry,
     // so that is the only thing worth a baseline.
     patchMesh_t *pm = def->patch;
-    const bool isPatch = ( pm && pm->width > 0 && pm->height > 0
-                        && pm->width <= 16 && pm->height <= 16 );
+    // KIWI-UX (CLEANUP, A-14): the bare 16 was `patchMesh_t::ctrl`'s extent
+    // written out by hand here and in kiwi_transform.cpp.  One predicate now,
+    // one named bound (KIWI_PATCH_MAX_DIM, kiwi_selection.h).
+    const bool isPatch = Patch_DimsSane( pm );
 
     if ( isPatch )
     {

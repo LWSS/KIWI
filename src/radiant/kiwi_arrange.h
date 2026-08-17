@@ -77,18 +77,18 @@
 // an overflow LOGS and yields NOTHING for that group rather than yielding a
 // partial arrangement, because a partial arrangement is a wrong arrangement.
 //
-//   KARR_MAX_SEGS    256   input segments per coplanar group.  Splitting is the
+//   KARRG_MAX_SEGS    256   input segments per coplanar group.  Splitting is the
 //                          O(n^2) step: 256^2 = 65k pair tests, each a handful of
 //                          dot products.  A store big enough to exceed this is a
 //                          store where a 64-segment circle count has been drawn
 //                          four times over on one plane.
-//   KARR_MAX_EDGES   1024  fragments after splitting.  n segments with k crossings
+//   KARRG_MAX_EDGES   1024  fragments after splitting.  n segments with k crossings
 //                          each produce n + (total crossings) fragments; the cap is
 //                          4x the segment cap, i.e. an average of three crossings
 //                          per segment.
-//   KARR_MAX_NODES   1024  welded fragment endpoints.  Welding is O(nodes^2) in
+//   KARRG_MAX_NODES   1024  welded fragment endpoints.  Welding is O(nodes^2) in
 //                          the worst case (1M compares, once per store change).
-//   KARR_MAX_CELLS    64   bounded cells emitted per group.
+//   KARRG_MAX_CELLS    64   bounded cells emitted per group.
 // A cell with more than KREG_MAX_LOOP vertices, or less than KREG_MIN_AREA of
 // area, is dropped individually (it is not an overflow — it is a cell §8 already
 // says is not a region).
@@ -98,10 +98,18 @@
 
 #include "kiwi_construct.h"
 
-#define KARR_MAX_SEGS    256
-#define KARR_MAX_EDGES   1024
-#define KARR_MAX_NODES   1024
-#define KARR_MAX_CELLS   64
+// KIWI-UX (CLEANUP, B-26): the prefix is KARRG_ ("arrangement"), not KARR_.
+// KARR_ was claimed by TWO unrelated families — kiwi_dupe.h's Array-duplicate
+// tuning (KARR_MIN_COUNT / KARR_MAX_COUNT / KARR_DEF_LINEAR / KARR_DEF_RADIAL /
+// KARR_MIN_OFFSET / KARR_MAX_SOURCE / KARR_LINE_BREAK_PIXELS, plus its KARR_FIELDS
+// table) and this one.  No TU includes both headers today, so nothing collided —
+// but grepping KARR_MAX_ returned two unrelated caps, and kiwi_dupe is the older,
+// larger and more public claimant, so THIS family moved.  Four constants, one
+// non-public consumer (kiwi_region.cpp reaches them through this header).
+#define KARRG_MAX_SEGS    256
+#define KARRG_MAX_EDGES   1024
+#define KARRG_MAX_NODES   1024
+#define KARRG_MAX_CELLS   64
 
 // One bounded cell of the arrangement: a CCW plane-space loop, first point NOT
 // repeated — exactly the shape kregion_t::pts carries, so kiwi_region.cpp can put

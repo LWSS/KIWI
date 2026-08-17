@@ -65,11 +65,22 @@ extern int  SpawnFlags_Gather();                                                
 extern void EclassInfo_Gather( eclass_t *cls, entEclassInfo_t &out );                  // win_ent.cpp
 extern void EclassCreate_Apply( const char *name );                                    // win_ent.cpp
 extern void EclassSelect_Apply( int listIndex, eclass_t *pec );                        // win_ent.cpp
+// KIWI-UX (ROUND AU): the selection -> edit_entity refresh, as mainfrm.cpp:56
+// declares it.  win_ent.cpp:800  void Entity_UpdateSelection()  ( = UpdateSelection( -1, NULL ) ).
+extern void Entity_UpdateSelection();                                                  // win_ent.cpp:800
+// KIWI-UX (ROUND AU): the dock-tab raise N uses, declared at FILE scope exactly as
+// mainfrm.cpp:3054 declares it.  imgui_shell.cpp:133  void ImGuiShell_FocusTab( const char * ).
+extern void ImGuiShell_FocusTab( const char *title );                                  // imgui_shell.cpp:201
 // EntSetKey_Apply / EntDeleteKey_Apply / SpawnFlags_Apply / EntAngle_Apply come from
 // radiant_ui_actions.h.
 
 // ── panel state ───────────────────────────────────────────────────────────────
 static bool s_showEntity = false;
+
+// KIWI-UX (ROUND AU): "was this window the focused surface on the frame it was
+// last drawn".  Recorded in Draw, read by Toggle — see ImGuiPanel_Entity_Toggle
+// for why N cannot be a blind boolean flip once the panel is a DOCK TAB.
+static bool s_entityFocused = false;
 
 // The eclass list cursor, as an index into the FULL EclassList_Gather order (that is
 // what EclassSelect_Apply forwards to UpdateSelection as the listbox index), plus a
@@ -346,18 +357,63 @@ void ImGuiPanel_Entity_MenuItem()
 
 // U-RIP seam: Edit→Entity Info (cmd 32787, was the MFC entity-list browser) routes here
 // until the entity-list dock tab lands — same show/hide flip the sibling toggles use.
+//
+// ── KIWI-UX (ROUND AU): N MUST BRING IT TO THE FRONT, NOT HIDE IT ────────────
+// USER DIRECTIVE: "make sure the legacy entity inspector (N) bind works so we can
+// change their properties."  N is `{ "ViewEntityInfo", 0x4E, 0, 33017 }`
+// (mainfrm.cpp:1140) in the DEFAULT table and kiwi_keymap.cpp's modern profile
+// never touches vk 0x4E, so the BINDING was always live — it reached
+// Cmd_OnViewEntity (mainfrm.cpp:3055) and flipped this bool.  What a blind flip
+// cannot express is the state this panel is now in: round AU docks it as a TAB
+// beside Textures / Entities (ImGuiShell_BuildDefaultDockLayout), so "open" and
+// "visible" are different things — pressing N while it sat BEHIND the Textures tab
+// closed a window the user could not see.
+//
+// The rule is the one every editor uses for a panel key: N brings it up and
+// focuses it; N again, while it IS the focused surface, puts it away.  The focus
+// question is answered by the panel's own last draw (s_entityFocused) rather than
+// guessed, and the raise goes through ImGuiShell_FocusTab, which is the same
+// SetWindowFocus the O / texture-view keys already use (imgui_shell.cpp:133).
 void ImGuiPanel_Entity_Toggle()
 {
-    s_showEntity = !s_showEntity;
+    if ( s_showEntity && s_entityFocused )
+    {
+        s_showEntity = false;
+        return;
+    }
+    s_showEntity = true;
+    ImGuiShell_FocusTab( "Entity inspector" );
 }
 
 void ImGuiPanel_Entity_Draw()
 {
-    if ( !s_showEntity )
+    // KIWI-UX (ROUND AU): the focus latch N reads.  Cleared BEFORE every early-out
+    // and before Begin, so "closed" and "collapsed / behind another tab" both read
+    // as unfocused and N raises rather than hides.
+    const bool wasShown = s_showEntity;
+    s_entityFocused = false;
+    if ( !wasShown )
         return;
 
     if ( ImGui::Begin( "Entity inspector", &s_showEntity ) )
     {
+        // RootAndChildWindows so a click in one of the fields still counts as
+        // "this panel is the surface".
+        s_entityFocused = ImGui::IsWindowFocused( ImGuiFocusedFlags_RootAndChildWindows );
+
+        // ── KIWI-UX (ROUND AU): RE-DERIVE, DO NOT TRUST THE CACHE ───────────
+        // Round AU made UpdateSelection publish edit_entity in this shell (see
+        // win_ent.cpp), so the two selection funnels — Brush_Select_Helper's
+        // splice (brush.cpp:947) and Brush_RemoveFromList (:980) — keep it live
+        // through every ordinary select / deselect.  A MAP LOAD is the one path
+        // that frees entity defs WITHOUT going through them (Map_Free ->
+        // Map_New, entity.cpp:1824), and a pointer into a freed def is a crash
+        // rather than a wrong readout.  One call per drawn frame re-derives it
+        // from selected_brushes + world_entity, both of which the load rebuilds
+        // — and it is nearly free: with no entity listbox in this shell
+        // UpdateSelection returns immediately after publishing those two globals.
+        Entity_UpdateSelection();     // win_ent.cpp:800 — UpdateSelection( -1, NULL )
+
         std::vector<eclassRow_t> rows;
         EclassList_Gather( rows );
         if ( s_selEclass >= (int)rows.size() )      // the list was refilled (map load)
@@ -383,6 +439,21 @@ void ImGuiPanel_Entity_Draw()
         }
         else
         {
+            // ── KIWI-UX (ROUND AU): SAY WHAT IS BEING EDITED ────────────────
+            // With edit_entity finally tracking the selection (win_ent.cpp
+            // UpdateSelection), the binary's own "nothing selected == worldspawn"
+            // rule becomes visible for the first time in this shell — and an
+            // unlabelled key grid that is silently worldspawn's is how a mapper
+            // puts a key on the map instead of on their entity.  The header names
+            // the class and the empty-selection case says so outright.
+            ImGui::SeparatorText( "Entity" );
+            const char *cls = ( edit_entity->eclass && edit_entity->eclass->name )
+                            ? edit_entity->eclass->name : "(unknown class)";
+            const bool empty = ( selected_brushes.next == &selected_brushes );
+            if ( empty )
+                ImGui::TextDisabled( "nothing selected — editing %s", cls );
+            else
+                ImGui::Text( "%s", cls );
             if ( multiple_edit_entities )
                 ImGui::TextDisabled( "multiple entities selected: edits apply to all of them" );
 
@@ -391,6 +462,13 @@ void ImGuiPanel_Entity_Draw()
             Panel_DrawAngles();
         }
     }
-    ImGuiShell_CloseOnFocusLoss( &s_showEntity );
+    // ── KIWI-UX (ROUND AU): NO CLICK-OFF AUTO-CLOSE ─────────────────────────
+    // ImGuiShell_CloseOnFocusLoss (imgui_shell.cpp:91) closed this panel ~130 ms
+    // after focus left it, and the ONE thing a mapper does with an entity
+    // inspector open is click the entity — in the 3D view, which takes the focus.
+    // Round AU's dock placement already exempts it in practice (the helper skips
+    // DockIsActive windows), but a user who tears the tab off must not lose the
+    // panel either.  An inspector is not a transient pop-out; N and the ✕ box are
+    // its close.
     ImGui::End();
 }

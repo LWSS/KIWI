@@ -18,19 +18,22 @@ extern void *HeapReAlloc_wrapper(void *ptr, int bytes);
 extern void ForEachQuantum(int count, void (*callback)(int, int), int threadCount);
 extern void BuildLightTransfers_PerTri(int triIndex, int edx, int count, void *callback);
 extern void GetLightingSubSample(int lightmapIdx, float u, float v, void *result);
-extern void ProcessLightingSampleArea(float areaX2, float *centroid, int unused1, int unused2, void *userData);
+extern void ProcessLightingSampleArea(float areaX2, float *centroid,
+                                      float *polyVerts, int vertCount,
+                                      void *userData, int areaIndex);
 extern int CompareFunction(const void *a, const void *b);
 extern void qsort_wrapper(void *base, __int64 num, int size,
                            int (*cmp)(const void *, const void *));
 extern float ceilf_wrapper(float x);
-extern void ForEach2dArea(float *coords, int vertCount,
-                                     int sWidth, int tHeight,
-                                     float sStart, float tStart,
-                                     float sPixelSize, float tPixelSize,
-                                     void *callback, void *userData);
-extern void FindLightingTransfers_inner(int sampleIdx, float *position, float *normal,
-                                        float subAreaFactor, float skyFactor,
-                                        void *subSample);
+extern void ForEach2dArea(void *coords, int vertCount,
+                          int sWidth, int tHeight,
+                          float sStart, float tStart,
+                          float sPixelSize, float tPixelSize,
+                          ForEach2dAreaCallback callback, void *userData);
+extern int FindLightingTransfers_inner(int sampleIdx, float *position, float *normal,
+                                       float subAreaFactor, float skyFactor,
+                                       unsigned char primaryLightIndex,
+                                       void *subSample);
 extern int ComputeLinearMappingForTriangle(Triangle_t *tri, void *outMapping);
 extern void MatrixTransformDirection(void *lightmapMatrix, void *vertData, void *output);
 extern int SetupLinearMapping(float *basis, float *baryCoords, float *outCoords,
@@ -111,6 +114,20 @@ static char s_assertDisable_Process_nanB0post;
 static char s_assertDisable_Process_nanB1post;
 static char s_assertDisable_Process_nanB2post;
 
+typedef struct RadiosityColorMapping_s {
+    Triangle_t *tri;
+    float uCoeff[3];
+    float vCoeff[3];
+} RadiosityColorMapping_t;
+
+typedef struct RadiosityColorAccum_s {
+    float area;
+    float rgb[3];
+    MaterialDef_t *material;
+} RadiosityColorAccum_t;
+
+static void BuildRadiosityColor_PerTri(int triIndex);
+
 /*
 ================
 BuildTriangleNormal
@@ -169,7 +186,8 @@ Only increments g_triCount if area > 0.
 */
 void AddTriangle(SurfaceInfo_t *surface, unsigned short materialIdx,
                  void *texcoordData, void *material,
-                 int initialTriCount, int triIndex)
+                 int initialTriCount, int triIndex,
+                 unsigned char primaryLightIndex)
 {
     Triangle_t *tri;
     unsigned short *indices;
@@ -181,6 +199,7 @@ void AddTriangle(SurfaceInfo_t *surface, unsigned short materialIdx,
     tri->material = material;
     tri->materialIdx = materialIdx;
     tri->lightmapIdx = surface->lightmapIdx;
+    tri->primaryLightIndex = primaryLightIndex;
 
     if (surface->lightmapIdx != 0x1F)
         Lighting_RegisterLightmap((int)surface->lightmapIdx);
@@ -217,6 +236,8 @@ void AddTrianglesForSurface(SurfaceInfo_t *surface, int modelIndex, void *texcoo
 {
     int triCount;
     int i;
+    int surfaceIndex;
+    unsigned char primaryLightIndex;
     void *material;
 
     Assert(modelIndex >= 0 && modelIndex < 0x3FF, s_assertDisable_AddTrianglesForSurface_modelIndex);
@@ -228,10 +249,15 @@ void AddTrianglesForSurface(SurfaceInfo_t *surface, int modelIndex, void *texcoo
     material = LoadMaterial(g_materialData[surface->materialRef]);
 
     triCount = (int)surface->indexCount / 3;
+    surfaceIndex = (int)((BspTriSoup_t *)surface - bspTriangles);
+    primaryLightIndex = surfaceIndex >= 0 && surfaceIndex < numBSPTriSoups
+        ? bspTriSoupPrimaryLightIndices[surfaceIndex]
+        : 0;
 
     for (i = 0; i < triCount; i++)
     {
-        AddTriangle(surface, modelIndex, texcoordData, material, g_triCount, i);
+        AddTriangle(surface, modelIndex, texcoordData, material, g_triCount, i,
+                    primaryLightIndex);
     }
 }
 
@@ -431,12 +457,24 @@ and optional alpha mask test. Updates hitResult if closer.
 void RayTriangleIntersect(RayTraceContext_t *ray, Triangle_t *tri)
 {
     int idx;
-    float startDist, endDist;
+    float directionDotNormal;
+    float facingSign;
+    float startNumerator;
     float fraction;
-    float hitX, hitY, hitZ;
+    float fromStart[3];
+    float rayCross[3];
+    float edge01[3];
+    float edge02[3];
+    float edgeCross[3];
+    float edge01Test;
+    float edge02Test;
+    float denominator;
     float baryU, baryV;
     float tc[2];
     RayHitResult_t *hit;
+    const float *vert0;
+    const float *vert1;
+    const float *vert2;
 
     /* vis cache dedup */
     idx = ray->cacheIndex;
@@ -445,49 +483,67 @@ void RayTriangleIntersect(RayTraceContext_t *ray, Triangle_t *tri)
     tri->cacheStamp[idx] = g_visCache[idx];
 
     /* compute signed distances to triangle plane */
-    startDist = ray->start[1] * tri->normal[1]
-              + ray->start[0] * tri->normal[0]
-              + ray->start[2] * tri->normal[2]
-              - tri->dist;
+    directionDotNormal = ray->delta[0] * tri->normal[0]
+                       + ray->delta[1] * tri->normal[1]
+                       + ray->delta[2] * tri->normal[2];
+    facingSign = 1.0f;
+    if (directionDotNormal >= 0.0f)
+    {
+        directionDotNormal = -directionDotNormal;
+        facingSign = -1.0f;
+    }
 
-    endDist = ray->end[1] * tri->normal[1]
-            + ray->end[0] * tri->normal[0]
-            + ray->end[2] * tri->normal[2]
-            - tri->dist;
-
-    /* both on same side — no intersection */
-    if (startDist * endDist > 0.0f)
-        return;
-    if (startDist == endDist)
-        return;
-
-    /* compute intersection fraction */
-    fraction = startDist / (startDist - endDist);
-
-    /* not closer than current best hit */
-    if (fraction >= ray->hitResult->fraction)
-        return;
-
-    /* compute hit point */
-    hitX = fraction * ray->delta[0] + ray->start[0];
-    hitY = fraction * ray->delta[1] + ray->start[1];
-    hitZ = fraction * ray->delta[2] + ray->start[2];
-
-    /* barycentric U */
-    baryU = hitX * tri->baryVec0[0] + hitY * tri->baryVec0[1]
-          + hitZ * tri->baryVec0[2] - tri->baryVec0[3];
-    if (0.0f > baryU)
-        return;
-    if (baryU > 1.0f)
+    /* Native edge/cross-product intersection uses vertex 0 as its origin. */
+    vert0 = g_vertData[tri->vertIndex[0]].pos;
+    vert1 = g_vertData[tri->vertIndex[1]].pos;
+    vert2 = g_vertData[tri->vertIndex[2]].pos;
+    fromStart[0] = vert0[0] - ray->start[0];
+    fromStart[1] = vert0[1] - ray->start[1];
+    fromStart[2] = vert0[2] - ray->start[2];
+    startNumerator = (fromStart[0] * tri->normal[0]
+                    + fromStart[1] * tri->normal[1]
+                    + fromStart[2] * tri->normal[2]) * facingSign;
+    if (startNumerator > 0.0f
+     || directionDotNormal * ray->hitResult->fraction >= startNumerator)
         return;
 
-    /* barycentric V */
-    baryV = hitX * tri->baryVec1[0] + hitY * tri->baryVec1[1]
-          + hitZ * tri->baryVec1[2] - tri->baryVec1[3];
-    if (0.0f > baryV)
+    rayCross[0] = ray->delta[1] * fromStart[2]
+                - ray->delta[2] * fromStart[1];
+    rayCross[1] = ray->delta[2] * fromStart[0]
+                - ray->delta[0] * fromStart[2];
+    rayCross[2] = ray->delta[0] * fromStart[1]
+                - ray->delta[1] * fromStart[0];
+
+    edge01[0] = vert0[0] - vert1[0];
+    edge01[1] = vert0[1] - vert1[1];
+    edge01[2] = vert0[2] - vert1[2];
+    edge01Test = (rayCross[0] * edge01[0]
+                + rayCross[1] * edge01[1]
+                + rayCross[2] * edge01[2]) * facingSign;
+    if (edge01Test > 0.0f)
         return;
-    if (baryU + baryV > 1.0f)
+
+    edge02[0] = vert0[0] - vert2[0];
+    edge02[1] = vert0[1] - vert2[1];
+    edge02[2] = vert0[2] - vert2[2];
+    edge02Test = (rayCross[0] * edge02[0]
+                + rayCross[1] * edge02[1]
+                + rayCross[2] * edge02[2]) * facingSign;
+    if (edge02Test < 0.0f)
         return;
+
+    edgeCross[0] = edge02[1] * edge01[2] - edge02[2] * edge01[1];
+    edgeCross[1] = edge02[2] * edge01[0] - edge02[0] * edge01[2];
+    edgeCross[2] = edge02[0] * edge01[1] - edge02[1] * edge01[0];
+    denominator = (ray->delta[0] * edgeCross[0]
+                 + ray->delta[1] * edgeCross[1]
+                 + ray->delta[2] * edgeCross[2]) * facingSign;
+    if (denominator > edge01Test - edge02Test)
+        return;
+
+    fraction = startNumerator / directionDotNormal;
+    baryU = -edge02Test / denominator;
+    baryV = edge01Test / denominator;
 
     /* alpha mask test if material has alpha data */
     if ((tri->material)->extraData)
@@ -1020,10 +1076,16 @@ accumulates weight, releases lock.
 ================
 */
 void GetLightingSubSampleWithLock(float area, float *samplePos,
-                                  int unused1, int unused2, Triangle_t *tri)
+                                  float *polyVerts, int vertCount,
+                                  void *userData, int areaIndex)
 {
+    Triangle_t *tri = (Triangle_t *)userData;
     LightingSampleResult_t result;
     int combinedIndex;
+
+    (void)polyVerts;
+    (void)vertCount;
+    (void)areaIndex;
 
     GetLightingSubSample((int)tri->lightmapIdx, samplePos[0] * 2.0f, samplePos[1] * 2.0f, &result);
 
@@ -1040,9 +1102,15 @@ void GetLightingSubSampleWithLock(float area, float *samplePos,
 }
 
 static void CountTexelsCallback(float area, float *samplePos,
-                                int unused1, int unused2, void *userData)
+                                float *polyVerts, int vertCount,
+                                void *userData, int areaIndex)
 {
     int *count = (int *)userData;
+    (void)area;
+    (void)samplePos;
+    (void)polyVerts;
+    (void)vertCount;
+    (void)areaIndex;
     (*count)++;
 }
 
@@ -1083,8 +1151,187 @@ and ProcessLightingSampleArea as the processing callback.
 */
 void BuildLightTransfers_Callback(int triIndex, int unused)
 {
-    BuildLightTransfers_PerTri(triIndex, unused, g_lightTransferCount,
-                               ProcessLightingSampleArea);
+    if (!g_lightingTransportPass)
+        BuildRadiosityColor_PerTri(triIndex);
+    else
+        BuildLightTransfers_PerTri(triIndex, unused, g_lightTransferCount,
+                                   ProcessLightingSampleArea);
+}
+
+int g_lightingTransportPass = 1;
+int g_lightingSeedSkyPass;
+
+static void RadiosityColorSample(float areaX2, float *centroid,
+                                 float *polyVerts, int vertCount,
+                                 void *userData, int areaIndex)
+{
+    RadiosityColorAccum_t *accum = (RadiosityColorAccum_t *)userData;
+    MaterialDef_t *material = accum->material;
+    int x = ((int)centroid[0]) & (material->width - 1);
+    int y = ((int)centroid[1]) & (material->height - 1);
+    int blockWidth = material->width / 4;
+    const unsigned char *rgb = (const unsigned char *)material->colorMask
+                             + 3 * ((x / 4) + blockWidth * (y / 4));
+    /* Native geometry.cpp 0x40B650 converts each normalized mask channel
+     * through sub_414580 (pow(channel, g_degamma)) before area weighting. */
+    float r = DegammaColorChannel((float)rgb[0] * (1.0f / 255.0f));
+    float g = DegammaColorChannel((float)rgb[1] * (1.0f / 255.0f));
+    float b = DegammaColorChannel((float)rgb[2] * (1.0f / 255.0f));
+
+    (void)polyVerts;
+    (void)vertCount;
+    (void)areaIndex;
+    accum->area += areaX2;
+    accum->rgb[0] += r * areaX2;
+    accum->rgb[1] += g * areaX2;
+    accum->rgb[2] += b * areaX2;
+}
+
+static void RadiosityColorForPolygon(const RadiosityColorMapping_t *mapping,
+                                     const float *polyVerts, int vertCount,
+                                     float outColor[3])
+{
+    union {
+        float verts[MAX_VERTS_PER_POLY][2];
+        unsigned char slots[4 * POLY_SLOT_STRIDE];
+    } mapped;
+    RadiosityColorAccum_t accum;
+    float mins[2] = { 3.402823466e+38f, 3.402823466e+38f };
+    float maxs[2] = { -3.402823466e+38f, -3.402823466e+38f };
+    float startX, startY, spanX, spanY, cellX, cellY;
+    int countX, countY;
+    int i;
+
+    for (i = 0; i < vertCount; i++)
+    {
+        float x = polyVerts[i * 2 + 0];
+        float y = polyVerts[i * 2 + 1];
+        mapped.verts[i][0] = x * mapping->uCoeff[0]
+                           + y * mapping->uCoeff[1] + mapping->uCoeff[2];
+        mapped.verts[i][1] = x * mapping->vCoeff[0]
+                           + y * mapping->vCoeff[1] + mapping->vCoeff[2];
+        if (mapped.verts[i][0] < mins[0]) mins[0] = mapped.verts[i][0];
+        if (mapped.verts[i][1] < mins[1]) mins[1] = mapped.verts[i][1];
+        if (mapped.verts[i][0] > maxs[0]) maxs[0] = mapped.verts[i][0];
+        if (mapped.verts[i][1] > maxs[1]) maxs[1] = mapped.verts[i][1];
+    }
+
+    startX = floorf(mins[0]);
+    startY = floorf(mins[1]);
+    spanX = maxs[0] - startX;
+    spanY = maxs[1] - startY;
+    cellX = ceilf_wrapper(spanX * 0.25f);
+    cellY = ceilf_wrapper(spanY * 0.25f);
+    if (cellX < 1.0f) cellX = 1.0f;
+    if (cellY < 1.0f) cellY = 1.0f;
+    countX = (int)ceilf_wrapper(spanX / cellX);
+    countY = (int)ceilf_wrapper(spanY / cellY);
+
+    accum.area = 0.0f;
+    accum.rgb[0] = accum.rgb[1] = accum.rgb[2] = 0.0f;
+    accum.material = mapping->tri->material;
+
+    if (countX > 0 && countY > 0)
+    {
+        ForEach2dArea(mapped.slots, vertCount, countX, countY,
+                      startX, startY, cellX, cellY,
+                      RadiosityColorSample, &accum);
+    }
+
+    if (accum.area > 0.0f)
+    {
+        float invArea = 1.0f / accum.area;
+        outColor[0] = accum.rgb[0] * invArea;
+        outColor[1] = accum.rgb[1] * invArea;
+        outColor[2] = accum.rgb[2] * invArea;
+    }
+    else
+    {
+        outColor[0] = outColor[1] = outColor[2] = 1.0f;
+    }
+}
+
+static void RadiosityColorArea(float areaX2, float *centroid,
+                               float *polyVerts, int vertCount,
+                               void *userData, int areaIndex)
+{
+    RadiosityColorMapping_t *mapping = (RadiosityColorMapping_t *)userData;
+    LightingSampleResult_t result;
+    LightmapSample_t *sample;
+    float color[3];
+    float scale;
+
+    (void)areaIndex;
+
+    GetLightingSubSample((int)mapping->tri->lightmapIdx,
+                         centroid[0] * 2.0f, centroid[1] * 2.0f, &result);
+    sample = result.lock;
+    if (!sample || !sample->vars || sample->weight <= 0.0f)
+        return;
+
+    scale = areaX2 / sample->weight;
+    RadiosityColorForPolygon(mapping, polyVerts, vertCount, color);
+
+    AcquireThreadLock((unsigned int)(uintptr_t)sample);
+    sample->vars->scattered[0] += color[0] * scale;
+    sample->vars->scattered[1] += color[1] * scale;
+    sample->vars->scattered[2] += color[2] * scale;
+    ReleaseThreadLock((unsigned int)(uintptr_t)sample);
+}
+
+static int RadiosityColorAffine(const float p[3][2], const float f[3], float out[3])
+{
+    double p00 = p[0][0], p01 = p[0][1];
+    double p10 = p[1][0], p11 = p[1][1];
+    double p20 = p[2][0], p21 = p[2][1];
+    double f0 = f[0], f1 = f[1], f2 = f[2];
+    double denom = p00 * (p11 - p21)
+                 + p10 * (p21 - p01)
+                 + p20 * (p01 - p11);
+    if (denom == 0.0f)
+        return 0;
+
+    out[0] = (float)((f0 * (p11 - p21)
+                       + f1 * (p21 - p01)
+                       + f2 * (p01 - p11)) / denom);
+    out[1] = (float)((f0 * (p20 - p10)
+                       + f1 * (p00 - p20)
+                       + f2 * (p10 - p00)) / denom);
+    out[2] = (float)((f0 * (p10 * p21 - p20 * p11)
+                       + f1 * (p20 * p01 - p00 * p21)
+                       + f2 * (p00 * p11 - p10 * p01)) / denom);
+    return 1;
+}
+
+static void BuildRadiosityColor_PerTri(int triIndex)
+{
+    Triangle_t *tri = &g_triangles[triIndex];
+    MaterialDef_t *material = tri->material;
+    RadiosityColorMapping_t mapping;
+    float lm[3][2];
+    float texU[3], texV[3];
+    int i;
+
+    if (tri->lightmapIdx == LIGHTMAP_NONE || !material || !material->colorMask)
+        return;
+    if (material->width <= 0 || material->height <= 0)
+        return;
+
+    mapping.tri = tri;
+    for (i = 0; i < 3; i++)
+    {
+        DrawVert_t *vert = &g_vertData[tri->vertIndex[i]];
+        lm[i][0] = vert->lmCoord[0] * 512.0f;
+        lm[i][1] = vert->lmCoord[1] * 512.0f;
+        texU[i] = vert->texCoord[0] * (float)material->width;
+        texV[i] = vert->texCoord[1] * (float)material->height;
+    }
+
+    if (!RadiosityColorAffine(lm, texU, mapping.uCoeff)
+        || !RadiosityColorAffine(lm, texV, mapping.vCoeff))
+        return;
+
+    ForEachLightingSampleInTriangle(tri, 1, RadiosityColorArea, &mapping);
 }
 
 /*
@@ -1872,6 +2119,8 @@ void BuildLightTransfers_PerTri(int triIndex, int param, int transferCount,
     /* overwrite header: param and lightmapIdx */
     localMapping.param = param;
     localMapping.lightmapIdx = (int)tri->lightmapIdx;
+    localMapping.triangleIndex = triIndex;
+    localMapping.primaryLightIndex = tri->primaryLightIndex;
 
     /* iterate over lighting samples with mapping data */
     {
@@ -2051,7 +2300,7 @@ void ForEachLightingSampleInTriangle(Triangle_t *tri, int count,
     ForEach2dArea((float *)scaledCoords, 3,
                              sCount + 1, tCount + 1,
                              sStart, tStart, pixelSize, pixelSize,
-                             callback, userData);
+                             (ForEach2dAreaCallback)callback, userData);
 #undef scaledCoords
 }
 
@@ -2075,7 +2324,8 @@ Mapping data layout (from ComputeLinearMappingForTriangle):
 ================
 */
 void ProcessLightingSampleArea(float areaX2, float *centroid,
-                               int unused1, int unused2, void *userData)
+                               float *polyVerts, int vertCount,
+                               void *userData, int areaIndex)
 {
     LightingSampleResult_t sampleResult;
     LightTransferMapping_t *mapping;
@@ -2085,6 +2335,9 @@ void ProcessLightingSampleArea(float areaX2, float *centroid,
     float u, v;
     float totalWeight, channelWeight;
     int combinedIndex;
+
+    (void)polyVerts;
+    (void)vertCount;
 
     Assert(areaX2 > 0.0f, s_assertDisable_Process_area);
     Assert(userData, s_assertDisable_Process_userData);
@@ -2123,6 +2376,18 @@ void ProcessLightingSampleArea(float areaX2, float *centroid,
 
 check_ratio:
     Assert(areaScale >= 0.0f && areaScale <= subAreaScale, s_assertDisable_Process_areaScale);
+
+    /* Native geometry.cpp 0x40BC80 replays the exact rejected raster-cell
+     * ranges stored in radtrans.bin and removes their area before doing any
+     * direct-light work. */
+    if (Relight_IsSuppressed(mapping->triangleIndex, areaIndex))
+    {
+        AcquireThreadLock((unsigned int)(uintptr_t)sampleResult.lock);
+        sampleResult.lock->weight -= areaX2;
+        sampleResult.lock->channelWeight[combinedIndex] -= areaX2;
+        ReleaseThreadLock((unsigned int)(uintptr_t)sampleResult.lock);
+        goto done;
+    }
 
     /* map UV to world position using linear mapping */
     u = centroid[0];
@@ -2164,7 +2429,22 @@ check_ratio:
     Assert(!IS_NAN_FLOAT(basis[6]) && !IS_NAN_FLOAT(basis[7]) && !IS_NAN_FLOAT(basis[8]),
            s_assertDisable_Process_nanB2post);
 
-    FindLightingTransfers_inner(mapping->param, worldPos, basis, areaScale, subAreaScale, &sampleResult);
+    /* Retail 0x40BC80 forwards the clipped polygon area to transport and
+     * performs the single normalization later in 0x415E50. */
+    if (!FindLightingTransfers_inner(mapping->param, worldPos, basis,
+                                     areaX2, areaX2,
+                                     mapping->primaryLightIndex,
+                                     &sampleResult))
+    {
+        /* 0x40BC40 subtracts exactly the clipped polygon area from both the
+         * sample total and this 2x2 channel when transport rejects the cell. */
+        AcquireThreadLock((unsigned int)(uintptr_t)sampleResult.lock);
+        sampleResult.lock->weight -= areaX2;
+        sampleResult.lock->channelWeight[combinedIndex] -= areaX2;
+        ReleaseThreadLock((unsigned int)(uintptr_t)sampleResult.lock);
+        Relight_RecordSuppressed(mapping->triangleIndex, areaIndex);
+        goto done;
+    }
 
     if (g_aoEnabled && g_aoFactors)
     {

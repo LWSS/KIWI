@@ -160,7 +160,6 @@ int  KiwiUndo_UndoDepth();
 int  KiwiUndo_RedoDepth();
 // The newest ticket's label ("drag selection", "draw line"), or NULL.
 const char *KiwiUndo_UndoLabel();
-const char *KiwiUndo_RedoLabel();
 
 // ── the record hooks (called from the two domains' tails) ───────────────────
 // `operation` is the undo record's own operation string, which undo.cpp already
@@ -174,6 +173,63 @@ void KiwiUndo_NoteVisibilityRecord( const char *operation );   // ROUND AG, ITEM
 void KiwiUndo_NoteLegacyEvicted();      // Undo_FreeFirstUndo tail — oldest record died
 void KiwiUndo_NoteLegacyCleared();      // Undo_Clear tail — the whole legacy stack died
 void KiwiUndo_NoteLegacyRedoCleared();  // Undo_ClearRedo tail — the legacy redo died
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  KIWI-UX (ROUND BJ, ITEM 4) — THE FACE-GRANULAR RESTORE
+// ═════════════════════════════════════════════════════════════════════════════
+// USER REPORT, verbatim: *"When ctrl-z'ing, dont select the whole solid (Bug!)."*
+//
+// ── THE ROOT CAUSE, end to end ──────────────────────────────────────────────
+// A UV-editor gesture (and every other face-scoped KIWI op) opens ONE legacy
+// record and covers the face-selected brushes by hand, because a brush named only
+// by a FACE is not on `selected_brushes` at all (kiwi_selection.h DESIGN NOTE 2):
+//     kiwi_uveditor.cpp UndoOpen -> KiwiCmd_UndoBegin + KiwiCmd_UndoCoverBrush
+//                                -> Undo_AddBrush( node->def )
+// Ctrl+Z then reaches Undo_Undo (undo.cpp:736) through this journal, and the
+// legacy restore destroys the face granularity in TWO places, neither of which
+// this layer could see:
+//   1. undo.cpp:808  `Select_Deselect( 1 )` — and a1 != 0 means
+//      `g_SelectedFaces.SetSize( 0 )` (select.cpp:1466-1468).  The whole face
+//      selection is thrown away outright.
+//   2. undo.cpp:932-982, Phase 4 — every brush DEF the record covered is
+//      re-created and handed to `Brush_AddToList2( newInst )` (undo.cpp:974),
+//      whose body TAIL-INSERTS the instance into `selected_brushes` and clears the
+//      low five brushFlags bits (brush.cpp:931-941).  So every covered brush comes
+//      back SELECTED AS A WHOLE OBJECT.
+// undo.cpp:1011's `Sel_InvalidateFromLegacy()` then makes the typed layer re-derive
+// from exactly that state, so KiwiSel() ends up holding SEL_OBJECT items where the
+// user had SEL_FACE ones.  Both legacy behaviours are FAITHFUL and are not touched:
+// face selection is a KIWI-side concept and the binary's undo has no idea it exists.
+//
+// ── THE FIX: A VALUE SNAPSHOT ON THE TICKET ─────────────────────────────────
+// KiwiCmd_UndoBegin (the ONE bracket opener every KIWI gesture uses; ported code
+// calls Undo_Start instead and is therefore unaffected) ARMS a snapshot of
+// KiwiSel() before the first mutation.  The next ticket Append mints carries it.
+// After a LEGACY ticket has been forwarded — undo AND redo, because a face-scoped
+// gesture does not change the selection, so the state that was right at gesture
+// begin is right at both ends — the snapshot is re-applied through the KIWI
+// selection API + Sel_SyncToLegacy (which opens with its own Select_Deselect(1),
+// so the whole-brush selection Phase 4 left behind is cleared for free).
+//
+// KEYED BY VALUE, NEVER BY POINTER, because Phase 4 hands back the record's CLONE
+// of the def and a fresh selbrush_t instance: an entry is
+// {brush ordinal in the snapshot's own brush list, def bounds + faceCount as the
+// fingerprint, face plane, and the item's own indices}.  On restore the live
+// brushes are walked in list order, each snapshot ordinal is matched to the first
+// UNUSED brush whose fingerprint agrees, and a face entry additionally checks the
+// plane at that face index.  A snapshot that resolves nothing is DISCARDED and the
+// legacy selection is left exactly as the ported undo made it.
+//
+// SCOPE, deliberately narrow: the restore only runs when the snapshot contained at
+// least one FACE item.  An object-only gesture already ends up with its objects
+// selected, and re-writing the selection there would be a behaviour change for a
+// case that has no bug.  It is also skipped outright while a modal command is live
+// — a re-select underneath a parked face push is the trap round N documented, and
+// the same discipline the ROUND BH handshake uses (kiwi_uv.cpp
+// KiwiUv_EndGestureBeforeApply) applies here: do not hand a gesture a selection it
+// did not ask for.  (Ctrl+Z cannot reach this with a command live anyway — the key
+// funnel's own swallow rung sees to that — so the guard costs nothing.)
+void KiwiUndo_ArmSelectionSnapshot();
 
 // ── append suppression (KiwiCmd_UndoCancel) ─────────────────────────────────
 // Re-entrant (a depth counter): a cancel that runs inside another cancel cannot

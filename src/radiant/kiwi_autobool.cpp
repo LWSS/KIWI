@@ -12,6 +12,7 @@
 #include <math.h>              // fabs — the cluster phase's volume comparison
 
 #include "kiwi_autobool.h"
+#include "kiwi_csg.h"                 // KIWI-UX (CLEANUP, B-10): KiwiCsg_BrushUsable
 #include "kiwi_command.h"      // KIWI_CMD_AUTO_BOOL + KiwiCmd_UndoBegin / KiwiCmd_UndoCommit
 #include "kiwi_selection.h"    // KiwiSel / Sel_Clear / Sel_BrushLive
 #include "kiwi_selext.h"       // KSELX_TOUCH_EPS
@@ -26,6 +27,12 @@ extern selbrush_t *Brush_MergeList( selbrush_t *brushList );                  //
 extern void        Brush_RemoveFromList( selbrush_t *b );                     // brush.cpp:962 (0x476680)
 extern void        Brush_AddToList2( selbrush_t *b );                         // brush.cpp:921 (0x4765A0)
 extern void        Brush_Free( selbrush_t *b );                               // brush.cpp:993 (0x475BA0)
+// KIWI-UX (CLEANUP, B-28): FILE SCOPE, not block scope.  Round AI shipped a link
+// error from a block-scope extern that MSVC mangled with its enclosing namespace;
+// kiwi_uv.cpp carries the full account.  This is the declaration that used to sit
+// inside KiwiAutoBool_RegisterCommands.
+extern bool        Radiant_RegisterCommand( const char *name, byte vk, byte mods,
+                                            int commandId );                  // mainfrm.cpp:1340
 // selected_brushes is the qe3.h sentinel (qe3.h:1054); iterate it as
 // `for ( b = selected_brushes.next; b != &selected_brushes; b = b->next )` (qe3.h:374).
 
@@ -63,23 +70,10 @@ namespace
     const double KAB_VOLUME_ABS_EPS = 1.0;
 
     // ── validation: CSG_Merge's own, per brush (csg.cpp:589-603) ─────────────
-    // Same three refusals, same reads.  `entity_s_def` IS `entity_s`
-    // (qe3.h `typedef entity_s entity_s_def;`), so this and the ported spelling
-    // `((entity_s_def*)b->owner->def)->eclass->fixedsize` are the same field.
-    bool Usable( const selbrush_t *b )
-    {
-        if ( !b || !b->def )
-            return false;
-        if ( b->patch )                                    // "Cannot add patches."
-            return false;
-        const entity_s *owner = b->owner;
-        if ( !owner || !owner->def )
-            return false;
-        const entity_s *ownerDef = owner->def;
-        if ( !ownerDef->eclass || ownerDef->eclass->fixedsize )
-            return false;                                  // "Cannot add fixed size entities."
-        return true;
-    }
+    // KIWI-UX (CLEANUP, B-10): this body was byte-identical to kiwi_csg.cpp's
+    // CsgUsable; both are KiwiCsg_BrushUsable (kiwi_csg.h) now.  The forwarder
+    // keeps this file's own name at its own call sites.
+    inline bool Usable( const selbrush_t *b ) { return KiwiCsg_BrushUsable( b ); }
 
     const entity_s *OwnerDef( const selbrush_t *b )
     {
@@ -730,20 +724,10 @@ namespace
 // ─── §3 palette predicate ────────────────────────────────────────────────────
 bool KiwiAutoBool_CanExecute()
 {
-    selbrush_t *first = selected_brushes.next;
-    if ( first == &selected_brushes || first->next == &selected_brushes )
-        return false;                                      // needs >= 2
-    const entity_s *ownerDef0 = OwnerDef( first );
-    if ( !ownerDef0 )
-        return false;
-    for ( selbrush_t *b = first; b != &selected_brushes; b = b->next )
-    {
-        if ( !Usable( b ) )
-            return false;
-        if ( OwnerDef( b ) != ownerDef0 )
-            return false;
-    }
-    return true;
+    // KIWI-UX (CLEANUP, B-10): this was the same ">= 2 / all usable / one owner"
+    // walk KiwiCsg_CanMerge runs, with the owner read spelled through a local
+    // OwnerDef() instead of inline.  Same answer, one implementation.
+    return KiwiCsg_SelectionMergeable();
 }
 
 // ─── dispatch + registration ─────────────────────────────────────────────────
@@ -757,7 +741,6 @@ bool KiwiAutoBool_DispatchInstant( unsigned int commandId )
 
 void KiwiAutoBool_RegisterCommands()
 {
-    extern bool Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId );
     // UNBOUND on purpose (vk 0), like KIWI_CMD_MATINFO and KIWI_CMD_FILLET_EDGE.
     // The user's own framing was "might be a bad idea, but we can try it": a verb
     // that rewrites a whole selection's topology does not get a key it can be hit

@@ -42,12 +42,14 @@
 //      editor already has.
 //
 // ── WHAT KIWI TRIMS ─────────────────────────────────────────────────────────
-// KCON_LINE and KCON_POLYLINE, open or closed.  NOT circles or arcs (they are
-// parametric — trimming one means converting it to a polyline, which silently
-// destroys the thing the user drew), and NOT rects (same argument: a trimmed rect
-// is not a rect).  Those are simply not hover candidates, and the HUD says so.
-// A polygon and a spline ARE trimmable, because the store keeps both as
-// KCON_POLYLINE (kiwi_construct.h §16b note).
+// KIWI-UX (CLEANUP, A-3) — EVERY type KiwiCon_VertCount / KiwiCon_VertWorld can
+// walk as a chain of segments, which is every type the store holds: KCON_LINE and
+// KCON_POLYLINE open or closed, AND the parametric ones (circle, arc, rect).
+// Round AF item 4 reversed shakeout H's type refusal by user directive — see
+// kiwi_trim.cpp:77-114 for the argument.  A parametric shape is CONVERTED to a
+// KCON_POLYLINE at its current tessellation, and the conversion is not silent:
+// the HUD warns before the click.  A polygon and a spline were always trimmable,
+// because the store keeps both as KCON_POLYLINE (kiwi_construct.h §16b note).
 //
 // ── THE MATH ────────────────────────────────────────────────────────────────
 // Intersections are 3D, because the store is 3D now (kiwi_construct.h ruling 3).
@@ -62,6 +64,24 @@
 // object's own ends.  That is the whole rule, and it is why the X in the user's
 // picture works: each tail is bounded by the crossing on one side and by an
 // endpoint on the other.
+//
+// ── KIWI-UX (ROUND BL, ITEM 2): …AND ON A DRAWN CHAIN, BY ITS OWN VERTICES ──
+// USER REPORT, verbatim: *"The trim tool still deletes the entire triangle when
+// used."*  For LINE / POLYLINE / RECT — the types whose segments are the edges the
+// user actually placed — the span is ALWAYS clamped to the hovered SEGMENT first,
+// and crossings may only narrow it further.  WHAT THE TICK MARKS IS WHAT DIES: a
+// closed triangle becomes an open two-segment chain, a rect an open three-segment
+// one, and only a bare two-point line (whose one segment IS the object) still goes
+// whole.  The paragraph above therefore describes CIRCLES and ARCS from this round
+// on: their "segments" are tessellation nobody drew, so they keep the arc-between-
+// crossings rule round AF item 4 shipped for exactly them.
+//
+// WHY THE CLAMP HAD TO BECOME AN INVARIANT.  Round BK computed the same segment
+// bounds but only consulted them when the crossing list was EMPTY, and a triangle
+// finished with Enter rather than by clicking its first point is stored as an OPEN
+// chain v0,v1,v2,v0 whose first and last segments share v0 — two self-crossings, at
+// parameters 0 and `total`, which the fallback bounds could not be improved by.
+// The span came out as the whole object and the click deleted the triangle.
 //
 // ── UNDO ────────────────────────────────────────────────────────────────────
 // ONE store-undo snapshot per TRIM CLICK (kiwi_construct.h ruling 2), not one per

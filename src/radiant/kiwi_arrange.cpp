@@ -34,7 +34,7 @@ namespace
     // and this is applied after multiplying back by the segment length, so it is a
     // world distance and it is KCON_ISECT_DIST — the same number that decided the
     // crossing existed in the first place.
-    const float KARR_CUT_MERGE = KCON_ISECT_DIST;
+    const float KARRG_CUT_MERGE = KCON_ISECT_DIST;
 
     // Node welding.  KREG_JOIN_DIST is §8's ONE slop (kiwi_construct.h says so out
     // loud), and using anything else here would mean a loop that welds for the
@@ -56,6 +56,13 @@ namespace
     // longer a free function, because "the weld" is now a property of the group
     // being arranged rather than of the editor's global state.  It is threaded
     // through as a parameter to the two places that consume it.
+    // KIWI-UX (CLEANUP, A-11): deliberately NOT KiwiRegion_FinestEdge.  That
+    // helper walks a CHAIN of consecutive points; `world` here is a list of
+    // INDEPENDENT segments, six floats per entry with both endpoints inside the
+    // entry, so the enumeration is a different question even though the floor,
+    // the tie-break and the KiwiRegion_WeldFor tail below are identical.  Folding
+    // it in would mean measuring one segment's end against the next segment's
+    // start, which is not an edge of anything.
     float ArrangeWeld( const std::vector<float> &world )
     {
         const int n = (int)( world.size() / 6 );
@@ -157,8 +164,8 @@ namespace
             }
             ( *t )[k] = v;
         }
-        // Merge cuts that land within KARR_CUT_MERGE of each other IN WORLD UNITS.
-        const float tol = ( lengthWorld > 1.0e-4f ) ? ( KARR_CUT_MERGE / lengthWorld ) : 1.0f;
+        // Merge cuts that land within KARRG_CUT_MERGE of each other IN WORLD UNITS.
+        const float tol = ( lengthWorld > 1.0e-4f ) ? ( KARRG_CUT_MERGE / lengthWorld ) : 1.0f;
         std::vector<float> out;
         for ( size_t i = 0; i < t->size(); ++i )
         {
@@ -185,7 +192,7 @@ namespace
             if ( sqrtf( dx * dx + dy * dy ) <= weld )
                 return i;
         }
-        if ( n >= KARR_MAX_NODES )
+        if ( n >= KARRG_MAX_NODES )
             return -1;
         nodes->push_back( p[0] );
         nodes->push_back( p[1] );
@@ -295,11 +302,11 @@ bool KiwiArrange_Cells( const int *objects, int count, const kconPlane_t &plane,
             float a[3], b[3];
             if ( !KiwiCon_SegmentWorld( *o, s, a, b ) )
                 break;
-            if ( (int)( world.size() / 6 ) >= KARR_MAX_SEGS )
+            if ( (int)( world.size() / 6 ) >= KARRG_MAX_SEGS )
             {
                 Sys_Printf( "Construction: %i+ coplanar segments — the region "
                             "arrangement is capped at %i and this group is skipped.\n",
-                            KARR_MAX_SEGS, KARR_MAX_SEGS );
+                            KARRG_MAX_SEGS, KARRG_MAX_SEGS );
                 return false;
             }
             for ( int k = 0; k < 3; ++k ) world.push_back( a[k] );
@@ -345,11 +352,11 @@ bool KiwiArrange_Cells( const int *objects, int count, const kconPlane_t &plane,
             }
             if ( Len2( prev, cur ) > weld )
             {
-                if ( (int)frag.size() >= KARR_MAX_EDGES )
+                if ( (int)frag.size() >= KARRG_MAX_EDGES )
                 {
                     Sys_Printf( "Construction: the region arrangement produced more "
                                 "than %i fragments — this group is skipped.\n",
-                                KARR_MAX_EDGES );
+                                KARRG_MAX_EDGES );
                     return false;
                 }
                 seg2_t f;
@@ -373,7 +380,7 @@ bool KiwiArrange_Cells( const int *objects, int count, const kconPlane_t &plane,
         if ( n0 < 0 || n1 < 0 )
         {
             Sys_Printf( "Construction: the region arrangement needs more than %i "
-                        "nodes — this group is skipped.\n", KARR_MAX_NODES );
+                        "nodes — this group is skipped.\n", KARRG_MAX_NODES );
             return false;
         }
         if ( n0 == n1 )
@@ -468,10 +475,10 @@ bool KiwiArrange_Cells( const int *objects, int count, const kconPlane_t &plane,
         if ( area < KREG_MIN_AREA )
             continue;
 
-        if ( (int)outCells->size() >= KARR_MAX_CELLS )
+        if ( (int)outCells->size() >= KARRG_MAX_CELLS )
         {
             Sys_Printf( "Construction: more than %i enclosed regions on one plane — "
-                        "the rest are ignored.\n", KARR_MAX_CELLS );
+                        "the rest are ignored.\n", KARRG_MAX_CELLS );
             break;
         }
         outCells->push_back( cell );

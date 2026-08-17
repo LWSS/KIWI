@@ -61,6 +61,7 @@
 #include <vector>
 
 struct selbrush_t;
+struct patchMesh_t;
 
 // ── selection kinds + the 1–5 mode-filter mask ───────────────────────────────
 enum sel_kind_t
@@ -116,11 +117,49 @@ bool        Sel_ItemEqual( const sel_item_t &a, const sel_item_t &b );
 // abandoned on the next selection generation change anyway.
 bool Sel_BrushLive( const selbrush_t *b );
 
+// ── KIWI-UX (CLEANUP, A-14): the patch control-grid bound, named ─────────────
+// `patchMesh_t::ctrl` is declared `drawVert_t ctrl[16][16]` (qe3.h:749), so a
+// width or height outside 1..16 means the def is not a usable patch and indexing
+// it would walk off the array.  The bare literal 16 was spelled at two sites
+// (kiwi_validity.cpp's baseline capture, kiwi_transform.cpp's VertexPos) with no
+// name and no derivation; both now ask this.  It lives HERE rather than in
+// kiwi_validity.h because DESIGN NOTE 3 above already owns the
+// ctrl[col][row] indexing scheme, and because every asker already includes this
+// header (kiwi_validity.cpp is the one that did not — one added include).
+#define KIWI_PATCH_MAX_DIM 16
+bool Patch_DimsSane( const patchMesh_t *pm );
+
 sel_item_t  Sel_MakeObject( selbrush_t *b );
 sel_item_t  Sel_MakeFace  ( selbrush_t *b, int faceIndex );
 sel_item_t  Sel_MakeEdge  ( selbrush_t *b, int faceIndex, int edgeIndex );
 sel_item_t  Sel_MakeVertex( selbrush_t *b, int faceIndex, int vertIndex );
 sel_item_t  Sel_MakePatchPoint( selbrush_t *b, int ctrlIndex );
+
+// ── KIWI-UX (CLEANUP, A-13 / C-49): resolving an item to world geometry ──────
+// ONE spelling each of the two questions that were written out four times apiece
+// with four different guard sets (kiwi_hover, kiwi_snap, kiwi_conselect,
+// kiwi_transform for the edge; kiwi_hover, kiwi_transform, kiwi_selconv,
+// kiwi_boxselect for the vertex).  Both carry the UNION of the guards those
+// copies had, so no site loses a check:
+//   * the def, its face array and faceIndex against def->faceCount;
+//   * the winding, and numpoints inside 1..MAX_POINTS_ON_WINDING (kiwi_conselect
+//     and kiwi_selconv had this bound; the others did not);
+//   * Patch_DimsSane on the control grid, and col/row inside it;
+//   * the edge / vertex ordinal against numpoints.
+//
+// `checkLive` is the ONE guard that is not free: Sel_BrushLive walks the display
+// lists, so a per-frame loop over the selection pays O(sel * brushes) for it —
+// the same cost DominantKind's own checkLive parameter exists to let a caller
+// decline (kiwi_transform.cpp).  It defaults to the SAFE answer; the loop sites
+// that already test liveness themselves, or that never held the pointer across a
+// frame, pass false explicitly and say why at the call site.
+//
+// Sel_EdgeEnds additionally refuses an item whose kind is not SEL_EDGE (the
+// kiwi_conselect copy did).  Sel_ItemWorldPos does NOT test kind — none of its
+// four copies did, and its callers select the arm by kind before calling.
+bool Sel_EdgeEnds   ( const sel_item_t &it, float outA[3], float outB[3],
+                      bool checkLive = true );
+bool Sel_ItemWorldPos( const sel_item_t &it, float out[3], bool checkLive = true );
 
 // ── the global selection + the pick-time mode mask ───────────────────────────
 // KiwiSel() is THE accessor; it guarantees any pending legacy change has been
@@ -135,7 +174,6 @@ bool Sel_Contains( const selection_t &sel, const sel_item_t &item );
 bool Sel_Add     ( selection_t &sel, const sel_item_t &item );   // true if newly added
 bool Sel_Remove  ( selection_t &sel, const sel_item_t &item );   // true if it was present
 bool Sel_Toggle  ( selection_t &sel, const sel_item_t &item );   // true if now selected
-int  Sel_CountOfKind( const selection_t &sel, sel_kind_t kind );
 
 // ── the two crossings ────────────────────────────────────────────────────────
 // Push KiwiSel() into the legacy globals so the ported ops (hide, texture apply,

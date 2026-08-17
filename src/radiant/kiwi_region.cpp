@@ -70,17 +70,23 @@
 #include "stdafx.h"
 #include "qe3.h"
 #include "mainfrm.h"                // camera_s
+#include <imgui/imgui.h>            // ROUND BL — the camera-overlay fill route
 #include <gfx_d3d/r_gfx.h>          // GfxColor
 #include <gfx_d3d/r_material.h>     // Material
 #include <gfx_d3d/r_rendercmds.h>   // MaterialTechniqueType, TECHNIQUE_UNLIT
 
 #include "kiwi_region.h"
 #include "kiwi_arrange.h"           // ROUND K — PASS 3, the planar arrangement
+#include "kiwi_camera.h"            // ROUND BK — KiwiCam_Ortho (the winding-side rule)
 #include "kiwi_construct.h"
-#include "kiwi_lines.h"             // ROUND AA — KiwiTris_OrientToEye (TRAP 3)
+// KIWI-UX (ROUND BK, ITEM 4): kept for the TRAP notes this file cites, not for a
+// call — the fill left the kiwi_lines emitter family for camwnd.cpp's own
+// (Cam_DrawWindingTinted, externed below).
+#include "kiwi_lines.h"             // TRAPs 3-5 (the fill's four-round history)
 #include "kiwi_pick.h"
 #include "kiwi_validity.h"          // ROUND R — KVALID_PLANE_DOT, the §19 V5 threshold
 #include "kiwi_units.h"             // ROUND AF, ITEM 5 — KiwiUnits_GridSpacingWorld
+#include "kiwi_vec.h"     // KIWI-UX (CLEANUP, A-15): the one spelling of Dot3/Sub3/...
 
 #include <math.h>
 #include <vector>           // ROUND AF, ITEM 5 - the gap report scratch buffer
@@ -89,9 +95,12 @@
 // ── ported entry points (verified against their definitions) ────────────────
 extern int   Sys_Printf( const char *fmt, ... );                         // win_qe3.cpp
 extern int   g_nUpdateBits;                                              // 0x25D5A74 (mainfrm.cpp)
-// ROUND R — the fill's eye nudge needs the view normal.  camwnd.cpp:152
-// `camera_s *Ed_Camera()`; `camera_s` comes from mainfrm.h, included above.
-extern camera_s *Ed_Camera();                                            // camwnd.cpp:152
+// ROUND R — the fill's eye nudge needs the view normal.  `camera_s` comes from
+// mainfrm.h, included above.
+// KIWI-UX (CLEANUP, B-6): it returns &g_camwndState.camera and NEVER returns NULL
+// (contract stated at camwnd.cpp:148-154), so the unguarded deref in the fill pass
+// is correct and a `!c` guard there would be dead code.
+extern camera_s *Ed_Camera();                                            // camwnd.cpp:156
 extern char  Byte4PackPixelColor( float *from, GfxColor *out );          // 0x402ac0
 // R_AddCmdSetMaterialColor comes from r_rendercmds.h (declared __cdecl there).
 extern void  __cdecl R_AddRenderCmdDrawTris(
@@ -103,6 +112,18 @@ extern void  __cdecl R_AddRenderCmdDrawTris(
 // fill pass can NAME the silent drop instead of counting past it.  Definition at
 // r_rendercmds.cpp (KISAK_RADIANT block immediately above R_GetCommandBuffer).
 extern int   __cdecl R_Ed_CmdBufferHeadroom();                           // r_rendercmds.cpp
+// ── KIWI-UX (ROUND BK, ITEM 4): THE DONOR EMITTER ───────────────────────────
+// camwnd.cpp's own translucent world-space polygon draw — the function the SKY
+// FILM is drawn with (camwnd.cpp's sky see-through arm calls Cam_DrawFaceTinted,
+// which is now three lines over this).  Signature copied VERBATIM from the
+// definition; `pts` is the polygon's world points, `n` its plane normal, `bgra`
+// the packed per-vertex colour, `push` the displacement along `n`.
+//   camwnd.cpp:1157  void Cam_DrawWindingTinted( const float (*pts)[3], int nv,
+//                        const float *n, Material *mtl, uint bgra, float push,
+//                        MaterialTechniqueType tech )
+extern void  Cam_DrawWindingTinted( const float ( *pts )[3], int nv, const float *n,
+                                    Material *mtl, uint bgra, float push,
+                                    MaterialTechniqueType tech );        // camwnd.cpp:1157
 
 namespace
 {
@@ -127,10 +148,6 @@ namespace
     // region that forms AND is selected still reads its formation flash first.
     const float KREG_SELECTED[4] = { 0.82f, 0.92f, 1.00f, 0.46f };
 
-    inline float Dot3( const float *a, const float *b )
-    {
-        return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-    }
 
     inline float Cross2( const float *o, const float *a, const float *b )
     {
@@ -272,21 +289,13 @@ namespace
     // above KREG_JOIN_DIST — the bound the weld may not exceed (kiwi_region.h
     // A WELD MAY NEVER EXCEED THE GEOMETRY IT IS WELDING).  Returns 0 when the
     // loop has no such edge at all, which the accessor reads as "no bound".
+    // KIWI-UX (CLEANUP, A-11): the body is KiwiRegion_FinestEdge now — this is
+    // the plane-space CLOSED-loop spelling of it, and kiwi_conselect.cpp's Join
+    // is the world-space open-or-closed one.
     float FinestLoopEdge( const std::vector<float> &pts )
     {
-        const int n = PtCount( pts );
-        float best = 0.0f;
-        for ( int i = 0, j = n - 1; i < n; j = i++ )
-        {
-            const float du = Pt( pts, i )[0] - Pt( pts, j )[0];
-            const float dv = Pt( pts, i )[1] - Pt( pts, j )[1];
-            const float d  = sqrtf( du * du + dv * dv );
-            if ( d <= KREG_JOIN_DIST )
-                continue;                    // degenerate — the weld's own business
-            if ( best <= 0.0f || d < best )
-                best = d;
-        }
-        return best;
+        return KiwiRegion_FinestEdge( pts.empty() ? 0 : &pts[0],
+                                      PtCount( pts ), 2, true );
     }
 
     // ═════════════════════════════════════════════════════════════════════════
@@ -1335,11 +1344,12 @@ void KiwiRegion_DrawFills( int highlightIndex )
     // be answered ON THE USER'S MACHINE — which means the instrument has to be
     // the deliverable.
     //
-    // WHAT WAS WRONG WITH THE OLD ONE (D-AL6, and the brief's own complaint):
-    // `nDrawn` incremented AFTER R_AddRenderCmdDrawTris, which returns void and
-    // drops silently.  It could only ever see derivation-side failures, and it
-    // reported nothing for a store with NO regions at all — the one state with
-    // zero instrumentation anywhere in the subsystem.
+    // WHAT WAS WRONG WITH THE OLD ONE (D-AL6, and the brief's own complaint): it
+    // counted submits AFTER R_AddRenderCmdDrawTris, which returns void and drops
+    // silently.  It could only ever see derivation-side failures, and it reported
+    // nothing for a store with NO regions at all — the one state with zero
+    // instrumentation anywhere in the subsystem.  (KIWI-UX (CLEANUP, B-25): that
+    // counter outlived the fix as a write-only duplicate of `nFills` and is gone.)
     //
     // WHAT THIS ONE DOES INSTEAD: it counts TRIANGLES SUBMITTED, computed BEFORE
     // the submit call, and it threads a GATE NAME through every early-out so the
@@ -1393,9 +1403,17 @@ void KiwiRegion_DrawFills( int highlightIndex )
     // every region's centroid, and doing it per region would make the fill draw
     // quadratic in the region count for a value that cannot change mid-pass.
     //
-    // ROUND AG, ITEM 1: the selection is a SET now, so this resolves the whole set
-    // once into a flag array rather than asking KiwiRegion_IsSelected per region
-    // (which would reintroduce exactly the quadratic the line above avoids).
+    // ROUND AG, ITEM 1: the selection is a SET now, so this resolves it into a flag
+    // array once rather than asking KiwiRegion_IsSelected per region.
+    //
+    // KIWI-UX (CLEANUP, B-4) — WHAT THIS DOES AND DOES NOT COST.  It removes the
+    // per-REGION factor only.  KiwiRegion_SelectedCount (:1281) and every
+    // KiwiRegion_SelectedAt (:1290) call still run ResolveCentroid (:1199) over
+    // every stored centroid, and ResolveCentroid walks every region — so the block
+    // below is O(sel^2 * regions) per drawn frame, not linear.  Collapsing it needs
+    // ONE accessor that resolves the whole centroid list in a single
+    // O(sel * regions) pass (and that pass must keep ResolveCentroid's `d <= bestD`
+    // tie-break, which takes the LAST equal-distance match).
     std::vector<char> selFlags( regions.size(), 0 );
     {
         const int selN = KiwiRegion_SelectedCount();
@@ -1407,13 +1425,14 @@ void KiwiRegion_DrawFills( int highlightIndex )
         }
     }
 
-    // One draw per region.  A region is capped at KREG_MAX_LOOP vertices, so the
-    // fan is bounded and these buffers can be exact rather than guarded.
-    static float    s_xyzw  [KREG_MAX_LOOP][4];
-    static float    s_normal[KREG_MAX_LOOP][3];
-    static float    s_st    [KREG_MAX_LOOP][2];
-    static float    s_color [KREG_MAX_LOOP];
-    static uint16_t s_idx   [( KREG_MAX_LOOP - 2 ) * 3];
+    // ROUND BK, ITEM 4: the loop's world points, handed to the donor route one
+    // CONVEX PIECE at a time.  A region is capped at KREG_MAX_LOOP vertices, so
+    // both buffers are bounded and can be exact rather than guarded.  The PIECE
+    // buffer is bounded by the DONOR's own array size instead — see the cap check
+    // in the piece loop below.
+    const int KREG_DONOR_MAX_PTS = 64;           // == CAM_MAXFACEVERTS, camwnd.cpp:526
+    static float s_world[KREG_MAX_LOOP][3];      // the loop, in world space
+    static float s_piece[KREG_MAX_LOOP][3];      // one convex piece of it
 
     // ── KIWI-UX (ROUND AM, ITEM 1): GATE 4/5 — THE MATERIAL AND ITS TECHNIQUE.
     // R_AddRenderCmdDrawTris' FIRST silent drop: `Material_GetTechnique(handle,
@@ -1453,7 +1472,14 @@ void KiwiRegion_DrawFills( int highlightIndex )
     // It reports only the ANOMALY (regions exist, none of them reached the
     // renderer) and only once per store generation, so a normal frame costs two
     // increments and a healthy editor never prints at all.
-    int nTooFew = 0, nTooMany = 0, nNoTris = 0, nDrawn = 0;
+    int nTooFew = 0, nTooMany = 0, nNoTris = 0;
+
+    // KIWI-UX (ROUND BK, ITEM 4): the sample the success line below reports.
+    int   emitSample       = -1;
+    int   emitSamplePieces = 0;
+    int   emitSampleVerts  = 0;
+    float emitSampleV[3]    = { 0.0f, 0.0f, 0.0f };
+    float emitSampleRgba[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
 
     for ( size_t r = 0; r < regions.size(); ++r )
     {
@@ -1481,17 +1507,18 @@ void KiwiRegion_DrawFills( int highlightIndex )
             continue;
         }
 
-        std::vector<int> tris;
-        if ( !KiwiRegion_Triangulate( reg.pts, &tris ) )
+        // ── KIWI-UX (ROUND BK, ITEM 4): CONVEX PIECES, NOT AN INDEX LIST ────
+        // The donor route (camwnd.cpp Cam_DrawWindingTinted) takes ONE CONVEX
+        // polygon and fans it, because that is what a brush face is.  The region
+        // walker's loop may be concave, so it is decomposed with the machinery the
+        // EXTRUDE already trusts for exactly this reason (KiwiRegion_ConvexPieces,
+        // Hertel-Mehlhorn over the same ear-clip).  A convex loop comes back as one
+        // piece, so the common case is still one draw per region.
+        std::vector< std::vector<int> > pieces;
+        if ( !KiwiRegion_ConvexPieces( reg.pts, &pieces ) || pieces.empty() )
         {
             ++nNoTris;
             if ( !gate ) gate = "TRIANGULATE (the ear-clip refused the loop)";
-            continue;
-        }
-        if ( tris.empty() || (int)tris.size() > ( KREG_MAX_LOOP - 2 ) * 3 )
-        {
-            ++nNoTris;
-            if ( !gate ) gate = "TRIANGULATE (empty or over the index cap)";
             continue;
         }
 
@@ -1514,154 +1541,146 @@ void KiwiRegion_DrawFills( int highlightIndex )
         }
         GfxColor packed;
         Byte4PackPixelColor( rgba, &packed );
-        const float packedAsFloat = *(float *)&packed.packed;   // bit-cast, as the ported batcher does
 
-        // ── KIWI-UX (ROUND AM, ITEM 1) — THE ONE TRANSLUCENT PROBE ──────────
-        // USER REPORT, verbatim: "Still no light blue face on extrudable line
-        // clusters."  Fourth round.  Rounds AK and AL both moved the fill's
-        // NORMAL and both missed, and this round found the report is not alone:
-        // item 2 ("hover highlighting when hovering a face in mode 3") and item 4
-        // ("gizmo arrows are still not filled in") are the SAME defect on two
-        // other shapes — a face's only channel IS a fill (kiwi_hover.cpp's empty
-        // `case SEL_FACE:`), and the gizmo heads have had real triangles since
-        // round AK.  Three shapes, one call, one bracket.
+        // ══════════════════════════════════════════════════════════════════
+        //  KIWI-UX (ROUND BK, ITEM 4) — THE SKY FILM'S BRACKET, VERBATIM.
+        // ══════════════════════════════════════════════════════════════════
+        // The rule this replaces (CLEANUP B-19) was "submit on the pass-level
+        // NEUTRAL bracket, take no per-region override", copied from the boolean
+        // operand preview.  It has now been shipped for three rounds and the fill
+        // has never appeared, so this round takes its state from the OTHER
+        // confirmed-visible translucent fill instead — the round-BC sky film.
         //
-        // The measurement that names it is r_rendercmds.cpp's own (:1913-1930):
-        // under a NEUTRAL MATERIAL_COLOR this editor's tools shaders came back at
-        // "~0.32x".  A dim line is still a line; a 0.22-alpha fill at 0.32x is
-        // nothing.  kiwi_lines.h TRAP 5 carries the derivation, the risk and why
-        // exactly ONE translucent fill takes the override this round — which is
-        // what RADIANT_KNOWN_ISSUES round AL asked for in as many words.
+        // WHAT THE SKY FILM ACTUALLY RUNS UNDER, read off camwnd.cpp rather than
+        // assumed: the world face loop reaches it with `ecol` from
+        // Cam_EditorMaterialColor, which SEEDS `out[3] = 1.0f` (camwnd.cpp:612-614)
+        // and whose "sky" row overwrites rgb only — so MATERIAL_COLOR is
+        // { r, g, b, **1.0** }, a FLAT COLOUR OVERRIDE, and the film's translucency
+        // comes entirely from the packed PER-VERTEX alpha (0.30).
         //
-        // Per REGION rather than per pass because the colour is per region (the
-        // selection state and the formation flash both move it), and one extra
-        // RC_SET_MATERIAL_COLOR per region is the same cost the ported line path
-        // pays per colour run.
-        //
-        // ══════════════════════════════════════════════════════════════════════
-        //  KIWI-UX (ROUND AQ, ITEM 2) — THE PROBE CAME BACK, AND IT SAID NO.
-        // ══════════════════════════════════════════════════════════════════════
-        // The KiwiTris_FillFlatColor( rgba ) call that used to be on this line was
-        // round AM's ONE TRANSLUCENT PROBE, taken on the "~0.32x neutral bracket"
-        // model (kiwi_lines.h TRAP 5).  The probe has now been run by the user and
-        // it FALSIFIES that model twice over:
-        //   * the fill is still not visible, so the neutral bracket was not what
-        //     was suppressing it; and
-        //   * it did not come back as an opaque light-blue slab either, which is
-        //     the OTHER outcome TRAP 5 predicted.  It came back as nothing at all.
-        // And the control experiment was in the tree the whole time: the BOOLEAN's
-        // red operand preview (kiwi_boolean.cpp FillBrush, :449) is confirmed
-        // visible across many sessions, and it draws on the NEUTRAL bracket, with
-        // per-vertex colour, at alpha 0.22 — the SAME alpha this fill uses
-        // (KREG_FILL[3], :116 == KBOOL_DIFF_RGBA[3], kiwi_boolean.cpp:77).  A route
-        // that carries a visible red fill at 0.22 cannot be the reason a light-blue
-        // one at 0.22 is invisible.
-        //
-        // So this round stops probing and COPIES THE CONTROL.  The flat override is
-        // withdrawn and the pass-level neutral bracket opened at the top of this
-        // function (the one the ported selected-face fill uses) now covers every
-        // region, which is byte-for-byte the boolean's submission state.  The
-        // remaining differences between the two emitters, and the pass-location one
-        // this round also removes, are tabulated in RADIANT_UX_DESIGN §69.
-        // ══════════════════════════════════════════════════════════════════════
+        // THAT SETTLES kiwi_lines.h TRAP 5's ONE OPEN QUESTION, by demonstration
+        // rather than by probe: `.w == 1` does NOT make a fill opaque.  The sky
+        // film is a flat-override draw at vertex alpha 0.30 and it is see-through
+        // on the user's machine — which is the whole reason round BC shipped it.
+        // So the region fill takes the same recipe: rgb into MATERIAL_COLOR at
+        // w == 1, the same rgb into the per-vertex colour with the REGION's alpha.
+        const float flat[4] = { rgba[0], rgba[1], rgba[2], 1.0f };
+        R_AddCmdSetMaterialColor( flat );
+
+        // The nudge is along the REGION PLANE's normal now, not the view axis,
+        // because the donor route applies it as `p + n*push` (its `push` argument,
+        // the ported selected-face overlay's own displacement).  Signed at the eye
+        // so a region viewed from behind is still lifted TOWARD the viewer — which
+        // is what round R's `-vpn` was reaching for and is the same answer without
+        // making the geometry a camera quantity.
+        float nrm[3] = { reg.plane.normal[0], reg.plane.normal[1], reg.plane.normal[2] };
+        {
+            float mid[3];
+            KiwiCon_PlaneToWorld( reg.plane, Pt( reg.pts, 0 ), mid );
+            const float toEye[3] = { c->origin[0] - mid[0],
+                                     c->origin[1] - mid[1],
+                                     c->origin[2] - mid[2] };
+            // In ORTHO there is no eye POINT (kiwi_lines.h, round AL, ITEM 2), so
+            // the side is decided by the view DIRECTION exactly as the winding rule
+            // is: the face pointing at the viewer is the one with n . vpn < 0.
+            const float side = KiwiCam_Ortho() ? -Dot3( nrm, c->vpn ) : Dot3( nrm, toEye );
+            if ( side < 0.0f )
+                for ( int k = 0; k < 3; ++k )
+                    nrm[k] = -nrm[k];
+        }
 
         for ( int i = 0; i < n; ++i )
         {
+            // KIWI-UX (ROUND BK, ITEM 4): the bare world point.  The KREG_FILL_NUDGE
+            // displacement is now the donor route's own `push` argument (applied
+            // along `nrm`, at the call below), and the per-vertex NORMAL and ST are
+            // the donor's too.
             float w[3];
             KiwiCon_PlaneToWorld( reg.plane, Pt( reg.pts, i ), w );
-            // KIWI-UX (ROUND R): pull the fan toward the eye by KREG_FILL_NUDGE, so
-            // a region drawn ON a brush face is not decided pixel-by-pixel against
-            // that face's own depth.  See kiwi_region.h for the report and for why
-            // this is kiwi_hover.cpp's number.  Along the VIEW normal rather than
-            // the region normal: a region seen from BEHIND (its normal pointing
-            // away) would otherwise be nudged further under the surface.
-            // KIWI-UX (ROUND AA, ITEM 2): the tail of this sentence used to read
-            // "and the fill is visible from both sides".  It was NOT — see the
-            // KiwiTris_OrientToEye call below.  The nudge argument is unaffected
-            // and stands as written.
-            s_xyzw[i][0] = w[0] - c->vpn[0] * KREG_FILL_NUDGE;
-            s_xyzw[i][1] = w[1] - c->vpn[1] * KREG_FILL_NUDGE;
-            s_xyzw[i][2] = w[2] - c->vpn[2] * KREG_FILL_NUDGE;
-            s_xyzw[i][3] = 1.0f;
-            // ── KIWI-UX (ROUND AK, ITEM 1) — THE FILL'S NORMAL IS THE VIEW'S ──
-            // USER REPORT, verbatim: "construction faces that can be extruded from
-            // still lack their light blue background on the face.  It worked a few
-            // days ago sometimes, but now never shows - not even from the backside."
-            //
-            // This line used to read `reg.plane.normal[]`, and THAT WAS THE ONLY
-            // THING SEPARATING THIS FILL FROM EVERY OTHER FILL IN THE KIWI LAYER.
-            // The whole rest of the path was audited end to end first and is sound:
-            // KiwiRegion_Triangulate cannot be failing on a region that extrudes
-            // (a CONVEX region skips it in kiwi_extrude.cpp:934-939 but cannot fail
-            // it either — AcceptLoop:336 already ran the identical self-intersect
-            // test, and a convex CCW loop always has an ear; a CONCAVE one reaches
-            // it through KiwiRegion_ConvexPieces:1607 and has already proven it
-            // succeeds).  EnsureBuilt is not re-entrant here (it commits s_builtFor
-            // and s_dirty BEFORE returning, so the nested call from ResolveCentroid
-            // short-circuits).  KiwiCon_Generation only moves inside Touch(), never
-            // from a draw.  KiwiHover_DrawWorld's MATERIAL_COLOR brackets are
-            // balanced and this pass re-seeds its own anyway.  The arrangement's
-            // cells arrive CCW (kiwi_arrange.cpp:459-469 keeps only positive area).
-            // So the geometry was reaching R_AddRenderCmdDrawTris and not appearing.
-            //
-            // WHAT THE NORMAL DOES: RB_DrawTriangles_Internal packs it per vertex
-            // through R_SetVertex4dWithNormal (rb_backend.cpp:186-217), and the
-            // editor's tools techniques are the vertcol_SHADED family
-            // (r_rendercmds.cpp:1944-1947 names the resolved technique).  A fill
-            // whose normal is locked to its own plane therefore presents the same
-            // fixed normal from BOTH sides — which is exactly the reported
-            // symptom, and exactly what round AA's KiwiTris_OrientToEye CANNOT fix,
-            // because that call reorders INDICES and never touches this array.
-            // A plane-locked normal also explains "only sometimes": it made the
-            // result a function of which way the sketch's plane happened to face.
-            //
-            // kiwi_hover.cpp:206-209 wrote the rule down when it hit the same
-            // question and answered it the other way: "the fan is a screen-facing
-            // decal ... reading face->plane would need the def here for no gain".
-            // kiwi_extrude.cpp:213-215 agrees.  This file is now the third.
-            //
-            // ── KIWI-UX (ROUND AL, ITEM 1) — AND `-vpn` WAS ALSO WRONG ──────
-            // USER REPORT, verbatim: "the blue face only shows up at steep
-            // angles.  Fix this!"  Round AK's half of the diagnosis was right —
-            // the normal is the channel — and its choice of REPLACEMENT was not.
-            // `-vpn` makes the shading term a function of the camera's PITCH, so
-            // the fill lights up looking down and goes out as the view levels,
-            // which is the report word for word, including the part depth cannot
-            // explain (the fill is missing where the region hangs off the wall
-            // over open air).  The two rounds' evidence together pin the term
-            // down to a fixed, roughly world-UP fake light; the whole derivation
-            // and why a CONSTANT is the only safe answer is kiwi_lines.h TRAP 4,
-            // and the binary's own fill batcher (brush.cpp:5915) writes a fixed
-            // world normal for the same reason.
-            KiwiTris_FillNormal( s_normal[i] );
-            s_st[i][0] = 0.0f;
-            s_st[i][1] = 0.0f;
-            s_color[i] = packedAsFloat;
+            s_world[i][0] = w[0];
+            s_world[i][1] = w[1];
+            s_world[i][2] = w[2];
         }
-        for ( size_t k = 0; k < tris.size(); ++k )
-            s_idx[k] = (uint16_t)tris[k];
+        // ── THE THREE CHANNELS THIS ROUND HANDED TO THE DONOR, AND THE ROUNDS
+        //    THAT OWNED THEM (kept short; the full arguments are in
+        //    RADIANT_UX_DESIGN §64/§65/§66/§69 and kiwi_lines.h TRAPs 3-5) ──────
+        //   * POSITION.  Round R nudged the fan back along `-vpn` by
+        //     KREG_FILL_NUDGE so a region drawn ON a brush face is not decided
+        //     pixel-by-pixel against that face's depth.  The nudge survives; it is
+        //     along the (viewer-oriented) PLANE normal now, which is what the
+        //     donor's `push` means and is no longer a camera quantity.
+        //   * NORMAL.  Round AK moved it from the region plane to `-vpn`, round AL
+        //     to KiwiTris_FillNormal's constant +Z, and the fill was invisible
+        //     under all three.  It is the region's own plane normal again — the
+        //     value BOTH visible fills in this editor write (kiwi_boolean.cpp
+        //     FillBrush, camwnd.cpp's sky film) and the value the binary's own
+        //     batcher writes (brush.cpp Face_AddWindingToTriBatch, 0x47b86a).
+        //   * ST.  Was (0,0) on every kiwi fill; the donor writes a real planar
+        //     1/128 projection, so a colorMap sample has somewhere to land.
 
-        // KIWI-UX (ROUND AA, ITEM 2) — THE REPORTED BUG.
+        // ── KIWI-UX (ROUND AA, ITEM 2) — WINDING, and where it lives now ────
         // USER REPORT, verbatim: "the light blue construction lineface isn't
         // rendering unless you're facing the other way (see pics).  Fix this."
-        // KiwiRegion_Triangulate's contract is "the input must be CCW"
-        // (kiwi_region.h), and the loop is CCW in the REGION PLANE's basis — so
-        // the emitted winding is locked to reg.plane and has nothing to do with
-        // where the eye is.  White_tools culls back faces (kiwi_lines.h TRAP 3),
-        // so exactly one side of every region drew.  Orient the fan at the eye,
-        // the same answer round Y gave the cut disc.
-        KiwiTris_OrientToEye( &s_xyzw[0][0], 4, s_idx, (int)tris.size(), c->origin );
-
+        // The loop is CCW in the REGION PLANE's basis, so the emitted winding was
+        // locked to reg.plane and had nothing to do with where the eye is, and
+        // white_tools culls back faces (kiwi_lines.h TRAP 3) — exactly one side of
+        // every region drew.  Round AA answered that with KiwiTris_OrientToEye,
+        // which rewrites the INDEX buffer.  The donor route owns its own fan, so
+        // the answer moves to the VERTEX ORDER instead: a piece whose plane normal
+        // points away from the viewer is emitted REVERSED, which is the same fix
+        // one level up and needs no index surgery.
+        //
         // ── KIWI-UX (ROUND AM, ITEM 1): GATE 8 — THE COMMAND BUFFER ─────────
         // R_AddRenderCmdDrawTris' SECOND silent drop.  Its byte cost is the exact
         // arithmetic r_rendercmds.cpp:2156-2163 does: a 16-byte header, then
         // 16+12+4+8 bytes of vertex streams per vertex, then a 2-byte-per-index
         // list rounded up to an even count.  Compared against the same sizeLimit
         // R_GetCommandBuffer will compute, BEFORE the call, so the drop is named
-        // instead of inferred.
+        // instead of inferred.  Asked per PIECE now, because a concave region is
+        // more than one draw.
+        const bool flip = ( Dot3( nrm, reg.plane.normal ) < 0.0f );
+        for ( size_t pi = 0; pi < pieces.size(); ++pi )
         {
-            const int ic    = (int)tris.size();
-            const int bytes = 16 + ( 16 + 12 + 4 + 8 ) * n + 2 * ( ( ic + 1 ) & ~1 );
+            const std::vector<int> &poly = pieces[pi];
+            const int pn = (int)poly.size();
+            // KREG_DONOR_MAX_PTS is the donor's own stack-array bound
+            // (CAM_MAXFACEVERTS, camwnd.cpp:526).  Over it Cam_DrawWindingTinted
+            // returns SILENTLY, which is precisely the class of drop this pass
+            // exists to name, so it is checked HERE with a gate name of its own.
+            // Hertel-Mehlhorn merges only while the result stays convex, so a piece
+            // this large needs a 64-corner convex region and is not reachable from
+            // the KCON tools — but "not reachable" is how the last five rounds of
+            // this bug were argued.
+            if ( pn < 3 || pn > KREG_DONOR_MAX_PTS )
+            {
+                ++nNoTris;
+                if ( !gate ) gate = ( pn < 3 )
+                    ? "TRIANGULATE (a convex piece has fewer than 3 corners)"
+                    : "TRIANGULATE (a convex piece is over the donor route's 64-vertex cap)";
+                continue;
+            }
+            bool badIndex = false;
+            for ( int i = 0; i < pn; ++i )
+            {
+                const int src = poly[ flip ? ( pn - 1 - i ) : i ];
+                if ( src < 0 || src >= n )
+                {
+                    badIndex = true;
+                    break;
+                }
+                s_piece[i][0] = s_world[src][0];
+                s_piece[i][1] = s_world[src][1];
+                s_piece[i][2] = s_world[src][2];
+            }
+            if ( badIndex )
+            {
+                ++nNoTris;
+                if ( !gate ) gate = "TRIANGULATE (a convex piece indexed off the loop)";
+                continue;
+            }
+
+            const int ic    = ( pn - 2 ) * 3;
+            const int bytes = 16 + ( 16 + 12 + 4 + 8 ) * pn + 2 * ( ( ic + 1 ) & ~1 );
             if ( R_Ed_CmdBufferHeadroom() < bytes )
             {
                 if ( !gate )
@@ -1669,17 +1688,67 @@ void KiwiRegion_DrawFills( int highlightIndex )
                            "dropped silently inside R_GetCommandBuffer)";
                 continue;
             }
+
+            // ── THE DONOR CALL.  Literally the function the SKY FILM is drawn
+            //    with (camwnd.cpp Cam_DrawWindingTinted, reached from
+            //    Cam_DrawFaceTinted at camwnd.cpp's sky see-through arm): same
+            //    material, same TECHNIQUE_UNLIT, same planar 1/128 ST, same plane
+            //    normal per vertex, same fan, same one R_AddRenderCmdDrawTris.
+            Cam_DrawWindingTinted( (const float (*)[3])s_piece, pn, nrm,
+                                   g_qeglobals.d_white, (uint)packed.packed,
+                                   KREG_FILL_NUDGE, TECHNIQUE_UNLIT );
+            ++nFills;
+            nTrisSub += pn - 2;
         }
 
-        R_AddRenderCmdDrawTris( g_qeglobals.d_white, TECHNIQUE_UNLIT,
-                                (short)tris.size(), s_idx, (short)n,
-                                s_xyzw, s_normal, s_color, s_st );
-        ++nDrawn;
-        ++nFills;
-        nTrisSub += (int)tris.size() / 3;      // counted from the SUBMITTED index list
+        // The FIRST region that reached the renderer this pass, kept for the one
+        // loud line below (printed after the loop, so it cannot flip-flop between
+        // regions frame after frame).
+        if ( emitSample < 0 && nFills > 0 )
+        {
+            emitSample       = (int)r;
+            emitSamplePieces = (int)pieces.size();
+            emitSampleVerts  = n;
+            emitSampleV[0]   = s_world[0][0];
+            emitSampleV[1]   = s_world[0][1];
+            emitSampleV[2]   = s_world[0][2];
+            for ( int k = 0; k < 4; ++k )
+                emitSampleRgba[k] = rgba[k];
+        }
     }
 
     R_AddCmdSetMaterialColor( s_white );
+
+    // ══════════════════════════════════════════════════════════════════════════
+    //  KIWI-UX (ROUND BK, ITEM 4) — THE ONE LOUD LINE THE BRIEF ASKED FOR
+    // ══════════════════════════════════════════════════════════════════════════
+    // Six rounds of instrumentation have produced no report because every one of
+    // them printed only on FAILURE, and this pass has never failed — the geometry
+    // has always reached the renderer.  So this one prints on SUCCESS: once per
+    // store generation (i.e. once per sketch edit, not sixty times a second) it
+    // names the route, the piece count, the vertex count, the first world vertex
+    // and the colour.  If the fill is still invisible after the route swap, the
+    // user's next report carries the numbers that pin it — and if the line does not
+    // appear at all, then the pass is not running, which is a different bug and one
+    // this line finally distinguishes.
+    if ( emitSample >= 0 )
+    {
+        static unsigned s_lastEmitGen = 0xFFFFFFFFu;
+        if ( s_lastEmitGen != KiwiCon_Generation() )
+        {
+            s_lastEmitGen = KiwiCon_Generation();
+            Sys_Printf( "Region fill: %i region%s -> Cam_DrawWindingTinted (the SKY FILM "
+                        "route).  Sample region %i: %i convex piece%s, %i loop verts, "
+                        "first vert (%.1f %.1f %.1f), rgba %.2f/%.2f/%.2f/%.2f, "
+                        "MATERIAL_COLOR.w 1, TECHNIQUE_UNLIT on white_tools.\n",
+                        nFills, ( nFills == 1 ) ? "" : "s",
+                        emitSample, emitSamplePieces,
+                        ( emitSamplePieces == 1 ) ? "" : "s", emitSampleVerts,
+                        emitSampleV[0], emitSampleV[1], emitSampleV[2],
+                        emitSampleRgba[0], emitSampleRgba[1],
+                        emitSampleRgba[2], emitSampleRgba[3] );
+        }
+    }
 
     // ── KIWI-UX (ROUND AM, ITEM 1): THE ONE LINE ────────────────────────────
     // The condition the brief asked for, exactly: a NONZERO region count coexisting
@@ -1725,7 +1794,180 @@ void KiwiRegion_DrawFills( int highlightIndex )
                         nFills, nRegions, nTrisSub, gate );
         }
     }
-    (void)nDrawn;
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  KIWI-UX (ROUND BL, ITEM 3) — THE FILL, DRAWN WHERE IT CANNOT FAIL TO DRAW
+// ═════════════════════════════════════════════════════════════════════════════
+// USER REPORT, verbatim: *"There is still no light blue plane where a construction
+// face can be extruded from.  You've failed again!"*
+//
+// SIX rounds (AA, AK, AL, AM, AQ, BK) have been spent on the ENGINE route: the
+// winding order, the vertex normal, the ST, the material colour, the pass location,
+// and finally BK's transplant onto the confirmed-visible sky film's own emitter.
+// Every gate in that chain is open when read (the instrumentation above proves the
+// geometry reaches R_AddRenderCmdDrawTris with a technique and buffer headroom),
+// and the fill has still never appeared on the user's machine.  Whatever is eating
+// it is downstream of everything this tree can read.
+//
+// So this round stops arguing with the renderer and draws the fills on the ONE
+// surface that is demonstrably painted every single frame in the user's build: the
+// ImGui camera overlay, the same ImDrawList that carries the HUD chips, the snap
+// label, the value bubble, the view cube and the marquee — all of which the user
+// can see in the very screenshots that report the missing fill.
+//
+// ── THE KNOWN LIMITATION, STATED LOUDLY ─────────────────────────────────────
+// An overlay has NO DEPTH BUFFER.  A region behind a wall still shows through, and
+// a region is drawn over any world geometry in front of it.  That is the accepted
+// price of a fill that is guaranteed to exist; a §8 region is editor scaffolding
+// that exists to be seen and clicked, not shaded world surface.  If the engine
+// route is ever proven to work, this can be demoted to a fallback in one line — its
+// call site is KiwiVP_DrawCameraOverlay and nothing else calls it.
+//
+// ── WHAT IS KEPT ────────────────────────────────────────────────────────────
+// KiwiRegion_DrawFills (the engine route) and its once-per-store-generation console
+// line stay exactly as round BK shipped them.  They cost nothing, they still age
+// the flash counters (the one thing this pass must NOT do — it would double-age
+// them), and the line is the only instrument that will ever tell us if the engine
+// route starts working.
+//
+// ── PROJECTION ──────────────────────────────────────────────────────────────
+// Pick_WorldToImage (kiwi_pick.cpp:500) — the editor's ONE world->camera-image
+// projection, exact inverse of CameraCalcRayDir, ortho-aware since round M, and the
+// helper every other screen-space consumer already uses.  Image pixels are
+// TOP-LEFT origin and the overlay's own origin is (imgMinX, imgMinY), so screen =
+// imgMin + image — the identical two lines KiwiNum_DrawBubble uses to pin the value
+// bubble at world geometry (kiwi_numeric.cpp:822 + :878-879).  It returns FALSE for
+// a point at or behind the eye plane in perspective (and never fails in ortho), so
+// "any vertex refused" is exactly the near-plane case, and the loop is dropped
+// whole rather than clipped — cheap, honest, and noted here rather than hidden.
+namespace
+{
+    // Bounded per frame on both axes.  KREG_MAX_LOOP is the loop cap the derivation
+    // already enforces (kiwi_region.h:249); the loop cap here is this pass's own —
+    // a store that derives hundreds of regions is a sketch the user cannot read
+    // anyway, and the overlay must never be able to cost more than the HUD.
+    const int   KREG_OVERLAY_MAX_LOOPS = 96;
+    const ImU32 KREG_OVERLAY_FILL      = IM_COL32( 120, 180, 255,  77 );  // ~0.30 alpha
+    const ImU32 KREG_OVERLAY_EDGE      = IM_COL32( 165, 210, 255, 150 );
+    const ImU32 KREG_OVERLAY_FILL_SEL  = IM_COL32( 200, 230, 255, 105 );
+    const ImU32 KREG_OVERLAY_EDGE_SEL  = IM_COL32( 235, 245, 255, 200 );
+}
+
+void KiwiRegion_DrawFillsOverlay( float imgMinX, float imgMinY, float imgW, float imgH )
+{
+    if ( !KiwiCon_ShowConstruction() )        // the same toggle the lines obey
+        return;
+    if ( !( imgW > 1.0f ) || !( imgH > 1.0f ) )
+        return;
+
+    // The CONST accessor on purpose: KiwiRegion_DrawFills owns the flash counters
+    // (kiwi_region.h:349-353) and ageing them from a second per-frame call would
+    // halve the flash.  This pass reads and draws; it changes nothing.
+    const std::vector<kregion_t> &regions = KiwiRegion_All();
+    if ( regions.empty() )
+        return;
+
+    // The selection, resolved ONCE for the pass — same reason as the engine route's
+    // copy at :1416-1425, and the same accessors.
+    std::vector<char> selFlags( regions.size(), 0 );
+    {
+        const int selN = KiwiRegion_SelectedCount();
+        for ( int s = 0; s < selN; ++s )
+        {
+            const int idx = KiwiRegion_SelectedAt( s );
+            if ( idx >= 0 && idx < (int)selFlags.size() )
+                selFlags[(size_t)idx] = 1;
+        }
+    }
+
+    ImDrawList *dl = ImGui::GetWindowDrawList();
+    if ( !dl )
+        return;
+    const ImVec2 clipMin( imgMinX, imgMinY );
+    const ImVec2 clipMax( imgMinX + imgW, imgMinY + imgH );
+    dl->PushClipRect( clipMin, clipMax, true );
+
+    ImVec2 scr[KREG_MAX_LOOP];
+    int    drawn = 0;
+
+    for ( size_t r = 0; r < regions.size() && drawn < KREG_OVERLAY_MAX_LOOPS; ++r )
+    {
+        const kregion_t &reg = regions[r];
+        const int n = PtCount( reg.pts );
+        if ( n < 3 || n > KREG_MAX_LOOP )
+            continue;
+
+        // Project the whole loop first: a single refusal drops the loop, so a
+        // partially-behind polygon can never be drawn wrapped around the viewport.
+        bool  ok      = true;
+        bool  onScreen = false;
+        for ( int i = 0; i < n && ok; ++i )
+        {
+            float w[3], sx = 0.0f, sy = 0.0f;
+            KiwiCon_PlaneToWorld( reg.plane, Pt( reg.pts, i ), w );
+            if ( !Pick_WorldToImage( w, &sx, &sy ) )
+            {
+                ok = false;                    // at/behind the eye plane
+                break;
+            }
+            scr[i].x = imgMinX + sx;
+            scr[i].y = imgMinY + sy;
+            // A cheap "is any of this anywhere near the image" test, generously
+            // padded: a triangle whose corners are all off one edge can still cover
+            // the view, so this only rejects loops entirely outside a padded rect.
+            if ( scr[i].x >= clipMin.x - imgW && scr[i].x <= clipMax.x + imgW
+              && scr[i].y >= clipMin.y - imgH && scr[i].y <= clipMax.y + imgH )
+                onScreen = true;
+        }
+        if ( !ok || !onScreen )
+            continue;
+
+        // BOTH SIDES.  No back-face test: the user asked to see these faces, the
+        // click machinery (KiwiRegion_PickAt) has always accepted either side, and
+        // an overlay has no winding rule to obey in the first place.
+        //
+        // The loop may be CONCAVE, and AddConvexPolyFilled would fill its hull.  The
+        // decomposition is the one the extruder already trusts (Hertel-Mehlhorn over
+        // the shared ear clip) — the same call the engine route makes at :1517.
+        std::vector< std::vector<int> > pieces;
+        const bool sel = ( selFlags[r] != 0 );
+        if ( KiwiRegion_ConvexPieces( reg.pts, &pieces ) && !pieces.empty() )
+        {
+            ImVec2 poly[KREG_MAX_LOOP];
+            for ( size_t pi = 0; pi < pieces.size(); ++pi )
+            {
+                const std::vector<int> &idx = pieces[pi];
+                const int pn = (int)idx.size();
+                if ( pn < 3 || pn > KREG_MAX_LOOP )
+                    continue;
+                bool bad = false;
+                for ( int i = 0; i < pn && !bad; ++i )
+                {
+                    const int src = idx[i];
+                    if ( src < 0 || src >= n ) { bad = true; break; }
+                    poly[i] = scr[src];
+                }
+                if ( bad )
+                    continue;
+                dl->AddConvexPolyFilled( poly, pn,
+                                         sel ? KREG_OVERLAY_FILL_SEL : KREG_OVERLAY_FILL );
+            }
+        }
+        else
+        {
+            // The ear clip refused the loop (it self-intersects, or it is degenerate
+            // in plane space).  The outline below still draws, so the user gets the
+            // boundary rather than nothing at all.
+        }
+
+        // …and the boundary, always, over the fill.
+        dl->AddPolyline( scr, n, sel ? KREG_OVERLAY_EDGE_SEL : KREG_OVERLAY_EDGE,
+                         ImDrawFlags_Closed, 1.5f );
+        ++drawn;
+    }
+
+    dl->PopClipRect();
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -1993,6 +2235,31 @@ float KiwiRegion_WeldDist()
 // ROUND AG, ITEM 2 — see kiwi_region.h A WELD MAY NEVER EXCEED THE GEOMETRY IT IS
 // WELDING for the report and the argument.  `finestEdge <= 0` means "the caller
 // found no edge above the degenerate floor", i.e. no bound, so the grid wins.
+// KIWI-UX (CLEANUP, A-11): see kiwi_region.h for why this is exported and which
+// three sites it replaced.  The body is FinestLoopEdge's, generalised over stride
+// and over the wrap edge; both were already exact in the copies.
+float KiwiRegion_FinestEdge( const float *pts, int count, int stride, bool closed )
+{
+    if ( !pts || count < 2 || ( stride != 2 && stride != 3 ) )
+        return 0.0f;
+    float best = 0.0f;
+    const int last = closed ? count : ( count - 1 );
+    for ( int i = 0; i < last; ++i )
+    {
+        const float *a = pts + (size_t)i * stride;
+        const float *b = pts + (size_t)( ( i + 1 ) % count ) * stride;
+        const float dx = b[0] - a[0];
+        const float dy = b[1] - a[1];
+        const float dz = ( stride == 3 ) ? ( b[2] - a[2] ) : 0.0f;
+        const float d  = sqrtf( dx * dx + dy * dy + dz * dz );
+        if ( d <= KREG_JOIN_DIST )
+            continue;                        // degenerate — the weld's own business
+        if ( best <= 0.0f || d < best )
+            best = d;
+    }
+    return best;
+}
+
 float KiwiRegion_WeldFor( float finestEdge )
 {
     float t = KiwiRegion_WeldDist();

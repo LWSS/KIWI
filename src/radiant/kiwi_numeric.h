@@ -81,8 +81,10 @@ struct kiwiNumField_t
 // grammar.
 void KiwiNum_Reset();
 
-// Install a command's fields.  `count` is clamped to KNUM_MAX_FIELDS.  Clears the
-// typed text and the focus, so it belongs in the command-start path only.
+// Install a command's fields.  `count` is clamped to KNUM_MAX_FIELDS — KIWI-UX
+// (CLEANUP, B-29): the clamp now prints a console line, because a dropped field
+// fails far from here (NumericFieldChanged never fires for it).  Clears the typed
+// text and the focus, so it belongs in the command-start path only.
 void KiwiNum_SetFields( const kiwiNumField_t *fields, int count );
 
 // Relabel one field WITHOUT disturbing what is typed — the per-stage rename the

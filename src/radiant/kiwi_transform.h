@@ -173,10 +173,6 @@ bool KiwiXform_CanScale();     // ditto
 //   KiwiXform_DominantKind    — the kind G would act on RIGHT NOW (objects >
 //                               faces > edges > verts), so the gizmo can decide
 //                               whether to appear at all.  Liveness-checked.
-//   KiwiXform_ReferencePoint  — where that gesture's reference point WOULD be,
-//                               computed by exactly the rules KiwiMoveCommand::
-//                               Begin uses per kind, so the gizmo is anchored on
-//                               the point the drag will actually pivot about.
 //   KiwiXform_PresetMoveConstraint — apply a handle's constraint to the LIVE move
 //                               command.  Call IMMEDIATELY after a successful
 //                               KiwiCmd_Start( KIWI_CMD_MOVE ) and never at any
@@ -190,7 +186,6 @@ bool KiwiXform_CanScale();     // ditto
 #define KIWI_XCON_PLANE  2
 
 bool KiwiXform_DominantKind( sel_kind_t *out );
-bool KiwiXform_ReferencePoint( float *out3 );
 void KiwiXform_PresetMoveConstraint( int con, int axis );
 
 // ─── SHAKEOUT D: the gizmos are now MODAL CHROME ────────────────────────────
@@ -213,9 +208,10 @@ void KiwiXform_PresetMoveConstraint( int con, int axis );
 //   KiwiXform_ActivePivot
 //       Where the gizmo DRAWS AND HIT-TESTS: KiwiMoveCommand's LIVE anchor
 //       (m_ref plus whatever the gesture has applied) or KiwiRotateCommand's
-//       m_pivot.  NOT KiwiXform_ReferencePoint — that re-derives the point from
-//       the live selection, which is a different thing again (it would follow a
-//       selection change, not this gesture's own applied delta).
+//       m_pivot.  KIWI-UX (CLEANUP, A-17): this is the ONLY anchor the gizmo may
+//       use — a point re-derived from the live selection is a different thing
+//       again (it would follow a selection change, not this gesture's own
+//       applied delta).
 //
 //       ── ROUND L: THE ANCHOR RIDES ────────────────────────────────────────
 //       USER REPORT, verbatim: "The pivot point is broken when moving a box
@@ -330,8 +326,17 @@ bool KiwiXform_ActivePushDir( float *out3 );
 // moved), so "reuse soon after" works; clicking a different brush changes it and
 // the pivot goes.  NEVER PERSISTED: no ini key, no profile entry, gone on exit.
 bool KiwiXform_PivotOverride( float *out3 );   // false = no session pivot in force
-void KiwiXform_ClearPivot();
 bool KiwiXform_PivotPlacing();                 // true while V-placement is live
+
+// ── KIWI-UX (ROUND BK, ITEM 6b): should the SNAP CANDIDATE DOTS be drawn? ────
+// USER DIRECTIVE, verbatim: *"when hunting for a pivot point, the obvious spots
+// (centers, corners, points, midways, etc.) need to have a black dot to show where
+// they are."*  True while a transform is placing its pivot (V) or is holding a
+// handle — the two states where the user is aiming at a point rather than looking
+// at a result.  Asked by KiwiSnap_DrawFaceAccents (kiwi_snap.cpp), which owns the
+// enumeration; this only widens its gate, and the reasoning for keeping that gate
+// otherwise tight is on the definition.
+bool KiwiXform_WantsSnapDots();
 
 // ─── ROUND Q: THE FACE PUSH AS A ONE-SHOT (un-extrude to destroy) ───────────
 // USER DIRECTIVE, verbatim: "Make it so that I can un-extrude faces entirely to
@@ -366,6 +371,18 @@ bool KiwiXform_PivotPlacing();                 // true while V-placement is live
 // every other commit in this layer uses.  `undoOp` must be a STRING LITERAL
 // (Undo_GeneralStart stores the pointer).  A rejected push restores the face and
 // CANCELS the record, so a refusal leaves nothing on the stack.
+// KIWI-UX (CLEANUP, A-26): THE SLACK ON THE PUSH-THROUGH TEST, EXPORTED.
+// `depth > KXPUSH_EPS && dist <= -depth + KXPUSH_EPS` is the comparison that
+// decides PUSH versus DELETE.  kiwi_extrude.cpp's HUD has to predict that answer
+// before E commits, so it ran the same comparison with its own copy of the
+// number (KEXT_PUSH_EPS) — and kiwi_extrude.cpp:1865 states outright that "the
+// two comparisons are the same comparison", which was true only for as long as
+// two unrelated literals happened to agree.  If they drifted, the HUD would
+// promise a carve and the helper would delete the brush.  One number now, read
+// by both; the value is unchanged.  kiwi_transform.cpp's file-local KX_EPS is
+// defined FROM this, so the file still has exactly one tolerance.
+#define KXPUSH_EPS 1.0e-4f
+
 enum kiwiFacePush_t
 {
     KXPUSH_FAILED  = 0,   // nothing changed; *outWhy says why (never NULL)

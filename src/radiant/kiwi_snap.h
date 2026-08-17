@@ -11,18 +11,22 @@
 //   * CONSTRUCTION SEGMENT MIDPOINTS   (arm 3b, reported as SNAP_EDGE_MID)
 //   * SNAP_FACE_CENTER                 (arm 4b) — now PRODUCED, brush faces only
 //   * a RELATIVE base direction for SNAP_ANGLE (arm 7)
-// SNAP_AXIS remains declared-but-unproduced; it lands with its consumer.
+// V5 (ROUND P) adds SNAP_AXIS — arm 4c, documented below and produced at
+// kiwi_snap.cpp:1723.  KIWI-UX (CLEANUP, A-4)   // KIWI-UX (ROUND BQ): re-cited
 //
 // ── THE RANKING THIS FILE IMPLEMENTS (spec §6: point > line > area > grid) ────
 // For a cursor ray, in order — each arm gated by its OWN pixel radius:
 //
 //   0. CTRL HELD  →  snapping is SUPPRESSED (spec §6, deliberately inverted vs
 //      other apps).  `type` = SNAP_NONE and `position` is the RAW point: the
-//      ACTIVE CONSTRUCTION PLANE hit while a drawing tool runs (a tool must place
-//      on its own plane even with snapping off), else the surface hit if the ray
-//      hits geometry, else the ray∩Z=0 ground-plane point, else a point
-//      KSNAP_FALLBACK_DIST down the ray.  `valid` is still true — "no snap" is an
-//      answer, not a failure.
+//      PLANAR PLACER's plane hit while one runs (a rect/circle/arc/n-gon or a §16b
+//      primitive must place on its own plane even with snapping off — ROUND BS),
+//      else the surface hit if the ray hits geometry, else the ray∩Z=0
+//      ground-plane point, else a point KSNAP_FALLBACK_DIST down the ray.  `valid`
+//      is still true — "no snap" is an answer, not a failure.  NOTE THE LABEL:
+//      KiwiSnap_TypeName(SNAP_NONE) is the string **"off"** — it means "snapping
+//      is not engaged", it has never meant "refused", and a transform shows it
+//      whenever Ctrl is not held (see the ROUND BS block below).
 //
 //   1. POINT — SNAP_ENDPOINT  →  a CONSTRUCTION anchor within PICK_VERT_PIXELS
 //      (8 px): a line/polyline/rect defining point, or a circle/arc centre or
@@ -89,13 +93,17 @@
 //      area above grid, and a surface point is what "put it on that face" means.
 //      CHANGED FROM V1 (flagged): v1 grid-snapped the surface point.  A user who
 //      wants the grid there holds nothing special — they point at empty space (arm
-//      8) — or types an exact value, which is what §6's "numeric hygiene" note
+//      9) — or types an exact value, which is what §6's "numeric hygiene" note
 //      really asks for.  Face push/pull along an axis-aligned normal still lands
 //      on-grid because the transform grid-snaps its own scalar, not the cursor.
-//      SUPPRESSED WHILE A DRAWING TOOL RUNS: a tool places on its own plane, and
-//      an area snap would silently drag the point off it.
+//      ROUND BS: THIS IS THE USER'S "WHEREVER A RAY TRACE HITS AGAINST AN OBJECT"
+//      AND IT IS NO LONGER SUPPRESSED FOR THE LINE TOOLS.  It is suppressed only
+//      while a PLANAR PLACER runs (rect/circle/arc/n-gon, §16b primitives), where
+//      an area hit on some other surface would be projected onto the tool's plane
+//      and land under the wall instead of under the cursor.
 //
-//   7. SNAP_ANGLE  →  drawing tools only, and only once the tool has an anchor
+//   7. SNAP_ANGLE  →  PLANAR PLACERS only (ROUND BS), and only once the tool has
+//      an anchor
 //      (its last placed point).  The cplane point's direction from that anchor is
 //      quantised to KCON_ANGLE_STEP (15°) IN PLANE, keeping the distance.  Ranked
 //      below every geometry snap on purpose: real geometry always beats a
@@ -113,14 +121,17 @@
 //      the arm is bit-identical to v3.  The label reads "45 deg rel" in the
 //      relative case and "45 deg" in the absolute one.
 //
-//   8. SNAP_CPLANE  →  drawing tools only: ray ∩ the active construction plane,
-//      grid-snapped IN PLANE with the §17 spacing.  This is the arm that makes a
-//      drawing tool work over empty space at all.
+//   8. SNAP_CPLANE  →  PLANAR PLACERS only (ROUND BS): ray ∩ the placer's own
+//      plane, grid-snapped IN PLANE with the §17 spacing.  This is the arm that
+//      makes a rect on a wall work over empty space.  UNREACHABLE for the line,
+//      polyline and spline tools — they have no plane at all now.
 //
-//   9. GRID on the GROUND PLANE  →  nothing under the cursor and no tool running:
-//      intersect the ray with Z=0 (the §17 ground grid, which is the drawn snap
-//      target) and snap that.  A ray that never crosses Z=0 (parallel, or pointing
-//      away) falls back to KSNAP_FALLBACK_DIST down the ray, snapped.
+//   9. GRID on the GROUND PLANE  →  nothing under the cursor and no planar placer
+//      running: intersect the ray with Z=0 (the §17 ground grid, which is the
+//      drawn snap target) and snap that.  A ray that never crosses Z=0 (parallel,
+//      or pointing away) falls back to KSNAP_FALLBACK_DIST down the ray, snapped.
+//      ROUND BS: this is the user's "the world ground" — the last resort, and the
+//      only "plane" left anywhere in placement.
 //
 // ── CONSTRUCTION CANDIDATE BUDGET ────────────────────────────────────────────
 // Construction objects are walked directly (they are not in the Pick candidate
@@ -146,14 +157,117 @@
 // itself; everything else passes 0 and gets the v1 candidate set.
 //
 // Cost is up to FOUR Pick() calls per query since shakeout F (vertex-mask,
-// edge-mask, object-mask and — only when no drawing tool is running — face-mask
-// for arm 4b; the screen-space masks skip Test_Ray, the area ones skip the screen
-// scan).  Budget is one query per frame, same as the hover pick.  The shakeout-F
+// edge-mask, object-mask and face-mask for arm 4b — the face-mask is
+// unconditional on a valid cursor pixel since shakeout H; the screen-space masks
+// skip Test_Ray, the area ones skip the screen scan).  KIWI-UX (CLEANUP, A-5).  Budget is one query per frame, same as the hover pick.  The shakeout-F
 // relative-angle arm additionally walks brush edges near the tool ANCHOR, whole-
 // brush bbox-rejected first and hard-capped at KSNAP_MAX_ANCHOR_EDGES.
 // ─────────────────────────────────────────────────────────────────────────────
 
 #include "kiwi_pick.h"
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  KIWI-UX (ROUND BN, ITEM 7) — THE SNAP LADDER, RE-STATED, AND THE ONE RULE
+//  THAT WAS MISSING
+// ═════════════════════════════════════════════════════════════════════════════
+// USER REPORT, verbatim: *"(see pic) Snap dragging is buggy.  Here it should just
+// snap to the nearest plane of the building unless I'm near a detailed point.  Try
+// to revamp this.  (For all tools.)"*  The picture is an edge drag on a stepped
+// rooftop with construction lines all over it, and the drag is being pulled onto
+// something that is nowhere near the roof.
+//
+// ── THE LADDER THE USER IS DESCRIBING IS THE ONE THIS FILE ALREADY HAS ──────
+// point > line > area > grid, with every point arm gated by a small pixel radius.
+// So the reported failure cannot be the ORDER, and it is not: it is that PIXEL
+// PROXIMITY IS NOT WORLD PROXIMITY under a perspective divide.  A construction
+// anchor a hundred metres behind the building projects within 8 px of the cursor
+// just as easily as the roof corner in front of it does, wins arm 1 outright, and
+// the drag teleports across the map.  That is the whole bug, and it is why "it
+// should just snap to the nearest plane of the building" reads as a ranking
+// complaint when it is really an occlusion complaint.
+//
+// ── PLASTICITY'S SnapPicker, READ, AND WHAT IT ACTUALLY DOES ────────────────
+// Two mechanisms, not one, and KIWI had only the first:
+//   1. A PRIORITY SORT, which is our ladder almost exactly —
+//      `FaceCenterPointSnap.priority = 0.99`, `PointSnap = 1`,
+//      `CurveSnap / AxisSnap / CurveEdgeSnap = 2`,
+//      `FaceConstructionPlaneSnap / FaceSnap = 3`, `PlaneSnap = 4`,
+//      `ConstructionPlaneSnap = 5`, sorted by `i1.snap.priority - i2.snap.priority`
+//      (SnapPicker.ts:136-161).  Points beat edges beat the face beat the plane:
+//      the brief's ladder, and ours.
+//   2. A DEPTH FILTER APPLIED **BEFORE** THAT SORT.  `processXRay` runs
+//      `findAllIntersectionsVeryCloseTogether(results, minDistance)` whenever the
+//      viewport is not in X-RAY mode (SnapPickerStrategy.ts:93-105), and that
+//      function keeps ONLY the candidates whose raycast distance is within 10e-3
+//      of the nearest one:
+//          for (const intersection of intersections)
+//              if (Math.abs(minDistance - intersection.distance) < 10e-3)
+//                  result.push(intersection);
+//      Everything further down the ray — i.e. everything the surface under the
+//      cursor is standing in front of — is DISCARDED before priority is consulted.
+//      Their pixel radii are enormous by our standards (`Points: { threshold: 26 }`,
+//      `Line2: { threshold: 30 }`, SnapPickerStrategy.ts:14-18) and that is only
+//      liveable BECAUSE of this filter.
+//
+// ── WHAT ROUND BN ADDS, THEREFORE ───────────────────────────────────────────
+//   * THE OCCLUSION GATE (KSNAP_OCCLUDE_SLOP_PX).  When the ray hits a surface,
+//     every POINT and LINE candidate that lies further down the ray than that
+//     surface — by more than a few pixels' worth of depth at its own scale — is
+//     refused.  Candidates in FRONT are kept (this is deliberately weaker than
+//     Plasticity's keep-only-the-nearest-cluster: a vertex floating in front of a
+//     wall is a legitimate target, and dropping it would be a new complaint).
+//     With the roof under the cursor, the construction scaffolding behind it stops
+//     competing and the FACE PLANE — arm 6, the "glue to the surface" the user is
+//     asking for — is what the ladder falls through to.  Exactly the described feel.
+//   * ONE RADIUS CONSTANT PER CLASS, below, instead of three arms sharing
+//     PICK_VERT_PIXELS by coincidence and a fourth using the construction CLICK
+//     box.  The numbers are the brief's (6-8 px), ordered so that the more DERIVED
+//     a point is, the closer you have to be to it.
+// The ORDER of the arms is unchanged and the AP self-snap mutes and the AA/AP
+// exclusion rules are untouched — they run inside the candidate scans, upstream of
+// all of this.
+// ── KIWI-UX (ROUND BO, ITEM 3): …AND THIS LADDER IS USER-APPROVED ───────────
+// USER RESPONSE to round BN, verbatim: *"Dragging is a lot better.  Keep it the
+// same."*  Round BO changes WHEN the ladder engages (arm 0's one modifier rule)
+// and NOTHING about how it behaves: the radii, the occlusion gate, the ranking and
+// the SNAP_FACE glue below are byte-for-byte BN's.  DO NOT REGRESS THEM.  The
+// contract page is RADIANT_UX_DESIGN §35.
+//
+// PER-CLASS PIXEL RADII.  A detail point must be AIMED AT; the ladder is only
+// allowed to prefer one over the big obvious surface when the cursor is genuinely
+// on it.
+#define KSNAP_R_CON_POINT     7.0f   // construction anchor / intersection / midpoint
+#define KSNAP_R_VERTEX        PICK_VERT_PIXELS   // 8 — brush corners / patch control points
+#define KSNAP_R_EDGE_MID      7.0f   // a brush edge's midpoint
+#define KSNAP_R_FACE_CENTER   6.0f   // a face centroid: the most derived point there is
+#define KSNAP_R_CON_SEG       8.0f   // the construction segment SNAP box.  The construction
+                                     // CLICK box stays KCON_LINE_PIXELS (10) — picking a
+                                     // line to select it and being dragged onto it are
+                                     // different questions and want different slack.
+// How far BEYOND the surface under the cursor a candidate may still be and count
+// as "on it".  In SCREEN PIXELS, converted at the candidate's own depth, so the
+// tolerance is the same visual slack near and far.  Generous enough that a vertex
+// lying exactly on the hit surface can never be refused by float error, tight
+// enough that anything in the next room is.
+#define KSNAP_OCCLUDE_SLOP_PX 6.0f
+
+// ── KIWI-UX (ROUND BS) — THE OFF-PLANE GATE IS DELETED ──────────────────────
+// TOMBSTONE.  Round BP's working-plane depth rule (KSNAP_ONPLANE_PX /
+// KSNAP_OFFPLANE_PX and the `planeOn` half of kiwi_snap.cpp's CandGate) is gone,
+// with both constants.  Its premise was *"while a tool places on a working plane,
+// that plane IS the depth the user is working at"*; this round removes the working
+// plane from the drawing path entirely, so there is no such depth and the gate has
+// nothing left to mean.
+//
+// USER RULING, verbatim: *"You seriously need to fucking get rid of the
+// construction plane. […] It just needs to be wherever a fucking ray trace hits
+// against an object OR a snapping point."*
+//
+// THE OCCLUSION GATE ABOVE (KSNAP_OCCLUDE_SLOP_PX, round BN — *"Dragging is a lot
+// better.  Keep it the same."*) IS THE ONLY DEPTH RULE LEFT, and it applies in
+// every context.  Everything the deleted gate was written to stop is stopped by
+// its ROOT cause being gone: the 61-ft endpoints it was refusing came from a plane
+// latched at roof height, and no plane is latched from placement any more.
 
 // Distance down the ray used when nothing is hit and the ray misses Z=0.
 #define KSNAP_FALLBACK_DIST 512.0f
@@ -185,6 +299,18 @@ struct snap_result_t
     float       position[3] = { 0.0f, 0.0f, 0.0f };
     sel_item_t  source;             // what we snapped to (marker + label); null for grid
 };
+
+// KIWI-UX (CLEANUP, SnapActive): "did this query land on anything at all".
+// `valid` alone is not the test — a result can be valid and still carry
+// SNAP_NONE — so the two conditions belong together, and they were written out
+// as a private SnapActive() in FOUR command classes (kiwi_transform.cpp,
+// kiwi_uv.cpp, kiwi_bevel.cpp and, before round T folded it away, the bevel
+// command).  kiwi_bevel.cpp's copy had no caller left at all (B-24) and dies
+// with this consolidation.  One spelling, beside the struct.
+inline bool KiwiSnap_Active( const snap_result_t &s )
+{
+    return s.valid && s.type != SNAP_NONE;
+}
 
 // True for the types that named REAL GEOMETRY (as opposed to the grid, or nothing).
 // A transform that wants "drag my reference point onto that thing" keys off this:
@@ -221,42 +347,35 @@ bool KiwiSnap_AxisDepth( const snap_result_t &r, const float *ref,
                          const float *axis, float *outDist );
 
 // ═════════════════════════════════════════════════════════════════════════════
-//  ROUND AG, ITEM 11 — LIGHT GRID SNAPPING, AND THE PARTIAL WALK-BACK OF D-Z2
+//  THE LATTICE BAND — round AG's numbers, round BO's placement
 // ═════════════════════════════════════════════════════════════════════════════
-// USER DIRECTIVE, verbatim: "There should be light snapping to the global grid
-// (disabled with ctrl)."
+// ── KIWI-UX (ROUND BO, ITEM 3): ROUND AG'S "LIGHT GRID SNAPPING" IS DELETED ──
+// USER REPORT, verbatim: *"The grid snapping is better, but now it's impossible to
+// get fine details.  Make it so it only snaps while holding Ctrl."*
 //
-// ROUND Z, ITEM 2 (D-Z2) made the three ONE-AXIS gestures raw by default on the
-// user's own report ("When extruding, it should not snap by default […] It's
-// just not good to use in a cluttered scene").  Both directives are right and
-// they are not in conflict once you separate the two things "snapping" meant:
+// Round AG, item 11 answered an earlier directive ("There should be light snapping
+// to the global grid (disabled with ctrl)") by giving the one-axis gestures a
+// capture band that fired in the branch where the ranked query had been SUPPRESSED
+// — i.e. it was snapping that happened precisely when the user had asked for none.
+// Under round BO's one rule that branch is "the user is not holding Ctrl during a
+// transform", which is exactly where fine detail has to be reachable, so the
+// wrapper (KiwiSnap_LightGridAxis) and its three call sites are gone.
 //
-//   THE GEOMETRY ARMS were what made a cluttered scene unusable — the query is
-//     RANKED, it reaches across the whole viewport, and it drags the drag onto
-//     whichever of a hundred nearby edges/verts/faces won.  Those stay OFF by
-//     default.  This is D-Z2 and it is NOT walked back.
-//   THE GRID is a fixed, predictable, global lattice that is exactly where a
-//     mapper wants to land, and it was collateral damage: turning off the ranked
-//     query also turned off the grid quantisation, so a plain drag could not land
-//     on a round number at all without Ctrl (which brings the clutter back with
-//     it).  THAT is what this restores, and only that.
+// THE BAND ITSELF IS NOT DEAD.  It is the SOFT mode of KiwiSnap_LatticeAxis below,
+// and the object move still reaches it for a SNAP_FACE hit — under Ctrl, where it
+// belongs.  These are its two constants and they are unchanged:
+//   * A CAPTURE BAND, NOT A QUANTISER.  The value is nudged only when it is
+//     ALREADY within KSNAP_LIGHT_BAND_PIX screen pixels of a lattice value;
+//     outside the band it passes through completely untouched, so dragging over a
+//     surface still feels continuous rather than stepping.
+//   * SCREEN PIXELS, converted at the gesture's own depth through
+//     KiwiCam_WorldPerPixel, so the stickiness feels identical zoomed in and
+//     zoomed out — and capped at KSNAP_LIGHT_MAX_FRAC of a cell so that zooming
+//     far out can never widen it into full snapping.
 //
-// LIGHT means two things, both load-bearing:
-//   1. GRID ONLY.  No geometry candidates, ever.  A default drag can be pulled
-//      onto the lattice and onto nothing else.
-//   2. A CAPTURE BAND, NOT A QUANTISER.  The value is nudged only when it is
-//      ALREADY within KSNAP_LIGHT_BAND_PIX screen pixels of a lattice value;
-//      outside the band it passes through completely untouched.  So free dragging
-//      still feels continuous — it does not step — and the lattice reads as a
-//      magnet rather than as a ratchet.  That difference is the whole directive:
-//      full quantisation IS what Ctrl already does.
-// The band is in SCREEN PIXELS (converted at the gesture's own depth through
-// KiwiCam_WorldPerPixel) so the stickiness feels identical zoomed in and zoomed
-// out, and it is additionally capped at KSNAP_LIGHT_MAX_FRAC of a cell so that
-// zooming far out can never widen it into full snapping.
-//
-// PRECEDENCE, unchanged: the NUMERIC FIELD outranks everything and is tested
-// first by every caller; Ctrl runs the full ranked query; otherwise this.
+// PRECEDENCE: the NUMERIC FIELD outranks everything and is tested first by every
+// caller; below it, arm 0 decides whether snapping is engaged at all, and only
+// then does the ladder-vs-lattice ranking matter.
 // KEXT_SELF_SNAP_BAND is untouched — it lives on the geometry arm.
 //
 // ── WHICH COORDINATE IS PUT ON THE LATTICE ──────────────────────────────────
@@ -272,7 +391,84 @@ bool KiwiSnap_AxisDepth( const snap_result_t &r, const float *ref,
 // Returns `d`, possibly nudged.  A zero/absent grid spacing returns `d` unchanged.
 #define KSNAP_LIGHT_BAND_PIX  5.0f      // screen pixels either side of a lattice value
 #define KSNAP_LIGHT_MAX_FRAC  0.22f     // …and never more than this much of one cell
-float KiwiSnap_LightGridAxis( float d, const float *ref, const float *axis );
+// ── KIWI-UX (ROUND BK, ITEM 6d): THE MAJOR LINES ARE STICKIER ───────────────
+// USER DIRECTIVE, verbatim: *"…and it should be easier to lock to the major lines
+// of the grid."*  A MAJOR is every tenth cell — the grid draw's own definition,
+// `i % 10 == 0` (kiwi_grid.cpp EmitRun), and the one this file must agree with or
+// the magnet would stick to lines the user cannot see.  A candidate that is also a
+// major gets a band this much wider, and when both a minor and a major are in
+// reach the major wins.  1.5 is small on purpose: it biases a tie, it does not
+// make the majors a second lattice.
+#define KSNAP_MAJOR_STRIDE    10        // cells per major — kiwi_grid.cpp EmitRun
+#define KSNAP_MAJOR_BAND_MUL  1.5f
+// KIWI-UX (ROUND BO, ITEM 3): KiwiSnap_LightGridAxis is DELETED.  Its three call
+// sites were all the "ranked query suppressed" branch of a TRANSFORM, which is now
+// exactly where the user asked for nothing to happen.  The SOFT band above is not
+// dead — KiwiSnap_LatticeAxis( …, hard=false, … ) still serves the object move's
+// SNAP_FACE arm, under Ctrl.
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  KIWI-UX (ROUND BL, ITEM 4) — ONE LATTICE RULE, HARD OR SOFT
+// ═════════════════════════════════════════════════════════════════════════════
+// USER REPORT, verbatim: *"It's still not possible to snap to the major grid lines
+// while using a tool.  This makes it really hard to align things.  You need to keep
+// the pivot point in line with the cursor like this and snap it."*
+//
+// Round BK gave the MAGNET its major-line preference (KSNAP_MAJOR_BAND_MUL above)
+// and left the HARD quantiser — the one the object move's grid arm actually runs
+// when nothing is under the cursor — with no notion of a major at all: it rounds to
+// the nearest CELL, so a pivot 0.3 cells from a major landed on the minor beside it
+// and the major was unreachable by aiming.  Two quantisers, one of which had never
+// heard of the feature.
+//
+// So both are this one function now and the major rule is stated once:
+//   * the nearest MAJOR is computed independently of the nearest cell (they are not
+//     the same line) and wins whenever it is inside KSNAP_MAJOR_BAND_MUL times the
+//     band — in HARD mode the band is a whole cell, so a major within 1.5 cells
+//     takes the value;
+//   * otherwise HARD rounds to the nearest cell unconditionally, and SOFT nudges
+//     only inside the KSNAP_LIGHT_BAND_PIX capture band and passes the value
+//     through untouched outside it.
+// `outMajor` (optional) reports whether a MAJOR line took the value, which is what
+// the move's HUD says out loud so the lock is legible.
+// KIWI-UX (ROUND BO, ITEM 3): SOFT now has exactly ONE caller — the object move's
+// SNAP_FACE arm — and it is reached only while snapping is ENGAGED (Ctrl, in a
+// transform).  HARD is every other lattice answer.
+float KiwiSnap_LatticeAxis( float d, const float *ref, const float *axis,
+                            bool hard, bool *outMajor );
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  KIWI-UX (ROUND BK, ITEM 6a/6c) — AN AREA HIT IS A MAGNET, NOT A TELEPORT
+// ═════════════════════════════════════════════════════════════════════════════
+// USER REPORTS, verbatim: *"I can no longer snap to the grid when moving with the
+// gizmo."* and *"the center of the gizmo should always track my mouse."*
+//
+// THE ROOT CAUSE OF BOTH IS ONE RANKING.  Arm 6 of KiwiSnap_Query (kiwi_snap.cpp,
+// "AREA — the Test_Ray surface point") answers SNAP_FACE for ANY surface under the
+// cursor and RETURNS, so arm 9 — the grid — is unreachable whenever the ray hits
+// geometry, which in a built scene is nearly always.  The Move command then routes
+// every KiwiSnap_IsGeometry result, SNAP_FACE included, through its ABSOLUTE arm
+// (`total = snapPos - ref`, or KiwiSnap_AxisDepth under an axis lock), so:
+//   * the grid quantiser in the `else` branch never runs   -> "no grid snap", and
+//   * the selection is dragged onto whatever plane happens to be under the cursor
+//     rather than tracking the cursor                       -> "the gizmo lags".
+//
+// AND THE NAMED ARMS ARE INNOCENT.  A vertex, an edge midpoint, a face CENTRE, a
+// construction endpoint or an intersection is a target the user aimed at, and
+// dragging the reference point exactly onto it is the whole point of the feature
+// ("able to snap corners together easily by placing a pivot").  SNAP_FACE is the
+// one arm that names no feature — it is wherever the ray happened to land — so it
+// is the one that becomes a magnet.
+//
+// `cur`    the value the CURSOR mapping produced (world units along some axis)
+// `target` the value the area snap would impose
+// `at`     a world point at the gesture's current position, for the pixel scale
+// Returns `target` when it is within KSNAP_AREA_BAND_PIX screen pixels of `cur`,
+// otherwise `cur` untouched.  Round AA ITEM 5's "X-lock this brush until it meets
+// that wall" therefore still fires — as you approach the wall, which is when it
+// was ever wanted — and stops rewriting the drag from across the room.
+#define KSNAP_AREA_BAND_PIX  14.0f
+float KiwiSnap_AreaMagnet( float cur, float target, const float *at );
 
 // THE query.  `imgX`/`imgY` are the camera-image cursor position (TOP-LEFT origin,
 // kiwi_pick.h conventions) — recorded for the screen-space label anchor; the ray
@@ -281,7 +477,40 @@ float KiwiSnap_LightGridAxis( float d, const float *ref, const float *axis );
 bool KiwiSnap_Query( const ray_t &ray, int imgX, int imgY, snap_result_t *out,
                      unsigned pickFlags = PICKF_NONE );
 
+// ═════════════════════════════════════════════════════════════════════════════
+//  KIWI-UX (ROUND BS) — **THE** PLACEMENT RESOLUTION.  ONE FUNCTION.
+// ═════════════════════════════════════════════════════════════════════════════
+// USER RULING, verbatim: *"It just needs to be wherever a fucking ray trace hits
+// against an object OR a snapping point."*
+//
+// A DRAWN OR PLACED POINT IS, IN THIS EXACT ORDER:
+//   1. THE ENGAGED SNAP POINT — the BN ladder (arms 0b-5: chain start, construction
+//      anchor, brush vertex, crossing, midpoints, face centre, axis guide, edge).
+//      Construction context: snapping is ON by default and Ctrl frees it; transform
+//      context: OFF by default and Ctrl engages it (the BO contract,
+//      KiwiCmd_SnapEngaged).
+//   2. ELSE THE RAY'S SURFACE HIT ON GEOMETRY — arm 6, the Test_Ray point on the
+//      brush face or patch under the cursor, verbatim and unsnapped.
+//   3. ELSE THE WORLD GROUND, z = 0, GRID-SNAPPED — arm 9.  Not a system, not a
+//      plane object, not state: the floor.  (A ray that never crosses z = 0 falls
+//      back KSNAP_FALLBACK_DIST down itself so there is always an answer.)
+// The ONLY exception is a PLANAR PLACER — rect / circle / arc / n-gon and the §16b
+// primitives — whose SHAPE cannot exist off a plane: between 1 and 2 they take
+// their own plane's hit (arms 7-8), and they derive that plane from the FIRST
+// point's surface.  The line, polyline and spline tools have no plane at all.
+//
+// PREVIEW AND PLACEMENT COME THROUGH HERE AND NOWHERE ELSE.  The rubber band is
+// `snap.position`, the stored point is `snap.position`, and the seed a tool latches
+// at Begin() is this function — so the marker can never draw in one place while the
+// geometry goes to another (the failure the user reported four rounds running).
+// Returns false only when the query itself refused (no camera, degenerate ray).
+bool KiwiSnap_ResolvePoint( const ray_t &ray, int imgX, int imgY, float out[3] );
+
 // Short tag for the marker label: "vert", "mid", "edge", "face", "grid", "off".
+// "off" IS SNAP_NONE AND MEANS "SNAPPING IS NOT ENGAGED" — arm 0's answer, i.e.
+// a transform without Ctrl (or an unusable grid spacing on arm 9).  It has never
+// meant "refused" or "off-plane"; ROUND BS re-states this because a screenshot of
+// an extrude showing `off` was read as a plane refusal leaking into a transform.
 const char *KiwiSnap_TypeName( snap_type_t t );
 
 // World-space marker for a snap result, emitted into the CURRENTLY OPEN

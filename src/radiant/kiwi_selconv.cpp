@@ -60,48 +60,22 @@ namespace
         if ( !b || !b->patch || !b->def )
             return 0;
         patchMesh_t *pm = b->def->patch;
-        if ( !pm || pm->width <= 0 || pm->height <= 0 || pm->width > 16 || pm->height > 16 )
+        // KIWI-UX (CLEANUP, C-55): the shared predicate, not a bare 16 —
+        // Patch_DimsSane (kiwi_selection.h) is this exact test against
+        // KIWI_PATCH_MAX_DIM.
+        if ( !Patch_DimsSane( pm ) )
             return 0;
         return pm;
     }
 
-    bool VertexPos( const sel_item_t &it, float *out )
-    {
-        if ( it.faceIndex < 0 )                       // patch control point
-        {
-            patchMesh_t *pm = PatchOf( it.brush );
-            if ( !pm )
-                return false;
-            const int col = it.vertIndex / pm->height;
-            const int row = it.vertIndex % pm->height;
-            if ( col < 0 || col >= pm->width || row < 0 || row >= pm->height )
-                return false;
-            out[0] = pm->ctrl[col][row].xyz[0];
-            out[1] = pm->ctrl[col][row].xyz[1];
-            out[2] = pm->ctrl[col][row].xyz[2];
-            return true;
-        }
-        winding_t *w = WindingOf( it.brush, it.faceIndex );
-        if ( !w || it.vertIndex < 0 || it.vertIndex >= w->numpoints )
-            return false;
-        out[0] = w->p[it.vertIndex][0];
-        out[1] = w->p[it.vertIndex][1];
-        out[2] = w->p[it.vertIndex][2];
-        return true;
-    }
-
-    bool EdgeEnds( const sel_item_t &it, float *a, float *b )
-    {
-        winding_t *w = WindingOf( it.brush, it.faceIndex );
-        if ( !w || w->numpoints < 2 )
-            return false;
-        if ( it.edgeIndex < 0 || it.edgeIndex >= w->numpoints )
-            return false;
-        const int j = ( it.edgeIndex + 1 ) % w->numpoints;
-        a[0] = w->p[it.edgeIndex][0]; a[1] = w->p[it.edgeIndex][1]; a[2] = w->p[it.edgeIndex][2];
-        b[0] = w->p[j][0];            b[1] = w->p[j][1];            b[2] = w->p[j][2];
-        return true;
-    }
+    // KIWI-UX (CLEANUP, A-13 / C-49): the local VertexPos / EdgeEnds were two
+    // more copies of the two resolutions kiwi_selection.h now owns as
+    // Sel_ItemWorldPos / Sel_EdgeEnds — with the same guard set this file had
+    // (the 1..MAX_POINTS_ON_WINDING bound WindingOf above carries, and PatchOf's
+    // dimension sanity, now KIWI_PATCH_MAX_DIM).  Every call site below passes
+    // checkLive = false: KiwiSelConv_Convert already gates the whole walk on
+    // Sel_BrushLive per item, and the inner dedup only ever sees items this
+    // function just built from those same live nodes.
 
     // ── the OUT set, with the four dedup rules ──────────────────────────────
     // One accumulator rather than four, because the dedup is the only thing that
@@ -138,7 +112,7 @@ namespace
                 if ( !items[i].brush || items[i].brush->def != b->def )
                     continue;
                 float ea[3], eb[3];
-                if ( !EdgeEnds( items[i], ea, eb ) )
+                if ( !Sel_EdgeEnds( items[i], ea, eb, false ) )
                     continue;
                 if ( ( PointNear( ea, a ) && PointNear( eb, c ) )
                   || ( PointNear( ea, c ) && PointNear( eb, a ) ) )
@@ -155,7 +129,7 @@ namespace
                 if ( !items[i].brush || items[i].brush->def != b->def )
                     continue;
                 float q[3];
-                if ( !VertexPos( items[i], q ) )
+                if ( !Sel_ItemWorldPos( items[i], q, false ) )
                     continue;
                 if ( PointNear( p, q ) )
                     return;
@@ -175,7 +149,7 @@ namespace
                     const int idx = col * pm->height + row;
                     sel_item_t it = Sel_MakePatchPoint( b, idx );
                     float p[3];
-                    if ( VertexPos( it, p ) )
+                    if ( Sel_ItemWorldPos( it, p, false ) )
                         out.AddVertex( b, -1, idx, p );
                 }
             return;
@@ -256,7 +230,7 @@ namespace
     void EdgeToFaces( const sel_item_t &it, outSet_t &out )
     {
         float a[3], b[3];
-        if ( !EdgeEnds( it, a, b ) )
+        if ( !Sel_EdgeEnds( it, a, b, false ) )
             return;
         brush_t *def = it.brush->def;
         if ( !def || !def->faces )
@@ -280,7 +254,7 @@ namespace
     void VertexToFaces( const sel_item_t &it, outSet_t &out )
     {
         float p[3];
-        if ( !VertexPos( it, p ) || it.brush->patch )
+        if ( !Sel_ItemWorldPos( it, p, false ) || it.brush->patch )
             return;
         brush_t *def = it.brush->def;
         if ( !def || !def->faces )
@@ -303,7 +277,7 @@ namespace
     void VertexToEdges( const sel_item_t &it, outSet_t &out )
     {
         float p[3];
-        if ( !VertexPos( it, p ) || it.brush->patch )
+        if ( !Sel_ItemWorldPos( it, p, false ) || it.brush->patch )
             return;
         brush_t *def = it.brush->def;
         if ( !def || !def->faces )
@@ -355,7 +329,7 @@ namespace
                 else
                 {
                     float p[3];
-                    if ( VertexPos( it, p ) )
+                    if ( Sel_ItemWorldPos( it, p, false ) )
                         out.AddVertex( it.brush, it.faceIndex, it.vertIndex, p );
                 }
                 break;
@@ -367,7 +341,7 @@ namespace
                 else
                 {
                     float a[3], b[3];
-                    if ( EdgeEnds( it, a, b ) )
+                    if ( Sel_EdgeEnds( it, a, b, false ) )
                         out.AddEdge( it.brush, it.faceIndex, it.edgeIndex, a, b );
                 }
                 break;

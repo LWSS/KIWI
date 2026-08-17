@@ -2270,6 +2270,45 @@ void __cdecl R_AddCmdSetCustomShaderConstant(unsigned int constant, float x, flo
     cmd->vec[3] = w;
 }
 
+// KIWI-UX (ROUND BM) — SECTION ANALYSIS.  Emit RC_SET_CLIP_PLANE carrying a WORLD
+// plane and an enable flag; RB_SetClipPlaneCmd (rb_backend.cpp) transforms it into
+// clip space against the active view and drives IDirect3DDevice9::SetClipPlane +
+// D3DRS_CLIPPLANEENABLE.  The contract and the derivation are on the struct in
+// r_rendercmds.h.  No binary counterpart — this is a KIWI editor feature.
+//
+// REPORTS the drop rather than swallowing it (see the declaration): this command is
+// non-critical, so a full buffer can refuse it, and a refused DISABLE is the one
+// case that does not self-correct — the plane would stay enabled for the overlay
+// and for every later frame.  kiwi_section.cpp keeps the acknowledged state and
+// re-issues it until one lands.
+// ── KIWI-UX (ROUND BO, ITEM 1): …AND THE DROP REPORT WAS A LIE ──────────────
+// AUTOPSY, suspect (c) "command reach".  The `if (!cmd) return false;` above is
+// dead code IN THE EDITOR BUILD.  R_GetCommandBuffer's KISAK_RADIANT overflow arm
+// (:496-524) deliberately never returns NULL — it hands back a pointer into
+// `s_overflowScratch`, a throwaway that is NOT linked into the command list — so
+// on a full buffer this function wrote the command into the void and reported
+// SUCCESS.  Everything round BM built on that report (the acknowledged `s_clipOn`
+// state in kiwi_section.cpp, the "a dropped disable re-issues next frame" repair,
+// and the KNOWN_ISSUES entry promising it "cannot become permanent") was therefore
+// resting on a value that could not be false.
+//
+// THE DISCRIMINATOR IS `lastCmd`, and it is exact rather than heuristic: the
+// success path sets `s_cmdList->lastCmd = header` (:491) and BOTH failure paths
+// clear it to 0 (:517, :532).  Nothing between our call and this line can move it.
+bool __cdecl R_AddCmdSetClipPlane(int enable, const float *plane)
+{
+    GfxCmdSetClipPlane *cmd =
+        (GfxCmdSetClipPlane *)R_GetCommandBuffer(RC_SET_CLIP_PLANE, sizeof(GfxCmdSetClipPlane));
+    if ( !cmd )
+        return false;
+    cmd->enable   = enable;
+    cmd->plane[0] = plane ? plane[0] : 0.0f;
+    cmd->plane[1] = plane ? plane[1] : 0.0f;
+    cmd->plane[2] = plane ? plane[2] : 0.0f;
+    cmd->plane[3] = plane ? plane[3] : 0.0f;
+    return ( s_cmdList != 0 && s_cmdList->lastCmd == &cmd->header );
+}
+
 // IDB R_AddCmdDrawFullScreenColoredQuad @ 0x4fc260 — emit RC_DRAW_FULL_SCREEN_COLORED_QUAD.
 // The backend handler (RB_DrawFullScreenColoredQuadCmd -> RB_DrawFullScreenColoredQuad),
 // the GfxCmdDrawFullScreenColoredQuad struct, and the dispatch-table entry ALL already

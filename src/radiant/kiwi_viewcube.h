@@ -29,12 +29,19 @@
 // nobody reaches for.  Logged as future work rather than crammed in.
 //
 // ── DRAWN WITH ImDrawList ONLY ──────────────────────────────────────────────
-// No ImGui items, for the same reason the chips carry a warning: the camera
-// window's next call after the overlay is End(), and an item (or a trailing
-// SetCursorPos) there trips ErrorCheckUsingSetCursorPosToExtendParentBoundaries
-// — the assert class fixed in eead8b7.  The widget therefore does its OWN hover
-// and click resolution against io.MousePos, and reports hover back so the shell
-// can drop the image's hover for the frame (exactly what DrawChips returns for).
+// KIWI-UX (CLEANUP, C-37): the rule this used to state — "no ImGui items" — is
+// not the rule, and the chips it cited as the precedent break it: DrawChips emits
+// five real ImGui::Buttons inside the camera image.  THE INVARIANT IS: no trailing
+// SetCursorScreenPos with no item after it, and no item that changes the window's
+// CONTENT EXTENT after the image.  Either trips ImGui::End's
+// ErrorCheckUsingSetCursorPosToExtendParentBoundaries (the assert class fixed in
+// eead8b7) or feeds a scrollbar loop.  kiwi_viewport.cpp's DrawChips carries the
+// canonical statement, in its "NO cursor restore here" block.
+//
+// This widget goes further than the invariant needs and emits NO items at all, so
+// it does its OWN hover and click resolution against io.MousePos, and reports
+// hover back so the shell can drop the image's hover for the frame (exactly what
+// DrawChips returns for).
 //
 // Clicks are resolved DURING the frame rather than in the post-present dispatch
 // because setting camera angles pops no modal and touches no message pump — the

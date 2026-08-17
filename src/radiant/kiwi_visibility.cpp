@@ -160,31 +160,85 @@ namespace
     }
 }
 
+// ═════════════════════════════════════════════════════════════════════════════
+//  KIWI-UX (CLEANUP, C-41) — THE "PRESSING H TWICE COSTS NO Ctrl+Z" GUARD,
+//                            ASKED OF THE RIGHT PAIR OF SNAPSHOTS
+// ═════════════════════════════════════════════════════════════════════════════
+// The guard used to be `SameSnap( s_visUndo.back(), snap )` at PUSH time — i.e.
+// it compared the incoming PRE-state with the PREVIOUS gesture's PRE-state.  That
+// answers "did the gesture BEFORE this one change anything", which is one gesture
+// late: H hides A (pushes S0), H again with A already hidden pushes S1 anyway
+// because S1 != S0, and only the THIRD press is suppressed.  The user needed two
+// Ctrl+Z to get A back, which is exactly what kiwi_visibility.h:116-118 promises
+// cannot happen.
+//
+// A push-time test cannot fix it — whether THIS gesture changes anything is not
+// knowable until it has run.  So the push is now in two halves: `KiwiVis_UndoPush`
+// CAPTURES the pre-state, and `KiwiVis_UndoCommit` — called immediately after the
+// core that does the work — compares it with the POST-state and only then commits
+// the record and mints the journal ticket.  Committing right there, rather than
+// lazily at some later entry point, is what keeps the unified journal's ORDERING
+// honest: the visibility ticket is minted at the moment of the edit, before any
+// other domain can mint one.
+//
+// A caller that forgets its Commit does not lose the record: the next Push, and
+// every stack read below, flushes an outstanding capture first — which reproduces
+// the old always-push behaviour for that path rather than silently dropping it.
+namespace
+{
+    visSnap_t   s_visPending;
+    const char *s_visPendingLabel = 0;
+    bool        s_visPendingHave  = false;
+
+    // Commit (or discard) an outstanding capture: a gesture that moved no hide bit
+    // leaves nothing behind at all, which is the whole mechanism.
+    void FlushPendingVisRecord()
+    {
+        if ( !s_visPendingHave )
+            return;
+        s_visPendingHave = false;
+
+        visSnap_t now;
+        Snapshot( &now );
+        if ( SameSnap( s_visPending, now ) )
+        {
+            s_visPending.clear();
+            return;                       // the gesture changed nothing — no step
+        }
+
+        s_visUndo.push_back( visSnap_t() );
+        s_visUndo.back().swap( s_visPending );
+        s_visPending.clear();
+        if ( (int)s_visUndo.size() > KVIS_UNDO_DEPTH )
+            s_visUndo.erase( s_visUndo.begin() );
+
+        s_visRedo.clear();
+        KiwiUndo_NoteVisibilityRecord( s_visPendingLabel ? s_visPendingLabel : "hide" );
+    }
+}
+
 // ─── ROUND AG, ITEM 7: the hide/unhide undo domain ───────────────────────────
+// Capture the pre-state.  MUST be paired with KiwiVis_UndoCommit() on the far side
+// of the core that does the work — see the block above.
 void KiwiVis_UndoPush( const char *label )
 {
-    visSnap_t snap;
-    Snapshot( &snap );
+    FlushPendingVisRecord();              // a caller that forgot its Commit
 
-    // A gesture that would restore to exactly what the newest record already
-    // holds is not a step: pressing H twice with nothing left to hide must not
-    // cost two Ctrl+Z presses.  (The construction store does not need this
-    // because its pushes are all at the head of a real edit; the hide family's
-    // are at the head of a call that very often changes nothing.)
-    if ( !s_visUndo.empty() && SameSnap( s_visUndo.back(), snap ) )
-        return;
+    Snapshot( &s_visPending );
+    s_visPendingLabel = label;            // callers pass string literals
+    s_visPendingHave  = true;
+}
 
-    s_visUndo.push_back( visSnap_t() );
-    s_visUndo.back().swap( snap );
-    if ( (int)s_visUndo.size() > KVIS_UNDO_DEPTH )
-        s_visUndo.erase( s_visUndo.begin() );
-
-    s_visRedo.clear();
-    KiwiUndo_NoteVisibilityRecord( label ? label : "hide" );
+// The far side of the pair: commit the captured record IF the gesture actually
+// moved a hide bit, else drop it.  Idempotent, and a no-op with nothing captured.
+void KiwiVis_UndoCommit()
+{
+    FlushPendingVisRecord();
 }
 
 bool KiwiVis_UndoPop()
 {
+    FlushPendingVisRecord();
     if ( s_visUndo.empty() )
         return false;
 
@@ -201,6 +255,7 @@ bool KiwiVis_UndoPop()
 
 bool KiwiVis_RedoPop()
 {
+    FlushPendingVisRecord();              // KIWI-UX (CLEANUP, C-41)
     if ( s_visRedo.empty() )
         return false;
 
@@ -218,6 +273,10 @@ void KiwiVis_ClearRedo() { s_visRedo.clear(); }
 
 void KiwiVis_UndoReset()
 {
+    // KIWI-UX (CLEANUP, C-41): an outstanding capture belongs to the map that is
+    // going away, so it is DROPPED rather than flushed.
+    s_visPendingHave = false;
+    s_visPending.clear();
     s_visUndo.clear();
     s_visRedo.clear();
 }
@@ -262,6 +321,8 @@ void KiwiVis_InvertHidden()
     for ( selbrush_t *b = active_brushes.next; b != &active_brushes; b = b->next )
         InvertOne( b, &nowHidden, &nowShown );
 
+    KiwiVis_UndoCommit();      // KIWI-UX (CLEANUP, C-41): the far side of the Push
+
     // The ported hide handlers' own invalidation (select.cpp:4182 / 4207 / 4257).
     g_nUpdateBits = -1;
     Sys_Printf( "Invert hidden: %i now hidden, %i shown.\n", nowHidden, nowShown );
@@ -290,18 +351,6 @@ bool KiwiVis_CanInvert()
 {
     return selected_brushes.next != &selected_brushes
         || active_brushes.next   != &active_brushes;
-}
-
-int KiwiVis_HiddenCount()
-{
-    int n = 0;
-    for ( selbrush_t *b = selected_brushes.next; b != &selected_brushes; b = b->next )
-        if ( Hidden( b ) )
-            ++n;
-    for ( selbrush_t *b = active_brushes.next; b != &active_brushes; b = b->next )
-        if ( Hidden( b ) )
-            ++n;
-    return n;
 }
 
 // ═════════════════════════════════════════════════════════════════════════════

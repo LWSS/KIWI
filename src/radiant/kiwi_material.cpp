@@ -18,6 +18,7 @@
 #include "kiwi_material.h"
 #include "kiwi_pick.h"                 // ROUND Y: Pick / Pick_RayFromCursor / ray_t
 #include "kiwi_selection.h"            // ROUND Y: sel_item_t, SEL_MASK_FACE, Sel_BrushLive
+#include "kiwi_str.h"                // KIWI-UX (CLEANUP, C-66): KiwiStr_ContainsNoCase
 
 #include <math.h>
 #include <string.h>
@@ -58,16 +59,12 @@ namespace
         "tools\\",
     };
 
-    bool ContainsNoCase( const char *hay, const char *needle )
-    {
-        if ( !hay || !needle || !*needle )
-            return false;
-        const size_t nlen = strlen( needle );
-        for ( const char *p = hay; *p; ++p )
-            if ( !_strnicmp( p, needle, nlen ) )
-                return true;
-        return false;
-    }
+    // KIWI-UX (CLEANUP, C-66): was a third ContainsNoCase, differing from
+    // kiwi_entbrowser.cpp's by answering FALSE for an empty needle.  Unreachable
+    // either way here — KMTL_TOOL_NAMES are non-empty literals and IsToolName
+    // guards its haystack — so it folds into KiwiStr_ContainsNoCase (kiwi_str.h)
+    // with no behaviour change.  _strnicmp is locale-sensitive; the shared body
+    // folds ASCII only, which is what a material path wants.
 
     // The channel-0 MaterialDef of a face, as the ported accessors want it
     // (non-const: Materialdef_GetName's own signature is non-const, and it is a
@@ -85,33 +82,44 @@ namespace
     {
         return m && ( ( m->lyrMtl != 0 ) + ( m->radMtl != 0 ) == 1 );
     }
+
+    // ── R1, and the accessor it reads through ───────────────────────────────
+    // KIWI-UX (CLEANUP, C-69): both of these were EXPORTED (kiwi_material.h) and
+    // nothing outside this file ever called either — `KiwiMtl_FaceIsInheritable`
+    // below is the entry point every caller actually uses.  They are file-local
+    // now; the R1 rule they implement is still documented on that function.
+    //
+    // Is `name` a TOOL material (caulk / nodraw / clip / hint / skip / portal /
+    // origin / trigger / lightgrid / anything under a "tools" path)?  NULL and
+    // the empty string answer true — an unnamed material is not something to
+    // inherit.
+    bool IsToolName( const char *name )
+    {
+        if ( !name || !*name )
+            return true;                    // unnamed is not something to inherit
+        for ( size_t i = 0; i < sizeof( KMTL_TOOL_NAMES ) / sizeof( KMTL_TOOL_NAMES[0] ); ++i )
+            if ( KiwiStr_ContainsNoCase( name, KMTL_TOOL_NAMES[i] ) )
+                return true;
+        return false;
+    }
+
+    // The channel-0 material name of a face, or NULL when it has none.
+    const char *FaceMaterialName( const face_t *f )
+    {
+        MaterialDef *md = Channel0( f );
+        if ( !HasMaterial( md ) )
+            return 0;
+        return (const char *)Materialdef_GetName( md );
+    }
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
 //  R1
 // ═════════════════════════════════════════════════════════════════════════════
-bool KiwiMtl_IsToolName( const char *name )
-{
-    if ( !name || !*name )
-        return true;                        // unnamed is not something to inherit
-    for ( size_t i = 0; i < sizeof( KMTL_TOOL_NAMES ) / sizeof( KMTL_TOOL_NAMES[0] ); ++i )
-        if ( ContainsNoCase( name, KMTL_TOOL_NAMES[i] ) )
-            return true;
-    return false;
-}
-
-const char *KiwiMtl_FaceMaterialName( const face_t *f )
-{
-    MaterialDef *md = Channel0( f );
-    if ( !HasMaterial( md ) )
-        return 0;
-    return (const char *)Materialdef_GetName( md );
-}
-
 bool KiwiMtl_FaceIsInheritable( const face_t *f )
 {
-    const char *name = KiwiMtl_FaceMaterialName( f );
-    return name && !KiwiMtl_IsToolName( name );
+    const char *name = FaceMaterialName( f );
+    return name && !IsToolName( name );
 }
 
 // ═════════════════════════════════════════════════════════════════════════════

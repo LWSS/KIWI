@@ -89,14 +89,14 @@ struct texdefSpinState_t
     float shiftVert;     // edit 1196
 };
 
-extern bool         PatchInspector_GatherPoint( patchMesh_t *def, patchPointState_t &pt );        // patchdialog.cpp:551 (sub_436E10 read)
-extern patchMesh_t *PatchInspector_GatherSelectedPatch();                                         // patchdialog.cpp:566 (GetPatchInfo read)
-extern void         PatchInspector_ApplyPoint( patchMesh_t *def, const patchPointState_t &pt );   // patchdialog.cpp:578 (0x436ef0)
-extern void         PatchInspector_Cap();                                                         // patchdialog.cpp:595 (0x4368d0)
-extern void         PatchInspector_Natural();                                                     // patchdialog.cpp:602 (0x436940)
-extern void         PatchInspector_Fit();                                                         // patchdialog.cpp:609 (0x436910)
-extern void         PatchInspector_SetTexturing( bool bAccepted, float sx, float sy, int mode );  // patchdialog.cpp:618 (0x436980)
-extern void         PatchInspector_SpinTexdef( UINT id, bool up, const texdefSpinState_t &step ); // patchdialog.cpp:640 (0x436ae0 -> sub_4370E0)
+extern bool         PatchInspector_GatherPoint( patchMesh_t *def, patchPointState_t &pt );        // patchdialog.cpp:379 (sub_436E10 read)
+extern patchMesh_t *PatchInspector_GatherSelectedPatch();                                         // patchdialog.cpp:394 (GetPatchInfo read)
+extern void         PatchInspector_ApplyPoint( patchMesh_t *def, const patchPointState_t &pt );   // patchdialog.cpp:406 (0x436ef0)
+extern void         PatchInspector_Cap();                                                         // patchdialog.cpp:423 (0x4368d0)
+extern void         PatchInspector_Natural();                                                     // patchdialog.cpp:430 (0x436940)
+extern void         PatchInspector_Fit();                                                         // patchdialog.cpp:437 (0x436910)
+extern void         PatchInspector_SetTexturing( bool bAccepted, float sx, float sy, int mode );  // patchdialog.cpp:446 (0x436980)
+extern void         PatchInspector_SpinTexdef( UINT id, bool up, const texdefSpinState_t &step ); // patchdialog.cpp:468 (0x436ae0 -> sub_4370E0)
 
 // The texdef spin control ids PatchInspector_SpinTexdef dispatches on (patchdialog.cpp:646-650),
 // copied so this panel needs no MFC resource header.  res/resource.h only carries these five

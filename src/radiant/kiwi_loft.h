@@ -228,7 +228,7 @@ class KiwiEditorCommand;
 // Steps 7 and 8 (build every segment, gate it) used to run only at COMMIT, so the
 // preview was blue whenever STATIONS existed even when the commit would refuse.
 // Rebuild now performs the whole build as a DRY RUN — the "rejection is free"
-// property kiwi_extrude.h states and kiwi_boolean.cpp's KiwiBool_WouldCarve
+// property kiwi_extrude.h states and kiwi_boolean.cpp's CarveByOneTool
 // already relies on — frees every def, and colours the bridge BAD-red unless the
 // commit would succeed.  The TANGENT->RULED retry is run in the dry pass too, so
 // when it would kick in the preview shows the RULED bridge that will ACTUALLY be
@@ -269,17 +269,55 @@ class KiwiEditorCommand;
 //     of.  Alignment follows round AN's directive for the fillet's swept surface:
 //     `Patch_KiwiCapAlign` (the Surface Inspector's CAP), because a loft strip IS
 //     the fillet arc's shape — a swept quadratic — and not a flat end cap.
+//     ROUND AY: and it now actually RUNS.  The call sat BEFORE AddBrushForPatch
+//     (this file's landing sequence was copied from the fillet before round AS
+//     moved it), so `Patch_KiwiCapAlign`'s round-AS symbiont guard took the
+//     early-out on every strip ever built and the CURVE bridge silently kept
+//     `Patch_KiwiFinishNewLike`'s naturalize instead.
 //   * NO COLLISION.  Patches are render surfaces; the standard caulk hint is
 //     printed on every creation, exactly as the patch cylinder prints it.
 //   * SPAN CAP.  width = 2*spans + 1 must stay inside the format's control grid
 //     (Patch_GenericMesh refuses a width outside 3..15, pmesh.cpp:1550), so CURVE
-//     clamps the density to KLOFT_MAX_CURVE_SEGS.  The HUD says so.
+//     clamps the density to KLOFT_MAX_CURVE_SEGS.  KIWI-UX (CLEANUP, B-16): the
+//     HUD shows the RESULTING density, which is not the same as saying the request
+//     was reduced — so the reduction is announced on the console, once, at the
+//     moment a TYPED density is cut down.  A mode flip re-clamps silently: that is
+//     the tool re-seeding itself, not an answer to a request.
 // ─────────────────────────────────────────────────────────────────────────────
 
-// CURVE mode's density ceiling: 2*7 + 1 == 15 columns, the widest control grid
-// the patch format accepts (pmesh.cpp:1550).  Nothing about the SHAPE wants more
-// — a bezier span is already curved — so this is a format bound, not a taste one.
-#define KLOFT_MAX_CURVE_SEGS    7
+// ONE PATCH's span ceiling: 2*7 + 1 == 15 columns, the widest control grid the
+// patch format accepts (Patch_GenericMesh refuses a width outside 3..15,
+// pmesh.cpp:1550, and KPATCH_MAX_WIDTH is 15 — kiwi_validity.h:135).  A FORMAT
+// bound, not a taste one.
+#define KLOFT_CURVE_SPANS_PER_PATCH  7
+// ═════════════════════════════════════════════════════════════════════════════
+//  KIWI-UX (ROUND BN, ITEM 2) — CURVE DENSITY: 7 -> 56, BY SPLITTING THE STRIP
+// ═════════════════════════════════════════════════════════════════════════════
+// USER DIRECTIVE, verbatim: *"Also allow more density within the curve loft
+// tool."*
+//
+// The old ceiling WAS the format bound above, applied to the whole span, because
+// each profile edge produced exactly ONE patch running the length of the loft.
+// Nothing forces that: a strip may be cut into CHUNKS of at most
+// KLOFT_CURVE_SPANS_PER_PATCH spans each, one patch per chunk, and the pieces are
+// geometrically continuous because
+//   * adjacent chunks SHARE their boundary station — the last even column of one
+//     is the first even column of the next, written from the same
+//     `m_stations[s]`, so they are coincident to the bit, and
+//   * the odd (handle) columns come from `SpanTangent`, which reads the
+//     NEIGHBOURING stations globally rather than the chunk — so the tangents
+//     match across a cut and the join is G1, not merely G0.
+//
+// WHAT BOUNDS THE NEW NUMBER, stated because "more" without a reason is how a
+// ceiling gets raised twice: a loft emits `chunks * ringPoints` patches (doubled
+// when Interior visible is on), so the density cap and the ring cap multiply.  At
+// 56 spans that is 8 chunks; at the KLOFT_MAX_RING ceiling of 64 profile points
+// that would be 512 patches from one gesture, which is why the BUILD gate refuses
+// on the product (KLOFT_MAX_CURVE_PATCHES) rather than on the density alone —
+// the density slider offers 56 and the tool says, in words, when a particular
+// profile cannot afford it.  Brush modes keep round AN's separate 128.
+#define KLOFT_MAX_CURVE_SEGS    56
+#define KLOFT_MAX_CURVE_PATCHES 256   // per loft, both copies counted
 #define KLOFT_DEF_SEGS_CURVE    2     // one span per 45 degrees of a right-angle bend
 #define KLOFT_CURVE_ROWS        3     // the edge's two rails + their midpoint
 
@@ -367,8 +405,24 @@ enum kiwiLoftBridge_t
 // kiwi_patchfillet.cpp's `u.rowFlip` (kiwi_patchfillet.cpp:870, honoured at
 // :1437-1443) — swap the two row ends as the control points are written.  Two
 // sided therefore writes the SAME strip twice, the second with its rows mirrored.
-// DEFAULT OFF: it doubles the patch count, and a wall the player only ever sees
-// from one side does not need it.
+//
+// ── ROUND AY: **DEFAULT ON**, and why round AT's "default off" was wrong ─────
+// USER REPORT, verbatim: "looks like the loft is still one sided, see pics."  The
+// mechanism above is right and was re-verified this round against patchInvert2
+// itself; the DEFAULT was the bug.  In THIS editor a patch's far side is not
+// merely unlit, it is never textured at all: `DrawPatches` emits the
+// PM_BACK_FACE index list at TECHNIQUE_WIREFRAME_SHADED (pmesh.cpp:10240), and
+// while the freshly built strips are still SELECTED — which is the state a user
+// is in the instant after pressing Enter, and the state in the report's
+// screenshots — that back pass is skipped entirely (the `drawFlags & 1` arm,
+// pmesh.cpp:10233-10237) so the far side shows the white selected wireframe and
+// nothing else.  Asking a mapper to opt in to a wall having two sides is asking
+// them to opt in to it not looking broken.  It stays a TOGGLE, because a
+// backdrop or a ceiling seen from one room only is a real case and the patch
+// count is real too — but the answer to "make me a curved wall" is a wall.
+// The two sheets are COINCIDENT deliberately: each is culled from the side the
+// other is drawn from, so exactly one rasterises per view direction and there is
+// nothing to z-fight.  An offset would open a seam at every silhouette edge.
 //
 // The three settings persist in the profile ini (section KLOFT_SECTION) because a
 // mapper who wants two-sided walls wants them for the whole session, and the loft

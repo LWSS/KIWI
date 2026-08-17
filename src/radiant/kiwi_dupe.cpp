@@ -17,6 +17,7 @@
 #include "mainfrm.h"        // camera_s
 
 #include "kiwi_dupe.h"
+#include "kiwi_csg.h"                 // KIWI-UX (CLEANUP, B-10): KiwiCsg_BrushUsable
 #include "kiwi_command.h"
 #include "kiwi_conselect.h"        // ROUND K — Shift+D over brush EDGES
 #include "kiwi_construct.h"        // ROUND AA, ITEM 8 — the array's line vector
@@ -28,6 +29,7 @@
 #include "kiwi_snap.h"
 #include "kiwi_transform.h"        // ROUND AA, ITEM 8 — KiwiXform_PivotOverride
 #include "kiwi_units.h"
+#include "kiwi_vec.h"     // KIWI-UX (CLEANUP, A-15): the one spelling of Dot3/Sub3/...
 
 #include <imgui/imgui.h>
 #include <math.h>
@@ -38,20 +40,26 @@
 // ── ported entry points (each verified against its definition) ──────────────
 extern int       Sys_Printf( const char *fmt, ... );                    // win_qe3.cpp:112
 extern int       g_nUpdateBits;                                         // 0x25D5A74 (mainfrm.cpp)
-extern camera_s *Ed_Camera();                                           // camwnd.cpp
+extern camera_s *Ed_Camera();                                           // camwnd.cpp:156
 extern void      CamWnd_BuildMatrix();                                  // camwnd.cpp 0x403470
 
-extern void      Clone_Selection( float gridSize );                     // select.cpp:2492 0x48F0D0
-extern void      Select_Move( const float *delta, char bSnap );         // select.cpp:2126 0x48E9C0
-extern void      Select_GetMid( float *mid );                           // select.cpp:2183 0x48FC70
+extern void      Clone_Selection( float gridSize );                     // select.cpp:2509 0x48F0D0
+extern void      Select_Move( const float *delta, char bSnap );         // select.cpp:2153 0x48E9C0
+extern void      Select_GetMid( float *mid );                           // select.cpp:2210 0x48FC70
 extern void      Select_RotateAxis( int axis, float deg,
-                                    float (*rot_around)[4][3] );        // select.cpp:2337 0x48FF40
+                                    float (*rot_around)[4][3] );        // select.cpp:2364 0x48FF40
 extern void      Select_ApplyMatrix_SelectedBrushes( int bSnap, float *mat,
-                                                     float deg, char bSwap ); // select.cpp:2215 0x48FD10
-extern void      sub_47B940( brush_t *def );                            // brush.cpp:5811 (Brush_UpdateSpecialMaterialFlag)
-extern float     grid_sizes[];                                          // engine_stubs.cpp:691 (0x6DDE5C)
+                                                     float deg, char bSwap ); // select.cpp:2242 0x48FD10
+extern void      sub_47B940( brush_t *def );                            // brush.cpp:5822 (Brush_UpdateSpecialMaterialFlag)
+extern float     grid_sizes[];                                          // engine_stubs.cpp:771 (0x6DDE5C)
 
-extern void      Radiant_ExecCommand( unsigned int cmdId );             // mainfrm.cpp:3894
+extern void      Radiant_ExecCommand( unsigned int cmdId );             // mainfrm.cpp:4083
+// KIWI-UX (CLEANUP, B-28): FILE SCOPE, not block scope.  Round AI shipped a link
+// error from a block-scope extern that MSVC mangled with its enclosing namespace;
+// kiwi_uv.cpp carries the full account.  This is the declaration that used to sit
+// inside KiwiDupe_RegisterCommands.
+extern bool      Radiant_RegisterCommand( const char *name, byte vk, byte mods,
+                                          int commandId );              // mainfrm.cpp:1340
 
 // ROUND J — the CREATION undo bracket for Duplicate (see kiwi_dupe.h).  Same
 // four entry points KiwiCmd_UndoBegin/Commit use (kiwi_command.cpp:49-53), minus
@@ -74,11 +82,6 @@ namespace
     // ghost — it is the INPUT the ghosts were derived from, not another copy.
     const float KDUP_COL_LINE[3]  = { 1.00f, 0.78f, 0.22f };
 
-    inline float Dot3( const float *a, const float *b )
-    {
-        return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-    }
-    inline void Copy3( const float *a, float *o ) { o[0]=a[0]; o[1]=a[1]; o[2]=a[2]; }
 
     // ── shakeout E: the numeric FIELD table (kiwi_command.h NumericFields) ──
     // STATIC storage — the numeric layer copies the struct but never the label.
@@ -101,11 +104,6 @@ namespace
         { "count",   KNUM_COUNT,  false },
         { "spacing", KNUM_LENGTH, true  },
     };
-    inline void Sub3( const float *a, const float *b, float *o )
-    { o[0]=a[0]-b[0]; o[1]=a[1]-b[1]; o[2]=a[2]-b[2]; }
-    inline void Mad3( const float *a, const float *d, float s, float *o )
-    { o[0]=a[0]+d[0]*s; o[1]=a[1]+d[1]*s; o[2]=a[2]+d[2]*s; }
-    inline float Len3( const float *a ) { return sqrtf( Dot3( a, a ) ); }
 
     bool RayPlane( const ray_t &ray, const float *pt, const float *n, float *out )
     {
@@ -126,93 +124,23 @@ namespace
     // across.  Doing it by hand is really hard and pivot (V) support needs to be
     // there as well."
     //
-    // This is kiwi_split.cpp:251 PickLineAt with its cut-specific payload removed,
-    // and it is a DELIBERATE second copy rather than a shared export, for the same
-    // reason the cut has its own: the two answer different questions about the same
-    // scan.  Cut needs a segment plus a brush face plus a brush edge resolved
-    // together and ranked against each other; the array needs a segment and nothing
-    // else.  Twenty lines of the same loop is cheaper than an export whose result
-    // struct has to carry both tools' payloads.
-    //
-    // WHY NOT KiwiConSel_PickAt, which is the file that owns construction picking:
-    // kiwi_split.cpp:198-205 wrote the reason out in full and it is unchanged here.
-    // That entry point answers at the granularity the CURRENT SELECTION MODE asks
-    // for (KindForMode), and in Object / Face / All mode it returns KCONSEL_OBJECT
-    // with index -1 — a whole polyline, with no segment named.  The array needs ONE
-    // segment whatever mode the user happens to be in, because a polyline is not a
-    // direction, so it scans segments directly.  The TOLERANCE is the shared
-    // KCON_LINE_PIXELS (10 px, kiwi_construct.h:211), so the clickbox is exactly the
-    // one every other construction pick uses.
+    // KIWI-UX (CLEANUP, PickLineAt): the twenty-line scan under this was a
+    // DELIBERATE second copy of kiwi_split.cpp's PickLineAt, argued on the
+    // grounds that the two tools want different PAYLOADS.  They do — and the
+    // payloads are all that differed, so the SCAN moved to
+    // KiwiCon_PickSegmentAt (kiwi_construct.h) and this keeps only its own.
+    // The "why not KiwiConSel_PickAt" reasoning moved with it.
     bool PickConstructionSegment( int imgX, int imgY, float *outA, float *outB,
                                   int *outObj, int *outSeg )
     {
-        if ( !KiwiCon_ShowConstruction() )
-            return false;                       // hidden geometry is not clickable
-
-        const float curX = (float)imgX;
-        const float curY = (float)imgY;
-        float bestA[3], bestB[3], bestDist = 0.0f;
-        int   bestObj = -1, bestSeg = -1;
-        bool  have = false;
-
-        const int count = KiwiCon_Count();
-        for ( int i = 0; i < count; ++i )
-        {
-            const kconObject_t *o = KiwiCon_At( i );
-            // A hidden object is INERT, not merely invisible (kiwi_construct.h
-            // HIDDEN) — it is not drawn, so it must not be pickable either.
-            if ( !o || o->hidden )
-                continue;
-            const int segs = KiwiCon_SegmentCount( *o );
-            for ( int s = 0; s < segs; ++s )
-            {
-                float wa[3], wb[3], ax, ay, bx, by;
-                if ( !KiwiCon_SegmentWorld( *o, s, wa, wb ) )
-                    break;
-                if ( !Pick_WorldToImage( wa, &ax, &ay ) || !Pick_WorldToImage( wb, &bx, &by ) )
-                    continue;                   // an end behind the eye — skip whole
-                const float ex = bx - ax, ey = by - ay;
-                const float len2 = ex * ex + ey * ey;
-                float t = 0.0f;
-                if ( len2 > 1.0e-6f )
-                {
-                    t = ( ( curX - ax ) * ex + ( curY - ay ) * ey ) / len2;
-                    if ( t < 0.0f ) t = 0.0f;
-                    if ( t > 1.0f ) t = 1.0f;
-                }
-                const float dx = ax + ex * t - curX;
-                const float dy = ay + ey * t - curY;
-                const float d  = sqrtf( dx * dx + dy * dy );
-                if ( d > KCON_LINE_PIXELS )
-                    continue;
-                if ( have && d >= bestDist )
-                    continue;
-                have = true;  bestDist = d;
-                Copy3( wa, bestA );  Copy3( wb, bestB );
-                bestObj = i;  bestSeg = s;
-            }
-        }
-        if ( !have )
-            return false;
-        if ( outA )   Copy3( bestA, outA );
-        if ( outB )   Copy3( bestB, outB );
-        if ( outObj ) *outObj = bestObj;
-        if ( outSeg ) *outSeg = bestSeg;
-        return true;
+        return KiwiCon_PickSegmentAt( imgX, imgY, outA, outB, outObj, outSeg, 0 );
     }
 
     // A brush instance Clone_Selection will actually copy (its own two skips).
-    bool Cloneable( const selbrush_t *b )
-    {
-        if ( !b || !b->def )
-            return false;
-        if ( b->patch )
-            return false;
-        const entity_s *owner = b->owner;
-        if ( !owner || !owner->def || !owner->def->eclass )
-            return false;
-        return !owner->def->eclass->fixedsize;
-    }
+    // KIWI-UX (CLEANUP, B-10): the same four tests kiwi_csg.cpp / kiwi_autobool.cpp
+    // ran, written with the eclass null-check folded into the owner conjunction —
+    // the same truth table.  KiwiCsg_BrushUsable (kiwi_csg.h) is the one spelling.
+    inline bool Cloneable( const selbrush_t *b ) { return KiwiCsg_BrushUsable( b ); }
 
     int CloneableSelectedCount()
     {
@@ -859,23 +787,15 @@ namespace
             }
         }
 
+        // KIWI-UX (CLEANUP, BoxEdges): the corner expansion and the 12-edge table
+        // are KiwiBox_Corners / KIWI_BOX_EDGE in kiwi_lines.h now — this was one
+        // of three verbatim copies of the same box.
         static bool DrawBox( const float *mins, const float *maxs )
         {
-            float v[8][3];
-            for ( int i = 0; i < 8; ++i )
-            {
-                v[i][0] = ( i & 1 ) ? maxs[0] : mins[0];
-                v[i][1] = ( i & 2 ) ? maxs[1] : mins[1];
-                v[i][2] = ( i & 4 ) ? maxs[2] : mins[2];
-            }
-            static const int E[12][2] =
-            {
-                {0,1},{1,3},{3,2},{2,0},
-                {4,5},{5,7},{7,6},{6,4},
-                {0,4},{1,5},{2,6},{3,7},
-            };
-            for ( int e = 0; e < 12; ++e )
-                if ( !KiwiLines_Add( v[E[e][0]], v[E[e][1]] ) )
+            float v[KIWI_BOX_CORNERS][3];
+            KiwiBox_Corners( mins, maxs, v );
+            for ( int e = 0; e < KIWI_BOX_EDGES; ++e )
+                if ( !KiwiLines_Add( v[KIWI_BOX_EDGE[e][0]], v[KIWI_BOX_EDGE[e][1]] ) )
                     return false;
             return true;
         }
@@ -1184,7 +1104,6 @@ bool KiwiDupe_DispatchInstant( unsigned int cmdId )
 // ─── registration + lookup ───────────────────────────────────────────────────
 void KiwiDupe_RegisterCommands()
 {
-    extern bool Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId );
     // Unbound: the CLASSIC-profile bindings.  The ARRAYS still claim no key; the
     // modern profile gives Shift+D to DUPLICATE (round J), which is what
     // Plasticity binds it to (default-keymap.ts:280 `shift-d` ->
@@ -1224,16 +1143,23 @@ void KiwiDupe_MenuItems()
     const bool canMirror = KiwiDupe_CanMirror();
     const bool canArray  = KiwiDupe_CanArray();
 
+    // KIWI-UX (CLEANUP, B-21): the block tooltip is collected from EVERY button in the
+    // block.  ImGui::IsItemHovered() after the loop refers to the LAST item submitted,
+    // so a tip meant for X/Y/Z only ever appeared over Z.
+    bool mirrorHover = false;
     ImGui::BeginDisabled( !canMirror );
     ImGui::TextDisabled( "Mirror" );
     ImGui::SameLine();
     if ( ImGui::Button( "X##kiwimirror" ) ) Radiant_ExecCommand( (unsigned int)KDUP_ID_FLIP_X );
+    mirrorHover = mirrorHover || ImGui::IsItemHovered();
     ImGui::SameLine();
     if ( ImGui::Button( "Y##kiwimirror" ) ) Radiant_ExecCommand( (unsigned int)KDUP_ID_FLIP_Y );
+    mirrorHover = mirrorHover || ImGui::IsItemHovered();
     ImGui::SameLine();
     if ( ImGui::Button( "Z##kiwimirror" ) ) Radiant_ExecCommand( (unsigned int)KDUP_ID_FLIP_Z );
+    mirrorHover = mirrorHover || ImGui::IsItemHovered();
     ImGui::EndDisabled();
-    if ( ImGui::IsItemHovered() )
+    if ( mirrorHover )
         ImGui::SetTooltip( "Mirrors the selection about the selection mid\n"
                            "(the ported Select_FlipAxis; fixed-size entities\n"
                            "also get their `angles` key flipped)." );
@@ -1249,14 +1175,17 @@ void KiwiDupe_MenuItems()
         ImGui::SetTooltip( "Clones the selection and enters Move, paused —\n"
                            "drag a gizmo handle or type a distance, then RMB/Enter." );
 
+    bool arrayHover = false;               // KIWI-UX (CLEANUP, B-21), as above
     ImGui::BeginDisabled( !canArray );
     if ( ImGui::Button( "Array (Linear)" ) )
         Radiant_ExecCommand( (unsigned int)KIWI_CMD_ARRAY_LINEAR );
+    arrayHover = arrayHover || ImGui::IsItemHovered();
     ImGui::SameLine();
     if ( ImGui::Button( "Array (Radial)" ) )
         Radiant_ExecCommand( (unsigned int)KIWI_CMD_ARRAY_RADIAL );
+    arrayHover = arrayHover || ImGui::IsItemHovered();
     ImGui::EndDisabled();
-    if ( ImGui::IsItemHovered() )
+    if ( arrayHover )
     {
         if ( !canArray )
             ImGui::SetTooltip( "Select at least one ordinary brush.\n"

@@ -21,12 +21,10 @@
 
 // ── shell bridge (verified against its definition) ──────────────────────────
 extern bool ImGuiShell_CameraImageRect( float *x, float *y, float *w, float *h );  // imgui_shell.cpp
-extern int  g_nUpdateBits;                                                         // mainfrm.cpp
+extern int  g_nUpdateBits;                                                         // engine_stubs.cpp:773
 
 namespace
 {
-    bool s_visible = false;
-
     // Geometry.  Deliberately narrow: this is a strip of controls beside a live
     // gesture, not a properties editor, and every pixel it takes is a pixel of the
     // model the user is looking at.  Plasticity's own dialog is `w-96` = 24rem =
@@ -112,15 +110,8 @@ namespace
     }
 }
 
-bool KiwiCmdOpts_Visible()
-{
-    return s_visible;
-}
-
 void KiwiCmdOpts_Draw()
 {
-    s_visible = false;
-
     KiwiEditorCommand *cmd = KiwiCmd_Active();
     if ( !cmd )
         return;
@@ -132,8 +123,6 @@ void KiwiCmdOpts_Draw()
     float ix, iy, iw, ih;
     if ( !ImGuiShell_CameraImageRect( &ix, &iy, &iw, &ih ) )
         return;                       // no camera image yet — nothing to anchor to
-
-    s_visible = true;
 
     ImGui::SetNextWindowPos( ImVec2( ix + KOPT_INSET, iy + ih * KOPT_TOPFRAC ),
                              ImGuiCond_Always );

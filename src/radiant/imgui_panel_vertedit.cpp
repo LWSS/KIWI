@@ -45,7 +45,7 @@
 #include "radiant_ui_actions.h"
 
 // ── verteditdlg.cpp bindings ──────────────────────────────────────────────────
-extern int g_nUpdateBits;                    // 0x25D5A74 (engine_stubs.cpp), as verteditdlg.cpp:23
+extern int g_nUpdateBits;                    // 0x25D5A74 (engine_stubs.cpp), as verteditdlg.cpp:20
 
 // One [Apply] pass snapshot: the four R/G/B/A slider values and the two enable check
 // boxes the paint consults.
@@ -60,7 +60,7 @@ struct vertEditState_t
     bool doAlpha;         // IDC_VED_CHK_ALPHA  (binary CButton @this+516)
 };
 
-extern void VertEditDlg_Apply( const vertEditState_t &st );   // 0x461210 (verteditdlg.cpp:69)
+extern void VertEditDlg_Apply( const vertEditState_t &st );   // 0x461210 (verteditdlg.cpp:66)
 
 // ── panel state ───────────────────────────────────────────────────────────────
 static bool s_showVertEdit = false;

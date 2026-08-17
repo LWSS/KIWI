@@ -4503,6 +4503,12 @@ bool R_ResetDevice()
         //   • ImGui's DX9 vertex/index buffers — recreated inside any NewFrame;
         //     ImGui_ImplDX9_InvalidateDeviceObjects null-checks each handle.
         //   • the RTT viewport textures — FreeSlot null-checks (radiant_rtt.cpp:24).
+        //     KIWI-UX (ROUND AX, ITEM 1): "viewport" was doing too much work in that
+        //     sentence.  RTT_ReleaseForReset covers the four viewport slots AND the
+        //     standalone entity-thumbnail slot — the latter only since round AX, because
+        //     the release loop iterated the slot ARRAY and the thumbnail slot is not in
+        //     it.  That one un-released D3DPOOL_DEFAULT render target is what made every
+        //     Reset() on this path return D3DERR_INVALIDCALL forever.  §75.
         //   • the unmanaged (default-pool) images — Image_Release NULLs basemap
         //     (r_image.cpp:185-192); a map load that is still running registers more of
         //     them while the device is down, which is precisely how this failure got
@@ -4696,6 +4702,18 @@ bool R_CheckLostDevice()
             return true;
 
         R_SyncRenderThread();
+#ifdef KISAK_RADIANT
+        // KIWI-UX (ROUND AX, ITEM 1): name WHERE and WITH WHAT the loss was first seen.
+        // Round AD made the RECOVERY loud but left the loss itself silent, so a report
+        // could say "Reset keeps failing" without saying what took the device down.  The
+        // FIRST HRESULT of an episode is the discriminator: D3DERR_DEVICELOST /
+        // D3DERR_DRIVERINTERNALERROR is the driver (TDR, mode change, another app), while
+        // anything else points back at us.  One line per episode; see kiwi_devicereset.cpp.
+        {
+            extern void KiwiDevice_NoteLoss(const char *where, long hr);   // radiant/kiwi_devicereset.cpp
+            KiwiDevice_NoteLoss("R_CheckLostDevice (inside R_IssueRenderCommands)", (long)hr);
+        }
+#endif
         dx.deviceLost = 1;
     }
 
@@ -4807,6 +4825,12 @@ char __cdecl R_TestDevice()
         }
         else
         {
+#ifdef KISAK_RADIANT
+            // KIWI-UX (ROUND AX, ITEM 1) — the paint-path twin of the note in
+            // R_CheckLostDevice above.  Same one-line-per-episode reporter.
+            extern void KiwiDevice_NoteLoss(const char *where, long hr);   // radiant/kiwi_devicereset.cpp
+            KiwiDevice_NoteLoss("R_TestDevice (frame WM_PAINT)", (long)coopHr);
+#endif
             dx.deviceLost = 1;
         }
     }

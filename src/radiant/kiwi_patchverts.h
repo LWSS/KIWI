@@ -35,7 +35,7 @@
 // Three independent kills, any one of which is fatal on its own:
 //
 //   KILL 1 — THE CAMERA NEVER REACHES `Drag_Begin`.  The only camera route into it
-//     is CamWnd_OnLButtonDown (camwnd.cpp:3358), and `KiwiVP_CameraButtonDown`
+//     is CamWnd_OnLButtonDown (camwnd.cpp:3444), and `KiwiVP_CameraButtonDown`
 //     returns true for a bare LMB unconditionally (kiwi_viewport.cpp:639-677), so
 //     `VP_Down` is skipped (imgui_shell.cpp:386-391).  Move and up are skipped the
 //     same way.  kiwi_viewport.cpp:394-404 already records that the legacy 3D
@@ -83,7 +83,7 @@
 // ── UNDO ─────────────────────────────────────────────────────────────────────
 // One record per drag, and it is the Move command's existing bracket:
 // `KiwiCmd_UndoBegin` + `UndoCoverBrush` per touched brush BEFORE the first
-// mutation, `KiwiCmd_UndoCommit` at the end (kiwi_command.cpp:2073-2115, the
+// mutation, `KiwiCmd_UndoCommit` at the end (kiwi_command.cpp:2297-2336, the
 // pattern kiwi_patchfillet.cpp:1053-1066 documents).  A patch's def is cloned
 // through `Brush_FullClone_sub475E80`, whose FIRST branch is the patch branch
 // (brush.cpp:7386-7398 → `Patch_Duplicate`, the whole 20 556-byte struct including

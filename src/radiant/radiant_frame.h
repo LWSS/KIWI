@@ -48,6 +48,34 @@ bool Radiant_TryHotkey( unsigned int vk );                // was CMainFrame::Try
 void Radiant_ExecCommand( unsigned int cmdId );           // the single id->action entry point
 bool Radiant_DispatchCommandDirect( unsigned int cmdId ); // the Phase-4 direct command table
 
+// ─── The command table (KIWI-UX, CLEANUP C-6) ────────────────────────────────
+// g_radiantCommands is a raw array of these, so every consumer needs the LAYOUT,
+// not just the pointer.  It used to be copy-pasted verbatim into SEVEN
+// translation units, each carrying a comment saying it "MUST MATCH mainfrm.cpp
+// verbatim ... there is no shared header".  There is: this one, which is the
+// stated home of the shell-agnostic frame API and which mainfrm.cpp already
+// includes.  Seven identical definitions of one struct walked by a raw array is
+// an ODR violation waiting for the first field to move.
+//   `byte` is universal/q_shared.h's typedef, reached through stdafx.h above.
+struct RadiantCommand { const char *name; byte vk; byte mods; int commandId; };
+
+// The table itself.  Mutable is for the keymap profiles, which rebind in place.
+int  Radiant_GetCommandTable( const RadiantCommand **out );
+int  Radiant_GetCommandTableMutable( RadiantCommand **out );
+
+// Registration into the KIWI extension block.  Alias = a second name/binding for
+// an id that is already registered.  Both return false on a full table or a
+// duplicate id (mainfrm.cpp says which, loudly, on the full arm).
+bool Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId );
+bool Radiant_RegisterCommandAlias( const char *name, byte vk, byte mods, int commandId );
+
+// Rebinding + the two UI-independent halves of a command-list line (pure
+// formatters, no listbox and no CFile — split out of sub_40BBC0).
+void        Radiant_ResetCommandBindings();
+void        Radiant_LoadCommandMap();                                  // the ported 0x421230
+const char *CommandList_KeyName( const RadiantCommand &c, char keybuf[8] );
+void        CommandList_Mods( const RadiantCommand &c, char mods[64] );
+
 // ─── The unsaved-changes prompts + the File-menu map flows (U-CMD-2) ─────────────
 // All plain Win32: the prompts are MessageBoxA over ::GetActiveWindow(), and the file flows
 // reach the shell only through s_currentMapPath + g_qeglobals.d_hwndMain (the frame HWND).
@@ -57,6 +85,11 @@ bool Radiant_FileSaveAs();                                // was CMainFrame::OnF
 void Radiant_FileNew();                                   // was CMainFrame::OnFileNew         (0x423AA0)
 void Radiant_FileOpen();                                  // was CMainFrame::OnFileOpen        (0x423AE0)
 void Radiant_FileSave();                                  // was CMainFrame::OnFileSave
+// KIWI-UX (ROUND BF): read-only view of s_currentMapPath (mainfrm.cpp:488), "" when the
+// map is untitled.  The Build & Run dialog (kiwi_launch.cpp) needs the AUTHORITATIVE saved
+// path to derive the compiler's -loadFrom source and the map name; `currentmap` (map.cpp:44)
+// is not that path -- prefab editing stomps it (map.cpp:1797-1813).
+const char *Radiant_CurrentMapPath();                     // mainfrm.cpp:495
 void Radiant_FileExit();                                  // was CMainFrame::OnFileExit (posts WM_CLOSE)
 bool Radiant_FrameCloseAllowed();                         // the guard half of CMainFrame::OnClose (0x422220)
 
@@ -118,9 +151,9 @@ extern bool g_radiantFirstLightRendererReady;
 // Each registers its own window class on first use and returns a WS_CHILD|WS_VISIBLE view
 // parented to `parent`.  The CALLER owns the g_qeglobals.d_hwnd* registration and the
 // creation ORDER — see the caller-obligation comment block at the head of each raw shell
-// (xywnd.cpp:4595, camwnd.cpp:3880, z.cpp:750, texwnd.cpp:2245) and the boot table in
+// (xywnd.cpp:4595, camwnd.cpp:3966, z.cpp:750, texwnd.cpp:2283) and the boot table in
 // radiant_main.cpp.
 HWND XYWnd_CreateRaw ( HWND parent, int x, int y, int w, int h );   // xywnd.cpp:4694
-HWND CamWnd_CreateRaw( HWND parent, int x, int y, int w, int h );   // camwnd.cpp:3987
+HWND CamWnd_CreateRaw( HWND parent, int x, int y, int w, int h );   // camwnd.cpp:4073
 HWND ZWnd_CreateRaw  ( HWND parent, int x, int y, int w, int h );   // z.cpp:814
-HWND TexWnd_CreateRaw( HWND parent, int x, int y, int w, int h );   // texwnd.cpp:2326
+HWND TexWnd_CreateRaw( HWND parent, int x, int y, int w, int h );   // texwnd.cpp:2364

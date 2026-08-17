@@ -31,6 +31,7 @@
 #include "kiwi_snap.h"
 #include "kiwi_units.h"
 #include "kiwi_validity.h"
+#include "kiwi_vec.h"     // KIWI-UX (CLEANUP, A-15): the one spelling of Dot3/Sub3/...
 
 #include <math.h>
 #include <stdio.h>
@@ -41,10 +42,10 @@
 extern int          Sys_Printf( const char *fmt, ... );                       // win_qe3.cpp:112
 extern int          g_nUpdateBits;                                            // 0x25D5A74 (mainfrm.cpp)
 
-extern unsigned int Brush_RemoveFace( brush_t *b, unsigned int faceIndex );   // brush.cpp:332  0x471640
-extern selbrush_t  *Brush_AddToList( brush_t *def, entity_s *owner );         // brush.cpp:656  0x475980
-extern void         Brush_AddToList2( selbrush_t *b );                        // brush.cpp:910  0x4765A0
-extern void         Select_Deselect( int a1 );                                // select.cpp:1428 0x48E800 (int, NOT char — mangling)
+extern unsigned int Brush_RemoveFace( brush_t *b, unsigned int faceIndex );   // brush.cpp:343  0x471640
+extern selbrush_t  *Brush_AddToList( brush_t *def, entity_s *owner );         // brush.cpp:667  0x475980
+extern void         Brush_AddToList2( selbrush_t *b );                        // brush.cpp:921  0x4765A0
+extern void         Select_Deselect( int a1 );                                // select.cpp:1445 0x48E800 (int, NOT char — mangling)
 
 // pmesh.cpp — the patch allocator, the KIWI-UX material/tessellation tail, and
 // the symbiont-brush maker.  MakeNewPatch and AddBrushForPatch are the binary's
@@ -52,7 +53,7 @@ extern void         Select_Deselect( int a1 );                                //
 // the two file-static workers Patch_BrushToMesh runs between them.
 extern patchMesh_t *MakeNewPatch();                                           // pmesh.cpp:136  0x437AC0
 extern brush_t     *AddBrushForPatch( patchMesh_t *p, entity_s *world_ent );  // pmesh.cpp:840  0x4386A0
-extern void         Patch_KiwiFinishNew( patchMesh_t *p );                    // pmesh.cpp:1556 (ROUND Q)
+extern void         Patch_KiwiFinishNew( patchMesh_t *p );                    // pmesh.cpp:1558 (ROUND Q)
 // ROUND AJ, ITEM 2 — the same tail with the naturalize scale taken from the
 // PARENT FACE's texdef instead of the editor default (pmesh.cpp:1508).
 extern void         Patch_KiwiFinishNewLike( patchMesh_t *p, const texdef_sub_t *srcTex );
@@ -70,7 +71,13 @@ extern void         Patch_Rebuild( patchMesh_t *p, char doBounds );           //
 // undo.cpp — the bracket head KiwiCmd_UndoBegin does not cover for an EDGE
 // selection (kiwi_selection.h DESIGN NOTE 2: edges are not on selected_brushes).
 extern void         Undo_AddBrush( entity_brush_s *pBrushInst );              // undo.cpp:494  0x45E680
-extern void         Undo_AddEntity( int a1 );                                 // undo.cpp:601  0x45E8B0
+
+// KIWI-UX (CLEANUP, B-28): FILE SCOPE, not block scope.  Round AI shipped a link
+// error from a block-scope extern that MSVC mangled with its enclosing namespace;
+// kiwi_uv.cpp carries the full account.  This is the declaration that used to sit
+// inside KiwiPatchFillet_RegisterCommands.
+extern bool         Radiant_RegisterCommand( const char *name, byte vk, byte mods,
+                                             int commandId );                 // mainfrm.cpp:1340
 
 namespace
 {
@@ -78,33 +85,16 @@ namespace
     const float KPF_MATCH_TOL = 0.1f;      // the ported FindPoint dedup tolerance
     const float KPF_PI        = 3.14159265358979f;
 
+    // KIWI-UX (CLEANUP, B-11): KPF_MAX_SPANS is the format bound expressed as
+    // spans, exactly as KLOFT_MAX_CURVE_SEGS is.  Bind it so the two cannot part.
+    static_assert( KPF_MAX_SPANS * 2 + 1 == KPATCH_MAX_WIDTH,
+                   "KPF_MAX_SPANS must be (KPATCH_MAX_WIDTH - 1) / 2" );
+
     const float KPF_COL_OK [3] = { 0.55f, 0.95f, 0.80f };   // the arc preview
     const float KPF_COL_BAD[3] = { 1.00f, 0.30f, 0.25f };
     const float KPF_COL_EDGE[3]= { 0.45f, 0.62f, 0.72f };   // the edges being filleted
 
-    // ── small vector helpers (same spellings as kiwi_bevel.cpp) ─────────────
-    inline float Dot3( const float *a, const float *b )
-    { return a[0]*b[0] + a[1]*b[1] + a[2]*b[2]; }
-    inline void Copy3( const float *a, float *o ) { o[0]=a[0]; o[1]=a[1]; o[2]=a[2]; }
-    inline void Sub3( const float *a, const float *b, float *o )
-    { o[0]=a[0]-b[0]; o[1]=a[1]-b[1]; o[2]=a[2]-b[2]; }
-    inline void Mad3( const float *a, const float *d, float s, float *o )
-    { o[0]=a[0]+d[0]*s; o[1]=a[1]+d[1]*s; o[2]=a[2]+d[2]*s; }
-    inline void Cross3( const float *a, const float *b, float *o )
-    {
-        o[0] = a[1]*b[2] - a[2]*b[1];
-        o[1] = a[2]*b[0] - a[0]*b[2];
-        o[2] = a[0]*b[1] - a[1]*b[0];
-    }
-    inline float Len3( const float *a ) { return sqrtf( Dot3( a, a ) ); }
-    bool Norm3( float *v )
-    {
-        const float l = Len3( v );
-        if ( !( l > 1.0e-6f ) )
-            return false;
-        v[0] /= l; v[1] /= l; v[2] /= l;
-        return true;
-    }
+    // ── local predicate over the shared vec helpers (kiwi_vec.h) ────────────
     inline bool PointNear( const float *a, const float *b, float tol )
     {
         float d[3];
@@ -112,21 +102,9 @@ namespace
         return fabsf( d[0] ) <= tol && fabsf( d[1] ) <= tol && fabsf( d[2] ) <= tol;
     }
 
-    // Closest point on the line (pt, axis) to the ray — kiwi_bevel.cpp's RayAxis.
-    bool RayAxis( const ray_t &ray, const float *pt, const float *axis, float *out )
-    {
-        float w0[3];
-        Sub3( pt, ray.origin, w0 );
-        const float b = Dot3( axis, ray.dir );
-        const float d = Dot3( axis, w0 );
-        const float e = Dot3( ray.dir, w0 );
-        const float den = 1.0f - b * b;
-        // ROUND AI, ITEM 2 — the sample gate; see kiwi_camera.h.
-        if ( fabsf( den ) < KCAM_RAYAXIS_MIN_DEN )
-            return false;
-        Mad3( pt, axis, ( b * e - d ) / den, out );
-        return true;
-    }
+    // KIWI-UX (CLEANUP, RayAxis): the local copy is gone — it was one of four
+    // byte-identical bodies.  It is KiwiCam_RayAxis (kiwi_camera.h) now, beside
+    // the KCAM_RAYAXIS_MIN_DEN gate every copy already cited.
 
     winding_t *WindingOf( const selbrush_t *b, int faceIndex )
     {
@@ -149,19 +127,9 @@ namespace
         return true;
     }
 
-    // undo: cover a brush the bracket's Undo_AddBrushList did not.  Identical to
-    // kiwi_bevel.cpp's / kiwi_transform.cpp's UndoCoverBrush, and duplicated for
-    // the same stated reason — it is four lines, and exporting it would put a
-    // private undo detail in a public header.
-    void UndoCoverBrush( selbrush_t *node )
-    {
-        if ( !node || !node->def )
-            return;
-        entity_s *owner = node->def->owner;
-        if ( owner && owner->eclass && owner->eclass->fixedsize )
-            Undo_AddEntity( (int)(intptr_t)owner );
-        Undo_AddBrush( (entity_brush_s *)node->def );
-    }
+    // KIWI-UX (CLEANUP, UndoCoverBrush): the local copy is gone — this was one
+    // of five verbatim bodies.  It is KiwiCmd_UndoCoverBrush (kiwi_command.h)
+    // now, beside the bracket whose blind spot it exists to fill.
 
     // ── shakeout E: the numeric FIELD tables.  STATIC storage — the numeric layer
     //    copies the struct but never the label.
@@ -514,9 +482,22 @@ namespace
             const int made = LandPatches();
             // ROUND AJ, ITEM 2: three patches per edge now — the arc plus the two
             // end caps that seal it against the chamfer face (see LandCaps).
+            // KIWI-UX (CLEANUP, B-39): and the skips are named, in the shape
+            // Gather() already uses in this file, so a count lower than 3x the edge
+            // count has a reason attached rather than being read as a design choice.
+            char skips[160];
+            skips[0] = '\0';
+            if ( m_skips.deadBrush || m_skips.capRange || m_skips.alloc )
+                _snprintf( skips, sizeof( skips ),
+                           "  Skipped: %i edge(s) whose solid went away, %i cap(s) "
+                           "outside the %i..%i-column patch format, %i patch(es) that "
+                           "could not be allocated.",
+                           m_skips.deadBrush, m_skips.capRange,
+                           KPATCH_MIN_WIDTH, KPATCH_MAX_WIDTH, m_skips.alloc );
+            skips[sizeof( skips ) - 1] = '\0';
             Sys_Printf( "Filleted %i edge(s) — %i patch(es) at radius %g "
-                        "(arc + sealed ends).\n",
-                        (int)m_units.size(), made, (double)m_radius );
+                        "(arc + sealed ends).%s\n",
+                        (int)m_units.size(), made, (double)m_radius, skips );
             Reset();
             g_nUpdateBits = -1;
         }
@@ -893,7 +874,7 @@ namespace
             ray_t ray;
             float p[3];
             const filletUnit_t &d = m_units[0];
-            if ( !CursorRay( &ray ) || !RayAxis( ray, d.e.mid, d.e.n, p ) )
+            if ( !CursorRay( &ray ) || !KiwiCam_RayAxis( ray, d.e.mid, d.e.n, p ) )
                 return;
             float rel[3];
             Sub3( p, d.e.mid, rel );
@@ -913,7 +894,7 @@ namespace
             ray_t ray;
             float p[3];
             const filletUnit_t &d = m_units[0];
-            if ( !CursorRay( &ray ) || !RayAxis( ray, d.e.mid, d.e.n, p ) )
+            if ( !CursorRay( &ray ) || !KiwiCam_RayAxis( ray, d.e.mid, d.e.n, p ) )
                 return;
             float rel[3];
             Sub3( p, d.e.mid, rel );
@@ -953,7 +934,7 @@ namespace
             // the whole gesture is inert.  Numeric entry (m_hasNum, below) is
             // deliberately OUTSIDE the gate: it never went through the cursor.
             if ( m_grabbed
-              && m_haveStart && CursorRay( &ray ) && RayAxis( ray, drv.e.mid, drv.e.n, p ) )
+              && m_haveStart && CursorRay( &ray ) && KiwiCam_RayAxis( ray, drv.e.mid, drv.e.n, p ) )
             {
                 float rel[3];
                 Sub3( p, drv.e.mid, rel );
@@ -981,7 +962,7 @@ namespace
                 //
                 // This was the last surviving copy of round Z's hand-rolled
                 // `dot( snap.position - ref, axis )` on a gesture that is genuinely
-                // one-axis: the drag itself is RayAxis( ray, drv.e.mid, drv.e.n )
+                // one-axis: the drag itself is KiwiCam_RayAxis( ray, drv.e.mid, drv.e.n )
                 // just above, and the latch uses the same axis.  Arm 6 (SNAP_FACE)
                 // is live here — this is a drag command, not a plane-placement tool
                 // (kiwi_snap.cpp gates arm 6 on toolActive), and PICKF_EXCLUDE_SELECTED
@@ -1178,7 +1159,7 @@ namespace
             m_undoOpen = true;
             for ( size_t i = 0; i < m_units.size(); ++i )
                 if ( DefFirstIndex( i ) == i )
-                    UndoCoverBrush( m_units[i].e.node );
+                    KiwiCmd_UndoCoverBrush( m_units[i].e.node );
         }
 
         // ── the patch: where its rows sit along the edge ────────────────────
@@ -1417,22 +1398,40 @@ namespace
         // ═══════════════════════════════════════════════════════════════════
         int LandPatches()
         {
-            // DESELECT BEFORE anything lands, the kiwi_extrude.h rule: everything
-            // on selected_brushes at COMMIT gets Undo_EndBrushList's "added by this
-            // record" stamp, and a CHAMFERED brush carrying that stamp would be
-            // DELETED by the undo instead of restored.  An edge selection never puts
-            // one there, but "in practice" is not a guarantee and this costs a call.
+            // ── KIWI-UX (CLEANUP, B-20): THE RULE, STATED ONCE ──────────────
+            // THIS is the site the other five point at.  DESELECT BEFORE anything
+            // lands: a creating gesture opens its undo bracket over an EMPTY
+            // selection, so the record covers exactly what the gesture creates and
+            // nothing it merely started from.  kiwi_loft.cpp (x2), kiwi_bevel.cpp
+            // and kiwi_primitive.cpp (x2) all follow it and all point here.
+            //
+            // The PRACTICE is the rule; the exact undo MECHANISM behind it is not
+            // restated here, because the audit found the usual one-line telling of
+            // it ("Undo_EndBrushList stamps everything on selected_brushes as
+            // 'added by this record', so a pre-existing brush would be DELETED by
+            // the undo") incomplete: Undo_AddBrush also stamps `ownerPrev`, and a
+            // brush the record COVERED is restored despite the stamp.  The
+            // stamp-vs-cover interaction is written up in RADIANT_KNOWN_ISSUES.
+            // Do not relax a Select_Deselect on the strength of either reading.
             Select_Deselect( 1 );
+
+            m_skips = landSkips_t();          // KIWI-UX (CLEANUP, B-39)
 
             int made = 0;
             for ( size_t i = 0; i < m_units.size(); ++i )
             {
                 const filletUnit_t &u = m_units[i];
                 if ( !Sel_BrushLive( u.e.node ) || u.faceIndex < 0 )
+                {
+                    ++m_skips.deadBrush;      // KIWI-UX (CLEANUP, B-39)
                     continue;
+                }
                 entity_s *owner = u.e.node->owner;
                 if ( !owner || !owner->def )
+                {
+                    ++m_skips.deadBrush;      // KIWI-UX (CLEANUP, B-39)
                     continue;
+                }
 
                 float lo[3], hi[3];
                 RowEnds( u, lo, hi );
@@ -1444,8 +1443,11 @@ namespace
 
                 patchMesh_t *p = MakeNewPatch();
                 if ( !p )
+                {
+                    ++m_skips.alloc;          // KIWI-UX (CLEANUP, B-39)
                     continue;
-                p->width  = u.spans * 2 + 1;      // <= 15, inside the format's 16
+                }
+                p->width  = u.spans * 2 + 1;      // <= KPATCH_MAX_WIDTH (CLEANUP, B-11)
                 p->height = KPF_PATCH_ROWS;
                 p->type   = PATCH_BEVEL;          // what this IS, and what the Curve
                                                   // menu's own quarter-cylinder uses
@@ -1564,8 +1566,12 @@ namespace
                 // and AddBrushForPatch is what creates it (pmesh.cpp:869).
                 // Round AM's lmap primitive never read the symbiont, so the
                 // pre-AddBrush position was harmless until AN swapped the arc
-                // to CAP.  The caps' lmap calls in LandCaps sit after their own
-                // AddBrushForPatch already.
+                // to CAP.  KIWI-UX (CLEANUP, B-1): the caps in LandCaps call
+                // Patch_KiwiLmapAlign BEFORE their AddBrushForPatch (:1731 /
+                // :1733), which is safe ONLY because lmap does not read
+                // p->pSymbiot (pmesh.cpp:2875-2880 forwards to
+                // Patch_Lightmap_Texturing_Sub).  Any CAP-class alignment added
+                // there must go BELOW the AddBrushForPatch.
                 Patch_KiwiCapAlign( p );
                 selbrush_t *inst = Brush_AddToList( pdef, owner );
                 Brush_AddToList2( inst );         // → selected_brushes, where the
@@ -1662,11 +1668,16 @@ namespace
                 Sub3( at, u.e.mid, off );
 
                 const int w = u.spans * 2 + 1;
-                if ( w < 3 || w > 15 )
+                if ( w < KPATCH_MIN_WIDTH || w > KPATCH_MAX_WIDTH )   // KIWI-UX (CLEANUP, B-11)
+                {
+                    ++m_skips.capRange;       // KIWI-UX (CLEANUP, B-39)
                     continue;
+                }
 
                 // The two profiles, before the row order is decided.
-                float top[15][3], bot[15][3];
+                // KIWI-UX (CLEANUP, B-11): sized BY the bound the line above
+                // tests, so the array cannot be left behind if it moves.
+                float top[KPATCH_MAX_WIDTH][3], bot[KPATCH_MAX_WIDTH][3];
                 for ( int col = 0; col < w; ++col )
                 {
                     float cs[3];
@@ -1702,7 +1713,10 @@ namespace
 
                 patchMesh_t *p = MakeNewPatch();
                 if ( !p )
+                {
+                    ++m_skips.alloc;          // KIWI-UX (CLEANUP, B-39)
                     continue;
+                }
                 p->width  = w;
                 p->height = 3;
                 p->type   = (PATCH_TYPES)( PATCH_BEVEL | PATCH_SEAM );
@@ -1797,6 +1811,20 @@ namespace
             m_hud[sizeof( m_hud ) - 1] = '\0';
         }
 
+        // KIWI-UX (CLEANUP, B-39): the landing paths' skip reasons, counted.  The
+        // commit line reports "%i patch(es)" and the user has no way to tell a
+        // count lower than 3x the edge count from a design decision, so every bare
+        // `continue` in LandPatches / LandCaps now leaves a mark here.  Zeroed at
+        // the top of LandPatches; LandCaps adds to the same set.  Reporting only —
+        // no early-out changed.
+        struct landSkips_t
+        {
+            int deadBrush = 0;   // the unit's brush or its owner went away mid-gesture
+            int capRange  = 0;   // a cap width outside the patch format's 3..15 columns
+            int alloc     = 0;   // MakeNewPatch returned NULL
+        };
+        landSkips_t               m_skips;
+
         std::vector<filletUnit_t> m_units;
         float                     m_radius    = 0.0f;
         // ROUND T: the merged tool's own state.  m_depth is the chamfer depth in
@@ -1839,11 +1867,9 @@ bool KiwiPatchFillet_CanFillet()
 }
 
 // ─── the B dispatch (kiwi_patchfillet.h THE B KEY) ───────────────────────────
-// ROUND T: unchanged in shape, changed in meaning.  B with brush edges selected
-// still reaches KIWI_CMD_FILLET_EDGE, but that command now STARTS AS A FLAT
-// CHAMFER and only becomes a fillet when D is pressed — which is the directive's
-// "the default bevel mode should be chamfer".  So bare B on a brush edge is the
-// bevel, exactly as a mapper expects, and the fillet is one key away inside it.
+// KIWI-UX (CLEANUP, B-31): the round-T bevel/fillet merge is written up ONCE, in
+// kiwi_bevel.h.  Bare B on a brush edge reaches this command, which starts as a
+// flat chamfer and becomes a fillet on D.
 int KiwiPatchFillet_ContextB( int commandId )
 {
     if ( commandId != KIWI_CMD_FILLET_CURVE )
@@ -1854,7 +1880,6 @@ int KiwiPatchFillet_ContextB( int commandId )
 // ─── registration ────────────────────────────────────────────────────────────
 void KiwiPatchFillet_RegisterCommands()
 {
-    extern bool Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId );
     // UNBOUND: B reaches it through KiwiPatchFillet_ContextB, so a second row on
     // 0x42 would be a second answer to the same question.  The palette and the
     // command list still list it by name and can run it directly.
@@ -1874,8 +1899,8 @@ KiwiEditorCommand *KiwiPatchFillet_CommandForId( int commandId )
 namespace
 {
     // ON-PLANE tolerance.  0.01 world units — the editor's own on-plane epsilon
-    // (kiwi_boolean.cpp's KiwiBool_PointInSolid asks the same question with the
-    // same number, and KVALID_PLANE_DIST is the same order).  It has to be at
+    // (named KBOOL_ONPLANE_EPS in kiwi_boolean.h; KVALID_PLANE_DIST is the same
+    // order).  Kept local so this file's tolerance stays its own.  It has to be at
     // least this loose because round AM's finding is that a brush's plane is
     // re-derived from SNAPPED planepts and sits thousandths off the ideal the
     // patch was solved against.

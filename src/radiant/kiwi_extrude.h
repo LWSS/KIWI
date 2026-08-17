@@ -118,6 +118,127 @@ struct selbrush_t;                // qe3.h:429 (the 56-byte brush INSTANCE / lis
 // geometry (which the pick layer's PICKF_EXCLUDE_SELECTED cannot see at all) on
 // exactly the same terms as brush geometry.
 #define KEXT_SELF_SNAP_BAND 2.0f  // world units either side of the start plane
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  KIWI-UX (ROUND BP, ITEM 2) — CTRL MAKES THE DEPTH MAPPING **ABSOLUTE**
+// ═════════════════════════════════════════════════════════════════════════════
+// USER DIRECTIVE, verbatim: *"I should be able to hold Ctrl and snap to the grid
+// lines like it's a face of a solid.  When holding Ctrl the extrusion should match
+// the mouse absolutely, and no longer be a relative drag."*
+//
+// WHAT THE THREE ONE-AXIS GESTURES DO WITHOUT CTRL (unchanged): the cursor is
+// solved against the gesture axis and the answer is taken RELATIVE to where it was
+// when the gesture was grabbed —
+//     d = dot( cursorOnAxis - ref, axis ) - start
+// which is the grab-rebase every handle in this editor keeps (a press with no
+// movement moves nothing).
+//
+// WITH CTRL HELD the `- start` term is dropped, so
+//     d = dot( cursorOnAxis - ref, axis )
+// and `ref` is on the SOURCE plane in all three gestures (the region's plane
+// centre, the face's winding centre) — which makes `d` the extruded end's own
+// position measured from the source, i.e. THE FACE RIDES THE CURSOR.
+//
+// THE TWO TRANSITIONS, and only one of them is a rebase:
+//   * CTRL DOWN is the feature, so it is allowed to move the face — that is what
+//     "match the mouse absolutely" asks for.  The jump is exactly `start`, the
+//     cursor's axis coordinate at the grab, so a gesture begun near the face (the
+//     ordinary case: you grab its lollipop) barely moves at all.
+//   * CTRL UP MUST NOT MOVE ANYTHING.  Relative resumes from wherever absolute
+//     left the face, which means re-latching `start` so the mapping evaluates to
+//     the CURRENT d — the same one-line rebase round AI wrote for the view gate.
+//
+// AND THE LATTICE BECOMES FACE PLANES.  Ctrl already turns the ranked snap query
+// on for a TRANSFORM (kiwi_command.h SnapContext), and KiwiSnap_LatticeAxis
+// already quantises the ABSOLUTE world coordinate on an axis-aligned gesture — so
+// a grid line ALREADY is a plane the end can land on.  What was missing is that a
+// GEOMETRY snap took the whole arm: with a face or an endpoint anywhere in the
+// query's reach, the lattice was never consulted and the visible grid line under
+// the cursor could not catch the end.  In absolute mode both are computed and the
+// one NEARER THE RAW CURSOR DEPTH wins — which is precisely "snap to the grid
+// lines like it's a face of a solid": the lattice competes with real faces on
+// their own terms instead of losing by default.
+//
+// SCOPE: the region extrude, the face extrude and the interactive face push — the
+// three gestures that already share KEXT_SELF_SNAP_BAND.  The creation lollipop's
+// height stage runs through the same KiwiSnap_LatticeAxis arm and is covered by
+// the lattice half; its mapping stays relative because a primitive's height has no
+// "absolute" reading (there is no source plane to measure from until it exists).
+bool KiwiExt_AbsoluteHeld();
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  KIWI-UX (ROUND BT) — THE ABSOLUTE ARM IS A **LADDER**, NOT A CONTEST
+// ═════════════════════════════════════════════════════════════════════════════
+// USER REPORT, verbatim: *"Construction lines are better, but when extruding (maybe
+// more operations) is not snapping like it should.  When holding Control it only
+// snaps to the grid (mine is set to 6in).  It's not working right, it needs to match
+// the extrusion face amount to exactly where my mouse is on the same plane.  It was
+// working before, it's broken now."*
+//
+// ── THE AUTOPSY, AND IT NAMES THIS FILE'S OWN ROUND ─────────────────────────
+// NOTHING AFTER ROUND BP TOUCHED THIS FAMILY'S CTRL PATH.  kiwi_extrude.cpp and
+// kiwi_transform.cpp are byte-identical between b5228b7 (BP) and 5dd405e (BS), and
+// every predicate round BS re-scoped — KiwiCon_PlanePlacement, the arm-6
+// suppression, the deleted `planeOn` gate — was ALREADY false during a transform,
+// so the snap query answers a live extrude bit-for-bit what it answered at BP.  The
+// ABSOLUTE REBASE ABOVE IS NOT GONE.  It is running, on both transitions.
+//
+// WHAT IS GONE IS THE GEOMETRY HALF OF THE LADDER, AND ROUND BP TOOK IT.  The
+// paragraph above replaced "a geometry snap wins" with a nearest-value CONTEST
+// against the HARD lattice: geometry had to satisfy `|sd - raw| <= |ld - raw|`.  But
+// a HARD lattice answer can never be more than HALF A CELL from the cursor value
+// (kiwi_snap.cpp KiwiSnap_LatticeAxis: `hard` rounds unconditionally and pins the
+// band to g * 0.5), so `|ld - raw| <= g/2` ALWAYS — and a real face plane can only
+// win when it is already inside that half cell.  On the user's 6-inch grid that is
+// three inches.  The grid therefore wins everywhere else, in every scene, forever:
+// *"when holding Control it only snaps to the grid (mine is set to 6in)"*, the
+// report naming the very number that rigs the comparison.
+//
+// A DENSE LATTICE MUST NOT OUTRANK REAL GEOMETRY.  kiwi_snap.h's ranking is
+// point > line > area > grid, and the OBJECT MOVE has spelled that out in code
+// since rounds BK/BL (kiwi_transform.cpp's `namedTarget` exemption and
+// KiwiSnap_AreaMagnet).  This function is that same rule for the ONE-AXIS gestures,
+// written ONCE so the family cannot drift apart the way its four copies of the
+// contest did:
+//
+//   1. a NAMED geometry snap — vertex, edge, edge midpoint, face centre,
+//      construction endpoint or intersection — resolved onto the axis by
+//      KiwiSnap_AxisDepth and past KEXT_SELF_SNAP_BAND: TAKEN OUTRIGHT.  It is
+//      already aim-gated: those arms only answer within their 6-8 px radius
+//      (kiwi_snap.h PER-CLASS PIXEL RADII), so "outright" means "the user was
+//      pointing at it".
+//   2. a SNAP_FACE — which names nothing; it is wherever the ray landed —
+//      resolved the same way: taken only while it is within KSNAP_AREA_BAND_PIX of
+//      the raw cursor depth (KiwiSnap_AreaMagnet).  So sweeping the cursor across a
+//      face plane CATCHES the extruded end like a real plane, and a wall across the
+//      room never rewrites the drag.
+//   3. otherwise the HARD lattice, majors included — `*outMajor` reports when a
+//      MAJOR line took the value, which is what the HUD's [MAJOR] badge reads.
+//
+// `rawAbs` is WHERE THE MOVING END IS NOW: its position along `axis` measured from
+// `ref`, which sits on the source plane in all four gestures — so under Ctrl it is
+// the cursor's own axis projection and the composition is exactly the user's
+// sentence (Ctrl rebases the mapping ONTO the cursor; this decides what that
+// mapping is allowed to land on), and in a relative arm it is the end the ladder
+// must catch rather than the cursor that is driving it.  `sd` and the magnet band
+// are measured in the same frame, so both readings stay coherent either way.
+// Returns the depth to use; `outMajor` may be null.
+struct snap_result_t;              // kiwi_snap.h:295
+float KiwiExt_LadderDepth( const snap_result_t &snap, const float *ref,
+                           const float *axis, float rawAbs, bool *outMajor );
+
+// ── KIWI-UX (ROUND BT): …AND THE SCOPE PARAGRAPH ABOVE WAS NOT TRUE ─────────
+// *"The creation lollipop's height stage runs through the same KiwiSnap_LatticeAxis
+// arm"* — it never did.  kiwi_primitive.cpp's height stage quantises with its own
+// `floorf( h / g + 0.5f ) * g`, consults no snap result, knows no major line and
+// reads no modifier at all.  It is the FOURTH member of this family (the user's
+// report is about the family, "maybe more operations"), and round BT gives it both
+// halves through these two functions: CTRL = ABSOLUTE with the same two transitions,
+// and the ladder above wherever its own snap context has snapping engaged.  Its
+// engaged state is the OPPOSITE of its three siblings' and that is deliberate — a
+// primitive is a CREATION gesture, so the round-BO contract makes snapping its
+// default and Ctrl the release (kiwi_command.h SnapContext).  The MAPPING rule is
+// what is shared; the SNAP rule stays each command's own.
 // ROUND AG, ITEM 2: KREG_MAX_LOOP comes from here, and the include is what makes
 // the macro below safe to expand in any TU rather than only in one whose include
 // order happens to be right.
@@ -207,8 +328,8 @@ bool KiwiExtrude_CanExecute();          // §3 palette predicate: at least one r
 // USER DIRECTIVE, verbatim: "when extruding, dont automatically bool diff the
 // solid.  It can be done by the user with a boolean after."  That withdrew round
 // AF item 2 — the REGION command's push-in cave, which probed for solid under the
-// drag and turned the prism into a KiwiBool_DifferenceByDef tool against every
-// brush it met.  The three outcomes above are a DIFFERENT feature and are kept,
+// drag and turned the prism into a boolean-difference tool against every brush it
+// met.  The three outcomes above are a DIFFERENT feature and are kept,
 // on three grounds that the region cave failed on all three:
 //   * it is not a boolean.  KiwiXform_PushFaceOnce moves ONE face plane of ONE
 //     brush — the same edit the lollipop performs by hand;

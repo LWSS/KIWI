@@ -6,6 +6,7 @@
  */
 
 #include "cod2rad64.h"
+#include "zlib/zlib.h"
 #include <stdlib.h>
 #include <math.h>
 
@@ -93,9 +94,28 @@ void GatherSurfaceIncidentEnergyForLightFromDir(float *lightColor, float *direct
 static void *g_transferPool;     /* qword_480A68 */
 static int g_transferPoolIdx;    /* dword_480A70 */
 
+typedef struct RelightSuppressedRange_s {
+    uint64_t key;
+    uint32_t count;
+    uint32_t reserved;
+} RelightSuppressedRange_t;
+
+typedef struct RelightTransferRef_s {
+    uint32_t packedSource;
+    float weight;
+} RelightTransferRef_t;
+
+static RelightSuppressedRange_t *g_relightSuppressedRanges;
+static uint32_t g_relightSuppressedCount;
+static uint32_t g_relightSuppressedCapacity;
+static int g_relightCacheLoaded;
+static float *g_relightSkyStorage;
+
 /* per-thread max bounced energy — originally dword_480A48..480A58, now dynamically sized */
 static float *g_bounceEnergy;
 static int g_bounceEnergyCount;
+static float *g_bounceStage;
+static int g_bounceStageCount;
 
 #define TRANSFER_HT_SIZE 4096
 #define TRANSFER_HT_MASK (TRANSFER_HT_SIZE - 1)
@@ -269,6 +289,500 @@ done:
     ReleaseThreadLock((unsigned int)(uintptr_t)fromSample);
 }
 
+/* compile.cpp 0x406F00: append one directional direct-light contribution.
+ * Retail uses a 16-bit count and a custom growable allocation.  The x64 port
+ * retains the exact 24-byte payload and widens only the allocation metadata. */
+static void AppendDirectTransport(Sample_t *sample, const float color[3],
+                                  const float direction[3])
+{
+    SampleVars_t *vars;
+    DirectTransport_t *record;
+
+    if (!sample || !(vars = sample->vars))
+        return;
+
+    AcquireThreadLock((unsigned int)(uintptr_t)sample);
+    if (vars->directTransportCount == vars->directTransportCapacity)
+    {
+        unsigned int newCapacity = vars->directTransportCapacity
+                                 ? vars->directTransportCapacity * 2u : 4u;
+        DirectTransport_t *newRecords = (DirectTransport_t *)realloc(
+            vars->directTransports,
+            (size_t)newCapacity * sizeof(*newRecords));
+        if (!newRecords)
+            Error("Out of memory allocating direct lighting influences\n");
+        vars->directTransports = newRecords;
+        vars->directTransportCapacity = newCapacity;
+    }
+
+    record = &vars->directTransports[vars->directTransportCount++];
+    record->color[0] = color[0];
+    record->color[1] = color[1];
+    record->color[2] = color[2];
+    record->direction[0] = direction[0];
+    record->direction[1] = direction[1];
+    record->direction[2] = direction[2];
+    ReleaseThreadLock((unsigned int)(uintptr_t)sample);
+}
+
+#define RADTRANS_VERSION 3u
+#define RADTRANS_FILENAME "radtrans.bin"
+
+static uint64_t Relight_MakeSuppressedKey(int triangleIndex, int areaIndex)
+{
+    return ((uint64_t)(uint32_t)triangleIndex << 32)
+         | (uint64_t)(uint32_t)areaIndex;
+}
+
+static int Relight_CompareSuppressedRanges(const void *left, const void *right)
+{
+    const RelightSuppressedRange_t *a =
+        (const RelightSuppressedRange_t *)left;
+    const RelightSuppressedRange_t *b =
+        (const RelightSuppressedRange_t *)right;
+    if (a->key < b->key)
+        return -1;
+    if (a->key > b->key)
+        return 1;
+    return 0;
+}
+
+static void Relight_ResetSuppressedRanges(void)
+{
+    free(g_relightSuppressedRanges);
+    g_relightSuppressedRanges = NULL;
+    g_relightSuppressedCount = 0;
+    g_relightSuppressedCapacity = 0;
+}
+
+int Relight_IsSuppressed(int triangleIndex, int areaIndex)
+{
+    uint64_t key;
+    uint32_t lo;
+    uint32_t hi;
+
+    if (!g_relightCacheLoaded || !g_relightSuppressedCount)
+        return 0;
+
+    key = Relight_MakeSuppressedKey(triangleIndex, areaIndex);
+    lo = 0;
+    hi = g_relightSuppressedCount;
+    while (lo < hi)
+    {
+        uint32_t mid = lo + ((hi - lo) >> 1);
+        const RelightSuppressedRange_t *range =
+            &g_relightSuppressedRanges[mid];
+        if (key < range->key)
+            hi = mid;
+        else if (key >= range->key + range->count)
+            lo = mid + 1;
+        else
+            return 1;
+    }
+    return 0;
+}
+
+void Relight_RecordSuppressed(int triangleIndex, int areaIndex)
+{
+    uint64_t key;
+    RelightSuppressedRange_t *range;
+
+    if (g_relightCacheLoaded)
+        return;
+
+    key = Relight_MakeSuppressedKey(triangleIndex, areaIndex);
+    AcquireThreadLock((unsigned int)(uintptr_t)&g_relightSuppressedRanges);
+
+    if (g_relightSuppressedCount)
+    {
+        range = &g_relightSuppressedRanges[g_relightSuppressedCount - 1];
+        if (range->key + range->count == key)
+        {
+            range->count++;
+            ReleaseThreadLock((unsigned int)(uintptr_t)&g_relightSuppressedRanges);
+            return;
+        }
+    }
+
+    if (g_relightSuppressedCount == g_relightSuppressedCapacity)
+    {
+        uint32_t newCapacity = g_relightSuppressedCapacity
+                             ? g_relightSuppressedCapacity + 1024u : 1024u;
+        RelightSuppressedRange_t *newRanges =
+            (RelightSuppressedRange_t *)realloc(g_relightSuppressedRanges,
+                (size_t)newCapacity * sizeof(*newRanges));
+        if (!newRanges)
+            Error("Out of memory for %i suppressed lighting samples\n",
+                  (int)g_relightSuppressedCount);
+        g_relightSuppressedRanges = newRanges;
+        g_relightSuppressedCapacity = newCapacity;
+    }
+
+    range = &g_relightSuppressedRanges[g_relightSuppressedCount++];
+    range->key = key;
+    range->count = 1;
+    range->reserved = 0;
+    ReleaseThreadLock((unsigned int)(uintptr_t)&g_relightSuppressedRanges);
+}
+
+static uint32_t RadTrans_DrawVertCrc(void)
+{
+    size_t byteCount = (size_t)numBSPDrawVerts * 68u;
+    if (byteCount > 0xFFFFFFFFu)
+        return 0;
+    return (uint32_t)crc32(0L, (const Bytef *)bspDrawVerts,
+                           (uInt)byteCount);
+}
+
+static int RadTrans_Read(FILE *file, void *data, size_t size)
+{
+    return size == 0 || fread(data, 1, size, file) == size;
+}
+
+static int RadTrans_Write(FILE *file, const void *data, size_t size)
+{
+    return size == 0 || fwrite(data, 1, size, file) == size;
+}
+
+static Sample_t **RadTrans_BuildUsefulSampleList(void)
+{
+    Sample_t **samples;
+    LightmapSample_t *allSamples = (LightmapSample_t *)g_lightingSamples;
+    int sampleIndex;
+    int usefulIndex = 0;
+
+    samples = (Sample_t **)malloc((size_t)g_usefulSampleCount
+                                * sizeof(*samples));
+    if (!samples)
+        Error("Out of memory loading relight file\n");
+
+    for (sampleIndex = 0; sampleIndex < g_totalSampleCount; sampleIndex++)
+    {
+        if (allSamples[sampleIndex].vars)
+            samples[usefulIndex++] = (Sample_t *)&allSamples[sampleIndex];
+    }
+
+    if (usefulIndex != g_usefulSampleCount)
+        Error("Relight sample table is inconsistent (%i != %i)\n",
+              usefulIndex, g_usefulSampleCount);
+    return samples;
+}
+
+static int RadTrans_ReadAndValidateHeader(FILE *file)
+{
+    uint32_t value;
+    float floatValue;
+    unsigned char byteValue;
+
+    if (!RadTrans_Read(file, &value, sizeof(value))
+     || value != RADTRANS_VERSION)
+        return 0;
+    if (!RadTrans_Read(file, &value, sizeof(value))
+     || value != (uint32_t)g_totalSampleCount)
+        return 0;
+    if (!RadTrans_Read(file, &value, sizeof(value))
+     || value != (uint32_t)g_usefulSampleCount)
+        return 0;
+    if (!RadTrans_Read(file, &value, sizeof(value))
+     || value != (uint32_t)g_traces)
+        return 0;
+    if (!RadTrans_Read(file, &value, sizeof(value))
+     || value != (uint32_t)g_superSample)
+        return 0;
+    if (!RadTrans_Read(file, &value, sizeof(value))
+     || value != (uint32_t)g_traceFilter)
+        return 0;
+    if (!RadTrans_Read(file, &floatValue, sizeof(floatValue))
+     || memcmp(&floatValue, &g_jitter, sizeof(floatValue)) != 0)
+        return 0;
+    if (!RadTrans_Read(file, &byteValue, sizeof(byteValue))
+     || byteValue != (unsigned char)g_modelShadows)
+        return 0;
+    if (!RadTrans_Read(file, &value, sizeof(value))
+     || value != (uint32_t)g_triCount)
+        return 0;
+    if (!RadTrans_Read(file, &value, sizeof(value))
+     || value != RadTrans_DrawVertCrc())
+        return 0;
+    return 1;
+}
+
+static int RadTrans_ValidatePayload(FILE *file, __int64 fileSize,
+                                    Sample_t **usefulSamples,
+                                    __int64 *payloadOffset)
+{
+    uint32_t rangeCount;
+    uint32_t sampleIndex;
+    uint64_t skipBytes;
+
+    *payloadOffset = _ftelli64(file);
+    if (*payloadOffset < 0 || !RadTrans_Read(file, &rangeCount, sizeof(rangeCount)))
+        return 0;
+
+    skipBytes = (uint64_t)rangeCount * sizeof(RelightSuppressedRange_t);
+    if (skipBytes > (uint64_t)fileSize
+     || _ftelli64(file) > fileSize - (__int64)skipBytes
+     || _fseeki64(file, (__int64)skipBytes, SEEK_CUR) != 0)
+        return 0;
+
+    skipBytes = (uint64_t)(uint32_t)g_usefulSampleCount
+              * (uint64_t)(uint32_t)g_traces * sizeof(float);
+    if (skipBytes > (uint64_t)fileSize
+     || _ftelli64(file) > fileSize - (__int64)skipBytes
+     || _fseeki64(file, (__int64)skipBytes, SEEK_CUR) != 0)
+        return 0;
+
+    for (sampleIndex = 0; sampleIndex < (uint32_t)g_usefulSampleCount;
+         sampleIndex++)
+    {
+        uint32_t transferCount;
+        uint32_t transferIndex;
+        if (!RadTrans_Read(file, &transferCount, sizeof(transferCount)))
+            return 0;
+        if ((uint64_t)transferCount * sizeof(RelightTransferRef_t)
+            > (uint64_t)(fileSize - _ftelli64(file)))
+            return 0;
+        for (transferIndex = 0; transferIndex < transferCount; transferIndex++)
+        {
+            RelightTransferRef_t ref;
+            uint32_t sourceIndex;
+            uint32_t directionIndex;
+            if (!RadTrans_Read(file, &ref, sizeof(ref)))
+                return 0;
+            sourceIndex = ref.packedSource & 0x7FFFFFu;
+            directionIndex = ref.packedSource >> 23;
+            if (sourceIndex >= (uint32_t)g_totalSampleCount
+             || directionIndex >= (uint32_t)g_traces
+             || !((LightmapSample_t *)g_lightingSamples)[sourceIndex].vars
+             || IS_NAN_FLOAT(ref.weight)
+             || ref.weight < -1.0e-5f)
+                return 0;
+        }
+        (void)usefulSamples;
+    }
+    return 1;
+}
+
+static int RadTrans_LoadV3(void)
+{
+    FILE *file;
+    __int64 fileSize;
+    __int64 payloadOffset;
+    Sample_t **usefulSamples;
+    uint32_t sampleIndex;
+    uint32_t rangeCount;
+
+    file = fopen(RADTRANS_FILENAME, "rb");
+    if (!file)
+        return 0;
+    if (_fseeki64(file, 0, SEEK_END) != 0
+     || (fileSize = _ftelli64(file)) < 0
+     || _fseeki64(file, 0, SEEK_SET) != 0
+     || !RadTrans_ReadAndValidateHeader(file))
+    {
+        fclose(file);
+        return 0;
+    }
+
+    usefulSamples = RadTrans_BuildUsefulSampleList();
+    if (!RadTrans_ValidatePayload(file, fileSize, usefulSamples, &payloadOffset))
+    {
+        free(usefulSamples);
+        fclose(file);
+        return 0;
+    }
+
+    if (_fseeki64(file, payloadOffset, SEEK_SET) != 0
+     || !RadTrans_Read(file, &rangeCount, sizeof(rangeCount)))
+        Error("Couldn't read relight file\n");
+
+    Relight_ResetSuppressedRanges();
+    if (rangeCount)
+    {
+        g_relightSuppressedRanges = (RelightSuppressedRange_t *)malloc(
+            (size_t)rangeCount * sizeof(*g_relightSuppressedRanges));
+        if (!g_relightSuppressedRanges)
+            Error("Out of memory loading relight file\n");
+        g_relightSuppressedCount = rangeCount;
+        g_relightSuppressedCapacity = rangeCount;
+        if (!RadTrans_Read(file, g_relightSuppressedRanges,
+                           (size_t)rangeCount
+                         * sizeof(*g_relightSuppressedRanges)))
+            Error("Couldn't read relight file\n");
+        qsort(g_relightSuppressedRanges, rangeCount,
+              sizeof(*g_relightSuppressedRanges),
+              Relight_CompareSuppressedRanges);
+    }
+
+    free(g_relightSkyStorage);
+    g_relightSkyStorage = (float *)calloc(
+        (size_t)g_usefulSampleCount * (size_t)g_traces, sizeof(float));
+    if (!g_relightSkyStorage)
+        Error("Out of memory loading relight file\n");
+    for (sampleIndex = 0; sampleIndex < (uint32_t)g_usefulSampleCount;
+         sampleIndex++)
+    {
+        usefulSamples[sampleIndex]->vars->skyInfluences =
+            &g_relightSkyStorage[(size_t)sampleIndex * (size_t)g_traces];
+    }
+    if (!RadTrans_Read(file, g_relightSkyStorage,
+                       (size_t)g_usefulSampleCount * (size_t)g_traces
+                     * sizeof(float)))
+        Error("Couldn't read relight file\n");
+
+    for (sampleIndex = 0; sampleIndex < (uint32_t)g_usefulSampleCount;
+         sampleIndex++)
+    {
+        TransferBlock_t *block;
+        TransferBlock_t *previous;
+        uint32_t transferCount;
+        uint32_t transferIndex;
+        if (!RadTrans_Read(file, &transferCount, sizeof(transferCount)))
+            Error("Couldn't read relight file\n");
+        for (transferIndex = 0; transferIndex < transferCount; transferIndex++)
+        {
+            RelightTransferRef_t ref;
+            uint32_t sourceIndex;
+            uint32_t directionIndex;
+            if (!RadTrans_Read(file, &ref, sizeof(ref)))
+                Error("Couldn't read relight file\n");
+            sourceIndex = ref.packedSource & 0x7FFFFFu;
+            directionIndex = ref.packedSource >> 23;
+            AllocLightingTransfer(usefulSamples[sampleIndex],
+                &((LightmapSample_t *)g_lightingSamples)[sourceIndex],
+                (int)directionIndex, ref.weight);
+        }
+
+        /* Native keeps the radtrans references in their serialized flat-array
+         * order.  AllocLightingTransfer grows the x64 compatibility chain by
+         * prepending 15-entry blocks, so reverse only the block links after
+         * loading to recover the native accumulation order. */
+        previous = NULL;
+        block = usefulSamples[sampleIndex]->vars->transferHead;
+        while (block)
+        {
+            TransferBlock_t *next = block->next;
+            block->next = previous;
+            previous = block;
+            block = next;
+        }
+        usefulSamples[sampleIndex]->vars->transferHead = previous;
+    }
+
+    fclose(file);
+    free(usefulSamples);
+    g_relightCacheLoaded = 1;
+    Com_Printf("----------------------------------------\n"
+               "Loading saved light transport for sky and radiosity...\n");
+    return 1;
+}
+
+static uint32_t RadTrans_CountTransfers(const Sample_t *sample)
+{
+    const TransferBlock_t *block;
+    uint32_t count = 0;
+    for (block = sample->vars->transferHead; block; block = block->next)
+    {
+        int entryIndex;
+        for (entryIndex = 0; entryIndex < TRANSFERS_PER_BLOCK; entryIndex++)
+        {
+            if (!block->entries[entryIndex].toSample)
+                break;
+            count++;
+        }
+    }
+    return count;
+}
+
+static int RadTrans_SaveV3(void)
+{
+    FILE *file;
+    Sample_t **usefulSamples;
+    uint32_t value;
+    uint32_t sampleIndex;
+    unsigned char modelShadows;
+    float zeroSky[512] = { 0 };
+    int ok = 1;
+
+    file = fopen(RADTRANS_FILENAME, "wb");
+    if (!file)
+        return 0;
+    usefulSamples = RadTrans_BuildUsefulSampleList();
+
+#define RADTRANS_WRITE_VALUE(v) \
+    do { if (!RadTrans_Write(file, &(v), sizeof(v))) ok = 0; } while (0)
+    value = RADTRANS_VERSION; RADTRANS_WRITE_VALUE(value);
+    value = (uint32_t)g_totalSampleCount; RADTRANS_WRITE_VALUE(value);
+    value = (uint32_t)g_usefulSampleCount; RADTRANS_WRITE_VALUE(value);
+    value = (uint32_t)g_traces; RADTRANS_WRITE_VALUE(value);
+    value = (uint32_t)g_superSample; RADTRANS_WRITE_VALUE(value);
+    value = (uint32_t)g_traceFilter; RADTRANS_WRITE_VALUE(value);
+    RADTRANS_WRITE_VALUE(g_jitter);
+    modelShadows = (unsigned char)g_modelShadows;
+    RADTRANS_WRITE_VALUE(modelShadows);
+    value = (uint32_t)g_triCount; RADTRANS_WRITE_VALUE(value);
+    value = RadTrans_DrawVertCrc(); RADTRANS_WRITE_VALUE(value);
+    value = g_relightSuppressedCount; RADTRANS_WRITE_VALUE(value);
+#undef RADTRANS_WRITE_VALUE
+
+    if (g_relightSuppressedCount)
+    {
+        qsort(g_relightSuppressedRanges, g_relightSuppressedCount,
+              sizeof(*g_relightSuppressedRanges),
+              Relight_CompareSuppressedRanges);
+        if (!RadTrans_Write(file, g_relightSuppressedRanges,
+                            (size_t)g_relightSuppressedCount
+                          * sizeof(*g_relightSuppressedRanges)))
+            ok = 0;
+    }
+
+    for (sampleIndex = 0; sampleIndex < (uint32_t)g_usefulSampleCount;
+         sampleIndex++)
+    {
+        const float *sky = usefulSamples[sampleIndex]->vars->skyInfluences;
+        if (!RadTrans_Write(file, sky ? sky : zeroSky,
+                            (size_t)g_traces * sizeof(float)))
+            ok = 0;
+    }
+
+    for (sampleIndex = 0; sampleIndex < (uint32_t)g_usefulSampleCount;
+         sampleIndex++)
+    {
+        Sample_t *sample = usefulSamples[sampleIndex];
+        TransferBlock_t *block;
+        uint32_t transferCount = RadTrans_CountTransfers(sample);
+        if (!RadTrans_Write(file, &transferCount, sizeof(transferCount)))
+            ok = 0;
+        for (block = sample->vars->transferHead; block; block = block->next)
+        {
+            int entryIndex;
+            for (entryIndex = 0; entryIndex < TRANSFERS_PER_BLOCK; entryIndex++)
+            {
+                TransferEntry_t *entry = &block->entries[entryIndex];
+                RelightTransferRef_t ref;
+                ptrdiff_t sourceIndex;
+                if (!entry->toSample)
+                    break;
+                sourceIndex = (LightmapSample_t *)entry->toSample
+                            - (LightmapSample_t *)g_lightingSamples;
+                if (sourceIndex < 0 || sourceIndex >= g_totalSampleCount
+                 || entry->lightIdx < 0 || entry->lightIdx >= g_traces)
+                    Error("Invalid light transport reference while saving relight file\n");
+                ref.packedSource = ((uint32_t)entry->lightIdx << 23)
+                                 | ((uint32_t)sourceIndex & 0x7FFFFFu);
+                ref.weight = entry->weight;
+                if (!RadTrans_Write(file, &ref, sizeof(ref)))
+                    ok = 0;
+            }
+        }
+    }
+
+    free(usefulSamples);
+    if (fclose(file) != 0)
+        ok = 0;
+    return ok;
+}
+
 static char s_assertDisable_Normalize_sample;  /* byte_480A7D */
 static char s_assertDisable_Normalize_vars;    /* byte_480A7C */
 
@@ -276,8 +790,8 @@ static char s_assertDisable_Normalize_vars;    /* byte_480A7C */
 ================
 NormalizeLightTransfers
 
-Clears the lighting transfer chain for a sample by setting
-vars->transferHead (+0x58) to NULL.
+Normalizes the sample's accumulated direct inputs and incoming transfer
+coefficients by its covered area.
 ================
 */
 void NormalizeLightTransfers(Sample_t *sample)
@@ -289,7 +803,70 @@ void NormalizeLightTransfers(Sample_t *sample)
     vars = sample->vars;
     Assert(vars != 0, s_assertDisable_Normalize_vars);
 
-    vars->transferHead = 0;
+    /* Native 0x415E50 normalizes only samples accepted by the transport
+     * classifier.  Rejected slots keep their vars allocation for neighbour
+     * reconstruction but are not valid bounce sources. */
+    if (!vars->validMask)
+        return;
+
+    if (sample->areaX2 > 0.0f)
+    {
+        float invArea = 1.0f / sample->areaX2;
+        LightmapSample_t *lightmapSample = (LightmapSample_t *)sample;
+        TransferBlock_t *block;
+        int traceIndex;
+        int channel;
+        unsigned int directIndex;
+
+        for (channel = 0; channel < 12; channel++)
+            vars->incident[channel] *= invArea;
+        vars->unscattered[0] *= invArea;
+        vars->unscattered[1] *= invArea;
+        vars->unscattered[2] *= invArea;
+        /* Native lighting.cpp 0x415E50 normalizes the accumulated incident
+         * RGB at vars+0x20 independently of the radiosity ping buffers. */
+        vars->gatheredIncident[0] *= invArea;
+        vars->gatheredIncident[1] *= invArea;
+        vars->gatheredIncident[2] *= invArea;
+        vars->coincident[0] *= invArea;
+        vars->coincident[1] *= invArea;
+        vars->coincident[2] *= invArea;
+
+        for (directIndex = 0;
+             directIndex < vars->directTransportCount;
+             ++directIndex)
+        {
+            DirectTransport_t *direct = &vars->directTransports[directIndex];
+            direct->color[0] *= invArea;
+            direct->color[1] *= invArea;
+            direct->color[2] *= invArea;
+        }
+
+        for (channel = 0; channel < 4; channel++)
+        {
+            if (lightmapSample->channelWeight[channel] > 0.0f)
+                vars->intensity[channel] /= lightmapSample->channelWeight[channel];
+            else
+                vars->intensity[channel] = 0.0f;
+        }
+
+        if (vars->skyInfluences)
+        {
+            for (traceIndex = 0; traceIndex < g_traces; traceIndex++)
+                vars->skyInfluences[traceIndex] *= invArea;
+        }
+
+        for (block = vars->transferHead; block; block = block->next)
+        {
+            int i;
+            for (i = 0; i < TRANSFERS_PER_BLOCK && block->entries[i].toSample; ++i)
+                block->entries[i].weight *= invArea;
+        }
+    }
+    else
+    {
+        vars->validMask = 0;
+    }
 }
 
 /* TraceSetup_and_Dispatch declared in cod2rad64.h — sub_40CDB0 */
@@ -318,8 +895,12 @@ Parameters:
   [stack+0x28] = outputNormal ptr (float[3], optional)
 ================
 */
-int FindLightingSamplesAndNormal(int sampleIdx, float *position, float *normal,
-                                 float offset, void *outputLighting, float *outputNormal)
+static int FindLightingSamplesAndNormalMode(int sampleIdx, float *position,
+                                            float *normal, float offset,
+                                            void *outputLighting,
+                                            float *outputNormal,
+                                            int nearestSample,
+                                            int *outTraceClass)
 {
     float startPos[3], endPos[3];
     RayHitResult_t hitResult;
@@ -328,9 +909,11 @@ int FindLightingSamplesAndNormal(int sampleIdx, float *position, float *normal,
     MaterialDef_t *material;
     float baryU, baryV, baryW;
     float u, v;
-    float maxUV = 511.0f;  /* dword_4576FC */
     float uvScale = 512.0f; /* dword_457700 */
     int vertIdx0, vertIdx1, vertIdx2;
+
+    if (outTraceClass)
+        *outTraceClass = 0;
 
     /* compute start = position + normal * smallOffset */
     startPos[0] = normal[0] * smallOffset + position[0];
@@ -366,76 +949,214 @@ int FindLightingSamplesAndNormal(int sampleIdx, float *position, float *normal,
         outputNormal[2] = tri->normal[2];
     }
 
-    /* check material backface flag */
     material = tri->material;
-    if (material->contents & (CONTENTS_NONCOLLIDING | CONTENTS_SKY))
+    if (material->surfaceFlags & SURF_SKY)
     {
-        /* backface/sky material — check orientation */
-        int result = TraceStaticModels(startPos, endPos);
-        return result ? 0 : -1;
+        int blockedByStaticModel = outputNormal
+            ? TraceStaticModels(startPos, endPos) : 0;
+        if (normal[2] < 0.0f)
+            return 0;
+        /* Native 0x407080 only normalizes/tests the static-model hit list when
+         * the optional output-normal argument is present.  The transport
+         * caller passes NULL and therefore accepts the world-sky hit here. */
+        if (!blockedByStaticModel && outTraceClass)
+            *outTraceClass = 3;
+        return blockedByStaticModel ? 0 : -1;
     }
 
-    /* check lightmapIdx != 0x1F (no lightmap) */
+    if (DotProduct(tri->normal, normal) >= 0.0f)
     {
-        if (tri->lightmapIdx == LIGHTMAP_NONE) {
-            return 0;
+        int traceClass = 2;
+
+        /* geometry.cpp 0x40A100 classifies an upward-facing opposing
+         * triangle by probing 0.1 unit behind its centroid toward -Z. */
+        if (tri->normal[2] >= 0.5f)
+        {
+            float probe[3];
+            float end[3];
+            RayHitResult_t verticalHit;
+            MaterialDef_t *verticalMaterial;
+
+            probe[0] = (g_vertData[tri->vertIndex[0]].pos[0]
+                      + g_vertData[tri->vertIndex[1]].pos[0]
+                      + g_vertData[tri->vertIndex[2]].pos[0])
+                     * 0.3333333432674408f - tri->normal[0] * 0.1f;
+            probe[1] = (g_vertData[tri->vertIndex[0]].pos[1]
+                      + g_vertData[tri->vertIndex[1]].pos[1]
+                      + g_vertData[tri->vertIndex[2]].pos[1])
+                     * 0.3333333432674408f - tri->normal[1] * 0.1f;
+            probe[2] = (g_vertData[tri->vertIndex[0]].pos[2]
+                      + g_vertData[tri->vertIndex[1]].pos[2]
+                      + g_vertData[tri->vertIndex[2]].pos[2])
+                     * 0.3333333432674408f - tri->normal[2] * 0.1f;
+            end[0] = probe[0];
+            end[1] = probe[1];
+            end[2] = probe[2] - 262144.0f;
+            TraceSetup_and_Dispatch(sampleIdx, probe, end, &verticalHit);
+            if (!verticalHit.triangle)
+            {
+                traceClass = 1;
+            }
+            else
+            {
+                verticalMaterial = verticalHit.triangle->material;
+                if ((verticalMaterial->surfaceFlags & SURF_SKY)
+                 || (verticalMaterial->contents == 1
+                  && (verticalMaterial->surfaceFlags & 0x80)))
+                    traceClass = 1;
+            }
         }
+        if (outTraceClass)
+            *outTraceClass = traceClass;
+        return 0;
+    }
 
-        /* barycentric interpolation of vertex UV coordinates */
-        baryU = hitResult.baryU;
-        baryV = hitResult.baryV;
-        baryW = 1.0f - baryU - baryV;
+    if (tri->lightmapIdx == LIGHTMAP_NONE)
+        return 0;
 
-        vertIdx0 = tri->vertIndex[0];
-        vertIdx1 = tri->vertIndex[1];
-        vertIdx2 = tri->vertIndex[2];
+    baryU = hitResult.baryU;
+    baryV = hitResult.baryV;
+    baryW = 1.0f - baryU - baryV;
 
-    /* interpolate U: w*vert0[0] + u*vert1[0] + v*vert2[0] */
+    vertIdx0 = tri->vertIndex[0];
+    vertIdx1 = tri->vertIndex[1];
+    vertIdx2 = tri->vertIndex[2];
+
     u = baryW * *(float *)&g_vertexData[vertIdx0 * 0x44]
       + baryU * *(float *)&g_vertexData[vertIdx1 * 0x44]
       + baryV * *(float *)&g_vertexData[vertIdx2 * 0x44];
-
-    /* interpolate V: w*vert0[1] + u*vert1[1] + v*vert2[1] */
     v = baryW * *(float *)&g_vertexData[vertIdx0 * 0x44 + 4]
       + baryU * *(float *)&g_vertexData[vertIdx1 * 0x44 + 4]
       + baryV * *(float *)&g_vertexData[vertIdx2 * 0x44 + 4];
-
-    /* scale and floor (binary calls sub_43B200 = floorf, NOT sqrtf) */
     u *= uvScale;
     v *= uvScale;
-    u = floorf(u);
-    v = floorf(v);
 
-    /* clamp u to [0, maxUV] */
-    if (u < 0.0f)
-        u = 0.0f;
-    else if (u > maxUV)
-        u = maxUV;
-
-    /* clamp v to [0, maxUV] */
-    if (v < 0.0f)
-        v = 0.0f;
-    else if (v > maxUV)
-        v = maxUV;
-
-    }
-    /* sample lightmap */
+    /* Retail 0x407080 has two output modes.  The default transport path and
+     * light-grid producer pass true and choose one clamped floor sample;
+     * ground lighting passes false and receives bilinear samples. */
+    if (nearestSample)
     {
-        int lightmapIdx = ((Triangle_t *)tri)->lightmapIdx;
-        float *outPtr = (float *)outputLighting;
-        outPtr[2] = 1.0f; /* initialize Z to 1 */
-        GetLightingSample(lightmapIdx, u, v, outPtr);
+        LightingHit_t *hit = (LightingHit_t *)outputLighting;
+        LightmapSample_t *sample;
+        int s = (int)floorf(u);
+        int t = (int)floorf(v);
+
+        if (s < 0) s = 0;
+        else if (s > 511) s = 511;
+        if (t < 0) t = 0;
+        else if (t > 511) t = 511;
+
+        GetLightingSample((int)tri->lightmapIdx, (float)s, (float)t,
+                          (void **)&sample);
+        if (!sample || sample->weight <= 0.0f)
+            return 0;
+
+        hit->sample = (LightingSample_t *)sample;
+        hit->weight = 1.0f;
+        hit->_pad = 0;
+        if (outTraceClass)
+            *outTraceClass = 4;
+        return 1;
     }
 
-    /* check if result is valid (result[2] > 0) */
     {
-        float *resultPtr = *(float **)outputLighting;
-        if (resultPtr[2] > 0.0f) {
-            return 1;
+        LightingHit_t *hits = (LightingHit_t *)outputLighting;
+        int baseS = (int)floorf(u);
+        int baseT = (int)floorf(v);
+        float fracS = u - (float)baseS;
+        float fracT = v - (float)baseT;
+        float sWeights[2] = { 1.0f - fracS, fracS };
+        float tWeights[2] = { 1.0f - fracT, fracT };
+        float totalWeight = 0.0f;
+        int hitCount = 0;
+        int dy, dx;
+
+        for (dy = 0; dy < 2; dy++)
+        {
+            int t = baseT + dy;
+            if (t < 0 || t >= 512 || tWeights[dy] == 0.0f)
+                continue;
+            for (dx = 0; dx < 2; dx++)
+            {
+                int s = baseS + dx;
+                LightmapSample_t *sample;
+                float weight = sWeights[dx] * tWeights[dy];
+                if (s < 0 || s >= 512 || weight == 0.0f)
+                    continue;
+
+                GetLightingSample((int)tri->lightmapIdx, (float)s, (float)t,
+                                  (void **)&sample);
+                if (!sample || sample->weight <= 0.0f)
+                    continue;
+
+                hits[hitCount].sample = (LightingSample_t *)sample;
+                hits[hitCount].weight = weight;
+                hits[hitCount]._pad = 0;
+                totalWeight += weight;
+                hitCount++;
+            }
         }
-    }
 
-    return 0;
+        if (hitCount && totalWeight > 0.0f && totalWeight < 0.9990000129f)
+        {
+            float scale = 1.0f / totalWeight;
+            int i;
+            for (i = 0; i < hitCount; i++)
+                hits[i].weight *= scale;
+        }
+        if (hitCount && outTraceClass)
+            *outTraceClass = 4;
+        return hitCount;
+    }
+}
+
+int FindLightingSamplesAndNormal(int sampleIdx, float *position, float *normal,
+                                 float offset, void *outputLighting,
+                                 float *outputNormal)
+{
+    return FindLightingSamplesAndNormalMode(sampleIdx, position, normal, offset,
+                                            outputLighting, outputNormal, 0,
+                                            NULL);
+}
+
+int FindLightingSamplesAndNormalNearest(int sampleIdx, float *position,
+                                        float *normal, float offset,
+                                        void *outputLighting,
+                                        float *outputNormal)
+{
+    return FindLightingSamplesAndNormalMode(sampleIdx, position, normal, offset,
+                                            outputLighting, outputNormal, 1,
+                                            NULL);
+}
+
+/* geometry.cpp 0x409D50/0x409C90/0x409E10.  Retail uses its multi-hit world
+ * trace; the pointer-safe port applies the same terminal-material predicates
+ * to the existing software trace. */
+static int Lighting_VerticalTraceIsSky(int sampleIdx, const float *point,
+                                       int upward, int allowSpecialSurface)
+{
+    float end[3];
+    RayHitResult_t hit;
+    MaterialDef_t *material;
+
+    end[0] = point[0];
+    end[1] = point[1];
+    end[2] = point[2] + (upward ? 262144.0f : -262144.0f);
+    TraceSetup_and_Dispatch(sampleIdx, (float *)point, end, &hit);
+    if (!hit.triangle)
+        return 1;
+
+    material = hit.triangle->material;
+    if (material->surfaceFlags & SURF_SKY)
+        return 1;
+    return allowSpecialSurface && material->contents == 1
+        && (material->surfaceFlags & 0x80);
+}
+
+static int Lighting_RejectTransportPoint(int sampleIdx, const float *point)
+{
+    return Lighting_VerticalTraceIsSky(sampleIdx, point, 0, 1)
+        && !Lighting_VerticalTraceIsSky(sampleIdx, point, 1, 0);
 }
 
 
@@ -461,6 +1182,7 @@ basis coefficients and g_sunColorR/CC/D0 for the sky color.
 */
 void GatherSkyLighting(int sampleIdx, float *position, float *basis,
                        float skyWeight, float subAreaFactor,
+                       unsigned char primaryLightIndex,
                        SubSample_t *subSample)
 {
     float startPos[3], endPos[3];
@@ -527,9 +1249,9 @@ void GatherSkyLighting(int sampleIdx, float *position, float *basis,
     directEnergy[0] = g_sunColorR * skyWeight;
     directEnergy[1] = g_sunColorG * skyWeight;
     directEnergy[2] = g_sunColorB * skyWeight;
-    radiosityEnergy[0] = g_sunRadiosityR * skyWeight;
-    radiosityEnergy[1] = g_sunRadiosityG * skyWeight;
-    radiosityEnergy[2] = g_sunRadiosityB * skyWeight;
+    radiosityEnergy[0] = g_backfaceLightR * skyWeight;
+    radiosityEnergy[1] = g_backfaceLightG * skyWeight;
+    radiosityEnergy[2] = g_backfaceLightB * skyWeight;
 
     Assert(!IS_NAN_FLOAT(directEnergy[0]) && !IS_NAN_FLOAT(directEnergy[1]) && !IS_NAN_FLOAT(directEnergy[2]),
            s_assertDisable_Sky_nanEnergy);
@@ -537,11 +1259,22 @@ void GatherSkyLighting(int sampleIdx, float *position, float *basis,
     localSunDir[0] = g_sunDirX * basis[0] + g_sunDirY * basis[1] + g_sunDirZ * basis[2];
     localSunDir[1] = g_sunDirX * basis[3] + g_sunDirY * basis[4] + g_sunDirZ * basis[5];
     localSunDir[2] = skyDir;
-    GatherSurfaceIncidentEnergyForLightFromDir(directEnergy, localSunDir, sampleVars->incident);
+    /* Native 0x407770 routes the surface's primary sun exclusively through
+     * the four scalar intensity samples.  Only a non-primary sun becomes a
+     * directional transport record in the coefficient textures. */
+    if (primaryLightIndex != (unsigned char)g_sunPrimaryLightIndex)
+    {
+        AppendDirectTransport(sample, directEnergy, localSunDir);
+    }
 
-    sampleVars->scattered[0] += directEnergy[0] * skyDir;
-    sampleVars->scattered[1] += directEnergy[1] * skyDir;
-    sampleVars->scattered[2] += directEnergy[2] * skyDir;
+    /* 0x407770 pre-scales the colors by visibility and clipped sub-area;
+     * 0x4075D0 then applies normal dot sun to accumulated/ping energy. */
+    sampleVars->gatheredIncident[0] += directEnergy[0] * skyDir;
+    sampleVars->gatheredIncident[1] += directEnergy[1] * skyDir;
+    sampleVars->gatheredIncident[2] += directEnergy[2] * skyDir;
+
+    /* `scattered` carries the material reflectivity vector in the recovered
+     * retail topology; direct sunlight must not overwrite it. */
     sampleVars->unscattered[0] += radiosityEnergy[0] * skyDir;
     sampleVars->unscattered[1] += radiosityEnergy[1] * skyDir;
     sampleVars->unscattered[2] += radiosityEnergy[2] * skyDir;
@@ -550,6 +1283,37 @@ void GatherSkyLighting(int sampleIdx, float *position, float *basis,
         && !IS_NAN_FLOAT(sampleVars->unscattered[1])
         && !IS_NAN_FLOAT(sampleVars->unscattered[2]),
            s_assertDisable_Sky_nanResult);
+}
+
+extern void *g_lightDirArray;
+
+/* Native compile.cpp 0x406BA0: inject the normalized per-direction sky
+ * visibility into the accumulated light and the first radiosity ping buffer. */
+static void SeedSkyLightForSample(Sample_t *sample)
+{
+    SampleVars_t *vars;
+    int i;
+
+    if (!sample || !(vars = sample->vars) || !vars->skyInfluences)
+        return;
+
+    for (i = 0; i < g_traces; i++)
+    {
+        LightDirEntry_t *dir = &((LightDirEntry_t *)g_lightDirArray)[i];
+        float weight = vars->skyInfluences[i] * dir->z;
+        float energy[3];
+
+        energy[0] = g_sunRadiosityR * weight;
+        energy[1] = g_sunRadiosityG * weight;
+        energy[2] = g_sunRadiosityB * weight;
+
+        vars->gatheredIncident[0] += energy[0];
+        vars->gatheredIncident[1] += energy[1];
+        vars->gatheredIncident[2] += energy[2];
+        vars->unscattered[0] += energy[0];
+        vars->unscattered[1] += energy[1];
+        vars->unscattered[2] += energy[2];
+    }
 }
 
 /* Forward declarations for functions not in cod2rad64.h */
@@ -581,13 +1345,8 @@ void BounceGatherCallback(Sample_t *sample)
 {
     SampleVars_t *sampleVars;
     TransferBlock_t *block;
-    float scatterColor[3];
     float bounceColor[3];
     int i;
-
-    AcquireThreadLock((unsigned int)(uintptr_t)sample);
-    Lighting_GetGatheredLight(sample, scatterColor);
-    ReleaseThreadLock((unsigned int)(uintptr_t)sample);
 
     sampleVars = sample->vars;
     block = sampleVars->transferHead;
@@ -605,21 +1364,22 @@ void BounceGatherCallback(Sample_t *sample)
                 break;
 
             {
-                float factor = g_radiosityScale * entry->weight;
-                bounceColor[0] = scatterColor[0] * factor;
-                bounceColor[1] = scatterColor[1] * factor;
-                bounceColor[2] = scatterColor[2] * factor;
-            }
-
-            AcquireThreadLock((unsigned int)(uintptr_t)entry->toSample);
-            {
-                Sample_t *toSamp = (Sample_t *)entry->toSample;
+                SampleVars_t *sourceVars = entry->toSample->vars;
                 float *lightDir = (float *)&((LightDirEntry_t *)g_lightDirArray)[entry->lightIdx];
+
+                /* Native lighting.cpp:641 multiplies the source sample's
+                 * accumulated incident RGB by its radiosity colour.  The
+                 * radiosity scale is already folded into scattered by
+                 * Lighting_ApplyRadiosityScale. */
+                bounceColor[0] = sourceVars->gatheredIncident[0] * sourceVars->scattered[0]
+                               * entry->weight;
+                bounceColor[1] = sourceVars->gatheredIncident[1] * sourceVars->scattered[1]
+                               * entry->weight;
+                bounceColor[2] = sourceVars->gatheredIncident[2] * sourceVars->scattered[2]
+                               * entry->weight;
                 GatherSurfaceIncidentEnergyForLightFromDir(bounceColor,
-                    lightDir,
-                    toSamp->vars->incident);
+                    lightDir, sampleVars->incident);
             }
-            ReleaseThreadLock((unsigned int)(uintptr_t)entry->toSample);
         }
 
         block = (TransferBlock_t *)block->next;
@@ -664,14 +1424,64 @@ void Compile(int threadCount)
     }
 
     BeginProgress("Calculating sample areas...");
-    SetLightingSampleAreas(threadCount);
+    /* The recovered rasterizer accumulates shared sample weights as floats.
+     * Running that reduction through the dynamic worker queue makes the sum
+     * order scheduler-dependent; retail is byte-stable for -Threads 1..4.
+     * Keep only this reduction ordered until its native per-thread scratch
+     * layout is represented locally. */
+    SetLightingSampleAreas(1);
     EndProgress();
 
     Lighting_InitSamples();
+
+    /* Native runs direct radiosity before constructing transport
+     * (0x40C6E0/0x40C1C0 before 0x40C700).  The recovered local raster
+     * callback had these operations fused, so split its two modes here. */
+    BeginProgress("Getting radiosity color for each sample...");
+    g_lightingTransportPass = 0;
+    BuildLightTransfers(1);
+    EndProgress();
+
+    BeginProgress("Applying radiosity scale...");
+    ForEachUsefulLightingSample(Lighting_ApplyRadiosityScale, threadCount);
+    EndProgress();
+
+    /* Retail initializes the randomized direction table immediately before
+     * validating radtrans.bin; the cache header includes all of these knobs. */
     SetupSampleRadii();
 
-    BeginProgress("Building light transport for everything...");
-    BuildLightTransfers(threadCount);
+    g_relightCacheLoaded = 0;
+    if (g_relightLoadEnabled && RadTrans_LoadV3())
+    {
+        g_relightSaveEnabled = 0;
+        BeginProgress("Building light transport for light sources...");
+    }
+    else
+    {
+        g_relightLoadEnabled = 0;
+        Relight_ResetSuppressedRanges();
+        BeginProgress("Building light transport for everything...");
+    }
+    g_lightingTransportPass = 1;
+    g_lightingSeedSkyPass = 0;
+    /* The local chain representation is updated by multiple triangles.  Its
+     * native flat-transfer scratch/ordered merge has not yet been recovered,
+     * so preserve retail's thread-invariant result by constructing it in work
+     * order.  Tracing after construction remains parallel. */
+    BuildLightTransfers(1);
+    EndProgress();
+
+    if (g_relightSaveEnabled)
+        RadTrans_SaveV3();
+
+    BeginProgress("Normalizing transport weights...");
+    ForEachUsefulLightingSample(NormalizeLightTransfers, 1);
+    EndProgress();
+
+    /* Native 0x416090 seeds the already-recorded, normalized sky influences;
+     * it does not replay geometry or consume a second random sequence. */
+    BeginProgress("Seeding sky light...");
+    ForEachUsefulLightingSample(SeedSkyLightForSample, threadCount);
     EndProgress();
 
     /* radiosity bounce */
@@ -681,19 +1491,31 @@ void Compile(int threadCount)
             RadiosityBounce(epsilon, threadCount);
     }
 
-    /* build lightmaps */
-    BeginProgress("Building lightmaps...");
+    /* The pre-existing transfer representation is outbound rather than the
+     * retail compiler's inbound flat lists.  Materialize its accumulated
+     * indirect term into the sample SH field before the retail-equivalent
+     * bleed/final-image stages below. */
     ForEachUsefulLightingSample(BounceGatherCallback, threadCount);
+
+    /* Retail bleeds the sample field before converting it to the packed CoD4
+     * lightmap images.  Ground and grid lighting follow this phase
+     * (cod4rad.exe 0x4081C4..0x408206). */
+    BeginProgress("Finding lightmap bleeding...");
+    InitBleeding(threadCount);
     EndProgress();
 
-    /* light grid */
-    BeginProgress("Calculating light grid...");
-    CalculateLightGrid(threadCount);
+    BeginProgress("Building final lightmaps...");
+    BuildFinalLightmaps_TripleLoop();
     EndProgress();
 
     /* ground lighting */
     BeginProgress("Calculating ground lighting for static models...");
     CalculateGroundLightingForAllStaticModels();
+    EndProgress();
+
+    /* light grid */
+    BeginProgress("Calculating light grid...");
+    CalculateLightGrid(threadCount);
     EndProgress();
 
     /* free transfer pool blocks */
@@ -704,11 +1526,6 @@ void Compile(int threadCount)
         g_transferPool = next;
     }
 
-    /* normalize transfers for all samples */
-    ForEachUsefulLightingSample(NormalizeLightTransfers, 1);
-
-    /* bleed lightmap edges (tail call at LST 0x40B230) */
-    InitBleeding(threadCount);
 }
 
 /*
@@ -729,8 +1546,9 @@ lighting subsample. Traces shadow rays and accumulates weighted
 light contribution into the sample's SH bands.
 ================
 */
-extern int PointLightEvaluatePoint(int sampleIdx, int lightIdx, float *position,
-    float *normal, float *outDir, float *outColor, float *outArg); /* pointlights_419090 */
+extern int PointLightEvaluatePoint(int surfacePrimaryLightIndex, int sampleIdx,
+    int lightIdx, float *position, float *normal, float *outDir,
+    float *outColor, float *outArg); /* pointlights_419090 */
 
 static char s_assertDisable_Point_sample;    /* byte_480A88 */
 static char s_assertDisable_Point_vars;      /* byte_480A87 */
@@ -738,8 +1556,10 @@ static char s_assertDisable_Point_nanEnergy; /* byte_480A86 */
 static char s_assertDisable_Point_nanResult; /* byte_480A85 */
 
 void GatherPointLightForSample(int sampleIdx, int lightIdx, float *position,
-    float *basis, float subAreaFactor, Sample_t *sample)
+    float *basis, float subAreaFactor, unsigned char primaryLightIndex,
+    SubSample_t *subSample)
 {
+    Sample_t *sample;
     SampleVars_t *sampleVars;
     float lightColor[3];
     float lightDirection[3];
@@ -747,13 +1567,14 @@ void GatherPointLightForSample(int sampleIdx, int lightIdx, float *position,
     float energy[3];
     int result;
 
+    sample = subSample ? subSample->sample : NULL;
     Assert(sample != 0, s_assertDisable_Point_sample);
     sampleVars = sample->vars;
     Assert(sampleVars != 0, s_assertDisable_Point_vars);
 
     /* call point light gathering — returns 0 (no light), 1 (directional), 2 (ambient) */
     /* binary passes basis+6 (the surface normal, 3rd row of basis) as 4th arg */
-    result = PointLightEvaluatePoint(sampleIdx, lightIdx - 2,
+    result = PointLightEvaluatePoint(primaryLightIndex, sampleIdx, lightIdx - 2,
         position, basis + 6,
         lightDirection, lightColor, &outArg);
 
@@ -768,19 +1589,12 @@ void GatherPointLightForSample(int sampleIdx, int lightIdx, float *position,
     Assert(!IS_NAN_FLOAT(energy[0]) && !IS_NAN_FLOAT(energy[1]) && !IS_NAN_FLOAT(energy[2]),
            s_assertDisable_Point_nanEnergy);
 
-    if (result == 2)
+    if (result == 1)
     {
-        /* ambient/omnidirectional: add energy to all 4 SH bands */
-        float *shBands = sampleVars->incident;
-        int i;
-        for (i = 0; i < 4; i++)
-        {
-            shBands[i * 3 + 0] += energy[0];
-            shBands[i * 3 + 1] += energy[1];
-            shBands[i * 3 + 2] += energy[2];
-        }
+        int intensityIndex = subSample->s + 2 * subSample->t;
+        sampleVars->intensity[intensityIndex] += subAreaFactor;
     }
-    else
+    else if (result == 2)
     {
         /* directional: transform light direction through basis matrix */
         float dir[3];
@@ -789,8 +1603,21 @@ void GatherPointLightForSample(int sampleIdx, int lightIdx, float *position,
         dir[1] = lightDirection[0] * basis[3] + lightDirection[1] * basis[4] + lightDirection[2] * basis[5];
         dir[2] = lightDirection[0] * basis[6] + lightDirection[1] * basis[7] + lightDirection[2] * basis[8];
 
+        AppendDirectTransport(sample, energy, dir);
         GatherSurfaceIncidentEnergyForLightFromDir(energy, dir,
             sampleVars->incident);
+    }
+    else
+    {
+        Assert(result == 3, s_assertDisable_Point_sample);
+
+        /* Native LIGHT_INFLUENCE_COINCIDENT is direction independent and is
+         * added to every final basis direction before gamma correction. */
+        AcquireThreadLock((unsigned int)(uintptr_t)sample);
+        sampleVars->coincident[0] += energy[0];
+        sampleVars->coincident[1] += energy[1];
+        sampleVars->coincident[2] += energy[2];
+        ReleaseThreadLock((unsigned int)(uintptr_t)sample);
     }
 
     /* accumulate energy * areaFactor into unscattered — outArg is GatherPointLight's 7th output */
@@ -798,6 +1625,9 @@ void GatherPointLightForSample(int sampleIdx, int lightIdx, float *position,
         sampleVars->unscattered[0] += energy[0] * outArg;
         sampleVars->unscattered[1] += energy[1] * outArg;
         sampleVars->unscattered[2] += energy[2] * outArg;
+        sampleVars->gatheredIncident[0] += energy[0] * outArg;
+        sampleVars->gatheredIncident[1] += energy[1] * outArg;
+        sampleVars->gatheredIncident[2] += energy[2] * outArg;
     }
 
     Assert(!IS_NAN_FLOAT(sampleVars->unscattered[0])
@@ -818,7 +1648,7 @@ radius computation.
 extern void UniformPointsOnHemisphere(int count, float *dirs, int stride); /* com_math_428CF0 */
 extern float Vec2DistanceSq(float *a, float *b);                    /* sub_4291D0: distance between 2D points */
 /* sqrtf is from CRT (sub_43D3C0) */
-float g_invTraces;       /* dword_480A5C: 1.0 / g_traces */
+float g_invTraces;       /* native 0x407C48: 2.0 / g_traces */
 
 void SetupSampleRadii(void)
 {
@@ -874,8 +1704,10 @@ void SetupSampleRadii(void)
         cur[3] = radius * g_jitter; /* store radius at offset +0xC */
     }
 
-    /* compute inverse trace count */
-    g_invTraces = 1.0f / (float)g_traces;
+    /* Hemisphere Monte Carlo normalization.  CoD4 integrates over the
+     * hemisphere with 2/N; the retained CoD2 port used 1/N, halving both
+     * sky seeds and every transport coefficient. */
+    g_invTraces = 2.0f / (float)g_traces;
 }
 
 /*
@@ -948,7 +1780,7 @@ void GatherBounceForSample(Sample_t *sourceSample, int threadIdx)
     SampleVars_t *sourceVars;
     float totalEnergy;
     float bouncedLight[3];
-    void *block;
+    TransferBlock_t *block;
     int i;
 
     Assert(sourceSample != 0, s_assertDisable_Bounce_source);
@@ -956,55 +1788,63 @@ void GatherBounceForSample(Sample_t *sourceSample, int threadIdx)
     Assert(sourceVars != 0, s_assertDisable_Bounce_sourceVars);
     Assert(sourceVars != 0, s_assertDisable_Bounce_sampleVars);
 
-    /* compute total unscattered energy */
-    totalEnergy = (sourceVars->unscattered[1]
-                 + sourceVars->unscattered[0]
-                 + sourceVars->unscattered[2]) * g_energyScale;
-
-    if (totalEnergy == 0.0f)
-        return;
-
-    /* update per-thread max energy */
-    if (totalEnergy > g_bounceEnergy[threadIdx + 1])
-        g_bounceEnergy[threadIdx + 1] = totalEnergy;
-
+    /* The producer stores transfers on the hit sample: each entry therefore
+     * names an incoming source.  This is the same pull topology as retail
+     * 0x407C50 (the old port mistakenly pushed entries back to their source). */
     Assert(!IS_NAN_FLOAT(sourceVars->unscattered[0])
         && !IS_NAN_FLOAT(sourceVars->unscattered[1])
         && !IS_NAN_FLOAT(sourceVars->unscattered[2]),
            s_assertDisable_Bounce_nanSource);
 
-    AcquireThreadLock((unsigned int)(uintptr_t)sourceSample);
-
-    bouncedLight[0] = g_radiosityScale * sourceVars->unscattered[0];
-    bouncedLight[1] = g_radiosityScale * sourceVars->unscattered[1];
-    bouncedLight[2] = g_radiosityScale * sourceVars->unscattered[2];
-
-    sourceVars->unscattered[0] = 0.0f;
-    sourceVars->unscattered[1] = 0.0f;
-    sourceVars->unscattered[2] = 0.0f;
-
-    ReleaseThreadLock((unsigned int)(uintptr_t)sourceSample);
-
-    Assert(!IS_NAN_FLOAT(bouncedLight[0]) && !IS_NAN_FLOAT(bouncedLight[1])
-        && !IS_NAN_FLOAT(bouncedLight[2]), s_assertDisable_Bounce_nanBounced);
-
-    /* iterate transfer chain, accumulate bounced light to targets */
+    bouncedLight[0] = bouncedLight[1] = bouncedLight[2] = 0.0f;
+    block = sourceVars->transferHead;
+    while (block)
     {
-        TransferBlock_t *block = sourceVars->transferHead;
-        while (block)
+        for (i = 0; i < TRANSFERS_PER_BLOCK; ++i)
         {
-            for (i = 0; i < TRANSFERS_PER_BLOCK; i++)
-            {
-                TransferEntry_t *entry = &block->entries[i];
-                if (!entry->toSample)
-                    break;
-
-                BuildLightingTransfersForSample(bouncedLight, entry->weight,
-                    (Sample_t *)entry->toSample);
-            }
-            block = (TransferBlock_t *)block->next;
+            TransferEntry_t *entry = &block->entries[i];
+            SampleVars_t *fromVars;
+            float color[3];
+            if (!entry->toSample)
+                break;
+            fromVars = ((Sample_t *)entry->toSample)->vars;
+            float cosine = ((LightDirEntry_t *)g_lightDirArray)[entry->lightIdx].z;
+            color[0] = fromVars->unscattered[0] * fromVars->scattered[0] * entry->weight * cosine;
+            color[1] = fromVars->unscattered[1] * fromVars->scattered[1] * entry->weight * cosine;
+            color[2] = fromVars->unscattered[2] * fromVars->scattered[2] * entry->weight * cosine;
+            bouncedLight[0] += color[0];
+            bouncedLight[1] += color[1];
+            bouncedLight[2] += color[2];
         }
+        block = block->next;
     }
+    /* `scattered` is this pass's destination ping-pong buffer.  RadiosityBounce
+     * commits it only after every worker has consumed unscattered. */
+    {
+        ptrdiff_t index = (LightmapSample_t *)sourceSample - (LightmapSample_t *)g_lightingSamples;
+        g_bounceStage[index * 3 + 0] = bouncedLight[0];
+        g_bounceStage[index * 3 + 1] = bouncedLight[1];
+        g_bounceStage[index * 3 + 2] = bouncedLight[2];
+    }
+
+    /* Retail 0x407C50 retains every pass in gatheredIncident while only the
+     * ping-pong buffer is replaced for the next pass. */
+    sourceVars->gatheredIncident[0] += bouncedLight[0];
+    sourceVars->gatheredIncident[1] += bouncedLight[1];
+    sourceVars->gatheredIncident[2] += bouncedLight[2];
+
+    totalEnergy = (bouncedLight[0] + bouncedLight[1] + bouncedLight[2]) * g_energyScale;
+    if (totalEnergy > g_bounceEnergy[threadIdx + 1])
+        g_bounceEnergy[threadIdx + 1] = totalEnergy;
+}
+
+static void CommitBounceForSample(Sample_t *sample)
+{
+    SampleVars_t *vars = sample->vars;
+    ptrdiff_t index = (LightmapSample_t *)sample - (LightmapSample_t *)g_lightingSamples;
+    vars->unscattered[0] = g_bounceStage[index * 3 + 0];
+    vars->unscattered[1] = g_bounceStage[index * 3 + 1];
+    vars->unscattered[2] = g_bounceStage[index * 3 + 2];
 }
 
 /*
@@ -1021,19 +1861,23 @@ void RadiosityBounce(float epsilon, int threadCount)
 {
     int pass;
     float maxEnergy;
-    float prevMax;
-    float divergeThreshold;
+    float firstBounceMax;
     char *msg;
     int i;
 
-    prevMax = k_initialMaxEnergy; /* initial large value */
-    divergeThreshold = k_divergeThreshold; /* 1.1 or similar */
+    firstBounceMax = k_initialMaxEnergy;
 
     if (!g_bounceEnergy || g_bounceEnergyCount < threadCount + 1)
     {
         if (g_bounceEnergy) free(g_bounceEnergy);
         g_bounceEnergyCount = threadCount + 1;
         g_bounceEnergy = (float *)calloc(g_bounceEnergyCount, sizeof(float));
+    }
+    if (!g_bounceStage || g_bounceStageCount < g_totalSampleCount)
+    {
+        free(g_bounceStage);
+        g_bounceStageCount = g_totalSampleCount;
+        g_bounceStage = (float *)calloc((size_t)g_bounceStageCount * 3, sizeof(*g_bounceStage));
     }
 
     pass = 0;
@@ -1058,17 +1902,18 @@ void RadiosityBounce(float epsilon, int threadCount)
             if (g_bounceEnergy[i] > maxEnergy)
                 maxEnergy = g_bounceEnergy[i];
         }
-
         EndProgress();
+        ForEachUsefulLightingSample(CommitBounceForSample, 1);
 
         if (pass == 1)
         {
-            prevMax = maxEnergy;
+            firstBounceMax = maxEnergy;
         }
         else
         {
-            /* check for divergence */
-            if (maxEnergy > prevMax * divergeThreshold)
+            /* Retail compares every later pass with the first pass; it does
+             * not update this baseline after each bounce (0x407F50). */
+            if (maxEnergy > firstBounceMax * 2.0f)
             {
                 Com_Printf("\n\nAborting radiosity due to a positive feedback loop.\n");
                 Com_Printf("This can usually be fixed by changing '-traces' slightly (currently %i).\n", g_traces);
@@ -1118,7 +1963,7 @@ static char s_assertDisable_Dir_incident;    /* byte_480A94 */
 static char s_assertDisable_Dir_nanEnergy;   /* byte_480A93 */
 static char s_assertDisable_Dir_nanResult;   /* byte_480A92 */
 
-void FindLightingTransfersForDirection(int sampleIdx, Sample_t *sample,
+int FindLightingTransfersForDirection(int sampleIdx, Sample_t *sample,
     float *position, float *normal, float subAreaFactor, int dirIdx)
 {
     float *dirEntry;
@@ -1127,10 +1972,11 @@ void FindLightingTransfersForDirection(int sampleIdx, Sample_t *sample,
     float lenSq;
     float pertDir[3]; /* perturbed direction on disk */
     float worldDir[3];
-    float hitResults[4]; /* from FindLightingSamplesAndNormal */
+    LightingHit_t hitResults[4];
     float outputNormal[3];
     SampleVars_t *sampleVars;
     int result;
+    int traceClass;
     float factor;
     float energy[3];
     int i;
@@ -1182,53 +2028,46 @@ void FindLightingTransfersForDirection(int sampleIdx, Sample_t *sample,
     worldDir[2] = pertDir[0] * normal[2] + pertDir[1] * normal[5] + pertDir[2] * normal[8];
 
     /* trace ray along world direction */
-    result = FindLightingSamplesAndNormal(sampleIdx, position, worldDir,
-        k_skyRayLength, hitResults, NULL);
+    result = FindLightingSamplesAndNormalMode(sampleIdx, position, worldDir,
+        k_skyRayLength, hitResults, NULL, g_traceFilter == 1, &traceClass);
 
-    if (result == 0)
-        return;
+    if (traceClass <= 2)
+        return traceClass;
 
     factor = g_invTraces * subAreaFactor;
 
-    if (result == -1)
+    if (traceClass == 3)
     {
-        /* backface hit — accumulate self-illumination energy */
-        energy[0] = g_backfaceLightR * factor;
-        energy[1] = g_backfaceLightG * factor;
-        energy[2] = g_backfaceLightB * factor;
-
-        Assert(!IS_NAN_FLOAT(energy[0]) && !IS_NAN_FLOAT(energy[1])
-            && !IS_NAN_FLOAT(energy[2]), s_assertDisable_Dir_nanEnergy);
-
-        /* gather into SH bands */
-        GatherSurfaceIncidentEnergyForLightFromDir(energy, pertDir,
-            sampleVars->incident);
-
-        /* accumulate into scattered and unscattered */
-        sampleVars->scattered[0] += energy[0];
-        sampleVars->scattered[1] += energy[1];
-        sampleVars->scattered[2] += energy[2];
-        sampleVars->unscattered[0] += energy[0];
-        sampleVars->unscattered[1] += energy[1];
-        sampleVars->unscattered[2] += energy[2];
-
-        Assert(!IS_NAN_FLOAT(sampleVars->unscattered[0])
-            && !IS_NAN_FLOAT(sampleVars->unscattered[1])
-            && !IS_NAN_FLOAT(sampleVars->unscattered[2]),
-               s_assertDisable_Dir_nanResult);
+        /* Native records sky visibility per trace during transport; the
+         * normalized vector is injected later by the dedicated seed pass. */
+        AcquireThreadLock((unsigned int)(uintptr_t)sample);
+        if (!sampleVars->skyInfluences)
+            sampleVars->skyInfluences = (float *)calloc((size_t)g_traces,
+                                                        sizeof(float));
+        if (!sampleVars->skyInfluences)
+            Error("Out of memory allocating sky influences\n");
+        sampleVars->skyInfluences[dirIdx] += factor;
+        ReleaseThreadLock((unsigned int)(uintptr_t)sample);
+        return 3;
     }
-    else if (result > 0)
+    else if (traceClass == 4)
     {
+        if (g_lightingSeedSkyPass)
+            return;
         /* hit neighbor samples — allocate transfers */
-        float *hitEntry = hitResults;
         for (i = 0; i < result; i++)
         {
-            void *toSample = *(void **)hitEntry;
-            float weight = factor * *(float *)(hitEntry + 2);
-            AllocLightingTransfer(toSample, sample, dirIdx, weight);
-            hitEntry += 4; /* 16 bytes per entry */
+            void *toSample = hitResults[i].sample;
+            float weight = factor * hitResults[i].weight;
+            /* The current sample owns its incoming-source list.  Retail
+             * 0x406F90 appends the packed hit sample to currentSample->vars;
+             * the previous port accidentally reversed these arguments. */
+            AllocLightingTransfer(sample, toSample, dirIdx, weight);
         }
+        return 4;
     }
+
+    return 0;
 }
 
 /*
@@ -1241,28 +2080,62 @@ for sky contribution. Finally calls GatherPointLightForSample for
 each point light.
 ================
 */
-void FindLightingTransfers_inner(int sampleIdx, float *position, float *normal,
-                                 float subAreaFactor, float skyFactor,
-                                 SubSample_t *subSample)
+int FindLightingTransfers_inner(int sampleIdx, float *position, float *normal,
+                                float subAreaFactor, float skyFactor,
+                                unsigned char primaryLightIndex,
+                                SubSample_t *subSample)
 {
     int i;
+    int hasUsefulDirection = 0;
+    int hasClassOne = 0;
     Sample_t *sample = *(Sample_t **)subSample;
 
-    /* gather lighting transfers for each direction */
-    for (i = 0; i < g_traces; i++)
+    if (g_lightingTransportPass)
     {
-        FindLightingTransfersForDirection(sampleIdx, sample, position, normal,
-                                          subAreaFactor, i);
+        if (!g_relightCacheLoaded)
+        {
+            /* Native transport dispatcher 0x40C700. */
+            for (i = 0; i < g_traces; i++)
+            {
+                int traceClass = FindLightingTransfersForDirection(
+                    sampleIdx, sample, position, normal, subAreaFactor, i);
+                if (traceClass == 1)
+                    hasClassOne = 1;
+                else if (traceClass > 2)
+                    hasUsefulDirection = 1;
+            }
+
+            /* Native 0x4083A0 returns before setting SampleVars::validMask or
+             * gathering direct lights when the hemisphere has neither sky nor
+             * a usable lightmapped neighbour. */
+            if (!hasUsefulDirection)
+                return 0;
+
+            if (hasClassOne)
+            {
+                float probe[3];
+                probe[0] = position[0] + normal[6] * 0.1f;
+                probe[1] = position[1] + normal[7] * 0.1f;
+                probe[2] = position[2] + normal[8] * 0.1f;
+                if (Lighting_RejectTransportPoint(sampleIdx, probe))
+                    return 0;
+            }
+        }
+
+        AcquireThreadLock((unsigned int)(uintptr_t)sample);
+        sample->vars->validMask |= (unsigned char)(1u <<
+            (subSample->s + 2 * subSample->t));
+        ReleaseThreadLock((unsigned int)(uintptr_t)sample);
     }
 
-    /* gather sky lighting */
-    GatherSkyLighting(sampleIdx, position, normal, subAreaFactor,
-                      skyFactor, subSample);
-
-    /* gather point lights */
-    for (i = 2; i < g_totalLightCount; i++)
+    if (g_lightingTransportPass)
     {
-        GatherPointLightForSample(sampleIdx, i, position, normal,
-                                   subAreaFactor, sample);
+        GatherSkyLighting(sampleIdx, position, normal, skyFactor,
+                          subAreaFactor, primaryLightIndex, subSample);
+        for (i = 2; i < g_totalLightCount; i++)
+            GatherPointLightForSample(sampleIdx, i, position, normal,
+                                       subAreaFactor, primaryLightIndex,
+                                       subSample);
     }
+    return 1;
 }

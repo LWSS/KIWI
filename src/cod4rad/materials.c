@@ -27,6 +27,74 @@ extern void memset_fast(void *dst, int val, int size);
 
 static char s_assertDisable_Material_ByteSwap_info;
 
+/* Build the native quarter-resolution RGB reflectivity mask. */
+static void *Material_LoadColorImage(void *fileData, int *texScaleW, int *texScaleH)
+{
+    ImageDecodeState_t imageInfo;
+    MaterialInfo_t *matInfo = (MaterialInfo_t *)fileData;
+    unsigned char *bytes = (unsigned char *)fileData;
+    unsigned char *pixels;
+    unsigned char *colorMask;
+    int width, height;
+    int blockWidth, blockHeight;
+    int blockX, blockY;
+
+    Image_LoadIWI((const char *)(bytes + matInfo->referenceImageName), &imageInfo);
+    pixels = imageInfo.pixels;
+    if (!pixels)
+        return 0;
+
+    width = imageInfo.stride;
+    height = imageInfo.height;
+    if (texScaleW)
+        *texScaleW = width;
+    if (texScaleH)
+        *texScaleH = height;
+
+    /* cod4rad.exe 0x418960 requires both dimensions to be divisible by four. */
+    if (((width | height) & 3) != 0)
+    {
+        Z_FreeInternal(pixels);
+        return 0;
+    }
+
+    blockWidth = width / 4;
+    blockHeight = height / 4;
+    colorMask = (unsigned char *)Z_Malloc(blockWidth * blockHeight * 3);
+    if (!colorMask)
+        Error("Couldn't allocate %i bytes for a color mask\n",
+              blockWidth * blockHeight * 3);
+
+    for (blockY = 0; blockY < blockHeight; blockY++)
+    {
+        for (blockX = 0; blockX < blockWidth; blockX++)
+        {
+            int sum[3] = { 0, 0, 0 };
+            int y, x;
+            unsigned char *dst = colorMask + (blockY * blockWidth + blockX) * 3;
+
+            for (y = 0; y < 4; y++)
+            {
+                const unsigned char *src = pixels
+                    + (((blockY * 4 + y) * width + blockX * 4) * 4);
+                for (x = 0; x < 4; x++)
+                {
+                    sum[0] += src[x * 4 + 0];
+                    sum[1] += src[x * 4 + 1];
+                    sum[2] += src[x * 4 + 2];
+                }
+            }
+
+            dst[0] = (unsigned char)((sum[0] + 8) / 16);
+            dst[1] = (unsigned char)((sum[1] + 8) / 16);
+            dst[2] = (unsigned char)((sum[2] + 8) / 16);
+        }
+    }
+
+    Z_FreeInternal(pixels);
+    return colorMask;
+}
+
 /*
 ================
 Material_ByteSwap
@@ -44,11 +112,9 @@ void Material_ByteSwap(void *info)
 
     Swap_Init_BigEndian();
 
-    mat->hashIndex     = (short)ShortSwap(mat->hashIndex);
-    mat->sortedIndex   = (short)ShortSwap(mat->sortedIndex);
     mat->locale        = LongSwap(mat->locale);
     mat->toolFlags     = (unsigned short)ShortSwap(mat->toolFlags);
-    mat->maxDeformMove = (int)FloatSwap(*(float *)&mat->maxDeformMove);
+    mat->maxDeformMove = FloatSwap(mat->maxDeformMove);
     mat->autoTexScaleW = (unsigned short)ShortSwap(mat->autoTexScaleW);
     mat->autoTexScaleH = (unsigned short)ShortSwap(mat->autoTexScaleH);
     mat->tessSize      = FloatSwap(mat->tessSize);
@@ -238,21 +304,21 @@ void *LoadMaterial(const char *materialName)
     /* parse material header fields into cache entry */
     matData = (unsigned char *)fileData;
 
-    /* contents and surfaceFlags from file header */
+    /* CoD4 MaterialInfo stores surfaceFlags at +0x20 and contents at +0x24. */
     *(int *)(entry + 0x40) = *(int *)(matData + 0x24);
-    *(int *)(entry + 0x44) = *(int *)(matData + 0x28);
+    *(int *)(entry + 0x44) = *(int *)(matData + 0x20);
 
     /* toolFlagsWord (short) */
-    *(short *)(entry + 0x48) = *(short *)(matData + 0x16);
+    *(short *)(entry + 0x48) = *(short *)(matData + 0x12);
 
     /* (gameFlags >> 1) & 1 */
-    *(int *)(entry + 0x4C) = (*(unsigned char *)(matData + 0x0C) >> 1) & 1;
+    *(int *)(entry + 0x4C) = (*(unsigned char *)(matData + 0x08) >> 1) & 1;
 
     /* toolFlags & 1 */
-    *(int *)(entry + 0x50) = *(unsigned char *)(matData + 0x16) & 1;
+    *(int *)(entry + 0x50) = *(unsigned char *)(matData + 0x12) & 1;
 
     /* tessellation size */
-    *(float *)(entry + 0x58) = *(float *)(matData + 0x20);
+    *(float *)(entry + 0x58) = *(float *)(matData + 0x1C);
     if (*(float *)(entry + 0x58) == 0.0f)
         *(float *)(entry + 0x58) = g_defaultTessSize;
 
@@ -260,22 +326,26 @@ void *LoadMaterial(const char *materialName)
     *(int *)(entry + 0x5C) = 0;
 
     /* (toolFlags >> 7) & 1 */
-    *(int *)(entry + 0x60) = (*(unsigned char *)(matData + 0x16) >> 7) & 1;
+    *(int *)(entry + 0x60) = (*(unsigned char *)(matData + 0x12) >> 7) & 1;
 
     /* (surfaceFlags >> 7) & 1 */
-    *(int *)(entry + 0x6C) = (*(int *)(entry + 0x40) >> 7) & 1;
+    *(int *)(entry + 0x6C) = (*(int *)(entry + 0x44) >> 7) & 1;
 
     /* nonColliding: (contentFlags byte & 4) || (toolFlags & 0x70) == 0x20 */
     nonColliding = 0;
-    if (*(unsigned char *)(matData + 0x28) & 4)
+    if (*(unsigned char *)(matData + 0x24) & 4)
         nonColliding = 1;
-    else if ((*(unsigned char *)(matData + 0x16) & 0x70) == 0x20)
+    else if ((*(unsigned char *)(matData + 0x12) & 0x70) == 0x20)
         nonColliding = 1;
     *(int *)(entry + 0x64) = nonColliding;
 
     /* auto texture scale (word → dword) */
-    *(int *)(entry + 0x70) = *(unsigned short *)(matData + 0x1C);
-    *(int *)(entry + 0x74) = *(unsigned short *)(matData + 0x1E);
+    *(int *)(entry + 0x70) = *(unsigned short *)(matData + 0x18);
+    *(int *)(entry + 0x74) = *(unsigned short *)(matData + 0x1A);
+
+    /* maskedmaterial.cpp keeps this independently of the collision alpha mask */
+    ((MaterialDef_t *)entry)->colorMask = Material_LoadColorImage(fileData,
+        (int *)(entry + 0x70), (int *)(entry + 0x74));
 
     /* load alpha image data */
     *(void **)(entry + 0x78) = Material_LoadAlphaImage(fileData,

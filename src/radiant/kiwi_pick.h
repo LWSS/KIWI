@@ -61,6 +61,8 @@
 
 #include "kiwi_selection.h"
 
+#include <math.h>
+
 // Pixel tolerances (spec §2).
 #define PICK_VERT_PIXELS 8.0f
 #define PICK_EDGE_PIXELS 6.0f
@@ -98,6 +100,34 @@ bool Pick_RayFromCursor( ray_t *out );
 // World → camera-image pixels, TOP-LEFT origin.  False when the point is at or
 // behind the eye plane, or the viewport has no size.
 bool Pick_WorldToImage( const float *world, float *outX, float *outY );
+
+// KIWI-UX (CLEANUP, A-12): the ONE spelling of "how far is the cursor from this
+// SEGMENT, in camera-image pixels".  `outT` (optional) is the clamped parameter
+// along a→b, which every caller needs to carry the screen answer back onto the
+// world segment.  Promoted verbatim out of kiwi_pick.cpp's anonymous namespace —
+// it was already the canonical copy — and the five open-coded duplicates
+// (kiwi_snap ScanConSegments/ScanAxes, kiwi_conselect PickAt, kiwi_trim HoverAt,
+// kiwi_split PickLineAt) now call it.  Callers still own the ACCEPTANCE radius
+// (PICK_EDGE_PIXELS / KCON_LINE_PIXELS / KCON_CLICK_PIXELS / an axis radius) and
+// still decide for themselves what a behind-the-eye endpoint means.
+inline float Pick_SegDist2D( float px, float py, float ax, float ay,
+                             float bx, float by, float *outT )
+{
+    const float dx = bx - ax, dy = by - ay;
+    const float len2 = dx * dx + dy * dy;
+    float t = 0.0f;
+    if ( len2 > 1e-6f )
+    {
+        t = ( ( px - ax ) * dx + ( py - ay ) * dy ) / len2;
+        if ( t < 0.0f )      t = 0.0f;
+        else if ( t > 1.0f ) t = 1.0f;
+    }
+    const float ex = px - ( ax + dx * t );
+    const float ey = py - ( ay + dy * t );
+    if ( outT )
+        *outT = t;
+    return sqrtf( ex * ex + ey * ey );
+}
 
 // KIWI-UX (Phase 1b): the candidate-admission filter this file's screen-space scan
 // uses, EXPORTED rather than duplicated so box selection (kiwi_boxselect.cpp) walks

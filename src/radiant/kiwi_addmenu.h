@@ -16,9 +16,12 @@
 // This file is UNCHANGED and the menu is UNBOUND, not deleted.  It is still a
 // palette row ("Add Menu (create)", KIWI_CMD_ADD_MENU 34027), still a button in
 // the KIWI panel's Construct block, still remappable by name from radiant.ini
-// [Commands] — and it is still the only single place that lists all thirteen
-// creators including the four that no longer have a chord (Polyline, Arc, Circle
-// (2-point), Polygon).  Deleting it would have made those four palette-only.
+// [Commands] — and it is still the only single place that lists all FIFTEEN
+// creators (KIWI-UX CLEANUP, C-73: `KADD_ROWS` in the .cpp — 9 curves, 5 solids,
+// Extrude Region; the five construction-plane rows below them are not creators),
+// including the SIX that have no chord: Polyline, Circle (2-point), Arc (centre),
+// Polygon (n-gon), Cone and Extrude Region.  Deleting it would have made those
+// six palette-only.
 //
 // ── WHAT THIS IS, AND WHAT IT IS NOT ────────────────────────────────────────
 // It is a CURSOR-ANCHORED, CATEGORISED VIEW over the creation commands that

@@ -68,6 +68,7 @@ void(__cdecl *const RB_RenderCommandTable[RC_COUNT])(GfxRenderCommandExecState *
   &RB_BeginViewCmd,                 // RC_BEGIN_VIEW = 0x16 (editor begin-view)
   &RB_DrawEditorSkinnedCachedCmd,   // RC_DRAW_EDITOR_SKINNEDCACHED = 0x17 (r_ed_scene.cpp)
   &RB_SetCustomConstantCmd,         // RC_SET_CUSTOM_CONSTANT = 0x18 (#26 layer C2 sun preview)
+  &RB_SetClipPlaneCmd,              // RC_SET_CLIP_PLANE = 0x19 (KIWI-UX ROUND BM: section analysis)
 #endif
 }; // idb (KISAK_RADIANT extends with RC_BEGIN_VIEW + RC_DRAW_EDITOR_SKINNEDCACHED + RC_SET_CUSTOM_CONSTANT; RC_COUNT sizes the table)
 
@@ -1492,6 +1493,114 @@ void __cdecl RB_SetCustomConstantCmd(GfxRenderCommandExecState *execState)
 {
     const GfxCmdSetCustomConstant *cmd = (const GfxCmdSetCustomConstant *)execState->cmd;
     R_SetCodeConstantFromVec4(&gfxCmdBufSourceState, (CodeConstant)cmd->type, (float *)cmd->vec);
+    execState->cmd = (char *)execState->cmd + cmd->header.byteCount;
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  KIWI-UX (ROUND BM) — SECTION ANALYSIS: THE D3D9 USER CLIP PLANE
+// ══════════════════════════════════════════════════════════════════════════════
+// The command carries a WORLD plane (a,b,c,d) whose `>= 0` half-space survives, and
+// this is where it becomes a clip-space plane, because THAT is what D3D9 wants once
+// a programmable vertex shader is transforming the vertices — which is every draw
+// this renderer issues (R_HW_SetVertexShader, rb_shade.cpp:103).  The derivation is
+// on GfxCmdSetClipPlane (r_rendercmds.h); in one line, these matrices are
+// row-vector (clip = world * VP) so the clip-space plane is VP^-1 applied to the
+// plane as a COLUMN:  Pclip[k] = sum_j invVP.m[k][j] * P[j].
+//
+// The matrix comes from the ACTIVE view (gfxCmdBufSourceState.viewParms3D, which
+// RB_BeginViewCmd installed from the editor's own R_Ed_SetSceneParms), so a plane
+// emitted for one view can never be applied with another view's matrices.
+//
+// TESS IS FLUSHED FIRST, for the same reason RB_SetViewportCmd flushes it: whatever
+// is batched in `tess` was submitted under the PREVIOUS clip state and must be drawn
+// under it.  Without this an enable would retroactively clip the batch that preceded
+// it (and a disable would un-clip the batch that followed).
+//
+// STATE SAFETY: nothing else in either tree touches D3DRS_CLIPPLANEENABLE (a grep of
+// the whole source finds no other SetClipPlane / CLIPPLANEENABLE user), so this
+// starts and ends at 0 and the editor's own bracket is the only writer.  A device
+// with no user clip planes at all would simply ignore both calls, which degrades to
+// "the section draws its plane and its handle but clips nothing" — visible, not
+// crashing.
+void __cdecl RB_SetClipPlaneCmd(GfxRenderCommandExecState *execState)
+{
+    const GfxCmdSetClipPlane *cmd = (const GfxCmdSetClipPlane *)execState->cmd;
+
+    if (tess.indexCount)
+        RB_EndTessSurface();
+
+    IDirect3DDevice9 *dev = gfxCmdBufState.prim.device;
+    if (dev)
+    {
+        const GfxViewParms *vp = gfxCmdBufSourceState.viewParms3D;
+        if (cmd->enable && vp)
+        {
+            const GfxMatrix *inv = &vp->inverseViewProjectionMatrix;
+            float pclip[4];
+            for (int k = 0; k < 4; ++k)
+                pclip[k] = inv->m[k][0] * cmd->plane[0]
+                         + inv->m[k][1] * cmd->plane[1]
+                         + inv->m[k][2] * cmd->plane[2]
+                         + inv->m[k][3] * cmd->plane[3];
+            const HRESULT hrPlane  = dev->SetClipPlane(0, pclip);
+            const HRESULT hrEnable = dev->SetRenderState(D3DRS_CLIPPLANEENABLE, D3DCLIPPLANE0);
+            // ══════════════════════════════════════════════════════════════════
+            //  KIWI-UX (ROUND BO, ITEM 1) — THE ONE-SHOT END-TO-END PROBE
+            // ══════════════════════════════════════════════════════════════════
+            // The round-BO autopsy walked the whole chain — the emit, the command
+            // table entry, the enum, the view install, and the clip-space transform
+            // (proved correct with a worked example, see RADIANT_UX_DESIGN) — and
+            // found every link sound.  What is left is DEVICE-LEVEL and cannot be
+            // read out of the source: either these two calls fail, or they succeed
+            // and the runtime/driver declines to apply a user clip plane to the
+            // shaders this build binds.  BM logged the second possibility as
+            // "DEVICE CAPABILITY IS NOT PROBED" and left it unprobed, which is why
+            // the report came back a second time with nothing new to go on.
+            //
+            // So: ONCE per run, on the first enable, write the whole answer to the
+            // first-light log AND to the console.  HRESULTs distinguish "refused";
+            // the GetRenderState read-back distinguishes "accepted but not stored";
+            // maxClipPlanes distinguishes "no user clip planes at all"; and all
+            // three succeeding while the view is uncut is the hardware verdict.
+            // One log line per session — no per-frame cost, nothing behind a
+            // getenv the user would have to know to set.
+            {
+                static bool s_probed = false;
+                if (!s_probed)
+                {
+                    s_probed = true;
+                    extern void Radiant_FL_Log(const char *fmt, ...);
+                    DWORD back = 0xDEADBEEF;
+                    const HRESULT hrGet = dev->GetRenderState(D3DRS_CLIPPLANEENABLE, &back);
+                    Radiant_FL_Log(
+                        "SECTIONPROBE: world=(%g %g %g %g) clip=(%g %g %g %g) "
+                        "SetClipPlane=0x%08lx SetRS=0x%08lx GetRS=0x%08lx readback=%lu "
+                        "gfxMetrics.maxClipPlanes=%d",
+                        cmd->plane[0], cmd->plane[1], cmd->plane[2], cmd->plane[3],
+                        pclip[0], pclip[1], pclip[2], pclip[3],
+                        (unsigned long)hrPlane, (unsigned long)hrEnable,
+                        (unsigned long)hrGet, (unsigned long)back,
+                        gfxMetrics.maxClipPlanes);
+                    Com_Printf(8,
+                        "Section: clip plane armed - SetClipPlane=0x%08lx "
+                        "SetRenderState=0x%08lx CLIPPLANEENABLE reads back %lu, "
+                        "device reports %d user clip planes.\n",
+                        (unsigned long)hrPlane, (unsigned long)hrEnable,
+                        (unsigned long)back, gfxMetrics.maxClipPlanes);
+                    if (back != (DWORD)D3DCLIPPLANE0 || hrPlane < 0 || hrEnable < 0
+                        || gfxMetrics.maxClipPlanes < 1)
+                        Com_PrintWarning(8,
+                            "Section: this device did NOT accept the user clip plane - "
+                            "the section will draw its plane and handle but cut nothing.\n");
+                }
+            }
+        }
+        else
+        {
+            dev->SetRenderState(D3DRS_CLIPPLANEENABLE, 0);
+        }
+    }
+
     execState->cmd = (char *)execState->cmd + cmd->header.byteCount;
 }
 #endif

@@ -202,7 +202,7 @@ void Split2dPolyAlongAxis(float *coords, int vertCount, int axis, float splitVal
 
 /*
  * Polygon slot size: each slot holds up to 8 vertices × 2 floats = 64 bytes,
- * but the binary uses 96-byte stride (index * 3 * 32) per slot.
+ * Retail reserves a 112-byte temporary slot and permits ten clipped vertices.
  */
 
 /* helper: get pointer to polygon slot within the buffer */
@@ -239,6 +239,7 @@ void ForEach2dArea(void *polyArray, int numPolys, int gridSizeX, int numCellsY,
     float centroid[2];
     float areaX2;
     double areaAbs;
+    int areaIndex;
 
     minArea = cellSizeX * 2.00000022232416086e-6f * cellSizeY;
     halfArea = cellSizeX * 0.5f * cellSizeY;
@@ -248,6 +249,7 @@ void ForEach2dArea(void *polyArray, int numPolys, int gridSizeX, int numCellsY,
     slotB = 1;  /* r14d */
     slotC = 2;  /* ebp */
     slotD = 3;  /* r11d */
+    areaIndex = 0;
 
     if (numCellsY <= 0)
         return;
@@ -372,7 +374,8 @@ void ForEach2dArea(void *polyArray, int numPolys, int gridSizeX, int numCellsY,
                 }
 
                 /* call callback with areaX2 as xmm0 (binary's contract: geometry_40EAB0 reads it from xmm0) */
-                callback(areaX2, centroid, polyVerts, curVertCount, userData);
+                callback(areaX2, centroid, polyVerts, curVertCount,
+                         userData, areaIndex++);
             }
 
         end_inner_iter:

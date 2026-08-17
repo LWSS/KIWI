@@ -10160,7 +10160,46 @@ extern bool MaterialDef_15_Drawflag_Multiply( int drawFlags, MaterialDef *m );
 // the binary draws it in the first/skip-multiply world pass. A depth-write substitute would skip
 // it and the water strip would vanish.
 // Returns true when at least one mesh was handed to the surf cache.
-static bool Patch_Fill_Emit( patch_t *inst, Material *mtlOverride, int face, int techType )
+//
+// ── KIWI-UX (ROUND BK, ITEM 1): `sortKeyBias` — THE ONE ADDED ARGUMENT ──────
+// USER REPORT, verbatim: *"When far away, curves render their wireform over their
+// surfaces.  This seems like a bug and it's ugly - fix it."*
+//
+// THE MECHANISM, named rather than guessed.  `R_AddEditorSurfsCmd` sorts the
+// pass's surfs with `Editor_SurfCompare` (r_ed_scene.cpp:181-197), whose keys are
+// **sortKey, then techType, then firstIndex**.  A patch's FILLED front and its
+// unselected `PM_BACK_FACE` wireframe are emitted from the SAME material, so they
+// carry the SAME sortKey — and `TECHNIQUE_WIREFRAME_SHADED` (29) is numerically
+// GREATER than any world technique (fakelight_normal 24 / _view 25), so the
+// wireframe always sorts LAST and draws ON TOP.  Whenever a textured surface is
+// coplanar with that wireframe the wire wins the depth compare (equal depth, and
+// the tools statemap is not depth-func LESS — if it were, the wireframe could
+// never have appeared over anything in the first place).
+//
+// COPLANAR IS THE NORMAL CASE FOR A "CURVE" IN THIS EDITOR: round AY made the
+// loft's **Two-sided** default ON, and RADIANT_KNOWN_ISSUES round AY wrote this
+// exact prediction down — *"the suspect is the unselected back-face
+// TECHNIQUE_WIREFRAME_SHADED pass of one sheet landing on the other sheet's
+// textured front at equal depth — a wireframe overlay, not a depth fight, and it
+// is stock DrawPatches behaviour that would need a change there rather than in
+// the loft."*  This is that change.
+//
+// AND WHY IT IS A FUNCTION OF DISTANCE: the wireframe fill mode rasterises
+// SCREEN-CONSTANT hairlines.  The tessellated grid's screen density rises as the
+// patch shrinks, so far away the lines merge and cover the whole surface ("all
+// wire"), while up close the same lines are a sparse grid over the texture
+// ("only part of it wire") — which is the two screenshots, in order.
+//
+// THE FIX IS ORDER, NOT SUPPRESSION.  The back-face pass is emitted with a
+// sortKey ONE BELOW the fills', so it draws FIRST and any coplanar texture then
+// wins on equal depth.  Where the patch genuinely is alone — a single sheet seen
+// from behind, round AY's "a patch has one side" case — nothing else draws at
+// that depth and the wireframe is exactly as visible as it always was.  The bias
+// stays INSIDE the material's own 100-wide bucket (`Editor_MaterialSortKey` is
+// `100 * primarySortKey`, r_ed_scene.cpp:172-175), so no other material's bucket
+// can be crossed by it.
+static bool Patch_Fill_Emit( patch_t *inst, Material *mtlOverride, int face, int techType,
+                             int sortKeyBias = 0 )
 {
     if ( !inst->visArray || inst->vertCount <= 0 || !inst->indicesFront )
         return false;
@@ -10168,7 +10207,8 @@ static bool Patch_Fill_Emit( patch_t *inst, Material *mtlOverride, int face, int
     bool emitted = false;
     if ( mtlOverride )
     {
-        Editor_AddMeshCmd( mtlOverride, techType, Editor_MaterialSortKey( mtlOverride ),
+        Editor_AddMeshCmd( mtlOverride, techType,
+                           Editor_MaterialSortKey( mtlOverride ) + sortKeyBias,
                            inst->vertCount, inst->visArray[0].vertHandle,
                            inst->indexCount, (int)indexTable );
         emitted = true;
@@ -10180,7 +10220,12 @@ static bool Patch_Fill_Emit( patch_t *inst, Material *mtlOverride, int face, int
         {
             Material *m = inst->visArray[L].material;
             if ( !m ) continue;
-            Editor_AddMeshCmd( m, techType, sortKey + L,
+            // KIWI-UX (ROUND BK, ITEM 1): a BIASED pass is FLAT in the layer index —
+            // the wireframe is the same hairline grid whatever layer it is emitted
+            // from, so giving each layer its own key would only interleave it back
+            // between the fills it has to precede.
+            Editor_AddMeshCmd( m, techType,
+                               sortKeyBias ? ( sortKey + sortKeyBias ) : ( sortKey + L ),
                                inst->vertCount, inst->visArray[L].vertHandle,
                                inst->indexCount, (int)indexTable );
             emitted = true;
@@ -10237,8 +10282,11 @@ bool DrawPatches( patch_t *inst, const orientation_t *orient, int techType, int 
     }
     else
     {
+        // KIWI-UX (ROUND BK, ITEM 1): …at sortKey-1 (see Patch_Fill_Emit).  The
+        // emit itself is byte-for-byte 0x441572; only its place in the pass's own
+        // sort moved, so a coplanar textured sheet is no longer overdrawn by it.
         Patch_Fill_Emit( inst, nullptr, PM_BACK_FACE,
-                         TECHNIQUE_WIREFRAME_SHADED );                     // 0x441572
+                         TECHNIQUE_WIREFRAME_SHADED, -1 );                 // 0x441572
         if ( patchWireframe )
         {
             extern void DrawPatchesWireframeGrid( patch_t *, GfxColor *,

@@ -268,9 +268,19 @@ void Map_NewMap()
     // with it.  Map_NewMap is the ONE point both File->New (via Map_New) and
     // Map_LoadFromFile pass through, and the load path re-fills the store from the
     // sidecar at its own tail afterwards — so this can never race it.
+    // KIWI-UX (CLEANUP, A-48): ...and so do the construction UNDO stacks and the
+    // unified journal's tickets.  ClearAll alone left the previous map's snapshots
+    // live, so a Ctrl+Z after File->New resurrected the old map's scaffolding into
+    // the new document (only the LOAD branch reached KiwiCon_LoadSidecar's reset).
     {
-        extern void KiwiCon_ClearAll();       // kiwi_construct.cpp
-        KiwiCon_ClearAll();
+        extern void KiwiCon_ResetForNewMap();  // kiwi_construct.cpp
+        KiwiCon_ResetForNewMap();
+        // KIWI-UX (ROUND BP, ITEM 1/3): the SECTION goes with the document too.  It
+        // is view state, but it is view state that CLAMPS PICKING, and a level
+        // latched in one map means nothing in the next — the round-BP autopsy's
+        // "an invisible latched plane distorting placement" in its purest form.
+        extern void KiwiSection_Reset();       // kiwi_section.h
+        KiwiSection_Reset();
     }
 }
 
@@ -616,8 +626,17 @@ void Map_LoadFromFile( const char *path )
         // Reads nothing but its own pending set, writes nothing but brushFlags bit 2
         // and the hide depth, and is a no-op for every sidecar written before this
         // round.  Design + the honest limits: kiwi_visibility.h ROUND AO.
-        extern void KiwiVis_SidecarLoadApply();                   // kiwi_visibility.h:257
+        extern void KiwiVis_SidecarLoadApply();                   // kiwi_visibility.h:261
         KiwiVis_SidecarLoadApply();
+
+        // KIWI-UX (ROUND BL, ITEM 1): *"When loading a map, load with all the groups
+        // in the outliner collapsed."*  Armed here rather than done here: it is a
+        // one-shot the panel consumes on its next draw (it may not even be open),
+        // and it must run after the sidecar load above because the CURVE groups it
+        // closes are minted by that load.  Nothing in the map or the store is
+        // touched — this is panel state only.
+        extern void KiwiOutliner_CollapseAllOnNextDraw();         // kiwi_outliner.h:147
+        KiwiOutliner_CollapseAllOnNextDraw();
     }
 
     g_nUpdateBits = -1;
@@ -1965,7 +1984,7 @@ void Prefab_PrevLevel()
     // NO-MFC: the texture-bar push is skipped — CTextureBar is an MFC CWnd embedded in
     // CMainFrame (texturebar.cpp) and dies with the frame; the ImGui texture-bar panel
     // re-gathers from the current texdef, so there is nothing to push.  Same treatment as
-    // the sibling sites in surfacedlg.cpp:633 and texwnd.cpp:1358.
+    // the sibling sites in surfacedlg.cpp:633 and texwnd.cpp:1396.
 
     sub_47D060( (int)&active_brushes );
     sub_47D060( (int)&selected_brushes );

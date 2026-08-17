@@ -350,9 +350,9 @@ void Bleed_CopySampleX2_Secondary(void *srcData, int s, int t, void *dstData)
 ================
 Lmap_InitBilinearBleeding
 
-Allocates lightmap bleed data, splits between primary and secondary,
-runs the bleeding finder over all lightmap pixels, then processes
-and frees the data.
+Allocates and builds the two native lightmap-adjacency masks.  Retail keeps
+these masks through final-lightmap construction; lighting.cpp uses them to
+reconstruct invalid coefficient texels and primary-light subsamples.
 ================
 */
 void Lmap_InitBilinearBleeding(int lmapCount, int threadCount)
@@ -373,11 +373,9 @@ void Lmap_InitBilinearBleeding(int lmapCount, int threadCount)
     /* find bleeding for all lightmap pixels */
     ForEachLightmapPixelInPoly(Lmap_FindBleeding_Callback, 2, threadCount);
 
-    /* process and apply bleeding */
-    Lighting_ForEachPixel_Helper(Lmap_ApplyBleeding, threadCount);
-
-    /* free bleed data */
-    free(g_primaryBleedData);
+    /* Native cod4rad does not run the older Cod2 iterative sample-field
+     * mutator here.  The masks remain live for lighting.cpp 0x415990,
+     * 0x415B80 and 0x415D90 during final image construction. */
 }
 
 /*

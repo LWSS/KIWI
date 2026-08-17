@@ -1,7 +1,10 @@
-// imgui_shell.cpp — UI-rework Phase 2a: Dear ImGui overlay on the camera window.
-// New KISAK code (not from the binary). Behind the `-imgui` command-line flag; the
-// MFC shell is untouched. The overlay proves device/backend/input integration —
-// the dockspace shell is Phase 2b. See RADIANT_UI_REWORK_PLAN.md.
+// imgui_shell.cpp — the editor's shell: the Dear ImGui dockspace hosted on the main
+// frame, its panels, and the five viewport dock tabs.  New KISAK code (not from the
+// binary).  KIWI-UX (CLEANUP, C-10): the header used to say this was a Phase-2a
+// overlay behind an `-imgui` flag with the MFC shell untouched.  All three claims
+// are false — the shell IS the editor UI, unconditionally (user directive
+// 2026-08-08), and the flag and its gate statics are gone.  See
+// RADIANT_UI_REWORK_PLAN.md.
 #include "stdafx.h"
 #include "qe3.h"
 
@@ -9,7 +12,13 @@
 #include "radiant_rtt.h"           // RTT_GetTexture / rttViewport_t (viewport images)
 #include "kiwi_windows.h"          // KIWI-UX §9 (shakeout B): per-window visibility flags
 #include "kiwi_outliner.h"         // KIWI-UX ROUND W: the scene list dock window
+#include "kiwi_entbrowser.h"       // KIWI-UX ROUND AU: the entity browser + camera drop target
+#include "kiwi_skybox.h"           // KIWI-UX ROUND AZ: the Sky tab (third tab of that node)
+#include "kiwi_uveditor.h"         // KIWI-UX ROUND BD: the UV editor (fourth tab of it)
 #include "kiwi_cmdoptions.h"       // KIWI-UX ROUND AI, ITEM 3: the in-command options panel
+#include "kiwi_import.h"           // KIWI-UX ROUND BE: the texture-import wizard (modal popup)
+#include "kiwi_launch.h"           // KIWI-UX ROUND BF: the Build & Run dialog + its child poll
+#include "radiant_registry.h"      // KIWI-UX (CLEANUP, C-7): Radiant_IniPath — <exedir>\…
 #include <unordered_set>
 #include <unordered_map>
 #include <string>
@@ -21,8 +30,6 @@
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler( HWND hWnd, UINT msg,
                                                               WPARAM wParam, LPARAM lParam );
 
-static bool s_shellChecked = false;
-static bool s_shellEnabled = false;   // -imgui present on the command line
 static bool s_shellInited  = false;
 static bool s_frameRendered = false;  // a full ImGui frame was Render()'d this cycle —
                                       // gates the platform-window update (AFK assert fix)
@@ -44,12 +51,74 @@ static HWND s_backendHwnd  = nullptr; // the window the win32 backend is bound t
 // (The Phase-2b dockhost window is retired — the main frame IS the dockspace surface
 //  now; see ImGuiShell_SetPrimarySurface below.)
 
+// ── KIWI-UX (CLEANUP, C-7 + C-8): the dock-layout ini, BESIDE THE EXE ───────────
+// ImGui stores the pointer it is handed, so the storage has to outlive the call —
+// hence the function-local static.  The directory comes from Radiant_IniPath()
+// (radiant_registry.cpp:9), which is the tree's one exe-relative path builder; the
+// filename carries KIWI_LAYOUT_VERSION so it cannot drift out of step with the
+// window-defaults reseed (kiwi_windows.h).  A user whose old kiwi_dock10.ini sat in
+// some other CWD gets one layout rebuild, which is the same first-run path the
+// version bumps already take.
+static const char *DockIniPath()
+{
+    static char s_path[MAX_PATH];
+    if ( !s_path[0] )
+    {
+        _snprintf( s_path, sizeof( s_path ), "%s", Radiant_IniPath() );
+        s_path[sizeof( s_path ) - 1] = '\0';
+        char *slash = strrchr( s_path, '\\' );      // keep "<exedir>\"
+        if ( slash )
+            slash[1] = '\0';
+        else
+            s_path[0] = '\0';                       // no directory: land in the CWD
+        const size_t used = strlen( s_path );
+        _snprintf( s_path + used, sizeof( s_path ) - used, "kiwi_dock%d.ini",
+                   KIWI_LAYOUT_VERSION );
+        s_path[sizeof( s_path ) - 1] = '\0';
+    }
+    return s_path;
+}
+
+extern int Sys_Printf( const char *fmt, ... );   // win_qe3.cpp:112
+
+// ── KIWI-UX (CLEANUP, C-9): retire the previous versions' dock inis ────────────
+// The layout-migration mechanism is "change the filename", so every superseded
+// kiwi_dock<n>.ini stayed on disk forever.  This deletes them ONCE, on a run where
+// the CURRENT version's ini already exists (i.e. the migration is complete and the
+// old file can no longer be needed), and only in the directory DockIniPath() built
+// -- never a scan, never the CWD, never a pattern this function did not write.
+static void DockIniRetireOlder()
+{
+    const char *path = DockIniPath();
+    const char *slash = strrchr( path, '\\' );
+    const size_t dirLen = slash ? (size_t)( slash - path ) + 1 : 0;
+    char old[MAX_PATH];
+    int removed = 0;
+    for ( int v = 1; v < KIWI_LAYOUT_VERSION; ++v )
+    {
+        if ( dirLen >= sizeof( old ) )
+            break;
+        memcpy( old, path, dirLen );
+        _snprintf( old + dirLen, sizeof( old ) - dirLen, "kiwi_dock%d.ini", v );
+        old[sizeof( old ) - 1] = '\0';
+        if ( ::GetFileAttributesA( old ) == INVALID_FILE_ATTRIBUTES )
+            continue;
+        if ( ::DeleteFileA( old ) )
+        {
+            Sys_Printf( "Dock layout: removed superseded %s\n", old );
+            ++removed;
+        }
+        else
+            Sys_Printf( "Dock layout: could not remove superseded %s\n", old );
+    }
+    (void)removed;                       // nothing is printed when nothing was there
+}
+
 static bool ImGuiShell_Enabled()
 {
     // Full-ImGui transition (user directive 2026-08-08): the shell IS the editor UI —
-    // always on. (The -imgui flag gated the Phase-2a overlay era; kept as a function so
-    // the call sites read the same.)
-    (void)s_shellChecked; (void)s_shellEnabled;
+    // always on.  (The -imgui flag gated the Phase-2a overlay era; kept as a function
+    // so the call sites read the same.)
     return true;
 }
 
@@ -163,6 +232,10 @@ extern void CamWnd_OnLButtonUp( unsigned int );
 extern void CamWnd_OnRButtonDown( HWND, unsigned int, int, int );
 extern void CamWnd_OnRButtonUp( HWND, unsigned int, int, int );
 extern void CamWnd_OnMouseMove( HWND, unsigned int, int, int );
+// KIWI-UX (ROUND BG, ITEM 2): the per-frame "should the cursor be hidden right now?"
+// recomputation.  Signature copied from its definition, camwnd.cpp
+// `void CamWnd_CursorReconcile( bool legacyCamDragLive )`.
+extern void CamWnd_CursorReconcile( bool legacyCamDragLive );
 extern void XYWnd_OnLButtonDown( HWND, unsigned int, int, int );
 extern void XYWnd_OnLButtonUp( unsigned int, int, int );
 extern void XYWnd_OnMouseMove( unsigned int, int, int );
@@ -416,13 +489,40 @@ static void ImGuiShell_ViewportInput( rttViewport_t id, bool hovered )
             if ( !( kiwiCam && KiwiVP_CameraWheel( s_wheel[id], mx, my ) ) )
                 VP_Wheel( id, hw, (short)( s_wheel[id] * 120.0f ), mx, my );   // image-relative
         }
+        const bool anyDown = io.MouseDown[0] || io.MouseDown[1] || io.MouseDown[2];
         if ( kiwiCam )
         {
             // §18 hover pick: once per frame, cursor over the image, NO button down.
-            const bool idle = !io.MouseDown[0] && !io.MouseDown[1] && !io.MouseDown[2];
-            KiwiVP_CameraHover( mx, my, idle && !kiwiTook );
+            KiwiVP_CameraHover( mx, my, !anyDown && !kiwiTook );
         }
-        if ( !kiwiTook )
+        // ══ KIWI-UX (ROUND BG, ITEM 2) — THE INVISIBLE-CURSOR ROOT CAUSE ══════════
+        // USER REPORT: "My mouse went invisible while using the UV editor."
+        //
+        // This is the UNOWNED branch: no viewport claimed a press.  It used to feed
+        // VP_Move unconditionally with VP_Flags(), which is the LIVE MK_* mask — so a
+        // drag that belongs to an ImGui WIDGET, merely passing over a viewport image,
+        // arrived at the legacy move handler as a viewport drag.  It reaches the camera
+        // image because round Y's IsItemHovered( AllowWhenBlockedByActiveItem ) (below,
+        // in the Draw path) deliberately stops another item's ActiveId from cancelling
+        // the image's hover — correct for its own purpose, and exactly what lets a UV
+        // editor drag "hover" the 3D view.  The chain then was:
+        //   VP_Move -> CamWnd_OnMouseMove -> CamWnd_MouseMoved( MK_RBUTTON, .. )
+        //     -> CamWnd_PositionDrag (camera_mode 1, the stock pref, camwnd.cpp:3961)
+        //        -> SetCursorPos( m_ptCursor ) + ShowCursor( FALSE )   camwnd.cpp:3980
+        // every tick of the drag, and the ONLY restore is Cam_MouseUp's
+        // ShowCursor(TRUE)-until-visible loop (camwnd.cpp:3899), which runs from VP_Up —
+        // which needs s_inputOwner == this viewport, which was never set.  So the
+        // ShowCursor counter stayed deeply negative and the cursor was gone APP-WIDE.
+        //
+        // The rule, and it is the move-direction twin of the one kiwi_viewport.cpp's
+        // GESTURE OWNERSHIP note states for releases: a legacy move handler is
+        // BUTTON-MASK DRIVEN, so it may only be fed a nonzero mask for a press it
+        // actually saw.  With no button down this is the ordinary hover move and is
+        // unchanged; a press claimed THIS TICK sets s_inputOwner above and still gets
+        // its move.  (The belt-and-braces half — a per-frame recomputation of whether
+        // the cursor should be hidden at all — is CamWnd_CursorReconcile, called from
+        // the dispatch entry point below.)
+        if ( !kiwiTook && ( s_inputOwner == id || !anyDown ) )
             VP_Move( id, hw, flags, mx, my );
     }
     else if ( owns )
@@ -495,12 +595,16 @@ void ImGuiShell_AbortViewportInput()
 // REAL Undo_Undo, and the chain that reaches it without a keystroke is exactly one:
 //
 //   ImGuiShell_ForceReleaseIfStuck  (below)
-//     -> ImGuiShell_AbortViewportInput            (imgui_shell.cpp:405)
-//        -> KiwiVP_CameraAbort                    (kiwi_viewport.cpp:893)
-//           -> KiwiGizmo_Abort                    (kiwi_gizmo.cpp:685)
-//              -> KiwiCmd_Cancel                  (kiwi_command.cpp:1262)
-//                 -> KiwiCmd_UndoCancel           (kiwi_command.cpp:2039)
+//     -> ImGuiShell_AbortViewportInput            (imgui_shell.cpp)
+//        -> KiwiVP_CameraAbort                    (kiwi_viewport.cpp)
+//           -> KiwiGizmo_Abort                    (kiwi_gizmo.cpp)
+//              -> KiwiCmd_Cancel                  (kiwi_command.cpp)
+//                 -> KiwiCmd_UndoCancel           (kiwi_command.cpp)
 //                    -> Undo_Undo                 ("move selection undone.")
+// KIWI-UX (CLEANUP, C-14): all five line numbers here were wrong (they named
+// :405/:893/:685/:1262/:2039 for what were then :493/:996/:1336/:1398/:2244).  The
+// SYMBOL is the durable half of a cite and the line number is not, so the numbers
+// are dropped rather than re-fixed — see C-15 on the convention.
 //
 // The guard's TRIGGER was right and its ACTION was wrong.  It fires precisely when
 // "this viewport owns a drag AND no physical mouse button is down" — which is not
@@ -559,7 +663,7 @@ static void ImGuiShell_ReleaseViewportInput()
         if ( id == RTT_CAMERA )
         {
             // Camera only: NEVER VP_Up here.  CamWnd_OnRButtonUp pops the classic
-            // context menu (camwnd.cpp:3357) — the same reason
+            // context menu (camwnd.cpp:3443) — the same reason
             // ImGuiShell_AbortViewportInput routes the camera around VP_Up.
             if ( KiwiVP_CameraButtonUp( b, mx, my ) )
                 released = true;
@@ -599,6 +703,22 @@ void ImGuiShell_DispatchViewportInput()
 {
     if ( !s_shellInited || !s_primary )
         return;
+
+    // ── KIWI-UX (ROUND BG, ITEM 2): THE PER-FRAME CURSOR RECOMPUTATION ─────────
+    // FIRST in the tick, and OUTSIDE the skipped-frame early-out below, because a
+    // skipped frame is one of the ways the release that would have restored the
+    // cursor goes missing.  The predicate is physical (GetAsyncKeyState, the same
+    // source the stuck-drag guard trusts for exactly this reason) and names the one
+    // state in which a hidden cursor is CORRECT: this shell owns a live camera drag
+    // that the LEGACY handlers are driving.  Everything else — a drag that was never
+    // ours, a lost release, focus loss, a popup eating the mouse — restores.
+    // See CamWnd_CursorReconcile (camwnd.cpp) for the latch it is undoing.
+    {
+        const bool physDown = ( ::GetAsyncKeyState( VK_LBUTTON ) & 0x8000 ) ||
+                              ( ::GetAsyncKeyState( VK_RBUTTON ) & 0x8000 ) ||
+                              ( ::GetAsyncKeyState( VK_MBUTTON ) & 0x8000 );
+        CamWnd_CursorReconcile( s_inputOwner == RTT_CAMERA && physDown );
+    }
 
     // ── KIWI-UX (ROUND Y, ITEM 6): ONLY DISPATCH FOR A FRAME THAT HAPPENED ──
     // USER REPORT: "Clicks are still ignored sometimes."
@@ -676,6 +796,29 @@ ImGuiID ImGuiShell_DockRoot()
 // the camera and only the camera.  A closed window is skipped entirely (no Begin, no
 // End) and an open one passes its flag as Begin's p_open, so the title-bar ✕ writes the
 // same state the Windows menu writes.
+// ── KIWI-UX (CLEANUP, C-12): ONE SPELLING OF "THIS VIEWPORT TOOK NO INPUT" ─────
+// s_imgMin / s_hovered / s_wheel and the four s_cam* are written ONLY inside the
+// `if ( tex )` arm below.  When RTT_GetTexture returns null — the first frames
+// after a device reset, since RTT_ReleaseForReset frees every slot and EnsureSlot
+// is lazy — the shell kept LAST frame's rect and hover, and
+// ImGuiShell_DispatchViewportInput dispatched clicks against them.  The
+// closed-window path was always careful to zero exactly these; this is that same
+// zeroing, named, so the two paths cannot drift.  Cell sizes are deliberately NOT
+// touched here: the no-texture path still records them, and that is what makes the
+// RT get created at the right size next tick.
+static void ClearViewportInputState( rttViewport_t id )
+{
+    s_hovered[id] = false;
+    s_wheel[id]   = 0.0f;
+    s_imgMin[id]  = ImVec2( 0.0f, 0.0f );
+    if ( id == RTT_CAMERA )
+    {
+        s_camMouseOver = false;
+        s_camMouseX = 0;
+        s_camMouseY = 0;
+    }
+}
+
 static void ImGuiShell_DrawViewportImage( rttViewport_t id, kiwiWindow_t win )
 {
     const bool  always = ( win == KIWI_WIN_COUNT );
@@ -689,10 +832,7 @@ static void ImGuiShell_DrawViewportImage( rttViewport_t id, kiwiWindow_t win )
         // from last frame's dimensions (it is gated on the flag too, belt and braces).
         s_cellW[id] = 0;
         s_cellH[id] = 0;
-        s_hovered[id] = false;
-        s_wheel[id]   = 0.0f;
-        if ( id == RTT_CAMERA )
-            s_camMouseOver = false;
+        ClearViewportInputState( id );      // KIWI-UX (CLEANUP, C-12)
         return;
     }
     if ( !always && KiwiWindows_JustOpened( win ) )
@@ -723,7 +863,7 @@ static void ImGuiShell_DrawViewportImage( rttViewport_t id, kiwiWindow_t win )
         // TexWnd_RenderToRT repaints every authorized frame.
         if ( id == RTT_TEXTURE )
         {
-            extern LRESULT Texture_ShowAll();     // texwnd.cpp (0x45b730), as radiant_main.cpp:68
+            extern LRESULT Texture_ShowAll();     // texwnd.cpp (0x45b730), as radiant_main.cpp:76
             extern LRESULT Texture_ShowInuse();   // texwnd.cpp (0x45B850), as map.cpp:145
             ImGui::AlignTextToFramePadding();
             ImGui::TextUnformatted( "Show:" );
@@ -800,6 +940,14 @@ static void ImGuiShell_DrawViewportImage( rttViewport_t id, kiwiWindow_t win )
                 // (ImGuiShell_DispatchViewportInput), so a context-menu modal can't nest
                 // inside the compositing scene bracket.
                 s_imgMin[id]   = ImGui::GetItemRectMin();
+                // ── KIWI-UX (ROUND AU): THE CAMERA IMAGE IS A DROP TARGET ──
+                // FIRST thing after the Image and nothing between, because
+                // BeginDragDropTarget reads g.LastItemData: with the Image's id
+                // of 0 it derives the target id from that item's RECT
+                // (imgui.cpp:16032-16037), which is the documented pattern for
+                // dropping onto an image.  It is a no-op unless a drag is live.
+                if ( id == RTT_CAMERA )
+                    KiwiEntBrowser_CameraDropTarget( s_imgMin[id].x, s_imgMin[id].y );
                 // ═══════════════════════════════════════════════════════════
                 //  KIWI-UX (ROUND Y, ITEM 6) — A FOCUSED TEXT FIELD WAS
                 //  SWALLOWING THE FIRST CLICK INTO THE VIEWPORT.
@@ -830,6 +978,21 @@ static void ImGuiShell_DrawViewportImage( rttViewport_t id, kiwiWindow_t win )
                 // happening.  Round X's selUnmask fixed the OTHER "2 clicks"
                 // report; this is the one it could not explain.
                 bool imgHovered = ImGui::IsItemHovered( ImGuiHoveredFlags_AllowWhenBlockedByActiveItem );
+                // ── KIWI-UX (ROUND AU): A LIVE DRAG-DROP OWNS THE MOUSE ─────
+                // AllowWhenBlockedByActiveItem is exactly what makes an ImGui
+                // DRAG read as "hovering the viewport": the source tile holds
+                // ActiveId for the whole drag, and round Y's flag deliberately
+                // removes that cancellation.  Without this the post-present
+                // dispatch would feed CamWnd_OnMouseMove — and, on a drag that
+                // BEGAN over the image, a press — while the user is only carrying
+                // a payload across it.  The drop itself does not need the hover:
+                // it arrives through BeginDragDropTarget above, inside the frame.
+                // (compile fix: IsDragDropActive is imgui_internal.h-only in
+                // 1.92.8; GetDragDropPayload() != NULL is the public spelling —
+                // "returns NULL when drag and drop is finished or inactive",
+                // imgui.h:1020.)
+                if ( ImGui::GetDragDropPayload() != nullptr )
+                    imgHovered = false;
                 // KIWI-UX: the §11 selection-mode chip row + the §12 marquee rectangle, drawn
                 // INSIDE the camera image (screen space; the world-space overlays go in the
                 // Cam_Draw tail instead). A chip under the cursor takes the image's hover for
@@ -876,8 +1039,16 @@ static void ImGuiShell_DrawViewportImage( rttViewport_t id, kiwiWindow_t win )
             }
             else
             {
-                ImGui::Dummy( avail );
+                // KIWI-UX (CLEANUP, C-12): no RT this frame, so this viewport takes
+                // no input this frame either.  (The bare ImGui::Dummy( avail ) that
+                // used to reserve the space is gone — nothing needed it; End()
+                // follows immediately.)
+                ClearViewportInputState( id );
             }
+        }
+        else
+        {
+            ClearViewportInputState( id );   // KIWI-UX (CLEANUP, C-12): zero-area cell
         }
     }
     ImGui::End();
@@ -981,6 +1152,18 @@ void ImGuiShell_RenderViewportsToRT()
         ZWnd_RenderToRT  ( s_cellW[RTT_Z],       s_cellH[RTT_Z] );
     if ( KiwiWindows_IsOpen( KIWI_WIN_TEXTURE ) )
         TexWnd_RenderToRT( s_cellW[RTT_TEXTURE], s_cellH[RTT_TEXTURE] );
+
+    // KIWI-UX (ROUND AV, ITEM 3): the entity-browser model thumbnails.  LAST, and inside
+    // this function rather than beside its call site (radiant_main.cpp:937), so it
+    // inherits both gates above for free — the `!s_primary` early-out and, far more
+    // importantly, the round-AB `RTT_DeviceHealthy()` one.  It renders AT MOST ONE
+    // thumbnail, only when the browser asked for one on the previous frame; with a warm
+    // cache (and whenever the Entity Browser is closed, since a panel that does not draw
+    // never requests) it is an early return on a null request slot.  Its render target is
+    // a standalone RTT slot, freed by the same RTT_ReleaseForReset the four viewports use
+    // — see kiwi_entthumb.h.
+    extern void KiwiEntThumb_Tick();   // kiwi_entthumb.cpp
+    KiwiEntThumb_Tick();
 }
 
 // Post-present (frame WM_PAINT): every native viewport child is a render-target IMAGE now, and
@@ -1082,6 +1265,35 @@ static void ImGuiShell_BuildDefaultDockLayout( ImGuiID dockId )
     ImGui::DockBuilderDockWindow( "2D View",  rightTop );      // top-right
     ImGui::DockBuilderDockWindow( "Textures", rightBottom );   // right-middle/bottom
 
+    // ── KIWI-UX (ROUND AU): the ENTITIES tab, and the INSPECTOR beside it ────
+    // USER DIRECTIVE, verbatim: "a new panel that's in the same viewport (tabbed)
+    // with the textures tab".  Docking a second window into the SAME node id is
+    // exactly what makes them tabs of one another — no extra split.
+    //
+    // "Entity inspector" is docked here TOO, and that is the other half of the N
+    // fix rather than a decoration.  It is a floating tool panel with no §9 flag,
+    // so it is not drawn until the user opens it — but DockBuilderDockWindow
+    // records where it BELONGS, so the frame it first appears it appears as a tab
+    // in this node instead of floating in the top-left corner.  A DOCKED window is
+    // also exempt from ImGuiShell_CloseOnFocusLoss (it checks DockIsActive), which
+    // is what stops the inspector from closing the instant the user clicks the
+    // brush they are inspecting.
+    ImGui::DockBuilderDockWindow( "Entities",         rightBottom );
+    ImGui::DockBuilderDockWindow( "Entity inspector", rightBottom );
+
+    // ── KIWI-UX (ROUND AZ, ITEM 3): the SKY tab, third of the same node ──────
+    // USER DIRECTIVE, verbatim: "Make this a separate tab like the entity tab."
+    // Same node id, so it is a tab of Textures and Entities and not a split —
+    // the one-line mechanism the round-AU block above states.
+    ImGui::DockBuilderDockWindow( "Sky",              rightBottom );
+
+    // ── KIWI-UX (ROUND BD): the UV EDITOR, fourth of the same node ───────────
+    // The directive's window sits beside the texture browser it edits the UVs of,
+    // so it is the same one-line mechanism the round-AU block above states: the
+    // same node id makes it a TAB, not a split.  KIWI_LAYOUT_VERSION went to 11
+    // with it so an existing profile actually rebuilds and sees this line.
+    ImGui::DockBuilderDockWindow( "UV editor",        rightBottom );
+
     ImGui::DockBuilderFinish( dockId );
 }
 
@@ -1118,7 +1330,6 @@ void ImGuiShell_DrawOverlay( IDirect3DDevice9 *device, HWND activeHwnd )
         return;
     s_beginFrame = false;
     s_device = device;               // for the opaque-image draw callback
-    const bool dockMode = true;
 
     if ( !s_shellInited )
     {
@@ -1138,8 +1349,26 @@ void ImGuiShell_DrawOverlay( IDirect3DDevice9 *device, HWND activeHwnd )
         // wouldn't stay open. Tool panels are regular IN-FRAME floating ImGui windows again:
         // they still float over the dockspace and are draggable, they just aren't separate OS
         // windows, so input uses the plain single-viewport path and Just Works.
-        io.IniFilename = "kiwi_dock8.ini";  // KIWI-UX (ROUND Y): bumped 7 -> 8 for the
-                                              // SKINNIER OUTLINER (left split 0.18 -> 0.125).
+        // KIWI-UX (CLEANUP, C-7 + C-8): an ABSOLUTE, exe-relative path built from
+        // ONE version number.  ImGui resolves a bare IniFilename against the process
+        // CWD, and the OPENFILENAMEA dialogs in this tree do not set OFN_NOCHANGEDIR
+        // — so after the first File->Open the dock layout was written next to the
+        // .map and the first-run test below read the wrong directory, which looks to
+        // the user like the layout resetting itself.  radiant_registry.h:3-5 already
+        // settles this: editor settings live NEXT TO THE EXE.
+        io.IniFilename = DockIniPath();
+                                              // (ROUND AZ): bumped 9 -> 10 so the
+                                              // SKY tab actually appears as a third tab
+                                              // beside Textures and Entities for an
+                                              // existing install — mandatory, not
+                                              // cosmetic, for exactly the reason stated
+                                              // three lines down.
+                                              // (ROUND AU bumped 8 -> 9 so the
+                                              // ENTITIES tab (and the Entity inspector's
+                                              // recorded dock slot) actually appear beside
+                                              // Textures for an existing install.)
+                                              // (ROUND Y bumped 7 -> 8 for the
+                                              // SKINNIER OUTLINER, left split 0.18 -> 0.125.)
                                               // (ROUND X bumped 6 -> 7 for the
                                               // full-width console strip.)  Same trap every
                                               // time: an existing kiwi_dock6.ini pins the
@@ -1154,6 +1383,11 @@ void ImGuiShell_DrawOverlay( IDirect3DDevice9 *device, HWND activeHwnd )
         // First run ever (no ini) → build the classic-Radiant default dock layout.
         s_dockLayoutPending =
             ( ::GetFileAttributesA( io.IniFilename ) == INVALID_FILE_ATTRIBUTES );
+        // KIWI-UX (CLEANUP, C-9): the current version's ini exists, so every earlier
+        // kiwi_dock<n>.ini beside it is spent — drop them.  Deliberately NOT done on
+        // the first-run path: there the migration has not happened yet.
+        if ( !s_dockLayoutPending )
+            DockIniRetireOlder();
         ImGui::StyleColorsDark();
         // When windows can be their own OS windows, square corners + opaque bg (rounded
         // corners would leave transparent gaps at the OS-window edges).
@@ -1184,31 +1418,32 @@ void ImGuiShell_DrawOverlay( IDirect3DDevice9 *device, HWND activeHwnd )
     // dispatch reads is THIS tick's.  See s_frameLive at the top of the file.
     s_frameLive = true;
 
-    if ( dockMode )
+    // KIWI-UX (CLEANUP, C-11): unconditional.  This was wrapped in `if ( dockMode )`
+    // with `const bool dockMode = true;` twenty lines up — the "pre-boot overlay
+    // fallback" that variable selected against was removed (see the note above the
+    // primary-surface gate), so the false arm could not be taken.
+    const ImGuiID dockId = ImGui::DockSpaceOverViewport();
+    s_dockRoot = dockId;                  // KIWI-UX §9: re-dock target for re-opened windows
+    ImGuiShell_BuildDefaultDockLayout( dockId );
+
+    if ( s_focusTab[0] )                  // pending hotkey/menu tab focus (O, texture view…)
     {
-        const ImGuiID dockId = ImGui::DockSpaceOverViewport();
-        s_dockRoot = dockId;              // KIWI-UX §9: re-dock target for re-opened windows
-        ImGuiShell_BuildDefaultDockLayout( dockId );
-
-        if ( s_focusTab[0] )              // pending hotkey/menu tab focus (O, texture view…)
-        {
-            ImGui::SetWindowFocus( s_focusTab );
-            s_focusTab[0] = '\0';
-        }
-
-        // The editor views as dock tabs — RTT textures drawn as images (Phase 5); the
-        // console stays a native EDIT child parked over its cell.
-        // KIWI-UX (§9, shakeout B): the camera is unconditional (NULL p_open = no ✕, no
-        // menu entry); the other three are drawn only while their kiwi_windows flag is
-        // set, and pass it as p_open so the title-bar ✕ toggles the SAME state the
-        // Windows menu does.  The titles are read from kiwi_windows so there is exactly
-        // one spelling of each per build (the dock ini keys off them).
-        ImGuiShell_DrawViewportImage( RTT_CAMERA,  KIWI_WIN_COUNT );   // always on
-        ImGuiShell_DrawViewportImage( RTT_XY,      KIWI_WIN_XY );
-        ImGuiShell_DrawViewportImage( RTT_Z,       KIWI_WIN_Z );
-        ImGuiShell_DrawViewportImage( RTT_TEXTURE, KIWI_WIN_TEXTURE );
-        ImGuiShell_DrawConsoleTab( g_qeglobals.d_hwndEdit );
+        ImGui::SetWindowFocus( s_focusTab );
+        s_focusTab[0] = '\0';
     }
+
+    // The editor views as dock tabs — RTT textures drawn as images (Phase 5); the
+    // console stays a native EDIT child parked over its cell.
+    // KIWI-UX (§9, shakeout B): the camera is unconditional (NULL p_open = no ✕, no
+    // menu entry); the other three are drawn only while their kiwi_windows flag is
+    // set, and pass it as p_open so the title-bar ✕ toggles the SAME state the
+    // Windows menu does.  The titles are read from kiwi_windows so there is exactly
+    // one spelling of each per build (the dock ini keys off them).
+    ImGuiShell_DrawViewportImage( RTT_CAMERA,  KIWI_WIN_COUNT );   // always on
+    ImGuiShell_DrawViewportImage( RTT_XY,      KIWI_WIN_XY );
+    ImGuiShell_DrawViewportImage( RTT_Z,       KIWI_WIN_Z );
+    ImGuiShell_DrawViewportImage( RTT_TEXTURE, KIWI_WIN_TEXTURE );
+    ImGuiShell_DrawConsoleTab( g_qeglobals.d_hwndEdit );
 
     // KIWI-UX (user directive): the FPS readout lives in the WIN32 TITLE BAR, not
     // the panel.  Every ~500ms: read the current title, strip OUR " | N FPS"
@@ -1252,8 +1487,7 @@ void ImGuiShell_DrawOverlay( IDirect3DDevice9 *device, HWND activeHwnd )
                 ImGui::SetNextWindowDockID( s_dockRoot, ImGuiCond_Always );
             if ( ImGui::Begin( KiwiWindows_Title( KIWI_WIN_SHELL ), shellOpen ) )
             {
-                ImGui::Text( dockMode ? "KIWI Radiant — ImGui shell."
-                                      : "Overlay (pre-boot fallback)." );
+                ImGui::Text( "KIWI Radiant — ImGui shell." );
                 extern void ImGuiPanels_Menu();   // imgui_panels.cpp
                 ImGuiPanels_Menu();
             }
@@ -1264,6 +1498,39 @@ void ImGuiShell_DrawOverlay( IDirect3DDevice9 *device, HWND activeHwnd )
     // early-outs when its §9 flag is clear) exactly like the shell panel above, but
     // its body is large enough to deserve its own file — kiwi_outliner.cpp.
     KiwiOutliner_Draw();
+    // KIWI-UX (ROUND AU): the ENTITY BROWSER dock window — same contract as the
+    // outliner above (Begins/Ends itself, early-outs on its §9 flag).  Drawn AFTER
+    // the viewport images so the camera image is already submitted when a tile's
+    // drag starts, and at top-level window scope because it is a real window.
+    KiwiEntBrowser_Draw();
+    // KIWI-UX (ROUND AZ, ITEM 3): the SKY dock window — same contract again
+    // (Begins/Ends itself, early-outs on its §9 flag).  It has no drag-to-camera
+    // gesture, so unlike the entity browser it carries no ordering constraint
+    // against the viewport images; it sits here to keep the three tabs of one dock
+    // node adjacent in this function as well as on screen.
+    KiwiSky_Draw();
+    // KIWI-UX (ROUND BD): the UV EDITOR dock window — same contract again (Begins/Ends
+    // itself, early-outs on its §9 flag).  Its canvas is pure ImDrawList over an
+    // InvisibleButton, so like the Sky tab it carries no ordering constraint against the
+    // viewport images; it sits here to keep the four tabs of one dock node adjacent in
+    // this function as well as on screen.
+    KiwiUvEd_Draw();
+    // KIWI-UX (ROUND BE): the TEXTURE IMPORT WIZARD.  Not a dock window — a MODAL POPUP
+    // that exists only while the dropped-file queue is non-empty, which is why this round
+    // adds no kiwiWindow_t row and does NOT bump KIWI_LAYOUT_VERSION.  It draws at
+    // top-level window scope for the same reason KiwiCmdOpts_Draw below does: ImGui::Open-
+    // Popup / BeginPopupModal must run outside any other window's Begin/End pair.  It
+    // early-outs to nothing when there is no queue.
+    KiwiImport_Draw();
+    // KIWI-UX (ROUND BF): the BUILD & RUN dialog.  Also not a dock window — a FLOATING
+    // window with its own file-scope open flag, so this round adds no kiwiWindow_t row and
+    // does NOT bump KIWI_LAYOUT_VERSION either.  It is called UNCONDITIONALLY and POLLS ITS
+    // CHILD PROCESS BEFORE it looks at that flag: the compilers run in real processes whose
+    // stdout pipe this frame is the only thing draining, so closing the window mid-build
+    // must not stall the pipe or freeze the BSP -> Light -> Run chain between stages
+    // (kiwi_launch.h D-BF-D).  Top-level window scope for the same reason as the wizard
+    // above: its Kill confirmation is an ImGui modal popup.
+    KiwiLaunch_Draw();
 
     // KIWI-UX (ROUND AI, ITEM 3): the IN-COMMAND OPTIONS panel — a floating window
     // that exists only while the live modal command declares options.  Drawn HERE,

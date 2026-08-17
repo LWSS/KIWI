@@ -295,10 +295,11 @@ bool KiwiSplit_DefByPlane( brush_t *def,
                            brush_t **outFront, brush_t **outBack, const char **why );
 
 // ═════════════════════════════════════════════════════════════════════════════
-//  ROUND AO, ITEM 3 — THE SAME SPLIT, REPORTED PER HALF
+//  WHY A SUBTRACT NEEDS PER-HALF REPORTING (history: round AO, item 3)
 // ═════════════════════════════════════════════════════════════════════════════
-// USER REPORT, verbatim: "With this new update, the boolean tool got worse and i
-// can't diff an arch into a square pyramid anymore.  Try to make it more robust."
+// USER REPORT that opened it, verbatim: "With this new update, the boolean tool
+// got worse and i can't diff an arch into a square pyramid anymore.  Try to make
+// it more robust."
 //
 // WHY THE ALL-OR-NOTHING CONTRACT ABOVE IS THE WRONG ONE FOR A SUBTRACT.  The
 // N-plane subtract walks the tool's faces and, at each one, keeps the OUTSIDE
@@ -314,35 +315,24 @@ bool KiwiSplit_DefByPlane( brush_t *def,
 //     remainder means "there is nothing meaningful left to remove", which is a
 //     STOP, not an error.
 //
-// Neither of those is a reason to abandon the target, and yet `KiwiSplit_DefByPlane`
+// Neither of those is a reason to abandon the target, yet `KiwiSplit_DefByPlane`
 // reports both as one indivisible `false` and frees both halves, so a single
 // sliver anywhere in a cascade threw the WHOLE carve away.  That is precisely the
 // arch-into-a-pyramid case: a pyramid has an apex and four sloped faces, an arch
 // is a many-planed tool (or a many-brush cascade), and intermediate pieces near
 // the apex and along the sloped edges routinely land under KVALID_MIN_FACE_AREA.
 //
-// So this entry point reports the two halves SEPARATELY and lets the caller
-// decide.  `KiwiSplit_DefByPlane` is now a thin wrapper over it that reproduces
-// the all-or-nothing contract EXACTLY, so the cut/split verbs are unchanged.
+// KIWI-UX (CLEANUP, A-19): the entry point that serves this argument is
+// `KiwiSplit_DefByPlaneCarve` below — round AR's, which the subtract has called
+// since.  Round AO's own by-parts entry was published for the same reason but
+// has no external caller left, so it is now the file-static `SplitDefByPlaneBody`
+// that `KiwiSplit_DefByPlane` and `KiwiSplit_DefByPlaneCarve` both front.
 enum kiwiSplitHalf_t
 {
     KSPLIT_HALF_NONE = 0,   // the plane did not divide: nothing lies on this side
     KSPLIT_HALF_OK,         // a §19-valid def is returned and is the caller's
     KSPLIT_HALF_SLIVER      // a def existed, failed §19 and HAS BEEN FREED
 };
-
-// Returns false — and allocates nothing — only when the split could not happen at
-// all: a degenerate cut plane, or the ported core producing neither half.  On
-// true, each half's state is reported in *outFrontState / *outBackState and the
-// matching out-pointer is non-NULL only for KSPLIT_HALF_OK.  `why` names the §19
-// check that rejected the FIRST sliver half (front before back), so a caller that
-// wants to report a drop has the same string the wrapper would have given it.
-bool KiwiSplit_DefByPlaneParts( brush_t *def,
-                                const float p0[3], const float p1[3], const float p2[3],
-                                brush_t **outFront, brush_t **outBack,
-                                kiwiSplitHalf_t *outFrontState,
-                                kiwiSplitHalf_t *outBackState,
-                                const char **why );
 
 // ═════════════════════════════════════════════════════════════════════════════
 //  KIWI-UX (ROUND AR, ITEM 2) — §19 IS A GATE ON WHAT GETS LANDED
@@ -351,8 +341,8 @@ bool KiwiSplit_DefByPlaneParts( brush_t *def,
 // I joined the polyline on the 2nd one.  When i bool it into the pyramid it
 // fails!"*
 //
-// THE DEFECT ROUND AO AND ROUND AQ BOTH WALKED PAST.  `KiwiSplit_DefByPlaneParts`
-// applies the FULL §19 gate to BOTH halves, and kiwi_boolean.cpp's subtract then
+// THE DEFECT ROUND AO AND ROUND AQ BOTH WALKED PAST.  Round AO's by-parts split
+// applied the FULL §19 gate to BOTH halves, and kiwi_boolean.cpp's subtract then
 // treats a refused BACK half as "the two solids miss" and abandons the whole
 // difference.  But the back half of a subtract step is the RUNNING INTERSECTION —
 // `target ∩ (inside tool planes 0..f)` — and kiwi_boolean.cpp's own contract says
@@ -389,6 +379,12 @@ bool KiwiSplit_DefByPlaneParts( brush_t *def,
 // it is two orders of magnitude clear of the gate that produced the refusal.
 #define KSPLIT_CARRY_EXTENT   1.0f      // world units, per axis
 
+// Returns false — and allocates nothing — only when the split could not happen at
+// all: a degenerate cut plane, or the ported core producing neither half.  On
+// true, each half's state is reported in *outFrontState / *outBackState and the
+// matching out-pointer is non-NULL only for KSPLIT_HALF_OK.  `why` names the §19
+// check that rejected the FIRST sliver half (front before back), so a caller that
+// wants to report a drop has the same string KiwiSplit_DefByPlane would give it.
 bool KiwiSplit_DefByPlaneCarve( brush_t *def,
                                 const float p0[3], const float p1[3], const float p2[3],
                                 brush_t **outFront, brush_t **outBack,

@@ -192,6 +192,27 @@ float KiwiRegion_WeldDist();
 
 float KiwiRegion_WeldFor( float finestEdge );
 
+// ── KIWI-UX (CLEANUP, A-11): THE SCAN THAT FEEDS IT, ONCE ───────────────────
+// "The shortest edge of this chain that is still above KREG_JOIN_DIST" — the
+// bound a weld may not exceed (see A WELD MAY NEVER EXCEED THE GEOMETRY IT IS
+// WELDING above).  Returns 0 when there is no such edge at all, which
+// KiwiRegion_WeldFor reads as "no bound".
+//
+// It was written out three times, and two of those three cited THIS header as
+// the authority for doing it: kiwi_region.cpp's own FinestLoopEdge (a closed
+// plane-space loop) and kiwi_conselect.cpp's Join (an open-or-closed WORLD
+// chain).  Both are chain walks over consecutive points and differ only in
+// stride and in the wrap, so both are parameters here.
+//
+// `pts` is `count` points of `stride` floats each; `stride` is 2 (plane space) or
+// 3 (world).  `closed` includes the wrap edge from the last point to the first.
+//
+// NOT used by kiwi_arrange.cpp's ArrangeWeld, deliberately: that one walks
+// INDEPENDENT SEGMENTS (six floats per entry, a and b inside the entry), not a
+// chain of consecutive points, so its enumeration is a different question with
+// the same tail.  See the note there.
+float KiwiRegion_FinestEdge( const float *pts, int count, int stride, bool closed );
+
 // The point-to-plane band to use RIGHT NOW, for the same reason.
 float KiwiRegion_PlaneBand();
 
@@ -330,6 +351,30 @@ bool KiwiRegion_IsSelected( int index );
 // flash counters are decremented — one call per drawn frame, which is exactly
 // what KREG_FLASH_FRAMES counts.
 void KiwiRegion_DrawFills( int highlightIndex );
+
+// ── KIWI-UX (ROUND BL, ITEM 3): THE SAME FILL, IN THE ImGui CAMERA OVERLAY ──
+// USER REPORT, verbatim: *"There is still no light blue plane where a construction
+// face can be extruded from.  You've failed again!"*
+//
+// Six rounds of engine-route fixes (AA / AK / AL / AM / AQ / BK) have not put one
+// pixel of fill on the user's screen, and every gate in that route reads OPEN.  So
+// the fill is ALSO drawn here: as a screen-space polygon on the ImDrawList that
+// carries the HUD, the snap label, the value bubble, the marquee and the view cube
+// — the surface the user's own screenshots prove is painted every frame.  Called
+// from KiwiVP_DrawCameraOverlay (kiwi_viewport.cpp), FIRST, so every HUD element
+// draws on top of it.  `imgMin*` / `img*` are the camera image's rect in ImGui
+// screen coordinates, exactly as every other overlay taker receives them.
+//
+// KNOWN LIMITATION, and it is deliberate: an overlay has NO DEPTH TEST.  A region
+// behind a wall shows through it, and a region is drawn over geometry in front of
+// it.  That is the price of a fill that is guaranteed to be visible; the engine
+// route (KiwiRegion_DrawFills, above) is kept and unchanged, so if it is ever
+// proven to work this can be demoted to a fallback at its single call site.
+//
+// Reads only.  It uses the CONST region accessor and must never age the flash
+// counters — those belong to KiwiRegion_DrawFills, which is the one call per DRAWN
+// frame that KREG_FLASH_FRAMES counts.
+void KiwiRegion_DrawFillsOverlay( float imgMinX, float imgMinY, float imgW, float imgH );
 
 // ── SHAKEOUT F: the chain walker, EXPORTED ──────────────────────────────────
 // PASS 2's endpoint-graph walk, lifted out of BuildRegions so "Join Lines"

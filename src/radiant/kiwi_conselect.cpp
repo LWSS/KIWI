@@ -26,7 +26,7 @@
 
 // ── ported entry points (each verified against its definition) ──────────────
 extern int  Sys_Printf( const char *fmt, ... );   // win_qe3.cpp:112  int Sys_Printf(const char*,...)
-extern int  g_nUpdateBits;                       // engine_stubs.cpp:693  int g_nUpdateBits = 0  (0x25D5A74)
+extern int  g_nUpdateBits;                       // engine_stubs.cpp:773  int g_nUpdateBits = 0  (0x25D5A74)
 // `selected_brushes` is the DISPLAY-list sentinel: declared in qe3.h:1054
 // (`extern selbrush_t selected_brushes;  // 0x23f1864`), defined in
 // engine_stubs.cpp:697 (`selbrush_t selected_brushes{};`).  READ ONLY here — the
@@ -100,8 +100,11 @@ namespace
     // Nothing at all is selected brush-side.  BOTH halves are asked because they
     // can legitimately disagree: an EDGE-only selection lives in KiwiSel() with an
     // EMPTY legacy list since shakeout D (kiwi_selection.h Sel_NoteLegacyDeselect
-    // explains why), so testing only the sentinel would let Delete eat a
-    // construction selection while the user had edges selected.
+    // explains why).
+    // KIWI-UX (CLEANUP, A-9): the one caller is KiwiConSel_CanMove.  G's
+    // construction arm must not run while ANY brush-side item is selected —
+    // including the fine kinds (edges, faces) that never reach selected_brushes —
+    // so Move needs both halves.  Delete uses the sentinel alone — see OwnsDelete.
     bool BrushSelectionEmpty()
     {
         if ( selected_brushes.next != &selected_brushes )
@@ -381,16 +384,8 @@ bool KiwiConSel_PickAt( int imgX, int imgY, kconSelItem_t *out, float *outPixels
                 break;
             if ( !Pick_WorldToImage( wa, &ax, &ay ) || !Pick_WorldToImage( wb, &bx, &by ) )
                 continue;                       // an end behind the eye — skip whole
-            const float ex = bx - ax, ey = by - ay;
-            const float len2 = ex * ex + ey * ey;
-            float t = 0.0f;
-            if ( len2 > 1.0e-6f )
-            {
-                t = ( ( curX - ax ) * ex + ( curY - ay ) * ey ) / len2;
-                if ( t < 0.0f ) t = 0.0f;
-                if ( t > 1.0f ) t = 1.0f;
-            }
-            const float d = PixelDist( ax + ex * t, ay + ey * t, curX, curY );
+            // KIWI-UX (CLEANUP, A-12): one spelling, kiwi_pick.h.
+            const float d = Pick_SegDist2D( curX, curY, ax, ay, bx, by, 0 );
             // KIWI-UX (ROUND R): the CLICK box is KCON_CLICK_PIXELS (14), NOT the
             // hover/snap radius KCON_LINE_PIXELS (10).  "Lines are still hard to
             // click" is a report about this one test, and only this one — see
@@ -672,23 +667,12 @@ bool KiwiConSel_Join()
     // hard 0.5 is right there: it must never eat a point the user placed.  The
     // difference is that here the walker has ALREADY RULED that these two points
     // are one, on the record, at that tolerance.
-    float finest = 0.0f;
-    {
-        const int n = (int)( raw.size() / 3 );
-        const int last = closed ? n : ( n - 1 );
-        for ( int i = 0; i < last && n >= 2; ++i )
-        {
-            const int j = ( i + 1 ) % n;
-            const float dx = raw[(size_t)j * 3 + 0] - raw[(size_t)i * 3 + 0];
-            const float dy = raw[(size_t)j * 3 + 1] - raw[(size_t)i * 3 + 1];
-            const float dz = raw[(size_t)j * 3 + 2] - raw[(size_t)i * 3 + 2];
-            const float d  = sqrtf( dx * dx + dy * dy + dz * dz );
-            if ( d <= KREG_JOIN_DIST )
-                continue;                    // degenerate — what the weld is FOR
-            if ( finest <= 0.0f || d < finest )
-                finest = d;
-        }
-    }
+    // KIWI-UX (CLEANUP, A-11): the scan was written out here, in
+    // kiwi_region.cpp's FinestLoopEdge and in kiwi_arrange.cpp — and this copy
+    // already cited kiwi_region.h as the authority for it.  Same walk, same
+    // KREG_JOIN_DIST floor, same open-or-closed wrap; only the stride differed.
+    const float finest = KiwiRegion_FinestEdge(
+        raw.empty() ? 0 : &raw[0], (int)( raw.size() / 3 ), 3, closed );
     const float weld = KiwiRegion_WeldFor( finest );
 
     std::vector<float> pts;
@@ -823,6 +807,11 @@ bool KiwiConSel_OwnsDelete()
     return selected_brushes.next == &selected_brushes;
 }
 
+// KIWI-UX (CLEANUP, A-36): deliberately NOT routed through OwnsDelete — see the
+// block above it.  CanDelete is "is there anything of ours to delete" (the
+// palette greys on it); OwnsDelete additionally asks whether the classic delete
+// has a job, and only the funnel may ask that.  It shares its body with
+// CanHide/OwnsHide by coincidence, not by rule, so it keeps its own.
 bool KiwiConSel_CanDelete()
 {
     return !s_sel.empty();
@@ -867,14 +856,21 @@ bool KiwiConSel_DeleteSelected()
 // Shift+H (isolate), Alt+H (show hidden) and Ctrl+H (invert) are NOT touched —
 // only the bare chord is arbitrated, so every other member of the family is
 // exactly what round J wired.
-bool KiwiConSel_CanHide()
+// KIWI-UX (CLEANUP, A-36): CanHide, OwnsHide and CanDelete were three
+// byte-identical `return !s_sel.empty();` bodies.  The header argues why
+// OwnsHide is weaker than OwnsDelete and why CanDelete is weaker again, but it
+// never distinguishes CanHide from OwnsHide — they are the same question asked
+// through two doors (the palette's canExecute and the H funnel).  Both names
+// stay, because the two doors are real; the ANSWER is written once so a future
+// change to one cannot silently miss the other.
+bool KiwiConSel_OwnsHide()
 {
     return !s_sel.empty();
 }
 
-bool KiwiConSel_OwnsHide()
+bool KiwiConSel_CanHide()
 {
-    return !s_sel.empty();
+    return KiwiConSel_OwnsHide();
 }
 
 bool KiwiConSel_HideSelected()
@@ -924,30 +920,12 @@ namespace
         return EdgeDist3( p, q ) <= KREG_JOIN_DIST;
     }
 
-    // The world endpoints of a SEL_EDGE item.  Same resolution kiwi_hover.cpp's
-    // EdgeEnds performs — winding edge e is p[e] -> p[(e+1) % numpoints] — with the
-    // same liveness and bounds guards, because this walks a cached selection and a
-    // freed brush node is exactly what those guards exist for.
-    bool EdgeEnds( const sel_item_t &it, float outA[3], float outB[3] )
-    {
-        if ( it.kind != SEL_EDGE || !Sel_BrushLive( it.brush ) )
-            return false;
-        const brush_t *def = it.brush->def;
-        if ( !def || !def->faces || it.faceIndex < 0 || it.faceIndex >= def->faceCount )
-            return false;
-        const winding_t *w = def->faces[it.faceIndex].w;
-        if ( !w || w->numpoints < 2 || w->numpoints > MAX_POINTS_ON_WINDING )
-            return false;
-        if ( it.edgeIndex < 0 || it.edgeIndex >= w->numpoints )
-            return false;
-        const int j = ( it.edgeIndex + 1 ) % w->numpoints;
-        for ( int k = 0; k < 3; ++k )
-        {
-            outA[k] = w->p[it.edgeIndex][k];
-            outB[k] = w->p[j][k];
-        }
-        return true;
-    }
+    // KIWI-UX (CLEANUP, A-13): this copy WAS the strictest of the four (kind +
+    // liveness + the MAX_POINTS_ON_WINDING bound), so it is the one that became
+    // Sel_EdgeEnds in kiwi_selection.h — every guard here survived.  The call
+    // site below takes the default checkLive = true, which is exactly what this
+    // body did: it walks a cached selection, where a freed node is the case the
+    // guard exists for.
 
     // Every UNIQUE selected edge, coincident duplicates dropped (see the header:
     // a brush edge belongs to two faces, so the same world segment arrives twice
@@ -958,7 +936,7 @@ namespace
         for ( size_t i = 0; i < sel.items.size(); ++i )
         {
             kedge_t e;
-            if ( !EdgeEnds( sel.items[i], e.a, e.b ) )
+            if ( !Sel_EdgeEnds( sel.items[i], e.a, e.b ) )
                 continue;
             if ( EdgeDist3( e.a, e.b ) <= KREG_JOIN_DIST )
                 continue;                       // a degenerate winding edge
@@ -996,8 +974,14 @@ namespace
         {
             grew = false;
             const size_t n = pts->size();
-            const float *head = &( *pts )[0];
-            const float *tail = &( *pts )[n - 3];
+            // KIWI-UX (CLEANUP, A-34): BY VALUE.  These used to be raw pointers into
+            // `*pts`, which the loop below push_backs and inserts into — either can
+            // reallocate.  It only worked because every mutating branch sets `grew`
+            // and ends the scan before the next read; copying makes that an ordinary
+            // fact rather than an unwritten invariant a future branch can break.
+            float head[3], tail[3];
+            for ( int k = 0; k < 3; ++k ) head[k] = ( *pts )[k];
+            for ( int k = 0; k < 3; ++k ) tail[k] = ( *pts )[n - 3 + k];
             if ( SamePoint( head, tail ) )
             {
                 pts->resize( n - 3 );           // drop the repeated closing point
@@ -1079,8 +1063,12 @@ bool KiwiConSel_DuplicateEdgesAsLines()
         kconObject_t o;
         // A two-point run IS a line; anything longer is a polyline.  Same typing
         // the drawing tools use, so nothing downstream has to special-case these.
-        o.type   = ( pts.size() == 6 ) ? KCON_LINE : KCON_POLYLINE;
-        o.closed = closed && ( pts.size() >= 9 );
+        // KIWI-UX (CLEANUP, A-37): asked in POINTS, not in the float count — the
+        // rule is "two points" and "three points", and the bare 6 and 9 this used
+        // to spell hid that behind the three-floats-per-point stride.
+        const int nPts = (int)( pts.size() / 3 );
+        o.type   = ( nPts == 2 ) ? KCON_LINE : KCON_POLYLINE;
+        o.closed = closed && ( nPts >= 3 );
         o.pts.swap( pts );
         if ( KiwiCon_Add( o ) < 0 )
             continue;
@@ -1178,6 +1166,27 @@ void KiwiConSel_MoveApply( const float delta[3] )
     //                    USUALLY: a non-planar chain's refit FAILS and leaves the
     //                    cache alone, and a translated origin is a better thing to
     //                    leave behind than an untranslated one.
+    // ── KIWI-UX (CLEANUP, A-33): THE BASELINE MUST STILL DESCRIBE THE OBJECT ───
+    // The point loop below is guarded on the baseline and the live object having
+    // the same point count, but the ORIGIN write above it is not — so a mismatch
+    // used to translate the cached plane origin while leaving the geometry where it
+    // was, with no console line, and then commit that state as an undo record.
+    // Asked as a PRE-PASS so nothing has moved yet when the answer is no: cancelling
+    // pops the store wholesale (KiwiCon_UndoPop), which would invalidate any
+    // kconObject_t* the apply loop was holding.  Abandoning is what
+    // kiwi_transform.cpp does when the selection changes under a live drag.
+    for ( size_t i = 0; i < s_moveBase.size(); ++i )
+    {
+        const kconObject_t *chk = KiwiCon_At( s_moveBase[i].object );
+        if ( chk && chk->pts.size() != s_moveBase[i].pts.size() )
+        {
+            Sys_Printf( "Move: the construction store changed under the gesture — "
+                        "move abandoned.\n" );
+            KiwiConSel_MoveCancel();
+            return;
+        }
+    }
+
     for ( size_t i = 0; i < s_moveBase.size(); ++i )
     {
         const moveBase_t &b = s_moveBase[i];

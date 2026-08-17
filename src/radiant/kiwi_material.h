@@ -46,8 +46,9 @@
 // ═════════════════════════════════════════════════════════════════════════════
 // ── R1: WHAT COUNTS AS INHERITABLE ──────────────────────────────────────────
 // A face is a valid material SOURCE when its channel-0 material name is not in
-// the TOOL family (KiwiMtl_IsToolName: caulk / nodraw* / *clip / hint / skip /
-// portal / origin / trigger / lightgrid / a "tools/" path).  The test is by NAME
+// the TOOL family (caulk / nodraw* / *clip / hint / skip / portal / origin /
+// trigger / lightgrid / a "tools/" path — the list is `KMTL_TOOL_NAMES` in
+// kiwi_material.cpp, and `KiwiMtl_FaceIsInheritable` is the test).  It is by NAME
 // because that is the only classification this editor already trusts: the
 // clipper's own decal test (`xywnd.cpp:2246`) and the texture filter
 // (`MtlDef_IsFaceFiltered`, mayaexport.cpp:112) both classify by name, and the
@@ -111,16 +112,15 @@ struct patchMesh_t;
 struct MaterialDef;
 
 // ── R1 ───────────────────────────────────────────────────────────────────────
-// Is `name` a TOOL material (caulk / nodraw / clip / hint / skip / portal /
-// origin / trigger / lightgrid / anything under a "tools" path)?  NULL and the
-// empty string answer true — an unnamed material is not something to inherit.
-bool KiwiMtl_IsToolName( const char *name );
-
-// The channel-0 material name of a face, or NULL when it has none.
-const char *KiwiMtl_FaceMaterialName( const face_t *f );
-
 // R1 applied to a face: it has a channel-0 material and that material is not a
-// tool material.
+// TOOL material (caulk / nodraw / clip / hint / skip / portal / origin / trigger
+// / lightgrid / anything under a "tools" path).  A face with no channel-0
+// material is not inheritable — an unnamed material is not something to inherit.
+//
+// This is the file's R1 entry point.  KIWI-UX (CLEANUP, C-69): the name test and
+// the channel-0 name accessor it reads through used to be exported beside it and
+// had no caller outside kiwi_material.cpp; they are file-local there now (the
+// tool-name list is `KMTL_TOOL_NAMES` in that file's anonymous namespace).
 bool KiwiMtl_FaceIsInheritable( const face_t *f );
 
 // ── R2 / R5 ──────────────────────────────────────────────────────────────────

@@ -17,6 +17,8 @@
 #include "prefs.h"       // g_PrefsDlg (the Test_Ray contents gates + Fov)
 #include "kiwi_camera.h" // ROUND M: KiwiCam_Ortho / KiwiCam_OrthoHalfHeight
 #include "kiwi_pick.h"
+#include "kiwi_section.h"   // KIWI-UX (ROUND BM) — the section plane clamps picks
+#include "kiwi_vec.h"     // KIWI-UX (CLEANUP, A-15): the one spelling of Dot3/Sub3/...
 
 #include <math.h>
 #include <vector>
@@ -43,10 +45,6 @@ namespace
     // rejected again by SelectFaceSth).  No symbol exists for it in qedefs.h.
     const int BRUSHFLAG_PICK_EXCLUDED = 0x20;
 
-    inline float Dot3( const float *a, const float *b )
-    {
-        return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-    }
 
     // Per-pick projection constants, latched once so the candidate loop does not
     // re-derive tan(fov) per point.  `s` is CameraCalcRayDir's per-pixel scale.
@@ -136,24 +134,14 @@ namespace
         return true;
     }
 
-    // 2D point→segment distance; `outT` is the clamped parameter along a→b.
-    float SegDist2D( float px, float py, float ax, float ay,
-                     float bx, float by, float *outT )
+    // KIWI-UX (CLEANUP, A-12): this body moved to kiwi_pick.h as
+    // Pick_SegDist2D — it was the canonical copy of a loop five other files had
+    // open-coded.  The local name is kept as a one-line forwarder so this file's
+    // call sites read as they always did.
+    inline float SegDist2D( float px, float py, float ax, float ay,
+                            float bx, float by, float *outT )
     {
-        const float dx = bx - ax, dy = by - ay;
-        const float len2 = dx * dx + dy * dy;
-        float t = 0.0f;
-        if ( len2 > 1e-6f )
-        {
-            t = ( ( px - ax ) * dx + ( py - ay ) * dy ) / len2;
-            if ( t < 0.0f )      t = 0.0f;
-            else if ( t > 1.0f ) t = 1.0f;
-        }
-        const float ex = px - ( ax + dx * t );
-        const float ey = py - ( ay + dy * t );
-        if ( outT )
-            *outT = t;
-        return sqrtf( ex * ex + ey * ey );
+        return Pick_SegDist2D( px, py, ax, ay, bx, by, outT );
     }
 
     // The candidate filter, mirroring sub_48D460's admission rules for the world
@@ -568,7 +556,13 @@ pick_result_t Pick( const ray_t &ray, sel_mask_t kindMask, unsigned pickFlags )
 
             // Point beats line beats area (spec §6's ranking, applied to picking).
             const pickBest_t &win = bestVert.hit ? bestVert : bestEdge;
-            if ( win.hit )
+            // KIWI-UX (ROUND BM, ITEM 1b): a SECTION must not let the user click a
+            // vertex or an edge it has cut away.  The winner is tested rather than
+            // every candidate — one plane test per pick instead of one per vertex —
+            // and a hidden winner FALLS THROUGH to the area pass below, which is
+            // clamped to the same plane.  kiwi_section.h carries the argument and
+            // the one case where the two differ.  No-op while no section is on.
+            if ( win.hit && KiwiSection_PointVisible( win.point ) )
             {
                 r.valid      = true;
                 r.item       = win.item;
@@ -587,6 +581,14 @@ pick_result_t Pick( const ray_t &ray, sel_mask_t kindMask, unsigned pickFlags )
 
     float start[3] = { ray.origin[0], ray.origin[1], ray.origin[2] };
     float dir[3]   = { ray.dir[0],    ray.dir[1],    ray.dir[2]    };
+    // KIWI-UX (ROUND BM, ITEM 1b): with a SECTION armed, a ray that begins in the
+    // hidden half is advanced to the section plane, so Test_Ray cannot return a
+    // surface the user cannot see.  This is the ONE place it has to happen — every
+    // pick in the editor (hover, selection, the snap query, every command, the
+    // camera's own pivot and dolly references) funnels through this function.
+    // No-op while no section is on, and no-op for a ray that already starts in the
+    // visible half.  kiwi_section.h states why the visible-side case needs nothing.
+    KiwiSection_ClampRayStart( start, dir );
     const int contents = Pick_CameraContents();
 
     edTrace_t t;

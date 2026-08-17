@@ -63,6 +63,7 @@
 #include <imgui/imgui.h>
 
 #include "kiwi_hints.h"
+#include "radiant_frame.h"          // KIWI-UX (CLEANUP, C-6): struct RadiantCommand + the table API
 #include "kiwi_command.h"
 #include "kiwi_construct.h"       // ROUND AT, ITEM 2 — the working-plane readout chip
 #include "kiwi_grid.h"            // ROUND AJ, ITEM 5 — the grid-snap master switch
@@ -78,24 +79,20 @@
 #include <stdio.h>
 #include <string.h>
 
-// MUST MATCH mainfrm.cpp's definition verbatim — same reasoning as
-// kiwi_palette.cpp:25 (it is the parameter type of the formatter below, so field
-// offsets and the mangled name both have to agree).
-//   `byte` is universal/q_shared.h's typedef (stdafx.h), the same one mainfrm sees.
-struct RadiantCommand { const char *name; byte vk; byte mods; int commandId; };
+// KIWI-UX (CLEANUP, C-6): the struct AND these declarations now live in
+// radiant_frame.h, included above.  This file used to carry a verbatim copy of
+// `struct RadiantCommand` plus its own externs, as six other TUs did.
 
 // ── mainfrm.cpp bindings (verified against their definitions) ───────────────
-extern int         Radiant_GetCommandTable( const RadiantCommand **out );   // mainfrm.cpp:1216
-extern const char *CommandList_KeyName( const RadiantCommand &c, char keybuf[8] );  // mainfrm.cpp:3880
 // ROUND AI, ITEM 6 (link fix): declared at FILE scope, not inside the anonymous
 // namespace below — MSVC mangles a block-scope extern declared inside an anon
 // namespace WITH that namespace (?A0x...@), which can never match the real
-// external definition (kiwi_patchverts.cpp:168) and dies at link.
+// external definition (kiwi_patchverts.cpp:289) and dies at link.
 extern bool        KiwiPatchVerts_Active();                                 // kiwi_patchverts.cpp
 // KIWI-UX (ROUND AO, ITEM Y): "is the advanced-terrain paint tool ARMED" — a mode
 // other than Disabled AND outer radius > inner radius.  Signature copied verbatim
 // from its definition, `int sub_401D50()` at patchdialog.cpp:229 (IDB 0x401D50);
-// it is the same gate the cursor ring (camwnd.cpp:2988) and the Alt+LMB routing
+// it is the same gate the cursor ring (camwnd.cpp:3074) and the Alt+LMB routing
 // (kiwi_viewport.cpp's LMB arm) use, so the chip can only appear when the stroke
 // really would fire.  FILE scope for the reason the note above gives.
 extern int         sub_401D50();                                            // patchdialog.cpp:229
@@ -109,14 +106,30 @@ namespace
     // Which corner the KEY PROMPTS take.  The verbs take the other one.  See the
     // Plasticity note at the top: 0.6 does it the other way round, and this is the
     // one constant that decides it.
-    const bool KHINT_PROMPTS_LEFT = true;
+    // KIWI-UX (CLEANUP, C-39): a COMPILE-TIME KNOB, not state.  Nothing writes it
+    // and nothing can; it exists so the two corners are named once rather than
+    // twice, and `!KHINT_PROMPTS_LEFT` reads as "the other corner".  The false arm
+    // is unreachable by construction and is meant to be.
+    constexpr bool KHINT_PROMPTS_LEFT = true;
 
     int s_show = -1;                    // -1 = not read from the profile yet
 
+    // KIWI-UX (CLEANUP, C-35): ONE cap for the keycap text.  LiveKey formatted into
+    // 32 bytes and AddChip then truncated into a 24-byte field, silently — one
+    // constant, so the two cannot disagree.  ("Shift+Ctrl+PageDown" is 19 chars and
+    // the palette fallback wraps it in "(...)", so the margin is thin.)
+    enum { KHINT_KEYCAP_MAX = 32 };
+
     struct chip_t
     {
-        char key[24];
-        char label[40];
+        char  key[KHINT_KEYCAP_MAX];
+        char  label[40];
+        // KIWI-UX (CLEANUP, C-34): measured ONCE, by MeasureChips, right after the
+        // build.  DrawStrip measures the strip and then lays it out, and DrawChip
+        // needs the keycap width again, so an un-cached ChipWidth ran CalcTextSize
+        // three times per chip per frame.
+        float kw;                       // keycap box width (text + 2 * KHINT_PAD_X)
+        float w;                        // whole chip: keycap + gap + label
     };
 
     // The live binding for a command id, formatted compactly ("Shift+G", "Del").
@@ -182,6 +195,8 @@ namespace
         _snprintf( chips[*n].label, sizeof( chips[*n].label ), "%s", label );
         chips[*n].key  [sizeof( chips[*n].key   ) - 1] = '\0';
         chips[*n].label[sizeof( chips[*n].label ) - 1] = '\0';
+        chips[*n].kw = 0.0f;            // MeasureChips fills both, once, after the build
+        chips[*n].w  = 0.0f;
         ++( *n );
     }
 
@@ -190,6 +205,10 @@ namespace
     // the same question kiwi_snap.cpp's CPLANE arm asks), and only when the plane
     // is somewhere a user would want told: OFF the world's major plane, or tilted.
     // Both of those are states the round-AT report was unable to see.
+    // KIWI-UX (ROUND BS): no code change here, and that is the point — round BS
+    // narrowed KiwiCon_PlanePlacement to the PLANAR placers, so this chip stopped
+    // appearing for the line/polyline/spline tools by itself.  A plane readout
+    // during line work would name a surface the line does not use.
     void AddWorkingPlaneChip( chip_t *chips, int *n )
     {
         if ( !KiwiCon_PlanePlacement() )
@@ -256,12 +275,12 @@ namespace
     // reached — the same fallback the old panel used.
     void AddVerb( chip_t *chips, int *n, int commandId, const char *label )
     {
-        if ( *n >= KHINT_MAX_CHIPS )
-            return;
-        char key[32];
+        // KIWI-UX (CLEANUP, C-35): no cap test here — AddChip owns it, and testing
+        // it in two places is how the two drift apart.
+        char key[KHINT_KEYCAP_MAX];
         if ( !LiveKey( commandId, key, sizeof( key ) ) )
         {
-            char pal[32];
+            char pal[KHINT_KEYCAP_MAX];
             if ( LiveKey( KIWI_CMD_PALETTE, pal, sizeof( pal ) ) )
                 _snprintf( key, sizeof( key ), "(%s)", pal );
             else
@@ -301,15 +320,34 @@ namespace
             AddChip( chips, &n, "Shift+XYZ", "Plane" );
         AddChip( chips, &n, "Tab",       "Field" );
         AddChip( chips, &n, "0-9",       "Exact" );
-        // ── KIWI-UX (ROUND Z, ITEM 2): CTRL MEANS THE OPPOSITE THING HERE ────
-        // USER DIRECTIVE: "When extruding, it should not snap by default.  Make it
-        // snap only when holding CTRL."  Ctrl SUPPRESSES snapping everywhere else
-        // (kiwi_snap.h arm 0) and ENABLES it for the three one-axis gestures, so
-        // this is the one strip that has to say which it is — a hint that lies is
-        // worse than no hint (this file's own rule).  Asked of the COMMAND rather
-        // than listed by name, so a future opt-in gets the right chip for free.
-        if ( cmd && cmd->SnapOptIn() )
-            AddChip( chips, &n, "Ctrl",  "Snap" );
+        // ── KIWI-UX (ROUND BO, ITEM 3): THE ONE SNAP CHIP, ALWAYS SHOWN ──────
+        // USER REPORT, verbatim: *"some operations it's the opposite, it's
+        // confusing"*.  Round Z showed a "Ctrl Snap" chip only for the three
+        // opted-in commands and said nothing at all for the rest, so the strip's
+        // SILENCE was carrying the other half of the grammar — which is a hint that
+        // lies by omission, and this file's rule forbids that.
+        //
+        // Now every gesture says which way Ctrl goes for IT, in its own words, read
+        // off the same SnapContext the snap layer reads (kiwi_command.h), so the
+        // chip and the behaviour cannot drift:
+        //     TRANSFORM   "Ctrl  Snap"        (raw until held)
+        //     CONSTRUCT   "Ctrl  Free"        (snaps until held)
+        //     ALWAYS      "Snap  On"          (the pivot placement, no modifier)
+        if ( cmd )
+        {
+            switch ( cmd->SnapContext() )
+            {
+            case KiwiEditorCommand::KSNAPCTX_CONSTRUCT:
+                AddChip( chips, &n, "Ctrl", "Free" );
+                break;
+            case KiwiEditorCommand::KSNAPCTX_ALWAYS:
+                AddChip( chips, &n, "Snap", "On" );
+                break;
+            default:
+                AddChip( chips, &n, "Ctrl", "Snap" );
+                break;
+            }
+        }
         // ── KIWI-UX (ROUND AJ, ITEM 5): SAY WHEN THE GRID IS OFF ────────────
         // The new checkbox by the grid pill is persistent and lives at the far
         // top-right of the viewport; a user mid-gesture is looking at the cursor
@@ -566,14 +604,22 @@ namespace
     const float KHINT_ROWGAP  = 3.0f;
     const float KHINT_EDGE    = 10.0f;   // inset from the image edge
 
-    float ChipWidth( const chip_t &c )
+    // KIWI-UX (CLEANUP, C-34): ONE CalcTextSize pair per chip per frame.  Called
+    // once on each strip after it is built; DrawStrip (measure pass AND layout
+    // pass) and DrawChip then read the cached numbers.
+    void MeasureChips( chip_t *chips, int n )
     {
-        const float kw = ImGui::CalcTextSize( c.key ).x + KHINT_PAD_X * 2.0f;
-        const float lw = ( c.label[0] != '\0' )
-                       ? ( KHINT_GAP + ImGui::CalcTextSize( c.label ).x )
-                       : 0.0f;
-        return kw + lw;
+        for ( int i = 0; i < n; ++i )
+        {
+            chips[i].kw = ImGui::CalcTextSize( chips[i].key ).x + KHINT_PAD_X * 2.0f;
+            chips[i].w  = chips[i].kw
+                        + ( ( chips[i].label[0] != '\0' )
+                            ? ( KHINT_GAP + ImGui::CalcTextSize( chips[i].label ).x )
+                            : 0.0f );
+        }
     }
+
+    float ChipWidth( const chip_t &c ) { return c.w; }
 
     // ROUND Z, ITEM 5: one definition of a chip row's height.  DrawStrip lays rows
     // out with it and KiwiHints_Draw reserves the band slot with it, and a strip
@@ -583,7 +629,7 @@ namespace
 
     void DrawChip( ImDrawList *dl, const chip_t &c, float x, float y, float lineH )
     {
-        const float kw = ImGui::CalcTextSize( c.key ).x + KHINT_PAD_X * 2.0f;
+        const float kw = c.kw;          // KIWI-UX (CLEANUP, C-34): measured once
         dl->AddRectFilled( ImVec2( x, y ), ImVec2( x + kw, y + lineH ),
                            IM_COL32( 44, 48, 58, 225 ), 3.0f );
         dl->AddRect      ( ImVec2( x, y ), ImVec2( x + kw, y + lineH ),
@@ -715,6 +761,27 @@ void KiwiHints_Draw( float imgMinX, float imgMinY, float imgW, float imgH )
     if ( !KiwiHints_Show() )
         return;
 
+    // ── KIWI-UX (CLEANUP, C-34): THE GEOMETRY GUARD RUNS FIRST ──────────────
+    // It used to sit below the build, so up to 24 chips were assembled — each
+    // AddVerb a linear scan of the ~200-row command table plus an _snprintf, each
+    // chip three CalcTextSize calls — and then thrown away, every frame, whenever
+    // the viewport was small.
+    //
+    // VERIFIED SAFE TO HOIST: nothing between the top of this function and the
+    // guard has a side effect anything after it depends on.  KiwiHints_Show()
+    // (which lazily loads the profile pref — the one latch here) stays above it and
+    // is unchanged; the Build* helpers only READ selection/command state and write
+    // into the two local arrays; and the one genuinely side-effecting call in this
+    // function, KiwiHud_BandTake, was already below the guard and still is.
+    //
+    // Each strip gets a little under half the width, so the two can never collide
+    // however wide a chip's label is.
+    const float maxW   = imgW * 0.46f;
+    const float leftX  = imgMinX + KHINT_EDGE;
+    const float rightX = imgMinX + imgW - KHINT_EDGE;
+    if ( maxW < 80.0f || imgH < 120.0f )
+        return;                                  // no room — draw nothing, never overlap
+
     chip_t prompts[KHINT_MAX_CHIPS];
     chip_t verbs  [KHINT_MAX_CHIPS];
     int    nP = 0;
@@ -768,13 +835,8 @@ void KiwiHints_Draw( float imgMinX, float imgMinY, float imgW, float imgH )
     if ( nP <= 0 && nV <= 0 )
         return;
 
-    // Each strip gets a little under half the width, so the two can never collide
-    // however wide a chip's label is.
-    const float maxW    = imgW * 0.46f;
-    const float leftX   = imgMinX + KHINT_EDGE;
-    const float rightX  = imgMinX + imgW - KHINT_EDGE;
-    if ( maxW < 80.0f || imgH < 120.0f )
-        return;                                  // no room — draw nothing, never overlap
+    MeasureChips( prompts, nP );        // KIWI-UX (CLEANUP, C-34) — once per chip
+    MeasureChips( verbs,   nV );
 
     // ── KIWI-UX (ROUND Z, ITEM 5): ONE SLOT FOR BOTH STRIPS ─────────────────
     // The prompts and the verbs sit at OPPOSITE ends of the same row band and can

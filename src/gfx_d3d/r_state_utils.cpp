@@ -18,9 +18,33 @@ void __cdecl R_DeriveNearPlaneConstantsForView(GfxCmdBufSourceState *source)
     const GfxViewParms *viewParms = &source->viewParms;
     const GfxMatrix *mtx = &viewParms->inverseViewProjectionMatrix;
 
+#ifdef KISAK_RADIANT
+    // ── KIWI-UX (ROUND BP, ITEM 1b): THE EDITOR CAN INSTALL AN OBLIQUE FRUSTUM ──
+    // Section analysis folds the cut plane into the camera projection's DEPTH
+    // COLUMN (camwnd.cpp CamWnd_SetupScene / kiwi_section.cpp
+    // KiwiSection_ObliqueDepthColumn).  clip.z then depends on clip.x/clip.y, so
+    // the inverse-VP deliberately leaves the ortho-like form the three asserts
+    // below describe: m[0][3] / m[1][3] become non-zero and m[3][3] can be zero or
+    // negative.  That is not degeneracy — it is the technique — but `1.0 /
+    // m[3][3]` would divide by zero in RELEASE as well as trip the asserts in a
+    // debug build.
+    //
+    // So the derivation is SKIPPED instead of asserted.  What that costs is
+    // nothing the editor uses: CONST_SRC_CODE_NEARPLANE_ORG/DX/DY are the
+    // near-plane corner-ray basis for depth-reconstruction shaders (soft
+    // particles, depth-based post), and Radiant binds no material that reads them.
+    // The constants simply keep their previous values for a sectioned frame.
+    {
+        const float m33 = mtx->m[3][3];
+        const float tol = 1.0e-5f * m33;
+        if ( !( m33 != 0.0f && fabs(mtx->m[0][3]) < tol && fabs(mtx->m[1][3]) < tol ) )
+            return;
+    }
+#else
     iassert(fabs(mtx->m[0][3]) < 1.0e-5f * mtx->m[3][3]);
     iassert(fabs(mtx->m[1][3]) < 1.0e-5f * mtx->m[3][3]);
     iassert( mtx->m[3][3] != 0 );
+#endif
 
     float scale = 1.0 / mtx->m[3][3];
 

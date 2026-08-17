@@ -15,11 +15,17 @@
 #include "kiwi_hints.h"     // ROUND Z, ITEM 5 — the shared bottom band + the chip toggle
 #include "kiwi_pick.h"
 #include "kiwi_snap.h"
+#include "kiwi_str.h"        // KIWI-UX (CLEANUP): KiwiStr_LowerAscii, the one case fold
+#include "kiwi_transform.h"  // KIWI-UX (CLEANUP, B-28) — KiwiXform_Is*Active
 #include "kiwi_units.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+// KIWI-UX (CLEANUP, B-29): the console, for the one diagnostic this file emits.
+// FILE SCOPE, not block scope — kiwi_uv.cpp carries the account of why.
+extern int Sys_Printf( const char *fmt, ... );                          // win_qe3.cpp:112
 
 namespace
 {
@@ -142,10 +148,12 @@ namespace
         return IsDigit( *p ) || ( *p == '.' && IsDigit( p[1] ) );
     }
 
-    char LowerAscii( char c )
-    {
-        return ( c >= 'A' && c <= 'Z' ) ? (char)( c - 'A' + 'a' ) : c;
-    }
+    // KIWI-UX (CLEANUP, wave-2 leftover): this file's copy of the ASCII case fold
+    // is gone — KiwiStr_LowerAscii (kiwi_str.h) is the one spelling.  It computes
+    // `c + ( 'a' - 'A' )` where this one computed `c - 'A' + 'a'`: the same +32
+    // after the identical ['A','Z'] guard, so it is byte-for-byte the same answer
+    // on every input the unit-suffix parser feeds it, including bytes >= 0x80
+    // (negative on this signed-char target), which both spellings pass through.
 
     // A unit suffix at `p`, consumed on a match.  Returns the multiplier INTO
     // INCHES, or 0 when there is no suffix here.  Longest match first, so "in"
@@ -166,13 +174,13 @@ namespace
         {
             const char *s = s_units[u].s;
             int         k = 0;
-            while ( s[k] && LowerAscii( p[k] ) == s[k] )
+            while ( s[k] && KiwiStr_LowerAscii( p[k] ) == s[k] )
                 ++k;
             if ( s[k] )
                 continue;                          // ran out of input before the word
             // Do not let "in" swallow the "i" of a longer word we do not know: the
             // next character must not be another letter.
-            const char n = LowerAscii( p[k] );
+            const char n = KiwiStr_LowerAscii( p[k] );
             if ( n >= 'a' && n <= 'z' )
                 continue;
             p += k;
@@ -323,6 +331,63 @@ namespace
         buf[bufSize - 1] = '\0';
     }
 
+    // ── KIWI-UX (ROUND AQ, ITEM 4): SAY WHAT THE EXPRESSION COMES TO ──────────
+    // A typed value used to be echoed with a hardcoded suffix ("%s in"), which was
+    // honest while the only legal input was a bare number.  It is a lie for
+    // "10ft6in" and useless for "12 * 12".  So: a plain number still echoes exactly
+    // as before, an EXPRESSION echoes with its evaluated result beside it, and
+    // something that does not evaluate is marked rather than shown as if it were a
+    // value.  That mark IS the "invalid expression keeps the field live + a status
+    // line" the directive asks for — the field keeps its text, the command keeps its
+    // cursor value, and the row says why.
+    //
+    // KIWI-UX (CLEANUP, B-3): hoisted out of FieldDisplay so the HUD LINE can use it
+    // too.  The HUD had its own hardcoded `"%s in"` — the very defect the paragraph
+    // above names and fixes — so "10ft6in" printed as "10ft6in in" and "12 *" was
+    // presented as if it were a value.  ONE spelling of "how a typed field reads",
+    // and the KNUM_LENGTH -> Units_FromDisplay conversion (which the HUD path did not
+    // do at all) comes with it.  Returns false when the field has no typed text.
+    bool TypedFieldDisplay( int f, char *buf, int bufSize )
+    {
+        const kiwiNumField_t *fd = KiwiNum_Field( f );
+        if ( !fd || !s_text[f][0] )
+            return false;
+
+        float       display = 0.0f;
+        const bool  valid   = EvalDisplay( s_text[f], &display );
+        bool        plain   = true;
+        for ( const char *q = s_text[f]; *q; ++q )
+            if ( !( ( *q >= '0' && *q <= '9' ) || *q == '.'
+                    || ( *q == '-' && q == s_text[f] ) ) )
+                { plain = false; break; }
+
+        if ( !valid )
+        {
+            _snprintf( buf, (size_t)bufSize, "%s  (incomplete)", s_text[f] );
+        }
+        else if ( plain )
+        {
+            if ( fd->kind == KNUM_LENGTH )
+                _snprintf( buf, (size_t)bufSize, "%s in", s_text[f] );
+            else if ( fd->kind == KNUM_ANGLE )
+                _snprintf( buf, (size_t)bufSize, "%s deg", s_text[f] );
+            else
+                _snprintf( buf, (size_t)bufSize, "%s", s_text[f] );
+        }
+        else
+        {
+            // The evaluator works in DISPLAY units, and FormatValue wants the
+            // field's own natural unit — which for a LENGTH is world units.
+            char val[48];
+            FormatValue( val, sizeof( val ), fd->kind,
+                         ( fd->kind == KNUM_LENGTH ) ? Units_FromDisplay( display )
+                                                     : display );
+            _snprintf( buf, (size_t)bufSize, "%s = %s", s_text[f], val );
+        }
+        buf[bufSize - 1] = '\0';
+        return true;
+    }
+
     // What the bubble shows for one field: the TYPED text while the user is
     // typing (with the §17 unit suffix a length needs), the command's LIVE value
     // otherwise.  False = this field has nothing to say and gets no row.
@@ -332,52 +397,8 @@ namespace
         if ( !fd )
             return false;
 
-        if ( s_text[f][0] )
-        {
-            // ── KIWI-UX (ROUND AQ, ITEM 4): SAY WHAT THE EXPRESSION COMES TO ──
-            // A typed value used to be echoed with a hardcoded suffix ("%s in"),
-            // which was honest while the only legal input was a bare number.  It
-            // is a lie for "10ft6in" and useless for "12 * 12".  So: a plain
-            // number still echoes exactly as before, an EXPRESSION echoes with its
-            // evaluated result beside it, and something that does not evaluate is
-            // marked rather than shown as if it were a value.  That mark IS the
-            // "invalid expression keeps the field live + a status line" the
-            // directive asks for — the field keeps its text, the command keeps its
-            // cursor value, and the row says why.
-            float       display = 0.0f;
-            const bool  valid   = EvalDisplay( s_text[f], &display );
-            bool        plain   = true;
-            for ( const char *q = s_text[f]; *q; ++q )
-                if ( !( ( *q >= '0' && *q <= '9' ) || *q == '.'
-                        || ( *q == '-' && q == s_text[f] ) ) )
-                    { plain = false; break; }
-
-            if ( !valid )
-            {
-                _snprintf( buf, (size_t)bufSize, "%s  (incomplete)", s_text[f] );
-            }
-            else if ( plain )
-            {
-                if ( fd->kind == KNUM_LENGTH )
-                    _snprintf( buf, (size_t)bufSize, "%s in", s_text[f] );
-                else if ( fd->kind == KNUM_ANGLE )
-                    _snprintf( buf, (size_t)bufSize, "%s deg", s_text[f] );
-                else
-                    _snprintf( buf, (size_t)bufSize, "%s", s_text[f] );
-            }
-            else
-            {
-                // The evaluator works in DISPLAY units, and FormatValue wants the
-                // field's own natural unit — which for a LENGTH is world units.
-                char val[48];
-                FormatValue( val, sizeof( val ), fd->kind,
-                             ( fd->kind == KNUM_LENGTH ) ? Units_FromDisplay( display )
-                                                         : display );
-                _snprintf( buf, (size_t)bufSize, "%s = %s", s_text[f], val );
-            }
-            buf[bufSize - 1] = '\0';
+        if ( TypedFieldDisplay( f, buf, bufSize ) )
             return true;
-        }
 
         float v = 0.0f;
         if ( !cmd || !cmd->NumericFieldValue( f, &v ) )
@@ -406,7 +427,16 @@ void KiwiNum_SetFields( const kiwiNumField_t *fields, int count )
         return;
     }
     if ( count > KNUM_MAX_FIELDS )
+    {
+        // KIWI-UX (CLEANUP, B-29): the truncation is now audible.  A dropped field
+        // fails FAR from here — NumericFieldChanged for any index past the cap
+        // simply never fires, and the command reads as "that field does nothing" —
+        // so the one place that knows says so.  Same early-out, one line louder.
+        Sys_Printf( "Numeric: a command declared %i fields; only %i (KNUM_MAX_FIELDS) "
+                    "are shown, the rest will never receive input.\n",
+                    count, KNUM_MAX_FIELDS );
         count = KNUM_MAX_FIELDS;
+    }
 
     for ( int i = 0; i < KNUM_MAX_FIELDS; ++i )
         s_text[i][0] = '\0';
@@ -708,10 +738,17 @@ void KiwiNum_DrawHud( float imgMinX, float imgMinY, float imgW, float imgH )
                        ? ""
                        : "RMB / Enter confirm  ·  drag adjust  ·  Tab field  ·  Esc cancel";
 
+    // KIWI-UX (CLEANUP, B-3): the typed value is rendered by the SAME helper the
+    // bubble uses, so an expression reads "12 * 12 = 12 ft" and an unevaluatable one
+    // reads "(incomplete)" instead of both being suffixed with a bare " in".
+    char typed[96];
+    typed[0] = '\0';
+    const bool haveTyped = TypedFieldDisplay( KiwiNum_Focus(), typed, sizeof( typed ) );
+
     char line[400];
-    if ( KiwiNum_Has() )
-        _snprintf( line, sizeof( line ), "%s   %s%s%s%s in", cmd->Name(),
-                   state ? state : "", state ? "   " : "", fieldTag, KiwiNum_Text() );
+    if ( haveTyped )
+        _snprintf( line, sizeof( line ), "%s   %s%s%s%s", cmd->Name(),
+                   state ? state : "", state ? "   " : "", fieldTag, typed );
     else if ( state )
         // KIWI-UX (shakeout E): the confirm flow changed — an LMB release PAUSES,
         // RMB-click or Enter CONFIRMS.  The line the user reads every gesture has
@@ -832,8 +869,10 @@ void KiwiNum_DrawBubble( float imgMinX, float imgMinY, float imgW, float imgH )
     // off far enough to clear the arrow tips (KGZ reach + head + a margin);
     // otherwise the old tight offset stays (drawing tools have no gizmo and the
     // bubble should hug the point there).
-    extern bool KiwiXform_IsMoveActive();     // kiwi_transform.h
-    extern bool KiwiXform_IsRotateActive();   // kiwi_transform.h
+    // KIWI-UX (CLEANUP, B-28): these two used to be BLOCK-SCOPE externs here.
+    // Both are declared by kiwi_transform.h, which this file now includes — an
+    // owning header beats a re-declaration, and it removes the MSVC
+    // namespace-mangling hazard kiwi_uv.cpp documents.
     const bool gizmoUp = KiwiXform_IsMoveActive() || KiwiXform_IsRotateActive();
     const float standoff = gizmoUp ? 96.0f : 16.0f;
     float x = imgMinX + sx + standoff;

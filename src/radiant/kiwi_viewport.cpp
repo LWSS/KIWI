@@ -38,14 +38,14 @@
 //   travel <= that, NOTHING LIVE    CONTEXT MENU.  The legacy down+up PAIR is
 //                                   REPLAYED here, in order, with the flags the
 //                                   press carried:
-//                                     CamWnd_OnRButtonDown (camwnd.cpp:3667)
+//                                     CamWnd_OnRButtonDown (camwnd.cpp:3753)
 //                                       -> CamWnd_DropModelsToPlane: sets
 //                                          m_nCambuttonstate and, because
 //                                          (nFlags & MK_RBUTTON), cam_was_not_dragged
-//                                     CamWnd_OnRButtonUp   (camwnd.cpp:3673)
+//                                     CamWnd_OnRButtonUp   (camwnd.cpp:3759)
 //                                       -> Cam_MouseUp, then CamWnd_ContextMenu,
 //                                          whose FIRST gate is cam_was_not_dragged
-//                                          (camwnd.cpp:2872) — which is exactly why
+//                                          (camwnd.cpp:2958) — which is exactly why
 //                                          the down half cannot be skipped.
 //
 // Replaying the pair (rather than calling CamWnd_ContextMenu directly) keeps the
@@ -87,28 +87,34 @@
 #include "kiwi_boxselect.h"
 #include "kiwi_camera.h"
 #include "kiwi_command.h"
+#include "kiwi_construct.h"      // ROUND BP, ITEM 3 — the PLANE chip reads the latch
 #include "kiwi_gizmo.h"
 #include "kiwi_hints.h"
 #include "kiwi_hover.h"
 #include "kiwi_lollipop.h"      // ROUND K — the extrude handle that replaces the gizmo
+#include "kiwi_section.h"       // ROUND BM — section analysis (the plane + its lollipop)
 #include "kiwi_numeric.h"
 #include "kiwi_patchverts.h"    // ROUND AJ, ITEM 1 — the mode's per-frame lifecycle
+#include "kiwi_region.h"        // ROUND BL, ITEM 3 — the overlay fill route
 #include "kiwi_selection.h"
 #include "kiwi_selext.h"
 #include "kiwi_snap.h"
 #include "kiwi_ux.h"
+#include "kiwi_units.h"          // ROUND BP — KiwiUnits_Format (the banner's numbers)
 #include "kiwi_uv.h"
 #include "kiwi_viewcube.h"
 
+#include <stdio.h>               // ROUND BP — _snprintf (the banner's rows)
+
 // ── ported entry points (verified against their definitions) ────────────────
-extern void CamWnd_OnRButtonDown( HWND hwnd, unsigned int nFlags, int x, int y ); // camwnd.cpp:3667
-extern void CamWnd_OnRButtonUp  ( HWND hwnd, unsigned int nFlags, int x, int y ); // camwnd.cpp:3673
-extern bool ImGuiShell_WantsKeyboard();                                           // imgui_shell.cpp:63
+extern void CamWnd_OnRButtonDown( HWND hwnd, unsigned int nFlags, int x, int y ); // camwnd.cpp:5270
+extern void CamWnd_OnRButtonUp  ( HWND hwnd, unsigned int nFlags, int x, int y ); // camwnd.cpp:5276
+extern bool ImGuiShell_WantsKeyboard();                                           // imgui_shell.cpp:148
 // KIWI-UX (ROUND AO, ITEM Y): the terrain-paint ARMED gate — "a paint mode is
 // picked (not Disabled) AND outer radius > inner radius".  Signature copied
 // verbatim from its definition, `int sub_401D50()` at patchdialog.cpp:229 (IDB
 // 0x401D50); it is the SAME function Drag_Begin (drag.cpp:653) and Cam_Draw
-// (camwnd.cpp:2988, the cursor ring) already gate on, so this arm can never
+// (camwnd.cpp:3074, the cursor ring) already gate on, so this arm can never
 // disagree with either the ring the user sees or the handler it defers to.
 // File scope, next to the other ported externs — never at block scope inside the
 // anonymous namespace below (that spelling caused the round-AI link failure).
@@ -136,8 +142,13 @@ namespace
     // rectangle to the command instead.  A separate value rather than a flag on
     // KG_MARQUEE, for the reason KG_CONSUMED gives: the release arm must be able to
     // tell the two apart at a glance, and they end differently.
+    // KG_SECTION (ROUND BM, ITEM 1b): the SECTION-ANALYSIS lollipop is held.  Its
+    // own tag rather than KG_GIZMO, because the section is NOT a command: KG_GIZMO's
+    // release and abort arms call into kiwi_lollipop / kiwi_gizmo, which both route
+    // through the active command's Rebase/Cancel, and there is no command here to
+    // route through (kiwi_section.h states why a section is view state).
     enum kgesture_t { KG_NONE = 0, KG_ORBIT, KG_MARQUEE, KG_COMMAND, KG_CONSUMED,
-                      KG_LOOK, KG_PAN, KG_GIZMO, KG_CMD_MARQUEE };
+                      KG_LOOK, KG_PAN, KG_GIZMO, KG_CMD_MARQUEE, KG_SECTION };
 
     // A press-to-release travel under this many pixels is a CLICK, not a drag.
     // Same MEANING as KBOX_CLICK_PIXELS on the LMB side; ROUND N deliberately left
@@ -339,6 +350,71 @@ namespace
     // classic profile 1-5 are still the grid-size presets (spec §11), so the chips
     // remain the mouse route that works in both.  The keys themselves route through
     // the shared command table (KIWI_CMD_SELMODE_*), never from here.
+    // ═══════════════════════════════════════════════════════════════════════════
+    //  KIWI-UX (ROUND BP, ITEMS 1 + 3) — THE LATCHED-STATE BANNER
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Both of this round's autopsies end in the same sentence: AN INVISIBLE LATCHED
+    // PLANE DISTORTING PLACEMENT.  A section armed at a Z level that cut nothing was
+    // clamping every pick ray in the editor; a working plane inherited from a sketch
+    // drawn on a roof was placing every point 61 ft up.  Neither had ANY on-screen
+    // presence, which is why both survived for rounds.
+    //
+    // So anything that is not the default now says so, in the loudest cheap place —
+    // directly under the selection-mode chips, at the top-left where the eye already
+    // goes.  Pure ImDrawList: it draws no ImGui item, so it cannot take the image's
+    // hover from a marquee (the same rule the hints, the snap label and the numeric
+    // HUD all follow) and the function's return value is still the cube's and the
+    // chips' alone.  Nothing is drawn at all when both states are default, so the
+    // ordinary viewport is unchanged.
+    void DrawStateBanner( float imgMinX, float imgMinY )
+    {
+        char rows[2][96];
+        ImU32 cols[2];
+        int   n = 0;
+
+        // ── KIWI-UX (ROUND BS): NO PLANE BANNER FOR LINE WORK ────────────────
+        // USER RULING: the construction plane is out of the drawing path, so a chip
+        // announcing one while a LINE tool runs would be announcing a thing that has
+        // no effect — worse than silence, because the user would go looking for it.
+        // The banner now appears only while a PLANAR PLACER is live (rect / circle /
+        // arc / n-gon and the §16b primitives — KiwiCon_PlanePlacement, which round
+        // BS narrowed to exactly those), i.e. only while the plane is doing
+        // something.  An explicit plane set with [Space] still announces itself in
+        // the console when it is set and again at each planar tool start.
+        if ( KiwiCon_PlaneIsExplicit() && KiwiCon_PlanePlacement() )
+        {
+            _snprintf( rows[n], sizeof( rows[n] ), "PLANE: %s", KiwiCon_PlaneDescLive() );
+            cols[n] = IM_COL32( 120, 210, 255, 255 );
+            rows[n][sizeof( rows[n] ) - 1] = 0;
+            ++n;
+        }
+        if ( KiwiSection_Active() )
+        {
+            char zb[32];
+            KiwiUnits_Format( zb, sizeof( zb ), KiwiSection_Level() );
+            _snprintf( rows[n], sizeof( rows[n] ),
+                       KiwiSection_Cutting() ? "SECTION Z=%s" : "SECTION Z=%s  (not cutting)", zb );
+            cols[n] = IM_COL32( 255, 206, 90, 255 );
+            rows[n][sizeof( rows[n] ) - 1] = 0;
+            ++n;
+        }
+        if ( !n )
+            return;
+
+        ImDrawList *dl = ImGui::GetWindowDrawList();
+        float y = imgMinY + 8.0f + 26.0f;                  // just under the chip row
+        for ( int i = 0; i < n; ++i )
+        {
+            const ImVec2 ts = ImGui::CalcTextSize( rows[i] );
+            const ImVec2 a( imgMinX + 8.0f, y );
+            const ImVec2 b( a.x + ts.x + 12.0f, a.y + ts.y + 6.0f );
+            dl->AddRectFilled( a, b, IM_COL32( 18, 18, 22, 205 ), 3.0f );
+            dl->AddRect( a, b, cols[i], 3.0f, 0, 1.0f );
+            dl->AddText( ImVec2( a.x + 6.0f, a.y + 3.0f ), cols[i], rows[i] );
+            y = b.y + 4.0f;
+        }
+    }
+
     bool DrawChips( float imgMinX, float imgMinY )
     {
         ImGui::SetCursorScreenPos( ImVec2( imgMinX + 8.0f, imgMinY + 8.0f ) );
@@ -486,6 +562,36 @@ bool KiwiVP_CameraButtonDown( int btn, int imgX, int imgY, bool shift, bool ctrl
 {
     if ( s_gesture != KG_NONE )
         return false;
+
+    // ══════════════════════════════════════════════════════════════════════════
+    //  KIWI-UX (ROUND BM, ITEM 1b) — THE SECTION GOES FIRST, ABOVE EVERYTHING
+    // ══════════════════════════════════════════════════════════════════════════
+    // Two arms, and both have to outrank every selection and command arm below:
+    //   * WHILE PICKING the whole point of the click is to name the section plane,
+    //     so it must not also change the selection or start a marquee.
+    //   * THE HANDLE is a live grabbable thing that exists with NO command running,
+    //     which is exactly the case every arm below assumes cannot happen — the
+    //     lollipop and gizmo arms are both gated on KiwiCmd_Active().  Without this
+    //     arm a press on the ball would fall through to the no-command click
+    //     grammar and re-select whatever is behind it.
+    // Shift is excluded from the handle arm for the round-U reason the lollipop arm
+    // states: Shift is ADDITIVE everywhere in this editor and never means "grab".
+    if ( btn == 0 && KiwiSection_ClickPick( imgX, imgY ) )
+    {
+        s_lastX      = imgX;
+        s_lastY      = imgY;
+        s_gesture    = KG_CONSUMED;      // own the release; change nothing on it
+        s_gestureBtn = btn;
+        return true;
+    }
+    if ( btn == 0 && !shift && KiwiSection_HandleDown( imgX, imgY ) )
+    {
+        s_lastX      = imgX;
+        s_lastY      = imgY;
+        s_gesture    = KG_SECTION;
+        s_gestureBtn = btn;
+        return true;
+    }
 
     // KIWI-UX (shakeout D, §14): THE GIZMO GOES FIRST, and only while a modal
     // command is live.  The arm below commits the active command on ANY LMB
@@ -662,17 +768,17 @@ bool KiwiVP_CameraButtonDown( int btn, int imgX, int imgY, bool shift, bool ctrl
         // (imgui_shell.cpp:407) and runs the legacy CamWnd_On* handler only when it
         // returns false (imgui_shell.cpp:412).  The KiwiBox_Begin arm at the bottom
         // of this block CLAIMED every LMB press as KG_MARQUEE, unconditionally, with
-        // no test of Alt at all — so CamWnd_OnLButtonDown (camwnd.cpp:4520) was never
+        // no test of Alt at all — so CamWnd_OnLButtonDown (camwnd.cpp:4606) was never
         // called, and with it the whole ported paint chain:
         //     CamWnd_OnLButtonDown
-        //       -> CamWnd_DropModelsToPlane   (camwnd.cpp:3334; nFlags == 1 is a
+        //       -> CamWnd_DropModelsToPlane   (camwnd.cpp:3420; nFlags == 1 is a
         //          "select" combo, so it reaches the Drag_Begin tail at :3368)
         //       -> Drag_Begin                 (drag.cpp:571) whose LABEL_34 arm at
         //          drag.cpp:650 IS the terrain-paint start: Alt held, buttons 1 or 2,
         //          mode sel_brush/sel_addpoint, sub_401D50() — then Patch_Paint_Start
         //          (pmesh.cpp:5994) and d_select_mode = sel_addpoint.
         // The ring the user sees is drawn from the SAME sub_401D50 gate
-        // (camwnd.cpp:2988), which is exactly why it appeared while the stroke did
+        // (camwnd.cpp:3074), which is exactly why it appeared while the stroke did
         // not: the drawing path was reachable and the input path was not.
         //
         // Nothing else was implicated, and each was checked rather than assumed:
@@ -694,7 +800,7 @@ bool KiwiVP_CameraButtonDown( int btn, int imgX, int imgY, bool shift, bool ctrl
         // KiwiVP_CameraMouseMove and KiwiVP_CameraButtonUp both return false while
         // s_gesture == KG_NONE, so the shell's owning branch (imgui_shell.cpp:430/435)
         // falls through to VP_Move -> CamWnd_OnMouseMove -> CamWnd_MouseMoved
-        // (camwnd.cpp:3643 Drag_MouseMoved -> drag.cpp:1424 sub_43E6F0, the paint dab)
+        // (camwnd.cpp:3729 Drag_MouseMoved -> drag.cpp:1424 sub_43E6F0, the paint dab)
         // and to VP_Up -> CamWnd_OnLButtonUp -> Cam_MouseUp -> Drag_MouseUp.  The
         // flags and the hwnd are the shell's own (VP_Flags, imgui_shell.cpp:261), so
         // no synthetic press is fabricated anywhere.
@@ -798,6 +904,10 @@ bool KiwiVP_CameraMouseMove( int imgX, int imgY )
     // handles need nothing here — the command already mapped the cursor for them).
     if ( s_gesture == KG_GIZMO )
         KiwiGizmo_Drag( imgX, imgY );
+    // ROUND BM, ITEM 1b: the section handle maps the CURSOR PIXEL, not the delta —
+    // it is an absolute drag along the plane normal, rebased at the press.
+    if ( s_gesture == KG_SECTION )
+        KiwiSection_HandleDrag( imgX, imgY );
 
     const int dx = imgX - s_lastX;
     const int dy = imgY - s_lastY;
@@ -884,7 +994,25 @@ bool KiwiVP_CameraButtonUp( int btn, int imgX, int imgY )
                            && rmbAbsY <= KVP_RMB_CONFIRM_PIXELS;
     const bool rmbClick = ( s_gesture == KG_LOOK && !s_rmbDrag );
     const bool wantConfirm = rmbNearClick && ( KiwiCmd_Active() != 0 );
-    const bool wantMenu    = rmbClick && !wantConfirm;
+    // ── KIWI-UX (ROUND BG, ITEM 1): THE LEGACY CAMERA CONTEXT MENU IS GONE ──────
+    // USER DIRECTIVE, verbatim: "I want this native right click menu that appears
+    // sometimes when right clicking on an object GONE."  (The screenshot is the
+    // face-picker popup: a material name, then "Select all" / greyed "Deselect
+    // all" — CamWnd_ContextMenu, camwnd.cpp:4283.)
+    //
+    // The TRIGGER is fenced off here, not the menu: CamWnd_ContextMenu and its three
+    // WM_COMMAND handlers stay in camwnd.cpp untouched, ported and reference-intact,
+    // and are simply unreachable from this layer now.  (The other end of the same
+    // directive is fenced at the ported handler itself, camwnd.cpp CamWnd_OnRButtonUp
+    // — that is the arm the LEGACY dispatch used, which is why the menu "appeared
+    // sometimes": a release the modern layer never claimed fell through to it.)
+    //
+    // A bare RMB click in the camera view therefore does nothing at all now; RMB drag
+    // still trucks, Alt+RMB still mouselooks and Shift+RMB still pans, and a no-drag
+    // release with a modal command live is still the CONFIRM above.  The XY and
+    // texture-window menus are untouched — they are different popups and nothing was
+    // reported about either.
+    const bool wantMenu    = false && rmbClick && !wantConfirm;
     // ROUND S: an ALT+MMB release is ALWAYS a view change (the gesture never became
     // an orbit).  Which one is decided by the NET travel: past KVP_SWIPE_PIXELS on
     // the dominant screen axis it is a directional swipe, under it round P's
@@ -917,6 +1045,8 @@ bool KiwiVP_CameraButtonUp( int btn, int imgX, int imgY )
         KiwiLollipop_Release();
         KiwiGizmo_Release();             // shakeout E: drag-to-PAUSE (kiwi_gizmo.h)
     }
+    else if ( s_gesture == KG_SECTION )
+        KiwiSection_HandleUp();          // ROUND BM: ungrab; the plane stays put
     else if ( s_gesture == KG_LOOK || s_gesture == KG_PAN )
         KiwiCam_PanEnd();                // drop the gesture's cached pan scale
     else if ( s_gesture == KG_ORBIT )
@@ -961,8 +1091,14 @@ void KiwiVP_CameraHover( int imgX, int imgY, bool over )
         KiwiHover_Clear();
         KiwiGizmo_Hover( imgX, imgY, false );
         KiwiLollipop_Hover( imgX, imgY, false );   // ROUND K
+        KiwiSection_Hover( imgX, imgY, false );    // ROUND BM
         return;
     }
+
+    // ROUND BM, ITEM 1b: the section handle is hoverable in BOTH arms below — it
+    // exists whether or not a command is running, which is what makes it different
+    // from every other handle in this file.  Done once, here, before the split.
+    KiwiSection_Hover( imgX, imgY, true );
 
     // KIWI-UX Phase 2, spec §5: with a modal command live, an idle move IS the command's
     // preview move (no button is down during a G/extrude drag — the gesture is modal, not
@@ -1007,6 +1143,8 @@ bool KiwiVP_CameraAbort()
         KiwiLollipop_Abort();            // ROUND K — see the release arm above
         KiwiGizmo_Abort();               // exact restore through the command framework
     }
+    else if ( s_gesture == KG_SECTION )
+        KiwiSection_HandleAbort();       // ROUND BM: restore the level at the grab
     else if ( s_gesture == KG_LOOK || s_gesture == KG_PAN )
         KiwiCam_PanEnd();                // shakeout E: drop the cached pan scale
     else if ( s_gesture == KG_ORBIT )
@@ -1069,10 +1207,12 @@ void KiwiVP_CameraTick( bool cursorOver )
         KiwiCam_FlyTick( false, false );
         return;
     }
-    const bool wasd   = ( s_gesture == KG_LOOK );
-    const bool arrows = cursorOver && !ImGuiShell_WantsKeyboard()
-                     && s_gesture == KG_NONE;
-    KiwiCam_FlyTick( wasd, arrows );
+    // KIWI-UX (CLEANUP, C-38): `lookHeld`, not `wasd` — the fly has been arrows-only
+    // since shakeout A, and this flag has always meant "RMB look is held".
+    const bool lookHeld = ( s_gesture == KG_LOOK );
+    const bool arrows   = cursorOver && !ImGuiShell_WantsKeyboard()
+                       && s_gesture == KG_NONE;
+    KiwiCam_FlyTick( lookHeld, arrows );
 }
 
 // ─── overlay (during the ImGui frame) ────────────────────────────────────────
@@ -1125,6 +1265,30 @@ namespace
 
 bool KiwiVP_DrawCameraOverlay( float imgMinX, float imgMinY, float imgW, float imgH )
 {
+    // ══════════════════════════════════════════════════════════════════════════
+    //  KIWI-UX (ROUND BL, ITEM 3) — THE CONSTRUCTION-FACE FILLS, IN THE OVERLAY
+    // ══════════════════════════════════════════════════════════════════════════
+    // USER REPORT, verbatim: *"There is still no light blue plane where a
+    // construction face can be extruded from.  You've failed again!"*
+    //
+    // Six rounds of engine-route submission fixes have not produced a visible fill,
+    // while every element drawn from THIS function — the chips, the snap label, the
+    // value bubble, the view cube, the marquee — appears in the user's own
+    // screenshots of the missing fill.  So the fill is drawn here as well, in screen
+    // space, projected with the editor's one world->image helper.  The engine route
+    // is kept and unchanged (kiwi_region.h); this is additive and unconditional.
+    //
+    // FIRST in the function on purpose: everything below is HUD, and HUD must read
+    // on top of scaffolding.  It draws no ImGui item, so it cannot take the image's
+    // hover from a marquee — the same rule the hints, the snap label and the numeric
+    // HUD all follow, and the return value is still the cube's and the chips' alone.
+    // The depth-test limitation is documented on the declaration and in
+    // RADIANT_KNOWN_ISSUES.  Reached through kiwi_region.h (included above) rather
+    // than through a block-scope extern: an owning header beats a re-declaration,
+    // and it keeps clear of the MSVC namespace-mangling hazard kiwi_uv.cpp
+    // documents (the same ruling CLEANUP B-28 applied to kiwi_numeric.cpp).
+    KiwiRegion_DrawFillsOverlay( imgMinX, imgMinY, imgW, imgH );   // kiwi_region.h:377
+
     DrawMarquee( imgMinX, imgMinY );     // under the chips
     DrawSwipeHint( imgMinX, imgMinY, imgW, imgH );   // ROUND S — Alt+MMB only
 
@@ -1176,5 +1340,8 @@ bool KiwiVP_DrawCameraOverlay( float imgMinX, float imgMinY, float imgW, float i
     // OR-ed with the chips' answer: either one under the cursor drops the hover.
     const bool cubeHot = KiwiViewCube_Draw( imgMinX, imgMinY, imgW, imgH );
     const bool chipHot = DrawChips( imgMinX, imgMinY );
+    // ROUND BP: AFTER the chips, so it sits under them and over the image.  Claims
+    // no hover (ImDrawList only), so it is not in the return value.
+    DrawStateBanner( imgMinX, imgMinY );
     return cubeHot || chipHot;
 }

@@ -86,6 +86,31 @@
 class KiwiEditorCommand;
 
 #define KPRIM_MIN_EXTENT     1.0f   // world units — below this the gesture is a no-op
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  KIWI-UX (ROUND BK, ITEM 5) — THE AXIS-LOCKED CREATION HEIGHT
+// ═══════════════════════════════════════════════════════════════════════════
+// USER DIRECTIVE, verbatim: *"When a cylinder (or similar 3D object) is created
+// from a snapped camera position that cannot possibly portray any Z movement (or
+// X/Y depending on axis/height), make it so the 3D object is just automatically
+// created with a 5ft height, but the lollipop extrusion for the top side (the one
+// that was facing the locked camera) is active and ready to be pulled on whenever
+// the camera is turned.  (This mimics Plasticity.)"*
+//
+// WHAT IT REPLACES.  Round AI, ITEM 2 gave the height stage a VIEW GATE
+// (KiwiCam_AxisPortrayable, kiwi_camera.h): looking straight down the height axis,
+// the cursor mapping is degenerate, so the height is HELD at 0 and the commit
+// click is REFUSED with a console line telling the user to orbit.  That was the
+// right answer to "the height was already -140 yd" and it is a dead end to the
+// user standing in a top view who wants a box: the tool tells them to go away and
+// come back.  This round completes the gesture instead — 5 ft of height, landed,
+// with the face push already armed on the cap they are looking at.
+//
+// 5 ft = 60 UNITS.  A Radiant/CoD4 world unit is one inch (kiwi_units.h carries
+// the whole ladder and KiwiUnits_Format prints in feet), so five feet is 5 * 12.
+// It is written as a product rather than as `60.0f` so the intent survives a
+// future units change.
+#define KPRIM_AUTO_HEIGHT   ( 5.0f * 12.0f )   // 5 ft, in world units (inches)
 #define KPRIM_CYL_SIDES_DEF  16     // brush.cpp:3589 (Brush_MakePhysCylinder)
 #define KPRIM_CYL_SIDES_MIN  3      // brush.cpp:3383 rejects < 3
 // -- KIWI-UX (ROUND AF, ITEM 7): 32 -> 64 --------------------------------

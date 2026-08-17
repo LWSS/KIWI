@@ -20,10 +20,18 @@ def link_data(root,game):
   except OSError:subprocess.run(['cmd.exe','/c','mklink','/J',str(dest),str(source)],check=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
 def stage(root,fixture,game):
  link_data(root,game)
- maps=root/'maps';maps.mkdir(parents=True);target=maps/fixture.name;shutil.copy2(fixture,target)
- for ext in ('.d3dprt','.d3dpoly'):
-  side=fixture.with_suffix(ext)
-  if side.is_file():shutil.copy2(side,maps/side.name)
+ maps=root/'maps';maps.mkdir(parents=True);target=maps/'fixture.d3dbsp';shutil.copy2(fixture,target)
+ # These are inputs to retail lighting, not outputs.  In particular,
+ # .grid_auto is produced by Cod4Map and must be identical on both sides or
+ # the comparison silently exercises two different light-grid paths.
+ for ext in ('.d3dprt','.d3dpoly','.grid_auto','.grid_not'):
+  candidates=[fixture.with_suffix(ext)]
+  # Saved pre-lighting fixtures are commonly named map.unlit.d3dbsp while
+  # their Cod4Map sidecars retain the map.grid_auto/map.d3dprt basename.
+  if fixture.stem.lower().endswith('.unlit'):
+   candidates.append(fixture.with_name(fixture.stem[:-len('.unlit')]+ext))
+  side=next((p for p in candidates if p.is_file()),None)
+  if side:shutil.copy2(side,maps/('fixture'+ext))
  return target
 def run(exe,root,maparg,args,timeout):
  try:
@@ -61,11 +69,14 @@ def main():
  for e in (a.retail,a.candidate):
   if not e.is_file():raise SystemExit(f'executable not found: {e}')
  with tempfile.TemporaryDirectory(prefix='cod4rad_diff_') as td:
-  base=Path(td);rr=base/'retail';cr=base/'candidate';rt=stage(rr,fixture,game);ct=stage(cr,fixture,game);maparg='maps/'+fixture.stem
-  report={'fixture':str(fixture),'args':a.arg,'retail':run(a.retail,rr,maparg,a.arg,a.timeout),'candidate':run(a.candidate,cr,maparg,a.arg,a.timeout),'temporary_root':str(base),'retail_bsp':lumps(rt),'candidate_bsp':lumps(ct)};report['comparison']=compare(report['retail_bsp'],report['candidate_bsp'])
+  base=Path(td);rr=base/'retail';cr=base/'candidate';rt=stage(rr,fixture,game);ct=stage(cr,fixture,game);maparg='maps/fixture'
+  report={'fixture':str(fixture),'args':a.arg,'retail':run(a.retail,rr,maparg,a.arg,a.timeout),'candidate':run(a.candidate,cr,maparg,a.arg,a.timeout),'temporary_root':str(base),'retail_bsp':lumps(rt),'candidate_bsp':lumps(ct)}
+  runs_ok=report['retail'].get('exit')==0 and report['candidate'].get('exit')==0
+  report['comparison']=compare(report['retail_bsp'],report['candidate_bsp']) if runs_ok else {'runs_succeeded':False,'identical_bytes':False,'size_delta':None,'different_lumps':[]}
   kept=keep_outputs(base) if a.keep else None
   if kept:report['kept_root']=str(kept)
   print(json.dumps(report,indent=2))
   if a.report:a.report.write_text(json.dumps(report,indent=2)+'\n',encoding='utf8')
   if kept:print(f'kept staged outputs: {kept}')
+  if not runs_ok:raise SystemExit(1)
 if __name__=='__main__':main()

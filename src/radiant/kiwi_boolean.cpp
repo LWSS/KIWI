@@ -20,12 +20,14 @@
 #include <gfx_d3d/r_rendercmds.h>   // MaterialTechniqueType, TECHNIQUE_UNLIT
 
 #include "kiwi_boolean.h"
+#include "kiwi_csg.h"                 // KIWI-UX (CLEANUP, B-10): KiwiCsg_BrushUsable
 #include "kiwi_boxselect.h"         // ROUND AA, ITEM 9 — KiwiBox_CollectBrushes
 #include "kiwi_command.h"
 #include "kiwi_lines.h"
 #include "kiwi_pick.h"
 #include "kiwi_selection.h"
 #include "kiwi_split.h"
+#include "kiwi_vec.h"     // KIWI-UX (CLEANUP, A-15): the one spelling of Dot3/Sub3/...
 
 #include <math.h>
 #include <stdint.h>
@@ -33,16 +35,16 @@
 #include <vector>
 
 // ── ported entry points (each verified against its DEFINITION) ──────────────
-extern camera_s   *Ed_Camera();                                               // camwnd.cpp:153
+extern camera_s   *Ed_Camera();                                               // camwnd.cpp:156
 extern int         Sys_Printf( const char *fmt, ... );                        // win_qe3.cpp
 extern int         g_nUpdateBits;                                             // 0x25D5A74 (mainfrm.cpp)
-extern selbrush_t *Brush_AddToList( brush_t *def, entity_s *owner );          // brush.cpp:656  (0x475980)
-extern void        Brush_AddToList2( selbrush_t *b );                         // brush.cpp:910  (0x4765a0)
-extern void        Brush_Free( selbrush_t *b );                               // brush.cpp:982  (0x475ba0)
-extern void        Select_Deselect( int bAlsoFreeFaces );                     // select.cpp:1428 (0x48E800)
+extern selbrush_t *Brush_AddToList( brush_t *def, entity_s *owner );          // brush.cpp:667  (0x475980)
+extern void        Brush_AddToList2( selbrush_t *b );                         // brush.cpp:921  (0x4765a0)
+extern void        Brush_Free( selbrush_t *b );                               // brush.cpp:993  (0x475ba0)
+extern void        Select_Deselect( int bAlsoFreeFaces );                     // select.cpp:1445 (0x48E800)
 extern void        Select_Brush( selbrush_t *brush, char some_overwrite,
                                  char bStatus, char center_grid_on_selection ); // select.cpp:884
-extern void        Radiant_ExecCommand( unsigned int cmdId );                 // mainfrm.cpp:3949
+extern void        Radiant_ExecCommand( unsigned int cmdId );                 // mainfrm.cpp:4083
 // ROUND N: the tool is consumed by a difference, and the tool is NOT on
 // selected_brushes (it is picked with PICKF_EXCLUDE_SELECTED), so the bracket
 // head's Undo_AddBrushList never cloned it.  These are what cover it by hand —
@@ -112,23 +114,17 @@ namespace
     // framework's own 288 was sized with (kiwi_command.cpp).
     const int KBOOL_LINE_HEADROOM = 96;
 
-    inline void Copy3( const float *a, float *o ) { o[0]=a[0]; o[1]=a[1]; o[2]=a[2]; }
 
     // A brush instance this verb may legally consume.  The same two tests every
     // other CSG path in this layer runs (kiwi_csg.cpp CsgUsable, kiwi_split.cpp
     // Splittable), which are in turn the ported cores' own: csg.cpp:572's
     // validation loop refuses patches and fixed-size entities outright.
-    bool Usable( const selbrush_t *b )
+    // KIWI-UX (CLEANUP, B-10): the four shared tests are KiwiCsg_BrushUsable
+    // (kiwi_csg.h); the `faceCount >= 4` on top is THIS verb's own — a solid with
+    // fewer than four planes cannot bound a volume to carve with — and stays here.
+    inline bool Usable( const selbrush_t *b )
     {
-        if ( !b || !b->def || b->patch )
-            return false;
-        const entity_s *owner = b->owner;
-        if ( !owner || !owner->def )
-            return false;
-        const entity_s *ownerDef = owner->def;
-        if ( !ownerDef->eclass || ownerDef->eclass->fixedsize )
-            return false;
-        return b->def->faceCount >= 4;
+        return KiwiCsg_BrushUsable( b ) && b->def->faceCount >= 4;
     }
 
     // Cheap bounds rejection: two brushes that do not overlap cannot interact, and
@@ -166,7 +162,7 @@ namespace
     // leaves the map exactly as it found it.
     //
     // ── KIWI-UX (ROUND T): WHAT THE HOLE'S WALLS ARE TEXTURED WITH ──────────
-    // Every carve plane goes through KiwiSplit_DefByPlane, which since round T
+    // Every carve plane goes through KiwiSplit_DefByPlaneCarve, which since round T
     // seeds its template face from kiwi_material.h's rules instead of stamping
     // caulk.  Those rules are given `remainder` — a descendant of the TARGET —
     // so the answer is kiwi_material.h R4, stated positively: **the hole belongs
@@ -200,9 +196,14 @@ namespace
     // the only AL edit to kiwi_split.cpp was the fill NORMAL, TRAP 4).  The defect
     // is older and this shape is simply the one that exposes it.
     //
-    // `KiwiSplit_DefByPlane` is ALL-OR-NOTHING: a §19 failure on EITHER half frees
-    // BOTH and returns false, and this loop turned that into KBOOL_REFUSED for the
-    // WHOLE TARGET.  But the two halves do not have the same standing here:
+    // KIWI-UX (CLEANUP, A-8): stated as HISTORY.  `KiwiSplit_DefByPlane` IS
+    // all-or-nothing — a §19 failure on EITHER half frees BOTH and returns false —
+    // and this loop USED to call it and turn that into KBOOL_REFUSED for the WHOLE
+    // TARGET.  Round AR moved the loop to `KiwiSplit_DefByPlaneCarve`, which gates
+    // only the front half and lets a carried back half through (kiwi_split.h §19 IS
+    // A GATE ON WHAT GETS LANDED); the loop counts and reports it instead of
+    // refusing.  The reasoning that got there, because it still governs the rule:
+    // the two halves do not have the same standing here.
     //
     //   * the FRONT half is a PIECE THAT WOULD BE LANDED.  A sliver front (V3
     //     "face collapsed", V4 "zero-area face" under KVALID_MIN_FACE_AREA = 0.1
@@ -254,10 +255,6 @@ namespace
     // reason s_carveSliverDrops is: the mapper is told when the boolean had to
     // work around something, even though nothing invalid was landed.
     int  s_carveCarried    = 0;
-    // KiwiBool_WouldCarve is a DRY RUN and the auto-bool asks it every frame the
-    // cursor moves, so the reporting must be silenced around it or one hover would
-    // be a hundred console lines a second.  Set/cleared by that function alone.
-    bool s_carveQuiet      = false;
 
     void KiwiBool_ResetCarveReport()
     {
@@ -376,7 +373,9 @@ namespace
             if ( backRefused )
             {
                 ++s_carveCarried;
-                if ( !s_carveQuiet && s_carveCarried <= KBOOL_REFUSE_REPORT_MAX )
+                // KIWI-UX (CLEANUP, A-16): the dry-run suppression went with the
+                // by-def cascade; every caller left is a real commit, so report.
+                if ( s_carveCarried <= KBOOL_REFUSE_REPORT_MAX )
                     Sys_Printf( "Boolean: tool plane %i left the running intersection "
                                 "outside the validity gate (%s) — carried on, because "
                                 "that piece is an intermediate and is never landed.\n",
@@ -519,9 +518,9 @@ namespace
                     // the whole gesture.  Bounded to KBOOL_REFUSE_REPORT_MAX lines
                     // per operation so a 40-segment arch cannot flood the console.
                     ++s_carveRefusals;
-                    if ( s_carveQuiet )
-                        { /* dry run — count only */ }
-                    else if ( s_carveRefusals <= KBOOL_REFUSE_REPORT_MAX )
+                    // KIWI-UX (CLEANUP, A-16): dry-run suppression removed with
+                    // the by-def cascade — every caller left is a real commit.
+                    if ( s_carveRefusals <= KBOOL_REFUSE_REPORT_MAX )
                         Sys_Printf( "Boolean: tool %i could not cut piece %i — %s.  "
                                     "That cut was skipped; the rest of the "
                                     "difference still ran.\n",
@@ -599,9 +598,9 @@ namespace
     {
         if ( !def || !def->faces )
             return;
-        const camera_s *cam = Ed_Camera();   // ROUND AA, ITEM 2 — the orient reference
-        if ( !cam )
-            return;
+        // ROUND AA, ITEM 2 — the orient reference.  KIWI-UX (CLEANUP, A-21): no
+        // null test; Ed_Camera never returns NULL (camwnd.cpp:153).
+        const camera_s *cam = Ed_Camera();
 
         static const float s_neutral[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
         static const float s_white[4]   = { 1.0f, 1.0f, 1.0f, 1.0f };
@@ -1052,24 +1051,14 @@ namespace
         // than tinted in difference mode: they already carry the §18 selection tint,
         // and a second wash over it would only say "still selected".
         //
-        // ── KIWI-UX (ROUND AA, ITEM 9): TWO SHARED BUDGETS, N TOOLS ─────────
-        // Both the fill and the outline used to be sized by "one tool plus the
-        // targets", and a tool SET breaks both assumptions:
-        //
-        //   * FILLS.  KBOOL_MAX_FILL (8) is a whole-frame budget, not a per-role
-        //     one, because a fill costs one R_AddRenderCmdDrawTris PER FACE.  The
-        //     TOOLS spend it FIRST — they are the operand the preview is about and
-        //     the thing the user is actively building — and a union's targets take
-        //     whatever is left.  Past the budget an operand is still OUTLINED, so
-        //     nothing goes invisible; it just stops being tinted.
-        //
-        //   * OUTLINES.  The 192-segment line batch is shared with everything else
-        //     the frame draws (kiwi_command.cpp KiwiCmd_DrawWorld) and a box costs
-        //     24 segments, so it holds about EIGHT solids.  There is no per-role cap
-        //     here because KiwiLines_Add already reports the budget honestly:
-        //     OutlineBrush returns false the moment it cannot fit another segment
-        //     and this bails.  The ORDER is what matters, and it is tools first for
-        //     the same reason the fills are.
+        // ── TWO SHARED BUDGETS, N TOOLS (round AA, item 9) ──────────────────
+        // KIWI-UX (CLEANUP, A-7): the round-AA sizing bullets are superseded by the
+        // round-AF block below and are gone with their stale counts.  What survives
+        // them: KBOOL_MAX_FILL is a WHOLE-FRAME fill budget, not a per-role one,
+        // because a fill costs one R_AddRenderCmdDrawTris PER FACE, and past it an
+        // operand is still OUTLINED rather than invisible; and the outline arm needs
+        // no cap of its own because KiwiLines_Add reports the shared line batch
+        // honestly — OutlineBrush returns false the moment a segment will not fit.
         //
         // The HOVER outline is drawn in BOTH stages now (it used to be stage 1
         // only), because in the live stage it is what says which solid the next
@@ -1086,7 +1075,7 @@ namespace
         //
         // BOTH round-AA budgets above were sized against ONE tool and both fired,
         // in pick order, so the operand that vanished was always the newest one:
-        //   * the FILL cliff at 8 (KBOOL_MAX_FILL), and
+        //   * the FILL cliff at KBOOL_MAX_FILL, and
         //   * the OUTLINE cliff at 288 / 24 = TWELVE (the shared line batch), which
         //     is the count the report names to the brush.
         // Worse, the outline arm `return`ed on the first refusal, which also killed
@@ -1591,228 +1580,3 @@ KiwiEditorCommand *KiwiBool_CommandForId( int commandId )
     return 0;
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-//  ROUND AF, ITEM 2 — THE CASCADE, LENT TO THE REGION EXTRUDE
-// ═════════════════════════════════════════════════════════════════════════════
-// See kiwi_boolean.h for the contract (who owns the tool, who owns the bracket)
-// and for why this is the SAME difference rather than a second one.  Everything
-// below is a driver over CarveTarget; not one line of the carve is re-derived.
-namespace
-{
-    // Every CSG-usable brush on either display list, resolved ONCE, exactly as
-    // DoDifference resolves its tool set — so the carve loop is a pure computation
-    // over a fixed array and can never trip over a node freed between two targets.
-    void CollectCarveTargets( const brush_t *toolDef, std::vector<selbrush_t *> *out )
-    {
-        out->clear();
-        selbrush_t *lists[2] = { &active_brushes, &selected_brushes };
-        for ( int L = 0; L < 2; ++L )
-        {
-            selbrush_t *head = lists[L];
-            for ( selbrush_t *b = head->next; b && b != head; b = b->next )
-            {
-                if ( !Usable( b ) || !b->def )
-                    continue;
-                if ( !BoundsOverlap( b->def, toolDef ) )
-                    continue;
-                out->push_back( b );
-            }
-        }
-    }
-}
-
-bool KiwiBool_PointInSolid( const float p[3] )
-{
-    if ( !p )
-        return false;
-    selbrush_t *lists[2] = { &active_brushes, &selected_brushes };
-    for ( int L = 0; L < 2; ++L )
-    {
-        selbrush_t *head = lists[L];
-        for ( selbrush_t *b = head->next; b && b != head; b = b->next )
-        {
-            const brush_t *def = b->def;
-            if ( !Usable( b ) || !def || !def->faces )
-                continue;
-            // Bounds first: eight compares instead of faceCount plane evaluations
-            // for the overwhelming majority that cannot contain the point.
-            if ( p[0] < def->mins[0] || p[0] > def->maxs[0]
-              || p[1] < def->mins[1] || p[1] > def->maxs[1]
-              || p[2] < def->mins[2] || p[2] > def->maxs[2] )
-                continue;
-            bool inside = true;
-            for ( int f = 0; f < def->faceCount && inside; ++f )
-            {
-                const plane_t &pl = def->faces[f].plane;
-                // The editor's own convention: outward normals, interior at
-                // n.p <= dist (kiwi_validity.h V6 states it in those words).  The
-                // epsilon admits a point exactly ON a face, which is what a region
-                // drawn on that face and pushed inward produces.
-                const float d = pl.normal[0] * p[0] + pl.normal[1] * p[1]
-                              + pl.normal[2] * p[2] - pl.dist;
-                if ( d > 0.01f )
-                    inside = false;
-            }
-            if ( inside )
-                return true;
-        }
-    }
-    return false;
-}
-
-bool KiwiBool_WouldCarve( brush_t *toolDef )
-{
-    if ( !toolDef )
-        return false;
-    std::vector<selbrush_t *> targets;
-    CollectCarveTargets( toolDef, &targets );
-    // KIWI-UX (ROUND AQ, ITEM 7): the round's per-cut reporting must not speak for
-    // a DRY RUN — this function is asked once per hovered frame.
-    struct quietScope_t { quietScope_t()  { s_carveQuiet = true;  }
-                          ~quietScope_t() { s_carveQuiet = false; } } quiet;
-    for ( size_t i = 0; i < targets.size(); ++i )
-    {
-        std::vector<brush_t *> pieces;
-        const char *why = "unknown";
-        brush_t *const tools[1] = { toolDef };
-        const carveResult_t r = CarveTarget( targets[i]->def, tools, 1, &pieces, &why );
-        // The DRY RUN allocates: CarveTarget clones, because that is how a
-        // plane-defined brush is asked "what would be left".  Everything it made is
-        // freed right here — nothing is landed and nothing is linked, so this is
-        // exactly the "rejection is free" property kiwi_extrude.h relies on.
-        FreeDefs( &pieces );
-        if ( r == KBOOL_CARVED )
-            return true;
-    }
-    return false;
-}
-
-int KiwiBool_DifferenceByDef( brush_t *toolDef, int *outPieces,
-                              int *outMissed, int *outRefused )
-{
-    if ( outPieces )  *outPieces  = 0;
-    if ( outMissed )  *outMissed  = 0;
-    if ( outRefused ) *outRefused = 0;
-    if ( !toolDef )
-        return 0;
-
-    struct carve_t
-    {
-        selbrush_t            *node;
-        std::vector<brush_t *> pieces;
-    };
-    std::vector<carve_t>      carves;
-    std::vector<selbrush_t *> targets;
-    CollectCarveTargets( toolDef, &targets );
-
-    int missed  = 0;
-    int refused = 0;
-
-    // BUILD EVERYTHING FIRST, land nothing — kiwi_boolean.h's UNDO rule, and the
-    // reason a refusal here costs the map nothing.
-    //
-    // ROUND AO, ITEM 3: the cave carve gets the sliver tolerance for free (it is
-    // the same CarveTarget), and its own zero + report so the two entry points
-    // never report each other's drops.  KIWI-UX (ROUND AQ, ITEM 7): and the same
-    // is true of the per-cut refusal account.
-    KiwiBool_ResetCarveReport();
-
-    for ( size_t i = 0; i < targets.size(); ++i )
-    {
-        selbrush_t *node = targets[i];
-        if ( !Sel_BrushLive( node ) )
-            continue;
-
-        carves.push_back( carve_t() );
-        carves.back().node = node;
-
-        const char *why = "unknown";
-        brush_t *const tools[1] = { toolDef };
-        const carveResult_t r = CarveTarget( node->def, tools, 1,
-                                             &carves.back().pieces, &why );
-        if ( r == KBOOL_CARVED )
-            continue;
-
-        carves.pop_back();
-        if ( r == KBOOL_MISS )
-        {
-            ++missed;
-            // KIWI-UX (ROUND AQ, ITEM 7): name the gate here too — same report,
-            // same reason, and the auto-carve path is where a mapper DRAGGING a
-            // shape into a solid actually lands.
-            Sys_Printf( "Carve: one brush left untouched — %s.\n",
-                        ( why && *why ) ? why : "the tool did not reach it" );
-        }
-        else
-        {
-            // KBOOL_REFUSED includes "the tool swallows this brush whole", which for
-            // a cavity means the prism is bigger than the thing it is being cut into.
-            // That is a real refusal and it is reported, not silently obeyed —
-            // deleting a brush the user was trying to dent is the worst possible
-            // reading of the gesture.
-            ++refused;
-            Sys_Printf( "Carve: one brush left untouched — %s.\n",
-                        why ? why : "invalid geometry" );
-        }
-    }
-
-    if ( carves.empty() )
-    {
-        if ( outMissed )  *outMissed  = missed;
-        if ( outRefused ) *outRefused = refused;
-        return 0;
-    }
-
-    if ( s_carveSliverDrops > 0 )                 // ROUND AO, ITEM 3
-        Sys_Printf( "Carve: %i fragment(s) came out below the validity gate and "
-                    "were dropped rather than refusing the whole carve.\n",
-                    s_carveSliverDrops );
-    if ( s_carveRefusals > 0 )                    // KIWI-UX (ROUND AQ, ITEM 7)
-        Sys_Printf( "Carve: %i individual cut(s) were refused and skipped — the "
-                    "cavity may be incomplete where those planes fell.\n",
-                    s_carveRefusals );
-    if ( s_carveCarried > 0 )                     // KIWI-UX (ROUND AR, ITEM 2)
-        Sys_Printf( "Carve: %i running intersection(s) were outside the validity "
-                    "gate and were carried on anyway (intermediates, never "
-                    "landed).\n", s_carveCarried );
-
-    // ── COVER THE TARGETS FOR UNDO ──────────────────────────────────────────
-    // The bracket head is Undo_AddBrushList( &selected_brushes ) (KiwiCmd_UndoBegin)
-    // and a brush the prism happens to penetrate is NOT on that list in general, so
-    // nothing cloned it.  Freeing it without this would make Ctrl+Z bring the carved
-    // pieces back and leave the original gone forever.  Same pair, same order, as
-    // kiwi_boolean.cpp's own tool cover (entity first).
-    //
-    // ALL of the covers run BEFORE any landing or freeing, so the record's brush
-    // section is contiguous — undo.cpp:539 warns when brushes are added after an
-    // entity, and interleaving cover/land/free per target would produce exactly that.
-    for ( size_t c = 0; c < carves.size(); ++c )
-    {
-        entity_s *owner = carves[c].node->def->owner;
-        if ( owner && owner->eclass && owner->eclass->fixedsize )
-            Undo_AddEntity( (int)(intptr_t)owner );
-        Undo_AddBrush( (entity_brush_s *)carves[c].node->def );
-    }
-
-    int landed = 0;
-    for ( size_t c = 0; c < carves.size(); ++c )
-    {
-        carve_t &cv = carves[c];
-        // ORDER (kiwi_split.h UNDO): land every piece FIRST, then free the source,
-        // so the owner entity never transiently drops to zero brushes.
-        for ( size_t p = 0; p < cv.pieces.size(); ++p )
-        {
-            selbrush_t *inst = Brush_AddToList( cv.pieces[p], cv.node->owner );
-            if ( inst->next || inst->prev )
-                Com_Error( ERR_FATAL, "Brush_AddToList: already linked" );
-            Brush_AddToList2( inst );
-            ++landed;
-        }
-        Brush_Free( cv.node );
-    }
-
-    if ( outPieces )  *outPieces  = landed;
-    if ( outMissed )  *outMissed  = missed;
-    if ( outRefused ) *outRefused = refused;
-    return (int)carves.size();
-}

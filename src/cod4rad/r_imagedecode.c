@@ -526,7 +526,7 @@ static char s_assertDisable_LoadIWI_name;
 Image_ValidateHeader
 
 Checks that the image file starts with the "IWi" magic bytes and
-has version 5. Returns 1 on success, 0 on failure (and prints an
+has CoD4 version 6. Returns 1 on success, 0 on failure (and prints an
 error message via Com_Printf).
 ================
 */
@@ -542,10 +542,10 @@ int Image_ValidateHeader(void *fileData, char *path)
     }
 
     version = bytes[3];
-    if (version != 5)
+    if (version != 6)
     {
         Com_Printf("^1ERROR: image '%s' is version %i but should be %i\n",
-                 path, (int)version, 5);
+                 path, (int)version, 6);
         return 0;
     }
 

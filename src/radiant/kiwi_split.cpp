@@ -35,6 +35,7 @@
 #include "kiwi_snap.h"                      // ROUND S: KiwiSnap_IsGeometry
 #include "kiwi_units.h"                     // ROUND S: Units_ToDisplay (the HUD offset)
 #include "kiwi_validity.h"
+#include "kiwi_vec.h"     // KIWI-UX (CLEANUP, A-15): the one spelling of Dot3/Sub3/...
 
 #include <math.h>
 #include <stdint.h>
@@ -50,12 +51,12 @@ extern int         g_nUpdateBits;                                             //
 
 extern void        Brush_SplitBrushByFace( brush_t *in, face_t *face,
                                            brush_t **front, brush_t **back );  // brush.cpp:4596 (0x471960)
-extern selbrush_t *Brush_AddToList( brush_t *def, entity_s *owner );           // brush.cpp:656 (0x475980)
-extern void        Brush_AddToList2( selbrush_t *b );                          // brush.cpp:910 (0x4765a0)
-extern void        Brush_Free( selbrush_t *b );                                // brush.cpp:982 (0x475ba0)
-extern void        Brush_Free_R( brush_t *def );                               // brush.cpp:689 (0x475af0)
+extern selbrush_t *Brush_AddToList( brush_t *def, entity_s *owner );           // brush.cpp:667 (0x475980)
+extern void        Brush_AddToList2( selbrush_t *b );                          // brush.cpp:921 (0x4765a0)
+extern void        Brush_Free( selbrush_t *b );                                // brush.cpp:993 (0x475ba0)
+extern void        Brush_Free_R( brush_t *def );                               // brush.cpp:700 (0x475af0)
 extern void        Entity_UnlinkBrush( brush_t *b );                           // entity.cpp:465 (0x485020)
-extern void        Select_Deselect( int bAlsoFreeFaces );                      // select.cpp:1428 (0x48E800)
+extern void        Select_Deselect( int bAlsoFreeFaces );                      // select.cpp:1445 (0x48E800)
 extern void        Select_Brush( selbrush_t *brush, char some_overwrite,
                                  char bStatus, char center_grid_on_selection ); // select.cpp:884
 
@@ -130,28 +131,6 @@ namespace
     const float KSPLIT_SPAN_SCALE  = 1.6f;    // half-length along the line
     const float KSPLIT_DEPTH_SCALE = 2.4f;    // sweep depth away from the camera
 
-    inline float Dot3( const float *a, const float *b )
-    { return a[0]*b[0] + a[1]*b[1] + a[2]*b[2]; }
-    inline void Copy3( const float *a, float *o ) { o[0]=a[0]; o[1]=a[1]; o[2]=a[2]; }
-    inline void Sub3( const float *a, const float *b, float *o )
-    { o[0]=a[0]-b[0]; o[1]=a[1]-b[1]; o[2]=a[2]-b[2]; }
-    inline void Mad3( const float *a, const float *d, float s, float *o )
-    { o[0]=a[0]+d[0]*s; o[1]=a[1]+d[1]*s; o[2]=a[2]+d[2]*s; }
-    inline void Cross3( const float *a, const float *b, float *o )
-    {
-        o[0] = a[1]*b[2] - a[2]*b[1];
-        o[1] = a[2]*b[0] - a[0]*b[2];
-        o[2] = a[0]*b[1] - a[1]*b[0];
-    }
-    inline float Len3( const float *a ) { return sqrtf( Dot3( a, a ) ); }
-    bool Norm3( float *v )
-    {
-        const float l = Len3( v );
-        if ( !( l > 1.0e-6f ) )
-            return false;
-        v[0] /= l; v[1] /= l; v[2] /= l;
-        return true;
-    }
 
     // The plane through three points, as (normal, dist) with the interior on the
     // n·p <= d side of nothing in particular — this is only ever used for SIDE
@@ -257,58 +236,20 @@ namespace
     // is refused for being too fine.
     const int KCUT_MAX_FENCE = 64;
 
+    // KIWI-UX (CLEANUP, PickLineAt): the scan moved to KiwiCon_PickSegmentAt
+    // (kiwi_construct.h) — kiwi_dupe.cpp had a verbatim second copy of it under a
+    // different payload.  What stays here is the payload: the cut's cutPick_t,
+    // which is ranked against a brush FACE and a brush EDGE pick a few lines
+    // below and so has to carry a kind and a pixel distance.
     bool PickLineAt( int imgX, int imgY, cutPick_t *out )
     {
-        if ( !out || !KiwiCon_ShowConstruction() )
-            return false;                       // hidden geometry is not clickable
-
-        const float curX = (float)imgX;
-        const float curY = (float)imgY;
-        cutPick_t   best;
-        float       bestDist = 0.0f;
-        bool        have     = false;
-
-        const int count = KiwiCon_Count();
-        for ( int i = 0; i < count; ++i )
-        {
-            const kconObject_t *o = KiwiCon_At( i );
-            // ROUND X, ITEM 11: a hidden object is inert — it is not drawn, so it
-            // must not be cuttable either (kiwi_construct.h HIDDEN).
-            if ( !o || o->hidden )
-                continue;
-            const int segs = KiwiCon_SegmentCount( *o );
-            for ( int s = 0; s < segs; ++s )
-            {
-                float wa[3], wb[3], ax, ay, bx, by;
-                if ( !KiwiCon_SegmentWorld( *o, s, wa, wb ) )
-                    break;
-                if ( !Pick_WorldToImage( wa, &ax, &ay ) || !Pick_WorldToImage( wb, &bx, &by ) )
-                    continue;                   // an end behind the eye — skip whole
-                const float ex = bx - ax, ey = by - ay;
-                const float len2 = ex * ex + ey * ey;
-                float t = 0.0f;
-                if ( len2 > 1.0e-6f )
-                {
-                    t = ( ( curX - ax ) * ex + ( curY - ay ) * ey ) / len2;
-                    if ( t < 0.0f ) t = 0.0f;
-                    if ( t > 1.0f ) t = 1.0f;
-                }
-                const float dx = ax + ex * t - curX;
-                const float dy = ay + ey * t - curY;
-                const float d  = sqrtf( dx * dx + dy * dy );
-                if ( d > KCON_LINE_PIXELS )
-                    continue;
-                if ( have && d >= bestDist )
-                    continue;
-                have = true;  bestDist = d;
-                best.kind = KCUT_SRC_LINE;
-                best.object = i;  best.segment = s;
-                Copy3( wa, best.a );  Copy3( wb, best.b );
-                best.dist = d;
-            }
-        }
-        if ( !have )
+        if ( !out )
             return false;
+        cutPick_t best;
+        if ( !KiwiCon_PickSegmentAt( imgX, imgY, best.a, best.b,
+                                     &best.object, &best.segment, &best.dist ) )
+            return false;
+        best.kind = KCUT_SRC_LINE;
         *out = best;
         return true;
     }
@@ -444,7 +385,14 @@ namespace
     // than kiwi_lines (which pins alpha to 1 — kiwi_lines.h TRAP 2).  It is the
     // same R_AddRenderCmdDrawTris + MATERIAL_COLOR bracket DrawQuad below and
     // kiwi_region.cpp's region fills already use.
-    const float KSPLIT_DISC_PIX  = 15.0f;   // 2.5x KSNAP_RING_PIX (kiwi_snap.cpp:74)
+    // KIWI-UX (CLEANUP, A-29): this WAS `15.0f  // 2.5x KSNAP_RING_PIX
+    // (kiwi_snap.cpp:74)` — a copied number with an already-stale cite, in a file
+    // that uses the published accessors correctly 1900 lines further down
+    // (:2383).  kiwi_snap.h publishes KiwiSnap_RingPixels() precisely "so a
+    // caller can match them exactly rather than copying numbers that then
+    // drift", so only the RATIO lives here now and the radius is computed at the
+    // use site.
+    const float KSPLIT_DISC_SCALE = 2.5f;   // of KiwiSnap_RingPixels() — see above
     const int   KSPLIT_DISC_SEGS = 24;      // reads round at 15 px; 22 indices*3
     // The HOVER accent, at the sweep quad's own alpha, so the two previews read as
     // one language.  KSPLIT_HOT_COL + KSPLIT_PLANE_RGBA[3].
@@ -459,8 +407,10 @@ namespace
         static const float s_neutral[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
         static const float s_white[4]   = { 1.0f, 1.0f, 1.0f, 1.0f };
 
+        // KIWI-UX (CLEANUP, A-21): no null test — Ed_Camera never returns NULL
+        // (camwnd.cpp:153); only the degenerate radius is a real refusal.
         const camera_s *cam = Ed_Camera();
-        if ( !cam || !( radius > 0.0f ) )
+        if ( !( radius > 0.0f ) )
             return;
 
         float n[3];
@@ -712,13 +662,22 @@ bool KiwiSplit_PlaneCrossesBrush( const brush_t *def,
 // The subtract in kiwi_boolean.cpp depends on exactly that reading.
 //
 // ── KIWI-UX (ROUND AO, ITEM 3): THE BODY MOVED DOWN ONE LEVEL ───────────────
-// Everything below now lives in `KiwiSplit_DefByPlaneParts`, which reports the
-// two halves SEPARATELY (kiwi_split.h states why a subtract needs that), and
-// this function is the wrapper that reproduces the all-or-nothing contract
-// above EXACTLY — including "on false NOTHING is allocated" and including which
-// half's §19 reason wins (front before back, which is what the short-circuit
-// `&&` it used to be spelled with produced).  The cut and split verbs therefore
-// see no change whatsoever.
+// Everything below now lives in `SplitDefByPlaneBody`, which reports the two
+// halves SEPARATELY, and this function is the wrapper that reproduces the
+// all-or-nothing contract above EXACTLY — including "on false NOTHING is
+// allocated" and including which half's §19 reason wins (front before back,
+// which is what the short-circuit `&&` it used to be spelled with produced).
+// The cut and split verbs therefore see no change whatsoever.
+// KIWI-UX (CLEANUP, A-19): the per-half report is not a published entry point —
+// KiwiSplit_DefByPlaneCarve is the one external caller that needs it.
+static bool SplitDefByPlaneBody( brush_t *def,
+                                 const float p0[3], const float p1[3], const float p2[3],
+                                 brush_t **outFront, brush_t **outBack,
+                                 kiwiSplitHalf_t *outFrontState,
+                                 kiwiSplitHalf_t *outBackState,
+                                 bool keepRefusedBack, bool *outBackRefused,
+                                 const char **why );
+
 bool KiwiSplit_DefByPlane( brush_t *def,
                            const float p0[3], const float p1[3], const float p2[3],
                            brush_t **outFront, brush_t **outBack, const char **why )
@@ -731,7 +690,8 @@ bool KiwiSplit_DefByPlane( brush_t *def,
 
     brush_t         *front = 0, *back = 0;
     kiwiSplitHalf_t  fs = KSPLIT_HALF_NONE, bs = KSPLIT_HALF_NONE;
-    if ( !KiwiSplit_DefByPlaneParts( def, p0, p1, p2, &front, &back, &fs, &bs, why ) )
+    if ( !SplitDefByPlaneBody( def, p0, p1, p2, &front, &back, &fs, &bs,
+                               false, 0, why ) )   // KIWI-UX (CLEANUP, A-19)
         return false;
 
     if ( fs == KSPLIT_HALF_SLIVER || bs == KSPLIT_HALF_SLIVER )
@@ -910,18 +870,6 @@ static bool SplitDefByPlaneBody( brush_t *def,
     return true;
 }
 
-bool KiwiSplit_DefByPlaneParts( brush_t *def,
-                                const float p0[3], const float p1[3], const float p2[3],
-                                brush_t **outFront, brush_t **outBack,
-                                kiwiSplitHalf_t *outFrontState,
-                                kiwiSplitHalf_t *outBackState,
-                                const char **why )
-{
-    return SplitDefByPlaneBody( def, p0, p1, p2, outFront, outBack,
-                                outFrontState, outBackState,
-                                false, 0, why );
-}
-
 // KIWI-UX (ROUND AR, ITEM 2) — see kiwi_split.h for the whole argument.
 bool KiwiSplit_DefByPlaneCarve( brush_t *def,
                                 const float p0[3], const float p1[3], const float p2[3],
@@ -1060,10 +1008,10 @@ namespace
         // neither goes through this rung.
         bool WantsClicks() const override { return true; }
 
-        // No scalar: the plane comes from the line and the camera.  Declaring zero
-        // fields keeps the single unnamed LENGTH field the framework installs, but
-        // nothing ever reads it — and it leaves Tab free (kiwi_split.h TAB ROUTING),
-        // which this command does not use but the split command below does.
+        // KIWI-UX (CLEANUP, A-40): no numeric field -- the plane comes from the
+        // picked source.  There is no NumericFields override here at all (the
+        // earlier note claimed one was "declared"), and leaving Tab free is
+        // deliberate: kiwi_split.h TAB ROUTING.
         const char *HudStatus() const override { return m_hud[0] ? m_hud : 0; }
         // RED while the LOCKED plane crosses NOTHING: confirming then would
         // silently do nothing, and the HUD is the only place that can say so in
@@ -1415,7 +1363,8 @@ namespace
                 // DrawDisc faces the camera for those.
                 if ( m_haveDisc )
                 {
-                    const float r = KSPLIT_DISC_PIX * KiwiCam_WorldPerPixel( m_discPt );
+                    const float r = KiwiSnap_RingPixels() * KSPLIT_DISC_SCALE
+                                  * KiwiCam_WorldPerPixel( m_discPt );
                     const float *onSurface = 0;
                     if ( m_haveHover && m_hover.kind == KCUT_SRC_FACE )
                         onSurface = m_hover.n;
@@ -1451,7 +1400,7 @@ namespace
             // cookie cutter at every count.
             if ( FenceActive() )
             {
-                const float lift = ( m_radius > 1.0f ) ? m_radius : 64.0f;
+                const float lift = m_radius;   // KIWI-UX (CLEANUP, A-39)
                 KiwiLines_Color( KSPLIT_EDGE_COL[0], KSPLIT_EDGE_COL[1], KSPLIT_EDGE_COL[2] );
                 for ( int f = 0; f < FenceCount(); ++f )
                 {
@@ -1684,7 +1633,7 @@ namespace
             const float d = m_hover.d;
             Mad3( m_mid, n, d - Dot3( n, m_mid ), c );
 
-            const float arm = ( m_radius > 1.0f ) ? m_radius : 64.0f;
+            const float arm = m_radius;        // KIWI-UX (CLEANUP, A-39)
             Copy3( c, m_p[0] );
             Mad3( c, e1, arm, m_p[1] );
             Mad3( c, e2, arm, m_p[2] );
@@ -1736,7 +1685,7 @@ namespace
             // a hair.
             Copy3( m_lineA, m_p[0] );
             Copy3( m_lineB, m_p[1] );
-            const float lift = ( m_radius > 1.0f ) ? m_radius : 64.0f;
+            const float lift = m_radius;       // KIWI-UX (CLEANUP, A-39)
             Mad3( m_lineA, m_away, lift, m_p[2] );
             return true;
         }
@@ -1904,7 +1853,7 @@ namespace
             if ( !Norm3( n ) )
                 return false;
 
-            const float lift = ( m_radius > 1.0f ) ? m_radius : 64.0f;
+            const float lift = m_radius;       // KIWI-UX (CLEANUP, A-39)
             Copy3( a, out[0] );
             Copy3( b, out[1] );
             Mad3( a, m_fenceN, lift, out[2] );
@@ -2044,6 +1993,11 @@ namespace
             float hi[3] = { -1e30f, -1e30f, -1e30f };
             for ( size_t i = 0; i < m_targets.size(); ++i )
             {
+                // KIWI-UX (CLEANUP, A-24): m_targets is latched in Begin() and this
+                // runs from Click(), so a brush can have been freed under a paused
+                // gesture — the same reason Commit/CountCrossings/DrawWorld re-test.
+                if ( !Sel_BrushLive( m_targets[i] ) || !m_targets[i]->def )
+                    continue;
                 const brush_t *def = m_targets[i]->def;
                 for ( int k = 0; k < 3; ++k )
                 {
@@ -2146,6 +2100,13 @@ namespace
         float m_planeN[3] = { 0.0f, 0.0f, 1.0f };
         float m_planeD    = 0.0f;
         float m_p[3][3]   = { { 0.0f, 0.0f, 0.0f }, { 0.0f, 0.0f, 0.0f }, { 0.0f, 0.0f, 0.0f } };
+        // KIWI-UX (CLEANUP, A-39): INVARIANT — m_radius is always > 1.
+        // It starts at 64 and MeasureBounds is its only writer, which ends with
+        // `if ( !( m_radius > 1.0f ) ) m_radius = 64.0f;`.  Four downstream
+        // lever-arm sites used to re-spell that clamp as
+        // `( m_radius > 1.0f ) ? m_radius : 64.0f`, which could never take its
+        // second arm; they read m_radius directly now.  Anything that becomes a
+        // second writer must keep this invariant or restore those guards.
         float m_radius    = 64.0f;
         // ── ROUND AF, ITEM 1: the FENCE (see the block above MeasureBounds) ──
         // The construction objects the cut is made of, in PICK ORDER (Shift adds,
@@ -2672,8 +2633,11 @@ bool KiwiSplit_CanSplitFace()
 {
     const selection_t &sel = KiwiSel();
     int n = 0;
+    // KIWI-UX (CLEANUP, A-25): the SAME test Begin() runs (:2256).  Without the
+    // liveness gate the palette advertises Split Face for a face whose brush was
+    // freed, and Begin then refuses with "select exactly ONE face".
     for ( size_t i = 0; i < sel.items.size(); ++i )
-        if ( sel.items[i].kind == SEL_FACE && sel.items[i].brush )
+        if ( sel.items[i].kind == SEL_FACE && Sel_BrushLive( sel.items[i].brush ) )
             ++n;
     return n == 1;
 }

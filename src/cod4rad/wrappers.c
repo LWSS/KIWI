@@ -86,25 +86,11 @@ float ceilf_wrapper(float x)
     return ceilf(x);
 }
 
-static __declspec(thread) unsigned int tls_rng_state;
-
 int rand_int(void)
 {
-    unsigned int s = tls_rng_state;
-    if (!s) s = GetCurrentThreadId() * 2654435761u + 1;
-    s ^= s << 13;
-    s ^= s >> 17;
-    s ^= s << 5;
-    tls_rng_state = s;
-    return (int)(s & 0x7FFF);
-}
-
-void rand_seed_pixel(int lmapIdx, int s, int t)
-{
-    unsigned int h = (unsigned int)lmapIdx * 73856093u ^ (unsigned int)s * 19349663u ^ (unsigned int)t * 83492791u;
-    if (!h) h = 1;
-    h ^= h << 13;
-    h ^= h >> 17;
-    h ^= h << 5;
-    tls_rng_state = h;
+    /* Retail calls the MSVC CRT rand() directly (for example 0x408243 and
+     * 0x411A45).  The prior x64 port seeded a TLS xorshift from the Windows
+     * thread id, making identical one-thread compiles vary between runs and
+     * changing every transport ray. */
+    return rand();
 }

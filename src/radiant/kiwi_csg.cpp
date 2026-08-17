@@ -20,7 +20,7 @@
 
 // ── ported entry points (each verified against its definition) ──────────────
 extern int  Sys_Printf( const char *fmt, ... );            // win_qe3.cpp
-extern void Radiant_ExecCommand( unsigned int cmdId );     // mainfrm.cpp:3894
+extern void Radiant_ExecCommand( unsigned int cmdId );     // mainfrm.cpp:4083
 
 // selected_brushes / active_brushes are the qe3.h sentinels (qe3.h:1053-1054).
 
@@ -49,20 +49,46 @@ namespace
     // (qe3.h:1000 `typedef entity_s entity_s_def;`), so the ported spelling
     // `((entity_s_def*)b->owner->def)->eclass->fixedsize` and the one below are
     // the same read.
-    bool CsgUsable( const selbrush_t *b )
+    // KIWI-UX (CLEANUP, B-10): the body moved out to KiwiCsg_BrushUsable below —
+    // this file is the one that owns the csg.cpp inventory, so it is the one that
+    // exports it.  The local name stays as a forwarder so this file reads as it did.
+    inline bool CsgUsable( const selbrush_t *b ) { return KiwiCsg_BrushUsable( b ); }
+}
+
+// KIWI-UX (CLEANUP, B-10): see kiwi_csg.h for what these four tests are and which
+// four copies they replaced.
+bool KiwiCsg_BrushUsable( const selbrush_t *b )
+{
+    if ( !b || !b->def )
+        return false;
+    if ( b->patch )                                    // instance patch @0x20
+        return false;
+    const entity_s *owner = b->owner;
+    if ( !owner || !owner->def )
+        return false;
+    const entity_s *ownerDef = owner->def;
+    if ( !ownerDef->eclass || ownerDef->eclass->fixedsize )
+        return false;
+    return true;
+}
+
+// KIWI-UX (CLEANUP, B-10): >= 2 selected, all usable, one owning entity.
+bool KiwiCsg_SelectionMergeable()
+{
+    selbrush_t *first = selected_brushes.next;
+    if ( first == &selected_brushes || first->next == &selected_brushes )
+        return false;                                      // the core needs >= 2
+    const entity_s *ownerDef0 = first->owner ? first->owner->def : 0;
+    if ( !ownerDef0 )
+        return false;
+    for ( selbrush_t *b = first; b != &selected_brushes; b = b->next )
     {
-        if ( !b || !b->def )
+        if ( !KiwiCsg_BrushUsable( b ) )
             return false;
-        if ( b->patch )                                    // instance patch @0x20
+        if ( b->owner->def != ownerDef0 )                  // "different entities"
             return false;
-        const entity_s *owner = b->owner;
-        if ( !owner || !owner->def )
-            return false;
-        const entity_s *ownerDef = owner->def;
-        if ( !ownerDef->eclass || ownerDef->eclass->fixedsize )
-            return false;
-        return true;
     }
+    return true;
 }
 
 // ─── §3 palette predicates ───────────────────────────────────────────────────
@@ -78,20 +104,7 @@ bool KiwiCsg_CanHollow()
 
 bool KiwiCsg_CanMerge()
 {
-    selbrush_t *first = selected_brushes.next;
-    if ( first == &selected_brushes || first->next == &selected_brushes )
-        return false;                                      // the core needs >= 2
-    const entity_s *ownerDef0 = first->owner ? first->owner->def : 0;
-    if ( !ownerDef0 )
-        return false;
-    for ( selbrush_t *b = first; b != &selected_brushes; b = b->next )
-    {
-        if ( !CsgUsable( b ) )
-            return false;
-        if ( b->owner->def != ownerDef0 )                  // "different entities"
-            return false;
-    }
-    return true;
+    return KiwiCsg_SelectionMergeable();      // KIWI-UX (CLEANUP, B-10)
 }
 
 bool KiwiCsg_CanAutoCaulk()

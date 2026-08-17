@@ -32,20 +32,69 @@
 // item that can hide the only remaining viewport is a trap.
 //
 // Persistence: kiwi_radiant.ini section "KiwiWindows" (Radiant_Profile*), one
-// entry per window.  Defaults encode the directive — only the console is on.
+// entry per window.
+//
+// KIWI-UX (CLEANUP, C-58): THE DEFAULTS ARE THE `s_def` TABLE IN kiwi_windows.cpp,
+// AND NOWHERE ELSE.  This line used to claim "only the console is on", which was
+// shakeout B's set and has been wrong since shakeout I put 2D View and Textures
+// back; five of the eight rows ship open today.  Read `s_def`'s `defOpen` column
+// for the answer, and `KW_VERSION` (== KIWI_LAYOUT_VERSION below) for whether an
+// existing profile gets re-seeded from it — those two are the whole mechanism.
+// The `default ON/OFF` notes on the enum below are a convenience echo of that
+// table; if they ever disagree with it, the table is right.
 // ─────────────────────────────────────────────────────────────────────────────
+
+// ── KIWI-UX (CLEANUP, C-8): ONE LAYOUT VERSION, TWO CONSUMERS ───────────────
+// The window-defaults reseed (kiwi_windows.cpp, section "KiwiWindows" entry
+// "DefaultsVersion") and the dock-layout ini filename (imgui_shell.cpp builds
+// "kiwi_dock<N>.ini") always had to be bumped TOGETHER — a half-bump leaves the
+// windows reseeded with the old layout pinned, or the reverse, with no
+// diagnostic.  The two were coupled only by a comment ladder in each file.  Now
+// there is ONE number: bump it here and both follow.  (It carries the dock ini's
+// numbering, which was ahead of the window counter's; the changeover reseeds the
+// window defaults exactly once, which is what the mechanism does anyway.)
+// KIWI-UX (ROUND BD): 10 -> 11.  The UV editor joins the Textures dock node as a
+// fourth tab, which needs BOTH halves of this number: the [KiwiWindows] reseed (so
+// an existing profile actually gets the new window OPEN) and a fresh
+// kiwi_dock11.ini (so ImGuiShell_BuildDefaultDockLayout runs again and PLACES it).
+// Existing users get a one-time layout reseed — the same deal every default change
+// has made since shakeout I, and the only way one is ever visible to an install
+// that already has a profile.
+#define KIWI_LAYOUT_VERSION  11
 
 enum kiwiWindow_t
 {
-    KIWI_WIN_XY = 0,        // "2D View"          (RTT_XY)      default OFF
+    // Shakeout I put these two back ON: "put the texture view by default under the
+    // 2d view on the right middle dock."
+    KIWI_WIN_XY = 0,        // "2D View"          (RTT_XY)      default ON
     KIWI_WIN_Z,             // "Z"                (RTT_Z)       default OFF
-    KIWI_WIN_TEXTURE,       // "Textures"         (RTT_TEXTURE) default OFF
+    KIWI_WIN_TEXTURE,       // "Textures"         (RTT_TEXTURE) default ON
     KIWI_WIN_CONSOLE,       // "Console"                        default ON
     KIWI_WIN_SHELL,         // "KIWI ImGui shell"               default OFF
     // ROUND W: the Plasticity-style scene list (kiwi_outliner.h).  DEFAULT ON and
     // docked into a new LEFT column, because the directive asks for it "on the
     // left" and a scene list nobody can find is a scene list nobody uses.
     KIWI_WIN_OUTLINER,      // "Outliner"                       default ON
+    // ROUND AU: the TrenchBroom-style entity browser (kiwi_entbrowser.h).  USER
+    // DIRECTIVE: "a new panel that's in the same viewport (tabbed) with the
+    // textures tab".  DEFAULT ON, and docked into the SAME node as "Textures" by
+    // ImGuiShell_BuildDefaultDockLayout — the two have to change together or the
+    // window opens as a floating tab over the camera (the note on s_def below).
+    KIWI_WIN_ENTITIES,      // "Entities"                       default ON
+    // ROUND AZ: the SKY tab (kiwi_skybox.h).  USER DIRECTIVE: "Make this a separate
+    // tab like the entity tab" — so it joins the SAME dock node as Textures and
+    // Entities, and the same rule applies: this enum and
+    // ImGuiShell_BuildDefaultDockLayout have to change together or it opens as a
+    // floating tab over the camera.  DEFAULT ON, because a tab nobody can find is a
+    // tab nobody uses and KW_VERSION is bumped so existing profiles get it once.
+    KIWI_WIN_SKY,           // "Sky"                            default ON
+    // ROUND BD: the TrenchBroom-style UV editor (kiwi_uveditor.h).  USER DIRECTIVE:
+    // a UV window showing every selected face as a wireframe over the tiled texture.
+    // DEFAULT ON, and docked into the SAME node as Textures / Entities / Sky by
+    // ImGuiShell_BuildDefaultDockLayout — the fourth tab of that node, and the same
+    // rule the three rows above it state applies: this enum and that function have to
+    // change together or the window opens as a floating tab over the camera.
+    KIWI_WIN_UVEDITOR,      // "UV editor"                      default ON
     KIWI_WIN_COUNT,
 };
 
@@ -79,7 +128,7 @@ void  KiwiWindows_SyncMenu();
 // than into a new top-level one, and that is safe: appending ITEMS to a popup
 // changes nothing about the MENU BAR's popup indices, which is what the two
 // index-based consumers in this build actually read —
-//   * texwnd.cpp:1600 / :1651 / :1665 / :1679  GetSubMenu( menu, 5 )  = Textures
+//   * texwnd.cpp:1638 / :1651 / :1665 / :1679  GetSubMenu( menu, 5 )  = Textures
 //   * radiant_main.cpp:529 / qe3.cpp:766       GetSubMenu( menu, 0 )  = File (MRU)
 // Only adding or removing a POPUP would shift those, and the §9 "Windows" popup
 // is appended at the END of the bar (after Help), so even that one cannot.

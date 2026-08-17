@@ -18,7 +18,7 @@ extern int   R_Add3DLine( GfxPointVertex *verts, const orientation_t *orient,
                           char width, int vertCount, int maxVertCount );   // draw.cpp 0x40c110
 extern char  Byte4PackPixelColor( float *from, GfxColor *out );            // 0x402ac0
 extern float world_orient_matrix[4][3];                                    // entity.cpp 0x6DE290
-extern camera_s *Ed_Camera();                                              // camwnd.cpp:153
+extern camera_s *Ed_Camera();                                              // camwnd.cpp:156
 
 namespace
 {

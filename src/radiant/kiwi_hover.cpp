@@ -57,6 +57,8 @@
 #include "kiwi_lines.h"
 #include "kiwi_selection.h"
 #include "kiwi_ux.h"
+#include "kiwi_uveditor.h"  // KIWI-UX (ROUND BN, ITEM 3): KiwiUvEd_OverlaySuppressed
+#include "kiwi_vec.h"     // KIWI-UX (CLEANUP, A-15): the one spelling of Dot3/Sub3/...
 
 #include <math.h>
 #include <string.h>
@@ -74,7 +76,7 @@ extern char  Byte4PackPixelColor( float *from, GfxColor *out );          // 0x40
 // ROUND AG, ITEM 3 — the outliner hover target needs a console line for its cap
 // and a repaint request when it changes.
 extern int   Sys_Printf( const char *fmt, ... );                        // win_qe3.cpp:112
-extern int   g_nUpdateBits;                                             // engine_stubs.cpp:693
+extern int   g_nUpdateBits;                                             // engine_stubs.cpp:773
 extern void  __cdecl R_AddRenderCmdDrawTris(
                  Material *material, MaterialTechniqueType techType, short indexCount,
                  const uint16_t *indices, short vertexCount,
@@ -130,7 +132,7 @@ namespace
     //
     // WHAT "SELECTED" ACTUALLY MEASURES, so the target is a number and not a
     // feeling.  A selected BRUSH in the camera is TWO channels, not one
-    // (camwnd.cpp:2755-2790):
+    // (camwnd.cpp:2755-2856):
     //   1. a MATERIAL_COLOR tint of `d_savedinfo.colors[11]` = {1, .25, .25, .25}
     //      (win_qe3.cpp:424) over the whole TEXTURED surface — vertcol_shaded
     //      lerps, so the result is 0.75*texture + 0.25*red; and
@@ -241,10 +243,6 @@ namespace
 
     pick_result_t s_hover;
 
-    inline float Dot3( const float *a, const float *b )
-    {
-        return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-    }
 
     void Nudge( const camera_s *c, const float *in, float *out )
     {
@@ -271,46 +269,26 @@ namespace
         return def->faces[it.faceIndex].w;
     }
 
-    bool VertexPos( const sel_item_t &it, float *out )
+    // ── KIWI-UX (ROUND BN, ITEM 3): "is the UV editor holding this item" ───────
+    // One predicate for both KIWI overlay passes (the translucent face FILLS and
+    // the wire ACCENTS), so they can never disagree about which shapes are hidden.
+    // The whole scope rule is on kiwi_uveditor.h "IN SCOPE"; here it is only asked.
+    // A SEL_FACE asks the per-face question; anything else asks the whole-object
+    // one, which is what makes a gathered patch's accents stand down too.
+    bool UvEditorOwns( const sel_item_t &it )
     {
         if ( !it.brush || !it.brush->def )
             return false;
-        if ( it.faceIndex < 0 )                     // patch control point
-        {
-            patchMesh_t *pm = it.brush->def->patch;
-            if ( !pm || pm->width <= 0 || pm->height <= 0
-              || pm->width > 16 || pm->height > 16 )
-                return false;
-            const int col = it.vertIndex / pm->height;
-            const int row = it.vertIndex % pm->height;
-            if ( col < 0 || col >= pm->width || row < 0 || row >= pm->height )
-                return false;
-            out[0] = pm->ctrl[col][row].xyz[0];
-            out[1] = pm->ctrl[col][row].xyz[1];
-            out[2] = pm->ctrl[col][row].xyz[2];
-            return true;
-        }
-        winding_t *w = WindingOf( it );
-        if ( !w || it.vertIndex < 0 || it.vertIndex >= w->numpoints )
-            return false;
-        out[0] = w->p[it.vertIndex][0];
-        out[1] = w->p[it.vertIndex][1];
-        out[2] = w->p[it.vertIndex][2];
-        return true;
+        return KiwiUvEd_OverlaySuppressed( it.brush->def,
+                                           ( it.kind == SEL_FACE ) ? it.faceIndex : -1 );
     }
 
-    bool EdgeEnds( const sel_item_t &it, float *a, float *b )
-    {
-        winding_t *w = WindingOf( it );
-        if ( !w || w->numpoints < 2 )
-            return false;
-        if ( it.edgeIndex < 0 || it.edgeIndex >= w->numpoints )
-            return false;
-        const int j = ( it.edgeIndex + 1 ) % w->numpoints;
-        a[0] = w->p[it.edgeIndex][0]; a[1] = w->p[it.edgeIndex][1]; a[2] = w->p[it.edgeIndex][2];
-        b[0] = w->p[j][0];            b[1] = w->p[j][1];            b[2] = w->p[j][2];
-        return true;
-    }
+    // KIWI-UX (CLEANUP, A-13 / C-49): the local EdgeEnds / VertexPos were two of
+    // the four copies each; both resolutions now live in kiwi_selection.h.  The
+    // call sites below pass checkLive = false because this file's draw loops
+    // ALREADY gate on BrushLive before EmitItem (:514, and activeFine/hoverValid
+    // for the other two entries) — asking again would be a second display-list
+    // walk per selected item per frame.
 
     void EmitWinding( const camera_s *c, winding_t *w )
     {
@@ -345,25 +323,19 @@ namespace
             AddNudged( c, pts[edges[e][0]], pts[edges[e][1]] );
     }
 
-    // World units per screen pixel at the depth of `world` — the same per-pixel
-    // scale CameraCalcRayDir builds its ray from, so a marker sized with this is
-    // constant on screen at any distance.
-    // KIWI-UX (shakeout A): this WAS the implementation; the §14 gizmo and the
-    // truck-pan size themselves with the identical constant, so the body moved to
-    // KiwiCam_WorldPerPixel (kiwi_camera.h) and this is now a thin alias — one
-    // projection constant, no drift.  `c` is redundant (the shared body reads
-    // Ed_Camera()) but keeps every call site below unchanged.
-    inline float WorldPerPixel( const camera_s *c, const float *world )
-    {
-        (void)c;
-        return KiwiCam_WorldPerPixel( world );
-    }
-
     // A small screen-scaled marker in the camera's own basis: a square plus its
     // two diagonals (6 segments), so it reads at any orientation.
+    //
+    // KiwiCam_WorldPerPixel (kiwi_camera.h) is world units per screen pixel at the
+    // depth of the point — the same per-pixel scale CameraCalcRayDir builds its ray
+    // from, so a marker sized with it is constant on screen at any distance, and
+    // the §14 gizmo and the truck-pan size themselves with the identical constant.
+    // KIWI-UX (CLEANUP, C-39): called directly; the local `WorldPerPixel( c, ... )`
+    // alias that kept shakeout A's call sites unchanged had one caller left and
+    // discarded its own first parameter.
     void EmitPointMarker( const camera_s *c, const float *p, float pixels )
     {
-        const float h = WorldPerPixel( c, p ) * pixels;
+        const float h = KiwiCam_WorldPerPixel( p ) * pixels;
         float corner[4][3];
         const float sx[4] = { -1.0f,  1.0f,  1.0f, -1.0f };
         const float sy[4] = { -1.0f, -1.0f,  1.0f,  1.0f };
@@ -452,7 +424,7 @@ namespace
             if ( !thin )
             {
                 float a[3], b[3];
-                if ( EdgeEnds( it, a, b ) )
+                if ( Sel_EdgeEnds( it, a, b, false ) )
                     AddNudged( c, a, b );
             }
             break;
@@ -460,7 +432,7 @@ namespace
             if ( !thin )
             {
                 float p[3];
-                if ( VertexPos( it, p ) )
+                if ( Sel_ItemWorldPos( it, p, false ) )
                     EmitPointMarker( c, p, 5.0f );
             }
             break;
@@ -522,6 +494,8 @@ namespace
                 const bool isActive = Sel_ItemEqual( it, active );
                 if ( isActive && activeDrawnElsewhere )
                     continue;                       // already drawn, brighter
+                if ( UvEditorOwns( it ) )
+                    continue;                       // ROUND BN, ITEM 3: in scope
                 KiwiLines_Color( isActive ? KACTIVE_COL[0] : KSELECTED_COL[0],
                                  isActive ? KACTIVE_COL[1] : KSELECTED_COL[1],
                                  isActive ? KACTIVE_COL[2] : KSELECTED_COL[2] );
@@ -577,11 +551,16 @@ namespace
                 continue;
             if ( activeIsFace && Sel_ItemEqual( it, active ) )
                 continue;                        // drawn brighter, below
+            if ( UvEditorOwns( it ) )
+                continue;                        // ROUND BN, ITEM 3: in scope
             EmitFaceFill( c, WindingOf( it ), KFILL_SELECTED );
         }
-        if ( activeIsFace )
+        // The ACTIVE face and the HOVERED one take the same rule: the active face is
+        // the UV canvas's background material, so leaving its fill on would tint the
+        // very surface the user opened the editor to look at.
+        if ( activeIsFace && !UvEditorOwns( active ) )
             EmitFaceFill( c, WindingOf( active ), KFILL_ACTIVE );
-        if ( hoverIsFace )
+        if ( hoverIsFace && !UvEditorOwns( hov.item ) )
             EmitFaceFill( c, WindingOf( hov.item ), KFILL_HOVER );
 
         R_AddCmdSetMaterialColor( s_white );

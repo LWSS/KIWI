@@ -3,15 +3,13 @@
  */
 
 #include "cod2rad64.h"
+#include <stdlib.h>
+#include <string.h>
 
 LightDef_t   g_lightDefs[MAX_RAD_LIGHTDEFS];
 int          g_numLightDefs;
 PointLight_t g_pointLights[MAX_RAD_POINTLIGHTS];
 int          g_numPointLights;
-
-/* external functions not in master header */
-extern int LoadLightDefImages(const char *name, int *outType,
-                              ImageDecodeState_t *outImage2, ImageDecodeState_t *outImage1);
 
 /*
 ================
@@ -22,7 +20,9 @@ Find or load a light definition by name.
 */
 LightDef_t *LoadLightDef(const char *name)
 {
+    ImageDecodeState_t image;
     int i;
+    int pixelCount;
     LightDef_t *def;
 
     for (i = 0; i < g_numLightDefs; i++)
@@ -31,30 +31,46 @@ LightDef_t *LoadLightDef(const char *name)
             return &g_lightDefs[i];
     }
 
-    if (g_numLightDefs == 64)
+    if (g_numLightDefs == MAX_RAD_LIGHTDEFS)
     {
-        Com_Printf("More than %i lightDefs used by all lights in map\n",
+        Com_Printf("More than %i lightDefs used by all lights combined; can't load '%s'\n",
                     g_numLightDefs, name);
+        return NULL;
     }
 
     /* allocate new slot */
     def = &g_lightDefs[g_numLightDefs];
 
-    /* load images */
-    if (!LoadLightDefImages(name, &def->image1, def->falloffName, &def->image2))
+    memset(&image, 0, sizeof(image));
+    if (!LoadLightDefImages(name, &image))
     {
         Com_Printf("Couldn't get light def images for '%s'\n", name);
+        return NULL;
     }
 
-    /* validate falloff image type */
-    if (def->type != 1)
+    if (image.height != 1)
     {
-        Com_Printf("Falloff image %s in light def %s has dimension %i instead of 1\n",
-                    def->falloffName, name, def->dimension, def->type);
+        Com_Printf("Falloff image %s in light def %s has dimensions %ix%i; height should be 1\n",
+                    image.name, name, image.stride, image.height);
     }
 
-    /* intern the name string */
     def->name = _strdup(name);
+    def->width = image.stride;
+    def->height = image.height;
+    pixelCount = def->width * def->height;
+    def->data = (float *)malloc((size_t)pixelCount * 3 * sizeof(*def->data));
+    if (!def->data)
+        Error("Couldn't allocate light def image data for '%s'\n", name);
+
+    /* Native sub_41AF80 stores degamma-corrected RGB floats, three per
+     * attenuation texel.  Alpha is not part of point-light falloff. */
+    for (i = 0; i < pixelCount; ++i)
+    {
+        def->data[i * 3 + 0] = DegammaColorChannel((float)image.pixels[i * 4 + 0] * (1.0f / 255.0f));
+        def->data[i * 3 + 1] = DegammaColorChannel((float)image.pixels[i * 4 + 1] * (1.0f / 255.0f));
+        def->data[i * 3 + 2] = DegammaColorChannel((float)image.pixels[i * 4 + 2] * (1.0f / 255.0f));
+    }
+    Z_FreeInternal(image.pixels);
 
     g_numLightDefs++;
 
@@ -68,7 +84,8 @@ AddPointLight
 Add a point light to the global light array.
 ================
 */
-void AddPointLight(float *origin, float radius, float *color, const char *defName)
+void AddPointLight(int primaryLightIndex, float *origin, float radius,
+                   float *color, const char *defName)
 {
     int idx;
     PointLight_t *light;
@@ -90,6 +107,8 @@ void AddPointLight(float *origin, float radius, float *color, const char *defNam
     if (!def)
         return;
 
+    light->primaryLightIndex = primaryLightIndex ? primaryLightIndex : -1;
+
     /* store origin */
     light->origin[0] = origin[0];
     light->origin[1] = origin[1];
@@ -98,8 +117,8 @@ void AddPointLight(float *origin, float radius, float *color, const char *defNam
     /* store radius */
     light->radius = radius;
 
-    /* compute falloff scale: def->dimension / radius */
-    light->falloffScale = (float)def->dimension / radius;
+    /* compute falloff scale: def->width / radius */
+    light->falloffScale = (float)def->width / radius;
 
     /* store and degamma color */
     light->color[0] = color[0];
@@ -118,8 +137,9 @@ AddSpotLight
 Add a spot light to the global light array.
 ================
 */
-void AddSpotLight(float *origin, float radius, float *color, const char *defName,
-                  float *dir, float outerCosAngle, float innerCosAngle, int exponent)
+void AddSpotLight(int primaryLightIndex, float *origin, float radius,
+                  float *color, const char *defName, float *dir,
+                  float outerCosAngle, float innerCosAngle, int exponent)
 {
     int idx;
     PointLight_t *light;
@@ -142,6 +162,8 @@ void AddSpotLight(float *origin, float radius, float *color, const char *defName
     if (!def)
         return;
 
+    light->primaryLightIndex = primaryLightIndex ? primaryLightIndex : -1;
+
     /* store origin */
     light->origin[0] = origin[0];
     light->origin[1] = origin[1];
@@ -150,8 +172,8 @@ void AddSpotLight(float *origin, float radius, float *color, const char *defName
     /* store radius */
     light->radius = radius;
 
-    /* compute falloff scale: def->dimension / radius */
-    light->falloffScale = (float)def->dimension / radius;
+    /* compute falloff scale: def->width / radius */
+    light->falloffScale = (float)def->width / radius;
 
     /* store and degamma color */
     light->color[0] = color[0];
@@ -199,7 +221,8 @@ Returns 1 if light contributes, 0 if not.
 */
 extern int TraceVisibility(int flags, float *traceStart, PointLight_t *light);
 
-int PointLightEvaluatePoint(int flags, int lightIndex, float *pos, float *normal,
+int PointLightEvaluatePoint(int surfacePrimaryLightIndex, int traceIndex,
+                            int lightIndex, float *pos, float *normal,
                             float *outDir, float *outColor, float *outDot)
 {
     PointLight_t *light;
@@ -214,23 +237,19 @@ int PointLightEvaluatePoint(int flags, int lightIndex, float *pos, float *normal
     float spotDot;
     float falloffR, falloffG, falloffB;
     float frac, invFrac;
-    unsigned char *texData;
+    float *texData;
     float traceStart[3];
-    float scale_255 = 1.0f / 255.0f;
-    int result = 1; /* edi: return value, 1=far hit, 2=near hit */
+    int result;
 
     /* assert: lightIndex in range (line 0x95) */
     Assert("(lightIndex >= 0 && lightIndex < pointLightCount)",
            ".\\pointlights.cpp", 0x95, 0, 1);
 
     light = &g_pointLights[lightIndex];
+    result = (light->primaryLightIndex != surfacePrimaryLightIndex) + 1;
 
     /* assert: light->def != NULL (line 0x98) */
     Assert("light->def", ".\\pointlights.cpp", 0x98, 0, 1);
-
-    /* assert: light->def->type == 2 (line 0x99) */
-    Assert("(light->def->type == GFX_LIGHT_TYPE_POINT)",
-           ".\\pointlights.cpp", 0x99, 0, 1);
 
     /* compute direction vector from light to pos */
     dx = light->origin[0] - pos[0];
@@ -252,7 +271,7 @@ int PointLightEvaluatePoint(int flags, int lightIndex, float *pos, float *normal
     def = light->def;
 
     /* if at last texel, no contribution */
-    if (falloffIdxInt == def->dimension - 1)
+    if (falloffIdxInt == def->width - 1)
         return 0;
 
     if (dist < 0.001f)
@@ -264,16 +283,16 @@ int PointLightEvaluatePoint(int flags, int lightIndex, float *pos, float *normal
         if (outDot)
             *outDot = 1.0f;
 
-        result = 2; /* near hit returns 2 */
+        result = 2 * (light->primaryLightIndex != surfacePrimaryLightIndex) + 1;
         spotAtten = 1.0f; /* xmm6 = 1.0 */
 
         /* use first texel directly if falloffIdx < 0 */
         if (falloffIdxInt < 0)
         {
-            texData = (unsigned char *)def->data;
-            falloffR = (float)texData[0] * scale_255;
-            falloffG = (float)texData[1] * scale_255;
-            falloffB = (float)texData[2] * scale_255;
+            texData = def->data;
+            falloffR = texData[0];
+            falloffG = texData[1];
+            falloffB = texData[2];
             goto apply_color;
         }
     }
@@ -360,7 +379,7 @@ int PointLightEvaluatePoint(int flags, int lightIndex, float *pos, float *normal
             traceStart[1] = outDir[1] * traceOffset + pos[1];
             traceStart[2] = outDir[2] * traceOffset + pos[2];
 
-            if (!TraceVisibility(flags, traceStart, light))
+            if (!TraceVisibility(traceIndex, traceStart, light))
                 return 0;
 
             if (normal)
@@ -377,19 +396,14 @@ do_falloff_lookup:
         long long idx = (long long)falloffIdxInt;
         frac = falloffIdx - (float)falloffIdxInt;
         invFrac = 1.0f - frac;
-        texData = (unsigned char *)def->data;
+        texData = def->data;
 
-        /* interpolate R: texData[idx*4+4]*frac + texData[idx*4+0]*invFrac */
-        falloffR = ((float)texData[idx * 4 + 4] * frac
-                  + (float)texData[idx * 4 + 0] * invFrac) * scale_255;
-
-        /* interpolate G: texData[idx*4+5]*frac + texData[idx*4+1]*invFrac */
-        falloffG = ((float)texData[idx * 4 + 5] * frac
-                  + (float)texData[idx * 4 + 1] * invFrac) * scale_255;
-
-        /* interpolate B: texData[idx*4+6]*frac + texData[idx*4+2]*invFrac */
-        falloffB = ((float)texData[idx * 4 + 6] * frac
-                  + (float)texData[idx * 4 + 2] * invFrac) * scale_255;
+        falloffR = texData[idx * 3 + 3] * frac
+                 + texData[idx * 3 + 0] * invFrac;
+        falloffG = texData[idx * 3 + 4] * frac
+                 + texData[idx * 3 + 1] * invFrac;
+        falloffB = texData[idx * 3 + 5] * frac
+                 + texData[idx * 3 + 2] * invFrac;
     }
 
 apply_color:
