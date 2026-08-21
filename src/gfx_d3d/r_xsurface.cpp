@@ -83,7 +83,7 @@ uint16_t *__cdecl R_CheckTris( const XSurface *surface, void *dstIndices, uint16
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Editor_ExtractXModelGeo (IDA sub_4FEBB0 0x4febb0, r_ed_scene.cpp:748) — extract an
+// Editor_ExtractXModelGeo (IDA sub_4FEBB0 0x4febb0, r_ed_scene.cpp:885) — extract an
 // XModel's LOD-0 surface geometry (vertex POSITIONS into verts[3*N], triangle INDICES into
 // indices[]) into plain caller buffers.  Returns the total index count written (0 on a bad
 // model or on buffer overflow).  Pure CPU extraction — the GPU render-into-VB path

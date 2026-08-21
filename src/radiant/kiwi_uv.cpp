@@ -35,11 +35,11 @@
 extern int   Sys_Printf( const char *fmt, ... );                        // win_qe3.cpp
 extern int   g_nUpdateBits;                                             // 0x25D5A74 (mainfrm.cpp)
 
-extern void  Brush_ShiftTexture ( float a1, float a2 );                 // select.cpp:3085  0x491F20
-extern void  Brush_ScaleTexture ( int   a1, int   a2 );                 // select.cpp:3258  0x492650
-extern void  Brush_RotateTexture( int   a1 );                           // select.cpp:3340  0x4929F0
+extern void  Brush_ShiftTexture ( float a1, float a2 );                 // select.cpp:3084  0x491F20
+extern void  Brush_ScaleTexture ( int   a1, int   a2 );                 // select.cpp:3257  0x492650
+extern void  Brush_RotateTexture( int   a1 );                           // select.cpp:3339  0x4929F0
 
-extern char  Texture_SetTexture( const int *a1, MaterialDef *a2 );      // texwnd.cpp:2156  0x45BE50
+extern char  Texture_SetTexture( const int *a1, MaterialDef *a2 );      // texwnd.cpp:2169  0x45BE50
 extern char  Radiant_PatchGetTexdef( patchMesh_t *patch,
                                      texdef_sub_t *texdef );            // brush.cpp:2231   0x44B620
 extern LayerMaterialDef *Materialdef_GetName( MaterialDef *mtlDef );    // materialdef.cpp:159  0x431640
@@ -49,14 +49,14 @@ extern void  UpdatePatchInspector();                                    // patch
 // KIWI-UX (ROUND AZ, ITEM 1): the round-AK patch re-naturalize, applied to the
 // pick-texture funnel as well as the browser one.  See PickTexture for why.  At
 // FILE scope on purpose (round AI's MSVC namespace-mangling link error) — the
-// same reason texwnd.cpp:1129 declares it here rather than in its caller.
+// same reason texwnd.cpp:1130 declares it here rather than in its caller.
 extern void  Patch_KiwiReNaturalizeSelected();                          // pmesh.cpp:1641 (ROUND AK)
 
 extern float grid_sizes[];                                              // engine_stubs.cpp:771  0x6DDE5C
 
-extern bool  ImGuiShell_CameraPaintCursor( int *x, int *y, int *w, int *h );  // imgui_shell.cpp:290
-extern bool  Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId ); // mainfrm.cpp:1340
-extern void  Radiant_ExecCommand( unsigned int cmdId );                 // mainfrm.cpp:4083
+extern bool  ImGuiShell_CameraPaintCursor( int *x, int *y, int *w, int *h );  // imgui_shell.cpp:297
+extern bool  Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId ); // mainfrm.cpp:1358
+extern void  Radiant_ExecCommand( unsigned int cmdId );                 // mainfrm.cpp:4054
 
 namespace
 {
@@ -78,7 +78,7 @@ namespace
 
     // ── the camera cursor, LATCHED for the instant Pick Texture command ──────
     // ImGuiShell_CameraPaintCursor is a "cursor is over the camera image RIGHT
-    // NOW" query (imgui_shell.cpp:202 returns false the moment it leaves), and
+    // NOW" query (imgui_shell.cpp:205 returns false the moment it leaves), and
     // Pick Texture is invoked from a menu button or the palette — i.e. with the
     // cursor over ImGui, never over the 3D view.  So the last position the cursor
     // HAD over the camera is sampled once per frame from the overlay draw (the one
@@ -122,7 +122,7 @@ namespace
     }
 
     // The classic grid step the RMB+Alt texture drag quantises to
-    // (camwnd.cpp:2686 uses grid_sizes[g_qeglobals.d_gridsize] directly).
+    // (camwnd.cpp:2750 uses grid_sizes[g_qeglobals.d_gridsize] directly).
     float ClassicGridStep()
     {
         int gi = g_qeglobals.d_gridsize;
@@ -343,7 +343,7 @@ namespace
             if ( m_haveStart && CursorPixels( &x, &y ) )
             {
                 // 1 px = 1 texture unit; right/down positive — the same sign the
-                // classic RMB+Alt drag accumulates with (camwnd.cpp:2676-2686).
+                // classic RMB+Alt drag accumulates with (camwnd.cpp:2740-2750).
                 s = (float)( x - m_startX );
                 t = (float)( y - m_startY );
             }
@@ -606,7 +606,7 @@ namespace
     //  in the same order.
     //
     //  SIDE EFFECT THAT IS KEPT (and is the classic behaviour): Texture_SetTexture
-    //  ends in Brush_SetTexture( a2, 1 ) (texwnd.cpp:2009), which APPLIES the
+    //  ends in Brush_SetTexture( a2, 1 ) (texwnd.cpp:2011), which APPLIES the
     //  picked material to the CURRENT SELECTION under its own undo bracket
     //  ("set face textures" / "set brush textures", select.cpp:1787).  Picking with
     //  something selected therefore also retextures it.  The menu tooltip says so.
@@ -668,12 +668,12 @@ namespace
         Texture_SetTexture( patchDef, md );
 
         // ── KIWI-UX (ROUND AZ, ITEM 1): THE ROUND-AK FENCE, ON THIS FUNNEL TOO ──
-        // `Texture_SetTexture` ends in `Brush_SetTexture` (texwnd.cpp:2123), which
+        // `Texture_SetTexture` ends in `Brush_SetTexture` (texwnd.cpp:2153), which
         // reaches a patch through `sub_476ED0` with a5 == 1 — that branch swaps the
         // two material POINTERS and returns (brush.cpp:2852-2866) without re-laying
         // `ctrl[][].texCoord`, so the patch comes out STRETCHED by
         // newWidth/oldWidth.  Round AK diagnosed that and hung the re-naturalize on
-        // the texture-browser funnel (texwnd.cpp:1187); this funnel applies the same
+        // the texture-browser funnel (texwnd.cpp:1188); this funnel applies the same
         // material to the same selection through the same call and never got it, so
         // a patch retextured by MMB pick stretched where one retextured by a
         // thumbnail click did not.
@@ -687,7 +687,7 @@ namespace
         //
         // FILE SCOPE, not block scope: round AI shipped a link error from a
         // block-scope extern that MSVC mangled with its enclosing namespace, which
-        // is why texwnd.cpp:1129 declares this at file scope too.  See below.
+        // is why texwnd.cpp:1130 declares this at file scope too.  See below.
         Patch_KiwiReNaturalizeSelected();
 
         SurfaceInspector::UpdateSurfaceDialog();
@@ -760,7 +760,7 @@ void KiwiUv_RegisterCommands()
     //                     CLASSIC route already exists and still works: the
     //                     middle-button pick over the 3D view (drag.cpp:695).
     // Alt+letter is safe here even though the classic camera texture drag is
-    // RMB+Alt / Ctrl+RMB+Alt (camwnd.cpp:2656/2695) — those are mouse gestures
+    // RMB+Alt / Ctrl+RMB+Alt (camwnd.cpp:2720/2695) — those are mouse gestures
     // tested with GetAsyncKeyState, not rows in the hotkey table.
     Radiant_RegisterCommand( "KiwiTextureShift",  0, 0, KIWI_CMD_TEX_SHIFT );
     Radiant_RegisterCommand( "KiwiTextureRotate", 0, 0, KIWI_CMD_TEX_ROTATE );
@@ -924,7 +924,7 @@ void KiwiUv_MenuItems()
 // ── THE APPLY WAS NEVER GATED.  IT WAS BEING SILENTLY REVERTED. ────────────────────
 // The click path itself is direct and always was: ImGuiShell_ViewportInput ->
 // VP_Down( RTT_TEXTURE ) -> TexWnd_OnLButtonDown -> TexWnd_ApplyMaterialAtIndex ->
-// Texture_SetTexture -> Brush_SetTexture (imgui_shell.cpp:363-366, texwnd.cpp:1337-1345).
+// Texture_SetTexture -> Brush_SetTexture (imgui_shell.cpp:365-368, texwnd.cpp:1339-1347).
 // No modal command sees that press — KiwiCmd_MouseButton is only offered CAMERA input
 // (kiwi_viewport.cpp:577) — and Brush_SetTexture opens and CLOSES its own undo record
 // ("set face textures" / "set brush textures", select.cpp:1814-1815/:1879).  So the

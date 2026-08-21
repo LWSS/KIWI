@@ -11,9 +11,9 @@
 //     RB_ExecuteRenderCommandsLoop(...)      rb_backend.cpp:2736
 //     RB_CallExecuteRenderCommands()         rb_backend.cpp:2820
 //     R_IssueRenderCommands(...)             r_rendercmds.cpp:298
-//     CamWnd_RenderToRT( w, h )              camwnd.cpp:4508
-//     ImGuiShell_RenderViewportsToRT()       imgui_shell.cpp:757
-//     Radiant_RunMessageLoop()               radiant_main.cpp:801
+//     CamWnd_RenderToRT( w, h )              camwnd.cpp:4659
+//     ImGuiShell_RenderViewportsToRT()       imgui_shell.cpp:759
+//     Radiant_RunMessageLoop()               radiant_main.cpp:802
 //
 // `rb_shade.cpp:202` is `g_primStats->dynamicIndexCount += tess.indexCount;`.
 // Only two operands, both file-scope globals, and `g_primStats` is only ever
@@ -24,11 +24,11 @@
 // this build (assertive.cpp logs and falls through), so line 202 runs anyway.
 //
 // EXACTLY ONE PATH produces that pair.  `RB_DrawEditorSkinnedCached_Sub`
-// (r_ed_scene.cpp:704) drives `tess` itself and never calls `R_TrackPrims`, so
+// (r_ed_scene.cpp:841) drives `tess` itself and never calls `R_TrackPrims`, so
 // `g_primStats` is 0 for its whole duration; its final flush is guarded
-// `if (haveBatch && boundVb)` (r_ed_scene.cpp:805).  An `ED_SURF_MESH` surf
+// `if (haveBatch && boundVb)` (r_ed_scene.cpp:942).  An `ED_SURF_MESH` surf
 // whose vertex buffer resolves to NULL leaves `boundVb == 0` while its indices
-// were still copied into `tess` (r_ed_scene.cpp:787-789), so the flush is
+// were still copied into `tess` (r_ed_scene.cpp:924-926), so the flush is
 // skipped and `tess.indexCount` LEAKS out of the command handler.  The very
 // next `RC_SET_MATERIAL_COLOR` — the editor emits one per brush, per face, per
 // entity — hits `if (tess.indexCount) RB_EndTessSurface();` and dies.
@@ -43,7 +43,7 @@
 // device reset does not touch.  The comment at r_init.cpp:4356 claiming
 // "faceVis visCount stays 0 in all build modes, so nothing dangles" was true
 // when the surf cache was device-gated off; `Radiant_FaceVisGpuReady()` is
-// `dx.device != nullptr` (camwnd.cpp:1130), so it is not true any more.
+// `dx.device != nullptr` (camwnd.cpp:1194), so it is not true any more.
 //
 // A stale handle is worse than a crash once the pool refills, too: `vbCount`
 // restarts at 0, so buffer index 1 becomes a DIFFERENT live buffer and the
@@ -72,13 +72,13 @@ void KiwiDevice_InvalidateEditorSurfCache();
 // ═════════════════════════════════════════════════════════════════════════════
 // USER REPORT, verbatim: *"I had it hang while loading a map, we need to fix
 // this"* — and, after Break All in the debugger: the main thread parked in
-// `MsgWaitForMultipleObjects` at `Radiant_RunMessageLoop` (radiant_main.cpp:843),
+// `MsgWaitForMultipleObjects` at `Radiant_RunMessageLoop` (radiant_main.cpp:844),
 // *"screen all black, never loads.  all other threads are just nvidia."*
 //
-// THE APP WAS NOT HUNG.  radiant_main.cpp:761-845 ticks at least every 16 ms
+// THE APP WAS NOT HUNG.  radiant_main.cpp:762-846 ticks at least every 16 ms
 // whatever happens, and :843 is that tick's normal idle park.  Every tick ran
 // `ImGuiShell_RenderViewportsToRT` → `ImGuiShell_BeginFrame` → `InvalidateRect` +
-// `UpdateWindow` → the frame WM_PAINT (radiant_main.cpp:163-208).  The screen was
+// `UpdateWindow` → the frame WM_PAINT (radiant_main.cpp:164-209).  The screen was
 // black because that paint's one gate —
 // `R_SetupRendertarget_CheckDevice` (r_init.cpp:4793) — answered FALSE on every
 // tick, forever, WITHOUT PRINTING ANYTHING.  A device loss during a heavy map load

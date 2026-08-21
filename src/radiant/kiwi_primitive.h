@@ -69,13 +69,13 @@
 //     so the sphere accepts any plane.
 //
 // ── SIDE COUNTS ─────────────────────────────────────────────────────────────
-// The classic route is the modal IDD_ARBITRARY_SIDES dialog (SidesDlgProc,
-// mainfrm.cpp:2366) which ships NO default at all — it `atol`s whatever text is
-// in the edit field, so an empty field yields 0 and the ported core rejects it
-// ("Bad sides number").  KIWI picks its own, and both numbers are taken from the
-// binary rather than invented:
+// The classic route is the sides prompt (was the IDD_ARBITRARY_SIDES modal
+// SidesDlgProc, now imgui_panel_sides.cpp) which ships NO default at all — it
+// `atol`s whatever text is in the edit field, so an empty field yields 0 and the
+// ported core rejects it ("Bad sides number").  KIWI picks its own, and both
+// numbers are taken from the binary rather than invented:
 //   * cylinder / cone = 16, the count the ported Brush_MakePhysCylinder itself
-//     hardcodes (brush.cpp:3589, `Brush_MakeSided_Prolog( 0x10u, 0 )`);
+//     hardcodes (brush.cpp:3598, `Brush_MakeSided_Prolog( 0x10u, 0 )`);
 //   * sphere = 8, because Brush_MakeSidedSphere builds sides×sides FACES
 //     (brush.cpp:3736) — 8 is 64 faces, and 16 would be 256 on one brush.
 // Adjusted live with `[` / `]`, the same non-digit input the polygon tool uses
@@ -111,7 +111,7 @@ class KiwiEditorCommand;
 // It is written as a product rather than as `60.0f` so the intent survives a
 // future units change.
 #define KPRIM_AUTO_HEIGHT   ( 5.0f * 12.0f )   // 5 ft, in world units (inches)
-#define KPRIM_CYL_SIDES_DEF  16     // brush.cpp:3589 (Brush_MakePhysCylinder)
+#define KPRIM_CYL_SIDES_DEF  16     // brush.cpp:3598 (Brush_MakePhysCylinder)
 #define KPRIM_CYL_SIDES_MIN  3      // brush.cpp:3383 rejects < 3
 // -- KIWI-UX (ROUND AF, ITEM 7): 32 -> 64 --------------------------------
 // USER DIRECTIVE, verbatim: "Sometimes you want more sides on the

@@ -75,7 +75,7 @@ extern void        CamWnd_BuildMatrix(); // camwnd.cpp 0x403470
 extern char  Byte4PackPixelColor( float *from, GfxColor *out );          // 0x402ac0
 // ROUND AG, ITEM 3 — the outliner hover target needs a console line for its cap
 // and a repaint request when it changes.
-extern int   Sys_Printf( const char *fmt, ... );                        // win_qe3.cpp:112
+extern int   Sys_Printf( const char *fmt, ... );                        // win_qe3.cpp:118
 extern int   g_nUpdateBits;                                             // engine_stubs.cpp:773
 extern void  __cdecl R_AddRenderCmdDrawTris(
                  Material *material, MaterialTechniqueType techType, short indexCount,
@@ -132,7 +132,7 @@ namespace
     //
     // WHAT "SELECTED" ACTUALLY MEASURES, so the target is a number and not a
     // feeling.  A selected BRUSH in the camera is TWO channels, not one
-    // (camwnd.cpp:2755-2856):
+    // (camwnd.cpp:2819-2929):
     //   1. a MATERIAL_COLOR tint of `d_savedinfo.colors[11]` = {1, .25, .25, .25}
     //      (win_qe3.cpp:424) over the whole TEXTURED surface — vertcol_shaded
     //      lerps, so the result is 0.75*texture + 0.25*red; and

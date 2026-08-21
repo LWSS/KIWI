@@ -44,8 +44,6 @@ void Prefs_SetDefaults( prefData_t *p )
     p->m_nMoveSpeed           = 350;
     p->m_nAngleSpeed          = 150;
     p->m_bCamXYUpdate         = 0;
-    p->m_bCubicClipping       = 1;
-    p->m_nCubicScale          = 13;
     p->m_bALTEdge             = 1;
     p->m_bTextureBar          = 0;
     p->m_bSnapTToGrid         = 0;
@@ -54,7 +52,6 @@ void Prefs_SetDefaults( prefData_t *p )
     p->m_bYZVis               = 0;
     p->m_bZVis                = 1;
     p->m_bSizePaint           = 1;
-    p->b_mCullSky             = 1;
     p->m_dropHeight           = 28;           // ctor default (LoadPrefs key "DropHeight" 28)
     p->m_bForceZeroDropHeight = 0;            // ctor default (no registry key; OnDropSelected gate)
     p->m_bNoClamp             = 0;
@@ -143,8 +140,6 @@ void Prefs_LoadPrefs( prefData_t *p )
     p->m_nMoveSpeed           = Radiant_ProfileGetInt( "Prefs", "MoveSpeed", 350 );
     p->m_nAngleSpeed          = Radiant_ProfileGetInt( "Prefs", "AngleSpeed", 150 );
     p->m_bCamXYUpdate         = Radiant_ProfileGetInt( "Prefs", "CamXYUpdate", 0 );
-    p->m_bCubicClipping       = Radiant_ProfileGetInt( "Prefs", "CubicClipping", 1 ) != 0;
-    p->m_nCubicScale          = Radiant_ProfileGetInt( "Prefs", "CubicScale", 13 );
     p->m_bALTEdge             = Radiant_ProfileGetInt( "Prefs", "ALTEdgeDrag", 1 );
     p->m_bTextureBar          = Radiant_ProfileGetInt( "Prefs", "UseTextureBar", 0 );
     p->which_game             = Radiant_ProfileGetString( "Prefs", "WhichGame", "" );
@@ -154,7 +149,6 @@ void Prefs_LoadPrefs( prefData_t *p )
     p->m_bYZVis               = Radiant_ProfileGetInt( "Prefs", "YZVIS", 0 );
     p->m_bZVis                = Radiant_ProfileGetInt( "Prefs", "ZVIS", 1 );
     p->m_bSizePaint           = Radiant_ProfileGetInt( "Prefs", "SizePainting", 1 );
-    p->b_mCullSky             = Radiant_ProfileGetInt( "Prefs", "CullSkies", 1 );
     p->m_dropHeight           = Radiant_ProfileGetInt( "Prefs", "DropHeight", 28 );
     p->m_bNoClamp             = Radiant_ProfileGetInt( "Prefs", "NoClamp", 0 );
     p->m_bDropModel           = Radiant_ProfileGetInt( "Prefs", "DropModel", 0 );
@@ -245,8 +239,6 @@ void Prefs_SavePrefs( prefData_t *p )
     Radiant_ProfileSetInt( "Prefs", "CamXYUpdate", p->m_bCamXYUpdate );
     Radiant_ProfileSetInt( "Prefs", "MoveSpeed", p->m_nMoveSpeed );
     Radiant_ProfileSetInt( "Prefs", "AngleSpeed", p->m_nAngleSpeed );
-    Radiant_ProfileSetInt( "Prefs", "CubicClipping", p->m_bCubicClipping );
-    Radiant_ProfileSetInt( "Prefs", "CubicScale", p->m_nCubicScale );
     Radiant_ProfileSetInt( "Prefs", "ALTEdgeDrag", p->m_bALTEdge );
     Radiant_ProfileSetInt( "Prefs", "UseTextureBar", p->m_bTextureBar );
     Radiant_ProfileSetString( "Prefs", "WhichGame", p->which_game.c_str() );
@@ -256,7 +248,6 @@ void Prefs_SavePrefs( prefData_t *p )
     Radiant_ProfileSetInt( "Prefs", "YZVIS", p->m_bYZVis );
     Radiant_ProfileSetInt( "Prefs", "ZVIS", p->m_bZVis );
     Radiant_ProfileSetInt( "Prefs", "SizePainting", p->m_bSizePaint );
-    Radiant_ProfileSetInt( "Prefs", "CullSkies", p->b_mCullSky );
     Radiant_ProfileSetInt( "Prefs", "DropHeight", p->m_dropHeight );
     Radiant_ProfileSetInt( "Prefs", "NoClamp", p->m_bNoClamp );
     Radiant_ProfileSetInt( "Prefs", "DropModel", p->m_bDropModel );
@@ -346,7 +337,7 @@ struct prefsDlgState_t
     // Checkboxes (BOOL).
     BOOL bLoadLast, bFace, bRightClick, bAutoSave, bLoadLastMap, bTexSubset;
     BOOL bSnapshots, bLoseChanges, bCamXYUpdate, bUseWheel, bAltAlwaysMove;
-    BOOL bSnapTGrid, bLinkKeepSel, bPaintSizing, bCullSky, bDontClamp;
+    BOOL bSnapTGrid, bLinkKeepSel, bPaintSizing, bDontClamp;
     BOOL bTexToolbar;
     BOOL bChaseMouse, bTexScrollbar, bThickLines, bColoredEnts, bTexBrush2d;
     BOOL bTexMesh2d, bFast2dDrag, bDetachWin, bTransBg;
@@ -380,7 +371,6 @@ void PrefsDlg_Gather( const prefData_t *p, prefsDlgState_t &out )
     out.bSnapTGrid     = p->m_bSnapTToGrid != 0;
     out.bLinkKeepSel   = p->linking_keeps_selection != 0;
     out.bPaintSizing   = p->m_bSizePaint != 0;
-    out.bCullSky       = p->b_mCullSky != 0;
     out.bDontClamp     = p->m_bNoClamp != 0;
     out.sUserIni       = p->m_strUserIniPath;
     out.sUserFilters   = p->m_strUserFilterPath;
@@ -431,7 +421,6 @@ void Prefs_ApplyFromDialogState( prefData_t *p, const prefsDlgState_t &st )
     p->m_bSnapTToGrid     = st.bSnapTGrid ? 1 : 0;
     p->linking_keeps_selection = st.bLinkKeepSel ? 1 : 0;
     p->m_bSizePaint       = st.bPaintSizing ? 1 : 0;
-    p->b_mCullSky         = st.bCullSky ? 1 : 0;
     p->m_bNoClamp         = st.bDontClamp ? 1 : 0;
     p->m_strUserIniPath   = st.sUserIni;
     p->m_strUserFilterPath= st.sUserFilters;

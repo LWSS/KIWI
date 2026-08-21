@@ -41,14 +41,10 @@ extern FILE *Map_SaveFileToPerforce( const char *path, char a2 );          // 0x
 extern int LoadFile( const char *filename, void **bufferptr );             // 0x40ABD0
 
 // ── Layered-material WINDOW globals/helpers (layeredmaterialwnd.cpp) ──────────
-// AddEntries makes the newly-created entry the window's active material and refreshes
-// the toolbar/title.  These are inert when the window has not been created
-// (lyrMtlWndGlob.hwnd == NULL → SetWindowTextA on NULL is a harmless no-op; the
-// toolbar sync early-returns on a NULL toolbar HWND from SendMessage).
+// AddEntries makes the newly-created entry the tool's active material; the caption and
+// toolbar-state refresh the binary did here is per-frame work in imgui_panel_lyrmtl.cpp.
 // (lyrMtlWndGlob extern comes from qe3.h)
 extern int  g_nUpdateBits;                           // 0x25D5A74
-// sub_4174E0 (toolbar button enable/check sync) lives in layeredmaterialwnd.cpp.
-extern "C" int LayeredMaterialWnd_SyncToolbar();     // wrapper around sub_4174E0
 
 // ─────────────────────────────────────────────────────────────────────────────
 // lyrMtlGlob — global storage for the layered material library.
@@ -532,9 +528,6 @@ void LayeredMaterials_AddEntries( char *name, HWND hWnd )
 
     lyrMtlWndGlob.activeLyrMtl = (int)(intptr_t)entry;
     lyrMtlWndGlob.selectedLayerIndex  = 0;
-    SetWindowTextA( lyrMtlWndGlob.hwnd, va( "Editing \"%s\"", (const char *)entry ) );
-    LayeredMaterialWnd_SyncToolbar();
-    InvalidateRect( lyrMtlWndGlob.layerList, nullptr, FALSE );
     g_nUpdateBits |= 0x10u;   // W_TEXTURE
     ++lyrMtlGlob.entryCount;
 }

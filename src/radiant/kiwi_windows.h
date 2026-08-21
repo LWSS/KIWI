@@ -60,7 +60,14 @@
 // Existing users get a one-time layout reseed — the same deal every default change
 // has made since shakeout I, and the only way one is ever visible to an install
 // that already has a profile.
-#define KIWI_LAYOUT_VERSION  11
+// 11 -> 12: the SUN tab joins the same node as a fifth tab (kiwi_sun.h).  USER
+// REPORT — "where is the add menu?  I can't see it.  You need to do a tab like the
+// skybox helper." — which is this bump's whole justification: the DockBuilder line
+// alone only runs on a fresh layout, so without the bump the reporter's long-lived
+// kiwi_dock11.ini would pin the old layout and the tab would never appear.  BOTH
+// halves are needed, exactly as the round-BD note above says: the [KiwiWindows]
+// reseed opens the window, the fresh kiwi_dock12.ini places it.
+#define KIWI_LAYOUT_VERSION  12
 
 enum kiwiWindow_t
 {
@@ -95,6 +102,12 @@ enum kiwiWindow_t
     // rule the three rows above it state applies: this enum and that function have to
     // change together or the window opens as a floating tab over the camera.
     KIWI_WIN_UVEDITOR,      // "UV editor"                      default ON
+    // The SUN tab (kiwi_sun.h).  USER REPORT: "You need to do a tab like the
+    // skybox helper."  Fifth tab of the same node, DEFAULT ON, and the same rule
+    // the four rows above it state applies: this enum and
+    // ImGuiShell_BuildDefaultDockLayout have to change together or the window
+    // opens as a floating tab over the camera.
+    KIWI_WIN_SUN,           // "Sun"                            default ON
     KIWI_WIN_COUNT,
 };
 
@@ -128,8 +141,8 @@ void  KiwiWindows_SyncMenu();
 // than into a new top-level one, and that is safe: appending ITEMS to a popup
 // changes nothing about the MENU BAR's popup indices, which is what the two
 // index-based consumers in this build actually read —
-//   * texwnd.cpp:1638 / :1651 / :1665 / :1679  GetSubMenu( menu, 5 )  = Textures
-//   * radiant_main.cpp:529 / qe3.cpp:766       GetSubMenu( menu, 0 )  = File (MRU)
+//   * texwnd.cpp:1640 / :1651 / :1665 / :1679  GetSubMenu( menu, 5 )  = Textures
+//   * radiant_main.cpp:530 / qe3.cpp:766       GetSubMenu( menu, 0 )  = File (MRU)
 // Only adding or removing a POPUP would shift those, and the §9 "Windows" popup
 // is appended at the END of the bar (after Help), so even that one cannot.
 // View is popup index 2 (File 0, Edit 1, View 2, Selection 3, Grid 4, Textures 5

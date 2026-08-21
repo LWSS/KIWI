@@ -316,7 +316,7 @@
 //               5 ToggleZ 33070
 //               mods 1 FREE — nothing displaced.  Shift+Z: PRIM_SPHERE 34053
 //               (Ctrl+Z never reaches the table: Radiant_PreTranslateMessage
-//               handles it upstream, radiant_main.cpp:661-665.)
+//               handles it upstream, radiant_main.cpp:662-666.)
 //
 //   vk 0x58 X   occupancy: 0 ToggleClipper 32783 · 1 ToggleCrosshairs 33100 ·
 //               2 Center2DOnCamera 33108 · 4 SelectedAssociated 33152 ·

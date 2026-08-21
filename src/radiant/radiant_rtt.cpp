@@ -5,6 +5,7 @@
 #include <d3d9.h>
 #include <string.h>                  // KIWI-UX (ROUND AX): strncpy in RTT_DescribeLiveSlots
 #include <gfx_d3d/r_init.h>          // dx, R_SetupRenderTargetTexture
+#include "kiwi_viewdirty.h"          // KiwiViewDirty_MarkAll on a reset release
 
 // Present-suppress flag read by RB_SwapBuffers (rb_backend.cpp): true while a viewport
 // renders into its RT so the offscreen render does not Present. Cleared for the final
@@ -69,7 +70,7 @@ namespace
 //   * ONE TestCooperativeLevel per frame instead of four.
 //   * A partially-rendered pass is worse than none: CamWnd_RenderToRT can succeed and
 //     XYWnd_RenderToRT then fail, leaving three stale RT images composited against one
-//     fresh one.  The white-flicker guard (ImGuiShell_FrameAuthorized, imgui_shell.cpp:1101)
+//     fresh one.  The white-flicker guard (ImGuiShell_FrameAuthorized, imgui_shell.cpp:1103)
 //     already tolerates a tick with no scene render at all, so skipping is free.
 // It does NOT replace RTT_Begin's own check — the device can be lost between this call and
 // any one viewport's Begin, and that check is the one that keeps a lost-device reset from
@@ -187,6 +188,9 @@ void RTT_ReleaseForReset()
     for ( rtSlot_t &s : s_slots )
         FreeSlot( s );
     FreeSlot( s_thumbSlot );        // ROUND AX: NOT covered by the loop — see above.
+    // The viewport textures the dirty-flag skip lets ImGui keep sampling have just been
+    // DESTROYED, so every view must render again regardless of the editor's update bits.
+    KiwiViewDirty_MarkAll();
     // KIWI-UX (ROUND AV, ITEM 3).  The thumbnail RT is released just above, and the
     // thumbnail CACHE (managed textures + the SYSTEMMEM readback surface, kiwi_entthumb.cpp)
     // is dropped with it.  Neither pool strictly requires it — MANAGED and SYSTEMMEM both

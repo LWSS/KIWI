@@ -21,7 +21,7 @@
 #include <vector>
 
 // ── ported entry points (verified against their definitions) ────────────────
-extern int Sys_Printf( const char *fmt, ... );   // win_qe3.cpp:112  int Sys_Printf(const char*,...)
+extern int Sys_Printf( const char *fmt, ... );   // win_qe3.cpp:118  int Sys_Printf(const char*,...)
 extern int g_nUpdateBits;                        // engine_stubs.cpp:773  int g_nUpdateBits = 0  (0x25D5A74)
 
 namespace

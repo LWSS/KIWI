@@ -35,13 +35,15 @@
 //   34030..34069  MODAL commands   (dispatch = KiwiCmd_Start, then a live gesture)
 //   34100..34199  instant commands, BLOCK 2 (shakeout D onward)
 // Allocated so far: instant-1 34001..34029 (FULL), modal 34030..34065,
-//                   instant-2 34100..34133.
-//                   Next free: instant 34134, modal 34066.
+//                   instant-2 34100..34136.
+//                   Next free: instant 34137, modal 34066.
+// (The SUN HELPER took instant 34135 for "Place Sun" and 34136 for its §9 window
+//  flag — kiwi_sun.h.)
 // (ROUND BM took instant 34133 for SECTION ANALYSIS — kiwi_section.h.  The ledger
 //  said "next free: instant 34132" while round BK had already taken 34132 for
 //  KIWI_CMD_VIEW_FACE, so this line is also the correction of that drift.)
 // KIWI-UX (CLEANUP, C-3): keep this ledger in step with the #defines below — the
-// top of instant-2 is KIWI_CMD_SECTION_TOGGLE 34133.
+// top of instant-2 is KIWI_CMD_WINDOW_SUN 34136.
 // (ROUND BH took instant 34131 for CAULK SELECTION — kiwi_caulk.h.)
 // (ROUND BF took instant 34130 for the BUILD & RUN dialog — kiwi_launch.h.)
 // (ROUND BE took instant 34128 / 34129 for TEXTURE IMPORT — kiwi_import.h.)
@@ -451,6 +453,27 @@
 // Registered UNBOUND — it is reached by the button above the view cube and by name
 // from the palette, the same rule KiwiMatInfo / KiwiModelInfo follow.
 #define KIWI_CMD_SECTION_TOGGLE     34133   // "Section Analysis" (view-cube button)
+// ── the instance-batching KILL SWITCH ──────────────────
+// Round BY4 changes HOW every placed model is drawn (pre-transformed world-space
+// instances merged into one draw call per material run, kiwi_instcache.h).  That
+// is a large change to the picture-producing path, landing unbuilt, so it ships
+// with a way to turn it off IN SESSION: the same shape as KiwiModelInfo — an
+// unbound, palette-only toggle — so the user can A/B a suspected rendering
+// difference against round BY3's per-instance path without a rebuild.
+#define KIWI_CMD_INSTBATCH          34134   // "Instance batching (toggle)"
+// ── the SUN HELPER (kiwi_sun.h) ─────────────────────────────────────────────
+// ONE instant id.  Placing a sun is a single write of the absent worldspawn keys
+// followed by selecting the helper — there is no gesture to own, so it is not a
+// modal verb; the ORBIT is a handle drag the viewport routes directly, exactly
+// as the section's lollipop is, and needs no command of its own.
+// Registered UNBOUND: it is reached from the Add menu and by name from the
+// palette, the same rule every other creation row without a chord follows.
+#define KIWI_CMD_PLACE_SUN          34135   // "Place Sun" (Add menu / palette)
+// The §9 window flag for the "Sun" dock tab.  A separate id from the verb above
+// for the same reason every other window toggle has one: KiwiWindows_DispatchInstant
+// owns every §9 flag (it walks the s_def table), and the feature file owns only its
+// verbs — the split round W made for the Outliner and round AZ for Sky.
+#define KIWI_CMD_WINDOW_SUN         34136   // "Sun" (the sun-helper dock window)
 // §25 mirror is NOT here: Select_FlipAxis / DoFlip are already ported AND already
 // wired to the classic ids 32956 / 32957 / 32958, so Phase 5 adds only palette
 // metadata over those (kiwi_dupe.h explains).
@@ -1139,6 +1162,30 @@ void KiwiCmd_Cancel();
 // Used by E (a new body enters Move, so it can be placed) — the same handoff the
 // classic Paste / Clone tail performs from outside a gesture.
 void KiwiCmd_StartDeferred( int commandId, bool paused );
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  KIWI — DROP THE SELECTION WHEN THIS GESTURE ENDS
+// ═════════════════════════════════════════════════════════════════════════════
+// USER RULING, verbatim: *"When pressing right click to confirm a move (with move
+// gizmo active), it should de-select the object since its done with the
+// operation."*
+//
+// WHY IT IS PARKED RATHER THAN DONE ON THE SPOT.  KiwiCmd_UndoCommit's tail is
+// `Undo_EndBrushList( &selected_brushes )`, which walks the list to record the
+// AFTER state of everything the bracket HEAD cloned from it.  A deselect inside
+// Commit() runs BEFORE that and hands the record an empty tail, so undoing the
+// move it had just confirmed would have nothing to restore — the ticket-journal
+// rule from round I, and the same ordering hazard kiwi_extrude.h states from the
+// other side ("everything Undo_AddBrushList clones must still be on the list at
+// COMMIT").  So the request is served at the end of KiwiCmd_Commit, after the
+// bracket is closed and before the deferred START.
+//
+// SCOPE IS THE CALLER'S, and deliberately narrow: kiwi_transform.cpp's Move asks
+// for this only on an RMB confirm (KiwiCmd_ConfirmIsRmb below) of a gesture that
+// actually mutated something.  A CANCEL drops the request, exactly as the
+// deferred start does — an unfinished operation has nothing to be done with.
+// Idempotent; requesting twice deselects once.
+void KiwiCmd_DeselectAfterCommit();
 
 // ── §4 the HOT / PAUSED gesture state (shakeout E — see the state table above) ─
 // Park the gesture: the preview stays, the value stays, MouseMove stops reaching

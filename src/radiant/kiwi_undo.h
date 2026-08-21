@@ -129,12 +129,12 @@
 // a preference.  The hidden bit is `selbrush_t::brushFlags & 4` plus the depth
 // counter `selbrush_t::xx5` (select.cpp:4168-4180), and BOTH live on the
 // INSTANCE.  The legacy undo snapshots DEFS: Undo_AddBrush clones through
-// Brush_FullClone_sub475E80 (undo.cpp:510 -> brush.cpp:7401), which allocates a
+// Brush_FullClone_sub475E80 (undo.cpp:510 -> brush.cpp:7424), which allocates a
 // 0x58 `brush_t` that has no brushFlags member at all.  Worse, Undo_Undo's
 // re-create phase goes through Brush_AddToList (brush.cpp:667), whose
 // `memset( b, 0, 0x38u )` ZEROES brushFlags and xx5 -- so a legacy record does
 // not merely fail to carry the hidden bit, it destroys it.  (Brush_AddToList2,
-// brush.cpp:940, clears the low five bits on every add-to-selection for the same
+// brush.cpp:942, clears the low five bits on every add-to-selection for the same
 // structural reason.)
 //
 // So hide gets a domain of its own with its own tiny store, exactly the shape
@@ -194,7 +194,7 @@ void KiwiUndo_NoteLegacyRedoCleared();  // Undo_ClearRedo tail — the legacy re
 //   2. undo.cpp:932-982, Phase 4 — every brush DEF the record covered is
 //      re-created and handed to `Brush_AddToList2( newInst )` (undo.cpp:974),
 //      whose body TAIL-INSERTS the instance into `selected_brushes` and clears the
-//      low five brushFlags bits (brush.cpp:931-941).  So every covered brush comes
+//      low five brushFlags bits (brush.cpp:933-943).  So every covered brush comes
 //      back SELECTED AS A WHOLE OBJECT.
 // undo.cpp:1011's `Sel_InvalidateFromLegacy()` then makes the typed layer re-derive
 // from exactly that state, so KiwiSel() ends up holding SEL_OBJECT items where the

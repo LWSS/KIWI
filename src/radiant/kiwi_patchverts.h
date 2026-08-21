@@ -35,9 +35,9 @@
 // Three independent kills, any one of which is fatal on its own:
 //
 //   KILL 1 — THE CAMERA NEVER REACHES `Drag_Begin`.  The only camera route into it
-//     is CamWnd_OnLButtonDown (camwnd.cpp:3444), and `KiwiVP_CameraButtonDown`
+//     is CamWnd_OnLButtonDown (camwnd.cpp:3569), and `KiwiVP_CameraButtonDown`
 //     returns true for a bare LMB unconditionally (kiwi_viewport.cpp:639-677), so
-//     `VP_Down` is skipped (imgui_shell.cpp:386-391).  Move and up are skipped the
+//     `VP_Down` is skipped (imgui_shell.cpp:388-393).  Move and up are skipped the
 //     same way.  kiwi_viewport.cpp:394-404 already records that the legacy 3D
 //     marquee is "UNREACHABLE from any modern flow" for exactly this reason.
 //   KILL 2 — THE MODE IS RESET ON EVERY MODERN CLICK.  `Sel_SyncToLegacy` opens
@@ -86,7 +86,7 @@
 // mutation, `KiwiCmd_UndoCommit` at the end (kiwi_command.cpp:2297-2336, the
 // pattern kiwi_patchfillet.cpp:1053-1066 documents).  A patch's def is cloned
 // through `Brush_FullClone_sub475E80`, whose FIRST branch is the patch branch
-// (brush.cpp:7386-7398 → `Patch_Duplicate`, the whole 20 556-byte struct including
+// (brush.cpp:7409-7421 → `Patch_Duplicate`, the whole 20 556-byte struct including
 // the 16x16 grid), so the control grid is inside the record.  Entering and leaving
 // the MODE is not journalled — it changes no geometry.
 // ─────────────────────────────────────────────────────────────────────────────

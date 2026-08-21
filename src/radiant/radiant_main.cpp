@@ -36,6 +36,7 @@
 #include "radiant_frame.h"             // the shell-agnostic frame API (this unit's header)
 #include "xywnd.h"                     // Ed_ActiveXY / ED_VIEW_XY (U-GLOBALS)
 #include "prefs.h"                     // Prefs_Init + g_PrefsDlg (the light-preview seeds)
+#include <universal/profile.h>
                                        // NOTE (reported): prefs.h:131 still declares
                                        // Prefs_ShowDialog( CWnd * ), which does not compile
                                        // under KISAK_NO_MFC — it breaks EVERY includer, not
@@ -248,7 +249,7 @@ static LRESULT CALLBACK Radiant_FrameWndProc( HWND hwnd, UINT msg, WPARAM wParam
         // (mainfrm.cpp:5484 — it forks to Radiant_DispatchCommandDirect under KISAK_NO_MFC).
         // Menu + accelerator commands arrive with HIWORD(wParam) == 0 and lParam == 0; a
         // non-zero lParam means a CHILD CONTROL notification (the console EDIT's EN_*), which
-        // is not a command id — same gate the raw camera WndProc documents (camwnd.cpp:4040).
+        // is not a command id — same gate the raw camera WndProc documents (camwnd.cpp:4177).
         if ( lParam == 0 )
         {
             Radiant_ExecCommand( (unsigned int)LOWORD( wParam ) );
@@ -297,8 +298,14 @@ static LRESULT CALLBACK Radiant_FrameWndProc( HWND hwnd, UINT msg, WPARAM wParam
     case WM_TIMER:
         // CMainFrame::OnTimer (mainfrm.cpp:1838): timer 1 refreshes the brush/entity counts.
         // Flushing g_nUpdateBits stays RoutineProcessing's job (the idle branch of the pump).
+        // Zoned because this is periodic work that lands in the message drain, between
+        // frames, where an unzoned cost reads as an empty gap in the trace.  The handler is
+        // change-gated (qe3.cpp), so the steady-state zone is two loads and a compare.
         if ( wParam == 1 )
+        {
+            PROF_SCOPED( "status count timer" );
             QE_CountBrushesAndUpdateStatusBar();
+        }
         break;
 
     case WM_KEYDOWN:
@@ -399,12 +406,12 @@ static LRESULT CALLBACK Radiant_BlankPaneWndProc( HWND hwnd, UINT msg, WPARAM wP
 // ═════════════════════════════════════════════════════════════════════════════
 //  Radiant_CreateRenderWindows — the raw twin of mainfrm.cpp:950 (same name, same order).
 //  ORDER IS LOAD-BEARING: R_BeginRegistrationInternal asserts and attaches the device to all
-//  five windows, and the XY view is created FIRST (xywnd.cpp:4601).  Each viewport's
+//  five windows, and the XY view is created FIRST (xywnd.cpp:4603).  Each viewport's
 //  caller-obligation block spells out the d_hwnd* registration this function owes it:
-//    XY  — xywnd.cpp:4600   (d_hwndXY  + seed Ed_ActiveXY()->m_nViewType = ED_VIEW_XY)
-//    Cam — camwnd.cpp:3967  (d_hwndCamera)
-//    Z   — z.cpp:751        (d_hwndZ)
-//    Tex — texwnd.cpp:2286  (d_hwndTexture, created AFTER XY, WS_VSCROLL supplied by the
+//    XY  — xywnd.cpp:4602   (d_hwndXY  + seed Ed_ActiveXY()->m_nViewType = ED_VIEW_XY)
+//    Cam — camwnd.cpp:4104  (d_hwndCamera)
+//    Z   — z.cpp:753        (d_hwndZ)
+//    Tex — texwnd.cpp:2288  (d_hwndTexture, created AFTER XY, WS_VSCROLL supplied by the
 //                            creator, W_TEXTURE drained by Radiant_UpdateWindows)
 // ═════════════════════════════════════════════════════════════════════════════
 static bool Radiant_CreateRenderWindows( HWND frame, const EdLayout &L )
@@ -454,8 +461,13 @@ static bool Radiant_CreateRenderWindows( HWND frame, const EdLayout &L )
     // why console_print's EM_REPLACESEL works.  CEdit::CreateEx is a wrapper over this exact
     // CreateWindowExA, so the raw form is the same window.
     {
-        const DWORD kConsoleStyle = WS_CHILD | WS_VISIBLE | WS_VSCROLL |
-                                    ES_MULTILINE | ES_AUTOHSCROLL;   // 0x50200084
+        // CREATED HIDDEN — the binary's style MINUS WS_VISIBLE.  This is the QE3 console pane
+        // (the system "EDIT" class); USER32 repaints it white on every EM_REPLACESEL, and the
+        // only thing that ever hid it ran from the pump, so it was visible through every long
+        // synchronous operation.  The window still exists, so console_print's EM_* sinks and
+        // ImGuiShell_DrawConsoleTab keep working unchanged.
+        const DWORD kConsoleStyle = WS_CHILD | WS_VSCROLL |
+                                    ES_MULTILINE | ES_AUTOHSCROLL;   // 0x50200084 minus WS_VISIBLE
         s_hwndConsole = ::CreateWindowExA( WS_EX_CLIENTEDGE, "EDIT", nullptr, kConsoleStyle,
                                            L.con.left, L.con.top, width( L.con ), height( L.con ),
                                            frame, (HMENU)(uintptr_t)( KIWI_IDW_PANE_FIRST + 6 ),
@@ -593,7 +605,7 @@ static bool Radiant_BootFrame( HWND frame )
         //     plus "Show Grid" / "Show Axes" check items appended INTO the existing
         //     View popup (index 2).  Appending ITEMS to a popup cannot shift the
         //     menu bar's POPUP indices, which is all the index-based consumers read
-        //     (texwnd.cpp:1638 index 5, radiant_main.cpp:529 index 0) — the argument
+        //     (texwnd.cpp:1640 index 5, radiant_main.cpp:530 index 0) — the argument
         //     is written out in kiwi_windows.h.  Same post-annotator placement as
         //     the Windows popup above, and for the same caption-cleanliness reason.
         extern void KiwiWindows_BuildViewMenu( void *frameMenu );
@@ -675,7 +687,7 @@ static bool Radiant_BootFrame( HWND frame )
     // TexWnd_ApplyMaterialAtIndex -> Texture_SetTexture -> Brush_SetTexture — every
     // level of which touches browser state (is_in_use via Texture_GetHandle, the
     // per-layer nPos, the scroll position, m_selIndex).  The base accept predicate
-    // is `tex->is_in_use` (texwnd.cpp:819), so ANY of that leaving flags clear
+    // is `tex->is_in_use` (texwnd.cpp:820), so ANY of that leaving flags clear
     // leaves the browser showing a handful of materials, and nothing later in the
     // boot re-opens it.  Asking for "show all" AFTER the last thing that can narrow
     // it makes the boot state unconditional instead of order-dependent.  It is the
@@ -724,16 +736,16 @@ static bool Radiant_BootFrame( HWND frame )
 //  the two view handlers lost.
 //
 //  Why the hotkey feed lives HERE: in the MFC shell every view forwarded its WM_KEYDOWN to
-//  CMainFrame::OnKeyDown (CXYWnd::OnKeyDown 0x465c90 → xywnd.cpp:3368; CCamWnd::OnKeyDown
-//  0x402f60 → camwnd.cpp:3648), and both of those forwards are compiled OUT under
+//  CMainFrame::OnKeyDown (CXYWnd::OnKeyDown 0x465c90 → xywnd.cpp:3369; CCamWnd::OnKeyDown
+//  0x402f60 → camwnd.cpp:3781), and both of those forwards are compiled OUT under
 //  KISAK_NO_MFC (the bodies are `#ifndef KISAK_NO_MFC ... #else (void)nChar;` — they say
 //  outright "Raw shell: keys reach the frame's own pump instead").  So the pump does the
 //  lookup, gated to EXACTLY the windows that fed the frame in MFC:
 //     the frame itself      (ON_WM_KEYDOWN, mainfrm.cpp:229)
-//     the XY grid           (xywnd.cpp:3368)
-//     the camera view       (camwnd.cpp:3648)
+//     the XY grid           (xywnd.cpp:3369)
+//     the camera view       (camwnd.cpp:3781)
 //  Z and the texture browser are deliberately EXCLUDED: neither CZWnd nor CTexWnd has an
-//  ON_WM_KEYDOWN entry (z.cpp:748 / texwnd.cpp:2283 both note the gap), so they swallowed
+//  ON_WM_KEYDOWN entry (z.cpp:750 / texwnd.cpp:2285 both note the gap), so they swallowed
 //  keys in the MFC shell and must keep swallowing them here.  The console EDIT is excluded
 //  by the same rule, which is what keeps typed text out of the hotkey table (the equivalent
 //  of CEntityWnd::PreTranslateMessage's "not an Edit control" gate, win_ent.cpp:1689).
@@ -957,17 +969,25 @@ static int Radiant_RunMessageLoop()
     MSG msg;
     for ( ;; )
     {
-        while ( ::PeekMessageA( &msg, nullptr, 0, 0, PM_REMOVE ) )
+        // ATTRIBUTION: one zone around the whole drain, not one per message — pass-boundary
+        // granularity.  Opened only when there is something to drain: the sub-millisecond
+        // tail of every frame runs this loop many times with an empty queue, and zoning
+        // those would bury the trace in empty scopes.
+        if ( ::PeekMessageA( &msg, nullptr, 0, 0, PM_NOREMOVE ) )
         {
-            if ( msg.message == WM_QUIT )
+            PROF_SCOPED( "pump message drain" );
+            while ( ::PeekMessageA( &msg, nullptr, 0, 0, PM_REMOVE ) )
             {
-                ::timeEndPeriod( 1 );
-                return (int)msg.wParam;
-            }
-            if ( !Radiant_PreTranslateMessage( &msg ) )
-            {
-                ::TranslateMessage( &msg );
-                ::DispatchMessageA( &msg );
+                if ( msg.message == WM_QUIT )
+                {
+                    ::timeEndPeriod( 1 );
+                    return (int)msg.wParam;
+                }
+                if ( !Radiant_PreTranslateMessage( &msg ) )
+                {
+                    ::TranslateMessage( &msg );
+                    ::DispatchMessageA( &msg );
+                }
             }
         }
 
@@ -982,6 +1002,9 @@ static int Radiant_RunMessageLoop()
         {
             if ( s_hwndFrame && ::IsWindowVisible( s_hwndFrame ) && ImGuiShell_PrimaryActive() )
             {
+                // The editor's frame: four RT viewport renders, one composited ImGui frame,
+                // then the pop-out windows.  Capped at 60 Hz by the QPC arithmetic around it.
+                PROF_SCOPED( "editor frame" );
                 // Phase 5: render the four viewports into their RT textures FIRST — each does
                 // its own scene + suppressed Present, so it must run OUTSIDE the compositing
                 // frame's scene bracket. The compositing ImGui frame then samples them.
@@ -998,6 +1021,7 @@ static int Radiant_RunMessageLoop()
                 // handler may pop a modal context menu). Uses the rects/hover the frame
                 // just recorded.
                 ImGuiShell_DispatchViewportInput();
+                FrameMark;
             }
             // Advance by whole frame intervals (drift-free cadence); a long stall
             // resynchronizes instead of "catching up" with a burst.
@@ -1023,6 +1047,10 @@ int APIENTRY WinMain( HINSTANCE hInstance, HINSTANCE /*hPrevInstance*/,
     // radiantapp.cpp:53 — gate P2 smoke test: verify the engine subset links and basic
     // printing works before any real init.  Com_Printf is safe pre-init.
     Com_Printf( 0, "[Radiant] Gate P2 smoke: engine subset initialized, WinMain reached\n" );
+
+    // Map loads are straight-line synchronous and never pump; without this the DWM
+    // ghost paints a white copy over the frame once Windows marks it unresponsive.
+    ::DisableProcessWindowsGhosting();
 
     // radiantapp.cpp:57 — register the common-control window classes the editor's child
     // controls need (the inspector tab strip uses SysTabControl32 — ICC_TAB_CLASSES).

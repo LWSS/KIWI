@@ -25,21 +25,21 @@
 // `SetMaterial( "caulk", &mat )` (csg.cpp:665 and :679) and Brush_AutoCaulk compares a
 // face's current material with `_stricmp( name, "caulk" )` (csg.cpp:722).  So the
 // registered editor name of the shipped caulk material is the bare leaf `caulk`, and
-// Texture_GetHandle( "caulk" ) (texwnd.cpp:313) is the same lookup the browser uses —
+// Texture_GetHandle( "caulk" ) (texwnd.cpp:320) is the same lookup the browser uses —
 // it lowercases, walks the registered list and, on a first reference, registers
-// "wc/caulk" through Register_WorldMaterial (texwnd.cpp:238-241).  In the shipped asset
+// "wc/caulk" through Register_WorldMaterial (texwnd.cpp:245-248).  In the shipped asset
 // set the bulk Load_Materials pass has already registered it, so the lookup is a list
 // walk and nothing is loaded here.
 //
 // ── D-BH-B: THE APPLY GOES THROUGH THE BROWSER FUNNEL, NOT THROUGH A SECOND PATH ──
 // The verb resolves caulk to its INDEX in the browser's sorted_materials and calls
-// TexWnd_ApplyMaterialAtIndex (texwnd.cpp:1250).  That is round AZ's D-AZ-D argument
+// TexWnd_ApplyMaterialAtIndex (texwnd.cpp:1252).  That is round AZ's D-AZ-D argument
 // applied a second time: the funnel already carries
-//   * the face-selection freshen + validate ("monkey hardening", texwnd.cpp:1266-1286),
+//   * the face-selection freshen + validate ("monkey hardening", texwnd.cpp:1296-1316),
 //   * TexWnd_BuildClickedMaterialDef -> Texture_SetTexture -> Brush_SetTexture, whose
 //     ONE undo record covers both `selected_brushes` and `g_SelectedFaces`
 //     (select.cpp:1814-1879),
-//   * round AK's Patch_KiwiReNaturalizeSelected fence (texwnd.cpp:1312),
+//   * round AK's Patch_KiwiReNaturalizeSelected fence (texwnd.cpp:1314),
 //   * ROUND BH ITEM 3's KiwiUv_EndGestureBeforeApply at its head, and
 //   * ROUND BH ITEM 2's auto-fit at its tail.
 // A second apply written here would have been a second undo shape and five things to
@@ -72,7 +72,7 @@
 // would destroy a texdef the mapper aligned by hand.  The detection is a LEAF-name
 // case-insensitive compare against "caulk" (KiwiCaulk_IsCaulkName), so "wc/caulk" and
 // "caulk" both match while "caulk_something" does not — deliberately narrower than
-// Cam_EditorMaterialColor's substring table (camwnd.cpp:633-634), which may class a
+// Cam_EditorMaterialColor's substring table (camwnd.cpp:639-640), which may class a
 // whole family as tool-coloured but must never make this fit fire on one.
 //
 // ── D-BH-E: ITEM 4 IS WHAT MAKES ITEM 2 VISIBLE ─────────────────────────────────
@@ -105,7 +105,7 @@
 // for Ctrl+R, round U for Ctrl+1..4 and round AA for DELETE, and the fix is the same
 // shape: one rung above the swallow, gated on PreemptIdle.  It does NOT cancel, unlike
 // round N's — the browser funnel already runs KiwiUv_EndGestureBeforeApply /
-// …RestoreGestureAfterApply around the apply (texwnd.cpp:1259/:1330), which cancels
+// …RestoreGestureAfterApply around the apply (texwnd.cpp:1261/:1330), which cancels
 // AND re-arms the parked push with a fresh baseline, so cancelling in the funnel would
 // cost the user the face gizmo on every End press.
 //

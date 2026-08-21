@@ -45,39 +45,39 @@ extern int       g_nUpdateBits;                                         // 0x25D
 // (brush.cpp:463), copied verbatim as the house rule requires.  It is misleading:
 // every caller in this layer passes g_qeglobals.random_texture_stuff, i.e. the
 // MATERIAL-DEF source, not plane points.
-extern brush_t  *Brush_Alloc( const void *planeptsSrc, eclass_t *ecls ); // brush.cpp:463 (0x4751e0)
-extern void      Brush_Create( float *mins, float *maxs, brush_t *b, eclass_t *ecls ); // brush.cpp:508 (0x475300)
-extern void      Brush_Free_R( brush_t *def );                          // brush.cpp:700 (0x475af0)
-extern void      Select_Deselect( int bAlsoFreeFaces );                 // select.cpp:1445 (0x48E800)
-extern bool      Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId ); // mainfrm.cpp:1340
+extern brush_t  *Brush_Alloc( const void *planeptsSrc, eclass_t *ecls ); // brush.cpp:465 (0x4751e0)
+extern void      Brush_Create( float *mins, float *maxs, brush_t *b, eclass_t *ecls ); // brush.cpp:510 (0x475300)
+extern void      Brush_Free_R( brush_t *def );                          // brush.cpp:706 (0x475af0)
+extern void      Select_Deselect( int bAlsoFreeFaces );                 // select.cpp:1444 (0x48E800)
+extern bool      Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId ); // mainfrm.cpp:1358
 // KIWI-UX (CLEANUP, B-28): FILE SCOPE, not block scope.  Round AI shipped a link
 // error from a block-scope extern that MSVC mangled with its enclosing namespace;
 // kiwi_uv.cpp carries the full account.  This is the declaration that used to sit
 // inside KiwiPrim_RegisterCommands.
-extern void      Radiant_ExecCommand( unsigned int cmdId );             // mainfrm.cpp:4083
+extern void      Radiant_ExecCommand( unsigned int cmdId );             // mainfrm.cpp:4054
 // KIWI-UX (ROUND BK, ITEM 5): the height sign is "toward the camera", so the
 // auto-height arm needs the view axis.  `camera_s` comes from mainfrm.h, included
-// above; the accessor never returns NULL (contract at camwnd.cpp:148-154).
-extern camera_s *Ed_Camera();                                           // camwnd.cpp:156
+// above; the accessor never returns NULL (contract at camwnd.cpp:154-160).
+extern camera_s *Ed_Camera();                                           // camwnd.cpp:161
 
 // The three ported primitives.  Signatures copied from their definitions, not
 // from the call sites: Brush_MakeSided's first parameter really is an `int`
-// carrying the brush_t* (brush.cpp:3392, faithful to 0x4731E0).
-extern void      Brush_MakeSided( int a1, unsigned int sides, int axis, char snap ); // brush.cpp:3392 (0x4731E0)
-extern void      Brush_MakeSidedCone( int sides );                      // brush.cpp:3636 (0x47BC10)
-extern void      Brush_MakeSidedSphere( int sides );                    // brush.cpp:3715 (0x47BE90)
+// carrying the brush_t* (brush.cpp:3401, faithful to 0x4731E0).
+extern void      Brush_MakeSided( int a1, unsigned int sides, int axis, char snap ); // brush.cpp:3405 (0x4731E0)
+extern void      Brush_MakeSidedCone( int sides );                      // brush.cpp:3653 (0x47BC10)
+extern void      Brush_MakeSidedSphere( int sides );                    // brush.cpp:3728 (0x47BE90)
 
-// xywnd.cpp:1562 // KIWI-UX forwarder (see kiwi_extrude.h).
+// xywnd.cpp:1563 // KIWI-UX forwarder (see kiwi_extrude.h).
 extern void      Ed_EnsureCurrentMaterial_Kiwi();
-// entity.cpp 0x25D5B30 - worldspawn (same extern brush.cpp:39 / camwnd.cpp:59 use).
+// entity.cpp 0x25D5B30 - worldspawn (same extern brush.cpp:39 / camwnd.cpp:65 use).
 extern entity_s *world_entity;
 
 // ── ROUND AG, ITEM 8: the EXPERIMENTAL PATCH MODE's entry points ───────────
 // Every one copied from its DEFINITION, and the same set kiwi_patchfillet.cpp
 // declares in its own extern block (that file is the precedent this follows in
 // full — see the long note at MakePatchCylinder).
-extern selbrush_t  *Brush_AddToList( brush_t *def, entity_s *owner );        // brush.cpp:667  0x475980
-extern void         Brush_AddToList2( selbrush_t *b );                       // brush.cpp:921  0x4765A0
+extern selbrush_t  *Brush_AddToList( brush_t *def, entity_s *owner );        // brush.cpp:669  0x475980
+extern void         Brush_AddToList2( selbrush_t *b );                       // brush.cpp:927  0x4765A0
 extern patchMesh_t *MakeNewPatch();                                          // pmesh.cpp:136  0x437AC0
 extern brush_t     *AddBrushForPatch( patchMesh_t *p, entity_s *world_ent );  // pmesh.cpp:840  0x4386A0
 extern void         Patch_KiwiFinishNew( patchMesh_t *p );                    // pmesh.cpp:1558 (ROUND Q)

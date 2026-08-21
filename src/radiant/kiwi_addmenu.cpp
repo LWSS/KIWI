@@ -71,6 +71,11 @@ namespace
 
         { "From construction", "Extrude Region", KIWI_CMD_EXTRUDE_REGION },
 
+        // The sun is not a solid and not a curve: it is a set of worldspawn keys
+        // plus a helper to aim them (kiwi_sun.h), so it gets its own group rather
+        // than being filed under something it is not.
+        { "Lighting", "Place Sun",              KIWI_CMD_PLACE_SUN        },
+
         // The plane is the question this menu provokes ("on WHAT am I drawing?"),
         // so the answer is one scroll away instead of in another panel.
         { "Construction plane", "XY",        KIWI_CMD_CPLANE_XY        },

@@ -25,8 +25,8 @@
 #include <math.h>
 
 // ── ported entry points (each verified against its DEFINITION) ────────────
-//   camwnd.cpp:151        camera_s *Ed_Camera()
-//   camwnd.cpp:162        void      CamWnd_BuildMatrix()      0x403470
+//   camwnd.cpp:157        camera_s *Ed_Camera()
+//   camwnd.cpp:168        void      CamWnd_BuildMatrix()      0x403470
 //   engine_stubs.cpp:693  int       g_nUpdateBits = 0         0x25d5a74
 extern camera_s *Ed_Camera();
 extern void      CamWnd_BuildMatrix();
@@ -203,6 +203,14 @@ namespace
             KiwiLines_Add( a, b );
         }
     }
+}
+
+// ─── the display side (kiwi_lollipop.h THE DISPLAY SIDE) ─────────────────────
+float KiwiLollipop_FaceSide( const float anchor[3], const float normal[3], float push )
+{
+    if ( push < 0.0f ) return -1.0f;         // travelling: keep the ride/flip rule
+    if ( push > 0.0f ) return  1.0f;
+    return KiwiCam_FacingSign( anchor, normal );   // at rest: the camera picks
 }
 
 // ─── the predicate everything asks ───────────────────────────────────────────

@@ -28,7 +28,7 @@ extern void MarkMapModified();                                // win_qe3.cpp 0x4
 
 // ROUND AA, ITEM 4 — V8's two halves.  The Brush_MakeFaceWinding declaration is
 // select.cpp:4510's, verbatim, with the definition line added.
-extern winding_t *Brush_MakeFaceWinding( face_t *f, brush_t *def );   // brush.cpp:4695 (0x471260)
+extern winding_t *Brush_MakeFaceWinding( face_t *f, brush_t *def );   // brush.cpp:4712 (0x471260)
 extern void       Winding_Free( winding_t *w );                      // winding.cpp:153
 
 namespace
@@ -319,7 +319,7 @@ bool KiwiValid_CheckBounds( brush_t *def, const char **outWhy )
 // only reach the probe box if some other plane stopped bounding them.
 //
 // WHY def->[mins,maxs] ARE WRITTEN AND PUT BACK, rather than passing a box in:
-// Brush_MakeFaceWinding (brush.cpp:4684) reads its base box straight off the def
+// Brush_MakeFaceWinding (brush.cpp:4693) reads its base box straight off the def
 // — `Winding_BaseForPlane` over def->[mins,maxs] expanded ±1 — and it is the
 // ported spelling of "the polygon these planes leave of this face".  Re-deriving
 // that clip loop here with a box parameter would be a second copy of it, so the

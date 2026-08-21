@@ -12,16 +12,16 @@
 //                (the standalone 5th slot; see radiant_rtt.h)
 //   THE FRAME    R_BeginFrame / R_BeginSharedCmdList / R_AddCmdClearScreen /
 //                R_EndFrame / R_IssueRenderCommands / R_SortMaterials
-//                — CamWnd_RenderToRT's sequence verbatim (camwnd.cpp:4693)
+//                — CamWnd_RenderToRT's sequence verbatim (camwnd.cpp:4844)
 //   THE CAMERA   R_Ed_ProjectionWouldBeValid + R_Ed_SetSceneParms
-//                — CamWnd_SetupScene's pair (camwnd.cpp:304/:316), with the
-//                  ORTHOGRAPHIC GfxMatrix round M added there (camwnd.cpp:291)
+//                — CamWnd_SetupScene's pair (camwnd.cpp:310/:316), with the
+//                  ORTHOGRAPHIC GfxMatrix round M added there (camwnd.cpp:297)
 //   THE MODEL    R_RegisterModel -> AddModelToModelInstBuff -> SkinModelInst ->
 //                R_AddEditorSurfsCmd -> RemoveModelInstFromBuf
 //                — Entity_UpdateModelInst's registration (entity.cpp:696-699)
-//                  and DrawModels' skin (camwnd.cpp:1544-1549), minus the entity
+//                  and DrawModels' skin (camwnd.cpp:1608-1613), minus the entity
 //   THE GUARD    setjmp( g_radiantAssetLoadJmp ) + __try/__except
-//                — Editor_InstanceAndSkinModel's bracket (camwnd.cpp:1565)
+//                — Editor_InstanceAndSkinModel's bracket (camwnd.cpp:1629)
 // ─────────────────────────────────────────────────────────────────────────────
 
 #include "stdafx.h"
@@ -48,18 +48,18 @@
 
 // ── externs, each copied from its definition ────────────────────────────────
 extern void  Radiant_FL_Log( const char *fmt, ... );                             // mainfrm.cpp
-// r_ed_scene.cpp:256 — int __cdecl AddModelToModelInstBuff(XModel*, float*, float)
+// r_ed_scene.cpp:318 — int __cdecl AddModelToModelInstBuff(XModel*, float*, float)
 // (the same spelling entity.cpp:254 uses).  `axis` is TWELVE floats: origin[3] then
-// axis[3][3] — r_ed_scene.cpp:280-283 reads axis[0..2] as the origin and
+// axis[3][3] — r_ed_scene.cpp:342-345 reads axis[0..2] as the origin and
 // AxisToQuat((vec3_t*)(axis+3), ...) for the rotation.  Returns a 1-BASED handle, 0 on
 // failure (XModelBad).
-extern int   AddModelToModelInstBuff( XModel *model, float *axis, float scale );  // r_ed_scene.cpp:256
-extern void  RemoveModelInstFromBuf( int inst );                                  // r_ed_scene.cpp:302
-// r_ed_scene.cpp:468 — the same declaration camwnd.cpp:1571 carries.
+extern int   AddModelToModelInstBuff( XModel *model, float *axis, float scale );  // r_ed_scene.cpp:358
+extern void  RemoveModelInstFromBuf( int inst );                                  // r_ed_scene.cpp:410
+// r_ed_scene.cpp:880 — the same declaration camwnd.cpp:1635 carries.
 extern void  SkinModelInst( int instanceHandle, Material *checkhandle, int techType,
-                            const int *colorPtr, int drawFlags );                 // r_ed_scene.cpp:468
-extern void *R_AddEditorSurfsCmd();                                               // r_ed_scene.cpp:215
-extern void  R_SortMaterials();                                                   // r_ed_scene.cpp:1059
+                            const int *colorPtr, int drawFlags );                 // r_ed_scene.cpp:880
+extern void *R_AddEditorSurfsCmd();                                               // r_ed_scene.cpp:284
+extern void  R_SortMaterials();                                                   // r_ed_scene.cpp:2009
 // engine_stubs.cpp:222-223 — the editor asset-drop recovery frame.
 extern int     g_radiantAssetLoadGuard;                                           // engine_stubs.cpp:222
 extern jmp_buf g_radiantAssetLoadJmp;                                             // engine_stubs.cpp:223
@@ -77,10 +77,10 @@ namespace
     const float KENTT_PITCH    = 20.0f;
     const float KENTT_YAW      = 200.0f;
     // Framing pad, and the ortho half-depth.  Depth is SYMMETRIC about the eye for the
-    // reason camwnd.cpp:266-271 gives: in an ortho view the eye POINT is arbitrary along
+    // reason camwnd.cpp:272-277 gives: in an ortho view the eye POINT is arbitrary along
     // the view axis, so a one-sided near plane clips what you are looking straight at.
     const float KENTT_PAD      = 1.12f;
-    // The guard-band constant every projection in this build carries (camwnd.cpp:229).
+    // The guard-band constant every projection in this build carries (camwnd.cpp:236).
     const float KENTT_GUARD    = 0.99951171875f;
     // Neutral studio background, deliberately not COLOR_CAMERABACK: a thumbnail grid
     // reads better against one flat tone than against the viewport's sky.
@@ -156,10 +156,10 @@ namespace
     char s_reqModel[128];
 
     // ── the model name a CLASS carries, or null ─────────────────────────────
-    // `defaultmdl=` -> default_model_name (eclass.cpp:915), which is cycleModelName[0]
+    // `defaultmdl=` -> default_model_name (eclass.cpp:958), which is cycleModelName[0]
     // (qe3.h:601-611).  A CLASS_PREFAB (classtype & 0x10) is excluded on purpose: its
     // "model" is a prefab of entities, not an XModel — Eclass_LoadModel takes the
-    // Prefab_Load branch for it (eclass.cpp:1009) and there is no handle to skin.
+    // Prefab_Load branch for it (eclass.cpp:1057) and there is no handle to skin.
     const char *ClassModelName( const eclass_t *ec )
     {
         if ( !ec )
@@ -172,7 +172,7 @@ namespace
 
     // ── the guarded model load ──────────────────────────────────────────────
     // MSVC forbids setjmp and __try in one function (C2713), so this is the same two-
-    // function split camwnd.cpp:1535/:1565 uses.  It runs BEFORE any render target is
+    // function split camwnd.cpp:1599/:1565 uses.  It runs BEFORE any render target is
     // bound — see kiwi_entthumb.h on why a longjmp between Begin and End would be the
     // D3DERR_INVALIDCALL failure mode rather than a skipped model.
     XModel *RegisterSEH( const char *name )
@@ -186,7 +186,7 @@ namespace
     XModel *RegisterGuarded( const char *name )
     {
         // The same parse-state precondition Editor_InstanceAndSkinModel documents
-        // (camwnd.cpp:1573-1580): XModel_LoadPhysicsCollMap parses at parseInfoNum 0 with
+        // (camwnd.cpp:1637-1644): XModel_LoadPhysicsCollMap parses at parseInfoNum 0 with
         // whatever tokenizer mode an earlier editor parse left, and collmap geometry holds
         // negative floats.  Identical result in either mode, so just enable it.
         ParseThreadInfo *parse = Com_GetParseThreadInfo();
@@ -345,7 +345,7 @@ namespace
 
         // The instance basis: rows are the model's local axes expressed in world, which
         // is the convention AddModelToModelInstBuff's AxisToQuat consumes
-        // (r_ed_scene.cpp:280-283).  A pure yaw about Z, identity when modelYaw is 0.
+        // (r_ed_scene.cpp:342-345).  A pure yaw about Z, identity when modelYaw is 0.
         float place[12] = { 0.0f, 0.0f, 0.0f,
                             yawC, yawS, 0.0f,
                            -yawS, yawC, 0.0f,
@@ -384,9 +384,9 @@ namespace
         if ( !( half > 0.0f ) )
             return nullptr;                       // degenerate bounds — nothing to frame
 
-        // The view basis, exactly CamWnd_BuildMatrix's convention (camwnd.cpp:186):
+        // The view basis, exactly CamWnd_BuildMatrix's convention (camwnd.cpp:192):
         // AngleVectors wants pitch NEGATED, and the scene axis is { vpn, -vright, vup }
-        // (camwnd.cpp:213-216).
+        // (camwnd.cpp:220-223).
         float ang[3] = { -KENTT_PITCH, KENTT_YAW, 0.0f };
         float vpn[3], vright[3], vup[3];
         AngleVectors( ang, vpn, vright, vup );
@@ -399,7 +399,7 @@ namespace
         // ORTHOGRAPHIC, for two reasons.  It frames a bbox exactly (no fit iteration and
         // no perspective foreshortening across a grid of differently-sized models), and it
         // is a projection shape R_Ed_SetSceneParms already consumes every frame from the
-        // 2D views — see camwnd.cpp:238-283 for the full argument and the matrix.
+        // 2D views — see camwnd.cpp:244-289 for the full argument and the matrix.
         const float halfExtent = half * KENTT_PAD;
         const float depth      = half * 8.0f + 64.0f;   // symmetric about the eye
         GfxMatrix proj;
@@ -416,7 +416,7 @@ namespace
             return nullptr;
 
         // The instance: `place` was built above (origin at the world origin, the ROUND-AX
-        // yaw as the 3x3).  Twelve floats, origin then the 3x3 (r_ed_scene.cpp:280-283).
+        // yaw as the 3x3).  Twelve floats, origin then the 3x3 (r_ed_scene.cpp:342-345).
         const int inst = AddModelToModelInstBuff( model, place, 1.0f );
         if ( !inst )
             return nullptr;
@@ -444,15 +444,15 @@ namespace
             //     (raw/techsets/l_sm_r0c0n0s0.techset and the whole l_sm_* family), whose
             //     pixel shader is vertcol_shaded_fog.hlsl — its CTAB declares `materialColor`
             //     (raw/shader_bin/ps_2_0_68679706);
-            //   * that is the vertcol_shaded family camwnd.cpp:2894-2899 documents:
+            //   * that is the vertcol_shaded family camwnd.cpp:2967-2972 documents:
             //         result.rgb = lerp( sample(colorMap)*vColor, matColor.rgb, matColor.w )
             //     so .w is a FLAT-COLOUR OVERRIDE FACTOR and w == 1 REPLACES THE TEXTURE;
             //   * round AV opened the thumbnail frame with {1,1,1,1} — copied from
-            //     CamWnd_RenderToRT's frame opener (camwnd.cpp:4655-4656) — and then never
+            //     CamWnd_RenderToRT's frame opener (camwnd.cpp:4806-4807) — and then never
             //     reset it, so every thumbnail surf drew at w == 1: flat white.
             //
             // The CAMERA does not have this problem because it pushes the binary's neutral
-            // {0,0,0,0} immediately before its own R_AddEditorSurfsCmd (camwnd.cpp:2900-2905,
+            // {0,0,0,0} immediately before its own R_AddEditorSurfsCmd (camwnd.cpp:2973-2978,
             // the binary's R_SetMaterialColor(NULL) at 0x4080f7/0x408115).  The thumbnail now
             // opens with the same neutral: it draws ONLY the model flush, so there is nothing
             // in this frame that wants a non-neutral MATERIAL_COLOR at all.
@@ -462,17 +462,17 @@ namespace
 
             // ── KIWI-UX (ROUND AW, ITEM 1) — OPEN THE PASS THE WAY EVERY CAMERA PASS OPENS
             // Cam_Draw calls R_SortMaterials before EACH accumulation (0x407ab9 world,
-            // camwnd.cpp:2603; 0x407fbf tint, :2919; 0x4084f0 white) and round AV's thumbnail
+            // camwnd.cpp:2667; 0x407fbf tint, :2919; 0x4084f0 white) and round AV's thumbnail
             // only had the trailing one.  Two things depend on it here:
             //   * it advances sceneSurfCount_saved, so R_AddEditorSurfsCmd carries exactly
-            //     this pass's surfs (r_ed_scene.cpp:1079);
+            //     this pass's surfs (r_ed_scene.cpp:1501);
             //   * it runs Material_Sort, which is the ONLY writer of
-            //     info.drawSurf.fields.primarySortKey (r_material_load_obj.cpp:6458-6461) —
+            //     info.drawSurf.fields.primarySortKey (r_material_load_obj.cpp:6792-6795) —
             //     and Editor_AddSurfCmd reads that field for the surf sort key
-            //     (r_ed_scene.cpp:453).  RegisterGuarded above may have just loaded these
+            //     (r_ed_scene.cpp:611).  RegisterGuarded above may have just loaded these
             //     materials for the first time (Material_Add sets rgp.needSortMaterials,
             //     r_material.cpp:537), and R_BeginFrame's own sort is gated on `rgp.world`
-            //     (r_rendercmds.cpp:1284), which Radiant never has.
+            //     (r_rendercmds.cpp:1304), which Radiant never has.
             R_SortMaterials();
 
             // The SKINNED draw item 1 restored, at the camera's textured technique.  A
@@ -484,7 +484,7 @@ namespace
             R_EndFrame();
             R_IssueRenderCommands( (uint)-1 );
             // NOT optional and not just a sort: R_SortMaterials is the per-frame RESET of
-            // the editor surf accumulation (r_ed_scene.cpp:852-860).  Without it the
+            // the editor surf accumulation (r_ed_scene.cpp:273-285).  Without it the
             // model-surf cursor never rewinds.
             R_SortMaterials();
             RTT_EndThumb();
@@ -589,6 +589,9 @@ void KiwiEntThumb_Tick()
     if ( tex )
     {
         kiwiTexEntry_t &e = s_cache[cls];
+        // Safe as an IMMEDIATE Release, unlike the wizard previews: this runs from
+        // KiwiEntThumb_Tick inside ImGuiShell_RenderViewportsToRT, BEFORE the pump authorizes
+        // the frame, so no draw list is open and the previous one was presented a tick ago.
         if ( e.tex )
             e.tex->Release();            // cannot normally happen; cheap insurance
         e.tex    = tex;

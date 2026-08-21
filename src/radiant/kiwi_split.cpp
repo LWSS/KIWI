@@ -50,13 +50,13 @@ extern void        CamWnd_BuildMatrix();                                      //
 extern int         g_nUpdateBits;                                             // 0x25D5A74 (mainfrm.cpp)
 
 extern void        Brush_SplitBrushByFace( brush_t *in, face_t *face,
-                                           brush_t **front, brush_t **back );  // brush.cpp:4596 (0x471960)
-extern selbrush_t *Brush_AddToList( brush_t *def, entity_s *owner );           // brush.cpp:667 (0x475980)
-extern void        Brush_AddToList2( selbrush_t *b );                          // brush.cpp:921 (0x4765a0)
-extern void        Brush_Free( selbrush_t *b );                                // brush.cpp:993 (0x475ba0)
-extern void        Brush_Free_R( brush_t *def );                               // brush.cpp:700 (0x475af0)
-extern void        Entity_UnlinkBrush( brush_t *b );                           // entity.cpp:465 (0x485020)
-extern void        Select_Deselect( int bAlsoFreeFaces );                      // select.cpp:1445 (0x48E800)
+                                           brush_t **front, brush_t **back );  // brush.cpp:4605 (0x471960)
+extern selbrush_t *Brush_AddToList( brush_t *def, entity_s *owner );           // brush.cpp:669 (0x475980)
+extern void        Brush_AddToList2( selbrush_t *b );                          // brush.cpp:927 (0x4765a0)
+extern void        Brush_Free( selbrush_t *b );                                // brush.cpp:1002 (0x475ba0)
+extern void        Brush_Free_R( brush_t *def );                               // brush.cpp:706 (0x475af0)
+extern void        Entity_UnlinkBrush( brush_t *b );                           // entity.cpp:464 (0x485020)
+extern void        Select_Deselect( int bAlsoFreeFaces );                      // select.cpp:1444 (0x48E800)
 extern void        Select_Brush( selbrush_t *brush, char some_overwrite,
                                  char bStatus, char center_grid_on_selection ); // select.cpp:884
 
@@ -408,7 +408,7 @@ namespace
         static const float s_white[4]   = { 1.0f, 1.0f, 1.0f, 1.0f };
 
         // KIWI-UX (CLEANUP, A-21): no null test — Ed_Camera never returns NULL
-        // (camwnd.cpp:153); only the degenerate radius is a real refusal.
+        // (camwnd.cpp:159); only the degenerate radius is a real refusal.
         const camera_s *cam = Ed_Camera();
         if ( !( radius > 0.0f ) )
             return;
@@ -652,7 +652,7 @@ bool KiwiSplit_PlaneCrossesBrush( const brush_t *def,
 // `false` NOTHING is allocated, whatever the reason.
 //
 // WHICH HALF IS WHICH, read out of the ported core rather than assumed
-// (brush.cpp:4596 Brush_SplitBrushByFace): `*back` is the clone that gains the
+// (brush.cpp:4605 Brush_SplitBrushByFace): `*back` is the clone that gains the
 // template face AS GIVEN and `*front` the clone that gains it REVERSED (planepts
 // [0] and [1] swapped, which flips the plane).  A brush's interior is the
 // intersection of its faces' `n·p <= d` half-spaces, so with `n` the template's

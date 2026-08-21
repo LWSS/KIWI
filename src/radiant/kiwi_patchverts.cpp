@@ -23,9 +23,9 @@
 
 // ── ported entry points (verified against their definitions) ────────────────
 // KIWI-UX (CLEANUP, B-6): Ed_Camera returns &g_camwndState.camera and NEVER
-// returns NULL (camwnd.cpp:153, and the contract note at :148-155 says so).  The
+// returns NULL (camwnd.cpp:159, and the contract note at :148-155 says so).  The
 // deref at :422 is therefore correct as written; a `!c` guard would be dead code.
-extern camera_s  *Ed_Camera();                       // camwnd.cpp:156
+extern camera_s  *Ed_Camera();                       // camwnd.cpp:161
 extern void       CamWnd_BuildMatrix();              // camwnd.cpp 0x403470
 extern int        g_nUpdateBits;                     // mainfrm.cpp
 extern selbrush_t selected_brushes;                  // brush.cpp

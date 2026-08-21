@@ -38,14 +38,14 @@
 //   travel <= that, NOTHING LIVE    CONTEXT MENU.  The legacy down+up PAIR is
 //                                   REPLAYED here, in order, with the flags the
 //                                   press carried:
-//                                     CamWnd_OnRButtonDown (camwnd.cpp:3753)
+//                                     CamWnd_OnRButtonDown (camwnd.cpp:3886)
 //                                       -> CamWnd_DropModelsToPlane: sets
 //                                          m_nCambuttonstate and, because
 //                                          (nFlags & MK_RBUTTON), cam_was_not_dragged
-//                                     CamWnd_OnRButtonUp   (camwnd.cpp:3759)
+//                                     CamWnd_OnRButtonUp   (camwnd.cpp:3892)
 //                                       -> Cam_MouseUp, then CamWnd_ContextMenu,
 //                                          whose FIRST gate is cam_was_not_dragged
-//                                          (camwnd.cpp:2958) — which is exactly why
+//                                          (camwnd.cpp:3031) — which is exactly why
 //                                          the down half cannot be skipped.
 //
 // Replaying the pair (rather than calling CamWnd_ContextMenu directly) keeps the
@@ -70,12 +70,12 @@
 // same rule as s_rmbLook.
 //
 // The one thing the replay neutralises is CamWnd_DropModelsToPlane's one-shot
-// cursor-joystick fly (camwnd.cpp:2486-2489): that is the CLASSIC meaning of RMB,
+// cursor-joystick fly (camwnd.cpp:2550-2553): that is the CLASSIC meaning of RMB,
 // and in the modern layer RMB is mouselook, so a context click must not also
 // nudge the camera.  It is fed dt = 0 for the duration (g_qeglobals.g_oldtime
 // saved and restored), which makes CamWnd_MouseControl's every term zero without
 // touching a line of ported logic.  (With the stock CameraMode pref of 1 it
-// returns before that anyway — camwnd.cpp:2433 — so this only matters at
+// returns before that anyway — camwnd.cpp:2497 — so this only matters at
 // CameraMode 0.)
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -93,6 +93,7 @@
 #include "kiwi_hover.h"
 #include "kiwi_lollipop.h"      // ROUND K — the extrude handle that replaces the gizmo
 #include "kiwi_section.h"       // ROUND BM — section analysis (the plane + its lollipop)
+#include "kiwi_sun.h"           // the sun helper — its glyph is a grabbable handle
 #include "kiwi_numeric.h"
 #include "kiwi_patchverts.h"    // ROUND AJ, ITEM 1 — the mode's per-frame lifecycle
 #include "kiwi_region.h"        // ROUND BL, ITEM 3 — the overlay fill route
@@ -103,18 +104,19 @@
 #include "kiwi_units.h"          // ROUND BP — KiwiUnits_Format (the banner's numbers)
 #include "kiwi_uv.h"
 #include "kiwi_viewcube.h"
+#include "kiwi_viewdirty.h"      // the 2D views' RTT gate — the camera pose marks it
 
 #include <stdio.h>               // ROUND BP — _snprintf (the banner's rows)
 
 // ── ported entry points (verified against their definitions) ────────────────
-extern void CamWnd_OnRButtonDown( HWND hwnd, unsigned int nFlags, int x, int y ); // camwnd.cpp:5270
-extern void CamWnd_OnRButtonUp  ( HWND hwnd, unsigned int nFlags, int x, int y ); // camwnd.cpp:5276
-extern bool ImGuiShell_WantsKeyboard();                                           // imgui_shell.cpp:148
+extern void CamWnd_OnRButtonDown( HWND hwnd, unsigned int nFlags, int x, int y ); // camwnd.cpp:5575
+extern void CamWnd_OnRButtonUp  ( HWND hwnd, unsigned int nFlags, int x, int y ); // camwnd.cpp:5581
+extern bool ImGuiShell_WantsKeyboard();                                           // imgui_shell.cpp:152
 // KIWI-UX (ROUND AO, ITEM Y): the terrain-paint ARMED gate — "a paint mode is
 // picked (not Disabled) AND outer radius > inner radius".  Signature copied
 // verbatim from its definition, `int sub_401D50()` at patchdialog.cpp:229 (IDB
 // 0x401D50); it is the SAME function Drag_Begin (drag.cpp:653) and Cam_Draw
-// (camwnd.cpp:3074, the cursor ring) already gate on, so this arm can never
+// (camwnd.cpp:3189, the cursor ring) already gate on, so this arm can never
 // disagree with either the ring the user sees or the handler it defers to.
 // File scope, next to the other ported externs — never at block scope inside the
 // anonymous namespace below (that spelling caused the round-AI link failure).
@@ -147,8 +149,13 @@ namespace
     // release and abort arms call into kiwi_lollipop / kiwi_gizmo, which both route
     // through the active command's Rebase/Cancel, and there is no command here to
     // route through (kiwi_section.h states why a section is view state).
+    // KG_SUN: the SUN HELPER's glyph is held (kiwi_sun.h).  Its own tag rather than
+    // KG_SECTION, for the same reason KG_SECTION is not KG_GIZMO — the two are
+    // different owners with different release and abort bodies, and a shared tag
+    // would make the release arm guess which one it is holding.
     enum kgesture_t { KG_NONE = 0, KG_ORBIT, KG_MARQUEE, KG_COMMAND, KG_CONSUMED,
-                      KG_LOOK, KG_PAN, KG_GIZMO, KG_CMD_MARQUEE, KG_SECTION };
+                      KG_LOOK, KG_PAN, KG_GIZMO, KG_CMD_MARQUEE, KG_SECTION,
+                      KG_SUN };
 
     // A press-to-release travel under this many pixels is a CLICK, not a drag.
     // Same MEANING as KBOX_CLICK_PIXELS on the LMB side; ROUND N deliberately left
@@ -487,7 +494,7 @@ namespace
     //     `camera_fov_setup == Camera_GetRectSelection3D` plus a sel_area* mode) —
     //     UNREACHABLE from any modern flow: it is armed only by Drag_Begin, which
     //     is reached only from CamWnd_OnLButtonDown, which KiwiVP_CameraButtonDown
-    //     consumes before the shell can dispatch it (imgui_shell.cpp:342-347).
+    //     consumes before the shell can dispatch it (imgui_shell.cpp:344-349).
     //     The one way stale state could survive is a classic-profile drag aborted
     //     mid-gesture, and that is torn down by CamWnd_AbortDrag through
     //     ImGuiShell_AbortViewportInput.  Left alone deliberately: adding a
@@ -589,6 +596,23 @@ bool KiwiVP_CameraButtonDown( int btn, int imgX, int imgY, bool shift, bool ctrl
         s_lastX      = imgX;
         s_lastY      = imgY;
         s_gesture    = KG_SECTION;
+        s_gestureBtn = btn;
+        return true;
+    }
+
+    // The SUN HELPER's glyph, on exactly the same terms as the section handle
+    // above it: a grabbable thing that exists with NO command running, so it has
+    // to outrank every arm below (all of which either assume a live command or
+    // read the press as a selection click).  Shift is excluded for the round-U
+    // reason the lollipop arm states — Shift is ADDITIVE everywhere in this
+    // editor and never means "grab".  KiwiSun_HandleDown self-gates on the helper
+    // being SELECTED already, so the click that selects it falls through to the
+    // ordinary grammar and cannot also orbit it (kiwi_sun.h).
+    if ( btn == 0 && !shift && KiwiSun_HandleDown( imgX, imgY ) )
+    {
+        s_lastX      = imgX;
+        s_lastY      = imgY;
+        s_gesture    = KG_SUN;
         s_gestureBtn = btn;
         return true;
     }
@@ -728,13 +752,13 @@ bool KiwiVP_CameraButtonDown( int btn, int imgX, int imgY, bool shift, bool ctrl
         // directive), and ALT+RMB is where the mouselook went.  Alt is read here
         // rather than plumbed through KiwiVP_CameraButtonDown's signature: the
         // shell already owns the ImGui io this dispatch runs inside
-        // (imgui_shell.cpp:342 passes io.KeyShift / io.KeyCtrl from the same io),
+        // (imgui_shell.cpp:344 passes io.KeyShift / io.KeyCtrl from the same io),
         // so reading io.KeyAlt from it is the same source, not a second one.
         //
         // AUDIT: nothing else in this layer binds Alt+RMB.  The camera's modern
         // arms are MMB (orbit), Shift+MMB (pan), RMB (this), wheel (dolly) and the
         // arrow fly; the XY window's Shift+RMB(+Alt) Drag_Begin arming
-        // (xywnd.cpp:3082) is a different window and a different handler entirely.
+        // (xywnd.cpp:3083) is a different window and a different handler entirely.
         //
         // The gesture is STILL tagged KG_LOOK either way, because the
         // click-vs-drag discrimination — and therefore the confirm /
@@ -743,7 +767,7 @@ bool KiwiVP_CameraButtonDown( int btn, int imgX, int imgY, bool shift, bool ctrl
         // s_rmbLook's business, not the gesture tag's.
         s_rmbLook = ImGui::GetIO().KeyAlt && !shift;
         // The flags the PRESS carried, built exactly as the shell's VP_Flags would
-        // have (imgui_shell.cpp:224): the replay must not read them at release
+        // have (imgui_shell.cpp:226): the replay must not read them at release
         // time, when the button is already up and MK_RBUTTON has gone.
         s_rmbFlags  = MK_RBUTTON | ( ctrl ? MK_CONTROL : 0u ) | ( shift ? MK_SHIFT : 0u );
         s_rmbPressX = imgX;
@@ -765,31 +789,31 @@ bool KiwiVP_CameraButtonDown( int btn, int imgX, int imgY, bool shift, bool ctrl
         //
         // WHERE THEY WERE EATEN, established by reading the dispatch rather than by
         // guessing.  The shell offers every camera press to this function FIRST
-        // (imgui_shell.cpp:407) and runs the legacy CamWnd_On* handler only when it
-        // returns false (imgui_shell.cpp:412).  The KiwiBox_Begin arm at the bottom
+        // (imgui_shell.cpp:409) and runs the legacy CamWnd_On* handler only when it
+        // returns false (imgui_shell.cpp:414).  The KiwiBox_Begin arm at the bottom
         // of this block CLAIMED every LMB press as KG_MARQUEE, unconditionally, with
-        // no test of Alt at all — so CamWnd_OnLButtonDown (camwnd.cpp:4606) was never
+        // no test of Alt at all — so CamWnd_OnLButtonDown (camwnd.cpp:4757) was never
         // called, and with it the whole ported paint chain:
         //     CamWnd_OnLButtonDown
-        //       -> CamWnd_DropModelsToPlane   (camwnd.cpp:3420; nFlags == 1 is a
+        //       -> CamWnd_DropModelsToPlane   (camwnd.cpp:3538; nFlags == 1 is a
         //          "select" combo, so it reaches the Drag_Begin tail at :3368)
         //       -> Drag_Begin                 (drag.cpp:571) whose LABEL_34 arm at
         //          drag.cpp:650 IS the terrain-paint start: Alt held, buttons 1 or 2,
         //          mode sel_brush/sel_addpoint, sub_401D50() — then Patch_Paint_Start
         //          (pmesh.cpp:5994) and d_select_mode = sel_addpoint.
         // The ring the user sees is drawn from the SAME sub_401D50 gate
-        // (camwnd.cpp:3074), which is exactly why it appeared while the stroke did
+        // (camwnd.cpp:3189), which is exactly why it appeared while the stroke did
         // not: the drawing path was reachable and the input path was not.
         //
         // Nothing else was implicated, and each was checked rather than assumed:
-        //   * the round-AM WM_SYSKEYDOWN routing (radiant_main.cpp:768-797) only
+        //   * the round-AM WM_SYSKEYDOWN routing (radiant_main.cpp:769-798) only
         //     ever looks at WM_SYSKEYDOWN/WM_SYSKEYUP.  There is no WM_SYS*BUTTON*
         //     message in Win32 — an Alt+click is a plain WM_LBUTTONDOWN — so a mouse
         //     gesture cannot enter that path, the same reason its own header gives
-        //     for Alt+MMB (radiant_main.cpp:751).  Its Alt-key-UP swallow is armed
+        //     for Alt+MMB (radiant_main.cpp:752).  Its Alt-key-UP swallow is armed
         //     only by a CONSUMED chord and is a keyboard event either way;
         //   * io.WantCaptureMouse gates the LEGACY hidden child windows
-        //     (imgui_shell.cpp:1399), not this dispatch — this runs from the pump off
+        //     (imgui_shell.cpp:1414), not this dispatch — this runs from the pump off
         //     the camera image's own hover;
         //   * Alt+RMB is mouselook and is UNTOUCHED here: it is latched in the RMB
         //     arm above (s_rmbLook) and this arm is LMB-only.
@@ -798,11 +822,11 @@ bool KiwiVP_CameraButtonDown( int btn, int imgX, int imgY, bool shift, bool ctrl
         // the whole routing: the shell then runs VP_Down -> CamWnd_OnLButtonDown, and
         // because no modern gesture starts, the rest of the stroke follows by itself —
         // KiwiVP_CameraMouseMove and KiwiVP_CameraButtonUp both return false while
-        // s_gesture == KG_NONE, so the shell's owning branch (imgui_shell.cpp:430/435)
+        // s_gesture == KG_NONE, so the shell's owning branch (imgui_shell.cpp:432/435)
         // falls through to VP_Move -> CamWnd_OnMouseMove -> CamWnd_MouseMoved
-        // (camwnd.cpp:3729 Drag_MouseMoved -> drag.cpp:1424 sub_43E6F0, the paint dab)
+        // (camwnd.cpp:3862 Drag_MouseMoved -> drag.cpp:1424 sub_43E6F0, the paint dab)
         // and to VP_Up -> CamWnd_OnLButtonUp -> Cam_MouseUp -> Drag_MouseUp.  The
-        // flags and the hwnd are the shell's own (VP_Flags, imgui_shell.cpp:261), so
+        // flags and the hwnd are the shell's own (VP_Flags, imgui_shell.cpp:263), so
         // no synthetic press is fabricated anywhere.
         //
         // ONE UNDO RECORD PER GESTURE, and it is the PORTED bracket — nothing is
@@ -812,7 +836,7 @@ bool KiwiVP_CameraButtonDown( int btn, int imgX, int imgY, bool shift, bool ctrl
         // 1697 -> sub_43ECB0 -> Undo_End (pmesh.cpp:4286).  A drag that never gets its
         // release closes the same way: KiwiVP_CameraAbort returns false with no
         // gesture live, so the shell falls through to CamWnd_AbortDrag
-        // (imgui_shell.cpp:474-478), which is Cam_MouseUp -> Drag_MouseUp.
+        // (imgui_shell.cpp:476-480), which is Cam_MouseUp -> Drag_MouseUp.
         //
         // THE GATE IS THE ARMED TEST AND NOTHING MORE.  sub_401D50() is false the
         // instant the mode is "Disabled" or the radii are not outer > inner, which is
@@ -840,7 +864,7 @@ bool KiwiVP_CameraButtonDown( int btn, int imgX, int imgY, bool shift, bool ctrl
         {
             // Belt-and-braces, and the same first line every other arm here has:
             // the shell's own press-tick hover call already clears it (idle is false
-            // with a button down, imgui_shell.cpp:422-423) and its owning branch
+            // with a button down, imgui_shell.cpp:424-425) and its owning branch
             // never re-runs hover during the drag, so this cannot un-clear anything.
             // It is here so the clear does not depend on the SHELL's ordering.
             KiwiHover_Clear();
@@ -908,6 +932,11 @@ bool KiwiVP_CameraMouseMove( int imgX, int imgY )
     // it is an absolute drag along the plane normal, rebased at the press.
     if ( s_gesture == KG_SECTION )
         KiwiSection_HandleDrag( imgX, imgY );
+    // The sun glyph orbits from the CURSOR PIXEL, which it turns into its own
+    // pitch/yaw accumulator (kiwi_sun.h) — it must not share this function's
+    // dx/dy, whose s_lastX/s_lastY are also read by the camera arms below.
+    if ( s_gesture == KG_SUN )
+        KiwiSun_HandleDrag( imgX, imgY );
 
     const int dx = imgX - s_lastX;
     const int dy = imgY - s_lastY;
@@ -998,7 +1027,7 @@ bool KiwiVP_CameraButtonUp( int btn, int imgX, int imgY )
     // USER DIRECTIVE, verbatim: "I want this native right click menu that appears
     // sometimes when right clicking on an object GONE."  (The screenshot is the
     // face-picker popup: a material name, then "Select all" / greyed "Deselect
-    // all" — CamWnd_ContextMenu, camwnd.cpp:4283.)
+    // all" — CamWnd_ContextMenu, camwnd.cpp:4434.)
     //
     // The TRIGGER is fenced off here, not the menu: CamWnd_ContextMenu and its three
     // WM_COMMAND handlers stay in camwnd.cpp untouched, ported and reference-intact,
@@ -1047,6 +1076,8 @@ bool KiwiVP_CameraButtonUp( int btn, int imgX, int imgY )
     }
     else if ( s_gesture == KG_SECTION )
         KiwiSection_HandleUp();          // ROUND BM: ungrab; the plane stays put
+    else if ( s_gesture == KG_SUN )
+        KiwiSun_HandleUp();              // ungrab and COMMIT: one undo record per drag
     else if ( s_gesture == KG_LOOK || s_gesture == KG_PAN )
         KiwiCam_PanEnd();                // drop the gesture's cached pan scale
     else if ( s_gesture == KG_ORBIT )
@@ -1092,6 +1123,7 @@ void KiwiVP_CameraHover( int imgX, int imgY, bool over )
         KiwiGizmo_Hover( imgX, imgY, false );
         KiwiLollipop_Hover( imgX, imgY, false );   // ROUND K
         KiwiSection_Hover( imgX, imgY, false );    // ROUND BM
+        KiwiSun_Hover( imgX, imgY, false );
         return;
     }
 
@@ -1099,6 +1131,10 @@ void KiwiVP_CameraHover( int imgX, int imgY, bool over )
     // exists whether or not a command is running, which is what makes it different
     // from every other handle in this file.  Done once, here, before the split.
     KiwiSection_Hover( imgX, imgY, true );
+    // The sun glyph is the same kind of thing and gets the same treatment
+    // (kiwi_sun.h): it exists independently of any command, so it is hovered once
+    // here rather than in each arm.
+    KiwiSun_Hover( imgX, imgY, true );
 
     // KIWI-UX Phase 2, spec §5: with a modal command live, an idle move IS the command's
     // preview move (no button is down during a G/extrude drag — the gesture is modal, not
@@ -1145,6 +1181,9 @@ bool KiwiVP_CameraAbort()
     }
     else if ( s_gesture == KG_SECTION )
         KiwiSection_HandleAbort();       // ROUND BM: restore the level at the grab
+    else if ( s_gesture == KG_SUN )
+        KiwiSun_HandleAbort();           // nothing was written: the worldspawn already
+                                         // holds the pre-drag angles
     else if ( s_gesture == KG_LOOK || s_gesture == KG_PAN )
         KiwiCam_PanEnd();                // shakeout E: drop the cached pan scale
     else if ( s_gesture == KG_ORBIT )
@@ -1198,6 +1237,36 @@ void KiwiVP_CameraTick( bool cursorOver )
     // ABOVE the modern-input gate on purpose: flipping the master toggle off must
     // not strand the editor in a mode whose only way out is the modern layer.
     KiwiPatchVerts_Update();
+
+    // ── THE 2D VIEWS FOLLOW THE CAMERA IN REALTIME AGAIN ────────────────────
+    // USER REPORT, verbatim: "I notice the camera indicator no longer updates in
+    // realtime."  A camera move sets W_CAMERA only — the XY_OVERLAY bit beside it
+    // is gated on m_bCamXYUpdate, which is 0 by default (prefs.cpp:46) — so
+    // KiwiViewDirty_MarkFromUpdateBits never saw the 2D views and the red camera
+    // marker sat still until the staggered heartbeat came round.
+    //
+    // ONE signature at ONE chokepoint, not a mark per handler: this tick runs
+    // AFTER the whole per-viewport input dispatch (imgui_shell.cpp:762) and it
+    // catches the LEGACY mutators too (CamWnd_Rotate / Rotate2 / PositionPan,
+    // driven from Radiant_OnIdle between frames), which is what a per-handler mark
+    // could not do without editing camwnd.cpp's ported bodies.
+    //
+    // KiwiViewDirty_Mark, NOT `g_nUpdateBits |= W_XY_OVERLAY`: the bit currency
+    // also drives Radiant_UpdateWindows' repaint dispatch and carries W_CAMERA
+    // beside it, so routing through it would re-render the camera view a second
+    // time for a move it has already drawn.  The direct mark says exactly one
+    // thing — "this RTT is stale" — and it is VIEW dirtiness only: no cache epoch
+    // is touched, because a camera move invalidates no derived data (the 2D passes
+    // do no view culling).  Cost: one XY + one Z re-render per tick WHILE the
+    // camera moves; idle cost is unchanged.
+    //
+    // ABOVE the modern-input gate, like the patch-vertex lifecycle above it: the
+    // classic input profile moves the camera too and its indicator must track.
+    if ( KiwiCam_PoseChangedSinceLastTick() )
+    {
+        KiwiViewDirty_Mark( KIWI_DIRTYVIEW_XY );
+        KiwiViewDirty_Mark( KIWI_DIRTYVIEW_Z );
+    }
 
     if ( !KiwiUX_ModernInput() )
     {

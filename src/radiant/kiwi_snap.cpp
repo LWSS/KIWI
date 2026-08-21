@@ -40,7 +40,7 @@
 extern camera_s *Ed_Camera();             // camwnd.cpp
 // The ACTIVE display-list sentinel (0x23F189C): defined engine_stubs.cpp:698
 // (`selbrush_t active_brushes{};`), same declaration kiwi_boxselect.cpp:41 and
-// camwnd.cpp:28 carry.  `selected_brushes` is declared in qe3.h:1054 and defined
+// camwnd.cpp:29 carry.  `selected_brushes` is declared in qe3.h:1054 and defined
 // engine_stubs.cpp:697.  READ ONLY here: the shakeout-F relative-angle arm walks
 // brush edges near the drawing tool's anchor and mutates nothing.
 extern selbrush_t active_brushes;
@@ -141,6 +141,55 @@ namespace
     float       s_axisDir[3]    = { 0.0f, 0.0f, 1.0f };
     float       s_axisHalfLen   = 0.0f;
     const char *s_axisName      = "Z";
+
+    // ═════════════════════════════════════════════════════════════════════════
+    //  KIWI — THE EXTENSION AXES (arm 4c candidates)
+    // ═════════════════════════════════════════════════════════════════════════
+    // The direction of whatever the tool's ANCHOR is sitting on, offered through
+    // the anchor as an ordinary axis candidate beside world Z and the plane's
+    // U/V/N.  Plasticity's own mechanism, not a parallel one:
+    //   * a picked point hands out ITS OWN axes at the anchor —
+    //     `work = work.concat(lastSnap.additionalSnapsFor(last.point))`, and every
+    //     PointAxisSnap in that list goes through `addAxis`
+    //     (plasticity/src/command/point-picker/PointPickerModel.ts:122-127);
+    //   * a CURVE ENDPOINT's contribution is its TANGENT —
+    //     `get tangentSnap() { … return new PointAxisSnap("Tangent", tangent,
+    //     this.position) }` (plasticity/src/editor/snaps/Snaps.ts:100-105), and
+    //     `activateSnapped` adds exactly that for a CurveEndPointSnap
+    //     (PointPickerModel.ts:283-285);
+    //   * a curve/EDGE anywhere along its length contributes normal + binormal +
+    //     TANGENT at the point (`CurveSnap.additionalSnapsFor`, Snaps.ts:222-244).
+    // A straight segment's tangent IS its direction, so for this editor's polygonal
+    // world "tangent at the anchor" and "the direction of the segment/edge the
+    // anchor is on" are the same vector — which is why this rides arm 4c's existing
+    // candidate set (kiwi_snap.h) instead of becoming a second mechanism.
+    //
+    // THE CAP.  An anchor vertex where several brushes meet has many incident
+    // edges, and every one of them appears TWICE (once per adjacent face winding).
+    // The gatherer dedups parallel directions and then keeps the few whose
+    // direction is nearest to where the cursor actually is, which is the only
+    // ordering that can matter to a capture test.
+    enum { KSNAP_MAX_EXT_AXES = 3 };
+
+    // ═════════════════════════════════════════════════════════════════════════
+    //  KIWI — THE 15° STOPS, FOR THE FREE TOOLS (arm 5b)
+    // ═════════════════════════════════════════════════════════════════════════
+    // A CAPTURE BAND, NOT A QUANTISER — round AG's D-AG20 rule, the same one
+    // KSNAP_LIGHT_BAND_PIX gives the lattice (kiwi_snap.h): the bearing is pulled
+    // onto a stop only when it is ALREADY within the band, and outside it the
+    // point passes through untouched so a free chain can still be drawn at 37°.
+    // The band is stated in SCREEN PIXELS of LATERAL travel at the segment's own
+    // length, converted at the cursor's own depth, so the stickiness feels the
+    // same near and far and on a long segment as on a short one.
+    const float KSNAP_ANGLE_BAND_PIX = 6.0f;
+    // …but never narrower than this in DEGREES.  A pixel band alone vanishes as
+    // the view zooms in (the same 0.1° droop that reads as 1 px at map scale reads
+    // as 24 px zoomed right in), and "it will not lock to 180" is the report.
+    const float KSNAP_ANGLE_BAND_MIN = 1.0f;
+    // …and never wider than this much of one step, so zooming out or drawing a
+    // very short segment cannot widen the band into full quantisation.  0.22 is
+    // KSNAP_LIGHT_MAX_FRAC's number, for the same reason it has it.
+    const float KSNAP_ANGLE_MAX_FRAC = 0.22f;
 
     // v3: the angle SNAP_ANGLE resolved to, for the label ("15 deg").
     float s_angleDeg = 0.0f;
@@ -266,6 +315,22 @@ namespace
         out[0] = ray.origin[0] + ray.dir[0] * dist;
         out[1] = ray.origin[1] + ray.dir[1] * dist;
         out[2] = ray.origin[2] + ray.dir[2] * dist;
+    }
+
+    // ── the normal of the plane FACING THE CAMERA ─────────
+    // The camera's own view axis, not `ray.dir`: in an ortho view they are the
+    // same vector, and in perspective ray.dir tilts with the cursor pixel, which
+    // would rock the bearing's zero across a sweep.  vpn is rebuilt from the
+    // angles every frame by CamWnd_BuildMatrix, which is also where the pick ray
+    // handed to this query came from.  False only for a camera with no basis yet.
+    bool ViewPlaneNormal( const ray_t &ray, float *out )
+    {
+        const camera_s *c = Ed_Camera();
+        Copy3( c ? c->vpn : ray.dir, out );
+        if ( Norm3( out ) )
+            return true;
+        Copy3( ray.dir, out );
+        return Norm3( out );
     }
 
     // KIWI-UX (CLEANUP, A-13): EdgeEndpoints was one of four copies of
@@ -472,9 +537,14 @@ namespace
     // The dedup is unchanged and now covers all three: a candidate that IS the
     // world vertical is dropped, because world Z is always offered first and two
     // guides on one line is two answers to one aim.
-    enum { KSNAP_AXIS_CANDS = 4 };           // world Z + plane U + plane V + plane N
+    // KIWI: + the anchor's EXTENSION directions.
+    enum { KSNAP_AXIS_CANDS = 4 + KSNAP_MAX_EXT_AXES };
 
-    int GatherAxisCandidates( const kconPlane_t &plane, axisCand_t *out )
+    // `extDirs` is `extCount` UNIT directions (3 floats each), already ranked by
+    // the caller; each is appended as a candidate unless it is parallel to one
+    // already in the set (two guides on one line is two answers to one aim).
+    int GatherAxisCandidates( const kconPlane_t &plane, const float *extDirs,
+                              int extCount, axisCand_t *out )
     {
         int n = 0;
         out[n].dir[0] = 0.0f; out[n].dir[1] = 0.0f; out[n].dir[2] = 1.0f;
@@ -495,7 +565,53 @@ namespace
             out[n].name = AxisName( d, pn[i] );
             ++n;
         }
+
+        // ── KIWI: the EXTENSION axes ─────────────────
+        // See the KSNAP_MAX_EXT_AXES block above for the Plasticity mechanism
+        // these match.  They are LAST because the world/plane triple is what the
+        // user can always count on being there; ScanAxes ranks on pixel distance
+        // anyway, so this order only decides a dead tie.
+        for ( int i = 0; i < extCount && n < KSNAP_AXIS_CANDS; ++i )
+        {
+            const float *d = extDirs + (size_t)i * 3;
+            bool dup = false;
+            for ( int k = 0; k < n && !dup; ++k )
+                dup = ( fabsf( Dot3( d, out[k].dir ) ) > 0.999f );
+            if ( dup )
+                continue;
+            Copy3( d, out[n].dir );
+            // An extension that happens to lie along a world axis is named for the
+            // axis (AxisName), so the label never says "ext" about the vertical.
+            out[n].name = AxisName( d, "ext" );
+            ++n;
+        }
         return n;
+    }
+
+    // ── KIWI: ONE RULE FOR "HOW FAR ALONG THIS AXIS" ────────
+    // Lifted verbatim out of ScanAxes so that LEG A's angle stop quantises its
+    // length exactly the way arm 4c's axis guides always have — both are the same
+    // gesture (a direction locked through the anchor), and a second copy of the
+    // rule is a second thing to drift.  ROUND P's argument, unchanged: ABSOLUTE
+    // when `dir` IS a world axis (so an off-grid anchor does not drag its offset
+    // along), the DISTANCE otherwise (a slanted axis has no world coordinate to be
+    // on the grid of).  Returns `along` untouched with no usable grid spacing.
+    float SnapAlongAxis( const float *anchor, const float *dir, float along )
+    {
+        const float g = KiwiUnits_GridSpacingWorld();
+        if ( !( g > 0.0f ) )
+            return along;
+        int wax = -1;
+        for ( int k = 0; k < 3; ++k )
+            if ( fabsf( dir[k] ) > 0.999f )
+                wax = k;
+        if ( wax >= 0 )
+        {
+            const float posw = anchor[wax] + dir[wax] * along;
+            const float snap = floorf( posw / g + 0.5f ) * g;
+            return ( snap - anchor[wax] ) / dir[wax];
+        }
+        return floorf( along / g + 0.5f ) * g;
     }
 
     // The scan.  Screen-space closest point on the axis SEGMENT, then the same
@@ -513,6 +629,7 @@ namespace
     };
 
     void ScanAxes( const camera_s *c, const float *anchor, const kconPlane_t &plane,
+                   const float *extDirs, int extCount,
                    float curX, float curY, axisBest_t *best )
     {
         const float wpp = WorldPerPixel( c, anchor );
@@ -523,7 +640,7 @@ namespace
         if ( half > 32768.0f ) half = 32768.0f;
 
         axisCand_t cand[KSNAP_AXIS_CANDS];       // ROUND Y: was 3 — the plane NORMAL joined
-        const int n = GatherAxisCandidates( plane, cand );
+        const int n = GatherAxisCandidates( plane, extDirs, extCount, cand );
 
         for ( int i = 0; i < n; ++i )
         {
@@ -575,25 +692,10 @@ namespace
             // axis there is no world coordinate to be on the grid of, so that case
             // quantises the DISTANCE from the anchor — narrowly and deliberately,
             // exactly as the push/pull scalar does.
-            float       along = -use + ( 2.0f * use ) * t;
-            const float g     = KiwiUnits_GridSpacingWorld();
-            if ( g > 0.0f )
-            {
-                int wax = -1;
-                for ( int k = 0; k < 3; ++k )
-                    if ( fabsf( cand[i].dir[k] ) > 0.999f )
-                        wax = k;
-                if ( wax >= 0 )
-                {
-                    const float posw = anchor[wax] + cand[i].dir[wax] * along;
-                    const float snap = floorf( posw / g + 0.5f ) * g;
-                    along = ( snap - anchor[wax] ) / cand[i].dir[wax];
-                }
-                else
-                {
-                    along = floorf( along / g + 0.5f ) * g;
-                }
-            }
+            // KIWI: the rule itself is SnapAlongAxis, shared with
+            // LEG A's angle stop; the body here is unchanged arithmetic.
+            const float along = SnapAlongAxis( anchor, cand[i].dir,
+                                               -use + ( 2.0f * use ) * t );
 
             best->hit     = true;
             best->dist    = d;
@@ -843,16 +945,8 @@ namespace
         return true;
     }
 
-    // ── RELATIVE ANGLE SNAP: what line is the tool's ANCHOR sitting on? ──────
-    // USER DIRECTIVE: "When drawing a line on top of an existing line/edge, it
-    // also will do a nice angle snap when applicable as well."
-    //
-    // The anchor-on-line test is literal: point-to-segment distance under the
-    // store's weld tolerance (KREG_JOIN_DIST — the SAME number that decides two
-    // endpoints are the same endpoint, so "on it" means one thing everywhere).
-    // The winner is the CLOSEST such segment, construction and brush edges
-    // competing on equal terms, because a user drawing off a corner where both
-    // meet means the one they aimed at and the pixels cannot tell us which.
+    // Squared distance from `p` to the SEGMENT a..b — the "is the anchor on this
+    // line?" test GatherAnchorDirs below runs against every candidate.
     float PointSegDist2( const float *p, const float *a, const float *b )
     {
         float ab[3], ap[3];
@@ -876,14 +970,89 @@ namespace
     // ceiling is a backstop against a pathological map, not a normal-case budget.
     enum { KSNAP_MAX_ANCHOR_EDGES = 4096 };
 
-    bool AnchorLineDir( const float anchor[3], float outDir[3] )
+    // ═════════════════════════════════════════════════════════════════════════
+    //  KIWI — ONE WALK, TWO READERS
+    // ═════════════════════════════════════════════════════════════════════════
+    // Shakeout F's AnchorLineDir answered ONE question — "what single line is the
+    // anchor on?", for arm 7's relative base — by walking the construction store
+    // and the brush edges near the anchor.  LEG B needs the SAME walk to answer a
+    // slightly bigger one: "which few directions does the anchor sit on?", so they
+    // can be offered as extension axes.  That is one walk with two orderings, not
+    // two walks (kiwi_snap.h's own duplicate-scan rule), so the body moved here and
+    // AnchorLineDir is now the one-result reader of it.
+    struct anchorDir_t
     {
-        // 0. THE IN-PROGRESS CHAIN WINS OUTRIGHT.  The segment the user just
-        //    placed with this very tool is not in the store yet (a drawing tool
-        //    commits its object at Finish, not per click), so without this rung a
-        //    polyline could never turn 45° off its own previous segment — the
-        //    single most obvious case the directive describes.  It is also the
-        //    least ambiguous: it is the thing the user drew a moment ago.
+        float dir[3] = { 0.0f, 0.0f, 0.0f };
+        float d2     = 0.0f;               // point-to-segment distance², world units²
+        float key    = 0.0f;               // the sort key — see GatherAnchorDirs
+    };
+
+    // Insert into a list kept sorted on `key` ASCENDING and deduped by direction
+    // (parallel either way round is the same line).  `maxN` caps it: a full list
+    // drops its worst entry.  TIES GO TO THE LATER CANDIDATE, which is exactly the
+    // tie-break shakeout F's `if ( d2 > best ) continue;` skip has always had.
+    void AnchorDirPush( anchorDir_t *list, int *count, int maxN,
+                        const float *dir, float d2, float key )
+    {
+        for ( int i = 0; i < *count; ++i )
+        {
+            if ( fabsf( Dot3( dir, list[i].dir ) ) <= 0.999f )
+                continue;
+            if ( d2 < list[i].d2 )
+                list[i].d2 = d2;           // same line, a nearer sample of it
+            return;
+        }
+        int at = *count;
+        while ( at > 0 && list[at - 1].key >= key )
+            --at;
+        if ( at >= maxN )
+            return;                        // worse than everything we are keeping
+        int last = *count;
+        if ( last >= maxN )
+            last = maxN - 1;               // the worst entry falls off the end
+        for ( int i = last; i > at; --i )
+            list[i] = list[i - 1];
+        Copy3( dir, list[at].dir );
+        list[at].d2  = d2;
+        list[at].key = key;
+        if ( *count < maxN )
+            ++*count;
+    }
+
+    // ── RELATIVE ANGLE SNAP: what line is the tool's ANCHOR sitting on? ──────
+    // USER DIRECTIVE: "When drawing a line on top of an existing line/edge, it
+    // also will do a nice angle snap when applicable as well."
+    //
+    // The anchor-on-line test is literal: point-to-segment distance under the
+    // store's weld tolerance (KREG_JOIN_DIST — the SAME number that decides two
+    // endpoints are the same endpoint, so "on it" means one thing everywhere).
+    // Construction segments and brush edges compete on equal terms, because a user
+    // drawing off a corner where both meet means the one they aimed at and the
+    // pixels cannot tell us which.  Note that "on it" is anywhere ALONG the
+    // segment, not only at an end: an anchor dropped mid-edge is still sitting on
+    // that edge's direction, and LEG B wants it for the same reason arm 7 does.
+    //
+    // `aim`, when given, is a UNIT direction (the cursor's, from the anchor) and
+    // the list is ranked by how nearly each candidate is COLLINEAR with it — the
+    // only ordering that can matter to a capture test, and what makes LEG B's cap
+    // keep the right few.  With no aim the ranking is distance-from-the-anchor and
+    // the in-progress chain wins outright, which is shakeout F's rule for arm 7,
+    // preserved exactly (including its early-out).
+    int GatherAnchorDirs( const float anchor[3], const float *aim,
+                          anchorDir_t *out, int maxN )
+    {
+        int count = 0;
+        if ( maxN < 1 )
+            return 0;
+
+        // 0. THE IN-PROGRESS CHAIN.  The segment the user just placed with this
+        //    very tool is not in the store yet (a drawing tool commits its object
+        //    at Finish, not per click), so without this rung a polyline could
+        //    never turn 45° off its own previous segment — the single most obvious
+        //    case the directive describes — and LEG B could not offer the
+        //    STRAIGHT CONTINUATION of the chain, which is the commonest extension
+        //    of all.  It is also the least ambiguous candidate there is: it is the
+        //    thing the user drew a moment ago.
         {
             float prev[3];
             if ( KiwiCon_ToolPrevAnchor( prev ) )
@@ -895,22 +1064,27 @@ namespace
                 if ( l > 1.0e-4f )
                 {
                     for ( int k = 0; k < 3; ++k )
-                        outDir[k] = dir[k] / l;
-                    return true;
+                        dir[k] /= l;
+                    // -1 as the un-aimed key is what "wins outright" means: no
+                    // real distance² can undercut it.
+                    AnchorDirPush( out, &count, maxN, dir, 0.0f,
+                                   aim ? ( 1.0f - fabsf( Dot3( dir, aim ) ) ) : -1.0f );
+                    if ( !aim && maxN == 1 )
+                        return count;      // shakeout F's early return, unchanged
                 }
             }
         }
 
-        const float tol  = KREG_JOIN_DIST;
-        float       best = tol * tol;
-        bool        have = false;
+        const float tol = KREG_JOIN_DIST;
 
         // 1. construction segments
-        const int count = KiwiCon_Count();
-        for ( int i = 0; i < count; ++i )
+        const int conCount = KiwiCon_Count();
+        for ( int i = 0; i < conCount; ++i )
         {
             const kconObject_t *o = KiwiCon_At( i );
-            // ROUND U (hidden) + ROUND AP, ITEM 2 (moved by a live gesture).
+            // ROUND U (hidden) + ROUND AP, ITEM 2 (moved by a live gesture).  This
+            // is also LEG B's self-snap mute: a construction object being dragged,
+            // or the one the tool is drawing over, cannot hand out an axis.
             if ( !ConCandidateUsable( o, i ) )
                 continue;
             const int segs = KiwiCon_SegmentCount( *o );
@@ -920,7 +1094,7 @@ namespace
                 if ( !KiwiCon_SegmentWorld( *o, s, wa, wb ) )
                     break;
                 const float d2 = PointSegDist2( anchor, wa, wb );
-                if ( d2 > best )
+                if ( d2 > tol * tol )
                     continue;
                 float dir[3];
                 for ( int k = 0; k < 3; ++k )
@@ -928,10 +1102,10 @@ namespace
                 const float l = sqrtf( Dot3( dir, dir ) );
                 if ( !( l > 1.0e-4f ) )
                     continue;
-                best = d2;
-                have = true;
                 for ( int k = 0; k < 3; ++k )
-                    outDir[k] = dir[k] / l;
+                    dir[k] /= l;
+                AnchorDirPush( out, &count, maxN, dir, d2,
+                               aim ? ( 1.0f - fabsf( Dot3( dir, aim ) ) ) : d2 );
             }
         }
 
@@ -967,7 +1141,7 @@ namespace
                         --budget;
                         const int j = ( i + 1 ) % w->numpoints;
                         const float d2 = PointSegDist2( anchor, w->p[i], w->p[j] );
-                        if ( d2 > best )
+                        if ( d2 > tol * tol )
                             continue;
                         float dir[3];
                         for ( int k = 0; k < 3; ++k )
@@ -975,15 +1149,26 @@ namespace
                         const float l = sqrtf( Dot3( dir, dir ) );
                         if ( !( l > 1.0e-4f ) )
                             continue;
-                        best = d2;
-                        have = true;
                         for ( int k = 0; k < 3; ++k )
-                            outDir[k] = dir[k] / l;
+                            dir[k] /= l;
+                        AnchorDirPush( out, &count, maxN, dir, d2,
+                                       aim ? ( 1.0f - fabsf( Dot3( dir, aim ) ) ) : d2 );
                     }
                 }
             }
         }
-        return have;
+        return count;
+    }
+
+    // Arm 7's base direction: the ONE line the anchor is on, un-aimed — i.e.
+    // shakeout F's answer, unchanged.
+    bool AnchorLineDir( const float anchor[3], float outDir[3] )
+    {
+        anchorDir_t one[1];
+        if ( GatherAnchorDirs( anchor, nullptr, one, 1 ) < 1 )
+            return false;
+        Copy3( one[0].dir, outDir );
+        return true;
     }
 }
 
@@ -1245,6 +1430,10 @@ bool KiwiSnap_Query( const ray_t &ray, int imgX, int imgY, snap_result_t *out,
     // ── the surface hit (arm 6) + the RAW point arms 0 and 9 fall back to ─────
     const pick_result_t surf = Pick( ray, SEL_MASK_OBJECT, pickFlags );
     float raw[3];
+    // Which of the four rungs answered — reported as the frame's working plane
+    // below (kiwi_snap.h havePlane).  0 = the placer's plane, 1 = the surface
+    // under the cursor, 2 = world ground, 3 = the view-aligned fallback.
+    int rawRung = 3;
     if ( haveCPlane )
     {
         // A PLANAR PLACER places on ITS OWN plane — even with snapping suppressed,
@@ -1254,17 +1443,75 @@ bool KiwiSnap_Query( const ray_t &ray, int imgX, int imgY, snap_result_t *out,
         raw[0] = cplaneHit[0];
         raw[1] = cplaneHit[1];
         raw[2] = cplaneHit[2];
+        rawRung = 0;
     }
     else if ( surf.valid )
     {
         raw[0] = surf.point[0];
         raw[1] = surf.point[1];
         raw[2] = surf.point[2];
+        rawRung = 1;
     }
-    else if ( !RayHitsGroundPlane( ray, raw ) )
+    else if ( RayHitsGroundPlane( ray, raw ) )
     {
-        RayPoint( ray, KSNAP_FALLBACK_DIST, raw );
+        rawRung = 2;
     }
+    else
+    {
+        // ── THE VIEW-ALIGNED RUNG IS SEATED ON THE CHAIN ──
+        // Nothing under the cursor and no ground crossing — a SIDE ortho view
+        // aimed at the void is exactly this — so the point can only slide on a
+        // plane facing the camera.  A flat KSNAP_FALLBACK_DIST down the ray puts
+        // that plane in a place nothing is drawn: an ORTHO pick ray starts
+        // KCAM_ORTHO_PICK_LEAD (16384) behind the eye plane (camwnd.cpp), so the
+        // point landed ~15.9k units behind the camera — invisible in a parallel
+        // projection, and a depth the next segment then measures against.
+        //
+        // With a chain already started the plane is seated THROUGH ITS LAST
+        // POINT: the segment stays at one depth, which is what the ortho image is
+        // already showing the user, and its bearing has no out-of-plane part at
+        // all.  Nothing is latched — the anchor is read fresh each frame.
+        RayPoint( ray, KSNAP_FALLBACK_DIST, raw );
+        float viewN[3], anchor[3];
+        if ( ViewPlaneNormal( ray, viewN ) && KiwiCon_ToolAnchor( anchor ) )
+        {
+            const float den = Dot3( ray.dir, viewN );
+            if ( fabsf( den ) > 1.0e-4f )
+            {
+                float rel[3];
+                Sub3( anchor, ray.origin, rel );
+                const float t = Dot3( rel, viewN ) / den;
+                if ( t > 0.0f && t < 1.0e6f )
+                    RayPoint( ray, t, raw );
+            }
+        }
+    }
+
+    // ── THE PLANE THAT RESOLUTION USED, REPORTED (kiwi_snap.h havePlane) ──────
+    // Written HERE, once, before any arm can return: every answering path below
+    // — including the geometry snaps, which name a point and not a surface —
+    // then carries the working plane of the frame that produced it.  The four
+    // rungs are the four branches above, in the same order.
+    out->havePlane = true;
+    if ( rawRung == 0 )
+        Copy3( cplane.normal, out->planeNormal );
+    else if ( rawRung == 1 )
+    {
+        if ( surf.haveNormal )
+            Copy3( surf.normal, out->planeNormal );
+        else
+            out->havePlane = false;          // a hit with no usable normal
+    }
+    else if ( rawRung == 2 )
+    {
+        out->planeNormal[0] = 0.0f;          // world ground
+        out->planeNormal[1] = 0.0f;
+        out->planeNormal[2] = 1.0f;
+    }
+    else if ( !ViewPlaneNormal( ray, out->planeNormal ) )
+    {
+        out->havePlane = false;              // the view-aligned rung, same normal
+    }                                        // the raw point above was seated on
 
     // ── arm 0: IS SNAPPING ENGAGED AT ALL? (§6) ──────────────────────────────
     // ── KIWI-UX (ROUND BO, ITEM 3): ONE MODIFIER, ONE MEANING ────────────────
@@ -1660,7 +1907,45 @@ bool KiwiSnap_Query( const ray_t &ray, int imgX, int imgY, snap_result_t *out,
                 if ( !KiwiCon_MakePlane( o, n, u, &axisBasis ) )
                     axisBasis = cplane;          // degenerate: fall back, never crash
             }
-            ScanAxes( Ed_Camera(), anchor, axisBasis, curX, curY, &axisBest );
+
+            // ── KIWI: THE EXTENSION AXES ─────────────
+            // USER REPORT, verbatim: *"it needs to be able to snap to whichever
+            // existing/starting plane the line/point occupies as well (see pic2)
+            // Make this also work with edges of solids."*  (Pic 2: a short
+            // construction segment, and a new longer one drawn nearly collinear
+            // with it at 36.4 deg, refusing to line up.)
+            //
+            // The direction of whatever the ANCHOR is sitting on — an existing
+            // construction segment, or a brush edge the anchor landed on through
+            // the vertex / edge arms — becomes an axis through the anchor, on
+            // exactly the same terms as world Z and the plane's U/V/N: a LINE-rank
+            // candidate that competes on pixel distance, draws the same dashed
+            // guide, and locks the point onto it in FULL 3D.  The mechanism and
+            // its Plasticity citations are on KSNAP_MAX_EXT_AXES above.
+            //
+            // FREE TOOLS ONLY.  A planar placer's shape cannot exist off its
+            // plane, and an extension axis is by construction a direction taken
+            // from geometry that need not lie in it — offering one to a rect would
+            // be offering it a corner off its own plane.
+            float extDirs[KSNAP_MAX_EXT_AXES * 3] = { 0.0f };
+            int   extCount = 0;
+            if ( !planarPlacer )
+            {
+                // Ranked by how nearly collinear each is with where the cursor
+                // actually is, so the cap keeps the few that could plausibly
+                // capture (KSNAP_MAX_EXT_AXES = 3).
+                float aim[3];
+                Sub3( raw, anchor, aim );
+                const bool haveAim = Norm3( aim );
+                anchorDir_t inc[KSNAP_MAX_EXT_AXES];
+                extCount = GatherAnchorDirs( anchor, haveAim ? aim : nullptr,
+                                             inc, KSNAP_MAX_EXT_AXES );
+                for ( int i = 0; i < extCount; ++i )
+                    Copy3( inc[i].dir, extDirs + (size_t)i * 3 );
+            }
+
+            ScanAxes( Ed_Camera(), anchor, axisBasis, extDirs, extCount,
+                      curX, curY, &axisBest );
         }
         if ( axisBest.hit )
         {
@@ -1731,6 +2016,129 @@ bool KiwiSnap_Query( const ray_t &ray, int imgX, int imgY, snap_result_t *out,
         return true;
     }
 
+    // ═════════════════════════════════════════════════════════════════════════
+    //  KIWI — arm 5b: THE 15° STOPS FOR THE FREE TOOLS
+    // ═════════════════════════════════════════════════════════════════════════
+    // USER REPORT, verbatim: *"angle indicator works good, but take a look at this
+    // pic.  The angle wont snap to 180."*  (Pic: the free Curve tool in a side
+    // view, a segment drawn along a wall's top edge, readout "angle 180.1 deg",
+    // status "dz -1.22607 in" — a one-inch droop the lock should have removed.)
+    //
+    // ROOT CAUSE.  Arm 7 below — the 15° angle lock — is inside `if (haveCPlane)`,
+    // and round BS made `haveCPlane` PLANAR-PLACEMENT-ONLY.  The line, polyline
+    // and spline tools have had NO angle snapping at all since; round BS said so
+    // out loud ("ARM 7 IS A REAL LOSS AND IT IS STATED RATHER THAN HIDDEN") and
+    // offered arm 4c's world axes in its place, which reach 0/90/180/270 by aiming
+    // but nothing in between and nothing at all on a wall.  180.1 is arm 4c's Y
+    // guide being ~1 px too far away to capture, with nothing below it.
+    //
+    // WHAT MAKES THIS DIFFERENT FROM THE PLANE ROUND BS DELETED.  The stop is
+    // measured in the plane the LADDER ALREADY RESOLVED THIS FRAME'S POINT ONTO
+    // (`out->planeNormal` — the placer's plane, else the surface
+    // under the cursor, else world ground, else the view-aligned plane through the
+    // tool's last point).  That is not latched state and it is not a construction
+    // plane; it is a property of the point the user is already pointing at.  It is
+    // also THE SAME normal the HUD readout and the Tab "angle" field measure in
+    // (kiwi_construct.cpp BearingNormal), so the lock and the number the user is
+    // reading agree by construction rather than by coincidence.
+    //
+    // A CAPTURE BAND, NOT A QUANTISER (KSNAP_ANGLE_BAND_PIX above).  Arm 7, VERIFIED
+    // against the code below, is a HARD quantiser — every direction it sees is
+    // rounded — and gates on NOTHING but arm 0 (`KiwiCmd_SnapEngaged`, i.e. on by
+    // default in a construction context and freed by Ctrl).  The OPT-IN GATING IS
+    // MIRRORED EXACTLY: this arm is downstream of the same arm-0 return and asks no
+    // further question.  The QUANTISATION deliberately is not, because a hard stop
+    // for a free 3D chain would make 37° unreachable, which is the freedom the free
+    // tools exist for; D-AG20's band ("a band is categorically not a quantiser —
+    // full quantisation is what Ctrl already does") is the house rule for exactly
+    // that trade.
+    //
+    // RANK — below every NAMED geometry snap and above the area/grid arms, which
+    // is where arm 7 sits for a planar placer (arm 6 is suppressed for those, so
+    // arm 7 is the first thing under the line arms there too).  A corner, an edge,
+    // a midpoint, a crossing or an axis guide is a place the user aimed at and must
+    // still outrank a constructed angle; SNAP_FACE names no feature — it is
+    // wherever the ray happened to land (kiwi_snap.h arm 6) — so it is exactly the
+    // answer an angle stop is entitled to refine.
+    //
+    // THE POINT MOVES IN THE PLANE, and only in it: the in-plane component is
+    // rotated about the anchor to the stop and the out-of-plane component is
+    // carried through untouched (it is 0 by construction for void drawing, whose
+    // fallback plane seats on the chain, and 0 again when anchor and cursor are on one
+    // surface).  The LENGTH goes through SnapAlongAxis, the same rule arm 4c's
+    // guides use, so locking to 0/90/180/270 over the ground lands on the lattice
+    // arm 9 would have given rather than taking the grid away.
+    if ( !planarPlacer && out->havePlane && haveCursorPx )
+    {
+        float anchor[3];
+        if ( KiwiCon_ToolAnchor( anchor ) )
+        {
+            // The CANONICAL basis (level on the surface = 0, up it = 90), from the
+            // normal alone — never a plane's authoring-order u/v.  Same helper,
+            // same argument as the bearing-basis `phi0`; taking the basis straight
+            // from the canonical helper is why there is no phi0 here to convert
+            // through.
+            float cu[3], cv[3];
+            KiwiCon_BearingBasis( out->planeNormal, cu, cv );
+
+            float d[3];
+            Sub3( raw, anchor, d );
+            const float outOfPlane = Dot3( d, out->planeNormal );
+            const float du  = Dot3( d, cu );
+            const float dv  = Dot3( d, cv );
+            const float len = sqrtf( du * du + dv * dv );
+            if ( len > 1.0e-3f )
+            {
+                const float rawDeg  = atan2f( dv, du ) * 57.29577951f;
+                const float stopDeg = floorf( rawDeg / KCON_ANGLE_STEP + 0.5f )
+                                    * KCON_ANGLE_STEP;
+                float miss = rawDeg - stopDeg;
+                if ( miss < 0.0f )
+                    miss = -miss;
+
+                // The band: KSNAP_ANGLE_BAND_PIX pixels of LATERAL travel at this
+                // segment's own length, floored in degrees so zooming in cannot
+                // close it and capped at a fraction of one step so zooming out (or
+                // a very short segment) cannot open it into a quantiser.
+                float band = KSNAP_ANGLE_MAX_FRAC * KCON_ANGLE_STEP;
+                {
+                    const float wpp = WorldPerPixel( Ed_Camera(), raw );
+                    if ( wpp > 0.0f )
+                    {
+                        float deg = ( ( KSNAP_ANGLE_BAND_PIX * wpp ) / len )
+                                  * 57.29577951f;
+                        if ( deg < KSNAP_ANGLE_BAND_MIN )
+                            deg = KSNAP_ANGLE_BAND_MIN;
+                        if ( deg < band )
+                            band = deg;
+                    }
+                }
+
+                if ( miss <= band )
+                {
+                    const float rad = stopDeg * 0.01745329252f;
+                    float dirW[3];
+                    for ( int k = 0; k < 3; ++k )
+                        dirW[k] = cu[k] * cosf( rad ) + cv[k] * sinf( rad );
+                    float use = SnapAlongAxis( anchor, dirW, len );
+                    if ( !( use > 0.0f ) )
+                        use = len;           // the lattice reached past the anchor
+                    for ( int k = 0; k < 3; ++k )
+                        out->position[k] = anchor[k] + dirW[k] * use
+                                         + out->planeNormal[k] * outOfPlane;
+                    // The label reads the CANONICAL wrapped bearing — the same
+                    // number the HUD and the Tab field show for this segment.
+                    s_angleDeg   = KiwiCon_WrapDeg( stopDeg );
+                    s_angleIsRel = false;    // absolute stops; LEG B owns "along
+                    s_angleRel   = 0.0f;     // that edge" as a real axis now
+                    out->valid = true;
+                    out->type  = SNAP_ANGLE;
+                    return true;
+                }
+            }
+        }
+    }
+
     // ── arm 6: AREA — the Test_Ray surface point, UNSNAPPED (see the header) ──
     // ── KIWI-UX (ROUND BS): THIS IS "WHEREVER A RAY TRACE HITS AN OBJECT" ────
     // USER RULING: a drawn point is the snap, ELSE THE SURFACE UNDER THE CURSOR,
@@ -1771,7 +2179,13 @@ bool KiwiSnap_Query( const ray_t &ray, int imgX, int imgY, snap_result_t *out,
     //     candidates rather than as an override; and
     //   * the Tab "angle" field still types an exact bearing and still composes with
     //     a typed length (kiwi_construct.cpp ApplyAngleOverride), measured in the
-    //     world ground basis.
+    //     canonical basis of the plane the cursor was resolved onto (
+    //     LEG B — `havePlane` above; kiwi_construct.h KiwiCon_BearingBasis).
+    //
+    // THE TWO LABELS CANNOT DISAGREE.  This arm runs only when `haveCPlane`, i.e.
+    // for a planar placer, and `cplane` IS that tool's own m_plane — the same
+    // normal its BearingNormal() returns and the same one rawRung 0 reports.  So
+    // `phi0` below and the Tab "angle" field are one zero on one plane.
     if ( haveCPlane )
     {
         float uv[2];
@@ -1807,6 +2221,24 @@ bool KiwiSnap_Query( const ray_t &ray, int imgX, int imgY, snap_result_t *out,
                 // keep the 15° ladder the rest of the editor teaches.  With
                 // nothing under the anchor the base is 0 and the behaviour is
                 // BIT-IDENTICAL to v3.
+                // ── KIWI: THE STOPS HAVE A CANONICAL ZERO ─
+                // The absolute half of this arm used to be measured from cplane.u,
+                // and cplane.u comes from the picked face's winding (its longest
+                // edge) — authoring order, not geometry.  So "0 deg" here and "0
+                // deg" in the Tab angle field named different directions on the
+                // same wall.  `phi0` is where the canonical zero
+                // (KiwiCon_BearingBasis: level on the surface, 90 = up it) sits in
+                // THIS plane's own basis; everything below is done in canonical
+                // degrees and converted back through it, so the LATTICE (arm 8) and
+                // the shape geometry keep the plane's face-aligned basis untouched
+                // while the angle the user reads and types is one number.
+                float phi0 = 0.0f;
+                {
+                    float cu[3], cv[3];
+                    KiwiCon_BearingBasis( cplane.normal, cu, cv );
+                    phi0 = atan2f( Dot3( cu, cplane.v ), Dot3( cu, cplane.u ) ) * 57.29577951f;
+                }
+
                 float baseDeg = 0.0f;
                 {
                     float refDir[3];
@@ -1819,20 +2251,22 @@ bool KiwiSnap_Query( const ray_t &ray, int imgX, int imgY, snap_result_t *out,
                         const float rv = Dot3( refDir, cplane.v );
                         if ( sqrtf( ru * ru + rv * rv ) > 1.0e-3f )
                         {
-                            baseDeg      = atan2f( rv, ru ) * 57.29577951f;
+                            baseDeg      = atan2f( rv, ru ) * 57.29577951f - phi0;
                             s_angleIsRel = true;
                         }
                     }
                 }
 
-                const float rawDeg = atan2f( dv, du ) * 57.29577951f;
+                const float rawDeg = atan2f( dv, du ) * 57.29577951f - phi0;
                 float rel = rawDeg - baseDeg;
                 rel = floorf( rel / KCON_ANGLE_STEP + 0.5f ) * KCON_ANGLE_STEP;
-                const float deg = baseDeg + rel;
-                const float rad = deg * 0.01745329252f;
+                const float deg = baseDeg + rel;                 // canonical degrees
+                const float rad = ( deg + phi0 ) * 0.01745329252f;
                 uv[0] = auv[0] + cosf( rad ) * len;
                 uv[1] = auv[1] + sinf( rad ) * len;
-                s_angleDeg = deg;
+                // Reported as an absolute compass bearing, [0, 360), matching the
+                // Tab "angle" field (kiwi_construct.h KiwiCon_WrapDeg).
+                s_angleDeg = KiwiCon_WrapDeg( deg );
                 // Reported in (-180, 180] so "90 deg rel" never prints as 450.
                 while ( rel >  180.0f ) rel -= 360.0f;
                 while ( rel <= -180.0f ) rel += 360.0f;
@@ -2219,7 +2653,7 @@ void KiwiSnap_EmitSpot( const float *p, float pixRadius, bool solid )
     if ( !p || !( pixRadius > 0.0f ) )
         return;
     // KIWI-UX (CLEANUP, A-21): no null test, matching the file's three other
-    // Ed_Camera sites — it never returns NULL (camwnd.cpp:153).
+    // Ed_Camera sites — it never returns NULL (camwnd.cpp:159).
     camera_s *c = Ed_Camera();
     if ( c->width < 1 || c->height < 1 )
         return;

@@ -1,18 +1,10 @@
-// ═════════════════════════════════════════════════════════════════════════════════════
-//  kiwi_iwi.cpp — KIWI-UX (ROUND BE): THE .iwi WRITER (mechanical half).
-// ═════════════════════════════════════════════════════════════════════════════════════
-// Read kiwi_iwi.h first — D-BE-A..D carry the whole argument (why the container is not a
-// choice, why D3DX, the field-by-field derivation of the layout from the reader, and the
-// v1 format/mip/POT policy).  This file is the transcription of that derivation.
-// ═════════════════════════════════════════════════════════════════════════════════════
+// kiwi_iwi.cpp — the .iwi writer (mechanical half).  The layout and the encodings are in
+// kiwi_iwi.h.
 #include "stdafx.h"
 #include "qe3.h"
 
 #include <d3d9.h>
-// <d3dx9.h> and not just <d3dx9tex.h>: D3DX_DEFAULT_NONPOW2 (the preview's "keep the true
-// dimensions" sentinel) is defined in the umbrella header (DXSDK Include/d3dx9.h:22), while
-// the texture entry points and the filter flags live in d3dx9tex.h.  d3dx9.lib / d3dx9d.lib
-// is already on the link line (scripts/radiant/CMakeLists.txt:116).
+// The umbrella header, not just <d3dx9tex.h>: D3DX_DEFAULT_NONPOW2 is only defined there.
 #include <d3dx9.h>                  // D3DXGetImageInfoFromFileA / D3DXCreateTextureFromFileExA
 #include <gfx_d3d/r_init.h>         // dx (dx.device)
 #include <gfx_d3d/r_image.h>        // GfxImageFileHeader / Image_ValidateHeader / Image_CountMipmapsForFile
@@ -20,22 +12,20 @@
 
 #include "kiwi_iwi.h"
 
+#include <math.h>                   // sqrt, for the normal-map encode
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
 #include <vector>
 
 // ── ported / cross-file entry points (each verified against its definition) ─────────
-extern int Sys_Printf( const char *fmt, ... );   // win_qe3.cpp:112   int Sys_Printf(const char*,...)
+extern int Sys_Printf( const char *fmt, ... );   // win_qe3.cpp:118   int Sys_Printf(const char*,...)
 
-// The 28 this writer spells out in a dozen places IS sizeof(GfxImageFileHeader), and it is
-// also the constant Image_LoadFromFileWithReader subtracts at r_image_load_obj.cpp:431.  If
-// the struct ever grows, this fires instead of the writer silently emitting a short header.
+// The 28 this writer spells out in a dozen places IS sizeof(GfxImageFileHeader); if the
+// struct grows, this fires instead of the writer silently emitting a short header.
 static_assert( sizeof( GfxImageFileHeader ) == 28, "GfxImageFileHeader must be 28 bytes (r_image.h:118)" );
 
-// ═════════════════════════════════════════════════════════════════════════════════════
-//  local helpers
-// ═════════════════════════════════════════════════════════════════════════════════════
+// ── local helpers ──────────────────────────────────────────────────────────────────
 namespace
 {
 
@@ -60,8 +50,8 @@ int NextPow2( int v )
     return p;
 }
 
-// Image_CountMipmaps (r_image.cpp:459), transcribed: the count the READER will derive from
-// the header we write, so the writer must produce exactly this many levels.
+// Image_CountMipmaps transcribed: the count the READER derives from the header we write, so
+// the writer must produce exactly this many levels.
 int CountMipmaps( unsigned char imageFlags, int width, int height, int depth )
 {
     if ( ( imageFlags & 2 ) != 0 )                      // IMG_FLAG_NOMIPMAPS
@@ -72,9 +62,7 @@ int CountMipmaps( unsigned char imageFlags, int width, int height, int depth )
     return mipCount;
 }
 
-// The reader's per-level advance, verbatim:
-//   DXT  — Image_LoadDxtc   r_image_load_obj.cpp:364  bytesPerBlock * ((h+3)>>2) * ((w+3)>>2)
-//   RGBA — Image_LoadBitmap r_image_load_obj.cpp:530  bytesPerPixel * h * w
+// The reader's per-level advance, verbatim.
 int LevelSize( int format, int w, int h )
 {
     if ( format == KIWI_IWI_DXT1 )
@@ -125,11 +113,76 @@ bool FormatHasAlpha( _D3DFORMAT f )
     }
 }
 
+// ── the normal-map encode ──────────────────────────────────────────────────────────
+// The pixel shader's own literal, `def c1, 4.08, 4.06452, -2.08, -2.06452`, decoding
+//     x = alpha * SCALE_X + BIAS_X          y = green * SCALE_Y + BIAS_Y
+// from the sampler's [0,1] values.  Spelled as the shader spells them so the inversion
+// below reads as an inversion and not as two magic numbers.
+const float kNrmDecodeScaleX = 4.08f;
+const float kNrmDecodeBiasX  = -2.08f;
+const float kNrmDecodeScaleY = 4.06452f;
+const float kNrmDecodeBiasY  = -2.06452f;
+
+// Slopes beyond the representable window (alpha 0..255 spans x in [-2.08, +2.0]) clamp at
+// the byte anyway; this bound only keeps the float->int conversion finite for a degenerate
+// nz -> 0 pixel.
+const float kNrmSlopeLimit = 4.0f;
+
+unsigned char EncodeNormalByte( float slope, float decodeScale, float decodeBias )
+{
+    if ( slope < -kNrmSlopeLimit ) slope = -kNrmSlopeLimit;
+    if ( slope >  kNrmSlopeLimit ) slope =  kNrmSlopeLimit;
+    const float raw = ( slope - decodeBias ) / decodeScale;      // back to the sampler's [0,1]
+    int v = (int)( raw * 255.0f + 0.5f );
+    if ( v < 0 )   v = 0;
+    if ( v > 255 ) v = 255;
+    return (unsigned char)v;
+}
+
+// One A8R8G8B8 mip level in place: a conventional RGB tangent-space normal becomes the
+// engine's two-channel form (alpha = x slope, R=G=B = y slope).  A8R8G8B8 is 0xAARRGGBB in
+// a DWORD, i.e. B,G,R,A in memory order, which is why the byte indices read 2,1,0,3.
+void EncodeNormalLevel( unsigned char *bits, int pitch, int w, int h )
+{
+    for ( int y = 0; y < h; ++y )
+    {
+        unsigned char *row = bits + (size_t)pitch * (size_t)y;
+        for ( int x = 0; x < w; ++x )
+        {
+            unsigned char *p = row + 4 * x;
+            float nx = (float)p[2] / 127.5f - 1.0f;
+            float ny = (float)p[1] / 127.5f - 1.0f;
+            float nz = (float)p[0] / 127.5f - 1.0f;
+            const float len = (float)sqrt( (double)( nx * nx + ny * ny + nz * nz ) );
+            if ( len > 1e-6f )
+            {
+                nx /= len;
+                ny /= len;
+                nz /= len;
+            }
+            else
+            {
+                nx = 0.0f;
+                ny = 0.0f;
+                nz = 1.0f;
+            }
+            // A pixel facing away from the surface has no slope representation at all.
+            if ( nz < 1.0f / 256.0f )
+                nz = 1.0f / 256.0f;
+
+            const unsigned char a = EncodeNormalByte( nx / nz, kNrmDecodeScaleX, kNrmDecodeBiasX );
+            const unsigned char g = EncodeNormalByte( ny / nz, kNrmDecodeScaleY, kNrmDecodeBiasY );
+            p[0] = g;
+            p[1] = g;
+            p[2] = g;
+            p[3] = a;
+        }
+    }
+}
+
 }  // namespace
 
-// ═════════════════════════════════════════════════════════════════════════════════════
-//  PROBE
-// ═════════════════════════════════════════════════════════════════════════════════════
+// ── PROBE ──────────────────────────────────────────────────────────────────────────
 bool KiwiIwi_Probe( const char *srcPath, kiwiIwiSource_t *out, char *err, size_t errSz )
 {
     if ( !srcPath || !srcPath[0] || !out )
@@ -158,8 +211,7 @@ bool KiwiIwi_Probe( const char *srcPath, kiwiIwiSource_t *out, char *err, size_t
     }
     if ( info.ResourceType != D3DRTYPE_TEXTURE )
     {
-        // A .dds can carry a cubemap or a volume texture; this writer emits 2D only
-        // (the reader's cube arm needs flags&4 and six faces per level — out of scope).
+        // A .dds can carry a cubemap or a volume texture; this writer emits 2D only.
         SetErr( err, errSz, "only 2D images are supported (this file is a cube/volume texture)" );
         return false;
     }
@@ -173,13 +225,9 @@ bool KiwiIwi_Probe( const char *srcPath, kiwiIwiSource_t *out, char *err, size_t
     return true;
 }
 
-// ═════════════════════════════════════════════════════════════════════════════════════
-//  PREVIEW
-// ═════════════════════════════════════════════════════════════════════════════════════
-// D3DPOOL_MANAGED deliberately: a managed texture survives a device reset without any
-// application involvement, so the wizard's preview needs NO entry in the RTT_ReleaseForReset
-// list (kiwi_skybox.cpp had to register one only because its cube-face copies are its own
-// default-pool objects).  One mip level — this is a thumbnail, not a surface.
+// ── PREVIEW ────────────────────────────────────────────────────────────────────────
+// D3DPOOL_MANAGED deliberately: a managed texture survives a device reset unaided, so the
+// preview needs NO entry in the RTT_ReleaseForReset list.  One mip level.
 IDirect3DTexture9 *KiwiIwi_CreatePreview( const char *srcPath )
 {
     if ( !srcPath || !srcPath[0] || !dx.device )
@@ -198,9 +246,7 @@ IDirect3DTexture9 *KiwiIwi_CreatePreview( const char *srcPath )
     return tex;
 }
 
-// ═════════════════════════════════════════════════════════════════════════════════════
-//  WRITE
-// ═════════════════════════════════════════════════════════════════════════════════════
+// ── WRITE ──────────────────────────────────────────────────────────────────────────
 bool KiwiIwi_WriteFromFile( const char *srcPath, const char *qpath,
                             const kiwiIwiOptions_t *opt, kiwiIwiResult_t *out,
                             char *err, size_t errSz )
@@ -237,12 +283,15 @@ bool KiwiIwi_WriteFromFile( const char *srcPath, const char *qpath,
     }
 
     // ── format ──────────────────────────────────────────────────────────────────────
+    // The normal and specular slots are ALWAYS DXT5, so "Compress" does not apply to them.
+    const int encoding = opt ? opt->encoding : KIWI_IWI_ENC_COLOR;
     int format = KIWI_IWI_ARGB8;
-    if ( opt && opt->compress )
+    if ( encoding != KIWI_IWI_ENC_COLOR )
+        format = KIWI_IWI_DXT5;
+    else if ( opt && opt->compress )
         format = src.hasAlpha ? KIWI_IWI_DXT5 : KIWI_IWI_DXT1;
-    // A DXT block is 4x4; anything narrower than a block would round UP inside D3D and
-    // stop matching the reader's ((w+3)>>2) advance for the last levels.  POT dimensions
-    // below 4 are rare but legal, so fall back to the uncompressed arm rather than refuse.
+    // A DXT block is 4x4; anything narrower rounds UP inside D3D and stops matching the
+    // reader's ((w+3)>>2) advance for the last levels.  Fall back to uncompressed.
     if ( format != KIWI_IWI_ARGB8 && ( width < 4 || height < 4 ) )
         format = KIWI_IWI_ARGB8;
 
@@ -250,22 +299,88 @@ bool KiwiIwi_WriteFromFile( const char *srcPath, const char *qpath,
     const int mipCount = CountMipmaps( flags, width, height, 1 );
 
     // ── decode ──────────────────────────────────────────────────────────────────────
-    // D3DPOOL_SYSTEMMEM: this texture is never drawn, only LockRect'd, and a system-memory
-    // texture consumes no video memory and cannot be lost by a device reset mid-import.
-    // MipLevels is passed EXPLICITLY (not D3DX_DEFAULT) so the chain D3DX builds is the one
-    // the reader will count from our header — the invariant checked immediately below.
+    // D3DPOOL_SYSTEMMEM: never drawn, only LockRect'd, and cannot be lost by a device reset
+    // mid-import.  MipLevels is passed EXPLICITLY so the chain D3DX builds is the one the
+    // reader will count from our header — the invariant checked immediately below.
+    // A NORMAL map is decoded into A8R8G8B8 first (whole mip chain filtered from the SOURCE
+    // normals), then each level is encoded in place and converted to the final format.
+    // D3DX_FILTER_DITHER is dropped on that path: dithering a normal map scatters its slopes.
+    const bool  twoStage    = ( encoding == KIWI_IWI_ENC_NORMAL );
+    const DWORD resampleFlt = twoStage ? D3DX_FILTER_TRIANGLE
+                                       : ( D3DX_FILTER_TRIANGLE | D3DX_FILTER_DITHER );
+
     IDirect3DTexture9 *tex = nullptr;
     HRESULT hr = ::D3DXCreateTextureFromFileExA(
         dx.device, srcPath,
         (UINT)width, (UINT)height, (UINT)mipCount,
-        0, D3DFormatFor( format ), D3DPOOL_SYSTEMMEM,
-        D3DX_FILTER_TRIANGLE | D3DX_FILTER_DITHER,   // resample filter
+        0, twoStage ? D3DFMT_A8R8G8B8 : D3DFormatFor( format ), D3DPOOL_SYSTEMMEM,
+        resampleFlt,                                 // resample filter
         D3DX_FILTER_BOX,                             // mip filter
         0, nullptr, nullptr, &tex );
     if ( FAILED( hr ) || !tex )
     {
         SetErr( err, errSz, "decode failed (D3DXCreateTextureFromFileEx 0x%08X)", (unsigned)hr );
         return false;
+    }
+
+    if ( twoStage )
+    {
+        for ( int L = 0; L < mipCount; ++L )
+        {
+            D3DLOCKED_RECT lr;
+            memset( &lr, 0, sizeof( lr ) );
+            if ( FAILED( tex->LockRect( (UINT)L, &lr, nullptr, 0 ) ) || !lr.pBits )
+            {
+                SetErr( err, errSz, "LockRect failed encoding normal-map mip level %d", L );
+                tex->Release();
+                return false;
+            }
+            EncodeNormalLevel( (unsigned char *)lr.pBits, lr.Pitch,
+                               MipDim( width, L ), MipDim( height, L ) );
+            tex->UnlockRect( (UINT)L );
+        }
+
+        if ( format != KIWI_IWI_ARGB8 )
+        {
+            // Compress level by level.  D3DX_FILTER_NONE makes this a pure format conversion
+            // of an already-correctly-sized surface.
+            IDirect3DTexture9 *packed = nullptr;
+            hr = ::D3DXCreateTexture( dx.device, (UINT)width, (UINT)height, (UINT)mipCount,
+                                      0, D3DFormatFor( format ), D3DPOOL_SYSTEMMEM, &packed );
+            if ( FAILED( hr ) || !packed )
+            {
+                SetErr( err, errSz, "could not create the DXT5 target (D3DXCreateTexture 0x%08X)",
+                        (unsigned)hr );
+                tex->Release();
+                return false;
+            }
+            bool convOk = true;
+            for ( int L = 0; L < mipCount && convOk; ++L )
+            {
+                IDirect3DSurface9 *sSrc = nullptr;
+                IDirect3DSurface9 *sDst = nullptr;
+                if ( FAILED( tex->GetSurfaceLevel( (UINT)L, &sSrc ) )
+                     || FAILED( packed->GetSurfaceLevel( (UINT)L, &sDst ) )
+                     || FAILED( ::D3DXLoadSurfaceFromSurface( sDst, nullptr, nullptr,
+                                                              sSrc, nullptr, nullptr,
+                                                              D3DX_FILTER_NONE, 0 ) ) )
+                {
+                    SetErr( err, errSz, "normal-map compression failed on mip level %d", L );
+                    convOk = false;
+                }
+                if ( sDst )
+                    sDst->Release();
+                if ( sSrc )
+                    sSrc->Release();
+            }
+            tex->Release();
+            if ( !convOk )
+            {
+                packed->Release();
+                return false;
+            }
+            tex = packed;
+        }
     }
 
     D3DSURFACE_DESC desc;
@@ -281,7 +396,7 @@ bool KiwiIwi_WriteFromFile( const char *srcPath, const char *qpath,
         return false;
     }
 
-    // ── size the file, exactly as the reader will (kiwi_iwi.h D-BE-C) ───────────────
+    // ── size the file, exactly as the reader will ──────────────────────────────────
     std::vector<int> levelSize( (size_t)mipCount, 0 );
     int dataBytes = 0;
     for ( int L = 0; L < mipCount; ++L )
@@ -310,10 +425,9 @@ bool KiwiIwi_WriteFromFile( const char *srcPath, const char *qpath,
     }
 
     // ── mip data, SMALLEST FIRST, tightly packed ────────────────────────────────────
-    // The order and the packing are the reader's loops read backwards: Image_LoadDxtc :350
-    // / Image_LoadBitmap :506 start at mipLevel == mipCount-1 (the 1x1 end) and advance by
-    // exactly the level size, so the file must present the levels in that same order with
-    // no padding.  LockRect hands us rows at the driver's own pitch, hence the repack.
+    // The reader starts at mipLevel == mipCount-1 (the 1x1 end) and advances by exactly the
+    // level size, so the file must present the levels in that order with no padding.
+    // LockRect hands us rows at the driver's own pitch, hence the repack.
     unsigned char *dst = p + 28;
     bool copyOk = true;
     for ( int L = mipCount - 1; L >= 0 && copyOk; --L )
@@ -352,11 +466,10 @@ bool KiwiIwi_WriteFromFile( const char *srcPath, const char *qpath,
     }
 
     // ── write ───────────────────────────────────────────────────────────────────────
-    // FS_FOpenFileWrite (com_files.cpp:496) -> FS_FOpenFileWriteToDirForThread(filename,
-    // fs_gamedir, FS_THREAD_MAIN), which FS_BuildOSPaths <fs_homepath>/<fs_gamedir>/<qpath>
-    // and FS_CreatePaths the directories.  See kiwi_matwriter.h D-BE-H for why that lands
-    // exactly next to the shipped library.
-    const int h = FS_FOpenFileWrite( qpath );
+    // <fs_homepath>/raw/<qpath>, directories created on the way.  raw/ rather than
+    // fs_gamedir ("main"): the map compilers' searchpaths are raw/raw_shared/devraw
+    // only, so an import into main/ is invisible to them.
+    const int h = FS_FOpenFileWriteToDir( qpath, "raw" );
     if ( !h )
     {
         SetErr( err, errSz, "could not open '%s' for writing", qpath );
@@ -366,7 +479,7 @@ bool KiwiIwi_WriteFromFile( const char *srcPath, const char *qpath,
     FS_FCloseFile( h );
     if ( wrote != (unsigned)( 28 + dataBytes ) )
     {
-        FS_Delete( qpath );
+        FS_DeleteInDir( (char*)qpath, (char *)"raw" );
         SetErr( err, errSz, "short write to '%s' (%u of %d bytes)", qpath, wrote, 28 + dataBytes );
         return false;
     }
@@ -383,9 +496,7 @@ bool KiwiIwi_WriteFromFile( const char *srcPath, const char *qpath,
     return true;
 }
 
-// ═════════════════════════════════════════════════════════════════════════════════════
-//  ROUND-TRIP GATE, STAGE 1 — the ENGINE's own header functions over our own file
-// ═════════════════════════════════════════════════════════════════════════════════════
+// ── ROUND-TRIP GATE, STAGE 1: the engine's own header functions over our own file ───
 bool KiwiIwi_VerifyOnDisk( const char *qpath, char *err, size_t errSz )
 {
     int fh = 0;
@@ -413,14 +524,13 @@ bool KiwiIwi_VerifyOnDisk( const char *qpath, char *err, size_t errSz )
         return false;
     }
 
-    // The engine's own validator — tag + version (r_image.cpp:438).  It prints its own
-    // Com_PrintError on failure, which is exactly the diagnostic we would have written.
+    // The engine's own validator — tag + version.  It prints its own Com_PrintError.
     if ( !Image_ValidateHeader( &hdr, qpath ) )
     {
         SetErr( err, errSz, "the engine rejected the header of '%s'", qpath );
         return false;
     }
-    // The vassert at r_image_load_obj.cpp:430 — [0] must equal the whole file.
+    // fileSizeForPicmip[0] must equal the whole file (the loader vasserts this).
     if ( hdr.fileSizeForPicmip[0] != fileSize )
     {
         SetErr( err, errSz, "'%s': fileSizeForPicmip[0]=%d but the file is %d bytes",
@@ -428,17 +538,14 @@ bool KiwiIwi_VerifyOnDisk( const char *qpath, char *err, size_t errSz )
         return false;
     }
     // The engine's own mip count, from our flags/dimensions.  The const-pointer overload is
-    // the one the loader itself calls (r_image.cpp:471, used at r_image_load_obj.cpp:348);
-    // r_image.h also declares a non-const int twin, hence the explicit cast.  Anything under
-    // 1 would make Image_LoadBitmap / Image_LoadDxtc upload nothing at all.
+    // the one the loader calls; r_image.h also declares a non-const int twin, hence the cast.
     const uint mips = Image_CountMipmapsForFile( (const GfxImageFileHeader *)&hdr );
     if ( mips < 1 )
     {
         SetErr( err, errSz, "'%s': the engine counts %u mip levels", qpath, mips );
         return false;
     }
-    // readSize for the worst picmip the engine can ask for must stay inside the file
-    // (r_image_load_obj.cpp:431 reads fileSizeForPicmip[picmip] - 28 bytes).
+    // readSize for the worst picmip the engine can ask for must stay inside the file.
     for ( int pm = 0; pm < 4; ++pm )
     {
         if ( hdr.fileSizeForPicmip[pm] < (int)sizeof( GfxImageFileHeader )
@@ -452,9 +559,7 @@ bool KiwiIwi_VerifyOnDisk( const char *qpath, char *err, size_t errSz )
     return true;
 }
 
-// ═════════════════════════════════════════════════════════════════════════════════════
-//  EXTENSION FILTER
-// ═════════════════════════════════════════════════════════════════════════════════════
+// ── EXTENSION FILTER ───────────────────────────────────────────────────────────────
 bool KiwiIwi_IsAcceptedExtension( const char *path )
 {
     if ( !path || !path[0] )

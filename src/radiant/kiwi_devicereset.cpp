@@ -5,7 +5,7 @@
 // full crash analysis (RB_EndSurfacePrologue:202 / g_primStats == NULL).
 #include "stdafx.h"
 #include "qe3.h"
-#include <stdlib.h>                 // free() — the port's j__free_0 thunk (brush.cpp:30)
+#include <stdlib.h>                 // free() — the port's j__free_0 thunk (brush.cpp:32)
 #include <stdarg.h>                 // KIWI-UX (ROUND AD): the one-line reporter's varargs
 #include <d3d9.h>                   // KIWI-UX (ROUND AD): D3DERR_* names for the diagnostics
 #include <gfx_d3d/r_init.h>         // KIWI-UX (ROUND AD): dx, g_disableRendering
@@ -16,7 +16,7 @@ extern int      Sys_Printf( const char *fmt, ... );                 // win_qe3.c
 // Brush_InvalidateVis (0x478340) — frees the faceVis array, drops a patch instance's
 // visuals through PMESH_22_Indices, and sets version = def->version - 1 so the next
 // Brush_CheckBuildFaceVis rebuilds.  Returns b->def.
-extern brush_t *Brush_InvalidateVis( selbrush_t *b );               // brush.cpp:1489
+extern brush_t *Brush_InvalidateVis( selbrush_t *b );               // brush.cpp:1506
 // active_brushes / selected_brushes / filtered_brushes are the three embedded
 // 56-byte display-list sentinels; declared in qe3.h:1053-1055.  Iterate as
 // `for (b = sel.next; b != &sel; b = b->next)` (qe3.h:374-375).
@@ -52,10 +52,10 @@ namespace
                 // a literal — and qe3.h:186 already static_asserts
                 // sizeof(faceVis_s) == 12, so the binary-layout claim stays
                 // ENFORCED rather than commented.  b->faces is the faceCount
-                // element array Brush_MakeFaceVisuals allocated (brush.cpp:153).
+                // element array Brush_MakeFaceVisuals allocated (brush.cpp:155).
                 faceVis_s *fv = &b->faces[i];
                 if ( fv->visArray )
-                    free( fv->visArray );     // operator new'd at brush.cpp:2659; the
+                    free( fv->visArray );     // operator new'd at brush.cpp:2668; the
                                               // port's own free is j__free_0 (brush.cpp:1805)
                 fv->visArray = nullptr;
                 fv->visCount = 0;
@@ -332,7 +332,7 @@ void KiwiDevice_FrameHealthWatch( HWND__ *frame, bool authorized, bool painted )
     static bool     s_escaped        = false;
 
     // A paint the pump did not authorize is NOT evidence.  Round U made every such
-    // paint draw nothing on purpose (imgui_shell.cpp:1272), and they arrive
+    // paint draw nothing on purpose (imgui_shell.cpp:1281), and they arrive
     // constantly — OS repaints, and the nested message loop of every menu and
     // modal dialog.  Judging them would let a file dialog left open for 15 s pop
     // the "device lost" box.  Ignore them entirely: neither evidence of health nor

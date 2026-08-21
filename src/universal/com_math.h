@@ -248,6 +248,8 @@ float __cdecl Vec3Dot(const vec3r a, const vec3r b);
 void __cdecl Vec3Cross(const vec3r v0, const vec3r v1, vec3r cross);
 float __cdecl Vec3LengthSq(const vec3r v);
 void __cdecl Vec3Scale(const vec3r v, float scale, vec3r result);
+void __cdecl Vec2Scale(const float *v, float scale, float *result);
+
 // :)
 inline float __cdecl I_fres(float val)
 {

@@ -207,7 +207,7 @@ GfxPrimStats *RB_EndSurfacePrologue()
     // ever NULL or a static address (rb_stats.cpp:69-75), so this is the only
     // pointer that can fault here.  The stats are a diagnostic; the DRAW is not.
     // Losing a frame's prim counters beats losing the map.  The real cause is fixed
-    // upstream in kiwi_devicereset.cpp + r_ed_scene.cpp:735.
+    // upstream in kiwi_devicereset.cpp + r_ed_scene.cpp:872.
     if (!g_primStats)
         return 0;
     g_primStats->dynamicIndexCount += tess.indexCount;

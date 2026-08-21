@@ -71,6 +71,7 @@
 #include "kiwi_region.h"          // ROUND K — the region-selected strip
 #include "kiwi_conselect.h"          // shakeout F — the construction-selection rows
 #include "kiwi_selection.h"
+#include "kiwi_sun.h"             // the sun helper's own strip (pitch / yaw readout)
 #include "kiwi_transform.h"
 #include "kiwi_units.h"           // ROUND AT, ITEM 2 — the working height, in §17 units
 #include "radiant_registry.h"
@@ -92,7 +93,7 @@ extern bool        KiwiPatchVerts_Active();                                 // k
 // KIWI-UX (ROUND AO, ITEM Y): "is the advanced-terrain paint tool ARMED" — a mode
 // other than Disabled AND outer radius > inner radius.  Signature copied verbatim
 // from its definition, `int sub_401D50()` at patchdialog.cpp:229 (IDB 0x401D50);
-// it is the same gate the cursor ring (camwnd.cpp:3074) and the Alt+LMB routing
+// it is the same gate the cursor ring (camwnd.cpp:3189) and the Alt+LMB routing
 // (kiwi_viewport.cpp's LMB arm) use, so the chip can only appear when the stroke
 // really would fire.  FILE scope for the reason the note above gives.
 extern int         sub_401D50();                                            // patchdialog.cpp:229
@@ -499,6 +500,45 @@ namespace
         return n;
     }
 
+    // ── the strip for a SELECTED SUN HELPER ─────────────────────────────────
+    // A fourth KIWI-owned selection that KiwiXform_DominantKind cannot see
+    // (kiwi_sun.h), so without this the strips would describe an EMPTY selection
+    // while a lit glyph and an amber frustum sit on screen — the same gap
+    // shakeout F closed for construction geometry and round K for regions.
+    //
+    // The pitch/yaw chip is a READOUT, in the shape AddWorkingPlaneChip uses: it
+    // is the number the drag is producing, and it is the only place it is shown.
+    int BuildSunPrompts( chip_t *chips )
+    {
+        int n = 0;
+        float pitch = 0.0f, yaw = 0.0f;
+        if ( KiwiSun_Angles( &pitch, &yaw ) )
+        {
+            char label[40];
+            _snprintf( label, sizeof( label ), "%.1f / %.1f deg", pitch, yaw );
+            label[sizeof( label ) - 1] = '\0';
+            AddChip( chips, &n, "Sun", label );
+        }
+        // LITERAL chips: the drag and its snap modifier are arbitrated in
+        // kiwi_viewport.cpp's LMB arm and in KiwiCmd_SnapEngaged, not in
+        // g_radiantCommands, so a table lookup would print no key at all.
+        AddChip( chips, &n, "Drag", "Orbit the sun" );
+        AddChip( chips, &n, "Ctrl", "Snap 5 deg" );
+        AddChip( chips, &n, "Esc",  "Deselect" );
+        return n;
+    }
+
+    int BuildSunVerbs( chip_t *chips )
+    {
+        int n = 0;
+        // The one thing that has to be said and has no key: the change does not
+        // reach the baked lighting until the map is compiled again (kiwi_sun.h
+        // "WHAT A CHANGE COSTS THE USER").
+        AddChip( chips, &n, "!", "Needs BSP + light recompile" );
+        AddVerb( chips, &n, KIWI_CMD_PALETTE, "More" );
+        return n;
+    }
+
     int BuildRegionVerbs( chip_t *chips )
     {
         int n = 0;
@@ -807,12 +847,25 @@ void KiwiHints_Draw( float imgMinX, float imgMinY, float imgW, float imgH )
         // construction selection (kiwi_boxselect.cpp), so the two can only both be
         // non-empty when the construction one is stale.
         const bool haveRegion   = KiwiRegion_HasSelection();
-        if ( haveBrushSel )
+        // The SUN HELPER is tested FIRST, ahead even of the brush selection, and
+        // the reason is a property of its click grammar rather than a preference:
+        // any plain click that is NOT on the glyph clears it (kiwi_boxselect.cpp's
+        // sun arm), so a live sun selection means the glyph is the most recent
+        // thing the user deliberately took hold of.  Nothing else in this ladder
+        // can say that about itself.
+        if ( KiwiSun_Selected() )
         {
-            // Tested FIRST on purpose: with both selections non-empty the strips
-            // describe the BRUSH one, because that is what G, Delete and every
-            // classic command would act on (kiwi_conselect.h gates its verbs on a
-            // PURE construction selection).
+            nP = BuildSunPrompts( prompts );
+            nV = BuildSunVerbs  ( verbs );
+        }
+        else if ( haveBrushSel )
+        {
+            // First of the three MAP selections, on purpose: with more than one of
+            // them non-empty the strips describe the BRUSH one, because that is
+            // what G, Delete and every classic command would act on
+            // (kiwi_conselect.h gates its verbs on a PURE construction selection).
+            // The sun arm above is not one of the three — it is worldspawn state
+            // and no classic command can see it at all.
             nP = BuildSelectionPrompts( prompts, false );
             nV = BuildSelectionVerbs  ( verbs, kind );
         }

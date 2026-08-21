@@ -25,7 +25,7 @@
 
 // KIWI-UX (CLEANUP, B-29): the console, for the one diagnostic this file emits.
 // FILE SCOPE, not block scope — kiwi_uv.cpp carries the account of why.
-extern int Sys_Printf( const char *fmt, ... );                          // win_qe3.cpp:112
+extern int Sys_Printf( const char *fmt, ... );                          // win_qe3.cpp:118
 
 namespace
 {

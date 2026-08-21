@@ -24,7 +24,9 @@
 #include "kiwi_command.h"
 #include "kiwi_str.h"                // KIWI-UX (CLEANUP, C-66): KiwiStr_ContainsNoCase
 #include "kiwi_texcache.h"           // KIWI-UX (CLEANUP, C-65): the by-name texture cache
+#include "kiwi_texgrave.h"           // deferred release (the face combo)
 #include "kiwi_windows.h"
+#include "kiwi_walkcache.h"          // KiwiWalkCache_Epoch — the union box's change signal
 #include "radiant_registry.h"       // Radiant_ProfileGetInt / SetInt
 
 // Include order mirrors texwnd.cpp:29-30, the one other radiant TU that walks a
@@ -46,42 +48,42 @@
 #include <vector>
 
 // ── ported / cross-file entry points (each verified against its definition) ─────────
-extern int         Sys_Printf( const char *fmt, ... );                       // win_qe3.cpp:112   int Sys_Printf(const char*,...)
+extern int         Sys_Printf( const char *fmt, ... );                       // win_qe3.cpp:118   int Sys_Printf(const char*,...)
 extern int         g_nUpdateBits;                                            // engine_stubs.cpp:773  int g_nUpdateBits
-extern camera_s   *Ed_Camera();                                              // camwnd.cpp:156    camera_s *Ed_Camera()
-extern brush_t    *Brush_Alloc( const void *planeptsSrc, eclass_t *ecls );   // brush.cpp:463     brush_t *Brush_Alloc(const void*,eclass_t*)
-extern void        Brush_Create( float *mins, float *maxs, brush_t *b, eclass_t *ecls ); // brush.cpp:508  void Brush_Create(float*,float*,brush_t*,eclass_t*)
-extern void        Brush_BuildWindings( brush_t *def, int bFull );           // brush.cpp:1418    void Brush_BuildWindings(brush_t*,int)
-extern void        Select_Deselect( int a1 );                                // select.cpp:1445   void Select_Deselect(int)
-extern bool        Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId ); // mainfrm.cpp:1340  bool Radiant_RegisterCommand(const char*,byte,byte,int)
-// xywnd.cpp:1571 — the KIWI forwarder for the static Ed_EnsureCurrentMaterial, the same
+extern camera_s   *Ed_Camera();                                              // camwnd.cpp:161    camera_s *Ed_Camera()
+extern brush_t    *Brush_Alloc( const void *planeptsSrc, eclass_t *ecls );   // brush.cpp:465     brush_t *Brush_Alloc(const void*,eclass_t*)
+extern void        Brush_Create( float *mins, float *maxs, brush_t *b, eclass_t *ecls ); // brush.cpp:510  void Brush_Create(float*,float*,brush_t*,eclass_t*)
+extern void        Brush_BuildWindings( brush_t *def, int bFull );           // brush.cpp:1434    void Brush_BuildWindings(brush_t*,int)
+extern void        Select_Deselect( int a1 );                                // select.cpp:1444   void Select_Deselect(int)
+extern bool        Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId ); // mainfrm.cpp:1358  bool Radiant_RegisterCommand(const char*,byte,byte,int)
+// xywnd.cpp:1595 — the KIWI forwarder for the static Ed_EnsureCurrentMaterial, the same
 // one kiwi_extrude.cpp / kiwi_primitive.cpp / kiwi_entbrowser.cpp seed a new brush from.
-extern void        Ed_EnsureCurrentMaterial_Kiwi();                          // xywnd.cpp:1571    void Ed_EnsureCurrentMaterial_Kiwi()
+extern void        Ed_EnsureCurrentMaterial_Kiwi();                          // xywnd.cpp:1605    void Ed_EnsureCurrentMaterial_Kiwi()
 // kiwi_extrude.cpp:2328 — the ported land triple (Entity_LinkBrush -> Brush_AddToList ->
 // Brush_AddToList2), exported so nothing re-spells it.
-extern selbrush_t *KiwiExtrude_LandDef( brush_t *def );                      // kiwi_extrude.cpp:2349  selbrush_t *KiwiExtrude_LandDef(brush_t*)
-extern ImGuiID     ImGuiShell_DockRoot();                                    // imgui_shell.cpp:789   ImGuiID ImGuiShell_DockRoot()
+extern selbrush_t *KiwiExtrude_LandDef( brush_t *def );                      // kiwi_extrude.cpp:2360  selbrush_t *KiwiExtrude_LandDef(brush_t*)
+extern ImGuiID     ImGuiShell_DockRoot();                                    // imgui_shell.cpp:796   ImGuiID ImGuiShell_DockRoot()
 // ── KIWI-UX (ROUND BB, ITEM 2): the shell lands in a func_group named "SkyBox" ──────
 // USER DIRECTIVE, verbatim: *"yeah so just add it to a group"*.  This is round W's
 // create-only group path (kiwi_outliner.cpp:1609-1676), reused rather than re-derived:
 // the same five entry points, in the same order, under the same merge-trap rule.
-extern eclass_t   *Eclass_ForName( int hasBrushes, const char *name );       // eclass.cpp:1090   eclass_t *Eclass_ForName(int,const char*)
-extern entity_s   *Entity_Create( eclass_t *eclass );                        // entity.cpp:1622   entity_s *Entity_Create(eclass_t*)
-extern void        SetKeyValue( entity_s_def *e, const char *key, const char *value ); // entity.cpp:209  void SetKeyValue(entity_s_def*,const char*,const char*)
+extern eclass_t   *Eclass_ForName( int hasBrushes, const char *name );       // eclass.cpp:1096   eclass_t *Eclass_ForName(int,const char*)
+extern entity_s   *Entity_Create( eclass_t *eclass );                        // entity.cpp:1629   entity_s *Entity_Create(eclass_t*)
+extern void        SetKeyValue( entity_s_def *e, const char *key, const char *value ); // entity.cpp:212  void SetKeyValue(entity_s_def*,const char*,const char*)
 extern void        Undo_SetIdForEntity( entity_s_def *ent );                 // undo.cpp:663      void Undo_SetIdForEntity(entity_s_def*)
 // KIWI-UX (CLEANUP, C-61): the two the targetname uniquifier needs.
 extern entity_s    entities;                                                 // entity.cpp 0x23F17A0 — entity-DEF list sentinel
-extern bool        Entity_HasEpairMatch( entity_s *e, const char *key, const char *val ); // entity.cpp:505  bool Entity_HasEpairMatch(entity_s*,const char*,const char*)
+extern bool        Entity_HasEpairMatch( entity_s *e, const char *key, const char *val ); // entity.cpp:520  bool Entity_HasEpairMatch(entity_s*,const char*,const char*)
 // ── the texture-window accessors (D-AZ-C / D-AZ-D) ─────────────────────────────────
 // texwnd_s is TU-local, so the enumeration and the MaterialDef builder come through
-// accessors beside TexWnd_GetMaterialListHead (texwnd.cpp:94), which is the pattern that
+// accessors beside TexWnd_GetMaterialListHead (texwnd.cpp:101), which is the pattern that
 // file already uses for every out-of-TU reader.
-extern int         TexWnd_MaterialCount();                                   // texwnd.cpp:2548   int TexWnd_MaterialCount()
-extern qtexture_s *TexWnd_MaterialAt( int idx );                             // texwnd.cpp:2550   qtexture_s *TexWnd_MaterialAt(int)
-extern void        TexWnd_MaterialDefFor( qtexture_s *q, MaterialDef *out );  // texwnd.cpp:2561   void TexWnd_MaterialDefFor(qtexture_s*,MaterialDef*)
-extern void        TexWnd_ApplyMaterialAtIndex( int idx );                   // texwnd.cpp:1250   void TexWnd_ApplyMaterialAtIndex(int)
-extern qtexture_s *Texture_GetHandle( const char *name );                    // texwnd.cpp:313    qtexture_s *Texture_GetHandle(const char*)
-extern void        Prefs_SavePrefs( prefData_t *p );                         // prefs.cpp:222     void Prefs_SavePrefs(prefData_t*)
+extern int         TexWnd_MaterialCount();                                   // texwnd.cpp:2562   int TexWnd_MaterialCount()
+extern qtexture_s *TexWnd_MaterialAt( int idx );                             // texwnd.cpp:2564   qtexture_s *TexWnd_MaterialAt(int)
+extern void        TexWnd_MaterialDefFor( qtexture_s *q, MaterialDef *out );  // texwnd.cpp:2564   void TexWnd_MaterialDefFor(qtexture_s*,MaterialDef*)
+extern void        TexWnd_ApplyMaterialAtIndex( int idx );                   // texwnd.cpp:1263   void TexWnd_ApplyMaterialAtIndex(int)
+extern qtexture_s *Texture_GetHandle( const char *name );                    // texwnd.cpp:314    qtexture_s *Texture_GetHandle(const char*)
+extern void        Prefs_SavePrefs( prefData_t *p );                         // prefs.cpp:216     void Prefs_SavePrefs(prefData_t*)
 // undo.cpp — the KIWI §4 bracket (kiwi_command.h:1155-1160).  `operation` MUST be a
 // string literal; the record stores the pointer.
 // (KiwiCmd_UndoBegin / KiwiCmd_UndoCommit come from kiwi_command.h, already included.)
@@ -95,7 +97,7 @@ namespace
     // ── constants ───────────────────────────────────────────────────────────────────
     // SURF_SKY.  universal/surfaceflags.h:57 is the infoParms row `{ "sky", 0, 4, 0x800,
     // 0 }`, cod4map.h:408 is `#define SURF_SKY 0x00000004`, filters.cpp:130 is the same
-    // bit in the filter name table, and camwnd.cpp:451-453 seeds `dword_181F51C = 4` with
+    // bit in the filter name table, and camwnd.cpp:457-459 seeds `dword_181F51C = 4` with
     // it.  Spelled once, here.
     const int KSKY_SURF_SKY = 4;
 
@@ -119,7 +121,7 @@ namespace
 
     // ── KIWI-UX (CLEANUP, C-73): the editor sky colour, spelled ONCE in this file ───
     // The placeholder plate is the same blue the camera paints a sky face with.  The
-    // AUTHORITY is Cam_EditorMaterialColor's own table — camwnd.cpp:621,
+    // AUTHORITY is Cam_EditorMaterialColor's own table — camwnd.cpp:627,
     // `{ "sky", 0.45f, 0.62f, 0.92f }` — which is a file-local static inside a PORTED
     // translation unit, so there is no named constant to reach without adding an include
     // edge into camwnd.cpp.  It is therefore restated here, converted once and checked:
@@ -267,6 +269,7 @@ namespace
     float    s_boundsMin[3] = { 0.0f, 0.0f, 0.0f };
     float    s_boundsMax[3] = { 0.0f, 0.0f, 0.0f };
     unsigned s_boundsStamp = 0;
+    unsigned s_boundsEpoch = 0;              // KiwiWalkCache_Epoch() at the last rebuild
 
     void ReadPrefs()
     {
@@ -284,7 +287,7 @@ namespace
         if ( s_face < 0 || s_face >= KSKY_FACE_COUNT ) s_face = KSKY_FACE_DEFAULT;
     }
 
-    // The leaf name, i.e. everything after the last '/'.  camwnd.cpp:2737 does exactly
+    // The leaf name, i.e. everything after the last '/'.  camwnd.cpp:2801 does exactly
     // this (`strrchr( mn, '/' )`, then `sl ? sl + 1 : mn`) and the fallback half of the
     // predicate has to agree with it or the tab and the camera would disagree about
     // which materials are sky.
@@ -496,9 +499,23 @@ namespace
 
     // Drop every cached tile.  Used by the face combo (every tile is now the wrong face)
     // and by KiwiSky_ReleaseForReset.  Idempotent.
-    void DropThumbs()
+    // `deferred` is the FACE COMBO's arm: it runs during the ImGui UI build, so the
+    // interfaces go to the graveyard rather than depending on where in the panel the combo
+    // is drawn.  The RESET caller must NOT defer — it runs outside any frame and its whole
+    // job is that nothing app-owned is alive when Reset() lands.
+    void DropThumbs( bool deferred )
     {
-        KiwiTexCache_ReleaseAll( s_thumbs );      // KIWI-UX (CLEANUP, C-65)
+        if ( !deferred )
+        {
+            KiwiTexCache_ReleaseAll( s_thumbs );      // KIWI-UX (CLEANUP, C-65)
+            return;
+        }
+        for ( kiwiTexCache_t::iterator it = s_thumbs.begin(); it != s_thumbs.end(); ++it )
+        {
+            KiwiTexGrave_Release( it->second.tex );   // null-tolerant (the `failed` rows)
+            it->second.tex = nullptr;
+        }
+        s_thumbs.clear();
     }
 
     bool MapBounds( float mins[3], float maxs[3] );      // defined below RebuildBounds
@@ -549,9 +566,8 @@ namespace
     }
 
     // ── the sky-brush union box ─────────────────────────────────────────────────────
-    // A brush is sky when its FACE 0's current-layer material is sky — the same face and
-    // the same layer CamWnd_CullCubic tests (camwnd.cpp:451).  Walking both sentinel
-    // lists, because a selected sky brush is still part of the shell.
+    // A brush is sky when its FACE 0's current-layer material is sky.  Walking both
+    // sentinel lists, because a selected sky brush is still part of the shell.
     void RebuildBounds()
     {
         s_boundsAny = false;
@@ -574,6 +590,7 @@ namespace
         FlattenRescue();                 // ROUND BA — see above
         s_boundsHave  = true;
         s_boundsStamp = ::GetTickCount();
+        s_boundsEpoch = KiwiWalkCache_Epoch();
     }
 
     // The whole map's bounds, for the shell.  Deliberately UNCONDITIONAL over both lists
@@ -654,7 +671,7 @@ namespace
     // IS the texture-browser thumbnail click, so this inherits the ported
     // Brush_SetTexture apply — one undo record covering BOTH selected_brushes and
     // g_SelectedFaces (select.cpp:1815-1879) — and round AK's patch re-naturalize fence
-    // (texwnd.cpp:1187).  A second apply written here would have been a second undo shape
+    // (texwnd.cpp:1188).  A second apply written here would have been a second undo shape
     // and a second place to forget the fence.
     bool ApplyToSelection()
     {
@@ -705,7 +722,7 @@ namespace
             return false;
         Brush_Create( a, b, def, nullptr );      // (mins,maxs) — the DISASM-confirmed arg
                                                  // order; hex-rays prints the __fastcall
-                                                 // args swapped (xywnd.cpp:1584-1585).
+                                                 // args swapped (xywnd.cpp:1585-1586).
         Brush_BuildWindings( def, 1 );
         KiwiExtrude_LandDef( def );
         return true;
@@ -732,7 +749,7 @@ namespace
     //
     // KIWI-UX (CLEANUP, C-61) — A FREE `targetname` FOR THE SHELL'S func_group.
     // "SkyBox" if nothing holds it, else "SkyBox2", "SkyBox3", …  `targetname` is a
-    // LINK key here (camwnd.cpp:4604 resolves targets by exact match), so a second
+    // LINK key here (camwnd.cpp:4755 resolves targets by exact match), so a second
     // shell sharing the first one's name is a broken link, not a cosmetic duplicate.
     // Walks the entity-DEF list the same way Region_FindTargetEntity does.
     void SkyShellTargetName( char *out, size_t n )
@@ -869,7 +886,7 @@ namespace
         //   * NAME VIA A targetname EPAIR.  A func_group has no other name; that is
         //     what the Outliner reads back (kiwi_outliner.cpp:354-356).  "SkyBox" is
         //     the directive's own spelling.  KIWI-UX (CLEANUP, C-61): it IS uniquified
-        //     now.  `targetname` is a LINK key in this tree — camwnd.cpp:4604 resolves
+        //     now.  `targetname` is a LINK key in this tree — camwnd.cpp:4755 resolves
         //     targets by exact match and mainfrm.cpp's Select_AllByKeyValue selects
         //     every holder — so a duplicate is not a visible duplicate row, it is a
         //     broken entity link.  Second shell in a map gets "SkyBox2", and so on;
@@ -880,7 +897,7 @@ namespace
         SkyShellTargetName( groupName, sizeof( groupName ) );
         if ( built > 0 )
         {
-            eclass_t *ec = Eclass_ForName( 0, "func_group" );      // eclass.cpp:1090
+            eclass_t *ec = Eclass_ForName( 0, "func_group" );      // eclass.cpp:1138
             if ( !ec )
                 Sys_Printf( "Sky: no func_group entity definition - the shell brushes "
                             "are in worldspawn.\n" );
@@ -951,7 +968,7 @@ namespace
         if ( onScreen && !q->next && s_regBudget > 0 && q->name )
         {
             --s_regBudget;
-            Texture_GetHandle( q->name );      // lazy registration (texwnd.cpp:313)
+            Texture_GetHandle( q->name );      // lazy registration (texwnd.cpp:320)
         }
 
         // ROUND BA: the SAME budget covers the cube-face copy, because it is the same
@@ -1020,7 +1037,7 @@ bool KiwiSky_IsSkyMaterial( const qtexture_s *q )
         return false;
     // 1. THE DATA'S OWN ANSWER.  color_or_surfacetype_filter (@0x1C, qe3.h:65) is the
     //    material's full surfaceFlags word, written from the material header at both
-    //    registration paths (texwnd.cpp:298 / :414).
+    //    registration paths (texwnd.cpp:305 / :414).
     if ( ( q->color_or_surfacetype_filter & KSKY_SURF_SKY ) != 0 )
         return true;
     // 2. ...AND ONLY WHEN THE DATA SAID NOTHING, the name.  Gated on the whole word being
@@ -1037,8 +1054,7 @@ bool KiwiSky_IsSkyMaterial( const qtexture_s *q )
 // The "is this brush a sky brush" test was written out longhand inside RebuildBounds and
 // round BB needs the same question answered in kiwi_focus.cpp (frame-all must not frame
 // the shell).  ONE spelling, for the same reason D-AZ-A gave for the material test.
-// FACE 0's material at the CURRENT EDIT LAYER — the same face and the same layer
-// CamWnd_CullCubic tests (camwnd.cpp:451).
+// FACE 0's material at the CURRENT EDIT LAYER.
 bool KiwiSky_IsSkyBrush( const brush_t *def )
 {
     if ( !def || !def->faces || def->faceCount <= 0 )
@@ -1065,7 +1081,7 @@ void KiwiSky_InvalidateBounds()
 // Cost after an alt-tab: the visible tiles re-copy one per frame.
 void KiwiSky_ReleaseForReset()
 {
-    DropThumbs();
+    DropThumbs( false );      // IMMEDIATE — see DropThumbs and kiwi_texgrave.h D-BU-E
 }
 
 bool KiwiSky_SeeThroughFace( const float *facePoint )
@@ -1077,7 +1093,15 @@ bool KiwiSky_SeeThroughFace( const float *facePoint )
     const unsigned now = ::GetTickCount();
     // Unsigned wrap is deliberate and correct across the 49-day GetTickCount rollover:
     // (now - stamp) is the true elapsed count in modular arithmetic.
-    if ( !s_boundsHave || ( now - s_boundsStamp ) >= KSKY_BOUNDS_MS )
+    //
+    // KIWI: the 250 ms window is now the POLL of a change signal,
+    // not the rebuild schedule.  The box is a function of every brush's def->mins/maxs, and
+    // KiwiWalkCache_Epoch is the editor's "some brush changed" counter (it is bumped by
+    // MarkMapModified and by every link/unlink/free funnel), so an unchanged map re-walks
+    // both brush lists never instead of four times a second — and this walk runs INSIDE the
+    // camera draw, per face, so its 250 ms expiry landed in one arbitrary frame.
+    if ( !s_boundsHave
+      || ( ( now - s_boundsStamp ) >= KSKY_BOUNDS_MS && s_boundsEpoch != KiwiWalkCache_Epoch() ) )
         RebuildBounds();
 
     if ( !s_boundsAny )
@@ -1112,7 +1136,7 @@ bool KiwiSky_SeeThroughFace( const float *facePoint )
     // sky was the see-through film for ever.  That is the whole of the report: the
     // TEXTURED arm renders correctly and always did (the user confirmed it mid-round —
     // *"ah it works if you select it"* — because the selected-brush pass at
-    // camwnd.cpp:2982-2999 draws the face's OWN material with TECHNIQUE_UNLIT and never
+    // camwnd.cpp:3055-3072 draws the face's OWN material with TECHNIQUE_UNLIT and never
     // consults this predicate, i.e. it is the textured arm with the film skipped).
     //
     // THE POINT THE FEATURE MEANS IS THE PIVOT.  "Am I working inside the sky volume" is
@@ -1137,7 +1161,7 @@ bool KiwiSky_SeeThroughFace( const float *facePoint )
     // default the pivot is inside the shell whenever the user is working, so the walls
     // went opaque, and the near wall — drawn depthTest LESSEQUAL / depthWrite DISABLE
     // (color_only.sm), i.e. it paints without occluding — covered the ground lattice
-    // that camwnd.cpp:2627 submits BEFORE the world.  The map survived because sky
+    // that camwnd.cpp:2691 submits BEFORE the world.  The map survived because sky
     // writes no depth; the grid did not, because it was already on the screen.
     // kiwi_skybox.h D-BC-A carries the full argument.
     //
@@ -1246,7 +1270,8 @@ void KiwiSky_Draw()
                 {
                     s_face = i;
                     Radiant_ProfileSetInt( KSKY_SECTION, KSKY_FACE_ENTRY, s_face );
-                    DropThumbs();          // every cached tile is now the wrong face
+                    DropThumbs( true );    // every cached tile is now the wrong face.
+                                           // DEFERRED: this is mid UI build.
                 }
                 if ( sel )
                     ImGui::SetItemDefaultFocus();

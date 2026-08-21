@@ -36,9 +36,9 @@
 #include <math.h>
 
 // ── ported entry points (verified against their definitions) ────────────────
-extern camera_s *Ed_Camera();          // camwnd.cpp:156
-extern void      CamWnd_BuildMatrix(); // camwnd.cpp:209 (0x403470)
-extern int       Sys_Printf( const char *fmt, ... );   // win_qe3.cpp:112
+extern camera_s *Ed_Camera();          // camwnd.cpp:161
+extern void      CamWnd_BuildMatrix(); // camwnd.cpp:210 (0x403470)
+extern int       Sys_Printf( const char *fmt, ... );   // win_qe3.cpp:118
 extern int       g_nUpdateBits;                        // 0x25D5A74 (mainfrm.cpp)
 
 namespace
@@ -701,6 +701,7 @@ namespace
 // ─── Cam_Draw hook (ROUND S: now BEFORE the world — see camwnd.cpp) ──────────
 void KiwiGrid_Draw()
 {
+
     const bool axesOn = KiwiUX_ShowAxes();
     // ── KIWI-UX (ROUND AJ, ITEM 5): NO GROUND LATTICE IN PERSPECTIVE ────────
     // USER DIRECTIVE, verbatim: "Disable drawing the grid in 'P' Camera mode

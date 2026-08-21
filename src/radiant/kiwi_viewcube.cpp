@@ -39,7 +39,7 @@
 //
 // ── THE VIEW SNAP, DERIVED RATHER THAN TABULATED ────────────────────────────
 // kiwi_camera.cpp's ANGLE CONVENTION note, verified against CamWnd_BuildMatrix
-// (camwnd.cpp:162-172), gives
+// (camwnd.cpp:168-178), gives
 //     vpn = ( cos(pitch) cos(yaw), cos(pitch) sin(yaw), sin(pitch) )
 // with a POSITIVE angles[0] looking UP.  Clicking a face means "stand off that
 // face and look back at the pivot", i.e. the new view direction is vpn = -normal,
@@ -51,15 +51,17 @@
 //     -X     ( 1, 0, 0)     0       0
 //     +Y     ( 0,-1, 0)     0     -90
 //     -Y     ( 0, 1, 0)     0      90
-//     +Z     ( 0, 0,-1)   -89*    kept
-//     -Z     ( 0, 0, 1)    89*    kept
-// (*) sin(pitch) = -+1 wants -+90, which the camera clamps to -+89 everywhere
-// (KiwiCam_OrbitDrag, KiwiCam_LookDrag) because a pole-exact pitch degenerates
-// the yaw-plane forward/right basis CamWnd_BuildMatrix also derives; and at the
-// pole atan2(0,0) carries no yaw, so the current one is kept.  Both fall out of
-// the general helper below as the degenerate case, which is why the table is
-// gone: CORNER clicks (isometric views) need the general form anyway, and two
-// code paths for one relation is how they drift apart.
+//     +Z     ( 0, 0,-1)   -90*    kept
+//     -Z     ( 0, 0, 1)    90*    kept
+// (*) sin(pitch) = -+1 gives -+90 EXACTLY, and the snap takes it exactly: the
+// basis is well defined at a pole (kiwi_camera.cpp's pitch-limit block proves it
+// from AngleVectors), and a TOP view held one degree off the pole leaks the side
+// faces of axis-aligned geometry, differently for every approach yaw.  The ±89
+// clamp is now only where it belongs — the interactive drags.  At the pole
+// atan2(0,0) carries no yaw, so the current one is kept (snapped to the lattice).
+// Both fall out of the general helper below as the degenerate case, which is why
+// the table is gone: CORNER clicks (isometric views) need the general form
+// anyway, and two code paths for one relation is how they drift apart.
 // ─────────────────────────────────────────────────────────────────────────────
 
 #include "stdafx.h"
@@ -84,7 +86,7 @@
 // ── ported entry points (verified against their definitions) ────────────────
 extern camera_s *Ed_Camera();          // camwnd.cpp
 extern void      CamWnd_BuildMatrix(); // camwnd.cpp 0x403470
-extern int       Sys_Printf( const char *fmt, ... );   // win_qe3.cpp:112
+extern int       Sys_Printf( const char *fmt, ... );   // win_qe3.cpp:118
 
 namespace
 {
@@ -345,12 +347,13 @@ namespace
     //
     // Two separate things were wrong, and only one of them was obvious.
     //
-    // 1. THE POLES KEPT THE OLD YAW OUTRIGHT.  A TOP / BOT click set pitch to
-    //    -+89 and copied c->angles[1] through unchanged (the "degenerate" arm
+    // 1. THE POLES KEPT THE OLD YAW OUTRIGHT.  A TOP / BOT click set the pole
+    //    pitch and copied c->angles[1] through unchanged (the "degenerate" arm
     //    below), because at the pole atan2(0,0) carries no yaw.  That is true about
-    //    the DIRECTION and false about the VIEW: the camera is 1 degree off the
-    //    pole, so the residual yaw is exactly the "spin" the user is looking at —
-    //    a plan view rolled to whatever angle they happened to be orbiting from.
+    //    the DIRECTION and false about the VIEW: at the pole the yaw still turns
+    //    the view in its own plane (vright = (sin y, -cos y, 0)), so the residual
+    //    yaw is exactly the "spin" the user is looking at — a plan view rolled to
+    //    whatever angle they happened to be orbiting from.
     //    The fix is to keep the NEAREST QUARTER TURN instead of the raw yaw: the
     //    plan is then axis-aligned, and it is the quarter turn closest to where
     //    the user already was, so the view does not jump a side.
@@ -389,8 +392,13 @@ namespace
         if ( z >  1.0f ) z =  1.0f;
         if ( z < -1.0f ) z = -1.0f;
         float pitch = (float)RAD2DEG( asinf( z ) );
-        if ( pitch >  89.0f ) pitch =  89.0f;   // the camera's own clamp
-        if ( pitch < -89.0f ) pitch = -89.0f;
+        // POLE-EXACT.  asinf(±1) is already ±90 to the last bit; this only bounds
+        // a caller that handed over a slightly-over-unit direction.  It used to
+        // clamp to ±89 "the camera's own clamp", which made TOP a 1-degree tilt —
+        // and which sides of an axis-aligned solid it leaked depended on the
+        // approach yaw.  KiwiCam_LookAlong bounds at ±90 to match.
+        if ( pitch >  90.0f ) pitch =  90.0f;
+        if ( pitch < -90.0f ) pitch = -90.0f;
         // A CORNER click is 35.264 degrees by construction (asin(1/sqrt3)); a FACE
         // click is 0 or the clamped pole.  Neither is a value anyone types, so the
         // pitch is left exactly as derived — the spin the directive is about is the
@@ -435,9 +443,10 @@ namespace
         { {  0.0f,  0.0f,  1.0f }, "bottom" },
     };
     // How close the current view must be to a face view to count as "already on
-    // it" — cos(3 degrees).  Wide enough that the round-N -+89 pole clamp (which
-    // makes a TOP view 1 degree off the true pole by construction) still reads as
-    // the top view, and far too tight for any orbited view to match by accident.
+    // it" — cos(3 degrees).  The six snaps land EXACTLY on their rows now, so this
+    // is pure tolerance: wide enough to survive a float round-trip through
+    // angles -> AngleVectors -> dot, and far too tight for any orbited view to
+    // match by accident.
     const float KVC_VIEW_ALIGNED = 0.99863f;
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -1000,7 +1009,7 @@ void KiwiViewCube_SetShow( bool on )
 // every path that moves the camera (the cube, the swipe, the drag-orbit, the
 // keyboard, a map load, a focus) obliged to keep it in step.  So: no state, one
 // dot product, and KVC_VIEW_ALIGNED — cos(3 degrees), already the file's own
-// "am I on this view" threshold and already wide enough for the +-89 pole clamp.
+// "am I on this view" threshold.
 //
 // outAxis is the WORLD AXIS the camera looks along (0=X, 1=Y, 2=Z), i.e. the
 // normal of the plane the user is looking at; outSign is which way it looks.
@@ -1087,8 +1096,8 @@ void KiwiViewCube_StepAxisView()
 // ── WHY THIS NEEDS TWO INTS OF STATE, and why it cannot be derived ──────────
 // The missing quantity is ROLL.  "Front, having come over the top" and "back,
 // reached by clicking the cube" are the SAME camera in this editor — Radiant's
-// camera has pitch and yaw and no roll at all, and LookAlongDirection clamps the
-// pitch to +-89 — so from the camera alone there is no way to tell whether the
+// camera has pitch and yaw and no roll at all, and the pitch is bounded at the
+// pole — so from the camera alone there is no way to tell whether the
 // next DOWN should continue over the pole or go back the way it came.  Round S's
 // refusal at the poles was that ambiguity showing up as a dead end.
 //
@@ -1144,7 +1153,7 @@ namespace
 // ─── ROUND S: Alt+MMB SWIPE — a 90-degree step in a screen direction ─────────
 // The mapping and its derivation are in kiwi_viewcube.h; this is the mechanical
 // half.  Everything goes through LookAlongDirection / KiwiCam_LookAlong, the same
-// pair the cube's own clicks use, so the yaw lattice, the +-89 pole clamp and the
+// pair the cube's own clicks use, so the yaw lattice, the pole-exact pitch and the
 // round-N spin reset are shared code rather than a second copy.
 void KiwiViewCube_SwipeAxisView( int dir )
 {
@@ -1188,7 +1197,7 @@ void KiwiViewCube_SwipeAxisView( int dir )
             // no face-view row for "top, rotated 90", so this is the one arm that
             // goes to KiwiCam_LookAlong directly.
             const float step = ( dir == 1 ) ? -90.0f : 90.0f;
-            KiwiCam_LookAlong( ( base == 4 ) ? -89.0f : 89.0f,
+            KiwiCam_LookAlong( ( base == 4 ) ? -90.0f : 90.0f,   // pole-EXACT
                                SnapAngle( yawSnapped + step, 90.0f ) );
             Sys_Printf( "View: %s (spun %s).\n", KVC_VIEWS[base].name,
                         ( dir == 1 ) ? "right" : "left" );

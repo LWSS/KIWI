@@ -26,9 +26,9 @@
 #include <vector>
 
 // ── ported entry points (each verified against its definition) ──────────────
-extern int  Sys_Printf( const char *fmt, ... );          // win_qe3.cpp:112
+extern int  Sys_Printf( const char *fmt, ... );          // win_qe3.cpp:118
 extern int  g_nUpdateBits;                               // 0x25D5A74 (mainfrm.cpp)
-extern void Radiant_ExecCommand( unsigned int cmdId );   // mainfrm.cpp:4083
+extern void Radiant_ExecCommand( unsigned int cmdId );   // mainfrm.cpp:4054
 // KIWI-UX (CLEANUP, C-55): at FILE scope, like every peer (kiwi_selconv.cpp,
 // kiwi_visibility.cpp, kiwi_outliner.cpp) — it was declared inside
 // KiwiSelExt_RegisterCommands' body with no cite.

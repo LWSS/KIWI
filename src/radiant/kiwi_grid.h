@@ -90,7 +90,7 @@
 //                reach grows as you climb.
 //   CENTRE       the camera's ground projection, pushed KGRID_FWD_BIAS * R along
 //                camera.forward — the YAW-PLANE forward CamWnd_BuildMatrix
-//                already computes (camwnd.cpp:169-171), which is pitch-free by
+//                already computes (camwnd.cpp:175-177), which is pitch-free by
 //                construction.  That spends ~72% of the window in front of the
 //                viewer instead of 50%, which is the only "reach" trick left once
 //                the frustum math is gone, and it cannot vary with pitch.
@@ -158,7 +158,7 @@
 //
 //     a cell of size S at ground distance d subtends about  (S/d) * f  pixels
 //     across, where f = (height/2) / (tan(fov/2)*0.75) is the pixel focal length
-//     (CameraCalcRayDir's own scale, camwnd.cpp:3176).  For a 65-degree fov at
+//     (CameraCalcRayDir's own scale, camwnd.cpp:3291).  For a 65-degree fov at
 //     900 px that is f ~ 940, so a 4-pixel floor puts d_max ~ 235 * S — the same
 //     order as the 120 * S the window already reaches.
 //
@@ -559,7 +559,7 @@
 // patch floating in an empty viewport, and the far ring cannot help because it is
 // clamped by the same number and so never comes out BIGGER than the near window
 // (BuildFarWindowOrtho's `bigger` test, kiwi_grid.cpp).  524288 matches the new
-// ortho depth slab (camwnd.cpp:183), i.e. the lattice can now reach exactly as
+// ortho depth slab (camwnd.cpp:189), i.e. the lattice can now reach exactly as
 // far as the projection can still show it, and no further.
 //
 // IT DOES NOT COST A SINGLE EXTRA SEGMENT.  The line COUNT is bounded by

@@ -13,6 +13,16 @@
 #include <gfx_d3d/r_rendercmds.h>   // MaterialTechniqueType, TECHNIQUE_UNLIT
 #include <gfx_d3d/r_material.h>     // Material*
 #include <cstdlib>                   // abs()
+#include <algorithm>                 // std::sort for the flush's slot order
+#include "kiwi_shadowcache.h"        // the model-geo + cast memo caches
+#include "kiwi_walkcache.h"          // the shared caster-walk recording
+
+int g_svNodesWalked   = 0;   // brushes+prefabs the caster walk visited
+int g_svCastersDrawn  = 0;   // brushes that reached SunLightPreview_DrawBrushShadow
+int g_svTrisFed       = 0;   // triangles offered to ShadVol_AddSilhouetteTri
+int g_svTrisKept      = 0;   // ... of which survived the facing test and were hashed
+int g_svBatches       = 0;   // R_AddRenderCmdDrawTris volume batches issued
+int g_svBatchKB       = 0;   // bytes those batches copy into the render command buffer
 
 // Assert/Sys_Printf — defined in engine_stubs.cpp (same pattern as all other radiant TUs).
 extern void Assert( const char *file, int line, int type, const char *fmt, ... );
@@ -89,6 +99,16 @@ static int    s_silhouetteSign  = 0;    // IDB 0x23F15BC  silhouette facing refe
 static short  s_indexCount     = 0;    // IDB 0x23F15C8  indexCount
 static short  s_vertexCount    = 0;    // IDB 0x23F15CA  vertexCount
 
+// The binary's flush sweeps ALL 65,536 edge slots and memsets the whole 64 KB vertex-index
+// table per batch.  These two lists record which slots an insert actually claimed so the
+// flush visits exactly those.  BIT-IDENTICAL, not merely equivalent: every slot the sweep
+// would reset is reset (untouched slots are already -1 from ShadVol_Init), and the list is
+// SORTED before it is walked so quads still come out in ascending slot order.
+static uint16_t s_edgeUsed[SHADVOL_EDGE_HASH_SIZE];
+static int      s_edgeUsedCount = 0;
+static uint16_t s_vertUsed[SHADVOL_VERT_HASH_SIZE];
+static int      s_vertUsedCount = 0;
+
 // mat_stencilshadow (0x23F15C0) == rgp.stencilShadowMaterial; read lazily on first build.
 #include <gfx_d3d/r_init.h>             // rgp
 
@@ -120,6 +140,7 @@ LABEL_6:
 
         s_vertHashPtr[v2] = (DWORD)(uintptr_t)v4;
         s_vertHashIdx[v2] = (short)shadVol.vertHashCount++;
+        s_vertUsed[s_vertUsedCount++] = v2;   // see the list note above
         return s_vertHashIdx[v2];
     }
     else
@@ -171,6 +192,7 @@ LABEL_7:
         s_edgeHash[v5].lo     = (short)v4;
         s_edgeHash[v5].hi     = (short)v3;
         s_edgeHash[v5].parity = a3;
+        s_edgeUsed[s_edgeUsedCount++] = v5;   // see the list note above
         return a3;
     }
     else
@@ -198,18 +220,20 @@ LABEL_7:
 // rgp.stencilShadowMaterial.  Assert shadowvolume.cpp:133 "edgeIndexCount == 0".
 // Also called MID-BUILD by ShadVol_AddSilhouetteTri on overflow, so one frame issues
 // many draws.  Loop bound: the binary's `v0 < &shadVol_edgeIndexCount` is exactly
-// 0x10000 slots (0x23F15B0 - 0x23715B0 = 0x80000 bytes / 8).
+// 0x10000 slots (0x23F15B0 - 0x23715B0 = 0x80000 bytes / 8), replaced by the occupied-slot
+// list (identical visits, identical order — see the note beside s_edgeUsed).
 // IDA keeps v7 as a running copy of indexCount but it always equals indexCount at the
 // one point it is used, so indexCount is used directly here.
 // ─────────────────────────────────────────────────────────────────────────────
 void SunLightPreview_PolyOffsetShadows()
 {
-    ShadVolEdgeSlot *slotBase = s_edgeHash;
-    ShadVolEdgeSlot *v0 = slotBase;
-    const ShadVolEdgeSlot *end = s_edgeHash + SHADVOL_EDGE_HASH_SIZE;
+    // The binary's full-table sweep, restricted to the slots an insert claimed, in the same
+    // ascending slot order.
+    std::sort( s_edgeUsed, s_edgeUsed + s_edgeUsedCount );
 
-    do
+    for ( int u = 0; u < s_edgeUsedCount; ++u )
     {
+        ShadVolEdgeSlot *v0 = &s_edgeHash[s_edgeUsed[u]];
         if ( v0->parity )
         {
             short v1, v2;
@@ -244,14 +268,11 @@ void SunLightPreview_PolyOffsetShadows()
                 s_indexCount = (short)(s_indexCount + s_quadsPerEdge);
             } while ( v5 );
 
-            v0 = slotBase;
-            slotBase->parity = 0;
+            v0->parity = 0;
         }
         v0->lo = -1;
-        ++v0;
-        slotBase = v0;
     }
-    while ( v0 < end );
+    s_edgeUsedCount = 0;
 
     iassert( shadVol.edgeIndexCount == 0 );   // shadowvolume.cpp:133
 
@@ -259,12 +280,18 @@ void SunLightPreview_PolyOffsetShadows()
     shadVol.edgeHashCount = 0;
     // Mark every vertex-hash slot empty.  The binary memsets the whole 0x40000-byte
     // table (ptr column included); only the index column is ever tested for -1.
-    memset( s_vertHashIdx, 0xFF, sizeof(s_vertHashIdx) );
+    // Only the claimed slots are written back: every other slot is already -1, so the table
+    // state equals the memset's at O(inserted).
+    for ( int u = 0; u < s_vertUsedCount; ++u )
+        s_vertHashIdx[s_vertUsed[u]] = -1;
+    s_vertUsedCount = 0;
 
     if ( s_vertexCount && s_indexCount )
     {
         if ( !mat_stencilshadow )
             mat_stencilshadow = rgp.stencilShadowMaterial;   // engine builtin "stencilshadow"
+        ++g_svBatches;
+        g_svBatchKB += ( 16 + 40 * (int)s_vertexCount + 2 * (int)s_indexCount ) / 1024;
         R_AddRenderCmdDrawTris(
             mat_stencilshadow,
             TECHNIQUE_UNLIT,
@@ -347,6 +374,8 @@ static void ShadVol_Init()
     memset( s_vertHashIdx, 0xFF, sizeof(s_vertHashIdx) );  // all slots empty
     for ( int i = 0; i < SHADVOL_EDGE_HASH_SIZE; ++i )
         s_edgeHash[i].lo = -1;
+    s_edgeUsedCount = 0;   // the lists describe THIS empty table
+    s_vertUsedCount = 0;
 }
 
 // Accessor for the sun-preview BLACK-WORLD multiply quad (camwnd Cam_SunPrev).  The
@@ -383,8 +412,10 @@ static void ShadVol_AddSilhouetteTri( const float *v1, const float *v2, const fl
     // IDB s_silhouetteSign and all index math below are untouched.
     float dot = -( nrm[0] * lx + nrm[1] * ly + nrm[2] * lz );
     int sign = ( dot >= 0.0f ) ? 1 : -1;
+    ++g_svTrisFed;
     if ( sign == s_silhouetteSign )                        // != front-cap facing -> skip
         return;
+    ++g_svTrisKept;
 
     if ( s_vertexCount > 1021 || s_indexCount + shadVol.edgeIndexCount > 6120 )
         SunLightPreview_PolyOffsetShadows();
@@ -459,8 +490,55 @@ static void ShadVol_AddFaceFan( const winding_t *w, const orientation_t *orient,
 // `4*(9*layer+9)` = face+36+36*layer), then the BASE layer's resolved handle ->
 // Material_CastsStencilShadow (0x47b21e..0x47b25c, inlined in the binary).
 
+// The one clause of the per-face gate that is a property of the ASSET and nothing else — no
+// light, no camera, no edit layer.  The whole-brush memo below asks it.
+static bool ShadVol_MaterialCasts( const Material *m )
+{
+    static const bool s_allMtl = []{ const char *e = getenv( "RADIANT_SHADOWVOL_ALLMTL" );
+                                     return e && e[0] == '1'; }();
+    if ( Material_CastsStencilShadow( (Material *)m ) )           // 0x47b252
+        return true;
+    if ( !s_allMtl )
+        return false;
+    int bidx = ( m->techniqueSet && m->techniqueSet->techniques[5] )
+                 ? (byte)m->stateBitsEntry[4] : 0;
+    return ( m->surfaceFlags & 0x40000 ) == 0 && m->stateBitsTable
+           && ( m->stateBitsTable[bidx].loadBits[0] & 0x7000F00u ) == 0x800u
+           && ( m->stateBitsTable[bidx].loadBits[1] & 1 ) != 0;
+}
+
 static void ShadVol_AddBrushFaces( const brush_t *def, const orientation_t *orient, const float *light )
 {
+    // Whether ANY face's LAYER-0 material can cast is ASSET state, so it is answered once per
+    // brush and remembered until the next edit.  The scan deliberately omits
+    // MtlDef_IsFaceFiltered (that one depends on the current edit layer) and REFUSES to
+    // memoize while a face's material handle is still unrealized — memoizing "no" there would
+    // disable the brush's shadow until the next edit.
+    {
+        const int memo = KiwiShadowCache_BrushCasts( def );
+        if ( memo == 0 )
+            return;
+        if ( memo < 0 )
+        {
+            bool any = false, unrealized = false;
+            for ( int fi = 0; fi < def->faceCount && !any; ++fi )
+            {
+                const face_t *f = &def->faces[fi];
+                if ( !f->w )
+                    continue;
+                qtexture_s *lm = MaterialDef_GetLayeredMaterial( (MaterialDef *)&f->mtldef[0] );
+                if ( !lm )
+                    continue;
+                if ( !lm->next ) { unrealized = true; continue; }
+                any = ShadVol_MaterialCasts( lm->next );
+            }
+            if ( !unrealized )
+                KiwiShadowCache_SetBrushCasts( def, any );
+            if ( !any )
+                return;
+        }
+    }
+
     float localLight[4];
     PlaneToOrientationVec4( localLight, light, orient );          // 0x47b1a2
     const int layer = g_qeglobals.current_edit_layer;
@@ -491,19 +569,9 @@ static void ShadVol_AddBrushFaces( const brush_t *def, const orientation_t *orie
         // binary casts no convex-brush shadows either (only patches and misc_models,
         // whose arms skip this gate).  Kept FAITHFUL.  RADIANT_SHADOWVOL_ALLMTL=1 relaxes
         // only that last clause so the CoD3-era behaviour can be inspected.
-        static const bool s_allMtl = []{ const char *e = getenv( "RADIANT_SHADOWVOL_ALLMTL" );
-                                         return e && e[0] == '1'; }();
-        bool casts = Material_CastsStencilShadow( lm->next );  // 0x47b252
-        if ( !casts && s_allMtl )
-        {
-            const Material *m = lm->next;
-            int bidx = ( m->techniqueSet && m->techniqueSet->techniques[5] )
-                         ? (byte)m->stateBitsEntry[4] : 0;
-            casts = ( m->surfaceFlags & 0x40000 ) == 0 && m->stateBitsTable
-                    && ( m->stateBitsTable[bidx].loadBits[0] & 0x7000F00u ) == 0x800u
-                    && ( m->stateBitsTable[bidx].loadBits[1] & 1 ) != 0;
-        }
-        if ( !casts )
+        // (the two clauses moved verbatim into ShadVol_MaterialCasts
+        // above so the whole-brush memo asks exactly this question.)
+        if ( !ShadVol_MaterialCasts( lm->next ) )
             continue;
         ShadVol_AddFaceFan( f->w, orient, light );               // 0x47b26c
     }
@@ -546,6 +614,8 @@ static int ShadVol_AddModelSilhouette( int indexCount, const uint16_t *indices,
 static char SunLightPreview_DrawModelShadow( selbrush_t *b, orientation_t *orient,
                                              const float *light )
 {
+    // The scratch the UNCACHED path still uses: the fallback for a cold cache and for a map
+    // past the cache's memory cap.
     static byte vbuf[196612];                  // v8  — 0x4000 verts * 12 bytes
     static byte ibuf[131076];                  // v11 — 0x10000 indices * 2 + slack
 
@@ -562,9 +632,19 @@ static char SunLightPreview_DrawModelShadow( selbrush_t *b, orientation_t *orien
 
     orientation_t mor;                                  // v9
     Entity_GetOrientation( (entity_s_def *)def, orient, &mor );   // 0x479ce8
-    int indexCount = Editor_ExtractXModelGeo( (XModel *)(intptr_t)mc->model->handle,
-                                              (float *)vbuf, 0x4000,
-                                              (uint16_t *)ibuf, 0x10000 );   // 0x479d18
+
+    // 0x479d18 — the extraction.  Its result depends only on the XModel, so the per-model
+    // cache is asked first; a hit hands back identical positions and indices.
+    XModel               *xm       = (XModel *)(intptr_t)mc->model->handle;
+    const float          *cVerts   = nullptr;
+    const unsigned short *cIndices = nullptr;
+    int                   indexCount = 0;
+    if ( KiwiShadowCache_ModelGeo( xm, &cVerts, &cIndices, &indexCount ) )
+        return (char)ShadVol_AddModelSilhouette( indexCount, cIndices, &mor,
+                                                 (const byte *)cVerts, 12, light );
+
+    indexCount = Editor_ExtractXModelGeo( xm, (float *)vbuf, 0x4000,
+                                          (uint16_t *)ibuf, 0x10000 );   // 0x479d18
     // sub_456850(indexCount, indices, &orient, verts, stride=12, light)
     return (char)ShadVol_AddModelSilhouette( indexCount, (const uint16_t *)ibuf, &mor,
                                              vbuf, 12, light );   // 0x479d38
@@ -605,7 +685,8 @@ char Radiant_ShadVol_ModelShadowArm( selbrush_t *sb, orientation_t *orient, cons
     return SunLightPreview_DrawModelShadow( sb, orient, light );                     // 0x47b2f0
 }
 
-static void SunLightPreview_BrushShadow( selbrush_t *listHead, orientation_t *orient, const float *light );
+static void SunLightPreview_BrushShadow( selbrush_t *listHead, orientation_t *orient,
+                                         const float *light );
 
 // 0x47b2a0 SunLightPreview_DrawBrushShadow — __usercall(light@eax, sb@edx, orient@ecx).
 // Dispatch in the binary's order: (1) sb->patch non-null -> the patch arm, RETURN;
@@ -654,11 +735,15 @@ static void SunLightPreview_DrawBrushShadow( const float *light, selbrush_t *sb,
 // composed onto the caller's and the prefab's own instanced brush list is walked
 // recursively.  mp_backlot's world is prefab CONTENTS + patches with ZERO top-level
 // convex brushes, so without this recursion it builds no volumes at all.
-static void SunLightPreview_BrushShadow( selbrush_t *listHead, orientation_t *orient, const float *light )
+// The UNCACHED arm only: the recording is made by the shared walk cache's own walk, which
+// records EVERYTHING — recording from here would omit FilterBrush-hidden brushes.
+static void SunLightPreview_BrushShadow( selbrush_t *listHead, orientation_t *orient,
+                                         const float *light )
 {
     selbrush_t *sentinel = listHead;                          // x_sb (0x47b319)
     for ( selbrush_t *b = listHead->next; b && b != sentinel; b = b->next )  // 0x47b31c/0x47b372
     {
+        ++g_svNodesWalked;
         if ( FilterBrush( b, 0 ) )                            // 0x47b328
             continue;
         entity_s *ent = b->owner;                             // 0x47b334
@@ -673,7 +758,39 @@ static void SunLightPreview_BrushShadow( selbrush_t *listHead, orientation_t *or
                                          &prefabOrient, light );
             continue;
         }
+        ++g_svCastersDrawn;
         SunLightPreview_DrawBrushShadow( light, b, orient );   // 0x47b36d
+    }
+}
+
+// THE REPLAY: the same visit sequence the walk above produces, read out of the recording.
+// Still evaluated PER FRAME on purpose: FilterBrush (so filter/layer/hide needs no dirty
+// signal, and a filtered prefab still skips its whole subtree via `subtreeEnd`), and
+// everything below SunLightPreview_DrawBrushShadow — which is why the emitted volume is
+// bit-for-bit what the uncached walk emits.
+static void SunLightPreview_ReplayCasters( const KiwiWalk *w, const float *light )
+{
+    for ( int i = 0; i < w->nodeCount; )
+    {
+        const KiwiWalkNode &nd = w->nodes[i];
+        ++g_svNodesWalked;
+        if ( FilterBrush( nd.brush, 0 ) )                     // 0x47b328, still per frame
+        {
+            i = nd.subtreeEnd ? nd.subtreeEnd : i + 1;
+            continue;
+        }
+        if ( nd.subtreeEnd )                                  // a prefab: descend
+        {
+            ++i;
+            continue;
+        }
+        if ( nd.orient >= 0 && nd.orient < w->orientCount )
+        {
+            ++g_svCastersDrawn;
+            SunLightPreview_DrawBrushShadow( light, nd.brush,
+                                             (orientation_t *)&w->orients[nd.orient] );
+        }
+        ++i;
     }
 }
 
@@ -702,7 +819,18 @@ bool Radiant_ShadVol_Begin( int frontCapPerTri )
 }
 
 // The two faithful entry points, exported under their binary names.
+// The caster-walk cache sits HERE, around the walk, not inside it: a miss runs the binary's
+// own walk unchanged.
 void Radiant_ShadVol_BrushShadow( selbrush_t *listHead, const orientation_t *orient, const float *light )
 {
+
+    // the recording is the SHARED one the camera and 2D passes
+    // replay (kiwi_walkcache.h) — the sun pass is a client of it now, not its owner.
+    const KiwiWalk *w = KiwiWalkCache_Get( listHead, orient );
+    if ( w )
+    {
+        SunLightPreview_ReplayCasters( w, light );
+        return;
+    }
     SunLightPreview_BrushShadow( listHead, (orientation_t *)orient, light );
 }

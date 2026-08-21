@@ -354,11 +354,10 @@ bool KiwiFocus_DispatchInstant( unsigned int cmdId )
     // `vpn = ( cos p cos y, cos p sin y, sin p )`, so for a wanted view direction
     // d (== -normal, i.e. looking INTO the face):
     //     pitch = asin( d.z ),  yaw = atan2( d.y, d.x )
-    // LookAlong clamps pitch to +-89 degrees, so a FLOOR or CEILING face is viewed
-    // from one degree off vertical rather than from exactly overhead.  That is the
-    // camera rig's own limit (a true +-90 pitch has no yaw), it is what the view
-    // cube's top/bottom already do, and one degree is not visible; it is stated
-    // here so the next reader does not go looking for a bug.
+    // LookAlong bounds the pitch at +-90, so a FLOOR or CEILING face is viewed
+    // from EXACTLY overhead — the same pole-exact snap the view cube's top/bottom
+    // take.  The yaw the pole keeps is this face's own atan2, which at a pole is
+    // atan2(0,0) = 0; the view is square to the face either way.
     const float *n = def->faces[fi].plane.normal;
     const float  nl = sqrtf( n[0]*n[0] + n[1]*n[1] + n[2]*n[2] );
     if ( !( nl > 1.0e-6f ) )

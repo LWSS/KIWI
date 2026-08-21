@@ -72,6 +72,61 @@ int __cdecl R_SetIndexData(GfxCmdBufPrimState *state, uint8_t *indices, int triC
     return baseIndex;
 }
 
+#ifdef KISAK_RADIANT
+// KIWI: R_SetIndexData's loop with the lock hoisted out of it — same reserve, same
+// ring offsets, same runs in the same order, same `used` accounting, same
+// DISCARD-on-empty / NOOVERWRITE-otherwise rule.  -1 = lock failed, draw nothing.
+int __cdecl R_SetIndexDataRuns(
+    GfxCmdBufPrimState *state, const uint16_t *const *runs, const int *triCounts, int runCount)
+{
+    PROF_SCOPED("RB_SetIndexData");
+
+    iassert(runs);
+    iassert(triCounts);
+
+    int totalTris = 0;
+    for (int i = 0; i < runCount; ++i)
+        totalTris += triCounts[i];
+    if (totalTris <= 0)
+        return -1;
+
+    const int baseIndex = R_ReserveIndexData(state, totalTris);
+    const int indexDataSize = 6 * totalTris;
+    IDirect3DIndexBuffer9 *ib = gfxBuf.dynamicIndexBuffer->buffer;
+    iassert(ib);
+
+    uint8_t *bufferData;
+    if (gfxBuf.dynamicIndexBuffer->used)
+    {
+        PROF_SCOPED("LockIndexBufferNoOverwrite");
+        bufferData = (uint8_t *)R_LockIndexBuffer(ib, 2 * gfxBuf.dynamicIndexBuffer->used, indexDataSize, D3DLOCK_NOOVERWRITE);
+    }
+    else
+    {
+        PROF_SCOPED("LockIndexBufferDiscard");
+        bufferData = (uint8_t *)R_LockIndexBuffer(ib, 2 * gfxBuf.dynamicIndexBuffer->used, indexDataSize, D3DLOCK_DISCARD);
+    }
+    if (!bufferData)
+        return -1;
+
+    uint8_t *dst = bufferData;
+    for (int i = 0; i < runCount; ++i)
+    {
+        const int bytes = 6 * triCounts[i];
+        if (bytes > 0)
+        {
+            memcpy(dst, runs[i], (size_t)bytes);
+            dst += bytes;
+        }
+    }
+    R_UnlockIndexBuffer(ib);
+    if (state->indexBuffer != ib)
+        R_ChangeIndices(state, ib);
+    gfxBuf.dynamicIndexBuffer->used += 3 * totalTris;
+    return baseIndex;
+}
+#endif
+
 void __cdecl R_SetupPassPerPrimArgs(GfxCmdBufContext context)
 {
     const MaterialPass *pass; // [esp+0h] [ebp-4h]

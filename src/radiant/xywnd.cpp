@@ -16,6 +16,10 @@ enum { YZ = ED_VIEW_YZ, XZ = ED_VIEW_XZ, XY = ED_VIEW_XY };   // the binary's ba
 #include <gfx_d3d/r_scene.h>        // R_Ed_SetSceneParms
 #include <gfx_d3d/r_rendercmds.h>   // R_AddCmd_Line3D, R_BeginFrame/R_EndFrame, R_AddCmdClearScreen
 #include "radiant_rtt.h"           // P5 RTT: RTT_Begin/RTT_End, RTT_XY
+#include <universal/profile.h>
+#include "kiwi_walkcache.h"        // the shared prefab-walk recording
+#include "kiwi_viewdirty.h"        // KiwiViewDirty_Mark — re-arm on a bailed render
+#include "kiwi_camera.h"           // KiwiCam_MarkerViewpoint — the camera icon's anchor
 #include <math.h>
 #include <vector>                   // XY_ContextMenu Layers submenu — distinct layer-name set
 #include <string>                   // (std::string / std::vector; <algorithm> already in stdafx)
@@ -414,7 +418,7 @@ static void DrawZIcon( const XYViewState *wnd )
 // The colour moves from the binary's flt_6DE160 blue to red; DrawZIcon keeps the blue,
 // so the two markers are now told apart at a glance instead of being the same colour.
 // Drawn ON TOP of the map: the XY paint calls DrawCameraIcon AFTER XY_DrawBrushes and
-// the turret highlights (xywnd.cpp:3960-3961), and the 2D views are depth-test-free
+// the turret highlights (xywnd.cpp:3961-3962), and the 2D views are depth-test-free
 // ortho, so emission order IS paint order.  Draw ORDER is not changed by this deviation
 // — the icon keeps its existing slot, just before DrawZIcon.
 static void DrawCameraIcon( const XYViewState *wnd )
@@ -429,12 +433,22 @@ static void DrawCameraIcon( const XYViewState *wnd )
     const float rad = DEG2RAD( ( ang + 45.0f ) );
     const float c   = (float)cos( rad );
     const float s   = (float)sin( rad );
-    const float oh  = cam.origin[v5];                             // origin, in-plane horizontal
-    const float ov  = cam.origin[v2];                            // origin, in-plane vertical
+    // ── KIWI-UX DEVIATION: THE ANCHOR IS THE VIEWPOINT, NOT camera.origin ─────
+    // USER REPORT, verbatim: "there is a bug where the camera is warped when it
+    // updates the visual position."  In the default ORTHO projection camera.origin
+    // is a PSEUDO-eye that the dolly re-seats at `pivot - forward * s_dist` on
+    // every notch, with s_dist as the ZOOM (1 .. 262144) — so the marker was
+    // translated across this view by the zoom, along the camera's own facing, for
+    // a camera that had not moved.  KiwiCam_MarkerViewpoint (kiwi_camera.h) is
+    // that anchor done once; in perspective it is camera.origin unchanged.
+    float eye[3];
+    KiwiCam_MarkerViewpoint( eye );
+    const float oh  = eye[v5];                                    // in-plane horizontal
+    const float ov  = eye[v2];                                    // in-plane vertical
 
     // KIWI-UX DEVIATION: world units per screen pixel.  wnd->scale is guarded non-zero
     // by XY_SetupScene's iassert and clamped to [0.01, 32] by the wheel handler
-    // (xywnd.cpp:3102-3104), so this cannot divide by zero.
+    // (xywnd.cpp:3103-3105), so this cannot divide by zero.
     const float px    = 1.0f / wnd->scale;
     const float bodyH = 12.0f * px;      // ROUND M: was 24 screen px (shakeout B), binary 16 world
     const float bodyV =  6.0f * px;      // ROUND M: was 12,  binary 8
@@ -693,7 +707,9 @@ static void Ed_DrawBrushEntityName( int nView, selbrush_t *b, float scale,
 // floats including alpha.  This keeps only !worldspawn->eclass colour, worldspawn->9, alpha 1.
 // Completing it needs sub_40A130 (colour unpack) + Brush_GetEntityLineColor 0x47aa20 + the
 // stride-artifact-prone brushflags offsets.  Cosmetic - selection/geometry unaffected.
-static void XY_BrushColor(selbrush_t *b, GfxColor *out)
+// `outRgba` (optional) hands back the same four floats this function packs, so the model-tint
+// bracket can push them as MATERIAL_COLOR without unpacking the BGRA order again.
+static void XY_BrushColor(selbrush_t *b, GfxColor *out, float *outRgba = nullptr)
 {
     float rgba[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
 
@@ -715,6 +731,11 @@ static void XY_BrushColor(selbrush_t *b, GfxColor *out)
     }
     rgba[3] = 1.0f;
     Byte4PackPixelColor( rgba, out );
+    if ( outRgba )
+    {
+        outRgba[0] = rgba[0]; outRgba[1] = rgba[1];
+        outRgba[2] = rgba[2]; outRgba[3] = rgba[3];
+    }
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -969,84 +990,81 @@ static void Ed_DrawSelectedRadius( selbrush_t *b, const GfxColor *col, int viewT
 
 static inline selbrush_t *Ed_EntFirstBrushInst( entity_s *e );   // defined below
 
-// XY view-bounds + clip-plane cull (0x46cc00 / 0x46cca0 / 0x46cd80) - the 2D analogue of the
-// camera's Cam_SetupClipPlanes/CullCubic pair: four planes along the view-rect edges,
-// re-derived into a prefab's LOCAL space so DrawModels_PrefabContents can reject content
-// brushes outside the visible rect.  Skipping it overruns radiant_modelSkinnedSurfs on a
-// dense map (the XY pass attempted ~23k model draws per frame on blackout).
+// The prefab-walk counters, shared with the camera (brush.cpp).
+extern int g_edPrefabPrefabsWalked;                     // brush.cpp:7061
+extern int g_edPrefabBrushesWalked;                     // brush.cpp:7062
+extern int g_edPrefabBrushesDrawn;                      // brush.cpp:7064
 
-// 0x4BA870 sub_4BA870 — transform a world plane {n,d} into `orient`'s local frame:
-//   out.n = VectorRotateByAxis(orient, n);  out.d = d − orient.origin·n
-static void XY_PlaneToLocal( float *out, const float *orientMtx, const float *plane )
+// The 2D view's per-entity model tint travels as a flat MATERIAL_COLOR, not a per-vertex
+// stamp: the stamp forces a writable tempSkinBuf copy (skinnedVert != verts0), which
+// disqualifies the surface from the geometry cache and the instance merge.  ONE
+// MATERIAL_COLOR is live per RC_DRAW_EDITOR_SKINNEDCACHED, so the flush window is CUT when
+// the brush colour changes with surfs queued.  SELECTED models keep the stamp.
+
+// Bound on how often ONE pass may cut its flush window: past the cap the remaining surfs
+// share the last tint, rather than risking a render-command buffer overflow.
+#define KIWI_XY_TINT_MAX_CUTS 64
+static int      s_xyTintCuts  = 0;
+static bool     s_xyTintOpen  = false;   // a flush window has adopted a colour
+static float    s_xyTintRgba[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+
+extern void *R_AddEditorSurfsCmd();      // r_ed_scene.cpp:269
+extern int   Editor_PendingSurfCount();  // r_ed_scene.cpp:297
+
+// Read by camwnd.cpp's Cam_SkinModelSEH: while non-zero, a technique-29 model arm must pass
+// colorPtr = NULL.  Set ONLY around the XY view's UNSELECTED pass.
+int g_edXyModelFlatTint = 0;
+
+// Close the open flush window: push its tint as a flat MATERIAL_COLOR override (w = 1), emit
+// the surf command, re-open an empty window.  Nothing queued = nothing emitted.
+static void XY_FlushModelSurfs()
 {
-    extern void VectorRotateByAxis( float *out, const float *axisMatrix, const float *dir );
-    iassert( plane != out );                                     // q_shared.cpp:1690
-    VectorRotateByAxis( out, orientMtx, plane );                 // 0x4ba89f
-    float d = orientMtx[1] * plane[1] + orientMtx[0] * plane[0] + orientMtx[2] * plane[2];
-    out[3] = plane[3] - d;                                       // 0x4ba8c3
-}
-
-// 0x46CCA0 CXYWnd_SetupClipPlanes — build the 4 view-edge planes in `orient`'s local space.
-void XYWnd_SetupClipPlanes( xywndState_t *xy, const float *orient )
-{
-    float p[4];
-    p[0] = p[1] = p[2] = 0.0f;
-    p[xy->m_clipDim1] = 1.0f;  p[3] = xy->m_clipMin1;            // 0x46ccbe/0x46ccce (+180)
-    XY_PlaneToLocal( xy->m_clipPlanes[0], orient, p );
-    p[0] = p[1] = p[2] = 0.0f;
-    p[xy->m_clipDim1] = -1.0f; p[3] = -xy->m_clipMax1;           // 0x46ccf5/0x46cd04 (−(+188))
-    XY_PlaneToLocal( xy->m_clipPlanes[1], orient, p );
-    p[0] = p[1] = p[2] = 0.0f;
-    p[xy->m_clipDim2] = 1.0f;  p[3] = xy->m_clipMin2;            // 0x46cd28/0x46cd34 (+184)
-    XY_PlaneToLocal( xy->m_clipPlanes[2], orient, p );
-    p[0] = p[1] = p[2] = 0.0f;
-    p[xy->m_clipDim2] = -1.0f; p[3] = -xy->m_clipMax2;           // 0x46cd58/0x46cd6a (−(+192))
-    XY_PlaneToLocal( xy->m_clipPlanes[3], orient, p );
-}
-
-// 0x46CC00 CXYWnd_SetupViewBounds — view axes + view-rect bounds, then the identity-orient
-// clip planes.  Binary XY_Draw calls this right after computing its view rect (0x46cf82).
-void XYWnd_SetupViewBounds( xywndState_t *xy )
-{
-    const float half = 0.5f / xy->m_fScale;                      // 0x46cc12
-    xy->m_clipDim1 = ( xy->m_nViewType == 0 );                   // x84
-    xy->m_clipDim2 = ( xy->m_nViewType != 2 ) + 1;               // x85
-    xy->m_clipDim3 = 3 - xy->m_clipDim2 - xy->m_clipDim1;        // x86
-    const float hw = (float)xy->m_nWidth  * half;
-    const float hh = (float)xy->m_nHeight * half;
-    xy->m_clipMin1 = xy->m_vOrigin[xy->m_clipDim1] - hw;         // x87
-    xy->m_clipMax1 = xy->m_vOrigin[xy->m_clipDim1] + hw;         // x89
-    xy->m_clipMin2 = xy->m_vOrigin[xy->m_clipDim2] - hh;         // x88
-    xy->m_clipMax2 = xy->m_vOrigin[xy->m_clipDim2] + hh;         // x90
-    XYWnd_SetupClipPlanes( xy, &world_orient_matrix[0][0] );     // 0x46cc95
-}
-
-
-// 0x46CD80 sub_46CD80 — cull test: 1 = brush's AABB is OUTSIDE any of the 4 planes (skip),
-// 0 = keep.  Farthest-corner test per plane (n>=0 → maxs, else mins), reject on d <= 0.
-char XYWnd_CullBrush( xywndState_t *xy, selbrush_t *b )
-{
-    brush_t *def = b->def;                                       // brush+20 (0x46cd94)
-    const float *mins = def->mins;                               // def floats [8..10]
-    const float *maxs = def->maxs;                               // def floats [11..13]
-    for ( int p = 0; p < 4; ++p )
+    if ( Editor_PendingSurfCount() > 0 )
     {
-        const float *pl = xy->m_clipPlanes[p];
-        float c0 = pl[0] >= 0.0f ? maxs[0] : mins[0];            // 0x46cd9c
-        float c1 = pl[1] >= 0.0f ? maxs[1] : mins[1];            // 0x46cdb1
-        float c2 = pl[2] >= 0.0f ? maxs[2] : mins[2];            // 0x46cdc5
-        float d  = pl[0] * c0 + pl[1] * c1 + pl[2] * c2 - pl[3]; // 0x46cde7/0x46cdf0
-        if ( d <= 0.0f )
-            return 1;                                            // outside → cull (0x46ce0e)
+        if ( s_xyTintOpen )
+        {
+            const float tint[4] = { s_xyTintRgba[0], s_xyTintRgba[1], s_xyTintRgba[2], 1.0f };
+            R_AddCmdSetMaterialColor( tint );
+        }
+        R_AddEditorSurfsCmd();
     }
-    return 0;                                                    // keep (0x46ce12)
+    R_SortMaterials();      // [FLUSH DEMARC] open the next window
+    s_xyTintOpen = false;
 }
 
+// Called once per top-level brush, BEFORE DrawBrush queues anything for it.
+static void XY_ModelTintNote( const float *rgba )
+{
+    if ( !s_xyTintOpen )
+    {
+        s_xyTintRgba[0] = rgba[0]; s_xyTintRgba[1] = rgba[1];
+        s_xyTintRgba[2] = rgba[2]; s_xyTintRgba[3] = rgba[3];
+        s_xyTintOpen = true;
+        return;
+    }
+    if ( s_xyTintRgba[0] == rgba[0] && s_xyTintRgba[1] == rgba[1]
+      && s_xyTintRgba[2] == rgba[2] )
+        return;                              // same colour — the window keeps growing
+    if ( s_xyTintCuts >= KIWI_XY_TINT_MAX_CUTS )
+        return;                              // capped — keep the tint already adopted
+    if ( Editor_PendingSurfCount() > 0 )
+    {
+        XY_FlushModelSurfs();                // cut the window at the colour change
+        ++s_xyTintCuts;
+    }
+    s_xyTintRgba[0] = rgba[0]; s_xyTintRgba[1] = rgba[1];
+    s_xyTintRgba[2] = rgba[2]; s_xyTintRgba[3] = rgba[3];
+    s_xyTintOpen = true;
+}
 
 void XY_DrawBrushes(const XYViewState *v)
 {
     if ( !active_brushes.next )            // sentinel list not bootstrapped → no map loaded
         return;
+
+    // open this view's prefab-walk window (published at the tail).
+    g_edPrefabPrefabsWalked = g_edPrefabBrushesWalked = 0;
+    g_edPrefabBrushesDrawn = 0;
 
     const int nDim1 = (v->viewType == ED_VIEW_YZ);     // horizontal world axis
     const int nDim2 = (v->viewType != ED_VIEW_XY) + 1; // vertical world axis
@@ -1073,20 +1091,33 @@ void XY_DrawBrushes(const XYViewState *v)
     // surfs, capping radiant_modelSkinnedSurfs and silently dropping model draws.
     { extern void R_SortMaterials(); R_SortMaterials(); }
 
+    // The UNSELECTED pass is open: tech-29 model arms reached from here transport their tint
+    // through MATERIAL_COLOR.  Cleared before the selected pass, which keeps the stamp.
+    s_xyTintOpen  = false;
+    s_xyTintCuts  = 0;
+    g_edXyModelFlatTint = 1;
+
+    // The 2D view is the second walker of the same tree: same recording, second replay.
+    const bool walkReplay = KiwiWalk_BeginReplay(
+        &active_brushes, ident, /*backward*/ false );
+
     for ( selbrush_t *b = active_brushes.next; b != &active_brushes; b = b->next )
     {
         brush_t *def = b->def;
         if ( !def )
             continue;
-        // AABB overlap of the brush bounds with the view rect, in the 2D view plane.
-        if ( xmax < def->mins[nDim1] || ymax < def->mins[nDim2] ||
-             xmin > def->maxs[nDim1] || ymin > def->maxs[nDim2] )
-            continue;
         if ( FilterBrush( b, 0 ) )         // 0 = no fast-drag filtering (g_PrefsDlg null)
             continue;
 
         GfxColor col;
-        XY_BrushColor( b, &col );
+        float    colRgba[4];
+        XY_BrushColor( b, &col, colRgba );
+        // the tint this brush's models want, adopted by the
+        // open flush window (cutting it first if the colour changed and surfs are already
+        // queued).  See the block above XY_DrawBrushes for the whole derivation.
+        XY_ModelTintNote( colRgba );
+        if ( walkReplay )
+            KiwiWalk_TopLevel( b );        // cursor lockstep
         DrawBrush( b, ident, v->viewType, /*technique=wireframe*/ 29, &col, /*width*/ 1, /*drawFlags*/ 0,
                    /*layerPrefix (binary `zero`)*/ "" );
 
@@ -1120,17 +1151,21 @@ void XY_DrawBrushes(const XYViewState *v)
         }
     }
 
+    if ( walkReplay )
+        KiwiWalk_EndReplay();   // the selected loop below stays immediate
+
     // 0x46d120 - flush the ACTIVE pass's editor surfs (the ED_SURF_MODEL surfs DrawBrush ->
     // DrawModels queued above) as their own RC_DRAW_EDITOR_SKINNEDCACHED window, exactly where
     // the binary flushes after its not-selected loop.
-    {
-        extern void *R_AddEditorSurfsCmd();
-        R_AddEditorSurfsCmd();
-    }
     // 0x46d230 — the binary opens the SELECTED pass with its own R_SortMaterials, so the
     // selected surfs flush in their own [saved..count) window (not re-flushing the active
     // pass's surfs).
-    { extern void R_SortMaterials(); R_SortMaterials(); }
+    // Both are XY_FlushModelSurfs now: same R_AddEditorSurfsCmd, same R_SortMaterials re-open,
+    // same order and count — only the tint command is new.
+    XY_FlushModelSurfs();
+    // The selected pass keeps the per-vertex stamp (its arm is tens of instances, and it is
+    // the arm round BY3 kept on the dynamic path on purpose).
+    g_edXyModelFlatTint = 0;
 
     // Selected brushes drawn on top.  KISAK: the editor's $line material drives the line
     // colour from CONST_SRC_CODE_MATERIAL_COLOR, not the per-vertex colour, so the selected
@@ -1158,9 +1193,7 @@ void XY_DrawBrushes(const XYViewState *v)
             brush_t *def = b->def;
             if ( !def )
                 continue;
-            bool culled = ( xmax < def->mins[nDim1] || ymax < def->mins[nDim2] ||
-                            xmin > def->maxs[nDim1] || ymin > def->maxs[nDim2] );
-            if ( !culled && !FilterBrush( b, 0 ) )
+            if ( !FilterBrush( b, 0 ) )
                 DrawBrush( b, ident, v->viewType, 29, &selCol, 2, 0,
                            /*layerPrefix (binary `zero`)*/ "" );
 
@@ -1199,6 +1232,7 @@ void XY_DrawBrushes(const XYViewState *v)
         const float viewMaxs[2] = { xmax, ymax };   // &tdp = {tdp, v52}
         ScriptGroup_DrawTeamColorViz( teamColorStr, viewMins, viewMaxs, nDim1, nDim2 );
     }
+
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1985,6 +2019,9 @@ static void Ed_XY_MouseMoved( xywndState_t *wnd, int x, int y, unsigned int butt
                     SetCursorPos( wnd->m_ptCursor.x, wnd->m_ptCursor.y );
                     // == CWnd::Invalidate( FALSE ) on this view.
                     ::InvalidateRect( wnd->m_hWnd, nullptr, FALSE );
+                    // Under RTT the InvalidateRect lands on a HIDDEN child and does nothing,
+                    // so the pan must announce itself in g_nUpdateBits for the dirty gate.
+                    g_nUpdateBits |= ( W_XY | W_XY_OVERLAY );
                 }
             }
         }
@@ -3226,7 +3263,9 @@ int XYWnd_OnMouseWheel( HWND hwnd, short zDelta, int screenX, int screenY )
     wnd->m_vOrigin[nDim1] += before[nDim1] - after[nDim1];
     wnd->m_vOrigin[nDim2] += before[nDim2] - after[nDim2];
 
-    g_nUpdateBits |= 1;   // RTT: no window to invalidate; the pump re-renders the RT
+    // A wheel ZOOM changes this view, so it must say so for the dirty gate; the camera bit is
+    // kept so the pump behaves as it did.
+    g_nUpdateBits |= ( W_XY | W_XY_OVERLAY | W_CAMERA );
     return TRUE;
 }
 
@@ -4039,9 +4078,6 @@ void XYWnd_Paint( HWND hwndIn )
     XY_DrawGrid( &vs );        // grid lines + coordinate/view-name labels
     if ( ( g_qeglobals.d_savedinfo.d_xyShowFlags & 0x10 ) == 0 )  // View→Show→Blocks (0x10 SET = hidden)
         XY_DrawBlockGrid( &vs );   // coarse 1024-unit block grid + block-index labels
-    // 0x46cf82 — CXYWnd_SetupViewBounds: view axes + rect + identity clip planes, so the
-    // prefab-content XY cull (DrawModels_PrefabContents → XY_CullBrush) has this frame's rect.
-    XYWnd_SetupViewBounds( wnd );
     XY_DrawBrushes( &vs );     // brushes/entity bboxes + entity-name labels
     // turret share/ambush export-highlight (IDB XY_Draw 0x46d876: the twin sub_46AD20
     // passes, gated on the selected turrets' script_turret_share/ambush key lists).
@@ -4096,6 +4132,44 @@ void XYWnd_Paint( HWND hwndIn )
     R_CheckTargetWindow( hwnd );
 }
 
+// The dirty-flag gate (kiwi_viewdirty.h) is driven by g_nUpdateBits, which every edit /
+// selection / filter / grid / layer / pan / zoom path already sets.  What it does NOT cover is
+// an overlay that follows the MOUSE while no bits are set — a live marquee, a clip-point drag,
+// the Shift+X crosshair — so while any of these is live the XY view is FORCE-DIRTY.
+extern int drag_ok;   // drag.cpp:132 (IDB 0x23f1724)
+
+bool XYWnd_OverlayIsLive()
+{
+    // Blanket default: while the 2D view owns a held mouse button, render every tick.  That
+    // makes every button-driven view change right by construction instead of by enumeration.
+    if ( Ed_ActiveXY()->m_nButtonstate != 0 )
+        return true;
+    if ( drag_ok )
+        return true;
+    if ( g_bCrossHairs || g_bClipMode || g_bRotateMode || g_bScaleMode )
+        return true;
+    const select_t m = g_qeglobals.d_select_mode;
+    if ( g_qeglobals.camera_fov_setup == (void *)&Ed_PressCallback
+         && ( m == sel_area || m == sel_areapoint_vertex || m == sel_areabrush
+           || m == sel_areabrush_sub || m == sel_areapoint_curve || m == sel_areapoint ) )
+        return true;
+    return false;
+}
+
+// A SKIPPED tick still owes XYWnd_RenderToRT's two non-drawing side effects: the viewport's
+// own size state (the mouse mapping reads m_nHeight) and CopySelectedFaceValues
+// (XY_Draw tail 0x46db54), which keeps the surface inspector's windings current.
+void XYWnd_TickSkipped( int w, int h )
+{
+    xywndState_t *wnd = Ed_ActiveXY();
+    if ( w >= 1 && h >= 1 )
+    {
+        wnd->m_nWidth  = w;
+        wnd->m_nHeight = h;
+    }
+    CopySelectedFaceValues();
+}
+
 // P5 RTT: the same XYWnd_Paint pipeline, rendering into RTT_XY's offscreen texture (for ImGui to
 // sample) instead of a native window.  The window-setup (R_SetupRendertarget_CheckDevice) is
 // replaced by RTT_Begin, the tail R_CheckTargetWindow is dropped, and the frame ends with RTT_End.
@@ -4103,24 +4177,37 @@ void XYWnd_Paint( HWND hwndIn )
 // Ed_ActiveXY(), never an HWND.  `w`/`h` come from the ImGui dock cell.
 void XYWnd_RenderToRT( int w, int h )
 {
+    PROF_SCOPED( "XY RenderToRT" );
+    // The caller has already CONSUMED this view's dirty flag, so every bail below must put it
+    // back or the view stays stale until the next invalidation.
     if ( !dx.device || w < 1 || h < 1 )
+    {
+        KiwiViewDirty_Mark( KIWI_DIRTYVIEW_XY );
         return;
+    }
     xywndState_t *wnd = Ed_ActiveXY();
     // Drive the viewport's own size state from the dock-cell size (was set by XYWnd_OnSize).
     wnd->m_nWidth  = w;
     wnd->m_nHeight = h;
-    if ( !RTT_Begin( RTT_XY, w, h ) )   // points FRAME_BUFFER at the RT + suppresses Present
-        return;
+    {
+        if ( !RTT_Begin( RTT_XY, w, h ) )   // points FRAME_BUFFER at the RT + suppresses Present
+        {
+            KiwiViewDirty_Mark( KIWI_DIRTYVIEW_XY );
+            return;
+        }
+    }
 
-    R_BeginFrame();
-    R_BeginSharedCmdList();
-    // Clear to the XY background colour (savedinfo colour slot 1); 7 = colour+depth+stencil.
-    R_AddCmdClearScreen( 7, g_qeglobals.d_savedinfo.colors[1], 1.0f, 0 );
-    // The $line UNLIT pixel shader needs CONST_SRC_CODE_MATERIAL_COLOR; the bare grid draw
-    // skips the per-material constant setup a scene render does, so set it white (the grid
-    // lines carry their colour per-vertex).
-    static const float s_edWhite[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
-    R_AddCmdSetMaterialColor( s_edWhite );
+    {
+        R_BeginFrame();
+        R_BeginSharedCmdList();
+        // Clear to the XY background colour (savedinfo colour slot 1); 7 = colour+depth+stencil.
+        R_AddCmdClearScreen( 7, g_qeglobals.d_savedinfo.colors[1], 1.0f, 0 );
+        // The $line UNLIT pixel shader needs CONST_SRC_CODE_MATERIAL_COLOR; the bare grid draw
+        // skips the per-material constant setup a scene render does, so set it white (the grid
+        // lines carry their colour per-vertex).
+        static const float s_edWhite[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+        R_AddCmdSetMaterialColor( s_edWhite );
+    }
 
     XYViewState vs;
     vs.viewType  = wnd->m_nViewType;
@@ -4140,9 +4227,6 @@ void XYWnd_RenderToRT( int w, int h )
     XY_DrawGrid( &vs );        // grid lines + coordinate/view-name labels
     if ( ( g_qeglobals.d_savedinfo.d_xyShowFlags & 0x10 ) == 0 )  // View→Show→Blocks (0x10 SET = hidden)
         XY_DrawBlockGrid( &vs );   // coarse 1024-unit block grid + block-index labels
-    // 0x46cf82 — CXYWnd_SetupViewBounds: view axes + rect + identity clip planes, so the
-    // prefab-content XY cull (DrawModels_PrefabContents → XY_CullBrush) has this frame's rect.
-    XYWnd_SetupViewBounds( wnd );
     XY_DrawBrushes( &vs );     // brushes/entity bboxes + entity-name labels
     // turret share/ambush export-highlight (IDB XY_Draw 0x46d876: the twin sub_46AD20
     // passes, gated on the selected turrets' script_turret_share/ambush key lists).
@@ -4191,10 +4275,16 @@ void XYWnd_RenderToRT( int w, int h )
     Ed_DrawConnectionLines();  // target/targetname + script_linkTo lines (self-gated on d_xyShowFlags&4)
     CopySelectedFaceValues();  // IDB XY_Draw tail 0x46db54: rebuild the selected faces' faceVis
     }   // end if (sceneOk) — degenerate-projection frame draws only the cleared background
-    R_EndFrame();
+    {
+        R_EndFrame();
+    }
     R_IssueRenderCommands( (uint)-1 );
-    R_SortMaterials();
-    RTT_End();
+    {
+        R_SortMaterials();
+    }
+    {
+        RTT_End();
+    }
 }
 
 
@@ -4514,8 +4604,13 @@ HWND XYWnd_CreateRaw( HWND parent, int x, int y, int w, int h )
         s_classRegistered = true;
     }
 
+    // CREATED HIDDEN — the MFC style MINUS WS_VISIBLE.  ImGuiShell_ApplyViewportDocks
+    // hides it on every pumped frame anyway (the viewport is an RTT texture), but the
+    // first pumped frame is after Load_Materials, so at WS_VISIBLE it sat unpainted over
+    // the frame for the whole boot material phase.  D3D9 does not require a visible window
+    // (R_InitRendererForWindow / R_Hwnd_Resize only GetClientRect + CreateAdditionalSwapChain).
     return CreateWindowExA( 0, XYWND_CLASS_NAME, nullptr,
-                            WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN,
+                            WS_CHILD | WS_CLIPSIBLINGS | WS_CLIPCHILDREN,
                             x, y, w, h, parent, nullptr, inst, nullptr );
 }
 

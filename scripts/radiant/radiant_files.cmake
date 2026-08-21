@@ -93,6 +93,10 @@ set(RADIANT_SRCS
     "${SRC_DIR}/radiant/imgui_panel_filters.cpp"  # Filters panel (F) — CFilterWnd replacement
     "${SRC_DIR}/radiant/imgui_panel_commands.cpp" # Phase 3 — command list panel
     "${SRC_DIR}/radiant/imgui_panel_advpatch.cpp" # Phase 3 — advanced patch edit panel
+    "${SRC_DIR}/radiant/imgui_panel_lyrmtl.cpp"   # layered materials tool (was the Win32 palette)
+    "${SRC_DIR}/radiant/imgui_panel_scriptgroup.cpp" # script group (was IDD_SCRIPT_GROUP_NAME)
+    "${SRC_DIR}/radiant/imgui_panel_project.cpp"  # project settings (was IDD_PROJECT_SETTINGS)
+    "${SRC_DIR}/radiant/imgui_panel_sides.cpp"    # arbitrary sides (was IDD_ARBITRARY_SIDES)
     # ── UX overhaul (RADIANT_UX_DESIGN) Phase 1a — selection core + unified pick ──
     "${SRC_DIR}/radiant/kiwi_selection.h"    # §1 typed selection model (sel_item_t/selection_t)
     "${SRC_DIR}/radiant/kiwi_selection.cpp"  # §1 legacy adapter (Sel_SyncToLegacy / RebuildFromLegacy)
@@ -301,6 +305,13 @@ set(RADIANT_SRCS
     # drives it lives in that widget's strip.
     "${SRC_DIR}/radiant/kiwi_section.h"      # section analysis (the Plasticity cross-section)
     "${SRC_DIR}/radiant/kiwi_section.cpp"
+    # The SUN HELPER: "Place Sun" writes the absent worldspawn sun keys, a warm
+    # glyph shows where the sun is, a projected orthographic frustum shows what it
+    # covers while the helper is selected, and dragging the glyph orbits it on a
+    # sphere around the biggest brush.  Beside the section because it is the other
+    # grabbable handle in this layer that exists with NO command running.
+    "${SRC_DIR}/radiant/kiwi_sun.h"          # the sun helper + the sundirection sign proof
+    "${SRC_DIR}/radiant/kiwi_sun.cpp"
     "${SRC_DIR}/radiant/kiwi_hints.h"        # contextual hotkey panel, read live from g_radiantCommands
     "${SRC_DIR}/radiant/kiwi_hints.cpp"
 
@@ -410,6 +421,11 @@ set(RADIANT_SRCS
     "${SRC_DIR}/radiant/kiwi_import.h"       # the drop plumbing + the material wizard
     "${SRC_DIR}/radiant/kiwi_import.cpp"
 
+    # Deferred texture release: ImGui only RECORDS an ImTextureID, so a Release() during the
+    # UI build hands the renderer a dangling pointer.  Drained at the start of the next frame.
+    "${SRC_DIR}/radiant/kiwi_texgrave.h"
+    "${SRC_DIR}/radiant/kiwi_texgrave.cpp"
+
     # ROUND BF — the BUILD & RUN launch dialog.  cod4map and cod4rad stay SEPARATE .exe
     # (cod4rad is x64; cod4map owns its process, its file system and its exit codes) and
     # this window drives them: Build BSP, Build Light, Run Map, and the BSP -> Light -> Run
@@ -434,12 +450,47 @@ set(RADIANT_SRCS
     "${SRC_DIR}/radiant/kiwi_caulk.h"        # the verb + the auto-fit hook (D-BH-A..E)
     "${SRC_DIR}/radiant/kiwi_caulk.cpp"
 
+    # Load progress in the window CAPTION: Map_LoadFromFile never pumps, and an ImGui frame
+    # may only start from the pump's WM_PAINT, so a modal is not available.
+    "${SRC_DIR}/radiant/kiwi_loadprogress.h"
+    "${SRC_DIR}/radiant/kiwi_loadprogress.cpp"
+
     "${SRC_DIR}/radiant/verteditdlg.cpp"
     "${SRC_DIR}/radiant/layersdlg.cpp"
     "${SRC_DIR}/radiant/dynentitydlg.cpp"
     "${SRC_DIR}/radiant/vehicledlg.cpp"
     "${SRC_DIR}/radiant/modeldlg.cpp"
     "${SRC_DIR}/radiant/mayaexport.cpp"     # Misc->Maya Export — the .mel MEL-script geometry exporter
+
+    # Static geometry for rigid xmodels: each unique LOD-0 surface uploaded ONCE
+    # (D3DPOOL_MANAGED), drawn per instance with a stream offset + its own placement.
+    "${SRC_DIR}/radiant/kiwi_modelcache.h"
+    "${SRC_DIR}/radiant/kiwi_modelcache.cpp"
+
+    # Pre-transformed per-instance geometry, so many instances of one surface merge into ONE
+    # call.  The three model_inst writers are its dirty signal.
+    "${SRC_DIR}/radiant/kiwi_instcache.h"
+    "${SRC_DIR}/radiant/kiwi_instcache.cpp"
+
+    # The sun-preview shadow pass's three O(map) phases, cached AROUND the faithful builder,
+    # which is left bit-for-bit.
+    "${SRC_DIR}/radiant/kiwi_shadowcache.h"
+    "${SRC_DIR}/radiant/kiwi_shadowcache.cpp"
+
+    # ONE recording of the brush tree, replayed by the camera pass, the 2D pass, the sun caster
+    # walk and the sun re-add.  FilterBrush is still evaluated per node, per frame.
+    "${SRC_DIR}/radiant/kiwi_walkcache.h"
+    "${SRC_DIR}/radiant/kiwi_walkcache.cpp"
+
+    # The 2D views render only when dirty, hooked on g_nUpdateBits' single drain, plus a
+    # force-dirty predicate for the overlays that follow the mouse.
+    "${SRC_DIR}/radiant/kiwi_viewdirty.h"
+    "${SRC_DIR}/radiant/kiwi_viewdirty.cpp"
+
+    # The camera's draw list is pose-invariant, so the entity + prefab pass's PRODUCT (surf
+    # records + immediate command bytes) is cached.  The camera still renders every frame.
+    "${SRC_DIR}/radiant/kiwi_surfcache.h"
+    "${SRC_DIR}/radiant/kiwi_surfcache.cpp"
 
     # ── Phase 2 — editor-only renderer files (OPUS stubs) ────────────────────
     # These have no kisak equivalents; fresh decompile + OPUS queue items.
@@ -448,6 +499,7 @@ set(RADIANT_SRCS
 
     # ── Build 10 — engine stubs (globals + function stubs for excluded files) ─
     "${SRC_DIR}/radiant/engine_stubs.cpp"
+
 )
 
 # ─────────────────────────────────────────────────────────────────────────────

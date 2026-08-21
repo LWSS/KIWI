@@ -264,7 +264,7 @@ void Brush_RealizeFaceMaterialsGuarded(brush_t *def)
 // when a rescue actually reached disk, so it is rare and always carries the path.  It
 // runs a nested message pump, which is survivable here for a reason established in
 // round U: an unauthorized WM_PAINT no longer draws or presents anything
-// (radiant_main.cpp:193 ImGuiShell_FrameAuthorized), and a paint that does try the
+// (radiant_main.cpp:194 ImGuiShell_FrameAuthorized), and a paint that does try the
 // device is stopped by R_SetupRendertarget_CheckDevice (r_init.cpp:4786/4803 — the
 // R_TestDevice gate and the NULL-swap-chain gate).  Owner is NULL, not our frame, so
 // the box does not re-enter the frame WndProc as an owner.

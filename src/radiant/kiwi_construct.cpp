@@ -88,13 +88,13 @@
 // ── ported entry points (each verified against its definition) ──────────────
 // KIWI-UX (CLEANUP, A-67): cites re-derived from the tree, and Radiant_ExecCommand
 // moved here from KiwiCon_MenuItems' body -- file scope is the house rule.
-extern int       Sys_Printf( const char *fmt, ... );          // win_qe3.cpp:112
-extern camera_s *Ed_Camera();                                 // camwnd.cpp:156
-extern void      CamWnd_BuildMatrix();                        // camwnd.cpp:209 (0x403470)
+extern int       Sys_Printf( const char *fmt, ... );          // win_qe3.cpp:118
+extern camera_s *Ed_Camera();                                 // camwnd.cpp:161
+extern void      CamWnd_BuildMatrix();                        // camwnd.cpp:210 (0x403470)
 extern int       g_nUpdateBits;                               // engine_stubs.cpp:773 (0x25D5A74)
-extern bool      ImGuiShell_CameraPaintCursor( int *x, int *y, int *w, int *h );  // imgui_shell.cpp:290
-extern bool      Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId );  // mainfrm.cpp:1340
-extern void      Radiant_ExecCommand( unsigned int cmdId );   // mainfrm.cpp:4083
+extern bool      ImGuiShell_CameraPaintCursor( int *x, int *y, int *w, int *h );  // imgui_shell.cpp:297
+extern bool      Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId );  // mainfrm.cpp:1358
+extern void      Radiant_ExecCommand( unsigned int cmdId );   // mainfrm.cpp:4054
 
 namespace
 {
@@ -588,6 +588,89 @@ bool KiwiCon_MakePlane( const float origin[3], const float normal[3],
     Copy3( u, out->u );
     Copy3( v, out->v );
     return true;
+}
+
+// ── KIWI: the canonical bearing basis ─────────────────
+// The whole argument is on the declaration in kiwi_construct.h.  Derived from the
+// NORMAL only, so every consumer that starts from the same surface gets the same
+// zero — which is what makes the number typeable back.
+void KiwiCon_BearingBasis( const float normal[3], float outU[3], float outV[3] )
+{
+    float n[3];
+    Copy3( normal, n );
+    if ( !Norm3( n ) )
+    {
+        n[0] = 0.0f;  n[1] = 0.0f;  n[2] = 1.0f;     // degenerate: treat it as ground
+    }
+
+    // The tolerant ground test (RectangleFactory.ts:81) — it covers a downward normal,
+    // which PlaneSnap's exact `=== 1` does not.
+    if ( fabsf( n[2] ) > 1.0f - 1.0e-4f )
+    {
+        outU[0] = 1.0f;  outU[1] = 0.0f;  outU[2] = 0.0f;      // world +X
+    }
+    else
+    {
+        const float worldZ[3] = { 0.0f, 0.0f, 1.0f };
+        Cross3( worldZ, n, outU );                              // the in-plane horizontal
+        if ( !Norm3( outU ) )
+        {
+            outU[0] = 1.0f;  outU[1] = 0.0f;  outU[2] = 0.0f;
+        }
+    }
+    // Orthogonalise against the normal before taking v: on a ground plane the seeded
+    // +X is already in-plane, but a normal a whisker off vertical would leave a
+    // component behind and tilt the whole frame.
+    Mad3( outU, n, -Dot3( outU, n ), outU );
+    if ( !Norm3( outU ) )
+    {
+        outU[0] = 1.0f;  outU[1] = 0.0f;  outU[2] = 0.0f;
+    }
+    Cross3( n, outU, outV );                                    // 90 deg = UP the surface
+    if ( !Norm3( outV ) )
+    {
+        outV[0] = 0.0f;  outV[1] = 1.0f;  outV[2] = 0.0f;
+    }
+}
+
+float KiwiCon_WrapDeg( float deg )
+{
+    if ( !( deg == deg ) )                    // NaN in, 0 out
+        return 0.0f;
+    deg = fmodf( deg, 360.0f );
+    if ( deg < 0.0f )
+        deg += 360.0f;
+    if ( deg >= 360.0f )                      // fmodf can land exactly on 360 after the add
+        deg = 0.0f;
+    return deg;
+}
+
+bool KiwiCon_BearingOf( const float normal[3], const float dir[3], float *outDeg,
+                        float *inPlaneOut, float *outOfPlaneOut )
+{
+    float u[3], v[3];
+    KiwiCon_BearingBasis( normal, u, v );
+    const float du = Dot3( dir, u );
+    const float dv = Dot3( dir, v );
+    const float dn = Dot3( dir, normal );
+    const float inPlane = sqrtf( du * du + dv * dv );
+    if ( inPlaneOut )    *inPlaneOut    = inPlane;
+    if ( outOfPlaneOut ) *outOfPlaneOut = dn;
+    if ( inPlane < 1.0e-4f )
+        return false;
+    if ( outDeg )
+        *outDeg = KiwiCon_WrapDeg( atan2f( dv, du ) * KCON_RAD2DEG );
+    return true;
+}
+
+void KiwiCon_BearingDir( const float normal[3], float deg, float out[3] )
+{
+    float u[3], v[3];
+    KiwiCon_BearingBasis( normal, u, v );
+    const float rad = deg * KCON_DEG2RAD;
+    const float cu  = cosf( rad ), sv = sinf( rad );
+    for ( int k = 0; k < 3; ++k )
+        out[k] = u[k] * cu + v[k] * sv;
 }
 
 // KIWI-UX (ROUND R): the lattice is anchored at the WORLD ORIGIN's projection onto
@@ -1137,7 +1220,7 @@ void KiwiCon_ClearAll()
 // the unified journal still holds their tickets, so a Ctrl+Z in the fresh map
 // resurrects the deleted map's scaffolding.  This is the same reset
 // KiwiCon_LoadSidecar performs (:4758-4764) on the branch a File->New never
-// reaches.  Called from Map_NewMap's existing KIWI-UX fence (map.cpp:266-274).
+// reaches.  Called from Map_NewMap's existing KIWI-UX fence (map.cpp:271-279).
 void KiwiCon_ResetForNewMap()
 {
     KiwiCon_ClearAll();
@@ -2098,11 +2181,12 @@ namespace
     bool          s_activeToolPlanar = false;
 
     // KIWI-UX (ROUND BS): the WORLD GROUND frame — origin at the world origin,
-    // normal +Z, u +X, v +Y.  Not a construction plane and never installed as one:
-    // it is the fixed basis the free-3D tools measure a TYPED BEARING in, so that
-    // "45 deg" means 45 degrees off world +X instead of off a plane they no longer
-    // have.  Built rather than declared so the u/v come out of the one
-    // orthonormalisation everything else in this file uses.
+    // normal +Z, u +X, v +Y.  Not a construction plane and never installed as one.
+    // it is no longer what a free-3D tool measures a bearing in —
+    // that is BearingNormal() + KiwiCon_BearingBasis, which follows the surface
+    // being drawn on — but it is still the m_plane a free tool carries (and the
+    // ground fallback for a planar tool's first point).  Built rather than declared
+    // so the u/v come out of the one orthonormalisation everything else here uses.
     void WorldGroundBasis( kconPlane_t *out )
     {
         const float o[3] = { 0.0f, 0.0f, 0.0f };
@@ -2262,13 +2346,26 @@ namespace
                 // segment IS the plane normal, and reporting "0 deg" for it would
                 // be a number that means nothing and that typing into would swing
                 // the segment somewhere the user did not ask for.
-                const float du = Dot3( d, m_plane.u );
-                const float dv = Dot3( d, m_plane.v );
-                const float dn = Dot3( d, m_plane.normal );
-                const float inPlane = sqrtf( du * du + dv * dv );
-                if ( inPlane < 1.0e-4f || fabsf( dn ) > inPlane )
+                //
+                // measured in the CANONICAL basis of the bearing
+                // surface (kiwi_construct.h KiwiCon_BearingBasis), not in the
+                // plane's own u/v — the same helper ApplyAngleOverride swings in,
+                // so the number displayed is the number that can be typed back.
+                // the Z LOCK is stated rather than inferred.  It
+                // used to be caught by the out-of-plane test below — a vertical
+                // segment IS the normal of a ground bearing plane — and that stops
+                // being true the moment the bearing plane is the one the tool drew
+                // in, which in a SIDE view is vertical and contains Z.  The lock
+                // dictates the direction, so there is no bearing to type back:
+                // ApplyAngleOverride refuses it, and this is the same refusal.
+                if ( m_zLock )
+                    return false;
+                float deg = 0.0f, inPlane = 0.0f, dn = 0.0f;
+                if ( !KiwiCon_BearingOf( BearingNormal(), d, &deg, &inPlane, &dn ) )
                     return false;                         // no meaningful bearing
-                *out = atan2f( dv, du ) * KCON_RAD2DEG;
+                if ( fabsf( dn ) > inPlane )
+                    return false;                         // mostly out of plane
+                *out = deg;
                 return true;
             }
             return false;
@@ -2333,6 +2430,12 @@ namespace
             m_numWorld  = 0.0f;
             m_hasAngle  = false;
             m_angleDeg  = 0.0f;
+            // the bearing surface starts as the world ground and is
+            // re-latched by every PushPoint on a free 3D tool.  it
+            // is the FALLBACK now — see BearingNormal().
+            m_bearingNormal[0] = 0.0f;
+            m_bearingNormal[1] = 0.0f;
+            m_bearingNormal[2] = 1.0f;
             m_zLock     = false;
             m_lastClickMs = 0;
             m_lastClickX  = -9999;
@@ -2347,9 +2450,11 @@ namespace
             // The LINE, POLYLINE and SPLINE tools do not touch the active plane at
             // all now — they do not derive one, do not install one, do not restore
             // one and do not project onto one.  Their m_plane is a FIXED WORLD
-            // GROUND frame kept for the TYPED-BEARING arithmetic only (the Tab
-            // "angle" field and its readout, which need SOME u/v to mean degrees
-            // in); it is not state, nothing writes it, and no point ever lands on it.
+            // GROUND frame; it is not state, nothing writes it, and no point ever
+            // lands on it.  the typed bearing no longer reads it —
+            // the "angle" field measures against BearingNormal(): the plane the
+            // snap ladder resolved the cursor onto this frame (the surface under
+            // the last placed point only as a fallback).
             //
             // A PLANAR tool still asks, because a rect with one corner 40 units off
             // its own plane is not a rect.  Its plane is the explicit one when the
@@ -2802,6 +2907,11 @@ namespace
         // offset is KEPT, so a typed bearing on a segment that also rises does what
         // it says (turn it) instead of flattening it.  Suppressed under the Z lock,
         // where there is no bearing to swing.
+        //
+        // the swing happens in the CANONICAL bearing basis, the
+        // one NumericFieldValue reads back — typing the number the readout shows
+        // has to leave the segment where it is, and that is only true when both
+        // sides use one basis (kiwi_construct.h KiwiCon_BearingBasis).
         void ApplyAngleOverride()
         {
             if ( !m_hasAngle || !m_haveCur || m_pts.empty() || m_zLock )
@@ -2809,18 +2919,15 @@ namespace
             float a[3], d[3];
             LastPoint( a );
             Sub3( m_cur, a, d );
-            const float du = Dot3( d, m_plane.u );
-            const float dv = Dot3( d, m_plane.v );
-            const float dn = Dot3( d, m_plane.normal );
-            const float len = sqrtf( du * du + dv * dv );
+            const float *n = BearingNormal();
+            float len = 0.0f, dn = 0.0f;
+            KiwiCon_BearingOf( n, d, nullptr, &len, &dn );   // the split, not the bearing
             if ( !( len > 1.0e-4f ) )
                 return;                       // no in-plane length: nothing to swing
-            const float rad = m_angleDeg * KCON_DEG2RAD;
-            const float nu  = cosf( rad ) * len;
-            const float nv  = sinf( rad ) * len;
+            float dir[3];
+            KiwiCon_BearingDir( n, m_angleDeg, dir );
             for ( int k = 0; k < 3; ++k )
-                m_cur[k] = a[k] + m_plane.u[k] * nu + m_plane.v[k] * nv
-                                + m_plane.normal[k] * dn;
+                m_cur[k] = a[k] + dir[k] * len + n[k] * dn;
         }
 
         // ═════════════════════════════════════════════════════════════════════
@@ -2857,6 +2964,32 @@ namespace
             m_pts.push_back( w[0] );
             m_pts.push_back( w[1] );
             m_pts.push_back( w[2] );
+
+            // ── KIWI: LATCH THE BEARING SURFACE ──────────
+            // A free 3D tool has no plane and never gets one — that is round BS's
+            // ruling and it stands.  What it does need is a SURFACE to measure the
+            // next segment's bearing against, and the surface under the point just
+            // placed is that surface.  Re-latched at EVERY point, not just the
+            // first: a polyline that turns a corner onto the floor should read its
+            // floor segments as floor bearings, not as "mostly out of plane" and
+            // no readout at all.  Nothing is installed anywhere; this is one
+            // normal, read by the angle field and by nothing else.
+            // and read only when THIS FRAME's resolution had no
+            // plane of its own — BearingNormal() prefers the plane the point was
+            // actually placed on, which is the one the user is drawing in.
+            if ( !PlanarOnly() )
+            {
+                kconPlane_t bp;
+                if ( PlaneFromCursorFaceAt( w, &bp ) )
+                    Copy3( bp.normal, m_bearingNormal );
+                else
+                {
+                    m_bearingNormal[0] = 0.0f;   // void: the world ground
+                    m_bearingNormal[1] = 0.0f;
+                    m_bearingNormal[2] = 1.0f;
+                }
+            }
+
             if ( !first || !PlanarOnly() || KiwiCon_PlaneIsExplicit() )
                 return;
 
@@ -3061,6 +3194,32 @@ namespace
         // kept as state so a later reader (a HUD row, a repeat of the console line)
         // does not have to re-pick the face to find out.
         bool               m_planeFromSurface = false;
+        // ── KIWI: THE BEARING SURFACE ────────────────────
+        // The normal the "angle" field is measured against.  A PLANAR tool answers
+        // with its own plane's normal — the same plane the snap ladder's arms 7+8
+        // resolve on, so its 15-degree lock label and this readout are one number.
+        // The BASIS comes from the normal alone (KiwiCon_BearingBasis), never from
+        // a plane's u/v, so the readout and the typed field cannot disagree.
+        //
+        // ── A FREE TOOL MEASURES IN THE PLANE IT DREW IN ─────
+        // Latching the surface under each PLACED POINT (world ground in the
+        // void) is wrong.  Drawing into the void in a SIDE ortho view defeats it: the
+        // resolution slides the point along a VERTICAL view-aligned plane
+        // (kiwi_snap.cpp, the rawRung 3 fallback), so the segment is perpendicular
+        // to the ground basis by construction — dv is 0, atan2 pins to 0/180, and
+        // sweeping cannot move it.  The bearing plane is therefore the plane the
+        // ladder ACTUALLY resolved m_cur onto this frame (snap_result_t::havePlane),
+        // and the per-point latch is only the fallback for a resolution that had
+        // no plane at all.
+        float              m_bearingNormal[3] = { 0.0f, 0.0f, 1.0f };
+        const float       *BearingNormal() const
+        {
+            if ( PlanarOnly() )
+                return m_plane.normal;
+            if ( m_snap.valid && m_snap.havePlane )
+                return m_snap.planeNormal;
+            return m_bearingNormal;
+        }
         std::vector<float> m_pts;                 // placed points, 3 floats, WORLD
         float              m_cur[3] = { 0.0f, 0.0f, 0.0f };
         bool               m_haveCur = false;
@@ -3068,8 +3227,10 @@ namespace
         bool               m_hasNum  = false;
         int                m_sidesOverride = 0;   // ROUND AF, ITEM 7 — 0 = automatic
         float              m_numWorld = 0.0f;
-        // shakeout E: the typed BEARING (field 1), degrees in the plane's own
-        // (u,v) basis — the same basis the 15° angle lock measures in.
+        // shakeout E: the typed BEARING (field 1).  degrees in the
+        // CANONICAL basis of BearingNormal() — 0 = level on the surface, 90 = up it
+        // (world +X / +Y on the ground) — the same basis the readout reports and the
+        // 15° angle lock quantises in.
         bool               m_hasAngle = false;
         float              m_angleDeg = 0.0f;
         snap_result_t      m_snap;
@@ -4990,7 +5151,7 @@ bool KiwiCon_SaveSidecar( const char *mapPath )
     //
     // `hiddenbrushtotal` is the size of the whole enumeration, not the hidden
     // count; it is the staleness guard — see KiwiVis_SidecarLoadApply.  The
-    // ordinals are indices into Map_SaveFile's own brush walk (map.cpp:693-706 +
+    // ordinals are indices into Map_SaveFile's own brush walk (map.cpp:842-855 +
     // :1515-1517), which is FRAGILE BY CONSTRUCTION: edit the .map outside KIWI and
     // every ordinal past the edit means a different brush.  That is why the guard
     // exists, why an out-of-range ordinal is dropped rather than clamped, and why

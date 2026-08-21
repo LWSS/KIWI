@@ -18,7 +18,7 @@
 // modelling tool:
 //
 //   * Cut (C), Split Face (Ctrl+R) and the Q boolean's carve all built their
-//     template face with `Ed_BuildClipFaceMaterial_Kiwi` (xywnd.cpp:2232) — the
+//     template face with `Ed_BuildClipFaceMaterial_Kiwi` (xywnd.cpp:2233) — the
 //     CLIPPER's synthesis, which stamps **caulk** (or nodraw_decal).  That is
 //     correct for the clipper, whose whole job is to trim structural brushwork
 //     against a plane the mapper drew, and it is what the binary does; it is
@@ -50,7 +50,7 @@
 // trigger / lightgrid / a "tools/" path — the list is `KMTL_TOOL_NAMES` in
 // kiwi_material.cpp, and `KiwiMtl_FaceIsInheritable` is the test).  It is by NAME
 // because that is the only classification this editor already trusts: the
-// clipper's own decal test (`xywnd.cpp:2246`) and the texture filter
+// clipper's own decal test (`xywnd.cpp:2247`) and the texture filter
 // (`MtlDef_IsFaceFiltered`, mayaexport.cpp:112) both classify by name, and the
 // STATE bits are an asset-side fact that round O proved cannot be reasoned about
 // from code.  `$default` is deliberately NOT a tool material — it is what an

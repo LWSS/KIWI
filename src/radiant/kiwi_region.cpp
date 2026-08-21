@@ -98,9 +98,9 @@ extern int   g_nUpdateBits;                                              // 0x25
 // ROUND R — the fill's eye nudge needs the view normal.  `camera_s` comes from
 // mainfrm.h, included above.
 // KIWI-UX (CLEANUP, B-6): it returns &g_camwndState.camera and NEVER returns NULL
-// (contract stated at camwnd.cpp:148-154), so the unguarded deref in the fill pass
+// (contract stated at camwnd.cpp:154-160), so the unguarded deref in the fill pass
 // is correct and a `!c` guard there would be dead code.
-extern camera_s *Ed_Camera();                                            // camwnd.cpp:156
+extern camera_s *Ed_Camera();                                            // camwnd.cpp:161
 extern char  Byte4PackPixelColor( float *from, GfxColor *out );          // 0x402ac0
 // R_AddCmdSetMaterialColor comes from r_rendercmds.h (declared __cdecl there).
 extern void  __cdecl R_AddRenderCmdDrawTris(
@@ -118,12 +118,12 @@ extern int   __cdecl R_Ed_CmdBufferHeadroom();                           // r_re
 // which is now three lines over this).  Signature copied VERBATIM from the
 // definition; `pts` is the polygon's world points, `n` its plane normal, `bgra`
 // the packed per-vertex colour, `push` the displacement along `n`.
-//   camwnd.cpp:1157  void Cam_DrawWindingTinted( const float (*pts)[3], int nv,
+//   camwnd.cpp:1221  void Cam_DrawWindingTinted( const float (*pts)[3], int nv,
 //                        const float *n, Material *mtl, uint bgra, float push,
 //                        MaterialTechniqueType tech )
 extern void  Cam_DrawWindingTinted( const float ( *pts )[3], int nv, const float *n,
                                     Material *mtl, uint bgra, float push,
-                                    MaterialTechniqueType tech );        // camwnd.cpp:1157
+                                    MaterialTechniqueType tech );        // camwnd.cpp:1221
 
 namespace
 {
@@ -1430,14 +1430,14 @@ void KiwiRegion_DrawFills( int highlightIndex )
     // both buffers are bounded and can be exact rather than guarded.  The PIECE
     // buffer is bounded by the DONOR's own array size instead — see the cap check
     // in the piece loop below.
-    const int KREG_DONOR_MAX_PTS = 64;           // == CAM_MAXFACEVERTS, camwnd.cpp:526
+    const int KREG_DONOR_MAX_PTS = 64;           // == CAM_MAXFACEVERTS, camwnd.cpp:532
     static float s_world[KREG_MAX_LOOP][3];      // the loop, in world space
     static float s_piece[KREG_MAX_LOOP][3];      // one convex piece of it
 
     // ── KIWI-UX (ROUND AM, ITEM 1): GATE 4/5 — THE MATERIAL AND ITS TECHNIQUE.
     // R_AddRenderCmdDrawTris' FIRST silent drop: `Material_GetTechnique(handle,
-    // techType)` null -> `return` with no diagnostic (r_rendercmds.cpp:2153).
-    // Read it here the way camwnd.cpp:589 Cam_MaterialWritesDepth already reads
+    // techType)` null -> `return` with no diagnostic (r_rendercmds.cpp:2173).
+    // Read it here the way camwnd.cpp:595 Cam_MaterialWritesDepth already reads
     // it — stateBitsEntry[tech] == 0xFF is "this material has no such technique",
     // which is what Material_GetTechnique bottoms out on.  Probed ONCE per pass:
     // it cannot change inside one.
@@ -1553,7 +1553,7 @@ void KiwiRegion_DrawFills( int highlightIndex )
         //
         // WHAT THE SKY FILM ACTUALLY RUNS UNDER, read off camwnd.cpp rather than
         // assumed: the world face loop reaches it with `ecol` from
-        // Cam_EditorMaterialColor, which SEEDS `out[3] = 1.0f` (camwnd.cpp:612-614)
+        // Cam_EditorMaterialColor, which SEEDS `out[3] = 1.0f` (camwnd.cpp:618-620)
         // and whose "sky" row overwrites rgb only — so MATERIAL_COLOR is
         // { r, g, b, **1.0** }, a FLAT COLOUR OVERRIDE, and the film's translucency
         // comes entirely from the packed PER-VERTEX alpha (0.30).
@@ -1632,7 +1632,7 @@ void KiwiRegion_DrawFills( int highlightIndex )
         //
         // ── KIWI-UX (ROUND AM, ITEM 1): GATE 8 — THE COMMAND BUFFER ─────────
         // R_AddRenderCmdDrawTris' SECOND silent drop.  Its byte cost is the exact
-        // arithmetic r_rendercmds.cpp:2156-2163 does: a 16-byte header, then
+        // arithmetic r_rendercmds.cpp:2176-2183 does: a 16-byte header, then
         // 16+12+4+8 bytes of vertex streams per vertex, then a 2-byte-per-index
         // list rounded up to an even count.  Compared against the same sizeLimit
         // R_GetCommandBuffer will compute, BEFORE the call, so the drop is named
@@ -1644,7 +1644,7 @@ void KiwiRegion_DrawFills( int highlightIndex )
             const std::vector<int> &poly = pieces[pi];
             const int pn = (int)poly.size();
             // KREG_DONOR_MAX_PTS is the donor's own stack-array bound
-            // (CAM_MAXFACEVERTS, camwnd.cpp:526).  Over it Cam_DrawWindingTinted
+            // (CAM_MAXFACEVERTS, camwnd.cpp:532).  Over it Cam_DrawWindingTinted
             // returns SILENTLY, which is precisely the class of drop this pass
             // exists to name, so it is checked HERE with a gate name of its own.
             // Hertel-Mehlhorn merges only while the result stays convex, so a piece

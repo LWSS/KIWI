@@ -48,6 +48,8 @@ void ImGuiPanels_Menu()
         extern void ImGuiPanel_Patch_MenuItem();     // imgui_panel_patch.cpp
         extern void ImGuiPanel_Commands_MenuItem();  // imgui_panel_commands.cpp
         extern void ImGuiPanel_AdvPatch_MenuItem();  // imgui_panel_advpatch.cpp
+        extern void ImGuiPanel_LyrMtl_MenuItem();       // imgui_panel_lyrmtl.cpp
+        extern void ImGuiPanel_ScriptGroup_MenuItem();  // imgui_panel_scriptgroup.cpp
         ImGuiPanel_Surface_MenuItem();
         ImGuiPanel_Entity_MenuItem();
         ImGuiPanel_FindTex_MenuItem();
@@ -62,6 +64,8 @@ void ImGuiPanels_Menu()
         ImGuiPanel_Patch_MenuItem();
         ImGuiPanel_Commands_MenuItem();
         ImGuiPanel_AdvPatch_MenuItem();
+        ImGuiPanel_LyrMtl_MenuItem();
+        ImGuiPanel_ScriptGroup_MenuItem();
     }
     ImGui::Checkbox( "ImGui demo",         &s_showDemo );
 
@@ -167,6 +171,10 @@ void ImGuiPanels_Draw()
         extern void ImGuiPanel_Filters_Draw();       // imgui_panel_filters.cpp
         extern void ImGuiPanel_Commands_Draw();      // imgui_panel_commands.cpp
         extern void ImGuiPanel_AdvPatch_Draw();      // imgui_panel_advpatch.cpp
+        extern void ImGuiPanel_LyrMtl_Draw();        // imgui_panel_lyrmtl.cpp
+        extern void ImGuiPanel_ScriptGroup_Draw();   // imgui_panel_scriptgroup.cpp
+        extern void ImGuiPanel_Project_Draw();       // imgui_panel_project.cpp
+        extern void ImGuiPanel_Sides_Draw();         // imgui_panel_sides.cpp
         ImGuiPanel_Surface_Draw();
         ImGuiPanel_Entity_Draw();
         ImGuiPanel_FindTex_Draw();
@@ -183,6 +191,10 @@ void ImGuiPanels_Draw()
         ImGuiPanel_Filters_Draw();
         ImGuiPanel_Commands_Draw();
         ImGuiPanel_AdvPatch_Draw();
+        ImGuiPanel_LyrMtl_Draw();
+        ImGuiPanel_ScriptGroup_Draw();
+        ImGuiPanel_Project_Draw();
+        ImGuiPanel_Sides_Draw();
     }
 
     if ( s_showGoTo )

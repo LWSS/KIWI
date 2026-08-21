@@ -17,6 +17,12 @@ int __cdecl R_ReserveIndexData(GfxCmdBufPrimState *state, int triCount);
 int __cdecl R_SetVertexData(GfxCmdBufState *state, const void *data, int vertexCount, int stride);
 void __cdecl R_ChangeObjectPlacement(GfxCmdBufSourceState *source, const GfxScaledPlacement *placement);
 int __cdecl R_SetIndexData(GfxCmdBufPrimState *state, uint8_t *indices, int triCount);
+#ifdef KISAK_RADIANT
+// KIWI: R_SetIndexData for CONCATENATED runs — same bytes, one Lock/Unlock instead of
+// `runCount`.  Returns the base index, or -1 on lock failure (caller draws nothing).
+int __cdecl R_SetIndexDataRuns(
+    GfxCmdBufPrimState *state, const uint16_t *const *runs, const int *triCounts, int runCount);
+#endif
 void __cdecl R_SetupPassPerPrimArgs(GfxCmdBufContext context);
 void __cdecl R_SetVertexShaderConstantFromCode(GfxCmdBufContext context, const MaterialShaderArgument *routingData);
 void __cdecl R_HW_SetVertexShaderConstant(__int64 device, __int64 data);

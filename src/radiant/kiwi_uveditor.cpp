@@ -55,7 +55,7 @@
 #include "kiwi_uv.h"                 // KiwiUv_FaceTexdef — THE per-face texdef accessor
 #include "kiwi_windows.h"
 
-// Include order mirrors kiwi_skybox.cpp:32-38, the other KIWI TU that walks a Material's
+// Include order mirrors kiwi_skybox.cpp:33-39, the other KIWI TU that walks a Material's
 // textureTable down to its GfxImage and hands the result to ImGui.
 #include <gfx_d3d/r_material.h>      // Material / MaterialTextureDef / textureTable
 #include <gfx_d3d/r_gfx.h>           // GfxImage / GfxTexture / MAPTYPE_2D
@@ -69,10 +69,10 @@
 #include <vector>
 
 // ── ported / cross-file entry points (each verified against its definition) ─────────
-extern int         Sys_Printf( const char *fmt, ... );                       // win_qe3.cpp:112   int Sys_Printf(const char*,...)
+extern int         Sys_Printf( const char *fmt, ... );                       // win_qe3.cpp:118   int Sys_Printf(const char*,...)
 extern int         g_nUpdateBits;                                            // engine_stubs.cpp:773  int g_nUpdateBits
-extern bool        Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId ); // mainfrm.cpp:1340  bool Radiant_RegisterCommand(const char*,byte,byte,int)
-extern ImGuiID     ImGuiShell_DockRoot();                                    // imgui_shell.cpp:789   ImGuiID ImGuiShell_DockRoot()
+extern bool        Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId ); // mainfrm.cpp:1358  bool Radiant_RegisterCommand(const char*,byte,byte,int)
+extern ImGuiID     ImGuiShell_DockRoot();                                    // imgui_shell.cpp:796   ImGuiID ImGuiShell_DockRoot()
 
 // The forward transform and its inverse.  Declarations copied VERBATIM from brush.cpp:
 // 1736-1737 and brush.cpp:1748-1749 — the byte-pointer `int` parameters are the binary's
@@ -83,15 +83,15 @@ extern void texturevecs_02( int surfDef, int uvVecs, float v5, int normal,
                              float dist, int arg6, int arg7, int arg8 );     // texturevecs.cpp:219  void texturevecs_02(int,int,float,int,float,int,int,int)
 
 extern void        TexMatToFakeTexCoords( MaterialDef *def, texdef_sub_t *texDef );  // materialdef.cpp:377  void TexMatToFakeTexCoords(MaterialDef*,texdef_sub_t*)
-extern void        Brush_BuildWindings( brush_t *b, int bFull );             // brush.cpp:1418    void Brush_BuildWindings(brush_t*,int)
-extern void        SetupVertexSelection();                                   // select.cpp:4618   void SetupVertexSelection()
-extern void        MarkMapModified();                                        // win_qe3.cpp:189   void MarkMapModified(void)
-extern void        sub_477D70( selbrush_t *b, const float *mat );            // brush.cpp:203     void sub_477D70(selbrush_t*,const float*)
-extern float       world_orient_matrix[4][3];                                // entity.cpp:299    float world_orient_matrix[4][3]
+extern void        Brush_BuildWindings( brush_t *b, int bFull );             // brush.cpp:1434    void Brush_BuildWindings(brush_t*,int)
+extern void        SetupVertexSelection();                                   // select.cpp:4617   void SetupVertexSelection()
+extern void        MarkMapModified();                                        // win_qe3.cpp:195   void MarkMapModified(void)
+extern void        sub_477D70( selbrush_t *b, const float *mat );            // brush.cpp:205     void sub_477D70(selbrush_t*,const float*)
+extern float       world_orient_matrix[4][3];                                // entity.cpp:312    float world_orient_matrix[4][3]
 
 extern qtexture_s *MaterialDef_GetLayeredMaterial( MaterialDef *def );       // materialdef.cpp:168  qtexture_s *MaterialDef_GetLayeredMaterial(MaterialDef*)
 extern LayerMaterialDef *Materialdef_GetName( MaterialDef *mtlDef );         // materialdef.cpp:159  LayerMaterialDef *Materialdef_GetName(MaterialDef*)
-extern qtexture_s *Texture_GetHandle( const char *name );                    // texwnd.cpp:313    qtexture_s *Texture_GetHandle(const char*)
+extern qtexture_s *Texture_GetHandle( const char *name );                    // texwnd.cpp:314    qtexture_s *Texture_GetHandle(const char*)
 
 // The patch side.  Patch_ShiftTexture( p, 0, 0 ) is used as the REBUILD: it adds zero to
 // every control ST and then runs the exact tail this file needs (bDirty for layer 1, free
@@ -99,7 +99,7 @@ extern qtexture_s *Texture_GetHandle( const char *name );                    // 
 // again here would be a second, quietly divergent spelling of a ported sequence.
 extern void        Patch_ShiftTexture( patchMesh_t *p, float s, float t );   // pmesh.cpp:3216    void Patch_ShiftTexture(patchMesh_t*,float,float)
 extern void        Patch_NaturalizeSelected( bool unk, bool cap, float x, float y ); // pmesh.cpp:2742  void Patch_NaturalizeSelected(bool,bool,float,float)
-extern void        Select_SetTexture( float *out );                          // select.cpp:1180   void Select_SetTexture(float*)
+extern void        Select_SetTexture( float *out );                          // select.cpp:1179   void Select_SetTexture(float*)
 
 // The two sentinel lists come from qe3.h:1053-1054; g_SelectedFaces from qe3.h:263.
 
@@ -782,7 +782,7 @@ namespace
     // ═══════════════════════════════════════════════════════════════════════════════
     //   td = &f->mtldef[L].mat_texDef + LayerMat::GetCurrentLayer(...)   [KiwiUv_FaceTexdef]
     //   Face_MoveTexture( td, f->plane.normal, texMat, &td->shift[0], td->rotate, td->crossterm )
-    //   s = dot(row0, p) + texMat[3];  t = dot(row1, p) + texMat[7]      [brush.cpp:2609-2610]
+    //   s = dot(row0, p) + texMat[3];  t = dot(row1, p) + texMat[7]      [brush.cpp:2618-2619]
     face_t *FaceOf( const uvFace_t &f )
     {
         brush_t *def = s_brushes[f.brushIdx].def;
@@ -1544,7 +1544,7 @@ namespace
     //  THE BACKGROUND (D-BD-D)
     // ═══════════════════════════════════════════════════════════════════════════════
     // The ACTIVE material's colormap, as an ImGui texture, or null.  This is the round-AZ
-    // MAPTYPE_2D arm (kiwi_skybox.cpp:450-495) with the CUBE arm deliberately absent —
+    // MAPTYPE_2D arm (kiwi_skybox.cpp:451-496) with the CUBE arm deliberately absent —
     // see D-BD-E.  The guards are the same three and each is load-bearing:
     //   textureTable null   — an unloaded / default material
     //   semantic != 2       — TS_COLOR_MAP; the table is hash-sorted, so [0] is a coin flip
@@ -1560,7 +1560,7 @@ namespace
         if ( !q )
             return nullptr;
         if ( !q->next && q->name )
-            Texture_GetHandle( q->name );        // lazy registration (texwnd.cpp:313)
+            Texture_GetHandle( q->name );        // lazy registration (texwnd.cpp:320)
         Material *mtl = q->next;
         if ( !mtl || !mtl->textureTable )
             return nullptr;
@@ -3578,7 +3578,7 @@ namespace
             case UVF_CROSSTERM: td->crossterm = value; break;
             case UVF_RESET:
             {
-                // TexWnd_BuildClickedMaterialDef's own default (texwnd.cpp:674-696):
+                // TexWnd_BuildClickedMaterialDef's own default (texwnd.cpp:674-697):
                 // size = material w/h × the layer's sample size, everything else zero.
                 float w, h;
                 MaterialSize( md, &w, &h );

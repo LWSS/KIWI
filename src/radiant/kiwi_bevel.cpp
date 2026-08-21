@@ -36,20 +36,20 @@
 #include <vector>
 
 // ── ported entry points (each verified against its definition) ──────────────
-extern int          Sys_Printf( const char *fmt, ... );                       // win_qe3.cpp:112
+extern int          Sys_Printf( const char *fmt, ... );                       // win_qe3.cpp:118
 extern int          g_nUpdateBits;                                            // 0x25D5A74 (mainfrm.cpp)
 
-extern face_t      *Face_Alloc( brush_t *b, face_t *f );                      // brush.cpp:302  0x471500
-extern unsigned int Brush_RemoveFace( brush_t *b, unsigned int faceIndex );   // brush.cpp:343  0x471640
-extern brush_t     *Brush_Clone( brush_t *def );                              // brush.cpp:723  0x475D20
-extern void         Brush_Free_R( brush_t *def );                             // brush.cpp:700  0x475AF0
-extern selbrush_t  *Brush_AddToList( brush_t *def, entity_s *owner );         // brush.cpp:667  0x475980
-extern void         Brush_AddToList2( selbrush_t *b );                        // brush.cpp:921  0x4765A0
-extern void         Entity_LinkBrush( brush_t *b, entity_s *world_ent );      // entity.cpp:432 0x484FC0
-extern void         Select_Deselect( int a1 );                                // select.cpp:1445 0x48E800 (int, NOT char — mangling)
-extern void         Select_Delete();                                          // select.cpp:1521 0x48E9A0
+extern face_t      *Face_Alloc( brush_t *b, face_t *f );                      // brush.cpp:304  0x471500
+extern unsigned int Brush_RemoveFace( brush_t *b, unsigned int faceIndex );   // brush.cpp:345  0x471640
+extern brush_t     *Brush_Clone( brush_t *def );                              // brush.cpp:729  0x475D20
+extern void         Brush_Free_R( brush_t *def );                             // brush.cpp:706  0x475AF0
+extern selbrush_t  *Brush_AddToList( brush_t *def, entity_s *owner );         // brush.cpp:669  0x475980
+extern void         Brush_AddToList2( selbrush_t *b );                        // brush.cpp:927  0x4765A0
+extern void         Entity_LinkBrush( brush_t *b, entity_s *world_ent );      // entity.cpp:445 0x484FC0
+extern void         Select_Deselect( int a1 );                                // select.cpp:1444 0x48E800 (int, NOT char — mangling)
+extern void         Select_Delete();                                          // select.cpp:1520 0x48E9A0
 
-extern void         Radiant_ExecCommand( unsigned int cmdId );                // mainfrm.cpp:4083
+extern void         Radiant_ExecCommand( unsigned int cmdId );                // mainfrm.cpp:4054
 
 // KIWI-UX (CLEANUP, B-28): FILE SCOPE, not block scope.  Round AI shipped a link
 // error from a block-scope extern that MSVC mangled with its enclosing namespace;

@@ -1153,7 +1153,7 @@ static int Lighting_VerticalTraceIsSky(int sampleIdx, const float *point,
         && (material->surfaceFlags & 0x80);
 }
 
-static int Lighting_RejectTransportPoint(int sampleIdx, const float *point)
+int Lighting_RejectTransportPoint(int sampleIdx, const float *point)
 {
     return Lighting_VerticalTraceIsSky(sampleIdx, point, 0, 1)
         && !Lighting_VerticalTraceIsSky(sampleIdx, point, 1, 0);
@@ -1196,6 +1196,7 @@ void GatherSkyLighting(int sampleIdx, float *position, float *basis,
     SampleVars_t *sampleVars;
     float smallOffset = 0.125f;
     float rayLen;
+    float visibility;
 
     Assert(subSample != 0, s_assertDisable_Sky_subSample);
 
@@ -1238,20 +1239,23 @@ void GatherSkyLighting(int sampleIdx, float *position, float *basis,
     if (TraceStaticModels(startPos, endPos))
         return;
 
-    /* accumulate subAreaFactor into sample data */
-    {
-        int idx = subSample->s + subSample->t * 2;
-        ((float *)sampleVars)[idx] += subAreaFactor;
-    }
+    /* Native 0x407770 derives a fractional sun visibility from a jittered
+     * multi-sample hit mask (popcount/sampleCount, 0x409B60), where alpha-
+     * masked materials subtract individual sub-rays and a flagged static-model
+     * final hit yields 0.01.  The single-ray trace above is the binary case of
+     * that (this trace set has no alpha-masked occluders yet): 1 when the ray
+     * reaches sky. */
+    visibility = 1.0f;
 
     /* CoD4 keeps direct sunlight and the energy injected into radiosity as
-     * separate colors.  Both are derived from the same visible sky hit. */
-    directEnergy[0] = g_sunColorR * skyWeight;
-    directEnergy[1] = g_sunColorG * skyWeight;
-    directEnergy[2] = g_sunColorB * skyWeight;
-    radiosityEnergy[0] = g_backfaceLightR * skyWeight;
-    radiosityEnergy[1] = g_backfaceLightG * skyWeight;
-    radiosityEnergy[2] = g_backfaceLightB * skyWeight;
+     * separate colors.  Both scale by visibility * skyWeight (0x407770
+     * v30 = vis * a8). */
+    directEnergy[0] = g_sunColorR * (visibility * skyWeight);
+    directEnergy[1] = g_sunColorG * (visibility * skyWeight);
+    directEnergy[2] = g_sunColorB * (visibility * skyWeight);
+    radiosityEnergy[0] = g_backfaceLightR * (visibility * skyWeight);
+    radiosityEnergy[1] = g_backfaceLightG * (visibility * skyWeight);
+    radiosityEnergy[2] = g_backfaceLightB * (visibility * skyWeight);
 
     Assert(!IS_NAN_FLOAT(directEnergy[0]) && !IS_NAN_FLOAT(directEnergy[1]) && !IS_NAN_FLOAT(directEnergy[2]),
            s_assertDisable_Sky_nanEnergy);
@@ -1259,10 +1263,17 @@ void GatherSkyLighting(int sampleIdx, float *position, float *basis,
     localSunDir[0] = g_sunDirX * basis[0] + g_sunDirY * basis[1] + g_sunDirZ * basis[2];
     localSunDir[1] = g_sunDirX * basis[3] + g_sunDirY * basis[4] + g_sunDirZ * basis[5];
     localSunDir[2] = skyDir;
-    /* Native 0x407770 routes the surface's primary sun exclusively through
-     * the four scalar intensity samples.  Only a non-primary sun becomes a
-     * directional transport record in the coefficient textures. */
-    if (primaryLightIndex != (unsigned char)g_sunPrimaryLightIndex)
+    /* 0x4075D0 influence modes: mode 1 (the surface's primary light IS the
+     * sun) accumulates vis * subAreaX2 into that 2x2 intensity scalar; any
+     * other primary (mode 2) becomes a directional transport record instead
+     * and leaves the scalar image untouched.  Feeding the scalar
+     * unconditionally lights surfaces the game will never apply the sun to. */
+    if (primaryLightIndex == (unsigned char)g_sunPrimaryLightIndex)
+    {
+        int idx = subSample->s + subSample->t * 2;
+        ((float *)sampleVars)[idx] += visibility * subAreaFactor;
+    }
+    else
     {
         AppendDirectTransport(sample, directEnergy, localSunDir);
     }
@@ -2016,7 +2027,12 @@ int FindLightingTransfersForDirection(int sampleIdx, Sample_t *sample,
     }
 
     Assert(subAreaFactor > 0, s_assertDisable_Dir_areaFactor);
-    Assert(sample->areaX2 > 0, s_assertDisable_Dir_sampleArea);
+    /* KISAK: >= rather than >.  Transport rejects subtract min(cellArea,
+     * weight) from the sample total (geometry.c ProcessLightingSampleArea), so
+     * a fully occluded texel legitimately drains to exactly 0 while a sibling
+     * 2x2 channel still holds area; retail 32-bit processes that state
+     * without complaint.  Negative still means corruption. */
+    Assert(sample->areaX2 >= 0, s_assertDisable_Dir_sampleArea);
 
     sampleVars = sample->vars;
     Assert(sampleVars != 0, s_assertDisable_Dir_vars);

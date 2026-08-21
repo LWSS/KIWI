@@ -648,6 +648,36 @@ struct GfxCmdDrawPoints;
 GfxCmdDrawPoints *__cdecl R_AddPointCmd(short pointCount, char size, char dimension, const GfxPointVertex *verts);
 GfxCmdDrawPoints *__cdecl R_AddPointCmd_W(short pointCount, char size, const GfxPointVertex *verts);
 
+// KIWI: bracket a pass whose line output should be emitted GROUPED BY COLOUR instead
+// of interleaved.  See the definition in r_rendercmds.cpp.
+void __cdecl R_Ed_BeginLineBucket();
+void __cdecl R_Ed_EndLineBucket();
+// Drain barrier: call before emitting anything that is not one of the bucket's lines.
+void __cdecl R_Ed_FlushLineBucket();
+// Per-frame magnitudes for the camera plots; reading them resets them.
+void __cdecl R_Ed_LineBucketStats(int *lines, int *groups, int *cmds, int *spills);
+
+// ── KIWI: THE BUCKET'S UNGROUPED CONTENTS, FOR THE PER-OBJECT SURF CACHE ──────
+// The bucket holds segments UNGROUPED, in emit order, and groups them only at the
+// flush — which is what lets a per-object cache store one object's lines on their own
+// and still get ONE global grouping when the frame replays a mix of cached and live
+// objects.  Read back a range with R_Ed_LineBucketRead, put it back later with
+// R_Ed_LineBucketAddSegs; the colour is carried by the vertices themselves, so only
+// width and dimension travel beside them.
+// Mark = the current segment count.  Pair it with the FLUSH COUNT: a flush emits
+// everything the bucket held and restarts the numbering, so a range noted before one
+// no longer names the same segments and the caller must abandon its capture.
+int  __cdecl R_Ed_LineBucketMark();
+int  __cdecl R_Ed_LineBucketFlushCount();
+// Copy segments [from, from+count) out.  `verts` receives 2*count vertices.
+// false = out of range / the bucket is not open.
+bool __cdecl R_Ed_LineBucketRead(int from, int count, GfxPointVertex *verts,
+                                 unsigned char *widths, unsigned char *dimensions);
+// Append previously read segments back into the open bucket, interning their colours
+// through the same group table the live path uses.  false = it did not fit.
+bool __cdecl R_Ed_LineBucketAddSegs(const GfxPointVertex *verts, const unsigned char *widths,
+                                    const unsigned char *dimensions, int count);
+
 // Editor begin-view command — IDB R_AddBeginViewCmd @ 0x4fc3a0 (r_rendercmds.cpp).
 // Emits an RC_BEGIN_VIEW carrying the scene def + the GfxViewParms* the backend
 // (RB_BeginViewCmd) hands to R_BeginView, establishing viewParms3D for the lines.

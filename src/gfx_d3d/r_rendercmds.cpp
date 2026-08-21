@@ -298,9 +298,9 @@ void __cdecl R_IssueRenderCommands(uint type)
                 RB_EndFrame(frontEndDataOut->drawType);
             }
             R_UnlockSkinnedCache();
-            R_ToggleSmpFrame();
+                R_ToggleSmpFrame();
+            }
         }
-    }
     else
     {
         if (Sys_IsMainThread())
@@ -426,6 +426,324 @@ int __cdecl R_Ed_CmdBufferHeadroom()
     sizeLimit -= 16;                                 // the RC_END_OF_LIST terminator reserve
     return ( sizeLimit > 0 ) ? sizeLimit : 0;
 }
+
+// KIWI: record/replay of one pass's raw command bytes, for the editor surf cache.
+// Legal only because every command in this list is SELF-CONTAINED — the draw cmds
+// memcpy their vertices in, and the only pointer held is GfxCmdDrawTriangles::material
+// (asset lifetime = the map's; a map load drops the cache).  The executor walks
+// purely by header.byteCount, so a byte-identical range replays identically.
+bool __cdecl R_Ed_CmdCursor( int *cursorOut )
+{
+    if ( !s_cmdList || !s_cmdList->cmds || !cursorOut )
+        return false;
+    *cursorOut = s_cmdList->usedTotal;
+    return true;
+}
+
+// Read back the bytes a pass appended: the range [from, usedTotal).
+bool __cdecl R_Ed_CmdRange( int from, const void **baseOut, int *bytesOut )
+{
+    if ( !s_cmdList || !s_cmdList->cmds || !baseOut || !bytesOut )
+        return false;
+    if ( from < 0 || from > s_cmdList->usedTotal )
+        return false;
+    *baseOut  = (const void *)&s_cmdList->cmds[from];
+    *bytesOut = s_cmdList->usedTotal - from;
+    return true;
+}
+
+// Critical-command bytes in `blob`, validating the sequence as it walks.
+// -1 = malformed; the caller must then refuse to cache it.
+int __cdecl R_Ed_CmdBlobCriticalBytes( const void *blob, int bytes )
+{
+    if ( !blob || bytes < 0 || ( bytes & 3 ) != 0 )
+        return -1;
+    const uint8_t *p = (const uint8_t *)blob;
+    int off = 0, critical = 0;
+    while ( off < bytes )
+    {
+        if ( bytes - off < (int)sizeof( GfxCmdHeader ) )
+            return -1;
+        const GfxCmdHeader *h = (const GfxCmdHeader *)( p + off );
+        const int size = (int)h->byteCount;
+        if ( size <= 0 || ( size & 3 ) != 0 || off + size > bytes )
+            return -1;
+        if ( (uint)h->id >= (uint)RC_COUNT )
+            return -1;
+        if ( h->id < RC_FIRST_NONCRITICAL )
+            critical += size;
+        off += size;
+    }
+    return critical;
+}
+
+// Append pre-built, self-contained commands verbatim; `criticalBytes` is what
+// R_Ed_CmdBlobCriticalBytes returned for the same blob.
+bool __cdecl R_Ed_CmdAppendBlob( const void *blob, int bytes, int criticalBytes )
+{
+    if ( !s_cmdList || !s_cmdList->cmds || !blob || bytes <= 0 || criticalBytes < 0 )
+        return false;
+    if ( bytes > R_Ed_CmdBufferHeadroom() )
+        return false;                    // no room: the caller emits the pass live
+    memcpy( &s_cmdList->cmds[s_cmdList->usedTotal], blob, (size_t)bytes );
+    s_cmdList->usedTotal    += bytes;
+    s_cmdList->usedCritical += criticalBytes;
+    s_cmdList->lastCmd       = 0;        // never extend a replayed command in place
+    return true;
+}
+
+// KIWI: the line bucket.  While open, Ed_EmitLineBatch parks segments here; the flush
+// emits one SetMaterialColor + as few RC_DRAW_LINES as the byteCount cap allows PER
+// DISTINCT (colour, width, dimension).  The port pushes RC_SET_MATERIAL_COLOR per colour
+// run where the binary does not, and that push becomes lastCmd, defeating R_AddLineCmd's
+// in-place merge — one backend tess flush per run.  Same colours, same vertex bytes, same
+// draw state; only ORDER changes, which is invisible for these opaque LESSEQUAL draws.
+// DRAIN BARRIER: any other command emitted while the bucket is open must flush it first
+// (the hook in R_GetCommandBuffer, plus the explicit one in R_AddPointCmd).
+#define KIWI_EDLINE_MAX_LINES  49152     // 1.5 MB of vertices; past it the bucket flushes
+#define KIWI_EDLINE_MAX_GROUPS 64        // distinct (colour,width,dimension) keys held at once
+// byteCount is uint16; cmd = 8-byte prefix + 0x20 a segment, so 8 + 0x20*2047 = 65,512.
+#define KIWI_EDLINE_CMD_LINES  2047
+
+namespace
+{
+    struct EdLineGroupKey
+    {
+        unsigned color;                  // the packed BGRA of the run's first vertex
+        uint8_t  width;
+        uint8_t  dimension;
+    };
+
+    GfxPointVertex s_edLineVerts[2 * KIWI_EDLINE_MAX_LINES];
+    GfxPointVertex s_edLineStage[2 * KIWI_EDLINE_CMD_LINES];   // one command's worth
+    uint8_t        s_edLineGroupOf[KIWI_EDLINE_MAX_LINES];
+    EdLineGroupKey s_edLineGroups[KIWI_EDLINE_MAX_GROUPS];
+    int            s_edLineGroupCount     = 0;
+    int            s_edLineCount          = 0;
+    bool           s_edLineBucketOpen     = false;
+    bool           s_edLineBucketFlushing = false;
+
+    int s_edLineStatLines  = 0;          // segments the bucket grouped
+    int s_edLineStatGroups = 0;          // distinct groups it emitted
+    int s_edLineStatCmds   = 0;          // R_AddLineCmd calls the flush made
+    int s_edLineStatSpills = 0;          // capacity/group-table barriers taken
+    // Every flush, since the process started.  Never reset, so a recorder can tell that a
+    // range it noted earlier has been emitted and is no longer readable.
+    int s_edLineFlushCount = 0;
+}
+
+// Emit everything the bucket holds, grouped, and reset it.  s_edLineBucketFlushing
+// blocks re-entry: the adders below call back into R_GetCommandBuffer's drain hook.
+static void Ed_LineBucket_Flush()
+{
+    if ( s_edLineCount <= 0 )
+    {
+        s_edLineGroupCount = 0;
+        return;
+    }
+    ++s_edLineFlushCount;
+    PROF_SCOPED( "Ed_LineBucketFlush" );
+    s_edLineBucketFlushing = true;
+    s_edLineStatGroups += s_edLineGroupCount;
+    for ( int g = 0; g < s_edLineGroupCount; ++g )
+    {
+        const EdLineGroupKey key = s_edLineGroups[g];
+        // GfxPointVertex.color is packed BGRA ([2]=R, [1]=G, [0]=B, [3]=A).
+        const uint8_t *c = (const uint8_t *)&key.color;
+        const float rgba[4] = { c[2] * ( 1.0f / 255.0f ), c[1] * ( 1.0f / 255.0f ),
+                                c[0] * ( 1.0f / 255.0f ), c[3] * ( 1.0f / 255.0f ) };
+        // Unconditional, not deduped: it keeps a recorded byte range self-contained,
+        // so a replayed blob does not depend on the colour current when it was taken.
+        R_AddCmdSetMaterialColor( rgba );
+        // Gather then emit: a group's segments are not contiguous in s_edLineVerts.
+        int staged = 0;
+        for ( int i = 0; i < s_edLineCount; ++i )
+        {
+            if ( s_edLineGroupOf[i] != (uint8_t)g )
+                continue;
+            s_edLineStage[2 * staged]     = s_edLineVerts[2 * i];
+            s_edLineStage[2 * staged + 1] = s_edLineVerts[2 * i + 1];
+            if ( ++staged == KIWI_EDLINE_CMD_LINES )
+            {
+                R_AddLineCmd( (short)staged, (char)key.width, (char)key.dimension,
+                              s_edLineStage );
+                ++s_edLineStatCmds;
+                staged = 0;
+            }
+        }
+        if ( staged > 0 )
+        {
+            R_AddLineCmd( (short)staged, (char)key.width, (char)key.dimension,
+                          s_edLineStage );
+            ++s_edLineStatCmds;
+        }
+    }
+    s_edLineCount          = 0;
+    s_edLineGroupCount     = 0;
+    s_edLineBucketFlushing = false;
+}
+
+static bool Ed_LineBucket_Active()
+{
+    return s_edLineBucketOpen && !s_edLineBucketFlushing;
+}
+
+// False = caller must emit immediately (a batch bigger than the whole bucket).
+static bool Ed_LineBucket_Add( short count, char width, char dimension,
+                               const GfxPointVertex *verts )
+{
+    if ( (int)count > KIWI_EDLINE_MAX_LINES )
+        return false;
+    if ( s_edLineCount + (int)count > KIWI_EDLINE_MAX_LINES )
+    {
+        Ed_LineBucket_Flush();                 // capacity barrier: grouping restarts
+        ++s_edLineStatSpills;
+    }
+    // Group MEMO: a run of segments almost always shares one key (a brush's wireframe is
+    // one colour), and the table scan below is up to KIWI_EDLINE_MAX_GROUPS compares per
+    // SEGMENT.  Checking last-used first turns that run into one compare each.  Reset by
+    // the flush, which clears the table.
+    static int s_lastGroup = -1;
+    for ( int i = 0; i < (int)count; ++i )
+    {
+        const unsigned packed = *(const unsigned int *)verts[2 * i].color;
+        int g = -1;
+        if ( s_lastGroup >= 0 && s_lastGroup < s_edLineGroupCount
+          && s_edLineGroups[s_lastGroup].color == packed
+          && s_edLineGroups[s_lastGroup].width == (uint8_t)width
+          && s_edLineGroups[s_lastGroup].dimension == (uint8_t)dimension )
+        {
+            g = s_lastGroup;
+        }
+        for ( int k = 0; g < 0 && k < s_edLineGroupCount; ++k )
+        {
+            if ( s_edLineGroups[k].color == packed
+              && s_edLineGroups[k].width == (uint8_t)width
+              && s_edLineGroups[k].dimension == (uint8_t)dimension )
+            {
+                g = k;
+                break;
+            }
+        }
+        if ( g < 0 )
+        {
+            if ( s_edLineGroupCount == KIWI_EDLINE_MAX_GROUPS )
+            {
+                Ed_LineBucket_Flush();         // group-table barrier, same contract
+                ++s_edLineStatSpills;
+            }
+            g = s_edLineGroupCount++;
+            s_edLineGroups[g].color     = packed;
+            s_edLineGroups[g].width     = (uint8_t)width;
+            s_edLineGroups[g].dimension = (uint8_t)dimension;
+        }
+        s_lastGroup                           = g;
+        s_edLineGroupOf[s_edLineCount]        = (uint8_t)g;
+        s_edLineVerts[2 * s_edLineCount]      = verts[2 * i];
+        s_edLineVerts[2 * s_edLineCount + 1]  = verts[2 * i + 1];
+        ++s_edLineCount;
+        ++s_edLineStatLines;
+    }
+    return true;
+}
+
+// ── the ungrouped read/put-back pair (r_rendercmds.h) ────────────────────────
+// Deliberately NOT a second storage format: they hand out and take back exactly what
+// Ed_LineBucket_Add already stores, so a replayed segment is indistinguishable from a
+// live one and the grouping at the flush is still ONE global pass.
+int __cdecl R_Ed_LineBucketMark()
+{
+    return s_edLineCount;
+}
+
+int __cdecl R_Ed_LineBucketFlushCount()
+{
+    return s_edLineFlushCount;
+}
+
+bool __cdecl R_Ed_LineBucketRead(int from, int count, GfxPointVertex *verts,
+                                 unsigned char *widths, unsigned char *dimensions)
+{
+    if ( from < 0 || count < 0 || from + count > s_edLineCount )
+        return false;
+    if ( count > 0 && ( !verts || !widths || !dimensions ) )
+        return false;
+    for ( int i = 0; i < count; ++i )
+    {
+        const int g = (int)s_edLineGroupOf[from + i];
+        if ( g < 0 || g >= s_edLineGroupCount )
+            return false;                      // the table was reset under us
+        verts[2 * i]     = s_edLineVerts[2 * ( from + i )];
+        verts[2 * i + 1] = s_edLineVerts[2 * ( from + i ) + 1];
+        widths[i]        = s_edLineGroups[g].width;
+        dimensions[i]    = s_edLineGroups[g].dimension;
+    }
+    return true;
+}
+
+bool __cdecl R_Ed_LineBucketAddSegs(const GfxPointVertex *verts, const unsigned char *widths,
+                                    const unsigned char *dimensions, int count)
+{
+    if ( count <= 0 )
+        return true;
+    if ( !verts || !widths || !dimensions || !Ed_LineBucket_Active() )
+        return false;
+    // Fed as RUNS of equal (width, dimension) so the per-segment call overhead is paid
+    // once per run; the colour still interns per segment inside Ed_LineBucket_Add.
+    int i = 0;
+    while ( i < count )
+    {
+        int j = i + 1;
+        // Capped: Ed_LineBucket_Add's count is a short, and a run must not out-size the
+        // bucket itself (which would make it refuse rather than spill).
+        const int runMax = i + 4096;
+        while ( j < count && j < runMax
+             && widths[j] == widths[i] && dimensions[j] == dimensions[i] )
+            ++j;
+        if ( !Ed_LineBucket_Add( (short)( j - i ), (char)widths[i], (char)dimensions[i],
+                                 &verts[2 * i] ) )
+            return false;
+        i = j;
+    }
+    return true;
+}
+
+// RADIANT_LINEBUCKET_OFF: back to the per-colour-run immediate path, nothing else changed.
+static bool Ed_LineBucketEnabled()
+{
+    static const bool s_off = []{ const char *e = getenv( "RADIANT_LINEBUCKET_OFF" );
+                                  return e && *e && *e != '0'; }();
+    return !s_off;
+}
+
+void __cdecl R_Ed_BeginLineBucket()
+{
+    Ed_LineBucket_Flush();                     // defensive: never nest two passes
+    if ( !Ed_LineBucketEnabled() )
+        return;
+    s_edLineBucketOpen = true;
+}
+
+void __cdecl R_Ed_EndLineBucket()
+{
+    Ed_LineBucket_Flush();
+    s_edLineBucketOpen = false;
+}
+
+void __cdecl R_Ed_FlushLineBucket()
+{
+    if ( s_edLineBucketOpen && !s_edLineBucketFlushing )
+        Ed_LineBucket_Flush();
+}
+
+void __cdecl R_Ed_LineBucketStats( int *lines, int *groups, int *cmds, int *spills )
+{
+    if ( lines )  *lines  = s_edLineStatLines;
+    if ( groups ) *groups = s_edLineStatGroups;
+    if ( cmds )   *cmds   = s_edLineStatCmds;
+    if ( spills ) *spills = s_edLineStatSpills;
+    s_edLineStatLines = s_edLineStatGroups = s_edLineStatCmds = s_edLineStatSpills = 0;
+}
 #endif
 
 GfxCmdHeader *__cdecl R_GetCommandBuffer(GfxRenderCommand renderCmd, int bytes)
@@ -449,6 +767,9 @@ GfxCmdHeader *__cdecl R_GetCommandBuffer(GfxRenderCommand renderCmd, int bytes)
     iassert( s_cmdList->cmds );
     iassert( rg.inFrame );
 #ifdef KISAK_RADIANT
+    // Drain barrier: bucketed lines were emitted before this command in the pass, so
+    // they must land in the list before it too.
+    R_Ed_FlushLineBucket();
     // EDITOR: these thresholds are crossed EVERY FRAME on a big map (the editor draws the
     // whole map, the game draws one scene) — the per-frame Com_PrintWarning flooded the
     // console with thousands of lines per minute (each line also churns the hidden EDIT
@@ -537,11 +858,18 @@ GfxCmdHeader *__cdecl R_GetCommandBuffer(GfxRenderCommand renderCmd, int bytes)
 
 void R_FreeTempSkinBuffer()
 {
+#ifdef KISAK_RADIANT
+    // KIWI: the editor rewinds the cursor instead of decommitting, so the commit state
+    // stays monotonic across views.  R_ShutdownTempSkinBuf (r_buffers.cpp) still
+    // Z_VirtualFrees the whole reservation on device reset / shutdown.
+    frontEndDataOut->tempSkinPos = 0;
+#else
     if (frontEndDataOut->tempSkinPos)
     {
         Z_VirtualDecommit(frontEndDataOut->tempSkinBuf, frontEndDataOut->tempSkinPos);
         frontEndDataOut->tempSkinPos = 0;
     }
+#endif
 }
 
 uint s_smpFrame;
@@ -2000,6 +2328,13 @@ static void Ed_EmitLineBatch(short count, char width, char dimension, GfxPointVe
     if ( count <= 0 || !verts )
         { R_AddLineCmd(count, width, dimension, verts); return; }
 
+    // Bucket arm: keyed on the same packed colour the run splitter below uses.
+    // RADIANT_LINEVCOL stays on the immediate path — it pushes a colour that is NOT
+    // the vertex colour, which the grouping cannot express.
+    if ( !Ed_LineVertexColorMode() && Ed_LineBucket_Active()
+      && Ed_LineBucket_Add( count, width, dimension, verts ) )
+        return;
+
     const bool neutral = Ed_LineVertexColorMode();
     int runStart = 0;
     for ( int i = 0; i <= (int)count; ++i )
@@ -2112,6 +2447,10 @@ GfxCmdDrawPoints *__cdecl R_AddPointCmd(short pointCount, char size, char dimens
 #ifdef KISAK_RADIANT
     iassert( (pointCount > 0) );
     iassert( (size > 0) );
+
+    // Drain before the s_edLastMatColor compare below — the bucket flush writes it,
+    // and R_GetCommandBuffer's barrier would fire after that decision.
+    R_Ed_FlushLineBucket();
 
     GfxCmdDrawPoints *lastCmd = nullptr;
     int first = 0;
@@ -2249,6 +2588,22 @@ void __cdecl R_AddCmdSetMaterialColor(const float *color)
     s_edLastMatColor[2] = color[2]; s_edLastMatColor[3] = color[3];
 #endif
 }
+
+#ifdef KISAK_RADIANT
+// The colour dedup is STATE a recorded pass leaves behind, not a command in it: a
+// replay copies bytes but runs no code, so the driver must save/restore it.
+void __cdecl R_Ed_GetLastMaterialColor( float out[4] )
+{
+    out[0] = s_edLastMatColor[0]; out[1] = s_edLastMatColor[1];
+    out[2] = s_edLastMatColor[2]; out[3] = s_edLastMatColor[3];
+}
+
+void __cdecl R_Ed_SetLastMaterialColor( const float in[4] )
+{
+    s_edLastMatColor[0] = in[0]; s_edLastMatColor[1] = in[1];
+    s_edLastMatColor[2] = in[2]; s_edLastMatColor[3] = in[3];
+}
+#endif
 
 #ifdef KISAK_RADIANT
 // IDB R_AddCmdSetCustomShaderConstant @ 0x4fd330 — emit RC_SET_CUSTOM_CONSTANT carrying a

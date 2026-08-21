@@ -9,6 +9,10 @@
 #include <universal/profile.h>
 
 
+#ifdef KISAK_RADIANT
+extern void Radiant_TempSkin_Invalidate();   // r_ed_scene.cpp:442
+#endif
+
 //struct GfxBuffers gfxBuf   85b3aa20     gfx_d3d : r_buffers.obj
 GfxBuffers gfxBuf;
 
@@ -375,6 +379,11 @@ void __cdecl R_ShutdownTempSkinBuf()
             data->tempSkinPos = 0;
         }
     }
+#ifdef KISAK_RADIANT
+    // The editor's commit high-water mark must be dropped with the reservation: a fresh
+    // Z_VirtualReserve can be handed back the SAME address with nothing committed.
+    Radiant_TempSkin_Invalidate();
+#endif
 }
 
 void __cdecl R_FreeStaticVertexBuffer(IDirect3DVertexBuffer9 *vb)

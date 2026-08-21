@@ -10166,7 +10166,7 @@ extern bool MaterialDef_15_Drawflag_Multiply( int drawFlags, MaterialDef *m );
 // surfaces.  This seems like a bug and it's ugly - fix it."*
 //
 // THE MECHANISM, named rather than guessed.  `R_AddEditorSurfsCmd` sorts the
-// pass's surfs with `Editor_SurfCompare` (r_ed_scene.cpp:181-197), whose keys are
+// pass's surfs with `Editor_SurfCompare` (r_ed_scene.cpp:182-198), whose keys are
 // **sortKey, then techType, then firstIndex**.  A patch's FILLED front and its
 // unselected `PM_BACK_FACE` wireframe are emitted from the SAME material, so they
 // carry the SAME sortKey — and `TECHNIQUE_WIREFRAME_SHADED` (29) is numerically
@@ -10196,7 +10196,7 @@ extern bool MaterialDef_15_Drawflag_Multiply( int drawFlags, MaterialDef *m );
 // from behind, round AY's "a patch has one side" case — nothing else draws at
 // that depth and the wireframe is exactly as visible as it always was.  The bias
 // stays INSIDE the material's own 100-wide bucket (`Editor_MaterialSortKey` is
-// `100 * primarySortKey`, r_ed_scene.cpp:172-175), so no other material's bucket
+// `100 * primarySortKey`, r_ed_scene.cpp:173-176), so no other material's bucket
 // can be crossed by it.
 static bool Patch_Fill_Emit( patch_t *inst, Material *mtlOverride, int face, int techType,
                              int sortKeyBias = 0 )

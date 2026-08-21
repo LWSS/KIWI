@@ -28,6 +28,12 @@ void XY_DrawGrid(const XYViewState *v);                                         
 void XY_DrawBlockGrid(const XYViewState *v);                                        // IDB 0x4690f0 (1024-unit block grid + labels)
 void XY_DrawBrushes(const XYViewState *v);                                          // IDB 0x46CE20 (brush + overlay body)
 
+// true while an overlay that follows the MOUSE (marquee,
+// clip points, crosshair, rotate/scale pivot, any live drag) is being drawn into the XY
+// view per frame — i.e. while the view changes with no g_nUpdateBits invalidation behind
+// it.  The dirty-flag skip (kiwi_viewdirty.h) force-renders whenever this is true.
+bool XYWnd_OverlayIsLive();
+
 // ─── xywndState_t — the XY viewport's shell state (U-VP-XY / U-GLOBALS) ────────────
 // The XY grid view is a SINGLETON in this port: Radiant_CreateRenderWindows (mainfrm.cpp
 // :881) news exactly ONE CXYWnd and immediately aliases m_pActiveXY onto it; m_pActiveXY is
@@ -41,9 +47,6 @@ void XY_DrawBrushes(const XYViewState *v);                                      
 //   m_hWnd   = the view's window handle, standing in for CWnd::m_hWnd / GetSafeHwnd() (the
 //              clipper capture tests and CreateEntityFromClassname's GetClientRect need it).
 //              Latched in XYWnd_OnCreate.
-//   clip*    = the XY view-bounds / clip-plane block (binary CXYWnd +168..+256).  These are
-//              STATE-ONLY: brush.cpp's prefab-content cull reaches them through
-//              XYWnd_SetupClipPlanes + XYWnd_CullBrush, both operating on this block.
 // mainfrm.h still DECLARES all of these as CXYWnd members (U-GUARD deletes them with the class)
 // — see the unit report's dead-member list.
 struct xywndState_t
@@ -63,16 +66,6 @@ struct xywndState_t
     float  m_vPressdelta[3]  = { 0, 0, 0 };
     POINT  m_ptCursor        = { 0, 0 };  // screen cursor at press (for RMB scroll)
     bool   m_bPress_selection = false;    // something was selected at press time
-
-    // ── XY view bounds + clip planes (binary CXYWnd fields +168..+256) ─────────
-    int   m_clipDim1 = 0;             // +168 (x84)  horizontal world axis
-    int   m_clipDim2 = 1;             // +172 (x85)  vertical world axis
-    int   m_clipDim3 = 2;             // +176 (x86)  the out-of-plane axis
-    float m_clipMin1 = 0.0f;          // +180 (x87)  view-rect min along dim1
-    float m_clipMin2 = 0.0f;          // +184 (x88)  view-rect min along dim2
-    float m_clipMax1 = 0.0f;          // +188 (x89)  view-rect max along dim1
-    float m_clipMax2 = 0.0f;          // +192 (x90)  view-rect max along dim2
-    float m_clipPlanes[4][4] = {};    // +196..+256  four {normal[3], dist} view-edge planes
 };
 
 // Ed_ActiveXY — the shell-agnostic "active XY view" accessor (U-GLOBALS).  The binary's

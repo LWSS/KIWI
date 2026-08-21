@@ -25,9 +25,9 @@
 #include <string>
 
 // ── ported / cross-file entry points (each verified against its definition) ─────────
-extern int  Sys_Printf( const char *fmt, ... );          // win_qe3.cpp:112
-extern bool Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId );  // mainfrm.cpp:1340
-// The fs_basepath accessor every radiant file already uses (mainfrm.cpp:604, texwnd.cpp:1783,
+extern int  Sys_Printf( const char *fmt, ... );          // win_qe3.cpp:118
+extern bool Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId );  // mainfrm.cpp:1358
+// The fs_basepath accessor every radiant file already uses (mainfrm.cpp:604, texwnd.cpp:1813,
 // filters.cpp:1023), spelled exactly as they spell it.  Cited without a line number on purpose:
 // TWO dvar.cpp exist in the tree (universal/ and cod4map/universal/), and a bare `dvar.cpp:NNN`
 // resolves to neither.  Definition: universal/dvar.cpp, `Dvar_GetString` (declared in

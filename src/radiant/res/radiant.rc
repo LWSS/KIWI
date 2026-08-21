@@ -97,9 +97,6 @@ BEGIN
             MENUITEM "&Z 100%", 32998
             MENUITEM "Z Zoo&m In\tCtrl-Delete", 32999
             MENUITEM "Z Zoom O&ut\tCtrl-Insert", 33000
-            MENUITEM SEPARATOR
-            MENUITEM "Cubic Clip Zoom In\tCtrl-]", 32820
-            MENUITEM "Cubic Clip Zoom Out\tCtrl-[", 32819
         END
         MENUITEM SEPARATOR
         POPUP "Show"
@@ -140,8 +137,6 @@ BEGIN
             MENUITEM "Toggle preview at max intensity", 36122
             MENUITEM "Show regions for selected", 36125
         END
-        MENUITEM SEPARATOR
-        MENUITEM "Cubic Clipping", 32817, CHECKED
     END
     POPUP "&Selection"
     BEGIN
@@ -596,7 +591,6 @@ BEGIN
     33182   "Rotate Texture 90\nRotate Texture 90"
     33238   "Cycle Edited Texture Layer\nCycle Edited Texture Layer"
     32936   "Toggle camera movement mode\nToggle camera movement mode"
-    32817   "Cubic clip the camera view\nCubic clip the camera view"
     32781   "Change views\nChange views"
     32810   "Free rotation\nFree Rotation"
     32813   "Free Scaling\nFree Scaling"

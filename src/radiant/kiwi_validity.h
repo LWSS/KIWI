@@ -80,7 +80,7 @@
 //
 //     Give the brush a PROBE BOX — its own bounds grown by KVALID_CLOSE_MARGIN —
 //     and rebuild every face winding against it with the ported
-//     Brush_MakeFaceWinding (brush.cpp:4684, 0x471260), which is exactly
+//     Brush_MakeFaceWinding (brush.cpp:4693, 0x471260), which is exactly
 //     "Winding_BaseForPlane over def->[mins,maxs]±1, then clip behind every other
 //     face plane".  A CLOSED brush's faces are its real faces and lie inside its
 //     own bounds, i.e. a whole margin away from the probe box.  An OPEN cell's

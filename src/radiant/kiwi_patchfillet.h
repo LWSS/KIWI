@@ -237,7 +237,7 @@
 // all — patch awareness lives one level down, in the cloner:
 //
 //   * Undo_AddBrush (undo.cpp:494) calls BrushDef_FullClone → Brush_FullClone_
-//     sub475E80 (brush.cpp:7361), whose FIRST branch is `if (def->patch)` →
+//     sub475E80 (brush.cpp:7408), whose FIRST branch is `if (def->patch)` →
 //     Patch_Duplicate (pmesh.cpp:2236), a memcpy of the whole 20 556-byte struct
 //     including the 16×16 control grid, plus a fresh symbiont.  So a MODIFIED
 //     patch is deep-copied by the ordinary brush path with nothing extra.

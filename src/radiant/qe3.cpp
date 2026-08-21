@@ -295,9 +295,30 @@ static int s_didonce         = 0;
 
 extern selbrush_t active_brushes;      // map.cpp (0x23F189C)
 extern void       Sys_UpdateStatusBar( void );   // win_qe3.cpp
+extern unsigned   KiwiWalkCache_StructEpoch();   // kiwi_walkcache.h
+
+// ── KIWI: THE 250 ms TIMER POLLS A COUNTER, NOT THE MAP ──
+// The 250 ms WM_TIMER (radiant_main.cpp) calls this four times a second, and the walk
+// below is O(map): on a prefab-authored level it is a full pointer chase of every brush
+// instance plus an iassert each, landing in the message drain — i.e. OUTSIDE every
+// profiler zone, which is why a 45 ms frame could look empty inside.
+//
+// The counts can only change when the SET of brush instances changes, and that has its
+// own signal (kiwi_walkcache.h KiwiWalkCache_StructEpoch, bumped by the instance
+// alloc/free, display-list link/unlink, entity relink and classname funnels).  So the
+// timer keeps polling; the walk only runs when the poll says something moved.
+// s_didonce still forces the first pass, and the explicit callers (map load, undo, redo,
+// the two mainfrm sites) reach the walk through the same epoch-or-first gate — those
+// transitions all bump the epoch anyway.
+static unsigned s_lastStructEpoch = 0;
 
 void QE_CountBrushesAndUpdateStatusBar( void )
 {
+    const unsigned structEpoch = KiwiWalkCache_StructEpoch();
+    if ( s_didonce && structEpoch == s_lastStructEpoch )
+        return;
+    s_lastStructEpoch = structEpoch;
+
     g_numbrushes  = 0;
     g_numentities = 0;
 

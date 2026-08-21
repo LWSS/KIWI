@@ -23,6 +23,13 @@ XModelSurfs *__cdecl XModelSurfsFindData(const char *name)
     return (XModelSurfs*)Hunk_FindDataForFile(3, name);
 }
 
+// KIWI: the binary leaves the mesh loader's mallocs unchecked (a null treeNodePool then
+// AVs inside BuildAabbTree).  Checking them is a deliberate divergence; signatures stay as
+// they are, so the failure is latched in this file-static and read by R_XModelSurfsLoadFile,
+// whose existing `return 0` arm threads out to XModelPrecache_LoadObj's $default model.
+// Main thread only, so a plain static is enough.
+static int s_xmodelSurfLoadFailed = 0;
+
 void __cdecl XModelReadSurface_BuildCollisionTree(
     XSurface *surface,
     uint vertListIndex,
@@ -82,8 +89,15 @@ void __cdecl XModelReadSurface_BuildCollisionTree(
     memset(&options, 0, 12);
     options.mins = 0;
     options.maxs = 0;
+    // treeNodePool (+0x18) is outside the binary's `memset(&options, 0, 12)`, and the
+    // failure epilogue free()s it — so it must be null before the first goto can be taken.
+    options.treeNodePool = 0;
     options.maintainValidBounds = 1;
+    if (!tree)
+        goto kiwiCollisionTreeAllocFailed;
     options.treeNodePool = (GenericAabbTree*)malloc(0x20000u);
+    if (!options.treeNodePool)
+        goto kiwiCollisionTreeAllocFailed;
     options.treeNodeLimit = 0x2000;
     options.minItemsPerLeaf = 1;
     options.maxItemsPerLeaf = 16;
@@ -183,6 +197,9 @@ void __cdecl XModelReadSurface_BuildCollisionTree(
         tree->leafCount = leafCount;
         options.mins = (float(*)[3])malloc(12 * leafCount);
         options.maxs = (float(*)[3])malloc(12 * leafCount);
+        // Only a null from a NON-zero request is a failure: malloc(0) may return either.
+        if (!tree->leafs || (leafCount && (!options.mins || !options.maxs)))
+            goto kiwiCollisionTreeAllocFailed;
         options.items = tree->leafs;
         options.itemCount = leafCount;
         options.itemSize = 2;
@@ -200,6 +217,8 @@ void __cdecl XModelReadSurface_BuildCollisionTree(
     tree->nodeCount = nodeCount;
     allocSize = 16 * nodeCount + 15;
     v3 = (byte*)Alloc(allocSize);
+    if (!v3)
+        goto kiwiCollisionTreeAllocFailed;
     alloced = v3;
     alignedAddr = (uintptr_t)(v3 + 15) & 0xFFFFFFF0;
     tree->nodes = (XSurfaceCollisionNode*)alignedAddr;
@@ -311,6 +330,22 @@ void __cdecl XModelReadSurface_BuildCollisionTree(
     free(options.mins);
     free(options.maxs);
     free(options.treeNodePool);
+    return;
+
+    // Out-of-memory arm: frees the same three pointers the success path does, all
+    // null-initialised at entry, so it is leak-free from any of the four goto sites.  The
+    // hunk-side Alloc()s have no per-block free; the whole model is discarded instead.
+kiwiCollisionTreeAllocFailed:
+    free(options.mins);
+    free(options.maxs);
+    free(options.treeNodePool);
+    vertList->collisionTree = 0;
+    s_xmodelSurfLoadFailed = 1;
+    Com_PrintError(
+        19,
+        "ERROR: out of memory building the collision tree for an xmodel surface (%d tris) - "
+        "the model will load as $default.\n",
+        surface->triCount);
 }
 
 static void __cdecl XSurfaceTransferGetTexCoordRange(const XVertexInfo_s *v, int vertCount, float *texCoordAv)
@@ -823,8 +858,23 @@ void __cdecl XModelReadSurface(XModel *model, byte **pos, void *(__cdecl *Alloc)
     }
     iassert(surface->deformed == (surface->vertListCount == 0));
 
+    // KIWI: the editor builds no per-surface collision trees.  XRigidVertList::collisionTree
+    // has exactly one reader anywhere (XSurfaceVisitTrianglesInAabb, called only from
+    // r_marks.cpp, whose entry points come from EffectsCore — not in radiant_files.cmake).
+    // The editor's geometry needs go through Editor_ExtractXModelGeo instead.  The field is
+    // left null, which is what a `deformed` surface already leaves on every build.
+#ifndef KISAK_RADIANT
     for (vertListIter = 0; vertListIter != surface->vertListCount; ++vertListIter)
+    {
         XModelReadSurface_BuildCollisionTree(surface, vertListIter, Alloc);
+        // Stop at the first out-of-memory.  The Hunk_FreeTempMemory below must still run:
+        // the temp hunk is a STACK, and skipping its pop corrupts every later alloc.
+        if (s_xmodelSurfLoadFailed)
+            break;
+    }
+#else
+    (void)vertListIter;
+#endif
 
     Hunk_FreeTempMemory((char*)surfVerts);
 }
@@ -868,6 +918,10 @@ void __cdecl XModelReadSurfaces(
         xsurf->baseVertIndex = baseVertIndex;
         baseTriIndex += xsurf->triCount;
         baseVertIndex += xsurf->vertCount;
+
+        // R_XModelSurfsLoadFile turns this latch into its existing `return 0`.
+        if (s_xmodelSurfLoadFailed)
+            break;
     }
 }
 
@@ -923,7 +977,17 @@ XModelSurfs *__cdecl R_XModelSurfsLoadFile(
             modelSurfs = (XModelSurfs*)Alloc(size);
             model->memUsage += size;
             modelSurfs->surfs = (XSurface*)&modelSurfs[1];
+            // A latched failure is treated exactly like the "out of date" / "file conflict"
+            // arms below: free the file, return 0, end up at the $default placeholder model.
+            s_xmodelSurfLoadFailed = 0;
             XModelReadSurfaces(model, name, modelSurfs, modelSurfs->partBits, modelNumsurfs, &pos, Alloc);
+            if (s_xmodelSurfLoadFailed)
+            {
+                s_xmodelSurfLoadFailed = 0;
+                FS_FreeFile((char*)buf);
+                Com_PrintError(19, "ERROR: out of memory loading xmodelsurfs '%s' for xmodel '%s'.\n", name, modelName);
+                return 0;
+            }
             FS_FreeFile((char*)buf);
 
             iassert(modelSurfs);

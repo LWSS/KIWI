@@ -96,7 +96,7 @@
 // ── CURSOR MAPPING (S = X = horizontal, T = Y = vertical) ───────────────────
 //   Shift    1 px = 1 texture unit, quantised to the CLASSIC grid step
 //            (grid_sizes[d_gridsize], the same quantum CamWnd_MouseMoved's
-//            RMB+Alt texture drag uses, camwnd.cpp:2686) — or to 1 unit while
+//            RMB+Alt texture drag uses, camwnd.cpp:2750) — or to 1 unit while
 //            CTRL suppresses snapping.  Right/down are positive, matching the
 //            classic path's screen-space accumulation sign.
 //   Rotate   0.5°/px horizontal, the same rate as kiwi_transform's R

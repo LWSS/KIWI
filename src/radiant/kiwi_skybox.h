@@ -20,7 +20,7 @@
 //   * THERE IS NOTHING TO "SET".  There is no map-level skybox slot to point at a
 //     material, so this tab's verbs are about GEOMETRY: tag some brushes as sky, or
 //     build the enclosing shell.
-//   * THE EDITOR ALREADY DRAWS SKY MATERIALS.  camwnd.cpp:2852-2855 deliberately exempts
+//   * THE EDITOR ALREADY DRAWS SKY MATERIALS.  camwnd.cpp:2925-2928 deliberately exempts
 //     sky from the `d_white` tool-volume substitution, *"whose colormap is real content
 //     the editor should show"*.  So a sky brush is already textured with the real sky
 //     colormap in the 3D view; this round does not add that, it adds the ability to turn
@@ -33,25 +33,24 @@
 //
 //   1. `SURF_SKY` (surfaceFlags bit 2, value 4) — the DATA's own answer.
 //      `universal/surfaceflags.h:57` is the infoParms row (`{ "sky", 0, 4, 0x800, 0 }`),
-//      `filters.cpp:130` is the same bit in the filter name table, and
-//      `CamWnd_CullCubic` (camwnd.cpp:432-455) is the runtime test — it seeds
-//      `dword_181F51C = 4` and folds `MaterialDef_09` over the layers, which ANDs
+//      `filters.cpp:130` is the same bit in the filter name table.  `MaterialDef_09`
+//      folded over the layers ANDs
 //      `qtexture_s::color_or_surfacetype_filter` (@0x1C, qe3.h:65).  That field IS the
 //      material's surfaceFlags, written at BOTH registration paths
-//      (texwnd.cpp:298 and texwnd.cpp:414) straight from the material header.
-//   2. leaf-name substring `"sky"` — camwnd.cpp:2739 (the sky-arm predicate) and
-//      camwnd.cpp:621 (the editor colour table's `{ "sky", ... }` row).
+//      (texwnd.cpp:305 and texwnd.cpp:421) straight from the material header.
+//   2. leaf-name substring `"sky"` — camwnd.cpp:2803 (the sky-arm predicate) and
+//      camwnd.cpp:627 (the editor colour table's `{ "sky", ... }` row).
 //   3. base-name substring `"sky_"` — select.cpp:708-727, the `SkyBrushOff` pick skip.
 //
 // THIS FILE MAKES (1) CANONICAL AND KEEPS (2) AS A FALLBACK, in one function —
 // `KiwiSky_IsSkyMaterial`.  The reasoning:
 //
-//   * (1) IS THE ONLY ONE THAT IS NOT A GUESS.  It is the flag the compiler, the game
-//     and `CullCubic` all act on.  A material named `desert_backdrop` with `SURF_SKY`
+//   * (1) IS THE ONLY ONE THAT IS NOT A GUESS.  It is the flag the compiler and the game
+//     act on.  A material named `desert_backdrop` with `SURF_SKY`
 //     set is sky; a material named `sky_scraper_wall` without it is not, and (2) and (3)
 //     get both of those wrong.
 //   * THE FALLBACK IS NOT SUPERSTITION, it covers a real state.  `Load_Materials`
-//     (texwnd.cpp:424) reads each 0x28 material header directly, so the flags are
+//     (texwnd.cpp:431) reads each 0x28 material header directly, so the flags are
 //     normally real without registering a render material — but a material reached
 //     through some other path can arrive with a zero filter word, and for those the name
 //     is the only evidence there is.  The fallback is therefore gated on the flags being
@@ -108,12 +107,12 @@
 // WHAT IT COSTS TO RENDER.  No new material and no second pass — it is the same
 // `g_qeglobals.d_white` handle at `TECHNIQUE_UNLIT` every other see-through tool volume
 // already draws through (clip / trigger / hint / skip / portal / origin /
-// lightgrid_volume, camwnd.cpp:2862-2867: *"all 0x08128965 like white_tools, i.e. already
+// lightgrid_volume, camwnd.cpp:2935-2940: *"all 0x08128965 like white_tools, i.e. already
 // blended and already depth-write-free"*).  It is NOT one term in the substitution
-// expression, though: the shipped arm is its own `if` AHEAD of it (camwnd.cpp:2916-2924),
+// expression, though: the shipped arm is its own `if` AHEAD of it (camwnd.cpp:2989-2997),
 // because the film needs a different DRAW rather than a different material —
 // `Cam_DrawFaceTinted` with `MATERIAL_COLOR {0,0,0,0}` and a packed per-vertex RGBA whose
-// alpha is the opacity (0.30, the sky-blue of the editor colour table at camwnd.cpp:621).
+// alpha is the opacity (0.30, the sky-blue of the editor colour table at camwnd.cpp:627).
 // Routing to `d_white` alone only drops the depth write; the per-vertex alpha is what
 // makes it translucent.
 //
@@ -140,14 +139,14 @@
 //     computes itself.  That is the binary's editor sky path, it was already reachable
 //     from the ported draw, and KIWI never reached it — see 2.
 //  2. THE FLAT BLUE WAS THE EDITOR COLOUR TABLE, NOT THE SKY.  `Cam_EditorMaterialColor`
-//     (camwnd.cpp:612-635) leaves `out[3] = 1.0f`, and w == 1 is a FLAT-COLOUR OVERRIDE
+//     (camwnd.cpp:618-641) leaves `out[3] = 1.0f`, and w == 1 is a FLAT-COLOUR OVERRIDE
 //     in the editor shader family — so the `{ "sky", 0.45f, 0.62f, 0.92f }` row painted
 //     every sky face solid (115,158,235) before the technique could sample anything.
 //     Round BA emits w = 0 for a textured sky face.
 //  3. SEE-THROUGH WAS NEVER TRANSLUCENT.  Round AZ routed it to `d_white`, which removes
 //     the DEPTH WRITE and nothing else — `Cam_DrawFace` pins the per-vertex colour to
 //     0xFFFFFFFF and white_tools blends SrcAlpha/InvSrcAlpha, so at alpha 255 the blend
-//     is arithmetically OPAQUE (camwnd.cpp:661-664 says exactly this for caulk).  It is
+//     is arithmetically OPAQUE (camwnd.cpp:667-670 says exactly this for caulk).  It is
 //     drawn `Cam_DrawFaceTinted` with a packed per-vertex RGBA at alpha 0.30 now — the
 //     binary's own translucent-fill recipe (Cam_DrawSelectedFaceFill at colors[16].a =
 //     0.25, kiwi_hover.cpp:156-158 at 0.25-0.35), MATERIAL_COLOR {0,0,0,0} and all.
@@ -172,13 +171,13 @@
 // The route is a straight read down the material the engine already loaded:
 //     qtexture_s::next (the registered Material*, qe3.h:50-53)
 //       -> Material::textureTable[i] where semantic == 2 (TS_COLOR_MAP, r_image.h:51)
-//          -- the same walk Radiant_MaterialTexScale already does at texwnd.cpp:142-153,
+//          -- the same walk Radiant_MaterialTexScale already does at texwnd.cpp:149-160,
 //             and for the same reason: the table is hash-sorted, so [0] is often the
 //             normalMap
 //       -> MaterialTextureDef::u.image (GfxImage*, r_material.h:412)
 //       -> GfxImage::texture.map (IDirect3DTexture9*, r_gfx.h:202-209)
 // which is handed to ImGui as `(ImTextureID)(intptr_t)tex`, exactly the cast the four
-// viewport images already use (imgui_shell.cpp:887).
+// viewport images already use (imgui_shell.cpp:939).
 //
 // ── ROUND BA: THE COLORMAP IS A CUBEMAP, SO THE TILE IS A COPY OF ONE FACE ──────────
 // Every tile came up "no map" because the last guard below rejects a cubemap — and that
@@ -216,10 +215,10 @@
 // ═════════════════════════════════════════════════════════════════════════════════════
 // **APPLY TO SELECTION** retextures the selected brushes with the chosen sky material.
 // It is not new code: it calls `TexWnd_ApplyMaterialAtIndex`, the SAME funnel a texture
-// thumbnail click goes through (texwnd.cpp:1250), so it inherits the ported
+// thumbnail click goes through (texwnd.cpp:1252), so it inherits the ported
 // `Brush_SetTexture` apply with its one undo record covering both `selected_brushes` and
 // `g_SelectedFaces` (select.cpp:1815-1879), AND round AK's patch re-naturalize fence
-// (texwnd.cpp:1187).  Writing a second apply here would have been a second undo shape and
+// (texwnd.cpp:1188).  Writing a second apply here would have been a second undo shape and
 // a second place for the fence to be forgotten.
 //
 // **CREATE SKYBOX SHELL** builds the enclosing box in one undo record.  Six brushes, not
@@ -269,14 +268,13 @@ bool KiwiSky_DispatchInstant( unsigned int cmdId );
 // ── THE predicate (D-AZ-A) ──────────────────────────────────────────────────────────
 // True when `q` is a sky material: `SURF_SKY` in its surfaceFlags word, or — only when
 // that word is zero, i.e. only when the data said nothing — a leaf-name substring "sky",
-// which is the rule camwnd.cpp:2739 already uses.  Null-safe (null is not sky).
+// which is the rule camwnd.cpp:2803 already uses.  Null-safe (null is not sky).
 // This is the one spelling; do not add a fourth.
 bool KiwiSky_IsSkyMaterial( const qtexture_s *q );
 
 // ── KIWI-UX (ROUND BB): the same question, asked about a BRUSH ──────────────────────
 // True when the brush's FACE 0 carries a sky material at the CURRENT EDIT LAYER — the
-// same face and the same layer CamWnd_CullCubic tests (camwnd.cpp:451), and the test
-// KiwiSky_SeeThroughFace's union-box walk was already doing longhand.  Exported because
+// test KiwiSky_SeeThroughFace's union-box walk was already doing longhand.  Exported because
 // kiwi_focus.cpp needs it: frame-all must NOT frame the sky shell, or the camera opens
 // every map at the distance that encloses the shell and the pivot can never be inside it
 // (the whole of round BB's item 1a).  Null-safe.
@@ -306,7 +304,7 @@ bool KiwiSky_IsSkyBrush( const brush_t *def );
 //
 // WHY THE GRID SPECIFICALLY, AND WHY THE MAP SURVIVED.  `main/statemaps/color_only.sm`
 // (the sky technique's state map) is depthTest LessEqual + depthWrite DISABLE, and the
-// ground lattice is submitted BEFORE the world since round S (camwnd.cpp:2627, and the
+// ground lattice is submitted BEFORE the world since round S (camwnd.cpp:2691, and the
 // long comment there says why).  So: the near sky wall is nearer than the Z=0 lattice,
 // passes LESSEQUAL, and paints every grid pixel away — but writes no depth, so the world
 // faces flushed after it are not rejected and the map draws over it normally.  Grid gone,

@@ -38,8 +38,6 @@ struct prefData_t
     int   m_nMoveSpeed;           // "MoveSpeed"               (350)
     int   m_nAngleSpeed;          // "AngleSpeed"              (150)
     int   m_bCamXYUpdate;         // "CamXYUpdate"             (0)
-    int   m_bCubicClipping;       // "CubicClipping"           (1)
-    int   m_nCubicScale;          // "CubicScale"              (13)
     int   m_bALTEdge;             // "ALTEdgeDrag"             (1)
     int   m_bTextureBar;          // "UseTextureBar"           (0)
     int   m_bSnapTToGrid;         // "SnapT"                   (0)
@@ -48,7 +46,6 @@ struct prefData_t
     int   m_bYZVis;               // "YZVIS"                   (0)
     int   m_bZVis;                // "ZVIS"                    (1)
     int   m_bSizePaint;           // "SizePainting"            (1)
-    int   b_mCullSky;             // "CullSkies"               (1)
     int   m_dropHeight;           // "DropHeight"              (28)
     int   m_bForceZeroDropHeight; // (no registry key; runtime) (0) — when set, the drop ignores
                                   //   m_dropHeight (CPrefsDlg @+0x2D4; not in Load/SavePrefs)

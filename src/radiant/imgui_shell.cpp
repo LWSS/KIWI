@@ -15,10 +15,14 @@
 #include "kiwi_entbrowser.h"       // KIWI-UX ROUND AU: the entity browser + camera drop target
 #include "kiwi_skybox.h"           // KIWI-UX ROUND AZ: the Sky tab (third tab of that node)
 #include "kiwi_uveditor.h"         // KIWI-UX ROUND BD: the UV editor (fourth tab of it)
+#include "kiwi_sun.h"              // KIWI-UX: the Sun helper tab (fifth tab of that node)
 #include "kiwi_cmdoptions.h"       // KIWI-UX ROUND AI, ITEM 3: the in-command options panel
 #include "kiwi_import.h"           // KIWI-UX ROUND BE: the texture-import wizard (modal popup)
 #include "kiwi_launch.h"           // KIWI-UX ROUND BF: the Build & Run dialog + its child poll
+#include "kiwi_texgrave.h"         // the deferred-release graveyard (D-BU-A..E)
 #include "radiant_registry.h"      // KIWI-UX (CLEANUP, C-7): Radiant_IniPath — <exedir>\…
+#include <universal/profile.h>
+#include "kiwi_viewdirty.h"        // the 2D-view dirty-flag skip
 #include <unordered_set>
 #include <unordered_map>
 #include <string>
@@ -79,7 +83,7 @@ static const char *DockIniPath()
     return s_path;
 }
 
-extern int Sys_Printf( const char *fmt, ... );   // win_qe3.cpp:112
+extern int Sys_Printf( const char *fmt, ... );   // win_qe3.cpp:118
 
 // ── KIWI-UX (CLEANUP, C-9): retire the previous versions' dock inis ────────────
 // The layout-migration mechanism is "change the filename", so every superseded
@@ -214,6 +218,9 @@ void ImGuiShell_FocusTab( const char *title )
 // lag on resize, imperceptible). The console (an EDIT control) is still a native child.
 extern void CamWnd_RenderToRT( int w, int h );   // camwnd.cpp
 extern void XYWnd_RenderToRT( int w, int h );    // xywnd.cpp
+// the non-drawing half of an XY tick, owed even when the
+// dirty gate skips the render.
+extern void XYWnd_TickSkipped( int w, int h );   // xywnd.cpp:4162
 extern void ZWnd_RenderToRT( int w, int h );     // z.cpp
 extern void TexWnd_RenderToRT( int w, int h );   // texwnd.cpp
 
@@ -507,10 +514,10 @@ static void ImGuiShell_ViewportInput( rttViewport_t id, bool hovered )
         // the image's hover — correct for its own purpose, and exactly what lets a UV
         // editor drag "hover" the 3D view.  The chain then was:
         //   VP_Move -> CamWnd_OnMouseMove -> CamWnd_MouseMoved( MK_RBUTTON, .. )
-        //     -> CamWnd_PositionDrag (camera_mode 1, the stock pref, camwnd.cpp:3961)
-        //        -> SetCursorPos( m_ptCursor ) + ShowCursor( FALSE )   camwnd.cpp:3980
+        //     -> CamWnd_PositionDrag (camera_mode 1, the stock pref, camwnd.cpp:4098)
+        //        -> SetCursorPos( m_ptCursor ) + ShowCursor( FALSE )   camwnd.cpp:4117
         // every tick of the drag, and the ONLY restore is Cam_MouseUp's
-        // ShowCursor(TRUE)-until-visible loop (camwnd.cpp:3899), which runs from VP_Up —
+        // ShowCursor(TRUE)-until-visible loop (camwnd.cpp:4032), which runs from VP_Up —
         // which needs s_inputOwner == this viewport, which was never set.  So the
         // ShowCursor counter stayed deeply negative and the cursor was gone APP-WIDE.
         //
@@ -663,7 +670,7 @@ static void ImGuiShell_ReleaseViewportInput()
         if ( id == RTT_CAMERA )
         {
             // Camera only: NEVER VP_Up here.  CamWnd_OnRButtonUp pops the classic
-            // context menu (camwnd.cpp:3443) — the same reason
+            // context menu (camwnd.cpp:3568) — the same reason
             // ImGuiShell_AbortViewportInput routes the camera around VP_Up.
             if ( KiwiVP_CameraButtonUp( b, mx, my ) )
                 released = true;
@@ -863,8 +870,8 @@ static void ImGuiShell_DrawViewportImage( rttViewport_t id, kiwiWindow_t win )
         // TexWnd_RenderToRT repaints every authorized frame.
         if ( id == RTT_TEXTURE )
         {
-            extern LRESULT Texture_ShowAll();     // texwnd.cpp (0x45b730), as radiant_main.cpp:76
-            extern LRESULT Texture_ShowInuse();   // texwnd.cpp (0x45B850), as map.cpp:145
+            extern LRESULT Texture_ShowAll();     // texwnd.cpp (0x45b730), as radiant_main.cpp:77
+            extern LRESULT Texture_ShowInuse();   // texwnd.cpp (0x45B850), as map.cpp:163
             ImGui::AlignTextToFramePadding();
             ImGui::TextUnformatted( "Show:" );
             ImGui::SameLine();
@@ -1125,11 +1132,12 @@ static void ImGuiShell_DrawConsoleTab( HWND child )
 // compositing frame's scene bracket). Uses the sizes recorded by last frame's images.
 void ImGuiShell_RenderViewportsToRT()
 {
+    PROF_SCOPED( "RenderViewportsToRT" );
     if ( !s_primary )
         return;
     // KIWI-UX (ROUND AB, ITEM 1): NEVER build a scene while the device is lost or awaiting
     // reset.  The recovery this defers to is the compositing WM_PAINT's
-    // R_SetupRendertarget_CheckDevice → R_TestDevice (radiant_main.cpp:197), whose active
+    // R_SetupRendertarget_CheckDevice → R_TestDevice (radiant_main.cpp:198), whose active
     // render target is the window backbuffer — the reset path that already works.  Letting
     // the loop run instead means R_IssueRenderCommands' own R_CheckLostDevice
     // (r_rendercmds.cpp:278) runs the FULL R_RecoverLostDevice → R_ResetDevice cascade from
@@ -1146,15 +1154,36 @@ void ImGuiShell_RenderViewportsToRT()
     // (b) the flag is checked here as well, so even a stale size can never resurrect a
     // hidden viewport.  The CAMERA has no flag — it is always rendered.
     CamWnd_RenderToRT( s_cellW[RTT_CAMERA],  s_cellH[RTT_CAMERA] );
+    // The 2D views render only when dirty: when the gate says "clean" the RTT keeps its last
+    // texture and the ImGui::Image below samples it as always.  Every uncertain answer is
+    // "render" (kiwi_viewdirty.h), and a CLOSED view is marked dirty so reopening it can never
+    // show a stale frame.  The CAMERA stays every-tick; the texture view is left alone.
     if ( KiwiWindows_IsOpen( KIWI_WIN_XY ) )
-        XYWnd_RenderToRT ( s_cellW[RTT_XY],      s_cellH[RTT_XY] );
+    {
+        if ( KiwiViewDirty_ShouldRender( KIWI_DIRTYVIEW_XY, s_cellW[RTT_XY], s_cellH[RTT_XY] ) )
+            XYWnd_RenderToRT ( s_cellW[RTT_XY],      s_cellH[RTT_XY] );
+        else
+            XYWnd_TickSkipped( s_cellW[RTT_XY],      s_cellH[RTT_XY] );
+    }
+    else
+    {
+        KiwiViewDirty_Mark( KIWI_DIRTYVIEW_XY );
+    }
     if ( KiwiWindows_IsOpen( KIWI_WIN_Z ) )
-        ZWnd_RenderToRT  ( s_cellW[RTT_Z],       s_cellH[RTT_Z] );
+    {
+        if ( KiwiViewDirty_ShouldRender( KIWI_DIRTYVIEW_Z, s_cellW[RTT_Z], s_cellH[RTT_Z] ) )
+            ZWnd_RenderToRT  ( s_cellW[RTT_Z],       s_cellH[RTT_Z] );
+    }
+    else
+    {
+        KiwiViewDirty_Mark( KIWI_DIRTYVIEW_Z );
+    }
     if ( KiwiWindows_IsOpen( KIWI_WIN_TEXTURE ) )
         TexWnd_RenderToRT( s_cellW[RTT_TEXTURE], s_cellH[RTT_TEXTURE] );
+    KiwiViewDirty_EndTick();
 
     // KIWI-UX (ROUND AV, ITEM 3): the entity-browser model thumbnails.  LAST, and inside
-    // this function rather than beside its call site (radiant_main.cpp:937), so it
+    // this function rather than beside its call site (radiant_main.cpp:938), so it
     // inherits both gates above for free — the `!s_primary` early-out and, far more
     // importantly, the round-AB `RTT_DeviceHealthy()` one.  It renders AT MOST ONE
     // thumbnail, only when the browser asked for one on the previous frame; with a warm
@@ -1294,6 +1323,15 @@ static void ImGuiShell_BuildDefaultDockLayout( ImGuiID dockId )
     // with it so an existing profile actually rebuilds and sees this line.
     ImGui::DockBuilderDockWindow( "UV editor",        rightBottom );
 
+    // ── KIWI-UX: the SUN HELPER, fifth of the same node ──────────────────────
+    // USER REPORT, verbatim: "where is the add menu?  I can't see it.  You need to
+    // do a tab like the skybox helper."  Same one-line mechanism the round-AU block
+    // above states — the same node id makes it a TAB, not a split — and
+    // KIWI_LAYOUT_VERSION went to 12 with it, which is the half that makes this line
+    // run at all for an install that already has a dock ini (kiwi_sun.h "THE DOCK
+    // TAB IS THE DISCOVERY SURFACE").
+    ImGui::DockBuilderDockWindow( "Sun",              rightBottom );
+
     ImGui::DockBuilderFinish( dockId );
 }
 
@@ -1331,6 +1369,8 @@ void ImGuiShell_DrawOverlay( IDirect3DDevice9 *device, HWND activeHwnd )
     s_beginFrame = false;
     s_device = device;               // for the opaque-image draw callback
 
+
+
     if ( !s_shellInited )
     {
         IMGUI_CHECKVERSION();
@@ -1357,6 +1397,14 @@ void ImGuiShell_DrawOverlay( IDirect3DDevice9 *device, HWND activeHwnd )
         // the user like the layout resetting itself.  radiant_registry.h:3-5 already
         // settles this: editor settings live NEXT TO THE EXE.
         io.IniFilename = DockIniPath();
+                                              // (bumped 11 -> 12 so the SUN tab
+                                              // actually appears as a fifth tab of
+                                              // that node for an existing install.
+                                              // Reported as "I can't see it" against
+                                              // a long-lived layout, which is this
+                                              // mechanism's entire purpose.)
+                                              // (ROUND BD bumped 10 -> 11 for the
+                                              // UV EDITOR, fourth tab of the same node.)
                                               // (ROUND AZ): bumped 9 -> 10 so the
                                               // SKY tab actually appears as a third tab
                                               // beside Textures and Entities for an
@@ -1409,6 +1457,14 @@ void ImGuiShell_DrawOverlay( IDirect3DDevice9 *device, HWND activeHwnd )
         ImGui_ImplWin32_Init( activeHwnd );
         s_backendHwnd = activeHwnd;
     }
+
+    // THE ONE DRAIN POINT, and it must stay HERE: after every early-out above (so it cannot
+    // run on a tick that renders nothing) and before NewFrame (so nothing this frame has
+    // recorded an ImTextureID yet).  Everything queued was retired during the PREVIOUS frame's
+    // UI build and presented by its WM_PAINT, so this is the first instant a release is safe.
+    // ABOVE `s_inFrame = true` deliberately: `s_beginFrame` was consumed at the top, so a
+    // paint this drain pumps (Image_Reload can Com_Error) returns at that gate instead.
+    KiwiTexGrave_Drain();
 
     s_inFrame = true;
     ImGui_ImplDX9_NewFrame();
@@ -1515,6 +1571,12 @@ void ImGuiShell_DrawOverlay( IDirect3DDevice9 *device, HWND activeHwnd )
     // viewport images; it sits here to keep the four tabs of one dock node adjacent in
     // this function as well as on screen.
     KiwiUvEd_Draw();
+    // KIWI-UX: the SUN HELPER dock window — same contract again (Begins/Ends itself,
+    // early-outs on its §9 flag).  Its body is plain ImGui items with no canvas and no
+    // drag gesture, so like the Sky tab it carries no ordering constraint against the
+    // viewport images; it sits here to keep the five tabs of one dock node adjacent in
+    // this function as well as on screen.
+    KiwiSun_Draw();
     // KIWI-UX (ROUND BE): the TEXTURE IMPORT WIZARD.  Not a dock window — a MODAL POPUP
     // that exists only while the dropped-file queue is non-empty, which is why this round
     // adds no kiwiWindow_t row and does NOT bump KIWI_LAYOUT_VERSION.  It draws at
@@ -1547,8 +1609,11 @@ void ImGuiShell_DrawOverlay( IDirect3DDevice9 *device, HWND activeHwnd )
     // frame and before the next one, so the one-frame "just opened" latch is correct.
     KiwiWindows_CommitPending();
 
-    ImGui::Render();
-    ImGui_ImplDX9_RenderDrawData( ImGui::GetDrawData() );   // main viewport (this surface)
+    {
+        PROF_SCOPED( "ImGui render" );
+        ImGui::Render();
+        ImGui_ImplDX9_RenderDrawData( ImGui::GetDrawData() );   // main viewport (this surface)
+    }
     s_frameRendered = true;   // gates ImGuiShell_RenderPlatformWindows (see below)
     // The extra platform windows (popped-out panels) are NOT rendered here — each does its
     // own BeginScene/EndScene/Present, which must not nest inside the frame's scene bracket
@@ -1620,6 +1685,10 @@ void ImGuiShell_InvalidateDeviceObjects()
 {
     if ( s_shellInited )
         ImGui_ImplDX9_InvalidateDeviceObjects();
+    // Nothing app-owned may sit in the graveyard across the Reset() that follows.  RELEASES
+    // ONLY: a lost device cannot create Image_Reload's replacement texture.  Unconditional and
+    // idempotent — it tolerates the double call the INVALIDCALL second-chance arm makes.
+    KiwiTexGrave_ReleaseForReset();
 }
 
 // Camera-window message hook (CCamWnd::WindowProc). Returns true when ImGui
@@ -1655,7 +1724,7 @@ bool ImGuiShell_HandleMessage( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam
     // ActiveId (the comment at imgui.cpp:5612).  Result: for the entire duration of any
     // click or drag in the 3D view, io.WantCaptureKeyboard was true and this returned
     // true for every WM_KEY*, which killed the frame WndProc's own hotkey arm
-    // (radiant_main.cpp:232-238 `case WM_KEYDOWN: Radiant_TryHotkey`) — the arm that is
+    // (radiant_main.cpp:233-239 `case WM_KEYDOWN: Radiant_TryHotkey`) — the arm that is
     // the ONLY hotkey path whenever a nested modal loop (a viewport context menu,
     // DialogBoxParamA, MessageBoxA) is pumping instead of Radiant_RunMessageLoop, since
     // those loops never call Radiant_PreTranslateMessage.

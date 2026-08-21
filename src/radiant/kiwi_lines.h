@@ -113,7 +113,7 @@ void KiwiTris_OrientToEye( const float *xyz, int stride,
 //   -> depth test LESSEQUAL, depth write OFF, cull BACK, SrcAlpha/InvSrcAlpha.
 // The pixel shader of that family is
 //     rgb = lerp( sample(colorMap) * vertexColour, materialColor.rgb, materialColor.w )
-// (r_rendercmds.cpp:1927-1946, measured, not guessed), and its VERTEX stage is
+// (r_rendercmds.cpp:1947-1966, measured, not guessed), and its VERTEX stage is
 // the "shaded" half of the name: r_shade.cpp:366-372 records that a zeroed def
 // constant "NaNs the FAKELIGHT VERTEX COLOUR", i.e. the vertex colour this
 // pixel shader receives has already been modulated by a term the vertex shader
@@ -134,13 +134,13 @@ void KiwiTris_OrientToEye( const float *xyz, int stride,
 // THE RULE, therefore: a translucent overlay fill wants CONSTANT brightness, so
 // its normal must be a CONSTANT — and the constant that maximises an up-lit term
 // is world +Z.  This is also what the BINARY does: Face_AddWindingToTriBatch
-// (brush.cpp:5915-5917, 0x47b86a), the ported selected-face fill's own batcher,
+// (brush.cpp:5924-5926, 0x47b86a), the ported selected-face fill's own batcher,
 // writes a fixed WORLD normal per vertex (the face plane's) and never a camera
 // vector.  The kiwi layer's `-vpn` was invented by this port.
 //
 // WHY NOT MATERIAL_COLOR WITH .w = 1 (the other way to be immune).  That is what
 // the editor's LINE batches do — Ed_EmitLineBatch pushes a per-colour-run
-// MATERIAL_COLOR with w == 1 (r_rendercmds.cpp:1940-1975), which lerps the whole
+// MATERIAL_COLOR with w == 1 (r_rendercmds.cpp:1960-1995), which lerps the whole
 // vertex term away, and it is exactly why the OUTLINES in this layer never
 // showed any of this and the FILLS did.  It is refused here because .w is the
 // lerp weight and the fills need per-vertex ALPHA: whether this shader's alpha
@@ -228,7 +228,7 @@ inline void KiwiTris_FillNormal( float *out )
 // alpha 0.22, whose colour is then multiplied by 0.32 as well, is nothing.
 //
 // SO THE FIX IS THE ROUTE THE LINES TOOK.  Ed_EmitLineBatch pushes a per-colour-
-// run MATERIAL_COLOR with .w == 1 (r_rendercmds.cpp:1940-1975), a FLAT COLOUR
+// run MATERIAL_COLOR with .w == 1 (r_rendercmds.cpp:1960-1995), a FLAT COLOUR
 // OVERRIDE that lerps the sampled term entirely away — which is exactly why the
 // outlines in this layer never showed any of this and the fills did.  This
 // helper is that push, spelled once.

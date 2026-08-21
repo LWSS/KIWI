@@ -25,10 +25,10 @@
 
 // ── ported entry points (each verified against its definition) ──────────────
 extern int  Sys_Printf( const char *fmt, ... );                        // win_qe3.cpp
-extern void Select_Deselect( int bAlsoFreeFaces );                     // select.cpp:1445 (0x48E800)
+extern void Select_Deselect( int bAlsoFreeFaces );                     // select.cpp:1444 (0x48E800)
 extern void Select_Brush( selbrush_t *brush, char some_overwrite,
                           char bStatus, char center_grid_on_selection ); // select.cpp:884
-extern void Radiant_ExecCommand( unsigned int cmdId );                 // mainfrm.cpp:4083
+extern void Radiant_ExecCommand( unsigned int cmdId );                 // mainfrm.cpp:4054
 
 namespace
 {

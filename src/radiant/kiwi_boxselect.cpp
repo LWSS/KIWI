@@ -37,6 +37,7 @@
 #include "kiwi_pick.h"
 #include "kiwi_region.h"             // ROUND K — regions are clickable + extrudable
 #include "kiwi_selection.h"
+#include "kiwi_sun.h"                // the sun helper's glyph is clickable
 
 #include <math.h>
 #include <stdlib.h>                  // abs
@@ -47,7 +48,7 @@
 // (included above) declares both display-list sentinels, and the local copy also
 // cited map.cpp, which is itself only an extern.
 extern int        g_nUpdateBits;     // 0x25D5A74 (mainfrm.cpp)
-// ROUND AG: camwnd.cpp:151 camera_s *Ed_Camera(); :162 void CamWnd_BuildMatrix();
+// camwnd.cpp:157 camera_s *Ed_Camera(); :162 void CamWnd_BuildMatrix();
 extern camera_s  *Ed_Camera();
 extern void       CamWnd_BuildMatrix();
 
@@ -686,6 +687,32 @@ namespace
         {
             ClickSelectLinesOnly( imgX, imgY, shift );
             return;
+        }
+
+        // ── KIWI-UX: THE SUN HELPER'S GLYPH IS CLICKABLE ────────────────────
+        // FIRST, above everything: the glyph is an aimed-at SCREEN target inside
+        // KSUN_PICK_PIX (kiwi_sun.h), the same class of thing as a vertex or the
+        // section ball, and it sits an orbit radius outside the map where no brush
+        // competes for the pixel.  A hit takes the WHOLE click and leaves the brush
+        // and construction selections exactly as they were — "I clicked the sun" is
+        // not a statement about brushes, which is the ruling the construction and
+        // region arms below already make for themselves.
+        //
+        // Shift and Ctrl are excluded: both are selection-BUILDING modifiers here,
+        // and there is exactly one sun, so there is nothing to accumulate or toggle
+        // it into.  They fall through to the ordinary grammar untouched.
+        if ( !shift && !ctrl )
+        {
+            if ( KiwiSun_GlyphHit( imgX, imgY ) )
+            {
+                KiwiSun_Select();
+                g_nUpdateBits |= ( W_CAMERA | W_XY | W_Z );
+                return;
+            }
+            // A plain click that did NOT land on the glyph drops the sun
+            // selection, the same way it drops the other three below.  Four
+            // selections, one click grammar.
+            KiwiSun_ClearSelection();
         }
 
         ray_t ray;

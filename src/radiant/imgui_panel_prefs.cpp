@@ -64,7 +64,7 @@ struct prefsDlgState_t
     // Checkboxes (BOOL).
     BOOL bLoadLast, bFace, bRightClick, bAutoSave, bLoadLastMap, bTexSubset;
     BOOL bSnapshots, bLoseChanges, bCamXYUpdate, bUseWheel, bAltAlwaysMove;
-    BOOL bSnapTGrid, bLinkKeepSel, bPaintSizing, bCullSky, bDontClamp;
+    BOOL bSnapTGrid, bLinkKeepSel, bPaintSizing, bDontClamp;
     BOOL bTexToolbar;
     BOOL bChaseMouse, bTexScrollbar, bThickLines, bColoredEnts, bTexBrush2d;
     BOOL bTexMesh2d, bFast2dDrag, bDetachWin, bTransBg;
@@ -81,8 +81,8 @@ struct prefsDlgState_t
 // any header yet (prefsDlgState_t is still local to prefs.cpp). Verified non-static at
 // prefs.cpp:369 and prefs.cpp:419. Everything else the dialog owns is HWND-side
 // (DoDataExchange, the CFileDialog browse handlers, OnSetGamePrefs), so nothing else is bound.
-extern void PrefsDlg_Gather( const prefData_t *p, prefsDlgState_t &out );        // prefs.cpp:362
-extern void Prefs_ApplyFromDialogState( prefData_t *p, const prefsDlgState_t &st ); // prefs.cpp:412
+extern void PrefsDlg_Gather( const prefData_t *p, prefsDlgState_t &out );        // prefs.cpp:353
+extern void Prefs_ApplyFromDialogState( prefData_t *p, const prefsDlgState_t &st ); // prefs.cpp:402
 
 // ── panel state ───────────────────────────────────────────────────────────────
 static bool s_showPrefs = false;
@@ -260,7 +260,6 @@ void ImGuiPanel_Prefs_Draw()
             const prefCheck_t items[] =
             {
                 { "Update XY on drag", &s_state.bCamXYUpdate },   // 1223
-                { "Cull sky on clip",  &s_state.bCullSky     },   // 1517
             };
             PP_CheckGrid( "##prefscam", items, (int)( sizeof( items ) / sizeof( items[0] ) ) );
         }

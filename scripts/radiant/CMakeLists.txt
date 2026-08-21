@@ -1,9 +1,6 @@
 message("----- KIWI Radiant -----")
 
-# Phase 4 / U-RIP: MFC is DELETED from the tree — there is no MFC shell and no
-# CMAKE_MFC_FLAG any more. The editor is plain Win32 + kisak_mfc_shim.h (which
-# supplies the CString/CStringList/CMap/CFile compat types the faithful port uses).
-# /MT stays (static CRT, set below) — that is independent of MFC.
+# No MFC: plain Win32 + kisak_mfc_shim.h (CString/CStringList/CMap/CFile compat types).
 
 project(KIWI-Radiant)
 
@@ -63,25 +60,61 @@ add_executable(${PROJECT_NAME} WIN32
     ${IMGUI_SRCS}
 )
 
+# Tracy — same FetchContent client the mp/sp/dedi targets use.
+include(${SCRIPTS_DIR}/extern/tracy.cmake)
+
 # KISAK_RADIANT guards all editor additions.
 # _MBCS / not UNICODE: the binary was built ANSI; all decompiled code is char*.
 target_compile_definitions(${PROJECT_NAME} PUBLIC
     KISAK_RADIANT
-    # KISAK_NO_MFC is now UNCONDITIONAL and TRANSITIONAL: MFC is gone, but U-RIP-2 is
-    # still stripping the last `#ifdef KISAK_NO_MFC` guards out of src/radiant. The
-    # define keeps those already-stripped-elsewhere TUs on the (only) Win32 path until
-    # the final guard is removed — at which point this line gets deleted too.
+    # TRANSITIONAL: deleted once the last `#ifdef KISAK_NO_MFC` guard leaves src/radiant.
     KISAK_NO_MFC
     WIN32
     _WINDOWS
     _MBCS
     # Radiant edits SP maps; use SP entity count so q_shared.h MAX_GENTITIES resolves
     MAX_GENTITIES=2176
+    # Radiant always profiles; profile.h #errors on TRACY_ENABLE without TRACY_ON_DEMAND.
+    TRACY_ENABLE
+    TRACY_ON_DEMAND
+    TRACY_ONLY_LOCALHOST
 )
 
 # Compile flags — match the SP/MP builds (/MT static CRT, as the original binary used)
 set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /MT /O2 /Ot /MP4 /W3 /Z7 /permissive-")
 set(CMAKE_CXX_FLAGS_DEBUG   "${CMAKE_CXX_FLAGS_DEBUG}   /MTd /Od /MP4 /W3 /Z7 /permissive-")
+
+# Debug builds compile the per-vertex / per-triangle render TUs at /O2.  cl.exe rejects
+# /RTC1 together with /O2 (D8016) and CMake cannot remove a flag per source, so /RTC1 is
+# stripped from this directory's Debug flags.  -DKIWI_RADIANT_DEBUG_FAST_HOT=OFF restores both.
+option(KIWI_RADIANT_DEBUG_FAST_HOT
+       "Radiant Debug: compile the proven-hot render TUs at /O2 (requires dropping /RTC1)" ON)
+
+if(KIWI_RADIANT_DEBUG_FAST_HOT)
+    # Directory-scoped: scripts/mp, scripts/dedi and scripts/cod4map are separate
+    # add_subdirectory() scopes and keep their own flags untouched.
+    string(REPLACE "/RTC1" "" CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG}")
+    string(REPLACE "/RTC1" "" CMAKE_C_FLAGS_DEBUG   "${CMAKE_C_FLAGS_DEBUG}")
+
+    # Leaf per-element loops only.  Editor LOGIC (brush.cpp, camwnd.cpp, entity.cpp,
+    # pmesh.cpp) stays at /Od so it remains steppable.
+    set(KIWI_RADIANT_DEBUG_HOT_SRCS
+        "${SRC_DIR}/radiant/r_ed_scene.cpp"
+        "${SRC_DIR}/radiant/kiwi_instcache.cpp"
+        "${SRC_DIR}/radiant/kiwi_modelcache.cpp"
+        "${SRC_DIR}/radiant/shadowvolume.cpp"
+        "${SRC_DIR}/radiant/kiwi_shadowcache.cpp"
+        "${SRC_DIR}/radiant/kiwi_walkcache.cpp"
+        "${SRC_DIR}/radiant/kiwi_surfcache.cpp"
+        "${SRC_DIR}/gfx_d3d/rb_backend.cpp"
+        "${SRC_DIR}/gfx_d3d/r_xsurface.cpp"
+        "${SRC_DIR}/gfx_d3d/r_shade.cpp"
+        "${SRC_DIR}/universal/com_math.cpp"
+    )
+    # Per-source options are appended AFTER the configuration flags, so /O2 wins.
+    set_source_files_properties(${KIWI_RADIANT_DEBUG_HOT_SRCS} PROPERTIES
+        COMPILE_OPTIONS "$<$<CONFIG:Debug>:/O2;/Ob2;/Oi;/Ot>")
+endif()
 
 # Warnings as Errors
 target_compile_options(${PROJECT_NAME} PRIVATE /we4700) # Uninit'd variable used in logic
@@ -93,6 +126,10 @@ set_property(TARGET ${PROJECT_NAME} PROPERTY
 # x86 / Win32
 set(CMAKE_GENERATOR_PLATFORM "Win32")
 target_link_options(${PROJECT_NAME} PRIVATE /machine:x86)
+
+# mp_backlot exhausts the 2 GB user address space without this (the 128 KB malloc in
+# XModelReadSurface_BuildCollisionTree fails).  Radiant target only.
+target_link_options(${PROJECT_NAME} PRIVATE /LARGEADDRESSAWARE)
 
 
 # PDB for Release

@@ -151,9 +151,9 @@ extern bool g_radiantFirstLightRendererReady;
 // Each registers its own window class on first use and returns a WS_CHILD|WS_VISIBLE view
 // parented to `parent`.  The CALLER owns the g_qeglobals.d_hwnd* registration and the
 // creation ORDER — see the caller-obligation comment block at the head of each raw shell
-// (xywnd.cpp:4595, camwnd.cpp:3966, z.cpp:750, texwnd.cpp:2283) and the boot table in
+// (xywnd.cpp:4597, camwnd.cpp:4103, z.cpp:752, texwnd.cpp:2285) and the boot table in
 // radiant_main.cpp.
-HWND XYWnd_CreateRaw ( HWND parent, int x, int y, int w, int h );   // xywnd.cpp:4694
-HWND CamWnd_CreateRaw( HWND parent, int x, int y, int w, int h );   // camwnd.cpp:4073
-HWND ZWnd_CreateRaw  ( HWND parent, int x, int y, int w, int h );   // z.cpp:814
-HWND TexWnd_CreateRaw( HWND parent, int x, int y, int w, int h );   // texwnd.cpp:2364
+HWND XYWnd_CreateRaw ( HWND parent, int x, int y, int w, int h );   // xywnd.cpp:4696
+HWND CamWnd_CreateRaw( HWND parent, int x, int y, int w, int h );   // camwnd.cpp:4224
+HWND ZWnd_CreateRaw  ( HWND parent, int x, int y, int w, int h );   // z.cpp:816
+HWND TexWnd_CreateRaw( HWND parent, int x, int y, int w, int h );   // texwnd.cpp:2366

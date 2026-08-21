@@ -12,7 +12,8 @@
 //   * SNAP_FACE_CENTER                 (arm 4b) — now PRODUCED, brush faces only
 //   * a RELATIVE base direction for SNAP_ANGLE (arm 7)
 // V5 (ROUND P) adds SNAP_AXIS — arm 4c, documented below and produced at
-// kiwi_snap.cpp:1723.  KIWI-UX (CLEANUP, A-4)   // KIWI-UX (ROUND BQ): re-cited
+// kiwi_snap.cpp:1981.  KIWI-UX (CLEANUP, A-4)   // KIWI-UX (ROUND BQ): re-cited
+// (re-cited again — arms 4c/5b moved the line.)
 //
 // ── THE RANKING THIS FILE IMPLEMENTS (spec §6: point > line > area > grid) ────
 // For a cursor ray, in order — each arm gated by its OWN pixel radius:
@@ -22,7 +23,9 @@
 //      PLANAR PLACER's plane hit while one runs (a rect/circle/arc/n-gon or a §16b
 //      primitive must place on its own plane even with snapping off — ROUND BS),
 //      else the surface hit if the ray hits geometry, else the ray∩Z=0
-//      ground-plane point, else a point KSNAP_FALLBACK_DIST down the ray.  `valid`
+//      ground-plane point, else the ray ∩ the VIEW-ALIGNED plane through the
+//      drawing tool's last point — KSNAP_FALLBACK_DIST down the ray when there is
+//      no such point (see kiwi_snap.h ladder).  `valid`
 //      is still true — "no snap" is an answer, not a failure.  NOTE THE LABEL:
 //      KiwiSnap_TypeName(SNAP_NONE) is the string **"off"** — it means "snapping
 //      is not engaged", it has never meant "refused", and a transform shows it
@@ -80,6 +83,11 @@
 //      Competes with arm 5 on pixel distance (see below) and, like it, is a LINE
 //      rank — so every POINT snap above still wins.  Full argument on
 //      KiwiSnap_DrawAxisGuides below.
+//      …plus the EXTENSION axes — the DIRECTION of whatever the
+//      anchor is sitting on (an existing construction segment, or a brush edge the
+//      anchor landed on), which makes "keep going along that line" a snap the same
+//      way the world triple makes "keep going up" one.  Same rank, same guide, same
+//      pixel competition; FREE tools only, and capped at KSNAP_MAX_EXT_AXES.
 //
 //   5. LINE — SNAP_EDGE  →  the closest point on the nearest LINE candidate
 //      within PICK_EDGE_PIXELS (6 px).  Two sources compete here and the smaller
@@ -88,6 +96,19 @@
 //      edge that would have been picked) and a construction segment.  `source` is
 //      a null item for the construction case — construction geometry has no
 //      sel_item_t (kiwi_construct.h scope ruling 1).
+//
+//   5b. SNAP_ANGLE —   THE 15° STOPS FOR THE **FREE** TOOLS
+//      (line / polyline / spline), which have had none since round BS moved arm 7
+//      behind `haveCPlane`.  The stops are measured in the CANONICAL bearing basis
+//      (KiwiCon_BearingBasis) of the plane THIS FRAME'S POINT WAS RESOLVED ONTO
+//      (snap_result_t::havePlane below) — the same plane the HUD readout and the
+//      Tab "angle" field measure in, so the lock and the number agree by
+//      construction.  A CAPTURE BAND, not a quantiser (D-AG20): outside the band
+//      the point passes through untouched and a 37° chain is still drawable.
+//      Ranked exactly where arm 7 sits for a planar placer — under every NAMED
+//      geometry snap and over the area/grid arms — because SNAP_FACE names no
+//      feature and is precisely what a stop is entitled to refine.  The full
+//      argument, the band arithmetic and the opt-in verification are on the arm.
 //
 //   6. AREA — SNAP_FACE  →  the ported Test_Ray surface hit, UNSNAPPED.  §6 ranks
 //      area above grid, and a surface point is what "put it on that face" means.
@@ -102,7 +123,8 @@
 //      an area hit on some other surface would be projected onto the tool's plane
 //      and land under the wall instead of under the cursor.
 //
-//   7. SNAP_ANGLE  →  PLANAR PLACERS only (ROUND BS), and only once the tool has
+//   7. SNAP_ANGLE  →  PLANAR PLACERS only (ROUND BS — the FREE tools' stops are
+//      arm 5b above), and only once the tool has
 //      an anchor
 //      (its last placed point).  The cplane point's direction from that anchor is
 //      quantised to KCON_ANGLE_STEP (15°) IN PLANE, keeping the distance.  Ranked
@@ -129,7 +151,9 @@
 //   9. GRID on the GROUND PLANE  →  nothing under the cursor and no planar placer
 //      running: intersect the ray with Z=0 (the §17 ground grid, which is the
 //      drawn snap target) and snap that.  A ray that never crosses Z=0 (parallel,
-//      or pointing away) falls back to KSNAP_FALLBACK_DIST down the ray, snapped.
+//      or pointing away) falls back to the VIEW-ALIGNED plane through the drawing
+//      tool's last point — KSNAP_FALLBACK_DIST down the ray when there is none —
+//      snapped (see kiwi_snap.h ladder).
 //      ROUND BS: this is the user's "the world ground" — the last resort, and the
 //      only "plane" left anywhere in placement.
 //
@@ -162,6 +186,10 @@
 // skip Test_Ray, the area ones skip the screen scan).  KIWI-UX (CLEANUP, A-5).  Budget is one query per frame, same as the hover pick.  The shakeout-F
 // relative-angle arm additionally walks brush edges near the tool ANCHOR, whole-
 // brush bbox-rejected first and hard-capped at KSNAP_MAX_ANCHOR_EDGES.
+// Arm 4c takes that SAME walk while a FREE drawing tool has an
+// anchor, to collect the extension directions — one function (GatherAnchorDirs)
+// with two orderings, not a second scan, and the planar/free split makes the two
+// readers mutually exclusive so no query ever runs it twice.
 // ─────────────────────────────────────────────────────────────────────────────
 
 #include "kiwi_pick.h"
@@ -298,6 +326,21 @@ struct snap_result_t
     snap_type_t type        = SNAP_NONE;
     float       position[3] = { 0.0f, 0.0f, 0.0f };
     sel_item_t  source;             // what we snapped to (marker + label); null for grid
+    // ── THE WORKING PLANE THIS RESOLUTION USED ───────────────────────────────
+    // The resolution always lands the cursor on SOME surface before the ranked
+    // arms run (KiwiSnap_Query, where `raw` is decided): the planar placer's own
+    // plane, else the face under the cursor, else world ground z=0, else — when
+    // the ray crosses none of those, which is every ray in a SIDE ortho view
+    // aimed at the void — the VIEW-ALIGNED plane through the drawing tool's last
+    // point.  That last one is vertical in a side view, and a bearing measured
+    // against any other plane is then perpendicular to the segment by
+    // construction: dv is 0 and atan2 pins to 0/180 whatever the cursor does.
+    //
+    // So it is reported: the plane a bearing for this frame's point means
+    // anything in.  Set on every answering path including the geometry snaps,
+    // which name a point rather than a surface and inherit the frame's plane.
+    bool        havePlane      = false;
+    float       planeNormal[3] = { 0.0f, 0.0f, 1.0f };   // unit
 };
 
 // KIWI-UX (CLEANUP, SnapActive): "did this query land on anything at all".
@@ -492,8 +535,10 @@ bool KiwiSnap_Query( const ray_t &ray, int imgX, int imgY, snap_result_t *out,
 //   2. ELSE THE RAY'S SURFACE HIT ON GEOMETRY — arm 6, the Test_Ray point on the
 //      brush face or patch under the cursor, verbatim and unsnapped.
 //   3. ELSE THE WORLD GROUND, z = 0, GRID-SNAPPED — arm 9.  Not a system, not a
-//      plane object, not state: the floor.  (A ray that never crosses z = 0 falls
-//      back KSNAP_FALLBACK_DIST down itself so there is always an answer.)
+//      plane object, not state: the floor.  (A ray that never crosses z = 0 — a
+//      SIDE ortho view — falls back to the VIEW-ALIGNED plane through the drawing
+//      tool's last point, and to KSNAP_FALLBACK_DIST down itself when there is no
+//      such point, so there is always an answer.  )
 // The ONLY exception is a PLANAR PLACER — rect / circle / arc / n-gon and the §16b
 // primitives — whose SHAPE cannot exist off a plane: between 1 and 2 they take
 // their own plane's hit (arms 7-8), and they derive that plane from the FIRST
@@ -601,6 +646,37 @@ float KiwiSnap_RingPixels();        // KSNAP_RING_PIX   — the separated ring
 //     we already have and it still works — it is now the SECOND way to go vertical,
 //     with aiming at the guide being the first.  Both are advertised in the tool's
 //     HUD.
+//
+// ── THE EXTENSION AXES JOIN THE SAME CANDIDATE SET ───────
+// USER REPORT, verbatim: *"it needs to be able to snap to whichever
+// existing/starting plane the line/point occupies as well (see pic2).  Make this
+// also work with edges of solids."*
+//
+// Plasticity's picker does not have a separate "extension" mechanism either: the
+// LAST PICKED SNAP contributes its OWN axes at the anchor —
+// `work = work.concat(lastSnap.additionalSnapsFor(last.point))`, each
+// PointAxisSnap of which goes through `addAxis`
+// (plasticity/src/command/point-picker/PointPickerModel.ts:122-127) — and for a
+// curve ENDPOINT that contribution is the TANGENT
+// (`get tangentSnap() { … new PointAxisSnap("Tangent", tangent, this.position) }`,
+// plasticity/src/editor/snaps/Snaps.ts:100-105; added explicitly for a
+// CurveEndPointSnap in `activateSnapped`, PointPickerModel.ts:283-285), while a
+// curve or EDGE anywhere along its length contributes normal + binormal + tangent
+// (`CurveSnap.additionalSnapsFor`, Snaps.ts:222-244).  A straight segment's
+// tangent IS its direction, so in a polygonal editor "the tangent at the anchor"
+// and "the direction of the segment/edge the anchor is on" are one vector — which
+// is why this rides arm 4c's candidate set rather than becoming a parallel rung.
+//
+// DEVIATIONS, stated: (a) FREE TOOLS ONLY — a planar placer's shape cannot exist
+// off its plane and an extension direction need not lie in it; (b) the anchor
+// counts as "on" a line anywhere ALONG it, not only at an end, which is the same
+// KREG_JOIN_DIST test arm 7's relative base already used; (c) the candidate count
+// is CAPPED (KSNAP_MAX_EXT_AXES, kiwi_snap.cpp) and ranked by collinearity with
+// the cursor, because a vertex where several brushes meet has many incident edges
+// and each appears twice, once per adjacent face winding; (d) the round-AP
+// self-snap mute still applies — the walk goes through ConCandidateUsable, and the
+// segment being drawn is not in the store at all, so a chain can never extend off
+// itself.
 //
 // The guide itself: DASHED (drawn as a run of short segments — kiwi_lines has no
 // dash mode), dim grey, clipped to ~420 px each way at the anchor's depth rather

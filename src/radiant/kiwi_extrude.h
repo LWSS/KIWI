@@ -223,7 +223,7 @@ bool KiwiExt_AbsoluteHeld();
 // must catch rather than the cursor that is driving it.  `sd` and the magnet band
 // are measured in the same frame, so both readings stay coherent either way.
 // Returns the depth to use; `outMajor` may be null.
-struct snap_result_t;              // kiwi_snap.h:295
+struct snap_result_t;              // kiwi_snap.h:323 (re-cited)
 float KiwiExt_LadderDepth( const snap_result_t &snap, const float *ref,
                            const float *axis, float rawAbs, bool *outMajor );
 

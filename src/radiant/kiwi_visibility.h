@@ -188,7 +188,7 @@ bool KiwiVis_CanInvert();
 // in the map's SAVE ENUMERATION.  That enumeration is a verbatim copy of
 // Map_SaveFile's own walk and must stay one:
 //
-//     Map_SaveFile      map.cpp:693-706   entity loop  (entities.next → &entities,
+//     Map_SaveFile      map.cpp:842-855   entity loop  (entities.next → &entities,
 //                                         gated on `def-list non-empty || worldspawn`)
 //     MapFile_WriteEntity map.cpp:1515-1517  per-entity DEF-list loop
 //                                         (b = eDef->brushes.prev; b != &eDef->def;

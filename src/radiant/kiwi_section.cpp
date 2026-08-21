@@ -26,10 +26,10 @@
 #include <math.h>
 
 // ── ported / sibling entry points (each verified against its DEFINITION) ─────
-extern camera_s *Ed_Camera();                          // camwnd.cpp:156
+extern camera_s *Ed_Camera();                          // camwnd.cpp:161
 extern int       g_nUpdateBits;                        // engine_stubs.cpp:773
-extern int       Sys_Printf( const char *fmt, ... );   // win_qe3.cpp:112
-extern void      Radiant_FL_Log( const char *fmt, ... );   // mainfrm.cpp:137
+extern int       Sys_Printf( const char *fmt, ... );   // win_qe3.cpp:118
+extern void      Radiant_FL_Log( const char *fmt, ... );   // mainfrm.cpp:145
 
 namespace
 {

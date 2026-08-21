@@ -2911,6 +2911,15 @@ void R_ShutdownDirect3D()
         R_UnloadGraphicsAssets();
     R_Cinematic_Shutdown();
     R_ReleaseForShutdownOrReset();
+#ifdef KISAK_RADIANT
+    // Both editor pools are D3DPOOL_MANAGED: nothing to free on device reset, so they
+    // are not in R_ReleaseForShutdownOrReset.  They must be freed HERE, after the
+    // release cascade and before dx.device->Release, while the device is still alive.
+    extern void KiwiModelCache_Shutdown();               // radiant/kiwi_modelcache.h
+    KiwiModelCache_Shutdown();
+    extern void KiwiInstCache_Shutdown();                // radiant/kiwi_instcache.h
+    KiwiInstCache_Shutdown();
+#endif
     while (dx.windowCount)
     {
         if (!dx.windows[--dx.windowCount].hwnd)
@@ -4358,11 +4367,11 @@ void R_ReleaseForShutdownOrReset()
     // KIWI-UX (ROUND AB, ITEM 1): the sentence that used to stand here — "the immediate camera
     // draw re-uploads per frame and holds no persistent vertHandles (faceVis visCount stays 0 in
     // all build modes), so nothing dangles" — IS FALSE.  Radiant_FaceVisGpuReady() is
-    // `dx.device != nullptr` (camwnd.cpp:1130), so Visuals_InitFaceVis (brush.cpp:2676) and
+    // `dx.device != nullptr` (camwnd.cpp:1194), so Visuals_InitFaceVis (brush.cpp:2676) and
     // Patch_BuildInstanceVisuals (pmesh.cpp:9768) DO cache persistent handles into the editor
     // surf cache.  Releasing the pool under them left every one of those handles dangling; the
     // next frame resolved one to a NULL vertex buffer, which makes
-    // RB_DrawEditorSkinnedCached_Sub skip its final tess flush (r_ed_scene.cpp:805) and leak
+    // RB_DrawEditorSkinnedCached_Sub skip its final tess flush (r_ed_scene.cpp:942) and leak
     // tess.indexCount out of the command handler with g_primStats still 0 — the monitor-sleep
     // crash at RB_EndSurfacePrologue (rb_shade.cpp:202).  Drop the cache FIRST, in the same
     // breath, so no cached handle can outlive the pool it indexes.  See kiwi_devicereset.h.
@@ -4520,7 +4529,7 @@ bool R_ResetDevice()
         //     surface.color, the classic INVALIDCALL culprit.
         //   • the per-window ADDITIONAL swap chains — the loop skips NULL slots (:4288).
         // The editor surf cache is NOT re-dropped: it cannot repopulate while the device
-        // is lost (Radiant_FaceVisGpuReady refuses, camwnd.cpp:1130), so a second drop
+        // is lost (Radiant_FaceVisGpuReady refuses, camwnd.cpp:1194), so a second drop
         // would only reprint its console line every retry.
         extern void ImGuiShell_InvalidateDeviceObjects();     // radiant/imgui_shell.cpp
         extern void RTT_ReleaseForReset();                    // radiant/radiant_rtt.cpp
@@ -5085,8 +5094,8 @@ HWND __cdecl R_CreateSwapChains(int hz, GfxWindowParms *wnd, int sharedHandle)
 //   2. The operator clicks the title bar to restore/activate.  DefWindowProc's
 //      OnDwpNcLButtonDown → OnDwpSysCommand nest SendMessage down to WM_SIZE (this is the
 //      uxtheme frame in the reported stack).
-//   3. Radiant_FrameWndProc's WM_SIZE arm (radiant_main.cpp:236-250) chains DefWindowProc
-//      then calls R_Hwnd_Resize (radiant_main.cpp:244).
+//   3. Radiant_FrameWndProc's WM_SIZE arm (radiant_main.cpp:237-251) chains DefWindowProc
+//      then calls R_Hwnd_Resize (radiant_main.cpp:245).
 //   4. Here: the window's swap chain is released and CreateAdditionalSwapChain is called
 //      on a LOST device.  It cannot succeed — the device owns no resources to hand out
 //      until it is Reset.

@@ -25,7 +25,7 @@
 #include <vector>
 
 // ── ported entry points (each verified against its definition) ──────────────
-extern int  Sys_Printf( const char *fmt, ... );   // win_qe3.cpp:112  int Sys_Printf(const char*,...)
+extern int  Sys_Printf( const char *fmt, ... );   // win_qe3.cpp:118  int Sys_Printf(const char*,...)
 extern int  g_nUpdateBits;                       // engine_stubs.cpp:773  int g_nUpdateBits = 0  (0x25D5A74)
 // `selected_brushes` is the DISPLAY-list sentinel: declared in qe3.h:1054
 // (`extern selbrush_t selected_brushes;  // 0x23f1864`), defined in

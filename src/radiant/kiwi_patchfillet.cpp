@@ -39,13 +39,13 @@
 #include <vector>
 
 // ── ported entry points (each verified against its DEFINITION) ──────────────
-extern int          Sys_Printf( const char *fmt, ... );                       // win_qe3.cpp:112
+extern int          Sys_Printf( const char *fmt, ... );                       // win_qe3.cpp:118
 extern int          g_nUpdateBits;                                            // 0x25D5A74 (mainfrm.cpp)
 
-extern unsigned int Brush_RemoveFace( brush_t *b, unsigned int faceIndex );   // brush.cpp:343  0x471640
-extern selbrush_t  *Brush_AddToList( brush_t *def, entity_s *owner );         // brush.cpp:667  0x475980
-extern void         Brush_AddToList2( selbrush_t *b );                        // brush.cpp:921  0x4765A0
-extern void         Select_Deselect( int a1 );                                // select.cpp:1445 0x48E800 (int, NOT char — mangling)
+extern unsigned int Brush_RemoveFace( brush_t *b, unsigned int faceIndex );   // brush.cpp:345  0x471640
+extern selbrush_t  *Brush_AddToList( brush_t *def, entity_s *owner );         // brush.cpp:669  0x475980
+extern void         Brush_AddToList2( selbrush_t *b );                        // brush.cpp:927  0x4765A0
+extern void         Select_Deselect( int a1 );                                // select.cpp:1444 0x48E800 (int, NOT char — mangling)
 
 // pmesh.cpp — the patch allocator, the KIWI-UX material/tessellation tail, and
 // the symbiont-brush maker.  MakeNewPatch and AddBrushForPatch are the binary's

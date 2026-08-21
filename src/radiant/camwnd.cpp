@@ -24,6 +24,16 @@
 #include "kiwi_material.h"          // KIWI-UX (ROUND Y): kiwiMatDiag_t (the KiwiMatInfo readout)
 #include "kiwi_skybox.h"            // KIWI-UX (ROUND AZ, ITEM 3 / BC, ITEM 3): KiwiSky_SeeThroughFace
 #include "kiwi_uveditor.h"          // KIWI-UX (ROUND BN, ITEM 3): KiwiUvEd_OverlaySuppressed
+#include <universal/profile.h>
+#include "kiwi_shadowcache.h"       // the sun-preview cache magnitudes
+#include "kiwi_walkcache.h"         // the shared prefab-walk recording
+#include "kiwi_surfcache.h"         // the camera's pose-invariant draw list
+extern int g_svNodesWalked;         // shadowvolume.cpp:28
+extern int g_svCastersDrawn;        // shadowvolume.cpp:29
+extern int g_svTrisFed;             // shadowvolume.cpp:30
+extern int g_svTrisKept;            // shadowvolume.cpp:31
+extern int g_svBatches;             // shadowvolume.cpp:32
+extern int g_svBatchKB;             // shadowvolume.cpp:33
 #include <universal/com_math.h>     // AngleVectors
 #include <math.h>
 #include <string.h>
@@ -33,6 +43,9 @@
 extern selbrush_t active_brushes;                              // map.cpp (0x23F189C)
 extern void       Radiant_FL_Log( const char *fmt, ... );      // mainfrm.cpp
 extern int        g_nUpdateBits;                               // 0x25D5A74 (mainfrm.cpp)
+extern int        g_edPrefabPrefabsWalked;                     // brush.cpp:7061
+extern int        g_edPrefabBrushesWalked;                     // brush.cpp:7062
+extern int        g_edPrefabBrushesDrawn;                      // brush.cpp:7064
 // Brush_Ray (0x475fe0) headless-safe distance wrapper — select.cpp.
 extern bool       Ed_BrushFloorRay( brush_t *def, const float *start,
                                      const float *dir, float *outDist );
@@ -83,8 +96,7 @@ extern void __cdecl R_InterpretSunLightParseParamsIntoLights( SunLightParseParam
 // U-GUARD, dead CCamWnd members after this unit (mainfrm.h ~line 33, not editable here):
 //   camera, m_nWidth, m_nHeight, m_nCambuttonstate, m_ptButton, cam_was_not_dragged,
 //   m_ptCursor, m_ptLastCursor, prob_some_cursor, x47, cursor_visible, light_preview_arr,
-//   light_preview_count, clipWorldNormal, clipWorldAxis, clipBoxCenter, clipPlaneNormal,
-//   clipPlaneAxis, m_contextMenu, struct LightPreviewRec — all superseded by the fields here.
+//   light_preview_count, m_contextMenu, struct LightPreviewRec — all superseded by the fields here.
 //   m_ptCursor3 was ALREADY dead before this unit (declared, never read or written).
 //   m_bLooking / m_ptLook are inside mainfrm.h's own #if 0 (the disabled FPS-look camera).
 //
@@ -122,13 +134,6 @@ struct camwndState_t
     camLightPreviewRec_t light_preview_arr[16] = {};
     int                  light_preview_count = 0;
 
-    // Cubic/frustum clip-plane state (CullCubic 0x4056d0 / Cam_Fov 0x405460 / sub_405620).
-    vec3_t clipWorldNormal[2] = {};   // IDB x33..x35 / x36..x38 (world-space side-plane normals)
-    int    clipWorldAxis[2][3] = {};  // IDB x39..x41 / x42..x44 (world-space corner selectors)
-    vec3_t clipBoxCenter      = {};   // IDB x163..x165 (camera origin in the target local space)
-    vec3_t clipPlaneNormal[2] = {};   // IDB x166..x168 / x169..x171 (local-space side normals)
-    int    clipPlaneAxis[2][3] = {};  // IDB x172..x174 / x175..x177 (local-space corner selectors)
-
     HMENU  contextMenu = nullptr;     // +0x338 the RMB face-picker popup (CMenu::m_hMenu)
 
     // CCamWnd::CCamWnd == the binary's Cam_Init (0x402c40): CMainFrame::CreateQEChildren
@@ -157,10 +162,6 @@ camera_s *Ed_Camera()
 {
     return &g_camwndState.camera;
 }
-
-// Defined below; Cam_Fov's tail calls it (they were sibling CCamWnd methods, so the class
-// declaration used to supply this).
-void CamWnd_SetupClipPlanes( const float *orient );
 
 // KIWI-UX (ROUND M): half-depth of the ORTHOGRAPHIC view volume, measured either
 // side of the eye along the view axis.  131072 was the engine's own world bound
@@ -228,6 +229,7 @@ void CamWnd_BuildMatrix()
 bool CamWnd_SetupScene()
 {
     camera_s &camera = g_camwndState.camera;
+
 
     CamWnd_BuildMatrix();
 
@@ -303,16 +305,8 @@ bool CamWnd_SetupScene()
     // so the product's last column is (0,0,0,1) and so is its inverse's — which
     // is exactly the (|m03|,|m13|) << m33 relation r_state_utils.cpp:21-22
     // asserts on.
-    //
-    // ACCEPTED LIMITATION, logged in RADIANT_KNOWN_ISSUES: CamWnd_Fov's cubic
-    // cull planes (used by the fixedsize MODEL/PREFAB pass only — the world brush
-    // pass has CullCubic elided) are still the PERSPECTIVE cone, so a model very
-    // close to the eye and far off-axis can be culled while an ortho view would
-    // show it.  Brush geometry is unaffected.
     const bool kiwiOrtho = KiwiCam_Ortho();
-    // KIWI-UX (ROUND BP, ITEM 1b): the ortho arm's own numbers, hoisted so the
-    // section fold below can reach them.  Zero while perspective, and the ortho
-    // block writes them before it uses them — no behaviour change to either arm.
+    // The ortho arm's own numbers, hoisted so the section fold below can reach them.
     float kiwiOrthoHalfW = 0.0f, kiwiOrthoHalfH = 0.0f, kiwiOrthoDepth = 0.0f;
     if ( kiwiOrtho )
     {
@@ -415,182 +409,6 @@ bool CamWnd_SetupScene()
     return true;
 }
 
-// Cubic / frustum clip setup + test (Cam_Fov 0x405460, sub_405620, CullCubic 0x4056d0).
-// Load-bearing on dense maps: without the cull EVERY prefab-content model is skinned and the
-// r_ed_scene tempSkinBuf overflows (~1264 models), silently DROPPING later models.
-extern void  Vec3Cross( const float *a, const float *b, float *out );              // 0x40A4D0 (out = a × b)
-extern void  VectorRotateByAxis( float *out, const float *axisMatrix, const float *dir ); // 0x4BA6B0
-extern void  OrientationWorldPosToLocalPos( float *out, const float *pos,
-                                            const orientation_t *orient );          // 0x4BA610
-extern float world_orient_matrix[4][3];                                             // entity.cpp 0x6DE290
-extern void  MaterialDef_02( MaterialDef *m, int ( *cb )( qtexture_s * ) );         // materialdef.cpp 0x431520
-extern int   MaterialDef_09( qtexture_s *radMtl );                                  // materialdef.cpp 0x431A00
-extern int   dword_181F51C;                                                         // engine_stubs.cpp (realize-state)
-
-// 0x405460  Cam_Fov — compute the two WORLD-space frustum SIDE planes from the camera
-// basis + camera_fov, then set up the identity-world clip planes for CullCubic.  Each
-// side plane's normal is stored (clipWorldNormal[0/1]) plus a 3-entry axis selector
-// (clipWorldAxis[0/1]) picking, per component, the box corner (0/1/2 = mins, 3/4/5 =
-// maxs) that is farthest along that normal — the classic Q3 axial box/plane test.
-void CamWnd_Fov()
-{
-    camera_s &camera                = g_camwndState.camera;
-    vec3_t ( &clipWorldNormal )[2]  = g_camwndState.clipWorldNormal;
-    int    ( &clipWorldAxis )[2][3] = g_camwndState.clipWorldAxis;
-
-    float vec[3];
-    // v4 = tan(fov/2) * 0.75 * (width/height); v3 = -v4  (0x405491..0x4054b0)
-    float v4 = (float)( tan( DEG2RAD( g_PrefsDlg->camera_fov ) * 0.5 ) * 0.75 );
-    v4 = (float)( v4 * (double)camera.width / (double)camera.height );
-    float v3 = -v4;
-
-    // Left side plane normal = cross(vpn - v4*vright, vup)   (0x4054ca..0x4054ed)
-    vec[0] = camera.vright[0] * v3 + camera.vpn[0];
-    vec[1] = camera.vright[1] * v3 + camera.vpn[1];
-    vec[2] = v3 * camera.vright[2] + camera.vpn[2];
-    Vec3Cross( vec, camera.vup, clipWorldNormal[0] );
-
-    // Right side plane normal = cross(vup, vpn + v4*vright)  (0x405518..0x40553b)
-    vec[0] = camera.vright[0] * v4 + camera.vpn[0];
-    vec[1] = camera.vright[1] * v4 + camera.vpn[1];
-    vec[2] = v4 * camera.vright[2] + camera.vpn[2];
-    Vec3Cross( camera.vup, vec, clipWorldNormal[1] );
-
-    // Per-component box-corner selector: normal>0 → the max face (3+axis), else the min
-    // face (axis).  (0x405551..0x405606 — x39..x44.)
-    clipWorldAxis[0][0] = clipWorldNormal[0][0] > 0.0f ? 3 : 0;
-    clipWorldAxis[1][0] = clipWorldNormal[1][0] > 0.0f ? 3 : 0;
-    clipWorldAxis[0][1] = clipWorldNormal[0][1] > 0.0f ? 4 : 1;
-    clipWorldAxis[1][1] = clipWorldNormal[1][1] > 0.0f ? 4 : 1;
-    clipWorldAxis[0][2] = clipWorldNormal[0][2] > 0.0f ? 5 : 2;
-    clipWorldAxis[1][2] = clipWorldNormal[1][2] > 0.0f ? 5 : 2;
-
-    CamWnd_SetupClipPlanes( &world_orient_matrix[0][0] );   // 0x4055fa
-}
-
-// 0x405620  sub_405620 — transform the world-space clip setup (clipWorldNormal/Axis)
-// into `orient`'s local space so CullCubic can test a brush drawn at that orientation:
-//   clipBoxCenter    = camera origin in local space
-//   clipPlaneNormal  = the two world normals rotated into local space
-//   clipPlaneAxis    = re-derived box-corner selectors from the rotated normals' signs
-void CamWnd_SetupClipPlanes( const float *orient )
-{
-    camera_s &camera                = g_camwndState.camera;
-    vec3_t ( &clipBoxCenter )       = g_camwndState.clipBoxCenter;
-    vec3_t ( &clipWorldNormal )[2]  = g_camwndState.clipWorldNormal;
-    vec3_t ( &clipPlaneNormal )[2]  = g_camwndState.clipPlaneNormal;
-    int    ( &clipPlaneAxis )[2][3] = g_camwndState.clipPlaneAxis;
-
-    const orientation_t *o = (const orientation_t *)orient;
-    OrientationWorldPosToLocalPos( clipBoxCenter, camera.origin, o );          // 0x405636
-    VectorRotateByAxis( clipPlaneNormal[0], orient, clipWorldNormal[0] );      // 0x40564d
-    VectorRotateByAxis( clipPlaneNormal[1], orient, clipWorldNormal[1] );      // 0x405661
-    for ( int p = 0; p < 2; ++p )                                             // 0x405670 loop (2 planes)
-    {
-        clipPlaneAxis[p][0] = clipPlaneNormal[p][0] > 0.0f ? 3 : 0;            // 0x405687
-        clipPlaneAxis[p][1] = clipPlaneNormal[p][1] > 0.0f ? 4 : 1;           // 0x40569f
-        clipPlaneAxis[p][2] = clipPlaneNormal[p][2] > 0.0f ? 5 : 2;           // 0x4056b1
-    }
-}
-
-// 0x4056d0  CullCubic — returns 1 to CULL (skip) the brush, 0 to KEEP.  Two independent
-// clips against the camera `cam`'s precomputed clip planes:
-//   (1) cubic distance clip (only if g_PrefsDlg->m_bCubicClipping): reject brushes whose
-//       AABB lies wholly outside a cube of half-size (m_nCubicScale<<6) centered at the
-//       camera (in the target orientation's local space = clipBoxCenter).  When cull-sky
-//       is off, SKY-material brushes are exempt (never distance-culled).
-//   (2) frustum clip: reject brushes whose farthest AABB corner is behind either of the
-//       two side planes (dot < -1.0).
-// `brush` is the INSTANCE (selbrush_t); its ->def carries the world-space mins/maxs (0x20/
-// 0x2c, contiguous, so def->mins[3+i] == def->maxs[i] — the axis-index trick).
-// U-VP-CAM: the binary's `cam` argument was always the ONE camera window, so the clip state
-// now comes from g_camwndState; the MFC-shell `CullCubic( brush, cam )` at the bottom of this
-// file is a thin forwarder for brush.cpp, whose call sites a later unit sweeps onto this name.
-char CamWnd_CullCubic( selbrush_t *brush )
-{
-    const camwndState_t *cam = &g_camwndState;
-    brush_t *def = brush->def;
-    // m_bCubicClipping defaults ON with m_nCubicScale=13 (cube half-size 13<<6 = 832 units),
-    // faithful to CPrefsDlg::LoadPrefs 0x44e7b9/0x44e7df.  Missing/popping distant geometry is
-    // usually THIS, not a draw bug — toggle View→Cubic Clipping (Ctrl+\, cmd 32817).
-    if ( g_PrefsDlg->m_bCubicClipping )
-    {
-        bool doDistance = false;
-        if ( g_PrefsDlg->b_mCullSky )                       // 0x4056e9 — cull sky too
-        {
-            doDistance = true;                              // 0x4056f0 goto LABEL_5
-        }
-        else
-        {
-            // Sky test: fold the face material's surface-type bits (seed 4 = SURF_SKY);
-            // if bit 2 survives (== 0 cleared? no — !=0 means sky) the brush is exempt.
-            // (0x405706: brush_faces->mtldef[current_edit_layer]; MaterialDef_02 + _09.)
-            MaterialDef *md = &def->faces[0].mtldef[g_qeglobals.current_edit_layer];
-            dword_181F51C = 4;                              // 0x405709
-            MaterialDef_02( md, MaterialDef_09 );           // 0x405713
-            if ( dword_181F51C == 0 )                       // 0x405722 — NOT sky → distance-clip
-                doDistance = true;
-            else
-                return 0;                                   // 0x4058cd — sky → keep (no distance cull)
-        }
-        if ( doDistance )
-        {
-            const float half = (float)( g_PrefsDlg->m_nCubicScale << 6 );  // 0x40572d
-            const float *mins = def->mins;                  // def->mins[0..2], def->mins[3..5] == maxs
-            // Reject if the AABB min corner is beyond the cube's max face on all axes,
-            // OR the AABB max corner is beyond the cube's min face on all axes.  This is
-            // the binary's two-pointer walk (0x40578e / 0x4057df) transcribed verbatim.
-            float boxMin[3] = { cam->clipBoxCenter[0] - half,
-                                cam->clipBoxCenter[1] - half,
-                                cam->clipBoxCenter[2] - half };
-            int i = 0;
-            while ( boxMin[i] <= (double)mins[i] || boxMin[i] <= (double)mins[i + 3] )
-            {
-                if ( ++i >= 3 )
-                {
-                    float boxMax[3] = { cam->clipBoxCenter[0] + half,
-                                        cam->clipBoxCenter[1] + half,
-                                        cam->clipBoxCenter[2] + half };
-                    int j = 0;
-                    while ( boxMax[j] >= (double)mins[j] || boxMax[j] >= (double)mins[j + 3] )
-                    {
-                        if ( ++j >= 3 )
-                            goto FRUSTUM;                    // 0x4057ee — passed cubic clip
-                    }
-                    return 1;                                // 0x4057df — cull
-                }
-            }
-            return 1;                                        // 0x40578e — cull
-        }
-    }
-
-FRUSTUM:   // LABEL_13 (0x4057f0) — frustum clip against the two side planes.
-    {
-        const float *mins = def->mins;                       // 0x4057f0
-        // Plane 0: farthest corner (per-axis via clipPlaneAxis[0]) dotted with normal[0].
-        float d0v[3];
-        d0v[0] = mins[cam->clipPlaneAxis[0][0]] - cam->clipBoxCenter[0];      // 0x40580f
-        d0v[1] = mins[cam->clipPlaneAxis[0][1]] - cam->clipBoxCenter[1];      // 0x40581c
-        d0v[2] = mins[cam->clipPlaneAxis[0][2]] - cam->clipBoxCenter[2];      // 0x405829
-        float d0 = cam->clipPlaneNormal[0][1] * d0v[1]
-                 + cam->clipPlaneNormal[0][0] * d0v[0]
-                 + cam->clipPlaneNormal[0][2] * d0v[2];                       // 0x40584b
-        if ( d0 >= -1.0 )                                                     // 0x405860
-        {
-            float d1v[3];
-            d1v[0] = mins[cam->clipPlaneAxis[1][0]] - cam->clipBoxCenter[0];  // 0x40587e
-            d1v[1] = mins[cam->clipPlaneAxis[1][1]] - cam->clipBoxCenter[1];  // 0x40588b
-            d1v[2] = mins[cam->clipPlaneAxis[1][2]] - cam->clipBoxCenter[2];  // 0x405898
-            float d1 = cam->clipPlaneNormal[1][1] * d1v[1]
-                     + cam->clipPlaneNormal[1][0] * d1v[0]
-                     + cam->clipPlaneNormal[1][2] * d1v[2];                   // 0x4058ba
-            if ( d1 >= -1.0 )                                                 // 0x4058c5
-                return 0;                                                     // keep
-        }
-        return 1;                                                            // 0x4058c9 — cull
-    }
-}
-
 // A face's mtldef carries a radMtl (qtexture_s) whose ->next is the engine Material* handle.
 static Material *FaceMaterial( const MaterialDef *md )
 {
@@ -639,7 +457,7 @@ static MaterialTechniqueType Cam_TechForDrawMode( int mode )
 //                      show & 0x100 (selected-only).  So "Bounding box", "Selected
 //                      Wireframe" and "Selected Skinned" already filtered correctly.
 //   * brush.cpp:6727   DrawOriginBox — the & 0x1000 BOXED bbox arm (behind RADIANT_DECOR).
-//   * brush.cpp:7297   the prefab-CONTENT technique (& 1 -> 29).
+//   * brush.cpp:7320   the prefab-CONTENT technique (& 1 -> 29).
 //   * select.cpp:397/:636  the pick chain.
 // Nothing read WIREFRAME (0x1) or SKIN_MODEL (0x10) for the xmodel MESH.  Instead the mesh
 // technique came from this file's own invention, `entTech = (classtype & 0x18) ? worldTech
@@ -655,7 +473,7 @@ static MaterialTechniqueType Cam_TechForDrawMode( int mode )
 // (0.5 0.5 0.5); the synthesized weapon_* classes (eclass.cpp:1645) are (.3 .3 1).  Those
 // classes carry a real character xmodel via defaultmdl= but their classtype is only 0x2
 // (eclass.cpp:925-939 gives 0x8 to four names and 0x10 to misc_prefab, nothing else), so
-// entTech was 29 -> SkinModelInst's `draw_meth2 != 29 ? 0 : color` arm (r_ed_scene.cpp:490)
+// entTech was 29 -> SkinModelInst's `draw_meth2 != 29 ? 0 : color` arm (r_ed_scene.cpp:624)
 // stamped the eclass colour over every skinned vertex -> a BLUE WIREFRAME CHARACTER.  And
 // white when selected, because the tech-29 white-outline pass (:3071) stamps colorWhite.
 // The COLOUR mechanism is the binary's own and is left exactly as it is: at tech 29 an
@@ -683,10 +501,51 @@ static int Cam_EntityMeshTech( MaterialTechniqueType cameraTech )
     return 29;                        // Bounding box (0x1000): no mesh reaches this anyway
 }
 
+// Direct-mapped memo in front of Cam_EditorMaterialColor's twelve strstr calls, keyed on
+// the interned material NAME POINTER (qtexture_s::name, qe3.h:54) and RESET at the top of
+// every CamWnd_Draw — so no entry can outlive the frame the pointer was observed in.
+static const int CAM_EDCOL_MEMO = 64;
+static struct { const char *name; float col[4]; bool isEditor; } s_edColMemo[CAM_EDCOL_MEMO];
+
+// Called once per CamWnd_Draw, before any pass gathers.
+static void Cam_EditorMaterialColorMemoReset()
+{
+    for ( int i = 0; i < CAM_EDCOL_MEMO; ++i )
+        s_edColMemo[i].name = nullptr;
+}
+
+static bool Cam_EditorMaterialColorUncached( const char *name, float out[4] );
+
 // Editor flat colour for a material name: true (+ colour) for a tool/sky material, false (+
 // white) for a plain world material.  The world draw splits on this — tools/sky get UNLIT +
 // flat MATERIAL_COLOR, world materials go through FAKELIGHT.
 static bool Cam_EditorMaterialColor( const char *name, float out[4] )
+{
+    if ( !name )
+    {
+        out[0] = out[1] = out[2] = out[3] = 1.0f;
+        return false;
+    }
+    // Pointer hash: the low bits of a heap pointer are the allocation's own alignment,
+    // so mix in the higher ones.
+    const uintptr_t p = (uintptr_t)name;
+    const int slot = (int)( ( ( p >> 4 ) ^ ( p >> 12 ) ) & ( CAM_EDCOL_MEMO - 1 ) );
+    if ( s_edColMemo[slot].name == name )
+    {
+        out[0] = s_edColMemo[slot].col[0]; out[1] = s_edColMemo[slot].col[1];
+        out[2] = s_edColMemo[slot].col[2]; out[3] = s_edColMemo[slot].col[3];
+        return s_edColMemo[slot].isEditor;
+    }
+    const bool isEditor = Cam_EditorMaterialColorUncached( name, out );
+    s_edColMemo[slot].name     = name;
+    s_edColMemo[slot].col[0]   = out[0]; s_edColMemo[slot].col[1] = out[1];
+    s_edColMemo[slot].col[2]   = out[2]; s_edColMemo[slot].col[3] = out[3];
+    s_edColMemo[slot].isEditor = isEditor;
+    return isEditor;
+}
+
+// The original body, unchanged.
+static bool Cam_EditorMaterialColorUncached( const char *name, float out[4] )
 {
     out[0] = out[1] = out[2] = out[3] = 1.0f;     // default: white (textured world material)
     if ( !name ) return false;
@@ -721,7 +580,7 @@ static bool Cam_EditorMaterialColor( const char *name, float out[4] )
 //
 // THE DIAGNOSIS, read out of the shipped assets rather than guessed:
 //   1. A Cut/Split gives its two new faces the CAULK material — the clipper's own
-//      synthesis, hoisted into Ed_BuildClipFaceMaterial_Kiwi (xywnd.cpp:2239
+//      synthesis, hoisted into Ed_BuildClipFaceMaterial_Kiwi (xywnd.cpp:2240
 //      picks "caulk" unless a source face is nodraw_decal).
 //   2. The world fill below routes ANY tool-class material — and
 //      Cam_EditorMaterialColor's table (this file, "caulk" row) classes caulk as
@@ -884,7 +743,7 @@ static bool Cam_MaterialWritesDepth( Material *handle, MaterialTechniqueType tec
 // the block above).  So EVERY face carrying the editor's default material draws
 // with no depth at all, and the newest brush wins in submission order.  Extrusion
 // makes it obvious because BuildPieceDef stamps the template onto a fresh brush and
-// LandDef tail-inserts it (kiwi_extrude.cpp:275-338, brush.cpp:7641 memcpy from
+// LandDef tail-inserts it (kiwi_extrude.cpp:275-338, brush.cpp:7664 memcpy from
 // random_texture_stuff[0].mtl, Brush_AddToList2 brush.cpp:921-927) — but it is not
 // an extrusion bug and the user's own "even without operations" report from round O
 // was the same defect seen from the other end.
@@ -915,9 +774,9 @@ static bool Cam_MaterialWritesDepth( Material *handle, MaterialTechniqueType tec
 // IT.  Radiant_ApplyStartupTextureScale (mainfrm.cpp:763-773, the OnCreate tail)
 // runs Radiant_CheckTextureScale, whose tail is Texture_ResetPosition
 // (mainfrm.cpp:2914).  Texture_ResetPosition ends in
-// TexWnd_ApplyMaterialAtIndex( TexWnd_HitTest( 9, 9 ) ) (texwnd.cpp:2066-2071) —
+// TexWnd_ApplyMaterialAtIndex( TexWnd_HitTest( 9, 9 ) ) (texwnd.cpp:2068-2073) —
 // i.e. it makes THE FIRST VISIBLE THUMBNAIL the current brush texture, and says
-// so in its own header comment (texwnd.cpp:2044-2046).  The browser lists
+// so in its own header comment (texwnd.cpp:2046-2048).  The browser lists
 // materials alphabetically, so in this asset set the editor's template at boot is
 // the first material in main/materials: **aa_default**.
 //
@@ -1305,6 +1164,11 @@ extern unsigned int Editor_VB_Upload( Material *material, int vertCount,
 extern void  Editor_AddGeoFace( Material *handle, int techType, int sortKey,
                                 int vertCount, int vbIndexAndOffs );
 extern void *R_AddEditorSurfsCmd();
+// How many surfs the OPEN flush window already holds.  Read either side of the entity +
+// prefab pass to decide whether the window is EXACTLY the block the surf cache replayed.
+extern int   Editor_PendingSurfCount();                          // r_ed_scene.cpp:424
+// The surf sort bucket — 100 * info.drawSurf.fields.primarySortKey.
+extern int __cdecl Editor_MaterialSortKey( Material *handle );   // r_ed_scene.cpp:173 (0x4FDBB0)
 
 // RADIANT_SURFCACHE — operator switch: faithful surf-cache world draw instead of immediate.
 static bool Cam_SurfCacheEnabled()
@@ -1366,6 +1230,9 @@ bool Radiant_FaceVisDeviceLost()
 // ambientMulOut: the black-world multiply colour (sub_50C470) the full-screen quad resets the
 // textured world to before the SUNLIGHT_PREVIEW pass adds the sun light.
 // `emit` = issue the 3 RC_SET_CUSTOM_CONSTANT commands (false = pre-compute values only).
+// Called ONCE per frame with emit=false; Cam_SunPrev_Main emits the same three constants
+// from the values it returned.  This is the expensive half of the sun setup (an 8 KB epair
+// round trip plus two parsers) and it used to run twice for one unchanging answer.
 static int Cam_SunPrev_SetSunConstants( float sunDirOut[3], float ambientMulOut[3] = nullptr,
                                         float sunColorOut[3] = nullptr, bool emit = true )
 {
@@ -1480,6 +1347,7 @@ static void Cam_EmitEditorTint( const face_t *f, int layer, float lastMC[4] )
 static void Cam_DrawFaceCached( face_t *f )
 {
     int layerCount = MaterialDef_11( &f->mtldef[g_qeglobals.current_edit_layer] );
+    int baseSortKey = -1;                 // seeded from the first drawn layer
     for ( int L = 0; L < layerCount; ++L )
     {
         EdLayerGeom g;
@@ -1492,7 +1360,11 @@ static void Cam_DrawFaceCached( face_t *f )
         unsigned int handle = Editor_VB_Upload( drawMtl, g.vertcount,
             (const float *)g.xyz, (const float *)g.tangent, (const float *)g.binormal,
             (const float *)g.normal, (const float *)g.st, (const float *)g.color );
-        Editor_AddGeoFace( drawMtl, TECHNIQUE_UNLIT, 0, g.vertcount, (int)handle );
+        // sortKey = Editor_MaterialSortKey(layer0) + layerIndex, so a face's layers stay
+        // consecutive inside one material bucket (DrawGeo 0x47acf0, brush.cpp:6060-6062).
+        if ( baseSortKey < 0 )
+            baseSortKey = Editor_MaterialSortKey( drawMtl );
+        Editor_AddGeoFace( drawMtl, TECHNIQUE_UNLIT, baseSortKey + L, g.vertcount, (int)handle );
     }
 }
 
@@ -1515,6 +1387,22 @@ static void Cam_SetLastMaterialColor( float dst[4], const float src[4] )
 {
     dst[0] = src[0]; dst[1] = src[1]; dst[2] = src[2]; dst[3] = src[3];
 }
+
+// The world fill's plain arm emits the same Editor_AddGeoFace surf DrawGeo emits, from the
+// persistent VB handle Brush_CheckBuildFaceVis (0x477d70) uploaded.  STILL IMMEDIATE, and must
+// stay so: the sun approximation arm, the sky see-through film, the solid-tool arm, and any
+// face whose faceVis is not built.  RADIANT_WORLDGEO=0 restores the immediate arm.
+static bool Cam_WorldGeoResident()
+{
+    static const bool s = ( getenv( "RADIANT_WORLDGEO" ) == nullptr
+                            || atoi( getenv( "RADIANT_WORLDGEO" ) ) != 0 );
+    return s;
+}
+
+// brush.cpp:205 — void sub_477D70( selbrush_t *b, const float *orient )  (Brush_CheckBuildFaceVis)
+extern void sub_477D70( selbrush_t *b, const float *orient );
+// brush.cpp:2499 — int g_edSunBakeVertColor  (the per-vertex sun bake gate)
+extern int  g_edSunBakeVertColor;
 
 static void Cam_DrawFaceFaithfulImmediate( face_t *f, MaterialTechniqueType tech )
 {
@@ -1548,6 +1436,145 @@ static void Cam_DrawFaceFaithfulImmediate( face_t *f, MaterialTechniqueType tech
                                 (short)g.vertcount, xyzw, g.normal, (float *)g.color, g.st );
     }
 }
+
+// ── THE BX BUCKET/ORDER LAW.  DO NOT REORDER THIS.  ─────────────────────────
+// The binary's world draw accumulates one editor-surf per material layer and closes with
+// R_AddEditorSurfsCmd (0x4FDA10), whose first statement qsorts the range by
+// Editor_SurfCompare (0x4FD9C0) — sortKey, then techType, then firstIndex.  sortKey is
+// 100 * the material's own primarySortKey, so opaques (400) precede sky (500), decals
+// (1200) and blends/glass (4300+).  A depth-write-free decal drawn BEFORE the opaques is
+// repainted by them; that ordering is the only thing keeping it visible.  The port's two
+// IMMEDIATE loops (world fill, selected-brush tint) bypassed the sort and are fixed here.
+// TIE-BREAK IS SUBMISSION ORDER, deliberately: faces sharing a key keep the sequence they
+// had before, which is what the caulk / sky / MATERIAL_COLOR-dedup arms rely on.
+// ONE NON-MATERIAL BUCKET: the see-through SKY FILM is a translucent d_white quad that must
+// composite over the whole scene, so it keys to CAM_SORTKEY_KIWI_OVERLAY, past every
+// material bucket.  Every other sky face keeps its own key of 500.
+struct CamSortFace
+{
+    face_t     *f;              // the face to draw
+    // The instance + faceVis index this face's geometry already lives at on the GPU
+    // (Editor_VB_Upload, brush.cpp:186).  nullptr/-1 = gathered by a pass with no instance.
+    selbrush_t *inst;
+    int         faceIndex;
+    Material *mtl;              // FaceMaterial( &f->mtldef[layer] ) — selects the draw arm
+    int       key;              // Editor_MaterialSortKey( mtl ), or CAM_SORTKEY_KIWI_OVERLAY
+    int       seq;              // submission index — the stable tie-break
+    bool      isSky;            // round BC: classified in the gather (see above)
+    bool      skySeeThrough;    // round BC: this face draws the translucent film
+    bool      uvOwns;           // selected pass: KiwiUvEd_OverlaySuppressed brush (no red tint)
+};
+
+// One bucket past every material bucket, and it can never collide: primarySortKey is a 6-bit
+// field (r_gfx.h:328) and the bucket stride is 100 (r_ed_scene.cpp:175).
+static const int CAM_SORTKEY_KIWI_OVERLAY = 100 * 64;
+
+// qsort comparator, shaped exactly like Editor_SurfCompare (r_ed_scene.cpp:182-198): the
+// material sort bucket first, then the stable tie-break.
+static int __cdecl Cam_SortFaceCompare( const void *pa, const void *pb )
+{
+    const CamSortFace *a = (const CamSortFace *)pa;
+    const CamSortFace *b = (const CamSortFace *)pb;
+    const int result = a->key - b->key;
+    if ( result )
+        return result;
+    return a->seq - b->seq;
+}
+
+// Append one face to a pass's gather list, computing its sort bucket (and, for the world
+// pass, the round-BC sky classification the bucket depends on).
+static void Cam_GatherFace( std::vector< CamSortFace > &out, face_t *f, Material *mtl,
+                            const MaterialDef *md, bool classifySky, bool uvOwns,
+                            selbrush_t *inst = nullptr, int faceIndex = -1 )
+{
+    CamSortFace e;
+    e.f             = f;
+    e.inst          = inst;
+    e.faceIndex     = faceIndex;
+    e.mtl           = mtl;
+    e.seq           = (int)out.size();
+    e.isSky         = false;
+    e.skySeeThrough = false;
+    e.uvOwns        = uvOwns;
+    // Material_FromHandle asserts on a NULL handle and can answer null for one that failed to
+    // register, and Editor_MaterialSortKey dereferences unconditionally (r_ed_scene.cpp:175).
+    // Anything unresolved keys at 0, i.e. drawn FIRST, so the opaques can still cover it.
+    const Material *mres = mtl ? Material_FromHandle( mtl ) : nullptr;
+    e.key           = mres ? Editor_MaterialSortKey( mtl ) : 0;
+
+    if ( classifySky )
+    {
+        const char *mn = md->radMtl ? md->radMtl->name : nullptr;
+        const char *sl = mn ? strrchr( mn, '/' ) : nullptr;
+        e.isSky = KiwiSky_IsSkyMaterial( md->radMtl )
+               || ( mn && strstr( sl ? sl + 1 : mn, "sky" ) != nullptr );
+        if ( e.isSky )
+        {
+            // The winding CENTROID, not a corner: a shell wall is thousands of units across and
+            // one corner can be on the far side of the pivot while the face as a whole is not.
+            float ctr[3] = { 0.0f, 0.0f, 0.0f };
+            const int np = f->w ? f->w->numpoints : 0;
+            if ( np > 0 )
+            {
+                for ( int pi = 0; pi < np; ++pi )
+                    for ( int k = 0; k < 3; ++k )
+                        ctr[k] += f->w->p[pi][k];
+                const float inv = 1.0f / (float)np;
+                for ( int k = 0; k < 3; ++k )
+                    ctr[k] *= inv;
+            }
+            e.skySeeThrough = KiwiSky_SeeThroughFace( ( np > 0 ) ? ctr : nullptr );
+        }
+        if ( e.skySeeThrough )
+            e.key = CAM_SORTKEY_KIWI_OVERLAY;
+    }
+    out.push_back( e );
+}
+
+// The pass tail: order the gathered faces.  Split out so every caller applies the identical
+// key, and so a one-face pass costs nothing.
+static void Cam_SortGatheredFaces( std::vector< CamSortFace > &faces )
+{
+    if ( faces.size() > 1 )
+        qsort( faces.data(), faces.size(), sizeof( CamSortFace ), Cam_SortFaceCompare );
+}
+
+// Emit one gathered world face from its RESIDENT geometry.  false = no resident
+// geometry for this face right now; the caller runs the immediate path.
+static bool Cam_DrawFaceResident( const CamSortFace &ent, MaterialTechniqueType tech )
+{
+    if ( !Cam_WorldGeoResident() )
+        return false;
+    // The per-vertex sun bake writes FRAME state into VERTEX data (brush.cpp:2602),
+    // so while it is on, resident vertices are the wrong vertices.
+    if ( g_edSunBakeVertColor )
+        return false;
+    selbrush_t *b = ent.inst;
+    if ( !b || ent.faceIndex < 0 || !b->faces || ent.faceIndex >= b->faceCount )
+        return false;
+    const faceVis_s *vis = &( (const faceVis_s *)b->faces )[ent.faceIndex];
+    if ( vis->visCount <= 0 || !vis->visArray || vis->vertcount < 3 )
+        return false;
+
+    // Per-layer emit, exactly as DrawGeo does it (brush.cpp:6058-6079): the key is the FIRST
+    // non-null layer's material bucket and each layer is base + i.
+    int sortKey = -1;
+    bool emitted = false;
+    for ( int i = 0; i < vis->visCount; ++i )
+    {
+        Material *mtl = vis->visArray[i].mtlHandle;
+        if ( !mtl )
+            continue;
+        Material *drawMtl = Cam_DrawMaterial( mtl );
+        if ( sortKey < 0 )
+            sortKey = Editor_MaterialSortKey( drawMtl );
+        Editor_AddGeoFace( drawMtl, Cam_TechAvailable( drawMtl, tech ), sortKey + i,
+                           vis->vertcount, vis->visArray[i].vertHandle );
+        emitted = true;
+    }
+    return emitted;
+}
+
 
 // KISAK sun-preview APPROXIMATION (used when the faithful R_SunPrev_Main path is unavailable):
 // MATERIAL_COLOR = the face's directional-sun colour, then draw the textured face UNLIT (which
@@ -1743,6 +1770,12 @@ bool Editor_ModelsEnabled()
 // Its own function because MSVC forbids setjmp and __try in one function (C2713).
 extern float world_orient_matrix[4][3];                                   // entity.cpp
 extern char  Entity_HasRenderableModel( brush_t_with_custom_def *b, int orient );  // brush.cpp 0x479610
+// Non-zero only across the 2D view's UNSELECTED brush loop (XY_DrawBrushes, xywnd.cpp): the
+// per-entity tint travels as a flat MATERIAL_COLOR instead of a per-vertex stamp, because
+// the stamp forces a writable tempSkinBuf copy and that disqualifies the surface from the
+// geometry cache and the instance merge.  The camera's tech-29 arm and the XY SELECTED pass
+// never see this set, so both keep the stamp.
+extern int   g_edXyModelFlatTint;                                         // xywnd.cpp:1161
 static int Cam_SkinModelSEH( selbrush_t *b, const orientation_t *orient, int meshTech,
                              GfxColor *col, int drawFlags )
 {
@@ -1757,8 +1790,11 @@ static int Cam_SkinModelSEH( selbrush_t *b, const orientation_t *orient, int mes
                 // DrawModels 0x479735: SkinModelInst(inst, checkhandle, draw_meth2,
                 // draw_meth2 != 29 ? 0 : color, drawFlags) — the per-vert colour override
                 // only rides the WIREFRAME technique.
+                const int *colorPtr = ( meshTech != 29 ) ? nullptr : (const int *)col;
+                if ( colorPtr && g_edXyModelFlatTint )
+                    colorPtr = nullptr;      // constant-level tint
                 SkinModelInst( b->owner->modelInst, nullptr, meshTech,
-                               meshTech != 29 ? nullptr : (const int *)col, drawFlags );
+                               colorPtr, drawFlags );
             }
         }
     }
@@ -2368,7 +2404,7 @@ static bool KiwiTerrainRing_PatchEligible( patchMesh_t *def )
         if ( !s_toldOnce )
         {
             s_toldOnce = true;
-            // Sys_Printf: camwnd.cpp:55 (extern, win_qe3.cpp:112 definition).
+            // Sys_Printf: camwnd.cpp:61 (extern, win_qe3.cpp:112 definition).
             Sys_Printf( "Terrain edit: the paint ring is drawn on patch SHEETS; CLOSED patches "
                         "(cylinder/cone/hemisphere) are skipped.\n" );
         }
@@ -2464,30 +2500,33 @@ static GfxCmdDrawPoints *DrawAdvancedTerrainEditCircle( const float *a1 )
 // stateMap "additive_stencil" -> depthTest EQUAL, depthWrite off, blend Add/InvDestAlpha/One)
 // only lights pixels at the EXACT depth the base pass wrote, so the re-add must reuse the same
 // faceVis/prefab-content/patch/model surf-cache entries.
-// KISAK: the CullCubic call is an addition - the port's entity pass culls (buffer pressure), so
-// the re-add culls identically.  A brush the base pass culled has nothing on screen to re-light.
-
 static int Cam_DrawBrushList_SunPreview( selbrush_t *head )
 {
     extern void DrawBrush( selbrush_t *b, const orientation_t *orient, int viewType,
                            int technique, GfxColor *col, char width, int drawFlags,
                            const char *layerPrefix );                       // brush.cpp 0x47afc0
     int drawn = 0;
+    // The sun re-add walks the same prefab tree at technique 26, so it replays the shared
+    // recording too.  `backward` because this walk runs through ->prev.
+    const bool walkReplay = KiwiWalk_BeginReplay(
+        head, (const orientation_t *)world_orient_matrix, /*backward*/ true );
     // The re-add walks the list BACKWARD: 0x406965 `mov esi,[edi]` seeds from head->prev and
     // 0x4069a9 `mov esi,[esi]` advances by prev (offset 0), unlike DrawGeneralWorld_'s +4 walk.
     for ( selbrush_t *b = head->prev; b && b != head; b = b->prev )
     {
         if ( !b->cullFlag )                       // 0x406970: byte[i+0x26]
             continue;
-        if ( CamWnd_CullCubic( b ) )              // KISAK (see above)
-            continue;
         GfxColor col;
         Cam_BrushColor2d( b, &col );              // 0x40697c Brush_GetColor2d
+        if ( walkReplay )
+            KiwiWalk_TopLevel( b );
         DrawBrush( b, (const orientation_t *)world_orient_matrix, /*viewType*/ -1,
                    /*technique*/ TECHNIQUE_SUNLIGHT_PREVIEW, &col,
                    /*width*/ 1, /*drawFlags*/ 0, /*layerPrefix*/ "" );      // 0x4069a1
         ++drawn;
     }
+    if ( walkReplay )
+        KiwiWalk_EndReplay();
     return drawn;
 }
 
@@ -2510,8 +2549,10 @@ static int Cam_DrawBrushList_SunPreview( selbrush_t *head )
 // write depth or alpha between the clear quad and the re-add.
 static void Cam_SunPrev_Main( bool faithfulSun, Material *sunMultiplyMat,
                               const float litSunDir[3], const float litAmbientMul[3],
-                              bool litHaveSun )
+                              const float litSunColor[3], bool litHaveSun )
 {
+    PROF_SCOPED("Cam_SunPrev_Main");
+
     if ( !faithfulSun )
         return;
 
@@ -2523,8 +2564,15 @@ static void Cam_SunPrev_Main( bool faithfulSun, Material *sunMultiplyMat,
     if ( !litHaveSun )
         return;
     {
-        float d[3], a[3], c[3];
-        Cam_SunPrev_SetSunConstants( d, a, c, /*emit=*/true );
+        // The same three RC_SET_CUSTOM_CONSTANT commands (0x406896/0x4068c3/0x4068f0) with the
+        // same values, emitted from what the `emit=false` call at the top of CamWnd_Draw already
+        // computed — the worldspawn sun round trip used to run twice per camera frame.
+        R_AddCmdSetCustomShaderConstant( CONST_SRC_CODE_SUN_POSITION,
+                                         litSunDir[0], litSunDir[1], litSunDir[2], 0.0f );
+        R_AddCmdSetCustomShaderConstant( CONST_SRC_CODE_SUN_DIFFUSE,
+                                         litSunColor[0], litSunColor[1], litSunColor[2], 1.0f );
+        R_AddCmdSetCustomShaderConstant( CONST_SRC_CODE_SUN_SPECULAR,
+                                         litSunColor[0], litSunColor[1], litSunColor[2], 1.0f );
     }
 
     // 0x4069e3 sets sundir.w = 0 unconditionally, so the shadVol counts are always the
@@ -2536,18 +2584,20 @@ static void Cam_SunPrev_Main( bool faithfulSun, Material *sunMultiplyMat,
     // (mat_white_multiply * the worldspawn ambient, dropping the rasterised world to its
     // ambient/diffuse floor) then clear-stencil (zeroes dest alpha + stencil for the volumes).
     // SetProjection2D is for the quads; the 3D projection is restored immediately after.
-    R_AddCmdProjectionSet2D();
-    if ( sunMultiplyMat )
     {
-        float blackCol[4] = { ambientMul[0], ambientMul[1], ambientMul[2], 1.0f };
-        R_AddCmdDrawFullScreenColoredQuad( 0.0f, 0.0f, 1.0f, 1.0f, blackCol, sunMultiplyMat );
+        R_AddCmdProjectionSet2D();
+        if ( sunMultiplyMat )
+        {
+            float blackCol[4] = { ambientMul[0], ambientMul[1], ambientMul[2], 1.0f };
+            R_AddCmdDrawFullScreenColoredQuad( 0.0f, 0.0f, 1.0f, 1.0f, blackCol, sunMultiplyMat );
+        }
+        if ( rgp.clearAlphaStencilMaterial )
+        {
+            static const float white[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+            R_AddCmdDrawFullScreenColoredQuad( 0.0f, 0.0f, 1.0f, 1.0f, white, rgp.clearAlphaStencilMaterial );
+        }
+        R_AddCmdProjectionSet3D();
     }
-    if ( rgp.clearAlphaStencilMaterial )
-    {
-        static const float white[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
-        R_AddCmdDrawFullScreenColoredQuad( 0.0f, 0.0f, 1.0f, 1.0f, white, rgp.clearAlphaStencilMaterial );
-    }
-    R_AddCmdProjectionSet3D();
 
     // 0x406a4c..0x406a8e - the shadow volumes.  frontCapIndices = quadsPerEdge = 3: the
     // directional (w==0) case, where every extruded vertex is the same point at infinity, so
@@ -2565,16 +2615,33 @@ static void Cam_SunPrev_Main( bool faithfulSun, Material *sunMultiplyMat,
     extern selbrush_t selected_brushes;                                     // map.cpp 0x23F1864
     if ( Radiant_ShadVol_Begin( 3 ) )                                       // 0x406a4c/0x406a66
     {
+        // The two BrushShadow calls are the CPU silhouette build over the WHOLE map — a caster
+        // behind the camera still shadows what is in front of it.
         const orientation_t *worldOr = (const orientation_t *)world_orient_matrix;
         Radiant_ShadVol_BrushShadow( &active_brushes,   worldOr, sun );     // 0x406a70
         Radiant_ShadVol_BrushShadow( &selected_brushes, worldOr, sun );     // 0x406a86
         SunLightPreview_PolyOffsetShadows();                                // 0x406a8e
+
+        // The sun preview is a per-frame CPU stencil shadow build over the whole map and the
+        // pref persists (SunLightPreviewEnable), so the pass names itself and the menu item that
+        // turns it off, once per session.  The toggle is not forced.
+        static bool s_sunCostReported = false;
+        if ( !s_sunCostReported && g_svTrisFed > 0 )
+        {
+            s_sunCostReported = true;
+            Sys_Printf( "Sun light preview ON: %d shadow casters, %d silhouette triangles, "
+                        "%d volume batches per frame.  This is a per-frame CPU shadow build "
+                        "over the whole map - View > \"Preview sun as well\" turns it off.\n",
+                        g_svCastersDrawn, g_svTrisFed, g_svBatches );
+        }
     }
 
     // The LIT re-add (0x406a93..0x406aac).  R_SortMaterials demarcates the flush so it carries
     // ONLY the tech-26 surfs; re-flushing an earlier pass would re-rasterise it on top of the
     // darkened frame.
     {
+        // A SECOND FULL WORLD DRAW — DrawBrush over both lists at technique 26, so the prefab
+        // walk, the layer-vis refresh and the model-surf queueing all run again.
         extern void R_SortMaterials();                                      // r_ed_scene.cpp
         R_SortMaterials();                                                  // 0x406a93
         Cam_DrawBrushList_SunPreview( &selected_brushes );                   // 0x406a9d
@@ -2590,16 +2657,24 @@ void CamWnd_Draw( HWND hwnd )
     camwndState_t *cam    = &g_camwndState;
     camera_s      &camera = cam->camera;
 
+    PROF_SCOPED( "CamWnd_Draw" );
+
     if ( !active_brushes.next )      // brush lists not bootstrapped → no map loaded
         return;
 
     if ( !CamWnd_SetupScene() )      // degenerate projection: skip geometry this frame, the
         return;                      // cleared background stands
 
-    // 0x407ee3 - the camera's WORLD-space cubic/frustum clip planes, so the entity and
-    // prefab-content passes below can CullCubic against them.  The binary calls this right
-    // after R_SetupScene; without it the entity pass skins every off-screen model.
-    CamWnd_Fov();
+    // the per-frame memo in front of Cam_EditorMaterialColor's twelve
+    // strstr calls.  Reset HERE, before any pass gathers, so no entry can outlive one frame.
+    Cam_EditorMaterialColorMemoReset();
+
+    g_edPrefabPrefabsWalked = g_edPrefabBrushesWalked = 0;
+    g_edPrefabBrushesDrawn = 0;
+
+    g_svNodesWalked = g_svCastersDrawn = 0;
+    g_svTrisFed     = g_svTrisKept     = 0;
+    g_svBatches     = g_svBatchKB      = 0;
 
     // ═════════════════════════════════════════════════════════════════════════
     //  KIWI-UX (ROUND BM, ITEM 1b) — THE SECTION-ANALYSIS CLIP PLANE OPENS HERE
@@ -2749,7 +2824,7 @@ void CamWnd_Draw( HWND hwnd )
     //     occlusion by a line that really is in front, and it is pixel-identical to
     //     what the old post-world position already produced.
     //
-    // WHY NOT R_AddCmd_Line3DNoDepth.  It exists (r_rendercmds.cpp:2022, dimension 4
+    // WHY NOT R_AddCmd_Line3DNoDepth.  It exists (r_rendercmds.cpp:2042, dimension 4
     // -> RB_DrawLines3D(depthTest=false) -> rgp.lineMaterialNoDepth = the registered
     // built-in "$line_nodepth", r_material.cpp:225) and it is the WRONG tool here.
     // main/materials/$line_nodepth carries refStateBits[1] = 0x00000002 =
@@ -2761,7 +2836,7 @@ void CamWnd_Draw( HWND hwnd )
     // with depthWrite disabled, so $line it is, and the argument above is what makes
     // that safe rather than a compromise.
     //
-    // POSITION: after CamWnd_SetupScene (the view exists) and CamWnd_Fov, before the
+    // POSITION: after CamWnd_SetupScene (the view exists), before the
     // first R_SortMaterials.  The grid is an IMMEDIATE RC_DRAW_LINES command, not an
     // editor surf, so it neither opens nor disturbs the surf accumulation the
     // R_SortMaterials pairs demarcate.  It leaves MATERIAL_COLOR at its last line
@@ -2776,17 +2851,23 @@ void CamWnd_Draw( HWND hwnd )
     // 0x407ab9 - R_SortMaterials opens the world accumulation so the main R_AddEditorSurfsCmd
     // flush is demarcated and the later selected/white flushes do not re-draw these surfs.
     { extern void R_SortMaterials(); R_SortMaterials(); }
+    // The GATHER half of DrawGeneralWorld_ -> R_AddEditorSurfsCmd: a face is APPENDED here and
+    // DRAWN in the sorted loop below.  Function-static (no per-frame realloc); CamWnd_Draw is
+    // not re-entrant, so one buffer is enough.
+    static std::vector< CamSortFace > s_worldFaces;
+    s_worldFaces.clear();
     selbrush_t *bhead = &active_brushes;
+    {
+    PROF_SCOPED( "world gather" );
     for ( selbrush_t *b = bhead->next; b != bhead; b = b->next )
     {
         brush_t *def = b->def;
         // DrawBrush 0x47B018 dispatches on the instance-side patch field.
         if ( !def || b->patch )                         // convex brushes only
             continue;
-        // 0x407af0 - DrawGeneralWorld_ gates every world brush on !CullCubic && !FilterBrush.
-        // KISAK: CullCubic stays elided here (the port draws the full map); FilterBrush is
-        // load-bearing - without it the map's own lightgrid_volume worldspawn brush renders as
-        // opaque teal planes z-fighting the coplanar floor.
+        // 0x407af0 - DrawGeneralWorld_ gates every world brush on FilterBrush.  Load-bearing:
+        // without it the map's own lightgrid_volume worldspawn brush renders as opaque teal
+        // planes z-fighting the coplanar floor.
         if ( FilterBrush( b, 0 ) )
             continue;
         // FIXEDSIZE POINT ENTITIES ARE NOT WORLD FACES.  DrawBrush 0x47b0bd routes any brush
@@ -2800,6 +2881,10 @@ void CamWnd_Draw( HWND hwnd )
             if ( ec && *(int *)&ec->fixedsize )
                 continue;
         }
+        // 0x47b07c — the per-instance faceVis sync DrawBrush runs for every brush it draws
+        // (brush.cpp:7438).  VERSION-GATED: a compare and a return on an unedited brush.
+        if ( Cam_WorldGeoResident() )
+            sub_477D70( b, (const float *)world_orient_matrix );
         for ( int fi = 0; fi < def->faceCount; ++fi )
         {
             face_t   *f   = &def->faces[fi];
@@ -2808,6 +2893,29 @@ void CamWnd_Draw( HWND hwnd )
             Material *mtl = FaceMaterial( &f->mtldef[layer] );
             if ( !mtl )
                 continue;
+            Cam_GatherFace( s_worldFaces, f, mtl, &f->mtldef[layer],
+                            /*classifySky*/ !sunApprox && !useCache, /*uvOwns*/ false,
+                            /*inst*/ b, /*faceIndex*/ fi );
+        }
+    }
+    }
+
+    // R_AddEditorSurfsCmd's qsort (0x4FDA10), on the immediate stream.  Within one key the
+    // order is unchanged (Cam_SortFaceCompare's `seq` tie-break).
+    {
+        Cam_SortGatheredFaces( s_worldFaces );
+    }
+
+    // The SUBMIT half.  Per face-layer this rebuilds the geometry (Face_BuildLayerGeom) and
+    // emits ONE RC_DRAW_TRIANGLES, i.e. one draw call per face-layer (rb_backend.cpp:1445).
+    {
+    PROF_SCOPED( "world submit" );
+    for ( size_t wi = 0; wi < s_worldFaces.size(); ++wi )
+    {
+        const CamSortFace &ent = s_worldFaces[wi];
+        face_t   *f   = ent.f;
+        Material *mtl = ent.mtl;
+        {
             if ( sunApprox )
             {
                 // UNLIT * per-face directional-sun MATERIAL_COLOR, deduped via lastMC.
@@ -2880,31 +2988,10 @@ void CamWnd_Draw( HWND hwnd )
                 // never consults it at all — it draws the face's OWN material at
                 // TECHNIQUE_UNLIT — which is why a selected sky brush is always
                 // textured.)
-                const char *sl    = mn ? strrchr( mn, '/' ) : nullptr;
-                const bool  isSky = KiwiSky_IsSkyMaterial( f->mtldef[layer].radMtl )
-                                 || ( mn && strstr( sl ? sl + 1 : mn, "sky" ) != nullptr );
-                bool skySeeThrough = false;
-                if ( isSky )
-                {
-                    // The winding CENTROID, not a corner: a shell wall is thousands of
-                    // units across and one corner can be on the far side of the pivot
-                    // while the face as a whole is in front of it.  winding_t is
-                    // { int numpoints; float p[][3] } (qcommon.h:1227-1235) and
-                    // `f->w` is non-null here — the loop head at :2660 skips faces
-                    // without one.
-                    float ctr[3] = { 0.0f, 0.0f, 0.0f };
-                    const int np = f->w->numpoints;
-                    if ( np > 0 )
-                    {
-                        for ( int pi = 0; pi < np; ++pi )
-                            for ( int k = 0; k < 3; ++k )
-                                ctr[k] += f->w->p[pi][k];
-                        const float inv = 1.0f / (float)np;
-                        for ( int k = 0; k < 3; ++k )
-                            ctr[k] *= inv;
-                    }
-                    skySeeThrough = KiwiSky_SeeThroughFace( ( np > 0 ) ? ctr : nullptr );
-                }
+                // The predicate and the centroid rule moved into Cam_GatherFace: the see-through
+                // answer decides this face's SORT BUCKET, which must be known before the order is.
+                const bool isSky         = ent.isSky;
+                const bool skySeeThrough = ent.skySeeThrough;
                 float ecol[4];
                 if ( Cam_EditorMaterialColor( mn, ecol ) || isSky )  // tool/sky/volume -> UNLIT + flat colour
                 {
@@ -3049,7 +3136,7 @@ void CamWnd_Draw( HWND hwnd )
                     // `Cam_DrawFace` pins the per-vertex colour to 0xFFFFFFFF (:1153) and
                     // white_tools' blend is SrcAlpha/InvSrcAlpha, so at vertex alpha 255
                     // the blend is arithmetically OPAQUE — a solid plane that merely fails
-                    // to occlude.  camwnd.cpp:661-664 writes the same thing down for the
+                    // to occlude.  camwnd.cpp:667-670 writes the same thing down for the
                     // caulk case: *"It still looks opaque (the vertex colour is
                     // 0xFFFFFFFF), but nothing behind it is ever occluded"*.  The lever is
                     // the binary's own translucent-fill recipe — MATERIAL_COLOR {0,0,0,0}
@@ -3091,6 +3178,12 @@ void CamWnd_Draw( HWND hwnd )
                 }
                 else                                            // world -> faithful + FAKELIGHT
                 {
+                    // Resident geometry first: the face's vertices are already in a persistent
+                    // editor VB, so draw them by NAME and only rebuild when there is no run.
+                    if ( Cam_DrawFaceResident( ent, worldTech ) )
+                    {
+                        continue;
+                    }
                     // FAKELIGHT (vertcol_shaded) LERPS by materialColor.w, so the neutral that
                     // shows the texture is w=0 (the binary's {0,0,0,0}) - a float[3] here would
                     // have its .w read OUT OF BOUNDS by R_AddCmdSetMaterialColor.
@@ -3104,6 +3197,7 @@ void CamWnd_Draw( HWND hwnd )
                 }
             }
         }
+    }
     }
 
     // The default and sun world draws set MATERIAL_COLOR per face; reset to white so the
@@ -3121,10 +3215,13 @@ void CamWnd_Draw( HWND hwnd )
     // DrawLightsMain and patches through the patch loop below, so both are skipped here.
     {
         static const float s_white[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
-        if ( !g_qeglobals.dontDrawSelectedTint )
-            R_AddCmdSetMaterialColor( g_qeglobals.d_savedinfo.colors[11] );  // red {1,0.25,0.25}
-        else
-            R_AddCmdSetMaterialColor( s_white );
+        // The second unsorted immediate loop, same fix as the world fill (0x4080e3 qsorts by
+        // material sort key).  The white/red tint bracket is per-FACE and emitted ON CHANGE:
+        // a sorted stream can interleave brushes, and RC_SET_MATERIAL_COLOR is CRITICAL.
+        const float *tintCol = g_qeglobals.dontDrawSelectedTint
+                             ? s_white : g_qeglobals.d_savedinfo.colors[11];  // red {1,0.25,0.25}
+        static std::vector< CamSortFace > s_selFaces;
+        s_selFaces.clear();
         for ( selbrush_t *b = selected_brushes.next; b != &selected_brushes; b = b->next )
         {
             brush_t *def = b->def;
@@ -3144,16 +3241,29 @@ void CamWnd_Draw( HWND hwnd )
             // hides the texture, so the colour is what is dropped — the same split the
             // pass's own !dontDrawSelectedTint gate already makes, applied per brush.
             const bool uvOwns = KiwiUvEd_OverlaySuppressed( def, -1 );
-            if ( uvOwns )
-                R_AddCmdSetMaterialColor( s_white );
             for ( int fi = 0; fi < def->faceCount; ++fi )
             {
                 face_t *f = &def->faces[fi];
-                if ( f->w )
-                    Cam_DrawFaceFaithfulImmediate( f, TECHNIQUE_UNLIT );     // textured * red
+                if ( !f->w )
+                    continue;
+                // `classifySky` is false: a selected sky brush draws its OWN material at
+                // TECHNIQUE_UNLIT, so there is no overlay bucket on this pass.
+                Cam_GatherFace( s_selFaces, f, FaceMaterial( &f->mtldef[layer] ),
+                                &f->mtldef[layer], /*classifySky*/ false, uvOwns );
             }
-            if ( uvOwns && !g_qeglobals.dontDrawSelectedTint )
-                R_AddCmdSetMaterialColor( g_qeglobals.d_savedinfo.colors[11] );   // back to red
+        }
+        Cam_SortGatheredFaces( s_selFaces );
+        const float *lastSelCol = nullptr;
+        for ( size_t si = 0; si < s_selFaces.size(); ++si )
+        {
+            const CamSortFace &ent  = s_selFaces[si];
+            const float       *want = ent.uvOwns ? s_white : tintCol;
+            if ( want != lastSelCol )                       // pointer identity: both are stable
+            {
+                R_AddCmdSetMaterialColor( want );
+                lastSelCol = want;
+            }
+            Cam_DrawFaceFaithfulImmediate( ent.f, TECHNIQUE_UNLIT );         // textured * red
         }
         R_AddCmdSetMaterialColor( s_white );                // reset for overlays / next frame
     }
@@ -3167,16 +3277,39 @@ void CamWnd_Draw( HWND hwnd )
     // xmodel mesh and the prefab contents textured.  Identity view orientation (DrawBrush
     // derives the entity inverse itself), viewType -1 so DrawShadedWireframe draws every edge.
     // SELECTED entities get their own tinted pass after the main flush (0x40809d).
+    // How many surfs the world fill put in the open flush window before this pass.  Zero on a
+    // prefab-authored map — which is when the window and the cached block coincide.
+    const int  pendingBeforeEntity = Editor_PendingSurfCount();
+    bool       entReplayed         = false;
+    // on a PATCHED frame the pass opens with this many entries already in
+    // the flush comparator's order (the objects that did not change), so the flush merges
+    // the live tail into them instead of re-sorting the map.  0 = no claim.
+    int        entSortedFirst      = 0;
+    int        entSortedCount      = 0;
     {
-        extern selbrush_t selected_brushes;
-        // KIWI-UX (ROUND AV, ITEMS 1+2): publish draw_meth2 for this pass only.  `entTech`
-        // below stays exactly as it was — it is draw_meth1, and it is what a model-LESS
-        // point entity's placeholder bbox draws with, so leaving it at 29 keeps every
-        // info_* / node_* / trigger_* box a wireframe box.  Only the MESH follows the
-        // show state.  Reset to -1 after the loop: the 2D views (xywnd.cpp:4055/:4156) and
-        // the white-outline pass below call the same DrawBrush and must keep their own 29.
-        extern int g_drawBrushMeshTech;   // brush.cpp:6535
-        g_drawBrushMeshTech = Cam_EntityMeshTech( worldTech );
+        // mp_backlot's worldspawn has no brushes: the level arrives as one misc_prefab, so this
+        // loop and the DrawBrush_PrefabContents recursion under it ARE the frame.
+        PROF_SCOPED( "entity + prefab pass" );
+        // This pass's OUTPUT does not depend on the camera, so an unchanged frame replays it.
+        // kiwi_surfcache.h has the validity contract.  The PASS KEY folds in every per-frame
+        // input no epoch covers, BY VALUE — the per-vertex sun bake writes FRAME state into
+        // VERTEX data (brush.cpp:2602), so a block taken with it off must not replay with it on.
+        const unsigned entPassKey =
+              ( (unsigned)Cam_EntityMeshTech( worldTech ) & 0xFFu )
+            | ( (unsigned)( g_qeglobals.current_edit_layer & 0xFF ) << 8 )
+            | ( Radiant_DecorEnabled()    ? 0x00010000u : 0u )
+            | ( g_edSunBakeVertColor      ? 0x00020000u : 0u )
+            | ( Cam_SunPrevEnabled()      ? 0x00040000u : 0u )
+            | ( sunApprox                 ? 0x00080000u : 0u )
+            | ( useCache                  ? 0x00100000u : 0u );
+        // ── KIWI: GATHER THE DISPATCH LIST ONCE ──────
+        // The gate below used to live inside the draw loop.  It is hoisted because the
+        // per-object cache needs the SAME sequence twice — once to ask each object
+        // whether it changed, once to draw the ones that did — and a gate written twice
+        // is a gate that drifts.  Function-static: CamWnd_Draw is not re-entrant.
+        static std::vector< selbrush_t * >      s_entBrushes;
+        static std::vector< unsigned long long > s_entSigs;
+        s_entBrushes.clear();
         {
             selbrush_t *head = &active_brushes;
             for ( selbrush_t *b = head->next; b && b != head; b = b->next )
@@ -3190,13 +3323,6 @@ void CamWnd_Draw( HWND hwnd )
                 if ( !ec || !*(int *)&ec->fixedsize )           // only fixedsize point entities
                     continue;
 
-                // 0x407af0 - CullCubic per world-oriented entity brush.  Without it every
-                // off-screen misc_model / misc_prefab is skinned and the skinned-surf buffers
-                // overflow, dropping later on-screen models.  Cam_Fov set the planes in WORLD
-                // space above, which is the state CullCubic reads.  Live editor only.
-                if ( CamWnd_CullCubic( b ) )
-                    continue;
-
                 // ── KIWI-UX (ROUND AX, ITEM 2): ENTITIES OBEY FilterBrush TOO ────
                 // USER REPORT: "entities are not hidable via H, it does nothing even
                 // though the eyeball changes in the UI."  The eyeball was telling the
@@ -3208,39 +3334,175 @@ void CamWnd_Draw( HWND hwnd )
                 // FilterBrush folds the hidden bit into its answer — `(brushFlags & 5)`
                 // at filters.cpp:724, bit 0 = filtered, bit 2 = HIDDEN — and it is what
                 // gates the convex world pass at :2615, the ROUND-AF patch pass at :2975,
-                // BOTH 2D loops (xywnd.cpp:1085/:1163) and every pick entry
-                // (select.cpp:672/:774, kiwi_pick.cpp:167).  Its absence here is exactly
+                // BOTH 2D loops (xywnd.cpp:1086/:1163) and every pick entry
+                // (select.cpp:672/:774, kiwi_pick.cpp:167).  Its absence here was exactly
                 // the round-AF defect repeated on the ENTITY pass, and it is why hiding
                 // worked in the XY view and did nothing in the 3D view.
                 //
                 // A raw `brushFlags & 4` test would have been the wrong fix: it would be
                 // a second spelling of "hidden" that drifts from the filter and layer
                 // semantics the shared predicate already owns.  The gate also cannot go
-                // inside DrawBrush — brush.cpp:7185 only tests bit 1 (layer) and its
+                // inside DrawBrush — brush.cpp:7208 only tests bit 1 (layer) and its
                 // `drawFlags & 1` force-draw contract is what the tint and outline passes
                 // rely on — so it goes in the caller loop, which is the binary's own
-                // shape (0x407af0: `!CullCubic && !FilterBrush`).
+                // shape (0x407af0: `!FilterBrush`).
                 if ( FilterBrush( b, 0 ) )
                     continue;
+                s_entBrushes.push_back( b );
+            }
+        }
+        const int entCount = (int)s_entBrushes.size();
+
+        // The frame in which NOTHING changed is answered first and costs nothing extra:
+        // the whole block comes back presorted, with its resident index runs.
+        entReplayed  = KiwiSurfCache_TryReplay( entPassKey );
+        int entMode  = entReplayed ? KIWI_SURFPASS_REPLAY : KIWI_SURFPASS_LIVE;
+
+        // Only when that was refused is it worth asking each object whether IT changed.
+        // The signatures come out of the recorded walk (kiwi_walkcache.h).
+        s_entSigs.clear();
+        if ( !entReplayed && entCount > 0 && KiwiSurfCache_PatchWanted( entPassKey ) )
+        {
+            {
+                PROF_SCOPED( "cam surf cache signatures" );
+                if ( KiwiWalk_BeginReplay( &active_brushes,
+                                           (const orientation_t *)world_orient_matrix,
+                                           /*backward*/ false ) )
+                {
+                    s_entSigs.resize( (size_t)entCount, 0ull );
+                    for ( int i = 0; i < entCount; ++i )
+                    {
+                        if ( !KiwiWalk_TopLevel( s_entBrushes[i] ) )
+                            break;               // the recording abandoned: leave the rest 0
+                        s_entSigs[i] = KiwiWalk_SubtreeSignature( s_entBrushes[i] );
+                    }
+                    KiwiWalk_EndReplay();
+                }
+            }
+            if ( (int)s_entSigs.size() == entCount )
+            {
+                entMode = KiwiSurfCache_PassMode( entPassKey, &s_entBrushes[0],
+                                                  &s_entSigs[0], entCount );
+                entReplayed = ( entMode == KIWI_SURFPASS_REPLAY );
+            }
+        }
+
+        // ── PATCH: replay the objects that did not change, redraw the ones that did ──
+        if ( entMode == KIWI_SURFPASS_PATCH )
+        {
+            R_Ed_BeginLineBucket();
+            if ( !KiwiSurfCache_PatchReplay( &entSortedFirst, &entSortedCount ) )
+            {
+                // Refused after the gate said yes: nothing was emitted, so fall through to
+                // the live pass (which opens its own bucket).
+                R_Ed_EndLineBucket();
+                KiwiSurfCache_PatchEnd();
+                entMode        = KIWI_SURFPASS_LIVE;
+                entSortedFirst = 0;
+                entSortedCount = 0;
+            }
+        }
+        if ( entMode == KIWI_SURFPASS_PATCH )
+        {
+            {
+                extern int g_drawBrushMeshTech;   // brush.cpp:6535
+                g_drawBrushMeshTech = Cam_EntityMeshTech( worldTech );
+                const bool walkOpened = KiwiWalk_BeginReplay(
+                    &active_brushes, (const orientation_t *)world_orient_matrix,
+                    /*backward*/ false );
+                bool walkReplay = walkOpened;
+                for ( int i = 0; i < entCount; ++i )
+                {
+                    selbrush_t *b = s_entBrushes[i];
+                    // A cursor mismatch abandons the RECORDING, not this loop: the objects
+                    // still to draw would otherwise leave holes for a frame.  DrawBrush
+                    // walks its own prefab list when the recording is gone.
+                    if ( walkReplay && !KiwiWalk_TopLevel( b ) )
+                        walkReplay = false;
+                    if ( !KiwiSurfCache_ObjectDirty( i ) )
+                        continue;                 // its surfs and lines already replayed
+                    GfxColor ecol;
+                    Cam_BrushColor2d( b, &ecol );
+                    entity_s_def *eDef = b->owner ? (entity_s_def *)b->owner->def : nullptr;
+                    eclass_t     *ec   = eDef ? eDef->eclass : nullptr;
+                    const int entTech  = ( ec && ( ec->classtype & 0x18 ) )
+                                         ? (int)worldTech : 29;
+                    DrawBrush( b, (orientation_t *)world_orient_matrix, /*viewType*/ -1,
+                               entTech, &ecol, /*width*/ 1, /*drawFlags*/ 0, "" );
+                }
+                if ( walkOpened )
+                    KiwiWalk_EndReplay();
+                g_drawBrushMeshTech = -1;
+            }
+            R_Ed_EndLineBucket();
+            KiwiSurfCache_PatchEnd();
+        }
+
+        if ( entMode == KIWI_SURFPASS_LIVE )
+        {
+        KiwiSurfCache_BeginRecord( entPassKey );
+        // Group this pass's line stream by colour: Ed_EmitLineBatch's per-colour-run
+        // RC_SET_MATERIAL_COLOR breaks R_AddLineCmd's merge, and each broken command costs a
+        // full backend tess flush.  INSIDE the record bracket deliberately, so the GROUPED
+        // bytes are what the surf cache captures.  Every other pass stays immediate.
+        R_Ed_BeginLineBucket();
+        extern selbrush_t selected_brushes;
+        // KIWI-UX (ROUND AV, ITEMS 1+2): publish draw_meth2 for this pass only.  `entTech`
+        // below stays exactly as it was — it is draw_meth1, and it is what a model-LESS
+        // point entity's placeholder bbox draws with, so leaving it at 29 keeps every
+        // info_* / node_* / trigger_* box a wireframe box.  Only the MESH follows the
+        // show state.  Reset to -1 after the loop: the 2D views (xywnd.cpp:4056/:4156) and
+        // the white-outline pass below call the same DrawBrush and must keep their own 29.
+        extern int g_drawBrushMeshTech;   // brush.cpp:6535
+        g_drawBrushMeshTech = Cam_EntityMeshTech( worldTech );
+        {
+            // The dispatch list gathered above IS this loop's sequence — the FilterBrush /
+            // fixedsize / patch gate now lives there and only there.  The PREFAB SUBTREES
+            // under each brush are replayed from the recording; KiwiWalk_TopLevel advances
+            // the cursor per dispatched brush, and the signature it can then read is what
+            // the next frame compares this object against (kiwi_surfcache.h).
+            const bool walkReplay = KiwiWalk_BeginReplay(
+                &active_brushes, (const orientation_t *)world_orient_matrix,
+                /*backward*/ false );
+            for ( int i = 0; i < entCount; ++i )
+            {
+                selbrush_t   *b     = s_entBrushes[i];
+                entity_s_def *eDef  = b->owner ? (entity_s_def *)b->owner->def : nullptr;
+                eclass_t     *ec    = eDef ? eDef->eclass : nullptr;
 
                 GfxColor ecol;
                 Cam_BrushColor2d( b, &ecol );
 
                 // Model/prefab classes take the camera technique (meshes/contents render lit
                 // through the surf-cache); plain point entities keep the wireframe bbox.
-                const int entTech = ( ec->classtype & 0x18 /*CLASS_MODEL|CLASS_PREFAB*/ )
+                const int entTech = ( ec && ( ec->classtype & 0x18 /*CLASS_MODEL|CLASS_PREFAB*/ ) )
                                     ? (int)worldTech : 29;
                 // KISAK drawFlags 0 = draw ALL layers in one pass.  The binary runs TWO passes,
                 // DrawGeneralWorld_(tech, 8=SKIP_MULTIPLY) @0x407f3b then (tech, 4=ONLY_MULTIPLY)
                 // @0x4082f3; this pass runs ONCE, so 8 would drop every additive/effect
                 // prefab-content layer.  drawFlags 0 short-circuits Editor_SurfFilter
                 // ((drawFlags&0xC)==0), letting all layers draw ordered by material sortKey.
+                if ( walkReplay )
+                    KiwiWalk_TopLevel( b );      // put the cursor on this brush's node
                 DrawBrush( b, (orientation_t *)world_orient_matrix, /*viewType (no cull)*/ -1,
                            entTech, &ecol, /*width*/ 1, /*drawFlags*/ 0, /*layerPrefix*/ "" );
+                // Close this object's segment.  A zero signature (no recording, or the
+                // cursor drifted) makes the whole capture unpatchable — the block still
+                // caches, it just cannot be edited one object at a time.
+                KiwiSurfCache_RecordNode(
+                    b, walkReplay ? KiwiWalk_SubtreeSignature( b ) : 0ull );
             }
+            if ( walkReplay )
+                KiwiWalk_EndReplay();
         }
         g_drawBrushMeshTech = -1;   // KIWI-UX (ROUND AV): draw_meth2 == draw_meth1 again
+        R_Ed_EndLineBucket();        // emit the grouped lines...
+        KiwiSurfCache_EndRecord();   // ...then capture them with the pass
+        }
     }
+    // With `pendingBeforeEntity`, this is how the flush decides whether the window it is about
+    // to emit is EXACTLY the replayed block — the only case where its order is already sorted.
+    const int pendingAfterEntity = Editor_PendingSurfCount();
 
     // Curve-point candidate markers (binary DrawGeneralWorld_ → Draw_PatchSelectPoints at
     // 0x407bb4): the GREEN UNSELECTED-candidates overlay, self-gated on sel_curvepoint/
@@ -3268,7 +3530,24 @@ void CamWnd_Draw( HWND hwnd )
         static const float s_flushNeutral[4] = { 0.0f, 0.0f, 0.0f, 0.0f };   // binary R_SetMaterialColor(NULL)
         R_AddCmdSetMaterialColor( s_flushNeutral );
     }
-    R_AddEditorSurfsCmd();
+    {
+        PROF_SCOPED( "main surf flush (sort)" );
+        // `presorted`: the window is byte-for-byte the block the cache replayed, already in this
+        // comparator's order — claimed ONLY when the world fill put nothing ahead of the block
+        // and nothing was appended after the pass.  `runsKey`: tells the backend THIS window is
+        // the one it may hold resident index runs for; every other flush leaves it cleared.
+        {
+            const bool windowIsBlock = entReplayed
+                                    && pendingBeforeEntity == 0
+                                    && Editor_PendingSurfCount() == pendingAfterEntity;
+            KiwiEdScene_StampMainFlush( KiwiSurfCache_BuildSerial(), windowIsBlock );
+            // a patched frame is not the block, but its head IS sorted.
+            // The flush honours the claim only when it names the window's own first entry,
+            // so a world fill ahead of the pass just falls back to the full sort.
+            KiwiEdScene_StampSortedPrefix( entSortedFirst, entSortedCount );
+        }
+        R_AddEditorSurfsCmd();
+    }
 
     // PATCH fill/wireframe.  DrawGeneralWorld_ -> DrawBrush routes patch brushes to the camera
     // (viewType>2) tech-29 branch, sub_4415D0 - the FILLED per-material-layer patch draw
@@ -3278,6 +3557,7 @@ void CamWnd_Draw( HWND hwnd )
     // pass's range.  It must NOT straddle the main accumulation - doing so discards every surf
     // the world fill queued and makes the main flush re-draw the patch range.
     {
+        PROF_SCOPED( "patch pass" );
         extern void DrawBrush( selbrush_t *b, const orientation_t *orient, int viewType,
                                int technique, GfxColor *col, char width, int drawFlags,
                                const char *layerPrefix );
@@ -3314,7 +3594,7 @@ void CamWnd_Draw( HWND hwnd )
                 //
                 // NOT A DEVIATION: the binary has no separate patch pass at all —
                 // DrawGeneralWorld_ (0x407af0) runs ONE loop over the world brushes
-                // gated on `!CullCubic && !FilterBrush` and lets DrawBrush (0x47B018)
+                // gated on `!FilterBrush` and lets DrawBrush (0x47B018)
                 // dispatch patches out of it.  The port split that loop in two so the
                 // patch surfs could be self-bracketed (see the note above), and the
                 // split dropped the gate on one side.  This restores it.
@@ -3383,7 +3663,7 @@ void CamWnd_Draw( HWND hwnd )
             // pass above.  Needed because hidden and selected are not exclusive — the
             // outliner's eye can hide a row that stays selected, and Select_HideUnselected
             // (select.cpp:4184) leaves the selection intact by construction.  This mirrors
-            // xywnd.cpp:1163, which gates its selected loop the same way.
+            // xywnd.cpp:1164, which gates its selected loop the same way.
             if ( FilterBrush( b, 0 ) )
                 continue;
             const int entTech = ( ec->classtype & 0x18 /*MODEL|PREFAB*/ ) ? (int)worldTech : 29;
@@ -3409,7 +3689,8 @@ void CamWnd_Draw( HWND hwnd )
     // selected-entity (0x4080e3) flushes and BEFORE the decoration/white-outline tail.  The
     // position is load-bearing: the multiply quad can only darken ALREADY-RASTERISED pixels and
     // the depth-EQUAL re-add can only land on depths the base pass wrote.
-    Cam_SunPrev_Main( faithfulSun, sunMultiplyMat, s_litSunDir, s_litAmbientMul, s_litHaveSun );
+    Cam_SunPrev_Main( faithfulSun, sunMultiplyMat, s_litSunDir, s_litAmbientMul,
+                      s_litSunColor, s_litHaveSun );
 
     // 0x4082f8 — LIGHT-REGION HULL overlay, drawn right after the DrawLightsMain loop (and,
     // in the binary, after the additive world pass at 0x4082f3 the port defers).  Draws the
@@ -3429,6 +3710,7 @@ void CamWnd_Draw( HWND hwnd )
     // display-only overlays), default-OFF behind RADIANT_DECOR.
     if ( Radiant_DecorEnabled() )
     {
+
         extern selbrush_t selected_brushes;
         // DrawTriggerRadius — every trigger_radius/_disk entity (classtype & 0xC0), in
         // both lists (binary: selected-loop else-branch + active-loop trigger-class).
@@ -3480,6 +3762,7 @@ void CamWnd_Draw( HWND hwnd )
     // bottoms out in DrawGeo's tech-29 line outline.
     if ( !g_qeglobals.dontDrawSelectedOutlines )
     {
+
         // 0x4084d2 - clear DEPTH|STENCIL before the outline draws so the selected wireframe
         // passes the depth test against the coplanar geometry and shows THROUGH.  whichToClear=6
         // means the colour arg is unused.
@@ -3508,7 +3791,7 @@ void CamWnd_Draw( HWND hwnd )
                 continue;
             // KIWI-UX (ROUND AX, ITEM 2): and the outline pass, which needs the gate MOST.
             // It passes drawFlags = 1, and drawFlags & 1 is precisely what defeats
-            // DrawBrush's own visibility test (brush.cpp:7185) — so without an explicit
+            // DrawBrush's own visibility test (brush.cpp:7208) — so without an explicit
             // FilterBrush here a hidden selected entity would still get a white wireframe
             // drawn over a freshly cleared depth buffer, i.e. hidden geometry showing
             // THROUGH everything.  Same predicate, same reason as the two passes above.
@@ -3767,6 +4050,15 @@ void CamWnd_Draw( HWND hwnd )
         // every other entry in this tail.
         extern void KiwiSection_DrawWorld();  // kiwi_section.cpp
         KiwiSection_DrawWorld();
+        // KIWI-UX: the SUN HELPER — a warm glyph where the sun is, its direction
+        // arrow, and (only while the helper is selected) the orthographic volume
+        // the sun projects through the biggest brush.  Beside the section handle
+        // for the same reason that one sits here: it exists with no command
+        // running, and it is a screen-constant handle that must read on top of
+        // the world.  Self-gated (nothing at all unless the worldspawn carries a
+        // "sundirection") and self-budgeted, like every other entry in this tail.
+        extern void KiwiSun_DrawWorld();      // kiwi_sun.cpp
+        KiwiSun_DrawWorld();
         // KIWI-UX (ROUND AX, ITEM 6): the entity-browser DRAG GHOST — the box the
         // entity would land in, drawn while its payload hovers the camera image.
         // Self-gated (nothing while no drag is over the camera) and self-budgeted
@@ -3776,6 +4068,9 @@ void CamWnd_Draw( HWND hwnd )
         extern void KiwiEntBrowser_DrawGhost();   // kiwi_entbrowser.cpp
         KiwiEntBrowser_DrawGhost();
     }
+
+
+
 }
 
 // CCamWnd MFC window (same skeleton as CXYWnd/CZWnd), rendering into d_hwndCamera, plus the
@@ -4768,6 +5063,7 @@ static void Region_DrawHull( const winding_t *w, const GfxColor *col )
 // ─────────────────────────────────────────────────────────────────────────────
 void RegionLightRelated()
 {
+
     float    rgba[4];
     GfxColor col;
 
@@ -5131,8 +5427,6 @@ void CamWnd_RegionsForSelected()
 //      extern void CamWnd_OnContextMenuDeselectAll();
 //  ...plus the non-handler entry points other TUs already reach through m_pCamWnd:
 //      extern void CamWnd_BuildMatrix();                    // was CCamWnd::Cam_BuildMatrix
-//      extern void CamWnd_SetupClipPlanes( const float *orient );  // was Cam_SetupClipPlanes
-//      extern char CamWnd_CullCubic( selbrush_t *brush );   // was CullCubic( brush, cam )
 //      extern void CamWnd_Draw( HWND hwnd );                // was CCamWnd::Cam_Draw
 //      extern void CamWnd_ChangeFloor( int a2 );            // was Cam_ChangeFloor( cam, a2 )
 //      extern void CamWnd_MouseControl( float dtime );      // was Cam_MouseControl( cam, dt )
@@ -5205,30 +5499,41 @@ void CamWnd_Paint( HWND hwnd )
 // dropped, and the frame ends with RTT_End.  `w`/`h` come from the ImGui dock cell.
 void CamWnd_RenderToRT( int w, int h )
 {
+    PROF_SCOPED( "Camera RenderToRT" );
     if ( !dx.device || w < 1 || h < 1 )
         return;
     // Drive the viewport's own size state from the dock-cell size (was set by CamWnd_OnSize).
     g_camwndState.width  = w;   g_camwndState.height = h;
     g_camwndState.camera.width = w;   g_camwndState.camera.height = h;
-    if ( !RTT_Begin( RTT_CAMERA, w, h ) )   // points FRAME_BUFFER at the RT + suppresses Present
-        return;
+    {
+        if ( !RTT_Begin( RTT_CAMERA, w, h ) )   // points FRAME_BUFFER at the RT + suppresses Present
+            return;
+    }
 
-    R_BeginFrame();
-    R_BeginSharedCmdList();
-    R_AddCmdClearScreen( 7, g_qeglobals.d_savedinfo.colors[4], 1.0f, 0 );   // COLOR_CAMERABACK
-    static const float s_white[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
-    R_AddCmdSetMaterialColor( s_white );
+    {
+        R_BeginFrame();
+        R_BeginSharedCmdList();
+        R_AddCmdClearScreen( 7, g_qeglobals.d_savedinfo.colors[4], 1.0f, 0 );   // COLOR_CAMERABACK
+        static const float s_white[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+        R_AddCmdSetMaterialColor( s_white );
+    }
 
     // CamWnd_Draw's hwnd is used ONLY for the terrain-paint cursor ring (ScreenToClient +
-    // GetClientRect at camwnd.cpp:2244/2246, gated on cursor_visible && sub_401D50()); it is not
+    // GetClientRect at camwnd.cpp:2308/2246, gated on cursor_visible && sub_401D50()); it is not
     // the render target.  Pass the live d_hwndCamera so that path still resolves during the shell
     // transition.
     CamWnd_Draw( g_qeglobals.d_hwndCamera );
 
-    R_EndFrame();
+    {
+        R_EndFrame();
+    }
     R_IssueRenderCommands( (uint)-1 );
-    R_SortMaterials();
-    RTT_End();
+    {
+        R_SortMaterials();
+    }
+    {
+        RTT_End();
+    }
 }
 
 // 0x402f10  CCamWnd::OnDestroy tail - persist the window placement.
@@ -5471,8 +5776,9 @@ HWND CamWnd_CreateRaw( HWND parent, int x, int y, int w, int h )
         s_classRegistered = true;
     }
 
+    // CREATED HIDDEN — see the same note in XYWnd_CreateRaw (xywnd.cpp).
     return CreateWindowExA( 0, CAMWND_CLASS_NAME, nullptr,
-                            WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN,
+                            WS_CHILD | WS_CLIPSIBLINGS | WS_CLIPCHILDREN,
                             x, y, w, h, parent, nullptr, inst, nullptr );
 }
 

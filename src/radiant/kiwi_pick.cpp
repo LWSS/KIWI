@@ -621,6 +621,20 @@ pick_result_t Pick( const ray_t &ray, sel_mask_t kindMask, unsigned pickFlags )
     r.point[1] = start[1] + dir[1] * t.dist;
     r.point[2] = start[2] + dir[2] * t.dist;
     r.screenDist = 0.0f;                       // area hit (spec §2)
+    // The surface the ray landed on, straight out of the trace record — see
+    // pick_result_t.  Rejected if it is not a usable direction, so a consumer that
+    // tests haveNormal can use it without re-normalising.
+    {
+        const float l2 = t.normal[0] * t.normal[0] + t.normal[1] * t.normal[1]
+                       + t.normal[2] * t.normal[2];
+        if ( l2 > 0.9f && l2 < 1.1f )
+        {
+            r.normal[0]  = t.normal[0];
+            r.normal[1]  = t.normal[1];
+            r.normal[2]  = t.normal[2];
+            r.haveNormal = true;
+        }
+    }
 
     // Face granularity only when the mask asks for faces and NOT objects: with both
     // bits set (mode 5 "Everything") an area hit resolves to the whole object, which

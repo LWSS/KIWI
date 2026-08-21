@@ -43,7 +43,7 @@
 //
 //   * the axes are (S, T) in TEXTURE-REPEAT units — 1.0 == one tile of the ACTIVE face's
 //     material.  KIWI's own ST are already in repeat units (Face_MoveTexture builds the
-//     matrix and brush.cpp:2609 emits `st = row·p + m3`), so nothing is converted;
+//     matrix and brush.cpp:2618 emits `st = row·p + m3`), so nothing is converted;
 //   * the TEXTURE and its grid are FIXED in the canvas; the WIREFRAMES move.  That is the
 //     Blender / Quake UV-editor metaphor and it is the inverse of TrenchBroom's, where the
 //     face is fixed.  Consequence, stated once and true of every gesture below: **the
@@ -110,8 +110,8 @@
 //
 // ── D-BD-E — THIS WINDOW OWNS NO D3D OBJECT, SO IT HAS NO RESET STORY ──────────────
 // The Sky tab needs a MANAGED per-face copy because a sky colorMap is a CUBEMAP
-// (kiwi_skybox.cpp:300-345).  An ORDINARY material's colorMap is MAPTYPE_2D, and the
-// round-AZ 2D arm (kiwi_skybox.cpp:468) hands ImGui the ENGINE'S OWN `img->texture.map`
+// (kiwi_skybox.cpp:301-346).  An ORDINARY material's colorMap is MAPTYPE_2D, and the
+// round-AZ 2D arm (kiwi_skybox.cpp:469) hands ImGui the ENGINE'S OWN `img->texture.map`
 // and stores nothing.  This file only ever takes that arm: a colormap that is not
 // MAPTYPE_2D draws no background at all (and the toolbar says why).  Nothing is allocated,
 // so there is no kiwiTexCache_t and no RTT_ReleaseForReset registration to forget.
@@ -493,12 +493,12 @@
 #define KUVE_SNAP_MAX_PTS      1024     // cap on each gesture-start snap candidate set
 
 // The dock window.  Begins/Ends itself and early-outs on its §9 flag, exactly like
-// KiwiOutliner_Draw / KiwiEntBrowser_Draw / KiwiSky_Draw (imgui_shell.cpp:1451-1462).
+// KiwiOutliner_Draw / KiwiEntBrowser_Draw / KiwiSky_Draw (imgui_shell.cpp:1484-1495).
 void KiwiUvEd_Draw();
 
 // §15 palette + §3 registration.  The window TOGGLE itself dispatches through
 // KiwiWindows_DispatchInstant (the §9 table owns the flag) — this only names the row, the
-// same split kiwi_skybox.cpp:1355-1364 makes.
+// same split kiwi_skybox.cpp:1381-1390 makes.
 void KiwiUvEd_RegisterCommands();
 
 // ═════════════════════════════════════════════════════════════════════════════════════

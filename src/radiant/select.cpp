@@ -287,8 +287,7 @@ static void Select_Brush_2( selbrush_t *list, selbrush_t *b )
 //  xx2@0xC, xx3@0x10, xx4@0x14 = a 0x30-byte orientation copy, dist@0x44, selected@0x48,
 //  _pad[0]@0x49, normal@0x4C).  The faceVis identity t->hit.face == &brush->faces[idx] holds
 //  because Brush_Ray returns into the real instance faceVis array (built by sub_477D70).
-//  KISAK: sub_48D460's camera/XY frustum cull (sub_405620 + CXYWnd_SetupClipPlanes +
-//  CullCubic + sub_46CD80) is skipped - it needs m_pCamWnd/m_pActiveXY, and it is a pure
+//  KISAK: sub_48D460's camera/XY frustum cull is not ported - it is a pure
 //  optimization (a brush is processed unless culled by BOTH views), so never culling is safe.
 // ═════════════════════════════════════════════════════════════════════════════
 extern selbrush_t active_brushes;          // map.cpp (0x23F189C)

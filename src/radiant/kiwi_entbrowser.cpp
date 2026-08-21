@@ -12,14 +12,14 @@
 //   ENUMERATE      EclassList_Gather( rows )                  win_ent.cpp:169
 //                  (FillClassList 0x496800's own g_eclass walk)
 //   PLACE          Test_Ray( origin, dir, contents, t, n )    select.cpp:770
-//                  called as Cam_ContextMenu calls it (camwnd.cpp:4273)
+//                  called as Cam_ContextMenu calls it (camwnd.cpp:4424)
 //   THE BOX        Ed_EnsureCurrentMaterial_Kiwi + Brush_Alloc + Brush_Create +
 //                  Brush_BuildWindings + KiwiExtrude_LandDef — the same five the
-//                  ported CreateEntityBrush (xywnd.cpp:3306-3325) runs, and the
+//                  ported CreateEntityBrush (xywnd.cpp:3327-3346) runs, and the
 //                  same five kiwi_primitive.cpp's AllocBoxDef/land pair runs
 //   CREATE         Undo_ClearRedo / Undo_GeneralStart( "create entity" ) /
 //                  CreateEntityFromName / Undo_End — CreateEntityFromClassname's
-//                  own bracket, verbatim (xywnd.cpp:3374-3386)
+//                  own bracket, verbatim (xywnd.cpp:3375-3387)
 //   THE TAIL       KiwiCmd_AfterPaste()                       kiwi_command.cpp:1193
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -43,29 +43,29 @@
 #include <vector>
 
 // ── ported entry points (each verified against its definition) ──────────────
-extern int         Sys_Printf( const char *fmt, ... );                       // win_qe3.cpp:112   int Sys_Printf(const char*,...)
+extern int         Sys_Printf( const char *fmt, ... );                       // win_qe3.cpp:118   int Sys_Printf(const char*,...)
 extern int         g_nUpdateBits;                                            // engine_stubs.cpp:773  int g_nUpdateBits
-extern eclass_t   *Eclass_ForName( int has_brushes, const char *name );      // eclass.cpp:1090   eclass_t *Eclass_ForName(int,const char*)
-extern brush_t    *Brush_Alloc( const void *planeptsSrc, eclass_t *ecls );   // brush.cpp:463     brush_t *Brush_Alloc(const void*,eclass_t*)
-extern void        Brush_Create( float *mins, float *maxs, brush_t *b, eclass_t *ecls ); // brush.cpp:508  void Brush_Create(float*,float*,brush_t*,eclass_t*)
-extern void        Brush_BuildWindings( brush_t *def, int bFull );           // brush.cpp:1418    void Brush_BuildWindings(brush_t*,int)
-extern void        Select_Deselect( int a1 );                                // select.cpp:1445   void Select_Deselect(int)
-extern void        CreateEntityFromName( const char *str );                  // xywnd.cpp:3390    void CreateEntityFromName(const char*)
+extern eclass_t   *Eclass_ForName( int has_brushes, const char *name );      // eclass.cpp:1096   eclass_t *Eclass_ForName(int,const char*)
+extern brush_t    *Brush_Alloc( const void *planeptsSrc, eclass_t *ecls );   // brush.cpp:465     brush_t *Brush_Alloc(const void*,eclass_t*)
+extern void        Brush_Create( float *mins, float *maxs, brush_t *b, eclass_t *ecls ); // brush.cpp:510  void Brush_Create(float*,float*,brush_t*,eclass_t*)
+extern void        Brush_BuildWindings( brush_t *def, int bFull );           // brush.cpp:1434    void Brush_BuildWindings(brush_t*,int)
+extern void        Select_Deselect( int a1 );                                // select.cpp:1444   void Select_Deselect(int)
+extern void        CreateEntityFromName( const char *str );                  // xywnd.cpp:3429    void CreateEntityFromName(const char*)
 extern void        Test_Ray( float *start, float *dir, int contents,
                              edTrace_t *t, int num_traces );                 // select.cpp:770    void Test_Ray(float*,float*,int,edTrace_t*,int)
 extern void        Undo_ClearRedo();                                         // undo.cpp:176      void Undo_ClearRedo()
 extern void        Undo_GeneralStart( const char *operation );               // undo.cpp:367      void Undo_GeneralStart(const char*)
 extern void        Undo_End();                                               // undo.cpp:686      void Undo_End()
-extern bool        Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId ); // mainfrm.cpp:1340  bool Radiant_RegisterCommand(const char*,byte,byte,int)
-// xywnd.cpp:1571 // KIWI-UX forwarder for the static Ed_EnsureCurrentMaterial
+extern bool        Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId ); // mainfrm.cpp:1358  bool Radiant_RegisterCommand(const char*,byte,byte,int)
+// xywnd.cpp:1595 // KIWI-UX forwarder for the static Ed_EnsureCurrentMaterial
 // (the same one kiwi_extrude.cpp / kiwi_primitive.cpp use).
-extern void        Ed_EnsureCurrentMaterial_Kiwi();                          // xywnd.cpp:1571    void Ed_EnsureCurrentMaterial_Kiwi()
+extern void        Ed_EnsureCurrentMaterial_Kiwi();                          // xywnd.cpp:1605    void Ed_EnsureCurrentMaterial_Kiwi()
 // kiwi_extrude.cpp:2328 — the ported land triple (Entity_LinkBrush ->
 // Brush_AddToList -> Brush_AddToList2), exported so nothing re-spells it.
-extern selbrush_t *KiwiExtrude_LandDef( brush_t *def );                      // kiwi_extrude.cpp:2349  selbrush_t *KiwiExtrude_LandDef(brush_t*)
-// imgui_shell.cpp:739 — the live dockspace id, for the JustOpened re-dock latch
+extern selbrush_t *KiwiExtrude_LandDef( brush_t *def );                      // kiwi_extrude.cpp:2360  selbrush_t *KiwiExtrude_LandDef(brush_t*)
+// imgui_shell.cpp:741 — the live dockspace id, for the JustOpened re-dock latch
 // (the same accessor kiwi_outliner.cpp:118 declares).
-extern ImGuiID     ImGuiShell_DockRoot();                                    // imgui_shell.cpp:789   ImGuiID ImGuiShell_DockRoot()
+extern ImGuiID     ImGuiShell_DockRoot();                                    // imgui_shell.cpp:796   ImGuiID ImGuiShell_DockRoot()
 
 // win_ent.cpp's eclass row.  MUST MATCH win_ent.cpp:161 and
 // imgui_panel_entity.cpp:38 verbatim (shared-header consolidation pending — the
@@ -75,7 +75,7 @@ struct eclassRow_t
     const char *name;
     eclass_t   *eclass;
 };
-extern void EclassList_Gather( std::vector<eclassRow_t> &rows );             // win_ent.cpp:169   void EclassList_Gather(std::vector<eclassRow_t>&)
+extern void EclassList_Gather( std::vector<eclassRow_t> &rows );             // win_ent.cpp:159   void EclassList_Gather(std::vector<eclassRow_t>&)
 
 namespace
 {
@@ -83,7 +83,7 @@ namespace
     const float KENTB_TILE_W    = 84.0f;    // the 3D cell
     const float KENTB_TILE_H    = 64.0f;
     const float KENTB_PAD       = 6.0f;     // isometric inset inside the cell
-    const int   KENTB_TRACES    = 20;       // Cam_ContextMenu's own depth (camwnd.cpp:4196)
+    const int   KENTB_TRACES    = 20;       // Cam_ContextMenu's own depth (camwnd.cpp:4347)
     const float KENTB_BOX_SIDE  = 64.0f;    // placeholder cube for a BRUSH eclass
 
     // Filter kinds.  "Point" == eclass_t.fixedsize (a real bbox); "Brush" == a
@@ -184,7 +184,7 @@ namespace
             b = ec->color[2];
         }
         // A class whose QUAKED block gave no colour parses as pure white
-        // (eclass.cpp:810) — leave it, white reads fine on the dark theme.
+        // (eclass.cpp:853) — leave it, white reads fine on the dark theme.
         r *= mul; g *= mul; b *= mul;
         if ( r > 1.0f ) r = 1.0f;
         if ( g > 1.0f ) g = 1.0f;
@@ -207,7 +207,7 @@ namespace
         else
         {
             // A brush class has NO bbox (mins/maxs stay zero — only the QUAKED
-            // size block sets them, eclass.cpp:836), so the tile shows the unit
+            // size block sets them, eclass.cpp:879), so the tile shows the unit
             // cube that stands for "this class takes a box".
             for ( int k = 0; k < 3; ++k )
             {
@@ -300,7 +300,7 @@ namespace
         else
             ImGui::TextUnformatted( "brush entity   (drops a 64-unit box)" );
         // qe3.h:604 — the five preview-model slots; [0] is "defaultmdl=" from the
-        // QUAKED attributes (eclass.cpp:915).  Named here because it is exactly
+        // QUAKED attributes (eclass.cpp:958).  Named here because it is exactly
         // the set a future thumbnail pass would render.
         if ( r.eclass->default_model_name && *r.eclass->default_model_name )
         {
@@ -426,7 +426,7 @@ namespace
         // "no model" and "load failed" alike, which is exactly the three cases that
         // should all draw a bbox.
         //
-        // NO ImDrawList CALLBACK, on purpose.  imgui_shell.cpp:786 + :654 has to bracket
+        // NO ImDrawList CALLBACK, on purpose.  imgui_shell.cpp:788 + :654 has to bracket
         // its viewport image with an ALPHABLENDENABLE-off callback because the RT's
         // alpha is not guaranteed opaque; a callback SPLITS the draw list, which in a
         // grid of tiles is the one thing not to do.  The thumbnail's alpha was forced
@@ -513,7 +513,7 @@ namespace
         }
 
         // ── rung 1: a real surface under the drop pixel ─────────────────────
-        // Test_Ray called the way Cam_ContextMenu calls it (camwnd.cpp:4273),
+        // Test_Ray called the way Cam_ContextMenu calls it (camwnd.cpp:4424),
         // with the camera-viewport contents mask the pick layer already computes.
         float hit[3];
         float normal[3] = { 0.0f, 0.0f, 1.0f };
@@ -523,7 +523,7 @@ namespace
             // `static` that was memset on every call, so the `static` bought nothing
             // but a hidden global shared between the two callers (the ImGui-frame
             // ghost preview and the post-present drop).  edTrace_t is 88 bytes
-            // (camwnd.cpp:4194-4195) x KENTB_TRACES 20 = 1760 bytes of stack, which
+            // (camwnd.cpp:4345-4346) x KENTB_TRACES 20 = 1760 bytes of stack, which
             // is what Cam_ContextMenu's own array costs and is nothing on a 1 MB
             // stack.
             edTrace_t traces[KENTB_TRACES];
@@ -603,7 +603,7 @@ namespace
     }
 
     // The placeholder world brush the ported creator binds to.  Same five calls
-    // CreateEntityBrush runs (xywnd.cpp:3306-3325) and the same land triple
+    // CreateEntityBrush runs (xywnd.cpp:3327-3346) and the same land triple
     // kiwi_extrude/kiwi_primitive use; only the bounds come from here.
     bool DropPlaceholder( const float mins[3], const float maxs[3] )
     {
@@ -680,7 +680,7 @@ namespace
         // as kiwi_primitive.cpp:1173).
         Select_Deselect( 1 );
 
-        // CreateEntityFromClassname's own bracket, verbatim (xywnd.cpp:3374-3386).
+        // CreateEntityFromClassname's own bracket, verbatim (xywnd.cpp:3375-3387).
         Undo_ClearRedo();
         Undo_GeneralStart( "create entity" );
         if ( !DropPlaceholder( mins, maxs ) )
@@ -695,10 +695,10 @@ namespace
         Sys_Printf( "Placed %s at %g %g %g.\n", classname, mins[0], mins[1], mins[2] );
 
         // ── KIWI-UX (CLEANUP, C-20): SAY SO WHEN THE MODEL KEY IS STILL MISSING ──
-        // CreateEntityFromName's model-class tail (xywnd.cpp:3435-3490) ends in
+        // CreateEntityFromName's model-class tail (xywnd.cpp:3436-3491) ends in
         // Ed_PostAddModelCommand, which posts WM_COMMAND to g_qeglobals.d_hwndEntity
         // — and this shell keeps that HWND permanently NULL by design
-        // (radiant_main.cpp:419-420: CEntityWnd is the MFC inspector the ImGui panels
+        // (radiant_main.cpp:420-421: CEntityWnd is the MFC inspector the ImGui panels
         // replace).  So the post is a GUARANTEED no-op: the entity lands with its
         // bbox and NO "model" epair, and nothing on screen said why.  There is no
         // "pick a model for this entity" entry point in the shell to call instead —
@@ -707,7 +707,7 @@ namespace
         // GetOpenFileNameA from here would run it inside the deferred post-present
         // act.  So this reports honestly rather than pretending; setting the key from
         // the Entity panel is the working route.  These are the same five classes
-        // xywnd.cpp:3435-3437 tests.
+        // xywnd.cpp:3436-3438 tests.
         if ( !I_stricmp( classname, "misc_model" )   || !I_stricmp( classname, "misc_prefab" ) ||
              !I_stricmp( classname, "script_model" ) || !I_stricmp( classname, "script_vehicle" ) ||
              !I_stricmp( classname, "dyn_model" ) )
@@ -717,7 +717,7 @@ namespace
         }
 
         // The paste precedent: the new entity is already selected
-        // (CreateEntityFromName's Select_Deselect + Select_Brush, xywnd.cpp:3419),
+        // (CreateEntityFromName's Select_Deselect + Select_Brush, xywnd.cpp:3420),
         // so this only puts it under a PAUSED move gizmo.  No-op in the classic
         // keymap profile and no-op if nothing landed (kiwi_command.cpp:1193).
         KiwiCmd_AfterPaste();
@@ -739,7 +739,7 @@ void KiwiEntBrowser_Draw()
     if ( ImGui::Begin( KiwiWindows_Title( KIWI_WIN_ENTITIES ), open ) )
     {
         // ── the header: the same search idiom the Textures panel uses ───────
-        // (imgui_shell.cpp:751's InputTextWithHint, round AE.)
+        // (imgui_shell.cpp:753's InputTextWithHint, round AE.)
         ImGui::SetNextItemWidth( 150.0f );
         ImGui::InputTextWithHint( "##entsearch", "search", s_filter, sizeof( s_filter ) );
         if ( s_filter[0] )
@@ -892,7 +892,7 @@ bool KiwiEntBrowser_CameraDropTarget( float imgMinX, float imgMinY )
     // overlay tail is not something to do for a decoration.  Consequence: the ghost is
     // one tick behind the cursor, because ImGuiShell_RenderViewportsToRT (which draws
     // the camera) runs BEFORE the compositing ImGui frame this code is in
-    // (radiant_main.cpp:942 vs :945).  At the pump's 60 Hz that is 16 ms of trail.
+    // (radiant_main.cpp:943 vs :945).  At the pump's 60 Hz that is 16 ms of trail.
     if ( p && !p->Delivery && p->Data && p->DataSize > 0 )
     {
         char name[64];
@@ -902,7 +902,7 @@ bool KiwiEntBrowser_CameraDropTarget( float imgMinX, float imgMinY )
         name[sizeof( name ) - 1] = '\0';
 
         s_ghostHave = false;
-        // Argument order is (has_brushes, name) — eclass.cpp:1090; PerformDrop:632
+        // Argument order is (has_brushes, name) — eclass.cpp:1138; PerformDrop:632
         // makes the identical call, and a preview that resolved a DIFFERENT class than
         // the drop would be the worst possible preview.
         const eclass_t *ec = name[0] ? Eclass_ForName( 0, name ) : nullptr;

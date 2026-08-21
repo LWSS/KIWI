@@ -265,7 +265,7 @@ void Eclass_CheckEntities(models_t *model)
     while ( cnt );
 
     Eclass_FreeEpairs( model );
-    j__free_0((void *)model->handle);
+    j__free_0((void *)model->handle);   // heap NAME string, NOT an XModel* — BY3-audit note at EOF
     j__free_0((void *)model->x15);
     j__free(model);
 }
@@ -407,13 +407,14 @@ char Prefab_Load(const char *a1, int *a2)
 
     path += ( a1 ? a1 : "" );
 
-    if ( Eclass_RealizeModel( a2, path.c_str() ) )
-    {
+    const char ok = Eclass_RealizeModel( a2, path.c_str() ) ? 1 : 0;
+
+
+    if ( ok )
         Sys_Printf( " successful.\n" );
-        return 1;
-    }
-    Sys_Printf( " failed.\n" );
-    return 0;
+    else
+        Sys_Printf( " failed.\n" );
+    return ok;
 }
 
 
@@ -428,6 +429,8 @@ char Prefab_Load(const char *a1, int *a2)
 // ─────────────────────────────────────────────────────────────────────────────
 LRESULT Model_load(char *modelPath, int a2)
 {
+    // R_RegisterModel below is not a lookup: on a miss it pulls the XModel off disk/iwd, then
+    // every material it references, then every image those bind — synchronously.
     const char *path = modelPath;
 
     if ( !I_strnicmp(modelPath, "xmodel", 6) )
@@ -446,6 +449,8 @@ LRESULT Model_load(char *modelPath, int a2)
     // `mov [ecx+4], eax` (the extra `*` crashed — handle is 0 for a fresh node).
     models_t *node = *(models_t **)a2;
     node->handle = (int)R_RegisterModel((char *)path);
+    // counted after the registration, so the plot's rise
+    // tracks completed precaches rather than attempts.
 
     {
         models_t **model = (models_t **)a2;
@@ -522,7 +527,7 @@ void Eclass_FreeModel(void **a1)
     for ( int cnt = 4; cnt; --cnt )
         j__free_0( (void *)*p_x90++ );
 
-    j__free_0( (void *)model->handle );
+    j__free_0( (void *)model->handle );   // heap NAME string, NOT an XModel* — BY3-audit note at EOF
     j__free_0( (void *)model->x15 );
     j__free( model );
 }
@@ -982,6 +987,7 @@ LABEL_4:
 // ─────────────────────────────────────────────────────────────────────────────
 void Eclass_LoadModel(int a1)
 {
+
     eclass_t *ec = (eclass_t *)a1;
     std::vector<std::string> list;   // was MFC CStringList; IDA sub_5AC540(&v9, 10) — 10 is only an allocation hint
 
@@ -1141,6 +1147,9 @@ LABEL_6:
 static inline bool Eclass_hasModel( models_t *e ) { return Eclass_hasModel( (eclass_t *)e ) != 0; }
 models_t *Eclass_01(const char *a1, int a2)
 {
+    // The model/prefab CLASS cache is a LINEAR LIST walked with _stricmp per node, once per
+    // model entity — O(entities x distinct models).  Eclass_InsertAlphabetized keeps g_models
+    // sorted, so an early-exit or a hash index is available if a load profile ever wants one.
     entity_s *ent = (entity_s *)(intptr_t)a2;
 
     if ( !a1 || !strlen(a1) )
@@ -1698,3 +1707,10 @@ void Load_Defs( const char *folder )
     if ( list )
         FS_FreeFileList( list );
 }
+
+
+// TWO DIFFERENT `handle` fields live at struct offset +4 and only one of them is freeable:
+//   * TOP-LEVEL nodes (0x184 B, the g_models/g_eclass lists) — handle is a HEAP NAME STRING
+//     (operator new in Eclass_01).  Every Eclass_CheckEntities caller passes one of these.
+//   * SUB-nodes (0x98 B, the +0x160 list) — handle IS the XModel*, which is HUNK memory.
+//     Both cleanup loops free the sub-NODE and must never free sub->handle.

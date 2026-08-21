@@ -8,6 +8,9 @@
 #include "qe3.h"
 #include <universal/q_parse.h>   // Com_ParseExt, parseInfo_t, Com_GetParseThreadInfo
 #include <universal/assertive.h> // iassert (USE_ASSERTS always on; same handler as Assert)
+extern void KiwiPrefabPrefix_Invalidate();   // brush.cpp:7110
+extern void KiwiShadowCache_Invalidate();    // kiwi_shadowcache.cpp:46
+extern void KiwiWalkCache_MarkStructural();  // kiwi_walkcache.h
 
 // ─── helpers declared by other Radiant files ─────────────────────────────────
 extern void  Assert( const char *file, int line, int type, const char *fmt, ... );
@@ -210,6 +213,16 @@ void SetKeyValue( entity_s_def *e, const char *key, const char *value )
 {
     if ( !e || !key || !*key )
         return;
+
+    // Both caches derive from this epair list (prefab layer prefix from "model", the
+    // walk recording from origin/angles/modelscale/spawnflags): any key set drops them.
+    KiwiPrefabPrefix_Invalidate();
+    KiwiShadowCache_Invalidate();
+    // "classname" re-runs the eclass lookup, which is what decides whether a brush counts
+    // as a fixed-size entity — the one key that changes the SET of objects rather than one
+    // object's state (kiwi_walkcache.h KiwiWalkCache_MarkStructural).
+    if ( !_stricmp( key, "classname" ) )
+        KiwiWalkCache_MarkStructural();
 
     sub_483500( (int)(intptr_t)e + 0x74, key, value );   // SetKeyValue_0 — raw set (primary effect)
 
@@ -431,6 +444,7 @@ void Entity_Free_R( entity_s *e )
 // fmt + level 0 byte-match).
 void Entity_LinkBrush( brush_t *b, entity_s *world_ent )
 {
+    KiwiWalkCache_MarkStructural();   // ownership move: the tree's shape changed
     if ( b->oprev || b->onext )
         Com_Error( ERR_FATAL, "Entity_LinkBrush: Allready linked" );
     vassert( (b->refCount >= 0), "(b->refCount) = %i", b->refCount );
@@ -464,6 +478,7 @@ void Entity_LinkBrush( brush_t *b, entity_s *world_ent )
 // match).
 void Entity_UnlinkBrush( brush_t *b )
 {
+    KiwiWalkCache_MarkStructural();   // see Entity_LinkBrush
     if ( !b->onext || !b->oprev )
         Com_Error( ERR_FATAL, "Entity_UnlinkBrush: Not currently linked" );
     vassert( (b->refCount > 0), "(b->refCount) = %i", b->refCount );

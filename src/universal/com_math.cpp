@@ -533,14 +533,9 @@ float __cdecl Vec2Normalize(vec2r v)
 
 void __cdecl Vec3NormalizeFast(float *v)
 {
-    float number; // [esp+0h] [ebp-1Ch]
-    float invLength; // [esp+18h] [ebp-4h]
-
-    number = Vec3LengthSq(v);
-    invLength = I_rsqrt(number);
-    v[0] = v[0] * invLength;
-    v[1] = v[1] * invLength;
-    v[2] = v[2] * invLength;
+    float number = Vec3LengthSq(v);
+    float invLength = I_rsqrt(number);
+    Vec3Scale(v, invLength, v);
 }
 
 float __cdecl Vec3NormalizeTo(const vec3r v, vec3r out)
@@ -881,13 +876,9 @@ void __cdecl YawVectors2D(float yaw, float *forward, float *right)
 
 void __cdecl Vec2NormalizeFast(float *v)
 {
-    float number; // [esp+18h] [ebp-8h]
-    float invLength; // [esp+1Ch] [ebp-4h]
-
-    number = *v * *v + v[1] * v[1];
-    invLength = I_rsqrt(number);
-    *v = *v * invLength;
-    v[1] = v[1] * invLength;
+    float number = Vec2LengthSq(v);
+    float invLength = I_rsqrt(number);
+    Vec2Scale(v, invLength, v);
 }
 
 void __cdecl PerpendicularVector(const float* src, float* dst)
@@ -3153,6 +3144,12 @@ void __cdecl Vec3Scale(const float *v, float scale, float *result)
     result[0] = scale * v[0];
     result[1] = scale * v[1];
     result[2] = scale * v[2];
+}
+
+void __cdecl Vec2Scale(const float *v, float scale, float *result)
+{
+    result[0] = scale * v[0];
+    result[1] = scale * v[1];
 }
 
 void __cdecl Vec3Add(const float *a, const float *b, float *sum)

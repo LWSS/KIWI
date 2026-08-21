@@ -62,6 +62,66 @@ namespace
             return KCAM_DEG_PER_PX;
         return 360.0f / (float)c->height;
     }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  THE PITCH LIMITS: ±90 IS EXACT, ±89 IS ONLY FOR DRAGS
+    // ═══════════════════════════════════════════════════════════════════════
+    // The basis at a pole is NOT degenerate under this file's angle convention.
+    // CamWnd_BuildMatrix passes { -pitch, yaw, 0 } to AngleVectors, and with roll
+    // zero that gives  vright = ( sin y, -cos y, 0 )  and  vup = ( sp cy, sp sy,
+    // cp )  with sp = sin(-pitch) — both unit, both perpendicular, and both fully
+    // determined by the YAW at pitch = ±90 (com_math_anglevectors.cpp:34-43).  The
+    // yaw-plane forward/right pair is built from { 0, yaw, 0 } and never sees the
+    // pitch at all (camwnd.cpp:214-218).  So an axis-locked view may be pole-EXACT:
+    // an ortho TOP view at ±89 is a 1-degree tilt that leaks the side faces of
+    // axis-aligned geometry, and which sides it leaks depends on the approach yaw.
+    //
+    // KCAM_PITCH_DRAG_LIMIT is what an interactive DRAG may reach — unchanged at
+    // 89, because a drag through the pole would have the view pass over the top
+    // and come back mirrored, which is not what a pitch drag means.
+    //
+    // A drag that STARTS pole-exact is the one case that needs more than the flat
+    // limit.  The orbit's clamp is absolute-from-latch, so with pitch0 = -90 the
+    // first moved pixel would clamp to -89 and jump the view a whole degree — in
+    // the WRONG direction when the drag is INTO the pole (-90.2 clamps up to -89).
+    // Widening the limit to the latched pitch when that is already outside the
+    // range makes the first pixel smooth, keeps the zero-delta frame exact, and is
+    // bit-for-bit the old ±89 for every drag that starts inside it.
+    //
+    // the limit was never the "stuck at the top" the user then hit —
+    // the ORBIT's accumulator was, by banking the pixels the clamp refused.  See
+    // KiwiCam_OrbitDrag; this pair of numbers is unchanged.
+    const float KCAM_PITCH_DRAG_LIMIT = 89.0f;
+    const float KCAM_PITCH_MAX        = 90.0f;   // the pole, and the absolute bound
+
+    float KCam_PitchDragLimit( float pitch0 )
+    {
+        const float a = fabsf( pitch0 );
+        if ( !( a > KCAM_PITCH_DRAG_LIMIT ) )    // also catches a NaN latch
+            return KCAM_PITCH_DRAG_LIMIT;
+        return ( a > KCAM_PITCH_MAX ) ? KCAM_PITCH_MAX : a;
+    }
+
+    // ── THE WIDENING IS ONE-SIDED ───────────────────────────────────────────
+    // The band a drag starting at `pitch0` may use.  ±89 normally; a drag that
+    // BEGINS outside that (only a pole-exact axis snap puts it there) keeps its
+    // own side widened to the latched pitch so the first moved pixel is smooth,
+    // and the OPPOSITE side stays at 89 — a pole is a place you snap to, not a
+    // place a drag can arrive at, and the symmetric form let one long drag from
+    // TOP run all the way onto BOTTOM.
+    void KCam_PitchDragBounds( float pitch0, float *outLo, float *outHi )
+    {
+        float lo = -KCAM_PITCH_DRAG_LIMIT;
+        float hi =  KCAM_PITCH_DRAG_LIMIT;
+        const float w = KCam_PitchDragLimit( pitch0 );
+        if ( w > KCAM_PITCH_DRAG_LIMIT )
+        {
+            if ( pitch0 > 0.0f ) hi =  w;
+            else                 lo = -w;
+        }
+        *outLo = lo;
+        *outHi = hi;
+    }
     // ── SHAKEOUT I: THE WORLD FELT 10x TOO BIG ──────────────────────────────
     // USER DIRECTIVE, verbatim: "Scale of the map (3d view) is still way too big.
     // Tone it down by about a factor of 10 in terms of zoom and such."
@@ -152,7 +212,7 @@ namespace
     //   below, "default ON" since round N), and CamWnd_SetupScene's ortho arm
     //   builds a depth range that is SYMMETRIC ABOUT THE EYE:
     //       zNear = -KCAM_ORTHO_DEPTH , zFar = +KCAM_ORTHO_DEPTH
-    //   with KCAM_ORTHO_DEPTH = 131072 (camwnd.cpp:187 — the engine's own world
+    //   with KCAM_ORTHO_DEPTH = 131072 (camwnd.cpp:193 — the engine's own world
     //   bound, the ±131072 = 2^17 sentinel Brush_BuildWindings seeds its AABB at,
     //   brush.cpp:1470-1471).  Anything whose view-space depth from the EYE
     //   exceeds 131072 is clipped away by the projection.  There is no such
@@ -181,7 +241,7 @@ namespace
     //   reached by the wheel any more.
     //
     //   IT ALSO FIXES THE PERSPECTIVE ARM, which has a different failure at the
-    //   same ceiling: camwnd.cpp:224-229 records that the float32 MatrixInverse44
+    //   same ceiling: camwnd.cpp:230-235 records that the float32 MatrixInverse44
     //   loses the sign of the inverse-VP's m[3][3] on far-from-origin cameras
     //   (observed blacking out at world X ~ -175000), so CamWnd_SetupScene's
     //   R_Ed_ProjectionWouldBeValid guard starts DROPPING WHOLE FRAMES.  The old
@@ -196,14 +256,14 @@ namespace
     // Everything in the block above is still true: in ortho the framed geometry
     // sits at view depth s_dist and the projection clips it at KCAM_ORTHO_DEPTH,
     // so the ceiling MUST be derived from that slab.  What AZ did not question is
-    // that KCAM_ORTHO_DEPTH (camwnd.cpp:187) is itself a KIWI number, not an
+    // that KCAM_ORTHO_DEPTH (camwnd.cpp:193) is itself a KIWI number, not an
     // engine one — it was picked as "the engine world bound" because that is the
     // largest coordinate a BRUSH can have, and the slab is not measured in brush
     // coordinates.  It is measured from the EYE, and an ortho eye is a pseudo-eye
     // parked s_dist behind the pivot: it is not in the world and nothing is
     // stored there.  So the whole ladder moves up two powers of two:
     //
-    //     KCAM_ORTHO_DEPTH   131072 -> 524288   (camwnd.cpp:187, this round)
+    //     KCAM_ORTHO_DEPTH   131072 -> 524288   (camwnd.cpp:193, this round)
     //     the ortho ceiling   65536 -> 262144   (= depth/2, unchanged RELATION)
     //     KCAM_ORTHO_HALF_MAX 32768 -> 131072   (= depth/4, unchanged relation)
     //     the eye leash      131072 -> 524288   in ortho (see KCam_OriginBound)
@@ -241,7 +301,7 @@ namespace
     const float KCAM_MAX_DIST_ORTHO   = KCAM_ORTHO_DEPTH_HALF * 0.5f; // 262144
     // The PERSPECTIVE ceiling is NOT the slab — that arm has an infinite far plane
     // (m[2][2]=C, m[2][3]=1) and cannot clip on depth at all.  What bounds it is
-    // the float32 MatrixInverse44 degeneracy camwnd.cpp:224-229 records (the
+    // the float32 MatrixInverse44 degeneracy camwnd.cpp:230-235 records (the
     // inverse-VP loses the sign of m[3][3] on far-from-origin cameras; observed
     // blacking out at world X ~ -175000), which makes R_Ed_ProjectionWouldBeValid
     // start DROPPING WHOLE FRAMES.  AZ's 65536 keeps the eye inside ±131072 for a
@@ -406,7 +466,12 @@ namespace
     float s_orbPitch0   = 0.0f;
     float s_orbYaw0     = 0.0f;
     int   s_orbAccX     = 0;
-    int   s_orbAccY     = 0;
+    // FLOAT, and only because the pitch clamp REWINDS it (KiwiCam_OrbitDrag): the
+    // rewind lands on the exact pixel count the limit allows, which is fractional.
+    // A sum of integer pixel deltas is exact in float far past any drag length, so
+    // every frame that does not touch the clamp computes the same pitch it did as
+    // an int accumulator.
+    float s_orbAccY     = 0.0f;
 
     // ── shakeout E: the pan's per-gesture world-per-pixel anchor ────────────
     // See kiwi_camera.h "THE SHAKEOUT-E SENSITIVITY FIX".  Cached at PanBegin and
@@ -635,7 +700,7 @@ namespace
         s_orbPitch0 = c->angles[0];
         s_orbYaw0   = c->angles[1];
         s_orbAccX   = 0;
-        s_orbAccY   = 0;
+        s_orbAccY   = 0.0f;
         s_orbActive = true;
         s_have      = true;
     }
@@ -701,16 +766,37 @@ void KiwiCam_OrbitDrag( int dx, int dy )
     // angles (an incremental form would keep rotating the eye after the pitch had
     // stopped moving), and a long orbit cannot drift.
     s_orbAccX += dx;
-    s_orbAccY += dy;
+    s_orbAccY += (float)dy;
 
     // KIWI-UX (ROUND BM, ITEM 3): the rate is 360/height degrees per pixel — one
     // viewport height of drag is one full turn, on both axes, which is Plasticity's
     // own `2*PI*delta/clientHeight` (OrbitControls.ts:673-674).  See
     // KCam_OrbitDegPerPx.  The signs, the clamp and the latch are unchanged.
     const float degPerPx = KCam_OrbitDegPerPx( c );
-    float pitch = s_orbPitch0 - (float)s_orbAccY * degPerPx;
-    if ( pitch >  89.0f ) pitch =  89.0f;
-    if ( pitch < -89.0f ) pitch = -89.0f;
+    // ±89, widened on ONE side to the latched pitch when the orbit began on a
+    // pole-exact axis view — see KCam_PitchDragLimit / KCam_PitchDragBounds.
+    float lo = 0.0f, hi = 0.0f;
+    KCam_PitchDragBounds( s_orbPitch0, &lo, &hi );
+    float pitch = s_orbPitch0 - s_orbAccY * degPerPx;
+    // ── THE CLAMP MUST NOT BANK TRAVEL IT REFUSED ("stuck at the top") ───────
+    // This rig is absolute-from-latch, so a clamped frame used to leave the
+    // refused pixels sitting in the accumulator: push into a pole for 200 px and
+    // the view did not move again until 200 px had been dragged back out.  From
+    // a pole-exact TOP view that is the FIRST thing a drag does, and it reads as
+    // the camera being stuck there.  Rewinding the accumulator to the exact
+    // travel the limit allowed makes the next pixel in the other direction move
+    // by exactly one pixel's worth, which is what the incremental mouselook has
+    // always done.  A frame that does not clamp does not touch it.
+    if ( pitch > hi )
+    {
+        pitch     = hi;
+        s_orbAccY = ( s_orbPitch0 - hi ) / degPerPx;
+    }
+    else if ( pitch < lo )
+    {
+        pitch     = lo;
+        s_orbAccY = ( s_orbPitch0 - lo ) / degPerPx;
+    }
     const float dp   = pitch - s_orbPitch0;          // what the clamp ACTUALLY allowed
     const float dyaw = -(float)s_orbAccX * degPerPx;
 
@@ -1225,13 +1311,24 @@ void KiwiCam_LookDrag( int dx, int dy )
         return;
     camera_s *c = Ed_Camera();
 
-    // Same rate and same signs as CamWnd_Rotate2 (camwnd.cpp:4094) and as the
+    // Same rate and same signs as CamWnd_Rotate2 (camwnd.cpp:4245) and as the
     // orbit above, so mouselook and orbit never feel like two different cameras.
+    // This form is INCREMENTAL, so the limit is taken from the pitch BEFORE the
+    // move: from a pole-exact view the first frame either holds at ±90 (looking
+    // further into the pole) or leaves it smoothly, instead of snapping a degree.
+    // The limit then shrinks back to ±89 as the view re-enters the range, and is
+    // exactly ±89 for every look that started inside it.  The widening is ONE-
+    // SIDED (KCam_PitchDragBounds): leaving a pole shrinks the band behind you, so
+    // the pole is a one-way door out and the OPPOSITE pole is never reachable by
+    // looking.  Incremental, so there is nothing for a clamped frame to bank —
+    // the orbit's rewind has no counterpart here.
+    float lo = 0.0f, hi = 0.0f;
+    KCam_PitchDragBounds( c->angles[0], &lo, &hi );
     c->angles[1] -= (float)dx * KCAM_DEG_PER_PX;
     c->angles[0] -= (float)dy * KCAM_DEG_PER_PX;
 
-    if ( c->angles[0] >  89.0f ) c->angles[0] =  89.0f;
-    if ( c->angles[0] < -89.0f ) c->angles[0] = -89.0f;
+    if ( c->angles[0] > hi ) c->angles[0] = hi;
+    if ( c->angles[0] < lo ) c->angles[0] = lo;
     c->angles[1] = (float)fmod( (double)c->angles[1], 360.0 );
 
     Commit( c );
@@ -1320,6 +1417,79 @@ void KiwiCam_PanDrag( int dx, int dy )
     KiwiCam_Translate( d );
 }
 
+// ─── the 2D marker anchor (kiwi_camera.h WHERE THE CAMERA IS) ────────────────
+void KiwiCam_MarkerViewpoint( float out3[3] )
+{
+    if ( !out3 )
+        return;
+    const camera_s *c = Ed_Camera();
+    Copy3( c->origin, out3 );
+    if ( !KiwiCam_Ortho() )
+        return;                              // perspective: the eye IS the place
+    // Walk the pseudo-eye forward to the standoff plane.  s_dist is the ortho
+    // zoom driver, and the dolly keeps `origin = lookAt - f * s_dist`, so this is
+    // the pivot whenever that invariant holds and the on-axis point at the same
+    // depth when a live orbit has taken the pivot off-axis.
+    float f[3];
+    ViewForward( c, f );
+    Mad3( out3, f, s_dist, out3 );
+}
+
+// ─── the pose signature (kiwi_camera.h THE POSE SIGNATURE) ───────────────────
+namespace
+{
+    float s_poseOrigin[3] = { 0.0f, 0.0f, 0.0f };
+    float s_poseAngles[3] = { 0.0f, 0.0f, 0.0f };
+    bool  s_poseHave      = false;
+}
+
+bool KiwiCam_PoseChangedSinceLastTick()
+{
+    const camera_s *c = Ed_Camera();
+    bool changed = !s_poseHave;
+    for ( int i = 0; i < 3; ++i )
+    {
+        // Exact compare, not an epsilon: the question is "did anything write the
+        // pose", and a mutator that moved the camera by a hair still has to show.
+        if ( c->origin[i] != s_poseOrigin[i] || c->angles[i] != s_poseAngles[i] )
+            changed = true;
+        s_poseOrigin[i] = c->origin[i];
+        s_poseAngles[i] = c->angles[i];
+    }
+    s_poseHave = true;
+    return changed;
+}
+
+// ─── which side of a face the camera is on (kiwi_camera.h) ───────────────────
+float KiwiCam_FacingSign( const float point[3], const float normal[3] )
+{
+    if ( !point || !normal )
+        return 1.0f;
+    const camera_s *c = Ed_Camera();
+    float d;
+    if ( KiwiCam_Ortho() )
+    {
+        // No eye point means anything in a parallel projection — the eye is parked
+        // KiwiCam_Distance() behind the pivot and moves with the ZOOM.  The view
+        // DIRECTION is the whole answer: the camera is on the normal's side when
+        // it looks against the normal.  Derived from the angles through the same
+        // AngleVectors call the draw uses, so it can never be a frame behind.
+        float f[3];
+        ViewForward( c, f );
+        d = -Dot3( f, normal );
+    }
+    else
+    {
+        const float rel[3] = { c->origin[0] - point[0],
+                               c->origin[1] - point[1],
+                               c->origin[2] - point[2] };
+        d = Dot3( rel, normal );
+    }
+    // Exactly edge-on (d == 0, and NaN) keeps the normal's own side, so the answer
+    // is total and a degenerate frame changes nothing.
+    return ( d < 0.0f ) ? -1.0f : 1.0f;
+}
+
 // ─── view-cube mutator ───────────────────────────────────────────────────────
 void KiwiCam_LookAlong( float pitch, float yaw )
 {
@@ -1334,8 +1504,13 @@ void KiwiCam_LookAlong( float pitch, float yaw )
     c->angles[0] = pitch;
     c->angles[1] = yaw;
     c->angles[2] = 0.0f;
-    if ( c->angles[0] >  89.0f ) c->angles[0] =  89.0f;
-    if ( c->angles[0] < -89.0f ) c->angles[0] = -89.0f;
+    // ±90, NOT ±89.  This is the ABSOLUTE re-aim every axis snap goes through
+    // (the view cube's faces and corners, the Alt+MMB step and swipe, View Face),
+    // and clamping it to 89 was what made a TOP view a 1-degree tilt that leaked
+    // side faces — the pole is well defined here (KCam_PitchDragLimit).  The clamp
+    // stays as the entry point's sanity bound: no caller may aim past a pole.
+    if ( c->angles[0] >  KCAM_PITCH_MAX ) c->angles[0] =  KCAM_PITCH_MAX;
+    if ( c->angles[0] < -KCAM_PITCH_MAX ) c->angles[0] = -KCAM_PITCH_MAX;
 
     float f[3];
     ViewForward( c, f );

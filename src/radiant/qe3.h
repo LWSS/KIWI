@@ -915,7 +915,7 @@ struct qeglobals_t
     HWND      d_hwndZ;                 // 0x44
     HWND      d_hwndStatus;            // 0x48
     HWND      d_hwndGroup;             // 0x4C
-    HWND      d_hwndMedia;             // 0x50
+    HWND      d_hwndMedia;             // 0x50  (script-group dialog; unused — panel replaced it)
     vec3_t    d_points[2048];          // 0x54
     int       d_numpoints;             // 0x6054
     pedge_t   d_edges[512];            // 0x6058  (16 bytes each = 8192)

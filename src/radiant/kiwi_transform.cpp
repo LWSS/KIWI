@@ -29,6 +29,7 @@
 // documentation reason.
 #include "kiwi_grid.h"
 #include "kiwi_lines.h"
+#include "kiwi_lollipop.h"           // KiwiLollipop_FaceSide (the handle's display side)
 #include "kiwi_numeric.h"
 #include "kiwi_patchfillet.h"        // ROUND AO, ITEM 2 — KiwiFillet_CarryOnPlaneMove
 #include "kiwi_pick.h"
@@ -75,10 +76,10 @@ extern void  Undo_AddEntity( int a1 );                                 // undo.c
 // entity variant is what Cmd_OnSelectionDelete (mainfrm.cpp) feeds for the same
 // reason: Select_Delete frees an owner entity left with no brushes.
 extern void  Undo_AddEntity_W( entity_s *a1 );                         // undo.cpp:633
-extern void  Select_Deselect( int bAlsoFreeFaces );                    // select.cpp:1445 (0x48E800)
+extern void  Select_Deselect( int bAlsoFreeFaces );                    // select.cpp:1444 (0x48E800)
 extern void  Select_Brush( selbrush_t *brush, char some_overwrite,
                            char bStatus, char center_grid_on_selection ); // select.cpp:884
-extern void  Select_Delete();                                          // select.cpp:1521 (0x48E760)
+extern void  Select_Delete();                                          // select.cpp:1520 (0x48E760)
 
 extern bool  ImGuiShell_CameraPaintCursor( int *x, int *y, int *w, int *h );   // imgui_shell.cpp
 
@@ -860,12 +861,17 @@ namespace
             // The DELETE state draws the untouched baseline (DrawWorld), so the
             // handle must sit on the baseline too rather than on a face that has
             // been pushed out the far side of its own brush.
+            //
+            // AND AT REST THE CAMERA PICKS THE SIDE (KiwiLollipop_FaceSide,
+            // kiwi_lollipop.h): a face selection survives an orbit, so with the
+            // camera behind it the stem used to spawn on the far side.
+            // Presentation only — the push's own sign convention is untouched.
             const float s = m_deleting ? 0.0f : m_scalar;
             for ( int k = 0; k < 3; ++k )
-            {
                 outAnchor[k] = m_ref[k] + m_pushDir[k] * s;
-                outDir[k]    = ( s < 0.0f ) ? -m_pushDir[k] : m_pushDir[k];
-            }
+            const float side = KiwiLollipop_FaceSide( outAnchor, m_pushDir, s );
+            for ( int k = 0; k < 3; ++k )
+                outDir[k] = m_pushDir[k] * side;
             return true;
         }
 
@@ -1361,6 +1367,40 @@ namespace
             // rule (kiwi_extrude.cpp): they land a NEW brush and that brush stays
             // selected, because the flow's result is the new body.
             const bool deselectAfter = ( m_kind == SEL_FACE && !m_construct );
+
+            // ═══════════════════════════════════════════════════════════════
+            //  KIWI — AND AN **RMB** CONFIRM DESELECTS
+            // ═══════════════════════════════════════════════════════════════
+            // USER RULING, verbatim: *"When pressing right click to confirm a move
+            // (with move gizmo active), it should de-select the object since its
+            // done with the operation."*
+            //
+            // The round-K rule above kept OBJECT / EDGE / VERTEX moves selected
+            // because "a mapper places, looks, and nudges again — that is the
+            // gesture's whole rhythm".  That rhythm is Enter's and the click-away's;
+            // RMB is now the explicit "I am done with this", so it — and ONLY it —
+            // ends with nothing selected.  Enter-confirm, a click-away and every
+            // other route are untouched, so the nudge-again rhythm survives intact.
+            //
+            // FOUR THINGS THIS IS NOT:
+            //   * NOT A CANCEL.  Cancel() never reaches here, and KiwiCmd_Cancel
+            //     drops a parked request anyway.
+            //   * NOT AN RMB PAN OR A CONTEXT MENU.  The confirm edge is decided in
+            //     kiwi_viewport.cpp (net travel <= KVP_RMB_CONFIRM_PIXELS, round Z);
+            //     a drag past it never calls KiwiCmd_Confirm at all.
+            //   * NOT A PAUSED COMMAND RESUMING.  Resume is not a confirm.
+            //   * NOT ANOTHER COMMAND.  This is the Move class only — an extrude, a
+            //     bevel or a boolean lands a RESULT that the user goes on to work
+            //     with, and each keeps its own rule (kiwi_extrude.cpp).
+            //
+            // `m_undoOpen` is the gesture's own "did anything actually move" test
+            // (it is what OpenUndoForBrushes sets on the first real mutation), read
+            // here BEFORE Reset() clears it: an RMB that confirms a move which never
+            // left the start point should leave the selection alone, exactly as a
+            // no-op Enter does.  The FACE arm already deselects unconditionally
+            // above, so it is excluded rather than asked for twice.
+            if ( !deselectAfter && !m_construct && m_undoOpen && KiwiCmd_ConfirmIsRmb() )
+                KiwiCmd_DeselectAfterCommit();
 
             // ── KIWI-UX (ROUND L): THE PIVOT RIDES THE COMMITTED TRANSLATION ──
             // Placed BEFORE Reset (which forgets m_total) and before the deselect

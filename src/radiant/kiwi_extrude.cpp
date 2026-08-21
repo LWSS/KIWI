@@ -34,6 +34,7 @@
 #include "kiwi_grid.h"
 #include "kiwi_hover.h"                 // shakeout G — E's hovered-face arm
 #include "kiwi_lines.h"
+#include "kiwi_lollipop.h"              // KiwiLollipop_FaceSide (the handle's display side)
 #include "kiwi_numeric.h"
 #include "kiwi_pick.h"
 #include "kiwi_region.h"
@@ -638,15 +639,21 @@ namespace
         // pulled instead of being swallowed by it) and the direction carries the
         // distance's SIGN (so a region pulled the other way keeps its stem on the
         // side the user is dragging toward).
+        //
+        // AND AT REST THE CAMERA PICKS THE SIDE.  A construction plane's normal
+        // points whichever way the plane was made, so with m_dist still 0 the stem
+        // spawned behind the face as often as in front of it — the user's report.
+        // KiwiLollipop_FaceSide (kiwi_lollipop.h) is that rule; it is presentation
+        // only and the extrude's sign convention is unchanged.
         bool LollipopHandle( float outAnchor[3], float outDir[3] ) const override
         {
             if ( m_region < 0 || !outAnchor || !outDir )
                 return false;
             for ( int k = 0; k < 3; ++k )
-            {
                 outAnchor[k] = m_ref[k] + m_plane.normal[k] * m_dist;
-                outDir[k]    = ( m_dist < 0.0f ) ? -m_plane.normal[k] : m_plane.normal[k];
-            }
+            const float side = KiwiLollipop_FaceSide( outAnchor, m_plane.normal, m_dist );
+            for ( int k = 0; k < 3; ++k )
+                outDir[k] = m_plane.normal[k] * side;
             return true;
         }
 
@@ -1458,15 +1465,19 @@ namespace
         // distance is now the UN-EXTRUDE (carve / destroy), so the stem really does
         // flip to the inward side and the ball stays out in front of the face the
         // user is dragging toward instead of ending up buried in the solid.
+        // At rest the CAMERA picks the side (KiwiLollipop_FaceSide): normally a
+        // no-op here, because the face was picked by a ray and so already faces the
+        // viewer — but a face stays selected across an orbit, and after one the
+        // handle used to spawn on the far side of it.
         bool LollipopHandle( float outAnchor[3], float outDir[3] ) const override
         {
             if ( !m_have || !outAnchor || !outDir )
                 return false;
             for ( int k = 0; k < 3; ++k )
-            {
                 outAnchor[k] = m_ref[k] + m_plane.normal[k] * m_dist;
-                outDir[k]    = ( m_dist < 0.0f ) ? -m_plane.normal[k] : m_plane.normal[k];
-            }
+            const float side = KiwiLollipop_FaceSide( outAnchor, m_plane.normal, m_dist );
+            for ( int k = 0; k < 3; ++k )
+                outDir[k] = m_plane.normal[k] * side;
             return true;
         }
 

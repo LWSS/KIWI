@@ -3,42 +3,21 @@
 #endif
 // cod3src\radiant\layeredmaterialwnd.cpp
 //
-// The Layered-Material authoring window — a raw-Win32 tool palette (NOT an MFC
-// CWnd/CDialog): a top-level WS_EX_PALETTEWINDOW frame ("LayeredMaterialWindow")
-// hosting a COMCTL32 toolbar (5 command buttons) plus a custom-painted, scrolling
-// "layer list" child ("LayeredMaterialList") that renders each layer's material
-// thumbnail through the CoD D3D renderer (R_AddCmdDraw2DImage / R_AddCmdDrawText).
-// Both windows use plain DefWindowProcA window procs (no MFC message maps).
-//
-// Layered-material authoring window: a raw Win32 palette with a toolbar and custom
-// rendered layer list. Library writes occur only after its CRC changes.
+// The layered-material authoring model: the active library entry, its layers, the
+// live-add flag, and the six commands the tool palette drives.  The binary's raw-Win32
+// palette (WS_EX_PALETTEWINDOW frame + COMCTL32 toolbar + custom-painted
+// "LayeredMaterialList" child) is gone — imgui_panel_lyrmtl.cpp is the widget layer and
+// binds to the functions below.  Library writes still occur only after its CRC changes.
 
 #include "stdafx.h"
-#include <commctrl.h>
-#include <vector>
 #include "qe3.h"
-#include "mainfrm.h"                  // CMainFrame (g_pParentWnd->OnKeyDown)
-#include <gfx_d3d/r_material.h>       // Material
-#include <gfx_d3d/r_init.h>           // R_SetupRendertarget_CheckDevice, R_CheckTargetWindow, R_Hwnd_Resize, R_InitRendererForWindow, R_SortMaterials
-#include <gfx_d3d/r_rendercmds.h>     // R_BeginFrame/EndFrame, R_IssueRenderCommands, R_AddCmdClearScreen, R_AddCmdProjectionSet2D, R_AddCmdDraw2DImage, R_AddCmdDrawText, Font_s
+#include <gfx_d3d/r_init.h>           // R_InitRendererForWindow
 
-// ── engine / cross-file deps ─────────────────────────────────────────────────
-#include <qcommon/qcommon.h>          // Com_Error (errorParm_t), ERR_FATAL
 extern int  Sys_Printf( const char *fmt, ... );
 extern void Assert( const char *file, int line, int type, const char *fmt, ... );
-extern char *va( const char *fmt, ... );
-
-// Renderer entry points come from the gfx_d3d headers above (same set CCamWnd/CTexWnd::
-// OnPaint use).  IDB→kisak name map for this file:
-//   R_AddClearCmd      → R_AddCmdClearScreen
-//   SetProjection2D    → R_AddCmdProjectionSet2D
-//   R_GetFontHeight    → font->pixelHeight  (sub_5120A0 just returns it)
-//   R_InitRendererForWindow takes HWND (not CWnd*) in kisak.
 
 // Brush-list display rebuild.
 extern void sub_47D060( int listHead );   // 0x47D060
-
-// CMainFrame keyboard dispatch (mainfrm.cpp).
 
 // Global brush lists (qe3.cpp).
 extern selbrush_t active_brushes;          // 0x23F189C
@@ -48,31 +27,26 @@ extern selbrush_t filtered_brushes;        // 0x23F182C
 // Window-update bit-mask (qe3 / Sys_UpdateWindows).
 extern int g_nUpdateBits;                  // 0x25D5A74
 
-extern BOOL SaveRegistryInfo( const char *pszName, void *pvBuf, int lSize );
-extern BOOL LoadRegistryInfo( const char *pszName, void *pvBuf, long *plSize );
-
 // texwnd "layered-material window active" flag (texwnd_s.unk_bool @0x10039) — set so
 // the texture-window click-apply path can add a layer.  Accessor avoids exporting the
-// TU-local texwnd_s.  (Currently no consumer reads it in kisak, but the write is faithful.)
+// TU-local texwnd_s.
 extern "C" void TexWnd_SetLayeredMaterialActive( int active );   // texwnd.cpp
 
 // Data layer (layeredmaterials.cpp).
-extern unsigned int CheckLayeredMaterial_Modifications( uint8_t *a1, int a2, int a3 );
-extern int     dword_1814CF8;                    // lyrMtlGlob_crcToken (clean-library CRC)
-extern int     lyrMtlGlob_entryCount;            // 0x1814CFC
-extern uint8_t lyrMtlGlob_Layers[];              // 0x1814D00 — 512 × 84 bytes
-extern void    LayeredMaterials_AddEntries( char *name, HWND hWnd );   // 0x417050
-extern void   *LayeredMaterials_texcoords( char *entry );              // 0x417190 (delete entry; ported)
+extern void  LayeredMaterials_AddEntries( char *name, HWND hWnd );   // 0x417050
+extern void *LayeredMaterials_texcoords( char *entry );              // 0x417190 (delete entry; ported)
 
 // ═══════════════════════════════════════════════════════════════════════════════
-//  lyrMtlWndGlob — the window's global state (IDB struct @ 0x181F500; type in
-//  qe3.h — field names from the binary's assert strings).
+//  lyrMtlWndGlob — the tool's global state (IDB struct @ 0x181F500; type in qe3.h —
+//  field names from the binary's assert strings).  The two HWND members survive as
+//  plumbing only: `layerList` is the hidden blank pane R_BeginRegistrationInternal
+//  attaches a fifth swap chain to (radiant_main.cpp Radiant_CreateRenderWindows).
 // ═══════════════════════════════════════════════════════════════════════════════
 LyrMtlWndGlob_t lyrMtlWndGlob = {};
 
 // ── 84-byte library-entry view (the realised "activeLyrMtl" points into
 //    lyrMtlGlob_Layers[]).  Same layout the data layer (layeredmaterials.cpp) uses via
-//    its offset enum; named here for the window's field accesses.  Per the IDA cap
+//    its offset enum; named here for the tool's field accesses.  Per the IDA cap
 //    (LayeredMaterialWnd_RadMtl 0x4185C0) a library entry holds at most ONE layer, so
 //    only layer[0] fits the 84-byte stride.
 struct LyrMtlEntry
@@ -85,182 +59,55 @@ struct LyrMtlEntry
     qtexture_s *layerHandle;   // 0x50  layer[0].handle (radMtl)
 };
 static_assert( sizeof( LyrMtlEntry ) == 84, "LyrMtlEntry must be the 84-byte library entry" );
-// The per-layer pair {id,handle} stride is 8 bytes; the window indexes layer i at
+// The per-layer pair {id,handle} stride is 8 bytes; the tool indexes layer i at
 // (0x4C + 8*i, 0x50 + 8*i).  Helpers keep the byte arithmetic identical to the IDB.
 static inline int  *EntryLayerId    ( LyrMtlEntry *e, int i ) { return (int *)( (char *)e + 0x4C + 8 * i ); }
 static inline void **EntryLayerHandle( LyrMtlEntry *e, int i ) { return (void **)( (char *)e + 0x50 + 8 * i ); }
 static inline LyrMtlEntry *ActiveEntry() { return (LyrMtlEntry *)(intptr_t)lyrMtlWndGlob.activeLyrMtl; }
 
 // Forward decls (mutual references within this TU).
-static LRESULT sub_417440();
-static LRESULT sub_4174E0();
-static int     sub_4173D0();
-static BOOL    sub_417710();
-BOOL           LayeredMaterialWnd_Layer( unsigned int newLayerIndex );
-static int     sub_417D60();
-ATOM           LayeredMaterialWnd_PreCreateWindow();
-
+static BOOL sub_417710();
+static int  LayeredMaterialWnd_ToggleLiveAdd();
+BOOL        LayeredMaterialWnd_Layer( unsigned int newLayerIndex );
 
 // ═══════════════════════════════════════════════════════════════════════════════
-//  MFC shell — CNameDlg.  This TU is otherwise RAW WIN32 (its own window class +
-//  WndProc), so this dialog and LayeredMaterialWnd_OnNewMaterial's temporary-CWnd
-//  parent are the only MFC in the file.
+//  sub_417440  (0x417440) — toggle the "Live add layer" state and mirror it into the
+//  texture window.  The binary drove the toolbar button's TBSTATE_CHECKED bit and read
+//  the new state back out of it; the flag itself is the whole model.
 // ═══════════════════════════════════════════════════════════════════════════════
-
-// ═══════════════════════════════════════════════════════════════════════════════
-//  LayeredMaterialWnd_Show  (0x4176A0)
-// ═══════════════════════════════════════════════════════════════════════════════
-BOOL LayeredMaterialWnd_Show()
+static int LayeredMaterialWnd_ToggleLiveAdd()
 {
-    return ShowWindow( lyrMtlWndGlob.hwnd, SW_SHOW );
+    const int newChecked = ( lyrMtlWndGlob.liveAddActive ^ 1 ) & 1;
+    lyrMtlWndGlob.liveAddActive = newChecked;
+    TexWnd_SetLayeredMaterialActive( newChecked );
+    return newChecked;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-//  LayeredMaterialWnd_OnClose  (0x417680)
-//  Un-toggle the "Live add" button (if armed), then hide the frame.
-// ═══════════════════════════════════════════════════════════════════════════════
-BOOL LayeredMaterialWnd_OnClose()
-{
-    if ( (BYTE)lyrMtlWndGlob.liveAddActive )
-        sub_417440();
-    return ShowWindow( lyrMtlWndGlob.hwnd, SW_HIDE );
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-//  LayeredMaterialWnd_ToggleVisibility  (0x4176B0)
-//  (Identical body to CMainFrame::OnToggleLayeredMaterials 0x42BFE0.)
-// ═══════════════════════════════════════════════════════════════════════════════
-BOOL LayeredMaterialWnd_ToggleVisibility()
-{
-    if ( !IsWindowVisible( lyrMtlWndGlob.hwnd ) )
-        return ShowWindow( lyrMtlWndGlob.hwnd, SW_SHOW );
-    if ( (BYTE)lyrMtlWndGlob.liveAddActive )
-        sub_417440();
-    return ShowWindow( lyrMtlWndGlob.hwnd, SW_HIDE );
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-//  sub_4173D0  (0x4173D0) — recompute the layer-list vertical scrollbar extent.
-//  Each layer row is 68px tall; nMax = 68 * layerCount (0 when no active material).
-// ═══════════════════════════════════════════════════════════════════════════════
-static int sub_4173D0()
-{
-    RECT rc;
-    GetClientRect( lyrMtlWndGlob.layerList, &rc );
-
-    int n = 0;
-    if ( lyrMtlWndGlob.activeLyrMtl )
-        n = ActiveEntry()->layerCount;
-
-    SCROLLINFO si;
-    si.nMax   = 68 * n;
-    si.cbSize = sizeof( SCROLLINFO );   // 28
-    si.fMask  = SIF_RANGE | SIF_PAGE;   // 3
-    si.nMin   = 0;
-    si.nPage  = rc.bottom - rc.top;
-    return SetScrollInfo( lyrMtlWndGlob.layerList, SB_VERT, &si, TRUE );
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-//  sub_417440  (0x417440) — toggle the "Live add layer" toolbar button (cmd 0x88C4 =
-//  35012) and mirror its checked state into the liveAddActive flag + texwnd flag.
-//  Uses TB_GETSTATE (0x412) / TB_SETSTATE (0x411); flips TBSTATE bit 0 (CHECKED).
-// ═══════════════════════════════════════════════════════════════════════════════
-static LRESULT sub_417440()
-{
-    LRESULT st = SendMessageA( lyrMtlWndGlob.toolbar, TB_GETSTATE, 0x88C4u, 0 );
-    if ( st != -1 )
-    {
-        char newChecked = (char)( st ^ 1 );
-        SendMessageA( lyrMtlWndGlob.toolbar, TB_SETSTATE, 0x88C4u, (LPARAM)( st ^ 1 ) );
-        *(BYTE *)&lyrMtlWndGlob.liveAddActive = (BYTE)( newChecked & 1 );
-        TexWnd_SetLayeredMaterialActive( newChecked & 1 );
-        return st;
-    }
-    return st;
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-//  sub_4174E0  (0x4174E0) — sync the five toolbar buttons' state to the model.
-//  Buttons 0x88C3/0x88C4 (New/Live) enabled iff an active material exists; 0x88C5
-//  (Remove layer) iff the selected layer is in range; 0x88C6 (Down) iff a lower layer
-//  exists; 0x88C7 (Up) iff a higher layer exists.  Each toggles TBSTATE_ENABLED (0x04).
-// ═══════════════════════════════════════════════════════════════════════════════
-static LRESULT sub_4174E0()
-{
-    int sel = lyrMtlWndGlob.selectedLayerIndex;
-    int mtl = lyrMtlWndGlob.activeLyrMtl;
-    int selCopy = sel;
-
-    LRESULT v2 = SendMessageA( lyrMtlWndGlob.toolbar, TB_GETSTATE, 0x88C3u, 0 );
-    if ( v2 != -1 && ( ( ( v2 & 4 ) != 0 ) != ( mtl != 0 ) ) )
-        SendMessageA( lyrMtlWndGlob.toolbar, TB_SETSTATE, 0x88C3u, (LPARAM)( v2 ^ 4 ) );
-
-    LRESULT v3 = SendMessageA( lyrMtlWndGlob.toolbar, TB_GETSTATE, 0x88C4u, 0 );
-    if ( v3 != -1 && ( ( ( v3 & 4 ) != 0 ) != ( mtl != 0 ) ) )
-        SendMessageA( lyrMtlWndGlob.toolbar, TB_SETSTATE, 0x88C4u, (LPARAM)( v3 ^ 4 ) );
-
-    bool v4 = mtl && sel >= 0 && sel < ActiveEntry()->layerCount;
-    LRESULT v5 = SendMessageA( lyrMtlWndGlob.toolbar, TB_GETSTATE, 0x88C5u, 0 );
-    if ( v5 != -1 && ( ( ( v5 & 4 ) != 0 ) != v4 ) )
-        SendMessageA( lyrMtlWndGlob.toolbar, TB_SETSTATE, 0x88C5u, (LPARAM)( v5 ^ 4 ) );
-
-    bool v6 = mtl && ( selCopy + 1 ) < ActiveEntry()->layerCount;
-    LRESULT v7 = SendMessageA( lyrMtlWndGlob.toolbar, TB_GETSTATE, 0x88C6u, 0 );
-    if ( v7 != -1 && ( ( ( v7 & 4 ) != 0 ) != v6 ) )
-        SendMessageA( lyrMtlWndGlob.toolbar, TB_SETSTATE, 0x88C6u, (LPARAM)( v7 ^ 4 ) );
-
-    bool v8 = mtl && ( selCopy - 1 ) >= 0;
-    LRESULT result = SendMessageA( lyrMtlWndGlob.toolbar, TB_GETSTATE, 0x88C7u, 0 );
-    if ( result != -1 && ( ( ( result & 4 ) != 0 ) != v8 ) )
-        return SendMessageA( lyrMtlWndGlob.toolbar, TB_SETSTATE, 0x88C7u, (LPARAM)( result ^ 4 ) );
-    return result;
-}
-
-// Exported thin wrappers so other TUs (layeredmaterials.cpp / mainfrm.cpp) can reach the
-// file-static helpers without seeing them: SyncToolbar = sub_4174E0 (button enable/check
-// state); UntoggleLiveAdd = sub_417440 (clear the "Live add" toolbar toggle on hide/close).
-extern "C" int LayeredMaterialWnd_SyncToolbar()   { return (int)sub_4174E0(); }
-extern "C" int LayeredMaterialWnd_UntoggleLiveAdd() { return (int)sub_417440(); }
-
-// ═══════════════════════════════════════════════════════════════════════════════
-//  sub_417710  (0x417710) — rebuild the three brush-list displays then invalidate the
-//  layer-list child (a layered-material change can affect drawn brushes).
+//  sub_417710  (0x417710) — rebuild the three brush-list displays after a layered-
+//  material change (it can affect drawn brushes).
 // ═══════════════════════════════════════════════════════════════════════════════
 static BOOL sub_417710()
 {
     sub_47D060( (int)(intptr_t)&active_brushes );
     sub_47D060( (int)(intptr_t)&selected_brushes );
     sub_47D060( (int)(intptr_t)&filtered_brushes );
-    sub_4174E0();
-    BOOL result = InvalidateRect( lyrMtlWndGlob.layerList, nullptr, FALSE );
     g_nUpdateBits = -1;
-    return result;
+    return TRUE;
 }
 
-// UI-independent action behind the layered-material window's "New" command.
+// UI-independent action behind the layered-material tool's "New" command.  The name
+// prompt's MessageBox owner is the frame (LayeredMaterials_AddEntries reports invalid /
+// duplicate names through it).
 void LyrMtlNewMaterial_Apply( const char *name )
 {
-    LayeredMaterials_AddEntries( (char *)name, lyrMtlWndGlob.hwnd );
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-//  LayeredMaterialWnd_OnNewMaterial  (0x417760) — the "New" command: pop the name
-//  modal; on OK, add a new (empty) library entry named by the operator.
-//  The binary attaches a temporary CWnd to the frame HWND as the modal's parent.
-// ═══════════════════════════════════════════════════════════════════════════════
-int LayeredMaterialWnd_OnNewMaterial()
-{
-    // NO-MFC: returns IDCANCEL — the name prompt is an MFC modal, so no entry is created.
-    // LyrMtlNewMaterial_Apply above is ready for an ImGui name prompt to call.
-    return IDCANCEL;
+    LayeredMaterials_AddEntries( (char *)name, g_qeglobals.d_hwndMain );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  LayeredMaterialWnd_Layer  (0x417940) — reorder: move the selected layer to
 //  newLayerIndex by swapping the two {id,handle} pairs, then re-select newLayerIndex.
 // ═══════════════════════════════════════════════════════════════════════════════
-// UI-independent action behind the layered-material window's layer Down/Up commands.
 BOOL LayeredMaterialWnd_Layer( unsigned int newLayerIndex )
 {
     LyrMtlEntry *e = ActiveEntry();
@@ -281,7 +128,7 @@ BOOL LayeredMaterialWnd_Layer( unsigned int newLayerIndex )
     return sub_417710();
 }
 
-// UI-independent action behind the layered-material window's "Delete material" command.
+// UI-independent action behind the layered-material tool's "Delete material" command.
 BOOL LyrMtlDeleteMaterial_Apply()
 {
     // LayeredMaterials_texcoords (0x417190, layeredmaterials.cpp) — now a real port:
@@ -295,7 +142,7 @@ BOOL LyrMtlDeleteMaterial_Apply()
     return sub_417710();
 }
 
-// UI-independent action behind the layered-material window's "Remove layer" command.
+// UI-independent action behind the layered-material tool's "Remove layer" command.
 BOOL LyrMtlRemoveLayer_Apply()
 {
     LyrMtlEntry *e = ActiveEntry();
@@ -313,20 +160,18 @@ BOOL LyrMtlRemoveLayer_Apply()
 // ═══════════════════════════════════════════════════════════════════════════════
 //  LayeredMaterialWnd_Commands  (0x417A60) — toolbar / WM_COMMAND dispatch.
 //    0 New, 1 Delete-material, 2 toggle-Live, 3 Remove-layer, 4 Down, 5 Up.
+//  Command 0 is the name prompt and belongs to the widget layer (the panel runs the
+//  ImGui modal and calls LyrMtlNewMaterial_Apply itself), so it is not handled here.
 // ═══════════════════════════════════════════════════════════════════════════════
 LRESULT LayeredMaterialWnd_Commands( int cmd )
 {
     switch ( cmd )
     {
-    case 0:
-        return LayeredMaterialWnd_OnNewMaterial();
-
     case 1:   // Delete the active layered material.
-        SetWindowTextA( lyrMtlWndGlob.hwnd, "(no layered material)" );
         return LyrMtlDeleteMaterial_Apply();
 
     case 2:
-        return sub_417440();
+        return LayeredMaterialWnd_ToggleLiveAdd();
 
     case 3:   // Remove the selected layer (shift the rest down, shrink layerCount).
         return LyrMtlRemoveLayer_Apply();
@@ -340,488 +185,42 @@ LRESULT LayeredMaterialWnd_Commands( int cmd )
     return 0;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-//  sub_417AC0  (0x417AC0) — TTN_NEEDTEXT tooltip strings for the toolbar buttons.
-// ═══════════════════════════════════════════════════════════════════════════════
-static const char *sub_417AC0( int cmdId )
-{
-    switch ( cmdId )
-    {
-    case 35010: return "Create a new layered material";
-    case 35011: return "Delete the selected layered material";
-    case 35012: return "When checked, clicking in the texture window adds a layer";
-    case 35013: return "Remove selected layer from the layered material";
-    case 35014: return "Move selected layer up";
-    case 35015: return "Move selected layer down";
-    default:    return nullptr;
-    }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-//  LayeredMaterialWnd_SavePosition  (0x417B10)
-// ═══════════════════════════════════════════════════════════════════════════════
-static BOOL LayeredMaterialWnd_SavePosition( HWND hWnd )
-{
-    RECT rc;
-    GetWindowRect( hWnd, &rc );
-    return SaveRegistryInfo( "LayeredMaterialsRect", &rc, sizeof( rc ) );
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-//  sub_417B40  (0x417B40) — compute the layer-list child's rect (full client width,
-//  below the toolbar).  Out: x=0, y=toolbarHeight, w=clientW, h=clientH-toolbarH.
-// ═══════════════════════════════════════════════════════════════════════════════
-static LONG sub_417B40( int *x, LONG *y, LONG *w, int *h )
-{
-    RECT toolbar, client;
-    GetClientRect( lyrMtlWndGlob.hwnd, &client );
-    GetWindowRect( lyrMtlWndGlob.toolbar, &toolbar );
-    LONG toolbarH = toolbar.bottom - toolbar.top;
-    *x = 0;
-    *y = toolbarH;
-    *w = client.right - client.left;
-    *h = client.bottom - toolbarH - client.top;
-    return toolbarH;
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-//  LayeredMaterialWnd_SaveSize  (0x417BA0) — re-lay the list child and recompute
-//  the scroll extent.
-// ═══════════════════════════════════════════════════════════════════════════════
-static int LayeredMaterialWnd_SaveSize()
-{
-    if ( lyrMtlWndGlob.layerList )
-    {
-        int  x, h;
-        LONG y, w;
-        sub_417B40( &x, &y, &w, &h );
-        SetWindowPos( lyrMtlWndGlob.layerList, nullptr, x, y, (int)w, h, SWP_NOZORDER );
-        RECT rc;
-        GetWindowRect( lyrMtlWndGlob.hwnd, &rc );
-        SaveRegistryInfo( "LayeredMaterialsRect", &rc, sizeof( rc ) );
-        return sub_4173D0();
-    }
-    return 0;
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-//  LayeredMaterialWnd_WindowProc  (0x417C20) — the FRAME window proc.
-// ═══════════════════════════════════════════════════════════════════════════════
-LRESULT CALLBACK LayeredMaterialWnd_WindowProc( HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam )
-{
-    HWND hwnd = hWnd;   // the binary's param name (assert string)
-    iassert( hwnd == lyrMtlWndGlob.hwnd || lyrMtlWndGlob.hwnd == NULL );   // LayeredMaterialWnd.cpp:330
-
-    if ( Msg <= WM_NOTIFY )
-    {
-        switch ( Msg )
-        {
-        case WM_NOTIFY:
-        {
-            TOOLTIPTEXTA *tt = (TOOLTIPTEXTA *)lParam;
-            if ( (int)tt->hdr.code == -520 )   // TTN_NEEDTEXTA
-            {
-                tt->lpszText = (char *)sub_417AC0( (int)tt->hdr.idFrom );
-                return DefWindowProcA( hWnd, Msg, wParam, lParam );
-            }
-            break;
-        }
-        case WM_MOVE:
-            LayeredMaterialWnd_SavePosition( hWnd );
-            return DefWindowProcA( hWnd, WM_MOVE, wParam, lParam );
-        case WM_SIZE:
-            LayeredMaterialWnd_SaveSize();
-            return DefWindowProcA( hWnd, WM_SIZE, wParam, lParam );
-        case WM_CLOSE:
-            LayeredMaterialWnd_OnClose();
-            return 0;
-        }
-        return DefWindowProcA( hWnd, Msg, wParam, lParam );
-    }
-
-    if ( Msg != WM_KEYDOWN )
-    {
-        if ( Msg == WM_COMMAND )
-        {
-            unsigned int c = (unsigned __int16)wParam - 35010;
-            if ( c <= 5 )
-                LayeredMaterialWnd_Commands( c );
-        }
-        return DefWindowProcA( hWnd, Msg, wParam, lParam );
-    }
-
-    // WM_KEYDOWN: ESC closes; everything else routes to the main frame's accelerator map.
-    if ( wParam == VK_ESCAPE )
-    {
-        LayeredMaterialWnd_OnClose();
-        return 0;
-    }
-    // NO-MFC: key forwarding skipped — CMainFrame::OnKeyDown is an MFC handler; U-CMD/U-BOOT
-    // owns the shell-agnostic accelerator dispatch this should route to (TryHotkey).
-    return 0;
-}
-
-// One layer-list row.  Rows are gathered in layer order (0 = bottom) and drawn in
-// reverse, so the FIRST row is the bottom-most band in the list.
-struct lyrMtlLayerRow_t
-{
-    qtexture_s *handle;     // layer[i].handle — the radMtl whose thumbnail + name the row shows
-    bool        selected;   // i == lyrMtlWndGlob.selectedLayerIndex (draws the highlight band)
-};
-
-// UI-independent read behind the layer list's population (sub_417D60 0x417D60's layer walk).
-void LyrMtlLayers_Gather( std::vector<lyrMtlLayerRow_t> &rows )
-{
-    if ( !lyrMtlWndGlob.activeLyrMtl )
-        return;
-
-    LyrMtlEntry *e = ActiveEntry();
-    for ( int i = 0; i < e->layerCount; ++i )
-    {
-        lyrMtlLayerRow_t row;
-        row.handle   = (qtexture_s *)*EntryLayerHandle( e, i );
-        row.selected = ( i == lyrMtlWndGlob.selectedLayerIndex );
-        rows.push_back( row );
-    }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-//  sub_417D60  (0x417D60) — paint the layer list: for each layer (top-down) draw the
-//  selected-row highlight band, the material thumbnail (aspect-fit into 64×64), and the
-//  material name.  Pure D3D 2D immediate-mode draw (same primitives as CTexWnd).
-// ═══════════════════════════════════════════════════════════════════════════════
-static int sub_417D60()
-{
-    int result = 0;
-    if ( !lyrMtlWndGlob.activeLyrMtl )
-        return result;
-
-    R_AddCmdProjectionSet2D();   // IDB SetProjection2D
-    int baseY = 2 - GetScrollPos( lyrMtlWndGlob.layerList, SB_VERT );   // v2
-    // IDB sub_5120A0 (R_GetFontHeight) just returns font->pixelHeight.
-    int fontH = ( (Font_s *)g_qeglobals.d_font_list )->pixelHeight;    // result
-
-    static const float s_white[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
-
-    std::vector<lyrMtlLayerRow_t> rows;
-    LyrMtlLayers_Gather( rows );
-
-    int v3 = (int)rows.size() - 1;     // walk layers bottom index → 0 (rows top-down)
-    if ( v3 < 0 )
-        return fontH;
-
-    int textY = baseY + ( fontH + 64 ) / 2;   // v21 — name baseline for the bottom row
-    int rowTop = baseY - 2;                    // v22 — highlight band top
-    int v2 = baseY;
-
-    for ( ; v3 >= 0; --v3 )
-    {
-        const float *textColor;
-        if ( rows[v3].selected )
-        {
-            RECT fr;
-            GetClientRect( lyrMtlWndGlob.hwnd, &fr );
-            float fw = (float)( fr.right - fr.left );
-            R_AddCmdDraw2DImage( 0.0f, (float)rowTop, fw, 68.0f, 0.0f, 0.0f, 1.0f, 1.0f,
-                                 g_qeglobals.d_savedinfo.colors[25], g_qeglobals.d_white );
-            textColor = g_qeglobals.d_savedinfo.colors[26];
-        }
-        else
-        {
-            textColor = g_qeglobals.d_savedinfo.colors[8];
-        }
-
-        qtexture_s *q = rows[v3].handle;              // v4
-        int h = q->height;                            // v5 (= *(qtex+24))
-        int w = q->width;                             // v24 (= *(qtex+20))
-        int drawH = h;                                // v23
-        // Aspect-fit the thumbnail into a 64×64 cell.
-        if ( w >= h )
-        {
-            if ( w > 64 )
-            {
-                drawH = ( h << 6 ) / q->width;        // (h*64)/w
-                w     = 64;
-            }
-        }
-        else if ( h > 64 )
-        {
-            drawH = 64;
-            w     = ( w << 6 ) / h;                   // (w*64)/h
-        }
-
-        Material *mtl = q->next;                      // v17 (Material* @ qtex+0)
-        int imgX = ( 64 - w ) / 2 + 2;                // v23 (final)
-        int imgY = v2 + ( 64 - drawH ) / 2;           // v23 (intermediate)
-        R_AddCmdDraw2DImage( (float)imgX, (float)imgY, (float)w, (float)drawH,
-                             0.0f, 0.0f, 1.0f, 1.0f, s_white, mtl );
-        R_AddCmdDrawText( q->name, 64, (Font_s *)g_qeglobals.d_font_list, 68.0f, (float)textY,
-                          1.0f, 1.0f, 0.0f, textColor, 0 );
-
-        result = 68;
-        rowTop += 68;
-        textY  += 68;
-        v2     += 68;
-    }
-    return result;
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-//  CLayermatWnd_OnPaint  (0x417F50) — list-child WM_PAINT: render one editor frame.
-// ═══════════════════════════════════════════════════════════════════════════════
-static int CLayermatWnd_OnPaint()
-{
-    PAINTSTRUCT ps;
-    BeginPaint( lyrMtlWndGlob.layerList, &ps );
-    if ( !R_SetupRendertarget_CheckDevice( lyrMtlWndGlob.layerList ) )
-        return EndPaint( lyrMtlWndGlob.layerList, &ps );
-
-    R_BeginFrame();
-    R_AddCmdClearScreen( 7, g_qeglobals.d_savedinfo.colors[0], 1.0f, 0 );   // IDB R_AddClearCmd
-    // ── KIWI-UX (ROUND AI, ITEM 1): SEED MATERIAL_COLOR LIKE EVERY OTHER PAINT ──
-    // MATERIAL_COLOR is BACKEND state that persists across frames AND across windows
-    // (r_rendercmds.cpp:1920 says so in as many words).  This paint draws thumbnails
-    // through R_AddCmdDraw2DImage / TECHNIQUE_UNLIT — whose flat-override weight is
-    // matColor.w — and was the one such path in the editor that seeded nothing, so it
-    // inherited whatever the previously painted window happened to park.  With round
-    // AI's texwnd fix that is much less likely to be a hostile value, but "much less
-    // likely" is not an invariant; this makes it one.  Same {1,1,1,0} and the same
-    // reasoning as TexWnd_Paint's seed (texwnd.cpp:1052-1066) — w == 0 means the
-    // sampled texture shows through instead of being replaced by a flat colour.
-    { static const float s_matColor[4] = { 1.0f, 1.0f, 1.0f, 0.0f }; R_AddCmdSetMaterialColor( s_matColor ); }
-    sub_417D60();
-    R_EndFrame();
-    R_IssueRenderCommands( (unsigned)-1 );
-    R_SortMaterials();
-    R_CheckTargetWindow( lyrMtlWndGlob.layerList );
-    // The IDB resets the hunk-temp watermark here (CLayermatWnd_OnPaint tail, hunk_low
-    // .temp = hunk_low.permanent).  R_IssueRenderCommands already drained the frame; the
-    // editor renderer manages its own hunk reset inside the shared OnPaint path, so the
-    // explicit reset is unnecessary in the port (matches CCamWnd/CTexWnd::OnPaint).
-    return 0;
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-//  CLayermatWnd_OnScroll  (0x418030) — list-child WM_VSCROLL.
-//  nMax = thumbpos; a2 = SB_* request code.  Line = 68px; page = nPage.
-// ═══════════════════════════════════════════════════════════════════════════════
-static UINT CLayermatWnd_OnScroll( int pos, int code )
-{
-    SCROLLINFO si;
-    si.cbSize = sizeof( SCROLLINFO );   // 28
-    si.fMask  = SIF_RANGE | SIF_PAGE | SIF_POS;   // 7
-    BOOL got = GetScrollInfo( lyrMtlWndGlob.layerList, SB_VERT, &si );
-
-    switch ( code )
-    {
-    case SB_LINEUP:    pos -= 68;          break;   // 0
-    case SB_LINEDOWN:  pos += 68;          break;   // 1
-    case SB_PAGEUP:    pos -= si.nPage;    break;   // 2
-    case SB_PAGEDOWN:  pos += si.nPage;    break;   // 3
-    case SB_THUMBTRACK:                    break;   // 5 (pos already the thumb pos)
-    case SB_TOP:       pos  = 0;           break;   // 6
-    case SB_BOTTOM:    pos  = si.nMax;     break;   // 7
-    default:
-        return got;
-    }
-
-    int maxPos = si.nMax - (int)si.nPage;
-    if ( pos > maxPos ) pos = maxPos;
-    if ( pos < 0 )      pos = 0;
-    UINT result = (UINT)maxPos;
-    if ( pos != si.nPos )
-    {
-        SetScrollPos( lyrMtlWndGlob.layerList, SB_VERT, pos, TRUE );
-        result = (UINT)InvalidateRect( lyrMtlWndGlob.layerList, nullptr, FALSE );
-    }
-    return result;
-}
-
 // UI-independent action behind the layer list's row selection.
 int LyrMtlSelectLayer_Apply( int layerIndex )
 {
     lyrMtlWndGlob.selectedLayerIndex = layerIndex;
-    sub_4174E0();
-    int result = InvalidateRect( lyrMtlWndGlob.layerList, nullptr, FALSE );
     g_nUpdateBits |= 0x10u;   // W_TEXTURE
-    return result;
+    return layerIndex;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-//  sub_4180E0  (0x4180E0) — list-child WM_LBUTTONDOWN: hit-test the y to a layer row
-//  (66px pitch, 64px hot band) and select it.  Rows are drawn top-down, so the index
-//  is mirrored: selected = layerCount - rowFromTop - 1.
-// ═══════════════════════════════════════════════════════════════════════════════
-static int sub_4180E0( int y )
+// ── panel-facing reads (imgui_panel_lyrmtl.cpp) ───────────────────────────────
+// The active entry's name (the binary put it in the frame caption), its layer count,
+// and one layer's radMtl handle — the walk the native list painter (sub_417D60) made.
+const char *LyrMtlWnd_ActiveName()
 {
-    int v1 = GetScrollPos( lyrMtlWndGlob.layerList, SB_VERT ) + y;
-    int row = ( v1 - 2 ) / 66;
-    if ( row >= 0 )
-    {
-        int n = ActiveEntry()->layerCount;
-        if ( row < n && ( v1 - 2 ) % 66 < 64 )
-            return LyrMtlSelectLayer_Apply( n - row - 1 );
-    }
-    return v1;
+    if ( !lyrMtlWndGlob.activeLyrMtl )
+        return nullptr;
+    return ActiveEntry()->name;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-//  LayeredMaterialWnd_WindowProcA  (0x418140) — the layer-LIST child window proc.
-// ═══════════════════════════════════════════════════════════════════════════════
-LRESULT CALLBACK LayeredMaterialWnd_WindowProcA( HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam )
+int LyrMtlWnd_LayerCount()
 {
-    HWND hwnd = hWnd;   // the binary's param name (assert string)
-    iassert( hwnd == lyrMtlWndGlob.layerList || lyrMtlWndGlob.layerList == NULL );   // LayeredMaterialWnd.cpp:528
-
-    if ( Msg <= WM_VSCROLL )
-    {
-        switch ( Msg )
-        {
-        case WM_VSCROLL:
-            CLayermatWnd_OnScroll( HIWORD( wParam ), (unsigned __int16)wParam );
-            return 0;
-        case WM_SIZE:
-            R_Hwnd_Resize( (HWND__ *)hWnd, (unsigned __int16)lParam, HIWORD( lParam ) );
-            return 0;
-        case WM_PAINT:
-            CLayermatWnd_OnPaint();
-            return 0;
-        }
-        return DefWindowProcA( hWnd, Msg, wParam, lParam );
-    }
-
-    if ( Msg != WM_LBUTTONDOWN )
-        return DefWindowProcA( hWnd, Msg, wParam, lParam );
-
-    if ( lyrMtlWndGlob.activeLyrMtl )
-        sub_4180E0( (short)HIWORD( lParam ) );   // y = GET_Y_LPARAM(lParam)
-    return 0;
+    if ( !lyrMtlWndGlob.activeLyrMtl )
+        return 0;
+    return ActiveEntry()->layerCount;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-//  LayeredMaterialWnd_PreCreateWindow  (0x418210) — register both window classes.
-// ═══════════════════════════════════════════════════════════════════════════════
-ATOM LayeredMaterialWnd_PreCreateWindow()
+qtexture_s *LyrMtlWnd_LayerHandle( int i )
 {
-    WNDCLASSEXA wc;
-    memset( &wc, 0, sizeof( wc ) );
-    wc.cbSize        = sizeof( wc );          // 48
-    wc.style         = CS_DBLCLKS;            // 8
-    wc.lpfnWndProc   = LayeredMaterialWnd_WindowProc;
-    wc.hInstance     = GetModuleHandleA( nullptr );
-    wc.hCursor       = LoadCursorA( nullptr, (LPCSTR)IDC_ARROW );   // 0x7F00
-    wc.hbrBackground = (HBRUSH)( COLOR_BTNTEXT );                    // 16
-    wc.lpszClassName = "LayeredMaterialWindow";
-    RegisterClassExA( &wc );
-
-    wc.lpfnWndProc   = LayeredMaterialWnd_WindowProcA;
-    wc.lpszClassName = "LayeredMaterialList";
-    return RegisterClassExA( &wc );
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-//  Create_ToolBar  (0x4182E0) — create the COMCTL32 toolbar with the 5 command buttons.
-//  The binary builds the TBBUTTON array from a control-byte string and TB_ADDBUTTONS;
-//  we build an explicit TBBUTTON[6] (5 buttons + a separator placeholder) for clarity —
-//  the command IDs (35010..35015) and the TB_ message sequence are byte-faithful.
-// ═══════════════════════════════════════════════════════════════════════════════
-static LRESULT Create_ToolBar()
-{
-    HMODULE hInst = GetModuleHandleA( nullptr );
-    HWND toolbar = CreateWindowExA( 0, TOOLBARCLASSNAMEA, nullptr,
-                                    WS_CHILD | WS_VISIBLE | WS_BORDER | CCS_NORESIZE | TBSTYLE_TOOLTIPS | TBSTYLE_FLAT,
-                                    0, 0, 168, 23, lyrMtlWndGlob.hwnd, nullptr, hInst, nullptr );
-    lyrMtlWndGlob.toolbar = toolbar;
-    if ( !toolbar )
-        Com_Error( ERR_FATAL, "%s", "Couldn't create a toolbar; you may need a newer version of Internet Explorer" );
-
-    SendMessageA( toolbar, TB_BUTTONSTRUCTSIZE, sizeof( TBBUTTON ), 0 );   // 0x41E, wParam=20
-    SendMessageA( toolbar, TB_SETBITMAPSIZE, 0, 0x000F0010 );              // 0x420, lParam=983056 = 16×15
-
-    // Six button command ids 35010..35015 (the binary's control string is 6 entries:
-    // {35010..35015}).  Image index 0 for each; separators get TBSTATE_WRAP and no cmd.
-    static const int s_cmd[6] = { 35010, 35011, 35012, 35013, 35014, 35015 };
-    TBBUTTON buttons[6];
-    memset( buttons, 0, sizeof( buttons ) );
-    for ( int i = 0; i < 6; ++i )
-    {
-        buttons[i].iBitmap   = 0;
-        buttons[i].idCommand = s_cmd[i];
-        buttons[i].fsState   = TBSTATE_ENABLED;   // 4
-        buttons[i].fsStyle   = TBSTYLE_BUTTON;    // 0
-    }
-    SendMessageA( toolbar, TB_ADDBUTTONS, 6, (LPARAM)buttons );            // 0x414
-
-    return sub_4174E0();
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-//  Create_LayerList  (0x418440) — create the custom-painted list child below the toolbar.
-// ═══════════════════════════════════════════════════════════════════════════════
-static int Create_LayerList()
-{
-    RECT toolbar, client;
-    GetClientRect( lyrMtlWndGlob.hwnd, &client );
-    GetWindowRect( lyrMtlWndGlob.toolbar, &toolbar );
-    int toolbarH = toolbar.bottom - toolbar.top;
-    lyrMtlWndGlob.layerList = CreateWindowExA( 0, "LayeredMaterialList", nullptr,
-                                              WS_CHILD | WS_VISIBLE | WS_VSCROLL,
-                                              0, toolbarH,
-                                              client.right - client.left,
-                                              client.bottom - client.top - toolbarH,
-                                              lyrMtlWndGlob.hwnd, nullptr, nullptr, nullptr );
-    if ( !lyrMtlWndGlob.layerList )
-        Com_Error( ERR_FATAL, "%s", "Couldn't create the material layer list" );
-    return sub_4173D0();
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-//  Create_LayerdMaterialWnd  (0x4184C0) — create the frame, toolbar, and list.
-//
-//  Integration: this is operator-attended.  It is NOT auto-invoked at startup because
-//  the editor shell (mainfrm.cpp OnCreateClient) already attaches lyrMtlWndGlob.layerList
-//  to the renderer via a hidden placeholder pane, and replacing that with this real
-//  frame's list child changes the gate-critical renderer multi-window attach.  An
-//  attended session can call this (e.g. lazily on the first F4 toggle) once the attach
-//  hand-off is verified on a live desktop.
-// ═══════════════════════════════════════════════════════════════════════════════
-int Create_LayerdMaterialWnd()
-{
-    lyrMtlWndGlob.hwnd            = nullptr;
-    lyrMtlWndGlob.toolbar = nullptr;
-    lyrMtlWndGlob.layerList          = nullptr;
-    lyrMtlWndGlob.liveAddActive                   = 0;
-    lyrMtlWndGlob.activeLyrMtl = 0;
-    lyrMtlWndGlob.selectedLayerIndex  = 0;
-
-    LayeredMaterialWnd_PreCreateWindow();
-
-    int x = 100, y = 100, w = 150, h = 400;
-    RECT savedRect;
-    long savedSize = sizeof( savedRect );
-    if ( LoadRegistryInfo( "LayeredMaterialsRect", &savedRect, &savedSize )
-         && savedSize == sizeof( savedRect ) )
-    {
-        x = savedRect.left;
-        y = savedRect.top;
-        w = savedRect.right - savedRect.left;
-        h = savedRect.bottom - savedRect.top;
-    }
-
-    lyrMtlWndGlob.hwnd = CreateWindowExA( WS_EX_PALETTEWINDOW, "LayeredMaterialWindow",
-                                            "(no layered material)",
-                                            WS_THICKFRAME | WS_SYSMENU | WS_DLGFRAME | WS_BORDER | WS_POPUP,
-                                            x, y, w, h, nullptr, nullptr, nullptr, nullptr );
-    if ( !lyrMtlWndGlob.hwnd )
-        Com_Error( ERR_FATAL, "%s", "Couldn't create layered material window." );
-
-    Create_ToolBar();
-    return Create_LayerList();
+    if ( !lyrMtlWndGlob.activeLyrMtl || i < 0 || i >= ActiveEntry()->layerCount )
+        return nullptr;
+    return (qtexture_s *)*EntryLayerHandle( ActiveEntry(), i );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  LayeredMaterialWnd_InitRenderer  (0x418580) — attach the CoD renderer to the
-//  layer-list child.  R_BeginRegistrationInternal (gfxwrapper.cpp) calls this.
+//  layer-list HWND.  R_BeginRegistrationInternal (gfxwrapper.cpp) calls this; the HWND
+//  is the permanently hidden blank pane, kept because the renderer wants a fifth window.
 // ═══════════════════════════════════════════════════════════════════════════════
 char LayeredMaterialWnd_InitRenderer()
 {
@@ -861,12 +260,9 @@ LRESULT LayeredMaterialWnd_RadMtl( qtexture_s *radMtl )
     *EntryLayerHandle( lyrMtl, count ) = radMtl;
     *EntryLayerId( lyrMtl, lyrMtl->layerCount++ ) = lyrMtl->nextId++;
 
-    sub_4173D0();
     sub_47D060( (int)(intptr_t)&active_brushes );
     sub_47D060( (int)(intptr_t)&selected_brushes );
     sub_47D060( (int)(intptr_t)&filtered_brushes );
-    sub_4174E0();
-    LRESULT result = InvalidateRect( lyrMtlWndGlob.layerList, nullptr, FALSE );
     g_nUpdateBits = -1;
-    return result;
+    return 0;
 }

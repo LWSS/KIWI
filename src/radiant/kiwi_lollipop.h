@@ -60,6 +60,33 @@
 //          a fingertip target, not a drawn thing).
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ── THE DISPLAY SIDE OF A FACE-OFFSET HANDLE ────────────────────────────────
+// USER REPORT, verbatim: "When extruding from a construction face, the Lollipop
+// handle should start on whichever side that the camera is closest to - it
+// sometimes spawns on the other side."
+//
+// The two rules, in the order they apply:
+//   * A gesture WITH TRAVEL keeps the side it is travelling toward — the ride/flip
+//     rule above, unchanged, and the one that stops the ball being buried by the
+//     surface it is pushing.
+//   * A gesture AT REST (push == 0, i.e. the frame the handle spawns on and every
+//     frame until the first drag) has no side of its own, and the face normal's
+//     sign is arbitrary with respect to the viewer — a construction plane's normal
+//     is whichever way the plane was made.  So the CAMERA picks it, which is
+//     Plasticity's behaviour and what the user asked for.
+//
+// Multiply the face normal by the result.  It is PRESENTATION ONLY: the direction
+// this feeds reaches nothing but the stem, the ring's basis and the ball's hit
+// test (kiwi_lollipop.cpp BuildGeo), so the gesture's cursor mapping, its sign
+// convention and its numbers are untouched — a drag in a given world direction
+// produces exactly the travel it produced before, whichever side the ball is on.
+//
+// Only for handles that are a FACE OFFSET.  A stem whose direction MEANS
+// something — the bevel's outward bisector (kiwi_patchfillet.cpp, aimed by user
+// directive), the section plane's cut direction (kiwi_section.cpp) — must not
+// flip, and does not call this.
+float KiwiLollipop_FaceSide( const float anchor[3], const float normal[3], float push );
+
 // True when the ACTIVE command wants a lollipop; fills the live anchor (world)
 // and the signed outward direction (unit).  This is the ONE predicate — the draw,
 // the hit test and kiwi_gizmo.cpp's stand-down all ask it.

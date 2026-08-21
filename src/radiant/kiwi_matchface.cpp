@@ -31,10 +31,10 @@
 // ── ported entry points (each verified against its definition) ──────────────
 extern int   Sys_Printf( const char *fmt, ... );                       // win_qe3.cpp
 extern int   g_nUpdateBits;                                            // 0x25D5A74 (mainfrm.cpp)
-extern int   Face_MakePlane( face_t *face );                           // brush.cpp:4478 (0x470470)
+extern int   Face_MakePlane( face_t *face );                           // brush.cpp:4495 (0x470470)
 // ROUND AA, ITEM 4 — the planarize-away path.  Declaration copied from
 // kiwi_bevel.cpp's extern block, which is the other verb that drops a half-space.
-extern unsigned int Brush_RemoveFace( brush_t *b, unsigned int faceIndex );   // brush.cpp:343  0x471640
+extern unsigned int Brush_RemoveFace( brush_t *b, unsigned int faceIndex );   // brush.cpp:345  0x471640
 // KIWI-UX (CLEANUP, B-28): FILE SCOPE, not block scope.  Round AI shipped a link
 // error from a block-scope extern that MSVC mangled with its enclosing namespace;
 // kiwi_uv.cpp carries the full account.  This is the declaration that used to sit
@@ -49,10 +49,10 @@ extern bool  Radiant_RegisterCommand( const char *name, byte vk, byte mods,
 // spelling of the pair in the whole UX layer, so the patch arm here and the patch
 // arm of the move gizmo cannot drift about what "rebuild" means.
 extern void  Patch_Rebuild( patchMesh_t *p, char doBounds );           // pmesh.cpp:2137 (0x438D80)
-extern void  MarkMapModified();                                        // win_qe3.cpp:189  (0x499BB0)
+extern void  MarkMapModified();                                        // win_qe3.cpp:195  (0x499BB0)
 
 // brush.cpp // KIWI-UX forwarders for the two file-static texture-lock halves
-// (the same pair kiwi_transform.cpp uses — brush.cpp:7601 / brush.cpp:7606).
+// (the same pair kiwi_transform.cpp uses — brush.cpp:7624 / brush.cpp:7629).
 extern void  Ed_FaceTexLockSave( float *saveBuf, face_t *face );
 extern void  Ed_FaceTexLockReproject( face_t *face, const float *saveBuf, const byte *lockFlags );
 
@@ -490,7 +490,7 @@ namespace
             // clip.  Writing it first would only be two rebuilds for one result.
             //
             // EVERY SURVIVING FACE KEEPS ITS MATERIAL AND ITS TEXDEF, and neither
-            // is re-derived: Brush_RemoveFace (brush.cpp:332) memmoves whole
+            // is re-derived: Brush_RemoveFace (brush.cpp:334) memmoves whole
             // 232-byte face_t records down one slot, so each surviving plane keeps
             // the planepts, all four MaterialDef layers, the contents and the
             // toolflags it arrived with.  There is no texture lock to run either —

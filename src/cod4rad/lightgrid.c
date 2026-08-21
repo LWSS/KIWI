@@ -30,6 +30,11 @@ int                      g_cod4LightGridColorCount;
  * separate from the temporary compact BSP lumps. */
 unsigned char           *g_cod4LightGridVectors;
 unsigned short          *g_cod4LightGridAssignments;
+/* Per grid point primary-light index (the native 12-byte point record's +10
+ * byte): computed by the worker before its light gather, consumed by the
+ * gather (a light that IS the cell's primary renders at runtime and must not
+ * be baked) and by the LUMP 2 serializer. */
+unsigned char           *g_gridPointPrimaries;
 static float             s_cod4LightGridBasis[56 * 3];
 /* Must be contiguous — the sky-gather path passes &g_gridLightScale0 as a
  * float[3] color pointer to GatherIncidentEnergyInSpaceForLightFromDir,
@@ -547,27 +552,80 @@ static int LightGrid_PointNearGeometry(const float *point)
     return 0;
 }
 
-/* Logical equivalent of the final candidate loop in 0x40DA70.  The retail
- * implementation builds a transient triangle partition (0x40CF50 through
- * 0x40D9E0) to answer the same occupancy question.  Reusing the compiler's
- * collision BSP preserves the predicate without duplicating a fragile
- * 32-bit pool and its polygon-clipping allocator. */
+/* Conservative stand-in for 0x40CF50's octant triangle collection: the
+ * octant box holds geometry when any of its four space diagonals crosses a
+ * triangle.  Retail clips the actual triangle set into a transient
+ * partition; a diagonal sweep answers the same "is there anything in this
+ * box at all" gate without the 32-bit pool. */
+static int LightGrid_BoxTouchesGeometry(const float *centre, const float *ext)
+{
+    int i;
+
+    for (i = 0; i < 4; ++i)
+    {
+        float start[3], end[3];
+        RayHitResult_t hit;
+        float sx = (i & 1) ? -ext[0] : ext[0];
+        float sy = (i & 2) ? -ext[1] : ext[1];
+
+        start[0] = centre[0] - sx;
+        start[1] = centre[1] - sy;
+        start[2] = centre[2] - ext[2];
+        end[0] = centre[0] + sx;
+        end[1] = centre[1] + sy;
+        end[2] = centre[2] + ext[2];
+        TraceSetup_and_Dispatch(0, start, end, &hit);
+        if (hit.triangle)
+            return 1;
+    }
+    return 0;
+}
+
+/* 0x40DA70.  An octant needs tracing only when its ±16,±16,±32 box actually
+ * contains geometry (an empty octant interpolates freely — 0x40CF50 finding
+ * no triangles returns 0 immediately) AND some other grid point bordering
+ * that box exists, sits clear of geometry, and is reachable from this
+ * octant's inner corner.  Retail answers the reachability from its clipped
+ * triangle partition (0x40D920/0x40D990); the compiler's collision BSP
+ * answers the same question here. */
 static int LightGrid_OctantNeedsTrace(const float *point, int octant)
 {
+    static const float kOctExt[3] = { 16.0f, 16.0f, 32.0f };
+    float centre[3], corner[3];
     int candidate;
     int opposite = octant ^ 7;
+
+    centre[0] = point[0] + ((octant & 1) ? -16.0f : 16.0f);
+    centre[1] = point[1] + ((octant & 2) ? -16.0f : 16.0f);
+    centre[2] = point[2] + ((octant & 4) ? -32.0f : 32.0f);
+
+    if (!LightGrid_BoxTouchesGeometry(centre, kOctExt))
+        return 0;
+
+    /* the probe corner sits 0.125 inside the box toward the source point */
+    corner[0] = centre[0] + ((opposite & 1) ? -15.875f : 15.875f);
+    corner[1] = centre[1] + ((opposite & 2) ? -15.875f : 15.875f);
+    corner[2] = centre[2] + ((opposite & 4) ? -31.875f : 31.875f);
 
     for (candidate = 0; candidate < 8; ++candidate)
     {
         float neighbour[3];
         if (candidate == opposite)
             continue;
-        neighbour[0] = point[0] + ((candidate & 1) ? -16.0f : 16.0f);
-        neighbour[1] = point[1] + ((candidate & 2) ? -16.0f : 16.0f);
-        neighbour[2] = point[2] + ((candidate & 4) ? -32.0f : 32.0f);
-        if (LightGrid_HasPointAtWorldPos(neighbour) &&
-            !LightGrid_PointNearGeometry(neighbour))
-            return 1;
+        neighbour[0] = centre[0] + ((candidate & 1) ? -15.875f : 15.875f);
+        neighbour[1] = centre[1] + ((candidate & 2) ? -15.875f : 15.875f);
+        neighbour[2] = centre[2] + ((candidate & 4) ? -31.875f : 31.875f);
+        if (!LightGrid_HasPointAtWorldPos(neighbour))
+            continue;
+        if (LightGrid_PointNearGeometry(neighbour))
+            continue;
+        /* 0x40D990 is region reachability inside the geometry-partitioned
+         * box: a neighbour in the SAME region interpolates fine and is
+         * skipped; a neighbour separated from the corner by the octant's
+         * triangles forces the renderer to trace. */
+        if (TraceVisibility(0, corner, neighbour))
+            continue;
+        return 1;
     }
     return 0;
 }
@@ -675,7 +733,11 @@ extern int rand_int(void);
 extern int FindLightingSamplesAndNormal(int sampleIdx, float *position, float *normal,
     float offset, void *outputLighting, float *outputNormal);
 extern void Lighting_GetGatheredLight(void *sample, float *outVars); /* lighting_412550 */
-extern int PointLightEvaluatePoint(int flags, int lightIndex, float *pos, float *normal,
+/* MUST match the pointlights.c definition — a shorter local prototype here
+ * shifted every argument (lightIndex took a truncated pointer, pos became
+ * null) and crashed the grid phase on the first map with a point light. */
+extern int PointLightEvaluatePoint(int surfacePrimaryLightIndex, int traceIndex,
+    int lightIndex, float *pos, float *normal,
     float *outDir, float *outColor, float *outDot);
 extern void AdjustLightingContrast(int sampleCount, int baseIndex, float *srcSamples, float *dstColors);
 extern unsigned char EncodeGammaCorrectedByte(float value);
@@ -698,71 +760,328 @@ static void CalculateLightGrid_GatherLightInternal(int flags, int gridIndex,
 #define GRID_SCALE_XY       0.03125f      /* dword_458784 = 0x3D000000 = 1/32 */
 #define GRID_SCALE_Z        0.015625f     /* dword_458A8C = 0x3C800000 = 1/64 */
 
+/* ── LUMP 44/45/2 serialization, native 0x4134A0 → 0x413320 → 0x413160 →
+ *    0x412E80 / 0x412CF0 ──────────────────────────────────────────────────
+ * The native writer expands each point into a 12-byte working record
+ * {u16 pos[3], u16 colorIndex, u8 primaryLightIndex, u8 needsTraceMask},
+ * sorts by (pos[rowAxis], pos[colAxis], z), and emits per row: a 12-byte row
+ * header, then run records over contiguous columns sharing one z-span, with
+ * the entry stream densely filled (fillers for missing cells).  Entry cells
+ * are 4 bytes: {u16 colorIndex, u8 primaryLightIndex, u8 needsTraceMask}. */
+
+typedef struct GridCell_s
+{
+    unsigned short pos[3];
+    unsigned short colorIndex;
+    unsigned char  primary;
+    unsigned char  needsTrace;
+} GridCell_t;
+
+static int s_gridRowAxis;   /* dword_61B2D14 */
+static int s_gridColAxis;   /* dword_61B2D18 */
+
+/* 0x410110: order by row coordinate, then column, then z. */
+static int LightGrid_CellCompare(const void *a, const void *b)
+{
+    const GridCell_t *ca = (const GridCell_t *)a;
+    const GridCell_t *cb = (const GridCell_t *)b;
+    if (ca->pos[s_gridRowAxis] != cb->pos[s_gridRowAxis])
+        return ca->pos[s_gridRowAxis] < cb->pos[s_gridRowAxis] ? -1 : 1;
+    if (ca->pos[s_gridColAxis] != cb->pos[s_gridColAxis])
+        return ca->pos[s_gridColAxis] < cb->pos[s_gridColAxis] ? -1 : 1;
+    if (ca->pos[2] != cb->pos[2])
+        return ca->pos[2] < cb->pos[2] ? -1 : 1;
+    return 0;
+}
+
+/* 0x411380: a cell sees the sun when the sun ray reaches a sky surface.
+ * cacheIndex is the caller's per-worker trace cache slot — slot zero races
+ * the parallel grid workers' cache stamps. */
+static int LightGrid_SunVisibleAt(int cacheIndex, const float *pos)
+{
+    float nearPt[3], farPt[3];
+    RayHitResult_t hit;
+
+    nearPt[0] = g_sunDirX * 0.125f + pos[0];
+    nearPt[1] = g_sunDirY * 0.125f + pos[1];
+    nearPt[2] = g_sunDirZ * 0.125f + pos[2];
+    farPt[0] = g_sunDirX * 262144.0f + pos[0];
+    farPt[1] = g_sunDirY * 262144.0f + pos[1];
+    farPt[2] = g_sunDirZ * 262144.0f + pos[2];
+    TraceSetup_and_Dispatch(cacheIndex, nearPt, farPt, &hit);
+    return !hit.triangle
+        || (hit.triangle->material->contents & (CONTENTS_NONCOLLIDING | CONTENTS_SKY)) != 0;
+}
+
+/* 0x4115B0 + 0x411470: a cell with no sun claims the single in-range non-sun
+ * primary (several candidates cancel to none); with no candidate, 255 marks
+ * a cell whose ±16,±16,±32 neighbourhood (probed at steps 8,8,16) still sees
+ * the sun. */
+static unsigned char LightGrid_FallbackPrimary(int cacheIndex, const float *pos)
+{
+    int idx, found = 0;
+    float x, y, z;
+
+    for (idx = g_sunPrimaryLightIndex + 1; idx < numBSPPrimaryLights; ++idx)
+    {
+        BspPrimaryLight_t *light = &bspPrimaryLights[idx];
+        float d0 = pos[0] - light->origin[0];
+        float d1 = pos[1] - light->origin[1];
+        float d2 = pos[2] - light->origin[2];
+        if (d0 * d0 + d1 * d1 + d2 * d2 < light->radius * light->radius)
+        {
+            /* 0x4111C0 additionally narrows spot lights by cone and consults
+             * the light's shadow-sample list; over-inclusion here only
+             * matters where two non-sun primaries overlap a cell. */
+            if (found)
+                return 0;
+            found = idx;
+        }
+    }
+    if (found)
+        return (unsigned char)found;
+
+    for (z = pos[2] - 32.0f; z <= pos[2] + 32.0f; z += 16.0f)
+        for (y = pos[1] - 16.0f; y <= pos[1] + 16.0f; y += 8.0f)
+            for (x = pos[0] - 16.0f; x <= pos[0] + 16.0f; x += 8.0f)
+            {
+                float p[3];
+                p[0] = x; p[1] = y; p[2] = z;
+                if (LightGrid_SunVisibleAt(cacheIndex, p))
+                    return 255;
+            }
+    return 0;
+}
+
+/* 0x412CF0: a column gap becomes 2-byte skip records {count, 0}. */
+static void LightGrid_WriteSkip(unsigned int gap)
+{
+    unsigned char *rows = g_cod4LightGridRows;
+
+    if (gap > 255)
+    {
+        unsigned int n = (gap - 256) / 255 + 1;
+        do
+        {
+            rows[g_cod4LightGridRowsSize++] = 255;
+            rows[g_cod4LightGridRowsSize++] = 0;
+            gap = (gap & ~0xFFu) | ((gap + 1) & 0xFFu);
+        }
+        while (--n);
+    }
+    rows[g_cod4LightGridRowsSize++] = (unsigned char)gap;
+    rows[g_cod4LightGridRowsSize++] = 0;
+}
+
+/* 0x412E80: emit one run — a dense runLen x height cell block (fillers carry
+ * colorIndex 0 and the sun primary), then the run record {count, height,
+ * zOffset[, zOffset high byte]}. */
+static void LightGrid_FlushRun(int runLen, unsigned short zFirst,
+                               unsigned short zLast, unsigned short rowZMin,
+                               int rowHeightOver255, GridCell_t *cells,
+                               int begin, int end, int *entryCount)
+{
+    int height = zLast - zFirst + 1;
+    int c, dz, idx = begin;
+    unsigned short runStartCol = cells[begin].pos[s_gridColAxis];
+    unsigned int remaining;
+    unsigned char *rows = g_cod4LightGridRows;
+
+    if (height > 255)
+        ErrorMsg("light grid vertical variation is too extreme\n");
+
+    for (c = 0; c < runLen; ++c)
+    {
+        for (dz = 0; dz < height; ++dz)
+        {
+            unsigned char *entry = g_cod4LightGridEntries + (size_t)*entryCount * 4;
+            if (*entryCount >= 0x100000)
+                ErrorMsg("MAX_MAP_LIGHTGRID_POINTS exceeded\n");
+            if (idx < end && cells[idx].pos[2] == (unsigned short)(zFirst + dz)
+                && cells[idx].pos[s_gridColAxis] == (unsigned short)(runStartCol + c))
+            {
+                *(unsigned short *)entry = cells[idx].colorIndex;
+                entry[2] = cells[idx].primary;
+                entry[3] = cells[idx].needsTrace;
+                ++idx;
+            }
+            else
+            {
+                *(unsigned short *)entry = 0;
+                entry[2] = (unsigned char)g_sunPrimaryLightIndex;
+                entry[3] = 0;
+            }
+            ++*entryCount;
+        }
+    }
+
+    remaining = (unsigned int)runLen;
+    do
+    {
+        unsigned int chunk = remaining > 255 ? 255 : remaining;
+        rows[g_cod4LightGridRowsSize++] = (unsigned char)chunk;
+        rows[g_cod4LightGridRowsSize++] = (unsigned char)height;
+        rows[g_cod4LightGridRowsSize++] = (unsigned char)(zFirst - rowZMin);
+        if (rowHeightOver255)
+            rows[g_cod4LightGridRowsSize++] = (unsigned char)((zFirst - rowZMin) >> 8);
+        remaining -= chunk;
+    }
+    while (remaining);
+}
+
 static void LightGrid_BuildCod4Compact(void)
 {
-    int i, axis, row, entryCount = 0;
+    int i, axis, entryCount = 0;
+    int cellCount;
     unsigned short mins[3] = { 0xffff, 0xffff, 0xffff };
     unsigned short maxs[3] = { 0, 0, 0 };
     unsigned short *header16 = (unsigned short *)g_cod4LightGridHeader;
+    GridCell_t *cells;
+    int rowCount;
 
     if (!g_gridPointCount || !g_gridSampleArrayCount)
         return;
-    for (i = 0; i < g_gridPointCount; ++i) {
-        unsigned short *p = (unsigned short *)&g_gridPoints[i];
-        for (axis = 0; axis < 3; ++axis) {
-            if (p[axis] < mins[axis]) mins[axis] = p[axis];
-            if (p[axis] > maxs[axis]) maxs[axis] = p[axis];
-        }
-    }
-    /* Retail chooses the broadest horizontal axis as rows. */
-    axis = 0;
-    if (maxs[1] - mins[1] > maxs[0] - mins[0]) axis = 1;
-    memcpy(header16, mins, sizeof(mins));
-    memcpy(header16 + 3, maxs, sizeof(maxs));
-    *(unsigned int *)(g_cod4LightGridHeader + 12) = (unsigned int)axis;
-    *(unsigned int *)(g_cod4LightGridHeader + 16) = (unsigned int)(axis ^ 1);
-    g_cod4LightGridRowsSize = 0;
-    for (row = mins[axis]; row <= maxs[axis]; ++row) {
-        unsigned char *rowData = g_cod4LightGridRows + g_cod4LightGridRowsSize;
-        unsigned short columnCount = (unsigned short)(maxs[axis ^ 1] - mins[axis ^ 1] + 1);
-        unsigned short height = (unsigned short)(maxs[2] - mins[2] + 1);
-        header16[10 + row - mins[axis]] = (unsigned short)(g_cod4LightGridRowsSize >> 2);
-        /* 0x413160/0x412E80 regular-row encoding: a 12-byte row header,
-         * followed by one 4-byte run descriptor.  Entry offsets address the
-         * packed four-byte LUMP 2 cells, hence the 19*4 (=0x4c) stride on
-         * the paired fixture. */
-        *(unsigned short *)(rowData + 0) = mins[axis ^ 1];
-        *(unsigned short *)(rowData + 2) = columnCount;
-        *(unsigned short *)(rowData + 4) = mins[2];
-        *(unsigned short *)(rowData + 6) = height;
-        *(unsigned int *)(rowData + 8) =
-            (unsigned int)((row - mins[axis]) * columnCount * 4);
-        *(unsigned short *)(rowData + 12) = (unsigned short)((height << 8) | columnCount);
-        *(unsigned short *)(rowData + 14) = 0;
-        g_cod4LightGridRowsSize += 16;
-    }
-    g_cod4LightGridHeaderSize = 20 + 2 * (maxs[axis] - mins[axis] + 1);
+
     /* 0x412AD0 clusters the producer's 56 RGB samples into modern 168-byte
      * renderer colors and attaches the resulting 16-bit index to each cell. */
     LightGrid_QuantizeVectors();
 
-    /* LUMP 2 is an array of four-byte runtime cells (color index, trace
-     * mask, sky visibility), not the Cod2 temporary eight-byte sort record.
-     * 0x412E80 writes exactly this representation. */
-    for (i = 0; i < g_gridSampleArrayCount; ++i) {
+    cellCount = g_gridSampleArrayCount;
+    cells = (GridCell_t *)malloc((size_t)cellCount * sizeof(GridCell_t));
+    if (!cells)
+        ErrorMsg("couldn't allocate light grid cell records\n");
+
+    for (i = 0; i < cellCount; ++i)
+    {
         GridSampleResult *sample = &((GridSampleResult *)g_gridSampleArray)[i];
-        unsigned char *entry = g_cod4LightGridEntries + entryCount * 4;
-        *(unsigned short *)(entry + 0) = g_cod4LightGridAssignments
+        GridSamplePoint_t *pt = &g_gridPoints[sample->producerIndex];
+        GridCell_t *cell = &cells[i];
+
+        cell->pos[0] = pt->x;
+        cell->pos[1] = pt->y;
+        cell->pos[2] = pt->z;
+        cell->colorIndex = g_cod4LightGridAssignments
             ? g_cod4LightGridAssignments[sample->producerIndex] : 0;
-        /* Legacy coordBits bit zero is the recovered sun-primary visibility
-         * result.  Modern v22 stores the primary-light index directly. */
-        entry[2] = (sample->coordBits & 1) ? 1
-                 : (sample->skyVis ? 0 : 255);
-        entry[3] = 0;
-        ++entryCount;
+        /* the worker fixed the cell primary before its gather (0x4116B0) */
+        cell->primary = g_gridPointPrimaries
+            ? g_gridPointPrimaries[sample->producerIndex] : 0;
+        cell->needsTrace = 0;   /* filled after the axis is chosen */
+
+        if (pt->x < mins[0]) mins[0] = pt->x;
+        if (pt->x > maxs[0]) maxs[0] = pt->x;
+        if (pt->y < mins[1]) mins[1] = pt->y;
+        if (pt->y > maxs[1]) maxs[1] = pt->y;
+        if (pt->z < mins[2]) mins[2] = pt->z;
+        if (pt->z > maxs[2]) maxs[2] = pt->z;
     }
+
+    /* 0x4134A0: the row axis is X unless X's span exceeds Y's. */
+    axis = (maxs[1] - mins[1] >= maxs[0] - mins[0]) ? 0 : 1;
+    s_gridRowAxis = axis;
+    s_gridColAxis = axis ^ 1;
+    qsort(cells, cellCount, sizeof(GridCell_t), LightGrid_CellCompare);
+
+    /* 0x410CF0 encodes the octant probes relative to the chosen axis. */
+    for (i = 0; i < cellCount; ++i)
+    {
+        float worldPos[3];
+        worldPos[0] = (float)((int)cells[i].pos[0] - 0x1000) * 32.0f;
+        worldPos[1] = (float)((int)cells[i].pos[1] - 0x1000) * 32.0f;
+        worldPos[2] = (float)((int)cells[i].pos[2] - 0x800) * 64.0f;
+        cells[i].needsTrace = LightGrid_ComputeNeedsTraceMask(worldPos, axis);
+    }
+
+    memcpy(header16, mins, sizeof(mins));
+    memcpy(header16 + 3, maxs, sizeof(maxs));
+    *(unsigned int *)(g_cod4LightGridHeader + 12) = (unsigned int)axis;
+    *(unsigned int *)(g_cod4LightGridHeader + 16) = (unsigned int)(axis ^ 1);
+    rowCount = maxs[axis] - mins[axis] + 1;
+    /* 0x4134A0 presets every row offset to the 0xFFFF empty-row sentinel. */
+    memset(header16 + 10, 0xFF, (size_t)rowCount * 2);
+    g_cod4LightGridHeaderSize = 20 + 2 * rowCount;
+
+    /* 0x413320 / 0x413160: per row — 12-byte row header, then runs of
+     * contiguous columns sharing one z-span, gaps as skip records, and the
+     * row's record stream padded to a 4-byte boundary. */
+    g_cod4LightGridRowsSize = 0;
+    i = 0;
+    while (i < cellCount)
+    {
+        int rowBegin = i, rowEnd, j;
+        unsigned short rowCoord = cells[i].pos[axis];
+        unsigned short rowZMin = cells[i].pos[2];
+        unsigned short rowZMax = cells[i].pos[2];
+        unsigned char *rowData;
+        int rowHeightOver255;
+        int runLen = 0, runBegin = 0;
+        unsigned short runStartCol = 0, runZFirst = 0, runZLast = 0;
+
+        for (rowEnd = i; rowEnd < cellCount
+             && cells[rowEnd].pos[axis] == rowCoord; ++rowEnd)
+        {
+            if (cells[rowEnd].pos[2] < rowZMin) rowZMin = cells[rowEnd].pos[2];
+            if (cells[rowEnd].pos[2] > rowZMax) rowZMax = cells[rowEnd].pos[2];
+        }
+
+        header16[10 + rowCoord - mins[axis]] =
+            (unsigned short)(g_cod4LightGridRowsSize >> 2);
+        rowData = g_cod4LightGridRows + g_cod4LightGridRowsSize;
+        *(unsigned short *)(rowData + 0) = cells[rowBegin].pos[axis ^ 1];
+        *(unsigned short *)(rowData + 2) = (unsigned short)
+            (cells[rowEnd - 1].pos[axis ^ 1] - cells[rowBegin].pos[axis ^ 1] + 1);
+        *(unsigned short *)(rowData + 4) = rowZMin;
+        *(unsigned short *)(rowData + 6) = (unsigned short)(rowZMax - rowZMin + 1);
+        *(unsigned int *)(rowData + 8) = (unsigned int)entryCount;
+        g_cod4LightGridRowsSize += 12;
+        rowHeightOver255 = (rowZMax - rowZMin + 1) > 255;
+
+        for (j = rowBegin; j < rowEnd; )
+        {
+            int colBegin = j;
+            unsigned short col = cells[j].pos[axis ^ 1];
+            unsigned short colZFirst, colZLast;
+
+            while (j < rowEnd && cells[j].pos[axis ^ 1] == col)
+                ++j;
+            colZFirst = cells[colBegin].pos[2];
+            colZLast = cells[j - 1].pos[2];
+
+            if (runLen && col == (unsigned short)(runStartCol + runLen)
+                && colZFirst == runZFirst && colZLast == runZLast
+                && runLen < 255)
+            {
+                ++runLen;
+            }
+            else
+            {
+                if (runLen)
+                {
+                    LightGrid_FlushRun(runLen, runZFirst, runZLast, rowZMin,
+                                       rowHeightOver255, cells, runBegin,
+                                       colBegin, &entryCount);
+                    if (col != (unsigned short)(runStartCol + runLen))
+                        LightGrid_WriteSkip(
+                            (unsigned int)(unsigned short)(col - runStartCol - runLen));
+                }
+                runStartCol = col;
+                runZFirst = colZFirst;
+                runZLast = colZLast;
+                runBegin = colBegin;
+                runLen = 1;
+            }
+        }
+        if (runLen)
+            LightGrid_FlushRun(runLen, runZFirst, runZLast, rowZMin,
+                               rowHeightOver255, cells, runBegin, rowEnd,
+                               &entryCount);
+
+        g_cod4LightGridRowsSize = (g_cod4LightGridRowsSize + 3) & ~3;
+        i = rowEnd;
+    }
+
     g_cod4LightGridEntryCount = entryCount;
 
+    free(cells);
     free(g_cod4LightGridAssignments);
     g_cod4LightGridAssignments = NULL;
 }
@@ -785,6 +1104,25 @@ void CalculateLightGrid_Worker(int gridIndex, int flags)
     sample = (GridSampleResult *)AllocGridSample(flags, gridPoint);
     if (!sample)
         return;
+
+    /* 0x4116B0 fixes the cell's primary light before the gather: the sun if
+     * visible (coordBits bit 0, set by AllocGridSample's octant trace), else
+     * the unique in-range light, else the near-sun probe. */
+    if (g_gridPointPrimaries)
+    {
+        GridSamplePoint_t *pt = (GridSamplePoint_t *)gridPoint;
+        float pos[3];
+        unsigned char primary;
+
+        pos[0] = (float)((int)pt->x - 0x1000) * 32.0f;
+        pos[1] = (float)((int)pt->y - 0x1000) * 32.0f;
+        pos[2] = (float)((int)pt->z - 0x800) * 64.0f;
+        primary = (sample->coordBits & 1)
+            ? (unsigned char)g_sunPrimaryLightIndex : 0;
+        if (!primary)
+            primary = LightGrid_FallbackPrimary(flags, pos);
+        g_gridPointPrimaries[gridIndex] = primary;
+    }
 
     memset(lightBuffer, 0, 0x60);
     CalculateLightGrid_GatherLightInternal(flags, gridIndex, lightBuffer,
@@ -1140,15 +1478,21 @@ static void CalculateLightGrid_GatherLightInternal(int flags, int gridIndex,
         }
     }
 
-    /* gather from point lights */
+    /* gather from point lights.  0x4116B0: the evaluation is keyed by the
+     * cell's PRIMARY light — a light that IS the cell's primary returns 1
+     * and is skipped (the renderer applies it at runtime from the grid's
+     * primary byte); 2 is a directional contribution, 3 a coincident/near
+     * one. */
     {
         int numLights = GetPointLightCount();
+        unsigned char cellPrimary = g_gridPointPrimaries
+            ? g_gridPointPrimaries[gridIndex] : 0;
         for (i = 0; i < numLights; i++)
         {
-            int result = PointLightEvaluatePoint(flags, i, pos, NULL,
-                lightDir, lightColor, NULL);
+            int result = PointLightEvaluatePoint((int)cellPrimary, flags, i,
+                pos, NULL, lightDir, lightColor, NULL);
 
-            if (result == 1)
+            if (result == 2)
             {
                 /* far light — use directional SH accumulation */
                 GatherIncidentEnergyInSpaceForLightFromDir(lightColor, lightDir, outBuffer);
@@ -1156,7 +1500,7 @@ static void CalculateLightGrid_GatherLightInternal(int flags, int gridIndex,
                     LightGrid_AccumulateCod4Vector(lightColor, lightDir,
                                                     cod4Vector);
             }
-            else if (result == 2)
+            else if (result == 3)
             {
                 /* near light — add color directly to all 24 SH coefficients */
                 for (j = 0; j < 24; j++)
@@ -1395,6 +1739,8 @@ void CalculateLightGrid(int flags)
         ErrorMsg("Couldn't allocate %i bytes for light grid producer vectors\n",
                  (g_gridPointCount + 1) * 168);
 
+    g_gridPointPrimaries = (unsigned char *)calloc((size_t)g_gridPointCount + 1, 1);
+
     /* calculate lighting for each grid point */
     ForEachLightmapPixel(g_gridPointCount, (void *)CalculateLightGrid_Worker, flags);
     LightGrid_AppendDefaultProducerVector();
@@ -1403,6 +1749,8 @@ void CalculateLightGrid(int flags)
     qsort(g_gridSampleArray, g_gridSampleArrayCount, sizeof(GridSampleResult),
           (void *)GridSamplePoint_CompareForSort);
     LightGrid_BuildCod4Compact();
+    free(g_gridPointPrimaries);
+    g_gridPointPrimaries = NULL;
     free(g_cod4LightGridVectors);
     g_cod4LightGridVectors = NULL;
 
@@ -1520,6 +1868,76 @@ done:
  *
  * Constants: dword_458A94 = Z height offset for trace, dword_4577D8 = Z below offset
  */
+/* Retail 0x410510: a point must see the world.  Each axis ray must land on
+ * a front-facing, unflagged surface (or sky) for the point to survive; a
+ * point buried in solid geometry only ever sees backfaces and is removed. */
+extern int Lighting_RejectTransportPoint(int sampleIdx, const float *point);
+
+static int LightGrid_SeesNoWorld(const float *pos)
+{
+    static const float kProbeDirs[6][3] = {
+        { 0.0f, 0.0f, -262144.0f }, { 0.0f, 0.0f, 262144.0f },
+        { -262144.0f, 0.0f, 0.0f }, { 262144.0f, 0.0f, 0.0f },
+        { 0.0f, -262144.0f, 0.0f }, { 0.0f, 262144.0f, 0.0f },
+    };
+    int i;
+
+    for (i = 0; i < 6; ++i)
+    {
+        float end[3];
+        RayHitResult_t hit;
+
+        end[0] = pos[0] + kProbeDirs[i][0];
+        end[1] = pos[1] + kProbeDirs[i][1];
+        end[2] = pos[2] + kProbeDirs[i][2];
+        TraceSetup_and_Dispatch(0, (float *)pos, end, &hit);
+        if (!hit.triangle)
+            continue;
+        if (!(hit.triangle->material->surfaceFlags & 0x80))
+        {
+            float facing = hit.triangle->normal[0] * kProbeDirs[i][0]
+                         + hit.triangle->normal[1] * kProbeDirs[i][1]
+                         + hit.triangle->normal[2] * kProbeDirs[i][2];
+            if (facing < 0.0f)
+                return 0;
+        }
+        if (hit.triangle->material->surfaceFlags & SURF_SKY)
+            return 0;
+    }
+    return 1;
+}
+
+/* Retail 0x410610/0x410760 prune the loaded point list harder than the x64
+ * build's own validation below: points outside the world bounds, points
+ * against geometry, points failing the under-world transport test, and
+ * points that see no world at all are all dropped before any worker runs. */
+static int LightGrid_RetailRejectsPoint(const GridSamplePoint_t *pt)
+{
+    float pos[3];
+
+    pos[0] = (float)((int)pt->x - 0x1000) * 32.0f;
+    pos[1] = (float)((int)pt->y - 0x1000) * 32.0f;
+    pos[2] = (float)((int)pt->z - 0x800) * 64.0f;
+
+    /* 0x409E40 tests against the world bounds; the worldspawn model's box
+     * is the same quantity here. */
+    if (numBSPModels > 0)
+    {
+        const BspModel_t *world = &bspModels[0];
+        if (pos[0] < world->mins[0] || pos[0] > world->maxs[0]
+            || pos[1] < world->mins[1] || pos[1] > world->maxs[1]
+            || pos[2] < world->mins[2] || pos[2] > world->maxs[2])
+            return 1;
+    }
+    if (LightGrid_PointNearGeometry(pos))
+        return 1;                               /* 0x410370 head (0x409F70) */
+    if (Lighting_RejectTransportPoint(0, pos))
+        return 1;                               /* 0x409E10 */
+    if (LightGrid_SeesNoWorld(pos))
+        return 1;                               /* 0x410510 */
+    return 0;
+}
+
 void CalculateLightGrid_SortPoints(void)
 {
     float zOffset;
@@ -1661,6 +2079,24 @@ void CalculateLightGrid_SortPoints(void)
     }
 
 done_dedup:
+    /* Retail 0x410760: prune the surviving points with the stricter 32-bit
+     * predicates (stable compaction — later lookups binary-search this
+     * array, so the sort order must hold). */
+    {
+        int src, dst = 0;
+        GridSamplePoint_t *pts = (GridSamplePoint_t *)g_gridPoints;
+
+        for (src = 0; src < g_gridPointCount; ++src)
+        {
+            if (LightGrid_RetailRejectsPoint(&pts[src]))
+                continue;
+            if (dst != src)
+                pts[dst] = pts[src];
+            ++dst;
+        }
+        g_gridPointCount = dst;
+    }
+
 epilogue:
     return;
 }

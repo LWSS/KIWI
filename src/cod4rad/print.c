@@ -133,8 +133,8 @@ void UpdateProgressPrint(void)
             PrintMsecDuration(elapsed);
             Com_Printf(" done, ");
             PrintMsecDuration((int)((float)elapsed / percent * (100.0f - percent)));
-            Com_Printf(" remaining               ");
-            Com_Printf("\r");
+
+            Com_Printf(" remaining\n");
         }
     }
 }

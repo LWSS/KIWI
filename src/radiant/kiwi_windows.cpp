@@ -20,8 +20,8 @@
 // Radiant_CheckMenu is NOT re-declared here: radiant_frame.h:120 declares it (and qe3.h
 // already pulls that in), so re-stating it would risk a signature drift.  Its definition
 // is mainfrm.cpp:1832.
-extern bool Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId ); // mainfrm.cpp:1340  bool Radiant_RegisterCommand(const char*,byte,byte,int)
-extern int  Sys_Printf( const char *fmt, ... );                                             // win_qe3.cpp:112   int Sys_Printf(const char*,...)
+extern bool Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId ); // mainfrm.cpp:1358  bool Radiant_RegisterCommand(const char*,byte,byte,int)
+extern int  Sys_Printf( const char *fmt, ... );                                             // win_qe3.cpp:118   int Sys_Printf(const char*,...)
 
 namespace
 {
@@ -63,6 +63,9 @@ namespace
         // ROUND BD: the UV editor.  Fourth tab of the same node, same reasoning as the
         // three rows above it, and KIWI_LAYOUT_VERSION goes to 11 with it.
         { "UV editor",        "UvEditor","&UV Editor",              KIWI_CMD_WINDOW_UVEDITOR,1 },
+        // The Sun tab.  Fifth tab of the same node, same reasoning as the four rows
+        // above it, and KIWI_LAYOUT_VERSION goes to 12 with it.
+        { "Sun",              "Sun",     "S&un Helper",             KIWI_CMD_WINDOW_SUN,     1 },
     };
 
     // KIWI-UX (shakeout I): the defaults above only bite on a FRESH profile, and an
@@ -100,6 +103,10 @@ namespace
                                           //     the ini number are the SAME number since
                                           //     C-8 — this column is the history, not the
                                           //     value; KIWI_LAYOUT_VERSION is the value.)
+                                          // 9 = the SUN tab joins it as a fifth tab
+                                          //     (kiwi_dock12).  Reported as "I can't see
+                                          //     it" against a long-lived layout, which is
+                                          //     precisely what this reseed exists for.
 
     bool s_open[KIWI_WIN_COUNT];        // the LIVE flag (ImGui's p_open target)
     bool s_last[KIWI_WIN_COUNT];        // what we last persisted — the ✕-box detector
@@ -205,12 +212,12 @@ void KiwiWindows_CommitPending()
 
 // ─── the native "Windows" popup ──────────────────────────────────────────────
 // Win32 usage mirrored from the two menu sites already in this shell:
-//   * ::LoadMenuA + ::SetMenu on the frame  (radiant_main.cpp:482-484)
+//   * ::LoadMenuA + ::SetMenu on the frame  (radiant_main.cpp:483-485)
 //   * ::CheckMenuItem( HMENU, id, MF_CHECKED|MF_UNCHECKED ) with MF_BYCOMMAND
 //     (the default) — Radiant_CheckMenu, mainfrm.cpp:1832-1837.
 // AppendMenuA with MF_POPUP takes the sub-menu handle in the UINT_PTR slot; the
 // items use MF_STRING and carry the KIWI command id, so their WM_COMMAND lands in
-// Radiant_FrameWndProc's `case WM_COMMAND` (radiant_main.cpp:196-207) exactly like
+// Radiant_FrameWndProc's `case WM_COMMAND` (radiant_main.cpp:197-208) exactly like
 // every other menu item and routes through Radiant_ExecCommand.
 void KiwiWindows_BuildMenu( void *frameMenu )
 {

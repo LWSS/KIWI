@@ -26,26 +26,26 @@
 #include <vector>
 
 // ── ported / cross-file entry points (each verified against its definition) ──
-extern int         Sys_Printf( const char *fmt, ... );                       // win_qe3.cpp:112   int Sys_Printf(const char*,...)
+extern int         Sys_Printf( const char *fmt, ... );                       // win_qe3.cpp:118   int Sys_Printf(const char*,...)
 extern int         g_nUpdateBits;                                            // engine_stubs.cpp:773  int g_nUpdateBits = 0
-extern bool        Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId ); // mainfrm.cpp:1340  bool Radiant_RegisterCommand(const char*,byte,byte,int)
+extern bool        Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId ); // mainfrm.cpp:1358  bool Radiant_RegisterCommand(const char*,byte,byte,int)
 // texwnd.cpp — the browser accessors round AZ added for the Sky tab, reused verbatim
-// (kiwi_skybox.cpp:79-83 declares the same three).  texwnd_s is TU-local, so every
+// (kiwi_skybox.cpp:80-84 declares the same three).  texwnd_s is TU-local, so every
 // out-of-TU reader goes through these.
-extern int         TexWnd_MaterialCount();                                   // texwnd.cpp:2548   int TexWnd_MaterialCount()
-extern qtexture_s *TexWnd_MaterialAt( int idx );                             // texwnd.cpp:2550   qtexture_s *TexWnd_MaterialAt(int)
-extern void        TexWnd_ApplyMaterialAtIndex( int idx );                   // texwnd.cpp:1250   void TexWnd_ApplyMaterialAtIndex(int)
-extern qtexture_s *Texture_GetHandle( const char *name );                    // texwnd.cpp:313    qtexture_s *Texture_GetHandle(const char*)
+extern int         TexWnd_MaterialCount();                                   // texwnd.cpp:2562   int TexWnd_MaterialCount()
+extern qtexture_s *TexWnd_MaterialAt( int idx );                             // texwnd.cpp:2564   qtexture_s *TexWnd_MaterialAt(int)
+extern void        TexWnd_ApplyMaterialAtIndex( int idx );                   // texwnd.cpp:1263   void TexWnd_ApplyMaterialAtIndex(int)
+extern qtexture_s *Texture_GetHandle( const char *name );                    // texwnd.cpp:314    qtexture_s *Texture_GetHandle(const char*)
 // select.cpp — the Surface Inspector's Fit funnel, IDB 0x4939E0.  Declared exactly as
 // mainfrm.cpp:4810 / surfacedlg.cpp:44 / patchdialog.cpp:356 declare it.
-extern void        Brush_FitTexture( float x, float y, int a4 );             // select.cpp:3667   void Brush_FitTexture(float,float,int)
+extern void        Brush_FitTexture( float x, float y, int a4 );             // select.cpp:3666   void Brush_FitTexture(float,float,int)
 // ── KIWI-UX (ROUND BJ, ITEM 1): the AUTO-CAULK half ─────────────────────────
 // The ONE id->action entry point (kiwi_command.h); id 33220 is Selection->CSG->Auto
 // Caulk, whose handler Cmd_OnSelectionAutoCaulk (mainfrm.cpp:2817-2824) is `static`
 // and brackets Brush_AutoCaulk itself.  Reaching it by id rather than re-spelling
 // its four-line bracket here is the same choice kiwi_command.cpp's Cut makes with
 // Copy / Delete (kiwi_command.cpp:1105-1106) and kiwi_join.cpp makes with CSG_Merge.
-extern void        Radiant_ExecCommand( unsigned int cmdId );                // mainfrm.cpp:4083  void Radiant_ExecCommand(unsigned int)
+extern void        Radiant_ExecCommand( unsigned int cmdId );                // mainfrm.cpp:4054  void Radiant_ExecCommand(unsigned int)
 // materialdef.cpp — the per-face material name the before/after count reads.  It
 // carries the MtlDef_IsValid L0 assert (materialdef.cpp:53), so it is called behind the
 // same "exactly one of lyrMtl / radMtl" guard kiwi_uv.cpp:724 states, and its result is
@@ -59,7 +59,7 @@ namespace
     const char *const KCAULK_NAME = "caulk";
 
     // The leaf of a registered material name.  Browser names are stored lowercase
-    // (Texture_GetHandle's _strlwr, texwnd.cpp:321) and may or may not carry a folder,
+    // (Texture_GetHandle's _strlwr, texwnd.cpp:328) and may or may not carry a folder,
     // so both spellings have to answer the same.
     const char *LeafName( const char *name )
     {
@@ -292,7 +292,7 @@ static bool KiwiCaulk_ApplyToSelection()
     }
 
     // AUTO first, PLAIN second, so the round-BH handshake that the funnel runs at
-    // its tail (KiwiUv_RestoreGestureAfterApply, texwnd.cpp:1330) is the LAST thing
+    // its tail (KiwiUv_RestoreGestureAfterApply, texwnd.cpp:1332) is the LAST thing
     // to touch the gesture state instead of being unwound by a selection swap.
     int autoDid = 0;
     if ( !objItems.empty() )

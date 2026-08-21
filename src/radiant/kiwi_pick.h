@@ -83,6 +83,13 @@ struct pick_result_t
     sel_item_t item;                          // what was hit, at the filter's granularity
     float      point[3]   = { 0.0f, 0.0f, 0.0f };   // world hit point
     float      screenDist = 0.0f;             // px from the cursor (0 for area hits)
+    // ── the SURFACE NORMAL at an area hit ────────────────────────────────────
+    // edTrace_t carries it already (qe3.h:335, filled by Brush_Ray for a brush
+    // face and by PMESH_51 for a patch), so this costs a copy and no second pick.
+    // False for the screen-space vertex/edge passes, which name a point and not a
+    // surface, and for any miss.  Consumers must not read `normal` without it.
+    bool       haveNormal = false;
+    float      normal[3]  = { 0.0f, 0.0f, 1.0f };
 };
 
 // ── ray construction ─────────────────────────────────────────────────────────

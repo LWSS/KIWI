@@ -58,6 +58,7 @@
 #include "kiwi_import.h"                // KIWI-UX (ROUND BE) — texture import (drop + wizard)
 #include "kiwi_launch.h"                // KIWI-UX (ROUND BF) — the Build & Run launch dialog
 #include "kiwi_caulk.h"                 // KIWI-UX (ROUND BH) — Caulk Selection (End)
+#include "kiwi_sun.h"                   // the sun helper — Place Sun + the Esc deselect
 #include "kiwi_section.h"               // KIWI-UX (ROUND BM) — Section Analysis (the view-cube button)
 #include "kiwi_outliner.h"              // ROUND W — the outliner's two group verbs
 #include "kiwi_windows.h"
@@ -65,7 +66,7 @@
 #include <string.h>
 
 // ── ported entry points (verified against their definitions) ────────────────
-extern int  Sys_Printf( const char *fmt, ... );                  // win_qe3.cpp:112 (undo.cpp:57 declares it the same way)
+extern int  Sys_Printf( const char *fmt, ... );                  // win_qe3.cpp:118 (undo.cpp:57 declares it the same way)
 extern void Undo_ClearRedo();                                    // undo.cpp 0x45e2b0
 // KIWI-UX (CLEANUP, UndoCoverBrush): the two the per-brush cover needs.
 extern void Undo_AddBrush( entity_brush_s *pBrushInst );         // undo.cpp:494  (0x45E680)
@@ -122,6 +123,30 @@ namespace
             return;
         if ( KiwiCmd_Start( id ) && paused )
             KiwiCmd_Pause();
+    }
+
+    // ── KIWI: the DEFERRED DESELECT ──────────────────
+    // Same shape and the same reason as the deferred start above: a command that
+    // wants the selection dropped when its gesture ends cannot do it from inside
+    // Commit(), because KiwiCmd_Commit still has to close the undo bracket and
+    // KiwiCmd_UndoCommit's tail is `Undo_EndBrushList( &selected_brushes )` — it
+    // reads the list to record the AFTER state of everything the head cloned.
+    // Emptying that list first would hand the record an empty tail, and the undo
+    // of a move that had just been confirmed would have nothing to restore.  So
+    // the request is parked here and served after the bracket is closed.
+    bool s_deferDeselect = false;
+
+    void DrainDeferredDeselect()
+    {
+        if ( !s_deferDeselect )
+            return;
+        s_deferDeselect = false;
+        // The ROUND K spelling (kiwi_transform.cpp deselectAfter), reused verbatim
+        // so the selection epoch and the legacy globals move exactly as they do
+        // after a confirmed face push.
+        Sel_Clear( KiwiSel() );
+        Sel_SyncToLegacy();
+        g_nUpdateBits = -1;
     }
 
     // The one cursor source for the active gesture (see KiwiCmd_LastCursor).
@@ -591,6 +616,11 @@ namespace
         // frame draws, which needs neither a selection nor a cursor ray.
         { KIWI_CMD_MODELINFO,       { "Model info (next frame's models)", "Textures", 0, 0 } },
 
+        // ── the instance-batching kill switch (kiwi_command.h:KIWI_CMD_INSTBATCH)
+        // No mask and no predicate, for the same reason as the two diagnostics above:
+        // it flips a draw-path flag that the next frame reads.
+        { KIWI_CMD_INSTBATCH,       { "Instance batching (toggle)", "View", 0, 0 } },
+
         // ── ROUND BE: the texture-import entry point (kiwi_import.h) ────────
         // No mask and no predicate: importing art needs neither a selection nor a
         // cursor.  Only the BROWSE id is listed — KIWI_CMD_IMPORT_DROPPED is an
@@ -646,6 +676,12 @@ namespace
         // predicate — it is always available, because arming it is what starts the
         // pick that decides what it cuts (kiwi_section.h).
         { KIWI_CMD_SECTION_TOGGLE,  { "Section Analysis",    "View",      0, nullptr } },
+        // The sun helper.  No selection mask — the sun is worldspawn state and has
+        // nothing to do with what is selected — and the predicate is only "is there
+        // a worldspawn to write onto" (kiwi_sun.h).  Its own category rather than a
+        // wrong one: it is neither a view toggle nor a solid, and "Editor" is where
+        // Preferences and Map Info live.
+        { KIWI_CMD_PLACE_SUN,       { "Place Sun",           "Lighting",  0, KiwiSun_CanPlace } },
         { KIWI_CMD_REPEAT_LAST,     { "Repeat Last Command", "Edit",      0, KiwiCmd_HasRepeatable } },
         // ROUND S: the clipboard Cut.  SEL_MASK_OBJECT + the same "is anything
         // selected" predicate the other whole-object edits use.
@@ -937,6 +973,7 @@ void KiwiCmd_RegisterCommands()
     KiwiLaunch_RegisterCommands();      // ROUND BF   — "Build & Run..." (cod4map / cod4rad / game)
     KiwiCaulk_RegisterCommands();       // ROUND BH   — "Caulk Selection" (End, modern profile)
     KiwiSection_RegisterCommands();     // ROUND BM   — "Section Analysis" (the view-cube button)
+    KiwiSun_RegisterCommands();         //            — "Place Sun" (the worldspawn sun keys)
     // ── ROUND J — the last Plasticity verbs (kiwi_offset/fillet/focus/visibility)
     KiwiOffset_RegisterCommands();      // O       offset a construction chain
     KiwiFillet_RegisterCommands();      // B       round its corners
@@ -950,6 +987,9 @@ void KiwiCmd_RegisterCommands()
     Radiant_RegisterCommand( "KiwiMatInfo", 0, 0, KIWI_CMD_MATINFO );
     // ROUND AW: the model-surface twin of KiwiMatInfo.  Unbound for the same reason.
     Radiant_RegisterCommand( "KiwiModelInfo", 0, 0, KIWI_CMD_MODELINFO );
+    // the instance-batching kill switch.  Unbound for the same reason —
+    // it exists so a suspected rendering difference can be A/B'd in session.
+    Radiant_RegisterCommand( "KiwiInstBatch", 0, 0, KIWI_CMD_INSTBATCH );
     // ── KIWI-UX (ROUND BB, ITEM 4): CSG HOLLOW REACHES THE PALETTE ──────────────
     // USER DIRECTIVE, verbatim: *"Add the hollow operation from legacy radiant to
     // the search (F) menu as a command."*
@@ -1045,6 +1085,7 @@ namespace
         case KIWI_CMD_WINDOW_SHELL:
         case KIWI_CMD_WINDOW_OUTLINER:                  // ROUND W — a window toggle
         case KIWI_CMD_WINDOW_ENTITIES:                  // ROUND AU — likewise
+        case KIWI_CMD_WINDOW_SUN:                       // the Sun tab — likewise
         // ROUND AU: the entity DROP is the tail of a drag that has already
         // happened and carries its argument in kiwi_entbrowser.cpp's one-shot
         // pending slot.  Repeating it would re-run a gesture with no payload —
@@ -1147,7 +1188,7 @@ bool KiwiCmd_RepeatLast()
 // console says so, which is also what makes Ctrl+X harmless on an empty selection.
 void KiwiCmd_ClipCut()
 {
-    extern void Radiant_ExecCommand( unsigned int cmdId );   // mainfrm.cpp:4083
+    extern void Radiant_ExecCommand( unsigned int cmdId );   // mainfrm.cpp:4054
 
     if ( selected_brushes.next == &selected_brushes )
     {
@@ -1272,6 +1313,10 @@ static bool KiwiCmd_DispatchInner( unsigned int cmdId )
         // above it, and the only entry point the view-cube button uses too.
         if ( KiwiSection_DispatchInstant( cmdId ) )
             return true;
+        // The sun helper's one id.  Same split as every feature above: the file
+        // owns its id and its whole body, this one owns only the route to it.
+        if ( KiwiSun_DispatchInstant( cmdId ) )
+            return true;
         if ( KiwiVis_DispatchInstant( cmdId ) )         // Ctrl+H  invert hidden
             return true;
         // ROUND W: Group / Ungroup Selection.  AFTER KiwiWindows_DispatchInstant,
@@ -1321,6 +1366,16 @@ static bool KiwiCmd_DispatchInner( unsigned int cmdId )
             // r_ed_scene.cpp — definition beside Editor_ModelSurfTech.
             extern void KiwiEdScene_ArmModelInfoDump();
             KiwiEdScene_ArmModelInfoDump();
+            return true;
+        }
+        // the instance-batching kill switch.  Also pure state: it flips one
+        // int that r_ed_scene.cpp's flush reads, and the OFF path is round BY3's
+        // per-instance draw, unchanged.
+        if ( cmdId == (unsigned int)KIWI_CMD_INSTBATCH )
+        {
+            // r_ed_scene.cpp — definition beside Editor_DrawMergedInstanceRun.
+            extern void KiwiEdScene_ToggleInstBatching();
+            KiwiEdScene_ToggleInstBatching();
             return true;
         }
         return false;                     // an unwired id in the reserved range
@@ -1491,6 +1546,10 @@ void KiwiCmd_Commit()
     g_activeCommand = nullptr;             // clear FIRST: Commit may re-enter the layer
     cmd->Commit();
     KiwiCmd_UndoCommit();                  // no-op when the command opened no bracket
+    // KIWI: AFTER the bracket, never inside it — see
+    // DrainDeferredDeselect.  Before the deferred START, so a handed-off command
+    // (shakeout G) begins from the selection state it is meant to see.
+    DrainDeferredDeselect();
     KiwiNum_Reset();
     s_lastSnap = snap_result_t();
     DrainDeferred();                       // shakeout G — AFTER the reset, never before
@@ -1509,6 +1568,9 @@ void KiwiCmd_Cancel()
     s_lastSnap = snap_result_t();
     s_deferId = 0;                         // shakeout G: a cancelled gesture hands off
                                            // to nothing — there is no result to place
+    // KIWI: and a CANCELLED gesture never deselects — the
+    // operation did not finish, so there is nothing to be done with.
+    s_deferDeselect = false;
     g_nUpdateBits |= 1;
 }
 
@@ -1516,6 +1578,12 @@ void KiwiCmd_StartDeferred( int commandId, bool paused )
 {
     s_deferId    = commandId;
     s_deferPause = paused;
+}
+
+// KIWI — see kiwi_command.h and DrainDeferredDeselect.
+void KiwiCmd_DeselectAfterCommit()
+{
+    s_deferDeselect = true;
 }
 
 // ─── §4 HOT / PAUSED (shakeout E) ────────────────────────────────────────────
@@ -1996,7 +2064,7 @@ bool KiwiUX_KeyFunnel( unsigned int vk )
     // USER REPORT, verbatim: "I still cant select 2 faces at once with
     // shift-clicks."  THIS is why — and it is not in the selection layer at all.
     //
-    // THE MECHANISM, end to end.  Radiant_PreTranslateMessage (radiant_main.cpp:646)
+    // THE MECHANISM, end to end.  Radiant_PreTranslateMessage (radiant_main.cpp:647)
     // calls this for every WM_KEYDOWN and, when it returns true, returns true
     // itself — which means the pump calls NEITHER TranslateMessage NOR
     // DispatchMessage for that message (radiant_main.cpp's pump).  The message
@@ -2012,7 +2080,7 @@ bool KiwiUX_KeyFunnel( unsigned int vk )
     // time), the LAST arm of this funnel fed VK_SHIFT to KiwiCmd_KeyDown, whose
     // final rung swallows every key it does not recognise — and the Shift press was
     // consumed before ImGui ever heard of it.  io.KeyShift stayed FALSE, so
-    // ImGuiShell_ViewportInput (imgui_shell.cpp:342) handed
+    // ImGuiShell_ViewportInput (imgui_shell.cpp:344) handed
     // KiwiVP_CameraButtonDown shift = false, KiwiCmd_MouseButton got shift = false,
     // and IdlePressReselect ran its PLAIN arm: cancel, click-select, REPLACE the
     // selection with the one face under the cursor.  Round K's rung and round N's
@@ -2226,7 +2294,7 @@ bool KiwiUX_KeyFunnel( unsigned int vk )
     // WHY THIS RUNG DOES *NOT* CANCEL, unlike round N's.  The caulk verb goes
     // through TexWnd_ApplyMaterialAtIndex, whose head already runs the round-BH
     // handshake KiwiUv_EndGestureBeforeApply / …RestoreGestureAfterApply
-    // (texwnd.cpp:1259/:1330).  That pair cancels the parked push AND RE-ARMS it
+    // (texwnd.cpp:1289/:1330).  That pair cancels the parked push AND RE-ARMS it
     // afterwards with a fresh BeginFaces baseline, so the face gizmo survives the
     // caulk.  Cancelling here would end the gesture without the latch that brings
     // it back, and the user would lose the push/pull gizmo on every End press.  So
@@ -2337,6 +2405,14 @@ bool KiwiUX_KeyFunnel( unsigned int vk )
     // which is unchanged.
     if ( vk == 0x1B && KiwiRegion_HasSelection() )                   // VK_ESCAPE
         KiwiRegion_ClearSelection();
+
+    // The SUN HELPER is a fourth KIWI-owned selection (kiwi_sun.h) and nothing in
+    // the ported layer knows it exists.  Same rung shape and same ruling as the
+    // region one immediately above: it clears its own state and does NOT consume
+    // the key, because Escape means "deselect" and with a brush selection live too
+    // it has to mean deselect BOTH.
+    if ( vk == 0x1B && KiwiSun_Selected() )                          // VK_ESCAPE
+        KiwiSun_ClearSelection();
 
     // ── KIWI-UX (ROUND AJ, ITEM 1): ESCAPE LEAVES PATCH VERTEX MODE ─────────
     // USER REPORT: "The curve vertex mode needs to hide the points when the curve

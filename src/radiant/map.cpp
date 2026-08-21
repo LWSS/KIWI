@@ -13,8 +13,26 @@
 #include "xywnd.h"               // xywndState_t / Ed_ActiveXY (U-GLOBALS)
 #include "prefs.h"               // g_PrefsDlg (m_bCleanTinyBrushes / m_fTinySize)
 #include <map>                   // target-name remap (was MFC CMapStringToString before U-SHIM removal)
+#include <set>                   // the layer model-prefix dedup set
 #include <string>
 #include <universal/q_parse.h>  // Com_ParseExt, parseInfo_t, Com_GetParseThreadInfo
+// progress feedback for the synchronous load — the legacy console
+// pane that used to be the (ugly) feedback is created hidden now.
+#include "kiwi_loadprogress.h"  // KiwiLoadProgress_Begin / _SetTitle / _End
+// the static XModel geometry pool is keyed on XSurface pointers,
+// so Map_NewMap — the one place map models are freed — has to drop it.
+#include "kiwi_modelcache.h"    // KiwiModelCache_Shutdown
+// the pre-transformed INSTANCE pool is keyed on the same
+// XSurface pointers PLUS the model_inst slots, so it dies at exactly the same place.
+#include "kiwi_instcache.h"     // KiwiInstCache_Shutdown
+#include "kiwi_shadowcache.h"   // KiwiShadowCache_Shutdown
+#include "kiwi_walkcache.h"     // KiwiWalkCache_Shutdown
+// the 1-2 minute synchronous load, made measurable.
+#include <universal/profile.h>
+#include <universal/com_memory.h>   // Hunk_Used (com_memory.h:93) — the hunk high-water plot
+// the prefab layer-prefix cache lives beside its only consumer,
+// DrawBrush_PrefabContents; Map_NewMap is where its entity-DEF keys stop meaning anything.
+extern void KiwiPrefabPrefix_Shutdown();   // brush.cpp:7119
 
 // ─── Assert and Sys_Printf from engine / radiant ──────────────────────────────
 extern void  Assert( const char *file, int line, int type, const char *fmt, ... );
@@ -245,6 +263,21 @@ void Map_NewMap()
     {
         Brush_FreeMapBrushes();
         Model_FreeMapModels();
+        // The geometry pool is keyed on the XSurface POINTER, and Model_FreeMapModels
+        // above just freed every map XModel — so the keys must die with them.
+        KiwiModelCache_Shutdown();
+        // Same argument, one key wider: the instance pool is keyed on (model_inst slot,
+        // XSurface), and both halves have just been freed.
+        KiwiInstCache_Shutdown();
+        // Third pool, same argument: the sun-preview caches key on selbrush_t*, brush_t*
+        // and XModel*, all three just freed.
+        KiwiShadowCache_Shutdown();
+        // The shared prefab-walk recording holds selbrush_t* into the lists just released.
+        // Its epoch is the editor's ONE epoch, so this also ages every memo above.
+        KiwiWalkCache_Shutdown();
+        // and the prefab layer-prefix cache, keyed on entity DEF
+        // pointers that Brush_FreeMapBrushes has just recycled (brush.cpp).
+        KiwiPrefabPrefix_Shutdown();
         Map_InitlLayers();
     }
     else
@@ -281,6 +314,12 @@ void Map_NewMap()
         // "an invisible latched plane distorting placement" in its purest form.
         extern void KiwiSection_Reset();       // kiwi_section.h
         KiwiSection_Reset();
+        // KIWI-UX: the SUN HELPER's selection, hover and cached orbit target all
+        // describe THIS document — the target is a brush AABB and the brushes are
+        // being freed around this call — so they go with it.  Same slot and same
+        // argument as the section above.
+        extern void KiwiSun_ResetForNewMap();  // kiwi_sun.h
+        KiwiSun_ResetForNewMap();
     }
 }
 
@@ -395,10 +434,14 @@ entity_s_def *Entity_GetClass( const char *name )
 // 0x486680  Map_LoadFromFile — main map-load entry point.
 void Map_LoadFromFile( const char *path )
 {
+    PROF_SCOPED( "Map_LoadFromFile" );
+
     HCURSOR cursorA = LoadCursorA( nullptr, (LPCSTR)IDC_WAIT );
     hCursor         = SetCursor( cursorA );
 
-    Map_Free();
+    {
+        Map_Free();
+    }
     Select_Deselect( 1 );
 
     // Normalise path: backslash -> forward slash
@@ -414,13 +457,20 @@ void Map_LoadFromFile( const char *path )
         *dst = '\0';
     }
 
+    // Everything from here to the tail is straight-line synchronous — nothing pumps — so the
+    // progress bracket routes every Sys_Printf below into the window CAPTION.  It cannot be an
+    // ImGui modal: an ImGui frame may only start from the pump's WM_PAINT.
+    KiwiLoadProgress_Begin( String );
+
     Sys_Printf( "Map_LoadFile: %s\n", String );
 
     iassert( prefabStackLevel >= 0 );
     iassert( !Map_EditingPrefab() );   // map.cpp:360
 
-    Map_NewMap();
-    Map_InitlLayers();
+    {
+        Map_NewMap();
+        Map_InitlLayers();
+    }
 
     // Clear the in-use flag (qtexture_s.is_in_use @+8) on every registered material,
     // walking the texWndGlob list link (qtexture_s.prev @+0x24).
@@ -432,16 +482,21 @@ void Map_LoadFromFile( const char *path )
     g_qeglobals.g_layerCount_maybe = 1;
 
     Sys_Printf( "Updating layers...\n" );
-    Layers_SetMapLayers();
-    Layers_02();
+    {
+        Layers_SetMapLayers();
+        Layers_02();
+    }
 
-    g_qeglobals.d_num_entities = Map_LoadEntities( path, &entities, 0 );
+    {
+        g_qeglobals.d_num_entities = Map_LoadEntities( path, &entities, 0 );
+    }
 
     // world_entity must be NULL before post-process loop (Map_NewMap clears it;
     // LoadEntities does NOT set it — the loop below does).
     iassert( world_entity == NULL );   // map.cpp:372
 
     // ── Post-process each entity def ─────────────────────────────────────────
+    {
     entity_s_def *eDef = (entity_s_def *)entities.next;
     while ( eDef != (entity_s_def *)&entities )
     {
@@ -485,10 +540,14 @@ void Map_LoadFromFile( const char *path )
 
         eDef = nextDef;
     }
+    }
 
     if ( !world_entity )
     {
         Sys_Printf( "No worldspawn in map.\n" );
+        // the function's ONLY early return — close the bracket here
+        // too or the caption stays stuck on "Loading ..." forever.
+        KiwiLoadProgress_End();
         Map_New();
         return;
     }
@@ -555,9 +614,19 @@ void Map_LoadFromFile( const char *path )
     Map_RegionOff();
     Texture_ShowInuse();
     modified = 0;
-    SetWindowTextA( g_qeglobals.d_hwndMain, String );
+    // Routed through the progress bracket, not SetWindowTextA: the binary's rename happens
+    // mid-load and a direct call would be overwritten by the next progress line.
+    KiwiLoadProgress_SetTitle( String );
 
     // ── Per-brush model load for model entities ───────────────────────────────
+    // Despite the heading this is NOT a model load: sub_418A50 is Layers_MarkModelPrefix
+    // (layers.cpp:473), an O(brushes x layers) string pass over the whole map.
+    {
+    // sub_418A50 ORs bit 0x10 into every layer whose name has `path` as a prefix — idempotent
+    // and keyed on nothing but `path`, and nothing in this loop mutates layerMap.  So a
+    // per-loop set of already-applied paths is behaviour-identical.  sub_418A50 itself is left
+    // byte-for-byte faithful; the dedup is at this call site only.
+    std::set<std::string> markedPaths;
     for ( selbrush_t *sb = active_brushes.next;
           sb != &active_brushes; sb = sb->next )
     {
@@ -577,13 +646,18 @@ void Map_LoadFromFile( const char *path )
                     break;
                 }
             }
-            sub_418A50( modelPath );
+            // apply once per DISTINCT path (see the note above).
+            if ( markedPaths.insert( std::string( modelPath ) ).second )
+                sub_418A50( modelPath );
         }
     }
+    }   // close "load: layer model-prefix marking"
 
     Sys_Printf( "Updating layers...\n" );
-    Layers_SetMapLayers();
-    Layers_02();
+    {
+        Layers_SetMapLayers();
+        Layers_02();
+    }
 
     // ── Between-map clipboard paste ───────────────────────────────────────────
     if ( g_bRestoreBetween )
@@ -597,12 +671,14 @@ void Map_LoadFromFile( const char *path )
     }
 
     // Rebuild brush display lists
-    for ( selbrush_t *sb = selected_brushes.next;
-          sb != &selected_brushes; sb = sb->next )
-        sub_47B940( sb->def );
-    for ( selbrush_t *sb = active_brushes.next;
-          sb != &active_brushes; sb = sb->next )
-        sub_47B940( sb->def );
+    {
+        for ( selbrush_t *sb = selected_brushes.next;
+              sb != &selected_brushes; sb = sb->next )
+            sub_47B940( sb->def );
+        for ( selbrush_t *sb = active_brushes.next;
+              sb != &active_brushes; sb = sb->next )
+            sub_47B940( sb->def );
+    }
 
     MainFrm_BrushList( (int)VA( 0, "%s - active_brushes",   "loaded map" ), &active_brushes );
     MainFrm_BrushList( (int)VA( 1, "%s - active_brushes", "loaded map" ), &selected_brushes );
@@ -638,6 +714,10 @@ void Map_LoadFromFile( const char *path )
         extern void KiwiOutliner_CollapseAllOnNextDraw();         // kiwi_outliner.h:147
         KiwiOutliner_CollapseAllOnNextDraw();
     }
+
+    // close the progress bracket opened at the head — this settles
+    // the window caption on the title the SetWindowTextA above asked for.
+    KiwiLoadProgress_End();
 
     g_nUpdateBits = -1;
 }
@@ -1984,7 +2064,7 @@ void Prefab_PrevLevel()
     // NO-MFC: the texture-bar push is skipped — CTextureBar is an MFC CWnd embedded in
     // CMainFrame (texturebar.cpp) and dies with the frame; the ImGui texture-bar panel
     // re-gathers from the current texdef, so there is nothing to push.  Same treatment as
-    // the sibling sites in surfacedlg.cpp:633 and texwnd.cpp:1396.
+    // the sibling sites in surfacedlg.cpp:633 and texwnd.cpp:1398.
 
     sub_47D060( (int)&active_brushes );
     sub_47D060( (int)&selected_brushes );
@@ -2135,8 +2215,12 @@ int Map_LoadEntities( const char *filename, entity_s *entList, char a3 )
 
     int   count = 0;
     void *buf   = nullptr;
-    if ( LoadFile( filename, &buf ) == -1 )
-        goto done;
+    // RE-ENTERED once per prefab (Prefab_Load -> Eclass_RealizeModel -> here).  LoadFile is a
+    // raw fopen/fread (no FS, no iwd — cmdlib.cpp).
+    {
+        if ( LoadFile( filename, &buf ) == -1 )
+            goto done;
+    }
 
     {
         Com_BeginParseSession( filename );

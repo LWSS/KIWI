@@ -1574,8 +1574,13 @@ int __cdecl R_FinishLoadingAabbTrees_r(GfxAabbTree *tree, int totalTreesUsed)
     ClearBounds(tree->mins, tree->maxs);
     if (tree->childCount)
     {
-        tree->childrenOffset = &rgl.aabbTrees[totalTreesUsed] - tree;
-        children = (tree + tree->childrenOffset);
+        // childrenOffset is a self-relative BYTE offset: R_AddAabbTreeSurfacesInFrustum_r
+        // (r_dpvs_static.cpp:61) and the R_AddStaticModelToAabbTree_r rebase
+        // (r_bsp_load_obj.cpp:2836) both consume it as bytes.  The GfxAabbTree*
+        // difference here scaled by sizeof and sent the renderer's child walk into
+        // unrelated float data.
+        tree->childrenOffset = (char *)&rgl.aabbTrees[totalTreesUsed] - (char *)tree;
+        children = (GfxAabbTree *)((char *)tree + tree->childrenOffset);
         iassert( children[0].startSurfIndex == tree->startSurfIndex );
         totalTreesUsed += tree->childCount;
         for (childIndex = 0; childIndex < tree->childCount; ++childIndex)
@@ -2261,7 +2266,7 @@ uint __cdecl R_BuildNoDecalAabbTree_r(GfxAabbTree *tree, uint startSurfIndex)
     tree->startSurfIndexNoDecal = startSurfIndex;
     if (tree->childCount)
     {
-        children = (tree + tree->childrenOffset);
+        children = (GfxAabbTree *)((char *)tree + tree->childrenOffset);
         for (childIter = 0; childIter < tree->childCount; ++childIter)
             startSurfIndex = R_BuildNoDecalAabbTree_r(&children[childIter], startSurfIndex);
     }
@@ -2970,7 +2975,7 @@ void __cdecl R_AllocStaticModels(GfxAabbTree *tree)
         memcpy(smodelIndexes, tree->smodelIndexes, 2 * tree->smodelIndexCount);
         tree->smodelIndexes = (ushort*)smodelIndexes;
     }
-    children = (tree + tree->childrenOffset);
+    children = (GfxAabbTree *)((char *)tree + tree->childrenOffset);
     for (childIndex = 0; childIndex < tree->childCount; ++childIndex)
         R_AllocStaticModels(&children[childIndex]);
 }
@@ -3041,7 +3046,7 @@ void __cdecl R_SortGfxAabbTree(GfxWorld *world, GfxAabbTree *tree)
     qsort(tree->smodelIndexes, tree->smodelIndexCount, 2u, (int(*)(const void *, const void *))CompareStaticModels);
     if (tree->childCount)
     {
-        children = (tree + tree->childrenOffset);
+        children = (GfxAabbTree *)((char *)tree + tree->childrenOffset);
         for (childIndex = 0; childIndex < tree->childCount; ++childIndex)
             R_SortGfxAabbTree(world, &children[childIndex]);
     }
@@ -3128,7 +3133,7 @@ void __cdecl R_SortGfxAabbTree(GfxWorld *world, GfxAabbTree *tree)
                 tree->childrenOffset = Hunk_AllocAlign(44 * count, 4, "R_SortGfxAabbTree", 21) - (byte*)tree;
                 if (tree->surfaceCount)
                 {
-                    children = (tree + tree->childrenOffset);
+                    children = (GfxAabbTree *)((char *)tree + tree->childrenOffset);
                     childTree = &children[tree->childCount++];
                     childTree->mins[0] = tree->mins[0];
                     childTree->mins[1] = tree->mins[1];
@@ -3149,7 +3154,7 @@ void __cdecl R_SortGfxAabbTree(GfxWorld *world, GfxAabbTree *tree)
                     count = childCount[ja];
                     if (count)
                     {
-                        children = (tree + tree->childrenOffset);
+                        children = (GfxAabbTree *)((char *)tree + tree->childrenOffset);
                         childTree = &children[tree->childCount++];
                         childTree->smodelIndexCount = count;
                         iassert( childTree->smodelIndexCount == count );
@@ -3161,7 +3166,7 @@ void __cdecl R_SortGfxAabbTree(GfxWorld *world, GfxAabbTree *tree)
                 }
                 if (smodelIndexCount)
                 {
-                    children = (tree + tree->childrenOffset);
+                    children = (GfxAabbTree *)((char *)tree + tree->childrenOffset);
                     childTree = &children[tree->childCount++];
                     childTree->smodelIndexCount = smodelIndexCount;
                     iassert(childTree->smodelIndexCount == smodelIndexCount);
@@ -3180,7 +3185,7 @@ int __cdecl R_AabbTreeChildrenCount_r(GfxAabbTree *tree)
     int count; // [esp+8h] [ebp-4h]
 
     count = 1;
-    children = (tree + tree->childrenOffset);
+    children = (GfxAabbTree *)((char *)tree + tree->childrenOffset);
     for (childIndex = 0; childIndex < tree->childCount; ++childIndex)
         count += R_AabbTreeChildrenCount_r(&children[childIndex]);
     return count;
@@ -3193,8 +3198,8 @@ GfxAabbTree *__cdecl R_AabbTreeMove_r(GfxAabbTree *tree, GfxAabbTree *newTree, G
     GfxAabbTree *allocChildren; // [esp+10h] [ebp-4h]
 
     qmemcpy(newTree, tree, sizeof(GfxAabbTree));
-    children = (tree + tree->childrenOffset);
-    newTree->childrenOffset = newChildren - newTree;
+    children = (GfxAabbTree *)((char *)tree + tree->childrenOffset);
+    newTree->childrenOffset = (char *)newChildren - (char *)newTree;
     allocChildren = &newChildren[tree->childCount];
     for (childIndex = 0; childIndex < tree->childCount; ++childIndex)
         allocChildren = R_AabbTreeMove_r(&children[childIndex], &newChildren[childIndex], allocChildren);

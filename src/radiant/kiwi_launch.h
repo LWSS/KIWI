@@ -58,7 +58,7 @@
 // costs nothing and can never produce off-search-path output.
 //
 // ── D-BF-D: NO THREADS.  THE POLL IS THE FRAME. ────────────────────────────────────
-// The radiant is a single-threaded WM_PAINT pump (radiant_main.cpp:944-1001 — PeekMessage
+// The radiant is a single-threaded WM_PAINT pump (radiant_main.cpp:945-1012 — PeekMessage
 // drain, then one forced paint per 1/60 s).  A worker thread reading a pipe would have to
 // hand its bytes to ImGui state that the paint owns, and the editor has no lock discipline
 // for that.  So the runner is a STATE MACHINE polled from `KiwiLaunch_Draw`:

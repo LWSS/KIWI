@@ -40,15 +40,15 @@
 
 // ── ported entry points (each verified against its DEFINITION) ──────────────
 extern int         Sys_Printf( const char *fmt, ... );                        // win_qe3.cpp
-extern camera_s   *Ed_Camera();                                               // camwnd.cpp:156
+extern camera_s   *Ed_Camera();                                               // camwnd.cpp:161
 extern int         g_nUpdateBits;                                             // 0x25D5A74 (mainfrm.cpp)
 // KIWI-UX (CLEANUP, B-34): the parameter name is `planeptsSrc`, copied verbatim
 // from the definition (brush.cpp:463) as the house rule requires.  The name is
 // the ported one and it is misleading: every caller in this layer passes
 // g_qeglobals.random_texture_stuff, i.e. the MATERIAL-DEF source, not plane points.
-extern brush_t    *Brush_Alloc( const void *planeptsSrc, eclass_t *ecls );    // brush.cpp:463  0x4751e0
-extern void        Brush_Free_R( brush_t *def );                              // brush.cpp:700  0x475af0
-extern void        Select_Deselect( int bAlsoFreeFaces );                     // select.cpp:1445 0x48E800
+extern brush_t    *Brush_Alloc( const void *planeptsSrc, eclass_t *ecls );    // brush.cpp:465  0x4751e0
+extern void        Brush_Free_R( brush_t *def );                              // brush.cpp:706  0x475af0
+extern void        Select_Deselect( int bAlsoFreeFaces );                     // select.cpp:1444 0x48E800
 
 // brush.cpp / xywnd.cpp // KIWI-UX forwarders — the same pair kiwi_extrude.cpp:61-63
 // declares, copied verbatim (a drift here is a link error, which is the point).
@@ -60,8 +60,8 @@ extern void Ed_EnsureCurrentMaterial_Kiwi();
 // sequence kiwi_patchfillet.cpp already uses.  Every declaration below is copied
 // VERBATIM from kiwi_patchfillet.cpp's own block, comments included, so a drift
 // between the two files is a link error rather than a silent second spelling.
-extern selbrush_t  *Brush_AddToList( brush_t *def, entity_s *owner );         // brush.cpp:667  0x475980
-extern void         Brush_AddToList2( selbrush_t *b );                        // brush.cpp:921  0x4765A0
+extern selbrush_t  *Brush_AddToList( brush_t *def, entity_s *owner );         // brush.cpp:669  0x475980
+extern void         Brush_AddToList2( selbrush_t *b );                        // brush.cpp:927  0x4765A0
 extern patchMesh_t *MakeNewPatch();                                           // pmesh.cpp:136  0x437AC0
 extern brush_t     *AddBrushForPatch( patchMesh_t *p, entity_s *world_ent );  // pmesh.cpp:840  0x4386A0
 // ROUND AJ, ITEM 2 — the creation tail with the naturalize scale taken from the

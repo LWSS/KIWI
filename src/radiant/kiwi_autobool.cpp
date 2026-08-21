@@ -24,9 +24,9 @@ extern int         g_nUpdateBits;                                             //
 // (NOT the circular display list) and returns a brand-new selbrush_t for the merged
 // brush, or nullptr when the union would not be convex.  Does not free the inputs.
 extern selbrush_t *Brush_MergeList( selbrush_t *brushList );                  // csg.cpp:409   (0x47D600)
-extern void        Brush_RemoveFromList( selbrush_t *b );                     // brush.cpp:962 (0x476680)
-extern void        Brush_AddToList2( selbrush_t *b );                         // brush.cpp:921 (0x4765A0)
-extern void        Brush_Free( selbrush_t *b );                               // brush.cpp:993 (0x475BA0)
+extern void        Brush_RemoveFromList( selbrush_t *b );                     // brush.cpp:972 (0x476680)
+extern void        Brush_AddToList2( selbrush_t *b );                         // brush.cpp:927 (0x4765A0)
+extern void        Brush_Free( selbrush_t *b );                               // brush.cpp:1002 (0x475BA0)
 // KIWI-UX (CLEANUP, B-28): FILE SCOPE, not block scope.  Round AI shipped a link
 // error from a block-scope extern that MSVC mangled with its enclosing namespace;
 // kiwi_uv.cpp carries the full account.  This is the declaration that used to sit

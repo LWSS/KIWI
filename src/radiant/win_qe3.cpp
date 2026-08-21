@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <cstring>
 #include <ctime>
+#include "kiwi_shadowcache.h"   // KiwiShadowCache_Invalidate
 
 // ────────────────────────────────────────────────────────────────────────────
 // Forward declarations from engine / other radiant TUs
@@ -81,6 +82,11 @@ void console_print( const char *fmt, va_list args )
     // cleanly). Headless/selftest has no shell inited — the append is a cheap string op.
     extern void ImGuiConsole_Append( const char *s );
     ImGuiConsole_Append( buf );
+
+    // The legacy EDIT pane below is hidden now, so the last log line is the only load
+    // readout.  No-op unless a load bracket is open; throttled internally to ~10 Hz.
+    extern void KiwiLoadProgress_Note( const char *line );   // kiwi_loadprogress.h
+    KiwiLoadProgress_Note( buf );
 
     HWND edit = g_qeglobals.d_hwndEdit;
     if ( !edit )
@@ -188,6 +194,9 @@ extern int  modified;          // map.cpp (0x23f179c)
 extern char currentmap[];      // map.cpp (0x23f18d8)
 void MarkMapModified( void )
 {
+    // The editor's "geometry changed" funnel: the recorded caster walk stores composed
+    // orientations, so it goes stale here.
+    KiwiShadowCache_Invalidate();
     if ( modified != 1 )
     {
         modified = 1;

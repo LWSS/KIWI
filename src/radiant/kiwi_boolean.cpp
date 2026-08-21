@@ -35,16 +35,16 @@
 #include <vector>
 
 // ── ported entry points (each verified against its DEFINITION) ──────────────
-extern camera_s   *Ed_Camera();                                               // camwnd.cpp:156
+extern camera_s   *Ed_Camera();                                               // camwnd.cpp:161
 extern int         Sys_Printf( const char *fmt, ... );                        // win_qe3.cpp
 extern int         g_nUpdateBits;                                             // 0x25D5A74 (mainfrm.cpp)
-extern selbrush_t *Brush_AddToList( brush_t *def, entity_s *owner );          // brush.cpp:667  (0x475980)
-extern void        Brush_AddToList2( selbrush_t *b );                         // brush.cpp:921  (0x4765a0)
-extern void        Brush_Free( selbrush_t *b );                               // brush.cpp:993  (0x475ba0)
-extern void        Select_Deselect( int bAlsoFreeFaces );                     // select.cpp:1445 (0x48E800)
+extern selbrush_t *Brush_AddToList( brush_t *def, entity_s *owner );          // brush.cpp:669  (0x475980)
+extern void        Brush_AddToList2( selbrush_t *b );                         // brush.cpp:927  (0x4765a0)
+extern void        Brush_Free( selbrush_t *b );                               // brush.cpp:1002  (0x475ba0)
+extern void        Select_Deselect( int bAlsoFreeFaces );                     // select.cpp:1444 (0x48E800)
 extern void        Select_Brush( selbrush_t *brush, char some_overwrite,
                                  char bStatus, char center_grid_on_selection ); // select.cpp:884
-extern void        Radiant_ExecCommand( unsigned int cmdId );                 // mainfrm.cpp:4083
+extern void        Radiant_ExecCommand( unsigned int cmdId );                 // mainfrm.cpp:4054
 // ROUND N: the tool is consumed by a difference, and the tool is NOT on
 // selected_brushes (it is picked with PICKF_EXCLUDE_SELECTED), so the bracket
 // head's Undo_AddBrushList never cloned it.  These are what cover it by hand —
@@ -599,7 +599,7 @@ namespace
         if ( !def || !def->faces )
             return;
         // ROUND AA, ITEM 2 — the orient reference.  KIWI-UX (CLEANUP, A-21): no
-        // null test; Ed_Camera never returns NULL (camwnd.cpp:153).
+        // null test; Ed_Camera never returns NULL (camwnd.cpp:159).
         const camera_s *cam = Ed_Camera();
 
         static const float s_neutral[4] = { 0.0f, 0.0f, 0.0f, 0.0f };

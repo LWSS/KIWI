@@ -30,6 +30,7 @@
 #include <gfx_d3d/r_gfx.h>
 #include <gfx_d3d/r_font.h>         // Font_s::pixelHeight (TexWnd_SetupIter)
 #include <universal/com_files.h>    // FS_ListFiles/FS_Read/FS_FOpenFileRead — bulk material load
+#include <universal/profile.h>
 
 // ── radiant-local helpers (home files) ────────────────────────────────────────
 extern char *AllocMaterialString( const char *src );   // qe3.cpp     (0x48b030)
@@ -423,6 +424,7 @@ static qtexture_s *Material_ConvertToEditorMaterial( const MaterialInfoRaw *raw,
 // editor-visible ones (valid usage/locale + a real auto-scale) into the browser.
 void Load_Materials( void )
 {
+
     if ( !fs_searchpaths )
     {
         Sys_Printf( "Load_Materials: filesystem not initialized\n" );
@@ -1192,13 +1194,14 @@ void TexWnd_Paint( HWND hwndArg )
 //
 // STOP/CAVEAT: the faithful paint body ends with TexWnd_UpdateScrollRange(), which drives the
 // native WS_VSCROLL bar via ::SetScrollInfo/::SetScrollPos( Ed_TexWnd()->m_hWnd, ... )
-// (texwnd.cpp:1232 and TexWnd_CheckScroll 1214/1216/1217).  That is the ONLY HWND touch in this
+// (texwnd.cpp:1234 and TexWnd_CheckScroll 1214/1216/1217).  That is the ONLY HWND touch in this
 // draw path (TexWnd_DrawMaterials/DrawLayeredMaterials themselves take no HWND).  It is kept here
 // to mirror TexWnd_Paint exactly and is harmless while the child window still exists during the
 // shell transition, but the texture child window CANNOT be deleted until scroll-range/position is
 // migrated to ImGui.  Flagged for the orchestrator rather than silently dropped.
 void TexWnd_RenderToRT( int w, int h )
 {
+    PROF_SCOPED( "Texture RenderToRT" );
     if ( !dx.device || w < 1 || h < 1 )
         return;
     texwndState_t *tex = Ed_TexWnd();
@@ -1206,24 +1209,34 @@ void TexWnd_RenderToRT( int w, int h )
     tex->m_nWidth  = w;   tex->m_nHeight = h;
     texWndGlob_textureOffset.m_nWidth  = w;
     texWndGlob_textureOffset.m_nHeight = h;
-    if ( !RTT_Begin( RTT_TEXTURE, w, h ) )   // points FRAME_BUFFER at the RT + suppresses Present
-        return;
+    {
+        if ( !RTT_Begin( RTT_TEXTURE, w, h ) )   // points FRAME_BUFFER at the RT + suppresses Present
+            return;
+    }
 
-    R_BeginFrame();
-    R_BeginSharedCmdList();
-    R_AddCmdClearScreen( 7, g_qeglobals.d_savedinfo.colors[0], 1.0f, 0 );
-    { static const float s_matColor[4] = { 1.0f, 1.0f, 1.0f, 0.0f }; R_AddCmdSetMaterialColor( s_matColor ); }
-    R_AddCmdProjectionSet2D();      // = SetProjection2D (RC_PROJECTION_SET / GFX_PROJECTION_2D)
+    {
+        R_BeginFrame();
+        R_BeginSharedCmdList();
+        R_AddCmdClearScreen( 7, g_qeglobals.d_savedinfo.colors[0], 1.0f, 0 );
+        { static const float s_matColor[4] = { 1.0f, 1.0f, 1.0f, 0.0f }; R_AddCmdSetMaterialColor( s_matColor ); }
+        R_AddCmdProjectionSet2D();      // = SetProjection2D (RC_PROJECTION_SET / GFX_PROJECTION_2D)
+    }
     if ( g_texwnd_simple_layered_selection == 1 )
         TexWnd_DrawLayeredMaterials();
     else
         TexWnd_DrawMaterials();
     TexWnd_UpdateScrollRange();    // IDB OnPaint 0x45db20: set the WS_VSCROLL range from the laid-out content (see STOP above)
 
-    R_EndFrame();
+    {
+        R_EndFrame();
+    }
     R_IssueRenderCommands( (uint)-1 );
-    R_SortMaterials();
-    RTT_End();
+    {
+        R_SortMaterials();
+    }
+    {
+        RTT_End();
+    }
 }
 
 // ApplyMaterialAtIndex — select material `idx` and apply it to the current face
@@ -1958,9 +1971,9 @@ static void R_DrawOutlineRect( int xL, int yT, int xR, int yB, const float *rgba
     // it sometimes turn the other textures in the viewport solid red".
     //
     // ROOT CAUSE.  `R_AddCmd_Line2D` is STATE-DESTRUCTIVE in this port and says so
-    // at its own definition (r_rendercmds.cpp:2028-2035): under KISAK_RADIANT it
-    // routes through `Ed_EmitLineBatch` (r_rendercmds.cpp:1976), which pushes the
-    // run's first vertex colour as the MATERIAL colour (r_rendercmds.cpp:2004) and
+    // at its own definition (r_rendercmds.cpp:2048-2055): under KISAK_RADIANT it
+    // routes through `Ed_EmitLineBatch` (r_rendercmds.cpp:1996), which pushes the
+    // run's first vertex colour as the MATERIAL colour (r_rendercmds.cpp:2024) and
     // NEVER puts it back — the binary never needed to, because it parks the neutral
     // {0,0,0,0} once per pass and lets the per-vertex colour drive $line.  The
     // selected-thumbnail frame is drawn in `colors[10]` = {1,0,0,1} (win_qe3.cpp:423),
@@ -1983,8 +1996,8 @@ static void R_DrawOutlineRect( int xL, int yT, int xR, int yB, const float *rgba
     // one, it is merely downstream of it.
     //
     // THE FIX IS THE BRACKET DISCIPLINE EVERY OTHER PASS IN THIS EDITOR ALREADY
-    // FOLLOWS — set, draw, put it back: xywnd.cpp:1148/1190 ("restore for subsequent
-    // passes/frames"), camwnd.cpp:1437/1439, kiwi_hover.cpp:497/521,
+    // FOLLOWS — set, draw, put it back: xywnd.cpp:1149/1190 ("restore for subsequent
+    // passes/frames"), camwnd.cpp:1501/1439, kiwi_hover.cpp:497/521,
     // kiwi_region.cpp:1290/1409.  texwnd.cpp was the one drawing path in the repo
     // that set a non-neutral colour and never restored it.
     //
@@ -1999,7 +2012,7 @@ static void R_DrawOutlineRect( int xL, int yT, int xR, int yB, const float *rgba
     // the load-bearing half (see the long note on TexWnd_Paint's seed).  COST: one
     // extra RC_SET_MATERIAL_COLOR per outline drawn — at most one per frame in the
     // grid (only the selected cell is framed), one per row in the layered sub-view.
-    // `R_AddCmdSetMaterialColor` does NOT itself dedup (r_rendercmds.cpp:2201); it
+    // `R_AddCmdSetMaterialColor` does NOT itself dedup (r_rendercmds.cpp:2221); it
     // updates `s_edLastMatColor`, which is what lets the NEXT line batch skip its
     // own push when the colour is unchanged, so the command count is a wash.
     { static const float s_restore[4] = { 1.0f, 1.0f, 1.0f, 0.0f };
@@ -2523,8 +2536,9 @@ HWND TexWnd_CreateRaw( HWND parent, int x, int y, int w, int h )
         s_classRegistered = true;
     }
 
+    // CREATED HIDDEN — see the same note in XYWnd_CreateRaw (xywnd.cpp).
     return CreateWindowExA( 0, TEXWND_CLASS_NAME, nullptr,
-                            WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN | WS_VSCROLL,
+                            WS_CHILD | WS_CLIPSIBLINGS | WS_CLIPCHILDREN | WS_VSCROLL,
                             x, y, w, h, parent, nullptr, inst, nullptr );
 }
 

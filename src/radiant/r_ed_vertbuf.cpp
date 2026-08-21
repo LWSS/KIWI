@@ -26,6 +26,9 @@
 #include <gfx_d3d/r_init.h>        // dx, R_ErrorDescription
 #include <gfx_d3d/r_gfx.h>        // GfxWorldVertex, GfxColor, PackedUnitVec
 #include <qcommon/com_pack.h>     // Vec3PackUnitVec
+// The camera surf cache holds editorMesh_s records whose `handle` IS a slot in this
+// pool, so every function here that reassigns or destroys a slot must invalidate it.
+#include "kiwi_surfcache.h"       // KiwiSurfCache_Invalidate / KiwiEdScene_ReleaseMeshRunIB
 
 // d3d9 lock flag used by the original (D3DLOCK_NOOVERWRITE)
 #ifndef D3DLOCK_NOOVERWRITE
@@ -131,6 +134,10 @@ static void Editor_VB_FreePoolList(edVbPool *pool)
 // R_ReleaseForShutdownOrReset.
 void Editor_VB_ReleaseForReset()
 {
+    // The POOL goes, not one brush's slots: nothing cached may survive (kiwi_surfcache.h).
+    KiwiSurfCache_InvalidateAll( "Editor_VB_ReleaseForReset" );
+    KiwiEdScene_ReleaseMeshRunIB();
+
     for (unsigned i = 0; i < editorGlobals.vbCount; ++i)
     {
         if (editorGlobals.vb[i])
@@ -401,6 +408,8 @@ unsigned int Editor_VB_Upload(Material *material, int vertCount,
     iassert(vertCount > 0);                                   // 0x51d1ff (level 0)
     iassert(vertCount <= ED_VERTBUF_VERTEX_COUNT);            // 0x51d225 (level 0)
 
+    KiwiSurfCache_Invalidate( "Editor_VB_Upload" );
+
     edMatVertBuf *matVertBuf = Editor_GetMaterialVertexBuffer(material);
     iassert( matVertBuf );   // r_ed_vertbuf.cpp:377
 
@@ -532,6 +541,9 @@ char R_Ed_FreeVertices(Material *handle, int vertCount, int vertHandle)
     iassert(vertCount > 0);                                   // 0x51cb7a (level 0)  r_ed_vertbuf.cpp:496
     iassert(vertCount <= ED_VERTBUF_VERTEX_COUNT);           // 0x51cba0 (level 0)  r_ed_vertbuf.cpp:497
 
+    // The freed run goes on a free list; the next GetHandle can give it to another face.
+    KiwiSurfCache_Invalidate( "R_Ed_FreeVertices" );
+
     edMatVertBuf *matVertBuf = Editor_GetMaterialVertexBuffer(handle);   // 0x51cbc3
     iassert( matVertBuf );   // r_ed_vertbuf.cpp:500
 
@@ -548,6 +560,9 @@ char sub_51CB70(Material *handle, int vertCount, int vertHandle)
 // scratch pool, and release all D3D9 vertex buffers.  Called on shutdown / reopt.
 void editorVB_freeBuffers()
 {
+    KiwiSurfCache_InvalidateAll( "editorVB_freeBuffers" );   // see Editor_VB_ReleaseForReset
+    KiwiEdScene_ReleaseMeshRunIB();
+
     edMatVertBuf *m = editorGlobals_matVertBufs;
     while (m) {
         edMatVertBuf *next = m->next;

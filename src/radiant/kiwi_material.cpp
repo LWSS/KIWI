@@ -29,7 +29,7 @@ extern bool              Materialdef_Realize( MaterialDef *md );              //
 extern float             Winding_Area( winding_t *w );                        // winding.cpp (winding.h:78)
 extern int               Sys_Printf( const char *fmt, ... );                  // win_qe3.cpp
 
-// xywnd.cpp:2232 — the CLIPPER's caulk / nodraw_decal synthesis, the // KIWI-UX
+// xywnd.cpp:2233 — the CLIPPER's caulk / nodraw_decal synthesis, the // KIWI-UX
 // forwarder shakeout G hoisted out of Ed_ProduceSplitLists.  R3's fallback.
 extern void              Ed_BuildClipFaceMaterial_Kiwi( face_t *out, const brush_t *src );
 
@@ -298,7 +298,7 @@ void KiwiMtl_InfoCommand()
     Sys_Printf( "--- KiwiMatInfo (edit layer %i) ---\n", g_qeglobals.current_edit_layer );
 
     // 1. THE TEMPLATE.  random_texture_stuff[layer] is what every new brush face
-    //    is memcpy'd from (brush.cpp:7641, :3426, :3662 ...), so it is the single
+    //    is memcpy'd from (brush.cpp:7664, :3426, :3662 ...), so it is the single
     //    most useful thing to know when new geometry draws wrong.
     {
         const int layer = g_qeglobals.current_edit_layer;

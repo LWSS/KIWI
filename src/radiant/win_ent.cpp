@@ -72,8 +72,6 @@ extern void        Undo_End();                                                  
 
 extern void        Entity_SetAngles( float a1, int axis );                             // select.cpp 0x494030
 
-extern void        ScriptGroup_HasFlag( const char *key, int dlgItemID, HWND hDlg );   // scriptgroup.cpp 0x454E40
-
 
 // ── entity-window globals (mirror the IDB file-scope state @ 0x240A1xx) ────────
 entity_s_def *edit_entity            = nullptr;   // 0x240A108  currently-edited def
@@ -766,17 +764,10 @@ int UpdateSelection( int wParam, eclass_t *cls )
         SetSpawnFlags();                 // reflect this entity's spawnflags into the boxes
         SetKeyValuePairs();
 
-        // IDA tail (0x4972a9) — RESTORED 2026-07-31. Reflects the selection's
-        // script_flag_true/false keys into the script-group (media) window's two flag
-        // listboxes. Was parked on two then-missing pieces; both landed with the
-        // script-group unit: ScriptGroup_HasFlag (0x454e40, scriptgroup.cpp) and
-        // d_hwndMedia (created by the script-group dialog's WM_INITDIALOG).
-        // IsWindowVisible(NULL) is FALSE, so this stays inert headless, as in the binary.
-        if ( ::IsWindowVisible( g_qeglobals.d_hwndMedia ) )
-        {
-            ScriptGroup_HasFlag( "script_flag_true",  1671, g_qeglobals.d_hwndMedia );
-            ScriptGroup_HasFlag( "script_flag_false", 1298, g_qeglobals.d_hwndMedia );
-        }
+        // IDA tail (0x4972a9) pushed the selection's script_flag_true/false keys into the
+        // script-group window's two flag listboxes.  imgui_panel_scriptgroup.cpp gathers
+        // both lists itself every frame it is open (ScriptGroupFlags_Gather), so there is
+        // nothing to push.
     }
     return 1;
 }

@@ -106,7 +106,6 @@ static char s_assertDisable_Process_area;
 static char s_assertDisable_Process_userData;
 static char s_assertDisable_Process_nanC0;
 static char s_assertDisable_Process_nanC1;
-static char s_assertDisable_Process_areaScale;
 static char s_assertDisable_Process_nanB0pre;
 static char s_assertDisable_Process_nanB1pre;
 static char s_assertDisable_Process_nanB2pre;
@@ -2306,6 +2305,20 @@ void ForEachLightingSampleInTriangle(Triangle_t *tri, int count,
 
 /*
 ================
+ClampAreaToWeight
+
+Native 0x40B570: max(0, min(areaX2, weight)), using the binary's exact
+subtract-and-compare sequence.
+================
+*/
+static float ClampAreaToWeight(float areaX2, float weight)
+{
+    float val = (weight - areaX2 < 0.0f) ? weight : areaX2;
+    return (0.0f - val < 0.0f) ? val : 0.0f;
+}
+
+/*
+================
 ProcessLightingSampleArea
 
 Callback for lighting sample processing. Maps lightmap UV
@@ -2329,11 +2342,10 @@ void ProcessLightingSampleArea(float areaX2, float *centroid,
 {
     LightingSampleResult_t sampleResult;
     LightTransferMapping_t *mapping;
-    float subAreaScale, areaScale;
+    float subAreaWeight, areaWeight;
     float worldPos[3];
     float basis[9]; /* 3x3: tangent, binormal, normal */
     float u, v;
-    float totalWeight, channelWeight;
     int combinedIndex;
 
     (void)polyVerts;
@@ -2352,30 +2364,19 @@ void ProcessLightingSampleArea(float areaX2, float *centroid,
                          centroid[0] * 2.0f, centroid[1] * 2.0f,
                          &sampleResult);
 
-    /* compute area ratios */
+    /* clamp the cell area against each accumulator separately (native 0x40bd9d
+     * channel, 0x40bdc8 total).  The channel clamp gates the cell; the pair is
+     * what every later consumer sees: transport and the direct gathers receive
+     * (total, channel) (0x40c100/0x40c0fd push arg_0 then arg_10), and the
+     * reject/suppression subtract removes each clamp from its own accumulator
+     * (0x40bc53 weight -= a2, 0x40bc6b channel -= a3, called with (arg_0,
+     * arg_10)).  Subtracting one shared value desyncs the accumulators and
+     * trips the subAreaFactor > 0 sanity check downstream. */
     combinedIndex = sampleResult.index0 + sampleResult.index1 * 2;
-    channelWeight = sampleResult.lock->channelWeight[combinedIndex];
-    totalWeight = sampleResult.lock->weight;
-
-    if (channelWeight > areaX2)
-        subAreaScale = areaX2 / channelWeight;
-    else if (channelWeight == 0.0f)
+    subAreaWeight = ClampAreaToWeight(areaX2, sampleResult.lock->channelWeight[combinedIndex]);
+    if (subAreaWeight == 0.0f)
         goto done;
-    else
-        subAreaScale = 1.0f;
-
-    if (totalWeight > areaX2)
-        areaScale = areaX2 / totalWeight;
-    else if (totalWeight == 0.0f)
-    {
-        areaScale = 0.0f;
-        goto check_ratio;
-    }
-    else
-        areaScale = 1.0f;
-
-check_ratio:
-    Assert(areaScale >= 0.0f && areaScale <= subAreaScale, s_assertDisable_Process_areaScale);
+    areaWeight = ClampAreaToWeight(areaX2, sampleResult.lock->weight);
 
     /* Native geometry.cpp 0x40BC80 replays the exact rejected raster-cell
      * ranges stored in radtrans.bin and removes their area before doing any
@@ -2383,8 +2384,8 @@ check_ratio:
     if (Relight_IsSuppressed(mapping->triangleIndex, areaIndex))
     {
         AcquireThreadLock((unsigned int)(uintptr_t)sampleResult.lock);
-        sampleResult.lock->weight -= areaX2;
-        sampleResult.lock->channelWeight[combinedIndex] -= areaX2;
+        sampleResult.lock->weight -= areaWeight;
+        sampleResult.lock->channelWeight[combinedIndex] -= subAreaWeight;
         ReleaseThreadLock((unsigned int)(uintptr_t)sampleResult.lock);
         goto done;
     }
@@ -2429,18 +2430,23 @@ check_ratio:
     Assert(!IS_NAN_FLOAT(basis[6]) && !IS_NAN_FLOAT(basis[7]) && !IS_NAN_FLOAT(basis[8]),
            s_assertDisable_Process_nanB2post);
 
-    /* Retail 0x40BC80 forwards the clipped polygon area to transport and
-     * performs the single normalization later in 0x415E50. */
+    /* Retail forwards the clamp pair to transport.  subAreaFactor is the
+     * CHANNEL clamp: GatherSkyLighting accumulates it into the per-subsample
+     * slot that compile.c:847 later divides by channelWeight, and the gate
+     * above guarantees it non-zero, which is what the transport-side
+     * `subAreaFactor > 0` sanity checks rely on.  skyFactor is the TOTAL
+     * clamp scaling the energy colors that NormalizeLightTransfers divides
+     * by sample->areaX2. */
     if (!FindLightingTransfers_inner(mapping->param, worldPos, basis,
-                                     areaX2, areaX2,
+                                     subAreaWeight, areaWeight,
                                      mapping->primaryLightIndex,
                                      &sampleResult))
     {
-        /* 0x40BC40 subtracts exactly the clipped polygon area from both the
-         * sample total and this 2x2 channel when transport rejects the cell. */
+        /* 0x40BC40 subtracts each clamp from its own accumulator when
+         * transport rejects the cell. */
         AcquireThreadLock((unsigned int)(uintptr_t)sampleResult.lock);
-        sampleResult.lock->weight -= areaX2;
-        sampleResult.lock->channelWeight[combinedIndex] -= areaX2;
+        sampleResult.lock->weight -= areaWeight;
+        sampleResult.lock->channelWeight[combinedIndex] -= subAreaWeight;
         ReleaseThreadLock((unsigned int)(uintptr_t)sampleResult.lock);
         Relight_RecordSuppressed(mapping->triangleIndex, areaIndex);
         goto done;

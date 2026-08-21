@@ -527,6 +527,67 @@ bool KiwiCon_RayPlaneBounded( const kconPlane_t &p, const ray_t &ray, float outW
 // otherwise.  Normalises and orthogonalises; false for a degenerate normal.
 bool KiwiCon_MakePlane( const float origin[3], const float normal[3],
                         const float *hintU, kconPlane_t *out );
+
+// ── KIWI: THE CANONICAL BEARING BASIS ─────────────────
+// USER REPORT, verbatim: *"the angle readout is way broken.  It only shows 178~
+// degrees and changes very little.  It should be an absolute angle like in
+// plasticity."*
+//
+// A bearing is only a number if its ZERO is a fact about the world.  Two zeroes
+// were in use and neither is:
+//   * the free 3D tools (line / polyline / spline) measured against the WORLD
+//     GROUND frame — u = +X, v = +Y — whatever surface the user was drawing on.
+//     Sketching on a wall that runs along world X therefore projects every
+//     in-wall direction onto ±X: horizontal reads ~180, sweeping up the wall
+//     barely moves it, and past 45 degrees of rise the out-of-plane gate drops
+//     the readout entirely.  That is the report, exactly.
+//   * a planar tool's plane takes its u from the picked FACE's winding (the
+//     longest edge, PlaneFromFacePick), which is authoring order, not geometry.
+//
+// The canonical answer, and it is the one Plasticity uses for its construction
+// planes: derive the in-plane axes from the NORMAL alone.
+//   * a non-ground plane: u = normalize( worldZ x n ) — the in-plane HORIZONTAL,
+//     so 0 degrees is level on the surface — and v = n x u, which points UP the
+//     surface, so 90 degrees is straight up it;
+//   * a ground-ish plane (|n.z| ~ 1, where there is no horizontal to single out):
+//     u = world +X, v = n x u, i.e. +Y on a floor.
+// Reference: plasticity/src/editor/snaps/PlaneSnap.ts:33-45
+// (`avoidNumericalPrecisionProblems` — `n.dot(Z) === 1` takes the IDENTITY
+// orientation, i.e. u = +X / v = +Y, and every other normal goes through
+// `mat.lookAt(n, origin, Z)`, whose first column is normalize(Z x n)), with the
+// tolerant degeneracy test from plasticity/src/commands/rect/RectangleFactory.ts:81
+// (`Math.abs(normal.dot(Z)) > 1 - 10e-6`, which covers a downward normal too).
+// World up is +Z in that tree as well (plasticity/src/editor/Editor.ts:46,
+// `THREE.Object3D.DefaultUp = Z`), so the convention ports across unchanged.
+//
+// ── THE BASIS IS CANONICAL, THE *NORMAL* WAS NOT ─────────
+// This helper is correct; what its callers once handed it was not: they latched
+// the surface under each PLACED POINT (world ground in the void), and a bearing
+// measured against a plane PERPENDICULAR to the one the segment lies in has
+// dv = 0 by construction — atan2 pins to 0/180 and sweeping cannot move it, the
+// same stuck signature in a different place.  Drawing into the void in a SIDE
+// ortho view does exactly that: the point slides on a VERTICAL view-aligned
+// plane while the bearing was read against the ground.  The normal now comes
+// from the plane the snap ladder actually resolved the cursor onto this frame
+// (kiwi_snap.h snap_result_t::havePlane), for the readout and the typed field
+// alike, with the per-point latch kept only as the no-plane fallback.
+//
+// RANGE: [0, 360).  Plasticity has no absolute bearing readout to copy — its
+// angle HUD is an unwrapped accumulated delta (MiniGizmos.ts:643-647 formats
+// rad2deg(value) with no wrap) and only its rotate DIALOG imposes a range, the
+// signed [-360, 360] scrubber at RotateDialog.tsx:20-22.  A compass reading is
+// what the user asked for, so the readout is unsigned and wraps once; the typed
+// field accepts any value and normalises it, so 45 and -315 are the same segment.
+void KiwiCon_BearingBasis( const float normal[3], float outU[3], float outV[3] );
+// Absolute bearing of `dir` in that basis, degrees in [0, 360).  False when the
+// direction has no usable in-plane component (`inPlaneOut`, when given, receives
+// the in-plane length so the caller can apply its own omission gate).
+bool KiwiCon_BearingOf( const float normal[3], const float dir[3], float *outDeg,
+                        float *inPlaneOut, float *outOfPlaneOut );
+// The inverse: the unit in-plane direction a typed bearing names.
+void KiwiCon_BearingDir( const float normal[3], float deg, float out[3] );
+// Degrees wrapped into [0, 360).
+float KiwiCon_WrapDeg( float deg );
 // Grid-snap a plane-space point using the §17 modern spacing, measured ALONG the
 // plane's own u/v.
 //

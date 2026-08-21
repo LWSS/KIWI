@@ -38,22 +38,22 @@
 #include <vector>
 
 // ── ported entry points (each verified against its definition) ──────────────
-extern int       Sys_Printf( const char *fmt, ... );                    // win_qe3.cpp:112
+extern int       Sys_Printf( const char *fmt, ... );                    // win_qe3.cpp:118
 extern int       g_nUpdateBits;                                         // 0x25D5A74 (mainfrm.cpp)
-extern camera_s *Ed_Camera();                                           // camwnd.cpp:156
+extern camera_s *Ed_Camera();                                           // camwnd.cpp:161
 extern void      CamWnd_BuildMatrix();                                  // camwnd.cpp 0x403470
 
-extern void      Clone_Selection( float gridSize );                     // select.cpp:2509 0x48F0D0
-extern void      Select_Move( const float *delta, char bSnap );         // select.cpp:2153 0x48E9C0
-extern void      Select_GetMid( float *mid );                           // select.cpp:2210 0x48FC70
+extern void      Clone_Selection( float gridSize );                     // select.cpp:2508 0x48F0D0
+extern void      Select_Move( const float *delta, char bSnap );         // select.cpp:2152 0x48E9C0
+extern void      Select_GetMid( float *mid );                           // select.cpp:2209 0x48FC70
 extern void      Select_RotateAxis( int axis, float deg,
                                     float (*rot_around)[4][3] );        // select.cpp:2364 0x48FF40
 extern void      Select_ApplyMatrix_SelectedBrushes( int bSnap, float *mat,
                                                      float deg, char bSwap ); // select.cpp:2242 0x48FD10
-extern void      sub_47B940( brush_t *def );                            // brush.cpp:5822 (Brush_UpdateSpecialMaterialFlag)
+extern void      sub_47B940( brush_t *def );                            // brush.cpp:5839 (Brush_UpdateSpecialMaterialFlag)
 extern float     grid_sizes[];                                          // engine_stubs.cpp:771 (0x6DDE5C)
 
-extern void      Radiant_ExecCommand( unsigned int cmdId );             // mainfrm.cpp:4083
+extern void      Radiant_ExecCommand( unsigned int cmdId );             // mainfrm.cpp:4054
 // KIWI-UX (CLEANUP, B-28): FILE SCOPE, not block scope.  Round AI shipped a link
 // error from a block-scope extern that MSVC mangled with its enclosing namespace;
 // kiwi_uv.cpp carries the full account.  This is the declaration that used to sit

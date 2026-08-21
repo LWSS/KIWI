@@ -9,7 +9,7 @@
 // NEW code over the KIWI layers plus FOUR ported cores, each called exactly the
 // way its existing caller calls it:
 //
-//   CREATE A GROUP     xywnd.cpp:3390 CreateEntityFromName's bracket, verbatim:
+//   CREATE A GROUP     xywnd.cpp:3411 CreateEntityFromName's bracket, verbatim:
 //                        Undo_ClearRedo(); Undo_GeneralStart( op );
 //                        Undo_AddBrushList( &selected_brushes );
 //                        Entity_Create( Eclass_ForName( 0, "func_group" ) );
@@ -83,23 +83,23 @@
 #include <vector>
 
 // ── ported entry points (each verified against its definition) ──────────────
-extern int         Sys_Printf( const char *fmt, ... );                       // win_qe3.cpp:112   int Sys_Printf(const char*,...)
+extern int         Sys_Printf( const char *fmt, ... );                       // win_qe3.cpp:118   int Sys_Printf(const char*,...)
 extern int         g_nUpdateBits;                                            // engine_stubs.cpp:773  int g_nUpdateBits
-extern entity_s   *world_entity;                                             // map.cpp:41        entity_s *world_entity
-extern entity_s    entityInsts;                                              // entity.cpp:286    entity_s entityInsts{}
-extern eclass_t   *Eclass_ForName( int hasBrushes, const char *name );       // eclass.cpp:1090   eclass_t *Eclass_ForName(int,const char*)
-extern entity_s   *Entity_Create( eclass_t *eclass );                        // entity.cpp:1622   entity_s *Entity_Create(eclass_t*)
-extern void        Entity_Free( char *a1 );                                  // entity.cpp:1485   void Entity_Free(char*)
-extern void        Entity_LinkBrush( brush_t *b, entity_s *world_ent );      // entity.cpp:432    void Entity_LinkBrush(brush_t*,entity_s*)
-extern void        Entity_UnlinkBrush( brush_t *b );                         // entity.cpp:465    void Entity_UnlinkBrush(brush_t*)
-extern selbrush_t *Entity_LinkBrush_0_extern( entity_s *e, entity_brush_s *b );// brush.cpp:623   selbrush_t *Entity_LinkBrush_0_extern(entity_s*,entity_brush_s*)
-extern void        Brush_BuildWindings( brush_t *def, int bFull );           // brush.cpp:1418    void Brush_BuildWindings(brush_t*,int)
+extern entity_s   *world_entity;                                             // map.cpp:59        entity_s *world_entity
+extern entity_s    entityInsts;                                              // entity.cpp:299    entity_s entityInsts{}
+extern eclass_t   *Eclass_ForName( int hasBrushes, const char *name );       // eclass.cpp:1096   eclass_t *Eclass_ForName(int,const char*)
+extern entity_s   *Entity_Create( eclass_t *eclass );                        // entity.cpp:1629   entity_s *Entity_Create(eclass_t*)
+extern void        Entity_Free( char *a1 );                                  // entity.cpp:1500   void Entity_Free(char*)
+extern void        Entity_LinkBrush( brush_t *b, entity_s *world_ent );      // entity.cpp:445    void Entity_LinkBrush(brush_t*,entity_s*)
+extern void        Entity_UnlinkBrush( brush_t *b );                         // entity.cpp:464    void Entity_UnlinkBrush(brush_t*)
+extern selbrush_t *Entity_LinkBrush_0_extern( entity_s *e, entity_brush_s *b );// brush.cpp:635   selbrush_t *Entity_LinkBrush_0_extern(entity_s*,entity_brush_s*)
+extern void        Brush_BuildWindings( brush_t *def, int bFull );           // brush.cpp:1434    void Brush_BuildWindings(brush_t*,int)
 extern void        SetupVertexSelection();                                   // engine_stubs      void SetupVertexSelection()
 extern void        MarkMapModified();                                        // win_qe3.cpp       void MarkMapModified()
-extern void        sub_476330( selbrush_t *b );                              // brush.cpp:846     void sub_476330(selbrush_t*)  Brush_Deselect_Helper
-extern void        sub_476470( selbrush_t *b );                              // brush.cpp:957     void sub_476470(selbrush_t*)  Brush_Select_Helper
-extern void        SetKeyValue( entity_s_def *e, const char *key, const char *value ); // entity.cpp:209  void SetKeyValue(entity_s_def*,const char*,const char*)
-extern char       *ValueForKey2( int e, const char *key );                   // entity.cpp:86     char *ValueForKey2(int,const char*)  ("" when absent)
+extern void        sub_476330( selbrush_t *b );                              // brush.cpp:851     void sub_476330(selbrush_t*)  Brush_Deselect_Helper
+extern void        sub_476470( selbrush_t *b );                              // brush.cpp:970     void sub_476470(selbrush_t*)  Brush_Select_Helper
+extern void        SetKeyValue( entity_s_def *e, const char *key, const char *value ); // entity.cpp:212  void SetKeyValue(entity_s_def*,const char*,const char*)
+extern char       *ValueForKey2( int e, const char *key );                   // entity.cpp:89     char *ValueForKey2(int,const char*)  ("" when absent)
 extern void        Undo_ClearRedo();                                         // undo.cpp:176      void Undo_ClearRedo()
 extern void        Undo_GeneralStart( const char *operation );               // undo.cpp:367      void Undo_GeneralStart(const char*)
 extern void        Undo_AddBrush( entity_brush_s *pBrushInst );              // undo.cpp:494      void Undo_AddBrush(entity_brush_s*)  -- takes the brush DEF
@@ -107,15 +107,15 @@ extern void        Undo_AddBrushList( selbrush_t *sb );                      // 
 extern void        Undo_AddEntity_W( entity_s *a1 );                         // undo.cpp:633      void Undo_AddEntity_W(entity_s*)
 extern void        Undo_SetIdForEntity( entity_s_def *ent );                 // undo.cpp:663      void Undo_SetIdForEntity(entity_s_def*)
 extern void        Undo_End();                                               // undo.cpp:686      void Undo_End()
-extern bool        Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId ); // mainfrm.cpp:1340
+extern bool        Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId ); // mainfrm.cpp:1358
 // KIWI-UX (ROUND W): the live dockspace id, so the JustOpened latch can re-dock
-// this window the way the shell re-docks its own (imgui_shell.cpp:474).
+// this window the way the shell re-docks its own (imgui_shell.cpp:476).
 extern ImGuiID     ImGuiShell_DockRoot();                                    // imgui_shell.cpp
 
 // `active_brushes` / `selected_brushes` are the DISPLAY-list sentinels, declared in
 // qe3.h:1053/1054 and defined in engine_stubs.cpp:777/778.  Only `selected_brushes`
 // is named here, and only as Undo_AddBrushList's argument — exactly as
-// xywnd.cpp:3401 passes it.
+// xywnd.cpp:3402 passes it.
 
 namespace
 {
@@ -826,8 +826,8 @@ bool ReparentBrushes( std::vector<selbrush_t *> &insts, entity_s *targetInst, co
 
         brush_t *bDef = sb->def;
         Entity_UnlinkBrush( bDef );                          // entity.cpp:465
-        Entity_LinkBrush( bDef, (entity_s *)targetDef );     // entity.cpp:432
-        Entity_LinkBrush_0_extern( targetInst, sb );         // brush.cpp:623
+        Entity_LinkBrush( bDef, (entity_s *)targetDef );     // entity.cpp:437
+        Entity_LinkBrush_0_extern( targetInst, sb );         // brush.cpp:633
 
         Brush_BuildWindings( bDef, 1 );
         if ( g_qeglobals.d_select_mode == sel_vertex || g_qeglobals.d_select_mode == sel_edge )
@@ -1736,7 +1736,7 @@ bool KiwiOutliner_GroupSelection()
     GatherSelectedBrushes( brushes );
     if ( !brushes.empty() )
     {
-        eclass_t *ec = Eclass_ForName( 0, "func_group" );     // eclass.cpp:1090
+        eclass_t *ec = Eclass_ForName( 0, "func_group" );     // eclass.cpp:1138
         if ( !ec )
         {
             Sys_Printf( "Outliner: no func_group entity definition — cannot group.\n" );
@@ -1773,7 +1773,7 @@ bool KiwiOutliner_GroupSelection()
             }
             else
             {
-                // xywnd.cpp:3399-3403's bracket, verbatim, plus pmesh.cpp:7396's
+                // xywnd.cpp:3400-3404's bracket, verbatim, plus pmesh.cpp:7396's
                 // Undo_SetIdForEntity tail.  Entity_Create does the reparenting
                 // itself, so there is nothing to relink here.
                 Undo_ClearRedo();

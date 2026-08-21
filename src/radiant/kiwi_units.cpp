@@ -18,7 +18,7 @@
 #include <stdlib.h>
 #include <math.h>
 
-extern int Sys_Printf( const char *fmt, ... );   // win_qe3.cpp:112
+extern int Sys_Printf( const char *fmt, ... );   // win_qe3.cpp:118
 
 namespace
 {

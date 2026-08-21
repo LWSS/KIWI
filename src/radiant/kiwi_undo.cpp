@@ -22,7 +22,7 @@
 #include <math.h>
 
 // ── ported entry points (verified against their definitions) ────────────────
-extern int   Sys_Printf( const char *fmt, ... );   // win_qe3.cpp:112 int Sys_Printf(const char*,...)
+extern int   Sys_Printf( const char *fmt, ... );   // win_qe3.cpp:118 int Sys_Printf(const char*,...)
 extern void  Undo_Undo();                          // undo.cpp:736  void Undo_Undo()
 extern void  Undo_Redo();                          // undo.cpp:1019 void Undo_Redo()
 extern bool  Undo_RedoAvailable();                 // undo.cpp:99   bool Undo_RedoAvailable()

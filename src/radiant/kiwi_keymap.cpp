@@ -212,7 +212,7 @@ namespace
         //  res/radiant.rc's IDR_MAIN_ACCEL bound Ctrl+X to 32951 = ID_FILE_EXIT_RAD.
         //  That accelerator ENTRY is deleted (the .rc carries the // KIWI-UX fence),
         //  which is what lets Ctrl+X reach this table at all — TranslateAccelerator
-        //  runs BEFORE Radiant_TryHotkey (radiant_main.cpp:651 then :675), so while
+        //  runs BEFORE Radiant_TryHotkey (radiant_main.cpp:652 then :675), so while
         //  the entry existed no binding here could ever have been seen.
         //
         //  AUDIT of vk 0x58 in the DEFAULT table, restated for this chord:
@@ -328,7 +328,7 @@ namespace
         // appears in res/radiant.rc's accelerator table (:506-516 is Ctrl+O/S/L/P/
         // K/M and Ctrl+Delete / Ctrl+Insert and nothing else), which matters
         // because TranslateAccelerator runs BEFORE the hotkey table
-        // (radiant_main.cpp:651 then :675).
+        // (radiant_main.cpp:652 then :675).
         //
         // The centre pairings are UNCHANGED and still read left-to-right: the
         // centre box keeps Shift+V and the centre rect keeps Alt+V, below.  What
@@ -438,7 +438,7 @@ namespace
         // camera and goes to Shift+Alt+Z (mods 3), the same destination shape every
         // other displacement in this profile uses.
         // (Ctrl+Z never reaches this table at all — Radiant_PreTranslateMessage
-        // handles undo upstream, radiant_main.cpp:661-665 — so claiming Z cannot
+        // handles undo upstream, radiant_main.cpp:662-666 — so claiming Z cannot
         // disturb it.)
         Bind( table, count, 33062, 0x5A, 3 );   // CameraAngleDown -> Shift+Alt+Z (frees Z)
         Bind( table, count, KIWI_CMD_MATCH_FACE, 0x5A, 0 );         // Z

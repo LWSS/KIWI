@@ -2069,7 +2069,6 @@ void __cdecl Phys_ObjTraceNewPos(dxBody *body)
     float number; // [esp+8h] [ebp-E0h]
     float fraction; // [esp+Ch] [ebp-DCh]
     float v4; // [esp+10h] [ebp-D8h]
-    bool v5; // [esp+14h] [ebp-D4h]
     float v6; // [esp+18h] [ebp-D0h]
     float v7; // [esp+1Ch] [ebp-CCh]
     float v8; // [esp+20h] [ebp-C8h]
@@ -2138,10 +2137,8 @@ void __cdecl Phys_ObjTraceNewPos(dxBody *body)
             
             iassert(!IS_NAN((newPos)[0]) && !IS_NAN((newPos)[1]) && !IS_NAN((newPos)[2]));
 
-            v5 = newPos[0] == userData->savedPos[0]
-                && newPos[1] == userData->savedPos[1]
-                && newPos[2] == userData->savedPos[2];
-            if (!v5 || userData->state <= (uint)PHYS_OBJ_STATE_STUCK)
+            bool posEqual = Vec3Compare(newPos, userData->savedPos);
+            if (!posEqual || userData->state <= (uint)PHYS_OBJ_STATE_STUCK)
             {
                 CM_BoxTrace(&trace, userData->savedPos, newPos, mins, maxs, 0, PHYS_WORLD_CLIPMASK);
                 userData->state = trace.startsolid ? PHYS_OBJ_STATE_STUCK : PHYS_OBJ_STATE_FREE;

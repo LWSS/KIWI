@@ -6185,7 +6185,7 @@ void __cdecl R_RegisterShaderConst(uint dest, const float *value, GfxShaderConst
             consts->count,
             16);
     for (sortedIndex = consts->count;
-        sortedIndex && *(&consts->count + sortedIndex + 1) > dest;
+        sortedIndex && consts->dest[sortedIndex - 1] > dest;  // KIWI: hex-rays dropped the uint16 cast; idb `movzx ecx, word ptr [eax+edx*2+2]`
         consts->value[sortedIndex + 1] = consts->value[sortedIndex])
     {
         --sortedIndex;
@@ -6447,12 +6447,254 @@ uint __cdecl R_DrawSurfPrimarySortKey(const Material *material)
     return material->info.sortKey;
 }
 
+#ifdef KISAK_RADIANT
+// KIWI: snapshot ("Schwartzian") material sort, editor only.  Material_Compare re-derives
+// its whole key on every comparison, so any instability in an input surfaces as std::sort's
+// "invalid comparator" abort.  Here each material's key is extracted ONCE and std::sort
+// orders pointers to those immutable records — strict-weak-ordered by construction.
+// KiwiMtlSort_Compare replays Material_Compare's rungs in the same order with the same
+// operators and the same direction (rungs 1, 3, 5 are k1-minus-k0, i.e. descending), so the
+// output permutation matches for stable data.
+// Two deliberate deviations: the vertex-shader rung is strncmp(...,127) because the
+// original's I_strncpyz(buf,src,128) + strcmp compares exactly 127 chars; and a NULL
+// pixel/vertex shader yields "" here where the original dereferenced it.
+// Material_Compare is kept — it is still the game build's comparator.
+struct KiwiMtlSortKey
+{
+    Material                     *material;
+    const char                   *materialName;
+    const char                   *techSetName;
+    const char                   *pixelShaderName;
+    const char                   *vertexShaderName;
+    const MaterialShaderArgument *codeConstArgs;   // the type-5 run inside pass->args
+    uint                          codeConstCount;
+    int                           hasTechniqueLit;
+    int                           hasTechniqueEmissive;
+    int                           hasLightmap;
+    int                           sortKey;
+    int                           prepass;
+    int                           writesDepth;
+    GfxShaderConstantBlock        literalConsts;
+};
+
+// The per-index half of R_ComparePixelConsts, lifted verbatim.  The type-5 code-const args
+// are one contiguous run inside pass->args, so they are held as (pointer, count) into the
+// technique's own array; only the LITERAL block is copied by value.
+static void KiwiMtlSort_ExtractPixelConsts(
+    const Material *material,
+    const MaterialPass *pass,
+    KiwiMtlSortKey *key)
+{
+    uint argCount;
+    const MaterialShaderArgument *arg;
+
+    arg = &pass->args[pass->perPrimArgCount + pass->perObjArgCount];
+    argCount = pass->stableArgCount;
+    if (argCount)
+    {
+        while (arg->type < 5u)
+        {
+            ++arg;
+            if (!--argCount)
+                return;
+        }
+        key->codeConstArgs = arg;
+        while (arg->type == 5)
+        {
+            bcassert(key->codeConstCount, 0x100);
+            ++key->codeConstCount;
+            ++arg;
+            if (!--argCount)
+                return;
+        }
+        R_GetPixelLiteralConsts(material, pass, &key->literalConsts);
+    }
+}
+
+static void KiwiMtlSort_Extract(Material *material, KiwiMtlSortKey *key)
+{
+    const MaterialTechnique *techniqueLit;
+    const MaterialTechnique *techniqueEmissive;
+    const MaterialTechniqueSet *techSet;
+    const MaterialPass *pass;
+
+    iassert( material );
+    techSet = Material_GetTechniqueSet(material);
+    iassert( techSet );
+    techniqueLit = Material_GetTechnique(material, TECHNIQUE_LIT_BEGIN);
+    techniqueEmissive = Material_GetTechnique(material, TECHNIQUE_EMISSIVE);
+
+    key->material             = material;
+    key->materialName         = material->info.name;
+    key->techSetName          = techSet->name;
+    key->pixelShaderName      = "";
+    key->vertexShaderName     = "";
+    key->hasTechniqueLit      = techniqueLit != 0;
+    key->hasTechniqueEmissive = techniqueEmissive != 0;
+    key->hasLightmap          = (material->info.gameFlags & 2) != 0;
+    key->sortKey              = material->info.sortKey;
+    key->prepass              = R_DrawSurfStandardPrepassSortKey(material);
+    key->writesDepth          = (material->stateFlags & 8) != 0;
+    key->codeConstArgs        = 0;
+    key->codeConstCount       = 0;
+    key->literalConsts.count  = 0;
+
+    // The shader-name and pixel-const rungs are reached only once both materials agree on
+    // hasTechniqueLit and, in the lit branch, writesDepth — so this material's own branch
+    // is exactly what Material_Compare would have read there.
+    if (key->hasTechniqueLit)
+        pass = techniqueLit->passArray;
+    else if (key->hasTechniqueEmissive)
+        pass = techniqueEmissive->passArray;
+    else
+        return;
+
+    if (pass[0].pixelShader)
+        key->pixelShaderName = pass[0].pixelShader->name;
+    if (pass[0].vertexShader)
+        key->vertexShaderName = pass[0].vertexShader->name;
+    if (key->hasTechniqueLit && !key->writesDepth)
+        return;                 // Material_Compare gates the LIT pixel-const rung on writesDepth
+    KiwiMtlSort_ExtractPixelConsts(material, pass, key);
+}
+
+// The pairwise tail of R_ComparePixelConsts, over two already-extracted keys.
+static int KiwiMtlSort_ComparePixelConsts(const KiwiMtlSortKey *k0, const KiwiMtlSortKey *k1)
+{
+    uint constIndex;
+    int j;
+    int comparison;
+
+    comparison = k0->codeConstCount - k1->codeConstCount;
+    if (k0->codeConstCount != k1->codeConstCount)
+        return comparison;
+    for (constIndex = 0; constIndex < k0->codeConstCount; ++constIndex)
+    {
+        comparison = k0->codeConstArgs[constIndex].u.codeConst.index
+                   - k1->codeConstArgs[constIndex].u.codeConst.index;
+        if (comparison)
+            return comparison;
+    }
+    comparison = k0->literalConsts.count - k1->literalConsts.count;
+    if (k0->literalConsts.count != k1->literalConsts.count)
+        return comparison;
+    for (constIndex = 0; constIndex < k0->literalConsts.count; ++constIndex)
+    {
+        comparison = k0->literalConsts.dest[constIndex] - k1->literalConsts.dest[constIndex];
+        if (comparison)
+            return comparison;
+        for (j = 0; j < 4; ++j)
+        {
+            if (k1->literalConsts.value[constIndex][j] > k0->literalConsts.value[constIndex][j])
+                return -1;
+            if (k1->literalConsts.value[constIndex][j] < k0->literalConsts.value[constIndex][j])
+                return 1;
+        }
+    }
+    return 0;
+}
+
+static bool KiwiMtlSort_Compare(const KiwiMtlSortKey *k0, const KiwiMtlSortKey *k1)
+{
+    int comparison;
+
+    comparison = k1->hasTechniqueLit - k0->hasTechniqueLit;
+    if (k1->hasTechniqueLit != k0->hasTechniqueLit)
+        return comparison < 0;
+    if (k0->hasTechniqueLit)
+    {
+        comparison = k0->sortKey - k1->sortKey;
+        if (comparison)
+            return comparison < 0;
+        comparison = k1->hasLightmap - k0->hasLightmap;
+        if (k1->hasLightmap != k0->hasLightmap)
+            return comparison < 0;
+    }
+    else
+    {
+        comparison = k1->hasTechniqueEmissive - k0->hasTechniqueEmissive;
+        if (k1->hasTechniqueEmissive != k0->hasTechniqueEmissive)
+            return comparison < 0;
+        comparison = k0->sortKey - k1->sortKey;
+        if (comparison)
+            return comparison < 0;
+    }
+    comparison = k0->prepass - k1->prepass;
+    if (k0->prepass != k1->prepass)
+        return comparison < 0;
+    comparison = k1->writesDepth - k0->writesDepth;
+    if (k1->writesDepth != k0->writesDepth)
+        return comparison < 0;
+    if (k0->hasTechniqueLit)
+    {
+        comparison = strcmp(k0->pixelShaderName, k1->pixelShaderName);
+        if (comparison)
+            return comparison < 0;
+        if (k0->writesDepth)
+        {
+            comparison = KiwiMtlSort_ComparePixelConsts(k0, k1);
+            if (comparison)
+                return comparison < 0;
+        }
+        comparison = strncmp(k0->vertexShaderName, k1->vertexShaderName, 127);
+        if (comparison)
+            return comparison < 0;
+    }
+    else if (k0->hasTechniqueEmissive)
+    {
+        comparison = strcmp(k0->pixelShaderName, k1->pixelShaderName);
+        if (comparison)
+            return comparison < 0;
+        comparison = KiwiMtlSort_ComparePixelConsts(k0, k1);
+        if (comparison)
+            return comparison < 0;
+        comparison = strncmp(k0->vertexShaderName, k1->vertexShaderName, 127);
+        if (comparison)
+            return comparison < 0;
+    }
+    comparison = strcmp(k0->techSetName, k1->techSetName);
+    if (comparison)
+        return comparison < 0;
+    iassert( k0->material != k1->material );
+    comparison = strcmp(k0->materialName, k1->materialName);
+    iassert( comparison );
+    return comparison < 0;
+}
+
+// Fixed: the material count is hard-capped — rgp.sortedMaterials is Material *[2048] and
+// Material_Add Com_Errors out at 2048.
+#define KIWI_MTL_SORT_MAX 2048
+static KiwiMtlSortKey        s_kiwiMtlSortKeys[KIWI_MTL_SORT_MAX];
+static const KiwiMtlSortKey *s_kiwiMtlSortOrder[KIWI_MTL_SORT_MAX];
+#endif
+
 void __cdecl Material_SortInternal(Material **sortedMaterials, uint materialCount)
 {
     uint sortedIndex; // [esp+98h] [ebp-Ch]
     Material *material; // [esp+A0h] [ebp-4h]
 
+#ifdef KISAK_RADIANT
+    // Sort a snapshot of the comparison keys, not the materials.  The bound cannot be
+    // exceeded; if it ever were, fall back rather than smash BSS.
+    iassert( materialCount <= KIWI_MTL_SORT_MAX );
+    if (materialCount <= KIWI_MTL_SORT_MAX)
+    {
+        for (sortedIndex = 0; sortedIndex < materialCount; ++sortedIndex)
+        {
+            KiwiMtlSort_Extract(sortedMaterials[sortedIndex], &s_kiwiMtlSortKeys[sortedIndex]);
+            s_kiwiMtlSortOrder[sortedIndex] = &s_kiwiMtlSortKeys[sortedIndex];
+        }
+        std::sort(s_kiwiMtlSortOrder, s_kiwiMtlSortOrder + materialCount, KiwiMtlSort_Compare);
+        for (sortedIndex = 0; sortedIndex < materialCount; ++sortedIndex)
+            sortedMaterials[sortedIndex] = s_kiwiMtlSortOrder[sortedIndex]->material;
+    }
+    else
+    {
+        std::sort(sortedMaterials, sortedMaterials + materialCount, Material_Compare);
+    }
+#else
     std::sort(sortedMaterials, sortedMaterials + materialCount, Material_Compare);
+#endif
     for (sortedIndex = 0; sortedIndex < materialCount; ++sortedIndex)
     {
         material = sortedMaterials[sortedIndex];

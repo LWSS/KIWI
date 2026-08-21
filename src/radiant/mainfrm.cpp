@@ -23,10 +23,12 @@
 #include <qcommon/threads.h>           // THREAD_CONTEXT_COUNT
 #include <win32/win_local.h>           // CRITSECT_COUNT (radiant-safe; cmd.cpp includes it too)
 #include <universal/com_memory.h>      // Com_InitHunkMemory
+#include <universal/profile.h>         // PROF_SCOPED â€” the idle pump's attribution
 #include <universal/com_files.h>       // FS_InitFilesystem
 #include <gfx_d3d/r_init.h>            // R_InitEditor, R_InitRendererForWindow
 #include <gfx_d3d/r_rendercmds.h>      // R_InitRenderCommands
 #include <gfx_d3d/r_material.h>        // Material (R_BeginRegistrationInternal return)
+#include "kiwi_windows.h"              // KiwiWindows_IsOpen kiwi_windows.h:105 / KiwiWindows_Set kiwi_windows.h:109
 
 extern void Radiant_RegisterGroupCDvars();   // engine_stubs.cpp
 extern void Sys_InitializeCriticalSections();// universal/win_common.cpp (decl lives in win32/win_local.h, not radiant-safe)
@@ -129,7 +131,13 @@ static void Radiant_ToggleChildVisible( HWND hwnd )
 {
     if ( !hwnd )
         return;
-    ::ShowWindow( hwnd, ::IsWindowVisible( hwnd ) ? SW_HIDE : SW_SHOW );
+    // HIDE-ONLY.  These four HWNDs are the LEGACY child panes; since the RTT transition each
+    // one is a render-target IMAGE inside the dockspace and ImGuiShell_ApplyViewportDocks
+    // SW_HIDEs any it finds visible.  SW_SHOW here could only paint a raw Win32 pane over the
+    // dockspace until the next frame swept it away.  Callers that need a real toggle drive the
+    // ImGui dock window instead - see Cmd_OnToggleconsole below.
+    if ( ::IsWindowVisible( hwnd ) )
+        ::ShowWindow( hwnd, SW_HIDE );
 }
 
 // Editor trace log (%TEMP%\radiant_firstlight.log) - append+flush+close per call so the
@@ -823,7 +831,7 @@ void Radiant_ApplyStartupTextureScale()
     //
     // The switch above ends in Texture_ResetPosition (via Radiant_CheckTextureScale
     // -> mainfrm.cpp:2914), whose documented tail is
-    // TexWnd_ApplyMaterialAtIndex( TexWnd_HitTest( 9, 9 ) ) (texwnd.cpp:2066-2071):
+    // TexWnd_ApplyMaterialAtIndex( TexWnd_HitTest( 9, 9 ) ) (texwnd.cpp:2068-2073):
     // it makes THE FIRST VISIBLE THUMBNAIL the current brush texture.  The browser
     // lists alphabetically, so on this asset set the editor booted with the current
     // material template set to `aa_default` — techset "tools", blendOp Add,
@@ -1009,26 +1017,22 @@ static void Radiant_RefreshTextureBar()
 }
 
 // â”€â”€ The real invalidation broadcast (CMainFrame::UpdateWindows, IDB 0x427090) â”€â”€â”€â”€
-// RedrawWindow each view whose W_* bit is set. RDW_UPDATENOW forces a synchronous repaint
-// (so drags track the cursor). m_bCamPreview is implicit-true here.
-// U-CMD-1: the four views are reached through g_qeglobals.d_hwnd{XY,Camera,Z,Texture} instead
-// of CMainFrame's child pointers.  VERIFIED IDENTICAL at the assignment sites
-// (each d_hwnd* WAS that child's GetSafeHwnd(), assigned once at creation and never rewritten
-// anywhere in the repo; the raw creators in radiant_main.cpp assign the same HWNDs), so the
-// ::RedrawWindow
-// targets are byte-for-byte the same windows; the non-NULL test replaces the pointer+
-// GetSafeHwnd() pair.  This is also what R_BeginRegistrationInternal attaches the device to.
-void Radiant_UpdateWindows( int nBits )
+// The binary RedrawWindow'd each view whose W_* bit was set, RDW_UPDATENOW, so a drag
+// tracked the cursor.
+//
+// ── KIWI: THE FOUR RedrawWindow CALLS ARE GONE ───────────
+// They targeted g_qeglobals.d_hwnd{XY,Camera,Z,Texture}, which are PERMANENTLY HIDDEN
+// since the RTT viewports landed: all four are created without WS_VISIBLE (xywnd.cpp,
+// camwnd.cpp, z.cpp, texwnd.cpp all carry the "CREATED HIDDEN" note),
+// ImGuiShell_ApplyViewportDocks SW_HIDEs any that somehow became visible on every
+// pumped frame, and Radiant_ToggleChildVisible is hide-only.  RDW_UPDATENOW delivers
+// WM_PAINT only to a visible window, so the broadcast could not repaint anything; the
+// real repaint path is KiwiViewDirty_MarkFromUpdateBits, which Radiant_RoutineProcessing
+// below calls from the same drain, feeding ImGuiShell_RenderViewportsToRT.  Four
+// ::RedrawWindow calls per drain, on the pump's hottest path, for nothing.
+// The two helpers below stay: they are the non-viewport half of the broadcast.
+void Radiant_UpdateWindows( int /*nBits*/ )
 {
-    if ( ( nBits & ( W_XY | W_XY_OVERLAY ) ) && g_qeglobals.d_hwndXY )
-        ::RedrawWindow( g_qeglobals.d_hwndXY, NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW );
-    if ( ( nBits & ( W_CAMERA | W_CAMERA_IFON ) ) && g_qeglobals.d_hwndCamera )
-        ::RedrawWindow( g_qeglobals.d_hwndCamera, NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW );
-    if ( ( nBits & ( W_Z | W_Z_OVERLAY ) ) && g_qeglobals.d_hwndZ )
-        ::RedrawWindow( g_qeglobals.d_hwndZ, NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW );
-    if ( ( nBits & W_TEXTURE ) && g_qeglobals.d_hwndTexture )
-        ::RedrawWindow( g_qeglobals.d_hwndTexture, NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW );
-
     // surfinsp: refresh the Surface Inspector edit fields whenever a view is invalidated
     // (selection / texdef edit / map load all set g_nUpdateBits).  No-op when it's closed.
     Surf_UpdateInspector();
@@ -1039,6 +1043,9 @@ void Radiant_UpdateWindows( int nBits )
     Radiant_RefreshTextureBar();
 }
 
+// the 2D-view dirty-flag hook consumed by the drain below.
+extern void KiwiViewDirty_MarkFromUpdateBits( int bits );   // kiwi_viewdirty.h:93
+
 // Idle pump (CMainFrame::RoutineProcessing 0x421a90), driven each idle from
 // CRadiantApp::OnIdle: compute dtime from clock() into g_qeglobals.g_time/g_oldtime (clamp
 // dt>2 -> 0.1, then dtime>0.2 -> 0.2), pump Cam_MouseControl for the RMB cursor-joystick fly,
@@ -1048,6 +1055,11 @@ void Radiant_RoutineProcessing()
 {
     if ( !g_radiantFrameState.doLoop )   // U-CMD-1: was m_bDoLoop
         return;
+
+    // Zoned: this runs once per pump iteration, which is far more often than once per
+    // frame (the pacer's wait truncates to whole milliseconds, so the sub-millisecond
+    // tail of every frame spins through here).  The zone is what makes that visible.
+    PROF_SCOPED( "RoutineProcessing" );
 
     // dtime = wall-clock seconds since last pump, clamped (binary 0x421ada..0x421b24).
     clock_t now = clock();
@@ -1064,6 +1076,9 @@ void Radiant_RoutineProcessing()
     {
         int bits = g_nUpdateBits;
         g_nUpdateBits = 0;
+        // THE ONE HOOK: g_nUpdateBits is the editor's invalidation currency and this is its
+        // only drain, already tagged with WHICH views each path dirties.
+        KiwiViewDirty_MarkFromUpdateBits( bits );
         Radiant_UpdateWindows( bits );
     }
 }
@@ -1231,9 +1246,6 @@ static const RadiantCommand g_radiantCommandsDefault[] = {
     { "SelectedAssociated", 0x58, 4, 33152 },
     { "OverBrightShiftUp", 0xDD, 1, 33147 },
     { "OverBrightShiftDown", 0xDB, 1, 33148 },
-    { "CubicClipZoomOut", 0xDD, 4, 32819 },
-    { "CubicClipZoomIn", 0xDB, 4, 32820 },
-    { "ToggleCubicClip", 0xDC, 4, 32817 },
     { "MoveSelectionDOWN", 0x6D, 0, 32829 },
     { "MoveSelectionUP", 0x6B, 0, 32831 },
     { "LinkSelected", 0x51, 2, 33211 },
@@ -1633,7 +1645,7 @@ bool Radiant_TryHotkey( unsigned int vk )
 // U-CMD-2: the five File-menu map flows + the WM_CLOSE guard are FREE functions now.  Every
 // one of these bodies already reached the shell through exactly two things â€” s_currentMapPath
 // and the frame's own HWND â€” and the HWND is g_qeglobals.d_hwndMain in BOTH shells
-// (mainfrm.cpp:1460 GetSafeHwnd() / radiant_main.cpp:312), so one body serves the MFC message
+// (mainfrm.cpp:1460 GetSafeHwnd() / radiant_main.cpp:313), so one body serves the MFC message
 // map (via the forwarders below) and Radiant_DispatchCommandDirect.  The two prompts they
 // guard on (Radiant_OkToDiscard / Radiant_ConfirmModified) and Radiant_FileSaveAs's picker are
 // defined further down this file; radiant_frame.h declares all three for both shells.
@@ -1721,51 +1733,40 @@ extern BOOL        DoMru( short nID, HWND hWnd );                             //
 extern char       *ValueForKey2( int e, const char *key );                   // entity.cpp 0x4825C0
 extern void        SetKeyValue( entity_s_def *e, const char *key, const char *value ); // entity.cpp
 
-// â”€â”€ 0x495330  ProjectDlgProc â€” the IDD_PROJECT_SETTINGS dialog proc â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-// Verbatim from the binary: WM_INITDIALOG (272) fills the 5 edit controls from the
-// project entity; WM_COMMAND (273) OK reads them back (SetKeyValue) + Project_Write,
-// Cancel just closes.  Control ids: 1265 basepath / 1274 mapspath / 1253 entitypath /
-// 1260 game / 1273 basegame.
-static INT_PTR CALLBACK ProjectDlgProc( HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam )
+// â”€â”€ 0x495330  ProjectDlgProc â€” the IDD_PROJECT_SETTINGS content, UI-independent â”€â”€
+// The dialog proc's WM_INITDIALOG (272) filled 5 edit controls from the project entity and
+// its IDOK (273) read them back (SetKeyValue) + Project_Write; those two halves are the
+// pair below and imgui_panel_project.cpp is the widget layer.  The control ids the dialog
+// used: 1265 basepath / 1274 mapspath / 1253 entitypath / 1260 game / 1273 basegame.
+const char *ProjectSettings_Get( const char *key )
 {
     entity_s_def *proj = (entity_s_def *)g_qeglobals.d_project_entity;
-    if ( msg == WM_INITDIALOG )
-    {
-        if ( !proj )
-            return TRUE;
-        SetDlgItemTextA( hDlg, 1265, ValueForKey2( (int)(intptr_t)proj, "basepath" ) );
-        SetDlgItemTextA( hDlg, 1274, ValueForKey2( (int)(intptr_t)proj, "mapspath" ) );
-        SetDlgItemTextA( hDlg, 1253, ValueForKey2( (int)(intptr_t)proj, "entitypath" ) );
-        SetDlgItemTextA( hDlg, 1260, ValueForKey2( (int)(intptr_t)proj, "game" ) );
-        SetDlgItemTextA( hDlg, 1273, ValueForKey2( (int)(intptr_t)proj, "basegame" ) );
-        return TRUE;
-    }
-    if ( msg != WM_COMMAND )
-        return FALSE;
-    if ( LOWORD( wParam ) == IDOK )
-    {
-        char String[1024];
-        GetDlgItemTextA( hDlg, 1265, String, 1024 ); SetKeyValue( proj, "basepath",   String );
-        GetDlgItemTextA( hDlg, 1274, String, 1024 ); SetKeyValue( proj, "mapspath",   String );
-        GetDlgItemTextA( hDlg, 1253, String, 1024 ); SetKeyValue( proj, "entitypath", String );
-        GetDlgItemTextA( hDlg, 1260, String, 1024 ); SetKeyValue( proj, "game",       String );
-        GetDlgItemTextA( hDlg, 1273, String, 1024 ); SetKeyValue( proj, "basegame",   String );
-        EndDialog( hDlg, 1 );
-        Project_Write( Project_GetCurrentPath() );
-        return TRUE;
-    }
-    if ( LOWORD( wParam ) == IDCANCEL )
-    {
-        EndDialog( hDlg, 0 );
-        return TRUE;
-    }
-    return FALSE;
+    if ( !proj )
+        return "";
+    return ValueForKey2( (int)(intptr_t)proj, key );
+}
+
+void ProjectSettings_Apply( const char *basepath, const char *mapspath, const char *entitypath,
+                            const char *game, const char *basegame )
+{
+    entity_s_def *proj = (entity_s_def *)g_qeglobals.d_project_entity;
+    if ( !proj )
+        return;
+    SetKeyValue( proj, "basepath",   basepath );
+    SetKeyValue( proj, "mapspath",   mapspath );
+    SetKeyValue( proj, "entitypath", entitypath );
+    SetKeyValue( proj, "game",       game );
+    SetKeyValue( proj, "basegame",   basegame );
+    Project_Write( Project_GetCurrentPath() );
 }
 
 // â”€â”€ 0x428DE0  CMainFrame::OnFileProjectsettings â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-// Pops the Project Settings dialog (edit the loaded project entity's epairs).  Faithful
-// (binary DialogBoxParamA(IDD_DLG_PROJECT, ProjectDlgProc)).  No-op if no project loaded
-// (the dialog would show blank fields and Project_Write would fault on a NULL entity).
+// Opens the Project Settings modal (edit the loaded project entity's epairs).  The binary
+// ran DialogBoxParamA(IDD_DLG_PROJECT, ProjectDlgProc) and discarded the return, so the
+// non-blocking open is behaviourally the same.  No-op if no project loaded (the fields
+// would be blank and Project_Write would fault on a NULL entity).
+extern void ImGuiPanel_Project_Open();   // imgui_panel_project.cpp:41  void ImGuiPanel_Project_Open()
+
 static void Cmd_OnFileProjectsettings()
 {
     if ( !g_qeglobals.d_project_entity )
@@ -1773,8 +1774,7 @@ static void Cmd_OnFileProjectsettings()
         Radiant_FL_Log( "OnFileProjectsettings: no project loaded" );
         return;
     }
-    DialogBoxParamA( g_qeglobals.d_hInstance, MAKEINTRESOURCE( IDD_PROJECT_SETTINGS ),
-                     g_qeglobals.d_hwndMain, ProjectDlgProc, 0 );
+    ImGuiPanel_Project_Open();
 }
 
 
@@ -1813,10 +1813,8 @@ void Radiant_CheckGridMenu()   // U-BOOT: de-static'd (both boots seed the radio
 
 extern "C" int ClampGridSize();   // drag.cpp (0x463a80 â€” rotate/grid snap table)
 
-// SetGridStatus (IDB 0x428a00) â€” the full "G:%.1f T:%i R:%i C:%i L:%c%c" status line.
-// Now that g_PrefsDlg is the real settings object the texture/rotate-lock + cubic-scale
-// fields are read directly (no more grid-size-only fallback): G=grid size,
-// T=saved grid index, R=ClampGridSize, C=CubicScale, L=texLock('M')+rotLock('R').
+// SetGridStatus (IDB 0x428a00), minus the C: cubic-scale field: G=grid size,
+// T=saved grid index, R=ClampGridSize, L=texLock('M')+rotLock('R').
 void Radiant_SetGridStatus()
 {
     const char texLockC = g_PrefsDlg->m_bTextureLock ? 'M' : ' ';
@@ -1824,11 +1822,10 @@ void Radiant_SetGridStatus()
     char buf[64];
     // NB: d_savedinfo.d_gridsize is a float in the port's qe3.h; the binary passes it
     // to %i, so cast to int explicitly (a float in a %i vararg would misalign the rest).
-    _snprintf( buf, sizeof( buf ), "G:%.1f T:%i R:%i C:%i L:%c%c",
+    _snprintf( buf, sizeof( buf ), "G:%.1f T:%i R:%i L:%c%c",
                grid_sizes[g_qeglobals.d_gridsize],
                (int)g_qeglobals.d_savedinfo.d_gridsize,
                ClampGridSize(),
-               g_PrefsDlg->m_nCubicScale,
                texLockC, rotLockC );
     MainFrm_SetStatusText( 4, buf );
 }
@@ -2129,7 +2126,7 @@ static void Cmd_OnViewZoomout()
 //   CWnd::FromHandle(..) == m_pXWnd  -> the HWND compare that test always reduced to
 //   GetClientRect + ClientToScreen   -> ::GetClientRect + ::MapWindowPoints( h, 0, .., 2 )
 //        (CWnd::ClientToScreen(RECT*) maps both corners â€” that is this call)
-//   m_pTexWnd->Scroll( zDelta )      -> TexWnd_Scroll (texwnd.cpp:2255 is its forwarder)
+//   m_pTexWnd->Scroll( zDelta )      -> TexWnd_Scroll (texwnd.cpp:2257 is its forwarder)
 // `focusOrHover` is the window the WM_MOUSEWHEEL was delivered to.  The binary's hover test
 // consults ::WindowFromPoint ONLY (the wheel is dispatched by CURSOR position, not focus), so
 // it is deliberately not read here; it stays in the signature because the raw pump's call
@@ -2506,56 +2503,37 @@ extern void Brush_MakeSidedSphere( int sides );                      // brush.cp
 char g_bDoCone   = 0;
 char g_bDoSphere = 0;
 
-// SidesDlgProc (0x495F00) â€” the modal "number of sides" dialog procedure.  Reads
-// the IDC_ARB_SIDES_IN edit field on OK and builds the primitive selected by the
-// g_bDoCone / g_bDoSphere flags.  Faithful to the binary (atol of the field text).
-static INT_PTR CALLBACK SidesDlgProc( HWND hDlg, UINT msg, WPARAM wParam, LPARAM )
+// SidesDlgProc's IDOK body (0x495F00): build the primitive the g_bDoCone / g_bDoSphere
+// flags select, from the number the operator typed.  imgui_panel_sides.cpp calls this;
+// Cancel calls nothing.
+//
+// The binary opened the undo bracket around the MODAL and closed it after; deferred apply
+// brackets the COMMIT instead, so a cancelled prompt leaves no empty undo record.  Same
+// sanctioned divergence the Thicken panel documents (imgui_panels.cpp).
+void Sides_Commit( int sides )
 {
-    if ( msg == WM_INITDIALOG )
-    {
-        ::SetFocus( ::GetDlgItem( hDlg, IDC_ARB_SIDES_IN ) );
-        return FALSE;       // we set focus ourselves (return 0 like the binary)
-    }
-    if ( msg != WM_COMMAND )
-        return FALSE;
-
-    WORD id = LOWORD( wParam );
-    if ( id == IDCANCEL )
-    {
-        ::EndDialog( hDlg, 0 );
-        return FALSE;
-    }
-    if ( id != IDOK )
-        return FALSE;
-
-    char text[256] = { 0 };
-    ::GetWindowTextA( ::GetDlgItem( hDlg, IDC_ARB_SIDES_IN ), text, 255 );
-    int sides = atol( text );
+    Undo_ClearRedo();
+    Undo_GeneralStart( g_bDoCone ? "make cone" : ( g_bDoSphere ? "make sphere" : "arbitrary sided" ) );
+    Undo_AddBrushList( &selected_brushes );
     if ( g_bDoCone )
         Brush_MakeSidedCone( sides );
     else if ( g_bDoSphere )
         Brush_MakeSidedSphere( sides );
     else
         Brush_MakeSided_Prolog( (unsigned int)sides, 1 );
-    ::EndDialog( hDlg, 1 );
-    return FALSE;
-}
-
-// Run the modal sides dialog, undo-bracketed (shared by all three handlers).
-static void Radiant_RunSidesDialog( const char *undoName, char doCone, char doSphere )
-{
-    Undo_ClearRedo();
-    Undo_GeneralStart( undoName );
-    Undo_AddBrushList( &selected_brushes );
-    g_bDoCone   = doCone;
-    g_bDoSphere = doSphere;
-    // The modal's owner is the frame HWND, and its module is d_hInstance (both set at
-    // boot in radiant_main.cpp) — was g_pParentWnd->m_hWnd / AfxGetInstanceHandle().
-    ::DialogBoxParamA( g_qeglobals.d_hInstance, MAKEINTRESOURCE( IDD_ARBITRARY_SIDES ),
-                       g_qeglobals.d_hwndMain,
-                       SidesDlgProc, 0 );
     Undo_EndBrushList( &selected_brushes );
     Undo_End();
+}
+
+// The three Brush -> Primitives handlers (0x424EE0 / 0x429170 / 0x42B630): arm the flags
+// SidesDlgProc reads, then open the prompt.
+extern void ImGuiPanel_Sides_Open( const char *title );   // imgui_panel_sides.cpp:31  void ImGuiPanel_Sides_Open(const char*)
+
+static void Radiant_RunSidesDialog( const char *title, char doCone, char doSphere )
+{
+    g_bDoCone   = doCone;
+    g_bDoSphere = doSphere;
+    ImGuiPanel_Sides_Open( title );
 }
 
 
@@ -3680,23 +3658,16 @@ static void Cmd_OnRenderMethodLightmap()  { Material_SetMode( 1 ); }
 static void Cmd_OnRenderMethodSmoothing() { Material_SetMode( 2 ); }
 
 // â”€â”€ LAYERED MATERIALS â€” the authoring tool palette (layeredmaterialwnd.cpp) â”€â”€â”€â”€â”€â”€
-// OnToggleLayeredMaterials (0x42BFE0) show/hides the frame (body identical to
-// LayeredMaterialWnd_ToggleVisibility 0x4176B0); OnSaveLayeredMaterials (0x42C020) flushes the
-// library to disk (CRC-gated).  The real window is NOT auto-created at startup, so
-// lyrMtlWndGlob.hwnd may be NULL - ShowWindow(NULL,...) is a harmless no-op.
-extern "C" int LayeredMaterialWnd_UntoggleLiveAdd();  // layeredmaterialwnd.cpp (sub_417440)
+// OnToggleLayeredMaterials (0x42BFE0) show/hid the raw-Win32 palette (body identical to
+// LayeredMaterialWnd_ToggleVisibility 0x4176B0) and un-toggled Live add on the way out;
+// imgui_panel_lyrmtl.cpp is that palette now and its toggle carries the same un-toggle.
+// OnSaveLayeredMaterials (0x42C020) flushes the library to disk (CRC-gated).
+extern void ImGuiPanel_LyrMtl_Toggle();               // imgui_panel_lyrmtl.cpp:64  void ImGuiPanel_LyrMtl_Toggle()
 extern char LayeredMaterials_Save();                  // layeredmaterials.cpp (0x416F40)
 
 static void Cmd_OnToggleLayeredMaterials()
 {
-    if ( !::IsWindowVisible( lyrMtlWndGlob.hwnd ) )
-    {
-        ::ShowWindow( lyrMtlWndGlob.hwnd, SW_SHOW );
-        return;
-    }
-    if ( (BYTE)lyrMtlWndGlob.liveAddActive )
-        LayeredMaterialWnd_UntoggleLiveAdd();   // binary calls sub_417440 (un-toggle Live)
-    ::ShowWindow( lyrMtlWndGlob.hwnd, SW_HIDE );
+    ImGuiPanel_LyrMtl_Toggle();
 }
 
 static void Cmd_OnSaveLayeredMaterials()
@@ -4869,24 +4840,6 @@ static void Cmd_OnViewZzoomout()           // cmd 33000 (0x424A40)
         z_scale = 0.003125f;
 }
 
-// â”€â”€ Cubic-clip zoom out / in (Ctrl+[ / ]) â€” Â±m_nCubicScale [1,220], persist.  IDB
-//    0x428F50 / 0x428F10. â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-static void Cmd_OnViewCubeout()            // cmd 32819
-{
-    if ( ++g_PrefsDlg->m_nCubicScale > 220 )
-        g_PrefsDlg->m_nCubicScale = 220;
-    Prefs_SavePrefs( g_PrefsDlg );
-    g_nUpdateBits |= 1u;
-    Radiant_SetGridStatus();
-}
-static void Cmd_OnViewCubein()             // cmd 32820
-{
-    if ( --g_PrefsDlg->m_nCubicScale < 1 )
-        g_PrefsDlg->m_nCubicScale = 1;
-    Prefs_SavePrefs( g_PrefsDlg );
-    g_nUpdateBits |= 1u;
-    Radiant_SetGridStatus();
-}
 
 // â”€â”€ View layout XY / YZ / XZ (0x424710/0x423FB0/0x424A80) â€” set the active 2D-view axis.
 //    m_nCurrentStyle==2 is the "no XY pane" style; skip there.  EViewType == m_nViewType. â”€
@@ -4936,6 +4889,9 @@ static void Cmd_OnToggleconsole()          // cmd 33068 (0x426A90)
     // port that is the embedded m_wndConsole child.
     if ( g_radiantFrameState.currentStyle > 0 && g_radiantFrameState.currentStyle < 3 )
     {
+        // The console the user reads is the ImGui dock window, not the native EDIT pane (which
+        // is created hidden).  KiwiWindows_Set persists the flag and re-syncs the menu check.
+        KiwiWindows_Set( KIWI_WIN_CONSOLE, !KiwiWindows_IsOpen( KIWI_WIN_CONSOLE ) );
         Radiant_ToggleChildVisible( g_qeglobals.d_hwndEdit );   // U-CMD-1: was m_wndConsole
     }
 }
@@ -5452,7 +5408,7 @@ bool Radiant_DispatchCommandDirect( unsigned int cmdId )
     //
     // WHY THE HOOK IS HERE AND NOT IN THE KEY FUNNEL.  Radiant_DispatchCommandDirect
     // is the ONE point every route converges on: the Ctrl+Z/Ctrl+Y arm in
-    // Radiant_PreTranslateMessage (radiant_main.cpp:663-664) posts ID_EDIT_UNDO/REDO
+    // Radiant_PreTranslateMessage (radiant_main.cpp:664-665) posts ID_EDIT_UNDO/REDO
     // through Radiant_ExecCommand, the Edit menu posts the same ids from
     // WM_COMMAND, the command palette runs classic ids through Radiant_ExecCommand,
     // and radiant.ini can remap the keys to anything.  Intercepting in
@@ -5702,8 +5658,6 @@ bool Radiant_DispatchCommandDirect( unsigned int cmdId )
     case 32998: Cmd_OnViewZ100(); return true;   // Z 100% (EMPTY)   0x424740
     case 32999: Cmd_OnViewZzoomin(); return true;   // Z zoom in        0x424A00
     case 33000: Cmd_OnViewZzoomout(); return true;   // Z zoom out       0x424A40
-    case 32819: Cmd_OnViewCubeout(); return true;   // cubic-clip out   0x428F50
-    case 32820: Cmd_OnViewCubein(); return true;   // cubic-clip in    0x428F10
     case 32772: Cmd_OnViewXy(); return true;   // View->Layout XY  0x424710
     case 32774: Cmd_OnViewYz(); return true;   // View->Layout YZ  0x423FB0
     case 32773: Cmd_OnViewXz(); return true;   // View->Layout XZ  0x424A80
@@ -5892,9 +5846,12 @@ bool Radiant_DispatchCommandDirect( unsigned int cmdId )
     case 32794: Ed_SplitClip();            return true;   // SplitSelected   (Shift+Enter)
     case 32796: Ed_FlipClip();             return true;   // FlipClip        (Ctrl+Enter)
     case 32810: Cmd_OnSelectMouserotate(); return true;   // MouseRotate     (R)
-    case 33034: return false;   // POST-RIP: OnBrushArbitrarysided          AfxGetInstanceHandle + g_pParentWnd->m_hWnd modal
-    case 32833: return false;   // POST-RIP: OnBrushMakecone                same modal sides dialog
-    case 32892: return false;   // POST-RIP: OnBrushPrimitivesSphere        same modal sides dialog
+    // Brush -> Primitives: the sides prompt (was the IDD_ARBITRARY_SIDES modal, now
+    // imgui_panel_sides.cpp).  Radiant_RunSidesDialog arms g_bDoCone/g_bDoSphere and
+    // opens it; OK runs Sides_Commit.
+    case 33034: Radiant_RunSidesDialog( "Arbitrary sided", 0, 0 ); return true;   // OnBrushArbitrarysided    0x424EE0
+    case 32833: Radiant_RunSidesDialog( "Cone",            1, 0 ); return true;   // OnBrushMakecone          0x429170
+    case 32892: Radiant_RunSidesDialog( "Sphere",          0, 1 ); return true;   // OnBrushPrimitivesSphere  0x42B630
     // ── TOOLBAR-STATE PREF TOGGLES — ported verbatim from the IW3xRadiant IDA (handler EA in
     //    each comment). Every one is a g_PrefsDlg field flip + Prefs_SavePrefs + the binary's own
     //    repaint; the ONLY dropped line is the m_wndToolBar TB_CHECKBUTTON reflect-state
@@ -5914,10 +5871,6 @@ bool Radiant_DispatchCommandDirect( unsigned int cmdId )
     case 33207: g_PrefsDlg->m_bVertSnapModel ^= 1;     Prefs_SavePrefs( g_PrefsDlg ); g_nUpdateBits = -1; return true;   // VertSnapModel        (0x42a180)
     case 33208: g_PrefsDlg->m_bVertSnapBrush ^= 1;     Prefs_SavePrefs( g_PrefsDlg ); g_nUpdateBits = -1; return true;   // VertSnapBrush        (0x42a1d0)
     case 33209: g_PrefsDlg->m_bVertSnapPrefab ^= 1;    Prefs_SavePrefs( g_PrefsDlg ); g_nUpdateBits = -1; return true;   // VertSnapPrefab       (0x42a220)
-    // Cubic clipping (0x428f90): flip + tick the (still-present) native menu item + repaint.
-    case 32817: g_PrefsDlg->m_bCubicClipping ^= 1;
-                Radiant_CheckMenu( 32817, g_PrefsDlg->m_bCubicClipping != 0 );
-                Prefs_SavePrefs( g_PrefsDlg ); g_nUpdateBits |= 1; return true;          // ViewCubicclipping
     case 32857: Cmd_OnPatchWireframe();  return true;   // TogglePatchWireframes (Shift+W)
     case 33155: Cmd_OnTolerantWeld();    return true;   // TolerantWeld          (Shift+J)
     case 33144: Cmd_OnToggleDrawSurfs(); return true;   // ToggleDrawSurfs       (0x42a040)

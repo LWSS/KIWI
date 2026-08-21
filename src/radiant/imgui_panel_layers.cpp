@@ -52,7 +52,7 @@ extern bool Layers_SetHidden( const char *layerName, bool hidden );     // layer
 // Takes a NON-const char* (it only reads it — select.cpp:1524-1554), so the picked
 // name is handed over through a mutable copy, exactly as the MFC handler does with its
 // LY_SelectedName stack buffer.
-extern void Select_BrushByLayer( char *layer_str );                     // select.cpp:1548 (0x48EE10)
+extern void Select_BrushByLayer( char *layer_str );                     // select.cpp:1547 (0x48EE10)
 
 // ── panel state ───────────────────────────────────────────────────────────────
 static bool s_showLayers = false;

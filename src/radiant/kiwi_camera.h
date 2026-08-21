@@ -93,7 +93,12 @@
 void KiwiCam_OrbitBegin( int imgX, int imgY );
 
 // Rotate the camera around the LATCHED pivot by a pixel delta (accumulated since
-// the press).  Pitch clamped to +-89 degrees; the eye's offset from the pivot is
+// the press).  Pitch clamped to +-89 degrees, widened ON THAT SIDE ONLY to the
+// latched pitch when the drag began on a pole-exact axis view
+// (KCam_PitchDragBounds, kiwi_camera.cpp) so the first moved pixel cannot snap.
+// A clamped frame REWINDS the pixel accumulator to the travel the limit actually
+// allowed, so pushing into a pole banks nothing and the first pixel back out
+// moves the view; the eye's offset from the pivot is
 // rotated by the same rigid rotation the angles undergo, so the orbit radius and
 // the pivot's screen position are both preserved.
 // ── KIWI-UX (ROUND BM, ITEM 3): THE RATE IS PLASTICITY'S, NOT A CONSTANT ────
@@ -143,8 +148,10 @@ float        KiwiCam_Distance();
 //
 // MOUSELOOK.  Rotates camera.angles from a pixel delta at the same 0.35 deg/px
 // and the same signs as the orbit drag and as the ported free-look
-// (CamWnd_Rotate2, camwnd.cpp:4094 `angles[1] -= dx*0.35; angles[0] -= dy*0.35`),
-// pitch clamped to +-89.  The camera POSITION is not touched; the orbit pivot is
+// (CamWnd_Rotate2, camwnd.cpp:4245 `angles[1] -= dx*0.35; angles[0] -= dy*0.35`),
+// pitch clamped to +-89 (same one-sided pole-entry widening as the orbit —
+// KCam_PitchDragBounds, taken from the pitch before the move, so leaving a pole
+// shrinks the band behind you).  The camera POSITION is not touched; the orbit pivot is
 // re-seated in front so a following MMB orbit is still sane.
 //
 // It deliberately does NOT hide or re-centre the cursor: the ported free-look
@@ -205,7 +212,48 @@ void KiwiCam_Translate( const float *delta );
 
 // Point the camera along `pitch`/`yaw` (camera.angles[0]/[1] degrees) while
 // keeping the current look_at and orbit distance — the view-cube's one mutator.
+// The pitch is bounded at ±90 and NOT at the drags' ±89: an axis-locked view has
+// to be pole-EXACT or a TOP view leaks side faces (kiwi_camera.cpp's pitch-limit
+// block has the basis proof and the interactive-clamp rule).
 void KiwiCam_LookAlong( float pitch, float yaw );
+
+// ── WHERE THE CAMERA IS, FOR A 2D MARKER ────────────────────────────────────
+// camera.origin is the EYE, and in the default ORTHO projection the eye is not a
+// place in the world: KiwiCam_Dolly re-seats it at `pivot - forward * s_dist`
+// every notch, and in ortho s_dist IS the zoom driver (1 .. 262144).  So a 2D
+// marker anchored on camera.origin slides across the view by the ZOOM, in a
+// direction set by the camera's own yaw/pitch, while the camera has not moved.
+//
+// This is that anchor done once: the eye in perspective, and in ortho the point
+// on the view axis at the standoff — the centre of what the ortho view is
+// actually showing, and invariant under the wheel by construction (the dolly
+// keeps origin + forward * s_dist on the pivot).
+void KiwiCam_MarkerViewpoint( float out3[3] );
+
+// ── THE POSE SIGNATURE ──────────────────────────────────────────────────────
+// Has the camera POSE (origin + angles) changed since the last call?  Consuming
+// it LATCHES this tick's pose, so it must be called exactly once per tick and
+// from one place — the camera tick (KiwiVP_CameraTick).
+//
+// It exists because the 2D views' dirty currency does not carry the camera.  A
+// pose change sets W_CAMERA only (Commit, and the ported CamWnd_* handlers, both
+// gated on m_bCamXYUpdate which is 0 by default), so nothing marked the XY / Z
+// views and their camera indicators waited for the staggered heartbeat — up to a
+// few seconds.  ONE signature at ONE chokepoint covers every mutator, including
+// the legacy ones that never call into this file.
+//
+// It is a VIEW-dirtiness question and nothing else: a camera move invalidates no
+// derived data (the 2D passes do no view culling), so the caller marks the RTT
+// re-render and must not touch any cache epoch.
+bool KiwiCam_PoseChangedSinceLastTick();
+
+// Which side of the plane ( `point`, `normal` ) the camera is on: +1 when the
+// camera is on the normal's side, -1 when it is behind it.  In PERSPECTIVE that
+// is the eye's own side; in ORTHO there is no eye point that means anything (the
+// eye is a pseudo-eye parked KiwiCam_Distance() behind the pivot), so the test is
+// the view direction instead.  Used by the one-axis handles to spawn on the side
+// the user is looking from; it decides PRESENTATION only.
+float KiwiCam_FacingSign( const float point[3], const float normal[3] );
 
 // ── shakeout I: the modern MAP-NEW / MAP-LOAD placement ─────────────────────
 // Put the camera at (0,-160,96) looking at the world origin and seat the orbit
@@ -328,7 +376,7 @@ void  KiwiCam_SetFlySpeedScale( float mul );
 // no-op", full stop, and that sentence is why a real failure hid for thirteen
 // rounds.  Sliding the eye is a no-op for the IMAGE.  It is not a no-op for the
 // DEPTH RANGE, because CamWnd_SetupScene's ortho arm anchors a slab of
-// ±KCAM_ORTHO_DEPTH (camwnd.cpp:187) ON THE EYE.  Dolly far enough out
+// ±KCAM_ORTHO_DEPTH (camwnd.cpp:193) ON THE EYE.  Dolly far enough out
 // and the geometry you framed passes beyond zFar and the viewport empties —
 // which is exactly the report "when zooming out extremely far, it breaks the 3d
 // camera completely".  The ceiling (kiwi_camera.cpp) is now DERIVED from that
@@ -340,7 +388,7 @@ void  KiwiCam_SetFlySpeedScale( float mul );
 // KCAM_ORTHO_DEPTH is now 524288 and the ortho ceiling 262144 — four times AZ's
 // range, with the SAME depth/2 derivation.  There are TWO ceilings now, because
 // the two projections are bounded by different things: ortho by the slab,
-// PERSPECTIVE by the float32 inverse-VP degeneracy (camwnd.cpp:224-229), which
+// PERSPECTIVE by the float32 inverse-VP degeneracy (camwnd.cpp:230-235), which
 // keeps AZ's 65536.  Both are read through KCam_MaxDist(), which also folds in
 // the half-height cap so a large fov cannot create a wheel dead zone.  Read the
 // block at KCAM_MAX_DIST_ORTHO (kiwi_camera.cpp) before changing any of these
@@ -350,7 +398,7 @@ void  KiwiCam_SetFlySpeedScale( float mul );
 // The slab half-depth used to be written TWICE — `KCAM_ORTHO_DEPTH` in
 // camwnd.cpp and `KCAM_ORTHO_DEPTH_HALF` in kiwi_camera.cpp — with two names for
 // one number and one meaning (a HALF-depth, either side of the eye), coupled by
-// nothing but a "MUST equal camwnd.cpp:187" comment on each side.  Four further
+// nothing but a "MUST equal camwnd.cpp:193" comment on each side.  Four further
 // constants are derived from it, so a one-sided edit desynced the zoom ceiling
 // from the clip slab — the failure round BC spent a whole round diagnosing.
 // It is one definition now; camwnd.cpp's local reads THIS, and the derived
@@ -432,7 +480,7 @@ float KiwiCam_OrthoHalfHeight();
 // where theta is the angle between the axis and the ray.  The solve is therefore
 // amplified by 1/sin^2(theta): a one-pixel cursor move at ground distance d moves
 // the answer by roughly  d / (f * sin^2 theta)  world units, where f ~ 940 is
-// CameraCalcRayDir's own pixel scale (camwnd.cpp:4094).  At theta = 5 degrees that
+// CameraCalcRayDir's own pixel scale (camwnd.cpp:4245).  At theta = 5 degrees that
 // is 70 units per pixel at d = 500 — and the local `den < 1e-4` guards in the six
 // RayAxis copies only refuse at theta < 0.6 degrees, so everything between 0.6 and
 // ~10 degrees SOLVES, loudly and wrongly.  That is the -140 yd: it is not a stale

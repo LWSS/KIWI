@@ -27,7 +27,7 @@
 //
 // The ported rotate does NOT use that sign.  Select_RotateAxis (select.cpp:2337)
 // builds its 3x3 from `Ed_SinCos( -deg, &s, &c )`, and the matrix is applied by
-// Select_ApplyMatrix (brush.cpp:8201) through OrientationPosToWorldPos
+// Select_ApplyMatrix (brush.cpp:8224) through OrientationPosToWorldPos
 // (draw.cpp:24), whose form is out[j] = SUM_i axis[i][j] * pos[i] + origin[j] —
 // i.e. the ROW-vector convention v'[j] = SUM_i M[i][j] v[i].  Substituting the
 // case-2 (Z) block, M[0][0]=c, M[1][0]=-s, M[0][1]=s, M[1][1]=c with s=-sin(deg):
@@ -80,10 +80,10 @@ extern void  __cdecl R_AddRenderCmdDrawTris(
                  const float ( *xyzw )[4], const float ( *normal )[3], float *color,
                  const float ( *st )[2] );                               // 0x4fd1c0
 // KIWI-UX (ROUND AL, ITEM 2): the ALWAYS-ON-TOP mechanism is R_AddCmdClearScreen,
-// which needs no extern here — it is declared __cdecl in r_rendercmds.h:938,
-// included above, and its definition is r_rendercmds.cpp:1513.  The two existing
-// editor uses are camwnd.cpp:3399 (the binary's own selected-outline prelude,
-// 0x4084d2) and camwnd.cpp:3538 (the port's terrain-ring re-clear).
+// which needs no extern here — it is declared __cdecl in r_rendercmds.h:980,
+// included above, and its definition is r_rendercmds.cpp:1841.  The two existing
+// editor uses are camwnd.cpp:3770 (the binary's own selected-outline prelude,
+// 0x4084d2) and camwnd.cpp:3917 (the port's terrain-ring re-clear).
 // (KIWI-UX (ROUND BM): all four numbers re-checked and corrected — three of them
 //  were already stale before this round shifted the two files again.)
 
@@ -767,7 +767,7 @@ namespace
         // the two rounds of evidence that pin its direction down).  With `-vpn`
         // here the fills' brightness was a function of where the camera pointed,
         // while the OUTLINES were immune — Ed_EmitLineBatch pushes a per-colour-
-        // run MATERIAL_COLOR with .w == 1 (r_rendercmds.cpp:1940-1975), which
+        // run MATERIAL_COLOR with .w == 1 (r_rendercmds.cpp:1960-1995), which
         // lerps the whole vertex term away.  "The fills vanish and the outlines
         // stay" is that asymmetry, exactly.  A constant world normal removes it.
         KiwiTris_FillNormal( s_fNrm );
@@ -1040,17 +1040,17 @@ namespace
     // THE MECHANISM IS THE EDITOR'S OWN, not a material trick.  The binary's
     // selected-brush white outline opens with R_AddClearCmd(6 = depth|stencil)
     // "so the selected wireframe passes the depth test against the coplanar
-    // geometry and shows THROUGH" (camwnd.cpp:2969-2975, 0x4084d2), and the port
+    // geometry and shows THROUGH" (camwnd.cpp:3042-3048, 0x4084d2), and the port
     // already re-issues exactly that call a second time when a later pass has
-    // dirtied the buffer under an overlay (camwnd.cpp:3082-3087, the terrain-paint
+    // dirtied the buffer under an overlay (camwnd.cpp:3197-3202, the terrain-paint
     // ring: "the port's filled patch pass can leave depth under the cursor, so
     // re-clear to preserve that overlay relationship").  This is the third use and
     // it is the same sentence.
     //
     // WHAT IT BUYS THAT THE EXISTING CLEAR DID NOT.  The KIWI overlay block
-    // (camwnd.cpp:3093-3181) runs a long way after that prelude, and EVERY line
+    // (camwnd.cpp:3208-3296) runs a long way after that prelude, and EVERY line
     // pass in it writes depth — $line is depthTest LESSEQUAL / depthWrite ON
-    // (main/materials/$line refStateBits[1] = 0x0d, decoded at camwnd.cpp:2422-
+    // (main/materials/$line refStateBits[1] = 0x0d, decoded at camwnd.cpp:2486-
     // 2432).  Hover outlines, construction lines, the marquee, the patch lattice,
     // the snap accents and the live command overlay all stamp the cleared buffer
     // before the gizmo draws, and the prelude clear itself is gated on

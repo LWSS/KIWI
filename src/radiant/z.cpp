@@ -13,6 +13,9 @@
 #include <gfx_d3d/r_scene.h>        // R_Ed_SetSceneParms
 #include <gfx_d3d/r_rendercmds.h>   // R_AddCmd_Line3D, R_BeginFrame/R_EndFrame, clear/material-color
 #include "radiant_rtt.h"           // P5 RTT: RTT_Begin/RTT_End, RTT_Z
+#include <universal/profile.h>
+#include "kiwi_viewdirty.h"        // KiwiViewDirty_Mark — re-arm on a bailed render
+#include "kiwi_camera.h"           // KiwiCam_MarkerViewpoint — the camera marker's anchor
 #include <math.h>
 
 // ─── Editor globals shared with xywnd.cpp / engine_stubs / map.cpp ───────────────
@@ -370,7 +373,13 @@ static void Z_DrawSelectedColumns( int v0 )
 // camera sits on the Z ruler.
 static void Z_DrawCameraMarker()
 {
-    const float camZ = Ed_Camera()->origin[2];   // U-GLOBALS (never NULL — guard dropped)
+    // KIWI-UX DEVIATION: the VIEWPOINT, not camera.origin.  Same reason as the XY
+    // camera icon (xywnd.cpp DrawCameraIcon): in ortho the eye is a pseudo-eye the
+    // dolly parks s_dist behind the pivot, so on a TOP view this marker rode the
+    // zoom straight off the top of the ruler.  Identical in perspective.
+    float camEye[3];
+    KiwiCam_MarkerViewpoint( camEye );
+    const float camZ = camEye[2];                // U-GLOBALS (never NULL — guard dropped)
     const float hw   = (float)( z_width / 4 );     // IDB v12 = z_width/4
     const float x    =  hw;                        // v8 = +hw
     const float xn   = -hw;                        // v9 = -hw
@@ -389,7 +398,7 @@ static void Z_DrawCameraMarker()
     n = Z_AddSeg( verts, x,    camZ,        x,    camZ - 48.0f,&col.packed, 1, n );
     n = Z_AddSeg( verts, xn,   camZ - 48.0f,x,    camZ - 48.0f,&col.packed, 1, n );
     n = Z_AddSeg( verts, xn,   camZ - 48.0f,xn,   camZ,        &col.packed, 1, n );
-    iassert( n == 16 );                            // IDB z.cpp:279 vertCount == ARRAY_COUNT(verts)
+    iassert( n == 16 );                            // IDB z.cpp:280 vertCount == ARRAY_COUNT(verts)
     if ( n )
         R_AddCmd_Line3D( (short)( n / 2 ), 1, verts );
 }
@@ -613,28 +622,47 @@ void ZWnd_Paint( HWND hwnd )
 // come from the ImGui dock cell.
 void ZWnd_RenderToRT( int w, int h )
 {
+    PROF_SCOPED( "Z RenderToRT" );
+    // the caller consumed this view's dirty flag before
+    // calling, so every bail has to put it back (see XYWnd_RenderToRT's note).
     if ( !dx.device || w < 1 || h < 1 )
+    {
+        KiwiViewDirty_Mark( KIWI_DIRTYVIEW_Z );
         return;
+    }
     // Drive the viewport's own size state from the dock-cell size (was set by ZWnd_OnSize).
     g_zwndState.width  = w;
     g_zwndState.height = h;
     z_width  = w;
     z_height = h;
-    if ( !RTT_Begin( RTT_Z, w, h ) )   // points FRAME_BUFFER at the RT + suppresses Present
-        return;
+    {
+        if ( !RTT_Begin( RTT_Z, w, h ) )   // points FRAME_BUFFER at the RT + suppresses Present
+        {
+            KiwiViewDirty_Mark( KIWI_DIRTYVIEW_Z );   // re-arm
+            return;
+        }
+    }
 
-    R_BeginFrame();
-    R_BeginSharedCmdList();
-    R_AddCmdClearScreen( 7, g_qeglobals.d_savedinfo.colors[1], 1.0f, 0 );
-    static const float s_edWhite[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
-    R_AddCmdSetMaterialColor( s_edWhite );
+    {
+        R_BeginFrame();
+        R_BeginSharedCmdList();
+        R_AddCmdClearScreen( 7, g_qeglobals.d_savedinfo.colors[1], 1.0f, 0 );
+        static const float s_edWhite[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+        R_AddCmdSetMaterialColor( s_edWhite );
+    }
 
     Z_Draw();
 
-    R_EndFrame();
+    {
+        R_EndFrame();
+    }
     R_IssueRenderCommands( (uint)-1 );
-    R_SortMaterials();
-    RTT_End();
+    {
+        R_SortMaterials();
+    }
+    {
+        RTT_End();
+    }
 }
 
 void ZWnd_OnLButtonDown( HWND hwnd, unsigned int nFlags, int x, int y )
@@ -775,8 +803,9 @@ HWND ZWnd_CreateRaw( HWND parent, int x, int y, int w, int h )
         s_classRegistered = true;
     }
 
+    // CREATED HIDDEN — see the same note in XYWnd_CreateRaw (xywnd.cpp).
     return CreateWindowExA( 0, ZWND_CLASS_NAME, nullptr,
-                            WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN,
+                            WS_CHILD | WS_CLIPSIBLINGS | WS_CLIPCHILDREN,
                             x, y, w, h, parent, nullptr, inst, nullptr );
 }
 

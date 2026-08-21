@@ -20,7 +20,7 @@
 
 // ── ported entry points (each verified against its definition) ──────────────
 extern int  Sys_Printf( const char *fmt, ... );            // win_qe3.cpp
-extern void Radiant_ExecCommand( unsigned int cmdId );     // mainfrm.cpp:4083
+extern void Radiant_ExecCommand( unsigned int cmdId );     // mainfrm.cpp:4054
 
 // selected_brushes / active_brushes are the qe3.h sentinels (qe3.h:1053-1054).
 

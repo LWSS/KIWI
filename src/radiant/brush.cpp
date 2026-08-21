@@ -12,6 +12,8 @@
 #include <gfx_d3d/r_rendercmds.h>   // R_AddCmd_Line3D, GfxPointVertex, GfxColor
 #include <universal/assertive.h>    // iassert (USE_ASSERTS always on; same handler as Assert)
 #include <string>                   // SelectedAssociated's matchValue (was MFC CString)
+#include "kiwi_shadowcache.h"       // KiwiShadowCache_Invalidate
+#include "kiwi_walkcache.h"         // the shared prefab-walk recording
 
 // faceVisuals_s / faceVis_s are now in qe3.h (moved so select.cpp can use them).
 // The static_asserts remain in qe3.h.
@@ -666,6 +668,10 @@ void Brush_SetInstanceLayerString( selbrush_t *b, const char *str )
 // ────────────────────────────────────────────────────────────────────────────
 selbrush_t *Brush_AddToList( brush_t *def, entity_s *owner )
 {
+    // The ONE allocator for a selbrush_t, so it is the exact signal that the recorded
+    // caster walk has changed shape.
+    KiwiWalkCache_MarkStructural();
+    KiwiShadowCache_Invalidate();
     iassert( def );     // brush.cpp:2384
     iassert( owner );   // brush.cpp:2385
     iassert( def->owner == owner->def );   // brush.cpp:2386
@@ -920,6 +926,10 @@ extern void Sel_InvalidateFromLegacy();
 // ────────────────────────────────────────────────────────────────────────────
 void Brush_AddToList2( selbrush_t *b )
 {
+    // selecting a brush MOVES it between the two display lists
+    // the sun preview walks, so the recorded walk no longer describes them.
+    KiwiWalkCache_MarkStructural();
+    KiwiShadowCache_Invalidate();
     if ( b->next || b->prev )
         Com_Error( ERR_FATAL, "Brush_AddToList: allready linked" );
 
@@ -961,6 +971,8 @@ void sub_476470( selbrush_t *b ) { Brush_Select_Helper( b ); }
 // ────────────────────────────────────────────────────────────────────────────
 void Brush_RemoveFromList( selbrush_t *b )
 {
+    KiwiWalkCache_MarkStructural();   // see Brush_AddToList
+    KiwiShadowCache_Invalidate();
     selbrush_t *next = b->next;
     selbrush_t *prev = b->prev;
     if ( !next || !prev )
@@ -992,6 +1004,10 @@ void Brush_RemoveFromList( selbrush_t *b )
 // the head removes the CamWnd light-preview record (sub_4062D0).
 void Brush_Free( selbrush_t *b )
 {
+    // Brush_RemoveFromList below invalidates only when the brush is still linked, and a
+    // recording that outlived one of its brushes is a DANGLING POINTER.  Bump unconditionally.
+    KiwiWalkCache_MarkStructural();
+    KiwiShadowCache_Invalidate();
     // IDA 0x475ba3: drop this brush's cached light-preview record from the camera window
     // (a2@<ebx> = g_pParentWnd->m_pCamWnd, offset 0x7C0; only when the cam window exists).
     // U-GLOBALS: the record array lives in the shell-agnostic camera state — no guard needed.
@@ -1417,6 +1433,7 @@ void Brush_AccumulateWorldBounds( int orientPtr, int brushPtr, int minsPtr, int 
 // ────────────────────────────────────────────────────────────────────────────
 void Brush_BuildWindings( brush_t *def, int bFull )
 {
+
     if ( bFull )
         Brush_SnapPlanepts( def );
 
@@ -6331,6 +6348,7 @@ void Patch_DrawControlPoints( patch_t *patchInstance, const orientation_t *orien
 // a "benign display rebuild"; stale patch tessellation on layer ops was the symptom.]
 void sub_47D060( int listHead )
 {
+
     selbrush_t *sentinel = (selbrush_t *)(intptr_t)listHead;
     for ( selbrush_t *i = sentinel->next; i != sentinel; i = i->next )   // 0x47d072
     {
@@ -6481,9 +6499,9 @@ void Draw_PatchSelectPointsSelected()
 //  NOT the inverse the bbox uses).  Those prefab brushes are plain worldspawn-class
 //  brushes, so the recursion bottoms out in DrawGeo.
 //
-//  Skipped vs sub_478B10: the camera/XY frustum cull (CullCubic / sub_46CD80) and the
-//  spawnflags drawFlags|=2 "ghost" toggle (read for fidelity; the line path ignores
-//  it).  Filtered prefab brushes (FilterBrush) ARE honoured.
+//  Skipped vs sub_478B10: the spawnflags drawFlags|=2 "ghost" toggle (read for
+//  fidelity; the line path ignores it).  Filtered prefab brushes (FilterBrush) ARE
+//  honoured.
 // ─────────────────────────────────────────────────────────────────────────────
 extern char FilterBrush( selbrush_t *b, int updateFilters );     // filters.cpp 0x46A1F0
 
@@ -7033,7 +7051,9 @@ static void DrawModels_Decorations( selbrush_t *b, const orientation_t *orient,
 // ─────────────────────────────────────────────────────────────────────────────
 extern "C++" LayerMaterialDef *Materialdef_GetName( MaterialDef *m );   // materialdef.cpp 0x431640
 
-static bool PrefabContent_IsClipBrush( selbrush_t *b )                  // 0x478a50
+// NOT static: KiwiWalk_DrawChildren applies the same gate and it must be the SAME function,
+// not a second spelling of it.
+bool PrefabContent_IsClipBrush( selbrush_t *b )                         // 0x478a50
 {
     brush_t *def = b->def;
     if ( def->patch )                                                  // def+0x50 (patchMesh_t*)
@@ -7054,6 +7074,99 @@ static bool PrefabContent_IsClipBrush( selbrush_t *b )                  // 0x478
 }
 
 
+// The prefab-walk magnitudes, reset once per frame at the head of CamWnd_Draw.
+int g_edPrefabPrefabsWalked  = 0;
+int g_edPrefabBrushesWalked  = 0;
+int g_edPrefabBrushesDrawn   = 0;
+
+// The prefab layer-prefix cache.  The string is `layerPrefix ++ strlwr(model) ++ "/"`, and
+// neither input changes per frame, so it is derived ONCE per (entity, parent prefix) and kept
+// until a SetKeyValue or a map load.  The inline build below stays as the fallback.
+// Keyed on the entity DEF pointer, with the parent prefix verified by STRCMP, not by pointer.
+static unsigned s_prefabPrefixEpoch = 1;
+
+// Called from SetKeyValue (entity.cpp) — any key set can be the "model" key, and
+// a key set is a user-scale event, so the cheap conservative bump is the right one.
+void KiwiPrefabPrefix_Invalidate()
+{
+    ++s_prefabPrefixEpoch;
+}
+
+#define KIWI_PP_SLOTS 0x8000     // 32,768 slots x 16 B = 512 KB; ~9x mp_backlot's prefabs
+
+struct KiwiPrefixSlot
+{
+    const void *key;
+    unsigned    epoch;
+    char       *parent;
+    char       *child;
+};
+static KiwiPrefixSlot s_prefixTable[KIWI_PP_SLOTS];
+
+// Called from Map_NewMap.  The table must be EMPTIED, not merely aged: after a map load the
+// entity DEF pointers are recycled memory, and stale slots are only reclaimed when reclaimed.
+void KiwiPrefabPrefix_Shutdown()
+{
+    for ( int i = 0; i < KIWI_PP_SLOTS; ++i )
+    {
+        free( s_prefixTable[i].parent );
+        free( s_prefixTable[i].child );
+        s_prefixTable[i].parent = nullptr;
+        s_prefixTable[i].child  = nullptr;
+        s_prefixTable[i].key    = nullptr;
+        s_prefixTable[i].epoch  = 0;
+    }
+    ++s_prefabPrefixEpoch;
+}
+
+extern char *ValueForKey2( int e, const char *key );   // entity.cpp:89 (0x4825C0)
+
+static const char *PrefabContent_ChildPrefix( entity_s_def *eDef, const char *layerPrefix )
+{
+    if ( !layerPrefix )
+        layerPrefix = "";
+    unsigned h    = (unsigned)( (uintptr_t)eDef >> 4 ) * 2654435761u;
+    int      slot = (int)( h & ( KIWI_PP_SLOTS - 1 ) );
+    for ( int probe = 0; probe < 16; ++probe, slot = ( slot + 1 ) & ( KIWI_PP_SLOTS - 1 ) )
+    {
+        KiwiPrefixSlot *e = &s_prefixTable[slot];
+        if ( e->key == eDef && e->epoch == s_prefabPrefixEpoch && e->parent && e->child
+             && strcmp( e->parent, layerPrefix ) == 0 )
+            return e->child;
+        // A LIVE entry for a different entity: keep probing, or the chain breaks.
+        if ( e->key && e->key != eDef && e->epoch == s_prefabPrefixEpoch )
+            continue;
+        // Free, stale, or ours-with-a-different-parent: (re)build in this slot.
+        const char *model = ValueForKey2( (int)(intptr_t)eDef, "model" );
+        if ( !model )
+            model = "";
+        const size_t pl = strlen( layerPrefix );
+        const size_t ml = strlen( model );
+        char *child  = (char *)malloc( pl + ml + 2 );
+        char *parent = (char *)malloc( pl + 1 );
+        if ( !child || !parent )
+        {
+            free( child );
+            free( parent );
+            return nullptr;                       // caller runs the inline build
+        }
+        memcpy( parent, layerPrefix, pl + 1 );
+        memcpy( child, layerPrefix, pl );
+        memcpy( child + pl, model, ml + 1 );
+        _strlwr( child + pl );                    // 0x478ba3, on the model half only
+        child[pl + ml]     = '/';                 // 0x478c0a
+        child[pl + ml + 1] = 0;
+        free( e->parent );
+        free( e->child );
+        e->key    = eDef;
+        e->epoch  = s_prefabPrefixEpoch;
+        e->parent = parent;
+        e->child  = child;
+        return child;
+    }
+    return nullptr;
+}
+
 static void DrawBrush_PrefabContents( selbrush_t *bboxBrush, entity_s_def *eDef,
                                       const orientation_t *orient, int viewType,
                                       int technique, GfxColor *col, char width,
@@ -7067,63 +7180,61 @@ static void DrawBrush_PrefabContents( selbrush_t *bboxBrush, entity_s_def *eDef,
     // Layer-key prefix for the prefab's content brushes (sub_478B10 0x478b50..0x478c0a):
     // childPrefix = layerPrefix ++ strlwr(<"model" epair value>) ++ "/".  The epair walk
     // (_stricmp key "model", miss → the `zero` empty string) is exactly ValueForKey2.
+    // served from the cache above; the inline build stays as the
+    // out-of-memory fallback and as the readable statement of what the bytes are.
     extern char *ValueForKey2( int e, const char *key );          // entity.cpp 0x4825C0
-    char childPrefix[1028];                                       // v33[1028]
-    char modelLc[1024];                                           // v32[1024]
-    strcpy( childPrefix, layerPrefix );                           // 0x478b50
-    strcpy( modelLc, ValueForKey2( (int)(intptr_t)eDef, "model" ) );
-    _strlwr( modelLc );                                           // 0x478ba3
-    strcat( childPrefix, modelLc );                               // 0x478bd8
-    strcat( childPrefix, "/" );                                   // 0x478c0a
+    const char *childPrefix = PrefabContent_ChildPrefix( eDef, layerPrefix );
+    char childPrefixBuf[1028];                                    // v33[1028]
+    if ( !childPrefix )
+    {
+        char modelLc[1024];                                       // v32[1024]
+        strcpy( childPrefixBuf, layerPrefix );                    // 0x478b50
+        strcpy( modelLc, ValueForKey2( (int)(intptr_t)eDef, "model" ) );
+        _strlwr( modelLc );                                       // 0x478ba3
+        strcat( childPrefixBuf, modelLc );                        // 0x478bd8
+        strcat( childPrefixBuf, "/" );                            // 0x478c0a
+        childPrefix = childPrefixBuf;
+    }
 
     // Forward orientation of the placed prefab (sub_478B10: Entity_GetOrientation
     // on the entity DEF through the caller's matrix).
-    orientation_t prefabOrient;
-    Entity_GetOrientation( eDef, (orientation_t *)orient, &prefabOrient );
+    // A replay hands back the RECORDED orientation, and also decides who walks the content
+    // list below: the recording's contiguous child array, or the prefab's linked list.
+    orientation_t        prefabOrient;
+    const orientation_t *useOrient = nullptr;   // set by exactly one of the two arms below
+    const bool replay = KiwiWalk_PrefabEnter( bboxBrush, &useOrient );
+    if ( !replay )
+    {
+        Entity_GetOrientation( eDef, (orientation_t *)orient, &prefabOrient );
+        useOrient = &prefabOrient;
+    }
 
-    // 0x478c1d — the per-content-brush CULL setup.  The binary sets up the ACTIVE VIEW's
-    // clip planes in the PREFAB's local space so it can cull each content brush BEFORE
-    // DrawBrush, then restores the planes to the caller's orientation at the end:
-    //   camera (a5 < 0): sub_405620(m_pCamWnd, &prefabOrient) → CullCubic per brush;
-    //   XY     (a5 >= 0): CXYWnd_SetupClipPlanes(&prefabOrient, m_pActiveXY) → sub_46CD80.
-    // Without the cull every prefab-content model is skinned: mp_backlot camera overflow
-    // (missing buildings, fixed 4cec231c) and — with the XY branch skipped — blackout's XY
-    // pass attempted ~23k model draws/frame, exhausting radiant_modelSkinnedSurfs[0x4000]
-    // and silently dropping ~7.7k models (XY cull ported 2026-07-05, XY_CullBrush).
-    // Guarded on the wnd pointers — NULL headless → no cull (the headless selftest never
-    // draws prefab contents anyway).
-    // U-GLOBALS: both views' state comes from the shell-agnostic accessors, so the
-    // g_pParentWnd / m_pCamWnd / m_pActiveXY guards (and the m_pXYWnd fallback) are gone —
-    // the view SELECTION is purely `viewType < 0` (camera) vs `>= 0` (XY), as in the binary.
-    extern char CamWnd_CullCubic( selbrush_t *brush );                          // camwnd.cpp 0x4056d0
-    extern void CamWnd_SetupClipPlanes( const float *orient );                  // camwnd.cpp 0x405620
-    extern char XYWnd_CullBrush( xywndState_t *xy, selbrush_t *b );             // xywnd.cpp 0x46cd80
-    extern void XYWnd_SetupClipPlanes( xywndState_t *xy, const float *orient ); // xywnd.cpp 0x46cca0
-    const bool cullCam = ( viewType < 0 );
-    if ( cullCam )
-        CamWnd_SetupClipPlanes( (const float *)&prefabOrient );          // 0x478c3f
-    // 0x478c65/0x478c7d — the XY branch (Ed_ActiveXY() IS the one XY view).
-    xywndState_t *cullXY = ( viewType >= 0 ) ? Ed_ActiveXY() : nullptr;
-    if ( cullXY )
-        XYWnd_SetupClipPlanes( cullXY, (const float *)&prefabOrient );   // 0x478c7d
+    // The XY view is what tells this loop and KiwiWalk_DrawChildren "this is the XY path"
+    // for FilterBrush's fast-2D-drag argument (a SEMANTIC gate, not a view test).
+    // 0x478c65 — Ed_ActiveXY() IS the one XY view; `viewType < 0` is the camera.
+    xywndState_t *drawXY = ( viewType >= 0 ) ? Ed_ActiveXY() : nullptr;
 
     // Iterate the prefab's instanced brush list (active_brushlist_next .. sentinel
     // &active_brushlist, linked via selbrush_t.next) and draw each.
     selbrush_t *sentinel = (selbrush_t *)&pf->active_brushlist;
 
+    ++g_edPrefabPrefabsWalked;
+
+    // The replay arm: same gate, same order, same DrawBrush — only the child SEQUENCE comes
+    // out of the recording.  KiwiWalk_DrawChildren is this loop's twin: edit both or neither.
+    if ( replay )
+    {
+        KiwiWalk_DrawChildren( useOrient, viewType, technique, col, width, drawFlags,
+                               childPrefix, drawXY );
+        KiwiWalk_PrefabLeave();
+        return;
+    }
+
     for ( selbrush_t *pb = pf->active_brushlist_next;
           pb && pb != sentinel;
           pb = pb->next )
     {
-        // 0x478cbb — CullCubic per content brush (camera view, in the prefab's local
-        // space set up above).  Cull → skip skinning this content brush entirely.
-        if ( cullCam && CamWnd_CullCubic( pb ) )
-            continue;
-        // 0x478cff — sub_46CD80 per content brush (XY view): outside the 2D view rect
-        // (planes in prefab-local space) → skip.  This is the cull whose absence made the
-        // XY pass queue every content model map-wide (the blackout FRAMEDROP overflow).
-        if ( cullXY && XYWnd_CullBrush( cullXY, pb ) )
-            continue;
+        ++g_edPrefabBrushesWalked;
         // 0x478d9a — the binary's draw gate: draw UNLESS FilterBrush hides it, OR
         // (drawFlags bit 1 set AND it's a clip brush).  A misc_prefab placed with a
         // non-zero "spawnflags" sets bit 1 (DrawModels 0x479791) → its clip-hull
@@ -7141,26 +7252,19 @@ static void DrawBrush_PrefabContents( selbrush_t *bboxBrush, entity_s_def *eDef,
         // 0x478d81 — the binary's FilterBrush 2nd arg is the fast-2D-drag flag, TRUE only
         // while a drag is active AND fast_2d_view_dragging is on AND this is the XY path
         // (v24 = g_qeglobals.toggle_unk02 && g_PrefsDlg->fast_2d_view_dragging && v31).
-        // (The port passed a literal 0 = never fast-filter; parity restored with the cull.)
         {
             const char fastDrag = ( g_qeglobals.toggle_unk02
                                     && g_PrefsDlg->fast_2d_view_dragging
-                                    && cullXY != nullptr ) ? 1 : 0;
+                                    && drawXY != nullptr ) ? 1 : 0;
             if ( FilterBrush( pb, fastDrag ) )
                 continue;
         }
         if ( ( drawFlags & 2 ) != 0 && PrefabContent_IsClipBrush( pb ) )
             continue;
+        ++g_edPrefabBrushesDrawn;
         DrawBrush( pb, &prefabOrient, viewType, technique, col, width, drawFlags,
                    childPrefix );
     }
-
-    // 0x478df3 — restore the clip planes to the CALLER's orientation (recursion-safe
-    // for nested prefabs).  Binary: sub_405620(m_pCamWnd, a4) / CXYWnd_SetupClipPlanes(a4, xy).
-    if ( cullCam )
-        CamWnd_SetupClipPlanes( (const float *)orient );                // 0x478dfa
-    if ( cullXY )
-        XYWnd_SetupClipPlanes( cullXY, (const float *)orient );         // 0x478e19
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -7296,7 +7400,13 @@ void DrawBrush( selbrush_t *b, const orientation_t *orient, int viewType,
             {
                 extern char *ValueForKey2( int e, const char *key );          // entity.cpp 0x4825C0
                 int contentFlags = drawFlags;
-                if ( atol( ValueForKey2( (int)(intptr_t)eDef, "spawnflags" ) ) )
+                // -1 = no replay open: read the epair, as before.  Only SetKeyValue can change
+                // this answer, and SetKeyValue drops the recording (entity.cpp:212).
+                const int spawnBit = KiwiWalk_SpawnflagsBit( b );
+                const bool spawnSet = ( spawnBit >= 0 )
+                                    ? ( spawnBit != 0 )
+                                    : ( atol( ValueForKey2( (int)(intptr_t)eDef, "spawnflags" ) ) != 0 );
+                if ( spawnSet )
                     contentFlags |= 2;
                 // draw_meth1 role (0x47b11a): View→Entities-as-wireframe (show-state bit 0)
                 // forces the content GEOMETRY to 29; the xmodel mesh keeps `technique`

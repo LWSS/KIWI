@@ -67,10 +67,10 @@ extern void EclassCreate_Apply( const char *name );                             
 extern void EclassSelect_Apply( int listIndex, eclass_t *pec );                        // win_ent.cpp
 // KIWI-UX (ROUND AU): the selection -> edit_entity refresh, as mainfrm.cpp:56
 // declares it.  win_ent.cpp:800  void Entity_UpdateSelection()  ( = UpdateSelection( -1, NULL ) ).
-extern void Entity_UpdateSelection();                                                  // win_ent.cpp:800
+extern void Entity_UpdateSelection();                                                  // win_ent.cpp:791
 // KIWI-UX (ROUND AU): the dock-tab raise N uses, declared at FILE scope exactly as
-// mainfrm.cpp:3054 declares it.  imgui_shell.cpp:133  void ImGuiShell_FocusTab( const char * ).
-extern void ImGuiShell_FocusTab( const char *title );                                  // imgui_shell.cpp:201
+// mainfrm.cpp:3054 declares it.  imgui_shell.cpp:135  void ImGuiShell_FocusTab( const char * ).
+extern void ImGuiShell_FocusTab( const char *title );                                  // imgui_shell.cpp:205
 // EntSetKey_Apply / EntDeleteKey_Apply / SpawnFlags_Apply / EntAngle_Apply come from
 // radiant_ui_actions.h.
 
@@ -373,7 +373,7 @@ void ImGuiPanel_Entity_MenuItem()
 // focuses it; N again, while it IS the focused surface, puts it away.  The focus
 // question is answered by the panel's own last draw (s_entityFocused) rather than
 // guessed, and the raise goes through ImGuiShell_FocusTab, which is the same
-// SetWindowFocus the O / texture-view keys already use (imgui_shell.cpp:133).
+// SetWindowFocus the O / texture-view keys already use (imgui_shell.cpp:135).
 void ImGuiPanel_Entity_Toggle()
 {
     if ( s_showEntity && s_entityFocused )
@@ -463,7 +463,7 @@ void ImGuiPanel_Entity_Draw()
         }
     }
     // ── KIWI-UX (ROUND AU): NO CLICK-OFF AUTO-CLOSE ─────────────────────────
-    // ImGuiShell_CloseOnFocusLoss (imgui_shell.cpp:91) closed this panel ~130 ms
+    // ImGuiShell_CloseOnFocusLoss (imgui_shell.cpp:93) closed this panel ~130 ms
     // after focus left it, and the ONE thing a mapper does with an entity
     // inspector open is click the entity — in the 3D view, which takes the focus.
     // Round AU's dock placement already exempts it in practice (the helper skips

@@ -18,7 +18,7 @@ extern int   R_Add3DLine( GfxPointVertex *verts, const orientation_t *orient,
                           char width, int vertCount, int maxVertCount );   // draw.cpp 0x40c110
 extern char  Byte4PackPixelColor( float *from, GfxColor *out );            // 0x402ac0
 extern float world_orient_matrix[4][3];                                    // entity.cpp 0x6DE290
-extern camera_s *Ed_Camera();                                              // camwnd.cpp:156
+extern camera_s *Ed_Camera();                                              // camwnd.cpp:161
 
 namespace
 {
@@ -77,7 +77,7 @@ int KiwiLines_Remaining()
 // argument, the measurement it rests on and the scope it is taken at are in
 // kiwi_lines.h; this is just the push.  `.w = 1` is what makes it an override
 // rather than a tint, and it is byte-for-byte what Ed_EmitLineBatch does per
-// colour run for every line in this layer (r_rendercmds.cpp:1940-1975).
+// colour run for every line in this layer (r_rendercmds.cpp:1960-1995).
 // ─────────────────────────────────────────────────────────────────────────────
 void KiwiTris_FillFlatColor( const float rgba[4] )
 {
@@ -115,7 +115,7 @@ void KiwiTris_OrientToEye( const float *xyz, int stride,
     float dir[3] = { 0.0f, 0.0f, 0.0f };
     if ( ortho )
     {
-        const camera_s *cam = Ed_Camera();              // camwnd.cpp:153
+        const camera_s *cam = Ed_Camera();              // camwnd.cpp:159
         dir[0] = -cam->vpn[0];
         dir[1] = -cam->vpn[1];
         dir[2] = -cam->vpn[2];
