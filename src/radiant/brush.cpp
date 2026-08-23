@@ -14,6 +14,7 @@
 #include <string>                   // SelectedAssociated's matchValue (was MFC CString)
 #include "kiwi_shadowcache.h"       // KiwiShadowCache_Invalidate
 #include "kiwi_walkcache.h"         // the shared prefab-walk recording
+#include "kiwi_matconvert.h"        // KIWI-UX: solid-red Shift+L face diagnostic
 
 // faceVisuals_s / faceVis_s are now in qe3.h (moved so select.cpp can use them).
 // The static_asserts remain in qe3.h.
@@ -414,7 +415,7 @@ int Brush_FaceIndexCmp( unsigned int faceIndex2, brush_t *b, unsigned int faceIn
 // Face_InitMaterialChannel  (0x472C90) — initialises one material channel
 // channel: 0=$default, 1=lightmap_gray, 2=smoothing_hard
 // ────────────────────────────────────────────────────────────────────────────
-static int Face_InitMaterialChannel( unsigned int textureChannel, face_t *faceDef,
+int Face_InitMaterialChannel( unsigned int textureChannel, face_t *faceDef,
                                       MaterialDef *src )
 {
     static const char *tex_names[3] = { "$default", "lightmap_gray", "smoothing_hard" };
@@ -2628,6 +2629,7 @@ bool Face_BuildLayerGeom( face_t *faceDef, const orientation_t *orient,
         g->color[i] = col;
     }
     g->material = MaterialDef_14( layer, mtldef );
+    KiwiMatConvert_ApplyFaceLightmapDiagnostic( faceDef, g ); // KIWI-UX: non-lit base material replaces the checker with red
     return true;
 }
 

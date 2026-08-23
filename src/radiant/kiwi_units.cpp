@@ -11,6 +11,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 #include "stdafx.h"
+#include "kiwi_fmt.h"
 #include "kiwi_units.h"
 #include "radiant_registry.h"
 
@@ -58,11 +59,8 @@ namespace
 
     void WriteFloat( const char *entry, float v )
     {
-        // KIWI-UX (CLEANUP, C-55): _snprintf, like KiwiUnits_Format below.  Not a
-        // live overflow (%.6g of a float is <= 13 chars into 64), but one spelling.
         char buf[64];
-        _snprintf( buf, sizeof( buf ), "%.6g", (double)v );
-        buf[sizeof( buf ) - 1] = '\0';
+        KiwiFmt_Num( buf, sizeof( buf ), v, 6 );
         Radiant_ProfileSetString( KUX_SECTION, entry, buf );
     }
 
@@ -118,8 +116,8 @@ const char *KiwiUnits_Format( char *buf, int bufSize, float world )
         return buf;
     // USER DIRECTIVE (shakeout A follow-up): tier the readout for big values —
     // plain inches below 120 in (10 ft), feet+inches below 300 ft, and
-    // yards+feet+inches from there.  %.6g / %.4g keep integral values integral
-    // ("128 in") and still show fractions; sub-0.005in remainders are dropped so
+    // yards+feet+inches from there.  Fixed decimals keep integral values integral
+    // after trailing zeros are stripped; sub-0.005in remainders are dropped so
     // "40 ft" never prints as "40 ft 0 in".
     const double in   = (double)Units_ToDisplay( world );
     const char  *sign = ( in < 0.0 ) ? "-" : "";
@@ -127,7 +125,9 @@ const char *KiwiUnits_Format( char *buf, int bufSize, float world )
 
     if ( a < 120.0 )
     {
-        _snprintf( buf, (size_t)bufSize, "%.6g in", in );
+        char value[64];
+        _snprintf( buf, (size_t)bufSize, "%s in",
+                   KiwiFmt_Num( value, sizeof( value ), in, 6 ) );
     }
     else if ( a < 3600.0 )                       // < 300 ft
     {
@@ -136,7 +136,11 @@ const char *KiwiUnits_Format( char *buf, int bufSize, float world )
         if ( rem < 0.005 )
             _snprintf( buf, (size_t)bufSize, "%s%d ft", sign, ft );
         else
-            _snprintf( buf, (size_t)bufSize, "%s%d ft %.4g in", sign, ft, rem );
+        {
+            char value[64];
+            _snprintf( buf, (size_t)bufSize, "%s%d ft %s in", sign, ft,
+                       KiwiFmt_Num( value, sizeof( value ), rem, 4 ) );
+        }
     }
     else
     {
@@ -147,7 +151,11 @@ const char *KiwiUnits_Format( char *buf, int bufSize, float world )
         if ( rem < 0.005 )
             _snprintf( buf, (size_t)bufSize, "%s%d yd %d ft", sign, yd, ft );
         else
-            _snprintf( buf, (size_t)bufSize, "%s%d yd %d ft %.4g in", sign, yd, ft, rem );
+        {
+            char value[64];
+            _snprintf( buf, (size_t)bufSize, "%s%d yd %d ft %s in", sign, yd, ft,
+                       KiwiFmt_Num( value, sizeof( value ), rem, 4 ) );
+        }
     }
     buf[bufSize - 1] = '\0';
     return buf;

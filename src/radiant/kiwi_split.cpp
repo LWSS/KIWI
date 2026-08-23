@@ -22,6 +22,7 @@
 #include "kiwi_split.h"
 #include "kiwi_camera.h"                    // ROUND X: KiwiCam_WorldPerPixel (the cut disc)
 #include "kiwi_command.h"
+#include "kiwi_fmt.h"
 // (ROUND L: kiwi_conselect.h is no longer included — Cut used to read the
 //  construction SELECTION for its line and now picks one with the cursor, so the
 //  store's own header is all this file needs.)
@@ -764,6 +765,12 @@ static bool SplitDefByPlaneBody( brush_t *def,
     // carries.
     face_t clipFace{};
     KiwiMtl_SeedClipFace( &clipFace, def, cutN );
+    // The seed COPIES the source face's four channels, so a source whose lightmap
+    // or smoothing channel is dead propagates that into both halves' new walls —
+    // invisible in Shift+L, and unlit at compile (kiwi_material.h "the three
+    // channels").  No-op on a sound source; the R3 caulk fallback already fills
+    // all three itself (xywnd.cpp:2288-2313).
+    KiwiMtl_EnsureFaceLayers( &clipFace );        // kiwi_material.h:245
     for ( int k = 0; k < 3; ++k )
     {
         clipFace.planepts[0][k] = p0[k];
@@ -2573,11 +2580,14 @@ namespace
                 // The number and its SCALE together: "offset 32 / 128" says both
                 // where the cut is and what it is measured against, which is what
                 // makes the reference edge legible without a second line of prose.
+                char offset[48], span[48];
                 _snprintf( m_hud, sizeof( m_hud ),
-                           "split brush  %s  offset %.6g / %.6g%s  (Tab flips)",
+                           "split brush  %s  offset %s / %s%s  (Tab flips)",
                            ( m_axis == 0 ) ? "U" : "V",
-                           Units_ToDisplay( m_t - m_lo ),
-                           Units_ToDisplay( m_hi - m_lo ),
+                           KiwiFmt_Num( offset, sizeof( offset ),
+                                        Units_ToDisplay( m_t - m_lo ), 6 ),
+                           KiwiFmt_Num( span, sizeof( span ),
+                                        Units_ToDisplay( m_hi - m_lo ), 6 ),
                            m_hasNum ? "  [typed]" : "" );
             }
             m_hud[sizeof( m_hud ) - 1] = '\0';

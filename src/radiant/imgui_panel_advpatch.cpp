@@ -9,7 +9,7 @@
 //     the first-open latch below.  The TBM_SETRANGE / TBM_SETPOS / SetHwnds half of that loop
 //     (patchdialog.cpp:106-110) has no analogue: there are no HWNDs here, and the slider's
 //     range and thumb are READ from the slot every frame instead of being pushed into a control.
-//   * RefreshSlot      (patchdialog.cpp:79-86): the buddy edit shows "%g" of
+//   * RefreshSlot      (patchdialog.cpp:79-86): the buddy edit shows the
 //     CurveEdit_DisplayValue and the thumb sits at CurveEdit_StepIndex.  Both are re-read every
 //     frame here, so every action's effect shows up on the next frame with no explicit refresh
 //     call — that IS the RefreshSlot equivalent.
@@ -92,6 +92,7 @@
 #include "stdafx.h"
 #include "qe3.h"
 #include <imgui/imgui.h>
+#include "kiwi_fmt.h"
 #include "radiant_ui_actions.h"
 
 // ── patchdialog.cpp bindings (the five wave-3 actions; not in radiant_ui_actions.h —
@@ -192,10 +193,12 @@ static void AP_SlotRow( int slot )
     ImGui::PushID( def.trackbarId );
     ImGui::SeparatorText( def.label );
 
-    // RefreshSlot's buddy-edit half: sprintf( "%g", CurveEdit_DisplayValue( slot ) )
+    // RefreshSlot's buddy-edit half: format CurveEdit_DisplayValue( slot ) for display.
     // (patchdialog.cpp:83-85).  Amplitude displays 2^(value-8), the others the raw value
     // (pmesh.cpp:4990-4994).
-    ImGui::Text( "value: %g", CurveEdit_DisplayValue( slot ) );
+    char display[32];
+    ImGui::Text( "value: %s", KiwiFmt_Num( display, sizeof( display ),
+                                           CurveEdit_DisplayValue( slot ) ) );
 
     // RefreshSlot's TBM_SETPOS half + OnHScroll, fused: the thumb IS CurveEdit_StepIndex and
     // the range IS CurveEdit_StepCount, both re-read every frame, so a drag applies and the
@@ -208,7 +211,7 @@ static void AP_SlotRow( int slot )
     // The buddy edit (EN_KILLFOCUS -> SyncCtrl): typed value -> transform -> clamp+snap.
     // Enter or [Set] is the commit (see the header note on EN_KILLFOCUS).
     ImGui::SetNextItemWidth( 90.0f );
-    bool setValue = ImGui::InputFloat( "##typed", &s_typed[slot], 0.0f, 0.0f, "%g",
+    bool setValue = ImGui::InputFloat( "##typed", &s_typed[slot], 0.0f, 0.0f, KIWI_FMT_FLOAT,
                                       ImGuiInputTextFlags_EnterReturnsTrue );
     ImGui::SameLine();
     setValue |= ImGui::Button( "Set value" );
@@ -221,7 +224,7 @@ static void AP_SlotRow( int slot )
     if ( def.rangeEditId )
     {
         ImGui::SetNextItemWidth( 90.0f );
-        bool setRange = ImGui::InputFloat( "##range", &s_range[slot], 0.0f, 0.0f, "%g",
+        bool setRange = ImGui::InputFloat( "##range", &s_range[slot], 0.0f, 0.0f, KIWI_FMT_FLOAT,
                                           ImGuiInputTextFlags_EnterReturnsTrue );
         ImGui::SameLine();
         setRange |= ImGui::Button( "Set max" );

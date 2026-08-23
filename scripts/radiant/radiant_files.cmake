@@ -78,6 +78,8 @@ set(RADIANT_SRCS
     "${SRC_DIR}/radiant/radiant_rtt.h"            # KIWI-UX (CLEANUP, C-16): registered for IDE visibility, like every other header here
     "${SRC_DIR}/radiant/imgui_panels.cpp"   # UI-rework Phase 3 — panels over the Phase-1 actions
     "${SRC_DIR}/radiant/imgui_panel_surface.cpp"  # Phase 3 — surface inspector panel
+    "${SRC_DIR}/radiant/kiwi_entinspect.h"   # KIWI typed entity schema parsed from QUAKED comments
+    "${SRC_DIR}/radiant/kiwi_entinspect.cpp"
     "${SRC_DIR}/radiant/imgui_panel_entity.cpp"   # Phase 3 — entity inspector panel
     "${SRC_DIR}/radiant/imgui_panel_findtex.cpp"  # Phase 3 — find/replace texture panel
     "${SRC_DIR}/radiant/imgui_panel_layers.cpp"   # Phase 3 — layers panel
@@ -312,6 +314,13 @@ set(RADIANT_SRCS
     # grabbable handle in this layer that exists with NO command running.
     "${SRC_DIR}/radiant/kiwi_sun.h"          # the sun helper + the sundirection sign proof
     "${SRC_DIR}/radiant/kiwi_sun.cpp"
+    "${SRC_DIR}/radiant/kiwi_sunshadow.h"    # persisted game-lighting preview + status
+    "${SRC_DIR}/radiant/kiwi_sunshadow.cpp"
+    "${SRC_DIR}/radiant/kiwi_light.h"        # selected-light helper, preview policy and extents
+    "${SRC_DIR}/radiant/kiwi_light.cpp"
+    # KIWI: Selected entity facing arrows in camera and orthographic views.
+    "${SRC_DIR}/radiant/kiwi_entarrow.h"
+    "${SRC_DIR}/radiant/kiwi_entarrow.cpp"
     "${SRC_DIR}/radiant/kiwi_hints.h"        # contextual hotkey panel, read live from g_radiantCommands
     "${SRC_DIR}/radiant/kiwi_hints.cpp"
 
@@ -346,6 +355,8 @@ set(RADIANT_SRCS
     # landed by the PORTED create path (CreateEntityFromName + its undo bracket).
     "${SRC_DIR}/radiant/kiwi_entbrowser.h"   # the Entities dock window + the drop
     "${SRC_DIR}/radiant/kiwi_entbrowser.cpp"
+    "${SRC_DIR}/radiant/kiwi_modelbrowser.h" # KIWI: static-xmodel browser + misc_model drop
+    "${SRC_DIR}/radiant/kiwi_modelbrowser.cpp"
 
     # ROUND AV — the REAL 3D thumbnails round AU scoped out.  USER DIRECTIVE: "I
     # would really like 3d previews in the entities viewer, try to get that to
@@ -418,6 +429,8 @@ set(RADIANT_SRCS
     "${SRC_DIR}/radiant/kiwi_iwi.cpp"
     "${SRC_DIR}/radiant/kiwi_matwriter.h"    # the binary material writer (template cloning)
     "${SRC_DIR}/radiant/kiwi_matwriter.cpp"
+    "${SRC_DIR}/radiant/kiwi_matconvert.h"   # unlit conversion + map material health
+    "${SRC_DIR}/radiant/kiwi_matconvert.cpp"
     "${SRC_DIR}/radiant/kiwi_import.h"       # the drop plumbing + the material wizard
     "${SRC_DIR}/radiant/kiwi_import.cpp"
 
@@ -476,6 +489,8 @@ set(RADIANT_SRCS
     # which is left bit-for-bit.
     "${SRC_DIR}/radiant/kiwi_shadowcache.h"
     "${SRC_DIR}/radiant/kiwi_shadowcache.cpp"
+    "${SRC_DIR}/radiant/kiwi_lightcache.h"   # per-light 52-byte caster-record cache
+    "${SRC_DIR}/radiant/kiwi_lightcache.cpp"
 
     # ONE recording of the brush tree, replayed by the camera pass, the 2D pass, the sun caster
     # walk and the sun re-add.  FilterBrush is still evaluated per node, per frame.

@@ -26,6 +26,9 @@
 #include "kiwi_uveditor.h"          // KIWI-UX (ROUND BN, ITEM 3): KiwiUvEd_OverlaySuppressed
 #include <universal/profile.h>
 #include "kiwi_shadowcache.h"       // the sun-preview cache magnitudes
+#include "kiwi_lightcache.h"        // per-light caster records keyed by the shared epoch
+#include "kiwi_light.h"             // KIWI Light helper policy and viewport overlay
+#include "kiwi_sunshadow.h"         // shared default-on sun-preview preference/status
 #include "kiwi_walkcache.h"         // the shared prefab-walk recording
 #include "kiwi_surfcache.h"         // the camera's pose-invariant draw list
 extern int g_svNodesWalked;         // shadowvolume.cpp:28
@@ -112,6 +115,7 @@ struct camLightPreviewRec_t   // == CCamWnd::LightPreviewRec, 56 B (IDB stride 1
     int           arg2;
     orientation_t orient;
 };
+static_assert( sizeof(camLightPreviewRec_t) == 56, "camLightPreviewRec_t" );
 
 struct camwndState_t
 {
@@ -131,7 +135,7 @@ struct camwndState_t
     int    cursor_visible = 1;            // +0x130 cursor-shown flag; Cam_MouseUp restores it to 1
 
     // light-region preview records (Regions_ForSelected 0x406F10 reads these): +0x134 / +0x2F4.
-    camLightPreviewRec_t light_preview_arr[16] = {};
+    camLightPreviewRec_t light_preview_arr[8] = {};
     int                  light_preview_count = 0;
 
     HMENU  contextMenu = nullptr;     // +0x338 the RMB face-picker popup (CMenu::m_hMenu)
@@ -473,7 +477,7 @@ static MaterialTechniqueType Cam_TechForDrawMode( int mode )
 // (0.5 0.5 0.5); the synthesized weapon_* classes (eclass.cpp:1645) are (.3 .3 1).  Those
 // classes carry a real character xmodel via defaultmdl= but their classtype is only 0x2
 // (eclass.cpp:925-939 gives 0x8 to four names and 0x10 to misc_prefab, nothing else), so
-// entTech was 29 -> SkinModelInst's `draw_meth2 != 29 ? 0 : color` arm (r_ed_scene.cpp:624)
+// entTech was 29 -> SkinModelInst's `draw_meth2 != 29 ? 0 : color` arm (r_ed_scene.cpp:641)
 // stamped the eclass colour over every skinned vertex -> a BLUE WIREFRAME CHARACTER.  And
 // white when selected, because the tech-29 white-outline pass (:3071) stamps colorWhite.
 // The COLOUR mechanism is the binary's own and is left exactly as it is: at tech 29 an
@@ -1166,9 +1170,9 @@ extern void  Editor_AddGeoFace( Material *handle, int techType, int sortKey,
 extern void *R_AddEditorSurfsCmd();
 // How many surfs the OPEN flush window already holds.  Read either side of the entity +
 // prefab pass to decide whether the window is EXACTLY the block the surf cache replayed.
-extern int   Editor_PendingSurfCount();                          // r_ed_scene.cpp:424
+extern int   Editor_PendingSurfCount();                          // r_ed_scene.cpp:441
 // The surf sort bucket — 100 * info.drawSurf.fields.primarySortKey.
-extern int __cdecl Editor_MaterialSortKey( Material *handle );   // r_ed_scene.cpp:173 (0x4FDBB0)
+extern int __cdecl Editor_MaterialSortKey( Material *handle );   // r_ed_scene.cpp:190 (0x4FDBB0)
 
 // RADIANT_SURFCACHE — operator switch: faithful surf-cache world draw instead of immediate.
 static bool Cam_SurfCacheEnabled()
@@ -1184,11 +1188,11 @@ bool Radiant_DecorEnabled()
     static const bool s = ( getenv( "RADIANT_DECOR" ) != nullptr );
     return s;
 }
-// The binary gates ActiveSunLightPreviewInit on enable_light_preview && preview_sun_aswell
-// (defaults 1 and 0), so the sun preview is off until the user enables it in Preferences.
+// KIWI-UX: the binary gates ActiveSunLightPreviewInit on both preferences.  KIWI keeps that master
+// gate but shares the persisted sun state with the View menu and lighting panels.
 static bool Cam_SunPrevEnabled()
 {
-    return g_PrefsDlg->enable_light_preview && g_PrefsDlg->preview_sun_aswell;
+    return g_PrefsDlg->enable_light_preview && KiwiSunPreview_Enabled();
 }
 
 // Brush_MakeFaceVisuals (0x477C50) uploads each face's per-layer GfxWorldVertex run to the
@@ -1230,9 +1234,9 @@ bool Radiant_FaceVisDeviceLost()
 // ambientMulOut: the black-world multiply colour (sub_50C470) the full-screen quad resets the
 // textured world to before the SUNLIGHT_PREVIEW pass adds the sun light.
 // `emit` = issue the 3 RC_SET_CUSTOM_CONSTANT commands (false = pre-compute values only).
-// Called ONCE per frame with emit=false; Cam_SunPrev_Main emits the same three constants
-// from the values it returned.  This is the expensive half of the sun setup (an 8 KB epair
-// round trip plus two parsers) and it used to run twice for one unchanging answer.
+// Called only when the edit-epoch cache rebuilds; Cam_SunPrev_Main emits the same three
+// constants from the cached values.  This is the expensive half of the sun setup (an 8 KB
+// epair round trip plus two parsers) and camera motion never re-runs it.
 static int Cam_SunPrev_SetSunConstants( float sunDirOut[3], float ambientMulOut[3] = nullptr,
                                         float sunColorOut[3] = nullptr, bool emit = true )
 {
@@ -1322,6 +1326,48 @@ static int Cam_SunPrev_SetSunConstants( float sunDirOut[3], float ambientMulOut[
         ambientMulOut[2] = params.diffuseColor[2] * sunFloor + amb[2];
     }
     return 1;
+}
+
+// KIWI-UX: parsing and interpreting worldspawn sunlight is edit-dependent, not
+// camera-dependent.  SetKeyValue/MarkMapModified already bump the shared walk/shadow
+// epoch, so cache the exact IDB-derived constants on that epoch.  An unedited map incurs
+// no per-frame epair serialization, parser work, or SunPrev_Setup re-derivation.
+struct CamSunPreviewCache
+{
+    entity_s *world;
+    unsigned epoch;
+    bool initialized;
+    bool active;
+    bool haveConstants;
+    float dir[3];
+    float ambientMul[3];
+    float color[3];
+};
+
+static const CamSunPreviewCache *Cam_SunPrev_CachedState()
+{
+    static CamSunPreviewCache cache = {};
+    const unsigned epoch = KiwiWalkCache_Epoch();
+    if ( !cache.initialized || cache.world != world_entity || cache.epoch != epoch )
+    {
+        cache.world = world_entity;
+        cache.epoch = epoch;
+        cache.initialized = true;
+        cache.active = false;
+        cache.haveConstants = false;
+        cache.dir[0] = cache.dir[1] = cache.dir[2] = 0.0f;
+        cache.ambientMul[0] = cache.ambientMul[1] = cache.ambientMul[2] = 0.0f;
+        cache.color[0] = cache.color[1] = cache.color[2] = 1.0f;
+
+        SunPrev_Setup();
+        cache.active = SunPrev_Active() != 0;
+        if ( cache.active )
+        {
+            cache.haveConstants = Cam_SunPrev_SetSunConstants(
+                cache.dir, cache.ambientMul, cache.color, /*emit=*/false ) != 0;
+        }
+    }
+    return &cache;
 }
 
 // Per-face editor flat colour via MATERIAL_COLOR, emitted only on CHANGE.  The dedup is
@@ -1466,10 +1512,10 @@ struct CamSortFace
 };
 
 // One bucket past every material bucket, and it can never collide: primarySortKey is a 6-bit
-// field (r_gfx.h:328) and the bucket stride is 100 (r_ed_scene.cpp:175).
+// field (r_gfx.h:328) and the bucket stride is 100 (r_ed_scene.cpp:192).
 static const int CAM_SORTKEY_KIWI_OVERLAY = 100 * 64;
 
-// qsort comparator, shaped exactly like Editor_SurfCompare (r_ed_scene.cpp:182-198): the
+// qsort comparator, shaped exactly like Editor_SurfCompare (r_ed_scene.cpp:199-215): the
 // material sort bucket first, then the stable tie-break.
 static int __cdecl Cam_SortFaceCompare( const void *pa, const void *pb )
 {
@@ -1497,7 +1543,7 @@ static void Cam_GatherFace( std::vector< CamSortFace > &out, face_t *f, Material
     e.skySeeThrough = false;
     e.uvOwns        = uvOwns;
     // Material_FromHandle asserts on a NULL handle and can answer null for one that failed to
-    // register, and Editor_MaterialSortKey dereferences unconditionally (r_ed_scene.cpp:175).
+    // register, and Editor_MaterialSortKey dereferences unconditionally (r_ed_scene.cpp:192).
     // Anything unresolved keys at 0, i.e. drawn FIRST, so the opaques can still cover it.
     const Material *mres = mtl ? Material_FromHandle( mtl ) : nullptr;
     e.key           = mres ? Editor_MaterialSortKey( mtl ) : 0;
@@ -1776,6 +1822,7 @@ extern char  Entity_HasRenderableModel( brush_t_with_custom_def *b, int orient )
 // geometry cache and the instance merge.  The camera's tech-29 arm and the XY SELECTED pass
 // never see this set, so both keep the stamp.
 extern int   g_edXyModelFlatTint;                                         // xywnd.cpp:1161
+static GfxColor s_sunModelFallbackColor;  // packed worldspawn sun colour for slot-24 fallback
 static int Cam_SkinModelSEH( selbrush_t *b, const orientation_t *orient, int meshTech,
                              GfxColor *col, int drawFlags )
 {
@@ -1791,6 +1838,12 @@ static int Cam_SkinModelSEH( selbrush_t *b, const orientation_t *orient, int mes
                 // draw_meth2 != 29 ? 0 : color, drawFlags) — the per-vert colour override
                 // only rides the WIREFRAME technique.
                 const int *colorPtr = ( meshTech != 29 ) ? nullptr : (const int *)col;
+                // KIWI-UX: SkinModelInst applies this only to materials that lack their
+                // native sunlight-preview receiver and use the N.L fallback.  Native-only
+                // instances remain read-only/static-cache eligible; native surfaces in a
+                // mixed instance keep their authored colours.
+                if ( meshTech == TECHNIQUE_SUNLIGHT_PREVIEW )
+                    colorPtr = (const int *)&s_sunModelFallbackColor;
                 if ( colorPtr && g_edXyModelFlatTint )
                     colorPtr = nullptr;      // constant-level tint
                 SkinModelInst( b->owner->modelInst, nullptr, meshTech,
@@ -1868,11 +1921,11 @@ int Editor_ModelShadowGuarded( selbrush_t *b, orientation_t *orient, const float
 
 // ── LIGHT-PREVIEW GLOW SPHERE ─────────────────────────────────────────────────
 // 0x4058e0  LightPreview_DrawLight2 — DrawLightsMain's (0x407180) fallback when the per-pixel
-// GPU light path (LightPreview_DrawLight 0x406fb0, unported) is unavailable: a 32x16 UV-sphere
+// GPU light path (LightPreview_DrawLight 0x406fb0) is disabled or unavailable: a 32x16 UV-sphere
 // of `radius` at the light origin, packed with the light colour, drawn additively through
 // R_AddRenderCmdDrawTris($additive, TECHNIQUE_UNLIT).
-// Colour per DrawLightsMain: _color (default white), saturated to the max component because
-// g_qeglobals.preview_at_max_intensity defaults 0 (the binary's 1e7 intensity path).
+// Colour per DrawLightsMain: _color (default white), saturated to the max component at the
+// selected preview intensity; command 36122 switches between the key and retail's 1e7 mode.
 // Topology is the binary's: 32 longitude x 16 latitude -> 15 rings of 32 (480) + 2 poles = 482,
 // quad-pairs per ring + two tri pole caps.  Rebuilt from intent, not transcribed (the IDB's
 // interleaved stack-array juggling is trap-dense); vertex count and index pattern are exact.
@@ -1880,6 +1933,22 @@ extern selbrush_t selected_brushes;                                // map.cpp (0
 extern void  OrientationPosToWorldPos( float *out, const float *localPos,
                                        const orientation_t *orient );   // brush.cpp (0x4BA430)
 extern float Entity_GetFloatValueForKey( int e, const char *key );      // entity.cpp (0x4837C0)
+extern int   Entity_GetIntValueForKey( int e, const char *key );        // entity.cpp (0x483820)
+extern int   Entity_GetVec3ForKey( entity_s_def *e, float *out,
+                                   const char *key );                    // entity.cpp (0x483860)
+extern char *ValueForKey2( int e, const char *key );                    // entity.cpp (0x4825C0)
+extern void __cdecl R_SetLightShaderConstants( const float *origin, float radius,
+                                               const float *color, const char *defName,
+                                               const float *dir, float cosHalfFovInner,
+                                               float cosHalfFovOuter, int exponent );
+
+static int Entity_Light( const float *worldPos, int defPtr, selbrush_t *scope,
+                         const orientation_t *orient,
+                         float *outDir, float *outCosInner, float *outCosOuter,
+                         float *outCosHalfFov );
+static int __cdecl Cam_LightGatherCached( KiwiLightCasterRecord *out,
+                                          const float *origin, float radius );
+static void Cam_BrushColor2d( selbrush_t *b, GfxColor *out );
 
 static void Cam_BuildLightGlowSphere( const float center[3], float radius,
                                       const float rgb[3] )
@@ -1980,84 +2049,238 @@ static void Cam_BuildLightGlowSphere( const float center[3], float radius,
                             (short)vertCount, xyzw, normal, color, st );
 }
 
-// One light instance's glow sphere.  All gates (owner/eclass/CLASS_LIGHT/hidden/radius) live
-// here so either preview source below can pass any selbrush_t.
-static void Cam_DrawOneLightPreview( selbrush_t *b )
+static entity_s_def *Region_FindTargetEntity( selbrush_t *scope, const char *name );
+static bool Cam_LightPreview_CompilerSpotForDualBits(
+    const float *origin, entity_s_def *ent, selbrush_t *scope,
+    const orientation_t *orient, float *outDir, float *outCosInner,
+    float *outCosOuter, float *outCosHalfFov );
+
+// 0x4065e0 LightPreview_SetLightTechnique. Entity_Light supplies the exact
+// spot/omni classification and cone values; sub_4FED50 is R_SetLightShaderConstants.
+static int Cam_LightPreview_SetLightTechnique( const float *origin, float radius,
+                                                const float *color, entity_s_def *ent,
+                                                selbrush_t *scope,
+                                                const orientation_t *orient )
 {
+    float dir[3] = { 0.0f, 0.0f, 0.0f };
+    float cosInner = 0.0f, cosOuter = 0.0f, cosHalfFov = 0.0f;
+    int cls = Entity_Light( origin, (int)(intptr_t)ent, scope, orient, dir,
+                            &cosInner, &cosOuter, &cosHalfFov );
+    // KIWI-UX: faithful Entity_Light (IDB 0x4063A0) gives bit 1 immediate omni
+    // precedence.  cod4map tests primary bit 2 first, so a valid dual-bit authored
+    // primary previews as the compiler's spot without changing the faithful function.
+    const int spawnflags = Entity_GetIntValueForKey( (int)(intptr_t)ent, "spawnflags" );
+    if ( ( spawnflags & 3 ) == 3
+      && Cam_LightPreview_CompilerSpotForDualBits(
+             origin, ent, scope, orient, dir, &cosInner, &cosOuter, &cosHalfFov ) )
+        cls = 2;
+    (void)cosHalfFov;
+
+    R_AddCmdProjectionSet2D();
+    const char *defName = ValueForKey2( (int)(intptr_t)ent, "def" );
+    if ( cls == 2 )
     {
-        {
-            entity_s *owner = b ? b->owner : nullptr;
-            if ( !owner )
-                return;
-            entity_s_def *eDef = (entity_s_def *)owner->def;
-            if ( !eDef || !eDef->eclass )
-                return;
-            if ( ( eDef->eclass->classtype & 1 ) == 0 )      // CLASS_LIGHT only
-                return;
-            // FilterBrush gate (the binary skips filtered lights); brushFlags&2 = hidden.
-            // (The binary's list loop also sign-tests a per-record byte, 0x406727 — the
-            // pending-remove flag; RemoveLightPreview already drops freed instances here.)
-            //
-            // KIWI-UX (ROUND AX, ITEM 2): the comment above promised a FilterBrush gate
-            // and the code only tested bit 1, the LAYER bit — so a HIDDEN light (bit 2,
-            // select.cpp:4179) kept drawing its preview sphere.  Same defect, same fix,
-            // same predicate as the three entity passes below.  Declared here because
-            // this function precedes the file-scope declaration at :1875; identical
-            // signature, copied from it.
-            extern char FilterBrush( selbrush_t *b, int updateFilters );   // filters.cpp:688
-            if ( ( b->brushFlags & 2 ) != 0 || FilterBrush( b, 0 ) )
-                return;
-            brush_t *def = b->def;
-            if ( !def )
-                return;
-            // radius key — binary returns early if radius <= 0 (LightPreview draws nothing).
-            float radius = Entity_GetFloatValueForKey( (int)(intptr_t)eDef, "radius" );
-            if ( radius <= 0.0f )
-                return;
-
-            // world position = DEF-bbox centre, transformed through the world orientation
-            // (identity for the editor world) — matches DrawLightsMain's OrientationPosToWorldPos.
-            float localCenter[3] = { ( def->mins[0] + def->maxs[0] ) * 0.5f,
-                                     ( def->mins[1] + def->maxs[1] ) * 0.5f,
-                                     ( def->mins[2] + def->maxs[2] ) * 0.5f };
-            float worldCenter[4];
-            OrientationPosToWorldPos( worldCenter,
-                                      localCenter,
-                                      (const orientation_t *)world_orient_matrix );
-
-            // colour = _color (default white), saturated to the max component (binary's
-            // preview_at_max_intensity==0 → intensity 1e7 path → hue at full brightness).
-            float rgb[3] = { 1.0f, 1.0f, 1.0f };
-            for ( epair_t *ep = eDef->epairs; ep; ep = ep->next )
-                if ( !_stricmp( ep->key, "_color" ) )
-                {
-                    float r, g, bl;
-                    if ( sscanf( ep->value, "%f %f %f", &r, &g, &bl ) == 3 )
-                    { rgb[0] = r; rgb[1] = g; rgb[2] = bl; }
-                    break;
-                }
-            float maxC = rgb[0];
-            if ( rgb[1] > maxC ) maxC = rgb[1];
-            if ( rgb[2] > maxC ) maxC = rgb[2];
-            if ( maxC > 0.0f ) { rgb[0] /= maxC; rgb[1] /= maxC; rgb[2] /= maxC; }
-
-            Cam_BuildLightGlowSphere( worldCenter, radius, rgb );
-        }
+        const int exponent = Entity_GetIntValueForKey( (int)(intptr_t)ent, "exponent" );
+        R_SetLightShaderConstants( origin, radius, color, defName, dir,
+                                   cosInner, cosOuter, exponent );
+        return TECHNIQUE_LIGHT_SPOT;
     }
+
+    R_SetLightShaderConstants( origin, radius, color, defName, nullptr,
+                               0.0f, 0.0f, 0 );
+    return TECHNIQUE_LIGHT_OMNI;
 }
 
-// Two preview sources, no dedupe (the binary double-draws a pinned+selected light too):
-//   (a) ActiveSunLightPreviewInit 0x406719 — the camera's PINNED light_preview_arr (8-slot
-//       FIFO, filled by Light Preview→"Start preview on selected", cmd 33951);
-//   (b) Cam_Draw 0x408266 — every SELECTED light.
-// With nothing pinned and nothing selected the toggle shows nothing; that is retail behaviour.
-static void Cam_DrawLightPreviews()
+// 0x406fb0 LightPreview_DrawLight. The 52-byte gather result is KIWI-cached;
+// every render command and brush/shadow pass retains the binary's order.
+static bool Cam_LightPreview_DrawLight( const float origin[4], float radius,
+                                        const float color[3], entity_s_def *ent,
+                                        selbrush_t *scope,
+                                        const orientation_t *orient, bool firstLight,
+                                        Material *multiplyMaterial )
 {
-    const camwndState_t *cam = &g_camwndState;
-    for ( int i = 0; i < cam->light_preview_count; ++i )                      // (a) pinned list
-        Cam_DrawOneLightPreview( (selbrush_t *)(intptr_t)cam->light_preview_arr[i].inst );
-    for ( selbrush_t *b = selected_brushes.next; b && b != &selected_brushes; b = b->next )
-        Cam_DrawOneLightPreview( b );                                         // (b) selected lights
+    // KIWI-UX: the faithful IDB 0x406FB0 pass unconditionally uses both editor-only
+    // materials.  Make the fallback visible and deterministic instead of submitting a
+    // null/default fullscreen pass.  The kiwi helper below separately covers stencilshadow.
+    const bool multiplyMissing = !multiplyMaterial
+                              || ( rgp.defaultMaterial
+                                && Material_IsDefault( multiplyMaterial ) );
+    const bool clearMissing = !rgp.clearAlphaStencilMaterial
+                           || ( rgp.defaultMaterial
+                             && Material_IsDefault( rgp.clearAlphaStencilMaterial ) );
+    if ( multiplyMissing || clearMissing )
+    {
+        static bool s_reportedMissingPreviewMaterial = false;
+        if ( !s_reportedMissingPreviewMaterial )
+        {
+            s_reportedMissingPreviewMaterial = true;
+            Sys_Printf( "Light preview: faithful per-light pass unavailable (%s missing) - "
+                        "drawing glow spheres instead.\n",
+                        multiplyMissing ? "white_multiply" : "rgp.clearAlphaStencilMaterial" );
+        }
+        return false;
+    }
+    if ( !KiwiLight_PerPixelPreviewReady( multiplyMaterial,
+                                           rgp.clearAlphaStencilMaterial ) )
+        return false;
+
+    int casterCount = 0;
+    // KIWI-UX: Reuse the per-light caster walk until its geometric key changes.
+    const KiwiLightCasterRecord *casters = KiwiLightCache_Get(
+        ent, origin, radius, Cam_LightGatherCached, &casterCount );
+    if ( !casters )
+        return false;
+
+    if ( firstLight )
+    {
+        float ambientColor[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
+        entity_s_def *worldDef = world_entity ? (entity_s_def *)world_entity->def : nullptr;
+        if ( worldDef && Entity_GetVec3ForKey( worldDef, ambientColor, "_color" ) )
+        {
+            // KIWI-UX: ColorNormalize writes white for a zero vector.  The compiler and
+            // IDB branch on its returned maximum, so an explicit "0 0 0" stays black.
+            const float maxComp = ColorNormalize( ambientColor, ambientColor );
+            if ( maxComp != 0.0f )
+            {
+                const float ambient = Entity_GetFloatValueForKey(
+                    (int)(intptr_t)worldDef, "ambient" );
+                ambientColor[0] *= ambient;
+                ambientColor[1] *= ambient;
+                ambientColor[2] *= ambient;
+            }
+            else
+            {
+                ambientColor[0] = ambientColor[1] = ambientColor[2] = 0.0f;
+            }
+        }
+        R_AddCmdProjectionSet2D();
+        R_AddCmdDrawFullScreenColoredQuad( 0.0f, 0.0f, 1.0f, 1.0f,
+                                           ambientColor, multiplyMaterial );
+    }
+
+    const int technique = Cam_LightPreview_SetLightTechnique(
+        origin, radius, color, ent, scope, orient );
+
+    extern bool Radiant_ShadVol_Begin( int frontCapPerTri );
+    extern void SunLightPreview_DrawBrushShadow( const float *light, selbrush_t *brush,
+                                                  orientation_t *brushOrient );
+    extern void SunLightPreview_PolyOffsetShadows();
+    if ( Radiant_ShadVol_Begin( 6 ) )
+    {
+        for ( int i = 0; i < casterCount; ++i )
+            SunLightPreview_DrawBrushShadow(
+                origin, casters[i].brush, (orientation_t *)&casters[i].orient );
+    }
+    SunLightPreview_PolyOffsetShadows();
+
+    extern void R_SortMaterials();
+    R_SortMaterials();
+    for ( int i = 0; i < casterCount; ++i )
+    {
+        GfxColor brushColor;
+        Cam_BrushColor2d( casters[i].brush, &brushColor );
+        // Editor_AddMeshCmd and Editor_AddSurfCmd drop a material that lacks 21/22.
+        // Never demote a light contribution to UNLIT: that would brighten unlit geometry.
+        DrawBrush( casters[i].brush, &casters[i].orient, /*viewType*/ -1,
+                   technique, &brushColor, /*width*/ 1, /*drawFlags*/ 0, "" );
+    }
+    R_AddEditorSurfsCmd();
+    return true;
+}
+
+// 0x407180 DrawLightsMain. The glow sphere remains the binary's failure/disabled fallback.
+static bool Cam_DrawLightsMain( selbrush_t *brush, selbrush_t *scope,
+                                const orientation_t *orient,
+                                bool firstLight, Material *multiplyMaterial )
+{
+    entity_s_def *ent = (entity_s_def *)brush->owner->def;
+    iassert( brush->owner->def == brush->def->owner );
+
+    extern char FilterBrush( selbrush_t *b, int updateFilters );
+    if ( FilterBrush( brush, 0 ) )
+        return false;
+    const float radius = Entity_GetFloatValueForKey( (int)(intptr_t)ent, "radius" );
+    if ( radius <= 0.0f )
+        return false;
+
+    const float localCenter[3] = {
+        0.5f * ( brush->def->mins[0] + brush->def->maxs[0] ),
+        0.5f * ( brush->def->mins[1] + brush->def->maxs[1] ),
+        0.5f * ( brush->def->mins[2] + brush->def->maxs[2] )
+    };
+    float worldCenter[4];
+    OrientationPosToWorldPos( worldCenter, localCenter, orient );
+    worldCenter[3] = 1.0f;
+
+    float color[3] = { 1.0f, 1.0f, 1.0f };
+    const char *colorText = ValueForKey2( (int)(intptr_t)ent, "_color" );
+    float parsed[3];
+    if ( colorText
+      && sscanf( colorText, "%f %f %f", &parsed[0], &parsed[1], &parsed[2] ) == 3 )
+        memcpy( color, parsed, sizeof(color) );
+
+    float intensity = Entity_GetFloatValueForKey( (int)(intptr_t)ent, "intensity" );
+    if ( !g_qeglobals.preview_at_max_intensity )
+        intensity = 10000000.0f;
+    else if ( intensity <= 0.0f )
+        intensity = 1.0f;
+
+    float maxColor = color[0];
+    if ( color[1] > maxColor ) maxColor = color[1];
+    if ( color[2] > maxColor ) maxColor = color[2];
+    float scale = intensity;
+    if ( maxColor != 0.0f )
+        scale /= maxColor;
+    color[0] *= scale;
+    color[1] *= scale;
+    color[2] *= scale;
+
+    bool drawn = false;
+    if ( g_PrefsDlg->enable_light_preview )
+        drawn = Cam_LightPreview_DrawLight( worldCenter, radius, color, ent, scope, orient,
+                                            firstLight, multiplyMaterial );
+    if ( !drawn )
+        Cam_BuildLightGlowSphere( worldCenter, radius, color );
+    return true;
+}
+
+// ActiveSunLightPreviewInit's pinned loop, followed by Cam_Draw's selected-light loop.
+// A pinned+selected light is intentionally submitted twice, as in CoD4Radiant.
+static void Cam_DrawLightPreviews( bool ambientBaseDone, Material *multiplyMaterial )
+{
+    camwndState_t *cam = &g_camwndState;
+    if ( g_PrefsDlg->enable_light_preview )
+    {
+        for ( int i = 0; i < cam->light_preview_count; ++i )
+        {
+            camLightPreviewRec_t *rec = &cam->light_preview_arr[i];
+            selbrush_t *brush = (selbrush_t *)(intptr_t)rec->inst;
+            // 0x406727: the signed-byte gate is brush+52, not preview-record+52.
+            if ( *( (char *)brush + 52 ) < 0 )
+                continue;
+            // KIWI-UX: use the same cod4map acceptance gates as the Light status panel.
+            if ( KiwiLight_PreviewPrimaryOnly() && !KiwiLight_GameWillRender( brush ) )
+                continue;
+            if ( Cam_DrawLightsMain( brush, (selbrush_t *)(intptr_t)rec->arg2, &rec->orient,
+                                     !ambientBaseDone, multiplyMaterial ) )
+                ambientBaseDone = true;
+        }
+    }
+
+    for ( selbrush_t *b = selected_brushes.next;
+          b != &selected_brushes; b = b->next )
+    {
+        iassert( b->owner->def == b->def->owner );
+        entity_s_def *ent = (entity_s_def *)b->owner->def;
+        if ( !( ent->eclass->classtype & 1 ) )
+            continue;
+        // KIWI-UX: use the same cod4map acceptance gates as the Light status panel.
+        if ( KiwiLight_PreviewPrimaryOnly() && !KiwiLight_GameWillRender( b ) )
+            continue;
+        if ( Cam_DrawLightsMain( b, nullptr, (const orientation_t *)world_orient_matrix,
+                                 !ambientBaseDone, multiplyMaterial ) )
+            ambientBaseDone = true;
+    }
 }
 
 // Camera decorations drawn after the world pass: DrawTriggerRadius (0x407410) and
@@ -2565,8 +2788,8 @@ static void Cam_SunPrev_Main( bool faithfulSun, Material *sunMultiplyMat,
         return;
     {
         // The same three RC_SET_CUSTOM_CONSTANT commands (0x406896/0x4068c3/0x4068f0) with the
-        // same values, emitted from what the `emit=false` call at the top of CamWnd_Draw already
-        // computed — the worldspawn sun round trip used to run twice per camera frame.
+        // same values, emitted from what the edit-epoch cache's `emit=false` call computed.
+        // The worldspawn sun round trip is not repeated for camera-only frames.
         R_AddCmdSetCustomShaderConstant( CONST_SRC_CODE_SUN_POSITION,
                                          litSunDir[0], litSunDir[1], litSunDir[2], 0.0f );
         R_AddCmdSetCustomShaderConstant( CONST_SRC_CODE_SUN_DIFFUSE,
@@ -2574,6 +2797,13 @@ static void Cam_SunPrev_Main( bool faithfulSun, Material *sunMultiplyMat,
         R_AddCmdSetCustomShaderConstant( CONST_SRC_CODE_SUN_SPECULAR,
                                          litSunColor[0], litSunColor[1], litSunColor[2], 1.0f );
     }
+
+    // KIWI-UX: XModel techsets normally own slot 26.  The rare missing-slot fallback uses
+    // FAKELIGHT_NORMAL for N.L and this packed worldspawn sun colour instead of flat grey.
+    float modelSunTint[4] = {
+        litSunColor[0], litSunColor[1], litSunColor[2], 1.0f
+    };
+    Byte4PackPixelColor( modelSunTint, &s_sunModelFallbackColor );
 
     // 0x4069e3 sets sundir.w = 0 unconditionally, so the shadVol counts are always the
     // directional 3 (`if (0.0 != v4) v1 = 6` can never fire).
@@ -2615,23 +2845,24 @@ static void Cam_SunPrev_Main( bool faithfulSun, Material *sunMultiplyMat,
     extern selbrush_t selected_brushes;                                     // map.cpp 0x23F1864
     if ( Radiant_ShadVol_Begin( 3 ) )                                       // 0x406a4c/0x406a66
     {
-        // The two BrushShadow calls are the CPU silhouette build over the WHOLE map — a caster
-        // behind the camera still shadows what is in front of it.
+        // The two BrushShadow calls cover the WHOLE map — a caster behind the camera can still
+        // shadow what is in front of it.  Their tree traversal, material eligibility, and
+        // XModel extraction all ride the shared edit-epoch caches.
         const orientation_t *worldOr = (const orientation_t *)world_orient_matrix;
         Radiant_ShadVol_BrushShadow( &active_brushes,   worldOr, sun );     // 0x406a70
         Radiant_ShadVol_BrushShadow( &selected_brushes, worldOr, sun );     // 0x406a86
         SunLightPreview_PolyOffsetShadows();                                // 0x406a8e
 
-        // The sun preview is a per-frame CPU stencil shadow build over the whole map and the
-        // pref persists (SunLightPreviewEnable), so the pass names itself and the menu item that
-        // turns it off, once per session.  The toggle is not forced.
+        // Name the live cost and the cache boundary once.  Camera movement never changes the
+        // shared edit epoch, so it rebuilds none of the cached caster inputs.
         static bool s_sunCostReported = false;
         if ( !s_sunCostReported && g_svTrisFed > 0 )
         {
             s_sunCostReported = true;
             Sys_Printf( "Sun light preview ON: %d shadow casters, %d silhouette triangles, "
-                        "%d volume batches per frame.  This is a per-frame CPU shadow build "
-                        "over the whole map - View > \"Preview sun as well\" turns it off.\n",
+                        "%d volume batches.  Caster walks, material eligibility, and XModel "
+                        "extraction are edit-epoch cached; camera motion invalidates none.  "
+                        "View > \"Preview sun as well\" turns it off.\n",
                         g_svCastersDrawn, g_svTrisFed, g_svBatches );
         }
     }
@@ -2701,19 +2932,16 @@ void CamWnd_Draw( HWND hwnd )
     // or, when the "white_multiply" material is missing (without the black-world reset the lit
     // pass would double-brighten), a KISAK APPROXIMATION: each world face flat-tinted by
     // suncolor*(ambient + diffuse*N.L) through MATERIAL_COLOR under UNLIT - directional shading
-    // with no shadows and no per-pixel lighting.  Both are opt-in (preview_sun_aswell = 0).
+    // with no shadows and no per-pixel lighting.  The faithful game-lighting path is the
+    // persisted default; View -> Preview sun as well can disable it.
     const bool sunPrev = Cam_SunPrevEnabled();
-    if ( sunPrev )
-    {
-        // Per frame, NOT one-shot: a newly loaded map must re-read its own worldspawn sun, and
-        // live sundirection/suncolor edits must take.  Setup fully rewrites g_edSun each call.
-        SunPrev_Setup();
-    }
-    const bool sunActive = sunPrev && SunPrev_Active();    // sun key present in this map
+    const CamSunPreviewCache *sunState = sunPrev ? Cam_SunPrev_CachedState() : nullptr;
+    const bool sunActive = sunState && sunState->active;   // sun key present in this map
     const bool useCache  = Cam_SurfCacheEnabled();
 
     extern Material *Radiant_GetWhiteMultiplyMaterial();   // shadowvolume.cpp
-    Material *sunMultiplyMat = sunActive ? Radiant_GetWhiteMultiplyMaterial() : nullptr;
+    Material *sunMultiplyMat = ( sunActive || g_PrefsDlg->enable_light_preview )
+                              ? Radiant_GetWhiteMultiplyMaterial() : nullptr;
     const bool faithfulSun   = sunActive && sunMultiplyMat != nullptr;
     // On the faithful path the world loop draws TEXTURED (not the N.L tint): the multiply quad
     // darkens that textured world and the cached lit pass then adds the sun on top.
@@ -2757,19 +2985,14 @@ void CamWnd_Draw( HWND hwnd )
                         "shadows) - no \"white_multiply\" material for the faithful path.\n" );
     }
 
-    // Values only - the EMISSION happens in Cam_SunPrev_Main, at the binary's own position
-    // (after the world draw).  emit=false touches no render state.
-    if ( faithfulSun )
+    // Values only - EMISSION happens in Cam_SunPrev_Main at the binary's own position
+    // (after the world draw).  The expensive parse is cached by edit epoch above.
+    if ( faithfulSun && sunState && sunState->haveConstants )
     {
-        if ( sunActive )
-            s_litHaveSun = ( Cam_SunPrev_SetSunConstants( s_litSunDir, s_litAmbientMul,
-                                                          s_litSunColor, /*emit=*/false ) != 0 );
-        if ( !s_litHaveSun )
-        {
-            // No sun key: a fixed high-afternoon sun + white light.
-            s_litSunDir[0] = -0.30f; s_litSunDir[1] = -0.40f; s_litSunDir[2] = -0.866f;
-            s_litSunColor[0] = s_litSunColor[1] = s_litSunColor[2] = 1.0f;
-        }
+        memcpy( s_litSunDir,     sunState->dir,        sizeof(s_litSunDir) );
+        memcpy( s_litSunColor,   sunState->color,      sizeof(s_litSunColor) );
+        memcpy( s_litAmbientMul, sunState->ambientMul, sizeof(s_litAmbientMul) );
+        s_litHaveSun = true;
         // NOTE: exactly THREE constants here (0x406896/0x4068c3/0x4068f0) - the binary never
         // touches CONST_SRC_CODE_ENVMAP_PARMS on this path.
     }
@@ -2857,19 +3080,35 @@ void CamWnd_Draw( HWND hwnd )
     static std::vector< CamSortFace > s_worldFaces;
     s_worldFaces.clear();
     selbrush_t *bhead = &active_brushes;
+    extern void DrawBrush( selbrush_t *b, const orientation_t *orient, int viewType,
+                           int technique, GfxColor *col, char width, int drawFlags,
+                           const char *layerPrefix );
     {
     PROF_SCOPED( "world gather" );
     for ( selbrush_t *b = bhead->next; b != bhead; b = b->next )
     {
         brush_t *def = b->def;
-        // DrawBrush 0x47B018 dispatches on the instance-side patch field.
-        if ( !def || b->patch )                         // convex brushes only
+        if ( !def )
             continue;
         // 0x407af0 - DrawGeneralWorld_ gates every world brush on FilterBrush.  Load-bearing:
         // without it the map's own lightgrid_volume worldspawn brush renders as opaque teal
         // planes z-fighting the coplanar floor.
         if ( FilterBrush( b, 0 ) )
             continue;
+        // KIWI-UX: restore the binary's ONE active-world accumulation.  DrawGeneralWorld_
+        // opens it at 0x407AB9, sends patches through DrawBrush at 0x407B9D (whose sole
+        // instance-side patch dispatch is 0x47B018), and closes it at 0x407BB9.  The port's
+        // later patch-only range made it a later painter-order range (observable at equal depth
+        // or after an unsafe pass state) and kept it outside the main cache/run validation.
+        if ( b->patch )
+        {
+            GfxColor pcol;
+            Cam_BrushColor2d( b, &pcol );
+            DrawBrush( b, (const orientation_t *)world_orient_matrix, /*viewType*/ -1,
+                       (int)worldTech, &pcol, /*width*/ 1, /*drawFlags*/ 0,
+                       /*layerPrefix*/ "" );
+            continue;
+        }
         // FIXEDSIZE POINT ENTITIES ARE NOT WORLD FACES.  DrawBrush 0x47b0bd routes any brush
         // whose eclass is fixedsize down DrawModels (model/prefab contents, no bbox) or, for a
         // model-less one, DrawGeo at the entity-local INVERSE orientation - never as filled
@@ -3315,7 +3554,7 @@ void CamWnd_Draw( HWND hwnd )
             for ( selbrush_t *b = head->next; b && b != head; b = b->next )
             {
                 brush_t *def = b->def;
-                if ( !def || b->patch )                         // patches: own pass below
+                if ( !def || b->patch )                         // patches: already in main world range
                     continue;
                 entity_s     *owner = b->owner;
                 entity_s_def *eDef  = owner ? (entity_s_def *)owner->def : nullptr;
@@ -3510,11 +3749,6 @@ void CamWnd_Draw( HWND hwnd )
     // (0x40c360) from the DrawConnectionLinks position at the Cam_Draw tail.
     Draw_PatchSelectPoints();
 
-    // Light preview: pinned list + SELECTED lights only (ActiveSunLightPreviewInit 0x4066d0's
-    // list loop + Cam_Draw 0x408266's selected loop).
-    if ( g_PrefsDlg->enable_light_preview )
-        Cam_DrawLightPreviews();
-
     // Flush the accumulated surf cache as one RC_DRAW_EDITOR_SKINNEDCACHED: ED_SURF_MESH
     // (brush faces from the cached world fill and the entity pass's prefab contents) plus
     // ED_SURF_MODEL (xmodel meshes).  Unconditional - a no-op when nothing is queued.
@@ -3549,7 +3783,9 @@ void CamWnd_Draw( HWND hwnd )
         R_AddEditorSurfsCmd();
     }
 
-    // PATCH fill/wireframe.  DrawGeneralWorld_ -> DrawBrush routes patch brushes to the camera
+    // SELECTED PATCH fill/wireframe.  Active patches are already in the main world range above;
+    // this selected-only range carries the red tint and force-draw semantics.
+    // DrawGeneralWorld_ -> DrawBrush routes patch brushes to the camera
     // (viewType>2) tech-29 branch, sub_4415D0 - the FILLED per-material-layer patch draw
     // (PMESH_25 instance rebuild + Editor_AddMeshCmd); DrawBrush may still pick
     // DrawPatchesWireframeGrid when the patch-wireframe pref is on.  Self-bracketed: opens with
@@ -3557,7 +3793,7 @@ void CamWnd_Draw( HWND hwnd )
     // pass's range.  It must NOT straddle the main accumulation - doing so discards every surf
     // the world fill queued and makes the main flush re-draw the patch range.
     {
-        PROF_SCOPED( "patch pass" );
+        PROF_SCOPED( "selected patch pass" );
         extern void DrawBrush( selbrush_t *b, const orientation_t *orient, int viewType,
                                int technique, GfxColor *col, char width, int drawFlags,
                                const char *layerPrefix );
@@ -3565,10 +3801,9 @@ void CamWnd_Draw( HWND hwnd )
         const orientation_t *orient = (const orientation_t *)world_orient_matrix;
 
         R_SortMaterials();
-        for ( int pass = 0; pass < 2; ++pass )
         {
-            selbrush_t *head = pass ? &selected_brushes : &active_brushes;
-            if ( pass == 1 && !g_qeglobals.dontDrawSelectedTint )
+            selbrush_t *head = &selected_brushes;
+            if ( !g_qeglobals.dontDrawSelectedTint )
                 R_AddCmdSetMaterialColor( g_qeglobals.d_savedinfo.colors[11] );
             for ( selbrush_t *b = head->next; b && b != head; b = b->next )
             {
@@ -3599,19 +3834,16 @@ void CamWnd_Draw( HWND hwnd )
                 // patch surfs could be self-bracketed (see the note above), and the
                 // split dropped the gate on one side.  This restores it.
                 //
-                // Both sub-passes are gated, matching xywnd.cpp's pair.  A hidden
-                // brush is normally deselected on the way in (Cmd_OnHideSelected =
-                // Select_Hide + Select_Deselect(1), mainfrm.cpp:5055), so pass 1
-                // rarely sees one — but "rarely" is how the first version of this bug
-                // was written.
+                // The selected pass stays gated too: hidden and selected are not mutually
+                // exclusive when visibility is changed from the outliner.
                 if ( FilterBrush( b, 0 ) )
                     continue;
                 GfxColor pcol;
                 Cam_BrushColor2d( b, &pcol );
                 DrawBrush( b, orient, /*viewType*/ -1, (int)worldTech, &pcol,
-                           /*width*/ 1, /*drawFlags*/ pass ? 1 : 0, /*layerPrefix*/ "" );
+                           /*width*/ 1, /*drawFlags*/ 1, /*layerPrefix*/ "" );
             }
-            if ( pass == 1 && !g_qeglobals.dontDrawSelectedTint )
+            if ( !g_qeglobals.dontDrawSelectedTint )
             {
                 static const float s_neutralPatch[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
                 R_AddCmdSetMaterialColor( s_neutralPatch );
@@ -3689,8 +3921,13 @@ void CamWnd_Draw( HWND hwnd )
     // selected-entity (0x4080e3) flushes and BEFORE the decoration/white-outline tail.  The
     // position is load-bearing: the multiply quad can only darken ALREADY-RASTERISED pixels and
     // the depth-EQUAL re-add can only land on depths the base pass wrote.
+    if ( g_PrefsDlg->enable_light_preview )
+        R_AddCmdProjectionSet2D(); // 0x4066ef: ActiveSunLightPreviewInit opens in 2D.
     Cam_SunPrev_Main( faithfulSun, sunMultiplyMat, s_litSunDir, s_litAmbientMul,
                       s_litSunColor, s_litHaveSun );
+    // KIWI-UX: A completed sun pass already supplied the frame's ambient multiply.
+    const bool ambientBaseDone = faithfulSun && s_litHaveSun;
+    Cam_DrawLightPreviews( ambientBaseDone, sunMultiplyMat );
 
     // 0x4082f8 — LIGHT-REGION HULL overlay, drawn right after the DrawLightsMain loop (and,
     // in the binary, after the additive world pass at 0x4082f3 the port defers).  Draws the
@@ -4057,8 +4294,11 @@ void CamWnd_Draw( HWND hwnd )
         // running, and it is a screen-constant handle that must read on top of
         // the world.  Self-gated (nothing at all unless the worldspawn carries a
         // "sundirection") and self-budgeted, like every other entry in this tail.
+        extern void KiwiEntArrow_DrawWorld(); // KIWI-UX: Declare the bounded selected-entity facing overlay.
         extern void KiwiSun_DrawWorld();      // kiwi_sun.cpp
+        KiwiLight_DrawWorld();                // KIWI-UX: Draw bounded selected-light extents before the sun helper.
         KiwiSun_DrawWorld();
+        KiwiEntArrow_DrawWorld();             // KIWI-UX: Draw facing arrows immediately after the sun helper.
         // KIWI-UX (ROUND AX, ITEM 6): the entity-browser DRAG GHOST — the box the
         // entity would land in, drawn while its payload hovers the camera image.
         // Self-gated (nothing while no drag is over the camera) and self-budgeted
@@ -4067,6 +4307,7 @@ void CamWnd_Draw( HWND hwnd )
         // side only draws, so the picker and the camera basis are untouched here.
         extern void KiwiEntBrowser_DrawGhost();   // kiwi_entbrowser.cpp
         KiwiEntBrowser_DrawGhost();
+        extern void KiwiModelBrowser_DrawGhost(); KiwiModelBrowser_DrawGhost(); // KIWI-UX
     }
 
 
@@ -4993,8 +5234,8 @@ extern char  *va( const char *fmt, ... );
 extern void   Brush_DrawSubmitFaceWindings( selbrush_t *inst, const orientation_t *orient,
                                             float *a3, rface_t **outList ); // brush.cpp 0x47B380
 
-// d_lightRegionHulls (dword_1807E00 / dword_25D5A4C) - the global hull sink the unported
-// per-pixel light preview (LightPreview_DrawLight 0x406fb0) would consume.
+// d_lightRegionHulls (dword_1807E00 / dword_25D5A4C) - the global hull sink
+// RegionLightRelated consumes after the per-light preview loop.
 void *d_lightRegionHulls[1024];
 int   d_lightRegionHullCount = 0;
 
@@ -5110,10 +5351,13 @@ static float Region_DistSqFromBox( const float *p, const float *mins, const floa
 
 // sub_4852E0 (0x4852E0) — find the entity DEF whose "targetname" == name (top-level
 // search; the prefab-scoped branch is unused for editor light region builds).
-static entity_s_def *Region_FindTargetEntity( const char *name )
+static entity_s_def *Region_FindTargetEntity( selbrush_t *scope, const char *name )
 {
-    entity_s *cur = entities.next;
-    while ( cur != &entities )
+    entity_s *head = &entities;
+    if ( scope )
+        head = (entity_s *)( (char *)scope->owner->modelClass->model + 8 );
+    entity_s *cur = head->next;
+    while ( cur != head )
     {
         if ( Entity_HasEpairMatch( cur, "targetname", name ) )
             return (entity_s_def *)cur;
@@ -5129,7 +5373,8 @@ static float Region_CosSum( float a1, float a2 )
 }
 
 // 0x4063A0  Entity_Light — classify a light + derive its cone.  Returns 2 (cone) / 3.
-static int Entity_Light( const float *worldPos, int defPtr, const orientation_t *orient,
+static int Entity_Light( const float *worldPos, int defPtr, selbrush_t *scope,
+                         const orientation_t *orient,
                          float *outDir, float *outCosInner, float *outCosOuter, float *outCosHalfFov )
 {
     if ( ( Entity_GetIntValueForKey( defPtr, "spawnflags" ) & 1 ) != 0 )
@@ -5141,7 +5386,7 @@ static int Entity_Light( const float *worldPos, int defPtr, const orientation_t 
     while ( ep )
     {
         const char *key = *(const char **)( (char *)ep + 4 );
-        if ( !strcmp( key, "target" ) )
+        if ( !_stricmp( key, "target" ) )
         {
             targetName = *(const char **)( (char *)ep + 8 );
             if ( !targetName )
@@ -5153,7 +5398,7 @@ static int Entity_Light( const float *worldPos, int defPtr, const orientation_t 
     }
     (void)found;
 
-    entity_s_def *tgt = Region_FindTargetEntity( targetName );
+    entity_s_def *tgt = Region_FindTargetEntity( scope, targetName );
     if ( !tgt )
         return 3;
 
@@ -5188,6 +5433,61 @@ static int Entity_Light( const float *worldPos, int defPtr, const orientation_t 
     *outCosInner = cosInner;
     *outCosOuter = cosOuter;
     return 2;
+}
+
+// KIWI-UX: cod4map's dual-primary-bit precedence, isolated from faithful
+// Entity_Light (IDB 0x4063A0).  Only a renderer-safe strict cone is promoted.
+static bool Cam_LightPreview_CompilerSpotForDualBits(
+    const float *origin, entity_s_def *ent, selbrush_t *scope,
+    const orientation_t *orient, float *outDir, float *outCosInner,
+    float *outCosOuter, float *outCosHalfFov )
+{
+    const int defPtr = (int)(intptr_t)ent;
+    const char *targetName = ValueForKey2( defPtr, "target" );
+    if ( !targetName || !*targetName )
+        return false;
+
+    entity_s_def *target = Region_FindTargetEntity( scope, targetName );
+    if ( !target )
+        return false;
+
+    float targetWorld[3];
+    OrientationPosToWorldPos( targetWorld, target->origin, orient );
+    float dir[3] = {
+        origin[0] - targetWorld[0],
+        origin[1] - targetWorld[1],
+        origin[2] - targetWorld[2]
+    };
+    const float length = Vec3Normalize_R( dir );
+
+    const float fovOuter = Entity_GetFloatValueForKey( defPtr, "fov_outer" );
+    const float cosOuter = ( fovOuter == 0.0f )
+                         ? length / sqrtf( length * length + 4096.0f )
+                         : (float)cos( DEG2RAD( fovOuter ) * 0.5f );
+    const float cosInner = (float)cos(
+        DEG2RAD( Entity_GetFloatValueForKey( defPtr, "fov_inner" ) ) * 0.5f );
+    if ( cosOuter >= cosInner )
+        return false;
+
+    outDir[0] = dir[0];
+    outDir[1] = dir[1];
+    outDir[2] = dir[2];
+    *outCosInner = cosInner;
+    *outCosOuter = cosOuter;
+
+    const float maxturn = Entity_GetFloatValueForKey( defPtr, "maxturn" );
+    if ( maxturn == 0.0f )
+    {
+        *outCosHalfFov = cosOuter;
+    }
+    else
+    {
+        const float c = (float)cos( DEG2RAD( maxturn ) );
+        *outCosHalfFov = ( -cosOuter <= c )
+                       ? Region_CosSum( cosOuter, c )
+                       : -1.0f;
+    }
+    return true;
 }
 
 // 0x47D180  recursive shadow-caster gatherer.  Each record = { orientation_t(0x30);
@@ -5237,6 +5537,13 @@ static int LightPreview_GatherShadowBrushes( char *out, const float *light, floa
     return n;
 }
 
+// KIWI cache adapter; the payload and 0x8000 cap remain the binary gatherer's.
+static int __cdecl Cam_LightGatherCached( KiwiLightCasterRecord *out,
+                                          const float *origin, float radius )
+{
+    return LightPreview_GatherShadowBrushes( (char *)out, origin, radius );
+}
+
 // 0x406CE0  sub_406CE0 — submit the shadow-caster faces, add the light cube, run the
 // merge driver, append the produced hulls to the global array.
 static void Region_BuildForLight( int cls, const float *coneCenter, const float *coneDir,
@@ -5283,7 +5590,8 @@ static void Region_BuildForLight( int cls, const float *coneCenter, const float 
 }
 
 // 0x406E00  sub_406E00 — for one light brush, build its region if radius>0 & spawnflags&3.
-static void Region_ForOneLight( selbrush_t *inst, const orientation_t *orient )
+static void Region_ForOneLight( selbrush_t *inst, selbrush_t *scope,
+                                const orientation_t *orient )
 {
     int defPtr = (int)(intptr_t)inst->owner->def;
     float radius = Entity_GetFloatValueForKey( defPtr, "radius" );
@@ -5306,7 +5614,8 @@ static void Region_ForOneLight( selbrush_t *inst, const orientation_t *orient )
     int casterCount = LightPreview_GatherShadowBrushes( recs, coneCenter, radius );
 
     float dir[3], cosInner, cosOuter, cosHalfFov;
-    int cls = Entity_Light( coneCenter, defPtr, orient, dir, &cosInner, &cosOuter, &cosHalfFov );
+    int cls = Entity_Light( coneCenter, defPtr, scope, orient, dir,
+                            &cosInner, &cosOuter, &cosHalfFov );
     Region_BuildForLight( cls, coneCenter, dir, radius, cosHalfFov, casterCount, recs );
 
     free( recs );
@@ -5391,14 +5700,15 @@ void CamWnd_RegionsForSelected()
         entity_s *owner = b->owner;
         eclass_t *eclass = ((entity_s_def *)owner->def)->eclass;
         if ( ( eclass->classtype & 1 ) != 0 )        // light eclass bit
-            Region_ForOneLight( b, (const orientation_t *)world_orient_matrix );
+            Region_ForOneLight( b, nullptr, (const orientation_t *)world_orient_matrix );
     }
     for ( int i = 0; i < cam->light_preview_count; i++ )
     {
         camLightPreviewRec_t *r = &cam->light_preview_arr[i];
-        // disasm gate: *(char*)(rec+52) >= 0 (the per-record flag byte).
-        if ( *( (char *)r + 52 ) >= 0 )
-            Region_ForOneLight( (selbrush_t *)(intptr_t)r->inst, &r->orient );
+        selbrush_t *brush = (selbrush_t *)(intptr_t)r->inst;
+        // 0x406f76: the signed-byte gate is brush+52, not preview-record+52.
+        if ( *( (char *)brush + 52 ) >= 0 )
+            Region_ForOneLight( brush, (selbrush_t *)(intptr_t)r->arg2, &r->orient );
     }
 }
 
@@ -5781,4 +6091,3 @@ HWND CamWnd_CreateRaw( HWND parent, int x, int y, int w, int h )
                             WS_CHILD | WS_CLIPSIBLINGS | WS_CLIPCHILDREN,
                             x, y, w, h, parent, nullptr, inst, nullptr );
 }
-

@@ -10,6 +10,7 @@
 #include <universal/assertive.h> // iassert (USE_ASSERTS always on; same handler as Assert)
 extern void KiwiPrefabPrefix_Invalidate();   // brush.cpp:7110
 extern void KiwiShadowCache_Invalidate();    // kiwi_shadowcache.cpp:46
+extern void KiwiLightCache_EntityKeyChanged( entity_s_def *lightDef, const char *key );
 extern void KiwiWalkCache_MarkStructural();  // kiwi_walkcache.h
 
 // ─── helpers declared by other Radiant files ─────────────────────────────────
@@ -214,10 +215,12 @@ void SetKeyValue( entity_s_def *e, const char *key, const char *value )
     if ( !e || !key || !*key )
         return;
 
-    // Both caches derive from this epair list (prefab layer prefix from "model", the
-    // walk recording from origin/angles/modelscale/spawnflags): any key set drops them.
+    // The prefab/walk caches derive from this epair list (prefab layer prefix from "model",
+    // the walk recording from origin/angles/modelscale/spawnflags): any key set drops them.
     KiwiPrefabPrefix_Invalidate();
     KiwiShadowCache_Invalidate();
+    // KIWI-UX: A light epair edit evicts that light while retaining unrelated light previews.
+    KiwiLightCache_EntityKeyChanged( e, key );
     // "classname" re-runs the eclass lookup, which is what decides whether a brush counts
     // as a fixed-size entity — the one key that changes the SET of objects rather than one
     // object's state (kiwi_walkcache.h KiwiWalkCache_MarkStructural).

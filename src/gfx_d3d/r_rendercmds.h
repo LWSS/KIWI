@@ -64,7 +64,9 @@ enum GfxRenderCommand : int
     // `renderCmd < RC_COUNT` guard admits it and RB_RenderCommandTable is sized for
     // it.  The whole feature is one enable/disable pair per camera frame.
     RC_SET_CLIP_PLANE = 0x19,
-    RC_COUNT = 0x1A,
+    // CoD4Radiant's deferred per-light constant payload (0x4fc330).
+    RC_SET_LIGHT_COLOR = 0x1A,
+    RC_COUNT = 0x1B,
 #else
     RC_COUNT = 0x16,
 #endif
@@ -740,6 +742,7 @@ struct GfxCmdSetClipPlane // sizeof=0x18
     int   enable;
     float plane[4];       // WORLD space; the backend transforms it to clip space
 };
+
 // Returns FALSE when the command buffer had no room for it.  That matters and is
 // not decoration: RC_SET_CLIP_PLANE is above RC_FIRST_NONCRITICAL, so
 // R_GetCommandBuffer is allowed to drop it on a full frame (which a big map reaches
@@ -758,6 +761,16 @@ struct GfxCmdSetClipPlane // sizeof=0x18
 // cannot tell.
 bool __cdecl R_AddCmdSetClipPlane(int enable, const float *plane);
 void __cdecl RB_SetClipPlaneCmd(GfxRenderCommandExecState *execState);
+
+// IDB layout: command header (4) + the complete 0x40-byte GfxLight.
+struct GfxCmdSetLightColor // sizeof=0x44
+{
+    GfxCmdHeader header;
+    GfxLight     light;
+};
+static_assert(sizeof(GfxCmdSetLightColor) == 0x44, "GfxCmdSetLightColor");
+void __cdecl RC_SetLightColor(const GfxLight *light);
+void __cdecl RB_SetLightColorCmd(GfxRenderCommandExecState *execState);
 // Editor full-screen colored quad — IDB R_AddCmdDrawFullScreenColoredQuad @ 0x4fc260
 // (#26 sun-preview, R_SunPrev_Main). Emits RC_DRAW_FULL_SCREEN_COLORED_QUAD (the backend
 // RB_DrawFullScreenColoredQuadCmd already exists in the CoD3 base). Used for the black-world

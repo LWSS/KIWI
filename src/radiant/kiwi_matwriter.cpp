@@ -92,8 +92,8 @@ const TemplateRow kTemplates[] =
     { { "World - lit, alpha test, normal",             "l_sm_t0c0n0",
         "Bumped, with hard cut-out transparency and no specular. Rugs, cut-out signage.",
         KIWI_MAT_SLOT_COLOR | KIWI_MAT_SLOT_NORMAL },
-      { "com_persian_rug_01", "ap_signage_interior_set_1", "com_ch_me_rug_01",
-        "ap_signage_interior_set_2", "ch_factory_beambraces" }, 12, 2 },
+      { "com_garbage", "mtl_canopy06", "mtl_chechnya_log",
+        "mtl_chechnya_trunk", nullptr }, 4, 2 },
 
     { { "World - lit, alpha blend, normal",            "l_sm_b0c0n0",
         "Bumped soft-blended overlay, decal sort key, no specular. Chipped paint, patches, tracks.",
@@ -106,6 +106,18 @@ const TemplateRow kTemplates[] =
         KIWI_MAT_SLOT_COLOR | KIWI_MAT_SLOT_SPECULAR },
       { "ch_reactor_metal_3", "ch_tile_floor01", "ch_tile_wall_01", "me_wallpaper2",
         "ch_wallwhiteblue01" }, 4, 3 },
+
+    { { "World - lit, alpha test, specular",           "l_sm_t0c0s0",
+        "Reflective and flat, with hard cut-out transparency.",
+        KIWI_MAT_SLOT_COLOR | KIWI_MAT_SLOT_SPECULAR },
+      { "icbm_securityglass", "mtl_mig29_desert", "mtl_news_ticker_chain",
+        "mtl_weapon_m84", "mtl_weapon_m84_burnt" }, 4, 3 },
+
+    { { "World - lit, alpha blend, specular",          "l_sm_b0c0s0",
+        "Reflective soft-blended overlay with a decal sort key.",
+        KIWI_MAT_SLOT_COLOR | KIWI_MAT_SLOT_SPECULAR },
+      { "ch_cyrillic_dark01", "ch_trim_stainlessteel_1_decal", "icbm_decal_bloodpool",
+        "kh_wall_damp01", "me_decal_oil_leak" }, 12, 3 },
 
     { { "World - glass (alpha blend + specular)",      "l_sm_b0c0s0",
         "What the shipped glass uses: blended, reflective, glass surface type and glass contents.",
@@ -271,6 +283,8 @@ bool TemplateShapeOk( const TemplateRow &row, const ParsedMaterial &m )
 {
     if ( m.techSet != row.info.techSet )
         return false;
+    if ( !strncmp( row.info.techSet, "l_sm_", 5 ) && m.info.gameFlags != 0x12 )
+        return false;
     if ( m.info.sortKey != (unsigned char)row.expectSortKey )
         return false;
     if ( (int)m.textures.size() != row.expectTextureCount )
@@ -398,6 +412,82 @@ bool KiwiIwi_ExistsOnDisk( const char *imageName )
     if ( !fh )
         return false;
     FS_FCloseFile( fh );
+    return true;
+}
+
+bool KiwiMat_ReadSource( const char *name, kiwiMatSource_t *outInfo, char *err, size_t errSz )
+{
+    if ( outInfo )
+        memset( outInfo, 0, sizeof( *outInfo ) );
+    if ( !name || !name[0] || !outInfo )
+    {
+        SetErr( err, errSz, "no material name or output record" );
+        return false;
+    }
+
+    std::vector<unsigned char> blob;
+    ParsedMaterial             m;
+    if ( !ReadMaterialFile( name, &blob ) )
+    {
+        SetErr( err, errSz, "the engine filesystem cannot find 'materials/%s'", name );
+        return false;
+    }
+    if ( !ParseMaterial( blob, &m ) )
+    {
+        SetErr( err, errSz, "'materials/%s' does not parse with Material_LoadRaw's offsets", name );
+        return false;
+    }
+
+    outInfo->gameFlags          = m.info.gameFlags;
+    outInfo->sortKey            = m.info.sortKey;
+    outInfo->usage              = m.info.usage;
+    outInfo->toolFlags          = m.info.toolFlags;
+    outInfo->locale             = m.info.locale;
+    outInfo->autoTexScaleWidth  = m.info.autoTexScaleWidth;
+    outInfo->autoTexScaleHeight = m.info.autoTexScaleHeight;
+    outInfo->surfaceFlags       = m.info.surfaceFlags;
+    outInfo->contents           = m.info.contents;
+    outInfo->refStateBits[0]    = m.refStateBits[0];
+    outInfo->refStateBits[1]    = m.refStateBits[1];
+    _snprintf( outInfo->techSet, sizeof( outInfo->techSet ), "%s", m.techSet.c_str() );
+    outInfo->techSet[sizeof( outInfo->techSet ) - 1] = '\0';
+
+    const TexEntry *fallbackColor = nullptr;
+    for ( size_t i = 0; i < m.textures.size(); ++i )
+    {
+        const TexEntry &t = m.textures[i];
+        char *dst = nullptr;
+        if ( t.semantic == 2 )
+        {
+            dst = outInfo->colorMapImage;
+            outInfo->colorMapSemantic = t.semantic;
+        }
+        else if ( t.semantic == 5 )
+            dst = outInfo->normalMapImage;
+        else if ( t.semantic == 8 )
+            dst = outInfo->specularMapImage;
+        else if ( t.semantic != 11 && !t.image.empty() && t.image[0] != '$' && !fallbackColor )
+            fallbackColor = &t;
+
+        if ( dst && !dst[0] )
+        {
+            _snprintf( dst, 64, "%s", t.image.c_str() );
+            dst[63] = '\0';
+        }
+    }
+
+    if ( !outInfo->colorMapImage[0] && fallbackColor )
+    {
+        _snprintf( outInfo->colorMapImage, sizeof( outInfo->colorMapImage ), "%s",
+                   fallbackColor->image.c_str() );
+        outInfo->colorMapImage[sizeof( outInfo->colorMapImage ) - 1] = '\0';
+        outInfo->colorMapSemantic = fallbackColor->semantic;
+    }
+    if ( !outInfo->colorMapImage[0] )
+    {
+        SetErr( err, errSz, "'materials/%s' exposes no usable image", name );
+        return false;
+    }
     return true;
 }
 

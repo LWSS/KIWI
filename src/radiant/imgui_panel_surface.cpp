@@ -8,6 +8,7 @@
 // re-Gathers its own fields instead.
 #include "stdafx.h"
 #include "qe3.h"
+#include "kiwi_fmt.h"
 #include "radiant_ui_actions.h"
 #include <imgui/imgui.h>
 
@@ -144,8 +145,11 @@ void ImGuiPanel_Surface_Draw()
         SI_Row( "Rotate (deg)",       &s_state.rotate,      SI_ID_ROTATE_SPIN,       &s_state.texdefDirty );
         SI_Row( "Sample size",        &s_state.sampleSize,  SI_ID_SAMPLE_SIZE_SPIN,  &s_state.sampleDirty );
 
-        // Read-only "Repeats in" readouts (raw texel size), in the dialog's %.6g format.
-        ImGui::Text( "Repeats in   x: %.6g   y: %.6g", s_state.repeatsX, s_state.repeatsY );
+        // Read-only "Repeats in" readouts (raw texel size), matching the dialog.
+        char repeatsX[48], repeatsY[48];
+        ImGui::Text( "Repeats in   x: %s   y: %s",
+                     KiwiFmt_Num( repeatsX, sizeof( repeatsX ), s_state.repeatsX, 6 ),
+                     KiwiFmt_Num( repeatsY, sizeof( repeatsY ), s_state.repeatsY, 6 ) );
         ImGui::Text( "Patch mode: %s", s_state.bPatchMode ? "yes" : "no" );
 
         if ( ImGui::Button( "Apply" ) )

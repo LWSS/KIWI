@@ -304,6 +304,15 @@ namespace
     int BuildCommandPrompts( chip_t *chips, KiwiEditorCommand *cmd )
     {
         int n = 0;
+        if ( KiwiDrop_Active() )
+        {
+            // Exact drop-mode hint: Drop to ground · G Move gizmo · Ctrl Snap · Esc Cancel
+            AddChip( chips, &n, "Drop", "to ground" );
+            AddChip( chips, &n, "G",    "Move gizmo" );
+            AddChip( chips, &n, "Ctrl", "Snap" );
+            AddChip( chips, &n, "Esc",  "Cancel" );
+            return n;
+        }
         const bool clicks = ( cmd && cmd->WantsClicks() );
         AddChip( chips, &n, "RMB/Enter", "Confirm" );
         AddChip( chips, &n, "Esc",       "Cancel" );

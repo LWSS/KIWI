@@ -71,6 +71,7 @@
 
 #include "kiwi_viewcube.h"
 #include "kiwi_camera.h"
+#include "kiwi_fmt.h"
 #include "kiwi_command.h"            // ROUND N — KiwiCmd_StepGrid (the shared clamp)
 #include "kiwi_grid.h"               // ROUND AJ, ITEM 5 — the grid-snap master switch
 #include "kiwi_numeric.h"            // ROUND AQ, ITEM 4 — KiwiNum_EvalDisplay (the one parser)
@@ -788,9 +789,11 @@ namespace
         // The value, in the SAME display units every other number in the editor uses
         // (§17): the spacing is held in inches, so this prints it directly rather
         // than routing a world value through KiwiUnits_Format — which would convert
-        // twice.  %g keeps 0.125 and 1024 both short and never prints "10.000000".
-        char buf[32];
-        _snprintf( buf, sizeof( buf ), "%g in", (double)KiwiUnits_GridSpacingInches() );
+        // twice.  Trailing-zero stripping keeps 0.125 and 1024 equally short.
+        char buf[40], value[32];
+        _snprintf( buf, sizeof( buf ), "%s in",
+                   KiwiFmt_Num( value, sizeof( value ),
+                                KiwiUnits_GridSpacingInches(), 6 ) );
         buf[sizeof( buf ) - 1] = '\0';
         const ImVec2 ts = ImGui::CalcTextSize( buf );
         dl->AddText( ImVec2( ( x0 + x1 ) * 0.5f - ts.x * 0.5f,
@@ -810,9 +813,8 @@ namespace
                 // current spacing (not blank) so the field doubles as a readout the
                 // user can edit rather than one they must retype, and anchored under
                 // the pill so the popup reads as belonging to it.
-                _snprintf( s_gridEditBuf, sizeof( s_gridEditBuf ), "%g",
-                           (double)KiwiUnits_GridSpacingInches() );
-                s_gridEditBuf[sizeof( s_gridEditBuf ) - 1] = '\0';
+                KiwiFmt_Num( s_gridEditBuf, sizeof( s_gridEditBuf ),
+                             KiwiUnits_GridSpacingInches(), 6 );
                 s_gridEdit      = true;
                 s_gridEditFocus = true;
                 // RIGHT-aligned to the pill, not left: the pill lives against the

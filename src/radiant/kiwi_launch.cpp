@@ -1,13 +1,10 @@
 // ═════════════════════════════════════════════════════════════════════════════════════
-//  kiwi_launch.cpp — KIWI-UX (ROUND BF): the Build & Run dialog, the child-process
-//  runner and the BSP -> Light -> Run pipeline.
+//  kiwi_launch.cpp — the Build dialog, child-process runner and BSP -> Light pipeline.
 // ═════════════════════════════════════════════════════════════════════════════════════
-// Read kiwi_launch.h first — D-BF-A..G carry the whole derivation: why the compilers stay
-// separate processes, why the target is always `raw\maps\mp\<name>.map`, the exact rule for
-// `-loadFrom`, why there is no thread, where the `.errlog` / `.lin` handoff can disagree,
-// and what the game needs on its command line.  Every contract cited there was read out of
-// src/cod4map/, src/cod4rad/ and the game sources; NONE of those files is touched by this
-// round.
+// Read kiwi_launch.h first: it records why the compilers stay separate processes, why the
+// target is always `raw\maps\mp\<name>.map`, the exact `-loadFrom` rule, why capture is
+// frame-polled, where the `.errlog` / `.lin` handoff can disagree, and why cancellation
+// warns about half-written lighting output.
 // ═════════════════════════════════════════════════════════════════════════════════════
 #include "stdafx.h"
 #include "qe3.h"
@@ -17,12 +14,14 @@
 
 #include "kiwi_command.h"
 #include "kiwi_launch.h"
-#include "radiant_frame.h"      // Radiant_FileSave (:87) + Radiant_CurrentMapPath (ROUND BF)
+#include "kiwi_matconvert.h"
+#include "radiant_frame.h"      // Radiant_FileSave (:87) + Radiant_CurrentMapPath
 
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
 #include <string>
+#include <vector>
 
 // ── ported / cross-file entry points (each verified against its definition) ─────────
 extern int  Sys_Printf( const char *fmt, ... );          // win_qe3.cpp:118
@@ -45,7 +44,7 @@ extern int  s_errLogCount;                               // points.cpp:50
 extern int  g_nUpdateBits;                               // engine_stubs.cpp:773
 // Radiant_FileSave()        radiant_frame.h:87 (mainfrm.cpp:1678) -- the Save funnel: with a path
 //                           set it is Map_SaveFile(s_currentMapPath,0,0), else Save-As.
-// Radiant_CurrentMapPath()  radiant_frame.h:92 (mainfrm.cpp:495, ROUND BF) -- read-only view of
+// Radiant_CurrentMapPath()  radiant_frame.h:92 (mainfrm.cpp:495) -- read-only view of
 //                           s_currentMapPath (mainfrm.cpp:488), "" when untitled.
 
 // ═════════════════════════════════════════════════════════════════════════════════════
@@ -58,21 +57,16 @@ namespace
 bool s_open = false;
 
 // ── options (persist for the session; nothing here goes in the ini) ────────────────
+bool s_buildBsp    = true;
+bool s_buildLight  = true;
 bool s_saveFirst   = true;      // run the Save funnel before a BSP build
 bool s_verbose     = true;      // cod4map -v
 bool s_onlyEnts    = false;     // cod4map -onlyEnts
 bool s_leakTest    = false;     // cod4map -leakTest
-char s_bspExtra[256] = { 0 };
 
 int  s_threads     = 0;         // cod4rad -Threads N  (0 = "not resolved yet")
 int  s_quality     = 1;         // 0 = -Fast, 1 = (neither), 2 = -Extra
 bool s_noRelight   = true;      // cod4rad -NoRelight
-char s_radExtra[256] = { 0 };
-
-bool s_developer   = true;      // game +set developer 1
-bool s_cheats      = true;      // game +set sv_cheats 1
-bool s_devmap      = true;      // devmap vs map
-bool s_skipLight   = false;     // the chain's "skip lighting" tick
 
 // ── the log ────────────────────────────────────────────────────────────────────────
 // Bounded ring: append at the back, drop whole lines off the front past the cap.  256 KB
@@ -89,13 +83,13 @@ enum launchStage_t
     LSTAGE_LIGHT
 };
 
-// The chain's INTENT: what should start when the current stage exits 0.  LCHAIN_OFF means
-// the stage was started on its own and nothing follows it.
+// The chain's intent: either LIGHT follows a successful BSP, or the running process is the
+// final selected stage.  Process creation and polling remain the same for both cases.
 enum launchChain_t
 {
     LCHAIN_OFF = 0,
-    LCHAIN_AFTER_BSP,       // BSP is running as part of Build & Run
-    LCHAIN_AFTER_LIGHT      // Light is running as part of Build & Run
+    LCHAIN_LIGHT_AFTER_BSP,
+    LCHAIN_FINAL_STAGE
 };
 
 launchStage_t s_stage = LSTAGE_NONE;
@@ -103,10 +97,32 @@ launchChain_t s_chain = LCHAIN_OFF;
 HANDLE        s_proc  = nullptr;      // the child, while it runs
 HANDLE        s_pipe  = nullptr;      // our READ end of its stdout+stderr
 DWORD         s_pid   = 0;
-DWORD         s_lastExit = 0;
-bool          s_haveLastExit = false;
-launchStage_t s_lastStage = LSTAGE_NONE;
-bool          s_killRequest = false;  // the confirm popup is owed an OpenPopup
+bool          s_cancelRequest = false;  // the confirm popup is owed an OpenPopup
+bool          s_cancelled = false;
+
+enum buildStatus_t
+{
+    BSTATUS_IDLE = 0,
+    BSTATUS_RUNNING,
+    BSTATUS_SUCCEEDED,
+    BSTATUS_FAILED
+};
+
+buildStatus_t s_buildStatus = BSTATUS_IDLE;
+double        s_buildStartedAt = 0.0;
+double        s_buildElapsed = 0.0;
+char          s_buildOutputPath[MAX_PATH] = { 0 };
+ULONGLONG     s_buildOutputBytes = 0;
+launchStage_t s_failureStage = LSTAGE_NONE;
+DWORD         s_failureExit = 0;
+bool          s_failureHasExit = false;
+std::string   s_failureDetail;
+
+// Child output is already kept in the bounded visible log.  This small line accumulator is
+// separate so the first ERROR:/assert line survives even if a very long build rolls the
+// visible log's front off the ring.
+std::string s_captureLine;
+std::string s_firstCaptureError;
 
 // The load source of the RUNNING (or last) BSP stage, kept so the post-run `.errlog` /
 // `.lin` probe looks exactly where cod4map's BuildOutputPathFromLoadSource wrote them.
@@ -158,13 +174,88 @@ void LogLine( const char *fmt, ... )
     LogAppend( "\n", 1 );
 }
 
+bool ContainsNoCase( const char *begin, const char *end, const char *needle )
+{
+    if ( !begin || !end || begin >= end || !needle || !needle[0] )
+        return false;
+    const size_t needleLen = strlen( needle );
+    for ( const char *p = begin; p < end; ++p )
+    {
+        if ( (size_t)( end - p ) >= needleLen && _strnicmp( p, needle, needleLen ) == 0 )
+            return true;
+    }
+    return false;
+}
+
+bool IsErrorText( const char *begin, const char *end )
+{
+    return ContainsNoCase( begin, end, "error:" ) ||
+           ContainsNoCase( begin, end, "assert" ) ||
+           ContainsNoCase( begin, end, "leak" );
+}
+
+bool IsWarningText( const char *begin, const char *end )
+{
+    return ContainsNoCase( begin, end, "warning" );
+}
+
+std::string TrimmedLine( const char *begin, const char *end )
+{
+    while ( begin < end && ( *begin == ' ' || *begin == '\t' || *begin == '\r' ) )
+        ++begin;
+    while ( end > begin && ( end[-1] == ' ' || end[-1] == '\t' || end[-1] == '\r' ) )
+        --end;
+    return std::string( begin, end );
+}
+
+void RememberCaptureLine()
+{
+    if ( s_firstCaptureError.empty() &&
+         ( ContainsNoCase( s_captureLine.c_str(),
+                           s_captureLine.c_str() + s_captureLine.size(), "error:" ) ||
+           ContainsNoCase( s_captureLine.c_str(),
+                           s_captureLine.c_str() + s_captureLine.size(), "assert" ) ) )
+    {
+        s_firstCaptureError = TrimmedLine( s_captureLine.c_str(),
+                                           s_captureLine.c_str() + s_captureLine.size() );
+    }
+    s_captureLine.clear();
+}
+
+void CaptureAppend( const char *text, size_t len )
+{
+    for ( size_t i = 0; i < len; ++i )
+    {
+        const char c = text[i];
+        if ( c == '\n' )
+        {
+            RememberCaptureLine();
+            continue;
+        }
+        if ( c != '\r' && s_captureLine.size() < 16u * 1024u )
+            s_captureLine.push_back( c );
+    }
+}
+
+void FlushCaptureLine()
+{
+    if ( !s_captureLine.empty() )
+        RememberCaptureLine();
+}
+
+void ResetStageCapture()
+{
+    s_captureLine.clear();
+    s_firstCaptureError.clear();
+}
+
 // ═════════════════════════════════════════════════════════════════════════════════════
 //  PATHS  (D-BF-B / D-BF-C).  Resolved fresh on every draw — never cached across a map
 //  change, because every one of these inputs moves when the user opens or saves a map.
 // ═════════════════════════════════════════════════════════════════════════════════════
 struct launchPaths_t
 {
-    char root[MAX_PATH];        // fs_basepath — the game root, and every child's CWD
+    char root[MAX_PATH];        // fs_basepath — the build root, and every child's CWD
     char binDir[MAX_PATH];      // the directory the running radiant exe sits in
     char mapPath[MAX_PATH];     // s_currentMapPath, "" when the map is untitled
     char name[128];             // basename of mapPath without the extension
@@ -278,7 +369,7 @@ void ResolvePaths( launchPaths_t &p )
     p.useLoadFrom = !SamePath( p.mapPath, p.targetAbs );
 }
 
-// The three tool exes, all beside the running radiant (SURVEY §A/B/D: one bin\<CONFIG>).
+// Both compiler exes sit beside the running radiant (one bin\<CONFIG> directory).
 void ToolPath( const launchPaths_t &p, const char *exe, char *out, size_t outSz )
 {
     _snprintf( out, outSz, "%s\\%s", p.binDir, exe );
@@ -327,6 +418,7 @@ void ReadAvailable()
         DWORD got  = 0;
         if ( !::ReadFile( s_pipe, buf, want, &got, nullptr ) || !got )
             return;
+        CaptureAppend( buf, (size_t)got );
         LogAppend( buf, (size_t)got );
     }
 }
@@ -346,14 +438,170 @@ const char *StageName( launchStage_t s )
 {
     switch ( s )
     {
-    case LSTAGE_BSP:   return "cod4map";
-    case LSTAGE_LIGHT: return "cod4rad";
-    default:           return "(idle)";
+    case LSTAGE_BSP:   return "BSP";
+    case LSTAGE_LIGHT: return "LIGHT";
+    default:           return "BUILD";
     }
 }
 
+double CurrentBuildElapsed()
+{
+    if ( s_buildStatus == BSTATUS_RUNNING )
+    {
+        const double elapsed = ImGui::GetTime() - s_buildStartedAt;
+        return elapsed > 0.0 ? elapsed : 0.0;
+    }
+    return s_buildElapsed;
+}
+
+void FormatElapsed( double elapsed, char *out, size_t outSz )
+{
+    const unsigned int totalSeconds = elapsed > 0.0 ? (unsigned int)elapsed : 0u;
+    const unsigned int minutes = totalSeconds / 60u;
+    const unsigned int seconds = totalSeconds % 60u;
+    if ( minutes )
+        _snprintf( out, outSz, "%um %02us", minutes, seconds );
+    else
+        _snprintf( out, outSz, "%us", seconds );
+    out[outSz - 1] = '\0';
+}
+
+const char *FileNamePart( const char *path )
+{
+    const char *name = path ? path : "";
+    if ( path )
+    {
+        for ( const char *p = path; *p; ++p )
+            if ( *p == '\\' || *p == '/' )
+                name = p + 1;
+    }
+    return name;
+}
+
+bool ReadOutputSize( const char *path, ULONGLONG &bytes )
+{
+    WIN32_FILE_ATTRIBUTE_DATA data;
+    memset( &data, 0, sizeof( data ) );
+    if ( !path || !path[0] ||
+         !::GetFileAttributesExA( path, GetFileExInfoStandard, &data ) ||
+         ( data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY ) )
+    {
+        bytes = 0;
+        return false;
+    }
+    bytes = ( (ULONGLONG)data.nFileSizeHigh << 32 ) | data.nFileSizeLow;
+    return true;
+}
+
+void FormatFileSize( ULONGLONG bytes, char *out, size_t outSz )
+{
+    const ULONGLONG kb = 1024u;
+    const ULONGLONG mb = kb * 1024u;
+    const ULONGLONG gb = mb * 1024u;
+    if ( bytes >= gb )
+        _snprintf( out, outSz, "%.1f GB", (double)bytes / (double)gb );
+    else if ( bytes >= mb )
+        _snprintf( out, outSz, "%.1f MB", (double)bytes / (double)mb );
+    else if ( bytes >= kb )
+        _snprintf( out, outSz, "%.1f KB", (double)bytes / (double)kb );
+    else
+        _snprintf( out, outSz, "%I64u B", bytes );
+    out[outSz - 1] = '\0';
+}
+
+void BeginBuildStatus( const launchPaths_t &p )
+{
+    s_buildStatus = BSTATUS_RUNNING;
+    s_buildStartedAt = ImGui::GetTime();
+    s_buildElapsed = 0.0;
+    s_buildOutputBytes = 0;
+    _snprintf( s_buildOutputPath, sizeof( s_buildOutputPath ), "%s", p.bspAbs );
+    s_buildOutputPath[sizeof( s_buildOutputPath ) - 1] = '\0';
+    s_failureStage = LSTAGE_NONE;
+    s_failureExit = 0;
+    s_failureHasExit = false;
+    s_failureDetail.clear();
+    ResetStageCapture();
+    s_cancelled = false;
+}
+
+void FinishBuildFailure( launchStage_t stage, DWORD exitCode, bool haveExit,
+                         const char *fallbackDetail )
+{
+    s_buildElapsed = CurrentBuildElapsed();
+    s_buildStatus = BSTATUS_FAILED;
+    s_failureStage = stage;
+    s_failureExit = exitCode;
+    s_failureHasExit = haveExit;
+    s_chain = LCHAIN_OFF;
+
+    if ( s_cancelled )
+        s_failureDetail = "Cancelled by user.";
+    else if ( !s_firstCaptureError.empty() )
+        s_failureDetail = s_firstCaptureError;
+    else if ( fallbackDetail && fallbackDetail[0] )
+        s_failureDetail = fallbackDetail;
+    else
+        s_failureDetail = "No ERROR:/assert line was captured.";
+
+    if ( s_failureDetail.size() > 240u )
+    {
+        s_failureDetail.resize( 237u );
+        s_failureDetail += "...";
+    }
+
+    if ( haveExit )
+    {
+        LogLine( "ERROR: BUILD FAILED - %s exit %lu - %s",
+                 StageName( stage ), exitCode, s_failureDetail.c_str() );
+        Sys_Printf( "Build: FAILED - %s exit %lu - %s\n",
+                    StageName( stage ), exitCode, s_failureDetail.c_str() );
+    }
+    else
+    {
+        LogLine( "ERROR: BUILD FAILED - %s - %s",
+                 StageName( stage ), s_failureDetail.c_str() );
+        Sys_Printf( "Build: FAILED - %s - %s\n",
+                    StageName( stage ), s_failureDetail.c_str() );
+    }
+}
+
+void FinishBuildSuccess( launchStage_t finalStage )
+{
+    ULONGLONG bytes = 0;
+    if ( !ReadOutputSize( s_buildOutputPath, bytes ) )
+    {
+        char detail[MAX_PATH + 64];
+        _snprintf( detail, sizeof( detail ), "Output file was not created: %s",
+                   s_buildOutputPath );
+        detail[sizeof( detail ) - 1] = '\0';
+        FinishBuildFailure( finalStage, 0, true, detail );
+        return;
+    }
+    if ( bytes == 0 )
+    {
+        char detail[MAX_PATH + 64];
+        _snprintf( detail, sizeof( detail ), "Output file is empty: %s", s_buildOutputPath );
+        detail[sizeof( detail ) - 1] = '\0';
+        FinishBuildFailure( finalStage, 0, true, detail );
+        return;
+    }
+
+    s_buildElapsed = CurrentBuildElapsed();
+    s_buildOutputBytes = bytes;
+    s_buildStatus = BSTATUS_SUCCEEDED;
+    s_chain = LCHAIN_OFF;
+
+    char elapsed[64], size[64];
+    FormatElapsed( s_buildElapsed, elapsed, sizeof( elapsed ) );
+    FormatFileSize( bytes, size, sizeof( size ) );
+    LogLine( "BUILD SUCCEEDED - %s - %s (%s)", elapsed, s_buildOutputPath, size );
+    Sys_Printf( "Build: SUCCEEDED in %s - %s (%s)\n", elapsed,
+                s_buildOutputPath, size );
+}
+
 // Spawn a CAPTURED console child: stdout AND stderr into one anonymous pipe, no window,
-// CWD = the game root.  The write end is inherited and closed in the parent immediately —
+// CWD = fs_basepath.  The write end is inherited and closed in the parent immediately —
 // keeping it open here would mean the read end never sees EOF.  Both compilers run stdout
 // unbuffered (cod4map bsp.cpp:1143 `setvbuf(stdout, NULL, _IONBF, 0)`), so the log streams
 // live rather than arriving in one lump at exit.
@@ -413,31 +661,6 @@ bool SpawnCaptured( const char *cmdline, const char *cwd )
     s_proc = pi.hProcess;
     s_pipe = rd;
     s_pid  = pi.dwProcessId;
-    return true;
-}
-
-// The game: a GUI process with a window of its own, so NO pipe, NO CREATE_NO_WINDOW, and
-// both handles are closed at once — nothing about it is polled (D-BF-F: Run Map is exempt
-// from the one-at-a-time rule).
-bool SpawnDetached( const char *cmdline, const char *cwd )
-{
-    STARTUPINFOA si;
-    memset( &si, 0, sizeof( si ) );
-    si.cb = sizeof( si );
-    PROCESS_INFORMATION pi;
-    memset( &pi, 0, sizeof( pi ) );
-
-    std::string mutableCmd( cmdline );
-    mutableCmd.push_back( '\0' );
-
-    if ( !::CreateProcessA( nullptr, &mutableCmd[0], nullptr, nullptr,
-                            FALSE, 0, nullptr, cwd, &si, &pi ) )
-    {
-        LogLine( "ERROR: CreateProcess failed (GetLastError %lu)", ::GetLastError() );
-        return false;
-    }
-    ::CloseHandle( pi.hThread );
-    ::CloseHandle( pi.hProcess );
     return true;
 }
 
@@ -584,6 +807,7 @@ bool Busy() { return s_stage != LSTAGE_NONE; }
 
 bool StartBsp( const launchPaths_t &p )
 {
+    ResetStageCapture();
     char exe[MAX_PATH];
     ToolPath( p, "KIWI-cod4map.exe", exe, sizeof( exe ) );
     if ( !FileExists( exe ) )
@@ -614,7 +838,6 @@ bool StartBsp( const launchPaths_t &p )
     if ( s_verbose )  cmd += " -v";
     if ( s_onlyEnts ) cmd += " -onlyEnts";
     if ( s_leakTest ) cmd += " -leakTest";
-    if ( s_bspExtra[0] ) { cmd += " "; cmd += s_bspExtra; }
     if ( p.useLoadFrom )
     {
         cmd += " -loadFrom \"";
@@ -641,6 +864,7 @@ bool StartBsp( const launchPaths_t &p )
 
 bool StartLight( const launchPaths_t &p )
 {
+    ResetStageCapture();
     EnsureThreadDefault();
     char exe[MAX_PATH];
     ToolPath( p, "KIWI-cod4rad.exe", exe, sizeof( exe ) );
@@ -667,7 +891,6 @@ bool StartLight( const launchPaths_t &p )
     if ( s_quality == 0 ) cmd += " -Fast";
     if ( s_quality == 2 ) cmd += " -Extra";
     if ( s_noRelight )    cmd += " -NoRelight";
-    if ( s_radExtra[0] ) { cmd += " "; cmd += s_radExtra; }
     // Map name LAST, extension-less: cod4rad strips any extension and appends .d3dbsp
     // itself (cmdline.c:755 SetBspFileExtensions("d3d"), :794-814).
     cmd += " \"";
@@ -686,87 +909,63 @@ bool StartLight( const launchPaths_t &p )
     return true;
 }
 
-bool StartGame( const launchPaths_t &p )
-{
-    char exe[MAX_PATH];
-    ToolPath( p, "KIWI-mp.exe", exe, sizeof( exe ) );
-    if ( !FileExists( exe ) )
-    {
-        LogLine( "ERROR: %s is missing -- build the mp target.", exe );
-        return false;
-    }
-
-    std::string cmd;
-    cmd += "\"";  cmd += exe;  cmd += "\"";
-    if ( s_developer ) cmd += " +set developer 1";
-    if ( s_cheats )    cmd += " +set sv_cheats 1";
-    cmd += s_devmap ? " +devmap " : " +map ";
-    cmd += p.name;
-
-    LogLine( "" );
-    LogLine( "==== RUN ====" );
-    LogLine( "cwd: %s", p.root );
-    LogLine( "%s", cmd.c_str() );
-    if ( !FileExists( p.bspAbs ) )
-        LogLine( "WARNING: %s does not exist -- the game will not find the map.", p.bspAbs );
-
-    if ( !SpawnDetached( cmd.c_str(), p.root ) )
-        return false;
-    LogLine( "launched (detached -- this window does not follow the game)" );
-    return true;
-}
-
 // Called from the poll the frame a stage's process is seen to have exited.
 void OnStageFinished( DWORD exitCode )
 {
     const launchStage_t finished = s_stage;
-    s_stage        = LSTAGE_NONE;
-    s_lastStage    = finished;
-    s_lastExit     = exitCode;
-    s_haveLastExit = true;
+    s_stage = LSTAGE_NONE;
 
     LogLine( "" );
     LogLine( "---- %s exited with code %lu (0x%08lX) ----",
              StageName( finished ), exitCode, exitCode );
-    Sys_Printf( "Build: %s exited with code %lu\n", StageName( finished ), exitCode );
 
     if ( finished == LSTAGE_BSP )
         AfterBspDiagnostics( exitCode );
+
+    if ( s_cancelled )
+    {
+        FinishBuildFailure( finished, exitCode, true, "Cancelled by user." );
+        return;
+    }
 
     if ( s_chain == LCHAIN_OFF )
         return;
 
     if ( exitCode != 0 )
     {
-        LogLine( "chain STOPPED: %s failed.", StageName( finished ) );
-        s_chain = LCHAIN_OFF;
+        LogLine( "build STOPPED: %s failed.", StageName( finished ) );
+        FinishBuildFailure( finished, exitCode, true, nullptr );
+        return;
+    }
+
+    if ( s_chain == LCHAIN_FINAL_STAGE )
+    {
+        FinishBuildSuccess( finished );
         return;
     }
 
     launchPaths_t p;
     ResolvePaths( p );
-    if ( !p.haveRoot || !p.haveMap )
+    if ( !p.haveRoot || !p.haveMap || !SamePath( p.bspAbs, s_buildOutputPath ) )
     {
-        LogLine( "chain STOPPED: the map path changed while the build ran." );
-        s_chain = LCHAIN_OFF;
+        LogLine( "ERROR: build stopped because the map path changed during BSP." );
+        FinishBuildFailure( LSTAGE_LIGHT, 0, false,
+                            "The map path changed before LIGHT could start." );
         return;
     }
 
-    if ( s_chain == LCHAIN_AFTER_BSP && !s_skipLight )
+    if ( s_chain == LCHAIN_LIGHT_AFTER_BSP )
     {
         if ( StartLight( p ) )
-            s_chain = LCHAIN_AFTER_LIGHT;
+            s_chain = LCHAIN_FINAL_STAGE;
         else
         {
-            LogLine( "chain STOPPED: could not start the lighting stage." );
-            s_chain = LCHAIN_OFF;
+            LogLine( "build STOPPED: could not start LIGHT." );
+            FinishBuildFailure( LSTAGE_LIGHT, 0, false,
+                                "The LIGHT stage could not be started." );
         }
         return;
     }
-
-    // Either the light stage just finished, or lighting was skipped: run the game.
-    s_chain = LCHAIN_OFF;
-    StartGame( p );
 }
 
 // ONE poll per frame.  STILL_ACTIVE is 259; neither compiler returns it (cod4map exits 0 or
@@ -781,17 +980,25 @@ void PollChild()
     DWORD code = STILL_ACTIVE;
     if ( !::GetExitCodeProcess( s_proc, &code ) )
     {
+        const DWORD err = ::GetLastError();
         LogLine( "ERROR: GetExitCodeProcess failed (GetLastError %lu) -- dropping the child.",
-                 ::GetLastError() );
+                 err );
+        const launchStage_t failed = s_stage;
+        FlushCaptureLine();
         CloseChild();
         s_stage = LSTAGE_NONE;
-        s_chain = LCHAIN_OFF;
+        char detail[128];
+        _snprintf( detail, sizeof( detail ),
+                   "GetExitCodeProcess failed (GetLastError %lu).", err );
+        detail[sizeof( detail ) - 1] = '\0';
+        FinishBuildFailure( failed, 0, false, detail );
         return;
     }
     if ( code == STILL_ACTIVE )
         return;
 
     ReadAvailable();          // whatever it wrote between the last drain and its exit
+    FlushCaptureLine();       // preserve a final ERROR/assert line without a trailing newline
     CloseChild();
     OnStageFinished( code );
 }
@@ -813,11 +1020,308 @@ void HelpMarker( const char *text )
     }
 }
 
+void DrawSpinner( float radius, float thickness, ImU32 color )
+{
+    const ImVec2 pos = ImGui::GetCursorScreenPos();
+    const ImVec2 centre( pos.x + radius, pos.y + radius );
+    ImGui::Dummy( ImVec2( radius * 2.0f, radius * 2.0f ) );
+
+    const float start = (float)ImGui::GetTime() * 5.0f;
+    ImDrawList *draw = ImGui::GetWindowDrawList();
+    draw->PathClear();
+    draw->PathArcTo( centre, radius, start, start + 4.8f, 24 );
+    draw->PathStroke( color, thickness, ImDrawFlags_None );
+}
+
+void DrawStatusBanner()
+{
+    ImVec4 background( 0.12f, 0.13f, 0.15f, 1.0f );
+    ImVec4 border( 0.35f, 0.37f, 0.40f, 1.0f );
+    ImVec4 primary( 0.78f, 0.80f, 0.84f, 1.0f );
+    ImVec4 secondary( 0.66f, 0.68f, 0.72f, 1.0f );
+    char headline[1024];
+    char detail[1024];
+    headline[0] = '\0';
+    detail[0] = '\0';
+
+    char elapsed[64];
+    FormatElapsed( CurrentBuildElapsed(), elapsed, sizeof( elapsed ) );
+
+    switch ( s_buildStatus )
+    {
+    case BSTATUS_RUNNING:
+        background = ImVec4( 0.30f, 0.23f, 0.04f, 1.0f );
+        border = ImVec4( 0.95f, 0.72f, 0.16f, 1.0f );
+        primary = ImVec4( 1.0f, 0.82f, 0.28f, 1.0f );
+        secondary = ImVec4( 0.95f, 0.84f, 0.52f, 1.0f );
+        _snprintf( headline, sizeof( headline ), "Running %s\xE2\x80\xA6  %s",
+                   StageName( s_stage ), elapsed );
+        _snprintf( detail, sizeof( detail ), "Output: %s", s_buildOutputPath );
+        break;
+
+    case BSTATUS_SUCCEEDED:
+    {
+        background = ImVec4( 0.06f, 0.25f, 0.13f, 1.0f );
+        border = ImVec4( 0.20f, 0.82f, 0.43f, 1.0f );
+        primary = ImVec4( 0.43f, 1.0f, 0.62f, 1.0f );
+        secondary = ImVec4( 0.66f, 0.92f, 0.74f, 1.0f );
+        char size[64];
+        FormatFileSize( s_buildOutputBytes, size, sizeof( size ) );
+        _snprintf( headline, sizeof( headline ),
+                   "BUILD SUCCEEDED \xC2\xB7 %s \xC2\xB7 %s %s", elapsed,
+                   FileNamePart( s_buildOutputPath ), size );
+        _snprintf( detail, sizeof( detail ), "%s", s_buildOutputPath );
+        break;
+    }
+
+    case BSTATUS_FAILED:
+        background = ImVec4( 0.31f, 0.07f, 0.08f, 1.0f );
+        border = ImVec4( 0.94f, 0.28f, 0.30f, 1.0f );
+        primary = ImVec4( 1.0f, 0.48f, 0.48f, 1.0f );
+        secondary = ImVec4( 1.0f, 0.68f, 0.52f, 1.0f );
+        if ( s_failureHasExit )
+            _snprintf( headline, sizeof( headline ),
+                       "BUILD FAILED \xE2\x80\x94 %s exit %lu",
+                       StageName( s_failureStage ), s_failureExit );
+        else
+            _snprintf( headline, sizeof( headline ),
+                       "BUILD FAILED \xE2\x80\x94 %s could not start",
+                       StageName( s_failureStage ) );
+        _snprintf( detail, sizeof( detail ), "%s", s_failureDetail.c_str() );
+        break;
+
+    default:
+        _snprintf( headline, sizeof( headline ), "Ready to build" );
+        _snprintf( detail, sizeof( detail ), "Select BSP and/or LIGHT, then press Build." );
+        break;
+    }
+    headline[sizeof( headline ) - 1] = '\0';
+    detail[sizeof( detail ) - 1] = '\0';
+
+    ImGui::PushStyleColor( ImGuiCol_ChildBg, background );
+    ImGui::PushStyleColor( ImGuiCol_Border, border );
+    if ( ImGui::BeginChild( "##buildstatus", ImVec2( 0.0f, 82.0f ),
+                            ImGuiChildFlags_Borders,
+                            ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse ) )
+    {
+        if ( s_buildStatus == BSTATUS_RUNNING )
+        {
+            DrawSpinner( 9.0f, 2.5f, ImGui::ColorConvertFloat4ToU32( primary ) );
+            ImGui::SameLine( 0.0f, 10.0f );
+        }
+
+        float headingSize = ImGui::GetFont()->LegacySize;
+        if ( headingSize <= 0.0f )
+            headingSize = ImGui::GetStyle().FontSizeBase;
+        if ( headingSize <= 0.0f )
+            headingSize = 13.0f;
+        ImGui::PushFont( nullptr, headingSize * 1.22f );
+        ImGui::TextColored( primary, "%s", headline );
+        ImGui::PopFont();
+        ImGui::PushStyleColor( ImGuiCol_Text, secondary );
+        ImGui::TextWrapped( "%s", detail );
+        ImGui::PopStyleColor();
+    }
+    ImGui::EndChild();
+    ImGui::PopStyleColor( 2 );
+}
+
+void DrawStageRows( bool busy )
+{
+    static const char *const kQuality[] = { "Fast", "Normal", "Extra" };
+
+    ImGui::BeginDisabled( busy );
+
+    ImGui::PushID( "bsp_stage" );
+    ImGui::Checkbox( "##enabled", &s_buildBsp );
+    ImGui::SameLine();
+    ImGui::TextUnformatted( "BSP" );
+    ImGui::SameLine( 105.0f );
+    ImGui::BeginDisabled( !s_buildBsp );
+    ImGui::Checkbox( "Verbose (-v)", &s_verbose );
+    ImGui::SameLine();
+    ImGui::Checkbox( "Entities only (-onlyEnts)", &s_onlyEnts );
+    ImGui::SameLine();
+    ImGui::Checkbox( "Leak test (-leakTest)", &s_leakTest );
+    ImGui::EndDisabled();
+    ImGui::PopID();
+
+    ImGui::PushID( "light_stage" );
+    ImGui::Checkbox( "##enabled", &s_buildLight );
+    ImGui::SameLine();
+    ImGui::TextUnformatted( "LIGHT" );
+    ImGui::SameLine( 105.0f );
+    ImGui::BeginDisabled( !s_buildLight );
+    ImGui::TextUnformatted( "Threads" );
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth( 74.0f );
+    if ( ImGui::InputInt( "##threads", &s_threads, 1, 4 ) )
+    {
+        if ( s_threads < 1 )  s_threads = 1;
+        if ( s_threads > 64 ) s_threads = 64;
+    }
+    ImGui::SameLine();
+    ImGui::TextUnformatted( "Quality" );
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth( 92.0f );
+    ImGui::Combo( "##quality", &s_quality, kQuality, IM_ARRAYSIZE( kQuality ) );
+    ImGui::SameLine();
+    ImGui::Checkbox( "No relight (-NoRelight)", &s_noRelight );
+    ImGui::EndDisabled();
+    ImGui::PopID();
+
+    ImGui::BeginDisabled( !s_buildBsp );
+    ImGui::Checkbox( "Save map before BSP", &s_saveFirst );
+    ImGui::EndDisabled();
+    ImGui::EndDisabled();
+}
+
+void StartSelectedBuild( const launchPaths_t &p )
+{
+    BeginBuildStatus( p );
+    s_chain = LCHAIN_OFF;
+
+    LogLine( "" );
+    LogLine( "================ BUILD ================" );
+
+    if ( s_buildBsp )
+    {
+        if ( StartBsp( p ) )
+            s_chain = s_buildLight ? LCHAIN_LIGHT_AFTER_BSP : LCHAIN_FINAL_STAGE;
+        else
+            FinishBuildFailure( LSTAGE_BSP, 0, false,
+                                "The BSP stage could not be started." );
+        return;
+    }
+
+    if ( StartLight( p ) )
+        s_chain = LCHAIN_FINAL_STAGE;
+    else
+        FinishBuildFailure( LSTAGE_LIGHT, 0, false,
+                            "The LIGHT stage could not be started." );
+}
+
+void DrawCancelPopup()
+{
+    if ( s_cancelRequest )
+    {
+        ImGui::OpenPopup( "Cancel build?" );
+        s_cancelRequest = false;
+    }
+    if ( !ImGui::BeginPopupModal( "Cancel build?", nullptr,
+                                  ImGuiWindowFlags_AlwaysAutoResize ) )
+        return;
+
+    ImGui::TextUnformatted( "Terminate the running compiler?" );
+    ImGui::Separator();
+    ImGui::TextWrapped(
+        "A terminated BSP may leave a partial .d3dbsp. LIGHT rewrites the same file in "
+        "place, so cancelling it can leave the output half-lit; rebuild BSP before using it." );
+    ImGui::Separator();
+    if ( ImGui::Button( "Cancel build", ImVec2( 120.0f, 0.0f ) ) )
+    {
+        if ( s_proc )
+        {
+            LogLine( "" );
+            LogLine( "---- cancel requested: TerminateProcess on %s (pid %lu) ----",
+                     StageName( s_stage ), s_pid );
+            if ( ::TerminateProcess( s_proc, 1 ) )
+            {
+                s_cancelled = true;                 // the poll records the exit next frame
+                s_chain = LCHAIN_OFF;               // never start another stage after cancel
+            }
+            else
+                LogLine( "ERROR: TerminateProcess failed (GetLastError %lu)",
+                         ::GetLastError() );
+        }
+        ImGui::CloseCurrentPopup();
+    }
+    ImGui::SameLine();
+    if ( ImGui::Button( "Keep building", ImVec2( 120.0f, 0.0f ) ) )
+        ImGui::CloseCurrentPopup();
+    ImGui::EndPopup();
+}
+
+void DrawLog()
+{
+    if ( ImGui::Button( "Copy log" ) )
+        ImGui::SetClipboardText( s_log.c_str() );
+    ImGui::SameLine();
+    if ( ImGui::Button( "Clear" ) )
+    {
+        s_log.clear();
+        s_logScrollPending = false;
+    }
+    ImGui::SameLine();
+    ImGui::TextDisabled( "%d KB", (int)( s_log.size() / 1024u ) );
+
+    if ( ImGui::BeginChild( "##buildlog", ImVec2( 0.0f, 0.0f ), ImGuiChildFlags_Borders,
+                            ImGuiWindowFlags_HorizontalScrollbar ) )
+    {
+        const bool followTail = s_logScrollPending &&
+                                ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 4.0f;
+
+        std::vector<size_t> lineStarts;
+        if ( !s_log.empty() )
+        {
+            lineStarts.push_back( 0 );
+            for ( size_t i = 0; i + 1 < s_log.size(); ++i )
+                if ( s_log[i] == '\n' )
+                    lineStarts.push_back( i + 1 );
+        }
+
+        // The app uses ImGui's embedded Proggy font as Fonts[0], so selecting it explicitly
+        // keeps compiler columns monospaced even if a future panel temporarily changes fonts.
+        ImFont *mono = ImGui::GetIO().Fonts->Fonts.Size > 0
+                     ? ImGui::GetIO().Fonts->Fonts[0] : nullptr;
+        if ( mono )
+            ImGui::PushFont( mono, 0.0f );
+        ImGui::PushStyleVar( ImGuiStyleVar_ItemSpacing, ImVec2( 4.0f, 1.0f ) );
+
+        ImGuiListClipper clipper;
+        clipper.Begin( (int)lineStarts.size() );
+        while ( clipper.Step() )
+        {
+            for ( int line = clipper.DisplayStart; line < clipper.DisplayEnd; ++line )
+            {
+                const size_t start = lineStarts[(size_t)line];
+                size_t end = (size_t)line + 1u < lineStarts.size()
+                           ? lineStarts[(size_t)line + 1u] - 1u : s_log.size();
+                if ( end > start && s_log[end - 1] == '\r' )
+                    --end;
+
+                const char *beginText = s_log.c_str() + start;
+                const char *endText = s_log.c_str() + end;
+                if ( IsErrorText( beginText, endText ) )
+                    ImGui::PushStyleColor( ImGuiCol_Text,
+                                           ImVec4( 1.0f, 0.38f, 0.38f, 1.0f ) );
+                else if ( IsWarningText( beginText, endText ) )
+                    ImGui::PushStyleColor( ImGuiCol_Text,
+                                           ImVec4( 1.0f, 0.78f, 0.24f, 1.0f ) );
+                else
+                    ImGui::PushStyleColor( ImGuiCol_Text,
+                                           ImVec4( 0.86f, 0.87f, 0.89f, 1.0f ) );
+                ImGui::TextUnformatted( beginText, endText );
+                ImGui::PopStyleColor();
+            }
+        }
+
+        ImGui::PopStyleVar();
+        if ( mono )
+            ImGui::PopFont();
+
+        if ( followTail )
+            ImGui::SetScrollHereY( 1.0f );
+        s_logScrollPending = false;
+    }
+    ImGui::EndChild();
+}
+
 void DrawWindow()
 {
     EnsureThreadDefault();
-    ImGui::SetNextWindowSize( ImVec2( 760.0f, 620.0f ), ImGuiCond_FirstUseEver );
-    if ( !ImGui::Begin( "Build & Run", &s_open, ImGuiWindowFlags_NoDocking ) )
+    ImGui::SetNextWindowSize( ImVec2( 780.0f, 620.0f ), ImGuiCond_FirstUseEver );
+    if ( !ImGui::Begin( "Build", &s_open, ImGuiWindowFlags_NoDocking ) )
     {
         ImGui::End();
         return;
@@ -826,253 +1330,77 @@ void DrawWindow()
     launchPaths_t p;
     ResolvePaths( p );
 
-    // ── what we are about to compile ───────────────────────────────────────────────
+    DrawStatusBanner();
+
     if ( !p.haveRoot )
         ImGui::TextColored( ImVec4( 1.0f, 0.4f, 0.4f, 1.0f ),
-                            "fs_basepath is empty -- the game root could not be resolved." );
-    else
-        ImGui::Text( "root:   %s", p.root );
+                            "fs_basepath is empty -- the build root could not be resolved." );
 
     if ( !p.haveMap )
         ImGui::TextColored( ImVec4( 1.0f, 0.75f, 0.25f, 1.0f ),
-                            "map:    (untitled) -- save the map first (File > Save As)." );
+                            "Map is untitled -- save it first (File > Save As)." );
     else
     {
-        ImGui::Text( "map:    %s", p.mapPath );
-        ImGui::Text( "target: %s", p.targetRel );
-        HelpMarker( "Both compilers derive their base path by walking the map argument back "
-                    "for a folder named 'maps' and require two folders below it, and the MP "
-                    "game reads maps/mp/<name>.d3dbsp off the search path. raw\\maps\\mp is "
-                    "the only directory that satisfies both, so every build targets it." );
+        ImGui::Text( "Map: %s", p.mapPath );
+        ImGui::TextDisabled( "Output: %s", p.bspAbs );
         if ( p.useLoadFrom )
         {
-            ImGui::TextDisabled( "        (compiled with -loadFrom: the saved .map is read "
-                                 "in place, output lands on the target)" );
+            ImGui::SameLine();
+            ImGui::TextDisabled( "(-loadFrom)" );
+            HelpMarker( "cod4map reads the saved map through -loadFrom while writing the "
+                        "compiled output under raw\\maps\\mp. The flag is omitted only when "
+                        "the saved map already is that exact target path." );
         }
     }
+
+    KiwiMatConvert_DrawMapHealth();
 
     const bool canBuild = p.haveRoot && p.haveMap;
     const bool busy     = Busy();
 
     ImGui::Separator();
-    ImGui::Checkbox( "Save the map before building", &s_saveFirst );
+    DrawStageRows( busy );
 
-    // ── BSP ────────────────────────────────────────────────────────────────────────
-    ImGui::Separator();
-    ImGui::TextUnformatted( "BSP  (KIWI-cod4map.exe)" );
-    ImGui::Checkbox( "verbose (-v)", &s_verbose );
-    ImGui::SameLine();
-    ImGui::Checkbox( "entities only (-onlyEnts)", &s_onlyEnts );
-    ImGui::SameLine();
-    ImGui::Checkbox( "leak test (-leakTest)", &s_leakTest );
-    HelpMarker( "-onlyEnts recompiles the entity lump only and leaves geometry and lighting "
-                "alone. -leakTest quits as soon as the map is found to leak." );
-    ImGui::SetNextItemWidth( 420.0f );
-    ImGui::InputText( "extra cod4map args", s_bspExtra, sizeof( s_bspExtra ) );
+    char bspExe[MAX_PATH], lightExe[MAX_PATH];
+    ToolPath( p, "KIWI-cod4map.exe", bspExe, sizeof( bspExe ) );
+    ToolPath( p, "KIWI-cod4rad.exe", lightExe, sizeof( lightExe ) );
+    const bool haveBspExe = FileExists( bspExe );
+    const bool haveLightExe = FileExists( lightExe );
+    const char *blockedReason = nullptr;
+    if ( !canBuild )
+        blockedReason = "A saved map and fs_basepath are required.";
+    else if ( !s_buildBsp && !s_buildLight )
+        blockedReason = "Select at least one build stage.";
+    else if ( s_buildBsp && !haveBspExe )
+        blockedReason = "KIWI-cod4map.exe was not found beside Radiant.";
+    else if ( s_buildLight && !haveLightExe )
+        blockedReason = "KIWI-cod4rad.exe was not found beside Radiant.";
+    else if ( !s_buildBsp && s_buildLight && !FileExists( p.bspAbs ) )
+        blockedReason = "LIGHT needs an existing .d3dbsp; enable BSP first.";
 
-    {
-        char exe[MAX_PATH];
-        ToolPath( p, "KIWI-cod4map.exe", exe, sizeof( exe ) );
-        const bool haveExe = FileExists( exe );
-        ImGui::BeginDisabled( busy || !canBuild || !haveExe );
-        if ( ImGui::Button( "Build BSP", ImVec2( 140.0f, 0.0f ) ) )
-        {
-            s_chain = LCHAIN_OFF;
-            StartBsp( p );
-        }
-        ImGui::EndDisabled();
-        if ( !haveExe )
-        {
-            ImGui::SameLine();
-            ImGui::TextColored( ImVec4( 1.0f, 0.4f, 0.4f, 1.0f ), "KIWI-cod4map.exe not found" );
-        }
-        else if ( !canBuild )
-        {
-            ImGui::SameLine();
-            ImGui::TextDisabled( "save the map first" );
-        }
-    }
-
-    // ── LIGHT ──────────────────────────────────────────────────────────────────────
-    ImGui::Separator();
-    ImGui::TextUnformatted( "Lighting  (KIWI-cod4rad.exe)" );
-    ImGui::SetNextItemWidth( 120.0f );
-    if ( ImGui::InputInt( "threads (-Threads)", &s_threads ) )
-    {
-        if ( s_threads < 1 )  s_threads = 1;
-        if ( s_threads > 64 ) s_threads = 64;
-    }
-    HelpMarker( "Without -Threads the tool clamps itself to at most 4 threads regardless of "
-                "the machine (cmdline.c ParseCommandLine_Init). The default here is the "
-                "processor count GetSystemInfo reports." );
-    ImGui::RadioButton( "Fast (-Fast)", &s_quality, 0 );
-    ImGui::SameLine();
-    ImGui::RadioButton( "Normal", &s_quality, 1 );
-    ImGui::SameLine();
-    ImGui::RadioButton( "Extra (-Extra)", &s_quality, 2 );
-    ImGui::Checkbox( "no relight cache (-NoRelight)", &s_noRelight );
-    HelpMarker( "cod4rad opens its relight cache as the bare relative name 'radtrans.bin' "
-                "(compile.c), so it lands in the working directory -- the game root -- and "
-                "is shared by every map compiled from here. Leave this on unless you are "
-                "re-lighting the SAME map repeatedly and want the cache." );
-    ImGui::SetNextItemWidth( 420.0f );
-    ImGui::InputText( "extra cod4rad args", s_radExtra, sizeof( s_radExtra ) );
-
-    {
-        char exe[MAX_PATH];
-        ToolPath( p, "KIWI-cod4rad.exe", exe, sizeof( exe ) );
-        const bool haveExe = FileExists( exe );
-        ImGui::BeginDisabled( busy || !canBuild || !haveExe );
-        if ( ImGui::Button( "Build Light", ImVec2( 140.0f, 0.0f ) ) )
-        {
-            s_chain = LCHAIN_OFF;
-            StartLight( p );
-        }
-        ImGui::EndDisabled();
-        if ( !haveExe )
-        {
-            ImGui::SameLine();
-            ImGui::TextColored( ImVec4( 1.0f, 0.4f, 0.4f, 1.0f ), "KIWI-cod4rad.exe not found" );
-        }
-        else if ( canBuild && !FileExists( p.bspAbs ) )
-        {
-            ImGui::SameLine();
-            ImGui::TextDisabled( "no .d3dbsp yet -- build the BSP first" );
-        }
-    }
-
-    // ── RUN ────────────────────────────────────────────────────────────────────────
-    ImGui::Separator();
-    ImGui::TextUnformatted( "Run  (KIWI-mp.exe)" );
-    ImGui::Checkbox( "developer 1", &s_developer );
-    ImGui::SameLine();
-    ImGui::Checkbox( "sv_cheats 1", &s_cheats );
-    HelpMarker( "SV_Map_f sets sv_cheats itself from the command name -- devmap turns it on, "
-                "map turns it off -- so this only survives as a pre-spawn value." );
-    // The bool-taking RadioButton overload, NOT the (int*, int) one: s_devmap is a `bool`
-    // and handing its address to the int* form would write four bytes into a one-byte
-    // object and stamp on whatever the linker put next to it.
-    if ( ImGui::RadioButton( "+devmap", s_devmap ) )
-        s_devmap = true;
-    ImGui::SameLine();
-    if ( ImGui::RadioButton( "+map", !s_devmap ) )
-        s_devmap = false;
-
-    {
-        char exe[MAX_PATH];
-        ToolPath( p, "KIWI-mp.exe", exe, sizeof( exe ) );
-        const bool haveExe = FileExists( exe );
-        ImGui::BeginDisabled( !canBuild || !haveExe );
-        if ( ImGui::Button( "Run Map", ImVec2( 140.0f, 0.0f ) ) )
-            StartGame( p );
-        ImGui::EndDisabled();
-        if ( !haveExe )
-        {
-            ImGui::SameLine();
-            ImGui::TextColored( ImVec4( 1.0f, 0.4f, 0.4f, 1.0f ), "KIWI-mp.exe not found" );
-        }
-        ImGui::SameLine();
-        ImGui::TextDisabled( "(+map / +devmap need a player profile -- see players\\)" );
-    }
-
-    // ── THE CHAIN ──────────────────────────────────────────────────────────────────
-    ImGui::Separator();
-    {
-        ImGui::BeginDisabled( busy || !canBuild );
-        if ( ImGui::Button( "Build & Run", ImVec2( 140.0f, 0.0f ) ) )
-        {
-            if ( StartBsp( p ) )
-                s_chain = LCHAIN_AFTER_BSP;
-            else
-                s_chain = LCHAIN_OFF;
-        }
-        ImGui::EndDisabled();
-        ImGui::SameLine();
-        ImGui::Checkbox( "skip lighting", &s_skipLight );
-        HelpMarker( "BSP, then lighting, then the game. Each stage starts only when the "
-                    "previous one exits 0." );
-    }
-
-    // ── STATUS + KILL ──────────────────────────────────────────────────────────────
-    ImGui::Separator();
     if ( busy )
     {
-        ImGui::TextColored( ImVec4( 0.4f, 0.85f, 1.0f, 1.0f ),
-                            "running: %s (pid %lu)%s", StageName( s_stage ), s_pid,
-                            s_chain != LCHAIN_OFF ? "  [Build & Run]" : "" );
-        ImGui::SameLine();
-        if ( ImGui::Button( "Kill" ) )
-            s_killRequest = true;
-    }
-    else if ( s_haveLastExit )
-    {
-        const ImVec4 col = s_lastExit == 0 ? ImVec4( 0.45f, 0.9f, 0.45f, 1.0f )
-                                           : ImVec4( 1.0f, 0.45f, 0.45f, 1.0f );
-        ImGui::TextColored( col, "%s finished with exit code %lu",
-                            StageName( s_lastStage ), s_lastExit );
+        ImGui::PushStyleColor( ImGuiCol_Button, ImVec4( 0.55f, 0.12f, 0.13f, 1.0f ) );
+        ImGui::PushStyleColor( ImGuiCol_ButtonHovered, ImVec4( 0.72f, 0.18f, 0.20f, 1.0f ) );
+        if ( ImGui::Button( "Cancel", ImVec2( -1.0f, 36.0f ) ) )
+            s_cancelRequest = true;
+        ImGui::PopStyleColor( 2 );
     }
     else
-        ImGui::TextDisabled( "idle" );
-
-    if ( s_killRequest )
     {
-        ImGui::OpenPopup( "Kill the running build?" );
-        s_killRequest = false;
-    }
-    if ( ImGui::BeginPopupModal( "Kill the running build?", nullptr,
-                                 ImGuiWindowFlags_AlwaysAutoResize ) )
-    {
-        ImGui::TextUnformatted( "Terminate the running compiler?" );
-        ImGui::Separator();
-        ImGui::TextWrapped(
-            "A killed cod4map leaves whatever it had written of the .d3dbsp; a killed "
-            "cod4rad is worse -- it reads and REWRITES the same .d3dbsp in place, so the "
-            "map on disk is left HALF LIT and has to be rebuilt from the BSP stage." );
-        ImGui::Separator();
-        if ( ImGui::Button( "Terminate", ImVec2( 120.0f, 0.0f ) ) )
-        {
-            if ( s_proc )
-            {
-                LogLine( "" );
-                LogLine( "---- kill requested: TerminateProcess on %s (pid %lu) ----",
-                         StageName( s_stage ), s_pid );
-                ::TerminateProcess( s_proc, 1 );      // the poll sees the exit next frame
-            }
-            s_chain = LCHAIN_OFF;                     // never chain past a kill
-            ImGui::CloseCurrentPopup();
-        }
-        ImGui::SameLine();
-        if ( ImGui::Button( "Keep building", ImVec2( 120.0f, 0.0f ) ) )
-            ImGui::CloseCurrentPopup();
-        ImGui::EndPopup();
+        ImGui::BeginDisabled( blockedReason != nullptr );
+        if ( ImGui::Button( "Build", ImVec2( -1.0f, 36.0f ) ) )
+            StartSelectedBuild( p );
+        ImGui::EndDisabled();
     }
 
-    // ── LOG ────────────────────────────────────────────────────────────────────────
+    if ( !busy && blockedReason )
+        ImGui::TextColored( ImVec4( 1.0f, 0.62f, 0.30f, 1.0f ), "%s", blockedReason );
+
+    DrawCancelPopup();
+
     ImGui::Separator();
-    if ( ImGui::Button( "Copy" ) )
-        ImGui::SetClipboardText( s_log.c_str() );
-    ImGui::SameLine();
-    if ( ImGui::Button( "Clear" ) )
-    {
-        s_log.clear();
-        s_haveLastExit = false;
-    }
-    ImGui::SameLine();
-    ImGui::TextDisabled( "%d KB", (int)( s_log.size() / 1024 ) );
-
-    ImGui::BeginChild( "##buildlog", ImVec2( 0.0f, 0.0f ), ImGuiChildFlags_Borders,
-                       ImGuiWindowFlags_HorizontalScrollbar );
-    ImGui::PushStyleVar( ImGuiStyleVar_ItemSpacing, ImVec2( 4.0f, 1.0f ) );
-    // TextUnformatted has a built-in clipper for long text inside a scroll region — the
-    // same shape the console tab uses (imgui_shell.cpp ImGuiShell_DrawConsoleTab).
-    ImGui::TextUnformatted( s_log.c_str(), s_log.c_str() + s_log.size() );
-    ImGui::PopStyleVar();
-    // Follow the tail only while the view IS at the tail: the moment the user scrolls up to
-    // read an error, new output must not yank them back down.
-    if ( s_logScrollPending && ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 4.0f )
-        ImGui::SetScrollHereY( 1.0f );
-    s_logScrollPending = false;
-    ImGui::EndChild();
+    DrawLog();
 
     ImGui::End();
 }
@@ -1084,87 +1412,19 @@ void DrawWindow()
 // ═════════════════════════════════════════════════════════════════════════════════════
 void KiwiLaunch_RegisterCommands()
 {
-    // ── KIWI-UX (ROUND BH, ITEM 5): F9 — AND IT IS THE COMPILED-IN DEFAULT ──────
-    // USER DIRECTIVE, verbatim: *"Also bind it to like F9 if it's not taken,
-    // otherwise something like shift-F9."*
-    //
-    // F9 (vk 0x78) IS FREE, and this is the full audit rather than a spot check.
-    // Every row of the stock table (mainfrm.cpp:1082-1270) carrying an F-key:
-    //     0x70 F1  mods 2  GetDistance 33178          (mainfrm.cpp:1241)
-    //     0x71 F2  mods 2  AutoEdgeTurn 33179         (:1242)
-    //     0x73 F4  mods 0  ToggleLayeredMaterialWnd   (:1268)
-    //     0x74 F5  mods 0  RefreshTextures 33204      (:1265)
-    //     0x75 F6  mods 0  SetViewToEntity 33210      (:1179)
-    //     0x77 F8  mods 0/1/2/3/4/5/6  the seven LightPreview* rows (:1257-1263)
-    // 0x78 appears NOWHERE — the only 0x78 in mainfrm.cpp is the key-NAME table
-    // row `{ "F9", 0x78 }` at :1436, which is the radiant.ini parser's spelling
-    // table, not a binding.  The MODERN profile's 81 Bind rows (kiwi_keymap.cpp
-    // ApplyModern) contain no 0x78 either, and no KIWI command or alias row claims
-    // it: every Radiant_RegisterCommand / Radiant_RegisterCommandAlias call in the
-    // tree registers UNBOUND except this one.  res/radiant.rc's IDR_MAIN_ACCEL
-    // carries no F-key, so TranslateAccelerator — which runs BEFORE the hotkey
-    // table — cannot swallow it.  So NO Shift+F9 fallback is needed.
-    //
-    // BOUND AT REGISTRATION, not in kiwi_keymap.cpp's modern profile, and that is
-    // deliberate: registering with a (vk, mods) makes this row's COMPILED-IN
-    // DEFAULT F9 (Radiant_RegisterCommand copies it into
-    // g_radiantCommandsKiwiDefault, mainfrm.cpp:1369), which is what
-    // Radiant_ResetCommandBindings restores — so F9 is live in the CLASSIC profile
-    // too.  A build key is profile-neutral: it is not a modelling verb competing
-    // for a prime letter, and a mapper who prefers the stock bindings still wants
-    // one key to compile.  radiant.ini's [Commands] section still overrides it,
-    // exactly as it overrides any other row.
+    // Keep the established command name and id so existing radiant.ini bindings continue
+    // to resolve. F9 remains the compiled-in default in both keymap profiles.
     Radiant_RegisterCommand( "KiwiBuildAndRun", 0x78, 0, KIWI_CMD_BUILD_RUN );
 }
 
-// ── KIWI-UX (ROUND BH, ITEM 5): THE TOP-BAR BUTTON ─────────────────────────────
-// USER DIRECTIVE, verbatim: *"Build and run needs to be in the win32 toolbar
-// somewhere."*
-//
-// THERE IS NO WIN32 TOOLBAR IN THIS SHELL, and that is a fact about the port
-// rather than an omission of this round: the icon toolbar was a CToolBar and went
-// out with the MFC rip (radiant_main.cpp step 1b: *"SKIPPED — the icon toolbar
-// (mainfrm.cpp:1473, OnCreate 0x420ac6 CreateEx + LoadToolBar(152)) is a CToolBar,
-// and every TB_CHECKBUTTON seed with it"*), and res/radiant.rc:12-13 records that
-// IDR_TOOLBAR152's BITMAP and TOOLBAR resources were DELETED with it, leaving
-// res/toolbar.bmp on disk with no consumer.  Re-creating a real TOOLBARCLASSNAME
-// child is not a small change either: the frame's ENTIRE client area is the ImGui
-// dockspace surface (radiant_main.cpp hands the frame to
-// ImGuiShell_SetPrimarySurface), so a native toolbar child would have to be carved
-// out of a D3D swap-chain window and the whole layout re-inset for it.
-//
-// THE NATIVE MENU BAR IS THE WIN32 TOP-BAR CHROME THIS SHELL ACTUALLY HAS, and it
-// is already the shell's stated command source (radiant_main.cpp: *"The menu bar
-// IS the command source in this shell"*).  So Build & Run becomes a TOP-LEVEL
-// MENU-BAR ITEM WITH NO POPUP: one click on the bar sends WM_COMMAND 34130 to the
-// frame WndProc, which routes it through Radiant_ExecCommand and the 34000..34199
-// KIWI arm exactly like the "Windows" popup's items do.  That satisfies "a
-// text-capable style, no new bitmap art" in the only vocabulary available.
-//
-// APPENDED AT THE RIGHT END, which is also the only safe place: the index-based
-// menu consumers in this tree read POPUP indices (radiant_main.cpp uses index 0
-// for the File popup's MRU, kiwi_windows.cpp uses index 2 for the View popup,
-// texwnd.cpp uses index 5 for the Textures popup), and appending after the last
-// popup cannot move any of them.  Same argument kiwi_windows.h writes out for the
-// "Windows" popup, which this sits to the right of.
-//
-// THE CAPTION CARRIES NO ACCELERATOR TEXT OF ITS OWN, deliberately.  This runs
-// AFTER Radiant_ShowMenuItemKeyBindings at boot (radiant_main.cpp annotates before
-// the KIWI menu builders, so their captions stay clean), but that annotator
-// searches BY COMMAND ID through the whole menu tree — a menu-bar item included —
-// and it runs again on every keymap-profile switch
-// (Radiant_RefreshMenuKeyBindings <- kiwi_keymap.cpp Rebuild).  So it WILL find
-// this row now that the command is bound and rewrite the caption to
-// "Build & Run\tF9".  Writing "(F9)" here as well would leave the key named twice
-// after the first profile switch; leaving it out means the caption is stable and
-// the annotator's own convention is the only one in play.  "&&" is Win32's escape
-// for a literal ampersand.
+// The native menu bar is this shell's top-bar command surface. Appending preserves every
+// index-based popup consumer, and the command system owns any accelerator annotation.
 void KiwiLaunch_BuildMenu( void *frameMenu )
 {
     HMENU hMenu = (HMENU)frameMenu;
     if ( !hMenu )
         return;
-    ::AppendMenuA( hMenu, MF_STRING, (UINT_PTR)KIWI_CMD_BUILD_RUN, "&Build && Run" );
+    ::AppendMenuA( hMenu, MF_STRING, (UINT_PTR)KIWI_CMD_BUILD_RUN, "&Build" );
     ::DrawMenuBar( g_qeglobals.d_hwndMain );
 }
 

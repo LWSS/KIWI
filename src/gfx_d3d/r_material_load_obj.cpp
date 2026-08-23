@@ -4434,6 +4434,20 @@ MaterialTechniqueSet *__cdecl Material_LoadTechniqueSet(char *name, GfxRenderer 
         }
         Com_EndParseSession();
         FS_FreeFile((char*)file);
+#ifdef KISAK_RADIANT
+        // KIWI-UX: an editor XModel techset can expose FAKELIGHT_NORMAL (24) without
+        // SUNLIGHT_PREVIEW (26).  Give that missing receiver a stencil-aware N.L fallback
+        // made entirely from the already-shipped fakelight/vertcol shader binaries.  Native
+        // slot-26 techniques are never replaced, and game builds never see this injection.
+        if ( techniqueSet && !techniqueSet->techniques[26]
+          && techniqueSet->techniques[24] )
+        {
+            MaterialTechnique *sunFallback = Material_RegisterTechnique(
+                (char *)"kiwi_sun_fakelight", renderer );
+            if ( sunFallback )
+                techniqueSet->techniques[26] = sunFallback;
+        }
+#endif
         return techniqueSet;
     }
     else

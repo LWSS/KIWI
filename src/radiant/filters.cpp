@@ -7,6 +7,7 @@
 
 #include "stdafx.h"
 #include "qe3.h"
+#include "kiwi_matconvert.h"     // KIWI-UX: non-lit surfaces remain visible in Shift+L
 #include <universal/q_parse.h>   // Com_Parse / Com_ParseOnLine — the filter file grammar
 #include <map>                    // faceTexMap (IDB std::map<std::string,int>)
 #include <string>
@@ -645,6 +646,7 @@ static int FilterBrush_ApplyFilterList(filter_entry_s *list, brush_t *def)
 // ─────────────────────────────────────────────────────────────────────────────
 static bool FilterBrush_CheckLayerFaces(brush_t *def)
 {
+    if ( KiwiMatConvert_ShouldShowBrushInLightmap( def ) ) return true; // KIWI-UX: techset health gates the checker visibility
     // IDA 0x46A190
     // a1@<ebx> = (int)def (raw brush_t pointer passed in ebx register)
     // *(DWORD*)(a1+64) = def->faceCount   (offset 0x40)

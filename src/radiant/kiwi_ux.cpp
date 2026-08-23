@@ -9,6 +9,7 @@
 #include "stdafx.h"
 #include "kiwi_ux.h"
 #include "kiwi_camera.h"
+#include "kiwi_fmt.h"
 #include "kiwi_gizmo.h"
 #include "kiwi_grid.h"            // ROUND AJ, ITEM 5 — the grid-snap master switch
 #include "kiwi_hints.h"
@@ -192,7 +193,7 @@ void KiwiUX_DrawSettings()
     // §17 units layer.  Both fields are DISPLAY values; nothing here touches map data.
     float spacing = KiwiUnits_GridSpacingInches();
     ImGui::SetNextItemWidth( 110.0f );
-    if ( ImGui::InputFloat( "Grid spacing (in)", &spacing, 0.0f, 0.0f, "%.4g",
+    if ( ImGui::InputFloat( "Grid spacing (in)", &spacing, 0.0f, 0.0f, KIWI_FMT_FLOAT,
                             ImGuiInputTextFlags_EnterReturnsTrue ) )
     {
         KiwiUnits_SetGridSpacingInches( spacing );
@@ -205,7 +206,7 @@ void KiwiUX_DrawSettings()
 
     float perInch = KiwiUnits_PerInch();
     ImGui::SetNextItemWidth( 110.0f );
-    if ( ImGui::InputFloat( "Units per inch", &perInch, 0.0f, 0.0f, "%.4g",
+    if ( ImGui::InputFloat( "Units per inch", &perInch, 0.0f, 0.0f, KIWI_FMT_FLOAT,
                             ImGuiInputTextFlags_EnterReturnsTrue ) )
     {
         KiwiUnits_SetPerInch( perInch );

@@ -57,6 +57,7 @@ namespace
         // texture browser, which is where the directive puts it, and KW_VERSION
         // is bumped below so existing profiles get it once.
         { "Entities",         "Entities","&Entity Browser",         KIWI_CMD_WINDOW_ENTITIES,1 },
+        { "Models",           "Models",  "&Model Browser",          KIWI_CMD_WINDOW_MODELS,  1 },
         // ROUND AZ: the Sky tab.  Third tab of the same node, same reasoning as the
         // Entities row above it, and KW_VERSION goes to 7 with it.
         { "Sky",              "Sky",     "S&ky Browser",            KIWI_CMD_WINDOW_SKY,     1 },
@@ -66,6 +67,8 @@ namespace
         // The Sun tab.  Fifth tab of the same node, same reasoning as the four rows
         // above it, and KIWI_LAYOUT_VERSION goes to 12 with it.
         { "Sun",              "Sun",     "S&un Helper",             KIWI_CMD_WINDOW_SUN,     1 },
+        { "Light",            "Light",   "&Light Helper",           KIWI_CMD_WINDOW_LIGHT,   1 },
+        { "Inspector",        "Inspector", "&Inspector",             KIWI_CMD_WINDOW_INSPECTOR, 1 },
     };
 
     // KIWI-UX (shakeout I): the defaults above only bite on a FRESH profile, and an
@@ -107,6 +110,9 @@ namespace
                                           //     (kiwi_dock12).  Reported as "I can't see
                                           //     it" against a long-lived layout, which is
                                           //     precisely what this reseed exists for.
+                                          // 13 = the LIGHT helper joins that node.
+                                          // 14 = the Inspector joins that helper node.
+                                          // 15 = the Models browser joins Textures/Entities.
 
     bool s_open[KIWI_WIN_COUNT];        // the LIVE flag (ImGui's p_open target)
     bool s_last[KIWI_WIN_COUNT];        // what we last persisted — the ✕-box detector
@@ -314,6 +320,7 @@ void KiwiWindows_RegisterCommands()
     Radiant_RegisterCommand( "KiwiWindowConsole", 0, 0, KIWI_CMD_WINDOW_CONSOLE );
     Radiant_RegisterCommand( "KiwiWindowShell",   0, 0, KIWI_CMD_WINDOW_SHELL );
     Radiant_RegisterCommand( "KiwiWindowOutliner",0, 0, KIWI_CMD_WINDOW_OUTLINER );  // ROUND W
+    Radiant_RegisterCommand( "KiwiWindowInspector", 0, 0, KIWI_CMD_WINDOW_INSPECTOR );
     // ROUND AU: the entity browser's own row is registered by kiwi_entbrowser.cpp
     // (KiwiEntBrowser_RegisterCommands), beside the file that owns the window —
     // the same split the Outliner's group verbs use.  The TOGGLE still dispatches

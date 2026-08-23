@@ -1532,6 +1532,15 @@ namespace
             // gives a patch that is created, selectable and NEVER DRAWN.
             KiwiMtl_RealizePatch( p );
 
+            // ...and a COPIED channel can be empty as easily as it can be
+            // unrealized: the probe's own channels come from Brush_Create, but
+            // `haveMtl` false leaves both slots at MakeNewPatch's defaults and a
+            // damaged source leaves them at the source's damage.  A patch with a
+            // dead lightmap channel is invisible in Shift+L and compiles unlit
+            // (kiwi_material.h "the three channels").  No-op when the copy was
+            // sound, which is the normal case.
+            KiwiMtl_EnsurePatchChannels( p );      // kiwi_material.h:250
+
             Patch_KiwiFinishNew( p );
 
             // KIWI-UX (CLEANUP, B-20): deselect before landing — the rule and its

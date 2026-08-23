@@ -11,6 +11,7 @@
 #include <cstring>
 #include <ctime>
 #include "kiwi_shadowcache.h"   // KiwiShadowCache_Invalidate
+#include "kiwi_lightcache.h"    // KiwiLightCache_MapModified
 
 // ────────────────────────────────────────────────────────────────────────────
 // Forward declarations from engine / other radiant TUs
@@ -197,6 +198,7 @@ void MarkMapModified( void )
     // The editor's "geometry changed" funnel: the recorded caster walk stores composed
     // orientations, so it goes stale here.
     KiwiShadowCache_Invalidate();
+    KiwiLightCache_MapModified(); // KIWI-UX: Preserve unrelated per-light lists after a light-only epair edit.
     if ( modified != 1 )
     {
         modified = 1;

@@ -27,6 +27,10 @@
 #include "kiwi_instcache.h"     // KiwiInstCache_Shutdown
 #include "kiwi_shadowcache.h"   // KiwiShadowCache_Shutdown
 #include "kiwi_walkcache.h"     // KiwiWalkCache_Shutdown
+// a face/patch whose lightmap or smoothing channel is dead is invisible in the
+// Shift+L render method and compiles unlit; load repairs it, save never writes it.
+#include "kiwi_material.h"      // KiwiMtl_HealMapLayersOnLoad / KiwiMtl_HealMapLayers
+#include "kiwi_matconvert.h"    // KIWI-UX: reset/load-time loaded-techset health scan
 // the 1-2 minute synchronous load, made measurable.
 #include <universal/profile.h>
 #include <universal/com_memory.h>   // Hunk_Used (com_memory.h:93) — the hunk high-water plot
@@ -308,6 +312,9 @@ void Map_NewMap()
     {
         extern void KiwiCon_ResetForNewMap();  // kiwi_construct.cpp
         KiwiCon_ResetForNewMap();
+        extern void KiwiOutliner_ResetForNewMap(); // kiwi_outliner.h
+        KiwiOutliner_ResetForNewMap();              // KIWI-UX: drop old document row state
+        extern void KiwiModelBrowser_ResetForNewMap(); KiwiModelBrowser_ResetForNewMap(); // KIWI-UX
         // KIWI-UX (ROUND BP, ITEM 1/3): the SECTION goes with the document too.  It
         // is view state, but it is view state that CLAMPS PICKING, and a level
         // latched in one map means nothing in the next — the round-BP autopsy's
@@ -320,6 +327,7 @@ void Map_NewMap()
         // argument as the section above.
         extern void KiwiSun_ResetForNewMap();  // kiwi_sun.h
         KiwiSun_ResetForNewMap();
+        KiwiMatConvert_ResetMapHealth(); // KIWI-UX: health rows belong to the document being torn down
     }
 }
 
@@ -705,14 +713,20 @@ void Map_LoadFromFile( const char *path )
         extern void KiwiVis_SidecarLoadApply();                   // kiwi_visibility.h:261
         KiwiVis_SidecarLoadApply();
 
-        // KIWI-UX (ROUND BL, ITEM 1): *"When loading a map, load with all the groups
-        // in the outliner collapsed."*  Armed here rather than done here: it is a
-        // one-shot the panel consumes on its next draw (it may not even be open),
-        // and it must run after the sidecar load above because the CURVE groups it
-        // closes are minted by that load.  Nothing in the map or the store is
-        // touched — this is panel state only.
-        extern void KiwiOutliner_CollapseAllOnNextDraw();         // kiwi_outliner.h:147
-        KiwiOutliner_CollapseAllOnNextDraw();
+        // KIWI-UX — HEAL DEAD MATERIAL LAYERS.  A face or patch whose LIGHTMAP (or
+        // smoothing) channel is missing, unnamed or zero-scaled is invisible in the
+        // Shift+L render method AND compiles with no lightmap at all — no baked
+        // light, no baked sun shadow.  Fixing the creation paths cannot heal a map
+        // that already carries such surfaces, so every load sweeps for them,
+        // reinitialises them to exactly what Brush_Create / MakeNewPatch produce, and
+        // marks the map modified so a re-save persists the repair.  The full rule and
+        // the compiler consequence are on the declaration.
+        //
+        // HERE, at the tail, for the same reason the sidecar block above gives: the
+        // sweep walks the per-entity DEF lists, which only exist once the load has
+        // finished building them.  Silent (and free) on an undamaged map.
+        KiwiMtl_HealMapLayersOnLoad();                            // kiwi_material.h:269
+        KiwiMatConvert_OnMapLoaded(); // KIWI-UX: diagnose loaded world-face/patch techsets after the map is fully live
     }
 
     // close the progress bracket opened at the head — this settles
@@ -778,6 +792,31 @@ void Map_SaveFile( const char *path, char a1, char a2 )
     {
         if ( savedPathHeap ) free( savedPathHeap );
         return;
+    }
+
+    // KIWI-UX — NEVER SERIALISE A DEAD MATERIAL LAYER.  Brush_Write emits each of a
+    // face's three channels as `<name> <sizeS> <sizeT> ...` straight out of the
+    // MaterialDef (brush.cpp:4276-4297) and Patch_Write emits the patch's three
+    // material NAMES the same way (pmesh.cpp:1136-1142); neither validates, so a
+    // channel that is unnamed or zero-scaled in memory is written that way and the
+    // damage becomes part of the file — where the map compiler then silently drops
+    // the surface from lightmapping.  Repairing HERE, before the first byte, means
+    // the writers stay exactly as the binary has them and the file is always valid.
+    // Same sweep as the load path, so a save of an already-healed map is a no-op.
+    //
+    // SAFE MID-SESSION, which is the round-AA hazard this position has to answer:
+    // the repair's SetMaterial reaches Texture_GetHandle (texwnd.cpp:314), which
+    // REGISTERS an unknown name into the browser's list.  The only names it can
+    // pass are the four the editor already registered at boot ($default,
+    // lightmap_gray, smoothing_hard, smoothing_smooth — mainfrm.cpp:746-748 /
+    // pmesh.cpp:145-147), and Texture_GetHandle returns the existing wrapper for a
+    // name already in the list rather than adding one.  So the browser is not
+    // touched; only `is_in_use` is set, exactly as an ordinary load would.
+    {
+        int healedBrushes = 0, healedPatches = 0;
+        if ( KiwiMtl_HealMapLayers( &healedBrushes, &healedPatches ) )   // kiwi_material.h:265
+            Sys_Printf( "Material layers: repaired %i brush(es) and %i patch(es) before "
+                        "writing.\n", healedBrushes, healedPatches );
     }
 
     FILE *fout = Map_SaveFileToPerforce( path, (char)(a2 == 0) );

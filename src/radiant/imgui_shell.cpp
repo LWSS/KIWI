@@ -13,9 +13,11 @@
 #include "kiwi_windows.h"          // KIWI-UX §9 (shakeout B): per-window visibility flags
 #include "kiwi_outliner.h"         // KIWI-UX ROUND W: the scene list dock window
 #include "kiwi_entbrowser.h"       // KIWI-UX ROUND AU: the entity browser + camera drop target
+#include "kiwi_modelbrowser.h"     // KIWI-UX: the Models tab + camera drop target
 #include "kiwi_skybox.h"           // KIWI-UX ROUND AZ: the Sky tab (third tab of that node)
 #include "kiwi_uveditor.h"         // KIWI-UX ROUND BD: the UV editor (fourth tab of it)
 #include "kiwi_sun.h"              // KIWI-UX: the Sun helper tab (fifth tab of that node)
+#include "kiwi_light.h"            // KIWI-UX: the Light helper tab (sixth tab of that node)
 #include "kiwi_cmdoptions.h"       // KIWI-UX ROUND AI, ITEM 3: the in-command options panel
 #include "kiwi_import.h"           // KIWI-UX ROUND BE: the texture-import wizard (modal popup)
 #include "kiwi_launch.h"           // KIWI-UX ROUND BF: the Build & Run dialog + its child poll
@@ -871,7 +873,7 @@ static void ImGuiShell_DrawViewportImage( rttViewport_t id, kiwiWindow_t win )
         if ( id == RTT_TEXTURE )
         {
             extern LRESULT Texture_ShowAll();     // texwnd.cpp (0x45b730), as radiant_main.cpp:77
-            extern LRESULT Texture_ShowInuse();   // texwnd.cpp (0x45B850), as map.cpp:163
+            extern LRESULT Texture_ShowInuse();   // texwnd.cpp (0x45B850), as map.cpp:166
             ImGui::AlignTextToFramePadding();
             ImGui::TextUnformatted( "Show:" );
             ImGui::SameLine();
@@ -955,6 +957,7 @@ static void ImGuiShell_DrawViewportImage( rttViewport_t id, kiwiWindow_t win )
                 // dropping onto an image.  It is a no-op unless a drag is live.
                 if ( id == RTT_CAMERA )
                     KiwiEntBrowser_CameraDropTarget( s_imgMin[id].x, s_imgMin[id].y );
+                if ( id == RTT_CAMERA ) KiwiModelBrowser_CameraDropTarget( s_imgMin[id].x, s_imgMin[id].y ); // KIWI-UX
                 // ═══════════════════════════════════════════════════════════
                 //  KIWI-UX (ROUND Y, ITEM 6) — A FOCUSED TEXT FIELD WAS
                 //  SWALLOWING THE FIRST CLICK INTO THE VIEWPORT.
@@ -1294,21 +1297,12 @@ static void ImGuiShell_BuildDefaultDockLayout( ImGuiID dockId )
     ImGui::DockBuilderDockWindow( "2D View",  rightTop );      // top-right
     ImGui::DockBuilderDockWindow( "Textures", rightBottom );   // right-middle/bottom
 
-    // ── KIWI-UX (ROUND AU): the ENTITIES tab, and the INSPECTOR beside it ────
+    // ── KIWI-UX: the ENTITIES tab ───────────────────────────────────────────
     // USER DIRECTIVE, verbatim: "a new panel that's in the same viewport (tabbed)
     // with the textures tab".  Docking a second window into the SAME node id is
     // exactly what makes them tabs of one another — no extra split.
-    //
-    // "Entity inspector" is docked here TOO, and that is the other half of the N
-    // fix rather than a decoration.  It is a floating tool panel with no §9 flag,
-    // so it is not drawn until the user opens it — but DockBuilderDockWindow
-    // records where it BELONGS, so the frame it first appears it appears as a tab
-    // in this node instead of floating in the top-left corner.  A DOCKED window is
-    // also exempt from ImGuiShell_CloseOnFocusLoss (it checks DockIsActive), which
-    // is what stops the inspector from closing the instant the user clicks the
-    // brush they are inspecting.
     ImGui::DockBuilderDockWindow( "Entities",         rightBottom );
-    ImGui::DockBuilderDockWindow( "Entity inspector", rightBottom );
+    ImGui::DockBuilderDockWindow( "Models",           rightBottom ); // KIWI-UX
 
     // ── KIWI-UX (ROUND AZ, ITEM 3): the SKY tab, third of the same node ──────
     // USER DIRECTIVE, verbatim: "Make this a separate tab like the entity tab."
@@ -1331,6 +1325,10 @@ static void ImGuiShell_BuildDefaultDockLayout( ImGuiID dockId )
     // run at all for an install that already has a dock ini (kiwi_sun.h "THE DOCK
     // TAB IS THE DISCOVERY SURFACE").
     ImGui::DockBuilderDockWindow( "Sun",              rightBottom );
+    // The selected-light helper is the sixth tab; layout version 13 makes this
+    // placement take effect for profiles that already had the Sun layout.
+    ImGui::DockBuilderDockWindow( "Light",            rightBottom );
+    ImGui::DockBuilderDockWindow( "Inspector",         rightBottom ); // KIWI-UX
 
     ImGui::DockBuilderFinish( dockId );
 }
@@ -1412,8 +1410,7 @@ void ImGuiShell_DrawOverlay( IDirect3DDevice9 *device, HWND activeHwnd )
                                               // cosmetic, for exactly the reason stated
                                               // three lines down.
                                               // (ROUND AU bumped 8 -> 9 so the
-                                              // ENTITIES tab (and the Entity inspector's
-                                              // recorded dock slot) actually appear beside
+                                              // ENTITIES tab actually appears beside
                                               // Textures for an existing install.)
                                               // (ROUND Y bumped 7 -> 8 for the
                                               // SKINNIER OUTLINER, left split 0.18 -> 0.125.)
@@ -1559,6 +1556,7 @@ void ImGuiShell_DrawOverlay( IDirect3DDevice9 *device, HWND activeHwnd )
     // the viewport images so the camera image is already submitted when a tile's
     // drag starts, and at top-level window scope because it is a real window.
     KiwiEntBrowser_Draw();
+    KiwiModelBrowser_Draw(); // KIWI-UX
     // KIWI-UX (ROUND AZ, ITEM 3): the SKY dock window — same contract again
     // (Begins/Ends itself, early-outs on its §9 flag).  It has no drag-to-camera
     // gesture, so unlike the entity browser it carries no ordering constraint
@@ -1574,9 +1572,12 @@ void ImGuiShell_DrawOverlay( IDirect3DDevice9 *device, HWND activeHwnd )
     // KIWI-UX: the SUN HELPER dock window — same contract again (Begins/Ends itself,
     // early-outs on its §9 flag).  Its body is plain ImGui items with no canvas and no
     // drag gesture, so like the Sky tab it carries no ordering constraint against the
-    // viewport images; it sits here to keep the five tabs of one dock node adjacent in
+    // viewport images; it sits here to keep the seven tabs of one dock node adjacent in
     // this function as well as on screen.
     KiwiSun_Draw();
+    KiwiLight_Draw();
+    extern void ImGuiPanel_Entity_Draw(); // imgui_panel_entity.cpp
+    ImGuiPanel_Entity_Draw(); // KIWI-UX
     // KIWI-UX (ROUND BE): the TEXTURE IMPORT WIZARD.  Not a dock window — a MODAL POPUP
     // that exists only while the dropped-file queue is non-empty, which is why this round
     // adds no kiwiWindow_t row and does NOT bump KIWI_LAYOUT_VERSION.  It draws at

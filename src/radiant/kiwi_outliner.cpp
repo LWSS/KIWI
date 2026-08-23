@@ -85,7 +85,7 @@
 // ── ported entry points (each verified against its definition) ──────────────
 extern int         Sys_Printf( const char *fmt, ... );                       // win_qe3.cpp:118   int Sys_Printf(const char*,...)
 extern int         g_nUpdateBits;                                            // engine_stubs.cpp:773  int g_nUpdateBits
-extern entity_s   *world_entity;                                             // map.cpp:59        entity_s *world_entity
+extern entity_s   *world_entity;                                             // map.cpp:62        entity_s *world_entity
 extern entity_s    entityInsts;                                              // entity.cpp:299    entity_s entityInsts{}
 extern eclass_t   *Eclass_ForName( int hasBrushes, const char *name );       // eclass.cpp:1096   eclass_t *Eclass_ForName(int,const char*)
 extern entity_s   *Entity_Create( eclass_t *eclass );                        // entity.cpp:1629   entity_s *Entity_Create(eclass_t*)
@@ -128,8 +128,11 @@ namespace
 // are ordinary rows with an arrow glyph rather than ImGui::CollapsingHeader.
 enum koutKind_t
 {
-    KOUT_SECTION_SOLIDS = 0,    // "Solids"  — the brush half of the scene
-    KOUT_SECTION_CURVES,        // "Curves"  — the construction half
+    KOUT_SECTION_BRUSHES = 0,   // worldspawn brushes + func_group folders
+    KOUT_SECTION_CURVES,        // construction objects
+    KOUT_SECTION_ENTITIES,      // ordinary brush and point entities
+    KOUT_SECTION_LIGHTS,        // CLASS_LIGHT entities
+    KOUT_SECTION_MODELS,        // model and prefab entities
     KOUT_GROUP_ENTITY,          // a func_group folder
     KOUT_ENTITY,                // any other brush/point entity, shown by classname
     KOUT_BRUSH,                 // one brush instance
@@ -163,8 +166,15 @@ struct koutRow_t
 // into the tag bits.
 inline unsigned EntKey     ( int numberId ) { return 0xD0000000u | (unsigned)numberId; }
 inline unsigned ConGroupKey( int group    ) { return 0xE0000000u | (unsigned)group; }
-const unsigned KOUT_KEY_SOLIDS = 0xF0000001u;
-const unsigned KOUT_KEY_CURVES = 0xF0000002u;
+const unsigned KOUT_KEY_BRUSHES  = 0xF0000001u;
+const unsigned KOUT_KEY_CURVES   = 0xF0000002u;
+const unsigned KOUT_KEY_ENTITIES = 0xF0000003u;
+const unsigned KOUT_KEY_LIGHTS   = 0xF0000004u;
+const unsigned KOUT_KEY_MODELS   = 0xF0000005u;
+
+const int KOUT_CLASS_LIGHT      = 0x01;
+const int KOUT_CLASS_MODELCLASS = 0x08;
+const int KOUT_CLASS_PREFAB     = 0x10;
 
 // The BRUSHFLAG_SELECTED bit, spelled as select.cpp:5112 spells it.
 const unsigned KOUT_BRUSHFLAG_SELECTED = 0x80u;
@@ -347,6 +357,50 @@ bool IsFuncGroup( entity_s *inst )
     return cn[0] && !_stricmp( cn, "func_group" );
 }
 
+// KIWI: keep entity bucketing in one place so every section uses the same rule.
+koutKind_t EntitySection( entity_s *inst )
+{
+    if ( IsFuncGroup( inst ) )
+        return KOUT_SECTION_BRUSHES;
+
+    entity_s_def *def = DefOf( inst );
+    eclass_t *ec = def ? def->eclass : 0;
+    const int classType = ec ? ec->classtype : 0;
+    if ( ( classType & KOUT_CLASS_LIGHT ) != 0 )
+        return KOUT_SECTION_LIGHTS;
+
+    if ( ( classType & ( KOUT_CLASS_MODELCLASS | KOUT_CLASS_PREFAB ) ) != 0 )
+        return KOUT_SECTION_MODELS;
+
+    const char *cn = ClassOf( inst );
+    const bool namedModel = !_stricmp( cn, "misc_model" )
+                         || !_stricmp( cn, "misc_prefab" );
+    if ( namedModel )
+        return KOUT_SECTION_MODELS;
+
+    if ( !_stricmp( cn, "script_model" ) && def )
+    {
+        const char *model = ValueForKey2( (int)(intptr_t)def, "model" );
+        if ( model && model[0] )
+            return KOUT_SECTION_MODELS;
+    }
+
+    return KOUT_SECTION_ENTITIES;
+}
+
+unsigned SectionKey( koutKind_t kind )
+{
+    switch ( kind )
+    {
+    case KOUT_SECTION_BRUSHES:  return KOUT_KEY_BRUSHES;
+    case KOUT_SECTION_CURVES:   return KOUT_KEY_CURVES;
+    case KOUT_SECTION_ENTITIES: return KOUT_KEY_ENTITIES;
+    case KOUT_SECTION_LIGHTS:   return KOUT_KEY_LIGHTS;
+    case KOUT_SECTION_MODELS:   return KOUT_KEY_MODELS;
+    default:                    return 0;
+    }
+}
+
 // A folder row's display name: the entity's own `targetname` when it has one,
 // otherwise "<klass> N" — Outliner.tsx:158's `getName(object) ?? klass id`.
 void FolderName( entity_s *inst, char *out, int outSize )
@@ -459,66 +513,53 @@ void FlattenEntityBrushes( entity_s *inst, int indent )
     }
 }
 
-void Flatten()
+void FlattenEntitySection( koutKind_t sectionKind )
 {
-    s_rows.clear();
+    const unsigned sectionKey = SectionKey( sectionKind );
+    PushRow( sectionKind, 0, sectionKey );
+    const size_t sectionRow = s_rows.size() - 1;
 
-    // ── SOLIDS ──────────────────────────────────────────────────────────────
-    PushRow( KOUT_SECTION_SOLIDS, 0, KOUT_KEY_SOLIDS );
-    const size_t solidsRow = s_rows.size() - 1;
-    int          solidsCount = 0;
-
-    if ( !Collapsed( KOUT_KEY_SOLIDS ) )
+    int count = 0;
+    for ( entity_s *e = entityInsts.next; e && e != &entityInsts; e = e->next )
     {
-        // Pass 0: the func_group FOLDERS.  Pass 1: every other entity, shown by
-        // classname.  Then the ungrouped worldspawn brushes last.
-        // FlattenOutline.ts:18 buckets while it walks for the same reason — the
-        // ORDER is a property of the OUTLINE, not of the order the scene happens to
-        // store things in, and entityInsts is in creation order.
-        for ( int pass = 0; pass < 2; ++pass )
-        {
-            for ( entity_s *e = entityInsts.next; e && e != &entityInsts; e = e->next )
-            {
-                if ( e == world_entity )
-                    continue;
-                const bool grp = IsFuncGroup( e );
-                if ( ( pass == 0 ) != grp )
-                    continue;
-
-                entity_s_def *def = DefOf( e );
-                const unsigned key = def ? EntKey( def->numberId ) : 0u;
-                PushRow( grp ? KOUT_GROUP_ENTITY : KOUT_ENTITY, 1, key );
-                s_rows.back().ent   = e;
-                s_rows.back().count = EntityBrushCount( e );
-                ++solidsCount;
-
-                if ( !Collapsed( key ) )
-                    FlattenEntityBrushes( e, 2 );
-            }
-        }
-
-        if ( world_entity )
-        {
-            int ordinal = 0;
-            for ( selbrush_t *b = world_entity->brushes.ownerNext;
-                  b && b != &world_entity->brushes;
-                  b = b->ownerNext )
-            {
-                ++ordinal;
-                PushRow( KOUT_BRUSH, 1, 0 );
-                s_rows.back().inst    = b;
-                s_rows.back().ent     = world_entity;
-                s_rows.back().ordinal = ordinal;
-                ++solidsCount;
-            }
-        }
+        if ( e != world_entity && EntitySection( e ) == sectionKind )
+            ++count;
     }
-    s_rows[solidsRow].count = solidsCount;
+    if ( sectionKind == KOUT_SECTION_BRUSHES && world_entity )
+        count += EntityBrushCount( world_entity );
+    s_rows[sectionRow].count = count;
 
-    // ── CURVES ──────────────────────────────────────────────────────────────
+    if ( Collapsed( sectionKey ) )
+        return;
+
+    for ( entity_s *e = entityInsts.next; e && e != &entityInsts; e = e->next )
+    {
+        if ( e == world_entity || EntitySection( e ) != sectionKind )
+            continue;
+
+        entity_s_def *def = DefOf( e );
+        const unsigned key = def ? EntKey( def->numberId ) : 0u;
+        PushRow( IsFuncGroup( e ) ? KOUT_GROUP_ENTITY : KOUT_ENTITY, 1, key );
+        s_rows.back().ent   = e;
+        s_rows.back().count = EntityBrushCount( e );
+        if ( !Collapsed( key ) )
+            FlattenEntityBrushes( e, 2 );
+    }
+
+    if ( sectionKind == KOUT_SECTION_BRUSHES && world_entity )
+        FlattenEntityBrushes( world_entity, 1 );
+}
+
+void FlattenCurves()
+{
     PushRow( KOUT_SECTION_CURVES, 0, KOUT_KEY_CURVES );
     const size_t curvesRow = s_rows.size() - 1;
-    int          curvesCount = 0;
+    int curvesCount = KiwiCon_GroupCount();
+    const int objectCount = KiwiCon_Count();
+    for ( int i = 0; i < objectCount; ++i )
+        if ( KiwiCon_Group( i ) < 0 )
+            ++curvesCount;
+    s_rows[curvesRow].count = curvesCount;
 
     if ( !Collapsed( KOUT_KEY_CURVES ) )
     {
@@ -530,7 +571,6 @@ void Flatten()
             PushRow( KOUT_CON_GROUP, 1, key );
             s_rows.back().conGroup = gid;
             s_rows.back().count    = KiwiCon_GroupMemberCount( gid );
-            ++curvesCount;
 
             if ( Collapsed( key ) )
                 continue;
@@ -558,45 +598,18 @@ void Flatten()
             PushRow( KOUT_CON_OBJECT, 1, 0 );
             s_rows.back().conIndex = i;
             s_rows.back().ordinal  = ordinal;
-            ++curvesCount;
         }
     }
-    s_rows[curvesRow].count = curvesCount;
 }
 
-// ── KIWI-UX (ROUND BL, ITEM 1): THE MAP-LOAD COLLAPSE ───────────────────────
-// USER DIRECTIVE, verbatim: *"When loading a map, load with all the groups in the
-// outliner collapsed."*
-//
-// s_collapsed holds the keys that are CLOSED, so an untouched key is OPEN — which
-// is exactly right for a session (a folder the user opened stays open) and exactly
-// wrong for the first frame of a map nobody has touched yet.  Rather than invert
-// the default — which would break "manual expand/collapse persists for the session"
-// — the load arms a one-shot and this closes every key the scene HAS.  Keys are
-// minted the same way Flatten mints them (EntKey / ConGroupKey / the two section
-// constants) so nothing can be closed under a key the panel will not look up.
-//
-// Enumerated from the SCENE, not from s_rows: the flatten stops descending into a
-// collapsed folder, so a pass over the rows would leave every nested folder
-// untouched — the user would open Solids and find the func_groups hanging open
-// again, which is the complaint one level down.
-bool s_collapseAllPending = false;
-
-void CollapseAllFolders()
+void Flatten()
 {
-    SetCollapsed( KOUT_KEY_SOLIDS, true );
-    SetCollapsed( KOUT_KEY_CURVES, true );
-    for ( entity_s *e = entityInsts.next; e && e != &entityInsts; e = e->next )
-    {
-        if ( e == world_entity )
-            continue;
-        entity_s_def *def = DefOf( e );
-        if ( def )
-            SetCollapsed( EntKey( def->numberId ), true );
-    }
-    const int nGroups = KiwiCon_GroupCount();
-    for ( int g = 0; g < nGroups; ++g )
-        SetCollapsed( ConGroupKey( KiwiCon_GroupIdAt( g ) ), true );
+    s_rows.clear();
+    FlattenEntitySection( KOUT_SECTION_BRUSHES );
+    FlattenCurves();
+    FlattenEntitySection( KOUT_SECTION_ENTITIES );
+    FlattenEntitySection( KOUT_SECTION_LIGHTS );
+    FlattenEntitySection( KOUT_SECTION_MODELS );
 }
 
 // Outliner.tsx:89-100: anything that becomes selected has its ancestors expanded,
@@ -613,11 +626,8 @@ void AutoExpandForSelection()
         return;
     s_lastSelGen = gen;
 
-    SetCollapsed( KOUT_KEY_SOLIDS, false );
     for ( entity_s *e = entityInsts.next; e && e != &entityInsts; e = e->next )
     {
-        if ( e == world_entity )
-            continue;
         bool any = false;
         for ( selbrush_t *b = e->brushes.ownerNext; b && b != &e->brushes; b = b->ownerNext )
         {
@@ -629,6 +639,14 @@ void AutoExpandForSelection()
         }
         if ( !any )
             continue;
+
+        if ( e == world_entity )
+        {
+            SetCollapsed( KOUT_KEY_BRUSHES, false );
+            continue;
+        }
+
+        SetCollapsed( SectionKey( EntitySection( e ) ), false );
         entity_s_def *def = DefOf( e );
         if ( def )
             SetCollapsed( EntKey( def->numberId ), false );
@@ -980,7 +998,7 @@ void DrawArrow( ImDrawList *dl, ImVec2 c, float r, bool open, ImU32 col )
 // Is this row a legal DROP TARGET, and what does dropping on it mean?
 bool RowAcceptsBrushes( const koutRow_t &r )
 {
-    return r.kind == KOUT_SECTION_SOLIDS       // -> worldspawn (ungroup)
+    return r.kind == KOUT_SECTION_BRUSHES      // -> worldspawn (ungroup)
         || r.kind == KOUT_GROUP_ENTITY
         || r.kind == KOUT_ENTITY;
 }
@@ -1012,10 +1030,10 @@ void ApplyDrop( const koutDrag_t &drag, const koutRow_t &target )
         if ( moving.empty() )
             moving.push_back( drag.inst );
 
-        entity_s *targetInst = ( target.kind == KOUT_SECTION_SOLIDS ) ? world_entity : target.ent;
+        entity_s *targetInst = ( target.kind == KOUT_SECTION_BRUSHES ) ? world_entity : target.ent;
         ReparentBrushes( moving, targetInst,
-                         ( target.kind == KOUT_SECTION_SOLIDS ) ? "outliner ungroup"
-                                                                : "outliner group" );
+                         ( target.kind == KOUT_SECTION_BRUSHES ) ? "outliner ungroup"
+                                                                 : "outliner group" );
         return;
     }
 
@@ -1066,14 +1084,42 @@ void ApplyDrop( const koutDrag_t &drag, const koutRow_t &target )
 
 } // namespace
 
-// KIWI-UX (ROUND BL, ITEM 1): the map-load arm.  Defined OUTSIDE the anonymous
-// namespace (it is header-declared) and doing nothing but setting the one-shot —
-// the panel may not even be open when a map loads, and the collapse must happen on
-// its next draw whenever that is, not on a scene walk from the loader's thread of
-// control.
-void KiwiOutliner_CollapseAllOnNextDraw()
+// KIWI: collapse keys and row identities belong to one map document.
+// KIWI: "When loading a map, load with all the groups in the outliner collapsed"
+// (earlier directive) — but only the FOLDERS.  The first version of that one-shot
+// also closed the top-level sections, which is exactly how a freshly loaded map
+// came up with "Solids (54)" and nothing under it until the user toggled it.
+// Armed by the map reset, consumed on the next draw (after the sidecar load has
+// minted the curve groups it closes).
+static bool s_collapseFoldersPending = false;
+
+static void CollapseFoldersOnly()
 {
-    s_collapseAllPending = true;
+    for ( entity_s *e = entityInsts.next; e && e != &entityInsts; e = e->next )
+    {
+        if ( e == world_entity )
+            continue;
+        entity_s_def *def = DefOf( e );
+        if ( def )
+            SetCollapsed( EntKey( def->numberId ), true );
+    }
+    const int nGroups = KiwiCon_GroupCount();
+    for ( int g = 0; g < nGroups; ++g )
+        SetCollapsed( ConGroupKey( KiwiCon_GroupIdAt( g ) ), true );
+}
+
+void KiwiOutliner_ResetForNewMap()
+{
+    s_collapsed.clear();
+    s_collapseFoldersPending = true;
+    s_rows.clear();
+    s_lastSelGen = 0;
+    s_anchor = koutAnchor_t();
+    s_rename = koutRename_t();
+    s_renameBuf[0] = '\0';
+    s_renameFocus = false;
+    s_structural = false;
+    s_paintSelecting = false;
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -1123,13 +1169,10 @@ void KiwiOutliner_Draw()
 
         s_structural = false;
         AutoExpandForSelection();
-        // KIWI-UX (ROUND BL, ITEM 1): the map-load one-shot, consumed AFTER the
-        // auto-expand pass (which re-opens SOLIDS on any selection-generation move,
-        // and a map load is one) and BEFORE the flatten that reads the state.
-        if ( s_collapseAllPending )
+        if ( s_collapseFoldersPending )
         {
-            s_collapseAllPending = false;
-            CollapseAllFolders();
+            s_collapseFoldersPending = false;
+            CollapseFoldersOnly();
         }
         Flatten();
 
@@ -1326,11 +1369,20 @@ void KiwiOutliner_Draw()
                 bool selected = false;
                 switch ( r.kind )
                 {
-                case KOUT_SECTION_SOLIDS:
-                    _snprintf( label, sizeof( label ), "Solids (%i)", r.count );
+                case KOUT_SECTION_BRUSHES:
+                    _snprintf( label, sizeof( label ), "Brushes (%i)", r.count );
                     break;
                 case KOUT_SECTION_CURVES:
                     _snprintf( label, sizeof( label ), "Curves (%i)", r.count );
+                    break;
+                case KOUT_SECTION_ENTITIES:
+                    _snprintf( label, sizeof( label ), "Entities (%i)", r.count );
+                    break;
+                case KOUT_SECTION_LIGHTS:
+                    _snprintf( label, sizeof( label ), "Lights (%i)", r.count );
+                    break;
+                case KOUT_SECTION_MODELS:
+                    _snprintf( label, sizeof( label ), "Models (%i)", r.count );
                     break;
                 case KOUT_GROUP_ENTITY:
                 case KOUT_ENTITY:

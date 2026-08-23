@@ -25,6 +25,7 @@
 #include "stdafx.h"
 #include "qe3.h"
 #include "prefs.h"                  // g_PrefsDlg->m_nTextureWindowScale / m_bTextureScrollbar
+#include "kiwi_matconvert.h"        // KIWI-UX: unlit conversion context menu + Shift+L scan hook
 
 #include <gfx_d3d/r_material.h>
 #include <gfx_d3d/r_gfx.h>
@@ -1366,7 +1367,7 @@ void TexWnd_OnLButtonDown( int x, int y )
 // drained each idle by CRadiantApp::OnIdle → UpdateWindows); 0x88C1 (35009) saves the library.
 extern int  g_nUpdateBits;                // mainfrm.cpp
 extern char LayeredMaterials_Save();      // layeredmaterials.cpp (IDB 0x416f40)
-static void TexWnd_OnRightMouseContextMenu()
+static void TexWnd_OnRightMouseContextMenu( int materialIndex ) // KIWI-UX: thread the hit material to the owned popup action
 {
     HMENU PopupMenu = CreatePopupMenu();
     AppendMenuA( PopupMenu, g_texwnd_simple_layered_selection != 0 ? 0 : 8, 1u, "View simple materials" );
@@ -1376,12 +1377,14 @@ static void TexWnd_OnRightMouseContextMenu()
         AppendMenuA( PopupMenu, 0x800u, 0, 0 );                              // MF_SEPARATOR
         AppendMenuA( PopupMenu, 0, 0x88C1u, "Save layered materials" );      // id 35009
     }
+    KiwiMatConvert_AppendTextureContextMenu( PopupMenu, materialIndex >= 0 ? texWndGlob_textureOffset.sorted_materials[materialIndex] : nullptr ); // KIWI-UX
     // P5 RTT: d_hwndTexture is the hidden child and a poor menu owner; repoint the owner to the
     // visible main frame.  (TPM_RETURNCMD returns the pick directly, so no WM_COMMAND routing.)
     int cmd = TrackPopupMenu( PopupMenu, 0x100u,                            // TPM_RETURNCMD
                               texWndGlob_textureOffset.m_ptDown[0],
                               texWndGlob_textureOffset.m_ptDown[1],
                               0, g_qeglobals.d_hwndMain, 0 );
+    if ( KiwiMatConvert_HandleTextureContextCommand( (unsigned int)cmd, materialIndex >= 0 ? texWndGlob_textureOffset.sorted_materials[materialIndex] : nullptr ) ) return; // KIWI-UX
     if ( (unsigned int)(cmd - 1) > 1 )
     {
         if ( cmd == 35009 )
@@ -1423,7 +1426,7 @@ void TexWnd_OnRButtonUp( unsigned int nFlags, int x, int y )
         }
         else
         {
-            TexWnd_OnRightMouseContextMenu();
+            TexWnd_OnRightMouseContextMenu( TexWnd_HitTest( x, y ) ); // KIWI-UX: context action belongs to the released thumbnail
         }
     }
     (void)nFlags; (void)x; (void)y;   // IDB OnButtonUp is standalone; no base call (avoids WM_CONTEXTMENU)
@@ -1606,6 +1609,7 @@ void Material_SetMode( int iMode )
         return;
 
     g_qeglobals.current_edit_layer  = iMode;
+    KiwiMatConvert_OnMaterialModeChanged( iMode ); // KIWI-UX: Shift+L reports loaded-techset health before the diagnostic rebuild
     texWndGlob_textureOffset.m_bNeedRange = false;        // scrollbar range now stale
 
     // Radio-check the three Render Method menu items (checked iff its mode is active).

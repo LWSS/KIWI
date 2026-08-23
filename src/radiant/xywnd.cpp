@@ -20,6 +20,7 @@ enum { YZ = ED_VIEW_YZ, XZ = ED_VIEW_XZ, XY = ED_VIEW_XY };   // the binary's ba
 #include "kiwi_walkcache.h"        // the shared prefab-walk recording
 #include "kiwi_viewdirty.h"        // KiwiViewDirty_Mark — re-arm on a bailed render
 #include "kiwi_camera.h"           // KiwiCam_MarkerViewpoint — the camera icon's anchor
+#include "kiwi_light.h"            // selected-light radius and cone overlays
 #include <math.h>
 #include <vector>                   // XY_ContextMenu Layers submenu — distinct layer-name set
 #include <string>                   // (std::string / std::vector; <algorithm> already in stdafx)
@@ -597,6 +598,7 @@ extern char      *ValueForKey2(int e, const char *key);               // entity.
 extern entity_s   entityInsts;                                        // entity.cpp (0x23F1748) — entity INSTANCE list head
 extern bool       HasKeyValuePair(entity_s_def *e, const char *key);  // entity.cpp (0x4838B0)
 extern float      Vec3Normalize_R(float *v);                          // engine_stubs.cpp (0x40A5E0) — returns length
+extern void       KiwiEntArrow_DrawXY( int viewType, float scale );   // KIWI-UX: Declare the bounded selected-entity 2D overlay.
 extern int        R_Add3DLine(GfxPointVertex *verts, const orientation_t *orient,
                               const float *p1, const float *p2, const unsigned int *color,
                               char width, int vertCount, int maxVertCount);  // draw.cpp (0x40C110)
@@ -1008,8 +1010,8 @@ static int      s_xyTintCuts  = 0;
 static bool     s_xyTintOpen  = false;   // a flush window has adopted a colour
 static float    s_xyTintRgba[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
 
-extern void *R_AddEditorSurfsCmd();      // r_ed_scene.cpp:269
-extern int   Editor_PendingSurfCount();  // r_ed_scene.cpp:297
+extern void *R_AddEditorSurfsCmd();      // r_ed_scene.cpp:286
+extern int   Editor_PendingSurfCount();  // r_ed_scene.cpp:314
 
 // Read by camwnd.cpp's Cam_SkinModelSEH: while non-zero, a technique-29 model arm must pass
 // colorPtr = NULL.  Set ONLY around the XY view's UNSELECTED pass.
@@ -1206,6 +1208,7 @@ void XY_DrawBrushes(const XYViewState *v)
             // radius overlay (light / node / trigger / colored) — keyed on the DEF eclass
             // classtype; the binary dispatches this for EVERY selected brush after DrawBrush.
             Ed_DrawSelectedRadius( b, &selCol, v->viewType, chTrig );
+            KiwiLight_DrawXY( b, v->viewType ); // KIWI-UX: Add bounded spot-cone and axis overlays.
 
             // script-group team-colour capture (binary XY_Draw 0x46d5ca..0x46d62c): for a
             // selected script-trigger, when the team-colour viz is enabled, remember its
@@ -4124,6 +4127,7 @@ void XYWnd_Paint( HWND hwndIn )
     // !rotate/scale && a non-empty selection.  nDim1=(viewType==YZ), nDim2=(viewType!=XY)+1.
     Ed_DrawSizeInfo( wnd, ( wnd->m_nViewType == ED_VIEW_YZ ), ( wnd->m_nViewType != ED_VIEW_XY ) + 1 );
     Ed_DrawConnectionLines();  // target/targetname + script_linkTo lines (self-gated on d_xyShowFlags&4)
+    KiwiEntArrow_DrawXY( wnd->m_nViewType, wnd->m_fScale ); // KIWI-UX: Draw selected-entity facing over the 2D overlay tail.
     CopySelectedFaceValues();  // IDB XY_Draw tail 0x46db54: rebuild the selected faces' faceVis
     }   // end if (sceneOk) — degenerate-projection frame draws only the cleared background
     R_EndFrame();
@@ -4273,6 +4277,7 @@ void XYWnd_RenderToRT( int w, int h )
     // !rotate/scale && a non-empty selection.  nDim1=(viewType==YZ), nDim2=(viewType!=XY)+1.
     Ed_DrawSizeInfo( wnd, ( wnd->m_nViewType == ED_VIEW_YZ ), ( wnd->m_nViewType != ED_VIEW_XY ) + 1 );
     Ed_DrawConnectionLines();  // target/targetname + script_linkTo lines (self-gated on d_xyShowFlags&4)
+    KiwiEntArrow_DrawXY( wnd->m_nViewType, wnd->m_fScale ); // KIWI-UX: Mirror the facing overlay in the RTT XY path.
     CopySelectedFaceValues();  // IDB XY_Draw tail 0x46db54: rebuild the selected faces' faceVis
     }   // end if (sceneOk) — degenerate-projection frame draws only the cleared background
     {

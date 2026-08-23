@@ -67,7 +67,10 @@
 // kiwi_dock11.ini would pin the old layout and the tab would never appear.  BOTH
 // halves are needed, exactly as the round-BD note above says: the [KiwiWindows]
 // reseed opens the window, the fresh kiwi_dock12.ini places it.
-#define KIWI_LAYOUT_VERSION  12
+// 12 -> 13: the LIGHT tab joins that helper node and is opened by default.
+// 13 -> 14: the Inspector becomes a registered helper tab, opened by default.
+// 14 -> 15: the Models browser joins the Textures/Entities dock node.
+#define KIWI_LAYOUT_VERSION  15
 
 enum kiwiWindow_t
 {
@@ -88,6 +91,8 @@ enum kiwiWindow_t
     // ImGuiShell_BuildDefaultDockLayout — the two have to change together or the
     // window opens as a floating tab over the camera (the note on s_def below).
     KIWI_WIN_ENTITIES,      // "Entities"                       default ON
+    // KIWI: static xmodels, previewed and placed as misc_model entities.
+    KIWI_WIN_MODELS,        // "Models"                         default ON
     // ROUND AZ: the SKY tab (kiwi_skybox.h).  USER DIRECTIVE: "Make this a separate
     // tab like the entity tab" — so it joins the SAME dock node as Textures and
     // Entities, and the same rule applies: this enum and
@@ -108,6 +113,11 @@ enum kiwiWindow_t
     // ImGuiShell_BuildDefaultDockLayout have to change together or the window
     // opens as a floating tab over the camera.
     KIWI_WIN_SUN,           // "Sun"                            default ON
+    // Light parameters, preview controls and runtime-primary status. Sixth tab
+    // of the same right-bottom helper node, default ON.
+    KIWI_WIN_LIGHT,         // "Light"                          default ON
+    // Per-type entity properties. Seventh tab of the helper node, default ON.
+    KIWI_WIN_INSPECTOR,     // "Inspector"                      default ON
     KIWI_WIN_COUNT,
 };
 

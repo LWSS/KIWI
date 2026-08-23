@@ -94,6 +94,7 @@
 #include "kiwi_lollipop.h"      // ROUND K — the extrude handle that replaces the gizmo
 #include "kiwi_section.h"       // ROUND BM — section analysis (the plane + its lollipop)
 #include "kiwi_sun.h"           // the sun helper — its glyph is a grabbable handle
+#include "kiwi_transform.h"
 #include "kiwi_numeric.h"
 #include "kiwi_patchverts.h"    // ROUND AJ, ITEM 1 — the mode's per-frame lifecycle
 #include "kiwi_region.h"        // ROUND BL, ITEM 3 — the overlay fill route
@@ -155,7 +156,7 @@ namespace
     // would make the release arm guess which one it is holding.
     enum kgesture_t { KG_NONE = 0, KG_ORBIT, KG_MARQUEE, KG_COMMAND, KG_CONSUMED,
                       KG_LOOK, KG_PAN, KG_GIZMO, KG_CMD_MARQUEE, KG_SECTION,
-                      KG_SUN };
+                      KG_SUN, KG_DROP };
 
     // A press-to-release travel under this many pixels is a CLICK, not a drag.
     // Same MEANING as KBOX_CLICK_PIXELS on the LMB side; ROUND N deliberately left
@@ -894,6 +895,20 @@ bool KiwiVP_CameraButtonDown( int btn, int imgX, int imgY, bool shift, bool ctrl
             return true;
         }
 
+        // KIWI-UX: a plain camera drag on an all-model selection defaults to the
+        // ground-contact solver.  KiwiDrop_BeginAt performs the same camera pick
+        // used to prove that the press landed on one of the selected models.
+        if ( !shift && !ctrl && !ImGui::GetIO().KeyAlt
+             && KiwiDrop_BeginAt( imgX, imgY ) )
+        {
+            KiwiHover_Clear();
+            s_lastX      = imgX;
+            s_lastY      = imgY;
+            s_gesture    = KG_DROP;
+            s_gestureBtn = btn;
+            return true;
+        }
+
         // KIWI-UX (shakeout D): the §14 gizmo test that USED to sit here is gone.
         // It was the idle-selection gizmo's grab, and there is no idle gizmo any
         // more — the handle test now runs at the top of this function, under the
@@ -1078,6 +1093,8 @@ bool KiwiVP_CameraButtonUp( int btn, int imgX, int imgY )
         KiwiSection_HandleUp();          // ROUND BM: ungrab; the plane stays put
     else if ( s_gesture == KG_SUN )
         KiwiSun_HandleUp();              // ungrab and COMMIT: one undo record per drag
+    else if ( s_gesture == KG_DROP )
+        KiwiCmd_Commit();                 // live preview closes as one move record
     else if ( s_gesture == KG_LOOK || s_gesture == KG_PAN )
         KiwiCam_PanEnd();                // drop the gesture's cached pan scale
     else if ( s_gesture == KG_ORBIT )
@@ -1184,6 +1201,8 @@ bool KiwiVP_CameraAbort()
     else if ( s_gesture == KG_SUN )
         KiwiSun_HandleAbort();           // nothing was written: the worldspawn already
                                          // holds the pre-drag angles
+    else if ( s_gesture == KG_DROP )
+        KiwiCmd_Cancel();                 // restore the move command's captured baseline
     else if ( s_gesture == KG_LOOK || s_gesture == KG_PAN )
         KiwiCam_PanEnd();                // shakeout E: drop the cached pan scale
     else if ( s_gesture == KG_ORBIT )

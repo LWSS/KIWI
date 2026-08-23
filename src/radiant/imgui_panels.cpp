@@ -156,7 +156,6 @@ void ImGuiPanels_Draw()
 
     {
         extern void ImGuiPanel_Surface_Draw();       // imgui_panel_surface.cpp
-        extern void ImGuiPanel_Entity_Draw();        // imgui_panel_entity.cpp
         extern void ImGuiPanel_FindTex_Draw();       // imgui_panel_findtex.cpp
         extern void ImGuiPanel_Layers_Draw();        // imgui_panel_layers.cpp
         extern void ImGuiPanel_DynEnt_Draw();        // imgui_panel_dynent.cpp
@@ -176,7 +175,6 @@ void ImGuiPanels_Draw()
         extern void ImGuiPanel_Project_Draw();       // imgui_panel_project.cpp
         extern void ImGuiPanel_Sides_Draw();         // imgui_panel_sides.cpp
         ImGuiPanel_Surface_Draw();
-        ImGuiPanel_Entity_Draw();
         ImGuiPanel_FindTex_Draw();
         ImGuiPanel_Layers_Draw();
         ImGuiPanel_DynEnt_Draw();

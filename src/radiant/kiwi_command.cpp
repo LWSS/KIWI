@@ -53,12 +53,14 @@
 #include "kiwi_undo.h"                   // shakeout I — the unified journal (cancel suppression)
 #include "kiwi_uv.h"
 #include "kiwi_entbrowser.h"            // ROUND AU — the entity browser + its deferred drop
+#include "kiwi_modelbrowser.h"          // KIWI: the Models window + deferred drop
 #include "kiwi_skybox.h"                // ROUND AZ — the Sky tab + its two verbs
 #include "kiwi_uveditor.h"              // KIWI-UX (ROUND BD) — the UV editor window row
 #include "kiwi_import.h"                // KIWI-UX (ROUND BE) — texture import (drop + wizard)
 #include "kiwi_launch.h"                // KIWI-UX (ROUND BF) — the Build & Run launch dialog
 #include "kiwi_caulk.h"                 // KIWI-UX (ROUND BH) — Caulk Selection (End)
 #include "kiwi_sun.h"                   // the sun helper — Place Sun + the Esc deselect
+#include "kiwi_light.h"                 // selected-light helper window registration
 #include "kiwi_section.h"               // KIWI-UX (ROUND BM) — Section Analysis (the view-cube button)
 #include "kiwi_outliner.h"              // ROUND W — the outliner's two group verbs
 #include "kiwi_windows.h"
@@ -631,7 +633,7 @@ namespace
         // No mask and no predicate: opening the dialog needs neither a selection
         // nor a saved map — the dialog itself greys the build buttons and says
         // why (an untitled map, a missing tool exe, a build already running).
-        { KIWI_CMD_BUILD_RUN,       { "Build & Run...",               "Build",     0, 0 } },
+        { KIWI_CMD_BUILD_RUN,       { "Build...",                     "Build",     0, 0 } },   // KIWI: game launch removed from the panel
 
         // ── ROUND BH: Caulk Selection (kiwi_caulk.h) ───────────────────────
         // The mask is SEL_MASK_FACE | SEL_MASK_OBJECT for the same reason the UV
@@ -967,6 +969,7 @@ void KiwiCmd_RegisterCommands()
     KiwiWindows_RegisterCommands();     // §9 shakeout B — the window toggles (+ ROUND W's)
     KiwiOutliner_RegisterCommands();    // ROUND W    — Group / Ungroup Selection
     KiwiEntBrowser_RegisterCommands();  // ROUND AU   — the Entities window toggle
+    KiwiModelBrowser_RegisterCommands(); // KIWI      — the Models window toggle
     KiwiSky_RegisterCommands();         // ROUND AZ   — the Sky window toggle + two verbs
     KiwiUvEd_RegisterCommands();        // ROUND BD   — the UV editor window toggle
     KiwiImport_RegisterCommands();      // ROUND BE   — "Import Textures..." (the drop's twin)
@@ -974,6 +977,7 @@ void KiwiCmd_RegisterCommands()
     KiwiCaulk_RegisterCommands();       // ROUND BH   — "Caulk Selection" (End, modern profile)
     KiwiSection_RegisterCommands();     // ROUND BM   — "Section Analysis" (the view-cube button)
     KiwiSun_RegisterCommands();         //            — "Place Sun" (the worldspawn sun keys)
+    KiwiLight_RegisterCommands();       //            — the selected-light helper window
     // ── ROUND J — the last Plasticity verbs (kiwi_offset/fillet/focus/visibility)
     KiwiOffset_RegisterCommands();      // O       offset a construction chain
     KiwiFillet_RegisterCommands();      // B       round its corners
@@ -1085,13 +1089,17 @@ namespace
         case KIWI_CMD_WINDOW_SHELL:
         case KIWI_CMD_WINDOW_OUTLINER:                  // ROUND W — a window toggle
         case KIWI_CMD_WINDOW_ENTITIES:                  // ROUND AU — likewise
+        case KIWI_CMD_WINDOW_MODELS:                    // the Models tab — likewise
         case KIWI_CMD_WINDOW_SUN:                       // the Sun tab — likewise
+        case KIWI_CMD_WINDOW_LIGHT:                     // the Light tab — likewise
+        case KIWI_CMD_WINDOW_INSPECTOR:                 // the Inspector tab — likewise
         // ROUND AU: the entity DROP is the tail of a drag that has already
         // happened and carries its argument in kiwi_entbrowser.cpp's one-shot
         // pending slot.  Repeating it would re-run a gesture with no payload —
         // and, worse, "Repeat Last" would silently become the drop instead of the
         // modelling verb the user actually last ran.
         case KIWI_CMD_ENT_DROP:
+        case KIWI_CMD_MODEL_DROP:
         case KIWI_CMD_VIEW_SHOW_GRID:
         case KIWI_CMD_VIEW_SHOW_AXES:
         case KIWI_CMD_VIEW_ORTHO:                       // ROUND M — a view toggle, not a verb
@@ -1330,6 +1338,8 @@ static bool KiwiCmd_DispatchInner( unsigned int cmdId )
         // §9 flag, this file owns only the verb, which is the same split round W
         // made between the Outliner's window id and its two group verbs.
         if ( KiwiEntBrowser_DispatchInstant( cmdId ) )
+            return true;
+        if ( KiwiModelBrowser_DispatchInstant( cmdId ) )
             return true;
         // ROUND AZ: the Sky tab's two VERBS (apply / create shell).  Its window
         // toggle is not here for the same reason the entity browser's is not —

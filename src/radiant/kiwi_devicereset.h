@@ -24,11 +24,11 @@
 // this build (assertive.cpp logs and falls through), so line 202 runs anyway.
 //
 // EXACTLY ONE PATH produces that pair.  `RB_DrawEditorSkinnedCached_Sub`
-// (r_ed_scene.cpp:841) drives `tess` itself and never calls `R_TrackPrims`, so
+// (r_ed_scene.cpp:858) drives `tess` itself and never calls `R_TrackPrims`, so
 // `g_primStats` is 0 for its whole duration; its final flush is guarded
-// `if (haveBatch && boundVb)` (r_ed_scene.cpp:942).  An `ED_SURF_MESH` surf
+// `if (haveBatch && boundVb)` (r_ed_scene.cpp:959).  An `ED_SURF_MESH` surf
 // whose vertex buffer resolves to NULL leaves `boundVb == 0` while its indices
-// were still copied into `tess` (r_ed_scene.cpp:924-926), so the flush is
+// were still copied into `tess` (r_ed_scene.cpp:941-943), so the flush is
 // skipped and `tess.indexCount` LEAKS out of the command handler.  The very
 // next `RC_SET_MATERIAL_COLOR` — the editor emits one per brush, per face, per
 // entity — hits `if (tess.indexCount) RB_EndTessSurface();` and dies.

@@ -13,6 +13,7 @@
 #include "kiwi_sun.h"
 #include "kiwi_camera.h"
 #include "kiwi_command.h"
+#include "kiwi_fmt.h"
 #include "kiwi_lines.h"
 #include "kiwi_pick.h"
 #include "kiwi_ux.h"
@@ -33,7 +34,7 @@ extern camera_s *Ed_Camera();                                              // ca
 extern int       g_nUpdateBits;                                            // engine_stubs.cpp:773
 extern int       Sys_Printf( const char *fmt, ... );                       // win_qe3.cpp:118
 extern void      MarkMapModified();                                        // win_qe3.cpp:195
-extern entity_s *world_entity;                                             // map.cpp:59
+extern entity_s *world_entity;                                             // map.cpp:62
 extern char     *ValueForKey2( int e, const char *key );                   // entity.cpp:89
 extern int       Entity_GetVec3ForKey( entity_s_def *e, float *out, const char *key ); // entity.cpp:99
 extern float     Entity_GetFloatValueForKey( int e, const char *key );     // entity.cpp:109
@@ -407,11 +408,20 @@ namespace
         g_nUpdateBits = -1;
     }
 
+    void FormatSunVec3( char *out, size_t outSize, float x, float y, float z )
+    {
+        char sx[48], sy[48], sz[48];
+        _snprintf( out, outSize, "%s %s %s",
+                   KiwiFmt_Num( sx, sizeof( sx ), x, 6 ),
+                   KiwiFmt_Num( sy, sizeof( sy ), y, 6 ),
+                   KiwiFmt_Num( sz, sizeof( sz ), z, 6 ) );
+        out[outSize - 1] = '\0';
+    }
+
     void WriteAngles( float pitch, float yaw, const char *operation )
     {
         char buf[64];
-        _snprintf( buf, sizeof( buf ), "%.4f %.4f 0", pitch, yaw );
-        buf[sizeof( buf ) - 1] = '\0';
+        FormatSunVec3( buf, sizeof( buf ), pitch, yaw, 0.0f );
         WriteKey( "sundirection", buf, operation );
     }
 
@@ -629,8 +639,7 @@ void KiwiSun_Place()
     float dPitch = 0.0f, dYaw = 0.0f;
     AnglesFromDir( KSUN_DEFAULT_DIR, &dPitch, &dYaw );
     char dirBuf[64];
-    _snprintf( dirBuf, sizeof( dirBuf ), "%.4f %.4f 0", dPitch, dYaw );
-    dirBuf[sizeof( dirBuf ) - 1] = '\0';
+    FormatSunVec3( dirBuf, sizeof( dirBuf ), dPitch, dYaw, 0.0f );
 
     struct sunKey_t { const char *key; const char *value; };
     enum { KSUN_DEFAULT_KEYS = 7 };
@@ -1090,8 +1099,7 @@ void KiwiSun_Draw()
             if ( !( s_uiLight >= 0.0f ) )
                 s_uiLight = 0.0f;
             char buf[32];
-            _snprintf( buf, sizeof( buf ), "%g", s_uiLight );
-            buf[sizeof( buf ) - 1] = '\0';
+            KiwiFmt_Num( buf, sizeof( buf ), s_uiLight, 6 );
             WriteKey( "sunlight", buf, "sun intensity" );
         }
         if ( ImGui::IsItemHovered() )
@@ -1114,9 +1122,8 @@ void KiwiSun_Draw()
         if ( ImGui::IsItemDeactivatedAfterEdit() )
         {
             char buf[64];
-            _snprintf( buf, sizeof( buf ), "%g %g %g",
-                       s_uiColor[0], s_uiColor[1], s_uiColor[2] );
-            buf[sizeof( buf ) - 1] = '\0';
+            FormatSunVec3( buf, sizeof( buf ),
+                           s_uiColor[0], s_uiColor[1], s_uiColor[2] );
             WriteKey( "suncolor", buf, "sun colour" );
         }
         if ( ImGui::IsItemHovered() )

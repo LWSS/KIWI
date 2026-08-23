@@ -31,6 +31,7 @@
 
 #include "stdafx.h"
 #include "qe3.h"
+#include "kiwi_matconvert.h"        // KIWI-UX: solid-red Shift+L patch diagnostic
 #include <universal/q_parse.h>
 #include <gfx_d3d/r_gfx.h>          // GfxPointVertex, GfxColor, GfxStateBits (terrain-paint ring + patch-fill)
 #include <gfx_d3d/r_material.h>     // Material stateBitsEntry/stateBitsTable (patch-fill opaque gate)
@@ -9988,6 +9989,7 @@ static void Patch_Fill_BuildVisuals( patch_t *inst, const orientation_t *orient,
     for ( int L = 0; L < inst->visCount; ++L )
     {
         Material *lmat = MaterialDef_14( (unsigned)L, mtldef );
+        KiwiMatConvert_ApplyPatchLightmapDiagnostic( inst->def, color, vertCount, &lmat ); // KIWI-UX: non-lit base material replaces the checker with red
         inst->visArray[L].material   = lmat;
         inst->visArray[L].vertHandle = (int)Editor_VB_Upload( lmat, vertCount,
             xyz, tangent, binormal, normal, st, (const float *)color );
@@ -10166,7 +10168,7 @@ extern bool MaterialDef_15_Drawflag_Multiply( int drawFlags, MaterialDef *m );
 // surfaces.  This seems like a bug and it's ugly - fix it."*
 //
 // THE MECHANISM, named rather than guessed.  `R_AddEditorSurfsCmd` sorts the
-// pass's surfs with `Editor_SurfCompare` (r_ed_scene.cpp:182-198), whose keys are
+// pass's surfs with `Editor_SurfCompare` (r_ed_scene.cpp:199-215), whose keys are
 // **sortKey, then techType, then firstIndex**.  A patch's FILLED front and its
 // unselected `PM_BACK_FACE` wireframe are emitted from the SAME material, so they
 // carry the SAME sortKey — and `TECHNIQUE_WIREFRAME_SHADED` (29) is numerically
@@ -10196,7 +10198,7 @@ extern bool MaterialDef_15_Drawflag_Multiply( int drawFlags, MaterialDef *m );
 // from behind, round AY's "a patch has one side" case — nothing else draws at
 // that depth and the wireframe is exactly as visible as it always was.  The bias
 // stays INSIDE the material's own 100-wide bucket (`Editor_MaterialSortKey` is
-// `100 * primarySortKey`, r_ed_scene.cpp:173-176), so no other material's bucket
+// `100 * primarySortKey`, r_ed_scene.cpp:190-193), so no other material's bucket
 // can be crossed by it.
 static bool Patch_Fill_Emit( patch_t *inst, Material *mtlOverride, int face, int techType,
                              int sortKeyBias = 0 )
@@ -10375,4 +10377,41 @@ patch_t *PMESH_55(patchMesh_t *def)
         p->version  = (short)( def->version - 1 );
     }
     return p;
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+//  KIWI-UX — Patch_KiwiEnsureLmapCoords
+//
+//  The LIGHTMAP-LAYER arm of Patch_KiwiFinishNewLike (:1542-1548), on its own.
+//  Same three statements, same constants, same order:
+//      terrain -> Patch_TerrainTexProject( p, 1, 16 )   else PMESH_02( p, 1, 16 )
+//      size_of_struct_0x504C = 16      (what Patch_Write serialises, :1146)
+//      bDirty = 1                      (the gate that makes it serialise at all)
+//
+//  It exists because the two workers are file-static ported internals with
+//  IDA-pinned float behaviour — the same argument Patch_KiwiFinishNew (:1558) and
+//  Patch_KiwiLmapAlign (:2875) both make for their own forwarders — and because
+//  the public spellings that would otherwise reach them are wrong for a REPAIR:
+//  Patch_Lightmap_Texturing (:2821) walks selected_brushes and opens its own undo
+//  bracket, and Patch_Lightmap_Texturing_Sub (:2792) re-lays whichever layer the
+//  edit layer currently is, which for a repair must be layer 1 unconditionally.
+//
+//  The caller is kiwi_material.cpp's KiwiMtl_EnsurePatchLayers, for a patch whose
+//  lightmap-layer control texCoords are flat or non-finite — a state no ported
+//  creator produces, so no ported caller is changed and no ported behaviour moves.
+//
+//  It does NOT rebuild curveDef: layer-1 texCoords do not participate in the
+//  tessellation geometry, and the callers that need a rebuild (the creators)
+//  already do one of their own.
+// ════════════════════════════════════════════════════════════════════════════
+void Patch_KiwiEnsureLmapCoords( patchMesh_t *p )
+{
+    if ( !p )
+        return;
+    const bool terrain = ( p->type & PATCH_TERRAIN ) != 0;
+    if ( terrain ) Patch_TerrainTexProject( p, 1, 16.0f );
+    else           PMESH_02( p, 1, 16.0f );
+    *(float *)&p->size_of_struct_0x504C = 16.0f;
+    p->bDirty = 1;
+    ++p->version;
 }

@@ -110,6 +110,30 @@ struct kiwiMatFields_t
 // on failure nothing is left behind.
 bool KiwiMat_Write( int templateIndex, const kiwiMatFields_t *f, char *err, size_t errSz );
 
+// Read the active raw material through the same parser the template writer uses.  Unlike
+// KiwiMat_Verify this does not require a semantic-2 colorMap, because legacy 2d materials
+// commonly carry their only image in semantic 0.  In that case colorMapImage is the first
+// real non-water image and colorMapSemantic records where it came from.
+struct kiwiMatSource_t
+{
+    unsigned char  gameFlags;
+    unsigned char  sortKey;
+    unsigned char  usage;
+    unsigned short toolFlags;
+    unsigned int   locale;
+    unsigned short autoTexScaleWidth;
+    unsigned short autoTexScaleHeight;
+    int            surfaceFlags;
+    int            contents;
+    unsigned int   refStateBits[2];
+    char           techSet[64];
+    char           colorMapImage[64];
+    unsigned char  colorMapSemantic;
+    char           normalMapImage[64];
+    char           specularMapImage[64];
+};
+bool KiwiMat_ReadSource( const char *name, kiwiMatSource_t *outInfo, char *err, size_t errSz );
+
 // Round-trip gate stage 2 + 3: register the material through the engine's own loader (which
 // proves the .iwi too), then re-read the header off disk and apply the browser gate to it.
 struct kiwiMatVerify_t

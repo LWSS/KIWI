@@ -19,6 +19,7 @@
 #include "kiwi_dupe.h"
 #include "kiwi_csg.h"                 // KIWI-UX (CLEANUP, B-10): KiwiCsg_BrushUsable
 #include "kiwi_command.h"
+#include "kiwi_fmt.h"
 #include "kiwi_conselect.h"        // ROUND K — Shift+D over brush EDGES
 #include "kiwi_construct.h"        // ROUND AA, ITEM 8 — the array's line vector
 #include "kiwi_grid.h"
@@ -910,9 +911,12 @@ namespace
 
             if ( m_radial )
             {
+                char step[32];
                 _snprintf( m_hud, sizeof( m_hud ),
-                           "radial array  count %i  (type a count; %.3g deg step)%s",
-                           m_count, (double)( 360.0f / (float)m_count ), ref );
+                           "radial array  count %i  (type a count; %s deg step)%s",
+                           m_count,
+                           KiwiFmt_Num( step, sizeof( step ), 360.0f / (float)m_count ),
+                           ref );
             }
             else if ( m_lineHave )
             {

@@ -96,7 +96,10 @@ void Prefs_SetDefaults( prefData_t *p )
     p->model_origin_size      = 4.0f;
     p->prefab_origin_size     = 16.0f;
     p->enable_light_preview   = 1;            // ctor dword_25D6068 = 1
-    p->preview_sun_aswell     = 0;            // ctor dword_25D606C = 0
+    // KIWI-UX: game-lighting preview is now the useful default.  A new key below gives
+    // existing profiles this default once without reviving their legacy debug-off value.
+    p->preview_sun_aswell     = 1;
+    p->light_preview_real_intensity = 1;
     p->m_strLastProject       = "";
     p->m_strLastMap           = "";
     p->which_game             = "";
@@ -202,7 +205,13 @@ void Prefs_LoadPrefs( prefData_t *p )
     p->model_origin_size      = (float)(unsigned int)Radiant_ProfileGetInt( "Prefs", "ModelOrgSize", 4 );
     p->prefab_origin_size     = (float)(unsigned int)Radiant_ProfileGetInt( "Prefs", "PrefabOrgSize", 16 );
     p->enable_light_preview   = Radiant_ProfileGetInt( "Prefs", "LightPreviewEnable", 1 );
-    p->preview_sun_aswell     = Radiant_ProfileGetInt( "Prefs", "SunLightPreviewEnable", 0 );
+    // KIWI-UX: these are deliberately new keys.  Existing profiles therefore receive each
+    // safer default once; the first subsequent preference save makes the choice durable.
+    p->preview_sun_aswell     = Radiant_ProfileGetInt( "Prefs", "SunLightPreviewGameLighting", 1 );
+    p->light_preview_real_intensity = Radiant_ProfileGetInt( "Prefs", "LightPreviewRealIntensity", 1 );
+    // IDB 0x407180: despite its name, true is the REAL entity-intensity branch; false
+    // selects retail's saturating 10000000 path.
+    g_qeglobals.preview_at_max_intensity = p->light_preview_real_intensity != 0;
     // The binary re-reads VertSnap* under the Snap* keys (the later read wins).
     p->m_bVertSnapModel       = Radiant_ProfileGetInt( "Prefs", "SnapModel", 0 );
     p->m_bVertSnapBrush       = Radiant_ProfileGetInt( "Prefs", "SnapBrush", 0 );
@@ -300,7 +309,12 @@ void Prefs_SavePrefs( prefData_t *p )
     Radiant_ProfileSetInt( "Prefs", "ModelOrgSize", (int)p->model_origin_size );
     Radiant_ProfileSetInt( "Prefs", "PrefabOrgSize", (int)p->prefab_origin_size );
     Radiant_ProfileSetInt( "Prefs", "LightPreviewEnable", p->enable_light_preview );
+    // KIWI-UX: keep the legacy sun value current for older installs, but load only the new migration
+    // key above so an existing legacy zero cannot defeat the new default.
     Radiant_ProfileSetInt( "Prefs", "SunLightPreviewEnable", p->preview_sun_aswell );
+    Radiant_ProfileSetInt( "Prefs", "SunLightPreviewGameLighting", p->preview_sun_aswell );
+    p->light_preview_real_intensity = g_qeglobals.preview_at_max_intensity ? 1 : 0;
+    Radiant_ProfileSetInt( "Prefs", "LightPreviewRealIntensity", p->light_preview_real_intensity );
     Radiant_ProfileSetInt( "Prefs", "SnapModel", p->m_bVertSnapModel );
     Radiant_ProfileSetInt( "Prefs", "SnapBrush", p->m_bVertSnapBrush );
     Radiant_ProfileSetInt( "Prefs", "SnapPrefab", p->m_bVertSnapPrefab );
@@ -322,6 +336,9 @@ void Prefs_Init( bool loadFromRegistry )
     Prefs_SetDefaults( g_PrefsDlg );
     if ( loadFromRegistry )
         Prefs_LoadPrefs( g_PrefsDlg );
+    else
+        g_qeglobals.preview_at_max_intensity =
+            g_PrefsDlg->light_preview_real_intensity != 0;
 }
 
 // One preferences-dialog control snapshot: every DDX-backed member of CPrefsDlg below

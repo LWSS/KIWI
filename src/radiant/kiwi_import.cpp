@@ -10,6 +10,7 @@
 #include <imgui/imgui.h>
 
 #include "kiwi_command.h"
+#include "kiwi_fmt.h"
 #include "kiwi_import.h"
 #include "kiwi_iwi.h"
 #include "kiwi_matwriter.h"
@@ -1287,13 +1288,17 @@ void KiwiImport_Draw()
     ImGui::SameLine();
     ImGui::TextDisabled( "(?)" );
     if ( ImGui::IsItemHovered() )
+    {
+        char sampleSize[32];
         ImGui::SetTooltip( "How much WORLD SPACE one copy of the texture covers.\n"
                            "Every wall in the shipped maps repeats every 128 units.\n\n"
                            "Stored as autoTexScaleWidth/Height = units / sample size\n"
-                           "(%g here), which the texture browser also uses as the\n"
+                           "(%s here), which the texture browser also uses as the\n"
                            "thumbnail size.  A fresh face's texdef is seeded with\n"
                            "autoTexScale * sample size, i.e. with this number.",
-                           (double)ImportSampleSize() );
+                           KiwiFmt_Num( sampleSize, sizeof( sampleSize ),
+                                        ImportSampleSize() ) );
+    }
     {
         // The derived header value plus the texel density it implies for THIS source.
         const bool haveSrc = s_srcOk[SLOT_COLOR];

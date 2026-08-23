@@ -23,6 +23,7 @@
 #include "kiwi_bevel.h"                 // the chamfer frame + appender (ROUND Q exports)
 #include "kiwi_camera.h"                // ROUND AI, ITEM 2 — KCAM_RAYAXIS_MIN_DEN
 #include "kiwi_command.h"
+#include "kiwi_fmt.h"
 #include "kiwi_lines.h"
 #include "kiwi_material.h"              // ROUND T — R6, the patch material realize
 #include "kiwi_numeric.h"
@@ -1529,6 +1530,17 @@ namespace
                 // the inherited material a REAL material before anything asks.
                 KiwiMtl_RealizePatch( p );
 
+                // ── …AND A COPIED CHANNEL CAN BE EMPTY, NOT ONLY UNREALIZED ──
+                // The two lines above copy the source face's channel 0 and 1
+                // POINTER PAIRS verbatim, so a source whose lightmap channel is
+                // missing or unnamed hands this patch the same hole — and a patch
+                // with a dead lightmap channel is invisible in the Shift+L render
+                // method AND compiles with no baked light or sun shadow at all.
+                // The fallback is MakeNewPatch's own default triple, so a repaired
+                // patch is exactly what a fresh one would have carried.  No-op on
+                // a sound copy, which is every ordinary edge.
+                KiwiMtl_EnsurePatchChannels( p );   // kiwi_material.h:250
+
                 // ── KIWI-UX (ROUND AJ, ITEM 2): NATURALIZE AT THE PARENT'S SCALE ──
                 // USER DIRECTIVE, verbatim: "Also the Texture should be fixed so it
                 // looks natural with the parent solid edge area."  The MATERIAL was
@@ -1741,6 +1753,9 @@ namespace
                 p->texture  = *(patchMesh_material *)&src->mtldef[0].lyrMtl;
                 p->lightmap = *(patchMesh_material *)&src->mtldef[1].lyrMtl;
                 KiwiMtl_RealizePatch( p );
+                // The cap copies the same two channels the arc does, so it needs
+                // the same guard for the same reason — see the arc's own call.
+                KiwiMtl_EnsurePatchChannels( p );   // kiwi_material.h:250
                 Patch_KiwiFinishNewLike( p, &src->mtldef[0].mat_texDef );
                 Patch_KiwiLmapAlign( p );         // ROUND AM — "for all parts"
 
@@ -1801,9 +1816,12 @@ namespace
                                     * ( 180.0f / KPF_PI );
                 char bias[48] = { 0 };
                 if ( fabsf( m_biasDeg ) > 1.0e-3f || m_hasBias )
-                    _snprintf( bias, sizeof( bias ), "  bias %.4g deg%s",
-                               (double)applied,
+                {
+                    char appliedText[32];
+                    _snprintf( bias, sizeof( bias ), "  bias %s deg%s",
+                               KiwiFmt_Num( appliedText, sizeof( appliedText ), applied, 4 ),
                                ( fabsf( applied - m_biasDeg ) > 0.05f ) ? " (clamped)" : "" );
+                }
                 _snprintf( m_hud, sizeof( m_hud ),
                            "bevel  %i edge(s)  d %s%s  (D: curve it)",
                            (int)m_units.size(), b, bias );

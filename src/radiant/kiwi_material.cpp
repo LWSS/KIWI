@@ -338,3 +338,322 @@ void KiwiMtl_InfoCommand()
         Sys_Printf( "  face %i name        \"%s\"\n", hit.item.faceIndex, md->radMtl->name );
     PrintOne( "face under cursor", md->radMtl ? md->radMtl->handle : 0 );
 }
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  MATERIAL-LAYER INTEGRITY (kiwi_material.h "the three channels")
+// ═════════════════════════════════════════════════════════════════════════════
+// The rules, the compiler consequence and the retail defaults are written out on
+// the declarations in kiwi_material.h.  This side is the mechanism, and it does
+// its repairing THROUGH the ported helpers, never around them:
+// Face_InitMaterialChannel for a face's channels and SetMaterial for a patch's.
+// Nothing here invents a material name the ported code does not already use.
+
+extern int   Face_InitMaterialChannel( unsigned int textureChannel, face_t *faceDef,
+                                       MaterialDef *src );                     // brush.cpp:417  (0x472C90)
+extern void  SetMaterial( const char *tex_name, patchMesh_material *mtlDef );  // materialdef.cpp:101 (0x4315C0)
+extern qtexture_s *MaterialDef_GetLayeredMaterial( MaterialDef *mtlDef );      // materialdef.cpp:168 (0x4314A0)
+namespace LayerMat { int GetCurrentLayer( MaterialDef *def ); }                // materialdef.cpp:252 (0x431B30)
+extern void  MarkMapModified( void );                                          // win_qe3.cpp:195 (0x499BB0)
+extern entity_s entities;                                                      // entity.cpp:295 (0x23F17A0)
+// pmesh.cpp — the per-patch lightmap-layer texCoord pass, the same one every
+// patch creator runs (Patch_KiwiFinishNewLike's layer-1 arm).
+extern void  Patch_KiwiEnsureLmapCoords( patchMesh_t *p );                     // pmesh.cpp:10405
+
+namespace
+{
+    // The retail defaults, as the ported code spells them.
+    //  - faces:   channel names from Face_InitMaterialChannel (brush.cpp:420) and
+    //             the sample sizes Radiant_SeedCurrentTexdefs installs into
+    //             random_texture_stuff (mainfrm.cpp:742-745): 0.25 / 16 / 0.25.
+    //  - patches: MakeNewPatch's own three names (pmesh.cpp:145-147) — note the
+    //             SMOOTHING default differs from a face's ("smoothing_smooth",
+    //             which is also the name Patch_Write omits, pmesh.cpp:1141).
+    const char *const KMTL_PATCH_CHANNEL[3] = { "$default", "lightmap_gray", "smoothing_smooth" };
+    const float       KMTL_CHANNEL_SAMPLE[3] = { 0.25f, 16.0f, 0.25f };
+
+    bool IsFiniteNonZero( float v )
+    {
+        // The compiler's own test (a zero texture scale is fatal there), plus the
+        // INF/NAN exponent test the ported patch writer uses (pmesh.cpp:1096).
+        if ( v == 0.0f )
+            return false;
+        return ( *(const unsigned int *)&v & 0x7F800000u ) != 0x7F800000u;
+    }
+
+    // A face channel is intact when it names a material AND the texdef of its
+    // CURRENT sub-layer carries a usable scale pair.  Both halves matter: an
+    // unnamed channel crashes Materialdef_GetName on save, and a zero scale is
+    // what makes the compiler drop the surface from lightmapping.
+    bool FaceChannelIsValid( face_t *f, int channel )
+    {
+        MaterialDef *md = &f->mtldef[channel];
+        if ( !HasMaterial( md ) )
+            return false;
+        const char *name = (const char *)Materialdef_GetName( md );
+        if ( !name || !name[0] )
+            return false;
+        const float *size = &md->mat_texDef.size[ 7 * LayerMat::GetCurrentLayer( md ) ];
+        return IsFiniteNonZero( size[0] ) && IsFiniteNonZero( size[1] );
+    }
+
+    // Force a channel's scale pair when the ported init could not write one.
+    // Init_MaterialLayer (materialdef.cpp:351) loops MaterialDef_04 times, so a
+    // material that resolved DEGENERATE (layerCount 0 — the headless / prefab-load
+    // shim, materialdef.cpp:110) leaves mat_texDef untouched at zero.  The values
+    // are the ones Ed_BuildClipFaceMaterial_Kiwi writes for the same three
+    // channels (xywnd.cpp:2293-2312).
+    void ForceChannelScale( face_t *f, int channel )
+    {
+        MaterialDef *md = &f->mtldef[channel];
+        qtexture_s  *t  = MaterialDef_GetLayeredMaterial( md );
+        const int    w  = t ? t->width  : 512;
+        const int    h  = t ? t->height : 512;
+        float       *size = &md->mat_texDef.size[ 7 * LayerMat::GetCurrentLayer( md ) ];
+        if ( !IsFiniteNonZero( size[0] ) ) size[0] = (float)w * KMTL_CHANNEL_SAMPLE[channel];
+        if ( !IsFiniteNonZero( size[1] ) ) size[1] = (float)h * KMTL_CHANNEL_SAMPLE[channel];
+    }
+
+    bool PatchChannelIsValid( patchMesh_t *p, int channel )
+    {
+        MaterialDef *md = (MaterialDef *)( &p->texture + channel );
+        if ( !HasMaterial( md ) )
+            return false;
+        const char *name = (const char *)Materialdef_GetName( md );
+        return name && name[0];
+    }
+
+    // Are this patch's LIGHTMAP-layer control texCoords degenerate?  The lightmap
+    // pair is texCoord floats [2],[3] (pmesh_texcoord, qedefs.h:159).  DEGENERATE
+    // here means the grid carries NO lightmap parametrisation at all — every
+    // control point on the same S and the same T, or a non-finite coordinate.
+    // That is the case the compiler cannot build lightmap vectors from.
+    //
+    // Deliberately NOT "one of the two axes is constant": a legitimately thin or
+    // collapsed patch can produce that, and a repair that fires on it would rewrite
+    // (and re-dirty) the same map on every load.  The test is for a channel with
+    // nothing in it, not for a channel that is unusual.
+    bool PatchLmapCoordsDegenerate( const patchMesh_t *p )
+    {
+        if ( p->width < 2 || p->height < 2 )
+            return false;                     // nothing to be degenerate ABOUT
+        const float *first = &p->ctrl[0][0].texCoord.st[2];
+        bool varies = false;
+        for ( int col = 0; col < p->width; ++col )
+        {
+            for ( int row = 0; row < p->height; ++row )
+            {
+                const float *lm = &p->ctrl[col][row].texCoord.st[2];
+                if ( ( *(const unsigned int *)&lm[0] & 0x7F800000u ) == 0x7F800000u ||
+                     ( *(const unsigned int *)&lm[1] & 0x7F800000u ) == 0x7F800000u )
+                    return true;              // INF/NAN — worse than flat
+                if ( lm[0] != first[0] || lm[1] != first[1] )
+                    varies = true;
+            }
+        }
+        return !varies;
+    }
+}
+
+bool KiwiMtl_FaceLayersAreValid( face_t *f )
+{
+    if ( !f )
+        return true;
+    for ( int c = 0; c < 3; ++c )
+        if ( !FaceChannelIsValid( f, c ) )
+            return false;
+    return true;
+}
+
+bool KiwiMtl_EnsureFaceLayers( face_t *f )
+{
+    if ( !f )
+        return false;
+    // The sound case, and it is the overwhelmingly common one: nothing to do and
+    // nothing to realize.  Every creation path calls this, so the fast answer is
+    // the one that has to be free.
+    if ( KiwiMtl_FaceLayersAreValid( f ) )
+        return false;
+
+    bool repaired = false;
+
+    // PER CHANNEL, not per face.  Face_SetDefaultMaterials (brush.cpp:434) is the
+    // spelling Brush_Create uses, but it rewrites channels 1 AND 2 unconditionally,
+    // which would throw away a hand-picked smoothing material to fix a lightmap
+    // one.  So the repair goes through the primitive that helper itself calls,
+    // Face_InitMaterialChannel (brush.cpp:417), one channel at a time — same
+    // material names, same Init_MaterialLayer, same result for the channel that
+    // was broken and nothing at all for the two that were not.
+    //
+    // The sample size is read from the same place Face_SetDefaultMaterials reads
+    // it, the per-edit-layer current-texture template (qe3.h:939), and falls back
+    // to the values the boot seeds it with (mainfrm.cpp:742-745) when the template
+    // is still unseeded.  Init_MaterialLayer takes it as the FLOAT BIT PATTERN
+    // reinterpreted as a pointer (materialdef.cpp:348-356).
+    for ( int c = 0; c < 3; ++c )
+    {
+        if ( FaceChannelIsValid( f, c ) )
+            continue;
+        float sample = g_qeglobals.random_texture_stuff[c].sampleSize;
+        if ( !IsFiniteNonZero( sample ) )
+            sample = KMTL_CHANNEL_SAMPLE[c];
+        MaterialDef *sampleBits = 0;
+        memcpy( &sampleBits, &sample, sizeof( sample ) );
+        Face_InitMaterialChannel( (unsigned int)c, f, sampleBits );
+        repaired = true;
+    }
+
+    // ...and the belt: a channel whose material resolved degenerate keeps a zero
+    // scale even after the ported init ran (see ForceChannelScale).
+    for ( int c = 0; c < 3; ++c )
+    {
+        MaterialDef *md   = &f->mtldef[c];
+        const float *size = &md->mat_texDef.size[ 7 * LayerMat::GetCurrentLayer( md ) ];
+        if ( !IsFiniteNonZero( size[0] ) || !IsFiniteNonZero( size[1] ) )
+        {
+            ForceChannelScale( f, c );
+            repaired = true;
+        }
+    }
+
+    if ( repaired )
+        KiwiMtl_RealizeFace( f );
+    return repaired;
+}
+
+bool KiwiMtl_EnsurePatchChannels( patchMesh_t *p )
+{
+    if ( !p )
+        return false;
+
+    bool repaired = false;
+    for ( int c = 0; c < 3; ++c )
+    {
+        if ( PatchChannelIsValid( p, c ) )
+            continue;
+        SetMaterial( KMTL_PATCH_CHANNEL[c], &p->texture + c );
+        repaired = true;
+    }
+
+    if ( repaired )
+        KiwiMtl_RealizePatch( p );
+    return repaired;
+}
+
+bool KiwiMtl_EnsurePatchLayers( patchMesh_t *p )
+{
+    if ( !p )
+        return false;
+
+    bool repaired = KiwiMtl_EnsurePatchChannels( p );
+
+    // The lightmap CHANNEL being present is not the same as the lightmap LAYER
+    // being parametrised; both are needed or the surface compiles unlit.
+    //
+    // Re-tested AFTER the pass, and only then counted: the ported layer-1 pass can
+    // legitimately answer "flat" for a patch whose geometry gives it nothing to
+    // spread over, and reporting THAT as a repair would mark the map modified on
+    // every single load without changing a byte.  Overwriting a channel that was
+    // already empty loses nothing either way.
+    if ( PatchLmapCoordsDegenerate( p ) )
+    {
+        Patch_KiwiEnsureLmapCoords( p );
+        if ( !PatchLmapCoordsDegenerate( p ) )
+            repaired = true;
+    }
+    return repaired;
+}
+
+bool KiwiMtl_EnsureBrushLayers( brush_t *def )
+{
+    if ( !def )
+        return false;
+    if ( def->patch )
+        return KiwiMtl_EnsurePatchLayers( def->patch );
+
+    bool repaired = false;
+    for ( int i = 0; def->faces && i < def->faceCount; ++i )
+        if ( KiwiMtl_EnsureFaceLayers( &def->faces[i] ) )
+            repaired = true;
+    return repaired;
+}
+
+// ── THE TESSELLATION-CAPACITY DIAGNOSTIC ─────────────────────────────────────
+// Report only — it changes nothing, and it exists because the editor mesh path is
+// 16-BIT END TO END and nothing on it says so out loud:
+//   * Patch_Fill_BuildFrontIndices writes every vertex index as `(uint16_t)`
+//     (pmesh.cpp:9885-9892), so a tessellated grid with more than 65536 vertices
+//     WRAPS its indices back to the start of the grid;
+//   * Editor_AddMeshCmd stores vertCount and indexCount as uint16 with a
+//     non-fatal assert either side (r_ed_scene.cpp:131-134);
+//   * one editor vertex buffer holds exactly 65536 verts (r_ed_vertbuf.cpp:38),
+//     and Editor_VB_Upload's own `vertCount <= ED_VERTBUF_VERTEX_COUNT` check is
+//     a non-fatal assert too (r_ed_vertbuf.cpp:409).
+// A patch over either cap therefore draws triangles whose corners resolve to
+// unrelated vertices — geometry that runs off to wherever those vertices happen
+// to be — rather than failing visibly.  Patch_GenericMesh2's subdivision can
+// reach a 511x511 grid (pmesh.cpp:219-220 CURVE_GRID_DIM), i.e. 261121 verts, so
+// the cap is reachable from a high subdivision level on a large control grid.
+//
+// Naming the patch on the console turns that into something a mapper can act on
+// (lower the patch's subdivision, or split it) and something a later round can
+// reproduce.  Once per sweep per patch; silent for every patch inside the caps.
+static void KiwiMtl_ReportPatchTessellationCap( const patchMesh_t *p )
+{
+    const curvePatchDef_t *cd = p ? p->curveDef : 0;
+    if ( !cd )
+        return;
+    const int verts = cd->width * cd->height;
+    const int indices = ( cd->height - 1 ) * ( 6 * cd->width - 6 );   // indexCount, pmesh.cpp:9905
+    if ( verts <= 0xFFFF && indices <= 0xFFFF )
+        return;
+    const char *name = "?";
+    MaterialDef *md = (MaterialDef *)&p->texture;
+    if ( HasMaterial( md ) )
+        name = (const char *)Materialdef_GetName( md );
+    Sys_Printf( "Patch tessellation over the editor's 16-bit mesh cap: \"%s\" %ix%i control "
+                "grid, subdiv %i -> %ix%i tessellated (%i verts, %i indices).  It will draw "
+                "stray geometry; lower its subdivision level or split it.\n",
+                name, p->width, p->height, p->subDivType,
+                cd->width, cd->height, verts, indices );
+}
+
+int KiwiMtl_HealMapLayers( int *outBrushes, int *outPatches )
+{
+    int brushes = 0;
+    int patches = 0;
+
+    // The MAP's own brush set, walked exactly as the writer walks it so nothing
+    // that will be serialised is missed: per entity, the DEF list runs from
+    // brushes.prev (entity+0x0C) to the &def sentinel (entity+0x08) via onext
+    // (map.cpp:1592).
+    for ( entity_s *e = entities.next; e != &entities; e = e->next )
+    {
+        brush_t *sentinel = (brush_t *)&e->def;
+        for ( brush_t *b = (brush_t *)e->brushes.prev; b && b != sentinel; b = b->onext )
+        {
+            const bool didRepair = KiwiMtl_EnsureBrushLayers( b );
+            if ( b->patch )
+                KiwiMtl_ReportPatchTessellationCap( b->patch );
+            if ( !didRepair )
+                continue;
+            if ( b->patch ) ++patches;
+            else            ++brushes;
+        }
+    }
+
+    if ( outBrushes ) *outBrushes = brushes;
+    if ( outPatches ) *outPatches = patches;
+    return brushes + patches;
+}
+
+void KiwiMtl_HealMapLayersOnLoad()
+{
+    int       brushes = 0, patches = 0;
+    const int total = KiwiMtl_HealMapLayers( &brushes, &patches );
+    if ( !total )
+        return;
+    Sys_Printf( "Material layers: repaired %i brush(es) and %i patch(es) carrying a missing or "
+                "zero-scale lightmap/smoothing layer.  Save to keep the repair.\n",
+                brushes, patches );
+    MarkMapModified();
+}

@@ -30,6 +30,18 @@ struct IDirect3DTexture9;
 // may enqueue a load.
 IDirect3DTexture9 *KiwiEntThumb_Get( const eclass_t *ec, bool mayRequest );
 
+// The same cache and renderer, addressed directly by xmodel name for the Models
+// browser.  Entity-class and direct-name requests for the same xmodel share one
+// texture and one pending-request budget.
+IDirect3DTexture9 *KiwiEntThumb_GetModel( const char *xmodelName, bool mayRequest );
+
+// Direct-name metadata populated by the guarded thumbnail load.  Bounds become
+// available as soon as the xmodel registers; a hard load/render failure remains
+// cached so the browser can grey that tile instead of retrying it every frame.
+bool KiwiEntThumb_GetModelBounds( const char *xmodelName,
+                                  float outMins[3], float outMaxs[3] );
+bool KiwiEntThumb_ModelFailed( const char *xmodelName );
+
 // One bounded render step: at most one thumbnail, only when one is pending.  Called from
 // ImGuiShell_RenderViewportsToRT, i.e. outside the compositing bracket and before
 // ImGuiShell_BeginFrame, under the RTT_DeviceHealthy() gate that function already makes.

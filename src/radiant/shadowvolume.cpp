@@ -27,6 +27,7 @@ int g_svBatchKB       = 0;   // bytes those batches copy into the render command
 // Assert/Sys_Printf — defined in engine_stubs.cpp (same pattern as all other radiant TUs).
 extern void Assert( const char *file, int line, int type, const char *fmt, ... );
 extern int  Sys_Printf( const char *fmt, ... );
+extern int  Entity_GetIntValueForKey( int e, const char *key );
 
 // ─────────────────────────────────────────────────────────────────────────────
 // R_AddRenderCmdDrawTris (0x4FD1C0) — not declared in kisak headers for KISAK_RADIANT.
@@ -680,6 +681,12 @@ static char Patch_AddShadowSilhouette( orientation_t *orient, patch_t *patch, co
 // it inside the asset-load guard bracket (see the call site below).
 char Radiant_ShadVol_ModelShadowArm( selbrush_t *sb, orientation_t *orient, const float *light )
 {
+    // KIWI-UX: cod4.def assigns misc_model spawnflag 2 = NO_SHADOW and 4 =
+    // NO_STATIC_SHADOWS; cod4rad's mapio caster policy suppresses them before geometry
+    // extraction.  This function is precisely the fixed-size misc_model shadow arm.
+    entity_s_def *ed = ( sb && sb->owner ) ? (entity_s_def *)sb->owner->def : nullptr;
+    if ( ed && ( Entity_GetIntValueForKey( (int)(intptr_t)ed, "spawnflags" ) & 6 ) != 0 )
+        return 0;
     if ( !Entity_HasRenderableModel( (brush_t_with_custom_def *)sb, (int)orient ) )  // 0x47b2e1
         return 0;
     return SunLightPreview_DrawModelShadow( sb, orient, light );                     // 0x47b2f0
@@ -695,7 +702,7 @@ static void SunLightPreview_BrushShadow( selbrush_t *listHead, orientation_t *or
 // owner -> the misc_model arm, gated on def->unk01 LOBYTE (modelFailed) == 0 and
 // Entity_HasRenderableModel; (4) else the convex face fan.
 // PREFAB CONTENTS are the CALLER's recursion (0x47b310), not handled here.
-static void SunLightPreview_DrawBrushShadow( const float *light, selbrush_t *sb, orientation_t *orient )
+void SunLightPreview_DrawBrushShadow( const float *light, selbrush_t *sb, orientation_t *orient )
 {
     patch_t *patch = sb->patch;                              // 0x47b2a7
     if ( patch )

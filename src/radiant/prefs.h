@@ -91,8 +91,9 @@ struct prefData_t
     int   camera_use_wheel;       // "CameraUseWheel"          (1)
     float model_origin_size;      // "ModelOrgSize"            (4)
     float prefab_origin_size;     // "PrefabOrgSize"           (16)
-    int   enable_light_preview;   // "LightPreviewEnable"      (1) — light/sun preview gate
-    int   preview_sun_aswell;     // "SunLightPreviewEnable"   (0) — sun shading in preview
+    int   enable_light_preview;   // "LightPreviewEnable"             (1) — light/sun preview gate
+    int   preview_sun_aswell;     // "SunLightPreviewGameLighting"    (1) — sun shading in preview
+    int   light_preview_real_intensity; // "LightPreviewRealIntensity" (1) — true uses entity intensity
     // ── string settings (CString; not consumed by the wired band-aids yet, but
     //    persisted faithfully so the round-trip is complete) ──────────────────────
     std::string m_strLastProject;     // "LastProject"

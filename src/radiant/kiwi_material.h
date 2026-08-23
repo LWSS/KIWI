@@ -204,3 +204,66 @@ bool KiwiMtl_Diagnose( Material *handle, kiwiMatDiag_t *out );
 
 // kiwi_material.cpp — the palette command's body (KIWI_CMD_MATINFO).
 void KiwiMtl_InfoCommand();
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  MATERIAL-LAYER INTEGRITY — "the three channels"
+// ═════════════════════════════════════════════════════════════════════════════
+// A CoD4 face carries THREE material channels and a patch carries the same
+// triple:
+//     mtldef[0] / patchMesh_t.texture    base colormap
+//     mtldef[1] / patchMesh_t.lightmap   lightmap  ("lightmap_gray")
+//     mtldef[2] / patchMesh_t.smoothing  smoothing ("smoothing_hard" on a face,
+//                                        "smoothing_smooth" on a patch)
+// Retail Radiant fills all three on every face it makes: Brush_Alloc memcpy's
+// the current template into channel 0 (brush.cpp:496) and then
+// Brush_SetDefaultMaterials -> Face_SetDefaultMaterials (brush.cpp:434) fills
+// channels 1 and 2 through Face_InitMaterialChannel (brush.cpp:417).  MakeNewPatch
+// (pmesh.cpp:136) does the patch equivalent with three SetMaterial calls.
+//
+// WHY IT MATTERS BEYOND THE VIEWPORT.  A surface whose LIGHTMAP channel is
+// missing, unnamed, or carries a zero texture scale is not merely invisible in
+// the editor's Shift+L (lightmap) render method — it compiles with no lightmap at
+// all: the map compiler needs a non-zero lightmap scale to build the surface's
+// lightmap vectors, and a surface without them receives no baked light and no
+// baked sun-shadow mask.  Nothing in the editor says so, which is why this is an
+// invariant with a repair rather than a warning.
+//
+// The repair always runs through the PORTED helpers named above, so a repaired
+// channel is byte-for-byte what Brush_Create / MakeNewPatch would have produced.
+// The one addition is a scale backstop: Init_MaterialLayer (materialdef.cpp:351)
+// writes mat_texDef only for materials that resolved to at least one layer, so a
+// channel whose material came back degenerate keeps its zero scale even after the
+// ported init; that case is filled with the same width*sampleSize product
+// Ed_BuildClipFaceMaterial_Kiwi uses (xywnd.cpp:2293).
+
+// True when all three of a face's channels name a material AND carry a finite,
+// non-zero texture scale.  A null face answers true (nothing to be wrong).
+bool KiwiMtl_FaceLayersAreValid( face_t *f );
+
+// Repair whichever of a face's three channels is missing, unnamed or zero-scaled.
+// Returns true when something was repaired.  Touches no other field of the face.
+bool KiwiMtl_EnsureFaceLayers( face_t *f );
+
+// The patch equivalent for the three MATERIAL channels only, falling back to
+// MakeNewPatch's own default triple.  This is what a CREATOR wants: it runs
+// before the creator's own texCoord pass, which needs the channels to resolve.
+bool KiwiMtl_EnsurePatchChannels( patchMesh_t *p );
+
+// The channels AND the LIGHTMAP-layer control texCoords: re-lays them when the
+// grid has no lightmap parametrisation left at all (every control point on the
+// same S AND the same T, or an INF/NAN coordinate).  This is what a REPAIR of an
+// existing patch wants; a creator would only make its own texCoord pass run
+// twice.  Returns true when something was repaired.
+bool KiwiMtl_EnsurePatchLayers( patchMesh_t *p );
+
+// Dispatch on a brush DEF: its patch when it owns one, else all of its faces.
+bool KiwiMtl_EnsureBrushLayers( brush_t *def );
+
+// Sweep every brush the map would serialise (the per-entity def lists, walked as
+// MapFile_WriteEntity walks them).  Returns the number of repaired brushes +
+// patches; the two out-parameters split that total and may be NULL.
+int  KiwiMtl_HealMapLayers( int *outBrushes, int *outPatches );
+
+// The load-time funnel: sweep, and when anything was repaired report it and mark
+// the map modified so a re-save persists the repair.
+void KiwiMtl_HealMapLayersOnLoad();

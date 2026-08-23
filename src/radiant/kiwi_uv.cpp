@@ -20,6 +20,7 @@
 
 #include "kiwi_uv.h"
 #include "kiwi_command.h"
+#include "kiwi_fmt.h"
 #include "kiwi_hints.h"     // ROUND Z, ITEM 5 — the shared bottom band
 #include "kiwi_numeric.h"
 #include "kiwi_pick.h"
@@ -405,9 +406,11 @@ namespace
 
         void UpdateHud()
         {
-            SetHud( "%s  %s  S %+.0f  T %+.0f  step %g",
+            char step[32];
+            SetHud( "%s  %s  S %+.0f  T %+.0f  step %s",
                     ScopeText(), TargetText(), (double)m_s, (double)m_t,
-                    (double)( SnapActive() ? ClassicGridStep() : 1.0f ) );
+                    KiwiFmt_Num( step, sizeof( step ),
+                                 SnapActive() ? ClassicGridStep() : 1.0f, 6 ) );
         }
 
         float m_s = 0.0f, m_t = 0.0f;
@@ -809,12 +812,15 @@ void KiwiUv_DrawReadout( float imgMinX, float imgMinY, float imgW, float imgH )
     const char *name = (const char *)Materialdef_GetName( md );
 
     char line[320];
+    char shiftS[48], shiftT[48], sizeS[48], sizeT[48], rotate[48];
     _snprintf( line, sizeof( line ),
-               "%s   shift %g, %g   size %g, %g   rot %g   layer %d",
+               "%s   shift %s, %s   size %s, %s   rot %s   layer %d",
                name ? name : "(unnamed)",
-               (double)td->shift[0], (double)td->shift[1],
-               (double)td->size[0],  (double)td->size[1],
-               (double)td->rotate,
+               KiwiFmt_Num( shiftS, sizeof( shiftS ), td->shift[0], 6 ),
+               KiwiFmt_Num( shiftT, sizeof( shiftT ), td->shift[1], 6 ),
+               KiwiFmt_Num( sizeS, sizeof( sizeS ), td->size[0], 6 ),
+               KiwiFmt_Num( sizeT, sizeof( sizeT ), td->size[1], 6 ),
+               KiwiFmt_Num( rotate, sizeof( rotate ), td->rotate, 6 ),
                g_qeglobals.current_edit_layer );
     line[sizeof( line ) - 1] = '\0';
 

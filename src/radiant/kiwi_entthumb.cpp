@@ -43,23 +43,24 @@
 
 #include <map>
 #include <string>
+#include <float.h>
 #include <math.h>
 #include <string.h>
 
 // ── externs, each copied from its definition ────────────────────────────────
 extern void  Radiant_FL_Log( const char *fmt, ... );                             // mainfrm.cpp
-// r_ed_scene.cpp:318 — int __cdecl AddModelToModelInstBuff(XModel*, float*, float)
+// r_ed_scene.cpp:335 — int __cdecl AddModelToModelInstBuff(XModel*, float*, float)
 // (the same spelling entity.cpp:254 uses).  `axis` is TWELVE floats: origin[3] then
-// axis[3][3] — r_ed_scene.cpp:342-345 reads axis[0..2] as the origin and
+// axis[3][3] — r_ed_scene.cpp:359-362 reads axis[0..2] as the origin and
 // AxisToQuat((vec3_t*)(axis+3), ...) for the rotation.  Returns a 1-BASED handle, 0 on
 // failure (XModelBad).
-extern int   AddModelToModelInstBuff( XModel *model, float *axis, float scale );  // r_ed_scene.cpp:358
-extern void  RemoveModelInstFromBuf( int inst );                                  // r_ed_scene.cpp:410
-// r_ed_scene.cpp:880 — the same declaration camwnd.cpp:1635 carries.
+extern int   AddModelToModelInstBuff( XModel *model, float *axis, float scale );  // r_ed_scene.cpp:375
+extern void  RemoveModelInstFromBuf( int inst );                                  // r_ed_scene.cpp:427
+// r_ed_scene.cpp:897 — the same declaration camwnd.cpp:1635 carries.
 extern void  SkinModelInst( int instanceHandle, Material *checkhandle, int techType,
-                            const int *colorPtr, int drawFlags );                 // r_ed_scene.cpp:880
-extern void *R_AddEditorSurfsCmd();                                               // r_ed_scene.cpp:284
-extern void  R_SortMaterials();                                                   // r_ed_scene.cpp:2009
+                            const int *colorPtr, int drawFlags );                 // r_ed_scene.cpp:897
+extern void *R_AddEditorSurfsCmd();                                               // r_ed_scene.cpp:301
+extern void  R_SortMaterials();                                                   // r_ed_scene.cpp:2118
 // engine_stubs.cpp:222-223 — the editor asset-drop recovery frame.
 extern int     g_radiantAssetLoadGuard;                                           // engine_stubs.cpp:222
 extern jmp_buf g_radiantAssetLoadJmp;                                             // engine_stubs.cpp:223
@@ -146,14 +147,23 @@ namespace
     // BUILD arms below stay here, because what makes a thumbnail and what makes a
     // cube-face tile are different questions.
     kiwiTexCache_t s_cache;
-    IDirect3DSurface9                  *s_readback = nullptr;   // SYSTEMMEM, reused
+    IDirect3DSurface9 *s_readback = nullptr;   // SYSTEMMEM, reused
+
+    struct modelMeta_t
+    {
+        bool  haveBounds = false;
+        float mins[3] = { 0.0f, 0.0f, 0.0f };
+        float maxs[3] = { 0.0f, 0.0f, 0.0f };
+    };
+    std::map<std::string, modelMeta_t> s_modelMeta;
 
     // At most ONE pending request, and it is data (not an eclass_t*): a .def reload
     // (Eclass_FreeAll) between the panel draw and the tick would dangle a class pointer,
     // and there is no reason to hold one — the model NAME is everything the render needs.
-    bool s_haveReq = false;
-    char s_reqClass[128];
-    char s_reqModel[128];
+    bool        s_haveReq = false;
+    std::string s_reqKey;
+    std::string s_reqLabel;
+    std::string s_reqModel;
 
     // ── the model name a CLASS carries, or null ─────────────────────────────
     // `defaultmdl=` -> default_model_name (eclass.cpp:958), which is cycleModelName[0]
@@ -168,6 +178,49 @@ namespace
             return nullptr;
         const char *m = ec->default_model_name;
         return ( m && *m ) ? m : nullptr;
+    }
+
+    const char *BareModelName( const char *name )
+    {
+        if ( !name )
+            return nullptr;
+        if ( _strnicmp( name, "xmodel", 6 ) == 0 &&
+             ( name[6] == '/' || name[6] == '\\' ) )
+            return name + 7;
+        return name;
+    }
+
+    // KIWI: stable, case-insensitive model-name key.  The normalized name stays
+    // after the FNV-1a hash so even a theoretical hash collision cannot alias two
+    // thumbnails.  Both browser APIs use this exact key.
+    std::string ModelCacheKey( const char *name )
+    {
+        const char *bare = BareModelName( name );
+        unsigned __int64 hash = 14695981039346656037ui64;
+        std::string normalized;
+        for ( const unsigned char *p = (const unsigned char *)( bare ? bare : "" ); *p; ++p )
+        {
+            unsigned char c = *p;
+            if ( c == '\\' )
+                c = '/';
+            if ( c >= 'A' && c <= 'Z' )
+                c = (unsigned char)( c - 'A' + 'a' );
+            normalized.push_back( (char)c );
+            hash ^= c;
+            hash *= 1099511628211ui64;
+        }
+        char prefix[32];
+        _snprintf( prefix, sizeof( prefix ), "model:%016I64x:", hash );
+        prefix[sizeof( prefix ) - 1] = '\0';
+        return std::string( prefix ) + normalized;
+    }
+
+    bool BoundsValid( const float mins[3], const float maxs[3] )
+    {
+        for ( int i = 0; i < 3; ++i )
+            if ( !_finite( mins[i] ) || !_finite( maxs[i] ) || maxs[i] < mins[i] )
+                return false;
+        return true;
     }
 
     // ── the guarded model load ──────────────────────────────────────────────
@@ -316,16 +369,31 @@ namespace
     // means "D3D would not hand over the pixels", which is transient and must not be
     // cached.  A null return with it FALSE is the real "no usable model for this
     // class" answer.
-    IDirect3DTexture9 *RenderThumb( const char *modelName, float *outWhiteFrac, bool *outD3DFail )
+    IDirect3DTexture9 *RenderThumb( const char *modelName, float *outWhiteFrac,
+                                    bool *outD3DFail, float outMins[3],
+                                    float outMaxs[3], bool *outHaveBounds )
     {
         if ( outD3DFail )
             *outD3DFail = false;
+        if ( outHaveBounds )
+            *outHaveBounds = false;
         XModel *model = RegisterGuarded( modelName );
         if ( !model || XModelBad( model ) )
             return nullptr;                  // a MODEL failure, not a D3D one
 
         float mins[3], maxs[3];
         XModelGetBounds( model, mins, maxs );
+        if ( BoundsValid( mins, maxs ) )
+        {
+            if ( outMins && outMaxs )
+                for ( int i = 0; i < 3; ++i )
+                {
+                    outMins[i] = mins[i];
+                    outMaxs[i] = maxs[i];
+                }
+            if ( outHaveBounds )
+                *outHaveBounds = true;
+        }
 
         // ── KIWI-UX (ROUND AX, ITEM 5) — the long-axis yaw.  See KENTT_LONG_AXIS_YAW.
         // Decided from the model's OWN bounds, before framing, because the instance
@@ -345,7 +413,7 @@ namespace
 
         // The instance basis: rows are the model's local axes expressed in world, which
         // is the convention AddModelToModelInstBuff's AxisToQuat consumes
-        // (r_ed_scene.cpp:342-345).  A pure yaw about Z, identity when modelYaw is 0.
+        // (r_ed_scene.cpp:359-362).  A pure yaw about Z, identity when modelYaw is 0.
         float place[12] = { 0.0f, 0.0f, 0.0f,
                             yawC, yawS, 0.0f,
                            -yawS, yawC, 0.0f,
@@ -416,7 +484,7 @@ namespace
             return nullptr;
 
         // The instance: `place` was built above (origin at the world origin, the ROUND-AX
-        // yaw as the 3x3).  Twelve floats, origin then the 3x3 (r_ed_scene.cpp:342-345).
+        // yaw as the 3x3).  Twelve floats, origin then the 3x3 (r_ed_scene.cpp:359-362).
         const int inst = AddModelToModelInstBuff( model, place, 1.0f );
         if ( !inst )
             return nullptr;
@@ -465,11 +533,11 @@ namespace
             // camwnd.cpp:2667; 0x407fbf tint, :2919; 0x4084f0 white) and round AV's thumbnail
             // only had the trailing one.  Two things depend on it here:
             //   * it advances sceneSurfCount_saved, so R_AddEditorSurfsCmd carries exactly
-            //     this pass's surfs (r_ed_scene.cpp:1501);
+            //     this pass's surfs (r_ed_scene.cpp:1518);
             //   * it runs Material_Sort, which is the ONLY writer of
             //     info.drawSurf.fields.primarySortKey (r_material_load_obj.cpp:6792-6795) —
             //     and Editor_AddSurfCmd reads that field for the surf sort key
-            //     (r_ed_scene.cpp:611).  RegisterGuarded above may have just loaded these
+            //     (r_ed_scene.cpp:628).  RegisterGuarded above may have just loaded these
             //     materials for the first time (Material_Add sets rgp.needSortMaterials,
             //     r_material.cpp:537), and R_BeginFrame's own sort is gated on `rgp.world`
             //     (r_rendercmds.cpp:1304), which Radiant never has.
@@ -484,7 +552,7 @@ namespace
             R_EndFrame();
             R_IssueRenderCommands( (uint)-1 );
             // NOT optional and not just a sort: R_SortMaterials is the per-frame RESET of
-            // the editor surf accumulation (r_ed_scene.cpp:273-285).  Without it the
+            // the editor surf accumulation (r_ed_scene.cpp:290-302).  Without it the
             // model-surf cursor never rewinds.
             R_SortMaterials();
             RTT_EndThumb();
@@ -498,48 +566,73 @@ namespace
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+namespace
+{
+    IDirect3DTexture9 *GetByModelName( const char *modelName, const char *label,
+                                      bool mayRequest )
+    {
+        const char *bare = BareModelName( modelName );
+        if ( !bare || !*bare )
+            return nullptr;
+
+        const std::string key = ModelCacheKey( bare );
+        kiwiTexCache_t::iterator it = s_cache.find( key );
+        if ( it != s_cache.end() )
+            return it->second.tex;
+        if ( !mayRequest )
+            return nullptr;
+
+        // KIWI: one slot for both tabs.  The first visible requester keeps it
+        // until the spaced render tick consumes it.
+        if ( !s_haveReq )
+        {
+            s_reqKey   = key;
+            s_reqLabel = ( label && *label ) ? label : bare;
+            s_reqModel = bare;
+            s_haveReq  = true;
+        }
+        return nullptr;
+    }
+}
+
 IDirect3DTexture9 *KiwiEntThumb_Get( const eclass_t *ec, bool mayRequest )
 {
     const char *cls = ec ? ec->name : nullptr;
-    if ( !cls || !*cls )
-        return nullptr;
-
-    kiwiTexCache_t::iterator it = s_cache.find( cls );
-    if ( it != s_cache.end() )
-        return it->second.tex;          // null for a FAILED entry — the caller draws the bbox
-
-    // ── KIWI-UX (ROUND AX, ITEM 3) — PRIORITISE WHAT THE OPERATOR CAN SEE.
-    // Round AV's comment said "first VISIBLE requester wins", and the request order was
-    // the tile submission order — but the browser has no clipper: kiwi_entbrowser.cpp
-    // draws EVERY tile of every OPEN group (:722-733), so a scrolled-out class 400 rows
-    // down was requesting before the row under the cursor.  The caller now passes the
-    // tile's own ImGui::IsRectVisible result, so the queue is the visible run, top to
-    // bottom of the scroll, which is the order the operator reads them in.
-    if ( !mayRequest )
-        return nullptr;
-
-    // Not cached.  Only classes that name a model at the CLASS level get a request; the
-    // rest are marked FAILED immediately so the lookup above answers them from then on and
-    // this branch is never re-entered for them.
     const char *mdl = ClassModelName( ec );
-    if ( !mdl )
-    {
-        s_cache[cls].failed = true;
+    if ( !cls || !*cls || !mdl )
         return nullptr;
-    }
+    return GetByModelName( mdl, cls, mayRequest );
+}
 
-    // ONE request per frame.  First visible requester wins; the rest simply ask again next
-    // frame, so a scrolled-to group warms in tile order at one per tick.  A collapsed
-    // group submits no tiles at all (kiwi_entbrowser.cpp:680), so it costs nothing.
-    if ( !s_haveReq )
+IDirect3DTexture9 *KiwiEntThumb_GetModel( const char *xmodelName, bool mayRequest )
+{
+    return GetByModelName( xmodelName, xmodelName, mayRequest );
+}
+
+bool KiwiEntThumb_GetModelBounds( const char *xmodelName,
+                                  float outMins[3], float outMaxs[3] )
+{
+    if ( !xmodelName || !*xmodelName || !outMins || !outMaxs )
+        return false;
+    const std::string key = ModelCacheKey( xmodelName );
+    std::map<std::string, modelMeta_t>::const_iterator it = s_modelMeta.find( key );
+    if ( it == s_modelMeta.end() || !it->second.haveBounds )
+        return false;
+    for ( int i = 0; i < 3; ++i )
     {
-        strncpy( s_reqClass, cls, sizeof( s_reqClass ) - 1 );
-        s_reqClass[sizeof( s_reqClass ) - 1] = '\0';
-        strncpy( s_reqModel, mdl, sizeof( s_reqModel ) - 1 );
-        s_reqModel[sizeof( s_reqModel ) - 1] = '\0';
-        s_haveReq = true;
+        outMins[i] = it->second.mins[i];
+        outMaxs[i] = it->second.maxs[i];
     }
-    return nullptr;
+    return true;
+}
+
+bool KiwiEntThumb_ModelFailed( const char *xmodelName )
+{
+    if ( !xmodelName || !*xmodelName )
+        return false;
+    const std::string key = ModelCacheKey( xmodelName );
+    kiwiTexCache_t::const_iterator it = s_cache.find( key );
+    return it != s_cache.end() && it->second.failed;
 }
 
 void KiwiEntThumb_Tick()
@@ -555,18 +648,36 @@ void KiwiEntThumb_Tick()
     if ( s_nextAllowed && (int)( nowMs - s_nextAllowed ) < 0 )
         return;
 
-    // Take the request FIRST.  Whatever happens below, this class is not asked again this
+    // Take the request FIRST.  Whatever happens below, this model is not asked again this
     // tick — and on success or hard failure it is never asked again at all.
-    char cls[128], mdl[128];
-    strncpy( cls, s_reqClass, sizeof( cls ) ); cls[sizeof( cls ) - 1] = '\0';
-    strncpy( mdl, s_reqModel, sizeof( mdl ) ); mdl[sizeof( mdl ) - 1] = '\0';
+    const std::string key   = s_reqKey;
+    const std::string label = s_reqLabel;
+    const std::string mdl   = s_reqModel;
+    s_reqKey.clear();
+    s_reqLabel.clear();
+    s_reqModel.clear();
     s_haveReq = false;
 
     float          whiteFrac = 0.0f;
     bool           d3dFail   = false;        // KIWI-UX (CLEANUP, C-67)
+    float          mins[3]   = { 0.0f, 0.0f, 0.0f };
+    float          maxs[3]   = { 0.0f, 0.0f, 0.0f };
+    bool           haveBounds = false;
     const unsigned t0        = ::GetTickCount();
-    IDirect3DTexture9 *tex   = RenderThumb( mdl, &whiteFrac, &d3dFail );
+    IDirect3DTexture9 *tex   = RenderThumb( mdl.c_str(), &whiteFrac, &d3dFail,
+                                            mins, maxs, &haveBounds );
     const unsigned costMs    = ::GetTickCount() - t0;
+
+    if ( haveBounds )
+    {
+        modelMeta_t &meta = s_modelMeta[key];
+        meta.haveBounds = true;
+        for ( int i = 0; i < 3; ++i )
+        {
+            meta.mins[i] = mins[i];
+            meta.maxs[i] = maxs[i];
+        }
+    }
 
     // Re-arm the budget from what this one actually cost.  A trivial prop leaves the
     // KENTT_MIN_GAP_MS floor; a 40 MB character with eight materials leaves twice its own
@@ -588,7 +699,7 @@ void KiwiEntThumb_Tick()
 
     if ( tex )
     {
-        kiwiTexEntry_t &e = s_cache[cls];
+        kiwiTexEntry_t &e = s_cache[key];
         // Safe as an IMMEDIATE Release, unlike the wizard previews: this runs from
         // KiwiEntThumb_Tick inside ImGuiShell_RenderViewportsToRT, BEFORE the pump authorizes
         // the frame, so no draw list is open and the previous one was presented a tick ago.
@@ -608,10 +719,10 @@ void KiwiEntThumb_Tick()
         // is the thermal family.
         if ( whiteFrac >= KENTT_WHITE_FRAC )
         {
-            const size_t n = strlen( mdl );
-            const bool   thermal = ( n >= 6 && _stricmp( mdl + n - 6, "_ac130" ) == 0 );
+            const size_t n = mdl.size();
+            const bool   thermal = ( n >= 6 && _stricmp( mdl.c_str() + n - 6, "_ac130" ) == 0 );
             Radiant_FL_Log( "KiwiEntThumb: '%s' (model '%s') rendered %.0f%% white - %s",
-                            cls, mdl, whiteFrac * 100.0f,
+                            label.c_str(), mdl.c_str(), whiteFrac * 100.0f,
                             thermal
                               ? "an AC130 THERMAL model; near-white is the shipped asset (faithful)"
                               : "NOT a known thermal model - run KiwiModelInfo and re-open the "
@@ -634,12 +745,12 @@ void KiwiEntThumb_Tick()
     {
         Radiant_FL_Log( "KiwiEntThumb: D3D readback FAILED for '%s' (model '%s') - the "
                         "device is healthy, so this is not the asset; will retry",
-                        cls, mdl );
+                        label.c_str(), mdl.c_str() );
         return;
     }
-    s_cache[cls].failed = true;
+    s_cache[key].failed = true;
     Radiant_FL_Log( "KiwiEntThumb: no preview for '%s' (model '%s') - keeping the bbox tile",
-                    cls, mdl );
+                    label.c_str(), mdl.c_str() );
 }
 
 void KiwiEntThumb_ReleaseForReset()
@@ -650,5 +761,9 @@ void KiwiEntThumb_ReleaseForReset()
         s_readback->Release();
         s_readback = nullptr;
     }
+    s_modelMeta.clear();
+    s_reqKey.clear();
+    s_reqLabel.clear();
+    s_reqModel.clear();
     s_haveReq = false;
 }

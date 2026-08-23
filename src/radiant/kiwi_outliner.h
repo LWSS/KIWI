@@ -126,25 +126,8 @@ bool KiwiOutliner_GroupSelection();     // "New Group from Selection"
 bool KiwiOutliner_CanUngroup();
 bool KiwiOutliner_UngroupSelection();   // dissolve the selection's groups
 
-// ── KIWI-UX (ROUND BL, ITEM 1): EVERY FOLDER CLOSED ON MAP LOAD ─────────────
-// USER DIRECTIVE, verbatim: *"When loading a map, load with all the groups in the
-// outliner collapsed."*
-//
-// The panel's collapse state is a set of the keys that are CLOSED
-// (kiwi_outliner.cpp s_collapsed), so "expanded" is the default for a key nobody
-// has touched — which is why a freshly loaded map opened with every func_group and
-// every curve group hanging open.  This does not invert that default (a session's
-// manual expand/collapse must keep working exactly as it does); it arms a ONE-SHOT
-// that closes every folder key the scene currently has, consumed on the panel's
-// next draw.  Called from the tail of Map_LoadFromFile (map.cpp), beside the
-// sidecar load, because the entity instances and the construction groups only
-// exist by then — the keys are minted from them.
-//
-// Deliberately consumed AFTER the panel's AutoExpandForSelection pass: that pass
-// re-opens SOLIDS unconditionally whenever the selection generation moves, and a
-// map load moves it.  Ordering them the other way round would have left the Solids
-// section open on exactly the frame this exists for.
-void KiwiOutliner_CollapseAllOnNextDraw();
+// KIWI: discard collapse keys and transient row identities with the old map.
+void KiwiOutliner_ResetForNewMap();
 
 // §3 registration + the instant-command tail (kiwi_command.cpp calls both).
 void KiwiOutliner_RegisterCommands();

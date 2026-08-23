@@ -579,6 +579,12 @@ namespace
                     KiwiMtl_SeedClipFace( &def->faces[f], mtlDef,
                                           mtlDef->faces[mtlFace].plane.normal );
                 }
+                // Both seeds OVERWRITE all four channels with the source face's,
+                // which undoes the valid triple Brush_Alloc had just stamped on
+                // (brush.cpp:501) if the source's own lightmap/smoothing channel is
+                // dead — invisible in Shift+L and unlit at compile
+                // (kiwi_material.h "the three channels").  No-op on a sound source.
+                KiwiMtl_EnsureFaceLayers( &def->faces[f] );   // kiwi_material.h:245
             }
         }
         return def;
@@ -2384,6 +2390,13 @@ namespace
                     p->texture  = *(patchMesh_material *)&src->mtldef[0].lyrMtl;
                     p->lightmap = *(patchMesh_material *)&src->mtldef[1].lyrMtl;
                     KiwiMtl_RealizePatch( p );
+                    // A COPY inherits the source's damage too: a face whose
+                    // lightmap channel is empty hands this patch an empty one,
+                    // and a patch with a dead lightmap channel is invisible in
+                    // Shift+L and compiles with no baked light at all
+                    // (kiwi_material.h "the three channels").  Falls back to
+                    // MakeNewPatch's own defaults; no-op on a sound copy.
+                    KiwiMtl_EnsurePatchChannels( p );   // kiwi_material.h:250
                     Patch_KiwiFinishNewLike( p, &src->mtldef[0].mat_texDef );
 
                     brush_t    *pdef = AddBrushForPatch( p, (entity_s *)owner->def );

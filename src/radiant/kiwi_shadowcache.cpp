@@ -11,6 +11,7 @@
 #include "qe3.h"                  // selbrush_t (qe3.h:429), orientation_t
 #include "kiwi_shadowcache.h"
 #include "kiwi_walkcache.h"       // the ONE epoch lives there
+#include "kiwi_lightcache.h"      // cached per-light 52-byte caster records
 
 // win_qe3.cpp:123 — int Sys_Printf( const char *fmt, ... )
 extern int Sys_Printf( const char *fmt, ... );
@@ -221,6 +222,7 @@ bool KiwiShadowCache_ModelGeo( XModel *model, const float **verts,
 
 void KiwiShadowCache_Shutdown()
 {
+    KiwiLightCache_Shutdown();
     for ( int i = 0; i < s_modelCount; ++i )
     {
         free( s_models[i].verts );

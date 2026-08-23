@@ -149,6 +149,26 @@
 #include "kiwi_selection.h"          // sel_kind_t (the gizmo handoff below)
 
 class KiwiEditorCommand;
+struct ray_t;
+
+// Model-drop placement is shared by an in-map drag and both browser ghosts.
+// `modelMins` / `modelMaxs` are local XModel bounds.  The helper rotates and
+// scales all eight corners, traces visible world geometry, falls back to global
+// Z=0 for a downward ray, snaps only the hit point's X/Y when transform snapping
+// is engaged, and leaves Z at contact height plus this small clearance.
+#define KDROP_FLOAT 0.75f
+bool KiwiDrop_ComputePlacement( const ray_t &ray,
+                                const float modelMins[3], const float modelMaxs[3],
+                                const float angles[3], float scale,
+                                float outOrigin[3],
+                                float outWorldMins[3] = 0,
+                                float outWorldMaxs[3] = 0 );
+
+// Plain camera LMB on an already-selected, model-only selection starts the drop
+// variant of Move.  The viewport owns its press/release cycle; Esc remains the
+// command framework's ordinary cancel path.
+bool KiwiDrop_BeginAt( int imgX, int imgY );
+bool KiwiDrop_Active();
 
 // Registers the three rows into the shared `g_radiantCommands` table.  Called by
 // KiwiCmd_RegisterCommands (kiwi_command.cpp) so there is still exactly one

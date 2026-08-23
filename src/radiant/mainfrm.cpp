@@ -29,6 +29,7 @@
 #include <gfx_d3d/r_rendercmds.h>      // R_InitRenderCommands
 #include <gfx_d3d/r_material.h>        // Material (R_BeginRegistrationInternal return)
 #include "kiwi_windows.h"              // KiwiWindows_IsOpen kiwi_windows.h:105 / KiwiWindows_Set kiwi_windows.h:109
+#include "kiwi_sunshadow.h"            // shared persisted sun-preview state
 
 extern void Radiant_RegisterGroupCDvars();   // engine_stubs.cpp
 extern void Sys_InitializeCriticalSections();// universal/win_common.cpp (decl lives in win32/win_local.h, not radiant-safe)
@@ -416,8 +417,8 @@ EdLayout Radiant_ComputeLayout( int cx, int cy, int topInset )
     const int zRight  = zW;
     const int xyRight = zW + xyW;
 
-    // Right column = Camera over Texture browser.  The Entity inspector FLOATS (toggled by
-    // N/O/T/F), so s_fracEnt is unused.
+    // Right column = Camera over Texture browser.  The Inspector is an ImGui dock tab, so
+    // this legacy native-layout fraction remains unused.
     int rCamH = (int)( topH * s_fracCam );  // Camera on top, Texture browser below
     if ( rCamH < 15 ) rCamH = 15;           // IDA split3 min = 15/15
     if ( rCamH > topH - 15 ) rCamH = topH - 15;
@@ -430,7 +431,7 @@ EdLayout Radiant_ComputeLayout( int cx, int cy, int topInset )
     ::SetRect( &L.xy,  zRight  + GAP,  0,               xyRight, topH      );
     ::SetRect( &L.cam, xyRight + GAP,  0,               cx,      camBottom );
     ::SetRect( &L.tex, xyRight + GAP,  camBottom + GAP, cx,      topH      );
-    ::SetRect( &L.ent, 0, 0, 0, 0 );        // entity inspector floats (toggled) â€” not docked
+    ::SetRect( &L.ent, 0, 0, 0, 0 );        // KIWI-UX: Inspector is ImGui-docked
     ::SetRect( &L.con, 0,              topH + GAP,      cx,      cy        );   // full-width console
     if ( topInset > 0 )
     {
@@ -3040,7 +3041,7 @@ static void Cmd_OnTexturesTexturewindowscale200() { g_PrefsDlg->m_nTextureWindow
 // CMainFrame::OnViewEntity (0x423f00) â€” Viewâ†’Toggleâ†’Entity View (33017).
 // Dock-world routing (the inspector-mode toggles drove the MFC tab strip, which
 // early-returns without d_hwndEntity — N/O/texture-view were dispatching into silence):
-// Entity -> the ImGui panel; Textures/Console -> focus the dock tab; Filters (F) stays
+// Entity -> the Inspector tab; Textures/Console -> focus the dock tab; Filters (F) stays
 // on the inert old path until the filters panel exists (POST-RIP).
 extern void ImGuiPanel_Entity_Toggle();                  // imgui_panel_entity.cpp
 extern void ImGuiPanel_Filters_Toggle();                 // imgui_panel_filters.cpp
@@ -5139,10 +5140,8 @@ static void Cmd_OnEnableLightPreview()     // cmd 33950 (0x4240C0)
 }
 static void Cmd_OnPreviewSun()             // cmd 36108 (0x424060)
 {
-    g_PrefsDlg->preview_sun_aswell = ( g_PrefsDlg->preview_sun_aswell == 0 );
-    Prefs_SavePrefs( g_PrefsDlg );
-    ::CheckMenuItem( Radiant_FrameMenu(), 36108, g_PrefsDlg->preview_sun_aswell ? MF_CHECKED : MF_UNCHECKED );
-    g_nUpdateBits |= W_CAMERA;
+    // KIWI-UX: the View item, Light tab, and persisted preference share one API.
+    KiwiSunPreview_SetEnabled( !KiwiSunPreview_Enabled() );
 }
 static void Cmd_OnStartPreviewSelected()   // cmd 33951 (0x424120)
 {
@@ -5172,6 +5171,11 @@ static void Cmd_OnClearPreviewList()       // cmd 33953 (0x4241C0)
 static void Cmd_OnPreviewAtMaxIntensity()  // cmd 36122 (0x425670)
 {
     g_qeglobals.preview_at_max_intensity = !g_qeglobals.preview_at_max_intensity;
+    // KIWI-UX: command 36122 changes the live, inverted retail field; mirror the real-
+    // intensity meaning into the named preference and persist it.
+    g_PrefsDlg->light_preview_real_intensity =
+        g_qeglobals.preview_at_max_intensity ? 1 : 0;
+    Prefs_SavePrefs( g_PrefsDlg );
     g_nUpdateBits = -1;
 }
 
@@ -5891,4 +5895,3 @@ bool Radiant_DispatchCommandDirect( unsigned int cmdId )
 
     return false;   // unknown id - nothing dispatched
 }
-

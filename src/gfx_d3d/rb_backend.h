@@ -488,6 +488,7 @@ void __cdecl RB_DrawProfileCmd(GfxRenderCommandExecState *execState);
 void __cdecl RB_SetMaterialColorCmd(GfxRenderCommandExecState *execState);
 #ifdef KISAK_RADIANT
 void __cdecl RB_SetCustomConstantCmd(GfxRenderCommandExecState *execState);  // #26 layer C2 sun preview
+void __cdecl RB_SetLightColorCmd(GfxRenderCommandExecState *execState);      // CoD4Radiant per-light preview
 #endif
 void __cdecl RB_SetViewportCmd(GfxRenderCommandExecState *execState);
 void __cdecl RB_LookupColor(uint8_t c, GfxColor *color);

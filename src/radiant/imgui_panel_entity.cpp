@@ -1,474 +1,1206 @@
-// imgui_panel_entity.cpp — UI-rework Phase 3: the ENTITY INSPECTOR panel over the
-// Phase-1 action/read functions in win_ent.cpp (declared in radiant_ui_actions.h and
-// as externs below). New KISAK code; visible only under -imgui.
-//
-// Panel semantics vs the MFC CEntityWnd entity pane: the SAME core calls in the SAME
-// order as the MFC handlers —
-//   * eclass list  : LBN_SELCHANGE → EclassSelect_Apply( index, eclass )   (OnEclassSelChange)
-//                    LBN_DBLCLK    → EclassCreate_Apply( name )            (OnEclassDblClk /
-//                                                                          CreateEntity)
-//   * key/values   : LBN_SELCHANGE → row into the key/value fields         (OnKVSelChange /
-//                                                                          EditProp)
-//                    Enter/commit  → EntSetKey_Apply( key, value )         (AddProp)
-//                    "Delete Key"  → EntDeleteKey_Apply( key )             (OnDeleteKey / DelProp)
-//   * spawnflags   : any box toggled → OR the 12 states → SpawnFlags_Apply  (OnSpawnFlagCheck /
-//                                                                          SetSpawnFlags_2)
-//   * angle grid   : button i → EntAngle_Apply( i )                        (OnAngleButton)
-// The panel-flow differences (the panel stays open, the lists are re-gathered every
-// frame instead of being push-populated by UpdateSelection, and the eclass filter box)
-// are the sanctioned Phase-3 divergences noted in RADIANT_UI_REWORK_PLAN.md.
-//
-// NO HWND/MFC anywhere in this file: every read is a *_Gather and every write a *_Apply.
+// KIWI: typed entity inspector over the existing win_ent read/write funnels.
 #include "stdafx.h"
 #include "qe3.h"
+#include "kiwi_entinspect.h"
+#include "kiwi_fmt.h"
+#include "kiwi_windows.h"
 #include "radiant_ui_actions.h"
+
 #include <imgui/imgui.h>
+
+#include <algorithm>
+#include <ctype.h>
+#include <float.h>
+#include <limits.h>
+#include <map>
+#include <set>
+#include <stdlib.h>
 #include <string>
 #include <vector>
 
-// ── win_ent.cpp bindings ──────────────────────────────────────────────────────
-// The entity-window globals the inspector edits (win_ent.cpp:83-84).  mainfrm.cpp
-// declares edit_entity the same way — they are not in a shared header yet.
-extern entity_s_def *edit_entity;              // win_ent.cpp (0x240A108)
-extern int           multiple_edit_entities;   // win_ent.cpp (0x240A10C)
+extern entity_s_def *edit_entity;              // win_ent.cpp:77
+extern int           multiple_edit_entities;   // win_ent.cpp:78
+extern entity_s      entities;                 // entity.cpp:295
+extern entity_s      entityInsts;              // entity.cpp:302
+extern entity_s     *world_entity;             // map.cpp:62
+extern int           g_nUpdateBits;             // engine_stubs.cpp:773
 
-// One row of the eclass list: the name the row is labelled with and the eclass_t* the row
-// carries as its item data (read back by the selchange / create paths).
-// MUST MATCH win_ent.cpp verbatim (shared-header consolidation pending)
 struct eclassRow_t
 {
     const char *name;
     eclass_t   *eclass;
 };
 
-// One key/value row of the inspector's key/value list: the epair's key + value.  The
-// synthesised "origin" row carries the def's origin vec3, pre-formatted, as its value.
-// MUST MATCH win_ent.cpp verbatim (shared-header consolidation pending)
-struct entKvRow_t
+extern void EclassList_Gather( std::vector<eclassRow_t> &rows );       // win_ent.cpp:167
+extern int  SpawnFlags_Gather();                                      // win_ent.cpp:456
+extern void SpawnFlagBit_Apply( int bit, int checked );                // win_ent.cpp:521
+extern void EclassCreate_Apply( const char *name );                    // win_ent.cpp:572
+extern void EclassSelect_Apply( int listIndex, eclass_t *pec );        // win_ent.cpp:778
+extern void Entity_UpdateSelection();                                  // win_ent.cpp:791
+extern void ImGuiShell_FocusTab( const char *title );                  // imgui_shell.cpp:205
+extern ImGuiID ImGuiShell_DockRoot();                                  // imgui_shell.cpp:798
+extern void MarkMapModified( void );                                   // win_qe3.cpp:195
+
+namespace
 {
-    std::string key;
-    std::string value;
-};
+    bool s_entityFocused = false;
+    bool s_editWorldspawn = false;
+    bool s_previousSelectionEmpty = true;
+    entity_s_def *s_previousEntity = nullptr;
 
-// The eclass-driven inspector fields: the description-box text and the first 8 spawnflag
-// checkbox labels (an empty name means that box is blanked + disabled).
-// MUST MATCH win_ent.cpp verbatim (shared-header consolidation pending)
-struct entEclassInfo_t
-{
-    const char *comment;
-    const char *flagname[8];
-};
+    int  s_selEclass = -1;
+    char s_eclassFilter[64] = { 0 };
+    char s_key[4096] = { 0 };
+    char s_value[4096] = { 0 };
 
-extern void EclassList_Gather( std::vector<eclassRow_t> &rows );                      // win_ent.cpp
-extern void EntityKeyValues_Gather( entity_s_def *def, std::vector<entKvRow_t> &rows );// win_ent.cpp
-extern int  SpawnFlags_Gather();                                                       // win_ent.cpp
-extern void EclassInfo_Gather( eclass_t *cls, entEclassInfo_t &out );                  // win_ent.cpp
-extern void EclassCreate_Apply( const char *name );                                    // win_ent.cpp
-extern void EclassSelect_Apply( int listIndex, eclass_t *pec );                        // win_ent.cpp
-// KIWI-UX (ROUND AU): the selection -> edit_entity refresh, as mainfrm.cpp:56
-// declares it.  win_ent.cpp:800  void Entity_UpdateSelection()  ( = UpdateSelection( -1, NULL ) ).
-extern void Entity_UpdateSelection();                                                  // win_ent.cpp:791
-// KIWI-UX (ROUND AU): the dock-tab raise N uses, declared at FILE scope exactly as
-// mainfrm.cpp:3054 declares it.  imgui_shell.cpp:135  void ImGuiShell_FocusTab( const char * ).
-extern void ImGuiShell_FocusTab( const char *title );                                  // imgui_shell.cpp:205
-// EntSetKey_Apply / EntDeleteKey_Apply / SpawnFlags_Apply / EntAngle_Apply come from
-// radiant_ui_actions.h.
-
-// ── panel state ───────────────────────────────────────────────────────────────
-static bool s_showEntity = false;
-
-// KIWI-UX (ROUND AU): "was this window the focused surface on the frame it was
-// last drawn".  Recorded in Draw, read by Toggle — see ImGuiPanel_Entity_Toggle
-// for why N cannot be a blind boolean flip once the panel is a DOCK TAB.
-static bool s_entityFocused = false;
-
-// The eclass list cursor, as an index into the FULL EclassList_Gather order (that is
-// what EclassSelect_Apply forwards to UpdateSelection as the listbox index), plus a
-// name filter over the list (a panel-only convenience — the eclass list is long).
-static int  s_selEclass  = -1;
-static char s_eclassFilter[64] = { 0 };
-
-// The key/value list cursor + the two edit fields.  4096 bytes each: the MFC fields are
-// read with WM_GETTEXT(0xFFF) into 4096-byte buffers (win_ent.cpp:319-321).
-static int  s_selKv      = -1;
-static char s_key[4096]  = { 0 };
-static char s_value[4096]= { 0 };
-
-// The last-4 spawnflag labels the eclass never names (win_ent.cpp:1186-1187's
-// kCheckDefault tail — the difficulty/gametype flags).
-static const char *const kCheckDefaultTail[4] = { "Easy", "Medium", "Hard", "Deathmatch" };
-
-// The 10 angle/direction button labels, in ENTITY_DEFINES order (win_ent.cpp:1194-1195);
-// the index IS the EntAngle_Apply switch case (win_ent.cpp:1603-1631).
-static const char *const kDirLabel[10] =
-    { "E", "NE", "N", "NW", "W", "SW", "S", "SE", "Up", "Dn" };
-
-static void Panel_CopyField( char *dst, size_t dstSz, const char *src )
-{
-    dst[0] = '\0';
-    if ( src )
+    struct PanelEditState
     {
-        strncpy( dst, src, dstSz - 1 );
-        dst[dstSz - 1] = '\0';
-    }
-}
-
-// Case-insensitive substring test for the eclass filter box (panel-only).  ASCII fold
-// done by hand so this needs no header beyond the contract's include list.
-static char Panel_LowerAscii( char c )
-{
-    return ( c >= 'A' && c <= 'Z' ) ? (char)( c + ( 'a' - 'A' ) ) : c;
-}
-
-static bool Panel_ContainsNoCase( const char *hay, const char *needle )
-{
-    if ( !needle || !needle[0] )
-        return true;
-    if ( !hay )
-        return false;
-    for ( const char *h = hay; *h; ++h )
-    {
-        const char *a = h, *b = needle;
-        while ( *a && *b && Panel_LowerAscii( *a ) == Panel_LowerAscii( *b ) )
-            ++a, ++b;
-        if ( !*b )
-            return true;
-    }
-    return false;
-}
-
-// ── the eclass list ───────────────────────────────────────────────────────────
-// Single click = the MFC LBN_SELCHANGE arm, double click = the LBN_DBLCLK arm.  A
-// double click fires both (the click, then the double) — exactly the MFC notification
-// order (SELCHANGE then DBLCLK).
-static void Panel_DrawEclassList( std::vector<eclassRow_t> &rows )
-{
-    ImGui::SeparatorText( "Entity class" );
-
-    ImGui::SetNextItemWidth( -1.0f );
-    ImGui::InputTextWithHint( "##eclassfilter", "filter...", s_eclassFilter, sizeof( s_eclassFilter ) );
-
-    if ( ImGui::BeginChild( "##eclasslist", ImVec2( 0.0f, 160.0f ), ImGuiChildFlags_Borders ) )
-    {
-        for ( size_t i = 0; i < rows.size(); ++i )
+        PanelEditState()
+            : integerValue( 0 ), boolValue( false ), wasActive( false )
         {
-            if ( !Panel_ContainsNoCase( rows[i].name, s_eclassFilter ) )
-                continue;
+            text[0] = '\0';
+            floatValue[0] = floatValue[1] = floatValue[2] = 0.0f;
+        }
 
-            ImGui::PushID( (int)i );
-            if ( ImGui::Selectable( rows[i].name ? rows[i].name : "(unnamed)",
-                                    s_selEclass == (int)i,
-                                    ImGuiSelectableFlags_AllowDoubleClick ) )
-            {
-                s_selEclass = (int)i;
-                EclassSelect_Apply( (int)i, rows[i].eclass );   // = OnEclassSelChange
-                if ( ImGui::IsMouseDoubleClicked( ImGuiMouseButton_Left ) )
-                    EclassCreate_Apply( rows[i].name );         // = OnEclassDblClk → CreateEntity
-            }
-            ImGui::PopID();
+        char  text[4096];
+        float floatValue[3];
+        int   integerValue;
+        bool  boolValue;
+        bool  wasActive;
+    };
+
+    std::map<std::string, PanelEditState> s_editStates;
+    entity_s_def *s_editStateEntity = nullptr;
+
+    struct OtherKeyRow
+    {
+        std::string key;
+        std::string value;
+    };
+
+    void CopyField( char *dst, size_t dstSize, const char *src )
+    {
+        if ( !dst || dstSize == 0 )
+            return;
+        dst[0] = '\0';
+        if ( src )
+        {
+            strncpy( dst, src, dstSize - 1 );
+            dst[dstSize - 1] = '\0';
         }
     }
-    ImGui::EndChild();
-    ImGui::TextDisabled( "single click: select class   double click: create entity" );
-}
 
-// The description box + the eclass flag names (UpdateSelection's comments + flag walk).
-// Returns true when `out` was filled.  EclassInfo_Gather feeds cls->comments straight
-// into TranslateString, which asserts on NULL and returns a SHARED STATIC buffer, so the
-// comment is guarded here and copied out before anything else can call it.
-static bool Panel_GatherEclassInfo( eclass_t *cls, entEclassInfo_t &out, std::string &commentOut )
-{
-    commentOut.clear();
-    if ( !cls || !cls->comments )
-        return false;
-
-    EclassInfo_Gather( cls, out );
-    if ( out.comment )
-        commentOut = out.comment;
-    return true;
-}
-
-// ── the key/value grid ────────────────────────────────────────────────────────
-static void Panel_DrawKeyValues()
-{
-    ImGui::SeparatorText( "Key / value" );
-
-    std::vector<entKvRow_t> rows;
-    EntityKeyValues_Gather( edit_entity, rows );
-    if ( s_selKv >= (int)rows.size() )       // the pair list shrank (delete / new selection)
-        s_selKv = -1;
-
-    const ImGuiTableFlags flags = ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg
-                                | ImGuiTableFlags_ScrollY | ImGuiTableFlags_Resizable;
-    if ( ImGui::BeginTable( "##entkv", 2, flags, ImVec2( 0.0f, 160.0f ) ) )
+    char LowerAscii( char c )
     {
-        ImGui::TableSetupColumn( "Key" );
-        ImGui::TableSetupColumn( "Value" );
-        ImGui::TableSetupScrollFreeze( 0, 1 );
+        return ( c >= 'A' && c <= 'Z' ) ? (char)( c + ( 'a' - 'A' ) ) : c;
+    }
+
+    std::string LowerString( const char *value )
+    {
+        std::string out = value ? value : "";
+        for ( size_t i = 0; i < out.size(); ++i )
+            out[i] = LowerAscii( out[i] );
+        return out;
+    }
+
+    bool ContainsNoCase( const char *haystack, const char *needle )
+    {
+        if ( !needle || !needle[0] )
+            return true;
+        if ( !haystack )
+            return false;
+        for ( const char *h = haystack; *h; ++h )
+        {
+            const char *a = h;
+            const char *b = needle;
+            while ( *a && *b && LowerAscii( *a ) == LowerAscii( *b ) )
+            {
+                ++a;
+                ++b;
+            }
+            if ( !*b )
+                return true;
+        }
+        return false;
+    }
+
+    bool StartsNoCase( const char *value, const char *prefix )
+    {
+        if ( !value || !prefix )
+            return false;
+        while ( *prefix )
+        {
+            if ( !*value || LowerAscii( *value ) != LowerAscii( *prefix ) )
+                return false;
+            ++value;
+            ++prefix;
+        }
+        return true;
+    }
+
+    epair_t *FindEpair( entity_s_def *entity, const char *key )
+    {
+        if ( !entity || !key )
+            return nullptr;
+        for ( epair_t *ep = entity->epairs; ep; ep = ep->next )
+            if ( !_stricmp( ep->key, key ) )
+                return ep;
+        return nullptr;
+    }
+
+    const char *EntityClassname( entity_s_def *entity )
+    {
+        if ( entity && entity->eclass && entity->eclass->name )
+            return entity->eclass->name;
+        epair_t *classname = FindEpair( entity, "classname" );
+        return classname ? classname->value : nullptr;
+    }
+
+    bool IsWorldspawn( entity_s_def *entity )
+    {
+        const char *classname = EntityClassname( entity );
+        return classname && !_stricmp( classname, "worldspawn" );
+    }
+
+    bool IsLightClass( entity_s_def *entity )
+    {
+        const char *classname = EntityClassname( entity );
+        return classname && StartsNoCase( classname, "light" );
+    }
+
+    bool IsTriggerClass( entity_s_def *entity )
+    {
+        const char *classname = EntityClassname( entity );
+        return classname && StartsNoCase( classname, "trigger_" );
+    }
+
+    bool IsSunTabKey( const char *key )
+    {
+        return key && ( !_stricmp( key, "sundirection" ) ||
+                        !_stricmp( key, "sunlight" ) ||
+                        !_stricmp( key, "suncolor" ) );
+    }
+
+    bool IsLightTabKey( const char *key )
+    {
+        static const char *const owned[] =
+        {
+            "_color", "intensity", "radius", "fov_outer", "fov_inner",
+            "exponent", "def", "maxturn", "maxmove", "target", "spawnflags"
+        };
+        if ( !key )
+            return false;
+        for ( size_t i = 0; i < sizeof( owned ) / sizeof( owned[0] ); ++i )
+            if ( !_stricmp( key, owned[i] ) )
+                return true;
+        return false;
+    }
+
+    bool ParameterExists( const std::vector<KiwiEntParameter> &parameters, const char *name )
+    {
+        for ( size_t i = 0; i < parameters.size(); ++i )
+            if ( !_stricmp( parameters[i].name.c_str(), name ) )
+                return true;
+        return false;
+    }
+
+    void AddParameter( std::vector<KiwiEntParameter> *parameters,
+                       const char *name, const char *description )
+    {
+        if ( !name || !name[0] || ParameterExists( *parameters, name ) )
+            return;
+        parameters->push_back( KiwiEntInspect_InferParameter( name, description, "" ) );
+    }
+
+    void BuildProperties( entity_s_def *entity, const KiwiEntSchema &schema,
+                          std::vector<KiwiEntParameter> *properties )
+    {
+        properties->clear();
+        if ( !entity )
+            return;
+
+        const bool world = IsWorldspawn( entity );
+        const bool light = IsLightClass( entity );
+        const bool fixed = entity->eclass && entity->eclass->fixedsize;
+        const bool hasAngles = FindEpair( entity, "angles" ) != nullptr;
+        bool schemaHasAngles = false;
+
+        for ( size_t i = 0; i < schema.parameters.size(); ++i )
+        {
+            const KiwiEntParameter &parameter = schema.parameters[i];
+            const char *key = parameter.name.c_str();
+            if ( !_stricmp( key, "classname" ) || !_stricmp( key, "spawnflags" ) )
+                continue;
+            if ( !_stricmp( key, "angles" ) )
+            {
+                schemaHasAngles = true;
+                if ( ( !fixed || IsTriggerClass( entity ) ) && !hasAngles )
+                    continue;
+            }
+            if ( !_stricmp( key, "origin" ) && !fixed )
+                continue;
+            if ( world && IsSunTabKey( key ) )
+                continue;
+            if ( light && IsLightTabKey( key ) )
+                continue;
+            if ( !ParameterExists( *properties, key ) )
+                properties->push_back( parameter );
+        }
+
+        if ( world )
+            return;
+
+        AddParameter( properties, "targetname",
+                      "Name other entities and scripts use to address this entity." );
+        if ( !light )
+            AddParameter( properties, "target",
+                          "Targetname of the entity this entity activates or points at." );
+        AddParameter( properties, "script_noteworthy",
+                      "Optional script tag for map-specific behavior." );
+        AddParameter( properties, "script_linkname",
+                      "Optional script link group name." );
+
+        if ( fixed )
+            AddParameter( properties, "origin", "World position of this point entity." );
+
+        const bool modelOrPoint = fixed || ( entity->eclass && ( entity->eclass->classtype & 8 ) );
+        const bool brushOrTrigger = !fixed || IsTriggerClass( entity );
+        const bool showAngles = hasAngles ||
+                                ( !brushOrTrigger && ( schemaHasAngles || modelOrPoint ) );
+        if ( showAngles )
+            AddParameter( properties, "angles", "Pitch, yaw and roll orientation in degrees." );
+    }
+
+    entity_s *FindEntityInstance( entity_s_def *def )
+    {
+        if ( !def )
+            return nullptr;
+        for ( entity_s *instance = entityInsts.next;
+              instance && instance != &entityInsts;
+              instance = instance->next )
+        {
+            if ( instance->def == (entity_s *)def )
+                return instance;
+        }
+        return nullptr;
+    }
+
+    int BrushCount( entity_s_def *def )
+    {
+        entity_s *instance = FindEntityInstance( def );
+        if ( !instance )
+            return 0;
+        int count = 0;
+        for ( selbrush_t *brush = instance->brushes.ownerNext;
+              brush && brush != &instance->brushes;
+              brush = brush->ownerNext )
+            ++count;
+        return count;
+    }
+
+    bool SelectionIsEmpty()
+    {
+        return !selected_brushes.next || selected_brushes.next == &selected_brushes;
+    }
+
+    void MarkEntityWrite()
+    {
+        MarkMapModified();
+        g_nUpdateBits = -1;
+    }
+
+    void SetEntityKey( const char *key, const char *value )
+    {
+        if ( !edit_entity || !key || !key[0] || !value )
+            return;
+        EntSetKey_Apply( key, value );
+        MarkEntityWrite();
+    }
+
+    void DeleteEntityKey( const char *key )
+    {
+        if ( !edit_entity || !key || !key[0] )
+            return;
+        EntDeleteKey_Apply( key );
+        if ( _stricmp( key, "classname" ) )
+            MarkEntityWrite();
+    }
+
+    void SetEntitySpawnFlags( int flags )
+    {
+        if ( !edit_entity )
+            return;
+        SpawnFlags_Apply( flags );
+        MarkEntityWrite();
+    }
+
+    PanelEditState &EditState( const char *key )
+    {
+        if ( s_editStateEntity != edit_entity )
+        {
+            s_editStates.clear();
+            s_editStateEntity = edit_entity;
+        }
+        return s_editStates[LowerString( key )];
+    }
+
+    bool ParseFloats( const char *text, float *out, int count )
+    {
+        if ( !text || !out || count <= 0 )
+            return false;
+        const char *cursor = text;
+        for ( int i = 0; i < count; ++i )
+        {
+            while ( *cursor && isspace( (unsigned char)*cursor ) )
+                ++cursor;
+            char *end = nullptr;
+            const double value = strtod( cursor, &end );
+            if ( end == cursor || !_finite( value ) || value > FLT_MAX || value < -FLT_MAX )
+                return false;
+            out[i] = (float)value;
+            cursor = end;
+        }
+        while ( *cursor && isspace( (unsigned char)*cursor ) )
+            ++cursor;
+        return *cursor == '\0';
+    }
+
+    bool ParseInteger( const char *text, int *out )
+    {
+        if ( !text || !out )
+            return false;
+        while ( *text && isspace( (unsigned char)*text ) )
+            ++text;
+        char *end = nullptr;
+        const long value = strtol( text, &end, 10 );
+        if ( end == text || value < INT_MIN || value > INT_MAX )
+            return false;
+        while ( *end && isspace( (unsigned char)*end ) )
+            ++end;
+        if ( *end )
+            return false;
+        *out = (int)value;
+        return true;
+    }
+
+    bool ParseBool( const char *text, bool *out )
+    {
+        if ( !text || !out )
+            return false;
+        if ( !_stricmp( text, "true" ) )
+        {
+            *out = true;
+            return true;
+        }
+        if ( !_stricmp( text, "false" ) )
+        {
+            *out = false;
+            return true;
+        }
+        int value = 0;
+        if ( !ParseInteger( text, &value ) )
+            return false;
+        *out = value != 0;
+        return true;
+    }
+
+    void FormatVec3Epair( char *out, size_t outSize, const float value[3] )
+    {
+        char x[48], y[48], z[48];
+        _snprintf( out, outSize, "%s %s %s",
+                   KiwiFmt_Num( x, sizeof( x ), value[0], 6 ),
+                   KiwiFmt_Num( y, sizeof( y ), value[1], 6 ),
+                   KiwiFmt_Num( z, sizeof( z ), value[2], 6 ) );
+        out[outSize - 1] = '\0';
+    }
+
+    void GatherSelectedEntities( std::vector<entity_s_def *> *out )
+    {
+        out->clear();
+        if ( !selected_brushes.next )
+            return;
+        std::set<entity_s_def *> seen;
+        for ( selbrush_t *brush = selected_brushes.next;
+              brush != &selected_brushes;
+              brush = brush->next )
+        {
+            entity_s_def *entity = brush->owner ? (entity_s_def *)brush->owner->def : nullptr;
+            if ( entity && seen.insert( entity ).second )
+                out->push_back( entity );
+        }
+    }
+
+    bool IsMixedValue( const std::vector<entity_s_def *> &entitiesToCompare, const char *key )
+    {
+        if ( entitiesToCompare.size() < 2 || !key )
+            return false;
+        epair_t *first = FindEpair( entitiesToCompare[0], key );
+        for ( size_t i = 1; i < entitiesToCompare.size(); ++i )
+        {
+            epair_t *other = FindEpair( entitiesToCompare[i], key );
+            if ( ( first == nullptr ) != ( other == nullptr ) )
+                return true;
+            if ( first && strcmp( first->value, other->value ) )
+                return true;
+        }
+        return false;
+    }
+
+    void AddUniqueSuggestion( std::vector<std::string> *suggestions, const char *value )
+    {
+        if ( !value || !value[0] )
+            return;
+        for ( size_t i = 0; i < suggestions->size(); ++i )
+            if ( !_stricmp( ( *suggestions )[i].c_str(), value ) )
+                return;
+        suggestions->push_back( value );
+    }
+
+    bool SuggestionLess( const std::string &a, const std::string &b )
+    {
+        return _stricmp( a.c_str(), b.c_str() ) < 0;
+    }
+
+    void GatherTargetSuggestions( std::vector<std::string> *suggestions )
+    {
+        suggestions->clear();
+        for ( entity_s *entity = entities.next;
+              entity && entity != &entities;
+              entity = entity->next )
+        {
+            for ( epair_t *ep = entity->epairs; ep; ep = ep->next )
+            {
+                if ( !_stricmp( ep->key, "targetname" ) || !_stricmp( ep->key, "target" ) )
+                    AddUniqueSuggestion( suggestions, ep->value );
+            }
+        }
+        std::sort( suggestions->begin(), suggestions->end(), SuggestionLess );
+    }
+
+    void DrawWrappedTooltip( const char *text )
+    {
+        ImGui::BeginTooltip();
+        ImGui::PushTextWrapPos( ImGui::GetFontSize() * 35.0f );
+        ImGui::TextUnformatted( text ? text : "" );
+        ImGui::PopTextWrapPos();
+        ImGui::EndTooltip();
+    }
+
+    void DrawParameterLabel( const KiwiEntParameter &parameter, bool mixed )
+    {
+        ImGui::TextUnformatted( parameter.name.c_str() );
+        bool showTooltip = ImGui::IsItemHovered();
+        ImGui::SameLine();
+        ImGui::TextDisabled( "(?)" );
+        showTooltip |= ImGui::IsItemHovered();
+        if ( mixed )
+        {
+            ImGui::SameLine();
+            ImGui::TextDisabled( "(mixed)" );
+        }
+        if ( showTooltip )
+        {
+            ImGui::BeginTooltip();
+            ImGui::PushTextWrapPos( ImGui::GetFontSize() * 35.0f );
+            if ( parameter.description.empty() )
+                ImGui::TextDisabled( "No description in the entity definition." );
+            else
+                ImGui::TextUnformatted( parameter.description.c_str() );
+            ImGui::Separator();
+            if ( parameter.defaultValue.empty() )
+                ImGui::TextDisabled( "No .def default." );
+            else
+                ImGui::Text( "Default: %s", parameter.defaultValue.c_str() );
+            if ( parameter.widget == KIWI_ENT_WIDGET_COLOR3 )
+            {
+                ImGui::Separator();
+                ImGui::TextWrapped( "The engine scales the biggest colour component to 1; "
+                                    "colour ratios are preserved." );
+            }
+            ImGui::PopTextWrapPos();
+            ImGui::EndTooltip();
+        }
+    }
+
+    bool DrawTextEditor( PanelEditState *state, const char *source, const char *hint,
+                         float width, std::string *outValue )
+    {
+        if ( !state->wasActive )
+            CopyField( state->text, sizeof( state->text ), source );
+        ImGui::SetNextItemWidth( width );
+        const bool enter = ImGui::InputTextWithHint(
+            "##value", hint ? hint : "", state->text, sizeof( state->text ),
+            ImGuiInputTextFlags_EnterReturnsTrue );
+        const bool done = enter || ImGui::IsItemDeactivatedAfterEdit();
+        state->wasActive = ImGui::IsItemActive();
+        if ( done )
+        {
+            *outValue = state->text;
+            return true;
+        }
+        return false;
+    }
+
+    bool DrawTargetEditor( PanelEditState *state, const char *source, const char *hint,
+                           const std::vector<std::string> &suggestions, float width,
+                           std::string *outValue )
+    {
+        const float comboWidth = ImGui::GetFrameHeight();
+        const float available = width > 0.0f ? width : ImGui::GetContentRegionAvail().x;
+        float textWidth = available - comboWidth - ImGui::GetStyle().ItemSpacing.x;
+        if ( textWidth < 40.0f )
+            textWidth = 40.0f;
+        bool commit = DrawTextEditor( state, source, hint, textWidth, outValue );
+
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth( comboWidth );
+        if ( ImGui::BeginCombo( "##targets", "", ImGuiComboFlags_NoPreview ) )
+        {
+            if ( suggestions.empty() )
+            {
+                ImGui::TextDisabled( "No targetnames or targets in this map" );
+            }
+            else
+            {
+                for ( size_t i = 0; i < suggestions.size(); ++i )
+                {
+                    if ( ImGui::Selectable( suggestions[i].c_str() ) )
+                    {
+                        CopyField( state->text, sizeof( state->text ), suggestions[i].c_str() );
+                        *outValue = suggestions[i];
+                        commit = true;
+                    }
+                }
+            }
+            ImGui::EndCombo();
+        }
+        if ( ImGui::IsItemHovered() )
+            ImGui::SetTooltip( "Choose an existing targetname or target from this map." );
+        return commit;
+    }
+
+    bool DrawTypedEditor( const KiwiEntParameter &parameter, bool present,
+                           const std::string &currentValue,
+                           const std::vector<std::string> &suggestions,
+                           float width, std::string *outValue )
+    {
+        PanelEditState &state = EditState( parameter.name.c_str() );
+        const char *displayValue = present ? currentValue.c_str() : parameter.defaultValue.c_str();
+
+        if ( parameter.widget == KIWI_ENT_WIDGET_TEXT ||
+             parameter.widget == KIWI_ENT_WIDGET_MODEL ||
+             parameter.widget == KIWI_ENT_WIDGET_DEF )
+        {
+            std::string hint;
+            if ( !present && !parameter.defaultValue.empty() )
+                hint = std::string( "default: " ) + parameter.defaultValue;
+            else if ( parameter.widget == KIWI_ENT_WIDGET_MODEL )
+                hint = "xmodel asset name / path";
+            else if ( parameter.widget == KIWI_ENT_WIDGET_DEF )
+                hint = "light definition asset";
+            const char *source = present ? currentValue.c_str() : "";
+            return DrawTextEditor( &state, source, hint.c_str(), width, outValue );
+        }
+
+        if ( parameter.widget == KIWI_ENT_WIDGET_TARGET )
+        {
+            std::string hint;
+            if ( !present && !parameter.defaultValue.empty() )
+                hint = std::string( "default: " ) + parameter.defaultValue;
+            else
+                hint = "targetname / target";
+            const char *source = present ? currentValue.c_str() : "";
+            return DrawTargetEditor( &state, source, hint.c_str(), suggestions, width, outValue );
+        }
+
+        const bool dimDefault = !present;
+        if ( dimDefault )
+            ImGui::PushStyleVar( ImGuiStyleVar_Alpha, ImGui::GetStyle().Alpha * 0.60f );
+
+        // KIWI: epairs have no undo-free preview path, so drags stay local and commit on release.
+        bool commit = false;
+        if ( parameter.widget == KIWI_ENT_WIDGET_COLOR3 )
+        {
+            float parsed[3] = { 0.0f, 0.0f, 0.0f };
+            if ( present && !ParseFloats( displayValue, parsed, 3 ) )
+            {
+                if ( dimDefault )
+                    ImGui::PopStyleVar();
+                return DrawTextEditor( &state, currentValue.c_str(), "invalid colour: edit raw value",
+                                       width, outValue );
+            }
+            if ( !state.wasActive )
+            {
+                if ( !ParseFloats( displayValue, parsed, 3 ) )
+                    parsed[0] = parsed[1] = parsed[2] = 0.0f;
+                state.floatValue[0] = parsed[0];
+                state.floatValue[1] = parsed[1];
+                state.floatValue[2] = parsed[2];
+            }
+            ImGui::SetNextItemWidth( width );
+            ImGui::ColorEdit3( "##value", state.floatValue,
+                               ImGuiColorEditFlags_Float | ImGuiColorEditFlags_DisplayRGB );
+            commit = ImGui::IsItemDeactivatedAfterEdit();
+            state.wasActive = ImGui::IsItemActive();
+            if ( commit )
+            {
+                char value[96];
+                FormatVec3Epair( value, sizeof( value ), state.floatValue );
+                *outValue = value;
+            }
+        }
+        else if ( parameter.widget == KIWI_ENT_WIDGET_VEC3 )
+        {
+            float parsed[3] = { 0.0f, 0.0f, 0.0f };
+            if ( present && !ParseFloats( displayValue, parsed, 3 ) )
+            {
+                if ( dimDefault )
+                    ImGui::PopStyleVar();
+                return DrawTextEditor( &state, currentValue.c_str(), "invalid vector: edit raw value",
+                                       width, outValue );
+            }
+            if ( !state.wasActive )
+            {
+                if ( !ParseFloats( displayValue, parsed, 3 ) )
+                    parsed[0] = parsed[1] = parsed[2] = 0.0f;
+                state.floatValue[0] = parsed[0];
+                state.floatValue[1] = parsed[1];
+                state.floatValue[2] = parsed[2];
+            }
+            ImGui::SetNextItemWidth( width );
+            ImGui::DragFloat3( "##value", state.floatValue, parameter.dragSpeed,
+                               parameter.hasDragRange ? parameter.dragMin : 0.0f,
+                               parameter.hasDragRange ? parameter.dragMax : 0.0f,
+                               KIWI_FMT_FLOAT );
+            commit = ImGui::IsItemDeactivatedAfterEdit();
+            state.wasActive = ImGui::IsItemActive();
+            if ( commit )
+            {
+                char value[96];
+                FormatVec3Epair( value, sizeof( value ), state.floatValue );
+                *outValue = value;
+            }
+        }
+        else if ( parameter.widget == KIWI_ENT_WIDGET_INT )
+        {
+            int parsed = 0;
+            if ( present && !ParseInteger( displayValue, &parsed ) )
+            {
+                if ( dimDefault )
+                    ImGui::PopStyleVar();
+                return DrawTextEditor( &state, currentValue.c_str(), "invalid integer: edit raw value",
+                                       width, outValue );
+            }
+            if ( !state.wasActive )
+            {
+                if ( !ParseInteger( displayValue, &parsed ) )
+                    parsed = 0;
+                state.integerValue = parsed;
+            }
+            ImGui::SetNextItemWidth( width );
+            ImGui::DragInt( "##value", &state.integerValue, parameter.dragSpeed,
+                            parameter.hasDragRange ? (int)parameter.dragMin : 0,
+                            parameter.hasDragRange ? (int)parameter.dragMax : 0 );
+            commit = ImGui::IsItemDeactivatedAfterEdit();
+            state.wasActive = ImGui::IsItemActive();
+            if ( commit )
+            {
+                char value[32];
+                _snprintf( value, sizeof( value ), "%i", state.integerValue );
+                value[sizeof( value ) - 1] = '\0';
+                *outValue = value;
+            }
+        }
+        else if ( parameter.widget == KIWI_ENT_WIDGET_BOOL )
+        {
+            bool parsed = false;
+            if ( present && !ParseBool( displayValue, &parsed ) )
+            {
+                if ( dimDefault )
+                    ImGui::PopStyleVar();
+                return DrawTextEditor( &state, currentValue.c_str(), "invalid boolean: edit raw value",
+                                       width, outValue );
+            }
+            if ( !ParseBool( displayValue, &parsed ) )
+                parsed = false;
+            state.boolValue = parsed;
+            if ( ImGui::Checkbox( "##value", &state.boolValue ) )
+            {
+                *outValue = state.boolValue ? "1" : "0";
+                commit = true;
+            }
+            state.wasActive = false;
+        }
+        else
+        {
+            float parsed = 0.0f;
+            if ( present && !ParseFloats( displayValue, &parsed, 1 ) )
+            {
+                if ( dimDefault )
+                    ImGui::PopStyleVar();
+                return DrawTextEditor( &state, currentValue.c_str(), "invalid number: edit raw value",
+                                       width, outValue );
+            }
+            if ( !state.wasActive )
+            {
+                if ( !ParseFloats( displayValue, &parsed, 1 ) )
+                    parsed = 0.0f;
+                state.floatValue[0] = parsed;
+            }
+            ImGui::SetNextItemWidth( width );
+            ImGui::DragFloat( "##value", &state.floatValue[0], parameter.dragSpeed,
+                              parameter.hasDragRange ? parameter.dragMin : 0.0f,
+                              parameter.hasDragRange ? parameter.dragMax : 0.0f,
+                              KIWI_FMT_FLOAT );
+            commit = ImGui::IsItemDeactivatedAfterEdit();
+            state.wasActive = ImGui::IsItemActive();
+            if ( commit )
+            {
+                char value[64];
+                KiwiFmt_Num( value, sizeof( value ), state.floatValue[0], 6 );
+                *outValue = value;
+            }
+        }
+
+        if ( dimDefault )
+            ImGui::PopStyleVar();
+        return commit;
+    }
+
+    bool DrawResetButton( bool visible )
+    {
+        if ( !visible )
+            return false;
+        const bool reset = ImGui::SmallButton( "\xC3\x97" );
+        if ( ImGui::IsItemHovered() )
+            ImGui::SetTooltip( "Remove this key and use the engine default." );
+        return reset;
+    }
+
+    void DrawEditorAndReset( const KiwiEntParameter &parameter, bool present, bool mixed,
+                             const std::string &currentValue, const char *writeKey,
+                             const std::vector<std::string> &targetSuggestions )
+    {
+        const bool showReset = present || mixed;
+        float editorWidth = ImGui::GetContentRegionAvail().x;
+        if ( showReset )
+            editorWidth -= ImGui::GetFrameHeight() + ImGui::GetStyle().ItemSpacing.x;
+        if ( editorWidth < 40.0f )
+            editorWidth = 40.0f;
+
+        std::string newValue;
+        const bool commit = DrawTypedEditor( parameter, present, currentValue,
+                                              targetSuggestions, editorWidth, &newValue );
+        bool reset = false;
+        if ( showReset )
+        {
+            ImGui::SameLine();
+            reset = DrawResetButton( true );
+        }
+
+        if ( reset )
+            DeleteEntityKey( writeKey );
+        else if ( commit )
+            SetEntityKey( writeKey, newValue.c_str() );
+    }
+
+    void DrawProperties( const std::vector<KiwiEntParameter> &properties,
+                         const std::vector<std::string> &targetSuggestions,
+                         const std::vector<entity_s_def *> &selectedEntities )
+    {
+        ImGui::SeparatorText( "Properties" );
+        if ( properties.empty() )
+            return;
+
+        const ImGuiTableFlags flags = ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_RowBg |
+                                      ImGuiTableFlags_Resizable | ImGuiTableFlags_SizingStretchProp;
+        if ( !ImGui::BeginTable( "##properties", 2, flags ) )
+            return;
+        ImGui::TableSetupColumn( "Property", ImGuiTableColumnFlags_WidthFixed, 135.0f );
+        ImGui::TableSetupColumn( "Value", ImGuiTableColumnFlags_WidthStretch );
         ImGui::TableHeadersRow();
 
-        for ( size_t i = 0; i < rows.size(); ++i )
+        for ( size_t i = 0; i < properties.size(); ++i )
         {
+            const KiwiEntParameter &parameter = properties[i];
+            epair_t *epair = FindEpair( edit_entity, parameter.name.c_str() );
+            const bool present = epair != nullptr;
+            const std::string currentValue = present ? epair->value : "";
+            const std::string writeKey = present ? epair->key : parameter.name;
+            const bool mixed = IsMixedValue( selectedEntities, parameter.name.c_str() );
+
+            ImGui::PushID( parameter.name.c_str() );
             ImGui::TableNextRow();
             ImGui::TableSetColumnIndex( 0 );
-            ImGui::PushID( (int)i );
-            // = OnKVSelChange / EditProp: the picked pair lands in the two edit fields.
-            if ( ImGui::Selectable( rows[i].key.c_str(), s_selKv == (int)i,
-                                    ImGuiSelectableFlags_SpanAllColumns ) )
-            {
-                s_selKv = (int)i;
-                Panel_CopyField( s_key,   sizeof( s_key ),   rows[i].key.c_str()   );
-                Panel_CopyField( s_value, sizeof( s_value ), rows[i].value.c_str() );
-            }
-            ImGui::PopID();
+            DrawParameterLabel( parameter, mixed );
+
             ImGui::TableSetColumnIndex( 1 );
-            ImGui::TextUnformatted( rows[i].value.c_str() );
+            DrawEditorAndReset( parameter, present, mixed, currentValue, writeKey.c_str(),
+                                targetSuggestions );
+            ImGui::PopID();
         }
         ImGui::EndTable();
     }
 
-    ImGui::SetNextItemWidth( -1.0f );
-    bool commit = ImGui::InputText( "Key",   s_key,   sizeof( s_key ),
-                                    ImGuiInputTextFlags_EnterReturnsTrue );
-    ImGui::SetNextItemWidth( -1.0f );
-    commit |= ImGui::InputText( "Value", s_value, sizeof( s_value ),
-                                ImGuiInputTextFlags_EnterReturnsTrue );
-
-    // Enter in either field = the MFC FieldWndProc's Enter→AddProp path.
-    if ( ImGui::Button( "Set" ) || commit )
-        EntSetKey_Apply( s_key, s_value );          // = AddProp
-    ImGui::SameLine();
-    if ( ImGui::Button( "Delete Key" ) )
-        EntDeleteKey_Apply( s_key );                // = OnDeleteKey → DelProp
-}
-
-// ── spawnflags: the 12 checkboxes ─────────────────────────────────────────────
-// Seeded from SpawnFlags_Gather every frame (the panel has no push-refresh hook), then
-// any toggle rebuilds all 12 bits and writes them — SetSpawnFlags_2's whole-int rebuild.
-// SpawnFlags_Apply has NO !edit_entity guard (faithful; see radiant_ui_actions.h:53), so
-// the call is gated here.
-static void Panel_DrawSpawnFlags( const entEclassInfo_t &info, bool haveInfo )
-{
-    ImGui::SeparatorText( "Spawnflags" );
-
-    const int flags0 = SpawnFlags_Gather();
-    bool      box[12];
-    for ( int i = 0; i < 12; ++i )
-        box[i] = ( flags0 & ( 1 << i ) ) != 0;
-
-    // Two columns of six, the MFC pane's flag grid (win_ent.cpp:1303-1307).  The column
-    // offset is taken BEFORE any item is submitted (GetContentRegionAvail shrinks as the
-    // row fills).
-    const float halfW  = ImGui::GetContentRegionAvail().x * 0.5f;
-    bool        changed = false;
-    for ( int slot = 0; slot < 12; ++slot )
+    void GatherOtherKeys( const std::vector<KiwiEntParameter> &properties,
+                          std::vector<OtherKeyRow> *rows )
     {
-        // MFC places box i at column i/6, row i%6; ImGui submits left-to-right, so the
-        // slot order interleaves the two columns (0,6,1,7,...) to land the same grid.
-        const int i = ( slot & 1 ) ? ( slot / 2 + 6 ) : ( slot / 2 );
-
-        // Label from the eclass flag names for the first 8 (UpdateSelection's labelling);
-        // an unnamed box is DISABLED there, so it is disabled here too.  The last 4 keep
-        // the static difficulty/gametype labels the eclass never names.
-        char        generic[32];
-        const char *label   = nullptr;
-        bool        disable = false;
-        if ( i < 8 )
+        rows->clear();
+        if ( !edit_entity )
+            return;
+        for ( epair_t *ep = edit_entity->epairs; ep; ep = ep->next )
         {
-            const char *flagname = haveInfo ? info.flagname[i] : nullptr;
-            if ( flagname && *flagname )
+            if ( !_stricmp( ep->key, "classname" ) || !_stricmp( ep->key, "spawnflags" ) )
+                continue;
+            if ( FindEpair( edit_entity, ep->key ) != ep )
+                continue;
+            if ( ParameterExists( properties, ep->key ) )
+                continue;
+            if ( IsWorldspawn( edit_entity ) && IsSunTabKey( ep->key ) )
+                continue;
+            if ( IsLightClass( edit_entity ) && IsLightTabKey( ep->key ) )
+                continue;
+            OtherKeyRow row;
+            row.key = ep->key;
+            row.value = ep->value;
+            rows->push_back( row );
+        }
+    }
+
+    void DrawOtherKeys( const std::vector<KiwiEntParameter> &properties,
+                        const std::vector<std::string> &targetSuggestions,
+                        const std::vector<entity_s_def *> &selectedEntities )
+    {
+        std::vector<OtherKeyRow> rows;
+        GatherOtherKeys( properties, &rows );
+        if ( rows.empty() )
+            return;
+
+        ImGui::SeparatorText( "Other keys" );
+
+        const ImGuiTableFlags flags = ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_RowBg |
+                                      ImGuiTableFlags_Resizable | ImGuiTableFlags_SizingStretchProp;
+        if ( !ImGui::BeginTable( "##otherkeys", 2, flags ) )
+            return;
+        ImGui::TableSetupColumn( "Key", ImGuiTableColumnFlags_WidthFixed, 135.0f );
+        ImGui::TableSetupColumn( "Value", ImGuiTableColumnFlags_WidthStretch );
+        ImGui::TableHeadersRow();
+
+        for ( size_t i = 0; i < rows.size(); ++i )
+        {
+            KiwiEntParameter inferred = KiwiEntInspect_InferParameter( rows[i].key.c_str(), "", "" );
+            const bool mixed = IsMixedValue( selectedEntities, rows[i].key.c_str() );
+
+            ImGui::PushID( (int)i );
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex( 0 );
+            DrawParameterLabel( inferred, mixed );
+
+            ImGui::TableSetColumnIndex( 1 );
+            inferred.name = std::string( "other:" ) + rows[i].key;
+            DrawEditorAndReset( inferred, true, mixed, rows[i].value, rows[i].key.c_str(),
+                                targetSuggestions );
+            ImGui::PopID();
+        }
+        ImGui::EndTable();
+    }
+
+    void DrawAddKey()
+    {
+        if ( !ImGui::CollapsingHeader( "Add key" ) )
+            return;
+
+        if ( ImGui::BeginTable( "##addkey", 3, ImGuiTableFlags_SizingStretchProp ) )
+        {
+            ImGui::TableSetupColumn( "Key", ImGuiTableColumnFlags_WidthStretch, 0.8f );
+            ImGui::TableSetupColumn( "Value", ImGuiTableColumnFlags_WidthStretch, 1.2f );
+            ImGui::TableSetupColumn( "Set", ImGuiTableColumnFlags_WidthFixed );
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex( 0 );
+            ImGui::SetNextItemWidth( -1.0f );
+            bool commit = ImGui::InputTextWithHint( "##key", "key", s_key, sizeof( s_key ),
+                                                     ImGuiInputTextFlags_EnterReturnsTrue );
+            ImGui::TableSetColumnIndex( 1 );
+            ImGui::SetNextItemWidth( -1.0f );
+            commit |= ImGui::InputTextWithHint( "##value", "value", s_value, sizeof( s_value ),
+                                                ImGuiInputTextFlags_EnterReturnsTrue );
+            ImGui::TableSetColumnIndex( 2 );
+            if ( ImGui::Button( "Set" ) || commit )
+                SetEntityKey( s_key, s_value );
+            ImGui::EndTable();
+        }
+    }
+
+    bool IsNamedSpawnFlag( const char *name )
+    {
+        return name && name[0] && _stricmp( name, "x" ) && strcmp( name, "-" );
+    }
+
+    void DrawSpawnFlags( eclass_t *eclass )
+    {
+        if ( !eclass )
+            return;
+        const char *const names[9] =
+        {
+            eclass->flagname0, eclass->flagname1, eclass->flagname2,
+            eclass->flagname3, eclass->flagname4, eclass->flagname5,
+            eclass->flagname6, eclass->flagname7, eclass->flagname8
+        };
+        int namedCount = 0;
+        for ( int i = 0; i < 9; ++i )
+            if ( IsNamedSpawnFlag( names[i] ) )
+                ++namedCount;
+        if ( namedCount == 0 )
+            return;
+
+        ImGui::SeparatorText( "Spawnflags" );
+        const int originalFlags = SpawnFlags_Gather();
+        int editedFlags = originalFlags;
+        bool changed = false;
+        int changedBit = -1;
+        bool changedChecked = false;
+        if ( ImGui::BeginTable( "##spawnflags", 2, ImGuiTableFlags_SizingStretchSame ) )
+        {
+            int slot = 0;
+            for ( int i = 0; i < 9; ++i )
             {
-                label = flagname;
+                if ( !IsNamedSpawnFlag( names[i] ) )
+                    continue;
+                if ( ( slot & 1 ) == 0 )
+                    ImGui::TableNextRow();
+                ImGui::TableSetColumnIndex( slot & 1 );
+                bool checked = ( editedFlags & ( 1 << i ) ) != 0;
+                ImGui::PushID( i );
+                if ( ImGui::Checkbox( names[i], &checked ) )
+                {
+                    if ( checked )
+                        editedFlags |= 1 << i;
+                    else
+                        editedFlags &= ~( 1 << i );
+                    changed = true;
+                    changedBit = i;
+                    changedChecked = checked;
+                }
+                ImGui::PopID();
+                ++slot;
+            }
+            ImGui::EndTable();
+        }
+
+        if ( changed )
+        {
+            if ( multiple_edit_entities && changedBit >= 0 )
+            {
+                SpawnFlagBit_Apply( changedBit, changedChecked ? 1 : 0 );
+                MarkEntityWrite();
             }
             else
             {
-                sprintf( generic, "flag %i", i );
-                label   = generic;
-                disable = haveInfo;
+                SetEntitySpawnFlags( editedFlags );
             }
         }
-        else
-        {
-            label = kCheckDefaultTail[i - 8];
-        }
-
-        if ( slot & 1 )
-            ImGui::SameLine( halfW );
-
-        ImGui::PushID( i );
-        ImGui::BeginDisabled( disable );
-        if ( ImGui::Checkbox( label, &box[i] ) )
-            changed = true;
-        ImGui::EndDisabled();
-        ImGui::PopID();
     }
 
-    if ( changed && edit_entity )
+    void DrawEclassList( std::vector<eclassRow_t> &rows )
     {
-        int flags = 0;
-        for ( int i = 0; i < 12; ++i )
-            flags |= (int)box[i] << i;              // = SetSpawnFlags_2's OR of the 12 boxes
-        SpawnFlags_Apply( flags );
+        ImGui::SetNextItemWidth( -1.0f );
+        ImGui::InputTextWithHint( "##eclassfilter", "filter...", s_eclassFilter,
+                                  sizeof( s_eclassFilter ) );
+        if ( ImGui::BeginChild( "##eclasslist", ImVec2( 0.0f, 250.0f ), ImGuiChildFlags_Borders ) )
+        {
+            for ( size_t i = 0; i < rows.size(); ++i )
+            {
+                if ( !ContainsNoCase( rows[i].name, s_eclassFilter ) )
+                    continue;
+                ImGui::PushID( (int)i );
+                if ( ImGui::Selectable( rows[i].name ? rows[i].name : "(unnamed)",
+                                        s_selEclass == (int)i,
+                                        ImGuiSelectableFlags_AllowDoubleClick ) )
+                {
+                    s_selEclass = (int)i;
+                    EclassSelect_Apply( (int)i, rows[i].eclass );
+                    if ( ImGui::IsMouseDoubleClicked( ImGuiMouseButton_Left ) )
+                    {
+                        EclassCreate_Apply( rows[i].name );
+                        ImGui::CloseCurrentPopup();
+                    }
+                }
+                if ( ImGui::IsItemHovered() && rows[i].eclass && rows[i].eclass->comments &&
+                     rows[i].eclass->comments[0] )
+                    DrawWrappedTooltip( rows[i].eclass->comments );
+                ImGui::PopID();
+            }
+        }
+        ImGui::EndChild();
+        ImGui::TextDisabled( "single click: inspect class   double click: create / change entity" );
+    }
+
+    void DrawChangeClass( std::vector<eclassRow_t> &rows )
+    {
+        const bool canChange = edit_entity && !IsWorldspawn( edit_entity );
+        ImGui::BeginDisabled( !canChange );
+        if ( ImGui::SmallButton( "Change class \xE2\x96\xBE" ) )
+            ImGui::OpenPopup( "##changeclass" );
+        ImGui::EndDisabled();
+
+        ImGui::SetNextWindowSize( ImVec2( 420.0f, 340.0f ), ImGuiCond_Appearing );
+        if ( ImGui::BeginPopup( "##changeclass" ) )
+        {
+            if ( ImGui::IsWindowAppearing() )
+                ImGui::SetKeyboardFocusHere();
+            DrawEclassList( rows );
+            ImGui::EndPopup();
+        }
+    }
+
+    void DrawEntityHeader( std::vector<eclassRow_t> &eclasses,
+                           const std::vector<entity_s_def *> &selectedEntities )
+    {
+        if ( !edit_entity )
+            return;
+
+        const char *classname = EntityClassname( edit_entity );
+        ImGui::SetWindowFontScale( 1.25f );
+        ImGui::TextUnformatted( classname ? classname : "(unknown class)" );
+        const bool classHovered = ImGui::IsItemHovered();
+        ImGui::SetWindowFontScale( 1.0f );
+        if ( edit_entity->eclass && edit_entity->eclass->comments &&
+             edit_entity->eclass->comments[0] && classHovered )
+            DrawWrappedTooltip( edit_entity->eclass->comments );
+
+        if ( selectedEntities.size() > 1 )
+            ImGui::TextDisabled( "(%u entities selected)", (unsigned)selectedEntities.size() );
+        if ( edit_entity->eclass && !edit_entity->eclass->fixedsize )
+        {
+            const int count = BrushCount( edit_entity );
+            ImGui::TextDisabled( "%d brush%s", count, count == 1 ? "" : "es" );
+        }
+        DrawChangeClass( eclasses );
+    }
+
+    void DrawOwnedSettingsLink()
+    {
+        if ( IsWorldspawn( edit_entity ) )
+        {
+            if ( ImGui::SmallButton( "Sun settings \xE2\x86\x92 Sun tab" ) )
+            {
+                KiwiWindows_Set( KIWI_WIN_SUN, true );
+                ImGuiShell_FocusTab( "Sun" );
+            }
+        }
+        else if ( IsLightClass( edit_entity ) )
+        {
+            if ( ImGui::SmallButton( "Light settings \xE2\x86\x92 Light tab" ) )
+            {
+                KiwiWindows_Set( KIWI_WIN_LIGHT, true );
+                ImGuiShell_FocusTab( "Light" );
+            }
+        }
+    }
+
+    void UpdateSelectionAndAutoFocus()
+    {
+        Entity_UpdateSelection();
+        const bool selectionEmpty = SelectionIsEmpty();
+        if ( selectionEmpty != s_previousSelectionEmpty )
+        {
+            s_editWorldspawn = false;
+            s_previousSelectionEmpty = selectionEmpty;
+        }
+        if ( edit_entity == s_previousEntity )
+            return;
+
+        s_editStates.clear();
+        s_editStateEntity = edit_entity;
+        if ( selectionEmpty )
+            s_editWorldspawn = false;
+
+        const char *classname = EntityClassname( edit_entity );
+        if ( edit_entity && !selectionEmpty && classname &&
+             _stricmp( classname, "worldspawn" ) && !StartsNoCase( classname, "light" ) )
+        {
+            KiwiWindows_Set( KIWI_WIN_INSPECTOR, true );
+            ImGuiShell_FocusTab( "Inspector" );
+        }
+        s_previousEntity = edit_entity;
     }
 }
 
-// ── the angle / direction grid ────────────────────────────────────────────────
-// The compass cell layout is the MFC one (win_ent.cpp:1310-1315): N up, E right —
-//   NW(3) N(2) NE(1) / W(4) · E(0) / SW(5) S(6) SE(7), with Up(8)/Dn(9) in a 4th column.
-static void Panel_AngleButton( int idx, const ImVec2 &size )
-{
-    ImGui::PushID( idx );
-    if ( ImGui::Button( kDirLabel[idx], size ) )
-        EntAngle_Apply( idx );                      // = OnAngleButton
-    ImGui::PopID();
-}
-
-static void Panel_DrawAngles()
-{
-    ImGui::SeparatorText( "Angle" );
-
-    const float   side = ImGui::GetFrameHeight() * 1.4f;
-    const ImVec2  sz( side, side );
-
-    // Cases 8/9 read edit_entity's "angles" key directly (win_ent.cpp:1618/1625) and the
-    // shared tail refreshes the key/value list from it — the grid is inert without an
-    // edited entity, so it is disabled rather than left to deref null.
-    ImGui::BeginDisabled( edit_entity == nullptr );
-    Panel_AngleButton( 3, sz ); ImGui::SameLine(); Panel_AngleButton( 2, sz ); ImGui::SameLine();
-    Panel_AngleButton( 1, sz ); ImGui::SameLine(); ImGui::Dummy( ImVec2( side * 0.4f, side ) );
-    ImGui::SameLine(); Panel_AngleButton( 8, sz );
-
-    Panel_AngleButton( 4, sz ); ImGui::SameLine(); ImGui::Dummy( sz ); ImGui::SameLine();
-    Panel_AngleButton( 0, sz );
-
-    Panel_AngleButton( 5, sz ); ImGui::SameLine(); Panel_AngleButton( 6, sz ); ImGui::SameLine();
-    Panel_AngleButton( 7, sz ); ImGui::SameLine(); ImGui::Dummy( ImVec2( side * 0.4f, side ) );
-    ImGui::SameLine(); Panel_AngleButton( 9, sz );
-    ImGui::EndDisabled();
-}
-
-// ── exports ───────────────────────────────────────────────────────────────────
-// The panel toggle, drawn inside the shell window's panel menu (imgui_shell.cpp →
-// ImGuiPanels_Menu).
 void ImGuiPanel_Entity_MenuItem()
 {
-    ImGui::Checkbox( "Entity inspector", &s_showEntity );
+    bool open = KiwiWindows_IsOpen( KIWI_WIN_INSPECTOR );
+    if ( ImGui::Checkbox( "Inspector", &open ) )
+        KiwiWindows_Set( KIWI_WIN_INSPECTOR, open );
 }
 
-// U-RIP seam: Edit→Entity Info (cmd 32787, was the MFC entity-list browser) routes here
-// until the entity-list dock tab lands — same show/hide flip the sibling toggles use.
-//
-// ── KIWI-UX (ROUND AU): N MUST BRING IT TO THE FRONT, NOT HIDE IT ────────────
-// USER DIRECTIVE: "make sure the legacy entity inspector (N) bind works so we can
-// change their properties."  N is `{ "ViewEntityInfo", 0x4E, 0, 33017 }`
-// (mainfrm.cpp:1140) in the DEFAULT table and kiwi_keymap.cpp's modern profile
-// never touches vk 0x4E, so the BINDING was always live — it reached
-// Cmd_OnViewEntity (mainfrm.cpp:3055) and flipped this bool.  What a blind flip
-// cannot express is the state this panel is now in: round AU docks it as a TAB
-// beside Textures / Entities (ImGuiShell_BuildDefaultDockLayout), so "open" and
-// "visible" are different things — pressing N while it sat BEHIND the Textures tab
-// closed a window the user could not see.
-//
-// The rule is the one every editor uses for a panel key: N brings it up and
-// focuses it; N again, while it IS the focused surface, puts it away.  The focus
-// question is answered by the panel's own last draw (s_entityFocused) rather than
-// guessed, and the raise goes through ImGuiShell_FocusTab, which is the same
-// SetWindowFocus the O / texture-view keys already use (imgui_shell.cpp:135).
 void ImGuiPanel_Entity_Toggle()
 {
-    if ( s_showEntity && s_entityFocused )
+    if ( KiwiWindows_IsOpen( KIWI_WIN_INSPECTOR ) && s_entityFocused )
     {
-        s_showEntity = false;
+        KiwiWindows_Set( KIWI_WIN_INSPECTOR, false );
         return;
     }
-    s_showEntity = true;
-    ImGuiShell_FocusTab( "Entity inspector" );
+    KiwiWindows_Set( KIWI_WIN_INSPECTOR, true );
+    ImGuiShell_FocusTab( "Inspector" );
 }
 
 void ImGuiPanel_Entity_Draw()
 {
-    // KIWI-UX (ROUND AU): the focus latch N reads.  Cleared BEFORE every early-out
-    // and before Begin, so "closed" and "collapsed / behind another tab" both read
-    // as unfocused and N raises rather than hides.
-    const bool wasShown = s_showEntity;
     s_entityFocused = false;
-    if ( !wasShown )
+    UpdateSelectionAndAutoFocus();
+    bool *open = KiwiWindows_OpenPtr( KIWI_WIN_INSPECTOR );
+    if ( !open || !*open )
         return;
 
-    if ( ImGui::Begin( "Entity inspector", &s_showEntity ) )
+    if ( KiwiWindows_JustOpened( KIWI_WIN_INSPECTOR ) )
+        ImGui::SetNextWindowDockID( ImGuiShell_DockRoot(), ImGuiCond_Always );
+
+    if ( ImGui::Begin( KiwiWindows_Title( KIWI_WIN_INSPECTOR ), open ) )
     {
-        // RootAndChildWindows so a click in one of the fields still counts as
-        // "this panel is the surface".
         s_entityFocused = ImGui::IsWindowFocused( ImGuiFocusedFlags_RootAndChildWindows );
 
-        // ── KIWI-UX (ROUND AU): RE-DERIVE, DO NOT TRUST THE CACHE ───────────
-        // Round AU made UpdateSelection publish edit_entity in this shell (see
-        // win_ent.cpp), so the two selection funnels — Brush_Select_Helper's
-        // splice (brush.cpp:947) and Brush_RemoveFromList (:980) — keep it live
-        // through every ordinary select / deselect.  A MAP LOAD is the one path
-        // that frees entity defs WITHOUT going through them (Map_Free ->
-        // Map_New, entity.cpp:1824), and a pointer into a freed def is a crash
-        // rather than a wrong readout.  One call per drawn frame re-derives it
-        // from selected_brushes + world_entity, both of which the load rebuilds
-        // — and it is nearly free: with no entity listbox in this shell
-        // UpdateSelection returns immediately after publishing those two globals.
-        Entity_UpdateSelection();     // win_ent.cpp:800 — UpdateSelection( -1, NULL )
-
-        std::vector<eclassRow_t> rows;
-        EclassList_Gather( rows );
-        if ( s_selEclass >= (int)rows.size() )      // the list was refilled (map load)
-            s_selEclass = -1;
-
-        Panel_DrawEclassList( rows );
-
-        entEclassInfo_t info      = { nullptr, { nullptr } };
-        std::string     comment;
-        const bool      haveInfo  = ( s_selEclass >= 0 )
-                                  ? Panel_GatherEclassInfo( rows[s_selEclass].eclass, info, comment )
-                                  : false;
-        if ( !comment.empty() )
+        bool inspectEntity = !SelectionIsEmpty() || s_editWorldspawn;
+        if ( !inspectEntity )
         {
-            ImGui::SeparatorText( "Description" );
-            ImGui::TextWrapped( "%s", comment.c_str() );
+            ImGui::TextUnformatted( "Nothing selected" );
+            const bool haveWorldspawn = world_entity && world_entity->def;
+            ImGui::BeginDisabled( !haveWorldspawn );
+            if ( ImGui::Button( "Edit worldspawn" ) )
+            {
+                edit_entity = (entity_s_def *)world_entity->def;
+                s_editWorldspawn = true;
+                s_editStates.clear();
+                s_editStateEntity = edit_entity;
+                inspectEntity = true;
+            }
+            ImGui::EndDisabled();
         }
 
-        if ( !edit_entity )
+        if ( inspectEntity && edit_entity )
         {
-            ImGui::SeparatorText( "Entity" );
-            ImGui::TextUnformatted( "(no entity selected)" );
-        }
-        else
-        {
-            // ── KIWI-UX (ROUND AU): SAY WHAT IS BEING EDITED ────────────────
-            // With edit_entity finally tracking the selection (win_ent.cpp
-            // UpdateSelection), the binary's own "nothing selected == worldspawn"
-            // rule becomes visible for the first time in this shell — and an
-            // unlabelled key grid that is silently worldspawn's is how a mapper
-            // puts a key on the map instead of on their entity.  The header names
-            // the class and the empty-selection case says so outright.
-            ImGui::SeparatorText( "Entity" );
-            const char *cls = ( edit_entity->eclass && edit_entity->eclass->name )
-                            ? edit_entity->eclass->name : "(unknown class)";
-            const bool empty = ( selected_brushes.next == &selected_brushes );
-            if ( empty )
-                ImGui::TextDisabled( "nothing selected — editing %s", cls );
-            else
-                ImGui::Text( "%s", cls );
-            if ( multiple_edit_entities )
-                ImGui::TextDisabled( "multiple entities selected: edits apply to all of them" );
+            std::vector<eclassRow_t> eclasses;
+            EclassList_Gather( eclasses );
+            if ( s_selEclass >= (int)eclasses.size() )
+                s_selEclass = -1;
 
-            Panel_DrawKeyValues();
-            Panel_DrawSpawnFlags( info, haveInfo );
-            Panel_DrawAngles();
+            std::vector<entity_s_def *> selectedEntities;
+            GatherSelectedEntities( &selectedEntities );
+            DrawEntityHeader( eclasses, selectedEntities );
+            DrawOwnedSettingsLink();
+
+            const KiwiEntSchema &schema = KiwiEntInspect_GetSchema(
+                edit_entity->eclass, eclasses.size() );
+            std::vector<KiwiEntParameter> properties;
+            BuildProperties( edit_entity, schema, &properties );
+            std::vector<std::string> targetSuggestions;
+            GatherTargetSuggestions( &targetSuggestions );
+
+            DrawProperties( properties, targetSuggestions, selectedEntities );
+            if ( !IsLightClass( edit_entity ) )
+                DrawSpawnFlags( edit_entity->eclass );
+            DrawOtherKeys( properties, targetSuggestions, selectedEntities );
+            DrawAddKey();
         }
     }
-    // ── KIWI-UX (ROUND AU): NO CLICK-OFF AUTO-CLOSE ─────────────────────────
-    // ImGuiShell_CloseOnFocusLoss (imgui_shell.cpp:93) closed this panel ~130 ms
-    // after focus left it, and the ONE thing a mapper does with an entity
-    // inspector open is click the entity — in the 3D view, which takes the focus.
-    // Round AU's dock placement already exempts it in practice (the helper skips
-    // DockIsActive windows), but a user who tears the tab off must not lose the
-    // panel either.  An inspector is not a transient pop-out; N and the ✕ box are
-    // its close.
     ImGui::End();
 }

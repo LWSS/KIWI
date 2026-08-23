@@ -104,6 +104,7 @@ if(KIWI_RADIANT_DEBUG_FAST_HOT)
         "${SRC_DIR}/radiant/kiwi_modelcache.cpp"
         "${SRC_DIR}/radiant/shadowvolume.cpp"
         "${SRC_DIR}/radiant/kiwi_shadowcache.cpp"
+        "${SRC_DIR}/radiant/kiwi_lightcache.cpp"
         "${SRC_DIR}/radiant/kiwi_walkcache.cpp"
         "${SRC_DIR}/radiant/kiwi_surfcache.cpp"
         "${SRC_DIR}/gfx_d3d/rb_backend.cpp"

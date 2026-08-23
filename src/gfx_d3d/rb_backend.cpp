@@ -69,6 +69,7 @@ void(__cdecl *const RB_RenderCommandTable[RC_COUNT])(GfxRenderCommandExecState *
   &RB_DrawEditorSkinnedCachedCmd,   // RC_DRAW_EDITOR_SKINNEDCACHED = 0x17 (r_ed_scene.cpp)
   &RB_SetCustomConstantCmd,         // RC_SET_CUSTOM_CONSTANT = 0x18 (#26 layer C2 sun preview)
   &RB_SetClipPlaneCmd,              // RC_SET_CLIP_PLANE = 0x19 (KIWI-UX ROUND BM: section analysis)
+  &RB_SetLightColorCmd,             // RC_SET_LIGHT_COLOR = 0x1A (CoD4Radiant light preview)
 #endif
 }; // idb (KISAK_RADIANT extends with RC_BEGIN_VIEW + RC_DRAW_EDITOR_SKINNEDCACHED + RC_SET_CUSTOM_CONSTANT; RC_COUNT sizes the table)
 
@@ -1494,6 +1495,19 @@ void __cdecl RB_SetCustomConstantCmd(GfxRenderCommandExecState *execState)
     const GfxCmdSetCustomConstant *cmd = (const GfxCmdSetCustomConstant *)execState->cmd;
     R_SetCodeConstantFromVec4(&gfxCmdBufSourceState, (CodeConstant)cmd->type, (float *)cmd->vec);
     execState->cmd = (char *)execState->cmd + cmd->header.byteCount;
+}
+
+// IDB RB_SetLightColorCmd @ 0x533940.  The state change is a tessellation
+// boundary, then the normal renderer light-property path installs the constants.
+void __cdecl RB_SetLightColorCmd(GfxRenderCommandExecState *execState)
+{
+    const GfxCmdSetLightColor *cmd = (const GfxCmdSetLightColor *)execState->cmd;
+    if ( tess.indexCount )
+        RB_EndTessSurface();
+    R_Set3D(&gfxCmdBufSourceState);
+    R_SetLightProperties(&gfxCmdBufSourceState, &cmd->light, cmd->light.def,
+                         LIGHT_HAS_NO_SHADOWMAP, 0.0f);
+    execState->cmd = (const char *)execState->cmd + cmd->header.byteCount;
 }
 
 // ══════════════════════════════════════════════════════════════════════════════

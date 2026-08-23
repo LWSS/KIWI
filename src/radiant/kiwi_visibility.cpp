@@ -22,6 +22,7 @@
 #include "kiwi_selection.h" // KiwiSel_GetModeMask / SEL_MASK_FACE
 #include "kiwi_undo.h"      // ROUND AG, ITEM 7 — KiwiUndo_NoteVisibilityRecord
 #include "kiwi_visibility.h"
+#include "kiwi_lightcache.h"
 
 #include <string.h>         // _strnicmp
 #include <vector>
@@ -145,6 +146,7 @@ namespace
                 }
             }
         }
+        KiwiLightCache_VisibilityChanged();
         g_nUpdateBits = -1;
     }
 
@@ -300,6 +302,7 @@ void KiwiVis_SetHidden( selbrush_t *b, bool hidden )
         b->brushFlags &= ~(int)KVIS_HIDDEN_BIT;
         b->xx5 = 0;
     }
+    KiwiLightCache_VisibilityChanged();
     g_nUpdateBits = -1;
 }
 
@@ -321,6 +324,7 @@ void KiwiVis_InvertHidden()
     for ( selbrush_t *b = active_brushes.next; b != &active_brushes; b = b->next )
         InvertOne( b, &nowHidden, &nowShown );
 
+    KiwiLightCache_VisibilityChanged();
     KiwiVis_UndoCommit();      // KIWI-UX (CLEANUP, C-41): the far side of the Push
 
     // The ported hide handlers' own invalidation (select.cpp:4182 / 4207 / 4257).

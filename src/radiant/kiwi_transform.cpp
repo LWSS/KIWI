@@ -15,11 +15,13 @@
 #include "qe3.h"
 #include "mainfrm.h"        // camera_s
 #include "prefs.h"          // g_PrefsDlg (texture / lightmap lock)
+#include <xanim/xmodel.h>
 
 #include "kiwi_transform.h"
 #include "kiwi_boxselect.h"          // ROUND K — the ONE click grammar (IdlePressReselect)
 #include "kiwi_camera.h"             // KiwiCam_WorldPerPixel (the pivot marker's scale)
 #include "kiwi_command.h"
+#include "kiwi_fmt.h"
 #include "kiwi_conselect.h"          // shakeout F — the construction move arm
 #include "kiwi_extrude.h"            // ROUND X — KEXT_SELF_SNAP_BAND (the ONE self-snap rule)
 // KIWI-UX (ROUND BL, ITEM 4): the object move's quantiser is KiwiSnap_LatticeAxis
@@ -33,6 +35,7 @@
 #include "kiwi_numeric.h"
 #include "kiwi_patchfillet.h"        // ROUND AO, ITEM 2 — KiwiFillet_CarryOnPlaneMove
 #include "kiwi_pick.h"
+#include "kiwi_section.h"
 #include "kiwi_selection.h"
 #include "kiwi_snap.h"
 #include "kiwi_units.h"
@@ -40,6 +43,7 @@
 #include "kiwi_vec.h"     // KIWI-UX (CLEANUP, A-15): the one spelling of Dot3/Sub3/...
 
 #include <math.h>
+#include <float.h>
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -51,14 +55,20 @@ extern int   Sys_Printf( const char *fmt, ... );                       // win_qe
 extern camera_s *Ed_Camera();                                          // camwnd.cpp
 extern void  CamWnd_BuildMatrix();                                     // camwnd.cpp 0x403470
 extern int   g_nUpdateBits;                                            // 0x25D5A74 (mainfrm.cpp)
+extern entity_s *world_entity;                                         // map.cpp:62
 
+extern int   Entity_GetVec3ForKey( entity_s_def *e, float *out, const char *key ); // entity.cpp:100
+extern void  SetKeyValue( entity_s_def *e, const char *key, const char *value );    // entity.cpp:213
 extern void  Select_Move( const float *delta, char bSnap );            // select.cpp 0x48E9C0
 extern void  Select_Scale( float sx, float sy, float sz );             // select.cpp 0x48FDC0
 extern void  Select_GetMid( float *mid );                              // select.cpp 0x48FC70
 extern void  Select_GetTrueMid( float *center );                       // select.cpp 0x48FC20
 extern void  Select_RotateAxis( int axis, float deg, float (*rot_around)[4][3] );  // select.cpp 0x48FF40
 extern void  Select_ApplyMatrix_SelectedBrushes( int bSnap, float *mat,
-                                                 float deg, char bSwap );          // select.cpp 0x48FD10
+                                                  float deg, char bSwap );          // select.cpp 0x48FD10
+extern void  Test_Ray( float *start, float *dir, int contents,
+                       edTrace_t *t, int numTraces );                               // select.cpp 0x48D7C0
+extern float *AnglesToAxis( float *angles, float (*axisOut)[3] );                  // engine_stubs.cpp
 
 extern int   Face_MakePlane( face_t *face );                           // brush.cpp 0x470470
 extern int   Brush_MoveVertex( vec3_t delta, brush_t *b, vec3_t move_points, vec3_t end ); // brush.cpp 0x471C30
@@ -251,6 +261,213 @@ namespace
         return true;
     }
 
+    bool DropBoundsValid( const float mins[3], const float maxs[3] )
+    {
+        if ( !mins || !maxs )
+            return false;
+        for ( int k = 0; k < 3; ++k )
+            if ( !_finite( mins[k] ) || !_finite( maxs[k] )
+                 || !( mins[k] <= maxs[k] ) )
+                return false;
+        return true;
+    }
+
+    const char *DropEntityValue( const entity_s_def *def, const char *key )
+    {
+        if ( !def || !key )
+            return "";
+        for ( epair_t *ep = def->epairs; ep; ep = ep->next )
+            if ( ep->key && ep->value && _stricmp( ep->key, key ) == 0 )
+                return ep->value;
+        return "";
+    }
+
+    entity_s_def *DropEntityDef( const selbrush_t *node )
+    {
+        if ( !node || !node->owner || node->owner == world_entity || !node->owner->def )
+            return 0;
+        return (entity_s_def *)node->owner->def;
+    }
+
+    bool DropModelEntity( const selbrush_t *node )
+    {
+        const entity_s_def *def = DropEntityDef( node );
+        if ( !def )
+            return false;
+        if ( def->eclass && ( def->eclass->classtype & 0x8 ) != 0 )
+            return true;
+        return DropEntityValue( def, "model" )[0] != '\0';
+    }
+
+    bool DropEntityInfo( selbrush_t *node, float mins[3], float maxs[3],
+                         float angles[3], float *scale, float origin[3] )
+    {
+        entity_s_def *def = DropEntityDef( node );
+        if ( !def || !DropModelEntity( node ) || !mins || !maxs || !angles || !scale || !origin )
+            return false;
+
+        bool haveBounds = false;
+        entitymodel_t *modelClass = (entitymodel_t *)def->modelClass;
+        if ( modelClass && modelClass->model && modelClass->model->handle )
+        {
+            XModel *model = (XModel *)(intptr_t)modelClass->model->handle;
+            XModelGetBounds( model, mins, maxs );
+            haveBounds = DropBoundsValid( mins, maxs );
+        }
+        // A selected but not-yet-resident model must not be loaded by a drag.
+        // Its class box is the conservative data already present in Radiant.
+        if ( !haveBounds && def->eclass )
+        {
+            for ( int k = 0; k < 3; ++k )
+            {
+                mins[k] = def->eclass->mins[k];
+                maxs[k] = def->eclass->maxs[k];
+            }
+            haveBounds = DropBoundsValid( mins, maxs );
+        }
+        if ( !haveBounds )
+            return false;
+
+        if ( !Entity_GetVec3ForKey( def, angles, "angles" ) )
+            angles[0] = angles[1] = angles[2] = 0.0f;
+        *scale = 1.0f;
+        const char *modelScale = DropEntityValue( def, "modelscale" );
+        if ( modelScale[0] )
+        {
+            const float parsed = (float)atof( modelScale );
+            if ( _finite( parsed ) && parsed > 0.0f )
+                *scale = parsed;
+        }
+        for ( int k = 0; k < 3; ++k )
+            origin[k] = def->origin[k];
+        return true;
+    }
+
+    void DropTransformBounds( const float mins[3], const float maxs[3],
+                              const float inAngles[3], float scale,
+                              float outMins[3], float outMaxs[3] )
+    {
+        float angles[3] = { inAngles ? inAngles[0] : 0.0f,
+                            inAngles ? inAngles[1] : 0.0f,
+                            inAngles ? inAngles[2] : 0.0f };
+        float axis[3][3];
+        AnglesToAxis( angles, axis );
+        if ( !( scale > 0.0f ) )
+            scale = 1.0f;
+        outMins[0] = outMins[1] = outMins[2] = FLT_MAX;
+        outMaxs[0] = outMaxs[1] = outMaxs[2] = -FLT_MAX;
+        for ( int c = 0; c < 8; ++c )
+        {
+            const float local[3] = {
+                ( ( c & 1 ) ? maxs[0] : mins[0] ) * scale,
+                ( ( c & 2 ) ? maxs[1] : mins[1] ) * scale,
+                ( ( c & 4 ) ? maxs[2] : mins[2] ) * scale };
+            // OrientationPosToWorldPos's rotation half: axis^T * local.
+            const float world[3] = {
+                axis[0][0] * local[0] + axis[1][0] * local[1] + axis[2][0] * local[2],
+                axis[0][1] * local[0] + axis[1][1] * local[1] + axis[2][1] * local[2],
+                axis[0][2] * local[0] + axis[1][2] * local[1] + axis[2][2] * local[2] };
+            for ( int k = 0; k < 3; ++k )
+            {
+                if ( world[k] < outMins[k] ) outMins[k] = world[k];
+                if ( world[k] > outMaxs[k] ) outMaxs[k] = world[k];
+            }
+        }
+    }
+
+    // Test_Ray normally hides every selected brush.  Drop only needs selected
+    // MODELS hidden; a selected floor brush/patch is still a valid world surface
+    // for a browser drop.  Lift that bit synchronously and restore it after the
+    // one trace, without touching selection lists or counters.
+    struct dropSurfaceUnmask_t
+    {
+        std::vector<selbrush_t *> nodes;
+
+        dropSurfaceUnmask_t()
+        {
+            for ( selbrush_t *node = selected_brushes.next;
+                  node && node != &selected_brushes; node = node->next )
+            {
+                if ( DropModelEntity( node )
+                     || ( node->brushFlags & BRUSHFLAG_SELECTED ) == 0 )
+                    continue;
+                node->brushFlags &= ~(int)BRUSHFLAG_SELECTED;
+                nodes.push_back( node );
+            }
+        }
+
+        ~dropSurfaceUnmask_t()
+        {
+            for ( size_t i = 0; i < nodes.size(); ++i )
+                nodes[i]->brushFlags |= (int)BRUSHFLAG_SELECTED;
+        }
+    };
+
+    bool DropRayHit( const ray_t &ray, float hit[3] )
+    {
+        float start[3] = { ray.origin[0], ray.origin[1], ray.origin[2] };
+        float dir[3]   = { ray.dir[0], ray.dir[1], ray.dir[2] };
+        edTrace_t trace;
+        // Fixed-size/model entities are not ground.  Test_Ray still supplies its
+        // normal FilterBrush/material-filter handling; selected models stay masked.
+        const int contents = ( Pick_CameraContents() | 0x200 ) & ~0x400;
+        KiwiSection_ClampRayStart( start, dir );
+        {
+            dropSurfaceUnmask_t unmask;
+            Test_Ray( start, dir, contents, &trace, 1 );
+        }
+        if ( trace.hit.brush )
+        {
+            for ( int k = 0; k < 3; ++k )
+                hit[k] = start[k] + dir[k] * trace.dist;
+            return true;
+        }
+
+        // No world surface: only a genuinely downward ray may use global Z=0.
+        // Parallel/upward rays return false so a live gesture keeps its last valid
+        // placement and a browser simply withholds its ghost/drop.
+        if ( !( ray.dir[2] < -0.00001f ) )
+            return false;
+        const float t = -ray.origin[2] / ray.dir[2];
+        if ( !( t > 0.0f ) )
+            return false;
+        for ( int k = 0; k < 3; ++k )
+            hit[k] = ray.origin[k] + ray.dir[k] * t;
+        hit[2] = 0.0f;
+        return true;
+    }
+
+    bool DropSelectionOnlyModels( std::vector<selbrush_t *> *out )
+    {
+        if ( out )
+            out->clear();
+        if ( !KiwiConSel_Empty() )
+            return false;
+
+        const selection_t &typed = KiwiSel();
+        if ( typed.items.empty() )
+            return false;
+        for ( size_t i = 0; i < typed.items.size(); ++i )
+            if ( typed.items[i].kind != SEL_OBJECT || !DropModelEntity( typed.items[i].brush ) )
+                return false;
+
+        for ( selbrush_t *node = selected_brushes.next;
+              node != &selected_brushes; node = node->next )
+        {
+            if ( !DropModelEntity( node ) )
+                return false;
+            if ( !out )
+                continue;
+            bool duplicate = false;
+            for ( size_t i = 0; i < out->size(); ++i )
+                if ( ( *out )[i]->owner == node->owner )
+                    duplicate = true;
+            if ( !duplicate )
+                out->push_back( node );
+        }
+        return !out || !out->empty();
+    }
+
     // KIWI-UX (CLEANUP, RayAxis): the local copy is gone - it was one of four
     // byte-identical bodies, and THIS file's was the one the other three
     // mirrored.  It moved verbatim to KiwiCam_RayAxis (kiwi_camera.h), beside
@@ -323,6 +540,193 @@ namespace
         // condition to test — not the typed selection, which can name faces whose
         // brushes are deliberately absent from the legacy list.
         return selected_brushes.next != &selected_brushes;
+    }
+
+    struct xformEntityAngles_t
+    {
+        entity_s_def *def;
+        float angles[3];
+        float axisAligned[3];
+        bool  isAxisAligned;
+    };
+
+    double XformRoundNearest( double value )
+    {
+        return value >= 0.0 ? floor( value + 0.5 ) : ceil( value - 0.5 );
+    }
+
+    double XformSnapAngleScalar( double value )
+    {
+        value = XformRoundNearest( value * 1000.0 ) / 1000.0;
+        const double integer = XformRoundNearest( value );
+        if ( fabs( value - integer ) <= 0.01 )
+            value = integer;
+        return value;
+    }
+
+    float XformNormalizeAngle( double value )
+    {
+        value = fmod( value, 360.0 );
+        if ( value < 0.0 )
+            value += 360.0;
+        if ( fabs( value ) < 0.0005 || fabs( value - 360.0 ) < 0.0005 )
+            value = 0.0;
+        return (float)value;
+    }
+
+    float XformSnapAngle( float value )
+    {
+        return XformNormalizeAngle( XformSnapAngleScalar( value ) );
+    }
+
+    float XformAngleDistance( float a, float b )
+    {
+        double d = fabs( (double)XformNormalizeAngle( a )
+                       - (double)XformNormalizeAngle( b ) );
+        if ( d > 180.0 )
+            d = 360.0 - d;
+        return (float)d;
+    }
+
+    bool XformAxisAlignedAngles( const float angles[3], float exact[3] )
+    {
+        for ( int i = 0; i < 3; ++i )
+        {
+            if ( !_finite( angles[i] ) )
+                return false;
+            const float normalized = XformNormalizeAngle( angles[i] );
+            const double multiple = XformRoundNearest( normalized / 90.0 ) * 90.0;
+            exact[i] = XformNormalizeAngle( multiple );
+            if ( XformAngleDistance( normalized, exact[i] ) > 0.01f )
+                return false;
+        }
+        return true;
+    }
+
+    const char *XformEntityKey( const entity_s_def *def, const char *key )
+    {
+        if ( !def || !key )
+            return nullptr;
+        for ( const epair_t *ep = def->epairs; ep; ep = ep->next )
+            if ( ep->key && !_stricmp( ep->key, key ) )
+                return ep->value ? ep->value : "";
+        return nullptr;
+    }
+
+    void KiwiXform_CaptureEntityAngles( std::vector<xformEntityAngles_t> &out )
+    {
+        out.clear();
+        for ( selbrush_t *brush = selected_brushes.next;
+              brush && brush != &selected_brushes; brush = brush->next )
+        {
+            entity_s_def *def = brush->owner
+                              ? (entity_s_def *)brush->owner->def : nullptr;
+            if ( !def || !def->eclass || !def->eclass->fixedsize )
+                continue;
+
+            bool duplicate = false;
+            for ( size_t i = 0; i < out.size(); ++i )
+                if ( out[i].def == def ) { duplicate = true; break; }
+            if ( duplicate )
+                continue;
+
+            xformEntityAngles_t base;
+            base.def = def;
+            if ( !Entity_GetVec3ForKey( def, base.angles, "angles" ) )
+                base.angles[0] = base.angles[1] = base.angles[2] = 0.0f;
+            base.isAxisAligned = XformAxisAlignedAngles( base.angles,
+                                                         base.axisAligned );
+            out.push_back( base );
+        }
+    }
+
+    bool XformExpectedAngles( const xformEntityAngles_t &base, float exactDelta,
+                              const float result[3], float out[3] )
+    {
+        if ( !base.isAxisAligned || !_finite( exactDelta ) )
+            return false;
+
+        const double delta = XformSnapAngleScalar( exactDelta );
+        for ( int component = 0; component < 3; ++component )
+        {
+            for ( int sign = 1; sign >= -1; sign -= 2 )
+            {
+                float candidate[3] =
+                {
+                    base.axisAligned[0], base.axisAligned[1], base.axisAligned[2]
+                };
+                candidate[component] = XformNormalizeAngle(
+                    (double)candidate[component] + (double)sign * delta );
+                if ( XformAngleDistance( candidate[0], result[0] ) <= 0.05f
+                     && XformAngleDistance( candidate[1], result[1] ) <= 0.05f
+                     && XformAngleDistance( candidate[2], result[2] ) <= 0.05f )
+                {
+                    out[0] = candidate[0];
+                    out[1] = candidate[1];
+                    out[2] = candidate[2];
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    void KiwiXform_SnapEntityAngles( const std::vector<xformEntityAngles_t> &baseline,
+                                     float exactDelta )
+    {
+        std::vector<entity_s_def *> defs;
+        for ( size_t i = 0; i < baseline.size(); ++i )
+            defs.push_back( baseline[i].def );
+
+        for ( selbrush_t *brush = selected_brushes.next;
+              brush && brush != &selected_brushes; brush = brush->next )
+        {
+            entity_s_def *def = brush->owner
+                              ? (entity_s_def *)brush->owner->def : nullptr;
+            if ( !def || !def->eclass || !def->eclass->fixedsize )
+                continue;
+            bool duplicate = false;
+            for ( size_t i = 0; i < defs.size(); ++i )
+                if ( defs[i] == def ) { duplicate = true; break; }
+            if ( !duplicate )
+                defs.push_back( def );
+        }
+
+        for ( size_t i = 0; i < defs.size(); ++i )
+        {
+            entity_s_def *def = defs[i];
+            const char *current = XformEntityKey( def, "angles" );
+            float result[3];
+            if ( !current || sscanf( current, "%f %f %f",
+                                     result, result + 1, result + 2 ) != 3
+                 || !_finite( result[0] ) || !_finite( result[1] )
+                 || !_finite( result[2] ) )
+                continue;
+
+            float clean[3] =
+            {
+                XformSnapAngle( result[0] ),
+                XformSnapAngle( result[1] ),
+                XformSnapAngle( result[2] )
+            };
+            for ( size_t j = 0; j < baseline.size(); ++j )
+            {
+                if ( baseline[j].def == def )
+                {
+                    XformExpectedAngles( baseline[j], exactDelta, result, clean );
+                    break;
+                }
+            }
+
+            char x[48], y[48], z[48], value[160];
+            _snprintf( value, sizeof( value ), "%s %s %s",
+                       KiwiFmt_Num( x, sizeof( x ), clean[0], 6 ),
+                       KiwiFmt_Num( y, sizeof( y ), clean[1], 6 ),
+                       KiwiFmt_Num( z, sizeof( z ), clean[2], 6 ) );
+            value[sizeof( value ) - 1] = '\0';
+            if ( strcmp( current, value ) )
+                SetKeyValue( def, "angles", value );
+        }
     }
 
     // KIWI-UX (CLEANUP, UndoCoverBrush): the local copy is gone — this was one
@@ -733,6 +1137,18 @@ namespace
         const char *Name() const override { return "Move"; }
         bool CanExecute() override { return KiwiXform_CanMove(); }
 
+        void ArmDrop( selbrush_t *anchor )
+        {
+            m_dropPending = true;
+            m_dropPendingNode = anchor;
+        }
+        void ClearDropArm()
+        {
+            m_dropPending = false;
+            m_dropPendingNode = 0;
+        }
+        bool DropMode() const { return m_dropActive; }
+
         // ── shakeout E: field table, live value, bubble anchor, resume ───────
         int NumericFields( const kiwiNumField_t **out ) const override
         { *out = KXF_MOVE; return 1; }
@@ -1079,8 +1495,17 @@ namespace
             float       curPos[3];      // where the ported solver actually left it
         };
 
+        struct dropUnit_t
+        {
+            selbrush_t *node;
+            float       baseOrigin[3];
+            float       relativeMinZ;
+        };
+
         bool Begin() override
         {
+            const bool startDrop = m_dropPending;
+            selbrush_t *dropAnchor = m_dropPendingNode;
             Reset();
 
             if ( !DominantKind( &m_kind ) )
@@ -1146,6 +1571,19 @@ namespace
             default:         if ( !BeginVerts()   ) return false; break;
             }
 
+            if ( startDrop )
+            {
+                if ( m_kind != SEL_OBJECT || !BeginDrop( dropAnchor ) )
+                {
+                    Sys_Printf( "Drop: the selected models have no usable resident bounds.\n" );
+                    return false;
+                }
+                CamWnd_BuildMatrix();
+                Copy3( Ed_Camera()->vpn, m_planeN );
+                UpdateHud();
+                return true;
+            }
+
             // KIWI-UX (shakeout G): the SESSION PIVOT overrides the reference point
             // this gesture maps against — the constraint anchor, the gizmo origin
             // and the axis/plane-lock origin are all m_ref, which is precisely "the
@@ -1167,6 +1605,12 @@ namespace
         {
             (void)pick;
             m_snap = snap;
+            if ( m_dropActive )
+            {
+                RecomputeDrop();
+                g_nUpdateBits |= 1;
+                return;
+            }
             if ( TrackPivot( snap ) )         // shakeout G: V-placement owns the move
                 return;
             Recompute();
@@ -1175,6 +1619,15 @@ namespace
 
         bool KeyDown( int vk, unsigned mods ) override
         {
+            if ( m_dropActive )
+            {
+                if ( vk == 'G' && mods == 0 )
+                {
+                    HandoffDropToMove();
+                    return true;
+                }
+                return false;
+            }
             if ( HandlePivotKey( vk ) )       // shakeout G: V / Esc-while-placing
                 return true;
             return HandleAxisKey( vk, mods, true );
@@ -1455,6 +1908,8 @@ namespace
 
         void DrawWorld() override
         {
+            if ( m_dropActive )
+                return;
             // KIWI-UX (shakeout G): the pivot marker outranks everything else in
             // this batch — while a placement is live it IS the gesture, and the
             // constraint accent would only be describing an anchor that is moving.
@@ -1530,6 +1985,12 @@ namespace
         // ─── lifecycle ──────────────────────────────────────────────────────
         void Reset()
         {
+            m_dropPending   = false;
+            m_dropPendingNode = 0;
+            m_dropActive    = false;
+            m_dropUnits.clear();
+            m_dropGroupMinZ = 0.0f;
+            m_dropAnchorRelMinZ = 0.0f;
             m_construct    = false;
             m_faces.clear();
             m_edges.clear();
@@ -1691,6 +2152,55 @@ namespace
             {
                 Select_GetTrueMid( m_ref );
             }
+            return true;
+        }
+
+        bool BeginDrop( selbrush_t *anchor )
+        {
+            std::vector<selbrush_t *> nodes;
+            if ( !DropSelectionOnlyModels( &nodes ) || !anchor || !anchor->owner )
+                return false;
+
+            entity_s *anchorOwner = anchor->owner;
+            bool haveAnchor = false;
+            for ( size_t i = 0; i < nodes.size(); ++i )
+            {
+                float mins[3], maxs[3], angles[3], scale, origin[3];
+                if ( !DropEntityInfo( nodes[i], mins, maxs, angles, &scale, origin ) )
+                    return false;
+                float relMins[3], relMaxs[3];
+                DropTransformBounds( mins, maxs, angles, scale, relMins, relMaxs );
+
+                dropUnit_t unit;
+                unit.node = nodes[i];
+                Copy3( origin, unit.baseOrigin );
+                unit.relativeMinZ = relMins[2];
+                m_dropUnits.push_back( unit );
+
+                if ( nodes[i]->owner == anchorOwner )
+                {
+                    haveAnchor = true;
+                    Copy3( origin, m_dropAnchorBase );
+                    Copy3( mins, m_dropAnchorMins );
+                    Copy3( maxs, m_dropAnchorMaxs );
+                    Copy3( angles, m_dropAnchorAngles );
+                    m_dropAnchorScale = scale;
+                    m_dropAnchorRelMinZ = relMins[2];
+                }
+            }
+            if ( !haveAnchor )
+                return false;
+
+            m_dropGroupMinZ = FLT_MAX;
+            for ( size_t i = 0; i < m_dropUnits.size(); ++i )
+            {
+                const float z = m_dropUnits[i].baseOrigin[2] - m_dropAnchorBase[2]
+                              + m_dropUnits[i].relativeMinZ;
+                if ( z < m_dropGroupMinZ )
+                    m_dropGroupMinZ = z;
+            }
+            Copy3( m_dropAnchorBase, m_ref );
+            m_dropActive = true;
             return true;
         }
 
@@ -2194,6 +2704,56 @@ namespace
         // The typed arm is deliberately NOT gated.  "Type a value" is the other
         // half of the affordance the idle HUD advertises, and a number the user
         // spelled out is as explicit an act as a grab.
+        void RecomputeDrop()
+        {
+            for ( size_t i = 0; i < m_dropUnits.size(); ++i )
+            {
+                if ( !Sel_BrushLive( m_dropUnits[i].node ) )
+                {
+                    Sys_Printf( "Drop: selection changed under the gesture - cancelled.\n" );
+                    KiwiCmd_Cancel();
+                    return;
+                }
+            }
+
+            ray_t ray;
+            if ( !CursorRay( &ray ) )
+                return;
+            float target[3];
+            if ( !KiwiDrop_ComputePlacement( ray,
+                                             m_dropAnchorMins, m_dropAnchorMaxs,
+                                             m_dropAnchorAngles, m_dropAnchorScale,
+                                             target ) )
+                return;
+
+            const float anchorLift = ( m_dropAnchorRelMinZ < 0.0f )
+                                   ? -m_dropAnchorRelMinZ : 0.0f;
+            const float hitZ = target[2] - anchorLift - KDROP_FLOAT;
+            const float groupLift = ( m_dropGroupMinZ < 0.0f )
+                                  ? -m_dropGroupMinZ : 0.0f;
+            target[2] = hitZ + groupLift + KDROP_FLOAT;
+
+            Sub3( target, m_dropAnchorBase, m_total );
+            Apply();
+            UpdateHud();
+        }
+
+        void HandoffDropToMove()
+        {
+            // The held model drag becomes the free centre handle from this pixel.
+            // Keeping this command instance keeps its displacement and undo record.
+            m_dropActive = false;
+            m_dropUnits.clear();
+            m_con = CON_FREE;
+            m_axis = 2;
+            Copy3( m_total, m_lockBase );
+            m_grabbed = true;
+            m_grabFresh = CursorPixels( &m_grabPixX, &m_grabPixY );
+            LatchMapStart();
+            m_pivotRebase = false;
+            UpdateHud();
+        }
+
         void Recompute() override
         {
             // KIWI-UX (CLEANUP, A-30): the frame's ONE liveness sweep, taken here —
@@ -3072,6 +3632,11 @@ namespace
         // ─── HUD ────────────────────────────────────────────────────────────
         void UpdateHud()
         {
+            if ( m_dropActive )
+            {
+                SetHud( "Drop to ground  G Move gizmo  Ctrl Snap  Esc Cancel" );
+                return;
+            }
             const char *what = m_construct               ? "construction"
                              : ( m_kind == SEL_OBJECT ) ? "objects"
                              : ( m_kind == SEL_FACE   ) ? "faces"
@@ -3181,6 +3746,18 @@ namespace
         // it (kiwi_construct.h scope ruling 1) — so it is a flag that redirects
         // Apply / RestoreAll / Commit and leaves the cursor mapping alone.
         bool       m_construct = false;
+
+        bool        m_dropPending = false;
+        selbrush_t *m_dropPendingNode = 0;
+        bool        m_dropActive = false;
+        std::vector<dropUnit_t> m_dropUnits;
+        float       m_dropAnchorBase[3]   = { 0.0f, 0.0f, 0.0f };
+        float       m_dropAnchorMins[3]   = { 0.0f, 0.0f, 0.0f };
+        float       m_dropAnchorMaxs[3]   = { 0.0f, 0.0f, 0.0f };
+        float       m_dropAnchorAngles[3] = { 0.0f, 0.0f, 0.0f };
+        float       m_dropAnchorScale     = 1.0f;
+        float       m_dropAnchorRelMinZ   = 0.0f;
+        float       m_dropGroupMinZ       = 0.0f;
 
         std::vector<faceUnit_t>      m_faces;
         std::vector<edgeUnit_t>      m_edges;
@@ -3303,12 +3880,14 @@ namespace
             m_ringDeg    = 0.0f;
             m_ringBase   = 0.0f;              // KIWI-UX (ROUND L)
             m_ringFresh  = false;
+            m_angleBase.clear();
 
             if ( !SelectionHasObjects() )
             {
                 Sys_Printf( "Rotate: no whole objects are selected.\n" );
                 return false;
             }
+            KiwiXform_CaptureEntityAngles( m_angleBase );
             // The pivot is LATCHED: Select_GetMid re-reads the selection bounds, so
             // calling it per increment would let the pivot crawl as the geometry
             // turns.  The ported rotate-mode nudge latches g_vRotateOrigin the same
@@ -3375,12 +3954,21 @@ namespace
         { return m_undoOpen || m_hasNum || fabsf( m_deg ) > KX_EPS; }
 
         void Commit() override
-        { m_undoOpen = false; m_pivotPlacing = false; g_nUpdateBits = -1; }
+        {
+            // KIWI: Clean the ported float round-trip before this undo bracket closes.
+            if ( m_undoOpen )
+                KiwiXform_SnapEntityAngles( m_angleBase, m_deg );
+            m_angleBase.clear();
+            m_undoOpen = false;
+            m_pivotPlacing = false;
+            g_nUpdateBits = -1;
+        }
 
         void Cancel() override
         {
             ApplyDelta( -m_applied );         // exact inverse; the bracket also restores
             m_applied = 0.0f;
+            m_angleBase.clear();
             m_undoOpen = false;
             m_pivotPlacing = false;
             g_nUpdateBits = -1;
@@ -3551,6 +4139,7 @@ namespace
         }
 
         float m_pivot[3] = { 0.0f, 0.0f, 0.0f };
+        std::vector<xformEntityAngles_t> m_angleBase;
         float m_deg      = 0.0f;
         float m_applied  = 0.0f;
         bool  m_ringActive = false;      // KIWI-UX (shakeout D): a ring is held
@@ -3756,6 +4345,88 @@ namespace
 }
 
 // ─── §3 canExecute predicates ────────────────────────────────────────────────
+bool KiwiDrop_ComputePlacement( const ray_t &ray,
+                                const float modelMins[3], const float modelMaxs[3],
+                                const float angles[3], float scale,
+                                float outOrigin[3],
+                                float outWorldMins[3], float outWorldMaxs[3] )
+{
+    if ( !outOrigin || !DropBoundsValid( modelMins, modelMaxs ) )
+        return false;
+
+    float relativeMins[3], relativeMaxs[3];
+    DropTransformBounds( modelMins, modelMaxs, angles, scale,
+                         relativeMins, relativeMaxs );
+
+    float hit[3];
+    if ( !DropRayHit( ray, hit ) )
+        return false;
+    if ( KiwiCmd_SnapEngaged() )
+    {
+        float snapped[3];
+        if ( KiwiGrid_Snap( hit, snapped ) )
+        {
+            hit[0] = snapped[0];
+            hit[1] = snapped[1];
+        }
+    }
+
+    // Test the model with its origin at the hit and only lift it.  A model whose
+    // local box is already above its origin is never pushed downward.
+    const float minZ = hit[2] + relativeMins[2];
+    float lift = hit[2] - minZ;
+    if ( lift < 0.0f )
+        lift = 0.0f;
+    lift += KDROP_FLOAT;
+    outOrigin[0] = hit[0];
+    outOrigin[1] = hit[1];
+    outOrigin[2] = hit[2] + lift;
+
+    if ( outWorldMins && outWorldMaxs )
+        for ( int k = 0; k < 3; ++k )
+        {
+            outWorldMins[k] = outOrigin[k] + relativeMins[k];
+            outWorldMaxs[k] = outOrigin[k] + relativeMaxs[k];
+        }
+    return true;
+}
+
+bool KiwiDrop_BeginAt( int imgX, int imgY )
+{
+    if ( KiwiCmd_Active() )
+        return false;
+    std::vector<selbrush_t *> selectedModels;
+    if ( !DropSelectionOnlyModels( &selectedModels ) )
+        return false;
+
+    ray_t ray;
+    if ( !Pick_RayFromImagePos( imgX, imgY, &ray ) )
+        return false;
+    const pick_result_t hit = Pick( ray, SEL_MASK_OBJECT );
+    if ( !hit.valid || !hit.item.brush || !DropModelEntity( hit.item.brush ) )
+        return false;
+
+    bool hitSelectedModel = false;
+    for ( size_t i = 0; i < selectedModels.size(); ++i )
+        if ( selectedModels[i]->owner == hit.item.brush->owner )
+            hitSelectedModel = true;
+    if ( !hitSelectedModel )
+        return false;
+
+    s_move.ArmDrop( hit.item.brush );
+    if ( !KiwiCmd_Start( KIWI_CMD_MOVE ) )
+    {
+        s_move.ClearDropArm();
+        return false;
+    }
+    return true;
+}
+
+bool KiwiDrop_Active()
+{
+    return KiwiCmd_Active() == &s_move && s_move.DropMode();
+}
+
 bool KiwiXform_CanMove()
 {
     sel_kind_t k;
@@ -3821,7 +4492,7 @@ void KiwiXform_PresetMoveConstraint( int con, int axis )
 // never read a pivot that belongs to a gesture that has ended.
 bool KiwiXform_IsMoveActive()
 {
-    return KiwiCmd_Active() == &s_move;
+    return KiwiCmd_Active() == &s_move && !s_move.DropMode();
 }
 
 bool KiwiXform_IsRotateActive()

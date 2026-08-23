@@ -19,6 +19,8 @@
 #include <gfx_d3d/r_debug.h>       // R_WarnOncePerFrame
 #include <gfx_d3d/r_dobj_skin.h>   // GfxModelSkinnedSurface, GfxModelSurfaceInfo
 #include <gfx_d3d/r_buffers.h>     // gfxBuf (dynamicVertexBuffer)
+#include <gfx_d3d/r_light.h>       // R_RegisterLightDef_LoadObj
+#include <gfx_d3d/r_rendercmds.h>  // RC_SetLightColor / clear-alpha fullscreen quad
 #include <gfx_d3d/r_xsurface.h>    // XSurfaceGetNumVerts/Tris
 #include <xanim/xmodel.h>          // XModel, XSurface, XModelBad, XModelGetBounds/Surfaces
 #include <universal/com_math.h>    // AxisToQuat, QuatToAxis, mat3x3
@@ -26,12 +28,14 @@
 #include "kiwi_modelcache.h"      // KiwiModelCache_Get / KiwiModelGeo
 #include "kiwi_instcache.h"       // KiwiInstCache_* / KiwiInstGeo
 #include "kiwi_surfcache.h"       // KiwiEdSurfMark / the block store
+#include "kiwi_light.h"           // Missing additive-technique policy
 #include <vector>
 #include <algorithm>              // std::sort / std::inplace_merge (the mixed-window flush)
 #include <utility>                // std::pair (record + owning object, sorted together)
 
 extern void Assert(const char *file, int line, int type, const char *fmt, ...); // 0x49cea0
 void FatalError(int code, const char *fmt, ...);                                // 0x49a9e0
+extern int Sys_Printf(const char *fmt, ...);                                    // 0x499e90
 
 // r_ed_vertbuf.cpp — handle → (vb, firstIndex)
 void Editor_GetVertexBufferAndIndex(unsigned int handle, IDirect3DVertexBuffer9 **vb, uint16_t *firstIndex);
@@ -83,6 +87,52 @@ static int radiant_surfCount;          // IDB 0x10F5654 — model-surf counter
 static int radiant_modelSurfPos;       // stands in for the binary's frontEndDataOut->surfPos
 static int edScene_lastFrameCount;     // IDB dword_1365660 (per-frame reset guard)
 
+// IDB sub_4FED50 @ 0x4fed50.  Build the exact editor GfxLight payload, clear
+// alpha/stencil before its volume pass, then defer installation of the light
+// constants until the command stream reaches this point.
+void __cdecl R_SetLightShaderConstants(
+    const float *origin, float radius, const float *color, const char *defName,
+    const float *dir, float cosHalfFovInner, float cosHalfFovOuter, int exponent)
+{
+    if ( radius <= 0.0f )
+        Assert("C:\\trees\\cod3-pc\\cod3-modtools\\cod3src\\src\\gfx_d3d\\r_ed_scene.cpp",
+               782, 0, "%s\n\t(radius) = %g", "(radius > 0.0f)", radius);
+
+    GfxLight light;
+    memset(&light, 0, sizeof(light));
+    light.type = dir ? 2 : 3; // GFX_LIGHT_TYPE_SPOT / GFX_LIGHT_TYPE_OMNI in the IDB
+    light.color[0] = color[0];
+    light.color[1] = color[1];
+    light.color[2] = color[2];
+    if ( dir )
+    {
+        light.dir[0] = dir[0];
+        light.dir[1] = dir[1];
+        light.dir[2] = dir[2];
+        light.cosHalfFovOuter = cosHalfFovOuter;
+        light.cosHalfFovInner = cosHalfFovInner;
+        light.exponent = exponent;
+    }
+    else
+    {
+        light.exponent = 1;
+    }
+    light.origin[0] = origin[0];
+    light.origin[1] = origin[1];
+    light.origin[2] = origin[2];
+    light.radius = radius;
+    // KIWI-UX: retail IDB 0x4FED50 uses rgp.dlightDef for an omitted name.  Both CoD4
+    // compilers instead default that authored light to light_point_linear, so the mutable
+    // editor preview registers the compiler default while named defs keep retail loading.
+    light.def = ( defName && *defName )
+              ? R_RegisterLightDef_LoadObj( defName )
+              : R_RegisterLightDef( "light_point_linear" );
+
+    R_AddCmdDrawFullScreenColoredQuad(0.0f, 0.0f, 1.0f, 1.0f,
+                                      colorWhite, rgp.clearAlphaStencilMaterial);
+    RC_SetLightColor(&light);
+}
+
 // Triangle-fan index tables (IDB unk_62D7C8 / unk_62D940): triangle t = { t+1, t+2, 0 }
 // front, { t+2, t+1, 0 } back.  Sized for the editor's max face (3*(N-2) <= 0xBA, N <= 64).
 #define ED_FACE_MAX_INDICES 186
@@ -101,6 +151,63 @@ static void Editor_InitFaceIndices()
         edBackFaceIndices[3 * t + 2] = 0;
     }
     s_edFaceIndicesInit = true;
+}
+
+// KIWI-UX: camera fill techniques are the editor's opaque surface path.  Wireframe,
+// sunlight-preview and shadow-cookie techniques are intentional overlays/contributions and
+// retain their authored depth policy.  A primary sort bucket past 4 is sky/decal/blend work,
+// where disabling depth writes is also intentional.
+static bool Editor_IsOpaqueFillPass(const Material *material, int techType, uint stateBits0)
+{
+    if (!material || material->info.drawSurf.fields.primarySortKey > 4)
+        return false;
+    if ((stateBits0 & GFXS0_BLENDOP_RGB_MASK) != 0)
+        return false;
+    return techType == TECHNIQUE_UNLIT
+        || techType == TECHNIQUE_FAKELIGHT_NORMAL
+        || techType == TECHNIQUE_FAKELIGHT_VIEW
+        || techType == TECHNIQUE_CASE_TEXTURE;
+}
+
+static bool s_edUnsafeOpaqueDepthReported;
+
+// Submission-time diagnostic requested for this failure class.  It inspects the same
+// stateBitsEntry + pass index that R_SetupPass reads at IDB 0x53C51E-0x53C523.
+static void Editor_CheckSubmittedOpaqueDepth(const Material *material, int techType)
+{
+    if (s_edUnsafeOpaqueDepthReported || !material || techType < 0 || techType >= TECHNIQUE_COUNT)
+        return;
+    if (!material->stateBitsTable)
+        return;
+    const MaterialTechnique *technique = material->techniqueSet
+                                       ? material->techniqueSet->techniques[techType] : nullptr;
+    if (!technique)
+        return;
+    const int first = material->stateBitsEntry[techType];
+    if (first < 0 || first >= material->stateBitsCount)
+        return;
+    for (int passIndex = 0; passIndex < technique->passCount; ++passIndex)
+    {
+        const int stateIndex = first + passIndex;
+        if (stateIndex >= material->stateBitsCount)
+            return;
+        const GfxStateBits &bits = material->stateBitsTable[stateIndex];
+        if (!Editor_IsOpaqueFillPass(material, techType, bits.loadBits[0]))
+            continue;
+        const uint depth = bits.loadBits[1];
+        if ((depth & GFXS1_DEPTHWRITE) == 0
+         || (depth & GFXS1_DEPTHTEST_DISABLE) != 0
+         || (depth & GFXS1_DEPTHTEST_MASK) != GFXS1_DEPTHTEST_LESSEQUAL)
+        {
+            s_edUnsafeOpaqueDepthReported = true;
+            Sys_Printf("Editor opaque surface submitted with unsafe depth state: material \"%s\", "
+                       "tech %i, pass %i, stateBits {0x%08X,0x%08X}; forcing depthWrite + "
+                       "LESSEQUAL.\n",
+                       material->info.name ? material->info.name : "(null)", techType, passIndex,
+                       bits.loadBits[0], bits.loadBits[1]);
+            return;
+        }
+    }
 }
 
 // ── front-end accumulation ────────────────────────────────────────────────────
@@ -123,6 +230,8 @@ void __cdecl Editor_AddMeshCmd(Material *handle, int techType, int sortKey,
         return;
     }
 
+    Editor_CheckSubmittedOpaqueDepth(material, techType);
+
     editorMesh_s *mesh = &edSceneGlobals.sceneMeshes[edSceneGlobals.sceneMeshCount++];
     mesh->handle      = vbIndexAndOffs;
     mesh->material    = material;
@@ -141,24 +250,41 @@ void __cdecl Editor_AddMeshCmd(Material *handle, int techType, int sortKey,
 }
 
 // 0x4FEEF0  sub_4FEEF0 — emit a front-facing fan (edFaceIndices) for one face.
+//
+// KIWI-UX — THE ASSERT HAS TO RETURN.  In the binary's dev build the Assert above the
+// emit is a hard stop, so control never reaches Editor_AddMeshCmd with a fan that does
+// not fit; in this port Assert is NON-FATAL, so it fell straight through and emitted
+// `indexCount = 3 * vertCount - 6` anyway.  For vertCount < 3 that is NEGATIVE (-6 / -3),
+// and Editor_AddMeshCmd stores it into a uint16 (:131-134) — so the surf claims ~65530
+// indices over a 186-entry table and every consumer walks ~131 KB past `edFaceIndices`.
+// For vertCount > 64 it walks past it by a smaller, equally arbitrary amount.  Either way
+// the values that come back are not indices into this face's vertex run, and the triangles
+// they build reach whatever else lives in the shared vertex buffer.  Dropping the face is
+// the same class of correction as the "MESH surf with no resolvable VB MUST be dropped"
+// rule below (:1991-1995), and it is what the dev build's stop achieves.
 void __cdecl Editor_AddGeoFace(Material *handle, int techType, int sortKey, int vertCount, int vbIndexAndOffs)
 {
     if (!s_edFaceIndicesInit)
         Editor_InitFaceIndices();
-    if (vertCount < 3 || (unsigned)(3 * vertCount - 6) > ED_FACE_MAX_INDICES)
+    if (vertCount < 3 || (unsigned)(3 * vertCount - 6) > ED_FACE_MAX_INDICES) {
         // KEEP_VERBOSE: the binary's condition string is PROSE, not a stringizable expression.
         Assert("C:\\trees\\cod3-pc\\cod3-modtools\\cod3src\\src\\gfx_d3d\\r_ed_scene.cpp", 197, 0, "%s\n\t(vertCount) = %i", "vertCount fan fits edFaceIndices", vertCount);
+        return;
+    }
     Editor_AddMeshCmd(handle, techType, sortKey, vertCount, vbIndexAndOffs, 3 * vertCount - 6, (int)edFaceIndices);
 }
 
 // 0x4FEF50  sub_4FEF50 — emit a back-facing fan (edBackFaceIndices) for one face.
+// The same non-fatal-Assert fall-through, and the same correction — see Editor_AddGeoFace.
 void __cdecl Editor_AddGeoBackFace(Material *handle, int techType, int sortKey, int vertCount, int vbIndexAndOffs)
 {
     if (!s_edFaceIndicesInit)
         Editor_InitFaceIndices();
-    if (vertCount < 3 || (unsigned)(3 * vertCount - 6) > ED_FACE_MAX_INDICES)
+    if (vertCount < 3 || (unsigned)(3 * vertCount - 6) > ED_FACE_MAX_INDICES) {
         // KEEP_VERBOSE: the binary's condition string is PROSE, not a stringizable expression.
         Assert("C:\\trees\\cod3-pc\\cod3-modtools\\cod3src\\src\\gfx_d3d\\r_ed_scene.cpp", 204, 0, "%s\n\t(vertCount) = %i", "vertCount fan fits edBackFaceIndices", vertCount);
+        return;
+    }
     Editor_AddMeshCmd(handle, techType, sortKey, vertCount, vbIndexAndOffs, 3 * vertCount - 6, (int)edBackFaceIndices);
 }
 
@@ -622,6 +748,7 @@ void __cdecl Editor_AddSurfCmd(int drawFlags, Material *material, model_inst *in
         if (radiant_surfCount == ED_SCENE_MAX_MODELSURFS) {
             R_WarnOncePerFrame((GfxWarningType)35, ED_SCENE_MAX_MODELSURFS);
         } else if (Editor_SurfFilter(drawFlags, material)) {
+            Editor_CheckSubmittedOpaqueDepth(material, techType);
             editorSurf_sub *v5 = &radiant_surfs[radiant_surfCount++];
             v5->material  = material;
             v5->techType  = techType;
@@ -914,8 +1041,6 @@ int KiwiEdScene_ReplayFiltered( const unsigned char *segClean, int segCount )
 // ── per-surf technique fallback + the model/material report ───────────────────
 // Editor_AddSurfCmd's gate silently DROPS a surf whose material lacks the requested
 // technique, so a ladder demotes first: requested -> UNLIT (4) -> WIREFRAME_SHADED (29).
-extern int Sys_Printf(const char *fmt, ...);          // win_qe3.cpp:112 (0x499e90)
-
 // A TOGGLE, not a frame-scoped one-shot: R_SortMaterials' reset runs at the TOP of Cam_Draw
 // (camwnd.cpp:2667), so a one-shot cleared there would clear itself before it printed.
 int g_kiwiModelInfoDump = 0;
@@ -962,6 +1087,20 @@ bool KiwiTechPresent(const Material *m, int tech)
     return m && m->techniqueSet && m->techniqueSet->techniques[tech] != 0;
 }
 
+// The loader injects this stencil-aware technique into an absent sun slot when the
+// techset has FAKELIGHT_NORMAL.  If the small technique asset itself is unavailable,
+// the direct slot-24 fallback below still needs the same sun-colour vertex stamp.
+bool KiwiModelNeedsSunFallbackColor(Material *handle)
+{
+    const Material *m = handle ? Material_FromHandle(handle) : 0;
+    if (!m || !m->techniqueSet)
+        return false;
+    MaterialTechnique *sun = m->techniqueSet->techniques[TECHNIQUE_SUNLIGHT_PREVIEW];
+    if (sun)
+        return sun->name && !_stricmp(sun->name, "kiwi_sun_fakelight");
+    return m->techniqueSet->techniques[TECHNIQUE_FAKELIGHT_NORMAL] != 0;
+}
+
 // The colorMap texdef — semantic 2, the value R_OverrideImage switches on (r_shade.cpp:326).
 const GfxImage *KiwiColorMap(const Material *m)
 {
@@ -1006,10 +1145,20 @@ static int Editor_ModelSurfTech(const XModel *xmodel, Material *handle, int surf
 
     int use = techType;
     if (!KiwiTechPresent(m, techType)) {
-        static const int kLadder[2] = { 4 /*TECHNIQUE_UNLIT*/, 29 /*TECHNIQUE_WIREFRAME_SHADED*/ };
-        use = -1;
-        for (int i = 0; i < 2; ++i) {
-            if (kLadder[i] != techType && KiwiTechPresent(m, kLadder[i])) { use = kLadder[i]; break; }
+        if (KiwiLight_KeepMissingTechnique(techType)) return techType; // KIWI-UX: Keep additive light passes out of the UNLIT fallback ladder so the existing queue gate skips them.
+        if (techType == TECHNIQUE_SUNLIGHT_PREVIEW) {
+            // KIWI-UX: a missing sun contribution must never demote to flat UNLIT grey.
+            // Prefer the requested N.L fallback; if even that is absent, leave 26 in place
+            // so Editor_AddSurfCmd drops only the sun contribution and preserves the
+            // already-rasterised textured ambient base.
+            use = KiwiTechPresent(m, TECHNIQUE_FAKELIGHT_NORMAL)
+                ? TECHNIQUE_FAKELIGHT_NORMAL : -1;
+        } else {
+            static const int kLadder[2] = { 4 /*TECHNIQUE_UNLIT*/, 29 /*TECHNIQUE_WIREFRAME_SHADED*/ };
+            use = -1;
+            for (int i = 0; i < 2; ++i) {
+                if (kLadder[i] != techType && KiwiTechPresent(m, kLadder[i])) { use = kLadder[i]; break; }
+            }
         }
         if (KiwiWarnOnce(mdlName, mtlName)) {
             if (use < 0)
@@ -1072,21 +1221,39 @@ void __cdecl SkinModelInst(int instanceHandle, Material *checkhandle, int techTy
 
     ++s_edModelInsts;
 
-    // `colorPtr` is the ONLY writer of the skinned verts, so it is exactly the condition
-    // under which a writable COPY is needed.
-    GfxModelSkinnedSurface *skinned = AddModelSurfBuf(mi->model, colorPtr != nullptr);
-    if (!skinned)
-        return;
-
     unsigned numsurfs    = (unsigned)GetXmodelNumSurfs(mi->model, 0);
     Material **modelMaterial = GetXmodelMaterialHandle(mi->model, 0);
     iassert(modelMaterial);
+
+    // The faithful wireframe stamp writes every surface.  The sun stamp is narrower: only
+    // XModel surfaces using the injected/direct fakelight fallback need a writable copy.
+    // A native-only instance stays in the static model cache; a mixed instance is copied
+    // once, but only its fallback surfaces are stamped below.
+    bool needWritable = colorPtr && techType == TECHNIQUE_WIREFRAME_SHADED;
+    if (colorPtr && techType == TECHNIQUE_SUNLIGHT_PREVIEW) {
+        for (unsigned i = 0; i < numsurfs && !needWritable; ++i) {
+            Material *useMat = checkhandle
+                             ? (Material *)Material_FromHandle(checkhandle)
+                             : modelMaterial[i];
+            needWritable = KiwiModelNeedsSunFallbackColor(useMat);
+        }
+    }
+    GfxModelSkinnedSurface *skinned = AddModelSurfBuf(mi->model, needWritable);
+    if (!skinned)
+        return;
 
     for (unsigned i = 0; i < numsurfs; ++i) {
         GfxModelSkinnedSurface *skinnedSurf = &skinned[i];   // the binary's local (assert strings)
         Material *material = modelMaterial[i];
         iassert(material);
-        if (colorPtr) {
+        Material *useMat = checkhandle ? (Material *)Material_FromHandle(checkhandle) : material;
+        // KIWI-UX: native tech-26 model materials retain their authored vertex colour.
+        // Only wireframe or the fakelight sun fallback receives the supplied stamp.
+        const bool stampColor = colorPtr
+            && ( techType == TECHNIQUE_WIREFRAME_SHADED
+              || ( techType == TECHNIQUE_SUNLIGHT_PREVIEW
+                && KiwiModelNeedsSunFallbackColor(useMat) ) );
+        if (stampColor) {
             // IDB 0x4fe3f0-0x4fe45f: record the override AND write *colorPtr over each vert's
             // colour (@+0x10, stride 0x20).  Only ever the tempSkinBuf COPY, never verts0.
             mi->colorOverride = *colorPtr;
@@ -1099,7 +1266,6 @@ void __cdecl SkinModelInst(int instanceHandle, Material *checkhandle, int techTy
         } else {
             mi->colorOverride = -1;
         }
-        Material *useMat = checkhandle ? (Material *)Material_FromHandle(checkhandle) : material;
         // KIWI: DEMOTE rather than vanish; returns techType unchanged in the normal case.
         const int surfTech = Editor_ModelSurfTech(mi->model, useMat, (int)i, techType);
         Editor_AddSurfCmd(drawFlags, useMat, mi, &skinned[i], surfTech);
@@ -1129,6 +1295,29 @@ static void Editor_DrawIndexedPrimitive(GfxCmdBufPrimState *state, const GfxDraw
     }
 }
 
+// KIWI-UX: sorting is only a batching decision for opaque editor fills.  R_SetupPass
+// faithfully installs the material pass at IDB 0x53C520-0x53C590; this editor-only guard
+// then repairs an unsafe opaque asset to the camera invariant before any primitive is drawn.
+// Intentional wireframe/sky/blend passes are rejected by Editor_IsOpaqueFillPass.
+static void Editor_ForceOpaqueFillDepth()
+{
+    const Material *material = gfxCmdBufState.material;
+    const uint stateBits0 = gfxCmdBufState.refStateBits[0];
+    if (!Editor_IsOpaqueFillPass(material, gfxCmdBufState.techType, stateBits0))
+        return;
+
+    const uint oldDepth = gfxCmdBufState.refStateBits[1];
+    const uint newDepth = (oldDepth & ~(GFXS1_DEPTHWRITE
+                                     | GFXS1_DEPTHTEST_DISABLE
+                                     | GFXS1_DEPTHTEST_MASK))
+                        | GFXS1_DEPTHWRITE | GFXS1_DEPTHTEST_LESSEQUAL;
+    if (newDepth == oldDepth)
+        return;
+
+    uint corrected[2] = { stateBits0, newDepth };
+    R_SetState(&gfxCmdBufState, corrected);
+}
+
 // 0x4FE5A0  R_DrawTessTechnique_Brushes — run the bound technique's passes over the
 // accumulated tess indices, through the editor's own untracked Editor_DrawIndexedPrimitive.
 static void R_DrawTessTechnique_Brushes(const GfxDrawPrimArgs *args)
@@ -1141,6 +1330,7 @@ static void R_DrawTessTechnique_Brushes(const GfxDrawPrimArgs *args)
 
     for (uint passIndex = 0; passIndex < technique->passCount; ++passIndex) {
         R_SetupPass(gfxCmdBufContext, passIndex);
+        Editor_ForceOpaqueFillDepth();
         R_UpdateVertexDecl(&gfxCmdBufState);
         R_SetupPassCriticalPixelShaderArgs(gfxCmdBufContext);
         R_SetupPassPerObjectArgs(gfxCmdBufContext);
@@ -1346,6 +1536,7 @@ static bool Editor_BeginModelPass(uint pass)
         return false;
     }
     R_SetupPass(gfxCmdBufContext, pass);
+    Editor_ForceOpaqueFillDepth();
     R_UpdateVertexDecl(&gfxCmdBufState);
     R_SetupPassCriticalPixelShaderArgs(gfxCmdBufContext);
     ++s_edPassSetups;
@@ -1636,6 +1827,73 @@ static unsigned Editor_MeshWindowSignature( int index, int amount )
     return h;
 }
 
+// ── KIWI-UX — THE MESH-SURF INDEX INVARIANT ─────────────────────────────────
+// Every consumer of an editorMesh_s rebases its index table onto the surf's own
+// vertex run: `firstIndex + indexTable[k]`, in Editor_BuildMeshRuns below and in
+// the tess path (:2067).  That is only a rebase if every value in
+// indexTable[0 .. indexCount) is already inside [0, vertCount) — the ONE invariant
+// the whole editor mesh pipeline rests on, and the one thing nothing checks.
+//
+// WHAT A VIOLATION LOOKS LIKE ON SCREEN, which is why this matters.  An index at or
+// beyond vertCount rebases to a slot BEYOND the surf's run, and the editor packs
+// every surf of one material into shared 64 K vertex buffers (r_ed_vertbuf.cpp:38,
+// carved per material by Editor_VB_AllocFromPools) — so the offending triangle takes
+// one corner from a completely unrelated surface and draws as a thin sliver running
+// from this object to wherever that surface happens to sit.  It does not crash, it
+// does not warn, and D3D cannot reject it: Editor_DrawMeshRun declares
+// MinVertexIndex/NumVertices as [0, maxVert] over the WHOLE run (:1914), so a stray
+// index is still inside the declared range and draws whatever it lands on.
+//
+// AND IT IS FAR MORE VISIBLE IN LIGHTMAP MODE, without being caused by it.  With
+// Material_SetMode 0 each surface uploads under its OWN material (brush.cpp:6078,
+// pmesh.cpp:10227), so a material's pool holds only that material's surfaces and a
+// stray index lands on a neighbouring surface of the same object — a wrong-looking
+// triangle nobody notices.  With Material_SetMode 1 EVERY surface in the map uploads
+// under `lightmap_gray`, one pool, so the same stray index lands on whatever else in
+// the MAP occupies that slot.  Same bad data, same bad triangle; only its far end
+// moves, from "next door" to "across the level".
+//
+// COST.  On the resident path the check runs inside Editor_BuildMeshRuns, i.e. once per
+// run-table REBUILD, not per frame — the same cadence as the staging copy it sits beside.
+// On the tess fallback it is one extra pass over a table the copy loop below walks anyway:
+// one compare per index, against a loop that already loads, adds, truncates and stores.
+static const int  KIWI_MESHIDX_MAX_REPORTS = 8;
+static int        s_kiwiMeshIdxReports = 0;
+static const void *s_kiwiMeshIdxLastMtl = nullptr;
+
+// Returns the first k in [0, indexCount) whose index escapes the surf's vertex run,
+// or -1 when the surf is sound.  A surf with no table or no indices is sound (the
+// callers drop those on their own terms).
+static int Editor_MeshSurfBadIndex(const editorMesh_s *m)
+{
+    const uint16_t *itab = (const uint16_t *)m->indexTable;
+    const int ic = (int)m->indexCount;
+    const int vc = (int)m->vertCount;
+    if (!itab || ic <= 0)
+        return -1;
+    for (int k = 0; k < ic; ++k)
+        if ((int)itab[k] >= vc)
+            return k;
+    return -1;
+}
+
+// Name the producer once per material, capped — the point is to identify what emitted
+// the surf, not to fill the console every frame it is submitted.
+static void Editor_ReportMeshSurfBadIndex(const editorMesh_s *m, int badK)
+{
+    if (s_kiwiMeshIdxReports >= KIWI_MESHIDX_MAX_REPORTS || m->material == s_kiwiMeshIdxLastMtl)
+        return;
+    s_kiwiMeshIdxLastMtl = m->material;
+    ++s_kiwiMeshIdxReports;
+    const uint16_t *itab = (const uint16_t *)m->indexTable;
+    Sys_Printf("Editor mesh surf DROPPED - index out of its own vertex run: material \"%s\", "
+               "tech %i, vertCount %i, indexCount %i, indexTable[%i] = %i.  It would have drawn "
+               "a stray triangle into unrelated geometry.\n",
+               KiwiStr(m->material ? m->material->info.name : 0),
+               m->techType, (int)m->vertCount, (int)m->indexCount, badK,
+               itab ? (int)itab[badK] : -1);
+}
+
 // Called from KiwiSurfCache's invalidation funnel via r_ed_vertbuf / device reset.
 void KiwiEdScene_DropMeshRuns()
 {
@@ -1738,6 +1996,18 @@ static void Editor_BuildMeshRuns( int index, int amount, int runsKey, unsigned s
             const uint16_t *itab = (const uint16_t *)m->indexTable;
             if ( !itab )
                 break;
+            // KIWI-UX — the index invariant (see Editor_MeshSurfBadIndex).  Cutting the
+            // run here also DROPS the surf: when it is the lead the `surfCount == 0` arm
+            // below turns it into a dead run, and when it is not, the next iteration
+            // makes it the lead and does the same.  Either way its indices never reach
+            // the resident IB.
+            {
+                const int badK = Editor_MeshSurfBadIndex( m );
+                if ( badK >= 0 ) {
+                    Editor_ReportMeshSurfBadIndex( m, badK );
+                    break;
+                }
+            }
             for ( int k = 0; k < ic; ++k )
                 s_edRunStaging.push_back( (uint16_t)( mFirst + itab[k] ) );
             const int last = mFirst + (int)m->vertCount - 1;
@@ -1747,7 +2017,8 @@ static void Editor_BuildMeshRuns( int index, int amount, int runsKey, unsigned s
             ++run.surfCount;
         }
 
-        if ( run.surfCount == 0 ) {          // itab null on the very first surf
+        if ( run.surfCount == 0 ) {          // the LEAD surf itself was refused (null index
+                                             // table, or an out-of-run index) — consume it
             EdMeshRun dead = { index + i, 1, lead->material, lead->techType, nullptr, 0, 0, 0 };
             s_edRuns.push_back( dead );
             ++i;
@@ -1899,6 +2170,18 @@ static void RB_DrawEditorSkinnedCached_Sub(int index, int amount, int runsKey)
             // 0 and the next RC_SET_MATERIAL_COLOR would deref NULL (rb_shade.cpp:202).
             if (!vb) {
                 continue;
+            }
+            // KIWI-UX — the same index invariant the resident-run builder enforces
+            // (Editor_MeshSurfBadIndex): this path rebases the surf's table onto its own
+            // vertex run below, which is only a rebase while every value is inside
+            // [0, vertCount).  Dropped for the same reason a VB-less surf is, and BEFORE
+            // the batch is opened so nothing of it reaches `tess`.
+            {
+                const int badK = Editor_MeshSurfBadIndex(mesh);
+                if (badK >= 0) {
+                    Editor_ReportMeshSurfBadIndex(mesh, badK);
+                    continue;
+                }
             }
             material   = mesh->material;
             techType   = mesh->techType;

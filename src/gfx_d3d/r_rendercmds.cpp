@@ -2679,6 +2679,23 @@ bool __cdecl R_AddCmdSetClipPlane(int enable, const float *plane)
 // editor passes a resolved Material* directly (matching every other kisak render-command
 // material field), so no handle indirection is needed. §11: R_GetCommandBuffer is
 // (renderCmd, bytes) in kisak — the IDB lists them swapped.
+// IDB RC_SetLightColor @ 0x4fc330.  Its payload is copied byte-for-byte; the
+// backend consumes the light only after every command already ahead of it.
+void __cdecl RC_SetLightColor(const GfxLight *light)
+{
+    extern void Assert(const char *file, int line, int type, const char *fmt, ...);
+    if ( !light )
+        Assert("C:\\trees\\cod3-pc\\cod3-modtools\\cod3src\\src\\gfx_d3d\\r_rendercmds.cpp",
+               1643, 0, "%s", "light");
+
+    GfxCmdSetLightColor *cmd = (GfxCmdSetLightColor *)
+        R_GetCommandBuffer(RC_SET_LIGHT_COLOR, sizeof(GfxCmdSetLightColor));
+    if ( !cmd )
+        Assert("C:\\trees\\cod3-pc\\cod3-modtools\\cod3src\\src\\gfx_d3d\\r_rendercmds.cpp",
+               1647, 0, "%s", "cmd");
+    memcpy(&cmd->light, light, sizeof(cmd->light));
+}
+
 void __cdecl R_AddCmdDrawFullScreenColoredQuad(
     float s0, float t0, float s1, float t1, const float *color, const Material *material)
 {

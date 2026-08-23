@@ -32,10 +32,12 @@
 #include "kiwi_entthumb.h"          // KIWI-UX (ROUND AV, ITEM 3): the real 3D tile preview
 #include "kiwi_command.h"
 #include "kiwi_construct.h"         // KiwiCon_ActivePlane / KiwiCon_RayPlane
+#include "kiwi_fmt.h"
 #include "kiwi_grid.h"              // KiwiGrid_Snap
 #include "kiwi_lines.h"             // KIWI-UX (ROUND AX, ITEM 6): the drag ghost's 12 edges
 #include "kiwi_pick.h"              // Pick_RayFromImagePos / Pick_CameraContents
 #include "kiwi_str.h"                // KIWI-UX (CLEANUP, C-66): KiwiStr_ContainsNoCase
+#include "kiwi_transform.h"
 #include "kiwi_windows.h"
 
 #include <stdio.h>
@@ -95,12 +97,15 @@ namespace
 
     // ── THE PENDING DROP ────────────────────────────────────────────────────
     // Written by the drop handler INSIDE the ImGui frame, consumed by the
-    // deferred KIWI_CMD_ENT_DROP arm after the present.  The PIXEL is recorded,
-    // not the world point: the ray must be cast from where the user let go, and
-    // it must be cast with the camera state the pump sees, not a frame earlier.
+    // deferred KIWI_CMD_ENT_DROP arm after the present.  The release PIXEL is
+    // retained for the ordinary resolver.  A model-class drag additionally keeps
+    // its last valid resolved box so a parallel/upward release cannot jump or vanish.
     bool  s_pendHave = false;
     char  s_pendClass[64] = { 0 };
     int   s_pendX = 0, s_pendY = 0;
+    bool  s_pendPlacement = false;
+    float s_pendMins[3] = { 0.0f, 0.0f, 0.0f };
+    float s_pendMaxs[3] = { 0.0f, 0.0f, 0.0f };
 
     // ── KIWI-UX (ROUND AX, ITEM 6) — THE DRAG GHOST ─────────────────────────
     // The RESOLVED BOX, not the pixel, and that asymmetry with s_pend* above is
@@ -110,6 +115,7 @@ namespace
     // running.  So the ladder runs once per frame in the ImGui frame that owns the
     // drag, and the camera only draws twelve latched line segments.
     bool  s_ghostHave = false;
+    char  s_ghostClass[64] = { 0 };
     float s_ghostMins[3] = { 0.0f, 0.0f, 0.0f };
     float s_ghostMaxs[3] = { 0.0f, 0.0f, 0.0f };
     float s_ghostCol[3]  = { 1.0f, 1.0f, 1.0f };
@@ -293,10 +299,13 @@ namespace
         ImGui::TextUnformatted( r.name ? r.name : "(unnamed)" );
         ImGui::Separator();
         if ( point )
-            ImGui::Text( "point entity   size %g %g %g",
-                         r.eclass->maxs[0] - r.eclass->mins[0],
-                         r.eclass->maxs[1] - r.eclass->mins[1],
-                         r.eclass->maxs[2] - r.eclass->mins[2] );
+        {
+            char x[32], y[32], z[32];
+            ImGui::Text( "point entity   size %s %s %s",
+                         KiwiFmt_Num( x, sizeof( x ), r.eclass->maxs[0] - r.eclass->mins[0] ),
+                         KiwiFmt_Num( y, sizeof( y ), r.eclass->maxs[1] - r.eclass->mins[1] ),
+                         KiwiFmt_Num( z, sizeof( z ), r.eclass->maxs[2] - r.eclass->mins[2] ) );
+        }
         else
             ImGui::TextUnformatted( "brush entity   (drops a 64-unit box)" );
         // qe3.h:604 — the five preview-model slots; [0] is "defaultmdl=" from the
@@ -496,7 +505,8 @@ namespace
 
     // Where a drop at (imgX,imgY) puts the entity's BOUNDING BOX, in world units.
     // `ec` may be a brush class, in which case the box is a KENTB_BOX_SIDE cube.
-    // Returns false only when the camera viewport has no ray to give.
+    // Model classes also return false for a parallel/upward ray with no world hit;
+    // the drag target retains its last valid box in that case.
     bool ResolveDropBox( const eclass_t *ec, int imgX, int imgY,
                          float outMins[3], float outMaxs[3] )
     {
@@ -510,6 +520,16 @@ namespace
         {
             bmin[k] = point ? ec->mins[k] : -KENTB_BOX_SIDE * 0.5f;
             bmax[k] = point ? ec->maxs[k] :  KENTB_BOX_SIDE * 0.5f;
+        }
+
+        // Model classes share the model browser/selection drop solver.  The
+        // existing creation bracket below still receives only its resolved box.
+        if ( point && ( ec->classtype & 0x8 ) != 0 )
+        {
+            const float angles[3] = { 0.0f, 0.0f, 0.0f };
+            float origin[3];
+            return KiwiDrop_ComputePlacement( ray, bmin, bmax, angles, 1.0f,
+                                              origin, outMins, outMaxs );
         }
 
         // ── rung 1: a real surface under the drop pixel ─────────────────────
@@ -634,7 +654,8 @@ namespace
 
     // The whole deferred act.  ONE undo record (kiwi_entbrowser.h THE CREATION
     // PATH IS THE PORTED ONE).
-    void PerformDrop( const char *classname, int imgX, int imgY )
+    void PerformDrop( const char *classname, int imgX, int imgY,
+                      const float *latchedMins, const float *latchedMaxs )
     {
         if ( !classname || !*classname )
         {
@@ -667,9 +688,17 @@ namespace
 
         eclass_t *ec = Eclass_ForName( 0, classname );
         float mins[3], maxs[3];
-        if ( !ResolveDropBox( ec, imgX, imgY, mins, maxs ) )
+        if ( latchedMins && latchedMaxs )
         {
-            Sys_Printf( "Entity browser: the 3D view has no size yet — nothing placed.\n" );
+            for ( int k = 0; k < 3; ++k )
+            {
+                mins[k] = latchedMins[k];
+                maxs[k] = latchedMaxs[k];
+            }
+        }
+        else if ( !ResolveDropBox( ec, imgX, imgY, mins, maxs ) )
+        {
+            Sys_Printf( "Entity browser: the drop ray has no valid placement - nothing placed.\n" );
             return;
         }
 
@@ -861,11 +890,15 @@ bool KiwiEntBrowser_CameraDropTarget( float imgMinX, float imgMinY )
     // (compile fix: public-API spelling — GetDragDropPayload() is NULL when no
     // drag is live, imgui.h:1020; IsDragDropActive is imgui_internal.h-only.)
     if ( ImGui::GetDragDropPayload() == nullptr )
+    {
         s_ghostHave = false;
+        s_ghostClass[0] = '\0';
+    }
 
     if ( !ImGui::BeginDragDropTarget() )
     {
         s_ghostHave = false;         // dragging, but not over the camera image
+        s_ghostClass[0] = '\0';
         return false;
     }
 
@@ -878,10 +911,15 @@ bool KiwiEntBrowser_CameraDropTarget( float imgMinX, float imgMinY )
     const ImGuiPayload *p = ImGui::AcceptDragDropPayload(
         KENTB_PAYLOAD,
         ImGuiDragDropFlags_AcceptBeforeDelivery | ImGuiDragDropFlags_AcceptNoDrawDefaultRect );
+    if ( !p )
+    {
+        s_ghostHave = false;
+        s_ghostClass[0] = '\0';
+    }
 
     // ── the PREVIEW arm — read-only, every hovering frame ────────────────────
-    // It runs the SAME ladder the drop runs (ResolveDropBox: Test_Ray -> the working
-    // plane -> the fallback distance -> grid snap), which is a pure
+    // It runs the SAME resolver the drop runs (the shared ground-contact helper
+    // for model classes, the legacy placement ladder for everything else), a pure
     // (eclass, pixel) -> (mins,maxs) function: it creates nothing, selects nothing, and
     // moves no working plane.  Running the real ladder rather than an approximation is
     // the whole point — a preview that disagrees with the drop is worse than none.
@@ -901,7 +939,12 @@ bool KiwiEntBrowser_CameraDropTarget( float imgMinX, float imgMinY )
         memcpy( name, p->Data, (size_t)n );
         name[sizeof( name ) - 1] = '\0';
 
-        s_ghostHave = false;
+        if ( _stricmp( s_ghostClass, name ) != 0 )
+        {
+            s_ghostHave = false;
+            strncpy( s_ghostClass, name, sizeof( s_ghostClass ) - 1 );
+            s_ghostClass[sizeof( s_ghostClass ) - 1] = '\0';
+        }
         // Argument order is (has_brushes, name) — eclass.cpp:1138; PerformDrop:632
         // makes the identical call, and a preview that resolved a DIFFERENT class than
         // the drop would be the worst possible preview.
@@ -922,7 +965,6 @@ bool KiwiEntBrowser_CameraDropTarget( float imgMinX, float imgMinY )
 
     if ( p && p->Delivery && p->Data && p->DataSize > 0 )
     {
-        s_ghostHave = false;         // the drop owns it from here
         char name[64];
         name[0] = '\0';
         const int n = ( p->DataSize < (int)sizeof( name ) ) ? p->DataSize
@@ -937,16 +979,51 @@ bool KiwiEntBrowser_CameraDropTarget( float imgMinX, float imgMinY )
             const ImVec2 mp = ImGui::GetIO().MousePos;
             s_pendX = (int)( mp.x - imgMinX );
             s_pendY = (int)( mp.y - imgMinY );
+
+            if ( _stricmp( s_ghostClass, name ) != 0 )
+            {
+                s_ghostHave = false;
+                strncpy( s_ghostClass, name, sizeof( s_ghostClass ) - 1 );
+                s_ghostClass[sizeof( s_ghostClass ) - 1] = '\0';
+            }
+            const eclass_t *ec = Eclass_ForName( 0, name );
+            if ( ec )
+            {
+                float mins[3], maxs[3];
+                if ( ResolveDropBox( ec, s_pendX, s_pendY, mins, maxs ) )
+                {
+                    for ( int k = 0; k < 3; ++k )
+                    {
+                        s_ghostMins[k] = mins[k];
+                        s_ghostMaxs[k] = maxs[k];
+                    }
+                    s_ghostHave = true;
+                }
+            }
+            s_pendPlacement = s_ghostHave;
+            if ( s_pendPlacement )
+                for ( int k = 0; k < 3; ++k )
+                {
+                    s_pendMins[k] = s_ghostMins[k];
+                    s_pendMaxs[k] = s_ghostMaxs[k];
+                }
             strncpy( s_pendClass, name, sizeof( s_pendClass ) - 1 );
             s_pendClass[sizeof( s_pendClass ) - 1] = '\0';
             s_pendHave = true;
             took = true;
+            s_ghostHave = false;         // the deferred drop owns the latched box
+            s_ghostClass[0] = '\0';
 
             // DEFERRED — see kiwi_entbrowser.h AND WHY THE CREATION IS DEFERRED.
             // Same PostMessage route kiwi_palette.cpp:151 documents; ids fit
             // LOWORD.
             ::PostMessageA( g_qeglobals.d_hwndMain, WM_COMMAND,
                             (WPARAM)(unsigned int)KIWI_CMD_ENT_DROP, 0 );
+        }
+        else
+        {
+            s_ghostHave = false;
+            s_ghostClass[0] = '\0';
         }
     }
     ImGui::EndDragDropTarget();
@@ -1021,6 +1098,12 @@ bool KiwiEntBrowser_DispatchInstant( unsigned int cmdId )
     cls[sizeof( cls ) - 1] = '\0';
     s_pendClass[0] = '\0';
 
-    PerformDrop( cls, s_pendX, s_pendY );
+    const bool havePlacement = s_pendPlacement;
+    float mins[3] = { s_pendMins[0], s_pendMins[1], s_pendMins[2] };
+    float maxs[3] = { s_pendMaxs[0], s_pendMaxs[1], s_pendMaxs[2] };
+    s_pendPlacement = false;
+
+    PerformDrop( cls, s_pendX, s_pendY,
+                 havePlacement ? mins : 0, havePlacement ? maxs : 0 );
     return true;
 }

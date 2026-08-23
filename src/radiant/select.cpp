@@ -9,6 +9,7 @@
 #include <universal/assertive.h>    // iassert (USE_ASSERTS always on; same handler as Assert)
 #include "qe3.h"
 #include "mainfrm.h"   // CMainFrame / CXYWnd::m_nViewType (region-select view axis)
+#include "kiwi_lightcache.h"
 #include "xywnd.h"     // xywndState_t / Ed_ActiveXY (U-GLOBALS)
 #include "prefs.h"     // CPrefsDlg / g_PrefsDlg (Test_Ray pick-chain m_nEntityShowState/...)
 #include <gfx_d3d/r_xsurface.h>  // XModel, Editor_ExtractXModelGeo (sub_48CE60 model ray-pick)
@@ -4196,6 +4197,7 @@ void Select_Hide()
         b->xx5 = 1;
     }
     g_nUpdateBits = -1;
+    KiwiLightCache_VisibilityChanged(); // KIWI-UX: Hidden casters must leave cached per-light lists.
 }
 
 void Select_HideUnselected()
@@ -4221,6 +4223,7 @@ void Select_HideUnselected()
         b->xx5 = 1;
     }
     g_nUpdateBits = -1;
+    KiwiLightCache_VisibilityChanged(); // KIWI-UX: Isolating changes the faithful caster set.
 }
 
 // 0x48EF40  Select_HideUnselected2_unused — "hide by classname" (Shift+Alt+Ctrl+H).
@@ -4256,6 +4259,7 @@ void Select_HideUnselected2_unused()
         }
     }
     g_nUpdateBits = -1;
+    KiwiLightCache_VisibilityChanged(); // KIWI-UX: Class hide changes the faithful caster set.
 }
 
 void ShowHidden()
@@ -4271,6 +4275,7 @@ void ShowHidden()
         b->xx5 = 0;
     }
     g_nUpdateBits = -1;
+    KiwiLightCache_VisibilityChanged(); // KIWI-UX: Newly shown casters must re-enter per-light lists.
 }
 
 void ShowLastHidden()
@@ -4292,6 +4297,7 @@ void ShowLastHidden()
                 b->brushFlags &= ~4u;
         }
     g_nUpdateBits = -1;
+    KiwiLightCache_VisibilityChanged(); // KIWI-UX: Restored hide depth changes cached caster visibility.
 }
 
 // ═════════════════════════════════════════════════════════════════════════════

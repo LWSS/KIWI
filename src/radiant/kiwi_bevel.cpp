@@ -999,6 +999,12 @@ int KiwiBevel_AppendFace( brush_t *def, const kiwiBevelEdge_t &e, float dist )
     // the face is created, so nothing downstream has to remember to.
     KiwiMtl_RealizeFace( nf );
 
+    // ...and the copy inherits the source's HOLES as well as its handles: a source
+    // face whose lightmap or smoothing channel is missing or zero-scaled gives the
+    // chamfer the same one, which is invisible in Shift+L and unlit at compile
+    // (kiwi_material.h "the three channels").  No-op on a sound source.
+    KiwiMtl_EnsureFaceLayers( nf );      // kiwi_material.h:245
+
     // n(bias), then c = mid - n(bias)*d, then the three points whose
     // cross(p0-p1, p2-p1) is +n(bias) (the proof is in kiwi_bevel.h).  The v used
     // for planept[2] must be the BIASED frame's, not the baseline one, or the
