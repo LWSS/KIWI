@@ -123,63 +123,41 @@ void __cdecl R_AddImageToList(XAssetHeader header, ImageList* imageList)
 
 void __cdecl R_SumOfUsedImages(Image_MemUsage *usage)
 {
-    const char *v1; // eax
     GfxImage *image; // [esp+0h] [ebp-2040h]
-    uint v3[4]; // [esp+4h] [ebp-203Ch] BYREF
-    int v4; // [esp+14h] [ebp-202Ch]
-    int v5; // [esp+18h] [ebp-2028h]
-    int v6; // [esp+1Ch] [ebp-2024h]
-    int v7; // [esp+20h] [ebp-2020h]
-    int v8; // [esp+24h] [ebp-201Ch]
-    int v9; // [esp+28h] [ebp-2018h]
-    int v10; // [esp+2Ch] [ebp-2014h]
-    uint i; // [esp+30h] [ebp-2010h]
-    int v12; // [esp+34h] [ebp-200Ch]
+    int trackBytes[10]; // [esp+4h] [ebp-203Ch] BYREF
+    int imageBytes; // [esp+2Ch] [ebp-2014h]
+    uint imageIter; // [esp+30h] [ebp-2010h]
+    int usedBytes; // [esp+34h] [ebp-200Ch]
     ImageList imageList; // [esp+38h] [ebp-2008h] BYREF
 
     iassert( usage );
     R_GetImageList(&imageList);
-    memset(v3, 0, sizeof(v3));
-    v4 = 0;
-    v5 = 0;
-    v6 = 0;
-    v7 = 0;
-    v8 = 0;
-    v9 = 0;
-    v12 = 0;
-    for (i = 0; i < imageList.count; ++i)
+    memset(trackBytes, 0, sizeof(trackBytes));
+    usedBytes = 0;
+    for (imageIter = 0; imageIter < imageList.count; ++imageIter)
     {
-        image = imageList.image[i];
+        image = imageList.image[imageIter];
         iassert( image );
-        v10 = image->cardMemory.platform[0];
-        v3[image->track] += v10;
+        imageBytes = image->cardMemory.platform[PICMIP_PLATFORM_USED];
+        trackBytes[image->track] += imageBytes;
         if (!Image_IsCodeImage(image->track))
-            v12 += v10;
+            usedBytes += imageBytes;
     }
-    usage->total = v12;
-    usage->lightmap = v4;
-    if (!dx.deviceLost && usage->total != imageGlobals.totalMemory.platform[0])
-    {
-        v1 = va("%i != %i", usage->total, imageGlobals.totalMemory.platform[0]);
-        MyAssertHandler(
-            ".\\r_image.cpp",
-            223,
-            0,
-            "%s\n\t%s",
-            "dx.deviceLost || usage->total == imageGlobals.totalMemory.platform[PICMIP_PLATFORM_USED]",
-            v1);
-    }
-    usage->minspec = imageGlobals.totalMemory.platform[1];
+
+    usage->total = usedBytes;
+    usage->lightmap = trackBytes[4];
+
+    iassert(dx.deviceLost || usage->total == imageGlobals.totalMemory.platform[PICMIP_PLATFORM_USED]);
+
+    usage->minspec = imageGlobals.totalMemory.platform[PICMIP_PLATFORM_MINSPEC];
 }
 
 void __cdecl Image_Release(GfxImage *image)
 {
-    int platform; // [esp+0h] [ebp-4h]
-
     iassert( image );
     if (!Image_IsCodeImage(image->track))
     {
-        for (platform = 0; platform < 2; ++platform)
+        for (int platform = 0; platform < PICMIP_PLATFORM_COUNT; ++platform)
             imageGlobals.totalMemory.platform[platform] -= image->cardMemory.platform[platform];
     }
     if (image->texture.basemap)
@@ -187,8 +165,8 @@ void __cdecl Image_Release(GfxImage *image)
         //image->texture.basemap->Release(image->texture.basemap);
         image->texture.basemap->Release();
         image->texture.basemap = 0;
-        image->cardMemory.platform[0] = 0;
-        image->cardMemory.platform[1] = 0;
+        image->cardMemory.platform[PICMIP_PLATFORM_USED] = 0;
+        image->cardMemory.platform[PICMIP_PLATFORM_MINSPEC] = 0;
     }
     else if (r_loadForRenderer->current.enabled)
     {
@@ -362,13 +340,13 @@ void __cdecl Load_Texture(GfxTexture *remoteLoadDef, GfxImage *image)
                 v6 = 4;
             else
                 v6 = loadDef->dimensions[1] >> r_picmip_water->current.integer;
-            image->cardMemory.platform[0] = 0;
-            image->cardMemory.platform[1] = 0;
+            image->cardMemory.platform[PICMIP_PLATFORM_USED] = 0;
+            image->cardMemory.platform[PICMIP_PLATFORM_MINSPEC] = 0;
             Image_Create2DTexture_PC(image, v7, v6, loadDef->levelCount, 0x10000, imageFormat);
         }
         else
         {
-            if (image->cardMemory.platform[0] != Image_GetCardMemoryAmount(
+            if (image->cardMemory.platform[PICMIP_PLATFORM_USED] != Image_GetCardMemoryAmount(
                 loadDef->flags,
                 loadDef->format,
                 loadDef->dimensions[0],
@@ -393,9 +371,9 @@ void __cdecl Load_Texture(GfxTexture *remoteLoadDef, GfxImage *image)
                     image->name);
             if (!image->delayLoadPixels)
             {
-                externalDataSize = image->cardMemory.platform[0];
-                image->cardMemory.platform[0] = 0;
-                image->cardMemory.platform[1] = 0;
+                externalDataSize = image->cardMemory.platform[PICMIP_PLATFORM_USED];
+                image->cardMemory.platform[PICMIP_PLATFORM_USED] = 0;
+                image->cardMemory.platform[PICMIP_PLATFORM_MINSPEC] = 0;
                 if (!Image_LoadFromFile(image))
                     Com_Error(ERR_DROP, "Couldn't load image '%s'\n", image->name);
                 DB_LoadedExternalData(externalDataSize);
@@ -774,7 +752,7 @@ void R_InitRawImage()
 
 void __cdecl R_InitImages()
 {
-    for (int i = 0; i < 2; ++i)
+    for (int i = 0; i < PICMIP_PLATFORM_COUNT; ++i)
     {
         iassert(imageGlobals.totalMemory.platform[i] == 0);
     }
@@ -784,6 +762,7 @@ void __cdecl R_InitImages()
     RB_InitImages();
     R_InitRawImage();
     rg.waterFloatTime = rg.waterFloatTime + 1.0;
+
 #ifdef KISAK_RADIANT
     // idb R_InitImages tail: load the editor's case-texture density-visualization images
     // (bin/case_textures.txt). Drives the CASE_TEXTURE technique (camera draw_mode 4).

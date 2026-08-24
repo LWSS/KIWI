@@ -169,24 +169,31 @@ enum MapType : int
     MAPTYPE_COUNT = 0x6,
 };
 
+enum $92364187413C9A0320C404614F91083D : int
+{
+    PICMIP_PLATFORM_USED = 0x0,
+    PICMIP_PLATFORM_MINSPEC = 0x1,
+    PICMIP_PLATFORM_COUNT = 0x2,
+};
+
 struct Picmip // sizeof=0x2
 {                                       // ...
     Picmip()
     {
-        platform[0] = 0;
-        platform[1] = 0;
+        platform[PICMIP_PLATFORM_USED] = 0;
+        platform[PICMIP_PLATFORM_MINSPEC] = 0;
     }
     Picmip(int i)
     {
-        platform[0] = i;
-        platform[1] = i;
+        platform[PICMIP_PLATFORM_USED] = i;
+        platform[PICMIP_PLATFORM_MINSPEC] = i;
     }
-    uint8_t platform[2];        // ...
+    uint8_t platform[PICMIP_PLATFORM_COUNT];        // ...
 };
 
 struct CardMemory // sizeof=0x8
 {                                       // ...
-    int platform[2];                    // ...
+    int platform[PICMIP_PLATFORM_COUNT];                    // ...
 };
 
 #define OFFSET_TO_GfxImageLoadDef_DATA sizeof(uint8_t) + sizeof(uint8_t) + sizeof(__int16) + sizeof(__int16) + sizeof(__int16) + sizeof(_D3DFORMAT) + sizeof(int)

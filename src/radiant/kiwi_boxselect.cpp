@@ -34,6 +34,7 @@
 #include "kiwi_lines.h"              // ROUND AG, ITEM 6 — the live marquee preview
 #include "kiwi_command.h"            // shakeout G — the face-click auto push/pull
 #include "kiwi_conselect.h"          // shakeout F — the parallel construction selection
+#include "kiwi_hover.h"
 #include "kiwi_pick.h"
 #include "kiwi_region.h"             // ROUND K — regions are clickable + extrudable
 #include "kiwi_selection.h"
@@ -636,59 +637,43 @@ namespace
         g_nUpdateBits |= ( W_CAMERA | W_XY | W_Z );
     }
 
-    // ═══════════════════════════════════════════════════════════════════════
-    //  ROUND Y, ITEM 5 — MODE 2 + CTRL = CONSTRUCTION LINES ONLY
-    // ═══════════════════════════════════════════════════════════════════════
-    // USER DIRECTIVE, verbatim: "mode -2 selection needs a way to select only
-    // lines.  Maybe with ctrl-held it does that(box select primarily).  Make it
-    // so and show it in the bottom when using mode 2."
-    //
-    // Mode 2 is EDGE mode, and in a scene with construction geometry over
-    // brushwork a marquee there returns a mixture: brush edges the user did not
-    // want, plus the lines they did.  Ctrl is a FILTER on the candidate set, not a
-    // new gesture — the marquee, the click, the crossing/containment rule and the
-    // undo shape are all unchanged; only what is allowed to answer changes.
-    //
-    // ── THE COST, STATED RATHER THAN HIDDEN ────────────────────────────────
-    // Ctrl already means SUBTRACT everywhere in this file (ApplyAndSync's `ctrl`
-    // arm, KiwiConSel_ApplyClick's grammar).  Inside mode 2 it cannot mean both,
-    // so while Ctrl is held in mode 2 the modifier grammar becomes:
-    //     Ctrl          -> lines only, REPLACE
-    //     Ctrl + Shift  -> lines only, ADD
-    // and subtract-in-edge-mode is unreachable while Ctrl is down.  It is fully
-    // reachable without Ctrl in every other mode, and in mode 2 by converting the
-    // selection (Ctrl+2) or clicking elsewhere.  The directive asks for the filter
-    // by name and "keep plain mode-2 behaviour unchanged" is the other half of it:
-    // WITHOUT Ctrl, mode 2 is byte-for-byte what it was.
-    bool LinesOnly( bool ctrl )
+    // Construction selection still exposes an older toggle primitive.  Keep its
+    // exact membership test here so the central click arm can enforce the shared
+    // add/remove grammar without changing unrelated construction commands.
+    bool ConItemSelected( const kconSelItem_t &item )
     {
-        return ctrl && KiwiSel_GetModeMask() == SEL_MASK_EDGE;
+        for ( int i = 0; i < KiwiConSel_Count(); ++i )
+        {
+            const kconSelItem_t *at = KiwiConSel_At( i );
+            if ( at && at->object == item.object && at->kind == item.kind
+              && at->index == item.index )
+                return true;
+        }
+        return false;
     }
 
-    // The lines-only click: the construction arm of ClickSelect, alone.  Nothing
-    // else is consulted and nothing else is cleared — a filter that also dropped
-    // the brush selection would be a second act the directive did not ask for.
-    void ClickSelectLinesOnly( int imgX, int imgY, bool shift )
+    // Ctrl only reaches Toggle when the exact item is already present, so it can
+    // remove but never add.  Shift similarly only adds an absent item.
+    void ApplyConClick( const kconSelItem_t &item, bool shift, bool ctrl )
     {
-        kconSelItem_t conItem;
-        float         conDist = 0.0f;
-        if ( KiwiConSel_PickAt( imgX, imgY, &conItem, &conDist ) )
-            KiwiConSel_ApplyClick( conItem, shift, false );
-        else if ( !shift )
-            KiwiConSel_Clear();
-        g_nUpdateBits |= ( W_CAMERA | W_XY | W_Z );
+        const bool selected = ConItemSelected( item );
+        if ( ctrl )
+        {
+            if ( selected )
+                KiwiConSel_ApplyClick( item, false, true );
+            return;
+        }
+        if ( shift )
+        {
+            if ( !selected )
+                KiwiConSel_ApplyClick( item, true, false );
+            return;
+        }
+        KiwiConSel_ApplyClick( item, false, false );
     }
 
     void ClickSelect( int imgX, int imgY, bool shift, bool ctrl )
     {
-        // ROUND Y, ITEM 5 — the filter, first: everything below it is about
-        // brushes, regions and arbitration between them, none of which applies.
-        if ( LinesOnly( ctrl ) )
-        {
-            ClickSelectLinesOnly( imgX, imgY, shift );
-            return;
-        }
-
         // ── KIWI-UX: THE SUN HELPER'S GLYPH IS CLICKABLE ────────────────────
         // FIRST, above everything: the glyph is an aimed-at SCREEN target inside
         // KSUN_PICK_PIX (kiwi_sun.h), the same class of thing as a vertex or the
@@ -698,22 +683,23 @@ namespace
         // not a statement about brushes, which is the ruling the construction and
         // region arms below already make for themselves.
         //
-        // Shift and Ctrl are excluded: both are selection-BUILDING modifiers here,
-        // and there is exactly one sun, so there is nothing to accumulate or toggle
-        // it into.  They fall through to the ordinary grammar untouched.
-        if ( !shift && !ctrl )
+        const bool sunHit = KiwiSun_GlyphHit( imgX, imgY );
+        if ( sunHit )
         {
-            if ( KiwiSun_GlyphHit( imgX, imgY ) )
+            if ( ctrl )
             {
-                KiwiSun_Select();
-                g_nUpdateBits |= ( W_CAMERA | W_XY | W_Z );
-                return;
+                if ( KiwiSun_Selected() )
+                    KiwiSun_ClearSelection();
             }
-            // A plain click that did NOT land on the glyph drops the sun
-            // selection, the same way it drops the other three below.  Four
-            // selections, one click grammar.
-            KiwiSun_ClearSelection();
+            else
+                KiwiSun_Select();
+            g_nUpdateBits |= ( W_CAMERA | W_XY | W_Z );
+            return;
         }
+        // A plain click that did NOT land on the glyph drops the sun selection;
+        // either set-preserving modifier leaves it alone.
+        if ( !shift && !ctrl )
+            KiwiSun_ClearSelection();
 
         ray_t ray;
         pick_result_t hit;
@@ -745,7 +731,7 @@ namespace
                                   || ( conDist < hit.screenDist );
                 if ( conWins )
                 {
-                    KiwiConSel_ApplyClick( conItem, shift, ctrl );
+                    ApplyConClick( conItem, shift, ctrl );
                     return;
                 }
             }
@@ -817,16 +803,21 @@ namespace
                 {
                     if ( !shift && !ctrl )
                         KiwiConSel_Clear();
-                    // ── ROUND AG, ITEM 1: SHIFT ACCUMULATES REGIONS ─────────
-                    // USER DIRECTIVE: "I should be able to shift click
-                    // construction faces."  Shift now TOGGLES this region in the
-                    // set (kiwi_region.h THE SELECTION IS A SET) instead of
-                    // replacing it, which is the same grammar Shift+click already
-                    // has on brushes, faces and construction segments.  Ctrl still
-                    // clears, and a plain click still replaces.
-                    if ( ctrl )        KiwiRegion_Select( -1 );
-                    else if ( shift )  KiwiRegion_ToggleSelect( reg );
-                    else               KiwiRegion_Select( reg );
+                    // Regions expose a toggle primitive, but the click grammar is
+                    // add/remove: call it only when that operation changes this one
+                    // member.  Ctrl never clears the rest of the region set.
+                    if ( ctrl )
+                    {
+                        if ( KiwiRegion_IsSelected( reg ) )
+                            KiwiRegion_ToggleSelect( reg );
+                    }
+                    else if ( shift )
+                    {
+                        if ( !KiwiRegion_IsSelected( reg ) )
+                            KiwiRegion_ToggleSelect( reg );
+                    }
+                    else
+                        KiwiRegion_Select( reg );
                     g_nUpdateBits |= ( W_CAMERA | W_XY | W_Z );
                     // …and AUTO-ENTER the region extrude, PAUSED, exactly as a face
                     // click auto-enters push/pull.  Paused means the lollipop is up
@@ -858,12 +849,12 @@ namespace
         if ( !hit.valid || !Sel_ItemValid( hit.item ) )
         {
             if ( shift || ctrl )
-                return;                          // additive click on nothing: keep the selection
+                return;                          // modified click on nothing: keep the selection
             Sel_Clear( sel );
         }
         else if ( ctrl )
         {
-            Sel_Toggle( sel, hit.item );
+            Sel_Remove( sel, hit.item );
         }
         else if ( shift )
         {
@@ -906,8 +897,8 @@ namespace
         // nothing else.  In mode 5 a face click is one of four things the same
         // click could have meant, and starting a modal command off an ambiguous
         // pick is how a user loses a selection they were building.
-        // Additive clicks (shift / ctrl) do not auto-enter either — those are
-        // selection-building gestures by definition.
+        // Modified clicks (Shift-add / Ctrl-remove) do not auto-enter either —
+        // those are selection-editing gestures by definition.
         if ( !shift && !ctrl
           && KiwiSel_GetModeMask() == SEL_MASK_FACE
           && hit.valid && hit.item.kind == SEL_FACE && Sel_ItemValid( hit.item )
@@ -1031,19 +1022,6 @@ void KiwiBox_End( int imgX, int imgY )
     r.y1 = (float)( ( dy < 0 ) ? s_startY : s_curY );
 
     const bool crossing = ( dx < 0 );            // right -> left (spec §12)
-
-    // ── ROUND Y, ITEM 5: the marquee half of the lines-only filter ──────────
-    // The construction rect alone, with the brush pass skipped entirely.  Same
-    // rect, same crossing rule, same grammar as the arm below — only the
-    // candidate set is narrowed.  Runs BEFORE the sliver arm because a
-    // deliberately thin lines-only swipe down a stack of parallel lines is a real
-    // gesture and must not be demoted to a click.
-    if ( LinesOnly( s_ctrl ) )
-    {
-        KiwiConSel_ApplyRect( r.x0, r.y0, r.x1, r.y1, crossing, s_shift, false );
-        g_nUpdateBits |= ( W_CAMERA | W_XY | W_Z );
-        return;
-    }
 
     std::vector<sel_item_t> items;
     Collect( r, crossing, items );
@@ -1249,9 +1227,7 @@ void KiwiBox_DrawPreview()
     r.y1 = (float)( ( dy < 0 ) ? s_startY : s_curY );
     const bool crossing = ( dx < 0 );
 
-    // The lines-only marquee has no brush candidates at all (ROUND Y, ITEM 5), and
-    // the construction store draws its own selection feedback.
-    if ( !LinesOnly( s_ctrl ) && ( !s_previewValid || RectMoved( r, s_previewRect ) ) )
+    if ( !s_previewValid || RectMoved( r, s_previewRect ) )
     {
         s_preview.clear();
         CollectNoRescue( r, crossing, s_preview, KBOX_FACE_RAYS_PREVIEW );   // ROUND AI, ITEM 5
@@ -1277,9 +1253,10 @@ void KiwiBox_DrawPreview()
     // same argument.  The segment budget is UNCHANGED — width is per batch, not per
     // segment, so this costs nothing.
     KiwiLines_Begin( KBOX_PREVIEW_SEGMENTS, 2 );
-    // §18's hover cyan: "these are the things you are pointing at" is the same
-    // sentence a raycast hover says, so it is the same colour.
-    KiwiLines_Color( 0.35f, 0.95f, 1.00f );
+    // Share the raycast-hover palette: cyan for add/replace, warm for removal.
+    float previewCol[3];
+    KiwiHover_PreviewColor( s_ctrl, previewCol );
+    KiwiLines_Color( previewCol[0], previewCol[1], previewCol[2] );
     for ( size_t i = 0; i < s_preview.size(); ++i )
     {
         const sel_item_t &it = s_preview[i];
@@ -1324,4 +1301,9 @@ bool KiwiBox_Rect( int *x0, int *y0, int *x1, int *y1, bool *crossing )
     if ( y1 ) *y1 = s_curY;
     if ( crossing ) *crossing = ( s_curX < s_startX );
     return true;
+}
+
+bool KiwiBox_RemovePreview()
+{
+    return s_active && s_ctrl;
 }

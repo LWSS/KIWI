@@ -1006,7 +1006,7 @@ void __cdecl CG_InterpolateEntityPosition(cg_s *cgameGlob, centity_s *cent)
         cent->pose.angles[0] = 0.0;
         cent->pose.angles[2] = 0.0;
         v22 = cent->currentState.u.player.leanf;
-        v5 = cent->currentState.u.player.leanf - v22;
+        v5 = cent->nextState.lerp.u.player.leanf - v22;
         v23 = v5 * 0.002777777845039964;
         v4 = v23 + 0.5;
         v3 = floor(v4);

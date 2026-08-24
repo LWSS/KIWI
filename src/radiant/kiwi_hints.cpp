@@ -236,19 +236,6 @@ namespace
         AddChip( chips, n, "Plane", label );
     }
 
-    // ── ROUND Y, ITEM 5: the mode-2 filter chip ─────────────────────────────
-    // USER DIRECTIVE: "…Make it so and show it in the bottom when using mode 2."
-    // Added to BOTH prompt builders that can be on screen in EDGE mode (with a
-    // selection and without one), because the modifier is available in both and a
-    // hint that only appears once something is selected is a hint that arrives
-    // after it was needed.  A LITERAL chip: Ctrl is arbitrated inside
-    // kiwi_boxselect.cpp's click grammar and has no command row to look up.
-    void AddEdgeModeFilterChip( chip_t *chips, int *n )
-    {
-        if ( KiwiSel_GetModeMask() == SEL_MASK_EDGE )
-            AddChip( chips, n, "Ctrl", "Lines only" );
-    }
-
     // ── ROUND AI, ITEM 6: the PATCH VERTEX MODE chip ────────────────────────
     // A MODE with no command running has nowhere else to announce itself — the
     // status line (KiwiNum_DrawHud) reads a live command's HudStatus and there is
@@ -267,6 +254,7 @@ namespace
         // while the mode is live, and the LEAVE chip stays last so the way out is
         // always the thing the eye lands on after the verbs.
         AddChip( chips, n, "Shift+LMB", "Add point" );
+        AddChip( chips, n, "Ctrl+LMB",  "Remove point" );
         AddChip( chips, n, "Drag box",  "Take several" );
         AddChip( chips, n, "V / Esc",   "Leave patch vertex mode" );
     }
@@ -312,6 +300,12 @@ namespace
             AddChip( chips, &n, "Ctrl", "Snap" );
             AddChip( chips, &n, "Esc",  "Cancel" );
             return n;
+        }
+        if ( cmd && cmd->PreemptIdle() )
+        {
+            AddChip( chips, &n, "LMB",       "Pick" );
+            AddChip( chips, &n, "Shift+LMB", "Add" );
+            AddChip( chips, &n, "Ctrl+LMB",  "Remove" );
         }
         const bool clicks = ( cmd && cmd->WantsClicks() );
         AddChip( chips, &n, "RMB/Enter", "Confirm" );
@@ -410,6 +404,9 @@ namespace
     {
         int n = 0;
         AddPatchVertsChip( chips, &n );              // ROUND AI, ITEM 6 — leads the strip
+        AddChip( chips, &n, "LMB",   "Pick" );
+        AddChip( chips, &n, "Shift", "Add" );
+        AddChip( chips, &n, "Ctrl",  "Remove" );
         AddVerb( chips, &n, KIWI_CMD_DRAW_LINE,     "Line" );
         AddVerb( chips, &n, KIWI_CMD_DRAW_RECT,     "Rect" );
         AddVerb( chips, &n, KIWI_CMD_DRAW_CIRCLE,   "Circle" );
@@ -427,7 +424,6 @@ namespace
         // ROUND S: it is a SWIPE now — a flick left/right/up/down steps 90 degrees
         // that way, a short press still steps the ring (kiwi_viewcube.h).
         AddChip( chips, &n, "Alt+MMB",              "Swipe views" );
-        AddEdgeModeFilterChip( chips, &n );          // ROUND Y, ITEM 5
         AddVerb( chips, &n, KIWI_CMD_PALETTE,       "Commands" );
         return n;
     }
@@ -452,6 +448,7 @@ namespace
             AddChip( chips, &n, "Alt+LMB", "Paint terrain" );
         AddChip( chips, &n, "LMB",   "Pick" );
         AddChip( chips, &n, "Shift", "Add" );
+        AddChip( chips, &n, "Ctrl",  "Remove" );
         AddChip( chips, &n, "Del",   "Delete" );
         AddChip( chips, &n, "Esc",   "Deselect" );
         if ( !construction )
@@ -459,7 +456,6 @@ namespace
             AddChip( chips, &n, "1-5",      "Mode" );
             AddChip( chips, &n, "Ctrl+1-4", "Convert" );
         }
-        AddEdgeModeFilterChip( chips, &n );          // ROUND Y, ITEM 5
         // ROUND J: Focus is kind-agnostic and is the single most useful key with
         // something selected, so it belongs on the PROMPT strip rather than in one
         // kind's verb list.
@@ -503,6 +499,9 @@ namespace
     int BuildRegionPrompts( chip_t *chips )
     {
         int n = 0;
+        AddChip( chips, &n, "LMB",   "Pick" );
+        AddChip( chips, &n, "Shift", "Add" );
+        AddChip( chips, &n, "Ctrl",  "Remove" );
         AddChip( chips, &n, "Drag", "the ball" );
         AddChip( chips, &n, "Esc",  "Deselect" );
         AddVerb( chips, &n, KIWI_CMD_FOCUS_SELECTION, "Focus" );
@@ -531,8 +530,10 @@ namespace
         // LITERAL chips: the drag and its snap modifier are arbitrated in
         // kiwi_viewport.cpp's LMB arm and in KiwiCmd_SnapEngaged, not in
         // g_radiantCommands, so a table lookup would print no key at all.
-        AddChip( chips, &n, "Drag", "Orbit the sun" );
-        AddChip( chips, &n, "Ctrl", "Snap 5 deg" );
+        AddChip( chips, &n, "Shift+LMB", "Add" );
+        AddChip( chips, &n, "Ctrl+LMB",  "Remove" );
+        AddChip( chips, &n, "Drag",      "Orbit the sun" );
+        AddChip( chips, &n, "Ctrl+drag", "Snap 5 deg" );
         AddChip( chips, &n, "Esc",  "Deselect" );
         return n;
     }

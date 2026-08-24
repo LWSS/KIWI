@@ -7,7 +7,7 @@
 //
 //   left -> right : CONTAINMENT (only what is fully enclosed)
 //   right -> left : CROSSING    (anything the rect touches)
-//   Shift adds, Ctrl removes, plain replaces — the same modifiers as a click.
+//   Shift adds, Ctrl removes, Shift+Ctrl removes (Ctrl wins), plain replaces.
 //   A drag under KBOX_CLICK_PIXELS is a CLICK: one Pick() with the same modifiers.
 //
 // Granularity comes from KiwiSel_GetModeMask() and follows the same
@@ -58,6 +58,10 @@ void KiwiBox_Cancel();
 // the current cursor (not normalised — the caller draws the direction), and
 // `crossing` is true for a right-to-left drag.
 bool KiwiBox_Rect( int *x0, int *y0, int *x1, int *y1, bool *crossing );
+
+// True while the live marquee will remove its candidates.  The screen rectangle
+// uses this to share the hover layer's warm remove/warning palette.
+bool KiwiBox_RemovePreview();
 
 // ── ROUND AG, ITEM 6: the LIVE marquee preview ──────────────────────────────
 // USER DIRECTIVE: "While box selecting, it should highlight the items in

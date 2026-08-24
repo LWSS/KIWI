@@ -134,10 +134,14 @@ void KiwiCam_OrbitEnd();
 //   ORTHO (the default projection).  The image scale is s_dist and nothing else,
 //   so a notch scales s_dist and the view is PANNED so that the world point under
 //   the cursor stays under the cursor — exact anchoring, closed form, no ray
-//   marching, no lateral surprise at any zoom.  The pivot is NOT re-derived.
-//   PERSPECTIVE.  The eye moves along the CURSOR RAY toward the surface under it
-//   (the zoom-to-mouse this editor deliberately has and Plasticity does not —
-//   `onMouseWheel` never reads clientX/Y, OrbitControls.ts:423-443).
+//   marching, no lateral surprise at any zoom.  Its wheel frame is derived from
+//   the CURRENT EYE, never by re-expressing the eye from a possibly off-axis orbit
+//   pivot left by the preceding gesture.
+//   PERSPECTIVE.  The eye scales along the CURSOR RAY about the surface hit under
+//   it (the zoom-to-mouse this editor deliberately has and Plasticity does not —
+//   `onMouseWheel` never reads clientX/Y, OrbitControls.ts:423-443).  The hit is
+//   sampled per notch rather than blended with stale wheel state, so equal and
+//   opposite notch counts are exact inverses until a documented clamp is reached.
 void KiwiCam_Dolly( float wheelSteps, int imgX, int imgY );
 
 // The current orbit pivot (world space) — for HUD/gizmo consumers later.
@@ -193,11 +197,12 @@ void KiwiCam_LookDrag( int dx, int dy );
 //   (plasticity/src/components/viewport/OrbitControls.ts:265-275; the ORTHOGRAPHIC
 //    arm at :276-279 is `(right-left)/zoom/clientWidth`, i.e. world-per-pixel too.)
 // Shakeout E moved KIWI off that onto a per-gesture surface pick, because the
-// PIVOT was unreliable: the old dolly re-seated it at s_dist on every notch, so it
-// wandered.  Round BM's ortho dolly does not re-seat the pivot at all (see
-// KiwiCam_Dolly), and in ortho KiwiCam_WorldPerPixel is depth-INDEPENDENT — the
-// surface pick could never have changed the answer there, which is the default
-// projection.  So the pick goes and the reference is `s_lookAt`, exactly as
+// PIVOT was unreliable: the old dolly re-seated it from a surface reference on
+// every notch, so it wandered.  KiwiCam_Dolly now derives the target from the
+// resulting eye at the scaled standoff; the cursor surface never becomes hidden
+// pivot state.  In ortho KiwiCam_WorldPerPixel is depth-INDEPENDENT — the surface
+// pick could never have changed the answer there, which is the default projection.
+// So the pick goes and the reference is `s_lookAt`, exactly as
 // Plasticity's is `this.target`.  It is still cached at PanBegin: Plasticity's
 // target distance is invariant during a pan (target and camera both move by
 // panOffset, OrbitControls.ts:228-234) and so is ours (KiwiCam_Translate moves the

@@ -201,6 +201,17 @@ namespace
     // close enough to detail work; the surface-referenced step already makes the
     // approach slow down smoothly instead of punching through.
     const float KCAM_MIN_DIST    = 1.0f;
+
+    // Equal and opposite wheel deltas must use reciprocal factors.  Computing the
+    // zoom-out arm as the reciprocal of the same positive-magnitude powf keeps the
+    // algebra symmetric instead of asking two independently rounded powf calls to
+    // happen to be exact inverses.
+    float KCam_DollyFactor( float wheelSteps )
+    {
+        if ( wheelSteps > 0.0f )
+            return powf( KCAM_DOLLY_STEP, wheelSteps );
+        return 1.0f / powf( KCAM_DOLLY_STEP, -wheelSteps );
+    }
     // ══ KIWI-UX (ROUND AZ, ITEM 2): THE ZOOM-OUT CEILING, DERIVED ═══════════
     // USER DIRECTIVE, verbatim: "when zooming out extremely far, it breaks the
     // 3d camera completely."  The screenshot is an empty viewport with a sliver
@@ -479,20 +490,6 @@ namespace
     float s_panK      = 0.0f;
     bool  s_panHave   = false;
 
-    // ── shakeout E: the dolly's SMOOTHED reference distance ─────────────────
-    // The step used to be "distance to the surface under the cursor, else the
-    // orbit distance", which STEPS the moment the cursor crosses a silhouette
-    // edge mid-scroll: one notch moves 15% of 40 units, the next 15% of 4000.
-    // Consecutive notches inside KCAM_DOLLY_WINDOW seconds now blend the new
-    // reference into the previous one, so an edge crossing ramps over two or
-    // three notches instead of jumping.  A dolly the user has stopped and
-    // restarted takes the new reference outright — that IS a new intent.
-    const double KCAM_DOLLY_WINDOW = 0.35;     // seconds
-    const float  KCAM_DOLLY_BLEND  = 0.5f;     // fraction of the NEW reference kept
-    double s_dollyPrev = 0.0;
-    float  s_dollyRef  = 0.0f;
-    bool   s_dollyHave = false;
-
     // Fly state.  s_flyPrev is the previous tick's QPC reading in seconds;
     // s_flyLookHeld records whether the last tick had the RMB-look arm live, which
     // is what KiwiCam_FlySwallowKey answers with.
@@ -515,8 +512,7 @@ namespace
         // KIWI-UX (CLEANUP, C-33): the FREQUENCY is fixed for the process lifetime
         // by the API contract (QueryPerformanceFrequency: "the frequency cannot
         // change while the system is running"), so it is read once.  Only the
-        // COUNTER is sampled per call — and this runs on every fly tick and every
-        // wheel notch.
+        // COUNTER is sampled per call — and this runs on every fly tick.
         static const LONGLONG freq = []() -> LONGLONG
         {
             LARGE_INTEGER f;
@@ -597,6 +593,49 @@ namespace
         const float off[3] = { rel[0] - f[0] * z, rel[1] - f[1] * z, rel[2] - f[2] * z };
         const float lateral = sqrtf( Dot3( off, off ) );
         return lateral <= z * 0.5f;              // within ~26 degrees of the view axis
+    }
+
+    // Clamp a scale-about-point transform to the eye leash BEFORE it is written.
+    // `toAnchor` is anchor-origin and the requested eye delta is
+    // `toAnchor * (1-factor)`.  Returning a factor between the request and 1 keeps
+    // the whole transform — distance and cursor correction alike — on one
+    // effective factor instead of letting Commit truncate the eye afterwards.
+    float ScaleFactorInsideWorld( const camera_s *c, const float *toAnchor, float factor )
+    {
+        if ( !c || !toAnchor || !( factor > 0.0f ) )
+            return 1.0f;                         // also rejects NaN
+
+        const float travel = 1.0f - factor;
+        if ( travel == 0.0f )
+            return factor;
+
+        const float bound = KCam_OriginBound();
+        float allowed = 1.0f;                    // fraction of the requested eye delta
+        for ( int i = 0; i < 3; ++i )
+        {
+            const float delta = toAnchor[i] * travel;
+            float room = 0.0f;
+            if ( delta > 0.0f )
+                room = bound - c->origin[i];
+            else if ( delta < 0.0f )
+                room = c->origin[i] + bound;
+            else
+                continue;
+
+            if ( !( room > 0.0f ) )
+            {
+                allowed = 0.0f;
+                break;
+            }
+            const float need = fabsf( delta );
+            if ( room < need )
+            {
+                const float a = room / need;
+                if ( a < allowed )
+                    allowed = a;
+            }
+        }
+        return 1.0f - travel * allowed;
     }
 
     // ── KIWI-UX (ROUND AZ, ITEM 2): the eye's leash ─────────────────────────
@@ -826,7 +865,7 @@ void KiwiCam_OrbitEnd()
 // ─── dolly ───────────────────────────────────────────────────────────────────
 void KiwiCam_Dolly( float wheelSteps, int imgX, int imgY )
 {
-    if ( wheelSteps == 0.0f )
+    if ( !( wheelSteps > 0.0f || wheelSteps < 0.0f ) )       // zero or NaN
         return;
     camera_s *c = Ed_Camera();
     // ROUND P: a wheel notch DURING a live orbit must not move the orbit's pivot —
@@ -842,10 +881,6 @@ void KiwiCam_Dolly( float wheelSteps, int imgX, int imgY )
             s_lookAt[i] = s_orbPivot[i];
         s_have = true;
     }
-    else if ( !s_have || !PivotUsable( c ) )
-    {
-        PivotOnAxis( c );
-    }
 
     // ═════════════════════════════════════════════════════════════════════════
     //  KIWI-UX (ROUND BM, ITEM 3) — THE ORTHOGRAPHIC ARM, IN CLOSED FORM
@@ -858,7 +893,7 @@ void KiwiCam_Dolly( float wheelSteps, int imgX, int imgY )
     // along the view axis changes nothing you can see.  So an ortho wheel notch is
     // exactly two things: SCALE s_dist, and PAN so the world point under the cursor
     // does not move.  Everything else the perspective arm does (a cursor ray, a
-    // surface reference, a punch-through clamp, the smoothing window) is either
+    // surface reference, a punch-through clamp, cross-notch reference state) is either
     // meaningless here or, as rounds AJ/AN discovered the hard way, actively wrong:
     // see the KIWI-UX (ROUND BM, ITEM 3) block by KCAM_DOLLY_STEP for how a
     // surface-distance step made zooming in "squirrely".
@@ -877,17 +912,20 @@ void KiwiCam_Dolly( float wheelSteps, int imgX, int imgY )
     // -vpn*lead term is along vpn and so contributes nothing to either dot).  No
     // iteration, no easement, no residual: the grabbed point is INVARIANT.
     //
-    // THE PIVOT IS THE FIXED POINT OF THE SCALE and is NOT re-derived — it only
-    // rides the lateral pan.  That is what makes the wheel an exact round trip
-    // (N notches out then N in restores every variable), and it is what lets the
-    // PAN go back to referencing the pivot the way Plasticity does (kiwi_camera.h,
-    // KiwiCam_PanBegin): the pivot no longer wanders on every notch.
+    // THE WHEEL FRAME COMES FROM THE EYE, NOT FROM THE CACHED ORBIT PIVOT.  An
+    // orbit may deliberately leave its picked pivot off the view axis.  Feeding
+    // that pivot into `origin = lookAt - forward * newDist` on the next notch
+    // silently centres it and moves the eye sideways before any requested scale
+    // is applied.  Instead, derive the old view centre as
+    // `origin + forward * d0`, pan that centre by the exact cursor correction,
+    // and only then derive the new eye.  The old eye is therefore the k=1 case by
+    // construction, regardless of what the preceding camera gesture did.
     //
     // BC DISCIPLINE: the DRIVER (s_dist) is clamped against KCam_MaxDist /
     // KCAM_MIN_DIST and the effective factor is re-derived FROM the clamped value,
-    // so at either end the notch is a clean no-op — no dead zone, and no leash
-    // saturation to fight because the eye is derived from the pivot rather than
-    // integrated.
+    // so at either end the notch is a clean no-op.  For a moving notch, the new
+    // eye is derived from the old eye's view centre rather than from cached pivot
+    // state, so the only displacement is the requested scale plus its exact pan.
     if ( KiwiCam_Ortho() )
     {
         const float maxDist = KCam_MaxDist();
@@ -895,65 +933,68 @@ void KiwiCam_Dolly( float wheelSteps, int imgX, int imgY )
         if ( !( d0 > KCAM_MIN_DIST ) ) d0 = KCAM_MIN_DIST;
         if ( d0 > maxDist )            d0 = maxDist;
 
-        float newDist = d0 * powf( KCAM_DOLLY_STEP, wheelSteps );   // < d0 zooming IN
+        float newDist = d0 * KCam_DollyFactor( wheelSteps );        // < d0 zooming IN
         if ( !( newDist > KCAM_MIN_DIST ) ) newDist = KCAM_MIN_DIST;   // also catches NaN
         if ( newDist > maxDist )            newDist = maxDist;
-        const float kEff = newDist / d0;      // what the clamps ACTUALLY allowed
+        float kEff = newDist / d0;            // what the distance clamps ACTUALLY allowed
 
-        float off[3] = { 0.0f, 0.0f, 0.0f };
+        float f[3];
+        ViewForward( c, f );
+        float toAnchor[3];
+        for ( int i = 0; i < 3; ++i )
+            toAnchor[i] = f[i] * d0;          // old eye -> old view centre
+
         ray_t oray;
-        if ( kEff != 1.0f && Pick_RayFromImagePos( imgX, imgY, &oray ) )
+        if ( Pick_RayFromImagePos( imgX, imgY, &oray ) )
         {
             const float rel[3] = { oray.origin[0] - c->origin[0],
                                    oray.origin[1] - c->origin[1],
                                    oray.origin[2] - c->origin[2] };
             const float offR = Dot3( rel, c->vright );
             const float offU = Dot3( rel, c->vup    );
-            const float s    = 1.0f - kEff;
             for ( int i = 0; i < 3; ++i )
-                off[i] = ( c->vright[i] * offR + c->vup[i] * offU ) * s;
+                toAnchor[i] += c->vright[i] * offR + c->vup[i] * offU;
         }
 
-        // The pan is RIGID — eye, pivot and (if one is latched) the orbit frame all
-        // move by the same `off`, so the latched eye-offset s_orbRel is unchanged
-        // and a mid-orbit notch cannot disturb the gesture.  Same rule and same
-        // three lines as KiwiCam_Translate.
+        // The leash is another clamp on the SAME factor.  Recompute newDist from
+        // it before deriving either the axial move or the lateral cursor pan.
+        kEff   = ScaleFactorInsideWorld( c, toAnchor, kEff );
+        newDist = d0 * kEff;
+
+        // A clamped notch is a true no-op.  In particular, do not use it to
+        // re-seat an off-axis orbit pivot; that hidden state change would make a
+        // later gesture discontinuous even though this notch moved no pixels.
+        if ( kEff == 1.0f )
+            return;
+
+        float move[3];
         for ( int i = 0; i < 3; ++i )
         {
-            c->origin[i] += off[i];
-            s_lookAt[i]  += off[i];
-            if ( s_orbActive )
-                s_orbPivot[i] += off[i];
+            move[i] = toAnchor[i] * ( 1.0f - kEff );
+            c->origin[i] += move[i];
+        }
+
+        // Outside a live orbit, rebase the target FROM the new eye.  During a live
+        // orbit its world-space pivot stays fixed and the new eye offset is
+        // re-latched after Commit below.
+        if ( !s_orbActive )
+        {
+            for ( int i = 0; i < 3; ++i )
+                s_lookAt[i] = c->origin[i] + f[i] * newDist;
         }
         s_dist = newDist;
         s_have = true;
 
-        // …and THEN re-seat the eye at the new standoff, but ONLY outside a live
-        // orbit.  Re-deriving `origin = lookAt - f * s_dist` is an IMAGE NO-OP
-        // whenever that invariant already held (the two differ by f*(d0-newDist),
-        // which is along the view axis and invisible in a parallel projection), and
-        // keeping it held is what stops s_dist and the real standoff from drifting
-        // apart — which would show up as a jump at the ortho->perspective handover,
-        // where the standoff IS the scale.  During an ORBIT the invariant does not
-        // hold by design (the pivot is whatever the user grabbed, off-axis), and
-        // re-deriving there is exactly round P's JUMP 1 — so it is skipped, and the
-        // next notch after the release restores it.
-        if ( !s_orbActive )
-        {
-            float f[3];
-            ViewForward( c, f );
-            for ( int i = 0; i < 3; ++i )
-                c->origin[i] = s_lookAt[i] - f[i] * s_dist;
-        }
-
-        Commit( c );                          // ClampToWorld carries the pair rigidly
+        Commit( c );
+        if ( s_orbActive )
+            LatchOrbit( c );                  // pivot stands; refresh eye offset + angles
         return;
     }
 
     // Cursor ray; a viewport with no size yet falls back to the view axis.
     float dir[3];
     ray_t ray;
-    bool  haveRay = Pick_RayFromImagePos( imgX, imgY, &ray );
+    const bool haveRay = Pick_RayFromImagePos( imgX, imgY, &ray );
     if ( haveRay )
     {
         dir[0] = ray.dir[0]; dir[1] = ray.dir[1]; dir[2] = ray.dir[2];
@@ -963,14 +1004,25 @@ void KiwiCam_Dolly( float wheelSteps, int imgX, int imgY )
         ViewForward( c, dir );
     }
 
-    // The step is a fraction of the distance to whatever is UNDER THE CURSOR when
-    // something is (Plasticity/Blender "zoom to mouse"), and of the orbit distance
-    // otherwise.  Deriving it from the surface — not from the clamped orbit radius —
-    // is what stops the dolly from creeping to a halt a few units short of a wall
-    // and then crawling back out one notch at a time.
-    float reference = s_dist;
-    float surface   = 0.0f;                                // TRUE hit distance
-    bool  haveHit   = false;
+    // One factor drives BOTH the distance and the cursor correction.  Clamping the
+    // former while applying the latter with the requested (unclamped) factor is a
+    // sideways move at a zoom boundary, not a dolly.
+    const float maxDist = KCam_MaxDist();
+    float d0 = s_dist;
+    if ( !( d0 > KCAM_MIN_DIST ) ) d0 = KCAM_MIN_DIST;
+    if ( d0 > maxDist )            d0 = maxDist;
+
+    float newDist = d0 * KCam_DollyFactor( wheelSteps );
+    if ( !( newDist > KCAM_MIN_DIST ) ) newDist = KCAM_MIN_DIST;
+    if ( newDist > maxDist )            newDist = maxDist;
+    float kEff = newDist / d0;
+
+    // The anchor is the actual cursor-ray surface hit.  On a miss, the point d0
+    // units down that same ray gives the old fallback while preserving the same
+    // scale-about-point algebra.  No value from a previous notch is retained.
+    float toAnchor[3] = { dir[0] * d0, dir[1] * d0, dir[2] * d0 };
+    float surface = d0;
+    bool haveHit = false;
     if ( haveRay )
     {
         const pick_result_t r = Pick( ray, SEL_MASK_OBJECT | SEL_MASK_FACE );
@@ -979,126 +1031,48 @@ void KiwiCam_Dolly( float wheelSteps, int imgX, int imgY )
             const float rel[3] = { r.point[0] - c->origin[0],
                                    r.point[1] - c->origin[1],
                                    r.point[2] - c->origin[2] };
-            reference = sqrtf( Dot3( rel, rel ) );
-            surface   = reference;
-            haveHit   = true;
+            const float hitDist = sqrtf( Dot3( rel, rel ) );
+            if ( hitDist > 0.0f )                       // also rejects NaN
+            {
+                Copy3( rel, toAnchor );
+                surface = hitDist;
+                haveHit = true;
+            }
         }
     }
-    const float maxDist = KCam_MaxDist();                  // KIWI-UX (ROUND BC, ITEM 1)
-    if ( reference < KCAM_MIN_DIST ) reference = KCAM_MIN_DIST;
-    if ( reference > maxDist )       reference = maxDist;
 
-    // KIWI-UX (shakeout E): blend consecutive notches so crossing a silhouette
-    // edge mid-scroll ramps instead of stepping.  See the constants above.  This
-    // smooths the STEP SIZE only — `surface` below stays the true hit distance,
-    // because a blended reference can sit BEYOND the wall and the punch-through
-    // clamp must never be measured against a number the geometry did not give it.
+    // Scaling about the hit leaves `surface * kEff` in front of the eye.  Clamp
+    // the factor itself so the punch-through guard, distance driver, and lateral
+    // correction all describe the same transform.  If the eye is already inside
+    // the guard, an inward notch is a no-op rather than a recoil.
+    if ( haveHit && kEff < 1.0f )
     {
-        const double now = NowSeconds();
-        if ( s_dollyHave && ( now - s_dollyPrev ) <= KCAM_DOLLY_WINDOW )
-            reference = s_dollyRef + ( reference - s_dollyRef ) * KCAM_DOLLY_BLEND;
-        s_dollyPrev = now;
-        s_dollyRef  = reference;
-        s_dollyHave = true;
-        if ( reference < KCAM_MIN_DIST ) reference = KCAM_MIN_DIST;
-        if ( reference > maxDist )       reference = maxDist;
-    }
-
-    // KIWI-UX (ROUND BM, ITEM 3): ONE curve.  Rounds AJ/AN's near-field step ease
-    // and cursor-aim fade used to sit here; both are deleted, and the block by
-    // KCAM_DOLLY_STEP states the cause they were treating (an ortho arm referencing
-    // the surface distance instead of the zoom) and where it is fixed instead.  The
-    // aim is the cursor ray at every distance, and the step is flat.
-    const float k = powf( KCAM_DOLLY_STEP, wheelSteps );   // < 1 when zooming in
-    float move = reference * ( 1.0f - k );                 // > 0 when zooming in
-    if ( haveHit && move > surface - KCAM_MIN_DIST )
-        move = surface - KCAM_MIN_DIST;                    // never punch through the surface
-
-    // ── KIWI-UX (ROUND AZ, ITEM 2): SATURATE THE MOVE, NOT JUST THE RESULT ──
-    // `move` is negative when zooming OUT.  The two clamps below on s_dist have
-    // always been there, but they clamped the DISTANCE only — the origin write on
-    // the next line was unguarded, so once s_dist pinned at the ceiling every
-    // further notch still walked the eye backwards by reference * (k-1) (~29,000
-    // units a notch at the old ceiling) while the recorded distance stood still.
-    // That is the runaway behind "it breaks the 3d camera completely": the eye
-    // ends up hundreds of thousands of units outside the world with a distance
-    // that claims otherwise.  Deriving the allowed move from the CLAMPED distance
-    // makes the wheel stop dead at the ceiling instead.
-    //
-    // ONLY THE ZOOM-OUT SIDE IS SATURATED.  Doing the same on the zoom-IN side
-    // would re-erect the shakeout-C wall ("after a certain point, you can't zoom
-    // in further"): with zoom-to-cursor the eye travels along the cursor ray, not
-    // the view axis, so `s_dist -= move` is an approximation there and clamping
-    // the move by it would stop the approach short of the surface.  Zooming out
-    // has no such subtlety — the ray and the axis both point away from the
-    // subject — so this arm is exact.
-    if ( move < 0.0f && s_dist - move > maxDist )
-        move = s_dist - maxDist;                           // <= 0, and exactly 0 at the ceiling
-
-    // ═══════════════════════════════════════════════════════════════════════
-    //  KIWI-UX (ROUND BC, ITEM 2) — …AND AGAINST THE EYE LEASH, WHICH IS THE
-    //  ONE THAT ACTUALLY BROKE THE ROUND TRIP
-    // ═══════════════════════════════════════════════════════════════════════
-    // USER REPORT, verbatim: "Zoom is broken after zooming out all the way, can't
-    // zoom back in all the way."
-    //
-    // THE STATE MACHINE, ON PAPER, WHICH IS WHERE THIS WAS FOUND.  Wheel out N
-    // times, wheel in N times: in ortho the cursor ray IS the view axis
-    // (Ed_CameraCalcRayDir's parallel arm, camwnd.cpp), so `dir == vpn`, the eye
-    // slides along the axis, and `s_lookAt = origin + f * s_dist` at the bottom of
-    // this function is INVARIANT under it.  Every variable returns to its start
-    // and the trip is exact — UNLESS the origin write is not the write that
-    // happens.  And there were two clamps that could change it after the fact:
-    //
-    //   * the ceiling above, which round AZ fixed by saturating `move` (so the
-    //     eye and s_dist stop together), and
-    //   * ClampToWorld, in the Commit funnel, WHICH ROUND AZ ADDED AND DID NOT
-    //     SATURATE AGAINST.  Once the eye reaches ±KCAM_ORIGIN_BOUND the clamp
-    //     pins it and shifts s_lookAt by the same correction (rigid, correct so
-    //     far) — but `s_dist -= move` has ALREADY recorded a move the eye did not
-    //     make, and the `PivotOnAxis(c)` at the bottom then re-seats the pivot at
-    //     `origin + f * s_dist` with the LARGER s_dist against a STATIONARY eye.
-    //     The pivot walks forward by |move| every notch.  Zooming back in cannot
-    //     undo that: the pivot is invariant on the way in, so it stays where the
-    //     saturated zoom-out left it — the map is no longer under it, and the
-    //     camera converges on empty space.  "Can't zoom back in all the way",
-    //     exactly, and it is permanent until something else re-seats the pivot.
-    //
-    // Reachable at AZ's numbers with one pan: at full zoom-out a pan drag moves
-    // the pivot ~100k units, and 65536 of standoff on top of that clears 131072.
-    // Raising the leash (ITEM 1) makes it rarer; saturating here makes it
-    // IMPOSSIBLE, which is the property the round trip needs.  Same shape as the
-    // ceiling arm above and for the same reason: derive the allowed move from the
-    // clamp, do not let the clamp rewrite the move afterwards.
-    if ( move < 0.0f )
-    {
-        const float bound = KCam_OriginBound();
-        float travel = -move;                              // > 0: how far BACK we want
-        for ( int i = 0; i < 3; ++i )
+        if ( !( surface > KCAM_MIN_DIST ) )
+            kEff = 1.0f;
+        else
         {
-            // new = origin + dir*move = origin - dir*travel.
-            if ( dir[i] > 1.0e-6f )                        // component decreases -> -bound
-            {
-                const float room = ( c->origin[i] + bound ) / dir[i];
-                if ( room < travel ) travel = room;
-            }
-            else if ( dir[i] < -1.0e-6f )                  // component increases -> +bound
-            {
-                const float room = ( bound - c->origin[i] ) / -dir[i];
-                if ( room < travel ) travel = room;
-            }
+            const float hitFloor = KCAM_MIN_DIST / surface;
+            if ( kEff < hitFloor )
+                kEff = hitFloor;
         }
-        if ( !( travel > 0.0f ) )                          // already at/outside: also NaN
-            travel = 0.0f;
-        move = -travel;
     }
 
-    for ( int i = 0; i < 3; ++i )
-        c->origin[i] += dir[i] * move;
+    // The eye leash is the final clamp and therefore the final effective factor.
+    // Applying it here prevents Commit from truncating only the origin after the
+    // distance has already recorded a larger move.
+    kEff   = ScaleFactorInsideWorld( c, toAnchor, kEff );
+    newDist = d0 * kEff;
+    if ( newDist < KCAM_MIN_DIST ) newDist = KCAM_MIN_DIST;
+    if ( newDist > maxDist )       newDist = maxDist;
 
-    s_dist -= move;
-    if ( s_dist < KCAM_MIN_DIST ) s_dist = KCAM_MIN_DIST;
-    if ( s_dist > maxDist )       s_dist = maxDist;
+    // A saturated notch changes neither pose nor pivot.  Otherwise this is the
+    // literal scale-about-anchor identity O' = A + kEff*(O-A).
+    if ( kEff == 1.0f )
+        return;
+    for ( int i = 0; i < 3; ++i )
+        c->origin[i] += toAnchor[i] * ( 1.0f - kEff );
+
+    s_dist = newDist;
 
     Commit( c );
     if ( s_orbActive )
@@ -1146,10 +1120,10 @@ void KiwiCam_SetOrtho( bool on )
     // zooms right out in ortho and then presses P would otherwise land the eye
     // 262144 units back with a projection that starts dropping frames, and every
     // clamp downstream reads the NEW ceiling, so s_dist and the eye would also
-    // disagree by 200,000 units.  Pull the pair in RIGIDLY instead: the pivot is
-    // the fixed point (it is what the user is looking at) and the eye is
-    // re-derived from it at the new ceiling, which is the same
-    // `origin = lookAt - forward * s_dist` every other mover in this file writes.
+    // disagree by 200,000 units.  Pull the pair in RIGIDLY instead: keep the
+    // current eye-derived view centre fixed and shorten the standoff along the
+    // view axis.  A cached off-axis orbit pivot must not add lateral motion to a
+    // projection clamp.
     // A camera already inside the new ceiling is untouched, which is every camera
     // going the other way (ortho's ceiling is the larger of the two).
     {
@@ -1157,16 +1131,14 @@ void KiwiCam_SetOrtho( bool on )
         const float maxd = KCam_MaxDist();
         if ( s_dist > maxd )
         {
-            if ( !s_have )
-                PivotOnAxis( c );
-            s_dist = maxd;
             float f[3];
             ViewForward( c, f );
             for ( int i = 0; i < 3; ++i )
-                c->origin[i] = s_lookAt[i] - f[i] * s_dist;
+                c->origin[i] += f[i] * ( s_dist - maxd );
+            s_dist = maxd;
+            PivotOnAxis( c );
             s_orbActive = false;        // the latched offset belonged to the old standoff
             s_panHave   = false;        // …and so did the cached pan scale
-            s_dollyHave = false;        // …and the dolly's smoothed reference
             Commit( c );
         }
     }
@@ -1375,11 +1347,12 @@ void KiwiCam_PanBegin( int imgX, int imgY )
     // Shakeout E's per-gesture area Pick is gone.  Plasticity pans at the world-
     // per-pixel of `this.target` in both projections and nothing else
     // (plasticity/src/components/viewport/OrbitControls.ts:265-279), and the reason
-    // KIWI moved off that — a pivot that wandered because the old dolly re-seated
-    // it at s_dist on every notch — no longer exists: round BM's ortho dolly does
-    // not re-derive the pivot at all.  In ORTHO, which is the default projection,
-    // KiwiCam_WorldPerPixel is depth-independent (2H/height), so the surface pick
-    // could never have changed the answer there in the first place.
+    // KIWI moved off that — a pivot that wandered because the old dolly derived it
+    // from a changing surface reference — no longer exists: the current dolly
+    // derives its target from the resulting eye at the scaled standoff.  In ORTHO,
+    // which is the default projection, KiwiCam_WorldPerPixel is depth-independent
+    // (2H/height), so the surface pick could never have changed the answer there in
+    // the first place.
     //
     // The cache stays per-gesture because it is FREE and exact: KiwiCam_Translate
     // moves the eye and the pivot together, so the pivot's world-per-pixel is
@@ -1550,7 +1523,6 @@ void KiwiCam_DefaultSpawn()
     s_dist    = d;
     s_have    = true;
     s_panHave = false;                    // the cached pan scale belonged to the old view
-    s_dollyHave = false;
     s_orbActive = false;                  // ROUND P: …and so did any latched orbit frame
 
     Commit( c );
@@ -1605,7 +1577,6 @@ void KiwiCam_FrameBounds( const float mins[3], const float maxs[3] )
     s_dist      = dist;
     s_have      = true;
     s_panHave   = false;                  // the cached pan scale belonged to the old view
-    s_dollyHave = false;                  // …and so did the dolly's smoothed reference
     s_orbActive = false;                  // ROUND P: …and so did any latched orbit frame
 
     Commit( c );

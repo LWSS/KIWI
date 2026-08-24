@@ -53,9 +53,13 @@
 #include <gfx_d3d/r_material.h>     // Material
 #include <gfx_d3d/r_rendercmds.h>   // MaterialTechniqueType, TECHNIQUE_UNLIT
 #include "kiwi_camera.h"    // KiwiCam_WorldPerPixel (the shared screen-scale)
+#include "kiwi_conselect.h"
+#include "kiwi_construct.h"
 #include "kiwi_hover.h"
 #include "kiwi_lines.h"
+#include "kiwi_region.h"
 #include "kiwi_selection.h"
+#include "kiwi_sun.h"
 #include "kiwi_ux.h"
 #include "kiwi_uveditor.h"  // KIWI-UX (ROUND BN, ITEM 3): KiwiUvEd_OverlaySuppressed
 #include "kiwi_vec.h"     // KIWI-UX (CLEANUP, A-15): the one spelling of Dot3/Sub3/...
@@ -242,6 +246,10 @@ namespace
     }
 
     pick_result_t s_hover;
+    kconSelItem_t s_conHover;
+    bool          s_conHoverValid = false;
+    int           s_regionHover   = -1;
+    bool          s_removePreview = false;
 
 
     void Nudge( const camera_s *c, const float *in, float *out )
@@ -347,6 +355,83 @@ namespace
             AddNudged( c, corner[i], corner[( i + 1 ) & 3] );
         AddNudged( c, corner[0], corner[2] );
         AddNudged( c, corner[1], corner[3] );
+    }
+
+    bool ConItemSelected( const kconSelItem_t &item )
+    {
+        for ( int i = 0; i < KiwiConSel_Count(); ++i )
+        {
+            const kconSelItem_t *at = KiwiConSel_At( i );
+            if ( at && at->object == item.object && at->kind == item.kind
+              && at->index == item.index )
+                return true;
+        }
+        return false;
+    }
+
+    void EmitConstructionHover( const camera_s *c )
+    {
+        if ( !s_conHoverValid )
+            return;
+        const kconObject_t *o = KiwiCon_At( s_conHover.object );
+        if ( !o )
+            return;
+
+        if ( s_conHover.kind == KCONSEL_POINT )
+        {
+            float p[3];
+            if ( KiwiCon_AnchorWorld( *o, s_conHover.index, p ) )
+                EmitPointMarker( c, p, 5.0f );
+            return;
+        }
+        if ( s_conHover.kind == KCONSEL_SEGMENT )
+        {
+            float a[3], b[3];
+            if ( KiwiCon_SegmentWorld( *o, s_conHover.index, a, b ) )
+                AddNudged( c, a, b );
+            return;
+        }
+        const int count = KiwiCon_SegmentCount( *o );
+        for ( int i = 0; i < count && KiwiLines_Remaining() > 0; ++i )
+        {
+            float a[3], b[3];
+            if ( KiwiCon_SegmentWorld( *o, i, a, b ) )
+                AddNudged( c, a, b );
+        }
+    }
+
+    void EmitRegionHover( const camera_s *c )
+    {
+        const std::vector<kregion_t> &regions = KiwiRegion_All();
+        if ( s_regionHover < 0 || s_regionHover >= (int)regions.size() )
+            return;
+        const kregion_t &r = regions[s_regionHover];
+        const int count = (int)( r.pts.size() / 2 );
+        if ( count < 2 )
+            return;
+        float prev[3];
+        KiwiCon_PlaneToWorld( r.plane, &r.pts[( count - 1 ) * 2], prev );
+        for ( int i = 0; i < count && KiwiLines_Remaining() > 0; ++i )
+        {
+            float cur[3];
+            KiwiCon_PlaneToWorld( r.plane, &r.pts[i * 2], cur );
+            AddNudged( c, prev, cur );
+            memcpy( prev, cur, sizeof( prev ) );
+        }
+    }
+
+    void DrawSpecialHover( const camera_s *c )
+    {
+        if ( !s_conHoverValid && s_regionHover < 0 )
+            return;
+        KiwiLines_Begin( KHOVER_MAX_SEGMENTS, s_regionHover >= 0 ? 1 : 2 );
+        const float *col = s_removePreview ? KACTIVE_COL : KHOVER_COL;
+        KiwiLines_Color( col[0], col[1], col[2] );
+        if ( s_conHoverValid )
+            EmitConstructionHover( c );
+        else
+            EmitRegionHover( c );
+        KiwiLines_Flush();
     }
 
     void EmitObject( const camera_s *c, selbrush_t *b )
@@ -525,8 +610,7 @@ namespace
 
         const pick_result_t &hov = KiwiHover_Get();
         const bool hoverIsFace = KiwiUX_ShowHover() && hov.valid
-                              && hov.item.kind == SEL_FACE && BrushLive( hov.item.brush )
-                              && !( activeIsFace && Sel_ItemEqual( hov.item, active ) );
+                              && hov.item.kind == SEL_FACE && BrushLive( hov.item.brush );
 
         bool any = activeIsFace || hoverIsFace;
         for ( size_t i = 0; i < sel.items.size() && !any; ++i )
@@ -555,13 +639,14 @@ namespace
                 continue;                        // ROUND BN, ITEM 3: in scope
             EmitFaceFill( c, WindingOf( it ), KFILL_SELECTED );
         }
-        // The ACTIVE face and the HOVERED one take the same rule: the active face is
-        // the UV canvas's background material, so leaving its fill on would tint the
-        // very surface the user opened the editor to look at.
+        // Selection overlays yield to the UV canvas, but hover does not: it is the
+        // preview of the next camera click and must stay visible even on the active
+        // UV face.  A Ctrl hover uses the existing warm active/warning palette.
         if ( activeIsFace && !UvEditorOwns( active ) )
             EmitFaceFill( c, WindingOf( active ), KFILL_ACTIVE );
-        if ( hoverIsFace && !UvEditorOwns( hov.item ) )
-            EmitFaceFill( c, WindingOf( hov.item ), KFILL_HOVER );
+        if ( hoverIsFace )
+            EmitFaceFill( c, WindingOf( hov.item ),
+                          s_removePreview ? KFILL_ACTIVE : KFILL_HOVER );
 
         R_AddCmdSetMaterialColor( s_white );
     }
@@ -703,30 +788,111 @@ int KiwiHover_OutlinerConIndex()   { return s_outCon; }
 int KiwiHover_OutlinerConGroupId() { return s_outConGroup; }
 
 // ─── hover state ─────────────────────────────────────────────────────────────
-void KiwiHover_Update( int imgX, int imgY )
+void KiwiHover_Update( int imgX, int imgY, bool ctrl )
 {
+    s_hover          = pick_result_t();
+    s_conHoverValid = false;
+    s_regionHover   = -1;
+    s_removePreview = false;
     if ( !KiwiUX_ShowHover() )
+        return;
+
+    // The sun glyph owns its pixel before any world ray, exactly as ClickSelect.
+    if ( KiwiSun_GlyphHit( imgX, imgY ) )
     {
-        s_hover = pick_result_t();
+        s_removePreview = ctrl && KiwiSun_Selected();
         return;
     }
+
     ray_t ray;
     if ( !Pick_RayFromImagePos( imgX, imgY, &ray ) )
-    {
-        s_hover = pick_result_t();
         return;
+
+    const sel_mask_t mask = KiwiSel_GetModeMask();
+    pick_result_t hit = Pick( ray, mask );
+
+    // Construction targets use the same point/line-over-area arbitration as the
+    // click path.  Clearing the brush result when construction wins is important:
+    // hover is a promise about the one item the ensuing click will affect.
+    kconSelItem_t conItem;
+    float         conDist = 0.0f;
+    if ( KiwiConSel_PickAt( imgX, imgY, &conItem, &conDist ) )
+    {
+        const bool brushPointish = hit.valid
+                                && ( hit.item.kind == SEL_VERTEX
+                                  || hit.item.kind == SEL_EDGE );
+        const bool conWins = !hit.valid || !brushPointish
+                          || conDist < hit.screenDist;
+        if ( conWins )
+        {
+            s_conHover       = conItem;
+            s_conHoverValid  = true;
+            s_removePreview  = ctrl && ConItemSelected( conItem );
+            return;
+        }
     }
-    s_hover = Pick( ray, KiwiSel_GetModeMask() );
+
+    // Construction regions are area targets and yield to aimed-at points/lines or
+    // a nearer brush face, mirroring ClickSelect byte for byte.
+    if ( mask != SEL_MASK_OBJECT )
+    {
+        const int reg = KiwiRegion_PickAt( ray );
+        if ( reg >= 0 )
+        {
+            const bool brushPointish = hit.valid
+                                    && ( hit.item.kind == SEL_VERTEX
+                                      || hit.item.kind == SEL_EDGE );
+            bool regionWins = !brushPointish;
+            float regDist = 0.0f;
+            if ( regionWins && hit.valid
+              && KiwiRegion_HitDistance( ray, reg, &regDist ) )
+            {
+                const float dx = hit.point[0] - ray.origin[0];
+                const float dy = hit.point[1] - ray.origin[1];
+                const float dz = hit.point[2] - ray.origin[2];
+                if ( sqrtf( dx * dx + dy * dy + dz * dz ) < regDist )
+                    regionWins = false;
+            }
+            if ( regionWins )
+            {
+                s_regionHover   = reg;
+                s_removePreview = ctrl && KiwiRegion_IsSelected( reg );
+                return;
+            }
+        }
+    }
+
+    s_hover = hit;
+    if ( ctrl && hit.valid && Sel_ItemValid( hit.item ) )
+        s_removePreview = Sel_Contains( KiwiSel(), hit.item );
 }
 
 void KiwiHover_Clear()
 {
-    s_hover = pick_result_t();
+    s_hover          = pick_result_t();
+    s_conHoverValid = false;
+    s_regionHover   = -1;
+    s_removePreview = false;
 }
 
 const pick_result_t &KiwiHover_Get()
 {
     return s_hover;
+}
+
+bool KiwiHover_RemovePreview()
+{
+    return s_removePreview;
+}
+
+void KiwiHover_PreviewColor( bool remove, float outRgb[3] )
+{
+    if ( !outRgb )
+        return;
+    const float *col = remove ? KACTIVE_COL : KHOVER_COL;
+    outRgb[0] = col[0];
+    outRgb[1] = col[1];
+    outRgb[2] = col[2];
 }
 
 // ─── Cam_Draw tail hook ──────────────────────────────────────────────────────
@@ -764,6 +930,8 @@ void KiwiHover_DrawWorld()
     if ( !KiwiUX_ShowHover() )
         return;
 
+    DrawSpecialHover( c );
+
     // Liveness gate BEFORE any brush deref (see BrushLive above).  The stale
     // hover is dropped for good; a stale active is skipped for the frame (the
     // selection rebuild will replace it).
@@ -777,7 +945,6 @@ void KiwiHover_DrawWorld()
     const bool activeFine   = Sel_ItemValid( active ) && active.kind != SEL_OBJECT
                            && BrushLive( active.brush );
     const bool hoverValid   = s_hover.valid && Sel_ItemValid( s_hover.item );
-    const bool hoverIsActive = hoverValid && activeFine && Sel_ItemEqual( s_hover.item, active );
 
     // Two batches, one per line width.  Outlines (object/face) are thin; the edge
     // highlight and the vertex marker are thick so they read as "grab me".
@@ -791,11 +958,13 @@ void KiwiHover_DrawWorld()
             KiwiLines_Color( KACTIVE_COL[0], KACTIVE_COL[1], KACTIVE_COL[2] );
             EmitItem( c, active, thin );
         }
-        // Hover last so it wins where the two coincide (unless they ARE the same
-        // item, in which case the active accent already said everything).
-        if ( hoverValid && !hoverIsActive && IsThinKind( s_hover.item ) == thin )
+        // Hover last even when it is already active/selected: the cyan layer is
+        // what makes Shift-hover visible, while Ctrl changes it to the warm
+        // remove/warning accent.
+        if ( hoverValid && IsThinKind( s_hover.item ) == thin )
         {
-            KiwiLines_Color( KHOVER_COL[0], KHOVER_COL[1], KHOVER_COL[2] );
+            const float *col = s_removePreview ? KACTIVE_COL : KHOVER_COL;
+            KiwiLines_Color( col[0], col[1], col[2] );
             EmitItem( c, s_hover.item, thin );
         }
 

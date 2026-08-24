@@ -2922,7 +2922,7 @@ void __cdecl R_FilterStaticModelIntoCells_r(
         if (boxSide == 3)
         {
             type = plane->type;
-            rightNode = (node + 2 * node->rightChildOffset);
+            rightNode = (mnode_t *)((char *)node + 2 * node->rightChildOffset);
             if (type >= 3)
             {
                 R_FilterStaticModelIntoCells_r(world, node + 1, smodelInst, mins2, maxs2);
@@ -2956,7 +2956,7 @@ void __cdecl R_FilterStaticModelIntoCells_r(
         else
         {
             vassert((boxSide == (1 << 0) || boxSide == (1 << 1)), "(boxSide) = %i", boxSide);
-            node = (node + 2 * (boxSide - 1) * (node->rightChildOffset - 2) + 4);
+            node = (mnode_t *)((char *)node + 2 * (boxSide - 1) * (node->rightChildOffset - 2) + 4);
         }
     }
     if (cellIndex)

@@ -26,8 +26,10 @@
 
 #include "stdafx.h"
 #include <csetjmp>                  // the model-load asset-drop recovery guard
+#include <imgui/imgui.h>            // GetFrameCount for the shared disk-load budget
 #include "qe3.h"                    // eclass_t
 #include "kiwi_entthumb.h"
+#include "kiwi_thumbcache.h"        // executable-local .kthumb files
 #include "radiant_rtt.h"            // RTT_BeginThumb / RTT_EndThumb / RTT_ThumbSurface
 #include "kiwi_texcache.h"          // KIWI-UX (CLEANUP, C-65): the by-name texture cache
 
@@ -43,6 +45,7 @@
 
 #include <map>
 #include <string>
+#include <vector>
 #include <float.h>
 #include <math.h>
 #include <string.h>
@@ -71,6 +74,12 @@ namespace
     // browser a >1.5x supersample in the tight dimension and leaves headroom if the
     // tile ever grows.  Square, so the projection needs no aspect term.
     const int   KENTT_RT       = 128;
+    // Bump this whenever lighting, camera angle, framing, or output size changes.
+    // It is persisted in every .kthumb header so visual changes invalidate all
+    // otherwise-current thumbnails without special migration code.
+    const unsigned KENTT_RENDER_VERSION = 1;
+    // Source hashing plus cache-file upload is limited across both browser tabs.
+    const int KENTT_DISK_LOADS_PER_FRAME = 8;
     // The isometric-ish view.  Pitch 20 deg down, yaw 200 deg: the camera sits off the
     // model's front-right and looks back and slightly down at it, which is the angle
     // round AU's ImDrawList tile already draws its bbox at (ProjectIso, 30 deg) read as
@@ -157,6 +166,17 @@ namespace
     };
     std::map<std::string, modelMeta_t> s_modelMeta;
 
+    struct sourceState_t
+    {
+        bool                   haveHash   = false;
+        bool                   diskChecked = false;
+        kiwiThumbSourceHash_t  sourceHash = 0;
+    };
+    std::map<std::string, sourceState_t> s_sourceState;
+    int      s_diskBudgetFrame = -1;
+    int      s_diskLoadsThisFrame = 0;
+    unsigned s_seenInvalidateSerial = 0;
+
     // At most ONE pending request, and it is data (not an eclass_t*): a .def reload
     // (Eclass_FreeAll) between the panel draw and the tick would dangle a class pointer,
     // and there is no reason to hold one — the model NAME is everything the render needs.
@@ -164,6 +184,40 @@ namespace
     std::string s_reqKey;
     std::string s_reqLabel;
     std::string s_reqModel;
+    kiwiThumbSourceHash_t s_reqSourceHash = 0;
+
+    bool TakeDiskLoadBudget()
+    {
+        const int frame = ImGui::GetFrameCount();
+        if ( frame != s_diskBudgetFrame )
+        {
+            s_diskBudgetFrame = frame;
+            s_diskLoadsThisFrame = 0;
+        }
+        if ( s_diskLoadsThisFrame >= KENTT_DISK_LOADS_PER_FRAME )
+            return false;
+        ++s_diskLoadsThisFrame;
+        return true;
+    }
+
+    void ClearRequest()
+    {
+        s_reqKey.clear();
+        s_reqLabel.clear();
+        s_reqModel.clear();
+        s_reqSourceHash = 0;
+        s_haveReq = false;
+    }
+
+    void ClearThumbnailMemory()
+    {
+        KiwiTexCache_ReleaseAll( s_cache );
+        s_modelMeta.clear();
+        s_sourceState.clear();
+        ClearRequest();
+        s_diskBudgetFrame = -1;
+        s_diskLoadsThisFrame = 0;
+    }
 
     // ── the model name a CLASS carries, or null ─────────────────────────────
     // `defaultmdl=` -> default_model_name (eclass.cpp:958), which is cycleModelName[0]
@@ -285,7 +339,9 @@ namespace
     // kind, and the caller must NOT cache it as a permanent failure — a healthy
     // device that fails one readback used to mark the class FAILED forever and log a
     // line pointing the operator at the ASSET when the fault was D3D.
-    IDirect3DTexture9 *CopyOutThumb( float *outWhiteFrac, bool *outD3DFail )
+    IDirect3DTexture9 *CopyOutThumb( const char *modelName,
+                                     kiwiThumbSourceHash_t sourceHash,
+                                     float *outWhiteFrac, bool *outD3DFail )
     {
         if ( outWhiteFrac )
             *outWhiteFrac = 0.0f;
@@ -336,6 +392,7 @@ namespace
         // The cutoff is KENTT_BG_MAX, derived beside KENTT_BG.
         int lit   = 0;
         int white = 0;
+        std::vector<unsigned> pixels( KENTT_RT * KENTT_RT );
         for ( int y = 0; y < KENTT_RT; ++y )
         {
             const unsigned *s = (const unsigned *)( (const unsigned char *)src.pBits + (size_t)y * src.Pitch );
@@ -344,6 +401,7 @@ namespace
             {
                 const unsigned p = s[x] | 0xFF000000u;   // FORCE OPAQUE — see kiwi_entthumb.h
                 d[x] = p;
+                pixels[(size_t)y * KENTT_RT + x] = p;
                 const int r = (int)( ( p >> 16 ) & 0xFF );
                 const int g = (int)( ( p >>  8 ) & 0xFF );
                 const int b = (int)(   p         & 0xFF );
@@ -358,6 +416,11 @@ namespace
         s_readback->UnlockRect();
         if ( outWhiteFrac && lit > 0 )
             *outWhiteFrac = (float)white / (float)lit;
+        // Disk persistence is best-effort and cannot turn a valid in-memory
+        // readback into a failed thumbnail.
+        KiwiThumbCache_Write( modelName, sourceHash, KENTT_RENDER_VERSION,
+                              KENTT_RT, KENTT_RT, KIWI_THUMBCACHE_FORMAT_BGRA8,
+                              &pixels[0], KENTT_RT * sizeof( unsigned ) );
         return tex;
     }
 
@@ -369,8 +432,10 @@ namespace
     // means "D3D would not hand over the pixels", which is transient and must not be
     // cached.  A null return with it FALSE is the real "no usable model for this
     // class" answer.
-    IDirect3DTexture9 *RenderThumb( const char *modelName, float *outWhiteFrac,
-                                    bool *outD3DFail, float outMins[3],
+    IDirect3DTexture9 *RenderThumb( const char *modelName,
+                                     kiwiThumbSourceHash_t sourceHash,
+                                     float *outWhiteFrac,
+                                     bool *outD3DFail, float outMins[3],
                                     float outMaxs[3], bool *outHaveBounds )
     {
         if ( outD3DFail )
@@ -557,7 +622,7 @@ namespace
             R_SortMaterials();
             RTT_EndThumb();
 
-            out = CopyOutThumb( outWhiteFrac, outD3DFail );
+            out = CopyOutThumb( modelName, sourceHash, outWhiteFrac, outD3DFail );
         }
 
         RemoveModelInstFromBuf( inst );
@@ -582,13 +647,57 @@ namespace
         if ( !mayRequest )
             return nullptr;
 
-        // KIWI: one slot for both tabs.  The first visible requester keeps it
-        // until the spaced render tick consumes it.
+        sourceState_t &source = s_sourceState[key];
+        if ( !source.diskChecked )
+        {
+            if ( !TakeDiskLoadBudget() )
+                return nullptr;
+            if ( !source.haveHash )
+            {
+                float mins[3] = { 0.0f, 0.0f, 0.0f };
+                float maxs[3] = { 0.0f, 0.0f, 0.0f };
+                bool haveBounds = false;
+                if ( !KiwiThumbCache_SourceHash( bare, &source.sourceHash,
+                                                 mins, maxs, &haveBounds ) )
+                    return nullptr;
+                source.haveHash = true;
+                if ( haveBounds )
+                {
+                    modelMeta_t &meta = s_modelMeta[key];
+                    meta.haveBounds = true;
+                    for ( int i = 0; i < 3; ++i )
+                    {
+                        meta.mins[i] = mins[i];
+                        meta.maxs[i] = maxs[i];
+                    }
+                }
+            }
+
+            IDirect3DTexture9 *diskTexture = nullptr;
+            const kiwiThumbCacheLoadResult_t load = KiwiThumbCache_Load(
+                bare, source.sourceHash, KENTT_RENDER_VERSION,
+                KENTT_RT, KENTT_RT, KIWI_THUMBCACHE_FORMAT_BGRA8,
+                &diskTexture );
+            if ( load == KIWI_THUMBCACHE_RETRY )
+                return nullptr;
+            source.diskChecked = true;
+            if ( load == KIWI_THUMBCACHE_HIT && diskTexture )
+            {
+                kiwiTexEntry_t &entry = s_cache[key];
+                entry.tex = diskTexture;
+                entry.failed = false;
+                return diskTexture;
+            }
+        }
+
+        // One render slot is shared by both tabs.  Disk hits may fill all eight
+        // budgeted slots, while the first miss waits here for the spaced render tick.
         if ( !s_haveReq )
         {
             s_reqKey   = key;
             s_reqLabel = ( label && *label ) ? label : bare;
             s_reqModel = bare;
+            s_reqSourceHash = source.sourceHash;
             s_haveReq  = true;
         }
         return nullptr;
@@ -637,6 +746,17 @@ bool KiwiEntThumb_ModelFailed( const char *xmodelName )
 
 void KiwiEntThumb_Tick()
 {
+    const unsigned invalidateSerial = KiwiThumbCache_InvalidateSerial();
+    if ( !s_seenInvalidateSerial )
+        s_seenInvalidateSerial = invalidateSerial;
+    else if ( invalidateSerial != s_seenInvalidateSerial )
+    {
+        // Tick runs before ImGui begins, so this is the safe place to release
+        // textures after the Models-tab clear button or an importer invalidation.
+        ClearThumbnailMemory();
+        s_seenInvalidateSerial = invalidateSerial;
+    }
+
     if ( !s_haveReq )
         return;                          // warm cache: zero cost, and this is the common path
 
@@ -653,10 +773,8 @@ void KiwiEntThumb_Tick()
     const std::string key   = s_reqKey;
     const std::string label = s_reqLabel;
     const std::string mdl   = s_reqModel;
-    s_reqKey.clear();
-    s_reqLabel.clear();
-    s_reqModel.clear();
-    s_haveReq = false;
+    const kiwiThumbSourceHash_t sourceHash = s_reqSourceHash;
+    ClearRequest();
 
     float          whiteFrac = 0.0f;
     bool           d3dFail   = false;        // KIWI-UX (CLEANUP, C-67)
@@ -664,8 +782,9 @@ void KiwiEntThumb_Tick()
     float          maxs[3]   = { 0.0f, 0.0f, 0.0f };
     bool           haveBounds = false;
     const unsigned t0        = ::GetTickCount();
-    IDirect3DTexture9 *tex   = RenderThumb( mdl.c_str(), &whiteFrac, &d3dFail,
-                                            mins, maxs, &haveBounds );
+    IDirect3DTexture9 *tex   = RenderThumb( mdl.c_str(), sourceHash,
+                                             &whiteFrac, &d3dFail,
+                                             mins, maxs, &haveBounds );
     const unsigned costMs    = ::GetTickCount() - t0;
 
     if ( haveBounds )
@@ -755,15 +874,10 @@ void KiwiEntThumb_Tick()
 
 void KiwiEntThumb_ReleaseForReset()
 {
-    KiwiTexCache_ReleaseAll( s_cache );      // KIWI-UX (CLEANUP, C-65)
+    ClearThumbnailMemory();
     if ( s_readback )
     {
         s_readback->Release();
         s_readback = nullptr;
     }
-    s_modelMeta.clear();
-    s_reqKey.clear();
-    s_reqLabel.clear();
-    s_reqModel.clear();
-    s_haveReq = false;
 }

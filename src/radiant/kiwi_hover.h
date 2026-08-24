@@ -29,13 +29,20 @@ struct entity_s;
 // Re-pick under the cursor (camera-image coords, TOP-LEFT origin).  Uses the
 // current KiwiSel_GetModeMask() so hover granularity always matches what a click
 // would select.  No-op when the hover toggle is off.
-void KiwiHover_Update( int imgX, int imgY );
+void KiwiHover_Update( int imgX, int imgY, bool ctrl );
 
 // Cursor left the camera image / a drag started — drop the highlight.
 void KiwiHover_Clear();
 
 // The last hover result (invalid when nothing is hovered).
 const pick_result_t &KiwiHover_Get();
+
+// True when the hovered target is selected and Ctrl would remove it.  Fine-tool
+// marker passes use the same state as the central hover renderer.
+bool KiwiHover_RemovePreview();
+
+// The shared selection-preview palette: cyan for add/replace, warm for remove.
+void KiwiHover_PreviewColor( bool remove, float outRgb[3] );
 
 // Cam_Draw tail hook (// KIWI-UX in camwnd.cpp): hover outline + active accent.
 void KiwiHover_DrawWorld();

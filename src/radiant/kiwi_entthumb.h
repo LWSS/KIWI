@@ -11,9 +11,9 @@
 // the isometric bbox tile.
 //
 // One shared 128x128 D3DPOOL_DEFAULT RT is rendered into, then copied per entry through a
-// reused SYSTEMMEM surface into a D3DPOOL_MANAGED texture.  The CPU hop is what lets the
-// copy force alpha to 0xFF, so the tiles need no per-draw ALPHABLENDENABLE callback (an
-// ImDrawList callback would split the draw list).
+// reused SYSTEMMEM surface into a D3DPOOL_MANAGED texture.  The CPU hop also persists the
+// same opaque BGRA bytes under kiwi_cache/thumbs/.  A matching disk entry uploads directly
+// to a MANAGED texture and skips the render.
 //
 // A failed model load is cached as FAILED and never retried.  The load runs inside the
 // editor's ERR_DROP + SEH bracket and BEFORE RTT_BeginThumb, never between Begin and End:
@@ -25,9 +25,9 @@ struct IDirect3DTexture9;
 // The cached thumbnail for `ec`, or null when there is none.  Null means "draw the
 // isometric bbox instead" and covers three cases the caller does not need to tell apart:
 // not rendered yet, no class-level model, and load failed.  On a miss it records at most
-// ONE pending request per frame for the next tick.  `mayRequest` is the caller's "this
-// tile is on screen" answer: a cache hit is served either way, but only a visible tile
-// may enqueue a load.
+// ONE pending render request for the next tick.  `mayRequest` is the caller's "this tile
+// is on screen" answer: a memory hit is served either way, but only a visible tile may
+// spend one of the shared eight disk-load slots or enqueue a render miss.
 IDirect3DTexture9 *KiwiEntThumb_Get( const eclass_t *ec, bool mayRequest );
 
 // The same cache and renderer, addressed directly by xmodel name for the Models
@@ -35,9 +35,9 @@ IDirect3DTexture9 *KiwiEntThumb_Get( const eclass_t *ec, bool mayRequest );
 // texture and one pending-request budget.
 IDirect3DTexture9 *KiwiEntThumb_GetModel( const char *xmodelName, bool mayRequest );
 
-// Direct-name metadata populated by the guarded thumbnail load.  Bounds become
-// available as soon as the xmodel registers; a hard load/render failure remains
-// cached so the browser can grey that tile instead of retrying it every frame.
+// Direct-name metadata populated while hashing the xmodel header (and confirmed by
+// a guarded render on a miss).  Thus disk hits retain true placement bounds without
+// registering the model; hard load/render failures remain cached for the session.
 bool KiwiEntThumb_GetModelBounds( const char *xmodelName,
                                   float outMins[3], float outMaxs[3] );
 bool KiwiEntThumb_ModelFailed( const char *xmodelName );
@@ -51,6 +51,7 @@ bool KiwiEntThumb_ModelFailed( const char *xmodelName );
 void KiwiEntThumb_Tick();
 
 // Drop every cached texture and the readback surface.  Called from RTT_ReleaseForReset
-// (radiant_rtt.cpp) so this feature has no device-reset hook of its own to forget.
+// (radiant_rtt.cpp) so this feature has no device-reset hook of its own to forget.  Disk
+// files survive and are lazily uploaded again after reset.
 // Idempotent — the INVALIDCALL retry arm runs the release list twice.
 void KiwiEntThumb_ReleaseForReset();

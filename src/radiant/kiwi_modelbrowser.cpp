@@ -12,6 +12,7 @@
 #include "kiwi_modelbrowser.h"
 #include "kiwi_command.h"
 #include "kiwi_entthumb.h"
+#include "kiwi_thumbcache.h"
 #include "kiwi_fmt.h"
 #include "kiwi_lines.h"
 #include "kiwi_pick.h"
@@ -609,6 +610,10 @@ void KiwiModelBrowser_Draw()
         ImGui::SameLine();
         if ( ImGui::SmallButton( "Refresh" ) )
             EnumerateModels();
+        if ( ImGui::SmallButton( "Clear thumbnail cache" ) )
+            KiwiThumbCache_InvalidateAll();
+        if ( ImGui::IsItemHovered() )
+            ImGui::SetTooltip( "Delete cached model/entity thumbnails; visible tiles reload lazily" );
         ImGui::Separator();
 
         std::vector<int> visible;
@@ -740,6 +745,7 @@ void KiwiModelBrowser_DrawGhost()
 
 void KiwiModelBrowser_RegisterCommands()
 {
+    KiwiThumbCache_Init();
     Radiant_RegisterCommand( "KiwiWindowModels", 0, 0, KIWI_CMD_WINDOW_MODELS );
 }
 

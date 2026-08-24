@@ -258,10 +258,19 @@ namespace
     // must not switch the camera from looking to trucking under the user's hand.
     bool         s_rmbLook   = false;
 
+    // The sun uses Ctrl for two verbs distinguished at release: a stationary
+    // click removes the selected helper, while a travelled drag keeps its
+    // established five-degree snap.
+    bool         s_sunCtrl   = false;
+    int          s_sunPressX = 0, s_sunPressY = 0;
+    int          s_sunMaxX   = 0, s_sunMaxY = 0;
+
     void EndGesture()
     {
         s_gesture    = KG_NONE;
         s_gestureBtn = -1;
+        s_sunCtrl    = false;
+        s_sunMaxX    = s_sunMaxY = 0;
     }
 
     // ── KIWI-UX (ROUND AA, ITEM 9): the KG_CMD_MARQUEE release ──────────────
@@ -472,6 +481,23 @@ namespace
         return anyHovered;
     }
 
+    void DrawSunRemoveCue( float imgMinX, float imgMinY, float imgW, float imgH )
+    {
+        if ( !KiwiHover_RemovePreview() )
+            return;
+        const ImVec2 mouse = ImGui::GetIO().MousePos;
+        const int x = (int)( mouse.x - imgMinX );
+        const int y = (int)( mouse.y - imgMinY );
+        if ( x < 0 || y < 0 || x >= (int)imgW || y >= (int)imgH
+          || !KiwiSun_GlyphHit( x, y ) )
+            return;
+        float rgb[3];
+        KiwiHover_PreviewColor( true, rgb );
+        const ImU32 col = ImGui::ColorConvertFloat4ToU32(
+            ImVec4( rgb[0], rgb[1], rgb[2], 0.96f ) );
+        ImGui::GetWindowDrawList()->AddCircle( mouse, 14.0f, col, 24, 3.0f );
+    }
+
     // ── marquee rectangle (spec §12) ────────────────────────────────────────
     //
     // ── KIWI-UX (ROUND U): ONE CLEAN TRANSLUCENT RECT, NO DASHES ────────────
@@ -553,11 +579,22 @@ namespace
                 return;                      // still a CLICK — draw no marquee
         }
 
-        // right -> left: crossing (warm).  left -> right: containment (cool).
-        const ImU32 fill   = crossing ? IM_COL32( 240, 190,  70, 48 )
-                                      : IM_COL32(  90, 170, 240, 48 );
-        const ImU32 border = crossing ? IM_COL32( 250, 200,  80, 235 )
-                                      : IM_COL32( 120, 195, 255, 235 );
+        // Direction still distinguishes crossing from containment, except during
+        // Ctrl-remove: then the action outranks direction and both the rectangle
+        // and its 3D candidates use the hover layer's warm warning palette.
+        ImU32 fill   = crossing ? IM_COL32( 240, 190,  70, 48 )
+                                : IM_COL32(  90, 170, 240, 48 );
+        ImU32 border = crossing ? IM_COL32( 250, 200,  80, 235 )
+                                : IM_COL32( 120, 195, 255, 235 );
+        if ( KiwiBox_RemovePreview() )
+        {
+            float rgb[3];
+            KiwiHover_PreviewColor( true, rgb );
+            fill = ImGui::ColorConvertFloat4ToU32(
+                ImVec4( rgb[0], rgb[1], rgb[2], 48.0f / 255.0f ) );
+            border = ImGui::ColorConvertFloat4ToU32(
+                ImVec4( rgb[0], rgb[1], rgb[2], 235.0f / 255.0f ) );
+        }
 
         ImDrawList *dl = ImGui::GetWindowDrawList();
         dl->AddRectFilled( a, b, fill );
@@ -582,8 +619,8 @@ bool KiwiVP_CameraButtonDown( int btn, int imgX, int imgY, bool shift, bool ctrl
     //     lollipop and gizmo arms are both gated on KiwiCmd_Active().  Without this
     //     arm a press on the ball would fall through to the no-command click
     //     grammar and re-select whatever is behind it.
-    // Shift is excluded from the handle arm for the round-U reason the lollipop arm
-    // states: Shift is ADDITIVE everywhere in this editor and never means "grab".
+    // Shift is excluded from the handle arm because it is additive selection;
+    // Ctrl keeps this view-state handle's existing meaning.
     if ( btn == 0 && KiwiSection_ClickPick( imgX, imgY ) )
     {
         s_lastX      = imgX;
@@ -604,15 +641,20 @@ bool KiwiVP_CameraButtonDown( int btn, int imgX, int imgY, bool shift, bool ctrl
     // The SUN HELPER's glyph, on exactly the same terms as the section handle
     // above it: a grabbable thing that exists with NO command running, so it has
     // to outrank every arm below (all of which either assume a live command or
-    // read the press as a selection click).  Shift is excluded for the round-U
-    // reason the lollipop arm states — Shift is ADDITIVE everywhere in this
-    // editor and never means "grab".  KiwiSun_HandleDown self-gates on the helper
-    // being SELECTED already, so the click that selects it falls through to the
-    // ordinary grammar and cannot also orbit it (kiwi_sun.h).
+    // read the press as a selection click).  Shift is excluded because it adds.
+    // Ctrl is resolved at release: a click removes the helper, while a travelled
+    // drag retains the established snap-orbit gesture.  KiwiSun_HandleDown
+    // self-gates on the helper being selected already, so the first click still
+    // falls through to the ordinary grammar (kiwi_sun.h).
     if ( btn == 0 && !shift && KiwiSun_HandleDown( imgX, imgY ) )
     {
+        KiwiHover_Clear();
         s_lastX      = imgX;
         s_lastY      = imgY;
+        s_sunCtrl    = ctrl;
+        s_sunPressX  = imgX;
+        s_sunPressY  = imgY;
+        s_sunMaxX    = s_sunMaxY = 0;
         s_gesture    = KG_SUN;
         s_gestureBtn = btn;
         return true;
@@ -691,6 +733,45 @@ bool KiwiVP_CameraButtonDown( int btn, int imgX, int imgY, bool shift, bool ctrl
         s_lastX      = imgX;
         s_lastY      = imgY;
         s_gesture    = KG_CMD_MARQUEE;
+        s_gestureBtn = btn;
+        return true;
+    }
+
+    // Auto-entered, still-unmoved face/region commands already yield a plain or
+    // Shift click through IdlePressReselect.  That virtual has no Ctrl parameter,
+    // so intercept Ctrl here, cancel the record-free idle command, and route the
+    // press through the one complete click grammar.  Shift+Ctrl therefore follows
+    // the documented Ctrl-wins/remove rule too.
+    if ( btn == 0 && ctrl && KiwiCmd_Active()
+      && KiwiCmd_Active()->PreemptIdle() )
+    {
+        const char *name = KiwiCmd_Active()->Name();
+        const bool wasFaceMove = name && strcmp( name, "Move" ) == 0;
+        const bool wasRegion   = name && strcmp( name, "Extrude Region" ) == 0;
+        KiwiCmd_Cancel();
+        KiwiHover_Clear();
+        KiwiBox_ClickSelectAt( imgX, imgY, shift, ctrl );
+
+        // Removing an absent target (including empty space) is a true no-op, and
+        // removing one member from a larger set leaves the same paused tool over
+        // the survivors.  This mirrors the Shift re-entry in IdlePressReselect.
+        if ( !KiwiCmd_Active() && wasRegion && KiwiRegion_HasSelection() )
+        {
+            if ( KiwiCmd_Start( KIWI_CMD_EXTRUDE_REGION ) )
+                KiwiCmd_Pause();
+        }
+        else if ( !KiwiCmd_Active() && wasFaceMove && KiwiXform_CanMove() )
+        {
+            const selection_t &sel = KiwiSel();
+            bool haveFace = false;
+            for ( size_t i = 0; i < sel.items.size() && !haveFace; ++i )
+                haveFace = ( sel.items[i].kind == SEL_FACE );
+            if ( haveFace && KiwiCmd_Start( KIWI_CMD_MOVE ) )
+                KiwiCmd_Pause();
+        }
+        s_lastX      = imgX;
+        s_lastY      = imgY;
+        s_gesture    = KG_CONSUMED;
         s_gestureBtn = btn;
         return true;
     }
@@ -846,8 +927,8 @@ bool KiwiVP_CameraButtonDown( int btn, int imgX, int imgY, bool shift, bool ctrl
         // and Ctrl are excluded because Drag_Begin's paint arm requires buttons == 1
         // EXACTLY (drag.cpp:651): with Shift held VP_Flags builds 5 and the ported
         // dispatcher would fall through to Drag_Setup — a brush DRAG — which is not
-        // what an additive click should ever turn into.  So the additive rungs keep
-        // their meaning and only the bare Alt+LMB is handed over.
+        // what a selection-modifier click should ever turn into.  So the Shift-add
+        // and Ctrl-remove rungs keep their meaning and only bare Alt+LMB is handed over.
         //
         // THE SELECT-MODE TEST IS PART OF THE SAME "and only then".  Drag_Begin's
         // paint arm also requires sel_brush or sel_addpoint (drag.cpp:652), and its
@@ -886,7 +967,8 @@ bool KiwiVP_CameraButtonDown( int btn, int imgX, int imgY, bool shift, bool ctrl
         // selection with the one brush under the cursor.  Owning it with an inert
         // gesture keeps the release away from both the marquee and
         // CamWnd_OnLButtonUp, whose press it never saw.
-        if ( ImGui::IsMouseDoubleClicked( ImGuiMouseButton_Left )
+        if ( !shift && !ctrl
+             && ImGui::IsMouseDoubleClicked( ImGuiMouseButton_Left )
              && KiwiSelExt_CameraDoubleClick( imgX, imgY ) )
         {
             KiwiHover_Clear();
@@ -951,7 +1033,15 @@ bool KiwiVP_CameraMouseMove( int imgX, int imgY )
     // pitch/yaw accumulator (kiwi_sun.h) — it must not share this function's
     // dx/dy, whose s_lastX/s_lastY are also read by the camera arms below.
     if ( s_gesture == KG_SUN )
+    {
         KiwiSun_HandleDrag( imgX, imgY );
+        const int sx = imgX - s_sunPressX;
+        const int sy = imgY - s_sunPressY;
+        const int ax = ( sx < 0 ) ? -sx : sx;
+        const int ay = ( sy < 0 ) ? -sy : sy;
+        if ( ax > s_sunMaxX ) s_sunMaxX = ax;
+        if ( ay > s_sunMaxY ) s_sunMaxY = ay;
+    }
 
     const int dx = imgX - s_lastX;
     const int dy = imgY - s_lastY;
@@ -1092,7 +1182,23 @@ bool KiwiVP_CameraButtonUp( int btn, int imgX, int imgY )
     else if ( s_gesture == KG_SECTION )
         KiwiSection_HandleUp();          // ROUND BM: ungrab; the plane stays put
     else if ( s_gesture == KG_SUN )
-        KiwiSun_HandleUp();              // ungrab and COMMIT: one undo record per drag
+    {
+        const int sx = imgX - s_sunPressX;
+        const int sy = imgY - s_sunPressY;
+        const int ax = ( sx < 0 ) ? -sx : sx;
+        const int ay = ( sy < 0 ) ? -sy : sy;
+        const bool ctrlClick = s_sunCtrl
+                            && s_sunMaxX < KBOX_CLICK_PIXELS
+                            && s_sunMaxY < KBOX_CLICK_PIXELS
+                            && ax < KBOX_CLICK_PIXELS && ay < KBOX_CLICK_PIXELS;
+        if ( ctrlClick )
+        {
+            KiwiSun_HandleAbort();
+            KiwiBox_ClickSelectAt( s_sunPressX, s_sunPressY, false, true );
+        }
+        else
+            KiwiSun_HandleUp();          // travelled drag: commit one undo record
+    }
     else if ( s_gesture == KG_DROP )
         KiwiCmd_Commit();                 // live preview closes as one move record
     else if ( s_gesture == KG_LOOK || s_gesture == KG_PAN )
@@ -1144,10 +1250,14 @@ void KiwiVP_CameraHover( int imgX, int imgY, bool over )
         return;
     }
 
+    const ImGuiIO &io = ImGui::GetIO();
+    const bool selectionAdd = io.KeyShift;
+
     // ROUND BM, ITEM 1b: the section handle is hoverable in BOTH arms below — it
     // exists whether or not a command is running, which is what makes it different
-    // from every other handle in this file.  Done once, here, before the split.
-    KiwiSection_Hover( imgX, imgY, true );
+    // from every other handle in this file.  Shift makes the press
+    // fall through to selection, so the handle must not advertise a grab then.
+    KiwiSection_Hover( imgX, imgY, !selectionAdd );
     // The sun glyph is the same kind of thing and gets the same treatment
     // (kiwi_sun.h): it exists independently of any command, so it is hovered once
     // here rather than in each arm.
@@ -1155,11 +1265,15 @@ void KiwiVP_CameraHover( int imgX, int imgY, bool over )
 
     // KIWI-UX Phase 2, spec §5: with a modal command live, an idle move IS the command's
     // preview move (no button is down during a G/extrude drag — the gesture is modal, not
-    // press-held).  The hover highlight is dropped for the duration so the viewport shows
-    // ONE thing: what the command is about to do.
+    // press-held).  A live transforming command suppresses selection hover, but an
+    // unmoved auto-entered face/region command yields to selection and therefore keeps
+    // the same hover preview its next click will consume.
     if ( KiwiCmd_Active() )
     {
-        KiwiHover_Clear();
+        if ( KiwiCmd_Active()->PreemptIdle() )
+            KiwiHover_Update( imgX, imgY, io.KeyCtrl );
+        else
+            KiwiHover_Clear();
         // KIWI-UX (shakeout D): the gizmo hover moved from the IDLE arm to this
         // one, because that is where the gizmos now live — a G / R gesture is
         // modal, no button is held, so its cursor moves arrive here.  A handle or
@@ -1169,13 +1283,13 @@ void KiwiVP_CameraHover( int imgX, int imgY, bool over )
         // KIWI-UX (ROUND K): the lollipop's ball brightens under the cursor the
         // same way a gizmo handle does, and for the same reason — it is the one
         // thing in the viewport that can be grabbed while the gesture is parked.
-        KiwiLollipop_Hover( imgX, imgY, true );
+        KiwiLollipop_Hover( imgX, imgY, !selectionAdd );
         KiwiCmd_MouseMove( imgX, imgY );
         return;
     }
 
     KiwiLollipop_Hover( imgX, imgY, false );      // ROUND K — no command, no handle
-    KiwiHover_Update( imgX, imgY );
+    KiwiHover_Update( imgX, imgY, io.KeyCtrl );
     // KIWI-UX (shakeout D): with NO command running there is no gizmo, so this is
     // a state clear rather than a hit test (it costs one compare — the gizmo's own
     // "is the move/rotate command active" gate refuses before any projection).
@@ -1377,6 +1491,7 @@ bool KiwiVP_DrawCameraOverlay( float imgMinX, float imgMinY, float imgW, float i
     // documents (the same ruling CLEANUP B-28 applied to kiwi_numeric.cpp).
     KiwiRegion_DrawFillsOverlay( imgMinX, imgMinY, imgW, imgH );   // kiwi_region.h:377
 
+    DrawSunRemoveCue( imgMinX, imgMinY, imgW, imgH );
     DrawMarquee( imgMinX, imgMinY );     // under the chips
     DrawSwipeHint( imgMinX, imgMinY, imgW, imgH );   // ROUND S — Alt+MMB only
 

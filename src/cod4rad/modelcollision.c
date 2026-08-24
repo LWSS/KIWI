@@ -93,6 +93,7 @@ void BuildModelCollision(float *mins, float *maxs)
     float boundsMargin;
     int nodeIndex;
     int childIndex;
+    int instanceCount = 0;
     float nodePos;
 
     /* find initial split axis (same logic as BuildBSPSubdivision) */
@@ -181,6 +182,7 @@ void BuildModelCollision(float *mins, float *maxs)
             /* insert into node's linked list */
             inst->next = g_bspSubdivNodes[nodeIndex].list;
             g_bspSubdivNodes[nodeIndex].list = inst;
+            ++instanceCount;
 
             inst = nextInst;
         } while (nextInst);
@@ -188,6 +190,18 @@ void BuildModelCollision(float *mins, float *maxs)
 
 done:
     g_collisionModelList = NULL;
+    if (g_modelShadows && g_gridSampleCount > 0
+        && instanceCount < g_gridSampleCount / 2)
+    {
+        WarningMsg(1,
+            "WARNING: only %i of %i shadow-enabled static models entered the baked shadow trace world; rejected models will have shadows only inside runtime shadow-map range.\n",
+            instanceCount, g_gridSampleCount / 2);
+    }
+    else if (instanceCount > 0)
+    {
+        Com_Printf("Built static-model shadow trace world with %i instances\n",
+                   instanceCount);
+    }
 }
 
 /*
@@ -369,11 +383,17 @@ CollisionMeshNode_t *BuildStaticModelCollisionMesh(void *model)
         const char *surfMatName = DObjGetSurfaceName(dobj, surfMap[i * 2], surfMap[i * 2 + 1], lodBuf[surfMap[i * 2]]);
         material = LoadMaterial(surfMatName);
 
-        /* check material flags: surfaceFlags has collision bits,
-         * and contents bit 18 is not set */
+        /* Retail CoD4Rad sub_41A590 (0x41A6F7..0x41A71F) accepts a
+         * surface when it is a patch or has an alpha collision mask, its
+         * material contents include solid/foliage/clipshot (0x2003), and
+         * SURF_NOCASTSHADOW is clear.  The old port applied 0x2003 to
+         * surfaceFlags and 0x40000 to contents, reversing the two fields. */
         {
-            if ((material->surfaceFlags & (SURF_NOSTEPS | SURF_SLICK | SURF_NODAMAGE)) &&
-                !(material->contents & CONTENTS_TELEPORTER))
+            if (((material->surfaceType & SURFTYPE_MASK) == SURFTYPE_PATCH
+                 || material->extraData)
+                && (material->contents
+                    & (CONTENTS_SOLID | CONTENTS_FOLIAGE | CONTENTS_CLIPSHOT))
+                && !(material->surfaceFlags & SURF_NOCASTSHADOW))
             {
                 /* valid collision material */
                 surface = DObjGetSurface(dobj, surfMap[i * 2], surfMap[i * 2 + 1], 0);

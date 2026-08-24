@@ -220,7 +220,7 @@ namespace
         // is told about is a grammar that does not exist.
         _snprintf( s_status, sizeof( s_status ),
                    "patch vertex mode  %i point(s) on %i patch(es)  %i selected  ·  "
-                   "click a point (Shift adds, drag a box takes several), then G "
+                   "click a point (Shift adds, Ctrl removes, drag a box takes several), then G "
                    "or the gizmo  ·  V / Esc: leave",
                    points, (int)s_patches.size(), sel );
         s_status[sizeof( s_status ) - 1] = '\0';
@@ -428,7 +428,8 @@ bool KiwiPatchVerts_ToggleForSelection()
 
     UpdateStatus();
     Sys_Printf( "Patch vertex mode: %i patch(es).  Click a control point and drag "
-                "the move gizmo (or press G).  SHIFT-CLICK adds points and a DRAGGED "
+                "the move gizmo (or press G).  SHIFT-CLICK adds points, CTRL-CLICK "
+                "removes one, and a DRAGGED "
                 "BOX takes every point inside it — the gizmo then moves them all "
                 "together, as one undo record.  V or Esc leaves.\n",
                 (int)s_patches.size() );
@@ -507,7 +508,10 @@ void KiwiPatchVerts_DrawWorld()
     {
         if ( pass == 0 )      KiwiLines_Color( KPV_POINT[0],    KPV_POINT[1],    KPV_POINT[2] );
         else if ( pass == 1 ) KiwiLines_Color( KPV_SELECTED[0], KPV_SELECTED[1], KPV_SELECTED[2] );
-        else                  KiwiLines_Color( KPV_HOVER[0],    KPV_HOVER[1],    KPV_HOVER[2] );
+        else if ( KiwiHover_RemovePreview() )
+            KiwiLines_Color( KPV_SELECTED[0], KPV_SELECTED[1], KPV_SELECTED[2] );
+        else
+            KiwiLines_Color( KPV_HOVER[0], KPV_HOVER[1], KPV_HOVER[2] );
 
         for ( size_t i = 0; i < s_patches.size(); ++i )
         {

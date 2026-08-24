@@ -200,9 +200,10 @@
 //
 // ── D-BG-B — PER-SHAPE TARGETING ("individual shape UV'ing") ──────────────────────
 // A canvas click INSIDE a shape's displayed outline makes that shape the UV-EDIT TARGET
-// SET; Shift+click toggles membership; a click on empty canvas restores "all".  The 3D
-// selection is NEVER touched — this is a UV-editor-local sub-selection over the gathered
-// rows, which is exactly why D-BG-A matters: you cannot click one of five stacked outlines.
+// SET; Shift+click adds and Ctrl+click removes; a plain click on empty canvas restores
+// "all".  The 3D selection is NEVER touched — this is a UV-editor-local sub-selection
+// over the gathered rows, which is exactly why D-BG-A matters: you cannot click one of
+// five stacked outlines.
 // Non-target shapes draw at KUVE_DIM_ALPHA.
 //
 // ONE DELIBERATE DEVIATION from the brief's ordering: the shape hit-test runs AFTER the
@@ -300,10 +301,9 @@
 //     axis (the crossterm route for faces, the ST shear for patches — BG's math, new grab
 //     site, and TB issue #1350's near-axis guard still refuses the degenerate case);
 //   * the BODY — a press inside a targeted shape's outline MOVES the target set.
-// Ctrl is "disable snapping" and NOTHING ELSE now: BD's "Ctrl anywhere rotates" is gone
-// (it made every Ctrl+drag meant to suppress a snap into a rotation), and so is the 32 px
-// rotate RING around the pivot, whose whole job the corner annulus now does without sitting
-// on top of the shapes.
+// Ctrl-drag engages snapping while Ctrl-click removes one target.  BD's "Ctrl anywhere
+// rotates" is gone, and so is the 32 px rotate RING around the pivot, whose whole job the
+// corner annulus now does without sitting on top of the shapes.
 //
 // ── D-BI-C — SUB-SHAPE SELECTION IS FIRST-CLASS, INCLUDING DOWN A STACK ───────────
 //   * A press on a shape targets it and begins the drag in the SAME press (BG's rule, kept).
@@ -311,16 +311,16 @@
 //     under the cursor, topmost first (patches draw over faces, later rows over earlier, so
 //     "topmost" is reverse draw order).  This is the answer to D-BI-A's strict-`<` finding;
 //     it is the standard alt-click-through of any 2D editor and it needs no modifier.
-//   * Shift+press toggles membership and starts nothing.
+//   * Shift+press adds membership and starts nothing; Ctrl-click removes one target.
 //   * A press on a shape that is ALREADY one of several targets moves the WHOLE set — a
 //     multi-selection may not collapse just because you grabbed it by one member; the NEXT
 //     press at the same spot collapses to that shape (cycle index resets to 0 for exactly
 //     that case, so the first repeat gives the topmost shape and not the second one).
 //   * MARQUEE: an LMB drag from empty canvas rubber-bands, and every shape whose displayed
 //     outline INTERSECTS the band (vertex in band, edge crossing it, or band inside the
-//     outline) becomes the target set; Shift extends.  This REPLACES BD's "drag anywhere =
-//     offset everything" fallback, which is the single easiest way to move geometry you did
-//     not mean to touch.
+//     outline) becomes the target set; Shift extends and Ctrl removes.  This REPLACES
+//     BD's "drag anywhere = offset everything" fallback, which is the single easiest way
+//     to move geometry you did not mean to touch.
 //   * A drag that starts in EMPTY SPACE INSIDE the box moves the set when a sub-selection is
 //     live, and marquees when it is not.  That is the exact reconciliation of the brief's
 //     two sentences ("inside the box but on no handle" drags; "empty canvas" marquees): with

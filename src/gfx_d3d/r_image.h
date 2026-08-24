@@ -2,13 +2,6 @@
 #include "r_material.h"
 #include <xanim/xanim.h>
 
- enum $92364187413C9A0320C404614F91083D : int
- {
-     PICMIP_PLATFORM_USED    = 0x0,
-     PICMIP_PLATFORM_MINSPEC = 0x1,
-     PICMIP_PLATFORM_COUNT   = 0x2,
- };
-
 enum GfxRefBlendMode : int
 {                                       // ...
     BLENDMODE_OPAQUE = 0x0,

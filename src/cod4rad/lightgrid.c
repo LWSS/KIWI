@@ -996,6 +996,8 @@ static void LightGrid_BuildCod4Compact(void)
     *(unsigned int *)(g_cod4LightGridHeader + 12) = (unsigned int)axis;
     *(unsigned int *)(g_cod4LightGridHeader + 16) = (unsigned int)(axis ^ 1);
     rowCount = maxs[axis] - mins[axis] + 1;
+    if (rowCount <= 0 || 20 + rowCount * 2 > (int)sizeof(g_cod4LightGridHeader))
+        ErrorMsg("light grid row span %i exceeds the header capacity\n", rowCount);
     /* 0x4134A0 presets every row offset to the 0xFFFF empty-row sentinel. */
     memset(header16 + 10, 0xFF, (size_t)rowCount * 2);
     g_cod4LightGridHeaderSize = 20 + 2 * rowCount;
@@ -1023,6 +1025,8 @@ static void LightGrid_BuildCod4Compact(void)
             if (cells[rowEnd].pos[2] > rowZMax) rowZMax = cells[rowEnd].pos[2];
         }
 
+        if ((g_cod4LightGridRowsSize >> 2) >= 0xFFFF)
+            ErrorMsg("light grid row data exceeds the 16-bit header offset range\n");
         header16[10 + rowCoord - mins[axis]] =
             (unsigned short)(g_cod4LightGridRowsSize >> 2);
         rowData = g_cod4LightGridRows + g_cod4LightGridRowsSize;
@@ -1178,18 +1182,85 @@ void AllocGridTraceDirections(void)
  * AddStaticModelLightGridSamples — load grid points from file, allocate buffer.
  * Address: 0x4100E0 | Size: 695 bytes
  *
- * Reads grid sample points from a binary file (6 bytes per point = GridSamplePoint).
- * Allocates buffer for file points + static model sample expansion.
- * If file not found or invalid, just expands static model samples.
+ * The retail source sequence is .grid, .vclog, .grid_auto, then static-model
+ * origin expansion.  These helpers preserve its fixed record validation and
+ * automatic/authored point merging.
  */
+/* CoD4Rad sub_40F970 centralizes validation for .grid, .grid_auto and
+ * .vclog.  Keep the fixed-record checks shared so 0x410C90's source
+ * precedence remains explicit in this port. */
+static int LightGrid_OpenPointFile(const char *suffix, int recordSize,
+                                   char *filePath, void **outFile,
+                                   int *outPointCount)
+{
+    char *end;
+    const char *src;
+    int fileSize;
+    void *file;
+
+    BuildFilePath(g_gridLogBasePath, filePath);
+    end = filePath;
+    while (*end) ++end;
+    src = suffix;
+    while ((*end++ = *src++) != '\0')
+        ;
+
+    file = fopen_wrap(filePath, "rb");
+    if (!file)
+        return 0;
+
+    fseek_wrap(file, 0, 2);
+    fileSize = ftell_wrap(file);
+    fseek_wrap(file, 0, 0);
+    if (fileSize <= 0 || (fileSize % recordSize) != 0)
+    {
+        WarningMsg(1,
+            "Ignoring light-grid point file '%s': size %i is not a positive multiple of %i\n",
+            filePath, fileSize, recordSize);
+        fclose_wrap(file);
+        return 0;
+    }
+
+    *outFile = file;
+    *outPointCount = fileSize / recordSize;
+    return 1;
+}
+
+static void LightGrid_AllocatePointBuffer(int sourcePointCount)
+{
+    int totalPointCount = sourcePointCount + g_gridSampleCount * 8;
+    unsigned long long byteCount;
+
+    if (totalPointCount <= 0)
+        return;
+
+    byteCount = (unsigned long long)totalPointCount * sizeof(GridSamplePoint_t);
+    g_gridPoints = (GridSamplePoint_t *)malloc(byteCount);
+    if (!g_gridPoints)
+    {
+        ErrorMsg("couldn't allocate %.2f MB for the light grid points\n",
+                 (double)((float)byteCount * (1.0f / (1024.0f * 1024.0f))));
+    }
+}
+
+static void LightGrid_ReadSixBytePoints(void *file, const char *filePath,
+                                        int pointCount)
+{
+    long long readCount = fread_wrap(&g_gridPoints[g_gridPointCount],
+                                     sizeof(GridSamplePoint_t), pointCount, file);
+    if (readCount != pointCount)
+        ErrorMsg("Error while reading %s\n", filePath);
+    g_gridPointCount += pointCount;
+}
+
 void AddStaticModelLightGridSamples(void)
 {
-    char filePath[0x400];
-    void *file;
-    int fileSize;
-    int filePointCount;
-    int totalPointCount;
-    long long readCount;
+    char gridPath[0x400];
+    char autoPath[0x400];
+    void *gridFile = NULL;
+    void *autoFile = NULL;
+    int gridPointCount = 0;
+    int autoPointCount = 0;
 
     /* assert: pointCount == 0 (line 0x62) */
     Assert("(lightGridGlob.pointCount == 0)", ".\\lightgrid.cpp", 0x62, 0, 1);
@@ -1197,80 +1268,28 @@ void AddStaticModelLightGridSamples(void)
     /* assert: points == NULL (line 0x63) */
     Assert("lightGridGlob.points == NULL", ".\\lightgrid.cpp", 0x63, 0, 1);
 
-    /* build file path from base path */
-    BuildFilePath(g_gridLogBasePath, filePath);
+    /* sub_40FCF0 only wins when an authored .grid exists.  Its allocator
+     * sub_40FB70 prepends .grid_auto, so preserve that merge and ordering. */
+    if (!LightGrid_OpenPointFile(".grid", sizeof(GridSamplePoint_t),
+                                 gridPath, &gridFile, &gridPointCount))
+        return;
 
-    /* append ".grid" extension (replace last chars) */
+    LightGrid_OpenPointFile(".grid_auto", sizeof(GridSamplePoint_t),
+                            autoPath, &autoFile, &autoPointCount);
+    LightGrid_AllocatePointBuffer(gridPointCount + autoPointCount);
+
+    if (autoFile)
     {
-        char *end = filePath;
-        while (*end) end++;
-        /* Retail emits the six-byte suffix with a dword/word pair. */
-        memcpy(end, ".grid", 6);
+        Com_Printf("Using %i automatic light-grid points from '%s'\n",
+                   autoPointCount, autoPath);
+        LightGrid_ReadSixBytePoints(autoFile, autoPath, autoPointCount);
+        fclose_wrap(autoFile);
     }
 
-    /* The normal CoD4Map workflow emits a six-byte-point `.grid_auto`
-     * companion.  Retail tries it when an authored `.grid` is absent. */
-    file = fopen_wrap(filePath, "rb");
-    if (!file)
-    {
-        char *end = filePath;
-        while (*end)
-            end++;
-        /* Replace the just-appended `.grid` suffix. */
-        memcpy(end - 5, ".grid_auto", sizeof(".grid_auto"));
-        file = fopen_wrap(filePath, "rb");
-        if (!file)
-        {
-            Com_Printf("Light grid sample point file '%s' not found, trying legacy .vclog.\n", filePath);
-            goto done;
-        }
-    }
-
-    /* get file size */
-    fseek_wrap(file, 0, 2); /* SEEK_END */
-    fileSize = ftell_wrap(file);
-    fseek_wrap(file, 0, 0); /* SEEK_SET */
-
-    /* validate size is multiple of 6 */
-    if (fileSize == 0 || (fileSize % 6) != 0)
-    {
-        Com_Printf("Ignoring grid logfile '%s': size %i is not a multiple of %i\n",
-                     filePath, fileSize, 6);
-        goto close_file;
-    }
-
-    filePointCount = fileSize / 6;
-    g_gridPointCount = filePointCount;
-
-    Com_Printf("Using %i grid points from grid logfile '%s'\n", filePointCount, filePath);
-
-    /* allocate: (filePointCount + staticModelSampleCount * 8) * 6 bytes */
-    totalPointCount = filePointCount + g_gridSampleCount * 8;
-    g_gridPoints = malloc((unsigned long long)totalPointCount * 3 * 2);
-    if (!g_gridPoints)
-    {
-        fclose_wrap(file);
-        ErrorMsg("couldn't allocate %.2f MB for the light grid points\n",
-                    (double)((float)fileSize * (1.0f / (1024.0f * 1024.0f))));
-    }
-
-    /* read grid points from file */
-    readCount = fread_wrap(g_gridPoints, 6, g_gridPointCount, file);
-    if (readCount != g_gridPointCount)
-    {
-        fclose_wrap(file);
-        ErrorMsg("Error while reading %s\n", filePath);
-        goto close_done;
-    }
-
-    LightGrid_ApplyGridNot();
-
-close_file:
-    fclose_wrap(file);
-
-close_done:
-done:
-    return;
+    Com_Printf("Using %i authored light-grid points from '%s'\n",
+               gridPointCount, gridPath);
+    LightGrid_ReadSixBytePoints(gridFile, gridPath, gridPointCount);
+    fclose_wrap(gridFile);
 }
 
 /*
@@ -1680,6 +1699,7 @@ static void LightGrid_AppendDefaultProducerVector(void)
 void CalculateLightGrid(int flags)
 {
     int numDirs;
+    int sourcePointCount;
     float dirScale;
 
     /* clear counters */
@@ -1687,6 +1707,8 @@ void CalculateLightGrid(int flags)
     g_gridSampleArrayCount = 0;
     g_cod4LightGridColorCount = 0;
     g_cod4LightGridEntryCount = 0;
+    g_cod4LightGridHeaderSize = 0;
+    g_cod4LightGridRowsSize = 0;
 
     /* assert: pointCount == 0 (line 0x142) */
     Assert("lightGridGlob.pointCount == 0", ".\\lightgrid.cpp", 0x142, 0, 1);
@@ -1703,20 +1725,42 @@ void CalculateLightGrid(int flags)
         {
             /* no file points — allocate for static model samples only */
             if (g_gridSampleCount == 0)
+            {
+                WarningMsg(1,
+                    "WARNING: no light-grid points were found in .grid, .vclog, .grid_auto, or shadow-enabled static models; modern light-grid lumps will not be generated.\n");
                 goto done;
+            }
 
-            g_gridPoints = malloc((unsigned long long)g_gridSampleCount * 8 * 3 * 2);
+            LightGrid_AllocatePointBuffer(0);
         }
+    }
+
+    if (g_gridSampleCount > 0)
+    {
+        Com_Printf("Using %i shadow-enabled static-model light-grid seed origins\n",
+                   g_gridSampleCount);
     }
 
     /* expand static model origins into grid points */
     ExpandStaticModelOrigins();
+    sourcePointCount = g_gridPointCount;
 
     /* sort, validate, deduplicate */
     CalculateLightGrid_SortPoints();
+    /* Retail 0x410870 applies .grid_not after reject/dedup, so exclusions
+     * affect automatic, vis-cache, and model-origin points alike. */
+    LightGrid_ApplyGridNot();
 
     if (g_gridPointCount == 0)
+    {
+        WarningMsg(1,
+            "WARNING: all %i light-grid source points were rejected or excluded; modern light-grid lumps will not be generated.\n",
+            sourcePointCount);
         goto done;
+    }
+
+    WarningMsg(1,
+        "WARNING: CoD4 light-grid octant partitioning (0x40CF50/0x40D920/0x40D990) and spot-light primary narrowing (0x4111C0) remain approximate; output is structurally compatible but not byte-equivalent to retail.\n");
 
     /* allocate trace directions */
     AllocGridTraceDirections();
@@ -1749,6 +1793,21 @@ void CalculateLightGrid(int flags)
     qsort(g_gridSampleArray, g_gridSampleArrayCount, sizeof(GridSampleResult),
           (void *)GridSamplePoint_CompareForSort);
     LightGrid_BuildCod4Compact();
+    if (!g_cod4LightGridHeaderSize || !g_cod4LightGridRowsSize
+        || !g_cod4LightGridEntryCount || !g_cod4LightGridColorCount)
+    {
+        WarningMsg(1,
+            "WARNING: CoD4 light-grid encoding was incomplete (header=%i rows=%i entries=%i colors=%i); the output BSP will not contain a usable modern light grid.\n",
+            g_cod4LightGridHeaderSize, g_cod4LightGridRowsSize,
+            g_cod4LightGridEntryCount, g_cod4LightGridColorCount);
+    }
+    else
+    {
+        Com_Printf("Built CoD4 light grid: %i source points, %i entries, %i colors, %i header bytes, %i row bytes\n",
+                   g_gridPointCount, g_cod4LightGridEntryCount,
+                   g_cod4LightGridColorCount, g_cod4LightGridHeaderSize,
+                   g_cod4LightGridRowsSize);
+    }
     free(g_gridPointPrimaries);
     g_gridPointPrimaries = NULL;
     free(g_cod4LightGridVectors);
@@ -1762,18 +1821,18 @@ done:
  * CalculateLightGrid_Setup — load vis cache grid points from file.
  * Address: 0x4103A0 | Size: 800 bytes
  *
- * Similar to AddStaticModelLightGridSamples but reads vis cache file (.viscache).
- * Reads 24-byte records, extracts 3 shorts per record into GridSamplePoint.
- * Allocates combined buffer for vis cache points + static model samples.
+ * Reads optional 24-byte .vclog records, merges six-byte .grid_auto points,
+ * and allocates spare capacity for static-model origin expansion.
  */
 void CalculateLightGrid_Setup(void)
 {
-    char filePath[0x400];
-    char record[24]; /* 24-byte vis cache record */
-    void *file;
-    int fileSize;
-    int visPointCount;
-    int totalPointCount;
+    char visPath[0x400];
+    char autoPath[0x400];
+    char record[24];
+    void *visFile = NULL;
+    void *autoFile = NULL;
+    int visPointCount = 0;
+    int autoPointCount = 0;
     int i;
 
     /* assert: pointCount == 0 (line 0x90) */
@@ -1782,80 +1841,52 @@ void CalculateLightGrid_Setup(void)
     /* assert: points == NULL (line 0x91) */
     Assert("lightGridGlob.points == NULL", ".\\lightgrid.cpp", 0x91, 0, 1);
 
-    /* build file path + ".viscache" extension */
-    BuildFilePath(g_gridLogBasePath, filePath);
+    /* 0x410C90 tries .vclog after an absent .grid.  Whether .vclog exists
+     * or not, allocator sub_40FB70 then merges .grid_auto before it. */
+    LightGrid_OpenPointFile(".vclog", sizeof(record),
+                            visPath, &visFile, &visPointCount);
+    LightGrid_OpenPointFile(".grid_auto", sizeof(GridSamplePoint_t),
+                            autoPath, &autoFile, &autoPointCount);
+
+    if (!visFile && !autoFile)
+        return;
+
+    LightGrid_AllocatePointBuffer(visPointCount + autoPointCount);
+
+    if (autoFile)
     {
-        char *end = filePath;
-        while (*end) end++;
-        /* write ".vclog\0" from constants: dword ".vcl" + word "og" + byte 0 */
-        *(int *)(end) = 0x6C63762E;   /* ".vcl" (dword_458A84) */
-        *(short *)(end + 4) = 0x676F; /* "og" (word_458A88) */
-        *(char *)(end + 6) = 0;       /* NUL (byte_458A8A) */
+        Com_Printf("Using %i automatic light-grid points from '%s'\n",
+                   autoPointCount, autoPath);
+        LightGrid_ReadSixBytePoints(autoFile, autoPath, autoPointCount);
+        fclose_wrap(autoFile);
     }
 
-    /* open file */
-    file = fopen_wrap(filePath, "rb");
-    if (!file)
-    {
-        Com_Printf("Vis cache logfile '%s' not found; using static model origins only.\n", filePath);
-        goto done;
-    }
+    if (!visFile)
+        return;
 
-    /* get file size */
-    fseek_wrap(file, 0, 2);
-    fileSize = ftell_wrap(file);
-    fseek_wrap(file, 0, 0);
-
-    /* validate size is multiple of 24 */
-    if (fileSize == 0 || (fileSize % 24) != 0)
-    {
-        Com_Printf("Ignoring vis cache logfile '%s': size %i is not a multiple of %i\n",
-                     filePath, fileSize, 24);
-        fclose_wrap(file);
-        goto epilogue;
-    }
-
-    visPointCount = fileSize / 24;
-
-    /* allocate combined buffer: (visPointCount + sampleCount*8) * 6 bytes */
-    totalPointCount = visPointCount + g_gridSampleCount * 8;
-    g_gridPoints = malloc((unsigned long long)totalPointCount * 3 * 2);
-    if (!g_gridPoints)
-    {
-        fclose_wrap(file);
-        Com_Printf("couldn't allocate %.2f MB for the light grid points\n",
-                    (double)((float)fileSize * (1.0f / (1024.0f * 1024.0f))));
-    }
-
-    Com_Printf("Using %i grid points from vis cache logfile '%s'\n", visPointCount, filePath);
-
-    /* read records and extract grid points */
+    Com_Printf("Using %i light-grid points from vis cache '%s'\n",
+               visPointCount, visPath);
     for (i = 0; i < visPointCount; i++)
     {
         long long readCount;
         GridSamplePoint_t *pt;
 
-        readCount = fread_wrap(record, 24, 1, file);
+        readCount = fread_wrap(record, sizeof(record), 1, visFile);
         if (readCount != 1)
         {
-            fclose_wrap(file);
-            Com_Printf("Error while reading %s\n", filePath);
-            break;
+            fclose_wrap(visFile);
+            ErrorMsg("Error while reading %s\n", visPath);
+            return;
         }
 
-        pt = &g_gridPoints[i];
+        pt = &g_gridPoints[g_gridPointCount];
         pt->x = *(unsigned short *)&record[0];
         pt->y = *(unsigned short *)&record[4];
         pt->z = *(unsigned short *)&record[8];
+        ++g_gridPointCount;
     }
 
-    fclose_wrap(file);
-    g_gridPointCount = visPointCount;
-    goto epilogue;
-
-epilogue:
-done:
-    return;
+    fclose_wrap(visFile);
 }
 
 /*
@@ -2085,6 +2116,13 @@ done_dedup:
     {
         int src, dst = 0;
         GridSamplePoint_t *pts = (GridSamplePoint_t *)g_gridPoints;
+
+        /* The legacy swap-with-last rejection above does not retain order.
+         * Retail's 12-byte-record pass re-establishes it before doing point
+         * lookups; otherwise the binary searches can reject valid cells. */
+        if (g_gridPointCount > 1)
+            qsort(g_gridPoints, g_gridPointCount,
+                  sizeof(GridSamplePoint_t), (void *)GridSamplePoint_Compare);
 
         for (src = 0; src < g_gridPointCount; ++src)
         {

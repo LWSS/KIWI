@@ -680,7 +680,6 @@ void SelectBrushRow( selbrush_t *b, bool additive, bool toggle )
         Sel_Toggle( sel, it );
     else
         Sel_Add( sel, it );
-    sel.active = it;
     Sel_SyncToLegacy();
     g_nUpdateBits = -1;
 }
@@ -709,6 +708,17 @@ void SelectConRow( int index, bool additive, bool toggle )
     it.index  = -1;
     KiwiConSel_ApplyClick( it, additive, toggle );
     g_nUpdateBits = -1;
+}
+
+bool ConObjectRowSelected( int index )
+{
+    for ( int i = 0; i < KiwiConSel_Count(); ++i )
+    {
+        const kconSelItem_t *it = KiwiConSel_At( i );
+        if ( it && it->object == index && it->kind == KCONSEL_OBJECT )
+            return true;
+    }
+    return false;
 }
 
 // Add every selectable row in [a,b] of the CURRENT flatten — the shift-click
@@ -1539,7 +1549,8 @@ void KiwiOutliner_Draw()
                         // Double-click a FOLDER = rename (OutlinerItems.tsx:77).
                         // Single-click = select everything inside it, which is the
                         // one thing a folder row can usefully mean for selection.
-                        if ( ImGui::IsMouseDoubleClicked( ImGuiMouseButton_Left )
+                        if ( !io.KeyShift && !io.KeyCtrl
+                          && ImGui::IsMouseDoubleClicked( ImGuiMouseButton_Left )
                           && Renameable( r.kind ) )
                         {
                             if ( r.kind == KOUT_CON_GROUP )
@@ -1556,6 +1567,21 @@ void KiwiOutliner_Draw()
                         else if ( r.kind == KOUT_GROUP_ENTITY || r.kind == KOUT_ENTITY )
                         {
                             selection_t &sel = KiwiSel();
+                            bool any = false;
+                            bool all = true;
+                            for ( selbrush_t *b = r.ent->brushes.ownerNext;
+                                  b && b != &r.ent->brushes; b = b->ownerNext )
+                            {
+                                if ( !Sel_BrushLive( b ) )
+                                    continue;
+                                any = true;
+                                if ( !BrushSelected( b ) )
+                                    all = false;
+                            }
+                            // Folder rows follow the outliner's documented group
+                            // convention: Ctrl toggles the group as a unit; Shift
+                            // (and Shift+Ctrl) adds it.
+                            const bool remove = io.KeyCtrl && !io.KeyShift && any && all;
                             if ( !io.KeyShift && !io.KeyCtrl )
                             {
                                 Sel_Clear( sel );
@@ -1563,19 +1589,35 @@ void KiwiOutliner_Draw()
                             }
                             for ( selbrush_t *b = r.ent->brushes.ownerNext;
                                   b && b != &r.ent->brushes; b = b->ownerNext )
-                                Sel_Add( sel, Sel_MakeObject( b ) );
+                            {
+                                if ( !Sel_BrushLive( b ) )
+                                    continue;
+                                if ( remove ) Sel_Remove( sel, Sel_MakeObject( b ) );
+                                else          Sel_Add   ( sel, Sel_MakeObject( b ) );
+                            }
                             Sel_SyncToLegacy();
                             g_nUpdateBits = -1;
                         }
                         else if ( r.kind == KOUT_CON_GROUP )
                         {
+                            const int cnt = KiwiCon_Count();
+                            bool any = false;
+                            bool all = true;
+                            for ( int k = 0; k < cnt; ++k )
+                            {
+                                if ( KiwiCon_Group( k ) != r.conGroup )
+                                    continue;
+                                any = true;
+                                if ( !ConObjectRowSelected( k ) )
+                                    all = false;
+                            }
+                            const bool remove = io.KeyCtrl && !io.KeyShift && any && all;
                             if ( !io.KeyShift && !io.KeyCtrl )
                             {
                                 KiwiConSel_Clear();
                                 Sel_Clear( KiwiSel() );
                                 Sel_SyncToLegacy();
                             }
-                            const int cnt = KiwiCon_Count();
                             for ( int k = 0; k < cnt; ++k )
                             {
                                 if ( KiwiCon_Group( k ) != r.conGroup )
@@ -1584,7 +1626,7 @@ void KiwiOutliner_Draw()
                                 it.object = k;
                                 it.kind   = KCONSEL_OBJECT;
                                 it.index  = -1;
-                                KiwiConSel_ApplyClick( it, true, false );
+                                KiwiConSel_ApplyClick( it, !remove, remove );
                             }
                             g_nUpdateBits = -1;
                         }

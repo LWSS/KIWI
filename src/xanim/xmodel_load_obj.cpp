@@ -30,6 +30,78 @@ XModelSurfs *__cdecl XModelSurfsFindData(const char *name)
 // Main thread only, so a plain static is enough.
 static int s_xmodelSurfLoadFailed = 0;
 
+// KIWI: BEGIN raw xmodel blend validation.  The skinner treats every bone entry as a
+// pre-scaled byte offset into a DObjSkelMat array, so reject a bad raw stream here rather
+// than letting a renderer worker dereference it later.
+static int s_xmodelSurfValidationFailed = 0;
+
+static bool XModelValidateRawSurfaceBlendOffsets(
+    const XModel *model,
+    const char *modelName,
+    int surfIndex,
+    const XSurface *surface)
+{
+    static_assert(sizeof(DObjSkelMat) == 64);
+
+    if (!surface->deformed)
+        return true;
+
+    const unsigned int boneCount = XModelNumBones(model);
+    const unsigned int boneStride = sizeof(DObjSkelMat);
+    const unsigned int boneOffsetLimit = boneCount * boneStride;
+    const uint16_t *vertsBlend = surface->vertInfo.vertsBlend;
+    unsigned int maxBoneOffset = 0;
+    int partitionVertCount = 0;
+    bool valid = true;
+
+    for (int weightIndex = 0; weightIndex < 4; ++weightIndex)
+    {
+        const int vertCount = surface->vertInfo.vertCount[weightIndex];
+        const int blendStride = 2 * weightIndex + 1;
+
+        if (vertCount < 0)
+        {
+            valid = false;
+            break;
+        }
+
+        partitionVertCount += vertCount;
+        for (int vertIndex = 0; vertIndex < vertCount; ++vertIndex)
+        {
+            for (int influenceIndex = 0; influenceIndex <= weightIndex; ++influenceIndex)
+            {
+                const int blendIndex = influenceIndex ? 2 * influenceIndex - 1 : 0;
+                const unsigned int boneOffset = vertsBlend[blendIndex];
+
+                if (boneOffset > maxBoneOffset)
+                    maxBoneOffset = boneOffset;
+                if (boneOffset >= boneOffsetLimit || boneOffset % boneStride)
+                    valid = false;
+            }
+            vertsBlend += blendStride;
+        }
+    }
+
+    if (partitionVertCount != surface->vertCount)
+        valid = false;
+
+    if (!valid)
+    {
+        Com_PrintError(
+            19,
+            "ERROR: xmodel '%s' surface %d has invalid raw blend bone offsets "
+            "(max index %u, max offset %u, %u bones); using $default.\n",
+            modelName,
+            surfIndex,
+            maxBoneOffset / boneStride,
+            maxBoneOffset,
+            boneCount);
+    }
+
+    return valid;
+}
+// KIWI: END raw xmodel blend validation.
+
 void __cdecl XModelReadSurface_BuildCollisionTree(
     XSurface *surface,
     uint vertListIndex,
@@ -771,8 +843,8 @@ void __cdecl XModelReadSurface(XModel *model, byte **pos, void *(__cdecl *Alloc)
                 iassert(blendOut);
                 for (i = 0; i < numWeights; ++i)
                 {
-                    blendOut->boneOffset = LOWORD(verts->normal[0]);
-                    blendOut->boneWeight = HIWORD(verts->normal[0]);
+                    blendOut->boneOffset = ((const XBlendLoadInfo *)verts)->boneOffset;
+                    blendOut->boneWeight = ((const XBlendLoadInfo *)verts)->boneWeight;
                     ++blendOut;
                     verts = (XVertexInfo_s*)((char*)verts + 4);
                 }
@@ -881,7 +953,7 @@ void __cdecl XModelReadSurface(XModel *model, byte **pos, void *(__cdecl *Alloc)
 
 void __cdecl XModelReadSurfaces(
     XModel *model,
-    const char *name,
+    const char *modelName,
     XModelSurfs *modelSurfs,
     int *modelPartBits,
     int surfCount,
@@ -911,6 +983,15 @@ void __cdecl XModelReadSurfaces(
 
         XModelReadSurface(model, pos, AllocMesh, xsurf);
 
+        if (s_xmodelSurfLoadFailed)
+            break;
+
+        if (!XModelValidateRawSurfaceBlendOffsets(model, modelName, surfIndex, xsurf))
+        {
+            s_xmodelSurfValidationFailed = 1;
+            break;
+        }
+
         for (j = 0; j < 4; ++j)
             modelPartBits[j] |= xsurf->partBits[j];
 
@@ -919,9 +1000,6 @@ void __cdecl XModelReadSurfaces(
         baseTriIndex += xsurf->triCount;
         baseVertIndex += xsurf->vertCount;
 
-        // R_XModelSurfsLoadFile turns this latch into its existing `return 0`.
-        if (s_xmodelSurfLoadFailed)
-            break;
     }
 }
 
@@ -980,7 +1058,14 @@ XModelSurfs *__cdecl R_XModelSurfsLoadFile(
             // A latched failure is treated exactly like the "out of date" / "file conflict"
             // arms below: free the file, return 0, end up at the $default placeholder model.
             s_xmodelSurfLoadFailed = 0;
-            XModelReadSurfaces(model, name, modelSurfs, modelSurfs->partBits, modelNumsurfs, &pos, Alloc);
+            s_xmodelSurfValidationFailed = 0;
+            XModelReadSurfaces(model, modelName, modelSurfs, modelSurfs->partBits, modelNumsurfs, &pos, Alloc);
+            if (s_xmodelSurfValidationFailed)
+            {
+                s_xmodelSurfValidationFailed = 0;
+                FS_FreeFile((char*)buf);
+                return 0;
+            }
             if (s_xmodelSurfLoadFailed)
             {
                 s_xmodelSurfLoadFailed = 0;

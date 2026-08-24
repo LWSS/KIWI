@@ -15,12 +15,12 @@
 #include "qe3.h"
 #include "mainfrm.h"        // camera_s
 #include "prefs.h"          // g_PrefsDlg (texture / lightmap lock)
-#include <xanim/xmodel.h>
 
 #include "kiwi_transform.h"
 #include "kiwi_boxselect.h"          // ROUND K — the ONE click grammar (IdlePressReselect)
 #include "kiwi_camera.h"             // KiwiCam_WorldPerPixel (the pivot marker's scale)
 #include "kiwi_command.h"
+#include "kiwi_droptrace.h"
 #include "kiwi_fmt.h"
 #include "kiwi_conselect.h"          // shakeout F — the construction move arm
 #include "kiwi_extrude.h"            // ROUND X — KEXT_SELF_SNAP_BAND (the ONE self-snap rule)
@@ -35,7 +35,6 @@
 #include "kiwi_numeric.h"
 #include "kiwi_patchfillet.h"        // ROUND AO, ITEM 2 — KiwiFillet_CarryOnPlaneMove
 #include "kiwi_pick.h"
-#include "kiwi_section.h"
 #include "kiwi_selection.h"
 #include "kiwi_snap.h"
 #include "kiwi_units.h"
@@ -55,8 +54,6 @@ extern int   Sys_Printf( const char *fmt, ... );                       // win_qe
 extern camera_s *Ed_Camera();                                          // camwnd.cpp
 extern void  CamWnd_BuildMatrix();                                     // camwnd.cpp 0x403470
 extern int   g_nUpdateBits;                                            // 0x25D5A74 (mainfrm.cpp)
-extern entity_s *world_entity;                                         // map.cpp:62
-
 extern int   Entity_GetVec3ForKey( entity_s_def *e, float *out, const char *key ); // entity.cpp:100
 extern void  SetKeyValue( entity_s_def *e, const char *key, const char *value );    // entity.cpp:213
 extern void  Select_Move( const float *delta, char bSnap );            // select.cpp 0x48E9C0
@@ -66,9 +63,6 @@ extern void  Select_GetTrueMid( float *center );                       // select
 extern void  Select_RotateAxis( int axis, float deg, float (*rot_around)[4][3] );  // select.cpp 0x48FF40
 extern void  Select_ApplyMatrix_SelectedBrushes( int bSnap, float *mat,
                                                   float deg, char bSwap );          // select.cpp 0x48FD10
-extern void  Test_Ray( float *start, float *dir, int contents,
-                       edTrace_t *t, int numTraces );                               // select.cpp 0x48D7C0
-extern float *AnglesToAxis( float *angles, float (*axisOut)[3] );                  // engine_stubs.cpp
 
 extern int   Face_MakePlane( face_t *face );                           // brush.cpp 0x470470
 extern int   Brush_MoveVertex( vec3_t delta, brush_t *b, vec3_t move_points, vec3_t end ); // brush.cpp 0x471C30
@@ -261,182 +255,6 @@ namespace
         return true;
     }
 
-    bool DropBoundsValid( const float mins[3], const float maxs[3] )
-    {
-        if ( !mins || !maxs )
-            return false;
-        for ( int k = 0; k < 3; ++k )
-            if ( !_finite( mins[k] ) || !_finite( maxs[k] )
-                 || !( mins[k] <= maxs[k] ) )
-                return false;
-        return true;
-    }
-
-    const char *DropEntityValue( const entity_s_def *def, const char *key )
-    {
-        if ( !def || !key )
-            return "";
-        for ( epair_t *ep = def->epairs; ep; ep = ep->next )
-            if ( ep->key && ep->value && _stricmp( ep->key, key ) == 0 )
-                return ep->value;
-        return "";
-    }
-
-    entity_s_def *DropEntityDef( const selbrush_t *node )
-    {
-        if ( !node || !node->owner || node->owner == world_entity || !node->owner->def )
-            return 0;
-        return (entity_s_def *)node->owner->def;
-    }
-
-    bool DropModelEntity( const selbrush_t *node )
-    {
-        const entity_s_def *def = DropEntityDef( node );
-        if ( !def )
-            return false;
-        if ( def->eclass && ( def->eclass->classtype & 0x8 ) != 0 )
-            return true;
-        return DropEntityValue( def, "model" )[0] != '\0';
-    }
-
-    bool DropEntityInfo( selbrush_t *node, float mins[3], float maxs[3],
-                         float angles[3], float *scale, float origin[3] )
-    {
-        entity_s_def *def = DropEntityDef( node );
-        if ( !def || !DropModelEntity( node ) || !mins || !maxs || !angles || !scale || !origin )
-            return false;
-
-        bool haveBounds = false;
-        entitymodel_t *modelClass = (entitymodel_t *)def->modelClass;
-        if ( modelClass && modelClass->model && modelClass->model->handle )
-        {
-            XModel *model = (XModel *)(intptr_t)modelClass->model->handle;
-            XModelGetBounds( model, mins, maxs );
-            haveBounds = DropBoundsValid( mins, maxs );
-        }
-        // A selected but not-yet-resident model must not be loaded by a drag.
-        // Its class box is the conservative data already present in Radiant.
-        if ( !haveBounds && def->eclass )
-        {
-            for ( int k = 0; k < 3; ++k )
-            {
-                mins[k] = def->eclass->mins[k];
-                maxs[k] = def->eclass->maxs[k];
-            }
-            haveBounds = DropBoundsValid( mins, maxs );
-        }
-        if ( !haveBounds )
-            return false;
-
-        if ( !Entity_GetVec3ForKey( def, angles, "angles" ) )
-            angles[0] = angles[1] = angles[2] = 0.0f;
-        *scale = 1.0f;
-        const char *modelScale = DropEntityValue( def, "modelscale" );
-        if ( modelScale[0] )
-        {
-            const float parsed = (float)atof( modelScale );
-            if ( _finite( parsed ) && parsed > 0.0f )
-                *scale = parsed;
-        }
-        for ( int k = 0; k < 3; ++k )
-            origin[k] = def->origin[k];
-        return true;
-    }
-
-    void DropTransformBounds( const float mins[3], const float maxs[3],
-                              const float inAngles[3], float scale,
-                              float outMins[3], float outMaxs[3] )
-    {
-        float angles[3] = { inAngles ? inAngles[0] : 0.0f,
-                            inAngles ? inAngles[1] : 0.0f,
-                            inAngles ? inAngles[2] : 0.0f };
-        float axis[3][3];
-        AnglesToAxis( angles, axis );
-        if ( !( scale > 0.0f ) )
-            scale = 1.0f;
-        outMins[0] = outMins[1] = outMins[2] = FLT_MAX;
-        outMaxs[0] = outMaxs[1] = outMaxs[2] = -FLT_MAX;
-        for ( int c = 0; c < 8; ++c )
-        {
-            const float local[3] = {
-                ( ( c & 1 ) ? maxs[0] : mins[0] ) * scale,
-                ( ( c & 2 ) ? maxs[1] : mins[1] ) * scale,
-                ( ( c & 4 ) ? maxs[2] : mins[2] ) * scale };
-            // OrientationPosToWorldPos's rotation half: axis^T * local.
-            const float world[3] = {
-                axis[0][0] * local[0] + axis[1][0] * local[1] + axis[2][0] * local[2],
-                axis[0][1] * local[0] + axis[1][1] * local[1] + axis[2][1] * local[2],
-                axis[0][2] * local[0] + axis[1][2] * local[1] + axis[2][2] * local[2] };
-            for ( int k = 0; k < 3; ++k )
-            {
-                if ( world[k] < outMins[k] ) outMins[k] = world[k];
-                if ( world[k] > outMaxs[k] ) outMaxs[k] = world[k];
-            }
-        }
-    }
-
-    // Test_Ray normally hides every selected brush.  Drop only needs selected
-    // MODELS hidden; a selected floor brush/patch is still a valid world surface
-    // for a browser drop.  Lift that bit synchronously and restore it after the
-    // one trace, without touching selection lists or counters.
-    struct dropSurfaceUnmask_t
-    {
-        std::vector<selbrush_t *> nodes;
-
-        dropSurfaceUnmask_t()
-        {
-            for ( selbrush_t *node = selected_brushes.next;
-                  node && node != &selected_brushes; node = node->next )
-            {
-                if ( DropModelEntity( node )
-                     || ( node->brushFlags & BRUSHFLAG_SELECTED ) == 0 )
-                    continue;
-                node->brushFlags &= ~(int)BRUSHFLAG_SELECTED;
-                nodes.push_back( node );
-            }
-        }
-
-        ~dropSurfaceUnmask_t()
-        {
-            for ( size_t i = 0; i < nodes.size(); ++i )
-                nodes[i]->brushFlags |= (int)BRUSHFLAG_SELECTED;
-        }
-    };
-
-    bool DropRayHit( const ray_t &ray, float hit[3] )
-    {
-        float start[3] = { ray.origin[0], ray.origin[1], ray.origin[2] };
-        float dir[3]   = { ray.dir[0], ray.dir[1], ray.dir[2] };
-        edTrace_t trace;
-        // Fixed-size/model entities are not ground.  Test_Ray still supplies its
-        // normal FilterBrush/material-filter handling; selected models stay masked.
-        const int contents = ( Pick_CameraContents() | 0x200 ) & ~0x400;
-        KiwiSection_ClampRayStart( start, dir );
-        {
-            dropSurfaceUnmask_t unmask;
-            Test_Ray( start, dir, contents, &trace, 1 );
-        }
-        if ( trace.hit.brush )
-        {
-            for ( int k = 0; k < 3; ++k )
-                hit[k] = start[k] + dir[k] * trace.dist;
-            return true;
-        }
-
-        // No world surface: only a genuinely downward ray may use global Z=0.
-        // Parallel/upward rays return false so a live gesture keeps its last valid
-        // placement and a browser simply withholds its ghost/drop.
-        if ( !( ray.dir[2] < -0.00001f ) )
-            return false;
-        const float t = -ray.origin[2] / ray.dir[2];
-        if ( !( t > 0.0f ) )
-            return false;
-        for ( int k = 0; k < 3; ++k )
-            hit[k] = ray.origin[k] + ray.dir[k] * t;
-        hit[2] = 0.0f;
-        return true;
-    }
-
     bool DropSelectionOnlyModels( std::vector<selbrush_t *> *out )
     {
         if ( out )
@@ -448,13 +266,14 @@ namespace
         if ( typed.items.empty() )
             return false;
         for ( size_t i = 0; i < typed.items.size(); ++i )
-            if ( typed.items[i].kind != SEL_OBJECT || !DropModelEntity( typed.items[i].brush ) )
+            if ( typed.items[i].kind != SEL_OBJECT
+              || !KiwiDrop_IsModelEntity( typed.items[i].brush ) )
                 return false;
 
         for ( selbrush_t *node = selected_brushes.next;
               node != &selected_brushes; node = node->next )
         {
-            if ( !DropModelEntity( node ) )
+            if ( !KiwiDrop_IsModelEntity( node ) )
                 return false;
             if ( !out )
                 continue;
@@ -1499,7 +1318,7 @@ namespace
         {
             selbrush_t *node;
             float       baseOrigin[3];
-            float       relativeMinZ;
+            float       relativeCorners[8][3];
         };
 
         bool Begin() override
@@ -1989,8 +1808,7 @@ namespace
             m_dropPendingNode = 0;
             m_dropActive    = false;
             m_dropUnits.clear();
-            m_dropGroupMinZ = 0.0f;
-            m_dropAnchorRelMinZ = 0.0f;
+            m_dropSupportCorners.clear();
             m_construct    = false;
             m_faces.clear();
             m_edges.clear();
@@ -2166,15 +1984,17 @@ namespace
             for ( size_t i = 0; i < nodes.size(); ++i )
             {
                 float mins[3], maxs[3], angles[3], scale, origin[3];
-                if ( !DropEntityInfo( nodes[i], mins, maxs, angles, &scale, origin ) )
+                if ( !KiwiDrop_GetModelInfo( nodes[i], mins, maxs, angles, &scale, origin ) )
                     return false;
                 float relMins[3], relMaxs[3];
-                DropTransformBounds( mins, maxs, angles, scale, relMins, relMaxs );
 
                 dropUnit_t unit;
                 unit.node = nodes[i];
                 Copy3( origin, unit.baseOrigin );
-                unit.relativeMinZ = relMins[2];
+                if ( !KiwiDrop_TransformBounds( mins, maxs, angles, scale,
+                                                relMins, relMaxs,
+                                                unit.relativeCorners ) )
+                    return false;
                 m_dropUnits.push_back( unit );
 
                 if ( nodes[i]->owner == anchorOwner )
@@ -2185,20 +2005,19 @@ namespace
                     Copy3( maxs, m_dropAnchorMaxs );
                     Copy3( angles, m_dropAnchorAngles );
                     m_dropAnchorScale = scale;
-                    m_dropAnchorRelMinZ = relMins[2];
                 }
             }
             if ( !haveAnchor )
                 return false;
 
-            m_dropGroupMinZ = FLT_MAX;
+            m_dropSupportCorners.clear();
+            m_dropSupportCorners.reserve( m_dropUnits.size() * 8u * 3u );
             for ( size_t i = 0; i < m_dropUnits.size(); ++i )
-            {
-                const float z = m_dropUnits[i].baseOrigin[2] - m_dropAnchorBase[2]
-                              + m_dropUnits[i].relativeMinZ;
-                if ( z < m_dropGroupMinZ )
-                    m_dropGroupMinZ = z;
-            }
+                for ( int corner = 0; corner < 8; ++corner )
+                    for ( int axis = 0; axis < 3; ++axis )
+                        m_dropSupportCorners.push_back(
+                            m_dropUnits[i].baseOrigin[axis] - m_dropAnchorBase[axis]
+                          + m_dropUnits[i].relativeCorners[corner][axis] );
             Copy3( m_dropAnchorBase, m_ref );
             m_dropActive = true;
             return true;
@@ -2723,15 +2542,11 @@ namespace
             if ( !KiwiDrop_ComputePlacement( ray,
                                              m_dropAnchorMins, m_dropAnchorMaxs,
                                              m_dropAnchorAngles, m_dropAnchorScale,
-                                             target ) )
+                                             target, 0, 0,
+                                             m_dropSupportCorners.empty()
+                                                 ? 0 : &m_dropSupportCorners[0],
+                                             (int)( m_dropSupportCorners.size() / 3u ) ) )
                 return;
-
-            const float anchorLift = ( m_dropAnchorRelMinZ < 0.0f )
-                                   ? -m_dropAnchorRelMinZ : 0.0f;
-            const float hitZ = target[2] - anchorLift - KDROP_FLOAT;
-            const float groupLift = ( m_dropGroupMinZ < 0.0f )
-                                  ? -m_dropGroupMinZ : 0.0f;
-            target[2] = hitZ + groupLift + KDROP_FLOAT;
 
             Sub3( target, m_dropAnchorBase, m_total );
             Apply();
@@ -2744,6 +2559,7 @@ namespace
             // Keeping this command instance keeps its displacement and undo record.
             m_dropActive = false;
             m_dropUnits.clear();
+            m_dropSupportCorners.clear();
             m_con = CON_FREE;
             m_axis = 2;
             Copy3( m_total, m_lockBase );
@@ -3751,13 +3567,12 @@ namespace
         selbrush_t *m_dropPendingNode = 0;
         bool        m_dropActive = false;
         std::vector<dropUnit_t> m_dropUnits;
+        std::vector<float> m_dropSupportCorners;
         float       m_dropAnchorBase[3]   = { 0.0f, 0.0f, 0.0f };
         float       m_dropAnchorMins[3]   = { 0.0f, 0.0f, 0.0f };
         float       m_dropAnchorMaxs[3]   = { 0.0f, 0.0f, 0.0f };
         float       m_dropAnchorAngles[3] = { 0.0f, 0.0f, 0.0f };
         float       m_dropAnchorScale     = 1.0f;
-        float       m_dropAnchorRelMinZ   = 0.0f;
-        float       m_dropGroupMinZ       = 0.0f;
 
         std::vector<faceUnit_t>      m_faces;
         std::vector<edgeUnit_t>      m_edges;
@@ -4349,38 +4164,90 @@ bool KiwiDrop_ComputePlacement( const ray_t &ray,
                                 const float modelMins[3], const float modelMaxs[3],
                                 const float angles[3], float scale,
                                 float outOrigin[3],
-                                float outWorldMins[3], float outWorldMaxs[3] )
+                                float outWorldMins[3], float outWorldMaxs[3],
+                                const float *supportCorners, int supportCornerCount )
 {
-    if ( !outOrigin || !DropBoundsValid( modelMins, modelMaxs ) )
+    if ( !outOrigin || !KiwiDrop_BoundsValid( modelMins, modelMaxs ) )
         return false;
 
+    float modelCorners[8][3];
     float relativeMins[3], relativeMaxs[3];
-    DropTransformBounds( modelMins, modelMaxs, angles, scale,
-                         relativeMins, relativeMaxs );
-
-    float hit[3];
-    if ( !DropRayHit( ray, hit ) )
+    if ( !KiwiDrop_TransformBounds( modelMins, modelMaxs, angles, scale,
+                                    relativeMins, relativeMaxs, modelCorners ) )
         return false;
+
+    const float *corners = &modelCorners[0][0];
+    int cornerCount = 8;
+    if ( supportCorners && supportCornerCount > 0 )
+    {
+        corners = supportCorners;
+        cornerCount = supportCornerCount;
+        relativeMins[0] = relativeMins[1] = relativeMins[2] = FLT_MAX;
+        relativeMaxs[0] = relativeMaxs[1] = relativeMaxs[2] = -FLT_MAX;
+        for ( int corner = 0; corner < cornerCount; ++corner )
+            for ( int axis = 0; axis < 3; ++axis )
+            {
+                const float value = corners[3 * corner + axis];
+                if ( !_finite( value ) )
+                    return false;
+                if ( value < relativeMins[axis] ) relativeMins[axis] = value;
+                if ( value > relativeMaxs[axis] ) relativeMaxs[axis] = value;
+            }
+    }
+
+    kiwiDropHit_t hit;
+    const bool excludeDraggedModels = ( supportCorners && supportCornerCount > 0 )
+                                    || KiwiDrop_Active();
+    if ( !KiwiDrop_Trace( ray, excludeDraggedModels, &hit ) )
+        return false;
+    float placeX = hit.point[0];
+    float placeY = hit.point[1];
     if ( KiwiCmd_SnapEngaged() )
     {
         float snapped[3];
-        if ( KiwiGrid_Snap( hit, snapped ) )
+        if ( KiwiGrid_Snap( hit.point, snapped ) )
         {
-            hit[0] = snapped[0];
-            hit[1] = snapped[1];
+            placeX = snapped[0];
+            placeY = snapped[1];
         }
     }
 
-    // Test the model with its origin at the hit and only lift it.  A model whose
-    // local box is already above its origin is never pushed downward.
-    const float minZ = hit[2] + relativeMins[2];
-    float lift = hit[2] - minZ;
-    if ( lift < 0.0f )
-        lift = 0.0f;
+    // Orient the hit plane upward, then move the placement origin only along +Z
+    // until every transformed bounds corner is on/above that local tangent plane.
+    // The zero initial lift is the never-push-down rule.  On a vertical plane +Z
+    // cannot resolve penetration, so retain the horizontal-plane support fallback.
+    float normal[3] = { hit.normal[0], hit.normal[1], hit.normal[2] };
+    if ( normal[2] < 0.0f )
+    {
+        normal[0] = -normal[0];
+        normal[1] = -normal[1];
+        normal[2] = -normal[2];
+    }
+    float lift = 0.0f;
+    if ( normal[2] > 1.0e-4f )
+    {
+        for ( int corner = 0; corner < cornerCount; ++corner )
+        {
+            const float *relative = corners + 3 * corner;
+            const float planeSide = normal[0] * ( placeX + relative[0] - hit.point[0] )
+                                  + normal[1] * ( placeY + relative[1] - hit.point[1] )
+                                  + normal[2] * relative[2];
+            if ( planeSide < 0.0f )
+            {
+                const float required = -planeSide / normal[2];
+                if ( required > lift )
+                    lift = required;
+            }
+        }
+    }
+    else if ( relativeMins[2] < 0.0f )
+    {
+        lift = -relativeMins[2];
+    }
     lift += KDROP_FLOAT;
-    outOrigin[0] = hit[0];
-    outOrigin[1] = hit[1];
-    outOrigin[2] = hit[2] + lift;
+    outOrigin[0] = placeX;
+    outOrigin[1] = placeY;
+    outOrigin[2] = hit.point[2] + lift;
 
     if ( outWorldMins && outWorldMaxs )
         for ( int k = 0; k < 3; ++k )
@@ -4403,7 +4270,7 @@ bool KiwiDrop_BeginAt( int imgX, int imgY )
     if ( !Pick_RayFromImagePos( imgX, imgY, &ray ) )
         return false;
     const pick_result_t hit = Pick( ray, SEL_MASK_OBJECT );
-    if ( !hit.valid || !hit.item.brush || !DropModelEntity( hit.item.brush ) )
+    if ( !hit.valid || !hit.item.brush || !KiwiDrop_IsModelEntity( hit.item.brush ) )
         return false;
 
     bool hitSelectedModel = false;

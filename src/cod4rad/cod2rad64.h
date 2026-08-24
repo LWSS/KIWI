@@ -123,8 +123,10 @@ Constants
 
 /* Content flags — from cod2map.h */
 #define CONTENTS_SOLID          0x00000001
+#define CONTENTS_FOLIAGE        0x00000002
 #define CONTENTS_NONCOLLIDING   0x00000004
 #define CONTENTS_SKY            0x00000800
+#define CONTENTS_CLIPSHOT       0x00002000
 #define CONTENTS_TELEPORTER     0x00040000
 #define CONTENTS_NODROP         0x80000000
 #define LMAP_STRIDE                     512   /* row stride shared by primary and secondary lightmaps */

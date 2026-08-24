@@ -169,6 +169,8 @@ sel_mask_t   KiwiSel_GetModeMask();
 void         KiwiSel_SetModeMask( sel_mask_t mask );
 
 // ── selection_t mutation (does NOT sync — call Sel_SyncToLegacy when done) ───
+// Click/marquee grammar: plain replaces, Shift adds, Ctrl removes.  Ctrl wins
+// Shift+Ctrl; it is not a toggle, and removing an absent item is a no-op.
 void Sel_Clear   ( selection_t &sel );
 bool Sel_Contains( const selection_t &sel, const sel_item_t &item );
 bool Sel_Add     ( selection_t &sel, const sel_item_t &item );   // true if newly added

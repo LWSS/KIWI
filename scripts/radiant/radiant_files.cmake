@@ -149,6 +149,8 @@ set(RADIANT_SRCS
     "${SRC_DIR}/radiant/kiwi_validity.cpp"
     "${SRC_DIR}/radiant/kiwi_transform.h"    # §13 G/R/S, §20 face push/pull, §21 edge, §22 vertex
     "${SRC_DIR}/radiant/kiwi_transform.cpp"
+    "${SRC_DIR}/radiant/kiwi_droptrace.h"    # shared brush/patch/model trace for model placement
+    "${SRC_DIR}/radiant/kiwi_droptrace.cpp"
     # ── UX overhaul Phase 4 — construction geometry, regions, extrude-to-brush ──
     "${SRC_DIR}/radiant/kiwi_construct.h"    # §7 construction store + §16 planes + drawing tools
     "${SRC_DIR}/radiant/kiwi_construct.cpp"  # …plus the <mapname>.kiwi sidecar persistence
@@ -369,6 +371,8 @@ set(RADIANT_SRCS
     # inherited rather than re-declared.  See kiwi_entthumb.h.
     "${SRC_DIR}/radiant/kiwi_entthumb.h"     # the thumbnail cache + the render tick
     "${SRC_DIR}/radiant/kiwi_entthumb.cpp"
+    "${SRC_DIR}/radiant/kiwi_thumbcache.h"   # executable-local, hash-invalidated .kthumb files
+    "${SRC_DIR}/radiant/kiwi_thumbcache.cpp"
 
     # ROUND AZ — the SKY TAB.  USER DIRECTIVE: "We need a skybox feature.  Invent
     # a nice way to show a skybox and allow the camera to ignore it's there so we

@@ -52,6 +52,7 @@
 #include "kiwi_uveditor.h"
 #include "kiwi_command.h"
 #include "kiwi_selection.h"
+#include "kiwi_hover.h"
 #include "kiwi_uv.h"                 // KiwiUv_FaceTexdef — THE per-face texdef accessor
 #include "kiwi_windows.h"
 
@@ -281,6 +282,7 @@ namespace
     std::vector<char>      s_faceTgt;
     std::vector<char>      s_patchTgt;
     bool                   s_targetAll = true;
+    bool                   s_targetNone = false;
     // Kept across gathers so a target set survives a repaint: keyed the same way the
     // gesture snapshot is (def + faceIndex / patchMesh_t*), and re-matched, never
     // dereferenced.
@@ -354,6 +356,7 @@ namespace
                                                       // "extend" is decided when the gesture
                                                       // starts, not by whether the key is
                                                       // still down when the mouse comes up
+    bool        s_gCtrl    = false;
     float       s_gOriginU = 0.0f, s_gOriginV = 0.0f; // origin at press (origin drag)
     // ── KIWI-UX (ROUND BJ, ITEM 5): the SCALE ANCHOR (D-BJ-E) ─────────────────────
     // The point a scale holds FIXED.  Round BI scaled about the pivot, so grabbing the
@@ -388,6 +391,9 @@ namespace
     int         s_collapseFace  = -1;
     int         s_collapsePatch = -1;
     int         s_collapseNext  = 0;    // the cycle index the collapse hands on
+    bool        s_removeArmed   = false;
+    int         s_removeFace    = -1;
+    int         s_removePatch   = -1;
 
     // ── KIWI-UX (ROUND BI): the gesture-start snap candidate sets (D-BI-F) ─────────
     struct uvPt_t   { float u, v; };
@@ -587,9 +593,8 @@ namespace
         if ( !s_targetAll )
         {
             // Re-match the stored keys against THIS gather.  A key that no longer names a
-            // gathered row simply drops out; if nothing matches at all the sub-selection
-            // has become meaningless and we fall back to "all" rather than to "nothing"
-            // (a canvas where no gesture does anything is a bug report waiting to happen).
+            // gathered row simply drops out.  An explicit Ctrl-removed empty target set is
+            // preserved; stale non-empty keys still fall back to all.
             int hits = 0;
             for ( size_t i = 0; i < s_faces.size(); ++i )
             {
@@ -620,10 +625,18 @@ namespace
             }
             if ( !hits )
             {
-                s_targetAll = true;
-                s_targetKeys.clear();
-                s_faceTgt.assign( s_faces.size(), 1 );
-                s_patchTgt.assign( s_patches.size(), 1 );
+                if ( s_targetNone )
+                {
+                    s_faceTgt.assign( s_faces.size(), 0 );
+                    s_patchTgt.assign( s_patches.size(), 0 );
+                }
+                else
+                {
+                    s_targetAll = true;
+                    s_targetKeys.clear();
+                    s_faceTgt.assign( s_faces.size(), 1 );
+                    s_patchTgt.assign( s_patches.size(), 1 );
+                }
             }
         }
 
@@ -767,11 +780,13 @@ namespace
                 k.pm        = s_brushes[s_patches[i]].pm;
                 s_targetKeys.push_back( k );
             }
+        s_targetNone = !s_targetAll && s_targetKeys.empty();
     }
 
     void TargetAll()
     {
         s_targetAll = true;
+        s_targetNone = false;
         s_targetKeys.clear();
         s_faceTgt.assign( s_faces.size(), 1 );
         s_patchTgt.assign( s_patches.size(), 1 );
@@ -2116,7 +2131,8 @@ namespace
     // shapes now sit ABOVE everything except the two handle families that are drawn ON
     // them, which is the whole correction: BG put three canvas-global objects (grid lines,
     // the origin's infinite axis lines, the rotate ring) above the shape hit-test, and at
-    // a fit zoom those covered most of the canvas (D-BI-A).  Ctrl is snapping-only now.
+    // a fit zoom those covered most of the canvas (D-BI-A).  Ctrl-click removes while
+    // Ctrl-drag keeps the transform snap modifier.
     uvProbe_t Probe( float u, float v, bool altDown )
     {
         uvProbe_t p;
@@ -2702,18 +2718,22 @@ namespace
     }
 
     // ── KIWI-UX (ROUND BI): the marquee's payload (D-BI-C) ──────────────────────────
-    // Every shape whose DISPLAYED outline intersects the band becomes the target set;
-    // Shift extends the existing one.  A band that catches nothing restores "all" — the
-    // same way out an empty click gives, because a target set of nothing is a canvas where
-    // no gesture does anything.
-    void ApplyMarquee( float u0, float v0, float u1, float v1, bool extend )
+    // Every shape whose displayed outline intersects the band is applied with the
+    // same grammar as a camera marquee: plain replaces, Shift adds, Ctrl removes.
+    void ApplyMarquee( float u0, float v0, float u1, float v1,
+                       bool extend, bool remove )
     {
         float r0[2] = { u0 < u1 ? u0 : u1, v0 < v1 ? v0 : v1 };
         float r1[2] = { u0 < u1 ? u1 : u0, v0 < v1 ? v1 : v0 };
 
         std::vector<char> ft( s_faces.size(),   0 );
         std::vector<char> pt( s_patches.size(), 0 );
-        if ( extend && !s_targetAll )
+        if ( ( extend || remove ) && s_targetAll )
+        {
+            ft.assign( s_faces.size(), 1 );
+            pt.assign( s_patches.size(), 1 );
+        }
+        else if ( extend || remove )
         {
             for ( size_t i = 0; i < ft.size() && i < s_faceTgt.size();  ++i ) ft[i] = s_faceTgt[i];
             for ( size_t i = 0; i < pt.size() && i < s_patchTgt.size(); ++i ) pt[i] = s_patchTgt[i];
@@ -2726,7 +2746,7 @@ namespace
             const int n = FaceStPointsDisp( i, poly, nullptr );
             if ( n >= 2 && PolyHitsRect( poly, n, r0, r1 ) )
             {
-                ft[i] = 1;
+                ft[i] = remove ? 0 : 1;
                 ++hits;
             }
         }
@@ -2735,7 +2755,7 @@ namespace
             const int n = PatchRing( pi, poly );
             if ( n >= 2 && PolyHitsRect( poly, n, r0, r1 ) )
             {
-                pt[pi] = 1;
+                pt[pi] = remove ? 0 : 1;
                 ++hits;
             }
         }
@@ -2743,12 +2763,16 @@ namespace
         int total = 0;
         for ( size_t i = 0; i < ft.size(); ++i ) total += ft[i];
         for ( size_t i = 0; i < pt.size(); ++i ) total += pt[i];
-        if ( !hits && !extend )
+        if ( !hits && !extend && !remove )
         {
             TargetAll();
             _snprintf( s_status, sizeof( s_status ), "targeting all shapes" );
         }
-        else if ( total < 1 )
+        else if ( !hits )
+        {
+            return;                                  // additive/removal miss: no-op
+        }
+        else if ( total == (int)( s_faces.size() + s_patches.size() ) )
         {
             TargetAll();
             _snprintf( s_status, sizeof( s_status ), "targeting all shapes" );
@@ -2766,6 +2790,37 @@ namespace
         s_cycleValid = false;                 // a marquee is not a point in the click cycle
     }
 
+    void RemoveTarget( int face, int patch )
+    {
+        if ( s_targetAll )
+        {
+            s_targetAll = false;
+            s_faceTgt.assign( s_faces.size(), 1 );
+            s_patchTgt.assign( s_patches.size(), 1 );
+        }
+
+        bool changed = false;
+        if ( face >= 0 && (size_t)face < s_faceTgt.size() && s_faceTgt[face] )
+        {
+            s_faceTgt[face] = 0;
+            changed = true;
+        }
+        else if ( patch >= 0 && (size_t)patch < s_patchTgt.size() && s_patchTgt[patch] )
+        {
+            s_patchTgt[patch] = 0;
+            changed = true;
+        }
+        if ( !changed )
+            return;
+
+        StoreTargetKeys();
+        AutoPivot();
+        _snprintf( s_status, sizeof( s_status ), "targeting %d shape%s",
+                   TargetCount(), TargetCount() == 1 ? "" : "s" );
+        s_status[sizeof( s_status ) - 1] = '\0';
+        s_cycleValid = false;
+    }
+
     void GestureEnd()
     {
         // ── KIWI-UX (ROUND BI): the two releases that mean something ────────────────
@@ -2773,11 +2828,12 @@ namespace
         {
             const float dx = ( s_gCurU - s_gStartU ) * s_zoom;
             const float dy = ( s_gCurV - s_gStartV ) * s_zoom;
-            const bool  extend = s_gShift;
+            const bool  extend = s_gShift && !s_gCtrl;
+            const bool  remove = s_gCtrl;
             if ( fabsf( dx ) < KUVE_MARQUEE_MIN_PX && fabsf( dy ) < KUVE_MARQUEE_MIN_PX )
             {
                 // A click, not a band: the way back to "all" (D-BI-C).
-                if ( !extend )
+                if ( !extend && !remove )
                 {
                     if ( !s_targetAll )
                         _snprintf( s_status, sizeof( s_status ), "targeting all shapes" );
@@ -2785,7 +2841,8 @@ namespace
                 }
             }
             else
-                ApplyMarquee( s_gStartU, s_gStartV, s_gCurU, s_gCurV, extend );
+                ApplyMarquee( s_gStartU, s_gStartV, s_gCurU, s_gCurV,
+                              extend, remove );
         }
         else if ( s_gesture == UVG_MOVE && !s_gOnShape )
         {
@@ -2794,11 +2851,27 @@ namespace
             const float dx = ( s_gCurU - s_gStartU ) * s_zoom;
             const float dy = ( s_gCurV - s_gStartV ) * s_zoom;
             if ( fabsf( dx ) < KUVE_MARQUEE_MIN_PX && fabsf( dy ) < KUVE_MARQUEE_MIN_PX
-                 && !s_gShift )
+                 && !s_gShift && !s_gCtrl )
             {
                 if ( !s_targetAll )
                     _snprintf( s_status, sizeof( s_status ), "targeting all shapes" );
                 TargetAll();
+            }
+        }
+        else if ( s_gesture == UVG_MOVE && s_gOnShape && s_removeArmed )
+        {
+            const float dx = ( s_gCurU - s_gStartU ) * s_zoom;
+            const float dy = ( s_gCurV - s_gStartV ) * s_zoom;
+            if ( fabsf( dx ) < KUVE_MARQUEE_MIN_PX && fabsf( dy ) < KUVE_MARQUEE_MIN_PX )
+            {
+                RestoreSnapshot();
+                if ( s_undoOpen )
+                {
+                    KiwiCmd_UndoCancel();
+                    s_undoOpen = false;
+                    s_covered  = false;
+                }
+                RemoveTarget( s_removeFace, s_removePatch );
             }
         }
         else if ( s_gesture == UVG_MOVE && s_gOnShape && s_collapseArmed )
@@ -2839,6 +2912,7 @@ namespace
 
         UndoCommit();
         s_collapseArmed = false;      // KIWI-UX (ROUND BO, ITEM 2)
+        s_removeArmed   = false;
         s_gesture = UVG_NONE;
         s_gButton = -1;
         s_gHandle = UVH_NONE;
@@ -2873,6 +2947,7 @@ namespace
             }
         }
         s_collapseArmed = false;      // KIWI-UX (ROUND BO, ITEM 2)
+        s_removeArmed   = false;
         s_gesture = UVG_NONE;
         s_gButton = -1;
         s_gHandle = UVH_NONE;
@@ -2909,6 +2984,7 @@ namespace
             s_originV = s_gOriginV;
         }
         s_collapseArmed = false;      // KIWI-UX (ROUND BO, ITEM 2)
+        s_removeArmed   = false;
         s_gesture = UVG_NONE;
         s_gButton = -1;
         s_gHandle = UVH_NONE;
@@ -2928,12 +3004,13 @@ namespace
     // is GONE with the tools that were on the grid.  What remains is the standard 2D
     // editor's: pivot → the target set's own handles → the shapes → the box body →
     // marquee, all of it resolved by the same probe the hover ran this frame.
-    // Ctrl is snapping-only; it starts no gesture of its own.
+    // Ctrl-click is removal; Ctrl-drag keeps the existing snapping behavior.
 
     // Make ONE shape the whole target set (D-BI-C).  Never touches the 3D selection.
     void TargetSingle( int face, int patch )
     {
         s_targetAll = false;
+        s_targetNone = false;
         s_faceTgt.assign( s_faces.size(), 0 );
         s_patchTgt.assign( s_patches.size(), 0 );
         if ( face >= 0 && (size_t)face < s_faceTgt.size() )
@@ -2951,6 +3028,7 @@ namespace
         // armed collapse.  FIRST thing, above every early return, so the pan arm
         // and the "not the left button" refusal disarm it too.
         s_collapseArmed = false;
+        s_removeArmed   = false;
 
         if ( button == ImGuiMouseButton_Right || button == ImGuiMouseButton_Middle )
         {
@@ -2976,6 +3054,7 @@ namespace
         s_gHandle  = pr.handle;
         s_gOnShape = ( pr.shapeFace >= 0 || pr.shapePatch >= 0 );
         s_gShift   = io.KeyShift;
+        s_gCtrl    = io.KeyCtrl;
         s_gButton  = button;
         s_gHandleU = u;
         s_gHandleV = v;
@@ -3055,26 +3134,46 @@ namespace
             const int    k      = CycleIndexFor( u, v, n );
             const bool   repeat = CycleIsRepeat( u, v );
 
-            if ( io.KeyShift )
+            if ( io.KeyCtrl )
             {
-                // Shift toggles membership and starts nothing — a toggle that also dragged
-                // would move the shape the user was only trying to add.  Out of "all" it
-                // means "all EXCEPT this one", the rule every shift-toggle in this editor
-                // follows (kiwi_boxselect ClickSelect).
-                if ( s_targetAll )
+                if ( !pr.shapeIsTarget )
                 {
-                    s_targetAll = false;
-                    s_faceTgt.assign( s_faces.size(), 1 );
-                    s_patchTgt.assign( s_patches.size(), 1 );
+                    s_gesture = UVG_NONE;             // removing an absent item is a no-op
+                    s_gButton = -1;
+                    return;
                 }
-                if ( pr.shapeFace >= 0 )
-                    s_faceTgt[pr.shapeFace] = s_faceTgt[pr.shapeFace] ? 0 : 1;
-                else
-                    s_patchTgt[pr.shapePatch] = s_patchTgt[pr.shapePatch] ? 0 : 1;
-                if ( TargetCount() < 1 )
-                    TargetAll();
-                else
+                // A stationary release removes this member; travelling beyond the
+                // click threshold remains the existing Ctrl-snap move.
+                s_removeArmed = true;
+                s_removeFace  = pr.shapeFace;
+                s_removePatch = pr.shapePatch;
+                _snprintf( s_status, sizeof( s_status ),
+                           "Ctrl-click removes; Ctrl-drag snap-moves %d shape%s",
+                           TargetCount(), TargetCount() == 1 ? "" : "s" );
+                s_status[sizeof( s_status ) - 1] = '\0';
+                s_cycleU     = u;
+                s_cycleV     = v;
+                s_cycleNext  = ( n > 0 ) ? ( k + 1 ) % n : 0;
+                s_cycleValid = true;
+                s_gesture = UVG_MOVE;
+                SnapshotSelection();
+                CaptureSnapSets();
+                return;
+            }
+            else if ( io.KeyShift )
+            {
+                // Shift is add-only.  Clicking an existing target is intentionally
+                // a no-op; it never turns an additive gesture into a removal.
+                if ( !pr.shapeIsTarget )
+                {
+                    s_targetAll  = false;
+                    s_targetNone = false;
+                    if ( pr.shapeFace >= 0 )
+                        s_faceTgt[pr.shapeFace] = 1;
+                    else
+                        s_patchTgt[pr.shapePatch] = 1;
                     StoreTargetKeys();
+                }
                 s_cycleU     = u;
                 s_cycleV     = v;
                 s_cycleNext  = ( n > 0 ) ? ( k + 1 ) % n : 0;
@@ -3169,8 +3268,8 @@ namespace
         // rather than through KiwiCmd_SnapEngaged because the canvas runs inside the
         // ImGui frame with no active KIWI command to ask — io.KeyCtrl IS the frame's
         // own authority for that (imgui_shell.cpp passes the same io to the
-        // viewport arms).  ONE line, one meaning, and the header's "Ctrl is
-        // snapping-only" note still holds: it starts no gesture of its own.
+        // viewport arms).  Ctrl-click is resolved at release; once the cursor
+        // travels beyond the click box this modifier means snapping.
         const bool snap = io.KeyCtrl;
         s_gCurU = u;
         s_gCurV = v;
@@ -3396,7 +3495,15 @@ namespace
             {
                 for ( int k = 0; k < n; ++k )
                     pts[k] = UvToPx( st[k][0], st[k][1] );
-                dl->AddPolyline( pts, n, IM_COL32( 255, 255, 255, 140 ),
+                ImU32 hoverCol = IM_COL32( 255, 255, 255, 140 );
+                if ( ImGui::GetIO().KeyCtrl && pr.shapeIsTarget )
+                {
+                    float rgb[3];
+                    KiwiHover_PreviewColor( true, rgb );
+                    hoverCol = ImGui::ColorConvertFloat4ToU32(
+                        ImVec4( rgb[0], rgb[1], rgb[2], 0.92f ) );
+                }
+                dl->AddPolyline( pts, n, hoverCol,
                                  ImDrawFlags_Closed, 3.5f );
             }
         }
@@ -3448,8 +3555,19 @@ namespace
             const ImVec2 b = UvToPx( s_gCurU,   s_gCurV );
             const ImVec2 r0( a.x < b.x ? a.x : b.x, a.y < b.y ? a.y : b.y );
             const ImVec2 r1( a.x < b.x ? b.x : a.x, a.y < b.y ? b.y : a.y );
-            dl->AddRectFilled( r0, r1, IM_COL32( 255, 255, 255, 30 ) );
-            dl->AddRect( r0, r1, IM_COL32( 255, 255, 255, 190 ), 0.0f, 0, 1.0f );
+            ImU32 fill = IM_COL32( 255, 255, 255, 30 );
+            ImU32 edge = IM_COL32( 255, 255, 255, 190 );
+            if ( s_gCtrl )
+            {
+                float rgb[3];
+                KiwiHover_PreviewColor( true, rgb );
+                fill = ImGui::ColorConvertFloat4ToU32(
+                    ImVec4( rgb[0], rgb[1], rgb[2], 30.0f / 255.0f ) );
+                edge = ImGui::ColorConvertFloat4ToU32(
+                    ImVec4( rgb[0], rgb[1], rgb[2], 190.0f / 255.0f ) );
+            }
+            dl->AddRectFilled( r0, r1, fill );
+            dl->AddRect( r0, r1, edge, 0.0f, 0, 1.0f );
         }
 
         // ── 3b. KIWI-UX (ROUND BJ, ITEM 6): THE SNAP ACCENTS (D-BJ-F) ──────────
@@ -4110,10 +4228,12 @@ void KiwiUvEd_Draw()
                 "handle skews, and the yellow dot is the pivot for rotate / skew / the "
                 "Rot 90 and Flip buttons (drag it to move it).\n\n"
                 "Click a shape to edit only that one; click the same spot again to step "
-                "down through shapes stacked there; Shift+click adds or removes; drag on "
+                "down through shapes stacked there; Shift+click adds; Ctrl+click removes; "
+                "drag on "
                 "empty canvas to rubber-band; click empty canvas (or Esc) for all of them "
                 // KIWI-UX (ROUND BO, ITEM 3): Ctrl ENGAGES snapping here now.
-                "again.  Right/middle drag pans, the wheel zooms, HOLD CTRL to snap "
+                "again.  Right/middle drag pans, the wheel zooms, HOLD CTRL while dragging "
+                "to snap "
                 "(grid, whole texels and the other shapes' vertices - drags are free "
                 "without it), Esc cancels a live drag.\n\n"
                 "Multiple faces are FOLDED OUT along the world edges they share, so they "

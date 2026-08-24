@@ -1456,7 +1456,9 @@ void XAnim_GetTimeIndex(
     else
     {
         low = 0;
-        high = (int)((float)tableSize * animTime->time);
+        // KIWI: retail reuses the already-truncated seed index here (CoD3MP 0x664577 byte /
+        // 0x6661C8 ushort) - a second float->int conversion can differ by one frame.
+        high = index;
         while (frameIndex < indices[--high])
         {
             index = (high + low) >> 1;

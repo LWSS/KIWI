@@ -782,6 +782,7 @@ void ProcessLightEntity(Entity_t *entity)
 void ProcessBrushModel(Entity_t *entity)
 {
     const char *modelValue;
+    const char *modelName;
     void *xmodel;
     float transform[12]; /* origin[3] + axis[9] */
     float scale[3];
@@ -809,7 +810,9 @@ void ProcessBrushModel(Entity_t *entity)
         kv = kv->next;
     }
 
-    if (spawnFlags & 2) return;
+    /* Retail CoD4Rad sub_418030 skips both NO_SHADOW (2) and
+     * NO_STATIC_SHADOWS (4). */
+    if (spawnFlags & (2 | 4)) return;
 
     /* look up "model" key */
     modelValue = NULL;
@@ -826,11 +829,20 @@ void ProcessBrushModel(Entity_t *entity)
 
     if (!modelValue) return;
 
-    /* validate: must start with "xmodel" + "/" or "\" */
-    if (strncmp(modelValue, "xmodel", 6) != 0) return;
-    if (modelValue[6] != '/' && modelValue[6] != '\\') return;
+    /* CoD4Rad sub_418030 uses sub_44B180 only to recognize and strip an
+     * optional "xmodel/" (or "xmodel\\") prefix.  Entity lumps normally
+     * contain bare asset names; rejecting them empties both the static-model
+     * shadow trace world and the model-origin light-grid source. */
+    modelName = modelValue;
+    if (strncmp(modelValue, "xmodel", 6) == 0
+        && (modelValue[6] == '/' || modelValue[6] == '\\'))
+    {
+        modelName += 7;
+    }
 
-    /* build xmodel path: "shadow_" + model name after "xmodel/" */
+    if (!modelName[0]) return;
+
+    /* build xmodel path: "shadow_" + bare model name */
     {
         char *dst;
         const char *src;
@@ -843,8 +855,8 @@ void ProcessBrushModel(Entity_t *entity)
         dst = xmodelPath;
         while (*dst) dst++;
 
-        /* copy model name (skip "xmodel/") */
-        src = modelValue + 7;
+        /* copy the bare model name */
+        src = modelName;
         i = 0;
         do {
             dst[i] = src[i];
@@ -855,10 +867,10 @@ void ProcessBrushModel(Entity_t *entity)
     xmodel = XModelPrecache(xmodelPath, XModel_AllocZeroed, XModel_AllocZeroed);
     if (!xmodel)
     {
-        xmodel = XModelPrecache(modelValue + 7, XModel_AllocZeroed, XModel_AllocZeroed);
+        xmodel = XModelPrecache(modelName, XModel_AllocZeroed, XModel_AllocZeroed);
         if (!xmodel)
         {
-            WarningMsg(1, "failed to load misc_model '%s'\n", modelValue);
+            WarningMsg(1, "failed to load misc_model '%s'\n", modelName);
             goto done;
         }
     }
@@ -1028,6 +1040,17 @@ void ProcessEntities(Entity_t *entity)
     if (I_stricmp(classname, "misc_model") == 0)
     {
         ProcessBrushModel(entity);
+        return;
+    }
+
+    if (I_stricmp(classname, "script_model") == 0)
+    {
+        /* Retail dispatches sub_418030(entity, 1) and carries that flag into
+         * sub_41A990's collision instance.  The x64 collision record does not
+         * yet model the script-only triangle-test semantics, so do not fold it
+         * silently into misc_model behavior. */
+        WarningMsg(1,
+            "WARNING: script_model static-shadow baking is not implemented; skipping model collision/light-grid seeding for this entity.\n");
         return;
     }
 
