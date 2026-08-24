@@ -102,7 +102,6 @@ void __cdecl XAnimCalc(
                             allocedCalcBuffer = 1;
                             XAnimCalc(obj, firstInfo, firstWeight, 1, 1, animInfo, rotTransArrayIndex, calcBuffer); // LWSS: add from blops.
                         }
-                        XAnimCalc(obj, firstInfo, firstWeight, 1, 1, animInfo, rotTransArrayIndex, calcBuffer);
                     }
                     iassert(calcBuffer);
                     XAnimCalc(obj, secondInfo, weight, 0, 1, animInfo, rotTransArrayIndex, calcBuffer);
@@ -203,12 +202,10 @@ void __cdecl XAnimCalcParts(
     float dir[4] = { 0.0f, 0.0f, 0.0f, 0.0f }; // [esp+140h] [ebp-160h] BYREF
     float v38; // [esp+154h] [ebp-14Ch]
     float *result; // [esp+158h] [ebp-148h]
-    float v40; // [esp+15Ch] [ebp-144h]
     float v41; // [esp+160h] [ebp-140h]
     char v42; // [esp+167h] [ebp-139h]
     float v44; // [esp+16Ch] [ebp-134h]
     float *start; // [esp+170h] [ebp-130h]
-    float scale1; // [esp+174h] [ebp-12Ch]
     float scale0; // [esp+178h] [ebp-128h]
     char v48; // [esp+17Fh] [ebp-121h]
     int v50; // [esp+184h] [ebp-11Ch] BYREF
@@ -344,9 +341,12 @@ LABEL_45:
 
             v44 = keyFrameLerpFrac;
             start = rotTransArray[modelPartIndex].quat;
-            scale1 = weightScale * keyFrameLerpFrac;
-            scale0 = weightScale - scale1;
-            Vec4MadMad(start, scale0, fromVec.v, scale1, toVec.v, start);
+            scale0 = weightScale;
+            Vec4Lerp(fromVec.v, toVec.v, keyFrameLerpFrac, dir);
+            // LWSS: add from blops. Accumulate the quaternion from the nearest hemisphere.
+            if (((dir[0] * start[0]) + (dir[1] * start[1]) + (dir[2] * start[2]) + (dir[3] * start[3])) < 0.0f)
+                scale0 = -scale0;
+            Vec4Mad(start, scale0, dir, start);
         }
         ++animPartIndex;
         randomDataShort += 2 * tableSize + 2;
@@ -420,9 +420,12 @@ LABEL_67:
 
             v38 = v80;
             result = rotTransArray[modelPartIndex].quat;
-            v40 = weightScale * v80;
-            v41 = weightScale - v40;
-            Vec4MadMad(result, v41, dir0, v40, dir1, result);
+            v41 = weightScale;
+            Vec4Lerp(dir0, dir1, v80, dir);
+            // LWSS: add from blops. Accumulate the quaternion from the nearest hemisphere.
+            if (((dir[0] * result[0]) + (dir[1] * result[1]) + (dir[2] * result[2]) + (dir[3] * result[3])) < 0.0f)
+                v41 = -v41;
+            Vec4Mad(result, v41, dir, result);
         }
         ++animPartIndex;
         randomDataShort += 4 * tableSize + 4;
@@ -446,7 +449,11 @@ LABEL_67:
             dir[2] = frameVec.v[2];
             dir[3] = frameVec.v[3];
             //v37 = *&frameVec.unitVec[2].packed;
-            Vec4Mad(quat, weightScale, dir, quat);
+            float scale = weightScale;
+            // LWSS: add from blops. Accumulate the quaternion from the nearest hemisphere.
+            if (((dir[0] * quat[0]) + (dir[1] * quat[1]) + (dir[2] * quat[2]) + (dir[3] * quat[3])) < 0.0f)
+                scale = -scale;
+            Vec4Mad(quat, scale, dir, quat);
         }
         ++animPartIndex;
         dataShort += 2;
@@ -469,7 +476,11 @@ LABEL_67:
             v34[1] = v73;
             v34[2] = v74;
             v34[3] = v75;
-            Vec4Mad(v33, weightScale, v34, v33);
+            float scale = weightScale;
+            // LWSS: add from blops. Accumulate the quaternion from the nearest hemisphere.
+            if (((v34[0] * v33[0]) + (v34[1] * v33[1]) + (v34[2] * v33[2]) + (v34[3] * v33[3])) < 0.0f)
+                scale = -scale;
+            Vec4Mad(v33, scale, v34, v33);
         }
         ++animPartIndex;
         dataShort += 4;
@@ -1258,7 +1269,16 @@ void __cdecl XAnimMadRotTransArray(
             r = Vec4LengthSq(rotTrans->quat);
             if (r != 0.0)
             {
-                Vec4Mad(totalRotTrans->quat, (I_rsqrt(r) * weightScale), rotTrans->quat, totalRotTrans->quat);
+                float quatScale = I_rsqrt(r) * weightScale;
+                // LWSS: add from blops. q and -q encode the same rotation; blend the nearer representation.
+                if (((totalRotTrans->quat[0] * rotTrans->quat[0])
+                    + (totalRotTrans->quat[1] * rotTrans->quat[1])
+                    + (totalRotTrans->quat[2] * rotTrans->quat[2])
+                    + (totalRotTrans->quat[3] * rotTrans->quat[3])) < 0.0f)
+                {
+                    quatScale = -quatScale;
+                }
+                Vec4Mad(totalRotTrans->quat, quatScale, rotTrans->quat, totalRotTrans->quat);
             }
             if (rotTrans->transWeight != 0.0)
             {

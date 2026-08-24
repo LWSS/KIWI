@@ -241,9 +241,9 @@ XModel *__cdecl DObjGetModel(const DObj_s *obj, int modelIndex)
     iassert(obj);
     iassert(modelIndex < obj->numModels);
 
-    // LWSS: blops has this for some reason, seems new
-    //if ( modelIndex < 0 || modelIndex >= obj->numModels )
-    //    return 0;
+	// LWSS: bounds check from blops
+    if (modelIndex < 0 || modelIndex >= obj->numModels)
+        return 0;
 
     return obj->models[modelIndex];
 }

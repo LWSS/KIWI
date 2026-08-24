@@ -514,7 +514,7 @@ bool __cdecl Xmodel_ParsePhysicsBox(const char **file, PhysGeomInfo *geom)
     }
     else
     {
-        Com_PrintError(19, "Expecting '{' while parsing physics cylinder");
+        Com_PrintError(19, "Expecting '{' while parsing physics box"); // LWSS: add from blops. cod4 says "cylinder" here
         return 0;
     }
 }
@@ -717,7 +717,7 @@ char __cdecl RemoveDuplicateBrushPlanes(
                         v5[2] = v6[2];
                         v5[3] = v6[3];
                     }
-                    --sideCount;
+                    --*sideCount; // LWSS: bugfix from blops. (Original cod4 missed the *)
                     --sideIndexI;
                     break;
                 }
@@ -744,7 +744,7 @@ char __cdecl RemoveDuplicateBrushPlanes(
                 v7[2] = v8[2];
                 v7[3] = v8[3];
             }
-            --sideCount;
+            --*sideCount; // LWSS: bugfix from blops. (Original cod4 missed the *)
             --sideIndexI;
         }
     }
