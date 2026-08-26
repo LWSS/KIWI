@@ -43,7 +43,7 @@ void ModelDlg_DoReplace( const char *const *fromSet, int fromCount,
 
     for ( selbrush_t *b = active_brushes.next; b != &active_brushes; )
     {
-        selbrush_t *next = b->next->prev;       // pre-save (faithful sentinel-walk; +0x04 then +0x00)
+        selbrush_t *next = b->next;             // 0x434f10: binary saves &b->next->prev; prev@+0x00 makes that == b->next
 
         // 0x434F1B: skip filtered.  0x434F2B: skip brushflags & 2 and & 0x20.  skip world.
         if ( FilterBrush( b, 0 ) )                              { b = next; continue; }

@@ -31,20 +31,31 @@ IDA when convenient; NOTE = faithful-but-ugly, no action planned.
 
 ## REVIEW
 
-- `src/radiant/modeldlg.cpp` ~46 — LIKELY HANG: `selbrush_t *next = b->next->prev;`
-  in ModelDlg_DoReplace. With prev@0x00/next@0x04 (qe3.h:431), `b->next->prev
-  == b` on a well-formed list and the body never unlinks, so `b = next` never
-  advances — [Replace] should loop forever on the first brush. Sibling walks
-  (xywnd.cpp:1930, drag.cpp:1501, csg.cpp:263) pre-save plain `b->next`. Smells
-  like a mis-transcribed +0x04/+0x00 pre-save; verify vs IDA and fix there.
+<!-- REMEDIATION PASS 2026-08-26 (after the kiwi_* comment cleanup + checkpoint 62ba4b8).
+     Method: these are PORTED files, so each item is verified against the CoD4Radiant IDB
+     (127.0.0.1:13337) BEFORE any edit — a wrong "fix" that deviates from the binary is worse
+     than the bug (match-IDA, never invent). Resolved this pass:
+       * modeldlg.cpp ModelDlg_DoReplace HANG  -> REAL port bug (dropped address-of), FIXED.
+       * surfacedlg.cpp &mat_texDef+layer       -> VERIFIED FAITHFUL vs 0x457b08, left as-is.
+     The remaining REVIEW items are each a per-item IDA verification (many are ImGui-shell
+     CONSOLIDATION todos, not code bugs; several "verify vs IDA" tend to resolve faithful like
+     surfacedlg did). Work them incrementally, IDA-first. The kiwi_* cleanup also surfaced ~160
+     flags in the NEW code, compiled separately at F:\CLAUDE WORKING DIR\kiwi_cleanup. -->
 
-- `src/radiant/surfacedlg.cpp` 230/249/473/539/637/666/702 — the per-layer
-  texdef idiom `&md->mat_texDef + layer` steps by sizeof(texdef_sub_t)=28
-  inside a 36-byte MaterialDef, so layer>0 lands 8 bytes into the NEXT
-  MaterialDef — and the target is already layer-selected upstream via
-  `mtldef[current_edit_layer]`, so it reads as a double step. Matches the
-  hex-rays typed-ptr blob-offset trap. HIGH PRIORITY: verify all 7 sites vs
-  IDA 0x457950/0x4572d0 — if real, layered-material surface edits corrupt.
+- [FIXED 2026-08-26] `src/radiant/modeldlg.cpp` ~46 — HANG in ModelDlg_DoReplace.
+  IDA-verified (CoD4Radiant 0x434f10): the binary saves `p_prev = &v5->next->prev`
+  (ADDRESS-OF the prev field) and later `v5 = (selbrush_t*)p_prev`; with prev@+0x00
+  that address IS `b->next`. The port dropped the `&`, writing `b->next->prev` (the
+  VALUE), which == b on a well-formed list → infinite loop on the first brush.
+  Fixed to `next = b->next` (faithful; matches xywnd:1930/drag:1501/csg:263).
+
+- [VERIFIED FAITHFUL 2026-08-26] `src/radiant/surfacedlg.cpp` 230/249/... the
+  per-layer `&md->mat_texDef + layer` idiom. IDA-checked: 0x457b08 does exactly
+  `texdef = &mtlDef->mat_texDef + LayerMat::GetCurrentLayer(mtlDef)` (with its own
+  `// 7*4bytes` note), AND upstream (0x457a3e) already selects
+  `mtldef[current_edit_layer]` — so the "double step" is IN THE BINARY, not a
+  transcription error. The port reproduces it correctly; per match-IDA it STAYS
+  (any layer>0 quirk is a faithful-original one). NOT a port bug — no change.
 - `src/radiant/surfacedlg.cpp` 143-144/160-161 — log-and-continue asserts on
   null pointers that are dereferenced immediately after (release null-deref);
   151 — guard tests `width` but the assert string says "size[0]" and division
