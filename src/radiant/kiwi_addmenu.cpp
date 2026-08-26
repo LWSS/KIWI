@@ -1,29 +1,20 @@
 #ifndef KISAK_RADIANT
 #error this file is only for Radiant!
 #endif
-// ─────────────────────────────────────────────────────────────────────────────
-// kiwi_addmenu.cpp — RADIANT_UX_DESIGN §16b.4 implementation.  See
-// kiwi_addmenu.h for what this is a view over and why it defers dispatch.
-// ─────────────────────────────────────────────────────────────────────────────
+// Cursor-anchored view of registered creation-related commands; see kiwi_addmenu.h.
 
 #include "stdafx.h"
 #include "qe3.h"
 #include <imgui/imgui.h>
 
 #include "kiwi_addmenu.h"
-#include "radiant_frame.h"          // KIWI-UX (CLEANUP, C-6): struct RadiantCommand + the table API
-#include "kiwi_cmdui.h"             // KIWI-UX (CLEANUP, C-72): the palette/add-menu shared bits
-#include "kiwi_command.h"       // the ids + KiwiCmd_CanExecute — the ONLY dependency
+#include "radiant_frame.h"          // RadiantCommand table API
+#include "kiwi_cmdui.h"             // shared palette/add-menu UI helpers
+#include "kiwi_command.h"       // command ids and KiwiCmd_CanExecute
 
 #include <ctype.h>
 #include <stdio.h>
 #include <string.h>
-
-// KIWI-UX (CLEANUP, C-6): the struct AND these declarations now live in
-// radiant_frame.h, included above.  This file used to carry a verbatim copy of
-// `struct RadiantCommand` plus its own externs, as six other TUs did.
-
-// ── mainfrm.cpp bindings (verified against their definitions) ───────────────
 
 namespace
 {
@@ -31,12 +22,10 @@ namespace
     bool   s_focusNext  = false;
     char   s_filter[96] = { 0 };
     int    s_selected   = 0;
-    ImVec2 s_anchor( 0.0f, 0.0f );      // where the cursor was when it opened
-    bool   s_anchorPending = false;     // read the cursor INSIDE the frame (see Open)
+    ImVec2 s_anchor( 0.0f, 0.0f );      // cursor position captured on first draw
+    bool   s_anchorPending = false;     // capture through ImGui inside a frame
 
-    // THE editorial table.  Order and grouping only — every row is an id that
-    // already exists in g_radiantCommands (§3: no second registry).  A row with
-    // a NULL label is a category header.
+    // Editorial ordering and grouping; metadata stays in g_radiantCommands.
     struct addRow_t
     {
         const char *category;   // non-NULL only on the first row of a group
@@ -46,10 +35,8 @@ namespace
 
     const addRow_t KADD_ROWS[] =
     {
-        // ROUND P: one CHAINED CURVE tool behind both rows — every click adds a
-        // point, RMB/Enter finishes the whole chain as one object (see
-        // KiwiCurveTool in kiwi_construct.cpp).  The Polyline row is kept, and
-        // labelled as the alias it now is, so nobody hunts for a tool that moved.
+        // Both ids intentionally address one chained-curve tool; keep Polyline
+        // as a discoverable alias.
         { "Curves", "Line (chained curve)",  KIWI_CMD_DRAW_LINE        },
         { 0,        "Polyline (= Line)",     KIWI_CMD_DRAW_POLYLINE    },
         { 0,        "Spline",                KIWI_CMD_DRAW_SPLINE      },
@@ -61,23 +48,17 @@ namespace
         { 0,        "Polygon (n-gon)",       KIWI_CMD_DRAW_POLYGON     },
 
         { "Solids", "Box (corner)",          KIWI_CMD_PRIM_BOX         },
-        // KIWI-UX (CLEANUP, C-57): category 0, like every other non-first row —
-        // KiwiAdd_Draw emits a SeparatorText for EVERY row carrying one, so this
-        // drew a second "Solids" header with one button between the two.
-        { 0,        "Box (centre)",          KIWI_CMD_PRIM_BOX_CENTER  },   // ROUND AF, ITEM 8
+        { 0,        "Box (centre)",          KIWI_CMD_PRIM_BOX_CENTER  },   // same Solids group
         { 0,        "Cylinder",              KIWI_CMD_PRIM_CYLINDER    },
         { 0,        "Sphere",                KIWI_CMD_PRIM_SPHERE      },
         { 0,        "Cone",                  KIWI_CMD_PRIM_CONE        },
 
         { "From construction", "Extrude Region", KIWI_CMD_EXTRUDE_REGION },
 
-        // The sun is not a solid and not a curve: it is a set of worldspawn keys
-        // plus a helper to aim them (kiwi_sun.h), so it gets its own group rather
-        // than being filed under something it is not.
+        // Place Sun edits worldspawn keys, so it remains outside curve/solid groups.
         { "Lighting", "Place Sun",              KIWI_CMD_PLACE_SUN        },
 
-        // The plane is the question this menu provokes ("on WHAT am I drawing?"),
-        // so the answer is one scroll away instead of in another panel.
+        // Keep drawing-plane controls adjacent to creation commands.
         { "Construction plane", "XY",        KIWI_CMD_CPLANE_XY        },
         { 0,        "XZ",                    KIWI_CMD_CPLANE_XZ        },
         { 0,        "YZ",                    KIWI_CMD_CPLANE_YZ        },
@@ -87,22 +68,12 @@ namespace
 
     const int KADD_COUNT = (int)( sizeof( KADD_ROWS ) / sizeof( KADD_ROWS[0] ) );
 
-    // ── KIWI-UX (CLEANUP, C-73): window layout, named file-locally ──────────────
-    // Same convention kiwi_cmdoptions.cpp's KOPT_* constants follow.
     const float KADD_WIDTH   = 330.0f;
     const float KADD_HEIGHT  = 430.0f;
     const float KADD_CURSOR_OFF = 8.0f;   // down-right of the cursor anchor
 
-    // ── KIWI-UX (CLEANUP, C-63): the two per-frame O(table) scans, memoised ────
-    // `ShortcutForId` walks the whole ~200-row command table, and `RowVisible`
-    // built a 128-byte haystack with _snprintf; between them they ran 20 rows x
-    // (1 table walk + 2-3 snprintfs) EVERY frame the menu was up.
-    //
-    //  * the shortcuts are resolved ONCE, in KiwiAdd_Open() — the menu is modal
-    //    and short-lived, so a rebind made while it is open shows up the next
-    //    time it is opened, which is the same deal the anchor gets;
-    //  * visibility is computed ONCE per frame, right after the filter field is
-    //    read and before anything reads it (StepSelection included).
+    // Shortcut labels refresh on open; visibility refreshes once after filter
+    // input each frame.
     char s_shortcut[KADD_COUNT][80];
     bool s_visible[KADD_COUNT];
 
@@ -113,14 +84,6 @@ namespace
                                      (int)sizeof( s_shortcut[i] ) );
     }
 
-    // KIWI-UX (CLEANUP, C-72): FuzzyMatch and ShortcutFor lived here as
-    // character-identical copies of the palette's, behind the excuse that "it is
-    // nine lines and exporting it would mean a header for one predicate".  It was
-    // three things, not one, and the two lists must accept the same queries and
-    // render the same rows.  They are KiwiCmdUI_Fuzzy / KiwiCmdUI_ShortcutForId in
-    // kiwi_cmdui.h now.
-
-    // The predicate itself.  Called once per row per frame, from RebuildVisible.
     bool RowMatches( int i )
     {
         char hay[128];
@@ -153,32 +116,23 @@ namespace
     void Run( int commandId )
     {
         KiwiAdd_Close();
-        // DEFERRED dispatch — see kiwi_palette.cpp's Run() for the full reasoning
-        // (an in-frame command that opens a modal Win32 dialog would nest its
-        // message pump inside the compositing scene bracket).  Ids fit LOWORD.
+        // Postpone Win32 modal commands until after ImGui composition; ids fit
+        // LOWORD.
         ::PostMessageA( g_qeglobals.d_hwndMain, WM_COMMAND,
                         (WPARAM)(unsigned int)commandId, 0 );
     }
 }
 
-// ─── open / close ────────────────────────────────────────────────────────────
 void KiwiAdd_Open()
 {
     s_open      = true;
     s_focusNext = true;
     s_filter[0] = '\0';
     s_selected  = 0;
-    // KIWI-UX (CLEANUP, C-63): the shortcut strings and the (empty-filter) row
-    // visibility, resolved once here instead of per row per frame.  Safe on this
-    // thread: Radiant_GetCommandTable is a plain read of the pump-side table, and
-    // Open() already runs on the pump out of a WM_COMMAND.
     ResolveShortcuts();
     RebuildVisible();
-    // Anchor at the cursor, the whole point of an ADD MENU as opposed to a
-    // palette: the list appears where you are already looking.  The cursor is
-    // read in the DRAW, not here: Open() runs on the pump thread out of a
-    // WM_COMMAND (the palette / menu / hotkey routes all land there), which is
-    // outside any ImGui frame.
+    // Capture through ImGui on first draw because command dispatch can open the
+    // menu outside a frame.
     s_anchorPending = true;
 }
 
@@ -200,7 +154,6 @@ bool KiwiAdd_IsOpen()
     return s_open;
 }
 
-// ─── the shell entry (classic keymap route) ──────────────────────────────────
 void KiwiAdd_MenuItem()
 {
     if ( ImGui::Button( "Open add menu (create)" ) )
@@ -210,7 +163,6 @@ void KiwiAdd_MenuItem()
                            "Curves, solid primitives, extrude, construction planes." );
 }
 
-// ─── draw ────────────────────────────────────────────────────────────────────
 void KiwiAdd_Draw()
 {
     if ( !s_open )
@@ -227,8 +179,7 @@ void KiwiAdd_Draw()
     const ImGuiViewport *vp = ImGui::GetMainViewport();
     const ImVec2 size( KADD_WIDTH, KADD_HEIGHT );
 
-    // Clamp so the menu is never born off-screen (opening it near the bottom-right
-    // corner is exactly when a cursor anchor would otherwise put it there).
+    // Keep the cursor-anchored window within the main viewport work area.
     float x = s_anchor.x + KADD_CURSOR_OFF;
     float y = s_anchor.y + KADD_CURSOR_OFF;
     if ( x + size.x > vp->WorkPos.x + vp->WorkSize.x ) x = vp->WorkPos.x + vp->WorkSize.x - size.x;
@@ -239,7 +190,7 @@ void KiwiAdd_Draw()
     ImGui::SetNextWindowPos( ImVec2( x, y ), ImGuiCond_Always );
     ImGui::SetNextWindowSize( size, ImGuiCond_Always );
     if ( s_focusNext )
-        ImGui::SetNextWindowFocus();       // on OPEN only (kiwi_palette.cpp's rule)
+        ImGui::SetNextWindowFocus();       // only on initial open
 
     if ( !ImGui::Begin( "Add", &s_open,
                         ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoDocking |
@@ -259,14 +210,10 @@ void KiwiAdd_Draw()
                                                    s_filter, sizeof( s_filter ),
                                                    ImGuiInputTextFlags_EnterReturnsTrue );
 
-    // KIWI-UX (CLEANUP, C-63): ONCE per frame, immediately after the filter is read
-    // and before the first reader (StepSelection, below).  Nothing between the
-    // InputText and here has a side effect this depends on, and every later
-    // RowVisible() in this function is now an array read.
+    // Rebuild here so navigation and drawing share the current filter state.
     RebuildVisible();
 
-    // Keyboard navigation, read from ImGui (never from Win32) — a single-line
-    // InputText does not consume the arrows, so this is safe while it has focus.
+    // A single-line InputText leaves Up/Down available for row navigation.
     if ( ImGui::IsKeyPressed( ImGuiKey_DownArrow, true ) )
         StepSelection( 1 );
     if ( ImGui::IsKeyPressed( ImGuiKey_UpArrow, true ) )
@@ -278,8 +225,7 @@ void KiwiAdd_Draw()
         return;
     }
 
-    // A filter change can hide the highlighted row; walk to the next visible one
-    // so Enter never runs something the user cannot see.
+    // Never let Enter run a row hidden by the current filter.
     if ( !RowVisible( s_selected ) )
         StepSelection( 1 );
 
@@ -297,8 +243,6 @@ void KiwiAdd_Draw()
             if ( !RowVisible( i ) )
                 continue;
 
-            // The header is drawn with its FIRST VISIBLE member, so filtering
-            // never leaves an orphaned category label behind.
             if ( KADD_ROWS[i].category )
                 ImGui::SeparatorText( KADD_ROWS[i].category );
 
@@ -318,8 +262,6 @@ void KiwiAdd_Draw()
             if ( !enabled && ImGui::IsItemHovered() )
                 ImGui::SetTooltip( "Unavailable right now." );
 
-            // KIWI-UX (CLEANUP, C-63/C-72): resolved in KiwiAdd_Open, right-aligned
-            // through the palette/add-menu shared helper.
             KiwiCmdUI_RightAlignedHint( s_shortcut[i], rowW );
 
             if ( !enabled )
@@ -335,12 +277,9 @@ void KiwiAdd_Draw()
         Run( runId );
 }
 
-// ─── §3 registration + dispatch ──────────────────────────────────────────────
 void KiwiAdd_RegisterCommands()
 {
-    // The CLASSIC-profile binding is none; kiwi_keymap.cpp lays Shift+A on top for
-    // the modern profile (and displaces SelectAllOfType to Shift+Alt+A — the audit
-    // is in kiwi_keymap.h).
+    // Add Menu is unbound; modern Shift+A belongs to Line.
     Radiant_RegisterCommand( "KiwiAddMenu", 0, 0, KIWI_CMD_ADD_MENU );
 }
 

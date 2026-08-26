@@ -2,9 +2,7 @@
 #error this file is only for Radiant!
 #endif
 // ─────────────────────────────────────────────────────────────────────────────
-// kiwi_sun.cpp — the sun helper.  kiwi_sun.h carries the request, the proof that
-// `sundirection` points AT the sun, the angle round trip and the horizon clamp;
-// this file is the implementation and the numbers.
+// Worldspawn sun helper implementation; kiwi_sun.h defines its direction invariants.
 // ─────────────────────────────────────────────────────────────────────────────
 
 #include "stdafx.h"
@@ -38,11 +36,8 @@ extern entity_s *world_entity;                                             // ma
 extern char     *ValueForKey2( int e, const char *key );                   // entity.cpp:89
 extern int       Entity_GetVec3ForKey( entity_s_def *e, float *out, const char *key ); // entity.cpp:99
 extern float     Entity_GetFloatValueForKey( int e, const char *key );     // entity.cpp:109
-// The shell's dockspace id, for the re-dock on re-open.  Not in any header — the
-// four dock-window files each declare it, and this is the fifth.
+// File-local elsewhere; needed to re-dock this window when it reopens.
 extern ImGuiID   ImGuiShell_DockRoot();                                    // imgui_shell.cpp:796
-// KiwiCam_FrameBounds is NOT re-declared: kiwi_camera.h:285 declares it and this
-// file includes that header, so restating it would risk a signature drift.
 extern void      SetKeyValue( entity_s_def *e, const char *key, const char *value );   // entity.cpp:212
 extern void      Undo_ClearRedo();                                         // undo.cpp:176
 extern void      Undo_GeneralStart( const char *operation );               // undo.cpp:367
@@ -51,29 +46,21 @@ extern void      Undo_End();                                               // un
 
 namespace
 {
-    // ── the horizon clamp and the snap step (kiwi_sun.h "THE HORIZON CLAMP") ──
-    // pitch < 0 puts the sun ABOVE the horizon; -89 is nearly overhead, -1 is
-    // nearly grazing.
+    // Negative pitch puts the sun above the horizon; -89 is overhead, -1 grazing.
     const float KSUN_PITCH_MIN   = -89.0f;
     const float KSUN_PITCH_MAX   =  -1.0f;
-    // The angle snap increment, the same 5 degrees the Rotate command uses
-    // (KX_ANGLE_STEP, kiwi_transform.cpp:94) so one number means one thing.
+    // Match the Rotate command's KX_ANGLE_STEP (kiwi_transform.cpp:94).
     const float KSUN_ANGLE_STEP  =   5.0f;
-    // The orbit rate fallback for a camera with no usable height, and the rate
-    // rule itself: 360 degrees per viewport height, i.e. one height of drag is one
-    // full turn.  Both lifted from KCam_OrbitDegPerPx (kiwi_camera.cpp:59-64),
-    // which is file-local there; the value at a ~1030 px image is 0.35.
+    // One viewport height is one turn; match KCam_OrbitDegPerPx's fallback
+    // (kiwi_camera.cpp:59-64) when camera height is unusable.
     const float KSUN_DEG_PER_PX_FALLBACK = 0.35f;
 
     // ── where the glyph sits, relative to the orbit target ──────────────────
     const float KSUN_ORBIT_SCALE  =      1.5f;   // x the target's bounding-sphere radius
     const float KSUN_MIN_RADIUS   =    256.0f;   // so a tiny brush does not swallow the glyph
-    // The ceiling is the perspective camera's own maximum orbit distance
-    // (KCAM_MAX_DIST_PERSP, kiwi_camera.cpp:313): past it the glyph is outside the
-    // furthest the user can pull the eye back to and cannot be looked at.
+    // Match KCAM_MAX_DIST_PERSP so the camera can still pull back to the glyph.
     const float KSUN_MAX_RADIUS   =  65536.0f;
-    // The empty-map fallback: orbit the world origin at a fixed radius, over a
-    // nominal cube so the frustum still has a cross-section to draw.
+    // Empty maps use a nominal cube so the frustum has a cross-section.
     const float KSUN_EMPTY_RADIUS =   2048.0f;
     const float KSUN_EMPTY_HALF   =    512.0f;
 
@@ -86,13 +73,10 @@ namespace
     const int   KSUN_DISC_SEGS  = 20;
     const int   KSUN_SPOKES     =  8;
     const int   KSUN_RAY_GRID   =  3;      // KSUN_RAY_GRID^2 interior direction rays
-    // The per-frame line budget (kiwi_lines.h TRAP 1).  kiwi_sun.h carries the
-    // tally that arrives at 54; 64 leaves headroom for a wider ray lattice.
+    // Worst case is 54 lines; kiwi_sun.h carries the budget tally.
     const int   KSUN_MAX_SEGMENTS = 64;
 
-    // Warm gold for the sun itself, amber for what it projects.  Deliberately away
-    // from the selection green, the hover cyan, the construction rose and the
-    // section's cool blue (KSEC_COL_PLANE, kiwi_section.cpp:77).
+    // Gold/amber avoids the established selection, hover, construction, and section hues.
     const float KSUN_COL_GLYPH  [3] = { 1.00f, 0.78f, 0.24f };
     const float KSUN_COL_HOT    [3] = { 1.00f, 0.95f, 0.66f };
     const float KSUN_COL_ARROW  [3] = { 0.98f, 0.62f, 0.18f };
@@ -100,10 +84,8 @@ namespace
     const float KSUN_COL_RAY    [3] = { 0.58f, 0.40f, 0.14f };
 
     // ── THE COMPILER'S OWN DEFAULT SUN DIRECTION ────────────────────────────
-    // cod4rad/cmdline.c:28-30 (g_sunDirX/Y/Z), i.e. what the light compiler uses
-    // when "sundirection" is absent.  Stated as the VECTOR and turned into angles
-    // through this file's own derivation, so the placed value and the dragged
-    // value can never come from two different pieces of arithmetic.
+    // Compiler fallback vector (cod4rad/cmdline.c:28-30); convert it through the
+    // same round trip used by dragging instead of duplicating an angle literal.
     const float KSUN_DEFAULT_DIR[3] = { 0.4418350f, 0.5680700f, 0.6943130f };
 
     const float KSUN_RAD2DEG = 57.29577951308232f;
@@ -113,28 +95,19 @@ namespace
     bool s_hot      = false;        // the glyph is under the cursor
     bool s_grabbed  = false;
 
-    // The drag.  s_grab* is the pair the press latched and s_acc* is the travel
-    // since; the live pair is re-derived from both every frame (absolute from
-    // latch), never accumulated onto itself.
+    // Re-derive live angles from the latched pair plus accumulated travel each frame.
     float s_grabPitch = 0.0f;
     float s_grabYaw   = 0.0f;
     float s_accX      = 0.0f;
     float s_accY      = 0.0f;
     float s_dragPitch = 0.0f;
     float s_dragYaw   = 0.0f;
-    // The previous cursor pixel, so the accumulator can be fed DELTAS.  It has to
-    // be deltas rather than "this pixel minus the press pixel": the clamp REWINDS
-    // the accumulator (see RecomputeDrag), which a pixel difference would undo on
-    // the very next move.
+    // Feed deltas because RecomputeDrag may rewind refused travel at the pitch clamp.
     int   s_lastX     = 0;
     int   s_lastY     = 0;
 
-    // ── the orbit target, cached against the editor's "some brush changed"
-    //    counter.  KiwiWalkCache_Epoch is bumped by MarkMapModified (win_qe3.cpp:199
-    //    -> KiwiShadowCache_Invalidate, kiwi_shadowcache.cpp:25) and by every
-    //    link/unlink/free funnel, so an unedited map walks the brush lists ONCE and
-    //    a selected sun costs no per-frame sweep.  Same mechanism, same argument as
-    //    kiwi_skybox.cpp's bounds cache (kiwi_skybox.cpp:1103-1105).
+    // Cache target bounds against KiwiWalkCache_Epoch, which covers map edits and
+    // brush link/unlink/free funnels (same scheme as kiwi_skybox.cpp:1103-1105).
     bool     s_haveTarget  = false;
     unsigned s_targetEpoch = 0;
     float    s_targetMins  [3] = { 0.0f, 0.0f, 0.0f };
@@ -152,10 +125,7 @@ namespace
         return world_entity ? world_entity->def : nullptr;
     }
 
-    // ── the two halves of the round trip (kiwi_sun.h "THE ANGLE ROUND TRIP") ──
-    // Forward goes through AngleVectors itself rather than through a second copy
-    // of its arithmetic: it is the function both compilers call, so there is one
-    // definition of what an angles string means and this file cannot drift from it.
+    // Use the compilers' AngleVectors spelling so angle semantics cannot drift.
     void DirFromAngles( float pitch, float yaw, float out[3] )
     {
         const float ang[3] = { pitch, yaw, 0.0f };
@@ -197,11 +167,8 @@ namespace
         float umn[3]    = { 0.0f, 0.0f, 0.0f };
         float umx[3]    = { 0.0f, 0.0f, 0.0f };
 
-        // Both sentinel lists, unconditionally — a hidden or selected brush is
-        // still geometry the sun shines on, which is the same argument
-        // kiwi_skybox.cpp's MapBounds makes (kiwi_skybox.cpp:600-602).  Patches
-        // need no separate pass: a patch IS a brush def here (def->patch), so the
-        // walk already covers them.
+        // Hidden and selected brushes still receive sunlight; patches are brush
+        // defs here, so both sentinel lists cover all target geometry.
         for ( int list = 0; list < 2; ++list )
         {
             selbrush_t *head = list ? &selected_brushes : &active_brushes;
@@ -241,9 +208,7 @@ namespace
         }
         else if ( haveUnion )
         {
-            // Every object in the map is FLAT (a terrain patch, a single sheet):
-            // no brush has a volume to be biggest by, so the union of what exists
-            // is the honest answer.
+            // If every object is flat, use their union because no positive volume wins.
             Copy3( umn, s_targetMins );
             Copy3( umx, s_targetMaxs );
         }
@@ -285,9 +250,7 @@ namespace
         s_haveTarget  = true;
     }
 
-    // The committed worldspawn pair.  False when the map has no parseable sun —
-    // the same three-component test the compilers apply (cod4rad/mapio.c:496-505
-    // warns and keeps its default when the value is not a vector).
+    // Match the compilers' three-component parse test (cod4rad/mapio.c:496-505).
     bool WorldAngles( float *outPitch, float *outYaw )
     {
         entity_s_def *wd = WorldDef();
@@ -333,11 +296,8 @@ namespace
     {
         const float k = DegPerPx();
 
-        // ── THE CLAMP MUST NOT BANK TRAVEL IT REFUSED ───────────────────────
-        // Rewinding the accumulator to exactly the travel the limit allowed makes
-        // the next pixel the other way move by one pixel's worth, instead of
-        // waiting out however far the user pushed into the stop.  Verbatim the
-        // rule KiwiCam_OrbitDrag applies to its own pitch (kiwi_camera.cpp:790-799).
+        // Rewind refused travel so the first reverse pixel moves off the clamp
+        // (the KiwiCam_OrbitDrag rule, kiwi_camera.cpp:790-799).
         float pitch = s_grabPitch + s_accY * k;
         if ( pitch > KSUN_PITCH_MAX )
         {
@@ -351,24 +311,12 @@ namespace
         }
         float yaw = s_grabYaw + s_accX * k;
 
-        // Ctrl engages the snap.  KiwiCmd_SnapEngaged is asked rather than
-        // GetAsyncKeyState so this obeys the same context rule every other
-        // gesture does; with no command running its answer is exactly "is Ctrl
-        // held" (kiwi_command.h:1312 — KSNAPCTX_TRANSFORM, the default with no
-        // active command).
-        //
-        // A gesture THAT HAS NOT TRAVELLED is exempt, which is the same guard the
-        // Rotate command's ring puts on its own 5-degree snap (`!m_ringFresh`,
-        // kiwi_transform.cpp:3504): a press-and-release with Ctrl held must not
-        // quantise an angle the user never touched, and it is what keeps
-        // KiwiSun_HandleUp's "nothing moved, no record" test true.
+        // Use the shared command snap context. Exempt zero travel so Ctrl-click
+        // remains a no-op, matching the Rotate ring (kiwi_transform.cpp:3504).
         const bool travelled = ( s_accX != 0.0f || s_accY != 0.0f );
         if ( travelled && KiwiCmd_SnapEngaged() )        // kiwi_command.h:1320
         {
-            // The snapped pitch has to land INSIDE the horizon clamp, and the
-            // clamp's own bounds are not multiples of the step — so the reachable
-            // snapped range is the multiples strictly inside it, derived here
-            // rather than written out, so a change to either constant carries.
+            // Derive the snapped range because the horizon bounds are not step multiples.
             const float snapLo = ceilf ( KSUN_PITCH_MIN / KSUN_ANGLE_STEP ) * KSUN_ANGLE_STEP;
             const float snapHi = floorf( KSUN_PITCH_MAX / KSUN_ANGLE_STEP ) * KSUN_ANGLE_STEP;
             pitch = SnapDeg( pitch );
@@ -381,13 +329,8 @@ namespace
         s_dragYaw   = WrapDeg( yaw );
     }
 
-    // ONE undo record for ONE worldspawn key.  Undo_AddEntity_W skips the brush
-    // walk for the worldspawn by name (undo.cpp:638), so the record covers the
-    // key/values and nothing else.
-    //
-    // EVERY write in this file goes through here — the drag's commit, the tab's
-    // number fields and the tab's colour picker alike — so "one gesture, one undo
-    // step" is a property of the funnel rather than of each caller.
+    // Funnel drag and tab writes through one undo record per gesture;
+    // Undo_AddEntity_W skips the worldspawn brush walk (undo.cpp:638).
     void WriteKey( const char *key, const char *value, const char *operation )
     {
         entity_s_def *wd = WorldDef();
@@ -400,10 +343,8 @@ namespace
         SetKeyValue( wd, key, value );
         Undo_End();
 
-        // The ported key/value funnel (win_ent.cpp:276-304) does NOT mark the map
-        // modified, and that is faithful and is not changed there.  It is done
-        // here because a sun the user placed and then lost to an unprompted close
-        // is the one failure this helper can cause.
+        // SetKeyValue does not mark the map modified (win_ent.cpp:276-304), so this
+        // helper must do it after committing the undo record.
         MarkMapModified();
         g_nUpdateBits = -1;
     }
@@ -426,8 +367,7 @@ namespace
     }
 
     // ── the glyph ───────────────────────────────────────────────────────────
-    // Camera-facing ring, the same shape kiwi_section.cpp's EmitDisc draws
-    // (kiwi_section.cpp:126).
+    // Camera-facing ring matching kiwi_section.cpp's EmitDisc (:126).
     void EmitRing( const camera_s *c, const float p[3], float r, int segs )
     {
         float prev[3], pt[3];
@@ -476,8 +416,7 @@ namespace
         if ( !KiwiLines_Add( pos, tail ) )
             return;
 
-        // The head, spread on the CAMERA basis so it reads as an arrowhead from
-        // any angle rather than collapsing when the shaft points at the eye.
+        // Camera-basis head avoids collapsing when the shaft points at the eye.
         const float h = KSUN_HEAD_PIX * wpp;
         float back[3];
         Mad3( tail, dir, h * 2.0f, back );
@@ -494,9 +433,7 @@ namespace
     }
 
     // ── the projected frustum ───────────────────────────────────────────────
-    // (u, v, L) is orthonormal, so any world point q is exactly
-    // u*(q.u) + v*(q.v) + L*(q.L) — which is what makes the projected box corners
-    // below an identity rather than an approximation.
+    // Orthonormal (u, v, L) makes the projected box reconstruction exact.
     void FrustumPoint( const float u[3], const float v[3], const float L[3],
                        float a, float b, float l, float out[3] )
     {
@@ -509,9 +446,7 @@ namespace
         // L is the direction the light TRAVELS: away from the sun, into the map.
         const float L[3] = { -dir[0], -dir[1], -dir[2] };
 
-        // Any reference not parallel to L gives a valid perpendicular pair; world
-        // Z serves except when L is near-vertical, which is exactly a sun near the
-        // zenith.
+        // Switch references near the zenith so the perpendicular basis stays valid.
         float ref[3] = { 0.0f, 0.0f, 1.0f };
         if ( fabsf( L[2] ) > 0.9f )
         {
@@ -565,8 +500,7 @@ namespace
             if ( !KiwiLines_Add( nearP[i], farP[i] ) )              return;
         }
 
-        // Interior direction rays, so the light direction reads at a glance.  On a
-        // half-step lattice, which keeps every ray off the box's own edges.
+        // Half-step interior rays show direction without overlapping box edges.
         KiwiLines_Color( KSUN_COL_RAY[0], KSUN_COL_RAY[1], KSUN_COL_RAY[2] );
         for ( int i = 0; i < KSUN_RAY_GRID; ++i )
         {
@@ -597,13 +531,9 @@ namespace
 // ═════════════════════════════════════════════════════════════════════════════
 void KiwiSun_RegisterCommands()
 {
-    // Unbound in both profiles: it is a creation verb reached from the Add menu
-    // and by name from the palette, the same rule the other unbound KIWI rows
-    // follow.
+    // Creation/window verbs remain unbound and searchable through the palette.
     Radiant_RegisterCommand( "KiwiPlaceSun", 0, 0, KIWI_CMD_PLACE_SUN );
-    // The §9 window flag, unbound and searchable — the same deal every window entry
-    // gets (kiwi_skybox.cpp:1386 registers "KiwiWindowSky" the same way).  The TOGGLE
-    // itself is not dispatched here: KiwiWindows_DispatchInstant owns every §9 flag.
+    // KiwiWindows_DispatchInstant owns all dock-window toggles.
     Radiant_RegisterCommand( "KiwiWindowSun", 0, 0, KIWI_CMD_WINDOW_SUN );
 }
 
@@ -629,13 +559,9 @@ void KiwiSun_Place()
         return;
     }
 
-    // The sensible daylight set.  `sundirection` is the light compiler's own
-    // default direction expressed as angles; the rest are the keys both compilers
-    // read beside it — cod4rad/mapio.c:303-382 and cod4map/primarylights.cpp:1388-1403.
-    //
-    // `sunIsPrimaryLight` is deliberately NOT written: absent means ON
-    // (primarylights.cpp:1388-1390 returns early only for an explicit 0), so
-    // writing "1" would add a key that changes nothing.
+    // Use the compiler direction plus the daylight keys both compilers consume
+    // (cod4rad/mapio.c:303-382; cod4map/primarylights.cpp:1388-1403).
+    // Do not write sunIsPrimaryLight: absence already means enabled (:1388-1390).
     float dPitch = 0.0f, dYaw = 0.0f;
     AnglesFromDir( KSUN_DEFAULT_DIR, &dPitch, &dYaw );
     char dirBuf[64];
@@ -655,13 +581,8 @@ void KiwiSun_Place()
     };
     const int count = KSUN_DEFAULT_KEYS;
 
-    // WHICH KEYS ARE MISSING IS DECIDED FIRST.  A record opened for a placement
-    // that writes nothing is a phantom Ctrl+Z, and placing a sun on a map that
-    // already has one is the common case (it is how the helper is re-selected).
-    // ValueForKey2 rather than HasKeyValuePair because it matches case-
-    // INSENSITIVELY (entity.cpp:92): a hand-typed "SunLight" is the same key to
-    // both compilers and must not gain a duplicate here.  A key present with an
-    // empty value counts as absent, which is the answer that fixes the map.
+    // Decide all missing keys before opening undo. ValueForKey2 matches keys
+    // case-insensitively (entity.cpp:92); an empty value remains fillable.
     bool missing[KSUN_DEFAULT_KEYS];
     int  toWrite = 0;
     for ( int i = 0; i < count; ++i )
@@ -694,17 +615,12 @@ void KiwiSun_Place()
                     "existing one.  Drag its glyph to move it.\n" );
     }
 
-    // Either way the helper ends SELECTED, so the frustum is up and the drag is
-    // one press away.
+    // Selection is also the no-write result when all keys already exist.
     s_selected = true;
     s_hot      = false;
     s_grabbed  = false;
 
-    // WHERE THE GLYPH IS, said out loud.  The orbit radius is a multiple of the
-    // biggest brush's bounding sphere, so on a large map the glyph is well outside
-    // the geometry and a user looking at the middle of their map sees nothing at
-    // all until they zoom out.  The one line that turns that from a bug report
-    // into a known place to look.
+    // Report the distant glyph position because large-map users may not see it.
     {
         float dir[3], pos[3];
         if ( SunFrame( dir, pos, nullptr ) )      // SunFrame runs EnsureTarget itself
@@ -801,9 +717,7 @@ bool KiwiSun_HandleDown( int imgX, int imgY )
     if ( !WorldAngles( &pitch, &yaw ) )
         return false;
 
-    // GRAB-REBASE: latch the pair and drive the drag from the travel SINCE, so a
-    // press with no movement is exactly a no-op (the discipline kiwi_lollipop.h
-    // states for every handle in this layer).
+    // Absolute-from-latch travel keeps a press without movement a no-op.
     s_grabPitch = pitch;
     s_grabYaw   = yaw;
     s_accX      = 0.0f;
@@ -867,9 +781,7 @@ void KiwiSun_HandleAbort()
 
 void KiwiSun_Hover( int imgX, int imgY, bool over )
 {
-    // Not gated on `s_selected`: the glyph brightening under the cursor is how a
-    // user learns it is clickable at all, and the first click is the one that
-    // selects it.  GlyphHit self-gates on there BEING a sun.
+    // Hover is not selection-gated; it advertises the glyph before the first click.
     const bool was = s_hot;
     s_hot = over && KiwiSun_GlyphHit( imgX, imgY );
     if ( s_hot != was )
@@ -912,16 +824,8 @@ namespace
     const float KSUNUI_FIELD_W = 96.0f;
 
     // ── THE LIVE EDIT BUFFERS, AND WHY THEY EXIST ───────────────────────────
-    // Every field here writes a worldspawn key through WriteKey, which opens an
-    // undo record.  An ImGui number field reports a change on EVERY frame it is
-    // being dragged, so binding one straight to WriteKey would mint a record per
-    // frame — the exact opposite of the "one gesture, one undo step" rule the
-    // orbit drag follows.  So each field edits a BUFFER and commits once, on the
-    // frame ImGui says the item was deactivated after an edit (or Enter was
-    // pressed).  That is the same shape kiwi_uveditor.cpp's numeric row uses
-    // (kiwi_uveditor.cpp:3810-3814); this file's only addition is that the buffer
-    // is RELOADED from the map whenever the field is not being edited, so an orbit
-    // drag, an undo or the entity window all show up here on the next frame.
+    // Buffer live ImGui edits and commit on deactivation/Enter so one gesture makes
+    // one undo record. Reload inactive fields so external edits and undo appear.
     float s_uiPitch    = 0.0f;
     float s_uiYaw      = 0.0f;
     float s_uiLight    = 0.0f;
@@ -929,15 +833,8 @@ namespace
     bool  s_uiEditing[3] = { false, false, false };   // pitch / yaw / sunlight
     bool  s_uiEditingColor = false;
 
-    // Select the helper and put the camera where BOTH the glyph and the geometry it
-    // lights are on screen: the orbit target's own box, grown to contain the glyph.
-    // Framing the glyph alone would fill the view with empty sky, and framing the
-    // target alone is what leaves the glyph off screen in the first place — which is
-    // the whole reason this button exists on a big map.
-    //
-    // No undo bracket: it moves the camera and changes one KIWI-owned selection
-    // flag, and kiwi_focus.h states the rule for exactly this case ("it moves the
-    // camera... there is no bracket and no journal ticket").
+    // Frame the union of target and glyph; either alone can hide the other.
+    // Camera motion plus KIWI-owned selection needs no undo bracket (kiwi_focus.h).
     void SelectAndFrame()
     {
         float dir[3], pos[3];
@@ -970,18 +867,11 @@ void KiwiSun_Draw()
         const bool    have  = KiwiSun_Exists();
 
         // ── place ───────────────────────────────────────────────────────────
-        // GREYED ONLY when there is no worldspawn to write onto.  It is deliberately
-        // NOT greyed by "a sun already exists": KiwiSun_Place fills the keys that are
-        // MISSING, so on a hand-authored map that carries `sundirection` and nothing
-        // else the button is the one thing that completes the set — and greying it
-        // would make the button disagree with the palette command and the Add-menu
-        // row, which are the same entry point.  The LABEL carries the difference
-        // instead, so the affordance never reads as "this will overwrite my sun".
+        // Existing suns stay enabled because placement fills only missing keys; the
+        // label makes clear that existing values are not overwritten.
         ImGui::BeginDisabled( !KiwiSun_CanPlace() );
         if ( ImGui::Button( have ? "Fill missing sun keys" : "Place Sun" ) )
-            KiwiSun_Place();               // the SAME entry point the command and the
-                                           // Add-menu row run, so the three can never
-                                           // diverge (kiwi_sun.h)
+            KiwiSun_Place();               // shared by the tab, command, and Add menu
         ImGui::EndDisabled();
         if ( ImGui::IsItemHovered() )
             ImGui::SetTooltip(
@@ -1027,8 +917,7 @@ void KiwiSun_Draw()
         ImGui::BeginDisabled( !have || wd == nullptr );
 
         // ── pitch / yaw ─────────────────────────────────────────────────────
-        // Reloaded from the map on every frame the field is not being edited, so
-        // an orbit drag or a Ctrl+Z shows up here immediately.
+        // Reload inactive fields so orbit drags and Ctrl+Z appear immediately.
         {
             float livePitch = 0.0f, liveYaw = 0.0f;
             if ( KiwiSun_Angles( &livePitch, &liveYaw ) )
@@ -1063,8 +952,7 @@ void KiwiSun_Draw()
 
         if ( pitchDone || yawDone )
         {
-            // The SAME clamp and the SAME wrap the drag applies, so a typed value
-            // and a dragged one can never end up in different ranges.
+            // Typed and dragged angles share the same clamp and wrap.
             if ( !( s_uiPitch >= KSUN_PITCH_MIN ) ) s_uiPitch = KSUN_PITCH_MIN;
             if ( s_uiPitch > KSUN_PITCH_MAX )       s_uiPitch = KSUN_PITCH_MAX;
             s_uiYaw = WrapDeg( s_uiYaw );
@@ -1073,16 +961,9 @@ void KiwiSun_Draw()
         }
 
         // ── the two keys a mapper reaches for next ──────────────────────────
-        // Scope, stated: this tab edits the sun's AIM and its BRIGHTNESS/COLOUR and
-        // nothing else.  `sundiffusecolor`, `diffusefraction`, `ambient` and
-        // `_color` are placed with sensible defaults and left to the entity window
-        // — they are ambient-model tuning, not "where is the sun and how strong is
-        // it", and a tab that grows into a second entity editor stops being a
-        // helper.  Same line the Sky tab draws around its own two numbers.
-        // BeginDisabled GREYS a widget; it does not skip the code around it, so
-        // every read below is guarded on `wd` rather than on the disabled state —
-        // Entity_GetFloatValueForKey / Entity_GetVec3ForKey both walk `e->epairs`
-        // and would dereference a null worldspawn (entity.cpp:102 / :111).
+        // Limit this helper to aim, brightness, and colour; ambient-model keys stay
+        // in the entity window. BeginDisabled does not skip reads, so guard `wd`
+        // before Entity_Get* walks e->epairs (entity.cpp:102,111).
         if ( wd && !s_uiEditing[2] )
             s_uiLight = Entity_GetFloatValueForKey( (int)(intptr_t)wd, "sunlight" );
 
@@ -1093,9 +974,8 @@ void KiwiSun_Draw()
         s_uiEditing[2] = ImGui::IsItemActive();
         if ( litEnter || ImGui::IsItemDeactivatedAfterEdit() )
         {
-            // The light compiler raises sunlight to `ambient` when it is below it
-            // (cod4map/primarylights.cpp:1406-1410) and there is no meaning to a
-            // negative one, so the floor is 0 here and the compiler owns the rest.
+            // Sunlight cannot be negative; the compiler owns the ambient floor
+            // (cod4map/primarylights.cpp:1406-1410).
             if ( !( s_uiLight >= 0.0f ) )
                 s_uiLight = 0.0f;
             char buf[32];

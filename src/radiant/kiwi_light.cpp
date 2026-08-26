@@ -232,8 +232,7 @@ namespace
         return v;
     }
 
-    // Fixed-point labels avoid ImGui's scientific notation while retaining useful
-    // map-key precision; trailing zeroes are removed for compact status text.
+    // Fixed-point labels retain map-key precision without scientific notation or trailing zeroes.
     void FormatFloat( char *out, size_t outSize, float value, int decimals = 3 )
     {
         if ( !out || !outSize )
@@ -361,16 +360,13 @@ namespace
         }
         out->cosInner = cosf( out->fovInner * KLIGHT_PI / 360.0f );
 
-        // The preview classifier is the ported Entity_Light rule: bit 1 means
-        // omni; otherwise a missing/invalid target cone also becomes omni.
+        // Ported Entity_Light classifies bit 1 and missing/invalid target cones as omni.
         out->previewSpot = !( out->flags & 1 ) && out->target
                         && out->cosOuter < out->cosInner;
         return true;
     }
 
-    // The per-entity acceptance gates are shared by the status panel and the
-    // preview policy.  The compiler's global 255-primary sort/cap and per-surface
-    // assignment require the compiled BSP and intentionally remain compile-time.
+    // Status/preview share per-entity gates; the BSP-only 255-primary cap/sort and surface assignment stay compile-time.
     GameLightReject GameLightRejection( const LightInfo &light )
     {
         if ( !( light.flags & 3 ) )
@@ -613,8 +609,7 @@ namespace
             if ( created )
             {
                 entity_s_def *targetDef = (entity_s_def *)targetBrush->owner->def;
-                // CreateEntityFromName already stamped this new entity with
-                // Undo_SetIdForEntity; only the pre-existing lights need snapshots.
+                // CreateEntityFromName assigns the new undo ID; snapshot only pre-existing lights.
                 SetKeyValue( targetDef, "targetname", targetName.c_str() );
                 for ( size_t i = 0; i < lights.size(); ++i )
                 {
@@ -956,8 +951,7 @@ void KiwiLight_DrawXY( selbrush_t *brush, int viewType )
     KiwiLines_Color( Clamp(light.effectiveColor[0], 0.0f, 1.0f),
                       Clamp(light.effectiveColor[1], 0.0f, 1.0f),
                       Clamp(light.effectiveColor[2], 0.0f, 1.0f) );
-    // Ed_DrawSelectedRadius maps its circle to XY, XZ, or YZ for the active view.
-    // This hook adds only the spot cone and axis.
+    // Ed_DrawSelectedRadius supplies the view-plane circle; add only the spot cone and axis.
     if ( light.previewSpot )
     {
         EmitXYCone( light, light.cosOuter, 1.0f, viewType );

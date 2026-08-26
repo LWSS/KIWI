@@ -1,35 +1,9 @@
 #ifndef KISAK_RADIANT
 #error this file is only for Radiant!
 #endif
-// ─────────────────────────────────────────────────────────────────────────────
-// kiwi_selection.cpp — RADIANT_UX_DESIGN §1 implementation.  See kiwi_selection.h
-// for the model and the three design notes (instance-vs-def pointer, how face
-// selection is really stored in this port, edge/vertex indexing).
-//
-// ── LEGACY HOOK SITES (all marked `// KIWI-UX` at the call site) ─────────────
-// Every legacy path that can change the selection passes through one of these:
-//   brush.cpp  Brush_AddToList2      — the ONLY link into selected_brushes
-//   brush.cpp  Brush_RemoveFromList  — the ONLY unlink from a display list
-//   select.cpp Select_Deselect       — splices selected→active directly (bypasses
-//                                      the pair above)
-//   select.cpp Select_Invert         — swaps both list heads directly (ditto)
-//   select.cpp SelectedFaceArray::SetSize   — every face-selection size change
-//                                      (::Add funnels through it)
-//   select.cpp SelectedFaceArray::RemoveAt  — the one face removal that does not
-//   undo.cpp   Undo_Undo / Undo_Redo  — wholesale list rebuilds; the tail hook is
-//                                      belt-and-braces over the funnels above
-//
-// ── DEVIATION FROM THE SPEC (flagged) ────────────────────────────────────────
-// §1 says the rebuild is "called at defined sync points — never lazily".  Two of
-// the funnels above (Brush_AddToList2 / Brush_RemoveFromList) are per-BRUSH and
-// run inside bulk loops (Select_ByClass, Select_Connected, Select_Invert,
-// Map_LoadFile, …), so an eager O(selection) rebuild inside them is O(N²).  The
-// hook body is therefore an O(1) invalidation and the rebuild is forced by
-// KiwiSel(), the single accessor.  This is observationally identical to the eager
-// form — nothing between a hook and the next KiwiSel() can read selection_t —
-// while staying linear.  Sel_RebuildFromLegacy() remains callable directly for
-// any site that wants the eager guarantee.
-// ─────────────────────────────────────────────────────────────────────────────
+// Typed selection and legacy-selection adapter; see kiwi_selection.h for indexing.
+// Legacy list, face-array, and undo hooks only invalidate: eager rebuilds from the
+// per-brush hooks would make bulk selection O(N²). KiwiSel() rebuilds before use.
 
 #include "stdafx.h"
 #include <universal/assertive.h>
@@ -40,18 +14,13 @@
 
 // ── legacy entry points (verified against their definitions) ────────────────
 extern float world_orient_matrix[4][3];                          // entity.cpp(0x6DE290)
-// KIWI-UX (CLEANUP, C-55): no local `extern selbrush_t active_brushes;` — qe3.h
-// (included above) declares both display-list sentinels.
 
 extern void Select_Deselect( int bAlsoFreeFaces );               // select.cpp 0x48E800
 extern void Select_Brush( selbrush_t *brush, char some_overwrite,
                           char bStatus, char center_grid_on_selection ); // select.cpp 0x48DCC0
 extern void sub_477D70( selbrush_t *b, const float *mat );       // brush.cpp  Brush_CheckBuildFaceVis
-// KIWI-UX (CLEANUP, C-40): the ONE per-brush hide writer, used to re-assert a hide
-// that Brush_AddToList2's `brushFlags &= ~0x1Fu` clears — see Sel_SyncToLegacy.
+// Re-applies hidden state that Brush_AddToList2 clears; see Sel_SyncToLegacy.
 extern void KiwiVis_SetHidden( selbrush_t *b, bool hidden );     // kiwi_visibility.h:141 / kiwi_visibility.cpp:289
-// (SetupVertexSelection, select.cpp 0x494BC0, is NO LONGER called from here —
-//  see the note in Sel_SyncToLegacy pass 1.)
 
 namespace
 {
@@ -59,15 +28,11 @@ namespace
     sel_mask_t  s_modeMask   = SEL_MASK_EVERYTHING;   // "5 Everything" is the start mode
     unsigned    s_generation = 1;
 
-    // Re-entrancy + laziness state.  s_syncing suppresses the rebuild hooks while
-    // Sel_SyncToLegacy drives legacy code (Select_Deselect / Select_Brush /
-    // g_SelectedFaces all fire them); s_rebuilding is belt-and-braces.
+    // Suppress notifications driven by our own sync and guard rebuild recursion.
     bool s_syncing    = false;
     bool s_rebuilding = false;
     bool s_dirty      = true;    // first KiwiSel() adopts whatever legacy state exists
-    // KIWI-UX (shakeout D): set by Sel_NoteLegacyDeselect, consumed by the next
-    // rebuild.  "The pending legacy change was a wholesale deselect, so do NOT
-    // carry the edge/vertex items over it."  See kiwi_selection.h.
+    // Explicit legacy deselects suppress edge/vertex carry on the next rebuild.
     bool s_deselected = false;
 
     // The instance's brush definition, or NULL when the node is not usable.
@@ -76,9 +41,7 @@ namespace
         return b ? b->def : nullptr;
     }
 
-    // A brush winding, or NULL. `faceIndex` is bounds-checked against the DEF's
-    // face count (the instance's faceCount is a cache that is 0 until the first
-    // camera draw — SetupVertexSelection documents the same trap).
+    // Use the definition's face count; the instance cache can remain zero until draw.
     winding_t *WindingOf( const selbrush_t *b, int faceIndex )
     {
         brush_t *def = DefOf( b );
@@ -96,15 +59,7 @@ namespace
         return ( b && b->patch && def ) ? def->patch : nullptr;
     }
 
-    // Is this item still addressable in the live map data?
-    // CRASH FIX (user report, 0xDDDDDDDD deref in WindingOf): the node must be
-    // LIVE before ANY deref.  A cancelled/invalid edge move runs Undo_Undo, which
-    // FREES the live selbrush nodes and relinks clones; the carried edge/vertex
-    // items in Sel_RebuildFromLegacy then hold freed pointers, and this function
-    // was the first deref on the rebuild path.  Sel_BrushLive walks the two
-    // display lists comparing POINTERS only, so the check itself is safe against
-    // freed memory.  Guarding here (not just at the carried loop) closes the same
-    // hole for every other ItemResolves caller (Sel_SyncToLegacy passes 1 and 2).
+    // Undo may replace cached nodes, so liveness must be checked before any dereference.
     bool ItemResolves( const sel_item_t &it )
     {
         if ( !Sel_BrushLive( it.brush ) )
@@ -210,9 +165,7 @@ sel_item_t Sel_MakePatchPoint( selbrush_t *b, int ctrlIndex )
     return Sel_MakeVertex( b, -1, ctrlIndex );
 }
 
-// ─── KIWI-UX (CLEANUP, A-14 / A-13 / C-49) — item → world geometry ───────────
-// The three questions the layer used to answer in nine private copies.  See
-// kiwi_selection.h for what each guard is and which copy it came from.
+// ─── item → world geometry ───────────────────────────────────────────────────
 bool Patch_DimsSane( const patchMesh_t *pm )
 {
     return pm && pm->width > 0 && pm->height > 0
@@ -221,9 +174,7 @@ bool Patch_DimsSane( const patchMesh_t *pm )
 
 namespace
 {
-    // The winding behind (brush, faceIndex), with the numpoints bound the strict
-    // copies carried.  `minPoints` is 2 for an edge, 1 for a vertex — the only
-    // difference between the two resolutions' winding guards.
+    // minPoints distinguishes edge (2) from vertex (1) resolution.
     const winding_t *StrictWinding( const sel_item_t &it, int minPoints )
     {
         if ( !it.brush || !it.brush->def )
@@ -373,10 +324,8 @@ bool Sel_Toggle( selection_t &sel, const sel_item_t &item )
 }
 
 // ─── selection_t → legacy ────────────────────────────────────────────────────
-// Order matters: Select_Brush asserts `g_SelectedFaces.GetSize() == 0 || patch`
-// (select.cpp:426), so the whole-brush selection MUST be pushed before any face
-// selection.  Select_Deselect(1) first, so every brush is back on active_brushes
-// (Brush_RemoveFromList requires a linked node) and the face array is empty.
+// Select_Brush requires an empty face array, so whole brushes precede faces.
+// Select_Deselect(1) also relinks brushes before Select_Brush removes them.
 void Sel_SyncToLegacy()
 {
     if ( s_syncing )
@@ -386,36 +335,8 @@ void Sel_SyncToLegacy()
     Select_Deselect( 1 );
 
     // ── pass 1: whole-brush selection ────────────────────────────────────────
-    // ONLY SEL_OBJECT selects its brush.
-    //
-    // SHAKEOUT D — THE PROMOTION IS GONE.  USER DIRECTIVE: "When selecting an
-    // edge, the entire solid (Brush in this case) should not get selected as
-    // well, only the edge/s."  SEL_VERTEX / SEL_EDGE used to promote their owner
-    // brush into `selected_brushes` so the ported vertex-edit handles
-    // (d_points / d_edges, rebuilt by SetupVertexSelection from the SELECTED
-    // brushes) had something to work from — which also made the whole brush
-    // light up red, which is what the user is objecting to.  SEL_FACE never
-    // promoted (a face selection and a brush selection are mutually exclusive in
-    // the legacy model — sub_48E170 converts one into the other), and now the
-    // fine kinds behave the same way.
-    //
-    // WHAT THAT COSTS, checked consumer by consumer before cutting it:
-    //   * kiwi_transform's BeginEdges / BeginVerts read KiwiSel().items DIRECTLY
-    //     and cover their brushes with UndoCoverBrush in OpenUndoForBrushes
-    //     (kiwi_transform.cpp) — they never depended on Undo_AddBrushList seeing
-    //     the brush, exactly as the FACE path already did not.
-    //   * kiwi_bevel's edge path is the same shape (its own undo cover, items
-    //     read directly).
-    //   * SetupVertexSelection is no longer called from here at all: it walks
-    //     `selected_brushes` (select.cpp:4595) and would now always produce an
-    //     EMPTY handle list.  Its only consumers are the legacy handle draw and
-    //     the legacy SelectVertexByRay / MoveSelection drag, none of which the
-    //     modern layer uses — the fine kinds are drawn by the shakeout-D accent
-    //     pass in kiwi_hover.cpp instead.
-    //   * KiwiXform_CanRotate / CanScale test `selected_brushes` (they are
-    //     whole-object ops), so R and S now correctly REFUSE on a pure
-    //     edge/vertex selection instead of silently rotating the whole brush.
-    //   * Sel_RebuildFromLegacy's carry rule had to change with it — see there.
+    // Only objects enter selected_brushes; promoting fine-component owners would
+    // render and operate on them as whole brushes. Fine transforms consume KiwiSel().
     std::vector<selbrush_t *> brushes;
 
     for ( size_t i = 0; i < s_selection.items.size(); ++i )
@@ -431,18 +352,8 @@ void Sel_SyncToLegacy()
             brushes.push_back( it.brush );
     }
 
-    // ── KIWI-UX (CLEANUP, C-40): SELECTING A BRUSH MUST NOT UN-HIDE IT ────────
-    // Select_Brush -> Brush_AddToList2 ends with `b->brushFlags &= ~0x1Fu`
-    // (brush.cpp:940), which clears bits 0..4 — and the hide bit is VALUE 4
-    // (bit index 2: select.cpp:4168 `|= 4u`, KVIS_HIDDEN_BIT), inside that mask.  It does
-    // not clear `xx5`, so the brush landed bit-clear/depth-1, a pair
-    // KiwiVis_SetHidden never produces, and nothing re-asserted it afterwards:
-    // one outliner click on a hidden brush destroyed the hide that
-    // KiwiVis_SidecarLoadApply had just restored.  The ported mask is FAITHFUL
-    // and is not touched; the state is re-applied here instead, through the one
-    // writer, AFTER the sync (before it, and Brush_AddToList2 would stomp it).
-    // Only the brushes being ADDED can lose it — Select_Deselect / the deselect
-    // helper leave brushFlags bit 4 alone.
+    // Brush_AddToList2 clears bits 0..4, including hidden value 4. Restore hidden
+    // state through the canonical writer after Select_Brush has cleared the mask.
     std::vector<char> wasHidden( brushes.size(), 0 );
     for ( size_t i = 0; i < brushes.size(); ++i )
         wasHidden[i] = ( ( (unsigned)brushes[i]->brushFlags & 4u ) != 0 ) ? 1 : 0;
@@ -492,11 +403,8 @@ void Sel_SyncToLegacy()
 }
 
 // ─── legacy → selection_t ────────────────────────────────────────────────────
-// SEL_OBJECT comes from the selected_brushes sentinel list, SEL_FACE from
-// g_SelectedFaces.  SEL_VERTEX/SEL_EDGE have no legacy source (d_move_points
-// holds raw float* into the deduped d_points scratch, which cannot be mapped back
-// to a (brush, face, vert) triple), so surviving vertex/edge items are CARRIED
-// OVER when their owning brush is still selected and their indices still resolve.
+// Objects and faces have legacy sources. Edge/vertex identity does not round-trip,
+// so live fine-component items carry unless an explicit deselect drops them.
 void Sel_RebuildFromLegacy()
 {
     if ( s_syncing || s_rebuilding )
@@ -528,17 +436,7 @@ void Sel_RebuildFromLegacy()
         s_selection.items.push_back( Sel_MakeFace( sf.brush, sf.index ) );
     }
 
-    // Carry the new-model-only kinds.
-    //
-    // SHAKEOUT D: the condition WAS "the owning brush is still on
-    // selected_brushes", which only ever held because pass 1 of the sync PROMOTED
-    // those owners.  With the promotion removed (see there) an edge-only
-    // selection leaves the legacy lists empty, and that test would have thrown
-    // the selection away on the very next legacy change.  The rule is now
-    // "the item still resolves" — ItemResolves already carries the Sel_BrushLive
-    // guard, so a freed node can never be carried — and the ONE case that must
-    // still drop them, an explicit user deselect, announces itself through
-    // Sel_NoteLegacyDeselect rather than being inferred from an empty list.
+    // Empty legacy lists are valid for fine selection; only explicit deselect drops it.
     if ( !s_deselected )
         for ( size_t i = 0; i < carried.size(); ++i )
             s_selection.items.push_back( carried[i] );

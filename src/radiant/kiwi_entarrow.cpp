@@ -15,7 +15,6 @@
 #include <stdio.h>
 #include <string.h>
 
-// KIWI: Verified against entity.cpp's entity-list sentinel definition.
 extern entity_s entities;                                                  // entity.cpp:295
 
 namespace
@@ -91,8 +90,8 @@ namespace
             have = true;
         }
 
-        // KIWI: A fixed-size entity normally has a bbox brush; this keeps the API
-        // useful during the short interval before that display proxy is rebuilt.
+        // Entity defs overlay their brush_t sentinel at &ent->def (Entity_LinkBrush, 0x484FC0).
+        // Fixed-size entities can briefly lack a bbox brush while their display proxy rebuilds.
         if ( !have && ent->eclass && ent->eclass->fixedsize )
         {
             for ( int k = 0; k < 3; ++k )
@@ -116,8 +115,7 @@ namespace
             return;
         }
 
-        // KIWI: Brush entities honour an explicit origin; otherwise their complete
-        // brush-def bounds supply the same stable centre used by selection framing.
+        // Brush entities use an explicit origin; otherwise use the full brush-def bounds center.
         if ( ParseVec3( ent, "origin", out ) )
             return;
         if ( haveBounds )
@@ -153,8 +151,7 @@ namespace
         {
             const entity_s_def *candidate = (const entity_s_def *)it;
             const char *targetname = FirstKey( candidate, "targetname" );
-            // KIWI: Connection lines use a case-sensitive value match; facing uses
-            // that same Radiant target-resolution convention.
+            // Match connection lines: target values are case-sensitive.
             if ( targetname && !strcmp( targetname, target ) )
                 return candidate;
         }
@@ -176,8 +173,7 @@ namespace
         }
 
         const entity_s_def *resolved = FindTarget( target );
-        // KIWI: Cache resolved and unresolved targets against the editor's global
-        // change epoch so camera, XY, and helper-panel queries share one scan.
+        // Cache hits and misses until the editor's global change epoch advances.
         if ( s_targetCount < KENTARROW_MAX_ARROWS )
         {
             s_targetCache[s_targetCount].source = source;
@@ -246,8 +242,7 @@ namespace
             {
                 float yaw = 0.0f;
                 sscanf( angleValue, "%f", &yaw );
-                // KIWI: Radiant has no single-key direction reader, so retain the
-                // Quake angle convention: -1 is up, -2 is down, otherwise yaw.
+                // Quake single-angle convention: -1 is up, -2 is down, otherwise yaw.
                 if ( yaw == -1.0f )
                 {
                     dir[0] = 0.0f; dir[1] = 0.0f; dir[2] = 1.0f;
@@ -267,7 +262,7 @@ namespace
             }
         }
 
-        // KIWI: Point-like entities face +X when their implicit angles are 0 0 0.
+        // Point-like entities with implicit 0 0 0 angles face +X.
         if ( source == FACING_NONE && ( !target || !*target )
              && !anglesValue && !angleValue )
         {
@@ -330,8 +325,7 @@ namespace
             out[2] = ent->eclass->color[2];
         }
 
-        // KIWI: Lights retain their authored hue; `_color` takes precedence over
-        // the eclass swatch, matching the existing entity-colour path.
+        // Lights use authored `_color` in preference to the eclass swatch.
         if ( ent && ent->eclass && ( ent->eclass->classtype & 0x1 ) != 0 )
         {
             float lightColor[3];
@@ -374,8 +368,7 @@ namespace
         int seenCount = 0;
         int arrowCount = 0;
 
-        // KIWI: One selected-list walk and one facing query per unique owner keep
-        // brush entities from multiplying arrows or target scans by brush count.
+        // Query each unique owner once so brush count cannot multiply arrows or target scans.
         for ( selbrush_t *b = selected_brushes.next;
               b && b != &selected_brushes; b = b->next )
         {

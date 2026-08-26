@@ -1,14 +1,8 @@
 #ifndef KISAK_RADIANT
 #error this file is only for Radiant!
 #endif
-// ─────────────────────────────────────────────────────────────────────────────
-// kiwi_arrange.cpp — ROUND K: the planar arrangement.  See kiwi_arrange.h for the
-// user directive, the two Plasticity files this mirrors (with line cites), why the
-// existing endpoint passes cannot answer the # case, and every cap.
-//
-// NEW code.  It touches NO map data and NO store data: it reads the construction
-// store through the const accessors and builds a throwaway view.
-// ─────────────────────────────────────────────────────────────────────────────
+// Builds a throwaway planar view from construction segments without modifying
+// map, selection, or construction data.
 
 #include "stdafx.h"
 #include "qe3.h"
@@ -21,48 +15,15 @@
 #include <stdio.h>
 #include <vector>
 
-// ── ported entry points (each verified against its DEFINITION) ────────────
-//   win_qe3.cpp:112   int Sys_Printf( const char *fmt, ... )
-// (nothing else: this file reads the construction store through its const
-//  accessors and never touches map data, the renderer or the selection.)
 extern int Sys_Printf( const char *fmt, ... );
 
 namespace
 {
-    // Two split parameters closer than this along one segment are the SAME cut.
-    // Deliberately tighter than the weld tolerance: a parameter is dimensionless
-    // and this is applied after multiplying back by the segment length, so it is a
-    // world distance and it is KCON_ISECT_DIST — the same number that decided the
-    // crossing existed in the first place.
+    // Merge cuts by the world-distance tolerance that recognized the intersection.
     const float KARRG_CUT_MERGE = KCON_ISECT_DIST;
 
-    // Node welding.  KREG_JOIN_DIST is §8's ONE slop (kiwi_construct.h says so out
-    // loud), and using anything else here would mean a loop that welds for the
-    // chain walker does not weld for the arrangement.
-    // ROUND AF, ITEM 5: …and KREG_JOIN_DIST is a FLOOR now, not the value.  The
-    // arrangement welds at exactly the distance the chain walker welds at, which
-    // is the whole point of there being one slop — so it asks the same accessor.
-    //
-    // ── ROUND AG, ITEM 2: AND IT IS BOUNDED BY THE INPUT ────────────────────
-    // The grid-scaled weld is the right number for USER-PLACED endpoints and the
-    // wrong number for TESSELLATED ones (kiwi_region.h A WELD MAY NEVER EXCEED THE
-    // GEOMETRY IT IS WELDING).  At grid 16 the unbounded weld is 4.0, and a
-    // radius-32 arc has 3.1-unit edges — so NodeFor welded each arc vertex onto
-    // its predecessor, every one of that arc's fragments came back with
-    // n0 == n1 and was dropped, and the arc left the arrangement entirely.  The
-    // cells it bounded then did not exist, silently.  That was the unfilled arch.
-    //
-    // So the weld is computed ONCE per call from the actual input — it is no
-    // longer a free function, because "the weld" is now a property of the group
-    // being arranged rather than of the editor's global state.  It is threaded
-    // through as a parameter to the two places that consume it.
-    // KIWI-UX (CLEANUP, A-11): deliberately NOT KiwiRegion_FinestEdge.  That
-    // helper walks a CHAIN of consecutive points; `world` here is a list of
-    // INDEPENDENT segments, six floats per entry with both endpoints inside the
-    // entry, so the enumeration is a different question even though the floor,
-    // the tie-break and the KiwiRegion_WeldFor tail below are identical.  Folding
-    // it in would mean measuring one segment's end against the next segment's
-    // start, which is not an edge of anything.
+    // Bound the grid-aware weld by the shortest input segment so tessellated edges
+    // cannot collapse. `world` stores independent segments, not a point chain.
     float ArrangeWeld( const std::vector<float> &world )
     {
         const int n = (int)( world.size() / 6 );
@@ -105,19 +66,8 @@ namespace
         return sqrtf( dx * dx + dy * dy );
     }
 
-    // ── STEP 1: FRAGMENT ────────────────────────────────────────────────────
-    // Every mutual crossing of `segs` becomes a cut parameter on BOTH segments —
-    // which is precisely PlanarCurveDatabase's "this intersection cuts the curve
-    // in two […] then we process the next curve, since it also has been cut in
-    // two" (kiwi_arrange.h cites the docstring).
-    //
-    // The crossing test itself is KiwiCon_SegSegClosest, in 3D, on the ORIGINAL
-    // world segments rather than on the projected 2D ones.  That is not a detour:
-    // the group is coplanar only to within KCON_PLANE_FIT_DIST, so two segments
-    // that are half a unit apart along the normal would cross EXACTLY in the
-    // projection and not at all in space, and the projection is the one place the
-    // editor could invent a crossing the user cannot see.  Trim asks the question
-    // the same way, at the same tolerance.
+    // Test original 3D segments so projection cannot invent crossings in a merely
+    // near-coplanar group. This matches Trim's closest-point test and tolerance.
     void GatherCuts( const std::vector<float> &world,      // 6 floats per segment
                      std::vector< std::vector<float> > *cuts )
     {
@@ -135,12 +85,8 @@ namespace
                                                        &ta, &tb, 0 );
                 if ( d > KCON_ISECT_DIST )
                     continue;
-                // A crossing AT an end of either segment is already a node once the
-                // endpoints weld, so recording it as a cut costs one degenerate
-                // fragment that the weld then collapses.  Recorded anyway: a
-                // T-junction (one segment's END landing mid-span on the other) is
-                // exactly the case where ONE side needs the cut and the other does
-                // not, and testing which is which here would be a second rule.
+                // Keep endpoint hits: a T-junction still needs a cut on its mid-span side.
+                // SortAndMerge discards the endpoint cut before fragmentation.
                 ( *cuts )[(size_t)i].push_back( ta );
                 ( *cuts )[(size_t)j].push_back( tb );
             }
@@ -151,8 +97,7 @@ namespace
     {
         if ( t->empty() )
             return;
-        // Insertion sort: a segment with more than a handful of cuts is already
-        // rare, and this keeps the file free of <algorithm> for four lines.
+        // Cut lists are small enough for insertion sort.
         for ( size_t i = 1; i < t->size(); ++i )
         {
             const float v = ( *t )[i];
@@ -164,7 +109,7 @@ namespace
             }
             ( *t )[k] = v;
         }
-        // Merge cuts that land within KARRG_CUT_MERGE of each other IN WORLD UNITS.
+        // Convert the world-distance merge tolerance to a segment parameter.
         const float tol = ( lengthWorld > 1.0e-4f ) ? ( KARRG_CUT_MERGE / lengthWorld ) : 1.0f;
         std::vector<float> out;
         for ( size_t i = 0; i < t->size(); ++i )
@@ -179,9 +124,6 @@ namespace
         t->swap( out );
     }
 
-    // ── STEP 2: the node set ────────────────────────────────────────────────
-    // ROUND AG, ITEM 2: `weld` is passed in (ArrangeWeld above) rather than read
-    // from the global grid.
     int NodeFor( std::vector<float> *nodes, const float p[2], float weld )
     {
         const int n = (int)( nodes->size() / 2 );
@@ -199,26 +141,11 @@ namespace
         return n;
     }
 
-    // ── STEP 3: the face walk ───────────────────────────────────────────────
-    // For half-edge h = (a -> b): at b, find h's TWIN (b -> a) in b's outgoing list
-    // sorted by angle, and take the entry BEFORE it, wrapping.  "Before it" in
-    // ascending-angle order is the CLOCKWISE neighbour, and taking the clockwise
-    // neighbour of the twin at every node is the standard rule that traces each
-    // face with its interior on the LEFT.
-    //
-    // Worked, not asserted — triangle A(0,0) B(1,0) C(0,1):
-    //   h = A->B.  At B the outgoing are B->C (135 deg) and B->A (180 deg); the
-    //   twin B->A is index 1, so next = index 0 = B->C.
-    //   h = B->C.  At C the outgoing are C->A (-90) and C->B (-45); twin C->B is
-    //   index 1, so next = index 0 = C->A.
-    //   h = C->A.  At A the outgoing are A->B (0) and A->C (90); twin A->C is
-    //   index 1, so next = index 0 = A->B — closed.
-    // The cycle is A->B->C, whose signed area is POSITIVE, i.e. the bounded cell.
-    // The complementary cycle A->C->B comes out negative and is the outer face.
+    // At h=(a->b), take the edge immediately clockwise from twin (b->a).
+    // Angle-sorted buckets then trace each face with its interior on the left.
     void BuildNext( std::vector<halfEdge_t> &he, int nodeCount )
     {
-        // One angle-sorted outgoing list per node.  Built as a flat bucket array so
-        // the whole thing is two allocations rather than `nodeCount` vectors.
+        // Flat per-node buckets avoid one vector allocation per node.
         std::vector<int> counts( (size_t)nodeCount, 0 );
         for ( size_t i = 0; i < he.size(); ++i )
             ++counts[(size_t)he[i].from];
@@ -232,8 +159,7 @@ namespace
         for ( size_t i = 0; i < he.size(); ++i )
             bucket[(size_t)fill[(size_t)he[i].from]++] = (int)i;
 
-        // Sort each node's bucket by angle (insertion sort — a node's degree is a
-        // handful in every real arrangement, and 4 for a plain crossing).
+        // Node degrees are small enough for insertion sort.
         for ( int nIdx = 0; nIdx < nodeCount; ++nIdx )
         {
             const int lo = start[(size_t)nIdx];
@@ -252,8 +178,7 @@ namespace
             }
         }
 
-        // Where each half-edge sits inside its own node's bucket, so the twin can
-        // be located in O(1) rather than by a scan per step.
+        // Record each half-edge's bucket slot for O(1) twin lookup.
         std::vector<int> slot( he.size(), 0 );
         for ( int nIdx = 0; nIdx < nodeCount; ++nIdx )
             for ( int i = start[(size_t)nIdx]; i < start[(size_t)nIdx + 1]; ++i )
@@ -286,14 +211,12 @@ bool KiwiArrange_Cells( const int *objects, int count, const kconPlane_t &plane,
     if ( !objects || count <= 0 || !outCells )
         return false;
 
-    // ── gather the group's world segments ───────────────────────────────────
+    // Gather world-space segments.
     std::vector<float> world;                   // 6 floats per segment
     for ( int i = 0; i < count; ++i )
     {
         const kconObject_t *o = KiwiCon_At( objects[i] );
-        // ROUND X, ITEM 11: belt-and-braces.  kiwi_region.cpp already filters the
-        // member list it hands over, but this is a public entry point and "hidden
-        // bounds nothing" is a store-wide rule, not a caller's responsibility.
+        // Public entry points enforce the store-wide rule that hidden geometry is inert.
         if ( !o || o->hidden )
             continue;
         const int segs = KiwiCon_SegmentCount( *o );
@@ -317,11 +240,10 @@ bool KiwiArrange_Cells( const int *objects, int count, const kconPlane_t &plane,
     if ( nSeg < 3 )
         return true;                            // fewer than three segments bound nothing
 
-    // ROUND AG, ITEM 2: ONE weld for this call, bounded by this group's own
-    // finest segment.  Everything below asks `weld`; nothing below reads the grid.
+    // Use one geometry-bounded weld throughout this call.
     const float weld = ArrangeWeld( world );
 
-    // ── STEP 1: cut parameters, then fragments ──────────────────────────────
+    // Fragment at crossings.
     std::vector< std::vector<float> > cuts;
     GatherCuts( world, &cuts );
 
@@ -370,7 +292,7 @@ bool KiwiArrange_Cells( const int *objects, int count, const kconPlane_t &plane,
     if ( frag.size() < 3 )
         return true;
 
-    // ── STEP 2: weld into a node set, then a deduped undirected edge set ─────
+    // Weld fragments into a deduplicated undirected edge set.
     std::vector<float>  nodes;                  // 2 floats per node
     std::vector<edge_t> edges;
     for ( size_t i = 0; i < frag.size(); ++i )
@@ -399,7 +321,7 @@ bool KiwiArrange_Cells( const int *objects, int count, const kconPlane_t &plane,
     if ( edges.size() < 3 || nodeCount < 3 )
         return true;
 
-    // ── STEP 3: half-edges, the angular order, and the face walk ────────────
+    // Build angularly ordered half-edges and walk faces.
     std::vector<halfEdge_t> he;
     he.reserve( edges.size() * 2 );
     for ( size_t i = 0; i < edges.size(); ++i )
@@ -427,9 +349,7 @@ bool KiwiArrange_Cells( const int *objects, int count, const kconPlane_t &plane,
         karrCell_t cell;
         int  h    = (int)s;
         bool ok   = true;
-        // The guard is the half-edge count: a well-formed cycle visits each half-
-        // edge at most once, so exceeding it means the `next` links are not a
-        // permutation and the walk must be abandoned rather than looped forever.
+        // A valid cycle cannot visit more half-edges than the graph contains.
         for ( size_t guard = 0; guard <= he.size(); ++guard )
         {
             if ( he[(size_t)h].used )
@@ -451,12 +371,7 @@ bool KiwiArrange_Cells( const int *objects, int count, const kconPlane_t &plane,
             continue;
         if ( (int)( cell.pts.size() / 2 ) > KREG_MAX_LOOP )
         {
-            // ROUND AG, ITEM 2: LOUD.  This was a silent drop and it is half of
-            // "the arch has no fill" — an arch cell carries the whole tessellated
-            // arc, so it blows a cap that a rectangle never gets near.  The cap
-            // itself moved to 2 * KCON_SEGS_MAX (kiwi_region.h); this says so when
-            // even that is not enough, because AcceptLoop's own copy of the test
-            // is never reached for a cell dropped here.
+            // This cell is rejected before AcceptLoop, so report the cap here.
             Sys_Printf( "Construction: an enclosed cell has %i corners and the "
                         "region cap is %i — it is neither filled nor extrudable.  "
                         "Lower the 'sides' count on its round parts.\n",
@@ -464,13 +379,8 @@ bool KiwiArrange_Cells( const int *objects, int count, const kconPlane_t &plane,
             continue;
         }
 
-        // SIGN IS THE BOUNDED/UNBOUNDED TEST.  The walk rule puts the interior on
-        // the left, so a bounded cell is CCW (positive signed area) and the one
-        // outer face of each connected component is CW (negative).  A dangling
-        // "spur" — a line sticking out past a corner, which is EXACTLY what the
-        // user's # picture is full of — is walked out and straight back along the
-        // same edge pair, contributing zero area, so it neither creates a cell nor
-        // corrupts the one it hangs off.
+        // Interior-left walks make bounded faces positive and outer faces negative.
+        // A dangling spur is traversed out and back, contributing zero signed area.
         const float area = KiwiRegion_SignedArea( cell.pts );
         if ( area < KREG_MIN_AREA )
             continue;

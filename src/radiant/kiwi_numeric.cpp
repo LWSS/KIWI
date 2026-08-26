@@ -1,36 +1,30 @@
 #ifndef KISAK_RADIANT
 #error this file is only for Radiant!
 #endif
-// ─────────────────────────────────────────────────────────────────────────────
-// kiwi_numeric.cpp — RADIANT_UX_DESIGN §13 / §13b implementation.
-// See kiwi_numeric.h for the field model, the "kind is a display fact" rule and
-// what the shakeout-E value bubble is for.
-// ─────────────────────────────────────────────────────────────────────────────
+// Numeric entry and value overlays for modal commands.
 
 #include "stdafx.h"
 #include <imgui/imgui.h>
 
 #include "kiwi_numeric.h"
 #include "kiwi_command.h"
-#include "kiwi_hints.h"     // ROUND Z, ITEM 5 — the shared bottom band + the chip toggle
+#include "kiwi_hints.h"     // Shared HUD band and hint visibility.
 #include "kiwi_pick.h"
 #include "kiwi_snap.h"
-#include "kiwi_str.h"        // KIWI-UX (CLEANUP): KiwiStr_LowerAscii, the one case fold
-#include "kiwi_transform.h"  // KIWI-UX (CLEANUP, B-28) — KiwiXform_Is*Active
+#include "kiwi_str.h"        // Shared ASCII case fold.
+#include "kiwi_transform.h"  // Transform-gizmo activity queries.
 #include "kiwi_units.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-// KIWI-UX (CLEANUP, B-29): the console, for the one diagnostic this file emits.
-// FILE SCOPE, not block scope — kiwi_uv.cpp carries the account of why.
+// File scope avoids MSVC namespace-linkage mismatches.
 extern int Sys_Printf( const char *fmt, ... );                          // win_qe3.cpp:118
 
 namespace
 {
-    // 24 chars is far past any coordinate a user types; the buffer is a hard cap,
-    // not a scroll (one field is still one scalar).
+    // 24 chars exceeds practical coordinate input; the buffer is a hard cap.
     enum { KNUM_TEXT_MAX = 24 };
 
     char           s_text[KNUM_MAX_FIELDS][KNUM_TEXT_MAX] = { { 0 } };
@@ -39,9 +33,7 @@ namespace
     int            s_focus      = 0;
     bool           s_tabLive    = false;
 
-    // The pre-shakeout-E grammar, installed by KiwiNum_Reset: one editable
-    // LENGTH field with no name.  Every command written before shakeout E gets
-    // exactly this, so nothing about their entry changes.
+    // Commands without declarations retain one unnamed editable length field.
     const kiwiNumField_t KNUM_DEFAULT_FIELD = { 0, KNUM_LENGTH, false };
 
     bool ValidField( int f )
@@ -59,15 +51,13 @@ namespace
         char *t = s_text[f];
         const size_t n = strlen( t );
         if ( n + 1 >= (size_t)KNUM_TEXT_MAX )
-            return true;                 // consumed, but full — ignore the key
+            return true;                 // Consume input even when full.
         t[n]     = c;
         t[n + 1] = '\0';
         return true;
     }
 
-    // KIWI-UX (ROUND AQ, ITEM 4): "one decimal point" is a property of the number
-    // being typed, not of the whole field — an expression may hold several.  Walk
-    // back from the end over the current numeric run only.
+    // Decimal uniqueness is per numeric run; expressions may contain several numbers.
     bool LastNumberHasDot( int f )
     {
         const char  *t = s_text[f];
@@ -78,7 +68,7 @@ namespace
             if ( c == '.' )
                 return true;
             if ( !( c >= '0' && c <= '9' ) )
-                return false;              // an operator/space/letter ends the run
+                return false;              // Operators, units, and whitespace end the run.
         }
         return false;
     }
@@ -92,48 +82,9 @@ namespace
         return false;
     }
 
-    // ═════════════════════════════════════════════════════════════════════════
-    //  KIWI-UX (ROUND AQ, ITEM 4) — THE EXPRESSION EVALUATOR
-    // ═════════════════════════════════════════════════════════════════════════
-    // USER DIRECTIVE, verbatim: "allow basic math operations when typing units.
-    // Also allow y/yd/i/in/f/ft for unit specifier.  So I can do ex: 12 * 12
-    // (default inch).  OR 12ft * 10 (120ft) OR 10ft6in ALT 10f6i OR 120 + 120
-    // (240 inches).  Also allow fractions like 1/8."
-    //
-    // Everything below works in DISPLAY UNITS (inches).  The single conversion to
-    // world units stays exactly where it was — KiwiNum_ValueWorldField's
-    // Units_FromDisplay — so this is a strictly better `atof` and nothing about
-    // the "kind is a display fact" rule (kiwi_numeric.h) changes.
-    //
-    // GRAMMAR (standard precedence, chosen over left-to-right because "120 + 120
-    // * 2" meaning 360 is what a calculator, a spreadsheet and every CAD input
-    // field in existence do — a mapper who wants the other reading has
-    // parentheses, and a mapper who assumes left-to-right has no way to ask for
-    // precedence at all):
-    //
-    //     expr    := term  { ('+' | '-') term }
-    //     term    := factor { ('*' | '/') factor }
-    //     factor  := ['-' | '+'] factor | '(' expr ')' | compound
-    //     compound:= number [unit] { number [unit] }        // 10ft6in, 10f6i
-    //     unit    := y|yd|yds|yard|yards | f|ft|feet|foot | i|in|ins|inch|inches
-    //
-    // A bare number is INCHES, which is the display unit, so "120 + 120" is 240 in
-    // and "12 * 12" is 144 in.  A COMPOUND is an implicit sum and it only chains
-    // while each piece carries a unit — "10ft6in" is 126 in, while "12 12" is not
-    // an expression at all and is rejected rather than guessed at.
-    //
-    // FRACTIONS NEED NO SPECIAL CASE, and that is the point of using the same
-    // operator: "1/8" is one divided by eight, i.e. 0.125 in, and "10ft/2" is one
-    // hundred and twenty divided by two, i.e. 60 in = 5 ft.  One rule, both
-    // readings, no mode.
-    //
-    // FAILURE IS TOTAL AND SILENT.  Any malformed input — a trailing operator, an
-    // unbalanced paren, a division by zero, junk after the expression — returns
-    // false, which the callers already treat as "this field has no value yet" and
-    // which therefore leaves the gesture on its CURSOR value.  A half-typed
-    // "12 *" is exactly that state, so an expression can be typed one character at
-    // a time without the preview ever seeing garbage.
-    // ═════════════════════════════════════════════════════════════════════════
+    // Results stay in display inches; KiwiNum_ValueWorldField owns the sole world
+    // conversion. Standard precedence, unary signs, parentheses, unit suffixes,
+    // and compounds are accepted; incomplete input fails atomically.
 
     bool IsDigit( char c ) { return c >= '0' && c <= '9'; }
 
@@ -148,16 +99,8 @@ namespace
         return IsDigit( *p ) || ( *p == '.' && IsDigit( p[1] ) );
     }
 
-    // KIWI-UX (CLEANUP, wave-2 leftover): this file's copy of the ASCII case fold
-    // is gone — KiwiStr_LowerAscii (kiwi_str.h) is the one spelling.  It computes
-    // `c + ( 'a' - 'A' )` where this one computed `c - 'A' + 'a'`: the same +32
-    // after the identical ['A','Z'] guard, so it is byte-for-byte the same answer
-    // on every input the unit-suffix parser feeds it, including bytes >= 0x80
-    // (negative on this signed-char target), which both spellings pass through.
-
-    // A unit suffix at `p`, consumed on a match.  Returns the multiplier INTO
-    // INCHES, or 0 when there is no suffix here.  Longest match first, so "in"
-    // never resolves as "i" and "ft" never as "f".
+    // Consumes a unit suffix and returns its multiplier into inches. Longest match
+    // wins so short forms cannot prefix-match their longer forms.
     float ParseUnitSuffix( const char *&p )
     {
         struct unitRow_t { const char *s; float mul; };
@@ -177,9 +120,8 @@ namespace
             while ( s[k] && KiwiStr_LowerAscii( p[k] ) == s[k] )
                 ++k;
             if ( s[k] )
-                continue;                          // ran out of input before the word
-            // Do not let "in" swallow the "i" of a longer word we do not know: the
-            // next character must not be another letter.
+                continue;                          // Not this suffix.
+            // Require a letter boundary rather than prefix-matching an unknown word.
             const char n = KiwiStr_LowerAscii( p[k] );
             if ( n >= 'a' && n <= 'z' )
                 continue;
@@ -210,9 +152,8 @@ namespace
             ok = false;
             return 0.0f;
         }
-        // The COMPOUND: one number, optionally a unit, and then — only while every
-        // piece so far carried a unit — another number.  A unit-less piece ends it,
-        // which is what stops "12 12" from silently becoming 24.
+        // A unit-bearing piece may be followed by another; a bare piece ends the
+        // compound, so "12 12" remains invalid.
         float total = 0.0f;
         for ( ;; )
         {
@@ -227,7 +168,7 @@ namespace
             const float mul = ParseUnitSuffix( p );
             if ( mul <= 0.0f )
             {
-                total += (float)v;                 // bare number = inches, and it ends the chain
+                total += (float)v;                 // Bare number = inches; end the compound.
                 break;
             }
             total += (float)v * mul;
@@ -235,7 +176,7 @@ namespace
             SkipWs( p );
             if ( !StartsNumber( p ) )
             {
-                p = save;                          // not a compound tail — leave the ws alone
+                p = save;                          // Leave whitespace for the expression parser.
                 break;
             }
         }
@@ -285,8 +226,7 @@ namespace
         return v;
     }
 
-    // THE parser.  `outDisplay` comes back in INCHES; false means "not a value
-    // yet", which every caller already handles as "use the cursor instead".
+    // Returns display inches; incomplete input is not a value yet.
     bool EvalDisplay( const char *t, float *outDisplay )
     {
         if ( !t || !*t || !ParsesToNumber( t ) )
@@ -297,18 +237,17 @@ namespace
         SkipWs( p );
         if ( !ok || *p )
             return false;
-        if ( v != v )                              // NaN
+        if ( v != v )                              // Reject NaN.
             return false;
-        if ( v > 1.0e18f || v < -1.0e18f )         // inf / absurd
+        if ( v > 1.0e18f || v < -1.0e18f )         // Reject infinities and absurd magnitudes.
             return false;
         if ( outDisplay )
             *outDisplay = v;
         return true;
     }
 
-    // Kind drives FORMATTING ONLY (kiwi_numeric.h).  `v` arrives in the field's
-    // own natural unit: raw world units for a LENGTH, degrees for an ANGLE, a
-    // bare multiplier / integer for the other two.
+    // Kind affects formatting only. Length values arrive in world units; other
+    // kinds arrive in their natural units.
     void FormatValue( char *buf, int bufSize, kiwiNumKind_t kind, float v )
     {
         if ( !buf || bufSize < 1 )
@@ -331,22 +270,9 @@ namespace
         buf[bufSize - 1] = '\0';
     }
 
-    // ── KIWI-UX (ROUND AQ, ITEM 4): SAY WHAT THE EXPRESSION COMES TO ──────────
-    // A typed value used to be echoed with a hardcoded suffix ("%s in"), which was
-    // honest while the only legal input was a bare number.  It is a lie for
-    // "10ft6in" and useless for "12 * 12".  So: a plain number still echoes exactly
-    // as before, an EXPRESSION echoes with its evaluated result beside it, and
-    // something that does not evaluate is marked rather than shown as if it were a
-    // value.  That mark IS the "invalid expression keeps the field live + a status
-    // line" the directive asks for — the field keeps its text, the command keeps its
-    // cursor value, and the row says why.
-    //
-    // KIWI-UX (CLEANUP, B-3): hoisted out of FieldDisplay so the HUD LINE can use it
-    // too.  The HUD had its own hardcoded `"%s in"` — the very defect the paragraph
-    // above names and fixes — so "10ft6in" printed as "10ft6in in" and "12 *" was
-    // presented as if it were a value.  ONE spelling of "how a typed field reads",
-    // and the KNUM_LENGTH -> Units_FromDisplay conversion (which the HUD path did not
-    // do at all) comes with it.  Returns false when the field has no typed text.
+    // Plain input is echoed directly; expressions show an evaluated value and
+    // incomplete input stays visible while the command uses its cursor value.
+    // The HUD and bubble share this path so units and validity agree.
     bool TypedFieldDisplay( int f, char *buf, int bufSize )
     {
         const kiwiNumField_t *fd = KiwiNum_Field( f );
@@ -376,8 +302,7 @@ namespace
         }
         else
         {
-            // The evaluator works in DISPLAY units, and FormatValue wants the
-            // field's own natural unit — which for a LENGTH is world units.
+            // FormatValue expects world units for lengths, not display inches.
             char val[48];
             FormatValue( val, sizeof( val ), fd->kind,
                          ( fd->kind == KNUM_LENGTH ) ? Units_FromDisplay( display )
@@ -388,9 +313,7 @@ namespace
         return true;
     }
 
-    // What the bubble shows for one field: the TYPED text while the user is
-    // typing (with the §17 unit suffix a length needs), the command's LIVE value
-    // otherwise.  False = this field has nothing to say and gets no row.
+    // Prefer typed text, then the command's live value. False omits the row.
     bool FieldDisplay( const KiwiEditorCommand *cmd, int f, char *buf, int bufSize )
     {
         const kiwiNumField_t *fd = KiwiNum_Field( f );
@@ -408,7 +331,7 @@ namespace
     }
 }
 
-// ─── lifecycle ───────────────────────────────────────────────────────────────
+// Lifecycle
 void KiwiNum_Reset()
 {
     for ( int i = 0; i < KNUM_MAX_FIELDS; ++i )
@@ -428,10 +351,7 @@ void KiwiNum_SetFields( const kiwiNumField_t *fields, int count )
     }
     if ( count > KNUM_MAX_FIELDS )
     {
-        // KIWI-UX (CLEANUP, B-29): the truncation is now audible.  A dropped field
-        // fails FAR from here — NumericFieldChanged for any index past the cap
-        // simply never fires, and the command reads as "that field does nothing" —
-        // so the one place that knows says so.  Same early-out, one line louder.
+        // Report truncation here because dropped fields never receive change events.
         Sys_Printf( "Numeric: a command declared %i fields; only %i (KNUM_MAX_FIELDS) "
                     "are shown, the rest will never receive input.\n",
                     count, KNUM_MAX_FIELDS );
@@ -445,8 +365,7 @@ void KiwiNum_SetFields( const kiwiNumField_t *fields, int count )
     s_fieldCount = count;
     s_tabLive    = false;
 
-    // Focus the first EDITABLE field, so a command whose field 0 is a read-only
-    // readout still takes digits somewhere sensible without a Tab.
+    // Start on the first editable field even when field zero is a readout.
     s_focus = 0;
     for ( int i = 0; i < count; ++i )
         if ( !s_fields[i].readOnly )
@@ -473,7 +392,7 @@ const kiwiNumField_t *KiwiNum_Field( int field )
     return ValidField( field ) ? &s_fields[field] : 0;
 }
 
-// ─── focus ───────────────────────────────────────────────────────────────────
+// Focus
 int KiwiNum_Focus()
 {
     return FocusedField();
@@ -493,9 +412,7 @@ bool KiwiNum_TabCycle( bool backwards )
     if ( editable < 1 )
         return false;
 
-    // The FIRST Tab does not move: it FOCUSES.  Plasticity's dialog behaves the
-    // same way — one Tab puts you in the first box, the next walks on — and it
-    // means "Tab, type, Enter" always lands in the field the HUD is naming.
+    // First Tab exposes the current field; subsequent Tabs advance.
     if ( !s_tabLive )
     {
         s_tabLive = true;
@@ -520,25 +437,18 @@ bool KiwiNum_TabCycle( bool backwards )
     return true;
 }
 
-// ─── keys ────────────────────────────────────────────────────────────────────
+// Key input
 bool KiwiNum_Key( int vk, unsigned int mods )
 {
-    // Tab is taken WITH or WITHOUT Shift and is always swallowed — see the note
-    // in kiwi_numeric.h.  It is tested above the modifier gate for exactly that
-    // reason (Shift+Tab is a real binding here, not a stray modified key).
+    // Tab accepts optional Shift and must precede modifier filtering.
     if ( vk == 0x09 )                    // VK_TAB
     {
         KiwiNum_TabCycle( ( mods & 1 ) != 0 );
         return true;
     }
 
-    // ── KIWI-UX (ROUND AQ, ITEM 4): THE SHIFTED OPERATORS ───────────────────
-    // '*', '(' and ')' cannot be typed without Shift on a US layout, and the gate
-    // below refuses every modified key.  So a NARROW shifted set is taken first,
-    // by VK, and everything else modified still falls through untouched.  The
-    // numpad (VK_MULTIPLY / VK_ADD / VK_DIVIDE, handled below) and VK_OEM_PLUS
-    // give unshifted routes to the same characters, which is what non-US layouts
-    // — where these VKs do not carry these glyphs — should use.
+    // '*', '(', ')' and '+' require Shift on a US layout, and the gate
+    // below rejects other modified keys. Numpad routes remain usable.
     if ( mods == 1 )                     // Shift, and nothing else
     {
         const int f = FocusedField();
@@ -573,9 +483,7 @@ bool KiwiNum_Key( int vk, unsigned int mods )
 
     if ( vk == 0xBE || vk == 0x6E )      // VK_OEM_PERIOD / VK_DECIMAL
     {
-        // KIWI-UX (ROUND AQ, ITEM 4): one dot per NUMBER, not one per field — an
-        // expression legitimately holds several ("1.5ft + 0.25in").  The old
-        // whole-field HasDot test would have refused the second one.
+        // Enforce one decimal point per number, not per expression.
         if ( LastNumberHasDot( f ) )
             return true;
         return Append( f, '.' );
@@ -583,14 +491,11 @@ bool KiwiNum_Key( int vk, unsigned int mods )
 
     if ( vk == 0xBD || vk == 0x6D )      // VK_OEM_MINUS / VK_SUBTRACT
     {
-        // KIWI-UX (ROUND AQ, ITEM 4): minus is now BOTH the leading sign and the
-        // subtraction operator, so it is no longer refused once the field has
-        // text.  A trailing "-" simply makes the expression not evaluate, which is
-        // the same "no value yet" state a trailing "*" produces.
+        // Minus is both a leading sign and an operator; a trailing minus is incomplete.
         return Append( f, '-' );
     }
 
-    // ── KIWI-UX (ROUND AQ, ITEM 4): THE REST OF THE EXPRESSION ALPHABET ─────
+    // Remaining expression keys.
     if ( vk == 0x6B )                    // VK_ADD (numpad +)
         return Append( f, '+' );
     if ( vk == 0x6A )                    // VK_MULTIPLY (numpad *)
@@ -602,17 +507,9 @@ bool KiwiNum_Key( int vk, unsigned int mods )
     if ( vk == 0x20 )                    // VK_SPACE — "10ft 6in", and a separator only
         return s_text[f][0] ? Append( f, ' ' ) : false;
 
-    // ── THE UNIT LETTERS, AND WHY THEY ARE GATED ────────────────────────────
-    // y / yd / i / in / f / ft, per the directive.  A letter is taken ONLY when it
-    // can CONTINUE what is already in the field, i.e. the field is a LENGTH and
-    // something has been typed into it.  That gate is what keeps the tool hotkeys
-    // alive: with an empty field every one of these letters still falls straight
-    // through to the command and to the binding table exactly as it did before, so
-    // "F", "T" and the rest keep meaning what they mean when the user is not
-    // mid-number.  (Known limit: the funnel's preempt/swap rungs run BEFORE this
-    // one, so a letter bound to a swappable verb can still be taken as that verb
-    // while a gesture is idle — the numpad and OEM operator routes above are
-    // unaffected, and no unit letter is bound to a swap verb today.)
+    // Consume unit letters only after text exists in a length field; otherwise they
+    // remain tool hotkeys. The outer funnel handles preempt/swap first, so adding a
+    // unit-letter binding there would steal the letter before numeric entry sees it.
     {
         const kiwiNumField_t *fd = KiwiNum_Field( f );
         if ( fd && fd->kind == KNUM_LENGTH && s_text[f][0] )
@@ -643,12 +540,10 @@ void KiwiNum_ClearEntry()
 {
     for ( int i = 0; i < KNUM_MAX_FIELDS; ++i )
         s_text[i][0] = '\0';
-    // The FOCUS is deliberately kept: a staged tool that has just advanced to its
-    // height stage should still be typing into the field the user Tabbed to.
+    // Keep focus so a staged tool continues in the field the user selected.
 }
 
-// ─── values ──────────────────────────────────────────────────────────────────
-// KIWI-UX (ROUND AQ, ITEM 4): the published entry point to the one parser.
+// Values
 bool KiwiNum_EvalDisplay( const char *text, float *outDisplay )
 {
     return EvalDisplay( text, outDisplay );
@@ -661,9 +556,7 @@ bool KiwiNum_HasField( int field )
 
 bool KiwiNum_HasValueField( int field )
 {
-    // KIWI-UX (ROUND AQ, ITEM 4): the whole expression must evaluate, not merely
-    // contain a digit.  A half-typed "12 *" is therefore "no value yet" and the
-    // gesture stays on its cursor value instead of jumping to 12 and back.
+    // Require the whole expression so partial input cannot move the preview.
     return ValidField( field ) && EvalDisplay( s_text[field], nullptr );
 }
 
@@ -672,11 +565,8 @@ float KiwiNum_ValueWorldField( int field )
     float display = 0.0f;
     if ( !ValidField( field ) || !EvalDisplay( s_text[field], &display ) )
         return 0.0f;
-    // §17: the typed number is INCHES; this is the one conversion boundary, and
-    // it applies to EVERY kind (kiwi_numeric.h "KIND IS A DISPLAY FACT").
-    // ROUND AQ: `display` now comes from the expression evaluator instead of
-    // atof, and the evaluator has already folded every ft/yd suffix down to
-    // inches — so this boundary is unmoved and still the only one.
+    // Evaluator results are display inches; this is the sole world conversion,
+    // regardless of field kind.
     return Units_FromDisplay( display );
 }
 
@@ -690,22 +580,17 @@ bool  KiwiNum_HasValue()   { return KiwiNum_HasValueField( FocusedField() ); }
 float KiwiNum_ValueWorld() { return KiwiNum_ValueWorldField( FocusedField() ); }
 const char *KiwiNum_Text() { return KiwiNum_TextField( FocusedField() ); }
 
-// ─── HUD ─────────────────────────────────────────────────────────────────────
+// HUD
 void KiwiNum_DrawHud( float imgMinX, float imgMinY, float imgW, float imgH )
 {
     KiwiEditorCommand *cmd = KiwiCmd_Active();
     if ( !cmd )
         return;
 
-    // KIWI-UX (Phase 3): the transform state sits between the op name and the typed
-    // value — "Move   faces  axis X  64 in   [12]".  HudStatus() is owned by the
-    // command (kiwi_command.h) and already carries its own units; the typed buffer
-    // is still raw text plus the "in" suffix §17 requires.
+    // Command status carries its own units and precedes the typed-field display.
     const char *state = cmd->HudStatus();
 
-    // KIWI-UX (shakeout E): once the user has Tabbed, the HUD names the field the
-    // digits are going into — otherwise a two-field command gives no feedback at
-    // all about which box is live.
+    // Once Tab activates focus, name the field receiving input.
     char fieldTag[40];
     fieldTag[0] = '\0';
     if ( KiwiNum_TabLive() )
@@ -718,29 +603,14 @@ void KiwiNum_DrawHud( float imgMinX, float imgMinY, float imgW, float imgH )
         }
     }
 
-    // ── KIWI-UX (ROUND Z, ITEM 5): THE CHIPS OWN THE GRAMMAR ────────────────
-    // USER REPORT (screenshot): this line and the chip strip were drawn on top of
-    // each other AND said the same thing — "RMB / Enter confirm · drag adjust · Tab
-    // field · Esc cancel" here, "RMB/Enter Confirm | Esc Cancel | Drag Adjust | Tab
-    // Field | 0-9 Exact" there.  The shared band (kiwi_hints.h) stops them
-    // OVERLAPPING; this stops them being two answers to one question.
-    //
-    // WHICH ONE YIELDS, and why this one: the chip strip reads its keys LIVE out of
-    // g_radiantCommands and shows them as keycaps, so it is the one that cannot go
-    // stale when a binding is remapped.  This tail is a hard-coded sentence.  So the
-    // tail is dropped WHILE THE CHIPS ARE UP and the line keeps what only it has —
-    // the command name, its transform state and the typed value.
-    //
-    // With the hints toggled OFF (KiwiHints_Show false) the tail comes back in full,
-    // because then it is the only place the grammar is written down at all.
+    // Live, remappable hint chips own the key grammar while visible. Restore the
+    // hard-coded tail only when hints are hidden.
     const bool chipsUp = KiwiHints_Show();
     const char *tail   = chipsUp
                        ? ""
                        : "RMB / Enter confirm  ·  drag adjust  ·  Tab field  ·  Esc cancel";
 
-    // KIWI-UX (CLEANUP, B-3): the typed value is rendered by the SAME helper the
-    // bubble uses, so an expression reads "12 * 12 = 12 ft" and an unevaluatable one
-    // reads "(incomplete)" instead of both being suffixed with a bare " in".
+    // Share the bubble formatter so units and invalid state agree.
     char typed[96];
     typed[0] = '\0';
     const bool haveTyped = TypedFieldDisplay( KiwiNum_Focus(), typed, sizeof( typed ) );
@@ -750,22 +620,17 @@ void KiwiNum_DrawHud( float imgMinX, float imgMinY, float imgW, float imgH )
         _snprintf( line, sizeof( line ), "%s   %s%s%s%s", cmd->Name(),
                    state ? state : "", state ? "   " : "", fieldTag, typed );
     else if ( state )
-        // KIWI-UX (shakeout E): the confirm flow changed — an LMB release PAUSES,
-        // RMB-click or Enter CONFIRMS.  The line the user reads every gesture has
-        // to say so… unless the chips already are (round Z, above).
+        // The tail explains pause/confirm only when the chips are hidden.
         _snprintf( line, sizeof( line ), "%s   %s   %s%s",
                    cmd->Name(), state, fieldTag, tail );
     else
         _snprintf( line, sizeof( line ), "%s   %s%s", cmd->Name(), fieldTag, tail );
     line[sizeof( line ) - 1] = '\0';
-    // With the tail dropped (above) the formats leave their separator behind, and a
-    // box sized on CalcTextSize would carry that as dead width.  Trimmed rather than
-    // branched, so the three formats stay one shape.
+    // Dropping the tail leaves separators; trim them before measuring the box.
     for ( int t = (int)strlen( line ) - 1; t >= 0 && line[t] == ' '; --t )
         line[t] = '\0';
 
-    // §19: an INVALID gesture reads RED and says so — the user must never mistake
-    // "the geometry stopped following the cursor" for a frozen editor.
+    // Invalid gestures stay visibly distinct from a frozen editor.
     const bool  invalid = cmd->HudInvalid();
     const ImU32 frameCol = invalid ? IM_COL32( 235,  70,  55, 230 )
                                    : IM_COL32(  90, 160, 220, 200 );
@@ -778,11 +643,8 @@ void KiwiNum_DrawHud( float imgMinX, float imgMinY, float imgW, float imgH )
     const float  boxW = sz.x + pad.x * 2.0f;
     const float  boxH = sz.y + pad.y * 2.0f;
 
-    // Bottom-centre of the camera image — out of the way of the top-left chips.
-    // ROUND Z, ITEM 5: horizontally centred as always; the VERTICAL anchor comes
-    // from the shared bottom band (kiwi_hints.h KiwiHud_BandTake), which is what
-    // stops this landing on top of the chip strip and the texture readout.  The
-    // fallback is the geometry this line used before the band existed.
+    // The shared bottom band avoids hints and texture readouts; fallback preserves
+    // the standalone placement.
     float x = imgMinX + ( imgW - boxW ) * 0.5f;
     float y = KiwiHud_BandTake( boxH, imgMinY + imgH - boxH - 12.0f );
     if ( x < imgMinX ) x = imgMinX;
@@ -797,16 +659,14 @@ void KiwiNum_DrawHud( float imgMinX, float imgMinY, float imgW, float imgH )
     dl->AddText( ImVec2( x + pad.x, y + pad.y ), textCol, line );
 }
 
-// ─── §13b the value bubble, pinned at the ACTION GEOMETRY ────────────────────
+// Value bubble
 void KiwiNum_DrawBubble( float imgMinX, float imgMinY, float imgW, float imgH )
 {
     KiwiEditorCommand *cmd = KiwiCmd_Active();
     if ( !cmd )
         return;
 
-    // WHERE.  The command's own anchor if it has one; otherwise the last snap
-    // point, which for the drawing tools IS the moving end of the segment — the
-    // exact place Plasticity puts it (kiwi_command.h BubbleAnchor).
+    // Prefer the command's action anchor; drawing tools fall back to the last snap.
     float anchor[3];
     if ( !cmd->BubbleAnchor( anchor ) )
     {
@@ -822,7 +682,7 @@ void KiwiNum_DrawBubble( float imgMinX, float imgMinY, float imgW, float imgH )
     if ( !Pick_WorldToImage( anchor, &sx, &sy ) )
         return;                                  // behind the eye — no bubble
 
-    // WHAT.  One row per field that has something to say.
+    // One row per field that has something to show.
     struct { char text[64]; bool focused; } rows[KNUM_MAX_FIELDS];
     int   n        = 0;
     float widest   = 0.0f;
@@ -836,9 +696,7 @@ void KiwiNum_DrawBubble( float imgMinX, float imgMinY, float imgW, float imgH )
         if ( !FieldDisplay( cmd, i, body, sizeof( body ) ) )
             continue;
         const kiwiNumField_t *fd = KiwiNum_Field( i );
-        // The primary row is bare ("0.609 in"); a secondary row carries its own
-        // label, because "36.4 deg" alone is only unambiguous when it is the only
-        // number on screen.
+        // Only secondary rows need labels to disambiguate multiple values.
         if ( n == 0 || !fd || !fd->label )
             _snprintf( rows[n].text, sizeof( rows[n].text ), "%s", body );
         else
@@ -859,20 +717,8 @@ void KiwiNum_DrawBubble( float imgMinX, float imgMinY, float imgW, float imgH )
     const float  boxW  = widest + pad.x * 2.0f;
     const float  boxH  = lineH * (float)n + pad.y * 2.0f + ( n > 1 ? 2.0f * (float)( n - 1 ) : 0.0f );
 
-    // Offset up-and-right of the anchor so the pill never sits ON the geometry it
-    // is measuring, then clamped inside the image.
-    // ── KIWI-UX (ROUND AN, ITEM 8): CLEAR OF THE GIZMO ──────────────────────
-    // USER REPORT, verbatim: "the measurement label gets in the way of the gizmo
-    // sometimes."  The gizmo is ~80 screen px of handles centred on the same
-    // anchor this bubble pins to; +16/-10 put the box straight onto the Y arrow
-    // and the plane squares.  While a transform gizmo is up, the bubble stands
-    // off far enough to clear the arrow tips (KGZ reach + head + a margin);
-    // otherwise the old tight offset stays (drawing tools have no gizmo and the
-    // bubble should hug the point there).
-    // KIWI-UX (CLEANUP, B-28): these two used to be BLOCK-SCOPE externs here.
-    // Both are declared by kiwi_transform.h, which this file now includes — an
-    // owning header beats a re-declaration, and it removes the MSVC
-    // namespace-mangling hazard kiwi_uv.cpp documents.
+    // Drawing tools hug the anchor; active transform gizmos need 96 px clearance
+    // for their roughly 80 px handles. Clamp either placement inside the image.
     const bool gizmoUp = KiwiXform_IsMoveActive() || KiwiXform_IsRotateActive();
     const float standoff = gizmoUp ? 96.0f : 16.0f;
     float x = imgMinX + sx + standoff;
@@ -902,8 +748,7 @@ void KiwiNum_DrawBubble( float imgMinX, float imgMinY, float imgW, float imgH )
                                           : IM_COL32( 180, 188, 205, 235 );
         if ( rows[i].focused )
         {
-            // A thin caret bar in the margin marks the box the digits go into —
-            // the one thing the Tab cycling is useless without.
+            // Mark the row receiving digits after Tab activates focus.
             dl->AddRectFilled( ImVec2( x + 2.0f, ty + 1.0f ),
                                ImVec2( x + 4.0f, ty + lineH - 1.0f ),
                                IM_COL32( 255, 205, 90, 240 ) );

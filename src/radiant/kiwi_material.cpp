@@ -1,50 +1,36 @@
 #ifndef KISAK_RADIANT
 #error this file is only for Radiant!
 #endif
-// ─────────────────────────────────────────────────────────────────────────────
-// kiwi_material.cpp — ROUND T implementation.  See kiwi_material.h for the six
-// rules, the two user reports this one file answers, and the exact broken link
-// (R6) that made the round-Q patch fillets invisible.
-//
-// NEW code over the ported cores.  It computes no material and registers no
-// asset: every read goes through the ported MaterialDef accessors and the only
-// write is a struct copy plus the ported Materialdef_Realize.
-// ─────────────────────────────────────────────────────────────────────────────
+// KIWI material inheritance and material-layer repair helpers.
+// Material reads and realization stay behind the ported MaterialDef entry points.
 
 #include "stdafx.h"
 #include "qe3.h"
 #include "winding.h"
 
 #include "kiwi_material.h"
-#include "kiwi_pick.h"                 // ROUND Y: Pick / Pick_RayFromCursor / ray_t
-#include "kiwi_selection.h"            // ROUND Y: sel_item_t, SEL_MASK_FACE, Sel_BrushLive
-#include "kiwi_str.h"                // KIWI-UX (CLEANUP, C-66): KiwiStr_ContainsNoCase
+#include "kiwi_pick.h"                 // Pick / Pick_RayFromCursor / ray_t
+#include "kiwi_selection.h"            // sel_item_t, SEL_MASK_FACE, Sel_BrushLive
+#include "kiwi_str.h"                // KiwiStr_ContainsNoCase
 
 #include <math.h>
 #include <string.h>
 
-// ── ported entry points (each verified against its DEFINITION) ──────────────
+// Ported entry points.
 extern LayerMaterialDef *Materialdef_GetName( MaterialDef *mtlDef );          // materialdef.cpp:159 (0x431640)
 extern bool              Materialdef_Realize( MaterialDef *md );              // materialdef.cpp:125
 extern float             Winding_Area( winding_t *w );                        // winding.cpp (winding.h:78)
 extern int               Sys_Printf( const char *fmt, ... );                  // win_qe3.cpp
 
-// xywnd.cpp:2233 — the CLIPPER's caulk / nodraw_decal synthesis, the // KIWI-UX
-// forwarder shakeout G hoisted out of Ed_ProduceSplitLists.  R3's fallback.
+// xywnd.cpp:2233 — the clipper's caulk/nodraw_decal synthesis and KIWI fallback.
 extern void              Ed_BuildClipFaceMaterial_Kiwi( face_t *out, const brush_t *src );
 
 namespace
 {
-    // ── R1: the TOOL family, by name ────────────────────────────────────────
-    // Substrings, case-insensitive, matched anywhere in the material name — the
-    // same shape `MtlDef_IsFaceFiltered` uses for the texture filter
-    // (mayaexport.cpp:112, `strstr(name, key)` over the whole map), so a
-    // "tools/caulk" path and a bare "caulk" classify identically without this
-    // file needing to know CoD4's naming layout.
-    //
-    // `$default` is NOT here on purpose: it is what an untextured brush wears,
-    // it draws (round O substituted the 3D variant for exactly that reason), and
-    // refusing to inherit it would send every fresh box's cut faces to caulk.
+    // Tool-family material names.
+    // Match substrings like MtlDef_IsFaceFiltered (mayaexport.cpp:112), independent
+    // of whether a material uses a tools path. `$default` stays inheritable so a
+    // fresh brush's cut faces do not fall back to caulk.
     const char *const KMTL_TOOL_NAMES[] = {
         "caulk",
         "nodraw",
@@ -59,40 +45,23 @@ namespace
         "tools\\",
     };
 
-    // KIWI-UX (CLEANUP, C-66): was a third ContainsNoCase, differing from
-    // kiwi_entbrowser.cpp's by answering FALSE for an empty needle.  Unreachable
-    // either way here — KMTL_TOOL_NAMES are non-empty literals and IsToolName
-    // guards its haystack — so it folds into KiwiStr_ContainsNoCase (kiwi_str.h)
-    // with no behaviour change.  _strnicmp is locale-sensitive; the shared body
-    // folds ASCII only, which is what a material path wants.
+    // Material paths use the shared ASCII-only, case-insensitive matcher.
 
-    // The channel-0 MaterialDef of a face, as the ported accessors want it
-    // (non-const: Materialdef_GetName's own signature is non-const, and it is a
-    // pure read — the cast is the call convention, not a mutation).
+    // Materialdef_GetName is non-const even though this call is a pure read.
     MaterialDef *Channel0( const face_t *f )
     {
         return f ? const_cast<MaterialDef *>( &f->mtldef[0] ) : 0;
     }
 
-    // MtlDef_IsValid's invariant, restated locally so this file can ASK rather
-    // than assert: exactly one of the two handles is set.  A half-built face
-    // (both NULL) would trip Materialdef_GetName's own iassert, and this file
-    // runs on paths where the honest answer is "no material" rather than a stop.
+    // MtlDef_IsValid requires exactly one handle; check it here instead of
+    // tripping Materialdef_GetName on a half-built face.
     bool HasMaterial( const MaterialDef *m )
     {
         return m && ( ( m->lyrMtl != 0 ) + ( m->radMtl != 0 ) == 1 );
     }
 
-    // ── R1, and the accessor it reads through ───────────────────────────────
-    // KIWI-UX (CLEANUP, C-69): both of these were EXPORTED (kiwi_material.h) and
-    // nothing outside this file ever called either — `KiwiMtl_FaceIsInheritable`
-    // below is the entry point every caller actually uses.  They are file-local
-    // now; the R1 rule they implement is still documented on that function.
-    //
-    // Is `name` a TOOL material (caulk / nodraw / clip / hint / skip / portal /
-    // origin / trigger / lightgrid / anything under a "tools" path)?  NULL and
-    // the empty string answer true — an unnamed material is not something to
-    // inherit.
+    // Name classification and access.
+    // Empty names and tool-family materials are not inheritable.
     bool IsToolName( const char *name )
     {
         if ( !name || !*name )
@@ -113,27 +82,21 @@ namespace
     }
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-//  R1
-// ═════════════════════════════════════════════════════════════════════════════
+// Material inheritance.
 bool KiwiMtl_FaceIsInheritable( const face_t *f )
 {
     const char *name = FaceMaterialName( f );
     return name && !IsToolName( name );
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-//  R2 / R5 — which face to inherit from
-// ═════════════════════════════════════════════════════════════════════════════
+// Source-face selection.
 int KiwiMtl_PickSourceFace( const brush_t *def, const float cutNormal[3],
                             int prefer0, int prefer1 )
 {
     if ( !def || !def->faces || def->faceCount <= 0 )
         return -1;
 
-    // R5: the caller's preferences first, IN ORDER.  A chamfer wants its own
-    // corner's material when that corner has one, and only falls through to the
-    // brush-wide scan when neither adjacent face is inheritable.
+    // Preferred adjacent faces win in caller order before brush-wide scoring.
     const int prefer[2] = { prefer0, prefer1 };
     for ( int i = 0; i < 2; ++i )
     {
@@ -144,10 +107,7 @@ int KiwiMtl_PickSourceFace( const brush_t *def, const float cutNormal[3],
             return fi;
     }
 
-    // R2: score = area * (1 - |n_f · n_cut|), maximised over inheritable faces.
-    // With no cut normal the perpendicularity term is 1 for every face and the
-    // scan degenerates to "the largest inheritable face", which is the right
-    // reading of "the brush's dominant material".
+    // Score = area * (1 - |n_f · n_cut|); without a normal, area alone wins.
     int   best      = -1;
     float bestScore = -1.0f;
     for ( int f = 0; f < def->faceCount; ++f )
@@ -156,9 +116,8 @@ int KiwiMtl_PickSourceFace( const brush_t *def, const float cutNormal[3],
         if ( !KiwiMtl_FaceIsInheritable( fc ) )
             continue;
 
-        // Area, from the winding when there is one.  A face whose winding was
-        // clipped away entirely still carries a material and still counts — at
-        // the floor area below, so it loses every tie to a face with a surface.
+        // A clipped-away winding keeps a floor area, preserving its material but
+        // losing every tie to a face with a surface.
         float area = 1.0f;
         if ( fc->w && fc->w->numpoints >= 3 && fc->w->numpoints <= MAX_POINTS_ON_WINDING )
         {
@@ -174,11 +133,7 @@ int KiwiMtl_PickSourceFace( const brush_t *def, const float cutNormal[3],
                           + fc->plane.normal[1] * cutNormal[1]
                           + fc->plane.normal[2] * cutNormal[2];
             perp = 1.0f - fabsf( d );
-            // A face exactly PARALLEL to the cut contributes nothing under the
-            // formula and would be unreachable even when it is the only
-            // inheritable face on the brush.  Floor it so "some material" always
-            // beats "no material"; the ordering between real candidates is
-            // untouched because the floor is far below any real perp term.
+            // Floor parallel faces so the only inheritable material beats none.
             if ( perp < 1.0e-3f )
                 perp = 1.0e-3f;
         }
@@ -190,12 +145,10 @@ int KiwiMtl_PickSourceFace( const brush_t *def, const float cutNormal[3],
             best      = f;
         }
     }
-    return best;                            // -1 = R3, the brush is all tool faces
+    return best;                            // -1 means every face is a tool material
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-//  the copy + R6
-// ═════════════════════════════════════════════════════════════════════════════
+// Material realization and copying.
 void KiwiMtl_RealizeFace( face_t *f )
 {
     if ( !f )
@@ -209,9 +162,8 @@ void KiwiMtl_RealizePatch( patchMesh_t *p )
 {
     if ( !p )
         return;
-    // The three channels are contiguous {lyrMtl, radMtl} pairs at +0x18 / +0x20 /
-    // +0x28 (qe3.h patchMesh_t), which is exactly how the ported draw walks them
-    // (`&inst->def->texture + layer`, pmesh.cpp:9896).  Same walk here.
+    // Material pairs are contiguous at +0x18/+0x20/+0x28, matching the ported
+    // pmesh.cpp:9896 draw walk.
     for ( int c = 0; c < 3; ++c )
     {
         MaterialDef *md = (MaterialDef *)( &p->texture + c );
@@ -229,14 +181,12 @@ bool KiwiMtl_SeedFaceFrom( face_t *out, const brush_t *def, int srcFace )
 
     const face_t *src = &def->faces[srcFace];
     for ( int c = 0; c < 4; ++c )
-        out->mtldef[c] = src->mtldef[c];    // the pointer pair AND the texdef
+        out->mtldef[c] = src->mtldef[c];    // pointer pair and texdef
     KiwiMtl_RealizeFace( out );
     return true;
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-//  the cut/split entry point (R2 + R3)
-// ═════════════════════════════════════════════════════════════════════════════
+// Cut/split seeding.
 bool KiwiMtl_SeedClipFace( face_t *out, const brush_t *def, const float cutNormal[3] )
 {
     if ( !out || !def )
@@ -246,18 +196,14 @@ bool KiwiMtl_SeedClipFace( face_t *out, const brush_t *def, const float cutNorma
     if ( src >= 0 && KiwiMtl_SeedFaceFrom( out, def, src ) )
         return true;
 
-    // R3 — an all-tool brush stays a tool brush.  The classic synthesis, byte for
-    // byte, through the same forwarder the clipper itself calls.
+    // All-tool brushes retain the clipper's caulk/nodraw_decal synthesis.
     Ed_BuildClipFaceMaterial_Kiwi( out, def );
     return false;
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-//  ROUND Y, ITEM 1 — "KiwiMatInfo", the permanent material-state readout
-// ═════════════════════════════════════════════════════════════════════════════
-// See kiwi_material.h for the report this answers and for the field list.  The
-// DECODE is camwnd.cpp's (KiwiMtl_Diagnose) because that file owns the
-// substitution predicate; this side only picks the subjects and formats.
+// Material-state diagnostic.
+// camwnd.cpp owns camera substitution decoding; this command only selects
+// subjects and formats the result.
 namespace
 {
     const char *YesNo( bool b ) { return b ? "YES" : "no"; }
@@ -297,9 +243,7 @@ void KiwiMtl_InfoCommand()
 {
     Sys_Printf( "--- KiwiMatInfo (edit layer %i) ---\n", g_qeglobals.current_edit_layer );
 
-    // 1. THE TEMPLATE.  random_texture_stuff[layer] is what every new brush face
-    //    is memcpy'd from (brush.cpp:7664, :3426, :3662 ...), so it is the single
-    //    most useful thing to know when new geometry draws wrong.
+    // New faces copy random_texture_stuff[layer] (brush.cpp:7664 et al.).
     {
         const int layer = g_qeglobals.current_edit_layer;
         const MaterialDef *md = ( layer >= 0 && layer < 3 )
@@ -310,9 +254,7 @@ void KiwiMtl_InfoCommand()
         PrintOne( "template", h );
     }
 
-    // 2. THE FACE UNDER THE CURSOR.  SEL_MASK_FACE alone, exactly as the snap
-    //    accents do (kiwi_snap.cpp KiwiSnap_DrawFaceAccents), so the answer is
-    //    about the surface the user is looking at rather than about the mode.
+    // Pick only the face under the cursor, independent of selection mode.
     ray_t ray;
     if ( !Pick_RayFromCursor( &ray ) )
     {
@@ -339,14 +281,8 @@ void KiwiMtl_InfoCommand()
     PrintOne( "face under cursor", md->radMtl ? md->radMtl->handle : 0 );
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-//  MATERIAL-LAYER INTEGRITY (kiwi_material.h "the three channels")
-// ═════════════════════════════════════════════════════════════════════════════
-// The rules, the compiler consequence and the retail defaults are written out on
-// the declarations in kiwi_material.h.  This side is the mechanism, and it does
-// its repairing THROUGH the ported helpers, never around them:
-// Face_InitMaterialChannel for a face's channels and SetMaterial for a patch's.
-// Nothing here invents a material name the ported code does not already use.
+// Material-layer integrity.
+// Repairs use the ported Face_InitMaterialChannel and SetMaterial helpers.
 
 extern int   Face_InitMaterialChannel( unsigned int textureChannel, face_t *faceDef,
                                        MaterialDef *src );                     // brush.cpp:417  (0x472C90)
@@ -355,35 +291,25 @@ extern qtexture_s *MaterialDef_GetLayeredMaterial( MaterialDef *mtlDef );      /
 namespace LayerMat { int GetCurrentLayer( MaterialDef *def ); }                // materialdef.cpp:252 (0x431B30)
 extern void  MarkMapModified( void );                                          // win_qe3.cpp:195 (0x499BB0)
 extern entity_s entities;                                                      // entity.cpp:295 (0x23F17A0)
-// pmesh.cpp — the per-patch lightmap-layer texCoord pass, the same one every
-// patch creator runs (Patch_KiwiFinishNewLike's layer-1 arm).
+// Same layer-1 texcoord pass used by patch creators.
 extern void  Patch_KiwiEnsureLmapCoords( patchMesh_t *p );                     // pmesh.cpp:10405
 
 namespace
 {
-    // The retail defaults, as the ported code spells them.
-    //  - faces:   channel names from Face_InitMaterialChannel (brush.cpp:420) and
-    //             the sample sizes Radiant_SeedCurrentTexdefs installs into
-    //             random_texture_stuff (mainfrm.cpp:742-745): 0.25 / 16 / 0.25.
-    //  - patches: MakeNewPatch's own three names (pmesh.cpp:145-147) — note the
-    //             SMOOTHING default differs from a face's ("smoothing_smooth",
-    //             which is also the name Patch_Write omits, pmesh.cpp:1141).
+    // Ported defaults: face samples are 0.25/16/0.25 (mainfrm.cpp:742), while
+    // patches use $default/lightmap_gray/smoothing_smooth (pmesh.cpp:145).
     const char *const KMTL_PATCH_CHANNEL[3] = { "$default", "lightmap_gray", "smoothing_smooth" };
     const float       KMTL_CHANNEL_SAMPLE[3] = { 0.25f, 16.0f, 0.25f };
 
     bool IsFiniteNonZero( float v )
     {
-        // The compiler's own test (a zero texture scale is fatal there), plus the
-        // INF/NAN exponent test the ported patch writer uses (pmesh.cpp:1096).
+        // Zero is compiler-invalid; pmesh.cpp:1096 also rejects INF/NAN exponents.
         if ( v == 0.0f )
             return false;
         return ( *(const unsigned int *)&v & 0x7F800000u ) != 0x7F800000u;
     }
 
-    // A face channel is intact when it names a material AND the texdef of its
-    // CURRENT sub-layer carries a usable scale pair.  Both halves matter: an
-    // unnamed channel crashes Materialdef_GetName on save, and a zero scale is
-    // what makes the compiler drop the surface from lightmapping.
+    // A valid channel is named and has finite, non-zero scales on its active layer.
     bool FaceChannelIsValid( face_t *f, int channel )
     {
         MaterialDef *md = &f->mtldef[channel];
@@ -396,12 +322,9 @@ namespace
         return IsFiniteNonZero( size[0] ) && IsFiniteNonZero( size[1] );
     }
 
-    // Force a channel's scale pair when the ported init could not write one.
-    // Init_MaterialLayer (materialdef.cpp:351) loops MaterialDef_04 times, so a
-    // material that resolved DEGENERATE (layerCount 0 — the headless / prefab-load
-    // shim, materialdef.cpp:110) leaves mat_texDef untouched at zero.  The values
-    // are the ones Ed_BuildClipFaceMaterial_Kiwi writes for the same three
-    // channels (xywnd.cpp:2293-2312).
+    // Zero-layer materials receive no scales; match Init_MaterialLayer's 512
+    // dimension fallback and Ed_BuildClipFaceMaterial_Kiwi's width*sample values
+    // (materialdef.cpp:351; xywnd.cpp:2293).
     void ForceChannelScale( face_t *f, int channel )
     {
         MaterialDef *md = &f->mtldef[channel];
@@ -422,16 +345,8 @@ namespace
         return name && name[0];
     }
 
-    // Are this patch's LIGHTMAP-layer control texCoords degenerate?  The lightmap
-    // pair is texCoord floats [2],[3] (pmesh_texcoord, qedefs.h:159).  DEGENERATE
-    // here means the grid carries NO lightmap parametrisation at all — every
-    // control point on the same S and the same T, or a non-finite coordinate.
-    // That is the case the compiler cannot build lightmap vectors from.
-    //
-    // Deliberately NOT "one of the two axes is constant": a legitimately thin or
-    // collapsed patch can produce that, and a repair that fires on it would rewrite
-    // (and re-dirty) the same map on every load.  The test is for a channel with
-    // nothing in it, not for a channel that is unusual.
+    // Lightmap coordinates are texCoord [2],[3]. Repair only a non-finite grid or
+    // one where both axes are constant; one constant axis can be a valid thin patch.
     bool PatchLmapCoordsDegenerate( const patchMesh_t *p )
     {
         if ( p->width < 2 || p->height < 2 )
@@ -468,27 +383,16 @@ bool KiwiMtl_EnsureFaceLayers( face_t *f )
 {
     if ( !f )
         return false;
-    // The sound case, and it is the overwhelmingly common one: nothing to do and
-    // nothing to realize.  Every creation path calls this, so the fast answer is
-    // the one that has to be free.
+    // The common valid path performs no realization work.
     if ( KiwiMtl_FaceLayersAreValid( f ) )
         return false;
 
     bool repaired = false;
 
-    // PER CHANNEL, not per face.  Face_SetDefaultMaterials (brush.cpp:434) is the
-    // spelling Brush_Create uses, but it rewrites channels 1 AND 2 unconditionally,
-    // which would throw away a hand-picked smoothing material to fix a lightmap
-    // one.  So the repair goes through the primitive that helper itself calls,
-    // Face_InitMaterialChannel (brush.cpp:417), one channel at a time — same
-    // material names, same Init_MaterialLayer, same result for the channel that
-    // was broken and nothing at all for the two that were not.
-    //
-    // The sample size is read from the same place Face_SetDefaultMaterials reads
-    // it, the per-edit-layer current-texture template (qe3.h:939), and falls back
-    // to the values the boot seeds it with (mainfrm.cpp:742-745) when the template
-    // is still unseeded.  Init_MaterialLayer takes it as the FLOAT BIT PATTERN
-    // reinterpreted as a pointer (materialdef.cpp:348-356).
+    // Reinitialize invalid channels independently, preserving the other channels.
+    // Samples come from matching current-texture templates, with boot defaults for
+    // unseeded values. Face_InitMaterialChannel consumes the float bit pattern
+    // through its MaterialDef* parameter (materialdef.cpp:348).
     for ( int c = 0; c < 3; ++c )
     {
         if ( FaceChannelIsValid( f, c ) )
@@ -502,8 +406,7 @@ bool KiwiMtl_EnsureFaceLayers( face_t *f )
         repaired = true;
     }
 
-    // ...and the belt: a channel whose material resolved degenerate keeps a zero
-    // scale even after the ported init ran (see ForceChannelScale).
+    // Degenerate material resolution can leave zero scales after initialization.
     for ( int c = 0; c < 3; ++c )
     {
         MaterialDef *md   = &f->mtldef[c];
@@ -546,14 +449,9 @@ bool KiwiMtl_EnsurePatchLayers( patchMesh_t *p )
 
     bool repaired = KiwiMtl_EnsurePatchChannels( p );
 
-    // The lightmap CHANNEL being present is not the same as the lightmap LAYER
-    // being parametrised; both are needed or the surface compiles unlit.
-    //
-    // Re-tested AFTER the pass, and only then counted: the ported layer-1 pass can
-    // legitimately answer "flat" for a patch whose geometry gives it nothing to
-    // spread over, and reporting THAT as a repair would mark the map modified on
-    // every single load without changing a byte.  Overwriting a channel that was
-    // already empty loses nothing either way.
+    // Material presence and lightmap parametrization are independent. Count the
+    // texcoord repair only if the ported pass makes the grid non-degenerate, or a
+    // legitimately flat patch would mark the map modified on every load.
     if ( PatchLmapCoordsDegenerate( p ) )
     {
         Patch_KiwiEnsureLmapCoords( p );
@@ -577,26 +475,10 @@ bool KiwiMtl_EnsureBrushLayers( brush_t *def )
     return repaired;
 }
 
-// ── THE TESSELLATION-CAPACITY DIAGNOSTIC ─────────────────────────────────────
-// Report only — it changes nothing, and it exists because the editor mesh path is
-// 16-BIT END TO END and nothing on it says so out loud:
-//   * Patch_Fill_BuildFrontIndices writes every vertex index as `(uint16_t)`
-//     (pmesh.cpp:9885-9892), so a tessellated grid with more than 65536 vertices
-//     WRAPS its indices back to the start of the grid;
-//   * Editor_AddMeshCmd stores vertCount and indexCount as uint16 with a
-//     non-fatal assert either side (r_ed_scene.cpp:131-134);
-//   * one editor vertex buffer holds exactly 65536 verts (r_ed_vertbuf.cpp:38),
-//     and Editor_VB_Upload's own `vertCount <= ED_VERTBUF_VERTEX_COUNT` check is
-//     a non-fatal assert too (r_ed_vertbuf.cpp:409).
-// A patch over either cap therefore draws triangles whose corners resolve to
-// unrelated vertices — geometry that runs off to wherever those vertices happen
-// to be — rather than failing visibly.  Patch_GenericMesh2's subdivision can
-// reach a 511x511 grid (pmesh.cpp:219-220 CURVE_GRID_DIM), i.e. 261121 verts, so
-// the cap is reachable from a high subdivision level on a large control grid.
-//
-// Naming the patch on the console turns that into something a mapper can act on
-// (lower the patch's subdivision, or split it) and something a later round can
-// reproduce.  Once per sweep per patch; silent for every patch inside the caps.
+// Patch tessellation-cap diagnostic.
+// Indices and counts narrow to uint16_t in pmesh.cpp:9885 and r_ed_scene.cpp:131,
+// so values above 0xFFFF wrap into unrelated vertices. CURVE_GRID_DIM permits
+// 511x511; report the patch so it can be split or assigned a lower subdivision.
 static void KiwiMtl_ReportPatchTessellationCap( const patchMesh_t *p )
 {
     const curvePatchDef_t *cd = p ? p->curveDef : 0;
@@ -622,10 +504,8 @@ int KiwiMtl_HealMapLayers( int *outBrushes, int *outPatches )
     int brushes = 0;
     int patches = 0;
 
-    // The MAP's own brush set, walked exactly as the writer walks it so nothing
-    // that will be serialised is missed: per entity, the DEF list runs from
-    // brushes.prev (entity+0x0C) to the &def sentinel (entity+0x08) via onext
-    // (map.cpp:1592).
+    // Per-entity DEF lists run from brushes.prev to the &def sentinel via onext
+    // (MapFile_WriteEntity, map.cpp:1592).
     for ( entity_s *e = entities.next; e != &entities; e = e->next )
     {
         brush_t *sentinel = (brush_t *)&e->def;

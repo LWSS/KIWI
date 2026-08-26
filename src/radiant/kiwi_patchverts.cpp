@@ -1,10 +1,7 @@
 #ifndef KISAK_RADIANT
 #error this file is only for Radiant!
 #endif
-// ─────────────────────────────────────────────────────────────────────────────
-// kiwi_patchverts.cpp — RADIANT_UX_DESIGN §62.6.  See kiwi_patchverts.h for the
-// whole design note, the V-binding rule and the three kills it works around.
-// ─────────────────────────────────────────────────────────────────────────────
+// Patch-vertex mode; see kiwi_patchverts.h for the V binding and lifecycle.
 
 #include "stdafx.h"
 #include "qe3.h"
@@ -12,19 +9,16 @@
 
 #include "kiwi_patchverts.h"
 #include "kiwi_camera.h"             // KiwiCam_WorldPerPixel (screen-constant markers)
-#include "kiwi_hover.h"              // ROUND AJ, ITEM 1 — the hover accent
+#include "kiwi_hover.h"              // shared hover pick and accent
 #include "kiwi_lines.h"
-#include "kiwi_pick.h"               // ROUND AJ, ITEM 1 — pick_result_t (KiwiHover_Get)
+#include "kiwi_pick.h"               // pick_result_t
 #include "kiwi_selection.h"
 
 #include <math.h>
 #include <stdio.h>
 #include <vector>
 
-// ── ported entry points (verified against their definitions) ────────────────
-// KIWI-UX (CLEANUP, B-6): Ed_Camera returns &g_camwndState.camera and NEVER
-// returns NULL (camwnd.cpp:159, and the contract note at :148-155 says so).  The
-// deref at :422 is therefore correct as written; a `!c` guard would be dead code.
+// Ed_Camera always returns &g_camwndState.camera (camwnd.cpp:159).
 extern camera_s  *Ed_Camera();                       // camwnd.cpp:161
 extern void       CamWnd_BuildMatrix();              // camwnd.cpp 0x403470
 extern int        g_nUpdateBits;                     // mainfrm.cpp
@@ -33,26 +27,16 @@ extern int        Sys_Printf( const char *fmt, ... );  // win_qe3.cpp
 
 namespace
 {
-    // ── budget ───────────────────────────────────────────────────────────────
-    // A 16x16 control grid is 15*16 + 16*15 = 480 lattice segments plus 256
-    // markers at 6 segments each = 2016 — i.e. ONE fully populated patch is
-    // already 2496 segments.  The mode is normally scoped to one or two patches,
-    // so the cap is generous rather than tight, but it exists because the mode can
-    // be entered on a multi-patch selection.
+    // Bound multi-patch overlays; 6000 segments covers the common one/two-patch case.
     enum { KPV_MAX_PATCHES  = 16 };
     enum { KPV_MAX_SEGMENTS = 6000 };
     const float KPV_MARKER_PX = 4.0f;
 
-    // §18's language: the lattice is the scaffolding (dim), an unselected control
-    // point is the same dim colour, and a SELECTED one takes the warm active
-    // accent kiwi_hover.cpp spends on "this is the thing you are moving".
+    // Dim scaffolding, bright points, and the warm active-selection accent.
     const float KPV_LATTICE[3]  = { 0.30f, 0.55f, 0.70f };
     const float KPV_POINT[3]    = { 0.45f, 0.85f, 1.00f };
     const float KPV_SELECTED[3] = { 1.00f, 0.80f, 0.25f };
-    // ROUND AJ, ITEM 1: §18's hover cyan — the same "this is the thing you are
-    // pointing at" colour kiwi_hover.cpp and the marquee preview already use.  The
-    // hovered marker is also drawn LARGER, because at 4 px a colour change alone is
-    // not a hover accent (round AI, item 4's own finding: one channel is not two).
+    // Hover is larger as a second cue beyond its shared cyan accent.
     const float KPV_HOVER[3]    = { 0.35f, 0.95f, 1.00f };
     const float KPV_HOVER_PX    = 6.5f;
 
@@ -60,35 +44,25 @@ namespace
     sel_mask_t                s_prevMask = SEL_MASK_OBJECT;
     std::vector<selbrush_t *> s_patches;
     char                      s_status[192] = { 0 };
-    // ROUND AJ, ITEM 1: the lifecycle's cheap gate — the selection walk runs only
-    // when the selection actually changed.
+    // Gate lifecycle selection walks on actual changes.
     unsigned                  s_selGen   = 0;
 
     patchMesh_t *PatchOf( selbrush_t *b )
     {
         if ( !Sel_BrushLive( b ) || !b->patch || !b->def )
             return 0;
-        // pmesh.cpp:3851 asserts the two spellings agree; read the DEF's, which is
-        // the one every ported patch consumer uses.
+        // Ported patch consumers use the DEF spelling; pmesh.cpp:3851 asserts agreement.
         patchMesh_t *pm = b->def->patch;
         if ( !pm || pm->width <= 0 || pm->height <= 0 || pm->width > 16 || pm->height > 16 )
             return 0;
         return pm;
     }
 
-    // Every patch named by the CURRENT selection, whether it is there as a whole
-    // object or as one of its own control points — so re-entering the mode after a
-    // point has been selected still finds the patch.
+    // Include each live patch named by the current selection.
     void GatherPatches( std::vector<selbrush_t *> &out )
     {
         out.clear();
-        // KIWI-UX (CLEANUP, B-38): the cap is announced.  A 17th selected patch was
-        // dropped with no console line and no HUD note, and the status line then
-        // read "N point(s) on 16 patch(es)" for a 20-patch selection — while the
-        // ADOPTION path below prints when it widens the set, so the two halves of
-        // one cap disagreed about whether the user is told.  Counted, then printed
-        // ONCE at the end: GatherPatches is only reached from
-        // KiwiPatchVerts_ToggleForSelection, i.e. once per Begin, never per frame.
+        // Report patches omitted by the hard cap once per mode entry.
         int overflow = 0;
         const selection_t &sel = KiwiSel();
         for ( size_t i = 0; i < sel.items.size(); ++i )
@@ -103,14 +77,12 @@ namespace
                 continue;
             if ( (int)out.size() >= KPV_MAX_PATCHES )
             {
-                ++overflow;                   // KIWI-UX (CLEANUP, B-38)
+                ++overflow;                   // count omissions for the entry warning
                 continue;
             }
             out.push_back( b );
         }
-        // The legacy list too: a patch selected through a ported path (a menu
-        // command, the XY pane) is on `selected_brushes` and may not have reached
-        // KiwiSel() yet this frame.
+        // Also scan the legacy selected-brush list, deduplicating against KiwiSel().
         for ( selbrush_t *b = selected_brushes.next;
               b && b != &selected_brushes; b = b->next )
         {
@@ -123,7 +95,7 @@ namespace
                 continue;
             if ( (int)out.size() >= KPV_MAX_PATCHES )
             {
-                ++overflow;                   // KIWI-UX (CLEANUP, B-38)
+                ++overflow;                   // count omissions for the entry warning
                 continue;
             }
             out.push_back( b );
@@ -136,9 +108,7 @@ namespace
                         overflow, (int)KPV_MAX_PATCHES );
     }
 
-    // The nudge every accent in this layer uses — 0.25 world units toward the eye,
-    // so a lattice line lying ON the patch surface is not decided pixel-by-pixel
-    // against that surface's depth (kiwi_hover.cpp's AddNudged, same constant).
+    // Nudge 0.25 world units toward the eye to avoid depth-fighting the patch surface.
     void AddNudged( const camera_s *c, const float *a, const float *b )
     {
         const float n = 0.25f;
@@ -177,8 +147,7 @@ namespace
         for ( size_t i = 0; i < sel.items.size(); ++i )
         {
             const sel_item_t &it = sel.items[i];
-            // kiwi_pick.h's indexing: a PATCH vertex is faceIndex = -1 with
-            // vertIndex = col * height + row.
+            // Patch points use faceIndex = -1 and vertIndex = col * height + row.
             if ( it.kind == SEL_VERTEX && it.brush == b
               && it.faceIndex < 0 && it.vertIndex == ctrlIndex )
                 return true;
@@ -186,10 +155,7 @@ namespace
         return false;
     }
 
-    // ROUND AJ, ITEM 1: is this control point the one under the cursor?  Read off
-    // the SHARED hover pick (kiwi_hover.cpp runs Pick() at the cursor every frame
-    // under the live mode mask, which in this mode is SEL_MASK_VERTEX), so the
-    // accent and the click can never disagree about which point is being aimed at.
+    // Share the cursor pick so hover and click target the same control point.
     bool PointHovered( selbrush_t *b, int ctrlIndex )
     {
         const pick_result_t &h = KiwiHover_Get();
@@ -213,11 +179,6 @@ namespace
         for ( size_t i = 0; i < s.items.size(); ++i )
             if ( s.items[i].kind == SEL_VERTEX && s.items[i].faceIndex < 0 )
                 ++sel;
-        // ROUND AJ, ITEM 1: the line NAMES THE MULTI-POINT GRAMMAR.  Shift-add and
-        // the marquee both worked before this round (kiwi_boxselect.cpp's click
-        // grammar is Sel_Add under Shift and its SEL_VERTEX rect arm collects patch
-        // control points) — nothing in the mode ever said so, and a grammar nobody
-        // is told about is a grammar that does not exist.
         _snprintf( s_status, sizeof( s_status ),
                    "patch vertex mode  %i point(s) on %i patch(es)  %i selected  ·  "
                    "click a point (Shift adds, Ctrl removes, drag a box takes several), then G "
@@ -226,24 +187,8 @@ namespace
         s_status[sizeof( s_status ) - 1] = '\0';
     }
 
-    // ── ROUND AJ, ITEM 1: the ONE exit, with its two independent questions ───
-    // `restoreMask` — false only when the USER has just chosen a different mask
-    // (putting the old one back would undo their keystroke).
-    // `reselect`    — false when something else now owns the selection (the user
-    // clicked another object, or the patches are gone); handing the patches back
-    // as objects there would fight the selection that caused the exit.
-    //
-    // ── KIWI-UX (CLEANUP, B-33): AND ITS THIRD, `quiet` ─────────────────────
-    // KiwiPatchVerts_DrawWorld used to inline a partial second teardown rather
-    // than call this, because it runs INSIDE Cam_Draw, which is walking the two
-    // brush sentinel lists — and this function's reselect arm ends in
-    // Sel_SyncToLegacy -> Select_Deselect, which RELINKS brushes between them.
-    // Re-entering that from the draw is the classic list-mutated-under-the-walker
-    // crash.  The reasoning was right; the shape was not: the copy already missed
-    // s_selGen, so the mode's state had two teardowns and one of them was already
-    // wrong.  `quiet` skips the reselect arm ENTIRELY (not just Sel_SyncToLegacy —
-    // Sel_Clear / Sel_Add are equally off-limits there) and the console line,
-    // which is exactly what the draw path was hand-writing.
+    // Do not restore a user-chosen mask or reselect over another selection.
+    // `quiet` is for Cam_Draw, where selection mutation would relink lists mid-walk.
     void ExitInternal( bool restoreMask, bool reselect, const char *why, bool quiet = false )
     {
         if ( !s_active )
@@ -255,9 +200,7 @@ namespace
 
         if ( reselect && !quiet )
         {
-            // Leaving the user with an empty selection after they press V would be
-            // the wrong end of "toggle off": they were editing that patch and still
-            // are, just not at point granularity any more.
+            // Toggle-off returns the latched patches as whole-object selection.
             selection_t &sel = KiwiSel();
             Sel_Clear( sel );
             for ( size_t i = 0; i < s_patches.size(); ++i )
@@ -268,9 +211,9 @@ namespace
 
         s_patches.clear();
         s_status[0] = '\0';
-        s_selGen    = 0;          // KIWI-UX (CLEANUP, B-33): the field the copy missed
+        s_selGen    = 0;          // reset the lifecycle gate
         if ( quiet )
-            return;               // no console line, no repaint request — see above
+            return;               // Cam_Draw-safe teardown stops here
         Sys_Printf( "Patch vertex mode: off%s%s.\n", why ? " — " : "", why ? why : "" );
         g_nUpdateBits = -1;
     }
@@ -298,8 +241,7 @@ const char *KiwiPatchVerts_Status()
 
 void KiwiPatchVerts_Exit()
 {
-    // The deliberate exit (V again, a delete, a map load): restore the mask the
-    // user was working in AND hand the patches back as whole objects.
+    // Restore the previous mask and return the latched patches as objects.
     ExitInternal( true, true, 0 );
 }
 
@@ -307,11 +249,7 @@ bool KiwiPatchVerts_HandleEscape()
 {
     if ( !s_active )
         return false;
-    // ONE LEVEL OUT, NOT A DESELECT.  Escape leaves the mode with the patches
-    // selected as objects; a second Escape then reaches the ordinary 33002
-    // UnSelectSelection (mainfrm.cpp:1144) and drops them.  Consuming the key is
-    // what makes that two-step readable — an Escape that both left the mode and
-    // cleared the selection would look like one press did two unrelated things.
+    // Escape leaves patches selected as objects; a second Escape deselects them.
     ExitInternal( true, true, "Esc" );
     return true;
 }
@@ -321,19 +259,14 @@ void KiwiPatchVerts_Update()
     if ( !s_active )
         return;
 
-    // ── TRIGGER 1: THE MODE MASK CHANGED ────────────────────────────────────
-    // The mode OWNS SEL_MASK_VERTEX for as long as it is live (it is the one state
-    // change that makes the whole thing work — see ToggleForSelection).  Anything
-    // that moves the mask off it — 1..5, Ctrl+1..4, a command's own mask — is the
-    // user choosing a granularity, so the mode stands down and does NOT put the
-    // old mask back over the top of the one they just picked.
+    // A new mode is the user's choice; leave without restoring the old mask.
     if ( KiwiSel_GetModeMask() != SEL_MASK_VERTEX )
     {
         ExitInternal( false, false, "the selection mode changed" );
         return;
     }
 
-    // ── TRIGGER 2: NOTHING LEFT TO EDIT ─────────────────────────────────────
+    // Leave when no latched patch remains live.
     bool anyLive = false;
     for ( size_t i = 0; i < s_patches.size() && !anyLive; ++i )
         anyLive = ( PatchOf( s_patches[i] ) != 0 );
@@ -343,32 +276,22 @@ void KiwiPatchVerts_Update()
         return;
     }
 
-    // ── TRIGGER 3: THE SELECTION MOVED OFF THE PATCH ────────────────────────
-    // KiwiSel() first (it can rebuild from the legacy lists, which bumps the
-    // generation), THEN read the generation, or the gate would latch a number the
-    // rebuild is about to invalidate.
+    // KiwiSel() may rebuild and bump the generation, so read the generation second.
     const selection_t &sel = KiwiSel();
     const unsigned     gen = Sel_Generation();
     if ( gen == s_selGen )
         return;
     s_selGen = gen;
 
-    // An EMPTY selection is NOT an exit: that is the "click empty space drops the
-    // point selection" case, and the patch is still the thing being edited.
+    // Empty selection only drops selected points; it does not leave the mode.
     for ( size_t i = 0; i < sel.items.size(); ++i )
     {
         const sel_item_t &it = sel.items[i];
         if ( KiwiPatchVerts_OwnsPatch( it.brush ) )
             continue;
 
-        // ── ADOPTION, and it replaces round AI's "scoped at entry" limit ────
-        // The pick mask is GLOBAL, so a control point on a patch the mode did not
-        // latch is perfectly clickable — and until now the lattice simply did not
-        // draw for it, which read as "that patch's points do not work".  A control
-        // point of ANY live patch is by definition a statement that the user is
-        // still doing patch vertex work, so the mode widens to include it instead
-        // of standing down.  Anything else in the selection — an object, a face,
-        // a brush vertex — is a statement that they are not, and exits.
+        // The vertex mask is global: adopt a picked point's live patch when possible.
+        // Any other unowned selection item exits the mode.
         if ( it.kind == SEL_VERTEX && it.faceIndex < 0 && PatchOf( it.brush )
           && (int)s_patches.size() < KPV_MAX_PATCHES )
         {
@@ -401,29 +324,15 @@ bool KiwiPatchVerts_ToggleForSelection()
     s_prevMask = KiwiSel_GetModeMask();
     s_active   = true;
 
-    // ── THE ONE STATE CHANGE THAT MAKES IT WORK ─────────────────────────────
-    // A pick-time mask, exactly as spec §1 requires ("modes are a pick-time mask,
-    // never a post-conversion of an object hit").  With SEL_MASK_VERTEX in force,
-    // kiwi_pick.cpp's screen-space scan answers with the nearest CONTROL POINT
-    // within PICK_VERT_PIXELS (kiwi_pick.cpp:336-359) instead of the patch, the
-    // marquee collects control points (kiwi_boxselect.cpp's SEL_VERTEX arm), and
-    // everything downstream — the gizmo, G, the grid snap, the undo bracket, the
-    // baseline restore on cancel — is the machinery kiwi_transform.cpp already
-    // runs for a vertex selection, with its patch arm already written
-    // (kiwi_transform.cpp:1912-1931 / :2735-2781).
+    // SEL_MASK_VERTEX routes picking and marquee to patch points; kiwi_transform's
+    // vertex path supplies gizmo movement, snap, cancel restore, and undo.
     KiwiSel_SetModeMask( SEL_MASK_VERTEX );
 
-    // Start from a CLEAN point selection.  The patch is dropped from the selection
-    // here (it stays in s_patches, which is what the draw reads), so the first
-    // click selects a point rather than adding one to a whole-object selection —
-    // and so the ported selected-patch wireframe stops fighting this file's own
-    // control-grid draw for the same pixels.
+    // Drop object items so the first click selects a point; s_patches keeps draw scope.
     selection_t &sel = KiwiSel();
     Sel_Clear( sel );
     Sel_SyncToLegacy();
-    // ROUND AJ, ITEM 1: adopt the generation the clear just produced, so the very
-    // first KiwiPatchVerts_Update does not read our own entry as "the selection
-    // changed" and walk it for nothing.
+    // Adopt the clear's generation so Update does not reprocess our own entry.
     s_selGen = Sel_Generation();
 
     UpdateStatus();
@@ -442,20 +351,8 @@ void KiwiPatchVerts_DrawWorld()
     if ( !s_active )
         return;
 
-    // Every patch gone (deleted, or a map load) — leave rather than draw nothing
-    // forever with a stale mask in force.
-    //
-    // A *QUIET* exit, and that matters: this runs inside Cam_Draw, which is walking
-    // `active_brushes` / `selected_brushes` right now.  The full
-    // KiwiPatchVerts_Exit ends in Sel_SyncToLegacy → Select_Deselect, which RELINKS
-    // brushes between those two sentinel lists — re-entering that from inside the
-    // draw is the classic list-mutated-under-the-walker crash.  Restoring the mask
-    // and dropping the latch is all that is needed here; there is nothing left to
-    // re-select anyway, which is why we are exiting.
-    //
-    // KIWI-UX (CLEANUP, B-33): this WAS a hand-inlined second teardown that had
-    // already drifted (it never cleared s_selGen).  ExitInternal's `quiet` flag
-    // now expresses exactly the same restriction, so the mode has ONE teardown.
+    // If every patch is gone, quietly restore the mask and drop the latch.
+    // Cam_Draw is walking brush lists here, so selection sync must not relink them.
     bool anyLive = false;
     for ( size_t i = 0; i < s_patches.size() && !anyLive; ++i )
         anyLive = ( PatchOf( s_patches[i] ) != 0 );
@@ -472,9 +369,7 @@ void KiwiPatchVerts_DrawWorld()
 
     UpdateStatus();
 
-    // ── PASS 1: the control LATTICE, dim ────────────────────────────────────
-    // One colour for the whole pass so Ed_EmitLineBatch emits exactly one
-    // SetMaterialColor + DrawLines pair for it (kiwi_lines.h "Colour runs").
+    // One color keeps the control lattice in a single material-color run.
     KiwiLines_Begin( KPV_MAX_SEGMENTS, 1 );
     KiwiLines_Color( KPV_LATTICE[0], KPV_LATTICE[1], KPV_LATTICE[2] );
     for ( size_t i = 0; i < s_patches.size(); ++i )
@@ -495,14 +390,8 @@ void KiwiPatchVerts_DrawWorld()
     }
     KiwiLines_Flush();
 
-    // ── PASS 2: the point MARKERS, at handle weight ─────────────────────────
-    // THREE colour runs inside one batch — every plain marker, then every selected
-    // one, then the single HOVERED one — rather than one run per marker.
-    //
-    // ROUND AJ, ITEM 1 (b): the hover run is what makes an 8 px pick target
-    // aimable.  It is drawn LAST so it wins the pixels where it overlaps either of
-    // the other two, and LARGER (KPV_HOVER_PX) because at handle size a colour
-    // swap alone is not a second channel.
+    // Draw plain, selected, then hover markers so later accents win overlaps.
+    // Hover is also larger, providing a cue beyond color.
     KiwiLines_Begin( KPV_MAX_SEGMENTS, 2 );
     for ( int pass = 0; pass < 3; ++pass )
     {
@@ -524,9 +413,7 @@ void KiwiPatchVerts_DrawWorld()
                 {
                     if ( KiwiLines_Remaining() <= 0 )
                         break;
-                    // kiwi_pick.h's index: col * height + row.  It MUST match, or
-                    // the marker highlight and the pick would disagree about which
-                    // point is which on a non-square grid.
+                    // Match kiwi_pick's col * height + row index, including non-square grids.
                     const int idx = col * pm->height + row;
                     const bool hovered = PointHovered( b, idx );
                     if ( pass == 2 )

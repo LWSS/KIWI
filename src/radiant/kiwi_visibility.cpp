@@ -1,45 +1,26 @@
 #ifndef KISAK_RADIANT
 #error this file is only for Radiant!
 #endif
-// ─────────────────────────────────────────────────────────────────────────────
-// kiwi_visibility.cpp — ROUND J: the hide / isolate family's KIWI half.  See
-// kiwi_visibility.h for what Plasticity binds, which three quarters of the family
-// were already ported, and why Invert Hidden takes no undo bracket.
-//
-// NEW code.  It touches exactly the two selbrush_t fields the ported hide cores
-// touch (`brushFlags` bit 2 and the hide depth `xx5`) and nothing else — no
-// geometry, no entity, no list surgery.
-// ─────────────────────────────────────────────────────────────────────────────
+// KIWI hide/isolate extensions. Visibility writes only brushFlags bit 2 and xx5.
 
 #include "stdafx.h"
 #include "qe3.h"
-// ROUND AF, ITEM 9 — the patch-gate diagnostic reads three pieces of state it does
-// not own: the "Don't select curves" pref, the filter category lists (both through
-// qe3.h's globals) and the current selection mode.
+// Patch-gate diagnostics read preferences, filter lists, and selection mode.
 #include "prefs.h"          // g_PrefsDlg->m_bSelectCurves (prefs.h:86)
 
 #include "kiwi_command.h"
 #include "kiwi_selection.h" // KiwiSel_GetModeMask / SEL_MASK_FACE
-#include "kiwi_undo.h"      // ROUND AG, ITEM 7 — KiwiUndo_NoteVisibilityRecord
+#include "kiwi_undo.h"      // KiwiUndo_NoteVisibilityRecord
 #include "kiwi_visibility.h"
 #include "kiwi_lightcache.h"
 
 #include <string.h>         // _strnicmp
 #include <vector>
-#include <algorithm>        // ROUND AO — std::sort / std::lower_bound over the def index
-#include <utility>          // ROUND AO — std::pair
+#include <algorithm>        // std::sort / std::lower_bound
+#include <utility>          // std::pair
 
-// ── ported entry points (each verified against its DEFINITION) ─────────────
-//   win_qe3.cpp:112        int  Sys_Printf( const char *fmt, ... )
-//   engine_stubs.cpp:693   int  g_nUpdateBits = 0;   // 0x25d5a74
-//   qe3.h:1054             selbrush_t selected_brushes;   // 0x23f1864
-//   qe3.h:1053             selbrush_t active_brushes;     // 0x23f189c
-//   mainfrm.cpp:1251       bool Radiant_RegisterCommand( const char *name, byte vk,
-//                                                        byte mods, int commandId )
-//   entity.cpp:282         entity_s entities{};   // 0x23F17A0 — the entity-DEF list
-//                          sentinel.  ROUND AO walks it to reproduce Map_SaveFile's
-//                          enumeration; declared at FILE SCOPE (never inside the
-//                          anonymous namespace — that is the round-AI link failure).
+// 0x25d5a74 g_nUpdateBits; 0x23f1864 selected_brushes; 0x23f189c active_brushes.
+// 0x23F17A0 entities; keep its declaration at file scope for external linkage.
 extern int      Sys_Printf( const char *fmt, ... );
 extern int      g_nUpdateBits;
 extern bool     Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId );
@@ -47,8 +28,7 @@ extern entity_s entities;
 
 namespace
 {
-    // The hidden bit, spelled exactly as the three ported cores spell it
-    // (select.cpp:4168 `b->brushFlags |= 4u`, :4249 `b->brushFlags &= ~4u`).
+    // Matches Select_Hide and ShowHidden's brushFlags bit.
     const unsigned KVIS_HIDDEN_BIT = 4u;
 
     inline bool Hidden( const selbrush_t *b )
@@ -56,48 +36,35 @@ namespace
         return ( (unsigned)b->brushFlags & KVIS_HIDDEN_BIT ) != 0;
     }
 
-    // Flip one brush's visibility.  Split out so the two list walks below cannot
-    // drift apart — which is exactly the failure the ported cores' three near-copy
-    // passes invite.
+    // Keep the selected and active list passes on one implementation.
     void InvertOne( selbrush_t *b, int *nowHidden, int *nowShown )
     {
         if ( ( (unsigned)b->brushFlags & KVIS_HIDDEN_BIT ) != 0 )
         {
-            // Exactly ShowHidden's per-brush body (select.cpp:4249-4250).
+            // Match ShowHidden's per-brush body.
             b->brushFlags &= ~(int)KVIS_HIDDEN_BIT;
             b->xx5         = 0;
             ++( *nowShown );
         }
         else
         {
-            // Exactly Select_Hide's THIRD pass (select.cpp:4179-4180), including
-            // the unconditional depth 1 — see the "flattens the depth" note in
-            // kiwi_visibility.h.
+            // Select_Hide also resets hidden brushes to depth 1.
             b->brushFlags |= (int)KVIS_HIDDEN_BIT;
             b->xx5         = 1;
             ++( *nowHidden );
         }
     }
 
-    // ═════════════════════════════════════════════════════════════════════════
-    //  ROUND AG, ITEM 7 — the hide snapshot store (kiwi_visibility.h THE STORE)
-    // ═════════════════════════════════════════════════════════════════════════
-    // Shaped one-for-one on kiwi_construct.cpp's construction store
-    // (KiwiCon_UndoPush :1082 / UndoPop :1096 / RedoPop :1121 / ClearRedo :1136),
-    // because that is the domain in this codebase that already solved "journal a
-    // non-geometry state change" and a second shape would drift from it.
+    // Visibility undo mirrors the construction snapshot domain.
     struct visEntry_t
     {
-        brush_t *def;       // the STABLE key — see kiwi_undo.h KUNDO_VISIBILITY
+        brush_t *def;       // stable across instance recreation, but not unique
         bool     hidden;
         int      depth;     // selbrush_t::xx5
     };
     typedef std::vector<visEntry_t> visSnap_t;
 
-    // The same depth the construction store uses (KCON_UNDO_DEPTH is 32); a hide
-    // snapshot is three words per brush, so even a 4000-brush map is ~48 KB per
-    // record and 1.5 MB for a full stack.  That is the same order as one
-    // construction snapshot and it is bounded.
+    // Match the construction store's bounded undo depth.
     const int KVIS_UNDO_DEPTH = 32;
 
     std::vector<visSnap_t> s_visUndo;
@@ -124,8 +91,7 @@ namespace
         }
     }
 
-    // Write a snapshot back.  ONLY bit 2 and xx5 — kiwi_visibility.h WHAT IT
-    // RESTORES says why the rest of brushFlags is untouchable here.
+    // Restore only bit 2 and xx5; other brushFlags bits belong to filters/layers.
     void Restore( const visSnap_t &snap )
     {
         for ( int pass = 0; pass < 2; ++pass )
@@ -162,38 +128,15 @@ namespace
     }
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-//  KIWI-UX (CLEANUP, C-41) — THE "PRESSING H TWICE COSTS NO Ctrl+Z" GUARD,
-//                            ASKED OF THE RIGHT PAIR OF SNAPSHOTS
-// ═════════════════════════════════════════════════════════════════════════════
-// The guard used to be `SameSnap( s_visUndo.back(), snap )` at PUSH time — i.e.
-// it compared the incoming PRE-state with the PREVIOUS gesture's PRE-state.  That
-// answers "did the gesture BEFORE this one change anything", which is one gesture
-// late: H hides A (pushes S0), H again with A already hidden pushes S1 anyway
-// because S1 != S0, and only the THIRD press is suppressed.  The user needed two
-// Ctrl+Z to get A back, which is exactly what kiwi_visibility.h:116-118 promises
-// cannot happen.
-//
-// A push-time test cannot fix it — whether THIS gesture changes anything is not
-// knowable until it has run.  So the push is now in two halves: `KiwiVis_UndoPush`
-// CAPTURES the pre-state, and `KiwiVis_UndoCommit` — called immediately after the
-// core that does the work — compares it with the POST-state and only then commits
-// the record and mints the journal ticket.  Committing right there, rather than
-// lazily at some later entry point, is what keeps the unified journal's ORDERING
-// honest: the visibility ticket is minted at the moment of the edit, before any
-// other domain can mint one.
-//
-// A caller that forgets its Commit does not lose the record: the next Push, and
-// every stack read below, flushes an outstanding capture first — which reproduces
-// the old always-push behaviour for that path rather than silently dropping it.
+// Compare pre/post snapshots so no-op gestures add no undo ticket. Committing at
+// the edit preserves journal order; later pushes and stack reads flush a missed Commit.
 namespace
 {
     visSnap_t   s_visPending;
     const char *s_visPendingLabel = 0;
     bool        s_visPendingHave  = false;
 
-    // Commit (or discard) an outstanding capture: a gesture that moved no hide bit
-    // leaves nothing behind at all, which is the whole mechanism.
+    // Commit only captures that differ from the current visibility state.
     void FlushPendingVisRecord()
     {
         if ( !s_visPendingHave )
@@ -205,7 +148,7 @@ namespace
         if ( SameSnap( s_visPending, now ) )
         {
             s_visPending.clear();
-            return;                       // the gesture changed nothing — no step
+            return;                       // no visibility change
         }
 
         s_visUndo.push_back( visSnap_t() );
@@ -219,20 +162,17 @@ namespace
     }
 }
 
-// ─── ROUND AG, ITEM 7: the hide/unhide undo domain ───────────────────────────
-// Capture the pre-state.  MUST be paired with KiwiVis_UndoCommit() on the far side
-// of the core that does the work — see the block above.
+// Capture before the gesture; pair with KiwiVis_UndoCommit after its last write.
 void KiwiVis_UndoPush( const char *label )
 {
-    FlushPendingVisRecord();              // a caller that forgot its Commit
+    FlushPendingVisRecord();              // finish a caller's outstanding capture
 
     Snapshot( &s_visPending );
-    s_visPendingLabel = label;            // callers pass string literals
+    s_visPendingLabel = label;            // caller guarantees static lifetime
     s_visPendingHave  = true;
 }
 
-// The far side of the pair: commit the captured record IF the gesture actually
-// moved a hide bit, else drop it.  Idempotent, and a no-op with nothing captured.
+// Idempotent; discard the capture when the gesture changed nothing.
 void KiwiVis_UndoCommit()
 {
     FlushPendingVisRecord();
@@ -244,7 +184,7 @@ bool KiwiVis_UndoPop()
     if ( s_visUndo.empty() )
         return false;
 
-    // Push the CURRENT state as the redo, exactly as KiwiCon_UndoPop does.
+    // Preserve the current state for redo before restoring undo.
     s_visRedo.push_back( visSnap_t() );
     Snapshot( &s_visRedo.back() );
     if ( (int)s_visRedo.size() > KVIS_UNDO_DEPTH )
@@ -257,7 +197,7 @@ bool KiwiVis_UndoPop()
 
 bool KiwiVis_RedoPop()
 {
-    FlushPendingVisRecord();              // KIWI-UX (CLEANUP, C-41)
+    FlushPendingVisRecord();              // finish any outstanding capture
     if ( s_visRedo.empty() )
         return false;
 
@@ -275,19 +215,14 @@ void KiwiVis_ClearRedo() { s_visRedo.clear(); }
 
 void KiwiVis_UndoReset()
 {
-    // KIWI-UX (CLEANUP, C-41): an outstanding capture belongs to the map that is
-    // going away, so it is DROPPED rather than flushed.
+    // A pending capture belongs to the discarded map; do not commit it.
     s_visPendingHave = false;
     s_visPending.clear();
     s_visUndo.clear();
     s_visRedo.clear();
 }
 
-// ─── ROUND AG, ITEM 7: the ONE per-brush writer ──────────────────────────────
-// The same two fields the ported family writes: Select_Hide's third pass
-// (select.cpp:4179-4180) sets the bit and depth 1, ShowHidden (select.cpp:
-// 4249-4250) clears both.  kiwi_outliner.cpp had a private copy of this; it now
-// calls here, so there is one spelling of "hidden" for the eye and the H key.
+// Match Select_Hide/ShowHidden: write only the hidden bit and depth.
 void KiwiVis_SetHidden( selbrush_t *b, bool hidden )
 {
     if ( !b )
@@ -306,37 +241,32 @@ void KiwiVis_SetHidden( selbrush_t *b, bool hidden )
     g_nUpdateBits = -1;
 }
 
-// ─── the KIWI-owned fourth member: INVERT HIDDEN ─────────────────────────────
+// KIWI-owned fourth hide command: invert hidden.
 void KiwiVis_InvertHidden()
 {
     int nowHidden = 0, nowShown = 0;
 
-    // ROUND AG, ITEM 7 — ONE record for the whole invert, taken before the first
-    // write.  Ctrl+H being its own inverse is no longer a reason not to journal
-    // it: the user asked for hide to be on the timeline, and a verb that is
-    // undoable by pressing it again is still a verb Ctrl+Z should reach.
+    // One undo record covers the whole gesture.
     KiwiVis_UndoPush( "invert hidden" );
 
-    // BOTH display lists, in the ported order (selected first, then active —
-    // Select_Hide's own order, select.cpp:4165/4171).
+    // Match Select_Hide's selected-then-active order.
     for ( selbrush_t *b = selected_brushes.next; b != &selected_brushes; b = b->next )
         InvertOne( b, &nowHidden, &nowShown );
     for ( selbrush_t *b = active_brushes.next; b != &active_brushes; b = b->next )
         InvertOne( b, &nowHidden, &nowShown );
 
     KiwiLightCache_VisibilityChanged();
-    KiwiVis_UndoCommit();      // KIWI-UX (CLEANUP, C-41): the far side of the Push
+    KiwiVis_UndoCommit();      // compare post-state and commit if changed
 
-    // The ported hide handlers' own invalidation (select.cpp:4182 / 4207 / 4257).
+    // Match the ported hide handlers' invalidation.
     g_nUpdateBits = -1;
     Sys_Printf( "Invert hidden: %i now hidden, %i shown.\n", nowHidden, nowShown );
 }
 
-// ─── §3 palette predicates ───────────────────────────────────────────────────
+// Palette predicates.
 bool KiwiVis_CanHide()
 {
-    // Both ported cores bail immediately on an empty selected list
-    // (select.cpp:4162, :4187), so the row would be a no-op without this.
+    // Hide and isolate both no-op on an empty selection.
     return selected_brushes.next != &selected_brushes;
 }
 
@@ -357,22 +287,13 @@ bool KiwiVis_CanInvert()
         || active_brushes.next   != &active_brushes;
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-//  ROUND AO — HIDDEN SOLIDS ACROSS SAVE / LOAD
-// ═════════════════════════════════════════════════════════════════════════════
-// The design, the ordinal space and the honest limits are written out in
-// kiwi_visibility.h (ROUND AO).  This half is the two walks and nothing else.
+// Hidden-solid sidecar persistence.
 namespace
 {
-    // A hand-edited sidecar is a text file; this is the only place that can stop a
-    // million `hiddenbrush` lines from becoming a million-entry vector.  Sized well
-    // above any real map (CoD4 maps run tens of thousands of brushes) so it can
-    // only ever be a bound on abuse, never on a legitimate file.
+    // Cap hostile sidecars far above legitimate map sizes.
     const int KVIS_SIDECAR_MAX_HIDDEN = 262144;
 
-    // (def, instance) — the def is the key, and it is NOT unique: an instanced
-    // prefab can present the same def more than once, so lookups walk the whole
-    // run of equal keys rather than taking the first.
+    // Definition pointers are not unique across prefab instances; scan each equal run.
     typedef std::pair<brush_t *, selbrush_t *> defInst_t;
 
     std::vector<brush_t *> s_saveOrder;        // the enumeration, ordinal == index
@@ -380,17 +301,11 @@ namespace
     std::vector<int>       s_pendingHidden;    // ordinals read back from a sidecar
     int                    s_pendingTotal = -1;// its `hiddenbrushtotal`, -1 = absent
 
-    // Every live brush INSTANCE, keyed on its def, sorted so the per-ordinal lookup
-    // below is a binary search.  The undo store's Restore() (above) does the same
-    // job with a nested scan; it can afford to because it runs once per Ctrl+Z on a
-    // snapshot the same size as the list.  This one runs once per SAVE over every
-    // brush in the map, and O(n^2) on a 30k-brush map is a visible stall.
+    // Sort live instances by definition for per-ordinal binary search during save.
     void BuildDefIndex( std::vector<defInst_t> *out )
     {
         out->clear();
-        // Same two lists, in the same order, as every other walk in this file
-        // (Select_Hide's order — select.cpp:4165/4171).  The order is irrelevant
-        // once sorted; it is kept so the walk reads like its neighbours.
+        // Traverse selected then active; sorting makes this order immaterial.
         for ( int pass = 0; pass < 2; ++pass )
         {
             selbrush_t *head = pass ? &active_brushes : &selected_brushes;
@@ -400,51 +315,35 @@ namespace
         std::sort( out->begin(), out->end() );
     }
 
-    // THE ENUMERATION.  A verbatim copy of Map_SaveFile's walk — see the citations
-    // in kiwi_visibility.h.  If either loop below ever stops matching its source,
-    // the ordinals stop meaning anything and the `hiddenbrushtotal` guard is what
-    // stops that being visible to the user as randomly hidden geometry.
+    // Must mirror Map_SaveFile's entity and definition order; ordinals depend on it.
     void BuildSaveOrder( std::vector<brush_t *> *out )
     {
         out->clear();
-        // map.cpp:693 — the entity loop, and :697-700 its write gate.
+        // Mirror Map_SaveFile's entity loop and write gate.
         for ( entity_s *eIter = entities.next; eIter != &entities; eIter = eIter->next )
         {
             entity_s_def *eDef = (entity_s_def *)eIter;
-            // map.cpp:698 derefs eclass unconditionally (faithful to 0x486f59).  We
-            // are not the save path and must never be the thing that crashes it, so
-            // a null eclass is skipped: it contributes no brushes to the file either
-            // way, so skipping it cannot shift an ordinal.
+            // Map_SaveFile dereferences eclass at 0x486f59; avoid another crash path here.
             if ( !eDef->eclass )
                 continue;
             const bool hasDefBrushes = ( (void *)eDef->brushes.prev != (void *)&eDef->def );
             const bool isWorld       = ( strcmp( eDef->eclass->name, "worldspawn" ) == 0 );
             if ( !hasDefBrushes && !isWorld )
-                continue;                       // not written at all → contributes nothing
+                continue;                       // omitted by Map_SaveFile
 
-            // map.cpp:1515-1517 — the per-entity DEF-list walk.  `brushes.prev` is
-            // the OLDEST link and `onext` runs forward (Entity_LinkBrush,
-            // entity.cpp:449-452), so this is insertion order == file order.
-            //
-            // DELIBERATE DIVERGENCE, the only one: MapFile_WriteEntity:1511 gates
-            // this loop on `!eclass->fixedsize`, i.e. a light / misc_model writes no
-            // brush block.  We count its bbox brush anyway, because ParseEntity's
-            // fixed-size tail (entity.cpp:1250) recreates exactly one per entity in
-            // the same entity order — so both sides still agree, and hiding a model
-            // becomes persistable instead of being silently dropped.
+            // `brushes.prev`/`onext` is insertion order, matching file order.
+            // Deliberate divergence: include each fixed-size bbox although it is not
+            // written; ParseEntity recreates one per entity in the same order.
             brush_t *sentinel = (brush_t *)&eDef->def;
             for ( brush_t *b = (brush_t *)eDef->brushes.prev; b != sentinel; b = b->onext )
                 out->push_back( b );
         }
     }
 
-    // First index of `def`'s run in the sorted index — callers walk forward while
-    // `idx[k].first == def`.  Returns idx.size() when the def has no live instance
-    // (a def-list brush that was never instanced — legal, and simply has no
-    // visibility to read or to write).
+    // Return the first equal definition, or idx.size() when no instance is live.
     size_t DefRunBegin( const std::vector<defInst_t> &idx, brush_t *def )
     {
-        const defInst_t key( def, (selbrush_t *)0 );   // second == 0 sorts below any real instance
+        const defInst_t key( def, (selbrush_t *)0 );   // null second key starts the run
         return (size_t)( std::lower_bound( idx.begin(), idx.end(), key ) - idx.begin() );
     }
 }
@@ -460,9 +359,8 @@ int KiwiVis_SidecarBuild()
     for ( size_t i = 0; i < s_saveOrder.size(); ++i )
     {
         brush_t *def = s_saveOrder[i];
-        // ANY live instance hidden marks the ordinal.  A def with several instances
-        // (an instanced prefab) has one ordinal and can only be given one answer;
-        // "hidden if any is" is the reading that cannot lose a user's hide.
+        // One ordinal represents every instance of a definition; preserve a hide if
+        // any instance is hidden.
         for ( size_t k = DefRunBegin( idx, def ); k < idx.size() && idx[k].first == def; ++k )
         {
             if ( Hidden( idx[k].second ) )
@@ -501,7 +399,7 @@ void KiwiVis_SidecarLoadTotal( int total )
 void KiwiVis_SidecarLoadNote( int ordinal )
 {
     if ( ordinal < 0 )
-        return;                                          // malformed line — ignored, never fatal
+        return;                                          // malformed line is non-fatal
     if ( (int)s_pendingHidden.size() >= KVIS_SIDECAR_MAX_HIDDEN )
         return;
     s_pendingHidden.push_back( ordinal );
@@ -512,19 +410,15 @@ void KiwiVis_SidecarLoadApply()
     if ( s_pendingHidden.empty() )
     {
         s_pendingTotal = -1;
-        return;                                          // the normal case: nothing was hidden
+        return;                                          // normal case: nothing hidden
     }
 
-    // Re-run the enumeration against the map that is now live.  Same function the
-    // save side used, which is the whole point.
+    // Re-run the exact save-side enumeration against live instances.
     BuildSaveOrder( &s_saveOrder );
     const int total = (int)s_saveOrder.size();
 
-    // THE GUARD.  A count that does not match means the two walks are looking at
-    // different maps — a .map edited outside KIWI, a stale sidecar, a save/load
-    // divergence.  Drop the entire set rather than apply a shifted one: hiding the
-    // wrong brushes is a confusing bug report, hiding none is a no-op the user can
-    // see is a no-op.
+    // A total mismatch proves the ordinals stale, so drop the whole set. Equal-count
+    // edits or reordering remain an unavoidable limitation of positional identity.
     if ( s_pendingTotal >= 0 && s_pendingTotal != total )
     {
         Sys_Printf( "WARNING: sidecar hidden-brush list is stale (%i brushes recorded, %i in the map) "
@@ -544,28 +438,25 @@ void KiwiVis_SidecarLoadApply()
         const int o = s_pendingHidden[i];
         if ( o < 0 || o >= total )
         {
-            ++skipped;                                   // out of range — ignored, not an error
+            ++skipped;                                   // ignore invalid ordinal
             continue;
         }
         brush_t *def   = s_saveOrder[o];
         bool     found = false;
         for ( size_t k = DefRunBegin( idx, def ); k < idx.size() && idx[k].first == def; ++k )
         {
-            // The SAME accessor Hide / Unhide All and the outliner eye use, so the
-            // bit and the hide depth are written exactly once, in one spelling.
+            // Use the shared hidden-bit/depth writer.
             KiwiVis_SetHidden( idx[k].second, true );
             found = true;
         }
         if ( found ) ++applied;
-        else         ++skipped;                          // def with no live instance
+        else         ++skipped;                          // definition has no live instance
     }
 
     s_pendingHidden.clear();
     s_pendingTotal = -1;
 
-    // NO KiwiVis_UndoPush here.  A map load has just reset both undo stores
-    // (KiwiCon_LoadSidecar → KiwiUndo_Reset, kiwi_construct.cpp:4451), and restored
-    // state is the map's starting state, not a step the user took.
+    // Loaded visibility is initial state, not an undoable user gesture.
     g_nUpdateBits = -1;
     if ( applied )
         Sys_Printf( "Restored %i hidden brush(es) from the sidecar.\n", applied );
@@ -574,12 +465,7 @@ void KiwiVis_SidecarLoadApply()
                     "(Unhide All clears any wrong hide).\n", skipped );
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-//  ROUND AF, ITEM 9 — THE FOUR SILENT PATCH GATES, NAMED
-// ═════════════════════════════════════════════════════════════════════════════
-// See kiwi_visibility.h for the report this answers and for what each gate is.
-// This file only READS state — it changes nothing, which is why it is safe to
-// hang off the H key.
+// Read-only diagnostics for silent patch-selection gates.
 namespace
 {
     bool AnyPatchInMap()
@@ -593,14 +479,8 @@ namespace
         return false;
     }
 
-    // A filter ENTRY whose name mentions curves / terrain and which is currently
-    // hidden.  Matched BY NAME, deliberately: what actually gates the patch is the
-    // node keyword inside the entry's condition tree (filters.cpp:507-509 tests
-    // `!strcmp( node, "curve" )` / `"terrain"`), and that tree is a private parse
-    // product with no accessor.  The shipped RadiantFilters.txt names those entries
-    // for what they filter, the Filters panel shows the user that same name, and a
-    // diagnostic that names the row the user has to un-tick is worth more than one
-    // that is provably exhaustive over a structure they cannot see.
+    // Filter conditions have no accessor, so infer curve/terrain gates from the
+    // displayed filter name. This diagnostic is advisory, not exhaustive.
     const char *HiddenCurveFilter()
     {
         filter_entry_s *heads[4] = {
@@ -614,8 +494,7 @@ namespace
             {
                 if ( f->isShown || !f->name )
                     continue;
-                // _stricmp has no substring form; lowercase-scan by hand rather than
-                // pull in a case-folding helper for two keywords.
+                // _stricmp has no substring form; scan both spellings in place.
                 for ( const char *s = f->name; *s; ++s )
                     if ( ( ( s[0] == 'c' || s[0] == 'C' ) && !_strnicmp( s, "curve",   5 ) )
                       || ( ( s[0] == 't' || s[0] == 'T' ) && !_strnicmp( s, "terrain", 7 ) ) )
@@ -662,12 +541,10 @@ void KiwiVis_ReportPatchGates( bool force )
         Sys_Printf( "Patches: the filter is \"%s\".\n", filtered );
 }
 
-// ─── commands ────────────────────────────────────────────────────────────────
+// Commands.
 void KiwiVis_RegisterCommands()
 {
-    // Unbound here — this is the CLASSIC-profile row.  kiwi_keymap.cpp puts it on
-    // Ctrl+H in the modern profile (vk 0x48 mods 4, which the default table leaves
-    // free; the audit is in kiwi_keymap.h).
+    // Classic leaves this unbound; the modern profile maps Ctrl+H.
     Radiant_RegisterCommand( "KiwiInvertHidden", 0, 0, KIWI_CMD_HIDE_INVERT );
 }
 
@@ -676,8 +553,7 @@ bool KiwiVis_DispatchInstant( unsigned int cmdId )
     if ( cmdId != (unsigned)KIWI_CMD_HIDE_INVERT )
         return false;
     KiwiVis_InvertHidden();
-    // ROUND AF, ITEM 9: Ctrl+H is the family's "my visibility is weird" verb, so it
-    // is where the ALL-CLEAR line earns its place — see kiwi_visibility.h.
+    // Forced mode also prints the patch-gate all-clear diagnostic.
     KiwiVis_ReportPatchGates( true );
     return true;
 }

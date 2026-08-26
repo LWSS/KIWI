@@ -520,7 +520,7 @@ KiwiEntParameter KiwiEntInspect_InferParameter( const char *name,
         return parameter;
     }
 
-    // KIWI: prose heuristics deliberately follow the brief's order.
+    // KIWI: unit-specific matches must precede broad boolean words such as "enable".
     if ( ContainsNoCase( parameter.description, "degrees" ) )
     {
         parameter.widget = KIWI_ENT_WIDGET_ANGLE;

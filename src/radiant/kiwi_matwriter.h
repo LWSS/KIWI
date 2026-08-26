@@ -2,10 +2,9 @@
 #ifndef KISAK_RADIANT
 #error this file is only for Radiant!
 #endif
-// kiwi_matwriter.h — the binary material writer: read a shipped material, rebuild it around
-// a new name + new images, write it back into the library.  Pure I/O, no editor state.
-// It CLONES rather than synthesises because refStateBits[2] is compiler output remapped
-// through the techset's per-pass state maps, with no grammar documented anywhere in the tree.
+// Clone a shipped material around a new name and images. Cloning is required because
+// refStateBits[2] is compiler output remapped by per-techset state maps with no documented
+// source grammar.
 //
 // Material blob layout, little-endian:
 //   +0x00  MaterialRaw (r_material.h:589, sizeof 0x40)
@@ -40,34 +39,26 @@
 //   +0x40 + 0xC*textureCount  MaterialConstantDefRaw[constantCount] (r_material.h:156, 0x14)
 //     +0x00 u32 nameOffset      must be non-zero; strncpy 12
 //     +0x04 f32 literal[4]
-//   then a string block of NUL-terminated strings, addressed only by the offsets above.  The
-//   shipped order, reproduced here: techSetName, materialName, colormapImageName, each
-//   texture entry's NAME, each constant's name.
-//   The loader qsorts the texture and constant tables in place by R_HashString of the entry
-//   NAME; cloning preserves every entry name, so that order needs no reproducing here.
+//   NUL-terminated strings follow and are addressed only by the offsets above. The loader
+//   qsorts texture and constant tables by entry-name hash; cloning preserves those names, so
+//   serialized table order need not match the source.
 //
-// The "wc/" of Register_WorldMaterial is a registration prefix, not a directory: Material_Load
-// strips it, so the file on disk is plain materials/<name>.  Files land in
-// <gameroot>/raw/materials/<name> and <gameroot>/raw/images/<name>.iwi via
-// FS_FOpenFileWriteToDir(…, "raw") — raw/ rather than fs_gamedir ("main") because the map
-// compilers' searchpaths are raw/raw_shared/devraw only; the editor searches raw/ too.
+// "wc/" is a registration prefix stripped by Material_Load; the disk path is materials/<name>.
+// Writes target raw/ because map compilers search raw/raw_shared/devraw; the editor also
+// searches raw/.
 //
-// BROWSER GATE, hard requirement: Load_Materials (texwnd.cpp:479) skips any material whose
-// usage, locale, autoTexScaleWidth or autoTexScaleHeight is zero, and TexWnd_FilterAccept
-// (texwnd.cpp:925) rejects usage_index == 0.  KiwiMat_Write refuses to write such a header.
+// Load_Materials skips zero usage, locale, or autoTexScale dimensions; TexWnd_FilterAccept also
+// rejects usage_index 0, so KiwiMat_Write refuses such headers.
 
 #include <stddef.h>
 
-// Unfilled slots bind the engine's own semantic fallbacks: $identitynormalmap (semantic 5)
-// and $black (semantic 8).  Written image names follow the tree's convention: the colour map
-// keeps <name>, the normal map is <name>_nml, the specular map is <name>_spc.
+// Unfilled slots use $identitynormalmap (semantic 5) or $black (semantic 8). Written names use
+// <name>, <name>_nml, and <name>_spc for color, normal, and specular maps.
 
 // ── the shipped template set ────────────────────────────────────────────────────────
-// Each row is a FAMILY: a techset name (`l_sm_<r|t|b>0c0[d0][n0][s0]` — r = opaque, t = alpha
-// test, b = alpha blend, c = colour, d = detail, n = normal, s = specular) plus the
-// texture-entry shape its members have.  The named candidates are tried in order; if none is
-// present in this data tree, KiwiMat_ResolveTemplate falls back to scanning materials/ for
-// the first file with the same techset name and a compatible shape.
+// Each family combines an `l_sm_<r|t|b>0c0[d0][n0][s0]` techset (opaque/test/blend plus
+// color/detail/normal/specular) with its texture-entry shape. Named candidates are tried in
+// order, then materials/ is scanned for a matching shape.
 enum kiwiMatSlot_t
 {
     KIWI_MAT_SLOT_COLOR    = 1,   // MaterialTextureDefRaw::semantic 2
@@ -85,8 +76,7 @@ struct kiwiMatTemplateInfo_t
 
 int                          KiwiMat_TemplateCount();
 const kiwiMatTemplateInfo_t *KiwiMat_TemplateInfo( int index );
-// Resolve `index` to a shipped material file name (cached).  Null if this data tree has no
-// usable template for that family — the wizard greys the row out.
+// Resolve to a cached shipped material name, or null when this data tree has no usable template.
 const char                  *KiwiMat_ResolveTemplate( int index );
 
 // ── the per-material fields the wizard collects ────────────────────────────────────
@@ -106,14 +96,12 @@ struct kiwiMatFields_t
                                    // NEGATIVE = keep the template's surfaceFlags verbatim
 };
 
-// Clone `templateIndex` into materials/<f->name>.  Returns false with a reason in `err`;
-// on failure nothing is left behind.
+// Clone into materials/<f->name>; failure leaves nothing behind and writes a reason to `err`.
 bool KiwiMat_Write( int templateIndex, const kiwiMatFields_t *f, char *err, size_t errSz );
 
-// Read the active raw material through the same parser the template writer uses.  Unlike
-// KiwiMat_Verify this does not require a semantic-2 colorMap, because legacy 2d materials
-// commonly carry their only image in semantic 0.  In that case colorMapImage is the first
-// real non-water image and colorMapSemantic records where it came from.
+// Read through the writer's parser. Legacy 2D materials may use semantic 0 instead of a
+// semantic-2 color map; colorMapImage then takes the first real non-water image and
+// colorMapSemantic records its source.
 struct kiwiMatSource_t
 {
     unsigned char  gameFlags;
@@ -134,8 +122,7 @@ struct kiwiMatSource_t
 };
 bool KiwiMat_ReadSource( const char *name, kiwiMatSource_t *outInfo, char *err, size_t errSz );
 
-// Round-trip gate stage 2 + 3: register the material through the engine's own loader (which
-// proves the .iwi too), then re-read the header off disk and apply the browser gate to it.
+// Verify the disk header/browser gate; an engine-loader cache miss also exercises .iwi loading.
 struct kiwiMatVerify_t
 {
     unsigned char  gameFlags;
@@ -151,8 +138,7 @@ struct kiwiMatVerify_t
     int            colorMapWidth;
     int            colorMapHeight;
     bool           colorMapUploaded;   // GfxImage::texture.basemap != null after the load
-    // `*Image` is empty when the loaded material has no such entry; it names the BUILT-IN
-    // when the entry is present but unfilled.
+    // `*Image` is empty for no entry and names the built-in for an unfilled entry.
     char           normalMapImage[64];
     int            normalMapWidth;
     int            normalMapHeight;
@@ -164,12 +150,9 @@ struct kiwiMatVerify_t
 };
 bool KiwiMat_Verify( const char *name, kiwiMatVerify_t *outInfo, char *err, size_t errSz );
 
-// Does materials/<name> already exist anywhere on the searchpaths?
 bool KiwiMat_ExistsOnDisk( const char *name );
-// Does images/<name>.iwi already exist anywhere on the searchpaths?
 bool KiwiIwi_ExistsOnDisk( const char *imageName );
 
-// Delete what one import attempt wrote (rollback).  Every argument is optional — null, empty
-// and built-in names ('$…') are skipped.
+// Roll back one import; null, empty, and built-in ('$…') names are skipped.
 void KiwiMat_DeleteWritten( const char *materialName, const char *colorImage,
                             const char *normalImage, const char *specularImage );

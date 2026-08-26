@@ -2,46 +2,26 @@
 #ifndef KISAK_RADIANT
 #error this file is only for Radiant!
 #endif
-// ─────────────────────────────────────────────────────────────────────────────
-// kiwi_viewport.h — the ONE bridge between the ImGui shell and the Phase-1b
-// camera-viewport layer (RADIANT_UX_DESIGN §10 camera, §11 chips, §12 marquee,
-// §18 hover).
+// kiwi_viewport.h — the bridge between the ImGui shell and the camera-viewport
+// input/overlay layer.  Two shell call sites:
+//   * ImGuiShell_ViewportInput (post-present pump) -> the KiwiVP_Camera* entry
+//     points below.  Each returns true when the modern layer CONSUMED the event,
+//     so the shell must NOT also run the legacy CamWnd_On* handler.  All are no-ops
+//     returning false while the modern-input toggle (kiwi_ux.h) is off, leaving the
+//     legacy dispatch unchanged.
+//   * ImGuiShell_DrawViewportImage (during the frame) -> KiwiVP_DrawCameraOverlay.
+// Coordinates are camera-RTT-image relative, TOP-LEFT origin (kiwi_pick.h).
 //
-// The shell owns exactly two call sites for this file:
-//   * ImGuiShell_ViewportInput  (POST-PRESENT, from the pump) — the KiwiVP_Camera*
-//     input entry points below.  Each returns true when the modern layer CONSUMED
-//     the event, in which case the shell must NOT also run the legacy CamWnd_On*
-//     handler.  Every one of them is a no-op returning false while the
-//     modern-input master toggle (kiwi_ux.h) is off, so the legacy dispatch is
-//     bit-for-bit what it was before Phase 1b.
-//   * ImGuiShell_DrawViewportImage (DURING the frame) — KiwiVP_DrawCameraOverlay,
-//     the screen-space chips + marquee rectangle.
-//
-// All coordinates are camera-RTT-image relative, TOP-LEFT origin (kiwi_pick.h).
-//
-// LEGACY PATHS THIS REPLACES WHILE THE TOGGLE IS ON (and only then):
-//   camera MMB  — the shell never dispatched button 2 for RTT_CAMERA at all
-//                 (VP_Down has no MMB arm), so the only legacy effect of an MMB
-//                 drag was CamWnd_OnMouseMove -> CamWnd_MouseMoved reaching
-//                 Drag_MouseMoved with drag_ok == 0, i.e. nothing.
-//   camera wheel— VP_Wheel's default arm: "camera/Z: no wheel".  (CamWnd_Scroll,
-//                 the binary's CameraUseWheel dolly, is only reachable from the
-//                 retired MFC CMainFrame::OnScroll path.)
-//   camera LMB  — CamWnd_OnLButtonDown -> CamWnd_DropModelsToPlane -> Drag_Begin,
-//                 the classic 3D pick / drag-select / drag-to-move.
-//                 ONE EXCEPTION (round AO, item Y): a BARE ALT+LMB while the
-//                 advanced-terrain paint tool is ARMED (sub_401D50, the same gate
-//                 the cursor ring is drawn from) is NOT consumed — the press, the
-//                 drag and the release all go to that legacy chain, because
-//                 Drag_Begin's own LABEL_34 arm IS the paint-stroke start.  See
-//                 the long note in KiwiVP_CameraButtonDown's LMB block.
-//   camera RMB  — (shakeout A, decision D-1 RESOLVED) CamWnd_OnRButtonDown ->
-//                 CamWnd_DropModelsToPlane's free-look fly / camera_mode drive,
-//                 and CamWnd_OnRButtonUp -> Cam_MouseUp + CamWnd_ContextMenu.
-//                 A modern RMB DRAG is mouselook and legacy sees NOTHING; a modern
-//                 RMB CLICK replays that exact down+up pair so the classic context
-//                 menu still fires from the pump.  See the RMB note in the .cpp.
-// ─────────────────────────────────────────────────────────────────────────────
+// Legacy paths replaced while the toggle is on:
+//   MMB   -> orbit / Shift-pan (legacy never dispatched camera MMB).
+//   wheel -> dolly (legacy had no camera wheel).
+//   LMB   -> pick / drag-select / move (CamWnd_OnLButtonDown -> DropModelsToPlane
+//            -> Drag_Begin).  EXCEPTION: a bare Alt+LMB while the terrain-paint tool
+//            is armed (sub_401D50) is NOT consumed — press/drag/release go to the
+//            legacy paint chain (Drag_Begin LABEL_34).  See KiwiVP_CameraButtonDown.
+//   RMB   -> mouselook (Alt) or pan; a no-drag RMB CONFIRMS a live modal command.
+//            The classic context menu was removed (user directive) — a bare RMB
+//            click does nothing; the CamWnd_OnRButton replay helper is dormant.
 
 // btn: 0 = LMB, 1 = RMB, 2 = MMB (ImGui's numbering, as the shell's loop uses).
 bool KiwiVP_CameraButtonDown( int btn, int imgX, int imgY, bool shift, bool ctrl );
@@ -52,10 +32,9 @@ bool KiwiVP_CameraWheel     ( float steps, int imgX, int imgY );
 // Idle hover (no button down).  `over` false = the cursor left the image.
 void KiwiVP_CameraHover( int imgX, int imgY, bool over );
 
-// ONE per-tick poll, from the shell's post-present dispatch AFTER the per-viewport
-// loop: the keyboard fly (shakeout A).  `cursorOver` is the camera image's hover
-// for this frame.  A no-op while the modern-input master toggle is off, so the
-// legacy dispatch stays bit-for-bit what it was.
+// One per-tick poll, after the per-viewport loop: the keyboard fly.  `cursorOver`
+// is the camera image's hover for this frame.  No-op while the modern-input toggle
+// is off.
 void KiwiVP_CameraTick( bool cursorOver );
 
 // Stuck-drag teardown.  True when a modern gesture was live and has been torn

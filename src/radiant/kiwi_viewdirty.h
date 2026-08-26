@@ -2,9 +2,8 @@
 #ifndef KISAK_RADIANT
 #error this file is only for Radiant!
 #endif
-//  kiwi_viewdirty.h - the XY and Z views render only when their content can have
-//  changed.  The dirty source is g_nUpdateBits, marked at its single drain in
-//  Radiant_RoutineProcessing; the camera and texture views are deliberately not gated.
+// Dirty gate for XY/Z RTTs, fed from the g_nUpdateBits drain. Camera and texture
+// rendering are deliberately outside this gate.
 
 enum kiwiDirtyView_t
 {
@@ -13,23 +12,18 @@ enum kiwiDirtyView_t
     KIWI_DIRTYVIEW_COUNT
 };
 
-// Ticks between forced re-renders of a view nothing has marked dirty.  The pump caps at
-// 60 Hz, so 120 == 2 s.  0 disables the heartbeat.
+// Missed-invalidation backstop in pump ticks; 120 is about 2 s at 60 Hz, 0 disables.
 #define KIWI_VIEWDIRTY_HEARTBEAT_TICKS 120
 
-// The drain hook.  `bits` is what Radiant_RoutineProcessing just took out of
-// g_nUpdateBits; W_XY|W_XY_OVERLAY mark the XY view, W_Z|W_Z_OVERLAY the Z view.
+// Mark from the g_nUpdateBits snapshot drained by Radiant_RoutineProcessing.
 void KiwiViewDirty_MarkFromUpdateBits( int bits );
 
-// Unconditional mark, for events the bit currency does not express: the RTT pool being
-// released for a device reset, a viewport window being reopened.
+// Re-arm after invalidation outside g_nUpdateBits, such as an RTT reset or viewport reopen.
 void KiwiViewDirty_MarkAll();
 void KiwiViewDirty_Mark( kiwiDirtyView_t view );
 
-// The gate: true = render this view now (and the flag is consumed).  `w`/`h` are the
-// dock-cell size the render would use; a change in them is a render, because the RT is
-// destroyed and recreated.
+// Return and consume the gate; a dock-cell size change forces an RTT redraw.
 bool KiwiViewDirty_ShouldRender( kiwiDirtyView_t view, int w, int h );
 
-// Advance the tick counter the heartbeat measures against.  Once per pump tick.
+// Advance heartbeat time once per healthy viewport-rendering tick.
 void KiwiViewDirty_EndTick();

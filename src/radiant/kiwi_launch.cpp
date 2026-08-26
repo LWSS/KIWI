@@ -1,11 +1,4 @@
-// ═════════════════════════════════════════════════════════════════════════════════════
-//  kiwi_launch.cpp — the Build dialog, child-process runner and BSP -> Light pipeline.
-// ═════════════════════════════════════════════════════════════════════════════════════
-// Read kiwi_launch.h first: it records why the compilers stay separate processes, why the
-// target is always `raw\maps\mp\<name>.map`, the exact `-loadFrom` rule, why capture is
-// frame-polled, where the `.errlog` / `.lin` handoff can disagree, and why cancellation
-// warns about half-written lighting output.
-// ═════════════════════════════════════════════════════════════════════════════════════
+// Build dialog and captured BSP/LIGHT process runner.
 #include "stdafx.h"
 #include "qe3.h"
 
@@ -15,7 +8,7 @@
 #include "kiwi_command.h"
 #include "kiwi_launch.h"
 #include "kiwi_matconvert.h"
-#include "radiant_frame.h"      // Radiant_FileSave (:87) + Radiant_CurrentMapPath
+#include "radiant_frame.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -23,18 +16,11 @@
 #include <string>
 #include <vector>
 
-// ── ported / cross-file entry points (each verified against its definition) ─────────
+// Ported and cross-file entry points.
 extern int  Sys_Printf( const char *fmt, ... );          // win_qe3.cpp:118
 extern bool Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId );  // mainfrm.cpp:1358
-// The fs_basepath accessor every radiant file already uses (mainfrm.cpp:604, texwnd.cpp:1813,
-// filters.cpp:1023), spelled exactly as they spell it.  Cited without a line number on purpose:
-// TWO dvar.cpp exist in the tree (universal/ and cod4map/universal/), and a bare `dvar.cpp:NNN`
-// resolves to neither.  Definition: universal/dvar.cpp, `Dvar_GetString` (declared in
-// qcommon/qcommon.h beside Dvar_GetInt).
-extern const char *Dvar_GetString( const char *dvarName );   // qcommon (fs_basepath)
-// The loaded-map path global.  map.cpp line 44 -- `char currentmap[1024] = ""` (IDB 0x23F18D8);
-// no line-number cite because nothing on that line is a checkable symbol.
-extern char currentmap[];
+extern const char *Dvar_GetString( const char *dvarName );   // universal/dvar.cpp (fs_basepath)
+extern char currentmap[];                               // map.cpp 0x23F18D8; active map/prefab
 extern void Pointfile_Errorfile_Public();                // errorfile.cpp:409
 extern void Pointfile_Clear();                           // points.cpp:112  (frees the error-log entries)
 extern void Pointfile_ResetPoints();                     // points.cpp:129  (s_num_points = 0)
@@ -42,40 +28,31 @@ extern int  Pointfile_GetNumPoints();                    // points.cpp:132
 extern FILE *Pointfile_Check();                          // points.cpp:56   (reads <currentmap minus ext>.lin)
 extern int  s_errLogCount;                               // points.cpp:50
 extern int  g_nUpdateBits;                               // engine_stubs.cpp:773
-// Radiant_FileSave()        radiant_frame.h:87 (mainfrm.cpp:1678) -- the Save funnel: with a path
-//                           set it is Map_SaveFile(s_currentMapPath,0,0), else Save-As.
-// Radiant_CurrentMapPath()  radiant_frame.h:92 (mainfrm.cpp:495) -- read-only view of
-//                           s_currentMapPath (mainfrm.cpp:488), "" when untitled.
 
-// ═════════════════════════════════════════════════════════════════════════════════════
-//  STATE
-// ═════════════════════════════════════════════════════════════════════════════════════
+// State.
 namespace
 {
 
-// ── the window ─────────────────────────────────────────────────────────────────────
 bool s_open = false;
 
-// ── options (persist for the session; nothing here goes in the ini) ────────────────
+// Options persist for the session only.
 bool s_buildBsp    = true;
 bool s_buildLight  = true;
-bool s_saveFirst   = true;      // run the Save funnel before a BSP build
-bool s_verbose     = true;      // cod4map -v
-bool s_onlyEnts    = false;     // cod4map -onlyEnts
-bool s_leakTest    = false;     // cod4map -leakTest
+bool s_saveFirst   = true;
+bool s_verbose     = true;
+bool s_onlyEnts    = false;
+bool s_leakTest    = false;
 
 int  s_threads     = 0;         // cod4rad -Threads N  (0 = "not resolved yet")
 int  s_quality     = 1;         // 0 = -Fast, 1 = (neither), 2 = -Extra
-bool s_noRelight   = true;      // cod4rad -NoRelight
+bool s_noRelight   = true;
 
-// ── the log ────────────────────────────────────────────────────────────────────────
-// Bounded ring: append at the back, drop whole lines off the front past the cap.  256 KB
-// is roughly 3000 lines of cod4map output, which is more than a full verbose compile.
+// 256 KiB retains roughly a full verbose compile (~3000 lines).
 const size_t kLogCap = 256u * 1024u;
 std::string  s_log;
 bool         s_logScrollPending = false;
 
-// ── the running child ──────────────────────────────────────────────────────────────
+// Running child.
 enum launchStage_t
 {
     LSTAGE_NONE = 0,
@@ -83,8 +60,7 @@ enum launchStage_t
     LSTAGE_LIGHT
 };
 
-// The chain's intent: either LIGHT follows a successful BSP, or the running process is the
-// final selected stage.  Process creation and polling remain the same for both cases.
+// Tracks whether LIGHT follows BSP or the running process is the final stage.
 enum launchChain_t
 {
     LCHAIN_OFF = 0,
@@ -94,7 +70,7 @@ enum launchChain_t
 
 launchStage_t s_stage = LSTAGE_NONE;
 launchChain_t s_chain = LCHAIN_OFF;
-HANDLE        s_proc  = nullptr;      // the child, while it runs
+HANDLE        s_proc  = nullptr;
 HANDLE        s_pipe  = nullptr;      // our READ end of its stdout+stderr
 DWORD         s_pid   = 0;
 bool          s_cancelRequest = false;  // the confirm popup is owed an OpenPopup
@@ -118,19 +94,14 @@ DWORD         s_failureExit = 0;
 bool          s_failureHasExit = false;
 std::string   s_failureDetail;
 
-// Child output is already kept in the bounded visible log.  This small line accumulator is
-// separate so the first ERROR:/assert line survives even if a very long build rolls the
-// visible log's front off the ring.
+// Separate from the visible ring so the first ERROR/assert survives front eviction.
 std::string s_captureLine;
 std::string s_firstCaptureError;
 
-// The load source of the RUNNING (or last) BSP stage, kept so the post-run `.errlog` /
-// `.lin` probe looks exactly where cod4map's BuildOutputPathFromLoadSource wrote them.
+// BSP load source; cod4map writes `.errlog` and `.lin` beside this path.
 char s_bspLoadSource[MAX_PATH] = { 0 };
 
-// The default thread count, resolved once and never zero at spawn time: the machine's
-// processor count.  cod4rad clamps ITSELF to [1,4] when -Threads is absent
-// (cmdline.c ParseCommandLine_Init), which is exactly why the dialog always passes the flag.
+// Resolve once from CPU count; StartLight passes -Threads, which cod4rad clamps to [1,4].
 void EnsureThreadDefault()
 {
     if ( s_threads > 0 )
@@ -143,9 +114,7 @@ void EnsureThreadDefault()
     if ( s_threads > 64 ) s_threads = 64;
 }
 
-// ═════════════════════════════════════════════════════════════════════════════════════
-//  LOG
-// ═════════════════════════════════════════════════════════════════════════════════════
+// Log capture.
 void LogAppend( const char *text, size_t len )
 {
     if ( !text || !len )
@@ -153,8 +122,7 @@ void LogAppend( const char *text, size_t len )
     s_log.append( text, len );
     if ( s_log.size() > kLogCap )
     {
-        // Drop from the front to the next line break so the top of the pane is never a
-        // half line.  npos (one enormous line) degrades to a hard cut, which is correct.
+        // Prefer a line boundary; hard-cut a single oversized line.
         const size_t over = s_log.size() - kLogCap;
         const size_t nl   = s_log.find( '\n', over );
         s_log.erase( 0, nl == std::string::npos ? over : nl + 1 );
@@ -249,10 +217,7 @@ void ResetStageCapture()
     s_firstCaptureError.clear();
 }
 
-// ═════════════════════════════════════════════════════════════════════════════════════
-//  PATHS  (D-BF-B / D-BF-C).  Resolved fresh on every draw — never cached across a map
-//  change, because every one of these inputs moves when the user opens or saves a map.
-// ═════════════════════════════════════════════════════════════════════════════════════
+// Resolve paths fresh because opening or saving a map can change every input.
 struct launchPaths_t
 {
     char root[MAX_PATH];        // fs_basepath — the build root, and every child's CWD
@@ -304,8 +269,7 @@ void StripExt( char *path )
         *dot = '\0';
 }
 
-// Full-path normalise + case-insensitive compare.  Used for the ONE decision `-loadFrom`
-// turns on (D-BF-C) and for the `currentmap` agreement test (D-BF-E).
+// Normalize before the `-loadFrom` and `currentmap` comparisons.
 bool SamePath( const char *a, const char *b )
 {
     if ( !a || !b || !a[0] || !b[0] )
@@ -342,7 +306,6 @@ void ResolvePaths( launchPaths_t &p )
     if ( !p.haveMap )
         return;
 
-    // NAME = basename minus extension.
     {
         const char *b = p.mapPath;
         for ( const char *c = p.mapPath; *c; ++c )
@@ -365,18 +328,16 @@ void ResolvePaths( launchPaths_t &p )
     p.targetAbs[sizeof( p.targetAbs ) - 1]       = '\0';
     p.bspAbs[sizeof( p.bspAbs ) - 1]             = '\0';
 
-    // D-BF-C: bridge with -loadFrom unless the saved map IS the target file.
+    // `-loadFrom` is unnecessary only when the saved source already is the target.
     p.useLoadFrom = !SamePath( p.mapPath, p.targetAbs );
 }
 
-// Both compiler exes sit beside the running radiant (one bin\<CONFIG> directory).
 void ToolPath( const launchPaths_t &p, const char *exe, char *out, size_t outSz )
 {
     _snprintf( out, outSz, "%s\\%s", p.binDir, exe );
     out[outSz - 1] = '\0';
 }
 
-// `<root>\raw\maps\mp` — created level by level.  ERROR_ALREADY_EXISTS is success.
 bool EnsureTargetDir( const launchPaths_t &p )
 {
     static const char *const kParts[] = { "raw", "raw\\maps", "raw\\maps\\mp" };
@@ -395,13 +356,9 @@ bool EnsureTargetDir( const launchPaths_t &p )
     return true;
 }
 
-// ═════════════════════════════════════════════════════════════════════════════════════
-//  THE PROCESS RUNNER (D-BF-D)
-// ═════════════════════════════════════════════════════════════════════════════════════
+// Child process.
 
-// Drain whatever the pipe holds right now.  Never blocks: PeekNamedPipe gives the byte
-// count first and ReadFile is asked for at most that many.  A broken pipe (the child exited
-// and our write end is long closed) just ends the loop.
+// Peek bounds each synchronous read, so draining never waits for new bytes.
 void ReadAvailable()
 {
     if ( !s_pipe )
@@ -600,11 +557,8 @@ void FinishBuildSuccess( launchStage_t finalStage )
                 s_buildOutputPath, size );
 }
 
-// Spawn a CAPTURED console child: stdout AND stderr into one anonymous pipe, no window,
-// CWD = fs_basepath.  The write end is inherited and closed in the parent immediately —
-// keeping it open here would mean the read end never sees EOF.  Both compilers run stdout
-// unbuffered (cod4map bsp.cpp:1143 `setvbuf(stdout, NULL, _IONBF, 0)`), so the log streams
-// live rather than arriving in one lump at exit.
+// Capture stdout/stderr in one pipe; the parent must close its writer for EOF to work.
+// Both use unbuffered stdout (bsp.cpp:1143; cod2rad.c:66), so output streams live.
 bool SpawnCaptured( const char *cmdline, const char *cwd )
 {
     SECURITY_ATTRIBUTES sa;
@@ -621,12 +575,11 @@ bool SpawnCaptured( const char *cmdline, const char *cwd )
     }
     ::SetHandleInformation( rd, HANDLE_FLAG_INHERIT, 0 );     // the READ end stays ours
 
-    // A console child with STARTF_USESTDHANDLES and a NULL stdin gets an invalid handle;
-    // neither compiler reads stdin, but NUL is the honest thing to hand it.
+    // STARTF_USESTDHANDLES still needs valid stdin, though neither compiler reads it.
     HANDLE nul = ::CreateFileA( "NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
                                 &sa, OPEN_EXISTING, 0, nullptr );
     if ( nul == INVALID_HANDLE_VALUE )
-        nul = nullptr;                      // never hand a child -1 as a std handle
+        nul = nullptr;                      // never pass INVALID_HANDLE_VALUE
 
     STARTUPINFOA si;
     memset( &si, 0, sizeof( si ) );
@@ -646,7 +599,7 @@ bool SpawnCaptured( const char *cmdline, const char *cwd )
                                       TRUE, CREATE_NO_WINDOW, nullptr, cwd, &si, &pi );
     const DWORD err = ::GetLastError();
 
-    ::CloseHandle( wr );                    // the parent's copy — see the note above
+    ::CloseHandle( wr );                    // parent must not retain the writer
     if ( nul )
         ::CloseHandle( nul );
 
@@ -664,12 +617,9 @@ bool SpawnCaptured( const char *cmdline, const char *cwd )
     return true;
 }
 
-// ═════════════════════════════════════════════════════════════════════════════════════
-//  THE .errlog / .lin HANDOFF (D-BF-E)
-// ═════════════════════════════════════════════════════════════════════════════════════
+// Diagnostic handoff.
 
-// cod4map's own output base for the diagnostics: the -loadFrom path when one was passed,
-// else the map argument (bsp.cpp:151-160 BuildOutputPathFromLoadSource).
+// Diagnostics follow `-loadFrom` when present (bsp.cpp:151-160).
 void DiagBase( char *out, size_t outSz )
 {
     _snprintf( out, outSz, "%s", s_bspLoadSource );
@@ -677,7 +627,7 @@ void DiagBase( char *out, size_t outSz )
     StripExt( out );
 }
 
-// The two ported readers key off `currentmap`, not off the path we compiled (D-BF-E).
+// The ported readers key off `currentmap`, not the path we compiled.
 bool ReadersPointAtOurFiles()
 {
     if ( !currentmap[0] || !s_bspLoadSource[0] )
@@ -685,16 +635,9 @@ bool ReadersPointAtOurFiles()
     return SamePath( currentmap, s_bspLoadSource );
 }
 
-// Delete the stale `.lin` and `.errlog` at BOTH candidate bases before a BSP run, so that
-// "the file exists afterwards" means "THIS run produced it".  Two holes make this necessary
-// and neither is ours to fix in the compiler:
-//   * cod4map removes the stale `.lin` at the TARGET base (bsp.cpp:1216-1217) but WRITES the
-//     new one at the LOAD-SOURCE base (leakfile.cpp:39/:154 via BuildOutputPathFromLoadSource).
-//     With -loadFrom in play those are different files, so an old leak file next to the .map
-//     survives forever and makes every later build look like it leaked;
-//   * `Error_Init` truncates the `.errlog` (errors.cpp:11-15) but it is called late in main
-//     (bsp.cpp:1229) — after the usage exit, after the platform gate and after FS_Startup —
-//     so a run that dies before it leaves the PREVIOUS run's error log on disk.
+// Clear both bases: cod4map removes target `.lin` but writes beside `-loadFrom`
+// (bsp.cpp:1216-1217; leakfile.cpp:39,154), and early exits precede Error_Init's
+// `.errlog` cleanup (bsp.cpp:1229).
 void ClearStaleDiagFiles( const launchPaths_t &p )
 {
     static const char *const kExts[] = { ".lin", ".errlog" };
@@ -719,16 +662,8 @@ void ClearStaleDiagFiles( const launchPaths_t &p )
     }
 }
 
-// After a BSP stage: pull the leak path or the error log into the editor, exactly the way
-// the File menu's own two handlers do it (mainfrm.cpp Cmd_OnPointfileOpen / Cmd_OnErrorFile).
-//
-// ONE LOADED AT A TIME.  Those ported handlers treat the pointfile and the error log as
-// mutually exclusive displays — each clears the other before loading — and Misc->Next leak
-// spot prefers the pointfile when both exist (mainfrm.cpp Cmd_OnMiscNextleakspot).  A leak
-// is also the more actionable of the two, so a leak wins here.
-//
-// `Pointfile_Check` carries `iassert(s_num_points == 0)` (points.cpp:77), so the reset MUST
-// come first — calling it over an already-loaded pointfile is an assert, not a reload.
+// Mirror the File-menu loaders, keeping their displays exclusive; a leak wins if both exist.
+// Pointfile_Check asserts s_num_points == 0, so reset before loading (points.cpp:77).
 void AfterBspDiagnostics( DWORD exitCode )
 {
     char base[MAX_PATH];
@@ -760,9 +695,7 @@ void AfterBspDiagnostics( DWORD exitCode )
 
     if ( !ReadersPointAtOurFiles() )
     {
-        // The editor's readers would look next to `currentmap`, which is not the file we
-        // just compiled.  Say so with both paths rather than letting Pointfile_Errorfile
-        // pop "Error log file was not found" at a path the user never named.
+        // Avoid opening a same-named diagnostic beside a different `currentmap`.
         LogLine( "" );
         if ( haveLin )
             LogLine( "LEAK -- pointfile written: %s", lin );
@@ -800,9 +733,7 @@ void AfterBspDiagnostics( DWORD exitCode )
     }
 }
 
-// ═════════════════════════════════════════════════════════════════════════════════════
-//  STAGES
-// ═════════════════════════════════════════════════════════════════════════════════════
+// Stages.
 bool Busy() { return s_stage != LSTAGE_NONE; }
 
 bool StartBsp( const launchPaths_t &p )
@@ -820,13 +751,12 @@ bool StartBsp( const launchPaths_t &p )
 
     if ( s_saveFirst )
     {
-        // The same funnel Radiant_FileSave uses; with a path set (guaranteed here, the
-        // button is disabled otherwise) that is Map_SaveFile(s_currentMapPath, 0, 0).
+        // p.haveMap prevents Save-As; this writes s_currentMapPath directly.
         Radiant_FileSave();
         LogLine( "saved %s", p.mapPath );
     }
 
-    // The load source (D-BF-C) doubles as the diagnostics base (D-BF-E).
+    // Diagnostics follow the actual load source.
     _snprintf( s_bspLoadSource, sizeof( s_bspLoadSource ), "%s",
                p.useLoadFrom ? p.mapPath : p.targetAbs );
     s_bspLoadSource[sizeof( s_bspLoadSource ) - 1] = '\0';
@@ -844,8 +774,7 @@ bool StartBsp( const launchPaths_t &p )
         cmd += p.mapPath;
         cmd += "\"";
     }
-    // The MAP NAME MUST BE LAST (bsp.cpp:1195 parses options over argv[1..argc-2],
-    // :1210 takes argv[argc-1] as the output base).
+    // bsp.cpp:1195/1210 requires the map argument last.
     cmd += " \"";
     cmd += p.targetRel;
     cmd += "\"";
@@ -891,8 +820,7 @@ bool StartLight( const launchPaths_t &p )
     if ( s_quality == 0 ) cmd += " -Fast";
     if ( s_quality == 2 ) cmd += " -Extra";
     if ( s_noRelight )    cmd += " -NoRelight";
-    // Map name LAST, extension-less: cod4rad strips any extension and appends .d3dbsp
-    // itself (cmdline.c:755 SetBspFileExtensions("d3d"), :794-814).
+    // cmdline.c:755,794-814 requires an extensionless map name last.
     cmd += " \"";
     cmd += p.radTargetRel;
     cmd += "\"";
@@ -909,7 +837,6 @@ bool StartLight( const launchPaths_t &p )
     return true;
 }
 
-// Called from the poll the frame a stage's process is seen to have exited.
 void OnStageFinished( DWORD exitCode )
 {
     const launchStage_t finished = s_stage;
@@ -968,8 +895,7 @@ void OnStageFinished( DWORD exitCode )
     }
 }
 
-// ONE poll per frame.  STILL_ACTIVE is 259; neither compiler returns it (cod4map exits 0 or
-// -1 or through Com_Error, cod4rad returns 0/1), so the classic ambiguity does not bite.
+// STILL_ACTIVE (259) cannot collide with these compilers' documented exit codes.
 void PollChild()
 {
     if ( s_stage == LSTAGE_NONE || !s_proc )
@@ -1003,9 +929,7 @@ void PollChild()
     OnStageFinished( code );
 }
 
-// ═════════════════════════════════════════════════════════════════════════════════════
-//  THE WINDOW
-// ═════════════════════════════════════════════════════════════════════════════════════
+// Window.
 void HelpMarker( const char *text )
 {
     ImGui::SameLine();
@@ -1270,8 +1194,7 @@ void DrawLog()
                     lineStarts.push_back( i + 1 );
         }
 
-        // The app uses ImGui's embedded Proggy font as Fonts[0], so selecting it explicitly
-        // keeps compiler columns monospaced even if a future panel temporarily changes fonts.
+        // Fonts[0] is the app's embedded monospace font.
         ImFont *mono = ImGui::GetIO().Fonts->Fonts.Size > 0
                      ? ImGui::GetIO().Fonts->Fonts[0] : nullptr;
         if ( mono )
@@ -1407,18 +1330,14 @@ void DrawWindow()
 
 }  // namespace
 
-// ═════════════════════════════════════════════════════════════════════════════════════
-//  COMMANDS + THE PER-FRAME ENTRY POINT
-// ═════════════════════════════════════════════════════════════════════════════════════
+// Commands and per-frame entry point.
 void KiwiLaunch_RegisterCommands()
 {
-    // Keep the established command name and id so existing radiant.ini bindings continue
-    // to resolve. F9 remains the compiled-in default in both keymap profiles.
+    // Preserve the command identity and F9 defaults for existing bindings.
     Radiant_RegisterCommand( "KiwiBuildAndRun", 0x78, 0, KIWI_CMD_BUILD_RUN );
 }
 
-// The native menu bar is this shell's top-bar command surface. Appending preserves every
-// index-based popup consumer, and the command system owns any accelerator annotation.
+// Append so index-based popup consumers retain their positions.
 void KiwiLaunch_BuildMenu( void *frameMenu )
 {
     HMENU hMenu = (HMENU)frameMenu;
@@ -1440,8 +1359,7 @@ bool KiwiLaunch_DispatchInstant( unsigned int cmdId )
 
 void KiwiLaunch_Draw()
 {
-    // POLL FIRST, ALWAYS (D-BF-D).  This runs whether or not the window is open, so closing
-    // it mid-build neither stalls the pipe nor freezes the chain between stages.
+    // Poll while hidden so capture and the BSP-to-LIGHT handoff cannot stall.
     PollChild();
 
     if ( !s_open )

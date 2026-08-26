@@ -1,49 +1,23 @@
 #ifndef KISAK_RADIANT
 #error this file is only for Radiant!
 #endif
-// ═════════════════════════════════════════════════════════════════════════════════════
-//  kiwi_uveditor.cpp — KIWI-UX (ROUND BD): THE UV EDITOR WINDOW.
-// ═════════════════════════════════════════════════════════════════════════════════════
+// Copyright (C) 2010 Kristian Duske
 //
-//  Copyright (C) 2010 Kristian Duske
+// Portions of this file are derived from TrenchBroom
+// (https://github.com/TrenchBroom/TrenchBroom): UvViewHelper.cpp (snapDelta, zoom fit),
+// UvOffsetTool.cpp (offset snap), UvScaleTool.cpp (handle ratio and vertex snap),
+// UvRotateTool.cpp (grab angle and edge-angle snap), UvShearTool.cpp (shear, edge-slope
+// snap, and issue #1350 guard), UvOriginTool.cpp, UvCameraTool.cpp, and UvEditor.cpp.
 //
-//  Portions of this file are derived from TrenchBroom
-//  (https://github.com/TrenchBroom/TrenchBroom): UvViewHelper.cpp (snapDelta, zoom fit),
-//  UvOffsetTool.cpp (vertex-to-grid offset snap), UvScaleTool.cpp (origin-to-handle ratio
-//  + vertex snap), UvRotateTool.cpp (grab-offset angle, the four-phase edge-angle snap and
-//  its 150/pow(d,0.8) threshold), UvShearTool.cpp (the shear factors, the edge-slope snap
-//  and the #1350 near-axis guard), UvOriginTool.cpp (origin snap candidates),
-//  UvCameraTool.cpp (cursor-anchored ×1.1 wheel zoom) and UvEditor.cpp (the toolbar).
-//  ROUND BI removed the two derivations that hung the SCALE and SHEAR handles on the UV
-//  GRID LINES (UvViewHelper::pickUvGrid) and the rotate RING (UvRotateTool::pick) — see
-//  D-BI-A.  The gesture MATH those tools carried is still TB's and is still credited here.
+// TrenchBroom is free software: you can redistribute it and/or modify it under the terms
+// of the GNU General Public License as published by the Free Software Foundation, either
+// version 3 of the License, or (at your option) any later version.
 //
-//  TrenchBroom is free software: you can redistribute it and/or modify
-//  it under the terms of the GNU General Public License as published by
-//  the Free Software Foundation, either version 3 of the License, or
-//  (at your option) any later version.
+// TrenchBroom is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+// without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+// See the GNU General Public License for more details.
 //
-//  TrenchBroom is distributed in the hope that it will be useful,
-//  but WITHOUT ANY WARRANTY; without even the implied warranty of
-//  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-//  GNU General Public License for more details.
-//
-// ═════════════════════════════════════════════════════════════════════════════════════
-// READ kiwi_uveditor.h FIRST.  It carries the whole design: why this is a 2D UV canvas
-// and not TrenchBroom's world-space ortho view (D-BD-A), how one 2×3 affine reaches a
-// texdef through Face_MoveTexture + texturevecs_02 (D-BD-B), why OFFSET bypasses that and
-// is exact (D-BD-C), why the background tiles by hand (D-BD-D), why this file owns no D3D
-// object (D-BD-E), why a patch brush contributes its patch and not its box faces (D-BD-F),
-// the undo shape (D-BD-G) and what v1 does not do (D-BD-H).  This file is the mechanical
-// half.
-//
-// KIWI-UX (ROUND BI): the GESTURE LAYER above all of that was replaced on a user verdict —
-// the controls came off the grid lines and onto the shapes.  D-BI-A..F in the header carry
-// that argument (what was rejected and the measurement that condemned it, the transform
-// box, first-class sub-shape selection with a click cycle and a marquee, the pivot that
-// follows the target set, the grid demoted to furniture, and the snap sets captured at the
-// press).  The WRITE path below D-BD-B / D-BG-A is untouched by that round.
-// ═════════════════════════════════════════════════════════════════════════════════════
+// kiwi_uveditor.h documents the coordinate, affine, display-layout, and undo contracts.
 
 #include "stdafx.h"
 #include "qe3.h"
@@ -66,18 +40,17 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
-#include <algorithm>          // ROUND BG: std::sort, for the fold-out's edge weld
+#include <algorithm>          // std::sort for the fold-out's edge weld
 #include <vector>
 
-// ── ported / cross-file entry points (each verified against its definition) ─────────
+// Ported/cross-file entry points, verified against their definitions.
 extern int         Sys_Printf( const char *fmt, ... );                       // win_qe3.cpp:118   int Sys_Printf(const char*,...)
 extern int         g_nUpdateBits;                                            // engine_stubs.cpp:773  int g_nUpdateBits
 extern bool        Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId ); // mainfrm.cpp:1358  bool Radiant_RegisterCommand(const char*,byte,byte,int)
 extern ImGuiID     ImGuiShell_DockRoot();                                    // imgui_shell.cpp:796   ImGuiID ImGuiShell_DockRoot()
 
-// The forward transform and its inverse.  Declarations copied VERBATIM from brush.cpp:
-// 1736-1737 and brush.cpp:1748-1749 — the byte-pointer `int` parameters are the binary's
-// usercall convention and are not to be "tidied" (texturevecs.cpp:94-101 / :195-221).
+// Copied from brush.cpp:1736-1749. The pointer-as-int parameters preserve the binary's
+// usercall convention (texturevecs.cpp:94-101, 195-221).
 extern void Face_MoveTexture( int surfDef, const float *normal, int outVecs,
                                int uvBase, float sizeX, float sizeY );       // texturevecs.cpp:101  void Face_MoveTexture(int,const float*,int,int,float,float)
 extern void texturevecs_02( int surfDef, int uvVecs, float v5, int normal,
@@ -94,32 +67,22 @@ extern qtexture_s *MaterialDef_GetLayeredMaterial( MaterialDef *def );       // 
 extern LayerMaterialDef *Materialdef_GetName( MaterialDef *mtlDef );         // materialdef.cpp:159  LayerMaterialDef *Materialdef_GetName(MaterialDef*)
 extern qtexture_s *Texture_GetHandle( const char *name );                    // texwnd.cpp:314    qtexture_s *Texture_GetHandle(const char*)
 
-// The patch side.  Patch_ShiftTexture( p, 0, 0 ) is used as the REBUILD: it adds zero to
-// every control ST and then runs the exact tail this file needs (bDirty for layer 1, free
-// curveDef, Patch_GenericMesh2, ++version — pmesh.cpp:3241-3246).  Writing that tail out
-// again here would be a second, quietly divergent spelling of a ported sequence.
+// Patch_ShiftTexture(p, 0, 0) supplies the ported rebuild tail after direct ST writes:
+// dirty layer 1, free curveDef, Patch_GenericMesh2, and increment version (pmesh.cpp:3241-3246).
 extern void        Patch_ShiftTexture( patchMesh_t *p, float s, float t );   // pmesh.cpp:3216    void Patch_ShiftTexture(patchMesh_t*,float,float)
 extern void        Patch_NaturalizeSelected( bool unk, bool cap, float x, float y ); // pmesh.cpp:2742  void Patch_NaturalizeSelected(bool,bool,float,float)
 extern void        Select_SetTexture( float *out );                          // select.cpp:1179   void Select_SetTexture(float*)
 
-// The two sentinel lists come from qe3.h:1053-1054; g_SelectedFaces from qe3.h:263.
-
 namespace
 {
-    // ═══════════════════════════════════════════════════════════════════════════════
-    //  constants that are not tuning (tuning lives in kiwi_uveditor.h)
-    // ═══════════════════════════════════════════════════════════════════════════════
+    // Non-tuning constants; tuning lives in kiwi_uveditor.h.
     const float KUVE_EPS        = 1.0e-6f;
     const int   KUVE_MAX_WINDING = 64;   // EdLayerGeom's own cap (qe3.h:216) — brush faces
                                          // are convex, so 64 points is ample.
     const float KUVE_PI         = 3.14159265358979323846f;
 
-    // Colours.  Deliberately a fixed light/dark PAIR rather than a luma sample of the
-    // bound texture: sampling would mean locking and reading a GPU surface every frame
-    // (D-BD-E says this file owns nothing), and TB's own adaptive rule is a hard binary
-    // (UvView.fragsh: luma < 0.5 ? 0.9-gray : 0.1-gray) whose two outputs are exactly
-    // these two.  The background is dimmed instead, which makes the light arm always the
-    // right one.
+    // Sampling texture luma would lock a GPU surface every frame. The dim background makes
+    // this fixed light palette readable without owning or reading back a D3D resource.
     const ImU32 KUVE_COL_BG        = IM_COL32(  24,  24,  28, 255 );
     const ImU32 KUVE_COL_TILE_TINT = IM_COL32( 168, 168, 168, 255 );  // multiply tint: dim
     const ImU32 KUVE_COL_GRID_MAJ  = IM_COL32( 230, 230, 230, 150 );
@@ -129,17 +92,12 @@ namespace
     const ImU32 KUVE_COL_PATCH     = IM_COL32( 150, 255, 150, 190 );
     const ImU32 KUVE_COL_HANDLE    = IM_COL32( 247, 230,  59, 255 );  // TB HandleColor
     const ImU32 KUVE_COL_HANDLE_HI = IM_COL32( 255,  40,  40, 255 );  // TB SelectedHandleColor
-    // KIWI-UX (ROUND BJ, ITEM 6): the snap accent.  The 3D pass paints its marker
-    // near-black (kiwi_snap.cpp KSNAP_COL_MARK) because it draws over a bright
-    // viewport; this canvas is a dimmed texture on a near-black plate, so the same
-    // glyph is drawn bright.  The GLYPH is what carries the language, not the hue.
+    // The 3D snap glyph is near-black; this canvas uses the same glyph in a visible hue.
     const ImU32 KUVE_COL_SNAP      = IM_COL32( 120, 255, 235, 240 );
     const ImU32 KUVE_COL_UAXIS     = IM_COL32( 255,  61,   0, 178 );  // TB (1.0,0.24,0.0,0.7)
     const ImU32 KUVE_COL_VAXIS     = IM_COL32(  74, 148,   0, 178 );  // TB (0.29,0.58,0.0,0.7)
 
-    // ═══════════════════════════════════════════════════════════════════════════════
-    //  the 2×3 affine (D-BD-B).  Row-major: x' = m[0]x + m[1]y + m[2].
-    // ═══════════════════════════════════════════════════════════════════════════════
+    // Row-major 2x3 affine: x' = m[0]x + m[1]y + m[2].
     struct uvXform_t { float m[6]; };
 
     uvXform_t XfIdentity()
@@ -154,9 +112,7 @@ namespace
         return x;
     }
 
-    // T(origin) · L · T(-origin) — every rotate / scale / skew in this file pins the
-    // origin handle, which is TB's rule (SURVEY_TRENCHBROOM §7 item 7) reached here by
-    // construction instead of by a compensating second write.
+    // T(origin) * L * T(-origin): rotate/skew and pivoted toolbar transforms pin the pivot.
     uvXform_t XfAboutOrigin( float l00, float l01, float l10, float l11,
                              float ox, float oy )
     {
@@ -181,8 +137,7 @@ namespace
             && fabsf( x.m[4] - 1.0f ) < KUVE_EPS && fabsf( x.m[5] ) < KUVE_EPS;
     }
 
-    // ── KIWI-UX (ROUND BG): the algebra the fold-out needs (D-BG-A) ────────────────
-    // Composition, `a AFTER b`: (a∘b)(x) = a(b(x)).  Row-major 2×3, translation in [2]/[5].
+    // Composition, `a AFTER b`: (a o b)(x) = a(b(x)); translation is in [2]/[5].
     uvXform_t XfMul( const uvXform_t &a, const uvXform_t &b )
     {
         uvXform_t r;
@@ -195,10 +150,8 @@ namespace
         return r;
     }
 
-    // A display transform is always invertible by construction (its linear part is
-    // orthonormal, det ±1), but this is the general 2×3 inverse and it guards anyway:
-    // a singular argument would otherwise divide by zero and poison every texdef the
-    // conjugation touches.  Singular ⇒ identity, i.e. "no display transform".
+    // Display transforms are orthonormal, but guard the general inverse: singular means
+    // identity rather than dividing by zero and poisoning every conjugated texdef.
     uvXform_t XfInverse( const uvXform_t &x )
     {
         const float det = x.m[0] * x.m[4] - x.m[1] * x.m[3];
@@ -215,8 +168,7 @@ namespace
         return r;
     }
 
-    // The LINEAR part only — a delta is a vector, not a point (D-BG-A: the offset case
-    // of the conjugation is D⁻¹'s linear part applied to the displayed delta).
+    // A delta is a vector: apply only D^-1's linear part for displayed-space offsets.
     void XfApplyVec( const uvXform_t &x, float sIn, float tIn, float *sOut, float *tOut )
     {
         const float s = x.m[0] * sIn + x.m[1] * tIn;
@@ -225,10 +177,7 @@ namespace
         *tOut = t;
     }
 
-    // THE CONJUGATION, D-BG-A: a gesture affine `A` expressed in DISPLAYED space becomes
-    // the TRUE-frame affine that may reach a texdef.  Identity D ⇒ A unchanged, which is
-    // why the active face costs nothing and why BD's behaviour is bit-identical whenever
-    // the chain is off or the selection is a single face.
+    // Convert a displayed-space gesture to true ST. Identity D leaves A bit-identical.
     uvXform_t XfConjugate( const uvXform_t &A, const uvXform_t &D )
     {
         if ( XfIsIdentity( D ) )
@@ -236,15 +185,12 @@ namespace
         return XfMul( XfInverse( D ), XfMul( A, D ) );
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════════
-    //  the gathered selection
-    // ═══════════════════════════════════════════════════════════════════════════════
+    // Gathered selection.
     struct uvBrush_t
     {
-        selbrush_t  *node;    // the INSTANCE node (may be null for a g_SelectedFaces row
-                              // whose brush we could not resolve — never dereferenced then)
+        selbrush_t  *node;    // instance node; a null unresolved face row is never dereferenced
         brush_t     *def;
-        patchMesh_t *pm;      // non-null == this row IS a patch (D-BD-F)
+        patchMesh_t *pm;      // non-null means this row is a patch
     };
     struct uvFace_t
     {
@@ -257,54 +203,34 @@ namespace
     std::vector<int>       s_patches;    // indices into s_brushes
     int                    s_activeFace = -1;   // index into s_faces, or -1
 
-    // ── KIWI-UX (ROUND BG), D-BG-A: the DISPLAY transforms, parallel to s_faces /
-    //    s_patches.  Identity means "drawn at its true ST", which is BD's behaviour and
-    //    is what every entry holds while the chain is off. ──────────────────────────
+    // Display transforms parallel s_faces/s_patches; identity means true ST position.
     std::vector<uvXform_t> s_faceD;
     std::vector<uvXform_t> s_patchD;
-    // ...and the CACHE of the last solve, replayed onto the above every frame (Gather()
-    // resets them).  Index-parallel, so it is only valid while the STRUCTURE signature —
-    // which rows were gathered, in which order — is unchanged.
+    // Gather resets D each frame, so replay this index-parallel cache while row structure matches.
     std::vector<uvXform_t> s_chainD;
     std::vector<uvXform_t> s_chainPD;
     bool                   s_chain      = true;   // toolbar toggle, session-only (no registry)
-    // ROUND BJ, ITEM 7: the texdef half of the old signature is GONE.  The layout is
-    // latched on the STRUCTURE alone — see the note in DrawCanvas.
     unsigned               s_chainStructSig = 0;  // (gathered rows, order, anchor, toggle)
     bool                   s_chainBuilt = false;
     int                    s_chainFolded = 0;     // how many faces the fold actually placed
     int                    s_chainShelved = 0;    // ...and how many had to be shelved
 
-    // ── KIWI-UX (ROUND BG), D-BG-B: the UV-EDITOR-LOCAL target sub-selection.  These are
-    //    parallel to s_faces / s_patches and are re-derived every gather; `s_targetAll`
-    //    is the BD state (everything gathered is a target) and is what an empty-canvas
-    //    click restores.  NOTHING here touches the 3D selection. ────────────────────
+    // Window-local targets parallel s_faces/s_patches; no state here changes 3D selection.
     std::vector<char>      s_faceTgt;
     std::vector<char>      s_patchTgt;
     bool                   s_targetAll = true;
     bool                   s_targetNone = false;
-    // Kept across gathers so a target set survives a repaint: keyed the same way the
-    // gesture snapshot is (def + faceIndex / patchMesh_t*), and re-matched, never
-    // dereferenced.
+    // Durable target keys are re-matched after each gather and never dereferenced.
     struct uvTgtKey_t { brush_t *def; int faceIndex; patchMesh_t *pm; };
     std::vector<uvTgtKey_t> s_targetKeys;
-    // ── KIWI-UX (ROUND BJ, ITEM 2): the selection-change stamp (D-BJ-D) ────────────
-    // FALSE means "this gather may derive the default target set from the EXPLICIT 3D
-    // face selection".  It is set the moment that derivation runs (once) and cleared
-    // only by a Sel_Generation change, so a canvas-local sub-selection the user built
-    // survives every unrelated re-gather — the gather runs EVERY FRAME — while a real
-    // 3D selection change (including a shift-click that adds a face) re-derives.
+    // Cleared only by Sel_Generation changes: local targets survive ordinary frame gathers,
+    // while a real 3D selection change re-seeds them from explicit selected faces.
     bool                   s_tgtSeeded = false;
 
-    // ── KIWI-UX (ROUND BN, ITEM 3): the SCOPE latch (kiwi_uveditor.h "IN SCOPE") ───
-    // Written once per frame by KiwiUvEd_Draw — the only place the window's own ImGui
-    // focus/hover is askable — and read by the 3D overlay passes through
-    // KiwiUvEd_InScope / KiwiUvEd_OverlaySuppressed.  False whenever the window is
-    // closed, collapsed or clipped away, so a stale gather can never suppress anything.
+    // Written where the window's ImGui focus/hover is available; false when not visible.
     bool                   s_inScope   = false;
 
-    // ── the gesture-start snapshot (D-BD-B point 2: every live frame rebuilds from
-    //    HERE, never from the previous frame's output) ────────────────────────────────
+    // Every live frame rebuilds from this gesture-start snapshot.
     struct uvSnapFace_t
     {
         brush_t      *def;
@@ -319,7 +245,7 @@ namespace
     std::vector<uvSnapFace_t>  s_snapFaces;
     std::vector<uvSnapPatch_t> s_snapPatches;
 
-    // ── view state ─────────────────────────────────────────────────────────────────
+    // View state.
     float    s_panU = 0.0f, s_panV = 0.0f;   // UV coord at the canvas top-left
     float    s_zoom = 128.0f;                // canvas pixels per texture repeat
     bool     s_zoomValid = false;            // TB UvViewHelper::m_zoomValid (:79-83)
@@ -328,16 +254,11 @@ namespace
     unsigned s_selGen = 0;                   // Sel_Generation() the view was framed for
     bool     s_haveGen = false;
 
-    // ── gesture state ──────────────────────────────────────────────────────────────
-    // KIWI-UX (ROUND BI): UVG_OFFSET is UVG_MOVE (it is a body drag on the shapes now, not
-    // the ladder's fallback), and UVG_MARQUEE is the rubber-band that replaced that
-    // fallback (D-BI-C).  UVG_SHEAR keeps its name because its arithmetic is unchanged.
+    // Gesture state.
     enum uvGesture_t { UVG_NONE = 0, UVG_ROTATE, UVG_ORIGIN, UVG_SCALE, UVG_SHEAR,
                        UVG_MOVE, UVG_MARQUEE, UVG_PAN };
 
-    // KIWI-UX (ROUND BI): the eight handles of the transform box (D-BI-B).  The order is
-    // load-bearing — 0..3 are the CORNERS (which also carry the rotate annulus) and 4..7
-    // are the EDGE MIDPOINTS (which also carry the Alt-skew), so `h < 4` is "is a corner".
+    // Load-bearing order: 0..3 are corners; 4..7 are edge midpoints.
     enum uvHandle_t { UVH_NONE = -1,
                       UVH_NW = 0, UVH_NE, UVH_SE, UVH_SW,
                       UVH_N,      UVH_E,  UVH_S,  UVH_W };
@@ -350,43 +271,25 @@ namespace
     float       s_gCurU   = 0.0f, s_gCurV   = 0.0f;   // ...and at the latest update
     float       s_gHandleU = 0.0f, s_gHandleV = 0.0f; // the grabbed handle, in UV
     bool        s_gAxis[2] = { false, false };        // which axes the handle armed
-    int         s_gHandle  = UVH_NONE;                // which handle (ROUND BI)
+    int         s_gHandle  = UVH_NONE;
     bool        s_gOnShape = false;                   // the press landed on a shape body
-    bool        s_gShift   = false;                   // Shift AS OF THE PRESS: a marquee's
-                                                      // "extend" is decided when the gesture
-                                                      // starts, not by whether the key is
-                                                      // still down when the mouse comes up
+    bool        s_gShift   = false;                   // modifier snapshot from the press
     bool        s_gCtrl    = false;
     float       s_gOriginU = 0.0f, s_gOriginV = 0.0f; // origin at press (origin drag)
-    // ── KIWI-UX (ROUND BJ, ITEM 5): the SCALE ANCHOR (D-BJ-E) ─────────────────────
-    // The point a scale holds FIXED.  Round BI scaled about the pivot, so grabbing the
-    // right edge moved the left edge out by the same amount; the standard 2D-editor
-    // rule is that the OPPOSITE side (or corner) is nailed down and only the dragged
-    // side moves.  Set at the press from the DEFLATED box, alongside s_gHandle*; the
-    // pivot keeps rotate, skew, Rot 90 / Flip and the numeric ops.
+    // Scale pins the opposite handle from the deflated box; other transforms use the pivot.
     float       s_gAnchorU = 0.0f, s_gAnchorV = 0.0f;
     float       s_gStartAngle = 0.0f;                 // TB computeInitialAngle grab offset
     char        s_status[192] = { 0 };
 
-    // ── KIWI-UX (ROUND BI): the pivot's "user placed" latch (D-BI-D) ───────────────
-    // While this is false the pivot is re-derived from the target set's displayed bbox
-    // centre every idle frame.  A pivot DRAG that actually moved it latches it true, and
-    // the latch clears on the selection change that re-frames the view.
+    // Until dragged, the pivot follows the displayed target bbox center; selection clears the latch.
     bool        s_originUser = false;
 
-    // ── KIWI-UX (ROUND BI): the stacked-shape click cycle (D-BI-C) ─────────────────
+    // Stacked-shape click cycle.
     float       s_cycleU = 0.0f, s_cycleV = 0.0f;
     int         s_cycleNext  = 0;
     bool        s_cycleValid = false;
 
-    // ── KIWI-UX (ROUND BO, ITEM 2): THE DEFERRED COLLAPSE ─────────────────────────
-    // Armed by a press on a shape that is ALREADY one of several targets, consumed by
-    // GestureEnd.  A press there can mean two different things and the difference is
-    // only knowable at the release: DRAG = move the whole target set (which is the
-    // re-reported bug), CLICK = collapse the set to the pressed shape.  So the press
-    // commits to neither, and this carries the click's answer across the gesture.
-    // Cleared by every gesture start and by every teardown, so it can never fire for
-    // a gesture it was not armed by.
+    // A press on one of several targets defers click-to-collapse until release; a drag moves all.
     bool        s_collapseArmed = false;
     int         s_collapseFace  = -1;
     int         s_collapsePatch = -1;
@@ -395,20 +298,18 @@ namespace
     int         s_removeFace    = -1;
     int         s_removePatch   = -1;
 
-    // ── KIWI-UX (ROUND BI): the gesture-start snap candidate sets (D-BI-F) ─────────
+    // Gesture-start snap candidates in displayed space.
     struct uvPt_t   { float u, v; };
     struct uvEdge_t { float u0, v0, u1, v1; };
     std::vector<uvPt_t>   s_gTgtPts;     // the DRAGGED shapes' displayed outline points
     std::vector<uvPt_t>   s_gOtherPts;   // ...and everything else's, as snap targets
     std::vector<uvEdge_t> s_gTgtEdges;   // the dragged outlines' edges (angle / slope snaps)
 
-    // ── the canvas rect for this frame (screen pixels) ─────────────────────────────
+    // Canvas rect for this frame, in screen pixels.
     ImVec2 s_c0( 0.0f, 0.0f );
     ImVec2 s_cs( 0.0f, 0.0f );
 
-    // ═══════════════════════════════════════════════════════════════════════════════
-    //  small helpers
-    // ═══════════════════════════════════════════════════════════════════════════════
+    // Small helpers.
     float ClampF( float v, float lo, float hi ) { return v < lo ? lo : ( v > hi ? hi : v ); }
     int   ClampI( int v, int lo, int hi )       { return v < lo ? lo : ( v > hi ? hi : v ); }
 
@@ -421,17 +322,12 @@ namespace
 
     bool MtlDefUsable( const MaterialDef *md )
     {
-        // The MtlDef_IsValid invariant (materialdef.cpp:53) is an L0 assert inside both
-        // MaterialDef_GetLayeredMaterial and Materialdef_GetName.  This window runs every
-        // frame over whatever is selected, so it TESTS the invariant instead of tripping
-        // it — the same reasoning kiwi_uv.cpp:185-189 states for the readout.
+        // Avoid the MtlDef_IsValid L0 assertions in per-frame material accessors.
         return md && ( ( md->lyrMtl != 0 ) + ( md->radMtl != 0 ) ) == 1;
     }
 
-    // The patch's per-layer material pair, as a MaterialDef.  `&p->texture + layer` is
-    // patchMesh_material pointer arithmetic (8 bytes/layer → texture / lightmap /
-    // smoothing) and MaterialDef's first two fields are the same pair — the expression is
-    // copied from Patch_RotateTexture (pmesh.cpp:3259).
+    // MaterialDef shares the patchMesh_material pair layout; copied from
+    // Patch_RotateTexture (pmesh.cpp:3259).
     MaterialDef *PatchMtlDef( patchMesh_t *p )
     {
         if ( !p )
@@ -452,14 +348,8 @@ namespace
         if ( q->height > 0 ) *h = (float)q->height;
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════════
-    //  GATHER — every selected face and every selected patch, once per frame
-    // ═══════════════════════════════════════════════════════════════════════════════
-    // Both sources are walked LIVE (the sentinel lists and the CArray), so nothing here
-    // is a stored pointer and Sel_BrushLive is not the right tool: a node reached by
-    // walking `selected_brushes` is live by construction.  The only stored pointers this
-    // file keeps are the gesture SNAPSHOT keys, and those are re-matched against a fresh
-    // gather every frame (SnapshotStillMatches) rather than dereferenced blind.
+    // Gather every selected face and patch once per frame. Live lists need no liveness
+    // check; stored snapshot/target pointers are only re-matched against a fresh gather.
     int FindBrushRow( selbrush_t *node, brush_t *def )
     {
         for ( size_t i = 0; i < s_brushes.size(); ++i )
@@ -476,18 +366,13 @@ namespace
         return false;
     }
 
-    void StoreTargetKeys();       // ROUND BJ, ITEM 2 — defined below, used by Gather
-    void TargetAll();             // ROUND BN, ITEM 4 — likewise (the re-derivation)
-    void TargetSingle( int face, int patch );   // ROUND BO, ITEM 2 — the deferred
-                                                // collapse, fired from GestureEnd
+    void StoreTargetKeys();
+    void TargetAll();
+    void TargetSingle( int face, int patch );
 
     void Gather()
     {
-        // ── KIWI-UX (ROUND BJ, ITEM 2): the selection-change stamp ─────────────────
-        // Read against `s_selGen`, which DrawCanvas updates LATER in this same frame,
-        // so a 3D selection change is seen by the gather that first observes it and the
-        // re-derivation below lands on the frame it belongs to.  Every other frame
-        // leaves the stamp set and the user's canvas-local target set alone.
+        // DrawCanvas updates s_selGen later, so this gather sees and seeds a selection change.
         if ( !s_haveGen || Sel_Generation() != s_selGen )
             s_tgtSeeded = false;
 
@@ -496,8 +381,7 @@ namespace
         s_patches.clear();
         s_activeFace = -1;
 
-        // 1. whole-selected brushes.  A PATCH brush contributes its patch and NOT its box
-        //    faces — D-BD-F.
+        // Whole-selected patch brushes contribute their patch, not derived box faces.
         for ( selbrush_t *b = selected_brushes.next;
               b && b != &selected_brushes;
               b = b->next )
@@ -531,9 +415,8 @@ namespace
             }
         }
 
-        // 2. the face selection.  Face-selected brushes are NOT on `selected_brushes`
-        //    (kiwi_selection.h DESIGN NOTE 2), so this cannot duplicate the pass above —
-        //    the HaveFace guard is belt for a selection state that grew a third writer.
+        // Face-selected brushes are absent from selected_brushes (kiwi_selection.h).
+        // HaveFace also protects against any future overlapping selection source.
         const int nf = g_SelectedFaces.GetSize();
         for ( int i = 0; i < nf; ++i )
         {
@@ -564,9 +447,7 @@ namespace
             s_faces.push_back( f );
         }
 
-        // 3. THE ACTIVE FACE — the one whose material paints the background and whose
-        //    vertices/edges every snap reads.  KiwiSel().active when it names a face we
-        //    gathered, else the first gathered face.
+        // The active face supplies the background, texel size, and chain anchor.
         const sel_item_t &act = KiwiSel().active;
         if ( act.kind == SEL_FACE && act.brush && act.brush->def )
         {
@@ -583,9 +464,7 @@ namespace
         if ( s_activeFace < 0 && !s_faces.empty() )
             s_activeFace = 0;
 
-        // ── KIWI-UX (ROUND BG): the two parallel arrays the rest of the round reads.
-        //    Both are rebuilt from scratch here, every frame, for the same reason the
-        //    gather itself is: nothing in this file may hold an index across a frame.
+        // Rebuild index-parallel display and target arrays every frame.
         s_faceD.assign( s_faces.size(), XfIdentity() );
         s_patchD.assign( s_patches.size(), XfIdentity() );
         s_faceTgt.assign( s_faces.size(), 1 );
@@ -640,56 +519,9 @@ namespace
             }
         }
 
-        // ── KIWI-UX (ROUND BJ, ITEM 2): THE TARGET SET STARTS AS THE 3D FACE PICK ──
-        // USER REPORT, verbatim: *"When faces are shift-selected in 3D, they also need
-        // to be shift-selected in the UV editor by default."*
-        //
-        // Round BI's default was "everything gathered is a target".  For a PURE face
-        // selection that already answers the report — the gathered rows ARE the picked
-        // faces, so all of them are targeted, and ITEM 3 is what makes that VISIBLE
-        // (they all draw gold now instead of one of them doing so).  Where it was wrong
-        // is a MIXED selection: whole brushes contribute all their faces, so the faces
-        // the user actually shift-picked were buried among them and the first canvas
-        // gesture moved rows that were never picked in 3D.
-        //
-        // So: when the 3D selection carries EXPLICIT faces (g_SelectedFaces), those
-        // faces — and only those — are the initial target set.  A whole-brush-only
-        // selection keeps "all", unchanged.  The stamp above is what makes this a
-        // DEFAULT and not a per-frame override.
-        // ── KIWI-UX (ROUND BN, ITEM 4): …AND THE RE-DERIVATION IS UNCONDITIONAL ──
-        // USER RE-REPORT, verbatim: *"When selecting multiple faces, it still needs
-        // to select multiple in the UV editor.  I shouldn't have to shift-click them
-        // in the UV editor to move them all at once after having shift-clicked them
-        // in 3D."*
-        //
-        // THE DEFECT IS THE `hits < nShapes` GUARD BELOW, and the stamp is innocent.
-        // Round BJ declined to seed when the explicit 3D faces cover EVERY gathered
-        // shape, reasoning "leave the state as plain `all` rather than as a
-        // sub-selection that happens to cover everything".  That reasoning silently
-        // assumes the state IS "all" — and after ANY canvas press it is not: a press
-        // on a shape runs TargetSingle (:2890, `s_targetAll = false`) and stores its
-        // keys, and the RE-MATCH block immediately above (:572-612) has just
-        // re-applied those stale keys to the NEW gather.  Nothing between the stamp
-        // (:471, which only clears `s_tgtSeeded`) and here ever clears `s_targetAll`.
-        //
-        // So the user's actual flow — shift-click faces in 3D, drag one in the
-        // canvas (which is what makes the canvas useful at all), shift-click a
-        // fourth face in 3D — re-gathered four faces, re-matched the ONE canvas key,
-        // hit the `4 < 4` guard, declined, and drew one gold shape.  Every later 3D
-        // shift-click was ignored for the rest of the session, which is exactly
-        // "I shouldn't have to shift-click them in the UV editor".
-        //
-        // THE RULE, stated once and implemented below: ANY change to the 3D
-        // selection re-derives the target set from `g_SelectedFaces` IMMEDIATELY —
-        // add, remove or replace.  A canvas-local sub-selection survives only
-        // UNRELATED re-gathers, i.e. frames in which `Sel_Generation()` did not
-        // move.  The three arms are the three answers, and the middle one is round
-        // BJ's, unchanged:
-        //     explicit faces cover EVERY gathered shape  -> plain "all" (TargetAll,
-        //         stated rather than assumed — this is the arm that was missing);
-        //     explicit faces cover SOME of them          -> that sub-selection;
-        //     no explicit faces at all (whole brushes)   -> plain "all", because the
-        //         old keys belong to a selection the user has just replaced.
+        // Any 3D selection change replaces stale local keys: explicit faces seed that
+        // subset; explicit faces covering every shape and whole-brush-only selections use
+        // plain "all". Local targeting survives only gathers with the same generation.
         if ( !s_tgtSeeded )
         {
             s_tgtSeeded = true;
@@ -697,8 +529,6 @@ namespace
             const int nShapes   = (int)( s_faces.size() + s_patches.size() );
             if ( nExplicit <= 0 && nShapes > 0 )
             {
-                // A whole-brush-only selection: "keeps all" was always the intent
-                // (round BJ), and TargetAll is what actually makes it true.
                 TargetAll();
             }
             else if ( nExplicit > 0 && nShapes > 0 )
@@ -720,11 +550,7 @@ namespace
                         }
                     }
                 }
-                // `hits == nShapes` means the explicit faces ARE everything on the
-                // canvas: the state becomes plain "all" rather than a sub-selection
-                // that happens to cover everything (Probe's empty-space arm reads
-                // s_targetAll, D-BI-C, and a redundant sub-selection would change it).
-                // KIWI-UX (ROUND BN, ITEM 4): SET, not assumed — see above.
+                // Avoid a redundant subset covering all; Probe treats s_targetAll as a mode.
                 if ( hits > 0 && hits < nShapes )
                 {
                     s_faceTgt = ft;
@@ -745,7 +571,6 @@ namespace
         return !s_faces.empty() || !s_patches.empty();
     }
 
-    // ── KIWI-UX (ROUND BG), D-BG-B ────────────────────────────────────────────────
     bool FaceIsTarget ( size_t i ) { return i < s_faceTgt.size()  && s_faceTgt[i]  != 0; }
     bool PatchIsTarget( size_t i ) { return i < s_patchTgt.size() && s_patchTgt[i] != 0; }
 
@@ -792,9 +617,7 @@ namespace
         s_patchTgt.assign( s_patches.size(), 1 );
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════════
-    //  PER-FACE UV READ (the SURVEY_KIWI recipe, verbatim)
-    // ═══════════════════════════════════════════════════════════════════════════════
+    // Per-face UV read, matching the ported write path.
     //   td = &f->mtldef[L].mat_texDef + LayerMat::GetCurrentLayer(...)   [KiwiUv_FaceTexdef]
     //   Face_MoveTexture( td, f->plane.normal, texMat, &td->shift[0], td->rotate, td->crossterm )
     //   s = dot(row0, p) + texMat[3];  t = dot(row1, p) + texMat[7]      [brush.cpp:2618-2619]
@@ -818,11 +641,7 @@ namespace
         *t = m[4] * p[0] + m[5] * p[1] + m[6] * p[2] + m[7];
     }
 
-    // The face's winding in ST.  Returns the point count (0 when the face has no winding
-    // or no usable texdef on the current layer).  `tdOverride` non-null reads the winding
-    // through a DIFFERENT texdef than the face is currently carrying — that is how a live
-    // gesture measures its snaps against the GESTURE-START projection instead of against
-    // the frame it is in the middle of writing.
+    // tdOverride reads ST from a gesture-start texdef rather than the frame being written.
     int FaceStPoints( const uvFace_t &f, float out[KUVE_MAX_WINDING][2],
                       const texdef_sub_t *tdOverride )
     {
@@ -848,15 +667,9 @@ namespace
         return n;
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════════
-    //  KIWI-UX (ROUND BG) — "PAPER ANGELS": THE DISPLAY TRANSFORMS (D-BG-A)
-    // ═══════════════════════════════════════════════════════════════════════════════
-    // Everything in this block is DISPLAY ONLY.  Not one line of it may reach a texdef
-    // or a control ST; the single point where D crosses into the write path is
-    // XfConjugate, at apply time, and that is the whole design.
+    // Display transforms. Only XfConjugate may carry D into the texdef/control-ST write path.
 
-    // The face winding in DISPLAYED ST — i.e. through D_f.  Same signature as
-    // FaceStPoints so the drawing / hit-testing sites read the same shape.
+    // Face winding in displayed ST; drawing and hit-testing share this path.
     int FaceStPointsDisp( size_t fi, float out[KUVE_MAX_WINDING][2],
                           const texdef_sub_t *tdOverride )
     {
@@ -879,10 +692,7 @@ namespace
         *t = v;
     }
 
-    // The patch's DISPLAYED outline: the control net's outer ring, walked once round.
-    // (A Bezier patch lies inside its control hull, and the ring is the cheap honest
-    // boundary — the same thing DrawWireframes already draws the user.)  Returns the
-    // point count; 0 for a degenerate patch.
+    // Displayed control-hull ring; a Bezier patch lies inside this inexpensive boundary.
     int PatchRing( size_t pi, float ring[KUVE_MAX_WINDING][2] )
     {
         patchMesh_t *p = s_brushes[s_patches[pi]].pm;
@@ -903,12 +713,7 @@ namespace
         return n;
     }
 
-    // ── the rebuild trigger ────────────────────────────────────────────────────────
-    // KIWI-UX (ROUND BJ, ITEM 7): this is now the WHOLE trigger.  Round BG also hashed
-    // every gathered texdef (ChainSignature / HashF, DELETED with this round — see the
-    // note in DrawCanvas), which made the fold-out re-solve itself from the new STs the
-    // moment any gesture released and visibly reshuffled the arrangement.  A display
-    // layout is not a function of the texdefs, so it is not keyed on them.
+    // Chain rebuild key: display layout depends on row structure, not mutable texdefs/ST.
     unsigned HashMix( unsigned h, unsigned v )
     {
         h ^= v;
@@ -916,9 +721,7 @@ namespace
         return h;
     }
 
-    // Which rows were gathered, in which order, which one is the fold ANCHOR, and
-    // whether the chain is on at all.  While THIS is unchanged the cached D array is
-    // index-parallel to the live one and is replayed onto it every frame.
+    // Cache stays index-parallel while row order, anchor, and Chain state match.
     unsigned ChainStructSig()
     {
         unsigned h = 2166136261u;
@@ -936,7 +739,7 @@ namespace
         return h;
     }
 
-    // ── the build ──────────────────────────────────────────────────────────────────
+    // Chain build.
     const int KUVE_CHAIN_MAX_PTS = 32;      // per-face winding cap for the fold only
 
     struct chainFace_t
@@ -976,10 +779,8 @@ namespace
         return a.vb < b.vb;
     }
 
-    // The rigid map placing neighbour edge (b0,b1) onto the anchor's DISPLAYED edge
-    // (A0,A1): rotate dir(b1-b0) onto dir(A1-A0), then translate b0 onto A0.  Lengths
-    // are NOT matched — a rigid transform cannot, and the two faces may carry different
-    // texture scales (D-BG-A states the compromise).
+    // Rotate neighbor edge (b0,b1) to the anchor's displayed direction and pin b0 to A0.
+    // Lengths deliberately remain unmatched because D is rigid and UV scales may differ.
     uvXform_t FoldRigid( const float *A0, const float *A1, const float *b0, const float *b1 )
     {
         const float ax = A1[0] - A0[0], ay = A1[1] - A0[1];
@@ -999,7 +800,7 @@ namespace
         return r;
     }
 
-    // Reflection across the line through P with direction (dx,dy) — the FOLD itself.
+    // Reflection across the line through P in direction (dx,dy).
     uvXform_t FoldMirror( const float *P, float dx, float dy )
     {
         const float l = sqrtf( dx * dx + dy * dy );
@@ -1024,9 +825,9 @@ namespace
             return;
         const int nf = (int)s_faces.size();
         if ( nf > KUVE_CHAIN_MAX_FACES )
-            return;                                   // D-BG-A: too many to be a diagram
+            return;                                   // too many faces for a useful diagram
 
-        // 1. gather the per-face geometry ONCE (world + own-frame ST + ST centroid).
+        // Gather world points, own-frame ST, and ST centroids once.
         s_cf.assign( (size_t)( nf > 0 ? nf : 0 ), chainFace_t() );
         for ( int i = 0; i < nf; ++i )
         {
@@ -1058,7 +859,7 @@ namespace
             }
         }
 
-        // 2. weld the world vertices (quantised buckets) and build the edge list.
+        // Weld world vertices into quantized buckets and build edges.
         s_cv.clear();
         for ( int i = 0; i < nf; ++i )
             for ( int k = 0; k < s_cf[i].n; ++k )
@@ -1115,7 +916,7 @@ namespace
         }
         std::sort( s_ce.begin(), s_ce.end(), EdgeLess );
 
-        // 3. adjacency: equal (va,vb) runs, every cross-face pair inside one.
+        // Equal welded-edge runs produce every cross-face adjacency.
         s_ca.clear();
         for ( size_t i = 0; i < s_ce.size(); )
         {
@@ -1132,7 +933,7 @@ namespace
                     ad.fb = s_ce[b].face;
                     ad.a0 = s_ce[a].i0;
                     ad.a1 = s_ce[a].i1;
-                    // Match the ENDPOINTS, not just the edge: b's i0 may be a's i1.
+                    // Match endpoints: b's i0 may correspond to a's i1.
                     const int wa0 = weldId[weldBase[s_ce[a].face] + s_ce[a].i0];
                     const int wb0 = weldId[weldBase[s_ce[b].face] + s_ce[b].i0];
                     if ( wb0 == wa0 ) { ad.b0 = s_ce[b].i0; ad.b1 = s_ce[b].i1; }
@@ -1142,7 +943,7 @@ namespace
             i = j;
         }
 
-        // 4. BFS from the active face; D stays identity there, always.
+        // BFS from the active face, whose D remains identity.
         std::vector<char> placed( (size_t)nf, 0 );
         std::vector<int>  queue;
         const int anchor = ( s_activeFace >= 0 && s_activeFace < nf ) ? s_activeFace : 0;
@@ -1174,8 +975,7 @@ namespace
 
                 uvXform_t D = FoldRigid( A0, A1, s_cf[fb].st[b0], s_cf[fb].st[b1] );
 
-                // Which side is the anchor's body on, and which side did the neighbour
-                // land on?  Same side ⇒ it overlaps the anchor ⇒ fold it across.
+                // Same-side centroids overlap, so reflect the neighbor across the edge.
                 float ca[2], cb[2];
                 XfApply( s_faceD[fa], s_cf[fa].ctr[0], s_cf[fa].ctr[1], &ca[0], &ca[1] );
                 XfApply( D,           s_cf[fb].ctr[0], s_cf[fb].ctr[1], &cb[0], &cb[1] );
@@ -1191,8 +991,7 @@ namespace
             }
         }
 
-        // 5. the shelf: everything the fold could not reach goes in a row to the right of
-        //    the occupied box.  Trivial shelf packing — D-BG-A says so and means it.
+        // Shelf unreachable faces to the right of the occupied box.
         float occ[4] = { 1.0e30f, 1.0e30f, -1.0e30f, -1.0e30f };
         bool  haveOcc = false;
         for ( int i = 0; i < nf; ++i )
@@ -1233,9 +1032,7 @@ namespace
             ++s_chainShelved;
         }
 
-        // 6. patches: their ST footprints rarely stack, so they are left alone UNLESS one
-        //    sits almost entirely inside the occupied box (>80% of its own area), which is
-        //    the case the user cannot read.  Those get the same shelf.
+        // Leave patches at true ST unless >80% of their bbox overlaps the occupied box.
         const int layer = ClampI( g_qeglobals.current_edit_layer, 0, 2 );
         for ( size_t pi = 0; pi < s_patches.size(); ++pi )
         {
@@ -1273,14 +1070,8 @@ namespace
         }
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════════
-    //  THE WRITE PATH
-    // ═══════════════════════════════════════════════════════════════════════════════
-    // The tail every ported texdef writer runs, per brush.  Verbatim the sequence
-    // Brush_ShiftTexture's face pass uses (select.cpp:3158-3163): rebuild windings, keep
-    // a vertex/edge selection consistent, mark the map, bump the def version, then
-    // re-sync the instance faceVis (sub_477D70 is version-gated, so this is also what
-    // keeps `selbrush->version == def->version` — the invariant select.cpp:2471 asserts).
+    // Ported texdef-writer tail from Brush_ShiftTexture (select.cpp:3158-3163): rebuild
+    // windings/vertex selection, mark modified, bump the def version, then sync faceVis.
     void TouchBrush( selbrush_t *node, brush_t *def )
     {
         if ( !def )
@@ -1294,16 +1085,12 @@ namespace
             sub_477D70( node, (const float *)world_orient_matrix );
     }
 
-    // D-BD-B: matrix surgery on the GESTURE-START texdef, then the binary's own inverse.
+    // Transform the gesture-start texdef matrix, then use the binary's inverse decomposition.
     void TransformFace( face_t *fd, const texdef_sub_t *td0, const uvXform_t &A,
                         texdef_sub_t *out )
     {
-        // A SINGULAR linear part collapses the two texture axes onto one line, and
-        // texturevecs_02 then divides by a zero row length (Phase E, `1/|row0|`) and
-        // poisons the texdef with an infinity that no later gesture can undo.  Skew is
-        // the reachable case: its matrix is [[1,f1],[f0,1]], whose determinant is
-        // 1 − f0·f1.  Refuse the frame instead — the caller re-derives from the snapshot
-        // next frame anyway, so the gesture simply stops moving at the degenerate point.
+        // A singular affine collapses a texture axis; texturevecs_02 would divide by its
+        // zero row length. Refuse that frame and let the next rebuild use the snapshot.
         const float det = A.m[0] * A.m[4] - A.m[1] * A.m[3];
         if ( fabsf( det ) < 1.0e-6f )
         {
@@ -1323,11 +1110,9 @@ namespace
         m[3] = A.m[0] * m0[3] + A.m[1] * m0[7] + A.m[2];
         m[7] = A.m[3] * m0[3] + A.m[4] * m0[7] + A.m[5];
 
-        // texturevecs_02 CONSUMES `m` as scratch (it orthogonalises the rows in place —
-        // a no-op for us, see D-BD-B) and writes the four texdef fields byref.  The arg
-        // shape is copied from Face_TexLock_Reproject's own call (brush.cpp:2978-2980):
-        // out+0 size, out+8 shift, out+16 rotate, out+20 crossterm.  The third argument
-        // is the hex-rays x87 phantom and is ignored by the port.
+        // texturevecs_02 consumes m as scratch and writes size/shift/rotate/crossterm byref.
+        // Call shape matches Face_TexLock_Reproject (brush.cpp:2978-2980); arg 3 is the
+        // ignored Hex-Rays x87 phantom.
         texturevecs_02( (int)(intptr_t)&out->size[0], (int)(intptr_t)m,
                         fd->plane.normal[2],
                         (int)(intptr_t)fd->plane.normal, fd->plane.dist,
@@ -1336,9 +1121,8 @@ namespace
                         (int)(intptr_t)&out->crossterm );
     }
 
-    // D-BD-C: the EXACT route for a pure translation.  m3 == -shift[0]/sx, so a UV
-    // translation by d is shift = shift0 - d*size0, with the binary's own zero-size
-    // substitution (texturevecs.cpp:108-109).
+    // Exact translation: m3=-shift[0]/sx, so shift=shift0-d*size0, with the port's
+    // zero-size substitution (texturevecs.cpp:108-109).
     void OffsetFace( const texdef_sub_t *td0, float dU, float dV, texdef_sub_t *out )
     {
         float sx = td0->size[0]; if ( sx == 0.0f ) sx = 128.0f;
@@ -1351,9 +1135,8 @@ namespace
         out->shift[1] = td0->shift[1] - dV * sy;
     }
 
-    // Patch control STs.  `st[2*layer]` / `[2*layer+1]` is the SAME slot
-    // Patch_ShiftTexture writes (pmesh.cpp:3232-3238); `texCoord` is st/lightmap/smoothing
-    // contiguous (qedefs.h:159-165) so the stride-2 walk reaches all three channels.
+    // Patch_ShiftTexture uses these same `[2*layer + {0,1}]` slots (pmesh.cpp:3232-3238);
+    // texCoord stores the three channels contiguously (qedefs.h:159-165).
     void TransformPatch( patchMesh_t *p, float src[16][16][2], const uvXform_t &A )
     {
         const int layer = ClampI( g_qeglobals.current_edit_layer, 0, 2 );
@@ -1367,12 +1150,8 @@ namespace
                 p->ctrl[i][j].texCoord.st[2 * layer]     = ns;
                 p->ctrl[i][j].texCoord.st[2 * layer + 1] = nt;
             }
-        // The REBUILD, borrowed rather than re-spelled: a zero shift adds nothing and then
-        // runs pmesh.cpp:3241-3246 (bDirty for layer 1, free curveDef, Patch_GenericMesh2,
-        // ++version).  Note this file transforms the WHOLE control grid even in
-        // sel_curvepoint mode — the canvas draws the whole grid, so it edits the whole
-        // grid; Patch_ShiftTexture's d_move_points filter only gates ST writes, and ours
-        // are already done.
+        // Zero shift invokes only the ported rebuild tail (pmesh.cpp:3241-3246). This editor
+        // intentionally transforms the whole displayed control grid even in curve-point mode.
         Patch_ShiftTexture( p, 0.0f, 0.0f );
     }
 
@@ -1390,48 +1169,21 @@ namespace
             }
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════════
-    //  UNDO (D-BD-G)
-    // ═══════════════════════════════════════════════════════════════════════════════
+    // Undo.
     void UndoOpen( const char *op )      // `op` MUST be a literal — the record stores it
     {
         if ( s_undoOpen )
             return;
-        // ── KIWI-UX (ROUND BH, ITEM 3): END A PARKED FACE GESTURE FIRST ────────
-        // USER REPORT, verbatim: *"Make it so texture applications dont require a
-        // right-click/enter to confirm, they are just an operation that goes
-        // through when you click the new texture (same with UVs)."*
-        //
-        // THIS WINDOW ALREADY COMMITTED PER GESTURE — every write path here is
-        // UndoOpen -> mutate -> RebuildAll -> UndoCommit (:2123 for the drag end,
-        // :2680 for ApplyAffine, :2690 for ApplyField), and KiwiCmd_UndoCommit
-        // closes the record on the spot.  Nothing here was ever deferred to a
-        // confirm.  What DID take UV edits back is the same thing that took
-        // texture applies back: in Face mode a face click auto-enters
-        // KIWI_CMD_MOVE and parks it, and that gesture's per-face baseline is the
-        // whole MaterialDef BLOCK (kiwi_transform.cpp:1663) — a texdef lives
-        // INSIDE that block — which RestoreAll (:1573) and every push frame
-        // (:2638) memcpy back over the face.  So an edit made here survived until
-        // the parked gesture was cancelled, and RMB / Enter (its Commit) was the
-        // only exit that kept it.  kiwi_uv.cpp has the full chain.
-        //
-        // At UndoOpen rather than at each caller: this is the ONE place every
-        // mutating path in this file passes through, and it runs BEFORE the first
-        // write.  The return value is deliberately NOT acted on here — a refusal
-        // (a live gesture that has applied something and does not opt into the
-        // round-Z swap protocol) leaves this window behaving exactly as it did
-        // before this round, bracket and all, plus one console line naming the
-        // command that is in the way.  Refusing the edit outright would be a new
-        // way for the UV window to do nothing, which is not what was asked for.
+        // A parked face-move baseline contains the whole MaterialDef and can overwrite this
+        // edit. End it at the one point every mutating path crosses, before the first write.
+        // A refusal is reported by KiwiUv_EndGestureBeforeApply but does not block this edit.
         KiwiUv_EndGestureBeforeApply( "UV editor" );
         KiwiCmd_UndoBegin( op );
         s_undoOpen = true;
         if ( !s_covered )
         {
-            // KiwiCmd_UndoBegin cloned `selected_brushes`; a brush named only by a FACE is
-            // not on that list (kiwi_selection.h DESIGN NOTE 2).  Cover every gathered row
-            // — Undo_AddBrush self-dedupes (undo.cpp:485), so the whole-selected ones cost
-            // nothing extra.  BEFORE the first mutation, which is the whole point.
+            // Face-selected brushes are absent from selected_brushes. Cover every gathered
+            // row before mutation; Undo_AddBrush self-deduplicates (undo.cpp:485).
             for ( size_t i = 0; i < s_brushes.size(); ++i )
                 KiwiCmd_UndoCoverBrush( s_brushes[i].node );
             s_covered = true;
@@ -1447,9 +1199,7 @@ namespace
         s_covered  = false;
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════════
-    //  CANVAS TRANSFORM
-    // ═══════════════════════════════════════════════════════════════════════════════
+    // Canvas transform.
     // +T is DOWN on the canvas, matching the image v axis, so a tile drawn at
     // (u..u+1, v..v+1) shows the texture the right way up.
     ImVec2 UvToPx( float u, float v )
@@ -1467,11 +1217,8 @@ namespace
     float StripeU() { return 1.0f / (float)ClampI( s_subX, 1, 16 ); }
     float StripeV() { return 1.0f / (float)ClampI( s_subY, 1, 16 ); }
 
-    // The UV rect the canvas currently shows.  FALSE means "not a rect any integer loop
-    // may be built from": both the tile fill and the grid convert these to `int` line
-    // indices, and a face whose STs run to 1e9 (a size[] of a few thousandths, which the
-    // Surface Inspector will happily type) would make `(int)floorf(u0)` undefined and the
-    // loop bound meaningless.  One guard, both consumers.
+    // Reject UV bounds that cannot safely become integer tile/grid loop indices; tiny typed
+    // texture sizes can otherwise drive ST near 1e9 and make `(int)floorf` undefined.
     const float KUVE_UV_SANE = 1.0e6f;
     bool VisibleUvRect( float *u0, float *v0, float *u1, float *v1 )
     {
@@ -1481,15 +1228,10 @@ namespace
             && fabsf( *v0 ) < KUVE_UV_SANE && fabsf( *v1 ) < KUVE_UV_SANE;
     }
 
-    // TB resetZoom (UvViewHelper.cpp:316-348): margins clamp(10%, 2..40) px, fit, and
-    // re-run on every viewport change until a valid zoom can be computed — the widget can
-    // be size-0 the first frame a selection exists.
+    // TB resetZoom (UvViewHelper.cpp:316-348): fit with clamped 10% margins and retry a
+    // size-zero first frame. Fit the complete displayed spread; AutoPivot owns the pivot.
     void FrameActive()
     {
-        // KIWI-UX (ROUND BI): the ORIGIN is no longer seeded from here.  It follows the
-        // TARGET SET's displayed bbox centre every idle frame (D-BI-D, AutoPivot), so this
-        // function is back to what its name says: the zoom fit over the whole DISPLAYED
-        // spread, which is what the fold-out decides.
         float mn[2] = {  1.0e30f,  1.0e30f };
         float mx[2] = { -1.0e30f, -1.0e30f };
         bool  any   = false;
@@ -1549,18 +1291,13 @@ namespace
         if ( availH / bh < z ) z = availH / bh;
         s_zoom = ClampF( z, KUVE_ZOOM_MIN, KUVE_ZOOM_MAX );
 
-        // Centre the box.
         s_panU = 0.5f * ( mn[0] + mx[0] ) - 0.5f * s_cs.x / s_zoom;
         s_panV = 0.5f * ( mn[1] + mx[1] ) - 0.5f * s_cs.y / s_zoom;
         s_zoomValid = true;
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════════
-    //  THE BACKGROUND (D-BD-D)
-    // ═══════════════════════════════════════════════════════════════════════════════
-    // The ACTIVE material's colormap, as an ImGui texture, or null.  This is the round-AZ
-    // MAPTYPE_2D arm (kiwi_skybox.cpp:451-496) with the CUBE arm deliberately absent —
-    // see D-BD-E.  The guards are the same three and each is load-bearing:
+    // Active material colormap, borrowing the MAPTYPE_2D path from kiwi_skybox.cpp:451-496.
+    // The three guards are load-bearing:
     //   textureTable null   — an unloaded / default material
     //   semantic != 2       — TS_COLOR_MAP; the table is hash-sorted, so [0] is a coin flip
     //   delayLoadPixels     — GfxTexture is a UNION (r_gfx.h:203-210); before upload the
@@ -1655,9 +1392,7 @@ namespace
         }
     }
 
-    // KIWI-UX (ROUND BG, ITEM 6): a non-target shape keeps its hue and loses its alpha —
-    // dimming the COLOUR would make the two shape families (blue faces, green patches)
-    // converge on the same grey and lose the one thing the canvas uses colour for.
+    // Preserve face/patch hue while dimming non-target alpha.
     ImU32 DimIf( ImU32 col, bool target )
     {
         if ( target )
@@ -1674,21 +1409,12 @@ namespace
 
         for ( size_t i = 0; i < s_faces.size(); ++i )
         {
-            // ROUND BG: through D_f (D-BG-A).  With the chain off, or on a single face,
-            // D is identity and this is BD's loop unchanged.
             const int n = FaceStPointsDisp( i, st, nullptr );
             if ( n < 2 )
                 continue;
             for ( int k = 0; k < n; ++k )
                 pts[k] = UvToPx( st[k][0], st[k][1] );
-            // ── KIWI-UX (ROUND BJ, ITEM 3): EVERY TARGET IS GOLD ──────────────
-            // USER REPORT, verbatim: *"Everything selected in the UV editor should
-            // be yellow (not just 1 chunk)."*  BG gave the gold outline to the
-            // ACTIVE face and nothing else, and dimmed by target — so a five-face
-            // target set drew one gold shape and four blue ones and read as "one of
-            // these is selected".  The gold IS the target treatment now, and the
-            // active face gets no outline of its own: it survives only as the
-            // background-material source and the chain-fold anchor (D-BJ-D).
+            // Gold denotes targets; the active face only supplies material and fold anchor.
             const bool tgt = FaceIsTarget( i );
             dl->AddPolyline( pts, n, DimIf( tgt ? KUVE_COL_ACTIVE : KUVE_COL_FACE, tgt ),
                              ImDrawFlags_Closed, tgt ? 2.5f : 1.5f );
@@ -1699,10 +1425,7 @@ namespace
             patchMesh_t *p = s_brushes[s_patches[pi]].pm;
             if ( !p )
                 continue;
-            // ROUND BJ, ITEM 3: a targeted patch is gold too.  It costs the green
-            // family tell while it is targeted, which is the right trade: the grid
-            // net already says "patch" at a glance, and "which of these will my
-            // drag move" is the question the canvas has to answer first.
+            // Targeted patches are gold; their control net still distinguishes the family.
             const bool ptgt = PatchIsTarget( pi );
             const ImU32 col = DimIf( ptgt ? KUVE_COL_ACTIVE : KUVE_COL_PATCH, ptgt );
             const int w = ClampI( p->width, 0, 16 ), h = ClampI( p->height, 0, 16 );
@@ -1731,17 +1454,8 @@ namespace
         }
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════════
-    //  HIT TESTS — KIWI-UX (ROUND BI): THE TRANSFORM BOX, NOT THE GRID (D-BI-B)
-    // ═══════════════════════════════════════════════════════════════════════════════
-    // DELETED with this round, not disabled: TB's `pickUvGrid` port (GridPickPx / PickGrid),
-    // the rotate RING pick, and the origin's two infinite-axis-LINE picks.  D-BI-A has the
-    // measurement that condemned them; what is left is a pivot DISC and eight box handles,
-    // all of which sit ON the shapes the gesture will move.
-    //
-    // The pivot: TB UvOriginTool::pick (:328-374) reduced to its circle arm.  The PICK
-    // radius (8 px) is deliberately larger than the radius it is DRAWN at (5 px, TB's) —
-    // a 5 px disc is a 10 px target and that was the original complaint.
+    // Hit tests use the pivot disc and transform-box handles, never grid lines. The pivot
+    // follows TB UvOriginTool::pick (:328-374), with a pick radius larger than its drawing.
     bool PickPivot( float u, float v )
     {
         const float du = ( u - s_originU ) * s_zoom;
@@ -1749,8 +1463,7 @@ namespace
         return sqrtf( du * du + dv * dv ) <= KUVE_ORIGIN_PICK_RAD;
     }
 
-    // The transform box, in canvas PIXELS, already inflated.  `valid` is false when the
-    // target set has nothing with a drawable outline in it.
+    // Inflated transform box in canvas pixels; invalid without a drawable target outline.
     struct uvBox_t
     {
         bool  valid;
@@ -1758,9 +1471,8 @@ namespace
     };
     uvBox_t s_box = { false, 0.0f, 0.0f, 0.0f, 0.0f };
 
-    // The bbox of every TARGETED shape's DISPLAYED outline, in UV.  Patches contribute
-    // their whole control net rather than the ring: an interior control point can lie
-    // outside the ring, and a box that a shape pokes out of is a lie.
+    // Displayed target bbox in UV. Patches use the whole net because interior controls can
+    // extend beyond the outer ring.
     bool TargetBoxUv( float *mn, float *mx )
     {
         bool any = false;
@@ -1821,12 +1533,8 @@ namespace
         return b;
     }
 
-    // The box WITHOUT its inflation — the shapes' own bbox.  Scale and skew measure from
-    // this one: the inflation exists so the handles do not sit on top of the outline, and
-    // a factor derived from an inflated reference would make the drag's grabbed point miss
-    // the cursor by `inflation × (k − 1)`, which is the whole "shapes move with the cursor"
-    // law (D-BG-D) failing by a few pixels at every large factor.  Only ever called on a
-    // box that passed BoxHasHandles, which is >= 24 px, i.e. wider than the 12 px it loses.
+    // Scale/skew use the uninflated shape bbox; using the drawn outset would offset the
+    // grabbed point by `inflation * (factor - 1)`.
     uvBox_t DeflateBox( const uvBox_t &b )
     {
         uvBox_t r = b;
@@ -1839,11 +1547,7 @@ namespace
         return r;
     }
 
-    // ── KIWI-UX (ROUND BI): the pivot follows the target set (D-BI-D) ───────────────
-    // Re-derived every idle frame from the SAME displayed bbox the box is drawn from, so a
-    // retarget moves the pivot with it and Rot 90 / Flip turn the target set about its own
-    // centre.  A pivot the user has dragged latches `s_originUser` and stops following
-    // until the 3D selection changes (which is where the latch clears).
+    // Follow the displayed target bbox until the user places the pivot; selection clears it.
     void AutoPivot()
     {
         if ( s_originUser || s_gesture != UVG_NONE )
@@ -1855,8 +1559,7 @@ namespace
         s_originV = 0.5f * ( mn[1] + mx[1] );
     }
 
-    // Handle centres, in canvas pixels.  Order matches uvHandle_t: 4 corners, then the 4
-    // edge midpoints, starting at the top and going clockwise in both groups.
+    // Canvas-pixel handle centers in uvHandle_t order.
     void HandlePx( const uvBox_t &b, int h, float *x, float *y )
     {
         const float cx = 0.5f * ( b.x0 + b.x1 );
@@ -1874,13 +1577,7 @@ namespace
         }
     }
 
-    // ── KIWI-UX (ROUND BJ, ITEM 5): the handle across the box from `h` ──────────────
-    // Corners: NW<->SE, NE<->SW — which is `h ^ 2` over the 0..3 corner order.  Edge
-    // mids: N<->S, E<->W — the same half-turn over the 4..7 order.  That handle's
-    // position is the scale ANCHOR, so the side the user grabbed is the only one that
-    // moves.  (For an edge-mid the anchor's OTHER coordinate is the box centre and is
-    // never read: a single-axis scale leaves the other axis at factor 1, and
-    // XfAboutOrigin's translation term for that axis is then exactly zero.)
+    // Opposite handle supplies the fixed scale anchor; an edge scale ignores its other axis.
     int OppositeHandle( int h )
     {
         if ( h >= UVH_NW && h <= UVH_SW )
@@ -1904,20 +1601,15 @@ namespace
         return b.valid && mx >= b.x0 && mx <= b.x1 && my >= b.y0 && my <= b.y1;
     }
 
-    // A box smaller than KUVE_BOX_MIN_PX on either axis carries NO handles at all: eight
-    // 14 px pick squares on a 20 px box would cover it completely and the BODY DRAG — the
-    // gesture the user is here for — would become unreachable.  Below that size the box is
-    // a plain outline, everything inside it drags, and the way to the handles is the wheel.
-    // Both the pick and the draw ask this one function, so they cannot disagree.
+    // Hide handles on tiny boxes so their pick squares do not consume the body drag. Pick
+    // and draw share this predicate.
     bool BoxHasHandles( const uvBox_t &b )
     {
         return b.valid && ( b.x1 - b.x0 ) >= KUVE_BOX_MIN_PX
                        && ( b.y1 - b.y0 ) >= KUVE_BOX_MIN_PX;
     }
 
-    // Square pick on the eight handles; then, for the CORNERS only, the rotate annulus —
-    // which must also be OUTSIDE the box, so that it can never take a press that belongs
-    // to the body (D-BI-B).  Returns UVH_NONE for a miss.
+    // Test handle squares first, then corner rotate annuli only outside the box body.
     int PickHandle( const uvBox_t &b, float mx, float my, bool *outRotate )
     {
         *outRotate = false;
@@ -1947,9 +1639,7 @@ namespace
         return UVH_NONE;
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════════
-    //  KIWI-UX (ROUND BG, ITEM 6) — SHAPE HIT-TESTING, IN DISPLAYED SPACE (D-BG-B)
-    // ═══════════════════════════════════════════════════════════════════════════════
+    // Shape hit-testing in displayed space.
     bool PointInPoly( const float pt[2], const float poly[KUVE_MAX_WINDING][2], int n )
     {
         bool in = false;
@@ -1963,9 +1653,7 @@ namespace
         return in;
     }
 
-    // Distance from pt to the polygon's boundary, in canvas PIXELS.  The enlarged
-    // tolerance from item 3a applies here too: a thin sliver of a face is unclickable by
-    // area alone, and its outline is the thing the user is aiming at anyway.
+    // Pixel distance to the boundary lets thin face slivers be picked by their outline.
     float PolyEdgeDistPx( const float pt[2], const float poly[KUVE_MAX_WINDING][2], int n )
     {
         float best = 1.0e30f;
@@ -1987,14 +1675,7 @@ namespace
         return best;
     }
 
-    // ── KIWI-UX (ROUND BI): EVERY shape under the cursor, TOPMOST FIRST (D-BI-C) ──────
-    // BG's PickShape returned ONE shape and ranked with a strict `<` over a rank that is
-    // 0.0 for every shape CONTAINING the point — so of N stacked shapes only the
-    // lowest-indexed one was ever reachable, with no way down the stack.  That is half of
-    // the "still cannot select each sub-shape" report (D-BI-A).  This returns the whole
-    // stack in reverse DRAW order, which is what "topmost" means on this canvas:
-    // DrawWireframes draws faces in index order and then patches, so patches are over
-    // faces and a later row is over an earlier one.
+    // Return all hits in reverse draw order: patches over faces, later rows over earlier.
     struct uvShapeRef_t { int face, patch; };
 
     int CollectShapesAt( float u, float v, uvShapeRef_t *out, int maxOut )
@@ -2030,8 +1711,7 @@ namespace
         return n;
     }
 
-    // Is this press within KUVE_CYCLE_PX of the previous one — i.e. the same spot, clicked
-    // again?  That and nothing else is what advances the stack cycle.
+    // Only a repeat press within KUVE_CYCLE_PX advances the stack cycle.
     bool CycleIsRepeat( float u, float v )
     {
         return s_cycleValid
@@ -2039,8 +1719,7 @@ namespace
             && fabsf( v - s_cycleV ) * s_zoom <= KUVE_CYCLE_PX;
     }
 
-    // Which entry of that stack the NEXT press takes.  Pure — the press updates the cycle
-    // state itself, so the hover probe can ask the same question without moving anything.
+    // Pure lookup so hover can preview the same cycle entry without changing state.
     int CycleIndexFor( float u, float v, int n )
     {
         if ( n < 1 )
@@ -2050,10 +1729,8 @@ namespace
         return 0;
     }
 
-    // ── KIWI-UX (ROUND BI): the marquee's shape test (D-BI-C) ────────────────────────
-    // "Intersects" is the honest test for a rubber band over OUTLINES: a vertex inside the
-    // band, an edge crossing it, or the band sitting entirely inside the outline.  Segment
-    // vs. axis-aligned rect is Liang-Barsky, which needs no square roots and no cases.
+    // Marquee intersection includes vertices, crossing edges, or a band inside the outline.
+    // Segment-vs-AABB uses Liang-Barsky.
     bool SegHitsRect( float ax, float ay, float bx, float by,
                       const float r0[2], const float r1[2] )
     {
@@ -2095,13 +1772,7 @@ namespace
         return PointInPoly( c, poly, n );
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════════
-    //  KIWI-UX (ROUND BG, ITEM 3a) — ONE PROBE, RUN BY BOTH THE HOVER AND THE PRESS
-    // ═══════════════════════════════════════════════════════════════════════════════
-    // BD ran the ladder inside GestureBegin and a PARTIAL copy of it inside DrawOverlays,
-    // which is how a highlight and a press can disagree.  There is now exactly one
-    // function that answers "what would a press here grab?", and both callers use it —
-    // so the hover feedback is correct BY CONSTRUCTION rather than by maintenance.
+    // One probe supplies both hover feedback and press behavior.
     struct uvProbe_t
     {
         uvGesture_t what;        // what a press here would BEGIN (UVG_NONE == nothing)
@@ -2109,7 +1780,7 @@ namespace
         int         handle;      // uvHandle_t, or UVH_NONE
         bool        rotateZone;  // the press is in a corner's rotate annulus
         bool        shearRefused;
-        int         shapeFace, shapePatch;   // the shape a press would TARGET (D-BI-C)
+        int         shapeFace, shapePatch;   // shape a press would target
         bool        shapeIsTarget;           // ...and whether it already is one
         bool        inBox;
     };
@@ -2126,13 +1797,8 @@ namespace
         p->inBox   = false;
     }
 
-    // ── THE LADDER, ROUND BI (D-BI-B/C) ─────────────────────────────────────────────
-    // Pivot -> box handles -> the SHAPE under the cursor -> the box body -> marquee.  The
-    // shapes now sit ABOVE everything except the two handle families that are drawn ON
-    // them, which is the whole correction: BG put three canvas-global objects (grid lines,
-    // the origin's infinite axis lines, the rotate ring) above the shape hit-test, and at
-    // a fit zoom those covered most of the canvas (D-BI-A).  Ctrl-click removes while
-    // Ctrl-drag keeps the transform snap modifier.
+    // Pick order: pivot, box handles, shape, box body, marquee. Ctrl-click removes;
+    // Ctrl-drag retains transform snapping.
     uvProbe_t Probe( float u, float v, bool altDown )
     {
         uvProbe_t p;
@@ -2143,8 +1809,7 @@ namespace
         const ImVec2 px = UvToPx( u, v );
         p.inBox = InBox( s_box, px.x, px.y );
 
-        // 1. THE PIVOT — view state only (TB UvOriginTool.cpp:120-125).  It is first
-        //    because it is the smallest target on the canvas and it sits inside the box.
+        // Pivot is first because it is the smallest target and lies inside the box.
         if ( PickPivot( u, v ) )
         {
             p.what    = UVG_ORIGIN;
@@ -2152,7 +1817,7 @@ namespace
             return p;
         }
 
-        // 2. THE BOX HANDLES — scale, rotate (corner annulus), skew (Alt + edge mid).
+        // Box handles: scale, corner-annulus rotate, or Alt+edge-mid skew.
         bool rot = false;
         const int h = PickHandle( s_box, px.x, px.y, &rot );
         if ( h != UVH_NONE )
@@ -2167,9 +1832,8 @@ namespace
             }
             if ( altDown && h >= UVH_N )      // skew lives on the EDGE MIDPOINTS only
             {
-                // TB issue #1350 (UvShearTool.cpp:284-289): the shear factor divides by the
-                // handle's offset from the pivot along the OTHER axis, so a handle sitting
-                // on the pivot's axis is a division by ~zero.  Refuse rather than explode.
+                // TB issue #1350: shear divides by the handle's other-axis pivot offset;
+                // refuse a near-zero divisor (UvShearTool.cpp:284-289).
                 const uvBox_t raw = DeflateBox( s_box );
                 float hx, hy;
                 HandlePx( raw, h, &hx, &hy );
@@ -2190,9 +1854,7 @@ namespace
             return p;
         }
 
-        // 3. THE SHAPES — a body press moves, and targets in the same press.  The entry of
-        //    the stack it resolves to is the cycle's (D-BI-C); the hover asks for it the
-        //    same way the press does, so the highlight cannot name a different shape.
+        // A shape body targets and moves; hover previews the same stack-cycle entry.
         uvShapeRef_t stack[64];
         const int    n = CollectShapesAt( u, v, stack, 64 );
         if ( n > 0 )
@@ -2206,31 +1868,13 @@ namespace
             return p;
         }
 
-        // 4/5. EMPTY SPACE.  Inside the box it is the body of a real target set, so it
-        //      drags; with no sub-selection there is no such object and it rubber-bands
-        //      (D-BI-C states the reconciliation and why it is not a mode).
+        // Empty space inside an explicit target box drags it; otherwise it marquees.
         p.what = ( p.inBox && !s_targetAll ) ? UVG_MOVE : UVG_MARQUEE;
         return p;
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════════
-    //  SNAPPING (all of it TB's, adapted to repeat units)
-    // ═══════════════════════════════════════════════════════════════════════════════
-    // ═══════════════════════════════════════════════════════════════════════════════
-    //  KIWI-UX (ROUND BJ, ITEM 6) — SNAP FEEDBACK (D-BJ-F)
-    // ═══════════════════════════════════════════════════════════════════════════════
-    // USER REPORT, verbatim: *"The snapping isn't very intuitive."*
-    //
-    // The MECHANISM was already right — D-BI-F snaps the thing the user is holding
-    // (the target set's own displayed vertices on a move; the dragged handle on a
-    // scale) against the grid, whole texels and the OTHER shapes' vertices, 8 px
-    // absorb, Ctrl off.  What was missing was any way to tell that it had happened:
-    // an 8 px absorb with no accent reads as the cursor being ignored.  So every
-    // engaged snap now leaves a MARK — the same glyph the 3D side uses (kiwi_snap.cpp
-    // EmitDotAndRing: a filled dot with a SEPARATED ring, Plasticity's language), plus
-    // the short tick ALONG the locked axis that a KIWI edge/midpoint snap carries, so
-    // "it locked onto THIS line" reads without a legend.  The colour is bright rather
-    // than the 3D pass's near-black (KSNAP_COL_MARK): this canvas is dark.
+    // TrenchBroom snapping adapted to repeat units. Point/axis absorbs draw KIWI's dot/ring
+    // glyph plus a tick along the locked axis; rotate reports its angle lock in the status.
     enum { KUVE_SNAPK_GRID = 0, KUVE_SNAPK_VERT = 1 };
 
     struct uvSnapAcc_t { float u, v; int axis; };   // axis 0 = S locked -> VERTICAL tick
@@ -2256,7 +1900,7 @@ namespace
         s_snapAcc.push_back( a );
     }
 
-    // One clause appended to the status readout, so the canvas says what it locked to.
+    // Status clause naming the active snap.
     const char *SnapLabel()
     {
         if ( s_snapAngle )
@@ -2269,11 +1913,8 @@ namespace
         return "";
     }
 
-    // TB UvViewHelper::snapDelta (:198-209): per axis, |distance| < 8 px ⇒ absorb onto the
-    // target, else ROUND the delta.  TB rounds to whole TEXELS because its UV coords are
-    // texels; ours are REPEATS, so the same rule is `round(delta·texSize)/texSize`.
-    // ROUND BJ, ITEM 6: `outAbsorbed` reports the ABSORB arm — the one that is felt as
-    // magnetism (the texel rounding is sub-pixel at any sane zoom and is not marked).
+    // TB UvViewHelper::snapDelta (:198-209): absorb inside 8 px; otherwise round the
+    // repeat-space delta to whole texels. Only the visible absorb is reported/marked.
     float SnapDeltaAxis( float delta, float distance, float texSize,
                          bool *outAbsorbed = nullptr )
     {
@@ -2290,12 +1931,8 @@ namespace
         return floorf( delta * texSize + 0.5f ) / texSize;
     }
 
-    // ── KIWI-UX (ROUND BI): ONE CANDIDATE SET, SHARED BY MOVE AND SCALE (D-BI-F) ─────
-    // The signed distance from `value` to the nearest snap candidate on `axis`: the grid
-    // lines of the current subdivision, and every displayed vertex of the shapes that are
-    // NOT being dragged.  (Whole TEXELS are the fallback quantum inside SnapDeltaAxis, TB's
-    // own rule.)  BG read these from the ACTIVE face, which need not be in the target set
-    // at all now — and a shape cannot usefully snap to itself.
+    // Signed distance to the nearest subdivision line or displayed vertex not being dragged.
+    // Whole texels remain SnapDeltaAxis's fallback quantum.
     float AxisStripe( int axis ) { return axis ? StripeV() : StripeU(); }
 
     float SnapCandidateDist( float value, int axis, int *outKind = nullptr )
@@ -2318,11 +1955,8 @@ namespace
         return best;
     }
 
-    // TB UvOffsetTool::snapDelta (:56-75) with the vertex set widened as above: the
-    // componentwise abs-min distance from every DRAGGED vertex, in its hypothetical
-    // post-drag position, to the nearest candidate.
-    // ROUND BJ, ITEM 6: it also remembers WHICH dragged vertex won each axis, so the
-    // accent can be drawn on the vertex that actually stuck rather than at the cursor.
+    // TB UvOffsetTool::snapDelta (:56-75): componentwise nearest candidate over every
+    // moved vertex; retain the winning vertex so the accent marks what actually snapped.
     void SnapMoveDelta( float dU, float dV, float texW, float texH,
                         float *outU, float *outV )
     {
@@ -2355,8 +1989,7 @@ namespace
                           s_gTgtPts[bestIdx[c]].v + *outV, c, bestKind[c] );
     }
 
-    // TB UvScaleTool::snap (:103-127): pull the moved handle onto a candidate when it is
-    // within 8 px on that axis.
+    // TB UvScaleTool::snap (:103-127): absorb the moved handle within 8 px per axis.
     float SnapHandleAxis( float value, int axis,
                           bool *outHit = nullptr, int *outKind = nullptr )
     {
@@ -2380,14 +2013,9 @@ namespace
         return a;
     }
 
-    // TB UvRotateTool::snapAngle (:72-108), re-expressed for a DELTA angle.  TB snaps the
-    // ABSOLUTE texdef rotation against every face-edge angle at all four 90° phases; our
-    // gesture carries a delta θ, so the candidates are the θ that make an edge square:
-    // θ = −edgeAngle + 90k.  Threshold is TB's own trial-and-error 150/pow(d,0.8), with
-    // the distance already in PIXELS (a 2D canvas has no world-unit-per-pixel step, so
-    // TB's extra /zoom is gone — see D-BD-A).
-    // ROUND BI: the edges are the TARGET SET's displayed outlines, captured at the press
-    // (D-BI-F) — the shapes the rotation is actually turning.
+    // TB UvRotateTool::snapAngle (:72-108), expressed for delta theta: candidates making
+    // a captured displayed edge square are `-edgeAngle + 90k`. Distance is already pixels,
+    // so the threshold is 150/pow(d,0.8) without TB's world-space `/zoom`.
     float SnapAngle( float theta, float distPx )
     {
         if ( s_gTgtEdges.size() < 1 )
@@ -2418,10 +2046,8 @@ namespace
         return ( bestDelta < threshold ) ? best : theta;
     }
 
-    // TB UvShearTool::snapShearFactors (:85-112): the candidate factors are the ones that
-    // make an edge axis-aligned, i.e. −v[1−axis]/v[axis].  Sign-independent of the drag, so
-    // the formula is TB's verbatim even though our factor sign is flipped (D-BD-A).
-    // Threshold 10/|orthogonalOffset|, in pixels.  ROUND BI: same captured edge set.
+    // TB UvShearTool::snapShearFactors (:85-112): `-v[1-axis]/v[axis]` makes an edge
+    // axis-aligned. The formula is sign-independent even though this canvas flips drag sign.
     float SnapShear( float factor, float orthoOffsetUv, int axis )
     {
         float best = 0.0f;
@@ -2442,10 +2068,8 @@ namespace
         return ( bestDelta < 10.0f / px ) ? best : factor;
     }
 
-    // TB UvOriginTool::snapDelta (:97-157) with its own KNOWN BUG fixed.  TB takes a
-    // componentwise abs_min over vertex COORDINATES, which snaps to a point that is on no
-    // vertex and no edge (its comment at :127-129 says so).  This snaps to the nearest
-    // candidate POINT in 2D and only when that point is inside the 8 px radius.
+    // TB UvOriginTool::snapDelta (:97-157) combines coordinate minima from different
+    // vertices; use the nearest actual 2D candidate point within the 8 px radius instead.
     void SnapOrigin( float *u, float *v )
     {
         float bestU = *u, bestV = *v;
@@ -2460,13 +2084,7 @@ namespace
             if ( d < bestD ) { bestD = d; bestU = grid.u; bestV = grid.v; }
         }
 
-        // ── KIWI-UX (ROUND BJ, ITEM 6): the pivot snaps to the SHAPES ON SCREEN ──
-        // BD/BG read these from the ACTIVE face's own ST frame, which since round BI
-        // need not be a targeted shape and, with the chain on, is not even drawn where
-        // its STs say (D-BG-A).  So a pivot dropped "on that corner" landed somewhere
-        // else.  The candidates are the same DISPLAYED-space point sets every other
-        // gesture uses (D-BI-F), captured at the press — both halves, because the pivot
-        // belongs to no shape and every vertex on the canvas is a fair target for it.
+        // The pivot belongs to no shape, so both captured displayed-space point sets apply.
         const std::vector<uvPt_t> *sets[2] = { &s_gTgtPts, &s_gOtherPts };
         float ctr[2] = { 0.0f, 0.0f };
         int   nctr = 0;
@@ -2479,8 +2097,7 @@ namespace
                 if ( d < bestD ) { bestD = d; bestU = p.u; bestV = p.v; }
                 if ( s == 0 ) { ctr[0] += p.u; ctr[1] += p.v; ++nctr; }
             }
-        // ...plus the TARGET SET's own centroid, which is the pivot placement people
-        // actually reach for and which no vertex would offer.
+        // Also offer the target centroid, which no vertex necessarily represents.
         if ( nctr > 0 )
         {
             ctr[0] /= (float)nctr;
@@ -2493,9 +2110,7 @@ namespace
         *v = bestV;
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════════
-    //  GESTURE LIFECYCLE
-    // ═══════════════════════════════════════════════════════════════════════════════
+    // Gesture lifecycle.
     void SnapshotSelection()
     {
         s_snapFaces.clear();
@@ -2526,16 +2141,13 @@ namespace
         }
     }
 
-    // ── KIWI-UX (ROUND BI): the snap candidate sets, captured ONCE at the press ──────
-    // D-BI-F: during the drag the STs these would be read from are exactly what the drag
-    // is rewriting, so reading them live would make every snap chase its own tail.  Both
-    // sets are DISPLAYED-space (the frame the gesture is expressed in) and both are capped.
+    // Capture capped displayed-space snap sets once; live reads would chase rewritten ST.
     void CaptureSnapSets()
     {
         s_gTgtPts.clear();
         s_gOtherPts.clear();
         s_gTgtEdges.clear();
-        SnapClear();                         // ROUND BJ, ITEM 6 - the accents die with it
+        SnapClear();
 
         float poly[KUVE_MAX_WINDING][2];
         for ( size_t i = 0; i < s_faces.size(); ++i )
@@ -2600,9 +2212,7 @@ namespace
         }
     }
 
-    // The snapshot is keyed on (def, faceIndex) / patchMesh_t*, and the gather runs FRESH
-    // every frame, so a selection that changed under the drag is DETECTED here rather than
-    // dereferenced.  Returns false when the gesture can no longer be applied.
+    // Re-match snapshot keys against the fresh gather before dereferencing them.
     bool SnapshotStillMatches()
     {
         if ( s_snapFaces.size() != s_faces.size() )
@@ -2619,18 +2229,14 @@ namespace
         return true;
     }
 
-    // Write the whole selection from the snapshot through `A`.  `offsetDelta` non-null
-    // selects the EXACT translation route for faces (D-BD-C); patches always go through
-    // the affine, which for a translation is the same arithmetic.
+    // Write targets from the snapshot. offsetDelta selects the exact face-translation path;
+    // a patch translation uses the equivalent affine arithmetic.
     void ApplySelection( const uvXform_t &A, const float *offsetDelta, const char *undoName )
     {
         if ( !SnapshotStillMatches() )
             return;
-        // An identity transform is skipped ONLY while nothing has been written yet — a
-        // bracket around a no-op is what kiwi_command.h forbids.  Once the gesture HAS
-        // mutated, identity must still be applied: it is the frame where the user dragged
-        // back to where they started, and the write puts the snapshot back.  (Returning
-        // early there would strand the previous frame's value on the selection.)
+        // Skip initial identity to avoid an empty undo record. After any write, identity
+        // must restore the snapshot when the cursor returns to its start.
         if ( XfIsIdentity( A ) && !s_undoOpen )
             return;
 
@@ -2638,8 +2244,8 @@ namespace
 
         for ( size_t i = 0; i < s_faces.size(); ++i )
         {
-            if ( !FaceIsTarget( i ) )        // ROUND BG, item 6: the apply loop is the
-                continue;                    // ONLY thing per-shape targeting changes
+            if ( !FaceIsTarget( i ) )
+                continue;
             face_t *fd = FaceOf( s_faces[i] );
             if ( !fd )
                 continue;
@@ -2649,13 +2255,11 @@ namespace
             if ( !td || !md )
                 continue;
             texdef_sub_t out = s_snapFaces[i].td;
-            // ROUND BG, D-BG-A: `A` is expressed in DISPLAYED space, so it is conjugated
-            // by this face's display transform before it may touch a texdef.  Identity D
-            // (the active face, or the chain off) short-circuits to BD's exact arithmetic.
+            // A is displayed-space; conjugate it into this face's true ST frame.
             const uvXform_t D = ( i < s_faceD.size() ) ? s_faceD[i] : XfIdentity();
             if ( offsetDelta )
             {
-                // The vector case of the same conjugation: D⁻¹'s LINEAR part on the delta.
+                // Translation uses only D^-1's linear part.
                 float dU = offsetDelta[0], dV = offsetDelta[1];
                 if ( !XfIsIdentity( D ) )
                     XfApplyVec( XfInverse( D ), offsetDelta[0], offsetDelta[1], &dU, &dV );
@@ -2671,7 +2275,7 @@ namespace
             td->shift[1]  = out.shift[1];
             td->rotate    = out.rotate;
             td->crossterm = out.crossterm;
-            TexMatToFakeTexCoords( md, td );     // every ported writer's tail
+            TexMatToFakeTexCoords( md, td );     // ported texdef-writer tail
         }
 
         for ( size_t i = 0; i < s_snapPatches.size(); ++i )
@@ -2682,20 +2286,15 @@ namespace
             TransformPatch( s_snapPatches[i].pm, s_snapPatches[i].st, XfConjugate( A, D ) );
         }
 
-        // ONE rebuild per brush, not one per face: Brush_ShiftTexture's face pass rebuilds
-        // per face because it walks faces, but the sequence is per-brush work and a drag
-        // over a 40-brush selection would otherwise pay for it six times over.  PATCH rows
-        // get it too — Brush_ShiftTexture's own brush loop is unconditional (select.cpp:
-        // 3095-3136), and Patch_ShiftTexture's rebuild covers the mesh, not the brush.
+        // Rebuild once per brush rather than once per face. Patch_ShiftTexture rebuilds the
+        // mesh, not its owning brush (select.cpp:3095-3136).
         for ( size_t i = 0; i < s_brushes.size(); ++i )
             TouchBrush( s_brushes[i].node, s_brushes[i].def );
 
         g_nUpdateBits = -1;
     }
 
-    // Put the selection back exactly where the gesture found it.  EXACT (it is a stored
-    // copy), unlike kiwi_uv.cpp's inverse-delta leg, which its own header calls out as
-    // non-bit-exact (kiwi_uv.h:83-86).
+    // Restore the exact stored snapshot, not an inverse delta (kiwi_uv.h:83-86).
     void RestoreSnapshot()
     {
         if ( !SnapshotStillMatches() )
@@ -2717,9 +2316,7 @@ namespace
         g_nUpdateBits = -1;
     }
 
-    // ── KIWI-UX (ROUND BI): the marquee's payload (D-BI-C) ──────────────────────────
-    // Every shape whose displayed outline intersects the band is applied with the
-    // same grammar as a camera marquee: plain replaces, Shift adds, Ctrl removes.
+    // Marquee grammar: plain replaces, Shift adds, Ctrl removes displayed-outline hits.
     void ApplyMarquee( float u0, float v0, float u1, float v1,
                        bool extend, bool remove )
     {
@@ -2770,7 +2367,7 @@ namespace
         }
         else if ( !hits )
         {
-            return;                                  // additive/removal miss: no-op
+            return;                                  // additive/removal miss
         }
         else if ( total == (int)( s_faces.size() + s_patches.size() ) )
         {
@@ -2787,7 +2384,7 @@ namespace
                        total, total == 1 ? "" : "s" );
         }
         s_status[sizeof( s_status ) - 1] = '\0';
-        s_cycleValid = false;                 // a marquee is not a point in the click cycle
+        s_cycleValid = false;
     }
 
     void RemoveTarget( int face, int patch )
@@ -2823,7 +2420,6 @@ namespace
 
     void GestureEnd()
     {
-        // ── KIWI-UX (ROUND BI): the two releases that mean something ────────────────
         if ( s_gesture == UVG_MARQUEE )
         {
             const float dx = ( s_gCurU - s_gStartU ) * s_zoom;
@@ -2832,7 +2428,7 @@ namespace
             const bool  remove = s_gCtrl;
             if ( fabsf( dx ) < KUVE_MARQUEE_MIN_PX && fabsf( dy ) < KUVE_MARQUEE_MIN_PX )
             {
-                // A click, not a band: the way back to "all" (D-BI-C).
+                // A click rather than a band restores all targets.
                 if ( !extend && !remove )
                 {
                     if ( !s_targetAll )
@@ -2846,8 +2442,7 @@ namespace
         }
         else if ( s_gesture == UVG_MOVE && !s_gOnShape )
         {
-            // A press on the box's empty interior that never moved is the same "restore
-            // all" click — it is the only empty space a sub-selection leaves reachable.
+            // A click in an explicit target box's empty interior also restores all.
             const float dx = ( s_gCurU - s_gStartU ) * s_zoom;
             const float dy = ( s_gCurV - s_gStartV ) * s_zoom;
             if ( fabsf( dx ) < KUVE_MARQUEE_MIN_PX && fabsf( dy ) < KUVE_MARQUEE_MIN_PX
@@ -2876,19 +2471,7 @@ namespace
         }
         else if ( s_gesture == UVG_MOVE && s_gOnShape && s_collapseArmed )
         {
-            // ══════════════════════════════════════════════════════════════════
-            //  KIWI-UX (ROUND BO, ITEM 2) — THE DEFERRED COLLAPSE FIRES HERE
-            // ══════════════════════════════════════════════════════════════════
-            // The press kept the whole target set (see the arm in GestureBegin) so
-            // the DRAG could move it as a unit.  If the cursor never left the click
-            // box then it was not a drag at all, it was a CLICK on one of several
-            // targets — and the universal convention for that is "select just this
-            // one, on the release".  Same threshold as the marquee and empty-box
-            // arms above, so the canvas has one definition of a drag.
-            //
-            // Shift is excluded: a Shift press never reaches this arm (it returns
-            // from GestureBegin with the gesture cleared), and testing it here keeps
-            // the arm honest if that ever changes.
+            // Below the shared drag threshold, collapse the multi-target set on release.
             const float dx = ( s_gCurU - s_gStartU ) * s_zoom;
             const float dy = ( s_gCurV - s_gStartV ) * s_zoom;
             if ( fabsf( dx ) < KUVE_MARQUEE_MIN_PX && fabsf( dy ) < KUVE_MARQUEE_MIN_PX
@@ -2897,21 +2480,21 @@ namespace
                 TargetSingle( s_collapseFace, s_collapsePatch );
                 s_cycleNext  = s_collapseNext;   // the next click here steps the stack
                 s_cycleValid = true;
-                AutoPivot();                     // D-BI-D: the pivot follows the set
+                AutoPivot();                     // pivot follows the target set
                 _snprintf( s_status, sizeof( s_status ), "targeting 1 shape" );
                 s_status[sizeof( s_status ) - 1] = '\0';
             }
         }
         else if ( s_gesture == UVG_ORIGIN )
         {
-            // D-BI-D: a pivot the user actually MOVED stops following the target set.
+            // A moved pivot stops following the target set.
             if ( fabsf( s_originU - s_gOriginU ) * s_zoom > 0.5f
                  || fabsf( s_originV - s_gOriginV ) * s_zoom > 0.5f )
                 s_originUser = true;
         }
 
         UndoCommit();
-        s_collapseArmed = false;      // KIWI-UX (ROUND BO, ITEM 2)
+        s_collapseArmed = false;
         s_removeArmed   = false;
         s_gesture = UVG_NONE;
         s_gButton = -1;
@@ -2921,7 +2504,7 @@ namespace
         s_gTgtPts.clear();
         s_gOtherPts.clear();
         s_gTgtEdges.clear();
-        SnapClear();                         // ROUND BJ, ITEM 6 - the accents die with it
+        SnapClear();
     }
 
     void GestureCancel()
@@ -2934,11 +2517,9 @@ namespace
             s_originV = s_gOriginV;
         }
         else if ( s_gesture != UVG_PAN && s_gesture != UVG_MARQUEE )
-        {                                        // ROUND BI: a marquee mutates nothing
+        {
             RestoreSnapshot();
-            // Belt AND braces, the kiwi_uv.cpp:345-353 shape: the restore above is exact,
-            // and KiwiCmd_UndoCancel then rolls the bracket back so the cancelled gesture
-            // leaves nothing in either direction (kiwi_command.cpp:2338-2361).
+            // Exact restore plus undo cancellation matches kiwi_uv.cpp:345-353.
             if ( s_undoOpen )
             {
                 KiwiCmd_UndoCancel();
@@ -2946,7 +2527,7 @@ namespace
                 s_covered  = false;
             }
         }
-        s_collapseArmed = false;      // KIWI-UX (ROUND BO, ITEM 2)
+        s_collapseArmed = false;
         s_removeArmed   = false;
         s_gesture = UVG_NONE;
         s_gButton = -1;
@@ -2956,18 +2537,14 @@ namespace
         s_gTgtPts.clear();
         s_gOtherPts.clear();
         s_gTgtEdges.clear();
-        SnapClear();                         // ROUND BJ, ITEM 6 - the accents die with it
+        SnapClear();
         _snprintf( s_status, sizeof( s_status ), "cancelled" );
         s_status[sizeof( s_status ) - 1] = '\0';
         g_nUpdateBits = -1;
     }
 
-    // Drop a live gesture WITHOUT re-reading the selection.  Used on the paths where the
-    // window did not run Gather() this frame (closed, or collapsed): `s_brushes` there is
-    // last frame's gather, so its `brush_t*` are stored pointers and RestoreSnapshot would
-    // dereference them.  The undo bracket is the authoritative restore anyway — this is
-    // exactly the belt half of GestureCancel with the braces left off, and it is the ONE
-    // thing that must not be skipped, because an open bracket may never survive a frame.
+    // Closed/collapsed paths have no fresh gather, so do not dereference stored brush keys.
+    // The undo record is the authoritative restore and must not survive the frame.
     void GestureAbandon()
     {
         if ( s_gesture == UVG_NONE )
@@ -2983,7 +2560,7 @@ namespace
             s_originU = s_gOriginU;
             s_originV = s_gOriginV;
         }
-        s_collapseArmed = false;      // KIWI-UX (ROUND BO, ITEM 2)
+        s_collapseArmed = false;
         s_removeArmed   = false;
         s_gesture = UVG_NONE;
         s_gButton = -1;
@@ -2993,20 +2570,13 @@ namespace
         s_gTgtPts.clear();
         s_gOtherPts.clear();
         s_gTgtEdges.clear();
-        SnapClear();                         // ROUND BJ, ITEM 6 - the accents die with it
+        SnapClear();
         g_nUpdateBits = -1;
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════════
-    //  KIWI-UX (ROUND BI): THE PRESS.  ONE Probe() ANSWER, ACTED ON (D-BI-B/C)
-    // ═══════════════════════════════════════════════════════════════════════════════
-    // TB's ToolChain order (Rotate ring → Origin → Scale/Shear on a grid line → Offset)
-    // is GONE with the tools that were on the grid.  What remains is the standard 2D
-    // editor's: pivot → the target set's own handles → the shapes → the box body →
-    // marquee, all of it resolved by the same probe the hover ran this frame.
-    // Ctrl-click is removal; Ctrl-drag keeps the existing snapping behavior.
+    // Press lifecycle uses the same Probe result as hover.
 
-    // Make ONE shape the whole target set (D-BI-C).  Never touches the 3D selection.
+    // Make one shape the local target set without changing 3D selection.
     void TargetSingle( int face, int patch )
     {
         s_targetAll = false;
@@ -3024,9 +2594,7 @@ namespace
     {
         ImGuiIO &io = ImGui::GetIO();
 
-        // KIWI-UX (ROUND BO, ITEM 2): a new gesture never inherits the last one's
-        // armed collapse.  FIRST thing, above every early return, so the pan arm
-        // and the "not the left button" refusal disarm it too.
+        // Clear deferred click actions before every early return.
         s_collapseArmed = false;
         s_removeArmed   = false;
 
@@ -3041,8 +2609,7 @@ namespace
         if ( button != ImGuiMouseButton_Left || !AnythingSelected() )
             return;
 
-        // D-BG-E, kept and now load-bearing: the SAME probe the hover ran this frame, so
-        // what lit up under the cursor is exactly what this press grabs.
+        // The same probe drives hover and press.
         const uvProbe_t pr = Probe( u, v, io.KeyAlt );
 
         s_gStartU  = s_gCurU = u;
@@ -3058,20 +2625,16 @@ namespace
         s_gButton  = button;
         s_gHandleU = u;
         s_gHandleV = v;
-        s_gAnchorU = s_originU;          // ROUND BJ, ITEM 5 — pivot unless a scale
-        s_gAnchorV = s_originV;          //                    overwrites it below
+        s_gAnchorU = s_originU;
+        s_gAnchorV = s_originV;
         if ( pr.handle != UVH_NONE && s_box.valid )
         {
-            // Scale and skew measure from the HANDLE, not from the press point: the press
-            // may be up to KUVE_HANDLE_PICK_PX off centre and that offset would otherwise
-            // be baked into the very first frame's factor.  From the DEFLATED box, so the
-            // point that tracks the cursor is on the shapes rather than on the inflation.
+            // Measure from the uninflated handle center, not an off-center press point.
             const uvBox_t raw = DeflateBox( s_box );
             float hx, hy;
             HandlePx( raw, pr.handle, &hx, &hy );
             PxToUv( ImVec2( hx, hy ), &s_gHandleU, &s_gHandleV );
-            // ROUND BJ, ITEM 5: …and the opposite handle is the anchor a SCALE holds
-            // fixed.  SKEW keeps the pivot (D-BJ-E), so this is only read by UVG_SCALE.
+            // Scale pins the opposite handle; skew keeps the pivot.
             const int opp = OppositeHandle( pr.handle );
             if ( opp != UVH_NONE )
             {
@@ -3097,9 +2660,7 @@ namespace
         {
         case UVG_ORIGIN:
             s_gesture = UVG_ORIGIN;          // view state only, never persisted
-            // ROUND BJ, ITEM 6: the pivot snaps against the same captured displayed
-            // point sets every other gesture uses (SnapOrigin) — so it has to capture
-            // them.  No SnapshotSelection: nothing is mutated by a pivot drag.
+            // Pivot snapping needs displayed point sets but no texdef snapshot.
             CaptureSnapSets();
             return;
         case UVG_ROTATE:
@@ -3115,18 +2676,14 @@ namespace
             CaptureSnapSets();
             return;
         case UVG_MARQUEE:
-            s_gesture = UVG_MARQUEE;         // nothing is mutated until the release
+            s_gesture = UVG_MARQUEE;
             return;
         default:
             break;                           // UVG_MOVE
         }
 
-        // ── MOVE, AND WITH IT THE TARGETING (D-BI-C) ────────────────────────────────
-        // A press on a shape targets it and drags it in ONE press (BG's rule).  What is
-        // new: repeated presses at the same spot walk DOWN the stack under the cursor,
-        // and a press on a shape that is already one of SEVERAL targets moves the whole
-        // set instead of collapsing it — the collapse is the next press at that spot,
-        // which starts the cycle at the topmost shape (s_cycleNext = 0 below).
+        // Shape press targets and drags; repeats cycle stacked hits. Pressing one of several
+        // targets moves the set and defers click-to-collapse until release.
         if ( s_gOnShape )
         {
             uvShapeRef_t stack[64];
@@ -3138,12 +2695,11 @@ namespace
             {
                 if ( !pr.shapeIsTarget )
                 {
-                    s_gesture = UVG_NONE;             // removing an absent item is a no-op
+                    s_gesture = UVG_NONE;
                     s_gButton = -1;
                     return;
                 }
-                // A stationary release removes this member; travelling beyond the
-                // click threshold remains the existing Ctrl-snap move.
+                // Stationary Ctrl release removes; Ctrl-drag snap-moves.
                 s_removeArmed = true;
                 s_removeFace  = pr.shapeFace;
                 s_removePatch = pr.shapePatch;
@@ -3162,8 +2718,7 @@ namespace
             }
             else if ( io.KeyShift )
             {
-                // Shift is add-only.  Clicking an existing target is intentionally
-                // a no-op; it never turns an additive gesture into a removal.
+                // Shift is add-only; an existing member is a no-op.
                 if ( !pr.shapeIsTarget )
                 {
                     s_targetAll  = false;
@@ -3186,44 +2741,11 @@ namespace
                 return;
             }
 
-            // ══════════════════════════════════════════════════════════════════
-            //  KIWI-UX (ROUND BO, ITEM 2) — THE `!s_targetAll` TERM WAS THE BUG
-            // ══════════════════════════════════════════════════════════════════
-            // USER RE-REPORT, verbatim: *"When selecting multiple faces, it still
-            // does not truly act like multiple are selected in the UV editor.  They
-            // are all highlighted, but I can't click-drag them as a cohesive unit
-            // unless I shift-click them again in the UV editor."*
-            //
-            // AND THE `unless I shift-click them again` HALF IS THE WHOLE
-            // DIAGNOSIS.  Round BN's seed does the right thing for the reported
-            // flow and then names the state badly: when the explicit 3D faces cover
-            // EVERY gathered shape it calls `TargetAll()` (:709), which sets
-            // `s_targetAll = true`.  That is a REPRESENTATION of "all three are
-            // targeted" — `s_faceTgt` is all 1s (:761-762), `TargetCount()` is 3 and
-            // `pr.shapeIsTarget` is true — but this predicate treated it as "there
-            // is no target set", so `keepSet` was false, `TargetSingle` ran, and the
-            // gold three collapsed to one on the press.  Shift-clicking in the
-            // canvas is the ONE path that turns "all" into an explicit set of the
-            // same shapes (:3013-3018), after which `!s_targetAll` is true and the
-            // drag worked — which is exactly, and only, what the user found.
-            //
-            // THE QUESTION THIS ARM ASKS has nothing to do with how the set is
-            // stored: "is the shape under the press already targeted, and is there
-            // more than one target?"  `pr.shapeIsTarget && TargetCount() > 1`
-            // answers it in both representations, so the `!s_targetAll` term is
-            // deleted rather than patched.
+            // Membership/count, not s_targetAll's storage mode, decides whether to keep a set.
             const bool keepSet = ( !repeat && pr.shapeIsTarget && TargetCount() > 1 );
             if ( keepSet )
             {
-                // ── THE DEFERRED COLLAPSE (the file-explorer nuance) ───────────
-                // Pressing an already-targeted shape must not decide anything yet:
-                // a DRAG means "move the whole set" and a CLICK means "collapse to
-                // this one", and which it is cannot be known until the release.  So
-                // the collapse is ARMED here and executed in GestureEnd only if the
-                // cursor never left the click box.  This is the same press/release
-                // split the marquee and the empty-box arms already use (:2762,
-                // :2781), with the same threshold, so the canvas has one answer to
-                // "did that count as a drag?"
+                // Defer collapse until release; a drag must retain and move the whole set.
                 s_cycleNext      = 0;
                 s_collapseArmed  = true;
                 s_collapseFace   = pr.shapeFace;
@@ -3246,30 +2768,19 @@ namespace
             s_cycleValid = true;
         }
 
-        // The retarget above may have changed the target set, and the pivot follows it
-        // (D-BI-D) — re-derive it NOW rather than on the next frame, so a rotate or a
-        // scale begun straight after this press pivots on what is actually targeted.
-        // (AutoPivot is a no-op once the gesture below is live, and while the latch is on.)
+        // Retarget before the gesture goes live so an automatic pivot follows immediately.
         AutoPivot();
 
         s_gesture = UVG_MOVE;
         SnapshotSelection();
-        CaptureSnapSets();               // AFTER the retarget: it partitions on the set
+        CaptureSnapSets();               // partition after retargeting
     }
 
     void GestureUpdate( float u, float v )
     {
         ImGuiIO &io = ImGui::GetIO();
-        // ── KIWI-UX (ROUND BO, ITEM 3): THE CANVAS FOLLOWS THE TRANSFORM RULE ──
-        // Every gesture on this canvas — move, pivot, rotate, scale, shear — is a
-        // TRANSFORM: it moves UVs that already exist.  So it is RAW by default and
-        // Ctrl engages the whole snap family (grid, whole texels, the other shapes'
-        // vertices).  This is the same inversion the 3D side takes, written here
-        // rather than through KiwiCmd_SnapEngaged because the canvas runs inside the
-        // ImGui frame with no active KIWI command to ask — io.KeyCtrl IS the frame's
-        // own authority for that (imgui_shell.cpp passes the same io to the
-        // viewport arms).  Ctrl-click is resolved at release; once the cursor
-        // travels beyond the click box this modifier means snapping.
+        // Canvas transforms are raw by default; Ctrl engages snapping from ImGui frame state.
+        // Ctrl-click remains removal until motion crosses the click threshold.
         const bool snap = io.KeyCtrl;
         s_gCurU = u;
         s_gCurV = v;
@@ -3277,34 +2788,27 @@ namespace
         switch ( s_gesture )
         {
         case UVG_PAN:
-            // The cursor holds the UV point it grabbed: pan by the difference between the
-            // UV now under the cursor and the one that was there at the press.  That is
-            // TB UvCameraTool's unproject-old / unproject-new / moveBy(delta) (:44-55)
-            // with the unprojects already done by the caller.
+            // Keep the grabbed UV under the cursor (TB UvCameraTool.cpp:44-55).
             s_panU += s_gStartU - u;
             s_panV += s_gStartV - v;
             break;
         case UVG_MARQUEE:
-            // Nothing is mutated until the release (ApplyMarquee, from GestureEnd); the
-            // band itself is drawn from s_gStart* / s_gCur* by the overlays.
             _snprintf( s_status, sizeof( s_status ), "marquee  %+.3f x %+.3f repeats",
                        u - s_gStartU, v - s_gStartV );
             break;
         case UVG_ORIGIN:
         {
-            // ROUND BI: the pivot's axis LINES are gone, so a pivot drag is always free in
-            // both axes (D-BI-D).  Its snap candidates are unchanged (SnapOrigin).
+            // Pivot drag is free in both S and T.
             float nu = s_gOriginU + ( u - s_gStartU );
             float nv = s_gOriginV + ( v - s_gStartV );
-            SnapClear();                     // ROUND BJ, ITEM 6
+            SnapClear();
             if ( snap )
             {
                 const float ru = nu, rv = nv;
                 SnapOrigin( &nu, &nv );
                 if ( fabsf( nu - ru ) > 1.0e-6f || fabsf( nv - rv ) > 1.0e-6f )
                 {
-                    // A 2D point snap: mark BOTH axes so the accent reads as a cross
-                    // through the point rather than as a single line lock.
+                    // Mark both axes so a 2D point snap reads as a cross.
                     SnapNote( nu, nv, 0, KUVE_SNAPK_VERT );
                     SnapNote( nu, nv, 1, KUVE_SNAPK_VERT );
                 }
@@ -3319,7 +2823,7 @@ namespace
         {
             float dU = u - s_gStartU;
             float dV = v - s_gStartV;
-            SnapClear();                     // ROUND BJ, ITEM 6
+            SnapClear();
             if ( snap )
             {
                 MaterialDef *md = nullptr;
@@ -3344,14 +2848,12 @@ namespace
             const float cur = atan2f( v - s_originV, u - s_originU ) * 180.0f / KUVE_PI;
             float theta = NormDeg( cur - s_gStartAngle );
             const float du = ( u - s_originU ) * s_zoom, dv = ( v - s_originV ) * s_zoom;
-            SnapClear();                     // ROUND BJ, ITEM 6
+            SnapClear();
             if ( snap )
             {
                 const float raw = theta;
                 theta = SnapAngle( theta, sqrtf( du * du + dv * dv ) );
-                // The rotate snap is an ANGLE, not a point, so it earns the readout
-                // clause and no dot: a mark on the canvas would name a place that had
-                // nothing to do with what locked.
+                // Angle snaps use only the readout; a point marker would be misleading.
                 s_snapAngle = ( fabsf( theta - raw ) > 1.0e-4f );
             }
             const float r = theta * KUVE_PI / 180.0f;
@@ -3364,20 +2866,9 @@ namespace
         }
         case UVG_SCALE:
         {
-            // TB UvScaleTool (:196-254): the factor is the ratio of anchor-to-handle
-            // distances, the handle having been moved by the drag delta.  ROUND BI: the
-            // handle is a BOX handle rather than a grid line (D-BI-B) — same arithmetic,
-            // and the corner case gains Shift = uniform.
-            // ── KIWI-UX (ROUND BJ, ITEM 5): THE ANCHOR IS THE OPPOSITE SIDE ─────
-            // USER REPORT, verbatim: *"When dragging the sides, dont expand both
-            // sides, just expand the side that is being dragged."*  BI derived the
-            // factor from the PIVOT, which sits at the box centre by default — so a
-            // right-edge drag scaled about the centre and the left edge moved out by
-            // the same amount.  `o` is the ANCHOR now: the handle across the box,
-            // captured at the press (D-BJ-E).  The arithmetic is otherwise TB's
-            // untouched, and with the anchor at the pivot (which is what the pivot
-            // handle still is for rotate / skew / Rot 90 / Flip) it is bit-identical
-            // to BI's.
+            // TB UvScaleTool (:196-254): scale is moved-handle distance divided by its
+            // start distance. Here the opposite box handle is the fixed anchor; Shift on
+            // corners uses one least-squares factor for both axes.
             float k[2] = { 1.0f, 1.0f };
             const float o[2]  = { s_gAnchorU, s_gAnchorV };
             const float h0[2] = { s_gHandleU, s_gHandleV };
@@ -3386,15 +2877,13 @@ namespace
             SnapClear();
             if ( snap )
             {
-                // ROUND BJ, ITEM 6: the thing the user is HOLDING is what snaps —
-                // the dragged handle, per armed axis — and it says so on the canvas.
+                // Snap the dragged handle on each armed axis.
                 bool hit[2]  = { false, false };
                 int  kind[2] = { KUVE_SNAPK_GRID, KUVE_SNAPK_GRID };
                 for ( int i = 0; i < 2; ++i )
                     if ( s_gAxis[i] )
                         h1[i] = SnapHandleAxis( h1[i], i, &hit[i], &kind[i] );
-                // Noted AFTER both axes, so a corner's first accent is not placed at
-                // the second axis's pre-snap value.
+                // Record accents after both axes so a corner uses the final 2D point.
                 for ( int i = 0; i < 2; ++i )
                     if ( hit[i] )
                         SnapNote( h1[0], h1[1], i, kind[i] );
@@ -3403,8 +2892,7 @@ namespace
                                  && io.KeyShift;
             if ( uniform )
             {
-                // Aspect-locked: the least-squares scalar, i.e. the drag's component ALONG
-                // the anchor-to-corner diagonal decides one factor for both axes.
+                // Least-squares scalar: the diagonal component decides both axes.
                 const float ox = h0[0] - o[0], oy = h0[1] - o[1];
                 const float len2 = ox * ox + oy * oy;
                 if ( len2 > KUVE_EPS )
@@ -3437,12 +2925,9 @@ namespace
         }
         case UVG_SHEAR:
         {
-            // TB UvShearTool (:159-208): factors {−dy/x0, −dx/y0}, recomputed from the
-            // DRAG START every frame (TB rolls the transaction back to get that; we get it
-            // for free because every frame rebuilds from the snapshot).  The sign is
-            // flipped from TB's — D-BD-A: our wireframe follows the cursor.  ROUND BI: the
-            // reference offset is the grabbed EDGE-MID HANDLE's offset from the pivot, not
-            // the press point's, so the shear is exact from the first frame.
+            // TB UvShearTool (:159-208), rebuilt from the gesture start each frame. The
+            // sign is flipped so the wireframe follows the cursor; reference the edge-mid
+            // handle rather than an off-center press point.
             const float x0 = s_gHandleU - s_originU;
             const float y0 = s_gHandleV - s_originV;
             const float dx = u - s_gStartU;
@@ -3466,22 +2951,13 @@ namespace
         s_status[sizeof( s_status ) - 1] = '\0';
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════════
-    //  OVERLAYS
-    // ═══════════════════════════════════════════════════════════════════════════════
-    // KIWI-UX (ROUND BG, ITEM 3a / D-BG-E): the overlays now read the SAME probe the press
-    // will read, so the highlight and the grab can no longer disagree.  `pr` is the probe
-    // for this frame's cursor (UVG_NONE-what when nothing is hovered or a drag is live).
-    // (The cursor UV that BD passed in is gone: every hit test it used to re-run here is
-    // now inside the probe, which is the point of D-BG-E.)
+    // Overlays consume the same frame probe as press handling.
     void DrawOverlays( ImDrawList *dl, bool hovered, const uvProbe_t &pr )
     {
         const ImVec2 o = UvToPx( s_originU, s_originV );
         const bool   idle = ( s_gesture == UVG_NONE ) && hovered;
 
-        // 1. THE SHAPE UNDER THE CURSOR announces itself — a press there targets AND drags
-        //    it (D-BI-C), so it has to be visible before the press.  With the click cycle
-        //    this is also the readout of WHICH of the stacked shapes is next.
+        // Highlight the shape/cycle entry the next press will target and drag.
         if ( idle && pr.what == UVG_MOVE && ( pr.shapeFace >= 0 || pr.shapePatch >= 0 ) )
         {
             float st[KUVE_MAX_WINDING][2];
@@ -3508,9 +2984,7 @@ namespace
             }
         }
 
-        // 2. THE TRANSFORM BOX AND ITS EIGHT HANDLES (D-BI-B).  Nothing here highlights
-        //    that a press would not grab: every hot test reads the SAME probe the press
-        //    reads, and the box the probe hit-tested is the box being drawn (s_box).
+        // Draw the same box and hot handle that Probe tested.
         if ( s_box.valid )
         {
             dl->AddRect( ImVec2( s_box.x0, s_box.y0 ), ImVec2( s_box.x1, s_box.y1 ),
@@ -3529,9 +3003,7 @@ namespace
                              ImVec2( hx + KUVE_HANDLE_PX, hy + KUVE_HANDLE_PX ),
                              IM_COL32( 30, 30, 30, 200 ) );
             }
-            // The rotate annulus has no permanent furniture — it would be four arcs of
-            // clutter around a box the user is trying to read.  It draws its quarter arc
-            // only while the cursor is in it (or a rotate is live from that corner).
+            // Draw a rotate arc only while its corner annulus is hot/live.
             const int rotCorner = ( idle && pr.rotateZone ) ? pr.handle
                                 : ( s_gesture == UVG_ROTATE && s_gHandle >= UVH_NW
                                     && s_gHandle <= UVH_SW ) ? s_gHandle : UVH_NONE;
@@ -3548,7 +3020,7 @@ namespace
             }
         }
 
-        // 3. THE MARQUEE (D-BI-C).
+        // Marquee.
         if ( s_gesture == UVG_MARQUEE )
         {
             const ImVec2 a = UvToPx( s_gStartU, s_gStartV );
@@ -3570,12 +3042,7 @@ namespace
             dl->AddRect( r0, r1, edge, 0.0f, 0, 1.0f );
         }
 
-        // ── 3b. KIWI-UX (ROUND BJ, ITEM 6): THE SNAP ACCENTS (D-BJ-F) ──────────
-        // Drawn only while a gesture is live and only for an ENGAGED absorb.  Per
-        // accent: a short TICK along the line the motion locked onto (a locked S
-        // means a vertical line, and vice versa), then the 3D pass's dot-and-
-        // separated-ring on the point itself.  Under the pivot on purpose — the
-        // pivot is a handle you can grab and must stay readable over an accent.
+        // Engaged absorbs draw a locked-axis tick plus dot/ring beneath the pivot.
         if ( s_gesture != UVG_NONE )
         {
             for ( size_t i = 0; i < s_snapAcc.size(); ++i )
@@ -3593,9 +3060,7 @@ namespace
             }
         }
 
-        // 4. THE PIVOT: a circle and a SMALL CROSS.  Its two infinite axis LINES are gone
-        //    (D-BI-D) — they were two full-canvas bands of picks sitting on the shapes.
-        //    The cross keeps their one useful job, naming which way S and T run.
+        // Pivot cross names the S/T directions without full-canvas pickable axis lines.
         const bool pivotHot = ( s_gesture == UVG_ORIGIN )
                             || ( idle && pr.what == UVG_ORIGIN );
         dl->AddLine( ImVec2( o.x - KUVE_ORIGIN_CROSS_PX, o.y ),
@@ -3606,11 +3071,9 @@ namespace
                              pivotHot ? KUVE_COL_HANDLE_HI : KUVE_COL_HANDLE, 16 );
     }
 
-    // The ImGui mouse cursor for what the probe found.  Recomputed FROM SCRATCH every
-    // frame and never latched — ImGui resets g.MouseCursor to Arrow in NewFrame
-    // (imgui.cpp:6012) and the win32 backend only calls ::SetCursor when the value
-    // CHANGES (imgui_impl_win32.cpp:534-538), so "stop asking" is the same as "arrow".
-    // That shape is the standing regression check for the round-BG cursor fix.
+    // Recompute every frame: ImGui resets to Arrow in NewFrame, while the Win32 backend
+    // calls SetCursor only when the requested value changes (imgui.cpp:6012,
+    // imgui_impl_win32.cpp:534-538).
     void ApplyHoverCursor( const uvProbe_t &pr, bool hovered )
     {
         if ( !hovered || s_gesture != UVG_NONE )
@@ -3618,10 +3081,7 @@ namespace
         switch ( pr.what )
         {
         case UVG_ROTATE:
-            // ImGui 1.92's cursor set has no ROTATE shape (imgui.h ImGuiMouseCursor_ enum
-            // is Arrow / TextInput / ResizeAll / NS / EW / NESW / NWSE / Hand / NotAllowed),
-            // so the pivot and the rotate annulus share Hand.  They never overlap — the
-            // annulus is outside the box and the pivot disc is inside it.
+            // ImGui 1.92 has no rotate cursor, so rotate and pivot use Hand.
             ImGui::SetMouseCursor( ImGuiMouseCursor_Hand );
             break;
         case UVG_ORIGIN:
@@ -3629,8 +3089,7 @@ namespace
             break;
         case UVG_SCALE:
         case UVG_SHEAR:
-            // Corners take the DIAGONAL cursors, and which diagonal depends on the corner:
-            // NW/SE lie on the NWSE diagonal, NE/SW on the NESW one.
+            // Match each corner to its diagonal resize cursor.
             if ( pr.handle == UVH_NW || pr.handle == UVH_SE )
                 ImGui::SetMouseCursor( ImGuiMouseCursor_ResizeNWSE );
             else if ( pr.handle == UVH_NE || pr.handle == UVH_SW )
@@ -3649,9 +3108,7 @@ namespace
         }
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════════
-    //  TOOLBAR
-    // ═══════════════════════════════════════════════════════════════════════════════
+    // Toolbar.
     texdef_sub_t *ActiveTexdef( MaterialDef **outMd )
     {
         if ( s_activeFace < 0 )
@@ -3660,26 +3117,19 @@ namespace
                                   s_faces[s_activeFace].faceIndex, outMd );
     }
 
-    // One immediate texdef edit over every TARGETED FACE, in one undo bracket.  `field`
-    // says which member the callback writes; patches are untouched (D-BD-H).
-    // KIWI-UX (ROUND BG, ITEM 4): UVF_FLIPU / UVF_FLIPV / UVF_ROT90CW / UVF_ROT90CCW are
-    // GONE from this enum.  They wrote the texdef fields directly, which pivots on the
-    // TEXTURE-SPACE ORIGIN — the "flies around really far off the centre point" report.
-    // All four are now ApplyAffineImmediate calls pivoted on the origin handle (D-BG-C).
+    // Immediate numeric texdef edits affect targeted faces only. Flip/Rot 90 use the
+    // pivoted affine path instead of raw fields, which would pivot at texture-space (0,0).
     enum uvField_t { UVF_SHIFT0 = 0, UVF_SHIFT1, UVF_SIZE0, UVF_SIZE1, UVF_ROTATE,
                      UVF_CROSSTERM, UVF_RESET };
 
-    // The per-face write WITHOUT bracket management, so a verb that has to touch patches
-    // as well can put both halves inside ONE undo record.  (Rot 90 on a mixed selection
-    // did exactly that wrongly at first: the face half through ApplyField and the patch
-    // half through a second call that ALSO rewrote the faces, turning them 180°.)
+    // Per-face write without bracket management, allowing mixed operations one undo record.
     void ApplyFieldInner( uvField_t field, float value )
     {
         const float sample = g_qeglobals.random_texture_stuff[TemplateLayer()].sampleSize;
 
         for ( size_t i = 0; i < s_faces.size(); ++i )
         {
-            if ( !FaceIsTarget( i ) )        // ROUND BG, item 6
+            if ( !FaceIsTarget( i ) )
                 continue;
             MaterialDef  *md = nullptr;
             texdef_sub_t *td = KiwiUv_FaceTexdef( s_brushes[s_faces[i].brushIdx].def,
@@ -3696,8 +3146,7 @@ namespace
             case UVF_CROSSTERM: td->crossterm = value; break;
             case UVF_RESET:
             {
-                // TexWnd_BuildClickedMaterialDef's own default (texwnd.cpp:674-697):
-                // size = material w/h × the layer's sample size, everything else zero.
+                // TexWnd_BuildClickedMaterialDef default (texwnd.cpp:674-697).
                 float w, h;
                 MaterialSize( md, &w, &h );
                 td->size[0]   = w * sample;
@@ -3720,13 +3169,9 @@ namespace
         g_nUpdateBits = -1;
     }
 
-    // ── KIWI-UX (ROUND BG, ITEM 4 / D-BG-C): ONE-SHOT AFFINE, THE GESTURE PATH ────────
-    // Rot 90 CW/CCW and Flip U/V are now this, and nothing else.  It is deliberately the
-    // SAME arithmetic ApplySelection runs — displayed-space affine `A`, conjugated per
-    // shape by its display transform, faces through Face_MoveTexture + texturevecs_02 and
-    // patches through their control STs — with the one difference that a toolbar verb has
-    // no gesture snapshot, so each shape's CURRENT state is its own td0.  Both halves live
-    // inside ONE undo bracket, which is the shape BD's Rot 90 already had and had to.
+    // One-shot transforms use the gesture arithmetic: displayed A, conjugated per shape;
+    // faces use Face_MoveTexture/texturevecs_02 and patches use control ST. With no gesture
+    // snapshot, each current shape state is td0. Faces and patches share one undo record.
     void ApplyAffineImmediate( const uvXform_t &A, const char *undoName )
     {
         if ( !AnythingSelected() || XfIsIdentity( A ) )
@@ -3797,10 +3242,8 @@ namespace
                 ApplyField( UVF_RESET, 0.0f, "uv reset" );
             if ( hasPatch )
             {
-                // Patch_NaturalizeSelected opens its OWN bracket (pmesh.cpp:2755-2757), so
-                // it cannot join ours — a mixed selection's Reset is two Ctrl+Z and the
-                // console says so rather than leaving the user to find out.  This is
-                // Cmd_OnPatchNaturalize's own pair (mainfrm.cpp:3895).
+                // Patch_NaturalizeSelected owns its bracket, so mixed Reset is two undo
+                // steps (pmesh.cpp:2755-2757; mainfrm.cpp:3895).
                 float x[2] = { 0.0f, 0.0f };
                 Select_SetTexture( x );
                 Patch_NaturalizeSelected( 0, 0, x[0], x[1] );
@@ -3818,13 +3261,8 @@ namespace
                                "The face half honours the canvas target set; the patch half\n"
                                "cannot - Patch_NaturalizeSelected takes the 3D selection." );
 
-        // ── KIWI-UX (ROUND BG, ITEM 4 + ITEM 5) ────────────────────────────────────
-        // All four verbs are ONE affine about the ORIGIN HANDLE, applied through the
-        // gesture path to faces and patches alike (D-BG-C).  The signs are chosen in
-        // CANVAS space, where +T is DOWN: [[0,-1],[1,0]] takes screen-right to screen-DOWN,
-        // i.e. the outline turns CLOCKWISE, which is what a button labelled "CW" has to do
-        // under D-BG-D.  (BD's patch arm used [[0,1],[-1,0]] for "CW", which is the other
-        // way round; its face arm did not pivot here at all.)
+        // Canvas +T is down, so [[0,-1],[1,0]] maps right to down: clockwise on screen.
+        // Faces and patches use the same affine about the displayed pivot.
         ImGui::SameLine();
         ImGui::BeginDisabled( !canAny );
         if ( ImGui::Button( "Flip U" ) )
@@ -3853,7 +3291,6 @@ namespace
                                "at the centre of whatever is targeted until you drag it, so by\n"
                                "default these turn the target set about its own centre." );
 
-        // ── KIWI-UX (ROUND BG, ITEM 3b): the fold-out toggle (D-BG-A) ──────────────
         ImGui::SameLine();
         if ( ImGui::Checkbox( "Chain", &s_chain ) )
             s_chainBuilt = false;                 // rebuild (or drop) on the next frame
@@ -3863,10 +3300,7 @@ namespace
                                "on top of each other.  DISPLAY ONLY - the STs never move.\n"
                                "Off = true ST positions (use it to check real alignment)." );
 
-        // ── KIWI-UX (ROUND BJ, ITEM 7): RE-SOLVING THE LAYOUT IS A DECISION ────────
-        // The fold is latched now (see DrawCanvas) — it is NOT re-solved because a
-        // texdef changed, which is what made a group rotate reshuffle on release.  So
-        // the way to re-solve it has to be something the user asks for.
+        // Fold layout is latched; only an explicit request re-solves current ST.
         ImGui::SameLine();
         ImGui::BeginDisabled( !s_chain || s_faces.size() < 2 );
         if ( ImGui::Button( "Re-fold" ) )
@@ -3891,7 +3325,7 @@ namespace
         if ( ImGui::InputInt( "grid Y", &s_subY, 1, 1 ) )
             s_subY = ClampI( s_subY, 1, 16 );
 
-        // ── the numeric row (FACE ONLY — D-BD-H) ───────────────────────────────────
+        // Numeric row: face texdefs only.
         MaterialDef  *md = nullptr;
         texdef_sub_t *td = ActiveTexdef( &md );
         (void)md;                     // the fields want the texdef, not the material
@@ -3942,9 +3376,7 @@ namespace
                                "buttons pivot on the yellow ORIGIN handle instead." );
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════════
-    //  THE CANVAS
-    // ═══════════════════════════════════════════════════════════════════════════════
+    // Canvas.
     void DrawCanvas()
     {
         ImGuiIO &io = ImGui::GetIO();
@@ -3960,59 +3392,25 @@ namespace
                               | ImGuiButtonFlags_MouseButtonMiddle );
         const bool hovered = ImGui::IsItemHovered();
 
-        // Re-frame when the selection changed, and keep re-trying the fit while the widget
-        // has no real size yet (TB cameraViewportChanged, UvViewHelper.cpp:73-83).
+        // Re-frame selection changes; retry while the widget has no usable size
+        // (TB UvViewHelper.cpp:73-83).
         const unsigned gen = Sel_Generation();
         if ( !s_haveGen || gen != s_selGen )
         {
             s_haveGen   = true;
             s_selGen    = gen;
             s_zoomValid = false;
-            // KIWI-UX (ROUND BI): the pivot's "user placed" latch lives for exactly one
-            // selection (D-BI-D), and the click cycle's anchor means nothing across one.
+            // User pivot placement and click-cycle state live for one 3D selection.
             s_originUser = false;
             s_cycleValid = false;
             if ( s_gesture != UVG_NONE )
                 GestureCancel();
         }
 
-        // ── KIWI-UX (ROUND BG, ITEM 3b): (re)solve the fold-out (D-BG-A) ───────────
-        // Gather() resets every D to identity each frame, so the layout has to be either
-        // rebuilt or REPLAYED FROM THE CACHE here.  The cache is index-parallel and is
-        // only valid while the STRUCTURE signature (which rows were gathered, in which
-        // order) is unchanged.
-        //
-        // ── KIWI-UX (ROUND BJ, ITEM 7): THE LAYOUT IS LATCHED, NOT RE-SOLVED ──────
-        // USER REPORT, verbatim: *"When rotating them all as a group, dont scramble
-        // them, keep them in their orientation."*
-        //
-        // THE MECHANISM WAS THIS BLOCK.  Round BG's rebuild condition was
-        // `!s_chainBuilt || ChainSignature() != s_chainSig`, and ChainSignature hashed
-        // every gathered face's size / shift / rotate / crossterm and every patch's
-        // ST — i.e. the very values a gesture writes.  The gesture itself was safe (the
-        // `s_gesture == UVG_NONE` clause froze the layout mid-drag), but the instant the
-        // mouse came UP the signature had moved and the whole fold-out was re-solved
-        // FROM THE NEW STs: a new BFS, new FoldRigid rotations, possibly different
-        // mirror decisions (SideOf flips as the ensemble turns) and a shelf laid out
-        // from a moved occupied box.  A group rotate therefore reshuffled on release,
-        // and so did every other write — a single-shape move snapped its shape back
-        // into the chain, and a numeric field edit re-solved the lot.
-        //
-        // THE FIX: D_f is a DISPLAY LAYOUT, not a function of the texdefs.  It is
-        // solved once per (gathered set, active face = fold anchor, Chain toggle) —
-        // which is exactly what ChainStructSig already hashes — and NEVER because a
-        // texdef changed.  The conjugation (D-BG-A) then does the rest for free: a
-        // displayed outline is D_f·st_f and a gesture writes A_true = D_f⁻¹·A·D_f, so
-        // the displayed outline moves by exactly A whatever D_f is.  The arrangement is
-        // therefore preserved indefinitely, and a group rotate rigidly turns the whole
-        // displayed ensemble about the pivot.
-        //
-        // THE TARGET SET is deliberately NOT part of the key.  BuildChain never reads
-        // it (the anchor is the active face), so keying on it would add re-solve points
-        // — i.e. scramble points — for no change in the answer.  RE-FOLD is a toolbar
-        // button instead, because "re-solve the layout" is now a decision and not a
-        // side effect.  AUTO-FRAME is unaffected: it runs off `s_zoomValid`, which the
-        // Sel_Generation change clears — that is the VIEW, not the layout.
+        // Gather resets D to identity, so replay the cached index-parallel layout while
+        // structure matches. D is display layout, not a function of mutable texdefs/ST or
+        // the target subset: those must not trigger a post-edit rearrangement. Conjugation
+        // guarantees displayed motion follows A. Re-fold explicitly invalidates the cache.
         {
             const unsigned ssig = ChainStructSig();
             if ( ssig != s_chainStructSig )
@@ -4034,22 +3432,18 @@ namespace
             }
         }
 
-        // AFTER the chain solve (ROUND BG): the fit frames the DISPLAYED spread, and the
-        // fold-out is what decides where that is.  Framing first would centre the view on
-        // the active face and leave its folded-out neighbours off-screen.
+        // Frame after chain placement so the complete displayed spread is visible.
         if ( !s_zoomValid )
             FrameActive();
 
-        // ── KIWI-UX (ROUND BI): the pivot, then the box, BEFORE any input is resolved ──
-        // Probe() hit-tests s_box, so the box the press is measured against has to be this
-        // frame's — computed from the same displayed outlines the wireframes will draw.
+        // Compute this frame's pivot and box before Probe hit-testing.
         AutoPivot();
         s_box = ComputeBox();
 
         float cu = 0.0f, cv = 0.0f;
         PxToUv( io.MousePos, &cu, &cv );
 
-        // ── wheel zoom, cursor-anchored (TB UvCameraTool::mouseScroll :80-107) ──────
+        // Cursor-anchored wheel zoom (TB UvCameraTool::mouseScroll :80-107).
         if ( hovered && io.MouseWheel != 0.0f && s_gesture == UVG_NONE )
         {
             const float before[2] = { cu, cv };
@@ -4062,13 +3456,11 @@ namespace
             PxToUv( io.MousePos, &cu, &cv );
         }
 
-        // ── gesture start / update / end ────────────────────────────────────────────
+        // Gesture start/update/end.
         if ( s_gesture == UVG_NONE && hovered )
         {
-            // KIWI-UX (ROUND BI): Esc with no gesture live clears the sub-selection back
-            // to all — the keyboard way out of a target set, next to the empty click.
-            // (The KIWI key funnel can claim Escape before ImGui sees it; the empty click
-            // and the empty marquee are the paths that never depend on that.)
+            // Escape clears local targets when ImGui receives it; empty click remains the
+            // path independent of the KIWI key funnel.
             if ( !s_targetAll && ImGui::IsKeyPressed( ImGuiKey_Escape, false ) )
             {
                 TargetAll();
@@ -4085,10 +3477,8 @@ namespace
         }
         else if ( s_gesture != UVG_NONE )
         {
-            // App focus loss cancels the drag — TB does the same on window deactivate
-            // (UvView.cpp:191-199).  Esc cancels too; note that the KIWI key funnel can
-            // claim Escape before ImGui sees it, so the mouse release is still the
-            // primary end of a gesture.
+            // Focus loss cancels as in TB UvView.cpp:191-199; mouse release is primary
+            // because the KIWI key funnel may consume Escape first.
             if ( io.AppFocusLost || ImGui::IsKeyPressed( ImGuiKey_Escape, false ) )
                 GestureCancel();
             else if ( s_gButton >= 0 && !io.MouseDown[s_gButton] )
@@ -4100,7 +3490,7 @@ namespace
                 GestureUpdate( cu, cv );
         }
 
-        // ── draw ────────────────────────────────────────────────────────────────────
+        // Draw.
         ImDrawList *dl = ImGui::GetWindowDrawList();
         dl->PushClipRect( s_c0, ImVec2( s_c0.x + s_cs.x, s_c0.y + s_cs.y ), true );
 
@@ -4115,13 +3505,8 @@ namespace
         DrawGrid( dl );
         DrawWireframes( dl );
 
-        // ── KIWI-UX (ROUND BG, ITEM 3a / D-BG-E): ONE probe, both consumers ────────
-        // Run AFTER the wireframes (it hit-tests displayed shapes) and BEFORE the
-        // overlays (which draw its answer).  Recomputed from scratch every frame — see
-        // ApplyHoverCursor for why that shape is also the cursor's regression check.
-        // ROUND BI: the box is recomputed here too, because a live gesture has just
-        // rewritten the STs it is derived from and the overlays must draw the box that
-        // is around the shapes NOW, not the one the press was measured against.
+        // Recompute the box after live ST writes, then run the shared hover/press probe
+        // before drawing overlays.
         s_box = ComputeBox();
         uvProbe_t pr;
         ProbeClear( &pr );
@@ -4132,20 +3517,17 @@ namespace
         if ( AnythingSelected() )
             DrawOverlays( dl, hovered, pr );
 
-        // ── the readout, bottom-left of the canvas ─────────────────────────────────
+        // Bottom-left readout.
         char line[320];
         const char *name = ( MtlDefUsable( bgMd ) )
                          ? (const char *)Materialdef_GetName( bgMd ) : nullptr;
-        // ROUND BG, item 6: the readout NAMES the target count, because a canvas where
-        // only some of the visible shapes will move has to say so.
         const int nShapes = (int)( s_faces.size() + s_patches.size() );
         char tgt[64];
         tgt[0] = '\0';
         if ( !s_targetAll && nShapes > 0 )
             _snprintf( tgt, sizeof( tgt ), "   editing %d of %d", TargetCount(), nShapes );
         tgt[sizeof( tgt ) - 1] = '\0';
-        // ...and what the fold-out actually did, for the same reason: a shape that is not
-        // where its STs say it is has to admit it.
+        // Report display-only folding because chained positions differ from true ST.
         char chain[64];
         chain[0] = '\0';
         if ( s_chain && s_faces.size() > 1 )
@@ -4176,20 +3558,16 @@ namespace
     }
 }   // anonymous namespace
 
-// ═════════════════════════════════════════════════════════════════════════════════════
-//  the dock window
-// ═════════════════════════════════════════════════════════════════════════════════════
+// Dock window.
 void KiwiUvEd_Draw()
 {
     bool *open = KiwiWindows_OpenPtr( KIWI_WIN_UVEDITOR );
     if ( !open || !*open )
     {
-        // Closed with a drag live (the ✕ box is reachable mid-gesture): the gesture has to
-        // end somewhere, and an open undo bracket must never survive a frame.  ABANDON
-        // rather than cancel — nothing gathered this frame, so there is no live selection
-        // to restore through (see GestureAbandon).
+        // No fresh gather exists after a mid-drag close, so abandon via undo rather than
+        // dereferencing the previous frame's selection.
         GestureAbandon();
-        s_inScope = false;                   // ROUND BN, ITEM 3: closed is out of scope
+        s_inScope = false;
         return;                              // closed: no Begin, no End, no cost
     }
 
@@ -4201,23 +3579,14 @@ void KiwiUvEd_Draw()
     {
         Gather();
 
-        // ── KIWI-UX (ROUND BN, ITEM 3): THE SCOPE LATCH ─────────────────────────
-        // Computed HERE, once, because this is the only place in the frame where the
-        // window's own ImGui focus/hover state is askable at all — Cam_Draw, which is
-        // what reads the answer, does not run inside this window's scope.  The whole
-        // rule (and why one frame of latency is the right trade) is in kiwi_uveditor.h
-        // "IN SCOPE".  RootAndChildWindows on both predicates because the canvas and
-        // the toolbar are CHILD windows: without it, hovering the canvas — i.e. the
-        // one thing the user is certain to be doing — would read as NOT hovering the
-        // UV editor.
+        // Latch here because Cam_Draw cannot query this window's ImGui state. Include child
+        // windows so the canvas and toolbar count as focused/hovered.
         s_inScope = ImGui::IsWindowFocused( ImGuiFocusedFlags_RootAndChildWindows )
                  || ImGui::IsWindowHovered( ImGuiHoveredFlags_RootAndChildWindows )
                  || s_gesture != UVG_NONE;
 
         if ( !AnythingSelected() )
         {
-            // KIWI-UX (ROUND BI): the help text is the interaction model, so it is
-            // rewritten with it.  Nothing in here is on a grid line any more.
             ImGui::TextWrapped(
                 "Nothing selected.  Select brush faces (or whole brushes, or patches) and "
                 "their UV wireframes appear here over the active material, tiled.\n\n"
@@ -4231,7 +3600,6 @@ void KiwiUvEd_Draw()
                 "down through shapes stacked there; Shift+click adds; Ctrl+click removes; "
                 "drag on "
                 "empty canvas to rubber-band; click empty canvas (or Esc) for all of them "
-                // KIWI-UX (ROUND BO, ITEM 3): Ctrl ENGAGES snapping here now.
                 "again.  Right/middle drag pans, the wheel zooms, HOLD CTRL while dragging "
                 "to snap "
                 "(grid, whole texels and the other shapes' vertices - drags are free "
@@ -4257,18 +3625,13 @@ void KiwiUvEd_Draw()
     }
     else
     {
-        GestureAbandon();                    // collapsed / clipped away mid-drag
-        s_inScope = false;                   // ROUND BN, ITEM 3: and out of scope with it
+        GestureAbandon();                    // collapsed/clipped away mid-drag
+        s_inScope = false;
     }
     ImGui::End();
 }
 
-// ═════════════════════════════════════════════════════════════════════════════════════
-//  KIWI-UX (ROUND BN, ITEM 3) — the two questions the 3D overlay passes ask
-// ═════════════════════════════════════════════════════════════════════════════════════
-// Both are pure reads of state this file already keeps per frame; the whole argument for
-// what they suppress (and for what they deliberately do not) is on the declarations in
-// kiwi_uveditor.h.
+// Pure per-frame reads used by 3D overlay passes; see the header's scope contract.
 bool KiwiUvEd_InScope()
 {
     return s_inScope;
@@ -4280,10 +3643,7 @@ bool KiwiUvEd_OverlaySuppressed( const brush_t *def, int faceIndex )
         return false;
     if ( faceIndex < 0 )
     {
-        // The WHOLE-object question.  s_brushes carries one row per gathered def
-        // whether it arrived as a whole brush, as a patch or as the owner of a picked
-        // face — and for the face case the brush is not on `selected_brushes` at all
-        // (kiwi_selection.h DESIGN NOTE 2), so the brush-level passes never see it.
+        // s_brushes covers whole brushes, patches, and owners of face-only selections.
         for ( size_t i = 0; i < s_brushes.size(); ++i )
             if ( s_brushes[i].def == def )
                 return true;
@@ -4292,13 +3652,9 @@ bool KiwiUvEd_OverlaySuppressed( const brush_t *def, int faceIndex )
     return HaveFace( const_cast< brush_t * >( def ), faceIndex );
 }
 
-// ═════════════════════════════════════════════════════════════════════════════════════
-//  §15 palette
-// ═════════════════════════════════════════════════════════════════════════════════════
+// Command palette.
 void KiwiUvEd_RegisterCommands()
 {
-    // Unbound, searchable — the same deal every §9 window entry gets
-    // (kiwi_windows.cpp:296-301).  The TOGGLE dispatches through
-    // KiwiWindows_DispatchInstant, which owns every §9 flag; this row only names it.
+    // Unbound/searchable; KiwiWindows_DispatchInstant owns the toggle state.
     Radiant_RegisterCommand( "KiwiWindowUvEditor", 0, 0, KIWI_CMD_WINDOW_UVEDITOR );
 }

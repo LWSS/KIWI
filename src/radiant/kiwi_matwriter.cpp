@@ -1,14 +1,9 @@
-// kiwi_matwriter.cpp — the binary material writer (mechanical half).  The blob layout and
-// the constraints are in kiwi_matwriter.h.
 #include "stdafx.h"
 #include "qe3.h"
 
-#include <gfx_d3d/r_material.h>     // MaterialRaw / MaterialInfoRaw / MaterialTextureDefRaw /
-                                    // MaterialConstantDefRaw / Material / Material_RegisterHandle /
-                                    // Material_IsDefault
-#include <gfx_d3d/r_gfx.h>          // GfxImage / GfxTexture
-#include <universal/com_files.h>    // FS_FOpenFileWrite / FS_Write / FS_FOpenFileRead / FS_Read /
-                                    // FS_FCloseFile / FS_Delete / FS_ListFiles / FS_FreeFileList
+#include <gfx_d3d/r_material.h>
+#include <gfx_d3d/r_gfx.h>
+#include <universal/com_files.h>
 
 #include "kiwi_matwriter.h"
 
@@ -18,20 +13,17 @@
 #include <string>
 #include <vector>
 
-// ── ported / cross-file entry points (each verified against its definition) ─────────
-extern int  Sys_Printf( const char *fmt, ... );          // win_qe3.cpp:118   int Sys_Printf(const char*,...)
+extern int  Sys_Printf( const char *fmt, ... );
 
-// Every offset this file writes is `sizeof`-derived, so only a struct edit can drift the
-// layout.  r_material.h declares these without size asserts of its own.
+// All written offsets are sizeof-derived; these catch layout drift at its source.
 static_assert( sizeof( MaterialInfoRaw )        == 0x28, "MaterialInfoRaw must be 40 bytes" );
 static_assert( sizeof( MaterialRaw )            == 0x40, "MaterialRaw must be 64 bytes" );
 static_assert( sizeof( MaterialTextureDefRaw )  == 0x0C, "MaterialTextureDefRaw must be 12 bytes" );
 static_assert( sizeof( MaterialConstantDefRaw ) == 0x14, "MaterialConstantDefRaw must be 20 bytes" );
 
 // ── THE TEMPLATE SET ───────────────────────────────────────────────────────────────
-// Every candidate is a shipped material that already passes the browser gate and whose
-// non-slot images are all built-ins ('$…'), so the clone substitutes only the slots
-// `info.slots` declares and inherits valid bindings for the rest.
+// Candidates pass the browser gate and use built-ins for non-slot images, so cloning replaces
+// only `info.slots` and inherits valid bindings for everything else.
 namespace
 {
 
@@ -65,7 +57,6 @@ const TemplateRow kTemplates[] =
         KIWI_MAT_SLOT_COLOR },
       { "ac_building_wall01", "ac_building_door01", "ac_ground_base01", nullptr, nullptr }, 4, 1 },
 
-    // ── families that consume a normal and/or specular slot ────────────────────────
     { { "World - lit, normal + specular",              "l_sm_r0c0n0s0",
         "Fully detailed lit surface. Shiny/detailed surfaces: metals, machined trim, wet stone.",
         KIWI_MAT_SLOT_COLOR | KIWI_MAT_SLOT_NORMAL | KIWI_MAT_SLOT_SPECULAR },
@@ -128,7 +119,7 @@ const TemplateRow kTemplates[] =
 
 const int kTemplateCount = (int)( sizeof( kTemplates ) / sizeof( kTemplates[0] ) );
 
-// resolved-once cache, one slot per row (empty string == "asked and answered, none found")
+// One resolved-once slot per row; empty also caches "none found".
 std::string g_resolved[kTemplateCount];
 bool        g_resolvedDone[kTemplateCount] = {};
 
@@ -143,11 +134,10 @@ void SetErr( char *err, size_t errSz, const char *fmt, ... )
     err[errSz - 1] = '\0';
 }
 
-// ── a parsed material blob ─────────────────────────────────────────────────────────
 struct TexEntry
 {
-    std::string   name;         // "colorMap" / "normalMap" / …
-    std::string   image;        // the image name this entry binds
+    std::string   name;
+    std::string   image;
     unsigned char samplerState;
     unsigned char semantic;
 };
@@ -167,7 +157,6 @@ struct ParsedMaterial
     std::vector<ConstEntry> constants;
 };
 
-// Read a NUL-terminated string that must lie entirely inside the blob.
 bool ReadStr( const std::vector<unsigned char> &blob, unsigned int off, std::string *out )
 {
     if ( off == 0 || off >= blob.size() )
@@ -184,7 +173,6 @@ bool ReadStr( const std::vector<unsigned char> &blob, unsigned int off, std::str
     return false;
 }
 
-// Read the whole of materials/<name> into `blob` through the engine filesystem.
 bool ReadMaterialFile( const char *name, std::vector<unsigned char> *blob )
 {
     char qpath[128];
@@ -207,7 +195,7 @@ bool ReadMaterialFile( const char *name, std::vector<unsigned char> *blob )
     return got == (unsigned)size;
 }
 
-// Parse a blob with EXACTLY the offsets Material_LoadRaw dereferences.
+// Mirror Material_LoadRaw's offset dereferences.
 bool ParseMaterial( const std::vector<unsigned char> &blob, ParsedMaterial *out )
 {
     if ( blob.size() < sizeof( MaterialRaw ) )
@@ -260,7 +248,6 @@ bool ParseMaterial( const std::vector<unsigned char> &blob, ParsedMaterial *out 
     return true;
 }
 
-// semantic <-> slot, the one place the mapping is written down.
 unsigned SlotForSemantic( unsigned char semantic )
 {
     if ( semantic == 2 ) return KIWI_MAT_SLOT_COLOR;
@@ -269,8 +256,7 @@ unsigned SlotForSemantic( unsigned char semantic )
     return 0;
 }
 
-// The built-in a slot's texture entry binds when the wizard has no image for it — the same
-// fallbacks Image_AssignDefaultTexture uses for semantics 5 and 8.
+// Match Image_AssignDefaultTexture's semantic-5/8 fallbacks.
 const char *BuiltinForSlot( unsigned slot )
 {
     if ( slot == KIWI_MAT_SLOT_NORMAL )   return "$identitynormalmap";
@@ -278,7 +264,6 @@ const char *BuiltinForSlot( unsigned slot )
     return nullptr;
 }
 
-// Is this parsed material usable as a template for `row`?
 bool TemplateShapeOk( const TemplateRow &row, const ParsedMaterial &m )
 {
     if ( m.techSet != row.info.techSet )
@@ -291,9 +276,8 @@ bool TemplateShapeOk( const TemplateRow &row, const ParsedMaterial &m )
         return false;
     if ( m.constants.empty() )
         return false;
-    // Exactly one colormap; every entry whose slot this family CONSUMES must carry real art;
-    // every other image must be a built-in ('$…'), because the clone replaces only the slots
-    // it owns and must not inherit somebody else's art.
+    // Consumed slots need real art; every other image must be built-in so cloning cannot inherit
+    // unrelated art. Exactly one color map is required.
     int colorMaps = 0;
     for ( size_t i = 0; i < m.textures.size(); ++i )
     {
@@ -308,7 +292,7 @@ bool TemplateShapeOk( const TemplateRow &row, const ParsedMaterial &m )
         if ( slot != 0 && ( row.info.slots & slot ) != 0 )
         {
             if ( builtin )
-                return false;                      // this family is supposed to supply art here
+                return false;
             continue;
         }
         if ( !builtin )
@@ -316,8 +300,7 @@ bool TemplateShapeOk( const TemplateRow &row, const ParsedMaterial &m )
     }
     if ( colorMaps != 1 )
         return false;
-    // the gate fields must already be sane — we copy toolFlags/refStateBits from here and
-    // a template that could not itself appear in the browser is the wrong thing to clone.
+    // Templates must pass the browser gate because toolFlags/refStateBits are copied from them.
     if ( !m.info.usage || !m.info.locale )
         return false;
     return true;
@@ -348,7 +331,7 @@ const char *KiwiMat_ResolveTemplate( int index )
     std::vector<unsigned char> blob;
     ParsedMaterial             m;
 
-    // 1) the named candidates, in order — one FS open each, no directory walk.
+    // Prefer named shipped candidates in order.
     for ( int i = 0; i < 5 && row.candidates[i]; ++i )
     {
         blob.clear();
@@ -361,8 +344,7 @@ const char *KiwiMat_ResolveTemplate( int index )
         return g_resolved[index].c_str();
     }
 
-    // 2) fall back to scanning materials/ for the first file of the right shape.  Only
-    //    reached in a data tree whose art differs from the shipped one, and only once.
+    // Data trees with different art fall back to the first material of the right shape.
     int          count = 0;
     const char **names = FS_ListFiles( "materials", "", FS_LIST_ALL, &count );
     for ( int i = 0; i < count; ++i )
@@ -528,8 +510,7 @@ bool KiwiMat_Write( int templateIndex, const kiwiMatFields_t *f, char *err, size
                 "usage/locale/autoTexScale must all be non-zero or Load_Materials (texwnd.cpp:455) hides the material" );
         return false;
     }
-    // Both "materials/%s" and "images/%s.iwi" are built into 64-byte engine buffers, and
-    // "images/" + ".iwi" is 11 characters.
+    // Leave room for the engine's 64-byte "materials/<name>" and "images/<name>.iwi" paths.
     if ( strlen( f->name ) > 50 || strlen( f->imageName ) > 50
          || strlen( f->normalImageName ) > 50 || strlen( f->specularImageName ) > 50 )
     {
@@ -553,8 +534,7 @@ bool KiwiMat_Write( int templateIndex, const kiwiMatFields_t *f, char *err, size
     }
 
     // ── build the string block ─────────────────────────────────────────────────────
-    // Shipped order: techSetName, materialName, colormap image, texture entry names,
-    // constant names.  Interned so a repeated string costs one copy.
+    // Start with the shipped techset/material/colormap order and intern duplicates.
     std::vector<char>        strings;
     std::vector<std::string> interned;
     std::vector<unsigned>    internedOff;
@@ -563,7 +543,6 @@ bool KiwiMat_Write( int templateIndex, const kiwiMatFields_t *f, char *err, size
     const unsigned constTabOff = texTabOff + 12u * (unsigned)t.textures.size();
     const unsigned stringBase  = constTabOff + 20u * (unsigned)t.constants.size();
 
-    // Append `s` to the string block once and hand back its blob-relative offset.
     auto intern = [&]( const std::string &s ) -> unsigned
     {
         for ( size_t i = 0; i < interned.size(); ++i )
@@ -584,9 +563,8 @@ bool KiwiMat_Write( int templateIndex, const kiwiMatFields_t *f, char *err, size
     const unsigned offName  = intern( newName );
     const unsigned offImage = intern( newImage );
 
-    // The substitution table, one row per slot.  Everything not named here — samplerState,
-    // semantic, the entry NAME, the constant table, the rest of MaterialInfoRaw — is carried
-    // from the template verbatim, never synthesised.
+    // Only slot image bindings are substituted; sampler state, semantics, entry names,
+    // constants, and the rest of MaterialInfoRaw remain template data.
     const TemplateRow &row = kTemplates[templateIndex];
     struct SlotSub { unsigned slot; const char *image; };
     const SlotSub subs[3] =
@@ -610,8 +588,7 @@ bool KiwiMat_Write( int templateIndex, const kiwiMatFields_t *f, char *err, size
                 if ( subs[s].slot == slot )
                     bind = ( subs[s].image && subs[s].image[0] ) ? subs[s].image
                                                                  : BuiltinForSlot( slot );
-            // COLOR is never optional: newImage falls back to f->name, which was already
-            // checked non-empty, so `bind` is non-null on that arm by construction.
+            // COLOR is non-null because newImage falls back to the validated f->name.
         }
         texImgOff[i] = bind ? intern( std::string( bind ) )
                             : intern( t.textures[i].image );   // not our slot: template verbatim
@@ -631,9 +608,8 @@ bool KiwiMat_Write( int templateIndex, const kiwiMatFields_t *f, char *err, size
     raw->info.locale                 = f->locale;
     raw->info.autoTexScaleWidth      = f->autoTexScaleWidth;
     raw->info.autoTexScaleHeight     = f->autoTexScaleHeight;
-    // Keep every non-surface-type bit the template carries (nodraw/nonsolid/… live there
-    // too) and replace only the 0x1F00000 surfaceTypeBits field.  surfaceType < 0 is the
-    // wizard's "(from template)" row: leave the whole field alone.
+    // Preserve non-surface-type flags and replace only 0x1F00000; a negative surfaceType means
+    // "from template" and leaves the field untouched.
     if ( f->surfaceType >= 0 )
         raw->info.surfaceFlags = ( t.info.surfaceFlags & ~0x1F00000 ) | ( f->surfaceType & 0x1F00000 );
     raw->refStateBits[0]             = t.refStateBits[0];
@@ -686,7 +662,7 @@ bool KiwiMat_Write( int templateIndex, const kiwiMatFields_t *f, char *err, size
     return true;
 }
 
-// ── ROUND-TRIP GATE, STAGE 2 + 3 ───────────────────────────────────────────────────
+// ── VERIFICATION ───────────────────────────────────────────────────────────────────
 bool KiwiMat_Verify( const char *name, kiwiMatVerify_t *outInfo, char *err, size_t errSz )
 {
     if ( outInfo )
@@ -697,7 +673,7 @@ bool KiwiMat_Verify( const char *name, kiwiMatVerify_t *outInfo, char *err, size
         return false;
     }
 
-    // ── STAGE 3a: read the header back and apply the Load_Materials gate ───────────
+    // Check current disk bytes before consulting the runtime material cache.
     std::vector<unsigned char> blob;
     ParsedMaterial             m;
     if ( !ReadMaterialFile( name, &blob ) )
@@ -739,7 +715,6 @@ bool KiwiMat_Verify( const char *name, kiwiMatVerify_t *outInfo, char *err, size
         outInfo->contents           = m.info.contents;
         _snprintf( outInfo->techSet, sizeof( outInfo->techSet ), "%s", m.techSet.c_str() );
         outInfo->techSet[sizeof( outInfo->techSet ) - 1] = '\0';
-        // All three slots, from the bytes that were just read back.
         for ( size_t i = 0; i < m.textures.size(); ++i )
         {
             char *dst = nullptr;
@@ -753,13 +728,9 @@ bool KiwiMat_Verify( const char *name, kiwiMatVerify_t *outInfo, char *err, size
         }
     }
 
-    // ── STAGE 2: the REAL engine load ─────────────────────────────────────────────
-    // This one call drags the material reader and the .iwi reader down end to end.  "wc/" is
-    // how the editor registers a world material and is what selects the "wc_" techset prefix.
-    // CAVEAT: registration returns a CACHED Material* when the name is already in
-    // rg.materialHashTable, so an OVERWRITE of a name registered this session re-validates
-    // the cached material.  The header check ABOVE always reads the new bytes off disk.  A
-    // failed load is never cached, so a retry after a fix always re-reads.
+    // "wc/" selects the world-material techset prefix. Existing names resolve from the material
+    // cache, so overwrite verification may be stale; the disk check above remains current.
+    // Failed loads are not cached, so a retry still reloads.
     char full[128];
     _snprintf( full, sizeof( full ), "wc/%s", name );
     full[sizeof( full ) - 1] = '\0';
@@ -778,11 +749,8 @@ bool KiwiMat_Verify( const char *name, kiwiMatVerify_t *outInfo, char *err, size
         return false;
     }
 
-    // What the loader actually bound per slot, and whether each .iwi decoded far enough to
-    // produce a D3D texture (a null texture.basemap means the reader took the file but
-    // produced nothing).  A missing COLORMAP texture is fatal; a normal/specular entry that
-    // failed to decode is only reported, because Image_AssignDefaultTexture has already
-    // substituted a valid fallback and the material renders.
+    // A missing or upload-failed color map is fatal. Normal/specular failures only populate
+    // outInfo because Image_AssignDefaultTexture already installed renderable fallbacks.
     bool sawColorMap = false;
     for ( int i = 0; i < mtl->textureCount; ++i )
     {

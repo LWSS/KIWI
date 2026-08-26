@@ -1,10 +1,7 @@
 #ifndef KISAK_RADIANT
 #error this file is only for Radiant!
 #endif
-// ─────────────────────────────────────────────────────────────────────────────
-// kiwi_cmdoptions.cpp — RADIANT_UX_DESIGN §62.3.  See kiwi_cmdoptions.h for the
-// whole design note and the Plasticity citations.
-// ─────────────────────────────────────────────────────────────────────────────
+// Floating option panel for live editor commands; see kiwi_cmdoptions.h.
 
 #include "stdafx.h"
 #include "qe3.h"
@@ -19,24 +16,17 @@
 #include <math.h>
 #include <stdio.h>
 
-// ── shell bridge (verified against its definition) ──────────────────────────
 extern bool ImGuiShell_CameraImageRect( float *x, float *y, float *w, float *h );  // imgui_shell.cpp
 extern int  g_nUpdateBits;                                                         // engine_stubs.cpp:773
 
 namespace
 {
-    // Geometry.  Deliberately narrow: this is a strip of controls beside a live
-    // gesture, not a properties editor, and every pixel it takes is a pixel of the
-    // model the user is looking at.  Plasticity's own dialog is `w-96` = 24rem =
-    // 384 px (Dialog.tsx:32); 250 is the same idea at KIWI's smaller font.
+    // Keep the panel narrow; 250 px fits compact controls without obscuring the model.
     const float KOPT_WIDTH   = 250.0f;
     const float KOPT_INSET   = 12.0f;    // from the camera image's left edge
     const float KOPT_TOPFRAC = 0.16f;    // down from the image's top
 
-    // A segmented button group.  ImGui has no such widget, so it is a row of
-    // Buttons with the selected one pushed to the "active" colour — which is what
-    // Plasticity's hidden-radio + styled-label idiom renders as
-    // (FilletDialog.tsx:78-81).
+    // ImGui has no segmented widget; active-styled buttons emulate one.
     bool EnumRow( const kiwiOption_t &o, int cur, int *outValue, bool enabled )
     {
         bool changed = false;
@@ -56,9 +46,7 @@ namespace
                 ImGui::PushStyleColor( ImGuiCol_ButtonHovered, st.Colors[ImGuiCol_ButtonActive] );
             }
             const char *label = ( o.choices && o.choices[i] ) ? o.choices[i] : "?";
-            // The ID is the LABEL — every row's labels are distinct within one
-            // command, and pushing the option index as an ID scope keeps two
-            // options that happen to share a label ("On"/"Off") apart.
+            // Labels supply button IDs; PushID(option index) isolates identical labels across rows.
             if ( ImGui::Button( label, ImVec2( bw, 0.0f ) ) && enabled && !on )
             {
                 *outValue = i;
@@ -70,16 +58,8 @@ namespace
         return changed;
     }
 
-    // `-  N  +`.  The buttons are square-ish and the value sits between them, which
-    // is the shape the directive asked for in as many words ("density stepper").
-    // ── KIWI-UX (ROUND AN, ITEM 3): SLIDER, with the stepper kept at its ends ──
-    // USER DIRECTIVE, verbatim: "make the density a slider so it's easier to
-    // adjust.  Make the topend something like 128, but allow typing in the field
-    // as well for any value."  The slider is DRAG-ONLY on purpose — this panel
-    // holds no text entry (it would steal Enter/Esc/Tab from the command,
-    // §62.3); typing goes through the command's own Tab numeric field, which is
-    // the same state by construction (OptionChanged routes into
-    // NumericFieldChanged).  The -/+ steppers stay for single-step nudges.
+    // Drag-only slider preserves command keys; typed values use the shared Tab field,
+    // while the steppers provide single-step nudges.
     bool IntRow( int cur, int lo, int hi, int *outValue, bool enabled )
     {
         bool changed = false;
@@ -128,17 +108,8 @@ void KiwiCmdOpts_Draw()
                              ImGuiCond_Always );
     ImGui::SetNextWindowSize( ImVec2( KOPT_WIDTH, 0.0f ), ImGuiCond_Always );
 
-    // ── THE FLAGS, AND WHY EACH ONE IS HERE ─────────────────────────────────
-    // NoNavFocus + NoFocusOnAppearing  — Plasticity's `tabIndex={-1}`
-    //     (Dialog.tsx:45-47): the panel must never take the keyboard from the
-    //     viewport, or Enter/Esc/Tab would stop reaching the command.
-    // NoSavedSettings + NoDocking + NoCollapse + NoResize + AlwaysAutoResize —
-    //     it is a transient, not a window the user owns.  The transient flag set
-    //     is the one kiwi_palette.cpp:229-231 and kiwi_addmenu.cpp:241-243 use.
-    // NO `p_open` — there is no ✕: the panel leaves when the gesture does.
-    // NO ImGuiShell_CloseOnFocusLoss — that helper is for pop-outs the user
-    //     opened; closing this on focus loss would hide a live gesture's controls
-    //     the moment the user clicked in the viewport, which is every gesture.
+    // Keep this transient panel out of keyboard navigation so command keys reach the
+    // gesture. The gesture owns its state and lifetime, including focus changes.
     const ImGuiWindowFlags flags =
           ImGuiWindowFlags_NoNavFocus
         | ImGuiWindowFlags_NoFocusOnAppearing
@@ -148,8 +119,7 @@ void KiwiCmdOpts_Draw()
         | ImGuiWindowFlags_NoResize
         | ImGuiWindowFlags_AlwaysAutoResize;
 
-    // "###CmdOptions" keeps ONE window identity while the caption changes with the
-    // command — the same idiom imgui_panel_patchdensity.cpp:47-48 uses.
+    // A stable ### suffix preserves window identity while the command caption changes.
     char title[96];
     _snprintf( title, sizeof( title ), "%s###CmdOptions", cmd->Name() );
     title[sizeof( title ) - 1] = '\0';
@@ -164,9 +134,7 @@ void KiwiCmdOpts_Draw()
     {
         const kiwiOption_t &o = opts[i];
 
-        // The `enabledBy` gate — Plasticity's `class="disabled"` row
-        // (FilletDialog.tsx:73).  A disabled row is DRAWN, not hidden: a control
-        // that vanishes teaches nothing about why it is unavailable.
+        // Draw gated options disabled instead of hiding why they are unavailable.
         bool enabled = true;
         if ( o.enabledBy >= 0 && o.enabledBy < count )
             enabled = ( cmd->OptionValue( o.enabledBy ) != 0 );
@@ -204,20 +172,9 @@ void KiwiCmdOpts_Draw()
 
         case KOPT_NUMFIELD:
         {
-            // ── THE ONE PLACE THIS PANEL TOUCHES THE NUMERIC LAYER ──────────
-            // Read through NumericFieldValue and write through
-            // NumericFieldChanged, so the slider and the Tab-and-type path are
-            // the SAME state — there is no second store.  The write is in WORLD
-            // units (Units_FromDisplay), which is that handler's stated contract
-            // (kiwi_command.h: "`world` is already in RAW WORLD UNITS … never
-            // re-convert it"), and the read is converted back for display for the
-            // same reason.
-            //
-            // KiwiNum_ClearField after the write is load-bearing: if the user had
-            // typed into this field, the typed text would otherwise still be
-            // showing in the HUD bubble and would win the next time the command
-            // re-read it.  Dragging the slider is a statement that the typed entry
-            // is finished with.
+            // Slider and Tab entry share the command's numeric-field state. Writes follow
+            // NumericFieldChanged's Units_FromDisplay contract; non-length handlers compensate.
+            // Clear typed text first so it cannot override the slider value on the next read.
             float world = 0.0f;
             if ( !cmd->NumericFieldValue( o.field, &world ) )
                 break;
@@ -247,16 +204,8 @@ void KiwiCmdOpts_Draw()
         ImGui::Spacing();
     }
 
-    // ── THE FOOTER, and it is Plasticity's (Dialog.tsx:44-47) ───────────────
-    // Cancel then OK, both calling exactly what the keyboard calls — KiwiCmd_Cancel
-    // is Esc's rung and KiwiCmd_Confirm IS Enter's (kiwi_command.cpp:1351 feeds
-    // VK_RETURN), which is also what the RMB release calls.  So "still allows
-    // enter/rightclick completion" is not a special case here: the button is the
-    // same code path, and nothing about Enter or RMB changed.
-    //
-    // BOTH are latched and acted on AFTER ImGui::End(): confirming ENDS the
-    // gesture, and running that inside the window's Begin/End would tear down the
-    // command whose Name() this window's ID string came from, mid-frame.
+    // Buttons use the shared cancel/confirm ladders. Latch clicks until after End():
+    // either action can destroy the active command backing this window.
     ImGui::Separator();
     bool doCancel = false, doConfirm = false;
     {

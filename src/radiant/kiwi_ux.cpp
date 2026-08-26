@@ -1,17 +1,14 @@
 #ifndef KISAK_RADIANT
 #error this file is only for Radiant!
 #endif
-// ─────────────────────────────────────────────────────────────────────────────
-// kiwi_ux.cpp — RADIANT_UX_DESIGN Phase-1b toggle store + settings UI.
-// See kiwi_ux.h for what the master toggle covers and what it deliberately does not.
-// ─────────────────────────────────────────────────────────────────────────────
+// Persisted UX toggles and their settings UI.
 
 #include "stdafx.h"
 #include "kiwi_ux.h"
 #include "kiwi_camera.h"
 #include "kiwi_fmt.h"
 #include "kiwi_gizmo.h"
-#include "kiwi_grid.h"            // ROUND AJ, ITEM 5 — the grid-snap master switch
+#include "kiwi_grid.h"            // Grid-snap preference API.
 #include "kiwi_hints.h"
 #include "kiwi_keymap.h"
 #include "kiwi_plastbridge.h"
@@ -19,10 +16,7 @@
 #include "kiwi_units.h"
 #include "kiwi_selection.h"
 #include "kiwi_viewcube.h"
-#include "kiwi_windows.h"         // KIWI-UX (CLEANUP, C-73): KiwiWindows_SyncViewMenu,
-                                  // which KiwiUX_DrawSettings used to re-declare at
-                                  // BLOCK scope.  No include cycle: kiwi_windows.h
-                                  // includes nothing at all.
+#include "kiwi_windows.h"         // Native View-menu checkbox synchronization.
 #include "radiant_registry.h"
 
 #include <imgui/imgui.h>
@@ -71,7 +65,7 @@ void KiwiUX_SetShowAxes( bool on )     { Set( s_showAxes, on ); g_nUpdateBits |=
 bool KiwiUX_ShowHover()                { return Get( s_showHover ); }
 void KiwiUX_SetShowHover( bool on )    { Set( s_showHover, on ); g_nUpdateBits |= 1; }
 
-// ─── settings UI ─────────────────────────────────────────────────────────────
+// Settings UI.
 void KiwiUX_DrawSettings()
 {
     ImGui::SeparatorText( "KIWI UX" );
@@ -89,10 +83,7 @@ void KiwiUX_DrawSettings()
                            "RMB CLICK confirms a live command, or opens the classic\n"
                            "context menu when nothing is running." );
 
-    // KIWI-UX (shakeout C): these two are ALSO native View-menu check items now,
-    // so a flip here has to re-stamp the menu — otherwise the two UIs disagree
-    // about the same flag, which is the §9 ✕-box problem in a different costume.
-    // (Declared by kiwi_windows.h, included above — CLEANUP, C-73.)
+    // Persist first, then restamp the matching native View-menu check item.
     bool grid = KiwiUX_ShowGrid();
     if ( ImGui::Checkbox( "Ground grid", &grid ) )
     {
@@ -112,9 +103,7 @@ void KiwiUX_DrawSettings()
         KiwiUX_SetShowAxes( axes );
         KiwiWindows_SyncViewMenu();
     }
-    // ROUND AJ, ITEM 5: the same master switch the viewport's grid pill carries.
-    // Both call KiwiGrid_SetSnapEnabled, so there is one preference and no second
-    // store to drift (kiwi_grid.h).
+    // Shared with the viewport grid pill; both controls use one persisted preference.
     bool gridSnap = KiwiGrid_SnapEnabled();
     if ( ImGui::Checkbox( "Snap to grid", &gridSnap ) )
         KiwiGrid_SetSnapEnabled( gridSnap );
@@ -127,8 +116,7 @@ void KiwiUX_DrawSettings()
     if ( ImGui::Checkbox( "Hover highlight", &hover ) )
         KiwiUX_SetShowHover( hover );
 
-    // Phase 2 §6: the snap marker + label.  Snapping itself is always on; CTRL is the
-    // temporary off switch (spec §6, deliberately inverted vs other apps).
+    // Marker visibility does not change each command's Ctrl-controlled snap engagement.
     bool snapMarkers = KiwiSnap_ShowMarkers();
     if ( ImGui::Checkbox( "Snap marker + label", &snapMarkers ) )
     {
@@ -139,9 +127,6 @@ void KiwiUX_DrawSettings()
         ImGui::SetTooltip( "Shown while a modal command is running.\n"
                            "Hold CTRL to suppress snapping itself." );
 
-    // Shakeout A: the three new viewport overlays + the fly-speed multiplier.
-    // Each owns its own state in its own file (same shape as the snap toggle
-    // above), so nothing is added to kiwi_ux.h for them.
     bool gizmo = KiwiGizmo_Show();
     if ( ImGui::Checkbox( "Transform gizmos", &gizmo ) )
         KiwiGizmo_SetShow( gizmo );
@@ -176,8 +161,7 @@ void KiwiUX_DrawSettings()
                            "Every key shown is read LIVE from the command table,\n"
                            "so remaps and keymap-profile switches show at once." );
 
-    // USER DIRECTIVE: a proper slider (log scale so 1x..50x are both reachable),
-    // default 10x.
+    // A logarithmic scale keeps both 0.1x and 50x usable.
     float fly = KiwiCam_FlySpeedScale();
     ImGui::SetNextItemWidth( 220.0f );
     if ( ImGui::SliderFloat( "Fly speed x", &fly, 0.1f, 50.0f, "%.1fx",
@@ -188,12 +172,11 @@ void KiwiUX_DrawSettings()
                            "which the ARROW-KEY fly reads as units per second\n"
                            "(stock 350).  Shift boosts while RMB is held." );
 
-    // Phase 2 §11: the keymap profile.  Full remap table in kiwi_keymap.h.
     KiwiKeymap_DrawSettings();
 
     KiwiPlastBridge_DrawSettings();
 
-    // §17 units layer.  Both fields are DISPLAY values; nothing here touches map data.
+    // Display-unit preferences only; neither mutates map geometry.
     float spacing = KiwiUnits_GridSpacingInches();
     ImGui::SetNextItemWidth( 110.0f );
     if ( ImGui::InputFloat( "Grid spacing (in)", &spacing, 0.0f, 0.0f, KIWI_FMT_FLOAT,

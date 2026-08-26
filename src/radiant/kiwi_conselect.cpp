@@ -1,15 +1,7 @@
 #ifndef KISAK_RADIANT
 #error this file is only for Radiant!
 #endif
-// ─────────────────────────────────────────────────────────────────────────────
-// kiwi_conselect.cpp — SHAKEOUT F implementation.  See kiwi_conselect.h for the
-// parallel-selection ruling, the click arbitration rule and the undo shape.
-//
-// NEW code over the KIWI layers.  It touches NO ported state: the construction
-// store is KIWI's own (kiwi_construct.cpp), the chain walker is KIWI's own
-// (kiwi_region.cpp) and the only ported things read here are the two selection
-// sentinels — read, never written — to answer "is anything brush-side selected".
-// ─────────────────────────────────────────────────────────────────────────────
+// Construction selection is KIWI-owned; legacy selection sentinels are read only.
 
 #include "stdafx.h"
 #include "qe3.h"
@@ -24,27 +16,17 @@
 #include <math.h>
 #include <vector>
 
-// ── ported entry points (each verified against its definition) ──────────────
-extern int  Sys_Printf( const char *fmt, ... );   // win_qe3.cpp:118  int Sys_Printf(const char*,...)
-extern int  g_nUpdateBits;                       // engine_stubs.cpp:773  int g_nUpdateBits = 0  (0x25D5A74)
-// `selected_brushes` is the DISPLAY-list sentinel: declared in qe3.h:1054
-// (`extern selbrush_t selected_brushes;  // 0x23f1864`), defined in
-// engine_stubs.cpp:697 (`selbrush_t selected_brushes{};`).  READ ONLY here — the
-// only question asked of it is "is anything brush-side selected".
+extern int  Sys_Printf( const char *fmt, ... );   // win_qe3.cpp:118
+extern int  g_nUpdateBits;                       // 0x25D5A74
+// 0x23F1864: selected_brushes is the display-list sentinel; read only here.
 extern bool Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId );
-                                                 // mainfrm.cpp:1246  bool Radiant_RegisterCommand(const char*,byte,byte,int)
+                                                 // mainfrm.cpp:1246
 
 namespace
 {
     std::vector<kconSelItem_t> s_sel;
 
-    // ── the MOVE gesture's baseline (kiwi_conselect.h UNDO) ─────────────────
-    // SHAKEOUT H: the baseline is now the object's WORLD POINTS as well as its
-    // plane origin.  A translate used to move only `plane.origin` and leave the
-    // plane-space points alone, which was the only spelling that could not lose
-    // coplanarity back when points WERE plane-space.  With world points that
-    // shortcut moves nothing at all — the points would stay exactly where they
-    // were — so the translate is now what it says: every point plus the origin.
+    // Move baselines store world-space points plus the object's plane origin.
     struct moveBase_t
     {
         int                object;
@@ -97,14 +79,7 @@ namespace
         else                  Add   ( it );
     }
 
-    // Nothing at all is selected brush-side.  BOTH halves are asked because they
-    // can legitimately disagree: an EDGE-only selection lives in KiwiSel() with an
-    // EMPTY legacy list since shakeout D (kiwi_selection.h Sel_NoteLegacyDeselect
-    // explains why).
-    // KIWI-UX (CLEANUP, A-9): the one caller is KiwiConSel_CanMove.  G's
-    // construction arm must not run while ANY brush-side item is selected —
-    // including the fine kinds (edges, faces) that never reach selected_brushes —
-    // so Move needs both halves.  Delete uses the sentinel alone — see OwnsDelete.
+    // Fine typed selections need not populate selected_brushes, so Move checks both.
     bool BrushSelectionEmpty()
     {
         if ( selected_brushes.next != &selected_brushes )
@@ -112,70 +87,25 @@ namespace
         return KiwiSel().items.empty();
     }
 
-    // ═════════════════════════════════════════════════════════════════════════
-    //  KIWI-UX (ROUND AA, ITEM 7) — THE TWO EXCLUSIVE MODES PICK NO LINES
-    // ═════════════════════════════════════════════════════════════════════════
-    // USER REPORT, verbatim: "Make pick mode 4 a brush-only pick mode.  Also for
-    // some reason lines are clickable in mode 3.  It should only be faces and
-    // construction faces."
-    //
-    // Shakeout F's answer to "lines aren't selectable with ANY mode" was to make
-    // every mode pick them (KindForMode below folded Face and Object into the
-    // whole-object arm, and its comment argued that answering "…except mode 3"
-    // would be answering half the report).  That was right at the time and is
-    // wrong now: the report has been made from the other side.  The modes are a
-    // FILTER, and a filter that never excludes anything is not one.
-    //
-    // The rule, and it is exactly two lines of it:
-    //   mode 3 (mask == SEL_MASK_FACE  ) — faces.  Brush faces and construction
-    //           REGION faces, which ARE faces (kiwi_region.cpp owns them and
-    //           ClickSelect picks them on their own arm).  A construction LINE is
-    //           not a face and never will be — that half of shakeout F's sentence
-    //           was always true, it was just being used to argue the opposite.
-    //   mode 4 (mask == SEL_MASK_OBJECT) — brush / entity objects.  Nothing else,
-    //           which is the whole content of "brush-only".  Region faces go too.
-    //
-    // EXACT EQUALITY, not a bit test.  Mode 5 (Everything) has the OBJECT and FACE
-    // bits set as well, and mode 5 must keep picking everything — it is the mode
-    // whose entire job is not filtering.  A bit test would silence construction in
-    // mode 5 as collateral, which is why this cannot be folded into KindForMode's
-    // priority chain (that chain is a "which granularity" question and this is a
-    // "whether at all" question; two questions, two predicates).
-    //
-    // AND THIS RETIRES THE 14-PIXEL LINE-BEATS-FACE RULE IN THOSE MODES BY
-    // CONSTRUCTION.  KCON_CLICK_PIXELS (kiwi_construct.h:233) is only reachable
-    // through PickAt, and ClickSelect's arbitration (`brushPointish` — an area hit
-    // always loses to a construction line, kiwi_boxselect.cpp) only runs when
-    // PickAt answered.  With PickAt refusing outright in modes 3 and 4, a line can
-    // no longer beat the face it is drawn on top of there, and the rule keeps
-    // working unchanged everywhere it was wanted.  No constant changed.
+    // Face and Object modes exclude construction lines. Exact equality preserves
+    // Everything mode, whose combined mask must still admit them.
     bool ModeAllowsConstructionLines()
     {
         const sel_mask_t mask = KiwiSel_GetModeMask();
         return mask != SEL_MASK_FACE && mask != SEL_MASK_OBJECT;
     }
 
-    // The granularity the CURRENT selection mode asks for.  Point mode picks
-    // anchors, Edge mode picks segments, and everything else picks WHOLE OBJECTS.
-    // (Face and Object still resolve to KCONSEL_OBJECT here — they simply never
-    // reach this function any more, because ModeAllowsConstructionLines gates the
-    // two entry points above it.  Left as-is so a future mask with the FACE bit
-    // set ALONGSIDE others still resolves sanely.)
+    // Match kiwi_boxselect.cpp's mask-priority order.
     kconSelKind_t KindForMode()
     {
         const sel_mask_t mask = KiwiSel_GetModeMask();
-        // Tested in the same priority order kiwi_boxselect.cpp's RectKind uses, so
-        // a mask with several bits resolves the same way in both files.
         if ( mask & SEL_MASK_OBJECT ) return KCONSEL_OBJECT;
         if ( mask & SEL_MASK_FACE )   return KCONSEL_OBJECT;
         if ( mask & SEL_MASK_EDGE )   return KCONSEL_SEGMENT;
         return KCONSEL_POINT;
     }
 
-    // Liang-Barsky, the same test kiwi_boxselect.cpp's marquee uses on brush
-    // windings.  Duplicated rather than exported: it is twenty lines of pure
-    // geometry in that file's anonymous namespace, and giving §12's private helper
-    // a public header would be a wider change than the copy.
+    // Liang-Barsky, matching kiwi_boxselect.cpp without widening its private API.
     bool SegHitsRect( float rx0, float ry0, float rx1, float ry1,
                       float ax, float ay, float bx, float by )
     {
@@ -237,7 +167,7 @@ namespace
     }
 }
 
-// ─── the list ────────────────────────────────────────────────────────────────
+// Selection list
 int KiwiConSel_Count()
 {
     return (int)s_sel.size();
@@ -258,16 +188,7 @@ void KiwiConSel_Clear()
     g_nUpdateBits |= 1;
 }
 
-// ── KIWI-UX (ROUND AR, ITEM 1): SELECT AN EXACT SET OF WHOLE OBJECTS ────────
-// The paste's "and now these are selected" step (kiwi_conclip.h).  It REPLACES —
-// a paste's selection is the pasted set and nothing else, which is what the brush
-// clipboard does too (Map_ImportBuffer opens with Select_Deselect(1), map.cpp
-// 0x487C90) and what makes the Move that follows unambiguous.
-//
-// Whole objects only, at KCONSEL_OBJECT granularity, regardless of the current
-// selection mode: a freshly pasted object has no meaningful point or segment the
-// user has aimed at, and G's construction arm is whole-object anyway
-// (kiwi_transform.cpp's arm, v1 note).
+// Paste replaces selection with whole objects, matching Map_ImportBuffer at 0x487C90.
 void KiwiConSel_SelectObjects( const int *objects, int count )
 {
     s_sel.clear();
@@ -320,22 +241,20 @@ bool KiwiConSel_SegmentSelected( int object, int segIndex )
 
 void KiwiConSel_NoteStoreReplaced()
 {
-    // A move in flight owns the store; it re-stamps its own state on commit or
-    // cancel, so dropping the selection under it would leave the gesture pointing
-    // at objects it can no longer name.
+    // A live move retains index selection while its own cancel restores the store.
     if ( s_moveOpen )
         return;
     KiwiConSel_Clear();
 }
 
-// ─── picking ─────────────────────────────────────────────────────────────────
+// Picking
 bool KiwiConSel_PickAt( int imgX, int imgY, kconSelItem_t *out, float *outPixels )
 {
     if ( !out )
         return false;
     if ( !KiwiCon_ShowConstruction() )
         return false;                           // hidden geometry is not clickable
-    if ( !ModeAllowsConstructionLines() )       // ROUND AA, ITEM 7 — modes 3 and 4
+    if ( !ModeAllowsConstructionLines() )       // Face/Object modes exclude lines.
         return false;
 
     const kconSelKind_t want = KindForMode();
@@ -350,7 +269,7 @@ bool KiwiConSel_PickAt( int imgX, int imgY, kconSelItem_t *out, float *outPixels
     for ( int i = 0; i < count; ++i )
     {
         const kconObject_t *o = KiwiCon_At( i );
-        if ( !o || o->hidden )        // ROUND U — a hidden object is not clickable
+        if ( !o || o->hidden )        // Hidden objects are inert.
             continue;
 
         if ( want == KCONSEL_POINT )
@@ -384,14 +303,8 @@ bool KiwiConSel_PickAt( int imgX, int imgY, kconSelItem_t *out, float *outPixels
                 break;
             if ( !Pick_WorldToImage( wa, &ax, &ay ) || !Pick_WorldToImage( wb, &bx, &by ) )
                 continue;                       // an end behind the eye — skip whole
-            // KIWI-UX (CLEANUP, A-12): one spelling, kiwi_pick.h.
             const float d = Pick_SegDist2D( curX, curY, ax, ay, bx, by, 0 );
-            // KIWI-UX (ROUND R): the CLICK box is KCON_CLICK_PIXELS (14), NOT the
-            // hover/snap radius KCON_LINE_PIXELS (10).  "Lines are still hard to
-            // click" is a report about this one test, and only this one — see
-            // kiwi_construct.h for why the two radii separate and for the
-            // arbitration re-check (a construction line beats a brush FACE at any
-            // distance, so a wider box cannot lose to the face it is drawn on).
+            // Clicks use 14 px for access; continuous hover/snap stays 10 px to limit noise.
             if ( d > KCON_CLICK_PIXELS )
                 continue;
             if ( have && d >= bestDist )
@@ -440,10 +353,7 @@ void KiwiConSel_ApplyRect( float x0, float y0, float x1, float y1,
 {
     if ( !KiwiCon_ShowConstruction() )
         return;
-    // ROUND AA, ITEM 7 — modes 3 and 4 do not marquee construction either.  The
-    // RETURN IS BEFORE THE CLEAR on purpose: a face- or object-mode marquee is a
-    // statement about brushes and has no opinion about the construction selection,
-    // so it must not silently drop one the user made in another mode.
+    // Filter before clearing: excluded modes do not alter construction selection.
     if ( !ModeAllowsConstructionLines() )
         return;
     if ( !shift && !ctrl )
@@ -455,7 +365,7 @@ void KiwiConSel_ApplyRect( float x0, float y0, float x1, float y1,
     for ( int i = 0; i < count; ++i )
     {
         const kconObject_t *o = KiwiCon_At( i );
-        if ( !o || o->hidden )        // ROUND U — a hidden object is not marquee-able
+        if ( !o || o->hidden )        // Hidden objects are inert.
             continue;
 
         if ( want == KCONSEL_POINT )
@@ -532,7 +442,7 @@ void KiwiConSel_ApplyRect( float x0, float y0, float x1, float y1,
     g_nUpdateBits |= 1;
 }
 
-// ─── JOIN ────────────────────────────────────────────────────────────────────
+// Join
 bool KiwiConSel_CanJoin()
 {
     std::vector<int> objs;
@@ -576,28 +486,13 @@ bool KiwiConSel_Join()
         return false;
     }
 
-    // ── SHAKEOUT H: JOIN NO LONGER REQUIRES ONE PLANE ───────────────────────
-    // It used to refuse a selection whose objects were not coplanar, because the
-    // merged polyline had to be written in ONE plane's basis and there was no
-    // honest choice of basis for a non-planar chain (kiwi_construct.h ruling 3 as
-    // it stood).  With a world-space store that constraint is gone: a 3D chain is
-    // a perfectly legal polyline, it just may not become a REGION — and whether it
-    // does is the region layer's question to answer, from the merged points, on the
-    // next frame.  Refusing here would have been this file deciding it on stale
-    // information.
-    //
-    // The old test survives where it belongs, in kiwi_region.cpp's PASS 2, which
-    // fits a plane through the chain and rejects it if the points do not lie on
-    // one.  So "anything that joins can become a region" becomes the honest "a join
-    // that IS planar becomes a region", which is what the user can see on screen.
+    // The world-space store permits 3D joins; region fitting later rejects
+    // non-planar loops.
     std::vector<kchainStep_t> steps;
     bool closed = false;
     if ( !KiwiRegion_ChainWalk( &objs[0], (int)objs.size(), &steps, &closed )
       || steps.size() < 2
-      // EVERY selected object must be IN the chain.  The walker legitimately DROPS
-      // a member whose own two ends coincide (it closes on itself and is not a
-      // chain link — kiwi_region.h), and a walker that returned a chain of the
-      // others would leave this function deleting an object it never merged.
+      // Never delete a selected object that the walker omitted from the chain.
       || steps.size() != objs.size() )
     {
         Sys_Printf( "Join: the selected lines do not form a single chain "
@@ -606,9 +501,7 @@ bool KiwiConSel_Join()
         return false;
     }
 
-    // Concatenate the walk into one WORLD polyline (shakeout H: no projection, no
-    // basis, nothing to lose).  RAW first — the weld cannot be chosen until the
-    // whole point sequence exists (see the note under the loop).
+    // Gather a raw world-space polyline before choosing its finest-edge weld.
     std::vector<float> raw;
     for ( size_t s = 0; s < steps.size(); ++s )
     {
@@ -627,50 +520,8 @@ bool KiwiConSel_Join()
         }
     }
 
-    // ═════════════════════════════════════════════════════════════════════════
-    //  KIWI-UX (ROUND AR, ITEM 2) — JOIN MUST WELD AT THE TOLERANCE THAT
-    //                               AUTHORISED THE JOIN
-    // ═════════════════════════════════════════════════════════════════════════
-    // USER REPORT, verbatim: "why does this bool diff fail? … The only different
-    // is I joined the polyline on the 2nd one.  When i bool it into the pyramid it
-    // fails!"
-    //
-    // THE DEFECT.  The chain that authorised this join was found by
-    // KiwiRegion_ChainWalk, which welds two ends into ONE NODE at
-    // `KiwiRegion_WeldDist()` — grid-scaled since round AF, `clamp( grid * 0.25,
-    // 0.5, 16 )` (kiwi_region.cpp, NodeFor / the two call sites either side of it).
-    // The concatenation below, and the closing-vertex drop under it, both used the
-    // bare KREG_JOIN_DIST floor of 0.5 instead.  At any grid of 4 or coarser —
-    // i.e. every grid anyone maps at — the walker therefore declares two ends
-    // IDENTICAL and this function then stores BOTH of them:
-    //
-    //   * a STUB EDGE at every junction, up to 16 world units long, and
-    //   * a DUPLICATE CLOSING VERTEX, because the ring's last point is within the
-    //     weld of its first but further than 0.5 from it.
-    //
-    // Neither is a shape the user drew, and both are exactly the input §23's prism
-    // builder turns into two nearly-identical side planes (§19 V5 "duplicate
-    // plane") and the boolean then turns into a near-tangent cut plane.  The
-    // UNJOINED outline never acquires them: nothing bakes the walker's weld into
-    // the store, so the loop the region layer stitches is cleaned by AcceptLoop and
-    // that is the end of it.  **That is a join changing geometry, which it must
-    // never do.**
-    //
-    // THE RULE IS NOW THE RING'S OWN, verbatim (kiwi_region.h A WELD MAY NEVER
-    // EXCEED THE GEOMETRY IT IS WELDING): the weld is the grid-scaled distance
-    // BOUNDED by the finest real edge in the chain, via KiwiRegion_WeldFor, which
-    // is bit-for-bit what AcceptLoop's DedupLoop uses on the same points.  So the
-    // stored polyline is the ring the region layer would have derived anyway.
-    //
-    // WHY THE STORE'S OWN NormalizePoints IS *NOT* CHANGED WITH IT.  It runs on
-    // every KiwiCon_Add, including a polyline the user drew point by point, and its
-    // hard 0.5 is right there: it must never eat a point the user placed.  The
-    // difference is that here the walker has ALREADY RULED that these two points
-    // are one, on the record, at that tolerance.
-    // KIWI-UX (CLEANUP, A-11): the scan was written out here, in
-    // kiwi_region.cpp's FinestLoopEdge and in kiwi_arrange.cpp — and this copy
-    // already cited kiwi_region.h as the authority for it.  Same walk, same
-    // KREG_JOIN_DIST floor, same open-or-closed wrap; only the stride differed.
+    // Bound endpoint collapse by the finest real edge, matching region sanitization.
+    // The store's 0.5 normalizer stays conservative for user-placed points.
     const float finest = KiwiRegion_FinestEdge(
         raw.empty() ? 0 : &raw[0], (int)( raw.size() / 3 ), 3, closed );
     const float weld = KiwiRegion_WeldFor( finest );
@@ -695,10 +546,7 @@ bool KiwiConSel_Join()
         }
     }
 
-    // A CLOSED chain ends where it began; the store's convention is that a closed
-    // polyline does NOT repeat its first point (the wrap is implicit), so drop it.
-    // ROUND AR, ITEM 2: at the SAME weld, for the same reason — this is the
-    // duplicate closing vertex, and it is the one the extruder trips over.
+    // Closed chains store an implicit wrap; drop the repeated endpoint at the same weld.
     if ( closed && (int)( pts.size() / 3 ) >= 2 )
     {
         const int n = (int)( pts.size() / 3 );
@@ -741,11 +589,7 @@ bool KiwiConSel_Join()
         s_sel.push_back( it );
     }
 
-    // KIWI-UX (ROUND R): report the count the STORE ended up with, not the count
-    // this function assembled.  KiwiCon_Add normalises the point list (the seam
-    // rule, kiwi_construct.h), so the two can legitimately differ — and the console
-    // line that said "5 points" for a shape the store held as 4 is precisely what
-    // sent this round's investigation to the wrong place.
+    // Report the normalized store count, which may differ after seam removal.
     const kconObject_t *stored = ( added >= 0 ) ? KiwiCon_At( added ) : 0;
     Sys_Printf( "Join: %i lines -> one %s polyline (%i points).\n",
                 (int)objs.size(), closed ? "CLOSED" : "open",
@@ -754,16 +598,10 @@ bool KiwiConSel_Join()
     return true;
 }
 
-// ─── DELETE ──────────────────────────────────────────────────────────────────
+// Delete
 namespace
 {
-    // ── ROUND U: how many BRUSH-side items a construction delete will skip ───
-    // Only the FINE kinds are counted, because they are exactly the ones the
-    // ported Delete Selection cannot act on: since shakeout D neither a face nor
-    // an edge nor a vertex puts its owner on `selected_brushes`
-    // (kiwi_selection.cpp pass 1), so Cmd_OnSelectionDelete — which walks that
-    // sentinel — is a NO-OP for them.  A whole-object selection is a different
-    // matter and is deliberately NOT counted here: see OwnsDelete.
+    // Count fine brush items that construction Delete leaves selected.
     int BrushFineItemCount()
     {
         int n = 0;
@@ -775,31 +613,8 @@ namespace
     }
 }
 
-// ── KIWI-UX (ROUND U): THE MIXED-SELECTION DELETE ───────────────────────────
-// USER DIRECTIVE, verbatim: "I also want you to fix the box select so I can press
-// 2, box, and delete all lines (without trying to delete edges from a brush cuz
-// they are un-deletable this way)".
-//
-// WHAT WENT WRONG, exactly.  A mode-2 marquee runs BOTH collectors (kiwi_boxselect
-// KiwiBox_End: Collect for brushes, then KiwiConSel_ApplyRect), so a box drawn over
-// scaffolding that overlaps a wall yields construction items AND brush SEL_EDGE
-// items.  Shakeout F's gate was `construction selected AND NOTHING brush-side`,
-// with "nothing brush-side" reading BOTH the legacy sentinel and KiwiSel().  The
-// edge items made the second half false, the funnel arm declined, and the key fell
-// through to the ported 33003 — which walks `selected_brushes`, finds it empty
-// (fine kinds do not promote since shakeout D) and does NOTHING.  Net effect for
-// the user: Delete silently did nothing at all.
-//
-// THE WIDENED RULE, and why it is still safe:
-//   * construction items selected AND `selected_brushes` EMPTY   -> ours.
-//     Any face / edge / vertex items in the selection are SKIPPED and counted, and
-//     skipping them costs nothing because the classic delete could not have acted
-//     on them either.
-//   * `selected_brushes` NON-EMPTY (whole objects / entities selected) -> NOT ours.
-//     There the classic delete has a real, unambiguous job and must keep it, so
-//     the funnel declines and the key falls through exactly as it always did.
-// The legacy sentinel is now the WHOLE test, which is also why it is the only one
-// this function reads.
+// Construction owns Delete only when the legacy whole-object list is empty.
+// Fine typed brush items remain selected; whole objects keep classic Delete.
 bool KiwiConSel_OwnsDelete()
 {
     if ( s_sel.empty() )
@@ -807,11 +622,7 @@ bool KiwiConSel_OwnsDelete()
     return selected_brushes.next == &selected_brushes;
 }
 
-// KIWI-UX (CLEANUP, A-36): deliberately NOT routed through OwnsDelete — see the
-// block above it.  CanDelete is "is there anything of ours to delete" (the
-// palette greys on it); OwnsDelete additionally asks whether the classic delete
-// has a job, and only the funnel may ask that.  It shares its body with
-// CanHide/OwnsHide by coincidence, not by rule, so it keeps its own.
+// Palette availability does not use the key's legacy-selection arbitration.
 bool KiwiConSel_CanDelete()
 {
     return !s_sel.empty();
@@ -841,28 +652,9 @@ bool KiwiConSel_DeleteSelected()
     return true;
 }
 
-// ─── ROUND U: HIDE (kiwi_conselect.h) ────────────────────────────────────────
-// USER DIRECTIVE, verbatim: "When box selecting with 2, the idea is to grab all
-// the temporary lines you used and delete/hide them.  We dont have a hide mechanic
-// right now, you should add that(H) and add (unhide all) in the search menu".
-//
-// THE H DISPATCH, stated once and implemented in KiwiUX_KeyFunnel:
-//   construction selection only   -> this, and the key is CONSUMED
-//   brush selection only          -> untouched: the ported Hide Selected (32923),
-//                                    which round J left on bare H
-//   BOTH                          -> this runs AND the funnel returns false, so
-//                                    32923 runs too.  One key, both halves, which
-//                                    is what a user who selected both means.
-// Shift+H (isolate), Alt+H (show hidden) and Ctrl+H (invert) are NOT touched —
-// only the bare chord is arbitrated, so every other member of the family is
-// exactly what round J wired.
-// KIWI-UX (CLEANUP, A-36): CanHide, OwnsHide and CanDelete were three
-// byte-identical `return !s_sel.empty();` bodies.  The header argues why
-// OwnsHide is weaker than OwnsDelete and why CanDelete is weaker again, but it
-// never distinguishes CanHide from OwnsHide — they are the same question asked
-// through two doors (the palette's canExecute and the H funnel).  Both names
-// stay, because the two doors are real; the ANSWER is written once so a future
-// change to one cannot silently miss the other.
+// Hide
+// Bare H hides both halves of a mixed selection; other H modifiers are untouched.
+// Palette availability and key ownership intentionally share one predicate.
 bool KiwiConSel_OwnsHide()
 {
     return !s_sel.empty();
@@ -880,15 +672,11 @@ bool KiwiConSel_HideSelected()
     if ( objs.empty() )
         return false;
 
-    // ONE store snapshot for the whole act, taken BEFORE the first write, exactly
-    // as Delete and Join do — so a single Ctrl+Z brings the scaffolding back
-    // (kiwi_conselect.h UNDO; the store's undo is a whole-store snapshot, which
-    // carries the hidden flags with it for free).
+    // One pre-mutation store snapshot makes the whole hide undoable.
     KiwiCon_UndoPush();
     for ( size_t i = 0; i < objs.size(); ++i )
         KiwiCon_SetHidden( objs[i], true );
-    // The selection goes with them: an object that is inert must not still be the
-    // thing G moves or Delete deletes (kiwi_construct.h HIDDEN).
+    // Hidden objects are inert, so they cannot remain selected.
     s_sel.clear();
 
     Sys_Printf( "Construction: hid %i object%s (Unhide All restores them).\n",
@@ -897,12 +685,10 @@ bool KiwiConSel_HideSelected()
     return true;
 }
 
-// ─── ROUND K: BRUSH EDGES → CONSTRUCTION LINES (Shift+D) ─────────────────────
-// The directive, the Plasticity source and every rule below are written out on
-// the declarations in kiwi_conselect.h.  This is the assembly.
+// Duplicate brush edges as construction lines
 namespace
 {
-    // One duplicated edge, in world space.
+    // One duplicated edge in world space.
     struct kedge_t
     {
         float a[3], b[3];
@@ -920,16 +706,8 @@ namespace
         return EdgeDist3( p, q ) <= KREG_JOIN_DIST;
     }
 
-    // KIWI-UX (CLEANUP, A-13): this copy WAS the strictest of the four (kind +
-    // liveness + the MAX_POINTS_ON_WINDING bound), so it is the one that became
-    // Sel_EdgeEnds in kiwi_selection.h — every guard here survived.  The call
-    // site below takes the default checkLive = true, which is exactly what this
-    // body did: it walks a cached selection, where a freed node is the case the
-    // guard exists for.
-
-    // Every UNIQUE selected edge, coincident duplicates dropped (see the header:
-    // a brush edge belongs to two faces, so the same world segment arrives twice
-    // whenever both of its faces contributed).
+    // Sel_EdgeEnds includes kind, liveness, and winding-bound checks.
+    // Drop coincident duplicates because adjacent faces can contribute one edge twice.
     void GatherSelectedEdges( std::vector<kedge_t> *out )
     {
         const selection_t &sel = KiwiSel();
@@ -951,15 +729,8 @@ namespace
         }
     }
 
-    // Grow one RUN out of `edges` starting at `seed`: keep extending from either
-    // free end with any unused edge whose own end lands on it, stopping when the
-    // run closes on itself or nothing else touches.  Greedy on purpose — the
-    // AMBIGUOUS case (three edges meeting at a point, which is every brush corner
-    // when three faces' edges are selected at once) has no right answer, and
-    // KiwiRegion_ChainWalk rejects it outright for exactly that reason.  Here a
-    // wrong guess costs a polyline split into two, not a wrong region: the §8 pass
-    // re-chains whatever this leaves as separate objects, and ROUND K's arrangement
-    // pass does not care about object boundaries at all.
+    // Greedily extend both ends. At branch points, leftover edges become later
+    // runs and region assembly may re-chain them.
     void GrowRun( std::vector<kedge_t> &edges, size_t seed,
                   std::vector<float> *pts, bool *closed )
     {
@@ -974,11 +745,7 @@ namespace
         {
             grew = false;
             const size_t n = pts->size();
-            // KIWI-UX (CLEANUP, A-34): BY VALUE.  These used to be raw pointers into
-            // `*pts`, which the loop below push_backs and inserts into — either can
-            // reallocate.  It only worked because every mutating branch sets `grew`
-            // and ends the scan before the next read; copying makes that an ordinary
-            // fact rather than an unwritten invariant a future branch can break.
+            // Copy endpoints before vector growth can invalidate element pointers.
             float head[3], tail[3];
             for ( int k = 0; k < 3; ++k ) head[k] = ( *pts )[k];
             for ( int k = 0; k < 3; ++k ) tail[k] = ( *pts )[n - 3 + k];
@@ -1016,7 +783,7 @@ namespace
                 }
             }
         }
-        // One last close test, for a run that finished on its own start.
+        // A run may close on the final extension.
         const size_t n = pts->size();
         if ( n >= 9 && SamePoint( &( *pts )[0], &( *pts )[n - 3] ) )
         {
@@ -1045,8 +812,7 @@ bool KiwiConSel_DuplicateEdgesAsLines()
         return false;
     }
 
-    // ONE push for the whole press (kiwi_undo.h): a duplicate that took three
-    // Ctrl+Z presses to take back would be three edits, and it is one act.
+    // One snapshot covers every object created by this command.
     KiwiCon_UndoPush();
 
     int added = 0, rings = 0;
@@ -1061,11 +827,7 @@ bool KiwiConSel_DuplicateEdgesAsLines()
             continue;
 
         kconObject_t o;
-        // A two-point run IS a line; anything longer is a polyline.  Same typing
-        // the drawing tools use, so nothing downstream has to special-case these.
-        // KIWI-UX (CLEANUP, A-37): asked in POINTS, not in the float count — the
-        // rule is "two points" and "three points", and the bare 6 and 9 this used
-        // to spell hid that behind the three-floats-per-point stride.
+        // Two points form a line; longer runs use the ordinary polyline type.
         const int nPts = (int)( pts.size() / 3 );
         o.type   = ( nPts == 2 ) ? KCON_LINE : KCON_POLYLINE;
         o.closed = closed && ( nPts >= 3 );
@@ -1090,7 +852,7 @@ bool KiwiConSel_DuplicateEdgesAsLines()
     return true;
 }
 
-// ─── MOVE ────────────────────────────────────────────────────────────────────
+// Move
 bool KiwiConSel_CanMove()
 {
     return !s_sel.empty() && BrushSelectionEmpty();
@@ -1106,9 +868,7 @@ bool KiwiConSel_MoveBegin( float outRef[3] )
     if ( objs.empty() )
         return false;
 
-    // The reference point: the centroid of every selected object's ANCHORS.  Not
-    // the tessellated vertices — a 64-segment circle would otherwise drag the
-    // centroid onto itself and swamp a line sharing the selection.
+    // Use defining anchors for the centroid so tessellation density cannot bias it.
     float sum[3] = { 0.0f, 0.0f, 0.0f };
     int   n      = 0;
     for ( size_t i = 0; i < objs.size(); ++i )
@@ -1141,8 +901,7 @@ bool KiwiConSel_MoveBegin( float outRef[3] )
         for ( int k = 0; k < 3; ++k )
             outRef[k] = sum[k] / (float)n;
 
-    // ONE snapshot, taken BEFORE anything moves.  It is both the cancel and the
-    // undo record (kiwi_conselect.h UNDO).
+    // The pre-mutation snapshot is both cancel state and the undo record.
     KiwiCon_UndoPush();
     s_moveOpen = true;
     return true;
@@ -1152,29 +911,9 @@ void KiwiConSel_MoveApply( const float delta[3] )
 {
     if ( !s_moveOpen || !delta )
         return;
-    // SHAKEOUT H: a whole-object translate moves EVERY WORLD POINT, plus the plane
-    // origin.  Absolute from the baseline, never incremental (kiwi_transform.h
-    // rule 1), so a drag that wanders and comes back lands exactly where it started.
-    //
-    // THE ORIGIN WRITE IS NOT DEAD, and it is worth saying which case needs it:
-    //   * CIRCLE / ARC   `pts` is EMPTY and the plane IS the shape's frame, so this
-    //                    line is the entire move.  RefitPlane leaves a parametric
-    //                    object's plane alone (kiwi_construct.cpp), so nothing
-    //                    overwrites it afterwards.
-    //   * LINE / …       `pts` is the shape and the plane is a cache.  The write is
-    //                    then usually superseded by NoteMutated's refit — but only
-    //                    USUALLY: a non-planar chain's refit FAILS and leaves the
-    //                    cache alone, and a translated origin is a better thing to
-    //                    leave behind than an untranslated one.
-    // ── KIWI-UX (CLEANUP, A-33): THE BASELINE MUST STILL DESCRIBE THE OBJECT ───
-    // The point loop below is guarded on the baseline and the live object having
-    // the same point count, but the ORIGIN write above it is not — so a mismatch
-    // used to translate the cached plane origin while leaving the geometry where it
-    // was, with no console line, and then commit that state as an undo record.
-    // Asked as a PRE-PASS so nothing has moved yet when the answer is no: cancelling
-    // pops the store wholesale (KiwiCon_UndoPop), which would invalidate any
-    // kconObject_t* the apply loop was holding.  Abandoning is what
-    // kiwi_transform.cpp does when the selection changes under a live drag.
+    // Apply absolute world-space deltas from the baseline. plane.origin carries
+    // parametric shapes and remains useful when a point-shape refit fails.
+    // Check point counts before acquiring mutable pointers so cancel can restore safely.
     for ( size_t i = 0; i < s_moveBase.size(); ++i )
     {
         const kconObject_t *chk = KiwiCon_At( s_moveBase[i].object );
@@ -1211,23 +950,13 @@ void KiwiConSel_MoveCancel()
     if ( !s_moveOpen )
         return;
     s_moveBase.clear();
-    // The snapshot MoveBegin pushed IS the pre-gesture store, so popping it is an
-    // exact restore and simultaneously drops the record — a cancelled gesture must
-    // leave nothing on the undo stack.
-    //
-    // s_moveOpen is cleared AFTER the pop, deliberately: UndoPop notifies
-    // KiwiConSel_NoteStoreReplaced, which drops the selection unless a move owns
-    // the store.  The pop restores the very snapshot this gesture took, so every
-    // index the selection holds is still correct and the user keeps their
-    // selection across a cancelled drag — which is what "cancel" should mean.
+    // Pop while s_moveOpen is true so store replacement preserves the restored,
+    // index-valid selection.
     KiwiCon_UndoPop();
     s_moveOpen = false;
 }
 
-// ── KIWI-UX (ROUND AP, ITEM 2): the self-snap mute (kiwi_conselect.h) ────────
-// s_moveBase IS the authoritative "what is this gesture moving" list — it is what
-// MoveApply writes through — so asking it is asking the one source of truth rather
-// than re-deriving the selection, which could drift from it.
+// The latched move baseline is the authoritative self-snap exclusion set.
 bool KiwiConSel_SnapMuted( int objectIndex )
 {
     if ( !s_moveOpen || objectIndex < 0 )
@@ -1248,21 +977,14 @@ void KiwiConSel_MoveCommit()
     KiwiCon_NoteMutated();
 }
 
-// ─── commands ────────────────────────────────────────────────────────────────
+// Commands
 void KiwiConSel_RegisterCommands()
 {
-    // Unbound here — these are the CLASSIC-profile bindings; kiwi_keymap.cpp puts
-    // Join on Ctrl+J in the modern profile.  Delete has NO row of its own on
-    // purpose: it must not become a second thing competing for VK_DELETE with
-    // 33003 (the funnel arbitrates instead — KiwiConSel_OwnsDelete).
+    // Keep registrations unbound: profiles bind Join, while shared Delete/H chords
+    // are arbitrated by KiwiUX_KeyFunnel.
     Radiant_RegisterCommand( "KiwiConstructJoin",   0, 0, KIWI_CMD_CONSTRUCT_JOIN );
     Radiant_RegisterCommand( "KiwiConstructDelete", 0, 0, KIWI_CMD_CONSTRUCT_DELETE );
-    // ROUND U: both UNBOUND, for the same reason Delete has no row of its own —
-    // H is SHARED with the ported Hide Selected (32923) and is arbitrated in the
-    // key funnel (KiwiConSel_OwnsHide), so a second row competing for the chord
-    // would make which one runs depend on table order.  Unhide All has no chord in
-    // Plasticity either and is a palette/search verb by the directive's own words
-    // ("add (unhide all) in the search menu").
+    // Unhide All remains palette-only.
     Radiant_RegisterCommand( "KiwiConstructHide",      0, 0, KIWI_CMD_CONSTRUCT_HIDE );
     Radiant_RegisterCommand( "KiwiConstructUnhideAll", 0, 0, KIWI_CMD_CONSTRUCT_UNHIDE );
 }

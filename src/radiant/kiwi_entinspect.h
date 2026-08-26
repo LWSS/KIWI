@@ -41,7 +41,7 @@ struct KiwiEntSchema
 // KIWI: schemas are parsed from the raw QUAKED comment and cached per live class.
 const KiwiEntSchema &KiwiEntInspect_GetSchema( const eclass_t *eclass, size_t eclassCount );
 
-// KIWI: infer present-but-undocumented standard keys in the "Other keys" section.
+// KIWI: keep schema and "Other keys" rows on the same widget-inference rules.
 KiwiEntParameter KiwiEntInspect_InferParameter( const char *name,
                                                 const char *description,
                                                 const char *defaultValue );

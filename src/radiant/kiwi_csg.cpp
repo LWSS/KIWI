@@ -1,34 +1,23 @@
 #ifndef KISAK_RADIANT
 #error this file is only for Radiant!
 #endif
-// ─────────────────────────────────────────────────────────────────────────────
-// kiwi_csg.cpp — RADIANT_UX_DESIGN §24 implementation.  See kiwi_csg.h for the
-// csg.cpp inventory, the "there is no subtract" finding and the preview ruling.
-//
-// NEW code over the ported cores.  It contains no CSG math: every operation runs
-// through Radiant_ExecCommand with the CLASSIC command id, i.e. the same handler
-// the menu and the hotkey reach.
-// ─────────────────────────────────────────────────────────────────────────────
+// CSG workflow UI over the ported geometry cores; no CSG math lives here.
+// Buttons dispatch command ids so the shared handlers own execution.
 
 #include "stdafx.h"
 #include "qe3.h"
 #include <imgui/imgui.h>
 
 #include "kiwi_csg.h"
-#include "kiwi_autobool.h"                     // ROUND AB — the Auto Bool button
+#include "kiwi_autobool.h"
 #include "kiwi_command.h"                      // KIWI_CMD_AUTO_BOOL
 
-// ── ported entry points (each verified against its definition) ──────────────
 extern int  Sys_Printf( const char *fmt, ... );            // win_qe3.cpp
-extern void Radiant_ExecCommand( unsigned int cmdId );     // mainfrm.cpp:4054
-
-// selected_brushes / active_brushes are the qe3.h sentinels (qe3.h:1053-1054).
+extern void Radiant_ExecCommand( unsigned int cmdId );     // mainfrm.cpp
 
 namespace
 {
-    // The three classic ids this file fronts (mainfrm.cpp's dispatch switch:
-    // 32982 -> Cmd_OnSelectionMakehollow, 32927 -> Cmd_OnSelectionCsgmerge,
-    // 33220 -> Cmd_OnSelectionAutoCaulk).
+    // Classic mainfrm.cpp dispatch ids: Hollow, Merge, and Auto Caulk.
     const int KCSG_ID_HOLLOW     = 32982;
     const int KCSG_ID_MERGE      = 32927;
     const int KCSG_ID_AUTO_CAULK = 33220;
@@ -43,20 +32,10 @@ namespace
         return n;
     }
 
-    // A brush instance CSG can legally consume: not a patch, not the brush of a
-    // fixed-size entity.  Both tests are the cores' own (csg.cpp:572's validation
-    // loop and CSG_MakeHollow's per-node skip).  `entity_s_def` IS `entity_s`
-    // (qe3.h:1000 `typedef entity_s entity_s_def;`), so the ported spelling
-    // `((entity_s_def*)b->owner->def)->eclass->fixedsize` and the one below are
-    // the same read.
-    // KIWI-UX (CLEANUP, B-10): the body moved out to KiwiCsg_BrushUsable below —
-    // this file is the one that owns the csg.cpp inventory, so it is the one that
-    // exports it.  The local name stays as a forwarder so this file reads as it did.
+    // Baseline patch/fixed-owner gate shared by the CSG-family tools.
     inline bool CsgUsable( const selbrush_t *b ) { return KiwiCsg_BrushUsable( b ); }
 }
 
-// KIWI-UX (CLEANUP, B-10): see kiwi_csg.h for what these four tests are and which
-// four copies they replaced.
 bool KiwiCsg_BrushUsable( const selbrush_t *b )
 {
     if ( !b || !b->def )
@@ -72,12 +51,11 @@ bool KiwiCsg_BrushUsable( const selbrush_t *b )
     return true;
 }
 
-// KIWI-UX (CLEANUP, B-10): >= 2 selected, all usable, one owning entity.
 bool KiwiCsg_SelectionMergeable()
 {
     selbrush_t *first = selected_brushes.next;
     if ( first == &selected_brushes || first->next == &selected_brushes )
-        return false;                                      // the core needs >= 2
+        return false;
     const entity_s *ownerDef0 = first->owner ? first->owner->def : 0;
     if ( !ownerDef0 )
         return false;
@@ -85,26 +63,26 @@ bool KiwiCsg_SelectionMergeable()
     {
         if ( !KiwiCsg_BrushUsable( b ) )
             return false;
-        if ( b->owner->def != ownerDef0 )                  // "different entities"
+        if ( b->owner->def != ownerDef0 )
             return false;
     }
     return true;
 }
 
-// ─── §3 palette predicates ───────────────────────────────────────────────────
+// Palette predicates.
 bool KiwiCsg_CanHollow()
 {
     selbrush_t *first = selected_brushes.next;
     if ( first == &selected_brushes )
-        return false;                                      // nothing selected
+        return false;
     if ( first->next != &selected_brushes )
-        return false;                                      // the handler refuses >1
+        return false;
     return CsgUsable( first );
 }
 
 bool KiwiCsg_CanMerge()
 {
-    return KiwiCsg_SelectionMergeable();      // KIWI-UX (CLEANUP, B-10)
+    return KiwiCsg_SelectionMergeable();
 }
 
 bool KiwiCsg_CanAutoCaulk()
@@ -112,11 +90,7 @@ bool KiwiCsg_CanAutoCaulk()
     return selected_brushes.next != &selected_brushes;
 }
 
-// ─── the console feedback pair ───────────────────────────────────────────────
-// Observation only.  CSG_Merge is already chatty ("Merging..." / "done." / its
-// four refusal messages) but never says how many brushes it ate; CSG_MakeHollow
-// says NOTHING AT ALL, which is the case this exists for — a hollow of a 6-sided
-// box silently replaces one brush with six and the user gets no confirmation.
+// Hollow is silent and Merge omits the selection delta, so report it here.
 void KiwiCsg_NoteBefore()
 {
     s_beforeCount = SelectedCount();
@@ -137,10 +111,7 @@ void KiwiCsg_NoteAfter( const char *label )
                     label ? label : "CSG", before, after );
 }
 
-// ─── the "Modeling" block in the shell's panel window ───────────────────────
-// NOT an ImGui menu — ImGuiPanels_Menu draws inside an ordinary ImGui::Begin
-// window, so BeginMenu/MenuItem would be illegal there (the same ruling
-// KiwiCon_MenuItems documents).  Buttons in a labelled section.
+// The caller is already inside ImGui::Begin, so this block must use buttons.
 void KiwiCsg_MenuItems()
 {
     ImGui::SeparatorText( "CSG" );
@@ -174,12 +145,7 @@ void KiwiCsg_MenuItems()
         Radiant_ExecCommand( (unsigned int)KCSG_ID_AUTO_CAULK );
     ImGui::EndDisabled();
 
-    // ── KIWI-UX (ROUND AB, ITEM 3): AUTO BOOL ──────────────────────────────
-    // Same predicate as Merge — it is Merge, applied greedily to PAIRS until no
-    // pair is left that forms one convex brush.  Sits here rather than in a new
-    // section because it belongs to exactly the same family and reads against
-    // exactly the same selection.  Deliberately given no hotkey; the panel and the
-    // command palette are its only two routes.
+    // Auto Bool runs pair sweeps plus guarded 3+ clusters; it is intentionally unbound.
     ImGui::SameLine();
     ImGui::BeginDisabled( !KiwiAutoBool_CanExecute() );
     if ( ImGui::Button( "Auto Bool" ) )
@@ -192,9 +158,6 @@ void KiwiCsg_MenuItems()
                            "the volume cannot change.  Greedy, so the result depends\n"
                            "on order.  One Ctrl+Z undoes the whole run." );
 
-    // ROUND L: there is still no subtract CORE in this port (kiwi_csg.h's
-    // inventory is unchanged) — but there is now a subtract VERB, built out of the
-    // two-halves splitter rather than out of csg.cpp.  The line points at it
-    // instead of dead-ending, because "not in this port" now reads as false.
+    // csg.cpp has no subtract core; Boolean Difference composes the splitter instead.
     ImGui::TextDisabled( "Subtract: press Q (Boolean -> difference), kiwi_boolean.h" );
 }

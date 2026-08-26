@@ -221,8 +221,7 @@ void KiwiLightCache_EntityKeyChanged(entity_s_def *lightDef, const char *key)
     const unsigned epoch = KiwiWalkCache_Epoch();
     if ( s_epoch + 1u != epoch )
     {
-        // Another invalidation happened since these records were current; do not
-        // revive stale caster lists merely because the latest edit was a light.
+        // An intervening invalidation may have changed caster geometry; do not revive old lists.
         ClearEntries();
         SyncGenerations(epoch);
         ResetPendingEdits();

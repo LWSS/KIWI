@@ -1,29 +1,26 @@
 #ifndef KISAK_RADIANT
 #error this file is only for Radiant!
 #endif
-// ─────────────────────────────────────────────────────────────────────────────
-// kiwi_lines.cpp — see kiwi_lines.h for the two traps this wrapper exists to hold.
-// ─────────────────────────────────────────────────────────────────────────────
 
 #include "stdafx.h"
 #include "qe3.h"
 #include "mainfrm.h"                // camera_s
 #include <gfx_d3d/r_rendercmds.h>   // R_AddCmd_Line3D, GfxPointVertex, GfxColor
 #include "kiwi_lines.h"
-#include "kiwi_camera.h"            // KIWI-UX (ROUND AL): KiwiCam_Ortho (kiwi_camera.h:255)
+#include "kiwi_camera.h"            // KiwiCam_Ortho
 
-// ── ported entry points (verified against their definitions) ────────────────
+// Ported entry points.
 extern int   R_Add3DLine( GfxPointVertex *verts, const orientation_t *orient,
                           const float *p1, const float *p2, const unsigned int *color,
                           char width, int vertCount, int maxVertCount );   // draw.cpp 0x40c110
 extern char  Byte4PackPixelColor( float *from, GfxColor *out );            // 0x402ac0
 extern float world_orient_matrix[4][3];                                    // entity.cpp 0x6DE290
-extern camera_s *Ed_Camera();                                              // camwnd.cpp:161
+extern camera_s *Ed_Camera();                                              // camwnd.cpp
 
 namespace
 {
-    // 256 segments per flush.  R_Add3DLine auto-flushes when the array fills, so
-    // this only bounds the STAGING buffer, not the batch: the caller's budget does.
+    // Stage 256 segments per flush; R_Add3DLine auto-flushes on overflow.
+    // The caller's budget, not this buffer, caps the full batch.
     enum { KLINES_VERTS = 512 };
 
     GfxPointVertex s_verts[KLINES_VERTS];
@@ -43,7 +40,7 @@ void KiwiLines_Begin( int maxSegments, int width )
 
 void KiwiLines_Color( float r, float g, float b )
 {
-    float rgba[4] = { r, g, b, 1.0f };      // alpha pinned opaque — kiwi_lines.h TRAP 2
+    float rgba[4] = { r, g, b, 1.0f };      // line alpha stays opaque; fades use RGB
     GfxColor c;
     Byte4PackPixelColor( rgba, &c );
     s_color = c.packed;
@@ -72,13 +69,7 @@ int KiwiLines_Remaining()
     return s_remaining;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// KIWI-UX (ROUND AM, ITEMS 1/2/4) — TRAP 5, the flat-colour override.  The whole
-// argument, the measurement it rests on and the scope it is taken at are in
-// kiwi_lines.h; this is just the push.  `.w = 1` is what makes it an override
-// rather than a tint, and it is byte-for-byte what Ed_EmitLineBatch does per
-// colour run for every line in this layer (r_rendercmds.cpp:1960-1995).
-// ─────────────────────────────────────────────────────────────────────────────
+// `.w = 1` selects the flat RGB override used by Ed_EmitLineBatch colour runs.
 void KiwiTris_FillFlatColor( const float rgba[4] )
 {
     if ( !rgba )
@@ -93,29 +84,20 @@ void KiwiTris_FillNeutral()
     R_AddCmdSetMaterialColor( s_neutral );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// KIWI-UX (ROUND AA, ITEM 2) — the shared eye-orient.  See kiwi_lines.h TRAP 3
-// for why every fill in this layer needs it and where the cull state comes from.
-// ─────────────────────────────────────────────────────────────────────────────
+// white_tools backface-culls, so orient each fill triangle toward the viewer.
 void KiwiTris_OrientToEye( const float *xyz, int stride,
                            unsigned short *idx, int idxCount, const float *eye )
 {
     if ( !xyz || !idx || !eye || stride < 3 || idxCount < 3 )
         return;
 
-    // ── KIWI-UX (ROUND AL, ITEM 2): THE ORTHO ARM.  See kiwi_lines.h. ───────
-    // Under a parallel projection the rasteriser's winding sign is `n · vpn` and
-    // the camera POSITION does not enter it, so testing against `eye` disagrees
-    // with the hardware for every triangle nearer than ~37 degrees to edge-on
-    // (the angle the ortho pseudo-eye subtends at the screen edge) and flips
-    // exactly those the wrong way.  `dir` is the vector TOWARD the viewer, which
-    // is what `eye - a` stands in for in the perspective arm, so the two arms
-    // share one comparison and one flip.
-    const bool ortho = KiwiCam_Ortho();                 // kiwi_camera.h:255
+    // Parallel projection winding uses n·vpn, not camera position. `dir` points
+    // toward the viewer, matching `eye - a` in the perspective arm.
+    const bool ortho = KiwiCam_Ortho();                 // direction test in parallel projection
     float dir[3] = { 0.0f, 0.0f, 0.0f };
     if ( ortho )
     {
-        const camera_s *cam = Ed_Camera();              // camwnd.cpp:159
+        const camera_s *cam = Ed_Camera();              // editor camera is never null
         dir[0] = -cam->vpn[0];
         dir[1] = -cam->vpn[1];
         dir[2] = -cam->vpn[2];
@@ -133,8 +115,7 @@ void KiwiTris_OrientToEye( const float *xyz, int stride,
         n[1] = ab[2] * ac[0] - ab[0] * ac[2];
         n[2] = ab[0] * ac[1] - ab[1] * ac[0];
 
-        // Degenerate (collinear / zero-area): no normal to test, so leave it be —
-        // it covers no pixels either way and inventing a flip would be noise.
+        // A near-zero world-space area has no stable winding to correct.
         if ( n[0] * n[0] + n[1] * n[1] + n[2] * n[2] <= 1e-12f )
             continue;
 

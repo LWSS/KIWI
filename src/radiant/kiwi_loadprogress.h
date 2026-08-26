@@ -2,22 +2,17 @@
 #ifndef KISAK_RADIANT
 #error this file is only for Radiant!
 #endif
-// kiwi_loadprogress.h — feedback for synchronous loads, via the frame's WINDOW TITLE.
-// No ImGui frame may be nested from inside a load (the shell's s_beginFrame/s_inFrame
-// guards reject it), and nothing here pumps; SetWindowTextA repaints anyway.
+// Native-title feedback for synchronous loads. Nothing here pumps or nests an ImGui frame;
+// same-thread SetWindowTextA updates the caption directly.
 
-// Open a bracket.  `what` is the short subject shown in the caption; it is copied.
-// Brackets nest — only the OUTERMOST Begin/End pair touches the caption.  Safe before
-// the frame window exists (no-op).
+// Open a nested bracket and copy its subject. Only the outermost pair owns the caption;
+// calls made before the frame exists are harmless.
 void KiwiLoadProgress_Begin( const char *what );
 
-// One log line.  Ignored unless a bracket is open.  Throttled internally and trimmed to
-// a single line's worth of text.
+// Show one trimmed, throttled log line while a bracket is open.
 void KiwiLoadProgress_Note( const char *line );
 
-// Set the caption a loader wants the window to END UP with.  Outside a bracket this is a
-// plain SetWindowTextA; inside one it is remembered and applied by End(), so a loader that
-// renames the frame midway through its own work is not reverted when the bracket closes.
+// Set the final caption: apply it directly outside a bracket, or defer it to End() inside one.
 void KiwiLoadProgress_SetTitle( const char *title );
 
 // Close the bracket and settle the caption.

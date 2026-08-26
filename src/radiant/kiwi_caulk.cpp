@@ -1,66 +1,40 @@
 #ifndef KISAK_RADIANT
 #error this file is only for Radiant!
 #endif
-// ─────────────────────────────────────────────────────────────────────────────
-// kiwi_caulk.cpp — KIWI-UX (ROUND BH, ITEMS 1 + 2).  See kiwi_caulk.h for the
-// user directives, the material-resolution argument (D-BH-A), the reason the
-// apply reuses the browser funnel rather than writing a second one (D-BH-B),
-// the two-undo-record ruling for the auto-fit (D-BH-C), why only caulk is
-// fitted (D-BH-D) and how this composes with ROUND BH ITEM 4 (D-BH-E).
-//
-// NEW code over ported cores.  Nothing here writes a MaterialDef or a texdef
-// itself: the material goes through TexWnd_ApplyMaterialAtIndex and the fit
-// through Brush_FitTexture, exactly as a thumbnail click and the Surface
-// Inspector's Fit button do.
-// ─────────────────────────────────────────────────────────────────────────────
+// Material and texdef writes stay in the browser-apply and Surface Inspector funnels.
 
 #include "stdafx.h"
 #include "qe3.h"
 
 #include "kiwi_caulk.h"
 #include "kiwi_command.h"
-#include "kiwi_uv.h"        // KiwiUv_CanEdit (the shared canExecute, D-BH note)
-#include "kiwi_selection.h" // ROUND BJ, ITEM 1 — the mixed-selection split
+#include "kiwi_uv.h"        // shared availability and gesture handoff
+#include "kiwi_selection.h" // mixed-selection split
 
 #include <string.h>
 #include <vector>
 
-// ── ported / cross-file entry points (each verified against its definition) ──
-extern int         Sys_Printf( const char *fmt, ... );                       // win_qe3.cpp:118   int Sys_Printf(const char*,...)
-extern int         g_nUpdateBits;                                            // engine_stubs.cpp:773  int g_nUpdateBits = 0
-extern bool        Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId ); // mainfrm.cpp:1358  bool Radiant_RegisterCommand(const char*,byte,byte,int)
-// texwnd.cpp — the browser accessors round AZ added for the Sky tab, reused verbatim
-// (kiwi_skybox.cpp:80-84 declares the same three).  texwnd_s is TU-local, so every
-// out-of-TU reader goes through these.
-extern int         TexWnd_MaterialCount();                                   // texwnd.cpp:2562   int TexWnd_MaterialCount()
-extern qtexture_s *TexWnd_MaterialAt( int idx );                             // texwnd.cpp:2564   qtexture_s *TexWnd_MaterialAt(int)
-extern void        TexWnd_ApplyMaterialAtIndex( int idx );                   // texwnd.cpp:1263   void TexWnd_ApplyMaterialAtIndex(int)
-extern qtexture_s *Texture_GetHandle( const char *name );                    // texwnd.cpp:314    qtexture_s *Texture_GetHandle(const char*)
-// select.cpp — the Surface Inspector's Fit funnel, IDB 0x4939E0.  Declared exactly as
-// mainfrm.cpp:4810 / surfacedlg.cpp:44 / patchdialog.cpp:356 declare it.
-extern void        Brush_FitTexture( float x, float y, int a4 );             // select.cpp:3666   void Brush_FitTexture(float,float,int)
-// ── KIWI-UX (ROUND BJ, ITEM 1): the AUTO-CAULK half ─────────────────────────
-// The ONE id->action entry point (kiwi_command.h); id 33220 is Selection->CSG->Auto
-// Caulk, whose handler Cmd_OnSelectionAutoCaulk (mainfrm.cpp:2817-2824) is `static`
-// and brackets Brush_AutoCaulk itself.  Reaching it by id rather than re-spelling
-// its four-line bracket here is the same choice kiwi_command.cpp's Cut makes with
-// Copy / Delete (kiwi_command.cpp:1105-1106) and kiwi_join.cpp makes with CSG_Merge.
-extern void        Radiant_ExecCommand( unsigned int cmdId );                // mainfrm.cpp:4054  void Radiant_ExecCommand(unsigned int)
-// materialdef.cpp — the per-face material name the before/after count reads.  It
-// carries the MtlDef_IsValid L0 assert (materialdef.cpp:53), so it is called behind the
-// same "exactly one of lyrMtl / radMtl" guard kiwi_uv.cpp:724 states, and its result is
-// used as a name exactly as csg.cpp:721 and kiwi_uveditor.cpp:3557 use it.
-extern LayerMaterialDef *Materialdef_GetName( MaterialDef *mtlDef );         // materialdef.cpp:159  LayerMaterialDef *Materialdef_GetName(MaterialDef*)
+// Cross-file entry points.
+extern int         Sys_Printf( const char *fmt, ... );                       // win_qe3.cpp
+extern int         g_nUpdateBits;                                            // engine_stubs.cpp
+extern bool        Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId ); // mainfrm.cpp
+// texwnd_s is TU-local, so browser materials are exposed through these accessors.
+extern int         TexWnd_MaterialCount();                                   // texwnd.cpp
+extern qtexture_s *TexWnd_MaterialAt( int idx );                             // texwnd.cpp
+extern void        TexWnd_ApplyMaterialAtIndex( int idx );                   // texwnd.cpp
+extern qtexture_s *Texture_GetHandle( const char *name );                    // texwnd.cpp
+extern void        Brush_FitTexture( float x, float y, int a4 );             // 0x4939E0
+// Command 33220 reaches the static, undo-bracketed Cmd_OnSelectionAutoCaulk.
+extern void        Radiant_ExecCommand( unsigned int cmdId );                // mainfrm.cpp
+// Materialdef_GetName asserts exactly one of lyrMtl/radMtl, so callers guard it.
+extern LayerMaterialDef *Materialdef_GetName( MaterialDef *mtlDef );         // materialdef.cpp
 
 namespace
 {
-    // D-BH-A.  Spelled ONCE, here; csg.cpp's ported AutoCaulk uses the same literal
-    // (csg.cpp:665 / :679 / :722).
+    // Matches Brush_AutoCaulkFace (0x47E080) and Brush_AutoCaulk (0x47E0F0).
     const char *const KCAULK_NAME = "caulk";
 
-    // The leaf of a registered material name.  Browser names are stored lowercase
-    // (Texture_GetHandle's _strlwr, texwnd.cpp:328) and may or may not carry a folder,
-    // so both spellings have to answer the same.
+    // Registered names may be bare or folder-qualified.
     const char *LeafName( const char *name )
     {
         const char *slash = strrchr( name, '/' );
@@ -70,11 +44,7 @@ namespace
         return back ? back + 1 : name;
     }
 
-    // Resolve caulk to its index in the browser's sorted_materials.  Texture_GetHandle
-    // FIRST so a set that has not referenced caulk yet still registers it (it appends
-    // through Editor_AddRadiantMaterial, texwnd.cpp:302-304, which is the same array
-    // TexWnd_MaterialAt reads) — then a pointer scan, which is exact where a name
-    // compare would only be probable.
+    // Register a first reference before scanning; pointer identity avoids ambiguous names.
     int CaulkIndex()
     {
         qtexture_s *q = Texture_GetHandle( KCAULK_NAME );
@@ -97,7 +67,6 @@ bool KiwiCaulk_IsCaulkName( const char *name )
 
 bool KiwiCaulk_CanExecute()
 {
-    // D-BH note on the declaration: the SAME predicate, not a copy of it.
     return KiwiUv_CanEdit();
 }
 
@@ -105,26 +74,16 @@ void KiwiCaulk_AutoFitApplied( const char *appliedName )
 {
     if ( !KiwiCaulk_IsCaulkName( appliedName ) )
         return;
-    // D-BH-C.  The Surface Inspector's own call (mainfrm.cpp:4813 makes the identical
-    // one for Ctrl+F).  1 x 1 = one repeat across the face; a4 == 0 is "fit per face",
-    // the only value OnFit / Brush_FitTexture ever pass (select.cpp:2104).
+    // One repeat per face; a4 == 0 matches Surface Inspector Fit (0x4939E0).
     Brush_FitTexture( 1.0f, 1.0f, 0 );
     Sys_Printf( "Caulk: fitted one repeat per face (the apply and the fit are separate "
                 "undo records - two Ctrl+Z).\n" );
     g_nUpdateBits = -1;
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-//  KIWI-UX (ROUND BJ, ITEM 1) — the two halves of the End key
-// ═════════════════════════════════════════════════════════════════════════════
-// See kiwi_caulk.h D-BJ-A (why the key never arrived on a face selection),
-// D-BJ-B (the split) and D-BJ-C (what the AUTO half can and cannot compose with).
 namespace
 {
-    // Whole-selected instances, and how many of them AutoCaulk can actually act on.
-    // Brush_AutoCaulk skips fixed-size entities and patches outright
-    // (Brush_IsFixedOrPatch, csg.cpp:146-152 / :706), so a selection made entirely of
-    // those has no AUTO arm and falls back to the plain one.
+    // Brush_AutoCaulk skips fixed-size entities and patches.
     int SelectedBrushCount( int *outSolids )
     {
         int n = 0, solids = 0;
@@ -143,10 +102,7 @@ namespace
         return n;
     }
 
-    // Faces of the WHOLE-SELECTED brushes whose current-layer material is not
-    // already caulk.  Brush_AutoCaulk reports a count of its own but does not
-    // return one, and csg.cpp is a ported file this round does not touch, so the
-    // number this verb prints is measured either side of the call instead.
+    // Brush_AutoCaulk reports its count but returns void, so measure around the call.
     int NonCaulkFaceCount()
     {
         const int layer = g_qeglobals.current_edit_layer;
@@ -160,8 +116,7 @@ namespace
             for ( int fi = 0; fi < def->faceCount; ++fi )
             {
                 MaterialDef *md = &def->faces[fi].mtldef[layer];
-                // The MtlDef_IsValid invariant (materialdef.cpp:53) is an L0 assert
-                // inside Materialdef_GetName; test it rather than trip it.
+                // Materialdef_GetName asserts exactly one active material representation.
                 if ( ( ( md->lyrMtl != 0 ) + ( md->radMtl != 0 ) ) != 1 )
                     continue;
                 const char *name = (const char *)Materialdef_GetName( md );
@@ -172,9 +127,7 @@ namespace
         return n;
     }
 
-    // The AUTO half: Selection->CSG->Auto Caulk, through its own id so its undo
-    // bracket is the ported one and there is exactly one Auto Caulk in the editor.
-    // Returns how many faces it converted.
+    // Use the command id so Cmd_OnSelectionAutoCaulk retains undo ownership.
     int RunAutoCaulk()
     {
         const int before = NonCaulkFaceCount();
@@ -183,8 +136,7 @@ namespace
         return ( before > after ) ? ( before - after ) : 0;
     }
 
-    // Install `items` as the whole KIWI selection and push it at the legacy globals.
-    // Sel_SyncToLegacy opens with Select_Deselect(1), so this is a REPLACE.
+    // Sel_SyncToLegacy replaces both legacy selection sets.
     void SetSelection( const std::vector<sel_item_t> &items, const sel_item_t &active )
     {
         selection_t &sel = KiwiSel();
@@ -197,10 +149,6 @@ namespace
     }
 }
 
-// ── the verb ────────────────────────────────────────────────────────────────
-// FACE arm: one call of real work (D-BH-B) — the funnel does the gesture end
-// (BH ITEM 3), the validate, the apply, the patch re-lay and the auto-fit (BH
-// ITEM 2).  SOLID arm: the ported AutoCaulk through its own command id.
 static bool KiwiCaulk_ApplyToSelection()
 {
     if ( !KiwiCaulk_CanExecute() )
@@ -213,16 +161,11 @@ static bool KiwiCaulk_ApplyToSelection()
     int       nSolids = 0;
     const int nBrushes = SelectedBrushCount( &nSolids );
 
-    // ── SOLID / GROUP: the stock AUTO-caulk, and nothing else ────────────────
-    // No index resolution and no fit on this arm: Brush_AutoCaulkFace writes the
-    // material itself with SetMaterial( "caulk", &mat ) (csg.cpp:665/:679), and it
-    // is the only thing that knows WHICH faces it converted — see D-BJ-C.
+    // AutoCaulk owns its material writes and does not expose the changed-face subset;
+    // fitting the whole selection would damage aligned UVs on visible faces.
     if ( nFaces == 0 && nSolids > 0 )
     {
-        // The BH ITEM 3 handshake, which the FACE arm gets for free from the browser
-        // funnel: a live gesture is ended (record-free when it applied nothing)
-        // before anything writes, and given back afterwards with a fresh baseline.
-        // A gesture that refuses says so on the console and nothing happens.
+        // End or reject a live UV gesture before the external material write.
         if ( !KiwiUv_EndGestureBeforeApply( "Caulk" ) )
             return true;
         const int did = RunAutoCaulk();
@@ -242,11 +185,8 @@ static bool KiwiCaulk_ApplyToSelection()
         return true;
     }
 
-    // ── PURE FACE SELECTION: plain caulk + fit, exactly those faces ──────────
-    // …and the ONE other case that takes this arm: a whole-brush selection with no
-    // AUTO-caulkable solid in it at all (patches, fixed-size entities).  Those have
-    // no hidden-face test to run, so they keep round BH's behaviour rather than
-    // silently doing nothing.
+    // An all-ineligible object selection uses plain apply+fit because patches and
+    // fixed-size entities have no AutoCaulk visibility test.
     if ( nBrushes == 0 || nSolids == 0 )
     {
         TexWnd_ApplyMaterialAtIndex( idx );
@@ -261,18 +201,9 @@ static bool KiwiCaulk_ApplyToSelection()
         return true;
     }
 
-    // ── MIXED: faces get plain caulk, whole brushes get AUTO-caulk ───────────
-    // The two halves cannot run over one legacy selection, because Brush_SetTexture
-    // walks BOTH g_SelectedFaces AND selected_brushes in the same record
-    // (select.cpp:1820-1876) — a mixed apply would plain-caulk every face of every
-    // selected solid, which is the opposite of what the AUTO half is for.  So the
-    // selection is split through the typed layer's own crossing (Sel_SyncToLegacy,
-    // kiwi_selection.h) and restored afterwards.  Values are captured first: the
-    // items hold live selbrush_t*, and neither half frees a brush.
-    // The handshake runs ONCE here, before the first selection swap: a parked face
-    // push holds a face index into a selection this arm is about to replace twice.
-    // (The FACE half's funnel runs its own; with nothing live by then it is a no-op,
-    // which is also why the face gizmo is not re-armed on this arm — D-BJ-C.)
+    // Brush_SetTexture walks both legacy sets, so split mixed input or it would
+    // plain-caulk every face of each selected solid. Capture live typed items first.
+    // Stop a parked face gesture before its indexed selection is replaced.
     if ( !KiwiUv_EndGestureBeforeApply( "Caulk" ) )
         return true;
 
@@ -291,9 +222,7 @@ static bool KiwiCaulk_ApplyToSelection()
         }
     }
 
-    // AUTO first, PLAIN second, so the round-BH handshake that the funnel runs at
-    // its tail (KiwiUv_RestoreGestureAfterApply, texwnd.cpp:1332) is the LAST thing
-    // to touch the gesture state instead of being unwound by a selection swap.
+    // Keep the browser funnel as the final material mutation before restoration.
     int autoDid = 0;
     if ( !objItems.empty() )
     {
@@ -318,8 +247,7 @@ static bool KiwiCaulk_ApplyToSelection()
 
 void KiwiCaulk_RegisterCommands()
 {
-    // UNBOUND here; kiwi_keymap.cpp's ApplyModern gives it End and moves the classic
-    // occupant (View->Center, 32953) to Shift+End in that profile only.
+    // Modern: End; View->Center moves to Shift+End. Classic stays unchanged.
     Radiant_RegisterCommand( "KiwiCaulkSelection", 0, 0, KIWI_CMD_CAULK_FACES );
 }
 

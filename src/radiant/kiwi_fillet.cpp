@@ -1,14 +1,7 @@
 #ifndef KISAK_RADIANT
 #error this file is only for Radiant!
 #endif
-// ─────────────────────────────────────────────────────────────────────────────
-// kiwi_fillet.cpp — ROUND J: FILLET CORNERS (B).  See kiwi_fillet.h for the
-// Plasticity source (ContourFilletFactory + the fillet-all gizmo), the per-corner
-// clamp, and why the result is a tessellated polyline.
-//
-// NEW code.  It touches NO map data: the whole file works on the construction
-// store, which is editor-only scaffolding.
-// ─────────────────────────────────────────────────────────────────────────────
+// Construction-chain filleting only mutates the editor-only construction store.
 
 #include "stdafx.h"
 #include "qe3.h"
@@ -27,20 +20,14 @@
 #include <stdio.h>
 #include <vector>
 
-// ── ported entry points (each verified against its DEFINITION) ─────────────
-//   win_qe3.cpp:112        int  Sys_Printf( const char *fmt, ... )
-//   engine_stubs.cpp:773   int  g_nUpdateBits = 0;   // 0x25d5a74
-//   mainfrm.cpp:1340       bool Radiant_RegisterCommand( const char *name, byte vk,
-//                                                        byte mods, int commandId )
+// 0x25d5a74: g_nUpdateBits, the ported editor update mask.
 extern int  Sys_Printf( const char *fmt, ... );
 extern int  g_nUpdateBits;
 extern bool Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId );
 
 namespace
 {
-    // §18: KIWI-UX (CLEANUP, B-9) — the construction-ROSE preview pair is ONE
-    // palette entry now, shared with kiwi_offset.cpp (kiwi_construct.h).  The
-    // local names stay so this file's draw code reads unchanged.
+    // Fillet and offset share the construction-preview colors.
     #define KFIL_COL_OK  KCON_PREVIEW_OK
     #define KFIL_COL_BAD KCON_PREVIEW_BAD
 
@@ -48,12 +35,9 @@ namespace
 
     const float KFIL_PI = 3.14159265358979323846f;
 
-    // Two plane-space points closer than this are the same point.
-    // KIWI-UX (CLEANUP, B-9): one number, KCON_WELD_2D (kiwi_construct.h) —
-    // kiwi_offset.h spelled the same value as KOFF_WELD_2D for the same question.
+    // Plane-space duplicate tests share the construction solver's fixed weld.
     const float KFIL_WELD_2D = KCON_WELD_2D;
 
-    // ── the source, resolved from the construction selection ────────────────
     int SelectedObject()
     {
         const int n = KiwiConSel_Count();
@@ -66,30 +50,23 @@ namespace
         return -1;
     }
 
-    // kiwi_fillet.h: straight-segment chains only.  A circle has no corners and a
-    // parametric arc is already round.
+    // Only straight-segment chains can have corners to replace.
     bool Filletable( const kconObject_t &o )
     {
         if ( KiwiCon_IsParametric( o ) )
             return false;
-        // Three points is the floor either way: an open chain needs one interior
-        // vertex, a closed one is not a loop below three.
         return (int)( o.pts.size() / 3 ) >= 3;
     }
 
-    // ── the corner SET (ContourFilletFactory.ts:44-47 / :53-72) ─────────────
-    // `chosen` is indexed by CHAIN VERTEX and says whether that vertex may round.
-    // Closed: every vertex.  Open: the interior ones.  Narrowed to the SELECTED
-    // anchors when the construction selection names any point on this object.
+    // Select every closed-chain vertex or open-chain interior unless point
+    // selection narrows the anchor-indexed set (ContourFilletFactory.ts:44-72).
     void ChooseCorners( int object, int n, bool closed, std::vector<char> *chosen,
                         bool *outNarrowed )
     {
         chosen->assign( (size_t)n, 0 );
         *outNarrowed = false;
 
-        // Which anchors did the user actually name?  (KCONSEL_POINT items index
-        // the object's ANCHORS, which for LINE/POLYLINE/RECT are its defining
-        // points — kiwi_construct.h "snap ANCHORS".)
+        // Point selections use defining-anchor indices, not tessellated vertices.
         std::vector<char> named;
         named.assign( (size_t)n, 0 );
         int namedCount = 0;
@@ -119,7 +96,7 @@ namespace
         *outNarrowed = ( namedCount > 0 );
     }
 
-    // ── plane-space chain, duplicates culled ────────────────────────────────
+    // Project to plane space and weld consecutive duplicates.
     bool ToPlaneChain( const kconObject_t &o, const kconPlane_t &plane,
                        std::vector<float> *out, std::vector<int> *outSrcIndex )
     {
@@ -161,14 +138,8 @@ namespace
     struct filletStats_t
     {
         int rounded = 0;        // corners that produced an arc
-        int clamped = 0;        // …of which were limited by their own edges
-        // ── KIWI-UX (CLEANUP, B-14): THE REFUSALS ARE COUNTED **AND REPORTED** ──
-        // `skipped` was one number written on five paths and read by nobody, so a
-        // user who chose eight corners and got three was told "3 of 8" with no way
-        // to tell a refusal from a clamp.  Split by REASON, the way this file's
-        // sibling kiwi_patchfillet.cpp splits Gather()'s three refusals, and now
-        // named in both the HUD and the commit line.  Reporting only — every
-        // early-out is byte for byte the one that was there before.
+        int clamped = 0;        // chosen corners limited by their own edges
+        // Keep refusal causes separate from edge clamping for user diagnostics.
         int skipFlat  = 0;      // too flat or too sharp to be a corner (KFIL_FLAT_DOT)
         int skipTight = 0;      // the radius fell below KFIL_MIN_RADIUS after the clamp
         int skipDegen = 0;      // a degenerate edge, half-angle or bisector
@@ -176,9 +147,7 @@ namespace
         int Skipped() const { return skipFlat + skipTight + skipDegen; }
     };
 
-    // ── THE FILLET (ContourFilletFactory's job, in plane space) ─────────────
-    // `src` is a plane-space chain (2 floats per point, first NOT repeated when
-    // closed).  `chosen` is per-vertex.  Writes the rounded chain into `out`.
+    // Fillet a plane-space chain; closed chains do not repeat their first point.
     bool FilletChain2D( const std::vector<float> &src, bool closed,
                         const std::vector<char> &chosen, float radius,
                         std::vector<float> *out, filletStats_t *stats,
@@ -225,9 +194,7 @@ namespace
             float cosT = ux*wx + uy*wy;
             if ( cosT >  1.0f ) cosT =  1.0f;
             if ( cosT < -1.0f ) cosT = -1.0f;
-            // cosT == -1 is a STRAIGHT continuation (the two edges point opposite
-            // ways from B), cosT == +1 is a spike doubling back on itself.  Both
-            // are outside what a fillet means.
+            // -1 is straight-through and +1 is a reversal; neither has a fillet.
             if ( cosT <= -KFIL_FLAT_DOT || cosT >= KFIL_FLAT_DOT )
             {
                 ++stats->skipFlat;
@@ -245,9 +212,8 @@ namespace
                 continue;
             }
 
-            // THE CLAMP (kiwi_fillet.h): half the shorter adjacent edge is what
-            // this corner may spend, so two corners sharing an edge can never
-            // overlap.
+            // Spend at most half the shorter adjacent edge so neighboring fillets
+            // cannot overlap.
             const float tAvail = 0.5f * ( ( ulen < wlen ) ? ulen : wlen );
             float r = radius;
             const float rMax = tAvail * tanHalf;
@@ -287,9 +253,7 @@ namespace
             while ( sweep >  KFIL_PI ) sweep -= 2.0f * KFIL_PI;
             while ( sweep < -KFIL_PI ) sweep += 2.0f * KFIL_PI;
 
-            // Density: the STORE'S own rule (KCON_SEGS_PER_UNIT), pro-rata over the
-            // sweep, so a filleted corner is exactly as smooth as a drawn arc of
-            // the same radius.
+            // Arc-length density is bounded per corner; total points are checked below.
             const float arcLen = r * fabsf( sweep );
             int segs = (int)floorf( arcLen * KCON_SEGS_PER_UNIT + 0.5f );
             if ( segs < KFIL_SEGS_MIN ) segs = KFIL_SEGS_MIN;
@@ -317,9 +281,6 @@ namespace
         return true;
     }
 
-    // ═══════════════════════════════════════════════════════════════════════
-    //  The command.
-    // ═══════════════════════════════════════════════════════════════════════
     class KiwiFilletCommand : public KiwiEditorCommand
     {
     public:
@@ -376,9 +337,8 @@ namespace
             }
 
             const int n = (int)( m_src.size() / 2 );
-            // ChooseCorners works in the object's ANCHOR indexing; srcIndex maps a
-            // chain vertex back to it, so a welded duplicate cannot shift the
-            // user's per-corner choice onto the wrong corner.
+            // Map welded chain vertices back to anchors so point selections cannot
+            // shift onto a different corner.
             std::vector<char> byAnchor;
             bool narrowed = false;
             ChooseCorners( m_object, KiwiCon_VertCount( *o ), m_closed, &byAnchor, &narrowed );
@@ -387,8 +347,7 @@ namespace
             for ( int i = 0; i < n; ++i )
             {
                 const int a = srcIndex[(size_t)i];
-                // A welded chain can be shorter than the anchor list, so the
-                // fillable test is re-asked in CHAIN terms too.
+                // Recheck fillability after welding changes the chain indices.
                 const bool fillable = m_closed ? true : ( i > 0 && i < n - 1 );
                 if ( fillable && a >= 0 && a < (int)byAnchor.size() && byAnchor[(size_t)a] )
                 {
@@ -398,10 +357,8 @@ namespace
             }
             if ( count <= 0 )
             {
-                // Two different causes, and saying the wrong one sends the user
-                // looking in the wrong place: `narrowed` means they named anchors
-                // in Point mode and every one of those was either an END of an
-                // open chain or a duplicate that ToPlaneChain welded away.
+                // A narrowed set can lose every candidate to open ends or welding;
+                // distinguish that from an unnarrowed chain with no corners.
                 Sys_Printf( narrowed
                     ? "Fillet: none of the selected anchors is a corner (an open "
                       "chain's two ends are not corners, and coincident points are "
@@ -413,10 +370,7 @@ namespace
             m_narrowed = narrowed;
             m_corners  = count;
 
-            // The reference corner: the FIRST chosen one.  The drag measures the
-            // cursor's plane-space distance to it, which makes "drag away from the
-            // corner" mean "bigger radius" — the same shape as Plasticity's
-            // FilletCornerGizmo, which is a magnitude gizmo planted at the corner.
+            // Measure drag magnitude from the first chosen corner, as the gizmo does.
             for ( int i = 0; i < n; ++i )
             {
                 if ( !m_chosen[(size_t)i] )
@@ -440,10 +394,7 @@ namespace
 
         void Rebase() override
         {
-            // A PAUSED -> HOT edge.  The `keep` bias is not optional: the mapping is
-            // a DELTA from `m_start`, so re-latching alone would collapse the radius
-            // to zero the instant the user pressed LMB to resume.  Same three lines
-            // as kiwi_extrude.cpp:291-299 and kiwi_offset.cpp.
+            // Preserve the delta across PAUSED -> HOT; relatching alone would zero it.
             const float keep = m_radius;
             m_haveStart = false;
             LatchStart();
@@ -485,19 +436,14 @@ namespace
                 return;
             }
 
-            // Everything below is unconditional, which is why the snapshot lands
-            // here (kiwi_fillet.h UNDO — kiwi_trim.cpp's rule).
+            // Snapshot only after preview validation, immediately before replacement.
             kconObject_t o;
             o.type   = KCON_POLYLINE;
             o.plane  = m_plane;                       // a SEED; KiwiCon_Add refits
             o.pts    = m_preview;
             o.closed = m_closed;
 
-            // KiwiCon_Add's only two rejections are ">KCON_MAX_POINTS" and
-            // "<2 points" (kiwi_construct.cpp:706-715), and FilletChain2D has
-            // already refused both, so the Add below cannot decline.  The branch
-            // stays as a belt-and-braces console line rather than a silent
-            // half-edit, because the RemoveAt above has already happened.
+            // Add validates its normalized copy after RemoveAt; retain recovery output.
             KiwiCon_UndoPush();
             KiwiCon_RemoveAt( m_object );             // FILLET REPLACES (kiwi_fillet.h)
             const int added = KiwiCon_Add( o );
@@ -508,8 +454,6 @@ namespace
             {
                 char b[32];
                 KiwiUnits_Format( b, sizeof( b ), m_radius );
-                // KIWI-UX (CLEANUP, B-14): the refusals, by reason.  Without this a
-                // count lower than the chosen-corner count reads as a clamp.
                 char skips[192];
                 skips[0] = '\0';
                 if ( m_stats.Skipped() )
@@ -682,9 +626,6 @@ namespace
                 SetHud( "fillet %s  ·  REFUSED: %s", b, m_why ? m_why : "invalid" );
             else
             {
-                // KIWI-UX (CLEANUP, B-14): "3 of 8" with five REFUSED corners and
-                // "3 of 8" with five clamped ones are different situations; the HUD
-                // now separates them.  The commit line carries the per-reason split.
                 char sk[24];
                 sk[0] = '\0';
                 if ( m_stats.Skipped() )
@@ -731,7 +672,6 @@ namespace
     KiwiFilletCommand s_fillet;
 }
 
-// ─── the public surface ──────────────────────────────────────────────────────
 bool KiwiFillet_CanFillet()
 {
     const int idx = SelectedObject();
@@ -740,17 +680,14 @@ bool KiwiFillet_CanFillet()
     const kconObject_t *o = KiwiCon_At( idx );
     if ( !o || !Filletable( *o ) )
         return false;
-    // A plane is a hard precondition (an arc off its own plane is not an arc), so
-    // the palette greys the row rather than letting the command refuse on entry.
+    // Off-plane chains cannot define arcs, so disable the command up front.
     kconPlane_t plane;
     return KiwiCon_ObjectPlane( *o, &plane );
 }
 
 void KiwiFillet_RegisterCommands()
 {
-    // Unbound here — the CLASSIC-profile row.  kiwi_keymap.cpp puts Fillet on the
-    // bare B in the modern profile, with the SameTargetname 36121 displacement;
-    // the audit is in kiwi_keymap.h.
+    // Modern keymap binds B; classic command registration remains unbound.
     Radiant_RegisterCommand( "KiwiFilletCorners", 0, 0, KIWI_CMD_FILLET_CURVE );
 }
 

@@ -2,112 +2,26 @@
 #ifndef KISAK_RADIANT
 #error this file is only for Radiant!
 #endif
-// ─────────────────────────────────────────────────────────────────────────────
-// kiwi_trim.h — SHAKEOUT H: TRIM (T), the "cut the overhang off" verb.
+// Trim follows Plasticity's fragment/complement behavior, but computes spans on
+// hover instead of maintaining a fragment database. It edits construction curves
+// only and remains active until RMB/Enter.
 //
-// USER DIRECTIVE, verbatim: "Add a Trim tool (T) that only works on lines.  Its
-// job is to trim off excess bits when lines are hastily drawn (see pic) This
-// exists in plasticity."  The picture is two lines crossing in an X with the four
-// tails sticking out past the crossing; clicking a tail removes it, leaving a
-// clean corner.
+// Chains use cumulative world-space arc length. Crossings are 3D closest approaches
+// within KCON_ISECT_DIST, matching construction intersection snapping.
 //
-// ── WHAT PLASTICITY ACTUALLY DOES (read, not remembered) ────────────────────
-// plasticity/src/commands/curve/TrimCommand.ts, bound to a BARE `t` in
-// src/startup/default-keymap.ts:267 (`"t": "command:trim"`, inside the
-// `body:not([gizmo])` scope).  Three facts shaped this port:
+// LINE/POLYLINE/RECT removal is always bounded first by the hovered stored edge;
+// crossings may only narrow it. CIRCLE/ARC tessellation is not user-drawn, so those
+// types retain the arc-between-neighboring-crossings rule.
 //
-//   1. IT IS CURVES ONLY.  The picker is `objectPicker.mode.set(SelectionMode.
-//      Curve)` (TrimCommand.ts:18) and LayerManager.showFragments() actively
-//      DISABLES solid/face/region picking for the duration
-//      (src/editor/LayerManager.ts:37-50).  So "only works on lines" is not a
-//      simplification of Plasticity — it is exactly Plasticity.
-//   2. THE PIECES EXIST BEFORE YOU CLICK.  PlanarCurveDatabase splits every
-//      coplanar curve at every mutual intersection into invisible "fragments" the
-//      moment a curve is added (src/editor/curves/PlanarCurveDatabase.ts:24-33,
-//      :79 `c3d.CurveEnvelope.IntersectWithAll`), and Trim just turns that layer
-//      visible and lets you pick one.  KIWI computes the spans ON HOVER instead —
-//      same answer, no second database to keep in sync, and the store is small
-//      enough that the scan is free.
-//   3. REMOVING A MIDDLE SPAN SPLITS THE CURVE IN TWO.  TrimFactory computes the
-//      COMPLEMENT of the removed parameter range (`interval.multitrim(...)`,
-//      TrimFactory.ts:84-91) and Interval.trim returns TWO intervals when the cut
-//      is interior (src/commands/curve/Interval.ts:31), one when it touches an
-//      end, and none when it swallows the whole curve.  KIWI does the same three
-//      cases, in world space.
-//   4. IT KEEPS GOING.  There is no loop: the command re-enqueues ITSELF after
-//      each trim (`this.editor.enqueue(new TrimCommand(this.editor), false)`,
-//      TrimCommand.ts:30) until Escape.  KIWI uses the shakeout-E multi-click
-//      grammar instead — WantsClicks, so a click is an event and RMB/Enter ends
-//      the command — which is the same behaviour through the machinery this
-//      editor already has.
+// Trimming a parametric object freezes its current tessellation as KCON_POLYLINE;
+// the HUD warns before the click. An interior open-chain cut may leave two objects,
+// while a closed-chain cut leaves one open complement.
 //
-// ── WHAT KIWI TRIMS ─────────────────────────────────────────────────────────
-// KIWI-UX (CLEANUP, A-3) — EVERY type KiwiCon_VertCount / KiwiCon_VertWorld can
-// walk as a chain of segments, which is every type the store holds: KCON_LINE and
-// KCON_POLYLINE open or closed, AND the parametric ones (circle, arc, rect).
-// Round AF item 4 reversed shakeout H's type refusal by user directive — see
-// kiwi_trim.cpp:77-114 for the argument.  A parametric shape is CONVERTED to a
-// KCON_POLYLINE at its current tessellation, and the conversion is not silent:
-// the HUD warns before the click.  A polygon and a spline were always trimmable,
-// because the store keeps both as KCON_POLYLINE (kiwi_construct.h §16b note).
+// Each click gets its own store-undo snapshot. PrepareTrim must finish before
+// KiwiCon_UndoPush: the push also creates a unified-journal ticket, and there is no
+// safe discard operation for a failed commit.
 //
-// ── THE MATH ────────────────────────────────────────────────────────────────
-// Intersections are 3D, because the store is 3D now (kiwi_construct.h ruling 3).
-// Two segments "cross" when their CLOSEST APPROACH is under KCON_ISECT_DIST
-// (0.25 world units) — KiwiCon_SegSegClosest, the same helper the SNAP_INTERSECTION
-// arm uses, so what trims is what snaps.  A true 3D line-line intersection test
-// would be exact-zero and therefore useless on floats.
-//
-// The hovered object is flattened into a cumulative ARC-LENGTH parameterisation.
-// Every crossing gives one parameter along it; the SPAN under the cursor is
-// bounded by the nearest crossing below and the nearest above, falling back to the
-// object's own ends.  That is the whole rule, and it is why the X in the user's
-// picture works: each tail is bounded by the crossing on one side and by an
-// endpoint on the other.
-//
-// ── KIWI-UX (ROUND BL, ITEM 2): …AND ON A DRAWN CHAIN, BY ITS OWN VERTICES ──
-// USER REPORT, verbatim: *"The trim tool still deletes the entire triangle when
-// used."*  For LINE / POLYLINE / RECT — the types whose segments are the edges the
-// user actually placed — the span is ALWAYS clamped to the hovered SEGMENT first,
-// and crossings may only narrow it further.  WHAT THE TICK MARKS IS WHAT DIES: a
-// closed triangle becomes an open two-segment chain, a rect an open three-segment
-// one, and only a bare two-point line (whose one segment IS the object) still goes
-// whole.  The paragraph above therefore describes CIRCLES and ARCS from this round
-// on: their "segments" are tessellation nobody drew, so they keep the arc-between-
-// crossings rule round AF item 4 shipped for exactly them.
-//
-// WHY THE CLAMP HAD TO BECOME AN INVARIANT.  Round BK computed the same segment
-// bounds but only consulted them when the crossing list was EMPTY, and a triangle
-// finished with Enter rather than by clicking its first point is stored as an OPEN
-// chain v0,v1,v2,v0 whose first and last segments share v0 — two self-crossings, at
-// parameters 0 and `total`, which the fallback bounds could not be improved by.
-// The span came out as the whole object and the click deleted the triangle.
-//
-// ── UNDO ────────────────────────────────────────────────────────────────────
-// ONE store-undo snapshot per TRIM CLICK (kiwi_construct.h ruling 2), not one per
-// command.  A trim session is a sequence of independent removals — Plasticity
-// makes each one its own command for exactly the same reason — and rolling five
-// of them back together would surprise anyone who only wanted the last one gone.
-//
-// THE PUSH IS THE LAST THING THAT CAN GO WRONG, and it has to be: since shakeout I
-// every KiwiCon_UndoPush ALSO mints a ticket in the unified journal (kiwi_undo.h),
-// and there is no "discard" spelling — KiwiCon_UndoPop RESTORES and is driven BY
-// the journal, so calling it to unwind a pointless push would leave an orphan
-// CONSTRUCTION ticket pointing at somebody else's snapshot.  The work is therefore
-// split: PrepareTrim reads the store and builds the two keep-lists with no
-// mutation and may decline; only once it has succeeded is the snapshot pushed, and
-// CommitTrim cannot decline.  No new store API, no journal surgery.
-//
-// ── THE KEY ─────────────────────────────────────────────────────────────────
-// Bare T in the modern profile.  vk 0x54's full occupancy in the compiled-in
-// table: mods 0 ViewTextures 33018 (mainfrm.cpp:998) · mods 1 ToggleTexMoveLock
-// 32785 (:1064) · mods 5 ThickenPatch 32904 (:999).  (NOT ToggleTexLock at mods 0
-// — that is 32785 and it is on Shift+T.)  mods 3 is free, so ViewTextures takes
-// the house two-step to Shift+Alt+T; it stays on the View menu and in the palette.
-// T is not in res/radiant.rc's accelerator table (:490-501), which matters because
-// TranslateAccelerator runs BEFORE the hotkey table and a collision there would
-// have been silent.
-// ─────────────────────────────────────────────────────────────────────────────
+// The modern keymap binds bare T; classic command registration remains unbound.
 
 class KiwiEditorCommand;
 

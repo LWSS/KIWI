@@ -1,10 +1,8 @@
 #ifndef KISAK_RADIANT
 #error this file is only for Radiant!
 #endif
-// kiwi_surfcache.cpp - mechanism for kiwi_surfcache.h.  It answers one question - "can
-// this frame's entity + prefab pass be replayed?" - and every uncertain answer is NO.
-// The answer has three values rather than two: the whole block, the
-// clean OBJECTS of the block, or nothing.
+// Replays the whole entity/prefab pass, only its clean object segments, or nothing;
+// every uncertain validity check refuses.
 
 #include "stdafx.h"
 #include <vector>
@@ -12,7 +10,7 @@
 #include <string.h>
 #include "qe3.h"                  // g_qeglobals (g_filtersUpdated), selbrush_t
 #include <gfx_d3d/r_gfx.h>        // GfxPointVertex (the cached line segments)
-#include "kiwi_walkcache.h"       // KiwiWalkCache_Epoch / _StructEpoch (kiwi_walkcache.h)
+#include "kiwi_walkcache.h"       // walk and structure epochs
 #include <universal/profile.h>
 #include "kiwi_surfcache.h"
 
@@ -33,13 +31,11 @@ extern bool __cdecl R_Ed_LineBucketAddSegs( const GfxPointVertex *verts, const u
 
 namespace
 {
-    // The blob cap.  Past it the cache refuses and the pass runs live for ever.
+    // Above 8 MiB, recording is refused to cap persistent command storage.
     const int KIWI_SURFCACHE_MAX_BLOB = 8 * 1024 * 1024;
-    // Past this many dispatched objects the segment bookkeeping is not worth its own
-    // memory; the block still caches, it just stops being patchable.
+    // Above this count the block still caches, but without per-object bookkeeping.
     const int KIWI_SURFCACHE_MAX_SEGS = 65536;
-    // ...and past this many CHANGED objects in one frame, redrawing them one by one is
-    // no cheaper than rebuilding, so the frame rebuilds.
+    // Above 256 dirty objects, rebuilding is cheaper than per-object patching.
     const int KIWI_SURFCACHE_MAX_DIRTY = 256;
 
     unsigned s_epoch      = 1;         // bumped by every invalidation funnel
@@ -56,7 +52,6 @@ namespace
     int      s_blobCritical = 0;       // of those, the CRITICAL ones
     float    s_blobEndColor[4] = { -2.0f, -2.0f, -2.0f, -2.0f };  // Ed_EmitLineBatch's dedup state
 
-    // ── the per-object segments ──────────────────────────────────────────────
     struct SurfSeg
     {
         const selbrush_t   *brush;
@@ -90,11 +85,10 @@ namespace
     std::vector< unsigned char >      s_segClean;    // per segment: 1 = replay it
     std::vector< unsigned long long > s_prevSigs;    // last frame's computed signatures
     unsigned                          s_prevStruct = 0;
-    // Set when the patch went wrong halfway: the frame still finishes (its records are
-    // already in the window), and the capture is torn down at PatchEnd instead.
+    // A mid-patch line failure defers teardown until appended records finish the frame.
     bool                              s_patchDropAtEnd = false;
 
-    int      s_serial   = 0;           // 0 = no valid capture; bumped on every rebuild
+    int      s_serial   = 0;           // 0 = no resident-run key
 
     bool Enabled()
     {
@@ -127,25 +121,14 @@ unsigned KiwiSurfCache_Epoch()
     return s_epoch;
 }
 
-// PER-BRUSH VB CHURN.  Editor_VB_Upload and R_Ed_FreeVertices fire from inside the draw
-// walk whenever a brush's faceVis is rebuilt, i.e. on the brush the user is dragging.
-//
-// It retires the WHOLE-BLOCK replay, which is the conservative thing and costs nothing:
-// that path is for frames in which nothing changed at all.
-//
-// It does NOT retire the SEGMENTS, and that is a claim about the vertex pool rather than
-// an optimism: an upload can only take space off the free list, so it can never land on a
-// range some other record still names; and a free can only return a range the brush being
-// rebuilt (or freed) owned, so the only records it endangers belong to an object that is
-// already either signature-dirty (its def->version was bumped by the same rebuild) or
-// gone (a free is structural, which invalidates everything).  A pool-level event is a
-// different statement and goes through KiwiSurfCache_InvalidateAll.
+// Per-brush VB churn retires whole replay but preserves segments. Uploads only consume
+// free space; frees affect a signature-dirty owner or a structural removal. Pool-wide
+// events use KiwiSurfCache_InvalidateAll.
 void KiwiSurfCache_Invalidate( const char *why )
 {
     ++s_epoch;
     s_lastWhy = why ? why : "(unnamed)";
-    // Do NOT free the storage here: this is called from edit funnels, and from
-    // Editor_VB_Upload inside a draw walk.  The SERIAL must go now - the runs name D3D9 VBs.
+    // May run inside a draw walk, so retain storage; resident runs name D3D9 VBs and drop now.
     s_have   = false;
     s_serial = 0;
     KiwiEdScene_DropMeshRuns();
@@ -163,8 +146,6 @@ int KiwiSurfCache_BuildSerial()
     return ( Enabled() && s_have ) ? s_serial : 0;
 }
 
-// ── the driver ──────────────────────────────────────────────────────────────
-
 bool KiwiSurfCache_TryReplay( unsigned passKey )
 {
     if ( !Enabled() || !s_have || s_recording )
@@ -179,13 +160,13 @@ bool KiwiSurfCache_TryReplay( unsigned passKey )
 
     PROF_SCOPED( "cam surf cache replay" );
 
-    // ORDER IS THE PASS'S OWN: records first, bytes second - the two streams are independent.
+    // Preserve pass order: surf records and command bytes are independent streams.
     if ( !KiwiEdScene_Replay() )
         return false;
     if ( !s_blob.empty()
       && !R_Ed_CmdAppendBlob( &s_blob[0], (int)s_blob.size(), s_blobCritical ) )
     {
-        // Half-replayed: drop the records too, or the live pass would double-draw them.
+        // Command replay failed after surf replay; discard the stored capture before fallback.
         KiwiEdScene_DropCapture();
         DropSegments();
         s_have = false;
@@ -225,9 +206,7 @@ void KiwiSurfCache_RecordNode( const selbrush_t *b, unsigned long long sig )
         return;
     }
 
-    // The LINE delta.  Any flush since the bracket opened (a capacity or group-table
-    // barrier, or the drain barrier a stray command trips) emitted everything the bucket
-    // held and restarted its numbering, so every range recorded before it is meaningless.
+    // Any line-bucket flush resets numbering and invalidates all recorded ranges.
     const int lineNow = R_Ed_LineBucketMark();
     if ( lineNow < s_recLineMark || R_Ed_LineBucketFlushCount() != s_recLineFlush )
     {
@@ -236,10 +215,8 @@ void KiwiSurfCache_RecordNode( const selbrush_t *b, unsigned long long sig )
     }
     const int lineCount = lineNow - s_recLineMark;
 
-    // Any command BYTES an object emitted are not attributable to it once the pass's own
-    // grouped flush is in the same blob, so an object that emits them is not patchable.
-    // In practice DrawBrush emits none: its lines go to the bucket and its geometry goes
-    // to the surf arrays.  Verified rather than assumed.
+    // Object-local command bytes cannot be separated from the grouped pass flush, so any
+    // such emission makes the capture unpatchable. DrawBrush normally emits lines/surfs.
     int cmdNow = 0;
     if ( !R_Ed_CmdCursor( &cmdNow ) || cmdNow != s_recCmdAfterNodes )
     {
@@ -280,8 +257,7 @@ void KiwiSurfCache_EndRecord()
         return;
     s_recording = false;
 
-    // An invalidation FROM INSIDE the pass (Editor_VB_Upload runs in the draw walk on a
-    // faceVis rebuild) means slots the records name may have been re-handed to another face.
+    // An in-pass VB upload/free can invalidate handles captured earlier in this pass.
     if ( s_epoch != s_recEpoch || KiwiWalkCache_Epoch() != s_recWalk )
     {
         KiwiEdScene_DropCapture();
@@ -329,15 +305,13 @@ void KiwiSurfCache_EndRecord()
     s_segmented  = segOk;
     if ( !segOk )
         DropSegments();
-    // A serial that never repeats, so the resident run table can only claim its own window.
+    // Issue a new resident-run key for this capture generation.
     if ( ++s_serial == 0 )
         s_serial = 1;
-    // The signatures this block was built from ARE last frame's, for the quiescence test.
+    // Require one observed patch frame before declaring changed signatures quiescent.
     s_prevSigs.clear();
     s_prevStruct = s_capStruct;
 }
-
-// ── the per-object path ──────────────────────────────────────────────────────
 
 bool KiwiSurfCache_PatchWanted( unsigned passKey )
 {
@@ -351,8 +325,7 @@ bool KiwiSurfCache_PatchWanted( unsigned passKey )
         && s_capPassKey == passKey;
 }
 
-// Called only AFTER KiwiSurfCache_TryReplay has already refused this frame — the caller
-// asks the cheap whole-block question first so an idle frame never pays for signatures.
+// Called after whole-block replay refuses, avoiding signature work on idle frames.
 int KiwiSurfCache_PassMode( unsigned passKey, selbrush_t *const *brushes,
                             const unsigned long long *sigs, int count )
 {
@@ -361,9 +334,7 @@ int KiwiSurfCache_PassMode( unsigned passKey, selbrush_t *const *brushes,
 
     if ( !KiwiSurfCache_PatchWanted( passKey ) || count <= 0 || !brushes || !sigs )
         return KIWI_SURFPASS_LIVE;
-    // The dispatch list and the recorded segments must be the SAME sequence.  The struct
-    // epoch above already says no object was added, removed, relinked or reclassified, so
-    // a mismatch here is a hole in that claim rather than an expected case: refuse.
+    // The structural epoch promises the same dispatch sequence; reject any mismatch.
     if ( (int)s_segs.size() != count )
         return KIWI_SURFPASS_LIVE;
 
@@ -381,9 +352,8 @@ int KiwiSurfCache_PassMode( unsigned passKey, selbrush_t *const *brushes,
             continue;                                  // unchanged: its records stand
         s_segClean[i] = 0;
         ++dirty;
-        // QUIESCENCE: a changed object whose signature is the same as LAST frame's has
-        // stopped moving, so folding it into a fresh block costs one live pass and buys
-        // back the presorted + resident-run path.  A drag never satisfies this.
+        // Rebuild once every dirty signature repeats, restoring the presorted resident-run
+        // path; an active drag keeps changing.
         if ( !sameFrameSet || sigs[i] == 0 || sigs[i] != s_prevSigs[i] )
             quiescent = false;
     }
@@ -394,8 +364,7 @@ int KiwiSurfCache_PassMode( unsigned passKey, selbrush_t *const *brushes,
 
     if ( dirty == 0 )
     {
-        // Everything is clean but the whole-block replay was refused above (the VB churn
-        // signal, most likely).  The block itself is still exactly right, so take it.
+        // Signatures prove the block valid despite the refused whole-block gate.
         s_capEpoch = s_epoch;
         s_capWalk  = KiwiWalkCache_Epoch();
         s_have     = true;
@@ -428,9 +397,7 @@ bool KiwiSurfCache_PatchReplay( int *sortedFirstOut, int *sortedCountOut )
 
     PROF_SCOPED( "cam surf cache patch replay" );
 
-    // The ABSOLUTE surf index the clean prefix starts at, so the flush can tell the prefix
-    // really is the head of its own window (a world fill ahead of it makes the claim
-    // false, and R_AddEditorSurfsCmd checks exactly that).
+    // Absolute start lets the flush reject the prefix claim when world surfs precede it.
     int windowFirst = 0;
     {
         KiwiEdSurfMark mark;
@@ -444,8 +411,7 @@ bool KiwiSurfCache_PatchReplay( int *sortedFirstOut, int *sortedCountOut )
         return false;
     }
 
-    // The clean objects' LINE SEGMENTS go back UNGROUPED, into the bucket the caller has
-    // open, so the live objects' lines land beside them and one grouping pass covers both.
+    // Replay clean line segments ungrouped so one pass groups them with live lines.
     for ( size_t i = 0; i < s_segs.size(); ++i )
     {
         if ( !s_segClean[i] || s_segs[i].lineCount <= 0 )
@@ -456,11 +422,8 @@ bool KiwiSurfCache_PatchReplay( int *sortedFirstOut, int *sortedCountOut )
                                       &s_capLineD[seg.lineFirst],
                                       seg.lineCount ) )
         {
-            // The bucket refused (closed, or out of room).  The records are already in, so
-            // this frame must still run to completion — tearing the segments down HERE
-            // would make ObjectDirty answer "yes" for everything and the caller would draw
-            // the clean objects a second time on top of their own replayed records.  The
-            // teardown is deferred to PatchEnd; the frame just loses those lines once.
+            // Clean records are already appended, so defer teardown to PatchEnd rather than
+            // make ObjectDirty double-draw them. This frame may lose unqueued clean lines.
             s_patchDropAtEnd = true;
             break;
         }

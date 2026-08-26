@@ -1,20 +1,20 @@
 #ifndef KISAK_RADIANT
 #error this file is only for Radiant!
 #endif
-// kiwi_viewdirty.cpp - mechanism for kiwi_viewdirty.h.  Every uncertain answer is "no".
+// Dirty-gates the XY and Z RTTs; unknown state renders.
 
 #include "stdafx.h"
-#include "qe3.h"                  // qedefs.h -> W_XY / W_XY_OVERLAY / W_Z / W_Z_OVERLAY
-#include "mainfrm.h"              // camera_s — kiwi_command.h's prerequisite (as kiwi_boxselect.cpp:31)
-#include "xywnd.h"                // XYWnd_OverlayIsLive (xywnd.h:35)
-#include "kiwi_command.h"         // KiwiCmd_Active (kiwi_command.h:1133)
+#include "qe3.h"
+#include "mainfrm.h"
+#include "xywnd.h"
+#include "kiwi_command.h"
 #include "kiwi_viewdirty.h"
 
 namespace
 {
     struct viewDirty_t
     {
-        bool dirty     = true;    // nothing has been rendered yet — render once
+        bool dirty     = true;    // force the initial render
         bool everDrawn = false;
         int  w         = -1;
         int  h         = -1;
@@ -22,15 +22,14 @@ namespace
     };
     viewDirty_t s_view[KIWI_DIRTYVIEW_COUNT];
 
-    unsigned s_tick        = 0;   // pump ticks, advanced by KiwiViewDirty_EndTick
-    // The tick the heartbeat last granted a render on: at most one view per tick.
-    // s_tick starts at 0, so seed this out of band.
+    unsigned s_tick        = 0;
+    // Shared across views to stagger heartbeat renders; -1 leaves tick zero available.
     unsigned s_lastBeatTick = (unsigned)-1;
 
-    // The force-dirty predicate: state that no g_nUpdateBits site announces.
+    // Inputs that change overlays without setting g_nUpdateBits.
     bool OverlayForcesRender( kiwiDirtyView_t view )
     {
-        // A modal KIWI tool previews every frame without invalidating anything.  BOTH views.
+        // Active commands can animate previews in both 2D views without invalidating them.
         if ( KiwiCmd_Active() )
             return true;
         if ( view == KIWI_DIRTYVIEW_XY )
@@ -53,7 +52,6 @@ void KiwiViewDirty_MarkAll()
 
 void KiwiViewDirty_MarkFromUpdateBits( int bits )
 {
-    // The SAME masks Radiant_UpdateWindows dispatches its RedrawWindow calls on.
     if ( bits & ( W_XY | W_XY_OVERLAY ) )
         s_view[KIWI_DIRTYVIEW_XY].dirty = true;
     if ( bits & ( W_Z | W_Z_OVERLAY ) )
@@ -63,7 +61,7 @@ void KiwiViewDirty_MarkFromUpdateBits( int bits )
 bool KiwiViewDirty_ShouldRender( kiwiDirtyView_t view, int w, int h )
 {
     if ( (int)view < 0 || (int)view >= (int)KIWI_DIRTYVIEW_COUNT )
-        return true;                                   // unknown view -> render
+        return true;                                   // unknown view: fail open
     viewDirty_t &s = s_view[view];
 
     // Correctness, not optimisation: a size change makes RTT recreate the texture.
@@ -73,8 +71,8 @@ bool KiwiViewDirty_ShouldRender( kiwiDirtyView_t view, int w, int h )
          && s_lastBeatTick != s_tick
          && ( s_tick - s.lastTick ) >= (unsigned)KIWI_VIEWDIRTY_HEARTBEAT_TICKS )
     {
-        render         = true;                         // the missed-source insurance
-        s_lastBeatTick = s_tick;                       // ...one view per tick, staggered
+        render         = true;
+        s_lastBeatTick = s_tick;
     }
 
     if ( !render && OverlayForcesRender( view ) )

@@ -1,13 +1,7 @@
 #ifndef KISAK_RADIANT
 #error this file is only for Radiant!
 #endif
-// ─────────────────────────────────────────────────────────────────────────────
-// kiwi_offset.cpp — ROUND J: OFFSET CURVE (O).  See kiwi_offset.h for the
-// Plasticity source, the plane rules, the miter/bevel joins and the refusal list.
-//
-// NEW code.  It touches NO map data: the whole file works on the construction
-// store, which is editor-only scaffolding.
-// ─────────────────────────────────────────────────────────────────────────────
+// Offset Curve works only on the editor construction store, never map data.
 
 #include "stdafx.h"
 #include "qe3.h"
@@ -21,43 +15,31 @@
 #include "kiwi_pick.h"
 #include "kiwi_region.h"
 #include "kiwi_units.h"
-#include "kiwi_vec.h"     // KIWI-UX (CLEANUP, A-15): the one spelling of Dot3/Sub3/...
+#include "kiwi_vec.h"     // Dot3/Sub3/...
 
 #include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <vector>
 
-// ── ported entry points (each verified against its DEFINITION) ─────────────
-//   win_qe3.cpp:112        int  Sys_Printf( const char *fmt, ... )
 //   engine_stubs.cpp:773   int  g_nUpdateBits = 0;   // 0x25d5a74
-//   mainfrm.cpp:1340       bool Radiant_RegisterCommand( const char *name, byte vk,
-//                                                        byte mods, int commandId )
 extern int  Sys_Printf( const char *fmt, ... );
 extern int  g_nUpdateBits;
 extern bool Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId );
 
 namespace
 {
-    // §18 palette: the live offset preview is construction ROSE like the geometry
-    // it parallels, and turns RED the moment the result is refused — the same two
-    // colours kiwi_fillet.cpp:43-44 uses for exactly the same "this will / will
-    // not commit" message.  (kiwi_bevel.cpp is a DIFFERENT §18 family: blue OK,
-    // its own red.)  KIWI-UX (CLEANUP, B-2)
-    // KIWI-UX (CLEANUP, B-9): ONE palette entry now, shared with kiwi_fillet.cpp
-    // (KCON_PREVIEW_OK / _BAD, kiwi_construct.h).  Local names kept.
+    // Shared construction preview palette.
     #define KOFF_COL_OK  KCON_PREVIEW_OK
     #define KOFF_COL_BAD KCON_PREVIEW_BAD
 
-    // ONE named LENGTH field (shakeout E).  Static storage: the numeric layer
-    // copies the structs but never the label string (kiwi_numeric.h).
+    // Numeric field copies retain label pointers, so labels need static storage.
     const kiwiNumField_t KOFF_FIELDS[1] = { { "offset", KNUM_LENGTH, false } };
 
 
     inline float Cross2( float ax, float ay, float bx, float by ) { return ax*by - ay*bx; }
 
-    // ── the source, resolved from the construction selection ────────────────
-    // The FIRST selected object, at any granularity (kiwi_offset.h).  -1 = none.
+    // Selection sub-items resolve to their owning construction object.
     int SelectedObject()
     {
         const int n = KiwiConSel_Count();
@@ -77,17 +59,14 @@ namespace
         return (int)( o.pts.size() / 3 ) >= 2;           // LINE / POLYLINE / RECT
     }
 
-    // ── THE PLANE (kiwi_offset.h "THE PLANE IT OFFSETS IN") ─────────────────
     // Returns false with `why` set when there is no sideways to offset along.
     bool PlaneFor( const kconObject_t &o, kconPlane_t *out, const char **why )
     {
         if ( KiwiCon_ObjectPlane( o, out ) )
             return true;
 
-        // A straight chain.  Newell refused it, correctly — it determines no plane
-        // of its own — so the ACTIVE construction plane's normal decides, exactly
-        // as Plasticity feeds its factory the viewport's construction plane
-        // (OffsetCurveCommand.ts:15).
+        // A straight chain has no fitted plane, so the active-plane normal supplies
+        // sideways and is orthogonalised to make the resulting plane contain it.
         const int n = (int)( o.pts.size() / 3 );
         if ( n < 2 )
         {
@@ -128,7 +107,6 @@ namespace
         return true;
     }
 
-    // ── plane-space chain, duplicates culled ────────────────────────────────
     bool ToPlaneChain( const kconObject_t &o, const kconPlane_t &plane,
                        std::vector<float> *out )
     {
@@ -151,8 +129,7 @@ namespace
             out->push_back( uv[0] );
             out->push_back( uv[1] );
         }
-        // A closed chain must not repeat its first point (the §8 toolkit's own
-        // convention — kiwi_region.h kregion_t::pts "first point NOT repeated").
+        // Closed plane-space rings omit a repeated first/last point.
         const int have = (int)( out->size() / 2 );
         if ( o.closed && have >= 2 )
         {
@@ -164,16 +141,14 @@ namespace
         return (int)( out->size() / 2 ) >= 2;
     }
 
-    // Do two NON-ADJACENT segments of an OPEN chain cross?  The closed case uses
-    // KiwiRegion_SelfIntersects instead (kiwi_offset.h REFUSALS): that helper reads
-    // its input as a RING, which an open chain is not.
+    // Open chains need a non-ring crossing test; KiwiRegion_SelfIntersects closes input.
     bool SegCross2D( const float *a0, const float *a1, const float *b0, const float *b1 )
     {
         const float d1x = a1[0]-a0[0], d1y = a1[1]-a0[1];
         const float d2x = b1[0]-b0[0], d2y = b1[1]-b0[1];
         const float den = Cross2( d1x, d1y, d2x, d2y );
         if ( fabsf( den ) < 1.0e-9f )
-            return false;                                // parallel: never "crosses"
+            return false;                                // parallel or collinear
         const float sx = b0[0]-a0[0], sy = b0[1]-a0[1];
         const float t = Cross2( sx, sy, d2x, d2y ) / den;
         const float u = Cross2( sx, sy, d1x, d1y ) / den;
@@ -192,18 +167,14 @@ namespace
         return false;
     }
 
-    // ── THE 2D OFFSET ───────────────────────────────────────────────────────
-    // `src` is a plane-space chain (2 floats per point, first point NOT repeated
-    // when closed).  Positive `d` is the direction of each edge's `Normal` below.
-    // Returns false with `why` set on a refusal.
+    // Plane-space points are uv pairs; closed chains omit a repeated endpoint.
+    // Positive `d` follows EdgeNormal; refusals set `why`.
     void EdgeNormal( const float *p0, const float *p1, bool flip, float *out )
     {
         float ex = p1[0] - p0[0], ey = p1[1] - p0[1];
         const float len = sqrtf( ex*ex + ey*ey );
         if ( len > 1.0e-9f ) { ex /= len; ey /= len; }
-        // For a CCW loop (signed area > 0) the OUTWARD normal of an edge walked in
-        // winding order is ( e.y, -e.x ) — check it on the unit square:
-        // (0,0)->(1,0) gives (0,-1), which points away from the interior.
+        // With u x v == normal, a CCW edge's outward normal is (e.y, -e.x).
         out[0] = flip ? -ey :  ey;
         out[1] = flip ?  ex : -ex;
     }
@@ -219,20 +190,13 @@ namespace
             return false;
         }
 
-        // SIGN.  A closed loop's own winding decides which side "outward" is; an
-        // open chain has no outward, so positive is the right of travel and the
-        // flip is never applied (kiwi_offset.h SIGN).
+        // Closed winding decides outward; open positive distance is right of travel.
         bool flip = false;
         float area0 = 0.0f;
         if ( closed )
         {
             area0 = KiwiRegion_SignedArea( src );
-            // A "closed" chain with NO AREA is collinear (or under three points):
-            // KiwiRegion_SignedArea returns exactly 0 for both (kiwi_region.cpp:
-            // 884-886).  It has no inside, so it has no outward, and the
-            // winding-flip refusal below cannot fire on it either — `area0 > 0` is
-            // false and a negative result would compare equal.  Refuse here, where
-            // the reason is still knowable.
+            // A zero-area closed chain has no outward side; refuse before winding tests.
             if ( area0 == 0.0f )
             {
                 *why = "the loop encloses no area";
@@ -242,7 +206,7 @@ namespace
         }
 
         const int edges = closed ? n : ( n - 1 );
-        std::vector<float> nrm;                          // 2 floats per EDGE
+        std::vector<float> nrm;                          // uv normal per edge
         nrm.resize( (size_t)edges * 2 );
         for ( int i = 0; i < edges; ++i )
             EdgeNormal( &src[(size_t)i*2], &src[( (size_t)( i + 1 ) % n )*2],
@@ -250,14 +214,12 @@ namespace
 
         const float miterMax = KOFF_MITER_LIMIT * fabsf( d );
 
-        // Emit the joint between edge `prev` and edge `next` at vertex `v`.
-        // Written as a lambda-free helper loop so the open/closed cases share it.
+        // Emit the prev/next join at each vertex.
         const int firstJoint = closed ? 0 : 1;
         const int lastJoint  = closed ? n : ( n - 1 );
 
         if ( !closed )
         {
-            // The free start: the first edge's shifted origin.
             out->push_back( src[0] + nrm[0] * d );
             out->push_back( src[1] + nrm[1] * d );
         }
@@ -270,15 +232,12 @@ namespace
             const float *np = &nrm[(size_t)prev*2];
             const float *nn = &nrm[(size_t)nxt*2];
 
-            // The two shifted lines: through v+np*d with direction perp(np), and
-            // through v+nn*d with direction perp(nn).  Their intersection is the
-            // miter point; `cross` is the sine of the turn.
+            // Intersect the two shifted lines; `cross` is the sine of their turn.
             const float cross = Cross2( np[0], np[1], nn[0], nn[1] );
             const float dot   = np[0]*nn[0] + np[1]*nn[1];
 
             if ( fabsf( cross ) < 1.0e-6f && dot > 0.0f )
             {
-                // Collinear continuation — one point, shifted.
                 out->push_back( v[0] + nn[0] * d );
                 out->push_back( v[1] + nn[1] * d );
                 continue;
@@ -288,9 +247,7 @@ namespace
             float mx = 0.0f, my = 0.0f;
             if ( !bevel )
             {
-                // Miter direction is the normalised sum of the two normals; its
-                // length along that sum is |d| / cos(half-angle), and
-                // cos(half-angle)^2 == (1 + dot)/2.
+                // The unit normal sum is the miter direction; |np + nn| / 2 is cosHalf.
                 float sx = np[0] + nn[0], sy = np[1] + nn[1];
                 const float slen = sqrtf( sx*sx + sy*sy );
                 if ( slen < 1.0e-6f )
@@ -328,13 +285,11 @@ namespace
 
         if ( !closed )
         {
-            // The free end: the last edge's shifted terminus.
             const int e = edges - 1;
             out->push_back( src[( (size_t)n - 1 )*2 + 0] + nrm[(size_t)e*2 + 0] * d );
             out->push_back( src[( (size_t)n - 1 )*2 + 1] + nrm[(size_t)e*2 + 1] * d );
         }
 
-        // ── the refusals (kiwi_offset.h) ────────────────────────────────────
         const int m = (int)( out->size() / 2 );
         if ( m < 2 )
         {
@@ -368,10 +323,7 @@ namespace
         return true;
     }
 
-    // ── the SIGNED distance from a plane-space point to the chain ───────────
-    // This is what maps the DRAG: the offset goes where the cursor is, so the user
-    // never has to know the sign convention.  The sign uses the SAME per-edge
-    // normal the offset itself uses, so the two can never disagree.
+    // Drag sign uses the same nearest-edge normals as the offset.
     float SignedDistance2D( const std::vector<float> &src, bool closed,
                             float px, float py )
     {
@@ -409,19 +361,8 @@ namespace
         if ( !have )
             return 0.0f;
 
-        // A CW loop's normals are mirrored by OffsetChain2D's `flip`, so the sign
-        // above — computed with the UNFLIPPED normal — has to be mirrored too, or
-        // dragging outward on a CW loop would offset inward.  One global flip from
-        // the same KiwiRegion_SignedArea the offset itself reads, so the two cannot
-        // disagree about which side is which.
-        //
-        // WHAT THIS DOES NOT DO: it is still a NEAREST-EDGE sign, not a
-        // point-in-polygon test, so past the loop's medial axis (deep inside a
-        // notch, further from every edge than the notch is wide) the nearest edge
-        // can be one whose normal points the other way.  The cursor has to be a
-        // long way inside a concave shape for that, and the consequence is a
-        // sign flip in the DRAG only — the offset itself is unaffected, and the
-        // typed field is always exact.
+        // OffsetChain2D mirrors CW normals, so mirror drag sign from the same area test.
+        // Nearest-edge sign can flip past a concave loop's medial axis; typing stays exact.
         if ( closed )
         {
             const float area = KiwiRegion_SignedArea( src );
@@ -431,9 +372,6 @@ namespace
         return best * bestSign;
     }
 
-    // ═══════════════════════════════════════════════════════════════════════
-    //  The command.
-    // ═══════════════════════════════════════════════════════════════════════
     class KiwiOffsetCommand : public KiwiEditorCommand
     {
     public:
@@ -459,8 +397,7 @@ namespace
         {
             if ( !m_have || m_preview.empty() )
                 return false;
-            // The middle of the offset chain — the geometry the value describes,
-            // which is what §13b asks for.
+            // Anchor the value to the middle preview vertex.
             const int n = (int)( m_preview.size() / 3 );
             const int k = n / 2;
             out3[0] = m_preview[(size_t)k*3 + 0];
@@ -510,15 +447,8 @@ namespace
 
         void Rebase() override
         {
-            // A PAUSED -> HOT edge: re-latch the raw scalar under the cursor so
-            // resuming does not jump the offset by however far the cursor wandered.
-            //
-            // THE `keep` IS NOT OPTIONAL.  The mapping is a DELTA from `m_start`
-            // (Recompute below), so re-latching `m_start = raw` alone makes the very
-            // next Recompute produce ZERO — resume a 32-unit offset and it collapses
-            // to "distance too small" the instant you press LMB.  Biasing the new
-            // origin by the current value is what makes the cursor reproduce it, and
-            // it is the same three lines kiwi_extrude.cpp:291-299 uses.
+            // Re-latch on PAUSED -> HOT; bias the delta origin by the current value
+            // so resuming neither jumps nor resets the offset.
             const float keep = m_dist;
             m_haveStart = false;
             LatchStart();
@@ -554,9 +484,7 @@ namespace
                 return;
             }
 
-            // Build the object from the ALREADY-VALIDATED preview.  Nothing below
-            // can decline, which is why the snapshot is pushed here and not before
-            // (kiwi_offset.h UNDO; the lesson is kiwi_trim.cpp's).
+            // Build from the offset-validated preview; push construction undo before add.
             kconObject_t o;
             if ( m_parametric )
             {
@@ -565,7 +493,7 @@ namespace
                 {
                     Sys_Printf( "Offset: the object went away.\n" );
                     Reset();
-                    g_nUpdateBits |= 1;       // …and drop the dead preview with it
+                    g_nUpdateBits |= 1;       // redraw after Reset clears the preview
                     return;
                 }
                 o        = *src;                          // centre / plane / sweep kept
@@ -583,10 +511,7 @@ namespace
             const int added = KiwiCon_Add( o );
             if ( added < 0 )
             {
-                // KiwiCon_Add's own rejection (the store's point cap).  The push is
-                // already spent; leaving it is the honest outcome — one Ctrl+Z
-                // restores a store that did not change, which is strictly better
-                // than stranding a journal ticket (kiwi_trim.cpp's note).
+                // Store validation failed after the undo snapshot was pushed.
                 Sys_Printf( "Offset: the store refused the new object.\n" );
             }
             else
@@ -602,7 +527,6 @@ namespace
 
         void Cancel() override
         {
-            // The gesture stored nothing, so there is nothing to roll back.
             Reset();
             g_nUpdateBits |= 1;
         }
@@ -641,8 +565,7 @@ namespace
             m_preview.clear();
         }
 
-        // The cursor's raw scalar in the offset's own units: for a chain the signed
-        // in-plane distance to it, for a circle/arc the signed change in radius.
+        // Chain scalars are signed in-plane distance; parametric scalars change radius.
         bool RawScalar( float *out ) const
         {
             int cx = 0, cy = 0;
@@ -671,8 +594,7 @@ namespace
             return true;
         }
 
-        // The parametric source's centre (plane space), read live so a store edit
-        // cannot leave a stale copy behind.  Returns the origin when it has gone.
+        // Read the plane-space centre live; a missing source falls back to the origin.
         const float *SrcCentre() const
         {
             static const float zero[2] = { 0.0f, 0.0f };
@@ -689,7 +611,7 @@ namespace
             m_haveStart = true;
         }
 
-        // §6 numeric hygiene: quantise the SCALAR, never the cursor point.
+        // Quantise the world-unit scalar, never the cursor point.
         float SnapScalar( float d ) const
         {
             const float g = KiwiUnits_GridSpacingWorld();
@@ -772,9 +694,7 @@ namespace
             UpdateHud();
         }
 
-        // The circle/arc preview is drawn from the SAME tessellation rule the store
-        // uses, by building a throwaway object and asking it — so the preview and
-        // the committed object can never be different shapes.
+        // Use store tessellation so preview and committed parametric geometry match.
         void BuildParametricPreview( const kconObject_t &src, float radius )
         {
             kconObject_t tmp = src;
@@ -834,7 +754,6 @@ namespace
     KiwiOffsetCommand s_offset;
 }
 
-// ─── the public surface ──────────────────────────────────────────────────────
 bool KiwiOffset_CanOffset()
 {
     const int idx = SelectedObject();
@@ -846,10 +765,8 @@ bool KiwiOffset_CanOffset()
 
 void KiwiOffset_RegisterCommands()
 {
-    // Unbound here — the CLASSIC-profile row.  kiwi_keymap.cpp puts Offset on the
-    // bare O in the modern profile (Plasticity's own key,
-    // default-keymap.ts:268), with the ViewConsole displacement; the audit is in
-    // kiwi_keymap.h.
+    // Classic leaves this unbound; the modern keymap assigns Plasticity's O and
+    // displaces ViewConsole (kiwi_keymap.h).
     Radiant_RegisterCommand( "KiwiOffsetCurve", 0, 0, KIWI_CMD_OFFSET_CURVE );
 }
 

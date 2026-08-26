@@ -1,13 +1,12 @@
 #pragma once
-//  kiwi_modelcache.h - static geometry for rigid XModel LOD-0 surfaces, uploaded once
-//  per unique XSurface and drawn by stream offset thereafter.  MANAGED: nothing to
-//  free on device reset; only shutdown and a device change drop it.
+// Static rigid XModel LOD-0 geometry cached per XSurface in D3DPOOL_MANAGED buffers.
+// Managed buffers survive reset; shutdown or device replacement drops the cache.
 
 struct XSurface;
 struct IDirect3DVertexBuffer9;
 struct IDirect3DIndexBuffer9;
 
-// One cached surface: where its verts and its indices live inside the pool.
+// One surface's vertex and index runs within the pool.
 struct KiwiModelGeo
 {
     IDirect3DVertexBuffer9 *vb;                // pool chunk holding the verts
@@ -18,14 +17,13 @@ struct KiwiModelGeo
     unsigned                triCount;          // == XSurfaceGetNumTris( xsurf )
 };
 
-// Look up - and, the first time, BUILD - the static geometry for one rigid model
-// surface.  False = not cacheable (no device, no verts0, pool full, earlier failure):
-// the caller MUST fall back to the per-frame dynamic upload.  Never asserts.
+// Build or retrieve one rigid surface. False requires the caller's per-frame dynamic
+// upload fallback (invalid input, pool/table exhaustion, or any earlier failure).
 bool KiwiModelCache_Get( const XSurface *xsurf, KiwiModelGeo *out );
 
 // Release every pooled buffer.  The device must still be alive.  Idempotent.
 void KiwiModelCache_Shutdown();
 
-// Tracy magnitudes, published once per front-end frame by r_ed_scene.cpp.
+// Resident-cache metrics for diagnostics.
 int KiwiModelCache_ResidentSurfs();
 int KiwiModelCache_ResidentKB();

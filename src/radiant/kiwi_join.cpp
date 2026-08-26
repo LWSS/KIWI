@@ -1,15 +1,7 @@
 #ifndef KISAK_RADIANT
 #error this file is only for Radiant!
 #endif
-// ─────────────────────────────────────────────────────────────────────────────
-// kiwi_join.cpp — SHAKEOUT G implementation.  See kiwi_join.h for the Plasticity
-// finding (its `j` is CURVES ONLY; its face-merge command is an empty body), the
-// three arms, the same-infinite-plane coplanarity test and why the face arm
-// reaches CSG_Merge through the CLASSIC command id rather than calling it.
-//
-// NEW code over the ported cores.  It selects and dispatches; it computes no
-// geometry and owns no undo bracket.
-// ─────────────────────────────────────────────────────────────────────────────
+// Context-sensitive Join dispatch; geometry and undo remain in existing cores.
 
 #include "stdafx.h"
 #include "qe3.h"
@@ -18,12 +10,12 @@
 #include "kiwi_command.h"
 #include "kiwi_conselect.h"
 #include "kiwi_selection.h"
-#include "kiwi_validity.h"          // KVALID_PLANE_DOT / KVALID_PLANE_DIST (§19's own)
-#include "kiwi_vec.h"     // KIWI-UX (CLEANUP, A-15): the one spelling of Dot3/Sub3/...
+#include "kiwi_validity.h"          // plane-comparison tolerances
+#include "kiwi_vec.h"     // vector helpers
 
 #include <math.h>
 
-// ── ported entry points (each verified against its definition) ──────────────
+// Ported entry points.
 extern int  Sys_Printf( const char *fmt, ... );                        // win_qe3.cpp
 extern void Select_Deselect( int bAlsoFreeFaces );                     // select.cpp:1444 (0x48E800)
 extern void Select_Brush( selbrush_t *brush, char some_overwrite,
@@ -33,8 +25,7 @@ extern void Radiant_ExecCommand( unsigned int cmdId );                 // mainfr
 namespace
 {
 
-    // The two selected FACE items, when there are EXACTLY two of them.  Returns
-    // false for any other count, which is the whole precondition of arm (a).
+    // Return exactly two live face items.
     bool TwoFaces( sel_item_t *a, sel_item_t *b )
     {
         const selection_t &sel = KiwiSel();
@@ -62,17 +53,8 @@ namespace
         return &it.brush->def->faces[it.faceIndex];
     }
 
-    // ── THE SAME-INFINITE-PLANE TEST (kiwi_join.h spells out why) ───────────
-    // |dot(n1,n2)| > KVALID_PLANE_DOT AND |d1 - sign(dot)*d2| < KVALID_PLANE_DIST.
-    // The MAGNITUDE is what is tested, not the signed dot: two brushes stacked
-    // against each other share a plane whose outward normals point AT each other,
-    // which is precisely the arrangement this verb exists to simplify.  The
-    // constant is matched with the sign so the distance comparison stays honest
-    // for the flipped case.
-    //
-    // Face planes carry (normal, dist) with the interior at n·p <= dist — the same
-    // convention §19's V5/V6 checks read (kiwi_validity.h), so the two tests agree
-    // by construction rather than by coincidence.
+    // Opposed normals may share a plane; compare |dot| and sign-adjusted distances
+    // (world units, n·p <= dist) at the validity tolerances.
     bool SameInfinitePlane( const face_t *f1, const face_t *f2 )
     {
         if ( !f1 || !f2 )
@@ -84,24 +66,8 @@ namespace
         return fabsf( f1->plane.dist - sign * f2->plane.dist ) < KVALID_PLANE_DIST;
     }
 
-    // ── ARM (a): two coplanar faces on two brushes -> merge the owners ──────
-    // WHAT THIS DOES NOT DO: any CSG.  CSG_Merge's contract is "merge everything
-    // on selected_brushes" and it takes no arguments (csg.cpp:572-579), so the
-    // only thing to decide here is WHAT IS SELECTED when it runs.  Driving that
-    // through the ported funnels (Select_Deselect, then Select_Brush per brush —
-    // select.cpp:884) and then running the CLASSIC id keeps exactly one handler,
-    // one undo record and one console report per merge:
-    //
-    //   Radiant_ExecCommand( 32927 ) -> Cmd_OnSelectionCsgmerge (mainfrm.cpp:2312)
-    //     KiwiCsg_NoteBefore / Undo_ClearRedo / Undo_GeneralStart("CSG merge") /
-    //     Undo_AddBrushList / CSG_Merge / Undo_EndBrushList / Undo_End /
-    //     KiwiCsg_NoteAfter
-    //
-    // Every refusal (fixed-size entities, patches, different owner entities, a
-    // non-convex hull) is CSG_Merge's own and is printed by CSG_Merge, which also
-    // re-adds the originals on its own failure path (csg.cpp:620+).  This file
-    // therefore refuses only the things CSG_Merge cannot see: fewer or more than
-    // two faces, both faces on one brush, and non-coplanar planes.
+    // CSG_Merge consumes selected_brushes; command 32927 owns its undo/reporting
+    // and restores the originals on refusal (csg.cpp:572, 0x47DA40).
     bool JoinFaces()
     {
         sel_item_t a, b;
@@ -111,7 +77,7 @@ namespace
         {
             Sys_Printf( "Join: those two faces are on the SAME brush — select one "
                         "face on each of two brushes.\n" );
-            return true;                     // the arm MATCHED; it just refused
+            return true;                     // the face arm claimed the command
         }
         if ( !SameInfinitePlane( FaceOf( a ), FaceOf( b ) ) )
         {
@@ -120,19 +86,16 @@ namespace
             return true;
         }
 
-        // The typed selection is about to become meaningless (the two brushes
-        // become one), so it is dropped BEFORE the merge rather than left naming
-        // faces of a freed def.
+        // Drop typed face references before the merge replaces their brush defs.
         Sel_Clear( KiwiSel() );
         Select_Deselect( 1 );
         Select_Brush( a.brush, 0, 0, 0 );
         Select_Brush( b.brush, 0, 0, 0 );
-        Radiant_ExecCommand( 32927 );        // the one CSG-merge handler
+        Radiant_ExecCommand( 32927 );        // classic undo-wrapped CSG merge
         return true;
     }
 }
 
-// ─── §3 canExecute ───────────────────────────────────────────────────────────
 bool KiwiJoin_CanJoin()
 {
     sel_item_t a, b;
@@ -142,11 +105,8 @@ bool KiwiJoin_CanJoin()
     return KiwiConSel_CanJoin();
 }
 
-// ─── the CONTEXT verb ────────────────────────────────────────────────────────
-// ORDER: faces first, lines second.  The two selections are parallel and can both
-// be non-empty (kiwi_conselect.h), and a brush-side selection is what every other
-// command in the editor reads first, so J agrees with the rest of the editor
-// rather than inventing a second precedence.
+// The face-arm check precedes construction selection when both stores are populated,
+// matching the rest of the editor's brush-first command ordering.
 bool KiwiJoin_DispatchInstant( unsigned int commandId )
 {
     if ( commandId != KIWI_CMD_JOIN )
@@ -156,7 +116,7 @@ bool KiwiJoin_DispatchInstant( unsigned int commandId )
         return true;
     if ( KiwiConSel_CanJoin() )
     {
-        KiwiConSel_Join();                   // the shakeout-F chain walker
+        KiwiConSel_Join();                   // chain selected construction lines
         return true;
     }
 
@@ -166,7 +126,6 @@ bool KiwiJoin_DispatchInstant( unsigned int commandId )
     return true;
 }
 
-// ─── registration ────────────────────────────────────────────────────────────
 void KiwiJoin_RegisterCommands()
 {
     extern bool Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId );

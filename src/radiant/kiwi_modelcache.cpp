@@ -1,23 +1,22 @@
 #ifndef KISAK_RADIANT
 #error this file is only for Radiant!
 #endif
-// kiwi_modelcache.cpp - mechanism for kiwi_modelcache.h.  Single-threaded.
+// Static XSurface geometry cache; single-threaded.
 
 #include "stdafx.h"
 #include <d3d9.h>
 #include <string.h>
-#include <gfx_d3d/r_init.h>        // dx — the D3D9 device (r_init.h:463)
-#include <gfx_d3d/r_xsurface.h>    // XSurfaceGetNumVerts / XSurfaceGetNumTris (r_xsurface.h:7-8)
-#include <gfx_d3d/r_dobj_skin.h>   // -> r_scene.h -> xanim.h: the full XSurface (xanim.h:1175)
+#include <gfx_d3d/r_init.h>        // dx.device
+#include <gfx_d3d/r_xsurface.h>    // surface count helpers
+#include <gfx_d3d/r_dobj_skin.h>   // XSurface definition
 #include "kiwi_modelcache.h"
 
-// win_qe3.cpp:122 — int Sys_Printf( const char *fmt, ... )
 extern int Sys_Printf( const char *fmt, ... );
 
 namespace
 {
 
-// One chunk holds 131,072 verts; an XSurface can never need more than 65,536 (uint16).
+// A 4 MB chunk holds 131,072 packed verts; one XSurface has at most 65,535.
 const unsigned KMC_VB_CHUNK_BYTES = 4u * 1024u * 1024u;
 const unsigned KMC_IB_CHUNK_BYTES = 1u * 1024u * 1024u;   // >= 65,535 tris * 6 B
 const int      KMC_MAX_VB_CHUNKS  = 32;                   // 128 MB cap
@@ -36,7 +35,7 @@ struct Entry
 
 Entry                    s_table[KMC_TABLE_SIZE];
 int                      s_entryCount;   // slots claimed (successes AND refusals)
-int                      s_okCount;      // slots that really hold geometry — the plotted number
+int                      s_okCount;      // successful geometry entries
 
 IDirect3DVertexBuffer9  *s_vbChunk[KMC_MAX_VB_CHUNKS];
 unsigned                 s_vbUsed[KMC_MAX_VB_CHUNKS];
@@ -46,12 +45,12 @@ IDirect3DIndexBuffer9   *s_ibChunk[KMC_MAX_IB_CHUNKS];
 unsigned                 s_ibUsed[KMC_MAX_IB_CHUNKS];
 int                      s_ibChunkCount;
 
-// The device every chunk was created on - the guard against a device recreate.
+// Device identity used to detect recreation.
 IDirect3DDevice9        *s_device;
 
 unsigned                 s_residentBytes;
 
-// One "the pool is full" line per session — a diagnostic, not a log.
+// Report only the first cache refusal per session.
 bool                     s_reportedFull;
 
 unsigned KMC_HashPtr( const XSurface *p )
@@ -64,7 +63,7 @@ unsigned KMC_HashPtr( const XSurface *p )
     return h;
 }
 
-// The slot for `xsurf`: its entry, or the free slot it would take.  Null = table full.
+// Return the matching slot or first free slot; null means full.
 Entry *KMC_Slot( const XSurface *xsurf )
 {
     unsigned i = KMC_HashPtr( xsurf ) & KMC_TABLE_MASK;
@@ -78,7 +77,7 @@ Entry *KMC_Slot( const XSurface *xsurf )
     return nullptr;
 }
 
-// Drop every record without touching D3D - for the device-changed guard.
+// Clear records without releasing buffers; used by the device-identity guard.
 void KMC_Forget()
 {
     memset( s_table, 0, sizeof( s_table ) );
@@ -94,7 +93,6 @@ void KMC_Forget()
     s_reportedFull  = false;
 }
 
-// Bump-allocate `bytes` of vertex space; returns the chunk + byte offset, or false.
 bool KMC_AllocVerts( unsigned bytes, IDirect3DVertexBuffer9 **outVb, unsigned *outOffset )
 {
     if ( bytes > KMC_VB_CHUNK_BYTES )
@@ -112,11 +110,11 @@ bool KMC_AllocVerts( unsigned bytes, IDirect3DVertexBuffer9 **outVb, unsigned *o
     if ( s_vbChunkCount == KMC_MAX_VB_CHUNKS )
         return false;
     IDirect3DVertexBuffer9 *vb = nullptr;
-    // MANAGED, WRITEONLY: write-once geometry, no FVF (the editor binds VERTDECL_PACKED).
+    // MANAGED, WRITEONLY, no FVF: the editor binds VERTDECL_PACKED.
     HRESULT hr = dx.device->CreateVertexBuffer( KMC_VB_CHUNK_BYTES, D3DUSAGE_WRITEONLY, 0,
                                                 D3DPOOL_MANAGED, &vb, nullptr );
     if ( hr < 0 || !vb )
-        return false;                                  // out of memory: caller keeps uploading
+        return false;                                  // allocation failure uses dynamic upload
     s_vbChunk[s_vbChunkCount] = vb;
     s_vbUsed[s_vbChunkCount]  = bytes;
     *outVb     = vb;
@@ -155,7 +153,7 @@ bool KMC_AllocIndices( unsigned bytes, IDirect3DIndexBuffer9 **outIb, unsigned *
     return true;
 }
 
-// Copied VERBATIM, so a cached draw is bit-identical to a dynamic one.
+// Preserve the dynamic path's packed vertex and index bytes exactly.
 bool KMC_Build( const XSurface *xsurf, KiwiModelGeo *geo )
 {
     const int vertCount = XSurfaceGetNumVerts( xsurf );
@@ -174,11 +172,10 @@ bool KMC_Build( const XSurface *xsurf, KiwiModelGeo *geo )
     IDirect3DIndexBuffer9 *ib = nullptr;
     unsigned ibOffset = 0;
     if ( !KMC_AllocIndices( ibBytes, &ib, &ibOffset ) )
-        return false;                                  // vertex space stays allocated: harmless
+        return false;                                  // vertex space remains reserved
 
     void *dst = nullptr;
-    // MANAGED buffers may not use DISCARD/NOOVERWRITE; a plain lock writes the sysmem copy.
-    // This runs inside backend execution, so the runtime may stall here ONCE per surface.
+    // MANAGED buffers require a plain sysmem lock, which may stall once per surface.
     if ( vb->Lock( vbOffset, vbBytes, &dst, 0 ) < 0 || !dst )
         return false;
     memcpy( dst, xsurf->verts0, vbBytes );
@@ -207,7 +204,7 @@ bool KiwiModelCache_Get( const XSurface *xsurf, KiwiModelGeo *out )
     if ( !xsurf || !out || !dx.device )
         return false;
 
-    // Device-identity guard.  One pointer compare on the hot path.
+    // Reset records when the D3D device identity changes.
     if ( s_device != dx.device )
     {
         KMC_Forget();
@@ -225,7 +222,7 @@ bool KiwiModelCache_Get( const XSurface *xsurf, KiwiModelGeo *out )
         return true;
     }
 
-    // Cold: claim the slot (even on failure, so an uncacheable surface is asked once) and build.
+    // Claim before building so each uncacheable surface is attempted once.
     e->xsurf  = xsurf;
     e->failed = true;
     ++s_entryCount;

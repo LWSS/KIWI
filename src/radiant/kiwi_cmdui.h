@@ -2,32 +2,14 @@
 #ifndef KISAK_RADIANT
 #error this file is only for Radiant!
 #endif
-// ─────────────────────────────────────────────────────────────────────────────
-// kiwi_cmdui.h — KIWI-UX (CLEANUP, C-72): the three things the §15 command
-// palette and the §16b add menu were each doing their own way.
-//
-// kiwi_addmenu.cpp:88 wrote the excuse down: the fuzzy match was "duplicated
-// rather than exported because it is nine lines and exporting it would mean a
-// header for one predicate".  It is three things now (match, shortcut text,
-// right-aligned hint), both files also needed one copy of `struct RadiantCommand`
-// each (C-6), and the two lists have to FEEL the same — a filter that accepts a
-// query in one and rejects it in the other is a bug the user cannot report.  So
-// the header exists, and this is what is in it.
-//
-// Header-only, all `inline`, no .cpp.  The bodies are the palette's verbatim —
-// the add menu's copies were character-identical apart from comments.
-// ─────────────────────────────────────────────────────────────────────────────
+// Shared helpers keep command-palette and add-menu matching and shortcut UI consistent.
 
-#include "radiant_frame.h"      // struct RadiantCommand + CommandList_KeyName / _Mods
+#include "radiant_frame.h"      // RadiantCommand and live command-table formatters
 #include <imgui/imgui.h>
 #include <ctype.h>
 #include <stdio.h>
 
-// Subsequence fuzzy match, case-insensitive: every character of `pat` must appear
-// in `str` in order.  Spaces in the pattern are separators, not literals.  An
-// empty pattern matches everything.  Deliberately the simplest thing that works —
-// both lists are ~200 rows and a ranking model is not what makes them feel good
-// at this size.
+// Case-insensitive subsequence match; an empty pattern matches all.
 inline bool KiwiCmdUI_Fuzzy( const char *str, const char *pat )
 {
     if ( !pat || !*pat )
@@ -51,10 +33,8 @@ inline bool KiwiCmdUI_Fuzzy( const char *str, const char *pat )
     return true;
 }
 
-// One row's binding as display text, through mainfrm's OWN formatters, so a
-// keymap-profile switch shows up with no work here.  `out` is always terminated
-// and is EMPTY when the row carries no key.  (CommandList_Mods leaves a trailing
-// " + ", which is why this is a plain concatenation.)
+// Use live formatters so keymap changes propagate; CommandList_Mods includes the trailing " + ".
+// Valid buffers are always terminated and empty for unbound commands.
 inline void KiwiCmdUI_ShortcutText( const RadiantCommand &c, char *out, int outSize )
 {
     if ( !out || outSize < 1 )
@@ -70,8 +50,7 @@ inline void KiwiCmdUI_ShortcutText( const RadiantCommand &c, char *out, int outS
     out[outSize - 1] = '\0';
 }
 
-// The same, found BY ID in the live table (the add menu's rows are ids, not table
-// entries).  Empty when the id is unbound or absent.
+// Resolve add-menu command IDs in the live table; absent or unbound IDs leave `out` empty.
 inline void KiwiCmdUI_ShortcutForId( int commandId, char *out, int outSize )
 {
     if ( !out || outSize < 1 )
@@ -90,9 +69,8 @@ inline void KiwiCmdUI_ShortcutForId( int commandId, char *out, int outSize )
     }
 }
 
-// The shortcut hint, RIGHT-ALIGNED on the row just submitted (§15).  Call it
-// straight after the row's Selectable; `rowW` is the list's content width.  No-op
-// for empty text, so callers do not need their own guard.
+// Call immediately after Selectable; `rowW` is its content width and 8 px is right padding.
+// Empty text is ignored.
 inline void KiwiCmdUI_RightAlignedHint( const char *text, float rowW )
 {
     if ( !text || !text[0] )

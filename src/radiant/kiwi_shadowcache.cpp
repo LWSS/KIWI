@@ -1,26 +1,23 @@
 #ifndef KISAK_RADIANT
 #error this file is only for Radiant!
 #endif
-// kiwi_shadowcache.cpp - mechanism for kiwi_shadowcache.h.  Nothing here computes geometry.
 
 #include "stdafx.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
-#include <gfx_d3d/r_xsurface.h>   // XModel, Editor_ExtractXModelGeo (r_xsurface.h:14)
-#include "qe3.h"                  // selbrush_t (qe3.h:429), orientation_t
+#include <gfx_d3d/r_xsurface.h>
+#include "qe3.h"
 #include "kiwi_shadowcache.h"
-#include "kiwi_walkcache.h"       // the ONE epoch lives there
-#include "kiwi_lightcache.h"      // cached per-light 52-byte caster records
+#include "kiwi_walkcache.h"
+#include "kiwi_lightcache.h"
 
-// win_qe3.cpp:123 — int Sys_Printf( const char *fmt, ... )
 extern int Sys_Printf( const char *fmt, ... );
 
-// Caps, per UNIQUE XModel.  Past either, the caller runs the original code.
+// Per-XModel caps; callers must not treat a cache miss as empty geometry.
 #define KIWI_SV_MAX_MODEL_MB       96
 #define KIWI_SV_MAX_MODELS       4096
 
-// The epoch: ONE counter for the whole editor, owned by the walk cache.
 static inline unsigned Sv_Epoch() { return KiwiWalkCache_Epoch(); }
 
 void KiwiShadowCache_Invalidate()
@@ -28,8 +25,8 @@ void KiwiShadowCache_Invalidate()
     KiwiWalkCache_Invalidate();
 }
 
-// The "can this brush cast at all?" memo.  Epoch stored per entry; a full table = "unknown".
-#define KIWI_SV_CAST_SLOTS 0x20000      // 131,072 slots x 12 B = 1.5 MB
+// Per-brush cast memo; stale or exhausted probes return unknown.
+#define KIWI_SV_CAST_SLOTS 0x20000      // 1.5 MB on 32-bit; power of two for masked probing
 
 struct SvCastSlot
 {
@@ -83,7 +80,7 @@ void KiwiShadowCache_SetBrushCasts( const void *brushDef, bool casts )
     // 32 probes deep and every slot live for another brush: give up rather than evict.
 }
 
-// Per-XModel extracted geometry, keyed on the XModel pointer (asset memory).
+// Extracted model-local geometry keyed by asset pointer.
 struct SvModelGeo
 {
     XModel         *model;
@@ -99,7 +96,7 @@ static int         s_modelCap   = 0;
 static int         s_modelBytes = 0;
 static bool        s_modelFull  = false;
 
-// XModel* -> s_models index (a linear scan would be O(models) per instance).  -1 = empty.
+// XModel* -> s_models index; avoids a linear scan per instance.
 #define KIWI_SV_MODEL_SLOTS 0x2000          // 8,192 slots, >= 2x KIWI_SV_MAX_MODELS
 static XModel *s_modelKey[KIWI_SV_MODEL_SLOTS];
 static int     s_modelIdx[KIWI_SV_MODEL_SLOTS];
@@ -129,7 +126,7 @@ bool KiwiShadowCache_ModelGeo( XModel *model, const float **verts,
     {
         const SvModelGeo *e = &s_models[s_modelIdx[slot]];
         if ( e->indexCount <= 0 )
-            return false;                     // known-bad model: extraction yielded nothing
+            return false;                     // empty entry: caller falls back
         *verts      = e->verts;
         *indices    = e->indices;
         *indexCount = e->indexCount;
@@ -138,7 +135,7 @@ bool KiwiShadowCache_ModelGeo( XModel *model, const float **verts,
     if ( s_modelFull || s_modelCount >= KIWI_SV_MAX_MODELS )
         return false;
 
-    // Extract ONCE, into the same limits the faithful call site uses, then keep it.
+    // Match the direct caller's limits so cached and fallback extraction agree.
     static float          s_vbuf[0x4000 * 3];
     static unsigned short s_ibuf[0x10000];
     const int ic = Editor_ExtractXModelGeo( model, s_vbuf, 0x4000, s_ibuf, 0x10000 );
@@ -207,8 +204,7 @@ bool KiwiShadowCache_ModelGeo( XModel *model, const float **verts,
         }
     }
 
-    // Publish the index BEFORE the early return, so a model that extracted to nothing
-    // is remembered as such and never re-extracted.
+    // Publish empty entries too so this cache does not retry failed extractions.
     s_modelKey[slot] = model;
     s_modelIdx[slot] = s_modelCount;
     ++s_modelCount;
@@ -237,7 +233,7 @@ void KiwiShadowCache_Shutdown()
     memset( s_modelKey, 0, sizeof( s_modelKey ) );
     s_modelIndexInit = true;
     memset( s_castTable, 0, sizeof( s_castTable ) );
-    KiwiWalkCache_Invalidate();   // the shared epoch: every memo entry above is now stale
+    KiwiWalkCache_Invalidate();   // age every shared-epoch memo
 }
 
 int KiwiShadowCache_ResidentKB()

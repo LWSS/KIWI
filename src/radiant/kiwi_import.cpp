@@ -1,11 +1,10 @@
-// kiwi_import.cpp — the drop plumbing, the wizard, the orchestration.  See kiwi_import.h
-// for the flow, kiwi_iwi.h and kiwi_matwriter.h for the two file formats.
+// Drag/drop plumbing and import-wizard orchestration.
 #include "stdafx.h"
 #include "qe3.h"
 
 #include <windows.h>
-#include <shellapi.h>               // DragQueryFileA / DragFinish (shell32.lib is already linked)
-#include <commdlg.h>                // GetOpenFileNameA (comdlg32.lib is already linked)
+#include <shellapi.h>
+#include <commdlg.h>
 #include <d3d9.h>
 #include <imgui/imgui.h>
 
@@ -16,8 +15,8 @@
 #include "kiwi_matwriter.h"
 #include "kiwi_texgrave.h"          // deferred release / deferred reload
 
-#include <gfx_d3d/r_image.h>        // Image_FindExisting (r_image.h:155) / Image_Reload (r_image.h:426)
-#include <gfx_d3d/r_gfx.h>          // GfxImage
+#include <gfx_d3d/r_image.h>
+#include <gfx_d3d/r_gfx.h>
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -25,25 +24,24 @@
 #include <string>
 #include <vector>
 
-// ── ported / cross-file entry points (each verified against its definition) ─────────
-extern int  Sys_Printf( const char *fmt, ... );                                          // win_qe3.cpp:118       int Sys_Printf(const char*,...)
-extern bool Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId ); // mainfrm.cpp:1358   bool Radiant_RegisterCommand(const char*,byte,byte,int)
-extern int  g_nUpdateBits;                                                               // engine_stubs.cpp:773  int g_nUpdateBits
-// texwnd.cpp accessors — declared here until U-GLOBALS gives the texture browser a header.
-extern qtexture_s *TexWnd_RegisterMaterialByName( const char *name );                    // texwnd.cpp:601        qtexture_s *TexWnd_RegisterMaterialByName(const char*)
-extern bool        TexWnd_MakeMaterialCurrentByName( const char *name );                 // texwnd.cpp:792        bool TexWnd_MakeMaterialCurrentByName(const char*)
-extern int  texWndGlob_textureOffset_usageCount();                                       // texwnd.cpp:106        int texWndGlob_textureOffset_usageCount()
-extern int  texWndGlob_textureOffset_localeCount();                                      // texwnd.cpp:107        int texWndGlob_textureOffset_localeCount()
+// Ported/cross-file entry points.
+extern int  Sys_Printf( const char *fmt, ... );                                          // win_qe3.cpp:118
+extern bool Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId ); // mainfrm.cpp:1358
+extern int  g_nUpdateBits;                                                               // engine_stubs.cpp:773
+// texwnd.cpp exposes no public header for these accessors.
+extern qtexture_s *TexWnd_RegisterMaterialByName( const char *name );                    // texwnd.cpp:601
+extern bool        TexWnd_MakeMaterialCurrentByName( const char *name );                 // texwnd.cpp:792
+extern int  texWndGlob_textureOffset_usageCount();                                       // texwnd.cpp:106
+extern int  texWndGlob_textureOffset_localeCount();                                      // texwnd.cpp:107
 
-// The three filter vocabularies.  usage/locale are filled from
-// deffiles/materials/{usage,locale}.txt by FillTextureMenu; surfacetype is compiled in.
+// FillTextureMenu loads usage/locale; surface types are compiled in.
 struct RadiantFilterEntry { char *name; int index; };
 static_assert( sizeof( RadiantFilterEntry ) == 8, "filter_material_t must be 8 bytes (IDB)" );
 extern RadiantFilterEntry filter_usage_array[256];        // engine_stubs.cpp:821  (IDB 0x739F80)
 extern RadiantFilterEntry filter_locale_array[256];       // engine_stubs.cpp:822  (IDB 0x73A780)
 extern RadiantFilterEntry filter_surfacetype_array[29];   // texwnd.cpp:1736       (IDB 0x73AF80)
 
-// ── STATE ──────────────────────────────────────────────────────────────────────────
+// State.
 namespace
 {
 
@@ -67,20 +65,19 @@ const unsigned kSlotMask[SLOT_COUNT] =
 const int kSlotEncoding[SLOT_COUNT] =
     { KIWI_IWI_ENC_COLOR, KIWI_IWI_ENC_NORMAL, KIWI_IWI_ENC_SPECULAR };
 
-// One queue entry: up to three source files that belong to the same material.
 struct ImportGroup
 {
     std::string path[SLOT_COUNT];
     std::string pairKey;            // the stripped basename the pairing agreed on ("" == none)
-    bool        paired = false;     // more than one file landed in this group
+    bool        paired = false;     // derive and display the stripped paired name
 };
 
-// ── the pending queue ──────────────────────────────────────────────────────────────
+// Pending queue.
 std::vector<ImportGroup> s_queue;      // front == the group being edited
 bool                     s_openRequest = false;   // an ImGui::OpenPopup is owed
 bool                     s_popupOpen   = false;
 
-// ── per-file wizard state ──────────────────────────────────────────────────────────
+// Per-file wizard state.
 char  s_name[64]        = { 0 };
 int   s_templateIndex   = 0;
 int   s_usageRow        = 0;      // row in filter_usage_array
@@ -93,29 +90,25 @@ bool  s_resampleToPot   = true;
 bool  s_overwrite       = false;
 bool  s_makeCurrent     = false;
 bool  s_applyToRest     = false;
-// the cached duplicate probe (see the wizard's name field)
 char  s_dupCheckedName[80] = { 0 };   // "<templateIndex>/<name>"
 bool  s_dupOnDisk          = false;
 
-// ── the probed sources, refreshed whenever the queue front changes ─────────────────
+// Probed sources for the queue front.
 kiwiIwiSource_t s_src[SLOT_COUNT]         = {};
 bool            s_srcOk[SLOT_COUNT]       = {};
 char            s_srcErr[SLOT_COUNT][256] = {};
 char            s_status[512]             = { 0 };
 bool            s_statusBad               = false;
 
-// ── autoTexScale <-> WORLD UNITS PER REPEAT ────────────────────────────────────────
-// The ONLY place this wizard converts between the two, routed through the same sampleSize
-// the editor's apply path multiplies by (never a hard-coded 4).  The layer index is
-// `current_edit_layer` because that is the layer a browser click stamps.
+// autoTexScale and world units per repeat.
+// Convert through the sample size of the current layer that a browser click stamps.
 float ImportSampleSize()
 {
     const float s = g_qeglobals.random_texture_stuff[g_qeglobals.current_edit_layer].sampleSize;
-    return ( s > 0.0f ) ? s : 0.25f;   // mainfrm.cpp:734 seeds 0.25f (IDB 0x45d14e); never 0
+    return ( s > 0.0f ) ? s : 0.25f;   // mainfrm.cpp:734 seeds 0.25f (IDB 0x45d14e)
 }
 
-// autoTexScale texels -> world units per repeat, and back.  Both clamp into the u16 the
-// material header stores and refuse zero, which Load_Materials treats as "hide this".
+// Refuse zero autoTexScale because Load_Materials treats it as "hide this".
 int ImportUnitsFromTexScale( int texScale )
 {
     const int units = (int)( (float)texScale * ImportSampleSize() + 0.5f );
@@ -130,20 +123,17 @@ int ImportTexScaleFromUnits( int units )
     return ts;
 }
 
-// The shipped ceiling: 512 texels of autoTexScale == a 128-world-unit repeat.
+// At the default 0.25 sample size, 512 autoTexScale repeats every 128 world units.
 const int kImportTexScaleModalMax = 512;
 
-// ── previews (MANAGED, so no device-reset hook is needed — kiwi_iwi.cpp) ───────────
+// Previews use managed textures, so no device-reset hook is needed (kiwi_iwi.cpp).
 IDirect3DTexture9 *s_preview[SLOT_COUNT]     = {};
 std::string        s_previewPath[SLOT_COUNT];
 
-// ── "apply to the rest" carry-over ─────────────────────────────────────────────────
+// Batch carry-over.
 bool s_batch = false;
 
-// HAND-OVER, never a direct Release: every caller is a button handler running during the
-// ImGui UI build, AFTER ImGui::Image recorded this pointer into the frame's draw list.
-// Releasing here is a use-after-free at that frame's render; the graveyard drops it at the
-// start of the NEXT frame.
+// Defer release until the next frame because ImGui may have recorded this pointer already.
 void ReleasePreview( int slot )
 {
     KiwiTexGrave_Release( s_preview[slot] );   // null-tolerant, so no guard here
@@ -157,8 +147,7 @@ void ReleaseAllPreviews()
         ReleasePreview( i );
 }
 
-// ── name derivation (D-BE-L) ───────────────────────────────────────────────────────
-// Sanitise an already-extension-stripped basename into a material name.
+// Name derivation.
 void SanitiseName( const char *stem, char *out, size_t outSz )
 {
     size_t w = 0;
@@ -179,12 +168,11 @@ void SanitiseName( const char *stem, char *out, size_t outSz )
     out[w] = '\0';
     if ( !out[0] )
         _snprintf( out, outSz, "imported_texture" );
-    // 50 is the writer's ceiling (kiwi_matwriter.cpp: the engine's 64-byte path buffers).
+    // The writer's 50-character ceiling preserves the engine's 64-byte path buffers.
     if ( strlen( out ) > 50 )
         out[50] = '\0';
 }
 
-// The basename of `path` with its extension removed, lowercased.
 void BaseStem( const char *path, char *out, size_t outSz )
 {
     out[0] = '\0';
@@ -211,9 +199,8 @@ void DeriveName( const char *path, char *out, size_t outSz )
     SanitiseName( stem, out, outSz );
 }
 
-// ── THE PAIRING RULE ───────────────────────────────────────────────────────────────
-// A multi-file drop is grouped by STRIPPED BASENAME.  These are whole-suffix tests at the
-// end of the stem, so "_normal" cannot also match "_n" and longest-match is not needed.
+// Pairing.
+// Group multi-file drops by stripped basename; whole-suffix tests need no longest-first order.
 struct SuffixRow { const char *suffix; int slot; };
 const SuffixRow kSuffixes[] =
 {
@@ -234,8 +221,7 @@ const SuffixRow kSuffixes[] =
 };
 const int kSuffixCount = (int)( sizeof( kSuffixes ) / sizeof( kSuffixes[0] ) );
 
-// Split `stem` into (key, slot).  A stem with no known suffix is a colour map whose key is
-// the whole stem — which is what makes an unsuffixed <name>.png pair with <name>_n.png.
+// Unsuffixed stems default to color and keep their full key, pairing name.png with name_n.png.
 void ClassifyStem( const char *stem, std::string *key, int *slot )
 {
     const size_t len = strlen( stem );
@@ -254,7 +240,6 @@ void ClassifyStem( const char *stem, std::string *key, int *slot )
     *slot = SLOT_COLOR;
 }
 
-// The one-line note the wizard prints when pairing fired.
 const char *PairingRuleText()
 {
     return "Paired by name: <base> / <base>_col / _c / _d / _diff = color,"
@@ -262,7 +247,7 @@ const char *PairingRuleText()
            " _s / _spc / _spec / _specular / _gloss = specular.";
 }
 
-// ── vocabulary helpers ─────────────────────────────────────────────────────────────
+// Vocabulary helpers.
 // Rows with a null name are "<separator>" entries; they are not selectable values.
 int FindUsageRowByName( const char *want )
 {
@@ -288,8 +273,7 @@ int FirstRealRow( const RadiantFilterEntry *arr, int count )
     return 0;
 }
 
-// Both filter tables are loaded by FillTextureMenu at boot; empty counts would let the
-// wizard write usage == 0 and produce an invisible material, so report it instead.
+// Empty boot vocabularies would write usage 0, which Load_Materials hides.
 bool VocabularyReady()
 {
     return texWndGlob_textureOffset_usageCount() > 1 && texWndGlob_textureOffset_localeCount() > 1;
@@ -314,14 +298,13 @@ unsigned SelectedLocaleMask()
 }
 int SelectedSurfaceType()
 {
-    // Row 0 is the wizard's "(from template)" sentinel — filter_surfacetype_array[0] is
-    // {"all", 0}, which as a WRITE value would mean "clear the surface type", not "any".
+    // Row 0 inherits; writing the table's {"all", 0} entry would clear the surface type.
     if ( s_surfaceRow <= 0 || s_surfaceRow >= 29 )
         return -1;
     return filter_surfacetype_array[s_surfaceRow].index;
 }
 
-// ── queue management ───────────────────────────────────────────────────────────────
+// Queue management.
 void SetStatus( bool bad, const char *fmt, ... )
 {
     va_list ap;
@@ -332,8 +315,7 @@ void SetStatus( bool bad, const char *fmt, ... )
     s_statusBad = bad;
 }
 
-// Re-probe one slot of the queue front.  Called from BeginFile and from the wizard's own
-// Browse / [x] buttons, so the probe result and the preview never disagree with the path.
+// Keep probe state synchronized with Browse/[x] path changes.
 void ProbeSlot( int slot )
 {
     s_srcOk[slot]     = false;
@@ -345,8 +327,7 @@ void ProbeSlot( int slot )
                                    s_srcErr[slot], sizeof( s_srcErr[slot] ) );
 }
 
-// The richest template row this data tree can resolve that consumes EXACTLY the slots the
-// group filled; falls back to the row consuming the most of them, then to row 0.
+// Prefer an exact resolvable slot match, then the family consuming the most filled slots.
 int DefaultTemplateForFilledSlots()
 {
     unsigned filled = 0;
@@ -361,8 +342,7 @@ int DefaultTemplateForFilledSlots()
         const kiwiMatTemplateInfo_t *ti = KiwiMat_TemplateInfo( i );
         if ( !ti || !KiwiMat_ResolveTemplate( i ) )
             continue;
-        // Never auto-pick a family that would have to bind a built-in for a slot the user
-        // did not fill; that is a deliberate choice, not a default.
+        // Built-in fallback maps require an explicit family choice, not an automatic default.
         if ( ( ti->slots & ~filled ) != 0 )
             continue;
         const unsigned used = ti->slots & filled;
@@ -379,8 +359,7 @@ int DefaultTemplateForFilledSlots()
     return best;
 }
 
-// (Re)seed the per-file fields from the queue front.  `keepSettings` is the batch carry-over:
-// only the NAME and the tiling defaults are re-derived.
+// Batch mode preserves user settings but re-derives each file's name and tiling.
 void BeginFile( bool keepSettings )
 {
     s_overwrite  = false;
@@ -397,15 +376,13 @@ void BeginFile( bool keepSettings )
         return;
 
     const ImportGroup &g = s_queue.front();
-    // The material name comes from the PAIR KEY when pairing fired, and from the colour
-    // file's own basename otherwise — only a real group strips the suffix.
+    // Strip a suffix only for a real paired group; otherwise use the color filename.
     if ( g.paired && !g.pairKey.empty() )
         SanitiseName( g.pairKey.c_str(), s_name, sizeof( s_name ) );
     else
         DeriveName( g.path[SLOT_COLOR].c_str(), s_name, sizeof( s_name ) );
 
-    // A suffixed image name spends four more of the engine's 64-byte path budget, so a group
-    // carrying an optional map derives a name four characters shorter.
+    // Reserve four of the writer's 50-character image-name budget for optional-map suffixes.
     if ( !g.path[SLOT_NORMAL].empty() || !g.path[SLOT_SPECULAR].empty() )
         if ( strlen( s_name ) > 46 )
             s_name[46] = '\0';
@@ -417,14 +394,11 @@ void BeginFile( bool keepSettings )
     {
         const int w = s_src[SLOT_COLOR].isPowerOfTwo ? s_src[SLOT_COLOR].width  : s_src[SLOT_COLOR].potWidth;
         const int h = s_src[SLOT_COLOR].isPowerOfTwo ? s_src[SLOT_COLOR].height : s_src[SLOT_COLOR].potHeight;
-        // Default autoTexScale is the source resolution, with the LONG EDGE capped at 512
-        // and the aspect preserved — a bigger source would otherwise hand the face a repeat
-        // several times the 128 world units every shipped map is built at.
+        // Preserve aspect while capping source-derived autoTexScale at a 512-pixel long edge.
         const int longEdge = ( w > h ) ? w : h;
         if ( longEdge > kImportTexScaleModalMax )
         {
-            // Integer halving, not a divide, so the capped pair stays power-of-two and the
-            // aspect is exact rather than rounded.
+            // Integer halving preserves power-of-two dimensions and exact aspect.
             int cw = w, ch = h;
             while ( ( ( cw > ch ) ? cw : ch ) > kImportTexScaleModalMax && cw > 1 && ch > 1 )
             {
@@ -444,8 +418,7 @@ void BeginFile( bool keepSettings )
     if ( !keepSettings )
     {
         s_templateIndex = DefaultTemplateForFilledSlots();
-        // Defaults chosen by NAME so they track whatever usage.txt / locale.txt this data
-        // tree ships, with a first-real-row fallback when the name is absent.
+        // Name-based defaults follow loaded vocabularies; otherwise use the first real row.
         s_usageRow  = FindUsageRowByName( "exterior wall" );
         if ( !s_usageRow )
             s_usageRow = FirstRealRow( filter_usage_array, texWndGlob_textureOffset_usageCount() );
@@ -486,9 +459,8 @@ void CloseWizard()
     ImGui::CloseCurrentPopup();
 }
 
-// ── the names this import will write ───────────────────────────────────────────────
-// One place decides them so the "files to be written" list, the writer's texture entries,
-// the overwrite probe, the reload invalidation and the rollback cannot drift apart.
+// Planned output names.
+// Centralize names so UI, writes, duplicate checks, reloads, and rollback cannot diverge.
 struct PlannedNames
 {
     char image[SLOT_COUNT][64];
@@ -515,7 +487,7 @@ void PlanNames( PlannedNames *out )
     }
 }
 
-// ── THE IMPORT ITSELF ──────────────────────────────────────────────────────────────
+// Import.
 bool PerformImport( char *err, size_t errSz )
 {
     if ( s_queue.empty() )
@@ -534,16 +506,14 @@ bool PerformImport( char *err, size_t errSz )
         if ( plan.active[i] )
             overwriting = KiwiIwi_ExistsOnDisk( plan.image[i] );
 
-    // ROLLBACK POLICY: a fresh import deletes everything it wrote on any failure; an
-    // OVERWRITE must NOT — the previous files are already gone, so deleting the half-written
-    // replacement turns a bad import into a missing asset every map would load as $default.
+    // Fresh imports roll back; overwrites keep partial replacements because their originals
+    // are already gone, and deleting them would turn corruption into missing assets.
     const bool rollback = !overwriting;
 
-    // What has physically been written so far, for the rollback.  A name only enters this
-    // list after its file exists on disk.
+    // Record only images confirmed written for fresh-import rollback.
     char wroteImage[SLOT_COUNT][64] = {};
 
-    // 1) the .iwi files, colour first.  2) round-trip stage 1 after each.
+    // Write and verify each .iwi before writing the material.
     kiwiIwiResult_t res[SLOT_COUNT] = {};
     for ( int i = 0; i < SLOT_COUNT; ++i )
     {
@@ -559,8 +529,7 @@ bool PerformImport( char *err, size_t errSz )
         opt.resampleToPot = s_resampleToPot;
         opt.encoding      = kSlotEncoding[i];
 
-        // A failed WRITE leaves nothing new on disk (KiwiIwi_WriteFromFile deletes a short
-        // write itself), so it is not the "was OVERWRITTEN" case; a failed VERIFY is.
+        // Writer failures leave no output; only post-write verification can leave a bad file.
         if ( !KiwiIwi_WriteFromFile( group.path[i].c_str(), imgQPath, &opt, &res[i], err, errSz ) )
         {
             if ( rollback )
@@ -583,17 +552,15 @@ bool PerformImport( char *err, size_t errSz )
         }
     }
 
-    // An overwrite has to invalidate the engine's cached copy or the browser and the 3D view
-    // keep drawing the old pixels.  QUEUED, not called: Image_Reload destroys the live
-    // IDirect3DTexture9, and panels drawn earlier in THIS frame already handed ImGui that
-    // pointer.  The reload runs at the start of the next frame, before any panel reads it —
-    // so the console line below reports the PRE-reload dimensions on such an overwrite.
+    // Queue cache reloads for next frame: Image_Reload destroys live D3D textures that an
+    // earlier panel may already have placed in this frame's ImGui draw list. Logged dimensions
+    // therefore remain pre-reload until then.
     if ( overwriting )
         for ( int i = 0; i < SLOT_COUNT; ++i )
             if ( wroteImage[i][0] )
                 KiwiTexGrave_ReloadImage( wroteImage[i] );
 
-    // 3) the material
+    // Write the material only after all images verify.
     kiwiMatFields_t f = {};
     _snprintf( f.name, sizeof( f.name ), "%s", s_name );
     _snprintf( f.imageName, sizeof( f.imageName ), "%s", plan.image[SLOT_COLOR] );
@@ -617,7 +584,7 @@ bool PerformImport( char *err, size_t errSz )
         return false;
     }
 
-    // 4) round-trip stage 2 + 3: the real engine loader, then the browser gate.
+    // Verify through the engine loader and browser gate.
     kiwiMatVerify_t v = {};
     if ( !KiwiMat_Verify( s_name, &v, err, errSz ) )
     {
@@ -629,7 +596,7 @@ bool PerformImport( char *err, size_t errSz )
         return false;
     }
 
-    // 5) into the browser, now, without a restart.
+    // Register immediately so the browser needs no restart.
     qtexture_s *q = TexWnd_RegisterMaterialByName( s_name );
     if ( !q )
     {
@@ -680,9 +647,8 @@ bool PerformImport( char *err, size_t errSz )
     return true;
 }
 
-// ── QUEUEING ───────────────────────────────────────────────────────────────────────
-// One file in, one colour-only group out (ClassifyStem is never consulted for a group of
-// one).  Two or more, and files whose stripped basenames agree become ONE group.
+// Queueing.
+// Multi-file drops group stripped-basename matches; a single file is always color-only.
 int QueuePaths( const std::vector<std::string> &paths )
 {
     std::vector<std::string> ok;
@@ -719,7 +685,6 @@ int QueuePaths( const std::vector<std::string> &paths )
         int         slot = SLOT_COLOR;
         ClassifyStem( stem, &key, &slot );
 
-        // Find an existing group of this drop with the same key and a free slot.
         size_t at = s_queue.size();
         for ( size_t g = firstNew; g < s_queue.size(); ++g )
         {
@@ -745,8 +710,7 @@ int QueuePaths( const std::vector<std::string> &paths )
         s_queue[at].path[slot] = ok[i];
     }
 
-    // A group that never received a colour file has no material to build, so promote the
-    // first file it does have into the colour slot rather than silently dropping it.
+    // Promote the first optional map when a group has no color instead of dropping the group.
     for ( size_t g = firstNew; g < s_queue.size(); ++g )
     {
         if ( !s_queue[g].path[SLOT_COLOR].empty() )
@@ -774,15 +738,14 @@ int QueuePaths( const std::vector<std::string> &paths )
 
 }  // namespace
 
-// ── WM_DROPFILES ───────────────────────────────────────────────────────────────────
+// WM_DROPFILES.
 bool KiwiImport_HandleDropFiles( void *hDropOpaque )
 {
     HDROP hDrop = (HDROP)hDropOpaque;
     if ( !hDrop )
         return false;
 
-    // The HDROP is only valid until DragFinish, so the WHOLE list is copied out here, in
-    // the message handler, before anything else happens.
+    // Copy every path before DragFinish invalidates the HDROP.
     std::vector<std::string> paths;
     const UINT n = ::DragQueryFileA( hDrop, 0xFFFFFFFF, nullptr, 0 );
     for ( UINT i = 0; i < n; ++i )
@@ -800,11 +763,10 @@ bool KiwiImport_HandleDropFiles( void *hDropOpaque )
     return true;
 }
 
-// ── COMMANDS ───────────────────────────────────────────────────────────────────────
+// Commands.
 void KiwiImport_RegisterCommands()
 {
-    // Only BROWSE is registered; KIWI_CMD_IMPORT_DROPPED is an internal continuation of a
-    // finished gesture and is never bindable.
+    // DROPPED is an internal continuation and must remain non-bindable.
     Radiant_RegisterCommand( "KiwiImportTextures", 0, 0, KIWI_CMD_IMPORT_BROWSE );
 }
 
@@ -825,13 +787,11 @@ bool KiwiImport_DispatchInstant( unsigned int cmdId )
 
     if ( cmdId == (unsigned int)KIWI_CMD_IMPORT_BROWSE )
     {
-        // OFN_ALLOWMULTISELECT + OFN_EXPLORER: on success the buffer is either a single
-        // full path, or a directory followed by NUL-separated file names and a double NUL.
+        // Multi-select returns one full path or a directory plus NUL-separated filenames.
         static char buf[16384];
         buf[0] = '\0';
 
-        // A COMMDLG filter is a run of NUL-terminated pairs ended by a second NUL, so it
-        // is assembled byte by byte rather than through a formatter.
+        // COMMDLG filters are NUL-terminated pairs followed by a final NUL.
         char   filter[256];
         size_t fp = 0;
         {
@@ -892,11 +852,10 @@ bool KiwiImport_DispatchInstant( unsigned int cmdId )
     return false;
 }
 
-// ── THE WIZARD ─────────────────────────────────────────────────────────────────────
+// Wizard.
 void KiwiImport_Draw()
 {
-    // BATCH MODE: one silent import per FRAME, so a long batch never blocks the pump for
-    // more than one file's work.
+    // Import at most one batch item per frame to keep pumping messages.
     if ( s_batch && !s_queue.empty() )
     {
         const std::string src = s_queue.front().path[SLOT_COLOR];
@@ -926,8 +885,7 @@ void KiwiImport_Draw()
 
     if ( !ImGui::BeginPopupModal( "Import texture", nullptr, ImGuiWindowFlags_AlwaysAutoResize ) )
     {
-        // The popup was dismissed by something other than our buttons (Escape).  Treat it
-        // as Cancel All: nothing has been written, so there is nothing to roll back.
+        // Treat external dismissal as Cancel All; nothing has been written.
         if ( s_popupOpen )
         {
             ReleaseAllPreviews();
@@ -946,7 +904,7 @@ void KiwiImport_Draw()
 
     const std::string src = s_queue.front().path[SLOT_COLOR];
 
-    // ── the source ────────────────────────────────────────────────────────────────
+    // Source.
     ImGui::TextDisabled( "Source" );
     if ( s_queue.front().paired )
         ImGui::TextWrapped( "%s", PairingRuleText() );
@@ -976,7 +934,7 @@ void KiwiImport_Draw()
         return;
     }
 
-    // ── name ──────────────────────────────────────────────────────────────────────
+    // Name.
     ImGui::Separator();
     ImGui::SetNextItemWidth( 320.0f );
     ImGui::InputText( "Material name", s_name, sizeof( s_name ) );
@@ -988,9 +946,8 @@ void KiwiImport_Draw()
                            "specular map as images/<name>_spc.iwi (the shipped tree's own\n"
                            "suffixes). Registered in the editor as wc/<name>." );
 
-    // ── material type ─────────────────────────────────────────────────────────────
-    // Drawn BEFORE the slot rows so the per-slot compatibility notes below describe the
-    // family selected right now and not last frame's.
+    // Material type.
+    // Keep material type before slot rows; their compatibility depends on its selection.
     const int tmplCount = KiwiMat_TemplateCount();
     if ( s_templateIndex < 0 || s_templateIndex >= tmplCount )
         s_templateIndex = 0;
@@ -1023,10 +980,8 @@ void KiwiImport_Draw()
         ImGui::TextColored( ImVec4( 1.0f, 0.45f, 0.35f, 1.0f ),
                             "No shipped material of this type was found to clone." );
 
-    // ── the three slots ───────────────────────────────────────────────────────────
-    // Previews are created lazily here and released ONLY through ReleasePreview: the Browse
-    // and [x] handlers below run during the UI build, after ImGui::Image already recorded
-    // the old pointer into this frame's draw list.
+    // Slots.
+    // Release changed previews through the graveyard; ImGui may hold this frame's pointer.
     const unsigned curSlots = cur ? cur->slots : (unsigned)KIWI_MAT_SLOT_COLOR;
 
     for ( int slot = 0; slot < SLOT_COUNT; ++slot )
@@ -1127,7 +1082,6 @@ void KiwiImport_Draw()
             }
         }
 
-        // Template compatibility, per slot.
         const bool consumed = ( curSlots & kSlotMask[slot] ) != 0;
         if ( !path.empty() && !consumed )
             ImGui::TextColored( ImVec4( 1.0f, 0.8f, 0.3f, 1.0f ),
@@ -1143,9 +1097,8 @@ void KiwiImport_Draw()
 
     ImGui::Separator();
 
-    // ── the files this import will write, and the duplicate probe over ALL of them ──
-    // The probe is one FS_FOpenFileRead per candidate over every searchpath and .iwd hash,
-    // so re-run it only when the typed name or the family changes.
+    // Planned output and duplicate check.
+    // Cache this all-searchpath/.iwd probe until the typed name or family changes.
     PlannedNames plan;
     PlanNames( &plan );
 
@@ -1160,8 +1113,7 @@ void KiwiImport_Draw()
         for ( int i = 0; i < SLOT_COUNT && !s_dupOnDisk; ++i )
             if ( plan.active[i] )
                 s_dupOnDisk = KiwiIwi_ExistsOnDisk( plan.image[i] );
-        // The overwrite opt-in is per NAME, not per session: typing a different name that
-        // also collides must ask again rather than inherit the previous name's consent.
+        // Overwrite consent is per name; every new collision must ask again.
         s_overwrite = false;
     }
     const bool dupOnDisk = s_dupOnDisk;
@@ -1177,8 +1129,8 @@ void KiwiImport_Draw()
                                 "Not written: the %s (this material type has no such slot).",
                                 kSlotLabel[i] );
 
-    // The engine's path buffers are 64 bytes and "images/" + ".iwi" spends 11 of them, which
-    // is the 50-character ceiling KiwiMat_Write enforces; a suffix spends four more.
+    // "images/" + ".iwi" leaves 50 chars in the engine's 64-byte path buffer; suffixes
+    // consume four more.
     int nameCeiling = 50;
     for ( int i = 0; i < SLOT_COUNT; ++i )
         if ( plan.active[i] )
@@ -1204,7 +1156,7 @@ void KiwiImport_Draw()
         s_overwrite = false;
     }
 
-    // ── usage / locale / surface type ─────────────────────────────────────────────
+    // Usage, locale, and surface type.
     const int usageCount  = texWndGlob_textureOffset_usageCount();
     const int localeCount = texWndGlob_textureOffset_localeCount();
 
@@ -1274,9 +1226,8 @@ void KiwiImport_Draw()
                            "Drives footstep/impact sounds in game and the\n"
                            "Textures > Surface type browser filter." );
 
-    // ── tiling / output ───────────────────────────────────────────────────────────
-    // This spinner is denominated in WORLD UNITS PER REPEAT and converts through the live
-    // sample size; the autoTexScale it will write is spelled out underneath.
+    // Tiling and output.
+    // Spinner units are world units per repeat; stored autoTexScale uses the live sample size.
     ImGui::Separator();
     int tile[2] = { ImportUnitsFromTexScale( s_tileW ), ImportUnitsFromTexScale( s_tileH ) };
     ImGui::SetNextItemWidth( 200.0f );
@@ -1300,7 +1251,6 @@ void KiwiImport_Draw()
                                         ImportSampleSize() ) );
     }
     {
-        // The derived header value plus the texel density it implies for THIS source.
         const bool haveSrc = s_srcOk[SLOT_COLOR];
         const int  srcW    = haveSrc ? ( s_src[SLOT_COLOR].isPowerOfTwo ? s_src[SLOT_COLOR].width
                                                                        : s_src[SLOT_COLOR].potWidth )
@@ -1333,7 +1283,6 @@ void KiwiImport_Draw()
                            "Color map only. Every shipped normal map (1292 of 1293) and\n"
                            "every shipped specular map (1437 of 1437) is DXT5, so those\n"
                            "two slots are always written as DXT5." );
-    // The checkbox is meaningless only when EVERY map to be written is already POT.
     bool allPot = true;
     for ( int i = 0; i < SLOT_COUNT; ++i )
         if ( plan.active[i] && s_srcOk[i] && !s_src[i].isPowerOfTwo )
@@ -1346,13 +1295,12 @@ void KiwiImport_Draw()
     if ( s_queue.size() > 1 )
         ImGui::Checkbox( "Apply these settings to the remaining materials", &s_applyToRest );
 
-    // ── validation + status ───────────────────────────────────────────────────────
+    // Validation and status.
     const bool vocabOk   = VocabularyReady();
     const bool gateOk    = SelectedUsageValue() != 0 && SelectedLocaleMask() != 0
                            && s_tileW > 0 && s_tileH > 0;
     const bool nameOk    = s_name[0] != '\0' && nameFits;
     const bool dupOk     = !dupOnDisk || s_overwrite;
-    // Every slot that will be written must be readable and either POT or resampleable.
     bool srcOk = true;
     bool potOk = true;
     for ( int i = 0; i < SLOT_COUNT; ++i )

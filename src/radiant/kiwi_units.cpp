@@ -1,14 +1,8 @@
 #ifndef KISAK_RADIANT
 #error this file is only for Radiant!
 #endif
-// ─────────────────────────────────────────────────────────────────────────────
-// kiwi_units.cpp — RADIANT_UX_DESIGN §17 implementation.  See kiwi_units.h.
-//
-// Persistence goes through the existing settings helpers (radiant_registry.h,
-// kiwi_radiant.ini next to the exe).  NOTHING is added to prefData_t: the ported
-// prefs struct is IDA-shaped and stays that way.  Floats round-trip as strings so
-// arbitrary (non power-of-two, fractional) spacings survive a restart.
-// ─────────────────────────────────────────────────────────────────────────────
+// Unit preferences stay outside IDA-shaped prefData_t and persist as strings so
+// fractional, non-power-of-two grid spacing survives restarts.
 
 #include "stdafx.h"
 #include "kiwi_fmt.h"
@@ -25,27 +19,14 @@ namespace
 {
     const char *KUX_SECTION = "KiwiUX";
 
-    // Floor for both prefs.  A zero/denormal spacing would make the grid emitter
-    // and KiwiGrid_Snap divide by ~0; a zero unit factor would break the display
-    // boundary in both directions.
+    // Prevent near-zero divisors in grid emission, snapping, and unit conversion.
     const float KUNITS_MIN = 0.0001f;
 
     float s_perInch      = 1.0f;
-    // ── KIWI-UX (ROUND U): THE DEFAULT GRID IS ONE INCH ─────────────────────
-    // USER DIRECTIVE, verbatim: "Make the default grid 1 inch."
-    //
-    // THE REGISTRY ENTRY IS RENAMED with the change (KUX_GRID_ENTRY below), for
-    // the FlySpeedScale reason (kiwi_camera.cpp:102-108): the spacing is PERSISTED
-    // on every change, so every existing session already has a "10" written under
-    // the old name and a bare default change would be invisible to everyone who
-    // has ever run the editor.  Renaming unpins those stored 10s exactly once;
-    // anyone who genuinely wants 10 sets it again and it persists under the new
-    // name.  The OLD entry is deliberately NOT read as a fallback — reading it
-    // would restore the very value the rename exists to drop.
+    // The 1-inch default intentionally ignores persisted 10-inch values under the old key.
     float s_gridInches   = 1.0f;
     bool  s_loaded       = false;
 
-    // v2: the default moved 10 in -> 1 in (ROUND U).  See the note above.
     const char *KUX_GRID_ENTRY = "GridSpacingInches2";
 
     float ReadFloat( const char *entry, float defVal )
@@ -68,13 +49,13 @@ namespace
     {
         if ( s_loaded )
             return;
-        s_loaded     = true;                 // set FIRST: the readers below are re-entrant-safe
+        s_loaded     = true;                 // Profile reads may re-enter Load().
         s_perInch    = ReadFloat( "UnitsPerInch", 1.0f );
         s_gridInches = ReadFloat( KUX_GRID_ENTRY, 1.0f );
     }
 }
 
-// ─── units ───────────────────────────────────────────────────────────────────
+// Units
 float KiwiUnits_PerInch()
 {
     Load();
@@ -84,10 +65,7 @@ float KiwiUnits_PerInch()
 void KiwiUnits_SetPerInch( float unitsPerInch )
 {
     Load();
-    // KIWI-UX (CLEANUP, C-54): a typed 0 or NaN used to be dropped in silence while
-    // the field kept showing the rejected text -- the worst of the three options the
-    // finding lists.  The refusal is unchanged; it just says so now, and names the
-    // value that is still in force.
+    // The negated comparison rejects NaN as well as values below the floor.
     if ( !( unitsPerInch >= KUNITS_MIN ) )
     {
         Sys_Printf( "Units: %g units/inch refused (minimum is %g) — still %g.\n",
@@ -114,11 +92,8 @@ const char *KiwiUnits_Format( char *buf, int bufSize, float world )
 {
     if ( !buf || bufSize < 1 )
         return buf;
-    // USER DIRECTIVE (shakeout A follow-up): tier the readout for big values —
-    // plain inches below 120 in (10 ft), feet+inches below 300 ft, and
-    // yards+feet+inches from there.  Fixed decimals keep integral values integral
-    // after trailing zeros are stripped; sub-0.005in remainders are dropped so
-    // "40 ft" never prints as "40 ft 0 in".
+    // Use inches below 10 ft, feet below 300 ft, then yards.
+    // Suppress sub-0.005-inch remainders instead of printing a trailing "0 in".
     const double in   = (double)Units_ToDisplay( world );
     const char  *sign = ( in < 0.0 ) ? "-" : "";
     const double a    = ( in < 0.0 ) ? -in : in;
@@ -161,7 +136,7 @@ const char *KiwiUnits_Format( char *buf, int bufSize, float world )
     return buf;
 }
 
-// ─── grid spacing ────────────────────────────────────────────────────────────
+// Grid spacing
 float KiwiUnits_GridSpacingInches()
 {
     Load();
@@ -171,7 +146,7 @@ float KiwiUnits_GridSpacingInches()
 void KiwiUnits_SetGridSpacingInches( float inches )
 {
     Load();
-    // KIWI-UX (CLEANUP, C-54): same rule as KiwiUnits_SetPerInch — refuse, and say so.
+    // The negated comparison also rejects NaN.
     if ( !( inches >= KUNITS_MIN ) )
     {
         Sys_Printf( "Units: grid spacing %g in refused (minimum is %g) — still %g in.\n",

@@ -1,16 +1,8 @@
 #ifndef KISAK_RADIANT
 #error this file is only for Radiant!
 #endif
-// ─────────────────────────────────────────────────────────────────────────────
-// kiwi_split.cpp — SHAKEOUT G implementation.  See kiwi_split.h for the
-// Plasticity findings behind both verbs, the cut-plane derivation, the shared
-// splitter's contract and the undo ordering (all read out of the sources, not
-// assumed).
-//
-// NEW code over the ported cores.  Every brush that is created, linked or freed
-// here goes through a ported function in the ported order; this file owns the
-// plane derivation, the preview, the confirm flow and the §19 gate.
-// ─────────────────────────────────────────────────────────────────────────────
+// Cut and Face Split UI over the ported brush splitter; see kiwi_split.h for
+// plane orientation, ownership, validity, and undo contracts.
 
 #include "stdafx.h"
 #include "qe3.h"
@@ -20,23 +12,20 @@
 #include <gfx_d3d/r_rendercmds.h>   // MaterialTechniqueType, TECHNIQUE_UNLIT
 
 #include "kiwi_split.h"
-#include "kiwi_camera.h"                    // ROUND X: KiwiCam_WorldPerPixel (the cut disc)
+#include "kiwi_camera.h"                    // cut-disc world/pixel scale
 #include "kiwi_command.h"
 #include "kiwi_fmt.h"
-// (ROUND L: kiwi_conselect.h is no longer included — Cut used to read the
-//  construction SELECTION for its line and now picks one with the cursor, so the
-//  store's own header is all this file needs.)
 #include "kiwi_construct.h"
-#include "kiwi_grid.h"                      // ROUND S: KiwiGrid_Snap (the §17 lattice)
+#include "kiwi_grid.h"                      // world-anchored lattice
 #include "kiwi_lines.h"
-#include "kiwi_material.h"                  // ROUND T: the inheritance rules
-#include "kiwi_numeric.h"                   // ROUND S: the offset field
+#include "kiwi_material.h"                  // split-face inheritance
+#include "kiwi_numeric.h"                   // Face Split offset
 #include "kiwi_pick.h"
 #include "kiwi_selection.h"
-#include "kiwi_snap.h"                      // ROUND S: KiwiSnap_IsGeometry
-#include "kiwi_units.h"                     // ROUND S: Units_ToDisplay (the HUD offset)
+#include "kiwi_snap.h"                      // geometry snap classification
+#include "kiwi_units.h"                     // HUD offset display
 #include "kiwi_validity.h"
-#include "kiwi_vec.h"     // KIWI-UX (CLEANUP, A-15): the one spelling of Dot3/Sub3/...
+#include "kiwi_vec.h"                       // shared vector helpers
 
 #include <math.h>
 #include <stdint.h>
@@ -44,7 +33,7 @@
 #include <string.h>
 #include <vector>
 
-// ── ported entry points (each verified against its definition) ──────────────
+// Ported entry points.
 extern int         Sys_Printf( const char *fmt, ... );                        // win_qe3.cpp
 extern camera_s   *Ed_Camera();                                               // camwnd.cpp
 extern void        CamWnd_BuildMatrix();                                      // camwnd.cpp 0x403470
@@ -61,12 +50,7 @@ extern void        Select_Deselect( int bAlsoFreeFaces );                      /
 extern void        Select_Brush( selbrush_t *brush, char some_overwrite,
                                  char bStatus, char center_grid_on_selection ); // select.cpp:884
 
-// (ROUND T: Ed_BuildClipFaceMaterial_Kiwi is no longer reached from here — the
-//  template face's material now comes from kiwi_material.h's inheritance rules,
-//  which fall back to that same forwarder for an all-tool brush.  See the fence
-//  in KiwiSplit_DefByPlane.)
-
-// The fill pair, the same two kiwi_region.cpp uses (kiwi_region.cpp:78 / :80-84).
+// Same fill path as kiwi_region.cpp.
 extern char        Byte4PackPixelColor( float *from, GfxColor *out );          // 0x402ac0
 extern void        __cdecl R_AddRenderCmdDrawTris(
                        Material *material, MaterialTechniqueType techType, short indexCount,
@@ -76,66 +60,32 @@ extern void        __cdecl R_AddRenderCmdDrawTris(
 
 namespace
 {
-    // Plasticity's cut phantom is red at 10% opacity (CutFactory.ts:333-343).  0.10
-    // over a wall at KIWI's brightness reads as nothing at all, so the alpha is
-    // raised to 0.22 — the same value kiwi_region.cpp's region fills use, chosen
-    // there for exactly this reason.  The hue is Plasticity's, unchanged.
+    // 0.22 matches region fills; Plasticity's 0.10 is unreadable at KIWI brightness.
     const float KSPLIT_PLANE_RGBA[4] = { 1.00f, 0.16f, 0.16f, 0.22f };
     const float KSPLIT_LINE_COL[3]   = { 1.00f, 0.35f, 0.30f };   // the intersection outline
     const float KSPLIT_EDGE_COL[3]   = { 1.00f, 0.75f, 0.35f };   // the cut LINE itself
-    // ROUND L: the stage-1 hover.  The SAME yellow every grabbable handle in the
-    // editor uses (kiwi_gizmo.cpp KGZ_HOT, kiwi_lollipop.cpp KLOL_COL_BALL), so
-    // "this is the thing the click will take" reads without being taught twice.
+    // Match the editor's existing hot-handle yellow.
     const float KSPLIT_HOT_COL[3]    = { 1.00f, 0.90f, 0.30f };
 
     const float KSPLIT_EPS = 1.0e-4f;
 
-    // ROUND S (the live face split).  KSPLIT_FACE_EPS is how close to the face
-    // PLANE a geometry snap has to be to count as "on this face" — 0.1 world units,
-    // the same order as the store's own weld tolerance, so a coplanar neighbour's
-    // vertex is accepted (it really is on the plane) and anything in front or
-    // behind is not.  KSPLIT_MIN_SPAN is the narrowest face the command will cut
-    // and the guard band it keeps at each end of the slide, so neither half can
-    // come back as a sliver the §19 gate then rejects.
+    // World units: accept coplanar snaps within weld-scale error and keep the cut
+    // away from both span ends so neither half is an immediate §19 sliver.
     const float KSPLIT_FACE_EPS  = 0.1f;
     const float KSPLIT_MIN_SPAN  = 1.0f;
 
-    // ── ROUND Y, ITEM 3: THE CENTRE SPOT ────────────────────────────────────
-    // USER DIRECTIVE, verbatim: "when using the split tool, show the center dot
-    // so I can find it easier."  The face CENTROID is where the cut starts (it is
-    // Derive()'s `t = m_centreT` fallback and has been since round S) and it is
-    // the one offset a modeller asks for by name — "split it exactly in half" —
-    // but nothing drew it and nothing pulled the cursor to it.
-    //
-    // Two halves, and both are needed for "find it easier":
-    //   * it is DRAWN, persistently, for the whole gesture, in kiwi_snap.cpp's own
-    //     dot-and-ring glyph (KiwiSnap_EmitSpot) so it reads as a snap target
-    //     rather than as a decoration.  The accent pass cannot do it — it is gated
-    //     on a command that WantsClicks and this one drags (kiwi_snap.h).
-    //   * it is SNAPPABLE.  The cursor's mapped offset latches onto the centroid
-    //     inside KSPLIT_CENTRE_SNAP_PIX screen pixels, measured in PIXELS so the
-    //     catch feels the same at every zoom — the same reasoning every capture
-    //     radius in kiwi_snap.cpp uses.  8 px is the editor's own click slop
-    //     (KBOX_CLICK_PIXELS, kiwi_boxselect.h) and is deliberately tighter than
-    //     the 30 px axis guides, which own a whole line rather than one point.
-    //   * Ctrl still suppresses it, because Ctrl suppresses snapping (§6) and a
-    //     centre latch the user cannot escape is the defect, not the feature.
+    // The centroid is both drawn and latched within screen-constant 8 px; Ctrl
+    // suppresses the latch with other snapping.
     const float KSPLIT_CENTRE_SNAP_PIX = 8.0f;
-    // The centre spot's ink: the snap marker's language, but in the split's own
-    // hot accent so it belongs to THIS gesture and cannot be mistaken for a
-    // live snap result the marker has already landed on.
+    // Split-specific ink distinguishes the persistent target from a live snap hit.
     const float KSPLIT_CENTRE_COL[3] = { 0.55f, 0.95f, 0.80f };
 
-    // The sweep quad is sized off the affected brushes' bounds.  "Giant" in the
-    // directive means "unmistakably crossing the solid"; a multiple of the bounds
-    // radius does that at every zoom without becoming a map-wide sheet.
+    // Bounds-relative preview stays visible without becoming a map-wide sheet.
     const float KSPLIT_SPAN_SCALE  = 1.6f;    // half-length along the line
     const float KSPLIT_DEPTH_SCALE = 2.4f;    // sweep depth away from the camera
 
 
-    // The plane through three points, as (normal, dist) with the interior on the
-    // n·p <= d side of nothing in particular — this is only ever used for SIDE
-    // TESTS, so the orientation does not matter as long as it is consistent.
+    // Plane as (normal, dist); side tests need consistency, not a preferred sign.
     bool PlaneOf( const float p0[3], const float p1[3], const float p2[3],
                   float outN[3], float *outD )
     {
@@ -149,10 +99,7 @@ namespace
         return true;
     }
 
-    // A brush instance this file may split: a real brush, not a patch, not a
-    // fixed-size entity's.  Both tests are the ported cores' own — the clipper's
-    // Ed_ProduceSplitLists de-selects exactly these two kinds (xywnd.cpp) and
-    // CSG_MakeHollow skips them (csg.cpp).
+    // Match the ported clipper/CSG exclusions: no patches or fixed-size entities.
     bool Splittable( const selbrush_t *b )
     {
         if ( !b || !b->def || b->patch )
@@ -166,52 +113,9 @@ namespace
         return true;
     }
 
-    // ── ROUND L: the construction SEGMENT under a pixel ─────────────────────
-    // USER DIRECTIVE, verbatim: "The cut workflow is clunky.  It should be: Select
-    // a solid, press C, then the selection expects a line to be selected."
-    //
-    // So the line is no longer a PRECONDITION read out of the construction
-    // selection (shakeout G's CutLine, which required exactly one construction item
-    // to be selected before C was pressed at all) — it is picked with the cursor
-    // INSIDE the gesture, the same way Match Face picks its target face.
-    //
-    // WHY NOT KiwiConSel_PickAt, which is the file that owns construction picking.
-    // Same reason Match Face re-casts its own ray (kiwi_matchface.cpp): that entry
-    // point resolves at the granularity the CURRENT SELECTION MODE asks for
-    // (KindForMode), and in Object / Face / All mode it answers KCONSEL_OBJECT with
-    // index -1 — a whole circle, with no segment named.  Cut needs ONE segment
-    // whatever mode the user happens to be in, so it scans segments directly.  The
-    // TOLERANCE is the shared one, KCON_LINE_PIXELS (10 px, kiwi_construct.h), so
-    // the clickbox is exactly the one every other construction pick uses.
-    //
-    // ── ROUND T: …AND A BRUSH FACE OR A BRUSH EDGE ──────────────────────────
-    // USER DIRECTIVE, verbatim: "I want a new addition to the cut tool.  Make it
-    // so you can select faces from brushes as well.  Imagine clicking the roof on
-    // another brush and using it as a plane to cut.  That's what I mean.  Allow
-    // Planes AND lines to be selected (and even edges, why not)."
-    //
-    // So stage 1 now accepts THREE kinds of pick, and each answers "what is the
-    // cutting plane" differently:
-    //
-    //   KCUT_SRC_LINE   a construction segment.  The plane passes through it and
-    //                   sweeps AWAY FROM THE CAMERA — the shakeout-G derivation,
-    //                   unchanged, because a line names a plane only together
-    //                   with a view direction.
-    //   KCUT_SRC_EDGE   a brush edge.  IDENTICAL treatment: an edge is a line
-    //                   that happens to belong to a solid, and "why not" is
-    //                   exactly right — the derivation already exists and the
-    //                   only new thing is where the two endpoints came from.
-    //   KCUT_SRC_FACE   a brush face.  ITS PLANE **IS** THE CUTTING PLANE.  No
-    //                   camera term at all: a face already carries a normal and a
-    //                   distance, which is the whole of a plane, so deriving one
-    //                   from the view would be throwing information away.  This
-    //                   is "click the roof on another brush and cut with it".
-    //
-    // ANOTHER brush is guaranteed rather than hoped for: Cut's PickFlags are
-    // PICKF_EXCLUDE_SELECTED, and the brushes being cut ARE the selection, so the
-    // pick chain cannot return a face or an edge of a target (kiwi_pick.h).  The
-    // gesture therefore cannot cut a brush along its own face, which would be a
-    // no-op with a preview.
+    // Construction segments are picked independently of selection mode at the shared
+    // tolerance. Lines and edges sweep from the view; faces supply their own plane.
+    // PICKF_EXCLUDE_SELECTED prevents a target brush from lending its own cutter.
     enum cutSrc_t { KCUT_SRC_LINE = 0, KCUT_SRC_EDGE, KCUT_SRC_FACE };
 
     struct cutPick_t
@@ -228,20 +132,10 @@ namespace
         float dist = 0.0f;                      // pixels from the cursor (FACE: 0)
     };
 
-    // ROUND AF, ITEM 1: the hard ceiling on a fence.  A cut by N planes can, in
-    // the worst case, produce 2^N solids, and 64 is already 2^64 of theoretical
-    // headroom that real geometry never approaches (a circle cutting a slab makes
-    // exactly 2 pieces, not 2^32 — each plane only divides the pieces it actually
-    // crosses).  It is the same 64 KCON_SEGS_MAX caps a circle at, so a maximally
-    // tessellated ring fits exactly and nothing the construction layer can draw
-    // is refused for being too fine.
+    // Worst-case pieces grow as 2^N; 64 still admits a maximum-resolution circle.
     const int KCUT_MAX_FENCE = 64;
 
-    // KIWI-UX (CLEANUP, PickLineAt): the scan moved to KiwiCon_PickSegmentAt
-    // (kiwi_construct.h) — kiwi_dupe.cpp had a verbatim second copy of it under a
-    // different payload.  What stays here is the payload: the cut's cutPick_t,
-    // which is ranked against a brush FACE and a brush EDGE pick a few lines
-    // below and so has to carry a kind and a pixel distance.
+    // Adapt the shared segment picker to the cut source's ranking payload.
     bool PickLineAt( int imgX, int imgY, cutPick_t *out )
     {
         if ( !out )
@@ -255,16 +149,7 @@ namespace
         return true;
     }
 
-    // ── ROUND T: the BRUSH half of stage 1 ──────────────────────────────────
-    // One ordinary pick through the shared chain, asked for EDGES and FACES only.
-    // Pick() already resolves point → line → area in that order at the shared
-    // pixel tolerances (kiwi_pick.h), so "the edge wins over the face it lies on"
-    // is not a rule this file has to invent — it is the pick API's own, the same
-    // one the marquee and the hover use, which is why an edge and a face hover
-    // exactly where the user expects from every other tool.
-    //
-    // SEL_VERTEX is deliberately NOT in the mask: a point names no plane, and
-    // admitting it would only steal the pixel from the edge that owns it.
+    // Shared pick ordering makes an edge win over its face; vertices name no plane.
     bool PickBrushAt( int imgX, int imgY, cutPick_t *out )
     {
         if ( !out )
@@ -302,9 +187,7 @@ namespace
             return true;
         }
 
-        // FACE — its plane, read off the face and re-derived from the winding so
-        // the distance is exact for THIS winding rather than for whatever the
-        // planepts happened to be before the last rebuild.
+        // Recompute distance from the current winding rather than stale planepts.
         const winding_t *w = f->w;
         if ( !w || w->numpoints < 3 || w->numpoints > MAX_POINTS_ON_WINDING )
             return false;
@@ -321,13 +204,8 @@ namespace
         return true;
     }
 
-    // The stage-1 pick, all three kinds, ranked.  A construction segment and a
-    // brush edge are both PIXEL hits and compete on pixel distance, with the
-    // construction line winning an exact tie (it is Cut's documented primary and
-    // the thing the console line asks for).  A FACE is an AREA hit — screenDist 0
-    // by construction (kiwi_pick.h) — so it can never out-rank a line-like hit;
-    // it is what you get when neither is under the cursor, which is exactly the
-    // "click the roof" gesture.
+    // Line-like hits compete by pixel distance; the construction line is intended
+    // to win an exact tie. A face is the fallback area hit.
     bool PickCutSourceAt( int imgX, int imgY, cutPick_t *out )
     {
         cutPick_t linePick, brushPick;
@@ -345,13 +223,7 @@ namespace
         return false;
     }
 
-    // Is there ANY pickable construction segment in the store?
-    //
-    // ROUND T: this is no longer a PRECONDITION — a map with no construction
-    // geometry at all is now a perfectly good place to run Cut, because a brush
-    // face or a brush edge answers the same question.  It survives only to choose
-    // the wording of the opening console line, so the prompt names the thing the
-    // user can actually click.
+    // Only selects the prompt wording; brush edges/faces make lines optional.
     bool AnyConstructionSegment()
     {
         if ( !KiwiCon_ShowConstruction() )
@@ -366,50 +238,20 @@ namespace
         return false;
     }
 
-    // ── the translucent sweep quad ──────────────────────────────────────────
-    // Its own MATERIAL_COLOR bracket, the ported selected-face fill's
-    // (camwnd.cpp 0x408106, and kiwi_region.cpp:661-666 spells it out): neutral so
-    // the per-vertex colour drives the draw, white again afterwards.
-    // ── KIWI-UX (ROUND X, ITEM 7): THE CUT DISC ─────────────────────────────
-    // USER DIRECTIVE, verbatim: "The cut previewer is pretty good, but I would like
-    // you to make it a semi-transparent circle about 250% bigger than the area
-    // we're cutting."
-    //
-    // The previewer the directive is looking at is the snap marker's dot-and-ring
-    // (kiwi_snap.cpp EmitDotAndRing — KSNAP_DOT_PIX 2 px filled, KSNAP_RING_PIX
-    // 6 px outline), which is what marks the point a click would cut at.  So the
-    // ring's 6 px is "the area we're cutting" and 250% of it is 15 px.  The dot and
-    // the ring both STAY — they are the precise mark and the directive calls the
-    // existing previewer good; the disc is added UNDER them as the area readout.
-    //
-    // A filled, genuinely translucent disc, so it needs the triangle path rather
-    // than kiwi_lines (which pins alpha to 1 — kiwi_lines.h TRAP 2).  It is the
-    // same R_AddRenderCmdDrawTris + MATERIAL_COLOR bracket DrawQuad below and
-    // kiwi_region.cpp's region fills already use.
-    // KIWI-UX (CLEANUP, A-29): this WAS `15.0f  // 2.5x KSNAP_RING_PIX
-    // (kiwi_snap.cpp:74)` — a copied number with an already-stale cite, in a file
-    // that uses the published accessors correctly 1900 lines further down
-    // (:2383).  kiwi_snap.h publishes KiwiSnap_RingPixels() precisely "so a
-    // caller can match them exactly rather than copying numbers that then
-    // drift", so only the RATIO lives here now and the radius is computed at the
-    // use site.
-    const float KSPLIT_DISC_SCALE = 2.5f;   // of KiwiSnap_RingPixels() — see above
-    const int   KSPLIT_DISC_SEGS = 24;      // reads round at 15 px; 22 indices*3
-    // The HOVER accent, at the sweep quad's own alpha, so the two previews read as
-    // one language.  KSPLIT_HOT_COL + KSPLIT_PLANE_RGBA[3].
+    // Filled previews use the ported MATERIAL_COLOR bracket at camwnd.cpp 0x408106;
+    // lines cannot preserve alpha. Scale the disc from the published snap-ring size.
+    const float KSPLIT_DISC_SCALE = 2.5f;   // of KiwiSnap_RingPixels()
+    const int   KSPLIT_DISC_SEGS = 24;      // smooth at the intended ~15 px radius
     const float KSPLIT_DISC_RGBA[4] = { 1.00f, 0.90f, 0.30f, 0.22f };
 
-    // A translucent fan in the plane (`centre`, `normal`).  `normal` may be null,
-    // in which case the disc faces the camera — a construction line and a brush
-    // edge have no surface to lie on, and a disc edge-on to the view is invisible.
+    // A null normal makes line/edge discs face the camera rather than disappear edge-on.
     void DrawDisc( const float centre[3], const float *normal, float radius,
                    const float rgba[4] )
     {
         static const float s_neutral[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
         static const float s_white[4]   = { 1.0f, 1.0f, 1.0f, 1.0f };
 
-        // KIWI-UX (CLEANUP, A-21): no null test — Ed_Camera never returns NULL
-        // (camwnd.cpp:159); only the degenerate radius is a real refusal.
+        // Ed_Camera is non-null by contract (camwnd.cpp:159).
         const camera_s *cam = Ed_Camera();
         if ( !( radius > 0.0f ) )
             return;
@@ -422,28 +264,7 @@ namespace
         if ( !Norm3( n ) )
             return;
 
-        // ── ROUND Y, ITEM 8: THE DISC IS BACKFACE-CULLED ────────────────────
-        // USER REPORT, verbatim: "the cut previewer I asked you to add only
-        // renders when i'm underneath the grid.  Fix that."
-        //
-        // "Visible from one side only" is backface culling on a fixed winding, and
-        // the state says so: this fan is drawn with g_qeglobals.d_white =
-        // Material_RegisterHandle("white_tools") (gfxwrapper.cpp:77), and
-        // main/materials/white_tools carries refStateBits[0] = 0x08128965, whose
-        // cull field (0x08128965 & GFXS0_CULL_MASK 0xC000 = 0x8000) is
-        // GFXS0_CULL_BACK -> s_cullTable_30[2] = 3 = D3DCULL_CCW (r_state.cpp:28,
-        // :919).  main/statemaps/default.sm passes cullFace through, so the state
-        // survives to the device.  There is nothing to fix in the material — the
-        // fan simply has to be wound toward the eye.
-        //
-        // The fix is one sign.  The ring below runs +u then +v with v = n x u, so
-        // its front face is the +n side; making n point AT the camera therefore
-        // makes the front face the one being looked at, from either side of a
-        // surface.  It is also exactly what the null-normal branch above already
-        // does (n = -vpn points at the eye), which is why the camera-facing discs
-        // — a line hover, an edge hover — always drew and only the FACE-oriented
-        // ones went missing.  The disc still lies IN the surface plane; only its
-        // winding changes.
+        // white_tools backface-culls, so orient +n toward the eye before winding.
         {
             float toEye[3];
             for ( int k = 0; k < 3; ++k )
@@ -452,9 +273,7 @@ namespace
                 for ( int k = 0; k < 3; ++k ) n[k] = -n[k];
         }
 
-        // An orthonormal pair in the plane, seeded from the world axis least
-        // aligned with the normal — the standard trick, and the same one
-        // KiwiCon_MakePlane uses, so a disc on an axis-aligned face is axis-aligned.
+        // Seed from the least-aligned world axis, matching KiwiCon_MakePlane.
         float seed[3] = { 0.0f, 0.0f, 0.0f };
         {
             int least = 0;
@@ -473,9 +292,7 @@ namespace
         if ( !Norm3( v ) )
             return;
 
-        // Toward the eye by the region fill's own nudge, for the region fill's own
-        // reason: a disc drawn ON a brush face is otherwise decided pixel-by-pixel
-        // against that face's depth (kiwi_region.h KREG_FILL_NUDGE).
+        // World units toward the eye avoid z-fighting with the source face.
         const float nudge = 0.5f;
 
         float          xyzw[KSPLIT_DISC_SEGS + 1][4];
@@ -509,9 +326,7 @@ namespace
             xyzw[i][1] = p[1] - cam->vpn[1] * nudge;
             xyzw[i][2] = p[2] - cam->vpn[2] * nudge;
             xyzw[i][3] = 1.0f;
-            // KIWI-UX (ROUND AL, ITEM 1): a CONSTANT world normal (kiwi_lines.h
-            // TRAP 4).  The NUDGE above still reads vpn — that one is about
-            // depth and is untouched.
+            // Batch normals are world-constant; vpn is used only for the depth nudge.
             KiwiTris_FillNormal( nrm[i] );
             st[i][0]   = 0.0f;
             st[i][1]   = 0.0f;
@@ -542,12 +357,7 @@ namespace
         float          nrm [4][3];
         float          st  [4][2];
         float          col [4];
-        // KIWI-UX (ROUND AA, ITEM 2): was `static const`.  The quad's corners come
-        // from m_dir (the picked line) and m_away, and m_away is derived from the
-        // camera AS IT WAS AT THE CLICK and then frozen — so the face normal is
-        // fixed at click time and orbiting past it made the whole sweep preview
-        // disappear.  Same defect round Y fixed on the cut disc.  kiwi_lines.h
-        // TRAP 3.  Per-instance now, because KiwiTris_OrientToEye rewrites it.
+        // Per-call because KiwiTris_OrientToEye rewrites winding for the current eye.
         uint16_t idx[6] = { 0, 1, 2, 0, 2, 3 };
 
         float rgbaCopy[4] = { rgba[0], rgba[1], rgba[2], rgba[3] };
@@ -563,7 +373,7 @@ namespace
             xyzw[i][1] = pts[i][1];
             xyzw[i][2] = pts[i][2];
             xyzw[i][3] = 1.0f;
-            KiwiTris_FillNormal( nrm[i] );   // ROUND AL, ITEM 1 — kiwi_lines.h TRAP 4
+            KiwiTris_FillNormal( nrm[i] );   // constant world normal required by batcher
             st[i][0]   = 0.0f;
             st[i][1]   = 0.0f;
             col[i]     = packedAsFloat;
@@ -577,10 +387,7 @@ namespace
         R_AddCmdSetMaterialColor( s_white );
     }
 
-    // The polygon a plane carves out of one brush, drawn as the segment it leaves
-    // across every face it crosses.  Cheap and exact: a convex face winding meets a
-    // plane in at most one segment, and the union of those segments IS the cut
-    // outline on the brush's surface.
+    // A convex face meets a plane in at most one segment; their union is the outline.
     void DrawIntersection( const brush_t *def, const float n[3], float d )
     {
         if ( !def || !def->faces )
@@ -611,9 +418,7 @@ namespace
     }
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-//  The shared splitter (kiwi_split.h).
-// ═════════════════════════════════════════════════════════════════════════════
+// Shared splitter; contracts are in kiwi_split.h.
 bool KiwiSplit_PlaneCrossesBrush( const brush_t *def,
                                   const float p0[3], const float p1[3], const float p2[3] )
 {
@@ -623,10 +428,7 @@ bool KiwiSplit_PlaneCrossesBrush( const brush_t *def,
     if ( !PlaneOf( p0, p1, p2, n, &d ) )
         return false;
 
-    // The bounding box's 8 corners: the plane crosses the brush only if they land
-    // on both sides.  Conservative in the right direction — a box that straddles
-    // while the brush itself does not simply produces a NULL half below, which is
-    // already a handled refusal.
+    // Bounds straddling is conservative: a false positive becomes a handled NULL half.
     bool front = false, back = false;
     for ( int i = 0; i < 8; ++i )
     {
@@ -640,37 +442,10 @@ bool KiwiSplit_PlaneCrossesBrush( const brush_t *def,
     return front && back;
 }
 
-// ── ROUND L: the DEF-LEVEL splitter, hoisted out of the instance-level one ──
-// kiwi_boolean.cpp needs to split a brush N TIMES IN A ROW, keeping one half and
-// re-splitting the other, and only the final pieces may ever reach the map.  That
-// is the same three operations this function has always performed (build the
-// template face, run the ported core, gate both halves) MINUS the landing, so the
-// landing is what moved out rather than the logic being copied.
-//
-// Contract, and it is deliberately all-or-nothing so a caller's cleanup is one
-// line: on `true`, at most ONE of the two halves is NULL, and a NULL one means
-// the plane did not divide this brush — everything is on the other side.  On
-// `false` NOTHING is allocated, whatever the reason.
-//
-// WHICH HALF IS WHICH, read out of the ported core rather than assumed
-// (brush.cpp:4605 Brush_SplitBrushByFace): `*back` is the clone that gains the
-// template face AS GIVEN and `*front` the clone that gains it REVERSED (planepts
-// [0] and [1] swapped, which flips the plane).  A brush's interior is the
-// intersection of its faces' `n·p <= d` half-spaces, so with `n` the template's
-// own outward normal:
-//     back  = { n·p <= d }   (BEHIND the plane, the side the normal points away from)
-//     front = { n·p >= d }   (IN FRONT of it)
-// The subtract in kiwi_boolean.cpp depends on exactly that reading.
-//
-// ── KIWI-UX (ROUND AO, ITEM 3): THE BODY MOVED DOWN ONE LEVEL ───────────────
-// Everything below now lives in `SplitDefByPlaneBody`, which reports the two
-// halves SEPARATELY, and this function is the wrapper that reproduces the
-// all-or-nothing contract above EXACTLY — including "on false NOTHING is
-// allocated" and including which half's §19 reason wins (front before back,
-// which is what the short-circuit `&&` it used to be spelled with produced).
-// The cut and split verbs therefore see no change whatsoever.
-// KIWI-UX (CLEANUP, A-19): the per-half report is not a published entry point —
-// KiwiSplit_DefByPlaneCarve is the one external caller that needs it.
+// The def-level body supports repeated off-map splitting. Brush_SplitBrushByFace
+// at brush.cpp:4605 gives the template face to back and its reverse to front:
+// back = {n·p <= d}, front = {n·p >= d}. Subtract depends on this orientation.
+// The ordinary wrapper remains all-or-nothing and reports front's §19 failure first.
 static bool SplitDefByPlaneBody( brush_t *def,
                                  const float p0[3], const float p1[3], const float p2[3],
                                  brush_t **outFront, brush_t **outBack,
@@ -692,13 +467,12 @@ bool KiwiSplit_DefByPlane( brush_t *def,
     brush_t         *front = 0, *back = 0;
     kiwiSplitHalf_t  fs = KSPLIT_HALF_NONE, bs = KSPLIT_HALF_NONE;
     if ( !SplitDefByPlaneBody( def, p0, p1, p2, &front, &back, &fs, &bs,
-                               false, 0, why ) )   // KIWI-UX (CLEANUP, A-19)
+                               false, 0, why ) )   // ordinary all-or-nothing split
         return false;
 
     if ( fs == KSPLIT_HALF_SLIVER || bs == KSPLIT_HALF_SLIVER )
     {
-        // `why` already names the first bad half's §19 check.  The half that DID
-        // survive is freed here so the caller never sees a partial result.
+        // Never expose the surviving half of an ordinary refused split.
         if ( front ) KiwiSplit_FreeUnlandedDef( front );
         if ( back  ) KiwiSplit_FreeUnlandedDef( back  );
         return false;
@@ -709,10 +483,7 @@ bool KiwiSplit_DefByPlane( brush_t *def,
     return true;
 }
 
-// ── KIWI-UX (ROUND AR, ITEM 2): the shared body ─────────────────────────────
-// `keepRefusedBack` is the ONLY difference between the two published entries —
-// see kiwi_split.h (§19 IS A GATE ON WHAT GETS LANDED) for the argument.  The
-// FRONT half is gated identically in both, because the front is what gets landed.
+// `keepRefusedBack` is the only carve divergence; front is always a landed candidate.
 static bool SplitDefByPlaneBody( brush_t *def,
                                  const float p0[3], const float p1[3], const float p2[3],
                                  brush_t **outFront, brush_t **outBack,
@@ -735,8 +506,7 @@ static bool SplitDefByPlaneBody( brush_t *def,
         return false;
     }
 
-    // Refuse a degenerate plane BEFORE anything is cloned: Face_MakePlane would
-    // normalise a zero cross product and hand both halves a garbage plane.
+    // Reject a degenerate plane before the ported core clones anything.
     float cutN[3], cutD;
     if ( !PlaneOf( p0, p1, p2, cutN, &cutD ) )
     {
@@ -744,32 +514,11 @@ static bool SplitDefByPlaneBody( brush_t *def,
         return false;
     }
 
-    // ── KIWI-UX (ROUND T): THE TWO NEW FACES INHERIT, THEY ARE NOT CAULKED ───
-    // USER DIRECTIVE, verbatim: "Make it so the texture is just inherited from
-    // the parent brush that are being operated on.  The caulk texture is not
-    // usable."
-    //
-    // WAS: Ed_BuildClipFaceMaterial_Kiwi( &clipFace, def ) — the CLIPPER's caulk /
-    // nodraw_decal synthesis, which is right for the clipper (it trims structural
-    // brushwork and the binary caulks the trim) and wrong for "split this in two",
-    // where the halves are meant to look like the thing that was split.  It is
-    // also the depth-writeless class round M/O decoded, i.e. the z-order lottery.
-    //
-    // NOW: kiwi_material.h R2 — the source brush's largest INHERITABLE face whose
-    // plane is most perpendicular to this cut.  R3 keeps an all-tool brush a tool
-    // brush by falling back to the same synthesis, so a caulk block still cuts
-    // into caulk.  The CLASSIC clipper is untouched and still caulks.
-    //
-    // face_t{} zero-inits, which is what leaves `w` NULL — Face_Alloc clones the
-    // template's winding and NULL is exactly what the clipper's own template
-    // carries.
+    // Split walls inherit from the best source face; all-tool brushes fall back to
+    // classic caulk. A zeroed template intentionally leaves `w` NULL for Face_Alloc.
     face_t clipFace{};
     KiwiMtl_SeedClipFace( &clipFace, def, cutN );
-    // The seed COPIES the source face's four channels, so a source whose lightmap
-    // or smoothing channel is dead propagates that into both halves' new walls —
-    // invisible in Shift+L, and unlit at compile (kiwi_material.h "the three
-    // channels").  No-op on a sound source; the R3 caulk fallback already fills
-    // all three itself (xywnd.cpp:2288-2313).
+    // Repair missing inherited layers; the caulk fallback already supplies them.
     KiwiMtl_EnsureFaceLayers( &clipFace );        // kiwi_material.h:245
     for ( int k = 0; k < 3; ++k )
     {
@@ -787,17 +536,9 @@ static bool SplitDefByPlaneBody( brush_t *def,
         return false;
     }
 
-    // §19 on whichever halves exist, while they are still off every display list.
-    // Brush_SplitBrushByFace already ran Brush_BuildWindings( b, 1 ) on each, so
-    // planes, windings and bounds are current and no rebuild is due here.  A
-    // half that fails is FREED HERE — the UNLINK + FREE pair CSG_MakeHollow uses
-    // on the piece it throws away (csg.cpp:365-369) — and reported as
-    // KSPLIT_HALF_SLIVER, so no caller ever has to unpick a partial result and no
-    // caller is handed a def it did not ask about.
-    //
-    // ROUND AO, ITEM 3: the two halves are gated INDEPENDENTLY.  `why` keeps the
-    // FRONT's reason when both are bad, which is the order the single `&&` this
-    // replaced short-circuited in.
+    // The ported core rebuilt planes, windings, and bounds. Gate off-list halves
+    // independently and free refusals with the CSG_MakeHollow unlink/free pair.
+    // Preserve front-before-back reason ordering.
     const char *frontWhy = "invalid geometry";
     const char *backWhy  = "invalid geometry";
     kiwiSplitHalf_t fs = KSPLIT_HALF_NONE;
@@ -823,22 +564,9 @@ static bool SplitDefByPlaneBody( brush_t *def,
         {
             bs = KSPLIT_HALF_OK;
         }
-        // ── KIWI-UX (ROUND AR, ITEM 2): CARRY A REFUSED *INTERMEDIATE* ───────
-        // The back half of a subtract step is never landed (kiwi_boolean.cpp
-        // discards it), so a §19 refusal of it is a statement about presentation
-        // and not about volume.  It is carried on when it has real thickness in
-        // all three directions; anything thinner is round AO's genuine graze and
-        // still stops the cascade.  Bounds are current: Brush_SplitBrushByFace
-        // ran Brush_BuildWindings on both halves.
-        //
-        // THE SECOND HALF OF THE TEST IS A CONTAINMENT INVARIANT, and it is what
-        // keeps this from carrying nonsense.  A half-space cut of a solid is a
-        // SUBSET of it, so the back's bounds must sit inside the input's.  Any §19
-        // verdict that means "this is not a bounded solid at all" — V7 (span past
-        // the map bound) and V8 (the remaining half-spaces do not enclose a finite
-        // cell, kiwi_validity.h) — breaks that invariant and is refused here, so
-        // only the presentation verdicts (V3 / V4 / V5 / V6 on a real subset) can
-        // ever be carried.  One world unit of slack for the split's own rounding.
+        // Back is never landed during subtract, so presentation-only refusals may
+        // continue when it has real thickness and remains within the source bounds.
+        // One world unit of containment slack covers split rounding.
         else if ( keepRefusedBack
                && ( back->maxs[0] - back->mins[0] ) >= KSPLIT_CARRY_EXTENT
                && ( back->maxs[1] - back->mins[1] ) >= KSPLIT_CARRY_EXTENT
@@ -864,9 +592,7 @@ static bool SplitDefByPlaneBody( brush_t *def,
         *why = frontWhy;
     else if ( bs == KSPLIT_HALF_SLIVER )
         *why = backWhy;
-    // KIWI-UX (ROUND AR, ITEM 2): a CARRIED back half still names the gate it
-    // failed, so the caller's "the hole may be imperfect here" line can say which
-    // one it was instead of only that something happened.
+    // A carried back still reports the gate it failed.
     else if ( outBackRefused && *outBackRefused )
         *why = backWhy;
 
@@ -877,7 +603,6 @@ static bool SplitDefByPlaneBody( brush_t *def,
     return true;
 }
 
-// KIWI-UX (ROUND AR, ITEM 2) — see kiwi_split.h for the whole argument.
 bool KiwiSplit_DefByPlaneCarve( brush_t *def,
                                 const float p0[3], const float p1[3], const float p2[3],
                                 brush_t **outFront, brush_t **outBack,
@@ -921,9 +646,7 @@ bool KiwiSplit_BrushByPlane( selbrush_t *node,
     if ( !KiwiSplit_DefByPlane( def, p0, p1, p2, &front, &back, why ) )
         return false;
 
-    // A NULL half means that side kept fewer than 4 faces, i.e. the plane did not
-    // actually divide this brush.  THIS entry point wants two halves or nothing,
-    // so discard whatever did come back.
+    // This entry point requires two halves; discard a one-sided clone.
     if ( !front || !back )
     {
         KiwiSplit_FreeUnlandedDef( front );
@@ -932,9 +655,7 @@ bool KiwiSplit_BrushByPlane( selbrush_t *node,
         return false;
     }
 
-    // Land both, SELECTED, in the ported order (Ed_ProduceSplitLists and
-    // CSG_MakeHollow both do exactly this pair, with the same already-linked
-    // guard).  The source instance is NOT freed here — kiwi_split.h says why.
+    // Land selected in the ported order; the caller frees the source afterward.
     selbrush_t *na = Brush_AddToList( front, owner );
     if ( na->next || na->prev )
         Com_Error( ERR_FATAL, "Brush_AddToList: already linked" );
@@ -953,9 +674,7 @@ bool KiwiSplit_BrushByPlane( selbrush_t *node,
 
 namespace
 {
-    // Split every brush on `targets` and free each source.  Returns how many
-    // brushes were actually divided.  The CALLER owns the undo bracket: this must
-    // run between KiwiCmd_UndoBegin and KiwiCmd_UndoCommit (kiwi_split.h).
+    // Split targets and free each source inside the caller's undo bracket.
     int SplitTargets( const std::vector<selbrush_t *> &targets,
                       const float p0[3], const float p1[3], const float p2[3],
                       const char *verb )
@@ -974,63 +693,30 @@ namespace
                 Sys_Printf( "%s: brush skipped — %s.\n", verb, why );
                 continue;
             }
-            // Both halves are linked and selected; only NOW is the source freed,
-            // so its owner entity never transiently runs out of brushes.
+            // Land before free so the owner never transiently loses every brush.
             Brush_Free( node );
             ++done;
         }
         return done;
     }
 
-    // ═════════════════════════════════════════════════════════════════════════
-    //  C — CUT.  Selected brushes, a CLICKED construction line, and a plane that
-    //  is locked at the instant of that click.  See kiwi_split.h THE CUT PLANE for
-    //  the derivation and ROUND L: THE TWO-STAGE CUT for the flow.
-    // ═════════════════════════════════════════════════════════════════════════
+    // C — Cut. The source click locks the plane described in kiwi_split.h.
     class KiwiCutCommand : public KiwiEditorCommand
     {
     public:
         const char *Name() const override { return "Cut"; }
         bool CanExecute() override { return KiwiSplit_CanCut(); }
 
-        // ── ROUND L: STAGE 1 IS A CLICK TOOL, STAGE 2 IS NOT ─────────────────
-        // Stage 1 needs the drawing tools' grammar (a click NAMES something — the
-        // same shape Match Face uses to pick its target face), and stage 2 needs
-        // the shakeout-E confirm flow (RMB / Enter commits, a stray click parks).
-        // WantsClicks is asked per press, so one command can be both in turn.
-        // ── KIWI-UX (ROUND AF, ITEM 1): STAGE 2 IS A CLICK TOOL TOO ────────
-        // USER DIRECTIVE, verbatim: "Allow shift-clicking of lines during cut
-        // operation setup to enable this."
-        //
-        // A SECOND line can only be named by a SECOND CLICK, and the FIRST click
-        // is what enters stage 2 — so with stage 2 refusing clicks there was no
-        // reachable state in which a fence could be grown at all.  The clicks
-        // therefore never stop being clicks, exactly as round AA did for the
-        // boolean when its tool became a set, and with the same cost accounted for:
-        // what is given up is the park-on-click behaviour (KiwiCmd_Pause returns
-        // early for a click tool), and the cut has NO DRAG to park — the plane is
-        // locked at the click and nothing follows the cursor except the hover,
-        // which is exactly what has to keep working so the next line can be aimed
-        // at.  RMB / Enter still commits and Esc still walks the stages back;
-        // neither goes through this rung.
+        // Both stages accept clicks so Shift+LMB can grow a fence; RMB/Enter commits.
         bool WantsClicks() const override { return true; }
 
-        // KIWI-UX (CLEANUP, A-40): no numeric field -- the plane comes from the
-        // picked source.  There is no NumericFields override here at all (the
-        // earlier note claimed one was "declared"), and leaving Tab free is
-        // deliberate: kiwi_split.h TAB ROUTING.
+        // Cut has no numeric field; the picked source defines its plane.
         const char *HudStatus() const override { return m_hud[0] ? m_hud : 0; }
-        // RED while the LOCKED plane crosses NOTHING: confirming then would
-        // silently do nothing, and the HUD is the only place that can say so in
-        // advance.  Never red in stage 1 — there is no plane yet to be wrong.
+        // Red only when a locked preview crosses no target.
         bool        HudInvalid() const override
         { return m_stage == KCUT_PREVIEW && m_crossing <= 0; }
 
-        // ROUND AF, ITEM 3's hook, used by ROUND AF, ITEM 1.  A 64-plane fence is
-        // 256 outline segments plus the per-target intersection outlines, which is
-        // several times the framework's default batch — the same "the cost is a
-        // function of a set the user is still growing" shape the boolean has, and
-        // answered the same way.  0 (no fence) leaves the default untouched.
+        // Fence overlay cost grows with planes and targets; zero keeps the default.
         int LineBudget() const override
         {
             if ( !FenceActive() )
@@ -1043,12 +729,8 @@ namespace
 
         int HudPrompts( const kiwiPrompt_t **out ) const override
         {
-            // STATIC storage per kiwi_command.h's contract — the strip copies the
-            // structs, not the strings.  The framework's own keys (confirm /
-            // cancel) are derived by kiwi_hints.cpp and not repeated.
-            // ROUND AF, ITEM 1: the additive grammar is advertised in BOTH stages,
-            // because it IS the same grammar in both — a fence can be grown after the
-            // preview is live, exactly as the boolean's tool set can.
+            // Static strings are required by the HUD contract; both stages advertise
+            // the additive fence grammar.
             static const kiwiPrompt_t s_pick[] = {
                 { "LMB",       "Pick a line, a brush EDGE or a brush FACE" },
                 { "Shift+LMB", "Add a line" },
@@ -1080,12 +762,7 @@ namespace
                 return false;
             }
 
-            // ── KIWI-UX (ROUND T): NOTHING REFUSES THE GESTURE ANY MORE ─────
-            // Round L kept ONE precondition — "there has to be a construction line
-            // somewhere" — on the honest ground that "click a line" is unanswerable
-            // from inside a modal gesture when the map has none.  It is answerable
-            // now: a brush face or a brush edge names a plane just as well, and
-            // every map has those.  The test survives only to word the prompt.
+            // Lines are optional because a brush edge or face also names a plane.
             m_stage = KCUT_PICK_LINE;
             UpdateHud();
             Sys_Printf( "Cut: click %s, a brush EDGE, or a brush FACE to use its "
@@ -1095,44 +772,15 @@ namespace
             return true;
         }
 
-        // ── ROUND L: STAGE 1 HOVERS, STAGE 2 DOES NOTHING AT ALL ─────────────
-        // USER DIRECTIVE, verbatim: "Also the way it cuts needs to be decided at
-        // line click-time and not update as the camera moves."
-        //
-        // BEFORE (shakeout G): AimFromCamera() ran HERE, on every hot frame, so the
-        // cutting plane swung with the camera for the whole life of the gesture and
-        // only stopped when the user happened to park it.  A cut you had aimed
-        // could be re-aimed by an orbit meant only to look at the preview.
-        //
-        // AFTER: the plane is derived ONCE, inside Click(), from the clicked line
-        // and the camera's vpn AT THAT INSTANT, and stored.  Nothing re-derives it —
-        // there is no call to AimFromCamera anywhere on a per-frame path.  Orbiting
-        // in stage 2 moves the camera and nothing else, which is what "decided at
-        // line click-time" means.
+        // Mouse motion updates only the next source hover. Click alone writes the
+        // locked plane, so orbiting during preview cannot re-aim it.
         void MouseMove( const pick_result_t &pick, const snap_result_t &snap ) override
         {
             (void)pick;
-            // ── ROUND AF, ITEM 1: THE HOVER TRACKS IN BOTH STAGES ──────────
-            // It used to return here ("the plane is LOCKED: nothing to update"),
-            // which was true when there was only ever one source.  With a FENCE
-            // there is always a next line to aim at, so the hover has to stay alive
-            // for the whole gesture — it is what tells the user which shape the
-            // next Shift+click will take, and it is what Click() reads.
-            //
-            // NOTHING ABOUT THE LOCKED PLANE MOVES.  m_p, m_planeN/D, m_lineA/B and
-            // m_away are written only by AimFromCamera / AimFromFace, both of which
-            // are called only from Click().  Round L's "the plane locks at the
-            // click and never re-derives" rule is untouched; only the QUESTION
-            // "what is under the cursor" keeps being asked.
+            // Keep hover live in preview so the next Shift+click can be aimed.
             const bool preview = ( m_stage != KCUT_PICK_LINE );
 
-            // ROUND X, ITEM 7: the point the disc is drawn at.  The SNAP position,
-            // not the raw pick, because that IS where the click will cut and it is
-            // the point the dot-and-ring marker is already sitting on — two markers
-            // for one act must not be able to disagree about where the act is.
-            // ROUND AF, ITEM 1: the DISC is a stage-1 affordance ("the click will cut
-            // here") and would be noise over a locked preview, so it is the one thing
-            // that stays stage-1 only.
+            // Stage-1 disc follows the snap point so it agrees with the snap marker.
             m_haveDisc = !preview && snap.valid;
             if ( m_haveDisc )
                 Copy3( snap.position, m_discPt );
@@ -1142,14 +790,10 @@ namespace
             const cutPick_t wasWhat = m_hover;
             m_haveHover = false;
             if ( KiwiCmd_LastCursor( &x, &y ) )
-                m_haveHover = PickCutSourceAt( x, y, &m_hover );   // ROUND T: 3 kinds
-            // The disc repaints with the cursor, not only when the hovered THING
-            // changes: it follows the snap point across a single face.
+                m_haveHover = PickCutSourceAt( x, y, &m_hover );   // line, edge, or face
+            // The disc follows the snap point even within one hovered source.
             g_nUpdateBits |= 1;
-            // Repaint when the hover APPEARS, DISAPPEARS or moves to a different
-            // thing — a face hover is an area hit, so "the flag changed" alone
-            // would leave the highlight stuck on the previous face while the
-            // cursor slid across a wall.
+            // Also track hover identity changes, including adjacent face areas.
             if ( m_haveHover != was
               || ( m_haveHover && ( m_hover.kind      != wasWhat.kind
                                  || m_hover.object    != wasWhat.object
@@ -1160,9 +804,7 @@ namespace
             UpdateHud();
         }
 
-        // Stage 1's click LOCKS THE PLANE.  Return true keeps the gesture running
-        // (kiwi_command.h Click) — this command is never committed by a click, only
-        // by RMB / Enter in stage 2.
+        // Source clicks lock planes; only RMB/Enter commits.
         bool Click() override
         {
             if ( m_stage != KCUT_PICK_LINE )
@@ -1175,10 +817,7 @@ namespace
             }
 
             m_srcKind = m_hover.kind;
-            // ROUND AF, ITEM 1: an EDGE or a FACE is a SINGLE-plane source and has
-            // no object to fence with, so picking one drops any fence outright
-            // rather than leaving a set that FenceActive would still answer true
-            // for while m_p holds a different plane entirely.
+            // Edge/face sources are single planes and cannot retain a construction fence.
             if ( m_hover.kind != KCUT_SRC_LINE )
             {
                 m_fenceObjs.clear();
@@ -1187,13 +826,7 @@ namespace
 
             if ( m_srcKind == KCUT_SRC_FACE )
             {
-                // ── ROUND T: THE FACE ARM.  NO CAMERA TERM AT ALL ────────────
-                // A face already IS a plane, so MeasureBounds (which the camera
-                // arm needs for its lever arm) is here only to size the preview
-                // and to place the three planepts near the geometry being cut —
-                // near, because Face_MakePlane's normal comes from a cross
-                // product of the planept differences and points a thousand units
-                // away from the action are needless precision loss.
+                // A face supplies its plane; bounds only size nearby, stable planepts.
                 MeasureBounds();
                 if ( !AimFromFace() )
                 {
@@ -1210,24 +843,8 @@ namespace
                 return true;
             }
 
-            // ══════════════════════════════════════════════════════════════
-            //  KIWI-UX (ROUND AF, ITEM 1): A CONSTRUCTION LINE NAMES A FENCE
-            // ══════════════════════════════════════════════════════════════
-            // USER DIRECTIVE, verbatim: "When cutting, a lot of times I want to
-            // cut with an entire circle or half-circle.  Allow shift-clicking of
-            // lines during cut operation setup to enable this."
-            //
-            // A CLICK NAMES THE WHOLE OBJECT, not the segment under the cursor.
-            // For a straight line that is exactly what it always was; for a circle
-            // or a polyline it is the loop the directive asks for, and it needs no
-            // new picking — KiwiCon_SegmentCount / SegmentWorld have always been
-            // able to walk an object.  SHIFT adds another object; shift-clicking
-            // one already in takes it back out.
-            //
-            // The BRUSH-EDGE arm is untouched and falls through to the round-L
-            // single-plane derivation below: an edge is not a construction object,
-            // it has no plane of its own to sweep along, and nothing in the
-            // directive asks for a fence of them.
+            // A construction click takes the entire object. Shift toggles additional
+            // objects; brush edges remain single view-swept planes.
             if ( m_srcKind == KCUT_SRC_LINE && m_hover.object >= 0 )
             {
                 const bool add = KiwiCmd_LastShift();
@@ -1268,9 +885,7 @@ namespace
 
                 if ( FenceActive() )
                 {
-                    // A REAL FENCE.  m_p is left alone deliberately: it is the
-                    // SINGLE-plane path's state and the fence path never reads it,
-                    // so the two cannot half-mix.
+                    // m_p remains single-plane state; fence geometry lives separately.
                     m_stage = KCUT_PREVIEW;
                     CountCrossings();
                     UpdateHud();
@@ -1284,14 +899,12 @@ namespace
                     g_nUpdateBits = -1;
                     return true;
                 }
-                // Exactly one segment: fall through to the round-L single-plane
-                // path, byte for byte, using the segment the fence flattened to.
+                // One segment uses the ordinary single-plane path.
                 Copy3( &m_fence[0], m_hover.a );
                 Copy3( &m_fence[3], m_hover.b );
             }
 
-            // LINE and EDGE share the derivation completely: two endpoints plus the
-            // camera.  An edge IS a line here, which is why the arm is not two arms.
+            // Lines and edges share the endpoint-plus-camera derivation.
             Copy3( m_hover.a, m_lineA );
             Copy3( m_hover.b, m_lineB );
             Sub3( m_lineB, m_lineA, m_dir );
@@ -1301,8 +914,7 @@ namespace
                 return true;
             }
 
-            // MeasureBounds first (AimFromCamera's third planept uses the lever arm
-            // it computes), then the ONE and ONLY derivation of the plane.
+            // Bounds provide AimFromCamera's stable plane-point lever arm.
             MeasureBounds();
             if ( !AimFromCamera() )
             {
@@ -1321,10 +933,7 @@ namespace
             return true;
         }
 
-        // Esc walks the stages back before the framework's cancel rung ever sees it
-        // (kiwi_command.cpp's ladder offers the key to the command first); Enter in
-        // stage 1 is consumed with a nudge, because there is nothing to confirm yet
-        // and committing an unlocked plane would silently do nothing.
+        // Esc steps preview back to picking; Enter is consumed until a plane is locked.
         bool KeyDown( int vk, unsigned mods ) override
         {
             (void)mods;
@@ -1333,12 +942,7 @@ namespace
                 m_stage     = KCUT_PICK_LINE;
                 m_crossing  = 0;
                 m_haveHover = false;
-                // A stage-2 click can have PARKED the gesture (stage 2 is not a
-                // click tool, so shakeout E's pause arm applies to it), and a
-                // PAUSED command receives no MouseMove — the line hover would be
-                // dead and the next click would be eaten as a resume.  Stage 1 can
-                // never be paused (WantsClicks refuses), so this is a no-op except
-                // on exactly the edge that needs it.
+                // Defensive only: WantsClicks() currently prevents either stage parking.
                 KiwiCmd_Resume();
                 UpdateHud();
                 Sys_Printf( "Cut: plane dropped — click another line, edge or face "
@@ -1361,13 +965,8 @@ namespace
 
             if ( m_stage == KCUT_PICK_LINE )
             {
-                // ── ROUND X, ITEM 7: the translucent cut disc ────────────────
-                // Drawn FIRST so the hover highlight and the snap marker land on
-                // top of it, which is what makes it read as an area under a point
-                // rather than as a blob over one.  Screen-constant at 15 px (2.5x
-                // the snap ring), oriented on the surface being cut when there is
-                // one — a FACE hover has a plane; a line or an edge does not, and
-                // DrawDisc faces the camera for those.
+                // Draw first beneath hover/snap ink; screen-constant and face-oriented
+                // when a face supplies a surface.
                 if ( m_haveDisc )
                 {
                     const float r = KiwiSnap_RingPixels() * KSPLIT_DISC_SCALE
@@ -1378,18 +977,11 @@ namespace
                     DrawDisc( m_discPt, onSurface, r, KSPLIT_DISC_RGBA );
                 }
 
-                // The hovered segment, brightened over the construction store's own
-                // draw.  Nothing else: with no plane locked there is nothing to
-                // preview, and a sweep quad that followed the cursor would be
-                // exactly the "updates as the camera moves" the directive removed.
+                // Before locking, draw only the source itself; no live sweep plane.
                 if ( m_haveHover )
                 {
                     KiwiLines_Color( KSPLIT_HOT_COL[0], KSPLIT_HOT_COL[1], KSPLIT_HOT_COL[2] );
-                    // ROUND T: whichever of the three kinds would be taken, drawn as
-                    // itself — the segment for a line or an edge, the whole winding
-                    // for a face.  "Hover-highlight whichever would be picked" is the
-                    // directive, and a face highlighted as a two-point stub would not
-                    // read as a face.
+                    // Draw the full hovered source: segment/edge or complete face winding.
                     if ( m_hover.kind == KCUT_SRC_FACE )
                         DrawFaceOutline( m_hover );
                     else
@@ -1398,16 +990,10 @@ namespace
                 return;
             }
 
-            // ── KIWI-UX (ROUND AF, ITEM 1): THE FENCE PREVIEW ───────────────
-            // One swept quad OUTLINE per plane — the segment, its two rails and the
-            // far edge — plus the hover, so the next Shift+click is aimable.  Lines
-            // rather than the translucent DrawQuad the single plane gets: a
-            // sixty-plane tube of translucent fills is an opaque blob that hides the
-            // geometry the user is trying to aim at, and the outline reads as a
-            // cookie cutter at every count.
+            // Fence planes use outlines: many translucent fills would hide the target.
             if ( FenceActive() )
             {
-                const float lift = m_radius;   // KIWI-UX (CLEANUP, A-39)
+                const float lift = m_radius;   // bounds-scaled lever arm
                 KiwiLines_Color( KSPLIT_EDGE_COL[0], KSPLIT_EDGE_COL[1], KSPLIT_EDGE_COL[2] );
                 for ( int f = 0; f < FenceCount(); ++f )
                 {
@@ -1448,11 +1034,8 @@ namespace
                 return;
             }
 
-            // The sweep quad.  For a LINE / EDGE plane: from the line, straight away
-            // from the camera AS IT WAS AT THE CLICK, sized off the affected brushes'
-            // bounds (kiwi_split.h).  For a FACE plane there is no sweep direction and
-            // no line — the quad is simply a square patch OF the plane, centred on the
-            // targets, so what is drawn is what will cut.
+            // Line/edge quads sweep along the click-time view; face quads are centered
+            // patches in the source plane. Both are sized from target bounds.
             float a[3], b[3], c[3], d[3];
             const float span  = m_radius * KSPLIT_SPAN_SCALE;
             const bool  faceMode = ( m_srcKind == KCUT_SRC_FACE );
@@ -1467,10 +1050,7 @@ namespace
             Mad3( a, m_away, depth, d );
             DrawQuad( a, b, c, d, KSPLIT_PLANE_RGBA );
 
-            // The cut LINE itself, then the outline the plane leaves on every
-            // affected brush.  Both inside the framework's own batch.  A FACE-derived
-            // plane has no line to draw — drawing m_lineA/m_lineB there would draw a
-            // stale segment from a previous stage-1 hover.
+            // Face-derived planes have no source line; m_lineA/B may be stale there.
             if ( !faceMode )
             {
                 KiwiLines_Color( KSPLIT_EDGE_COL[0], KSPLIT_EDGE_COL[1], KSPLIT_EDGE_COL[2] );
@@ -1492,10 +1072,7 @@ namespace
                 return;
             }
 
-            // Only the brushes the LOCKED plane actually crosses.  Re-tested at
-            // COMMIT rather than reused from the preview count because the BRUSHES
-            // can change under a paused gesture (something freed, something moved),
-            // not because the plane can — since ROUND L it cannot.
+            // Re-test live brush geometry at commit; the locked plane cannot change.
             std::vector<selbrush_t *> hit;
             for ( size_t i = 0; i < m_targets.size(); ++i )
             {
@@ -1504,9 +1081,7 @@ namespace
                     continue;
                 if ( FenceActive() )
                 {
-                    // ROUND AF, ITEM 1: ANY plane of the fence crossing the brush is
-                    // reason enough to hand it to the cascade, which decides per plane
-                    // and leaves a target every plane misses completely alone.
+                    // Any crossing plane hands the brush to the per-plane cascade.
                     for ( int f = 0; f < FenceCount(); ++f )
                     {
                         float pts[3][3];
@@ -1531,16 +1106,11 @@ namespace
                 return;
             }
 
-            // ONE record for "remove N, add 2N" — the CSG_MakeHollow wrapper's
-            // exact order (kiwi_split.h UNDO).  KiwiCmd_UndoBegin IS
-            // ClearRedo + GeneralStart + AddBrushList(&selected_brushes), which
-            // clones every original before the first of them is touched.
+            // One undo record clones every source before any split is landed.
             KiwiCmd_UndoBegin( "cut brushes" );
             if ( FenceActive() )
             {
-                // ROUND AF, ITEM 1: the cascade.  ONE bracket for the whole fence,
-                // exactly as the single-plane path has one for its single split, and
-                // for the same reason — this is one gesture.
+                // The whole fence is one gesture and one undo record.
                 int pieces = 0;
                 const int cut = CascadeCut( hit, &pieces );
                 Sys_Printf( "Cut: %i brush(es) -> %i, by a %i-plane fence.\n",
@@ -1570,17 +1140,14 @@ namespace
             m_srcKind   = KCUT_SRC_LINE;
             m_crossing  = 0;
             m_haveHover = false;
-            m_haveDisc  = false;      // ROUND X, ITEM 7
-            m_fenceObjs.clear();      // ROUND AF, ITEM 1
+            m_haveDisc  = false;      // stage-1 snap disc
+            m_fenceObjs.clear();      // additive construction sources
             m_fence.clear();
             m_fenceFromPlane = false;
             m_hud[0]    = '\0';
         }
 
-        // ── ROUND T: the hovered FACE's winding, as a closed outline ─────────
-        // Read live rather than cached: the pick is a frame old by the time this
-        // runs and the brush can have been rebuilt under a paused gesture, so the
-        // winding pointer is re-fetched and re-bounds-checked here.
+        // Re-fetch the hovered face winding because the brush may have rebuilt.
         static void DrawFaceOutline( const cutPick_t &h )
         {
             if ( !Sel_BrushLive( h.node ) || !h.node->def || !h.node->def->faces )
@@ -1595,19 +1162,8 @@ namespace
                     return;
         }
 
-        // ── ROUND T: THE FACE ARM'S DERIVATION ───────────────────────────────
-        // The clicked face's plane, VERBATIM: m_planeN / m_planeD are its own, and
-        // the three planepts are laid out around the point of that plane nearest
-        // the targets' centre, in an orthonormal in-plane basis at the bounds
-        // radius.  Two consequences worth stating:
-        //   * the camera is not consulted, so orbiting between the click and the
-        //     confirm cannot change the cut — the ROUND L promise, for free;
-        //   * the planepts are WELL SPREAD and NEAR THE GEOMETRY, which is what
-        //     Face_MakePlane's cross product wants.  Taking three of the source
-        //     winding's own points would satisfy neither on a small face far away.
-        //
-        // The basis doubles as the preview quad's axes (m_dir / m_away), which is
-        // why they are written here rather than only inside DrawWorld.
+        // Preserve the clicked face plane without a camera term. Bounds-scaled nearby
+        // planepts improve cross-product precision; the same basis drives the preview.
         bool AimFromFace()
         {
             float n[3];
@@ -1615,8 +1171,7 @@ namespace
             if ( !Norm3( n ) )
                 return false;
 
-            // An in-plane basis: cross the normal with whichever world axis it is
-            // least aligned to, which can never be the degenerate pairing.
+            // The least-aligned world axis gives a stable in-plane basis.
             float ax[3] = { 0.0f, 0.0f, 0.0f };
             {
                 int   least = 0;
@@ -1633,14 +1188,12 @@ namespace
             if ( !Norm3( e2 ) )
                 return false;
 
-            // The targets' bounds centre (MeasureBounds' m_mid — NOT m_centre,
-            // which is the LINE arm's projection onto the clicked line and is
-            // meaningless here), dropped onto the plane.
+            // Project the unmodified target-bounds center, not the line-arm center.
             float c[3];
             const float d = m_hover.d;
             Mad3( m_mid, n, d - Dot3( n, m_mid ), c );
 
-            const float arm = m_radius;        // KIWI-UX (CLEANUP, A-39)
+            const float arm = m_radius;        // bounds-scaled lever arm
             Copy3( c, m_p[0] );
             Mad3( c, e1, arm, m_p[1] );
             Mad3( c, e2, arm, m_p[2] );
@@ -1650,20 +1203,13 @@ namespace
             Copy3( e1, m_dir );
             Copy3( e2, m_away );
             Copy3( c,  m_centre );
-            // The two "line" ends are meaningless for a face plane and DrawWorld
-            // skips them; parked on the plane so nothing downstream reads garbage.
+            // Face mode does not draw these; initialize them on-plane defensively.
             Copy3( c, m_lineA );
             Copy3( c, m_lineB );
             return true;
         }
 
-        // n = normalise( cross( lineDir, away ) ), away = the camera's forward
-        // projected perpendicular to the line.  kiwi_split.h derives it in full.
-        //
-        // ROUND L: CALLED FROM EXACTLY ONE PLACE — Click(), at the instant the line
-        // is picked.  Everything it writes (m_away, m_planeN, m_planeD, m_p) is the
-        // gesture's locked plane from then on.  Nothing on a per-frame path may
-        // call it; that was the bug.
+        // Called only by Click: project camera forward off the line and lock the plane.
         bool AimFromCamera()
         {
             CamWnd_BuildMatrix();
@@ -1685,76 +1231,20 @@ namespace
             Copy3( n, m_planeN );
             m_planeD = Dot3( n, m_lineA );
 
-            // The three planepts the splitter is handed: two on the line (so the
-            // cut passes exactly through it, which is the whole promise of the
-            // feature) and one swept away from the camera.  Well spread by
-            // construction — the sweep offset is a bounds-scaled distance, never
-            // a hair.
+            // Two points stay on the source line; the third uses a bounds-scaled sweep.
             Copy3( m_lineA, m_p[0] );
             Copy3( m_lineB, m_p[1] );
-            const float lift = m_radius;       // KIWI-UX (CLEANUP, A-39)
+            const float lift = m_radius;       // bounds-scaled lever arm
             Mad3( m_lineA, m_away, lift, m_p[2] );
             return true;
         }
 
-        // The union bounds of the affected brushes: the preview's size and the
-        // third planept's lever arm both come from it.
-        // ═══════════════════════════════════════════════════════════════════
-        //  KIWI-UX (ROUND AF, ITEM 1) — CUT WITH A CHAIN OR A LOOP
-        // ═══════════════════════════════════════════════════════════════════
-        // USER DIRECTIVE, verbatim: "When cutting, a lot of times I want to cut with
-        // an entire circle or half-circle.  Allow shift-clicking of lines during cut
-        // operation setup to enable this."
-        //
-        // ── WHAT A FENCE IS ────────────────────────────────────────────────
-        // ONE construction object contributes ALL of its segments, not the one under
-        // the cursor.  A circle is one object with N segments, so a plain click on a
-        // circle already IS "the whole loop" — which is the directive's own example
-        // and costs nothing to honour, because KiwiCon_SegmentCount / SegmentWorld
-        // have always been able to enumerate it.  SHIFT+click ADDS another object's
-        // segments; shift-clicking one that is already in takes it back out, the same
-        // additive grammar the boolean's tool set uses.
-        //
-        // Each segment is then swept along ONE shared direction into a plane, and the
-        // target brushes are split by every plane IN SEQUENCE, KEEPING BOTH HALVES
-        // each time.  That is the only structural difference from the Q boolean's
-        // cascade, which this borrows its shape from: the boolean discards the
-        // intersection, and a cut discards nothing at all.
-        //
-        // ── THE SWEEP DIRECTION ─────────────────────────────────────────────
-        // For a single segment it is unchanged, and deliberately so: AimFromCamera,
-        // the round-L derivation, which strips the along-the-line component out of
-        // the view direction so "the plane goes back into the screen" is what the
-        // user sees.  That derivation is about ONE line and does not generalise — ask
-        // it about a circle and it answers differently for every segment, producing a
-        // fence of planes that fan instead of forming a tube.
-        //
-        // So a MULTI-SEGMENT fence uses the objects' own PLANE NORMAL
-        // (KiwiCon_ObjectPlane).  A construction loop is planar by construction — it
-        // is what the region layer accepts — and extruding it along its normal is
-        // precisely the cookie cutter: a circle on the floor becomes a vertical tube,
-        // and the brush inside the tube separates from the brush outside it.  If no
-        // member carries a valid plane (two lines that determine none between them),
-        // the camera derivation from the FIRST segment is the fallback and the console
-        // says which was used.
-        //
-        // ── CONVEXITY, STATED PLAINLY ───────────────────────────────────────
-        // Every piece a cut produces is CONVEX BY CONSTRUCTION — each split is a
-        // single plane through a convex solid, and both halves of that are convex.
-        // What a concave fence produces is not a concave piece, it is MANY pieces: an
-        // L-shaped fence cutting a slab gives four solids, not two, because the two
-        // planes of the L each cut the whole slab.  That is correct and it is what a
-        // plane-defined editor can do; it is stated here, in the HUD and in
-        // RADIANT_KNOWN_ISSUES so it is never mistaken for a bug.  The piece count is
-        // bounded by 2^planes in the worst case, which is why KCUT_MAX_FENCE exists.
-        //
-        // ── MATERIALS AND UNDO ──────────────────────────────────────────────
-        // Neither changes.  Every plane goes through KiwiSplit_DefByPlane, which
-        // seeds its template face from kiwi_material.h R2/R3 against the def BEING
-        // SPLIT — so a piece cut off a piece inherits from its own parent, which is
-        // the rule stated positively.  ONE KiwiCmd_UndoBegin covers the whole
-        // cascade, and the targets are on `selected_brushes`, so the bracket head
-        // cloned all of them and nothing needs a hand cover.
+        // Target-union bounds size previews and plane-point lever arms.
+        // A construction object contributes every segment; Shift toggles objects.
+        // Multi-segment fences sweep along the first available object-plane normal,
+        // falling back to the first segment's click-time camera direction.
+        // Each plane splits every current piece and keeps both halves, so concave
+        // fences intentionally produce multiple convex brushes. One undo covers all.
         bool FenceActive() const { return (int)( m_fence.size() / 6 ) > 1; }
         int  FenceCount()  const { return (int)( m_fence.size() / 6 ); }
 
@@ -1766,9 +1256,7 @@ namespace
             return false;
         }
 
-        // Rebuild m_fence (world segments) and m_fenceN (the sweep direction) from
-        // m_fenceObjs.  Called after every change to the object set, so the two can
-        // never disagree.  False = the set produces nothing usable.
+        // Rebuild flattened world segments and their shared sweep direction together.
         bool FenceRebuild()
         {
             m_fence.clear();
@@ -1781,10 +1269,7 @@ namespace
                 if ( !o || o->hidden )
                     continue;
 
-                // The sweep direction comes from the FIRST member that has a plane.
-                // First rather than "best": the order is the pick order, which is the
-                // one the mapper can predict, and the members are coplanar in every
-                // case this is meant for.
+                // Use the first planar member so pick order determines the sweep.
                 if ( !haveN )
                 {
                     kconPlane_t pl;
@@ -1824,10 +1309,7 @@ namespace
 
             if ( !haveN )
             {
-                // No member carries a plane.  Fall back to the single-line camera
-                // derivation over the FIRST segment — which is exactly what the
-                // one-segment cut would have done, so the degenerate case degrades
-                // into the behaviour that has always been there.
+                // Without an object plane, use the first segment's camera derivation.
                 Copy3( &m_fence[0], m_lineA );
                 Copy3( &m_fence[3], m_lineB );
                 Sub3( m_lineB, m_lineA, m_dir );
@@ -1838,10 +1320,7 @@ namespace
             return true;
         }
 
-        // The three planepts of fence plane `i`: the segment's two ends plus one end
-        // swept along the fence direction.  Spread by the targets' own radius for the
-        // reason MeasureBounds states — a cross product of nearly-coincident
-        // differences is precision the .map round-trip cannot afford.
+        // Segment endpoints plus a bounds-scaled sweep form stable planepts.
         bool FencePlanePts( int i, float out[3][3] ) const
         {
             if ( i < 0 || i >= FenceCount() )
@@ -1852,32 +1331,22 @@ namespace
             Sub3( b, a, e );
             if ( !Norm3( e ) )
                 return false;
-            // A segment PARALLEL to the sweep names no plane — its extrusion is a
-            // line.  Refused per-plane rather than for the whole fence, because one
-            // bad segment in a fifty-segment ring is not a reason to refuse the ring.
+            // A segment parallel to the sweep extrudes to a line; skip it, not the fence.
             float n[3];
             Cross3( e, m_fenceN, n );
             if ( !Norm3( n ) )
                 return false;
 
-            const float lift = m_radius;       // KIWI-UX (CLEANUP, A-39)
+            const float lift = m_radius;       // bounds-scaled lever arm
             Copy3( a, out[0] );
             Copy3( b, out[1] );
             Mad3( a, m_fenceN, lift, out[2] );
             return true;
         }
 
-        // THE CASCADE.  One target at a time, all-or-nothing per target, nothing
-        // landed until every plane has been applied to it.
-        //
-        // OWNERSHIP is the boolean's, verbatim, and the invariant is the same:
-        // `!owned  <=>  cur == { the map's own def }`, which is borrowed and must
-        // never be freed.  The transition is one-way and happens the first time a
-        // plane actually divides something, at which point `cur` held exactly the one
-        // borrowed def and it was replaced wholesale.
-        //
-        // Returns the number of TARGETS that were cut; `outPieces` is how many solids
-        // they became.
+        // Apply every plane off-map before landing. Until the first actual split,
+        // `cur` contains the borrowed map def; afterward every entry is owned.
+        // Return cut targets and report their total landed pieces separately.
         int CascadeCut( const std::vector<selbrush_t *> &targets, int *outPieces )
         {
             struct work_t
@@ -1915,11 +1384,7 @@ namespace
                         if ( !KiwiSplit_DefByPlane( cur[c], pts[0], pts[1], pts[2],
                                                     &front, &back, &why ) )
                         {
-                            // Nothing was allocated by that call.  Ours is `next`
-                            // plus the part of `cur` this pass has not disposed of
-                            // yet — which starts at c, NOT at 0: everything earlier
-                            // was either freed or handed to `next`.  All of it guarded
-                            // on owning the set at all.
+                            // Earlier entries were freed or moved to `next`; clean from c onward.
                             if ( owned )
                             {
                                 for ( size_t q = c; q < cur.size(); ++q )
@@ -1936,8 +1401,7 @@ namespace
 
                         if ( front && back )
                         {
-                            // THE SPLIT.  Both halves survive — this is the whole
-                            // difference from the boolean, which drops the `back`.
+                            // Cut keeps both halves; boolean subtract drops back.
                             next.push_back( front );
                             next.push_back( back );
                             if ( owned )
@@ -1946,9 +1410,7 @@ namespace
                         }
                         else
                         {
-                            // The plane missed this piece.  Whichever half came back
-                            // is a re-clone of the same volume; drop it and carry the
-                            // piece we already have.
+                            // On a miss, discard the one-sided clone and retain the original.
                             if ( front ) KiwiSplit_FreeUnlandedDef( front );
                             if ( back  ) KiwiSplit_FreeUnlandedDef( back );
                             next.push_back( cur[c] );
@@ -1975,8 +1437,7 @@ namespace
             int landed = 0;
             for ( size_t w = 0; w < work.size(); ++w )
             {
-                // ORDER (kiwi_split.h UNDO): land every piece FIRST, then free the
-                // source, so the owner entity never transiently drops to zero brushes.
+                // Land every piece before freeing its source; preserve owner lifetime.
                 for ( size_t p = 0; p < work[w].pieces.size(); ++p )
                 {
                     selbrush_t *inst = Brush_AddToList( work[w].pieces[p],
@@ -2000,9 +1461,7 @@ namespace
             float hi[3] = { -1e30f, -1e30f, -1e30f };
             for ( size_t i = 0; i < m_targets.size(); ++i )
             {
-                // KIWI-UX (CLEANUP, A-24): m_targets is latched in Begin() and this
-                // runs from Click(), so a brush can have been freed under a paused
-                // gesture — the same reason Commit/CountCrossings/DrawWorld re-test.
+                // Targets are latched; recheck liveness before reading bounds.
                 if ( !Sel_BrushLive( m_targets[i] ) || !m_targets[i]->def )
                     continue;
                 const brush_t *def = m_targets[i]->def;
@@ -2018,26 +1477,18 @@ namespace
             if ( !( m_radius > 1.0f ) )
                 m_radius = 64.0f;
 
-            // The bounds centre, kept as its own member: the LINE arm projects it
-            // onto the clicked line (below) and ROUND T's FACE arm drops it onto the
-            // clicked plane, so both need the unprojected point.
+            // Keep the unprojected center for both line and face source paths.
             for ( int k = 0; k < 3; ++k )
                 m_mid[k] = ( lo[k] + hi[k] ) * 0.5f;
 
-            // The quad is centred on the LINE, lifted onto the span the brushes
-            // occupy along it, so a short line still previews a full-width cut.
+            // Project center onto the source line so short lines still preview full width.
             float rel[3];
             Sub3( m_mid, m_lineA, rel );
             Mad3( m_lineA, m_dir, Dot3( rel, m_dir ), m_centre );
-            // (ROUND L: this used to end with a second AimFromCamera() to re-derive
-            //  the third planept now that the lever arm was known.  The caller runs
-            //  MeasureBounds THEN AimFromCamera, in that order, exactly once, so the
-            //  re-derivation is the caller's next line instead of a hidden one here.)
+            // Caller runs MeasureBounds before the sole AimFromCamera derivation.
         }
 
-        // How many of the targets the LOCKED plane crosses.  Counted once, when the
-        // plane is locked — it cannot change without the brushes changing, and the
-        // commit re-tests anyway.
+        // Count targets crossed by the locked source; commit re-tests live geometry.
         void CountCrossings()
         {
             m_crossing = 0;
@@ -2051,15 +1502,12 @@ namespace
         {
             if ( m_stage == KCUT_PICK_LINE )
             {
-                // ROUND T: NAME the thing the click would take, so "why did it use
-                // that plane" is answered before the click rather than after it.
+                // Name the exact source before it is locked.
                 const char *what = "click a line, edge or face";
                 if ( m_haveHover )
                     what = ( m_hover.kind == KCUT_SRC_FACE ) ? "click this FACE — its plane cuts"
                          : ( m_hover.kind == KCUT_SRC_EDGE ) ? "click this EDGE — sweeps from the view"
-                    // ROUND AF, ITEM 1: a construction click takes the WHOLE object,
-                    // and the chip has to say so — "click this LINE" is a promise the
-                    // tool no longer keeps for a circle.
+                    // Construction clicks take whole objects, not just hovered segments.
                                                              : "click this SHAPE — all of it cuts";
                 _snprintf( m_hud, sizeof( m_hud ),
                            "cut  %i brush(es)  %s", (int)m_targets.size(), what );
@@ -2067,9 +1515,7 @@ namespace
             else
             {
                 if ( FenceActive() )
-                    // ROUND AF, ITEM 1.  The piece count is what a mapper needs to
-                    // brace for: a concave fence makes MANY solids and that is
-                    // correct, so the number is advertised rather than discovered.
+                    // Advertise fence plane count because concave fences make many pieces.
                     _snprintf( m_hud, sizeof( m_hud ),
                                "cut  FENCE %i planes  %i of %i brush(es) crossed  "
                                "(nothing is discarded)",
@@ -2084,18 +1530,15 @@ namespace
             m_hud[sizeof( m_hud ) - 1] = '\0';
         }
 
-        // ROUND L: which half of the flow is running (kiwi_split.h THE TWO-STAGE CUT).
+        // Source picking precedes locked preview.
         enum stage_t { KCUT_PICK_LINE = 0, KCUT_PREVIEW };
         stage_t   m_stage     = KCUT_PICK_LINE;
         bool      m_haveHover = false;
         cutPick_t m_hover;
-        // ROUND X, ITEM 7: the disc's centre — the live snap point, latched in
-        // MouseMove.  Separate from m_hover because a snap can be valid over empty
-        // space where no cut source is hovered, and the disc still says where the
-        // cursor is.
+        // The snap disc can exist independently of a hovered cut source.
         bool      m_haveDisc = false;
         float     m_discPt[3] = { 0.0f, 0.0f, 0.0f };
-        cutSrc_t  m_srcKind   = KCUT_SRC_LINE;   // ROUND T: what the LOCKED plane came from
+        cutSrc_t  m_srcKind   = KCUT_SRC_LINE;   // locked plane source
 
         std::vector<selbrush_t *> m_targets;
         float m_lineA[3]  = { 0.0f, 0.0f, 0.0f };
@@ -2103,25 +1546,14 @@ namespace
         float m_dir[3]    = { 1.0f, 0.0f, 0.0f };
         float m_away[3]   = { 0.0f, 1.0f, 0.0f };
         float m_centre[3] = { 0.0f, 0.0f, 0.0f };
-        float m_mid[3]    = { 0.0f, 0.0f, 0.0f };   // ROUND T: the targets' bounds centre
+        float m_mid[3]    = { 0.0f, 0.0f, 0.0f };   // target-bounds center
         float m_planeN[3] = { 0.0f, 0.0f, 1.0f };
         float m_planeD    = 0.0f;
         float m_p[3][3]   = { { 0.0f, 0.0f, 0.0f }, { 0.0f, 0.0f, 0.0f }, { 0.0f, 0.0f, 0.0f } };
-        // KIWI-UX (CLEANUP, A-39): INVARIANT — m_radius is always > 1.
-        // It starts at 64 and MeasureBounds is its only writer, which ends with
-        // `if ( !( m_radius > 1.0f ) ) m_radius = 64.0f;`.  Four downstream
-        // lever-arm sites used to re-spell that clamp as
-        // `( m_radius > 1.0f ) ? m_radius : 64.0f`, which could never take its
-        // second arm; they read m_radius directly now.  Anything that becomes a
-        // second writer must keep this invariant or restore those guards.
+        // Invariant: MeasureBounds is the only writer and keeps m_radius > 1.
         float m_radius    = 64.0f;
-        // ── ROUND AF, ITEM 1: the FENCE (see the block above MeasureBounds) ──
-        // The construction objects the cut is made of, in PICK ORDER (Shift adds,
-        // a shift-click on one already in takes it out), and the world segments
-        // they flatten to — 6 floats per segment, rebuilt whole by FenceRebuild so
-        // the two can never drift.  `m_fenceN` is the shared sweep direction and
-        // `m_fenceFromPlane` says whether it came from the objects own plane or
-        // from the camera fallback, which is the one thing the console has to say.
+        // Fence objects stay in pick order; flattened segments use six floats each.
+        // FenceRebuild updates segments, sweep normal, and its source together.
         std::vector<int>   m_fenceObjs;
         std::vector<float> m_fence;
         float m_fenceN[3] = { 0.0f, 0.0f, 1.0f };
@@ -2130,25 +1562,17 @@ namespace
         char  m_hud[128]  = { 0 };
     };
 
-    // ROUND S: the one numeric field the live split gets.  STATIC storage — the
-    // numeric layer copies the struct but never the label (kiwi_numeric.h).  It
-    // must stay a table of ONE: two fields would take Tab away from the U/V flip
-    // (kiwi_split.h TAB ROUTING).
+    // Static label lifetime is required; exactly one field preserves Tab for U/V.
     const kiwiNumField_t KSPLITFACE_FIELDS[1] = { { "offset", KNUM_LENGTH, false } };
 
-    // ═════════════════════════════════════════════════════════════════════════
-    //  Ctrl+R — FACE SPLIT.  One selected face, a LIVE line across it that
-    //  follows the cursor, TAB flips U/V.  See kiwi_split.h ROUND S.
-    // ═════════════════════════════════════════════════════════════════════════
+    // Ctrl+R — live Face Split; Tab flips U/V.
     class KiwiSplitFaceCommand : public KiwiEditorCommand
     {
     public:
         const char *Name() const override { return "Split Face"; }
         bool CanExecute() override { return KiwiSplit_CanSplitFace(); }
 
-        // ROUND S: ONE field — the offset of the cut from the face edge the slide
-        // axis points AWAY from.  Exactly one, because the Tab rung is
-        // `KiwiNum_FieldCount() <= 1` (kiwi_split.h TAB ROUTING).
+        // Offset is measured from the low slide-axis edge; one field preserves Tab.
         int NumericFields( const kiwiNumField_t **out ) const override
         { *out = KSPLITFACE_FIELDS; return 1; }
 
@@ -2185,15 +1609,13 @@ namespace
         const char *HudStatus() const override { return m_hud[0] ? m_hud : 0; }
         bool        HudInvalid() const override { return !m_valid; }
 
-        // ROUND S: the tech limitation, on the prompt strip where it is read
-        // BEFORE the commit rather than in a console line after it.
+        // Put the convex-brush limitation on the pre-commit prompt strip.
         int HudPrompts( const kiwiPrompt_t **out ) const override
         {
             static const kiwiPrompt_t s_prompts[] = {
                 { "Tab",  "Flip U / V" },
                 { "Move", "Slide the cut" },
-                // ROUND Y, ITEM 3: say the centre spot exists.  It is drawn and it
-                // latches, and a snap nobody knows about is a snap nobody uses.
+                // Advertise the persistent center latch.
                 { "Dot",  "Face centre - snaps for an exact half" },
                 { "0-9",  "Exact offset" },
                 { "!",    "Splits the brush - brush faces cannot split alone" },
@@ -2209,7 +1631,7 @@ namespace
             m_hud[0] = '\0';
             m_hasNum   = false;
             m_numWorld = 0.0f;
-            m_haveT    = false;             // seed at the centroid until the mouse moves
+            m_haveT    = false;             // seed at centroid until mouse movement
 
             const selection_t &sel = KiwiSel();
             const sel_item_t  *face = 0;
@@ -2239,9 +1661,7 @@ namespace
                 return false;
             }
             UpdateHud();
-            // ROUND S: say the tech limitation ONCE, in the words the directive
-            // asked about, so "it only splits the face" is answered before the
-            // first commit rather than discovered after it.
+            // State the convex-brush limitation before commit.
             Sys_Printf( "Split Face: move the mouse to slide the cut, Tab flips U/V, "
                         "type an exact offset, RMB / Enter splits.\n"
                         "Split Face: this splits the BRUSH along that line - a brush "
@@ -2250,18 +1670,15 @@ namespace
             return true;
         }
 
-        // TAB flips U/V.  Reached because kiwi_command.cpp offers Tab to the active
-        // command BEFORE the numeric layer whenever the numeric layer has at most
-        // one field to cycle (kiwi_split.h TAB ROUTING).
+        // With one numeric field, kiwi_command.cpp routes Tab here before cycling.
         bool KeyDown( int vk, unsigned mods ) override
         {
             (void)mods;
             if ( vk != 0x09 )               // VK_TAB
                 return false;
             m_axis = ( m_axis + 1 ) & 1;
-            // The offset's REFERENCE EDGE changes with the axis, so a carried-over
-            // position (typed or hovered) would silently mean something else.  Drop
-            // both and re-seat at the centroid; the next move picks it straight up.
+            // The reference edge changes with the axis; drop typed/hovered position
+            // and re-seat at the centroid.
             m_haveT = false;
             Derive();
             UpdateHud();
@@ -2269,33 +1686,20 @@ namespace
             return true;
         }
 
-        // ── ROUND S: THE LIVE CURSOR MAPPING ─────────────────────────────────
-        // The whole of "let me customize it".  See kiwi_split.h for the rule; the
-        // three sources in priority order are: a TYPED offset (handled in Derive),
-        // a GEOMETRY snap that lies on the face plane, and the cursor ray's own
-        // intersection with the face plane, grid-snapped.
+        // Position priority: typed offset, on-plane geometry snap, then grid-snapped
+        // cursor-ray intersection with the selected face plane.
         void MouseMove( const pick_result_t &pick, const snap_result_t &snap ) override
         {
             (void)pick;
-            // The basis FIRST: OffDir() below is the slide axis, and it has to be
-            // this frame's (Tab, or a brush edited under a paused gesture, moves it).
+            // Rebuild the slide basis before mapping this frame's cursor.
             float n[3], d;
             if ( DeriveBasis() && FacePlane( n, &d ) )
             {
                 float world[3];
                 bool  have = false;
 
-                // (1) a geometry snap ON THIS FACE'S PLANE.  The plane test is what
-                //     keeps a vertex on some other brush from yanking the cut: the
-                //     snap layer ranks globally, this command is about one face.
-                //
-                //     SNAP_FACE IS DELIBERATELY EXCLUDED.  It is the one "geometry"
-                //     type that is not a target the user aimed at — arm 6 is the
-                //     ported Test_Ray surface hit, UNSNAPPED (kiwi_snap.h says so in
-                //     those words), and it fires on the very face being split.
-                //     Taking it would mean the cut NEVER grid-snapped, because the
-                //     grid arm below would never be reached.  Every other geometry
-                //     type is a point or an edge someone placed or built.
+                // Global geometry snaps qualify only on this face plane. Exclude
+                // SNAP_FACE because it is the unsnapped surface hit and would starve grid snap.
                 if ( snap.valid && KiwiSnap_IsGeometry( snap.type )
                   && snap.type != SNAP_FACE
                   && fabsf( Dot3( n, snap.position ) - d ) <= KSPLIT_FACE_EPS )
@@ -2303,11 +1707,8 @@ namespace
                     Copy3( snap.position, world );
                     have = true;
                 }
-                // (2) the cursor ray ∩ the face plane, then the §17 lattice.
-                //     CTRL SUPPRESSES SNAPPING (§6, kiwi_snap.h arm 0): the layer
-                //     answers SNAP_NONE, and SNAP_NONE is produced by nothing else
-                //     on a valid query (arm 9 always answers SNAP_GRID), so it is
-                //     the signal to leave the plane hit exactly where it is.
+                // Otherwise intersect the selected face plane and grid-snap it.
+                // A valid SNAP_NONE signals Ctrl suppression and preserves the raw hit.
                 if ( !have )
                 {
                     ray_t ray;
@@ -2328,17 +1729,8 @@ namespace
                     m_cursorT = Dot3( world, OffDir() );
                     m_haveT   = true;
 
-                    // ── ROUND Y, ITEM 3: THE CENTRE LATCH ────────────────────
-                    // The face centroid is the "split it exactly in half" answer
-                    // and it is now drawn (DrawWorld below), so it has to be
-                    // reachable too — a marked target the cursor slides straight
-                    // past is worse than no mark.  Measured in SCREEN PIXELS at
-                    // the centroid's own depth, so the catch is the same size at
-                    // every zoom, and applied LAST so a real geometry snap
-                    // (arm 1) still wins: that is a target the user aimed at.
-                    //
-                    // CTRL SUPPRESSES IT, on the same signal arm 2 uses: the snap
-                    // layer answers SNAP_NONE only when §6's suppression is on.
+                    // Apply the screen-space center latch last so explicit geometry
+                    // snaps win; SNAP_NONE/Ctrl and typed input suppress it.
                     const bool suppressed = snap.valid && snap.type == SNAP_NONE;
                     const bool tookGeometry = snap.valid && KiwiSnap_IsGeometry( snap.type )
                                            && snap.type != SNAP_FACE
@@ -2366,13 +1758,7 @@ namespace
             if ( Sel_BrushLive( m_node ) )
                 DrawIntersection( m_node->def, m_planeN, m_planeD );
 
-            // ── ROUND Y, ITEM 3: THE CENTRE SPOT, PERSISTENTLY ──────────────
-            // Drawn LAST so it sits over the cut line rather than under it, and
-            // in its own colour run (kiwi_lines.h — a colour change opens a new
-            // run, so the two glyphs are emitted together after every line).
-            // Dot + separated ring is kiwi_snap.cpp's POINT glyph, which is what
-            // this is: a place the cut can land on.  Nine + twelve segments, well
-            // inside KiwiCmd_DrawWorld's budget.
+            // Draw the standard point glyph last so the persistent center stays visible.
             KiwiLines_Color( KSPLIT_CENTRE_COL[0], KSPLIT_CENTRE_COL[1], KSPLIT_CENTRE_COL[2] );
             KiwiSnap_EmitSpot( m_centre, KiwiSnap_AccentPixels() * 2.0f, true  );
             KiwiSnap_EmitSpot( m_centre, KiwiSnap_RingPixels(),          false );
@@ -2386,12 +1772,8 @@ namespace
                 return;
             }
 
-            // The face selection is NOT on selected_brushes (kiwi_selection.h
-            // DESIGN NOTE 2), so the bracket head's Undo_AddBrushList would clone
-            // NOTHING and undo could not bring the source brush back.  Put the
-            // brush on the legacy selection FIRST, exactly the way the ported
-            // Select_Brush does it, and the whole CSG_MakeHollow bracket shape then
-            // applies unchanged: the head clones it, the tail stamps the halves.
+            // Modern face selection is absent from selected_brushes; promote its brush
+            // before opening undo so the head clones the source and tail stamps halves.
             Select_Deselect( 1 );
             Select_Brush( m_node, 0, 0, 0 );
             Sel_Clear( KiwiSel() );
@@ -2414,10 +1796,7 @@ namespace
         }
 
     private:
-        // ── the FACE's own plane, as (n, d) ─────────────────────────────────
-        // Read from face_t::plane, normalised defensively (a face whose winding
-        // survives Brush_BuildWindings always has a unit normal, but this runs on
-        // every mouse move and a NaN here would poison the whole gesture).
+        // Read the current face plane and normalize defensively each frame.
         bool FacePlane( float n[3], float *d ) const
         {
             if ( !Sel_BrushLive( m_node ) || !m_node->def || !m_node->def->faces )
@@ -2447,13 +1826,10 @@ namespace
             return true;
         }
 
-        // The SLIDE AXIS: in the face plane, perpendicular to the cut line.  The
-        // basis is re-derived every frame (the brush can change under a paused
-        // gesture), so this reads the cached copy DeriveBasis wrote.
+        // Cached slide axis from the current frame's DeriveBasis.
         const float *OffDir() const { return m_off; }
 
-        // Basis + span, with no reference to where the cut currently is.  Fills
-        // m_lineDir / m_off / m_lo / m_hi / m_half / m_nrm.
+        // Rebuild face basis and projected span independently of cut position.
         bool DeriveBasis()
         {
             if ( !Sel_BrushLive( m_node ) || !m_node->def || !m_node->def->faces )
@@ -2473,8 +1849,7 @@ namespace
             for ( int k = 0; k < 3; ++k )
                 c[k] *= inv;
 
-            // The longest winding edge gives U's reference direction, and also the
-            // half-length the preview line is drawn at.
+            // Longest edge defines U and bounds the preview line.
             float longest[3] = { 0.0f, 0.0f, 0.0f };
             float bestLen    = 0.0f;
             float radius     = 0.0f;
@@ -2497,9 +1872,7 @@ namespace
             if ( !Norm3( m_nrm ) )
                 return false;
 
-            // U = perpendicular to the longest edge, in the face plane; V = along
-            // it.  A cut ACROSS the long axis is what "split it in 2" means for a
-            // long face, which is why U is the default.
+            // U crosses the longest edge direction; V runs along it.
             float u[3];
             Cross3( m_nrm, longest, u );
             if ( !Norm3( u ) )
@@ -2527,9 +1900,7 @@ namespace
             return true;
         }
 
-        // Basis + the CURRENT position -> the preview line and the cut plane.
-        // Position priority (kiwi_split.h): a TYPED offset, else the last cursor
-        // projection, else the centroid (the pre-round-S 50/50).
+        // Position priority is typed offset, last cursor projection, then centroid.
         bool Derive()
         {
             m_valid = false;
@@ -2577,9 +1948,7 @@ namespace
             }
             else
             {
-                // The number and its SCALE together: "offset 32 / 128" says both
-                // where the cut is and what it is measured against, which is what
-                // makes the reference edge legible without a second line of prose.
+                // Display offset with total span so its low-edge reference has scale.
                 char offset[48], span[48];
                 _snprintf( m_hud, sizeof( m_hud ),
                            "split brush  %s  offset %s / %s%s  (Tab flips)",
@@ -2597,9 +1966,7 @@ namespace
         int   m_face   = -1;
         int   m_axis   = 0;                 // 0 = U, 1 = V
         bool  m_valid  = false;
-        // ROUND S: the live position.  m_cursorT/m_haveT are the cursor's own
-        // projection onto the slide axis; m_hasNum/m_numWorld are the typed offset
-        // (which outranks it); m_t is what Derive settled on.
+        // Typed offset outranks cursor projection; m_t is the resolved position.
         bool  m_haveT     = false;
         float m_cursorT   = 0.0f;
         bool  m_hasNum    = false;
@@ -2626,11 +1993,7 @@ namespace
     KiwiSplitFaceCommand s_splitFace;
 }
 
-// ─── §3 canExecute ───────────────────────────────────────────────────────────
-// ROUND L: ">= 1 selected brush", and nothing else.  USER DIRECTIVE: "It should
-// be: Select a solid, press C, then the selection expects a line to be selected."
-// The line is picked INSIDE the gesture now, so requiring one up front here would
-// grey the palette row for the exact workflow the directive describes.
+// Cut needs only a selected splittable brush; the cutter is picked in the gesture.
 bool KiwiSplit_CanCut()
 {
     for ( selbrush_t *n = selected_brushes.next; n != &selected_brushes; n = n->next )
@@ -2643,16 +2006,13 @@ bool KiwiSplit_CanSplitFace()
 {
     const selection_t &sel = KiwiSel();
     int n = 0;
-    // KIWI-UX (CLEANUP, A-25): the SAME test Begin() runs (:2256).  Without the
-    // liveness gate the palette advertises Split Face for a face whose brush was
-    // freed, and Begin then refuses with "select exactly ONE face".
+    // Match Begin's liveness test so palette state cannot advertise a freed face.
     for ( size_t i = 0; i < sel.items.size(); ++i )
         if ( sel.items[i].kind == SEL_FACE && Sel_BrushLive( sel.items[i].brush ) )
             ++n;
     return n == 1;
 }
 
-// ─── registration + lookup ───────────────────────────────────────────────────
 void KiwiSplit_RegisterCommands()
 {
     extern bool Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId );

@@ -392,8 +392,7 @@ namespace
         }
         if ( !SkipBytes( cursor, end, sizeof( int ) ) )
             return false;
-        // Materials are a best-effort extension of the required model/parts/surfs
-        // stamp.  Their strings follow collision data and are already in this buffer.
+        // Material stamps are best-effort; model/parts/surfs remain the required set.
         ParseMaterialNames( cursor, end, lodNames, materialNames );
         return true;
     }
@@ -472,8 +471,7 @@ bool KiwiThumbCache_SourceHash( const char *xmodelName,
     HashByte( hash, parsed ? 1 : 0 );
     if ( parsed )
     {
-        // XModelPartsPrecache receives config.entries[0].filename; every non-empty
-        // entry is independently passed to XModelSurfsPrecache by the loader.
+        // The loader precaches parts from LOD 0, but surfs from every non-empty LOD.
         if ( !lodNames[0].empty() )
             HashSourceFile( hash, std::string( "xmodelparts/" ) + lodNames[0] );
         std::set<std::string> seenSurfs;

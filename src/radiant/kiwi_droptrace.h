@@ -3,9 +3,8 @@
 #error this file is only for Radiant!
 #endif
 
-// Shared geometry trace used by model-drag placement and both model browsers.
-// World brushes and patches retain Test_Ray's visibility rules.  Model entities
-// add a bounded mesh pass over resident XModel geometry.
+// Shared by model-drag placement and both browsers: Test_Ray handles visible
+// brushes/patches, then resident XModels get a bounded mesh pass.
 
 struct ray_t;
 struct selbrush_t;
@@ -21,8 +20,7 @@ struct kiwiDropHit_t
 bool KiwiDrop_BoundsValid( const float mins[3], const float maxs[3] );
 bool KiwiDrop_IsModelEntity( const selbrush_t *node );
 
-// Reads only model/entity state already resident in Radiant.  When the XModel is
-// not resident, local eclass bounds are returned and *outModel remains null.
+// Uses resident state only; a missing XModel falls back to eclass bounds and null outModel.
 bool KiwiDrop_GetModelInfo( selbrush_t *node,
                             float mins[3], float maxs[3],
                             float angles[3], float *scale, float origin[3],
@@ -35,8 +33,7 @@ bool KiwiDrop_TransformBounds( const float mins[3], const float maxs[3],
                                float outMins[3], float outMaxs[3],
                                float ( *outCorners )[3] = 0 );
 
-// Nearest visible hit across Test_Ray's brush/tessellated-patch result and up to
-// 64 nearest model-AABB candidates.  Selected models are omitted only for the
-// live drag gesture; browser drops may land on selected existing models.
+// Nearest Test_Ray surface or one of the 64 nearest model-AABB candidates.
+// Only live drags omit selected models; browser drops may land on them.
 bool KiwiDrop_Trace( const ray_t &ray, bool excludeSelectedModels,
                      kiwiDropHit_t *outHit );

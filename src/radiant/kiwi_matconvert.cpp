@@ -167,10 +167,8 @@ void ScanPrefabBrushList( selbrush_t *sentinel, int depth )
     for ( selbrush_t *instance = sentinel->next;
           instance && instance != sentinel; instance = instance->next )
     {
-        // KIWI: the brush-instance OWNER is an entity instance - its eclass lives on
-        // the entity DEF (owner->def), and a prefab is identified by owner->prefab
-        // alone, exactly as kiwi_walkcache.cpp Walk_RecordList does.  Reading
-        // owner->eclass on the instance dereferenced garbage (crash on map load).
+        // Brush-instance owners are entity instances: prefab identity is owner->prefab,
+        // matching Walk_RecordList; owner->eclass is invalid here (use owner->def).
         entity_s *owner = instance->owner;
         if ( owner && owner->prefab )
         {
@@ -188,7 +186,7 @@ void ScanPrefabRoots( selbrush_t *sentinel )
     for ( selbrush_t *instance = sentinel->next;
           instance && instance != sentinel; instance = instance->next )
     {
-        entity_s *owner = instance->owner;           // KIWI: prefab = owner->prefab (see ScanPrefabBrushList)
+        entity_s *owner = instance->owner;           // Prefab identity is owner->prefab; see ScanPrefabBrushList.
         if ( owner && owner->prefab )
             ScanPrefabBrushList( (selbrush_t *)( (char *)owner->prefab + 0x0C ), 1 );
     }
@@ -295,9 +293,8 @@ char BlendFamily( const kiwiMatSource_t &source, const Material *loaded )
                          || ContainsNoCase( source.techSet, "falloff" )
                          || ContainsNoCase( source.techSet, "replace" )
                          || ContainsNoCase( source.techSet, "_b0" );
-    // Ref-state RGB blend 0x12 is Src=One, Dst=Zero, Op=Disable: opaque.  A real
-    // non-zero alternative preserves alpha/additive sources even when the techset name
-    // does not advertise its blend mode.
+    // RGB blend 0x12 is Src=One, Dst=Zero, Op=Disable (opaque); any other nonzero
+    // value preserves unnamed alpha/additive sources.
     const unsigned int rgbBlend = source.refStateBits[0] & GFXS0_BLEND_RGB_MASK;
     if ( namedBlend || ( rgbBlend && rgbBlend != 0x12 ) || source.sortKey != 4 )
         return 'b';
@@ -541,9 +538,8 @@ bool KiwiMatConvert_MaterialIsNonLit( const Material *material )
         return true;
     if ( !techSet || !techSet->techniques[TECHNIQUE_LIT_SUN_SHADOW] )
         return true;
-    // The brief explicitly preserves alpha-blended sources as l_sm_b0*.  Those shipped
-    // world techsets receive lit-sun-shadow but intentionally omit a shadowmap-depth pass;
-    // opaque and alpha-tested world families must carry both passes.
+    // l_sm_b0* has lit-sun-shadow but intentionally no depth pass; only opaque and
+    // alpha-tested world families require both passes.
     if ( ContainsNoCase( TechSetBase( techSet->name ), "l_sm_b0" ) )
         return false;
     return !techSet->techniques[TECHNIQUE_BUILD_SHADOWMAP_DEPTH];

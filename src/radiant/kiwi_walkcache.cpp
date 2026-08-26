@@ -1,8 +1,7 @@
 #ifndef KISAK_RADIANT
 #error this file is only for Radiant!
 #endif
-// kiwi_walkcache.cpp - mechanism for kiwi_walkcache.h.  This TU is on the FAST_HOT list:
-// the replay loop compiles at /O2 in Debug while brush.cpp, which it dispatches into, stays /Od.
+// FAST_HOT keeps this replay loop at /O2 in Debug while dispatched brush.cpp code stays /Od.
 
 #include "stdafx.h"
 #include <stdlib.h>
@@ -16,23 +15,21 @@
 // The recording COPIES orientation_t by value, so its size is load-bearing here.
 static_assert( sizeof( orientation_t ) == 48, "orientation_t (fxprimitives.h != IDB)" );
 
-// win_qe3.cpp:123 — int Sys_Printf( const char *fmt, ... )
+// win_qe3.cpp:123
 extern int  Sys_Printf( const char *fmt, ... );
-// entity.cpp:629 — void Entity_GetOrientation( entity_s_def *ent, orientation_t *orParent, orientation_t *orOut )
+// entity.cpp:629
 extern void Entity_GetOrientation( entity_s_def *ent, orientation_t *orParent, orientation_t *orOut );
-// entity.cpp:89 — char *ValueForKey2( int e, const char *key )
+// entity.cpp:89
 extern char *ValueForKey2( int e, const char *key );
-// filters.cpp:688 — char FilterBrush(selbrush_t *a1, int a2)
+// filters.cpp:688
 extern char FilterBrush( selbrush_t *a1, int a2 );
-// brush.cpp:7389 — void DrawBrush( selbrush_t *b, const orientation_t *orient, int viewType,
-//                                  int technique, GfxColor *col, char width, int drawFlags,
-//                                  const char *layerPrefix )
+// brush.cpp:7389
 extern void DrawBrush( selbrush_t *b, const orientation_t *orient, int viewType,
                        int technique, GfxColor *col, char width, int drawFlags,
                        const char *layerPrefix );
-// brush.cpp:7068 — bool PrefabContent_IsClipBrush( selbrush_t *b )   (0x478a50)
+// brush.cpp:7068 (0x478a50)
 extern bool PrefabContent_IsClipBrush( selbrush_t *b );
-// brush.cpp:7084-7087 — the prefab-walk magnitudes the camera and XY views plot.
+// brush.cpp:7084-7087
 extern int  g_edPrefabPrefabsWalked;
 extern int  g_edPrefabBrushesWalked;
 extern int  g_edPrefabBrushesDrawn;
@@ -49,12 +46,12 @@ struct prefab_s
 };
 static_assert( sizeof( prefab_s ) == 0x54, "prefab_s (kiwi_walkcache.cpp mirror != entity.cpp)" );
 
-// Caps.  Past any of them the recording is abandoned and the caller runs the original walk.
+// Exceeding any cap abandons recording so the caller runs the original walk.
 #define KIWI_WALK_MAX_NODES     1000000
 #define KIWI_WALK_MAX_ORIENTS     65536      // one per prefab instance reached by the walk
 #define KIWI_WALK_MAX_DEPTH          32      // nested-prefab depth; a cycle would be caught here
 
-// The epoch.  Owned here, read by kiwi_shadowcache.cpp's memo; one funnel bumps it.
+// Shared invalidation epoch; kiwi_shadowcache.cpp reads it through this owner.
 static unsigned s_epoch = 1;
 
 void KiwiWalkCache_Invalidate()
@@ -67,8 +64,7 @@ unsigned KiwiWalkCache_Epoch()
     return s_epoch;
 }
 
-// The structure-only counter (kiwi_walkcache.h).  Separate from s_epoch because s_epoch is
-// bumped by MarkMapModified, i.e. by every drag frame.
+// Structure-only epoch avoids invalidating set pollers on each drag-frame s_epoch bump.
 static unsigned s_structEpoch = 1;
 
 void KiwiWalkCache_MarkStructural()
@@ -82,7 +78,7 @@ unsigned KiwiWalkCache_StructEpoch()
     return s_structEpoch;
 }
 
-// The recordings.  Only the active display-list head is ever asked for, so two slots do.
+// Two slots cover the active and selected display-list heads used by current callers.
 struct WalkRec
 {
     const selbrush_t *head;
@@ -176,8 +172,7 @@ static bool Walk_GrowTop( WalkRec *w )
     return true;
 }
 
-// The recorder's own walk, deliberately NOT hooked into a client's draw walk: a recording
-// made through that walk's filter and cull gates is only valid for the frame that made it.
+// Record independently: a client's filter/cull gates would make the result frame-specific.
 static bool Walk_RecordList( WalkRec *w, selbrush_t *listHead, int orientIdx, int depth );
 
 // False only on a cap hit or allocation failure (the caller then abandons the recording).
@@ -248,7 +243,7 @@ static bool Walk_RecordList( WalkRec *w, selbrush_t *listHead, int orientIdx, in
     return true;
 }
 
-// Said ONCE per session, and only for a real refusal - never for an empty brush list.
+// Report a real refusal once per session; empty lists are not failures.
 static void Walk_ReportCap()
 {
     static bool s_reported = false;
@@ -312,7 +307,7 @@ const KiwiWalk *KiwiWalkCache_Get( selbrush_t *listHead, const orientation_t *ro
     return &w->view;
 }
 
-// The replay session.  One at a time; a pass closes its session before the next one runs.
+// One replay session at a time; each pass closes before the next begins.
 static const KiwiWalk *s_replay   = nullptr;
 static bool            s_backward = false;
 static int             s_topCursor = 0;    // next topLevel[] entry to match
@@ -345,8 +340,7 @@ void KiwiWalk_EndReplay()
     s_curNode = -1;
 }
 
-// The lockstep cursor.  The client's list and the recording's top-level list are the SAME
-// sequence; a brush that is not found means the tree changed without an epoch bump.
+// Search from the cursor so filtered nodes may be skipped; a miss means an un-signaled change.
 bool KiwiWalk_TopLevel( const selbrush_t *brush )
 {
     if ( !s_replay )
@@ -410,8 +404,7 @@ void KiwiWalk_PrefabLeave()
     // The child loop restores s_curNode itself; this exists so the call sites read as a bracket.
 }
 
-// THE TWIN OF DrawBrush_PrefabContents' OWN LOOP (brush.cpp:7335-7384): same tests, same
-// order; only DIRECT children are visited here.  EDIT BOTH OR NEITHER.
+// Mirrors DrawBrush_PrefabContents' direct-child loop (brush.cpp:7335-7384); keep tests/order in sync.
 void KiwiWalk_DrawChildren( const orientation_t *prefabOrient, int viewType, int technique,
                             GfxColor *col, char width, int drawFlags, const char *childPrefix,
                             xywndState_t *drawXY )
@@ -422,8 +415,7 @@ void KiwiWalk_DrawChildren( const orientation_t *prefabOrient, int viewType, int
     const KiwiWalkNode   *nodes  = s_replay->nodes;
     const int             end    = nodes[myNode].subtreeEnd;
 
-    // 0x478d81 — FilterBrush's 2nd arg is the fast-2D-drag flag: a drag is active AND
-    // fast_2d_view_dragging is on AND this is the XY path.
+    // 0x478d81: fast-drag filtering requires an active drag, the preference, and the XY path.
     const char fastDrag = ( g_qeglobals.toggle_unk02
                             && g_PrefsDlg->fast_2d_view_dragging
                             && drawXY != nullptr ) ? 1 : 0;
@@ -455,7 +447,7 @@ void KiwiWalk_DrawChildren( const orientation_t *prefabOrient, int viewType, int
         s_curNode = myNode;
 }
 
-// ── the per-object change signature (kiwi_walkcache.h) ──────────────────────
+// Per-object change signature (kiwi_walkcache.h).
 namespace
 {
     inline void Sig_Mix( unsigned long long &h, unsigned long long v )
@@ -471,9 +463,7 @@ namespace
         if ( !b )
             return;
         Sig_Mix( h, (unsigned long long)(uintptr_t)b->def );
-        // brush_t::version is the editor's own "this brush's geometry or texdef changed"
-        // counter — every Brush_Build / Brush_Move / texture write bumps it (brush.cpp),
-        // and it is what DrawBrush's own faceVis sync gates on.
+        // brush_t::version changes with geometry/texdef rebuilds and gates DrawBrush faceVis sync.
         if ( b->def )
             Sig_Mix( h, (unsigned long long)(unsigned short)b->def->version );
         // The bits FilterBrush reads: hidden, filtered, layer.
@@ -487,9 +477,8 @@ namespace
             Sig_Mix( h, (unsigned long long)(uintptr_t)eDef->modelClass );
             Sig_Mix( h, (unsigned long long)(unsigned)eDef->modelInst );
             Sig_Mix( h, (unsigned long long)(unsigned)eDef->version );
-            // The model-rebuild counter Checkkey_Model bumps for angles / modelscale /
-            // model (brush.cpp:794, :875) — the placement changes a moved bbox brush's
-            // def->version does not cover.
+            // Checkkey_Model bumps this for angles/modelscale/model (brush.cpp:794, :875);
+            // bbox def->version does not cover placement.
             Sig_Mix( h, (unsigned long long)(unsigned)eDef->version_prob_wrong );
             for ( int k = 0; k < 3; ++k )
                 Sig_Mix( h, (unsigned long long)*(const unsigned *)&eDef->origin[k] );
@@ -497,9 +486,7 @@ namespace
         Sig_Mix( h, (unsigned long long)(unsigned)n.flags );
         if ( w && n.childOrient >= 0 && n.childOrient < w->orientCount )
         {
-            // The composed orientation this prefab's contents were drawn in.  Folded from
-            // the RECORDING, which is rebuilt whenever an epair changes, so it is the live
-            // placement rather than a stale copy.
+            // Epair changes rebuild the recording, so this composed orientation is current.
             const unsigned *f = (const unsigned *)&w->orients[n.childOrient];
             for ( int k = 0; k < (int)( sizeof( orientation_t ) / sizeof( unsigned ) ); ++k )
                 Sig_Mix( h, (unsigned long long)f[k] );

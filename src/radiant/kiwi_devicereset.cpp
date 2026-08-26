@@ -1,41 +1,24 @@
 #ifndef KISAK_RADIANT
 #error this file is only for Radiant!
 #endif
-// kiwi_devicereset.cpp — KIWI-UX ROUND AB, ITEM 1.  See kiwi_devicereset.h for the
-// full crash analysis (RB_EndSurfacePrologue:202 / g_primStats == NULL).
+// D3D9 reset cleanup and recovery diagnostics for Radiant.
 #include "stdafx.h"
 #include "qe3.h"
-#include <stdlib.h>                 // free() — the port's j__free_0 thunk (brush.cpp:32)
-#include <stdarg.h>                 // KIWI-UX (ROUND AD): the one-line reporter's varargs
-#include <d3d9.h>                   // KIWI-UX (ROUND AD): D3DERR_* names for the diagnostics
-#include <gfx_d3d/r_init.h>         // KIWI-UX (ROUND AD): dx, g_disableRendering
+#include <stdlib.h>                 // free() matches brush.cpp's j__free_0 thunk
+#include <stdarg.h>                 // varargs reporter
+#include <d3d9.h>                   // D3DERR_* diagnostics
+#include <gfx_d3d/r_init.h>         // dx, g_disableRendering
 #include "kiwi_devicereset.h"
 
-// ── ported entry points (each verified against its definition) ───────────────
 extern int      Sys_Printf( const char *fmt, ... );                 // win_qe3.cpp
-// Brush_InvalidateVis (0x478340) — frees the faceVis array, drops a patch instance's
-// visuals through PMESH_22_Indices, and sets version = def->version - 1 so the next
-// Brush_CheckBuildFaceVis rebuilds.  Returns b->def.
-extern brush_t *Brush_InvalidateVis( selbrush_t *b );               // brush.cpp:1506
-// active_brushes / selected_brushes / filtered_brushes are the three embedded
-// 56-byte display-list sentinels; declared in qe3.h:1053-1055.  Iterate as
-// `for (b = sel.next; b != &sel; b = b->next)` (qe3.h:374-375).
+// Brush_InvalidateVis (0x478340) drops face/patch visuals and arms their rebuild.
+extern brush_t *Brush_InvalidateVis( selbrush_t *b );               // brush.cpp
 
 namespace
 {
-    // Drop ONE instance's cached surf-cache state.
-    //
-    // The per-face `visArray` blocks are freed here rather than by
-    // `Visuals_VisArray` (brush.cpp:1793) on purpose: that function's loop calls
-    // `sub_51CB70` (R_Ed_FreeVertices, r_ed_vertbuf.cpp:516) on every
-    // `visuals->vertHandle`, which returns the run to the per-material pool.  On
-    // this path the pool is about to be — or has just been — destroyed wholesale
-    // by `Editor_VB_ReleaseForReset` (r_ed_vertbuf.cpp:125), so those frees would
-    // manufacture free-slots inside pools for D3D9 buffers that no longer exist,
-    // and `Editor_VB_GetHandle` (r_ed_vertbuf.cpp:169) would later hand one of
-    // them back — a handle pointing at nothing.  `Brush_InvalidateVis` is the
-    // binary's own drop-don't-return primitive; it just does not free the
-    // per-face visArray blocks (0x478340 leaks them), so the loop below does.
+    // Do not return cached handles through R_Ed_FreeVertices while its VB pool is
+    // being destroyed; that would populate the new pool's free lists with stale runs.
+    // Brush_InvalidateVis (0x478340) does not free per-face visArray blocks, so do it first.
     void DropInstanceSurfCache( selbrush_t *b )
     {
         if ( !b || !b->def )
@@ -45,25 +28,14 @@ namespace
         {
             for ( int i = 0; i < b->faceCount; ++i )
             {
-                // KIWI-UX (CLEANUP, C-18): this WAS
-                // `(faceVis_s *)( (char *)b->faces + 12 * i )` with a comment
-                // asserting the stride.  `b->faces` is already `faceVis_s *`
-                // (qe3.h:438), so the type system can carry the stride instead of
-                // a literal — and qe3.h:186 already static_asserts
-                // sizeof(faceVis_s) == 12, so the binary-layout claim stays
-                // ENFORCED rather than commented.  b->faces is the faceCount
-                // element array Brush_MakeFaceVisuals allocated (brush.cpp:155).
                 faceVis_s *fv = &b->faces[i];
                 if ( fv->visArray )
-                    free( fv->visArray );     // operator new'd at brush.cpp:2668; the
-                                              // port's own free is j__free_0 (brush.cpp:1805)
+                    free( fv->visArray );     // Visuals_VisArray (0x46f590), minus the VB-handle returns.
                 fv->visArray = nullptr;
                 fv->visCount = 0;
             }
         }
 
-        // Frees b->faces, runs PMESH_22_Indices for a patch instance, and arms the
-        // rebuild via version = def->version - 1.
         Brush_InvalidateVis( b );
     }
 
@@ -81,12 +53,7 @@ namespace
 
 void KiwiDevice_InvalidateEditorSurfCache()
 {
-    // The three display lists are the complete set of live brush INSTANCES
-    // (qe3.h:360-375).  A brush that is on none of them is not drawn and holds no
-    // surf-cache state.  `.next` is NULL rather than the sentinel before map.cpp
-    // has ever linked them (engine_stubs.cpp:778-779 zero-initialises two of the
-    // sentinels), so DropList tolerates a NULL walk — this runs on the shutdown
-    // path too, where the lists may already be torn down.
+    // Current brush-list heads may be null before map initialization or after teardown.
     int n = 0;
     n += DropList( active_brushes );
     n += DropList( selected_brushes );
@@ -96,27 +63,13 @@ void KiwiDevice_InvalidateEditorSurfCache()
         Sys_Printf( "Device reset: dropped the editor surface cache for %i brush(es).\n", n );
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-//  KIWI-UX (ROUND AD) — the D3DPOOL_DEFAULT images nobody was releasing,
-//                        and the recovery chain that failed silently.
-//  Full analysis in kiwi_devicereset.h / RADIANT_UX_DESIGN §59.
-// ═════════════════════════════════════════════════════════════════════════════
-
-// ── ported entry points (each verified against its definition) ───────────────
-// Image_Release (r_image.cpp:175) and Image_IsProg (r_image_load_obj.cpp:258) are declared
-// in r_image.h:147 / :280, which qe3.h:22 already pulls in.  Image_Rebuild has no
-// header declaration, so it is declared here against its definition:
-extern void __cdecl Image_Rebuild( GfxImage *image );        // r_image.cpp:1075
-// Kiwi_RescueSave — copied verbatim from the existing declaration at
-// engine_stubs.cpp:282 (definition map.cpp:836).
+// Image_Rebuild has no header declaration.
+extern void __cdecl Image_Rebuild( GfxImage *image );        // r_image.cpp
 extern bool Kiwi_RescueSave(char *outPath, int outPathSize);   // radiant/map.cpp
 
 namespace
 {
-    // ── the one-line reporter ────────────────────────────────────────────────
-    // OutputDebugStringA ALWAYS (it is the only channel that survives a black
-    // window and an undrained stdout — the exact situation this exists for), the
-    // console only when a console can be reached.  Callers own the throttling.
+    // Always mirror diagnostics to OutputDebugStringA; callers throttle repeats.
     void KiwiDevice_Report( const char *fmt, ... )
     {
         char msg[512];
@@ -132,17 +85,15 @@ namespace
         Sys_Printf( "Device: %s\n", msg );
     }
 
-    // Latest facts from the recovery chain.  Written by the two Note* hooks in
-    // r_init.cpp, read by the health watch.
+    // Latest recovery state for the frame health watch.
     long s_lastCoopHr    = 0;     // TestCooperativeLevel, from R_TestDevice
     long s_lastResetHr   = 0;     // IDirect3DDevice9::Reset, from R_ResetDevice
     int  s_lastResetPass = -1;    // which release pass ran for that attempt
     int  s_resetAttempts = 0;
-    // KIWI-UX (ROUND AX, ITEM 1): the FIRST loss of the current episode.
     bool        s_lossNoted   = false;
     long        s_lossHr      = 0;
     const char *s_lossWhere   = nullptr;   // a string literal from the call site; never freed
-    bool        s_auditDone   = false;     // the default-pool audit is once per episode
+    bool        s_auditDone   = false;     // once per loss episode
 
     const char *HrName( long hr )
     {
@@ -170,9 +121,7 @@ namespace
         }
     }
 
-    // WHY THE FRAME IS BLACK, named rather than guessed.  These are, in order,
-    // every way R_SetupRendertarget_CheckDevice (r_init.cpp:4793-4839) can answer
-    // FALSE.  The frame WM_PAINT's own two pre-conditions come first.
+    // Mirror each false gate in R_SetupRendertarget_CheckDevice after WM_PAINT's checks.
     const char *BlackFrameReason( HWND__ *frame )
     {
         if ( !dx.device )
@@ -199,15 +148,8 @@ namespace
     }
 }
 
-// Release every UNMANAGED image.  Reproduces R_FreeLostImage (r_image.cpp:1024)
-// verbatim — `category >= IMG_CATEGORY_FIRST_UNMANAGED → Image_Release` — over the
-// enumeration the editor actually has (imageGlobals.imageHashTable), because
-// R_ReleaseLostImages' DB_EnumXAssets is a stub here.
-//
-// IDEMPOTENT.  Image_Release (r_image.cpp:175) NULLs image->texture.basemap and
-// zeroes cardMemory inside the same `if`, so a second call subtracts 0 from
-// imageGlobals.totalMemory and releases nothing.  That matters: the round-AD
-// second-chance arm in R_ResetDevice runs this again on a retry.
+// R_ReleaseLostImages cannot enumerate editor images because DB_EnumXAssets is a stub.
+// Mirror R_FreeLostImage over imageGlobals.imageHashTable; the basemap gate makes retries safe.
 void KiwiDevice_ReleaseUnmanagedImages()
 {
     int released = 0;
@@ -217,7 +159,7 @@ void KiwiDevice_ReleaseUnmanagedImages()
         if ( !img || img->category < IMG_CATEGORY_FIRST_UNMANAGED )
             continue;
         if ( !img->texture.basemap )
-            continue;                       // already released — keep the count honest
+            continue;                       // basemap already released
         Image_Release( img );
         ++released;
     }
@@ -225,16 +167,9 @@ void KiwiDevice_ReleaseUnmanagedImages()
         Sys_Printf( "Device reset: released %i unmanaged (default-pool) image(s).\n", released );
 }
 
-// The counterpart, run after a Reset() that SUCCEEDED.  Reproduces only
-// R_RebuildLostImage's unmanaged arm (r_image.cpp:1108-1125):
-//     !basemap && category >= 5 && !Image_IsProg → Image_Rebuild.
-// The `category < 5` arm is deliberately NOT reproduced: it ends in
-// Com_Error(ERR_DROP) for an image that cannot be reloaded, and in this editor a
-// managed image with a NULL basemap is an ordinary missing asset (it kept its
-// texture across the Reset if it had one at all) — killing the process over it
-// would be a worse bug than the one this round is fixing.  Progs are excluded for
-// the engine's own reason: they are render targets, and R_CreateForInitOrReset →
-// R_InitRenderTargets rebuilds those.
+// Mirror R_RebuildLostImage's unmanaged arm over the editor hash table.
+// Managed textures survive Reset, so do not invoke its fatal missing-asset arm.
+// Prog images are render targets rebuilt by R_InitRenderTargets.
 void KiwiDevice_RebuildUnmanagedImages()
 {
     int rebuilt = 0;
@@ -275,9 +210,7 @@ void KiwiDevice_NoteResetResult( long hr, int releasePass )
     s_lastResetPass = releasePass;
     ++s_resetAttempts;
 
-    // KIWI-UX (ROUND AX, ITEM 1): the episode is over — re-arm the loss reporter so the
-    // NEXT loss gets its own line.  Mirrors R_ResetDevice's own s_lastResetHr = S_OK
-    // (r_init.cpp:4584), which is the same "episode over" statement on the engine side.
+    // A successful Reset ends the episode and rearms first-loss reporting and auditing.
     if ( hr >= 0 )
     {
         s_lossNoted = false;
@@ -286,18 +219,8 @@ void KiwiDevice_NoteResetResult( long hr, int releasePass )
         s_auditDone = false;
     }
 
-    // KIWI-UX (ROUND AX, ITEM 1) — WHAT WAS STILL ALIVE.
-    // D3DERR_INVALIDCALL from Reset() means one thing: an app-created D3DPOOL_DEFAULT
-    // resource is still alive or still bound.  Round AX was a leaked render target
-    // (radiant_rtt.cpp's standalone thumbnail slot, which the release loop's range-`for`
-    // over the ARRAY could never reach) and it cost a whole investigation because nothing
-    // in the editor could enumerate that class of object.  Now the FIRST failed attempt of
-    // an episode prints the audit — after the release pass has already run, so anything
-    // listed is by definition something the release pass did not cover.  Once per episode,
-    // not per attempt: this fires up to 60 times a second while a loss is latched.
-    // Keyed on its OWN per-episode flag rather than on s_resetAttempts == 1, because that
-    // counter is only cleared by the health watch's recovered branch — a SECOND loss
-    // episode in one session would otherwise never print the audit at all.
+    // INVALIDCALL means a default-pool object is still live or bound. Audit the first
+    // failure after release in each episode to name uncovered RTT/image resources.
     if ( hr == D3DERR_INVALIDCALL && !s_auditDone )
     {
         s_auditDone = true;
@@ -321,22 +244,14 @@ void KiwiDevice_NoteResetResult( long hr, int releasePass )
     }
 }
 
-// ── A + C: the frame WM_PAINT's health watch ────────────────────────────────
-// Called from radiant_main.cpp's WM_PAINT AFTER ::EndPaint, so: the paint region
-// is already validated, no scene bracket is open, no D3D render target is bound,
-// and the pump is alive.  That is what makes the message box at the bottom safe.
+// Called after EndPaint, with no scene/target active and a live message pump.
 void KiwiDevice_FrameHealthWatch( HWND__ *frame, bool authorized, bool painted )
 {
     static unsigned s_unhealthySince = 0;   // GetTickCount of the first black tick (0 = healthy)
     static unsigned s_lastLog        = 0;
     static bool     s_escaped        = false;
 
-    // A paint the pump did not authorize is NOT evidence.  Round U made every such
-    // paint draw nothing on purpose (imgui_shell.cpp:1281), and they arrive
-    // constantly — OS repaints, and the nested message loop of every menu and
-    // modal dialog.  Judging them would let a file dialog left open for 15 s pop
-    // the "device lost" box.  Ignore them entirely: neither evidence of health nor
-    // of failure, so the clock is neither started nor cleared.
+    // OS and nested-loop paints intentionally render nothing; they are not health evidence.
     if ( !authorized )
         return;
 
@@ -352,10 +267,7 @@ void KiwiDevice_FrameHealthWatch( HWND__ *frame, bool authorized, bool painted )
                                (unsigned)s_lastResetHr, HrName( s_lastResetHr ) );
             s_unhealthySince = 0;
             s_resetAttempts  = 0;
-            // KIWI-UX (ROUND AX, ITEM 1): the episode is definitively over here too —
-            // frames are rendering.  Belt and braces with the re-arm in
-            // KiwiDevice_NoteResetResult, which covers the case where recovery happened
-            // without a Reset ever being attempted.
+            // A rendered frame also ends episodes that recovered without Reset.
             s_lossNoted = false;
             s_lossWhere = nullptr;
             s_lossHr    = 0;
@@ -370,10 +282,7 @@ void KiwiDevice_FrameHealthWatch( HWND__ *frame, bool authorized, bool painted )
         s_lastLog        = 0;
     }
 
-    // ONE line per ~2 s while black.  Not per tick: this build's Com_Printf is a
-    // bare vprintf that can stall the main thread on an undrained stdout (the
-    // hazard R_ResetDevice documents at r_init.cpp:4460), and the whole point of
-    // this line is that it is readable.
+    // Log at most every ~2 s; Sys_Printf can stall on undrained stdout.
     if ( !s_lastLog || ( now - s_lastLog ) >= 2000 )
     {
         s_lastLog = now ? now : 1u;
@@ -383,9 +292,7 @@ void KiwiDevice_FrameHealthWatch( HWND__ *frame, bool authorized, bool painted )
             "Reset=0x%08x %s after %i attempt(s), release pass: %s",
             now - s_unhealthySince,
             BlackFrameReason( frame ),
-            // KIWI-UX (ROUND AX, ITEM 1): where the episode STARTED, carried through to
-            // every line.  A report that only names the failing Reset cannot distinguish
-            // a driver TDR from an editor bug; the first HRESULT can.
+            // Preserve the first loss site/HRESULT across every report.
             s_lossWhere ? s_lossWhere : "(not recorded this session)",
             (unsigned)s_lossHr, HrName( s_lossHr ),
             (unsigned)s_lastCoopHr,  HrName( s_lastCoopHr ),
@@ -394,23 +301,8 @@ void KiwiDevice_FrameHealthWatch( HWND__ *frame, bool authorized, bool painted )
             ReleasePassName( s_lastResetPass ) );
     }
 
-    // ── C: THE PERMANENT-LOSS ESCAPE HATCH ──────────────────────────────────
-    // 15 s of unbroken black is not a transient loss any more.  Nothing here
-    // stops the retries — the device may still come back — but the operator must
-    // not be left staring at a black window with an unsaved map behind it.
-    //
-    // Kiwi_RescueSave (map.cpp:836) is safe from this healthy context: it is
-    // one-shot, SEH-wrapped, pure fopen/fprintf, and deliberately posts no window
-    // messages and touches no editor state (map.cpp:790-802).  It was written for
-    // dying contexts; a live one is strictly easier.
-    //
-    // The message box is owned by the frame — the pump is alive, the paint region
-    // is validated (we are past ::EndPaint), and an unauthorized WM_PAINT from the
-    // box's nested loop draws nothing (ImGuiShell_FrameAuthorized, round U).  It
-    // differs from Kiwi_FatalRescue's NULL owner (engine_stubs.cpp:309) on
-    // purpose: that one runs while the process is dying and re-entering our own
-    // WndProc as an owner is a risk with no upside, whereas here the editor keeps
-    // running and the box belongs over its window.
+    // After 15 s, rescue once and alert without stopping Reset retries.
+    // Kiwi_RescueSave is one-shot, SEH-wrapped, and avoids window/editor mutation.
     if ( !s_escaped && ( now - s_unhealthySince ) >= 15000 )
     {
         s_escaped = true;
@@ -428,9 +320,7 @@ void KiwiDevice_FrameHealthWatch( HWND__ *frame, bool authorized, bool painted )
                    "Last Reset: 0x%08x (%s) after %i attempt(s)\n\n"
                    "%s%s\n\n"
                    "Please RESTART the editor.  Your original .map file was NOT touched.",
-                   // KIWI-UX (ROUND AX, ITEM 1): the operator screenshots THIS box, so the
-                   // loss origin belongs in it — that screenshot is the whole evidence base
-                   // for the next round.
+                    // Include the first loss in the screenshotable dialog.
                    s_lossWhere ? s_lossWhere : "(not recorded)",
                    (unsigned)s_lossHr, HrName( s_lossHr ),
                    (unsigned)s_lastCoopHr,  HrName( s_lastCoopHr ),

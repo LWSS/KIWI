@@ -113,8 +113,7 @@ namespace
     {
         std::vector<std::string> names;
         int count = 0;
-        // KIWI: FS_LIST_ALL walks the editor's loose and loaded-IWD search paths;
-        // its own list builder deduplicates case-insensitively before we copy it.
+        // FS_LIST_ALL covers loose and loaded-IWD paths; listing deduplicates case-insensitively.
         const char **files = FS_ListFiles( "xmodel", "", FS_LIST_ALL, &count );
         names.reserve( count > 0 ? (size_t)count : 0 );
         for ( int i = 0; files && i < count; ++i )
@@ -438,9 +437,8 @@ namespace
 
     bool DropPlaceholder( eclass_t *miscModel, const float origin[3] )
     {
-        // KIWI: Entity_Create derives origin as placeholder-mins minus the
-        // misc_model eclass mins.  Use that eclass box at the already-snapped
-        // model origin; the thumbnail's real bounds are only the resting/ghost box.
+        // Entity_Create derives origin from placeholder mins minus eclass mins, so use
+        // the eclass box here; real model bounds only drive resting and the ghost.
         float mins[3], maxs[3];
         for ( int i = 0; i < 3; ++i )
         {
@@ -515,8 +513,7 @@ namespace
         }
 
         Select_Deselect( 1 );
-        // KIWI: the ported five-call placeholder and CreateEntityFromName stay in
-        // one record; the model epair is written before that record closes.
+        // Keep the ported placeholder/entity sequence and model epair in one undo record.
         Undo_ClearRedo();
         Undo_GeneralStart( "create entity" );
         if ( !DropPlaceholder( miscModel, origin ) )
@@ -536,7 +533,7 @@ namespace
             if ( candidate && candidate->eclass == miscModel )
                 created = candidate;
         }
-        // KIWI: no angles epair is authored; its absence is the zero rotation.
+        // No angles epair is authored; absence means zero rotation.
         if ( created )
             SetKeyValue( created, "model", modelName );
         Undo_End();
@@ -709,8 +706,7 @@ bool KiwiModelBrowser_CameraDropTarget( float imgMinX, float imgMinY )
             }
             s_ghostHave = true;
         }
-        // A parallel/upward miss deliberately leaves the previous valid box in
-        // place.  Delivery latches that same placement for the deferred create.
+        // Hold the last valid box through parallel/upward misses; delivery latches it.
         if ( payload->Delivery )
         {
             took = QueueDrop( modelName.c_str(), x, y,

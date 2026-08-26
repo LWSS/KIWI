@@ -86,8 +86,7 @@ namespace
         return true;
     }
 
-    // Slab trace.  When the ray begins inside, the first positive exit surface is
-    // returned; the optional lower bound is zero in that case for candidate culling.
+    // An interior ray returns its first positive exit, but a zero culling lower bound.
     bool RayBounds( const float origin[3], const float dir[3],
                     const float mins[3], const float maxs[3],
                     float *outDist, float outNormal[3],
@@ -312,8 +311,7 @@ namespace
 
         surfaceUnmask_t()
         {
-            // Selected brush/patch surfaces remain valid browser targets.  Selected
-            // models stay masked here and are handled by the explicit model pass.
+            // Unmask selected brush/patch targets; models stay masked for the explicit pass.
             for ( selbrush_t *node = selected_brushes.next;
                   node && node != &selected_brushes; node = node->next )
             {
@@ -461,9 +459,8 @@ bool KiwiDrop_Trace( const ray_t &ray, bool excludeSelectedModels,
     float bestDist = FLT_MAX;
     float bestNormal[3] = { 0.0f, 0.0f, 1.0f };
 
-    // Fixed-size/model proxies and camera-excluded flag-0x20 brushes are kept out
-    // of this pass.  Patches reach PMESH_51 here, i.e. their tessellated curveDef
-    // triangles, not their control hull or symbiont bounds.
+    // Exclude fixed-size/model proxies and flag-0x20 brushes; patches still reach
+    // PMESH_51's tessellated triangles, not control hull or symbiont bounds.
     const int contents = ( Pick_CameraContents() | 0x200 ) & ~( 0x400 | 0x1000 );
     edTrace_t worldTrace;
     {

@@ -1,28 +1,24 @@
 #ifndef KISAK_RADIANT
 #error this file is only for Radiant!
 #endif
-// kiwi_instcache.cpp - mechanism for kiwi_instcache.h.  The per-vertex transform is the
-// game's own R_SkinXSurfaceStaticVerts, writing GfxPackedVertex (VERTDECL_PACKED).
+// Caches R_SkinXSurfaceStaticVerts-style output in the packed editor vertex layout.
 
 #include "stdafx.h"
 #include <d3d9.h>
 #include <string.h>
 #include <stdlib.h>
-#include <gfx_d3d/r_init.h>        // dx — the D3D9 device (r_init.h:463)
-#include <gfx_d3d/r_gfx.h>         // GfxPackedVertex (r_gfx.h:45), GfxScaledPlacement (r_gfx.h:98)
-#include <gfx_d3d/r_xsurface.h>    // XSurfaceGetNumVerts / XSurfaceGetNumTris (r_xsurface.h:7-8)
-#include <gfx_d3d/r_dobj_skin.h>   // -> r_scene.h -> xanim.h: the full XSurface (xanim.h:1175)
-// DObjSkelMat is only a CAST TARGET here, so xanim/dobj.h (and <ode/ode.h>) stays out.
-#include <universal/com_math.h>    // UnitQuatToAxis (com_math.h:440), R_TransformSkelMat (com_math.h:551), float4 (com_math.h:66)
+#include <gfx_d3d/r_init.h>        // dx.device
+#include <gfx_d3d/r_gfx.h>         // packed vertex and placement types
+#include <gfx_d3d/r_xsurface.h>    // surface count helpers
+#include <gfx_d3d/r_dobj_skin.h>   // XSurface definition
+// DObjSkelMat is only a cast target, avoiding the heavier xanim/dobj.h include.
+#include <universal/com_math.h>    // transform helpers
 #include "kiwi_instcache.h"
-#include "kiwi_shadowcache.h"    // KiwiShadowCache_Invalidate
+#include "kiwi_shadowcache.h"    // sun-preview invalidation
 
-// win_qe3.cpp:122 — int Sys_Printf( const char *fmt, ... )
 extern int Sys_Printf( const char *fmt, ... );
 
-// r_staticmodelcache.cpp:593 — void __cdecl SetupTransformUnitVec(const float4 *mtx, int (*fixedMtx)[3])
 extern void __cdecl SetupTransformUnitVec( const float4 *mtx, int ( *fixedMtx )[3] );
-// r_staticmodelcache.cpp:606 — PackedUnitVec __cdecl LocalTransformUnitVec(PackedUnitVec in, const int (*fixedMtx)[3])
 extern PackedUnitVec __cdecl LocalTransformUnitVec( PackedUnitVec in, const int ( *fixedMtx )[3] );
 
 namespace
@@ -32,16 +28,16 @@ namespace
 const unsigned KIWI_IC_PAGE_VERTS = 65536u;
 const unsigned KIWI_IC_PAGE_BYTES = KIWI_IC_PAGE_VERTS * 32u;      // 2 MB
 
-// Caps.  Past either, Get() answers false and the caller keeps the per-instance path.
+// Hard caps bound backing allocations at 96 MB of vertices and 48 MB of indices.
 const int      KIWI_IC_MAX_PAGES  = 48;
 const int      KIWI_IC_MAX_IDXBLK = 48;                            // x 1 MB
 const unsigned KIWI_IC_IDXBLK_BYTES = 1024u * 1024u;
 
-// Open-addressed (instance, surface) -> entry table.  Never grows; full = Get() false.
+// Fixed open-addressed table; saturation falls back to per-instance drawing.
 const int      KIWI_IC_TABLE_SIZE = 32768;
 const int      KIWI_IC_TABLE_MASK = KIWI_IC_TABLE_SIZE - 1;
 
-// Instance-surfaces transformed per front-end frame, so a map's first sight spreads out.
+// Limit first-seen transforms per frame to spread map warmup.
 const int      KIWI_IC_BUILD_BUDGET = 1024;
 
 struct Entry
@@ -66,18 +62,18 @@ unsigned char           *s_idxBlk[KIWI_IC_MAX_IDXBLK];
 unsigned                 s_idxUsed[KIWI_IC_MAX_IDXBLK];
 int                      s_idxBlkCount;
 
-// The device every page above was created on - the recreate guard.
+// Device used to create the pages, for detecting recreation.
 IDirect3DDevice9        *s_device;
 
 unsigned                 s_residentBytes;
 int                      s_builtThisFrame;
 bool                     s_reportedFull;
-// Once a pool has refused, STOP CLAIMING SLOTS, or every later miss walks the table.
+// Stop claiming table slots after either pool refuses an allocation.
 bool                     s_poolFull;
 
 unsigned IC_Hash( const GfxScaledPlacement *inst, const XSurface *xsurf )
 {
-    // Both keys are array elements, so their low bits are far from uniform; fold both.
+    // Fold pointer alignment with odd avalanche constants; low address bits are nonuniform.
     unsigned h = (unsigned)(uintptr_t)inst * 0x9E3779B1u;
     h ^= (unsigned)(uintptr_t)xsurf * 0x85EBCA6Bu;
     h ^= h >> 15;
@@ -86,8 +82,7 @@ unsigned IC_Hash( const GfxScaledPlacement *inst, const XSurface *xsurf )
     return h;
 }
 
-// The entry for (inst, xsurf), or the free slot it would take; null = table full.  No
-// tombstones - invalidation marks stale, so probe chains can never break.
+// No tombstones: invalidation marks entries stale so probe chains remain intact.
 Entry *IC_Slot( const GfxScaledPlacement *inst, const XSurface *xsurf )
 {
     unsigned i = IC_Hash( inst, xsurf ) & KIWI_IC_TABLE_MASK;
@@ -117,7 +112,7 @@ void IC_Forget()
     s_poolFull      = false;
 }
 
-// Reserve verts in a page.  A run may NEVER straddle pages; a bad fit starts a new one.
+// Vertex runs cannot straddle pages because indices share one 16-bit window.
 bool IC_AllocVerts( unsigned vertCount, unsigned *outPage, unsigned *outBaseVert )
 {
     if ( vertCount > KIWI_IC_PAGE_VERTS )
@@ -148,7 +143,7 @@ bool IC_AllocVerts( unsigned vertCount, unsigned *outPage, unsigned *outBaseVert
     return true;
 }
 
-// Reserve a pre-offset index run in heap - the bytes a merged draw memcpys into the DIB.
+// Reserve a heap-backed index run for direct copying into the dynamic index buffer.
 unsigned short *IC_AllocIndices( unsigned indexCount )
 {
     const unsigned bytes = ( ( indexCount * 2u ) + 3u ) & ~3u;
@@ -174,14 +169,14 @@ unsigned short *IC_AllocIndices( unsigned indexCount )
     return (unsigned short *)blk;
 }
 
-// The transform: R_SkinXSurfaceStaticVerts with a GfxPackedVertex destination.
+// Mirrors R_SkinXSurfaceStaticVerts into GfxPackedVertex.
 bool IC_Transform( const GfxScaledPlacement *pl, const XSurface *xsurf,
                    IDirect3DVertexBuffer9 *vb, unsigned baseVert, unsigned vertCount )
 {
     mat3x3 axis;
     UnitQuatToAxis( pl->base.quat, axis );
 
-    // normAxis = pure rotation (normals), useAxis = rotation * scale.  Normals are NOT scaled.
+    // Rotate normals without scale; positions use rotation * scale.
     float4 normAxis[4];
     float4 useAxis[4];
     for ( int r = 0; r < 3; ++r )
@@ -196,8 +191,7 @@ bool IC_Transform( const GfxScaledPlacement *pl, const XSurface *xsurf,
         useAxis[r].v[3]  = 0.0f;
     }
     normAxis[3].v[0] = normAxis[3].v[1] = normAxis[3].v[2] = normAxis[3].v[3] = 0.0f;
-    // ABSOLUTE world origin, not eye-relative: the merged draw runs under the editor's
-    // eye-relative world matrix, whose row 3 already carries -eyeOffset.
+    // Store absolute world origins; the eye-relative draw matrix already applies -eyeOffset.
     useAxis[3].v[0] = pl->base.origin[0];
     useAxis[3].v[1] = pl->base.origin[1];
     useAxis[3].v[2] = pl->base.origin[2];
@@ -253,9 +247,9 @@ bool KiwiInstCache_Get( const GfxScaledPlacement *placement, const XSurface *xsu
             *out = e->geo;
             return true;
         }
-        // Edited: re-transform IN PLACE; the pair's vertex count cannot change, so the allocation stands.
+        // Re-transform stale geometry in place; an XSurface's vertex count is immutable.
         if ( s_builtThisFrame >= KIWI_IC_BUILD_BUDGET )
-            return false;                              // BY3 path for this frame
+            return false;                              // per-instance fallback this frame
         ++s_builtThisFrame;
         if ( !IC_Transform( placement, xsurf, e->geo.vb, e->geo.baseVert, e->geo.vertCount ) )
         {
@@ -267,11 +261,11 @@ bool KiwiInstCache_Get( const GfxScaledPlacement *placement, const XSurface *xsu
         return true;
     }
 
-    // Refuse BEFORE claiming when a pool has refused or the table is 3/4 full (probe decay).
+    // Refuse before claiming after pool exhaustion or 75% table load to limit probe decay.
     if ( s_poolFull || s_entryCount >= ( KIWI_IC_TABLE_SIZE * 3 ) / 4 )
         return false;
 
-    // Claim the slot even on failure, so an uncacheable surface is asked exactly once.
+    // Claim even on failure so permanently uncacheable surfaces are tested once.
     const int vertCount = XSurfaceGetNumVerts( xsurf );
     const int triCount  = XSurfaceGetNumTris( xsurf );
 
@@ -286,7 +280,7 @@ bool KiwiInstCache_Get( const GfxScaledPlacement *placement, const XSurface *xsu
         return false;
     if ( s_builtThisFrame >= KIWI_IC_BUILD_BUDGET )
     {
-        // Not a refusal, just "not this frame": release the slot so the next frame retries.
+        // Budget exhaustion is temporary; release the slot for next frame's retry.
         e->inst = nullptr;
         --s_entryCount;
         return false;
@@ -320,7 +314,7 @@ bool KiwiInstCache_Get( const GfxScaledPlacement *placement, const XSurface *xsu
         return false;                                  // page space stays reserved: harmless
     }
 
-    // Pre-biased by baseVert ONCE so a merged draw is a pure memcpy; every biased index fits in 16 bits.
+    // Pre-bias once for memcpy batching; page bounds keep every result within uint16.
     {
         const unsigned short *srcIdx = xsurf->triIndices;
         const unsigned n = (unsigned)( 3 * triCount );
@@ -348,12 +342,11 @@ bool KiwiInstCache_Get( const GfxScaledPlacement *placement, const XSurface *xsu
 
 void KiwiInstCache_InvalidateInstance( const GfxScaledPlacement *placement )
 {
-    // KIWI: this is also the sun preview's model-pose edge - its recorded caster walk
-    // stores these poses as composed orientations, so it invalidates here too.
+    // Model-pose edits also invalidate the sun preview's recorded caster geometry.
     KiwiShadowCache_Invalidate();
     if ( !placement )
         return;
-    // One linear scan.  This runs on EDIT paths, never on the draw path.
+    // The linear scan is confined to edit paths.
     for ( int i = 0; i < KIWI_IC_TABLE_SIZE; ++i )
     {
         Entry *e = &s_table[i];

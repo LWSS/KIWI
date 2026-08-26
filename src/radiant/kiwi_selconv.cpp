@@ -1,15 +1,9 @@
 #ifndef KISAK_RADIANT
 #error this file is only for Radiant!
 #endif
-// ─────────────────────────────────────────────────────────────────────────────
-// kiwi_selconv.cpp — shakeout D: Ctrl+1..4 selection conversion.  See
-// kiwi_selconv.h for the Plasticity semantics this is ported from (with file:line
-// cites into the LGPLv3 tree) and for the four places KIWI's mapping differs.
-//
-// NEW code over the ported cores.  It mutates NO geometry — it only reads
-// windings and rewrites the typed selection, then pushes it down through the ONE
-// crossing (Sel_SyncToLegacy).
-// ─────────────────────────────────────────────────────────────────────────────
+// Ctrl+1..4 convert typed selection without mutating geometry.
+// Results cross into the legacy stores only through Sel_SyncToLegacy; the header
+// documents KIWI's deliberate differences from Plasticity.
 
 #include "stdafx.h"
 #include "qe3.h"
@@ -21,19 +15,15 @@
 #include <math.h>
 #include <vector>
 
-// ── ported entry points (verified against their definitions) ────────────────
 extern int  Sys_Printf( const char *fmt, ... );   // win_qe3.cpp
 extern int  g_nUpdateBits;                        // 0x25D5A74 (mainfrm.cpp)
 
-// mainfrm.cpp — the shared command table's append hook (// KIWI-UX there).
 extern bool Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId );
 
 namespace
 {
-    // The dedup tolerance.  0.1 units, the same number the ported FindPoint /
-    // SetupVertexSelection dedup uses and the same one kiwi_boxselect and
-    // kiwi_transform's edge dedup already use — one world corner must mean one
-    // point item however many windings name it (kiwi_selection.h DESIGN NOTE 3).
+    // Match the ported FindPoint/SetupVertexSelection tolerance so winding
+    // references to one world-space corner deduplicate to one selection item.
     const float KSC_TOL = 0.1f;
 
     inline bool PointNear( const float *a, const float *b )
@@ -60,26 +50,15 @@ namespace
         if ( !b || !b->patch || !b->def )
             return 0;
         patchMesh_t *pm = b->def->patch;
-        // KIWI-UX (CLEANUP, C-55): the shared predicate, not a bare 16 —
-        // Patch_DimsSane (kiwi_selection.h) is this exact test against
-        // KIWI_PATCH_MAX_DIM.
         if ( !Patch_DimsSane( pm ) )
             return 0;
         return pm;
     }
 
-    // KIWI-UX (CLEANUP, A-13 / C-49): the local VertexPos / EdgeEnds were two
-    // more copies of the two resolutions kiwi_selection.h now owns as
-    // Sel_ItemWorldPos / Sel_EdgeEnds — with the same guard set this file had
-    // (the 1..MAX_POINTS_ON_WINDING bound WindingOf above carries, and PatchOf's
-    // dimension sanity, now KIWI_PATCH_MAX_DIM).  Every call site below passes
-    // checkLive = false: KiwiSelConv_Convert already gates the whole walk on
-    // Sel_BrushLive per item, and the inner dedup only ever sees items this
-    // function just built from those same live nodes.
+    // The outer conversion validates each source item before dereference; items
+    // built during the walk can skip repeated liveness scans in geometry helpers.
 
-    // ── the OUT set, with the four dedup rules ──────────────────────────────
-    // One accumulator rather than four, because the dedup is the only thing that
-    // differs between the kinds and it belongs next to the push.
+    // Deduplicated conversion output.
     struct outSet_t
     {
         std::vector<sel_item_t> items;
@@ -102,8 +81,7 @@ namespace
             items.push_back( Sel_MakeFace( b, faceIndex ) );
         }
 
-        // Unordered segment compare: the two faces that share a physical edge
-        // wind in opposite directions, so the endpoints arrive swapped.
+        // Adjacent face windings reverse a shared edge, so compare unordered endpoints.
         void AddEdge( selbrush_t *b, int faceIndex, int edgeIndex,
                       const float *a, const float *c )
         {
@@ -121,7 +99,7 @@ namespace
             items.push_back( Sel_MakeEdge( b, faceIndex, edgeIndex ) );
         }
 
-        // Coincident-corner dedup: same brush DEF plus the same world position.
+        // Winding faces repeat physical corners; deduplicate by definition and position.
         void AddVertex( selbrush_t *b, int faceIndex, int vertIndex, const float *p )
         {
             for ( size_t i = 0; i < items.size(); ++i )
@@ -138,7 +116,7 @@ namespace
         }
     };
 
-    // ── OBJECT fan-outs ─────────────────────────────────────────────────────
+    // Object conversions.
     void ObjectToPoints( selbrush_t *b, outSet_t &out )
     {
         if ( patchMesh_t *pm = PatchOf( b ) )
@@ -189,7 +167,7 @@ namespace
                 out.AddFace( b, f );
     }
 
-    // ── FACE fan-outs ───────────────────────────────────────────────────────
+    // Face conversions.
     void FaceToPoints( const sel_item_t &it, outSet_t &out )
     {
         winding_t *w = WindingOf( it.brush, it.faceIndex );
@@ -199,9 +177,7 @@ namespace
             out.AddVertex( it.brush, it.faceIndex, i, w->p[i] );
     }
 
-    // Plasticity's face2edge (SelectionConversionStrategy.ts:97) is
-    // "GetOuterEdges of the face" — the face's own boundary loop, which for a
-    // brush winding is simply every winding edge.
+    // Plasticity's face2edge uses the outer loop; for a brush that is every winding edge.
     void FaceToEdges( const sel_item_t &it, outSet_t &out )
     {
         winding_t *w = WindingOf( it.brush, it.faceIndex );
@@ -211,7 +187,7 @@ namespace
             out.AddEdge( it.brush, it.faceIndex, e, w->p[e], w->p[( e + 1 ) % w->numpoints] );
     }
 
-    // ── EDGE / VERTEX fan-outs ──────────────────────────────────────────────
+    // Edge and vertex conversions.
     void EdgeToPoints( const sel_item_t &it, outSet_t &out )
     {
         winding_t *w = WindingOf( it.brush, it.faceIndex );
@@ -222,11 +198,8 @@ namespace
         out.AddVertex( it.brush, it.faceIndex, j,            w->p[j] );
     }
 
-    // Plasticity's edge2face (:64) asks the modeller for the edge's two adjacent
-    // faces (GetFacePlus / GetFaceMinus).  This port has no such link, so the
-    // faces are found the way every other edge consumer in this layer finds them
-    // (kiwi_transform's GatherAdjacent): a face is adjacent when its winding
-    // contains BOTH endpoints, at the shared 0.1 tolerance.
+    // Plasticity uses adjacency links unavailable here; match both endpoints
+    // against each winding at the shared 0.1-world-unit tolerance instead.
     void EdgeToFaces( const sel_item_t &it, outSet_t &out )
     {
         float a[3], b[3];
@@ -273,7 +246,7 @@ namespace
         }
     }
 
-    // KIWI extension (kiwi_selconv.h note 3): the counterpart of VertexToFaces.
+    // KIWI adds the reciprocal vertex-to-edge conversion.
     void VertexToEdges( const sel_item_t &it, outSet_t &out )
     {
         float p[3];
@@ -296,7 +269,7 @@ namespace
         }
     }
 
-    // ── the conversion itself ───────────────────────────────────────────────
+    // Conversion dispatch.
     const char *KindWord( sel_kind_t k )
     {
         return ( k == SEL_VERTEX ) ? "points"
@@ -362,10 +335,8 @@ namespace
 
         if ( out.items.empty() )
         {
-            // The documented EMPTY case (kiwi_selconv.h note 4): a patch-only
-            // selection has neither faces nor winding edges.  KEEP the selection
-            // — throwing it away would be the one outcome the user can neither
-            // see coming nor undo (selection changes open no undo record).
+            // Patches have no winding edges or plane faces. Keep an empty conversion
+            // because selection changes have no undo record.
             Sys_Printf( "Convert selection: nothing in the selection converts to %s "
                         "(patches have no faces or edges) — selection kept.\n",
                         KindWord( to ) );
@@ -376,15 +347,12 @@ namespace
         Sel_Clear( sel );
         for ( size_t i = 0; i < out.items.size(); ++i )
             Sel_Add( sel, out.items[i] );
-        // Sel_Add leaves `active` on the LAST item added; the first one is the
-        // better anchor (it comes from the first source item, i.e. the thing the
-        // user most likely clicked first), and every ops layer keys reference
-        // points off `active`.
+        // Sel_Add leaves the last item active; preserve the first source-derived
+        // item as the operation anchor.
         sel.active = out.items[0];
 
-        // THE DIVERGENCE FROM PLASTICITY (kiwi_selconv.h note 2): the picker's
-        // mode follows the conversion, or the very next click would throw the
-        // result away.
+        // Unlike Plasticity, KIWI makes the picker mode follow a successful
+        // conversion so the next click does not discard the converted kind.
         KiwiSel_SetModeMask( SEL_KIND_BIT( to ) );
 
         Sel_SyncToLegacy();
@@ -395,15 +363,12 @@ namespace
     }
 }
 
-// ─── §3 canExecute ───────────────────────────────────────────────────────────
 bool KiwiSelConv_CanConvert()
 {
     return !KiwiSel().items.empty();
 }
 
-// ─── registration ────────────────────────────────────────────────────────────
-// Unbound here: these are the CLASSIC-profile bindings, and the modern profile
-// (kiwi_keymap.cpp) is what puts them on Ctrl+1..Ctrl+4.
+// Classic registration is unbound; the modern keymap supplies Ctrl+1..4.
 void KiwiSelConv_RegisterCommands()
 {
     Radiant_RegisterCommand( "KiwiConvertToPoints",  0, 0, KIWI_CMD_SELCONV_POINT );
@@ -412,7 +377,6 @@ void KiwiSelConv_RegisterCommands()
     Radiant_RegisterCommand( "KiwiConvertToObjects", 0, 0, KIWI_CMD_SELCONV_OBJECT );
 }
 
-// ─── instant dispatch ────────────────────────────────────────────────────────
 bool KiwiSelConv_DispatchInstant( unsigned int commandId )
 {
     switch ( commandId )

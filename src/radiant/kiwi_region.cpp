@@ -1,105 +1,38 @@
 #ifndef KISAK_RADIANT
 #error this file is only for Radiant!
 #endif
-// ─────────────────────────────────────────────────────────────────────────────
-// kiwi_region.cpp — RADIANT_UX_DESIGN §8 implementation plus the 2D polygon
-// toolkit §23's extrusion consumes.  See kiwi_region.h for the loop rules, the
-// tolerances and the note on the fill's render path.
-//
-// NEW code over the ported cores.  The only ported thing it touches is the
-// immediate-mode triangle emitter the editor already draws its own translucent
-// overlays with.
-//
-// ── HOW A REGION IS FOUND ───────────────────────────────────────────────────
-// THREE passes since ROUND K, in this order, so the cheap and unambiguous cases
-// never pay for the expensive one:
-//
-//   PASS 1  every CLOSED object is a region on its own (rect, closed polyline,
-//           circle).  Its tessellated vertices are the loop.
-//   PASS 2  the OPEN objects are grouped by plane; inside a group their
-//           endpoints are welded into shared nodes and the result is walked as a
-//           graph.  A connected component is a region only when EVERY node in it
-//           has degree exactly 2 — that is §8's "each endpoint shared by exactly
-//           two segments" read strictly, and it is what makes the answer unique.
-//           A T-junction (degree 3) rejects its whole component rather than
-//           guessing a branch.
-//   PASS 3  ROUND K - the PLANAR ARRANGEMENT over the same coplanar group plus
-//           any coplanar CLOSED objects: every segment split at every mutual
-//           crossing, then a minimal-face walk of the resulting planar graph, and
-//           every BOUNDED cell is a region.  This is the pass that answers "lines
-//           close off a section even if they extend further" - the # case, which
-//           passes 1 and 2 are structurally blind to, because no endpoint touches
-//           any other endpoint there.  It runs UNCONDITIONALLY and its duplicates
-//           are dropped by DuplicateRegion (world centroid + area).  The algorithm,
-//           the Plasticity sources it mirrors and every cap live in kiwi_arrange.h.
-//
-// Both passes then apply the same acceptance gate: no self-intersection, area
-// above KREG_MIN_AREA, at most KREG_MAX_LOOP vertices, and the loop is rewound
-// CCW so everything downstream (fill triangulation, extrusion cap winding) can
-// assume one orientation.
-//
-// ── SHAKEOUT F ──────────────────────────────────────────────────────────────
-// Three changes, all in service of "a face has to appear when a loop closes, on
-// ANY plane, and I have to SEE it happen":
-//
-//   1. PASS 2's endpoint walk is EXPORTED as KiwiRegion_ChainWalk (kiwi_region.h)
-//      so "Join Lines" (kiwi_conselect.cpp) chains by exactly this rule.  The
-//      degree audit is now "no node above 2" plus "the walk closed", which is the
-//      same condition written so that an OPEN chain is also expressible — Join
-//      needs that, a region does not.
-//   2. The two-object floor.  PASS 2 used to require THREE graph edges, which
-//      silently rejected every loop made of two objects (two arcs, two polylines,
-//      a polyline and a line back).  Two is enough; the area gate below is what
-//      actually rejects the degenerate cases.
-//   3. THE FLASH.  A newly formed region's fill fades from near-white over
-//      KREG_FLASH_FRAMES Cam_Draw frames, and one console line announces it.
-//      Frame-counted, gated on the region COUNT growing — see CarryFlash.
-//
-// AUDITED AND FOUND CORRECT (recorded so the next round does not re-check it):
-// the plane keying works on ARBITRARY planes.  SamePlane derives the plane
-// constant from the origin on every call rather than storing a `d`, so two
-// objects whose planes were built from the SAME brush face at DIFFERENT cursor
-// points compare EQUAL — same normal, same n·origin.  The chain's loop is
-// re-projected through WORLD into the group's plane (AppendObjectPoints), so
-// differing u/v bases are handled too, and KiwiRegion_PickAt is a plain
-// ray∩plane plus an even-odd test in plane space with no axis assumption
-// anywhere.  What WAS broken lived in kiwi_construct.cpp's
-// KiwiCon_AutoPlaneForTool — see the note there.
-// ─────────────────────────────────────────────────────────────────────────────
+// Regions come from closed objects, welded open-object cycles, and bounded cells
+// in a planar arrangement.  Every route shares AcceptLoop; arrangement duplicates
+// are matched by world position and area.
+// Chain points pass through world space into the fitted group plane, so differing
+// object bases and non-axial planes use the same loop and picking conventions.
 
 #include "stdafx.h"
 #include "qe3.h"
 #include "mainfrm.h"                // camera_s
-#include <imgui/imgui.h>            // ROUND BL — the camera-overlay fill route
+#include <imgui/imgui.h>            // camera-overlay fill
 #include <gfx_d3d/r_gfx.h>          // GfxColor
 #include <gfx_d3d/r_material.h>     // Material
 #include <gfx_d3d/r_rendercmds.h>   // MaterialTechniqueType, TECHNIQUE_UNLIT
 
 #include "kiwi_region.h"
-#include "kiwi_arrange.h"           // ROUND K — PASS 3, the planar arrangement
-#include "kiwi_camera.h"            // ROUND BK — KiwiCam_Ortho (the winding-side rule)
+#include "kiwi_arrange.h"           // planar-arrangement pass
+#include "kiwi_camera.h"            // KiwiCam_Ortho winding-side rule
 #include "kiwi_construct.h"
-// KIWI-UX (ROUND BK, ITEM 4): kept for the TRAP notes this file cites, not for a
-// call — the fill left the kiwi_lines emitter family for camwnd.cpp's own
-// (Cam_DrawWindingTinted, externed below).
-#include "kiwi_lines.h"             // TRAPs 3-5 (the fill's four-round history)
+#include "kiwi_lines.h"             // shared fill-rendering constraints
 #include "kiwi_pick.h"
-#include "kiwi_validity.h"          // ROUND R — KVALID_PLANE_DOT, the §19 V5 threshold
-#include "kiwi_units.h"             // ROUND AF, ITEM 5 — KiwiUnits_GridSpacingWorld
-#include "kiwi_vec.h"     // KIWI-UX (CLEANUP, A-15): the one spelling of Dot3/Sub3/...
+#include "kiwi_validity.h"          // KVALID_PLANE_DOT
+#include "kiwi_units.h"             // grid-scaled tolerances
+#include "kiwi_vec.h"     // Dot3
 
 #include <math.h>
-#include <vector>           // ROUND AF, ITEM 5 - the gap report scratch buffer
+#include <vector>           // scratch vectors
 #include <string.h>
 
-// ── ported entry points (verified against their definitions) ────────────────
+// Ported entry points.
 extern int   Sys_Printf( const char *fmt, ... );                         // win_qe3.cpp
 extern int   g_nUpdateBits;                                              // 0x25D5A74 (mainfrm.cpp)
-// ROUND R — the fill's eye nudge needs the view normal.  `camera_s` comes from
-// mainfrm.h, included above.
-// KIWI-UX (CLEANUP, B-6): it returns &g_camwndState.camera and NEVER returns NULL
-// (contract stated at camwnd.cpp:154-160), so the unguarded deref in the fill pass
-// is correct and a `!c` guard there would be dead code.
+// Returns the persistent g_camwndState.camera and never null.
 extern camera_s *Ed_Camera();                                            // camwnd.cpp:161
 extern char  Byte4PackPixelColor( float *from, GfxColor *out );          // 0x402ac0
 // R_AddCmdSetMaterialColor comes from r_rendercmds.h (declared __cdecl there).
@@ -108,19 +41,9 @@ extern void  __cdecl R_AddRenderCmdDrawTris(
                  const uint16_t *indices, short vertexCount,
                  const float ( *xyzw )[4], const float ( *normal )[3], float *color,
                  const float ( *st )[2] );                               // 0x4fd1c0
-// KIWI-UX (ROUND AM, ITEM 1): the render-command buffer headroom probe, so the
-// fill pass can NAME the silent drop instead of counting past it.  Definition at
-// r_rendercmds.cpp (KISAK_RADIANT block immediately above R_GetCommandBuffer).
+// Names command-buffer drops before the void renderer call can hide them.
 extern int   __cdecl R_Ed_CmdBufferHeadroom();                           // r_rendercmds.cpp
-// ── KIWI-UX (ROUND BK, ITEM 4): THE DONOR EMITTER ───────────────────────────
-// camwnd.cpp's own translucent world-space polygon draw — the function the SKY
-// FILM is drawn with (camwnd.cpp's sky see-through arm calls Cam_DrawFaceTinted,
-// which is now three lines over this).  Signature copied VERBATIM from the
-// definition; `pts` is the polygon's world points, `n` its plane normal, `bgra`
-// the packed per-vertex colour, `push` the displacement along `n`.
-//   camwnd.cpp:1221  void Cam_DrawWindingTinted( const float (*pts)[3], int nv,
-//                        const float *n, Material *mtl, uint bgra, float push,
-//                        MaterialTechniqueType tech )
+// Confirmed-visible translucent world-space polygon emitter; push is along n.
 extern void  Cam_DrawWindingTinted( const float ( *pts )[3], int nv, const float *n,
                                     Material *mtl, uint bgra, float push,
                                     MaterialTechniqueType tech );        // camwnd.cpp:1221
@@ -131,21 +54,12 @@ namespace
     unsigned               s_builtFor = 0;        // the KiwiCon_Generation() it was built for
     bool                   s_dirty    = true;
 
-    // §18: regions are "translucent light blue".  Alpha 0.22 sits under the
-    // ported 3D-marquee quad's 0.25 so a marquee dragged over a region still
-    // reads as the stronger of the two.
+    // Keep the resting fill weaker than the 0.25-alpha 3D marquee.
     const float KREG_FILL[4] = { 0.45f, 0.70f, 1.00f, 0.22f };
     const float KREG_HILITE[4] = { 0.62f, 0.84f, 1.00f, 0.38f };
-    // SHAKEOUT F: what a region fades FROM when it has just formed.  Near-white
-    // and much more opaque than either resting colour, so "a face appeared" is
-    // unmissable even on a pale wall; the alpha still stays under 1 so the
-    // geometry behind it is never hidden outright.
+    // New regions fade from a conspicuous but still translucent near-white.
     const float KREG_FLASH[4] = { 0.90f, 0.97f, 1.00f, 0.62f };
-    // ROUND K: the SELECTED region.  Near-white and stronger than either resting
-    // colour, which is exactly what a SELECTED construction line already looks like
-    // (kiwi_construct.cpp KCON_COL_SEL_LINE) — "selected" means one thing to the
-    // eye on every kind of construction geometry.  Weaker than KREG_FLASH so a
-    // region that forms AND is selected still reads its formation flash first.
+    // Selection stays weaker than the formation flash so both states remain visible.
     const float KREG_SELECTED[4] = { 0.82f, 0.92f, 1.00f, 0.46f };
 
 
@@ -164,9 +78,7 @@ namespace
         return (int)( pts.size() / 2 );
     }
 
-    // Do segments (a,b) and (c,d) properly cross?  "Properly" excludes shared
-    // endpoints, which is what makes it usable on a closed loop where every
-    // consecutive pair touches by construction.
+    // Strict sign-change segment test; callers separately skip adjacent loop edges.
     bool SegCross( const float *a, const float *b, const float *c, const float *d )
     {
         const float d1 = Cross2( a, b, c );
@@ -232,29 +144,8 @@ namespace
         pts.swap( out );
     }
 
-    // ── KIWI-UX (ROUND R): DROP REDUNDANT COLLINEAR VERTICES ────────────────
-    // USER REPORT, verbatim: "Join: 5 lines -> one CLOSED polyline (5 points)"
-    // followed by "Extrude: rejected — duplicate plane", on what the user drew as a
-    // SQUARE.  A square drawn out of five lines has one side split in two, so the
-    // ring carries a mid-edge vertex — and a mid-edge vertex is exactly what §23's
-    // prism builder turns into TWO SIDE FACES SHARING ONE PLANE (both are "through
-    // this edge, parallel to the extrusion axis", and the two edges are the same
-    // line).  §19's V5 gate then says "duplicate plane", correctly, about geometry
-    // that was never wrong — the profile was.
-    //
-    // The test is the V5 test, run one step earlier and in 2D: two consecutive
-    // edges whose UNIT DIRECTIONS agree to within KVALID_PLANE_DOT produce two side
-    // planes that V5 will call the same, because they also share the vertex between
-    // them and so have the same distance.  Using §19's own constant rather than a
-    // second tolerance is the point — a profile this accepts is a profile the
-    // validity gate accepts, by construction, instead of by coincidence.
-    //
-    // Nothing legitimate is eaten.  KVALID_PLANE_DOT is 0.999 = 2.56°, and the
-    // densest thing this layer produces is a KCON_SEGS_MAX (64) circle, whose
-    // consecutive segments turn 5.6° — more than twice the threshold.  The pass
-    // repeats until it makes no change, because removing one vertex can leave its
-    // two neighbours collinear (three points along one split edge).  A ring that
-    // collapses below 3 points is left to AcceptLoop's own n < 3 refusal.
+    // Remove successive edges that §19 would turn into duplicate prism side planes.
+    // Reuse KVALID_PLANE_DOT and repeat because one removal can expose another.
     void DropCollinear( std::vector<float> &pts )
     {
         bool changed = true;
@@ -285,51 +176,16 @@ namespace
         }
     }
 
-    // ROUND AG, ITEM 2: the shortest edge of a plane-space loop that is still
-    // above KREG_JOIN_DIST — the bound the weld may not exceed (kiwi_region.h
-    // A WELD MAY NEVER EXCEED THE GEOMETRY IT IS WELDING).  Returns 0 when the
-    // loop has no such edge at all, which the accessor reads as "no bound".
-    // KIWI-UX (CLEANUP, A-11): the body is KiwiRegion_FinestEdge now — this is
-    // the plane-space CLOSED-loop spelling of it, and kiwi_conselect.cpp's Join
-    // is the world-space open-or-closed one.
+    // Closed plane-space specialization of the shared finest-edge weld bound.
     float FinestLoopEdge( const std::vector<float> &pts )
     {
         return KiwiRegion_FinestEdge( pts.empty() ? 0 : &pts[0],
                                       PtCount( pts ), 2, true );
     }
 
-    // ═════════════════════════════════════════════════════════════════════════
-    //  KIWI-UX (ROUND AR, ITEM 2) — ONE RING SANITIZER, AND NOTHING MAY SKIP IT
-    // ═════════════════════════════════════════════════════════════════════════
-    // USER REPORT, verbatim: *"why does this bool diff fail? see the 2 pics.  The
-    // 2nd pic fails while the 1st pic works.  Why?  The only different is I joined
-    // the polyline on the 2nd one.  When i bool it into the pyramid it fails!"*
-    //
-    // A JOINED outline reaches this layer as PASS 1 (one closed object); an
-    // UNJOINED one reaches it as PASS 2 (a chain) or PASS 3 (an arrangement cell).
-    // The STANDING REGION INVARIANT is that those three routes derive the SAME
-    // fill, the SAME extrude and therefore the SAME cut — "join is a bookkeeping
-    // act, not a geometry act".  That invariant was true only by CONVENTION: all
-    // three passes happened to funnel through AcceptLoop, and the two cleaning
-    // steps were spelled out inline where a fourth caller could quietly acquire
-    // one of them and not the other.
-    //
-    // It is a FUNCTION now, exported (kiwi_region.h), so that the invariant is a
-    // thing the code states rather than a thing a reader has to re-derive.  The
-    // three steps, in the order they must run:
-    //
-    //   1. DEDUPE at the weld, BOUNDED by the loop's own finest edge (round AG,
-    //      ITEM 2 — a weld may never exceed the geometry it is welding);
-    //   2. DROP COLLINEAR at §19's own KVALID_PLANE_DOT (round R — two consecutive
-    //      edges on one line become two identical prism side planes, which is the
-    //      "duplicate plane" refusal);
-    //   3. …and repeat 1 once more, because dropping a collinear vertex can bring
-    //      its two neighbours within the weld of each other.  That third step is
-    //      NEW this round and it is the one shape neither pass used to remove.
-    //
-    // Winding is deliberately NOT part of this: RewindCCW is an ACCEPTANCE
-    // decision (it needs the signed area the gate then re-reads), so it stays in
-    // AcceptLoop where the other gates are.
+    // Joined and unjoined outlines must sanitize identically: bounded dedupe,
+    // collinear removal, then dedupe again because removal can expose a new weld.
+    // Winding remains an acceptance decision in AcceptLoop.
     void SanitizeRing( std::vector<float> &pts )
     {
         DedupLoop( pts, KiwiRegion_WeldFor( FinestLoopEdge( pts ) ) );
@@ -337,43 +193,17 @@ namespace
         DedupLoop( pts, KiwiRegion_WeldFor( FinestLoopEdge( pts ) ) );
     }
 
-    // The one acceptance gate both passes run (kiwi_region.cpp header note).
+    // Shared acceptance gate for every derivation route.
     bool AcceptLoop( kregion_t &r )
     {
-        // Deduped at the JOIN tolerance, not at float epsilon: PASS 2 welds two
-        // endpoints that are up to KREG_JOIN_DIST apart into one node, so the
-        // stitched loop can carry a sub-tolerance edge that the ear clip would
-        // then have to survive.
-        //
-        // ROUND AF, ITEM 5 made that tolerance grid-scaled.  ROUND AG, ITEM 2
-        // BOUNDS it by the loop's own finest edge: the sentence that used to stand
-        // here — "no real construction segment is that short (the densest circle
-        // this store makes has ~6-unit segments at its minimum radius)" — is FALSE
-        // for a LARGE round object, whose edge length is 0.098 * radius and has
-        // nothing to do with the grid.  At grid 16 the unbounded weld was 4.0 and
-        // it ate a radius-32 arc whole.  See kiwi_region.h for the full report.
-        //
-        // KIWI-UX (ROUND R): …then the collinear pass, so all THREE region passes
-        // get it from one place — PASS 1 (a closed object drawn with a split side),
-        // PASS 2 (a chain welded out of several lines) and PASS 3 (the arrangement,
-        // whose face walk visits every T-junction node on an edge and so produces
-        // collinear runs by construction).  See the note on DropCollinear for why
-        // the tolerance is §19's own.
-        //
-        // KIWI-UX (ROUND AR, ITEM 2): both steps, plus the second dedupe pass, are
-        // now SanitizeRing — one function, so a joined outline and an unjoined one
-        // cannot be cleaned differently.  See the note on it above.
+        // Use the same bounded weld and collinear cleanup for all three passes.
         SanitizeRing( r.pts );
         const int n = PtCount( r.pts );
         if ( n < 3 )
             return false;
         if ( n > KREG_MAX_LOOP )
         {
-            // ROUND AG, ITEM 2: LOUD.  "extrudable if and only if filled" is only
-            // a usable invariant if the editor says when it cannot hold it — a
-            // silent `continue` here is exactly what made the unfilled arch
-            // unanswerable from inside the editor.  Throttled by the store
-            // generation like the gap report, so a stuck loop does not spam.
+            // Keep the fill/extrude cap failure visible, once per store generation.
             static unsigned s_lastCapGen = 0xFFFFFFFFu;
             if ( s_lastCapGen != KiwiCon_Generation() )
             {
@@ -394,9 +224,7 @@ namespace
         return true;
     }
 
-    // ── PASS 2's endpoint graph ─────────────────────────────────────────────
-    // SHAKEOUT H: nodes are WORLD points and welding is a 3D distance — see the
-    // note on KiwiRegion_ChainWalk in kiwi_region.h for why the plane had to go.
+    // Endpoint nodes and weld distances are world-space so plane fitting can follow.
     struct chainEdge_t
     {
         int   objIndex;
@@ -428,8 +256,7 @@ namespace
         return (int)nodes.size() - 1;
     }
 
-    // SHAKEOUT H: every tessellated point of `o` within KCON_PLANE_FIT_DIST of
-    // `plane`.  Body here; KiwiRegion_ObjectOnPlane below is the exported spelling.
+    // Membership requires every tessellated point to fit the plane band.
     bool ObjectOnPlane( const kconObject_t &o, const kconPlane_t &plane )
     {
         const int n = KiwiCon_VertCount( o );
@@ -443,20 +270,14 @@ namespace
             const float rel[3] = { w[0] - plane.origin[0],
                                    w[1] - plane.origin[1],
                                    w[2] - plane.origin[2] };
-            if ( fabsf( Dot3( rel, plane.normal ) ) > KiwiRegion_PlaneBand() )   // ROUND AF, ITEM 5
+            if ( fabsf( Dot3( rel, plane.normal ) ) > KiwiRegion_PlaneBand() )   // grid-aware band
                 return false;
         }
         return true;
     }
 
-    // ROUND AG, ITEM 2: "have we already arranged this plane".  NOT a revival of
-    // the deleted KiwiRegion_SamePlane (which decided MEMBERSHIP, and rightly went
-    // when membership became a point-vs-plane test).  This asks a bookkeeping
-    // question about two planes the code itself produced, and a false negative
-    // costs one redundant arrangement whose cells DuplicateRegion then drops —
-    // i.e. it cannot produce a wrong region, only a wasted pass.  Sign-agnostic on
-    // the normal: a rect and a circle drawn on the same wall from opposite sides
-    // are the same plane for this purpose.
+    // Bookkeeping-only plane comparison; membership still tests every point.
+    // Normals are sign-agnostic, and a false negative only repeats arrangement.
     bool SamePlaneApprox( const kconPlane_t &a, const kconPlane_t &b )
     {
         if ( fabsf( Dot3( a.normal, b.normal ) ) < 0.999f )
@@ -467,10 +288,7 @@ namespace
         return fabsf( Dot3( rel, a.normal ) ) <= KiwiRegion_PlaneBand();
     }
 
-    // SHAKEOUT H FIX: an object's two chain ENDS in world space, which is what the
-    // "prefer a partner that touches the seed" rule in PASS 2 compares.  Same two
-    // vertices KiwiRegion_ChainWalk welds on, so "touches" means there exactly what
-    // it means here.
+    // Use the same world-space endpoints that ChainWalk welds.
     bool SeedEndpoints( int object, float outA[3], float outB[3] )
     {
         const kconObject_t *o = KiwiCon_At( object );
@@ -493,7 +311,7 @@ namespace
             return false;
         for ( int i = 0; i < 2; ++i )
             if ( Dist3( e[i], a ) <= KiwiRegion_WeldDist()
-              || Dist3( e[i], b ) <= KiwiRegion_WeldDist() )   // ROUND AF, ITEM 5
+              || Dist3( e[i], b ) <= KiwiRegion_WeldDist() )   // shared weld distance
                 return true;
         return false;
     }
@@ -533,20 +351,8 @@ namespace
         }
     }
 
-    // ── ROUND K: the PASS-3 duplicate gate ──────────────────────────────────
-    // PASS 3 re-finds, as an arrangement cell, every loop PASS 1 and PASS 2 found
-    // by their own routes — a drawn rectangle IS a bounded cell of its own four
-    // segments.  Two regions in the same place would fill twice (visibly darker),
-    // pick ambiguously and extrude twice, so the arrangement's output is matched
-    // against everything already emitted.
-    //
-    // The key is WORLD CENTROID + |AREA|, not the point list: PASS 2 stitches a
-    // loop out of whole objects and PASS 3 out of split fragments, so the same
-    // quadrilateral legitimately comes back with a different vertex COUNT (a
-    // corner that is a T-junction is a vertex for one and not the other).  Centroid
-    // within the store's one weld tolerance and area within 1% is "the same face"
-    // by any reading; two genuinely different cells that agree on both are two
-    // loops drawn on top of each other, where either answer is the same answer.
+    // Arrangement can rediscover pass-1/2 faces with different split vertices.
+    // Match world position plus absolute area to prevent double fill/pick/extrude.
     bool DuplicateRegion( const kregion_t &r )
     {
         const int n = PtCount( r.pts );
@@ -580,7 +386,7 @@ namespace
             oc[1] /= (float)on;
             float ow[3];
             KiwiCon_PlaneToWorld( o.plane, oc, ow );
-            if ( Dist3( cw, ow ) > KiwiRegion_WeldDist() )      // ROUND AF, ITEM 5
+            if ( Dist3( cw, ow ) > KiwiRegion_WeldDist() )      // shared weld distance
                 continue;
             const float oa = fabsf( KiwiRegion_SignedArea( o.pts ) );
             const float bigger = ( oa > area ) ? oa : area;
@@ -600,20 +406,15 @@ namespace
         for ( int i = 0; i < count; ++i )
         {
             const kconObject_t *o = KiwiCon_At( i );
-            // ROUND U: a HIDDEN object bounds nothing.  kiwi_construct.h argues the
-            // ruling in full; the short form is that a region held together by a
-            // line nobody can see is a region nobody can fix.
+            // Hidden geometry cannot define a face the user can see or repair.
             if ( !o || o->hidden )
                 continue;
             const bool closed = ( o->type == KCON_CIRCLE ) || ( o->type == KCON_RECT ) || o->closed;
             if ( !closed )
                 continue;
 
-            // SHAKEOUT H: the object's plane is DERIVED now, and a closed polyline
-            // that does not fit one is simply not a region — the loop is real, it
-            // just does not bound a face.  KiwiCon_ObjectPlane answers both cases
-            // (a circle's stored plane, a polyline's cached fit) and says no when
-            // there is nothing honest to answer with.
+            // Closed polylines still need a derived plane; a non-planar loop is not
+            // a face.  Circles can answer with their stored plane.
             kconPlane_t plane;
             if ( !KiwiCon_ObjectPlane( *o, &plane ) )
                 continue;
@@ -640,15 +441,14 @@ namespace
         for ( int i = 0; i < count; ++i )
         {
             const kconObject_t *o = KiwiCon_At( i );
-            if ( !o || o->hidden )        // ROUND U — hidden is inert
+            if ( !o || o->hidden )        // hidden geometry is inert
                 continue;
             const bool closed = ( o->type == KCON_CIRCLE ) || ( o->type == KCON_RECT ) || o->closed;
             if ( !closed && KiwiCon_VertCount( *o ) >= 2 )
                 open.push_back( i );
         }
 
-        // ROUND AG, ITEM 2: every plane PASS 3 has already arranged.  PASS 3b below
-        // covers the planes it did not reach; see the note there.
+        // Planes already handled by the open-object arrangement pass.
         std::vector<kconPlane_t> arranged;
 
         std::vector<char> grouped( open.size(), 0 );
@@ -657,15 +457,8 @@ namespace
             if ( grouped[g] )
                 continue;
 
-            // ── SHAKEOUT H: THE GROUP'S PLANE IS FITTED, NOT COPIED ─────────────
-            // The seed used to hand over its own stored plane.  A world-space store
-            // has none to hand over, and — more to the point — a seed that IS a
-            // two-point line never determines a plane at all, which is the commonest
-            // case there is (draw four lines round a corner and the first one is a
-            // line).  So the seed's points are accumulated and A PARTNER IS ADDED
-            // UNTIL THE FIT SUCCEEDS — which partner is the question the FIX note
-            // below answers — and from then on membership is the plain
-            // point-vs-plane test.
+            // Fit the group plane from world points; a two-point seed needs a
+            // partner before it determines a plane.  Later membership is point-to-plane.
             std::vector<float> seedPts;
             AppendWorldPoints( *KiwiCon_At( open[g] ), &seedPts );
             grouped[g] = 1;                  // consumed either way — do not retry it
@@ -679,27 +472,9 @@ namespace
             bool havePlane = KiwiCon_FitPlane( &seedPts[0], (int)( seedPts.size() / 3 ),
                                                &plane );
 
-            // ── SHAKEOUT H FIX: WHICH PARTNER FIXES THE PLANE MATTERS ──────────
-            // When the seed is a straight line it determines no plane on its own, so
-            // some OTHER object has to co-determine one — and the greedy version
-            // took whichever came first IN STORE ORDER.  A stray line that merely
-            // happens to be coplanar with the seed (say, lying in the same floor)
-            // could therefore fix the group's plane to the WRONG one and the real
-            // loop, sitting on a wall through the same seed line, was then rejected
-            // object by object and never became a region.
-            //
-            // The cheap fix is the rule a user would state: prefer a partner that
-            // TOUCHES the seed.  Pass 1 only considers candidates one of whose ends
-            // is within the weld tolerance of one of the seed's ends — i.e. a
-            // candidate that could actually be the next link of the chain we are
-            // looking for.  Pass 2 falls back to any coplanar candidate, so nothing
-            // that used to group stops grouping; it just stops going FIRST.
-            //
-            // This narrows the failure, it does not close it: two lines that both
-            // touch the seed end and lie on different planes still resolve by store
-            // order.  Logged in RADIANT_KNOWN_ISSUES rather than papered over — the
-            // real answer is to seed the plane from the CHAIN the walker finds, which
-            // is a re-order of the whole pass and not this round's business.
+            // Prefer a touching partner when a straight seed needs a plane, then
+            // fall back to any fitting partner.  Ambiguous touching partners on
+            // different planes still resolve by store order.
             if ( !havePlane )
             {
                 float sa[3], sb[3];
@@ -717,9 +492,7 @@ namespace
                             continue;
                         if ( pass == 0 && !TouchesEnds( *o, sa, sb ) )
                             continue;
-                        // The fit itself is the test — KiwiCon_FitPlane refuses when
-                        // any point strays, so a candidate on a different plane is
-                        // rejected here rather than poisoning the group.
+                        // The fit rejects a candidate whose points stray from the plane.
                         std::vector<float> trial = seedPts;
                         AppendWorldPoints( *o, &trial );
                         if ( trial.size() == seedPts.size() )
@@ -736,8 +509,7 @@ namespace
                 }
             }
 
-            // With the plane fixed, membership is the plain point-vs-plane test and
-            // order no longer matters at all.
+            // Once fixed, the plane makes later membership independent of order.
             if ( havePlane )
             {
                 for ( size_t k = g + 1; k < open.size(); ++k )
@@ -751,18 +523,12 @@ namespace
                     members.push_back( open[k] );
                 }
             }
-            // ROUND K: WAS `if ( !havePlane || members.size() < 2 ) continue;`.
-            // The member floor moved DOWN to the chain walk, which is the only thing
-            // that ever needed it — PASS 3 below can bound a cell out of a single
-            // self-crossing polyline, and dropping the whole group here would have
-            // taken the arrangement with it.
+            // Keep one-member groups for arrangement; a self-crossing polyline can
+            // bound a cell even though ChainWalk needs at least two members.
             if ( !havePlane )
                 continue;
 
-            // SHAKEOUT F: the endpoint-graph walk is now KiwiRegion_ChainWalk (see
-            // kiwi_region.h) so "Join Lines" chains by the SAME rule a region does.
-            // The semantics are unchanged, with ONE deliberate relaxation recorded
-            // below at the `steps.size() < 2` gate.
+            // Region detection and Join Lines share this endpoint-graph walk.
             if ( members.size() >= 2 )
             {
                 std::vector<kchainStep_t> steps;
@@ -770,14 +536,8 @@ namespace
                 if ( KiwiRegion_ChainWalk( &members[0], (int)members.size(),
                                            &steps, &closed )
                   && closed
-                  // WAS `edges.size() < 3`.  A loop of TWO objects is perfectly real
-                  // — two arcs, two polylines, or a polyline and a line back to its
-                  // start — and the old floor of three rejected every one of them,
-                  // which is exactly the "my loop closed and no face appeared"
-                  // report shakeout F was answering.  Nothing unsafe is admitted:
-                  // two STRAIGHT segments between the same two nodes are collinear,
-                  // so they enclose no area and AcceptLoop's KREG_MIN_AREA gate
-                  // drops them.
+                  // Two curved objects can enclose a loop; the area gate rejects
+                  // the degenerate two-straight-segment case.
                   && steps.size() >= 2 )
                 {
                     std::vector<float> loop;
@@ -794,28 +554,15 @@ namespace
                 }
             }
 
-            // ── ROUND K, PASS 3: THE PLANAR ARRANGEMENT ─────────────────────────
-            // USER DIRECTIVE: a region must form "whenever lines close off a section
-            // even if they extend further".  The passes above are ENDPOINT passes
-            // and structurally cannot see a mid-span crossing — the full argument,
-            // the Plasticity sources this mirrors and every cap are in
-            // kiwi_arrange.h.  It runs UNCONDITIONALLY over the group rather than
-            // "only when the chain walk found nothing", and the duplicates that
-            // produces are dropped by DuplicateRegion.  Correctness first: making
-            // the passes exclusive would mean a store where four lines chain AND a
-            // fifth crosses them shows only half its faces.
-            //
-            // CLOSED objects join the group HERE and nowhere else.  They are not in
-            // `open` (PASS 1 owns them) and they cannot chain, but a rectangle with
-            // a line drawn across it encloses two cells and the arrangement is the
-            // only pass that can say so.  Membership is the same point-vs-plane test
-            // the open members passed.
+            // Arrangement runs even after a chain succeeds so mid-span crossings
+            // also produce cells.  Add coplanar closed objects here because they can
+            // subdivide a pass-1 face; DuplicateRegion removes repeated faces.
             {
                 std::vector<int> arrMembers( members );
                 for ( int k = 0; k < count; ++k )
                 {
                     const kconObject_t *o = KiwiCon_At( k );
-                    if ( !o || o->hidden )    // ROUND U — hidden is inert
+                    if ( !o || o->hidden )    // hidden geometry is inert
                         continue;
                     const bool isClosed = ( o->type == KCON_CIRCLE ) || ( o->type == KCON_RECT )
                                        || o->closed;
@@ -823,7 +570,7 @@ namespace
                         continue;
                     arrMembers.push_back( k );
                 }
-                arranged.push_back( plane );   // ROUND AG, ITEM 2 — see PASS 3b
+                arranged.push_back( plane );   // prevents the closed-only sweep repeating it
 
                 std::vector<karrCell_t> cells;
                 if ( KiwiArrange_Cells( &arrMembers[0], (int)arrMembers.size(),
@@ -845,22 +592,8 @@ namespace
             }
         }
 
-        // ── ROUND AG, ITEM 2, PASS 3b: THE PLANES WITH NO OPEN OBJECT ON THEM ───
-        // PASS 3 lives INSIDE the open-object group loop, so a plane that carries
-        // only CLOSED objects never reaches the arrangement at all.  Two
-        // overlapping rectangles, or a circle sitting inside a rect, enclose real
-        // cells and produced NO fill — while the same picture with one stray line
-        // across it produced all of them, because the line seeded a group.  That is
-        // a second, independent source of "it only does it sometimes", and it is
-        // the same defect shape as the first: a pass that is conditional on
-        // something the user has no reason to connect it to.
-        //
-        // The cheapest honest fix is a second sweep, not a restructure of the group
-        // loop: for every visible CLOSED object whose own plane no group already
-        // arranged, arrange that plane over everything coplanar with it.  Costs
-        // nothing when the store has open geometry on every plane (the `arranged`
-        // test skips immediately) and it cannot double-emit — DuplicateRegion is
-        // the same guard PASS 3 uses.
+        // Closed-only planes never seed the open-object pass.  Sweep each remaining
+        // such plane over all coplanar objects, with the same duplicate guard.
         for ( int i = 0; i < count; ++i )
         {
             const kconObject_t *o = KiwiCon_At( i );
@@ -890,8 +623,8 @@ namespace
                     continue;
                 arrMembers.push_back( k );
             }
-            // One closed object on its own plane IS pass 1's business and pass 1
-            // has already had it; the arrangement only earns its cost from two.
+            // A single closed object is assumed to be pass-1-only, so arrangement
+            // starts at two members on a closed-only plane.
             if ( arrMembers.size() < 2 )
                 continue;
 
@@ -913,9 +646,7 @@ namespace
             }
         }
 
-        // ── SHAKEOUT F: the world centroid every region is keyed by ─────────────
-        // Used only by the flash carry below; computed once here so nothing has to
-        // re-derive it per frame.
+        // Cache each region's world-space match key for flash and selection carry.
         for ( size_t i = 0; i < s_regions.size(); ++i )
         {
             kregion_t &r = s_regions[i];
@@ -934,29 +665,14 @@ namespace
         }
     }
 
-    // SHAKEOUT F: carry the flash counters across a re-derive.  A region whose
-    // world centroid matches one from the previous build is the SAME region and
-    // keeps whatever flash it had left; a region with no match is NEW and gets a
-    // full KREG_FLASH_FRAMES.  Centroid matching (rather than index matching) is
-    // what makes this survive the re-derive's arbitrary ordering — PASS 1 and
-    // PASS 2 both append, so adding one closed object can renumber everything a
-    // chain produced.
-    //
-    // KREG_FLASH_MATCH is generous on purpose: it only has to tell "the same loop"
-    // from "a different loop", and two DIFFERENT regions whose centroids are 2
-    // units apart are two loops drawn on top of each other, where mis-carrying a
-    // flash is invisible.
+    // Carry flash state by world position rather than unstable derived indices.
+    // The generous radius tolerates small rebuild motion.
     const float KREG_FLASH_MATCH = 2.0f;
 
     void CarryFlash( const std::vector<kregion_t> &prev, bool announce )
     {
-        // A region is only ever treated as NEW when the region COUNT actually
-        // GREW.  Without that gate a MOVE gesture on construction geometry
-        // (kiwi_conselect.h) would re-derive every frame with every centroid in a
-        // slightly different place, the match would miss, and the same untouched
-        // region would "form" sixty times a second — sixty flashes and sixty
-        // console lines.  Count growth is the honest signal: a loop closing is
-        // exactly "there is one more region than there was".
+        // Require count growth before declaring an unmatched region new; otherwise
+        // a moving region can miss the position match and re-flash every frame.
         const bool grew  = s_regions.size() > prev.size();
         int        fresh = 0;
         for ( size_t i = 0; i < s_regions.size(); ++i )
@@ -983,8 +699,6 @@ namespace
             s_regions[i].flash = KREG_FLASH_FRAMES;
             ++fresh;
         }
-        // The console line is the half of the feedback that survives the user
-        // looking somewhere else at the instant the loop closed.
         if ( announce && fresh > 0 )
             Sys_Printf( "Construction: %i region%s closed (%i total).\n",
                         fresh, ( fresh == 1 ) ? "" : "s", (int)s_regions.size() );
@@ -995,9 +709,7 @@ namespace
         const unsigned gen = KiwiCon_Generation();
         if ( !s_dirty && gen == s_builtFor )
             return;
-        // SHAKEOUT F: the FIRST build of a session must not announce or flash every
-        // region a loaded sidecar brought with it — only a build that follows a
-        // real store change is a "a loop just closed" event.
+        // Loaded sidecar regions are not newly closed during the first build.
         const bool first = ( s_builtFor == 0 );
         std::vector<kregion_t> prev;
         prev.swap( s_regions );
@@ -1011,7 +723,7 @@ namespace
     }
 }
 
-// ─── the region list ─────────────────────────────────────────────────────────
+// Region list.
 const std::vector<kregion_t> &KiwiRegion_All()
 {
     EnsureBuilt();
@@ -1023,13 +735,13 @@ void KiwiRegion_Invalidate()
     s_dirty = true;
 }
 
-// ─── SHAKEOUT F: the exported coplanarity test + chain walker ────────────────
+// Shared coplanarity and chain helpers.
 bool KiwiRegion_ObjectOnPlane( const kconObject_t &o, const kconPlane_t &plane )
 {
     return ObjectOnPlane( o, plane );
 }
 
-// KIWI-UX (ROUND AR, ITEM 2) — see kiwi_region.h for the invariant this serves.
+// Shared sanitizer preserves the joined/unjoined region invariant.
 void KiwiRegion_SanitizeRing( std::vector<float> &pts )
 {
     SanitizeRing( pts );
@@ -1045,7 +757,7 @@ bool KiwiRegion_ChainWalk( const int *objects, int count,
     if ( !objects || count < 1 || !outSteps )
         return false;
 
-    // ── weld every member's two ENDS into shared nodes ───────────────────────
+    // Weld every member's two world-space ends into shared nodes.
     std::vector<chainNode_t> nodes;
     std::vector<chainEdge_t> edges;
     for ( int m = 0; m < count; ++m )
@@ -1060,15 +772,13 @@ bool KiwiRegion_ChainWalk( const int *objects, int count,
         if ( !KiwiCon_VertWorld( *o, 0, w0 ) || !KiwiCon_VertWorld( *o, n - 1, w1 ) )
             continue;
 
-        // Ends already coincident: the object closes on itself and is NOT a chain
-        // link.  Dropped BEFORE NodeFor so it cannot leave a stray node behind and
-        // fail the degree audit for everyone else.
-        if ( Dist3( w0, w1 ) <= KiwiRegion_WeldDist() )         // ROUND AF, ITEM 5
+        // Self-closing objects belong to pass 1; drop them before creating nodes.
+        if ( Dist3( w0, w1 ) <= KiwiRegion_WeldDist() )         // pass-1 object, not a link
             continue;
 
         chainEdge_t e;
         e.objIndex = objects[m];
-        e.node0    = NodeFor( nodes, w0, KiwiRegion_WeldDist() );   // ROUND AF, ITEM 5
+        e.node0    = NodeFor( nodes, w0, KiwiRegion_WeldDist() );   // shared weld distance
         e.node1    = NodeFor( nodes, w1, KiwiRegion_WeldDist() );
         e.used     = false;
         if ( e.node0 == e.node1 )
@@ -1194,17 +904,13 @@ bool KiwiRegion_HitDistance( const ray_t &ray, int index, float *outDist )
     return true;
 }
 
-// ─── ROUND K: region selection (see kiwi_region.h for why it is a centroid) ──
-// ROUND AG, ITEM 1: …and why it is now a LIST of centroids rather than one.
+// Region selection is stored as world-space match keys, not derived indices.
 namespace
 {
     struct selCentroid_t { float c[3]; };
     std::vector<selCentroid_t> s_selCentroids;
 
-    // Resolve ONE stored centroid to a live region index, or -1.
-    // KREG_FLASH_MATCH is the tolerance the flash carry already uses to answer
-    // "is this the same region across a re-derive"; asking the question twice with
-    // two numbers is how the two answers drift apart.
+    // Reuse the flash carry tolerance for the same cross-derive identity test.
     int ResolveCentroid( const float *c )
     {
         const std::vector<kregion_t> &regions = KiwiRegion_All();
@@ -1239,10 +945,7 @@ void KiwiRegion_Select( int index )
     g_nUpdateBits |= 1;
 }
 
-// ROUND AG, ITEM 1: Shift+click.  In if it was out, out if it was in — the same
-// grammar Shift+click already has on brushes, faces and construction segments,
-// which is the whole point of the directive ("I should be able to shift click
-// construction faces").
+// Shift+click uses the same toggle grammar as other selectable geometry.
 void KiwiRegion_ToggleSelect( int index )
 {
     const std::vector<kregion_t> &regions = KiwiRegion_All();
@@ -1275,9 +978,7 @@ void KiwiRegion_ClearSelection()
 
 int KiwiRegion_SelectedIndex()
 {
-    // The PRIMARY: the first stored centroid that still resolves.  Every existing
-    // caller wants "the one region the gesture is about", and for a single
-    // selection this is bit-for-bit what it always was.
+    // The first still-live member is the primary selection for single-target callers.
     for ( size_t i = 0; i < s_selCentroids.size(); ++i )
     {
         const int idx = ResolveCentroid( s_selCentroids[i].c );
@@ -1328,49 +1029,26 @@ bool KiwiRegion_HasSelection()
     return KiwiRegion_SelectedIndex() >= 0;
 }
 
-// ─── the translucent fill ────────────────────────────────────────────────────
+// Translucent engine-route fill.
 void KiwiRegion_DrawFills( int highlightIndex )
 {
-    // NOT the const accessor: the flash counters live in the regions and this is
-    // the one call per drawn frame that is allowed to age them (kiwi_region.h).
+    // This is the only per-frame path allowed to age region flash counters.
     EnsureBuilt();
     std::vector<kregion_t> &regions = s_regions;
 
-    // ── KIWI-UX (ROUND AM, ITEM 1) — THE INSTRUMENT THAT NAMES THE GATE ─────
-    // Fourth round on "the light blue face never shows", and three single-suspect
-    // fixes have now missed.  The whole chain Cam_Draw -> KiwiCon_DrawWorld ->
-    // here was walked gate by gate this round and every gate is open in code
-    // (the table is in RADIANT_UX_DESIGN §66), so the remaining question can only
-    // be answered ON THE USER'S MACHINE — which means the instrument has to be
-    // the deliverable.
-    //
-    // WHAT WAS WRONG WITH THE OLD ONE (D-AL6, and the brief's own complaint): it
-    // counted submits AFTER R_AddRenderCmdDrawTris, which returns void and drops
-    // silently.  It could only ever see derivation-side failures, and it reported
-    // nothing for a store with NO regions at all — the one state with zero
-    // instrumentation anywhere in the subsystem.  (KIWI-UX (CLEANUP, B-25): that
-    // counter outlived the fix as a write-only duplicate of `nFills` and is gone.)
-    //
-    // WHAT THIS ONE DOES INSTEAD: it counts TRIANGLES SUBMITTED, computed BEFORE
-    // the submit call, and it threads a GATE NAME through every early-out so the
-    // line it prints says which one closed FIRST.  The two gates that live inside
-    // R_AddRenderCmdDrawTris are probed here rather than inferred: the technique
-    // through the same stateBitsEntry read camwnd.cpp's Cam_MaterialWritesDepth
-    // uses (:589), and the command-buffer headroom through R_Ed_CmdBufferHeadroom
-    // (r_rendercmds.cpp).  A healthy frame costs one 0xFF compare, one subtract
-    // and a handful of increments, and prints nothing ever.
+    // Track the first failed derivation/render gate and submitted triangle count.
+    // Technique availability and command-buffer room are checked before the void
+    // renderer call can silently discard a draw.
     const char *gate      = nullptr;              // the FIRST gate that closed
     int         nRegions  = (int)regions.size();
-    int         nFills    = 0;                    // regions that survived to a submit
+    int         nFills    = 0;                    // convex-piece draw calls submitted
     int         nTrisSub  = 0;                    // triangles handed to the renderer
     if ( nRegions == 0 )
         gate = "DERIVATION (no region was built from the construction store)";
 
     if ( regions.empty() )
     {
-        // The store has objects but nothing closes: say so, once per store change,
-        // and hand the user the gap report that already knows how to say WHERE.
-        // This path printed NOTHING for four rounds.
+        // Report an unclosed store once per generation, with its nearest gap.
         if ( KiwiCon_Count() > 0 )
         {
             static unsigned s_lastEmptyGen = 0xFFFFFFFFu;
@@ -1386,34 +1064,17 @@ void KiwiRegion_DrawFills( int highlightIndex )
         return;
     }
 
-    // ROUND R: the view normal for the coplanar-fill nudge (kiwi_region.h
-    // KREG_FILL_NUDGE).  Read ONCE for the whole pass — it cannot change inside it.
-    // The caller is Cam_Draw's tail, so CamWnd_BuildMatrix has already run for this
-    // frame and c->vpn is this frame's.
+    // CamWnd_BuildMatrix has already produced this frame's view state.
     const camera_s *c = Ed_Camera();
 
-    // Same bracket the ported selected-face fill uses (camwnd.cpp 0x408106):
-    // MATERIAL_COLOR neutral so the PER-VERTEX colour drives the draw, and back to
-    // white afterwards so no later pass inherits it.
+    // Match the selected-face material-color bracket and restore white afterwards.
+    // 0x408106
     static const float s_neutral[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
     static const float s_white[4]   = { 1.0f, 1.0f, 1.0f, 1.0f };
     R_AddCmdSetMaterialColor( s_neutral );
 
-    // ROUND K: resolved ONCE for the whole pass — KiwiRegion_SelectedIndex walks
-    // every region's centroid, and doing it per region would make the fill draw
-    // quadratic in the region count for a value that cannot change mid-pass.
-    //
-    // ROUND AG, ITEM 1: the selection is a SET now, so this resolves it into a flag
-    // array once rather than asking KiwiRegion_IsSelected per region.
-    //
-    // KIWI-UX (CLEANUP, B-4) — WHAT THIS DOES AND DOES NOT COST.  It removes the
-    // per-REGION factor only.  KiwiRegion_SelectedCount (:1281) and every
-    // KiwiRegion_SelectedAt (:1290) call still run ResolveCentroid (:1199) over
-    // every stored centroid, and ResolveCentroid walks every region — so the block
-    // below is O(sel^2 * regions) per drawn frame, not linear.  Collapsing it needs
-    // ONE accessor that resolves the whole centroid list in a single
-    // O(sel * regions) pass (and that pass must keep ResolveCentroid's `d <= bestD`
-    // tie-break, which takes the LAST equal-distance match).
+    // Resolve the selection set once into flags.  The accessors still make this
+    // O(sel² * regions); any combined resolver must preserve the last-equal match.
     std::vector<char> selFlags( regions.size(), 0 );
     {
         const int selN = KiwiRegion_SelectedCount();
@@ -1425,22 +1086,13 @@ void KiwiRegion_DrawFills( int highlightIndex )
         }
     }
 
-    // ROUND BK, ITEM 4: the loop's world points, handed to the donor route one
-    // CONVEX PIECE at a time.  A region is capped at KREG_MAX_LOOP vertices, so
-    // both buffers are bounded and can be exact rather than guarded.  The PIECE
-    // buffer is bounded by the DONOR's own array size instead — see the cap check
-    // in the piece loop below.
+    // Regions are bounded by KREG_MAX_LOOP; donor pieces have a tighter checked cap.
     const int KREG_DONOR_MAX_PTS = 64;           // == CAM_MAXFACEVERTS, camwnd.cpp:532
     static float s_world[KREG_MAX_LOOP][3];      // the loop, in world space
     static float s_piece[KREG_MAX_LOOP][3];      // one convex piece of it
 
-    // ── KIWI-UX (ROUND AM, ITEM 1): GATE 4/5 — THE MATERIAL AND ITS TECHNIQUE.
-    // R_AddRenderCmdDrawTris' FIRST silent drop: `Material_GetTechnique(handle,
-    // techType)` null -> `return` with no diagnostic (r_rendercmds.cpp:2173).
-    // Read it here the way camwnd.cpp:595 Cam_MaterialWritesDepth already reads
-    // it — stateBitsEntry[tech] == 0xFF is "this material has no such technique",
-    // which is what Material_GetTechnique bottoms out on.  Probed ONCE per pass:
-    // it cannot change inside one.
+    // stateBitsEntry[TECHNIQUE_UNLIT] == 0xFF predicts Material_GetTechnique's
+    // silent null-technique drop; the material cannot change within this pass.
     if ( !gate )
     {
         if ( !g_qeglobals.d_white )
@@ -1458,23 +1110,13 @@ void KiwiRegion_DrawFills( int highlightIndex )
         }
     }
 
-    // A gate set BEFORE the loop is a pass-level failure: every region is lost to
-    // it, so the report must lead with it even though the loop still runs and the
-    // triangle count comes out nonzero (R_AddRenderCmdDrawTris takes the geometry
-    // and drops it inside).  Latched here so the tail can tell the two apart.
+    // A pre-loop gate invalidates every apparent submit, so preserve it for reporting.
     const bool passGateClosed = ( gate != nullptr );
 
-    // ── KIWI-UX (ROUND AK, ITEM 1): THE PASS SAYS WHEN IT DREW NOTHING ──────
-    // Round AG established the rule for this subsystem — "both drops now print" —
-    // because a silent `continue` is what made the unfilled arch unanswerable from
-    // inside the editor.  The DRAW had no such account, so "the fill never shows"
-    // could not be told apart from "the region never derived" without a rebuild.
-    // It reports only the ANOMALY (regions exist, none of them reached the
-    // renderer) and only once per store generation, so a normal frame costs two
-    // increments and a healthy editor never prints at all.
+    // Count per-region rejection causes for the once-per-generation anomaly report.
     int nTooFew = 0, nTooMany = 0, nNoTris = 0;
 
-    // KIWI-UX (ROUND BK, ITEM 4): the sample the success line below reports.
+    // One submitted sample for the once-per-generation route diagnostic.
     int   emitSample       = -1;
     int   emitSamplePieces = 0;
     int   emitSampleVerts  = 0;
@@ -1486,15 +1128,12 @@ void KiwiRegion_DrawFills( int highlightIndex )
         kregion_t &reg = regions[r];
         const int n = PtCount( reg.pts );
 
-        // SHAKEOUT F: age the flash HERE, before any of the skip paths below, so a
-        // region that cannot be triangulated this frame still ages out instead of
-        // staying lit forever.
+        // Age before skip paths so an undrawable region cannot remain flashed forever.
         const int flash = reg.flash;
         if ( reg.flash > 0 )
         {
             --reg.flash;
-            // Keep repainting while the flash runs, otherwise it would freeze on
-            // whatever frame the editor last happened to draw.
+            // Repaint until the frame-counted flash completes.
             g_nUpdateBits |= 1;
         }
 
@@ -1507,13 +1146,8 @@ void KiwiRegion_DrawFills( int highlightIndex )
             continue;
         }
 
-        // ── KIWI-UX (ROUND BK, ITEM 4): CONVEX PIECES, NOT AN INDEX LIST ────
-        // The donor route (camwnd.cpp Cam_DrawWindingTinted) takes ONE CONVEX
-        // polygon and fans it, because that is what a brush face is.  The region
-        // walker's loop may be concave, so it is decomposed with the machinery the
-        // EXTRUDE already trusts for exactly this reason (KiwiRegion_ConvexPieces,
-        // Hertel-Mehlhorn over the same ear-clip).  A convex loop comes back as one
-        // piece, so the common case is still one draw per region.
+        // Cam_DrawWindingTinted fans one convex polygon, so concave loops use the
+        // same ear-clip/Hertel-Mehlhorn decomposition as extrusion.
         std::vector< std::vector<int> > pieces;
         if ( !KiwiRegion_ConvexPieces( reg.pts, &pieces ) || pieces.empty() )
         {
@@ -1522,17 +1156,12 @@ void KiwiRegion_DrawFills( int highlightIndex )
             continue;
         }
 
-        // ROUND K: the SELECTED region outranks the caller's highlight — a caller
-        // passes `highlightIndex` for a transient (the extrude preview's own
-        // region), and a selection is a state the user put the editor into.
+        // Persistent selection outranks the caller's transient preview highlight.
         float rgba[4];
         memcpy( rgba, selFlags[r]                   ? KREG_SELECTED
                     : ( (int)r == highlightIndex )  ? KREG_HILITE
                                                     : KREG_FILL, sizeof( rgba ) );
-        // …then lerp toward the flash colour by however much of the flash is left.
-        // A LERP rather than a swap: the fill fades back to its resting blue over
-        // the whole KREG_FLASH_FRAMES instead of snapping off, which is what makes
-        // it read as "that just happened" rather than as a render glitch.
+        // Lerp from flash to resting color instead of snapping between them.
         if ( flash > 0 )
         {
             const float t = (float)flash / (float)KREG_FLASH_FRAMES;
@@ -1542,37 +1171,13 @@ void KiwiRegion_DrawFills( int highlightIndex )
         GfxColor packed;
         Byte4PackPixelColor( rgba, &packed );
 
-        // ══════════════════════════════════════════════════════════════════
-        //  KIWI-UX (ROUND BK, ITEM 4) — THE SKY FILM'S BRACKET, VERBATIM.
-        // ══════════════════════════════════════════════════════════════════
-        // The rule this replaces (CLEANUP B-19) was "submit on the pass-level
-        // NEUTRAL bracket, take no per-region override", copied from the boolean
-        // operand preview.  It has now been shipped for three rounds and the fill
-        // has never appeared, so this round takes its state from the OTHER
-        // confirmed-visible translucent fill instead — the round-BC sky film.
-        //
-        // WHAT THE SKY FILM ACTUALLY RUNS UNDER, read off camwnd.cpp rather than
-        // assumed: the world face loop reaches it with `ecol` from
-        // Cam_EditorMaterialColor, which SEEDS `out[3] = 1.0f` (camwnd.cpp:618-620)
-        // and whose "sky" row overwrites rgb only — so MATERIAL_COLOR is
-        // { r, g, b, **1.0** }, a FLAT COLOUR OVERRIDE, and the film's translucency
-        // comes entirely from the packed PER-VERTEX alpha (0.30).
-        //
-        // THAT SETTLES kiwi_lines.h TRAP 5's ONE OPEN QUESTION, by demonstration
-        // rather than by probe: `.w == 1` does NOT make a fill opaque.  The sky
-        // film is a flat-override draw at vertex alpha 0.30 and it is see-through
-        // on the user's machine — which is the whole reason round BC shipped it.
-        // So the region fill takes the same recipe: rgb into MATERIAL_COLOR at
-        // w == 1, the same rgb into the per-vertex colour with the REGION's alpha.
+        // Match the visible sky-film bracket: MATERIAL_COLOR supplies flat RGB at
+        // alpha 1, while the packed per-vertex color supplies translucency.
         const float flat[4] = { rgba[0], rgba[1], rgba[2], 1.0f };
         R_AddCmdSetMaterialColor( flat );
 
-        // The nudge is along the REGION PLANE's normal now, not the view axis,
-        // because the donor route applies it as `p + n*push` (its `push` argument,
-        // the ported selected-face overlay's own displacement).  Signed at the eye
-        // so a region viewed from behind is still lifted TOWARD the viewer — which
-        // is what round R's `-vpn` was reaching for and is the same answer without
-        // making the geometry a camera quantity.
+        // The donor applies push along n, so orient the region normal toward the
+        // viewer before applying KREG_FILL_NUDGE.
         float nrm[3] = { reg.plane.normal[0], reg.plane.normal[1], reg.plane.normal[2] };
         {
             float mid[3];
@@ -1580,9 +1185,7 @@ void KiwiRegion_DrawFills( int highlightIndex )
             const float toEye[3] = { c->origin[0] - mid[0],
                                      c->origin[1] - mid[1],
                                      c->origin[2] - mid[2] };
-            // In ORTHO there is no eye POINT (kiwi_lines.h, round AL, ITEM 2), so
-            // the side is decided by the view DIRECTION exactly as the winding rule
-            // is: the face pointing at the viewer is the one with n . vpn < 0.
+            // Ortho has no eye point; choose the side from view direction instead.
             const float side = KiwiCam_Ortho() ? -Dot3( nrm, c->vpn ) : Dot3( nrm, toEye );
             if ( side < 0.0f )
                 for ( int k = 0; k < 3; ++k )
@@ -1591,66 +1194,23 @@ void KiwiRegion_DrawFills( int highlightIndex )
 
         for ( int i = 0; i < n; ++i )
         {
-            // KIWI-UX (ROUND BK, ITEM 4): the bare world point.  The KREG_FILL_NUDGE
-            // displacement is now the donor route's own `push` argument (applied
-            // along `nrm`, at the call below), and the per-vertex NORMAL and ST are
-            // the donor's too.
+            // The donor applies nudge, normals, and planar ST from these world points.
             float w[3];
             KiwiCon_PlaneToWorld( reg.plane, Pt( reg.pts, i ), w );
             s_world[i][0] = w[0];
             s_world[i][1] = w[1];
             s_world[i][2] = w[2];
         }
-        // ── THE THREE CHANNELS THIS ROUND HANDED TO THE DONOR, AND THE ROUNDS
-        //    THAT OWNED THEM (kept short; the full arguments are in
-        //    RADIANT_UX_DESIGN §64/§65/§66/§69 and kiwi_lines.h TRAPs 3-5) ──────
-        //   * POSITION.  Round R nudged the fan back along `-vpn` by
-        //     KREG_FILL_NUDGE so a region drawn ON a brush face is not decided
-        //     pixel-by-pixel against that face's depth.  The nudge survives; it is
-        //     along the (viewer-oriented) PLANE normal now, which is what the
-        //     donor's `push` means and is no longer a camera quantity.
-        //   * NORMAL.  Round AK moved it from the region plane to `-vpn`, round AL
-        //     to KiwiTris_FillNormal's constant +Z, and the fill was invisible
-        //     under all three.  It is the region's own plane normal again — the
-        //     value BOTH visible fills in this editor write (kiwi_boolean.cpp
-        //     FillBrush, camwnd.cpp's sky film) and the value the binary's own
-        //     batcher writes (brush.cpp Face_AddWindingToTriBatch, 0x47b86a).
-        //   * ST.  Was (0,0) on every kiwi fill; the donor writes a real planar
-        //     1/128 projection, so a colorMap sample has somewhere to land.
-
-        // ── KIWI-UX (ROUND AA, ITEM 2) — WINDING, and where it lives now ────
-        // USER REPORT, verbatim: "the light blue construction lineface isn't
-        // rendering unless you're facing the other way (see pics).  Fix this."
-        // The loop is CCW in the REGION PLANE's basis, so the emitted winding was
-        // locked to reg.plane and had nothing to do with where the eye is, and
-        // white_tools culls back faces (kiwi_lines.h TRAP 3) — exactly one side of
-        // every region drew.  Round AA answered that with KiwiTris_OrientToEye,
-        // which rewrites the INDEX buffer.  The donor route owns its own fan, so
-        // the answer moves to the VERTEX ORDER instead: a piece whose plane normal
-        // points away from the viewer is emitted REVERSED, which is the same fix
-        // one level up and needs no index surgery.
-        //
-        // ── KIWI-UX (ROUND AM, ITEM 1): GATE 8 — THE COMMAND BUFFER ─────────
-        // R_AddRenderCmdDrawTris' SECOND silent drop.  Its byte cost is the exact
-        // arithmetic r_rendercmds.cpp:2176-2183 does: a 16-byte header, then
-        // 16+12+4+8 bytes of vertex streams per vertex, then a 2-byte-per-index
-        // list rounded up to an even count.  Compared against the same sizeLimit
-        // R_GetCommandBuffer will compute, BEFORE the call, so the drop is named
-        // instead of inferred.  Asked per PIECE now, because a concave region is
-        // more than one draw.
+        // Region-plane normals match Face_AddWindingToTriBatch.
+        // 0x47b86a
+        // Reverse viewer-away pieces because white_tools culls back faces.
+        // The byte formula mirrors R_GetCommandBuffer and is checked per piece.
         const bool flip = ( Dot3( nrm, reg.plane.normal ) < 0.0f );
         for ( size_t pi = 0; pi < pieces.size(); ++pi )
         {
             const std::vector<int> &poly = pieces[pi];
             const int pn = (int)poly.size();
-            // KREG_DONOR_MAX_PTS is the donor's own stack-array bound
-            // (CAM_MAXFACEVERTS, camwnd.cpp:532).  Over it Cam_DrawWindingTinted
-            // returns SILENTLY, which is precisely the class of drop this pass
-            // exists to name, so it is checked HERE with a gate name of its own.
-            // Hertel-Mehlhorn merges only while the result stays convex, so a piece
-            // this large needs a 64-corner convex region and is not reachable from
-            // the KCON tools — but "not reachable" is how the last five rounds of
-            // this bug were argued.
+            // Enforce Cam_DrawWindingTinted's silent CAM_MAXFACEVERTS stack bound.
             if ( pn < 3 || pn > KREG_DONOR_MAX_PTS )
             {
                 ++nNoTris;
@@ -1689,11 +1249,7 @@ void KiwiRegion_DrawFills( int highlightIndex )
                 continue;
             }
 
-            // ── THE DONOR CALL.  Literally the function the SKY FILM is drawn
-            //    with (camwnd.cpp Cam_DrawWindingTinted, reached from
-            //    Cam_DrawFaceTinted at camwnd.cpp's sky see-through arm): same
-            //    material, same TECHNIQUE_UNLIT, same planar 1/128 ST, same plane
-            //    normal per vertex, same fan, same one R_AddRenderCmdDrawTris.
+            // Use the sky-film donor's material, technique, planar ST, normal, and fan.
             Cam_DrawWindingTinted( (const float (*)[3])s_piece, pn, nrm,
                                    g_qeglobals.d_white, (uint)packed.packed,
                                    KREG_FILL_NUDGE, TECHNIQUE_UNLIT );
@@ -1701,9 +1257,7 @@ void KiwiRegion_DrawFills( int highlightIndex )
             nTrisSub += pn - 2;
         }
 
-        // The FIRST region that reached the renderer this pass, kept for the one
-        // loud line below (printed after the loop, so it cannot flip-flop between
-        // regions frame after frame).
+        // Capture the first submitted sample for stable diagnostics.
         if ( emitSample < 0 && nFills > 0 )
         {
             emitSample       = (int)r;
@@ -1719,18 +1273,7 @@ void KiwiRegion_DrawFills( int highlightIndex )
 
     R_AddCmdSetMaterialColor( s_white );
 
-    // ══════════════════════════════════════════════════════════════════════════
-    //  KIWI-UX (ROUND BK, ITEM 4) — THE ONE LOUD LINE THE BRIEF ASKED FOR
-    // ══════════════════════════════════════════════════════════════════════════
-    // Six rounds of instrumentation have produced no report because every one of
-    // them printed only on FAILURE, and this pass has never failed — the geometry
-    // has always reached the renderer.  So this one prints on SUCCESS: once per
-    // store generation (i.e. once per sketch edit, not sixty times a second) it
-    // names the route, the piece count, the vertex count, the first world vertex
-    // and the colour.  If the fill is still invisible after the route swap, the
-    // user's next report carries the numbers that pin it — and if the line does not
-    // appear at all, then the pass is not running, which is a different bug and one
-    // this line finally distinguishes.
+    // Once per store generation, confirm the route and one submitted sample.
     if ( emitSample >= 0 )
     {
         static unsigned s_lastEmitGen = 0xFFFFFFFFu;
@@ -1750,19 +1293,9 @@ void KiwiRegion_DrawFills( int highlightIndex )
         }
     }
 
-    // ── KIWI-UX (ROUND AM, ITEM 1): THE ONE LINE ────────────────────────────
-    // The condition the brief asked for, exactly: a NONZERO region count coexisting
-    // with ZERO submitted triangles.  Throttled on the store generation the same way
-    // the loop-cap report at :322 is, so a sketch stuck in this state says so once
-    // rather than sixty times a second.
-    //
-    // WHEN IT PRINTS NOTHING, THAT IS ALSO THE ANSWER, and it is a sharper one than
-    // round AK's was: triangles were counted from the SUBMITTED index list and both
-    // in-renderer drops were probed BEFORE the call, so silence now means the
-    // geometry genuinely reached RB_DrawTriangles_Internal with a technique and room
-    // to hold it.  Everything left after that is BLEND STATE or SHADING — the
-    // vertcol_shaded fakelight term of kiwi_lines.h TRAP 4, or the alpha the
-    // MATERIAL_COLOR probe named in RADIANT_KNOWN_ISSUES round AL.
+    // Report zero submitted triangles or a pass-level silent-drop gate once per
+    // generation.  With both internal gates open, loss is downstream in blending
+    // or shading rather than derivation or command submission.
     if ( nTrisSub == 0 || passGateClosed )
     {
         static unsigned s_lastFillGen = 0xFFFFFFFFu;
@@ -1783,8 +1316,7 @@ void KiwiRegion_DrawFills( int highlightIndex )
     }
     else if ( gate )
     {
-        // Some regions drew and some did not: still worth one line, because a
-        // PARTIALLY filled sketch is the state that reads as "it works sometimes".
+        // A partial fill is also anomalous and worth one throttled report.
         static unsigned s_lastPartialGen = 0xFFFFFFFFu;
         if ( s_lastPartialGen != KiwiCon_Generation() )
         {
@@ -1796,57 +1328,14 @@ void KiwiRegion_DrawFills( int highlightIndex )
     }
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-//  KIWI-UX (ROUND BL, ITEM 3) — THE FILL, DRAWN WHERE IT CANNOT FAIL TO DRAW
-// ═════════════════════════════════════════════════════════════════════════════
-// USER REPORT, verbatim: *"There is still no light blue plane where a construction
-// face can be extruded from.  You've failed again!"*
-//
-// SIX rounds (AA, AK, AL, AM, AQ, BK) have been spent on the ENGINE route: the
-// winding order, the vertex normal, the ST, the material colour, the pass location,
-// and finally BK's transplant onto the confirmed-visible sky film's own emitter.
-// Every gate in that chain is open when read (the instrumentation above proves the
-// geometry reaches R_AddRenderCmdDrawTris with a technique and buffer headroom),
-// and the fill has still never appeared on the user's machine.  Whatever is eating
-// it is downstream of everything this tree can read.
-//
-// So this round stops arguing with the renderer and draws the fills on the ONE
-// surface that is demonstrably painted every single frame in the user's build: the
-// ImGui camera overlay, the same ImDrawList that carries the HUD chips, the snap
-// label, the value bubble, the view cube and the marquee — all of which the user
-// can see in the very screenshots that report the missing fill.
-//
-// ── THE KNOWN LIMITATION, STATED LOUDLY ─────────────────────────────────────
-// An overlay has NO DEPTH BUFFER.  A region behind a wall still shows through, and
-// a region is drawn over any world geometry in front of it.  That is the accepted
-// price of a fill that is guaranteed to exist; a §8 region is editor scaffolding
-// that exists to be seen and clicked, not shaded world surface.  If the engine
-// route is ever proven to work, this can be demoted to a fallback in one line — its
-// call site is KiwiVP_DrawCameraOverlay and nothing else calls it.
-//
-// ── WHAT IS KEPT ────────────────────────────────────────────────────────────
-// KiwiRegion_DrawFills (the engine route) and its once-per-store-generation console
-// line stay exactly as round BK shipped them.  They cost nothing, they still age
-// the flash counters (the one thing this pass must NOT do — it would double-age
-// them), and the line is the only instrument that will ever tell us if the engine
-// route starts working.
-//
-// ── PROJECTION ──────────────────────────────────────────────────────────────
-// Pick_WorldToImage (kiwi_pick.cpp:500) — the editor's ONE world->camera-image
-// projection, exact inverse of CameraCalcRayDir, ortho-aware since round M, and the
-// helper every other screen-space consumer already uses.  Image pixels are
-// TOP-LEFT origin and the overlay's own origin is (imgMinX, imgMinY), so screen =
-// imgMin + image — the identical two lines KiwiNum_DrawBubble uses to pin the value
-// bubble at world geometry (kiwi_numeric.cpp:822 + :878-879).  It returns FALSE for
-// a point at or behind the eye plane in perspective (and never fails in ortho), so
-// "any vertex refused" is exactly the near-plane case, and the loop is dropped
-// whole rather than clipped — cheap, honest, and noted here rather than hidden.
+// The ImGui overlay is a guaranteed-visible fallback for the engine-route fill.
+// It has no depth buffer, so occluded regions show through world geometry.
+// The engine route remains responsible for flash aging and renderer diagnostics.
+// Pick_WorldToImage returns top-left image pixels; perspective loops with any
+// vertex at/behind the eye plane are dropped whole rather than near-plane clipped.
 namespace
 {
-    // Bounded per frame on both axes.  KREG_MAX_LOOP is the loop cap the derivation
-    // already enforces (kiwi_region.h:249); the loop cap here is this pass's own —
-    // a store that derives hundreds of regions is a sketch the user cannot read
-    // anyway, and the overlay must never be able to cost more than the HUD.
+    // Bound overlay work independently of the per-region vertex cap.
     const int   KREG_OVERLAY_MAX_LOOPS = 96;
     const ImU32 KREG_OVERLAY_FILL      = IM_COL32( 120, 180, 255,  77 );  // ~0.30 alpha
     const ImU32 KREG_OVERLAY_EDGE      = IM_COL32( 165, 210, 255, 150 );
@@ -1861,15 +1350,12 @@ void KiwiRegion_DrawFillsOverlay( float imgMinX, float imgMinY, float imgW, floa
     if ( !( imgW > 1.0f ) || !( imgH > 1.0f ) )
         return;
 
-    // The CONST accessor on purpose: KiwiRegion_DrawFills owns the flash counters
-    // (kiwi_region.h:349-353) and ageing them from a second per-frame call would
-    // halve the flash.  This pass reads and draws; it changes nothing.
+    // Read only; the engine route alone ages the flash once per frame.
     const std::vector<kregion_t> &regions = KiwiRegion_All();
     if ( regions.empty() )
         return;
 
-    // The selection, resolved ONCE for the pass — same reason as the engine route's
-    // copy at :1416-1425, and the same accessors.
+    // Resolve selection once for the pass, as in the engine route.
     std::vector<char> selFlags( regions.size(), 0 );
     {
         const int selN = KiwiRegion_SelectedCount();
@@ -1898,8 +1384,7 @@ void KiwiRegion_DrawFillsOverlay( float imgMinX, float imgMinY, float imgW, floa
         if ( n < 3 || n > KREG_MAX_LOOP )
             continue;
 
-        // Project the whole loop first: a single refusal drops the loop, so a
-        // partially-behind polygon can never be drawn wrapped around the viewport.
+        // Drop the whole loop if any vertex is at or behind the eye plane.
         bool  ok      = true;
         bool  onScreen = false;
         for ( int i = 0; i < n && ok; ++i )
@@ -1913,9 +1398,7 @@ void KiwiRegion_DrawFillsOverlay( float imgMinX, float imgMinY, float imgW, floa
             }
             scr[i].x = imgMinX + sx;
             scr[i].y = imgMinY + sy;
-            // A cheap "is any of this anywhere near the image" test, generously
-            // padded: a triangle whose corners are all off one edge can still cover
-            // the view, so this only rejects loops entirely outside a padded rect.
+            // Cheap padded vertex-near-image test; the clip rect handles final coverage.
             if ( scr[i].x >= clipMin.x - imgW && scr[i].x <= clipMax.x + imgW
               && scr[i].y >= clipMin.y - imgH && scr[i].y <= clipMax.y + imgH )
                 onScreen = true;
@@ -1923,13 +1406,8 @@ void KiwiRegion_DrawFillsOverlay( float imgMinX, float imgMinY, float imgW, floa
         if ( !ok || !onScreen )
             continue;
 
-        // BOTH SIDES.  No back-face test: the user asked to see these faces, the
-        // click machinery (KiwiRegion_PickAt) has always accepted either side, and
-        // an overlay has no winding rule to obey in the first place.
-        //
-        // The loop may be CONCAVE, and AddConvexPolyFilled would fill its hull.  The
-        // decomposition is the one the extruder already trusts (Hertel-Mehlhorn over
-        // the shared ear clip) — the same call the engine route makes at :1517.
+        // Draw both sides, matching picking.  Concave loops use the shared convex
+        // decomposition because AddConvexPolyFilled would otherwise fill the hull.
         std::vector< std::vector<int> > pieces;
         const bool sel = ( selFlags[r] != 0 );
         if ( KiwiRegion_ConvexPieces( reg.pts, &pieces ) && !pieces.empty() )
@@ -1956,12 +1434,10 @@ void KiwiRegion_DrawFillsOverlay( float imgMinX, float imgMinY, float imgW, floa
         }
         else
         {
-            // The ear clip refused the loop (it self-intersects, or it is degenerate
-            // in plane space).  The outline below still draws, so the user gets the
-            // boundary rather than nothing at all.
+            // Preserve the boundary when triangulation refuses the fill.
         }
 
-        // …and the boundary, always, over the fill.
+        // Draw the boundary over any fill.
         dl->AddPolyline( scr, n, sel ? KREG_OVERLAY_EDGE_SEL : KREG_OVERLAY_EDGE,
                          ImDrawFlags_Closed, 1.5f );
         ++drawn;
@@ -1970,9 +1446,7 @@ void KiwiRegion_DrawFillsOverlay( float imgMinX, float imgMinY, float imgW, floa
     dl->PopClipRect();
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-//  The 2D toolkit (§23).  Everything here works on a CCW plane-space loop.
-// ═════════════════════════════════════════════════════════════════════════════
+// The 2D toolkit expects CCW plane-space loops.
 float KiwiRegion_SignedArea( const std::vector<float> &pts )
 {
     const int n = PtCount( pts );
@@ -2013,9 +1487,7 @@ bool KiwiRegion_IsConvex( const std::vector<float> &pts )
     for ( int i = 0; i < n; ++i )
     {
         const float c = Cross2( Pt( pts, i ), Pt( pts, ( i + 1 ) % n ), Pt( pts, ( i + 2 ) % n ) );
-        // Exactly-collinear turns are TOLERATED: a tessellated arc segment pair or
-        // a snapped-to-grid corner routinely produces one, and calling that
-        // concave would send perfectly good profiles down the decomposition path.
+        // Tolerate collinear turns from tessellation and grid snapping.
         if ( fabsf( c ) < 1.0e-4f )
             continue;
         const int s = ( c > 0.0f ) ? 1 : -1;
@@ -2042,9 +1514,7 @@ bool KiwiRegion_Triangulate( const std::vector<float> &pts, std::vector<int> *ou
     for ( int i = 0; i < n; ++i )
         poly.push_back( i );
 
-    // Ear clipping.  `guard` bounds the outer loop at the theoretical maximum
-    // number of scans (one full sweep per remaining vertex) so a pathological
-    // input can stall the algorithm but never the editor.
+    // Bound ear-clipping scans so pathological input cannot stall the editor.
     int guard = n * n + 8;
     while ( (int)poly.size() > 3 && guard-- > 0 )
     {
@@ -2065,9 +1535,7 @@ bool KiwiRegion_Triangulate( const std::vector<float> &pts, std::vector<int> *ou
 
             if ( fabsf( cross ) < 1.0e-5f )
             {
-                // A COLLINEAR vertex.  It is a zero-area "ear": drop the vertex
-                // without emitting a degenerate triangle.  Handling this here is
-                // what lets grid-snapped and tessellated profiles through at all.
+                // Drop a collinear zero-area ear without emitting a triangle.
                 poly.erase( poly.begin() + i );
                 clipped = true;
                 break;
@@ -2140,16 +1608,12 @@ namespace
         // a: start at s1 and run the whole way round, ending on s0.
         for ( size_t k = 0; k < a.size(); ++k )
             out->push_back( a[( ai + 1 + k ) % a.size()] );
-        // b: continue from the vertex AFTER s0 and stop BEFORE s1 — b[bi] is s1 and
-        // b[bi+1] is s0, so the shared pair is exactly what k = 2 .. size-1 skips.
+        // Continue through b after s0, omitting the shared pair.
         for ( size_t k = 2; k < b.size(); ++k )
             out->push_back( b[( bi + k ) % b.size()] );
         if ( out->size() < 3 )
             return false;
-        // Two pieces that share MORE than the one edge would produce a ring with a
-        // repeated vertex — a pinched polygon whose collinear turns the convexity
-        // test tolerates.  Reject it outright rather than merge into a shape the
-        // extruder cannot turn into planes.
+        // Reject repeated vertices from multi-edge adjacency; they pinch the union.
         for ( size_t i = 0; i < out->size(); ++i )
             for ( size_t j = i + 1; j < out->size(); ++j )
                 if ( ( *out )[i] == ( *out )[j] )
@@ -2179,11 +1643,8 @@ bool KiwiRegion_ConvexPieces( const std::vector<float> &pts,
         pieces.push_back( p );
     }
 
-    // HERTEL-MEHLHORN: repeatedly remove an INESSENTIAL diagonal — one whose two
-    // adjacent pieces merge into a still-convex polygon.  Greedy and O(pieces²)
-    // per pass, which is fine at this scale (a 64-vertex profile yields at most
-    // 62 triangles) and is the standard formulation; it guarantees at most 4x the
-    // optimal piece count.
+    // Hertel-Mehlhorn greedily removes diagonals whose adjacent pieces remain convex.
+    // The bounded profiles make the O(pieces²) passes acceptable.
     bool merged = true;
     int  guard  = (int)pieces.size() * (int)pieces.size() + 8;
     while ( merged && guard-- > 0 )
@@ -2216,13 +1677,7 @@ bool KiwiRegion_ConvexPieces( const std::vector<float> &pts,
     return !outPieces->empty();
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-//  ROUND AF, ITEM 5 — THE GRID-AWARE TOLERANCES AND THE GAP REPORT
-// ═════════════════════════════════════════════════════════════════════════════
-// The reasoning — including why a quarter of a grid step provably cannot fuse two
-// points the user meant to keep apart — is in kiwi_region.h.  These are the two
-// numbers themselves, in one place, so nothing in this layer can weld at one
-// distance and chain at another.
+// Central grid-aware tolerances keep welding and chaining on the same distances.
 float KiwiRegion_WeldDist()
 {
     const float g = KiwiUnits_GridSpacingWorld();
@@ -2232,12 +1687,8 @@ float KiwiRegion_WeldDist()
     return t;
 }
 
-// ROUND AG, ITEM 2 — see kiwi_region.h A WELD MAY NEVER EXCEED THE GEOMETRY IT IS
-// WELDING for the report and the argument.  `finestEdge <= 0` means "the caller
-// found no edge above the degenerate floor", i.e. no bound, so the grid wins.
-// KIWI-UX (CLEANUP, A-11): see kiwi_region.h for why this is exported and which
-// three sites it replaced.  The body is FinestLoopEdge's, generalised over stride
-// and over the wrap edge; both were already exact in the copies.
+// Find the shortest nondegenerate edge for the geometry-bounded weld.
+// Zero means no edge supplied a bound, so the grid-derived distance wins.
 float KiwiRegion_FinestEdge( const float *pts, int count, int stride, bool closed )
 {
     if ( !pts || count < 2 || ( stride != 2 && stride != 3 ) )
@@ -2283,19 +1734,8 @@ float KiwiRegion_PlaneBand()
     return t;
 }
 
-// ── 5(c): "loop gap 0.8 at (x y z)" ─────────────────────────────────────────
-// Every rejection inside BuildRegions is a silent `continue`, which is why "it
-// will not detect my face" has never had an answer the editor itself could give.
-// This is that answer: weld every visible OPEN object's two ends at exactly the
-// distance the chain walker uses, then report the ends that are still DANGLING
-// together with how far the nearest other dangling end is.
-//
-// A dangling end whose partner sits just past the weld distance IS the bug class
-// the user is describing, and the number printed is what has to be closed — either
-// by moving the point or by raising the grid, which raises the weld.
-//
-// It reads the store and prints.  It changes nothing, so it is safe to call from
-// anywhere, including a draw path.
+// Report the nearest unwelded visible open endpoint using ChainWalk's distance.
+// This is read-only and throttled unless the caller forces a report.
 void KiwiRegion_ReportGaps( bool force )
 {
     static unsigned s_reportedGen = 0xFFFFFFFFu;
@@ -2306,8 +1746,7 @@ void KiwiRegion_ReportGaps( bool force )
 
     const float tol = KiwiRegion_WeldDist();
 
-    // Collect every OPEN object's two ends.  A closed shape has nothing dangling by
-    // definition, and is the thing this is trying to help the user MAKE.
+    // Closed objects have no dangling endpoints to diagnose.
     std::vector<float> ends;
     const int count = KiwiCon_Count();
     for ( int i = 0; i < count; ++i )
@@ -2336,9 +1775,7 @@ void KiwiRegion_ReportGaps( bool force )
         return;
     }
 
-    // For each end, the distance to the NEAREST other end.  At or under `tol` it is
-    // already welded and is not a gap; over it, it is exactly what has to close.
-    // O(m^2) over the ends of the OPEN objects only, run once per store change.
+    // Find each endpoint's nearest peer; O(m²) runs once per store generation.
     int   nearestAt  = -1;
     float nearestGap = 0.0f;
     int   dangling   = 0;
@@ -2356,8 +1793,7 @@ void KiwiRegion_ReportGaps( bool force )
         if ( best <= tol )
             continue;                        // welded: not a gap
         ++dangling;
-        // Report the SMALLEST real gap: the near miss is the one the user meant to
-        // close, and a line end genuinely on its own across the map is not news.
+        // Prefer the smallest real gap over an isolated endpoint across the map.
         if ( nearestAt < 0 || best < nearestGap )
         {
             nearestAt  = i;

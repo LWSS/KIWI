@@ -3,9 +3,8 @@
 #error this file is only for Radiant!
 #endif
 
-// KIWI: The Models dock window enumerates static xmodels through the editor
-// filesystem, previews them through kiwi_entthumb, and defers camera placement
-// until after the ImGui frame.  A placement creates one selected misc_model.
+// Enumerates and previews static xmodels; camera drops defer creation until after
+// the ImGui frame and leave one selected misc_model.
 
 #define KMODEL_PAYLOAD "KIWI_XMODEL"
 

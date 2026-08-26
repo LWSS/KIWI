@@ -1,68 +1,13 @@
 #ifndef KISAK_RADIANT
 #error this file is only for Radiant!
 #endif
-// ─────────────────────────────────────────────────────────────────────────────
-// kiwi_outliner.cpp — ROUND W implementation.  See kiwi_outliner.h for the user
-// directive, the Plasticity sources this ports and the ruling that a brush group
-// IS a func_group entity.
-//
-// NEW code over the KIWI layers plus FOUR ported cores, each called exactly the
-// way its existing caller calls it:
-//
-//   CREATE A GROUP     xywnd.cpp:3411 CreateEntityFromName's bracket, verbatim:
-//                        Undo_ClearRedo(); Undo_GeneralStart( op );
-//                        Undo_AddBrushList( &selected_brushes );
-//                        Entity_Create( Eclass_ForName( 0, "func_group" ) );
-//                      plus pmesh.cpp:7396's Undo_SetIdForEntity( newDef ) tail,
-//                      which is what makes the NEW entity part of the record
-//                      (Undo_Undo phase 2 removes entity instances whose def
-//                      carries the record id — undo.cpp:853).
-//
-//   REPARENT A BRUSH   the three-call triple that is the ONLY spelling of it in
-//                      this tree — Entity_Create's own loop (entity.cpp:1697-1699
-//                      and :1743-1745) and Select_Ungroup's (select.cpp:5119-5126)
-//                      are the same three calls in the same order:
-//                        Entity_UnlinkBrush( def );                 // def-list out
-//                        Entity_LinkBrush( def, targetDef );        // def-list in
-//                        Entity_LinkBrush_0_extern( targetInst, inst ); // owner chain
-//                      wrapped in the same Brush_Deselect_Helper / rebuild /
-//                      Brush_Select_Helper envelope both of them use.
-//
-//   UNGROUP            Select_Ungroup's body (select.cpp:5079) reduced to ONE
-//                      entity: the same triple back to worldspawn, then
-//                      Entity_Free.  It is NOT a call to Select_Ungroup, because
-//                      that walks the SELECTION and the outliner's ungroup acts on
-//                      the folder row the user right-clicked.
-//
-//   RENAME             SetKeyValue( def, "targetname", text ) — entity.cpp:209,
-//                      the same setter win_ent.cpp:278 EntSetKey_Apply drives.
-//
-// ── UNDO, AND WHY THE REPARENT IS ACTUALLY COVERED ─────────────────────────
-// This was checked in the restore code rather than assumed.  Undo_AddBrush
-// (undo.cpp:494) clones the brush def and stores `clone->unk1 =
-// brush->owner->numberId` (undo.cpp:527) — the OWNING ENTITY's unique number.
-// Undo_Undo's phase 4 (undo.cpp:942-968) re-links each restored def into the
-// entity instance whose def carries that numberId, falling back to worldspawn.
-// So OWNERSHIP IS PART OF THE RECORD, and a reparent bracketed with an
-// Undo_AddBrush per moved brush — taken BEFORE the move, so the OLD owner is what
-// gets stored — is undone completely.  Nothing extra is needed and nothing extra
-// is added: the entities themselves are deliberately NOT fed to Undo_AddEntity in
-// the reparent path, because Undo_AddEntity stamps the LIVE entity
-// (undo.cpp:620) and phase 2 would then delete and re-create an entity the user
-// never touched.
-//
-// ── ONE RECORD PER ACT ─────────────────────────────────────────────────────
-// Every verb here opens exactly one Undo_GeneralStart / Undo_End bracket, so the
-// §39 journal (kiwi_undo.h) mints exactly one ticket and one Ctrl+Z undoes the
-// whole regroup, however many brushes it moved.  The construction half pushes
-// exactly one KiwiCon_UndoPush before mutating, which is the same promise in the
-// other domain.
-//
-// ── WHAT THIS FILE DOES NOT DO ─────────────────────────────────────────────
-// It does not delete, move, duplicate or reshape geometry, and it owns no
-// selection of its own.  Every row reads live state as it is drawn and every
-// click leaves through the funnels the viewport already uses.
-// ─────────────────────────────────────────────────────────────────────────────
+// Plasticity-style outliner over live KIWI scene and selection state.
+// Group creation mirrors xywnd.cpp:3411 plus pmesh.cpp:7396's new-entity undo id.
+// Reparenting preserves Entity_UnlinkBrush -> Entity_LinkBrush ->
+// Entity_LinkBrush_0_extern and the ported deselect/rebuild/reselect envelope.
+// Undo_AddBrush must run before each relink because it records the old owner's id;
+// recording an unchanged owner entity would make undo delete and recreate it.
+// Ungroup mirrors Select_Ungroup for one row entity; rename uses targetname.
 
 #include "stdafx.h"
 #include "qe3.h"
@@ -73,59 +18,51 @@
 #include "kiwi_command.h"
 #include "kiwi_conselect.h"
 #include "kiwi_construct.h"
-#include "kiwi_hover.h"         // ROUND AG, ITEM 3 — the row hover, in 3D
+#include "kiwi_hover.h"         // viewport row hover
 #include "kiwi_selection.h"
-#include "kiwi_visibility.h"    // ROUND AG, ITEM 7 — KiwiVis_SetHidden / UndoPush
+#include "kiwi_visibility.h"    // shared hidden state and undo
 #include "kiwi_windows.h"
 
 #include <stdio.h>
 #include <string.h>
 #include <vector>
 
-// ── ported entry points (each verified against its definition) ──────────────
-extern int         Sys_Printf( const char *fmt, ... );                       // win_qe3.cpp:118   int Sys_Printf(const char*,...)
-extern int         g_nUpdateBits;                                            // engine_stubs.cpp:773  int g_nUpdateBits
-extern entity_s   *world_entity;                                             // map.cpp:62        entity_s *world_entity
-extern entity_s    entityInsts;                                              // entity.cpp:299    entity_s entityInsts{}
-extern eclass_t   *Eclass_ForName( int hasBrushes, const char *name );       // eclass.cpp:1096   eclass_t *Eclass_ForName(int,const char*)
-extern entity_s   *Entity_Create( eclass_t *eclass );                        // entity.cpp:1629   entity_s *Entity_Create(eclass_t*)
-extern void        Entity_Free( char *a1 );                                  // entity.cpp:1500   void Entity_Free(char*)
-extern void        Entity_LinkBrush( brush_t *b, entity_s *world_ent );      // entity.cpp:445    void Entity_LinkBrush(brush_t*,entity_s*)
-extern void        Entity_UnlinkBrush( brush_t *b );                         // entity.cpp:464    void Entity_UnlinkBrush(brush_t*)
-extern selbrush_t *Entity_LinkBrush_0_extern( entity_s *e, entity_brush_s *b );// brush.cpp:635   selbrush_t *Entity_LinkBrush_0_extern(entity_s*,entity_brush_s*)
-extern void        Brush_BuildWindings( brush_t *def, int bFull );           // brush.cpp:1434    void Brush_BuildWindings(brush_t*,int)
-extern void        SetupVertexSelection();                                   // engine_stubs      void SetupVertexSelection()
-extern void        MarkMapModified();                                        // win_qe3.cpp       void MarkMapModified()
-extern void        sub_476330( selbrush_t *b );                              // brush.cpp:851     void sub_476330(selbrush_t*)  Brush_Deselect_Helper
-extern void        sub_476470( selbrush_t *b );                              // brush.cpp:970     void sub_476470(selbrush_t*)  Brush_Select_Helper
-extern void        SetKeyValue( entity_s_def *e, const char *key, const char *value ); // entity.cpp:212  void SetKeyValue(entity_s_def*,const char*,const char*)
-extern char       *ValueForKey2( int e, const char *key );                   // entity.cpp:89     char *ValueForKey2(int,const char*)  ("" when absent)
-extern void        Undo_ClearRedo();                                         // undo.cpp:176      void Undo_ClearRedo()
-extern void        Undo_GeneralStart( const char *operation );               // undo.cpp:367      void Undo_GeneralStart(const char*)
-extern void        Undo_AddBrush( entity_brush_s *pBrushInst );              // undo.cpp:494      void Undo_AddBrush(entity_brush_s*)  -- takes the brush DEF
-extern void        Undo_AddBrushList( selbrush_t *sb );                      // undo.cpp:551      void Undo_AddBrushList(selbrush_t*)
-extern void        Undo_AddEntity_W( entity_s *a1 );                         // undo.cpp:633      void Undo_AddEntity_W(entity_s*)
-extern void        Undo_SetIdForEntity( entity_s_def *ent );                 // undo.cpp:663      void Undo_SetIdForEntity(entity_s_def*)
-extern void        Undo_End();                                               // undo.cpp:686      void Undo_End()
+// Ported entry points; locations anchor the exact ABI used here.
+extern int         Sys_Printf( const char *fmt, ... );                       // win_qe3.cpp:118
+extern int         g_nUpdateBits;                                            // engine_stubs.cpp:773
+extern entity_s   *world_entity;                                             // map.cpp:62
+extern entity_s    entityInsts;                                              // entity.cpp:299
+extern eclass_t   *Eclass_ForName( int hasBrushes, const char *name );       // eclass.cpp:1096
+extern entity_s   *Entity_Create( eclass_t *eclass );                        // entity.cpp:1629
+extern void        Entity_Free( char *a1 );                                  // entity.cpp:1500
+extern void        Entity_LinkBrush( brush_t *b, entity_s *world_ent );      // entity.cpp:445
+extern void        Entity_UnlinkBrush( brush_t *b );                         // entity.cpp:464
+extern selbrush_t *Entity_LinkBrush_0_extern( entity_s *e, entity_brush_s *b );// brush.cpp:635
+extern void        Brush_BuildWindings( brush_t *def, int bFull );           // brush.cpp:1434
+extern void        SetupVertexSelection();                                   // engine_stubs.cpp
+extern void        MarkMapModified();                                        // win_qe3.cpp
+extern void        sub_476330( selbrush_t *b );                              // brush.cpp:851; Brush_Deselect_Helper
+extern void        sub_476470( selbrush_t *b );                              // brush.cpp:970; Brush_Select_Helper
+extern void        SetKeyValue( entity_s_def *e, const char *key, const char *value ); // entity.cpp:212
+extern char       *ValueForKey2( int e, const char *key );                   // entity.cpp:89; "" when absent
+extern void        Undo_ClearRedo();                                         // undo.cpp:176
+extern void        Undo_GeneralStart( const char *operation );               // undo.cpp:367
+extern void        Undo_AddBrush( entity_brush_s *pBrushInst );              // undo.cpp:494; takes brush def
+extern void        Undo_AddBrushList( selbrush_t *sb );                      // undo.cpp:551
+extern void        Undo_AddEntity_W( entity_s *a1 );                         // undo.cpp:633
+extern void        Undo_SetIdForEntity( entity_s_def *ent );                 // undo.cpp:663
+extern void        Undo_End();                                               // undo.cpp:686
 extern bool        Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId ); // mainfrm.cpp:1358
-// KIWI-UX (ROUND W): the live dockspace id, so the JustOpened latch can re-dock
-// this window the way the shell re-docks its own (imgui_shell.cpp:476).
+// Live dockspace id used to re-dock a newly opened panel (imgui_shell.cpp:476).
 extern ImGuiID     ImGuiShell_DockRoot();                                    // imgui_shell.cpp
 
-// `active_brushes` / `selected_brushes` are the DISPLAY-list sentinels, declared in
-// qe3.h:1053/1054 and defined in engine_stubs.cpp:777/778.  Only `selected_brushes`
-// is named here, and only as Undo_AddBrushList's argument — exactly as
-// xywnd.cpp:3402 passes it.
+// selected_brushes is passed only to Undo_AddBrushList, matching xywnd.cpp:3402.
 
 namespace
 {
-// ═════════════════════════════════════════════════════════════════════════════
-//  THE ROW MODEL
-// ═════════════════════════════════════════════════════════════════════════════
-// One flat array per frame, built from the live scene plus the collapse set —
-// FlattenOutline.ts:13 in C++.  Every row is the SAME HEIGHT, which is what lets
-// ImGuiListClipper skip the ones off screen; that is also why the section headers
-// are ordinary rows with an arrow glyph rather than ImGui::CollapsingHeader.
+// Row model
+// Equal-height rows are flattened from live state each frame so ImGuiListClipper
+// can skip off-screen entries; section headers therefore use ordinary rows too.
 enum koutKind_t
 {
     KOUT_SECTION_BRUSHES = 0,   // worldspawn brushes + func_group folders
@@ -153,17 +90,8 @@ struct koutRow_t
     unsigned    key;        // collapse-set key; 0 = not collapsible
 };
 
-// ── collapse keys ───────────────────────────────────────────────────────────
-// Entity keys are the entity DEF's `numberId` (qe3.h:539, minted by
-// dword_739DC4++ in entity.cpp:1716) — unique for the life of the entity and
-// stable across frames, which an index or a pointer would not be.
-//
-// EVERY key is TAGGED into its own high range, and that is not decoration:
-// dword_739DC4 starts at ZERO (entity.cpp:289), so an untagged numberId of 0 would
-// collide with this file's "0 == this row is not collapsible" sentinel and produce
-// one folder in the map that could never be collapsed.  The tags also keep the
-// three namespaces apart; both id spaces are small counters, so nothing can carry
-// into the tag bits.
+// numberId is stable for an entity's lifetime. Tags separate key namespaces and
+// keep valid id 0 distinct from the non-collapsible sentinel.
 inline unsigned EntKey     ( int numberId ) { return 0xD0000000u | (unsigned)numberId; }
 inline unsigned ConGroupKey( int group    ) { return 0xE0000000u | (unsigned)group; }
 const unsigned KOUT_KEY_BRUSHES  = 0xF0000001u;
@@ -176,24 +104,17 @@ const int KOUT_CLASS_LIGHT      = 0x01;
 const int KOUT_CLASS_MODELCLASS = 0x08;
 const int KOUT_CLASS_PREFAB     = 0x10;
 
-// The BRUSHFLAG_SELECTED bit, spelled as select.cpp:5112 spells it.
+// Ported selection and visibility values (select.cpp:5112, :4168, :4180).
 const unsigned KOUT_BRUSHFLAG_SELECTED = 0x80u;
-// The hidden bit + its depth field, spelled as select.cpp:4168/4180 spell them
-// (and as kiwi_visibility.cpp:35 re-states).  ONE state: a brush hidden from this
-// panel is hidden to H, to Ctrl+H and to "Show Hidden", because it is the same
-// two fields.
 const unsigned KOUT_HIDDEN_BIT = 4u;
 
-// ═════════════════════════════════════════════════════════════════════════════
-//  PANEL STATE (all of it panel-local; none of it is scene state)
-// ═════════════════════════════════════════════════════════════════════════════
+// Panel-local state
 std::vector<unsigned>  s_collapsed;        // keys of the folders that are CLOSED
 std::vector<koutRow_t> s_rows;             // rebuilt every frame
 unsigned               s_lastSelGen = 0;   // for the auto-expand pass
 
-// The shift-range anchor, stored as an IDENTITY rather than a row index: the
-// flatten changes shape whenever anything is expanded, deleted or created, and an
-// index into last frame's array is a lie the moment it does.
+// Row indices shift with the flatten. Brush anchors store identity; construction
+// anchors retain a store-generation-scoped index.
 struct koutAnchor_t
 {
     koutKind_t  kind     = KOUT_BRUSH;
@@ -203,37 +124,9 @@ struct koutAnchor_t
 };
 koutAnchor_t s_anchor;
 
-// ── INLINE RENAME ───────────────────────────────────────────────────────────
-// ROUND W shipped this for FOLDERS only and keyed it on the folder's collapse key,
-// which every non-folder row leaves at 0.
-//
-// ── KIWI-UX (ROUND X, ITEM 10): EVERY ROW THAT HAS SOMEWHERE TO PUT A NAME ──
-// USER DIRECTIVE, verbatim: "Move curves into their own section in the 'outliner'.
-// Allow renaming of items in the outliner by double clicking the item and typing."
-//
-// Plasticity renames every RealNodeItem — Solids, Curves, Groups and Empties — with
-// the same handler, because `render()`'s double-click hook is unconditional
-// (plasticity/src/components/outliner/OutlinerItems.tsx:75-80) and the storage is
-// one key→string map that does not care what kind the node is (Nodes.ts:84-98).
-// Only its two virtual SECTION headers are excluded, and they are excluded by being
-// a different component entirely (Outliner.tsx:164-174, hardcoded 'Curves'/'Solids').
-//
-// KIWI matches that set except for one kind, and the exception is a storage fact
-// rather than a choice: a worldspawn BRUSH has nowhere to keep a name.  It is not an
-// entity, so it has no epair; it is not in the sidecar, so it has no editor-side
-// record; and the .map format has no per-brush id to key an external table on.  The
-// obvious workaround — key names by the brush's ordinal in the worldspawn list — is
-// refused deliberately: that ordinal is reordered by CSG, clone, delete, undo and
-// by the load order of the .map itself, so a name would silently move to a
-// DIFFERENT brush, which is worse than having no name.  See RADIANT_KNOWN_ISSUES.
-//
-// So the renameable set is: entity folders and entity rows (targetname), construction
-// group folders (the store's group-name table) and construction objects (the sidecar
-// name added this round, kiwi_construct.h kconObject_t::name).
-//
-// The row being renamed is held as an IDENTITY rather than as an index, for exactly
-// the reason s_anchor is (the flatten changes shape whenever anything is expanded,
-// created or deleted).
+// Inline rename targets use stable identities. Entities store targetname and
+// construction rows use sidecar names. World brushes cannot be named safely
+// because the map format has no persistent per-brush id; ordinals can reorder.
 struct koutRename_t
 {
     bool        active   = false;
@@ -245,11 +138,8 @@ koutRename_t s_rename;
 char     s_renameBuf[64] = { 0 };
 bool     s_renameFocus  = false;
 
-// Is THIS row the one being renamed?  Folders compare by collapse key (unique and
-// stable per entity / group); a construction object compares by store index, which
-// is only meaningful inside one store generation — and the generation cannot move
-// while an InputText has focus, because every path that bumps it is a command and
-// no command runs while io.WantTextInput is true.
+// Folder keys are stable; construction indices are valid only within one store
+// generation, which commands cannot change while text input owns the keyboard.
 bool RenamingRow( const koutRow_t &r )
 {
     if ( !s_rename.active || s_rename.kind != r.kind )
@@ -259,16 +149,13 @@ bool RenamingRow( const koutRow_t &r )
     return s_rename.key != 0 && s_rename.key == r.key;
 }
 
-// True for the kinds that have somewhere to put a name (see the block above).
 bool Renameable( koutKind_t k )
 {
     return k == KOUT_GROUP_ENTITY || k == KOUT_ENTITY
         || k == KOUT_CON_GROUP    || k == KOUT_CON_OBJECT;
 }
 
-// Enter rename mode on `r`, seeded with the CURRENT label so the field doubles as
-// a readout the user can edit rather than one they must retype (the grid pill's
-// own rule, kiwi_viewcube.cpp:502-508).  `seed` is that label.
+// Seed the editor with the current label (kiwi_viewcube.cpp:502-508).
 void BeginRename( const koutRow_t &r, const char *seed )
 {
     s_rename.active   = true;
@@ -280,26 +167,15 @@ void BeginRename( const koutRow_t &r, const char *seed )
     s_renameBuf[sizeof( s_renameBuf ) - 1] = '\0';
 }
 
-// Set by any row action that FREES an entity or reorders the construction store.
-// The row array was flattened at the top of the frame, so once one of those has
-// run every row after it in this frame's list may name something that no longer
-// exists — the draw loop STOPS rather than reading it.  It is a one-frame stall
-// and the next frame re-flattens; the alternative is a dangling deref inside an
-// ImGui loop, which is the exact shape of bug the liveness discipline exists for.
+// Freeing an entity or reordering the store invalidates later flattened rows;
+// stop drawing and rebuild next frame rather than dereference stale identities.
 bool s_structural = false;
 
-// Shift+drag paint-select: latched on the press, cleared on release.  It is
-// deliberately exclusive with the ImGui drag-drop SOURCE (see the row draw) —
-// one gesture cannot mean both "add these rows" and "move this row".
+// Shift+drag paint selection is mutually exclusive with row drag-and-drop.
 bool s_paintSelecting = false;
 
-// ── the drag payload ────────────────────────────────────────────────────────
-// NOT a bare pointer by contract: the descriptor carries what the drop needs to
-// re-validate before it dereferences anything.  For a brush that is
-// Sel_BrushLive (kiwi_selection.h:117 — pointer comparison against the two
-// display lists, safe on freed memory); for a construction object it is the
-// store generation, because indices are only meaningful within one generation
-// (kiwi_construct.h "nothing else may cache across it").
+// Payload validation uses Sel_BrushLive for brush pointers and pairs construction
+// indices with the store generation.
 const char *KOUT_PAYLOAD = "KIWI_OUTLINER_ROW";
 struct koutDrag_t
 {
@@ -309,9 +185,7 @@ struct koutDrag_t
     unsigned    conGen;
 };
 
-// ═════════════════════════════════════════════════════════════════════════════
-//  SMALL HELPERS
-// ═════════════════════════════════════════════════════════════════════════════
+// Small helpers
 bool Collapsed( unsigned key )
 {
     if ( !key )
@@ -357,7 +231,7 @@ bool IsFuncGroup( entity_s *inst )
     return cn[0] && !_stricmp( cn, "func_group" );
 }
 
-// KIWI: keep entity bucketing in one place so every section uses the same rule.
+// Centralized so every section uses the same entity classification.
 koutKind_t EntitySection( entity_s *inst )
 {
     if ( IsFuncGroup( inst ) )
@@ -401,8 +275,7 @@ unsigned SectionKey( koutKind_t kind )
     }
 }
 
-// A folder row's display name: the entity's own `targetname` when it has one,
-// otherwise "<klass> N" — Outliner.tsx:158's `getName(object) ?? klass id`.
+// targetname with Plasticity's "<class> <id>" fallback (Outliner.tsx:158).
 void FolderName( entity_s *inst, char *out, int outSize )
 {
     entity_s_def *def = DefOf( inst );
@@ -445,8 +318,7 @@ int EntityBrushCount( entity_s *inst )
     return n;
 }
 
-// A brush row's own label.  A patch mesh is called a patch — it is still a brush
-// to the map format, but calling it "Brush" would be a lie the user can see.
+// Patch meshes retain their visible type even though the map stores them as brushes.
 void BrushName( selbrush_t *inst, int ordinal, char *out, int outSize )
 {
     const bool isPatch = ( inst && inst->def && inst->def->patch != 0 );
@@ -459,16 +331,8 @@ bool BrushHidden( const selbrush_t *b )
     return b && ( ( (unsigned)b->brushFlags & KOUT_HIDDEN_BIT ) != 0 );
 }
 
-// Set/clear the hide state of ONE brush instance, writing the SAME two fields the
-// ported family writes: Select_Hide's third pass (select.cpp:4179-4180) sets the
-// bit and depth 1, ShowHidden (select.cpp:4249-4250) clears both.
-//
-// KIWI-UX (ROUND AG, ITEM 7): the body moved to KiwiVis_SetHidden and this is a
-// forwarder.  It had been a verbatim private copy, and the round-AG undo made
-// that a liability rather than a duplication: a second spelling of "hidden" is a
-// second thing the snapshot store would have to be kept in step with.  The
-// "no undo bracket, deliberately" sentence that stood here is GONE — the eye
-// brackets now, at the click (see the four arms in the row handler).
+// Use the shared writer so the eye and H-family update the same hide state;
+// callers bracket visibility undo around the whole gesture.
 void SetBrushHidden( selbrush_t *b, bool hidden )
 {
     KiwiVis_SetHidden( b, hidden );
@@ -476,15 +340,11 @@ void SetBrushHidden( selbrush_t *b, bool hidden )
 
 bool BrushSelected( selbrush_t *b )
 {
-    // Outliner.tsx:150-152 re-asks per row per render; so does this.  The typed
-    // selection is the authority for the UX layer, and Sel_Contains is a short
-    // scan over a list that is only ever as long as the user's selection.
+    // Query live typed selection; the panel owns no selection cache.
     return b && Sel_Contains( KiwiSel(), Sel_MakeObject( b ) );
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-//  FLATTEN  (FlattenOutline.ts:13)
-// ═════════════════════════════════════════════════════════════════════════════
+// Flatten (FlattenOutline.ts:13)
 void PushRow( koutKind_t kind, int indent, unsigned key )
 {
     koutRow_t r;
@@ -602,6 +462,8 @@ void FlattenCurves()
     }
 }
 
+// Divergence from Plasticity: KIWI emits five fixed top-level sections, including
+// empty ones; Plasticity emits only non-empty type sections within each group.
 void Flatten()
 {
     s_rows.clear();
@@ -612,14 +474,11 @@ void Flatten()
     FlattenEntitySection( KOUT_SECTION_MODELS );
 }
 
-// Outliner.tsx:89-100: anything that becomes selected has its ancestors expanded,
-// so a viewport selection is never hiding inside a closed folder.  Cheap and only
-// runs when the selection generation actually moved.
+// Expand brush ancestors after the typed brush-selection generation changes
+// (Outliner.tsx:89-100).
 void AutoExpandForSelection()
 {
-    // KiwiSel() FIRST: it folds in any pending legacy change (and bumps the
-    // generation when it does), so reading the counter before that call would
-    // compare against a number the very next line invalidates.
+    // Fold pending legacy changes in before reading the generation they may bump.
     KiwiSel();
     const unsigned gen = Sel_Generation();
     if ( gen == s_lastSelGen )
@@ -653,17 +512,12 @@ void AutoExpandForSelection()
     }
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-//  SELECTION  (the outliner -> scene direction)
-// ═════════════════════════════════════════════════════════════════════════════
-// Everything leaves through the SAME funnels the viewport click uses:
-// Sel_* + Sel_SyncToLegacy for brushes (kiwi_selection.h:132-146),
-// KiwiConSel_ApplyClick for construction (kiwi_conselect.h:125).  The outliner is
-// not a second selection owner and holds no list of its own.
+// Selection: outliner -> scene
+// Rows use the viewport's Sel_* / Sel_SyncToLegacy and KiwiConSel_ApplyClick
+// funnels; the panel owns no second selection state.
 void SelectBrushRow( selbrush_t *b, bool additive, bool toggle )
 {
-    // KIWI-UX (CLEANUP, C-54): a click on a row whose brush has been deleted under
-    // the list did nothing and said nothing.  Same early-out, now audible.
+    // Stale flattened rows fail audibly.
     if ( !b || !Sel_BrushLive( b ) )
     {
         Sys_Printf( "Outliner: that brush no longer exists — nothing selected.\n" );
@@ -686,8 +540,7 @@ void SelectBrushRow( selbrush_t *b, bool additive, bool toggle )
 
 void SelectConRow( int index, bool additive, bool toggle )
 {
-    // KIWI-UX (CLEANUP, C-54): the construction store shrank under the list, so the
-    // row names an object that is gone.  Same early-out, now audible.
+    // Stale flattened rows fail audibly.
     if ( index < 0 || index >= KiwiCon_Count() )
     {
         Sys_Printf( "Outliner: that curve row is stale (index %i of %i) — "
@@ -696,9 +549,7 @@ void SelectConRow( int index, bool additive, bool toggle )
     }
     if ( !additive && !toggle )
     {
-        // Same rule as above, from the other side: a plain click on a curve row
-        // clears the brush selection too, so the two halves cannot drift into
-        // disagreeing about what "the selection" is.
+        // A plain curve click clears the brush half of the shared selection.
         Sel_Clear( KiwiSel() );
         Sel_SyncToLegacy();
     }
@@ -721,10 +572,8 @@ bool ConObjectRowSelected( int index )
     return false;
 }
 
-// Add every selectable row in [a,b] of the CURRENT flatten — the shift-click
-// range.  Sections and folders are skipped: a range is over leaves, because
-// including a folder would silently mean "and everything inside it", which is a
-// different act with a different undo story.
+// Shift ranges cover leaves in the current flatten; folders would implicitly add
+// hidden descendants and change the gesture's meaning.
 void SelectRange( int a, int b )
 {
     if ( a > b )
@@ -784,19 +633,11 @@ void SetAnchor( const koutRow_t &r )
     s_anchor.valid    = ( r.kind == KOUT_BRUSH || r.kind == KOUT_CON_OBJECT );
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-//  THE REPARENT (the func_group half of the directive)
-// ═════════════════════════════════════════════════════════════════════════════
-// `insts` is a SNAPSHOT taken before any mutation — the owner chains this walks
-// are the very lists the triple relinks, so iterating them live would be
-// iterating a list while it changes under the cursor.
-//
-// One Undo_GeneralStart / Undo_End bracket for the whole move (kiwi_command.h's
-// bracket contract), with the per-brush Undo_AddBrush taken BEFORE the first
-// relink so the record stores the OLD owner (see the file header).
+// Brush reparenting
+// Snapshot instances before mutating their owner chains. One undo bracket covers
+// the move, with each Undo_AddBrush taken before its owner changes.
 bool ReparentBrushes( std::vector<selbrush_t *> &insts, entity_s *targetInst, const char *op )
 {
-    // KIWI-UX (CLEANUP, C-54): audible, same early-out.
     if ( !targetInst )
     {
         Sys_Printf( "Outliner: the drop target no longer exists — move cancelled.\n" );
@@ -808,8 +649,8 @@ bool ReparentBrushes( std::vector<selbrush_t *> &insts, entity_s *targetInst, co
         Sys_Printf( "Outliner: the drop target has no definition — move cancelled.\n" );
         return false;
     }
-    // A point entity's brush is its bounding box and is not the user's to move —
-    // Entity_Create refuses the same case (entity.cpp:1640-1645).
+    // A point entity's brush is its bounding box, not user geometry
+    // (Entity_Create, entity.cpp:1640-1645).
     if ( targetDef->eclass && targetDef->eclass->fixedsize )
     {
         Sys_Printf( "Outliner: %s is a point entity — it cannot hold brushes.\n",
@@ -817,7 +658,6 @@ bool ReparentBrushes( std::vector<selbrush_t *> &insts, entity_s *targetInst, co
         return false;
     }
 
-    // Drop the dead and the already-there.
     std::vector<selbrush_t *> move;
     for ( size_t i = 0; i < insts.size(); ++i )
     {
@@ -830,9 +670,7 @@ bool ReparentBrushes( std::vector<selbrush_t *> &insts, entity_s *targetInst, co
     }
     if ( move.empty() )
     {
-        // KIWI-UX (CLEANUP, C-54): this arm prints because the SUCCESS arm does.
-        // Dragging a row onto the folder it already belongs to used to produce
-        // nothing at all, which reads as "the outliner ignored my drag".
+        // Report a valid no-op drop instead of appearing to ignore it.
         Sys_Printf( "Outliner: nothing to move — the %i dragged brush(es) are "
                     "already in %s.\n", (int)insts.size(), ClassOf( targetInst ) );
         return false;
@@ -846,8 +684,7 @@ bool ReparentBrushes( std::vector<selbrush_t *> &insts, entity_s *targetInst, co
     for ( size_t i = 0; i < move.size(); ++i )
     {
         selbrush_t *sb = move[i];
-        // select.cpp:5112 — the ported envelope: a SELECTED instance is taken out
-        // of the selection bookkeeping across the relink and put back after.
+        // select.cpp:5112: selected instances leave bookkeeping across the relink.
         const bool wasSelected = ( ( (unsigned)sb->brushFlags & KOUT_BRUSHFLAG_SELECTED ) != 0 );
         if ( wasSelected )
             sub_476330( sb );
@@ -889,16 +726,10 @@ void GatherSelectedBrushes( std::vector<selbrush_t *> &out )
     }
 }
 
-// Dissolve ONE func_group: every brush back to worldspawn, then free the entity.
-// Select_Ungroup's body (select.cpp:5106-5146) reduced to a single entity, plus
-// the undo bracket it does not have.  Undo_AddEntity_W (undo.cpp:633) clones the
-// entity AND every brush def it owns, and Undo_Undo restores the entity in phase 3
-// before it re-links the brushes in phase 4 — which is the order that makes the
-// group come back with its members, not just its name.
+// Select_Ungroup for one entity (select.cpp:5106-5146). Undo_AddEntity_W snapshots
+// entity and brushes; undo restores the entity before relinking its brushes.
 bool UngroupEntity( entity_s *inst, const char *op )
 {
-    // KIWI-UX (CLEANUP, C-54): audible, same early-out.  "Ungroup did nothing and
-    // said nothing" is indistinguishable from "ungroup is broken".
     if ( !inst || inst == world_entity || !world_entity )
     {
         Sys_Printf( "Outliner: worldspawn is not a group — nothing to ungroup.\n" );
@@ -952,18 +783,9 @@ bool UngroupEntity( entity_s *inst, const char *op )
     return true;
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-//  ROW DRAWING
-// ═════════════════════════════════════════════════════════════════════════════
-// The eye.  Drawn on the window draw list rather than from a font glyph, because
-// the shell ships no icon atlas and a letter would read as text.  Open = an
-// almond outline with a pupil; CLOSED = the same almond flattened to its lower
-// lid with a lash, which is what Plasticity's `eye-off` reads as at 16px
-// (OutlinerItems.tsx:87).
-// NOTE on PathStroke: the vendored ImGui SWAPPED its last two parameters in
-// 1.92.8 — it is now PathStroke( col, thickness, flags ) (imgui.h:3551) and the
-// old (col, flags, thickness) spelling is `= delete` (imgui.h:3607).  Passing two
-// arguments is the only form that is unambiguous under both.
+// Row drawing
+// The shell has no icon atlas, so the eye is drawn directly. Two-argument
+// PathStroke is unambiguous across the vendored ImGui signature swap (imgui.h:3551).
 void DrawEye( ImDrawList *dl, ImVec2 c, float r, bool hidden, ImU32 col )
 {
     if ( !hidden )
@@ -978,8 +800,7 @@ void DrawEye( ImDrawList *dl, ImVec2 c, float r, bool hidden, ImU32 col )
     }
     else
     {
-        // The lower lid alone plus three short lashes — an unmistakably CLOSED eye
-        // at this size, where a drawn-through slash would just look like a strike.
+        // A lower lid and lashes remain legible as closed at this size.
         dl->PathClear();
         dl->PathArcTo( ImVec2( c.x, c.y - r * 1.15f ), r * 1.55f, 1.20f, 1.94f, 12 );
         dl->PathStroke( col, 1.3f );
@@ -992,7 +813,6 @@ void DrawEye( ImDrawList *dl, ImVec2 c, float r, bool hidden, ImU32 col )
     }
 }
 
-// A folder / section disclosure triangle.
 void DrawArrow( ImDrawList *dl, ImVec2 c, float r, bool open, ImU32 col )
 {
     if ( open )
@@ -1005,7 +825,7 @@ void DrawArrow( ImDrawList *dl, ImVec2 c, float r, bool open, ImU32 col )
                                ImVec2( c.x + r * 0.70f, c.y     ), col );
 }
 
-// Is this row a legal DROP TARGET, and what does dropping on it mean?
+// Drop-target classification.
 bool RowAcceptsBrushes( const koutRow_t &r )
 {
     return r.kind == KOUT_SECTION_BRUSHES      // -> worldspawn (ungroup)
@@ -1019,7 +839,6 @@ bool RowAcceptsCurves( const koutRow_t &r )
         || r.kind == KOUT_CON_GROUP;
 }
 
-// Apply a dropped payload to a row.
 void ApplyDrop( const koutDrag_t &drag, const koutRow_t &target )
 {
     if ( drag.kind == KOUT_BRUSH )
@@ -1031,9 +850,7 @@ void ApplyDrop( const koutDrag_t &drag, const koutRow_t &target )
             Sys_Printf( "Outliner: the dragged brush no longer exists.\n" );
             return;
         }
-        // Multi-drag: dragging a row that is PART OF THE SELECTION moves the whole
-        // selection, which is what every outliner in every DCC does and what the
-        // directive's "allow multiple" implies for the drag half.
+        // Dragging a selected row moves the whole current selection.
         std::vector<selbrush_t *> moving;
         if ( BrushSelected( drag.inst ) )
             GatherSelectedBrushes( moving );
@@ -1051,17 +868,12 @@ void ApplyDrop( const koutDrag_t &drag, const koutRow_t &target )
     {
         if ( !RowAcceptsCurves( target ) )
             return;
-        // The construction store's indices are only meaningful within one
-        // generation (kiwi_construct.h): a store that changed under the drag makes
-        // the payload's index name a different object, so the drop is refused
-        // rather than applied to whatever now sits there.
+        // Refuse indices from another store generation; they may name new objects.
         if ( drag.conGen != KiwiCon_Generation() )
         {
             Sys_Printf( "Outliner: the construction store changed — drop cancelled.\n" );
             return;
         }
-        // KIWI-UX (CLEANUP, C-54): the generation matched but the index is out of
-        // range anyway — say so, as the generation arm above already does.
         if ( drag.conIndex < 0 || drag.conIndex >= KiwiCon_Count() )
         {
             Sys_Printf( "Outliner: the dragged curve is gone (index %i of %i) — "
@@ -1094,13 +906,8 @@ void ApplyDrop( const koutDrag_t &drag, const koutRow_t &target )
 
 } // namespace
 
-// KIWI: collapse keys and row identities belong to one map document.
-// KIWI: "When loading a map, load with all the groups in the outliner collapsed"
-// (earlier directive) — but only the FOLDERS.  The first version of that one-shot
-// also closed the top-level sections, which is exactly how a freshly loaded map
-// came up with "Solids (54)" and nothing under it until the user toggled it.
-// Armed by the map reset, consumed on the next draw (after the sidecar load has
-// minted the curve groups it closes).
+// Collapse identities are document-local. Reset arms a post-sidecar-load pass
+// that closes folders while leaving top-level sections open.
 static bool s_collapseFoldersPending = false;
 
 static void CollapseFoldersOnly()
@@ -1132,14 +939,10 @@ void KiwiOutliner_ResetForNewMap()
     s_paintSelecting = false;
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-//  THE PANEL
-// ═════════════════════════════════════════════════════════════════════════════
+// Panel
 void KiwiOutliner_Draw()
 {
-    // ROUND AG, ITEM 3: the hover target lives for exactly ONE outliner draw.
-    // Cleared HERE — before the early-out, so closing the panel with a row
-    // hovered cannot leave a highlight burned into the viewport.
+    // Clear before the early-out so closing the panel cannot retain viewport hover.
     KiwiHover_OutlinerClear();
 
     bool *open = KiwiWindows_OpenPtr( KIWI_WIN_OUTLINER );
@@ -1151,10 +954,8 @@ void KiwiOutliner_Draw()
 
     if ( ImGui::Begin( KiwiWindows_Title( KIWI_WIN_OUTLINER ), open ) )
     {
-        // ── the header: a title and ONE button (Outliner.tsx:196-205) ───────
-        // Drawn BEFORE the flatten on purpose: the two buttons here restructure the
-        // scene, and a row array built before them would be one frame out of date
-        // the instant either is pressed.  The header reads no rows, so it can.
+        // KIWI adds Ungroup beside Plasticity's New Group action. Both run before
+        // flattening because they can restructure rows.
         ImGui::TextUnformatted( "Scene" );
         ImGui::SameLine();
         {
@@ -1187,23 +988,15 @@ void KiwiOutliner_Draw()
         Flatten();
 
         ImGuiIO &io = ImGui::GetIO();
-        // The shift-drag latch.  It is checked BEFORE the rows so a press that
-        // began on a row this frame still paints on the next one.
+        // Clear the shift-drag latch before rows process this frame's press.
         if ( !ImGui::IsMouseDown( ImGuiMouseButton_Left ) )
             s_paintSelecting = false;
 
-        // TWO heights, and the difference matters: ImGui advances the cursor by
-        // (item height + ItemSpacing.y) after each line, so an ImGuiListClipper told
-        // the ITEM height would drift by one spacing per row and put the wrong rows
-        // under the mouse a screenful down.  The items are itemH tall; the clipper is
-        // told rowH, which is itemH + the spacing it cannot see.
+        // Items use itemH, but the clipper needs item height plus ItemSpacing.y;
+        // otherwise hit rows drift by one spacing per entry.
         const float itemH   = ImGui::GetTextLineHeight();
         const float rowH    = ImGui::GetTextLineHeightWithSpacing();
-        // ── KIWI-UX (CLEANUP, C-55): the row layout, NAMED ──────────────────
-        // `indentW` was already named and the rest of the row was bare literals.
-        // The two HALF constants are written as arithmetic rather than as their own
-        // literals, because each is the CENTRE of the gutter above it — changing a
-        // gutter width and forgetting its centre is how a glyph ends up off-centre.
+        // Derive glyph centers from gutter widths so layout changes stay centered.
         const float indentW    = 14.0f;   // per indent level
         const float eyeW       = 18.0f;   // the eye column's hit width
         const float eyeCx      = eyeW * 0.5f;
@@ -1219,7 +1012,7 @@ void KiwiOutliner_Draw()
         const ImU32 dim  = ImGui::GetColorU32( ImGuiCol_TextDisabled );
         const ImU32 lit  = ImGui::GetColorU32( ImGuiCol_Text );
 
-        // THE CLIPPER: thousands of brushes, ~40 submitted rows.
+        // Large maps still submit only the visible rows.
         ImGuiListClipper clipper;
         clipper.Begin( (int)s_rows.size(), rowH );
         while ( clipper.Step() )
@@ -1228,20 +1021,9 @@ void KiwiOutliner_Draw()
             {
                 if ( i < 0 || i >= (int)s_rows.size() )
                     continue;
-                const koutRow_t r = s_rows[i];       // by value: the row list must not
-                                                     // be re-entered mid-draw
-                // ── KIWI-UX (CLEANUP, C-43): A STABLE WIDGET ID, NOT THE ROW INDEX ──
-                // This file refuses to store an index for the selection anchor
-                // (:184-186, "an index into last frame's array is a lie the moment it
-                // does") and for the rename target (:224-226) — and then handed that
-                // very index to ImGui as the identity of every widget scoped under it
-                // (the rename box, both context menus, the drag source).  Collapsing a
-                // folder above an open rename box shifted `i` and ImGui lost the
-                // widget's state.  The identity each row already carries is used
-                // instead: the collapse KEY for a folder (which is exactly what
-                // koutRename_t keys on), the instance POINTER for a brush, and a
-                // tagged store index for a construction object (which is what
-                // koutAnchor_t / koutRename_t key on).
+                const koutRow_t r = s_rows[i];       // isolate against mid-draw re-entry
+                // Row indices shift on collapse. Widget ids use folder keys, brush
+                // pointers, or tagged construction indices to preserve ImGui state.
                 if ( r.key != 0 )
                     ImGui::PushID( (int)r.key );
                 else if ( r.kind == KOUT_BRUSH && r.inst )
@@ -1251,7 +1033,7 @@ void KiwiOutliner_Draw()
                 else
                     ImGui::PushID( i );
 
-                // ── the eye ────────────────────────────────────────────────
+                // Eye
                 bool hidden = false;
                 bool hasEye = false;
                 switch ( r.kind )
@@ -1267,9 +1049,7 @@ void KiwiOutliner_Draw()
                 case KOUT_GROUP_ENTITY:
                 case KOUT_ENTITY:
                 {
-                    // A folder's eye reads "is EVERY child hidden" and writes the
-                    // opposite to all of them — the only reading that makes one
-                    // click on a folder a complete act.
+                    // Folder eye state is "all hidden"; one click applies its inverse.
                     int n = 0, nh = 0;
                     for ( selbrush_t *b = r.ent->brushes.ownerNext;
                           b && b != &r.ent->brushes; b = b->ownerNext )
@@ -1314,13 +1094,10 @@ void KiwiOutliner_Draw()
                         const bool want = !hidden;
                         if ( r.kind == KOUT_BRUSH )
                         {
-                            // ROUND AG, ITEM 7: ONE record per CLICK.  The
-                            // construction arms below have bracketed since round U
-                            // and the brush arms did not, which the user saw as
-                            // "Ctrl+Z undoes hiding a line but not a brush".
+                            // One visibility record per click.
                             KiwiVis_UndoPush( "hide (outliner)" );
                             SetBrushHidden( r.inst, want );
-                            KiwiVis_UndoCommit();      // KIWI-UX (CLEANUP, C-41)
+                            KiwiVis_UndoCommit();      // commit the captured gesture
                         }
                         else if ( r.kind == KOUT_CON_OBJECT )
                         {
@@ -1329,14 +1106,12 @@ void KiwiOutliner_Draw()
                         }
                         else if ( r.kind == KOUT_GROUP_ENTITY || r.kind == KOUT_ENTITY )
                         {
-                            // ROUND AG, ITEM 7: ONE record for the whole ENTITY,
-                            // taken before the loop — a group's eye is one gesture
-                            // however many brushes it owns.
+                            // One visibility record covers every child brush.
                             KiwiVis_UndoPush( "hide group (outliner)" );
                             for ( selbrush_t *b = r.ent->brushes.ownerNext;
                                   b && b != &r.ent->brushes; b = b->ownerNext )
                                 SetBrushHidden( b, want );
-                            KiwiVis_UndoCommit();      // KIWI-UX (CLEANUP, C-41)
+                            KiwiVis_UndoCommit();      // commit the captured gesture
                         }
                         else if ( r.kind == KOUT_CON_GROUP )
                         {
@@ -1350,7 +1125,7 @@ void KiwiOutliner_Draw()
                 }
                 ImGui::SameLine( 0.0f, 0.0f );
 
-                // ── the indent + the disclosure arrow ───────────────────────
+                // Indent and disclosure arrow
                 if ( r.indent > 0 )
                 {
                     ImGui::Dummy( ImVec2( indentW * (float)r.indent, itemH ) );
@@ -1374,7 +1149,7 @@ void KiwiOutliner_Draw()
                     ImGui::SameLine( 0.0f, colGapX );
                 }
 
-                // ── the label ──────────────────────────────────────────────
+                // Label
                 char label[128];
                 bool selected = false;
                 switch ( r.kind )
@@ -1413,10 +1188,7 @@ void KiwiOutliner_Draw()
                 case KOUT_CON_OBJECT:
                 {
                     const kconObject_t *o = KiwiCon_At( r.conIndex );
-                    // ROUND X, ITEM 10: a NAMED object shows its name; an unnamed one
-                    // falls back to the generated "<type> <ordinal>".  That is
-                    // Plasticity's own fallback shape — `${klass} ${id}` when the
-                    // names map has no entry (Outliner.tsx:158).
+                    // Unnamed objects use Plasticity's "<type> <ordinal>" fallback.
                     const char *nm = KiwiCon_Name( r.conIndex );
                     if ( nm && nm[0] )
                         _snprintf( label, sizeof( label ), "%s", nm );
@@ -1429,9 +1201,7 @@ void KiwiOutliner_Draw()
                 }
                 label[sizeof( label ) - 1] = '\0';
 
-                // Renaming this row?  Draw the edit box instead of the label — the
-                // same swap Plasticity's row does (OutlinerItems.tsx:41-58).
-                // ROUND X, ITEM 10: any renameable KIND, not folders only.
+                // Renameable rows swap their label for an editor (OutlinerItems.tsx:41-58).
                 if ( RenamingRow( r ) )
                 {
                     ImGui::SetNextItemWidth( -1.0f );
@@ -1443,13 +1213,7 @@ void KiwiOutliner_Draw()
                     const bool done = ImGui::InputText( "##rename", s_renameBuf,
                                                         sizeof( s_renameBuf ),
                                                         ImGuiInputTextFlags_EnterReturnsTrue );
-                    // ROUND X, ITEM 10: Esc CANCELS.  Plasticity has no cancel at all
-                    // — its only key handler is `e.code === "Enter"` and blur commits
-                    // (OutlinerItems.tsx:153-167), so clicking away saves an edit you
-                    // were abandoning.  That is a gap in theirs, not a rule to copy:
-                    // every other text field in this editor (the grid pill, the command
-                    // palette) cancels on Esc, and a rename that cannot be backed out
-                    // of would be the only one that does not.
+                    // Divergence from Plasticity: Esc cancels, matching other editor fields.
                     const bool esc  = ImGui::IsKeyPressed( ImGuiKey_Escape, false );
                     const bool lost = ImGui::IsItemDeactivated();
                     if ( esc )
@@ -1466,17 +1230,13 @@ void KiwiOutliner_Draw()
                             }
                             else if ( r.kind == KOUT_CON_OBJECT )
                             {
-                                // ROUND X, ITEM 10: ONE store snapshot for the edit,
-                                // the same bracket every other construction-store
-                                // mutation takes (kiwi_conselect.h UNDO) — a rename
-                                // is undoable exactly like a hide or a group move.
+                                // One construction snapshot covers the object rename.
                                 KiwiCon_UndoPush();
                                 KiwiCon_SetName( r.conIndex, s_renameBuf );
                             }
                             else if ( entity_s_def *def = DefOf( r.ent ) )
                             {
-                                // ONE record: the epair edit alone.  Undo_AddEntity_W
-                                // is the setter's own bracket shape (win_ent.cpp:278).
+                                // Match the entity editor's epair undo bracket (win_ent.cpp:278).
                                 Undo_ClearRedo();
                                 Undo_GeneralStart( "outliner rename" );
                                 Undo_AddEntity_W( (entity_s *)def );
@@ -1497,13 +1257,8 @@ void KiwiOutliner_Draw()
                 {
                     if ( r.kind == KOUT_BRUSH || r.kind == KOUT_CON_OBJECT )
                     {
-                        // ── ROUND X, ITEM 10: DOUBLE-CLICK RENAMES A LEAF TOO ──
-                        // Tested BEFORE the selection arms and only without
-                        // modifiers: Shift and Ctrl are the range / toggle gestures
-                        // and a second click while building a selection means "add
-                        // another one", never "rename this".  A double-click still
-                        // leaves the row SELECTED, because the first click of the
-                        // pair already ran the ordinary single-click arm.
+                        // Modifiers reserve range/toggle gestures; an unmodified
+                        // double-click renames after its first click selected the row.
                         if ( !io.KeyShift && !io.KeyCtrl
                           && ImGui::IsMouseDoubleClicked( ImGuiMouseButton_Left ) )
                         {
@@ -1514,10 +1269,7 @@ void KiwiOutliner_Draw()
                             }
                             else
                             {
-                                // A worldspawn brush has nowhere to keep a name —
-                                // see the koutRename_t block for why an ordinal key
-                                // is refused rather than shipped.  Say so once per
-                                // attempt rather than doing nothing silently.
+                                // World brushes have no persistent naming key; report it.
                                 Sys_Printf( "Outliner: a brush has no name field — "
                                             "put it in a group (New Group from "
                                             "Selection) and name the group.\n" );
@@ -1546,9 +1298,7 @@ void KiwiOutliner_Draw()
                     }
                     else if ( isFolder )
                     {
-                        // Double-click a FOLDER = rename (OutlinerItems.tsx:77).
-                        // Single-click = select everything inside it, which is the
-                        // one thing a folder row can usefully mean for selection.
+                        // Double-click renames a folder; single-click selects its children.
                         if ( !io.KeyShift && !io.KeyCtrl
                           && ImGui::IsMouseDoubleClicked( ImGuiMouseButton_Left )
                           && Renameable( r.kind ) )
@@ -1578,9 +1328,7 @@ void KiwiOutliner_Draw()
                                 if ( !BrushSelected( b ) )
                                     all = false;
                             }
-                            // Folder rows follow the outliner's documented group
-                            // convention: Ctrl toggles the group as a unit; Shift
-                            // (and Shift+Ctrl) adds it.
+                            // Ctrl toggles the group as a unit; Shift adds it.
                             const bool remove = io.KeyCtrl && !io.KeyShift && any && all;
                             if ( !io.KeyShift && !io.KeyCtrl )
                             {
@@ -1633,19 +1381,9 @@ void KiwiOutliner_Draw()
                     }
                 }
 
-                // ── ROUND AG, ITEM 3: THE ROW HOVER IS A VIEWPORT HOVER ────
-                // USER DIRECTIVE: "While mousing over the brushes in the
-                // outliner, it should highlight them in 3D so I can find them
-                // easier."  Plasticity's own Outliner.tsx does exactly this by
-                // pushing the row's item into the SAME hover collection the
-                // viewport raycast writes to (`selection.hovered.add`); the KIWI
-                // equivalent publishes a one-frame target that
-                // KiwiHover_DrawWorld consumes — see kiwi_hover.h.
-                //
-                // HERE, right after the Selectable, because IsItemHovered reads
-                // the LAST SUBMITTED ITEM and the drag-drop and context-menu
-                // calls below submit their own.  A folder publishes ALL its
-                // members, which is the whole reason a mapper hovers a folder.
+                // Publish row hover to the viewport immediately after Selectable:
+                // IsItemHovered reads the last item, and later widgets replace it.
+                // Folder hover publishes all members (kiwi_hover.h).
                 if ( ImGui::IsItemHovered() )
                 {
                     switch ( r.kind )
@@ -1668,11 +1406,8 @@ void KiwiOutliner_Draw()
                     }
                 }
 
-                // ── the folder context menu (rename / ungroup) ─────────────
-                // Immediately after the Selectable ON PURPOSE:
-                // BeginPopupContextItem's open test reads the LAST SUBMITTED ITEM
-                // even when it is given an explicit id, so the drag-drop calls
-                // below must not come between them.
+                // Folder context menu must immediately follow Selectable because
+                // BeginPopupContextItem tests the last submitted item.
                 if ( r.kind == KOUT_GROUP_ENTITY || r.kind == KOUT_CON_GROUP )
                 {
                     if ( ImGui::BeginPopupContextItem( "##folderctx" ) )
@@ -1707,11 +1442,8 @@ void KiwiOutliner_Draw()
                         ImGui::EndPopup();
                     }
                 }
-                // ── ROUND X, ITEM 10: the CONSTRUCTION-OBJECT context menu ─────
-                // Same position and the same reason as the folder menu above (it has
-                // to be the item immediately after the Selectable).  Rename only —
-                // grouping a curve is already the drag-to-folder gesture and delete
-                // is the Delete key over the viewport selection this row drives.
+                // Construction objects expose rename only; grouping uses drag and
+                // deletion uses the selection's Delete command.
                 else if ( r.kind == KOUT_CON_OBJECT )
                 {
                     if ( ImGui::BeginPopupContextItem( "##conctx" ) )
@@ -1725,9 +1457,7 @@ void KiwiOutliner_Draw()
                     }
                 }
 
-                // ── shift+DRAG paint-select (the directive's "shift dragging") ──
-                // Deliberately exclusive with the drag-drop source below: one
-                // gesture, one meaning.  Shift held = paint; shift free = move.
+                // Shift paints selection; unmodified dragging moves rows.
                 if ( io.KeyShift && ImGui::IsItemHovered()
                   && ImGui::IsMouseDown( ImGuiMouseButton_Left ) )
                 {
@@ -1751,7 +1481,7 @@ void KiwiOutliner_Draw()
                     }
                 }
 
-                // ── drag SOURCE ────────────────────────────────────────────
+                // Drag source
                 if ( !io.KeyShift && !s_paintSelecting
                   && ( r.kind == KOUT_BRUSH || r.kind == KOUT_CON_OBJECT ) )
                 {
@@ -1768,7 +1498,7 @@ void KiwiOutliner_Draw()
                     }
                 }
 
-                // ── drop TARGET ────────────────────────────────────────────
+                // Drop target
                 if ( RowAcceptsBrushes( r ) || RowAcceptsCurves( r ) )
                 {
                     if ( ImGui::BeginDragDropTarget() )
@@ -1798,15 +1528,10 @@ void KiwiOutliner_Draw()
     ImGui::End();
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-//  THE TWO GROUP VERBS
-// ═════════════════════════════════════════════════════════════════════════════
+// Group commands
 bool KiwiOutliner_CanGroup()
 {
-    // The predicate matches what the verb will actually DO, so the palette row and
-    // the header button grey out instead of printing a refusal after the click.
-    // The brush half needs a selection that is ENTIRELY worldspawn-owned — see
-    // KiwiOutliner_GroupSelection for why this verb is create-only.
+    // Brush grouping is create-only and therefore requires all-world ownership.
     std::vector<selbrush_t *> brushes;
     GatherSelectedBrushes( brushes );
     if ( !brushes.empty() )
@@ -1825,7 +1550,7 @@ bool KiwiOutliner_GroupSelection()
 {
     bool did = false;
 
-    // ── the SOLID half: a func_group entity ─────────────────────────────────
+    // Brush half: func_group entity.
     std::vector<selbrush_t *> brushes;
     GatherSelectedBrushes( brushes );
     if ( !brushes.empty() )
@@ -1837,23 +1562,9 @@ bool KiwiOutliner_GroupSelection()
         }
         else
         {
-            // WHICH ARM Entity_Create WILL TAKE, decided BEFORE the bracket opens.
-            // Entity_Create has three arms (entity.cpp:1628-1756) and only ONE of
-            // them allocates: with every selected brush owned by worldspawn it
-            // builds a NEW entity (:1714) and reparents the selection into it
-            // (:1739-1753).  With ANY non-world brush in the selection it instead
-            // MERGES the world brushes into that brush's EXISTING entity
-            // (:1669-1710) and returns THAT — a return indistinguishable from a
-            // create afterwards.  Two things go wrong if this verb takes that arm:
-            //   * Undo_SetIdForEntity would stamp a pre-existing entity, and one
-            //     Ctrl+Z would DELETE a group the user never created (Undo_Undo
-            //     phase 2, undo.cpp:853);
-            //   * the merge can also REFUSE outright (":1648 Can't merge entities",
-            //     ":1661 ...ungroup first"), which would leave an opened bracket
-            //     around a no-op — kiwi_command.h: "a command that mutates nothing
-            //     must NOT open a bracket at all".
-            // So "Group Selection" is CREATE-ONLY, and adding brushes to an
-            // existing group is the DRAG, which names its target unambiguously.
+            // Entity_Create allocates only for an all-world selection; mixed owners
+            // merge or refuse (entity.cpp:1628-1756). Stamping a returned existing
+            // entity would make undo delete it, so existing groups are drag targets.
             bool allWorld = true;
             for ( size_t i = 0; i < brushes.size(); ++i )
                 if ( brushes[i]->owner != world_entity )
@@ -1867,9 +1578,8 @@ bool KiwiOutliner_GroupSelection()
             }
             else
             {
-                // xywnd.cpp:3400-3404's bracket, verbatim, plus pmesh.cpp:7396's
-                // Undo_SetIdForEntity tail.  Entity_Create does the reparenting
-                // itself, so there is nothing to relink here.
+                // xywnd.cpp:3400-3404 bracket plus pmesh.cpp:7396 entity-id tail;
+                // Entity_Create performs the relink.
                 Undo_ClearRedo();
                 Undo_GeneralStart( "outliner group" );
                 Undo_AddBrushList( &selected_brushes );
@@ -1877,9 +1587,7 @@ bool KiwiOutliner_GroupSelection()
                 if ( entity_s_def *def = DefOf( inst ) )
                 {
                     Undo_SetIdForEntity( def );
-                    // "named 'group_N'" — the directive's own spelling.  numberId is
-                    // the entity's unique number (qe3.h:539), so two groups made in
-                    // one session can never share a name.
+                    // numberId makes the generated group_N name session-unique.
                     char nm[64];
                     _snprintf( nm, sizeof( nm ), "group_%i", def->numberId );
                     nm[sizeof( nm ) - 1] = '\0';
@@ -1901,7 +1609,7 @@ bool KiwiOutliner_GroupSelection()
         }
     }
 
-    // ── the CURVE half: a sidecar group ─────────────────────────────────────
+    // Construction half: sidecar group.
     if ( KiwiConSel_Count() > 0 )
     {
         std::vector<int> objs;
@@ -1940,7 +1648,7 @@ bool KiwiOutliner_GroupSelection()
 
 bool KiwiOutliner_CanUngroup()
 {
-    // Brush side: any selected brush whose owner is a non-worldspawn brush entity.
+    // Brush side: any selected brush owned by a non-world brush entity.
     std::vector<selbrush_t *> brushes;
     GatherSelectedBrushes( brushes );
     for ( size_t i = 0; i < brushes.size(); ++i )
@@ -1952,7 +1660,7 @@ bool KiwiOutliner_CanUngroup()
         if ( def && def->eclass && !def->eclass->fixedsize )
             return true;
     }
-    // Curve side: any selected construction object that is in a group.
+    // Construction side: any selected grouped object.
     for ( int i = 0; i < KiwiConSel_Count(); ++i )
     {
         const kconSelItem_t *it = KiwiConSel_At( i );
@@ -1966,8 +1674,7 @@ bool KiwiOutliner_UngroupSelection()
 {
     bool did = false;
 
-    // Collect the DISTINCT owning entities first — the ungroup frees them, so the
-    // selection they came from must not be walked while that happens.
+    // Collect distinct owners before ungroup frees them and invalidates selection.
     std::vector<entity_s *> ents;
     {
         std::vector<selbrush_t *> brushes;
@@ -1995,8 +1702,7 @@ bool KiwiOutliner_UngroupSelection()
         if ( UngroupEntity( ents[i], "outliner ungroup" ) )
             did = true;
 
-    // The construction half: drop every selected object out of its group, and
-    // remove a group that ends up with nothing in it.
+    // Ungroup selected construction objects and remove groups left empty.
     {
         std::vector<int> groups;
         std::vector<int> objs;
@@ -2037,15 +1743,10 @@ bool KiwiOutliner_UngroupSelection()
     return did;
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-//  COMMANDS
-// ═════════════════════════════════════════════════════════════════════════════
+// Commands
 void KiwiOutliner_RegisterCommands()
 {
-    // UNBOUND in both keymap profiles, on the same argument kiwi_windows.cpp makes
-    // for its own five: registering makes them searchable in the §15 palette and
-    // remappable from radiant.ini, and a group verb is not worth a letter while
-    // the modern profile's budget is spent on the modelling verbs.
+    // Unbound by default but searchable and remappable through radiant.ini.
     Radiant_RegisterCommand( "KiwiGroupSelection",   0, 0, KIWI_CMD_GROUP_CREATE );
     Radiant_RegisterCommand( "KiwiUngroupSelection", 0, 0, KIWI_CMD_GROUP_UNGROUP );
 }

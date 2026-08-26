@@ -1,24 +1,19 @@
 #ifndef KISAK_RADIANT
 #error this file is only for Radiant!
 #endif
-// ─────────────────────────────────────────────────────────────────────────────
-// kiwi_pick.cpp — RADIANT_UX_DESIGN §2 implementation.  See kiwi_pick.h for the
-// coordinate conventions and the edge/vertex indexing scheme.
-//
-// NEW code over the ported cores: the surface pick IS Test_Ray (unmodified); the
-// vertex/edge pick is a screen-space rank over the brush lists the editor already
-// walks to draw.  Nothing here mutates map data.
-// ─────────────────────────────────────────────────────────────────────────────
+// Unified pick implementation; coordinate and index conventions are in kiwi_pick.h.
+// Surface hits use the ported Test_Ray path; vertices and edges rank projected
+// brush geometry in screen pixels. Picking never mutates map geometry.
 
 #include "stdafx.h"
 #include <universal/assertive.h>
 #include "qe3.h"
 #include "mainfrm.h"     // camera_s
 #include "prefs.h"       // g_PrefsDlg (the Test_Ray contents gates + Fov)
-#include "kiwi_camera.h" // ROUND M: KiwiCam_Ortho / KiwiCam_OrthoHalfHeight
+#include "kiwi_camera.h" // orthographic ray/projection helpers
 #include "kiwi_pick.h"
-#include "kiwi_section.h"   // KIWI-UX (ROUND BM) — the section plane clamps picks
-#include "kiwi_vec.h"     // KIWI-UX (CLEANUP, A-15): the one spelling of Dot3/Sub3/...
+#include "kiwi_section.h"   // section-plane pick clamps
+#include "kiwi_vec.h"     // Dot3/Sub3/...
 
 #include <math.h>
 #include <vector>
@@ -26,11 +21,9 @@
 // ── ported entry points (verified against their definitions) ────────────────
 extern camera_s  *Ed_Camera();                                     // camwnd.cpp
 extern void       CamWnd_BuildMatrix();                            // camwnd.cpp 0x403470
-extern void       Ed_CameraCalcRayDir( int x, int y, float *dir ); // camwnd.cpp (KIWI-UX forwarder)
-// ROUND M: the ORIGIN half of the ray, so the ortho arm's parallel rays start on
-// the image plane instead of at the eye.  Perspective: returns camera.origin
-// unchanged, so this is a no-op rename of what Pick_RayFromImagePos already did.
-extern void       Ed_CameraCalcRayOrigin( int x, int y, float *org ); // camwnd.cpp (KIWI-UX)
+extern void       Ed_CameraCalcRayDir( int x, int y, float *dir ); // camwnd.cpp forwarder
+// Orthographic rays need per-pixel image-plane origins; perspective returns camera.origin.
+extern void       Ed_CameraCalcRayOrigin( int x, int y, float *org ); // camwnd.cpp forwarder
 extern void       Test_Ray( float *start, float *dir, int contents,
                             edTrace_t *t, int num_traces );        // select.cpp 0x48D7C0
 extern char       FilterBrush( selbrush_t *b, int updateFilters ); // filters.cpp 0x46A1F0
@@ -40,19 +33,13 @@ extern bool       ImGuiShell_CameraPaintCursor( int *x, int *y, int *w, int *h )
 
 namespace
 {
-    // selbrush_t.brushFlags bit 5 — the "excluded from the ordinary pick" gate the
-    // ported walker sub_48D460 tests (admitted only on the 0x1000 pass, and then
-    // rejected again by SelectFaceSth).  No symbol exists for it in qedefs.h.
+    // brushFlags bit 5 mirrors sub_48D460's ordinary-pick exclusion; only the
+    // 0x1000 pass admits it, then SelectFaceSth rejects it. qedefs.h has no symbol.
     const int BRUSHFLAG_PICK_EXCLUDED = 0x20;
 
 
-    // Per-pick projection constants, latched once so the candidate loop does not
-    // re-derive tan(fov) per point.  `s` is CameraCalcRayDir's per-pixel scale.
-    //
-    // ROUND M: `ortho` / `pivotDist` carry the orthographic arm.  See camwnd.cpp
-    // Ed_CameraCalcRayDir for the full FORWARD/INVERSE pair this must match — the
-    // two are useless apart, so they are written down in one place and referenced
-    // from the other.
+    // Projection constants are latched once per pick; `s` matches CameraCalcRayDir's
+    // per-pixel scale. `ortho` and `pivotDist` must stay paired with that transform.
     struct projCtx_t
     {
         const camera_s *cam       = nullptr;
@@ -77,8 +64,7 @@ namespace
         p.s = (float)( ( t * 0.75 + t * 0.75 ) / (double)p.h );
         if ( !( p.s > 0.0f ) )
             return p;
-        // ROUND M: dist = H / tanY — the SAME recovery Ed_CameraCalcRayOrigin
-        // uses, so the ray builder and this inverse share one number.
+        // Match Ed_CameraCalcRayOrigin's orthographic recovery: dist = H / tanY.
         p.ortho = KiwiCam_Ortho();
         if ( p.ortho )
         {
@@ -93,19 +79,9 @@ namespace
         return p;
     }
 
-    // World → camera-image pixels (TOP-LEFT origin).  Exact inverse of
-    // CameraCalcRayDir: that builds dir = vpn + vright*xf + vup*yf with
-    // xf = (x - w/2)*s, yf = (y - h/2)*s, so a point at origin + k*dir satisfies
-    // dot(rel,vpn) = k, dot(rel,vright) = k*xf, dot(rel,vup) = k*yf.  The integer
-    // halves (w/2, h/2) are kept integer for the same reason.
-    //
-    // ROUND M (ORTHO): the divisor becomes the CONSTANT pivot distance instead of
-    // the point's own depth — that one substitution is the whole difference, and
-    // it is the exact inverse of the ortho ray's lateral ORIGIN offset (camwnd.cpp
-    // Ed_CameraCalcRayOrigin).  The depth test also changes meaning: in ortho a
-    // point behind the eye PLANE is still on screen (the eye point is arbitrary
-    // along the view axis), so only the ±KCAM_ORTHO_DEPTH slab could reject it and
-    // nothing an editor holds reaches that — hence no rejection here at all.
+    // World → TOP-LEFT camera-image pixels, exactly inverse to CameraCalcRayDir.
+    // Keep integer w/2 and h/2; ortho divides by pivotDist to invert its lateral ray
+    // origin and deliberately ignores the arbitrary eye plane along the view axis.
     bool ProjectRaw( const projCtx_t &p, const float *world, float *ox, float *oy )
     {
         if ( !p.ok )
@@ -134,20 +110,16 @@ namespace
         return true;
     }
 
-    // KIWI-UX (CLEANUP, A-12): this body moved to kiwi_pick.h as
-    // Pick_SegDist2D — it was the canonical copy of a loop five other files had
-    // open-coded.  The local name is kept as a one-line forwarder so this file's
-    // call sites read as they always did.
+    // Retain the local name while sharing the canonical implementation in kiwi_pick.h.
     inline float SegDist2D( float px, float py, float ax, float ay,
                             float bx, float by, float *outT )
     {
         return Pick_SegDist2D( px, py, ax, ay, bx, by, outT );
     }
 
-    // The candidate filter, mirroring sub_48D460's admission rules for the world
-    // pass.  Prefab/model interiors are excluded on purpose: spec §2 resolves those
-    // to SEL_OBJECT via Test_Ray, and their brushes live in prefab-local space, so
-    // their windings would project to the wrong pixels.
+    // Mirrors sub_48D460's world-pass admission. Prefab/model interiors are excluded:
+    // their windings are prefab-local and would project as world coordinates;
+    // Test_Ray resolves them at object granularity.
     bool BrushPickable( selbrush_t *b )
     {
         if ( !b || !b->def )
@@ -170,12 +142,8 @@ namespace
         return true;
     }
 
-    // ── PICKF_EXCLUDE_SELECTED (Phase 3) ────────────────────────────────────
-    // Snapshotted ONCE per Pick() call rather than tested per candidate against
-    // the live selection: the scan is O(brushes) and the set is O(selection), so
-    // building it up front turns an O(brushes * selection) walk with a KiwiSel()
-    // call inside the inner loop into one build plus a small linear membership
-    // test.  (KiwiSel() can force a rebuild — never call it inside the scan.)
+    // Snapshot once because KiwiSel() may rebuild selection state; never call it
+    // from the candidate scan. Linear membership assumes selections stay small.
     struct excludeSet_t
     {
         std::vector<const selbrush_t *> nodes;
@@ -209,50 +177,9 @@ namespace
         }
     };
 
-    // ═════════════════════════════════════════════════════════════════════════
-    //  KIWI-UX (ROUND X, ITEMS 5 + 8) — A SELECTED BRUSH IS INVISIBLE TO Test_Ray.
-    // ═════════════════════════════════════════════════════════════════════════
-    // USER REPORTS, verbatim:
-    //   (5) "If a brush is selected and while its selected, I switch to mode-3 and
-    //        select a face, it takes 2 clicks. Fix this so it just works."
-    //   (8) "Sometimes when clicking, an object isn't selected and it takes 2 tries.
-    //        No clue why. This also happens with faces."
-    //
-    // ONE CAUSE, and it is not click slop.  `sub_48D460` — the ported brush-list
-    // walker Test_Ray runs over BOTH lists (select.cpp:653-742) — skips outright:
-    //
-    //     int brushflags = sbn->brushFlags;                     // select.cpp:675
-    //     if ( ( brushflags & BRUSHFLAG_SELECTED ) != 0 )       // select.cpp:677
-    //         continue;
-    //
-    // and `Brush_Select_Helper` (brush.cpp:844-846, called by Brush_AddToList2
-    // BEFORE it links the node into selected_brushes) sets exactly that bit.  So
-    // the area pass CANNOT hit anything that is already selected — the selected
-    // list is walked and then every member of it is thrown away.
-    //
-    // The user-visible shape is precisely "two clicks":
-    //   click 1 — the only brush under the cursor is the selected one, Test_Ray
-    //             reports nothing, and ClickSelect's miss arm clears the selection;
-    //   click 2 — the brush is no longer selected, so now it picks.
-    // In face mode that is report (5) exactly, and in object mode it is report (8):
-    // re-clicking the thing you already had selected drops it instead of keeping it.
-    //
-    // THE FIX, and why it lives here rather than in select.cpp: the walker's skip is
-    // ported behaviour and stays.  What ROUND X changes is the STATE it is asked to
-    // walk — the bit is lifted for the duration of the one Test_Ray call and put
-    // straight back.  It is synchronous, it allocates nothing that can throw between
-    // the two halves, no drawing or message pump runs inside it, and the selection
-    // COUNTERS are untouched (the bit is flipped directly, never through
-    // Brush_Select_Helper / Brush_Deselect_Helper, which are what own d_select_count).
-    //
-    // Keeping a selected object selectable is also the standard behaviour and
-    // Plasticity's: a plain click on an already-selected item makes it the selection
-    // rather than dropping it, and Ctrl is what removes it.
-    //
-    // NOT APPLIED under PICKF_EXCLUDE_SELECTED: that flag means "pretend the
-    // selection is not there", so unmasking would only produce a nearest hit that
-    // the exclude test below then rejects — hiding the surface BEHIND it, which is
-    // the hazard already logged for that flag's area arm.
+    // Test_Ray's ported walker skips BRUSHFLAG_SELECTED, so ordinary picks temporarily
+    // clear the bit without touching selection counters. End() restores recorded bits.
+    // Exclusion picks stay masked; rejecting their nearest hit cannot expose one behind.
     struct selUnmask_t
     {
         std::vector<selbrush_t *> nodes;
@@ -311,7 +238,6 @@ namespace
         const bool wantVert = ( kindMask & SEL_MASK_VERTEX ) != 0;
         const bool wantEdge = ( kindMask & SEL_MASK_EDGE ) != 0;
 
-        // Sentinel walk: init from .next, advance via ->next.
         for ( selbrush_t *b = sentinel->next; b && b != sentinel; b = b->next )
         {
             if ( !BrushPickable( b ) )
@@ -321,53 +247,15 @@ namespace
 
             brush_t *def = b->def;
 
-            // ── patch brushes: control points only (v1; grid edges are not brush
-            //    windings and the terrain-drag core addresses control points).
+            // Patch grids expose control points only; grid edges are not brush windings,
+            // and terrain dragging addresses control points.
             if ( b->patch )
             {
                 if ( !wantVert )
                     continue;
-                // ── KIWI-UX (ROUND AK, ITEM 3) — A PATCH'S CONTROL POINTS NEED
-                //    VERTEX GRANULARITY, NOT JUST THE VERTEX BIT ────────────────
-                // USER REPORT, verbatim: "bevel is good, but I can't select the
-                // curve parts to retexture them."
-                //
-                // THE CHAIN, AND IT IS NOT ANY OF THE FOUR GATES ROUND AF FOUND.
-                // Those were all audited again this round and every one of them
-                // already defaults permissive: m_bSelectCurves is 1 (prefs.cpp:82
-                // and :191), the Curve/Terrain filters default isShown = true
-                // (filters.cpp:982, registry default 1 at :1091), and the mode mask
-                // starts at SEL_MASK_EVERYTHING (kiwi_selection.cpp:55).  The fifth
-                // cause is HERE:
-                //   * mode 5 (the default) has BOTH the VERTEX and the OBJECT bits;
-                //   * this screen-space pass runs BEFORE the Test_Ray area pass
-                //     (kiwi_pick.cpp, the "screen-space pass" block below) and a
-                //     hit RETURNS IMMEDIATELY, so the area pass never runs;
-                //   * this branch accepts ANY control point within PICK_VERT_PIXELS
-                //     (8 px) — and a fillet arc is (spans*2+1) x 3 control points
-                //     packed into one chamfer (kiwi_patchfillet.cpp:1272-1273), so
-                //     at working zoom the 8 px discs TILE the whole visible patch;
-                //   * so every click on a fillet resolved to a SEL_VERTEX item, and
-                //     Sel_SyncToLegacy pushes only SEL_OBJECT onto selected_brushes
-                //     (kiwi_selection.cpp:352 — shakeout D removed the promotion),
-                //     so Brush_SetTexture early-returned on an empty selection
-                //     (select.cpp:1792) and the Textures-panel click was a SILENT
-                //     NO-OP.  Both halves of the report, one chain.
-                // It bites FILLETS and not large patches for exactly one reason:
-                // control-point density per screen pixel.
-                //
-                // THE RULE IS THE ONE THIS FILE ALREADY APPLIES TO FACES: granularity
-                // means the bit is set AND the OBJECT bit is not (see faceGranularity
-                // in Pick(), which reads `(kindMask & SEL_MASK_FACE) && !(kindMask &
-                // SEL_MASK_OBJECT)`).  Under it:
-                //   mode 5 / 4  -> the PATCH is picked, and can be textured;
-                //   patch vertex mode (V) sets SEL_MASK_VERTEX ALONE
-                //     (kiwi_patchverts.cpp:370, and :286 asserts that ownership),
-                //     so its control points still pick exactly as before.
-                // SCOPED TO PATCHES ON PURPOSE: brush vertices in mode 5 are a
-                // handful of corner handles, not a tiling field, and they are a
-                // gesture the editor has always had at that mask.  Nothing outside
-                // this `if ( b->patch )` branch changes.
+                // Mixed object masks resolve patches as SEL_OBJECT; dense control-point
+                // hit discs would otherwise swallow the area pick and block texturing.
+                // Vertex-only patch mode still scans the control points.
                 if ( ( kindMask & SEL_MASK_OBJECT ) != 0 )
                     continue;
                 patchMesh_t *pm = def->patch;
@@ -402,11 +290,8 @@ namespace
                 if ( n < 1 || n > MAX_POINTS_ON_WINDING )
                     continue;
 
-                // Project the winding once; reuse for both verts and edges.
-                // MAX_POINTS_ON_WINDING is 1024 — too big for a stack array of
-                // pairs here, so cap the projected cache at a brush-face-sane 64
-                // (a convex brush face never approaches that) and fall back to
-                // per-edge reprojection above it.
+                // Cache 64 projected points; MAX_POINTS_ON_WINDING (1024) is too large
+                // for stack pair arrays, so unusually large faces reproject beyond it.
                 enum { CACHE = 64 };
                 float cx[CACHE], cy[CACHE];
                 bool  cok[CACHE];
@@ -458,9 +343,7 @@ namespace
     }
 }
 
-// KIWI-UX (Phase 1b): export the admission filter unchanged, so kiwi_boxselect.cpp
-// admits exactly the brushes a click pick would instead of carrying a second copy
-// that can drift.  Pure forwarder — no behaviour change to the pick itself.
+// Share admission with box selection so its candidate set cannot drift from clicks.
 bool Pick_BrushPickable( selbrush_t *b )
 {
     return BrushPickable( b );
@@ -475,15 +358,11 @@ bool Pick_RayFromImagePos( int imgX, int imgY, ray_t *out )
     if ( c->width < 1 || c->height < 1 )
         return false;
 
-    // The ported picker relies on the draw having run Cam_BuildMatrix; recompute it
-    // so a pick issued before/between draws still gets a valid basis.  Pure function
-    // of camera.angles — the values are identical to the ones the draw computes.
+    // Rebuild the camera basis so picks issued between draws do not use stale vectors.
     CamWnd_BuildMatrix();
 
-    // The shell's flip base is camera_s.height (kept in step with the ImGui dock
-    // cell by CamWnd_RenderToRT), the same expression CamWnd_OnLButtonDown uses.
-    // ROUND M: BOTH halves come from the camwnd forwarders now, so the ortho arm's
-    // parallel rays get their per-pixel origin instead of the eye.
+    // Flip against camera_s.height, which CamWnd_RenderToRT keeps aligned with the RTT.
+    // Both forwarders are required so orthographic rays get per-pixel origins.
     const int flipY = c->height - imgY - 1;
     Ed_CameraCalcRayOrigin( imgX, flipY, out->origin );
     Ed_CameraCalcRayDir   ( imgX, flipY, out->dir );
@@ -556,12 +435,9 @@ pick_result_t Pick( const ray_t &ray, sel_mask_t kindMask, unsigned pickFlags )
 
             // Point beats line beats area (spec §6's ranking, applied to picking).
             const pickBest_t &win = bestVert.hit ? bestVert : bestEdge;
-            // KIWI-UX (ROUND BM, ITEM 1b): a SECTION must not let the user click a
-            // vertex or an edge it has cut away.  The winner is tested rather than
-            // every candidate — one plane test per pick instead of one per vertex —
-            // and a hidden winner FALLS THROUGH to the area pass below, which is
-            // clamped to the same plane.  kiwi_section.h carries the argument and
-            // the one case where the two differ.  No-op while no section is on.
+            // Test the closest screen-space candidate against the section plane; a
+            // hidden winner falls through to the clamped area pass. Testing only the
+            // winner avoids a plane test per candidate and is a no-op without a cut.
             if ( win.hit && KiwiSection_PointVisible( win.point ) )
             {
                 r.valid      = true;
@@ -581,21 +457,15 @@ pick_result_t Pick( const ray_t &ray, sel_mask_t kindMask, unsigned pickFlags )
 
     float start[3] = { ray.origin[0], ray.origin[1], ray.origin[2] };
     float dir[3]   = { ray.dir[0],    ray.dir[1],    ray.dir[2]    };
-    // KIWI-UX (ROUND BM, ITEM 1b): with a SECTION armed, a ray that begins in the
-    // hidden half is advanced to the section plane, so Test_Ray cannot return a
-    // surface the user cannot see.  This is the ONE place it has to happen — every
-    // pick in the editor (hover, selection, the snap query, every command, the
-    // camera's own pivot and dolly references) funnels through this function.
-    // No-op while no section is on, and no-op for a ray that already starts in the
-    // visible half.  kiwi_section.h states why the visible-side case needs nothing.
+    // If sectioning hides the ray origin, advance it to the plane before Test_Ray.
+    // Every Pick() area hit passes here; the clamp is inactive without a cut or
+    // when the origin is already visible.
     KiwiSection_ClampRayStart( start, dir );
     const int contents = Pick_CameraContents();
 
     edTrace_t t;
     {
-        // KIWI-UX (ROUND X, ITEMS 5 + 8) — see selUnmask_t above.  The destructor
-        // restores the bit on every exit from this block, including the early
-        // returns that follow it once `unmask` has gone out of scope.
+        // The destructor restores recorded selected bits before later early returns.
         selUnmask_t unmask;
         if ( !pExcl )
             unmask.Begin();
@@ -621,9 +491,7 @@ pick_result_t Pick( const ray_t &ray, sel_mask_t kindMask, unsigned pickFlags )
     r.point[1] = start[1] + dir[1] * t.dist;
     r.point[2] = start[2] + dir[2] * t.dist;
     r.screenDist = 0.0f;                       // area hit (spec §2)
-    // The surface the ray landed on, straight out of the trace record — see
-    // pick_result_t.  Rejected if it is not a usable direction, so a consumer that
-    // tests haveNormal can use it without re-normalising.
+    // Copy only a usable unit normal so haveNormal consumers need not renormalise.
     {
         const float l2 = t.normal[0] * t.normal[0] + t.normal[1] * t.normal[1]
                        + t.normal[2] * t.normal[2];
@@ -636,10 +504,9 @@ pick_result_t Pick( const ray_t &ray, sel_mask_t kindMask, unsigned pickFlags )
         }
     }
 
-    // Face granularity only when the mask asks for faces and NOT objects: with both
-    // bits set (mode 5 "Everything") an area hit resolves to the whole object, which
-    // is classic Radiant's LMB behaviour.  Patches and prefab/model hits are always
-    // SEL_OBJECT (spec §2: no editing inside prefab instances in v1).
+    // Face granularity requires FACE without OBJECT; mixed masks use classic object
+    // behavior. Patches use object granularity; prefab/model internals must not
+    // resolve to editable faces.
     const bool faceGranularity = ( kindMask & SEL_MASK_FACE ) != 0
                               && ( kindMask & SEL_MASK_OBJECT ) == 0;
     int faceIndex = -1;
@@ -654,31 +521,9 @@ pick_result_t Pick( const ray_t &ray, sel_mask_t kindMask, unsigned pickFlags )
         r.item = Sel_MakeFace( hb, faceIndex );
     else if ( ( kindMask & SEL_MASK_OBJECT ) != 0 )
         r.item = Sel_MakeObject( hb );
-    // ── KIWI-UX (ROUND AM, ITEM 7a) — A PATCH IN FACE MODE IS THE PATCH ──────
-    // USER REPORT, verbatim: "I still cant face select a curve, makes it hard to
-    // correct the texture on the sides and front of the fillet."
-    //
-    // WHAT WAS HAPPENING.  Mode 3 is SEL_MASK_FACE with neither the VERTEX nor
-    // the OBJECT bit, so a patch hit was rejected TWICE: ScanList's control-point
-    // arm skips it (`if ( !wantVert ) continue;`, :338-341) and this tail fell to
-    // the `r.valid = false` below.  ClickSelect's miss arm then CLEARS the
-    // selection, so clicking a fillet in face mode did not just fail to select
-    // it — it deselected whatever was selected, which is why retexturing the
-    // fillet's sides and front was impossible.
-    //
-    // WHY OBJECT GRANULARITY IS THE CORRECT SEMANTIC AND NOT A FALLBACK.  A patch
-    // HAS NO FACES.  Its symbiont brush is a bounding box (AddBrushForPatch), so
-    // "the face of a patch you clicked" is a box side and would texture the wrong
-    // thing.  The patch itself is the finest thing there is to name, so in a mode
-    // whose whole meaning is "pick the surface under the cursor" the patch IS the
-    // surface — and that is the same reading round AK made for mode 5, where it
-    // stopped the control-point scan from swallowing the click so the patch could
-    // resolve as an object and reach Brush_SetTexture (kiwi_pick.cpp:383-384).
-    // This is that ruling applied to the one mode it did not reach.
-    //
-    // SCOPED TO PATCHES.  A prefab/model hit still returns invalid in face mode:
-    // spec §2 has no editing inside prefab instances, and unlike a patch a prefab
-    // instance is not a single texturable surface.
+    // A patch has no editable faces; its symbiont brush is only a bounding box, so
+    // face-only mode returns the patch object rather than a bogus box face.
+    // Prefab/model internals are intentionally unsupported in face-only mode.
     else if ( hb->patch )
         r.item = Sel_MakeObject( hb );
     else
