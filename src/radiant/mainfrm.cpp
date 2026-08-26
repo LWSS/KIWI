@@ -1120,7 +1120,8 @@ static const RadiantCommand g_radiantCommandsDefault[] = {
     { "SplitPatch", 0x58, 5, 33158 },
     { "SurfaceInspector", 0x53, 0, 33041 },
     { "PatchInspector", 0x53, 1, 33092 },
-    { "ApplyPatchCap", 0x50, 5, 35040 },
+    // KIWI: Ctrl+Shift+P is Plasticity push; Patch Cap moves to the free Shift+P chord.
+    { "ApplyPatchCap", 0x50, 1, 35040 },
     { "TolerantWeld", 0x4A, 5, 33155 },
     { "RedisperseVertices", 0x46, 1, 33170 },
     { "RedisperseRows", 0x45, 1, 32888 },

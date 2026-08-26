@@ -281,6 +281,44 @@ extern bool KiwiVP_CameraAbort     ();
 extern bool KiwiVP_DrawCameraOverlay( float imgMinX, float imgMinY, float imgW, float imgH );
 
 static rttViewport_t s_inputOwner = RTT_COUNT;   // RTT_COUNT == none capturing
+
+// ── KIWI-UX (ROUND BU): WHICH BUTTONS' PRESSES THE LEGACY LAYER ACTUALLY SAW ──
+// USER REPORT, verbatim: "If I press right mouse -> left mouse -> right mouse just
+// on blank nothingness, the mouse jumps up to the [top] left of my monitor and
+// spins my camera."
+//
+// The owned branch had the exact bug round BG fixed on the UNOWNED branch, one arm
+// over: it fed VP_Move the LIVE VP_Flags() mask.  While a gesture owns the
+// viewport, a SECOND button press is dispatched nowhere (the press loop only runs
+// in the unowned branch) — but it still sets its MK_ bit.  The user's sequence:
+// RMB press (KG_LOOK, legacy sees nothing) -> LMB press (ignored, still down) ->
+// RMB release (gesture ends; owner stays, LMB holds it) -> RMB press again
+// (ignored) -> every tick now runs VP_Move( MK_LBUTTON|MK_RBUTTON ) with no
+// modern gesture live.  CamWnd_MouseMoved arms its RMB view-control on a mask for
+// a press it never saw and pins the cursor to m_ptCursor — which in this shell
+// NOTHING has ever written (the legacy press path that seeds it, CamWnd_
+// DropModelsToPlane, never ran), so it is the {0,0} initializer: SetCursorPos(0,0)
+// = the top-left of the monitor, and the huge first delta spins the view.  The
+// same hole let the release fall through to VP_Up for a press legacy never saw
+// (CamWnd_OnRButtonUp is a context-menu path).
+//
+// The rule, stated once for both branches now: A LEGACY HANDLER MAY ONLY EVER SEE
+// A BUTTON — in a move mask, or as a release — WHOSE PRESS IT WAS HANDED.  This
+// mask records exactly those presses (bit b == button b, set where VP_Down ran),
+// filters every mask VP_Move receives, and gates VP_Up.  Buttons the modern layer
+// claimed, and buttons pressed mid-gesture that nobody dispatched, never reach
+// legacy in any form.  Modifier bits (MK_SHIFT/MK_CONTROL) pass through untouched.
+static unsigned int  s_legacyBtnMask = 0;         // bit 1<<b: VP_Down ran for button b
+
+static unsigned int VP_LegacyFlags( unsigned int flags )
+{
+    unsigned int f = flags & ~(unsigned int)( MK_LBUTTON | MK_RBUTTON | MK_MBUTTON );
+    if ( ( s_legacyBtnMask & 1u ) && ( flags & MK_LBUTTON ) ) f |= MK_LBUTTON;
+    if ( ( s_legacyBtnMask & 2u ) && ( flags & MK_RBUTTON ) ) f |= MK_RBUTTON;
+    if ( ( s_legacyBtnMask & 4u ) && ( flags & MK_MBUTTON ) ) f |= MK_MBUTTON;
+    return f;
+}
+
 static ImVec2        s_imgMin[RTT_COUNT];         // image top-left in screen coords
 static bool          s_hovered[RTT_COUNT];        // image hovered this frame (recorded in Draw)
 static float         s_wheel[RTT_COUNT];          // wheel delta captured DURING the frame — must
@@ -492,6 +530,7 @@ static void ImGuiShell_ViewportInput( rttViewport_t id, bool hovered )
                     continue;
                 }
                 VP_Down( id, hw, b, flags, mx, my );
+                s_legacyBtnMask |= ( 1u << b );      // ROUND BU: legacy saw this press
             }
         if ( s_wheel[id] != 0.0f )
         {
@@ -532,21 +571,39 @@ static void ImGuiShell_ViewportInput( rttViewport_t id, bool hovered )
         // the cursor should be hidden at all — is CamWnd_CursorReconcile, called from
         // the dispatch entry point below.)
         if ( !kiwiTook && ( s_inputOwner == id || !anyDown ) )
-            VP_Move( id, hw, flags, mx, my );
+            VP_Move( id, hw, VP_LegacyFlags( flags ), mx, my );   // ROUND BU: press-seen mask
     }
     else if ( owns )
     {
+        // ROUND BU: the same press-seen filter the unowned branch got in round BG —
+        // a button whose press the modern layer claimed (or that was pressed
+        // mid-gesture and dispatched nowhere) must not reach the legacy move mask,
+        // or CamWnd_MouseMoved arms a view-control drag around the never-seeded
+        // m_ptCursor {0,0} pivot (the "cursor jumps to the monitor's top-left and
+        // the camera spins" report — see s_legacyBtnMask above).
         if ( !( kiwiCam && KiwiVP_CameraMouseMove( mx, my ) ) )
-            VP_Move( id, hw, flags, mx, my );
+            VP_Move( id, hw, VP_LegacyFlags( flags ), mx, my );
         for ( int b = 0; b < 3; ++b )
             if ( ImGui::IsMouseReleased( b ) )
             {
+                const unsigned int bit = 1u << b;
                 if ( kiwiCam && KiwiVP_CameraButtonUp( b, mx, my ) )
+                {
+                    s_legacyBtnMask &= ~bit;         // modern owned it; nothing for legacy
                     continue;
-                VP_Up( id, hw, b, flags, mx, my );
+                }
+                // ROUND BU: a release is only a legacy release if legacy saw the
+                // press (CamWnd_OnRButtonUp is a context-menu/Cam_MouseUp path and
+                // must not fire for a press that was swallowed mid-gesture).
+                if ( s_legacyBtnMask & bit )
+                    VP_Up( id, hw, b, VP_LegacyFlags( flags ), mx, my );
+                s_legacyBtnMask &= ~bit;
             }
         if ( !io.MouseDown[0] && !io.MouseDown[1] && !io.MouseDown[2] )
-            s_inputOwner = RTT_COUNT;
+        {
+            s_inputOwner    = RTT_COUNT;
+            s_legacyBtnMask = 0;             // ROUND BU: belt-and-braces for a lost edge
+        }
     }
     else if ( kiwiCam )
     {
@@ -591,7 +648,8 @@ void ImGuiShell_AbortViewportInput()
         for ( int b = 0; b < 3; ++b )     // XY/Z/texture: up-handlers just reset drag/button state
             VP_Up( id, hw, b, 0, 0, 0 );
     }
-    s_inputOwner = RTT_COUNT;
+    s_inputOwner    = RTT_COUNT;
+    s_legacyBtnMask = 0;                  // ROUND BU: no press survives a teardown
 }
 
 // ── KIWI-UX (ROUND AB, ITEM 2): THE MISSING RELEASE IS A RELEASE ────────────
@@ -677,7 +735,7 @@ static void ImGuiShell_ReleaseViewportInput()
             if ( KiwiVP_CameraButtonUp( b, mx, my ) )
                 released = true;
         }
-        else
+        else if ( s_legacyBtnMask & ( 1u << b ) )   // ROUND BU: only presses legacy saw
         {
             VP_Up( id, hw, b, 0, mx, my );   // flags 0: every button is physically up
             released = true;
@@ -689,7 +747,8 @@ static void ImGuiShell_ReleaseViewportInput()
         ImGuiShell_AbortViewportInput();     // clears s_inputOwner itself
         return;
     }
-    s_inputOwner = RTT_COUNT;
+    s_inputOwner    = RTT_COUNT;
+    s_legacyBtnMask = 0;                     // ROUND BU: no press survives a teardown
 }
 
 // KIWI-UX (ROUND Y, ITEM 6): the stuck-drag guard, hoisted out of the dispatch tail

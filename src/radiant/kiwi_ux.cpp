@@ -14,6 +14,7 @@
 #include "kiwi_grid.h"            // ROUND AJ, ITEM 5 — the grid-snap master switch
 #include "kiwi_hints.h"
 #include "kiwi_keymap.h"
+#include "kiwi_plastbridge.h"
 #include "kiwi_snap.h"
 #include "kiwi_units.h"
 #include "kiwi_selection.h"
@@ -189,6 +190,8 @@ void KiwiUX_DrawSettings()
 
     // Phase 2 §11: the keymap profile.  Full remap table in kiwi_keymap.h.
     KiwiKeymap_DrawSettings();
+
+    KiwiPlastBridge_DrawSettings();
 
     // §17 units layer.  Both fields are DISPLAY values; nothing here touches map data.
     float spacing = KiwiUnits_GridSpacingInches();

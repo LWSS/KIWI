@@ -33,6 +33,7 @@
 // views already exist (in MFC it landed on RecalcLayout the same way).  The frame's WndProc
 // tolerates messages arriving before the children exist (every handler null-checks).
 #include "stdafx.h"
+#include "kiwi_plastbridge.h"
 #include "radiant_frame.h"             // the shell-agnostic frame API (this unit's header)
 #include "xywnd.h"                     // Ed_ActiveXY / ED_VIEW_XY (U-GLOBALS)
 #include "prefs.h"                     // Prefs_Init + g_PrefsDlg (the light-preview seeds)
@@ -610,6 +611,8 @@ static bool Radiant_BootFrame( HWND frame )
         //     the Windows popup above, and for the same caption-cleanliness reason.
         extern void KiwiWindows_BuildViewMenu( void *frameMenu );
         KiwiWindows_BuildViewMenu( s_hMenu );
+        // KIWI: append before the launcher below performs the final DrawMenuBar.
+        KiwiPlastBridge_BuildMenu( s_hMenu );
 
         // 4a-quater) KIWI-UX (ROUND BH, ITEM 5), user directive "Build and run needs
         //     to be in the win32 toolbar somewhere": a top-level, popup-less
@@ -618,7 +621,7 @@ static bool Radiant_BootFrame( HWND frame )
         //     WM_COMMAND` and routes through the ordinary Radiant_ExecCommand KIWI
         //     arm.  There is no CToolBar in this shell (step 1b above), and the menu
         //     bar is this shell's stated command source; kiwi_launch.h has the full
-        //     argument.  LAST of the three menu builders so the two popups keep the
+        //     argument.  LAST of the menu builders so the popups keep the
         //     bar positions they have had since shakeout B/C, and appending after
         //     them cannot move any POPUP INDEX the index-based consumers read.
         extern void KiwiLaunch_BuildMenu( void *frameMenu );   // kiwi_launch.cpp

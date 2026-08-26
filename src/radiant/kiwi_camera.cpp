@@ -781,6 +781,70 @@ void KiwiCam_OrbitBegin( int imgX, int imgY )
             havePivot   = true;
         }
     }
+
+    // ═══ KIWI-UX (ROUND BU): A VOID-PRESS PIVOT TAKES ITS DEPTH FROM WHAT IS FRAMED ═══
+    // USER REPORT, verbatim: "the mmb mouse sensitivity is too high and unreliable.
+    // Sometimes it's great.  Other times it is way too high and shitty." — and, on the
+    // follow-up question, "it gets higher as I zoom in."
+    //
+    // THE MECHANISM, and why it is zoom-proportional.  Rotating by dTheta about a
+    // pivot at view depth zp slews content at depth zg laterally by (zg - zp)*sin
+    // dTheta — screen-stable only for content AT the pivot depth.  On screen that
+    // slew is (zg - zp)*sin dTheta / halfHeight SCREENS, and in the default ortho
+    // profile halfHeight IS the zoom (s_dist * 0.478).  So a fixed depth mismatch
+    // reads as ever-higher "sensitivity" the further in the user zooms — and the
+    // ortho dolly PRESERVES the mismatch exactly (each notch advances the eye by
+    // d0*(1-k) while s_dist scales by k, so zg - s_dist is invariant), which is why
+    // zooming could never work it off.
+    //
+    // WHEN THE MISMATCH HAPPENS.  A press ON geometry latches the surface under the
+    // cursor (above) — depth right, feel right, "sometimes it's great".  A press on
+    // VOID fell back to the stored s_lookAt or the axis point at s_dist — both
+    // rebased by the ortho dolly to the abstract view-centre depth, NOT to the
+    // geometry's — so the whole frame swept sideways under the drag, worse the
+    // deeper the zoom: "way too high and shitty", exactly.
+    //
+    // THE FIX: when the cursor pick misses, take the depth from a CENTRE-OF-IMAGE
+    // pick — the thing the user is actually looking at — and only keep the stored
+    // pivot if its depth is within ONE VIEWPORT HEIGHT of slew of the framed
+    // surface (|zp - zc| <= height * wpp, i.e. a quarter-turn orbit could not sweep
+    // the frame by more than a screen).  Both picks miss -> the old fallbacks,
+    // unchanged: there is nothing framed to disagree with.
+    if ( !havePivot )
+    {
+        ray_t cray;
+        pick_result_t centre;                    // .valid defaults false (kiwi_pick.h:82)
+        if ( Pick_RayFromImagePos( c->width / 2, c->height / 2, &cray ) )
+            centre = Pick( cray, SEL_MASK_OBJECT | SEL_MASK_FACE );
+        if ( centre.valid )
+        {
+            float f[3];
+            ViewForward( c, f );
+            const float relC[3] = { centre.point[0] - c->origin[0],
+                                    centre.point[1] - c->origin[1],
+                                    centre.point[2] - c->origin[2] };
+            const float zc = Dot3( relC, f );
+            bool keepStored = false;
+            if ( PivotUsable( c ) )
+            {
+                const float relP[3] = { s_lookAt[0] - c->origin[0],
+                                        s_lookAt[1] - c->origin[1],
+                                        s_lookAt[2] - c->origin[2] };
+                const float zp   = Dot3( relP, f );
+                const float band = (float)c->height * KiwiCam_WorldPerPixel( centre.point );
+                keepStored = ( fabsf( zp - zc ) <= band );
+            }
+            if ( !keepStored )
+            {
+                s_lookAt[0] = centre.point[0];
+                s_lookAt[1] = centre.point[1];
+                s_lookAt[2] = centre.point[2];
+                s_have      = true;
+            }
+            havePivot = true;
+        }
+    }
+
     if ( !havePivot && !PivotUsable( c ) )
         PivotOnAxis( c );
 

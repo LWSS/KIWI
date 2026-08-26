@@ -64,6 +64,7 @@
 #include "kiwi_section.h"               // KIWI-UX (ROUND BM) — Section Analysis (the view-cube button)
 #include "kiwi_outliner.h"              // ROUND W — the outliner's two group verbs
 #include "kiwi_windows.h"
+#include "kiwi_plastbridge.h"
 
 #include <string.h>
 
@@ -459,6 +460,7 @@ namespace
         { KIWI_CMD_GRID_DOUBLE,    { "Grid Spacing: Double",      "Grid",      0,                   nullptr } },
         { KIWI_CMD_SNAP_TOGGLE,    { "Snap Markers: Toggle",      "Grid",      0,                   nullptr } },
         { KIWI_CMD_SELFTEST,       { "UX: Modal Self-Test",       "KIWI",      0,                   nullptr } },
+        { KIWI_CMD_PLASTICITY_PUSH,{ "Send Selection to Plasticity", "Export", SEL_MASK_OBJECT,     KiwiPlastBridge_CanPush } },
 
         // ── §13 / §20 / §21 / §22 direct manipulation (kiwi_transform.cpp) ──
         // Move's selKindMask is EVERYTHING because G is context-aware: it moves
@@ -938,6 +940,7 @@ bool KiwiCmd_CanExecute( int commandId )
 // unbound; kiwi_keymap.cpp lays the modern keys on top.
 void KiwiCmd_RegisterCommands()
 {
+    KiwiPlastBridge_RegisterCommands(); // Ctrl+Shift+P selected reference export
     Radiant_RegisterCommand( "KiwiSelectModePoint",  0, 0, KIWI_CMD_SELMODE_POINT );
     Radiant_RegisterCommand( "KiwiSelectModeEdge",   0, 0, KIWI_CMD_SELMODE_EDGE );
     Radiant_RegisterCommand( "KiwiSelectModeFace",   0, 0, KIWI_CMD_SELMODE_FACE );
@@ -1100,6 +1103,7 @@ namespace
         // modelling verb the user actually last ran.
         case KIWI_CMD_ENT_DROP:
         case KIWI_CMD_MODEL_DROP:
+        case KIWI_CMD_PLASTICITY_PUSH:                 // external export, not a modelling replay
         case KIWI_CMD_VIEW_SHOW_GRID:
         case KIWI_CMD_VIEW_SHOW_AXES:
         case KIWI_CMD_VIEW_ORTHO:                       // ROUND M — a view toggle, not a verb
@@ -1354,6 +1358,8 @@ static bool KiwiCmd_DispatchInner( unsigned int cmdId )
         // ROUND BF: the Build & Run dialog's one id (34130).  Same split again — the
         // feature owns its id; this file owns nothing but the route to it.
         if ( KiwiLaunch_DispatchInstant( cmdId ) )
+            return true;
+        if ( KiwiPlastBridge_DispatchInstant( cmdId ) )
             return true;
         // ROUND BH: "Caulk Selection" (34131).  Same split again — the feature owns its
         // id and its whole body; this file owns only the route to it.

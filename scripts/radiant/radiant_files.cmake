@@ -133,6 +133,8 @@ set(RADIANT_SRCS
     "${SRC_DIR}/radiant/kiwi_numeric.cpp"
     "${SRC_DIR}/radiant/kiwi_command.h"      # §3 command metadata + §4 modal framework + undo brackets
     "${SRC_DIR}/radiant/kiwi_command.cpp"
+    "${SRC_DIR}/radiant/kiwi_plastbridge.h"  # selected brush/patch reference export
+    "${SRC_DIR}/radiant/kiwi_plastbridge.cpp"
     "${SRC_DIR}/radiant/kiwi_cmdoptions.h"   # §62.3 the in-command options panel (round AI, item 3)
     "${SRC_DIR}/radiant/kiwi_cmdoptions.cpp"
     "${SRC_DIR}/radiant/kiwi_patchverts.h"   # §62.6 patch vertex mode on V (round AI, item 6)

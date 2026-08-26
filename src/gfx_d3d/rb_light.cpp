@@ -1052,8 +1052,6 @@ uint8_t __cdecl R_ExtrapolateLightingAtPoint(
     GfxModelLightExtrapolation extrapolateBehavior,
     uint defaultGridEntry)
 {
-    iassert(lightGrid->entryCount && lightGrid->colorCount); // LWSS ADD - (map has no lightgrid if goes off)
-
     if (extrapolateBehavior == GFX_MODELLIGHT_SHOW_MISSING
         && !defaultGridEntry
         && r_showMissingLightGrid->current.enabled

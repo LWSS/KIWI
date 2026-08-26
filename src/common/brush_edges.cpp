@@ -555,6 +555,16 @@ char __cdecl IntAlreadyInList(const int *list, int listCount, int value)
     return 0;
 }
 
+struct CycleQueueNode
+{
+    const SimplePlaneIntersection *point;   // ebp-4020 group: v11
+    int plane;                              // planeIndex
+    int depth;                              // v13 / v14[4*idx-1]
+    CycleQueueNode *back;                   // v14[4*idx]
+};
+static_assert(sizeof(CycleQueueNode) == 0x10);
+
+// aislop
 char __cdecl FindCycleBFS(
     int basePlane,
     const SimplePlaneIntersection **pts,
@@ -565,80 +575,79 @@ char __cdecl FindCycleBFS(
     const SimplePlaneIntersection **resultCycle,
     int *resultCycleCount)
 {
-    const SimplePlaneIntersection **v9; // [esp+0h] [ebp-4028h]
-    const SimplePlaneIntersection **enda; // [esp+4h] [ebp-4024h]
-    const SimplePlaneIntersection *v11; // [esp+8h] [ebp-4020h] BYREF
-    int planeIndex; // [esp+Ch] [ebp-401Ch]
-    int v13; // [esp+10h] [ebp-4018h]
-    uint v14[4094]; // [esp+14h] [ebp-4014h]
-    int v15; // [esp+400Ch] [ebp-1Ch]
-    const SimplePlaneIntersection *v16; // [esp+4010h] [ebp-18h]
-    const SimplePlaneIntersection **i; // [esp+4014h] [ebp-14h]
-    int j; // [esp+4018h] [ebp-10h]
-    int v19; // [esp+401Ch] [ebp-Ch]
-    int v20; // [esp+4020h] [ebp-8h]
-    int v21; // [esp+4024h] [ebp-4h]
+    CycleQueueNode queue[1024];             // [ebp-4020..] (retail v11/planeIndex/v13/v14)
+    const SimplePlaneIntersection **enda;   // v9/enda scan bounds
+    const SimplePlaneIntersection **i;      // i
+    CycleQueueNode *node;                    // v9 (walkback cursor)
+    int thirdPlane;                          // v15
+    int goalPlane;                           // v19
+    int cycleIndex;                          // v16 (carried as a byte-stepped index)
+    int queueHead;                           // v20 — node being expanded
+    int queueTail;                           // v21 — number of enqueued nodes
+    int j;
 
     iassert(IsPtFormedByThisPlane( connectingPlane, start ));
     iassert(IsPtFormedByThisPlane( connectingPlane, end ));
-    v11 = start;
-    planeIndex = ThirdPlane(start, basePlane, connectingPlane);
-    v13 = 1;
-    v14[0] = 0;
-    v20 = 0;
-    v21 = 1;
-    v19 = ThirdPlane(end, basePlane, connectingPlane);
-LABEL_6:
-    if (v21 <= v20)
-    {
-        *resultCycleCount = 0;
-        return 0;
-    }
-    else
+
+    queue[0].point = start;
+    queue[0].plane = ThirdPlane(start, basePlane, connectingPlane);
+    queue[0].depth = 1;
+    queue[0].back = 0;
+    queueHead = 0;
+    queueTail = 1;
+    goalPlane = ThirdPlane(end, basePlane, connectingPlane);
+
+    while (queueTail > queueHead)
     {
         enda = &pts[ptsCount];
-        for (i = NextPointFormedByThisPlane(*(&planeIndex + 4 * v20), pts, enda);
+        for (i = NextPointFormedByThisPlane(queue[queueHead].plane, pts, enda);
             ;
-            i = NextPointFormedByThisPlane(*(&planeIndex + 4 * v20), i + 1, enda))
+            i = NextPointFormedByThisPlane(queue[queueHead].plane, i + 1, enda))
         {
             if (i == enda)
             {
-                ++v20;
-                goto LABEL_6;
+                ++queueHead;                 // this node's plane exhausted; expand the next
+                goto nextNode;
             }
-            v15 = ThirdPlane(*i, basePlane, *(&planeIndex + 4 * v20));
-            if (v15 != connectingPlane)
+            thirdPlane = ThirdPlane(*i, basePlane, queue[queueHead].plane);
+            if (thirdPlane != connectingPlane)
             {
-                for (j = 0; j < v21 && *(&planeIndex + 4 * j) != v15; ++j)
+                for (j = 0; j < queueTail && queue[j].plane != thirdPlane; ++j)
                     ;
-                if (j >= v21)
+                if (j >= queueTail)          // plane not yet visited -> enqueue
                 {
-                    bcassert(v21, 0x400);
-                    *(&v11 + 4 * v21) = *i;
-                    *(&planeIndex + 4 * v21) = v15;
-                    v14[4 * v21 - 1] = v14[4 * v20 - 1] + 1;
-                    v14[4 * v21++] = (uint)&v11 + 4 * v20; // KISAKTODO: sus cast
-                    if (v15 == v19)
-                        break;
+                    bcassert(queueTail, 0x400);
+                    queue[queueTail].point = *i;
+                    queue[queueTail].plane = thirdPlane;
+                    queue[queueTail].depth = queue[queueHead].depth + 1;
+                    queue[queueTail].back = &queue[queueHead];
+                    ++queueTail;
+                    if (thirdPlane == goalPlane)
+                        goto walkback;
                 }
             }
         }
-        v9 = &v11 + 4 * v21 - 4;
-        if ((int)v9[1] != v19) // KISAKTODO: sus cast
-            MyAssertHandler("..\\common\\brush_edges.cpp", 318, 1, "%s", "node->plane == goalPlane");
-        *resultCycleCount = (int)(v9[2]->xyz + 1);
-        v16 = v9[2];
-        while (v9)
-        {
-            resultCycle[(uint)v16] = *v9;
-            v16 = (v16 - 1);
-            v9 = &v9[3];
-        }
-        if (v16)
-            MyAssertHandler("..\\common\\brush_edges.cpp", 326, 1, "%s", "cycleIndex == 0");
-        *resultCycle = end;
-        return 1;
+    nextNode:;
     }
+    *resultCycleCount = 0;
+    return 0;
+
+walkback:
+    node = &queue[queueTail - 1];             // the goal node just enqueued
+    if (node->plane != goalPlane)
+        MyAssertHandler("..\\common\\brush_edges.cpp", 318, 1, "%s", "node->plane == goalPlane");
+    cycleIndex = node->depth;
+    *resultCycleCount = cycleIndex + 1;
+    while (node)
+    {
+        resultCycle[cycleIndex] = node->point;
+        --cycleIndex;
+        node = node->back;
+    }
+    if (cycleIndex)
+        MyAssertHandler("..\\common\\brush_edges.cpp", 326, 1, "%s", "cycleIndex == 0");
+    *resultCycle = end;
+    return 1;
 }
 
 int __cdecl RemovePtsWithPlanesThatOccurLessThanTwice(const SimplePlaneIntersection **pts, int ptsCount)

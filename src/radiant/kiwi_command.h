@@ -35,8 +35,8 @@
 //   34030..34069  MODAL commands   (dispatch = KiwiCmd_Start, then a live gesture)
 //   34100..34199  instant commands, BLOCK 2 (shakeout D onward)
 // Allocated so far: instant-1 34001..34029 (FULL), modal 34030..34065,
-//                   instant-2 34100..34140.
-//                   Next free: instant 34141, modal 34066.
+//                   instant-2 34100..34141.
+//                   Next free: instant 34142, modal 34066.
 // KIWI: the Models browser uses 34139 for its window and 34140 for deferred placement.
 // (The SUN HELPER took instant 34135 for "Place Sun" and 34136 for its §9 window
 //  flag — kiwi_sun.h.)
@@ -44,7 +44,7 @@
 //  said "next free: instant 34132" while round BK had already taken 34132 for
 //  KIWI_CMD_VIEW_FACE, so this line is also the correction of that drift.)
 // KIWI-UX (CLEANUP, C-3): keep this ledger in step with the #defines below — the
-// top of instant-2 is KIWI_CMD_MODEL_DROP 34140.
+// top of instant-2 is KIWI_CMD_PLASTICITY_PUSH 34141.
 // (ROUND BH took instant 34131 for CAULK SELECTION — kiwi_caulk.h.)
 // (ROUND BF took instant 34130 for the BUILD & RUN dialog — kiwi_launch.h.)
 // (ROUND BE took instant 34128 / 34129 for TEXTURE IMPORT — kiwi_import.h.)
@@ -479,6 +479,7 @@
 #define KIWI_CMD_WINDOW_INSPECTOR   34138   // "Inspector" (per-type entity properties)
 #define KIWI_CMD_WINDOW_MODELS      34139   // "Models" (the static-xmodel browser)
 #define KIWI_CMD_MODEL_DROP         34140   // internal: place the dragged xmodel
+#define KIWI_CMD_PLASTICITY_PUSH    34141   // "Send Selection to Plasticity"
 // §25 mirror is NOT here: Select_FlipAxis / DoFlip are already ported AND already
 // wired to the classic ids 32956 / 32957 / 32958, so Phase 5 adds only palette
 // metadata over those (kiwi_dupe.h explains).
