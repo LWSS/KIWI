@@ -32,9 +32,9 @@
 class KiwiEditorCommand;
 struct ray_t;
 
-// Drop local XModel bounds onto traced scene geometry. X/Y alone snap; +Z lift
-// keeps every transformed model or optional group-support corner above the hit plane.
-#define KDROP_FLOAT 0.75f
+// Drop local XModel bounds onto traced scene geometry. X/Y alone snap; the
+// origin seats directly on the hit surface (bbox clipping into the ground is
+// deliberate — CoD model origins are authored at ground contact).
 bool KiwiDrop_ComputePlacement( const ray_t &ray,
                                 const float modelMins[3], const float modelMaxs[3],
                                 const float angles[3], float scale,

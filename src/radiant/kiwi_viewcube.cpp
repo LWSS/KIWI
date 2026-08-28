@@ -28,6 +28,8 @@
 #include "kiwi_numeric.h"            // grid expression parser
 #include "kiwi_units.h"              // grid spacing and display units
 #include "kiwi_section.h"            // section-analysis state
+#include "kiwi_pick.h"               // ray_t + Pick_RayFromImagePos — the cursor-distance readout
+#include "kiwi_droptrace.h"          // kiwiDropHit_t + KiwiDrop_Trace — likewise
 #include "radiant_registry.h"
 #include "kiwi_vec.h"     // Dot3
 
@@ -38,6 +40,9 @@
 extern camera_s *Ed_Camera();          // camwnd.cpp
 extern void      CamWnd_BuildMatrix(); // camwnd.cpp 0x403470
 extern int       Sys_Printf( const char *fmt, ... );   // win_qe3.cpp:118
+// File scope on purpose: an extern inside an anonymous-namespace function gets
+// internal linkage under MSVC (the cursor-distance readout's mousespace source).
+extern bool      ImGuiShell_CameraPaintCursor( int *x, int *y, int *w, int *h );   // imgui_shell.cpp
 
 namespace
 {
@@ -315,6 +320,33 @@ namespace
         dl->AddText( ImVec2( x1 - ts.x, y1 + KVC_ZOOM_GAP ),
                      hot ? IM_COL32( 255, 226, 110, 255 ) : IM_COL32( 190, 196, 208, 225 ),
                      label );
+
+        // KIWI-UX: live camera→cursor distance in RAW ENGINE UNITS (inches), under the
+        // zoom label.  This is the number distance-based systems compare against (model
+        // cull/LOD distances, fog, sound ranges), so a mapper can zoom to where detail
+        // should drop and read the threshold straight off the view.  One extra ray only
+        // while the cursor is over the camera image.
+        {
+            int cpx, cpy;
+            ray_t ray;
+            kiwiDropHit_t hit;
+            if ( ImGuiShell_CameraPaintCursor( &cpx, &cpy, nullptr, nullptr )
+              && Pick_RayFromImagePos( cpx, cpy, &ray )
+              && KiwiDrop_Trace( ray, false, &hit ) )
+            {
+                const float *eye = Ed_Camera()->origin;
+                const float dx = hit.point[0] - eye[0];
+                const float dy = hit.point[1] - eye[1];
+                const float dz = hit.point[2] - eye[2];
+                const float dist = sqrtf( dx * dx + dy * dy + dz * dz );
+                char dline[96];
+                _snprintf( dline, sizeof( dline ), "cursor %.0f units", dist );
+                dline[sizeof( dline ) - 1] = 0;
+                const ImVec2 dts = ImGui::CalcTextSize( dline );
+                dl->AddText( ImVec2( x1 - dts.x, y1 + KVC_ZOOM_GAP + KVC_ZOOM_TEXT ),
+                             IM_COL32( 190, 196, 208, 225 ), dline );
+            }
+        }
         return hot;
     }
 

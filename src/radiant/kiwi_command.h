@@ -144,6 +144,7 @@
 #define KIWI_CMD_WINDOW_MODELS      34139   // "Models" (the static-xmodel browser)
 #define KIWI_CMD_MODEL_DROP         34140   // internal: place the dragged xmodel
 #define KIWI_CMD_PLASTICITY_PUSH    34141   // "Send Selection to Plasticity"
+#define KIWI_CMD_GRASS_PANEL        34142   // "Grass Scatter" (the AOE foliage paint panel)
 
 // Shared with mainfrm's dispatch gate so range changes have one definition.
 bool KiwiCmd_IsKiwiId ( int id );

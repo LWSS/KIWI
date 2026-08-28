@@ -91,6 +91,13 @@ static struct {
 static int    s_quadsPerEdge   = 6;     // IDB 0x23F15B4  shadVol_quadsPerEdge
 static int    s_frontCapIndices = 6;    // IDB 0x23F15B8  shadVol_frontCapIndices
 static int    s_silhouetteSign  = 0;    // IDB 0x23F15BC  silhouette facing reference
+// KIWI divergence (sun-preview fix): finite extrusion distance for DIRECTIONAL (w==0)
+// lights.  The binary extrudes sun volumes to a homogeneous point at infinity, which is
+// correct projectively but makes every open/seam edge of a model caster drag a shadow
+// wall across the whole map ("shadows extend forever").  When > 0, sun-lit twins are
+// placed this many units downstream instead (w=1) and the back cap becomes real.
+// 0 = binary behavior.  Set per-batch by Radiant_ShadVol_Begin.
+static float  s_directionalExtrudeDistance = 0.0f;
        Material *mat_stencilshadow = nullptr; // IDB 0x23F15C0 (== rgp.stencilShadowMaterial)
        // mat_white_multiply (0x23F15C4), registered by name in ShadVol_Init.  NOT an rgp
        // builtin: the #26 sun-preview BLACK-WORLD quad multiplies the framebuffer by the
@@ -116,7 +123,8 @@ static int      s_vertUsedCount = 0;
 // ─────────────────────────────────────────────────────────────────────────────
 // 0x456350 — vertex hash lookup/insert.  sunlight = float[4] {dir.xyz, w},
 // vtx = float[3].  Returns the hash-table index of the vertex; on insert it writes
-// BOTH slots of the pair (real xyz/w=1, then extruded vtx*w - light.xyz / w=0).
+// BOTH slots of the pair (real xyz/w=1, then extruded vtx*w - light.xyz / w=0 —
+// or, KIWI divergence, a finite w=1 twin when s_directionalExtrudeDistance is set).
 // ─────────────────────────────────────────────────────────────────────────────
 static short shadowvolume_01( const float *sunlight, const float *vtx )
 {
@@ -134,10 +142,22 @@ LABEL_6:
         s_vertexCount += 2;
 
         v4[0] = vtx[0];  v4[1] = vtx[1];  v4[2] = vtx[2];  v4[3] = 1.0f;
-        v4[4] = v4[0] * sunlight[3] - sunlight[0];
-        v4[5] = v4[1] * sunlight[3] - sunlight[1];
-        v4[6] = v4[2] * sunlight[3] - sunlight[2];
-        v4[7] = 0.0f;
+        if ( sunlight[3] == 0.0f && s_directionalExtrudeDistance > 0.0f )
+        {
+            // KIWI divergence: close the sun volume a finite distance past the scene
+            // instead of at projective infinity (see s_directionalExtrudeDistance).
+            v4[4] = v4[0] - sunlight[0] * s_directionalExtrudeDistance;
+            v4[5] = v4[1] - sunlight[1] * s_directionalExtrudeDistance;
+            v4[6] = v4[2] - sunlight[2] * s_directionalExtrudeDistance;
+            v4[7] = 1.0f;
+        }
+        else
+        {
+            v4[4] = v4[0] * sunlight[3] - sunlight[0];
+            v4[5] = v4[1] * sunlight[3] - sunlight[1];
+            v4[6] = v4[2] * sunlight[3] - sunlight[2];
+            v4[7] = 0.0f;
+        }
 
         s_vertHashPtr[v2] = (DWORD)(uintptr_t)v4;
         s_vertHashIdx[v2] = (short)shadVol.vertHashCount++;
@@ -433,9 +453,9 @@ static void ShadVol_AddSilhouetteTri( const float *v1, const float *v2, const fl
     // vertex owns TWO xyzw slots, so the real vertex is index 2*i and its extruded twin
     // 2*i+1; the back cap is the front cap with every index +1 and the winding reversed.
     // Winding flips with sign (0x456708: the v22<=0 vs >0 branch).  indexCount advances by
-    // shadVol_frontCapIndices, which is 3 for a directional light — the back cap then
-    // degenerates (every extruded vertex is the same point at infinity) and out[3..5] is
-    // scratch that the next tri overwrites.
+    // shadVol_frontCapIndices: 3 in the binary's directional case (back cap degenerates at
+    // the point at infinity, out[3..5] is scratch) — but 6 under the KIWI finite-extrusion
+    // divergence, where the extruded twins are distinct and z-fail needs the real back cap.
     short *out = s_indexBuf + s_indexCount;
     short r1 = (short)(2 * i1), r3 = (short)(2 * i3);
     out[1]     = (short)(2 * i2);                          // word_232E5AA[ic]
@@ -702,12 +722,20 @@ static void SunLightPreview_BrushShadow( selbrush_t *listHead, orientation_t *or
 // owner -> the misc_model arm, gated on def->unk01 LOBYTE (modelFailed) == 0 and
 // Entity_HasRenderableModel; (4) else the convex face fan.
 // PREFAB CONTENTS are the CALLER's recursion (0x47b310), not handled here.
+// KIWI DIAG: per-caster-class kill switches for the Sun tab's shadow-debug row.
+// All default ON (the faithful behaviour).  Toggling isolates which caster class
+// produces a reported artifact without a rebuild: patches (terrain self-shadow),
+// misc_models, or convex brush fans.
+bool g_svCastPatches = true;
+bool g_svCastModels  = true;
+bool g_svCastBrushes = true;
+
 void SunLightPreview_DrawBrushShadow( const float *light, selbrush_t *sb, orientation_t *orient )
 {
     patch_t *patch = sb->patch;                              // 0x47b2a7
     if ( patch )
     {
-        if ( patch->def )
+        if ( patch->def && g_svCastPatches )
         {
             Patch_AddShadowSilhouette( orient, patch, light ); // 0x47b2b3
         }
@@ -719,6 +747,8 @@ void SunLightPreview_DrawBrushShadow( const float *light, selbrush_t *sb, orient
     entity_s_def *ed = sb->owner ? (entity_s_def *)sb->owner->def : nullptr;
     if ( ed && ed->eclass && *(int *)&ed->eclass->fixedsize )  // 0x47b2d1
     {
+        if ( !g_svCastModels )
+            return;
         brush_t *def = sb->def;                              // 0x47b2d7
         if ( !( def->unk01 & 0xFF ) )                        // 0x47b2da (LOBYTE modelFailed)
         {
@@ -733,7 +763,8 @@ void SunLightPreview_DrawBrushShadow( const float *light, selbrush_t *sb, orient
         }
         return;
     }
-    ShadVol_AddBrushFaces( sb->def, orient, light );          // 0x47b302
+    if ( g_svCastBrushes )
+        ShadVol_AddBrushFaces( sb->def, orient, light );      // 0x47b302
 }
 
 // 0x47b310 SunLightPreview_BrushShadow.  Walk a brush DISPLAY list (`listHead` is the
@@ -809,10 +840,14 @@ static void SunLightPreview_ReplayCasters( const KiwiWalk *w, const float *light
 //   SunLightPreview_PolyOffsetShadows()
 // Radiant_ShadVol_Begin does the one-time init + the two counters and reports whether
 // the stencilshadow material exists; the caller makes the three calls itself so the
-// sequence reads as the binary's.  3 = one cap per silhouette tri, the directional
-// (w==0) case: every extruded vertex is the same point at infinity so the back cap
-// degenerates away.  Point lights use 6 = front + back cap.
-bool Radiant_ShadVol_Begin( int frontCapPerTri )
+// sequence reads as the binary's.  The binary's sun path used 3 = one cap per
+// silhouette tri (extruded vertices coincide at the point at infinity, so the back cap
+// degenerates away); point lights use 6 = front + back cap.
+// KIWI divergence: directionalExtrudeDistance > 0 caps sun volumes a finite distance
+// downstream (scene diagonal + margin, computed by the caller).  The caller must then
+// ALSO pass 6, because the finite back cap and full side quads become real geometry
+// that z-fail correctness depends on.  0.0f = the binary's infinite behavior.
+bool Radiant_ShadVol_Begin( int frontCapPerTri, float directionalExtrudeDistance )
 {
     if ( !s_shadVolInit )
         ShadVol_Init();
@@ -821,6 +856,7 @@ bool Radiant_ShadVol_Begin( int frontCapPerTri )
 
     s_frontCapIndices = frontCapPerTri;          // shadVol_frontCapIndices (0x406a66)
     s_quadsPerEdge    = frontCapPerTri;          // shadVol_quadsPerEdge    (0x406a6b)
+    s_directionalExtrudeDistance = directionalExtrudeDistance;
 
     return true;
 }

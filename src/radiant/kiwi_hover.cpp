@@ -19,6 +19,7 @@
 #include "kiwi_camera.h"    // KiwiCam_WorldPerPixel (the shared screen-scale)
 #include "kiwi_conselect.h"
 #include "kiwi_construct.h"
+#include "kiwi_grass.h"
 #include "kiwi_hover.h"
 #include "kiwi_lines.h"
 #include "kiwi_region.h"
@@ -691,6 +692,10 @@ void KiwiHover_DrawWorld()
     if ( c->width < 1 || c->height < 1 )
         return;
     CamWnd_BuildMatrix();
+
+    // Grass Scatter is another cursor-driven camera accent.  It owns a separate,
+    // exact-size line batch so the hover budget cannot truncate its AOE ring.
+    KiwiGrass_DrawWorld();
 
     // Fills precede line accents so borders, edges, and vertices remain on top.
     // Every brush-backed emit is liveness-gated before dereference.

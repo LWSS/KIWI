@@ -377,7 +377,10 @@ typedef struct XModelCollSurf_s {
 #define XMODEL_SET_COLLSURFS(m, v)  (*(XModelCollSurf_t **)((char *)(m) + 0xA8) = (v))
 
 /*
- * XSurfaceTempVert — expanded vertex format in xmodelsurfs file, 64 bytes.
+ * XSurfaceTempVert — CoD4 v25 vertices expanded into the compiler's 64-byte
+ * shape.  This is not
+ * the byte-for-byte wire record: weighted v25 vertices have a 63-byte base
+ * followed by 4 bytes per secondary weight.
  */
 typedef struct XSurfaceTempVert_s {
     float          normal[3];   /* [0]  vertex normal */
@@ -393,7 +396,9 @@ typedef struct XSurfaceTempVert_s {
 } XSurfaceTempVert_t;
 
 /*
- * XSurfaceBlendEntry — additional blend bone data, 16 bytes.
+ * XSurfaceBlendEntry — additional blend bone data, 16 bytes.  v25 stores only
+ * bone index + weight for a secondary influence; the loader repeats the
+ * vertex position in data[] for the compiler's deform path.
  */
 typedef struct XSurfaceBlendEntry_s {
     float          data[3];    /* [0]  blend position/delta */
@@ -405,7 +410,7 @@ typedef struct XSurfaceBlendEntry_s {
  * XSurface — per-surface vertex/triangle data, 40 bytes.
  */
 typedef struct XSurface_s {
-    unsigned char   flags;      /* [0]  surface flags */
+    unsigned char   tileMode;   /* [0]  CoD4 v25 surface tile mode */
     unsigned char   deformed;   /* [1]  deformation flag */
     unsigned short  vertCount;  /* [2]  vertex count */
     unsigned short  triCount;   /* [4]  triangle count */
@@ -434,6 +439,22 @@ typedef struct XModelLodInfo_s {
     XModelSurfs_t  *modelSurfs; /* [24] loaded surface data */
     unsigned char   _pad20[8];  /* [32] */
 } XModelLodInfo_t;
+
+/* Parsed CoD4 raw xmodel v25 configuration (0x1430 bytes).  The wire order is
+ * flags/bounds/physics string, four (distance, filename) entries, collLod. */
+typedef struct XModelConfigEntry_s {
+    char  filename[1024];
+    float dist;
+} XModelConfigEntry_t;
+
+typedef struct XModelConfig_s {
+    XModelConfigEntry_t entries[4];
+    float               mins[3];
+    float               maxs[3];
+    int                 collLod;
+    unsigned char       flags;
+    char                physicsPresetFilename[1024];
+} XModelConfig_t;
 
 /*
  * XModel — model data. lodInfo[4] spans [16..175] with stride 40.
@@ -2150,11 +2171,11 @@ Function Prototypes — xmodel_load_obj.c
 
 extern void XModelCalcBasePose(XModelParts_t *modelParts);
 extern void XModelReadCompressedQuat(const unsigned char **pos, short *quat);
-extern void XModelReadCollSurfs(const unsigned char **pos, XModel_t *model, void *(*alloc)(int));
+extern void XModelReadCollSurfs(const unsigned char **pos, XModel_t *model, void *(*alloc)(int), const char *name);
 extern void R_XModelSurfsReadData(XModel_t *model, const char *surfFilename, XSurface_t **surfsArray, int *partBits, int numsurfs, const unsigned char **pos, void *(*alloc)(int));
 extern XModel_t *XModelLoadFile(const char *name, void *(*alloc)(int), void *(*allocColl)(int));
 extern int XModelSurfsLoad(XModel_t *model, void *(*alloc)(int));
-extern int XModel_ReadHeader(const char *name, const unsigned char **pos, int *outVersion);
+extern int XModel_ReadHeader(const char *name, const unsigned char **pos, XModelConfig_t *config);
 
 
 

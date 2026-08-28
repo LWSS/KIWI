@@ -175,6 +175,10 @@ void KiwiWindows_BuildMenu( void *frameMenu )
     for ( int i = 0; i < KIWI_WIN_COUNT; ++i )
         ::AppendMenuA( popup, MF_STRING, (UINT_PTR)s_def[i].commandId, s_def[i].menuText );
 
+    // Floating tool panels that are not KIWI_WIN_* dock windows but still belong here.
+    ::AppendMenuA( popup, MF_SEPARATOR, 0, nullptr );
+    ::AppendMenuA( popup, MF_STRING, (UINT_PTR)KIWI_CMD_GRASS_PANEL, "Grass Scatter" );
+
     // Camera is always on; grayed id 0 prevents hiding the primary viewport.
     ::AppendMenuA( popup, MF_SEPARATOR, 0, nullptr );
     ::AppendMenuA( popup, MF_STRING | MF_GRAYED | MF_CHECKED, 0, "3D Camera (always on)" );
@@ -193,6 +197,9 @@ void KiwiWindows_SyncMenu()
     Load();
     for ( int i = 0; i < KIWI_WIN_COUNT; ++i )
         Radiant_CheckMenu( (UINT)s_def[i].commandId, s_open[i] );
+    // Non-dock tool panels appended to the same popup.
+    extern bool KiwiGrass_PanelVisible();   // kiwi_grass.cpp
+    Radiant_CheckMenu( (UINT)KIWI_CMD_GRASS_PANEL, KiwiGrass_PanelVisible() );
 }
 
 // Native View-popup toggles use KIWI ids and Radiant_CheckMenu check marks.
@@ -247,6 +254,7 @@ void KiwiWindows_RegisterCommands()
     Radiant_RegisterCommand( "KiwiViewShowGrid",  0, 0, KIWI_CMD_VIEW_SHOW_GRID );
     Radiant_RegisterCommand( "KiwiViewShowAxes",  0, 0, KIWI_CMD_VIEW_SHOW_AXES );
     Radiant_RegisterCommand( "KiwiViewOrtho",     0, 0, KIWI_CMD_VIEW_ORTHO );
+    Radiant_RegisterCommand( "KiwiGrassScatter",  0, 0, KIWI_CMD_GRASS_PANEL );
 }
 
 bool KiwiWindows_DispatchInstant( unsigned int cmdId )
@@ -268,6 +276,12 @@ bool KiwiWindows_DispatchInstant( unsigned int cmdId )
     {
         KiwiCam_SetOrtho( !KiwiCam_Ortho() );
         KiwiWindows_SyncViewMenu();
+        return true;
+    }
+    if ( cmdId == (unsigned int)KIWI_CMD_GRASS_PANEL )
+    {
+        extern void KiwiGrass_TogglePanel();   // kiwi_grass.cpp
+        KiwiGrass_TogglePanel();
         return true;
     }
 

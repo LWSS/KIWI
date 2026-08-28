@@ -1,246 +1,312 @@
 /*
- * r_xsurface_load_obj.c — XSurface binary format loading.
+ * r_xsurface_load_obj.c - CoD4 v25 raw XSurface loading for cod4rad.
  *
- * Source: ..\src\gfx_d3d\r_xsurface_load_obj.cpp
- * Reads per-surface vertex/triangle data from the xmodelsurfs file.
- *
- * Note: The x64 cod2rad version is simpler than the x86 decompiled.
- * It reads raw vertex data + triangle indices but does NOT do
- * rigid vertex lists, XSurfaceTransfer, or blend data extraction.
- * Those may be handled elsewhere in the x64 pipeline.
- *
- * See cod2rad64.h for XSurface struct layout.
+ * The retail loader expands the variable v25 vertex records into a temporary
+ * 64-byte representation and then packs them for the renderer.  cod4rad needs
+ * float positions, normals, and UVs instead, so this loader expands the same
+ * wire records directly into XSurfaceTempVert_t plus compiler blend entries.
  */
 
 #include "cod2rad64.h"
 
 extern float vec3_origin[3];
-#define TANGENT_FRAME_EPSILON 0.001f
+
+#define XMODEL_MAX_RIGID_VERT_LISTS 128
+#define TANGENT_FRAME_EPSILON       0.002f
 
 static char s_assertDisable_R_XSurfaceLoadObj_boneOffset;
 static char s_assertDisable_R_XSurfaceLoadObj_tangentFrame;
-static char s_assertDisable_R_XSurfaceLoadObj_weights;
-static char s_assertDisable_R_XSurfaceLoadObj_blendOffset;
-static char s_assertDisable_R_XSurfaceLoadObj_deformed;
-static char s_assertDisable_R_XSurfaceLoadObj_blendBone;
 static char s_assertDisable_R_XSurfaceLoadObj_triIndices;
 static char s_assertDisable_R_XSurfaceLoadObj_allocCount;
+
+static int R_XSurfaceSetPartBit(XModel_t *model, int *partBits,
+                                unsigned short boneIndex)
+{
+    int numBones;
+
+    numBones = model->parts ? model->parts->numBones : DOBJ_MAX_PARTS;
+    if (boneIndex >= DOBJ_MAX_PARTS || boneIndex >= numBones)
+    {
+        Com_Printf("^1ERROR: xmodelsurfs references bone %u, but the model has %d bones\n",
+                   (unsigned int)boneIndex, numBones);
+        return 0;
+    }
+
+    /* cod4rad's DObj code uses the low-bit-first partBits representation. */
+    partBits[boneIndex >> 5] |= (int)(1u << (boneIndex & 0x1F));
+    return 1;
+}
 
 /*
 ================
 R_XSurfaceLoadObj
 
-Reads a single XSurface from the binary xmodelsurfs file stream.
-Allocates 40-byte XSurface, reads header, vertex data (variable
-per-vertex format with position/normal/tangent/bone data),
-triangle indices, and handles padding for even tri count.
+CoD4 v25 surface wire layout:
+  byte tileMode, u16 opaque surface value, u16 vertCount, u16 triCount
+  repeated { u16 rigidVertCount, u16 boneIndex }, terminated by count == 0
+  u16 totalBlendCount unless there is exactly one rigid list
+  vertices, then triCount * 3 u16 indices
 
-Per-vertex data in file (variable size):
-  Rigid (boneOffset != -1): 48 bytes per vert
-    3 floats position, 4 bytes packed normal,
-    8 floats tangent/binormal/texcoord data, 3 floats extra
-  Deformed (boneOffset == -1): 48+ bytes per vert
-    Same as rigid but with bone weight byte, bone index short,
-    and additional blend entries (4 bytes each per weight)
-
+The fixed vertex prefix is normal[3], color[4], uv[2], binormal[3],
+tangent[3] (48 bytes).  A one-list rigid vertex then has position[3]
+(60 bytes total).  Every other vertex has byte secondaryWeightCount,
+u16 primaryBone, position[3], followed by that many {u16 bone, u16 weight}
+records (63 + 4*n bytes total).
 ================
 */
 XSurface_t *R_XSurfaceLoadObj(XModel_t *model, int *partBits,
-                             const unsigned char **pos, void *(*alloc)(int))
+                              const unsigned char **pos, void *(*alloc)(int))
 {
     XSurface_t *surface;
-    unsigned char *vertBuf;
-    int vertCount;
-    int triCount;
-    short boneIndex;
+    unsigned char *vertCursor;
+    int rigidVertListCount;
+    int rigidVertCount;
+    unsigned short singleRigidBone;
+    int useSingleRigidRecord;
+    int numBlends;
+    int blendsRead;
     int allocSize;
+    int originalTriCount;
     int allocCount;
     int i;
 
-    /* allocate XSurface struct (40 bytes) */
-    surface = (XSurface_t *)alloc(0x28);
-    model->memUsage += 0x28;
+    surface = (XSurface_t *)alloc(sizeof(XSurface_t));
+    model->memUsage += sizeof(XSurface_t);
+    memset(surface, 0, sizeof(XSurface_t));
 
-    /* read surface header */
-    surface->flags = **pos;
+    surface->tileMode = **pos;
     *pos += 1;
 
-    surface->vertCount = *(unsigned short *)*pos;
+    /* Retail reads this u16 but does not retain it in XSurface. */
     *pos += 2;
 
-    surface->triCount = *(unsigned short *)*pos;
+    surface->vertCount = *(const unsigned short *)*pos;
+    *pos += 2;
+    surface->triCount = *(const unsigned short *)*pos;
     *pos += 2;
 
-    /* read bone offset */
-    boneIndex = *(short *)*pos;
-    *pos += 2;
-
-    if (boneIndex == -1)
+    if (!surface->triCount)
     {
-        /* deformed surface */
-        short extraCount = *(short *)*pos;
+        Com_Printf("^1ERROR: xmodelsurfs contains a surface with no triangles\n");
+        return NULL;
+    }
+
+    rigidVertListCount = 0;
+    rigidVertCount = 0;
+    singleRigidBone = 0;
+
+    for (;;)
+    {
+        unsigned short listVertCount;
+        unsigned short boneIndex;
+
+        listVertCount = *(const unsigned short *)*pos;
         *pos += 2;
+        if (!listVertCount)
+            break;
 
-        surface->boneOffset = -1;
+        if (rigidVertListCount >= XMODEL_MAX_RIGID_VERT_LISTS)
+        {
+            Com_Printf("^1ERROR: xmodelsurfs contains too many rigid vertex lists\n");
+            return NULL;
+        }
 
-        allocSize = (extraCount + surface->vertCount * 4) * 16;
-        surface->verts = alloc(allocSize);
-        model->memUsage += allocSize;
+        boneIndex = *(const unsigned short *)*pos;
+        *pos += 2;
+        if (!rigidVertListCount)
+            singleRigidBone = boneIndex;
+
+        rigidVertCount += listVertCount;
+        rigidVertListCount++;
+    }
+
+    surface->deformed = (rigidVertCount != surface->vertCount);
+    if (surface->deformed)
+        rigidVertListCount = 0;
+
+    useSingleRigidRecord = (rigidVertListCount == 1);
+    surface->boneOffset = -1;
+
+    if (useSingleRigidRecord)
+    {
+        int boneOffset;
+
+        numBlends = 0;
+        if (!R_XSurfaceSetPartBit(model, partBits, singleRigidBone))
+            return NULL;
+
+        boneOffset = (int)singleRigidBone << 6;
+        Assert((short)boneOffset == boneOffset,
+               s_assertDisable_R_XSurfaceLoadObj_boneOffset);
+        surface->boneOffset = (short)boneOffset;
     }
     else
     {
-        /* rigid surface */
-        int boneNum = (unsigned short)boneIndex;
-        int offset = boneNum << 6;
-
-        Assert((short)offset == offset,
-               s_assertDisable_R_XSurfaceLoadObj_boneOffset);
-
-        surface->boneOffset = (short)offset;
-
-        /* set bone bit in partBits */
-        partBits[boneNum >> 5] |= 1 << (boneNum & 0x1F);
-
-        /* allocate vertex buffer: vertCount * 64 bytes */
-        allocSize = surface->vertCount * 64;
-        surface->verts = alloc(allocSize);
-        model->memUsage += allocSize;
+        numBlends = *(const unsigned short *)*pos;
+        *pos += 2;
     }
 
-    /* read vertex data */
+    allocSize = surface->vertCount * (int)sizeof(XSurfaceTempVert_t)
+              + numBlends * (int)sizeof(XSurfaceBlendEntry_t);
+    surface->verts = alloc(allocSize);
+    model->memUsage += allocSize;
+    memset(surface->verts, 0, allocSize);
+
+    vertCursor = (unsigned char *)surface->verts;
+    blendsRead = 0;
+
+    for (i = 0; i < surface->vertCount; i++)
     {
-        XSurfaceTempVert_t *vert = (XSurfaceTempVert_t *)surface->verts;
-        vertCount = surface->vertCount;
+        XSurfaceTempVert_t *vert;
+        float check[3];
 
-        for (i = 0; i < vertCount; i++)
+        vert = (XSurfaceTempVert_t *)vertCursor;
+
+        vert->normal[0] = *(const float *)*pos; *pos += 4;
+        vert->normal[1] = *(const float *)*pos; *pos += 4;
+        vert->normal[2] = *(const float *)*pos; *pos += 4;
+
+        *(unsigned int *)vert->color = *(const unsigned int *)*pos;
+        *pos += 4;
+
+        vert->texcoordU = *(const float *)*pos; *pos += 4;
+        vert->texcoordV = *(const float *)*pos; *pos += 4;
+
+        vert->binormal[0] = *(const float *)*pos; *pos += 4;
+        vert->binormal[1] = *(const float *)*pos; *pos += 4;
+        vert->binormal[2] = *(const float *)*pos; *pos += 4;
+
+        vert->tangent[0] = *(const float *)*pos; *pos += 4;
+        vert->tangent[1] = *(const float *)*pos; *pos += 4;
+        vert->tangent[2] = *(const float *)*pos; *pos += 4;
+
+        check[0] = vert->normal[0] * vert->tangent[0]
+                 + vert->normal[1] * vert->tangent[1]
+                 + vert->normal[2] * vert->tangent[2];
+        check[1] = vert->tangent[0] * vert->binormal[0]
+                 + vert->tangent[1] * vert->binormal[1]
+                 + vert->tangent[2] * vert->binormal[2];
+        check[2] = vert->binormal[0] * vert->normal[0]
+                 + vert->binormal[1] * vert->normal[1]
+                 + vert->binormal[2] * vert->normal[2];
+        Assert(VectorCompareEpsilon(check, vec3_origin,
+                                    TANGENT_FRAME_EPSILON, 3),
+               s_assertDisable_R_XSurfaceLoadObj_tangentFrame);
+
+        if (useSingleRigidRecord)
         {
-            /* normal (3 floats) */
-            vert->normal[0] = *(float *)*pos; *pos += 4;
-            vert->normal[1] = *(float *)*pos; *pos += 4;
-            vert->normal[2] = *(float *)*pos; *pos += 4;
+            vert->numWeights = 0;
+            vert->boneOffset = (unsigned short)surface->boneOffset;
+            vert->pos[0] = *(const float *)*pos; *pos += 4;
+            vert->pos[1] = *(const float *)*pos; *pos += 4;
+            vert->pos[2] = *(const float *)*pos; *pos += 4;
+            vertCursor += sizeof(XSurfaceTempVert_t);
+        }
+        else
+        {
+            unsigned char numWeights;
+            unsigned short boneIndex;
+            int boneOffset;
+            int weightIndex;
 
-            /* packed color (4 bytes) */
-            *(unsigned int *)vert->color = *(unsigned int *)*pos; *pos += 4;
-
-            /* texcoord U, texcoord V */
-            vert->texcoordU = *(float *)*pos; *pos += 4;
-            vert->texcoordV = *(float *)*pos; *pos += 4;
-
-            /* tangent (3 floats) */
-            vert->tangent[0] = *(float *)*pos; *pos += 4;
-            vert->tangent[1] = *(float *)*pos; *pos += 4;
-            vert->tangent[2] = *(float *)*pos; *pos += 4;
-
-            /* binormal (3 floats) */
-            vert->binormal[0] = *(float *)*pos; *pos += 4;
-            vert->binormal[1] = *(float *)*pos; *pos += 4;
-            vert->binormal[2] = *(float *)*pos; *pos += 4;
-
-            /* verify tangent frame orthogonality */
+            numWeights = **pos;
+            *pos += 1;
+            if (numWeights >= 4)
             {
-                float check[3];
-                check[0] = vert->normal[0] * vert->binormal[0]
-                         + vert->normal[1] * vert->binormal[1]
-                         + vert->normal[2] * vert->binormal[2];
-                check[1] = vert->binormal[0] * vert->tangent[0]
-                         + vert->binormal[1] * vert->tangent[1]
-                         + vert->binormal[2] * vert->tangent[2];
-                check[2] = vert->normal[0] * vert->tangent[0]
-                         + vert->normal[1] * vert->tangent[1]
-                         + vert->normal[2] * vert->tangent[2];
-                Assert(VectorCompareEpsilon(check, vec3_origin, TANGENT_FRAME_EPSILON, 3),
-                       s_assertDisable_R_XSurfaceLoadObj_tangentFrame);
+                Com_Printf("^1ERROR: xmodelsurfs vertex has %u secondary weights (maximum is 3)\n",
+                           (unsigned int)numWeights);
+                return NULL;
             }
-
-            if (boneIndex != -1)
+            if (numWeights && !surface->deformed)
             {
-                /* rigid: position (3 floats) — no numWeights/boneOffset written */
-                vert->pos[0] = *(float *)*pos; *pos += 4;
-                vert->pos[1] = *(float *)*pos; *pos += 4;
-                vert->pos[2] = *(float *)*pos; *pos += 4;
-                vert++;
+                Com_Printf("^1ERROR: rigid xmodelsurfs vertex has blend weights\n");
+                return NULL;
             }
-            else
-            {
-                /* deformed: weight count, bone index, position offset */
-                unsigned char numWeights = **pos; *pos += 1;
-                vert->numWeights = numWeights;
+            vert->numWeights = numWeights;
 
-                /* bone index and offset */
+            boneIndex = *(const unsigned short *)*pos;
+            *pos += 2;
+            if (!R_XSurfaceSetPartBit(model, partBits, boneIndex))
+                return NULL;
+
+            boneOffset = (int)boneIndex << 6;
+            if ((unsigned short)boneOffset != boneOffset)
+            {
+                Com_Printf("^1ERROR: xmodelsurfs bone offset does not fit in u16\n");
+                return NULL;
+            }
+            vert->boneOffset = (unsigned short)boneOffset;
+
+            vert->pos[0] = *(const float *)*pos; *pos += 4;
+            vert->pos[1] = *(const float *)*pos; *pos += 4;
+            vert->pos[2] = *(const float *)*pos; *pos += 4;
+
+            vertCursor += sizeof(XSurfaceTempVert_t);
+
+            for (weightIndex = 0; weightIndex < numWeights; weightIndex++)
+            {
+                XSurfaceBlendEntry_t *blend;
+
+                if (blendsRead >= numBlends)
                 {
-                    short bi = *(short *)*pos; *pos += 2;
-                    int boff = bi << 6;
-                    partBits[bi >> 5] |= 1 << (bi & 0x1F);
-                    vert->boneOffset = (unsigned short)boff;
-
-                    Assert(boff == (short)boff,
-                           s_assertDisable_R_XSurfaceLoadObj_blendOffset);
+                    Com_Printf("^1ERROR: xmodelsurfs blend count exceeds its header value\n");
+                    return NULL;
                 }
 
-                /* position offset (3 floats) */
-                vert->pos[0] = *(float *)*pos; *pos += 4;
-                vert->pos[1] = *(float *)*pos; *pos += 4;
-                vert->pos[2] = *(float *)*pos; *pos += 4;
+                blend = (XSurfaceBlendEntry_t *)vertCursor;
+                boneIndex = *(const unsigned short *)*pos;
+                *pos += 2;
+                if (!R_XSurfaceSetPartBit(model, partBits, boneIndex))
+                    return NULL;
 
-                vert++;
-
-                /* read additional blend bone entries (16 bytes each) */
-                if (numWeights > 0)
+                boneOffset = (int)boneIndex << 6;
+                if ((unsigned short)boneOffset != boneOffset)
                 {
-                    XSurfaceBlendEntry_t *blend = (XSurfaceBlendEntry_t *)vert;
-                    unsigned char *blendRaw = (unsigned char *)vert;
-                    int w;
-
-                    /* read extra byte before blend loop */
-                    blendRaw[-3] = **pos; *pos += 1;
-
-                    for (w = 0; w < numWeights; w++)
-                    {
-                        /* read bone index from file */
-                        short bi = *(short *)*pos; *pos += 2;
-                        int boff = bi << 6;
-                        partBits[bi >> 5] |= 1 << (bi & 0x1F);
-                        blend->boneOffset = (unsigned short)boff;
-
-                        Assert(boff == (unsigned short)boff,
-                               s_assertDisable_R_XSurfaceLoadObj_blendBone);
-
-                        /* read 3 floats data */
-                        blend->data[0] = *(float *)*pos; *pos += 4;
-                        blend->data[1] = *(float *)*pos; *pos += 4;
-                        blend->data[2] = *(float *)*pos; *pos += 4;
-
-                        /* read weight */
-                        blend->weight = *(unsigned short *)*pos; *pos += 2;
-                        blend++;
-                    }
-
-                    vert = (XSurfaceTempVert_t *)blend;
+                    Com_Printf("^1ERROR: xmodelsurfs blend bone offset does not fit in u16\n");
+                    return NULL;
                 }
+
+                blend->data[0] = vert->pos[0];
+                blend->data[1] = vert->pos[1];
+                blend->data[2] = vert->pos[2];
+                blend->boneOffset = (unsigned short)boneOffset;
+                blend->weight = *(const unsigned short *)*pos;
+                *pos += 2;
+
+                vertCursor += sizeof(XSurfaceBlendEntry_t);
+                blendsRead++;
             }
         }
     }
 
-    /* allocate and read triangle indices */
-    triCount = surface->triCount;
-    allocCount = (triCount + 1) & ~1; /* round up to even */
-
-    surface->triIndices = (unsigned short *)alloc((triCount * 3 + 3) * 2);
-    Assert(surface->triIndices, s_assertDisable_R_XSurfaceLoadObj_triIndices);
-
-    for (i = 0; i < triCount * 3; i++)
+    if (blendsRead != numBlends)
     {
-        surface->triIndices[i] = *(unsigned short *)*pos;
-        *pos += 2;
+        Com_Printf("^1ERROR: xmodelsurfs blend count does not match its vertex records\n");
+        return NULL;
     }
 
-    /* pad to even tri count if needed */
-    if (allocCount != triCount)
-    {
-        Assert(allocCount == triCount + 1,
-               s_assertDisable_R_XSurfaceLoadObj_allocCount);
+    originalTriCount = surface->triCount;
+    allocCount = (originalTriCount + 1) & ~1;
+    surface->triIndices = (unsigned short *)alloc(6 * (originalTriCount + 1));
+    Assert(surface->triIndices, s_assertDisable_R_XSurfaceLoadObj_triIndices);
 
-        /* duplicate last vertex index 3 times for padding triangle */
+    for (i = 0; i < originalTriCount * 3; i++)
+    {
+        surface->triIndices[i] = *(const unsigned short *)*pos;
+        *pos += 2;
+        if (surface->triIndices[i] >= surface->vertCount)
+        {
+            Com_Printf("^1ERROR: xmodelsurfs triangle index %u exceeds vertex count %u\n",
+                       (unsigned int)surface->triIndices[i],
+                       (unsigned int)surface->vertCount);
+            return NULL;
+        }
+    }
+
+    if (allocCount != originalTriCount)
+    {
+        Assert(allocCount == originalTriCount + 1,
+               s_assertDisable_R_XSurfaceLoadObj_allocCount);
         surface->triIndices[i] = surface->triIndices[i - 1];
         surface->triIndices[i + 1] = surface->triIndices[i - 1];
         surface->triIndices[i + 2] = surface->triIndices[i - 1];

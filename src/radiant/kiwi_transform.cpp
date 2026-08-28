@@ -3165,40 +3165,13 @@ bool KiwiDrop_ComputePlacement( const ray_t &ray,
         }
     }
 
-    // Orient support upward and lift only along +Z until every corner clears.
-    // Near-vertical planes use horizontal support because +Z cannot resolve them.
-    float normal[3] = { hit.normal[0], hit.normal[1], hit.normal[2] };
-    if ( normal[2] < 0.0f )
-    {
-        normal[0] = -normal[0];
-        normal[1] = -normal[1];
-        normal[2] = -normal[2];
-    }
-    float lift = 0.0f;
-    if ( normal[2] > 1.0e-4f )
-    {
-        for ( int corner = 0; corner < cornerCount; ++corner )
-        {
-            const float *relative = corners + 3 * corner;
-            const float planeSide = normal[0] * ( placeX + relative[0] - hit.point[0] )
-                                  + normal[1] * ( placeY + relative[1] - hit.point[1] )
-                                  + normal[2] * relative[2];
-            if ( planeSide < 0.0f )
-            {
-                const float required = -planeSide / normal[2];
-                if ( required > lift )
-                    lift = required;
-            }
-        }
-    }
-    else if ( relativeMins[2] < 0.0f )
-    {
-        lift = -relativeMins[2];
-    }
-    lift += KDROP_FLOAT;
+    // Seat the origin directly on the hit surface. No corner-clearing lift and no
+    // hover margin: CoD models are authored with the origin at ground contact, so
+    // letting the bbox (grass skirts, tree roots, rock undersides) clip into the
+    // surface is the desired placement.
     outOrigin[0] = placeX;
     outOrigin[1] = placeY;
-    outOrigin[2] = hit.point[2] + lift;
+    outOrigin[2] = hit.point[2];
 
     if ( outWorldMins && outWorldMaxs )
         for ( int k = 0; k < 3; ++k )

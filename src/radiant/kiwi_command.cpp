@@ -21,6 +21,7 @@
 #include "kiwi_fillet.h"
 #include "kiwi_patchfillet.h"
 #include "kiwi_focus.h"
+#include "kiwi_grass.h"
 #include "kiwi_lines.h"
 #include "kiwi_loft.h"
 #include "kiwi_offset.h"
@@ -251,6 +252,23 @@ namespace
         }
     }
 
+    // Clipboard verbs that must escape an active gesture so paste chains work:
+    // Paste/Clone re-enter Move PAUSED via KiwiCmd_AfterPaste, so a chord like
+    // Ctrl+V during that gesture would otherwise be swallowed as the bare pivot
+    // key V. Copy is included so re-copying mid-chain also works.
+    bool ClipboardVerb( int id )
+    {
+        switch ( id )
+        {
+        case 33039:                         // Edit->Copy   (Ctrl+C)
+        case 33040:                         // Edit->Paste  (Ctrl+V)
+        case 33001:                         // Clone        (Shift+Space)
+            return true;
+        default:
+            return false;
+        }
+    }
+
     // Copy and Delete Selection both require at least one selected brush.
     bool CanClipCut()
     {
@@ -411,6 +429,7 @@ namespace
         { 32783, { "Toggle Clipper",            "Modeling",  0, nullptr           } },
         { 33005, { "Drag Vertices",             "Transform", 0, nullptr           } },
         { 33006, { "Drag Edges",                "Transform", 0, nullptr           } },
+        { KIWI_CMD_GRASS_PANEL, { "Grass Scatter", "Modeling", 0, nullptr        } },
     };
 
     // Built-in modal lifecycle probe. It intentionally mutates nothing and opens no undo.
@@ -1363,6 +1382,9 @@ bool KiwiUX_KeyFunnel( unsigned int vk )
         return true;
     }
 
+    if ( vk == 0x1B && KiwiGrass_HandleEscape() )   // VK_ESCAPE: disarm the paint tool
+        return true;
+
     if ( g_activeCommand && g_activeCommand->PreemptIdle() )
     {
         const int id = LookupBinding( vk, CurrentMods() );
@@ -1384,6 +1406,26 @@ bool KiwiUX_KeyFunnel( unsigned int vk )
             const bool moved = g_activeCommand->GestureMoved();
             if ( moved ) KiwiCmd_Commit();
             else         KiwiCmd_Cancel();
+            return false;                   // …and let the hotkey table run it
+        }
+    }
+
+    // Paste chains: Ctrl+V (and Ctrl+C / Clone) escape the gesture like a G/R/S
+    // swap — commit a moved gesture, cancel an untouched one — so the hotkey
+    // table can run Paste, whose AfterPaste tail re-enters Move PAUSED for the
+    // next link. Without this the modal Move swallows V as its pivot key.
+    // Copy yields WITHOUT ending the gesture: it only reads the selection.
+    if ( g_activeCommand && !KiwiNum_Has() )
+    {
+        const int id = LookupBinding( vk, CurrentMods() );
+        if ( ClipboardVerb( id ) )
+        {
+            if ( id != 33039 )              // Copy leaves the gesture running
+            {
+                const bool moved = g_activeCommand->GestureMoved();
+                if ( moved ) KiwiCmd_Commit();
+                else         KiwiCmd_Cancel();
+            }
             return false;                   // …and let the hotkey table run it
         }
     }

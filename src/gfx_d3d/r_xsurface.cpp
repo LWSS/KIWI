@@ -50,6 +50,28 @@ int __cdecl XSurfaceGetNumTris(const XSurface *surface)
 #ifdef KISAK_RADIANT
 #include <xanim/xmodel.h>   // XModel, XModelGetSurfaces, XModelBad
 #include <string.h>         // memcpy
+#include "r_material.h"     // Material_FromHandle — the shadow-proxy surface filter
+
+// KIWI: CoD4 foliage models carry a dedicated shadow-map proxy surface (techset
+// "mc_shadowcaster", materials like "mc/mtl_tree_shadow_caster") that the game
+// never draws in colour passes — it exists only to feed the runtime shadow maps.
+// The editor must treat it as invisible everywhere: it is a coarse oversized
+// volume, so feeding it to the stencil sun-preview silhouette produced giant
+// wrong shadows, and it pollutes vert-snap / ray-pick / visible draws.
+// lod0SurfIndex is the index within LOD 0's surface range.
+bool Editor_XModelSurfIsShadowProxy( XModel *model, int lod0SurfIndex )
+{
+    if ( !model || !model->materialHandles )
+        return false;
+    Material *handle =
+        model->materialHandles[(uint16_t)model->lodInfo[0].surfIndex + lod0SurfIndex];
+    const Material *m = handle ? Material_FromHandle( handle ) : 0;
+    if ( !m )
+        return false;
+    const char *ts = ( m->techniqueSet && m->techniqueSet->name ) ? m->techniqueSet->name : "";
+    const char *mn = m->info.name ? m->info.name : "";
+    return strstr( ts, "shadowcaster" ) != 0 || strstr( mn, "shadow_caster" ) != 0;
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // R_CheckTris (IDA 0x51de30, r_xsurface.cpp:37) — copy a surface's triangle indices
@@ -110,6 +132,10 @@ int __cdecl Editor_ExtractXModelGeo( XModel *model, float *verts, int vertLimit,
 
     for ( int i = 0; i < surfaceCount; ++i )
     {
+        // KIWI: shadow-map proxy surfaces are invisible geometry — never extract them
+        // (see Editor_XModelSurfIsShadowProxy above).
+        if ( Editor_XModelSurfIsShadowProxy( model, i ) )
+            continue;
         XSurface *surf = &surfaces[i];
         int nv = XSurfaceGetNumVerts( surf );
         if ( vertCount + nv > vertLimit )

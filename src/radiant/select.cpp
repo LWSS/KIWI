@@ -642,13 +642,16 @@ static char sub_48D240( const float *start, const float *dir, int contents,
           && ( ( contents & 4 ) == 0
             || _strnicmp( ((entity_s *)owner->def)->eclass->name, "actor", 5 ) != 0 ) )
         {
-            char hit = sub_48CE60( p_dist, normal, start, dir, a4 );     // 0x48d43e
-            if ( !hit )                                  // LABEL_16
-            {
-                a6->hit.brush = nullptr;
-                a6->hit.face  = nullptr;
-            }
-            return hit;
+            // KIWI-UX divergence from 0x48d43e: the binary treats sub_48CE60's
+            // per-triangle test as authoritative — a miss CLEARS the hit, making
+            // skinny models (grass, poles, fences) nearly unclickable.  Here the
+            // triangle pass only REFINES dist/normal on a mesh hit (it writes
+            // nothing on a miss), and the Brush_Ray bounds hit above stands
+            // regardless, so the whole model bbox is the selection zone.  The
+            // drop trace is unaffected: it passes contents|0x200, which excludes
+            // fixedsize entities in the walker before this branch.
+            sub_48CE60( p_dist, normal, start, dir, a4 );
+            return 1;
         }
     }
     return (char)(intptr_t)face;                        // return (char)patch

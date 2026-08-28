@@ -137,11 +137,14 @@ struct advPatchSlot_t
     int         rangeEditId;     // 1482 / 1483, or 0
 };
 
+// KIWI-UX: defaults raised from the dialog's 16/64.  CoD4 terrain control points sit
+// hundreds of units apart, so a 64-unit outer radius usually contained NO control point
+// and a stroke silently did nothing.  64/256 reaches typical terrain immediately.
 static const advPatchSlot_t s_slotDef[3] =
 {
-    { 1424, 1428, 16.0f, 0.0f, 1024.0f, 16.0f, "Inner Radius", 1482 },
-    { 1425, 1429, 64.0f, 0.0f, 1024.0f, 16.0f, "Outer Radius", 1483 },
-    { 1426, 1430,  8.0f, 0.0f,   16.0f,  1.0f, "Amplitude",       0 },
+    { 1424, 1428,  64.0f, 0.0f, 1024.0f, 16.0f, "Inner Radius", 1482 },
+    { 1425, 1429, 256.0f, 0.0f, 1024.0f, 16.0f, "Outer Radius", 1483 },
+    { 1426, 1430,  11.0f, 0.0f,   16.0f,  1.0f, "Amplitude",       0 },
 };
 
 // ── panel state ───────────────────────────────────────────────────────────────
@@ -261,9 +264,11 @@ void ImGuiPanel_AdvPatch_Toggle()
 
 void ImGuiPanel_AdvPatch_Draw()
 {
-    if ( !s_showAdvPatch )
-        return;
-
+    // Bind the paint-param slots (inner/outer radius, amplitude) at STARTUP — BEFORE the
+    // panel-visibility early-out below.  sub_401D50 gates terrain paint on outer(1425) >
+    // inner(1424); if the panel was never opened this session the getters returned 0 > 0 =
+    // false, so Alt+LMB terrain paint silently did nothing.  Binding here (first Draw frame,
+    // panel open or not) makes the radius gate valid from the first frame.
     if ( !s_bound )
     {
         // OnInitDialog (patchdialog.cpp:96-116), minus its HWND half.  One-shot per process:
@@ -281,39 +286,72 @@ void ImGuiPanel_AdvPatch_Draw()
         s_pickAlpha = g_paintColorA;
     }
 
+    if ( !s_showAdvPatch )
+        return;
+
     // "Advanced Patch Editing Options" = the dialog's CAPTION (res/radiant.rc:709).
     if ( ImGui::Begin( "Advanced Patch Editing Options", &s_showAdvPatch,
                        ImGuiWindowFlags_AlwaysAutoResize ) )
     {
-        // The paint gate, so an all-zero brush is not a mystery: sub_401D50
-        // (patchdialog.cpp:385-392) refuses to start a stroke unless the mode is not
-        // "Disabled" AND outer radius > inner radius.
-        ImGui::TextDisabled( "Pick a mode (not Disabled), tick channels, set outer > inner radius," );
-        ImGui::TextDisabled( "select the patch(es), then ALT+LEFT-DRAG in the 3D view to paint." );
-        // KIWI-UX (ROUND AO, ITEM Y): this line used to promise "LMB raise, RMB
-        // lower", which is what the BINARY does — sub_43E6F0 takes buttons 1 or 2
-        // and signs the stroke by which (patchdialog.cpp:246).  In the modern
-        // viewport ALT+RMB is the mouselook (kiwi_viewport.cpp's RMB arm), so only
-        // the LMB half is routed and the panel now says only what is true.  The
-        // "lower" half is NOT otherwise reachable and the panel says so rather than
-        // offering a workaround that does not exist: mode 0's amount is
-        // `grid_sizes[gridsize] * sign * 0.5` (patchdialog.cpp:274) and `sign` comes
-        // ONLY from the button, so no slot in this panel can invert it.  Smooth (3)
-        // is the one mode that can bring terrain down, by averaging.
-        ImGui::TextDisabled( "(Alt+RIGHT-drag is the camera mouselook in this shell, so the" );
-        ImGui::TextDisabled( " RMB \"lower\" half is not bound; Smooth is the way down.)" );
+        ImGui::TextDisabled( "Select the patch(es), then ALT+LEFT-DRAG in the 3D view to paint." );
+
+        // ── KIWI-UX: LIVE READINESS — every gate a stroke passes through, verified
+        // here every frame, so "nothing happened" is never a mystery.  These are the
+        // same tests sub_401D50 (arm), sub_43E6F0 (mask), and PMESH_16 (strength)
+        // apply; a stroke that reaches the patch with all rows green WILL paint.
+        {
+            extern float sub_401BB0();               // inner radius     (pmesh.cpp)
+            extern float sub_401C00();               // outer radius
+            extern float sub_401C50();               // strength = 2^(amp-8)
+            extern int   OnlyPatchesSelected();      // engine_stubs.cpp 0x447860
+            extern int   CurvEditDlg_OnSomeSetting();// "apply to active" (patchdialog.cpp)
+            const ImVec4 bad( 1.0f, 0.35f, 0.3f, 1.0f );
+            const int  liveMode = AdvPatchEdit_GetMode();
+            bool anyChan = false;
+            for ( int c = 0; c < 6 && !anyChan; ++c )
+                anyChan = AdvPatchEdit_GetChannel( c );
+            bool ok = true;
+            if ( liveMode == 6 )
+            { ok = false; ImGui::TextColored( bad, "BLOCKED: mode is Disabled - pick one below." ); }
+            if ( liveMode == 1 )
+            { ok = false; ImGui::TextColored( bad, "NOTE: Drag up/down is not an Alt+LMB paint - it"
+                                                   " weights vertex drags instead." ); }
+            if ( !( sub_401C00() > sub_401BB0() ) )
+            { ok = false; ImGui::TextColored( bad, "BLOCKED: outer radius must be > inner radius." ); }
+            if ( sub_401C50() == 0.0f )
+            { ok = false; ImGui::TextColored( bad, "BLOCKED: amplitude 0 - strokes have no effect." ); }
+            if ( !anyChan )
+            { ok = false; ImGui::TextColored( bad, "BLOCKED: no channel ticked - strokes touch nothing." ); }
+            if ( !OnlyPatchesSelected() && !CurvEditDlg_OnSomeSetting() )
+            { ok = false; ImGui::TextColored( bad, "BLOCKED: select ONLY patch(es) (or tick apply-to-"
+                                                   "unselected)." ); }
+            if ( ok )
+            {
+                static const char *s_verb[6] =
+                    { "RAISE height", "(vertex-drag weighting)", "flatten toward the grabbed value",
+                      "SMOOTH (average) - flat areas will not visibly change", "add noise",
+                      "grab height/colour (eyedropper)" };
+                extern bool AdvPatchEdit_GetLower();   // patchdialog.cpp
+                const char *verb = ( liveMode >= 0 && liveMode < 6 ) ? s_verb[liveMode] : "?";
+                if ( liveMode == 0 && AdvPatchEdit_GetLower() )
+                    verb = "LOWER height";
+                ImGui::TextColored( ImVec4( 0.4f, 1.0f, 0.5f, 1.0f ),
+                                    "READY - Alt+LMB drag will %s.", verb );
+            }
+        }
 
         // ── paint mode radios (1435..1440) — drives sub_401DB0 via the store ───
         // Labels follow sub_43E6F0's switch behaviour (patchdialog.cpp): the operation the
-        // stroke performs on the ticked channels.
+        // stroke performs on the ticked channels.  Mode 1 is labelled for what it really
+        // is — the soft-select weighting for ordinary vertex drags, NOT an Alt+LMB paint.
         ImGui::SeparatorText( "Mode" );
         static const struct { int mode; const char *label; } s_modeUi[] = {
             { 0, "Raise / Lower height" },
-            { 1, "Set height" },
-            { 2, "Set toward paint target" },
             { 3, "Smooth (average)" },
-            { 4, "Add noise" },
+            { 2, "Flatten (toward grabbed value)" },
             { 5, "Grab value (eyedropper)" },
+            { 4, "Add noise" },
+            { 1, "Drag up/down (soft-select vertex drags)" },
             { 6, "Disabled" },
         };
         int mode = AdvPatchEdit_GetMode();
@@ -321,6 +359,17 @@ void ImGuiPanel_AdvPatch_Draw()
         {
             if ( ImGui::RadioButton( s_modeUi[i].label, mode == s_modeUi[i].mode ) )
                 AdvPatchEdit_SetMode( s_modeUi[i].mode );
+        }
+        // KIWI-UX: the Lower toggle replaces the binary's unreachable Alt+RMB lower stroke
+        // (Alt+RMB is the mouselook in this shell).  Only mode 0 reads it.
+        {
+            extern bool AdvPatchEdit_GetLower();          // patchdialog.cpp
+            extern void AdvPatchEdit_SetLower( bool );
+            ImGui::BeginDisabled( mode != 0 );
+            bool lower = AdvPatchEdit_GetLower();
+            if ( ImGui::Checkbox( "Lower instead of raise", &lower ) )
+                AdvPatchEdit_SetLower( lower );
+            ImGui::EndDisabled();
         }
 
         // ── channel checkboxes (1469..1474) — drives sub_43E6F0's mask via the store ──

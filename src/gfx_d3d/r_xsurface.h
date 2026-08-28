@@ -13,4 +13,7 @@ struct XModel;
 uint16_t *__cdecl R_CheckTris(const XSurface *surface, void *dstIndices, uint16_t baseVert);
 int __cdecl Editor_ExtractXModelGeo(XModel *model, float *verts, int vertLimit,
                                     uint16_t *indices, int indexLimit);
+// True for a CoD4 shadow-map proxy surface (techset "mc_shadowcaster") — invisible
+// geometry the editor must skip in draws, extraction, and shadow silhouettes.
+bool Editor_XModelSurfIsShadowProxy(XModel *model, int lod0SurfIndex);
 #endif

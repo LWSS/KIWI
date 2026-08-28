@@ -4,8 +4,7 @@
 
 #include "cod2rad64.h"
 
-#define WEIGHT_SCALE_65536  1.52588e-5f
-#define WEIGHT_SCALE_256    0.00390625f
+#define WEIGHT_SCALE_65536  0.0000152587890625f
 
 /*
 ================
@@ -174,6 +173,13 @@ void R_XSurfaceDeformVerts(XSurface_t *surface, BoneMatrix_t *boneMats, float *o
                 outNormals += 3;
             }
 
+            if (outTexcoords)
+            {
+                outTexcoords[0] = v->texcoordU;
+                outTexcoords[1] = v->texcoordV;
+                outTexcoords += 2;
+            }
+
             /* pos = pos * mat3x3 + translation */
             outPositions[0] = v->pos[0] * mat->col0[0]
                             + v->pos[1] * mat->col1[0]
@@ -192,12 +198,22 @@ void R_XSurfaceDeformVerts(XSurface_t *surface, BoneMatrix_t *boneMats, float *o
             if (v->numWeights > 0)
             {
                 float firstWeight;
+                float secondaryWeight;
                 int numWeights;
+                int weightIndex;
                 XSurfaceBlendEntry_t *blend;
+                XSurfaceBlendEntry_t *weightBlend;
                 BoneMatrix_t *blendMat;
 
-                /* scale initial result by first bone weight */
-                firstWeight = (float)v->pad3D * WEIGHT_SCALE_256;
+                /* v25 stores each secondary weight as u16; the primary weight
+                 * is the remainder after all secondary influences. */
+                secondaryWeight = 0.0f;
+                weightBlend = (XSurfaceBlendEntry_t *)(vp + 0x40);
+                for (weightIndex = 0; weightIndex < v->numWeights; weightIndex++)
+                    secondaryWeight += (float)weightBlend[weightIndex].weight
+                                     * WEIGHT_SCALE_65536;
+
+                firstWeight = 1.0f - secondaryWeight;
                 outPositions[0] *= firstWeight;
                 outPositions[1] *= firstWeight;
                 outPositions[2] *= firstWeight;

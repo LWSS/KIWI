@@ -34,6 +34,9 @@ bool KiwiSun_DispatchInstant( unsigned int cmdId );
 // are preserved; all writes share one undo record, with none for a no-op.
 void KiwiSun_Place();
 
+// Remove all worldspawn sun keys (one undo record) so a fresh sun can be placed.
+void KiwiSun_Delete();
+
 // A worldspawn is required as the key owner.
 bool KiwiSun_CanPlace();
 

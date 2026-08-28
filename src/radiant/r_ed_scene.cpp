@@ -1243,6 +1243,12 @@ void __cdecl SkinModelInst(int instanceHandle, Material *checkhandle, int techTy
         return;
 
     for (unsigned i = 0; i < numsurfs; ++i) {
+        // KIWI: shadow-map proxy surfaces (techset "mc_shadowcaster") are invisible in
+        // every game colour pass; drawing them here rendered the coarse proxy volume
+        // as a dark blob over foliage models.  Same filter as the geometry extraction.
+        extern bool Editor_XModelSurfIsShadowProxy(XModel *model, int lod0SurfIndex);   // r_xsurface.cpp
+        if (Editor_XModelSurfIsShadowProxy(mi->model, (int)i))
+            continue;
         GfxModelSkinnedSurface *skinnedSurf = &skinned[i];   // the binary's local (assert strings)
         Material *material = modelMaterial[i];
         iassert(material);

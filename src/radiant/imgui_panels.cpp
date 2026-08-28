@@ -48,6 +48,7 @@ void ImGuiPanels_Menu()
         extern void ImGuiPanel_Patch_MenuItem();     // imgui_panel_patch.cpp
         extern void ImGuiPanel_Commands_MenuItem();  // imgui_panel_commands.cpp
         extern void ImGuiPanel_AdvPatch_MenuItem();  // imgui_panel_advpatch.cpp
+        extern void KiwiGrass_MenuItem();            // kiwi_grass.cpp
         extern void ImGuiPanel_LyrMtl_MenuItem();       // imgui_panel_lyrmtl.cpp
         extern void ImGuiPanel_ScriptGroup_MenuItem();  // imgui_panel_scriptgroup.cpp
         ImGuiPanel_Surface_MenuItem();
@@ -64,6 +65,7 @@ void ImGuiPanels_Menu()
         ImGuiPanel_Patch_MenuItem();
         ImGuiPanel_Commands_MenuItem();
         ImGuiPanel_AdvPatch_MenuItem();
+        KiwiGrass_MenuItem();
         ImGuiPanel_LyrMtl_MenuItem();
         ImGuiPanel_ScriptGroup_MenuItem();
     }
@@ -170,6 +172,7 @@ void ImGuiPanels_Draw()
         extern void ImGuiPanel_Filters_Draw();       // imgui_panel_filters.cpp
         extern void ImGuiPanel_Commands_Draw();      // imgui_panel_commands.cpp
         extern void ImGuiPanel_AdvPatch_Draw();      // imgui_panel_advpatch.cpp
+        extern void KiwiGrass_Draw();                // kiwi_grass.cpp
         extern void ImGuiPanel_LyrMtl_Draw();        // imgui_panel_lyrmtl.cpp
         extern void ImGuiPanel_ScriptGroup_Draw();   // imgui_panel_scriptgroup.cpp
         extern void ImGuiPanel_Project_Draw();       // imgui_panel_project.cpp
@@ -189,6 +192,7 @@ void ImGuiPanels_Draw()
         ImGuiPanel_Filters_Draw();
         ImGuiPanel_Commands_Draw();
         ImGuiPanel_AdvPatch_Draw();
+        KiwiGrass_Draw();
         ImGuiPanel_LyrMtl_Draw();
         ImGuiPanel_ScriptGroup_Draw();
         ImGuiPanel_Project_Draw();

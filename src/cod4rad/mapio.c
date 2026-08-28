@@ -863,8 +863,20 @@ void ProcessBrushModel(Entity_t *entity)
         } while (src[i++]);
     }
 
-    /* try loading shadow model first, then original */
-    xmodel = XModelPrecache(xmodelPath, XModel_AllocZeroed, XModel_AllocZeroed);
+    /* try loading shadow model first, then original.  KISAK: probe the shadow_
+     * variant's existence QUIETLY first — only a handful of stock models ship one,
+     * and letting XModelPrecache miss on every other model spammed
+     * "^1ERROR: xmodel 'shadow_...' not found" per placed misc_model.
+     * FS_ReadFile with a NULL buffer returns the length without reading. */
+    xmodel = NULL;
+    {
+        char probePath[1024];
+        if (Com_sprintf(probePath, sizeof(probePath), "xmodel/%s", xmodelPath) >= 0
+            && FS_ReadFile(probePath, NULL) >= 0)
+        {
+            xmodel = XModelPrecache(xmodelPath, XModel_AllocZeroed, XModel_AllocZeroed);
+        }
+    }
     if (!xmodel)
     {
         xmodel = XModelPrecache(modelName, XModel_AllocZeroed, XModel_AllocZeroed);

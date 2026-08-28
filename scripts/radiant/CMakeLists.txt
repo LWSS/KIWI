@@ -49,6 +49,8 @@ set(IMGUI_SRCS
 # WIN32 group: added only as link errors demand it (Radiant has its own Sys_* in win_qe3.cpp).
 add_executable(${PROJECT_NAME} WIN32
     ${RADIANT_SRCS}
+    "${SRC_DIR}/radiant/kiwi_grass.h"
+    "${SRC_DIR}/radiant/kiwi_grass.cpp"
     ${UNIVERSAL}
     ${COMMON}
     ${XANIM}

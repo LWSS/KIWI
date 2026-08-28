@@ -455,7 +455,7 @@ int __cdecl ReduceToACycle(int basePlane, const SimplePlaneIntersection **pts, i
     int ptCount; // [esp+403Ch] [ebp-1014h] BYREF
     float perimiter1; // [esp+4040h] [ebp-1010h]
     float perimiter2; // [esp+4044h] [ebp-100Ch]
-    const SimplePlaneIntersection *points[4]; // [esp+4048h] [ebp-1008h] BYREF
+    const SimplePlaneIntersection *points[1024]; // hex-rays undersized this [4] (max literal index seen); GetPtsFormedByPlane writes up to maxResults=1024 into it → stack overflow + PartitionEdges edges[v14] AV. Siblings resultCycle/v13/list/partition are all [1024].
     int j; // [esp+504Ch] [ebp-4h]
     int ptsCounta; // [esp+5060h] [ebp+10h]
 

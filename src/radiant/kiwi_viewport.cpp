@@ -29,6 +29,7 @@
 #include "kiwi_command.h"
 #include "kiwi_construct.h"
 #include "kiwi_gizmo.h"
+#include "kiwi_grass.h"
 #include "kiwi_hints.h"
 #include "kiwi_hover.h"
 #include "kiwi_lollipop.h"
@@ -65,7 +66,7 @@ namespace
     // mutating selection. SECTION and SUN need distinct release/abort paths.
     enum kgesture_t { KG_NONE = 0, KG_ORBIT, KG_MARQUEE, KG_COMMAND, KG_CONSUMED,
                       KG_LOOK, KG_PAN, KG_GIZMO, KG_CMD_MARQUEE, KG_SECTION,
-                      KG_SUN, KG_DROP };
+                      KG_SUN, KG_DROP, KG_GRASS };
 
     // The sticky RMB menu-drag latch uses tighter slop than LMB selection so an
     // intended camera drag cannot become a menu click after returning near its press.
@@ -338,6 +339,21 @@ bool KiwiVP_CameraButtonDown( int btn, int imgX, int imgY, bool shift, bool ctrl
     if ( s_gesture != KG_NONE )
         return false;
 
+    // KIWI-UX: an armed Grass Scatter owns bare Alt+LMB before every camera handle,
+    // command, selection arm, and the legacy terrain-paint handoff below.  When it is
+    // disarmed this gate is false, preserving the prior dispatch in effect.
+    if ( btn == 0 && !shift && !ctrl && ImGui::GetIO().KeyAlt
+      && KiwiGrass_IsArmed() )
+    {
+        KiwiHover_Clear();
+        KiwiGrass_HandleDown( imgX, imgY );
+        s_lastX      = imgX;
+        s_lastY      = imgY;
+        s_gesture    = KG_GRASS;        // own release even when prerequisites refuse a stamp
+        s_gestureBtn = btn;
+        return true;
+    }
+
     // Section pick/handle input precedes commands and selection because its handle
     // exists without a command. Shift bypasses the handle for additive selection;
     // the consumed pick owns release so it cannot also select behind the plane.
@@ -562,6 +578,14 @@ bool KiwiVP_CameraMouseMove( int imgX, int imgY )
     if ( s_gesture == KG_NONE )
         return false;
 
+    if ( s_gesture == KG_GRASS )
+    {
+        s_lastX = imgX;
+        s_lastY = imgY;
+        KiwiGrass_HandleDrag( imgX, imgY );
+        return true;
+    }
+
     // Feed a modal preview first even during camera navigation; it does not consume
     // the move, so the owning camera gesture still receives its delta.
     if ( KiwiCmd_Active() )
@@ -666,7 +690,9 @@ bool KiwiVP_CameraButtonUp( int btn, int imgX, int imgY )
         }
     }
 
-    if ( s_gesture == KG_MARQUEE )
+    if ( s_gesture == KG_GRASS )
+        KiwiGrass_HandleUp();
+    else if ( s_gesture == KG_MARQUEE )
         KiwiBox_End( imgX, imgY );
     else if ( s_gesture == KG_CMD_MARQUEE )
         CommandMarqueeEnd( imgX, imgY );
@@ -732,6 +758,10 @@ bool KiwiVP_CameraWheel( float steps, int imgX, int imgY )
 
 void KiwiVP_CameraHover( int imgX, int imgY, bool over )
 {
+    // The stroke path updates its own cursor; every other gesture hides the armed ring.
+    if ( s_gesture != KG_GRASS )
+        KiwiGrass_Hover( imgX, imgY, over && s_gesture == KG_NONE );
+
     if ( !over || s_gesture != KG_NONE )
     {
         KiwiHover_Clear();
@@ -776,7 +806,9 @@ bool KiwiVP_CameraAbort()
 {
     if ( s_gesture == KG_NONE )
         return false;
-    if ( s_gesture == KG_MARQUEE || s_gesture == KG_CMD_MARQUEE )
+    if ( s_gesture == KG_GRASS )
+        KiwiGrass_HandleAbort();
+    else if ( s_gesture == KG_MARQUEE || s_gesture == KG_CMD_MARQUEE )
         KiwiBox_Cancel();                // discard either owner's rect without selection changes
     else if ( s_gesture == KG_GIZMO )
     {

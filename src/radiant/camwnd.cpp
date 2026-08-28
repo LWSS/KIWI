@@ -2161,11 +2161,11 @@ static bool Cam_LightPreview_DrawLight( const float origin[4], float radius,
     const int technique = Cam_LightPreview_SetLightTechnique(
         origin, radius, color, ent, scope, orient );
 
-    extern bool Radiant_ShadVol_Begin( int frontCapPerTri );
+    extern bool Radiant_ShadVol_Begin( int frontCapPerTri, float directionalExtrudeDistance );
     extern void SunLightPreview_DrawBrushShadow( const float *light, selbrush_t *brush,
                                                   orientation_t *brushOrient );
     extern void SunLightPreview_PolyOffsetShadows();
-    if ( Radiant_ShadVol_Begin( 6 ) )
+    if ( Radiant_ShadVol_Begin( 6, 0.0f ) )     // point lights: binary extrusion unchanged
     {
         for ( int i = 0; i < casterCount; ++i )
             SunLightPreview_DrawBrushShadow(
@@ -2770,6 +2770,44 @@ static int Cam_DrawBrushList_SunPreview( selbrush_t *head )
 // zeroes both first.  ORDER IS LOAD-BEARING: everything that should darken must already be
 // RASTERISED (not merely queued in the surf cache) before the multiply quad, and nothing may
 // write depth or alpha between the clear quad and the re-add.
+
+// KIWI divergence (sun-preview fix): the finite extrusion distance for the sun shadow
+// volumes = the active+selected map AABB diagonal + margin.  A caster anywhere inside
+// that box reaches past every possible in-bounds receiver along any sun direction, so
+// shadows land exactly as before — they just STOP past the scene instead of smearing to
+// infinity (the visible artifact on open/alpha model meshes like foliage).
+static float Cam_SunPrev_ShadowExtrudeDistance()
+{
+    extern selbrush_t selected_brushes;                                     // map.cpp 0x23F1864
+    selbrush_t *heads[2] = { &active_brushes, &selected_brushes };
+    float mins[3] = { 0.0f, 0.0f, 0.0f };
+    float maxs[3] = { 0.0f, 0.0f, 0.0f };
+    bool any = false;
+
+    for ( int list = 0; list < 2; ++list )
+    {
+        for ( selbrush_t *b = heads[list]->next; b && b != heads[list]; b = b->next )
+        {
+            brush_t *def = b->def;
+            if ( !def )
+                continue;
+            for ( int axis = 0; axis < 3; ++axis )
+            {
+                if ( !any || def->mins[axis] < mins[axis] ) mins[axis] = def->mins[axis];
+                if ( !any || def->maxs[axis] > maxs[axis] ) maxs[axis] = def->maxs[axis];
+            }
+            any = true;
+        }
+    }
+
+    if ( !any )
+        return 1024.0f;
+    const float dx = maxs[0] - mins[0];
+    const float dy = maxs[1] - mins[1];
+    const float dz = maxs[2] - mins[2];
+    return sqrtf( dx * dx + dy * dy + dz * dz ) + 64.0f;
+}
+
 static void Cam_SunPrev_Main( bool faithfulSun, Material *sunMultiplyMat,
                               const float litSunDir[3], const float litAmbientMul[3],
                               const float litSunColor[3], bool litHaveSun )
@@ -2829,21 +2867,26 @@ static void Cam_SunPrev_Main( bool faithfulSun, Material *sunMultiplyMat,
         R_AddCmdProjectionSet3D();
     }
 
-    // 0x406a4c..0x406a8e - the shadow volumes.  frontCapIndices = quadsPerEdge = 3: the
-    // directional (w==0) case, where every extruded vertex is the same point at infinity, so
-    // the back cap degenerates and one front-cap tri per silhouette tri is all that is kept.
+    // 0x406a4c..0x406a8e - the shadow volumes.  The binary ran frontCapIndices =
+    // quadsPerEdge = 3: the directional (w==0) case, where every extruded vertex is the
+    // same point at infinity, the back cap degenerates, and one front-cap tri per
+    // silhouette tri is all that is kept.
+    // KIWI divergence: sun volumes are now extruded a FINITE distance (scene AABB diagonal
+    // + margin) so an open/seam edge on a model caster no longer drags a shadow wall across
+    // the whole map ("model shadows extend forever").  Finite twins make the back cap and
+    // full side quads real geometry, so the sun path passes 6 like point lights do.
     // BrushShadow recurses into PREFAB CONTENTS with the composed placement orientation;
     // PolyOffsetShadows emits the silhouette side quads from the edge hash and draws the volume
     // through rgp.stencilShadowMaterial (colorWrite off, depthWrite off, depthTest LESS, cull
     // NONE, stencil two-sided z-fail).  Shadowed pixels end with stencil != 0, which the
     // additive_stencil re-add (stencil EQUAL ref 0) then skips.
-    extern bool Radiant_ShadVol_Begin( int frontCapPerTri );
+    extern bool Radiant_ShadVol_Begin( int frontCapPerTri, float directionalExtrudeDistance );
     extern void Radiant_ShadVol_BrushShadow( selbrush_t *listHead, const orientation_t *orient,
                                              const float *light );
     extern void SunLightPreview_PolyOffsetShadows();
     extern float world_orient_matrix[4][3];                                 // entity.cpp 0x6DE290
     extern selbrush_t selected_brushes;                                     // map.cpp 0x23F1864
-    if ( Radiant_ShadVol_Begin( 3 ) )                                       // 0x406a4c/0x406a66
+    if ( Radiant_ShadVol_Begin( 6, Cam_SunPrev_ShadowExtrudeDistance() ) )  // 0x406a4c/0x406a66 + KIWI finite extrusion
     {
         // The two BrushShadow calls cover the WHOLE map — a caster behind the camera can still
         // shadow what is in front of it.  Their tree traversal, material eligibility, and
@@ -2899,6 +2942,17 @@ void CamWnd_Draw( HWND hwnd )
     // the per-frame memo in front of Cam_EditorMaterialColor's twelve
     // strstr calls.  Reset HERE, before any pass gathers, so no entry can outlive one frame.
     Cam_EditorMaterialColorMemoReset();
+
+    // KIWI-UX: cross-patch normal weld (pmesh.cpp) — average tessellated normals at
+    // coincident patch-boundary verts so sewn terrain patches shade seamlessly, the
+    // way cod4map's SmoothVertexNormalsForGroup does at compile time.  BEFORE the
+    // world pass: a bumped def version makes the lazy Patch_Fill_SyncVersion rebuild
+    // pick up the welded normals in this same frame.  Stamp-gated — an unedited map
+    // costs one list walk.
+    {
+        extern void KiwiPatchWeld_Run();   // pmesh.cpp
+        KiwiPatchWeld_Run();
+    }
 
     g_edPrefabPrefabsWalked = g_edPrefabBrushesWalked = 0;
     g_edPrefabBrushesDrawn = 0;
@@ -4042,6 +4096,16 @@ void CamWnd_Draw( HWND hwnd )
             // above still drew it.
             if ( KiwiUvEd_OverlaySuppressed( def, -1 ) )
                 continue;
+            // KIWI-UX: selected MODELS/PREFABS show as the red tint alone — the tech-29
+            // SkinModelInst white triangle mesh reads as noise on dense meshes.  Brushes
+            // and plain fixedsize boxes keep the outline (it is their only selection cue).
+            {
+                entity_s     *owner = b->owner;
+                entity_s_def *eDef  = owner ? (entity_s_def *)owner->def : nullptr;
+                eclass_t     *ec    = eDef ? eDef->eclass : nullptr;
+                if ( ec && *(int *)&ec->fixedsize && ( ec->classtype & 0x18 ) )   // MODEL|PREFAB
+                    continue;
+            }
             // drawFlags=1 (force-draw) matches the binary's a10=1; viewType -1 = no 2D cull.
             DrawBrush( b, (const orientation_t *)world_orient_matrix, /*viewType*/ -1,
                        /*technique*/ 29, &whiteCol, /*width*/ 1, /*drawFlags*/ 1, /*layerPrefix*/ "" );

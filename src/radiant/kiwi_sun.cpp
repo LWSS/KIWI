@@ -155,14 +155,12 @@ namespace
         return floorf( deg / KSUN_ANGLE_STEP + 0.5f ) * KSUN_ANGLE_STEP;
     }
 
-    // ── the orbit target: the biggest brush, and the ladder under it ────────
+    // ── the orbit target: the UNION of all map geometry ─────────────────────
+    // KIWI-UX: this used to prefer the single BIGGEST brush, which made the sun
+    // orbit one skybox wall on maps whose shell is built from several chunks
+    // (user report).  The whole-map union is what "orbit the map" means.
     void RebuildTarget()
     {
-        bool  haveBest = false;
-        float bestVol  = 0.0f;
-        float bmn[3]   = { 0.0f, 0.0f, 0.0f };
-        float bmx[3]   = { 0.0f, 0.0f, 0.0f };
-
         bool  haveUnion = false;
         float umn[3]    = { 0.0f, 0.0f, 0.0f };
         float umx[3]    = { 0.0f, 0.0f, 0.0f };
@@ -189,26 +187,11 @@ namespace
                     if ( !haveUnion || def->maxs[k] > umx[k] ) umx[k] = def->maxs[k];
                 }
                 haveUnion = true;
-
-                const float vol = ex * ey * ez;
-                if ( vol > bestVol )
-                {
-                    bestVol  = vol;
-                    haveBest = true;
-                    Copy3( def->mins, bmn );
-                    Copy3( def->maxs, bmx );
-                }
             }
         }
 
-        if ( haveBest )
+        if ( haveUnion )
         {
-            Copy3( bmn, s_targetMins );
-            Copy3( bmx, s_targetMaxs );
-        }
-        else if ( haveUnion )
-        {
-            // If every object is flat, use their union because no positive volume wins.
             Copy3( umn, s_targetMins );
             Copy3( umx, s_targetMaxs );
         }
@@ -226,7 +209,7 @@ namespace
         for ( int k = 0; k < 3; ++k )
             s_targetCentre[k] = ( s_targetMins[k] + s_targetMaxs[k] ) * 0.5f;
 
-        if ( haveBest || haveUnion )
+        if ( haveUnion )
         {
             const float bounding = Len3( span ) * 0.5f;      // bounding-sphere radius
             float r = bounding * KSUN_ORBIT_SCALE;
@@ -624,10 +607,63 @@ void KiwiSun_Place()
     {
         float dir[3], pos[3];
         if ( SunFrame( dir, pos, nullptr ) )      // SunFrame runs EnsureTarget itself
-            Sys_Printf( "Sun glyph at (%.0f %.0f %.0f), %.0f units from the biggest "
-                        "brush's centre - zoom out or frame the map to see it.\n",
+            Sys_Printf( "Sun glyph at (%.0f %.0f %.0f), %.0f units from the map's "
+                        "centre - zoom out or frame the map to see it.\n",
                         pos[0], pos[1], pos[2], s_orbitRadius );
     }
+    Repaint();
+}
+
+// Remove the worldspawn sun keys so a fresh sun can be placed.  The inverse of
+// KiwiSun_Place (which only writes ABSENT keys, so re-placing needs these gone
+// first).  Undo-bracketed as one record.
+extern void DeleteKey( epair_t **head, const char *key );      // entity.cpp 0x483720
+void KiwiSun_Delete()
+{
+    entity_s_def *wd = WorldDef();
+    if ( !wd )
+    {
+        Sys_Printf( "Delete Sun: there is no worldspawn.\n" );
+        return;
+    }
+
+    // The same 7 keys KiwiSun_Place manages (sun direction + the daylight keys both
+    // compilers consume).
+    static const char *const sunKeys[7] =
+    {
+        "sundirection", "sunlight", "suncolor", "sundiffusecolor",
+        "diffusefraction", "ambient", "_color",
+    };
+
+    int present = 0;
+    for ( int i = 0; i < 7; ++i )
+    {
+        const char *have = ValueForKey2( (int)(intptr_t)wd, sunKeys[i] );
+        if ( have && have[0] )
+            ++present;
+    }
+    if ( present == 0 )
+    {
+        Sys_Printf( "Delete Sun: this map has no sun keys to remove.\n" );
+        return;
+    }
+
+    Undo_ClearRedo();
+    Undo_GeneralStart( "delete sun" );
+    Undo_AddEntity_W( wd );
+    for ( int i = 0; i < 7; ++i )
+        DeleteKey( &wd->epairs, sunKeys[i] );   // entity_s::epairs @0x74; no-op if absent
+    Undo_End();
+
+    s_selected = false;
+    s_hot      = false;
+    s_grabbed  = false;
+
+    MarkMapModified();
+    g_nUpdateBits = -1;
+    Sys_Printf( "Sun deleted: %d worldspawn sun key%s removed - use Place Sun for a fresh one.\n",
+                present, ( present == 1 ) ? "" : "s" );
+    SayRecompile();
     Repaint();
 }
 
@@ -889,9 +925,22 @@ void KiwiSun_Draw()
         if ( ImGui::IsItemHovered() )
             ImGui::SetTooltip(
                 "Selects the sun glyph (which turns the projected frustum on) and\n"
-                "frames the camera on the glyph AND the biggest brush together.\n"
+                "frames the camera on the glyph AND the whole map together.\n"
                 "The glyph orbits well outside the geometry, so on a large map this\n"
                 "is how you find it." );
+
+        ImGui::SameLine();
+        ImGui::BeginDisabled( !have );
+        if ( ImGui::Button( "Delete Sun" ) )
+            KiwiSun_Delete();              // remove all sun keys so Place Sun writes fresh ones
+        ImGui::EndDisabled();
+        if ( ImGui::IsItemHovered() )
+            ImGui::SetTooltip(
+                "Removes ALL worldspawn sun keys (sundirection, sunlight, suncolor,\n"
+                "sundiffusecolor, diffusefraction, ambient, _color) as one undo step,\n"
+                "so Place Sun re-creates a fresh default sun.  Use this to re-place\n"
+                "a sun whose values you want reset (Place Sun alone never overwrites\n"
+                "existing keys)." );
 
         ImGui::Separator();
 
@@ -1015,9 +1064,32 @@ void KiwiSun_Draw()
 
         ImGui::EndDisabled();
 
+        // ── shadow-preview debug ─────────────────────────────────────────────
+        // Per-caster-class kill switches for the stencil shadow-volume preview
+        // (shadowvolume.cpp).  Isolates which caster class produces a reported
+        // shadow artifact live, without a rebuild.
+        {
+            extern bool g_svCastPatches, g_svCastModels, g_svCastBrushes;  // shadowvolume.cpp
+            if ( ImGui::TreeNode( "Shadow preview debug" ) )
+            {
+                bool any = false;
+                any |= ImGui::Checkbox( "Patches cast",  &g_svCastPatches );
+                ImGui::SameLine();
+                any |= ImGui::Checkbox( "Models cast",   &g_svCastModels );
+                ImGui::SameLine();
+                any |= ImGui::Checkbox( "Brushes cast",  &g_svCastBrushes );
+                if ( any )
+                    g_nUpdateBits = -1;
+                extern int g_svCastersDrawn, g_svTrisFed, g_svBatches;     // shadowvolume.cpp
+                ImGui::TextDisabled( "casters %d  silhouette tris %d  batches %d",
+                                     g_svCastersDrawn, g_svTrisFed, g_svBatches );
+                ImGui::TreePop();
+            }
+        }
+
         ImGui::Separator();
         ImGui::TextDisabled( "Drag the glyph in the 3D view to orbit the sun "
-                             "around the biggest brush (Ctrl snaps 5 deg)." );
+                             "around the whole map (Ctrl snaps 5 deg)." );
         ImGui::TextDisabled( "sundirection is baked at compile time - recompile "
                              "BSP + light to see it in the lighting." );
     }

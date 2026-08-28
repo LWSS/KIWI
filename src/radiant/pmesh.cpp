@@ -5161,6 +5161,11 @@ int PMESH_20_Radius_2( int count, patchMesh_t *patch, const float *cursor,
         for ( int row = 0; row < patch->height; ++row )// i, v7[1] = height
         {
             drawVert_t *cp = &patch->ctrl[col][row];   // a2+16 base, 80-byte stride
+            // KIWI-UX: a marked point (turned_edge & 2) is EXCLUDED from painting
+            // (PMESH_16 skips it), so the preview must not colour it either — a dot
+            // that highlights what the stroke cannot touch is a lie about its reach.
+            if ( ( cp->turned_edge & 2 ) != 0 )
+                continue;
             const float dx = cp->xyz[0] - cursor[0];
             const float dy = cp->xyz[1] - cursor[1];
             const float dist2 = dy * dy + dx * dx;
@@ -10148,6 +10153,187 @@ void Patch_Fill_SyncVersion( patch_t *inst, const orientation_t *orient )
     // Rebuild if no visuals yet OR the instance version != def version.
     if ( !inst->visArray || inst->version != inst->def->version )
         Patch_BuildInstanceVisuals( inst, orient );
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  KIWI-UX: CROSS-PATCH NORMAL WELD — kill the lighting seam between adjacent patches.
+//
+//  Each patch tessellates its curveDef normals from its OWN control mesh, so two sewn
+//  terrain patches disagree about the shared boundary's normal and the editor preview
+//  (world N.L shading and the sun re-add both read the tessellated normal,
+//  Patch_Fill_BuildVisuals :9959) shows a hard lighting seam the COMPILED map does not
+//  have: cod4map averages normals across coincident vertices at BSP time
+//  (SmoothVertexNormalsForGroup, cod4map/tris.cpp:2606, default smoothAngle 0.01 ≈
+//  anything under ~89 degrees apart smooths).  This pass mirrors that for the preview:
+//  gather the PERIMETER vertices of every top-level patch's tessellated grid, group
+//  coincident positions, average each member's normal with every co-located normal
+//  within the compiler's dot >= 0.01 gate, write the result back into curveDef, and
+//  bump the def version so the lazy instance rebuild re-uploads.
+//
+//  Scope notes: def-level curveDef coords are LOCAL, so only top-level patches
+//  (world-identity placement) are welded — prefab-content patch pairs in different
+//  prefabs live in different spaces and are skipped.  T-junctions (different
+//  tessellation densities) simply find no partner and keep their own normal.
+//  Change detection is a stamp over (def, version) so an idle map costs one list walk.
+// ═════════════════════════════════════════════════════════════════════════════
+#include <vector>
+#include <algorithm>
+
+namespace
+{
+    struct kpwVert_t
+    {
+        unsigned long long key;      // quantized position
+        patchMesh_t       *def;
+        curveVert_t       *cv;
+        float              newNormal[3];
+        bool               changed;
+    };
+
+    // Quantize to 1/4 unit; coincident (sewn) tessellated verts land on identical keys.
+    unsigned long long KPW_Key( const float *p )
+    {
+        const long long qx = (long long)floorf( p[0] * 4.0f + 0.5f );
+        const long long qy = (long long)floorf( p[1] * 4.0f + 0.5f );
+        const long long qz = (long long)floorf( p[2] * 4.0f + 0.5f );
+        return ( (unsigned long long)( qx & 0x1FFFFF ) )
+             | ( (unsigned long long)( qy & 0x1FFFFF ) << 21 )
+             | ( (unsigned long long)( qz & 0x1FFFFF ) << 42 );
+    }
+
+    void KPW_CollectPerimeter( patchMesh_t *def, std::vector<kpwVert_t> &out )
+    {
+        curvePatchDef_t *mesh = def->curveDef;
+        const int mw = mesh->width, mh = mesh->height;
+        for ( int row = 0; row < mh; ++row )
+            for ( int col = 0; col < mw; ++col )
+            {
+                if ( row != 0 && row != mh - 1 && col != 0 && col != mw - 1 )
+                    continue;                              // perimeter only
+                curveVert_t *cv = &mesh->verts[col + row * mw];
+                kpwVert_t v;
+                v.key = KPW_Key( cv->xyz );
+                v.def = def;
+                v.cv  = cv;
+                v.changed = false;
+                out.push_back( v );
+            }
+    }
+}
+
+void KiwiPatchWeld_Run()
+{
+    // ── change stamp over every top-level patch (def pointer + version) ──────
+    static unsigned long long s_lastStamp = 0xFFFFFFFFFFFFFFFFull;
+    unsigned long long stamp = 0x9E3779B97F4A7C15ull;
+    bool anyMissingMesh = false;
+    selbrush_t *lists[2] = { &active_brushes, &selected_brushes };
+    for ( int l = 0; l < 2; ++l )
+        for ( selbrush_t *b = lists[l]->next; b && b != lists[l]; b = b->next )
+        {
+            if ( !b->patch || !b->patch->def )
+                continue;
+            patchMesh_t *def = b->patch->def;
+            stamp = stamp * 6364136223846793005ull
+                  + (unsigned long long)(uintptr_t)def + (unsigned long long)def->version;
+            if ( !def->curveDef || !def->curveDef->verts )
+                anyMissingMesh = true;                     // tessellates later — retry then
+        }
+    if ( stamp == s_lastStamp )
+        return;
+
+    // ── gather perimeter verts of every welded-eligible def (dedup defs) ─────
+    std::vector<patchMesh_t *> defs;
+    for ( int l = 0; l < 2; ++l )
+        for ( selbrush_t *b = lists[l]->next; b && b != lists[l]; b = b->next )
+        {
+            if ( !b->patch || !b->patch->def )
+                continue;
+            patchMesh_t *def = b->patch->def;
+            if ( !def->curveDef || !def->curveDef->verts )
+                continue;
+            if ( def->curveDef->width < 2 || def->curveDef->height < 2 )
+                continue;
+            if ( std::find( defs.begin(), defs.end(), def ) == defs.end() )
+                defs.push_back( def );
+        }
+
+    std::vector<kpwVert_t> verts;
+    for ( size_t d = 0; d < defs.size(); ++d )
+        KPW_CollectPerimeter( defs[d], verts );
+
+    // ── group coincident keys; per-member average within the compiler's gate ─
+    std::sort( verts.begin(), verts.end(),
+               []( const kpwVert_t &a, const kpwVert_t &b ) { return a.key < b.key; } );
+
+    std::vector<patchMesh_t *> touched;
+    for ( size_t i = 0; i < verts.size(); )
+    {
+        size_t j = i + 1;
+        while ( j < verts.size() && verts[j].key == verts[i].key )
+            ++j;
+        if ( j - i >= 2 )
+        {
+            // Two-phase per group: compute every member's average, then write, so
+            // late members do not average against already-welded early members.
+            for ( size_t m = i; m < j; ++m )
+            {
+                const float *nm = verts[m].cv->normal;
+                float acc[3] = { 0.0f, 0.0f, 0.0f };
+                for ( size_t o = i; o < j; ++o )
+                {
+                    const float *no = verts[o].cv->normal;
+                    const float dot = nm[0]*no[0] + nm[1]*no[1] + nm[2]*no[2];
+                    if ( o != m && dot < 0.01f )           // cod4map smoothAngle default
+                        continue;
+                    acc[0] += no[0]; acc[1] += no[1]; acc[2] += no[2];
+                }
+                if ( Vec3Normalize_R( acc ) < 0.001f )
+                    continue;                              // opposing normals cancelled — keep own
+                const float *cur = verts[m].cv->normal;
+                if ( fabsf( acc[0] - cur[0] ) + fabsf( acc[1] - cur[1] )
+                   + fabsf( acc[2] - cur[2] ) > 0.0001f )
+                {
+                    verts[m].newNormal[0] = acc[0];
+                    verts[m].newNormal[1] = acc[1];
+                    verts[m].newNormal[2] = acc[2];
+                    verts[m].changed = true;
+                }
+            }
+            for ( size_t m = i; m < j; ++m )
+            {
+                if ( !verts[m].changed )
+                    continue;
+                verts[m].cv->normal[0] = verts[m].newNormal[0];
+                verts[m].cv->normal[1] = verts[m].newNormal[1];
+                verts[m].cv->normal[2] = verts[m].newNormal[2];
+                if ( std::find( touched.begin(), touched.end(), verts[m].def ) == touched.end() )
+                    touched.push_back( verts[m].def );
+            }
+        }
+        i = j;
+    }
+
+    // ── force the lazy instance rebuild for every def whose normals moved ────
+    for ( size_t d = 0; d < touched.size(); ++d )
+        ++touched[d]->version;
+
+    // Restamp INCLUDING our own version bumps so the pass is one-shot per edit.
+    // A def still waiting on tessellation keeps the stamp unstored so it retries.
+    if ( !anyMissingMesh )
+    {
+        stamp = 0x9E3779B97F4A7C15ull;
+        for ( int l = 0; l < 2; ++l )
+            for ( selbrush_t *b = lists[l]->next; b && b != lists[l]; b = b->next )
+            {
+                if ( !b->patch || !b->patch->def )
+                    continue;
+                patchMesh_t *def = b->patch->def;
+                stamp = stamp * 6364136223846793005ull
+                      + (unsigned long long)(uintptr_t)def + (unsigned long long)def->version;
+            }
+        s_lastStamp = stamp;
+    }
 }
 
 extern bool MaterialDef_15_Drawflag_Multiply( int drawFlags, MaterialDef *m );

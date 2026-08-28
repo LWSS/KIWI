@@ -1,11 +1,15 @@
 /*
- * xmodel_load_obj.c — XModel file loading and parsing.
+ * xmodel_load_obj.c - CoD4 v25 raw XModel loading for cod4rad.
  *
- * Source: ..\src\xanim\xmodel_load_obj.cpp
- * Reconstructed from decompiled output, LST, and CoD2 server source.
+ * The map compiler keeps its existing x64 runtime structures and allocation
+ * callbacks, but consumes the CoD4 v25 xmodel/xmodelparts/xmodelsurfs wire
+ * formats used by the game loader.
  */
 
 #include "cod2rad64.h"
+
+#define XMODEL_COLL_BOUNDS_EPSILON 0.001f
+#define XMODEL_COLL_NORMAL_EPSILON 0.01f
 
 static char s_assertDisable_XModelReadCompressedQuat;
 static char s_assertDisable_XModelPartsLoadFile_buf;
@@ -32,48 +36,23 @@ static char s_assertDisable_XModelSurfsLoad;
 static char s_assertDisable_XModelSurfsLoad_filename;
 
 /*
- * XModelLodInfo layout (x64, 40 bytes, confirmed from LST):
- *   +0x00  const char *filename      (8 bytes)
- *   +0x08  short numsurfs            (2 bytes + padding)
- *   +0x10  unsigned short *surfNames (8 bytes)
- *   +0x18  XModelSurfs_t *modelSurfs   (8 bytes)
- *   +0x20  other fields              (8 bytes)
- *
- * lodInfo[0] starts at XModel + 0x10, stride 0x28 (40 bytes).
- * Up to 4 LOD levels (0..3).
- *
- * Hunk data types used for surfs caching: type 2.
- */
-
-
-/*
 ================
 XModelCalcBasePose
 
-Computes the base bone matrices for a model's parts.
-Root bones get identity quaternions. Non-root bones get
-quaternions from compressed shorts multiplied into parent,
-then MatrixTransformVectorQuatTrans for translation.
-After computing all bones, sets anim and skel partBits to -1.
-
-Parts skel layout (from LST):
-  parts+0x28: partBits.anim[4]  (16 bytes, set to 0xFF)
-  parts+0x38: partBits.control[4] (16 bytes, NOT touched)
-  parts+0x48: partBits.skel[4]  (16 bytes, set to 0xFF)
-  parts+0x58: mat[0]            (DObjAnimMat array)
-
+CoD4 stores three signed quaternion components per non-root bone.  The fourth
+component is reconstructed by XModelReadCompressedQuat, and all four are
+scaled by 1/32767 before concatenating them with the parent base pose.
 ================
 */
 void XModelCalcBasePose(XModelParts_t *modelParts)
 {
-    static const float SHORT_TO_QUAT = 3.0518509e-5f; /* 0x38000100 */
-
+    static const float SHORT_TO_QUAT = 0.00003051850944757462f;
     unsigned char *parentList;
     DObjAnimMat_t *quatTrans;
     int numBones;
     float *trans;
     short *quats;
-    int numRootBones;
+    int count;
     float vLenSq;
     float tempQuat[4];
 
@@ -82,10 +61,9 @@ void XModelCalcBasePose(XModelParts_t *modelParts)
     quats = modelParts->quats;
     trans = modelParts->trans;
     quatTrans = &modelParts->skel_mat[0];
-    numRootBones = modelParts->numRootBones;
 
-    /* root bones: identity quaternion */
-    while (numRootBones)
+    count = modelParts->numRootBones;
+    while (count)
     {
         quatTrans->quat[0] = 0.0f;
         quatTrans->quat[1] = 0.0f;
@@ -95,27 +73,28 @@ void XModelCalcBasePose(XModelParts_t *modelParts)
         quatTrans->trans[1] = 0.0f;
         quatTrans->trans[2] = 0.0f;
         quatTrans->transWeight = 2.0f;
-        numRootBones--;
+        count--;
         quatTrans++;
     }
 
-    /* non-root bones: decompress quats and apply hierarchy */
-    numRootBones = numBones - modelParts->numRootBones;
-
-    while (numRootBones)
+    count = numBones - modelParts->numRootBones;
+    while (count)
     {
+        DObjAnimMat_t *parent;
+        float mat[3][3];
+
         tempQuat[0] = (float)quats[0] * SHORT_TO_QUAT;
         tempQuat[1] = (float)quats[1] * SHORT_TO_QUAT;
         tempQuat[2] = (float)quats[2] * SHORT_TO_QUAT;
         tempQuat[3] = (float)quats[3] * SHORT_TO_QUAT;
 
-        QuatMultiply(tempQuat, quatTrans[-*parentList].quat, quatTrans->quat);
+        parent = &quatTrans[-(int)*parentList];
+        QuatMultiply(tempQuat, parent->quat, quatTrans->quat);
 
         vLenSq = quatTrans->quat[0] * quatTrans->quat[0]
                + quatTrans->quat[1] * quatTrans->quat[1]
                + quatTrans->quat[2] * quatTrans->quat[2]
                + quatTrans->quat[3] * quatTrans->quat[3];
-
         if (vLenSq == 0.0f)
         {
             quatTrans->quat[3] = 1.0f;
@@ -126,25 +105,22 @@ void XModelCalcBasePose(XModelParts_t *modelParts)
             quatTrans->transWeight = 2.0f / vLenSq;
         }
 
-        /* binary builds 3x3 rotation matrix from parent quat, then does mat*vec + parent.trans */
-        {
-            extern void DObjAnimMatToAxis(void *animMat, float *outMat); /* xanim_public_41B080 */
-            float mat[9];
-            DObjAnimMat_t *parent = &quatTrans[-(int)*parentList];
-            DObjAnimMatToAxis(parent, mat);
-            quatTrans->trans[0] = mat[0]*trans[0] + mat[3]*trans[1] + mat[6]*trans[2] + parent->trans[0];
-            quatTrans->trans[1] = mat[1]*trans[0] + mat[4]*trans[1] + mat[7]*trans[2] + parent->trans[1];
-            quatTrans->trans[2] = mat[2]*trans[0] + mat[5]*trans[1] + mat[8]*trans[2] + parent->trans[2];
-        }
+        DObjAnimMatToAxis(parent, mat);
+        quatTrans->trans[0] = mat[0][0] * trans[0] + mat[1][0] * trans[1]
+                            + mat[2][0] * trans[2] + parent->trans[0];
+        quatTrans->trans[1] = mat[0][1] * trans[0] + mat[1][1] * trans[1]
+                            + mat[2][1] * trans[2] + parent->trans[1];
+        quatTrans->trans[2] = mat[0][2] * trans[0] + mat[1][2] * trans[1]
+                            + mat[2][2] * trans[2] + parent->trans[2];
 
-        numRootBones--;
+        count--;
         quats += 4;
         trans += 3;
         quatTrans++;
         parentList++;
     }
 
-    /* mark all bones as computed in skel partBits */
+    /* The cod4rad XModelParts shape embeds the base-pose DSkel bits. */
     modelParts->skel_partBits.anim[0] = -1;
     modelParts->skel_partBits.anim[1] = -1;
     modelParts->skel_partBits.anim[2] = -1;
@@ -155,45 +131,28 @@ void XModelCalcBasePose(XModelParts_t *modelParts)
     modelParts->skel_partBits.skel[3] = -1;
 }
 
-/*
-================
-XModelReadCompressedQuat
-
-Reads 3 compressed quaternion shorts from a byte stream,
-computes the 4th component via unit quaternion constraint:
-  q3 = sqrt(32767² - q0² - q1² - q2²)
-
-The constant 0x3FFF0001 = 32767² = 1073676289.
-
-================
-*/
 void XModelReadCompressedQuat(const unsigned char **pos, short *quat)
 {
-    int q0, q1, q2;
+    int q0;
+    int q1;
+    int q2;
     int q3sq;
     int q3;
 
-    quat[0] = *(short *)*pos;  *pos += 2;
-    quat[1] = *(short *)*pos;  *pos += 2;
-    quat[2] = *(short *)*pos;  *pos += 2;
+    quat[0] = *(const short *)*pos; *pos += 2;
+    quat[1] = *(const short *)*pos; *pos += 2;
+    quat[2] = *(const short *)*pos; *pos += 2;
 
-    q0 = (int)quat[0];
-    q1 = (int)quat[1];
-    q2 = (int)quat[2];
-
+    q0 = quat[0];
+    q1 = quat[1];
+    q2 = quat[2];
     q3sq = 0x3FFF0001 - q0 * q0 - q1 * q1 - q2 * q2;
-
     if (q3sq > 0)
-    {
         q3 = (int)floorf(sqrtf((float)q3sq) + 0.5f);
-    }
     else
-    {
         q3 = 0;
-    }
 
     Assert(q3 == (short)q3, s_assertDisable_XModelReadCompressedQuat);
-
     quat[3] = (short)q3;
 }
 
@@ -201,32 +160,14 @@ void XModelReadCompressedQuat(const unsigned char **pos, short *quat)
 ================
 XModelPartsLoadFile
 
-Reads an xmodelparts file from disk. Parses bone hierarchy,
-compressed quaternions, translations, and bone names.
-
-File format (after version short == 20):
-  +0x00  short numChildBones (non-root)
-  +0x02  short numRootBones
-  For each non-root bone (numChildBones entries):
-    1 byte parent index
-    3 floats trans (12 bytes)
-    3 shorts compressed quat (6 bytes, 4th computed)
-  For each bone (totalBones entries):
-    null-terminated name string
-  byte[totalBones] partClassification data
-
-Allocations:
-  bone names:      totalBones * 2 bytes (unsigned short array)
-  hierarchy:       numChildBones + 15 bytes (ptr + parentList + pad)
-  parts:           totalBones * 32 + 88 bytes (XModelParts_s + skel)
-  quats:           numChildBones * 8 bytes (4 shorts per bone)
-  trans:           numChildBones * 16 bytes (3 floats + pad per bone)
-  partClassify:    totalBones bytes
-
+v25 wire order:
+  u16 version, u16 numChildBones, u16 numRootBones
+  child records: byte parentIndex, float trans[3], s16 quat[3]
+  bone-name C strings, byte partClassification[numBones], byte useBones
 ================
 */
 XModelParts_t *XModelPartsLoadFile(XModel_t *model, const char *name,
-                                    void *(*alloc)(int))
+                                   void *(*alloc)(int))
 {
     char filename[64];
     unsigned char *buf;
@@ -241,9 +182,13 @@ XModelParts_t *XModelPartsLoadFile(XModel_t *model, const char *name,
     XModelParts_t *parts;
     short *quats;
     float *trans;
+    int hierarchySize;
+    int partsSize;
     int parentIdx;
+    int useBones;
     int i;
 
+    buf = NULL;
     if (Com_sprintf(filename, sizeof(filename), "xmodelparts/%s", name) < 0)
     {
         Com_Printf("^1ERROR: filename '%s' too long\n", filename);
@@ -251,15 +196,13 @@ XModelParts_t *XModelPartsLoadFile(XModel_t *model, const char *name,
     }
 
     fileSize = FS_ReadFile(filename, (void **)&buf);
-
     if (fileSize < 0)
     {
         Assert(!buf, s_assertDisable_XModelPartsLoadFile_buf);
         Com_Printf("^1ERROR: xmodelparts '%s' not found\n", name);
         return NULL;
     }
-
-    if (fileSize == 0)
+    if (!fileSize)
     {
         Com_Printf("^1ERROR: xmodelparts '%s' has 0 length\n", name);
         FS_FreeFile(buf);
@@ -268,111 +211,95 @@ XModelParts_t *XModelPartsLoadFile(XModel_t *model, const char *name,
 
     Assert(buf, s_assertDisable_XModelPartsLoadFile_bufValid);
     pos = buf;
-
-    /* check version */
-    version = *(short *)pos;
+    version = *(const short *)pos;
     pos += 2;
-
-    if (version != 20)
+    if (version != 25)
     {
         FS_FreeFile(buf);
         Com_Printf("^1ERROR: xmodelparts '%s' out of date (version %i, expecting %i)\n",
-                    name, (int)version, 20);
+                   name, (int)version, 25);
         return NULL;
     }
 
-    /* read bone counts */
-    numChildBones = *(unsigned short *)pos;
-    numRootBones = *(unsigned short *)(pos + 2);
-    pos += 4;
+    numChildBones = *(const unsigned short *)pos; pos += 2;
+    numRootBones = *(const unsigned short *)pos; pos += 2;
     totalBones = numChildBones + numRootBones;
-
-    /* allocate bone names array */
-    boneNames = (unsigned short *)alloc(totalBones * 2);
-    model->memUsage += totalBones * 2;
-
     if (totalBones >= DOBJ_MAX_PARTS)
     {
         FS_FreeFile(buf);
-        Com_Printf("^1ERROR: xmodel '%s' has more than %d bones\n", name, DOBJ_MAX_PARTS - 1);
+        Com_Printf("^1ERROR: xmodel '%s' has more than %d bones\n",
+                   name, DOBJ_MAX_PARTS - 1);
         return NULL;
     }
 
-    /* allocate hierarchy: ptr(8) + parentList + padding */
-    hierarchy = (XBoneHierarchy_t *)alloc(numChildBones + 15);
-    model->memUsage += numChildBones + 15;
+    boneNames = (unsigned short *)alloc(totalBones * sizeof(unsigned short));
+    model->memUsage += totalBones * sizeof(unsigned short);
+
+    hierarchySize = sizeof(XBoneHierarchy_t);
+    if (numChildBones > 1)
+        hierarchySize += numChildBones - 1;
+    hierarchy = (XBoneHierarchy_t *)alloc(hierarchySize);
+    model->memUsage += hierarchySize;
+    memset(hierarchy, 0, hierarchySize);
     hierarchy->names = boneNames;
 
-    /* allocate parts with embedded skel: header(88) + mat[totalBones](totalBones*32) */
-    parts = (XModelParts_t *)alloc(totalBones * 32 + 88);
-    model->memUsage += totalBones * 32 + 88;
+    partsSize = 88 + totalBones * sizeof(DObjAnimMat_t);
+    parts = (XModelParts_t *)alloc(partsSize);
+    model->memUsage += partsSize;
+    memset(parts, 0, partsSize);
     parts->hierarchy = hierarchy;
 
-    /* allocate quats and trans if there are non-root bones */
-    if (numChildBones > 0)
+    if (numChildBones)
     {
         parts->quats = (short *)alloc(numChildBones * 8);
         model->memUsage += numChildBones * 8;
         parts->trans = (float *)alloc(numChildBones * 16);
         model->memUsage += numChildBones * 16;
     }
-    else
-    {
-        parts->quats = NULL;
-        parts->trans = NULL;
-    }
 
-    /* allocate part classification */
     parts->partClassification = (unsigned char *)alloc(totalBones);
     model->memUsage += totalBones;
-
-    /* store bone counts */
     parts->numBones = (short)totalBones;
     parts->numRootBones = (short)numRootBones;
 
-    /* read non-root bone data */
     quats = parts->quats;
     trans = parts->trans;
-
     for (i = numRootBones; i < totalBones; i++)
     {
-        /* read parent index (1 byte) */
-        parentIdx = *pos;
+        parentIdx = *pos++;
         Assert(parentIdx >= 0, s_assertDisable_XModelPartsLoadFile_index);
         Assert(parentIdx < i, s_assertDisable_XModelPartsLoadFile_indexLt);
-
         hierarchy->parentList[i - numRootBones] = (unsigned char)(i - parentIdx);
         Assert((i - parentIdx) == hierarchy->parentList[i - numRootBones],
                s_assertDisable_XModelPartsLoadFile_parentList);
 
-        /* read trans (3 floats, 12 bytes at pos+1) */
-        trans[0] = *(float *)(pos + 1);
-        trans[1] = *(float *)(pos + 5);
-        trans[2] = *(float *)(pos + 9);
-        pos += 13;
-
-        /* read compressed quat (3 shorts, computes 4th) */
+        trans[0] = *(const float *)pos; pos += 4;
+        trans[1] = *(const float *)pos; pos += 4;
+        trans[2] = *(const float *)pos; pos += 4;
         XModelReadCompressedQuat(&pos, quats);
 
         quats += 4;
         trans += 3;
     }
 
-    /* read bone names */
     for (i = 0; i < totalBones; i++)
     {
-        int len = (int)strlen((const char *)pos) + 1;
-        boneNames[i] = SL_GetStringOfLen((const char *)pos, 0, len, 10);
+        int len;
+
+        len = (int)strlen((const char *)pos) + 1;
+        boneNames[i] = (unsigned short)SL_GetStringOfLen(
+            (const char *)pos, 0, len, 10);
         pos += len;
     }
 
-    /* copy part classification data */
     memcpy(parts->partClassification, pos, totalBones);
+    pos += totalBones;
+    useBones = *pos++ != 0;
 
-    /* clean up and compute base pose */
     FS_FreeFile(buf);
     XModelCalcBasePose(parts);
-
+    if (!useBones && numChildBones)
+        memset(parts->trans, 0, numChildBones * 16);
     return parts;
 }
 
@@ -380,148 +307,95 @@ XModelParts_t *XModelPartsLoadFile(XModel_t *model, const char *name,
 ================
 XModelReadCollSurfs
 
-Reads collision surface data from the model file stream.
-Parses collision triangles (plane normals, svec, tvec) and
-surface bounds (mins/maxs with margin), boneIdx, contents.
-
-XModelCollSurf_s (48 bytes = 0x30):
-  +0x00  XModelCollTri_t *collTris
-  +0x08  int numCollTris
-  +0x0C  float mins[3]       (file value - margin)
-  +0x18  float maxs[3]       (file value + margin)
-  +0x24  int boneIdx
-  +0x28  int contents         (masked with 0xDFFFFFFB)
-  +0x2C  int surfFlags
-
-XModelCollTri_s (48 bytes = 0x30):
-  +0x00  float plane[4]      (normal xyz + distance)
-  +0x10  float svec[4]       (barycentric s vector + offset)
-  +0x20  float tvec[4]       (barycentric t vector + offset)
-
+The v25 collision stream contains precomputed plane/svec/tvec records.  The
+wire XModelCollSurf is 44 bytes on x86; cod4rad's widened pointer makes the
+runtime structure 48 bytes without changing any serialized field.
 ================
 */
 void XModelReadCollSurfs(const unsigned char **pos, XModel_t *model,
-                          void *(*alloc)(int), const char *name)
+                         void *(*alloc)(int), const char *name)
 {
     int numCollSurfs;
-    int numCollTris;
     int i;
     int j;
-    float n0, n1, n2, lenSq;
-    XModelCollSurf_t *surf;
-    XModelCollTri_t *tri;
 
     Assert(!model->contents, s_assertDisable_XModelReadCollSurfs_contents);
-
-    /* read numCollSurfs */
-    numCollSurfs = *(int *)*pos;
+    numCollSurfs = *(const int *)*pos;
     *pos += 4;
     model->numCollSurfs = numCollSurfs;
 
-    if (numCollSurfs == 0)
+    if (!numCollSurfs)
     {
-        Assert(!XMODEL_COLLSURFS(model), s_assertDisable_XModelReadCollSurfs_noSurfs);
+        Assert(!XMODEL_COLLSURFS(model),
+               s_assertDisable_XModelReadCollSurfs_noSurfs);
         return;
     }
 
-    /* allocate collision surfaces array */
-    XMODEL_COLLSURFS(model) = (XModelCollSurf_t *)alloc(numCollSurfs * sizeof(XModelCollSurf_t));
+    XMODEL_COLLSURFS(model) = (XModelCollSurf_t *)alloc(
+        numCollSurfs * sizeof(XModelCollSurf_t));
+    memset(XMODEL_COLLSURFS(model), 0,
+           numCollSurfs * sizeof(XModelCollSurf_t));
 
     for (i = 0; i < numCollSurfs; i++)
     {
-        surf = &XMODEL_COLLSURFS(model)[i];
+        XModelCollSurf_t *surf;
 
-        /* read numCollTris */
-        surf->numCollTris = *(int *)*pos;
+        surf = &XMODEL_COLLSURFS(model)[i];
+        surf->numCollTris = *(const int *)*pos;
         *pos += 4;
         Assert(surf->numCollTris, s_assertDisable_XModelReadCollSurfs_tris);
+        surf->collTris = (XModelCollTri_t *)alloc(
+            surf->numCollTris * sizeof(XModelCollTri_t));
 
-        /* allocate triangles */
-        surf->collTris = (XModelCollTri_t *)alloc(surf->numCollTris * sizeof(XModelCollTri_t));
-
-        /* read each collision triangle */
         for (j = 0; j < surf->numCollTris; j++)
         {
+            XModelCollTri_t *tri;
+            float lenSq;
+
             tri = &surf->collTris[j];
+            tri->plane[0] = *(const float *)*pos; *pos += 4;
+            tri->plane[1] = *(const float *)*pos; *pos += 4;
+            tri->plane[2] = *(const float *)*pos; *pos += 4;
+            tri->plane[3] = *(const float *)*pos; *pos += 4;
 
-            /* read plane normal and distance */
-            tri->plane[0] = *(float *)*pos; *pos += 4;
-            tri->plane[1] = *(float *)*pos; *pos += 4;
-            tri->plane[2] = *(float *)*pos; *pos += 4;
-            tri->plane[3] = *(float *)*pos; *pos += 4;
-
-            /* assert plane normal is approximately unit length */
-            n0 = tri->plane[0];
-            n1 = tri->plane[1];
-            n2 = tri->plane[2];
-            lenSq = n0 * n0 + n1 * n1 + n2 * n2;
-            Assert(fabsf(sqrtf(lenSq) - 1.0f) < COLL_NORMAL_EPSILON,
+            lenSq = tri->plane[0] * tri->plane[0]
+                  + tri->plane[1] * tri->plane[1]
+                  + tri->plane[2] * tri->plane[2];
+            Assert(fabsf(sqrtf(lenSq) - 1.0f)
+                       < XMODEL_COLL_NORMAL_EPSILON,
                    s_assertDisable_XModelReadCollSurfs_normal);
 
-            /* read svec (4 floats) */
-            tri->svec[0] = *(float *)*pos; *pos += 4;
-            tri->svec[1] = *(float *)*pos; *pos += 4;
-            tri->svec[2] = *(float *)*pos; *pos += 4;
-            tri->svec[3] = *(float *)*pos; *pos += 4;
-
-            /* read tvec (4 floats) */
-            tri->tvec[0] = *(float *)*pos; *pos += 4;
-            tri->tvec[1] = *(float *)*pos; *pos += 4;
-            tri->tvec[2] = *(float *)*pos; *pos += 4;
-            tri->tvec[3] = *(float *)*pos; *pos += 4;
+            tri->svec[0] = *(const float *)*pos; *pos += 4;
+            tri->svec[1] = *(const float *)*pos; *pos += 4;
+            tri->svec[2] = *(const float *)*pos; *pos += 4;
+            tri->svec[3] = *(const float *)*pos; *pos += 4;
+            tri->tvec[0] = *(const float *)*pos; *pos += 4;
+            tri->tvec[1] = *(const float *)*pos; *pos += 4;
+            tri->tvec[2] = *(const float *)*pos; *pos += 4;
+            tri->tvec[3] = *(const float *)*pos; *pos += 4;
         }
 
-        /* read surface bounds (with margin adjustment) */
-        surf->mins[0] = *(float *)*pos - COLL_BOUNDS_MARGIN; *pos += 4;
-        surf->mins[1] = *(float *)*pos - COLL_BOUNDS_MARGIN; *pos += 4;
-        surf->mins[2] = *(float *)*pos - COLL_BOUNDS_MARGIN; *pos += 4;
-        surf->maxs[0] = *(float *)*pos + COLL_BOUNDS_MARGIN; *pos += 4;
-        surf->maxs[1] = *(float *)*pos + COLL_BOUNDS_MARGIN; *pos += 4;
-        surf->maxs[2] = *(float *)*pos + COLL_BOUNDS_MARGIN; *pos += 4;
-
-        /* read boneIdx */
-        surf->boneIdx = *(int *)*pos;
-        *pos += 4;
-
-        /* read contents (masked) */
-        surf->contents = *(int *)*pos & 0xDFFFFFFB;
-        *pos += 4;
-
+        surf->mins[0] = *(const float *)*pos - XMODEL_COLL_BOUNDS_EPSILON; *pos += 4;
+        surf->mins[1] = *(const float *)*pos - XMODEL_COLL_BOUNDS_EPSILON; *pos += 4;
+        surf->mins[2] = *(const float *)*pos - XMODEL_COLL_BOUNDS_EPSILON; *pos += 4;
+        surf->maxs[0] = *(const float *)*pos + XMODEL_COLL_BOUNDS_EPSILON; *pos += 4;
+        surf->maxs[1] = *(const float *)*pos + XMODEL_COLL_BOUNDS_EPSILON; *pos += 4;
+        surf->maxs[2] = *(const float *)*pos + XMODEL_COLL_BOUNDS_EPSILON; *pos += 4;
+        surf->boneIdx = *(const int *)*pos; *pos += 4;
+        surf->contents = *(const int *)*pos & 0xDFFFFFFB; *pos += 4;
         Assert(!surf->contents || surf->boneIdx >= 0,
                s_assertDisable_XModelReadCollSurfs_boneIdx);
-
-        /* read surfFlags */
-        surf->surfFlags = *(int *)*pos;
-        *pos += 4;
-
-        /* accumulate contents into model */
+        surf->surfFlags = *(const int *)*pos; *pos += 4;
         model->contents |= surf->contents;
     }
+
+    (void)name;
 }
 
-/*
-================
-R_XModelSurfsReadData
-
-Reads surface data from the file buffer for each surface.
-Calls R_XSurfaceLoadObj for each surface in a loop,
-storing the returned XSurface pointers in the surfsArray.
-
-Params (7, from LST caller analysis):
-  model        — the XModel being loaded
-  surfFilename — surface filename (unused in body, for API compat)
-  surfsArray   — output: array of XSurface pointers (numsurfs entries)
-  partBits     — output: bone bits (passed through to each surface load)
-  numsurfs     — number of surfaces to read
-  pos          — pointer to current read position in file buffer
-  alloc        — allocation callback
-
-================
-*/
 void R_XModelSurfsReadData(XModel_t *model, const char *surfFilename,
-                            XSurface_t **surfsArray, int *partBits,
-                            int numsurfs, const unsigned char **pos,
-                            void *(*alloc)(int))
+                           XSurface_t **surfsArray, int *partBits,
+                           int numsurfs, const unsigned char **pos,
+                           void *(*alloc)(int))
 {
     int i;
 
@@ -534,58 +408,44 @@ void R_XModelSurfsReadData(XModel_t *model, const char *surfFilename,
     for (i = 0; i < numsurfs; i++)
     {
         surfsArray[i] = R_XSurfaceLoadObj(model, partBits, pos, alloc);
+        if (!surfsArray[i])
+            break;
     }
+
+    (void)surfFilename;
 }
 
-/*
-================
-XModelSurfsLoadFile
-
-Reads an xmodelsurfs file from disk, validates version
-and surface count, allocates an XModelSurfs struct, and
-fills it by calling R_XModelSurfsReadData.
-
-File format:
-  +0x00  short version     (must be 20 = 0x14)
-  +0x02  short numsurfs    (must match expected)
-  +0x04  surface data...
-
-XModelSurfs allocation: numsurfs * 8 + 24 bytes
-  +0x00  XSurface_t *surfs   (→ points to inline data at +24)
-  +0x08  partBits area     (16 bytes)
-  +0x18  XSurface ptrs[]   (numsurfs * 8 bytes, inline)
-
-================
-*/
-XModelSurfs_t *XModelSurfsLoadFile(XModel_t *model, const char *surfFilename,
-                                  void *(*alloc)(int), int numsurfs,
-                                  const char *modelName)
+XModelSurfs_t *XModelSurfsLoadFile(XModel_t *model,
+                                   const char *surfFilename,
+                                   void *(*alloc)(int), int numsurfs,
+                                   const char *modelName)
 {
     char filename[64];
     unsigned char *buf;
-    int fileSize;
     const unsigned char *pos;
+    int fileSize;
     short version;
     short fileNumSurfs;
     int allocSize;
+    int i;
     XModelSurfs_t *surfs;
 
-    if (Com_sprintf(filename, sizeof(filename), "xmodelsurfs/%s", surfFilename) < 0)
+    buf = NULL;
+    if (Com_sprintf(filename, sizeof(filename), "xmodelsurfs/%s",
+                    surfFilename) < 0)
     {
         Com_Printf("^1ERROR: filename '%s' too long\n", filename);
         return NULL;
     }
 
     fileSize = FS_ReadFile(filename, (void **)&buf);
-
     if (fileSize < 0)
     {
         Assert(!buf, s_assertDisable_XModelSurfsLoadFile_buf);
         Com_Printf("^1ERROR: xmodelsurf '%s' not found\n", surfFilename);
         return NULL;
     }
-
-    if (fileSize == 0)
+    if (!fileSize)
     {
         Com_Printf("^1ERROR: xmodelsurf '%s' has 0 length\n", surfFilename);
         FS_FreeFile(buf);
@@ -593,92 +453,228 @@ XModelSurfs_t *XModelSurfsLoadFile(XModel_t *model, const char *surfFilename,
     }
 
     Assert(buf, s_assertDisable_XModelSurfsLoadFile_bufValid);
-
     pos = buf;
-
-    /* check version */
-    version = *(short *)pos;
-    pos += 2;
-
-    if (version != 20)
+    version = *(const short *)pos; pos += 2;
+    if (version != 25)
     {
         FS_FreeFile(buf);
         Com_Printf("^1ERROR: xmodelsurfs '%s' out of date (version %i, expecting %i)\n",
-                    surfFilename, (int)version, 20);
+                   surfFilename, (int)version, 25);
         return NULL;
     }
 
-    /* check surface count */
-    fileNumSurfs = *(short *)pos;
-    pos += 2;
-
+    fileNumSurfs = *(const short *)pos; pos += 2;
     if (fileNumSurfs != numsurfs)
     {
         FS_FreeFile(buf);
         Com_Printf("^1ERROR: File conflict (between non-iwd and iwd) for xmodelsurfs '%s' (model '%s')\n",
-                    surfFilename, modelName);
+                   surfFilename, modelName);
         return NULL;
     }
 
-    /* allocate XModelSurfs: header (24 bytes) + surface pointers (numsurfs * 8) */
-    allocSize = numsurfs * 8 + 24;
+    allocSize = sizeof(XModelSurfs_t)
+              + numsurfs * sizeof(XSurface_t *);
     surfs = (XModelSurfs_t *)alloc(allocSize);
     model->memUsage += allocSize;
-
-    /* set surfs pointer to inline data at offset 24 (right after the struct header) */
+    memset(surfs, 0, allocSize);
     surfs->surfs = (XSurface_t **)(surfs + 1);
 
-    /* parse surface data from file */
-    R_XModelSurfsReadData(model, surfFilename,
-                          surfs->surfs,
-                          surfs->partBits,
-                          numsurfs, &pos, alloc);
+    R_XModelSurfsReadData(model, surfFilename, surfs->surfs,
+                          surfs->partBits, numsurfs, &pos, alloc);
+    for (i = 0; i < numsurfs; i++)
+    {
+        if (!surfs->surfs[i])
+        {
+            FS_FreeFile(buf);
+            return NULL;
+        }
+    }
 
     FS_FreeFile(buf);
     return surfs;
+}
+
+static XModelSurfs_t *XModelSurfsPrecacheData(
+    XModel_t *model, const char *filename, void *(*alloc)(int),
+    int numsurfs, const char *modelName)
+{
+    XModelSurfs_t *surfs;
+
+    surfs = XModelSurfsFindData(filename);
+    if (surfs)
+        return surfs;
+
+    surfs = XModelSurfsLoadFile(model, filename, alloc, numsurfs,
+                                modelName);
+    if (!surfs)
+    {
+        Com_Printf("^1ERROR: Cannot find xmodelsurfs '%s'.\n", filename);
+        return NULL;
+    }
+
+    XModelSurfsSetData(filename, surfs, alloc);
+    return surfs;
+}
+
+static int XModelReadConfigString(const char *modelName,
+                                  const unsigned char **pos,
+                                  char *out, int outSize,
+                                  const char *fieldName)
+{
+    int len;
+
+    len = (int)strlen((const char *)*pos) + 1;
+    if (len > outSize)
+    {
+        Com_Printf("^1ERROR: xmodel '%s' %s is too long\n",
+                   modelName, fieldName);
+        return 0;
+    }
+
+    memcpy(out, *pos, len);
+    *pos += len;
+    return 1;
+}
+
+static int XModelSetBoundsFromLod0Surfaces(XModel_t *model)
+{
+    XModelSurfs_t *modelSurfs;
+    int haveBounds;
+    int surfIndex;
+
+    modelSurfs = model->lodInfo[0].modelSurfs;
+    haveBounds = 0;
+    for (surfIndex = 0; surfIndex < model->lodInfo[0].numsurfs;
+         surfIndex++)
+    {
+        XSurface_t *surface;
+        const unsigned char *vertCursor;
+        int vertIndex;
+
+        surface = modelSurfs->surfs[surfIndex];
+        vertCursor = (const unsigned char *)surface->verts;
+        for (vertIndex = 0; vertIndex < surface->vertCount; vertIndex++)
+        {
+            const XSurfaceTempVert_t *vert;
+            int axis;
+
+            vert = (const XSurfaceTempVert_t *)vertCursor;
+            if (!haveBounds)
+            {
+                model->mins[0] = vert->pos[0];
+                model->mins[1] = vert->pos[1];
+                model->mins[2] = vert->pos[2];
+                model->maxs[0] = vert->pos[0];
+                model->maxs[1] = vert->pos[1];
+                model->maxs[2] = vert->pos[2];
+                haveBounds = 1;
+            }
+            else
+            {
+                for (axis = 0; axis < 3; axis++)
+                {
+                    if (vert->pos[axis] < model->mins[axis])
+                        model->mins[axis] = vert->pos[axis];
+                    if (vert->pos[axis] > model->maxs[axis])
+                        model->maxs[axis] = vert->pos[axis];
+                }
+            }
+
+            vertCursor += sizeof(XSurfaceTempVert_t)
+                        + vert->numWeights
+                        * sizeof(XSurfaceBlendEntry_t);
+        }
+    }
+
+    return haveBounds;
+}
+
+/*
+================
+XModel_ReadHeader
+
+CoD4 v25 wire order:
+  u16 version, byte flags, float mins[3], float maxs[3]
+  physicsPreset C string
+  four { float distance, xmodelsurfs filename C string }
+  s32 collLod
+================
+*/
+int XModel_ReadHeader(const char *name, const unsigned char **pos,
+                      XModelConfig_t *config)
+{
+    short version;
+    int i;
+
+    memset(config, 0, sizeof(*config));
+    version = *(const short *)*pos;
+    *pos += 2;
+    if (version != 25)
+    {
+        Com_Printf("^1ERROR: xmodel '%s' out of date (version %i, expecting %i)\n",
+                   name, (int)version, 25);
+        return 0;
+    }
+
+    config->flags = **pos; *pos += 1;
+    config->mins[0] = *(const float *)*pos; *pos += 4;
+    config->mins[1] = *(const float *)*pos; *pos += 4;
+    config->mins[2] = *(const float *)*pos; *pos += 4;
+    config->maxs[0] = *(const float *)*pos; *pos += 4;
+    config->maxs[1] = *(const float *)*pos; *pos += 4;
+    config->maxs[2] = *(const float *)*pos; *pos += 4;
+
+    if (!XModelReadConfigString(name, pos,
+                                config->physicsPresetFilename,
+                                sizeof(config->physicsPresetFilename),
+                                "physics preset name"))
+        return 0;
+
+    for (i = 0; i < 4; i++)
+    {
+        config->entries[i].dist = *(const float *)*pos;
+        *pos += 4;
+        if (!XModelReadConfigString(name, pos,
+                                    config->entries[i].filename,
+                                    sizeof(config->entries[i].filename),
+                                    "LOD filename"))
+            return 0;
+    }
+
+    config->collLod = *(const int *)*pos;
+    *pos += 4;
+    return 1;
 }
 
 /*
 ================
 XModelLoadFile
 
-Reads the main xmodel file, allocates the XModel struct,
-parses collision surfaces, loads parts (bones), reads
-bone info (bounds/radius), and sets up LOD surface filenames.
-
-This is the master model loading function. Flow:
-  1. Read "xmodel/%s" file (fallback to "shadow" variant)
-  2. Parse header (version + basic fields)
-  3. Allocate XModel struct (256 + LOD string space)
-  4. Call XModelReadCollSurfs to parse collision data
-  5. Set up LOD filenames/numsurfs/surfNames in the model
-  6. Find or load xmodelparts (XModelPartsFindData / XModelPartsLoadFile)
-  7. Allocate and fill boneInfo array (bounds + radius per bone)
-  8. Copy mins/maxs/collLod from parsed header
-
-
-Note: the header parser and SL helper are not yet reconstructed.
+The main stream is consumed in the retail v25 order: config, collision data,
+a first pass over LOD material names, parts, per-bone bounds, then a second
+LOD pass that precaches surfaces and interns the material-name strings.
 ================
 */
 XModel_t *XModelLoadFile(const char *name, void *(*alloc)(int),
-                        void *(*allocColl)(int))
+                         void *(*allocColl)(int))
 {
     char filename[64];
     unsigned char *buf;
-    int fileSize;
     const unsigned char *pos;
-    unsigned char headerData[0x1080]; /* parsed header buffer */
+    const unsigned char *lodDataPos;
+    int fileSize;
+    XModelConfig_t config;
     int lodStringLens[4];
     int totalStringLen;
     int allocSize;
     XModel_t *model;
     XModelParts_t *parts;
-    const char *partsName;
+    XBoneInfo_t *boneInfo;
     int numBones;
-    int numLods;
     int i;
     int j;
 
+    buf = NULL;
     if (Com_sprintf(filename, sizeof(filename), "xmodel/%s", name) < 0)
     {
         Com_Printf("^1ERROR: filename '%s' too long\n", filename);
@@ -686,318 +682,222 @@ XModel_t *XModelLoadFile(const char *name, void *(*alloc)(int),
     }
 
     fileSize = FS_ReadFile(filename, (void **)&buf);
-
     if (fileSize < 0)
     {
         Assert(!buf, s_assertDisable_XModelLoadFile_buf);
-
-        /* try shadow model fallback */
-        if (strstr(name, "shadow"))
-            return NULL;
-
         Com_Printf("^1ERROR: xmodel '%s' not found\n", name);
         return NULL;
     }
-
-    if (fileSize == 0)
+    if (!fileSize)
     {
         Com_Printf("^1ERROR: xmodel '%s' has 0 length\n", name);
         FS_FreeFile(buf);
         return NULL;
     }
 
-    /* parse header (version check + basic model data) */
     pos = buf;
-    if (!XModel_ReadHeader(name, &pos, headerData))
+    if (!XModel_ReadHeader(name, &pos, &config))
     {
         FS_FreeFile(buf);
         return NULL;
     }
 
-    /* compute LOD filename string lengths */
     totalStringLen = 0;
     for (i = 0; i < 4; i++)
     {
-        lodStringLens[i] = (int)strlen((const char *)&headerData[i * 0x404]) + 1;
+        lodStringLens[i] = (int)strlen(config.entries[i].filename) + 1;
         totalStringLen += lodStringLens[i];
     }
 
-    /* allocate XModel: struct (256 bytes) + inline LOD strings */
-    allocSize = totalStringLen + 256;
+    allocSize = sizeof(XModel_t) + totalStringLen;
     model = (XModel_t *)alloc(allocSize);
+    memset(model, 0, allocSize);
     model->memUsage = allocSize;
 
-    /* read collision surfaces */
-    XModelReadCollSurfs(&pos, model, allocColl, name);
-
-    /* set up LOD filenames and surface data */
     {
-        char *stringDst = (char *)model + 256; /* inline strings after struct */
-        short numLodsCount = 0;
+        char *stringDst;
 
+        stringDst = (char *)(model + 1);
         for (i = 0; i < 4; i++)
         {
-            /* copy filename string inline */
-            const char *src = (const char *)&headerData[i * 0x404];
-            char *dst = stringDst;
-            while (*src)
-                *dst++ = *src++;
-            *dst = 0;
-
+            memcpy(stringDst, config.entries[i].filename,
+                   lodStringLens[i]);
             model->lodInfo[i].filename = stringDst;
-
-            if (*stringDst)
-            {
-                numLodsCount++;
-
-                /* read numsurfs from stream */
-                model->lodInfo[i].numsurfs = *(short *)pos;
-                pos += 2;
-
-                /* allocate and read surfNames */
-                int ns = model->lodInfo[i].numsurfs;
-                model->lodInfo[i].surfNames = (unsigned short *)alloc(ns * 2);
-                model->memUsage += ns * 2;
-
-                for (j = 0; j < ns; j++)
-                {
-                    /* read surface name via SL string lookup */
-                    int len = (int)strlen((const char *)pos) + 1;
-                    model->lodInfo[i].surfNames[j] = SL_GetStringOfLen((const char *)pos, 0, len, 8);
-                    pos += len;
-                }
-            }
-            else
-            {
-                model->lodInfo[i].surfNames = NULL;
-            }
-
-            /* read LOD distance from parsed header */
-            /* model->lodInfo[i].dist = headerData[...]; */
-
             stringDst += lodStringLens[i];
         }
-
-        model->numLods = numLodsCount;
-        Assert(model->numLods, s_assertDisable_XModelLoadFile_numLods);
     }
 
-    /* find or load xmodelparts */
-    partsName = model->lodInfo[0].filename;
+    XModelReadCollSurfs(&pos, model, allocColl, name);
 
-    /* try cache first (hunk type 3) */
-    parts = (XModelParts_t *)Hunk_FindDataForFile(3, partsName);
+    lodDataPos = pos;
+    model->numLods = 0;
+    for (i = 0; i < 4; i++)
+    {
+        if (config.entries[i].filename[0])
+        {
+            Assert(i == model->numLods,
+                   s_assertDisable_XModelLoadFile_numLods);
+            model->numLods++;
+            model->lodInfo[i].numsurfs =
+                *(const unsigned short *)pos;
+            pos += 2;
+            for (j = 0; j < model->lodInfo[i].numsurfs; j++)
+                pos += strlen((const char *)pos) + 1;
+        }
+    }
+    Assert(model->numLods, s_assertDisable_XModelLoadFile_numLods);
 
+    parts = XModelPartsFindData(config.entries[0].filename);
     if (!parts)
     {
-        parts = XModelPartsLoadFile(model, partsName, alloc);
-
-        if (!parts)
-        {
-            Com_Printf("^1ERROR: Cannot find xmodelparts '%s'.\n", partsName);
-        }
-        else
-        {
-            Hunk_AddDataForFile(3, partsName, parts, alloc);
-        }
+        parts = XModelPartsLoadFile(model, config.entries[0].filename,
+                                    alloc);
+        if (parts)
+            XModelPartsSetData(config.entries[0].filename, parts, alloc);
     }
-
+    if (!parts)
+    {
+        Com_Printf("^1ERROR: Cannot find xmodelparts '%s'.\n",
+                   config.entries[0].filename);
+        FS_FreeFile(buf);
+        XModelFree(model);
+        return NULL;
+    }
     model->parts = parts;
 
-    if (!parts)
+    numBones = parts->numBones;
+    boneInfo = (XBoneInfo_t *)alloc(numBones * sizeof(XBoneInfo_t));
+    model->memUsage += numBones * sizeof(XBoneInfo_t);
+    for (i = 0; i < numBones; i++)
     {
+        float dx;
+        float dy;
+        float dz;
+
+        boneInfo[i].bounds[0][0] = *(const float *)pos; pos += 4;
+        boneInfo[i].bounds[0][1] = *(const float *)pos; pos += 4;
+        boneInfo[i].bounds[0][2] = *(const float *)pos; pos += 4;
+        boneInfo[i].bounds[1][0] = *(const float *)pos; pos += 4;
+        boneInfo[i].bounds[1][1] = *(const float *)pos; pos += 4;
+        boneInfo[i].bounds[1][2] = *(const float *)pos; pos += 4;
+
+        boneInfo[i].offset[0] =
+            (boneInfo[i].bounds[0][0] + boneInfo[i].bounds[1][0]) * 0.5f;
+        boneInfo[i].offset[1] =
+            (boneInfo[i].bounds[0][1] + boneInfo[i].bounds[1][1]) * 0.5f;
+        boneInfo[i].offset[2] =
+            (boneInfo[i].bounds[0][2] + boneInfo[i].bounds[1][2]) * 0.5f;
+        dx = boneInfo[i].bounds[1][0] - boneInfo[i].offset[0];
+        dy = boneInfo[i].bounds[1][1] - boneInfo[i].offset[1];
+        dz = boneInfo[i].bounds[1][2] - boneInfo[i].offset[2];
+        boneInfo[i].radiusSquared = dx * dx + dy * dy + dz * dz;
+    }
+    model->boneInfo = boneInfo;
+
+    pos = lodDataPos;
+    for (i = 0; i < 4; i++)
+    {
+        XModelSurfs_t *surfs;
+        int fileNumSurfs;
+        int numSurfs;
+
+        if (!config.entries[i].filename[0])
+            continue;
+
+        fileNumSurfs = *(const unsigned short *)pos;
+        pos += 2;
+        if (fileNumSurfs != model->lodInfo[i].numsurfs)
+        {
+            Com_Printf("^1ERROR: xmodel '%s' LOD surface count changed while loading\n",
+                       name);
+            FS_FreeFile(buf);
+            XModelFree(model);
+            return NULL;
+        }
+
+        surfs = XModelSurfsPrecacheData(
+            model, config.entries[i].filename, alloc,
+            model->lodInfo[i].numsurfs, name);
+        if (!surfs)
+        {
+            FS_FreeFile(buf);
+            XModelFree(model);
+            return NULL;
+        }
+        model->lodInfo[i].modelSurfs = surfs;
+
+        numSurfs = model->lodInfo[i].numsurfs;
+        if (numSurfs)
+        {
+            model->lodInfo[i].surfNames = (unsigned short *)alloc(
+                numSurfs * sizeof(unsigned short));
+            model->memUsage += numSurfs * sizeof(unsigned short);
+        }
+
+        for (j = 0; j < numSurfs; j++)
+        {
+            const char *wireName;
+            const char *materialName;
+            int wireLen;
+            int materialLen;
+
+            wireName = (const char *)pos;
+            wireLen = (int)strlen(wireName) + 1;
+            pos += wireLen;
+            materialName = !strcmp(wireName, "$default")
+                         ? "$default3d" : wireName;
+            materialLen = (int)strlen(materialName) + 1;
+            model->lodInfo[i].surfNames[j] = (unsigned short)
+                SL_GetStringOfLen(materialName, 0, materialLen, 8);
+        }
+    }
+
+    if (!XModelSetBoundsFromLod0Surfaces(model))
+    {
+        Com_Printf("^1ERROR: xmodel '%s' has no LOD0 vertices\n", name);
         FS_FreeFile(buf);
         XModelFree(model);
         return NULL;
     }
 
-    /* allocate and fill boneInfo array */
-    numBones = parts->numBones;
-    {
-        int boneInfoSize = numBones * 40; /* XBoneInfo = 40 bytes */
-        XBoneInfo_t *boneInfo = (XBoneInfo_t *)alloc(boneInfoSize);
-        model->memUsage += boneInfoSize;
-
-        for (i = 0; i < numBones; i++)
-        {
-            /* read 6 floats: bounds[0][3] and bounds[1][3] from stream */
-            float b0 = *(float *)pos; pos += 4;
-            float b1 = *(float *)pos; pos += 4;
-            float b2 = *(float *)pos; pos += 4;
-            float b3 = *(float *)pos; pos += 4;
-            float b4 = *(float *)pos; pos += 4;
-            float b5 = *(float *)pos; pos += 4;
-
-            boneInfo[i].bounds[0][0] = b0;
-            boneInfo[i].bounds[0][1] = b1;
-            boneInfo[i].bounds[0][2] = b2;
-            boneInfo[i].bounds[1][0] = b3;
-            boneInfo[i].bounds[1][1] = b4;
-            boneInfo[i].bounds[1][2] = b5;
-
-            /* compute offset = center of bounds */
-            boneInfo[i].offset[0] = (b0 + b3) * 0.5f;
-            boneInfo[i].offset[1] = (b1 + b4) * 0.5f;
-            boneInfo[i].offset[2] = (b2 + b5) * 0.5f;
-
-            /* compute radiusSquared */
-            float dx = b3 - boneInfo[i].offset[0];
-            float dy = b4 - boneInfo[i].offset[1];
-            float dz = b5 - boneInfo[i].offset[2];
-            boneInfo[i].radiusSquared = dx * dx + dy * dy + dz * dz;
-        }
-
-        model->boneInfo = boneInfo;
-    }
-
     FS_FreeFile(buf);
 
-    /* copy mins/maxs from parsed header */
-    model->mins[0] = *(float *)&headerData[0x1010];
-    model->mins[1] = *(float *)&headerData[0x1014];
-    model->mins[2] = *(float *)&headerData[0x1018];
-    model->maxs[0] = *(float *)&headerData[0x101C];
-    model->maxs[1] = *(float *)&headerData[0x1020];
-    model->maxs[2] = *(float *)&headerData[0x1024];
-
-    /* set collLod and flags from header */
-    model->collLod = *(short *)&headerData[0x1028];
+    Assert(config.collLod == (short)config.collLod,
+           s_assertDisable_XModelLoadFile_collLod);
+    model->collLod = (short)config.collLod;
     Assert(model->collLod < model->numLods,
            s_assertDisable_XModelLoadFile_collLod);
+    model->flags = config.flags;
 
-    model->flags = headerData[0x102C];
-
+    /* The game uses config.maxs[0] as model radius after recomputing the AABB
+     * from LOD0 vertices.  cod4rad has no radius, PhysPreset, or PhysGeom
+     * consumers; the config fields were still consumed to preserve alignment. */
     return model;
 }
 
-/*
-================
-XModelSurfsLoad
-
-Loads surface data for all LOD levels of a model.
-For each LOD with a non-empty filename: finds cached surfs
-or loads from disk via XModelSurfsLoadFile, then caches.
-Returns true if all LODs loaded successfully.
-
-================
-*/
 int XModelSurfsLoad(XModel_t *model, void *(*alloc)(int))
 {
     int i;
-    const char *filename;
-    XModelSurfs_t *surfs;
 
     Assert(model, s_assertDisable_XModelSurfsLoad);
     Assert(model->lodInfo[0].filename[0],
            s_assertDisable_XModelSurfsLoad_filename);
 
-    for (i = 0; i < 4; i++)
+    for (i = 0; i < model->numLods; i++)
     {
-        filename = model->lodInfo[i].filename;
-        if (!*filename)
-            break;
+        XModelSurfs_t *surfs;
 
-        surfs = (XModelSurfs_t *)Hunk_FindDataForFile(2, filename);
+        if (model->lodInfo[i].modelSurfs)
+            continue;
 
-        if (!surfs)
-        {
-            surfs = XModelSurfsLoadFile(model, filename, alloc,
-                        model->lodInfo[i].numsurfs, model->name);
-
-            if (!surfs)
-            {
-                Com_Printf("^1ERROR: Cannot find 'xmodelsurfs '%s'.\n", filename);
-            }
-            else
-            {
-                Hunk_AddDataForFile(2, filename, surfs, alloc);
-            }
-        }
-
-        model->lodInfo[i].modelSurfs = surfs;
-
+        surfs = XModelSurfsPrecacheData(
+            model, model->lodInfo[i].filename, alloc,
+            model->lodInfo[i].numsurfs,
+            model->name ? model->name : model->lodInfo[i].filename);
         if (!surfs)
             return 0;
+        model->lodInfo[i].modelSurfs = surfs;
     }
-
-    return 1;
-}
-
-/*
-================
-XModel_ReadHeader
-
-Reads the xmodel file header: version check, LOD filenames
-with distances, model bounds, and collLod.
-
-headerBuffer layout (0x1030 bytes):
-  +0x0000  LOD 0: char filename[0x400] + float dist
-  +0x0404  LOD 1: char filename[0x400] + float dist
-  +0x0808  LOD 2: char filename[0x400] + float dist
-  +0x0C0C  LOD 3: char filename[0x400] + float dist
-  +0x1010  float mins[3]
-  +0x101C  float maxs[3]
-  +0x1028  int collLod
-  +0x102C  byte numLods
-
-================
-*/
-int XModel_ReadHeader(const char *name, const unsigned char **pos,
-                       unsigned char *headerBuffer)
-{
-    short version;
-    int i;
-
-    /* read and check version */
-    version = *(short *)*pos;
-    *pos += 2;
-
-    if (version != 20)
-    {
-        Com_Printf("^1ERROR: xmodel '%s' out of date (version %i, expecting %i)\n",
-                    name, (int)version, 20);
-        return 0;
-    }
-
-    /* read numLods byte */
-    headerBuffer[0x102C] = **pos;
-    *pos += 1;
-
-    /* read 7 floats: mins[3], maxs[3], radius */
-    for (i = 0; i < 6; i++) /* mins[3] + maxs[3], no 7th float */
-    {
-        *(float *)&headerBuffer[0x1010 + i * 4] = *(float *)*pos;
-        *pos += 4;
-    }
-
-    /* read 4 LOD entries: distance float + filename string */
-    for (i = 0; i < 4; i++)
-    {
-        int base = i * 0x404;
-        char *dst;
-
-        /* read LOD distance float */
-        *(float *)&headerBuffer[base + 0x400] = *(float *)*pos;
-        *pos += 4;
-
-        /* copy filename string (binary copies locally, then advances pos via strlen) */
-        {
-            const unsigned char *strStart = *pos;
-            dst = (char *)&headerBuffer[base];
-            while (*strStart)
-            {
-                *dst++ = (char)*strStart++;
-            }
-            *dst = 0;
-
-            /* advance pos past the string + null terminator */
-            *pos += (int)strlen((const char *)*pos) + 1;
-        }
-    }
-
-    /* read collLod int */
-    *(int *)&headerBuffer[0x1028] = *(int *)*pos;
-    *pos += 4;
 
     return 1;
 }

@@ -124,6 +124,13 @@ int  AdvPatchEdit_GetMode()                 { return s_advMode; }
 bool AdvPatchEdit_GetChannel( int idx )     { return ( idx >= 0 && idx < 6 ) ? s_advChan[idx] : false; }
 void AdvPatchEdit_SetChannel( int idx, bool on ) { if ( idx >= 0 && idx < 6 ) s_advChan[idx] = on; }
 
+// KIWI-UX: stroke DIRECTION for Raise/Lower (mode 0).  The binary signed the stroke by
+// the mouse button (LMB raise, RMB lower), but Alt+RMB is the mouselook in the modern
+// shell, so the RMB half is unreachable — this panel toggle is the replacement sign.
+static bool s_advLower = false;
+bool AdvPatchEdit_GetLower()            { return s_advLower; }
+void AdvPatchEdit_SetLower( bool low )  { s_advLower = low; }
+
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  ShowInfoDialog (0x40BE90) — the modeless "Information" state prompt.
@@ -249,7 +256,10 @@ void sub_43E6F0( int buttons, int origin, int dir )
         Radiant_FL_Log( "PAINT sub_43E6F0 btn=%d: cell pick MISSED (no terrain under cursor)", buttons );
         return;
     }
-    const float sign = ( buttons == 1 ) ? 1.0f : -1.0f;
+    float sign = ( buttons == 1 ) ? 1.0f : -1.0f;
+    // KIWI-UX: the panel's Lower toggle inverts the (LMB-only) stroke — see s_advLower.
+    if ( AdvPatchEdit_GetLower() )
+        sign = -sign;
 
     // Channel mask from the dialog checkboxes (1469 Height, 1470 Color-all, 1471/72/73 B/G/R, 1474 A).
     int mask = AdvDlg_IsChecked( 1469 ) ? 1 : 0;
