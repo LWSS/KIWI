@@ -22,6 +22,8 @@
 #include "kiwi_patchfillet.h"
 #include "kiwi_focus.h"
 #include "kiwi_grass.h"
+#include "kiwi_terrain.h"
+#include "kiwi_decal.h"
 #include "kiwi_lines.h"
 #include "kiwi_loft.h"
 #include "kiwi_offset.h"
@@ -430,6 +432,8 @@ namespace
         { 33005, { "Drag Vertices",             "Transform", 0, nullptr           } },
         { 33006, { "Drag Edges",                "Transform", 0, nullptr           } },
         { KIWI_CMD_GRASS_PANEL, { "Grass Scatter", "Modeling", 0, nullptr        } },
+        { KIWI_CMD_TERRAIN_PANEL, { "Terrain Sculpt", "Modeling", 0, nullptr      } },
+        { KIWI_CMD_WINDOW_DECALS, { "Decals", "Windows", 0, nullptr                } },
     };
 
     // Built-in modal lifecycle probe. It intentionally mutates nothing and opens no undo.
@@ -729,6 +733,8 @@ namespace
         case KIWI_CMD_WINDOW_SUN:                       // the Sun tab — likewise
         case KIWI_CMD_WINDOW_LIGHT:                     // the Light tab — likewise
         case KIWI_CMD_WINDOW_INSPECTOR:                 // the Inspector tab — likewise
+        case KIWI_CMD_WINDOW_DECALS:                    // the Decals tab — likewise
+        case KIWI_CMD_TERRAIN_PANEL:                    // a panel toggle, not a verb
         case KIWI_CMD_ENT_DROP:
         case KIWI_CMD_MODEL_DROP:
         case KIWI_CMD_PLASTICITY_PUSH:                 // external export, not a modelling replay
@@ -1382,6 +1388,11 @@ bool KiwiUX_KeyFunnel( unsigned int vk )
         return true;
     }
 
+    // Armed paint tools: Esc disarms; Terrain Sculpt also takes + / - for its radius.
+    if ( KiwiTerrain_HandleKey( vk ) )
+        return true;
+    if ( vk == 0x1B && KiwiDecal_HandleEscape() )
+        return true;
     if ( vk == 0x1B && KiwiGrass_HandleEscape() )   // VK_ESCAPE: disarm the paint tool
         return true;
 

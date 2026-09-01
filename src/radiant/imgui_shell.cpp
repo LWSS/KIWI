@@ -29,7 +29,8 @@
 #include <unordered_map>
 #include <string>
 #include <imgui/imgui.h>
-#include <imgui/imgui_internal.h>     // DockBuilder API + GetCurrentWindow (auto-close)
+#include <imgui/imgui_internal.h>
+#include "kiwi_material.h"          // KMTL_PAYLOAD (texture-browser drag)     // DockBuilder API + GetCurrentWindow (auto-close)
 #include <imgui/backends/imgui_impl_win32.h>
 #include <imgui/backends/imgui_impl_dx9.h>
 
@@ -390,6 +391,10 @@ static unsigned int VP_Flags()
     return f;
 }
 
+// Texture-browser press bookkeeping for the release-time apply (see VP_Down/VP_Up).
+static int  s_texPressX = 0, s_texPressY = 0;
+static bool s_texPressPending = false;
+
 static void VP_Down( rttViewport_t id, HWND hw, int btn, unsigned int f, int x, int y )
 {
     switch ( id )
@@ -408,7 +413,10 @@ static void VP_Down( rttViewport_t id, HWND hw, int btn, unsigned int f, int x, 
         else if ( btn == 1 ) ZWnd_OnRButtonDown( hw, f, x, y );
         break;
     case RTT_TEXTURE:
-        if ( btn == 0 ) TexWnd_OnLButtonDown( x, y );
+        // KIWI-UX: the thumbnail click APPLIES on release, not press, so a drag out of
+        // the browser (material drag-and-drop onto the terrain / decal panels) never
+        // re-textures the selection on the way out.  Press only records the spot.
+        if ( btn == 0 ) { s_texPressX = x; s_texPressY = y; s_texPressPending = true; }
         else if ( btn == 1 ) TexWnd_OnRButtonDown( f, x, y );
         break;
     default: break;
@@ -433,7 +441,14 @@ static void VP_Up( rttViewport_t id, HWND hw, int btn, unsigned int f, int x, in
         else if ( btn == 1 ) ZWnd_OnRButtonUp( f );
         break;
     case RTT_TEXTURE:
-        if ( btn == 1 ) TexWnd_OnRButtonUp( f, x, y );
+        if ( btn == 0 && s_texPressPending )
+        {
+            s_texPressPending = false;
+            const int dx = x - s_texPressX, dy = y - s_texPressY;
+            if ( dx > -4 && dx < 4 && dy > -4 && dy < 4 )
+                TexWnd_OnLButtonDown( s_texPressX, s_texPressY );   // the ported click-apply
+        }
+        else if ( btn == 1 ) TexWnd_OnRButtonUp( f, x, y );
         break;
     default: break;
     }
@@ -1017,6 +1032,28 @@ static void ImGuiShell_DrawViewportImage( rttViewport_t id, kiwiWindow_t win )
                 if ( id == RTT_CAMERA )
                     KiwiEntBrowser_CameraDropTarget( s_imgMin[id].x, s_imgMin[id].y );
                 if ( id == RTT_CAMERA ) KiwiModelBrowser_CameraDropTarget( s_imgMin[id].x, s_imgMin[id].y ); // KIWI-UX
+                // KIWI-UX: the texture browser is a DRAG SOURCE.  Dragging a thumbnail out
+                // carries its material name (KMTL_PAYLOAD) to the Terrain Sculpt layer list
+                // and the Decals window.  The hit test runs at the PRESS position, in the
+                // RT's own pixels (the image is drawn 1:1 at the RT size).
+                if ( id == RTT_TEXTURE
+                  && ImGui::BeginDragDropSource( ImGuiDragDropFlags_SourceAllowNullID ) )
+                {
+                    extern int         TexWnd_HitTest( int px, int py );   // texwnd.cpp
+                    extern qtexture_s *TexWnd_MaterialAt( int idx );       // texwnd.cpp
+                    const ImVec2 press = ImGui::GetIO().MouseClickedPos[0];
+                    const int    px = (int)( press.x - s_imgMin[id].x );
+                    const int    py = (int)( press.y - s_imgMin[id].y );
+                    qtexture_s  *q  = TexWnd_MaterialAt( TexWnd_HitTest( px, py ) );
+                    if ( q && q->name )
+                    {
+                        ImGui::SetDragDropPayload( KMTL_PAYLOAD, q->name, strlen( q->name ) + 1 );
+                        ImGui::TextUnformatted( q->name );
+                    }
+                    else
+                        ImGui::TextDisabled( "(no material under the press)" );
+                    ImGui::EndDragDropSource();
+                }
                 // ═══════════════════════════════════════════════════════════
                 //  KIWI-UX (ROUND Y, ITEM 6) — A FOCUSED TEXT FIELD WAS
                 //  SWALLOWING THE FIRST CLICK INTO THE VIEWPORT.
@@ -1388,6 +1425,7 @@ static void ImGuiShell_BuildDefaultDockLayout( ImGuiID dockId )
     // placement take effect for profiles that already had the Sun layout.
     ImGui::DockBuilderDockWindow( "Light",            rightBottom );
     ImGui::DockBuilderDockWindow( "Inspector",         rightBottom ); // KIWI-UX
+    ImGui::DockBuilderDockWindow( "Decals",           rightBottom ); // KIWI-UX decal placement
 
     ImGui::DockBuilderFinish( dockId );
 }
@@ -1635,6 +1673,10 @@ void ImGuiShell_DrawOverlay( IDirect3DDevice9 *device, HWND activeHwnd )
     // this function as well as on screen.
     KiwiSun_Draw();
     KiwiLight_Draw();
+    {
+        extern void KiwiDecal_Draw();     // kiwi_decal.cpp — the Decals dock window
+        KiwiDecal_Draw();
+    }
     extern void ImGuiPanel_Entity_Draw(); // imgui_panel_entity.cpp
     ImGuiPanel_Entity_Draw(); // KIWI-UX
     // KIWI-UX (ROUND BE): the TEXTURE IMPORT WIZARD.  Not a dock window — a MODAL POPUP

@@ -8,6 +8,8 @@
 
 void KiwiGrass_MenuItem();
 void KiwiGrass_Draw();
+void KiwiGrass_DrawSettings();     // panel body, drawn by the Terrain Sculpt Grass mode
+void KiwiGrass_SetArmed( bool armed );
 
 // Windows-menu / palette route (KIWI_CMD_GRASS_PANEL).
 void KiwiGrass_TogglePanel();

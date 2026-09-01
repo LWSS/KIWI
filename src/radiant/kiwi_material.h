@@ -33,6 +33,9 @@
 // visual build, or a selectable patch can have no visuals.
 // The classic Ed_ProduceSplitLists clipper remains unchanged and still emits caulk.
 
+// ImGui drag payload from the Textures tab: the material NAME (NUL-terminated).
+#define KMTL_PAYLOAD "KIWI_MATERIAL"
+
 struct brush_t;
 struct face_t;
 struct patchMesh_t;

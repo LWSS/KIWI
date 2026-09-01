@@ -154,6 +154,7 @@ patchMesh_t *MakeNewPatch()
     p->pSymbiot = nullptr;
     p->version  = 0;
     p->xx22b    = false;
+    memset( p->kiwiLayer, 0, sizeof( p->kiwiLayer ) );   // KIWI: no texture layers
     return p;
 }
 
@@ -995,6 +996,27 @@ brush_t *Patch_ParseMesh( const char **text, int version, int isMesh )
     Map_ParseEntityLayerKey( text, "smoothing_smooth", smoothBuf, "smoothing" );
     SetMaterial( smoothBuf, &p->smoothing );
 
+    // KIWI texture layers: "kiwilayer <slot> <material>" lines, any count, any order.
+    memset( p->kiwiLayer, 0, sizeof( p->kiwiLayer ) );
+    for ( ;; )
+    {
+        parseInfo_t *tok = Com_Parse( text );
+        if ( strcmp( tok->token, "kiwilayer" ) )
+        {
+            Com_UngetToken();
+            break;
+        }
+        const int slot = (int)j__atol( Com_ParseOnLine( text )->token );
+        pi->parseInfo[pi->parseInfoNum].spaceDelimited = 1;
+        parseInfo_t *nameTok = Com_ParseOnLine( text );
+        pi->parseInfo[pi->parseInfoNum].spaceDelimited = 0;
+        if ( slot >= 0 && slot < 4 )
+        {
+            strncpy( p->kiwiLayer[slot], nameTok->token, 63 );
+            p->kiwiLayer[slot][63] = 0;
+        }
+    }
+
     // params:  <width> <height> <size> <subDivType>
     p->width  = Com_ParseInt( text );
     p->height = (int)j__atol( Com_ParseOnLine( text )->token );
@@ -1141,6 +1163,10 @@ int Patch_Write( WriteWriter_t writer, patchMesh_t *p )
     const char *smName = (const char *)Materialdef_GetName( (MaterialDef *)&p->smoothing );
     if ( strcmp( smName, "smoothing_smooth" ) )
         WRITE( writer, "   smoothing %s\n", smName );
+    // KIWI texture layers (patchMesh_t.kiwiLayer): one optional line per used slot.
+    for ( int slot = 0; slot < 4; ++slot )
+        if ( p->kiwiLayer[slot][0] )
+            WRITE( writer, "   kiwilayer %i %s\n", slot, p->kiwiLayer[slot] );
 
     // IDA uses plain "%g" for the LOD size (6 sig figs); stock patch sizes are
     // integer-valued (0 in blackout) so no exponent arises — match IDA verbatim.
@@ -9991,10 +10017,21 @@ static void Patch_Fill_BuildVisuals( patch_t *inst, const orientation_t *orient,
                             xyz, normal, st, tangent, binormal ); // 0x4400e4
 
     // Upload one VB run per layer + record {material, vertHandle} (0x4400f6 loop).
+    // Runs past the material def's own layer count are KIWI texture layers: their
+    // material is the layer's alpha-blend twin and their vertex alpha is the weight
+    // channel (kiwi_terrain.cpp rewrites `color` per run).
+    const int baseRuns = MaterialDef_11( mtldef );
     for ( int L = 0; L < inst->visCount; ++L )
     {
-        Material *lmat = MaterialDef_14( (unsigned)L, mtldef );
-        KiwiMatConvert_ApplyPatchLightmapDiagnostic( inst->def, color, vertCount, &lmat ); // KIWI-UX: non-lit base material replaces the checker with red
+        Material *lmat = MaterialDef_14( (unsigned)( L < baseRuns ? L : 0 ), mtldef );
+        if ( L < baseRuns )
+            KiwiMatConvert_ApplyPatchLightmapDiagnostic( inst->def, color, vertCount, &lmat ); // KIWI-UX: non-lit base material replaces the checker with red
+        {
+            extern void KiwiTerrain_LayerUpload( patchMesh_t *def, int run, int baseRuns,
+                                                 unsigned int *color, const curveVert_t *verts,
+                                                 int vertCount, Material **material );
+            KiwiTerrain_LayerUpload( inst->def, L, baseRuns, color, src, vertCount, &lmat );
+        }
         inst->visArray[L].material   = lmat;
         inst->visArray[L].vertHandle = (int)Editor_VB_Upload( lmat, vertCount,
             xyz, tangent, binormal, normal, st, (const float *)color );
@@ -10130,7 +10167,12 @@ static void Patch_BuildInstanceVisuals( patch_t *inst, const orientation_t *orie
     // realize it by name now that the renderer is up, else the filled draw has nothing to bind.
     extern bool Materialdef_Realize( MaterialDef *md );  // materialdef.cpp
     Materialdef_Realize( mtldef );
-    const int layerCount = MaterialDef_11( mtldef );
+    // KIWI texture layers: one extra blended run per used slot (preview only; the .map
+    // keeps one patch).  Only the base material def carries them (edit layer 0).
+    extern int KiwiTerrain_ExtraLayerCount( patchMesh_t *def );   // kiwi_terrain.cpp
+    const int baseLayers = MaterialDef_11( mtldef );
+    const int layerCount = baseLayers
+                         + ( g_qeglobals.current_edit_layer == 0 ? KiwiTerrain_ExtraLayerCount( inst->def ) : 0 );
     inst->visCount = layerCount;
     if ( layerCount <= 0 ) { inst->visArray = nullptr; return; }
     inst->visArray = (patchVisuals_s *)operator new( (size_t)( 8 * layerCount ) );
@@ -10458,7 +10500,10 @@ bool DrawPatches( patch_t *inst, const orientation_t *orient, int techType, int 
     if ( !MaterialDef_15_Drawflag_Multiply( drawFlags, mtldef ) )
         return true;
 
-    const int patchWireframe = g_PrefsDlg->patch_wireframe;
+    // KIWI Terrain Sculpt paint modes hide the wireframe (both the selected white
+    // grid below and the unselected grid pass) by reading the pref as "off".
+    extern bool KiwiTerrain_HideWireframe();   // kiwi_terrain.cpp (Tab toggles)
+    const int patchWireframe = KiwiTerrain_HideWireframe() ? 0 : g_PrefsDlg->patch_wireframe;
     const bool drawFront = patchWireframe == 0 || ( patchWireframe == 2 && techType != 29 );
     if ( drawFront )
         Patch_Fill_Emit( inst, nullptr, PM_FRONT_FACE, techType );          // 0x44153E
@@ -10599,5 +10644,46 @@ void Patch_KiwiEnsureLmapCoords( patchMesh_t *p )
     else           PMESH_02( p, 1, 16.0f );
     *(float *)&p->size_of_struct_0x504C = 16.0f;
     p->bDirty = 1;
+    ++p->version;
+}
+
+// ── KIWI Terrain Sculpt / Decals bridge (kiwi_terrain.cpp, kiwi_decal.cpp) ─────
+//  Non-static entry points over the two file-static halves of the ported paint undo
+//  chain, so the KIWI tools bracket a stroke exactly like the original Alt+LMB paint:
+//  Patch_Paint (clear xx22b) -> first touch: Patch_PaintMarkUndo -> release:
+//  Patch_PaintFinish (PMESH_18 tags the touched defs with the undo id).  Appended at
+//  the END of the file on purpose so no pmesh.cpp:NNN citation elsewhere shifts.
+void Patch_PaintMarkUndo( patchMesh_t *def )
+{
+    if ( def && def->pSymbiot )
+        sub_45E770( def->pSymbiot );
+}
+
+void Patch_PaintFinish( selbrush_t *list )
+{
+    if ( list )
+        PMESH_18( list );
+}
+
+// ── KIWI Terrain Sculpt: texture + tessellate a freshly built control grid ─────────
+//  The Create_Terrain / Patch_GenericMesh tail (naturalize layer 0, project layers 1/2,
+//  seed the sample size, build curveDef) for patches the terrain tools construct
+//  themselves (split chunks, expander chunks).  `texScale` is the layer-0 natural
+//  scale (random_texture_stuff[0].sampleSize, 0.25 when unset).
+void Patch_KiwiTextureAndBuild( patchMesh_t *p, float texScale )
+{
+    if ( !p )
+        return;
+    if ( texScale <= 0.0f )
+        texScale = 0.25f;
+    Patch_Naturalize2( p, 0, texScale, texScale );
+    const bool terrain = ( p->type & PATCH_TERRAIN ) != 0;
+    if ( terrain ) Patch_TerrainTexProject( p, 1, 16.0f );
+    else           PMESH_02( p, 1, 16.0f );
+    *(float *)&p->size_of_struct_0x504C = 16.0f;
+    p->bDirty = 1;
+    if ( terrain ) Patch_TerrainTexProject( p, 2, 0.25f );
+    else           PMESH_02( p, 2, 0.25f );
+    Patch_BuildCurveDef( p );
     ++p->version;
 }

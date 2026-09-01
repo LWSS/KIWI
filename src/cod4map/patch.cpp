@@ -448,6 +448,9 @@ Parses a mesh/curve from the map file
 */
 #define MAX_PATCH_SIZE 32
 
+/* KIWI texture-layer scratch: the parsed vertex colours of the patch being read. */
+static int *g_kiwiLayerColorCopy = NULL;
+static int  g_kiwiLayerColorCopyCount = 0;
 static void ParsePatchLayer(char **parsePtr)
 {
   char layerName[1028];
@@ -580,7 +583,31 @@ Patch_t *ParsePatch(double unused, char **parsePtr, int patchType, float *transf
   strcpy(lmMatName, COM_Parse(parsePtr));
   Com_SetSpaceDelimited(0);
   smoothing = ParsePatchSmoothing(parsePtr);
-
+  /* KIWI texture layers: "kiwilayer <slot> <material>" (slot 0..3 = weight in the
+     vertex colour channel r,g,b,a).  Expanded below into the stock layered form —
+     one duplicate patch per layer wearing that material with alpha = the channel —
+     so the coalescer sees exactly what a hand-duplicated CoD4 terrain gives it. */
+  char kiwiLayerName[4][MAX_QPATH];
+  memset(kiwiLayerName, 0, sizeof(kiwiLayerName));
+  for (;;)
+  {
+    char *ktok = COM_Parse(parsePtr);
+    int kslot;
+    if (strcmp(ktok, "kiwilayer"))
+    {
+      Com_UngetToken();
+      break;
+    }
+    kslot = COM_ParseInt(parsePtr);
+    Com_SetSpaceDelimited(1);
+    ktok = COM_ParseExt(parsePtr);
+    Com_SetSpaceDelimited(0);
+    if (kslot >= 0 && kslot < 4 && ktok && *ktok)
+    {
+      strncpy(kiwiLayerName[kslot], ktok, MAX_QPATH - 1);
+      kiwiLayerName[kslot][MAX_QPATH - 1] = 0;
+    }
+  }
   width = COM_ParseInt(parsePtr);
   height = COM_ParseInt(parsePtr);
   COM_ParseInt(parsePtr);
@@ -610,7 +637,18 @@ Patch_t *ParsePatch(double unused, char **parsePtr, int patchType, float *transf
     return NULL;
 
   MergePatchVertexPositions(verts, width * height);
-
+  /* KIWI: keep the parsed colours (the layer weights) before the base is whitened. */
+  {
+    int vi;
+    if (g_kiwiLayerColorCopyCount < width * height)
+    {
+      free(g_kiwiLayerColorCopy);
+      g_kiwiLayerColorCopy = malloc(sizeof(int) * width * height);
+      g_kiwiLayerColorCopyCount = width * height;
+    }
+    for (vi = 0; vi < width * height; ++vi)
+      g_kiwiLayerColorCopy[vi] = verts[vi].color;
+  }
   /* create patch structure */
   patch = malloc(sizeof(Patch_t));
   memset(patch, 0, sizeof(Patch_t));
@@ -640,12 +678,68 @@ Patch_t *ParsePatch(double unused, char **parsePtr, int patchType, float *transf
   if ( brushFlags & CONTENTS_NONCOLLIDING )
     patch->surfaceFlags |= CONTENTS_NONCOLLIDING;
   patch->contentFlags = toolFlags | patch->material->toolFlagsWord;
-  NormalizePatchVertexColors(patch);
-
-  /* link into entity's patch list */
-  patch->next = g_currentEntity->patches;
-  g_currentEntity->patches = patch;
-
+  {
+    int anyLayer = 0, kslot;
+    for (kslot = 0; kslot < 4; ++kslot)
+      if (kiwiLayerName[kslot][0])
+        anyLayer = 1;
+    if (anyLayer)
+    {
+      /* The base of a layered patch carries no weight of its own: its colour is the
+         weight store.  Give the compiler the white/opaque base a stock map has. */
+      int vi;
+      for (vi = 0; vi < width * height; ++vi)
+        verts[vi].color = (int)0xFFFFFFFFu;
+    }
+    NormalizePatchVertexColors(patch);
+    /* link into entity's patch list */
+    patch->next = g_currentEntity->patches;
+    g_currentEntity->patches = patch;
+    if (anyLayer)
+    {
+      /* Base first, then the layers in slot order — the same prepend sequence a
+         hand-duplicated terrain written base-first goes through. */
+      for (kslot = 0; kslot < 4; ++kslot)
+      {
+        Patch_t *layer;
+        MeshVert_t *lverts;
+        int *lindices;
+        int vi;
+        if (!kiwiLayerName[kslot][0])
+          continue;
+        lverts = malloc(sizeof(MeshVert_t) * width * height);
+        lindices = malloc(sizeof(int) * width * height);
+        memcpy(lverts, verts, sizeof(MeshVert_t) * width * height);
+        memcpy(lindices, indices, sizeof(int) * width * height);
+        for (vi = 0; vi < width * height; ++vi)
+        {
+          /* weight = this slot's channel of the ORIGINAL colour: the parser stores the
+             file's b g r a into color[2],[1],[0],[3], so byte kslot is r,g,b,a. */
+          unsigned char *c = (unsigned char *)&lverts[vi].color;
+          c[3] = ((unsigned char *)&g_kiwiLayerColorCopy[vi])[kslot];
+          c[0] = c[1] = c[2] = 255;
+        }
+        layer = malloc(sizeof(Patch_t));
+        memcpy(layer, patch, sizeof(Patch_t));
+        layer->material = LoadMaterial(kiwiLayerName[kslot]);
+        layer->vertexData = lverts;
+        layer->indexData = lindices;
+        layer->surfaceFlags = layer->material->contentFlags;
+        if ( brushFlags & (CONTENTS_CLIPSHOT | CONTENTS_MISSILECLIP) )
+          layer->surfaceFlags = layer->material->contentFlags & ~(CONTENTS_DETAIL | CONTENTS_SOLID);
+        if ( brushFlags & CONTENTS_CLIPSHOT )
+          layer->surfaceFlags |= CONTENTS_CLIPSHOT;
+        if ( brushFlags & CONTENTS_MISSILECLIP )
+          layer->surfaceFlags |= CONTENTS_MISSILECLIP;
+        if ( brushFlags & CONTENTS_NONCOLLIDING )
+          layer->surfaceFlags |= CONTENTS_NONCOLLIDING;
+        layer->contentFlags = toolFlags | layer->material->toolFlagsWord;
+        NormalizePatchVertexColors(layer);
+        layer->next = g_currentEntity->patches;
+        g_currentEntity->patches = layer;
+      }
+    }
+  }
   return g_currentEntity->patches;
 }
 

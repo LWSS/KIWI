@@ -8155,3 +8155,55 @@ the CAMERA CONTRACT, the disposition table for every round-BK camera change, and
   nothing either way). The texture browser is measured at 0.4 ms and its content — an
   async-loading material list with its own scroll state — is not expressible in the `W_*`
   currency, so it stays every-tick. The camera stays every-tick by design.
+
+## Terrain Sculpt / Decals (round BQ, 2026-09-01) — UNBUILT, verify on next build
+
+- **Not yet compiled.** `kiwi_terrain.cpp`, `kiwi_decal.cpp`, the forwarding
+  `imgui_panel_advpatch.cpp` and the hooks in kiwi_viewport / kiwi_hover /
+  kiwi_command / kiwi_windows / imgui_shell / pmesh.cpp tail were written without a
+  build (user builds). First-build candidates: `ImGuiChildFlags_Borders` /
+  `ImTextureID` idioms, `Pick()` mask arguments, block-scope externs.
+- **Smooth seams across patch borders.** Smooth averages within one patch's control
+  grid, so a shared edge point of two patches receives two different means. Sculpt
+  both patches selected and expect a small step at the seam under heavy smoothing.
+- **Blend paint shows only when the patch wears a blend material.** Painting alpha on
+  a single-layer material changes nothing visible (the technique ignores it).
+- **Decal preview/outline is flat**; a decal spanning two faces is not projected —
+  it stays on the picked face's plane.
+- **Decals placed on patch surfaces** use the pick's tessellated-triangle normal;
+  curved patches get a flat decal tangent to that triangle.
+- **Legacy soft-select option** arms the ported Alt+LMB chain (mode 1): Alt+LMB then
+  opens/closes an empty "patch painting" undo record and draws the legacy ring.
+- **Texture paint (layers) — UNBUILT.** First-build candidates: `Material_Load`
+  takes `char*` (a mutable buffer is passed), `Patch_Duplicate` + `Brush_AddToList`
+  + active-list splice for the new layer, `KiwiMat_Write` template lookup by techset.
+  Behavioural: the blend twin only previews if the shipped `l_sm_b0c0*` template is
+  healthy; a failed twin prints once and the layer draws opaque (z-fight) in the
+  camera only. Layer order for a LOADED map is .map order; the registry does not
+  persist across sessions. Twin materials are written into the KIWI materials dir.
+- **Textures tab: click-apply moved to RELEASE (imgui_shell.cpp VP_Down/VP_Up).** A
+  press now only records the spot; the ported TexWnd_OnLButtonDown apply fires on
+  release within 4 px. This lets thumbnails be DRAGGED (KMTL_PAYLOAD) onto the
+  Terrain Sculpt layer list and the Decals material field without re-texturing the
+  selection on the way out. Unbuilt; check the press/release hit positions match.
+- **Auto-transition bands are per-session** (keyed by layer patch); the default
+  bands only stagger by layer index (L2 from Z 256 up, L3+ on slopes >= 35 deg).
+- **Terrain chunks (round BQ, 2026-09-01) — UNBUILT.** Split / Expander / Trim create
+  and delete patches through CreateChunk (MakeNewPatch + Patch_KiwiTextureAndBuild +
+  AddBrushForPatch + Brush_AddToList) and the Edit->Delete undo bracket. Split
+  resamples a REGULAR axis-aligned control grid (bilinear); a skewed or rotated
+  source patch resamples wrongly. A non-square source splits into square chunks of
+  the smaller side and leaves a strip uncovered (squares cannot tile a rectangle).
+  The expander lattice is anchored on the corner of the patch under the cursor.
+- **Single-patch texture layers (round BQ addendum 2) — UNBUILT.** New `kiwilayer`
+  map lines: an OLD cod4map/radiant build ignores/rejects them (radiant's reader stops
+  at an unknown token; cod4map's ParsePatch would choke). Both readers here handle
+  them. Vertex colour painting on a layered patch edits layer weights (documented in
+  the panel). Old maps with duplicate stacks: use "Fold overlapping duplicate patches
+  into layers" once.
+- **Terrain seams are now STITCHED after every height stamp** (kiwi_terrain.cpp
+  StitchSeams): coincident border points across all eligible patches take the mean of
+  the stroke's patches and unselected neighbours are pulled along (undo-marked). This
+  supersedes the earlier "smooth seams across patch borders" caveat. T-junctions
+  (a coarse chunk next to a denser one) still crack between points; Tessellate a
+  region to one density, or let the expander build chunks (it matches per-axis cells).

@@ -15542,3 +15542,74 @@ material through `KiwiMat_Verify`, whose report line now names all three maps wi
 dimensions and whether each produced a texture. A normal/specular map that failed to decode
 is **reported, not fatal** — `Image_AssignDefaultTexture` has already substituted a valid
 fallback and the material renders; only a dead colorMap fails the import.
+
+## Decision log — round BQ (Terrain Sculpt + Decals, 2026-09-01)
+
+- **D-BQ-A — The Advanced Patch Editor (Y, cmd 33130) is replaced by Terrain Sculpt
+  (`kiwi_terrain.cpp`).** The ported dialog's UI-independent store (patchdialog.cpp)
+  stays; its mode stays 6/"Disabled" so the legacy Alt+LMB paint chain
+  (drag.cpp → sub_43E6F0) never arms unless the user ticks the legacy soft-select
+  option. `imgui_panel_advpatch.cpp` is now a forwarder that only keeps the
+  CurvEditDlg slot seeding (sub_43DA20 / the radius getters still read it).
+- **D-BQ-B — Terrain Sculpt is an ARMED tool that owns bare LMB in the camera** (Far
+  Cry Sandbox model, not the original's Alt+LMB): Shift = smooth override, Ctrl =
+  lower / pick height / eyedropper, Esc disarms, + / - and Ctrl+wheel resize, Shift+
+  wheel changes strength. Selection is unavailable while armed by design.
+- **D-BQ-C — Per-point math.** Falloff is the ported smoothstep annulus (sub_43DB60)
+  plus linear / sharp / constant; square brushes use Chebyshev distance with an
+  optional rotation. Smooth is a 3x3 neighbour mean over the pre-stamp grid of the
+  SAME patch (the original averaged the whole footprint); shared-edge points of two
+  adjacent patches can therefore diverge slightly — see RADIANT_KNOWN_ISSUES.
+- **D-BQ-D — Texture blending is vertex alpha.** CoD4 blend techsets mix their second
+  layer by vertex alpha; materials in the lightmap-alpha class (toolFlags & 0x70 ==
+  0x60, the class Patch_CalcVertColors / cod4map Tris_GetLayerVertexWeight treat by
+  RGB intensity) get R=G=B=A painted instead. No new .map syntax.
+- **D-BQ-E — Undo reuses the ported paint bracket verbatim**: Patch_Paint (clear
+  xx22b) → first touch Patch_PaintMarkUndo (sub_45E770) → release Patch_PaintFinish
+  (PMESH_18) → Undo_End. Both wrappers are appended at the END of pmesh.cpp so no
+  pmesh.cpp:NNN citation moved.
+- **D-BQ-F — A decal is an ordinary 3x3 patch** (`kiwi_decal.cpp`, dock window
+  "Decals", KIWI_WIN_DECALS): laid on the picked face, pushed off it by `offset +
+  layer * 0.125`, one-repeat-fit ST (naturalize's negative-T convention), vertex
+  alpha = opacity with an optional edge fade. Nothing new for the .map, cod4map or
+  the game. Any selected 3x3 planar patch is editable from the window (adopted on
+  first sight, re-synced when moved by another tool).
+- **D-BQ-G — Layout version 15 → 16** (new default-open dock window "Decals").
+
+### Round BQ addendum — Texture paint = CoD4 layered terrain (2026-09-01)
+
+- **D-BQ-H — supersedes D-BQ-D.** Terrain texture blending follows the stock CoD4
+  model exactly: a terrain STACK is a set of patches with identical control grids,
+  each wearing its own material; cod4map (`tris_coalesce.cpp`
+  FindOrCreateCoalescedSurfProps → `tris.cpp` TriangulateSurfImpl →
+  SelectCoalescibleLayerCount) merges their coplanar triangles into one layered
+  surface of up to 5 layers and blends layer k by that patch's vertex alpha.
+  Terrain Sculpt's "Texture paint" mode adds layers (Patch_Duplicate of the base,
+  alpha 0, chosen material), paints the active layer's alpha (Ctrl erases; painting
+  the base erases the layers above), and every sculpt op targets the whole stack so
+  the layers stay coplanar and coalescible.
+- **D-BQ-I — editor preview via twin materials.** Upper layers upload with
+  `kiwi_blend_<name>`, an `l_sm_b0c0[n0][s0]` material over the same images written
+  once by the material writer (KiwiMat_Write) and swapped in at the patch VB upload
+  (`KiwiTerrain_LayerMaterialOverride`, pmesh.cpp Patch_Fill_BuildVisuals). The
+  .map keeps the real material. Layer indices are a session registry (walk order =
+  .map order on load).
+- **D-BQ-J — Grass Scatter is a mode of Terrain Sculpt**, not its own window; the
+  Windows-menu and palette entries open the panel with Grass selected.
+
+### Round BQ addendum 2 — layers on ONE patch (2026-09-01), supersedes D-BQ-H/I
+
+- **D-BQ-K** — `patchMesh_t.kiwiLayer[4]` (appended past the IDB layout; the size
+  assert is widened) names up to four extra materials; layer k's weight is the control
+  point's vert_color byte k (r,g,b,a). The .map gains optional `kiwilayer <slot>
+  <material>` lines inside the mesh block (radiant writer/reader in pmesh.cpp).
+  **cod4map/patch.cpp expands them at parse time** into the stock duplicate-patch
+  form (base whitened + one clone per slot with alpha := channel), so the coalescer
+  and the game see exactly what a hand-duplicated CoD4 terrain gives them.
+- **D-BQ-L** — the camera previews each used slot as one extra VB run
+  (Patch_BuildInstanceVisuals asks KiwiTerrain_ExtraLayerCount; Patch_Fill_BuildVisuals
+  lets KiwiTerrain_LayerUpload set the run's alpha + twin material). One pick, one
+  triangle set, no stacks. "Fold overlapping duplicate patches into layers" migrates
+  old-style stacks.
+- Chunks created by Split/Expander are always PATCH_TERRAIN (the bezier projection
+  path PMESH_02 crashed on a fresh, untessellated grid).

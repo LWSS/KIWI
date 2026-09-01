@@ -322,6 +322,11 @@ set(RADIANT_SRCS
     "${SRC_DIR}/radiant/kiwi_sunshadow.cpp"
     "${SRC_DIR}/radiant/kiwi_light.h"        # selected-light helper, preview policy and extents
     "${SRC_DIR}/radiant/kiwi_light.cpp"
+    # KIWI: Terrain Sculpt (Y) — patch sculpt/blend paint; Decals — decal patches on faces.
+    "${SRC_DIR}/radiant/kiwi_terrain.h"
+    "${SRC_DIR}/radiant/kiwi_terrain.cpp"
+    "${SRC_DIR}/radiant/kiwi_decal.h"
+    "${SRC_DIR}/radiant/kiwi_decal.cpp"
     # KIWI: Selected entity facing arrows in camera and orthographic views.
     "${SRC_DIR}/radiant/kiwi_entarrow.h"
     "${SRC_DIR}/radiant/kiwi_entarrow.cpp"

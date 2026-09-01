@@ -4106,6 +4106,13 @@ void CamWnd_Draw( HWND hwnd )
                 if ( ec && *(int *)&ec->fixedsize && ( ec->classtype & 0x18 ) )   // MODEL|PREFAB
                     continue;
             }
+            // KIWI Terrain Sculpt paint modes hide the selected-patch white wireframe (this
+            // tech-29 pass IS the triangle grid over a selected terrain); Tab toggles it.
+            {
+                extern bool KiwiTerrain_HideWireframe();   // kiwi_terrain.cpp
+                if ( b->patch && KiwiTerrain_HideWireframe() )
+                    continue;
+            }
             // drawFlags=1 (force-draw) matches the binary's a10=1; viewType -1 = no 2D cull.
             DrawBrush( b, (const orientation_t *)world_orient_matrix, /*viewType*/ -1,
                        /*technique*/ 29, &whiteCol, /*width*/ 1, /*drawFlags*/ 1, /*layerPrefix*/ "" );

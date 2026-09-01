@@ -30,6 +30,8 @@
 #include "kiwi_construct.h"
 #include "kiwi_gizmo.h"
 #include "kiwi_grass.h"
+#include "kiwi_terrain.h"
+#include "kiwi_decal.h"
 #include "kiwi_hints.h"
 #include "kiwi_hover.h"
 #include "kiwi_lollipop.h"
@@ -66,7 +68,7 @@ namespace
     // mutating selection. SECTION and SUN need distinct release/abort paths.
     enum kgesture_t { KG_NONE = 0, KG_ORBIT, KG_MARQUEE, KG_COMMAND, KG_CONSUMED,
                       KG_LOOK, KG_PAN, KG_GIZMO, KG_CMD_MARQUEE, KG_SECTION,
-                      KG_SUN, KG_DROP, KG_GRASS };
+                      KG_SUN, KG_DROP, KG_GRASS, KG_TERRAIN, KG_DECAL };
 
     // The sticky RMB menu-drag latch uses tighter slop than LMB selection so an
     // intended camera drag cannot become a menu click after returning near its press.
@@ -339,6 +341,28 @@ bool KiwiVP_CameraButtonDown( int btn, int imgX, int imgY, bool shift, bool ctrl
     if ( s_gesture != KG_NONE )
         return false;
 
+    // KIWI-UX: an armed Terrain Sculpt owns bare LMB (Shift/Ctrl are its modifiers) and
+    // an armed Decals tool owns bare LMB, both ahead of every camera handle, command,
+    // selection arm and the legacy terrain-paint handoff below.  Disarmed = no change.
+    if ( btn == 0 && !ImGui::GetIO().KeyAlt && KiwiTerrain_IsArmed() )
+    {
+        KiwiHover_Clear();
+        KiwiTerrain_HandleDown( imgX, imgY, shift, ctrl );
+        s_lastX      = imgX;
+        s_lastY      = imgY;
+        s_gesture    = KG_TERRAIN;      // own release even when the press refused a stroke
+        s_gestureBtn = btn;
+        return true;
+    }
+    if ( btn == 0 && !shift && !ctrl && !ImGui::GetIO().KeyAlt && KiwiDecal_IsArmed() )
+    {
+        KiwiHover_Clear();
+        KiwiDecal_HandleDown( imgX, imgY );
+        s_gesture    = KG_DECAL;
+        s_gestureBtn = btn;
+        return true;
+    }
+
     // KIWI-UX: an armed Grass Scatter owns bare Alt+LMB before every camera handle,
     // command, selection arm, and the legacy terrain-paint handoff below.  When it is
     // disarmed this gate is false, preserving the prior dispatch in effect.
@@ -585,6 +609,15 @@ bool KiwiVP_CameraMouseMove( int imgX, int imgY )
         KiwiGrass_HandleDrag( imgX, imgY );
         return true;
     }
+    if ( s_gesture == KG_TERRAIN )
+    {
+        s_lastX = imgX;
+        s_lastY = imgY;
+        KiwiTerrain_HandleDrag( imgX, imgY );
+        return true;
+    }
+    if ( s_gesture == KG_DECAL )
+        return true;                     // click-to-place: nothing to drag
 
     // Feed a modal preview first even during camera navigation; it does not consume
     // the move, so the owning camera gesture still receives its delta.
@@ -692,6 +725,10 @@ bool KiwiVP_CameraButtonUp( int btn, int imgX, int imgY )
 
     if ( s_gesture == KG_GRASS )
         KiwiGrass_HandleUp();
+    else if ( s_gesture == KG_TERRAIN )
+        KiwiTerrain_HandleUp();
+    else if ( s_gesture == KG_DECAL )
+        KiwiDecal_HandleUp();
     else if ( s_gesture == KG_MARQUEE )
         KiwiBox_End( imgX, imgY );
     else if ( s_gesture == KG_CMD_MARQUEE )
@@ -752,6 +789,12 @@ bool KiwiVP_CameraWheel( float steps, int imgX, int imgY )
 {
     if ( !KiwiUX_ModernInput() )
         return false;
+    // Armed paint tools take the modified wheel (radius / strength, size / rotation).
+    {
+        const bool shift = ImGui::GetIO().KeyShift, ctrl = ImGui::GetIO().KeyCtrl;
+        if ( KiwiTerrain_HandleWheel( steps, shift, ctrl ) || KiwiDecal_HandleWheel( steps, shift, ctrl ) )
+            return true;
+    }
     KiwiCam_Dolly( steps, imgX, imgY );
     return true;
 }
@@ -761,6 +804,9 @@ void KiwiVP_CameraHover( int imgX, int imgY, bool over )
     // The stroke path updates its own cursor; every other gesture hides the armed ring.
     if ( s_gesture != KG_GRASS )
         KiwiGrass_Hover( imgX, imgY, over && s_gesture == KG_NONE );
+    if ( s_gesture != KG_TERRAIN )
+        KiwiTerrain_Hover( imgX, imgY, over && s_gesture == KG_NONE );
+    KiwiDecal_Hover( imgX, imgY, over && s_gesture == KG_NONE );
 
     if ( !over || s_gesture != KG_NONE )
     {
@@ -808,6 +854,10 @@ bool KiwiVP_CameraAbort()
         return false;
     if ( s_gesture == KG_GRASS )
         KiwiGrass_HandleAbort();
+    else if ( s_gesture == KG_TERRAIN )
+        KiwiTerrain_HandleAbort();
+    else if ( s_gesture == KG_DECAL )
+        KiwiDecal_HandleAbort();
     else if ( s_gesture == KG_MARQUEE || s_gesture == KG_CMD_MARQUEE )
         KiwiBox_Cancel();                // discard either owner's rect without selection changes
     else if ( s_gesture == KG_GIZMO )

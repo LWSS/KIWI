@@ -20,6 +20,8 @@
 #include "kiwi_conselect.h"
 #include "kiwi_construct.h"
 #include "kiwi_grass.h"
+#include "kiwi_terrain.h"
+#include "kiwi_decal.h"
 #include "kiwi_hover.h"
 #include "kiwi_lines.h"
 #include "kiwi_region.h"
@@ -696,6 +698,9 @@ void KiwiHover_DrawWorld()
     // Grass Scatter is another cursor-driven camera accent.  It owns a separate,
     // exact-size line batch so the hover budget cannot truncate its AOE ring.
     KiwiGrass_DrawWorld();
+    // Terrain Sculpt brush ring and the Decals outline/preview: same exact-size batches.
+    KiwiTerrain_DrawWorld();
+    KiwiDecal_DrawWorld();
 
     // Fills precede line accents so borders, edges, and vertices remain on top.
     // Every brush-backed emit is liveness-gated before dereference.

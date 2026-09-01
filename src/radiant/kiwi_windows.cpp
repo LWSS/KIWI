@@ -44,6 +44,7 @@ namespace
         { "Sun",              "Sun",     "S&un Helper",             KIWI_CMD_WINDOW_SUN,     1 },
         { "Light",            "Light",   "&Light Helper",           KIWI_CMD_WINDOW_LIGHT,   1 },
         { "Inspector",        "Inspector", "&Inspector",             KIWI_CMD_WINDOW_INSPECTOR, 1 },
+        { "Decals",           "Decals",  "&Decals",                 KIWI_CMD_WINDOW_DECALS,  1 },
     };
 
     // Older profiles are reseeded once so visibility defaults match the rebuilt dock layout.
@@ -178,6 +179,7 @@ void KiwiWindows_BuildMenu( void *frameMenu )
     // Floating tool panels that are not KIWI_WIN_* dock windows but still belong here.
     ::AppendMenuA( popup, MF_SEPARATOR, 0, nullptr );
     ::AppendMenuA( popup, MF_STRING, (UINT_PTR)KIWI_CMD_GRASS_PANEL, "Grass Scatter" );
+    ::AppendMenuA( popup, MF_STRING, (UINT_PTR)KIWI_CMD_TERRAIN_PANEL, "Terrain Sculpt	Y" );
 
     // Camera is always on; grayed id 0 prevents hiding the primary viewport.
     ::AppendMenuA( popup, MF_SEPARATOR, 0, nullptr );
@@ -200,6 +202,8 @@ void KiwiWindows_SyncMenu()
     // Non-dock tool panels appended to the same popup.
     extern bool KiwiGrass_PanelVisible();   // kiwi_grass.cpp
     Radiant_CheckMenu( (UINT)KIWI_CMD_GRASS_PANEL, KiwiGrass_PanelVisible() );
+    extern bool KiwiTerrain_PanelVisible();   // kiwi_terrain.cpp
+    Radiant_CheckMenu( (UINT)KIWI_CMD_TERRAIN_PANEL, KiwiTerrain_PanelVisible() );
 }
 
 // Native View-popup toggles use KIWI ids and Radiant_CheckMenu check marks.
@@ -255,6 +259,8 @@ void KiwiWindows_RegisterCommands()
     Radiant_RegisterCommand( "KiwiViewShowAxes",  0, 0, KIWI_CMD_VIEW_SHOW_AXES );
     Radiant_RegisterCommand( "KiwiViewOrtho",     0, 0, KIWI_CMD_VIEW_ORTHO );
     Radiant_RegisterCommand( "KiwiGrassScatter",  0, 0, KIWI_CMD_GRASS_PANEL );
+    Radiant_RegisterCommand( "KiwiTerrainSculpt", 0, 0, KIWI_CMD_TERRAIN_PANEL );
+    Radiant_RegisterCommand( "KiwiWindowDecals",  0, 0, KIWI_CMD_WINDOW_DECALS );
 }
 
 bool KiwiWindows_DispatchInstant( unsigned int cmdId )
@@ -282,6 +288,12 @@ bool KiwiWindows_DispatchInstant( unsigned int cmdId )
     {
         extern void KiwiGrass_TogglePanel();   // kiwi_grass.cpp
         KiwiGrass_TogglePanel();
+        return true;
+    }
+    if ( cmdId == (unsigned int)KIWI_CMD_TERRAIN_PANEL )
+    {
+        extern void KiwiTerrain_TogglePanel();   // kiwi_terrain.cpp
+        KiwiTerrain_TogglePanel();
         return true;
     }
 

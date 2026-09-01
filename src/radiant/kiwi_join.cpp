@@ -98,6 +98,11 @@ namespace
 
 bool KiwiJoin_CanJoin()
 {
+    {
+        extern bool KiwiTerrain_CanJoinSelected();   // kiwi_terrain.cpp
+        if ( KiwiTerrain_CanJoinSelected() )
+            return true;
+    }
     sel_item_t a, b;
     if ( TwoFaces( &a, &b ) && a.brush != b.brush
       && SameInfinitePlane( FaceOf( a ), FaceOf( b ) ) )
@@ -114,6 +119,13 @@ bool KiwiJoin_DispatchInstant( unsigned int commandId )
 
     if ( JoinFaces() )
         return true;
+    // Terrain: two or more selected sheet patches that share full edges merge into one
+    // grid (kiwi_terrain.cpp), as long as the result stays within the 16-point cap.
+    {
+        extern int KiwiTerrain_JoinSelected();   // kiwi_terrain.cpp — joins made, -1 = not a patch selection
+        if ( KiwiTerrain_JoinSelected() >= 0 )
+            return true;
+    }
     if ( KiwiConSel_CanJoin() )
     {
         KiwiConSel_Join();                   // chain selected construction lines
@@ -121,7 +133,8 @@ bool KiwiJoin_DispatchInstant( unsigned int commandId )
     }
 
     Sys_Printf( "Join: select either TWO coplanar faces on two brushes (they merge "
-                "into one solid) or two or more construction lines (they chain into "
+                "into one solid), two or more edge-adjacent terrain patches (they merge "
+                "into one grid), or two or more construction lines (they chain into "
                 "one polyline).\n" );
     return true;
 }

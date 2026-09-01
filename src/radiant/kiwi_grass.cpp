@@ -83,7 +83,6 @@ namespace
     char  s_layer[64] = "grass";   // map layer every placed model is assigned to ("" = none)
 
     bool s_loaded    = false;
-    bool s_show      = false;
     bool s_armed     = false;
     bool s_cursorHave = false;
     float s_cursorPoint[3] = { 0.0f, 0.0f, 0.0f };
@@ -562,40 +561,52 @@ namespace
     }
 }
 
+// Grass Scatter is a MODE of the Terrain Sculpt panel (kiwi_terrain.cpp); every route
+// that used to open its own window now opens that panel with the Grass tool selected.
+extern void KiwiTerrain_OpenWithTool( int tool );   // kiwi_terrain.cpp
+enum { KGRASS_TERRAIN_TOOL = 6 };                    // KTER_GRASS in kiwi_terrain.cpp
+
 void KiwiGrass_MenuItem()
 {
     LoadSettings();
-    if ( ImGui::Checkbox( "Grass Scatter", &s_show ) && !s_show )
-        SetArmed( false );
+    if ( ImGui::MenuItem( "Grass Scatter (Terrain Sculpt mode)" ) )
+        KiwiTerrain_OpenWithTool( KGRASS_TERRAIN_TOOL );
 }
 
 // Windows-menu / palette route (KIWI_CMD_GRASS_PANEL, kiwi_windows.cpp).
 void KiwiGrass_TogglePanel()
 {
     LoadSettings();
-    s_show = !s_show;
-    if ( !s_show )
-        SetArmed( false );
-    extern void KiwiWindows_SyncMenu();   // kiwi_windows.cpp — refresh the check mark
-    KiwiWindows_SyncMenu();
+    KiwiTerrain_OpenWithTool( KGRASS_TERRAIN_TOOL );
 }
 
 bool KiwiGrass_PanelVisible()
 {
+    extern bool KiwiTerrain_PanelVisible();
+    return KiwiTerrain_PanelVisible();
+}
+
+// The terrain panel arms/disarms the scatter when its Grass mode is armed.
+void KiwiGrass_SetArmed( bool armed )
+{
     LoadSettings();
-    return s_show;
+    SetArmed( armed );
 }
 
 void KiwiGrass_Draw()
 {
     LoadSettings();
-    if ( s_armed && ImGui::IsKeyPressed( ImGuiKey_Escape, false ) )
+    // The settings now live inside the Terrain Sculpt panel (KiwiGrass_DrawSettings);
+    // this per-frame call only keeps the arm state honest when the panel is gone.
+    extern bool KiwiTerrain_PanelVisible();
+    if ( s_armed && !KiwiTerrain_PanelVisible() )
         SetArmed( false );
-    if ( !s_show )
-        return;
+}
 
-    const bool wasShown = s_show;
-    if ( ImGui::Begin( "Grass Scatter", &s_show, ImGuiWindowFlags_AlwaysAutoResize ) )
+// The palette + scatter parameters, drawn inside the Terrain Sculpt panel.
+void KiwiGrass_DrawSettings()
+{
+    LoadSettings();
     {
         bool changed = false;
         ImGui::TextDisabled( "Drag model tiles from the Models browser into a slot." );
@@ -641,23 +652,10 @@ void KiwiGrass_Draw()
             s_warnedNoModels = false;
             g_nUpdateBits |= W_CAMERA;
         }
-
-        ImGui::Separator();
-        if ( ImGui::Button( s_armed ? "Disarm scatter" : "Scatter (Alt+LMB paint)" ) )
-            SetArmed( !s_armed );
         if ( s_armed )
             ImGui::TextColored( ImVec4( 0.42f, 0.92f, 0.48f, 1.0f ), "%s", s_status );
         else
             ImGui::TextDisabled( "%s", s_status );
-    }
-    ImGui::End();
-
-    if ( !s_show )
-        SetArmed( false );
-    if ( wasShown != s_show )                     // closed via the title-bar X
-    {
-        extern void KiwiWindows_SyncMenu();       // kiwi_windows.cpp — refresh the check mark
-        KiwiWindows_SyncMenu();
     }
 }
 

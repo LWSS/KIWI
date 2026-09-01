@@ -416,7 +416,11 @@ namespace
                 const float pos = (float)i * w.spacing;
 
                 float a[3], b[3];
-                a[2] = b[2] = 0.0f;
+                // KIWI-UX: the grid sits a hair BELOW the Z=0 plane.  Terrain snapped to
+                // exactly Z=0 (Set height's default target) is coplanar with it and the
+                // depth-tested lines z-fight through the surface as dashes; -0.125 puts
+                // every Z=0 surface in front when seen from above.
+                a[2] = b[2] = -0.125f;
                 a[axis]     = b[axis]     = pos;
                 a[axis ^ 1] = w.centre[axis ^ 1] - w.reach[axis ^ 1];
                 b[axis ^ 1] = w.centre[axis ^ 1] + w.reach[axis ^ 1];

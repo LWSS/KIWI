@@ -757,8 +757,14 @@ struct patchMesh_t
     bool               bDirty;      // 0x5043
     int                xx21;        // 0x5044
     int                size_of_struct_0x504C; // 0x5048
+    // KIWI extension (past the 20556-byte IDB layout; nothing indexes the struct by its
+    // raw size).  Terrain texture layers 1..4: material names, "" = slot unused.  The
+    // layer's weight is the control point's vert_color channel of the same index
+    // (r,g,b,a = slots 0..3).  Written to the .map as "kiwilayer <slot> <material>";
+    // cod4map expands them into the stock duplicate-patch layered surface itself.
+    char               kiwiLayer[4][64];     // 0x504C
 };
-static_assert(sizeof(patchMesh_t) == 20556, "patchMesh_t");
+static_assert(sizeof(patchMesh_t) == 20556 + 256, "patchMesh_t (+KIWI layer slots)");
 static_assert(offsetof(patchMesh_t, ctrl) == 56,       "patchMesh_t.ctrl");
 static_assert(offsetof(patchMesh_t, pSymbiot) == 20540, "patchMesh_t.pSymbiot");
 
