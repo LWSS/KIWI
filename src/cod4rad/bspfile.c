@@ -49,10 +49,9 @@ BspCollisionAabb_disk_t bspCollisionAABBs[MAX_MAP_COLLISION_AABBS];
 extern unsigned char g_lightmapOutput[];
 #define bspLightmapData ((char *)g_lightmapOutput)
 
-/* bspLightGridHash / bspLightGridColors are the same buffers as CalculateLightGrid's
- * g_gridSampleArray / g_gridColorEntries in the binary.
- * Alias to match — otherwise CalculateLightGrid writes into one buffer and
- * WriteBSPFile reads from another (empty) buffer. */
+/* bspLightGridHash / bspLightGridColors are the same CoD2-heritage working
+ * buffers as CalculateLightGrid's g_gridSampleArray / g_gridColorEntries.
+ * Keep the aliases for the worker code; v22 disk lumps use the g_cod4 buffers. */
 extern unsigned char g_gridSampleArray[];
 extern unsigned char g_gridColorEntries[];
 extern int g_gridSampleArrayCount;
@@ -65,7 +64,6 @@ extern unsigned char g_cod4LightGridEntries[];
 extern int g_cod4LightGridEntryCount;
 extern unsigned char g_cod4LightGridColors[];
 extern int g_cod4LightGridColorCount;
-/* Data buffers and counts are shared — grid computation overwrites loaded data */
 #define bspLightGridHash       ((BspLightGridEntry_t *)g_gridSampleArray)
 #define bspLightGridColors     ((BspLightGridColor_t *)g_gridColorEntries)
 #define numBSPLightGridHash    g_gridSampleArrayCount
@@ -152,6 +150,8 @@ static char s_assertDisable_SwapDrawVerts;
 static char s_assertDisable_SwapDrawVerts_len;
 static char s_assertDisable_SwapBrushes;
 static char s_assertDisable_SwapBrushes_len;
+static char s_assertDisable_SwapLightGridEntries;
+static char s_assertDisable_SwapLightGridEntries_len;
 static char s_assertDisable_SwapCollisionAabbTree;
 static char s_assertDisable_SwapCollisionAabbTree_len;
 static char s_assertDisable_SetBspFileExtensions;
@@ -345,9 +345,13 @@ void SwapShortsBlock(void *data, int len)
 /* MAX_MAP_ENTITIES / MAX_MAP_ENTSTRING now in cod2rad64.h */
 
 /* BSP lump limits — from cod2map.h */
+#define COD4_LIGHTGRID_ENTRY_SIZE  4
+#define COD4_LIGHTGRID_COLOR_SIZE  168
+#define MAX_MAP_LIGHTGRID_HEADER_BYTES 0x4014
+#define MAX_MAP_LIGHTGRID_ROWS_BYTES   0x40000
+#define MAX_COD4_LIGHTGRID_ENTRY_BYTES 0x400000
 #define MAX_MAP_MATERIALS         1024
 #define MAX_MAP_LIGHTBYTES        0x5D00000
-#define MAX_MAP_LIGHTGRID         0x400000
 #define MAX_MAP_LIGHTGRIDCOLORS   0xFFFF
 #define MAX_MAP_PLANES            524288
 #define MAX_MAP_BRUSHSIDES        655360
@@ -765,11 +769,24 @@ void LoadBspFile(const char *filename)
 
     numBSPMaterials       = CopyLump(header, LUMP_MATERIALS,           bspMaterials,          sizeof(bspMaterials[0]),          sizeof(bspMaterials));
     numBSPLightBytes      = CopyLump(header, LUMP_LIGHTBYTES,          bspLightmapData,       1,                                MAX_MAP_LIGHTBYTES);
-    /* bspLightGridHash/Colors are aliased pointers to g_gridSampleArray/g_gridColorEntries
-     * (see top of file); sizeof(bspLightGridHash) gives 8 (pointer size), not array bytes.
-     * Use the explicit MAX sizes instead. */
-    numBSPLightGridHash   = CopyLump(header, LUMP_LIGHTGRIDENTRIES,    bspLightGridHash,      sizeof(BspLightGridEntry_t),      MAX_MAP_LIGHTGRID * (unsigned long long)sizeof(BspLightGridEntry_t));
-    numBSPLightGridColors = CopyLump(header, LUMP_LIGHTGRIDCOLORS,     bspLightGridColors,    sizeof(BspLightGridColor_t),      MAX_MAP_LIGHTGRIDCOLORS * (unsigned long long)sizeof(BspLightGridColor_t));
+    numBSPLightGridHash = 0;
+    numBSPLightGridColors = 0;
+    if (header->version >= 0x10)
+    {
+        g_cod4LightGridHeaderSize = CopyLump(header, LUMP_LIGHTGRIDHEADER,  g_cod4LightGridHeader,  1,                          MAX_MAP_LIGHTGRID_HEADER_BYTES);
+        g_cod4LightGridRowsSize   = CopyLump(header, LUMP_LIGHTGRIDROWS,    g_cod4LightGridRows,    1,                          MAX_MAP_LIGHTGRID_ROWS_BYTES);
+        /* KIWI: retail 0x402fe1 loads 4-byte v22 entries (and 0x40301f
+         * loads 168-byte colors) into the compact CoD4 buffers. */
+        g_cod4LightGridEntryCount = CopyLump(header, LUMP_LIGHTGRIDENTRIES, g_cod4LightGridEntries, COD4_LIGHTGRID_ENTRY_SIZE,  MAX_COD4_LIGHTGRID_ENTRY_BYTES);
+        g_cod4LightGridColorCount = CopyLump(header, LUMP_LIGHTGRIDCOLORS,  g_cod4LightGridColors,  COD4_LIGHTGRID_COLOR_SIZE,  MAX_COD4_GRIDCOLOR_BYTES);
+    }
+    else
+    {
+        g_cod4LightGridHeaderSize = 0;
+        g_cod4LightGridRowsSize = 0;
+        g_cod4LightGridEntryCount = 0;
+        g_cod4LightGridColorCount = 0;
+    }
     numBSPPlanes          = CopyLump(header, LUMP_PLANES,              bspPlanes,             sizeof(bspPlanes[0]),             sizeof(bspPlanes));
     numBSPBrushSides      = CopyLump(header, LUMP_BRUSHSIDES,          bspBrushSidesData,     sizeof(bspBrushSidesData[0]),     sizeof(bspBrushSidesData));
     numBSPBrushes         = CopyLump(header, LUMP_BRUSHES,             bspBrushes,            sizeof(bspBrushes[0]),            sizeof(bspBrushes));
@@ -944,7 +961,7 @@ static void SelectOutputChunk(
             if (g_cod4LightGridEntryCount != 0)
             {
                 *outputData = g_cod4LightGridEntries;
-                *outputLength = g_cod4LightGridEntryCount * 4;
+                *outputLength = g_cod4LightGridEntryCount * COD4_LIGHTGRID_ENTRY_SIZE;
             }
             else if (numBSPLightGridHash != 0 || inputLength == 0)
             {
@@ -956,7 +973,7 @@ static void SelectOutputChunk(
             if (g_cod4LightGridColorCount != 0)
             {
                 *outputData = g_cod4LightGridColors;
-                *outputLength = g_cod4LightGridColorCount * 168;
+                *outputLength = g_cod4LightGridColorCount * COD4_LIGHTGRID_COLOR_SIZE;
             }
             else if (numBSPLightGridColors != 0 || inputLength == 0)
             {
@@ -1450,6 +1467,32 @@ void SwapBrushes(void *data, int len)
 
 /*
 ================
+SwapLightGridEntries
+
+Byte-swaps compact CoD4 light-grid entries (4 bytes each).
+Layout: S+0, byte+2, byte+3.
+================
+*/
+static void SwapLightGridEntries(void *data, int len)
+{
+    int count, i;
+
+    Assert(data, s_assertDisable_SwapLightGridEntries);
+    Assert(len >= 0, s_assertDisable_SwapLightGridEntries_len);
+    count = len / COD4_LIGHTGRID_ENTRY_SIZE;
+    Assert(len == count * COD4_LIGHTGRID_ENTRY_SIZE,
+           s_assertDisable_SwapLightGridEntries_len);
+
+    for (i = 0; i < count; i++)
+    {
+        unsigned short *colorIndex = (unsigned short *)
+            ((unsigned char *)data + i * COD4_LIGHTGRID_ENTRY_SIZE);
+        *colorIndex = BigShort(*colorIndex);
+    }
+}
+
+/*
+================
 SwapCollisionAabbTree
 
 Byte-swaps collision AABB tree — variable-length nested structure.
@@ -1533,7 +1576,7 @@ void SwapLumpData(int lumpIdx, void *data, int maxCount, int count, int elemSize
     {
         case LUMP_MATERIALS:           SwapMaterials(data, dataSize); break;
         case LUMP_LIGHTBYTES:          return; /* byte data */
-        case LUMP_LIGHTGRIDENTRIES:    SwapBrushes(data, dataSize); break;
+        case LUMP_LIGHTGRIDENTRIES:    SwapLightGridEntries(data, dataSize); break;
         case LUMP_LIGHTGRIDCOLORS:     return; /* byte data */
         case LUMP_PLANES:              SwapLongsBlock_generic(data, dataSize); break;
         case LUMP_BRUSHSIDES:          SwapLongsBlock_generic(data, dataSize); break;
@@ -1595,8 +1638,8 @@ void SwapBSPFile(int swapFlag)
 
     SwapLumpData(LUMP_MATERIALS,           bspMaterials,          MAX_MAP_MATERIALS,         numBSPMaterials,        sizeof(bspMaterials[0]),         swapFlag);
     SwapLumpData(LUMP_LIGHTBYTES,          bspLightmapData,       MAX_MAP_LIGHTBYTES,        numBSPLightBytes,       sizeof(bspLightmapData[0]),      swapFlag);
-    SwapLumpData(LUMP_LIGHTGRIDENTRIES,    bspLightGridHash,      MAX_MAP_LIGHTGRID,         numBSPLightGridHash,    sizeof(bspLightGridHash[0]),     swapFlag);
-    SwapLumpData(LUMP_LIGHTGRIDCOLORS,     bspLightGridColors,    MAX_MAP_LIGHTGRIDCOLORS,   numBSPLightGridColors,  sizeof(bspLightGridColors[0]),   swapFlag);
+    SwapLumpData(LUMP_LIGHTGRIDENTRIES,    g_cod4LightGridEntries, MAX_COD4_LIGHTGRID_ENTRY_BYTES / COD4_LIGHTGRID_ENTRY_SIZE, g_cod4LightGridEntryCount, COD4_LIGHTGRID_ENTRY_SIZE, swapFlag);
+    SwapLumpData(LUMP_LIGHTGRIDCOLORS,     g_cod4LightGridColors,  MAX_MAP_LIGHTGRIDCOLORS,   g_cod4LightGridColorCount, COD4_LIGHTGRID_COLOR_SIZE, swapFlag);
     SwapLumpData(LUMP_PLANES,              bspPlanes,             MAX_MAP_PLANES,            numBSPPlanes,           sizeof(bspPlanes[0]),            swapFlag);
     SwapLumpData(LUMP_BRUSHSIDES,          bspBrushSidesData,     MAX_MAP_BRUSHSIDES,        numBSPBrushSides,       sizeof(bspBrushSidesData[0]),    swapFlag);
     SwapLumpData(LUMP_BRUSHES,             bspBrushes,            MAX_MAP_BRUSHES,           numBSPBrushes,          sizeof(bspBrushes[0]),           swapFlag);

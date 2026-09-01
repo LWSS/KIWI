@@ -397,6 +397,21 @@ CollisionMeshNode_t *BuildStaticModelCollisionMesh(void *model)
             {
                 /* valid collision material */
                 surface = DObjGetSurface(dobj, surfMap[i * 2], surfMap[i * 2 + 1], 0);
+                /* KIWI: the fixed stack buffers below hold 0x8000 indices /
+                 * 0x8000 verts; an oversized surface silently smashed the
+                 * stack (garbage verts, collvec scale assert). Skip it with a
+                 * loud warning instead. */
+                if (XSurfaceGetNumTris(surface) * 3 > 0x8000
+                    || ((XSurface_t *)surface)->vertCount > 0x8000)
+                {
+                    Com_Printf("WARNING: model surface %i (%s) exceeds cod4rad limits "
+                               "(%i tris / %i verts, max 10922 / 32768) - skipped for "
+                               "collision/shadows\n",
+                               i, surfMatName, XSurfaceGetNumTris(surface),
+                               (int)((XSurface_t *)surface)->vertCount);
+                    materials[i] = NULL;
+                    continue;
+                }
                 totalTris += XSurfaceGetNumTris(surface);
                 materials[i] = material;
             }

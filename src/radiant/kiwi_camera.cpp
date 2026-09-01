@@ -12,6 +12,7 @@
 #include <universal/com_math.h>      // AngleVectors
 #include "kiwi_camera.h"
 #include "kiwi_pick.h"
+#include "kiwi_droptrace.h"          // KiwiDrop_Trace — the orbit pivot's any-surface fallback
 #include "radiant_registry.h"        // Radiant_Profile* (the fly-speed multiplier)
 #include "kiwi_vec.h"     // shared Dot3/Sub3/... helpers
 
@@ -397,6 +398,26 @@ void KiwiCam_OrbitBegin( int imgX, int imgY )
             s_have      = true;
             havePivot   = true;
         }
+        else
+        {
+            // The pick above reuses SELECTION semantics, so a surface the current
+            // prefs make unselectable (patches with "select curves" off, filtered
+            // content, model gates) yields no pivot and the orbit visibly spun
+            // around something else (user report).  An orbit pivot only needs ANY
+            // visible surface: fall through to the placement trace, which walks
+            // brushes/patches via Test_Ray and models via their real meshes.
+            kiwiDropHit_t hit;
+            // 65536 = the editor world's half-extent: keeps the trace's Z=0
+            // ground-plane fallback from seating a grazing-angle pivot in the void.
+            if ( KiwiDrop_Trace( ray, false, &hit ) && hit.dist < 65536.0f )
+            {
+                s_lookAt[0] = hit.point[0];
+                s_lookAt[1] = hit.point[1];
+                s_lookAt[2] = hit.point[2];
+                s_have      = true;
+                havePivot   = true;
+            }
+        }
     }
 
     // On a cursor miss, use the framed surface's center-pick depth. Keep a stored
@@ -425,6 +446,17 @@ void KiwiCam_OrbitBegin( int imgX, int imgY )
                 const float zp   = Dot3( relP, f );
                 const float band = (float)c->height * KiwiCam_WorldPerPixel( centre.point );
                 keepStored = ( fabsf( zp - zc ) <= band );
+                // Depth alone let a pivot from a PREVIOUS orbit far off to the SIDE
+                // survive (same depth, wrong place) — the orbit then swung around a
+                // point nowhere near the view (user report).  Require the stored
+                // pivot to also sit within the same band LATERALLY of the view axis.
+                if ( keepStored )
+                {
+                    const float lat[3] = { relP[0] - f[0] * zp,
+                                           relP[1] - f[1] * zp,
+                                           relP[2] - f[2] * zp };
+                    keepStored = ( sqrtf( Dot3( lat, lat ) ) <= band );
+                }
             }
             if ( !keepStored )
             {
