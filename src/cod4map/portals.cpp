@@ -867,6 +867,11 @@ int PartitionBrushes(Node_t *node, Tree_t *tree)
   /* start a new cell from unassigned non-opaque leaves */
   if ( n->cellnum == CELLNUM_UNKNOWN && !n->opaque )
   {
+    /* KIWI FIX (AUDIT_cod4map finding 15): bspCells is MAX_MAP_CELLS entries and nothing
+       else bounds this counter; match the neighbouring producers (MAX_MAP_OCCLUDERS above,
+       map_reflection_probe.cpp:182) instead of running off the end of the array. */
+    if ( numBSPCells >= MAX_MAP_CELLS )
+      Com_Error("MAX_MAP_CELLS (%i) exceeded\n", MAX_MAP_CELLS);
     ClearBounds(bspCells[numBSPCells].mins, bspCells[numBSPCells].maxs);
     SplitBrushList(n, 1, tree);
     return ++numBSPCells;
@@ -1302,6 +1307,12 @@ int GetLeafBrushes(void)
       RemoveColinearPoints(w);
 
       /* determine plane orientation */
+      /* KIWI FIX (AUDIT_cod4map finding 15): guard the portal / portal-vert lumps the way
+         every other producer in this file does (MAX_MAP_OCCLUDERS, MAX_MAP_OCCLUDER_INDEXES). */
+      if ( numBSPPortals >= MAX_MAP_PORTALS )
+        Com_Error("MAX_MAP_PORTALS (%i) exceeded\n", MAX_MAP_PORTALS);
+      if ( numBSPPortalVerts + w->numpoints > MAX_MAP_PORTAL_VERTS )
+        Com_Error("MAX_MAP_PORTAL_VERTS (%i) exceeded\n", MAX_MAP_PORTAL_VERTS);
       portalIdx = numBSPPortals++;
       planeResult = SelectSplitPlane_r(face, neighbor);
       planeResult ^= 1;
@@ -1339,6 +1350,10 @@ int GetLeafBrushes(void)
     {
       if ( (unsigned char)(1 << ((bitShift + i) & 7)) & (unsigned char)g_brushSideBitmap[(bitShift + i) >> 3] )
       {
+        /* KIWI FIX (AUDIT_cod4map finding 15): bspCullGroupIndexes is
+           MAX_MAP_CULLGROUPINDEXES entries and this counter was never checked. */
+        if ( leafBrushIdx >= MAX_MAP_CULLGROUPINDEXES )
+          Com_Error("MAX_MAP_CULLGROUPINDEXES (%i) exceeded\n", MAX_MAP_CULLGROUPINDEXES);
         bspCullGroupIndexes[leafBrushIdx++] = i;
         bspCells[cellIdx].cullGroupCount++;
       }

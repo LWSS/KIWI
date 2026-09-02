@@ -956,8 +956,14 @@ int TesselateWinding( TriSurf_t *ts, int cellIndex, int cullGroupIndex, void (*t
   GetProjectionAxes( normal, &axisX, &axisY );
 
   /* ear-clip until only a triangle remains */
-  while ( w->numpoints > 3 )
+  /* KIWI FIX (AUDIT_cod4map finding 28): TesselateClipEar -> TesselateFixIntersections ->
+     TesselateInsertVertices can FreeWinding(ts->winding) and install a new one, so the cached
+     w is dangling after the first iteration.  Re-read ts->winding, exactly as TesselateClipEar
+     and TesselateFixIntersections themselves do. */
+  while ( ts->winding->numpoints > 3 )
     TesselateClipEar( ts, cellIndex, cullGroupIndex, axisX, axisY, triCallback );
+
+  w = ts->winding;
 
   if ( w->numpoints == 3 )
   {

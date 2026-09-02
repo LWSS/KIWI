@@ -219,7 +219,7 @@ Evaluate a point/spot light's contribution at a position.
 Returns 1 if light contributes, 0 if not.
 ================
 */
-extern int TraceVisibility(int flags, float *traceStart, PointLight_t *light);
+extern int TraceVisibility(int cacheIndex, float *startPos, float *endPos);   /* geometry.c:940 */
 
 int PointLightEvaluatePoint(int surfacePrimaryLightIndex, int traceIndex,
                             int lightIndex, float *pos, float *normal,
@@ -379,12 +379,16 @@ int PointLightEvaluatePoint(int surfacePrimaryLightIndex, int traceIndex,
             traceStart[1] = outDir[1] * traceOffset + pos[1];
             traceStart[2] = outDir[2] * traceOffset + pos[2];
 
-            if (!TraceVisibility(traceIndex, traceStart, light))
+            /* KIWI FIX: PointLight_t gained a leading primaryLightIndex, so the old
+               (float *)light casts handed the traces {int-as-float, origin.x, origin.y}
+               as the endpoint -- point lights were effectively unshadowed.  Trace to
+               the light's origin explicitly. */
+            if (!TraceVisibility(traceIndex, traceStart, light->origin))
                 return 0;
 
             if (normal)
             {
-                if (TraceStaticModels(traceStart, (float *)light))
+                if (TraceStaticModels(traceStart, light->origin))
                     return 0;
             }
         }

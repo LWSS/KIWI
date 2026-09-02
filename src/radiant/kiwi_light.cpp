@@ -1073,7 +1073,13 @@ void KiwiLight_Draw()
 
             std::vector<std::string> defs;
             GatherLightDefs( defs );
-            const char *liveDef = Key( first, "def" );
+            // KIWI FIX: Key() hands back a pointer INTO the entity's epair value storage.
+            // WriteKeyAll -> SetKeyValue -> sub_483500 free()s that exact block and
+            // reallocates it, and WriteKeyAll is called from inside the combo below — so a
+            // raw pointer dangles for the remaining Selectable compares, the empty-check and
+            // the strncpy into s_defEdit.  Snapshot the value before anything can mutate it.
+            const std::string liveDefValue( Key( first, "def" ) );
+            const char *liveDef = liveDefValue.c_str();
             const char *defPreview = ( liveDef && *liveDef ) ? liveDef : "light_point_linear (compiler default)";
             const bool defOpen = ImGui::BeginCombo( "def", defPreview );
             ItemTooltip( KTIP_DEF );
@@ -1161,7 +1167,11 @@ void KiwiLight_Draw()
 
             ImGui::SeparatorText( "Target (?)" );
             ItemTooltip( KTIP_TARGET );
-            const char *liveTarget = Key( first, "target" );
+            // KIWI FIX: same epair use-after-free as the "def" combo above — the "<none>"
+            // and per-name Selectables call WriteKeyAll, which free()s this entity's
+            // "target" value string while the loop still compares against it.
+            const std::string liveTargetValue( Key( first, "target" ) );
+            const char *liveTarget = liveTargetValue.c_str();
             std::vector<std::string> targets;
             GatherTargetNames( targets );
             const bool targetOpen = ImGui::BeginCombo( "target", liveTarget && *liveTarget ? liveTarget : "<none>" );

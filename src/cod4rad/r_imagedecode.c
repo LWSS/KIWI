@@ -370,6 +370,11 @@ void Image_DecodeCompressed(ImageDecodeState_t *dst, ImageInfo_t *srcInfo,
     decodeState.height = height;
     decodeState.channels = (bytesPerPixel >= 4) ? 3 : bytesPerPixel;
     decodeState.bpp = bytesPerPixel;
+    /* KIWI FIX: the bitstream pointer was never set (memset left it NULL), so every
+       wavelet-format .iwi (format 6..10: trigger, volume, spotlight_beam, sun_flare, ...)
+       faulted in Wavelet_Decompress on the first mip -- any map with a trigger brush
+       could not be lit.  The reader advances bytePtr itself across mips/faces. */
+    decodeState.bytePtr = srcData;
 
     /* decode each mip level from highest to lowest */
     for (mip = mipCount; mip >= 0; mip--)
@@ -385,12 +390,19 @@ void Image_DecodeCompressed(ImageDecodeState_t *dst, ImageInfo_t *srcInfo,
 
         for (face = 0; face < faceCount; face++)
         {
-            /* binary passes different src/dst: dst = allocPtr + totalPixels - mipPixels */
+            /* binary passes different src/dst: dst = allocPtr + totalPixels - mipPixels.
+               KIWI FIX: src is the PREVIOUS (smaller) mip's decoded pixels -- the inverse
+               wavelet's LL band (or the scratch the LL coefficients are decoded into),
+               NOT the compressed input, and the compressed stream is consumed by the
+               bitstream reader through decodeState.bytePtr, so it is never advanced by
+               hand here.  (IDB-unconfirmed reconstruction: the cod4rad IDA instance was
+               down when this was fixed -- verify against 0x4xxxxx Image_DecodeCompressed.) */
             unsigned char *decodeDst = allocPtrs[face] + totalPixels - mipPixels;
+            unsigned char *decodeSrc = workPtrs[face];
             decodeState.initialized = 0;
 
-            Wavelet_Decompress(srcData, decodeDst, &decodeState);
-            srcData += mipPixels; /* advance past this mip's compressed data */
+            Wavelet_Decompress(decodeSrc, decodeDst, &decodeState);
+            workPtrs[face] = decodeDst;
 
             /* convert first face at mip 0 */
             if (face == 0 && mip == 0)

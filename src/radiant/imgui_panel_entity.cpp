@@ -1186,6 +1186,19 @@ void ImGuiPanel_Entity_Draw()
             std::vector<entity_s_def *> selectedEntities;
             GatherSelectedEntities( &selectedEntities );
             DrawEntityHeader( eclasses, selectedEntities );
+            // KIWI FIX: DrawEntityHeader -> DrawChangeClass -> EclassCreate_Apply
+            // (win_ent.cpp:572) runs Entity_Create, which reparents the selected brushes
+            // into a NEW entity and free()s every owner entity it empties — including the
+            // defs already sitting in selectedEntities.  The rest of this frame still
+            // hands that vector to IsMixedValue -> FindEpair, which walks ->epairs of a
+            // freed entity_s_def.  Re-gather from the (re-selected) live brush list, and
+            // re-check edit_entity, before anything downstream dereferences them.
+            GatherSelectedEntities( &selectedEntities );
+            if ( !edit_entity )
+            {
+                ImGui::End();
+                return;
+            }
             DrawOwnedSettingsLink();
 
             const KiwiEntSchema &schema = KiwiEntInspect_GetSchema(

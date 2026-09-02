@@ -34,6 +34,7 @@
 // tolerates messages arriving before the children exist (every handler null-checks).
 #include "stdafx.h"
 #include "kiwi_plastbridge.h"
+#include "kiwi_test.h"               // KIWI-TEST: unattended script mode hooks
 #include "radiant_frame.h"             // the shell-agnostic frame API (this unit's header)
 #include "xywnd.h"                     // Ed_ActiveXY / ED_VIEW_XY (U-GLOBALS)
 #include "prefs.h"                     // Prefs_Init + g_PrefsDlg (the light-preview seeds)
@@ -377,7 +378,8 @@ static LRESULT CALLBACK Radiant_FrameWndProc( HWND hwnd, UINT msg, WPARAM wParam
         // Radiant_FrameCloseAllowed(), so quitting with unsaved edits now prompts here too —
         // and File→Exit (Radiant_FileExit) just posts WM_CLOSE, so it goes through this one
         // guard rather than prompting twice.  User cancel = swallow the close.
-        if ( !Radiant_FrameCloseAllowed() )
+        // KIWI-TEST: unattended edits must never stop on the unsaved-map prompt.
+        if ( !KiwiTest_Active() && !Radiant_FrameCloseAllowed() )
             return 0;
         ::DestroyWindow( hwnd );
         return 0;
@@ -995,6 +997,7 @@ static int Radiant_RunMessageLoop()
         }
 
         Radiant_OnIdle( 0 );   // RoutineProcessing: Cam_MouseControl + g_nUpdateBits drain
+        KiwiTest_Tick();       // KIWI-TEST: exactly one script step per idle-pump tick
                                // (event-driven viewport repaints — not frame-gated, so an
                                // edit still shows on the very next tick)
 
@@ -1050,6 +1053,32 @@ int APIENTRY WinMain( HINSTANCE hInstance, HINSTANCE /*hPrevInstance*/,
     // radiantapp.cpp:53 — gate P2 smoke test: verify the engine subset links and basic
     // printing works before any real init.  Com_Printf is safe pre-init.
     Com_Printf( 0, "[Radiant] Gate P2 smoke: engine subset initialized, WinMain reached\n" );
+
+    // KIWI-TEST: parse only this mode's switches; normal startup arguments remain untouched.
+    const char *testScript = nullptr;
+    const char *testLog = nullptr;
+    bool testRequested = false, testKeep = false, testStrict = false, testArgsValid = true;
+    for ( int i = 1; i < __argc; ++i )
+    {
+        if ( _stricmp( __argv[i], "-kiwitest" ) == 0 )
+        {
+            testRequested = true;
+            if ( i + 1 < __argc && __argv[i + 1][0] != '-' ) testScript = __argv[++i];
+            else testArgsValid = false;
+        }
+        else if ( _stricmp( __argv[i], "-kiwitest-log" ) == 0 )
+        {
+            if ( i + 1 < __argc && __argv[i + 1][0] != '-' ) testLog = __argv[++i];
+            else testArgsValid = false;
+        }
+        else if ( _stricmp( __argv[i], "-kiwitest-keep" ) == 0 ) testKeep = true;
+        else if ( _stricmp( __argv[i], "-kiwitest-strict" ) == 0 ) testStrict = true;
+    }
+    if ( testRequested )
+    {
+        if ( !KiwiTest_Init( testScript, testLog, testKeep, testStrict ) ) return 2;
+        if ( !testArgsValid ) { KiwiTest_Log( "invalid or incomplete -kiwitest arguments" ); return 2; }
+    }
 
     // Map loads are straight-line synchronous and never pump; without this the DWM
     // ghost paints a white copy over the frame once Windows marks it unresponsive.

@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <cstring>
 #include <ctime>
+#include "kiwi_test.h"          // KIWI-TEST: console tee (no-op outside test mode)
 #include "kiwi_shadowcache.h"   // KiwiShadowCache_Invalidate
 #include "kiwi_lightcache.h"    // KiwiLightCache_MapModified
 
@@ -75,6 +76,7 @@ void console_print( const char *fmt, va_list args )
     _vsnprintf( buf, sizeof( buf ), fmt, args );
     buf[sizeof( buf ) - 1] = '\0';
 
+    KiwiTest_ConsoleTap( buf );  // KIWI-TEST: capture the central formatted console stream
     fputs( buf, stdout );
 
     // Tee to the ImGui console panel (imgui_shell.cpp). It renders the raw \n directly, so it

@@ -30,6 +30,11 @@ char   visTmpDir[MAX_OS_PATH];
 
 char s_assertDisable_VisMain;
 
+/* KIWI FIX (AUDIT_cod4map finding 13): the fixed-size portal bitvectors in this file are all
+   Pstack_t::mightsee-sized (cod4map.h), so that array is the real cap on portalbytes.
+   LoadPortals now errors instead of silently overrunning them. */
+#define MAX_VIS_PORTALBYTES  ((size_t)sizeof(((Pstack_t *)0)->mightsee))
+
 
 /*
 ================
@@ -121,8 +126,10 @@ void ClusterMerge(int leafnum)
   int i, j;
   int pidx;
   int numvis;
-  char portalvector[MAX_MAP_LEAFS / 8];
-  uintptr_t uncompressed[MAX_MAP_LEAFS / 8 / sizeof(uintptr_t)];
+  char portalvector[MAX_MAP_LEAFS / 8];                                  /* leaf bits  — leafbytes */
+  /* KIWI FIX (AUDIT_cod4map finding 13): this buffer holds the PORTAL bitvector (memset and
+     OR'd for portalbytes), so it must be sized from the portal cap, not MAX_MAP_LEAFS. */
+  uintptr_t uncompressed[MAX_VIS_PORTALBYTES / sizeof(uintptr_t)];       /* portal bits — portalbytes */
 
   /* resolve merged leaf chain */
   mergedLeafnum = leafnum;
@@ -714,6 +721,12 @@ int LoadPortals( char *portalFile )
   leaflongs = leafbytes / sizeof(long);
   portalbytes = ((numportals * 2 + 63) & ~63) >> 3;
   visPortalLongs = (int)(portalbytes / sizeof(uint32_t));
+
+  /* KIWI FIX (AUDIT_cod4map finding 13): every fixed portal bitvector (Pstack_t::mightsee,
+     ClusterMerge's uncompressed[]) is MAX_VIS_PORTALBYTES long and is filled for portalbytes.
+     Nothing else bounds numportals, so fail loudly rather than overrun them. */
+  if ( portalbytes > MAX_VIS_PORTALBYTES )
+    Com_Error( "LoadPortals: too many portals (%i, max %i)", numportals, (int)(MAX_VIS_PORTALBYTES * 4) );
 
   /* each file portal is split into two memory portals (forward + back) */
   visPortals = malloc( 2 * numportals * sizeof(Vportal_t) );
@@ -1409,7 +1422,15 @@ int *CreatePassages(LPVOID lpThreadParameter)
         continue;
 
       /* clip winding through all separator planes */
-      memcpy(in, p->winding, sizeof(in));
+      /* KIWI FIX (AUDIT_cod4map finding 14): a Winding_t is allocated as exactly
+         sizeof(int) + 12 * numpoints bytes (polylib.cpp AllocWinding), so the old fixed
+         sizeof(in) copy read up to 148 bytes off the end of a small heap winding, and a
+         winding with more than MAX_POINTS_ON_FIXED_WINDING points wrote a numpoints that
+         overruns in[]/out[] downstream in PassageChopWinding.  Copy the real extent, and
+         reject anything that does not fit. */
+      if ( p->winding->numpoints > MAX_POINTS_ON_FIXED_WINDING )
+        Com_Error( "CreatePassages: portal winding has %i points (max %i)", p->winding->numpoints, MAX_POINTS_ON_FIXED_WINDING );
+      memcpy(in, p->winding, sizeof(int) + sizeof(vec3_t) * p->winding->numpoints);
 
       for ( k = 0; k < numseperators; k++ )
       {

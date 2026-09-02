@@ -325,6 +325,8 @@ set(RADIANT_SRCS
     # KIWI: Terrain Sculpt (Y) — patch sculpt/blend paint; Decals — decal patches on faces.
     "${SRC_DIR}/radiant/kiwi_terrain.h"
     "${SRC_DIR}/radiant/kiwi_terrain.cpp"
+    "${SRC_DIR}/radiant/kiwi_test.h"         # KIWI-TEST: scripted unattended editor runner
+    "${SRC_DIR}/radiant/kiwi_test.cpp"
     "${SRC_DIR}/radiant/kiwi_decal.h"
     "${SRC_DIR}/radiant/kiwi_decal.cpp"
     # KIWI: Selected entity facing arrows in camera and orthographic views.

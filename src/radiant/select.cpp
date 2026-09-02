@@ -2530,6 +2530,14 @@ void Clone_Selection( float /*a1*/ )
     if ( nSrc == 0 )
         return;                               // nothing cloneable (all patches/bboxes)
 
+    // KIWI: the binary reaches Clone through CXYWnd::Paste -> Map_ImportBuffer (0x487C90),
+    // which brackets the whole paste in Undo_ClearRedo / Undo_GeneralStart("import buffer")
+    // ... modified = 1 / Undo_End (0x487D96..0x488B8E).  This in-memory subset had lost
+    // that bracket, so Ctrl+Z after a Clone popped the user's PREVIOUS edit while the
+    // clones stayed, and a clone-only session closed without a save prompt.
+    Undo_ClearRedo();
+    Undo_GeneralStart( "import buffer" );
+
     // Deselect the originals (they return to active_brushes); the clones become the
     // new selection (matches the binary's paste-selects-the-new-brushes net effect).
     Select_Deselect( 1 );
@@ -2550,6 +2558,9 @@ void Clone_Selection( float /*a1*/ )
         Brush_AddToList2( inst );             // appends to selected_brushes
     }
 
+    Undo_EndBrushList( &selected_brushes );   // the clones are the selection, as at 0x488B7E
+    MarkMapModified();
+    Undo_End();
     g_nUpdateBits = -1;
 }
 

@@ -3137,7 +3137,7 @@ int ShadowMid_PointsMatch3D(float *pointA, float *pointB);
 int ShadowMid_FixTJunctions();
 void ShadowMid_SimplifyConcaveHoles(void);
 int ShadowMid_FindBestNotch(Winding_t *windingA, Winding_t *windingB, int startIdxA, int startIdxB, int *outStartIdx, int vertCount);
-int ShadowMid_PlugNotchesInWinding(TriSurf_t **_unused, IntWinding_t **neighbors, int neighborCount, int *auxStride, IntWinding_t *baseWinding);
+int ShadowMid_PlugNotchesInWinding(TriSurf_t **_unused, IntWinding_t **neighbors, int neighborCount, int auxStride, IntWinding_t *baseWinding); /* KIWI FIX (AUDIT_cod4map finding 27): auxStride is an int, not a pointer */
 char ShadowMid_WindingBehindPlane(TriSurf_t *tsA, TriSurf_t *tsB);
 char ShadowMid_IsConvex(TriSurf_t *ts);
 size_t ShadowMid_EmitTriCallback(TriSurf_t *ts, int vertIdx0, int vertIdx1, int vertIdx2, int cellIndex, int cullGroupIndex);

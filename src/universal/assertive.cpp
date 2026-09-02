@@ -2,6 +2,9 @@
 #include "assertive.h"
 #include <win32/win_local.h>
 #include <cstdarg>
+#ifdef KISAK_RADIANT
+#include <radiant/kiwi_test.h>
+#endif
 
 enum AssertOccurance : int
 {
@@ -72,6 +75,15 @@ char __cdecl AssertNotify(int type, AssertOccurance occurance)
         msg = "ASSERTION FAILURE... (this text is on the clipboard)";
     }
     ActiveWindow = GetActiveWindow();
+#ifdef KISAK_RADIANT
+    // KIWI-TEST: an unattended assert is a deterministic failure, never a modal wait.
+    if (KiwiTest_Active())
+    {
+        KiwiTest_Log("assert dialog: %s", assertMessage);
+        KiwiTest_Fail(assertMessage);
+        ExitProcess(3);
+    }
+#endif
     if (MessageBoxA(ActiveWindow, assertMessage, msg, 0x12011u) != 1)
         return 1;
 #if defined(_DEBUG)
@@ -168,6 +180,15 @@ void __cdecl ParseError(const char* msg)
     HWND ActiveWindow; // eax
 
     ActiveWindow = GetActiveWindow();
+#ifdef KISAK_RADIANT
+    // KIWI-TEST: map parse errors must not strand the harness behind MessageBoxA.
+    if (KiwiTest_Active())
+    {
+        KiwiTest_Log(".map parse error: %s", msg ? msg : "<null>");
+        KiwiTest_Fail(msg ? msg : ".map parse error");
+        ExitProcess(3);
+    }
+#endif
     MessageBoxA(ActiveWindow, msg, ".map parse error", 0x10u);
 }
 

@@ -2443,7 +2443,10 @@ Plugs notches from neighbor windings into the base winding.
 Iterates neighbors, finds shared edges, and removes notch geometry.
 ================
 */
-int ShadowMid_PlugNotchesInWinding(TriSurf_t **_unused, IntWinding_t **neighbors, int neighborCount, int *auxStride, IntWinding_t *baseWinding)
+/* KIWI FIX (AUDIT_cod4map finding 27): parameter 4 is the aux element size, not a pointer.
+   The caller used to cast its TriSurf_t *baseSurf into this slot (an argument shift), so
+   *auxStride dereferenced baseSurf->winding and passed a heap pointer as a vertex stride. */
+int ShadowMid_PlugNotchesInWinding(TriSurf_t **_unused, IntWinding_t **neighbors, int neighborCount, int auxStride, IntWinding_t *baseWinding)
 {
   int i, dupCount, bestNotchSize, bestNotchStart;
   int sharedIdxA, sharedIdxB;
@@ -2476,7 +2479,7 @@ int ShadowMid_PlugNotchesInWinding(TriSurf_t **_unused, IntWinding_t **neighbors
     {
       /* remove notch from base winding and rebuild temp */
       FreeWinding(tempWinding);
-      RemoveSharedBoundaryPoints(baseWinding, *auxStride, bestNotchStart, bestNotchSize);
+      RemoveSharedBoundaryPoints(baseWinding, auxStride, bestNotchStart, bestNotchSize);
       AssertFatal(ptsBase == baseWinding->auxData, s_assertDisable_ShadowMid_PlugNotchesInWinding);
       tempWinding = ShadowMid_WindingFromAuxData(baseWinding->numpoints, (SmAuxVert_t *)ptsBase);
     }
@@ -3807,7 +3810,8 @@ int SM_PlugNotchesCallback(TriSurf_t **surfArray, IntWinding_t **neighbors, int 
     while ( idx < count );
   }
   while ( prevCount != count );
-  return ShadowMid_PlugNotchesInWinding(surfArray, neighbors, count, (int *)baseSurf, baseWinding);
+  /* KIWI FIX (AUDIT_cod4map finding 27): pass this callback's own auxStride, not baseSurf. */
+  return ShadowMid_PlugNotchesInWinding(surfArray, neighbors, count, auxStride, baseWinding);
 }
 
 /*

@@ -3696,9 +3696,10 @@ bool KiwiCon_SaveSidecar( const char *mapPath )
     // Enumerate hidden solids before deciding whether a sidecar is needed.
     const int hiddenCount = KiwiVis_SidecarBuild();
 
-    if ( s_objects.empty() && hiddenCount == 0 )
+    if ( s_objects.empty() && hiddenCount == 0 && s_groups.empty() )
     {
-        // With no objects or hidden solids, remove any existing sidecar.
+        // With no objects, hidden solids or groups, remove any existing sidecar.
+        // (Groups are serialized below, so an empty-groups-only map must keep its file.)
         ::DeleteFileA( path );
         return true;
     }
@@ -4027,6 +4028,8 @@ bool KiwiCon_LoadSidecar( const char *mapPath )
         }
         // Any other keyword is a newer file's addition — skipped silently.
     }
+    if ( inObject )
+        bad = true;               // EOF inside an object: the file is truncated, say so
     fclose( f );
 
     s_objects.swap( loaded );

@@ -130,12 +130,12 @@ IDA when convenient; NOTE = faithful-but-ugly, no action planned.
   hand-expanded `Assert` in the file (hardcoded line 175); siblings use
   iassert. Check the IDA original for whether the guard should terminate.
 
-- `src/radiant/verteditdlg.cpp` ~34: VED_BracketPatch sets `patch->xx22b = true`
-  and the vert-edit path never clears it (only Patch_Paint pmesh.cpp:5726 /
-  PMESH_18 pmesh.cpp:4011 do) — a second [Apply] on the same patch skips the
-  undo bracket until a paint op resets the flag. Check IDB 0x461210 for a
-  dropped Patch_Paint/PMESH_18 call. Also :116 cites 0x4611C8, below the
-  function's own entry — transposed digit.
+- [VERIFIED FAITHFUL 2026-09-01] `src/radiant/verteditdlg.cpp` ~34: VED_BracketPatch
+  sets `patch->xx22b = true` and never clears it, so a second [Apply] on the same
+  patch skips the undo bracket until a paint op resets the flag. IDB 0x461210 does
+  exactly the same (sets the flag at both bracket sites, no Patch_Paint/PMESH_18 on
+  the path) — a RETAIL quirk, not a dropped call. Any fix is a deliberate divergence.
+  The :116 cite of 0x4611C8 (below the function entry) is still a transposed digit.
 - `src/radiant/scriptgroup.cpp` ~1481 vs mainfrm.cpp ~3388: byte-identical
   duplicate Disassociate bodies in two files — the known duplicate-function
   drift trap; dedupe when either is next touched. Also turret handlers

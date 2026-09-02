@@ -30,7 +30,10 @@ typedef struct BrushSideClipContext_s {
 } BrushSideClipContext_t;
 
 static BrushSideGlobals_t brushSideGlob;
-static int s_brushSideClipCount;
+/* KIWI FIX (AUDIT_cod4map finding 16): s_brushSideClipCount and its "== 2543" early return
+   removed - a hardcoded, never-reset global call count with no geometric meaning (a leftover
+   conditional breakpoint / decompiler artifact).  It aborted one winding subtraction at an
+   arbitrary point that depended on brush processing order. */
 static char s_assertDisable_BrushSides;
 
 /* CoD4 0x407E70 passes two uninitialized stack vectors.  Their incidental
@@ -130,9 +133,6 @@ static WindingList_t **BrushSides_SubtractOpaqueBrush(WindingList_t **link,
     else if ( side == SIDE_FRONT || (side == SIDE_ON && DotProduct(plane, sideNormal) >= 0.0f) )
       return &node->next;
   }
-
-  if ( ++s_brushSideClipCount == 2543 )
-    return &node->next;
 
   for ( i = crossCount; i; )
   {

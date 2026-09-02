@@ -517,6 +517,11 @@ static void MergePatchVertexPositions(MeshVert_t *verts, int vertCount)
         vertMap[vertIter] = root;
         ++groupSize[root];
         VectorAdd(groupSum[vertIter], groupSum[root], groupSum[root]);
+        /* KIWI FIX (AUDIT_cod4map finding 6): stop at the EARLIEST matching vertex, as the
+           function comment and the "root <= vertIter" invariant below require.  Without the
+           break, every further prior vertex that also maps to this root re-matched and
+           double-counted groupSize[root] / groupSum[vertIter]. */
+        break;
       }
     }
   }
@@ -579,8 +584,14 @@ Patch_t *ParsePatch(double unused, char **parsePtr, int patchType, float *transf
   brushFlags = ParseContentsFlags(parsePtr);
   toolFlags = ParseToolFlags(parsePtr);
   Com_SetSpaceDelimited(1);
-  strcpy(matName, COM_Parse(parsePtr));
-  strcpy(lmMatName, COM_Parse(parsePtr));
+  /* KIWI FIX (AUDIT_cod4map finding 1): COM_Parse returns a MAX_TOKEN_CHARS (1024) buffer;
+     the unbounded strcpy overran these MAX_QPATH (64) frames on a long material name.
+     Bounded copy, same idiom as the kiwilayer material read below — an over-long name is
+     truncated and still reports through LoadMaterial as a missing material. */
+  strncpy(matName, COM_Parse(parsePtr), MAX_QPATH - 1);
+  matName[MAX_QPATH - 1] = 0;
+  strncpy(lmMatName, COM_Parse(parsePtr), MAX_QPATH - 1);
+  lmMatName[MAX_QPATH - 1] = 0;
   Com_SetSpaceDelimited(0);
   smoothing = ParsePatchSmoothing(parsePtr);
   /* KIWI texture layers: "kiwilayer <slot> <material>" (slot 0..3 = weight in the

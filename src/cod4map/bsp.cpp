@@ -101,7 +101,6 @@ int          displayCollMapWarnings;
 int          fulldetail;
 int          g_currentEntityIndex;
 char         g_loadFromPath[MAX_OS_PATH];
-char         g_mapFileExtCheck[4];
 char         g_mapSourceFile[MAX_OS_PATH];
 int          g_numBrushes;
 int          g_numMapBrushes;
@@ -1219,7 +1218,10 @@ int main(int argc, const char **argv, const char **envp)
 
   /* determine source map file */
   strcpy(g_mapSourceFile, ExpandArg(argv[argc - 1]));
-  if ( strcmp(&g_mapFileExtCheck[strlen(g_mapSourceFile)], ".reg") )
+  // KIWI: the decompile rendered `g_mapSourceFile + strlen - 4` as an index into an
+  // adjacent 4-byte global (hex-rays adjacent-global artifact); it only worked when the
+  // linker happened to place the two arrays back to back.  Test the real extension.
+  if ( strlen(g_mapSourceFile) < 4 || strcmp(g_mapSourceFile + strlen(g_mapSourceFile) - 4, ".reg") )
   {
     sprintf(buf, "%s.reg", g_outputBasePath);
     remove(buf);

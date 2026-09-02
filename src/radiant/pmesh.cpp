@@ -1020,6 +1020,12 @@ brush_t *Patch_ParseMesh( const char **text, int version, int isMesh )
     // params:  <width> <height> <size> <subDivType>
     p->width  = Com_ParseInt( text );
     p->height = (int)j__atol( Com_ParseOnLine( text )->token );
+    // KIWI: the binary (0x444AC0) reads the grid straight into ctrl[16][16] with no clamp,
+    // so a hand-edited or foreign .map with "24 24" corrupts the heap on load.  Reject it
+    // as a parse error instead (the writer never emits anything outside 2..16).
+    if ( p->width < 2 || p->width > 16 || p->height < 2 || p->height > 16 )
+        Com_ScriptErrorDrop( "patch size %i x %i is outside the 2..16 control-point range\n",
+                             p->width, p->height );
 
     if ( isMesh )
         p->type = PATCH_TERRAIN;
