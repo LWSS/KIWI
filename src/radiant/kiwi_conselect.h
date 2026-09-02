@@ -109,6 +109,10 @@ void KiwiConSel_MoveCommit();
 // form: they rotate rigidly, and a non-uniform scale becomes the mean of the two
 // factors spanning their plane (no ellipses).
 void KiwiConSel_RotateApply( const float pivot[3], int axis, float degrees );
+// General form: `m` (world = m * baseline, column vectors) is the whole turn from
+// the baseline about `pivot`; the axis form is one such matrix.  A chained ring
+// gesture feeds the composition of its segments through this.
+void KiwiConSel_RotateApplyMatrix( const float pivot[3], const float m[3][3] );
 void KiwiConSel_ScaleApply ( const float pivot[3], const float factor[3] );
 
 // Construction snap candidates bypass Pick's selected-object exclusion. Mute the

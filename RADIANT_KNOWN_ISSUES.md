@@ -8238,6 +8238,80 @@ the CAMERA CONTRACT, the disposition table for every round-BK camera change, and
   edit whose widget is no longer active.  The modal G/R/S + ring path was verified
   end-to-end on the 10:01 build by `refimage_transform_undo.kt` (all 20 expectations
   pass).
+- **Reference images ignored depth (fixed 2026-09-02, UNBUILT):** `DrawImages` sorted
+  only by `layerOrder`, and the cloned `l_sm_b0c0` blend material writes no depth, so
+  the later/higher-layer picture always painted over the other in the camera view.
+  `InFront` (kiwi_refimage.cpp) now puts the picture closest to the viewer on top:
+  perspective orders same-axis stacked pictures exactly by eye-to-plane distance and
+  everything else (coplanar tiles, different axes) by eye-to-centre distance; ortho
+  uses the centre's signed depth along vpn; 2D views use the depth-axis coordinate
+  (`XY_SetupProjectionMtx` puts the larger coordinate nearer).  `layerOrder` only
+  breaks exact ties (<= 0.001 units).  The armed camera pick, `XYPick`, and the
+  marquee use the same rule so clicks land on the picture drawn on top.  Coplanar
+  tiles are ordered whole-picture by centre distance, so the front tile covers the
+  back one across the entire overlap; per-pixel depth is impossible without a
+  depth-writing material.
+- **Reference images: free tilt + undo flush (2026-09-02, UNBUILT):** the modal R
+  ring used to snap any turn that was not about the picture's own normal to quarter
+  turns.  `krefImage_t::tilt[3][3]` (identity = on its major plane) now carries the
+  residual, `AxisBasis` = `AlignedBasis(axis, rotation)` turned by it, and
+  `KiwiRefImage_RotateApply` turns the whole baseline frame freely, then reads it back
+  as (axis = dominant normal component, rotation = u heading, flipV, tilt).  The
+  alignment preference: a result within `KIWI_REFIMG_ALIGN_SNAP_DEG` (4 deg) of a
+  major plane snaps onto it unless Alt is held.  Read-back also reconciles frame
+  handedness (the XZ aligned frame is left-handed) with a V flip, which fixes the old
+  quarter-turn path silently mirroring a picture that landed on XZ.  Picks (camera ray
+  and 2D view-axis drop) intersect the real plane; 2D views still list a tilted picture
+  under its dominant plane and draw it projected.  Sidecar: `tilt` line (9 floats) only
+  when not identity; old files load unchanged.  Inspector shows the tilt with an "Align
+  to plane" button.  Undo: `KiwiRefImage_FlushPending` runs at the top of
+  `KiwiUndo_Undo/Redo` so a settled panel/drag edit that had not yet closed becomes the
+  newest ticket instead of Ctrl+Z popping the record beneath it (the store's own
+  `UndoPop` used to commit it AFTER the journal had already chosen an older ticket,
+  desynchronising the two).  Scripts: `refimage rotate <deg> [x|y|z]`, `expect image N
+  tilt <deg>`, `refimage_free_rotate.kt`.
+- **Rotate gizmo chains axes (2026-09-02, UNBUILT):** grabbing a second ring (or
+  pressing another X/Y/Z key) inside one R gesture used to undo the first axis'
+  residual (`SetConstraint` → `ApplyDelta(-m_applied)`), so a turn about X followed
+  by Y reset the X part.  `KiwiRotateCommand` now keeps `m_chain` (finished
+  segments in order) and the live axis starts at zero: brushes compose by their
+  incremental `RotateBrushes`, stores get the composed 3x3 through the new
+  `KiwiRefImage_RotateApplyMatrix` / `KiwiConSel_RotateApplyMatrix` (the axis forms
+  now build one matrix and call these).  Cancel, Ctrl+Z on a paused gesture, and V
+  pivot moves unwind every segment in reverse; commit is still one record.  The HUD
+  appends "after X 30.0, Z -15.0" while a chain exists.  Typed degrees apply to the
+  live axis only.  Fixed-size entity `angles` clean-up (`KiwiXform_SnapEntityAngles`)
+  only recognises a single-axis result; a chained turn falls back to plain 0.001
+  rounding of whatever the ported matrix path produced (already the behaviour for a
+  non-axis-aligned start).  Not scriptable yet: the test DSL's `refimage rotate` is one
+  MoveBegin/Commit per verb.
+- **Reference images select as a set (2026-09-02, UNBUILT):** the store held ONE
+  `s_selected`, so Shift-click on a second picture just swapped the selection.  Now
+  `s_sel` (ordered set, last = primary `s_selected`) with `KiwiRefImage_SelectAdd /
+  SelectRemove / IsSelected / SelectedCount / SelectedAt`; `ApplyClick` = plain replace,
+  Shift add (and make primary), Ctrl remove; the marquee applies the same grammar to
+  every picture it names (frontmost becomes primary).  Snapshots carry the set, so undo,
+  redo, and Cancel restore it.  `MoveBegin` latches every selected unlocked visible
+  picture (pivot = their origin centroid; one picture = its own origin, as before) and
+  Move/RotateMatrix/Scale loop the set — so the chained ring, G and S act on all.  The
+  armed MOVE drag carries the rest of the set by the same delta; corner scale / Shift
+  rotate drags act on the dragged picture only.  Delete / H / the panel's Remove use
+  `KiwiRefImage_DeleteSelected / HideSelected` (one record).  Inspector fields edit the
+  primary and say so when several are selected.  Outliner rows highlight per membership.
+  DSL: `refimage select+ <i>`, `refimage deselect <i>`, `refimage deleteselected`,
+  `expect images selected <n>`, `expect image <i> selected 0|1`;
+  `refimage_multiselect.kt` covers all of it (hand-computed centroid expectations).
+- **Move gizmo plane squares on images moved in one direction (2026-09-02, UNBUILT):**
+  `ConstrainRefImage` zeroed the picture's major-axis component for EVERY non-normal
+  constraint, so a plane square whose plane was not the picture's own (e.g. the XY
+  square on an XZ picture, or on one just turned there by the ring) intersected the two
+  planes and moved along a line.  It now applies to FREE moves only, and projects onto
+  the picture's real plane normal (`KiwiRefImage_PlaneNormal`, tilt included) instead of
+  a world axis; axis and plane locks move exactly as chosen.  Typed-scalar direction
+  (`NumericDirection`) still uses the major axis.  Also reverted: `XYPick`/`XYHit`
+  briefly returned the plane hit as the grab point, which changed the point's depth
+  relative to the drag's view points and would have pulled a 2D-dragged picture to the
+  view origin's depth; the inside test still uses the plane hit.
 - **Console spam while moving a construction line:** `KiwiRegion_DrawFills` reported
   "NO region derived" + "loop gap" once per store generation, and a live G/R/S bumps
   the generation every mouse move.  The report is now skipped while a command is

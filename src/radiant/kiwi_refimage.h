@@ -19,6 +19,11 @@ struct krefImage_t
     float       width, height;
     bool        keepAspect;
     float       rotation;      // degrees around the plane normal
+    // Residual rotation applied AFTER (axis, rotation): identity means the picture
+    // lies exactly on its major-axis plane; anything else is a free tilt.  Column
+    // vectors: world = tilt * aligned.  Rotations favour alignment by snapping this
+    // back to identity when it would end within KIWI_REFIMG_ALIGN_SNAP_DEG.
+    float       tilt[3][3];
     bool        flipU, flipV;
     float       opacity;
     bool        locked;
@@ -41,8 +46,20 @@ krefImage_t       *KiwiRefImage_MutableAt( int index );
 int                KiwiRefImage_Add( const krefImage_t &image );
 bool               KiwiRefImage_RemoveAt( int index );
 unsigned           KiwiRefImage_Generation();
+// Selection is a SET.  Selected() is the primary (the last picked; the inspector
+// and the corner handles act on it); Select(index) is exclusive (-1 clears);
+// SelectAdd adds and makes primary; SelectRemove drops one.  Undo/redo snapshots
+// restore the whole set.  The G/R/S arms, the armed move drag, Delete and H act
+// on every selected, unlocked, visible picture.
 int                KiwiRefImage_Selected();
+int                KiwiRefImage_SelectedCount();
+int                KiwiRefImage_SelectedAt( int i );
+bool               KiwiRefImage_IsSelected( int index );
 void               KiwiRefImage_Select( int index );
+void               KiwiRefImage_SelectAdd( int index );
+void               KiwiRefImage_SelectRemove( int index );
+bool               KiwiRefImage_DeleteSelected();   // one undo record for the set
+bool               KiwiRefImage_HideSelected();     // ditto
 
 // Shared viewport/panel/outliner selection funnel.  Plain replaces every scene
 // selection domain, Shift preserves brush/construction selection, and Ctrl only
@@ -70,6 +87,8 @@ bool KiwiRefImage_DeleteAt( int index );
 bool KiwiRefImage_Focus( int index );
 // World-space box of the picture quad with its rotation applied; false for a bad index.
 bool KiwiRefImage_Bounds( int index, float mins[3], float maxs[3] );
+// Unit normal of the picture's actual plane (tilt included); false for a bad index.
+bool KiwiRefImage_PlaneNormal( int index, float out[3] );
 
 // Dock window and scene rendering.
 void KiwiRefImage_Draw();
@@ -103,10 +122,16 @@ void KiwiRefImage_MoveCancel();
 // R / S arms: same baseline + undo bracket as Move (MoveBegin first, then
 // MoveCommit / MoveCancel); both ABSOLUTE from the baseline.  Rotation about the
 // image's own plane normal spins the picture; about any other world axis the
-// picture only orbits the pivot (its plane cannot leave the major axes).  Scale
+// whole picture turns freely (the plane may leave the major axes), except that a
+// result within KIWI_REFIMG_ALIGN_SNAP_DEG of a major-axis plane snaps onto it
+// unless Alt is held.  Scale
 // multiplies the pivot-relative origin per world axis and the width/height by the
 // factors carried by the picture's in-plane u/v directions.
 void KiwiRefImage_RotateApply( const float pivot[3], int axis, float degrees );
+// The general form: `m` (world = m * baseline, column vectors) is the whole turn
+// from the baseline about `pivot`.  The axis form builds one such matrix in the
+// ring's sense; a chained ring gesture feeds the composition of its segments.
+void KiwiRefImage_RotateApplyMatrix( const float pivot[3], const float m[3][3] );
 void KiwiRefImage_ScaleApply ( const float pivot[3], const float factor[3] );
 
 // Explorer drop / Edit->Paste. A handled HDROP is finished by the implementation.
@@ -118,7 +143,14 @@ void KiwiRefImage_WriteSidecar( FILE *f );
 bool KiwiRefImage_ParseSidecarLine( const char *line );
 void KiwiRefImage_ResetForNewMap();
 
-// Whole-store snapshot domain used by kiwi_undo.cpp.
+// Degrees the picture is tilted off its major-axis plane (0 = aligned).
+float KiwiRefImage_TiltDegrees( int index );
+// Snap threshold for the alignment preference (degrees).
+#define KIWI_REFIMG_ALIGN_SNAP_DEG 4.0f
+
+// Whole-store snapshot domain used by kiwi_undo.cpp.  FlushPending closes a settled
+// panel/drag edit into the journal so Ctrl+Z pops IT rather than an older record.
+void KiwiRefImage_FlushPending();
 bool KiwiRefImage_UndoPop();
 bool KiwiRefImage_RedoPop();
 void KiwiRefImage_ClearRedo();

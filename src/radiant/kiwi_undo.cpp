@@ -395,6 +395,9 @@ const char *KiwiUndo_UndoLabel()
 // Ctrl+Z.
 bool KiwiUndo_Undo()
 {
+    // A settled reference-image edit (panel widget, armed drag) must be a ticket
+    // before the newest ticket is chosen, or Ctrl+Z pops the record beneath it.
+    KiwiRefImage_FlushPending();
     // Discard stale tickets until an authoritative domain store can honor one.
     while ( !s_undo.empty() )
     {
@@ -444,6 +447,7 @@ bool KiwiUndo_Undo()
 // Ctrl+Y / Ctrl+Shift+Z.
 bool KiwiUndo_Redo()
 {
+    KiwiRefImage_FlushPending();            // same rule as undo; a new record drops redo
     while ( !s_redo.empty() )
     {
         const ticket_t t = s_redo.back();

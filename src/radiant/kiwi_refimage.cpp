@@ -113,6 +113,9 @@ krefImage_t::krefImage_t()
       pixW( 0 ), pixH( 0 )
 {
     origin[0] = origin[1] = origin[2] = 0.0f;
+    for ( int i = 0; i < 3; ++i )
+        for ( int j = 0; j < 3; ++j )
+            tilt[i][j] = ( i == j ) ? 1.0f : 0.0f;
 }
 
 // Public entry points are kept near the top; their implementation state and
@@ -124,25 +127,40 @@ namespace
     const int   KREF_UNDO_DEPTH = 32;
     const float KREF_MIN_SIZE = 0.125f;
 
-    struct storeSnap_t { std::vector<krefImage_t> images; int selected = -1; };
+    // Selection is an ordered set of indices (s_sel); the LAST one is the primary
+    // (s_selected) that the inspector and the corner handles act on.  Snapshots
+    // carry the whole set so undo/redo restore it.
+    struct storeSnap_t { std::vector<krefImage_t> images; int selected = -1; std::vector<int> sel; };
     enum dragMode_t { KREF_DRAG_NONE = 0, KREF_DRAG_MOVE, KREF_DRAG_SCALE, KREF_DRAG_ROTATE };
     struct drag_t
     {
         bool active = false; int index = -1; dragMode_t mode = KREF_DRAG_NONE; int corner = -1;
         float startPoint[3] = { 0,0,0 }, grabOffset[3] = { 0,0,0 }, startAngle = 0.0f;
         krefImage_t base;
+        // The other selected, movable pictures: a MOVE drag carries them along.
+        std::vector<int>         groupIndex;
+        std::vector<krefImage_t> groupBase;
     };
     struct placement_t { int axis; float origin[3]; };
+    // The G/R/S arms act on every selected, unlocked, visible picture from one
+    // baseline; `bases[i]` is the latched copy of `indices[i]`.
     struct move_t
     {
-        bool        active = false;
-        int         index = -1;
-        krefImage_t base;
+        bool                     active = false;
+        std::vector<int>         indices;
+        std::vector<krefImage_t> bases;
     };
 
     extern std::vector<krefImage_t> s_images;
     extern unsigned s_generation;
     extern int s_selected;
+    extern std::vector<int> s_sel;
+    bool IsSel( int index );
+    void SelSync();
+    void SelSet( int index );
+    void SelAdd( int index );
+    void SelRemove( int index );
+    void SelClear();
     extern bool s_armed;
     extern std::vector<storeSnap_t> s_undo, s_redo;
     extern storeSnap_t s_pending;
@@ -155,10 +173,15 @@ namespace
     extern bool s_focusPending;
 
     int ClampAxis( int axis );
+    bool InFront( const krefImage_t &a, const krefImage_t &b, bool camera );
     bool SelectionAllowsImages();
     bool NearF( float a, float b );
     void Sanitize( krefImage_t &r );
     void AxisBasis( const krefImage_t &r, float u[3], float v[3], float n[3] );
+    void AlignedBasis( int axis, float rotation, float u[3], float v[3], float n[3] );
+    bool TiltIsIdentity( const krefImage_t &r );
+    void TiltSetIdentity( krefImage_t &r );
+    float TiltDegrees( const krefImage_t &r );
     void Touch( bool dirty );
     storeSnap_t Snapshot();
     void CommitPending();
@@ -209,7 +232,7 @@ int KiwiRefImage_Add( const krefImage_t &image )
     Sanitize( copy );
     copy.material = nullptr;
     s_images.push_back( copy );
-    s_selected = (int)s_images.size() - 1;
+    SelSet( (int)s_images.size() - 1 );
     Touch( true );
     return s_selected;
 }
@@ -218,8 +241,14 @@ bool KiwiRefImage_RemoveAt( int index )
 {
     if ( index < 0 || index >= (int)s_images.size() ) return false;
     s_images.erase( s_images.begin() + index );
-    if ( s_selected == index ) s_selected = -1;
-    else if ( s_selected > index ) --s_selected;
+    // Re-seat every selected index above the hole; drop the removed one.
+    for ( size_t i = 0; i < s_sel.size(); )
+    {
+        if ( s_sel[i] == index )     { s_sel.erase( s_sel.begin() + i ); continue; }
+        if ( s_sel[i] > index )      --s_sel[i];
+        ++i;
+    }
+    SelSync();
     if ( s_hoverCamera == index ) s_hoverCamera = -1;
     else if ( s_hoverCamera > index ) --s_hoverCamera;
     if ( s_hoverXY == index ) s_hoverXY = -1;
@@ -230,13 +259,38 @@ bool KiwiRefImage_RemoveAt( int index )
 
 unsigned KiwiRefImage_Generation() { return s_generation; }
 int KiwiRefImage_Selected() { return s_selected; }
+int KiwiRefImage_SelectedCount() { return (int)s_sel.size(); }
+int KiwiRefImage_SelectedAt( int i ) { return i >= 0 && i < (int)s_sel.size() ? s_sel[i] : -1; }
+bool KiwiRefImage_IsSelected( int index ) { return IsSel( index ); }
 
+// Exclusive: this picture alone, or nothing for a bad index.
 void KiwiRefImage_Select( int index )
 {
-    const int next = index >= 0 && index < (int)s_images.size() ? index : -1;
-    if ( next != s_selected ) { s_selected = next; Touch( false ); }
+    const bool valid = index >= 0 && index < (int)s_images.size();
+    if ( !valid ) { if ( !s_sel.empty() ) { SelClear(); Touch( false ); } return; }
+    if ( s_sel.size() == 1 && s_sel[0] == index ) return;
+    SelSet( index );
+    Touch( false );
 }
 
+void KiwiRefImage_SelectAdd( int index )
+{
+    if ( index < 0 || index >= (int)s_images.size() ) return;
+    if ( s_selected == index ) return;               // already the primary
+    SelAdd( index );
+    Touch( false );
+}
+
+void KiwiRefImage_SelectRemove( int index )
+{
+    if ( !IsSel( index ) ) return;
+    SelRemove( index );
+    Touch( false );
+}
+
+// Click grammar shared by the viewports, the dock list, and the Outliner: plain
+// replaces every scene selection domain with this picture, Shift ADDS it (and makes
+// it the primary), Ctrl removes it.
 void KiwiRefImage_ApplyClick( int index, bool shift, bool ctrl, bool viewport )
 {
     if ( index < 0 || index >= (int)s_images.size() )
@@ -251,18 +305,17 @@ void KiwiRefImage_ApplyClick( int index, bool shift, bool ctrl, bool viewport )
         Sel_Clear( KiwiSel() );
         Sel_SyncToLegacy();
         KiwiConSel_Clear();
+        KiwiRefImage_Select( index );
     }
-
-    if ( ctrl )
+    else if ( ctrl )
     {
-        if ( s_selected == index )
-            KiwiRefImage_Select( -1 );
+        KiwiRefImage_SelectRemove( index );
     }
     else
     {
-        KiwiRefImage_Select( index );
+        KiwiRefImage_SelectAdd( index );
     }
-    if ( viewport && s_selected == index )
+    if ( viewport && IsSel( index ) )
         s_focusPending = true;
     g_nUpdateBits = -1;
 }
@@ -357,6 +410,15 @@ bool KiwiRefImage_Bounds( int index, float mins[3], float maxs[3] )
     return true;
 }
 
+bool KiwiRefImage_PlaneNormal( int index, float out[3] )
+{
+    if ( index < 0 || index >= (int)s_images.size() || !out )
+        return false;
+    float u[3], v[3];
+    AxisBasis( s_images[index], u, v, out );
+    return true;
+}
+
 bool KiwiRefImage_Focus( int index )
 {
     float mins[3], maxs[3];
@@ -366,43 +428,88 @@ bool KiwiRefImage_Focus( int index )
     return true;
 }
 
+float KiwiRefImage_TiltDegrees( int index )
+{
+    if ( index < 0 || index >= (int)s_images.size() ) return 0.0f;
+    return TiltDegrees( s_images[index] );
+}
+
+void KiwiRefImage_FlushPending()
+{
+    if ( s_pendingHave && !s_move.active && !s_drag.active )
+        CommitPending();
+}
+
+namespace
+{
+    // The selected pictures a transform arm may act on: selected, unlocked, visible.
+    void MovableSelection( std::vector<int> *out )
+    {
+        out->clear();
+        for ( size_t i = 0; i < s_sel.size(); ++i )
+        {
+            const int index = s_sel[i];
+            if ( index < 0 || index >= (int)s_images.size() ) continue;
+            if ( s_images[index].locked || s_images[index].hidden ) continue;
+            out->push_back( index );
+        }
+    }
+}
+
 bool KiwiRefImage_CanMove()
 {
-    return s_selected >= 0 && s_selected < (int)s_images.size()
-        && !s_images[s_selected].locked && !s_images[s_selected].hidden;
+    std::vector<int> movable;
+    MovableSelection( &movable );
+    return !movable.empty();
 }
 
 bool KiwiRefImage_MoveBegin( float outRef[3] )
 {
-    if ( !KiwiRefImage_CanMove() || s_drag.active )
+    if ( s_drag.active )
         return false;
-    BeginEdit( "move reference image" );
+    std::vector<int> movable;
+    MovableSelection( &movable );
+    if ( movable.empty() )
+        return false;
+    BeginEdit( movable.size() > 1 ? "move reference images" : "move reference image" );
     s_move.active = true;
-    s_move.index = s_selected;
-    s_move.base = s_images[s_selected];
+    s_move.indices = movable;
+    s_move.bases.clear();
+    float centroid[3] = { 0.0f, 0.0f, 0.0f };
+    for ( size_t i = 0; i < movable.size(); ++i )
+    {
+        s_move.bases.push_back( s_images[movable[i]] );
+        for ( int k = 0; k < 3; ++k ) centroid[k] += s_images[movable[i]].origin[k];
+    }
+    // One picture: its own origin (exactly, so the ring pivots on it); several:
+    // the centroid of their origins, like the construction arm's anchor centroid.
     if ( outRef )
-        memcpy( outRef, s_move.base.origin, sizeof( s_move.base.origin ) );
+        for ( int k = 0; k < 3; ++k ) outRef[k] = centroid[k] / (float)movable.size();
     return true;
 }
 
 void KiwiRefImage_MoveApply( const float total[3] )
 {
-    if ( !s_move.active || !total || s_move.index < 0
-      || s_move.index >= (int)s_images.size() )
+    if ( !s_move.active || !total )
         return;
-    krefImage_t &r = s_images[s_move.index];
-    float next[3];
-    bool changed = false;
-    for ( int k = 0; k < 3; ++k )
+    for ( size_t mi = 0; mi < s_move.indices.size(); ++mi )
     {
-        next[k] = s_move.base.origin[k] + total[k];
-        if ( !NearF( r.origin[k], next[k] ) ) changed = true;
+        const int index = s_move.indices[mi];
+        if ( index < 0 || index >= (int)s_images.size() ) continue;
+        krefImage_t &r = s_images[index];
+        float next[3];
+        bool changed = false;
+        for ( int k = 0; k < 3; ++k )
+        {
+            next[k] = s_move.bases[mi].origin[k] + total[k];
+            if ( !NearF( r.origin[k], next[k] ) ) changed = true;
+        }
+        if ( !changed )
+            continue;
+        memcpy( r.origin, next, sizeof( next ) );
+        Sanitize( r );
+        Touch( true );
     }
-    if ( !changed )
-        return;
-    memcpy( r.origin, next, sizeof( next ) );
-    Sanitize( r );
-    Touch( true );
 }
 
 void KiwiRefImage_MoveCommit()
@@ -423,87 +530,134 @@ void KiwiRefImage_MoveCancel()
 
 namespace
 {
-    // Rotate `in` about the world axis `axis` through `pivot` (right-hand rule).
-    void RotatePointAboutAxis( const float pivot[3], int axis, float c, float sn,
-                               const float in[3], float out[3] )
+    // out = m * in (column vectors).
+    void MulMat3( const float m[3][3], const float in[3], float out[3] )
     {
-        const int i = ( axis + 1 ) % 3, j = ( axis + 2 ) % 3;
-        const float di = in[i] - pivot[i], dj = in[j] - pivot[j];
-        out[axis] = in[axis];
-        out[i]    = pivot[i] + di * c - dj * sn;
-        out[j]    = pivot[j] + di * sn + dj * c;
+        for ( int i = 0; i < 3; ++i )
+            out[i] = m[i][0] * in[0] + m[i][1] * in[1] + m[i][2] * in[2];
     }
 }
 
 void KiwiRefImage_RotateApply( const float pivot[3], int axis, float degrees )
 {
-    if ( !s_move.active || !pivot || axis < 0 || axis > 2
-      || s_move.index < 0 || s_move.index >= (int)s_images.size() )
+    if ( axis < 0 || axis > 2 )
         return;
-    krefImage_t       &r = s_images[s_move.index];
-    const krefImage_t &b = s_move.base;
-
-    // About any axis other than the picture's own normal the plane must stay on a
-    // major axis, so the turn snaps to quarter turns and the picture re-maps onto
-    // the plane its rotated normal lands on.  About its own normal it spins freely.
-    float deg = degrees;
-    if ( axis != b.axis )
-        deg = 90.0f * floorf( degrees / 90.0f + 0.5f );
     // Negative: the ported Select_RotateAxis turns the other way for the same degrees,
     // and the ring feeds both, so images must spin like brushes do.
-    const float rad = -deg * KREF_PI / 180.0f;
+    const float rad = -degrees * KREF_PI / 180.0f;
     const float c = cosf( rad ), sn = sinf( rad );
-    static const float zero[3] = { 0.0f, 0.0f, 0.0f };
+    const int i = ( axis + 1 ) % 3, j = ( axis + 2 ) % 3;
+    float m[3][3];
+    for ( int a = 0; a < 3; ++a )
+        for ( int k = 0; k < 3; ++k )
+            m[a][k] = ( a == k ) ? 1.0f : 0.0f;
+    m[i][i] = c;  m[i][j] = -sn;
+    m[j][i] = sn; m[j][j] = c;
+    KiwiRefImage_RotateApplyMatrix( pivot, m );
+}
 
-    float origin[3];
-    RotatePointAboutAxis( pivot, axis, c, sn, b.origin, origin );
+void KiwiRefImage_RotateApplyMatrix( const float pivot[3], const float m[3][3] )
+{
+    if ( !s_move.active || !pivot || !m )
+        return;
+    // Every latched picture turns about the same pivot from its own baseline.
+    for ( size_t mi = 0; mi < s_move.indices.size(); ++mi )
+    {
+    const int index = s_move.indices[mi];
+    if ( index < 0 || index >= (int)s_images.size() ) continue;
+    krefImage_t       &r = s_images[index];
+    const krefImage_t &b = s_move.bases[mi];
 
-    // Rotate the baseline frame and read the result back as (axis, rotation, flip):
-    // the rotated normal picks the plane, the rotated u vector the in-plane angle, and
-    // a normal that lands negative means the picture is now seen from behind, which
-    // one V flip restores (two-sided quad, so it stays visible either way).
+    float origin[3], rel[3], turned[3];
+    for ( int k = 0; k < 3; ++k ) rel[k] = b.origin[k] - pivot[k];
+    MulMat3( m, rel, turned );
+    for ( int k = 0; k < 3; ++k ) origin[k] = pivot[k] + turned[k];
+
+    // Turn the baseline frame (tilt included) freely, then read the result back as
+    // (axis, rotation, flipV, tilt): the rotated normal's dominant component picks
+    // the major plane, the rotated u vector's in-plane heading the rotation, the
+    // handedness check below the V flip.  Whatever the aligned frame cannot express
+    // becomes the tilt.
     float u[3], v[3], n[3];
     AxisBasis( b, u, v, n );
-    float ur[3], nr[3];
-    RotatePointAboutAxis( zero, axis, c, sn, u, ur );
-    RotatePointAboutAxis( zero, axis, c, sn, n, nr );
-    int newAxis = b.axis;
-    if ( axis != b.axis )
-    {
-        newAxis = 0;
-        for ( int k = 1; k < 3; ++k )
-            if ( fabsf( nr[k] ) > fabsf( nr[newAxis] ) ) newAxis = k;
-    }
-    krefImage_t flat = b;
-    flat.axis     = newAxis;
-    flat.rotation = 0.0f;
+    float ur[3], vr[3], nr[3];
+    MulMat3( m, u, ur );
+    MulMat3( m, v, vr );
+    MulMat3( m, n, nr );
+    int newAxis = 0;
+    for ( int k = 1; k < 3; ++k )
+        if ( fabsf( nr[k] ) > fabsf( nr[newAxis] ) ) newAxis = k;
+    // The quad is two-sided, so the normal's sign is free: face the plane's +axis.
+    if ( nr[newAxis] < 0.0f )
+        for ( int k = 0; k < 3; ++k ) nr[k] = -nr[k];
     float bu[3], bv[3], bn[3];
-    AxisBasis( flat, bu, bv, bn );
+    AlignedBasis( newAxis, 0.0f, bu, bv, bn );
     const float du = ur[0] * bu[0] + ur[1] * bu[1] + ur[2] * bu[2];
     const float dv = ur[0] * bv[0] + ur[1] * bv[1] + ur[2] * bv[2];
+    // The projection never degenerates: |nr[newAxis]| >= 1/sqrt(3) bounds ur's
+    // out-of-plane share to sqrt(2/3).
     const float rotation = atan2f( dv, du ) * 180.0f / KREF_PI;
-    const bool  flipV    = ( nr[newAxis] < 0.0f ) ? !b.flipV : b.flipV;
+    float ua[3], va[3], na[3];
+    AlignedBasis( newAxis, rotation, ua, va, na );
+    // The aligned frames are not all right-handed (XZ is u x v = -n), and a tilt
+    // must be a proper rotation, so match the turned frame's handedness to the
+    // aligned one by mirroring v; the V texture flip makes that mirror invisible.
+    const float handT = ur[0] * ( vr[1] * nr[2] - vr[2] * nr[1] )
+                      + ur[1] * ( vr[2] * nr[0] - vr[0] * nr[2] )
+                      + ur[2] * ( vr[0] * nr[1] - vr[1] * nr[0] );
+    const float handA = ua[0] * ( va[1] * na[2] - va[2] * na[1] )
+                      + ua[1] * ( va[2] * na[0] - va[0] * na[2] )
+                      + ua[2] * ( va[0] * na[1] - va[1] * na[0] );
+    bool flipV = b.flipV;
+    if ( ( handT < 0.0f ) != ( handA < 0.0f ) )
+    {
+        flipV = !flipV;
+        for ( int k = 0; k < 3; ++k ) vr[k] = -vr[k];
+    }
 
-    bool changed = !NearF( r.rotation, rotation ) || r.axis != newAxis || r.flipV != flipV;
+    krefImage_t next = b;
+    next.origin[0] = origin[0]; next.origin[1] = origin[1]; next.origin[2] = origin[2];
+    next.axis     = newAxis;
+    next.rotation = rotation;
+    next.flipV    = flipV;
+    // tilt = T * A^T with T = [ur vr nr] and A = the aligned frame, both as columns.
+    for ( int i = 0; i < 3; ++i )
+        for ( int j = 0; j < 3; ++j )
+            next.tilt[i][j] = ur[i] * ua[j] + vr[i] * va[j] + nr[i] * na[j];
+    // Favour the major planes: a near-aligned result snaps onto its plane.  Alt
+    // keeps the exact free pose (the same modifier the armed drags use).
+    if ( TiltDegrees( next ) <= KIWI_REFIMG_ALIGN_SNAP_DEG
+      && !( ::GetKeyState( VK_MENU ) & 0x8000 ) )
+        TiltSetIdentity( next );
+    Sanitize( next );
+
+    bool changed = !NearF( r.rotation, next.rotation ) || r.axis != next.axis || r.flipV != next.flipV;
     for ( int k = 0; k < 3 && !changed; ++k )
-        changed = !NearF( r.origin[k], origin[k] );
+        changed = !NearF( r.origin[k], next.origin[k] );
+    for ( int i = 0; i < 3 && !changed; ++i )
+        for ( int j = 0; j < 3 && !changed; ++j )
+            changed = !NearF( r.tilt[i][j], next.tilt[i][j] );
     if ( !changed )
-        return;
-    memcpy( r.origin, origin, sizeof( origin ) );
-    r.axis     = newAxis;
-    r.rotation = rotation;
-    r.flipV    = flipV;
-    Sanitize( r );
+        continue;
+    memcpy( r.origin, next.origin, sizeof( origin ) );
+    r.axis     = next.axis;
+    r.rotation = next.rotation;
+    r.flipV    = next.flipV;
+    memcpy( r.tilt, next.tilt, sizeof( r.tilt ) );
     Touch( true );
+    }
 }
 
 void KiwiRefImage_ScaleApply( const float pivot[3], const float factor[3] )
 {
-    if ( !s_move.active || !pivot || !factor
-      || s_move.index < 0 || s_move.index >= (int)s_images.size() )
+    if ( !s_move.active || !pivot || !factor )
         return;
-    krefImage_t       &r = s_images[s_move.index];
-    const krefImage_t &b = s_move.base;
+    for ( size_t mi = 0; mi < s_move.indices.size(); ++mi )
+    {
+    const int index = s_move.indices[mi];
+    if ( index < 0 || index >= (int)s_images.size() ) continue;
+    krefImage_t       &r = s_images[index];
+    const krefImage_t &b = s_move.bases[mi];
     float origin[3];
     for ( int k = 0; k < 3; ++k )
         origin[k] = pivot[k] + ( b.origin[k] - pivot[k] ) * factor[k];
@@ -528,12 +682,13 @@ void KiwiRefImage_ScaleApply( const float pivot[3], const float factor[3] )
     for ( int k = 0; k < 3 && !changed; ++k )
         changed = !NearF( r.origin[k], origin[k] );
     if ( !changed )
-        return;
+        continue;
     memcpy( r.origin, origin, sizeof( origin ) );
     r.width  = width;
     r.height = height;
     Sanitize( r );
     Touch( true );
+    }
 }
 
 void KiwiRefImage_DrawWorld() { DrawImages( -1, 1.0f, true ); }
@@ -644,19 +799,54 @@ bool KiwiRefImage_HandleEscape()
 
 bool KiwiRefImage_HandleDelete()
 {
-    if ( !s_armed || s_selected < 0 || s_selected >= (int)s_images.size() ) return false;
+    if ( !s_armed || s_sel.empty() ) return false;
     if ( s_drag.active )
     {
         ImGuiShell_AbortViewportInput();
         if ( s_drag.active ) EndDrag( true );
     }
-    return KiwiRefImage_DeleteAt( s_selected );
+    return KiwiRefImage_DeleteSelected();
 }
 
 bool KiwiRefImage_OwnsDelete()
 {
-    return s_selected >= 0 && s_selected < (int)s_images.size()
-        && KiwiSel().items.empty() && KiwiConSel_Empty();
+    return !s_sel.empty() && KiwiSel().items.empty() && KiwiConSel_Empty();
+}
+
+// Every selected picture in one undo record.  Indices are removed from the top
+// down so the lower ones keep their meaning while the loop runs.
+bool KiwiRefImage_DeleteSelected()
+{
+    if ( s_sel.empty() ) return false;
+    CommitPending();
+    const storeSnap_t before = Snapshot();
+    std::vector<int> order = s_sel;
+    std::sort( order.begin(), order.end() );
+    bool any = false;
+    for ( size_t i = order.size(); i-- > 0; )
+        any = KiwiRefImage_RemoveAt( order[i] ) || any;
+    if ( !any ) return false;
+    ImmediateCommit( before, order.size() > 1 ? "remove reference images" : "remove reference image" );
+    return true;
+}
+
+bool KiwiRefImage_HideSelected()
+{
+    if ( s_sel.empty() ) return false;
+    CommitPending();
+    const storeSnap_t before = Snapshot();
+    bool any = false;
+    for ( size_t i = 0; i < s_sel.size(); ++i )
+    {
+        const int index = s_sel[i];
+        if ( index < 0 || index >= (int)s_images.size() || s_images[index].hidden ) continue;
+        s_images[index].hidden = true;
+        any = true;
+    }
+    if ( !any ) return false;
+    Touch( true );
+    ImmediateCommit( before, s_sel.size() > 1 ? "hide reference images" : "hide reference image" );
+    return true;
 }
 
 bool KiwiRefImage_HandleDropFiles( void *dropHandle, int screenX, int screenY )
@@ -790,7 +980,26 @@ namespace
     std::vector<krefImage_t> s_images;
     unsigned                 s_generation = 1;
     int                      s_selected = -1;
+    std::vector<int>         s_sel;
     bool                     s_armed = false;
+
+    bool IsSel( int index )
+    {
+        for ( size_t i = 0; i < s_sel.size(); ++i )
+            if ( s_sel[i] == index ) return true;
+        return false;
+    }
+    void SelSync() { s_selected = s_sel.empty() ? -1 : s_sel.back(); }
+    void SelClear() { s_sel.clear(); SelSync(); }
+    void SelSet( int index ) { s_sel.clear(); s_sel.push_back( index ); SelSync(); }
+    void SelRemove( int index )
+    {
+        for ( size_t i = 0; i < s_sel.size(); ++i )
+            if ( s_sel[i] == index ) { s_sel.erase( s_sel.begin() + i ); break; }
+        SelSync();
+    }
+    // Add, or move an already-selected picture to the back so it becomes primary.
+    void SelAdd( int index ) { SelRemove( index ); s_sel.push_back( index ); SelSync(); }
     bool                     s_profileLoaded = false;
     float                    s_defaultOpacity = 0.75f;
 
@@ -877,6 +1086,34 @@ namespace
         while ( r.rotation > 180.0f ) r.rotation -= 360.0f;
         while ( r.rotation <= -180.0f ) r.rotation += 360.0f;
         r.opacity = ClampF( r.opacity, 0.0f, 1.0f );
+        // Keep the tilt a proper rotation: Gram-Schmidt the rows, and fall back to
+        // identity for anything non-finite, degenerate, or mirrored.
+        bool ok = true;
+        for ( int i = 0; i < 3 && ok; ++i )
+            for ( int j = 0; j < 3 && ok; ++j )
+                ok = _finite( r.tilt[i][j] ) != 0;
+        float m[3][3];
+        if ( ok ) memcpy( m, r.tilt, sizeof( m ) );
+        for ( int i = 0; i < 3 && ok; ++i )
+        {
+            for ( int p = 0; p < i; ++p )
+            {
+                const float d = m[i][0] * m[p][0] + m[i][1] * m[p][1] + m[i][2] * m[p][2];
+                for ( int k = 0; k < 3; ++k ) m[i][k] -= d * m[p][k];
+            }
+            const float len = sqrtf( m[i][0] * m[i][0] + m[i][1] * m[i][1] + m[i][2] * m[i][2] );
+            if ( len < 1.0e-4f ) { ok = false; break; }
+            for ( int k = 0; k < 3; ++k ) m[i][k] /= len;
+        }
+        if ( ok )
+        {
+            const float det = m[0][0] * ( m[1][1] * m[2][2] - m[1][2] * m[2][1] )
+                            - m[0][1] * ( m[1][0] * m[2][2] - m[1][2] * m[2][0] )
+                            + m[0][2] * ( m[1][0] * m[2][1] - m[1][1] * m[2][0] );
+            ok = det > 0.0f;
+        }
+        if ( ok ) memcpy( r.tilt, m, sizeof( m ) );
+        else      TiltSetIdentity( r );
     }
 
     storeSnap_t Snapshot()
@@ -884,6 +1121,7 @@ namespace
         storeSnap_t s;
         s.images = s_images;
         s.selected = s_selected;
+        s.sel = s_sel;
         return s;
     }
 
@@ -898,22 +1136,36 @@ namespace
             return false;
         for ( int i = 0; i < 3; ++i )
             if ( !NearF( a.origin[i], b.origin[i] ) ) return false;
+        for ( int i = 0; i < 3; ++i )
+            for ( int j = 0; j < 3; ++j )
+                if ( !NearF( a.tilt[i][j], b.tilt[i][j] ) ) return false;
         return true;
     }
 
     bool SameSnap( const storeSnap_t &a, const storeSnap_t &b )
     {
-        if ( a.selected != b.selected || a.images.size() != b.images.size() ) return false;
+        if ( a.selected != b.selected || a.sel != b.sel || a.images.size() != b.images.size() ) return false;
         for ( size_t i = 0; i < a.images.size(); ++i )
             if ( !SameRecord( a.images[i], b.images[i] ) ) return false;
         return true;
     }
 
+    void RestoreSelection( const storeSnap_t &snap )
+    {
+        s_sel.clear();
+        for ( size_t i = 0; i < snap.sel.size(); ++i )
+            if ( snap.sel[i] >= 0 && snap.sel[i] < (int)s_images.size() && !IsSel( snap.sel[i] ) )
+                s_sel.push_back( snap.sel[i] );
+        // Older snapshots (single `selected`) still restore that one picture.
+        if ( s_sel.empty() && snap.selected >= 0 && snap.selected < (int)s_images.size() )
+            s_sel.push_back( snap.selected );
+        SelSync();
+    }
+
     void Restore( const storeSnap_t &snap )
     {
         s_images = snap.images;
-        s_selected = ( snap.selected >= 0 && snap.selected < (int)s_images.size() )
-                   ? snap.selected : -1;
+        RestoreSelection( snap );
         s_drag = drag_t();
         s_move = move_t();
         s_hoverCamera = s_hoverXY = -1;
@@ -935,6 +1187,7 @@ namespace
         s_undo.push_back( storeSnap_t() );
         s_undo.back().images.swap( s_pending.images );
         s_undo.back().selected = s_pending.selected;
+        s_undo.back().sel.swap( s_pending.sel );
         s_pending = storeSnap_t();
         if ( (int)s_undo.size() > KREF_UNDO_DEPTH ) s_undo.erase( s_undo.begin() );
         s_redo.clear();
@@ -964,7 +1217,7 @@ namespace
         s_pendingHave = false;
         s_pending = storeSnap_t();
         s_images = before.images;
-        s_selected = before.selected;
+        RestoreSelection( before );
         s_drag = drag_t();
         Touch( false ); // restored state is not a document edit; only request a redraw
     }
@@ -1690,7 +1943,7 @@ namespace
         }
         InitialSize( r );
         s_images.push_back( r );
-        s_selected = (int)s_images.size() - 1;
+        SelSet( (int)s_images.size() - 1 );
         Touch( true );
         Sys_Printf( "Reference image '%s' added on the %s plane.\n", r.file.c_str(),
                     r.axis == 2 ? "XY" : ( r.axis == 1 ? "XZ" : "YZ" ) );
@@ -1722,22 +1975,59 @@ namespace
         return false;
     }
 
-    void AxisBasis( const krefImage_t &r, float u[3], float v[3], float n[3] )
+    // The frame a picture would have on its major-axis plane: normal +axis, u/v the
+    // plane's two other world axes spun by `rotation` about the normal.
+    void AlignedBasis( int axis, float rotation, float u[3], float v[3], float n[3] )
     {
         float bu[3] = { 0.0f, 0.0f, 0.0f };
         float bv[3] = { 0.0f, 0.0f, 0.0f };
         n[0] = n[1] = n[2] = 0.0f;
-        n[r.axis] = 1.0f;
-        if ( r.axis == 2 )      { bu[0] = 1.0f; bv[1] = 1.0f; }
-        else if ( r.axis == 1 ) { bu[0] = 1.0f; bv[2] = 1.0f; }
-        else                    { bu[1] = 1.0f; bv[2] = 1.0f; }
-        const float a = r.rotation * KREF_PI / 180.0f;
+        n[axis] = 1.0f;
+        if ( axis == 2 )      { bu[0] = 1.0f; bv[1] = 1.0f; }
+        else if ( axis == 1 ) { bu[0] = 1.0f; bv[2] = 1.0f; }
+        else                  { bu[1] = 1.0f; bv[2] = 1.0f; }
+        const float a = rotation * KREF_PI / 180.0f;
         const float c = cosf( a ), s = sinf( a );
         for ( int i = 0; i < 3; ++i )
         {
             u[i] = bu[i] * c + bv[i] * s;
             v[i] = bv[i] * c - bu[i] * s;
         }
+    }
+
+    // The picture's actual frame: the aligned frame turned by the residual tilt.
+    void AxisBasis( const krefImage_t &r, float u[3], float v[3], float n[3] )
+    {
+        float au[3], av[3], an[3];
+        AlignedBasis( r.axis, r.rotation, au, av, an );
+        for ( int i = 0; i < 3; ++i )
+        {
+            u[i] = r.tilt[i][0] * au[0] + r.tilt[i][1] * au[1] + r.tilt[i][2] * au[2];
+            v[i] = r.tilt[i][0] * av[0] + r.tilt[i][1] * av[1] + r.tilt[i][2] * av[2];
+            n[i] = r.tilt[i][0] * an[0] + r.tilt[i][1] * an[1] + r.tilt[i][2] * an[2];
+        }
+    }
+
+    bool TiltIsIdentity( const krefImage_t &r )
+    {
+        for ( int i = 0; i < 3; ++i )
+            for ( int j = 0; j < 3; ++j )
+                if ( fabsf( r.tilt[i][j] - ( i == j ? 1.0f : 0.0f ) ) > 1.0e-5f ) return false;
+        return true;
+    }
+
+    void TiltSetIdentity( krefImage_t &r )
+    {
+        for ( int i = 0; i < 3; ++i )
+            for ( int j = 0; j < 3; ++j )
+                r.tilt[i][j] = ( i == j ) ? 1.0f : 0.0f;
+    }
+
+    // Rotation angle of the tilt matrix: acos((trace - 1) / 2).
+    float TiltDegrees( const krefImage_t &r )
+    {
+        const float t = ( r.tilt[0][0] + r.tilt[1][1] + r.tilt[2][2] - 1.0f ) * 0.5f;
+        return acosf( ClampF( t, -1.0f, 1.0f ) ) * 180.0f / KREF_PI;
     }
 
     void Corners( const krefImage_t &r, float out[4][3] )
@@ -1761,21 +2051,42 @@ namespace
         *vOut = rel[0] * v[0] + rel[1] * v[1] + rel[2] * v[2];
     }
 
-    bool RayPlane( const ray_t &ray, int axis, const float origin[3], float out[3], float *outT = nullptr )
+    bool RayPlane( const ray_t &ray, const krefImage_t &r, float out[3], float *outT = nullptr )
     {
-        const float den = ray.dir[axis];
+        float u[3], v[3], n[3];
+        AxisBasis( r, u, v, n );
+        const float den = ray.dir[0] * n[0] + ray.dir[1] * n[1] + ray.dir[2] * n[2];
         if ( fabsf( den ) < 1.0e-6f ) return false;
-        const float t = ( origin[axis] - ray.origin[axis] ) / den;
+        const float num = ( r.origin[0] - ray.origin[0] ) * n[0]
+                        + ( r.origin[1] - ray.origin[1] ) * n[1]
+                        + ( r.origin[2] - ray.origin[2] ) * n[2];
+        const float t = num / den;
         if ( t <= 0.0f || t > 1000000.0f ) return false;
         for ( int k = 0; k < 3; ++k ) out[k] = ray.origin[k] + ray.dir[k] * t;
         if ( outT ) *outT = t;
         return true;
     }
 
+    // 2D views look straight down their depth axis: drop the view point onto the
+    // picture's plane along that axis (a tilted picture is still hit where it is
+    // drawn).  False when the plane is edge-on to the view.
+    bool XYPointOnImagePlane( const xywndState_t *w, const float p[3], const krefImage_t &r, float out[3] )
+    {
+        float u[3], v[3], n[3];
+        AxisBasis( r, u, v, n );
+        const int d = w->m_nViewType;
+        if ( fabsf( n[d] ) < 1.0e-6f ) return false;
+        float t = 0.0f;
+        for ( int k = 0; k < 3; ++k ) t += ( r.origin[k] - p[k] ) * n[k];
+        memcpy( out, p, sizeof( float ) * 3 );
+        out[d] += t / n[d];
+        return true;
+    }
+
     bool CameraPointOnImagePlane( int x, int y, const krefImage_t &r, float out[3] )
     {
         ray_t ray;
-        return Pick_RayFromImagePos( x, y, &ray ) && RayPlane( ray, r.axis, r.origin, out );
+        return Pick_RayFromImagePos( x, y, &ray ) && RayPlane( ray, r, out );
     }
 
     bool CameraPick( int x, int y, int *outIndex, float *outDistance,
@@ -1794,7 +2105,7 @@ namespace
             const krefImage_t &r = s_images[i];
             float p[3];
             if ( r.hidden || !r.material
-              || !RayPlane( ray, r.axis, r.origin, p ) || !PointInside( r, p ) )
+              || !RayPlane( ray, r, p ) || !PointInside( r, p ) )
                 continue;
             const float dx = p[0] - ray.origin[0];
             const float dy = p[1] - ray.origin[1];
@@ -1824,17 +2135,19 @@ namespace
         if ( !w ) return false;
         float p[3];
         XYPoint( x, y, p );
-        int best = -1, bestLayer = INT_MIN;
+        int best = -1;
         for ( int i = 0; i < (int)s_images.size(); ++i )
         {
             const krefImage_t &r = s_images[i];
-            if ( r.hidden || !r.material || r.axis != w->m_nViewType || !PointInside( r, p ) )
+            // The inside test uses the plane hit; the returned point stays the
+            // VIEW point (depth = view origin) because BeginDrag/DragTo measure
+            // their grab offset against view points throughout the drag.
+            float hit[3];
+            if ( r.hidden || !r.material || r.axis != w->m_nViewType
+              || !XYPointOnImagePlane( w, p, r, hit ) || !PointInside( r, hit ) )
                 continue;
-            if ( best < 0 || r.layerOrder >= bestLayer )
-            {
+            if ( best < 0 || !InFront( s_images[best], r, false ) )
                 best = i;
-                bestLayer = r.layerOrder;
-            }
         }
         if ( best < 0 ) return false;
         if ( outIndex ) *outIndex = best;
@@ -1934,7 +2247,9 @@ namespace
         if ( y0 > y1 ) { const float t = y0; y0 = y1; y1 = t; }
 
         const xywndState_t *w = camera ? nullptr : Ed_ActiveXY();
-        int best = -1, bestLayer = INT_MIN;
+        // Every picture the rectangle names, back to front, so the frontmost ends
+        // up as the primary.  Plain replaces, Shift adds, Ctrl removes.
+        std::vector<int> hits;
         for ( int i = 0; i < (int)s_images.size(); ++i )
         {
             const krefImage_t &r = s_images[i];
@@ -1949,29 +2264,79 @@ namespace
                     : XYWorldToImage( world[k], &q[k][0], &q[k][1] ) );
             if ( !projected || !QuadHitsRect( q, x0, y0, x1, y1, crossing ) )
                 continue;
-            if ( best < 0 || r.layerOrder >= bestLayer )
-            {
-                best = i;
-                bestLayer = r.layerOrder;
-            }
+            hits.push_back( i );
         }
+        std::stable_sort( hits.begin(), hits.end(), [camera]( int a, int b ) {
+            return InFront( s_images[b], s_images[a], camera );
+        } );
 
+        const std::vector<int> was = s_sel;
         if ( ctrl )
         {
-            if ( best >= 0 && s_selected == best )
-                KiwiRefImage_Select( -1 );
+            for ( size_t i = 0; i < hits.size(); ++i ) SelRemove( hits[i] );
         }
-        else if ( best >= 0 )
+        else
         {
-            KiwiRefImage_Select( best );
+            if ( !shift ) SelClear();
+            for ( size_t i = 0; i < hits.size(); ++i ) SelAdd( hits[i] );
         }
-        else if ( !shift )
-        {
-            KiwiRefImage_Select( -1 );
-        }
-        if ( best >= 0 && s_selected == best )
+        if ( was != s_sel ) Touch( false );
+        if ( !hits.empty() && IsSel( hits.back() ) )
             s_focusPending = true;
         g_nUpdateBits = -1;
+    }
+
+    // Draw and pick arbitration: the picture closest to the viewer wins.  The
+    // blend material writes no depth, so this order is the only thing separating
+    // overlapping images on screen.
+    //  * camera, perspective: two pictures on the same axis but different planes
+    //    are ordered exactly by the eye's distance to each plane; otherwise
+    //    (coplanar, or different axes) by the eye's distance to the picture
+    //    centre, which is what "closest one on top" means for side-by-side tiles.
+    //  * camera, ortho: signed depth of the picture centre along the view
+    //    direction (the ortho eye is a zoom-dependent pseudo position).
+    //  * 2D views: the depth-axis coordinate; XY_SetupProjectionMtx maps the
+    //    larger coordinate to the smaller D3D depth, so the higher picture is nearer.
+    // Only an exact tie (<= 0.001 units) falls back to the explicit layer order.
+    bool InFront( const krefImage_t &a, const krefImage_t &b, bool camera )
+    {
+        const float eps = 1.0e-3f;
+        if ( !camera )
+        {
+            const float da = a.origin[a.axis], db = b.origin[b.axis];
+            if ( fabsf( da - db ) > eps ) return da > db;
+            return a.layerOrder > b.layerOrder;
+        }
+        const camera_s *cam = Ed_Camera();
+        if ( cam && KiwiCam_Ortho() )
+        {
+            float da = 0.0f, db = 0.0f;
+            for ( int k = 0; k < 3; ++k )
+            {
+                da += ( a.origin[k] - cam->origin[k] ) * cam->vpn[k];
+                db += ( b.origin[k] - cam->origin[k] ) * cam->vpn[k];
+            }
+            if ( fabsf( da - db ) > eps ) return da < db;
+        }
+        else if ( cam )
+        {
+            if ( a.axis == b.axis && TiltIsIdentity( a ) && TiltIsIdentity( b ) )
+            {
+                const float pa = fabsf( cam->origin[a.axis] - a.origin[a.axis] );
+                const float pb = fabsf( cam->origin[b.axis] - b.origin[b.axis] );
+                if ( fabsf( pa - pb ) > eps ) return pa < pb;
+            }
+            float ca = 0.0f, cb = 0.0f;
+            for ( int k = 0; k < 3; ++k )
+            {
+                const float ra = a.origin[k] - cam->origin[k];
+                const float rb = b.origin[k] - cam->origin[k];
+                ca += ra * ra; cb += rb * rb;
+            }
+            ca = sqrtf( ca ); cb = sqrtf( cb );
+            if ( fabsf( ca - cb ) > eps ) return ca < cb;
+        }
+        return a.layerOrder > b.layerOrder;
     }
 
     void DrawOne( krefImage_t &r )
@@ -2007,16 +2372,22 @@ namespace
                                 xyzw, normal, color, st );
     }
 
+    // Every selected picture gets the outline; only the primary gets the corner
+    // ticks (the handles CameraHit/XYHit offer).
     void DrawSelection( int axisFilter, float scale, bool camera )
     {
-        if ( s_selected < 0 || s_selected >= (int)s_images.size() ) return;
-        const krefImage_t &r = s_images[s_selected];
-        if ( r.hidden || !r.material || ( axisFilter >= 0 && r.axis != axisFilter ) ) return;
+        for ( size_t si = 0; si < s_sel.size(); ++si )
+        {
+        const int index = s_sel[si];
+        if ( index < 0 || index >= (int)s_images.size() ) continue;
+        const krefImage_t &r = s_images[index];
+        if ( r.hidden || !r.material || ( axisFilter >= 0 && r.axis != axisFilter ) ) continue;
         float c[4][3];
         Corners( r, c );
         KiwiLines_Begin( 20, 2 );
         KiwiLines_Color( r.locked ? 0.9f : 1.0f, r.locked ? 0.35f : 0.75f, 0.15f );
         for ( int i = 0; i < 4; ++i ) KiwiLines_Add( c[i], c[( i + 1 ) & 3] );
+        if ( index != s_selected ) { KiwiLines_Flush(); continue; }
         float u[3], v[3], n[3];
         AxisBasis( r, u, v, n );
         for ( int i = 0; i < 4; ++i )
@@ -2037,12 +2408,13 @@ namespace
             KiwiLines_Add( a, b );
         }
         KiwiLines_Flush();
+        }
     }
 
     void DrawHover( int axisFilter, bool camera )
     {
         const int index = camera ? s_hoverCamera : s_hoverXY;
-        if ( index < 0 || index >= (int)s_images.size() || index == s_selected )
+        if ( index < 0 || index >= (int)s_images.size() || IsSel( index ) )
             return;
         const krefImage_t &r = s_images[index];
         if ( r.hidden || !r.material || ( axisFilter >= 0 && r.axis != axisFilter ) )
@@ -2062,8 +2434,10 @@ namespace
         for ( int i = 0; i < (int)s_images.size(); ++i )
             if ( !s_images[i].hidden && ( axisFilter < 0 || s_images[i].axis == axisFilter ) )
                 order.push_back( i );
-        std::stable_sort( order.begin(), order.end(), []( int a, int b ) {
-            return s_images[a].layerOrder < s_images[b].layerOrder;
+        // Painter's order: the farther plane first, so the nearer one lands on top
+        // (equal depth = layer order; equal layer = store order, later on top).
+        std::stable_sort( order.begin(), order.end(), [camera]( int a, int b ) {
+            return InFront( s_images[b], s_images[a], camera );
         } );
         for ( size_t i = 0; i < order.size(); ++i ) DrawOne( s_images[order[i]] );
         static const float white[4] = { 1,1,1,1 };
@@ -2097,8 +2471,8 @@ namespace
                 }
             }
         }
-        // Keep the armed editor's established layer-first pick policy.  Ordinary
-        // unarmed object selection uses CameraPick's eye-distance policy instead.
+        // Nearest plane first, layer order only for coplanar hits: the armed pick
+        // must land on the picture the draw order shows on top (CameraPick agrees).
         ray_t ray;
         if ( !Pick_RayFromImagePos( x, y, &ray ) ) return -1;
         int best = -1, bestLayer = INT_MIN;
@@ -2108,9 +2482,10 @@ namespace
             const krefImage_t &r = s_images[i];
             float t;
             if ( r.hidden || !r.material
-              || !RayPlane( ray, r.axis, r.origin, p, &t ) || !PointInside( r, p ) )
+              || !RayPlane( ray, r, p, &t ) || !PointInside( r, p ) )
                 continue;
-            if ( r.layerOrder > bestLayer || ( r.layerOrder == bestLayer && t <= bestT ) )
+            const bool sameDepth = fabsf( t - bestT ) <= 1.0e-3f;
+            if ( best < 0 || t < bestT - 1.0e-3f || ( sameDepth && r.layerOrder >= bestLayer ) )
             {
                 best = i; bestLayer = r.layerOrder; bestT = t;
                 memcpy( hitPoint, p, sizeof( p ) );
@@ -2135,7 +2510,7 @@ namespace
                 for ( int i = 0; i < 4; ++i )
                 {
                     float d = 0.0f;
-                    for ( int k = 0; k < 3; ++k ) if ( k != r.axis ) d += ( c[i][k] - hitPoint[k] ) * ( c[i][k] - hitPoint[k] );
+                    for ( int k = 0; k < 3; ++k ) if ( k != w->m_nViewType ) d += ( c[i][k] - hitPoint[k] ) * ( c[i][k] - hitPoint[k] );
                     d = sqrtf( d );
                     if ( d <= best ) { best = d; *corner = i; }
                 }
@@ -2152,10 +2527,13 @@ namespace
     {
         if ( index < 0 || index >= (int)s_images.size() )
         {
-            if ( s_selected != -1 ) { s_selected = -1; Touch( false ); }
+            if ( !s_sel.empty() ) { SelClear(); Touch( false ); }
             return false;
         }
-        if ( s_selected != index ) { s_selected = index; Touch( false ); }
+        // A drag on an unselected picture selects it alone; on a selected one it
+        // becomes the primary and the rest of the set rides along (move only).
+        if ( !IsSel( index ) )           { SelSet( index ); Touch( false ); }
+        else if ( s_selected != index )  { SelAdd( index ); Touch( false ); }
         if ( s_images[index].locked )
         {
             // Consume the complete click/drag sequence without mutating either
@@ -2166,10 +2544,22 @@ namespace
         }
         BeginEdit( shift && corner < 0 ? "rotate reference image"
                                       : ( corner >= 0 ? "scale reference image" : "move reference image" ) );
+        s_drag = drag_t();
         s_drag.active = true; s_drag.index = index; s_drag.corner = corner;
         s_drag.mode = shift && corner < 0 ? KREF_DRAG_ROTATE
                     : ( corner >= 0 ? KREF_DRAG_SCALE : KREF_DRAG_MOVE );
         s_drag.base = s_images[index];
+        if ( s_drag.mode == KREF_DRAG_MOVE )
+        {
+            std::vector<int> movable;
+            MovableSelection( &movable );
+            for ( size_t i = 0; i < movable.size(); ++i )
+                if ( movable[i] != index )
+                {
+                    s_drag.groupIndex.push_back( movable[i] );
+                    s_drag.groupBase.push_back( s_images[movable[i]] );
+                }
+        }
         memcpy( s_drag.startPoint, point, sizeof( s_drag.startPoint ) );
         for ( int k = 0; k < 3; ++k ) s_drag.grabOffset[k] = s_drag.base.origin[k] - point[k];
         float lu, lv;
@@ -2199,6 +2589,16 @@ namespace
                 }
             }
             memcpy( r.origin, desired, sizeof( r.origin ) );
+            // The rest of the selection follows by the same world delta.
+            for ( size_t g = 0; g < s_drag.groupIndex.size(); ++g )
+            {
+                const int gi = s_drag.groupIndex[g];
+                if ( gi < 0 || gi >= (int)s_images.size() ) continue;
+                for ( int k = 0; k < 3; ++k )
+                    s_images[gi].origin[k] = s_drag.groupBase[g].origin[k]
+                                           + ( desired[k] - s_drag.base.origin[k] );
+                Sanitize( s_images[gi] );
+            }
         }
         else if ( s_drag.mode == KREF_DRAG_SCALE )
         {
@@ -2354,7 +2754,7 @@ namespace
             const bool missing = s_missingWarned.find( r.file ) != s_missingWarned.end();
             if ( missing ) ImGui::PushStyleColor( ImGuiCol_Text, ImVec4( 1.0f, 0.25f, 0.2f, 1.0f ) );
             const std::string label = ( r.name.empty() ? r.file : r.name ) + "  [" + AxisName( r.axis ) + "]";
-            if ( ImGui::Selectable( label.c_str(), i == s_selected ) )
+            if ( ImGui::Selectable( label.c_str(), IsSel( i ) ) )
             {
                 const ImGuiIO &io = ImGui::GetIO();
                 KiwiRefImage_ApplyClick( i, io.KeyShift, io.KeyCtrl, false );
@@ -2373,6 +2773,9 @@ namespace
         krefImage_t &r = s_images[s_selected];
         ImGui::SeparatorText( "Selected image" );
         ImGui::TextDisabled( "%s", r.file.c_str() );
+        if ( s_sel.size() > 1 )
+            ImGui::TextDisabled( "%d images selected; the fields edit the last picked one. G/R/S and Remove act on all.",
+                                 (int)s_sel.size() );
 
         char name[512];
         _snprintf( name, sizeof( name ), "%s", r.name.c_str() ); name[sizeof( name ) - 1] = '\0';
@@ -2415,6 +2818,18 @@ namespace
         if ( ImGui::DragFloat( "Rotation", &r.rotation, 1.0f, -180.0f, 180.0f, "%.1f deg" ) )
             EditContinuous( before, "rotate reference image" );
         EditSettle();
+        if ( TiltIsIdentity( r ) )
+            ImGui::TextDisabled( "Tilt: on the %s plane", AxisName( r.axis ) );
+        else
+        {
+            ImGui::Text( "Tilt: %.1f deg off the %s plane", TiltDegrees( r ), AxisName( r.axis ) );
+            ImGui::SameLine();
+            before = Snapshot();
+            if ( ImGui::SmallButton( "Align to plane" ) )
+            {
+                TiltSetIdentity( r ); EditImmediate( before, "align reference image to plane" );
+            }
+        }
         before = Snapshot();
         if ( ImGui::Checkbox( "Flip U", &r.flipU ) ) EditImmediate( before, "flip reference image" );
         ImGui::SameLine(); before = Snapshot();
@@ -2437,8 +2852,8 @@ namespace
         if ( ImGui::Button( "Fit to selection bounds" ) ) FitSelectedToBrushSelection();
         ImGui::SameLine();
         if ( ImGui::Button( "Reset size" ) ) ResetSelectedSize();
-        if ( ImGui::Button( "Remove" ) )
-            KiwiRefImage_DeleteAt( s_selected );
+        if ( ImGui::Button( s_sel.size() > 1 ? "Remove selected" : "Remove" ) )
+            KiwiRefImage_DeleteSelected();
     }
 
     void WriteQuoted( FILE *f, const char *key, const std::string &value )
@@ -2545,7 +2960,7 @@ void KiwiRefImage_Draw()
             }
             s_armed = !s_armed; Touch( false );
         }
-        if ( s_armed ) ImGui::TextDisabled( "LMB move/scale; Shift+body rotates; Alt disables snapping/free-rotates; Delete removes; Esc disarms." );
+        if ( s_armed ) ImGui::TextDisabled( "LMB move/scale; Shift+body rotates; Alt disables snapping/free-rotates; Delete removes; Esc disarms.  R + X/Y/Z ring tilts off the plane (snaps back within 4 deg unless Alt)." );
 
         ImGui::SetNextItemWidth( 150.0f );
         if ( ImGui::SliderFloat( "New opacity", &s_defaultOpacity, 0.0f, 1.0f, "%.2f" ) ) SaveDefaults();
@@ -2569,6 +2984,11 @@ void KiwiRefImage_WriteSidecar( FILE *f )
         fprintf( f, "size %.9g %.9g\n", r.width, r.height );
         if ( !r.keepAspect ) fprintf( f, "keepaspect 0\n" );
         fprintf( f, "rotation %.9g\n", r.rotation );
+        if ( !TiltIsIdentity( r ) )
+            fprintf( f, "tilt %.9g %.9g %.9g %.9g %.9g %.9g %.9g %.9g %.9g\n",
+                     r.tilt[0][0], r.tilt[0][1], r.tilt[0][2],
+                     r.tilt[1][0], r.tilt[1][1], r.tilt[1][2],
+                     r.tilt[2][0], r.tilt[2][1], r.tilt[2][2] );
         fprintf( f, "flip %i %i\n", r.flipU ? 1 : 0, r.flipV ? 1 : 0 );
         fprintf( f, "opacity %.9g\n", r.opacity );
         fprintf( f, "locked %i\n", r.locked ? 1 : 0 );
@@ -2596,6 +3016,15 @@ bool KiwiRefImage_ParseSidecarLine( const char *line )
     if ( Keyword( line, "size", &rest ) ) { sscanf( rest, "%f %f", &s_parseImage.width, &s_parseImage.height ); return true; }
     if ( Keyword( line, "keepaspect", &rest ) ) { int v = 1; sscanf( rest, "%i", &v ); s_parseImage.keepAspect = v != 0; return true; }
     if ( Keyword( line, "rotation", &rest ) ) { sscanf( rest, "%f", &s_parseImage.rotation ); return true; }
+    if ( Keyword( line, "tilt", &rest ) )
+    {
+        float m[9];
+        if ( sscanf( rest, "%f %f %f %f %f %f %f %f %f", &m[0], &m[1], &m[2], &m[3], &m[4], &m[5], &m[6], &m[7], &m[8] ) == 9 )
+            for ( int i = 0; i < 3; ++i )
+                for ( int j = 0; j < 3; ++j )
+                    s_parseImage.tilt[i][j] = m[i * 3 + j];   // Sanitize re-orthonormalises on finish
+        return true;
+    }
     if ( Keyword( line, "flip", &rest ) ) { int u = 0, v = 0; sscanf( rest, "%i %i", &u, &v ); s_parseImage.flipU = u != 0; s_parseImage.flipV = v != 0; return true; }
     if ( Keyword( line, "opacity", &rest ) ) { sscanf( rest, "%f", &s_parseImage.opacity ); return true; }
     if ( Keyword( line, "locked", &rest ) ) { int v = 0; sscanf( rest, "%i", &v ); s_parseImage.locked = v != 0; return true; }
@@ -2607,7 +3036,7 @@ bool KiwiRefImage_ParseSidecarLine( const char *line )
 
 void KiwiRefImage_ResetForNewMap()
 {
-    s_images.clear(); s_selected = -1; s_armed = false; s_drag = drag_t(); s_move = move_t();
+    s_images.clear(); SelClear(); s_armed = false; s_drag = drag_t(); s_move = move_t();
     s_hoverCamera = s_hoverXY = -1; s_xyClickOwned = false; s_focusPending = false;
     s_parseActive = false; s_parseImage = krefImage_t();
     s_fileAsset.clear(); s_assetCache.clear(); s_missingWarned.clear();

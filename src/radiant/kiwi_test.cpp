@@ -756,9 +756,17 @@ static void ExecuteExpect( const ScriptLine &line )
     }
     if ( subject == "images" )
     {
+        // expect images <n> | expect images selected <n>
+        if ( w.size() == 4 && Lower( w[2] ) == "selected" && ParseInt( w[3], expectedInt ) )
+        {
+            actualInt = KiwiRefImage_SelectedCount();
+            ExpectResult( line, actualInt == expectedInt, std::to_string( actualInt ),
+                          std::to_string( expectedInt ) );
+            return;
+        }
         if ( w.size() != 3 || !ParseInt( w[2], expectedInt ) )
         {
-            ScriptError( line, "expect images requires one integer" );
+            ScriptError( line, "expect images <n> | expect images selected <n>" );
             return;
         }
         actualInt = KiwiRefImage_Count();
@@ -772,7 +780,7 @@ static void ExecuteExpect( const ScriptLine &line )
         int index = -1;
         if ( w.size() < 5 || !ParseInt( w[2], index ) )
         {
-            ScriptError( line, "expect image <index> origin x y z | rotation <deg> | size w h | axis xy|xz|yz" );
+            ScriptError( line, "expect image <index> origin x y z | rotation <deg> | tilt <deg> | size w h | axis xy|xz|yz" );
             return;
         }
         const krefImage_t *r = KiwiRefImage_At( index );
@@ -801,6 +809,16 @@ static void ExecuteExpect( const ScriptLine &line )
         {
             n = 1;
             have[0] = r->rotation;
+        }
+        else if ( field == "tilt" && w.size() == 5 )
+        {
+            n = 1;
+            have[0] = KiwiRefImage_TiltDegrees( index );
+        }
+        else if ( field == "selected" && w.size() == 5 )
+        {
+            n = 1;
+            have[0] = KiwiRefImage_IsSelected( index ) ? 1.0f : 0.0f;
         }
         else if ( field == "size" && w.size() == 6 )
         {
@@ -1061,13 +1079,24 @@ static void ExecuteRefImage( const ScriptLine &line )
         g_nUpdateBits = -1;
         return;
     }
-    if ( verb == "select" || verb == "delete" )
+    if ( verb == "deleteselected" )
     {
+        // Every selected picture as one record (the Delete key's route).
+        if ( !KiwiRefImage_DeleteSelected() )
+        { ScriptError( line, "refimage deleteselected: nothing selected" ); return; }
+        g_nUpdateBits = -1;
+        return;
+    }
+    if ( verb == "select" || verb == "select+" || verb == "deselect" || verb == "delete" )
+    {
+        // select = exclusive, select+ = add (and make primary), deselect = remove one.
         int index = -1;
         if ( w.size() != 3 || !ParseInt( w[2], index ) || index < 0 || index >= KiwiRefImage_Count() )
         { ScriptError( line, "refimage %s requires an existing image index", verb.c_str() ); return; }
-        if ( verb == "select" ) KiwiRefImage_Select( index );
-        else                    KiwiRefImage_DeleteAt( index );
+        if      ( verb == "select" )   KiwiRefImage_Select( index );
+        else if ( verb == "select+" )  KiwiRefImage_SelectAdd( index );
+        else if ( verb == "deselect" ) KiwiRefImage_SelectRemove( index );
+        else                           KiwiRefImage_DeleteAt( index );
         g_nUpdateBits = -1;
         return;
     }
@@ -1075,18 +1104,27 @@ static void ExecuteRefImage( const ScriptLine &line )
     {
         // Acts on the SELECTED image: move dx dy dz | rotate <deg about its plane normal>
         // | scale <uniform factor about its own origin>.
+        // rotate takes an optional world axis (x|y|z); default = the plane normal.
         float v[3] = { 0.0f, 0.0f, 0.0f };
-        const size_t need = verb == "move" ? 5 : 3;
+        int rotAxis = -1;
+        if ( verb == "rotate" && w.size() == 4 )
+        {
+            const std::string a = Lower( w[3] );
+            rotAxis = a == "x" ? 0 : a == "y" ? 1 : a == "z" ? 2 : -1;
+            if ( rotAxis < 0 ) { ScriptError( line, "refimage rotate axis must be x, y, or z" ); return; }
+        }
+        const size_t need = verb == "move" ? 5 : ( rotAxis >= 0 ? 4 : 3 );
+        const size_t nargs = verb == "move" ? 3 : 1;
         if ( w.size() != need )
-        { ScriptError( line, "refimage move dx dy dz | rotate <deg> | scale <factor>" ); return; }
-        for ( size_t k = 0; k + 2 < need; ++k )
+        { ScriptError( line, "refimage move dx dy dz | rotate <deg> [x|y|z] | scale <factor>" ); return; }
+        for ( size_t k = 0; k < nargs; ++k )
             if ( !ParseFloat( w[k + 2], v[k] ) )
             { ScriptError( line, "refimage %s argument %d is not numeric", verb.c_str(), (int)k + 1 ); return; }
         const krefImage_t *r = KiwiRefImage_At( KiwiRefImage_Selected() );
         if ( !r ) { ScriptError( line, "refimage %s requires a selected image", verb.c_str() ); return; }
         if ( !KiwiRefImage_CanMove() )
         { ScriptError( line, "refimage %s: the selected image is locked or hidden", verb.c_str() ); return; }
-        const int axis = r->axis;
+        const int axis = rotAxis >= 0 ? rotAxis : r->axis;
         float pivot[3];
         if ( !KiwiRefImage_MoveBegin( pivot ) )
         { ScriptError( line, "refimage %s: MoveBegin refused", verb.c_str() ); return; }

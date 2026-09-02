@@ -1033,6 +1033,11 @@ namespace
                 {
                     m_refImage = true;
                     m_refImageAxis = image->axis;
+                    if ( !KiwiRefImage_PlaneNormal( KiwiRefImage_Selected(), m_refImageNormal ) )
+                    {
+                        m_refImageNormal[0] = m_refImageNormal[1] = m_refImageNormal[2] = 0.0f;
+                        m_refImageNormal[m_refImageAxis] = 1.0f;
+                    }
                     m_kind = SEL_OBJECT;
                     CamWnd_BuildMatrix();
                     Copy3( Ed_Camera()->vpn, m_planeN );
@@ -1934,12 +1939,16 @@ namespace
 
         void ConstrainRefImage( float *d ) const
         {
-            if ( !m_refImage )
+            if ( !m_refImage || m_con != CON_FREE )
                 return;
-            // Free/plane movement stays in the image plane.  An explicit lock to
-            // the plane normal is the sole way to change its depth.
-            if ( !( m_con == CON_AXIS && m_axis == m_refImageAxis ) )
-                d[m_refImageAxis] = 0.0f;
+            // FREE movement stays in the picture's own plane (its tilt included).
+            // An axis or plane lock is the user's explicit choice and moves exactly
+            // as it says: a gizmo plane square must never collapse to one direction
+            // because the picture happens to lie on another plane.
+            const float dn = d[0] * m_refImageNormal[0] + d[1] * m_refImageNormal[1]
+                           + d[2] * m_refImageNormal[2];
+            for ( int k = 0; k < 3; ++k )
+                d[k] -= dn * m_refImageNormal[k];
         }
 
         // Direction for a bare typed move scalar.
@@ -2695,6 +2704,7 @@ namespace
         bool       m_construct = false;
         bool       m_refImage = false;
         int        m_refImageAxis = 2;
+        float      m_refImageNormal[3] = { 0.0f, 0.0f, 1.0f };   // the picture's real plane
 
         bool        m_dropPending = false;
         selbrush_t *m_dropPendingNode = 0;
@@ -2788,6 +2798,7 @@ namespace
         bool Begin() override
         {
             m_deg = m_applied = 0.0f;
+            m_chain.clear();
             m_axis = 2;                       // Z default
             m_con  = CON_AXIS;                // R is ALWAYS about an axis
             m_hasNum   = false;
@@ -2851,11 +2862,9 @@ namespace
         void RefreshHud() override { UpdateHud(); }
         void ApplyPivot( const float p[3] ) override
         {
-            // Moving a used rotation center first undoes the old-center residual, then
-            // adopts the new center at zero degrees.
-            ApplyDelta( -m_applied );
-            m_applied = 0.0f;
-            m_deg     = 0.0f;
+            // Moving a used rotation center first undoes everything turned about the
+            // old center (the whole chain), then adopts the new center at zero degrees.
+            UnwindAll();
             Copy3( p, m_pivot );
             m_pivotOverridden = true;
             UpdateHud();
@@ -2866,7 +2875,7 @@ namespace
         { (void)commandId; return !m_pivotPlacing; }
 
         bool GestureMoved() const override
-        { return m_undoOpen || m_hasNum || fabsf( m_deg ) > KX_EPS; }
+        { return m_undoOpen || m_hasNum || !m_chain.empty() || fabsf( m_deg ) > KX_EPS; }
 
         void Commit() override
         {
@@ -2886,8 +2895,9 @@ namespace
         {
             if ( m_construct )      KiwiConSel_MoveCancel();      // pops the snapshot
             else if ( m_refImage )  KiwiRefImage_MoveCancel();
-            else                    ApplyDelta( -m_applied );     // exact inverse; the bracket also restores
+            else                    UnwindAll();                  // exact inverse of every segment; the bracket also restores
             m_applied = 0.0f;
+            m_chain.clear();
             m_angleBase.clear();
             m_undoOpen = false;
             m_pivotPlacing = false;
@@ -2949,10 +2959,20 @@ namespace
                 return;                       // R has no free / plane mode
             if ( axis == m_axis )
                 return;                       // second press of the same axis: keep it
-            // Re-aiming first undoes the old-axis residual so the HUD remains one rotation
-            // rather than an unreported composition.
-            ApplyDelta( -m_applied );
+            // Re-aiming keeps what the old axis turned: it becomes a finished segment
+            // of the chain and the new axis starts at zero, so ring grabs (or X/Y/Z
+            // keys) compose within one gesture, one undo record.
+            if ( fabsf( m_applied ) > KX_EPS )
+            {
+                chainSeg_t seg;
+                seg.axis = m_axis;
+                seg.deg  = m_applied;
+                m_chain.push_back( seg );
+            }
             m_applied = 0.0f;
+            m_deg     = 0.0f;
+            m_ringBase = 0.0f;
+            m_ringDeg  = 0.0f;
             m_axis    = axis;
             Recompute();
         }
@@ -2987,23 +3007,87 @@ namespace
                 // Absolute from the store baseline (kiwi_transform.h rule 1); the
                 // store's own snapshot is the undo record, so no legacy bracket opens.
                 m_applied += delta;
-                if ( m_construct ) KiwiConSel_RotateApply( m_pivot, m_axis, m_applied );
-                else               KiwiRefImage_RotateApply( m_pivot, m_axis, m_applied );
-                g_nUpdateBits = -1;
+                ApplyStore();
                 return;
             }
             if ( !SelectionHasObjects() )
                 return;
             OpenUndo( "rotate selection" );
+            RotateBrushes( m_axis, delta );
+            m_applied += delta;
+        }
 
-            // Ported rotation pattern: pivot in row 0, Select_RotateAxis fills rows 1..3,
-            // then Select_ApplyMatrix_SelectedBrushes applies the residual.
+        // Ported rotation pattern: pivot in row 0, Select_RotateAxis fills rows 1..3,
+        // then Select_ApplyMatrix_SelectedBrushes applies the residual.  Brushes are
+        // turned incrementally, so a chain composes by itself.
+        void RotateBrushes( int axis, float delta )
+        {
             float rot_around[4][3];
             Copy3( m_pivot, rot_around[0] );
-            Select_RotateAxis( m_axis, delta, (float (*)[4][3])rot_around );
+            Select_RotateAxis( axis, delta, (float (*)[4][3])rot_around );
             Select_ApplyMatrix_SelectedBrushes( 0, rot_around[0], delta, 0 );
-            m_applied += delta;
             g_nUpdateBits = -1;
+        }
+
+        // One world-axis turn as the 3x3 the stores apply, in the stores' own sense
+        // (negated degrees, right-hand rule: what Select_RotateAxis does for brushes).
+        static void AxisMatrix( int axis, float degrees, float m[3][3] )
+        {
+            const float rad = -degrees * 3.14159265358979323846f / 180.0f;
+            const float c = cosf( rad ), sn = sinf( rad );
+            const int i = ( axis + 1 ) % 3, j = ( axis + 2 ) % 3;
+            for ( int a = 0; a < 3; ++a )
+                for ( int b = 0; b < 3; ++b )
+                    m[a][b] = ( a == b ) ? 1.0f : 0.0f;
+            m[i][i] = c;  m[i][j] = -sn;
+            m[j][i] = sn; m[j][j] = c;
+        }
+
+        // The whole gesture as one rotation from the store baseline: finished
+        // segments in order, then the live axis.  Stores are absolute, so every
+        // feed re-applies the composition.
+        void ApplyStore()
+        {
+            float total[3][3];
+            for ( int a = 0; a < 3; ++a )
+                for ( int b = 0; b < 3; ++b )
+                    total[a][b] = ( a == b ) ? 1.0f : 0.0f;
+            for ( size_t s = 0; s <= m_chain.size(); ++s )
+            {
+                const int   axis = s < m_chain.size() ? m_chain[s].axis : m_axis;
+                const float deg  = s < m_chain.size() ? m_chain[s].deg  : m_applied;
+                float step[3][3], next[3][3];
+                AxisMatrix( axis, deg, step );
+                for ( int a = 0; a < 3; ++a )
+                    for ( int b = 0; b < 3; ++b )
+                        next[a][b] = step[a][0] * total[0][b] + step[a][1] * total[1][b] + step[a][2] * total[2][b];
+                memcpy( total, next, sizeof( total ) );
+            }
+            if ( m_construct ) KiwiConSel_RotateApplyMatrix( m_pivot, total );
+            else               KiwiRefImage_RotateApplyMatrix( m_pivot, total );
+            g_nUpdateBits = -1;
+        }
+
+        // Back to the baseline pose: stores re-apply an identity, brushes are turned
+        // back segment by segment in reverse order.
+        void UnwindAll()
+        {
+            if ( m_construct || m_refImage )
+            {
+                m_chain.clear();
+                m_applied = 0.0f;
+                m_deg     = 0.0f;
+                ApplyStore();
+                return;
+            }
+            if ( fabsf( m_applied ) > KX_EPS && SelectionHasObjects() )
+                RotateBrushes( m_axis, -m_applied );
+            for ( size_t s = m_chain.size(); s-- > 0; )
+                if ( SelectionHasObjects() )
+                    RotateBrushes( m_chain[s].axis, -m_chain[s].deg );
+            m_chain.clear();
+            m_applied = 0.0f;
+            m_deg     = 0.0f;
         }
 
         void UpdateHud()
@@ -3013,15 +3097,25 @@ namespace
                 UpdatePivotHud();
                 return;
             }
+            // Finished segments of a chained turn, e.g. "  after X 30.0, Z -15.0".
+            char chain[160] = { 0 };
+            for ( size_t s = 0; s < m_chain.size(); ++s )
+            {
+                char one[40];
+                _snprintf( one, sizeof( one ), "%s%s %.1f", s ? ", " : "  after ",
+                           AxisName( m_chain[s].axis ), (double)m_chain[s].deg );
+                one[sizeof( one ) - 1] = '\0';
+                strncat( chain, one, sizeof( chain ) - strlen( chain ) - 1 );
+            }
             // Idle rotate HUD explains the ring/numeric gate.
             if ( !m_ringActive && !m_hasNum && fabsf( m_deg ) <= KX_EPS )
             {
-                SetHud( "%s  axis %s  grab a ring / type degrees%s", What(), AxisName( m_axis ),
-                        m_pivotOverridden ? "  [pivot moved]" : "  (V moves the pivot)" );
+                SetHud( "%s  axis %s  grab a ring / type degrees%s%s", What(), AxisName( m_axis ),
+                        chain, m_pivotOverridden ? "  [pivot moved]" : "  (V moves the pivot)" );
                 return;
             }
-            SetHud( "%s  axis %s  %.1f deg%s", What(), AxisName( m_axis ), (double)m_deg,
-                    m_pivotOverridden ? "  [pivot moved]" : "" );
+            SetHud( "%s  axis %s  %.1f deg%s%s", What(), AxisName( m_axis ), (double)m_deg,
+                    chain, m_pivotOverridden ? "  [pivot moved]" : "" );
         }
 
         const char *What() const
@@ -3033,6 +3127,10 @@ namespace
         bool  m_refImage  = false;       // the reference-image store owns it
         float m_deg      = 0.0f;
         float m_applied  = 0.0f;
+        // Finished turns of this gesture, in application order; the live axis
+        // (m_axis, m_applied) comes after them.  Cleared by Begin / Cancel / pivot.
+        struct chainSeg_t { int axis; float deg; };
+        std::vector<chainSeg_t> m_chain;
         bool  m_ringActive = false;      // a ring is held
         float m_ringDeg    = 0.0f;       // angle requested by the ring
         // Ring sweep base and press-frame snap freeze.

@@ -953,23 +953,6 @@ void KiwiConSel_MoveApply( const float delta[3] )
 
 namespace
 {
-    // Rotate `p` about the world axis `axis` through `pivot` (right-hand rule).
-    void RotateAboutAxis( const float pivot[3], int axis, float c, float sn,
-                          const float in[3], float out[3] )
-    {
-        const int i = ( axis + 1 ) % 3, j = ( axis + 2 ) % 3;
-        const float di = in[i] - pivot[i], dj = in[j] - pivot[j];
-        out[axis] = in[axis];
-        out[i]    = pivot[i] + di * c - dj * sn;
-        out[j]    = pivot[j] + di * sn + dj * c;
-    }
-
-    void RotateVector( int axis, float c, float sn, const float in[3], float out[3] )
-    {
-        static const float zero[3] = { 0.0f, 0.0f, 0.0f };
-        RotateAboutAxis( zero, axis, c, sn, in, out );
-    }
-
     // The baseline must still describe the store; otherwise abandon the gesture.
     bool BaselineValid( const char *what )
     {
@@ -990,14 +973,45 @@ namespace
 
 void KiwiConSel_RotateApply( const float pivot[3], int axis, float degrees )
 {
-    if ( !s_moveOpen || !pivot || axis < 0 || axis > 2 )
-        return;
-    if ( !BaselineValid( "Rotate" ) )
+    if ( axis < 0 || axis > 2 )
         return;
     // Negative: the ported Select_RotateAxis turns the other way for the same degrees,
     // and the ring feeds both, so construction must spin like brushes do.
     const float rad = -degrees * KCON_DEG2RAD;
     const float c = cosf( rad ), sn = sinf( rad );
+    const int i = ( axis + 1 ) % 3, j = ( axis + 2 ) % 3;
+    float m[3][3];
+    for ( int a = 0; a < 3; ++a )
+        for ( int k = 0; k < 3; ++k )
+            m[a][k] = ( a == k ) ? 1.0f : 0.0f;
+    m[i][i] = c;  m[i][j] = -sn;
+    m[j][i] = sn; m[j][j] = c;
+    KiwiConSel_RotateApplyMatrix( pivot, m );
+}
+
+namespace
+{
+    void MatVec( const float m[3][3], const float in[3], float out[3] )
+    {
+        for ( int i = 0; i < 3; ++i )
+            out[i] = m[i][0] * in[0] + m[i][1] * in[1] + m[i][2] * in[2];
+    }
+
+    void MatAbout( const float pivot[3], const float m[3][3], const float in[3], float out[3] )
+    {
+        float rel[3], turned[3];
+        for ( int k = 0; k < 3; ++k ) rel[k] = in[k] - pivot[k];
+        MatVec( m, rel, turned );
+        for ( int k = 0; k < 3; ++k ) out[k] = pivot[k] + turned[k];
+    }
+}
+
+void KiwiConSel_RotateApplyMatrix( const float pivot[3], const float m[3][3] )
+{
+    if ( !s_moveOpen || !pivot || !m )
+        return;
+    if ( !BaselineValid( "Rotate" ) )
+        return;
     for ( size_t i = 0; i < s_moveBase.size(); ++i )
     {
         const moveBase_t &b = s_moveBase[i];
@@ -1006,13 +1020,13 @@ void KiwiConSel_RotateApply( const float pivot[3], int axis, float degrees )
             continue;
         // Rigid frame rotation keeps circles/arcs parametric: the origin orbits the
         // pivot and the basis vectors turn with it (centre/radius/angles unchanged).
-        RotateAboutAxis( pivot, axis, c, sn, b.plane.origin, o->plane.origin );
-        RotateVector( axis, c, sn, b.plane.normal, o->plane.normal );
-        RotateVector( axis, c, sn, b.plane.u,      o->plane.u );
-        RotateVector( axis, c, sn, b.plane.v,      o->plane.v );
+        MatAbout( pivot, m, b.plane.origin, o->plane.origin );
+        MatVec( m, b.plane.normal, o->plane.normal );
+        MatVec( m, b.plane.u,      o->plane.u );
+        MatVec( m, b.plane.v,      o->plane.v );
         if ( o->pts.size() == b.pts.size() )
             for ( size_t k = 0; k + 2 < b.pts.size(); k += 3 )
-                RotateAboutAxis( pivot, axis, c, sn, &b.pts[k], &o->pts[k] );
+                MatAbout( pivot, m, &b.pts[k], &o->pts[k] );
     }
     KiwiCon_NoteMutated();
 }

@@ -1530,7 +1530,7 @@ bool KiwiUX_KeyFunnel( unsigned int vk )
     // not armed.  Mixed brush/construction selections retain their existing owner.
     if ( ( vk == 0x2E || vk == 0x08 ) && KiwiRefImage_OwnsDelete() )
     {
-        KiwiRefImage_DeleteAt( KiwiRefImage_Selected() );
+        KiwiRefImage_DeleteSelected();
         return true;
     }
 
@@ -1542,7 +1542,7 @@ bool KiwiUX_KeyFunnel( unsigned int vk )
     // and Unhide All are the way back).
     if ( vk == 0x48 && CurrentMods() == 0 && KiwiRefImage_OwnsDelete() )   // H
     {
-        KiwiRefImage_SetHidden( KiwiRefImage_Selected(), true );
+        KiwiRefImage_HideSelected();
         return true;
     }
 

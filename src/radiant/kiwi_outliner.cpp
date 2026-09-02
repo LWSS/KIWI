@@ -560,7 +560,7 @@ void ObserveImageGeneration()
     if ( gen == s_lastImageGen )
         return;
     s_lastImageGen = gen;
-    if ( KiwiRefImage_Selected() >= 0 )
+    if ( KiwiRefImage_SelectedCount() > 0 )
         SetCollapsed( KOUT_KEY_IMAGES, false );
     if ( s_anchor.kind == KOUT_IMAGE
       && ( s_anchor.imageIndex < 0 || s_anchor.imageIndex >= KiwiRefImage_Count() ) )
@@ -1298,7 +1298,7 @@ void KiwiOutliner_Draw()
                     _snprintf( label, sizeof( label ), "%s  [%s]%s", nm,
                                image ? ImageAxisName( image->axis ) : "?",
                                image && image->locked ? " (locked)" : "" );
-                    selected = image && KiwiRefImage_Selected() == r.imageIndex;
+                    selected = image && KiwiRefImage_IsSelected( r.imageIndex );
                     break;
                 }
                 }
