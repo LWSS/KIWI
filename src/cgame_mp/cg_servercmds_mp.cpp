@@ -40,8 +40,8 @@ void __cdecl CG_ParseServerInfo(int localClientNum)
     info = CL_GetConfigString(localClientNum, 0);
 
     cgs = CG_GetLocalClientStaticGlobals(localClientNum);
-    strncpy(cgs->szHostName, Info_ValueForKey(info, "sv_hostname"), 0x100u);
-    strncpy(cgs->gametype, Info_ValueForKey(info, "g_gametype"), 0x20u);
+    I_strncpyz(cgs->szHostName, Info_ValueForKey(info, "sv_hostname"), sizeof(cgs->szHostName));
+    I_strncpyz(cgs->gametype, Info_ValueForKey(info, "g_gametype"), sizeof(cgs->gametype));
     if (!cgs->localServer)
         Dvar_SetStringByName("g_gametype", cgs->gametype);
     cgs->maxclients = atoi(Info_ValueForKey(info, "sv_maxclients"));
@@ -452,7 +452,7 @@ void __cdecl CG_DeployServerCommand(int localClientNum)
     case 0x43:
         v25 = Cmd_Argv(1);
         weapIndex = atoi(v25);
-        if (!weapIndex || BG_GetWeaponDef(weapIndex)->offhandClass)
+        if (!weapIndex || (BG_ValidateWeaponNumber(weapIndex) && BG_GetWeaponDef(weapIndex)->offhandClass)) // KISAK: server-supplied index; unparsed slots are NULL
             CG_SetEquippedOffHand(localClientNum, weapIndex);
         break;
     case 0x44:
@@ -723,6 +723,8 @@ void __cdecl CG_ParseScores(int localClientNum)
     {
         v5 = Cmd_Argv(7 * i + 5);
         cgameGlob->scores[i].client = atoi(v5);
+        if ((uint32_t)cgameGlob->scores[i].client >= MAX_CLIENTS) // KISAK: unsigned compare, client is int32
+            cgameGlob->scores[i].client = 0;
         v6 = Cmd_Argv(7 * i + 6);
         cgameGlob->scores[i].score = atoi(v6);
         v7 = Cmd_Argv(7 * i + 7);
@@ -945,7 +947,7 @@ void __cdecl CG_ConfigStringModified(int localClientNum)
                     }
                     else
                     {
-                        *((uint *)cgs + num - 665) = (uint)R_RegisterModel(str); // KISAKTODO: unhack typing
+                        cgs->gameModels[num - CS_MODELS] = R_RegisterModel(str);
                     }
                     break;
                 }
@@ -1225,6 +1227,13 @@ void __cdecl CG_SetChannelVolCmd(int localClientNum)
         prio = atoi(v1);
         v2 = Cmd_Argv(2);
         shockIndex = atoi(v2);
+        
+        if (shockIndex >= 16)
+        {
+            Com_PrintError(14, "CG_SetChannelVolCmd: bad shellshock index %u\n", shockIndex);
+            return;
+        }
+        
         v3 = Cmd_Argv(3);
         fadetime = atof(v3);
         vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);

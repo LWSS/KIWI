@@ -119,7 +119,7 @@ int __cdecl SV_IsTempBannedGuid(const char *cdkeyHash)
     for (banSlot = 0; banSlot < 0x10; ++banSlot)
     {
         if (!memcmp(&svs.tempBans[banSlot], cdkeyHash, 0x20u)
-            && sv_kickBanTime->current.value * 1000.0 >= (svs.time - LODWORD(svs.mapCenter[9 * banSlot - 136])))
+            && sv_kickBanTime->current.value * 1000.0 >= (svs.time - svs.tempBans[banSlot].banTime))
         {
             return 1;
         }
@@ -298,7 +298,7 @@ void __cdecl SV_ReceiveStats(netadr_t from, msg_t *msg)
     if (ClientByAddress)
     {
         packetNum = MSG_ReadByte(msg);
-        if (packetNum < 8)
+        if (packetNum < 7)
         {
             Com_Printf(15, "Received packet %i of stats data\n", packetNum);
             start = 1240 * packetNum;
@@ -320,6 +320,11 @@ void __cdecl SV_ReceiveStats(netadr_t from, msg_t *msg)
                     v2);
             }
             MSG_ReadData(msg, &ClientByAddress->stats[start], v4);
+            if (msg->overflowed)
+            {
+                Com_PrintWarning(15, "Truncated stat packet %i from client\n", packetNum);
+                return;
+            }
             ClientByAddress->statPacketsReceived |= 1 << packetNum;
             ClientByAddress->lastPacketTime = svs.time;
             v3 = va("statResponse %i", ~ClientByAddress->statPacketsReceived & 0x7F);
@@ -414,7 +419,7 @@ void __cdecl SV_BanGuidBriefly(const char *cdkeyHash)
 
     banSlot = SV_FindFreeTempBanSlot();
     memcpy(&svs.tempBans[banSlot], cdkeyHash, 0x20u);
-    LODWORD(svs.mapCenter[9 * banSlot - 136]) = svs.time;
+    svs.tempBans[banSlot].banTime = svs.time;
 }
 
 uint __cdecl SV_FindFreeTempBanSlot()
@@ -427,7 +432,7 @@ uint __cdecl SV_FindFreeTempBanSlot()
     {
         if (!svs.tempBans[banSlot].cdkeyHash[0])
             return banSlot;
-        if (SLODWORD(svs.mapCenter[9 * banSlot - 136]) < SLODWORD(svs.mapCenter[9 * oldestSlot - 136]))
+        if (svs.tempBans[banSlot].banTime < svs.tempBans[oldestSlot].banTime)
             oldestSlot = banSlot;
     }
     return oldestSlot;
@@ -1125,6 +1130,17 @@ void __cdecl SV_SendClientGameState(client_t *client)
     MSG_WriteLong(&msg, client - svs.clients);
     MSG_WriteLong(&msg, sv.checksumFeed);
     MSG_WriteByte(&msg, 7u);
+    
+    // KISAK: every other sender checks this; a truncated gamestate must not go out (and a full buffer
+    // is exactly what overflows the Huffman stage in SV_SendMessageToClient).
+    if (msg.overflowed)
+    {
+        Com_PrintError(15, "SV_SendClientGameState: gamestate overflowed for client %i\n", client - svs.clients);
+        SV_DropClient(client, "EXE_SERVERMESSAGEOVERFLOW", 1);
+        SV_GetServerStaticHeader();
+        return;
+    }
+    
     Com_DPrintf(15, "Sending %i bytes in gamestate to client: %i\n", msg.cursize, client - svs.clients);
     SV_SendMessageToClient(&msg, client);
     SV_GetServerStaticHeader();
@@ -1514,7 +1530,13 @@ void __cdecl SV_ExecuteClientMessage(client_t *cl, msg_t *msg)
     msgCompressed.cursize = MSG_ReadBitsCompress(
         &msg->data[msg->readcount],
         msgCompressed_buf_0,
-        msg->cursize - msg->readcount);
+        msg->cursize - msg->readcount,
+        sizeof(msgCompressed_buf_0));
+    if (msgCompressed.cursize < 0)
+    {
+        SV_DropClient(cl, "SV_ExecuteClientMessage: oversize compressed message", 1);
+        return;
+    }
     if (cl->serverId == sv_serverId_value || cl->downloading || cl->downloadingWWW || cl->clientDownloadingWWW)
     {
         if (SV_ProcessClientCommands(cl, &msgCompressed, 0, &c))

@@ -327,8 +327,8 @@ void __cdecl SVC_Status(netadr_t from)
     int v21; // [esp+4450h] [ebp-414h]
     int v22; // [esp+4454h] [ebp-410h]
     playerState_s *v23; // [esp+4458h] [ebp-40Ch]
-    char v24; // [esp+445Ch] [ebp-408h] BYREF
-    _BYTE v25[3]; // [esp+445Dh] [ebp-407h] BYREF
+
+    char playerLine[1024]; // [esp+445Ch] [ebp-408h] BYREF
     int v26; // [esp+485Ch] [ebp-8h]
 
     v22 = 0;
@@ -358,16 +358,16 @@ void __cdecl SVC_Status(netadr_t from)
             if (gameInitialized)
             {
                 ClientScore = G_GetClientScore(v13 - svs.clients);
-                Com_sprintf(&v24, 0x400u, "%i %i \"%s\"\n", ClientScore, v13->ping, v13->name);
+                Com_sprintf(playerLine, sizeof(playerLine), "%i %i \"%s\"\n", ClientScore, v13->ping, v13->name);
             }
             else
             {
-                Com_sprintf(&v24, 0x400u, "%i %i \"%s\"\n", 0, v13->ping, v13->name);
+                Com_sprintf(playerLine, sizeof(playerLine), "%i %i \"%s\"\n", 0, v13->ping, v13->name);
             }
-            v14 = &v25[strlen(&v24)] - v25;
+            v14 = strlen(playerLine);
             if (v14 + v21 >= 0x20000)
                 break;
-            v7 = &v24;
+            v7 = playerLine;
             v6 = &tempServerMsgBuf[v21];
             do
             {
@@ -736,11 +736,11 @@ void __cdecl SV_ConnectionlessPacket(netadr_t from, msg_t *msg)
 
 void __cdecl SV_PacketEvent(netadr_t from, msg_t *msg)
 {
-    client_t *client; // [esp+0h] [ebp-Ch]
-    int qport; // [esp+4h] [ebp-8h]
+    iassert(Sys_IsMainThread());
 
     iassert(Sys_IsMainThread());
     if (msg->cursize >= 4 && *(uint *)msg->data == -1)
+    if (msg->cursize >= 4 && *(uint32_t *)msg->data == -1)
     {
         SV_ConnectionlessPacket(from, msg);
     }
@@ -749,8 +749,8 @@ void __cdecl SV_PacketEvent(netadr_t from, msg_t *msg)
         SV_ResetSkeletonCache();
         MSG_BeginReading(msg);
         MSG_ReadLong(msg);
-        qport = MSG_ReadShort(msg);
-        client = SV_FindClientByAddress(from, qport);
+        int qport = MSG_ReadShort(msg);
+        client_t *client = SV_FindClientByAddress(from, qport);
         if (client)
         {
             if (Netchan_Process(&client->header.netchan, msg))
@@ -760,7 +760,8 @@ void __cdecl SV_PacketEvent(netadr_t from, msg_t *msg)
                 if (client->messageAcknowledge >= 0)
                 {
                     client->reliableAcknowledge = MSG_ReadLong(msg);
-                    if (client->reliableSequence - client->reliableAcknowledge < 128)
+                    int64_t reliableDelta = (int64_t)client->reliableSequence - client->reliableAcknowledge;
+                    if (reliableDelta >= 0 && reliableDelta < MAX_RELIABLE_COMMANDS)
                     {
                         SV_Netchan_Decode(client, &msg->data[msg->readcount], msg->cursize - msg->readcount);
                         if (client->header.state != 1)

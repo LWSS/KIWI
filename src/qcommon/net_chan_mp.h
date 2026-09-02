@@ -121,9 +121,11 @@ struct fakedLatencyPackets_t // sizeof=0x50
     msg_t msg;
 };
 
-struct loopmsg_t // sizeof=0x580
+struct loopmsg_t // sizeof=0x580 (originally; data was 1400)
 {                                       // ...
-    uint8_t data[1400];
+    // KISAK: OOB voice batches to the listen-server host (up to ~10 KB) and large status replies exceeded the
+    // original 1400-byte slot and silently overflowed into the next slots. Nothing serializes this struct.
+    uint8_t data[16384];
     int datalen;
     int port;
 };
@@ -189,6 +191,7 @@ void __cdecl Netchan_Setup(
     int incomingBufferSize);
 bool __cdecl Netchan_TransmitNextFragment(netchan_t* chan);
 bool __cdecl Netchan_Transmit(netchan_t* chan, int length, char* data);
+void BADPACKET(void *buffer, uint32_t len);
 int __cdecl Netchan_Process(netchan_t* chan, msg_t* msg);
 int __cdecl NET_CompareBaseAdrSigned(netadr_t* a, netadr_t* b);
 bool __cdecl NET_CompareBaseAdr(netadr_t a, netadr_t b);
