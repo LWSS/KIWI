@@ -329,6 +329,8 @@ set(RADIANT_SRCS
     "${SRC_DIR}/radiant/kiwi_test.cpp"
     "${SRC_DIR}/radiant/kiwi_decal.h"
     "${SRC_DIR}/radiant/kiwi_decal.cpp"
+    "${SRC_DIR}/radiant/kiwi_refimage.h"     # KIWI: editor-only construction images
+    "${SRC_DIR}/radiant/kiwi_refimage.cpp"
     # KIWI: Selected entity facing arrows in camera and orthographic views.
     "${SRC_DIR}/radiant/kiwi_entarrow.h"
     "${SRC_DIR}/radiant/kiwi_entarrow.cpp"

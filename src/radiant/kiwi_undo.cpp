@@ -10,6 +10,7 @@
 #include "kiwi_undo.h"
 #include "kiwi_construct.h"
 #include "kiwi_visibility.h"    // visibility undo domain
+#include "kiwi_refimage.h"      // KIWI (REFIMG): fourth whole-store domain
 #include "kiwi_selection.h"     // face-granular selection restore
 #include "kiwi_command.h"       // KiwiCmd_Active restore guard
 
@@ -25,9 +26,9 @@ extern undo_s *g_lastundo;                         // undo.cpp:82   undo_s *g_la
 
 namespace
 {
-    // Default domain capacities total 64 + 32 + 32. Global trimming is safe only
-    // when every domain reports its own evictions before this limit is exceeded.
-    const int KUNDO_MAX_TICKETS = 128;
+    // Default domain capacities total 64 + 32 + 32 + 32. Global trimming is safe
+    // only when every domain reports its own evictions before this limit is exceeded.
+    const int KUNDO_MAX_TICKETS = 160;
 
     // Pointer identity does not survive legacy restore, so selection keys use a
     // snapshot-local brush ordinal and geometry values. See kiwi_undo.h.
@@ -69,6 +70,7 @@ namespace
         s_redo.clear();
         KiwiCon_ClearRedo();            // domain-local redo follows the journal
         KiwiVis_ClearRedo();            // same rule for visibility
+        KiwiRefImage_ClearRedo();       // same rule for reference images
     }
 
     // Snapshot armed by the current KIWI bracket and consumed by its ticket.
@@ -120,6 +122,7 @@ namespace
     {
         return ( d == KUNDO_LEGACY )     ? "brush"
              : ( d == KUNDO_VISIBILITY ) ? "hide"
+             : ( d == KUNDO_REFIMAGE )   ? "reference image"
                                          : "construction";
     }
 
@@ -272,6 +275,11 @@ void KiwiUndo_NoteVisibilityRecord( const char *operation )
     Append( KUNDO_VISIBILITY, operation );
 }
 
+void KiwiUndo_NoteRefImageRecord( const char *operation )
+{
+    Append( KUNDO_REFIMAGE, operation );
+}
+
 // Consistency hooks.
 void KiwiUndo_NoteLegacyEvicted()
 {
@@ -372,6 +380,7 @@ void KiwiUndo_Reset()
     s_pendingHasFace = false;
     s_pendingArmed   = false;
     KiwiVis_UndoReset();                // visibility history belongs to the map
+    KiwiRefImage_UndoReset();           // reference-image history belongs to the map
 }
 
 // Depths and labels.
@@ -404,6 +413,10 @@ bool KiwiUndo_Undo()
         else if ( t.domain == KUNDO_VISIBILITY )    // instance-side hidden snapshots
         {
             done = KiwiVis_UndoPop();               // pushes the hide redo snapshot
+        }
+        else if ( t.domain == KUNDO_REFIMAGE )
+        {
+            done = KiwiRefImage_UndoPop();
         }
         else
         {
@@ -450,6 +463,10 @@ bool KiwiUndo_Redo()
         else if ( t.domain == KUNDO_VISIBILITY )    // instance-side hidden snapshots
         {
             done = KiwiVis_RedoPop();
+        }
+        else if ( t.domain == KUNDO_REFIMAGE )
+        {
+            done = KiwiRefImage_RedoPop();
         }
         else
         {

@@ -42,6 +42,7 @@
 #include "kiwi_pick.h"
 #include "kiwi_primitive.h"              // §16b Box / Cylinder / Sphere / Cone
 #include "kiwi_region.h"
+#include "kiwi_refimage.h"
 #include "kiwi_selconv.h"
 #include "kiwi_selection.h"
 #include "kiwi_snap.h"
@@ -434,6 +435,7 @@ namespace
         { KIWI_CMD_GRASS_PANEL, { "Grass Scatter", "Modeling", 0, nullptr        } },
         { KIWI_CMD_TERRAIN_PANEL, { "Terrain Sculpt", "Modeling", 0, nullptr      } },
         { KIWI_CMD_WINDOW_DECALS, { "Decals", "Windows", 0, nullptr                } },
+        { KIWI_CMD_WINDOW_REFIMAGES, { "Reference Images", "Windows", 0, nullptr    } },
     };
 
     // Built-in modal lifecycle probe. It intentionally mutates nothing and opens no undo.
@@ -734,6 +736,7 @@ namespace
         case KIWI_CMD_WINDOW_LIGHT:                     // the Light tab — likewise
         case KIWI_CMD_WINDOW_INSPECTOR:                 // the Inspector tab — likewise
         case KIWI_CMD_WINDOW_DECALS:                    // the Decals tab — likewise
+        case KIWI_CMD_WINDOW_REFIMAGES:                 // KIWI (REFIMG): panel toggle
         case KIWI_CMD_TERRAIN_PANEL:                    // a panel toggle, not a verb
         case KIWI_CMD_ENT_DROP:
         case KIWI_CMD_MODEL_DROP:
@@ -1142,6 +1145,17 @@ bool KiwiCmd_KeyDown( int vk, unsigned int mods )
         return true;
     }
 
+    // Ctrl+Z while a gesture is live (paused after a ring/handle release or still
+    // dragging) takes the gesture back: an exact cancel that leaves no undo or redo
+    // ticket.  Without this the modifier was ignored and Ctrl+Z read as the Z-axis lock.
+    // Ctrl+Y is swallowed so a redo cannot run under a live command.
+    if ( ( mods & 4u ) && ( vk == 0x5A || vk == 0x59 ) )   // Ctrl+Z / Ctrl+Y
+    {
+        if ( vk == 0x5A )
+            KiwiCmd_Cancel();
+        return true;
+    }
+
     if ( g_activeCommand->KeyDown( vk, mods ) )
     {
         g_nUpdateBits |= 1;
@@ -1388,6 +1402,21 @@ bool KiwiUX_KeyFunnel( unsigned int vk )
         return true;
     }
 
+    // A live gesture owns Escape before any armed tool grammar can eat it: Esc
+    // cancels the gesture and puts everything back the way it was when the tool
+    // started (KiwiCmd_KeyDown's ladder: a typed field clears first, then V pivot
+    // placement ends, then the command itself cancels).  Without this an armed
+    // image / terrain / decal / grass tool swallowed the first Esc and the
+    // half-finished move or rotate stayed on screen.
+    if ( g_activeCommand && vk == 0x1B )                       // VK_ESCAPE
+        return KiwiCmd_KeyDown( (int)vk, CurrentMods() );
+
+    // KIWI (REFIMG): armed planes own their explicit Escape/Delete grammar first.
+    if ( vk == 0x1B && KiwiRefImage_HandleEscape() )
+        return true;
+    if ( vk == 0x2E && KiwiRefImage_HandleDelete() )
+        return true;
+
     // Armed paint tools: Esc disarms; Terrain Sculpt also takes + / - for its radius.
     if ( KiwiTerrain_HandleKey( vk ) )
         return true;
@@ -1408,16 +1437,23 @@ bool KiwiUX_KeyFunnel( unsigned int vk )
         }
     }
 
+    // G / R / S while a transform is live swap tools in place, in every direction
+    // and for brushes, construction and reference images alike: the running
+    // gesture is APPLIED first (committed as its own undo record when it moved
+    // anything, dropped when it did not) and the new tool starts from that
+    // result.  The key of the tool already running is not a swap; it falls
+    // through to the command's own KeyDown (Move uses G to hand a drop off) and
+    // is otherwise swallowed, so a repeated press can never commit-and-restart.
     if ( g_activeCommand )
     {
         const int id = LookupBinding( vk, CurrentMods() );
-        if ( id && SwapVerb( id ) && g_activeCommand->CanSwapTo( id )
-          && KiwiCmd_CanExecute( id ) )
+        if ( id && SwapVerb( id ) && KiwiXform_CommandForId( id ) != g_activeCommand
+          && g_activeCommand->CanSwapTo( id ) && KiwiCmd_CanExecute( id ) )
         {
             const bool moved = g_activeCommand->GestureMoved();
             if ( moved ) KiwiCmd_Commit();
             else         KiwiCmd_Cancel();
-            return false;                   // …and let the hotkey table run it
+            return false;                   // …and let the hotkey table start the new tool
         }
     }
 
@@ -1490,9 +1526,25 @@ bool KiwiUX_KeyFunnel( unsigned int vk )
         return true;
     }
 
+    // A pure image selection owns Delete/Backspace even when its gesture tool is
+    // not armed.  Mixed brush/construction selections retain their existing owner.
+    if ( ( vk == 0x2E || vk == 0x08 ) && KiwiRefImage_OwnsDelete() )
+    {
+        KiwiRefImage_DeleteAt( KiwiRefImage_Selected() );
+        return true;
+    }
+
     // Permanent, once-per-session diagnosis of legitimate patch selection gates.
     if ( vk == 0x48 && CurrentMods() == 0 )                          // H
         KiwiVis_ReportPatchGates( false );
+
+    // Bare H on a pure reference-image selection hides that image (the Outliner's eye
+    // and Unhide All are the way back).
+    if ( vk == 0x48 && CurrentMods() == 0 && KiwiRefImage_OwnsDelete() )   // H
+    {
+        KiwiRefImage_SetHidden( KiwiRefImage_Selected(), true );
+        return true;
+    }
 
     // Bare H hides construction first; mixed selections then fall through to classic Hide.
     if ( vk == 0x48 && CurrentMods() == 0 && KiwiConSel_OwnsHide() )  // H

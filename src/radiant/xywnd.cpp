@@ -599,6 +599,7 @@ extern entity_s   entityInsts;                                        // entity.
 extern bool       HasKeyValuePair(entity_s_def *e, const char *key);  // entity.cpp (0x4838B0)
 extern float      Vec3Normalize_R(float *v);                          // engine_stubs.cpp (0x40A5E0) — returns length
 extern void       KiwiEntArrow_DrawXY( int viewType, float scale );   // KIWI-UX: Declare the bounded selected-entity 2D overlay.
+extern void       KiwiRefImage_DrawXY( int viewType, float scale );   // KIWI (REFIMG): editor-only material quads.
 extern int        R_Add3DLine(GfxPointVertex *verts, const orientation_t *orient,
                               const float *p1, const float *p2, const unsigned int *color,
                               char width, int vertCount, int maxVertCount);  // draw.cpp (0x40C110)
@@ -4104,6 +4105,8 @@ void XYWnd_Paint( HWND hwndIn )
         R_AddCmdSetMaterialColor( s_flushNeutral );
     }
     R_AddEditorSurfsCmd();   // flush the ED_SURF_MODEL surfs into THIS ortho frame
+    // KIWI (REFIMG): material draw is legal here; lead the overlay tail so its wires stay above it.
+    KiwiRefImage_DrawXY( wnd->m_nViewType, wnd->m_fScale );
     // Live marquee box (IDB XY_Draw 0x46d9a1): draw while a box-drag is active. The gate
     // mirrors the binary's `camera_fov_setup == sub_467700 && mode ∈ {area, 12..15}`
     // (Ed_PressCallback stands in for sub_467700 — see its note).
@@ -4254,6 +4257,8 @@ void XYWnd_RenderToRT( int w, int h )
         R_AddCmdSetMaterialColor( s_flushNeutral );
     }
     R_AddEditorSurfsCmd();   // flush the ED_SURF_MODEL surfs into THIS ortho frame
+    // KIWI (REFIMG): RTT twin, first in the material-capable overlay tail.
+    KiwiRefImage_DrawXY( wnd->m_nViewType, wnd->m_fScale );
     // Live marquee box (IDB XY_Draw 0x46d9a1): draw while a box-drag is active. The gate
     // mirrors the binary's `camera_fov_setup == sub_467700 && mode ∈ {area, 12..15}`
     // (Ed_PressCallback stands in for sub_467700 — see its note).

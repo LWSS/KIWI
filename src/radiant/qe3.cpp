@@ -748,6 +748,7 @@ void LoadMruInReg( LPMRUMENU *mru )
 
 // ── 0x4994B0  DoMru — open a recent file (the 8000..8009 command handler body) ─
 extern void Pointfile_Clear();                             // points.cpp
+extern void Radiant_OpenMap( const char *path );           // mainfrm.cpp (KIWI)
 BOOL DoMru( short nID, HWND hWnd )
 {
     // Unsaved-changes / inside-prefab guard (binary inlines HasUnsavedChangesOrInsidePrefab
@@ -781,7 +782,10 @@ BOOL DoMru( short nID, HWND hWnd )
     {
         MRU_NewItem( mru, fileName );                        // promote to top
         Pointfile_Clear();
-        Map_LoadFromFile( fileName );
+        // KIWI: File->Recent goes through Radiant_OpenMap like File->Open, so the load
+        // also records the current map path (Save no longer asks for a name), retitles
+        // the frame, and fits the top view on the map's contents.
+        Radiant_OpenMap( fileName );
     }
     // Rebuild the recent-files menu items in the File menu (submenu 0).
     HMENU subMenu = GetSubMenu( GetMenu( hWnd ), 0 );

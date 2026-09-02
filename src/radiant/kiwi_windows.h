@@ -8,8 +8,8 @@
 
 // Shared by the [KiwiWindows] defaults reseed and kiwi_dock<N>.ini.
 // Bump when defaults or dock placement changes so existing profiles receive both together.
-// Version 15 adds Models to the Textures/Entities dock node.
-#define KIWI_LAYOUT_VERSION  16
+// Version 17 adds Reference Images beside Decals in the lower-right dock node.
+#define KIWI_LAYOUT_VERSION  17
 
 enum kiwiWindow_t
 {
@@ -30,6 +30,7 @@ enum kiwiWindow_t
     KIWI_WIN_LIGHT,         // "Light"                          default ON
     KIWI_WIN_INSPECTOR,     // "Inspector"                      default ON
     KIWI_WIN_DECALS,        // "Decals"                         default ON
+    KIWI_WIN_REFIMAGES,     // "Reference Images"               default ON
     KIWI_WIN_COUNT,
 };
 

@@ -25,6 +25,7 @@
 #include "kiwi_hover.h"
 #include "kiwi_lines.h"
 #include "kiwi_region.h"
+#include "kiwi_refimage.h"
 #include "kiwi_selection.h"
 #include "kiwi_sun.h"
 #include "kiwi_ux.h"
@@ -694,6 +695,9 @@ void KiwiHover_DrawWorld()
     if ( c->width < 1 || c->height < 1 )
         return;
     CamWnd_BuildMatrix();
+
+    // KIWI (REFIMG): textured planes precede every construction/selection line pass.
+    KiwiRefImage_DrawWorld();
 
     // Grass Scatter is another cursor-driven camera accent.  It owns a separate,
     // exact-size line batch so the hover budget cannot truncate its AOE ring.

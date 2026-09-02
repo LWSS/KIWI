@@ -30,6 +30,10 @@
 #include <gfx_d3d/r_material.h>        // Material (R_BeginRegistrationInternal return)
 #include "kiwi_windows.h"              // KiwiWindows_IsOpen kiwi_windows.h:105 / KiwiWindows_Set kiwi_windows.h:109
 #include "kiwi_sunshadow.h"            // shared persisted sun-preview state
+#include "kiwi_construct.h"            // KIWI: fit-on-load counts construction objects
+#include "kiwi_refimage.h"             // KIWI: ...and reference images
+#include "kiwi_viewdirty.h"            // KIWI: the fitted 2D view must re-render
+#include "kiwi_camera.h"               // KIWI: KiwiCam_LookAlong / KiwiCam_FrameBounds (3D fit)
 
 extern void Radiant_RegisterGroupCDvars();   // engine_stubs.cpp
 extern void Sys_InitializeCriticalSections();// universal/win_common.cpp (decl lives in win32/win_local.h, not radiant-safe)
@@ -632,6 +636,122 @@ bool Radiant_LoadProjectAtStartup()
     return false;
 }
 
+// KIWI: after a load the 2D view starts as the TOP view, zoomed so the whole map fills
+// about 80% of the view.  "Whole map" means everything the editor shows: every active
+// brush/patch (entities included), every visible construction object and every visible
+// reference image, so a map that is still only sketches and pictures frames too.  An
+// empty map keeps the view it has.
+extern void XYWnd_SetViewType( int vt );                          // below (0x4685F0 forwarder)
+extern int  Sys_Printf( const char *fmt, ... );                   // win_qe3.cpp (0x499E90)
+namespace
+{
+    void FitExtend( float mins[3], float maxs[3], const float p[3], bool *any )
+    {
+        for ( int k = 0; k < 3; ++k )
+        {
+            if ( p[k] < mins[k] ) mins[k] = p[k];
+            if ( p[k] > maxs[k] ) maxs[k] = p[k];
+        }
+        *any = true;
+    }
+}
+
+static void Radiant_FitXYToMap()
+{
+    float mins[3] = {  131072.0f,  131072.0f,  131072.0f };
+    float maxs[3] = { -131072.0f, -131072.0f, -131072.0f };
+    bool  any = false;
+    int   nBrush = 0, nCon = 0, nImg = 0;
+
+    for ( selbrush_t *b = active_brushes.next; b && b != &active_brushes; b = b->next )
+    {
+        const brush_t *def = b->def;
+        if ( !def ) continue;
+        FitExtend( mins, maxs, def->mins, &any );
+        FitExtend( mins, maxs, def->maxs, &any );
+        ++nBrush;
+    }
+
+    for ( int i = 0; i < KiwiCon_Count(); ++i )
+    {
+        const kconObject_t *o = KiwiCon_At( i );
+        if ( !o || KiwiCon_Hidden( i ) ) continue;
+        bool used = false;
+        if ( KiwiCon_IsParametric( *o ) )
+        {
+            float p0[3], p1[3];
+            const int n = KiwiCon_SegmentCount( *o );
+            for ( int seg = 0; seg < n; ++seg )
+                if ( KiwiCon_SegmentWorld( *o, seg, p0, p1 ) )
+                {
+                    FitExtend( mins, maxs, p0, &any );
+                    FitExtend( mins, maxs, p1, &any );
+                    used = true;
+                }
+        }
+        else
+        {
+            float p[3];
+            const int n = KiwiCon_VertCount( *o );
+            for ( int v = 0; v < n; ++v )
+                if ( KiwiCon_VertWorld( *o, v, p ) )
+                {
+                    FitExtend( mins, maxs, p, &any );
+                    used = true;
+                }
+        }
+        if ( used ) ++nCon;
+    }
+
+    for ( int i = 0; i < KiwiRefImage_Count(); ++i )
+    {
+        const krefImage_t *r = KiwiRefImage_At( i );
+        float lo[3], hi[3];
+        if ( !r || r->hidden || !KiwiRefImage_Bounds( i, lo, hi ) ) continue;
+        FitExtend( mins, maxs, lo, &any );
+        FitExtend( mins, maxs, hi, &any );
+        ++nImg;
+    }
+
+    if ( !any )
+    {
+        Radiant_FL_Log( "XY view fit: nothing to frame (empty map)" );
+        return;
+    }
+
+    XYWnd_SetViewType( ED_VIEW_XY );
+    xywndState_t *xy = Ed_ActiveXY();
+    const int w = xy->m_nWidth  > 0 ? xy->m_nWidth  : 1024;   // not sized yet (cmdline load)
+    const int h = xy->m_nHeight > 0 ? xy->m_nHeight : 768;
+    const float extX = ( maxs[0] - mins[0] ) > 1.0f ? ( maxs[0] - mins[0] ) : 1.0f;
+    const float extY = ( maxs[1] - mins[1] ) > 1.0f ? ( maxs[1] - mins[1] ) : 1.0f;
+    float scale = (float)w / extX;
+    if ( (float)h / extY < scale ) scale = (float)h / extY;
+    scale *= 0.80f;                                   // the contents fill ~80% of the view
+    if ( scale < 0.01f ) scale = 0.01f;               // XYWnd zoom limits (xywnd.cpp)
+    if ( scale > 32.0f ) scale = 32.0f;
+    xy->m_fScale     = scale;
+    xy->m_vOrigin[0] = 0.5f * ( mins[0] + maxs[0] );
+    xy->m_vOrigin[1] = 0.5f * ( mins[1] + maxs[1] );
+    KiwiViewDirty_Mark( KIWI_DIRTYVIEW_XY );
+
+    // The 3D view frames the same contents from a three-quarter overhead angle
+    // (35 degrees down, 45 degrees off the X axis) so the whole map is in shot on
+    // load instead of the player-start eye view the binary used.  FrameBounds keeps
+    // the aim and backs the camera off until the bounding sphere fits the FOV.
+    KiwiCam_LookAlong( -35.0f, 45.0f );
+    CamWnd_BuildMatrix();
+    KiwiCam_FrameBounds( mins, maxs );
+    CamWnd_BuildMatrix();
+
+    Sys_Printf( "XY view fit: top view on %d brushes, %d construction objects, %d images "
+                "(%g x %g units, scale %g); camera framed on the same bounds.\n",
+                nBrush, nCon, nImg, extX, extY, scale );
+    Radiant_FL_Log( "XY view fit: top view, origin=(%g %g) scale=%g ext=(%g %g) "
+                    "brushes=%d construction=%d images=%d",
+                    xy->m_vOrigin[0], xy->m_vOrigin[1], scale, extX, extY, nBrush, nCon, nImg );
+}
+
 void Radiant_OpenMap( const char *path )
 {
     if ( !Radiant_PathLooksLikeMap( path ) )
@@ -646,11 +766,11 @@ void Radiant_OpenMap( const char *path )
     if ( g_qeglobals.d_hwndMain )        // NO-MFC: same liveness gate, HWND-based
     {
         Z_CenterOnMap();
-        // NO Cam_CenterOnMap here: Map_LoadFromFile (0x486680) already placed camera.origin at
-        // the info_player_start (else deathmatch, else origin) +60 Z and set camera.angles from
-        // that entity, exactly as the binary does.  (Radiant_CenterXYOnMap / Z_CenterOnMap keep
-        // the 2D views map-centered - a port convenience; the binary points the XY view at the
-        // player start too, via the m_pXYWnd write in 0x486680.)
+        Radiant_FitXYToMap();            // KIWI: top view + 3D camera framed on the whole map
+        // Map_LoadFromFile (0x486680) placed camera.origin at the info_player_start (else
+        // deathmatch, else origin) +60 Z with that entity's angles, exactly as the binary
+        // does; Radiant_FitXYToMap then re-frames the camera on the map's contents (KIWI
+        // divergence, by request: a load should show the whole map, not one eye view).
         // Title = "CoD4Radiant - <map>".
         char title[MAX_PATH + 32];
         _snprintf( title, sizeof( title ), "CoD4Radiant - %s", path );
@@ -5456,7 +5576,12 @@ bool Radiant_DispatchCommandDirect( unsigned int cmdId )
     // the two, so that by the time KiwiCmd_AfterPaste looks at the world BOTH
     // kinds of pasted geometry are landed and selected and it can decide what one
     // Move gesture may carry.  Order matters: AfterPaste must run LAST.
-    case 33040: Cmd_OnEditPastebrush(); KiwiConClip_Paste(); KiwiCmd_AfterPaste(); return true;   // Edit->Paste           0x4286D0
+    case 33040:
+        { // KIWI (REFIMG): clipboard pixels/files take precedence over brush paste.
+            extern bool KiwiRefImage_PasteClipboard();
+            if ( KiwiRefImage_PasteClipboard() ) return true;
+        }
+        Cmd_OnEditPastebrush(); KiwiConClip_Paste(); KiwiCmd_AfterPaste(); return true;   // Edit->Paste           0x4286D0
     case 32818: Cmd_OnFileProjectsettings(); return true;   // File->Project Settings 0x428DE0
     case 32995: Cmd_OnViewZoomin(); return true;   // View->Zoom->XY Zoom In  0x424750
     case 32996: Cmd_OnViewZoomout(); return true;   // View->Zoom->XY Zoom Out 0x4247E0

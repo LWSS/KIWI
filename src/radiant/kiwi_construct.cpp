@@ -28,6 +28,7 @@
 #include "kiwi_numeric.h"
 #include "kiwi_pick.h"
 #include "kiwi_region.h"
+#include "kiwi_refimage.h"
 #include "kiwi_snap.h"
 #include "kiwi_trim.h"
 #include "kiwi_undo.h"
@@ -956,11 +957,12 @@ void KiwiCon_ClearAll()
     Touch();
 }
 
-// A new document also discards construction undo/redo and unified journal tickets;
-// palette ClearAll intentionally keeps its just-pushed undo snapshot.
+// A new document also discards construction/reference-image state and unified
+// journal tickets; palette ClearAll intentionally keeps its just-pushed undo snapshot.
 void KiwiCon_ResetForNewMap()
 {
     KiwiCon_ClearAll();
+    KiwiRefImage_ResetForNewMap(); // KIWI (REFIMG): File->New must discard the old map's planes.
     s_undo.clear();
     s_redo.clear();
     KiwiUndo_Reset();
@@ -3696,7 +3698,8 @@ bool KiwiCon_SaveSidecar( const char *mapPath )
     // Enumerate hidden solids before deciding whether a sidecar is needed.
     const int hiddenCount = KiwiVis_SidecarBuild();
 
-    if ( s_objects.empty() && hiddenCount == 0 && s_groups.empty() )
+    if ( s_objects.empty() && hiddenCount == 0 && s_groups.empty()
+      && KiwiRefImage_Count() == 0 ) // KIWI (REFIMG): sidecar-only planes keep the file.
     {
         // With no objects, hidden solids or groups, remove any existing sidecar.
         // (Groups are serialized below, so an empty-groups-only map must keep its file.)
@@ -3741,6 +3744,8 @@ bool KiwiCon_SaveSidecar( const char *mapPath )
     // contain spaces but not quotes.
     for ( size_t g = 0; g < s_groups.size(); ++g )
         fprintf( f, "congroup %i \"%s\"\n", s_groups[g].id, s_groups[g].name );
+    // KIWI (REFIMG): independent editor-only blocks precede construction objects.
+    KiwiRefImage_WriteSidecar( f );
     for ( size_t i = 0; i < s_objects.size(); ++i )
     {
         const kconObject_t &o = s_objects[i];
@@ -3806,6 +3811,7 @@ bool KiwiCon_SaveSidecar( const char *mapPath )
 
 bool KiwiCon_LoadSidecar( const char *mapPath )
 {
+    KiwiRefImage_ResetForNewMap(); // KIWI (REFIMG): map replacement owns this store too.
     s_objects.clear();
     s_groups.clear();
     s_nextGroupId = 1;
@@ -3848,6 +3854,10 @@ bool KiwiCon_LoadSidecar( const char *mapPath )
         if ( sscanf( line, "%31s", kw ) != 1 )
             continue;
         if ( kw[0] == '#' )
+            continue;
+
+        // KIWI (REFIMG): its block parser consumes only refimage records/extensions.
+        if ( KiwiRefImage_ParseSidecarLine( line ) )
             continue;
 
         if ( !strcmp( kw, "object" ) )

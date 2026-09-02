@@ -2,8 +2,9 @@
 #ifndef KISAK_RADIANT
 #error this file is only for Radiant!
 #endif
-// Unified undo/redo order for legacy brush/entity, construction, and visibility
-// records. Each domain retains its own snapshots and restore implementation.
+// Unified undo/redo order for legacy brush/entity, construction, visibility, and
+// reference-image records. Each domain retains its own snapshots and restore
+// implementation.
 
 // Tickets contain only {domain, label}. Record hooks append them when the owning
 // store commits a record; undo and redo pop the newest ticket and forward it to
@@ -26,6 +27,7 @@ enum kundoDomain_t
     KUNDO_LEGACY = 0,           // undo.cpp's brush/entity record stack
     KUNDO_CONSTRUCTION,         // kiwi_construct.cpp's whole-store snapshots
     KUNDO_VISIBILITY,           // kiwi_visibility.cpp's hidden-bit snapshots
+    KUNDO_REFIMAGE,             // kiwi_refimage.cpp's editor-only plane snapshots
 };
 
 // False lets mainfrm.cpp fall through to classic history predating this journal.
@@ -42,6 +44,7 @@ const char *KiwiUndo_UndoLabel();
 void KiwiUndo_NoteLegacyRecord( const char *operation );
 void KiwiUndo_NoteConstructionRecord( const char *operation );
 void KiwiUndo_NoteVisibilityRecord( const char *operation );   // visibility store tail
+void KiwiUndo_NoteRefImageRecord( const char *operation );     // reference-image store tail
 
 // Legacy consistency hooks.
 void KiwiUndo_NoteLegacyEvicted();      // Undo_FreeFirstUndo tail — oldest record died

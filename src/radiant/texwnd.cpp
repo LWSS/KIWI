@@ -882,6 +882,7 @@ static bool TexWnd_FilterAccept( const qtexture_s *tex )
 {
     if ( !tex || !tex->name )
         return false;
+    if ( _strnicmp( tex->name, "kiwi_refimg_", 12 ) == 0 ) return false; // KIWI (REFIMG): generated editor assets never enter the browser.
 
     const int layer = g_qeglobals.current_edit_layer;
     if ( layer == 1 )                                          // Lightmap render-method

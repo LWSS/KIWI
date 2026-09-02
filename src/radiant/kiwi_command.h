@@ -147,6 +147,7 @@
 #define KIWI_CMD_GRASS_PANEL        34142   // "Grass Scatter" (the AOE foliage paint panel)
 #define KIWI_CMD_TERRAIN_PANEL      34143   // "Terrain Sculpt" (the Y-key patch sculpt/paint panel)
 #define KIWI_CMD_WINDOW_DECALS      34144   // "Decals" (the decal placement dock window)
+#define KIWI_CMD_WINDOW_REFIMAGES   34145   // "Reference Images" (editor-only planes)
 
 // Shared with mainfrm's dispatch gate so range changes have one definition.
 bool KiwiCmd_IsKiwiId ( int id );

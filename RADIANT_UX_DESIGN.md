@@ -15613,3 +15613,46 @@ fallback and the material renders; only a dead colorMap fails the import.
   old-style stacks.
 - Chunks created by Split/Expander are always PATCH_TERRAIN (the bezier projection
   path PMESH_02 crashed on a fresh, untessellated grid).
+
+## D-REFIMG — editor-only reference images
+
+- PNG/JPEG/BMP/TGA/DDS/WebP files dropped or pasted over a viewport are copied to
+  the map's `refimages/` directory and shown as blended, axis-aligned XY/XZ/YZ
+  material quads. They can be moved, corner-scaled, rotated, flipped, faded,
+  hidden, locked, layered, and undone without creating brushes or patch geometry.
+- Records live only in the adjacent KIWI2 sidecar as `refimage "relative/path"`
+  blocks ending in `end`; transform, display, lock, and name fields are one per
+  line. Generated `raw/images/kiwi_refimg_*` and `raw/materials/kiwi_refimg_*`
+  assets are editor preview data, are hidden from the texture browser, and are
+  never written to `.map` or consumed by cod4map.
+
+## D-XFORM amendments (2026-09-02) — tool swap, Esc, fit on load
+
+- **Tool swap while a transform is live.** G / R / S pressed during Move, Rotate or
+  Scale (any direction, brushes / construction / reference images alike) APPLIES the
+  running gesture first — committed as its own undo record when it moved anything,
+  dropped when it did not — and starts the new tool from that result.  The key of
+  the tool already running is not a swap (Move keeps G for the drop hand-off); it
+  falls through to the command's own KeyDown and is otherwise swallowed, so a
+  repeated press cannot commit-and-restart the gesture.  Move's old "no swap while
+  moving construction or an image" rule is gone: Rotate and Scale serve both stores.
+  Swapping stays blocked during V pivot placement and drop mode.
+- **Esc mid-tool cancels and restores the start state, always.**  In the key
+  funnel a live gesture now owns Escape BEFORE any armed tool grammar (image
+  placement, terrain, decal, grass) can consume it.  Ladder: a typed numeric field
+  clears first, then V pivot placement ends, then the command cancels (store
+  snapshot popped for construction / images, ported inverse + bracket unwind for
+  brushes).
+- **Fit on load.**  A load (File→Open, File→Recent, cmdline, test `open`) ends in
+  the TOP view zoomed so the contents fill ~80% of the view.  Contents = every
+  active brush/patch (entities included) + every visible construction object +
+  every visible reference image, so a map that is still only sketches and pictures
+  frames too.  The fit reports "XY view fit: top view on N brushes, N construction
+  objects, N images" on the console.  File→Recent now goes through Radiant_OpenMap
+  like File→Open, so it also records the current map path (Save no longer asks for
+  a name) and retitles the frame.
+- **3D view fit on load (2026-09-02, by request).** After the top-view fit the camera is
+  aimed from a three-quarter overhead angle (pitch -35, yaw 45) and `KiwiCam_FrameBounds`
+  backs it off until the same brush + construction + image bounds fit the FOV.  This
+  replaces the binary's player-start eye view on load (the classic placement still
+  happens first inside Map_LoadFromFile; the fit overrides it).

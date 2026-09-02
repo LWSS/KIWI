@@ -102,6 +102,14 @@ bool KiwiConSel_MoveBegin( float outRef[3] );
 void KiwiConSel_MoveApply( const float delta[3] );
 void KiwiConSel_MoveCancel();
 void KiwiConSel_MoveCommit();
+// R / S arms: same baseline + undo snapshot as Move (call MoveBegin first, then
+// MoveCommit / MoveCancel).  Both are ABSOLUTE from the baseline.  Rotation is a
+// right-hand-rule turn about the world axis through `pivot`; scale multiplies the
+// pivot-relative position per world axis.  Circles/arcs keep their parametric
+// form: they rotate rigidly, and a non-uniform scale becomes the mean of the two
+// factors spanning their plane (no ellipses).
+void KiwiConSel_RotateApply( const float pivot[3], int axis, float degrees );
+void KiwiConSel_ScaleApply ( const float pivot[3], const float factor[3] );
 
 // Construction snap candidates bypass Pick's selected-object exclusion. Mute the
 // latched move set explicitly so an absolute drag cannot repeatedly snap to itself.

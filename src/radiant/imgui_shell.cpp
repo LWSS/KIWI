@@ -280,6 +280,15 @@ extern void KiwiVP_CameraHover     ( int imgX, int imgY, bool over );
 extern void KiwiVP_CameraTick      ( bool cursorOver );
 extern bool KiwiVP_CameraAbort     ();
 extern bool KiwiVP_DrawCameraOverlay( float imgMinX, float imgMinY, float imgW, float imgH );
+// KIWI (REFIMG): XY images get first refusal while armed, or for a direct
+// object/everything-mode image click.
+extern bool KiwiRefImage_HandleXYDown( int imgX, int imgY, unsigned int flags );
+extern bool KiwiRefImage_HandleXYMove( int imgX, int imgY );
+extern bool KiwiRefImage_HandleXYUp();
+extern void KiwiRefImage_HandleXYAbort();
+extern void KiwiRefImage_HoverXY( int imgX, int imgY, bool over );
+extern void KiwiRefImage_ApplyRectXY( float x0, float y0, float x1, float y1,
+                                      bool crossing, bool shift, bool ctrl );
 
 static rttViewport_t s_inputOwner = RTT_COUNT;   // RTT_COUNT == none capturing
 
@@ -310,6 +319,9 @@ static rttViewport_t s_inputOwner = RTT_COUNT;   // RTT_COUNT == none capturing
 // claimed, and buttons pressed mid-gesture that nobody dispatched, never reach
 // legacy in any form.  Modifier bits (MK_SHIFT/MK_CONTROL) pass through untouched.
 static unsigned int  s_legacyBtnMask = 0;         // bit 1<<b: VP_Down ran for button b
+static bool          s_xyLegacyPress = false;
+static int           s_xyLegacyX = 0, s_xyLegacyY = 0;
+static unsigned int  s_xyLegacyFlags = 0;
 
 static unsigned int VP_LegacyFlags( unsigned int flags )
 {
@@ -331,6 +343,8 @@ static float         s_wheel[RTT_COUNT];          // wheel delta captured DURING
 static bool          s_camMouseOver = false;
 static int           s_camMouseX = 0, s_camMouseY = 0;   // image-relative, top-left origin
 static int           s_camImgW = 0, s_camImgH = 0;
+static rttViewport_t s_lastRefViewport = RTT_COUNT;
+static int           s_lastRefX = 0, s_lastRefY = 0;
 
 // Bridge for CamWnd_Draw's terrain-paint brush ring: the cursor position + size RELATIVE to the
 // camera RTT image (the 3D viewport panel). Returns false when the cursor isn't over the camera
@@ -363,6 +377,37 @@ bool ImGuiShell_CameraImageRect( float *x, float *y, float *w, float *h )
     if ( y ) *y = s_imgMin[RTT_CAMERA].y;
     if ( w ) *w = (float)s_camImgW;
     if ( h ) *h = (float)s_camImgH;
+    return true;
+}
+
+// KIWI (REFIMG): Explorer supplies physical screen coordinates; ImGui's stored
+// rectangles are backend-client coordinates because multi-viewport is disabled.
+bool ImGuiShell_ViewportAtScreen( int screenX, int screenY,
+                                  int *rttId, int *imgX, int *imgY )
+{
+    if ( !s_backendHwnd ) return false;
+    POINT p = { screenX, screenY };
+    if ( !::ScreenToClient( s_backendHwnd, &p ) ) return false;
+    for ( int i = 0; i < RTT_COUNT; ++i )
+    {
+        if ( s_cellW[i] < 1 || s_cellH[i] < 1 ) continue;
+        const int x = (int)( (float)p.x - s_imgMin[i].x );
+        const int y = (int)( (float)p.y - s_imgMin[i].y );
+        if ( x < 0 || y < 0 || x >= s_cellW[i] || y >= s_cellH[i] ) continue;
+        if ( rttId ) *rttId = i;
+        if ( imgX ) *imgX = x;
+        if ( imgY ) *imgY = y;
+        return true;
+    }
+    return false;
+}
+
+bool ImGuiShell_LastViewport( int *rttId, int *imgX, int *imgY )
+{
+    if ( s_lastRefViewport == RTT_COUNT ) return false;
+    if ( rttId ) *rttId = (int)s_lastRefViewport;
+    if ( imgX ) *imgX = s_lastRefX;
+    if ( imgY ) *imgY = s_lastRefY;
     return true;
 }
 
@@ -539,12 +584,24 @@ static void ImGuiShell_ViewportInput( rttViewport_t id, bool hovered )
             if ( ImGui::IsMouseClicked( b ) )
             {
                 s_inputOwner = id;
+                if ( id == RTT_XY && b == 0 && KiwiRefImage_HandleXYDown( mx, my, flags ) )
+                {
+                    kiwiTook = true;
+                    continue;
+                }
                 if ( kiwiCam && KiwiVP_CameraButtonDown( b, mx, my, io.KeyShift, io.KeyCtrl ) )
                 {
                     kiwiTook = true;
                     continue;
                 }
                 VP_Down( id, hw, b, flags, mx, my );
+                if ( id == RTT_XY && b == 0 )
+                {
+                    s_xyLegacyPress = true;
+                    s_xyLegacyX = mx;
+                    s_xyLegacyY = my;
+                    s_xyLegacyFlags = flags;
+                }
                 s_legacyBtnMask |= ( 1u << b );      // ROUND BU: legacy saw this press
             }
         if ( s_wheel[id] != 0.0f )
@@ -557,6 +614,10 @@ static void ImGuiShell_ViewportInput( rttViewport_t id, bool hovered )
         {
             // §18 hover pick: once per frame, cursor over the image, NO button down.
             KiwiVP_CameraHover( mx, my, !anyDown && !kiwiTook );
+        }
+        else if ( id == RTT_XY )
+        {
+            KiwiRefImage_HoverXY( mx, my, !anyDown && !kiwiTook );
         }
         // ══ KIWI-UX (ROUND BG, ITEM 2) — THE INVISIBLE-CURSOR ROOT CAUSE ══════════
         // USER REPORT: "My mouse went invisible while using the UV editor."
@@ -590,18 +651,27 @@ static void ImGuiShell_ViewportInput( rttViewport_t id, bool hovered )
     }
     else if ( owns )
     {
+        if ( id == RTT_XY )
+            KiwiRefImage_HoverXY( mx, my, false );
         // ROUND BU: the same press-seen filter the unowned branch got in round BG —
         // a button whose press the modern layer claimed (or that was pressed
         // mid-gesture and dispatched nowhere) must not reach the legacy move mask,
         // or CamWnd_MouseMoved arms a view-control drag around the never-seeded
         // m_ptCursor {0,0} pivot (the "cursor jumps to the monitor's top-left and
         // the camera spins" report — see s_legacyBtnMask above).
-        if ( !( kiwiCam && KiwiVP_CameraMouseMove( mx, my ) ) )
+        if ( !( id == RTT_XY && KiwiRefImage_HandleXYMove( mx, my ) )
+          && !( kiwiCam && KiwiVP_CameraMouseMove( mx, my ) ) )
             VP_Move( id, hw, VP_LegacyFlags( flags ), mx, my );
         for ( int b = 0; b < 3; ++b )
             if ( ImGui::IsMouseReleased( b ) )
             {
                 const unsigned int bit = 1u << b;
+                if ( id == RTT_XY && b == 0 && KiwiRefImage_HandleXYUp() )
+                {
+                    s_xyLegacyPress = false;
+                    s_legacyBtnMask &= ~bit;
+                    continue;
+                }
                 if ( kiwiCam && KiwiVP_CameraButtonUp( b, mx, my ) )
                 {
                     s_legacyBtnMask &= ~bit;         // modern owned it; nothing for legacy
@@ -611,18 +681,35 @@ static void ImGuiShell_ViewportInput( rttViewport_t id, bool hovered )
                 // press (CamWnd_OnRButtonUp is a context-menu/Cam_MouseUp path and
                 // must not fire for a press that was swallowed mid-gesture).
                 if ( s_legacyBtnMask & bit )
+                {
+                    const bool imageMarquee = id == RTT_XY && b == 0 && s_xyLegacyPress
+                        && ( g_qeglobals.d_select_mode == sel_areabrush
+                          || g_qeglobals.d_select_mode == sel_areabrush_sub );
                     VP_Up( id, hw, b, VP_LegacyFlags( flags ), mx, my );
+                    if ( imageMarquee )
+                        KiwiRefImage_ApplyRectXY( (float)s_xyLegacyX, (float)s_xyLegacyY,
+                                                  (float)mx, (float)my, mx < s_xyLegacyX,
+                                                  ( s_xyLegacyFlags & MK_SHIFT ) != 0,
+                                                  ( s_xyLegacyFlags & MK_CONTROL ) != 0 );
+                }
+                if ( id == RTT_XY && b == 0 )
+                    s_xyLegacyPress = false;
                 s_legacyBtnMask &= ~bit;
             }
         if ( !io.MouseDown[0] && !io.MouseDown[1] && !io.MouseDown[2] )
         {
             s_inputOwner    = RTT_COUNT;
             s_legacyBtnMask = 0;             // ROUND BU: belt-and-braces for a lost edge
+            s_xyLegacyPress = false;
         }
     }
     else if ( kiwiCam )
     {
         KiwiVP_CameraHover( mx, my, false );           // cursor elsewhere → drop the highlight
+    }
+    else if ( id == RTT_XY )
+    {
+        KiwiRefImage_HoverXY( mx, my, false );
     }
 }
 
@@ -660,11 +747,13 @@ void ImGuiShell_AbortViewportInput()
     }
     else
     {
+        if ( id == RTT_XY ) KiwiRefImage_HandleXYAbort(); // KIWI (REFIMG)
         for ( int b = 0; b < 3; ++b )     // XY/Z/texture: up-handlers just reset drag/button state
             VP_Up( id, hw, b, 0, 0, 0 );
     }
     s_inputOwner    = RTT_COUNT;
     s_legacyBtnMask = 0;                  // ROUND BU: no press survives a teardown
+    s_xyLegacyPress = false;
 }
 
 // ── KIWI-UX (ROUND AB, ITEM 2): THE MISSING RELEASE IS A RELEASE ────────────
@@ -750,9 +839,21 @@ static void ImGuiShell_ReleaseViewportInput()
             if ( KiwiVP_CameraButtonUp( b, mx, my ) )
                 released = true;
         }
+        else if ( id == RTT_XY && b == 0 && KiwiRefImage_HandleXYUp() )
+        {
+            released = true;
+        }
         else if ( s_legacyBtnMask & ( 1u << b ) )   // ROUND BU: only presses legacy saw
         {
+            const bool imageMarquee = id == RTT_XY && b == 0 && s_xyLegacyPress
+                && ( g_qeglobals.d_select_mode == sel_areabrush
+                  || g_qeglobals.d_select_mode == sel_areabrush_sub );
             VP_Up( id, hw, b, 0, mx, my );   // flags 0: every button is physically up
+            if ( imageMarquee )
+                KiwiRefImage_ApplyRectXY( (float)s_xyLegacyX, (float)s_xyLegacyY,
+                                          (float)mx, (float)my, mx < s_xyLegacyX,
+                                          ( s_xyLegacyFlags & MK_SHIFT ) != 0,
+                                          ( s_xyLegacyFlags & MK_CONTROL ) != 0 );
             released = true;
         }
     }
@@ -764,6 +865,7 @@ static void ImGuiShell_ReleaseViewportInput()
     }
     s_inputOwner    = RTT_COUNT;
     s_legacyBtnMask = 0;                     // ROUND BU: no press survives a teardown
+    s_xyLegacyPress = false;
 }
 
 // KIWI-UX (ROUND Y, ITEM 6): the stuck-drag guard, hoisted out of the dispatch tail
@@ -1112,6 +1214,12 @@ static void ImGuiShell_DrawViewportImage( rttViewport_t id, kiwiWindow_t win )
                         imgHovered = false;
                 }
                 s_hovered[id]  = imgHovered;
+                if ( s_hovered[id] && ( id == RTT_CAMERA || id == RTT_XY ) )
+                {
+                    s_lastRefViewport = id;
+                    s_lastRefX = (int)( ImGui::GetIO().MousePos.x - s_imgMin[id].x );
+                    s_lastRefY = (int)( ImGui::GetIO().MousePos.y - s_imgMin[id].y );
+                }
                 // Capture the wheel NOW (valid frame context, before EndFrame zeroes it). The
                 // post-present dispatch consumes s_wheel[id]; reading io.MouseWheel there is
                 // always 0. Item-hover keeps the wheel scoped to the viewport under the cursor.
@@ -1426,6 +1534,7 @@ static void ImGuiShell_BuildDefaultDockLayout( ImGuiID dockId )
     ImGui::DockBuilderDockWindow( "Light",            rightBottom );
     ImGui::DockBuilderDockWindow( "Inspector",         rightBottom ); // KIWI-UX
     ImGui::DockBuilderDockWindow( "Decals",           rightBottom ); // KIWI-UX decal placement
+    ImGui::DockBuilderDockWindow( "Reference Images", rightBottom ); // KIWI (REFIMG)
 
     ImGui::DockBuilderFinish( dockId );
 }
@@ -1574,6 +1683,36 @@ void ImGuiShell_DrawOverlay( IDirect3DDevice9 *device, HWND activeHwnd )
     // primary-surface gate), so the false arm could not be taken.
     const ImGuiID dockId = ImGui::DockSpaceOverViewport();
     s_dockRoot = dockId;                  // KIWI-UX §9: re-dock target for re-opened windows
+
+    // KIWI-UX: the mouse wheel over a dock node's tab bar scrolls its tabs, so tabs
+    // hidden behind the overflow arrows are reachable without clicking through them.
+    // Done before any window submits so this frame's tab layout already uses the new
+    // scroll target; the wheel is consumed so the panel underneath does not scroll too.
+    {
+        ImGuiContext &g = *ImGui::GetCurrentContext();
+        const float wheel = g.IO.MouseWheel;
+        if ( wheel != 0.0f )
+        {
+            for ( int i = 0; i < g.TabBars.GetMapSize(); ++i )
+            {
+                ImGuiTabBar *tb = g.TabBars.TryGetMapData( i );
+                if ( !tb || tb->CurrFrameVisible < g.FrameCount - 1 )
+                    continue;                                   // not laid out last frame
+                if ( !tb->BarRect.Contains( g.IO.MousePos ) )
+                    continue;
+                const float maxScroll = tb->WidthAllTabs - tb->BarRect.GetWidth();
+                if ( maxScroll <= 0.0f )
+                    break;                                      // everything already fits
+                float target = tb->ScrollingTarget - wheel * 60.0f;
+                if ( target < 0.0f )       target = 0.0f;
+                if ( target > maxScroll )  target = maxScroll;
+                tb->ScrollingTarget = target;
+                tb->ScrollingTargetDistToVisibility = 0.0f;
+                g.IO.MouseWheel = 0.0f;
+                break;
+            }
+        }
+    }
     ImGuiShell_BuildDefaultDockLayout( dockId );
 
     if ( s_focusTab[0] )                  // pending hotkey/menu tab focus (O, texture view…)
@@ -1676,6 +1815,10 @@ void ImGuiShell_DrawOverlay( IDirect3DDevice9 *device, HWND activeHwnd )
     {
         extern void KiwiDecal_Draw();     // kiwi_decal.cpp — the Decals dock window
         KiwiDecal_Draw();
+    }
+    { // KIWI (REFIMG): tabbed beside Decals in the same right-hand dock node.
+        extern void KiwiRefImage_Draw();
+        KiwiRefImage_Draw();
     }
     extern void ImGuiPanel_Entity_Draw(); // imgui_panel_entity.cpp
     ImGuiPanel_Entity_Draw(); // KIWI-UX

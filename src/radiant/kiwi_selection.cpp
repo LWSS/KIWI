@@ -8,6 +8,7 @@
 #include "stdafx.h"
 #include <universal/assertive.h>
 #include "qe3.h"
+#include "kiwi_refimage.h"
 #include "kiwi_selection.h"
 
 #include <string.h>
@@ -270,6 +271,8 @@ unsigned Sel_Generation()
 // ─── selection_t mutation ────────────────────────────────────────────────────
 void Sel_Clear( selection_t &sel )
 {
+    // KIWI (REFIMG2): every typed full-clear is also a reference-image clear.
+    KiwiRefImage_Select( -1 );
     if ( sel.items.empty() && !Sel_ItemValid( sel.active ) )
         return;
     sel.items.clear();
@@ -472,6 +475,8 @@ void Sel_NoteLegacyDeselect()
 {
     if ( s_syncing )
         return;                 // Sel_SyncToLegacy's own Select_Deselect(1)
+    // KIWI (REFIMG2): legacy XY/Esc deselects enter through this one adapter.
+    KiwiRefImage_Select( -1 );
     s_dirty      = true;
     s_deselected = true;
 }

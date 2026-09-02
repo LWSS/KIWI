@@ -17,10 +17,12 @@
 #include "kiwi_conselect.h"          // construction selection
 #include "kiwi_hover.h"
 #include "kiwi_pick.h"
+#include "kiwi_refimage.h"
 #include "kiwi_region.h"             // region click/extrude
 #include "kiwi_selection.h"
 #include "kiwi_sun.h"                // the sun helper's glyph is clickable
 
+#include <float.h>
 #include <math.h>
 #include <stdlib.h>                  // abs
 #include <vector>
@@ -534,10 +536,12 @@ namespace
         // Construction candidates compete in screen pixels.  They win on a brush
         // miss or area hit; against a brush vertex/edge, the closer point/line wins.
         // A construction win consumes the click without clearing brush selection.
+        bool constructionCandidate = false;
         {
             kconSelItem_t conItem;
             float         conDist = 0.0f;
             const bool    conHit  = KiwiConSel_PickAt( imgX, imgY, &conItem, &conDist );
+            constructionCandidate = conHit;
             if ( conHit )
             {
                 const bool brushPointish = hit.valid
@@ -547,6 +551,8 @@ namespace
                                   || ( conDist < hit.screenDist );
                 if ( conWins )
                 {
+                    if ( !shift && !ctrl )
+                        KiwiRefImage_Select( -1 );
                     ApplyConClick( conItem, shift, ctrl );
                     return;
                 }
@@ -555,6 +561,37 @@ namespace
             {
                 // With no construction candidate, a plain click clears that store.
                 KiwiConSel_Clear();
+            }
+        }
+
+        // Reference images are object/area targets.  Any brush vertex/edge or any
+        // construction candidate keeps priority.  Against a brush face/object area
+        // hit, compare eye distance and let the nearer surface own the click.
+        if ( !constructionCandidate
+          && ( KiwiSel_GetModeMask() == SEL_MASK_OBJECT
+            || KiwiSel_GetModeMask() == SEL_MASK_EVERYTHING ) )
+        {
+            int image = -1;
+            float imageDist = FLT_MAX;
+            if ( KiwiRefImage_PickAt( imgX, imgY, &image, &imageDist ) )
+            {
+                const bool brushPointish = hit.valid
+                                        && ( hit.item.kind == SEL_VERTEX
+                                          || hit.item.kind == SEL_EDGE );
+                bool imageWins = !hit.valid || !Sel_ItemValid( hit.item );
+                if ( !imageWins && !brushPointish )
+                {
+                    const float dx = hit.point[0] - ray.origin[0];
+                    const float dy = hit.point[1] - ray.origin[1];
+                    const float dz = hit.point[2] - ray.origin[2];
+                    const float brushDist = sqrtf( dx * dx + dy * dy + dz * dz );
+                    imageWins = !( brushDist < imageDist );
+                }
+                if ( imageWins )
+                {
+                    KiwiRefImage_ApplyClick( image, shift, ctrl, true );
+                    return;
+                }
             }
         }
 
@@ -587,7 +624,10 @@ namespace
                 if ( regionWins )
                 {
                     if ( !shift && !ctrl )
+                    {
                         KiwiConSel_Clear();
+                        KiwiRefImage_Select( -1 );
+                    }
                     // Regions expose a toggle primitive, but the click grammar is
                     // add/remove: call it only when that operation changes this one
                     // member.  Ctrl never clears the rest of the region set.
@@ -785,6 +825,7 @@ void KiwiBox_End( int imgX, int imgY )
     // Apply the rect independently to construction geometry: unlike a click, a
     // marquee can legitimately name both brush and construction items.
     KiwiConSel_ApplyRect( r.x0, r.y0, r.x1, r.y1, crossing, s_shift, s_ctrl );
+    KiwiRefImage_ApplyRect( r.x0, r.y0, r.x1, r.y1, crossing, s_shift, s_ctrl );
 }
 
 void KiwiBox_Cancel()

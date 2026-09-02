@@ -978,36 +978,59 @@ namespace
         return best;
     }
 
-    int ScaleHudAxis()
+    // The scale command's constraint, read back from its HUD line: 0 = uniform,
+    // 1 = one axis, 2 = the plane across `*axis` (the two other axes).
+    int ScaleHudConstraint( int *axis )
     {
+        *axis = -1;
         KiwiEditorCommand *cmd = KiwiCmd_Active();
         const char *hud = cmd ? cmd->HudStatus() : 0;
         if ( !hud )
-            return -1;
-        const char *axis = strstr( hud, "axis " );
-        if ( !axis )
-            return -1;
-        axis += 5;
-        if ( *axis == 'X' ) return 0;
-        if ( *axis == 'Y' ) return 1;
-        if ( *axis == 'Z' ) return 2;
-        return -1;
+            return 0;
+        int mode = 1;
+        const char *tag = strstr( hud, "axis " );
+        if ( !tag )
+        {
+            tag  = strstr( hud, "plane " );
+            mode = 2;
+        }
+        if ( !tag )
+            return 0;
+        tag = strchr( tag, ' ' ) + 1;
+        if      ( *tag == 'X' ) *axis = 0;
+        else if ( *tag == 'Y' ) *axis = 1;
+        else if ( *tag == 'Z' ) *axis = 2;
+        else return 0;
+        return mode;
     }
 
+    // X/Y/Z key = that axis, Shift (mods bit 0) + key = the plane across it; the same
+    // constraint again releases to uniform (HandleAxisKey in kiwi_transform.cpp).
     void AimScaleAxis( int axis )
     {
         KiwiEditorCommand *cmd = KiwiCmd_Active();
-        if ( !cmd || axis < 0 || axis > 2 || ScaleHudAxis() == axis )
+        int cur;
+        if ( !cmd || axis < 0 || axis > 2 || ( ScaleHudConstraint( &cur ) == 1 && cur == axis ) )
             return;
         cmd->KeyDown( 0x58 + axis, 0 );
+    }
+
+    void AimScalePlane( int axis )
+    {
+        KiwiEditorCommand *cmd = KiwiCmd_Active();
+        int cur;
+        if ( !cmd || axis < 0 || axis > 2 || ( ScaleHudConstraint( &cur ) == 2 && cur == axis ) )
+            return;
+        cmd->KeyDown( 0x58 + axis, 1 );
     }
 
     void AimScaleUniform()
     {
         KiwiEditorCommand *cmd = KiwiCmd_Active();
-        const int axis = ScaleHudAxis();
-        if ( cmd && axis >= 0 )
-            cmd->KeyDown( 0x58 + axis, 0 );
+        int cur;
+        const int mode = ScaleHudConstraint( &cur );
+        if ( cmd && mode != 0 && cur >= 0 )
+            cmd->KeyDown( 0x58 + cur, mode == 2 ? 1u : 0u );   // repeat = release
     }
 
     void PushRingAngle()
@@ -1082,9 +1105,11 @@ bool KiwiGizmo_MouseDown( int imgX, int imgY )
         else
         {
             if ( hit >= KGZ_AXIS_X && hit <= KGZ_AXIS_Z )
-                AimScaleAxis( hit - KGZ_AXIS_X );
+                AimScaleAxis( hit - KGZ_AXIS_X );          // one axis
+            else if ( hit >= KGZ_PLANE_X && hit <= KGZ_PLANE_Z )
+                AimScalePlane( hit - KGZ_PLANE_X );        // two axes (the square's plane)
             else
-                AimScaleUniform();
+                AimScaleUniform();                         // the centre ball
         }
 
         s_grabbed = hit;

@@ -8207,3 +8207,38 @@ the CAMERA CONTRACT, the disposition table for every round-BK camera change, and
   supersedes the earlier "smooth seams across patch borders" caveat. T-junctions
   (a coarse chunk next to a denser one) still crack between points; Tessellate a
   region to one density, or let the expander build chunks (it matches per-axis cells).
+
+## Round 2026-09-02 — tool swap / Esc / fit-on-load / image undo — UNBUILT, verify on next build
+
+- **Why the fit never happened on `powerplant.map`:** the map has zero brushes (it is
+  construction lines + pasted pictures so far); the fit only walked `active_brushes`
+  and returned before logging.  It now counts construction objects and reference
+  images as well (`Radiant_FitXYToMap`, mainfrm.cpp).  Proof script:
+  `tools\kiwitest\scripts\fit_on_load.kt`.
+- **Reference-image undo — what the journal does by design:** a G / R / S gesture on
+  an image is a store snapshot (`KiwiRefImage_MoveBegin` → `MoveCommit`); the record
+  is minted only at COMMIT (RMB / Enter / a tool swap).  A ring or handle release
+  only PAUSES the gesture, and Ctrl+Z on a paused gesture is a CANCEL (exact revert,
+  no ticket).  Ctrl+Z after a commit pops the reference-image ticket through
+  `KiwiUndo_Undo`.  If the user still cannot undo an image edit after this build,
+  run `tools\kiwitest\scripts\refimage_transform_undo.kt` (it exercises exactly that
+  path without a mouse) and report which expectation fails.
+- **Test-mode `undo` vs `editor_undo`:** the older `undo` verb calls the classic
+  `Undo_Undo` directly and never sees KIWI-domain records; `editor_undo` dispatches
+  ID_EDIT_UNDO (journal first).  Image scripts must use `editor_undo`.
+- **Swap during a held gizmo drag:** the gizmo's grab state survives a G/R/S swap;
+  the next mouse move feeds the new command, release pauses it.  Ring drags drop
+  their grab as soon as Rotate is no longer the active command.
+- **Image undo root cause (found 2026-09-02, UNBUILT):** the Reference Images
+  Inspector's continuous widgets (Origin, Width, Height, Rotation, Opacity, Layer
+  order, Name) tested `IsItemDeactivatedAfterEdit` only inside the "value changed"
+  branch; a slider's release frame reports no change, so the pending edit never
+  closed into a journal record and Ctrl+Z skipped past it.  `EditSettle()` now polls
+  the release after every widget and a per-frame safety net commits any pending panel
+  edit whose widget is no longer active.  The modal G/R/S + ring path was verified
+  end-to-end on the 10:01 build by `refimage_transform_undo.kt` (all 20 expectations
+  pass).
+- **Console spam while moving a construction line:** `KiwiRegion_DrawFills` reported
+  "NO region derived" + "loop gap" once per store generation, and a live G/R/S bumps
+  the generation every mouse move.  The report is now skipped while a command is
+  active and fires once when the gesture settles.

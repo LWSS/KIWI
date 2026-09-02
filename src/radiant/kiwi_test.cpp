@@ -7,6 +7,8 @@
 #include "kiwi_command.h"
 #include "radiant_frame.h"
 #include "mainfrm.h"
+#include "kiwi_refimage.h"     // refimage verbs + expectations (test mode)
+#include "xywnd.h"             // expect xyview: Ed_ActiveXY / ED_VIEW_*
 
 #include <algorithm>
 #include <cctype>
@@ -752,6 +754,95 @@ static void ExecuteExpect( const ScriptLine &line )
                       std::to_string( expectedInt ) );
         return;
     }
+    if ( subject == "images" )
+    {
+        if ( w.size() != 3 || !ParseInt( w[2], expectedInt ) )
+        {
+            ScriptError( line, "expect images requires one integer" );
+            return;
+        }
+        actualInt = KiwiRefImage_Count();
+        ExpectResult( line, actualInt == expectedInt, std::to_string( actualInt ),
+                      std::to_string( expectedInt ) );
+        return;
+    }
+    if ( subject == "image" )
+    {
+        // expect image <i> origin x y z | rotation <deg> | size w h | axis xy|xz|yz
+        int index = -1;
+        if ( w.size() < 5 || !ParseInt( w[2], index ) )
+        {
+            ScriptError( line, "expect image <index> origin x y z | rotation <deg> | size w h | axis xy|xz|yz" );
+            return;
+        }
+        const krefImage_t *r = KiwiRefImage_At( index );
+        if ( !r )
+        {
+            ExpectResult( line, false, "no such image", "image " + w[2] );
+            return;
+        }
+        const std::string field = Lower( w[3] );
+        if ( field == "axis" )
+        {
+            const std::string plane = Lower( w[4] );
+            static const char *const names[3] = { "yz", "xz", "xy" };
+            const char *have = ( r->axis >= 0 && r->axis < 3 ) ? names[r->axis] : "?";
+            ExpectResult( line, w.size() == 5 && plane == have, have, plane );
+            return;
+        }
+        float want[3] = { 0.0f, 0.0f, 0.0f }, have[3] = { 0.0f, 0.0f, 0.0f };
+        int n = 0;
+        if ( field == "origin" && w.size() == 7 )
+        {
+            n = 3;
+            for ( int k = 0; k < 3; ++k ) have[k] = r->origin[k];
+        }
+        else if ( field == "rotation" && w.size() == 5 )
+        {
+            n = 1;
+            have[0] = r->rotation;
+        }
+        else if ( field == "size" && w.size() == 6 )
+        {
+            n = 2;
+            have[0] = r->width;
+            have[1] = r->height;
+        }
+        else
+        {
+            ScriptError( line, "expect image: unknown field '%s' or wrong argument count", w[3].c_str() );
+            return;
+        }
+        for ( int k = 0; k < n; ++k )
+            if ( !ParseFloat( w[(size_t)k + 4], want[k] ) )
+            {
+                ScriptError( line, "expect image %s argument %d is not numeric", field.c_str(), k + 1 );
+                return;
+            }
+        bool pass = true;
+        for ( int k = 0; k < n; ++k )
+            if ( fabsf( have[k] - want[k] ) > 0.05f )
+                pass = false;
+        char actual[96], expected[96];
+        _snprintf( actual,   sizeof( actual ),   "%g %g %g", have[0], have[1], have[2] );
+        _snprintf( expected, sizeof( expected ), "%g %g %g", want[0], want[1], want[2] );
+        actual[sizeof( actual ) - 1] = expected[sizeof( expected ) - 1] = 0;
+        ExpectResult( line, pass, actual, expected );
+        return;
+    }
+    if ( subject == "xyview" )
+    {
+        if ( w.size() != 3 )
+        {
+            ScriptError( line, "expect xyview top|front|side" );
+            return;
+        }
+        const std::string want = Lower( w[2] );
+        const int vt = Ed_ActiveXY()->m_nViewType;
+        const char *have = vt == ED_VIEW_XY ? "top" : vt == ED_VIEW_XZ ? "front" : "side";
+        ExpectResult( line, want == have, have, want );
+        return;
+    }
     if ( subject == "console" )
     {
         if ( w.size() != 3 )
@@ -935,6 +1026,84 @@ static void ExecuteSelect( const ScriptLine &line )
         return;
     }
     ScriptError( line, "unknown select mode '%s'", w[1].c_str() );
+}
+
+// Reference-image verbs (kiwi_refimage.h).  The transform verbs go through the same
+// MoveBegin / apply / MoveCommit arms the modal G / R / S tools use, so each one is
+// exactly one reference-image record in the unified undo journal (editor_undo).
+// `add` mirrors the sidecar loader: no undo record, file path map-relative.
+static void ExecuteRefImage( const ScriptLine &line )
+{
+    const std::vector<std::string> &w = line.words;
+    if ( w.size() < 2 ) { ScriptError( line, "refimage requires a verb" ); return; }
+    const std::string verb = Lower( w[1] );
+    if ( verb == "add" )
+    {
+        // refimage add <map-relative file> [xy|xz|yz] [x y z] [w h]
+        if ( w.size() != 3 && w.size() != 4 && w.size() != 7 && w.size() != 9 )
+        { ScriptError( line, "refimage add <file> [xy|xz|yz] [x y z] [w h]" ); return; }
+        krefImage_t r;
+        r.file = w[2];
+        if ( w.size() >= 4 )
+        {
+            const std::string plane = Lower( w[3] );
+            r.axis = plane == "xy" ? 2 : plane == "xz" ? 1 : plane == "yz" ? 0 : -1;
+            if ( r.axis < 0 ) { ScriptError( line, "refimage add plane must be xy, xz, or yz" ); return; }
+        }
+        if ( w.size() >= 7 )
+            for ( int k = 0; k < 3; ++k )
+                if ( !ParseFloat( w[(size_t)k + 4], r.origin[k] ) )
+                { ScriptError( line, "refimage add origin is not numeric" ); return; }
+        if ( w.size() == 9 && ( !ParseFloat( w[7], r.width ) || !ParseFloat( w[8], r.height ) ) )
+        { ScriptError( line, "refimage add size is not numeric" ); return; }
+        const int index = KiwiRefImage_Add( r );
+        LogFormat( "REFIMAGE", "added #%d %s", index, w[2].c_str() );
+        g_nUpdateBits = -1;
+        return;
+    }
+    if ( verb == "select" || verb == "delete" )
+    {
+        int index = -1;
+        if ( w.size() != 3 || !ParseInt( w[2], index ) || index < 0 || index >= KiwiRefImage_Count() )
+        { ScriptError( line, "refimage %s requires an existing image index", verb.c_str() ); return; }
+        if ( verb == "select" ) KiwiRefImage_Select( index );
+        else                    KiwiRefImage_DeleteAt( index );
+        g_nUpdateBits = -1;
+        return;
+    }
+    if ( verb == "move" || verb == "rotate" || verb == "scale" )
+    {
+        // Acts on the SELECTED image: move dx dy dz | rotate <deg about its plane normal>
+        // | scale <uniform factor about its own origin>.
+        float v[3] = { 0.0f, 0.0f, 0.0f };
+        const size_t need = verb == "move" ? 5 : 3;
+        if ( w.size() != need )
+        { ScriptError( line, "refimage move dx dy dz | rotate <deg> | scale <factor>" ); return; }
+        for ( size_t k = 0; k + 2 < need; ++k )
+            if ( !ParseFloat( w[k + 2], v[k] ) )
+            { ScriptError( line, "refimage %s argument %d is not numeric", verb.c_str(), (int)k + 1 ); return; }
+        const krefImage_t *r = KiwiRefImage_At( KiwiRefImage_Selected() );
+        if ( !r ) { ScriptError( line, "refimage %s requires a selected image", verb.c_str() ); return; }
+        if ( !KiwiRefImage_CanMove() )
+        { ScriptError( line, "refimage %s: the selected image is locked or hidden", verb.c_str() ); return; }
+        const int axis = r->axis;
+        float pivot[3];
+        if ( !KiwiRefImage_MoveBegin( pivot ) )
+        { ScriptError( line, "refimage %s: MoveBegin refused", verb.c_str() ); return; }
+        if ( verb == "move" )
+            KiwiRefImage_MoveApply( v );
+        else if ( verb == "rotate" )
+            KiwiRefImage_RotateApply( pivot, axis, v[0] );
+        else
+        {
+            const float f[3] = { v[0], v[0], v[0] };
+            KiwiRefImage_ScaleApply( pivot, f );
+        }
+        KiwiRefImage_MoveCommit();
+        g_nUpdateBits = -1;
+        return;
+    }
+    ScriptError( line, "unknown refimage verb '%s'", w[1].c_str() );
 }
 
 static void ExecuteLine( const ScriptLine &line )
@@ -1135,6 +1304,23 @@ static void ExecuteLine( const ScriptLine &line )
         // Patch_Thicken is its UI-independent core and owns its legacy undo record.
         Patch_Thicken( amount, (char)seam );
         g_nUpdateBits = -1;
+        return;
+    }
+    if ( command == "refimage" ) { ExecuteRefImage( line ); return; }
+    if ( command == "editor_undo" || command == "editor_redo" )
+    {
+        // The editor's own Ctrl+Z / Ctrl+Y route (ID_EDIT_UNDO / ID_EDIT_REDO): the
+        // unified journal first — construction, visibility, reference images — with
+        // the classic brush stack as its fallback.  `undo` above stays the raw classic
+        // stack so the older brush scripts keep their exact semantics.
+        int count = 1;
+        if ( w.size() > 2 || ( w.size() == 2 && ( !ParseInt( w[1], count ) || count < 0 ) ) )
+        { ScriptError( line, "%s accepts one optional non-negative count", command.c_str() ); return; }
+        const unsigned int id = command == "editor_undo" ? 57643u : 57644u;
+        for ( int i = 0; i < count; ++i )
+            Radiant_DispatchCommandDirect( id );
+        g_nUpdateBits = -1;
+        UpdateSelection( -1, nullptr );
         return;
     }
     if ( command == "expect" ) { ExecuteExpect( line ); return; }

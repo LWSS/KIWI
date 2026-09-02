@@ -18,6 +18,7 @@
 #include "kiwi_region.h"
 #include "kiwi_arrange.h"           // planar-arrangement pass
 #include "kiwi_camera.h"            // KiwiCam_Ortho winding-side rule
+#include "kiwi_command.h"           // KiwiCmd_Active: no derivation report mid-gesture
 #include "kiwi_construct.h"
 #include "kiwi_lines.h"             // shared fill-rendering constraints
 #include "kiwi_pick.h"
@@ -1048,8 +1049,11 @@ void KiwiRegion_DrawFills( int highlightIndex )
 
     if ( regions.empty() )
     {
-        // Report an unclosed store once per generation, with its nearest gap.
-        if ( KiwiCon_Count() > 0 )
+        // Report an unclosed store once per generation, with its nearest gap — but
+        // not while a live gesture (G/R/S on construction) bumps the generation every
+        // mouse move; that made the pair of lines scroll the console per frame.  The
+        // report fires once when the gesture ends and the store settles.
+        if ( KiwiCon_Count() > 0 && !KiwiCmd_Active() )
         {
             static unsigned s_lastEmptyGen = 0xFFFFFFFFu;
             if ( s_lastEmptyGen != KiwiCon_Generation() )

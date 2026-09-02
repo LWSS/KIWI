@@ -41,6 +41,7 @@
 #include "kiwi_numeric.h"
 #include "kiwi_patchverts.h"
 #include "kiwi_region.h"
+#include "kiwi_refimage.h"
 #include "kiwi_selection.h"
 #include "kiwi_selext.h"
 #include "kiwi_snap.h"
@@ -68,7 +69,7 @@ namespace
     // mutating selection. SECTION and SUN need distinct release/abort paths.
     enum kgesture_t { KG_NONE = 0, KG_ORBIT, KG_MARQUEE, KG_COMMAND, KG_CONSUMED,
                       KG_LOOK, KG_PAN, KG_GIZMO, KG_CMD_MARQUEE, KG_SECTION,
-                      KG_SUN, KG_DROP, KG_GRASS, KG_TERRAIN, KG_DECAL };
+                      KG_SUN, KG_DROP, KG_GRASS, KG_REFIMG, KG_TERRAIN, KG_DECAL };
 
     // The sticky RMB menu-drag latch uses tighter slop than LMB selection so an
     // intended camera drag cannot become a menu click after returning near its press.
@@ -340,6 +341,16 @@ bool KiwiVP_CameraButtonDown( int btn, int imgX, int imgY, bool shift, bool ctrl
 {
     if ( s_gesture != KG_NONE )
         return false;
+
+    // KIWI (REFIMG): only a hit is consumed; misses still reach normal geometry tools.
+    if ( btn == 0 && KiwiRefImage_IsArmed()
+      && KiwiRefImage_HandleCameraDown( imgX, imgY, shift ) )
+    {
+        KiwiHover_Clear();
+        s_lastX = imgX; s_lastY = imgY;
+        s_gesture = KG_REFIMG; s_gestureBtn = btn;
+        return true;
+    }
 
     // KIWI-UX: an armed Terrain Sculpt owns bare LMB (Shift/Ctrl are its modifiers) and
     // an armed Decals tool owns bare LMB, both ahead of every camera handle, command,
@@ -616,6 +627,12 @@ bool KiwiVP_CameraMouseMove( int imgX, int imgY )
         KiwiTerrain_HandleDrag( imgX, imgY );
         return true;
     }
+    if ( s_gesture == KG_REFIMG )
+    {
+        s_lastX = imgX; s_lastY = imgY;
+        KiwiRefImage_HandleCameraDrag( imgX, imgY );
+        return true;
+    }
     if ( s_gesture == KG_DECAL )
         return true;                     // click-to-place: nothing to drag
 
@@ -725,6 +742,8 @@ bool KiwiVP_CameraButtonUp( int btn, int imgX, int imgY )
 
     if ( s_gesture == KG_GRASS )
         KiwiGrass_HandleUp();
+    else if ( s_gesture == KG_REFIMG )
+        KiwiRefImage_HandleCameraUp();
     else if ( s_gesture == KG_TERRAIN )
         KiwiTerrain_HandleUp();
     else if ( s_gesture == KG_DECAL )
@@ -801,6 +820,8 @@ bool KiwiVP_CameraWheel( float steps, int imgX, int imgY )
 
 void KiwiVP_CameraHover( int imgX, int imgY, bool over )
 {
+    // KIWI (REFIMG): armed-only hover; the module is inert when disarmed.
+    KiwiRefImage_HoverCamera( imgX, imgY, over && s_gesture == KG_NONE );
     // The stroke path updates its own cursor; every other gesture hides the armed ring.
     if ( s_gesture != KG_GRASS )
         KiwiGrass_Hover( imgX, imgY, over && s_gesture == KG_NONE );
@@ -854,6 +875,8 @@ bool KiwiVP_CameraAbort()
         return false;
     if ( s_gesture == KG_GRASS )
         KiwiGrass_HandleAbort();
+    else if ( s_gesture == KG_REFIMG )
+        KiwiRefImage_HandleCameraAbort();
     else if ( s_gesture == KG_TERRAIN )
         KiwiTerrain_HandleAbort();
     else if ( s_gesture == KG_DECAL )

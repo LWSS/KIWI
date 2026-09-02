@@ -10,6 +10,7 @@
 #include "kiwi_command.h"
 #include "kiwi_construct.h"
 #include "kiwi_pick.h"
+#include "kiwi_refimage.h"       // Unhide All also reveals hidden reference images
 #include "kiwi_region.h"
 #include "kiwi_selection.h"
 
@@ -26,12 +27,15 @@ namespace
 {
     std::vector<kconSelItem_t> s_sel;
 
-    // Move baselines store world-space points plus the object's plane origin.
+    // Transform baselines store the object's plane origin, WORLD points, and (for
+    // rotate/scale) the whole parametric frame at Begin.
     struct moveBase_t
     {
         int                object;
         float              origin[3];   // the object's plane origin at Begin
         std::vector<float> pts;         // its WORLD points at Begin
+        kconPlane_t        plane;       // full frame at Begin (rotate needs u/v/normal)
+        float              radius;      // parametric radius at Begin
     };
     std::vector<moveBase_t> s_moveBase;
     bool                    s_moveOpen = false;
@@ -880,7 +884,9 @@ bool KiwiConSel_MoveBegin( float outRef[3] )
         b.object = objs[i];
         for ( int k = 0; k < 3; ++k )
             b.origin[k] = o->plane.origin[k];
-        b.pts = o->pts;
+        b.pts    = o->pts;
+        b.plane  = o->plane;
+        b.radius = o->radius;
         s_moveBase.push_back( b );
 
         const int anchors = KiwiCon_AnchorCount( *o );
@@ -941,6 +947,111 @@ void KiwiConSel_MoveApply( const float delta[3] )
                 o->pts[k + 1] = b.pts[k + 1] + delta[1];
                 o->pts[k + 2] = b.pts[k + 2] + delta[2];
             }
+    }
+    KiwiCon_NoteMutated();
+}
+
+namespace
+{
+    // Rotate `p` about the world axis `axis` through `pivot` (right-hand rule).
+    void RotateAboutAxis( const float pivot[3], int axis, float c, float sn,
+                          const float in[3], float out[3] )
+    {
+        const int i = ( axis + 1 ) % 3, j = ( axis + 2 ) % 3;
+        const float di = in[i] - pivot[i], dj = in[j] - pivot[j];
+        out[axis] = in[axis];
+        out[i]    = pivot[i] + di * c - dj * sn;
+        out[j]    = pivot[j] + di * sn + dj * c;
+    }
+
+    void RotateVector( int axis, float c, float sn, const float in[3], float out[3] )
+    {
+        static const float zero[3] = { 0.0f, 0.0f, 0.0f };
+        RotateAboutAxis( zero, axis, c, sn, in, out );
+    }
+
+    // The baseline must still describe the store; otherwise abandon the gesture.
+    bool BaselineValid( const char *what )
+    {
+        for ( size_t i = 0; i < s_moveBase.size(); ++i )
+        {
+            const kconObject_t *chk = KiwiCon_At( s_moveBase[i].object );
+            if ( chk && chk->pts.size() != s_moveBase[i].pts.size() )
+            {
+                Sys_Printf( "%s: the construction store changed under the gesture — "
+                            "%s abandoned.\n", what, what );
+                KiwiConSel_MoveCancel();
+                return false;
+            }
+        }
+        return true;
+    }
+}
+
+void KiwiConSel_RotateApply( const float pivot[3], int axis, float degrees )
+{
+    if ( !s_moveOpen || !pivot || axis < 0 || axis > 2 )
+        return;
+    if ( !BaselineValid( "Rotate" ) )
+        return;
+    // Negative: the ported Select_RotateAxis turns the other way for the same degrees,
+    // and the ring feeds both, so construction must spin like brushes do.
+    const float rad = -degrees * KCON_DEG2RAD;
+    const float c = cosf( rad ), sn = sinf( rad );
+    for ( size_t i = 0; i < s_moveBase.size(); ++i )
+    {
+        const moveBase_t &b = s_moveBase[i];
+        kconObject_t *o = KiwiCon_MutableAt( b.object );
+        if ( !o )
+            continue;
+        // Rigid frame rotation keeps circles/arcs parametric: the origin orbits the
+        // pivot and the basis vectors turn with it (centre/radius/angles unchanged).
+        RotateAboutAxis( pivot, axis, c, sn, b.plane.origin, o->plane.origin );
+        RotateVector( axis, c, sn, b.plane.normal, o->plane.normal );
+        RotateVector( axis, c, sn, b.plane.u,      o->plane.u );
+        RotateVector( axis, c, sn, b.plane.v,      o->plane.v );
+        if ( o->pts.size() == b.pts.size() )
+            for ( size_t k = 0; k + 2 < b.pts.size(); k += 3 )
+                RotateAboutAxis( pivot, axis, c, sn, &b.pts[k], &o->pts[k] );
+    }
+    KiwiCon_NoteMutated();
+}
+
+void KiwiConSel_ScaleApply( const float pivot[3], const float factor[3] )
+{
+    if ( !s_moveOpen || !pivot || !factor )
+        return;
+    if ( !BaselineValid( "Scale" ) )
+        return;
+    for ( size_t i = 0; i < s_moveBase.size(); ++i )
+    {
+        const moveBase_t &b = s_moveBase[i];
+        kconObject_t *o = KiwiCon_MutableAt( b.object );
+        if ( !o )
+            continue;
+        for ( int k = 0; k < 3; ++k )
+            o->plane.origin[k] = pivot[k] + ( b.plane.origin[k] - pivot[k] ) * factor[k];
+        if ( o->pts.size() == b.pts.size() )
+            for ( size_t k = 0; k + 2 < b.pts.size(); k += 3 )
+                for ( int a = 0; a < 3; ++a )
+                    o->pts[k + a] = pivot[a] + ( b.pts[k + a] - pivot[a] ) * factor[a];
+        if ( KiwiCon_IsParametric( *o ) )
+        {
+            // A circle cannot become an ellipse: use the mean factor of the two world
+            // axes that carry most of the plane (weighted by the basis vectors), so a
+            // uniform scale is exact and an axis scale still grows the ring sensibly.
+            float wsum = 0.0f, fsum = 0.0f;
+            for ( int a = 0; a < 3; ++a )
+            {
+                const float w = b.plane.u[a] * b.plane.u[a] + b.plane.v[a] * b.plane.v[a];
+                wsum += w;
+                fsum += w * factor[a];
+            }
+            const float f = wsum > 1.0e-6f ? fsum / wsum : factor[0];
+            o->radius = b.radius * ( f > 0.0f ? f : -f );
+            if ( o->radius < 1.0e-3f )
+                o->radius = 1.0e-3f;
+        }
     }
     KiwiCon_NoteMutated();
 }
@@ -1007,9 +1118,18 @@ bool KiwiConSel_DispatchInstant( unsigned int cmdId )
     case KIWI_CMD_CONSTRUCT_UNHIDE:
     {
         const int n = KiwiCon_UnhideAll();
-        if ( n > 0 ) Sys_Printf( "Construction: unhid %i object%s.\n",
-                                 n, ( n == 1 ) ? "" : "s" );
-        else         Sys_Printf( "Construction: nothing is hidden.\n" );
+        int images = 0;
+        for ( int i = 0; i < KiwiRefImage_Count(); ++i )
+        {
+            const krefImage_t *img = KiwiRefImage_At( i );
+            if ( img && img->hidden && KiwiRefImage_SetHidden( i, false ) )
+                ++images;
+        }
+        if ( n > 0 || images > 0 )
+            Sys_Printf( "Construction: unhid %i object%s and %i reference image%s.\n",
+                        n, ( n == 1 ) ? "" : "s", images, ( images == 1 ) ? "" : "s" );
+        else
+            Sys_Printf( "Construction: nothing is hidden.\n" );
         g_nUpdateBits |= 1;
         return true;
     }

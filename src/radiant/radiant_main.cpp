@@ -270,6 +270,13 @@ static LRESULT CALLBACK Radiant_FrameWndProc( HWND hwnd, UINT msg, WPARAM wParam
     // kiwi_import.h D-BE-J.
     case WM_DROPFILES:
         {
+            // KIWI (REFIMG): viewport image drops become editor-only reference planes.
+            POINT dropPoint = { 0, 0 };
+            ::DragQueryPoint( (HDROP)wParam, &dropPoint );
+            ::ClientToScreen( hwnd, &dropPoint );
+            extern bool KiwiRefImage_HandleDropFiles( void *hDropOpaque, int screenX, int screenY );
+            if ( KiwiRefImage_HandleDropFiles( (void *)wParam, dropPoint.x, dropPoint.y ) )
+                return 0;
             // Block-scope extern + a local id constant, the same shape every other KIWI
             // hook in this file takes: kiwi_command.h cannot be included here (it pulls in
             // kiwi_pick.h / kiwi_snap.h, which need qe3.h, which this shell file

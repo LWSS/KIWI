@@ -23,6 +23,7 @@
 #include "kiwi_numeric.h"
 #include "kiwi_patchfillet.h"        // KiwiFillet_CarryOnPlaneMove
 #include "kiwi_pick.h"
+#include "kiwi_refimage.h"
 #include "kiwi_selection.h"
 #include "kiwi_snap.h"
 #include "kiwi_units.h"
@@ -667,6 +668,8 @@ namespace
         // permitted.
         bool HandleAxisKey( int vk, unsigned mods, bool allowPlane )
         {
+            if ( mods & 6u )                      // Ctrl / Alt chords are never axis locks
+                return false;
             int axis = -1;
             if      ( vk == 0x58 ) axis = 0;      // X
             else if ( vk == 0x59 ) axis = 1;      // Y
@@ -898,12 +901,15 @@ namespace
         kiwiSnapCtx_t SnapContext() const override
         { return m_pivotPlacing ? KSNAPCTX_ALWAYS : KSNAPCTX_TRANSFORM; }
 
-        // Transform swapping is blocked during pivot placement or construction moves.
-        // A moved face push cannot yield because its commit path deselects the face.
+        // Transform swapping is blocked only during pivot placement and drop mode.
+        // Construction and reference-image moves swap like brush moves: Rotate and
+        // Scale serve both stores, and Commit closes the store snapshot before the
+        // next tool opens its own.  A moved face push cannot yield because its
+        // commit path deselects the face.
         bool CanSwapTo( int commandId ) const override
         {
             (void)commandId;
-            if ( m_pivotPlacing || m_construct )
+            if ( m_pivotPlacing || m_dropActive )
                 return false;
             if ( m_kind == SEL_FACE && GestureMoved() )
                 return false;
@@ -1016,6 +1022,18 @@ namespace
                     // A session pivot overrides MoveBegin's construction centroid once and stays
                     // latched. This preserves live reference == m_ref + m_total for absolute snaps.
                     m_pivotOverridden = PivotActive( m_ref );
+                    CamWnd_BuildMatrix();
+                    Copy3( Ed_Camera()->vpn, m_planeN );
+                    LatchMapStart();
+                    UpdateHud();
+                    return true;
+                }
+                const krefImage_t *image = KiwiRefImage_At( KiwiRefImage_Selected() );
+                if ( image && KiwiRefImage_CanMove() && KiwiRefImage_MoveBegin( m_ref ) )
+                {
+                    m_refImage = true;
+                    m_refImageAxis = image->axis;
+                    m_kind = SEL_OBJECT;
                     CamWnd_BuildMatrix();
                     Copy3( Ed_Camera()->vpn, m_planeN );
                     LatchMapStart();
@@ -1185,6 +1203,14 @@ namespace
                 return;
             }
 
+            if ( m_refImage )
+            {
+                KiwiRefImage_MoveCommit();
+                Reset();
+                g_nUpdateBits = -1;
+                return;
+            }
+
             // DELIBERATE DIVERGENCE from Brush_MoveVertex (brush.cpp 0x471C30): rebuild
             // touched brush windings once at commit because the ported solver leaves bounds
             // stale. Face pushes deselect after commit; object/edge/vertex moves remain
@@ -1313,6 +1339,8 @@ namespace
             m_dropUnits.clear();
             m_dropSupportCorners.clear();
             m_construct    = false;
+            m_refImage     = false;
+            m_refImageAxis = 2;
             m_faces.clear();
             m_edges.clear();
             m_verts.clear();
@@ -1398,6 +1426,11 @@ namespace
             if ( m_construct )
             {
                 KiwiConSel_MoveCancel();
+                return;
+            }
+            if ( m_refImage )
+            {
+                KiwiRefImage_MoveCancel();
                 return;
             }
 
@@ -1899,6 +1932,16 @@ namespace
             }
         }
 
+        void ConstrainRefImage( float *d ) const
+        {
+            if ( !m_refImage )
+                return;
+            // Free/plane movement stays in the image plane.  An explicit lock to
+            // the plane normal is the sole way to change its depth.
+            if ( !( m_con == CON_AXIS && m_axis == m_refImageAxis ) )
+                d[m_refImageAxis] = 0.0f;
+        }
+
         // Direction for a bare typed move scalar.
         bool NumericDirection( float *out )
         {
@@ -1910,13 +1953,24 @@ namespace
             }
             float d[3];
             Copy3( m_total, d );
-            if ( m_con == CON_PLANE )
+            if ( m_refImage )
+            {
+                d[m_refImageAxis] = 0.0f;
+                if ( m_con == CON_PLANE ) d[m_axis] = 0.0f;
+            }
+            else if ( m_con == CON_PLANE )
                 d[m_axis] = 0.0f;
             else
                 d[2] = 0.0f;                    // project on the ground plane (Z=0)
             if ( !Norm3( d ) )
             {
-                out[0] = 1.0f; out[1] = out[2] = 0.0f;    // documented fallback: +X
+                out[0] = out[1] = out[2] = 0.0f;
+                int fallback = 0;
+                if ( m_refImage )
+                    while ( fallback < 2 && ( fallback == m_refImageAxis
+                          || ( m_con == CON_PLANE && fallback == m_axis ) ) )
+                        ++fallback;
+                out[fallback] = 1.0f;
                 return true;
             }
             Copy3( d, out );
@@ -2018,6 +2072,7 @@ namespace
                 Add3( m_lockBase, d, total );
             }
             // Publish this frame's mouse total before NumericDirection reads it.
+            ConstrainRefImage( total );
             Copy3( total, m_total );
 
             // Recompute the major-grid HUD flag from scratch each frame.
@@ -2121,6 +2176,10 @@ namespace
                 }
             }
 
+            // Geometry/lattice snapping may have filled the plane-normal component
+            // after the cursor delta was projected, so enforce the image plane once
+            // more at the final publication point.
+            ConstrainRefImage( total );
             Copy3( total, m_total );
             Apply();
             UpdateHud();
@@ -2291,6 +2350,14 @@ namespace
                 KiwiConSel_MoveApply( m_total );
                 m_invalid = false;
                 m_why     = 0;
+                g_nUpdateBits |= 1;
+                return;
+            }
+            if ( m_refImage )
+            {
+                KiwiRefImage_MoveApply( m_total );
+                m_invalid = false;
+                m_why = 0;
                 g_nUpdateBits |= 1;
                 return;
             }
@@ -2536,6 +2603,7 @@ namespace
                 return;
             }
             const char *what = m_construct               ? "construction"
+                             : m_refImage                ? "image"
                              : ( m_kind == SEL_OBJECT ) ? "objects"
                              : ( m_kind == SEL_FACE   ) ? "faces"
                              : ( m_kind == SEL_EDGE   ) ? "edges" : "verts";
@@ -2625,6 +2693,8 @@ namespace
         // Construction is a separate store-backed move arm, not another sel_kind_t;
         // it shares only the object cursor mapping.
         bool       m_construct = false;
+        bool       m_refImage = false;
+        int        m_refImageAxis = 2;
 
         bool        m_dropPending = false;
         selbrush_t *m_dropPendingNode = 0;
@@ -2729,15 +2799,29 @@ namespace
             m_ringFresh  = false;
             m_angleBase.clear();
 
+            m_construct = m_refImage = false;
             if ( !SelectionHasObjects() )
             {
-                Sys_Printf( "Rotate: no whole objects are selected.\n" );
-                return false;
+                // R also serves a pure construction or reference-image selection; the
+                // store's MoveBegin latches the baseline + undo snapshot and reports the
+                // anchor centroid as the natural pivot.
+                if ( KiwiConSel_CanMove() && KiwiConSel_MoveBegin( m_pivot ) )
+                    m_construct = true;
+                else if ( KiwiRefImage_CanMove() && KiwiRefImage_MoveBegin( m_pivot ) )
+                    m_refImage = true;
+                else
+                {
+                    Sys_Printf( "Rotate: nothing rotatable is selected.\n" );
+                    return false;
+                }
             }
-            KiwiXform_CaptureEntityAngles( m_angleBase );
-            // Latch the pivot once; repeated Select_GetMid calls would let it crawl while
-            // rotating. This matches the ported rotate-mode nudge.
-            Select_GetMid( m_pivot );
+            else
+            {
+                KiwiXform_CaptureEntityAngles( m_angleBase );
+                // Latch the pivot once; repeated Select_GetMid calls would let it crawl
+                // while rotating. This matches the ported rotate-mode nudge.
+                Select_GetMid( m_pivot );
+            }
             // A session pivot replaces row 0 of the ported rot_around matrix.
             m_pivotOverridden = PivotActive( m_pivot );
             m_pivotPlacing    = false;
@@ -2786,22 +2870,28 @@ namespace
 
         void Commit() override
         {
+            if ( m_construct )      KiwiConSel_MoveCommit();      // the snapshot IS the undo record
+            else if ( m_refImage )  KiwiRefImage_MoveCommit();
             // Clean the ported float round-trip before the undo bracket closes.
-            if ( m_undoOpen )
+            else if ( m_undoOpen )
                 KiwiXform_SnapEntityAngles( m_angleBase, m_deg );
             m_angleBase.clear();
             m_undoOpen = false;
             m_pivotPlacing = false;
+            m_construct = m_refImage = false;
             g_nUpdateBits = -1;
         }
 
         void Cancel() override
         {
-            ApplyDelta( -m_applied );         // exact inverse; the bracket also restores
+            if ( m_construct )      KiwiConSel_MoveCancel();      // pops the snapshot
+            else if ( m_refImage )  KiwiRefImage_MoveCancel();
+            else                    ApplyDelta( -m_applied );     // exact inverse; the bracket also restores
             m_applied = 0.0f;
             m_angleBase.clear();
             m_undoOpen = false;
             m_pivotPlacing = false;
+            m_construct = m_refImage = false;
             g_nUpdateBits = -1;
         }
 
@@ -2892,6 +2982,16 @@ namespace
         {
             if ( fabsf( delta ) <= KX_EPS )
                 return;
+            if ( m_construct || m_refImage )
+            {
+                // Absolute from the store baseline (kiwi_transform.h rule 1); the
+                // store's own snapshot is the undo record, so no legacy bracket opens.
+                m_applied += delta;
+                if ( m_construct ) KiwiConSel_RotateApply( m_pivot, m_axis, m_applied );
+                else               KiwiRefImage_RotateApply( m_pivot, m_axis, m_applied );
+                g_nUpdateBits = -1;
+                return;
+            }
             if ( !SelectionHasObjects() )
                 return;
             OpenUndo( "rotate selection" );
@@ -2916,16 +3016,21 @@ namespace
             // Idle rotate HUD explains the ring/numeric gate.
             if ( !m_ringActive && !m_hasNum && fabsf( m_deg ) <= KX_EPS )
             {
-                SetHud( "objects  axis %s  grab a ring / type degrees%s", AxisName( m_axis ),
+                SetHud( "%s  axis %s  grab a ring / type degrees%s", What(), AxisName( m_axis ),
                         m_pivotOverridden ? "  [pivot moved]" : "  (V moves the pivot)" );
                 return;
             }
-            SetHud( "objects  axis %s  %.1f deg%s", AxisName( m_axis ), (double)m_deg,
+            SetHud( "%s  axis %s  %.1f deg%s", What(), AxisName( m_axis ), (double)m_deg,
                     m_pivotOverridden ? "  [pivot moved]" : "" );
         }
 
+        const char *What() const
+        { return m_construct ? "construction" : m_refImage ? "image" : "objects"; }
+
         float m_pivot[3] = { 0.0f, 0.0f, 0.0f };
         std::vector<xformEntityAngles_t> m_angleBase;
+        bool  m_construct = false;       // the construction store owns this gesture
+        bool  m_refImage  = false;       // the reference-image store owns it
         float m_deg      = 0.0f;
         float m_applied  = 0.0f;
         bool  m_ringActive = false;      // a ring is held
@@ -2984,66 +3089,117 @@ namespace
             m_undoOpen = false;
             m_haveStartX = CursorPixels( &m_startX, &m_dummyY );
 
+            m_construct = m_refImage = false;
+            m_pivotOverridden = false;
+            m_pivotPlacing    = false;
             if ( !SelectionHasObjects() )
             {
-                Sys_Printf( "Scale: no whole objects are selected.\n" );
-                return false;
+                // S also serves a pure construction or reference-image selection.
+                if ( KiwiConSel_CanMove() && KiwiConSel_MoveBegin( m_pivot ) )
+                    m_construct = true;
+                else if ( KiwiRefImage_CanMove() && KiwiRefImage_MoveBegin( m_pivot ) )
+                    m_refImage = true;
+                else
+                {
+                    Sys_Printf( "Scale: nothing scalable is selected.\n" );
+                    return false;
+                }
             }
-            // HUD pivot only: Select_Scale (select.cpp 0x48FDC0) recomputes its own pivot
-            // on every residual call.
-            Select_GetMid( m_pivot );
+            else
+            {
+                // Select_Scale (select.cpp 0x48FDC0) scales about the selection centre it
+                // recomputes per call; a session pivot re-centres the result (ApplyWanted).
+                Select_GetMid( m_pivot );
+            }
+            m_pivotOverridden = PivotActive( m_pivot );
             UpdateHud();
             return true;
         }
 
-        // Scale can always yield to another transform.
+        // Scale may yield to another transform unless V placement owns the keyboard.
         bool CanSwapTo( int commandId ) const override
-        { (void)commandId; return true; }
+        { (void)commandId; return !m_pivotPlacing; }
+
+        bool SupportsPivot() const override { return true; }
+        const float *PivotAnchor() const override { return m_pivot; }
+        void RefreshHud() override { UpdateHud(); }
+        void ApplyPivot( const float p[3] ) override
+        {
+            // Undo the residual about the old centre, adopt the new one, then reapply the
+            // same factor about it.
+            ApplyWanted( 1.0f, 1.0f, 1.0f );
+            Copy3( p, m_pivot );
+            m_pivotOverridden = true;
+            Recompute();
+        }
 
         bool GestureMoved() const override
         { return m_undoOpen || m_hasNum || fabsf( m_factor - 1.0f ) > KX_EPS; }
 
         void MouseMove( const pick_result_t &pick, const snap_result_t &snap ) override
         {
-            // Scale has no snap arm; do not retain an unused snap result.
             (void)pick;
-            (void)snap;
+            if ( TrackPivot( snap ) )         // V-placement owns the move
+                return;
             Recompute();
             g_nUpdateBits |= 1;
         }
 
         bool KeyDown( int vk, unsigned mods ) override
         {
-            return HandleAxisKey( vk, mods, false );
+            if ( HandlePivotKey( vk ) )       // V / Esc while placing
+                return true;
+            // X/Y/Z = one axis, Shift+X/Y/Z = the plane across that axis (two axes).
+            return HandleAxisKey( vk, mods, true );
         }
 
-        void Commit() override { m_undoOpen = false; g_nUpdateBits = -1; }
+        void Commit() override
+        {
+            if ( m_construct )      KiwiConSel_MoveCommit();      // the snapshot IS the undo record
+            else if ( m_refImage )  KiwiRefImage_MoveCommit();
+            m_undoOpen = false;
+            m_pivotPlacing = false;
+            m_construct = m_refImage = false;
+            g_nUpdateBits = -1;
+        }
 
         void Cancel() override
         {
-            ApplyWanted( 1.0f, 1.0f, 1.0f );
+            if ( m_construct )      KiwiConSel_MoveCancel();      // pops the snapshot
+            else if ( m_refImage )  KiwiRefImage_MoveCancel();
+            else                    ApplyWanted( 1.0f, 1.0f, 1.0f );
             m_undoOpen = false;
+            m_pivotPlacing = false;
+            m_construct = m_refImage = false;
             g_nUpdateBits = -1;
         }
 
         void DrawWorld() override
         {
+            if ( m_pivotPlacing )
+            {
+                DrawPivotMarker( m_pivotWip, true );
+                return;
+            }
             DrawConstraint( m_pivot, m_pivot, m_pivot );
+            if ( m_pivotOverridden )
+                DrawPivotMarker( m_pivot, false );
         }
 
     protected:
         void SetConstraint( constraint_t con, int axis ) override
         {
-            // CON_FREE restores uniform scale; plane constraints are meaningless here.
+            // CON_FREE restores uniform scale; CON_AXIS scales one axis; CON_PLANE scales
+            // the two axes across `axis` (the gizmo's plane squares / Shift+X/Y/Z).
             if ( con == CON_FREE )
             {
                 m_con = CON_FREE;
                 Recompute();
                 return;
             }
-            if ( con != CON_AXIS )
+            if ( con != CON_AXIS && con != CON_PLANE )
                 return;
-            m_con  = CON_AXIS;
+            m_con  = con;
             m_axis = axis;
             Recompute();
         }
@@ -3063,9 +3219,13 @@ namespace
             m_factor = f;
             float want[3] = { f, f, f };
             if ( m_con == CON_AXIS )
+            {
                 for ( int k = 0; k < 3; ++k )
                     if ( k != m_axis )
                         want[k] = 1.0f;
+            }
+            else if ( m_con == CON_PLANE )
+                want[m_axis] = 1.0f;
 
             ApplyWanted( want[0], want[1], want[2] );
             UpdateHud();
@@ -3076,6 +3236,20 @@ namespace
         void ApplyWanted( float sx, float sy, float sz )
         {
             const float want[3] = { sx, sy, sz };
+            if ( m_construct || m_refImage )
+            {
+                // Absolute from the store baseline; the store's snapshot is the undo record.
+                bool same = true;
+                for ( int k = 0; k < 3 && same; ++k )
+                    same = fabsf( want[k] - m_applied[k] ) <= 1.0e-6f;
+                if ( same )
+                    return;
+                if ( m_construct ) KiwiConSel_ScaleApply( m_pivot, want );
+                else               KiwiRefImage_ScaleApply( m_pivot, want );
+                m_applied[0] = want[0]; m_applied[1] = want[1]; m_applied[2] = want[2];
+                g_nUpdateBits = -1;
+                return;
+            }
             float ratio[3];
             bool any = false;
             for ( int k = 0; k < 3; ++k )
@@ -3087,17 +3261,39 @@ namespace
             if ( !any || !SelectionHasObjects() )
                 return;
             OpenUndo( "scale selection" );
+            float mid[3];
+            Select_GetMid( mid );                 // the centre Select_Scale scales about
             Select_Scale( ratio[0], ratio[1], ratio[2] );
+            if ( m_pivotOverridden )
+            {
+                // Scaling about P equals scaling about the centre plus a shift of
+                // (centre - P) * (ratio - 1) on each axis — re-centre on the session pivot.
+                float shift[3];
+                for ( int k = 0; k < 3; ++k )
+                    shift[k] = ( mid[k] - m_pivot[k] ) * ( ratio[k] - 1.0f );
+                Select_Move( shift, 0 );
+            }
             m_applied[0] = want[0]; m_applied[1] = want[1]; m_applied[2] = want[2];
             g_nUpdateBits = -1;
         }
 
+        const char *What() const
+        { return m_construct ? "construction" : m_refImage ? "image" : "objects"; }
+
         void UpdateHud()
         {
+            if ( m_pivotPlacing )
+            {
+                UpdatePivotHud();
+                return;
+            }
+            const char *tail = m_pivotOverridden ? "  [pivot moved]" : "";
             if ( m_con == CON_AXIS )
-                SetHud( "objects  axis %s  x%.3f", AxisName( m_axis ), (double)m_factor );
+                SetHud( "%s  axis %s  x%.3f%s", What(), AxisName( m_axis ), (double)m_factor, tail );
+            else if ( m_con == CON_PLANE )
+                SetHud( "%s  plane %s  x%.3f%s", What(), AxisName( m_axis ), (double)m_factor, tail );
             else
-                SetHud( "objects  uniform  x%.3f", (double)m_factor );
+                SetHud( "%s  uniform  x%.3f%s", What(), (double)m_factor, tail );
         }
 
         float m_pivot[3]   = { 0.0f, 0.0f, 0.0f };
@@ -3106,6 +3302,9 @@ namespace
         int   m_startX     = 0;
         int   m_dummyY     = 0;
         bool  m_haveStartX = false;
+        bool  m_construct  = false;       // the construction store owns this gesture
+        bool  m_refImage   = false;       // the reference-image store owns it
+        bool  m_pivotOverridden = false;  // scaling about a session (V) pivot
     };
 
     KiwiMoveCommand   s_move;
@@ -3223,18 +3422,19 @@ bool KiwiXform_CanMove()
     sel_kind_t k;
     if ( DominantKind( &k, false ) )       // palette-rate: skip the liveness walk
         return true;
-    // G also handles a pure construction selection.
-    return KiwiConSel_CanMove();
+    // G also handles pure construction and reference-image selections.
+    return KiwiConSel_CanMove() || KiwiRefImage_CanMove();
 }
 
 bool KiwiXform_CanRotate()
 {
-    return SelectionHasObjects();
+    // R also handles pure construction and reference-image selections.
+    return SelectionHasObjects() || KiwiConSel_CanMove() || KiwiRefImage_CanMove();
 }
 
 bool KiwiXform_CanScale()
 {
-    return SelectionHasObjects();
+    return SelectionHasObjects() || KiwiConSel_CanMove() || KiwiRefImage_CanMove();
 }
 
 void KiwiXform_RegisterCommands()

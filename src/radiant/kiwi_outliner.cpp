@@ -19,6 +19,7 @@
 #include "kiwi_conselect.h"
 #include "kiwi_construct.h"
 #include "kiwi_hover.h"         // viewport row hover
+#include "kiwi_refimage.h"
 #include "kiwi_selection.h"
 #include "kiwi_visibility.h"    // shared hidden state and undo
 #include "kiwi_windows.h"
@@ -70,11 +71,13 @@ enum koutKind_t
     KOUT_SECTION_ENTITIES,      // ordinary brush and point entities
     KOUT_SECTION_LIGHTS,        // CLASS_LIGHT entities
     KOUT_SECTION_MODELS,        // model and prefab entities
+    KOUT_SECTION_IMAGES,        // editor-only reference images
     KOUT_GROUP_ENTITY,          // a func_group folder
     KOUT_ENTITY,                // any other brush/point entity, shown by classname
     KOUT_BRUSH,                 // one brush instance
     KOUT_CON_GROUP,             // a construction-group folder
     KOUT_CON_OBJECT,            // one construction object
+    KOUT_IMAGE,                 // one reference image
 };
 
 struct koutRow_t
@@ -85,6 +88,7 @@ struct koutRow_t
     entity_s   *ent;        // KOUT_GROUP_ENTITY / KOUT_ENTITY — the INSTANCE node
     int         conIndex;   // KOUT_CON_OBJECT        — store index
     int         conGroup;   // KOUT_CON_GROUP         — group id
+    int         imageIndex; // KOUT_IMAGE store index
     int         ordinal;    // the display number ("Brush 12", "Line 3")
     int         count;      // folders: how many children
     unsigned    key;        // collapse-set key; 0 = not collapsible
@@ -100,6 +104,8 @@ const unsigned KOUT_KEY_ENTITIES = 0xF0000003u;
 const unsigned KOUT_KEY_LIGHTS   = 0xF0000004u;
 const unsigned KOUT_KEY_MODELS   = 0xF0000005u;
 
+const unsigned KOUT_KEY_IMAGES = 0xF0000006u;
+
 const int KOUT_CLASS_LIGHT      = 0x01;
 const int KOUT_CLASS_MODELCLASS = 0x08;
 const int KOUT_CLASS_PREFAB     = 0x10;
@@ -112,6 +118,7 @@ const unsigned KOUT_HIDDEN_BIT = 4u;
 std::vector<unsigned>  s_collapsed;        // keys of the folders that are CLOSED
 std::vector<koutRow_t> s_rows;             // rebuilt every frame
 unsigned               s_lastSelGen = 0;   // for the auto-expand pass
+unsigned               s_lastImageGen = 0;
 
 // Row indices shift with the flatten. Brush anchors store identity; construction
 // anchors retain a store-generation-scoped index.
@@ -120,6 +127,7 @@ struct koutAnchor_t
     koutKind_t  kind     = KOUT_BRUSH;
     selbrush_t *inst     = nullptr;
     int         conIndex = -1;
+    int         imageIndex = -1;
     bool        valid    = false;
 };
 koutAnchor_t s_anchor;
@@ -133,6 +141,7 @@ struct koutRename_t
     koutKind_t  kind     = KOUT_BRUSH;
     unsigned    key      = 0;        // folders (entity / construction group)
     int         conIndex = -1;       // KOUT_CON_OBJECT
+    int         imageIndex = -1;     // KOUT_IMAGE
 };
 koutRename_t s_rename;
 char     s_renameBuf[64] = { 0 };
@@ -146,13 +155,15 @@ bool RenamingRow( const koutRow_t &r )
         return false;
     if ( r.kind == KOUT_CON_OBJECT )
         return s_rename.conIndex == r.conIndex;
+    if ( r.kind == KOUT_IMAGE )
+        return s_rename.imageIndex == r.imageIndex;
     return s_rename.key != 0 && s_rename.key == r.key;
 }
 
 bool Renameable( koutKind_t k )
 {
     return k == KOUT_GROUP_ENTITY || k == KOUT_ENTITY
-        || k == KOUT_CON_GROUP    || k == KOUT_CON_OBJECT;
+        || k == KOUT_CON_GROUP    || k == KOUT_CON_OBJECT || k == KOUT_IMAGE;
 }
 
 // Seed the editor with the current label (kiwi_viewcube.cpp:502-508).
@@ -162,6 +173,7 @@ void BeginRename( const koutRow_t &r, const char *seed )
     s_rename.kind     = r.kind;
     s_rename.key      = r.key;
     s_rename.conIndex = r.conIndex;
+    s_rename.imageIndex = r.imageIndex;
     s_renameFocus     = true;
     _snprintf( s_renameBuf, sizeof( s_renameBuf ), "%s", seed ? seed : "" );
     s_renameBuf[sizeof( s_renameBuf ) - 1] = '\0';
@@ -271,6 +283,7 @@ unsigned SectionKey( koutKind_t kind )
     case KOUT_SECTION_ENTITIES: return KOUT_KEY_ENTITIES;
     case KOUT_SECTION_LIGHTS:   return KOUT_KEY_LIGHTS;
     case KOUT_SECTION_MODELS:   return KOUT_KEY_MODELS;
+    case KOUT_SECTION_IMAGES:   return KOUT_KEY_IMAGES;
     default:                    return 0;
     }
 }
@@ -326,6 +339,19 @@ void BrushName( selbrush_t *inst, int ordinal, char *out, int outSize )
     out[outSize - 1] = '\0';
 }
 
+const char *ImageBaseName( const std::string &file )
+{
+    const char *base = file.c_str();
+    for ( const char *p = base; *p; ++p )
+        if ( *p == '/' || *p == '\\' ) base = p + 1;
+    return base;
+}
+
+const char *ImageAxisName( int axis )
+{
+    return axis == 2 ? "XY" : ( axis == 1 ? "XZ" : "YZ" );
+}
+
 bool BrushHidden( const selbrush_t *b )
 {
     return b && ( ( (unsigned)b->brushFlags & KOUT_HIDDEN_BIT ) != 0 );
@@ -354,6 +380,7 @@ void PushRow( koutKind_t kind, int indent, unsigned key )
     r.ent      = 0;
     r.conIndex = -1;
     r.conGroup = -1;
+    r.imageIndex = -1;
     r.ordinal  = 0;
     r.count    = 0;
     r.key      = key;
@@ -462,7 +489,21 @@ void FlattenCurves()
     }
 }
 
-// Divergence from Plasticity: KIWI emits five fixed top-level sections, including
+void FlattenImages()
+{
+    PushRow( KOUT_SECTION_IMAGES, 0, KOUT_KEY_IMAGES );
+    s_rows.back().count = KiwiRefImage_Count();
+    if ( Collapsed( KOUT_KEY_IMAGES ) )
+        return;
+    for ( int i = 0; i < KiwiRefImage_Count(); ++i )
+    {
+        PushRow( KOUT_IMAGE, 1, 0 );
+        s_rows.back().imageIndex = i;
+        s_rows.back().ordinal = i + 1;
+    }
+}
+
+// Divergence from Plasticity: KIWI emits six fixed top-level sections, including
 // empty ones; Plasticity emits only non-empty type sections within each group.
 void Flatten()
 {
@@ -472,6 +513,7 @@ void Flatten()
     FlattenEntitySection( KOUT_SECTION_ENTITIES );
     FlattenEntitySection( KOUT_SECTION_LIGHTS );
     FlattenEntitySection( KOUT_SECTION_MODELS );
+    FlattenImages();
 }
 
 // Expand brush ancestors after the typed brush-selection generation changes
@@ -510,6 +552,22 @@ void AutoExpandForSelection()
         if ( def )
             SetCollapsed( EntKey( def->numberId ), false );
     }
+}
+
+void ObserveImageGeneration()
+{
+    const unsigned gen = KiwiRefImage_Generation();
+    if ( gen == s_lastImageGen )
+        return;
+    s_lastImageGen = gen;
+    if ( KiwiRefImage_Selected() >= 0 )
+        SetCollapsed( KOUT_KEY_IMAGES, false );
+    if ( s_anchor.kind == KOUT_IMAGE
+      && ( s_anchor.imageIndex < 0 || s_anchor.imageIndex >= KiwiRefImage_Count() ) )
+        s_anchor = koutAnchor_t();
+    if ( s_rename.active && s_rename.kind == KOUT_IMAGE
+      && ( s_rename.imageIndex < 0 || s_rename.imageIndex >= KiwiRefImage_Count() ) )
+        s_rename = koutRename_t();
 }
 
 // Selection: outliner -> scene
@@ -559,6 +617,17 @@ void SelectConRow( int index, bool additive, bool toggle )
     it.index  = -1;
     KiwiConSel_ApplyClick( it, additive, toggle );
     g_nUpdateBits = -1;
+}
+
+void SelectImageRow( int index, bool additive, bool toggle )
+{
+    if ( index < 0 || index >= KiwiRefImage_Count() )
+    {
+        Sys_Printf( "Outliner: that image row is stale (index %i of %i) - nothing selected.\n",
+                    index, KiwiRefImage_Count() );
+        return;
+    }
+    KiwiRefImage_ApplyClick( index, additive, toggle, false );
 }
 
 bool ConObjectRowSelected( int index )
@@ -621,6 +690,9 @@ int FindAnchorRow()
         if ( s_anchor.kind == KOUT_CON_OBJECT && r.kind == KOUT_CON_OBJECT
           && r.conIndex == s_anchor.conIndex )
             return (int)i;
+        if ( s_anchor.kind == KOUT_IMAGE && r.kind == KOUT_IMAGE
+          && r.imageIndex == s_anchor.imageIndex )
+            return (int)i;
     }
     return -1;
 }
@@ -630,7 +702,9 @@ void SetAnchor( const koutRow_t &r )
     s_anchor.kind     = r.kind;
     s_anchor.inst     = r.inst;
     s_anchor.conIndex = r.conIndex;
-    s_anchor.valid    = ( r.kind == KOUT_BRUSH || r.kind == KOUT_CON_OBJECT );
+    s_anchor.imageIndex = r.imageIndex;
+    s_anchor.valid    = ( r.kind == KOUT_BRUSH || r.kind == KOUT_CON_OBJECT
+                       || r.kind == KOUT_IMAGE );
 }
 
 // Brush reparenting
@@ -931,6 +1005,7 @@ void KiwiOutliner_ResetForNewMap()
     s_collapseFoldersPending = true;
     s_rows.clear();
     s_lastSelGen = 0;
+    s_lastImageGen = 0;
     s_anchor = koutAnchor_t();
     s_rename = koutRename_t();
     s_renameBuf[0] = '\0';
@@ -980,6 +1055,7 @@ void KiwiOutliner_Draw()
 
         s_structural = false;
         AutoExpandForSelection();
+        ObserveImageGeneration();
         if ( s_collapseFoldersPending )
         {
             s_collapseFoldersPending = false;
@@ -1030,6 +1106,8 @@ void KiwiOutliner_Draw()
                     ImGui::PushID( (const void *)r.inst );
                 else if ( r.kind == KOUT_CON_OBJECT )
                     ImGui::PushID( (int)( 0xC0000000u | (unsigned)r.conIndex ) );
+                else if ( r.kind == KOUT_IMAGE )
+                    ImGui::PushID( (int)( 0xB0000000u | (unsigned)r.imageIndex ) );
                 else
                     ImGui::PushID( i );
 
@@ -1046,6 +1124,13 @@ void KiwiOutliner_Draw()
                     hidden = KiwiCon_Hidden( r.conIndex );
                     hasEye = true;
                     break;
+                case KOUT_IMAGE:
+                {
+                    const krefImage_t *image = KiwiRefImage_At( r.imageIndex );
+                    hidden = image ? image->hidden : false;
+                    hasEye = image != nullptr;
+                    break;
+                }
                 case KOUT_GROUP_ENTITY:
                 case KOUT_ENTITY:
                 {
@@ -1121,6 +1206,10 @@ void KiwiOutliner_Draw()
                                 if ( KiwiCon_Group( k ) == r.conGroup )
                                     KiwiCon_SetHidden( k, want );
                         }
+                        else if ( r.kind == KOUT_IMAGE )
+                        {
+                            KiwiRefImage_SetHidden( r.imageIndex, want );
+                        }
                     }
                 }
                 ImGui::SameLine( 0.0f, 0.0f );
@@ -1169,6 +1258,9 @@ void KiwiOutliner_Draw()
                 case KOUT_SECTION_MODELS:
                     _snprintf( label, sizeof( label ), "Models (%i)", r.count );
                     break;
+                case KOUT_SECTION_IMAGES:
+                    _snprintf( label, sizeof( label ), "Images (%i)", r.count );
+                    break;
                 case KOUT_GROUP_ENTITY:
                 case KOUT_ENTITY:
                 {
@@ -1198,6 +1290,17 @@ void KiwiOutliner_Draw()
                     selected = KiwiConSel_ObjectSelected( r.conIndex );
                     break;
                 }
+                case KOUT_IMAGE:
+                {
+                    const krefImage_t *image = KiwiRefImage_At( r.imageIndex );
+                    const char *nm = image ? ( image->name.empty()
+                        ? ImageBaseName( image->file ) : image->name.c_str() ) : "Image";
+                    _snprintf( label, sizeof( label ), "%s  [%s]%s", nm,
+                               image ? ImageAxisName( image->axis ) : "?",
+                               image && image->locked ? " (locked)" : "" );
+                    selected = image && KiwiRefImage_Selected() == r.imageIndex;
+                    break;
+                }
                 }
                 label[sizeof( label ) - 1] = '\0';
 
@@ -1222,9 +1325,13 @@ void KiwiOutliner_Draw()
                     }
                     else if ( done || lost )
                     {
-                        if ( s_renameBuf[0] )
+                        if ( s_renameBuf[0] || r.kind == KOUT_IMAGE )
                         {
-                            if ( r.kind == KOUT_CON_GROUP )
+                            if ( r.kind == KOUT_IMAGE )
+                            {
+                                KiwiRefImage_SetName( r.imageIndex, s_renameBuf );
+                            }
+                            else if ( r.kind == KOUT_CON_GROUP )
                             {
                                 KiwiCon_SetGroupName( r.conGroup, s_renameBuf );
                             }
@@ -1251,11 +1358,25 @@ void KiwiOutliner_Draw()
                     continue;
                 }
 
-                if ( ImGui::Selectable( label, selected,
-                                        ImGuiSelectableFlags_AllowDoubleClick,
-                                        ImVec2( 0.0f, itemH ) ) )
+                const bool dimImageRow = r.kind == KOUT_IMAGE && hidden;
+                if ( dimImageRow )
+                    ImGui::PushStyleColor( ImGuiCol_Text, ImGui::GetStyleColorVec4( ImGuiCol_TextDisabled ) );
+                const bool rowClicked = ImGui::Selectable( label, selected,
+                                                           ImGuiSelectableFlags_AllowDoubleClick,
+                                                           ImVec2( 0.0f, itemH ) );
+                if ( dimImageRow )
+                    ImGui::PopStyleColor();
+                if ( rowClicked )
                 {
-                    if ( r.kind == KOUT_BRUSH || r.kind == KOUT_CON_OBJECT )
+                    if ( r.kind == KOUT_IMAGE )
+                    {
+                        SelectImageRow( r.imageIndex, io.KeyShift, io.KeyCtrl );
+                        if ( !io.KeyShift && !io.KeyCtrl
+                          && ImGui::IsMouseDoubleClicked( ImGuiMouseButton_Left ) )
+                            KiwiRefImage_Focus( r.imageIndex );
+                        SetAnchor( r );
+                    }
+                    else if ( r.kind == KOUT_BRUSH || r.kind == KOUT_CON_OBJECT )
                     {
                         // Modifiers reserve range/toggle gestures; an unmodified
                         // double-click renames after its first click selected the row.
@@ -1452,6 +1573,27 @@ void KiwiOutliner_Draw()
                         {
                             const char *nm = KiwiCon_Name( r.conIndex );
                             BeginRename( r, ( nm && nm[0] ) ? nm : "" );
+                        }
+                        ImGui::EndPopup();
+                    }
+                }
+                else if ( r.kind == KOUT_IMAGE )
+                {
+                    if ( ImGui::BeginPopupContextItem( "##imagectx" ) )
+                    {
+                        const krefImage_t *image = KiwiRefImage_At( r.imageIndex );
+                        if ( image && ImGui::MenuItem( image->hidden ? "Show" : "Hide" ) )
+                            KiwiRefImage_SetHidden( r.imageIndex, !image->hidden );
+                        image = KiwiRefImage_At( r.imageIndex );
+                        if ( image && ImGui::MenuItem( image->locked ? "Unlock" : "Lock" ) )
+                            KiwiRefImage_SetLocked( r.imageIndex, !image->locked );
+                        image = KiwiRefImage_At( r.imageIndex );
+                        if ( image && ImGui::MenuItem( "Rename" ) )
+                            BeginRename( r, image->name.c_str() );
+                        if ( image && ImGui::MenuItem( "Delete" ) )
+                        {
+                            KiwiRefImage_DeleteAt( r.imageIndex );
+                            s_structural = true;
                         }
                         ImGui::EndPopup();
                     }

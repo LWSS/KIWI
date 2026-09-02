@@ -45,6 +45,7 @@ namespace
         { "Light",            "Light",   "&Light Helper",           KIWI_CMD_WINDOW_LIGHT,   1 },
         { "Inspector",        "Inspector", "&Inspector",             KIWI_CMD_WINDOW_INSPECTOR, 1 },
         { "Decals",           "Decals",  "&Decals",                 KIWI_CMD_WINDOW_DECALS,  1 },
+        { "Reference Images", "RefImages", "&Reference Images",     KIWI_CMD_WINDOW_REFIMAGES, 1 },
     };
 
     // Older profiles are reseeded once so visibility defaults match the rebuilt dock layout.
@@ -261,6 +262,7 @@ void KiwiWindows_RegisterCommands()
     Radiant_RegisterCommand( "KiwiGrassScatter",  0, 0, KIWI_CMD_GRASS_PANEL );
     Radiant_RegisterCommand( "KiwiTerrainSculpt", 0, 0, KIWI_CMD_TERRAIN_PANEL );
     Radiant_RegisterCommand( "KiwiWindowDecals",  0, 0, KIWI_CMD_WINDOW_DECALS );
+    Radiant_RegisterCommand( "KiwiWindowRefImages", 0, 0, KIWI_CMD_WINDOW_REFIMAGES ); // KIWI (REFIMG)
 }
 
 bool KiwiWindows_DispatchInstant( unsigned int cmdId )
