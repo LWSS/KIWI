@@ -30,12 +30,15 @@
 #include "kiwi_section.h"            // section-analysis state
 #include "kiwi_pick.h"               // ray_t + Pick_RayFromImagePos — the cursor-distance readout
 #include "kiwi_droptrace.h"          // kiwiDropHit_t + KiwiDrop_Trace — likewise
+#include <xanim/xanim.h>             // XSurface (complete type: triCount)
+#include <xanim/xmodel.h>            // XModelGetSurfaces — the triangle-count readout
 #include "radiant_registry.h"
 #include "kiwi_vec.h"     // Dot3
 
 #include <math.h>
 #include <stdio.h>                   // _snprintf — the grid readout
 #include <stdlib.h>
+#include <string.h>                  // strlen — the triangle-count formatter
 
 extern camera_s *Ed_Camera();          // camwnd.cpp
 extern void      CamWnd_BuildMatrix(); // camwnd.cpp 0x403470
@@ -43,6 +46,8 @@ extern int       Sys_Printf( const char *fmt, ... );   // win_qe3.cpp:118
 // File scope on purpose: an extern inside an anonymous-namespace function gets
 // internal linkage under MSVC (the cursor-distance readout's mousespace source).
 extern bool      ImGuiShell_CameraPaintCursor( int *x, int *y, int *w, int *h );   // imgui_shell.cpp
+extern selbrush_t selected_brushes;    // map.cpp — the triangle-count walk
+extern selbrush_t active_brushes;      // map.cpp
 
 namespace
 {
@@ -258,6 +263,79 @@ namespace
     // cos(3 degrees) tolerates angles -> basis -> dot round trips.
     const float KVC_VIEW_ALIGNED = 0.99863f;
 
+    // Triangle-count preview for the label slot: every visible brush (winding fan),
+    // patch (tessellated grid cells x 2) and model entity (lod 0 surfaces), over the
+    // active and selected lists, hidden geometry excluded.  Recounted twice a second;
+    // the walk is a few thousand nodes at most.
+    int   s_triCount     = 0;
+    float s_triNextTime  = 0.0f;
+
+    int CountTriangles()
+    {
+        int tris = 0;
+        for ( int pass = 0; pass < 2; ++pass )
+        {
+            selbrush_t *head = pass == 0 ? &selected_brushes : &active_brushes;
+            for ( selbrush_t *b = head->next; b && b != head; b = b->next )
+            {
+                if ( !b->def || ( b->brushFlags & 4 ) != 0 )     // hidden (select.cpp:4168)
+                    continue;
+                if ( KiwiDrop_IsModelEntity( b ) )
+                {
+                    float mins[3], maxs[3], angles[3], origin[3], scale;
+                    XModel *model = 0;
+                    if ( KiwiDrop_GetModelInfo( b, mins, maxs, angles, &scale, origin, &model ) && model )
+                    {
+                        XSurface *surfs = 0;
+                        const int n = XModelGetSurfaces( model, &surfs, 0 );
+                        for ( int s = 0; surfs && s < n; ++s )
+                            tris += surfs[s].triCount;
+                    }
+                    continue;
+                }
+                if ( b->def->patch )
+                {
+                    const curvePatchDef_t *mesh = b->def->patch->curveDef;
+                    if ( mesh && mesh->width > 1 && mesh->height > 1 )
+                        tris += ( mesh->width - 1 ) * ( mesh->height - 1 ) * 2;
+                    continue;
+                }
+                if ( !b->def->faces )
+                    continue;
+                for ( int f = 0; f < b->def->faceCount; ++f )
+                {
+                    const winding_t *w = b->def->faces[f].w;
+                    if ( w && w->numpoints >= 3 )
+                        tris += w->numpoints - 2;
+                }
+            }
+        }
+        return tris;
+    }
+
+    void FormatThousands( char *out, int outSize, int v )
+    {
+        char raw[32];
+        _snprintf( raw, sizeof( raw ), "%d", v );
+        raw[sizeof( raw ) - 1] = 0;
+        const int len = (int)strlen( raw );
+        int o = 0;
+        for ( int i = 0; i < len && o < outSize - 1; ++i )
+        {
+            if ( i && ( ( len - i ) % 3 ) == 0 )
+                out[o++] = ',';
+            out[o++] = raw[i];
+        }
+        out[o] = 0;
+    }
+
+    // The "1px = ..." zoom meter shows only while the zoom is fresh (the units per
+    // pixel changed within the last KVC_ZOOM_LINGER seconds); the rest of the time
+    // the slot carries the triangle count.
+    const float KVC_ZOOM_LINGER = 1.5f;
+    float s_zoomLastWpp  = -1.0f;
+    float s_zoomLastTime = -1000.0f;
+
     // Log-scaled fill is linear in multiplicative wheel steps. Colour maps the same
     // fraction from green to red as world-units-per-pixel sensitivity increases;
     // the formatted number uses current display units. The 8-pixel bar is read-only
@@ -282,44 +360,76 @@ namespace
                           && mouse.y >= y0 && mouse.y <= y1 + KVC_ZOOM_GAP + KVC_ZOOM_TEXT;
 
         ImDrawList *dl = ImGui::GetWindowDrawList();
-        dl->AddRectFilled( ImVec2( x0, y0 ), ImVec2( x1, y1 ),
-                           IM_COL32( 18, 18, 22, 175 ), 2.0f );
 
-        // Two linear legs preserve a true amber midpoint.
-        float r, g, b;
-        if ( frac < 0.5f )
+        // Fresh zoom?  A changed units-per-pixel restarts the linger clock.
+        const float now = (float)ImGui::GetTime();
+        if ( s_zoomLastWpp < 0.0f )
+            s_zoomLastWpp = wpp;                 // first frame: nothing to announce
+        else if ( fabsf( wpp - s_zoomLastWpp ) > wpp * 1.0e-4f )
         {
-            const float t = frac * 2.0f;
-            r = 0.36f + ( 0.98f - 0.36f ) * t;
-            g = 0.80f + ( 0.75f - 0.80f ) * t;
-            b = 0.36f + ( 0.22f - 0.36f ) * t;
+            s_zoomLastWpp  = wpp;
+            s_zoomLastTime = now;
+        }
+        const bool zoomFresh = ( now - s_zoomLastTime ) < KVC_ZOOM_LINGER || hot;
+
+        if ( zoomFresh )
+        {
+            dl->AddRectFilled( ImVec2( x0, y0 ), ImVec2( x1, y1 ),
+                               IM_COL32( 18, 18, 22, 175 ), 2.0f );
+
+            // Two linear legs preserve a true amber midpoint.
+            float r, g, b;
+            if ( frac < 0.5f )
+            {
+                const float t = frac * 2.0f;
+                r = 0.36f + ( 0.98f - 0.36f ) * t;
+                g = 0.80f + ( 0.75f - 0.80f ) * t;
+                b = 0.36f + ( 0.22f - 0.36f ) * t;
+            }
+            else
+            {
+                const float t = ( frac - 0.5f ) * 2.0f;
+                r = 0.98f + ( 0.95f - 0.98f ) * t;
+                g = 0.75f + ( 0.24f - 0.75f ) * t;
+                b = 0.22f + ( 0.20f - 0.22f ) * t;
+            }
+            const ImU32 col = IM_COL32( (int)( r * 255.0f ), (int)( g * 255.0f ),
+                                        (int)( b * 255.0f ), 235 );
+
+            // Keep a visible sliver at the minimum.
+            float fillW = ( x1 - x0 ) * frac;
+            if ( fillW < 2.0f ) fillW = 2.0f;
+            dl->AddRectFilled( ImVec2( x0, y0 ), ImVec2( x0 + fillW, y1 ), col, 2.0f );
+            dl->AddRect( ImVec2( x0, y0 ), ImVec2( x1, y1 ),
+                         IM_COL32( 80, 84, 96, 150 ), 2.0f, 0, 1.0f );
+
+            char num[64];
+            char label[96];
+            KiwiUnits_Format( num, sizeof( num ), wpp );
+            _snprintf( label, sizeof( label ), "1px = %s", num );
+            label[sizeof( label ) - 1] = 0;
+            const ImVec2 ts = ImGui::CalcTextSize( label );
+            dl->AddText( ImVec2( x1 - ts.x, y1 + KVC_ZOOM_GAP ),
+                         hot ? IM_COL32( 255, 226, 110, 255 ) : IM_COL32( 190, 196, 208, 225 ),
+                         label );
         }
         else
         {
-            const float t = ( frac - 0.5f ) * 2.0f;
-            r = 0.98f + ( 0.95f - 0.98f ) * t;
-            g = 0.75f + ( 0.24f - 0.75f ) * t;
-            b = 0.22f + ( 0.20f - 0.22f ) * t;
+            // Idle: the slot shows the scene's triangle count instead.
+            if ( now >= s_triNextTime )
+            {
+                s_triCount    = CountTriangles();
+                s_triNextTime = now + 0.5f;
+            }
+            char num[32];
+            char label[64];
+            FormatThousands( num, sizeof( num ), s_triCount );
+            _snprintf( label, sizeof( label ), "%s tris", num );
+            label[sizeof( label ) - 1] = 0;
+            const ImVec2 ts = ImGui::CalcTextSize( label );
+            dl->AddText( ImVec2( x1 - ts.x, y1 + KVC_ZOOM_GAP ),
+                         IM_COL32( 190, 196, 208, 225 ), label );
         }
-        const ImU32 col = IM_COL32( (int)( r * 255.0f ), (int)( g * 255.0f ),
-                                    (int)( b * 255.0f ), 235 );
-
-        // Keep a visible sliver at the minimum.
-        float fillW = ( x1 - x0 ) * frac;
-        if ( fillW < 2.0f ) fillW = 2.0f;
-        dl->AddRectFilled( ImVec2( x0, y0 ), ImVec2( x0 + fillW, y1 ), col, 2.0f );
-        dl->AddRect( ImVec2( x0, y0 ), ImVec2( x1, y1 ),
-                     IM_COL32( 80, 84, 96, 150 ), 2.0f, 0, 1.0f );
-
-        char num[64];
-        char label[96];
-        KiwiUnits_Format( num, sizeof( num ), wpp );
-        _snprintf( label, sizeof( label ), "1px = %s", num );
-        label[sizeof( label ) - 1] = 0;
-        const ImVec2 ts = ImGui::CalcTextSize( label );
-        dl->AddText( ImVec2( x1 - ts.x, y1 + KVC_ZOOM_GAP ),
-                     hot ? IM_COL32( 255, 226, 110, 255 ) : IM_COL32( 190, 196, 208, 225 ),
-                     label );
 
         // KIWI-UX: live camera→cursor distance in RAW ENGINE UNITS (inches), under the
         // zoom label.  This is the number distance-based systems compare against (model

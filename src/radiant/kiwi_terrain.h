@@ -34,7 +34,9 @@ int  KiwiTerrain_ExtraLayerCount( patchMesh_t *def );
 void KiwiTerrain_LayerUpload( patchMesh_t *def, int run, int baseRuns,
                               unsigned int *color, const curveVert_t *verts,
                               int vertCount, Material **material );
-// True while a paint mode wants the patch wireframe grid hidden (Tab toggles).
+// True while an armed sculpt tool owns the patch wireframe: the ported camera draws
+// (selected white mesh, unselected pref grid) stand down and DrawWorld draws the grid
+// only within the brush's reach around the cursor; Tab hides it entirely.
 bool KiwiTerrain_HideWireframe();
 
 // J (KIWI_CMD_JOIN): merge selected edge-adjacent terrain sheets into one grid.
@@ -55,3 +57,13 @@ bool KiwiTerrain_HandleWheel( float steps, bool shift, bool ctrl );
 
 void KiwiTerrain_Hover( int imgX, int imgY, bool over );
 void KiwiTerrain_DrawWorld();
+
+// -kiwitest entry points (kiwi_test.cpp `terrain` verb): the tool by name (raise,
+// setheight, smooth, noise, texture, colour, grass, trim), a setting by name (outer,
+// inner, strength, speed, falloff, shape, chunk, expand, basez, cells, surfaces,
+// targetz, unselected, terrainonly), arming, and one whole stroke: a vertical ray
+// through (x, y) resolved like the camera cursor, held for `seconds`, then released.
+bool KiwiTerrain_TestSetTool( const char *name );
+bool KiwiTerrain_TestSet( const char *key, float value );
+void KiwiTerrain_TestArm( bool armed );
+bool KiwiTerrain_TestStroke( float x, float y, float seconds, bool shift, bool ctrl );

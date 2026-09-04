@@ -8,6 +8,7 @@
 #include "radiant_frame.h"
 #include "mainfrm.h"
 #include "kiwi_refimage.h"     // refimage verbs + expectations (test mode)
+#include "kiwi_terrain.h"      // terrain verb: tool / set / arm / stroke (test mode)
 #include "xywnd.h"             // expect xyview: Ed_ActiveXY / ED_VIEW_*
 
 #include <algorithm>
@@ -1050,6 +1051,65 @@ static void ExecuteSelect( const ScriptLine &line )
 // MoveBegin / apply / MoveCommit arms the modal G / R / S tools use, so each one is
 // exactly one reference-image record in the unified undo journal (editor_undo).
 // `add` mirrors the sidecar loader: no undo record, file path map-relative.
+// terrain tool <name> | set <key> <value> | arm 0|1 | stroke x y [seconds] [shift] [ctrl]
+static void ExecuteTerrain( const ScriptLine &line )
+{
+    const std::vector<std::string> &w = line.words;
+    if ( w.size() < 2 ) { ScriptError( line, "terrain requires a verb" ); return; }
+    const std::string verb = Lower( w[1] );
+    if ( verb == "tool" )
+    {
+        if ( w.size() != 3 ) { ScriptError( line, "terrain tool <raise|setheight|smooth|noise|texture|colour|grass|trim>" ); return; }
+        if ( !KiwiTerrain_TestSetTool( w[2].c_str() ) )
+        { ScriptError( line, "terrain tool: unknown tool '%s'", w[2].c_str() ); return; }
+        g_nUpdateBits = -1;
+        return;
+    }
+    if ( verb == "set" )
+    {
+        float value = 0.0f;
+        if ( w.size() != 4 || !ParseFloat( w[3], value ) )
+        { ScriptError( line, "terrain set <key> <numeric value>" ); return; }
+        if ( !KiwiTerrain_TestSet( w[2].c_str(), value ) )
+        { ScriptError( line, "terrain set: unknown key '%s'", w[2].c_str() ); return; }
+        return;
+    }
+    if ( verb == "arm" )
+    {
+        int on = 0;
+        if ( w.size() != 3 || !ParseInt( w[2], on ) ) { ScriptError( line, "terrain arm 0|1" ); return; }
+        KiwiTerrain_TestArm( on != 0 );
+        g_nUpdateBits = -1;
+        return;
+    }
+    if ( verb == "stroke" )
+    {
+        // A whole press/hold/release at world (x, y): the cursor is a vertical ray
+        // resolved like the camera's (patches, then surfaces / base plane when
+        // creation is allowed).  Modifiers name the Shift/Ctrl grammars of the tool.
+        float x = 0.0f, y = 0.0f, seconds = 0.5f;
+        bool shift = false, ctrl = false;
+        if ( w.size() < 4 || !ParseFloat( w[2], x ) || !ParseFloat( w[3], y ) )
+        { ScriptError( line, "terrain stroke x y [seconds] [shift] [ctrl]" ); return; }
+        size_t next = 4;
+        if ( w.size() > next && ParseFloat( w[next], seconds ) )
+            ++next;
+        for ( ; next < w.size(); ++next )
+        {
+            const std::string m = Lower( w[next] );
+            if      ( m == "shift" ) shift = true;
+            else if ( m == "ctrl" )  ctrl = true;
+            else { ScriptError( line, "terrain stroke: unknown modifier '%s'", w[next].c_str() ); return; }
+        }
+        if ( !KiwiTerrain_TestStroke( x, y, seconds, shift, ctrl ) )
+        { ScriptError( line, "terrain stroke: refused (not armed, a live command, or nothing under %.0f %.0f)", x, y ); return; }
+        g_nUpdateBits = -1;
+        UpdateSelection( -1, nullptr );
+        return;
+    }
+    ScriptError( line, "terrain verb must be tool, set, arm, or stroke" );
+}
+
 static void ExecuteRefImage( const ScriptLine &line )
 {
     const std::vector<std::string> &w = line.words;
@@ -1345,6 +1405,7 @@ static void ExecuteLine( const ScriptLine &line )
         return;
     }
     if ( command == "refimage" ) { ExecuteRefImage( line ); return; }
+    if ( command == "terrain" )  { ExecuteTerrain( line ); return; }
     if ( command == "editor_undo" || command == "editor_redo" )
     {
         // The editor's own Ctrl+Z / Ctrl+Y route (ID_EDIT_UNDO / ID_EDIT_REDO): the

@@ -15614,6 +15614,70 @@ fallback and the material renders; only a dead colorMap fails the import.
 - Chunks created by Split/Expander are always PATCH_TERRAIN (the bezier projection
   path PMESH_02 crashed on a fresh, untessellated grid).
 
+### Round BQ addendum 3 — terrain creation anywhere (2026-09-03)
+
+- **D-BQ-M — ONE checkbox, "Allow terrain creation" (was "Expand terrain into empty
+  space").** The user asked for creation on any empty zone and then for the two
+  behaviours to be one mode rather than a new tool.  While Raise is armed with the box
+  ticked, a stroke needs no patch at all: the cursor resolves patches → world surfaces
+  (`KiwiDrop_Trace`, optional) → a horizontal base plane, the empty lattice cells under
+  the brush get chunks, the chunks join the selection and the stroke's targets, and the
+  airbrush raises them like any terrain.  Where terrain is within reach (outer radius +
+  chunk size, bounds distance to the nearest eligible sheet) the lattice CONTINUES that
+  sheet — same anchor, per-axis cell multiples, materials and layer slots, seam heights
+  probed — so painting outward from existing ground never starts a second grid.  Off on
+  its own the lattice is world-origin aligned at the chunk size with "Cells per new
+  chunk" density and the texture browser's current material (Create_Terrain's rule).
+- **D-BQ-N — created chunks are stamped, not copied, into the stroke record**
+  (`Undo_KiwiMarkCreated`): Undo frees them and restores nothing, so an undone creation
+  stroke leaves no flat chunks.  One record per stroke, as before.
+- Ring colour tells the operator where the chunk will land: green on a patch, cyan on a
+  brush/model, blue on the base height.  `terrain` test verbs (`tool`, `set`, `arm`,
+  `stroke`) drive the whole thing without a mouse (`terrain_create.kt`).
+- **D-BQ-O — the armed wireframe is the area of effect.** A selected terrain's full
+  white grid hid the surface being sculpted; the user asked for the wireframe "in an
+  AoE slightly bigger than the tooltip unless Tab is pressed to toggle hide it".  While
+  a sculpt tool is armed the ported patch wireframe draws stand down and the module
+  draws the render grid only within outer radius × "Wire reach" (1.25 default, the
+  brush's own circle/square metric), white for the patches the stroke will move and
+  grey for the rest; Tab hides it outright in every armed mode.  Disarmed, the ported
+  draws return unchanged.
+- **D-BQ-P — the outliner lists terrain under its own "Terrain" section** (user:
+  "it shouldn't show up as brushes").  Worldspawn's PATCH_TERRAIN patches leave the
+  "Brushes" section for a "Terrain (N)" section right after it, rows named "Terrain N";
+  bezier patches stay "Patch N" under Brushes.  Terrain inside a func_group or entity
+  stays in that folder (the group is the user's own organisation).  Dropping rows on the
+  Terrain header reparents to worldspawn exactly like the Brushes header, and selecting
+  terrain auto-expands the Terrain section instead of Brushes.  Collapse key
+  0xF0000007; section order Brushes, Terrain, Curves, Entities, Lights, Models, Images.
+- **D-BQ-Q — category rows carry an eye too** (user: "add Hide buttons to the categories
+  so entire groups can be hidden").  A section's eye reads "every member hidden" and one
+  click applies the inverse to all of them: brush-backed sections (Brushes = worldspawn's
+  non-terrain brushes + every func_group, Terrain, Entities, Lights, Models) go through
+  one visibility undo record; Curves through the construction snapshot; Images through the
+  image store.  The eye glyph itself is now an eyeball - almond outline, filled iris,
+  dark pupil, a glint - closed stays the lower lid with lashes.
+- **D-BQ-R — the camera's top-right label slot alternates.**  "1px = ..." and its zoom
+  bar appear only while the zoom is fresh (units-per-pixel changed in the last 1.5 s, or
+  the slot is hovered); otherwise the slot shows the scene triangle count ("12,345 tris":
+  visible brushes as winding fans, patches as tessellated cells x 2, model entities at
+  lod 0), recounted twice a second.
+- **Terrain Sculpt tuning (2026-09-03):** "Speed grows with radius" is gone as a choice
+  and its ON behaviour is the rule (units per second at a 128 radius, wider brushes
+  proportionally faster); Raise speed default 128, slider to 4096; Outer/Inner radius
+  sliders to 3072 (hard clamp 12288).
+- **D-BQ-S — height fields speak the viewport's units.**  Target height and Base height
+  are text fields on the same grammar as the transform HUD (`KiwiNum_EvalDisplay`: ft,
+  in, yd, y, fractions, math), shown through `KiwiUnits_Format` while idle.
+- **D-BQ-T — height colours while a height tool is armed** (user: "really hard to see
+  the texture").  Raise / Set height / Smooth / Noise / Trim re-upload every patch's
+  base run as a height gradient over a flat opaque material (layers suppressed), the
+  range following the terrain's extremes; Texture paint, Vertex colour and Grass keep
+  the real look.  One checkbox ("Height colours while armed", default on) turns it off.
+- **D-BQ-U — the armed wireframe never has holes.**  A segment budget that cut the
+  list mid-way left whole patches blank; the grid now coarsens uniformly (stride 2/4/8)
+  when the reach would exceed the budget.
+
 ## D-REFIMG — editor-only reference images
 
 - PNG/JPEG/BMP/TGA/DDS/WebP files dropped or pasted over a viewport are copied to

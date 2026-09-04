@@ -8207,6 +8207,69 @@ the CAMERA CONTRACT, the disposition table for every round-BK camera change, and
   supersedes the earlier "smooth seams across patch borders" caveat. T-junctions
   (a coarse chunk next to a denser one) still crack between points; Tessellate a
   region to one density, or let the expander build chunks (it matches per-axis cells).
+- **"Allow terrain creation" (2026-09-03, replaces "Expand terrain into empty space") —
+  UNBUILT.** The Raise checkbox now works over ANY empty zone, no patch required: the
+  cursor falls from the patches to brushes/models (`KiwiDrop_Trace`, "Land on brushes
+  and models") and then to a horizontal base plane ("Base height"); the chunk lattice
+  continues the nearest eligible SHEET patch within outer radius + chunk size (its
+  corner, per-axis cell multiples, materials, layers) and otherwise starts at the
+  world origin at the chunk size with "Cells per new chunk" density and the texture
+  browser's current material (Create_Terrain's rule). Caveats: the reach test is a
+  bounds distance, so a stroke that starts far from every sheet begins a new
+  origin-anchored lattice that will not seam with terrain it later grows into (Join
+  / Tessellate fix it); a fresh chunk inherits no contents/tool flags; the
+  base-plane ring is drawn flat at the base height (blue = plane, cyan = surface).
+  First-build candidates: `KiwiDrop_Trace` on an empty map, `curTexWndLayer_t::mtl`
+  field names, the `_stricmp` in the test entry points.
+- **Undo of created chunks (found 2026-09-03, UNBUILT).** The expander registered each
+  new chunk through `Patch_PaintMarkUndo` → `Undo_AddBrush`, which SAVES a copy of the
+  flat chunk into the stroke's record; Undo_Undo then freed the live chunk (phase 1)
+  and restored the copy (phase 4), so undoing an expand stroke left flat chunks behind.
+  New chunks are now stamped created only (`Undo_KiwiMarkCreated`, undo.cpp KIWI
+  tail: ownerPrev = record id, no copy) with `xx22b` pre-set so the first stamp does
+  not save one either. `tools\kiwitest\scripts\terrain_create.kt` asserts patches
+  1 → 0 → 1 across editor_undo / editor_redo and a byte-equal map after undo.
+- **Armed wireframe = area of effect only (2026-09-03, UNBUILT).** While any sculpt
+  tool but Grass is armed, `KiwiTerrain_HideWireframe` is true, so the two ported
+  camera draws (the selected white tech-29 mesh in camwnd.cpp and the unselected
+  `patch_wireframe` grid in Patch_Fill_Draw) stand down and `DrawWireframeAoE`
+  (kiwi_terrain.cpp) draws each eligible patch's render grid only where a segment end
+  lies within outer radius × "Wire reach" (default 1.25, brush-shaped). White =
+  patches the stroke moves, grey = the rest. Tab hides it entirely in every armed
+  mode (was: paint modes only); the old per-mode "Hide patch wireframe while
+  painting" boxes are gone, replaced by one "Hide wireframe (Tab)" in the Brush
+  section. 2D views are untouched. Budget: 8192 segments per frame, then the grid
+  simply stops (dense bezier patches under a huge radius). Disarmed = ported look.
+- **Outliner section eyes + eyeball glyph, camera triangle counter (2026-09-03, UNBUILT).**
+  Category rows now have an eye (`SectionEyeState` / `SectionSetHidden`,
+  kiwi_outliner.cpp); the click branch keys on `r.key >= KOUT_KEY_BRUSHES` (section keys
+  are 0xF000000x, entity/construction keys 0xD/0xE-prefixed). The eyeball uses
+  `PathFillConvex` + `PathStroke( col, 1.2f, ImDrawFlags_Closed )` — the vendored
+  ImGui (1.92.8+) takes (col, thickness, flags); the older (col, flags, thickness)
+  order is an obsoleted overload, and a two-argument call would bind the flag as a
+  512 px thickness. The triangle counter (`CountTriangles`,
+  kiwi_viewcube.cpp) walks selected + active brushes every 0.5 s: models count lod 0
+  through `XModelGetSurfaces` (a model that failed to load contributes 0), hidden
+  geometry is skipped, and nothing about the compiler's later coalescing/splitting is
+  predicted - it is a preview of editor geometry, not the BSP. First-build candidates:
+  `XSurface` complete type via `<xanim/xmodel.h>`, `brush_t::faceCount` spelling.
+- **Terrain Sculpt round 3 (2026-09-03, UNBUILT): unit heights, height colours,
+  wireframe holes.** (1) "Target height" and "Base height" are `UnitInputWorld` text
+  fields on the shared `KiwiNum_EvalDisplay` grammar (12ft 6in, 3yd, 1/8; bare = inches,
+  `Units_FromDisplay` to world); a bad string prints to the console and keeps the old
+  value. (2) "Height colours while armed" (default on, profile `Heatmap`): with a
+  HEIGHT tool armed, `KiwiTerrain_LayerUpload` rewrites run 0 of every patch to a
+  blue→cyan→green→yellow→red gradient by vertex Z over `g_qeglobals.d_opague` (the
+  lightmap-diagnostic material) and `ExtraLayerCount` returns 0, so layers do not
+  overdraw; the range is the min/max control-point Z of the eligible patches (a
+  16-unit band on flat sheets), refreshed on arm / tool change / toggle and after a
+  stroke that moved an extreme (`RebuildAllPatchVisuals` re-uploads every patch VB —
+  a few ms on a big map). Paint modes and Grass keep the real materials. If the
+  gradient shows but stays uniform, `d_opague` is ignoring vertex colour: swap in
+  `d_white`. (3) The wireframe holes in the screenshot were the segment budget running
+  out mid-list (patches after the cut simply did not draw). `DrawWireframeAoE` now
+  estimates the segment count first and coarsens the WHOLE grid (stride 2/4/8, no
+  diagonals) when it exceeds 16k, so every patch in reach draws.
 
 ## Round 2026-09-02 — tool swap / Esc / fit-on-load / image undo — UNBUILT, verify on next build
 

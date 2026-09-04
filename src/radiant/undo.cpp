@@ -1234,3 +1234,18 @@ void Undo_Redo()
 
     Sel_InvalidateFromLegacy();   // KIWI-UX (wholesale brush-list rebuild)
 }
+
+// KIWI (TERRAIN): a brush CREATED inside the open record is stamped with the record's
+// id - what Undo_EndBrushList does per def - WITHOUT saving a copy of it.  Undo_Undo's
+// phase 1 then frees it and phase 4 has nothing to put back.  Registering it through
+// Undo_AddBrush instead would restore that copy after the undo and leave the new
+// chunk behind (kiwi_terrain.cpp ExpandUnderBrush).
+void Undo_KiwiMarkCreated( brush_t *def )
+{
+    if ( !g_lastundo || g_lastundo->done || !def )
+        return;
+    def->ownerPrev = (entity_s *)(intptr_t)g_lastundo->id;
+    entity_s *owner = (entity_s *)def->owner;
+    if ( owner && *(int *)&owner->eclass->fixedsize )
+        owner->epairEdits = g_lastundo->id;
+}

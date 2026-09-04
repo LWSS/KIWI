@@ -67,6 +67,7 @@ namespace
 enum koutKind_t
 {
     KOUT_SECTION_BRUSHES = 0,   // worldspawn brushes + func_group folders
+    KOUT_SECTION_TERRAIN,       // worldspawn terrain meshes (PATCH_TERRAIN patches)
     KOUT_SECTION_CURVES,        // construction objects
     KOUT_SECTION_ENTITIES,      // ordinary brush and point entities
     KOUT_SECTION_LIGHTS,        // CLASS_LIGHT entities
@@ -105,6 +106,23 @@ const unsigned KOUT_KEY_LIGHTS   = 0xF0000004u;
 const unsigned KOUT_KEY_MODELS   = 0xF0000005u;
 
 const unsigned KOUT_KEY_IMAGES = 0xF0000006u;
+const unsigned KOUT_KEY_TERRAIN = 0xF0000007u;
+
+// Which of an entity's brushes a section lists: worldspawn splits its terrain meshes
+// out of "Brushes" into "Terrain"; every other entity folder lists all of its own.
+enum koutFilter_t { KOUT_FILTER_ALL = 0, KOUT_FILTER_NOT_TERRAIN, KOUT_FILTER_TERRAIN };
+
+bool IsTerrainNode( const selbrush_t *b )
+{
+    return b && b->def && b->def->patch && ( b->def->patch->type & PATCH_TERRAIN ) != 0;
+}
+
+bool PassesFilter( const selbrush_t *b, koutFilter_t filter )
+{
+    if ( filter == KOUT_FILTER_ALL )
+        return true;
+    return IsTerrainNode( b ) == ( filter == KOUT_FILTER_TERRAIN );
+}
 
 const int KOUT_CLASS_LIGHT      = 0x01;
 const int KOUT_CLASS_MODELCLASS = 0x08;
@@ -279,6 +297,7 @@ unsigned SectionKey( koutKind_t kind )
     switch ( kind )
     {
     case KOUT_SECTION_BRUSHES:  return KOUT_KEY_BRUSHES;
+    case KOUT_SECTION_TERRAIN:  return KOUT_KEY_TERRAIN;
     case KOUT_SECTION_CURVES:   return KOUT_KEY_CURVES;
     case KOUT_SECTION_ENTITIES: return KOUT_KEY_ENTITIES;
     case KOUT_SECTION_LIGHTS:   return KOUT_KEY_LIGHTS;
@@ -321,13 +340,14 @@ const char *ConTypeName( kconType_t t )
     }
 }
 
-int EntityBrushCount( entity_s *inst )
+int EntityBrushCount( entity_s *inst, koutFilter_t filter = KOUT_FILTER_ALL )
 {
     int n = 0;
     if ( !inst )
         return 0;
     for ( selbrush_t *b = inst->brushes.ownerNext; b && b != &inst->brushes; b = b->ownerNext )
-        ++n;
+        if ( PassesFilter( b, filter ) )
+            ++n;
     return n;
 }
 
@@ -335,7 +355,8 @@ int EntityBrushCount( entity_s *inst )
 void BrushName( selbrush_t *inst, int ordinal, char *out, int outSize )
 {
     const bool isPatch = ( inst && inst->def && inst->def->patch != 0 );
-    _snprintf( out, (size_t)outSize, "%s %i", isPatch ? "Patch" : "Brush", ordinal );
+    const char *what = IsTerrainNode( inst ) ? "Terrain" : ( isPatch ? "Patch" : "Brush" );
+    _snprintf( out, (size_t)outSize, "%s %i", what, ordinal );
     out[outSize - 1] = '\0';
 }
 
@@ -387,11 +408,13 @@ void PushRow( koutKind_t kind, int indent, unsigned key )
     s_rows.push_back( r );
 }
 
-void FlattenEntityBrushes( entity_s *inst, int indent )
+void FlattenEntityBrushes( entity_s *inst, int indent, koutFilter_t filter = KOUT_FILTER_ALL )
 {
     int ordinal = 0;
     for ( selbrush_t *b = inst->brushes.ownerNext; b && b != &inst->brushes; b = b->ownerNext )
     {
+        if ( !PassesFilter( b, filter ) )
+            continue;
         ++ordinal;
         PushRow( KOUT_BRUSH, indent, 0 );
         s_rows.back().inst    = b;
@@ -413,7 +436,7 @@ void FlattenEntitySection( koutKind_t sectionKind )
             ++count;
     }
     if ( sectionKind == KOUT_SECTION_BRUSHES && world_entity )
-        count += EntityBrushCount( world_entity );
+        count += EntityBrushCount( world_entity, KOUT_FILTER_NOT_TERRAIN );
     s_rows[sectionRow].count = count;
 
     if ( Collapsed( sectionKey ) )
@@ -434,7 +457,18 @@ void FlattenEntitySection( koutKind_t sectionKind )
     }
 
     if ( sectionKind == KOUT_SECTION_BRUSHES && world_entity )
-        FlattenEntityBrushes( world_entity, 1 );
+        FlattenEntityBrushes( world_entity, 1, KOUT_FILTER_NOT_TERRAIN );
+}
+
+// Worldspawn's terrain meshes (Terrain Sculpt chunks, Terrain-dialog patches) get
+// their own section; terrain inside a group or entity stays in that folder.
+void FlattenTerrain()
+{
+    PushRow( KOUT_SECTION_TERRAIN, 0, KOUT_KEY_TERRAIN );
+    s_rows.back().count = world_entity ? EntityBrushCount( world_entity, KOUT_FILTER_TERRAIN ) : 0;
+    if ( Collapsed( KOUT_KEY_TERRAIN ) || !world_entity )
+        return;
+    FlattenEntityBrushes( world_entity, 1, KOUT_FILTER_TERRAIN );
 }
 
 void FlattenCurves()
@@ -503,12 +537,13 @@ void FlattenImages()
     }
 }
 
-// Divergence from Plasticity: KIWI emits six fixed top-level sections, including
+// Divergence from Plasticity: KIWI emits seven fixed top-level sections, including
 // empty ones; Plasticity emits only non-empty type sections within each group.
 void Flatten()
 {
     s_rows.clear();
     FlattenEntitySection( KOUT_SECTION_BRUSHES );
+    FlattenTerrain();
     FlattenCurves();
     FlattenEntitySection( KOUT_SECTION_ENTITIES );
     FlattenEntitySection( KOUT_SECTION_LIGHTS );
@@ -529,13 +564,16 @@ void AutoExpandForSelection()
 
     for ( entity_s *e = entityInsts.next; e && e != &entityInsts; e = e->next )
     {
-        bool any = false;
+        bool any = false, anyTerrain = false, anyOther = false;
         for ( selbrush_t *b = e->brushes.ownerNext; b && b != &e->brushes; b = b->ownerNext )
         {
             if ( BrushSelected( b ) )
             {
                 any = true;
-                break;
+                if ( IsTerrainNode( b ) ) anyTerrain = true;
+                else                      anyOther   = true;
+                if ( anyTerrain && anyOther )
+                    break;
             }
         }
         if ( !any )
@@ -543,7 +581,9 @@ void AutoExpandForSelection()
 
         if ( e == world_entity )
         {
-            SetCollapsed( KOUT_KEY_BRUSHES, false );
+            // Worldspawn lists its terrain under "Terrain", the rest under "Brushes".
+            if ( anyOther )   SetCollapsed( KOUT_KEY_BRUSHES, false );
+            if ( anyTerrain ) SetCollapsed( KOUT_KEY_TERRAIN, false );
             continue;
         }
 
@@ -857,20 +897,121 @@ bool UngroupEntity( entity_s *inst, const char *op )
     return true;
 }
 
+// Section eyes: a category row's eye reads "everything in it is hidden" and one
+// click applies the inverse to every member.  Members per section:
+//   Brushes  = worldspawn's non-terrain brushes + every func_group's brushes
+//   Terrain  = worldspawn's terrain meshes
+//   Entities / Lights / Models = every brush of every entity classed there
+//   Curves   = every construction object;  Images = every reference image.
+bool SectionIsBrushBacked( koutKind_t k )
+{
+    return k == KOUT_SECTION_BRUSHES || k == KOUT_SECTION_TERRAIN || k == KOUT_SECTION_ENTITIES
+        || k == KOUT_SECTION_LIGHTS  || k == KOUT_SECTION_MODELS;
+}
+
+// Walk the brushes a section lists.  `apply` < 0 counts (n / hidden), else sets hidden.
+void SectionBrushes( koutKind_t k, int apply, int *n, int *nh )
+{
+    if ( n )  *n  = 0;
+    if ( nh ) *nh = 0;
+    for ( entity_s *e = entityInsts.next; e && e != &entityInsts; e = e->next )
+    {
+        koutFilter_t filter = KOUT_FILTER_ALL;
+        if ( e == world_entity )
+        {
+            if ( k == KOUT_SECTION_BRUSHES )      filter = KOUT_FILTER_NOT_TERRAIN;
+            else if ( k == KOUT_SECTION_TERRAIN ) filter = KOUT_FILTER_TERRAIN;
+            else                                  continue;
+        }
+        else if ( EntitySection( e ) != k )
+            continue;
+        for ( selbrush_t *b = e->brushes.ownerNext; b && b != &e->brushes; b = b->ownerNext )
+        {
+            if ( !PassesFilter( b, filter ) )
+                continue;
+            if ( apply < 0 )
+            {
+                if ( n )  ++*n;
+                if ( nh && BrushHidden( b ) ) ++*nh;
+            }
+            else
+                SetBrushHidden( b, apply != 0 );
+        }
+    }
+}
+
+void SectionEyeState( koutKind_t k, bool *hidden, bool *hasEye )
+{
+    int n = 0, nh = 0;
+    if ( SectionIsBrushBacked( k ) )
+        SectionBrushes( k, -1, &n, &nh );
+    else if ( k == KOUT_SECTION_CURVES )
+    {
+        n = KiwiCon_Count();
+        for ( int i = 0; i < n; ++i )
+            if ( KiwiCon_Hidden( i ) ) ++nh;
+    }
+    else if ( k == KOUT_SECTION_IMAGES )
+    {
+        n = KiwiRefImage_Count();
+        for ( int i = 0; i < n; ++i )
+        {
+            const krefImage_t *image = KiwiRefImage_At( i );
+            if ( image && image->hidden ) ++nh;
+        }
+    }
+    *hidden = ( n > 0 && nh == n );
+    *hasEye = ( n > 0 );
+}
+
+void SectionSetHidden( koutKind_t k, bool want )
+{
+    if ( SectionIsBrushBacked( k ) )
+    {
+        // One visibility record covers the whole section.
+        KiwiVis_UndoPush( "hide section (outliner)" );
+        SectionBrushes( k, want ? 1 : 0, nullptr, nullptr );
+        KiwiVis_UndoCommit();
+    }
+    else if ( k == KOUT_SECTION_CURVES )
+    {
+        KiwiCon_UndoPush();
+        const int n = KiwiCon_Count();
+        for ( int i = 0; i < n; ++i )
+            KiwiCon_SetHidden( i, want );
+    }
+    else if ( k == KOUT_SECTION_IMAGES )
+    {
+        const int n = KiwiRefImage_Count();
+        for ( int i = 0; i < n; ++i )
+            KiwiRefImage_SetHidden( i, want );
+    }
+}
+
 // Row drawing
 // The shell has no icon atlas, so the eye is drawn directly. Two-argument
 // PathStroke is unambiguous across the vendored ImGui signature swap (imgui.h:3551).
+// Open = an almond outline with a filled iris, a darker pupil and a highlight;
+// closed = the lower lid with three lashes.
 void DrawEye( ImDrawList *dl, ImVec2 c, float r, bool hidden, ImU32 col )
 {
     if ( !hidden )
     {
+        // Almond: two arcs of radius 1.55r whose centres sit 0.9r above/below the
+        // pupil; they meet 1.26r either side of it (sqrt(1.55^2 - 0.9^2)).
         dl->PathClear();
-        dl->PathArcTo( ImVec2( c.x, c.y + r * 1.15f ), r * 1.55f, -1.20f, -1.94f, 12 );
-        dl->PathStroke( col, 1.3f );
+        dl->PathArcTo( ImVec2( c.x, c.y + r * 0.90f ), r * 1.55f, -2.52f, -0.62f, 14 );
+        dl->PathArcTo( ImVec2( c.x, c.y - r * 0.90f ), r * 1.55f,  0.62f,  2.52f, 14 );
+        dl->PathFillConvex( ( col & 0x00FFFFFFu ) | 0x30000000u );      // faint white
         dl->PathClear();
-        dl->PathArcTo( ImVec2( c.x, c.y - r * 1.15f ), r * 1.55f, 1.20f, 1.94f, 12 );
-        dl->PathStroke( col, 1.3f );
-        dl->AddCircleFilled( c, r * 0.42f, col, 10 );
+        dl->PathArcTo( ImVec2( c.x, c.y + r * 0.90f ), r * 1.55f, -2.52f, -0.62f, 14 );
+        dl->PathArcTo( ImVec2( c.x, c.y - r * 0.90f ), r * 1.55f,  0.62f,  2.52f, 14 );
+        dl->PathStroke( col, 1.2f, ImDrawFlags_Closed );   // vendored order: (col, thickness, flags)
+        // Iris, pupil, glint.
+        dl->AddCircleFilled( c, r * 0.58f, col, 12 );
+        dl->AddCircleFilled( c, r * 0.28f, IM_COL32( 30, 30, 36, 255 ), 10 );
+        dl->AddCircleFilled( ImVec2( c.x - r * 0.20f, c.y - r * 0.22f ), r * 0.14f,
+                             IM_COL32( 255, 255, 255, 230 ), 8 );
     }
     else
     {
@@ -903,6 +1044,7 @@ void DrawArrow( ImDrawList *dl, ImVec2 c, float r, bool open, ImU32 col )
 bool RowAcceptsBrushes( const koutRow_t &r )
 {
     return r.kind == KOUT_SECTION_BRUSHES      // -> worldspawn (ungroup)
+        || r.kind == KOUT_SECTION_TERRAIN      // -> worldspawn as well
         || r.kind == KOUT_GROUP_ENTITY
         || r.kind == KOUT_ENTITY;
 }
@@ -931,10 +1073,9 @@ void ApplyDrop( const koutDrag_t &drag, const koutRow_t &target )
         if ( moving.empty() )
             moving.push_back( drag.inst );
 
-        entity_s *targetInst = ( target.kind == KOUT_SECTION_BRUSHES ) ? world_entity : target.ent;
-        ReparentBrushes( moving, targetInst,
-                         ( target.kind == KOUT_SECTION_BRUSHES ) ? "outliner ungroup"
-                                                                 : "outliner group" );
+        const bool toWorld = target.kind == KOUT_SECTION_BRUSHES || target.kind == KOUT_SECTION_TERRAIN;
+        entity_s *targetInst = toWorld ? world_entity : target.ent;
+        ReparentBrushes( moving, targetInst, toWorld ? "outliner ungroup" : "outliner group" );
         return;
     }
 
@@ -1163,6 +1304,15 @@ void KiwiOutliner_Draw()
                     hasEye = ( n > 0 );
                     break;
                 }
+                case KOUT_SECTION_BRUSHES:
+                case KOUT_SECTION_TERRAIN:
+                case KOUT_SECTION_CURVES:
+                case KOUT_SECTION_ENTITIES:
+                case KOUT_SECTION_LIGHTS:
+                case KOUT_SECTION_MODELS:
+                case KOUT_SECTION_IMAGES:
+                    SectionEyeState( r.kind, &hidden, &hasEye );
+                    break;
                 default:
                     break;
                 }
@@ -1210,6 +1360,11 @@ void KiwiOutliner_Draw()
                         {
                             KiwiRefImage_SetHidden( r.imageIndex, want );
                         }
+                        else if ( r.key >= KOUT_KEY_BRUSHES )      // a category row
+                        {
+                            SectionSetHidden( r.kind, want );
+                            g_nUpdateBits = -1;
+                        }
                     }
                 }
                 ImGui::SameLine( 0.0f, 0.0f );
@@ -1245,6 +1400,9 @@ void KiwiOutliner_Draw()
                 {
                 case KOUT_SECTION_BRUSHES:
                     _snprintf( label, sizeof( label ), "Brushes (%i)", r.count );
+                    break;
+                case KOUT_SECTION_TERRAIN:
+                    _snprintf( label, sizeof( label ), "Terrain (%i)", r.count );
                     break;
                 case KOUT_SECTION_CURVES:
                     _snprintf( label, sizeof( label ), "Curves (%i)", r.count );

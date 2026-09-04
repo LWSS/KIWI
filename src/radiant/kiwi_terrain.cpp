@@ -6,7 +6,9 @@
 //
 // Sculpts the control points of the selected patches (optionally every visible patch)
 // with a circular or square brush: raise/lower, set height, smooth, noise, texture
-// layers, vertex colour, grass scatter, trim, plus chunk splitting and an expander.
+// layers, vertex colour, grass scatter, trim, plus chunk splitting and terrain
+// creation ("Allow terrain creation": the Raise brush lays new chunks in the empty
+// lattice cells it covers, next to existing terrain or over nothing at all).
 //
 // TEXTURE LAYERS live on ONE patch.  patchMesh_t.kiwiLayer[4] names up to four extra
 // materials; the weight of layer k is the control point's vert_color byte k (r,g,b,a).
@@ -25,13 +27,16 @@
 #include <gfx_d3d/r_material.h>
 
 #include "kiwi_command.h"
+#include "kiwi_droptrace.h"
 #include "kiwi_fmt.h"
 #include "kiwi_grass.h"
 #include "kiwi_lines.h"
 #include "kiwi_material.h"
 #include "kiwi_matwriter.h"
+#include "kiwi_numeric.h"    // KiwiNum_EvalDisplay - height fields take the viewport's unit grammar
 #include "kiwi_pick.h"
 #include "kiwi_terrain.h"
+#include "kiwi_units.h"      // KiwiUnits_Format / Units_FromDisplay
 #include "radiant_registry.h"
 
 #include <float.h>
@@ -71,6 +76,7 @@ extern void         Undo_AddBrushList( selbrush_t *list );             // undo.c
 extern void         Undo_EndBrushList( selbrush_t *list );             // undo.cpp:576
 extern void         Undo_AddEntity_W( entity_s *ent );                 // undo.cpp:633
 extern void         Undo_End();
+extern void         Undo_KiwiMarkCreated( brush_t *def );              // undo.cpp (KIWI tail)
 // Legacy soft-select vertex drag (Advanced Patch Editor mode 1).
 extern int          AdvPatchEdit_GetMode();                            // patchdialog.cpp
 extern void         AdvPatchEdit_SetMode( int mode );
@@ -120,8 +126,7 @@ namespace
     float s_inner       = 64.0f;
     float s_strength    = 1.0f;      // 0..2
     float s_squareRot   = 0.0f;      // degrees, square brush only
-    float s_amount      = 64.0f;     // raise speed: units per second at a 128-unit outer radius
-    bool  s_scaleWithRadius = true;
+    float s_amount      = 128.0f;    // raise speed: units per second at full weight, 128 radius
     float s_targetZ     = 0.0f;      // set-height target: an absolute world Z
     float s_noiseScale  = 32.0f;
     float s_noiseFreq   = 0.004f;
@@ -131,10 +136,15 @@ namespace
     bool  s_affectUnselected = false;
     float s_chunkSize   = 2048.0f;   // max patch side; the expander/split chunk size
     int   s_density     = 8;         // Tessellate: cells across the whole patch (any size; >15 splits)
-    bool  s_expand      = false;     // Raise: create chunks in empty lattice cells under the brush
+    bool  s_expand      = false;     // Raise: "Allow terrain creation" - lay chunks in empty lattice cells
+    float s_createZ     = 0.0f;      // creation: base height where nothing at all is under the cursor
+    int   s_createCells = 8;         // creation: cells per side of a chunk laid with no terrain in reach
+    bool  s_createOnSurfaces = true; // creation: the cursor lands on brushes/models before the base plane
     bool  s_terrainOnly = false;
     bool  s_softSelect  = false;
-    bool  s_hideWire    = true;      // paint modes hide the patch wireframe (Tab)
+    bool  s_hideWire    = false;     // armed: hide the patch wireframe entirely (Tab toggles)
+    float s_wireReach   = 1.25f;     // armed: wireframe shown within outer radius x this
+    bool  s_heatmap     = true;      // armed height tools: patches wear a height gradient
 
     // ── session ──────────────────────────────────────────────────────────────
     bool  s_loaded = false;
@@ -144,6 +154,15 @@ namespace
     bool  s_cursorHave = false;
     float s_cursor[3]  = { 0.0f, 0.0f, 0.0f };
     selbrush_t *s_cursorNode = nullptr;      // the patch under the cursor (ring drop target)
+    // What the cursor landed on.  Only "Allow terrain creation" lets it leave the patches.
+    enum kterCursor_t { KCUR_NONE = 0, KCUR_PATCH, KCUR_SURFACE, KCUR_PLANE };
+    int   s_cursorKind = KCUR_NONE;
+    patchMesh_t *s_scratchLike = nullptr;    // template for chunks laid with no terrain in reach
+    int   s_created    = 0;                  // chunks laid by the current stroke
+    // Height gradient ("heatmap") range over the eligible patches while armed.
+    bool  s_heatValid  = false;
+    float s_heatMinZ   = 0.0f;
+    float s_heatMaxZ   = 1.0f;
 
     bool  s_stroke      = false;
     bool  s_undoOpen    = false;
@@ -226,7 +245,7 @@ namespace
         if ( s_tool < 0 || s_tool >= KTER_TOOL_COUNT ) s_tool = KTER_RAISE;
         if ( s_shape != KTER_SQUARE ) s_shape = KTER_CIRCLE;
         if ( s_falloff < 0 || s_falloff > KTER_FO_CONSTANT ) s_falloff = KTER_FO_SMOOTH;
-        s_outer     = ClampF( s_outer, 4.0f, 8192.0f );
+        s_outer     = ClampF( s_outer, 4.0f, 12288.0f );
         s_inner     = ClampF( s_inner, 0.0f, s_outer );
         s_strength  = ClampF( s_strength, 0.01f, 2.0f );
         s_squareRot = ClampF( s_squareRot, -180.0f, 180.0f );
@@ -240,6 +259,10 @@ namespace
         s_chunkSize = ClampF( s_chunkSize, 256.0f, 8192.0f );
         if ( s_density < 1 ) s_density = 1;
         if ( s_density > 120 ) s_density = 120;
+        s_createZ = ClampF( s_createZ, -65536.0f, 65536.0f );
+        if ( s_createCells < 1 )  s_createCells = 1;
+        if ( s_createCells > 15 ) s_createCells = 15;
+        s_wireReach = ClampF( s_wireReach, 1.0f, 4.0f );
     }
 
     void Load()
@@ -255,7 +278,6 @@ namespace
         s_strength  = ReadFloat( "Strength", 1.0f );
         s_squareRot = ReadFloat( "SquareRot", 0.0f );
         s_amount    = ReadFloat( "RaiseSpeed", 64.0f );
-        s_scaleWithRadius = Radiant_ProfileGetInt( KTER_PROFILE, "ScaleWithRadius", 1 ) != 0;
         s_targetZ   = ReadFloat( "TargetZ", 0.0f );
         s_noiseScale = ReadFloat( "NoiseScale", 32.0f );
         s_noiseFreq  = ReadFloat( "NoiseFreq", 0.004f );
@@ -268,6 +290,11 @@ namespace
         s_chunkSize = ReadFloat( "ChunkSize2", 2048.0f );
         s_density   = Radiant_ProfileGetInt( KTER_PROFILE, "DensityCells", 8 );
         s_expand    = Radiant_ProfileGetInt( KTER_PROFILE, "Expand", 0 ) != 0;
+        s_createZ   = ReadFloat( "CreateZ", 0.0f );
+        s_createCells = Radiant_ProfileGetInt( KTER_PROFILE, "CreateCells", 8 );
+        s_createOnSurfaces = Radiant_ProfileGetInt( KTER_PROFILE, "CreateOnSurfaces", 1 ) != 0;
+        s_wireReach = ReadFloat( "WireReach", 1.25f );
+        s_heatmap   = Radiant_ProfileGetInt( KTER_PROFILE, "Heatmap", 1 ) != 0;
         s_terrainOnly = Radiant_ProfileGetInt( KTER_PROFILE, "TerrainOnly", 0 ) != 0;
         Sanitize();
     }
@@ -283,7 +310,6 @@ namespace
         WriteFloat( "Strength", s_strength );
         WriteFloat( "SquareRot", s_squareRot );
         WriteFloat( "RaiseSpeed", s_amount );
-        Radiant_ProfileSetInt( KTER_PROFILE, "ScaleWithRadius", s_scaleWithRadius ? 1 : 0 );
         WriteFloat( "TargetZ", s_targetZ );
         WriteFloat( "NoiseScale", s_noiseScale );
         WriteFloat( "NoiseFreq", s_noiseFreq );
@@ -296,6 +322,11 @@ namespace
         WriteFloat( "ChunkSize2", s_chunkSize );
         Radiant_ProfileSetInt( KTER_PROFILE, "DensityCells", s_density );
         Radiant_ProfileSetInt( KTER_PROFILE, "Expand", s_expand ? 1 : 0 );
+        WriteFloat( "CreateZ", s_createZ );
+        Radiant_ProfileSetInt( KTER_PROFILE, "CreateCells", s_createCells );
+        Radiant_ProfileSetInt( KTER_PROFILE, "CreateOnSurfaces", s_createOnSurfaces ? 1 : 0 );
+        WriteFloat( "WireReach", s_wireReach );
+        Radiant_ProfileSetInt( KTER_PROFILE, "Heatmap", s_heatmap ? 1 : 0 );
         Radiant_ProfileSetInt( KTER_PROFILE, "TerrainOnly", s_terrainOnly ? 1 : 0 );
     }
 
@@ -382,12 +413,61 @@ namespace
         return true;
     }
 
+    bool CreationAllowed()
+    {
+        return s_tool == KTER_RAISE && s_expand;
+    }
+
+    // Cursor resolution.  Patches first (every mode).  With terrain creation allowed
+    // the cursor then lands on any world surface (brushes, models - KiwiDrop_Trace) and
+    // finally on the horizontal base plane, so the brush works over an empty zone.
+    bool ResolveCursor( const ray_t &ray, float outPoint[3], byte outColor[4] )
+    {
+        if ( PickPatches( ray.origin, ray.dir, true, outPoint, outColor, &s_cursorNode ) )
+        {
+            s_cursorKind = KCUR_PATCH;
+            return true;
+        }
+        s_cursorNode = nullptr;
+        if ( outColor )
+            memset( outColor, 255, 4 );
+        if ( !CreationAllowed() )
+        {
+            s_cursorKind = KCUR_NONE;
+            return false;
+        }
+        if ( s_createOnSurfaces )
+        {
+            kiwiDropHit_t hit;
+            if ( KiwiDrop_Trace( ray, false, &hit ) )
+            {
+                memcpy( outPoint, hit.point, sizeof( hit.point ) );
+                s_cursorKind = KCUR_SURFACE;
+                return true;
+            }
+        }
+        if ( fabsf( ray.dir[2] ) > 1e-6f )
+        {
+            const float t = ( s_createZ - ray.origin[2] ) / ray.dir[2];
+            if ( t > 0.0f && t < 131072.0f )
+            {
+                for ( int i = 0; i < 3; ++i )
+                    outPoint[i] = ray.origin[i] + ray.dir[i] * t;
+                outPoint[2] = s_createZ;
+                s_cursorKind = KCUR_PLANE;
+                return true;
+            }
+        }
+        s_cursorKind = KCUR_NONE;
+        return false;
+    }
+
     bool PickCursor( int imgX, int imgY, float outPoint[3], byte outColor[4] )
     {
         ray_t ray;
         if ( !Pick_RayFromImagePos( imgX, imgY, &ray ) )
             return false;
-        return PickPatches( ray.origin, ray.dir, true, outPoint, outColor, &s_cursorNode );
+        return ResolveCursor( ray, outPoint, outColor );
     }
 
     void SampleGrid( const patchMesh_t *src, float x, float y, float *outZ, byte outColor[4] );
@@ -918,9 +998,12 @@ namespace
         }
     }
 
+    // Raise speed grows with the brush (units per second at a 128 outer radius, never
+    // below that): a wide brush moving a hill should not crawl.  Always on - the old
+    // "Speed grows with radius" checkbox was confusing and its off state too slow.
     float AdditiveRate()
     {
-        const float r = s_scaleWithRadius ? s_outer / 128.0f : 1.0f;
+        const float r = s_outer > 128.0f ? s_outer / 128.0f : 1.0f;
         return s_amount * r;
     }
 
@@ -1511,22 +1594,125 @@ namespace
         return false;
     }
 
-    int EmptyCellsUnderBrush( float cells[64][5] )
+    // The lattice a stroke lays chunks on.  With terrain under the cursor - or, when
+    // creation is allowed, within reach of the brush - the chunks CONTINUE that sheet:
+    // its corner anchors the lattice, the chunk sides are the nearest multiple of its
+    // cell per axis (so every new edge point lands on an existing grid point and the
+    // seams share vertices; a rectangular-celled source gets rectangular chunks), and
+    // the new patch copies its materials, flags and layer slots.  With nothing in reach
+    // the lattice is world-origin aligned at the chunk size, "Cells per new chunk"
+    // dense, and the patch wears the texture browser's current material.
+    struct kterLattice_t
     {
-        if ( !s_cursorNode || !s_cursorHave )
+        const patchMesh_t *like;      // template patch; null = fresh (FreshTemplate)
+        entity_s          *owner;
+        float ax, ay;                 // lattice anchor
+        float SX, SY;                 // chunk sides
+        float cellX, cellY;           // grid cell of the chunks
+    };
+
+    // XY distance from a point to a node's bounds rectangle (0 inside).
+    float BoundsDistanceXY( const selbrush_t *b, const float *p )
+    {
+        const float *mins = b->def->mins, *maxs = b->def->maxs;
+        float dx = 0.0f, dy = 0.0f;
+        if ( p[0] < mins[0] ) dx = mins[0] - p[0]; else if ( p[0] > maxs[0] ) dx = p[0] - maxs[0];
+        if ( p[1] < mins[1] ) dy = mins[1] - p[1]; else if ( p[1] > maxs[1] ) dy = p[1] - maxs[1];
+        return sqrtf( dx * dx + dy * dy );
+    }
+
+    // The closest eligible SHEET patch within `reach` of the cursor (XY), so a stroke
+    // that starts beside existing terrain continues its lattice instead of starting a
+    // new one that would never seam with it.
+    selbrush_t *NearestEligiblePatch( const float *p, float reach )
+    {
+        selbrush_t *best = nullptr;
+        float bestD = reach;
+        for ( int pass = 0; pass < 2; ++pass )
+        {
+            selbrush_t *head = pass == 0 ? &selected_brushes : &active_brushes;
+            for ( selbrush_t *b = head->next; b && b != head; b = b->next )
+            {
+                if ( !PatchEligible( b ) || !GridIsSheet( b->patch->def ) )
+                    continue;
+                const float d = BoundsDistanceXY( b, p );
+                if ( d < bestD )
+                {
+                    bestD = d;
+                    best  = b;
+                }
+            }
+        }
+        return best;
+    }
+
+    // Template for a chunk laid with no terrain in reach: a terrain mesh wearing the
+    // texture browser's current material and lightmap (Create_Terrain's rule, pmesh.cpp
+    // 0x43b841), no layers, no contents/tool flags.  Kept as one scratch def.
+    const patchMesh_t *FreshTemplate()
+    {
+        if ( !s_scratchLike )
+            s_scratchLike = MakeNewPatch();
+        patchMesh_t *p = s_scratchLike;
+        p->type       = PATCH_TERRAIN;
+        p->contents   = 0;
+        p->flags      = 0;
+        p->subDivType = 8;
+        memset( p->kiwiLayer, 0, sizeof( p->kiwiLayer ) );
+        const curTexWndLayer_t *cur = g_qeglobals.random_texture_stuff;
+        if ( cur[0].mtl.lyrMtl )
+        {
+            p->texture.lyrMtl = cur[0].mtl.lyrMtl;
+            p->texture.radMtl = cur[0].mtl.radMtl;
+        }
+        if ( cur[1].mtl.lyrMtl )
+        {
+            p->lightmap.lyrMtl = cur[1].mtl.lyrMtl;
+            p->lightmap.radMtl = cur[1].mtl.radMtl;
+        }
+        return p;
+    }
+
+    bool ResolveLattice( kterLattice_t *L )
+    {
+        if ( !s_cursorHave )
+            return false;
+        selbrush_t *node = s_cursorNode;
+        if ( !node && CreationAllowed() )
+            node = NearestEligiblePatch( s_cursor, s_outer + s_chunkSize );
+        if ( node )
+        {
+            L->like  = node->patch->def;
+            L->owner = node->owner;
+            L->cellX = CellSizeAxis( L->like, 0 );
+            L->cellY = CellSizeAxis( L->like, 1 );
+            L->SX = floorf( s_chunkSize / L->cellX + 0.5f ) * L->cellX;
+            L->SY = floorf( s_chunkSize / L->cellY + 0.5f ) * L->cellY;
+            if ( L->SX < L->cellX ) L->SX = L->cellX;
+            if ( L->SY < L->cellY ) L->SY = L->cellY;
+            const float *bm = node->def->mins;
+            L->ax = bm[0] - floorf( bm[0] / L->SX ) * L->SX;
+            L->ay = bm[1] - floorf( bm[1] / L->SY ) * L->SY;
+            return true;
+        }
+        if ( !CreationAllowed() || !world_entity )
+            return false;
+        int cells = s_createCells;
+        if ( cells < 1 )  cells = 1;
+        if ( cells > 15 ) cells = 15;
+        L->like  = nullptr;
+        L->owner = world_entity;
+        L->SX = L->SY = s_chunkSize;
+        L->cellX = L->cellY = s_chunkSize / (float)cells;
+        L->ax = L->ay = 0.0f;
+        return true;
+    }
+
+    int EmptyCellsUnderBrush( float cells[64][5], const kterLattice_t &L )
+    {
+        if ( !s_cursorHave )
             return 0;
-        // Chunk sides = the nearest multiple of the source cell size PER AXIS, so every
-        // new edge point lands on an existing grid point and the seams share vertices
-        // (a rectangular-celled source therefore gets rectangular chunks).
-        const patchMesh_t *srcDef = s_cursorNode->patch->def;
-        const float cellX = CellSizeAxis( srcDef, 0 ), cellY = CellSizeAxis( srcDef, 1 );
-        float SX = floorf( s_chunkSize / cellX + 0.5f ) * cellX;
-        float SY = floorf( s_chunkSize / cellY + 0.5f ) * cellY;
-        if ( SX < cellX ) SX = cellX;
-        if ( SY < cellY ) SY = cellY;
-        const float *bm = s_cursorNode->def->mins;
-        const float ax = bm[0] - floorf( bm[0] / SX ) * SX;
-        const float ay = bm[1] - floorf( bm[1] / SY ) * SY;
+        const float SX = L.SX, SY = L.SY, ax = L.ax, ay = L.ay;
         const float r = s_outer;
         const int cx0 = (int)floorf( ( s_cursor[0] - r - ax ) / SX ), cx1 = (int)floorf( ( s_cursor[0] + r - ax ) / SX );
         const int cy0 = (int)floorf( ( s_cursor[1] - r - ay ) / SY ), cy1 = (int)floorf( ( s_cursor[1] + r - ay ) / SY );
@@ -1562,19 +1748,30 @@ namespace
         return n;
     }
 
+    // Hover preview: the cells the next stroke would fill.
+    int PreviewCells()
+    {
+        kterLattice_t L;
+        if ( !CreationAllowed() || !ResolveLattice( &L ) )
+            return 0;
+        return EmptyCellsUnderBrush( s_expandCells, L );
+    }
+
     void ExpandUnderBrush()
     {
+        kterLattice_t L;
+        if ( !ResolveLattice( &L ) )
+            return;
         float cells[64][5];
-        const int n = EmptyCellsUnderBrush( cells );
+        const int n = EmptyCellsUnderBrush( cells, L );
         if ( !n )
             return;
-        const patchMesh_t *like = s_cursorNode->patch->def;
-        const float cellX = CellSizeAxis( like, 0 ), cellY = CellSizeAxis( like, 1 );
+        const patchMesh_t *like = L.like ? L.like : FreshTemplate();
         for ( int c = 0; c < n; ++c )
         {
-            selbrush_t *node = CreateChunkXY( like, s_cursorNode->owner, cells[c][0], cells[c][1],
+            selbrush_t *node = CreateChunkXY( like, L.owner, cells[c][0], cells[c][1],
                                               cells[c][2], cells[c][3],
-                                              PointsFor( cells[c][2], cellX ), PointsFor( cells[c][3], cellY ),
+                                              PointsFor( cells[c][2], L.cellX ), PointsFor( cells[c][3], L.cellY ),
                                               nullptr, cells[c][4] );
             // Seams: every border point takes the height of the terrain already there
             // (vertical probe, this chunk excluded), so shared edges match exactly.
@@ -1602,13 +1799,17 @@ namespace
             }
             if ( s_undoOpen )
             {
+                // Created INSIDE the stroke's record: stamp it as created (Undo_Undo
+                // frees it, nothing restores it) and pre-mark it painted so the first
+                // stamp does not save a copy that would come back after the undo.
                 def->xx22b = 1;
-                Patch_PaintMarkUndo( def );
+                Undo_KiwiMarkCreated( node->def );
             }
             // The new chunk joins the SELECTION, so the next stroke (which targets the
             // selection) keeps moving it with its neighbours instead of leaving a step.
             Select_Brush( node, 0, 0, 0 );
             s_targets.push_back( node );
+            ++s_created;
         }
         g_nUpdateBits = -1;
     }
@@ -2003,6 +2204,7 @@ namespace
             s_ringCount  = 0;
             g_nUpdateBits |= W_CAMERA;
         }
+        s_cursorKind = KCUR_NONE;
     }
 
     bool UpdateCursor( int imgX, int imgY, byte outColor[4] )
@@ -2057,9 +2259,96 @@ namespace
         memcpy( s_lastCenter, s_cursor, sizeof( s_cursor ) );
         s_haveLastCenter = true;
         s_accumDt = 0.0f;
-        if ( s_tool == KTER_RAISE && s_expand && !s_modShift && !s_modCtrl )
+        if ( CreationAllowed() && !s_modShift && !s_modCtrl )
             ExpandUnderBrush();
         FlushDirty();
+    }
+
+    // ── height gradient ("heatmap") while a height tool is armed ─────────────
+    // The base VB run of every patch is re-uploaded with a blue→cyan→green→yellow→red
+    // colour by control-point height over a flat opaque material, so relief reads at a
+    // glance instead of hiding under the texture.  Paint modes keep the real look.
+    bool HeatmapActive()
+    {
+        return s_armed && s_heatmap
+            && ( s_tool == KTER_RAISE || s_tool == KTER_SETHEIGHT || s_tool == KTER_SMOOTH
+              || s_tool == KTER_NOISE || s_tool == KTER_TRIM );
+    }
+
+    // Min/max control-point Z over the eligible patches; true when the range moved.
+    bool ComputeHeatRange()
+    {
+        float lo = FLT_MAX, hi = -FLT_MAX;
+        for ( int pass = 0; pass < 2; ++pass )
+        {
+            selbrush_t *head = pass == 0 ? &selected_brushes : &active_brushes;
+            for ( selbrush_t *b = head->next; b && b != head; b = b->next )
+            {
+                if ( !PatchEligible( b ) )
+                    continue;
+                const patchMesh_t *def = b->patch->def;
+                for ( int i = 0; i < def->width; ++i )
+                    for ( int j = 0; j < def->height; ++j )
+                    {
+                        const float z = def->ctrl[i][j].xyz[2];
+                        if ( z < lo ) lo = z;
+                        if ( z > hi ) hi = z;
+                    }
+            }
+        }
+        if ( lo > hi )
+        {
+            lo = 0.0f;
+            hi = 1.0f;
+        }
+        if ( hi - lo < 16.0f )                 // a flat sheet: a 16-unit band keeps the colour stable
+        {
+            const float mid = ( lo + hi ) * 0.5f;
+            lo = mid - 8.0f;
+            hi = mid + 8.0f;
+        }
+        const bool moved = !s_heatValid || fabsf( lo - s_heatMinZ ) > 0.5f || fabsf( hi - s_heatMaxZ ) > 0.5f;
+        s_heatMinZ  = lo;
+        s_heatMaxZ  = hi;
+        s_heatValid = true;
+        return moved;
+    }
+
+    // Packed BGRA (the patch VB order) for a 0..1 height fraction.
+    unsigned int HeatColor( float t )
+    {
+        t = ClampF( t, 0.0f, 1.0f );
+        float r, g, b;
+        if ( t < 0.25f )      { const float k = t / 0.25f;            r = 0.0f;     g = k;        b = 1.0f; }
+        else if ( t < 0.5f )  { const float k = ( t - 0.25f ) / 0.25f; r = 0.0f;     g = 1.0f;     b = 1.0f - k; }
+        else if ( t < 0.75f ) { const float k = ( t - 0.5f ) / 0.25f;  r = k;        g = 1.0f;     b = 0.0f; }
+        else                  { const float k = ( t - 0.75f ) / 0.25f; r = 1.0f;     g = 1.0f - k; b = 0.0f; }
+        const unsigned B = (unsigned)( b * 255.0f + 0.5f ), G = (unsigned)( g * 255.0f + 0.5f ), R = (unsigned)( r * 255.0f + 0.5f );
+        return B | ( G << 8 ) | ( R << 16 ) | 0xFF000000u;
+    }
+
+    // Re-upload every patch's visuals (the VB colours come from LayerUpload).
+    void RebuildAllPatchVisuals()
+    {
+        for ( int pass = 0; pass < 2; ++pass )
+        {
+            selbrush_t *head = pass == 0 ? &selected_brushes : &active_brushes;
+            for ( selbrush_t *b = head->next; b && b != head; b = b->next )
+                if ( NodeIsPatch( b ) )
+                {
+                    Patch_Rebuild( b->patch->def, 0 );
+                    ++b->patch->def->version;
+                }
+        }
+        g_nUpdateBits = -1;
+    }
+
+    // Arm / tool / toggle transitions: refresh the range and the uploads.
+    void HeatmapRefresh()
+    {
+        if ( s_armed && s_heatmap )
+            ComputeHeatRange();
+        RebuildAllPatchVisuals();
     }
 
     void EndStroke()
@@ -2077,15 +2366,22 @@ namespace
         Patch_PaintFinish( &active_brushes );
         if ( s_undoOpen )
             Undo_End();
+        // The gradient range follows the terrain: re-tint everything only when the
+        // stroke pushed the extremes (the touched patches re-uploaded already).
+        if ( HeatmapActive() && ComputeHeatRange() )
+            RebuildAllPatchVisuals();
         s_undoOpen = false;
         s_stroke   = false;
         g_nUpdateBits = -1;
-        if ( s_touched )
-            SetStatus( "Armed. Last stroke: %i stamp%s over %i patch%s.",
-                       s_stamps, s_stamps == 1 ? "" : "s", s_touched, s_touched == 1 ? "" : "es" );
+        if ( s_touched || s_created )
+            SetStatus( "Armed. Last stroke: %i stamp%s over %i patch%s, %i chunk%s laid.",
+                       s_stamps, s_stamps == 1 ? "" : "s", s_touched, s_touched == 1 ? "" : "es",
+                       s_created, s_created == 1 ? "" : "s" );
+        else if ( CreationAllowed() )
+            SetStatus( "Armed. The stroke reached no control point and every cell under it was covered." );
         else
             SetStatus( "Armed. The stroke reached no control point (grow the radius or select the patch)." );
-        s_stamps = s_touched = 0;
+        s_stamps = s_touched = s_created = 0;
     }
 
     void SetArmed( bool armed )
@@ -2096,6 +2392,8 @@ namespace
             EndStroke();
         s_armed = armed;
         ClearCursor();
+        if ( s_heatmap )
+            HeatmapRefresh();                  // on: tint every patch; off: real materials back
         KiwiGrass_SetArmed( armed && s_tool == KTER_GRASS );
         SetStatus( armed ? ( s_tool == KTER_GRASS ? "Armed. LMB in the 3D camera scatters; Esc disarms."
                                                   : "Armed. LMB in the 3D camera sculpts; Esc disarms." )
@@ -2107,10 +2405,13 @@ namespace
     {
         if ( tool < 0 || tool >= KTER_TOOL_COUNT )
             return;
+        const bool wasHeat = HeatmapActive();
         s_tool = tool;
         KiwiGrass_SetArmed( s_armed && s_tool == KTER_GRASS );
         if ( s_armed )
             ClearCursor();
+        if ( wasHeat != HeatmapActive() )
+            HeatmapRefresh();
         g_nUpdateBits = -1;          // wireframe hiding depends on the tool
     }
 
@@ -2129,12 +2430,55 @@ namespace
 
     void RadiusStep( float factor )
     {
-        s_outer = ClampF( s_outer * factor, 4.0f, 8192.0f );
+        s_outer = ClampF( s_outer * factor, 4.0f, 12288.0f );
         s_inner = ClampF( s_inner * factor, 0.0f, s_outer );
         Save();
         SyncSoftSelect();
         RebuildRing();
         g_nUpdateBits |= W_CAMERA;
+    }
+
+    // A height field with the viewport's numeric grammar (kiwi_numeric): "12ft 6in",
+    // "3yd", "1/8", "-64" (bare numbers are inches, like the transform HUD).  Idle it
+    // shows KiwiUnits_Format; a click opens the typed text, Enter or clicking away
+    // commits, Esc reverts.  True when a new value landed in *world.
+    bool UnitInputWorld( const char *label, float *world, float width )
+    {
+        static char    s_buf[64];
+        static ImGuiID s_editing = 0;
+        const ImGuiID  id = ImGui::GetID( label );
+        char shown[64];
+        KiwiUnits_Format( shown, sizeof( shown ), *world );
+        const bool editing = ( s_editing == id );
+        ImGui::SetNextItemWidth( width );
+        ImGui::InputText( label, editing ? s_buf : shown, editing ? sizeof( s_buf ) : sizeof( shown ),
+                          ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll );
+        if ( ImGui::IsItemHovered() )
+            ImGui::SetTooltip( "Math and units: 12ft 6in, 3yd, 1/8, -64  (bare numbers are inches)" );
+        bool committed = false;
+        if ( !editing && ImGui::IsItemActivated() )
+        {
+            strncpy( s_buf, shown, sizeof( s_buf ) - 1 );
+            s_buf[sizeof( s_buf ) - 1] = '\0';
+            s_editing = id;
+        }
+        else if ( editing )
+        {
+            if ( ImGui::IsItemDeactivatedAfterEdit() )
+            {
+                float disp = 0.0f;
+                if ( KiwiNum_EvalDisplay( s_buf, &disp ) )
+                {
+                    *world = Units_FromDisplay( disp );
+                    committed = true;
+                }
+                else
+                    Sys_Printf( "Terrain Sculpt: '%s' is not a length (try 12ft 6in, 3yd, 1/8).\n", s_buf );
+            }
+            if ( !ImGui::IsItemActive() )
+                s_editing = 0;
+        }
+        return committed;
     }
 
     bool AcceptMaterialDrop( char *outName, int outSize )
@@ -2337,8 +2681,6 @@ namespace
             ImGui::SetTooltip( "Each layer draws as one extra alpha-blended run with a twin material\n"
                                "(kiwi_blend_<name>, written once next to the real one). The .map keeps\n"
                                "one patch with 'kiwilayer' lines; cod4map expands them at compile time." );
-        if ( ImGui::Checkbox( "Hide patch wireframe while painting (Tab)", &s_hideWire ) )
-            g_nUpdateBits = -1;
     }
 }
 
@@ -2376,15 +2718,19 @@ void KiwiTerrain_OpenWithTool( int tool )
     KiwiWindows_SyncMenu();
 }
 
+// While a sculpt tool is armed this module OWNS the patch wireframe: the ported
+// draws (the selected white tech-29 mesh, the unselected pref grid) stand down and
+// DrawWorld draws the grid only within the brush's reach around the cursor - or
+// nothing at all once Tab has hidden it.  Disarmed = the ported behaviour.
 bool KiwiTerrain_HideWireframe()
 {
-    return s_show && s_hideWire && ( s_tool == KTER_TEXTURE || s_tool == KTER_COLOR );
+    return s_armed && s_tool != KTER_GRASS;
 }
 
 int KiwiTerrain_ExtraLayerCount( patchMesh_t *def )
 {
     Load();
-    if ( !def || !s_previewBlend )
+    if ( !def || !s_previewBlend || HeatmapActive() )   // the gradient replaces the layers
         return 0;
     return UsedSlotCount( def );
 }
@@ -2402,6 +2748,20 @@ void KiwiTerrain_LayerUpload( patchMesh_t *def, int run, int baseRuns,
         return;
     if ( run < baseRuns )
     {
+        // Height gradient while a height tool is armed: the base run turns into a
+        // flat opaque material with the colour by control-point height (a terrain
+        // mesh's render verts ARE its control points; a bezier's are interpolated).
+        if ( run == 0 && HeatmapActive() && verts )
+        {
+            if ( !s_heatValid )
+                ComputeHeatRange();
+            const float span = s_heatMaxZ - s_heatMinZ;
+            for ( int i = 0; i < vertCount; ++i )
+                color[i] = HeatColor( span > 0.0f ? ( verts[i].xyz[2] - s_heatMinZ ) / span : 0.5f );
+            if ( material && ( g_qeglobals.d_opague || g_qeglobals.d_white ) )
+                *material = g_qeglobals.d_opague ? g_qeglobals.d_opague : g_qeglobals.d_white;
+            return;
+        }
         if ( run == 0 && UsedSlotCount( def ) )
             for ( int i = 0; i < vertCount; ++i )
                 color[i] |= 0xFF000000u;
@@ -2471,28 +2831,80 @@ void KiwiTerrain_Draw()
             static const char *s_foNames[] = { "Smooth", "Linear", "Sharp", "Constant" };
             ImGui::SetNextItemWidth( 120.0f );
             changed |= ImGui::Combo( "Falloff", &s_falloff, s_foNames, 4 );
-            changed |= ImGui::SliderFloat( "Outer radius", &s_outer, 4.0f, 2048.0f, "%.0f", ImGuiSliderFlags_Logarithmic );
-            changed |= ImGui::SliderFloat( "Inner radius", &s_inner, 0.0f, 2048.0f, "%.0f", ImGuiSliderFlags_Logarithmic );
+            changed |= ImGui::SliderFloat( "Outer radius", &s_outer, 4.0f, 3072.0f, "%.0f", ImGuiSliderFlags_Logarithmic );
+            changed |= ImGui::SliderFloat( "Inner radius", &s_inner, 0.0f, 3072.0f, "%.0f", ImGuiSliderFlags_Logarithmic );
             if ( s_inner > s_outer )
                 s_inner = s_outer;
             changed |= ImGui::SliderFloat( "Strength", &s_strength, 0.01f, 2.0f, "%.2f" );
             ImGui::TextDisabled( "+ / - resize   Ctrl+wheel resize   Shift+wheel strength" );
+            if ( ImGui::Checkbox( "Hide wireframe (Tab)", &s_hideWire ) )
+                g_nUpdateBits = -1;
+            if ( ImGui::IsItemHovered() )
+                ImGui::SetTooltip( "While armed the patch wireframe is drawn only around the brush\n"
+                                   "(white = patches the stroke moves, grey = the rest). Tab hides it." );
+            if ( !s_hideWire )
+            {
+                ImGui::SameLine();
+                ImGui::SetNextItemWidth( 100.0f );
+                changed |= ImGui::SliderFloat( "Wire reach", &s_wireReach, 1.0f, 4.0f, "x%.2f" );
+                if ( ImGui::IsItemHovered() )
+                    ImGui::SetTooltip( "Wireframe radius as a multiple of the outer radius." );
+            }
+            if ( ImGui::Checkbox( "Height colours while armed", &s_heatmap ) )
+            {
+                Save();
+                HeatmapRefresh();
+            }
+            if ( ImGui::IsItemHovered() )
+                ImGui::SetTooltip( "Height tools (Raise, Set height, Smooth, Noise, Trim) show every patch\n"
+                                   "as a blue -> green -> red gradient by height instead of its texture,\n"
+                                   "so relief reads at a glance. Texture / colour paint keep the real look." );
         }
 
         switch ( s_tool )
         {
         case KTER_RAISE:
-            changed |= ImGui::SliderFloat( "Raise speed", &s_amount, 1.0f, 1024.0f, "%.0f u/s",
+            changed |= ImGui::SliderFloat( "Raise speed", &s_amount, 1.0f, 4096.0f, "%.0f",
                                            ImGuiSliderFlags_Logarithmic );
-            changed |= ImGui::Checkbox( "Speed grows with radius", &s_scaleWithRadius );
-            changed |= ImGui::Checkbox( "Expand terrain into empty space", &s_expand );
             if ( ImGui::IsItemHovered() )
-                ImGui::SetTooltip( "While raising, empty chunk cells under the brush get a new square\n"
-                                   "patch (same materials and layers) at the neighbouring height, then\n"
-                                   "rise with the stroke. Green squares preview them." );
+                ImGui::SetTooltip( "Units per second at full brush weight with a 128 outer radius;\n"
+                                   "wider brushes rise proportionally faster." );
+            changed |= ImGui::Checkbox( "Allow terrain creation", &s_expand );
+            if ( ImGui::IsItemHovered() )
+                ImGui::SetTooltip( "While raising, every empty chunk cell under the brush gets a new terrain\n"
+                                   "patch that then rises with the stroke - anywhere, no patch needed.\n"
+                                   "Next to existing terrain the chunk continues its lattice, materials and\n"
+                                   "layers at the neighbouring height (seams matched). With no terrain in\n"
+                                   "reach the cursor lands on brushes and models, else on the base height,\n"
+                                   "and the chunk wears the texture browser's current material.\n"
+                                   "Green squares preview the cells; a blue ring = base height, cyan = surface." );
+            if ( s_expand )
+            {
+                ImGui::Indent();
+                changed |= UnitInputWorld( "Base height (Z)", &s_createZ, 160.0f );
+                ImGui::SameLine();
+                if ( ImGui::Button( "From cursor##create" ) && s_cursorHave )
+                {
+                    s_createZ = s_cursor[2];
+                    changed = true;
+                }
+                if ( ImGui::IsItemHovered() )
+                    ImGui::SetTooltip( "Take the height under the hover ring (patch, surface or plane)." );
+                ImGui::SetNextItemWidth( 160.0f );
+                changed |= ImGui::SliderInt( "Cells per new chunk", &s_createCells, 1, 15 );
+                if ( ImGui::IsItemHovered() )
+                    ImGui::SetTooltip( "Grid density of a chunk laid with no terrain within reach\n"
+                                       "(reach = outer radius + chunk size). Chunks beside existing\n"
+                                       "terrain copy its cell size instead so the seams share points." );
+                changed |= ImGui::Checkbox( "Land on brushes and models", &s_createOnSurfaces );
+                if ( ImGui::IsItemHovered() )
+                    ImGui::SetTooltip( "Off the patches the cursor first tries the world's brushes and models;\n"
+                                       "untick to sculpt on the base height only, ignoring what is below." );
+                ImGui::Unindent();
+            }
             break;
         case KTER_SETHEIGHT:
-            changed |= ImGui::InputFloat( "Target height (world Z)", &s_targetZ, 1.0f, 16.0f, "%.1f" );
+            changed |= UnitInputWorld( "Target height (Z)", &s_targetZ, 160.0f );
             ImGui::SameLine();
             if ( ImGui::Button( "From cursor" ) && s_cursorHave )
             {
@@ -2513,8 +2925,6 @@ void KiwiTerrain_Draw()
         case KTER_COLOR:
             changed |= ImGui::ColorEdit3( "Colour", s_color, ImGuiColorEditFlags_Uint8 );
             ImGui::TextDisabled( "On a patch with texture layers the colour bytes ARE the layer weights." );
-            if ( ImGui::Checkbox( "Hide patch wireframe while painting (Tab)", &s_hideWire ) )
-                g_nUpdateBits = -1;
             break;
         default:
             break;
@@ -2526,9 +2936,10 @@ void KiwiTerrain_Draw()
             changed |= ImGui::SliderFloat( "Chunk size", &s_chunkSize, 256.0f, 8192.0f, "%.0f",
                                            ImGuiSliderFlags_Logarithmic );
             if ( ImGui::IsItemHovered() )
-                ImGui::SetTooltip( "Largest patch side and the expander's cell. New chunks copy the\n"
-                                   "density of the terrain under the cursor (same cell size), on a\n"
-                                   "lattice that is a multiple of that cell so the seams line up." );
+                ImGui::SetTooltip( "Largest patch side and the cell of terrain creation. New chunks copy\n"
+                                   "the density of the terrain under or near the cursor (same cell size),\n"
+                                   "on a lattice that is a multiple of that cell so the seams line up;\n"
+                                   "with no terrain in reach the lattice starts at the world origin." );
             if ( ImGui::Button( "Split oversized selected patches" ) )
                 SplitOversized();
             ImGui::SeparatorText( "Density" );
@@ -2598,9 +3009,10 @@ void KiwiTerrain_Draw()
             }
             SetArmed( !s_armed );
         }
-        if ( s_armed && s_tool != KTER_GRASS && s_tool != KTER_TRIM && !AnyTargetPatch() )
+        if ( s_armed && s_tool != KTER_GRASS && s_tool != KTER_TRIM && !AnyTargetPatch() && !CreationAllowed() )
             ImGui::TextColored( ImVec4( 1.0f, 0.55f, 0.3f, 1.0f ),
-                                "No patch selected - select the terrain patch(es) or tick 'Affect unselected'." );
+                                "No patch selected - select the terrain patch(es), tick 'Affect unselected',\n"
+                                "or tick 'Allow terrain creation' under Raise to sculpt on empty ground." );
         if ( s_armed )
             ImGui::TextColored( ImVec4( 0.42f, 0.92f, 0.48f, 1.0f ), "%s", s_status );
         else
@@ -2615,6 +3027,68 @@ void KiwiTerrain_Draw()
         extern void KiwiWindows_SyncMenu();
         KiwiWindows_SyncMenu();
     }
+}
+
+// The press, once the cursor is resolved (mouse path and the -kiwitest stroke share it).
+// `picked` = the vertex colour under the cursor (white off the patches).
+static bool BeginStroke( bool shift, bool ctrl, const byte picked[4] )
+{
+    s_modShift = shift;
+    s_modCtrl  = ctrl;
+
+    if ( ctrl && !shift )
+    {
+        if ( s_tool == KTER_SETHEIGHT )
+        {
+            s_targetZ = s_cursor[2];
+            Save();
+            SetStatus( "Armed. Target height picked: %.1f", s_targetZ );
+            return false;
+        }
+        if ( s_tool == KTER_COLOR )
+        {
+            for ( int k = 0; k < 3; ++k )
+                s_color[k] = (float)picked[k] / 255.0f;
+            Save();
+            SetStatus( "Armed. Colour picked." );
+            return false;
+        }
+    }
+
+    if ( s_tool == KTER_TRIM )
+    {
+        s_stroke = true;
+        TrimUnderBrush();
+        return true;
+    }
+
+    // With creation allowed a stroke needs no patch at all: the chunks it lays join
+    // the selection and the targets as they appear.
+    if ( !AnyTargetPatch() && !CreationAllowed() )
+    {
+        SetStatus( "Armed. Select the patch(es) to sculpt, or tick 'Affect unselected'." );
+        return false;
+    }
+    BuildTargets();
+
+    Undo_ClearRedo();
+    Undo_GeneralStart( "terrain sculpt" );
+    s_undoOpen = true;
+    Patch_Paint( &selected_brushes );
+    Patch_Paint( &active_brushes );          // seam stitching may touch unselected neighbours
+
+    s_stroke    = true;
+    s_stamps    = 0;
+    s_touched   = 0;
+    s_created   = 0;
+    s_noiseSeed += 1.0f;
+    s_haveLastCenter = false;
+    s_accumDt   = 1.0f / 60.0f;
+    SetStatus( s_cursorKind == KCUR_PLANE   ? "Sculpting on the base height..."
+             : s_cursorKind == KCUR_SURFACE ? "Sculpting on a world surface..."
+                                            : "Sculpting..." );
+    ApplyStroke();
+    return true;
 }
 
 // ── viewport bridge ──────────────────────────────────────────────────────────
@@ -2649,57 +3123,7 @@ bool KiwiTerrain_HandleDown( int imgX, int imgY, bool shift, bool ctrl )
         SetStatus( "Armed. No patch under the cursor." );
         return false;
     }
-    s_modShift = shift;
-    s_modCtrl  = ctrl;
-
-    if ( ctrl && !shift )
-    {
-        if ( s_tool == KTER_SETHEIGHT )
-        {
-            s_targetZ = s_cursor[2];
-            Save();
-            SetStatus( "Armed. Target height picked: %.1f", s_targetZ );
-            return false;
-        }
-        if ( s_tool == KTER_COLOR )
-        {
-            for ( int k = 0; k < 3; ++k )
-                s_color[k] = (float)picked[k] / 255.0f;
-            Save();
-            SetStatus( "Armed. Colour picked." );
-            return false;
-        }
-    }
-
-    if ( s_tool == KTER_TRIM )
-    {
-        s_stroke = true;
-        TrimUnderBrush();
-        return true;
-    }
-
-    if ( !AnyTargetPatch() )
-    {
-        SetStatus( "Armed. Select the patch(es) to sculpt, or tick 'Affect unselected'." );
-        return false;
-    }
-    BuildTargets();
-
-    Undo_ClearRedo();
-    Undo_GeneralStart( "terrain sculpt" );
-    s_undoOpen = true;
-    Patch_Paint( &selected_brushes );
-    Patch_Paint( &active_brushes );          // seam stitching may touch unselected neighbours
-
-    s_stroke    = true;
-    s_stamps    = 0;
-    s_touched   = 0;
-    s_noiseSeed += 1.0f;
-    s_haveLastCenter = false;
-    s_accumDt   = 1.0f / 60.0f;
-    SetStatus( "Sculpting..." );
-    ApplyStroke();
-    return true;
+    return BeginStroke( shift, ctrl, picked );
 }
 
 void KiwiTerrain_HandleDrag( int imgX, int imgY )
@@ -2756,7 +3180,7 @@ bool KiwiTerrain_HandleKey( int vk )
         SetArmed( false );
         return true;
     }
-    if ( vk == 0x09 && ( s_tool == KTER_TEXTURE || s_tool == KTER_COLOR ) )   // VK_TAB
+    if ( vk == 0x09 && s_tool != KTER_GRASS )  // VK_TAB: hide / show the wireframe around the brush
     {
         s_hideWire = !s_hideWire;
         g_nUpdateBits = -1;
@@ -2808,8 +3232,123 @@ void KiwiTerrain_Hover( int imgX, int imgY, bool over )
         return;
     }
     UpdateCursor( imgX, imgY, nullptr );
-    s_expandCellCount = ( s_tool == KTER_RAISE && s_expand && s_cursorHave )
-                      ? EmptyCellsUnderBrush( s_expandCells ) : 0;
+    s_expandCellCount = PreviewCells();
+}
+
+// The armed-tool wireframe: every eligible patch's render grid (the same cells,
+// edges and turned-edge diagonals DrawPatchesWireframeGrid emits), but only the
+// segments with an end within outer radius x "Wire reach" of the cursor, in the
+// brush's shape.  Patches the stroke moves (the selection, plus the active list
+// under "Affect unselected") are white; the rest grey.
+// A patch whose bounds meet the reach box (the candidate test the wireframe uses).
+static bool WirePatchInReach( selbrush_t *b, float pad )
+{
+    if ( !PatchEligible( b ) )
+        return false;
+    const float *mins = b->def->mins, *maxs = b->def->maxs;
+    if ( s_cursor[0] + pad < mins[0] || s_cursor[0] - pad > maxs[0]
+      || s_cursor[1] + pad < mins[1] || s_cursor[1] - pad > maxs[1] )
+        return false;
+    const curvePatchDef_t *mesh = b->patch->def->curveDef;
+    return mesh && mesh->width > 1 && mesh->height > 1 && mesh->verts;
+}
+
+// Never a hole: when the reach covers more grid than the line budget allows, the
+// whole wireframe coarsens uniformly (every 2nd / 4th / 8th grid line, diagonals
+// dropped) instead of some patches drawing and the rest being cut off.  The budget
+// is what one frame's render-command buffer takes comfortably (16k segments).
+static void DrawWireframeAoE()
+{
+    if ( !s_armed || s_tool == KTER_GRASS || s_hideWire || !s_cursorHave )
+        return;
+    const float reach  = s_outer * s_wireReach;
+    const float pad    = s_shape == KTER_SQUARE ? reach * 1.42f : reach;
+    const int   budget = 16384;
+
+    // Pass 1: how many segments would the full grid take?  Only cells inside the
+    // brush's bounding square count (the reach circle is a little less).
+    int estimate = 0;
+    for ( int pass = 0; pass < 2; ++pass )
+    {
+        selbrush_t *head = pass == 0 ? &selected_brushes : &active_brushes;
+        for ( selbrush_t *b = head->next; b && b != head; b = b->next )
+        {
+            if ( !WirePatchInReach( b, pad ) )
+                continue;
+            const curvePatchDef_t *mesh = b->patch->def->curveDef;
+            const float *mins = b->def->mins, *maxs = b->def->maxs;
+            const float ex = maxs[0] - mins[0], ey = maxs[1] - mins[1];
+            // Fraction of the patch inside the reach square, per axis.
+            float fx = 1.0f, fy = 1.0f;
+            if ( ex > 1.0f )
+            {
+                const float x0 = mins[0] > s_cursor[0] - pad ? mins[0] : s_cursor[0] - pad;
+                const float x1 = maxs[0] < s_cursor[0] + pad ? maxs[0] : s_cursor[0] + pad;
+                fx = ( x1 - x0 ) / ex;
+            }
+            if ( ey > 1.0f )
+            {
+                const float y0 = mins[1] > s_cursor[1] - pad ? mins[1] : s_cursor[1] - pad;
+                const float y1 = maxs[1] < s_cursor[1] + pad ? maxs[1] : s_cursor[1] + pad;
+                fy = ( y1 - y0 ) / ey;
+            }
+            const float cells = (float)( ( mesh->width - 1 ) * ( mesh->height - 1 ) ) * ClampF( fx, 0.0f, 1.0f ) * ClampF( fy, 0.0f, 1.0f );
+            estimate += (int)( cells * 3.0f ) + mesh->width + mesh->height;
+        }
+    }
+    int stride = 1;
+    while ( stride < 8 && estimate / ( stride * stride ) > budget )
+        stride *= 2;
+
+    // Pass 2: draw.  With a stride the cell corners are every stride-th grid line,
+    // the last line clamped to the border so the patch edge always closes.
+    KiwiLines_Begin( budget + 1024, 1 );
+    for ( int pass = 0; pass < 2; ++pass )
+    {
+        const bool target = pass == 0 || s_affectUnselected;
+        if ( target ) KiwiLines_Color( 0.95f, 0.95f, 0.95f );
+        else          KiwiLines_Color( 0.5f, 0.5f, 0.55f );
+        selbrush_t *head = pass == 0 ? &selected_brushes : &active_brushes;
+        for ( selbrush_t *b = head->next; b && b != head; b = b->next )
+        {
+            if ( !WirePatchInReach( b, pad ) )
+                continue;
+            const patchMesh_t *def = b->patch->def;
+            const curvePatchDef_t *mesh = def->curveDef;
+            const int mw = mesh->width, mh = mesh->height;
+            const curveVert_t *verts = mesh->verts;
+            const bool terrain = ( def->type & PATCH_TERRAIN ) != 0;
+            for ( int row = 0; row + 1 < mh; row += stride )
+            {
+                int row1 = row + stride; if ( row1 > mh - 1 ) row1 = mh - 1;
+                for ( int col = 0; col + 1 < mw; col += stride )
+                {
+                    int col1 = col + stride; if ( col1 > mw - 1 ) col1 = mw - 1;
+                    const float *v00 = verts[col  + row  * mw].xyz;
+                    const float *v10 = verts[col1 + row  * mw].xyz;
+                    const float *v01 = verts[col  + row1 * mw].xyz;
+                    const float *v11 = verts[col1 + row1 * mw].xyz;
+                    const bool in00 = BrushDistance( s_cursor, v00 ) <= reach;
+                    const bool in10 = BrushDistance( s_cursor, v10 ) <= reach;
+                    const bool in01 = BrushDistance( s_cursor, v01 ) <= reach;
+                    const bool in11 = BrushDistance( s_cursor, v11 ) <= reach;
+                    if ( !in00 && !in10 && !in01 && !in11 )
+                        continue;
+                    if ( col == 0 && ( in00 || in01 ) ) KiwiLines_Add( v00, v01 );
+                    if ( row == 0 && ( in00 || in10 ) ) KiwiLines_Add( v00, v10 );
+                    if ( in11 || in10 ) KiwiLines_Add( v11, v10 );
+                    if ( in11 || in01 ) KiwiLines_Add( v11, v01 );
+                    if ( stride == 1 )
+                    {
+                        const bool turned = terrain && ( def->ctrl[col][row].turned_edge & 1 );
+                        if ( turned ) { if ( in00 || in11 ) KiwiLines_Add( v00, v11 ); }
+                        else          { if ( in01 || in10 ) KiwiLines_Add( v01, v10 ); }
+                    }
+                }
+            }
+        }
+    }
+    KiwiLines_Flush();
 }
 
 void KiwiTerrain_DrawWorld()
@@ -2825,9 +3364,15 @@ void KiwiTerrain_DrawWorld()
     if ( !s_armed || !s_cursorHave || s_ringCount < 2 )
         return;
 
+    DrawWireframeAoE();
+
     const bool showInner = s_inner > 0.0f && s_inner < s_outer && s_falloff != KTER_FO_CONSTANT;
     KiwiLines_Begin( s_ringCount * 2 + 4, 2 );
-    KiwiLines_Color( 0.3f, 1.0f, 0.4f );
+    // Off the patches (creation allowed) the ring turns blue on the base plane and
+    // cyan on a brush/model so the operator knows where the chunks will land.
+    if ( s_cursorKind == KCUR_PLANE )        KiwiLines_Color( 0.35f, 0.65f, 1.0f );
+    else if ( s_cursorKind == KCUR_SURFACE ) KiwiLines_Color( 0.35f, 0.95f, 1.0f );
+    else                                     KiwiLines_Color( 0.3f, 1.0f, 0.4f );
     for ( int i = 0; i < s_ringCount; ++i )
         if ( !KiwiLines_Add( s_ringOuter[i], s_ringOuter[( i + 1 ) % s_ringCount] ) )
             break;
@@ -2840,7 +3385,7 @@ void KiwiTerrain_DrawWorld()
     }
     KiwiLines_Flush();
 
-    if ( s_tool == KTER_RAISE && s_expand && s_expandCellCount > 0 )
+    if ( CreationAllowed() && s_expandCellCount > 0 )
     {
         KiwiLines_Begin( s_expandCellCount * 4, 1 );
         KiwiLines_Color( 0.3f, 1.0f, 0.4f );
@@ -2946,4 +3491,95 @@ int KiwiTerrain_JoinSelected()
         Sys_Printf( "Join: the selected terrain patches do not share a full edge with matching "
                     "materials, layers and cell size, or the result would exceed 16 points across.\n" );
     return joins;
+}
+
+// ── -kiwitest entry points (kiwi_test.cpp `terrain` verb) ───────────────────
+bool KiwiTerrain_TestSetTool( const char *name )
+{
+    Load();
+    static const char *const names[KTER_TOOL_COUNT] =
+        { "raise", "setheight", "smooth", "noise", "texture", "colour", "grass", "trim" };
+    for ( int i = 0; i < KTER_TOOL_COUNT; ++i )
+        if ( !_stricmp( name, names[i] ) || ( i == KTER_COLOR && !_stricmp( name, "color" ) ) )
+        {
+            SetTool( i );
+            Save();
+            return true;
+        }
+    return false;
+}
+
+bool KiwiTerrain_TestSet( const char *key, float value )
+{
+    Load();
+    if      ( !_stricmp( key, "outer" ) )       s_outer = value;
+    else if ( !_stricmp( key, "inner" ) )       s_inner = value;
+    else if ( !_stricmp( key, "strength" ) )    s_strength = value;
+    else if ( !_stricmp( key, "speed" ) )       s_amount = value;
+    else if ( !_stricmp( key, "falloff" ) )     s_falloff = (int)value;
+    else if ( !_stricmp( key, "shape" ) )       s_shape = (int)value;
+    else if ( !_stricmp( key, "chunk" ) )       s_chunkSize = value;
+    else if ( !_stricmp( key, "expand" ) )      s_expand = value != 0.0f;
+    else if ( !_stricmp( key, "basez" ) )       s_createZ = value;
+    else if ( !_stricmp( key, "cells" ) )       s_createCells = (int)value;
+    else if ( !_stricmp( key, "surfaces" ) )    s_createOnSurfaces = value != 0.0f;
+    else if ( !_stricmp( key, "targetz" ) )     s_targetZ = value;
+    else if ( !_stricmp( key, "unselected" ) )  s_affectUnselected = value != 0.0f;
+    else if ( !_stricmp( key, "terrainonly" ) ) s_terrainOnly = value != 0.0f;
+    else if ( !_stricmp( key, "hidewire" ) )    s_hideWire = value != 0.0f;
+    else if ( !_stricmp( key, "wirereach" ) )   s_wireReach = value;
+    else if ( !_stricmp( key, "heatmap" ) )     { s_heatmap = value != 0.0f; HeatmapRefresh(); }
+    else
+        return false;
+    Sanitize();
+    Save();
+    RebuildRing();
+    g_nUpdateBits |= W_CAMERA;
+    return true;
+}
+
+void KiwiTerrain_TestArm( bool armed )
+{
+    Load();
+    if ( armed )
+    {
+        s_softSelect = false;
+        SyncSoftSelect();
+    }
+    SetArmed( armed );
+}
+
+// One whole stroke without a mouse: a vertical ray dropped through (x, y) is resolved
+// exactly like the camera cursor (patches, then - with creation allowed - surfaces and
+// the base plane), the press runs, the stroke is held for `seconds`, then released.
+bool KiwiTerrain_TestStroke( float x, float y, float seconds, bool shift, bool ctrl )
+{
+    Load();
+    if ( !s_armed || s_tool == KTER_GRASS )
+        return false;
+    if ( KiwiCmd_Active() )
+        return false;
+    ray_t ray;
+    ray.origin[0] = x; ray.origin[1] = y; ray.origin[2] = 65536.0f;
+    ray.dir[0] = 0.0f; ray.dir[1] = 0.0f; ray.dir[2] = -1.0f;
+    float hit[3];
+    byte  picked[4];
+    if ( !ResolveCursor( ray, hit, picked ) )
+    {
+        ClearCursor();
+        SetStatus( "Armed. No patch under the cursor." );
+        return false;
+    }
+    s_cursorHave = true;
+    memcpy( s_cursor, hit, sizeof( hit ) );
+    RebuildRing();
+    if ( !BeginStroke( shift, ctrl, picked ) )
+        return false;
+    if ( s_stroke && s_tool != KTER_TRIM && seconds > 0.0f )
+    {
+        s_accumDt = seconds;
+        ApplyStroke();
+    }
+    EndStroke();
+    return true;
 }
