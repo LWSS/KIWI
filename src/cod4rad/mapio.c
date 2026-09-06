@@ -382,6 +382,14 @@ void ProcessEntity(Entity_t *entity)
                 WarningMsg(2, "key '%s' has value '%s' which is not a valid vector\n", "_color", ac);
             else
             {
+                /* KIWI FIX: same negative-channel guard as the point lights (NaN after degamma). */
+                if (ambientColor[0] < 0.0f || ambientColor[1] < 0.0f || ambientColor[2] < 0.0f)
+                {
+                    WarningMsg(1, "WARNING: worldspawn '_color' '%s' has a negative channel; clamped to 0\n", ac);
+                    if (ambientColor[0] < 0.0f) ambientColor[0] = 0.0f;
+                    if (ambientColor[1] < 0.0f) ambientColor[1] = 0.0f;
+                    if (ambientColor[2] < 0.0f) ambientColor[2] = 0.0f;
+                }
                 float mc = ambientColor[0];
                 if (ambientColor[1] > mc) mc = ambientColor[1];
                 if (ambientColor[2] > mc) mc = ambientColor[2];
@@ -641,6 +649,17 @@ void ProcessLightEntity(Entity_t *entity)
             WarningMsg(1, "WARNING: ignoring light at (%.0f %.0f %.0f): no '_color' key\n",
                              (double)origin[0], (double)origin[1], (double)origin[2]);
             return;
+        }
+        /* KIWI FIX: a negative channel (the editor's HDR colour widget can produce one)
+           reaches DegammaColor's powf and becomes NaN, which the "!IS_NAN_FLOAT(energy)"
+           sanity check then reports far from its cause.  Clamp here and name the light. */
+        if (color[0] < 0.0f || color[1] < 0.0f || color[2] < 0.0f)
+        {
+            WarningMsg(1, "WARNING: light at (%.0f %.0f %.0f): '_color' '%s' has a negative channel; clamped to 0\n",
+                             (double)origin[0], (double)origin[1], (double)origin[2], colorStr);
+            if (color[0] < 0.0f) color[0] = 0.0f;
+            if (color[1] < 0.0f) color[1] = 0.0f;
+            if (color[2] < 0.0f) color[2] = 0.0f;
         }
     }
 

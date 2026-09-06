@@ -688,6 +688,8 @@ void KiwiHover_PreviewColor( bool remove, float outRgb[3] )
     outRgb[2] = col[2];
 }
 
+#include "kiwi_perf.h"   // KiwiPerf: time the picture and terrain draws inside the camera
+
 // ─── Cam_Draw tail hook ──────────────────────────────────────────────────────
 void KiwiHover_DrawWorld()
 {
@@ -697,13 +699,19 @@ void KiwiHover_DrawWorld()
     CamWnd_BuildMatrix();
 
     // KIWI (REFIMG): textured planes precede every construction/selection line pass.
-    KiwiRefImage_DrawWorld();
+    {
+        KiwiPerfScope perf( KPERF_REFIMAGES );
+        KiwiRefImage_DrawWorld();
+    }
 
     // Grass Scatter is another cursor-driven camera accent.  It owns a separate,
     // exact-size line batch so the hover budget cannot truncate its AOE ring.
     KiwiGrass_DrawWorld();
     // Terrain Sculpt brush ring and the Decals outline/preview: same exact-size batches.
-    KiwiTerrain_DrawWorld();
+    {
+        KiwiPerfScope perf( KPERF_TERRAIN_DRAW );
+        KiwiTerrain_DrawWorld();
+    }
     KiwiDecal_DrawWorld();
 
     // Fills precede line accents so borders, edges, and vertices remain on top.

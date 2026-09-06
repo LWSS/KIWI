@@ -25,6 +25,7 @@
 #include "radiant_registry.h"      // KIWI-UX (CLEANUP, C-7): Radiant_IniPath — <exedir>\…
 #include <universal/profile.h>
 #include "kiwi_viewdirty.h"        // the 2D-view dirty-flag skip
+#include "kiwi_perf.h"             // KiwiPerf: per-stage frame timers (the "KiwiPerf" HUD)
 #include <unordered_set>
 #include <unordered_map>
 #include <string>
@@ -682,15 +683,9 @@ static void ImGuiShell_ViewportInput( rttViewport_t id, bool hovered )
                 // must not fire for a press that was swallowed mid-gesture).
                 if ( s_legacyBtnMask & bit )
                 {
-                    const bool imageMarquee = id == RTT_XY && b == 0 && s_xyLegacyPress
-                        && ( g_qeglobals.d_select_mode == sel_areabrush
-                          || g_qeglobals.d_select_mode == sel_areabrush_sub );
+                    // KIWI (REFIMG, 2026-09-03): the 2D marquee no longer selects reference
+                    // images (click / outliner only), so nothing follows the release.
                     VP_Up( id, hw, b, VP_LegacyFlags( flags ), mx, my );
-                    if ( imageMarquee )
-                        KiwiRefImage_ApplyRectXY( (float)s_xyLegacyX, (float)s_xyLegacyY,
-                                                  (float)mx, (float)my, mx < s_xyLegacyX,
-                                                  ( s_xyLegacyFlags & MK_SHIFT ) != 0,
-                                                  ( s_xyLegacyFlags & MK_CONTROL ) != 0 );
                 }
                 if ( id == RTT_XY && b == 0 )
                     s_xyLegacyPress = false;
@@ -845,15 +840,8 @@ static void ImGuiShell_ReleaseViewportInput()
         }
         else if ( s_legacyBtnMask & ( 1u << b ) )   // ROUND BU: only presses legacy saw
         {
-            const bool imageMarquee = id == RTT_XY && b == 0 && s_xyLegacyPress
-                && ( g_qeglobals.d_select_mode == sel_areabrush
-                  || g_qeglobals.d_select_mode == sel_areabrush_sub );
             VP_Up( id, hw, b, 0, mx, my );   // flags 0: every button is physically up
-            if ( imageMarquee )
-                KiwiRefImage_ApplyRectXY( (float)s_xyLegacyX, (float)s_xyLegacyY,
-                                          (float)mx, (float)my, mx < s_xyLegacyX,
-                                          ( s_xyLegacyFlags & MK_SHIFT ) != 0,
-                                          ( s_xyLegacyFlags & MK_CONTROL ) != 0 );
+            // KIWI (REFIMG, 2026-09-03): no image marquee on this release either.
             released = true;
         }
     }
@@ -1360,7 +1348,12 @@ void ImGuiShell_RenderViewportsToRT()
     // drawing a window, so the size these calls read is 0 and the RT render early-outs;
     // (b) the flag is checked here as well, so even a stale size can never resurrect a
     // hidden viewport.  The CAMERA has no flag — it is always rendered.
-    CamWnd_RenderToRT( s_cellW[RTT_CAMERA],  s_cellH[RTT_CAMERA] );
+    {
+        extern int g_nUpdateBits;
+        KiwiPerf_TickBegin( g_nUpdateBits );
+        KiwiPerfScope perf( KPERF_CAMERA );
+        CamWnd_RenderToRT( s_cellW[RTT_CAMERA],  s_cellH[RTT_CAMERA] );
+    }
     // The 2D views render only when dirty: when the gate says "clean" the RTT keeps its last
     // texture and the ImGui::Image below samples it as always.  Every uncertain answer is
     // "render" (kiwi_viewdirty.h), and a CLOSED view is marked dirty so reopening it can never
@@ -1368,7 +1361,10 @@ void ImGuiShell_RenderViewportsToRT()
     if ( KiwiWindows_IsOpen( KIWI_WIN_XY ) )
     {
         if ( KiwiViewDirty_ShouldRender( KIWI_DIRTYVIEW_XY, s_cellW[RTT_XY], s_cellH[RTT_XY] ) )
+        {
+            KiwiPerfScope perf( KPERF_XY );
             XYWnd_RenderToRT ( s_cellW[RTT_XY],      s_cellH[RTT_XY] );
+        }
         else
             XYWnd_TickSkipped( s_cellW[RTT_XY],      s_cellH[RTT_XY] );
     }
@@ -1379,14 +1375,20 @@ void ImGuiShell_RenderViewportsToRT()
     if ( KiwiWindows_IsOpen( KIWI_WIN_Z ) )
     {
         if ( KiwiViewDirty_ShouldRender( KIWI_DIRTYVIEW_Z, s_cellW[RTT_Z], s_cellH[RTT_Z] ) )
+        {
+            KiwiPerfScope perf( KPERF_Z );
             ZWnd_RenderToRT  ( s_cellW[RTT_Z],       s_cellH[RTT_Z] );
+        }
     }
     else
     {
         KiwiViewDirty_Mark( KIWI_DIRTYVIEW_Z );
     }
     if ( KiwiWindows_IsOpen( KIWI_WIN_TEXTURE ) )
+    {
+        KiwiPerfScope perf( KPERF_TEXTURE );
         TexWnd_RenderToRT( s_cellW[RTT_TEXTURE], s_cellH[RTT_TEXTURE] );
+    }
     KiwiViewDirty_EndTick();
 
     // KIWI-UX (ROUND AV, ITEM 3): the entity-browser model thumbnails.  LAST, and inside

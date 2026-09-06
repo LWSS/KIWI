@@ -59,3 +59,7 @@ void  KiwiWindows_SyncViewMenu();
 // Command registration and instant dispatch; kiwi_command.cpp calls both.
 void  KiwiWindows_RegisterCommands();
 bool  KiwiWindows_DispatchInstant( unsigned int cmdId );
+
+// Opens an Explorer window with `osPath` selected (explorer.exe /select).
+// Single-sourced here for the Models browser and the Plasticity bridge.
+bool  KiwiWindows_RevealInExplorer( const char *osPath );

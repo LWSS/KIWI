@@ -18,5 +18,8 @@ void KiwiUX_SetShowAxes( bool on );
 bool KiwiUX_ShowHover();                   // hover outline + active-item accent
 void KiwiUX_SetShowHover( bool on );
 
+bool KiwiUX_ShowTriCount();                // camera bottom-right "N tris" readout (View menu)
+void KiwiUX_SetShowTriCount( bool on );
+
 // Draws the KIWI UX settings block from ImGuiPanels_Menu.
 void KiwiUX_DrawSettings();

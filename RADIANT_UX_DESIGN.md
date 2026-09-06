@@ -1279,6 +1279,15 @@ result is still Radiant writing stock-compatible .map files.
   arbitrary spacings allowed; global XYZ axis lines + infinite snappable
   grey XY ground grid always rendered in the 3D viewport. Internal storage
   and .map serialization remain raw game units.
+- **D-8 (decided, 2026-09-04):** asset browsers expose the file on disk.
+  Right-click on a Models-browser tile → "Open in Explorer" reveals the
+  `xmodel/<name>` file the loader would actually read (resolved through the
+  same search-path walk the thumbnail cache uses, `KiwiThumbCache_ResolveModelSource`,
+  so a shadowed copy further down the path is never shown). A model that lives
+  only inside an IWD has no loose file: the item is disabled and "Reveal IWD in
+  Explorer" offers the containing archive instead. The shell call is
+  single-sourced as `KiwiWindows_RevealInExplorer` (the Plasticity bridge now
+  uses it too) to avoid the duplicate-function drift seen elsewhere.
 
 ---
 
@@ -15671,12 +15680,75 @@ fallback and the material renders; only a dead colorMap fails the import.
   in, yd, y, fractions, math), shown through `KiwiUnits_Format` while idle.
 - **D-BQ-T — height colours while a height tool is armed** (user: "really hard to see
   the texture").  Raise / Set height / Smooth / Noise / Trim re-upload every patch's
-  base run as a height gradient over a flat opaque material (layers suppressed), the
+  base run as a height gradient over `kiwi_heat`, a runtime clone of the plain lit
+  world template with the builtin white colormap (the editor's flat tool materials
+  cannot draw a lit, depth-written front face - the first cut was invisible from
+  above), layers suppressed, with a colour scale on the camera's left edge (five
+  ticks in the display units - yd / ft / in - and a marker at the cursor's height), the
   range following the terrain's extremes; Texture paint, Vertex colour and Grass keep
   the real look.  One checkbox ("Height colours while armed", default on) turns it off.
 - **D-BQ-U — the armed wireframe never has holes.**  A segment budget that cut the
   list mid-way left whole patches blank; the grid now coarsens uniformly (stride 2/4/8)
   when the reach would exceed the budget.
+- **D-BQ-V — the texture brush carries its material** (user: "arm the painter with
+  textures and then whichever terrain is touched gets a layer of paint").  Texture
+  paint no longer works on a selected patch's "active slot": the panel's "Paint with"
+  field holds one material (dropped from the Textures tab, taken from the browser, or
+  clicked from a patch's layer list), every eligible patch is a target, and a patch
+  that lacks the material receives it as a layer slot the moment the brush reaches one
+  of its points.  "Erase to base" is the other mode.  The selected patch's layer list
+  stays as an inspector (swap / remove / auto-transition).
+- **D-BQ-W — V picks the height, [ ] size the brush.**  While armed, V copies the
+  height under the hover ring into the Set height target (or the creation base height
+  under Raise), and `[` / `]` step the radius with key repeat, next to + / - and
+  Ctrl+wheel.
+- **D-BQ-X — painting shows its weights as colours** (user: "the paint is super
+  weak... I want it to look different").  A second texture blended over a similar
+  base is subtle by nature, so while Texture paint is armed each layer draws as a flat
+  slot colour (1 red, 2 green, 3 blue, 4 yellow) at its painted weight over
+  `kiwi_weight`, an alpha-blend clone of the world template with a white colormap;
+  disarm to see the real blend.  One checkbox turns it off.  Weight and vertex-colour
+  paint also respond three times faster than height tools.
+- **D-BQ-Y — amendments to D-BQ-X** (user: the red "doesn't draw over more than 1
+  image", and "shouldn't show unless I'm using the same texture").  (1) Only the layer
+  that carries the brush material draws red; every other layer keeps its blended
+  texture, so dirt, sand and grass stack visibly while the one being painted is
+  obvious.  (2) Reference pictures are drawn after a depth clear on top of the scene,
+  so the red run was under them; while pictures exist the red runs are re-emitted
+  after the pictures (`DrawWeightOverlay`) so the brushwork reads on top of the photo
+  being traced.
+- **D-BQ-Z — Blend replaces Vertex colour** (user: "replace it with a texture blending
+  tool that only blends textures with nearby textures").  Vertex colour on a layered
+  patch was already just the weights, and on a plain patch it had no use in this
+  workflow.  Blend averages every layer's weight over a 1-4 point neighbourhood and
+  welds coincident border points across patches, so the per-point steps the coarse
+  grid leaves between two textures become gradients that continue over chunk seams.
+- **D-REFIMG amendment — pictures are never box-selected.**  A marquee over a traced
+  photo selects the geometry on it; the picture is picked by click or the outliner.
+- **D-PERF — the KiwiPerf HUD.**  A named-timer table around the per-frame stages and
+  a bottom-band readout, so "the map lags" becomes "the camera render is 28 ms of
+  which refimages are 21".  Off by default.
+
+## Round 2026-09-05 — corner tri count, flatten, brush painting
+
+- **D-BQ-AA — the triangle count is a corner readout with a View-menu switch.**  It
+  sits bottom-right of the camera, always on by default, and "View > Show Triangle
+  Count" (checkable, persisted) hides it; the top-right zoom slot is the zoom's alone.
+- **D-BQ-AB — flat terrain becomes brushes on request.**  "Flat selected patches ->
+  brushes" replaces each selected terrain patch whose heights lie within a tolerance
+  with one brush at the mean height, the patch's material on top and caulk elsewhere,
+  so flat ground costs 12 triangles and one collision hull instead of a grid.  Patches
+  that are not flat are left alone; Set height first to qualify more.  One undo record.
+- **D-BQ-AC — the texture painter paints brush faces.**  With "Paint brush faces too"
+  the same stroke that weights terrain layers also stamps the brush material onto
+  upward brush faces under the ring, whole, so a spot that became a brush (D-BQ-AB)
+  keeps being painted with the terrain tool.
+- **D-BQ-AD — I is the eyedropper.**  While Texture paint is armed, I loads "Paint
+  with" from under the pointer: a patch gives its heaviest layer at the nearest
+  control point (the base when nothing reaches 25 %), a brush gives the face.
+- **Not added, on evidence:** a caulk-under-terrain pass (stock mp_backlot seals with
+  a hull a median 313 units below its terrain, never a slab under each patch) and a
+  decimate tool (Join + Tessellate-down already coarsen a region).
 
 ## D-REFIMG — editor-only reference images
 

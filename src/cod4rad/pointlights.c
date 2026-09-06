@@ -187,7 +187,16 @@ void AddSpotLight(int primaryLightIndex, float *origin, float radius,
     light->isSpot = 1;
 
     /* compute spot light parameters */
-    invRange = 1.0f / (innerCosAngle - outerCosAngle);
+    /* KIWI FIX: fov_inner == fov_outer (a hard-edged cone) made this 1/0 = inf, and then
+       spotAtten = spotDot*inf - outerCos*inf = NaN for every point inside the cone - the
+       same NaN-energy sanity check as a negative colour.  Treat a zero-width band as a
+       very steep one: the attenuation clamps to 1 just inside the edge. */
+    {
+        float range = innerCosAngle - outerCosAngle;
+        if (range < 1.0e-6f)
+            range = 1.0e-6f;
+        invRange = 1.0f / range;
+    }
 
     light->spotDir[0] = dir[0];
     light->spotDir[1] = dir[1];

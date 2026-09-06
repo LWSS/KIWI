@@ -1018,6 +1018,12 @@ void KiwiLight_Draw()
             ItemTooltip( KTIP_COLOR );
             if ( colorDeactivated )
             {
+                // HDR mode lets a channel be dragged BELOW zero; cod4rad degammas the
+                // colour with powf, and a negative base is NaN (the "!IS_NAN_FLOAT(energy)"
+                // sanity check on kisak_trash, 2026-09-05).  Above 1 is fine, below 0 is not.
+                for ( int k = 0; k < 3; ++k )
+                    if ( !( s_colorEdit[k] >= 0.0f ) )
+                        s_colorEdit[k] = 0.0f;
                 char text[96];
                 char red[28], green[28], blue[28];
                 FormatFloat( red, sizeof(red), s_colorEdit[0], 6 );

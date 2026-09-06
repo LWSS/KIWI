@@ -2962,8 +2962,25 @@ void KiwiRefImage_Draw()
         }
         if ( s_armed ) ImGui::TextDisabled( "LMB move/scale; Shift+body rotates; Alt disables snapping/free-rotates; Delete removes; Esc disarms.  R + X/Y/Z ring tilts off the plane (snaps back within 4 deg unless Alt)." );
 
+        // One slider for EVERY image (and the default new images start with).  It used
+        // to set only the default, which read as broken because nothing on screen moved.
+        // Continuous edit -> one journal record on release, like the Inspector's sliders.
         ImGui::SetNextItemWidth( 150.0f );
-        if ( ImGui::SliderFloat( "New opacity", &s_defaultOpacity, 0.0f, 1.0f, "%.2f" ) ) SaveDefaults();
+        {
+            const storeSnap_t before = Snapshot();
+            if ( ImGui::SliderFloat( "Opacity (all images)", &s_defaultOpacity, 0.0f, 1.0f, "%.2f" ) )
+            {
+                s_defaultOpacity = ClampF( s_defaultOpacity, 0.0f, 1.0f );
+                for ( size_t i = 0; i < s_images.size(); ++i )
+                    s_images[i].opacity = s_defaultOpacity;
+                SaveDefaults();
+                if ( !s_images.empty() )
+                    EditContinuous( before, "change opacity of all reference images" );
+            }
+            EditSettle();
+            if ( ImGui::IsItemHovered() )
+                ImGui::SetTooltip( "Sets every image's opacity at once (undoable) and the opacity new images get." );
+        }
         DrawImageList();
         DrawSelectedEditor();
         if ( s_pendingHave && !s_drag.active && !ImGui::IsAnyItemActive() ) CommitPending();

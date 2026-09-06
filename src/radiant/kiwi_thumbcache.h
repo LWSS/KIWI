@@ -48,6 +48,14 @@ bool KiwiThumbCache_Write( const char *xmodelName,
                            kiwiThumbCacheFormat_t format,
                            const void *pixels, unsigned rowPitch );
 
+// Resolves xmodel/<name> exactly as the engine loader would (search-path order,
+// IWD members honoured). A loose file writes its OS path and sets *outLoose; an
+// IWD member writes the containing .iwd's path and clears it. Returns false when
+// nothing on the search path carries the model.
+bool KiwiThumbCache_ResolveModelSource( const char *xmodelName,
+                                        char *outContainer, int containerSize,
+                                        bool *outLoose );
+
 // Writers must invalidate after replacing xmodel/<name> or its parts/surfs;
 // otherwise the cached source hash is not recomputed until the next process start.
 void KiwiThumbCache_Invalidate( const char *xmodelName );

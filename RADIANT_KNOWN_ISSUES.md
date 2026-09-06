@@ -8158,6 +8158,16 @@ the CAMERA CONTRACT, the disposition table for every round-BK camera change, and
 
 ## Terrain Sculpt / Decals (round BQ, 2026-09-01) — UNBUILT, verify on next build
 
+- **2026-09-05 — bezier curves are no longer eligible for ANY terrain pass.** "Curves
+  fubar'd / compile wrong" was not the loader: save→load→save is a fixed point for
+  kisak_trash.map and for a fresh cylinder (`curve_roundtrip.kt`), and cod4map's
+  cylinder verts sit on the circle. The Terrain Sculpt passes were editing curves:
+  `PatchEligible` only excluded non-`PATCH_TERRAIN` patches behind the "Terrain
+  patches only" checkbox, default OFF, so strokes flattened a cylinder's rings to the
+  ground and `StitchSeams` welded its border ring to the terrain's. Now hard-wired
+  (checkbox, profile key and `terrain set terrainonly` verb removed; convert-to-terrain
+  keeps `PatchEligibleAnyType`). First build: sculpt next to a cylinder and confirm it
+  never moves; the corrupted brush 29 in kisak_trash.map must be redrawn.
 - **Not yet compiled.** `kiwi_terrain.cpp`, `kiwi_decal.cpp`, the forwarding
   `imgui_panel_advpatch.cpp` and the hooks in kiwi_viewport / kiwi_hover /
   kiwi_command / kiwi_windows / imgui_shell / pmesh.cpp tail were written without a
@@ -8259,14 +8269,187 @@ the CAMERA CONTRACT, the disposition table for every round-BK camera change, and
   `Units_FromDisplay` to world); a bad string prints to the console and keeps the old
   value. (2) "Height colours while armed" (default on, profile `Heatmap`): with a
   HEIGHT tool armed, `KiwiTerrain_LayerUpload` rewrites run 0 of every patch to a
-  blue→cyan→green→yellow→red gradient by vertex Z over `g_qeglobals.d_opague` (the
-  lightmap-diagnostic material) and `ExtraLayerCount` returns 0, so layers do not
-  overdraw; the range is the min/max control-point Z of the eligible patches (a
-  16-unit band on flat sheets), refreshed on arm / tool change / toggle and after a
-  stroke that moved an extreme (`RebuildAllPatchVisuals` re-uploads every patch VB —
-  a few ms on a big map). Paint modes and Grass keep the real materials. If the
-  gradient shows but stays uniform, `d_opague` is ignoring vertex colour: swap in
-  `d_white`. (3) The wireframe holes in the screenshot were the segment budget running
+  blue→cyan→green→yellow→red gradient by vertex Z over the runtime material
+  `kiwi_heat` (`HeatMaterial`: a `KiwiMat_Write` clone of the shipped `l_sm_r0c0`
+  template with the builtin `$white` colormap, loaded as `wc/kiwi_heat`) and
+  `ExtraLayerCount` returns 0, so layers do not overdraw. FIRST ATTEMPT USED
+  `$opaque` AND WAS INVISIBLE FROM ABOVE: `$opaque` has no lit (fakelight 24/25)
+  technique (brush.cpp:6067), so only the tech-29 underside drew, and `white_tools`
+  is alpha-blended without depth write (camwnd.cpp:594), so neither editor flat
+  material can stand in for a lit terrain surface. If `kiwi_heat` cannot be written
+  or loads as the default material, the console says so once and the gradient tints
+  the patch's own texture instead. The range is the min/max control-point Z of the
+  eligible patches (a 16-unit band on flat sheets), refreshed on arm / tool change /
+  toggle and after a stroke that moved an extreme (`RebuildAllPatchVisuals`
+  re-uploads every patch VB — a few ms on a big map). Paint modes and Grass keep the
+  real materials. `KiwiTerrain_DrawOverlay` (called from `KiwiVP_DrawCameraOverlay`
+  before the view cube) draws the scale on the camera's LEFT edge, vertically
+  centred, labels through `KiwiUnits_Format` (yd / ft / in by magnitude); it hides
+  on images under 240x160 px and never claims hover.
+- **Reference Images "New opacity" did nothing visible (2026-09-03, UNBUILT).** The
+  slider only stored the default for images added LATER (`s_defaultOpacity`). It is
+  now "Opacity (all images)": every image takes the value as you drag (one journal
+  record on release through `EditContinuous` / `EditSettle`, so Ctrl+Z restores all
+  of them at once) and new images still start with it.
+- **Texture paint carries its material on the brush (2026-09-03, UNBUILT).** The
+  per-selection "active slot" is gone: the panel's "Paint with" button (drop target /
+  "Use current" / click a layer row) sets `s_paintMaterial` (profile `PaintMaterial`,
+  `PaintBase`). With a material set, Texture paint needs NO selection: every eligible
+  patch is a target (`PaintAnywhere` widens `BuildTargets` / `AnyTargetPatch` / the
+  BeginStroke gate), and a patch that lacks the material gets it as a new slot on the
+  FIRST control point the brush reaches (`needAdd` in `StampPatch`, after
+  `MarkTouched` took the undo copy; a first layer zeroes the colour bytes as
+  `AddLayerSlot` does). Erasing or smoothing a layer the patch lacks is a no-op; a
+  patch with 4 slots used is skipped and counted (console line at stroke end). Undo
+  of such a stroke restores the pre-stroke patch including its slot list. Test verb:
+  `terrain material <name|base>`; script `terrain_paint_anywhere.kt`.
+- **Set height V / brush [ ] keys (2026-09-03, UNBUILT).** While armed, V copies the
+  height under the hover ring into the Set height target (or the creation base height
+  under Raise + "Allow terrain creation"); `[` / `]` step the radius by 1.15x per
+  key-repeat, alongside + / - and Ctrl+wheel. Both go through `KiwiTerrain_HandleKey`,
+  which the key funnel consults before any hotkey while the tool is armed, so V does
+  not reach the transform pivot verb until the tool is disarmed.
+- **"The paint is super weak" (2026-09-03, UNBUILT).** Two things: (1) with the
+  texture paint blended over a similar-looking base the result is subtle by nature —
+  so while Texture paint is ARMED the layer runs now draw as flat slot colours
+  (red / green / blue / yellow, packed B|G<<8|R<<16 in `KiwiTerrain_LayerUpload`)
+  at the painted weight over `kiwi_weight` (a `KiwiMat_Write` clone of the shipped
+  `l_sm_b0c0` alpha-blend template with the builtin `$white` colormap; falls back to
+  the blend twin with the real texture if it cannot be made). "Show painted weights
+  as colours while armed" (profile `WeightView`, test key `weightview`) turns it off;
+  disarming always shows the real look. (2) weights and vertex colours now lerp
+  three times faster than heights (`LerpStep( w * 3 )`), so a stroke reaches the
+  Paint weight ceiling in a fraction of a second at strength 1. If the painted area
+  still looks weak with the colour view ON, the weight itself is low: check the
+  "Paint weight" ceiling slider (0..1) in the Texture paint section.
+- **Red paint hidden by reference pictures / only the brush material is red
+  (2026-09-03, UNBUILT).** The camera draws reference images AFTER the selected-outline
+  depth clear (camwnd.cpp ~4055, KiwiHover_DrawWorld → KiwiRefImage_DrawWorld), i.e.
+  over everything at their opacity, so the world pass's red run under a picture was
+  dimmed or hidden and read as "draws over only one image". `DrawWeightOverlay`
+  (kiwi_terrain.cpp, called from KiwiTerrain_DrawWorld right after the pictures)
+  re-emits every patch's `kiwi_weight` run through `Editor_AddMeshCmd` at
+  TECHNIQUE_UNLIT with a neutral MATERIAL_COLOR and flushes it with
+  `R_AddEditorSurfsCmd`, bracketed by `R_SortMaterials` like every other Cam_Draw
+  pass; it runs only while pictures exist. Over bare terrain the run is therefore
+  blended twice (alpha a → 1-(1-a)^2: unchanged at full weight, a little stronger in
+  the falloff) - accepted. The view now highlights ONLY the layer whose material is
+  the brush material (always red); other layers keep their blended textures, and
+  "Erase to base" shows the real look.
+- **Round 2026-09-03 (late) — UNBUILT.** (1) Camera top-right strip: the cursor-distance
+  line has its own row now (`KVC_TOP_STRIP` + one text line; SECTION and the cube move
+  down 14 px) - it used to sit on the SECTION button. (2) Reference images are never
+  box-selected: the camera marquee (`KiwiBox_End`) and both 2D legacy release paths in
+  imgui_shell.cpp no longer call `KiwiRefImage_ApplyRect*`; click and the outliner
+  still select them. (3) **Perf HUD**: `KiwiPerf` (palette "Perf HUD", View) toggles two
+  lines in the camera's bottom band - frame ms / fps, the update bits the tick began
+  with, and the per-stage averages (camera, xy, z, texture, thumbs, refimages, terrain,
+  imgui) sorted by cost, "(skipped)" for a 2D view the dirty gate held.
+  `kiwi_perf.h/.cpp` (new, in radiant_files.cmake); timers in
+  ImGuiShell_RenderViewportsToRT, KiwiHover_DrawWorld. For powerplant.map the
+  measured facts so far: 9 pasted pictures of ~2.4K x 1.3K (resampled to 4096 x 2048
+  DXT1 + mips, ~6 MB VRAM each), the camera renders EVERY tick, the 2D views only on
+  dirty ticks. Nothing in the code walk was an obvious O(n^2); the HUD is the next step:
+  toggle it on the lagging map and read which stage dominates and whether "xy" shows
+  every tick (something setting g_nUpdateBits each frame) - then the fix is targeted.
+  (4) "Vertex colour" is gone from Terrain Sculpt; its slot is **Blend**: every used
+  layer's weight moves toward the mean of a (2R+1)^2 neighbourhood of the pre-stamp
+  grid ("Blend reach" 1..4, profile `BlendRings`), and after every texture / blend
+  stroke `StitchWeights` averages coincident border points across patches
+  (neighbours undo-marked and rebuilt) so transitions continue over chunk seams. The
+  profile keys ColorR/G/B are ignored; the test tool name is `blend`.
+- **15 fps blend on powerplant.map (1,286 terrain chunks) — FIXED, UNBUILT.** The seam
+  passes (`StitchSeams`, `StitchWeights`) anchored on `IsTargetDef`, and with "Affect
+  unselected" EVERY patch is a target: each frame of a stroke tested every border point
+  of every patch against every other patch (~10^8 bounds checks). They now anchor on
+  `IsDirtyDef` (the patches the stamps changed this flush, a handful) and early-out when
+  nothing is dirty. Two more per-frame costs that scale with the chunk count:
+  DrawPatches' back-face wireframe run (one draw call per patch, only visible from
+  below) stands down while the sculpt tool owns the wireframe, and the height-colour
+  range only re-tints every patch when an extreme moved by 5 % of the span / 32 units
+  (a Raise stroke nudging the peak used to re-upload 1,286 VBs). Still one-time hitches:
+  arming with height colours on, and the first stroke after arming, re-upload every
+  patch once. If the map is still slow when NOT sculpting, run `KiwiPerf`: with
+  1,286 patches the ported per-patch draw submission (base run + sync + control-point
+  tail per patch per tick) is the next suspect.
+- **Round 2026-09-05 — UNBUILT.** (1) **Triangle count** moved to the camera's
+  bottom-right corner (`DrawTriCount`, kiwi_viewcube.cpp) and is a checkable native
+  **View > Show Triangle Count** item (`KIWI_CMD_VIEW_SHOW_TRIS` 34147, `KiwiUX_ShowTriCount`,
+  profile KiwiUX/ShowTriCount, palette "Show Triangle Count"); the zoom slot shows only
+  the fresh "1px =" label now. (2) **Flat selected patches -> brushes** (Terrain Sculpt,
+  Chunks): a selected sheet patch whose heights span <= "Flatness tolerance" becomes one
+  brush (`Brush_Alloc` + `Brush_Create` on the patch's XY bounds, top at the MEAN height,
+  "Thickness" deep; top face = the patch's base material, the rest caulk; landed through
+  `KiwiExtrude_LandDef`, i.e. world entity + selected; `Undo_KiwiMarkCreated`), the
+  patches deleted through the Edit->Delete bracket in the same record. Non-flat patches
+  are kept and counted. Texture axis of the top face is the template's (current
+  texture window), so the material may need an align after; layers are dropped (a
+  brush face has none). (3) **Paint brush faces too** (Texture paint): with the box on,
+  the cursor also lands on brushes (KiwiDrop_Trace) and every upward face (normal z >
+  0.5) whose winding centre is inside the ring takes the paint material whole;
+  `Undo_AddBrush` on first touch inside the stroke record; Ctrl / Erase to base leave
+  faces alone. Test keys `paintbrushes`, `flattol`, `flatthick`. First-build candidates:
+  `face_t::plane.normal` spelling, `SetMaterial` on `(patchMesh_material *)&face->mtldef[0]`
+  (the two structs share the lyrMtl/radMtl prefix), `KiwiMtl_RealizeFace` linkage.
+  (4) **I = eyedropper** while Texture paint is armed (`EyedropMaterial`): on a patch the
+  heaviest layer at the nearest control point (base below 25 %), on a brush the face
+  under the pointer (`Pick( ray, SEL_MASK_FACE )`), into "Paint with".
+- **Caulk under terrain — checked against mp_backlot_geo.map (2026-09-05).** Of 111
+  ground-like terrain meshes, every one has a brush within 1,024 units beneath its
+  centre: 93 over an all-caulk brush, the other 18 over brushes whose non-caulk faces
+  are visible walls / sidewalks; the nearest brush top is a median 313 units below the
+  terrain (min -16, max 480), i.e. a SEALING HULL well under the ground, not a caulk
+  slab flush under each patch. So no "caulk every downward face" pass is needed for
+  terrain; the mapper's hull does the sealing and terrain patches provide the
+  collision. (The flatten-to-brush tool already caulks its own sides and bottom.)
+- **Flatten-to-brushes "turned yellow / lost the paint" (2026-09-05).** Yellow = the
+  camera's flat SELECTION highlight: the tool leaves the new brushes selected (Esc shows
+  the texture); the tooltip now says so. The paint: a brush face has no per-vertex
+  weights, so a blend cannot carry over; the top face now takes the patch's DOMINANT
+  material (the painted layer with the highest mean weight when it covers at least half
+  the patch, else the base) instead of always the base. Also `Brush_BuildWindings` now
+  runs BEFORE the top-face test so the plane normals it reads exist. Top-face texture
+  axis/scale is the texture window's template (Brush_Create) - align after if needed.
+- **mp_killhouse load crash (2026-09-05) — FIXED, UNBUILT.** `PartitionEdges`
+  (src/common/brush_edges.cpp) kept `resultCycle` as a single pointer where the
+  binary's frame reserves a 1024-pointer array (hex-rays offsets ebp-1018h..-14h);
+  `FindCycleBFS` writes one entry per cycle node, so a model whose physics collmap
+  brush produced a multi-node cycle overwrote the loop state and the next memmove
+  faulted. It is a plain CoD4 model path (xmodel physics collmap parse on
+  `R_RegisterModel`), not a foreign-format model. Details in tools/kiwitest/FINDINGS.md.
+- **Round 2026-09-05 (late) — UNBUILT.** (1) **White console pane over the ImGui console
+  during model-load storms**: `console_print` (win_qe3.cpp) no longer feeds the legacy
+  EDIT (every EM_REPLACESEL re-laid out a 400-line control) and hides it whenever a line
+  finds it visible, printing one report line the first time - so whatever shows it (not
+  found: it is created without WS_VISIBLE and every known path is hide-only) cannot keep it
+  on screen. If the report line appears in the console, say so and the shower gets a hook.
+  (2) **Model arrows**: those are the ported entity ANGLE arrows (View > Show > Angles,
+  native menu, `d_xyShowFlags` bit 2 SET = hidden); now also in the palette as "Show Angle
+  Arrows" (id 33972). They batch through the entity pass's line bucket, so hiding them
+  saves the per-entity emit but not much else. (3) **Tracy "main surf flush (sort)" 3.5 ms
+  of a 19.9 ms frame**: r_ed_scene.cpp now keeps a SORT-ORDER CACHE for the camera's main
+  flush (`runsKey != 0`): the window's pre-sort key tuples (record address, material,
+  xsurf / vb handle, sortKey, techType, type - everything `Editor_SurfCompare` reads) are
+  compared with last frame's; identical means last frame's permutation is applied in O(n)
+  instead of the O(n log n) sort with a two-record-dereference comparator. Any change
+  falls back to the live sort (mixed-window or full) and re-records.
+  `RADIANT_SORTCACHE_OFF=1` disables it. Expected: the sort zone drops to ~0.2 ms on a
+  static camera; a moving camera does not change the window either (the pass is
+  pose-invariant), so it applies while flying too. The remaining big zones - "world" /
+  "worldentities" submission (~3.5 ms: 1,286 patches re-submitted per tick, the entity
+  cache only covers models) and ExecuteRenderCmds (~5 ms, 531 draws) - are the next
+  targets; a world-pass surf cache like the entity one would remove most of the former.
+- **cod4rad NaN-energy sanity check on kisak_trash (2026-09-05) — FIXED, UNBUILT.** Not the
+  new wall models (parsed clean: 24 verts, 12 tris, unit normals); the map's one light has
+  `_color "0.392 1 -0.122"`, written by the Light window's HDR colour editor, which lets a
+  channel be dragged below zero, and cod4rad's degamma powf turns a negative into NaN. The
+  editor now clamps channels to >= 0 on write; cod4rad clamps negative light / worldspawn
+  colours at parse with a warning naming the light, clamps again inside `DegammaColor`,
+  and guards the spot-cone `1/(innerCos-outerCos)` so `fov_inner == fov_outer` cannot NaN
+  either. Re-save that light (or just recompile: the warning + clamp make it build).
+- **No decimate tool.** Tessellate resamples a selected patch to ANY cell count,
+  down as well as up, and J (Join) merges edge-adjacent sheets with matching
+  materials / layers / cell size; coarsening a region is Join, then Tessellate down. (3) The wireframe holes in the screenshot were the segment budget running
   out mid-list (patches after the cut simply did not draw). `DrawWireframeAoE` now
   estimates the segment count first and coarsens the WHOLE grid (stride 2/4/8, no
   diagonals) when it exceeds 16k, so every patch in reach draws.

@@ -299,6 +299,7 @@ namespace
             ImGui::TextDisabled( "preview loading" );
         if ( !failed )
             ImGui::TextDisabled( "drag into the 3D view or double-click to place" );
+        ImGui::TextDisabled( "right-click: open in Explorer" );
         ImGui::EndTooltip();
     }
 
@@ -362,6 +363,40 @@ namespace
             }
             ImGui::TextDisabled( "drop in the 3D view" );
             ImGui::EndDragDropSource();
+        }
+
+        // Right-click reveals the asset on disk. Resolved through the same
+        // search-path walk the loader uses, so a shadowed copy is never shown and an
+        // IWD member (nothing loose to open) offers the containing .iwd instead.
+        // Must follow the InvisibleButton: BeginPopupContextItem tests the last item.
+        if ( ImGui::BeginPopupContextItem( "##modelctx" ) )
+        {
+            char container[512];
+            bool loose = false;
+            const bool found = KiwiThumbCache_ResolveModelSource(
+                row.name.c_str(), container, sizeof( container ), &loose );
+            if ( found && loose )
+            {
+                if ( ImGui::MenuItem( "Open in Explorer" ) &&
+                     !KiwiWindows_RevealInExplorer( container ) )
+                    Sys_Printf( "Models browser: could not open Explorer for '%s'.\n",
+                                container );
+            }
+            else if ( found )
+            {
+                ImGui::MenuItem( "Open in Explorer", nullptr, false, false );
+                ImGui::TextDisabled( "packed in an IWD; no loose file" );
+                if ( ImGui::MenuItem( "Reveal IWD in Explorer" ) &&
+                     !KiwiWindows_RevealInExplorer( container ) )
+                    Sys_Printf( "Models browser: could not open Explorer for '%s'.\n",
+                                container );
+            }
+            else
+            {
+                ImGui::MenuItem( "Open in Explorer", nullptr, false, false );
+                ImGui::TextDisabled( "not found on the search path" );
+            }
+            ImGui::EndPopup();
         }
 
         ImDrawList *dl = ImGui::GetWindowDrawList();

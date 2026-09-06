@@ -222,6 +222,13 @@ Apply degamma to RGB color in place.
 */
 void DegammaColor(float *color)
 {
+    /* KIWI FIX: the retail assert is a string literal (always true, see AUDIT_cod4rad F4),
+       so a negative channel sailed into powf and came out NaN.  A negative colour has no
+       meaning; clamp it so every caller (point, spot, sun, ambient) is safe. */
+    if (color[0] < 0.0f) color[0] = 0.0f;
+    if (color[1] < 0.0f) color[1] = 0.0f;
+    if (color[2] < 0.0f) color[2] = 0.0f;
+
     Assert("(color >= 0)", ".\\lighting.cpp", 0xBD, 0, 1);
     color[0] = powf(color[0], g_degamma);
 

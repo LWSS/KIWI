@@ -57,6 +57,10 @@ bool KiwiTerrain_HandleWheel( float steps, bool shift, bool ctrl );
 
 void KiwiTerrain_Hover( int imgX, int imgY, bool over );
 void KiwiTerrain_DrawWorld();
+// Camera ImGui overlay (kiwi_viewport.cpp KiwiVP_DrawCameraOverlay): while the
+// height colours are on, a colour scale on the left edge with the heights in the
+// display units (yd / ft / in) and a marker at the cursor's height.  Never claims hover.
+void KiwiTerrain_DrawOverlay( float imgMinX, float imgMinY, float imgW, float imgH );
 
 // -kiwitest entry points (kiwi_test.cpp `terrain` verb): the tool by name (raise,
 // setheight, smooth, noise, texture, colour, grass, trim), a setting by name (outer,
@@ -65,5 +69,7 @@ void KiwiTerrain_DrawWorld();
 // through (x, y) resolved like the camera cursor, held for `seconds`, then released.
 bool KiwiTerrain_TestSetTool( const char *name );
 bool KiwiTerrain_TestSet( const char *key, float value );
+// Texture paint's brush material ("base" = erase to base).
+bool KiwiTerrain_TestSetPaintMaterial( const char *name );
 void KiwiTerrain_TestArm( bool armed );
 bool KiwiTerrain_TestStroke( float x, float y, float seconds, bool shift, bool ctrl );

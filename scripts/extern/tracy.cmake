@@ -21,8 +21,14 @@ FetchContent_MakeAvailable ( tracy )
 
 set_property(TARGET TracyClient PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
-#Tracy is default off, but turned on by simply defining TRACY_ENABLE
-set_property(TARGET TracyClient PROPERTY INTERFACE_COMPILE_DEFINITIONS TRACY_ON_DEMAND TRACY_ONLY_LOCALHOST)
+# Tracy's own set_option() puts TRACY_ENABLE / TRACY_ON_DEMAND / TRACY_ONLY_LOCALHOST on
+# TracyClient's PUBLIC interface when the options above are ON.  The old form of this line
+# OVERWROTE that interface list with just the two secondary flags, so every consumer
+# except Radiant (which re-defines TRACY_ENABLE itself) compiled profile.h's
+# "Disable Profiling without Tracy" branch: KIWI-mp / sp / dedi linked the client but
+# every zone and frame mark was a no-op and nothing ever showed up.  APPEND keeps
+# TRACY_ENABLE; on-demand mode costs nothing until a profiler connects.
+set_property(TARGET TracyClient APPEND PROPERTY INTERFACE_COMPILE_DEFINITIONS TRACY_ON_DEMAND TRACY_ONLY_LOCALHOST)
 target_include_directories(${PROJECT_NAME} PUBLIC ${CMAKE_BINARY_DIR}/_deps/tracy-src/public)
 target_link_libraries(${PROJECT_NAME} PUBLIC TracyClient)
 #################

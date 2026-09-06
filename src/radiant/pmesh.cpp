@@ -10524,8 +10524,12 @@ bool DrawPatches( patch_t *inst, const orientation_t *orient, int techType, int 
         // KIWI-UX (ROUND BK, ITEM 1): …at sortKey-1 (see Patch_Fill_Emit).  The
         // emit itself is byte-for-byte 0x441572; only its place in the pass's own
         // sort moved, so a coplanar textured sheet is no longer overdrawn by it.
-        Patch_Fill_Emit( inst, nullptr, PM_BACK_FACE,
-                         TECHNIQUE_WIREFRAME_SHADED, -1 );                 // 0x441572
+        // KIWI (TERRAIN): while the sculpt tool owns the wireframe this back-face
+        // wireframe run stands down too - one draw call per patch, 1,286 of them on a
+        // chunked map, visible only from underneath.
+        if ( !KiwiTerrain_HideWireframe() )
+            Patch_Fill_Emit( inst, nullptr, PM_BACK_FACE,
+                             TECHNIQUE_WIREFRAME_SHADED, -1 );             // 0x441572
         if ( patchWireframe )
         {
             extern void DrawPatchesWireframeGrid( patch_t *, GfxColor *,

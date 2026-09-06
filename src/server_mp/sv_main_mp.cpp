@@ -738,8 +738,10 @@ void __cdecl SV_PacketEvent(netadr_t from, msg_t *msg)
 {
     iassert(Sys_IsMainThread());
 
-    iassert(Sys_IsMainThread());
-    if (msg->cursize >= 4 && *(uint *)msg->data == -1)
+    // KIWI FIX (2026-09-05): the 2026-09-02 upstream merge (6bfe4b5e) resolved a conflict here by keeping
+    // BOTH copies of this test.  Two consecutive `if`s bound the `else` to the inner one, so the
+    // sequenced-packet branch below was dead code: every netchan packet from a connected client was
+    // silently ignored.  Connects got through the OOB stats sync and then both ends timed out.
     if (msg->cursize >= 4 && *(uint32_t *)msg->data == -1)
     {
         SV_ConnectionlessPacket(from, msg);

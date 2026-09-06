@@ -979,6 +979,8 @@ namespace
     }
 }
 
+#include "kiwi_perf.h"   // KiwiPerf_Draw - the perf HUD line in the bottom band
+
 bool KiwiVP_DrawCameraOverlay( float imgMinX, float imgMinY, float imgW, float imgH )
 {
     // Draw screen-space region fills first so all HUD remains above the scaffolding.
@@ -995,6 +997,7 @@ bool KiwiVP_DrawCameraOverlay( float imgMinX, float imgMinY, float imgW, float i
 
     // Contextual hotkeys are non-interactive ImDrawList output.
     KiwiHints_Draw( imgMinX, imgMinY, imgW, imgH );
+    KiwiPerf_Draw( imgMinX, imgMinY, imgW, imgH );     // "KiwiPerf" toggle; nothing when off
 
     // Snap and numeric HUD output cannot claim image hover.
     if ( KiwiCmd_Active() )
@@ -1007,6 +1010,10 @@ bool KiwiVP_DrawCameraOverlay( float imgMinX, float imgMinY, float imgW, float i
 
     // Unconditional: this also ticks the camera-cursor latch used by Pick Texture.
     KiwiUv_DrawReadout( imgMinX, imgMinY, imgW, imgH );
+
+    // KIWI (TERRAIN): the height colour scale on the left edge while the sculpt
+    // tool's height colours are on; non-interactive.
+    KiwiTerrain_DrawOverlay( imgMinX, imgMinY, imgW, imgH );
 
     // View cube and chips report their own hover so clicks cannot start a marquee behind them.
     const bool cubeHot = KiwiViewCube_Draw( imgMinX, imgMinY, imgW, imgH );

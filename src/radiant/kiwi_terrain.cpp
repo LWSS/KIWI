@@ -25,6 +25,8 @@
 
 #include <gfx_d3d/r_gfx.h>
 #include <gfx_d3d/r_material.h>
+#include <gfx_d3d/r_rendercmds.h>   // TECHNIQUE_UNLIT, R_AddCmdSetMaterialColor - the weight overlay
+#include "kiwi_refimage.h"          // KiwiRefImage_Count - the overlay only matters over pictures
 
 #include "kiwi_command.h"
 #include "kiwi_droptrace.h"
@@ -77,6 +79,22 @@ extern void         Undo_EndBrushList( selbrush_t *list );             // undo.c
 extern void         Undo_AddEntity_W( entity_s *ent );                 // undo.cpp:633
 extern void         Undo_End();
 extern void         Undo_KiwiMarkCreated( brush_t *def );              // undo.cpp (KIWI tail)
+extern void         Undo_AddBrush( entity_brush_s *pBrushInst );       // undo.cpp:494 (takes the brush DEF)
+// Flatten-to-brushes and brush-face painting.
+extern brush_t     *Brush_Alloc( const void *planeptsSrc, eclass_t *ecls );          // brush.cpp
+extern void         Brush_Create( float *mins, float *maxs, brush_t *b, eclass_t *ecls ); // brush.cpp:510
+extern void         Brush_BuildWindings( brush_t *def, int bFull );                  // brush.cpp:1434
+extern void         Ed_EnsureCurrentMaterial_Kiwi();                                  // texwnd.cpp
+extern selbrush_t  *KiwiExtrude_LandDef( brush_t *def );                              // kiwi_extrude.cpp (world + selected)
+extern void         sub_47B940( brush_t *def );                                       // brush.cpp:5841 Brush_UpdateSpecialMaterialFlag
+extern void         MarkMapModified();                                                // win_qe3.cpp
+extern void         KiwiMtl_RealizeFace( face_t *f );                                 // kiwi_material.h
+// The weight overlay re-emits a patch's flat-colour run after the reference images.
+extern int          Editor_MaterialSortKey( Material *handle );        // r_ed_scene.cpp 0x4FDBB0
+extern void         Editor_AddMeshCmd( Material *handle, int techType, int sortKey,
+                        int vertCount, int vbIndexAndOffs, int indexCount, int indexTable ); // r_ed_scene.cpp 0x4FDA50
+extern void        *R_AddEditorSurfsCmd();                             // r_ed_scene.cpp 0x4FDA10
+extern void         R_SortMaterials();                                 // r_ed_scene.cpp
 // Legacy soft-select vertex drag (Advanced Patch Editor mode 1).
 extern int          AdvPatchEdit_GetMode();                            // patchdialog.cpp
 extern void         AdvPatchEdit_SetMode( int mode );
@@ -95,7 +113,7 @@ namespace
         KTER_SMOOTH,        // neighbour average
         KTER_NOISE,         // additive value noise
         KTER_TEXTURE,       // texture layers: paint a slot's weight
-        KTER_COLOR,         // vertex colour (non-layered patches)
+        KTER_BLEND,         // blend: smooth every layer's weights with its neighbours (seams too)
         KTER_GRASS,         // Grass Scatter (kiwi_grass.cpp) as a mode of this panel
         KTER_TRIM,          // remove terrain chunks under the brush
         KTER_TOOL_COUNT
@@ -105,15 +123,15 @@ namespace
     enum kterFalloff_t { KTER_FO_SMOOTH = 0, KTER_FO_LINEAR, KTER_FO_SHARP, KTER_FO_CONSTANT };
 
     const char *KTER_TOOL_NAME[KTER_TOOL_COUNT] =
-        { "Raise / Lower", "Set height", "Smooth", "Noise", "Texture paint", "Vertex colour", "Grass", "Trim" };
+        { "Raise / Lower", "Set height", "Smooth", "Noise", "Texture paint", "Blend", "Grass", "Trim" };
     const char *KTER_TOOL_HINT[KTER_TOOL_COUNT] =
     {
-        "LMB raise   Ctrl+LMB lower   Shift+LMB smooth",
-        "LMB snap to target Z   Ctrl+LMB pick height   Shift+LMB smooth",
+        "LMB raise   Ctrl+LMB lower   Shift+LMB smooth   V pick base height",
+        "LMB snap to target Z   V / Ctrl+LMB pick the height under the pointer   Shift+LMB smooth",
         "LMB smooth",
         "LMB add noise   Ctrl+LMB subtract   Shift+LMB smooth",
-        "LMB paint the active layer   Ctrl+LMB erase it   Shift+LMB smooth its weights",
-        "LMB paint colour   Ctrl+LMB eyedropper   Shift+LMB smooth colours",
+        "LMB paint the brush material onto any terrain touched   Ctrl+LMB paint it out   Shift+LMB smooth   I eyedropper",
+        "LMB blends every layer's weights with their neighbours, across patch seams too",
         "LMB scatter models along the stroke   Esc disarms",
         "LMB removes every terrain chunk whose centre is under the brush",
     };
@@ -132,7 +150,9 @@ namespace
     float s_noiseFreq   = 0.004f;
     float s_blendWeight = 1.0f;      // paint ceiling for a layer weight (0..1 -> 255)
     bool  s_previewBlend = true;     // draw the layer runs in the camera
-    float s_color[3]    = { 1.0f, 1.0f, 1.0f };
+    int   s_blendRings  = 2;         // Blend: neighbourhood radius in grid points (1..4)
+    float s_flatTol     = 1.0f;      // Flatten: a patch whose heights span <= this becomes one brush
+    float s_flatThick   = 16.0f;     // Flatten: brush thickness below the surface
     bool  s_affectUnselected = false;
     float s_chunkSize   = 2048.0f;   // max patch side; the expander/split chunk size
     int   s_density     = 8;         // Tessellate: cells across the whole patch (any size; >15 splits)
@@ -140,7 +160,6 @@ namespace
     float s_createZ     = 0.0f;      // creation: base height where nothing at all is under the cursor
     int   s_createCells = 8;         // creation: cells per side of a chunk laid with no terrain in reach
     bool  s_createOnSurfaces = true; // creation: the cursor lands on brushes/models before the base plane
-    bool  s_terrainOnly = false;
     bool  s_softSelect  = false;
     bool  s_hideWire    = false;     // armed: hide the patch wireframe entirely (Tab toggles)
     float s_wireReach   = 1.25f;     // armed: wireframe shown within outer radius x this
@@ -176,7 +195,17 @@ namespace
     bool  s_haveLastCenter = false;
     char  s_status[160] = "Disarmed.";
 
-    int   s_activeSlot  = -1;                // -1 = base (painting it erases the layers)
+    // Texture paint carries its MATERIAL on the brush: whichever terrain the brush
+    // touches gets that material as a layer slot (added on first touch, 4 max) and
+    // its weight painted - no selection needed.  "Erase to base" paints every layer
+    // out instead.
+    char  s_paintMaterial[64] = "";
+    bool  s_paintBase   = false;
+    bool  s_paintBrushes = false;            // Texture paint: brush faces under the brush take the material too
+    bool  s_weightView  = true;              // armed Texture paint: layers draw as flat colours by weight
+    int   s_layersAdded = 0;                 // per stroke: slots created on touched patches
+    int   s_layersFull  = 0;                 // per stroke: patches skipped (4 slots used)
+    int   s_facesPainted = 0;                // per stroke: brush faces that took the material
     std::vector<selbrush_t *> s_targets;     // the patches one stroke touches
     std::vector<patchMesh_t *> s_dirtyDefs;  // changed this frame; rebuilt once
     bool  s_dirtyBounds = false;
@@ -254,8 +283,8 @@ namespace
         s_noiseScale = ClampF( s_noiseScale, 0.25f, 2048.0f );
         s_noiseFreq  = ClampF( s_noiseFreq, 0.0001f, 1.0f );
         s_blendWeight = ClampF( s_blendWeight, 0.0f, 1.0f );
-        for ( int i = 0; i < 3; ++i )
-            s_color[i] = ClampF( s_color[i], 0.0f, 1.0f );
+        if ( s_blendRings < 1 ) s_blendRings = 1;
+        if ( s_blendRings > 4 ) s_blendRings = 4;
         s_chunkSize = ClampF( s_chunkSize, 256.0f, 8192.0f );
         if ( s_density < 1 ) s_density = 1;
         if ( s_density > 120 ) s_density = 120;
@@ -283,9 +312,10 @@ namespace
         s_noiseFreq  = ReadFloat( "NoiseFreq", 0.004f );
         s_blendWeight = ReadFloat( "BlendWeight", 1.0f );
         s_previewBlend = Radiant_ProfileGetInt( KTER_PROFILE, "PreviewBlend", 1 ) != 0;
-        s_color[0]  = ReadFloat( "ColorR", 1.0f );
-        s_color[1]  = ReadFloat( "ColorG", 1.0f );
-        s_color[2]  = ReadFloat( "ColorB", 1.0f );
+        s_blendRings = Radiant_ProfileGetInt( KTER_PROFILE, "BlendRings", 2 );
+        s_flatTol    = ReadFloat( "FlatTol", 1.0f );
+        s_flatThick  = ReadFloat( "FlatThick", 16.0f );
+        s_paintBrushes = Radiant_ProfileGetInt( KTER_PROFILE, "PaintBrushes", 0 ) != 0;
         s_affectUnselected = Radiant_ProfileGetInt( KTER_PROFILE, "AffectUnselected", 0 ) != 0;
         s_chunkSize = ReadFloat( "ChunkSize2", 2048.0f );
         s_density   = Radiant_ProfileGetInt( KTER_PROFILE, "DensityCells", 8 );
@@ -295,7 +325,13 @@ namespace
         s_createOnSurfaces = Radiant_ProfileGetInt( KTER_PROFILE, "CreateOnSurfaces", 1 ) != 0;
         s_wireReach = ReadFloat( "WireReach", 1.25f );
         s_heatmap   = Radiant_ProfileGetInt( KTER_PROFILE, "Heatmap", 1 ) != 0;
-        s_terrainOnly = Radiant_ProfileGetInt( KTER_PROFILE, "TerrainOnly", 0 ) != 0;
+        {
+            const std::string pm = Radiant_ProfileGetString( KTER_PROFILE, "PaintMaterial", "" );
+            strncpy( s_paintMaterial, pm.c_str(), sizeof( s_paintMaterial ) - 1 );
+            s_paintMaterial[sizeof( s_paintMaterial ) - 1] = '\0';
+        }
+        s_paintBase = Radiant_ProfileGetInt( KTER_PROFILE, "PaintBase", 0 ) != 0;
+        s_weightView = Radiant_ProfileGetInt( KTER_PROFILE, "WeightView", 1 ) != 0;
         Sanitize();
     }
 
@@ -315,9 +351,10 @@ namespace
         WriteFloat( "NoiseFreq", s_noiseFreq );
         WriteFloat( "BlendWeight", s_blendWeight );
         Radiant_ProfileSetInt( KTER_PROFILE, "PreviewBlend", s_previewBlend ? 1 : 0 );
-        WriteFloat( "ColorR", s_color[0] );
-        WriteFloat( "ColorG", s_color[1] );
-        WriteFloat( "ColorB", s_color[2] );
+        Radiant_ProfileSetInt( KTER_PROFILE, "BlendRings", s_blendRings );
+        WriteFloat( "FlatTol", s_flatTol );
+        WriteFloat( "FlatThick", s_flatThick );
+        Radiant_ProfileSetInt( KTER_PROFILE, "PaintBrushes", s_paintBrushes ? 1 : 0 );
         Radiant_ProfileSetInt( KTER_PROFILE, "AffectUnselected", s_affectUnselected ? 1 : 0 );
         WriteFloat( "ChunkSize2", s_chunkSize );
         Radiant_ProfileSetInt( KTER_PROFILE, "DensityCells", s_density );
@@ -327,7 +364,9 @@ namespace
         Radiant_ProfileSetInt( KTER_PROFILE, "CreateOnSurfaces", s_createOnSurfaces ? 1 : 0 );
         WriteFloat( "WireReach", s_wireReach );
         Radiant_ProfileSetInt( KTER_PROFILE, "Heatmap", s_heatmap ? 1 : 0 );
-        Radiant_ProfileSetInt( KTER_PROFILE, "TerrainOnly", s_terrainOnly ? 1 : 0 );
+        Radiant_ProfileSetString( KTER_PROFILE, "PaintMaterial", s_paintMaterial );
+        Radiant_ProfileSetInt( KTER_PROFILE, "PaintBase", s_paintBase ? 1 : 0 );
+        Radiant_ProfileSetInt( KTER_PROFILE, "WeightView", s_weightView ? 1 : 0 );
     }
 
     // ── patches / picking ────────────────────────────────────────────────────
@@ -336,13 +375,30 @@ namespace
         return b && b->patch && b->def && b->patch->def;
     }
 
-    bool PatchEligible( selbrush_t *b )
+    // Any visible, unfiltered patch of either kind: the "convert bezier to terrain
+    // mesh" button is the only user of this.
+    bool PatchEligibleAnyType( selbrush_t *b )
     {
         if ( !NodeIsPatch( b ) )
             return false;
         if ( FilterBrush( b, 0 ) || ( b->brushFlags & 0x20 ) != 0 )
             return false;
-        if ( s_terrainOnly && ( b->patch->def->type & PATCH_TERRAIN ) == 0 )
+        return true;
+    }
+
+    // KIWI FIX (2026-09-05): a patch the sculpt / seam / paint passes may touch is a
+    // TERRAIN MESH (CoD4 "mesh": the control grid IS the surface) and nothing else.
+    // This used to be the "Terrain patches only" checkbox, default OFF, so every stroke
+    // and every seam weld also ran over bezier CURVES within reach - a cylinder standing
+    // on the ground had its rings flattened to the ground height and its border ring
+    // welded to the terrain's, which is what "fubar'd" curves in kisak_trash.map (they
+    // then saved and compiled exactly that way - the loader was never at fault).  A
+    // bezier's control points are not its surface; the tool has no business with them.
+    bool PatchEligible( selbrush_t *b )
+    {
+        if ( !PatchEligibleAnyType( b ) )
+            return false;
+        if ( ( b->patch->def->type & PATCH_TERRAIN ) == 0 )
             return false;
         return true;
     }
@@ -431,8 +487,23 @@ namespace
         s_cursorNode = nullptr;
         if ( outColor )
             memset( outColor, 255, 4 );
-        if ( !CreationAllowed() )
+        // Off the patches: terrain creation lands on surfaces / the base plane, and
+        // the texture painter lands on brush faces when it paints brushes too.
+        const bool brushPaint = s_tool == KTER_TEXTURE && s_paintBrushes && !s_paintBase && s_paintMaterial[0];
+        if ( !CreationAllowed() && !brushPaint )
         {
+            s_cursorKind = KCUR_NONE;
+            return false;
+        }
+        if ( brushPaint )
+        {
+            kiwiDropHit_t hit;
+            if ( KiwiDrop_Trace( ray, false, &hit ) )
+            {
+                memcpy( outPoint, hit.point, sizeof( hit.point ) );
+                s_cursorKind = KCUR_SURFACE;
+                return true;
+            }
             s_cursorKind = KCUR_NONE;
             return false;
         }
@@ -600,6 +671,23 @@ namespace
         return def->texture.radMtl && def->texture.radMtl->name ? def->texture.radMtl->name : "(none)";
     }
 
+    int FindSlotByName( const patchMesh_t *def, const char *name )
+    {
+        if ( !name || !name[0] )
+            return -1;
+        for ( int k = 0; k < KTER_SLOTS; ++k )
+            if ( SlotUsed( def, k ) && !_stricmp( def->kiwiLayer[k], name ) )
+                return k;
+        return -1;
+    }
+
+    // Texture paint with a material on the brush (or "erase to base") needs no
+    // selection: every eligible patch is a target.
+    bool PaintAnywhere()
+    {
+        return s_tool == KTER_TEXTURE && ( s_paintBase || s_paintMaterial[0] != 0 );
+    }
+
     // Preview twin: "kiwi_blend_<name>", an alpha-blend (l_sm_b0c0[n0][s0]) material over
     // the SAME images, written once through the material writer and loaded by the
     // renderer.  Editor-only; the .map never references it.
@@ -673,6 +761,119 @@ namespace
         }
         s_blendTwins[name] = twin;
         return twin;
+    }
+
+    // The height-gradient material: a clone of the plain lit world template
+    // (l_sm_r0c0) whose colormap is the engine's builtin $white, so it carries every
+    // camera technique (the editor's $opaque has no lit technique and white_tools
+    // does not write depth - neither can stand in for a terrain surface) and the
+    // vertex colour alone paints the surface.  Written once as kiwi_heat, cached.
+    // Null = fall back to the patch's own material, tinted.
+    Material *HeatMaterial()
+    {
+        static Material *s_heat     = nullptr;
+        static bool      s_heatTried = false;
+        if ( s_heatTried )
+            return s_heat;
+        s_heatTried = true;
+        const char *heatName = "kiwi_heat";
+        char err[256] = { 0 };
+        bool ok = KiwiMat_ExistsOnDisk( heatName );
+        if ( !ok )
+        {
+            int tpl = -1;
+            for ( int i = 0; i < KiwiMat_TemplateCount() && tpl < 0; ++i )
+            {
+                const kiwiMatTemplateInfo_t *info = KiwiMat_TemplateInfo( i );
+                if ( info && info->techSet && !_stricmp( info->techSet, "l_sm_r0c0" ) )
+                    tpl = i;
+            }
+            if ( tpl >= 0 )
+            {
+                kiwiMatFields_t f;
+                memset( &f, 0, sizeof( f ) );
+                _snprintf( f.name, sizeof( f.name ), "%s", heatName );
+                _snprintf( f.imageName, sizeof( f.imageName ), "%s", "$white" );
+                f.usage  = 1;
+                f.locale = 1u;
+                f.autoTexScaleWidth  = 512;
+                f.autoTexScaleHeight = 512;
+                f.surfaceType = -1;                   // keep the template's surface flags
+                ok = KiwiMat_Write( tpl, &f, err, sizeof( err ) );
+            }
+            else
+                _snprintf( err, sizeof( err ), "no shipped template for techset 'l_sm_r0c0'" );
+        }
+        if ( ok )
+        {
+            s_heat = Material_Load( (char*)"wc/kiwi_heat", 0 );
+            if ( s_heat && Material_IsDefault( s_heat ) )
+            {
+                s_heat = nullptr;
+                _snprintf( err, sizeof( err ), "'kiwi_heat' loaded as the default material" );
+            }
+            else if ( !s_heat )
+                _snprintf( err, sizeof( err ), "Material_Load('kiwi_heat') failed" );
+        }
+        if ( !s_heat )
+            Sys_Printf( "Terrain Sculpt: no height-colour material (%s); the gradient tints the real textures instead.\n",
+                        err[0] ? err : "unknown" );
+        return s_heat;
+    }
+
+    // The weight-view material: the alpha-blend world template (l_sm_b0c0) over the
+    // builtin $white colormap, so a layer run shows its slot colour at the painted
+    // weight.  Written once as kiwi_weight, cached.  Null = the blend twin as usual.
+    Material *WeightMaterial()
+    {
+        static Material *s_mat   = nullptr;
+        static bool      s_tried = false;
+        if ( s_tried )
+            return s_mat;
+        s_tried = true;
+        const char *name = "kiwi_weight";
+        char err[256] = { 0 };
+        bool ok = KiwiMat_ExistsOnDisk( name );
+        if ( !ok )
+        {
+            int tpl = -1;
+            for ( int i = 0; i < KiwiMat_TemplateCount() && tpl < 0; ++i )
+            {
+                const kiwiMatTemplateInfo_t *info = KiwiMat_TemplateInfo( i );
+                if ( info && info->techSet && !_stricmp( info->techSet, "l_sm_b0c0" ) )
+                    tpl = i;
+            }
+            if ( tpl >= 0 )
+            {
+                kiwiMatFields_t f;
+                memset( &f, 0, sizeof( f ) );
+                _snprintf( f.name, sizeof( f.name ), "%s", name );
+                _snprintf( f.imageName, sizeof( f.imageName ), "%s", "$white" );
+                f.usage  = 1;
+                f.locale = 1u;
+                f.autoTexScaleWidth  = 512;
+                f.autoTexScaleHeight = 512;
+                f.surfaceType = -1;
+                ok = KiwiMat_Write( tpl, &f, err, sizeof( err ) );
+            }
+            else
+                _snprintf( err, sizeof( err ), "no shipped template for techset 'l_sm_b0c0'" );
+        }
+        if ( ok )
+        {
+            s_mat = Material_Load( (char*)"wc/kiwi_weight", 0 );
+            if ( s_mat && Material_IsDefault( s_mat ) )
+            {
+                s_mat = nullptr;
+                _snprintf( err, sizeof( err ), "'kiwi_weight' loaded as the default material" );
+            }
+            else if ( !s_mat )
+                _snprintf( err, sizeof( err ), "Material_Load('kiwi_weight') failed" );
+        }
+        if ( !s_mat )
+            Sys_Printf( "Terrain Sculpt: no weight-view material (%s); painted layers show their blended texture instead.\n",
+                        err[0] ? err : "unknown" );
+        return s_mat;
     }
 
     // Undo bracket for one non-stroke edit of a patch (layer slot changes, etc.).
@@ -768,7 +969,10 @@ namespace
             def->kiwiLayer[slot][63] = '\0';
         }
         MultiEditEnd( defs );
-        s_activeSlot = slot;
+        strncpy( s_paintMaterial, material, sizeof( s_paintMaterial ) - 1 );   // and paint with it
+        s_paintMaterial[sizeof( s_paintMaterial ) - 1] = '\0';
+        s_paintBase = false;
+        Save();
     }
 
     // Removes the slot AND every weight ever painted with it, on every target patch.
@@ -792,8 +996,6 @@ namespace
                         *(unsigned int *)&def->ctrl[i][j].vert_color = 0xFFFFFFFFu;
         }
         MultiEditEnd( defs );
-        if ( s_activeSlot == slot )
-            s_activeSlot = -1;
     }
 
     void SwapLayerMaterial( patchMesh_t *lead, int slot, const char *material )
@@ -819,7 +1021,7 @@ namespace
     {
         int n = 0;
         for ( selbrush_t *b = selected_brushes.next; b && b != &selected_brushes; b = b->next )
-            if ( PatchEligible( b ) && ( b->patch->def->type & PATCH_TERRAIN ) == 0 )
+            if ( PatchEligibleAnyType( b ) && ( b->patch->def->type & PATCH_TERRAIN ) == 0 )
                 ++n;
         return n;
     }
@@ -833,7 +1035,7 @@ namespace
         Patch_Paint( &active_brushes );
         for ( selbrush_t *b = selected_brushes.next; b && b != &selected_brushes; b = b->next )
         {
-            if ( !PatchEligible( b ) || ( b->patch->def->type & PATCH_TERRAIN ) != 0 )
+            if ( !PatchEligibleAnyType( b ) || ( b->patch->def->type & PATCH_TERRAIN ) != 0 )
                 continue;
             patchMesh_t *def = b->patch->def;
             def->xx22b = 1;
@@ -980,7 +1182,7 @@ namespace
     }
 
     // ── stamping ─────────────────────────────────────────────────────────────
-    enum kterOp_t { OP_RAISE, OP_SETHEIGHT, OP_SMOOTH, OP_NOISE, OP_TEXTURE, OP_COLOR };
+    enum kterOp_t { OP_RAISE, OP_SETHEIGHT, OP_SMOOTH, OP_NOISE, OP_TEXTURE, OP_BLEND };
 
     struct gridSnap_t
     {
@@ -1050,6 +1252,18 @@ namespace
         bool         target;
     };
 
+    // Changed THIS flush.  The seam passes anchor on these, never on the whole target
+    // list: with "Affect unselected" every patch of a 1,286-chunk map is a target, and
+    // anchoring on targets meant every border point of every patch was tested against
+    // every other patch on every frame of a stroke (~10^8 checks: the 15 fps blend).
+    bool IsDirtyDef( patchMesh_t *def )
+    {
+        for ( size_t i = 0; i < s_dirtyDefs.size(); ++i )
+            if ( s_dirtyDefs[i] == def )
+                return true;
+        return false;
+    }
+
     bool IsTargetDef( patchMesh_t *def )
     {
         for ( size_t t = 0; t < s_targets.size(); ++t )
@@ -1089,7 +1303,7 @@ namespace
 
     void StitchSeams()
     {
-        if ( s_targets.empty() )
+        if ( s_targets.empty() || s_dirtyDefs.empty() )
             return;
         std::vector<seamPatch_t> all;
         for ( int pass = 0; pass < 2; ++pass )
@@ -1098,7 +1312,7 @@ namespace
             for ( selbrush_t *b = head->next; b && b != head; b = b->next )
                 if ( PatchEligible( b ) )
                 {
-                    seamPatch_t e = { b, b->patch->def, IsTargetDef( b->patch->def ) };
+                    seamPatch_t e = { b, b->patch->def, IsDirtyDef( b->patch->def ) };
                     all.push_back( e );
                 }
         }
@@ -1198,10 +1412,92 @@ namespace
         }
     }
 
+    // Seams for WEIGHTS: after a texture / blend stroke, every border point of a
+    // stroke patch takes, together with the coincident border points of other
+    // patches (within KTER_WELD in XY), the MEAN of all their colour bytes, so a
+    // painted transition continues across the chunk edge instead of stepping.
+    // Neighbours pulled along are undo-marked and rebuilt, like StitchSeams.
+    void StitchWeights()
+    {
+        if ( s_targets.empty() || s_dirtyDefs.empty() )
+            return;
+        std::vector<seamPatch_t> all;
+        for ( int pass = 0; pass < 2; ++pass )
+        {
+            selbrush_t *head = pass == 0 ? &selected_brushes : &active_brushes;
+            for ( selbrush_t *b = head->next; b && b != head; b = b->next )
+                if ( PatchEligible( b ) && UsedSlotCount( b->patch->def ) )
+                {
+                    seamPatch_t e = { b, b->patch->def, IsDirtyDef( b->patch->def ) };
+                    all.push_back( e );
+                }
+        }
+        for ( size_t a = 0; a < all.size(); ++a )
+        {
+            if ( !all[a].target )
+                continue;
+            patchMesh_t *A = all[a].def;
+            int ai[64], aj[64];
+            const int an = BorderRing( A, ai, aj );
+            for ( int k = 0; k < an; ++k )
+            {
+                drawVert_t *P = &A->ctrl[ai[k]][aj[k]];
+                std::vector<drawVert_t *> group;
+                std::vector<size_t>       groupPatch;
+                for ( size_t o = 0; o < all.size(); ++o )
+                {
+                    if ( o == a )
+                        continue;
+                    const float *mins = all[o].node->def->mins, *maxs = all[o].node->def->maxs;
+                    if ( P->xyz[0] < mins[0] - KTER_WELD || P->xyz[0] > maxs[0] + KTER_WELD
+                      || P->xyz[1] < mins[1] - KTER_WELD || P->xyz[1] > maxs[1] + KTER_WELD )
+                        continue;
+                    patchMesh_t *B = all[o].def;
+                    int bi[64], bj[64];
+                    const int bn = BorderRing( B, bi, bj );
+                    for ( int m = 0; m < bn; ++m )
+                    {
+                        drawVert_t *Q = &B->ctrl[bi[m]][bj[m]];
+                        if ( fabsf( Q->xyz[0] - P->xyz[0] ) <= KTER_WELD && fabsf( Q->xyz[1] - P->xyz[1] ) <= KTER_WELD )
+                        {
+                            group.push_back( Q );
+                            groupPatch.push_back( o );
+                        }
+                    }
+                }
+                if ( group.empty() )
+                    continue;
+                float mean[4];
+                for ( int c = 0; c < 4; ++c )
+                {
+                    mean[c] = (float)( (const byte *)&P->vert_color )[c];
+                    for ( size_t g = 0; g < group.size(); ++g )
+                        mean[c] += (float)( (const byte *)&group[g]->vert_color )[c];
+                    mean[c] /= (float)( group.size() + 1 );
+                }
+                for ( int c = 0; c < 4; ++c )
+                    ( (byte *)&P->vert_color )[c] = (byte)(int)( mean[c] + 0.5f );
+                for ( size_t g = 0; g < group.size(); ++g )
+                {
+                    bool differs = false;
+                    for ( int c = 0; c < 4 && !differs; ++c )
+                        differs = ( (const byte *)&group[g]->vert_color )[c] != ( (const byte *)&P->vert_color )[c];
+                    if ( !differs )
+                        continue;
+                    TouchNeighbour( all[groupPatch[g]].def, all[groupPatch[g]].target );
+                    NoteDirty( all[groupPatch[g]].def, false );
+                    memcpy( &group[g]->vert_color, &P->vert_color, 4 );
+                }
+            }
+        }
+    }
+
     void FlushDirty()
     {
         if ( s_dirtyBounds && !s_dirtyDefs.empty() )
             StitchSeams();
+        if ( !s_dirtyDefs.empty() && ( s_tool == KTER_TEXTURE || s_tool == KTER_BLEND ) )
+            StitchWeights();
         for ( size_t i = 0; i < s_dirtyDefs.size(); ++i )
             Patch_Rebuild( s_dirtyDefs[i], s_dirtyBounds ? 1 : 0 );
         s_dirtyDefs.clear();
@@ -1221,12 +1517,42 @@ namespace
                 return false;
         }
         const bool texOp = ( op == OP_TEXTURE || ( op == OP_SMOOTH && s_tool == KTER_TEXTURE ) );
-        if ( texOp && s_activeSlot >= 0 && !SlotUsed( def, s_activeSlot ) )
-            return false;                                  // this patch has no such layer
-        if ( texOp && s_activeSlot < 0 && UsedSlotCount( def ) == 0 )
-            return false;
+        // Texture paint: which slot on THIS patch the brush material means.
+        //   -1        = base / erase every layer (needs at least one layer to erase)
+        //   existing  = paint (or erase / smooth) that slot
+        //   none yet  = painting IN adds the slot on the first point it reaches
+        //               (needAdd); erasing or smoothing a layer the patch lacks is a no-op.
+        int  slot    = -1;
+        bool needAdd = false;
+        if ( texOp )
+        {
+            if ( s_paintBase || !s_paintMaterial[0] || !_stricmp( s_paintMaterial, BaseMaterialName( def ) ) )
+            {
+                if ( UsedSlotCount( def ) == 0 )
+                    return false;
+            }
+            else
+            {
+                slot = FindSlotByName( def, s_paintMaterial );
+                if ( slot < 0 )
+                {
+                    if ( op != OP_TEXTURE || sign < 0.0f )
+                        return false;
+                    slot = FirstFreeSlot( def );
+                    if ( slot < 0 )
+                    {
+                        ++s_layersFull;
+                        return false;
+                    }
+                    needAdd = true;
+                }
+            }
+        }
 
-        const bool neighbour = ( op == OP_SMOOTH );
+        // Blend needs layers to blend; it reads the whole grid, like Smooth.
+        if ( op == OP_BLEND && UsedSlotCount( def ) == 0 )
+            return false;
+        const bool neighbour = ( op == OP_SMOOTH || op == OP_BLEND );
         gridSnap_t snap;
         if ( neighbour )
             for ( int i = 0; i < def->width; ++i )
@@ -1236,7 +1562,7 @@ namespace
                     memcpy( snap.c[i][j], &def->ctrl[i][j].vert_color, 4 );
                 }
 
-        const float texTarget = ( s_activeSlot < 0 || sign < 0.0f ) ? 0.0f : s_blendWeight * 255.0f;
+        const float texTarget = ( slot < 0 || sign < 0.0f ) ? 0.0f : s_blendWeight * 255.0f;
         bool changed = false;
         for ( int i = 0; i < def->width; ++i )
         {
@@ -1248,7 +1574,9 @@ namespace
                 const float w = Falloff( BrushDistance( center, cp->xyz ) ) * s_strength;
                 if ( w <= 0.0f )
                     continue;
-                const float lt = LerpStep( w, dt );
+                // Weights and colours respond three times faster than heights: a
+                // paint stroke should reach its ceiling in a fraction of a second.
+                const float lt = LerpStep( ( texOp || op == OP_BLEND ) ? w * 3.0f : w, dt );
                 const float at = w * dt * AdditiveRate();
 
                 MarkTouched( def );
@@ -1292,41 +1620,135 @@ namespace
                     const float inv = 1.0f / (float)n;
                     if ( s_tool == KTER_TEXTURE )
                     {
-                        if ( s_activeSlot >= 0 )
-                            col[s_activeSlot] = LerpByte( col[s_activeSlot], sumC[s_activeSlot] * inv, lt );
+                        if ( slot >= 0 )
+                            col[slot] = LerpByte( col[slot], sumC[slot] * inv, lt );
                         else
                             for ( int k = 0; k < KTER_SLOTS; ++k )
                                 if ( SlotUsed( def, k ) )
                                     col[k] = LerpByte( col[k], sumC[k] * inv, lt );
-                    }
-                    else if ( s_tool == KTER_COLOR )
-                    {
-                        for ( int k = 0; k < 3; ++k )
-                            col[k] = LerpByte( col[k], sumC[k] * inv, lt );
                     }
                     else
                         cp->xyz[2] += ( sumZ * inv - cp->xyz[2] ) * lt;
                     break;
                 }
                 case OP_TEXTURE:
-                    if ( s_activeSlot >= 0 )
-                        col[s_activeSlot] = LerpByte( col[s_activeSlot], texTarget, lt );
+                    if ( needAdd )
+                    {
+                        // First point reached: the patch gets the brush material as a
+                        // layer (MarkTouched above already took the undo copy).  A
+                        // patch with no layers yet has white colour bytes that mean
+                        // nothing as weights, so they start from zero.
+                        if ( UsedSlotCount( def ) == 0 )
+                            for ( int ci = 0; ci < def->width; ++ci )
+                                for ( int cj = 0; cj < def->height; ++cj )
+                                    *(unsigned int *)&def->ctrl[ci][cj].vert_color = 0u;
+                        strncpy( def->kiwiLayer[slot], s_paintMaterial, 63 );
+                        def->kiwiLayer[slot][63] = '\0';
+                        needAdd = false;
+                        ++s_layersAdded;
+                    }
+                    if ( slot >= 0 )
+                        col[slot] = LerpByte( col[slot], texTarget, lt );
                     else
                         for ( int k = 0; k < KTER_SLOTS; ++k )     // base: erase the layers
                             if ( SlotUsed( def, k ) )
                                 col[k] = LerpByte( col[k], 0.0f, lt );
                     break;
-                case OP_COLOR:
-                    for ( int k = 0; k < 3; ++k )
-                        col[k] = LerpByte( col[k], s_color[k] * 255.0f, lt );
+                case OP_BLEND:
+                {
+                    // Every used layer's weight moves toward the mean over a
+                    // (2R+1)^2 neighbourhood of the pre-stamp grid, so the per-point
+                    // steps the coarse grid leaves between two textures fade into a
+                    // gradient.  The seam pass (StitchWeights) carries it across patches.
+                    const int R = s_blendRings;
+                    float sumC[4] = { 0, 0, 0, 0 };
+                    int   n = 0;
+                    for ( int di = -R; di <= R; ++di )
+                        for ( int dj = -R; dj <= R; ++dj )
+                        {
+                            const int ni = i + di, nj = j + dj;
+                            if ( ni < 0 || nj < 0 || ni >= def->width || nj >= def->height )
+                                continue;
+                            for ( int k = 0; k < 4; ++k )
+                                sumC[k] += (float)snap.c[ni][nj][k];
+                            ++n;
+                        }
+                    if ( n == 0 )
+                        break;
+                    const float inv = 1.0f / (float)n;
+                    for ( int k = 0; k < KTER_SLOTS; ++k )
+                        if ( SlotUsed( def, k ) )
+                            col[k] = LerpByte( col[k], sumC[k] * inv, lt );
                     break;
+                }
                 }
             }
         }
         if ( changed )
             NoteDirty( def, op == OP_RAISE || op == OP_SETHEIGHT || op == OP_NOISE
-                            || ( op == OP_SMOOTH && s_tool != KTER_TEXTURE && s_tool != KTER_COLOR ) );
+                            || ( op == OP_SMOOTH && s_tool != KTER_TEXTURE && s_tool != KTER_BLEND ) );
         return changed;
+    }
+
+    // Texture paint on BRUSHES: every upward face (normal z > 0.5) of a visible,
+    // unfiltered brush whose winding centre lies inside the brush ring takes the
+    // paint material whole (a face has no per-vertex weights).  Ctrl (erase) and
+    // "Erase to base" do nothing here.  Each brush is Undo_AddBrush'ed on first touch
+    // inside the stroke's record, so Ctrl+Z restores its faces with the terrain.
+    int PaintBrushFaces( const float *center )
+    {
+        if ( !s_paintBrushes || s_paintBase || !s_paintMaterial[0] )
+            return 0;
+        int painted = 0;
+        const float r = s_shape == KTER_SQUARE ? s_outer * 1.42f : s_outer;
+        for ( int pass = 0; pass < 2; ++pass )
+        {
+            selbrush_t *head = pass == 0 ? &selected_brushes : &active_brushes;
+            for ( selbrush_t *b = head->next; b && b != head; b = b->next )
+            {
+                brush_t *def = b->def;
+                if ( !def || def->patch || !def->faces || FilterBrush( b, 0 ) || ( b->brushFlags & 0x20 ) != 0 )
+                    continue;
+                if ( center[0] + r < def->mins[0] || center[0] - r > def->maxs[0]
+                  || center[1] + r < def->mins[1] || center[1] - r > def->maxs[1] )
+                    continue;
+                bool touched = false;
+                for ( int f = 0; f < def->faceCount; ++f )
+                {
+                    face_t *face = &def->faces[f];
+                    const winding_t *w = face->w;
+                    if ( !w || w->numpoints < 3 || face->plane.normal[2] < 0.5f )
+                        continue;
+                    float c[3] = { 0.0f, 0.0f, 0.0f };
+                    for ( int i = 0; i < w->numpoints; ++i )
+                        for ( int k = 0; k < 3; ++k )
+                            c[k] += w->p[i][k];
+                    for ( int k = 0; k < 3; ++k )
+                        c[k] /= (float)w->numpoints;
+                    if ( BrushDistance( center, c ) > s_outer )
+                        continue;
+                    const qtexture_s *cur = face->mtldef[0].radMtl;
+                    if ( cur && cur->name && !_stricmp( cur->name, s_paintMaterial ) )
+                        continue;                              // already wears it
+                    if ( !touched )
+                    {
+                        Undo_AddBrush( (entity_brush_s *)def );  // skipped if already in this record
+                        touched = true;
+                    }
+                    SetMaterial( s_paintMaterial, (patchMesh_material *)&face->mtldef[0] );
+                    KiwiMtl_RealizeFace( face );
+                    ++painted;
+                }
+                if ( touched )
+                {
+                    ++def->version;
+                    Brush_BuildWindings( def, 0 );
+                    sub_47B940( def );
+                    MarkMapModified();
+                }
+            }
+        }
+        return painted;
     }
 
     void Stamp( const float *center, kterOp_t op, float sign, float dt )
@@ -1336,6 +1758,15 @@ namespace
         bool any = false;
         for ( size_t i = 0; i < s_targets.size(); ++i )
             any |= StampPatch( s_targets[i], op, center, sign, dt );
+        if ( op == OP_TEXTURE && sign > 0.0f )
+        {
+            const int faces = PaintBrushFaces( center );
+            if ( faces > 0 )
+            {
+                s_facesPainted += faces;
+                any = true;
+            }
+        }
         if ( any )
         {
             ++s_stamps;
@@ -1353,7 +1784,7 @@ namespace
         case KTER_SMOOTH:    return OP_SMOOTH;
         case KTER_NOISE:     return OP_NOISE;
         case KTER_TEXTURE:   return OP_TEXTURE;
-        case KTER_COLOR:     return OP_COLOR;
+        case KTER_BLEND:     return OP_BLEND;
         default:             return OP_RAISE;
         }
     }
@@ -1363,7 +1794,7 @@ namespace
         s_targets.clear();
         for ( int pass = 0; pass < 2; ++pass )
         {
-            if ( pass == 1 && !s_affectUnselected )
+            if ( pass == 1 && !s_affectUnselected && !PaintAnywhere() )
                 break;
             selbrush_t *head = pass == 0 ? &selected_brushes : &active_brushes;
             for ( selbrush_t *b = head->next; b && b != head; b = b->next )
@@ -1377,7 +1808,7 @@ namespace
         for ( selbrush_t *b = selected_brushes.next; b && b != &selected_brushes; b = b->next )
             if ( PatchEligible( b ) )
                 return true;
-        if ( s_affectUnselected )
+        if ( s_affectUnselected || PaintAnywhere() )
             for ( selbrush_t *b = active_brushes.next; b && b != &active_brushes; b = b->next )
                 if ( PatchEligible( b ) )
                     return true;
@@ -1575,6 +2006,132 @@ namespace
         Sys_Printf( "Terrain Sculpt: split %i patch%s into %i chunk%s (%.0f).\n",
                     (int)originals.size(), originals.size() == 1 ? "" : "es",
                     made, made == 1 ? "" : "s", s_chunkSize );
+    }
+
+    // ── Flatten: flat selected terrain -> one brush each ─────────────────────
+    // A terrain patch whose control heights all lie within `s_flatTol` is replaced by
+    // a single axis-aligned brush: top at that height, `s_flatThick` deep, the patch's
+    // base material on the top face and caulk on the rest.  Flat ground as a brush is
+    // 12 triangles and one collision volume instead of up to 450 triangles; the Set
+    // height tool makes more patches qualify.  One undo record (deleted patches saved,
+    // created brushes stamped); non-flat patches are left alone and counted.
+    void FlattenSelectedToBrushes()
+    {
+        std::vector<selbrush_t *> flat;
+        int skipped = 0;
+        for ( selbrush_t *b = selected_brushes.next; b && b != &selected_brushes; b = b->next )
+        {
+            if ( !PatchEligible( b ) || !GridIsSheet( b->patch->def ) )
+                continue;
+            const patchMesh_t *def = b->patch->def;
+            float lo = FLT_MAX, hi = -FLT_MAX;
+            for ( int i = 0; i < def->width; ++i )
+                for ( int j = 0; j < def->height; ++j )
+                {
+                    const float z = def->ctrl[i][j].xyz[2];
+                    if ( z < lo ) lo = z;
+                    if ( z > hi ) hi = z;
+                }
+            if ( hi - lo <= s_flatTol )
+                flat.push_back( b );
+            else
+                ++skipped;
+        }
+        if ( flat.empty() )
+        {
+            Sys_Printf( "Terrain Sculpt: no selected terrain patch is flat within %.1f units (%i checked).\n",
+                        s_flatTol, skipped );
+            return;
+        }
+        if ( !world_entity )
+            return;
+
+        // Remember what to build before the patches go.
+        struct flatRec_t { float mins[3], maxs[3]; char material[64]; };
+        std::vector<flatRec_t> recs;
+        for ( size_t i = 0; i < flat.size(); ++i )
+        {
+            const patchMesh_t *def = flat[i]->patch->def;
+            flatRec_t r;
+            r.mins[0] = flat[i]->def->mins[0]; r.mins[1] = flat[i]->def->mins[1];
+            r.maxs[0] = flat[i]->def->maxs[0]; r.maxs[1] = flat[i]->def->maxs[1];
+            float z = 0.0f;
+            for ( int a = 0; a < def->width; ++a )
+                for ( int c = 0; c < def->height; ++c )
+                    z += def->ctrl[a][c].xyz[2];
+            z /= (float)( def->width * def->height );
+            r.maxs[2] = z;
+            r.mins[2] = z - ( s_flatThick > 1.0f ? s_flatThick : 1.0f );
+            // The top face wears the patch's DOMINANT material: the painted layer with
+            // the highest mean weight when it covers at least half the patch, else the
+            // base.  A face has no weights, so the paint cannot carry over any finer.
+            const char *top = BaseMaterialName( def );
+            float bestMean = 127.0f;
+            for ( int k = 0; k < KTER_SLOTS; ++k )
+            {
+                if ( !SlotUsed( def, k ) )
+                    continue;
+                float sum = 0.0f;
+                for ( int a = 0; a < def->width; ++a )
+                    for ( int c = 0; c < def->height; ++c )
+                        sum += (float)( (const byte *)&def->ctrl[a][c].vert_color )[k];
+                const float mean = sum / (float)( def->width * def->height );
+                if ( mean > bestMean )
+                {
+                    bestMean = mean;
+                    top = def->kiwiLayer[k];
+                }
+            }
+            strncpy( r.material, top, 63 );
+            r.material[63] = '\0';
+            recs.push_back( r );
+        }
+
+        // Delete the patches inside the record (Edit->Delete's bracket)...
+        Select_Deselect( 1 );
+        for ( size_t i = 0; i < flat.size(); ++i )
+        {
+            ForgetDef( flat[i]->patch->def );
+            Select_Brush( flat[i], 0, 0, 0 );
+        }
+        Undo_ClearRedo();
+        Undo_GeneralStart( "flatten terrain to brushes" );
+        Undo_AddBrushList( &selected_brushes );
+        for ( selbrush_t *i = selected_brushes.next; i != &selected_brushes; i = i->next )
+            Undo_AddEntity_W( (entity_s *)i->owner->def );
+        Select_Delete();
+
+        // ...then lay the brushes, stamped as created so undo frees them.
+        Ed_EnsureCurrentMaterial_Kiwi();
+        int made = 0;
+        for ( size_t i = 0; i < recs.size(); ++i )
+        {
+            brush_t *def = Brush_Alloc( g_qeglobals.random_texture_stuff, nullptr );
+            if ( !def )
+                continue;
+            Brush_Create( recs[i].mins, recs[i].maxs, def, nullptr );
+            Brush_BuildWindings( def, 1 );               // planes first: the top test reads them
+            for ( int f = 0; f < def->faceCount; ++f )
+            {
+                face_t *face = &def->faces[f];
+                const bool top = face->plane.normal[2] > 0.9f;
+                SetMaterial( top ? recs[i].material : "caulk", (patchMesh_material *)&face->mtldef[0] );
+                KiwiMtl_RealizeFace( face );
+            }
+            Brush_BuildWindings( def, 1 );
+            KiwiExtrude_LandDef( def );                  // world entity + selected
+            Undo_KiwiMarkCreated( def );
+            ++made;
+        }
+        Undo_End();
+        s_targets.clear();
+        g_nUpdateBits = -1;
+        char kept[64] = "";
+        if ( skipped )
+            _snprintf( kept, sizeof( kept ), " (%i not flat, kept)", skipped );
+        kept[sizeof( kept ) - 1] = '\0';
+        Sys_Printf( "Terrain Sculpt: %i flat patch%s became %i brush%s%s.\n",
+                    (int)flat.size(), flat.size() == 1 ? "" : "es", made, made == 1 ? "" : "es", kept );
     }
 
     bool AnyPatchCovers( float x, float y )
@@ -2268,6 +2825,14 @@ namespace
     // The base VB run of every patch is re-uploaded with a blue→cyan→green→yellow→red
     // colour by control-point height over a flat opaque material, so relief reads at a
     // glance instead of hiding under the texture.  Paint modes keep the real look.
+    // Armed Texture paint: the layer runs draw as flat slot colours (red, green, blue,
+    // yellow) at the painted weight instead of the blended second texture, so the
+    // brushwork is unmistakable while painting.
+    bool WeightViewActive()
+    {
+        return s_armed && s_weightView && s_tool == KTER_TEXTURE;
+    }
+
     bool HeatmapActive()
     {
         return s_armed && s_heatmap
@@ -2307,7 +2872,13 @@ namespace
             lo = mid - 8.0f;
             hi = mid + 8.0f;
         }
-        const bool moved = !s_heatValid || fabsf( lo - s_heatMinZ ) > 0.5f || fabsf( hi - s_heatMaxZ ) > 0.5f;
+        // Hysteresis: re-tinting means re-uploading EVERY patch (1,286 VBs on a chunked
+        // map), so only a range change worth seeing - 5 % of the span or 32 units,
+        // whichever is larger - triggers it; a Raise stroke nudging the peak does not.
+        const float tol = ( hi - lo ) * 0.05f > 32.0f ? ( hi - lo ) * 0.05f : 32.0f;
+        const bool moved = !s_heatValid || fabsf( lo - s_heatMinZ ) > tol || fabsf( hi - s_heatMaxZ ) > tol;
+        if ( !moved && s_heatValid )
+            return false;                      // keep the old range: the colours stay put
         s_heatMinZ  = lo;
         s_heatMaxZ  = hi;
         s_heatValid = true;
@@ -2373,14 +2944,18 @@ namespace
         s_undoOpen = false;
         s_stroke   = false;
         g_nUpdateBits = -1;
-        if ( s_touched || s_created )
-            SetStatus( "Armed. Last stroke: %i stamp%s over %i patch%s, %i chunk%s laid.",
+        if ( s_touched || s_created || s_facesPainted )
+            SetStatus( "Armed. Last stroke: %i stamp%s over %i patch%s, %i chunk%s laid, %i brush face%s painted.",
                        s_stamps, s_stamps == 1 ? "" : "s", s_touched, s_touched == 1 ? "" : "es",
-                       s_created, s_created == 1 ? "" : "s" );
+                       s_created, s_created == 1 ? "" : "s", s_facesPainted, s_facesPainted == 1 ? "" : "s" );
         else if ( CreationAllowed() )
             SetStatus( "Armed. The stroke reached no control point and every cell under it was covered." );
         else
             SetStatus( "Armed. The stroke reached no control point (grow the radius or select the patch)." );
+        if ( s_layersAdded || s_layersFull )
+            Sys_Printf( "Terrain Sculpt: '%s' added as a layer on %i patch%s%s.\n",
+                        s_paintMaterial, s_layersAdded, s_layersAdded == 1 ? "" : "es",
+                        s_layersFull ? " (some patches already carry 4 layers and were skipped)" : "" );
         s_stamps = s_touched = s_created = 0;
     }
 
@@ -2392,8 +2967,7 @@ namespace
             EndStroke();
         s_armed = armed;
         ClearCursor();
-        if ( s_heatmap )
-            HeatmapRefresh();                  // on: tint every patch; off: real materials back
+        HeatmapRefresh();                      // armed views on/off: every patch re-uploads
         KiwiGrass_SetArmed( armed && s_tool == KTER_GRASS );
         SetStatus( armed ? ( s_tool == KTER_GRASS ? "Armed. LMB in the 3D camera scatters; Esc disarms."
                                                   : "Armed. LMB in the 3D camera sculpts; Esc disarms." )
@@ -2405,12 +2979,12 @@ namespace
     {
         if ( tool < 0 || tool >= KTER_TOOL_COUNT )
             return;
-        const bool wasHeat = HeatmapActive();
+        const bool wasHeat = HeatmapActive(), wasWeight = WeightViewActive();
         s_tool = tool;
         KiwiGrass_SetArmed( s_armed && s_tool == KTER_GRASS );
         if ( s_armed )
             ClearCursor();
-        if ( wasHeat != HeatmapActive() )
+        if ( wasHeat != HeatmapActive() || wasWeight != WeightViewActive() )
             HeatmapRefresh();
         g_nUpdateBits = -1;          // wireframe hiding depends on the tool
     }
@@ -2514,24 +3088,91 @@ namespace
     // ── the Texture paint section of the panel ───────────────────────────────
     void DrawTexturePaint( bool &changed )
     {
-        ImGui::SeparatorText( "Texture layers" );
+        char dropped[128];
+
+        // The brush's material: whatever terrain the brush touches gets it as a layer.
+        ImGui::SeparatorText( "Paint with" );
+        {
+            char label[160];
+            if ( s_paintBase )
+                _snprintf( label, sizeof( label ), "Erase to base" );
+            else if ( s_paintMaterial[0] )
+                _snprintf( label, sizeof( label ), "%s", s_paintMaterial );
+            else
+                _snprintf( label, sizeof( label ), "(drop a material here)" );
+            label[sizeof( label ) - 1] = '\0';
+            ImGui::Button( label, ImVec2( 320.0f, 30.0f ) );
+            if ( AcceptMaterialDrop( dropped, sizeof( dropped ) ) )
+            {
+                strncpy( s_paintMaterial, dropped, sizeof( s_paintMaterial ) - 1 );
+                s_paintMaterial[sizeof( s_paintMaterial ) - 1] = '\0';
+                s_paintBase = false;
+                changed = true;
+            }
+            if ( ImGui::IsItemHovered() )
+                ImGui::SetTooltip( "Drop a thumbnail from the Textures tab, click a layer row below, or press\n"
+                                   "I over terrain or a brush face while armed (eyedropper).\n"
+                                   "Any terrain the brush touches gets this material as a layer\n"
+                                   "(added on first touch, 4 per patch) - no selection needed." );
+            ImGui::SameLine();
+            if ( ImGui::Button( "Use current" ) )
+            {
+                qtexture_s *q = g_qeglobals.random_texture_stuff[0].mtl.radMtl;
+                if ( q && q->name )
+                {
+                    strncpy( s_paintMaterial, q->name, sizeof( s_paintMaterial ) - 1 );
+                    s_paintMaterial[sizeof( s_paintMaterial ) - 1] = '\0';
+                    s_paintBase = false;
+                    changed = true;
+                }
+            }
+            if ( ImGui::IsItemHovered() )
+                ImGui::SetTooltip( "Take the texture browser's current material." );
+            if ( ImGui::Checkbox( "Erase to base (paint every layer out)", &s_paintBase ) )
+                changed = true;
+            ImGui::SameLine();
+            if ( ImGui::Checkbox( "Paint brush faces too", &s_paintBrushes ) )
+                changed = true;
+            if ( ImGui::IsItemHovered() )
+                ImGui::SetTooltip( "Upward brush faces whose centre is inside the ring take the material\n"
+                                   "whole (no weights on a face), so flat spots can be brushes instead of\n"
+                                   "terrain and still be painted with the same tool. The cursor lands on\n"
+                                   "brushes as well as terrain; Ctrl / Erase to base leave faces alone." );
+            ImGui::TextDisabled( s_paintBase
+                ? "LMB thins every layer under the brush back to the base material."
+                : "LMB paints the material in, Ctrl+LMB paints it out, Shift+LMB smooths it." );
+            if ( ImGui::Checkbox( "Show this material's weight in red while armed", &s_weightView ) )
+            {
+                Save();
+                HeatmapRefresh();
+            }
+            if ( ImGui::IsItemHovered() )
+                ImGui::SetTooltip( "While painting, the layer that carries the brush material draws red at its\n"
+                                   "painted weight (on top of any reference pictures too); every other layer\n"
+                                   "keeps its blended texture, so dirt, sand and grass can be layered while the\n"
+                                   "one being painted stays obvious. Disarm to see the real look." );
+        }
+
+        ImGui::SeparatorText( "Layers of the selected patch" );
         selbrush_t *node = FirstSelectedPatch();
         s_bandTreeOpen = false;
         if ( !node )
         {
-            ImGui::TextDisabled( "Select a terrain patch to see and paint its layers." );
+            ImGui::TextDisabled( "Select a patch to inspect, swap or remove its layers (painting needs no selection)." );
             return;
         }
         patchMesh_t *def = node->patch->def;
-        char dropped[128];
 
-        // Base row.
+        // Base row: click = paint the base (erase layers).
         {
             char label[160];
             _snprintf( label, sizeof( label ), "Base  %s", BaseMaterialName( def ) );
             label[sizeof( label ) - 1] = '\0';
-            if ( ImGui::RadioButton( label, s_activeSlot < 0 ) )
-                s_activeSlot = -1;
+            if ( ImGui::RadioButton( label, s_paintBase ) )
+            {
+                s_paintBase = true;
+                changed = true;
+            }
         }
         // Layer rows.
         for ( int k = 0; k < KTER_SLOTS; ++k )
@@ -2542,8 +3183,13 @@ namespace
             char label[160];
             _snprintf( label, sizeof( label ), "L%i  %s", k + 1, def->kiwiLayer[k] );
             label[sizeof( label ) - 1] = '\0';
-            if ( ImGui::RadioButton( label, s_activeSlot == k ) )
-                s_activeSlot = k;
+            if ( ImGui::RadioButton( label, !s_paintBase && !_stricmp( s_paintMaterial, def->kiwiLayer[k] ) ) )
+            {
+                strncpy( s_paintMaterial, def->kiwiLayer[k], sizeof( s_paintMaterial ) - 1 );
+                s_paintMaterial[sizeof( s_paintMaterial ) - 1] = '\0';
+                s_paintBase = false;
+                changed = true;
+            }
             if ( AcceptMaterialDrop( dropped, sizeof( dropped ) ) )
             {
                 s_blendTwins.erase( std::string( dropped ) );
@@ -2575,11 +3221,7 @@ namespace
             }
             ImGui::PopID();
         }
-        if ( s_activeSlot >= 0 && !SlotUsed( def, s_activeSlot ) )
-            s_activeSlot = -1;
-        ImGui::TextDisabled( s_activeSlot < 0
-            ? "Painting the base erases every layer under the brush."
-            : "LMB paints this layer in, Ctrl+LMB paints it out." );
+        ImGui::TextDisabled( "Click a row to paint with it; drop onto a row to swap its material." );
 
         // Add a layer by dragging a thumbnail out of the Textures tab.
         const bool full = FirstFreeSlot( def ) < 0;
@@ -2758,8 +3400,11 @@ void KiwiTerrain_LayerUpload( patchMesh_t *def, int run, int baseRuns,
             const float span = s_heatMaxZ - s_heatMinZ;
             for ( int i = 0; i < vertCount; ++i )
                 color[i] = HeatColor( span > 0.0f ? ( verts[i].xyz[2] - s_heatMinZ ) / span : 0.5f );
-            if ( material && ( g_qeglobals.d_opague || g_qeglobals.d_white ) )
-                *material = g_qeglobals.d_opague ? g_qeglobals.d_opague : g_qeglobals.d_white;
+            // kiwi_heat (lit, depth-writing, white colormap) shows the colour alone;
+            // without it the patch keeps its own material and the colour tints it.
+            Material *heat = HeatMaterial();
+            if ( heat && material )
+                *material = heat;
             return;
         }
         if ( run == 0 && UsedSlotCount( def ) )
@@ -2770,6 +3415,23 @@ void KiwiTerrain_LayerUpload( patchMesh_t *def, int run, int baseRuns,
     const int slot = NthUsedSlot( def, run - baseRuns );
     if ( slot < 0 || !verts )
         return;
+    // Weight view: ONLY the brush material's own layer draws red at its painted
+    // weight; every other layer keeps its blended texture, so dirt / sand / grass can
+    // be layered while the one being painted stays obvious.
+    if ( WeightViewActive() && !s_paintBase && !_stricmp( def->kiwiLayer[slot], s_paintMaterial ) )
+    {
+        Material *flat = WeightMaterial();
+        for ( int i = 0; i < vertCount; ++i )
+        {
+            const unsigned a = ( (const byte *)&verts[i].vert_color )[slot];
+            // Packed B | G<<8 | R<<16 (the patch VB order): red.
+            color[i] = ( flat ? 0xFF0000u : ( color[i] & 0x00FFFFFFu ) ) | ( a << 24 );
+        }
+        Material *use = flat ? flat : BlendTwin( def->kiwiLayer[slot] );
+        if ( use && material )
+            *material = use;
+        return;
+    }
     for ( int i = 0; i < vertCount; ++i )
     {
         const unsigned a = ( (const byte *)&verts[i].vert_color )[slot];
@@ -2836,7 +3498,7 @@ void KiwiTerrain_Draw()
             if ( s_inner > s_outer )
                 s_inner = s_outer;
             changed |= ImGui::SliderFloat( "Strength", &s_strength, 0.01f, 2.0f, "%.2f" );
-            ImGui::TextDisabled( "+ / - resize   Ctrl+wheel resize   Shift+wheel strength" );
+            ImGui::TextDisabled( "[ ] or + / - resize (hold to repeat)   Ctrl+wheel resize   Shift+wheel strength" );
             if ( ImGui::Checkbox( "Hide wireframe (Tab)", &s_hideWire ) )
                 g_nUpdateBits = -1;
             if ( ImGui::IsItemHovered() )
@@ -2922,9 +3584,14 @@ void KiwiTerrain_Draw()
         case KTER_TEXTURE:
             DrawTexturePaint( changed );
             break;
-        case KTER_COLOR:
-            changed |= ImGui::ColorEdit3( "Colour", s_color, ImGuiColorEditFlags_Uint8 );
-            ImGui::TextDisabled( "On a patch with texture layers the colour bytes ARE the layer weights." );
+        case KTER_BLEND:
+            ImGui::SetNextItemWidth( 160.0f );
+            changed |= ImGui::SliderInt( "Blend reach (grid points)", &s_blendRings, 1, 4 );
+            if ( ImGui::IsItemHovered() )
+                ImGui::SetTooltip( "How many grid points each weight averages with. 1 softens a single\n"
+                                   "step, 3-4 turn a hard edge into a wide gradient." );
+            ImGui::TextDisabled( "Blends every layer's weights toward their neighbours, seams included;\n"
+                                 "textures that meet in steps become smooth transitions." );
             break;
         default:
             break;
@@ -2942,6 +3609,23 @@ void KiwiTerrain_Draw()
                                    "with no terrain in reach the lattice starts at the world origin." );
             if ( ImGui::Button( "Split oversized selected patches" ) )
                 SplitOversized();
+            ImGui::SeparatorText( "Flatten to brushes" );
+            ImGui::SetNextItemWidth( 120.0f );
+            changed |= ImGui::InputFloat( "Flatness tolerance", &s_flatTol, 0.5f, 4.0f, "%.1f" );
+            ImGui::SameLine();
+            ImGui::SetNextItemWidth( 120.0f );
+            changed |= ImGui::InputFloat( "Thickness", &s_flatThick, 1.0f, 16.0f, "%.0f" );
+            if ( ImGui::Button( "Flat selected patches -> brushes" ) )
+                FlattenSelectedToBrushes();
+            if ( ImGui::IsItemHovered() )
+                ImGui::SetTooltip( "Every selected terrain patch whose heights all lie within the tolerance\n"
+                                   "becomes ONE brush: 12 triangles and one collision volume instead of a grid.\n"
+                                   "Top face = the patch's dominant material (the painted layer with the\n"
+                                   "highest average weight if it covers half the patch, else the base); sides\n"
+                                   "and bottom caulk. A face has no weights, so blends do not carry over.\n"
+                                   "Patches that are not flat are kept; Set height them first to qualify.\n"
+                                   "The new brushes stay SELECTED (flat highlight in the camera) - Esc to see\n"
+                                   "their texture. Undoable." );
             ImGui::SeparatorText( "Density" );
             ImGui::SetNextItemWidth( 160.0f );
             changed |= ImGui::SliderInt( "Cells across each selected patch", &s_density, 1, 120,
@@ -2981,7 +3665,7 @@ void KiwiTerrain_Draw()
 
             ImGui::SeparatorText( "Scope" );
             changed |= ImGui::Checkbox( "Affect unselected patches too", &s_affectUnselected );
-            changed |= ImGui::Checkbox( "Terrain patches only", &s_terrainOnly );
+            ImGui::TextDisabled( "Terrain meshes only - bezier curves are never sculpted, welded or painted." );
             if ( ImGui::Checkbox( "Soft-select vertex drags (legacy Drag Up/Down)", &s_softSelect ) )
             {
                 SyncSoftSelect();
@@ -3045,15 +3729,8 @@ static bool BeginStroke( bool shift, bool ctrl, const byte picked[4] )
             SetStatus( "Armed. Target height picked: %.1f", s_targetZ );
             return false;
         }
-        if ( s_tool == KTER_COLOR )
-        {
-            for ( int k = 0; k < 3; ++k )
-                s_color[k] = (float)picked[k] / 255.0f;
-            Save();
-            SetStatus( "Armed. Colour picked." );
-            return false;
-        }
     }
+    (void)picked;
 
     if ( s_tool == KTER_TRIM )
     {
@@ -3064,7 +3741,7 @@ static bool BeginStroke( bool shift, bool ctrl, const byte picked[4] )
 
     // With creation allowed a stroke needs no patch at all: the chunks it lays join
     // the selection and the targets as they appear.
-    if ( !AnyTargetPatch() && !CreationAllowed() )
+    if ( !AnyTargetPatch() && !CreationAllowed() && !PaintAnywhere() )
     {
         SetStatus( "Armed. Select the patch(es) to sculpt, or tick 'Affect unselected'." );
         return false;
@@ -3081,6 +3758,9 @@ static bool BeginStroke( bool shift, bool ctrl, const byte picked[4] )
     s_stamps    = 0;
     s_touched   = 0;
     s_created   = 0;
+    s_layersAdded = 0;
+    s_layersFull  = 0;
+    s_facesPainted = 0;
     s_noiseSeed += 1.0f;
     s_haveLastCenter = false;
     s_accumDt   = 1.0f / 60.0f;
@@ -3171,6 +3851,61 @@ bool KiwiTerrain_HandleEscape()
     return true;
 }
 
+// I: eyedropper.  Loads "Paint with" from whatever is under the pointer: on a patch,
+// the layer with the heaviest weight at the nearest control point (the base when no
+// layer carries at least 25 %); on a brush, the face the pointer is on.
+static bool EyedropMaterial()
+{
+    ray_t ray;
+    if ( !Pick_RayFromCursor( &ray ) )
+        return false;
+    float hit[3];
+    byte  col[4];
+    selbrush_t *node = nullptr;
+    if ( PickPatches( ray.origin, ray.dir, true, hit, col, &node ) && node )
+    {
+        const patchMesh_t *def = node->patch->def;
+        // Nearest control point in XY.
+        int bi = 0, bj = 0;
+        float best = FLT_MAX;
+        for ( int i = 0; i < def->width; ++i )
+            for ( int j = 0; j < def->height; ++j )
+            {
+                const float dx = def->ctrl[i][j].xyz[0] - hit[0], dy = def->ctrl[i][j].xyz[1] - hit[1];
+                const float d = dx * dx + dy * dy;
+                if ( d < best ) { best = d; bi = i; bj = j; }
+            }
+        const byte *w = (const byte *)&def->ctrl[bi][bj].vert_color;
+        int slot = -1, weight = 63;                    // below 25 % the base shows through
+        for ( int k = 0; k < KTER_SLOTS; ++k )
+            if ( SlotUsed( def, k ) && (int)w[k] > weight ) { weight = w[k]; slot = k; }
+        const char *name = slot >= 0 ? def->kiwiLayer[slot] : BaseMaterialName( def );
+        strncpy( s_paintMaterial, name, sizeof( s_paintMaterial ) - 1 );
+        s_paintMaterial[sizeof( s_paintMaterial ) - 1] = '\0';
+        s_paintBase = false;
+        Save();
+        SetStatus( "Armed. Eyedropper: %s (%s)", s_paintMaterial, slot >= 0 ? "layer" : "base" );
+        return true;
+    }
+    const pick_result_t face = Pick( ray, SEL_MASK_FACE );
+    if ( face.valid && face.item.kind == SEL_FACE && face.item.brush && face.item.brush->def
+      && face.item.faceIndex >= 0 && face.item.faceIndex < face.item.brush->def->faceCount )
+    {
+        const qtexture_s *q = face.item.brush->def->faces[face.item.faceIndex].mtldef[0].radMtl;
+        if ( q && q->name )
+        {
+            strncpy( s_paintMaterial, q->name, sizeof( s_paintMaterial ) - 1 );
+            s_paintMaterial[sizeof( s_paintMaterial ) - 1] = '\0';
+            s_paintBase = false;
+            Save();
+            SetStatus( "Armed. Eyedropper: %s (brush face)", s_paintMaterial );
+            return true;
+        }
+    }
+    SetStatus( "Armed. Eyedropper: nothing under the pointer." );
+    return false;
+}
+
 bool KiwiTerrain_HandleKey( int vk )
 {
     if ( !s_armed )
@@ -3184,6 +3919,45 @@ bool KiwiTerrain_HandleKey( int vk )
     {
         s_hideWire = !s_hideWire;
         g_nUpdateBits = -1;
+        return true;
+    }
+    if ( vk == 0x49 && s_tool == KTER_TEXTURE ) // I: eyedropper into "Paint with"
+    {
+        EyedropMaterial();
+        g_nUpdateBits |= W_CAMERA;
+        return true;
+    }
+    if ( vk == 0x56 )                          // V: pick the height under the pointer
+    {
+        if ( !s_cursorHave )
+        {
+            SetStatus( "Armed. V needs the pointer over terrain (or the base plane)." );
+            return true;
+        }
+        if ( s_tool == KTER_SETHEIGHT )
+        {
+            s_targetZ = s_cursor[2];
+            Save();
+            char h[64];
+            KiwiUnits_Format( h, sizeof( h ), s_targetZ );
+            SetStatus( "Armed. Target height picked: %s", h );
+            g_nUpdateBits |= W_CAMERA;
+            return true;
+        }
+        if ( CreationAllowed() )
+        {
+            s_createZ = s_cursor[2];
+            Save();
+            char h[64];
+            KiwiUnits_Format( h, sizeof( h ), s_createZ );
+            SetStatus( "Armed. Base height picked: %s", h );
+            return true;
+        }
+        return false;
+    }
+    if ( vk == 0xDD || vk == 0xDB )            // ] / [ : brush radius up / down (auto-repeats)
+    {
+        RadiusStep( vk == 0xDD ? 1.15f : 1.0f / 1.15f );
         return true;
     }
     if ( vk == 0x6B || vk == 0xBB )            // VK_ADD / VK_OEM_PLUS
@@ -3240,6 +4014,56 @@ void KiwiTerrain_Hover( int imgX, int imgY, bool over )
 // segments with an end within outer radius x "Wire reach" of the cursor, in the
 // brush's shape.  Patches the stroke moves (the selection, plus the active list
 // under "Affect unselected") are white; the rest grey.
+// The camera draws the reference images AFTER a depth clear, on top of everything, so
+// the red weight run under a picture was dimmed by that picture's opacity (and gone
+// behind an opaque one).  While the weight view is on and pictures exist, re-emit
+// every patch's red run here - KiwiHover_DrawWorld calls this right after
+// KiwiRefImage_DrawWorld - as an unlit, vertex-coloured, depth-tested blend over
+// them.  Over bare terrain it merely restates the world pass's own run.
+static void DrawWeightOverlay()
+{
+    if ( !WeightViewActive() || s_paintBase || KiwiRefImage_Count() <= 0 )
+        return;
+    Material *flat = WeightMaterial();
+    if ( !flat )
+        return;
+    const float neutral[4] = { 0.0f, 0.0f, 0.0f, 0.0f };   // w = 0: the vertex colour drives
+    static const float white[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+    bool any = false;
+    const int sortKey = Editor_MaterialSortKey( flat );
+    for ( int pass = 0; pass < 2; ++pass )
+    {
+        selbrush_t *head = pass == 0 ? &selected_brushes : &active_brushes;
+        for ( selbrush_t *b = head->next; b && b != head; b = b->next )
+        {
+            if ( !PatchEligible( b ) )
+                continue;
+            const patch_t *inst = b->patch;
+            if ( !inst->visArray || inst->vertCount <= 0 || !inst->indicesFront )
+                continue;
+            for ( int L = 0; L < inst->visCount; ++L )
+            {
+                if ( inst->visArray[L].material != flat )
+                    continue;
+                if ( !any )
+                {
+                    R_SortMaterials();                    // open this pass's accumulation
+                    R_AddCmdSetMaterialColor( neutral );
+                    any = true;
+                }
+                Editor_AddMeshCmd( flat, TECHNIQUE_UNLIT, sortKey + L, inst->vertCount,
+                                   inst->visArray[L].vertHandle, inst->indexCount,
+                                   (int)(intptr_t)inst->indicesFront );
+            }
+        }
+    }
+    if ( any )
+    {
+        R_AddEditorSurfsCmd();
+        R_AddCmdSetMaterialColor( white );
+    }
+}
+
 // A patch whose bounds meet the reach box (the candidate test the wireframe uses).
 static bool WirePatchInReach( selbrush_t *b, float pad )
 {
@@ -3361,6 +4185,7 @@ void KiwiTerrain_DrawWorld()
     }
     if ( s_armed && s_tool == KTER_GRASS )
         return;
+    DrawWeightOverlay();                       // needs no cursor: the paint must read over pictures
     if ( !s_armed || !s_cursorHave || s_ringCount < 2 )
         return;
 
@@ -3419,6 +4244,81 @@ void KiwiTerrain_DrawWorld()
         float top[3] = { s_cursor[0], s_cursor[1], s_targetZ };
         KiwiLines_Add( s_cursor, top );
         KiwiLines_Flush();
+    }
+}
+
+// ── camera overlay: the height colour scale ──────────────────────────────────
+void KiwiTerrain_DrawOverlay( float imgMinX, float imgMinY, float imgW, float imgH )
+{
+    if ( !HeatmapActive() || !s_heatValid || imgH < 160.0f || imgW < 240.0f )
+        return;
+    ImDrawList *dl = ImGui::GetWindowDrawList();
+    if ( !dl )
+        return;
+
+    // Geometry: a bar on the left edge, vertically centred, labels to its right.
+    const float barW   = 16.0f;
+    float       barH   = imgH * 0.45f;
+    if ( barH > 260.0f ) barH = 260.0f;
+    if ( barH < 120.0f ) barH = 120.0f;
+    const float x0 = imgMinX + 14.0f;
+    const float y0 = imgMinY + ( imgH - barH ) * 0.5f;
+    const float x1 = x0 + barW;
+    const float y1 = y0 + barH;
+    const float lineH = ImGui::GetTextLineHeight();
+
+    // Widest label decides the backdrop.
+    const int ticks = 5;
+    char labels[ticks][64];
+    float labelW = 0.0f;
+    for ( int i = 0; i < ticks; ++i )
+    {
+        const float t = (float)i / (float)( ticks - 1 );
+        KiwiUnits_Format( labels[i], sizeof( labels[i] ), s_heatMinZ + ( s_heatMaxZ - s_heatMinZ ) * t );
+        const float w = ImGui::CalcTextSize( labels[i] ).x;
+        if ( w > labelW ) labelW = w;
+    }
+    const char *title = "height";
+    const float titleW = ImGui::CalcTextSize( title ).x;
+    float boxW = barW + 8.0f + labelW + 14.0f;
+    if ( boxW < titleW + 8.0f ) boxW = titleW + 8.0f;
+    dl->AddRectFilled( ImVec2( x0 - 6.0f, y0 - lineH - 8.0f ), ImVec2( x0 - 6.0f + boxW, y1 + lineH * 0.5f + 6.0f ),
+                       IM_COL32( 18, 18, 22, 175 ), 3.0f );
+    dl->AddText( ImVec2( x0 - 2.0f, y0 - lineH - 4.0f ), IM_COL32( 190, 196, 208, 225 ), title );
+
+    // The gradient, top = high (red) to bottom = low (blue), in 32 bands.
+    const int bands = 32;
+    for ( int i = 0; i < bands; ++i )
+    {
+        const float tTop = 1.0f - (float)i / (float)bands;
+        const float tBot = 1.0f - (float)( i + 1 ) / (float)bands;
+        const unsigned cT = HeatColor( tTop ), cB = HeatColor( tBot );   // packed BGRA
+        const ImU32 top = IM_COL32( ( cT >> 16 ) & 255, ( cT >> 8 ) & 255, cT & 255, 255 );
+        const ImU32 bot = IM_COL32( ( cB >> 16 ) & 255, ( cB >> 8 ) & 255, cB & 255, 255 );
+        const float ya = y0 + barH * (float)i / (float)bands;
+        const float yb = y0 + barH * (float)( i + 1 ) / (float)bands;
+        dl->AddRectFilledMultiColor( ImVec2( x0, ya ), ImVec2( x1, yb ), top, top, bot, bot );
+    }
+    dl->AddRect( ImVec2( x0, y0 ), ImVec2( x1, y1 ), IM_COL32( 80, 84, 96, 200 ), 0.0f, 0, 1.0f );
+
+    // Ticks and labels (top = max).
+    for ( int i = 0; i < ticks; ++i )
+    {
+        const float t = (float)i / (float)( ticks - 1 );
+        const float y = y1 - barH * t;
+        dl->AddLine( ImVec2( x1, y ), ImVec2( x1 + 5.0f, y ), IM_COL32( 220, 224, 232, 220 ), 1.0f );
+        dl->AddText( ImVec2( x1 + 8.0f, y - lineH * 0.5f ), IM_COL32( 220, 224, 232, 230 ), labels[i] );
+    }
+
+    // The cursor's height as a marker on the bar.
+    if ( s_cursorHave )
+    {
+        const float span = s_heatMaxZ - s_heatMinZ;
+        const float t = span > 0.0f ? ClampF( ( s_cursor[2] - s_heatMinZ ) / span, 0.0f, 1.0f ) : 0.5f;
+        const float y = y1 - barH * t;
+        dl->AddTriangleFilled( ImVec2( x0 - 7.0f, y - 4.0f ), ImVec2( x0 - 7.0f, y + 4.0f ), ImVec2( x0 - 1.0f, y ),
+                               IM_COL32( 255, 255, 255, 240 ) );
+        dl->AddLine( ImVec2( x0, y ), ImVec2( x1, y ), IM_COL32( 255, 255, 255, 200 ), 1.0f );
     }
 }
 
@@ -3498,9 +4398,9 @@ bool KiwiTerrain_TestSetTool( const char *name )
 {
     Load();
     static const char *const names[KTER_TOOL_COUNT] =
-        { "raise", "setheight", "smooth", "noise", "texture", "colour", "grass", "trim" };
+        { "raise", "setheight", "smooth", "noise", "texture", "blend", "grass", "trim" };
     for ( int i = 0; i < KTER_TOOL_COUNT; ++i )
-        if ( !_stricmp( name, names[i] ) || ( i == KTER_COLOR && !_stricmp( name, "color" ) ) )
+        if ( !_stricmp( name, names[i] ) )
         {
             SetTool( i );
             Save();
@@ -3525,16 +4425,38 @@ bool KiwiTerrain_TestSet( const char *key, float value )
     else if ( !_stricmp( key, "surfaces" ) )    s_createOnSurfaces = value != 0.0f;
     else if ( !_stricmp( key, "targetz" ) )     s_targetZ = value;
     else if ( !_stricmp( key, "unselected" ) )  s_affectUnselected = value != 0.0f;
-    else if ( !_stricmp( key, "terrainonly" ) ) s_terrainOnly = value != 0.0f;
     else if ( !_stricmp( key, "hidewire" ) )    s_hideWire = value != 0.0f;
     else if ( !_stricmp( key, "wirereach" ) )   s_wireReach = value;
     else if ( !_stricmp( key, "heatmap" ) )     { s_heatmap = value != 0.0f; HeatmapRefresh(); }
+    else if ( !_stricmp( key, "paintbrushes" ) ) s_paintBrushes = value != 0.0f;
+    else if ( !_stricmp( key, "flattol" ) )     s_flatTol = value;
+    else if ( !_stricmp( key, "flatthick" ) )   s_flatThick = value;
+    else if ( !_stricmp( key, "weightview" ) )  { s_weightView = value != 0.0f; HeatmapRefresh(); }
     else
         return false;
     Sanitize();
     Save();
     RebuildRing();
     g_nUpdateBits |= W_CAMERA;
+    return true;
+}
+
+bool KiwiTerrain_TestSetPaintMaterial( const char *name )
+{
+    Load();
+    if ( !name )
+        return false;
+    if ( !_stricmp( name, "base" ) )
+    {
+        s_paintBase = true;
+    }
+    else
+    {
+        strncpy( s_paintMaterial, name, sizeof( s_paintMaterial ) - 1 );
+        s_paintMaterial[sizeof( s_paintMaterial ) - 1] = '\0';
+        s_paintBase = false;
+    }
+    Save();
     return true;
 }
 

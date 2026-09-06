@@ -436,6 +436,9 @@ namespace
         { KIWI_CMD_TERRAIN_PANEL, { "Terrain Sculpt", "Modeling", 0, nullptr      } },
         { KIWI_CMD_WINDOW_DECALS, { "Decals", "Windows", 0, nullptr                } },
         { KIWI_CMD_WINDOW_REFIMAGES, { "Reference Images", "Windows", 0, nullptr    } },
+        { KIWI_CMD_PERF_HUD,         { "Perf HUD",         "View",    0, nullptr    } },
+        { KIWI_CMD_VIEW_SHOW_TRIS,   { "Show Triangle Count", "View", 0, nullptr    } },
+        { 33972,                     { "Show Angle Arrows",   "View", 0, nullptr    } },   // View->Show->Angles (native)
     };
 
     // Built-in modal lifecycle probe. It intentionally mutates nothing and opens no undo.
@@ -737,6 +740,8 @@ namespace
         case KIWI_CMD_WINDOW_INSPECTOR:                 // the Inspector tab — likewise
         case KIWI_CMD_WINDOW_DECALS:                    // the Decals tab — likewise
         case KIWI_CMD_WINDOW_REFIMAGES:                 // KIWI (REFIMG): panel toggle
+        case KIWI_CMD_PERF_HUD:                         // a HUD toggle, not a verb
+        case KIWI_CMD_VIEW_SHOW_TRIS:                   // View readout toggle
         case KIWI_CMD_TERRAIN_PANEL:                    // a panel toggle, not a verb
         case KIWI_CMD_ENT_DROP:
         case KIWI_CMD_MODEL_DROP:

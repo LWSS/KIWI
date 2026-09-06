@@ -27,6 +27,7 @@
 #include "kiwi_grid.h"               // snap and perspective-grid state
 #include "kiwi_numeric.h"            // grid expression parser
 #include "kiwi_units.h"              // grid spacing and display units
+#include "kiwi_ux.h"                 // KiwiUX_ShowTriCount - View > Show Triangle Count
 #include "kiwi_section.h"            // section-analysis state
 #include "kiwi_pick.h"               // ray_t + Pick_RayFromImagePos — the cursor-distance readout
 #include "kiwi_droptrace.h"          // kiwiDropHit_t + KiwiDrop_Trace — likewise
@@ -66,7 +67,9 @@ namespace
     const float KVC_SEC_H     = 20.0f;   // button height, pixels
     const float KVC_SEC_GAP   = 4.0f;    // label -> button
     const float KVC_STRIP_GAP = 6.0f;    // button -> cube
-    const float KVC_TOP_STRIP = KVC_ZOOM_H + KVC_ZOOM_GAP + KVC_ZOOM_TEXT
+    // Two text rows under the bar: the zoom / triangle label and the cursor-distance
+    // line (the latter used to overlap the SECTION button).
+    const float KVC_TOP_STRIP = KVC_ZOOM_H + KVC_ZOOM_GAP + KVC_ZOOM_TEXT + KVC_ZOOM_TEXT
                               + KVC_SEC_GAP + KVC_SEC_H + KVC_STRIP_GAP;
 
     // Omit the strip when it would push the cube below the image.
@@ -413,23 +416,8 @@ namespace
                          hot ? IM_COL32( 255, 226, 110, 255 ) : IM_COL32( 190, 196, 208, 225 ),
                          label );
         }
-        else
-        {
-            // Idle: the slot shows the scene's triangle count instead.
-            if ( now >= s_triNextTime )
-            {
-                s_triCount    = CountTriangles();
-                s_triNextTime = now + 0.5f;
-            }
-            char num[32];
-            char label[64];
-            FormatThousands( num, sizeof( num ), s_triCount );
-            _snprintf( label, sizeof( label ), "%s tris", num );
-            label[sizeof( label ) - 1] = 0;
-            const ImVec2 ts = ImGui::CalcTextSize( label );
-            dl->AddText( ImVec2( x1 - ts.x, y1 + KVC_ZOOM_GAP ),
-                         IM_COL32( 190, 196, 208, 225 ), label );
-        }
+        // Idle: the slot stays empty; the triangle count lives in the bottom-right
+        // corner (DrawTriCount) where View > Show Triangle Count controls it.
 
         // KIWI-UX: live camera→cursor distance in RAW ENGINE UNITS (inches), under the
         // zoom label.  This is the number distance-based systems compare against (model
@@ -470,7 +458,7 @@ namespace
         const float x1 = imgMinX + imgW - KVC_MARGIN;
         const float x0 = x1 - KVC_SEC_W;
         const float y0 = imgMinY + KVC_MARGIN + KVC_ZOOM_H + KVC_ZOOM_GAP
-                       + KVC_ZOOM_TEXT + KVC_SEC_GAP;
+                       + KVC_ZOOM_TEXT + KVC_ZOOM_TEXT + KVC_SEC_GAP;   // below the cursor line
         const float y1 = y0 + KVC_SEC_H;
 
         const ImVec2 mouse = ImGui::GetIO().MousePos;
@@ -989,12 +977,40 @@ void KiwiViewCube_SwipeAxisView( int dir )
     Sys_Printf( "View: %s.\n", KVC_VIEWS[target].name );
 }
 
+// Bottom-right corner: the scene triangle count (View > Show Triangle Count).  Counts
+// every 0.5 s; brushes as winding fans, patches as tessellated cells x 2, model
+// entities at lod 0, hidden geometry excluded.  Never claims hover.
+static void DrawTriCount( float imgMinX, float imgMinY, float imgW, float imgH )
+{
+    if ( !KiwiUX_ShowTriCount() || imgW < 160.0f || imgH < 80.0f )
+        return;
+    const float now = (float)ImGui::GetTime();
+    if ( now >= s_triNextTime )
+    {
+        s_triCount    = CountTriangles();
+        s_triNextTime = now + 0.5f;
+    }
+    char num[32];
+    char label[64];
+    FormatThousands( num, sizeof( num ), s_triCount );
+    _snprintf( label, sizeof( label ), "%s tris", num );
+    label[sizeof( label ) - 1] = 0;
+    ImDrawList *dl = ImGui::GetWindowDrawList();
+    const ImVec2 ts = ImGui::CalcTextSize( label );
+    const float x1 = imgMinX + imgW - KVC_MARGIN;
+    const float y1 = imgMinY + imgH - KVC_MARGIN;
+    dl->AddRectFilled( ImVec2( x1 - ts.x - 8.0f, y1 - ts.y - 6.0f ), ImVec2( x1, y1 ),
+                       IM_COL32( 18, 18, 22, 175 ), 3.0f );
+    dl->AddText( ImVec2( x1 - ts.x - 4.0f, y1 - ts.y - 3.0f ), IM_COL32( 190, 196, 208, 235 ), label );
+}
+
 bool KiwiViewCube_Draw( float imgMinX, float imgMinY, float imgW, float imgH )
 {
     if ( imgW < KVC_BOX * 1.5f || imgH < KVC_BOX * 1.5f )
         return false;                            // too small a viewport to be useful
 
     // Cube visibility does not hide independent camera, section or grid controls.
+    DrawTriCount( imgMinX, imgMinY, imgW, imgH );      // corner readout, no hover claim
     const bool zoomHot = DrawZoomBar( imgMinX, imgMinY, imgW, imgH );
     const bool secHot  = DrawSectionButton( imgMinX, imgMinY, imgW, imgH );
     const bool projHot = DrawProjButton( imgMinX, imgMinY, imgW, imgH );

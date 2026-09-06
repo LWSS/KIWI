@@ -12,6 +12,9 @@
 #include "kiwi_camera.h"           // KiwiCam_Ortho / KiwiCam_SetOrtho
 #include "radiant_registry.h"      // Radiant_ProfileGetInt/SetInt
 
+#include <shellapi.h>              // ShellExecuteA (KiwiWindows_RevealInExplorer)
+#include <stdio.h>                 // sprintf_s
+
 // Keep Radiant_CheckMenu single-sourced in radiant_frame.h.
 extern bool Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId ); // mainfrm.cpp
 extern int  Sys_Printf( const char *fmt, ... );                                             // win_qe3.cpp
@@ -228,6 +231,7 @@ void KiwiWindows_BuildViewMenu( void *frameMenu )
     ::AppendMenuA( view, MF_STRING, (UINT_PTR)KIWI_CMD_VIEW_SHOW_AXES, "Show &Axes" );
     // Checked means orthographic.
     ::AppendMenuA( view, MF_STRING, (UINT_PTR)KIWI_CMD_VIEW_ORTHO,     "&Orthographic Camera" );
+    ::AppendMenuA( view, MF_STRING, (UINT_PTR)KIWI_CMD_VIEW_SHOW_TRIS, "Show &Triangle Count" );
     s_viewMenuBuilt = true;
     ::DrawMenuBar( g_qeglobals.d_hwndMain );
 
@@ -241,6 +245,7 @@ void KiwiWindows_SyncViewMenu()
     Radiant_CheckMenu( (UINT)KIWI_CMD_VIEW_SHOW_GRID, KiwiUX_ShowGrid() );
     Radiant_CheckMenu( (UINT)KIWI_CMD_VIEW_SHOW_AXES, KiwiUX_ShowAxes() );
     Radiant_CheckMenu( (UINT)KIWI_CMD_VIEW_ORTHO,     KiwiCam_Ortho() );   // projection check state
+    Radiant_CheckMenu( (UINT)KIWI_CMD_VIEW_SHOW_TRIS, KiwiUX_ShowTriCount() );
 }
 
 // Command registration and dispatch.
@@ -263,6 +268,8 @@ void KiwiWindows_RegisterCommands()
     Radiant_RegisterCommand( "KiwiTerrainSculpt", 0, 0, KIWI_CMD_TERRAIN_PANEL );
     Radiant_RegisterCommand( "KiwiWindowDecals",  0, 0, KIWI_CMD_WINDOW_DECALS );
     Radiant_RegisterCommand( "KiwiWindowRefImages", 0, 0, KIWI_CMD_WINDOW_REFIMAGES ); // KIWI (REFIMG)
+    Radiant_RegisterCommand( "KiwiPerf",            0, 0, KIWI_CMD_PERF_HUD );         // perf HUD toggle
+    Radiant_RegisterCommand( "KiwiViewShowTris",    0, 0, KIWI_CMD_VIEW_SHOW_TRIS );   // View > Show Triangle Count
 }
 
 bool KiwiWindows_DispatchInstant( unsigned int cmdId )
@@ -298,6 +305,18 @@ bool KiwiWindows_DispatchInstant( unsigned int cmdId )
         KiwiTerrain_TogglePanel();
         return true;
     }
+    if ( cmdId == (unsigned int)KIWI_CMD_PERF_HUD )
+    {
+        extern void KiwiPerf_Toggle();           // kiwi_perf.cpp
+        KiwiPerf_Toggle();
+        return true;
+    }
+    if ( cmdId == (unsigned int)KIWI_CMD_VIEW_SHOW_TRIS )
+    {
+        KiwiUX_SetShowTriCount( !KiwiUX_ShowTriCount() );
+        KiwiWindows_SyncViewMenu();
+        return true;
+    }
 
     for ( int i = 0; i < KIWI_WIN_COUNT; ++i )
     {
@@ -308,4 +327,17 @@ bool KiwiWindows_DispatchInstant( unsigned int cmdId )
         return true;
     }
     return false;
+}
+
+bool KiwiWindows_RevealInExplorer( const char *osPath )
+{
+    if ( !osPath || !osPath[0] )
+        return false;
+    // explorer.exe /select,"<path>" opens the parent folder with the file highlighted.
+    char arguments[1024];
+    sprintf_s( arguments, sizeof( arguments ), "/select,\"%s\"", osPath );
+    const HINSTANCE result = ::ShellExecuteA( g_qeglobals.d_hwndMain, "open",
+                                               "explorer.exe", arguments,
+                                               nullptr, SW_SHOWNORMAL );
+    return (INT_PTR)result > 32;
 }

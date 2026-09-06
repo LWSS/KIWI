@@ -1074,6 +1074,13 @@ static void ExecuteTerrain( const ScriptLine &line )
         { ScriptError( line, "terrain set: unknown key '%s'", w[2].c_str() ); return; }
         return;
     }
+    if ( verb == "material" )
+    {
+        // Texture paint's brush material; "base" = erase to base.
+        if ( w.size() != 3 ) { ScriptError( line, "terrain material <name|base>" ); return; }
+        KiwiTerrain_TestSetPaintMaterial( w[2].c_str() );
+        return;
+    }
     if ( verb == "arm" )
     {
         int on = 0;

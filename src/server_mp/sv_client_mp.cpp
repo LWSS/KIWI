@@ -298,7 +298,7 @@ void __cdecl SV_ReceiveStats(netadr_t from, msg_t *msg)
     if (ClientByAddress)
     {
         packetNum = MSG_ReadByte(msg);
-        if (packetNum < 7)
+        if (packetNum < 7)                 // KISAK: client only sends 0..6; 7 would set bit 7 and wedge the gamestate gate
         {
             Com_Printf(15, "Received packet %i of stats data\n", packetNum);
             start = 1240 * packetNum;

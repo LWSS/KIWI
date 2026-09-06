@@ -336,6 +336,8 @@ set(RADIANT_SRCS
     "${SRC_DIR}/radiant/kiwi_entarrow.cpp"
     "${SRC_DIR}/radiant/kiwi_hints.h"        # contextual hotkey panel, read live from g_radiantCommands
     "${SRC_DIR}/radiant/kiwi_hints.cpp"
+    "${SRC_DIR}/radiant/kiwi_perf.h"         # KiwiPerf: per-stage frame timers + camera HUD line
+    "${SRC_DIR}/radiant/kiwi_perf.cpp"
 
     # Shakeout B — the 3D-first default layout.  Per-window visibility flags, the
     # native "Windows" popup on the frame menu, and the RTT render gating that makes

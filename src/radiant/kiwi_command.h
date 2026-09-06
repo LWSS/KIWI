@@ -148,6 +148,8 @@
 #define KIWI_CMD_TERRAIN_PANEL      34143   // "Terrain Sculpt" (the Y-key patch sculpt/paint panel)
 #define KIWI_CMD_WINDOW_DECALS      34144   // "Decals" (the decal placement dock window)
 #define KIWI_CMD_WINDOW_REFIMAGES   34145   // "Reference Images" (editor-only planes)
+#define KIWI_CMD_PERF_HUD           34146   // "KiwiPerf" - per-stage frame timers in the camera
+#define KIWI_CMD_VIEW_SHOW_TRIS     34147   // View > Show Triangle Count (camera bottom-right readout)
 
 // Shared with mainfrm's dispatch gate so range changes have one definition.
 bool KiwiCmd_IsKiwiId ( int id );

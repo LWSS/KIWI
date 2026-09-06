@@ -438,6 +438,34 @@ void KiwiThumbCache_Init()
                 (double)bytes / ( 1024.0 * 1024.0 ) );
 }
 
+bool KiwiThumbCache_ResolveModelSource( const char *xmodelName,
+                                        char *outContainer, int containerSize,
+                                        bool *outLoose )
+{
+    if ( outContainer && containerSize > 0 )
+        outContainer[0] = '\0';
+    if ( outLoose )
+        *outLoose = false;
+    const std::string model = NormalizeModelName( xmodelName );
+    if ( model.empty() || !fs_searchpaths )
+        return false;
+    // Same walk the source hash uses, so the Models browser reveals the file the
+    // loader would actually read rather than a shadowed copy further down.
+    const sourceStamp_t stamp =
+        ResolveSource( ( std::string( "xmodel/" ) + model ).c_str() );
+    if ( stamp.kind == sourceStamp_t::MISSING )
+        return false;
+    if ( outContainer && containerSize > 0 )
+    {
+        const size_t copied =
+            stamp.container.copy( outContainer, (size_t)containerSize - 1 );
+        outContainer[copied] = '\0';
+    }
+    if ( outLoose )
+        *outLoose = stamp.kind == sourceStamp_t::LOOSE;
+    return true;
+}
+
 bool KiwiThumbCache_SourceHash( const char *xmodelName,
                                 kiwiThumbSourceHash_t *outHash,
                                 float outMins[3], float outMaxs[3],

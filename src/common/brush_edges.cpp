@@ -771,7 +771,7 @@ int __cdecl PartitionEdges(
     int *partition)
 {
     const SimplePlaneIntersection *v8; // [esp+0h] [ebp-1020h]
-    const SimplePlaneIntersection *resultCycle; // [esp+8h] [ebp-1018h] BYREF
+    const SimplePlaneIntersection *resultCycle[1024]; // [esp+8h] [ebp-1018h] BYREF
     int v10; // [esp+100Ch] [ebp-14h]
     int i; // [esp+1010h] [ebp-10h]
     int resultCycleCount; // [esp+1014h] [ebp-Ch] BYREF
@@ -792,7 +792,7 @@ int __cdecl PartitionEdges(
                 edges[partition[i] - 1],
                 edges[v14],
                 connectingPlane,
-                &resultCycle,
+                resultCycle,
                 &resultCycleCount))
             {
                 if (i < v10 - 1)

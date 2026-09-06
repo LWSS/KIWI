@@ -825,7 +825,8 @@ void KiwiBox_End( int imgX, int imgY )
     // Apply the rect independently to construction geometry: unlike a click, a
     // marquee can legitimately name both brush and construction items.
     KiwiConSel_ApplyRect( r.x0, r.y0, r.x1, r.y1, crossing, s_shift, s_ctrl );
-    KiwiRefImage_ApplyRect( r.x0, r.y0, r.x1, r.y1, crossing, s_shift, s_ctrl );
+    // KIWI (REFIMG, 2026-09-03): reference images are NEVER box-selected - a marquee over
+    // a traced photo must select the geometry on it, not the photo.  Click / outliner only.
 }
 
 void KiwiBox_Cancel()

@@ -11,6 +11,7 @@
 #include "kiwi_command.h"
 #include "kiwi_droptrace.h"
 #include "kiwi_shadowcache.h"
+#include "kiwi_windows.h"          // KiwiWindows_RevealInExplorer
 #include "radiant_frame.h"
 #include "radiant_registry.h"
 
@@ -1123,14 +1124,8 @@ namespace
         return true;
     }
 
-    bool RevealInExplorer( const std::string &path )
-    {
-        const std::string arguments = "/select,\"" + path + "\"";
-        const HINSTANCE result = ::ShellExecuteA( g_qeglobals.d_hwndMain, "open",
-                                                   "explorer.exe", arguments.c_str(),
-                                                   nullptr, SW_SHOWNORMAL );
-        return (INT_PTR)result > 32;
-    }
+    // Explorer reveal is single-sourced in kiwi_windows.cpp (KiwiWindows_RevealInExplorer)
+    // so the Models browser and this bridge cannot drift apart.
 
     bool AutoImportEnabled()
     {
@@ -1221,7 +1216,7 @@ namespace
             Sys_Printf( "Plasticity export: could not copy failed path \"%s\" to "
                         "the clipboard.\n", failedPath.c_str() );
         for ( size_t i = 0; i < job.files.size(); ++i )
-            if ( !RevealInExplorer( job.files[i].path ) )
+            if ( !KiwiWindows_RevealInExplorer( job.files[i].path.c_str() ) )
                 Sys_Printf( "Plasticity export: could not open Explorer for \"%s\".\n",
                             job.files[i].path.c_str() );
     }

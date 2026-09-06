@@ -95,23 +95,23 @@ void console_print( const char *fmt, va_list args )
     if ( !edit )
         return;                       // headless / pre-OnCreate — stdout only
 
-    // The binary runs TranslateString (\n → \r\n) BEFORE the SendMessage so the edit
-    // control shows proper line breaks (a bare \n renders as a box in a Win32 edit).
-    // stdout above gets the raw \n (native), so gate output is unchanged.
-    char *guiText = TranslateString( buf );
-
-    if ( SendMessageA( edit, EM_GETLINECOUNT, 0, 0 ) > 400 )
+    // KIWI (2026-09-05): the legacy EDIT is no longer FED.  It was kept as a hidden mirror of
+    // the ImGui console, but during a synchronous print storm (the lazy model loads of the
+    // first camera frame) it was seen painting itself white over the dark console tab, and
+    // every EM_REPLACESEL on a 400-line control re-lays the whole text out (real CPU per
+    // line).  The ImGui console above is the only readout now; the control stays alive
+    // only because legacy HWND users still expect it to exist.  If anything shows it,
+    // hide it again right here - this runs on every line, so it cannot linger.
+    if ( ::IsWindowVisible( edit ) )
     {
-        DWORD selStart = 0, selEnd = 0;
-        SendMessageA( edit, WM_SETREDRAW, FALSE, 0 );
-        SendMessageA( edit, EM_GETSEL, (WPARAM)&selStart, (LPARAM)&selEnd );
-        SendMessageA( edit, EM_SETSEL, 0, 500 );             // select first 500 chars
-        SendMessageA( edit, EM_REPLACESEL, FALSE, (LPARAM)"" );// delete them (trim top)
-        SendMessageA( edit, EM_SETSEL, selStart, selEnd );    // restore caret
-        SendMessageA( edit, WM_SETREDRAW, TRUE, 0 );
+        ::ShowWindow( edit, SW_HIDE );
+        static bool s_reported = false;
+        if ( !s_reported )
+        {
+            s_reported = true;
+            ImGuiConsole_Append( "KIWI: the legacy console pane was visible and has been hidden (report this if it keeps happening).\n" );
+        }
     }
-
-    SendMessageA( edit, EM_REPLACESEL, FALSE, (LPARAM)guiText );// append at the caret
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

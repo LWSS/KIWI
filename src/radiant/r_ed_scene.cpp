@@ -31,6 +31,9 @@
 #include "kiwi_light.h"           // Missing additive-technique policy
 #include <vector>
 #include <algorithm>              // std::sort / std::inplace_merge (the mixed-window flush)
+#include <vector>                 // KIWI (PERF): the main-flush sort-order cache
+#include <unordered_map>
+#include <stdlib.h>
 #include <utility>                // std::pair (record + owning object, sorted together)
 
 extern void Assert(const char *file, int line, int type, const char *fmt, ...); // 0x49cea0
@@ -405,6 +408,117 @@ void KiwiEdScene_StampSortedPrefix(int first, int count)
     s_edPendingSortedCount = count;
 }
 
+// ── KIWI (PERF): the main-flush SORT-ORDER CACHE ─────────────────────────────
+// A static camera on a chunked map submits the SAME window every frame (the same
+// records in the same submission order), and Editor_SurfCompare's inputs - the key
+// tuple below - are identical too, so last frame's sorted order is this frame's sorted
+// order.  Applying it is one O(n) key comparison plus one O(n) permutation instead of
+// an O(n log n) std::sort whose comparator dereferences two records per probe; on the
+// 1,286-chunk map this was the 3.5 ms "main surf flush (sort)" zone of a 20 ms frame.
+// Only the camera's main flush (runsKey != 0) uses it; every other window sorts live.
+// RADIANT_SORTCACHE_OFF=1 disables it (A/B).
+namespace
+{
+    struct kiwiSortKey_t
+    {
+        uintptr_t rec;        // the record address: the comparator's final tie-break
+        uintptr_t mat;        // material (model: editorSurf_sub, mesh: editorMesh_s)
+        uintptr_t sub;        // model: xsurf; mesh: vb handle
+        int       sortKey;
+        int       techType;
+        int       type;
+        bool operator==( const kiwiSortKey_t &o ) const
+        {
+            return rec == o.rec && mat == o.mat && sub == o.sub && sortKey == o.sortKey
+                && techType == o.techType && type == o.type;
+        }
+    };
+    std::vector<kiwiSortKey_t> s_sortKeysPrev;   // last main flush, PRE-sort order
+    std::vector<kiwiSortKey_t> s_sortKeysCur;
+    std::vector<int>           s_sortPerm;       // sorted position -> pre-sort index
+    std::vector<editorSurf_s>  s_sortScratch;
+
+    bool SortCacheEnabled()
+    {
+        static const bool s_off = []{ const char *e = getenv( "RADIANT_SORTCACHE_OFF" );
+                                      return e && *e && *e != '0'; }();
+        return !s_off;
+    }
+
+    void SortKeyOf( const editorSurf_s &s, kiwiSortKey_t *k )
+    {
+        k->rec  = (uintptr_t)s.mesh_or_surfSub;
+        k->type = (int)s.type;
+        if ( s.type == ED_SURF_MODEL )
+        {
+            const editorSurf_sub *sub = (const editorSurf_sub *)s.mesh_or_surfSub;
+            k->mat = (uintptr_t)sub->material;
+            k->sub = (uintptr_t)( sub->skinnedSurf ? sub->skinnedSurf->xsurf : nullptr );
+            k->sortKey = sub->sortKey;
+            k->techType = sub->techType;
+        }
+        else
+        {
+            const editorMesh_s *m = (const editorMesh_s *)s.mesh_or_surfSub;
+            k->mat = (uintptr_t)m->material;
+            k->sub = (uintptr_t)(unsigned)m->handle;
+            k->sortKey = m->sortKey;
+            k->techType = m->techType;
+        }
+    }
+
+    // Fill s_sortKeysCur from the window; true when it equals last frame's window.
+    bool SortCacheMatches( int first, int count )
+    {
+        s_sortKeysCur.resize( (size_t)count );
+        for ( int i = 0; i < count; ++i )
+            SortKeyOf( edSceneGlobals.sceneSurfs[first + i], &s_sortKeysCur[(size_t)i] );
+        if ( (int)s_sortKeysPrev.size() != count || (int)s_sortPerm.size() != count )
+            return false;
+        for ( int i = 0; i < count; ++i )
+            if ( !( s_sortKeysCur[(size_t)i] == s_sortKeysPrev[(size_t)i] ) )
+                return false;
+        return true;
+    }
+
+    void SortCacheApply( int first, int count )
+    {
+        s_sortScratch.assign( &edSceneGlobals.sceneSurfs[first], &edSceneGlobals.sceneSurfs[first] + count );
+        for ( int j = 0; j < count; ++j )
+            edSceneGlobals.sceneSurfs[first + j] = s_sortScratch[(size_t)s_sortPerm[(size_t)j]];
+    }
+
+    // After a live sort: remember the pre-sort keys (already in s_sortKeysCur) and the
+    // permutation that produced the sorted window.
+    void SortCacheRecord( int first, int count )
+    {
+        std::unordered_map<uintptr_t, int> index;
+        index.reserve( (size_t)count * 2 );
+        for ( int i = 0; i < count; ++i )
+            index[s_sortKeysCur[(size_t)i].rec] = i;
+        s_sortPerm.resize( (size_t)count );
+        for ( int j = 0; j < count; ++j )
+        {
+            std::unordered_map<uintptr_t, int>::const_iterator it =
+                index.find( (uintptr_t)edSceneGlobals.sceneSurfs[first + j].mesh_or_surfSub );
+            if ( it == index.end() )
+            {
+                s_sortPerm.clear();                    // cannot happen; never trust a partial map
+                s_sortKeysPrev.clear();
+                return;
+            }
+            s_sortPerm[(size_t)j] = it->second;
+        }
+        s_sortKeysPrev.swap( s_sortKeysCur );
+    }
+}
+
+void KiwiEdScene_SortCacheDrop()
+{
+    s_sortKeysPrev.clear();
+    s_sortPerm.clear();
+}
+
 // 0x4FDA10  R_AddEditorSurfsCmd — sort the surfs added since the last flush and emit
 // one RC_DRAW_EDITOR_SKINNEDCACHED for them.
 void *__cdecl R_AddEditorSurfsCmd()
@@ -427,6 +541,12 @@ void *__cdecl R_AddEditorSurfsCmd()
         if (presorted)
             return Editor_AddCmd_DrawSkinnedCached(first, count, runsKey);
 #ifdef KISAK_RADIANT
+        // KIWI (PERF): the main flush of an unchanged scene reuses last frame's order.
+        const bool sortCache = runsKey != 0 && SortCacheEnabled();
+        if (sortCache && SortCacheMatches(first, count)) {
+            SortCacheApply(first, count);
+            return Editor_AddCmd_DrawSkinnedCached(first, count, runsKey);
+        }
         // MIXED WINDOW: [ clean objects, replayed in comparator order ][ objects redrawn
         // live ].  Sorting only the live tail and merging is O(n) with a scratch buffer
         // instead of O(n log n) over the whole map, which is what keeps a drag's frame near
@@ -438,10 +558,14 @@ void *__cdecl R_AddEditorSurfsCmd()
             std::inplace_merge(&edSceneGlobals.sceneSurfs[first],
                                &edSceneGlobals.sceneSurfs[first + sortedCount],
                                &edSceneGlobals.sceneSurfs[first] + count, Editor_SurfLess());
+            if (sortCache)
+                SortCacheRecord(first, count);
             return Editor_AddCmd_DrawSkinnedCached(first, count, runsKey);
         }
         std::sort(&edSceneGlobals.sceneSurfs[first],
                   &edSceneGlobals.sceneSurfs[first] + count, Editor_SurfLess());
+        if (sortCache)
+            SortCacheRecord(first, count);
 #else
         qsort(&edSceneGlobals.sceneSurfs[first], count, sizeof(editorSurf_s), Editor_SurfCompare);
 #endif
