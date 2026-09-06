@@ -1,5 +1,3 @@
-#ifndef KISAK_OPENAL
-
 #include <universal/q_shared.h>
 #include "snd_local.h"
 #include "snd_public.h"
@@ -43,6 +41,20 @@ uint __stdcall MSS_FileReadCallback(UINTa hFileHandle, void *pBuffer, uint bytes
     return FS_Read((byte *)pBuffer, bytes, hFileHandle);
 }
 
+static void MSS_SetMixerPreferences(int hertz)
+{
+  // KIWI (miles9): DirectSound rounds a 1 ms fragment up to 256 sample frames
+  // at every supported output rate (11/22/44 kHz). The SDK's default of 48
+  // fragments therefore queues 279 ms at 44.1 kHz, not the intended 48 ms.
+  // Target 24 ms: 1/2/4 fragments at 11025/22050/44100 Hz (~23 ms).
+  int mixFragments = hertz * 24 / (256 * 1000);
+  if (mixFragments < 1)
+    mixFragments = 1;
+  AIL_set_preference(DIG_MIXER_CHANNELS, SND_MAX_CHANNELS);
+  AIL_set_preference(DIG_DS_FRAGMENT_SIZE, 1);
+  AIL_set_preference(DIG_DS_MIX_FRAGMENT_CNT, mixFragments);
+}
+
 _DIG_DRIVER *__cdecl MSS_open_digital_driver(int hertz, int bits, int channels)
 {
   bool v4; // [esp+0h] [ebp-10h]
@@ -50,7 +62,7 @@ _DIG_DRIVER *__cdecl MSS_open_digital_driver(int hertz, int bits, int channels)
   _DIG_DRIVER *driver; // [esp+8h] [ebp-8h]
   MSS_MC_SPEC mcSpec; // [esp+Ch] [ebp-4h] BYREF
 
-  AIL_set_preference(DIG_MIXER_CHANNELS, SND_MAX_CHANNELS);
+  MSS_SetMixerPreferences(hertz);
   driver = (_DIG_DRIVER *)AIL_open_digital_driver(hertz, bits, channels, 0);
   if ( driver )
   {
@@ -65,7 +77,7 @@ _DIG_DRIVER *__cdecl MSS_open_digital_driver(int hertz, int bits, int channels)
         MSS_InitFailed();
         return NULL;
       }
-      AIL_set_preference(DIG_MIXER_CHANNELS, SND_MAX_CHANNELS);
+      MSS_SetMixerPreferences(hertz);
       return (_DIG_DRIVER *)AIL_open_digital_driver(hertz, bits, 32, 0);
     }
   }
@@ -157,9 +169,11 @@ void MSS_InitChannels()
   g_snd.ambient_track = 1;
 }
 
+// KISAK: only the EQ parameter table is initialized here. The "3 Band Parm Eq" Miles
+// pipeline filter (milesEq.flt) that used to be located and opened below never worked
+// reliably (AV inside the .flt on coup) and has been removed from the tree entirely.
 void MSS_InitEq()
 {
-  milesGlob.eqFilter = 0;
   milesGlob.eqLerp = 1.0f; // Added by someone?
 
   for ( int eqIndex = 0; eqIndex < 2; ++eqIndex )
@@ -176,28 +190,6 @@ void MSS_InitEq()
         params->type = SND_EQTYPE_FIRST;
       }
     }
-  }
-
-  // LWSS ADD
-  HPROENUM itr = HPROENUM_FIRST;
-  HPROVIDER provider;
-  char *filterName = NULL;
-  int filterCount = 0;
-  while (AIL_enumerate_filters(&itr, &provider, &filterName))
-  {
-      Com_Printf(19, "[%d]Found filter (%s)\n", filterCount, filterName);
-      filterCount++;
-  }
-  // LWSS END
-
-  if ( AIL_find_filter("3 Band Parm Eq", &milesGlob.eqFilter) )
-  {
-    AIL_open_filter(milesGlob.eqFilter, milesGlob.driver);
-  }
-  else
-  {
-    milesGlob.eqFilter = 0;
-    Com_PrintError(9, "ERROR: unable to load eq filter.\n");
   }
 }
 
@@ -231,43 +223,14 @@ float MSS_GetWetLevel(const snd_alias_t *pAlias)
         return g_snd.effect->wetlevel;
 }
 
-const char *MSS_EQ_ENABLED[3] = { "Enable 0", "Enable 1", "Enable 2" }; // idb
-const char *MSS_EQ_FREQ[3] = { "Freq 0", "Freq 1", "Freq 2" }; // idb
-const char *MSS_EQ_TYPE[3] = { "Type 0", "Type 1", "Type 2" }; // idb
-const char *MSS_EQ_GAIN[3] = { "Gain 0", "Gain 1", "Gain 2" }; // idb
-const char *MSS_EQ_Q[3] = { "Q 0", "Q 1", "Q 2" }; // idb
-
+// KISAK: intentional no-op. This used to push milesGlob.eq[][] into the removed
+// "3 Band Parm Eq" pipeline filter via AIL_set_sample_processor/AIL_sample_stage_property.
+// The parameter table, script commands (seteq/seteqlerp) and savegame fields are kept so
+// GSC and save files keep working; the DSP just isn't applied.
 void __cdecl MSS_ApplyEqFilter(_SAMPLE *s, int entchannel)
 {
-  int enabled; // [esp+0h] [ebp-14h] BYREF
-  int band; // [esp+4h] [ebp-10h]
-  SAMPLESTAGE stage; // [esp+8h] [ebp-Ch]
-  SndEqParams *params; // [esp+Ch] [ebp-8h]
-  int eqIndex; // [esp+10h] [ebp-4h]
-  
-  if ( snd_enableEq->current.enabled && milesGlob.eqFilter )
-  {
-    AIL_set_sample_processor(s, SP_FILTER, milesGlob.eqFilter);
-    AIL_set_sample_processor(s, SP_FILTER_1, milesGlob.eqFilter);
-    stage = SP_FILTER;
-    for (eqIndex = 0; eqIndex < 2; ++eqIndex)
-    {
-        for (band = 0; band < 3; ++band)
-        {
-            params = &milesGlob.eq[eqIndex].params[band][entchannel];
-            enabled = params->enabled;
-            AIL_sample_stage_property(s, stage, MSS_EQ_ENABLED[band], -1, 0, &enabled, 0);
-            if (enabled)
-            {
-                AIL_sample_stage_property(s, stage, MSS_EQ_TYPE[band], -1, 0, params, 0);
-                AIL_sample_stage_property(s, stage, MSS_EQ_FREQ[band], -1, 0, &params->freq, 0);
-                AIL_sample_stage_property(s, stage, MSS_EQ_GAIN[band], -1, 0, &params->gain, 0);
-                AIL_sample_stage_property(s, stage, MSS_EQ_Q[band],    -1, 0, &params->q, 0);
-            }
-        }
-        stage = SP_FILTER_1;
-    }
-  }
+  (void)s;
+  (void)entchannel;
 }
 
 void __cdecl MSS_ResumeSample(int i, int frametime)
@@ -340,5 +303,3 @@ uint *__cdecl MSS_Alloc_FastFile(int bytes)
 {
   return (uint *)Z_Malloc(bytes, "MSS_Alloc", 15);
 }
-
-#endif

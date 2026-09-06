@@ -23,6 +23,8 @@ mono_crash.*
 [Rr]elease/
 [Rr]eleases/
 x64/
+!deps/msslib/x64/
+# KISAK (miles9): Keep the parked Miles x64 SDK visible to Git.
 x86/
 bld/
 build/

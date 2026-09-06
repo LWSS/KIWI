@@ -3232,9 +3232,10 @@ void __cdecl SND_Init()
     snd_enableStream = Dvar_RegisterBool("snd_enableStream", 1, DVAR_CHEAT, "Enable streamed sounds");
     snd_enableReverb = Dvar_RegisterBool("snd_enableReverb", 1, DVAR_CHEAT, "Enable sound reverberation");
     //snd_enableEq = Dvar_RegisterBool("snd_enableEq", 1, DVAR_ARCHIVE, "Enable equalization filter");
-    // LWSS: disable EQ by default. There is a rare crash within MSS that can't be cleanly worked around afaik. 
-    // to repro go to `coup` and set timescale to 10, then mash alt-tab
-    snd_enableEq = Dvar_RegisterBool("snd_enableEq", 0, DVAR_ARCHIVE, "Enable equalization filter (KISAK: note this can cause a rare crash)");
+    // LWSS: disable EQ by default. There was a rare crash within the Miles EQ .flt that couldn't be worked around
+    // (repro: `coup`, timescale 10, mash alt-tab). KISAK: the filter has since been removed from the tree, so this
+    // dvar now only gates the script-side EQ bookkeeping (g_main.cpp); no DSP is applied either way.
+    snd_enableEq = Dvar_RegisterBool("snd_enableEq", 0, DVAR_ARCHIVE, "Enable equalization bookkeeping (KISAK: EQ DSP filter removed, has no audible effect)");
     snd_draw3D = Dvar_RegisterEnum("snd_draw3D", snd_draw3DNames, 0, DVAR_CHEAT, "Draw the position and info of world sounds");
     snd_levelFadeTime = Dvar_RegisterInt(
         "snd_levelFadeTime",

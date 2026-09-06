@@ -177,13 +177,14 @@ void __cdecl BG_FreeWeaponDefStrings()
 }
 
 void __cdecl BG_ShutdownWeaponDefFiles()
-{   
-    //if (*(_BYTE *)fs_gameDirVar->current.integer) // LWSS: clear these even without a mod folder
+{
+    //if (*(_BYTE *)fs_gameDirVar->current.integer || !IsFastFileLoad())
+    if (!IsFastFileLoad())// LWSS: clear these even without a mod folder
     {
         BG_ClearSurfaceTypeSounds();
         BG_FreeWeaponDefStrings();
     }
-    
+
     bg_lastParsedWeaponIndex = 0;
 }
 

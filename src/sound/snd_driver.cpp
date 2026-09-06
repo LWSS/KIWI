@@ -1,5 +1,3 @@
-#ifndef KISAK_OPENAL
-
 #include <universal/q_shared.h>
 #include "snd_local.h"
 #include "snd_public.h"
@@ -331,8 +329,14 @@ int __cdecl SND_StartAlias2DSample(SndStartAliasInfo *startAliasInfo, int *pChan
         info.initial_ptr = sound->info.initial_ptr;
         info.channel_mask = ~0U; // NEW!
 
-        //AIL_set_sample_info(handle, &sound->info);
-        AIL_set_sample_info(handle, &info);
+        // KIWI (miles9): A rejected format must not masquerade as successful playback.
+        if (!AIL_set_sample_info(handle, &info))
+        {
+            Com_PrintError(9, "Miles rejected 2D alias '%s' (format=%d bits=%d channels=%d rate=%u bytes=%u): %s\n",
+                startAliasInfo->alias0->aliasName, info.format, info.bits, info.channels, info.rate, info.data_len, AIL_last_error());
+            AIL_end_sample(handle);
+            return SND_SetPlaybackIdNotPlayed(index);
+        }
     }
 
     MSS_ApplyEqFilter(handle, entchannel);
@@ -521,8 +525,14 @@ int __cdecl SND_StartAlias3DSample(SndStartAliasInfo *startAliasInfo, int *pChan
         info.initial_ptr = sound->info.initial_ptr;
         info.channel_mask = ~0U; // NEW!
 
-        //AIL_set_sample_info(handle, &sound->info);
-        AIL_set_sample_info(handle, &info);
+        // KIWI (miles9): Preserve the error before another Miles call overwrites it.
+        if (!AIL_set_sample_info(handle, &info))
+        {
+            Com_PrintError(9, "Miles rejected 3D alias '%s' (format=%d bits=%d channels=%d rate=%u bytes=%u): %s\n",
+                startAliasInfo->alias0->aliasName, info.format, info.bits, info.channels, info.rate, info.data_len, AIL_last_error());
+            AIL_end_sample(handle);
+            return SND_SetPlaybackIdNotPlayed(index);
+        }
     }
 
     MSS_ApplyEqFilter(handle, entchannel);
@@ -832,8 +842,9 @@ int __cdecl SND_StartAliasStreamOnChannel(SndStartAliasInfo *startAliasInfo, int
 
 void __cdecl SND_SetRoomtype(int roomtype)
 {
-    AIL_set_room_type(milesGlob.driver, roomtype);
-    AIL_set_digital_master_reverb_levels(milesGlob.driver, MSS_GetDryLevel(), MSS_GetWetLevel(0));
+    // KISAK (miles9): Keep room reverb on bus 0.
+    AIL_set_room_type(milesGlob.driver, 0, roomtype);
+    AIL_set_digital_master_reverb_levels(milesGlob.driver, 0, MSS_GetDryLevel(), MSS_GetWetLevel(0));
 }
 
 void __cdecl SND_UpdateEqs()
@@ -1464,7 +1475,12 @@ void __cdecl SND_SetHWND(HWND hwnd)
 {
     if (g_snd.Initialized2d)
     {
-        AIL_set_DirectSound_HWND(milesGlob.driver, hwnd);
+        // KIWI (miles9): WIN32_HWND's UpdateDSHwnd releases/reacquires the Miles
+        // mutex, but AIL_platform_property does not lock it on entry. Supply the
+        // missing lock scope or this thread retains the mutex and stalls all audio.
+        AIL_lock_mutex();
+        AIL_platform_property(milesGlob.driver, WIN32_HWND, 0, &hwnd, 0);
+        AIL_unlock_mutex();
     }
 }
 
@@ -1535,5 +1551,3 @@ void SND_SetEqLerp(float lerp)
 	SND_UpdateEqs();
 }
 #endif
-
-#endif // !KISAK_OPENAL

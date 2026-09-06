@@ -59,18 +59,6 @@ add_executable(${PROJECT_NAME}
 # Add multiplayer flag
 target_compile_definitions(${PROJECT_NAME} PUBLIC KISAK_MP CINEMA USE_SEPARATE_BLIT_TEXTURE)
 
-# Feature flag to swap the sound backend from Miles/MSS to OpenAL (see SOUND_BACKEND above).
-if (KISAK_OPENAL)
-    target_compile_definitions(${PROJECT_NAME} PUBLIC KISAK_OPENAL)
-
-    # Generate the dr_wav/dr_mp3 single-header implementations in exactly this one TU (see
-    # comment in snd_driver_load_obj.cpp). Must stay scoped to this file only, not target-wide,
-    # since dr_wav.h/dr_mp3.h are also included (declarations only) elsewhere in the sound module.
-    set_source_files_properties(${SRC_DIR}/sound/snd_driver_load_obj.cpp PROPERTIES
-        COMPILE_DEFINITIONS "DR_WAV_IMPLEMENTATION;DR_MP3_IMPLEMENTATION"
-    )
-endif()
-
 # We need all of the pre/post-build commands
 include(${SCRIPTS_DIR}/pre_build.cmake)
 include(${SCRIPTS_DIR}/post_build.cmake)
@@ -83,7 +71,3 @@ else()
     include(${SCRIPTS_DIR}/extern/tracy.cmake)
 endif()
 
-# OpenAL (sound backend, only needed when KISAK_OPENAL is enabled)
-if (KISAK_OPENAL)
-    include(${SCRIPTS_DIR}/extern/openal.cmake)
-endif()

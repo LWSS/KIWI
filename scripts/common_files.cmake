@@ -466,9 +466,7 @@ set(SERVER
 set(SOUND
     "${SRC_DIR}/sound/snd.cpp"
     "${SRC_DIR}/sound/snd_mss.cpp"
-    "${SRC_DIR}/sound/snd_openal.cpp"
     "${SRC_DIR}/sound/snd_driver.cpp"
-    "${SRC_DIR}/sound/snd_driver_openal.cpp"
     "${SRC_DIR}/sound/snd_driver_load_obj.cpp"
     "${SRC_DIR}/sound/snd_local.h"
     "${SRC_DIR}/sound/snd_public.h"
@@ -604,6 +602,8 @@ set(XANIM
 # Dependencies
 set(MSSLIB
     "${DEPS_DIR}/msslib/mss.h"
+    # KISAK (miles9): Show the RAD core types header in the Miles IDE group.
+    "${DEPS_DIR}/msslib/rrcore.h"
 )
 
 set(ODE
