@@ -1,4 +1,5 @@
 #include <universal/q_shared.h>
+#include <universal/surfaceflags.h>
 #include "r_material.h"
 #include "r_utils.h"
 #include <universal/com_files.h>
@@ -5889,7 +5890,7 @@ Material *__cdecl Material_LoadRaw(const MaterialRaw *mtlRaw, uint materialType,
     material->editorUsage  = mtlRaw->info.usage;
     material->editorLocale = mtlRaw->info.locale;
 #endif
-    v4 = (mtlRaw->info.surfaceFlags & 0x1F00000) >> 20;
+    v4 = SURF_TYPEINDEX(mtlRaw->info.surfaceFlags);
     surfIndex = v4;
     if (v4)
     {
@@ -5976,7 +5977,7 @@ Material *__cdecl Material_LoadRaw(const MaterialRaw *mtlRaw, uint materialType,
             0,
             "%s",
             "!(material->info.gameFlags & MTL_GAMEFLAG_CASTS_SHADOW)");
-    if ((mtlRaw->info.surfaceFlags & 0x40000) == 0
+    if ((mtlRaw->info.surfaceFlags & SURF_NOCASTSHADOW) == 0
         && Material_GetTechnique(material, TECHNIQUE_BUILD_SHADOWMAP_DEPTH)
         && (material->stateFlags & 4) == 0)
     {

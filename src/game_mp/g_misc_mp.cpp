@@ -157,7 +157,7 @@ void __cdecl G_ClientStopUsingTurret(gentity_s *self)
     owner->s.otherEntityNum = 0;
     self->active = 0;
     self->r.ownerNum.setEnt(0);
-    pTurretInfo->flags &= ~0x800u;
+    pTurretInfo->flags &= ~TURRET_INIT_VIEW;
 }
 
 void __cdecl turret_think_client(gentity_s *self)
@@ -200,7 +200,7 @@ void __cdecl turret_track(gentity_s *self, gentity_s *other)
     if (turretInfo->fireTime <= 0)
     {
         turretInfo->fireTime = 0;
-        if ((other->client->ps.pm_flags & PMF_FROZEN) != 0 || (other->client->buttons & 1) == 0)
+        if ((other->client->ps.pm_flags & PMF_FROZEN) != 0 || (other->client->buttons & BUTTON_ATTACK) == 0)
         {
             turretInfo->triggerDown = 0;
         }
@@ -438,7 +438,7 @@ void __cdecl G_PlayerTurretPositionAndBlend(gentity_s *ent, gentity_s *pTurretEn
                 end[2] = client->ps.origin[2];
                 start[2] = start[2] + ent->client->ps.viewHeightCurrent;
                 end[2] = end[2] - 60.0;
-                G_TraceCapsule(&trace, start, vec3_origin, vec3_origin, end, ent->s.number, 0x810011);
+                G_TraceCapsule(&trace, start, vec3_origin, vec3_origin, end, ent->s.number, MASK_DEADSOLID);
                 if (trace.fraction < 1.0)
                 {
                     Vec3Lerp(start, end, trace.fraction, endpos);
@@ -523,9 +523,9 @@ void __cdecl turret_clientaim(gentity_s *self, gentity_s *other)
         v2 = v9;
     self->s.lerp.u.turret.gunAngles[1] = v2;
     self->s.lerp.u.turret.gunAngles[2] = 0.0;
-    if ((pTurretInfo->flags & 0x800) != 0)
+    if ((pTurretInfo->flags & TURRET_INIT_VIEW) != 0)
     {
-        pTurretInfo->flags &= ~0x800u;
+        pTurretInfo->flags &= ~TURRET_INIT_VIEW;
         self->s.lerp.eFlags ^= 2u;
     }
 }
@@ -672,7 +672,9 @@ int __cdecl turret_UpdateTargetAngles(gentity_s *self, float *desiredAngles, int
         fSpeed[0] = 200.0;
         fSpeed[1] = 200.0;
     }
-    if ((pTurretInfo->flags & 0x200) != 0 && (pTurretInfo->flags & 0x100) != 0 && fSpeed[0] < 360.0)
+    if ((pTurretInfo->flags & TURRET_PITCH_CAP) != 0
+        && (pTurretInfo->flags & TURRET_FIRST_PITCH_CAP) != 0
+        && fSpeed[0] < 360.0)
         fSpeed[0] = 360.0;
     for (i = 0; i < 2; ++i)
     {
@@ -696,13 +698,13 @@ int __cdecl turret_UpdateTargetAngles(gentity_s *self, float *desiredAngles, int
     }
     desiredPitch = self->s.lerp.u.turret.gunAngles[0];
     self->s.lerp.u.turret.gunAngles[2] = desiredPitch;
-    if ((pTurretInfo->flags & 0x200) != 0)
+    if ((pTurretInfo->flags & TURRET_PITCH_CAP) != 0)
     {
-        if ((pTurretInfo->flags & 0x400) != 0)
+        if ((pTurretInfo->flags & TURRET_PITCH_MIN) != 0)
         {
             if (pTurretInfo->pitchCap > (double)self->s.lerp.u.turret.gunAngles[0])
                 goto LABEL_24;
-            pTurretInfo->flags &= ~0x100u;
+            pTurretInfo->flags &= ~TURRET_FIRST_PITCH_CAP;
         }
         else
         {
@@ -712,7 +714,7 @@ int __cdecl turret_UpdateTargetAngles(gentity_s *self, float *desiredAngles, int
                 v3 = AngleDelta(pTurretInfo->pitchCap, pitch);
                 goto LABEL_29;
             }
-            pTurretInfo->flags &= ~0x100u;
+            pTurretInfo->flags &= ~TURRET_FIRST_PITCH_CAP;
         }
     }
     v3 = AngleDelta(desiredPitch, pitch);
@@ -936,7 +938,7 @@ void __cdecl turret_use(gentity_s *self, gentity_s *owner, gentity_s* activator)
     owner->flags |= FL_USE_TURRET;
     ps->ps.viewlocked = PLAYERVIEWLOCK_FULL;
     ps->ps.viewlocked_entNum = self->s.number;
-    pTurretInfo->flags |= 0x800u;
+    pTurretInfo->flags |= TURRET_INIT_VIEW;
     pTurretInfo->userOrigin[0] = owner->r.currentOrigin[0];
     pTurretInfo->userOrigin[1] = owner->r.currentOrigin[1];
     pTurretInfo->userOrigin[2] = owner->r.currentOrigin[2];
@@ -1092,9 +1094,9 @@ void __cdecl G_SpawnTurret(gentity_s *self, const char *weaponinfoname)
         pTurretInfo->playerSpread = weapDef->playerSpread;
     if (pTurretInfo->playerSpread < 0.0)
         pTurretInfo->playerSpread = 0.0;
-    pTurretInfo->flags = 3;
-    self->clipmask = 1;
-    self->r.contents = 2097156;
+    pTurretInfo->flags = TURRET_REQUIRES_AI | TURRET_AUTO;
+    self->clipmask = MASK_SOLID;
+    self->r.contents = CONTENTS_USE | CONTENTS_NONCOLLIDING;
     self->r.svFlags = 0;
     self->s.eType = ET_MG42;
     self->flags |= FL_SUPPORTS_LINKTO;

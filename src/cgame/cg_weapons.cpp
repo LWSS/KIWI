@@ -1,4 +1,5 @@
 #include <universal/q_shared.h>
+#include <universal/surfaceflags.h>
 #include <qcommon/qcommon.h>
 
 #include "cg_local.h"
@@ -33,18 +34,12 @@
 #include <client/cl_scrn.h>
 #endif
 
-enum {
-    NUM_WEAP_ANIMS = 0x20,
-    WEAP_ANIM_ADS_UP = 31,
-    WEAP_ANIM_ADS_DOWN = 32,
-};
-
 const float MYLERP_START = 0.3f;
 const float MYLERP_END = 0.1f;
 
 int removeMeWhenMPStopsCrashingInHere;
 
-int g_animRateOffsets[33] =
+int g_animRateOffsets[NUM_WEAP_ANIMS] =
 {
   -1,
   -1,
@@ -145,12 +140,12 @@ void __cdecl CG_RegisterWeapon(int localClientNum, uint weaponNum)
                 weapInfo->handModel = weapDef->handXModel;
                 weapInfo->weapModelIdx = 0;
                 XAnimClearTreeGoalWeights(weapInfo->tree, 0, 0.0);
-                XAnimSetGoalWeight(obj, 0, 1.0, 0.0, 1.0, 0, 1u, 0);
-                XAnimSetGoalWeight(obj, 1u, 1.0, 0.0, 1.0, 0, 1u, 0);
-                if (*weapDef->szXAnims[32])
+                XAnimSetGoalWeight(obj, WEAP_ANIM_ROOT, 1.0, 0.0, 1.0, 0, 1u, 0);
+                XAnimSetGoalWeight(obj, WEAP_ANIM_IDLE, 1.0, 0.0, 1.0, 0, 1u, 0);
+                if (*weapDef->szXAnims[WEAP_ANIM_ADS_DOWN])
                 {
-                    XAnimSetGoalWeight(obj, 0x20u, 1.0, 0.0, 0.0, 0, 1u, 0);
-                    XAnimSetTime(weapInfo->tree, 32, 1.0);
+                    XAnimSetGoalWeight(obj, WEAP_ANIM_ADS_DOWN, 1.0, 0.0, 0.0, 0, 1u, 0);
+                    XAnimSetTime(weapInfo->tree, WEAP_ANIM_ADS_DOWN, 1.0);
                 }
                 for (tagIndex = 0; tagIndex < 8 && weapDef->hideTags[tagIndex]; ++tagIndex)
                 {
@@ -243,26 +238,26 @@ XAnimTree_s *__cdecl CG_CreateWeaponViewModelXAnim(WeaponDef *weapDef)
     XAnim_s *pAnims; // [esp+10h] [ebp-4h]
 
     iassert(weapDef);
-    pAnims = XAnimCreateAnims("VIEWMODEL", 33, Hunk_AllocXAnimClient);
+    pAnims = XAnimCreateAnims("VIEWMODEL", NUM_WEAP_ANIMS, Hunk_AllocXAnimClient);
     iassert(pAnims);
-    XAnimBlend(pAnims, 0, "root", 1, 32, 0);
-    for (animIndex = 1; animIndex < 33; ++animIndex)
+    XAnimBlend(pAnims, WEAP_ANIM_ROOT, "root", 1, 32, 0);
+    for (animIndex = WEAP_ANIM_IDLE; animIndex < NUM_WEAP_ANIMS; ++animIndex)
     {
         if (*weapDef->szXAnims[animIndex])
             v2 = animIndex;
         else
-            v2 = 1;
+            v2 = WEAP_ANIM_IDLE;
 
         BG_CreateXAnim(pAnims, animIndex, (char *)weapDef->szXAnims[v2]);
     }
     pAnimTree = XAnimCreateTree(pAnims, Hunk_AllocXAnimClient);
     iassert(pAnimTree);
-    if (!weapDef->szXAnims[1] || !*weapDef->szXAnims[1])
+    if (!weapDef->szXAnims[WEAP_ANIM_IDLE] || !*weapDef->szXAnims[WEAP_ANIM_IDLE])
         Com_Error(ERR_DROP, "CG_RegisterWeapon: No idle anim specified for [%s]", weapDef->szDisplayName);
-    if (*weapDef->szXAnims[31] && XAnimIsLooped(pAnims, 0x1Fu))
-        Com_Error(ERR_DROP, "CG_RegisterWeapon: ADS anim [%s] cannot be looping", weapDef->szXAnims[31]);
-    if (*weapDef->szXAnims[32] && XAnimIsLooped(pAnims, 0x20u))
-        Com_Error(ERR_DROP, "CG_RegisterWeapon: ADS anim [%s] cannot be looping", weapDef->szXAnims[32]);
+    if (*weapDef->szXAnims[WEAP_ANIM_ADS_UP] && XAnimIsLooped(pAnims, WEAP_ANIM_ADS_UP))
+        Com_Error(ERR_DROP, "CG_RegisterWeapon: ADS anim [%s] cannot be looping", weapDef->szXAnims[WEAP_ANIM_ADS_UP]);
+    if (*weapDef->szXAnims[WEAP_ANIM_ADS_DOWN] && XAnimIsLooped(pAnims, WEAP_ANIM_ADS_DOWN))
+        Com_Error(ERR_DROP, "CG_RegisterWeapon: ADS anim [%s] cannot be looping", weapDef->szXAnims[WEAP_ANIM_ADS_DOWN]);
     return pAnimTree;
 }
 
@@ -413,29 +408,26 @@ void __cdecl CG_RegisterItemVisuals(int localClientNum, uint weapIdx)
 
 void __cdecl CG_RegisterItems(int localClientNum)
 {
-    char v1; // al
-    char *v2; // [esp+8h] [ebp-98h]
-    const char *ConfigString; // [esp+Ch] [ebp-94h]
-    char items[132]; // [esp+10h] [ebp-90h] BYREF
-    int i; // [esp+98h] [ebp-8h]
-    int digit; // [esp+9Ch] [ebp-4h]
+    const char* configString = CL_GetConfigString(localClientNum, CS_ITEMS);
+    if (!configString[0])
+        return;
 
-    ConfigString = CL_GetConfigString(localClientNum, CS_ITEMS);
-    v2 = items;
-    do
+    for (size_t i = 1; i < MAX_WEAPONS; ++i)
     {
-        v1 = *ConfigString;
-        *v2++ = *ConfigString++;
-    } while (v1);
-    for (i = 1; i < 128; ++i)
-    {
-        digit = items[i / 4];
-        if (digit > 57)
-            digit -= 87;
-        else
-            digit -= 48;
-        if ((digit & (1 << (i & 3))) != 0)
+        const char hexadecimal = configString[i / 4];
+        if (!hexadecimal)
+            break;
+
+        // '0'-'9','a'-'f'; 'f' -> 0b1111
+        const int value = (hexadecimal > '9')
+            ? static_cast<int>(hexadecimal - 'a' + 10)
+            : static_cast<int>(hexadecimal - '0');
+
+        const size_t bitIndex = i & 3;
+        if (value & (1 << bitIndex))
+        {
             CG_RegisterItemVisuals(localClientNum, i);
+        }
     }
 }
 
@@ -789,110 +781,114 @@ void __cdecl WeaponRunXModelAnims(int localClientNum, const playerState_s* ps, w
     weapDef = BG_GetWeaponDef(weaponIndex);
     if (weapDef->aimDownSight)
     {
-        v5 = ps->weaponstate == 7 && ps->weaponTime - weapDef->iPositionReloadTransTime > 0;
+        v5 = ps->weaponstate == WEAPON_RELOADING && ps->weaponTime - weapDef->iPositionReloadTransTime > 0;
         v4 = (ps->pm_flags & PMF_SIGHT_AIMING) != 0 && (ps->weapFlags & 2) == 0;
         v3 = !v5 && v4;
-        PlayADSAnim(ps->fWeaponPosFrac, weaponIndex, obj, 32 - v3);
+        PlayADSAnim(
+            ps->fWeaponPosFrac,
+            weaponIndex,
+            obj,
+            v3 ? WEAP_ANIM_ADS_UP : WEAP_ANIM_ADS_DOWN);
     }
-    else if (*weapDef->szXAnims[32])
+    else if (*weapDef->szXAnims[WEAP_ANIM_ADS_DOWN])
     {
-        PlayADSAnim(0.0, weaponIndex, obj, 32);
+        PlayADSAnim(0.0, weaponIndex, obj, WEAP_ANIM_ADS_DOWN);
     }
     if (ps->weapAnim != weapInfo->iPrevAnim || weaponIndex != cgameGlob->prevViewmodelWeapon)
     {
         transitionTime = 0.0;
         switch (ps->weapAnim & 0xFFFFFDFF)
         {
-        case 0u:
-        case 1u:
-            i = 1;
+        case WEAP_IDLE:
+        case WEAP_FORCE_IDLE:
+            i = WEAP_ANIM_IDLE;
             break;
-        case 2u:
-            StartWeaponAnim(localClientNum, weaponIndex, obj, 3, transitionTime);
+        case WEAP_ATTACK:
+            StartWeaponAnim(localClientNum, weaponIndex, obj, WEAP_ANIM_FIRE, transitionTime);
             goto LABEL_64;
-        case 3u:
-            StartWeaponAnim(localClientNum, weaponIndex, obj, 5, transitionTime);
+        case WEAP_ATTACK_LASTSHOT:
+            StartWeaponAnim(localClientNum, weaponIndex, obj, WEAP_ANIM_LASTSHOT, transitionTime);
             goto LABEL_64;
-        case 4u:
-            StartWeaponAnim(localClientNum, weaponIndex, obj, 6, transitionTime);
+        case WEAP_RECHAMBER:
+            StartWeaponAnim(localClientNum, weaponIndex, obj, WEAP_ANIM_RECHAMBER, transitionTime);
             goto LABEL_64;
-        case 5u:
-            StartWeaponAnim(localClientNum, weaponIndex, obj, 28, transitionTime);
+        case WEAP_ADS_ATTACK:
+            StartWeaponAnim(localClientNum, weaponIndex, obj, WEAP_ANIM_ADS_FIRE, transitionTime);
             goto LABEL_64;
-        case 6u:
-            StartWeaponAnim(localClientNum, weaponIndex, obj, 29, transitionTime);
+        case WEAP_ADS_ATTACK_LASTSHOT:
+            StartWeaponAnim(localClientNum, weaponIndex, obj, WEAP_ANIM_ADS_LASTSHOT, transitionTime);
             goto LABEL_64;
-        case 7u:
-            StartWeaponAnim(localClientNum, weaponIndex, obj, 30, transitionTime);
+        case WEAP_ADS_RECHAMBER:
+            StartWeaponAnim(localClientNum, weaponIndex, obj, WEAP_ANIM_ADS_RECHAMBER, transitionTime);
             goto LABEL_64;
-        case 8u:
-            StartWeaponAnim(localClientNum, weaponIndex, obj, 7, transitionTime);
+        case WEAP_MELEE_ATTACK:
+            StartWeaponAnim(localClientNum, weaponIndex, obj, WEAP_ANIM_MELEE, transitionTime);
             goto LABEL_64;
-        case 9u:
-            StartWeaponAnim(localClientNum, weaponIndex, obj, 8, transitionTime);
+        case WEAP_MELEE_CHARGE:
+            StartWeaponAnim(localClientNum, weaponIndex, obj, WEAP_ANIM_MELEE_CHARGE, transitionTime);
             goto LABEL_64;
-        case 0xAu:
-            StartWeaponAnim(localClientNum, weaponIndex, obj, 15, transitionTime);
+        case WEAP_DROP:
+            StartWeaponAnim(localClientNum, weaponIndex, obj, WEAP_ANIM_DROP, transitionTime);
             goto LABEL_64;
-        case 0xBu:
-            StartWeaponAnim(localClientNum, weaponIndex, obj, 13, transitionTime);
+        case WEAP_RAISE:
+            StartWeaponAnim(localClientNum, weaponIndex, obj, WEAP_ANIM_RAISE, transitionTime);
             goto LABEL_64;
-        case 0xCu:
-            StartWeaponAnim(localClientNum, weaponIndex, obj, 14, transitionTime);
+        case WEAP_FIRST_RAISE:
+            StartWeaponAnim(localClientNum, weaponIndex, obj, WEAP_ANIM_FIRST_RAISE, transitionTime);
             goto LABEL_64;
-        case 0xDu:
-            StartWeaponAnim(localClientNum, weaponIndex, obj, 9, transitionTime);
+        case WEAP_RELOAD:
+            StartWeaponAnim(localClientNum, weaponIndex, obj, WEAP_ANIM_RELOAD, transitionTime);
             goto LABEL_64;
-        case 0xEu:
-            StartWeaponAnim(localClientNum, weaponIndex, obj, 10, transitionTime);
+        case WEAP_RELOAD_EMPTY:
+            StartWeaponAnim(localClientNum, weaponIndex, obj, WEAP_ANIM_RELOAD_EMPTY, transitionTime);
             goto LABEL_64;
-        case 0xFu:
-            StartWeaponAnim(localClientNum, weaponIndex, obj, 11, transitionTime);
+        case WEAP_RELOAD_START:
+            StartWeaponAnim(localClientNum, weaponIndex, obj, WEAP_ANIM_RELOAD_START, transitionTime);
             goto LABEL_64;
-        case 0x10u:
-            StartWeaponAnim(localClientNum, weaponIndex, obj, 12, transitionTime);
+        case WEAP_RELOAD_END:
+            StartWeaponAnim(localClientNum, weaponIndex, obj, WEAP_ANIM_RELOAD_END, transitionTime);
             goto LABEL_64;
-        case 0x11u:
-            StartWeaponAnim(localClientNum, weaponIndex, obj, 17, transitionTime);
+        case WEAP_ALTSWITCHFROM:
+            StartWeaponAnim(localClientNum, weaponIndex, obj, WEAP_ANIM_ALT_DROP, transitionTime);
             goto LABEL_64;
-        case 0x12u:
-            StartWeaponAnim(localClientNum, weaponIndex, obj, 16, transitionTime);
+        case WEAP_ALTSWITCHTO:
+            StartWeaponAnim(localClientNum, weaponIndex, obj, WEAP_ANIM_ALT_RAISE, transitionTime);
             goto LABEL_64;
-        case 0x13u:
-            StartWeaponAnim(localClientNum, weaponIndex, obj, 19, transitionTime);
+        case WEAP_QUICK_DROP:
+            StartWeaponAnim(localClientNum, weaponIndex, obj, WEAP_ANIM_QUICK_DROP, transitionTime);
             goto LABEL_64;
-        case 0x14u:
-            StartWeaponAnim(localClientNum, weaponIndex, obj, 18, transitionTime);
+        case WEAP_QUICK_RAISE:
+            StartWeaponAnim(localClientNum, weaponIndex, obj, WEAP_ANIM_QUICK_RAISE, transitionTime);
             goto LABEL_64;
-        case 0x15u:
-            StartWeaponAnim(localClientNum, weaponIndex, obj, 21, transitionTime);
+        case WEAP_EMPTY_DROP:
+            StartWeaponAnim(localClientNum, weaponIndex, obj, WEAP_ANIM_EMPTY_DROP, transitionTime);
             goto LABEL_64;
-        case 0x16u:
-            StartWeaponAnim(localClientNum, weaponIndex, obj, 20, transitionTime);
+        case WEAP_EMPTY_RAISE:
+            StartWeaponAnim(localClientNum, weaponIndex, obj, WEAP_ANIM_EMPTY_RAISE, transitionTime);
             goto LABEL_64;
-        case 0x17u:
-            StartWeaponAnim(localClientNum, weaponIndex, obj, 22, transitionTime);
+        case WEAP_SPRINT_IN:
+            StartWeaponAnim(localClientNum, weaponIndex, obj, WEAP_ANIM_SPRINT_IN, transitionTime);
             goto LABEL_64;
-        case 0x18u:
-            StartWeaponAnim(localClientNum, weaponIndex, obj, 23, transitionTime);
+        case WEAP_SPRINT_LOOP:
+            StartWeaponAnim(localClientNum, weaponIndex, obj, WEAP_ANIM_SPRINT_LOOP, transitionTime);
             goto LABEL_64;
-        case 0x19u:
-            StartWeaponAnim(localClientNum, weaponIndex, obj, 24, transitionTime);
+        case WEAP_SPRINT_OUT:
+            StartWeaponAnim(localClientNum, weaponIndex, obj, WEAP_ANIM_SPRINT_OUT, transitionTime);
             goto LABEL_64;
-        case 0x1Au:
-            StartWeaponAnim(localClientNum, weaponIndex, obj, 4, transitionTime);
+        case WEAP_HOLD_FIRE:
+            StartWeaponAnim(localClientNum, weaponIndex, obj, WEAP_ANIM_HOLD_FIRE, transitionTime);
             goto LABEL_64;
-        case 0x1Bu:
-            StartWeaponAnim(localClientNum, weaponIndex, obj, 25, transitionTime);
+        case WEAP_DETONATE:
+            StartWeaponAnim(localClientNum, weaponIndex, obj, WEAP_ANIM_DETONATE, transitionTime);
             goto LABEL_64;
-        case 0x1Cu:
-            StartWeaponAnim(localClientNum, weaponIndex, obj, 26, transitionTime);
+        case WEAP_NIGHTVISION_WEAR:
+            StartWeaponAnim(localClientNum, weaponIndex, obj, WEAP_ANIM_NIGHTVISION_WEAR, transitionTime);
             goto LABEL_64;
-        case 0x1Du:
-            StartWeaponAnim(localClientNum, weaponIndex, obj, 27, transitionTime);
+        case WEAP_NIGHTVISION_REMOVE:
+            StartWeaponAnim(localClientNum, weaponIndex, obj, WEAP_ANIM_NIGHTVISION_REMOVE, transitionTime);
             goto LABEL_64;
         default:
-            StartWeaponAnim(localClientNum, weaponIndex, obj, 1, transitionTime);
+            StartWeaponAnim(localClientNum, weaponIndex, obj, WEAP_ANIM_IDLE, transitionTime);
             Com_Printf(19, "WeaponRunXModelAnims: Unknown weapon animation %i\n", ps->weapAnim & 0xFFFFFDFF);
         LABEL_64:
             weapInfo->iPrevAnim = ps->weapAnim;
@@ -901,12 +897,12 @@ void __cdecl WeaponRunXModelAnims(int localClientNum, const playerState_s* ps, w
         }
         while (1)
         {
-            if (i >= 31)
+            if (i >= WEAP_ANIM_ADS_UP)
             {
                 if (ps->ammoclip[BG_ClipForWeapon(weaponIndex)])
-                    StartWeaponAnim(localClientNum, weaponIndex, obj, 1, transitionTime);
+                    StartWeaponAnim(localClientNum, weaponIndex, obj, WEAP_ANIM_IDLE, transitionTime);
                 else
-                    StartWeaponAnim(localClientNum, weaponIndex, obj, 2, transitionTime);
+                    StartWeaponAnim(localClientNum, weaponIndex, obj, WEAP_ANIM_EMPTY_IDLE, transitionTime);
                 goto LABEL_64;
             }
             if (!XAnimHasFinished(pAnimTree, i))
@@ -942,11 +938,11 @@ void __cdecl StartWeaponAnim(
 #ifdef KISAK_MP
     cgameGlob = CG_GetLocalClientGlobals(localClientNum);
 
-    if ((cgameGlob->predictedPlayerState.weaponstate == 7
-        || cgameGlob->predictedPlayerState.weaponstate == 9
-        || cgameGlob->predictedPlayerState.weaponstate == 11
-        || cgameGlob->predictedPlayerState.weaponstate == 10
-        || cgameGlob->predictedPlayerState.weaponstate == 8)
+    if ((cgameGlob->predictedPlayerState.weaponstate == WEAPON_RELOADING
+        || cgameGlob->predictedPlayerState.weaponstate == WEAPON_RELOAD_START
+        || cgameGlob->predictedPlayerState.weaponstate == WEAPON_RELOAD_END
+        || cgameGlob->predictedPlayerState.weaponstate == WEAPON_RELOAD_START_INTERUPT
+        || cgameGlob->predictedPlayerState.weaponstate == WEAPON_RELOADING_INTERUPT)
         && (cgameGlob->predictedPlayerState.perks & 4) != 0)
     {
         if (perk_weapReloadMultiplier->current.value == 0.0)
@@ -954,7 +950,8 @@ void __cdecl StartWeaponAnim(
         else
             rate = rate / perk_weapReloadMultiplier->current.value;
     }
-    else if (cgameGlob->predictedPlayerState.weaponstate == 6 && (cgameGlob->predictedPlayerState.perks & 8) != 0)
+    else if (cgameGlob->predictedPlayerState.weaponstate == WEAPON_RECHAMBERING
+        && (cgameGlob->predictedPlayerState.perks & 8) != 0)
     {
         if (perk_weapRateMultiplier->current.value == 0.0)
             rate = 1000.0;
@@ -963,7 +960,7 @@ void __cdecl StartWeaponAnim(
     }
 #endif
 
-    for (int i = 1; i < 31; ++i)
+    for (int i = WEAP_ANIM_IDLE; i < WEAP_ANIM_ADS_UP; ++i)
     {
         if (animIndex == i)
             XAnimSetGoalWeight(obj, i, 1.0, transitionTime, rate, 0, 1u, 1);
@@ -979,7 +976,7 @@ double __cdecl GetWeaponAnimRate(WeaponDef *weapDef, XAnim_s *anims, uint animIn
 
     iassert(weapDef);
     iassert(anims);
-    bcassert(animIndex, NUM_WEAP_ANIMS);
+    bcassert(animIndex, WEAP_ANIM_ADS_DOWN);
     offset = g_animRateOffsets[animIndex];
     if (offset < 0)
         return 1.0;
@@ -997,21 +994,21 @@ void __cdecl PlayADSAnim(float weaponPosFrac, int weaponNum, DObj_s *obj, int an
     float time; // [esp+18h] [ebp-4h]
 
     iassert((animIndex == WEAP_ANIM_ADS_UP) || (animIndex == WEAP_ANIM_ADS_DOWN));
-    if (animIndex == 31)
+    if (animIndex == WEAP_ANIM_ADS_UP)
     {
-        XAnimSetGoalWeight(obj, 0x1Fu, 1.0f, 0.1f, 0.0f, 0, 1u, 0);
-        XAnimSetGoalWeight(obj, 0x20u, 0.0f, 0.1f, 0.0f, 0, 0, 0);
+        XAnimSetGoalWeight(obj, WEAP_ANIM_ADS_UP, 1.0f, 0.1f, 0.0f, 0, 1u, 0);
+        XAnimSetGoalWeight(obj, WEAP_ANIM_ADS_DOWN, 0.0f, 0.1f, 0.0f, 0, 0, 0);
     }
     else
     {
-        XAnimSetGoalWeight(obj, 0x1Fu, 0.0f, 0.1f, 0.0f, 0, 0, 0);
-        XAnimSetGoalWeight(obj, 0x20u, 1.0f, 0.1f, 0.0f, 0, 1u, 0);
+        XAnimSetGoalWeight(obj, WEAP_ANIM_ADS_UP, 0.0f, 0.1f, 0.0f, 0, 0, 0);
+        XAnimSetGoalWeight(obj, WEAP_ANIM_ADS_DOWN, 1.0f, 0.1f, 0.0f, 0, 1u, 0);
     }
     Tree = DObjGetTree(obj);
-    XAnimSetTime(Tree, 0x1Fu, weaponPosFrac);
+    XAnimSetTime(Tree, WEAP_ANIM_ADS_UP, weaponPosFrac);
     time = 1.0 - weaponPosFrac;
     v5 = DObjGetTree(obj);
-    XAnimSetTime(v5, 0x20u, time);
+    XAnimSetTime(v5, WEAP_ANIM_ADS_DOWN, time);
 }
 
 void __cdecl ResetWeaponAnimTrees(int localClientNum, const playerState_s *ps)
@@ -1029,11 +1026,11 @@ void __cdecl ResetWeaponAnimTrees(int localClientNum, const playerState_s *ps)
             animTree = DObjGetTree(obj);
             iassert(animTree);
             XAnimClearTreeGoalWeights(animTree, 0, 0.0f);
-            XAnimSetGoalWeight(obj, 0, 1.0f, 0.0f, 1.0f, 0, 1u, 0);
+            XAnimSetGoalWeight(obj, WEAP_ANIM_ROOT, 1.0f, 0.0f, 1.0f, 0, 1u, 0);
             if (ps->ammoclip[BG_ClipForWeapon(weapIndex)])
-                StartWeaponAnim(localClientNum, weapIndex, obj, 1, 0.0f);
+                StartWeaponAnim(localClientNum, weapIndex, obj, WEAP_ANIM_IDLE, 0.0f);
             else
-                StartWeaponAnim(localClientNum, weapIndex, obj, 2, 0.0f);
+                StartWeaponAnim(localClientNum, weapIndex, obj, WEAP_ANIM_EMPTY_IDLE, 0.0f);
         }
     }
 }
@@ -1121,11 +1118,11 @@ bool __cdecl ViewmodelRocketShouldBeAttached(int localClientNum, WeaponDef* weap
     if (cgameGlob->predictedPlayerState.ammoclip[BG_ClipForWeapon(cgameGlob->predictedPlayerState.weapon)])
         return 1;
 
-    return (cgameGlob->predictedPlayerState.weaponstate == 7
-        || cgameGlob->predictedPlayerState.weaponstate == 9
-        || cgameGlob->predictedPlayerState.weaponstate == 11
-        || cgameGlob->predictedPlayerState.weaponstate == 10
-        || cgameGlob->predictedPlayerState.weaponstate == 8)
+    return (cgameGlob->predictedPlayerState.weaponstate == WEAPON_RELOADING
+        || cgameGlob->predictedPlayerState.weaponstate == WEAPON_RELOAD_START
+        || cgameGlob->predictedPlayerState.weaponstate == WEAPON_RELOAD_END
+        || cgameGlob->predictedPlayerState.weaponstate == WEAPON_RELOAD_START_INTERUPT
+        || cgameGlob->predictedPlayerState.weaponstate == WEAPON_RELOADING_INTERUPT)
         && weapDef->iReloadTime - cgameGlob->predictedPlayerState.weaponTime > weapDef->reloadShowRocketTime;
 }
 
@@ -1245,9 +1242,9 @@ static void CalculateWeaponPosition_BasePosition_angles(cg_s *cgameGlob, float *
     minSpeed = minSpeed + cg_gun_rot_minspeed->current.value;
 
     if (cgameGlob->xyspeed <= minSpeed
-        || ps->weaponstate == 7
-        || ps->weaponstate == 25
-        || ps->weaponstate == 26)
+        || ps->weaponstate == WEAPON_RELOADING
+        || ps->weaponstate == WEAPON_NIGHTVISION_WEAR
+        || ps->weaponstate == WEAPON_NIGHTVISION_REMOVE)
     {
         targetAng[0] = 0.0f;
         targetAng[1] = 0.0f;
@@ -1828,10 +1825,10 @@ void __cdecl CalculateWeaponPosition_BasePosition_movement(cg_s *cgameGlob, floa
         minSpeed = v2;
     }
     moving = minSpeed < (float)cgameGlob->xyspeed;
-    v6 = ps->weaponstate == 25 || ps->weaponstate == 26;
+    v6 = ps->weaponstate == WEAPON_NIGHTVISION_WEAR || ps->weaponstate == WEAPON_NIGHTVISION_REMOVE;
     prone = ps->viewHeightTarget == 11;
     crouched = ps->viewHeightTarget == 40;
-    if (minSpeed >= (float)cgameGlob->xyspeed || ps->weaponstate == 7 || v6)
+    if (minSpeed >= (float)cgameGlob->xyspeed || ps->weaponstate == WEAPON_RELOADING || v6)
     {
         targetPos[0] = 0.0f;
         targetPos[1] = 0.0f;
@@ -1867,7 +1864,7 @@ void __cdecl CalculateWeaponPosition_BasePosition_movement(cg_s *cgameGlob, floa
         lerp = 1.0;
         if (v6)
         {
-            if (ps->weaponstate == 25)
+            if (ps->weaponstate == WEAPON_NIGHTVISION_WEAR)
             {
                 lerpa = (float)ps->weaponTime / (float)weapDef->nightVisionWearTime;
             }
@@ -2317,11 +2314,11 @@ char __cdecl ToggleWeaponAltMode(int localClientNum)
 
     cgameGlob = CG_GetLocalClientGlobals(localClientNum);
 
-    if ((cgameGlob->predictedPlayerState.weaponstate == 1
-        || cgameGlob->predictedPlayerState.weaponstate == 2
-        || cgameGlob->predictedPlayerState.weaponstate == 3
-        || cgameGlob->predictedPlayerState.weaponstate == 4)
-        && cgameGlob->predictedPlayerState.weaponstate != 1)
+    if ((cgameGlob->predictedPlayerState.weaponstate == WEAPON_RAISING
+        || cgameGlob->predictedPlayerState.weaponstate == WEAPON_RAISING_ALTSWITCH
+        || cgameGlob->predictedPlayerState.weaponstate == WEAPON_DROPPING
+        || cgameGlob->predictedPlayerState.weaponstate == WEAPON_DROPPING_QUICK)
+        && cgameGlob->predictedPlayerState.weaponstate != WEAPON_RAISING)
     {
         return 0;
     }
@@ -2343,7 +2340,8 @@ bool __cdecl ActionSlotUsageAllowed(cg_s *cgameGlob)
     iassert(cgameGlob);
     if (!cgameGlob->nextSnap)
         return 0;
-    if (cgameGlob->predictedPlayerState.weaponstate == 3 || cgameGlob->predictedPlayerState.weaponstate == 4)
+    if (cgameGlob->predictedPlayerState.weaponstate == WEAPON_DROPPING
+        || cgameGlob->predictedPlayerState.weaponstate == WEAPON_DROPPING_QUICK)
         return 0;
     if ((cgameGlob->predictedPlayerState.pm_flags & (PMF_RESPAWNED | PMF_FROZEN)) != 0)
         return 0;
@@ -2568,7 +2566,7 @@ void __cdecl CG_FireWeapon(
             if (isPlayer)
                 TakeClipOnlyWeaponIfEmpty(localClientNum, &cgameGlob->predictedPlayerState);
 #elif KISAK_SP
-            //if (playerUsingTurret || v19 || p_nextState->eType == 1)
+            //if (playerUsingTurret || v19 || p_nextState->eType == ET_PLAYER)
             //{
             //    fireRumble = weaponDef->fireRumble;
             //    if (fireRumble)
@@ -2868,7 +2866,7 @@ void __cdecl FireBulletPenetrate(
             DynEntCl_DynEntImpactEvent(localClientNum, attacker->nextState.number, bp->start, br.hitPos, weapDef->damage, 0);
             hitContents = br.trace.contents;
             damage = weapDef->damage;
-            surfType = (br.trace.surfaceFlags & 0x1F00000) >> 20;
+            surfType = SURF_TYPEINDEX(br.trace.surfaceFlags);
             entityNum = traceHitEntityId;
             sourceEntityNum = attacker->nextState.number;
 
@@ -2979,11 +2977,11 @@ void __cdecl FireBulletPenetrate(
                         v7 = v32 * v32;
                         if (v7 < (float)v33)
                         {
-                            if (!traceHit || (br.trace.surfaceFlags & 4) == 0)
+                            if (!traceHit || (br.trace.surfaceFlags & SURF_SKY) == 0)
                             {
                                 contents = revBr.trace.contents;
                                 v28 = weapDef->damage;
-                                v29 = (revBr.trace.surfaceFlags & 0x1F00000) >> 20;
+                                v29 = SURF_TYPEINDEX(revBr.trace.surfaceFlags);
                                 targetEntityNum = traceHitEntityId;
                                 number = attacker->nextState.number;
                                 if (!sv_clientSideBullets->current.enabled || !IsEntityAPlayer(localClientNum, targetEntityNum))
@@ -3005,7 +3003,7 @@ void __cdecl FireBulletPenetrate(
                             {
                                 v22 = br.trace.contents;
                                 v23 = weapDef->damage;
-                                v24 = (br.trace.surfaceFlags & 0x1F00000) >> 20;
+                                v24 = SURF_TYPEINDEX(br.trace.surfaceFlags);
                                 v25 = traceHitEntityId;
                                 v26 = attacker->nextState.number;
                                 if (!sv_clientSideBullets->current.enabled || !IsEntityAPlayer(localClientNum, v25))
@@ -3045,7 +3043,7 @@ void __cdecl FireBulletPenetrate(
                         {
                             v15 = br.trace.contents;
                             v16 = weapDef->damage;
-                            v17 = (br.trace.surfaceFlags & 0x1F00000) >> 20;
+                            v17 = SURF_TYPEINDEX(br.trace.surfaceFlags);
                             v18 = traceHitEntityId;
                             v19 = attacker->nextState.number;
                             if (!sv_clientSideBullets->current.enabled || !IsEntityAPlayer(localClientNum, traceHitEntityId))
@@ -3101,7 +3099,7 @@ char __cdecl BulletTrace(
     iassert(br);
     bcassert(lastSurfaceType, SURF_TYPECOUNT);
     Com_Memset((uint *)br, 0, 68);
-    CG_LocationalTrace(&br->trace, (float*)bp->start, (float*)bp->end, bp->ignoreEntIndex, 0x2806831);
+    CG_LocationalTrace(&br->trace, (float*)bp->start, (float*)bp->end, bp->ignoreEntIndex, MASK_SHOT);
     if (br->trace.hitType == TRACE_HITTYPE_NONE)
         return 0;
     hitEntId = Trace_GetEntityHitId(&br->trace);
@@ -3113,11 +3111,11 @@ char __cdecl BulletTrace(
     if (Entity)
     {
         if ((Entity->nextState.eType == ET_PLAYER || Entity->nextState.eType == ET_PLAYER_CORPSE) && !br->trace.surfaceFlags)
-            br->trace.surfaceFlags = 0x700000;
+            br->trace.surfaceFlags = SURF_TYPE_FLESH;
         br->ignoreHitEnt = ShouldIgnoreHitEntity(attacker->nextState.number, hitEntId);
     }
-    br->depthSurfaceType = (br->trace.surfaceFlags & 0x1F00000) >> 20;
-    if ((br->trace.surfaceFlags & 0x100) != 0)
+    br->depthSurfaceType = SURF_TYPEINDEX(br->trace.surfaceFlags);
+    if ((br->trace.surfaceFlags & SURF_NOPENETRATE) != 0)
     {
         br->depthSurfaceType = 0;
     }

@@ -331,7 +331,7 @@ void __cdecl ClientSpawn(gentity_s *ent, const float *spawn_origin, const float 
         SV_UnlinkEntity(ent);
     ent->s.groundEntityNum = ENTITYNUM_NONE;
     Scr_SetString(&ent->classname, scr_const.player);
-    ent->clipmask = 0x2810011;
+    ent->clipmask = MASK_PLAYERSOLID;
     ent->r.svFlags |= 1u;
     ent->takedamage = 0;
     G_SetClientContents(ent);
@@ -345,15 +345,15 @@ void __cdecl ClientSpawn(gentity_s *ent, const float *spawn_origin, const float 
     ent->r.maxs[2] = 70.0f;
     iFlags = client->ps.eFlags & 0x100002;
     memcpy(&savedSess, &client->sess, sizeof(savedSess));
-    savedSpawnCount = client->ps.stats[4];
+    savedSpawnCount = client->ps.stats[STAT_SPAWN_COUNT];
     savedServerTime = client->lastServerTime;
     ClientClearFields(client);
     memset((uint8_t *)client, 0, sizeof(gclient_s));
     memcpy(&client->sess, &savedSess, sizeof(client->sess));
     client->lastServerTime = savedServerTime;
     client->spectatorClient = -1;
-    client->ps.stats[4] = savedSpawnCount + 1;
-    client->ps.stats[2] = client->sess.maxHealth;
+    client->ps.stats[STAT_SPAWN_COUNT] = savedSpawnCount + 1;
+    client->ps.stats[STAT_MAX_HEALTH] = client->sess.maxHealth;
     client->ps.eFlags = iFlags;
     client->sess.cs.clientIndex = index;
     client->sess.cs.attachedVehEntNum = ENTITYNUM_NONE;

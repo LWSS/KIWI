@@ -667,25 +667,25 @@ void __cdecl MSG_SetDefaultUserCmd(playerState_s *ps, usercmd_s *cmd)
     {
         if ((ps->eFlags & 8) != 0)
         {
-            cmd->buttons |= 0x100u;
+            cmd->buttons |= BUTTON_PRONE;
         }
         else if ((ps->eFlags & 4) != 0)
         {
-            cmd->buttons |= 0x200u;
+            cmd->buttons |= BUTTON_CROUCH;
         }
         if (ps->leanf <= 0.0)
         {
             if (ps->leanf < 0.0)
-                cmd->buttons |= 0x40u;
+                cmd->buttons |= BUTTON_LEAN_LEFT;
         }
         else
         {
-            cmd->buttons |= 0x80u;
+            cmd->buttons |= BUTTON_LEAN_RIGHT;
         }
         if (ps->fWeaponPosFrac != 0.0)
-            cmd->buttons |= 0x800u;
+            cmd->buttons |= BUTTON_ADS;
         if ((ps->pm_flags & PMF_SPRINTING) != 0)
-            cmd->buttons |= 2u;
+            cmd->buttons |= BUTTON_SPRINT;
     }
 }
 
@@ -775,7 +775,7 @@ void __cdecl MSG_WriteDeltaUsercmdKey(msg_t *msg, int key, const usercmd_s *from
     {
         if (from->angles[0] == to->angles[0]
             && from->angles[1] == to->angles[1]
-            && (from->buttons & 1) == (to->buttons & 1)
+            && (from->buttons & BUTTON_ATTACK) == (to->buttons & BUTTON_ATTACK)
             && horFromMove == horToMove)
         {
             MSG_WriteKey(msg, key, 0, 1u);
@@ -804,12 +804,12 @@ void __cdecl MSG_WriteDeltaUsercmdKey(msg_t *msg, int key, const usercmd_s *from
         MSG_WriteDeltaKey(msg, keya, from->buttons >> 1, to->buttons >> 1, 0x14u);
         MSG_WriteDeltaKey(msg, keya, from->weapon, to->weapon, 7u);
         MSG_WriteDeltaKey(msg, keya, from->offHandIndex, to->offHandIndex, 7u);
-        if ((to->buttons & 0x10000) != 0)
+        if ((to->buttons & BUTTON_LOC_CONFIRM) != 0)
         {
             MSG_WriteDeltaKeyByte(msg, keya, from->selectedLocation[0], to->selectedLocation[0]);
             MSG_WriteDeltaKeyByte(msg, keya, from->selectedLocation[1], to->selectedLocation[1]);
         }
-        if ((to->buttons & 4) != 0)
+        if ((to->buttons & BUTTON_MELEE) != 0)
         {
             MSG_WriteDeltaKeyShort(
                 msg,
@@ -840,7 +840,7 @@ void __cdecl MSG_ReadDeltaUsercmdKey(msg_t *msg, int key, const usercmd_s *from,
         to->serverTime = MSG_ReadLong(msg);
     if (MSG_ReadKey(msg, key, 1u))
     {
-        to->buttons &= ~1u;
+        to->buttons &= ~BUTTON_ATTACK;
         if (MSG_ReadKey(msg, key, 1u))
         {
             to->buttons |= MSG_ReadKey(msg, key, 1u);
@@ -851,16 +851,16 @@ void __cdecl MSG_ReadDeltaUsercmdKey(msg_t *msg, int key, const usercmd_s *from,
             MSG_HorMoveFrom(horToMovea, &to->forwardmove, &to->rightmove);
             keya = to->serverTime ^ key;
             to->angles[2] = (uint16_t)MSG_ReadDeltaKeyShort(msg, keya, from->angles[2]);
-            to->buttons &= 1u;
-            to->buttons |= 2 * MSG_ReadDeltaKey(msg, keya, from->buttons >> 1, 0x14u);
+            to->buttons &= BUTTON_ATTACK;
+            to->buttons |= BUTTON_SPRINT * MSG_ReadDeltaKey(msg, keya, from->buttons >> 1, 0x14u);
             to->weapon = MSG_ReadDeltaKey(msg, keya, from->weapon, 7u);
             to->offHandIndex = MSG_ReadDeltaKey(msg, keya, from->offHandIndex, 7u);
-            if ((to->buttons & 0x10000) != 0)
+            if ((to->buttons & BUTTON_LOC_CONFIRM) != 0)
             {
                 to->selectedLocation[0] = MSG_ReadDeltaKeyByte(msg, keya, from->selectedLocation[0]);
                 to->selectedLocation[1] = MSG_ReadDeltaKeyByte(msg, keya, from->selectedLocation[1]);
             }
-            if ((to->buttons & 4) != 0)
+            if ((to->buttons & BUTTON_MELEE) != 0)
             {
                 to->meleeChargeYaw = (double)MSG_ReadDeltaKeyShort(
                     msg,
@@ -869,7 +869,7 @@ void __cdecl MSG_ReadDeltaUsercmdKey(msg_t *msg, int key, const usercmd_s *from,
                     * 0.0054931640625;
                 to->meleeChargeDist = MSG_ReadDeltaKey(msg, keya, from->meleeChargeDist, 8u);
             }
-            if (to->buttons >= 0x200000)
+            if (to->buttons >= (1 << BUTTON_BIT_COUNT))
             {
                 Com_PrintError(15, "client sent an invalid buttons value %i\n", to->buttons);
                 to->buttons = from->buttons;
@@ -1363,19 +1363,12 @@ int __cdecl MSG_ReadDeltaEntityStruct(msg_t *msg, int time, char *from, char *to
     }
 }
 
-int __cdecl MSG_ReadLastChangedField(msg_t *msg, int totalFields)
+uint MSG_ReadLastChangedField(msg_t *msg, int totalFields)
 {
-    const char *v2; // eax
-    int lastChanged; // [esp+0h] [ebp-8h]
-    uint idealBits; // [esp+4h] [ebp-4h]
+    uint idealBits = GetMinBitCountForNum(totalFields);
+    int lastChanged = MSG_ReadBits(msg, idealBits);
 
-    idealBits = GetMinBitCountForNum(totalFields);
-    lastChanged = MSG_ReadBits(msg, idealBits);
-    if (lastChanged > totalFields)
-    {
-        v2 = va("lastChanged was %i, totalFields is %i\n", lastChanged, totalFields);
-        MyAssertHandler(".\\qcommon\\msg_mp.cpp", 1321, 0, "%s\n\t%s", "lastChanged <= totalFields", v2);
-    }
+    vassert(lastChanged <= totalFields, "lastChanged was %i, totalFields is %i\n", lastChanged, totalFields);
     return lastChanged;
 }
 
@@ -1602,16 +1595,7 @@ void __cdecl MSG_ReadDeltaPlayerstate(
     playerState_s *to,
     bool predictedFieldsIgnoreXor)
 {
-    int Short; // eax
-    int v7; // eax
-    uint8_t Byte; // al
-    clientActive_t *LocalClientGlobals; // [esp+1Ch] [ebp-2F9Ch]
-    int i; // [esp+20h] [ebp-2F98h]
-    int k; // [esp+20h] [ebp-2F98h]
-    int print; // [esp+24h] [ebp-2F94h]
-    int LastChangedField; // [esp+30h] [ebp-2F88h]
-    int Bits; // [esp+2FA8h] [ebp-10h]
-    bool lc; // [esp+2FB3h] [ebp-5h]
+    int print;
 
     uint8_t dst[sizeof(playerState_s) + 8]; // [esp+38h] [ebp-2F80h] BYREF
 
@@ -1634,15 +1618,21 @@ void __cdecl MSG_ReadDeltaPlayerstate(
         print = 0;
     }
 
-    lc = MSG_ReadBit(msg) > 0;
-    LastChangedField = MSG_ReadLastChangedField(msg, numPlayerStateFields);
+    bool lc = MSG_ReadBit(msg) > 0;
 
     {
-        int itr = 0;
-        NetField *field = (NetField *)playerStateFields;
-        while (itr < LastChangedField)
+        const uint32_t lastChangedField = MSG_ReadLastChangedField(msg, numPlayerStateFields);
+        if (lastChangedField > static_cast<uint32_t>(numPlayerStateFields))
         {
-            iassert(!msg->overflowed);
+            msg->overflowed = 1;
+            return;
+        }
+
+        iassert(!msg->overflowed);
+
+        for (uint32_t i = 0; i < lastChangedField; ++i)
+        {
+            const NetField *field = &playerStateFields[i];
 
             if (predictedFieldsIgnoreXor && lc && field->changeHints == 3)
                 MSG_ReadDeltaField(msg, time, (const char *)from, (char *)to, field, print, 1);
@@ -1650,8 +1640,6 @@ void __cdecl MSG_ReadDeltaPlayerstate(
                 MSG_ReadDeltaField(msg, time, (const char *)from, (char *)to, field, print, 0);
 
             iassert(!msg->overflowed);
-            ++itr;
-            ++field;
         }
     }
 
@@ -1671,10 +1659,8 @@ void __cdecl MSG_ReadDeltaPlayerstate(
 
     if (!lc)
     {
-        LocalClientGlobals = CL_GetLocalClientGlobals(localClientNum);
-
         if (!CL_GetPredictedOriginForServerTime(
-            LocalClientGlobals,
+            CL_GetLocalClientGlobals(localClientNum),
             to->commandTime,
             to->origin,
             to->velocity,
@@ -1703,53 +1689,51 @@ void __cdecl MSG_ReadDeltaPlayerstate(
     {
         if (cl_shownet && cl_shownet->current.integer == 4)
             Com_Printf(16, "%s ", "PS_STATS");
-        Bits = MSG_ReadBits(msg, 5u);
-        if ((Bits & 1) != 0)
-            to->stats[0] = MSG_ReadShort(msg);
-        if ((Bits & 2) != 0)
-            to->stats[1] = MSG_ReadShort(msg);
-        if ((Bits & 4) != 0)
-            to->stats[2] = MSG_ReadShort(msg);
-        if ((Bits & 8) != 0)
-            to->stats[3] = MSG_ReadBits(msg, 6u);
-        if ((Bits & 0x10) != 0)
-            to->stats[4] = MSG_ReadByte(msg);
+        int Bits = MSG_ReadBits(msg, MAX_STATS);
+        if ((Bits & (1 << STAT_HEALTH)) != 0)
+            to->stats[STAT_HEALTH] = MSG_ReadShort(msg);
+        if ((Bits & (1 << STAT_DEAD_YAW)) != 0)
+            to->stats[STAT_DEAD_YAW] = MSG_ReadShort(msg);
+        if ((Bits & (1 << STAT_MAX_HEALTH)) != 0)
+            to->stats[STAT_MAX_HEALTH] = MSG_ReadShort(msg);
+        if ((Bits & (1 << STAT_IDENT_CLIENT_NUM)) != 0)
+            to->stats[STAT_IDENT_CLIENT_NUM] = MSG_ReadBits(msg, 6u);
+        if ((Bits & (1 << STAT_SPAWN_COUNT)) != 0)
+            to->stats[STAT_SPAWN_COUNT] = MSG_ReadByte(msg);
     }
 
     if (MSG_ReadBit(msg))
     {
-        for (i = 0; i < 4; ++i)
+        for (int i = 0; i < 4; ++i)
         {
             if (MSG_ReadBit(msg))
             {
                 if (cl_shownet && cl_shownet->current.integer == 4)
                     Com_Printf(16, "%s ", "PS_AMMO");
-                Bits = MSG_ReadShort(msg);
+                int Bits = MSG_ReadShort(msg);
                 for (int j = 0; j < 16; ++j)
                 {
                     if ((Bits & (1 << j)) != 0)
                     {
-                        Short = MSG_ReadShort(msg);
-                        to->ammo[16 * i + j] = Short;
+                        to->ammo[16 * i + j] = MSG_ReadShort(msg);
                     }
                 }
             }
         }
     }
 
-    for (k = 0; k < 8; ++k)
+    for (int k = 0; k < 8; ++k)
     {
         if (MSG_ReadBit(msg))
         {
             if (cl_shownet && cl_shownet->current.integer == 4)
                 Com_Printf(16, "%s ", "PS_AMMOCLIP");
-            Bits = MSG_ReadShort(msg);
+            int Bits = MSG_ReadShort(msg);
             for (int j = 0; j < 16; ++j)
             {
                 if ((Bits & (1 << j)) != 0)
                 {
-                    v7 = MSG_ReadShort(msg);
-                    to->ammoclip[16 * k + j] = v7;
+                    to->ammoclip[16 * k + j] = MSG_ReadShort(msg);
                 }
             }
         }
@@ -1780,8 +1764,7 @@ void __cdecl MSG_ReadDeltaPlayerstate(
     {
         for (int j = 0; j < 128; ++j)
         {
-            Byte = MSG_ReadByte(msg);
-            to->weaponmodels[j] = Byte;
+            to->weaponmodels[j] = MSG_ReadByte(msg);
         }
     }
 }

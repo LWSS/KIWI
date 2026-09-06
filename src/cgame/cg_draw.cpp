@@ -255,14 +255,14 @@ int __cdecl CG_CheckPlayerMovement(usercmd_s oldCmd, usercmd_s newCmd)
 
 int __cdecl CG_CheckPlayerStanceChange(int localClientNum, __int16 newButtons, __int16 changedButtons)
 {
-    if ((changedButtons & 0x1300) != 0)
+    if ((changedButtons & (BUTTON_PRONE | BUTTON_CROUCH | BUTTON_TEMP_STANCE)) != 0)
     {
         CG_MenuShowNotify(localClientNum, 3);
         return 1;
     }
     else
     {
-        if ((newButtons & 0x1300) != 0)
+        if ((newButtons & (BUTTON_PRONE | BUTTON_CROUCH | BUTTON_TEMP_STANCE)) != 0)
             CG_MenuShowNotify(localClientNum, 3);
         return 0;
     }
@@ -272,7 +272,7 @@ int __cdecl CG_CheckPlayerTryReload(int localClientNum, char buttons)
 {
     int result; // r3
 
-    if ((buttons & 0x30) == 0)
+    if ((buttons & (BUTTON_RELOAD | BUTTON_USE_RELOAD)) == 0)
         return 0;
     vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     if ((cgArray[0].predictedPlayerState.pm_flags & 4) != 0)
@@ -287,7 +287,7 @@ int __cdecl CG_CheckPlayerFireNonTurret(int localClientNum, char buttons)
 {
     int result; // r3
 
-    if ((buttons & 1) == 0)
+    if ((buttons & BUTTON_ATTACK) == 0)
         return 0;
     vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     result = 1;
@@ -311,7 +311,7 @@ int __cdecl CG_CheckPlayerWeaponUsage(int localClientNum, char buttons)
 
 int __cdecl CG_CheckPlayerOffHandUsage(int localClientNum, __int16 buttons)
 {
-    if ((buttons & 0xC000) == 0)
+    if ((buttons & (BUTTON_FRAG | BUTTON_SMOKE)) == 0)
         return 0;
     CG_MenuShowNotify(localClientNum, 4);
     return 1;
@@ -319,7 +319,7 @@ int __cdecl CG_CheckPlayerOffHandUsage(int localClientNum, __int16 buttons)
 
 unsigned int __cdecl CG_CheckPlayerMiscInput(int buttons)
 {
-    return buttons & 0xFFFFECFF;
+    return buttons & ~(BUTTON_PRONE | BUTTON_CROUCH | BUTTON_TEMP_STANCE);
 }
 
 void __cdecl CG_CheckForPlayerInput(int localClientNum)
@@ -376,19 +376,19 @@ void __cdecl CG_CheckForPlayerInput(int localClientNum)
         newInput = CG_CheckPlayerMovement(*(usercmd_s *)v8.angles[0], *(usercmd_s *)v8.angles[2]);
         if (CG_CheckPlayerWeaponUsage(localClientNum, buttons))
             newInput = 1;
-        if ((weaponMdlName.buttons & 0xC000) != 0)
+        if ((weaponMdlName.buttons & (BUTTON_FRAG | BUTTON_SMOKE)) != 0)
         {
             CG_MenuShowNotify(localClientNum, 4);
             newInput = 1;
         }
-        if ((changedButtons & 0x1300) != 0)
+        if ((changedButtons & (BUTTON_PRONE | BUTTON_CROUCH | BUTTON_TEMP_STANCE)) != 0)
         {
             CG_MenuShowNotify(localClientNum, 3);
             CG_MenuShowNotify(localClientNum, 2);
         }
         else
         {
-            if ((weaponMdlName.buttons & 0x1300) != 0)
+            if ((weaponMdlName.buttons & (BUTTON_PRONE | BUTTON_CROUCH | BUTTON_TEMP_STANCE)) != 0)
                 CG_MenuShowNotify(localClientNum, 3);
             if (!newInput)
                 newInput = CG_CheckPlayerMiscInput(changedButtons) != 0;

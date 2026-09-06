@@ -2745,7 +2745,7 @@ void __cdecl Actor_FinishSpawningAll()
                 iassert(typeScript);
                 iassert(typeScript->main);
                 iassert(typeScript->spawner);
-                if (pEnt->s.eType == 15)
+                if (pEnt->s.eType == ET_ACTOR_SPAWNER)
                 {
                     Scr_FreeThread(Scr_ExecEntThread(pEnt, typeScript->spawner, 0));
                 }
@@ -2888,7 +2888,7 @@ void __cdecl Actor_UpdatePlayerPush(actor_s *self, gentity_s *player)
     iassert(player->sentient);
 
     if (!self->bDontAvoidPlayer
-        && (self->Physics.iTraceMask & 0x2000000) != 0
+        && (self->Physics.iTraceMask & CONTENTS_PLAYER) != 0
         && self->eState[self->stateLevel] != AIS_TURRET
         && ((1 << self->sentient->eTeam) & ~(1 << Sentient_EnemyTeam(player->sentient->eTeam))) != 0)
     {
@@ -3629,7 +3629,7 @@ LABEL_87:
             xyz[2] = xyz[2] - (float)((float)infoScale * (float)7.0);
             G_AddDebugString(xyz, colorWhite, infoScale * 0.6f, "dontavoidplayer");
         }
-        if ((actor->Physics.iTraceMask & 0x2000000) == 0)
+        if ((actor->Physics.iTraceMask & CONTENTS_PLAYER) == 0)
         {
             xyz[2] = xyz[2] - (float)((float)infoScale * (float)7.0);
             G_AddDebugString(xyz, colorWhite, infoScale * 0.6f, "pushPlayer");
@@ -4620,7 +4620,7 @@ int __cdecl SP_actor(gentity_s *ent)
         ent->r.maxs[1] = 15.0;
         ent->r.maxs[2] = 72.0;
         ent->clipmask = 42074129;
-        ent->r.contents = 0x4000;
+        ent->r.contents = CONTENTS_ACTOR;
         ent->s.eType = ET_ACTOR;
         G_SetOrigin(ent, ent->r.currentOrigin);
         v3->ent = ent;
@@ -4854,7 +4854,7 @@ void __cdecl Actor_Think(gentity_s *self)
             Actor_UpdateLookAt(actor);
 
             if (actor->delayedDeath && !Actor_InScriptedState(actor))
-                G_Damage(self, 0, 0, 0, self->r.currentOrigin, self->health + 1, 0, 0, 0xFFFFFFFF, HITLOC_HEAD, 0, 0);
+                G_Damage(self, 0, 0, 0, self->r.currentOrigin, self->health + 1, DAMAGE_NOFLAG, MOD_UNKNOWN, 0xFFFFFFFF, HITLOC_HEAD, 0, 0);
 
             if (self->actor->Physics.bIsAlive && !self->actor->ignoreTriggers)
                 G_DoTouchTriggers(self);

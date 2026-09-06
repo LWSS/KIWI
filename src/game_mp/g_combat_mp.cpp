@@ -63,7 +63,7 @@ void __cdecl G_ParseHitLocDmgTable()
         g_fHitLocDamageMult[i] = 1.0;
         pFieldList[i].szName = g_HitLocNames[i];
         pFieldList[i].iOffset = 4 * i;
-        pFieldList[i].iFieldType = 6;
+        pFieldList[i].iFieldType = CSPFT_FLOAT;
         prev = Scr_AllocString((char *)g_HitLocNames[i], 1);
         g_HitLocConstNames[i] = prev;
     }
@@ -88,7 +88,7 @@ void __cdecl LookAtKiller(gentity_s *self, gentity_s *inflictor, gentity_s *atta
     {
         Vec3Sub(attacker->r.currentOrigin, self->r.currentOrigin, dir);
     LABEL_10:
-        self->client->ps.stats[1] = (int)vectoyaw(dir);
+        self->client->ps.stats[STAT_DEAD_YAW] = (int)vectoyaw(dir);
         vectoyaw(dir);
         return;
     }
@@ -98,7 +98,7 @@ void __cdecl LookAtKiller(gentity_s *self, gentity_s *inflictor, gentity_s *atta
         goto LABEL_10;
     }
     iassert(self->client);
-    self->client->ps.stats[1] = (int)self->r.currentAngles[1];
+    self->client->ps.stats[STAT_DEAD_YAW] = (int)self->r.currentAngles[1];
 }
 
 int __cdecl G_MeansOfDeathFromScriptParam(uint scrParam)
@@ -107,7 +107,7 @@ int __cdecl G_MeansOfDeathFromScriptParam(uint scrParam)
     int i; // [esp+4h] [ebp-4h]
 
     modName = Scr_GetConstString(scrParam);
-    for (i = 0; i < 16; ++i)
+    for (i = 0; i < MOD_NUM; ++i)
     {
         if (*modNames[i] == modName)
             return i;
@@ -149,7 +149,7 @@ void __cdecl player_die(
         self->client->ps.pm_type = (self->client->ps.pm_type == PM_NORMAL_LINKED) ? PM_DEAD_LINKED : PM_DEAD;
 
         deathAnimDuration = BG_AnimScriptEvent(&self->client->ps, ANIM_ET_DEATH, 0, 1);
-        self->client->ps.stats[0] = 0;
+        self->client->ps.stats[STAT_HEALTH] = 0;
         Scr_PlayerKilled(
             self,
             inflictor,
@@ -172,7 +172,7 @@ void __cdecl player_die(
             }
         }
         self->takedamage = 1;
-        self->r.contents = 0x4000000;
+        self->r.contents = CONTENTS_CORPSE;
         self->r.currentAngles[2] = 0.0;
         LookAtKiller(self, inflictor, attacker);
         viewangles = self->client->ps.viewangles;
@@ -222,7 +222,7 @@ void __cdecl DeathGrenadeDrop(gentity_s *self, int meansOfDeath)
             1,
             self->client->ps.grenadeTimeLeft);
     }
-    if (meansOfDeath != 12 && (self->client->ps.perks & 0x40) != 0)
+    if (meansOfDeath != MOD_SUICIDE && (self->client->ps.perks & 0x40) != 0)
     {
         grenadeWeaponIndexa = BG_FindWeaponIndexForName(perk_grenadeDeath->current.string);
         if (grenadeWeaponIndexa)
@@ -317,7 +317,7 @@ void __cdecl G_DamageClient(
         }
         if ((uint)hitLoc > HITLOC_GUN)
             MyAssertHandler(".\\game_mp\\g_combat_mp.cpp", 489, 0, "%s", "(hitLoc >= HITLOC_NONE) && (hitLoc < HITLOC_NUM)");
-        if (mod != 7)
+        if (mod != MOD_MELEE)
             damage = (int)(G_GetWeaponHitLocationMultiplier(hitLoc, weapon) * (double)damage);
         if (damage <= 0)
             damage = 1;
@@ -905,7 +905,7 @@ int __cdecl G_RadiusDamage(
                     Vec3Sub(ent->r.currentOrigin, origin, diff);
                     diff[2] = diff[2] + 24.0;
                     v14 = (fInnerDamage - fOuterDamage) * (1.0 - v12 / radius) + fOuterDamage;
-                    G_Damage(ent, inflictor, attacker, diff, origin, (v14 * v23), 5, mod, weapon, HITLOC_NONE, 0, 0, 0);
+                    G_Damage(ent, inflictor, attacker, diff, origin, (v14 * v23), DAMAGE_RADIUS | DAMAGE_NO_KNOCKBACK, mod, weapon, HITLOC_NONE, 0, 0, 0);
                 }
             }
         }

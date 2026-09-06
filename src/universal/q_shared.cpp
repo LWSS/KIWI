@@ -966,7 +966,7 @@ bool __cdecl ParseConfigStringToStructCustomSize(
         src = Info_ValueForKey(pszBuffer, (char *)v20->szName);
         if (*src)
         {
-            if (v20->iFieldType >= 12)
+            if (v20->iFieldType >= CSPFT_NUM_BASE_FIELD_TYPES)
             {
                 if (iMaxFieldTypes <= 0 || v20->iFieldType >= iMaxFieldTypes)
                 {
@@ -988,35 +988,35 @@ bool __cdecl ParseConfigStringToStructCustomSize(
             {
                 switch (v20->iFieldType)
                 {
-                case 0:
+                case CSPFT_STRING:
                     parseStrcpy(&pStruct[v20->iOffset], src);
                     break;
-                case 1:
+                case CSPFT_STRING_MAX_STRING_CHARS:
                     I_strncpyz((char *)&pStruct[v20->iOffset], src, 1024);
                     break;
-                case 2:
+                case CSPFT_STRING_MAX_QPATH:
                     I_strncpyz((char *)&pStruct[v20->iOffset], src, 64);
                     break;
-                case 3:
+                case CSPFT_STRING_MAX_OSPATH:
                     I_strncpyz((char *)&pStruct[v20->iOffset], src, 256);
                     break;
-                case 4:
+                case CSPFT_INT:
                     v7 = atoi(src);
                     *(uint *)&pStruct[v20->iOffset] = v7;
                     break;
-                case 5:
+                case CSPFT_QBOOLEAN:
                     v8 = atoi(src);
                     *(uint *)&pStruct[v20->iOffset] = v8 != 0;
                     break;
-                case 6:
+                case CSPFT_FLOAT:
                     v16 = atof(src);
                     *(float *)&pStruct[v20->iOffset] = v16;
                     break;
-                case 7:
+                case CSPFT_MILLISECONDS:
                     v15 = atof(src);
                     *(uint *)&pStruct[v20->iOffset] = (int)(v15 * 1000.0);
                     break;
-                case 8:
+                case CSPFT_FX:
 #ifdef KISAK_MP
                     if (!com_dedicated->current.integer)
 #endif
@@ -1025,14 +1025,14 @@ bool __cdecl ParseConfigStringToStructCustomSize(
                         *(uint *)&pStruct[v20->iOffset] = (uint)v9;
                     }
                     break;
-                case 9:
+                case CSPFT_XMODEL:
                     I_strncpyz(dest, src, 0x2000);
                     v22 = R_RegisterModel(dest);
                     *(uint *)&pStruct[v20->iOffset] = (uint)v22;
                     if (!v22)
                         v18 = 1;
                     break;
-                case 0xA:
+                case CSPFT_MATERIAL:
 #ifdef KISAK_MP
                     if (!com_dedicated->current.integer)
 #endif
@@ -1041,12 +1041,12 @@ bool __cdecl ParseConfigStringToStructCustomSize(
                         *(uint *)&pStruct[v20->iOffset] = (uint)v10;
                     }
                     break;
-                case 0xB:
+                case CSPFT_SOUND:
                     SoundAlias = Com_FindSoundAlias(src);
                     *(uint *)&pStruct[v20->iOffset] = (uint)SoundAlias;
                     break;
                 default:
-                    if (v20->iFieldType >= 0)
+                    if (v20->iFieldType >= CSPFT_STRING)
                     {
                         if (!alwaysfails)
                             MyAssertHandler(

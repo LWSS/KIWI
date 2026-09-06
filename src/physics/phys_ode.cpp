@@ -1,4 +1,5 @@
 #include <universal/q_shared.h>
+#include <universal/surfaceflags.h>
 #include "phys_local.h"
 #include <DynEntity/DynEntity_client.h>
 #include <qcommon/mem_track.h>
@@ -1294,8 +1295,8 @@ void __cdecl Phys_PlayCollisionSound(int localClientNum, dxBody *body, uint sndC
     if (-phys_minImpactMomentum->current.value > impactVelocity * mass.mass)
     {
         bcassert(sndClass, 0x32);
-        bcassert(((contactList->contacts[0].surfFlags & 0x1F00000) >> 20), 0x1Du);
-        sound = cgMedia.physCollisionSound[sndClass][(contactList->contacts[0].surfFlags & 0x1F00000) >> 20];
+        bcassert(SURF_TYPEINDEX(contactList->contacts[0].surfFlags), 0x1Du);
+        sound = cgMedia.physCollisionSound[sndClass][SURF_TYPEINDEX(contactList->contacts[0].surfFlags)];
         if (sound)
             SND_AddPhysicsSound(sound, pos);
     }

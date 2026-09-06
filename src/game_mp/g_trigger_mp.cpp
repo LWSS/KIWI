@@ -188,7 +188,7 @@ void __cdecl hurt_touch(gentity_s *self, gentity_s *other, int extra)
     {
         G_Trigger(self, other);
         self->item[0].index = (self->spawnflags & 0x10) != 0 ? level.time + 1000 : level.time + 50;
-        G_Damage(other, self, self, 0, 0, self->damage, 0, 13, 0xFFFFFFFF, HITLOC_NONE, 0, 0, 0);
+        G_Damage(other, self, self, 0, 0, self->damage, DAMAGE_NOFLAG, MOD_TRIGGER_HURT, 0xFFFFFFFF, HITLOC_NONE, 0, 0, 0);
         if ((self->spawnflags & 0x20) != 0)
         {
             iassert(self->handler == ENT_HANDLER_TRIGGER_HURT_TOUCH);
@@ -240,19 +240,19 @@ void __cdecl SP_trigger_once(gentity_s *ent)
 
 bool __cdecl Respond_trigger_damage(gentity_s *pEnt, int iMOD)
 {
-    if ((pEnt->spawnflags & 1) != 0 && iMOD == 1)
+    if ((pEnt->spawnflags & 1) != 0 && iMOD == MOD_PISTOL_BULLET)
         return 0;
-    if ((pEnt->spawnflags & 2) != 0 && iMOD == 2)
+    if ((pEnt->spawnflags & 2) != 0 && iMOD == MOD_RIFLE_BULLET)
         return 0;
-    if ((pEnt->spawnflags & 4) != 0 && iMOD >= 3 && iMOD <= 6)
+    if ((pEnt->spawnflags & 4) != 0 && iMOD >= MOD_GRENADE && iMOD <= MOD_PROJECTILE_SPLASH)
         return 0;
-    if ((pEnt->spawnflags & 8) != 0 && iMOD >= 3 && (iMOD <= 6 || iMOD == 14))
+    if ((pEnt->spawnflags & 8) != 0 && iMOD >= MOD_GRENADE && (iMOD <= MOD_PROJECTILE_SPLASH || iMOD == MOD_EXPLOSIVE))
         return 0;
-    if ((pEnt->spawnflags & 0x10) != 0 && (iMOD == 4 || iMOD == 6))
+    if ((pEnt->spawnflags & 0x10) != 0 && (iMOD == MOD_GRENADE_SPLASH || iMOD == MOD_PROJECTILE_SPLASH))
         return 0;
-    if ((pEnt->spawnflags & 0x20) != 0 && iMOD == 7)
+    if ((pEnt->spawnflags & 0x20) != 0 && iMOD == MOD_MELEE)
         return 0;
-    return (pEnt->spawnflags & 0x100) == 0 || iMOD && (iMOD <= 8 || iMOD > 13);
+    return (pEnt->spawnflags & 0x100) == 0 || iMOD != MOD_UNKNOWN && (iMOD <= MOD_HEAD_SHOT || iMOD > MOD_TRIGGER_HURT);
 }
 
 void __cdecl Activate_trigger_damage(gentity_s *pEnt, gentity_s *pOther, int iDamage, int iMOD)
@@ -320,7 +320,7 @@ void __cdecl G_CheckHitTriggerDamage(gentity_s *pActivator, float *vStart, float
     gentity_s *pEnt; // [esp+1030h] [ebp-10h]
     float maxs[3]; // [esp+1034h] [ebp-Ch] BYREF
 
-    bcassert(iMOD, 0x10);
+    bcassert(iMOD, MOD_NUM);
     iassert(*modNames[iMOD]);
     iassert(vStart);
     iassert(vEnd);

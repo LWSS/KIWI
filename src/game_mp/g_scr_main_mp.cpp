@@ -2501,7 +2501,7 @@ void GScr_positionWouldTelefrag()
     Scr_GetVector(0, vectorValue);
     Vec3Add(vectorValue, playerMins, sum);
     Vec3Add(vectorValue, playerMaxs, maxs);
-    v4 = CM_AreaEntities(sum, maxs, entityList, 1024, 0x2000000);
+    v4 = CM_AreaEntities(sum, maxs, entityList, 1024, CONTENTS_PLAYER);
     for (i = 0; i < v4; ++i)
     {
         v2 = &g_entities[entityList[i]];
@@ -2928,11 +2928,11 @@ void Scr_BulletTrace()
 
     pIgnoreEnt = 0;
     iIgnoreEntNum = ENTITYNUM_NONE;
-    iClipMask = 0x2806831;
+    iClipMask = MASK_SHOT;
     Scr_GetVector(0, vStart);
     Scr_GetVector(1u, vEnd);
     if (!Scr_GetInt(2))
-        iClipMask &= ~0x2000000u;
+        iClipMask &= ~CONTENTS_PLAYER;
     if (Scr_GetType(3) == 1 && Scr_GetPointerType(3) == 20)
     {
         pIgnoreEnt = Scr_GetEntity(3);
@@ -2964,7 +2964,7 @@ void Scr_BulletTrace()
     {
         Scr_AddVector(trace.normal);
         Scr_AddArrayStringIndexed(scr_const.normal);
-        iSurfaceTypeIndex = (trace.surfaceFlags & 0x1F00000) >> 20;
+        iSurfaceTypeIndex = SURF_TYPEINDEX(trace.surfaceFlags);
         value = Com_SurfaceTypeToName(iSurfaceTypeIndex);
         Scr_AddString(value);
         Scr_AddArrayStringIndexed(scr_const.surfacetype);
@@ -2982,11 +2982,11 @@ void Scr_BulletTracePassed()
 
     pIgnoreEnt = 0;
     iIgnoreEntNum = ENTITYNUM_NONE;
-    iClipMask = 0x2806831;
+    iClipMask = MASK_SHOT;
     Scr_GetVector(0, vStart);
     Scr_GetVector(1u, vEnd);
     if (!Scr_GetInt(2))
-        iClipMask &= ~0x2000000u;
+        iClipMask &= ~CONTENTS_PLAYER;
     if (Scr_GetType(3) == 1 && Scr_GetPointerType(3) == 20)
     {
         pIgnoreEnt = Scr_GetEntity(3);
@@ -3011,7 +3011,7 @@ void __cdecl Scr_SightTracePassed()
     Scr_GetVector(0, vStart);
     Scr_GetVector(1u, vEnd);
     if (!Scr_GetInt(2))
-        iClipMask &= ~0x2000000u;
+        iClipMask &= ~CONTENTS_PLAYER;
     if (Scr_GetType(3) == 1 && Scr_GetPointerType(3) == 20)
     {
         pIgnoreEnt = Scr_GetEntity(3);
@@ -3877,7 +3877,7 @@ void Scr_GrenadeExplosionEffect()
     vEnd[1] = vPos[1];
     vEnd[2] = vPos[2] - 17.0;
     G_TraceCapsule(&trace, vPos, (float *)vec3_origin, (float *)vec3_origin, vEnd, ENTITYNUM_NONE, 2065);
-    result = (trace.surfaceFlags & 0x1F00000) >> 20;
+    result = SURF_TYPEINDEX(trace.surfaceFlags);
     pEnt->s.surfType = result;
 }
 
@@ -5157,7 +5157,7 @@ void __cdecl GScr_PlaceSpawnPoint(scr_entref_t entref)
         (float *)playerMaxs,
         vEnd,
         pEnt->s.number,
-        0x2810011);
+        MASK_PLAYERSOLID);
     Vec3Lerp(vStart, vEnd, trace.fraction, vStart);
     vEnd[0] = vStart[0];
     vEnd[1] = vStart[1];
@@ -5169,7 +5169,7 @@ void __cdecl GScr_PlaceSpawnPoint(scr_entref_t entref)
         (float *)playerMaxs,
         vEnd,
         pEnt->s.number,
-        0x2810011);
+        MASK_PLAYERSOLID);
     EntityHitId = Trace_GetEntityHitId(&trace);
     pEnt->s.groundEntityNum = EntityHitId;
     g_entities[pEnt->s.groundEntityNum].flags |= FL_GROUND_ENT;
@@ -5181,7 +5181,7 @@ void __cdecl GScr_PlaceSpawnPoint(scr_entref_t entref)
         (float *)playerMaxs,
         vStart,
         pEnt->s.number,
-        0x2810011);
+        MASK_PLAYERSOLID);
     if (trace.allsolid)
         Com_PrintWarning(
             23,
@@ -6136,7 +6136,7 @@ void __cdecl Scr_SetHealth(gentity_s *ent, int i)
     if (ent->client)
     {
         ent->health = health;
-        ent->client->ps.stats[0] = health;
+        ent->client->ps.stats[STAT_HEALTH] = health;
     }
     else
     {
@@ -6395,7 +6395,7 @@ void __cdecl Scr_PlayerDamage(
     GScr_AddVector(vPoint);
     WeaponDef = BG_GetWeaponDef(iWeapon);
     Scr_AddString((char *)WeaponDef->szInternalName);
-    if (meansOfDeath < 0x10)
+    if (meansOfDeath < MOD_NUM)
         Scr_AddConstString(*modNames[meansOfDeath]);
     else
         Scr_AddString("badMOD");
@@ -6430,7 +6430,7 @@ void __cdecl Scr_PlayerKilled(
     GScr_AddVector(vDir);
     WeaponDef = BG_GetWeaponDef(iWeapon);
     Scr_AddString((char *)WeaponDef->szInternalName);
-    if (meansOfDeath < 0x10)
+    if (meansOfDeath < MOD_NUM)
         Scr_AddConstString(*modNames[meansOfDeath]);
     else
         Scr_AddString("badMOD");
@@ -6463,7 +6463,7 @@ void __cdecl Scr_PlayerLastStand(
     GScr_AddVector(vDir);
     WeaponDef = BG_GetWeaponDef(iWeapon);
     Scr_AddString((char *)WeaponDef->szInternalName);
-    if (meansOfDeath < 0x10)
+    if (meansOfDeath < MOD_NUM)
         Scr_AddConstString(*modNames[meansOfDeath]);
     else
         Scr_AddString("badMOD");

@@ -17,6 +17,15 @@
 
 static const char *hintStrings[] = { "", "HINT_NOICON", "HINT_ACTIVATE", "HINT_HEALTH" }; // idb
 
+enum DAMAGE_FLAGS : int // (SP/MP same)
+{
+    DAMAGE_NOFLAG = 0,
+    DAMAGE_RADIUS = (1 << 0),
+    DAMAGE_NO_ARMOR = (1 << 1),
+    DAMAGE_NO_KNOCKBACK = (1 << 2),
+    DAMAGE_PENETRATION = (1 << 3),
+};
+
 enum VehicleTypes : int // (SP/MP same)
 {
     VEH_WHEELS_4 = 0x0,
@@ -26,6 +35,17 @@ enum VehicleTypes : int // (SP/MP same)
     VEH_ARTILLERY = 0x4,
     VEH_HELICOPTER = 0x5,
     NUM_VEHICLE_TYPES = 0x6,
+};
+
+enum VehicleSound : __int32
+{
+    VEH_LOW_IDLE_SND = 0x0,
+    VEH_HIGH_IDLE_SND = 0x1,
+    VEH_LOW_ENGINE_SND = 0x2,
+    VEH_HIGH_ENGINE_SND = 0x3,
+    VEH_TURRET_SPIN_SND = 0x4,
+    VEH_TURRET_STOP_SND = 0x5,
+    NUM_VEHICLE_SNDS = 0x6,
 };
 
 // Corresponds to above enum
@@ -100,11 +120,11 @@ struct vehicle_info_t // sizeof=0x274
     float turretVertSpanUp;
     float turretVertSpanDown;
     float turretRotRate;
-    char sndNames[6][64];
+    char sndNames[NUM_VEHICLE_SNDS][64];
 #ifdef KISAK_SP
-    uint16_t sndIndices[6];
+    uint16_t sndIndices[NUM_VEHICLE_SNDS];
 #else
-    uint8_t sndIndices[6];
+    uint8_t sndIndices[NUM_VEHICLE_SNDS];
 #endif
     float engineSndSpeed;
 };

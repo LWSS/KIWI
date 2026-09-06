@@ -2148,7 +2148,7 @@ void MdlPrvDropToFloor()
     mins[1] = -5.0f;
     mins[2] = -5.0f;
 
-    CG_TraceCapsule(&trace, center, mins, maxs, end, -1, 1);
+    CG_TraceCapsule(&trace, center, mins, maxs, end, -1, MASK_SOLID);
 
     if (!trace.allsolid && trace.fraction != 1.0)
     {
@@ -2676,7 +2676,7 @@ void __cdecl CG_AddModelPreviewerModel(int frametime)
         CG_ModPrvApplyDelta(v9);
         DObjUpdateClientInfo(g_mdlprv.model.currentObj, v9, center);
         memset(&g_mdlprv.model.pose, 0, sizeof(g_mdlprv.model.pose));
-        g_mdlprv.model.pose.eType = 17;
+        g_mdlprv.model.pose.eType = ET_EVENTS;
         g_mdlprv.model.currentEntity.info.pose = &g_mdlprv.model.pose;
         g_mdlprv.model.pose.ragdollHandle = g_mdlprv.model.ragdoll;
         //g_mdlprv.model.pose.isRagdoll = (_cntlzw(g_mdlprv.model.ragdoll) & 0x20) == 0;

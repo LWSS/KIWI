@@ -15,7 +15,7 @@ byte *bulletPriorityMap;
 byte *riflePriorityMap;
 float g_fHitLocDamageMult[19]{ 0.0f };
 
-unsigned __int16 *modNames[16] =
+unsigned __int16 *modNames[MOD_NUM] =
 {
     &scr_const.mod_unknown,
     &scr_const.mod_pistol_bullet,
@@ -98,7 +98,7 @@ void __cdecl G_ParseHitLocDmgTable()
         v3 = g_HitLocNames[v0];
         g_fHitLocDamageMult[v0] = 1.0;
         *p_iOffset = v0 * 4;
-        p_iOffset[1] = 6;
+        p_iOffset[1] = CSPFT_FLOAT;
         *(p_iOffset - 1) = (int)v3;
         *v1++ = Scr_AllocString((char*)v3, 1);
         p_iOffset += 3;
@@ -124,7 +124,7 @@ void __cdecl TossClientItems(gentity_s *self)
     client = self->client;
     weapon = self->s.weapon;
     weaponstate = client->ps.weaponstate;
-    if (weaponstate == 3 || weaponstate == 4)
+    if (weaponstate == WEAPON_DROPPING || weaponstate == WEAPON_DROPPING_QUICK)
         weapon = client->pers.cmd.weapon;
     if (!client)
         MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\bgame\\../bgame/bg_weapons.h", 229, 0, "%s", "ps");
@@ -166,7 +166,7 @@ void __cdecl LookAtKiller(gentity_s *self, gentity_s *inflictor, gentity_s *atta
         v6[0] = v3;
         v6[1] = (float)v4 - self->r.currentOrigin[1];
         v6[2] = (float)v5 - self->r.currentOrigin[2];
-        self->client->ps.stats[1] = (int)vectoyaw(v6);
+        self->client->ps.stats[STAT_DEAD_YAW] = (int)vectoyaw(v6);
         vectoyaw(v6);
         return;
     }
@@ -177,7 +177,7 @@ void __cdecl LookAtKiller(gentity_s *self, gentity_s *inflictor, gentity_s *atta
         v5 = inflictor->r.currentOrigin[2];
         goto LABEL_7;
     }
-    self->client->ps.stats[1] = (int)self->r.currentAngles[1];
+    self->client->ps.stats[STAT_DEAD_YAW] = (int)self->r.currentAngles[1];
 }
 
 int __cdecl G_MeansOfDeathFromScriptParam(unsigned int scrParam)
@@ -273,7 +273,7 @@ void __cdecl player_die(
         self->sentient->lastAttacker = attacker;
         v22 = self->client;
         self->takedamage = 1;
-        self->r.contents = 0x4000000;
+        self->r.contents = CONTENTS_CORPSE;
         self->s.weapon = 0;
         if (v22->ps.pm_type != PM_DEAD_LINKED)
         {
@@ -352,17 +352,17 @@ void __cdecl handleDeathInvulnerability(gentity_s *targ, int prevHealth, int mod
     client = targ->client;
     iassert(client);
     iassert(client->invulnerableEnabled);
-    if (prevHealth == client->ps.stats[2])
+    if (prevHealth == client->ps.stats[STAT_MAX_HEALTH])
         client->invulnerableActivated = 0;
     health = targ->health;
     if (prevHealth != health && health <= 0 && prevHealth > 0)
     {
-        if (mod == 1 || mod == 2 || (v8 = 0, mod == 8))
+        if (mod == MOD_PISTOL_BULLET || mod == MOD_RIFLE_BULLET || (v8 = 0, mod == MOD_HEAD_SHOT))
             v8 = 1;
         v9 = v8;
-        v10 = player_deathInvulnerableToProjectile->current.enabled && (mod == 5 || mod == 6);
+        v10 = player_deathInvulnerableToProjectile->current.enabled && (mod == MOD_PROJECTILE || mod == MOD_PROJECTILE_SPLASH);
         v11 = v10;
-        v12 = player_deathInvulnerableToMelee->current.enabled && mod == 7;
+        v12 = player_deathInvulnerableToMelee->current.enabled && mod == MOD_MELEE;
         if (v9 || v11 || v12)
         {
             p_invulnerableActivated = &client->invulnerableActivated;
@@ -482,7 +482,7 @@ static void __cdecl G_DamageKnockback(
     if (dir)
         Vec3NormalizeTo(dir, scaledDir);
     else
-        flags |= 4;
+        flags |= DAMAGE_NO_KNOCKBACK;
 
     client = targ->client;
     if (client)
@@ -505,13 +505,13 @@ static void __cdecl G_DamageKnockback(
     if ((targ->flags & 0x20) != 0)
         dmg = 0;
 
-    if ((flags & 4) == 0 && dmg && client && (client->ps.eFlags & 0x300) == 0)
+    if ((flags & DAMAGE_NO_KNOCKBACK) == 0 && dmg && client && (client->ps.eFlags & 0x300) == 0)
     {
         client->ps.velocity[0] += (scaledDir[0] * ((g_knockback->current.value * dmg) * 0.004f));
         client->ps.velocity[1] += (scaledDir[1] * ((g_knockback->current.value * dmg) * 0.004f));
         client->ps.velocity[2] += (scaledDir[2] * ((g_knockback->current.value * dmg) * 0.004f));
 
-        if (targ == attacker && (mod == 5 || mod == 6 || mod == 3 || mod == 4))
+        if (targ == attacker && (mod == MOD_PROJECTILE || mod == MOD_PROJECTILE_SPLASH || mod == MOD_GRENADE || mod == MOD_GRENADE_SPLASH))
             client->ps.velocity[2] = client->ps.velocity[2] * 0.25;
 
         if (!client->ps.pm_time)
@@ -649,15 +649,15 @@ void __cdecl G_Damage(
             {
                 return;
             }
-            if (mod != 11)
+            if (mod != MOD_FALLING)
             {
-                if ((dflags & 1) != 0)
+                if ((dflags & DAMAGE_RADIUS) != 0)
                 {
                     dmgDvar = player_radiusDamageMultiplier;
                 }
                 else
                 {
-                    if (mod == 7)
+                    if (mod == MOD_MELEE)
                         dmgDvar = player_meleeDamageMultiplier;
                     else
                         dmgDvar = player_damageMultiplier;
@@ -673,7 +673,7 @@ void __cdecl G_Damage(
         if (!G_ShouldTakeBulletDamage(targ, attacker))
             return;
 
-        if (targ->actor && mod != 7)
+        if (targ->actor && mod != MOD_MELEE)
         {
             iassert(hitLoc >= HITLOC_NONE && hitLoc < HITLOC_NUM);
             WeaponHitLocationMultiplier = G_GetWeaponHitLocationMultiplier(hitLoc, weapon);
@@ -811,7 +811,7 @@ void __cdecl G_Damage(
                     {
                         if (targ->health < 0)
                             targ->health = 0;
-                        v66->ps.stats[0] = targ->health;
+                        v66->ps.stats[STAT_HEALTH] = targ->health;
                     }
                 }
             }
@@ -1485,7 +1485,7 @@ int __cdecl G_RadiusDamage(
                             dir,
                             origin,
                             (int)damage,
-                            5, // dflags
+                            DAMAGE_RADIUS | DAMAGE_NO_KNOCKBACK, // dflags
                             mod,
                             weapon,
                             HITLOC_NONE,

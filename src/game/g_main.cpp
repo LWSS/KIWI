@@ -1656,7 +1656,7 @@ void __cdecl G_ClientDoPerFrameNotifies(gentity_s *ent)
         Scr_Notify(ent, scr_const.weapon_change, 1u);
         client->lastWeapon = client->ps.weapon;
     }
-    if (client->ps.weaponstate != 5 || (v5 = 1, client->ps.pm_type >= PM_DEAD))
+    if (client->ps.weaponstate != WEAPON_FIRING || (v5 = 1, client->ps.pm_type >= PM_DEAD))
         v5 = 0;
     v6 = v5;
     if (v5 != client->previouslyFiring)
@@ -1707,12 +1707,12 @@ void __cdecl G_RunFrameForEntityInternal(gentity_s *ent)
         ent->r.eventTime = 0;
     }
     eType = ent->s.eType;
-    if (eType == 3)
+    if (eType == ET_MISSILE)
     {
         G_RunMissile(ent);
         return;
     }
-    if (eType == 2)
+    if (eType == ET_ITEM)
     {
         v4 = ent;
         if (ent->tagInfo)
@@ -1741,7 +1741,7 @@ void __cdecl G_RunFrameForEntityInternal(gentity_s *ent)
     {
         if (ent->client)
             return;
-        if (!ent->s.eType)
+        if (ent->s.eType == ET_GENERAL)
         {
             if (ent->tagInfo)
                 G_GeneralLink(ent);
@@ -2073,13 +2073,13 @@ void __cdecl G_ArchiveSpecialEntityInfo(const entityState_s *es, MemoryFile *mem
     MemFile_ArchiveData(memFile, 1, &level.specialIndex[es->number]);
     eType = es->eType;
     v5 = level.specialIndex[es->number];
-    if (eType == 14)
+    if (eType == ET_ACTOR)
     {
         MemFile_ArchiveData(memFile, 24, &level.cgData_actorProneInfo[v5]);
         MemFile_ArchiveData(memFile, 1, &level.cgData_actorOnCompass[v5]);
         MemFile_ArchiveData(memFile, 1, &level.cgData_actorTeam[v5]);
     }
-    else if (eType == 16)
+    else if (eType == ET_ACTOR_CORPSE)
     {
         MemFile_ArchiveData(memFile, 24, &level.cgData_actorProneInfo[v5]);
     }
@@ -2236,7 +2236,7 @@ void __cdecl ShowEntityInfo()
 
         filter = g_entinfo_type->current.integer;
         if (filter == 1)
-            contentmask = 0x4000;             // AI only -> CONTENTS_BODY
+            contentmask = 0x4000;             // AI only -> CONTENTS_ACTOR
         else if (filter == 2)
             contentmask = 0x800000;           // vehicle only -> CONTENTS_VEHICLE
         else

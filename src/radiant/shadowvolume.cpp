@@ -10,6 +10,7 @@
 // 0x4418b0 patch arm.  Asserts: shadowvolume.cpp:133, :164, :205, :209.
 
 #include "stdafx.h"
+#include <universal/surfaceflags.h>
 #include <gfx_d3d/r_rendercmds.h>   // MaterialTechniqueType, TECHNIQUE_UNLIT
 #include <gfx_d3d/r_material.h>     // Material*
 #include <cstdlib>                   // abs()
@@ -523,7 +524,7 @@ static bool ShadVol_MaterialCasts( const Material *m )
         return false;
     int bidx = ( m->techniqueSet && m->techniqueSet->techniques[5] )
                  ? (byte)m->stateBitsEntry[4] : 0;
-    return ( m->surfaceFlags & 0x40000 ) == 0 && m->stateBitsTable
+    return ( m->surfaceFlags & SURF_NOCASTSHADOW ) == 0 && m->stateBitsTable
            && ( m->stateBitsTable[bidx].loadBits[0] & 0x7000F00u ) == 0x800u
            && ( m->stateBitsTable[bidx].loadBits[1] & 1 ) != 0;
 }

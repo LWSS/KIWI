@@ -2699,7 +2699,7 @@ static void Cmd_OnSelectionMakeDetail()      // 0x4261C0 â€” Selectionâ†
     Undo_ClearRedo();
     Undo_GeneralStart( "make detail" );
     Undo_AddBrushList( &selected_brushes );
-    Select_ChangeBrushType( 0x8000000, 8320 );
+    Select_ChangeBrushType( 0x8000000, MASK_WEAPONCLIP );
     Undo_EndBrushList( &selected_brushes );
     Undo_End();
 }

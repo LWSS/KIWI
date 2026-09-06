@@ -221,7 +221,7 @@ char __cdecl AimTarget_IsTargetVisible(int localClientNum, const centity_s *targ
         (float *)vec3_origin,
         targetEyePos,
         cgameGlob->predictedPlayerState.clientNum,
-        0x803003);
+        MASK_AIMTARGET_VISIBILITY);
 
     if (trace.fraction != 1.0 && Trace_GetEntityHitId(&trace) != targetEnt->nextState.number)
     {

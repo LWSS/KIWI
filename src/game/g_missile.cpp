@@ -1,4 +1,5 @@
 #include <universal/q_shared.h>
+#include <universal/surfaceflags.h>
 #include "game_public.h"
 #include <script/scr_const.h>
 #include <server/sv_world.h>
@@ -366,7 +367,7 @@ void __cdecl G_ExplodeMissile(gentity_s *ent)
                 {
                     normal = trace.normal;
                 }
-                eventEnt->s.surfType = (trace.surfaceFlags & 0x1F00000) >> 20;
+                eventEnt->s.surfType = SURF_TYPEINDEX(trace.surfaceFlags);
             }
             if (weapDef->projExplosion && weapDef->projExplosion != WEAPPROJEXP_HEAVY)
             {
@@ -638,7 +639,7 @@ void __cdecl G_MakeMissilePickupItem(gentity_s *ent)
     ent->r.maxs[1] = 1.0;
     ent->r.maxs[2] = 1.0;
 
-    ent->r.contents |= 0x200000u;
+    ent->r.contents |= CONTENTS_USE;
     item = BG_FindItemForWeapon(ent->s.weapon, ent->s.weaponModel);
     iassert(item);
 
@@ -665,7 +666,7 @@ void __cdecl RunMissile_BroadcastActorEvents(gentity_s *missile)
     methodOfDeath = entityHandlers[missile->handler].methodOfDeath;
     weapDef = BG_GetWeaponDef(missile->s.weapon);
     iassert(weapDef);
-    if (methodOfDeath == 3)
+    if (methodOfDeath == MOD_GRENADE)
     {
         if (weapDef->offhandClass)
         {
@@ -802,7 +803,7 @@ void __cdecl G_RunMissile(gentity_s *ent)
     {
         G_MissileTrace(&tr, ent->r.currentOrigin, origin, ENTITYNUM_NONE, ent->clipmask | 0x20);
     }
-    if ((tr.surfaceFlags & 0x1F00000) == 0x1400000)
+    if ((tr.surfaceFlags & SURF_TYPE_MASK) == SURF_TYPE_WATER)
     {
         RunMissile_CreateWaterSplash(ent, &tr);
         if (ent->r.ownerNum.isDefined())
@@ -814,7 +815,7 @@ void __cdecl G_RunMissile(gentity_s *ent)
             G_MissileTrace(&tr, ent->r.currentOrigin, origin, ENTITYNUM_NONE, ent->clipmask);
         }
     }
-    if ((tr.surfaceFlags & 0x1F00000) == 0x900000)
+    if ((tr.surfaceFlags & SURF_TYPE_MASK) == SURF_TYPE_GLASS)
         Missile_PenetrateGlass(&tr, ent, ent->r.currentOrigin, origin, weapDef->damage, 0);
     Vec3Lerp(ent->r.currentOrigin, origin, tr.fraction, endpos);
     DrawMissileDebug(ent->r.currentOrigin, endpos);
@@ -890,7 +891,7 @@ void __cdecl G_RunMissile(gentity_s *ent)
         v9 = Vec3Length(diff);
         ent->missile.travelDist = ent->missile.travelDist + v9;
     }
-    if (entityHandlers[ent->handler].methodOfDeath == 3)
+    if (entityHandlers[ent->handler].methodOfDeath == MOD_GRENADE)
         G_GrenadeTouchTriggerDamage(
             ent,
             vOldOrigin,
@@ -954,7 +955,7 @@ void __cdecl G_RunMissile(gentity_s *ent)
         G_RunThink(ent);
         return;
     }
-    if ((tr.surfaceFlags & 4) != 0)
+    if ((tr.surfaceFlags & SURF_SKY) != 0)
     {
         Scr_Notify(ent, scr_const.death, 0);
         G_FreeEntity(ent);
@@ -1028,13 +1029,13 @@ void __cdecl MissileImpact(gentity_s *ent, trace_t *trace, float *dir, float *en
     explodeOnImpact = weapDef->bProjImpactExplode;
     explosionType = weapDef->projExplosion;
     damage = weapDef->damage;
-    ent->s.surfType = (trace->surfaceFlags & 0x1F00000) >> 20;
+    ent->s.surfType = SURF_TYPEINDEX(trace->surfaceFlags);
     if (GrenadeDud(ent, weapDef) || JavelinDud(ent, weapDef))
     {
         explosionType = 4;
         explodeOnImpact = 0;
         ent->missile.travelDist = -1.0e10f;
-        methodOfDeath = 15;
+        methodOfDeath = MOD_IMPACT;
     }
     else if (explodeOnImpact)
     {
@@ -1042,15 +1043,15 @@ void __cdecl MissileImpact(gentity_s *ent, trace_t *trace, float *dir, float *en
     }
     else
     {
-        methodOfDeath = 15;
+        methodOfDeath = MOD_IMPACT;
     }
-    if (methodOfDeath == 15)
+    if (methodOfDeath == MOD_IMPACT)
         partGroup = (hitLocation_t)trace->partGroup;
     else
         partGroup = HITLOC_NONE;
     hitLocation = partGroup;
 #ifdef KISAK_SP
-    if (methodOfDeath != 7 && ent->r.ownerNum.isDefined())
+    if (methodOfDeath != MOD_MELEE && ent->r.ownerNum.isDefined())
     {
         gentity_s *owner = ent->r.ownerNum.ent();
         Actor_BroadcastLineEvent(owner, AI_EV_PROJECTILE_IMPACT, 0, owner->s.lerp.pos.trBase, endpos, 0.0);
@@ -1062,7 +1063,7 @@ void __cdecl MissileImpact(gentity_s *ent, trace_t *trace, float *dir, float *en
         && !CheckCrumpleMissile(ent, trace))
     {
         if (BounceMissile(ent, trace) && !trace->startsolid)
-            G_AddEvent(ent, EV_GRENADE_BOUNCE, (trace->surfaceFlags & 0x1F00000) >> 20);
+            G_AddEvent(ent, EV_GRENADE_BOUNCE, SURF_TYPEINDEX(trace->surfaceFlags));
         if (weapDef->iProjectileActivateDist > 0 && ent->s.lerp.pos.trType == TR_STATIONARY)
         {
             v4 = DirToByte(trace->normal);
@@ -1101,7 +1102,7 @@ void __cdecl MissileImpact(gentity_s *ent, trace_t *trace, float *dir, float *en
                         velocity,
                         ent->r.currentOrigin,
                         damage,
-                        0,
+                        DAMAGE_NOFLAG,
                         methodOfDeath,
                         ent->s.weapon,
                         hitLocation,
@@ -1122,7 +1123,7 @@ void __cdecl MissileImpact(gentity_s *ent, trace_t *trace, float *dir, float *en
                         velocity,
                         ent->r.currentOrigin,
                         damage,
-                        0,
+                        DAMAGE_NOFLAG,
                         methodOfDeath,
                         ent->s.weapon,
                         hitLocation,
@@ -1139,11 +1140,11 @@ void __cdecl MissileImpact(gentity_s *ent, trace_t *trace, float *dir, float *en
         if (!explodeOnImpact)
         {
             if (other->client && !trace->surfaceFlags)
-                trace->surfaceFlags = 0x700000;
+                trace->surfaceFlags = SURF_TYPE_FLESH;
             if (!CheckCrumpleMissile(ent, trace))
             {
                 if (BounceMissile(ent, trace) && !trace->startsolid)
-                    G_AddEvent(ent, EV_GRENADE_BOUNCE, (trace->surfaceFlags & 0x1F00000) >> 20);
+                    G_AddEvent(ent, EV_GRENADE_BOUNCE, SURF_TYPEINDEX(trace->surfaceFlags));
                 return;
             }
         }
@@ -1246,7 +1247,7 @@ LABEL_92:
     if (inWater)
         v28 = 20;
     else
-        v28 = (trace->surfaceFlags & 0x1F00000) >> 20;
+        v28 = SURF_TYPEINDEX(trace->surfaceFlags);
     ent->s.surfType = v28;
     Scr_Notify(ent, scr_const.death, 0);
     G_FreeEntityAfterEvent(ent);
@@ -1327,7 +1328,7 @@ bool __cdecl CheckCrumpleMissile(gentity_s *ent, trace_t *trace)
     iassert(weapDef);
     if (weapDef->weapType != WEAPTYPE_PROJECTILE)
         return 0;
-    if (trace->surfaceFlags == 0x700000)
+    if (trace->surfaceFlags == SURF_TYPE_FLESH)
         return 1;
     hitTime = level.previousTime + (int)((double)(level.time - level.previousTime) * trace->fraction);
     BG_EvaluateTrajectoryDelta(&ent->s.lerp.pos, hitTime, velocity);
@@ -1361,7 +1362,7 @@ bool __cdecl BounceMissile(gentity_s *ent, trace_t *trace)
     weapDef = BG_GetWeaponDef(ent->s.weapon);
     iassert(weapDef);
     contents = SV_PointContents(ent->r.currentOrigin, -1, 32);
-    surfType = (trace->surfaceFlags & 0x1F00000) >> 20;
+    surfType = SURF_TYPEINDEX(trace->surfaceFlags);
     hitTime = level.previousTime + (int)((double)(level.time - level.previousTime) * trace->fraction);
     BG_EvaluateTrajectoryDelta(&ent->s.lerp.pos, hitTime, velocity);
     dot = Vec3Dot(velocity, trace->normal);
@@ -1680,8 +1681,8 @@ void __cdecl Missile_PenetrateGlass(
                             vel,
                             ent->r.currentOrigin,
                             damage,
-                            0,
-                            15,
+                            DAMAGE_NOFLAG,
+                            MOD_IMPACT,
                             ent->s.weapon,
                             hitLoc,
                             results->modelIndex,
@@ -1926,7 +1927,7 @@ void __cdecl RunMissile_CreateWaterSplash(const gentity_s *missile, const trace_
     tent = G_TempEntity((float*)missile->r.currentOrigin, EV_GRENADE_BOUNCE);
     tent->s.eventParm = DirToByte(trace->normal);
     tent->s.un1.scale = 0;
-    tent->s.surfType = (trace->surfaceFlags & 0x1F00000) >> 20;
+    tent->s.surfType = SURF_TYPEINDEX(trace->surfaceFlags);
     tent->s.otherEntityNum = missile->s.number;
     tent->s.weapon = missile->s.weapon;
 }
@@ -3010,7 +3011,7 @@ static void PredictBounceMissile(
     WeaponDef = BG_GetWeaponDef(ent->s.weapon);
     if (!WeaponDef)
         MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_missile.cpp", 2306, 0, "%s", "weapDef");
-    v15 = (trace->surfaceFlags >> 20) & 0x1F;
+    v15 = SURF_TYPEINDEX(trace->surfaceFlags);
     BG_EvaluateTrajectoryDelta(pos, velocityTime, delta);
     v16 = delta[2];
     v17 = delta[1];
@@ -3136,7 +3137,7 @@ int G_PredictMissile(gentity_s *ent, int duration, float *vLandPos, int allowBou
         }
         else
         {
-            if ((tr.surfaceFlags & 0x1F00000) == 0x900000)
+            if ((tr.surfaceFlags & SURF_TYPE_MASK) == SURF_TYPE_GLASS)
                 Missile_PenetrateGlass(&tr, ent, org, origin, weapDef->damage, 1);
             Vec3Lerp(org, origin, tr.fraction, endpos);
             //DrawMissilePredictDebug(org, endpos);
@@ -3203,7 +3204,7 @@ int G_PredictMissile(gentity_s *ent, int duration, float *vLandPos, int allowBou
             }
             if (tr.fraction != 1.0)
             {
-                if ((tr.surfaceFlags & 4) != 0)
+                if ((tr.surfaceFlags & SURF_SKY) != 0)
                 {
                 LABEL_36:
                     memcpy(ent, &backupEnt, sizeof(gentity_s));

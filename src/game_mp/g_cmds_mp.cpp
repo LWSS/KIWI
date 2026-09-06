@@ -201,7 +201,7 @@ void __cdecl Cmd_Give_f(gentity_s *ent)
             if (strlen(name))
             {
                 if (!(give_all = I_stricmp(name, "all") == 0) && I_strnicmp(name, "health", 6)
-                    || (!amount ? (ent->health = ent->client->ps.stats[2]) : (ent->health += amount), give_all))
+                    || (!amount ? (ent->health = ent->client->ps.stats[STAT_MAX_HEALTH]) : (ent->health += amount), give_all))
                 {
                     if (!give_all && I_stricmp(name, "weapons"))
                         goto LABEL_49;
@@ -523,7 +523,7 @@ void __cdecl Cmd_Kill_f(gentity_s *ent)
         bgs = &level_bgs;
         ent->flags &= ~(FL_GODMODE|FL_DEMI_GODMODE);
         ent->health = 0;
-        ent->client->ps.stats[0] = 0;
+        ent->client->ps.stats[STAT_HEALTH] = 0;
         player_die(ent, ent, ent, 100000, 12, 0, 0, HITLOC_NONE, 0);
         vassert((bgs == &level_bgs), "(bgs) = %p", bgs);
         bgs = 0;
@@ -563,7 +563,7 @@ void __cdecl StopFollowing(gentity_s *ent)
         vMaxs[0] = 8.0;
         vMaxs[1] = 8.0;
         vMaxs[2] = 8.0;
-        G_TraceCapsule(&trace, vPos, vMins, vMaxs, vEnd, ENTITYNUM_NONE, 0x810011);
+        G_TraceCapsule(&trace, vPos, vMins, vMaxs, vEnd, ENTITYNUM_NONE, MASK_DEADSOLID);
         Vec3Lerp(vPos, vEnd, trace.fraction, vPos);
         client->ps.clientNum = ent - g_entities;
         client->ps.eFlags &= 0xFFFFFCFF;

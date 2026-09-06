@@ -666,8 +666,8 @@ void __cdecl CG_OffsetThirdPersonView(cg_s *cgameGlob)
     focusAngles[2] = cgameGlob->refdefViewAngles[2];
     if (cgameGlob->predictedPlayerState.pm_type >= PM_DEAD)
     {
-        focusAngles[1] = (float)cgameGlob->predictedPlayerState.stats[1];
-        viewAngles[1] = (float)cgameGlob->predictedPlayerState.stats[1];
+        focusAngles[1] = (float)cgameGlob->predictedPlayerState.stats[STAT_DEAD_YAW];
+        viewAngles[1] = (float)cgameGlob->predictedPlayerState.stats[STAT_DEAD_YAW];
     }
     if (focusAngles[0] > 45.0)
         focusAngles[0] = 45.0;
@@ -1609,7 +1609,7 @@ void __cdecl GetCeilingHeight(cg_s *cgameGlob)
         (float *)playerMaxs,
         endPos,
         ENTITYNUM_NONE,
-        1);
+        MASK_SOLID);
     if (result.fraction < 1.0)
     {
         Vec3Lerp(cgameGlob->predictedPlayerState.origin, endPos, result.fraction, endPos);
@@ -1775,7 +1775,7 @@ void __cdecl CG_UpdateAdsDof(int localClientNum, GfxDepthOfField *dof)
             (float *)vec3_origin,
             traceEnd,
             ps->clientNum,
-            0x806C31);
+            MASK_ADS_DOF_TRACE);
         Vec3Lerp(cgameGlob->refdef.vieworg, traceEnd, trace.fraction, traceEnd);
         Vec3Sub(traceEnd, cgameGlob->refdef.vieworg, v);
         traceDist = Vec3Length(v);

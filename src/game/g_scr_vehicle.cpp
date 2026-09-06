@@ -69,39 +69,39 @@ short s_numVehicleInfos;
 
 cspField_t s_vehicleFields[33] =
 {
-  { "type", offsetof(vehicle_info_t, type), 12 },
-  { "steerWheels", offsetof(vehicle_info_t, steerWheels), 5 },
-  { "texureScroll", offsetof(vehicle_info_t, texScroll), 5 },
-  { "quadBarrel", offsetof(vehicle_info_t, quadBarrel), 5 },
-  { "bulletDamage", offsetof(vehicle_info_t, bulletDamage), 5 },
-  { "armorPiercingDamage", offsetof(vehicle_info_t, armorPiercingDamage), 5 },
-  { "grenadeDamage", offsetof(vehicle_info_t, grenadeDamage), 5 },
-  { "projectileDamage", offsetof(vehicle_info_t, projectileDamage), 5 },
-  { "projectileSplashDamage", offsetof(vehicle_info_t, projectileSplashDamage), 5 },
-  { "heavyExplosiveDamage", offsetof(vehicle_info_t, heavyExplosiveDamage), 5 },
-  { "texureScrollScale", offsetof(vehicle_info_t, texScrollScale), 6 },
-  { "maxSpeed", offsetof(vehicle_info_t, maxSpeed), 6 },
-  { "accel", offsetof(vehicle_info_t, accel), 6 },
-  { "rotRate", offsetof(vehicle_info_t, rotRate), 6 },
-  { "rotAccel", offsetof(vehicle_info_t, rotAccel), 6 },
-  { "collisionDamage", offsetof(vehicle_info_t, collisionDamage), 6 },
-  { "collisionSpeed", offsetof(vehicle_info_t, collisionSpeed), 6 },
-  { "suspensionTravel", offsetof(vehicle_info_t, suspensionTravel), 6 },
-  { "maxBodyPitch", offsetof(vehicle_info_t, maxBodyPitch), 6 },
-  { "maxBodyRoll", offsetof(vehicle_info_t, maxBodyRoll), 6 },
-  { "turretWeapon", offsetof(vehicle_info_t, turretWeapon), 0 },
-  { "turretHorizSpanLeft", offsetof(vehicle_info_t, turretHorizSpanLeft), 6 },
-  { "turretHorizSpanRight", offsetof(vehicle_info_t, turretHorizSpanRight), 6 },
-  { "turretVertSpanUp", offsetof(vehicle_info_t, turretVertSpanUp), 6 },
-  { "turretVertSpanDown", offsetof(vehicle_info_t, turretVertSpanDown), 6 },
-  { "turretRotRate", offsetof(vehicle_info_t, turretRotRate), 6 },
-  { "lowIdleSnd", offsetof(vehicle_info_t, sndNames[0]), 0 },
-  { "highIdleSnd", offsetof(vehicle_info_t, sndNames[1]), 0 },
-  { "lowEngineSnd", offsetof(vehicle_info_t, sndNames[2]), 0 },
-  { "highEngineSnd", offsetof(vehicle_info_t, sndNames[3]), 0 },
-  { "turretSpinSnd", offsetof(vehicle_info_t, sndNames[4]), 0 },
-  { "turretStopSnd", offsetof(vehicle_info_t, sndNames[5]), 0 },
-  { "engineSndSpeed", offsetof(vehicle_info_t, engineSndSpeed), 6 }
+  { "type", offsetof(vehicle_info_t, type), CSPFT_NUM_BASE_FIELD_TYPES },
+  { "steerWheels", offsetof(vehicle_info_t, steerWheels), CSPFT_QBOOLEAN },
+  { "texureScroll", offsetof(vehicle_info_t, texScroll), CSPFT_QBOOLEAN },
+  { "quadBarrel", offsetof(vehicle_info_t, quadBarrel), CSPFT_QBOOLEAN },
+  { "bulletDamage", offsetof(vehicle_info_t, bulletDamage), CSPFT_QBOOLEAN },
+  { "armorPiercingDamage", offsetof(vehicle_info_t, armorPiercingDamage), CSPFT_QBOOLEAN },
+  { "grenadeDamage", offsetof(vehicle_info_t, grenadeDamage), CSPFT_QBOOLEAN },
+  { "projectileDamage", offsetof(vehicle_info_t, projectileDamage), CSPFT_QBOOLEAN },
+  { "projectileSplashDamage", offsetof(vehicle_info_t, projectileSplashDamage), CSPFT_QBOOLEAN },
+  { "heavyExplosiveDamage", offsetof(vehicle_info_t, heavyExplosiveDamage), CSPFT_QBOOLEAN },
+  { "texureScrollScale", offsetof(vehicle_info_t, texScrollScale), CSPFT_FLOAT },
+  { "maxSpeed", offsetof(vehicle_info_t, maxSpeed), CSPFT_FLOAT },
+  { "accel", offsetof(vehicle_info_t, accel), CSPFT_FLOAT },
+  { "rotRate", offsetof(vehicle_info_t, rotRate), CSPFT_FLOAT },
+  { "rotAccel", offsetof(vehicle_info_t, rotAccel), CSPFT_FLOAT },
+  { "collisionDamage", offsetof(vehicle_info_t, collisionDamage), CSPFT_FLOAT },
+  { "collisionSpeed", offsetof(vehicle_info_t, collisionSpeed), CSPFT_FLOAT },
+  { "suspensionTravel", offsetof(vehicle_info_t, suspensionTravel), CSPFT_FLOAT },
+  { "maxBodyPitch", offsetof(vehicle_info_t, maxBodyPitch), CSPFT_FLOAT },
+  { "maxBodyRoll", offsetof(vehicle_info_t, maxBodyRoll), CSPFT_FLOAT },
+  { "turretWeapon", offsetof(vehicle_info_t, turretWeapon), CSPFT_STRING },
+  { "turretHorizSpanLeft", offsetof(vehicle_info_t, turretHorizSpanLeft), CSPFT_FLOAT },
+  { "turretHorizSpanRight", offsetof(vehicle_info_t, turretHorizSpanRight), CSPFT_FLOAT },
+  { "turretVertSpanUp", offsetof(vehicle_info_t, turretVertSpanUp), CSPFT_FLOAT },
+  { "turretVertSpanDown", offsetof(vehicle_info_t, turretVertSpanDown), CSPFT_FLOAT },
+  { "turretRotRate", offsetof(vehicle_info_t, turretRotRate), CSPFT_FLOAT },
+  { "lowIdleSnd", offsetof(vehicle_info_t, sndNames[VEH_LOW_IDLE_SND]), CSPFT_STRING },
+  { "highIdleSnd", offsetof(vehicle_info_t, sndNames[VEH_HIGH_IDLE_SND]), CSPFT_STRING },
+  { "lowEngineSnd", offsetof(vehicle_info_t, sndNames[VEH_LOW_ENGINE_SND]), CSPFT_STRING },
+  { "highEngineSnd", offsetof(vehicle_info_t, sndNames[VEH_HIGH_ENGINE_SND]), CSPFT_STRING },
+  { "turretSpinSnd", offsetof(vehicle_info_t, sndNames[VEH_TURRET_SPIN_SND]), CSPFT_STRING },
+  { "turretStopSnd", offsetof(vehicle_info_t, sndNames[VEH_TURRET_STOP_SND]), CSPFT_STRING },
+  { "engineSndSpeed", offsetof(vehicle_info_t, engineSndSpeed), CSPFT_FLOAT }
 }; // idb
 
 
@@ -134,7 +134,7 @@ void __cdecl VEH_InitEntity(gentity_s *ent, scr_vehicle_s *veh, int infoIdx)
 #ifdef KISAK_MP
     ent->handler = ENT_HANDLER_HELICOPTER;
     ent->r.svFlags = 4;
-    ent->r.contents = 8320;
+    ent->r.contents = MASK_WEAPONCLIP;
     ent->s.lerp.eFlags = 0;
     ent->s.lerp.pos.trType = TR_INTERPOLATE;
     ent->s.lerp.apos.trType = TR_INTERPOLATE;
@@ -159,9 +159,9 @@ void __cdecl VEH_InitEntity(gentity_s *ent, scr_vehicle_s *veh, int infoIdx)
     int spawnflags = ent->spawnflags;
     ent->handler = ENT_HANDLER_VEHICLE_INIT;
     ent->r.svFlags = 4;
-    ent->r.contents = 8320;
+    ent->r.contents = MASK_WEAPONCLIP;
     if ((spawnflags & 1) != 0)
-        ent->r.contents = 0x202080;
+        ent->r.contents = MASK_WEAPONCLIP | CONTENTS_USE;
     ent->s.lerp.eFlags = 0;
     ent->s.eType = ET_VEHICLE;
     ent->s.lerp.pos.trType = TR_INTERPOLATE;
@@ -209,7 +209,7 @@ void __cdecl VEH_InitVehicle(gentity_s *ent, scr_vehicle_s *veh, short infoIdx)
     veh->drawOnCompass = 0;
     veh->lookAtText0 = 0;
     veh->lookAtText1 = 0;
-    veh->manualMode = 0;
+    veh->manualMode = VEH_MANUAL_OFF;
     veh->manualSpeed = 0.0f;
     veh->manualAccel = 0.0f;
     veh->manualDecel = 0.0f;
@@ -239,9 +239,9 @@ void __cdecl VEH_InitVehicle(gentity_s *ent, scr_vehicle_s *veh, short infoIdx)
     veh->engineSndLerp = 0.0f;
     veh->turretHitNum = 0;
 #ifdef KISAK_SP
-    if (s_vehicleInfos[infoIdx].sndIndices[0] && s_vehicleInfos[infoIdx].sndIndices[1])
+    if (s_vehicleInfos[infoIdx].sndIndices[VEH_LOW_IDLE_SND] && s_vehicleInfos[infoIdx].sndIndices[VEH_HIGH_IDLE_SND])
         veh->idleSndEnt.setEnt(G_SpawnSoundBlend());
-    if (s_vehicleInfos[infoIdx].sndIndices[2] && s_vehicleInfos[infoIdx].sndIndices[3])
+    if (s_vehicleInfos[infoIdx].sndIndices[VEH_LOW_ENGINE_SND] && s_vehicleInfos[infoIdx].sndIndices[VEH_HIGH_ENGINE_SND])
         veh->engineSndEnt.setEnt(G_SpawnSoundBlend());
 #endif
     veh->hover.hoverRadius = 30.0f;
@@ -969,7 +969,7 @@ void __cdecl VEH_PushEntity(gentity_s *ent, gentity_s *target, float *pushDir, f
                 && (!target->actor || !Actor_InScriptedState(target->actor)))
             {
                 G_Damage(target, ent, ent, pushDir, target->r.currentOrigin,
-                         999999, 0, MOD_CRUSH, -1, HITLOC_NONE, 0, 0);
+                         999999, DAMAGE_NOFLAG, MOD_CRUSH, -1, HITLOC_NONE, 0, 0);
             }
         }
 #endif
@@ -2117,7 +2117,7 @@ void __cdecl CMD_VEH_Script_SetSpeed(gentity_s *ent)
     info = &s_vehicleInfos[veh->infoIdx];
     iassert(veh);
     iassert(info);
-    veh->manualMode = 1;
+    veh->manualMode = VEH_MANUAL_ON;
     veh->manualSpeed = Scr_GetFloat(0) * MPH_TO_INCHES_PER_SEC;
     if (veh->manualSpeed < 0.0f)
     {
@@ -2161,7 +2161,7 @@ void __cdecl CMD_VEH_ResumeSpeed(scr_entref_t entref)
     scr_vehicle_s *veh; // [esp+0h] [ebp-8h]
 
     veh = GScr_GetVehicle(entref)->scr_vehicle;
-    veh->manualMode = 2;
+    veh->manualMode = VEH_MANUAL_TRANS;
     veh->manualAccel = Scr_GetFloat(0) * MPH_TO_INCHES_PER_SEC;
     if (veh->manualAccel < 0.0f)
         Scr_ParamError(0, "Cannot set negative acceleration on vehicle");
@@ -2281,7 +2281,7 @@ void __cdecl CMD_VEH_SetGoalPos(scr_entref_t entref)
     scr_vehicle_s *veh; // [esp+0h] [ebp-8h]
 
     veh = GScr_GetVehicle(entref)->scr_vehicle;
-    veh->manualMode = 1;
+    veh->manualMode = VEH_MANUAL_ON;
     Scr_GetVector(0, veh->goalPosition);
     veh->stopAtGoal = Scr_GetNumParam() > 1 && Scr_GetInt(1) != 0;
     if (veh->manualSpeed == 0.0f || veh->manualAccel == 0.0f || veh->manualDecel == 0.0f)
@@ -2756,14 +2756,14 @@ bool G_IsVehicleImmune(gentity_s *ent, int mod, char damageFlags, uint weapon)
 
     switch (mod)
     {
-    case 1:
-    case 2:
-        if (v4->bulletDamage || ((damageFlags & 2) != 0 && v4->armorPiercingDamage))
+    case MOD_PISTOL_BULLET:
+    case MOD_RIFLE_BULLET:
+        if (v4->bulletDamage || ((damageFlags & DAMAGE_NO_ARMOR) != 0 && v4->armorPiercingDamage))
             goto LABEL_3;
         goto LABEL_6;
 
-    case 3:
-    case 4:
+    case MOD_GRENADE:
+    case MOD_GRENADE_SPLASH:
     {
 
         if (BG_GetWeaponDef(weapon)->projExplosion == WEAPPROJEXP_HEAVY)
@@ -2775,15 +2775,15 @@ bool G_IsVehicleImmune(gentity_s *ent, int mod, char damageFlags, uint weapon)
         break;
     }
 
-    case 5:
+    case MOD_PROJECTILE:
         result = (v4->projectileDamage == 0);
         break;
 
-    case 6:
+    case MOD_PROJECTILE_SPLASH:
         result = (v4->projectileSplashDamage == 0);
         break;
 
-    case 14:
+    case MOD_EXPLOSIVE:
     LABEL_3:
         result = 0;
         break;
@@ -2876,7 +2876,7 @@ static void VEH_Strcpy(byte *pMember, const char *pKeyValue)
 
 int VEH_ParseSpecificField(uint8_t *pStruct, const char *pValue, int fieldType)
 {
-    if (fieldType == 12)
+    if (fieldType == CSPFT_NUM_BASE_FIELD_TYPES)
     {
         int typeIdx;
         for (typeIdx = 0; typeIdx < ARRAY_COUNT(s_vehicleTypeNames); typeIdx++)
@@ -2923,7 +2923,7 @@ int __cdecl G_LoadVehicle(const char *name)
         s_vehicleFields,
         ARRAY_COUNT(s_vehicleFields),
         infoString,
-        13,
+        CSPFT_NUM_BASE_FIELD_TYPES + 1,
         VEH_ParseSpecificField,
         VEH_Strcpy))
     {
@@ -2994,15 +2994,15 @@ static void VEH_GroundPlantInternal(gentity_s *ent, vehicle_physic_t *phys, int 
     else
         numWheels = 4;
 
-    contents = 529;
+    contents = CONTENTS_SOLID | CONTENTS_GLASS | CONTENTS_VEHICLECLIP;
 
-    if ((veh->flags & 1) != 0)
+    if (veh->flags & 1)
     {
-#ifdef KISAK_MP
-        contents |= 0x10000u;
-#elif KISAK_SP
-        contents = 66065;
-#endif
+        /*When veh->flags & 1 is set:
+        - MP adds 0x10000, which is CONTENTS_PLAYERCLIP.
+        - SP assigns 66065, which is 0x10211
+        -> the same final combination.*/
+        contents |= CONTENTS_PLAYERCLIP;
     }
 
     axis[3][0] = phys->origin[0];
@@ -3071,7 +3071,7 @@ static void VEH_GroundPlantInternal(gentity_s *ent, vehicle_physic_t *phys, int 
         else
         {
             Vec3Lerp(traceStart, traceEnd, trace.fraction, hitPos);
-            phys->wheelSurfType[i] = (trace.surfaceFlags & 0x1F00000) >> 20;
+            phys->wheelSurfType[i] = SURF_TYPEINDEX(trace.surfaceFlags);
         }
         if (gravity)
         {
@@ -3268,8 +3268,8 @@ void VEH_UpdateSounds(gentity_s *ent)
         else
         {
             idleSndLerp = scr_vehicle->idleSndLerp;
-            v7 = sndIndices[1];
-            v8 = *sndIndices;
+            v7 = sndIndices[VEH_HIGH_IDLE_SND];
+            v8 = sndIndices[VEH_LOW_IDLE_SND];
         }
         G_SetSoundBlend(v5, v8, v7, idleSndLerp);
     }
@@ -3286,17 +3286,17 @@ void VEH_UpdateSounds(gentity_s *ent)
         G_SetSoundBlend(v9, 0, 0, 0.0);
         goto LABEL_14;
     }
-    G_SetSoundBlend(v9, sndIndices[2], sndIndices[3], scr_vehicle->engineSndLerp);
+    G_SetSoundBlend(v9, sndIndices[VEH_LOW_ENGINE_SND], sndIndices[VEH_HIGH_ENGINE_SND], scr_vehicle->engineSndLerp);
 LABEL_15:
     turretState = scr_vehicle->turret.turretState;
-    if (turretState == VEH_TURRET_MOVING && sndIndices[4])
+    if (turretState == VEH_TURRET_MOVING && sndIndices[VEH_TURRET_SPIN_SND])
     {
-        ent->s.loopSound = sndIndices[4];
+        ent->s.loopSound = sndIndices[VEH_TURRET_SPIN_SND];
     }
     else if (turretState == VEH_TURRET_STOPPING)
     {
-        if (sndIndices[5])
-            G_PlaySoundAlias(ent, sndIndices[5]);
+        if (sndIndices[VEH_TURRET_STOP_SND])
+            G_PlaySoundAlias(ent, sndIndices[VEH_TURRET_STOP_SND]);
     }
 #elif KISAK_MP
     iassert(ent->r.inuse);
@@ -3688,7 +3688,7 @@ void __cdecl VEH_UpdateClient(gentity_s *ent)
             buttons = client->pers.cmd.buttons;
             move[0] = client->pers.cmd.forwardmove;
             move[1] = client->pers.cmd.rightmove;
-            handbrake = (int8_t)((buttons & 0x800) ? 0x7F : 0);
+            handbrake = (int8_t)((buttons & BUTTON_ADS) ? 0x7F : 0);
             move[2] = handbrake;
             if (handbrake > 0)
                 player->client->ps.eFlags &= ~0x40000u;
@@ -3777,17 +3777,17 @@ void __cdecl VEH_UpdatePath(gentity_s *ent)
     iassert(veh->pathPos.speed >= 0.0f);
     iassert(veh->manualSpeed >= 0.0f);
 
-    if (veh->manualMode == 0)
+    if (veh->manualMode == VEH_MANUAL_OFF)
     {
         // No manual override - just track the path's prescribed speed.
         veh->speed = veh->pathPos.speed;
     }
     else
     {
-        // manualMode 1 = explicit manual speed; mode 2 = decay back to path
-        // speed and then auto-clear.
-        float manualSpeed = (veh->manualMode == 2) ? veh->pathPos.speed
-                                                   : veh->manualSpeed;
+        // VEH_MANUAL_ON = explicit manual speed; VEH_MANUAL_TRANS = decay back
+        // to path speed and then auto-clear.
+        float manualSpeed = (veh->manualMode == VEH_MANUAL_TRANS) ? veh->pathPos.speed
+                                                                   : veh->manualSpeed;
         float newSpeed;
         if (veh->speed >= manualSpeed)
         {
@@ -3802,8 +3802,8 @@ void __cdecl VEH_UpdatePath(gentity_s *ent)
                 newSpeed = manualSpeed;
         }
         veh->speed = newSpeed;
-        if (veh->manualMode == 2 && newSpeed == manualSpeed)
-            veh->manualMode = 0;
+        if (veh->manualMode == VEH_MANUAL_TRANS && newSpeed == manualSpeed)
+            veh->manualMode = VEH_MANUAL_OFF;
     }
 
     iassert(veh->speed >= 0.0f);
@@ -3959,7 +3959,7 @@ void VEH_SetupCollmap(gentity_s *ent)
         {
             ent->s.index.item = CollMap->s.index.item;
             SV_SetBrushModel(ent);
-            ent->r.contents = 0x800000;
+            ent->r.contents = CONTENTS_VEHICLE;
             if (ent->spawnflags & 1)
                 ent->r.contents = 0xA00000;
         }
@@ -4235,7 +4235,7 @@ void G_RestartScrVehicleInfo()
     v0 = 0;
     if (s_numVehicleInfos > 0)
     {
-        v1 = s_vehicleInfos[0].sndNames[0];
+        v1 = s_vehicleInfos[0].sndNames[VEH_LOW_IDLE_SND];
         do
         {
             v2 = (_WORD*)(v1 + 384);
@@ -5361,7 +5361,7 @@ void G_SaveVehicleInfo(SaveGame *save)
     uint16_t *sndIndices = (uint16_t *)s_vehicleInfos[0].sndIndices;
     for (int v2 = 0; v2 < s_numVehicleInfos; ++v2)
     {
-        for (int i = 0; i < 6; ++i)
+        for (int i = 0; i < NUM_VEHICLE_SNDS; ++i)
         {
             if (sndIndices[i])
                 SaveMemory_SaveWrite(&sndIndices[i], 2, save);
@@ -5377,7 +5377,7 @@ void G_LoadVehicleInfo(SaveGame *save)
     uint16_t *sndIndices = (uint16_t *)s_vehicleInfos[0].sndIndices;
     for (int v2 = 0; v2 < s_numVehicleInfos; ++v2)
     {
-        for (int i = 0; i < 6; ++i)
+        for (int i = 0; i < NUM_VEHICLE_SNDS; ++i)
         {
             if (sndIndices[i])
                 SaveMemory_LoadRead(&sndIndices[i], 2, save);
@@ -5538,8 +5538,8 @@ void Scr_Vehicle_Touch(gentity_s *pSelf, gentity_s *pOther, int bTouched)
                 moveDir,
                 pOther->r.currentOrigin,
                 999999,
-                0,
-                9,
+                DAMAGE_NOFLAG,
+                MOD_CRUSH,
                 -1,
                 HITLOC_NONE,
                 0,
@@ -5562,8 +5562,8 @@ void Scr_Vehicle_Touch(gentity_s *pSelf, gentity_s *pOther, int bTouched)
                     moveDir,
                     pOther->r.currentOrigin,
                     999999,
-                    0,
-                    9,
+                    DAMAGE_NOFLAG,
+                    MOD_CRUSH,
                     -1,
                     HITLOC_NONE,
                     0,
@@ -5589,8 +5589,8 @@ void Scr_Vehicle_Touch(gentity_s *pSelf, gentity_s *pOther, int bTouched)
                             moveDir,
                             pOther->r.currentOrigin,
                             damage,
-                            0,
-                            9,
+                            DAMAGE_NOFLAG,
+                            MOD_CRUSH,
                             -1,
                             HITLOC_NONE,
                             0,
@@ -6038,7 +6038,7 @@ void __cdecl VEH_UpdateWeapon(gentity_s *ent)
     {
         veh->turret.fireTime = fireTime - 50;
     }
-    else if ((player->client->pers.cmd.buttons & 1) != 0
+    else if ((player->client->pers.cmd.buttons & BUTTON_ATTACK) != 0
         && (player->client->ps.pm_flags & 0xC00) == 0)
     {
         Scr_Notify(ent, scr_const.turret_fire, 0);
@@ -6102,7 +6102,7 @@ void __cdecl VEH_UpdateWeapon(gentity_s *ent)
 
         if (veh->turret.fireTime <= 0 || (veh->turret.fireTime -= level.frametime, veh->turret.fireTime <= 0))
         {
-            if ((client->buttons & 1) != 0)
+            if ((client->buttons & BUTTON_ATTACK) != 0)
                 FireTurret(ent, &g_entities[playerEntNum]);
         }
     }

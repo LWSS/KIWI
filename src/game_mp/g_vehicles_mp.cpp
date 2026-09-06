@@ -288,7 +288,7 @@ void __cdecl InitInfos(int restarting)
         for (vehIndex = 0; vehIndex < s_numVehicleInfos; ++vehIndex)
         {
             vehInfo = &s_vehicleInfos[vehIndex];
-            for (sndIndex = 0; sndIndex < 6; ++sndIndex)
+            for (sndIndex = 0; sndIndex < NUM_VEHICLE_SNDS; ++sndIndex)
             {
                 if (vehInfo->sndIndices[sndIndex])
                     vehInfo->sndIndices[sndIndex] = G_SoundAliasIndex(vehInfo->sndNames[sndIndex]);
@@ -329,9 +329,9 @@ void __cdecl SetupCollisionMap(gentity_s *ent)
         {
             ent->s.index.brushmodel = cmEnt->s.index.brushmodel;
             SV_SetBrushModel(ent);
-            ent->r.contents = 0x800000;
+            ent->r.contents = CONTENTS_VEHICLE;
             if ((ent->spawnflags & 1) != 0)
-                ent->r.contents |= 0x200000u;
+                ent->r.contents |= CONTENTS_USE;
         }
         else
         {
@@ -446,7 +446,7 @@ void __cdecl InitEntityVehicleVars(gentity_s *ent, scr_vehicle_s *veh, __int16 i
     veh->drawOnCompass = 0;
     veh->lookAtText0 = 0;
     veh->lookAtText1 = 0;
-    veh->manualMode = 0;
+    veh->manualMode = VEH_MANUAL_OFF;
     veh->manualSpeed = 0.0;
     veh->manualAccel = 0.0;
     veh->manualDecel = 0.0;
@@ -467,12 +467,12 @@ void __cdecl InitEntityVars(gentity_s *ent, scr_vehicle_s *veh, int infoIdx)
 {
     ent->handler = ENT_HANDLER_VEHICLE;
     ent->r.svFlags = 4;
-    ent->r.contents = 8320;
+    ent->r.contents = MASK_WEAPONCLIP;
     if ((ent->spawnflags & 1) != 0)
     {
         if (!alwaysfails)
             MyAssertHandler(".\\game_mp\\g_vehicles_mp.cpp", 2874, 0, "Initializing a usable vehicle!");
-        ent->r.contents |= 0x200000u;
+        ent->r.contents |= CONTENTS_USE;
     }
     ent->s.eType = ET_VEHICLE;
     ent->s.lerp.eFlags = 0;
@@ -568,27 +568,27 @@ bool __cdecl G_VehImmuneToDamage(gentity_s *ent, int mod, char damageFlags, uint
     info = &s_vehicleInfos[veh->infoIdx];
     switch (mod)
     {
-    case 1:
-    case 2:
+    case MOD_PISTOL_BULLET:
+    case MOD_RIFLE_BULLET:
         if (info->bulletDamage)
             result = 0;
         else
-            result = (damageFlags & 2) == 0 || !info->armorPiercingDamage;
+            result = (damageFlags & DAMAGE_NO_ARMOR) == 0 || !info->armorPiercingDamage;
         break;
-    case 3:
-    case 4:
+    case MOD_GRENADE:
+    case MOD_GRENADE_SPLASH:
         if (BG_GetWeaponDef(weapon)->projExplosion == WEAPPROJEXP_HEAVY)
             result = info->heavyExplosiveDamage == 0;
         else
             result = info->grenadeDamage == 0;
         break;
-    case 5:
+    case MOD_PROJECTILE:
         result = info->projectileDamage == 0;
         break;
-    case 6:
+    case MOD_PROJECTILE_SPLASH:
         result = info->projectileSplashDamage == 0;
         break;
-    case 14:
+    case MOD_EXPLOSIVE:
         result = 0;
         break;
     default:
@@ -908,8 +908,8 @@ void __cdecl InflictDamage(gentity_s *vehEnt, gentity_s *target, float *dir, int
         dir,
         target->r.currentOrigin,
         damage,
-        0,
-        9,
+        DAMAGE_NOFLAG,
+        MOD_CRUSH,
         0xFFFFFFFF,
         HITLOC_NONE,
         0,

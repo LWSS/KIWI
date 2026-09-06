@@ -990,7 +990,7 @@ void CompleteDvarArgument()
     dvarName = Con_TokenizeInput();
     dvar = Dvar_FindVar(dvarName);
     iassert(dvar);
-    if (dvar->type == 6)
+    if (dvar->type == DVAR_TYPE_ENUM)
     {
         dvarValuePrefix = Cmd_Argv(1);
         if (*dvarValuePrefix)

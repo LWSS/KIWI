@@ -814,6 +814,16 @@ enum pmflags_t : int // (MP/SP same)
 #endif
 };
 
+enum statIndex_t : __int32
+{
+    STAT_HEALTH = 0x0,
+    STAT_DEAD_YAW = 0x1,
+    STAT_MAX_HEALTH = 0x2,
+    STAT_IDENT_CLIENT_NUM = 0x3,
+    STAT_SPAWN_COUNT = 0x4,
+    MAX_STATS = 0x5,
+};
+
 #ifdef KISAK_MP
 enum pmtype_t : int
 {
@@ -897,7 +907,7 @@ struct playerState_s // sizeof=0x2F64
     int damageYaw;
     int damagePitch;
     int damageCount;
-    int stats[5];                       // XREF: SV_GetClientPositionAtTime(int,int,float * const)+E9/r
+    int stats[MAX_STATS];               // XREF: SV_GetClientPositionAtTime(int,int,float * const)+E9/r
     int ammo[128];
     int ammoclip[128];
     uint weapons[4];
@@ -1411,6 +1421,13 @@ enum VehicleMoveState : int
     VEH_MOVESTATE_HOVER = 0x2,
 };
 
+enum VehicleManualMode : int
+{
+    VEH_MANUAL_OFF = 0x0,
+    VEH_MANUAL_ON = 0x1,
+    VEH_MANUAL_TRANS = 0x2,
+};
+
 enum VehicleTurretState : int
 {                                       // ...
     VEH_TURRET_STOPPED = 0x0,
@@ -1472,7 +1489,7 @@ struct scr_vehicle_s // sizeof=0x354
     int drawOnCompass;
     uint16_t lookAtText0;
     uint16_t lookAtText1;
-    int manualMode;
+    VehicleManualMode manualMode;
     float manualSpeed;
     float manualAccel;
     float manualDecel;
@@ -1533,7 +1550,7 @@ struct scr_vehicle_s // sizeof=0x338
     int drawOnCompass;
     uint16_t lookAtText0;
     uint16_t lookAtText1;
-    int manualMode;
+    VehicleManualMode manualMode;
     float manualSpeed;
     float manualAccel;
     float manualDecel;

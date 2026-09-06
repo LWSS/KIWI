@@ -3,6 +3,7 @@
 #endif
 
 #include <universal/q_shared.h>
+#include <universal/surfaceflags.h>
 #include "cg_local_mp.h"
 #include "cg_public_mp.h"
 #include <script/scr_const.h>
@@ -525,14 +526,14 @@ void __cdecl SetupPoseControllers(int localClientNum, DObj_s *obj, centity_s *ce
                 Vec3Mad(wheelPos, 40.0, axis[2], traceStart);
                 scale = -suspTravel;
                 Vec3Mad(wheelPos, scale, axis[2], traceEnd);
-                CG_TraceCapsule(&trace, traceStart, (float *)vec3_origin, (float *)vec3_origin, traceEnd, ns->number, 529);
+                CG_TraceCapsule(&trace, traceStart, (float *)vec3_origin, (float *)vec3_origin, traceEnd, ns->number, CONTENTS_SOLID | CONTENTS_GLASS | CONTENTS_VEHICLECLIP);
                 v5 = CompressUnit(trace.fraction);
                 cent->pose.vehicle.wheelFraction[tireIdx] = v5;
                 if (tireIdx == cgameGlob->vehicleFrame % 4)
                 {
                     fxInfo->tireActive[tireIdx] = 1;
                     Vec3Lerp(traceStart, traceEnd, trace.fraction, fxInfo->tireGroundPoint[tireIdx]);
-                    fxInfo->tireGroundSurfType[tireIdx] = (trace.surfaceFlags & 0x1F00000) >> 20;
+                    fxInfo->tireGroundSurfType[tireIdx] = SURF_TYPEINDEX(trace.surfaceFlags);
                 }
             }
         }
@@ -681,7 +682,7 @@ void __cdecl VehicleFXTest(int localClientNum, const DObj_s *obj, centity_s *cen
             end[0] = v13;
             end[1] = v14;
             end[2] = v15;
-            CG_TraceCapsule(&trace, cent->currentState.pos.trBase, mins, maxs, end, entityNum, 2097);
+            CG_TraceCapsule(&trace, cent->currentState.pos.trBase, mins, maxs, end, entityNum, MASK_HELI_DUST_TRACE);
             nextDustInc = 1000;
             if (trace.fraction < 1.0)
             {
@@ -695,7 +696,7 @@ void __cdecl VehicleFXTest(int localClientNum, const DObj_s *obj, centity_s *cen
                     axis[0][1] = 0.0;
                     axis[0][2] = 1.0;
                     Vec3Basis_RightHanded(axis[0], axis[1], axis[2]);
-                    if ((FxMarksSystem *)(trace.surfaceFlags & 0x1F00000) == (FxMarksSystem *)&fx_marksSystemPool[0].pointGroups[930].pointGroup.points[0].xyz[2])
+                    if ((trace.surfaceFlags & SURF_TYPE_MASK) == SURF_TYPE_WATER)
                         fx = cgMedia.heliWaterEffect;
                     else
                         fx = cgMedia.heliDustEffect;
@@ -704,24 +705,24 @@ void __cdecl VehicleFXTest(int localClientNum, const DObj_s *obj, centity_s *cen
             }
             vehFx->nextDustFx = nextDustInc + Sys_Milliseconds();
         }
-        if (cent->nextState.un1.scale != 3 && vehFx->nextSmokeFx <= (signed int)Sys_Milliseconds())
+        if (cent->nextState.un1.scale != HELICOPTER_FULLHEALTH && vehFx->nextSmokeFx <= (signed int)Sys_Milliseconds())
         {
             v6.scale = (int)cent->nextState.un1;
-            switch (v6.scale)
+            switch (static_cast<HELICOPTER_STAGES>(v6.scale))
             {
-            case 0:
+            case HELICOPTER_ONFIRE:
                 fx = cgMedia.helicopterOnFire;
                 tag = scr_const.tag_engine_left;
                 DObjGetBoneIndex(obj, scr_const.tag_engine_left, &vehFx->tag_engine_left);
                 boneIndex = vehFx->tag_engine_left;
                 goto LABEL_59;
-            case 1:
+            case HELICOPTER_HEAVYSMOKE:
                 fx = cgMedia.helicopterHeavySmoke;
                 tag = scr_const.tag_engine_left;
                 DObjGetBoneIndex(obj, scr_const.tag_engine_left, &vehFx->tag_engine_left);
                 boneIndex = vehFx->tag_engine_left;
                 goto LABEL_59;
-            case 2:
+            case HELICOPTER_SMOKING:
                 fx = cgMedia.helicopterLightSmoke;
                 tag = scr_const.tag_engine_right;
                 DObjGetBoneIndex(obj, scr_const.tag_engine_right, &vehFx->tag_engine_right);
