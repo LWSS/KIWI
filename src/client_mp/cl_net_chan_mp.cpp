@@ -108,11 +108,11 @@ void __cdecl CL_Netchan_PrintProfileStats(int localClientNum, int bPrintToConsol
     iassert(net_profile->current.integer);
     CL_Netchan_UpdateProfileStats(localClientNum);
     if (bPrintToConsole)
-        Com_Printf(14, "\n\n");
+        Com_Printf(CON_CHANNEL_CLIENT, "\n\n");
     Com_sprintf(szLine, 0x400u, "====================");
     if (bPrintToConsole)
     {
-        Com_Printf(14, "%s\n", szLine);
+        Com_Printf(CON_CHANNEL_CLIENT, "%s\n", szLine);
     }
     else
     {
@@ -122,7 +122,7 @@ void __cdecl CL_Netchan_PrintProfileStats(int localClientNum, int bPrintToConsol
     Com_sprintf(szLine, 0x400u, "Client Network Profile:");
     if (bPrintToConsole)
     {
-        Com_Printf(14, "%s\n\n", szLine);
+        Com_Printf(CON_CHANNEL_CLIENT, "%s\n\n", szLine);
     }
     else
     {
@@ -133,7 +133,7 @@ void __cdecl CL_Netchan_PrintProfileStats(int localClientNum, int bPrintToConsol
     Com_sprintf(szLine, 0x400u, "      Source    bps   max   min frag%%");
     if (bPrintToConsole)
     {
-        Com_Printf(14, "%s\n", szLine);
+        Com_Printf(CON_CHANNEL_CLIENT, "%s\n", szLine);
     }
     else
     {
@@ -153,7 +153,7 @@ void __cdecl CL_Netchan_PrintProfileStats(int localClientNum, int bPrintToConsol
         clc->OOBProf.send.iSmallestPacket);
     if (bPrintToConsole)
     {
-        Com_Printf(14, "%s\n", szLine);
+        Com_Printf(CON_CHANNEL_CLIENT, "%s\n", szLine);
     }
     else
     {
@@ -169,7 +169,7 @@ void __cdecl CL_Netchan_PrintProfileStats(int localClientNum, int bPrintToConsol
         pStream->recieve.iSmallestPacket);
     if (bPrintToConsole)
     {
-        Com_Printf(14, "%s\n", szLine);
+        Com_Printf(CON_CHANNEL_CLIENT, "%s\n", szLine);
     }
     else
     {
@@ -189,7 +189,7 @@ void __cdecl CL_Netchan_PrintProfileStats(int localClientNum, int bPrintToConsol
         clc->netchan.prof.send.iFragmentPercentage);
     if (bPrintToConsole)
     {
-        Com_Printf(14, "%s\n", szLine);
+        Com_Printf(CON_CHANNEL_CLIENT, "%s\n", szLine);
     }
     else
     {
@@ -206,7 +206,7 @@ void __cdecl CL_Netchan_PrintProfileStats(int localClientNum, int bPrintToConsol
         pStream->recieve.iFragmentPercentage);
     if (bPrintToConsole)
     {
-        Com_Printf(14, "%s\n", szLine);
+        Com_Printf(CON_CHANNEL_CLIENT, "%s\n", szLine);
     }
     else
     {
@@ -216,7 +216,7 @@ void __cdecl CL_Netchan_PrintProfileStats(int localClientNum, int bPrintToConsol
     iTotalBPS = iTotalBPSRecieved + iTotalBPSSent;
     Com_sprintf(szLine, 0x400u, "       Total: %5i", iTotalBPSRecieved + iTotalBPSSent);
     if (bPrintToConsole)
-        Com_Printf(14, "%s\n", szLine);
+        Com_Printf(CON_CHANNEL_CLIENT, "%s\n", szLine);
     else
         CL_ProfDraw(iYPos + 10, szLine);
 }

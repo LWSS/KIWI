@@ -34,7 +34,7 @@ LABEL_2:
         {
             userData = (PhysObjUserData *)dBodyGetData(body0);
             if (userData->debugContacts)
-                Com_Printf(0, "Body0 flagged stuck due to normals %d and %d\n", contactIdx0, contactIdx1);
+                Com_Printf(CON_CHANNEL_DONT_FILTER, "Body0 flagged stuck due to normals %d and %d\n", contactIdx0, contactIdx1);
             iassert(userData);
             userData->state = PHYS_OBJ_STATE_STUCK;
         }
@@ -42,7 +42,7 @@ LABEL_2:
         {
             userDataa = (PhysObjUserData *)dBodyGetData(body1);
             if (userDataa->debugContacts)
-                Com_Printf(0, "Body1 flagged stuck due to normals %d and %d\n", contactIdx0, contactIdx1);
+                Com_Printf(CON_CHANNEL_DONT_FILTER, "Body1 flagged stuck due to normals %d and %d\n", contactIdx0, contactIdx1);
             if (!userDataa)
                 MyAssertHandler(".\\physics\\phys_contacts.cpp", 398, 0, "%s", "userData");
             userDataa->state = PHYS_OBJ_STATE_STUCK;
@@ -206,7 +206,7 @@ void __cdecl Phys_DumpGroups(const float (*centroid)[3])
 
     for (groupIter = 0; groupIter != 3; ++groupIter)
         Com_Printf(
-            0,
+            CON_CHANNEL_DONT_FILTER,
             "Group %i: N:%g %g %g\n",
             groupIter,
             (*centroid)[3 * groupIter],
@@ -220,7 +220,7 @@ void __cdecl Phys_DumpContacts(const ContactList *contacts, const int *group)
 
     for (contactIter = 0; contactIter != contacts->contactCount; ++contactIter)
         Com_Printf(
-            0,
+            CON_CHANNEL_DONT_FILTER,
             "Contact %i: G:%i, P:(%g %g %g), N:(%g %g %g), D:%g\n",
             contactIter,
             group[contactIter],
@@ -248,7 +248,7 @@ void __cdecl Phys_MergeGroups(const ContactList *contacts, float (*centroid)[3],
             if (dot > 0.9990000128746033)
             {
                 if (physGlob.dumpContacts)
-                    Com_Printf(0, "Group %i merged into %i.\n", groupIter2, groupIter);
+                    Com_Printf(CON_CHANNEL_DONT_FILTER, "Group %i merged into %i.\n", groupIter2, groupIter);
                 for (contactIter = 0; contactIter != contacts->contactCount; ++contactIter)
                 {
                     if (group[contactIter] == groupIter2)
@@ -440,7 +440,7 @@ void __cdecl Phys_DebugDrawContactPoint(const float *pos, const float *normal, f
 void __cdecl Phys_DumpContact(int contactNum, const dContactGeom *contact)
 {
     Com_Printf(
-        0,
+        CON_CHANNEL_DONT_FILTER,
         "Contact %i: P:(%g %g %g), N:(%g %g %g), D:%g\n",
         contactNum,
         contact->pos[0],
@@ -515,7 +515,7 @@ void __cdecl Phys_CreateJointForEachContact(
     }
     if (debug)
     {
-        Com_Printf(0, "Pre Oppose Check:\n");
+        Com_Printf(CON_CHANNEL_DONT_FILTER, "Pre Oppose Check:\n");
         for (contactIter = 0; contactIter != contactList->contactCount; ++contactIter)
             Phys_DumpContact(contactIter, &contactList->contacts[contactIter].contact);
     }
@@ -528,7 +528,7 @@ void __cdecl Phys_CreateJointForEachContact(
         Phys_RemoveOpposingNormalContacts(pos[1], contactList);
     }
     if (debug)
-        Com_Printf(0, "Final Contacts:\n");
+        Com_Printf(CON_CHANNEL_DONT_FILTER, "Final Contacts:\n");
     for (contactIter = 0; contactIter != contactList->contactCount; ++contactIter)
     {
         contact = &contactList->contacts[contactIter].contact;
@@ -548,7 +548,7 @@ void __cdecl Phys_CreateJointForEachContact(
             {
                 pz = Vec3Dot(pointVel, contact->normal);
                 Com_Printf(
-                    0,
+                    CON_CHANNEL_DONT_FILTER,
                     "Killing contact %d, pointvel %f %f %f dot %f\n",
                     contactIter,
                     pointVel[0],
@@ -566,7 +566,7 @@ void __cdecl Phys_CreateJointForEachContact(
             {
                 pza = Vec3Dot(pointVel, contact->normal);
                 Com_Printf(
-                    0,
+                    CON_CHANNEL_DONT_FILTER,
                     "Killing contact %d, pointvel %f %f %f dot %f\n",
                     contactIter,
                     pointVel[0],
@@ -592,7 +592,7 @@ void __cdecl Phys_CreateJointForEachContact(
                 if (!joint)
                 {
                 LABEL_55:
-                    Com_PrintWarning(21, "Maximum number of ODE physics contact points exceeded.\n");
+                    Com_PrintWarning(CON_CHANNEL_FX, "Maximum number of ODE physics contact points exceeded.\n");
                     return;
                 }
                 if (debug)

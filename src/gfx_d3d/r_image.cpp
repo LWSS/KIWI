@@ -242,7 +242,7 @@ void __cdecl Image_SetupRenderTarget(
 {
     iassert(image);
     iassert(image->semantic == TS_2D);
-    Image_SetupAndLoad(image, width, height, 1, 131075, imageFormat);
+    Image_SetupAndLoad(image, width, height, 1, IMG_FLAG_NOPICMIP | IMG_FLAG_NOMIPMAPS | IMG_FLAG_RENDER_TARGET, imageFormat);
 }
 
 void __cdecl Load_Texture(GfxTexture *remoteLoadDef, GfxImage *image)
@@ -329,7 +329,7 @@ void __cdecl Load_Texture(GfxTexture *remoteLoadDef, GfxImage *image)
             }
             iassert(data == &loadDef->data[loadDef->resourceSize]);
         }
-        else if (image->category == 5)
+        else if (image->category == IMG_CATEGORY_WATER)
         {
             image->delayLoadPixels = 0;
             if (loadDef->dimensions[0] >> r_picmip_water->current.integer < 4)
@@ -423,13 +423,13 @@ char __cdecl Image_ValidateHeader(GfxImageFileHeader *imageFile, const char *fil
         }
         else
         {
-            Com_PrintError(8, "ERROR: image '%s' is version %i but should be version %i\n", filepath, imageFile->version, 6);
+            Com_PrintError(CON_CHANNEL_GFX, "ERROR: image '%s' is version %i but should be version %i\n", filepath, imageFile->version, 6);
             return 0;
         }
     }
     else
     {
-        Com_PrintError(8, "ERROR: image '%s' is not an IW image\n", filepath);
+        Com_PrintError(CON_CHANNEL_GFX, "ERROR: image '%s' is not an IW image\n", filepath);
         return 0;
     }
 }
@@ -439,7 +439,7 @@ uint __cdecl Image_CountMipmaps(char imageFlags, uint width, uint height, uint d
     uint mipRes; // [esp+0h] [ebp-8h]
     uint mipCount; // [esp+4h] [ebp-4h]
 
-    if ((imageFlags & 2) != 0)
+    if ((imageFlags & IMG_FLAG_NOMIPMAPS) != 0)
         return 1;
     mipCount = 1;
     for (mipRes = 1; mipRes < width || mipRes < height || mipRes < depth; mipRes *= 2)
@@ -544,14 +544,14 @@ GfxImage *__cdecl Image_LoadBuiltin(char *name, uint8_t semantic, uint8_t imageT
     {
         if (tableIndex >= 8)
         {
-            Com_PrintError(8, "ERROR: Unknown built-in image '%s'", name);
+            Com_PrintError(CON_CHANNEL_GFX, "ERROR: Unknown built-in image '%s'", name);
             return 0;
         }
         if (!strcmp(constructorTable[tableIndex].name, name))
             break;
     }
 
-    image = Image_Alloc(name, 1u, semantic, imageTrack);
+    image = Image_Alloc(name, IMG_CATEGORY_AUTO_GENERATED, semantic, imageTrack);
     iassert(image);
     constructorTable[tableIndex].LoadCallback(image);
     return image;
@@ -664,7 +664,7 @@ void __cdecl R_SetPicmip()
     iassert( r_reflectionProbeGenerate );
     if (r_reflectionProbeGenerate->current.enabled)
     {
-        Com_Printf(8, "Picmip is set to lowest quality for generating reflections.\n");
+        Com_Printf(CON_CHANNEL_GFX, "Picmip is set to lowest quality for generating reflections.\n");
         imageGlobals.picmip = 2;
         imageGlobals.picmipBump = 2;
         imageGlobals.picmipSpec = 2;
@@ -673,14 +673,14 @@ void __cdecl R_SetPicmip()
     {
         if (r_picmip_manual->current.enabled)
         {
-            Com_Printf(8, "Picmip is set manually.\n");
+            Com_Printf(CON_CHANNEL_GFX, "Picmip is set manually.\n");
             imageGlobals.picmip = r_picmip->current.integer;
             imageGlobals.picmipBump = r_picmip_bump->current.integer;
             imageGlobals.picmipSpec = r_picmip_spec->current.integer;
         }
         else
         {
-            Com_Printf(8, "Texture detail is set automatically.\n");
+            Com_Printf(CON_CHANNEL_GFX, "Texture detail is set automatically.\n");
             if (texMemInMegs < 0x1C2)
             {
                 if (texMemInMegs < 0x12C)
@@ -725,7 +725,7 @@ void __cdecl R_SetPicmip()
                 }
                 if (cappedPicmip)
                     Com_Printf(
-                        8,
+                        CON_CHANNEL_GFX,
                         "Reducing texture detail based on total system memory of %i MB to improve load times.\n",
                         sysMemInMegs);
             }
@@ -736,7 +736,7 @@ void __cdecl R_SetPicmip()
         if (!r_specular->current.enabled || !r_rendererInUse->current.integer)
             imageGlobals.picmipSpec = 3;
         Com_Printf(
-            8,
+            CON_CHANNEL_GFX,
             "Using picmip %i on most textures, %i on normal maps, and %i on specular maps\n",
             imageGlobals.picmip,
             imageGlobals.picmipBump,
@@ -746,7 +746,7 @@ void __cdecl R_SetPicmip()
 
 void R_InitRawImage()
 {
-    rgp.rawImage = Image_AllocProg(11, 4u, 0);
+    rgp.rawImage = Image_AllocProg(11, IMG_CATEGORY_RAW, TS_2D);
     iassert(rgp.rawImage);
 }
 
@@ -777,19 +777,19 @@ bool __cdecl Image_IsCodeImage(int track)
 
 void R_InitCodeImages()
 {
-    rgp.whiteImage = Image_Register("$white", 1u, 0);
+    rgp.whiteImage = Image_Register("$white", TS_FUNCTION, 0);
     iassert(rgp.whiteImage);
-    rgp.blackImage = Image_Register("$black", 1u, 0);
+    rgp.blackImage = Image_Register("$black", TS_FUNCTION, 0);
     iassert(rgp.blackImage);
-    rgp.blackImage3D = Image_Register("$black_3d", 1u, 0);
+    rgp.blackImage3D = Image_Register("$black_3d", TS_FUNCTION, 0);
     iassert(rgp.blackImage3D);
-    rgp.blackImageCube = Image_Register("$black_cube", 1u, 0);
+    rgp.blackImageCube = Image_Register("$black_cube", TS_FUNCTION, 0);
     iassert(rgp.blackImageCube);
-    rgp.grayImage = Image_Register("$gray", 1u, 0);
+    rgp.grayImage = Image_Register("$gray", TS_FUNCTION, 0);
     iassert(rgp.grayImage);
-    rgp.identityNormalMapImage = Image_Register("$identitynormalmap", 1u, 0);
+    rgp.identityNormalMapImage = Image_Register("$identitynormalmap", TS_FUNCTION, 0);
     iassert(rgp.identityNormalMapImage);
-    rgp.pixelCostColorCodeImage = Image_Register("$pixelcostcolorcode", 1u, 0);
+    rgp.pixelCostColorCodeImage = Image_Register("$pixelcostcolorcode", TS_FUNCTION, 0);
     iassert(rgp.pixelCostColorCodeImage);
 }
 
@@ -826,7 +826,7 @@ void __cdecl R_LoadCaseTextures()
         GfxImage *image = Image_FindExisting(pi->token);
         if (!image)
         {
-            image = Image_Register(pi->token, 2u, 1);
+            image = Image_Register(pi->token, TS_COLOR_MAP, 1);
             // Image_Register already logs "ERROR: failed to load image" on miss.
         }
         rgp.caseTextures[rgp.caseTextures_count] = image;
@@ -882,14 +882,14 @@ void __cdecl R_ImageList_f()
     //    (signed int)(4 * imageList.count) >> 2,
     //    imagecompare);
     std::sort(&imageList.image[0], &imageList.image[imageList.count], imagecompare);
-    Com_Printf(8, "\n-fmt- -dimension-");
+    Com_Printf(CON_CHANNEL_GFX, "\n-fmt- -dimension-");
     for (j = 0; j < 2; ++j)
-        Com_Printf(8, "%s", g_platform_name[j]);
-    Com_Printf(8, "  --name-------\n");
+        Com_Printf(CON_CHANNEL_GFX, "%s", g_platform_name[j]);
+    Com_Printf(CON_CHANNEL_GFX, "  --name-------\n");
     for (i = 0; i < imageList.count; ++i)
     {
         image = imageList.image[i];
-        Com_Printf(8, "%4i x %-4i ", image->width, image->height);
+        Com_Printf(CON_CHANNEL_GFX, "%4i x %-4i ", image->width, image->height);
         v1 = R_ImagePixelFormat(image);
         v9 = v1;
         if (v1 > D3DFMT_A8L8)
@@ -898,7 +898,7 @@ void __cdecl R_ImageList_f()
             {
                 if (v1 == D3DFMT_DXT5)
                 {
-                    Com_Printf(8, "DXT5  ");
+                    Com_Printf(CON_CHANNEL_GFX, "DXT5  ");
                     goto LABEL_36;
                 }
             }
@@ -907,13 +907,13 @@ void __cdecl R_ImageList_f()
                 switch (v1)
                 {
                 case D3DFMT_DXT3:
-                    Com_Printf(8, "DXT3  ");
+                    Com_Printf(CON_CHANNEL_GFX, "DXT3  ");
                     goto LABEL_36;
                 case D3DFMT_R32F:
-                    Com_Printf(8, "R32F  ");
+                    Com_Printf(CON_CHANNEL_GFX, "R32F  ");
                     goto LABEL_36;
                 case D3DFMT_DXT1:
-                    Com_Printf(8, "DXT1  ");
+                    Com_Printf(CON_CHANNEL_GFX, "DXT1  ");
                     goto LABEL_36;
                 }
             }
@@ -926,30 +926,30 @@ void __cdecl R_ImageList_f()
         }
         else if (v1 == D3DFMT_A8L8)
         {
-            Com_Printf(8, "AL16  ");
+            Com_Printf(CON_CHANNEL_GFX, "AL16  ");
         }
         else
         {
             switch (v1)
             {
             case D3DFMT_A8R8G8B8:
-                Com_Printf(8, "RGBA32");
+                Com_Printf(CON_CHANNEL_GFX, "RGBA32");
                 break;
             case D3DFMT_X8R8G8B8:
-                Com_Printf(8, "RGB32 ");
+                Com_Printf(CON_CHANNEL_GFX, "RGB32 ");
                 break;
             case D3DFMT_A8:
-                Com_Printf(8, "A8    ");
+                Com_Printf(CON_CHANNEL_GFX, "A8    ");
                 break;
             case D3DFMT_L8:
-                Com_Printf(8, "L8    ");
+                Com_Printf(CON_CHANNEL_GFX, "L8    ");
                 break;
             default:
                 goto LABEL_34;
             }
         }
     LABEL_36:
-        Com_Printf(8, "  %s", imageTypeName[image->track]);
+        Com_Printf(CON_CHANNEL_GFX, "  %s", imageTypeName[image->track]);
         for (j = 0; j < 2; ++j)
         {
             v13 = (double)image->cardMemory.platform[j] / 1024.0;
@@ -957,7 +957,7 @@ void __cdecl R_ImageList_f()
                 fmt = "%7.0fk";
             else
                 fmt = "%7.1fk";
-            Com_Printf(8, fmt, v13);
+            Com_Printf(CON_CHANNEL_GFX, fmt, v13);
             v5 = image->cardMemory.platform[j];
             if (!IsFastFileLoad())
             {
@@ -967,28 +967,28 @@ void __cdecl R_ImageList_f()
             }
             v8[j] += v5;
         }
-        Com_Printf(8, "  %s\n", image->name);
+        Com_Printf(CON_CHANNEL_GFX, "  %s\n", image->name);
     }
-    Com_Printf(8, " ---------\n");
-    Com_Printf(8, " %i total images\n", imageList.count);
+    Com_Printf(CON_CHANNEL_GFX, " ---------\n");
+    Com_Printf(CON_CHANNEL_GFX, " %i total images\n", imageList.count);
     for (j = 0; j < 2; ++j)
-        Com_Printf(8, " %5.1f MB %s total image size\n", (double)(int)v8[j] / 1048576.0, g_platform_name[j]);
+        Com_Printf(CON_CHANNEL_GFX, " %5.1f MB %s total image size\n", (double)(int)v8[j] / 1048576.0, g_platform_name[j]);
     if (!IsFastFileLoad())
     {
-        Com_Printf(8, "\n");
-        Com_Printf(8, "       ");
+        Com_Printf(CON_CHANNEL_GFX, "\n");
+        Com_Printf(CON_CHANNEL_GFX, "       ");
         for (j = 0; j < 2; ++j)
-            Com_Printf(8, "%s", g_platform_name[j]);
-        Com_Printf(8, "\n");
+            Com_Printf(CON_CHANNEL_GFX, "%s", g_platform_name[j]);
+        Com_Printf(CON_CHANNEL_GFX, "\n");
         for (i = 0; i < 0xA; ++i)
         {
-            Com_Printf(8, "%s:", imageTypeName[i]);
+            Com_Printf(CON_CHANNEL_GFX, "%s:", imageTypeName[i]);
             for (j = 0; j < 2; ++j)
-                Com_Printf(8, "  %5.1f", (double)*(int *)&dst[8 * i + 4 * j] / 1048576.0);
-            Com_Printf(8, "  MB\n");
+                Com_Printf(CON_CHANNEL_GFX, "  %5.1f", (double)*(int *)&dst[8 * i + 4 * j] / 1048576.0);
+            Com_Printf(CON_CHANNEL_GFX, "  MB\n");
         }
     }
-    Com_Printf(8, "Related commands: meminfo, imagelist, gfx_world, gfx_model, cg_drawfps, com_statmon, tempmeminfo\n");
+    Com_Printf(CON_CHANNEL_GFX, "Related commands: meminfo, imagelist, gfx_world, gfx_model, cg_drawfps, com_statmon, tempmeminfo\n");
 }
 
 bool __cdecl imagecompare(GfxImage *image1, GfxImage *image2)
@@ -1006,7 +1006,7 @@ void __cdecl R_FreeLostImage(XAssetHeader header)
     iassert( image );
     iassert( image->category != IMG_CATEGORY_UNKNOWN );
 
-    if (image->category >= 5)
+    if (image->category >= IMG_CATEGORY_FIRST_UNMANAGED)
         Image_Release(header.image);
 }
 
@@ -1044,9 +1044,9 @@ char __cdecl Image_AssignDefaultTexture(GfxImage *image)
 #endif
     if (image->mapType != MAPTYPE_2D)
         return 0;
-    if (image->semantic == 5)
+    if (image->semantic == TS_NORMAL_MAP)
         return R_DuplicateTexture(image, rgp.identityNormalMapImage);
-    if (image->semantic == 8)
+    if (image->semantic == TS_SPECULAR_MAP)
         return R_DuplicateTexture(image, rgp.blackImage);
     return R_DuplicateTexture(image, rgp.whiteImage);
 }
@@ -1061,11 +1061,11 @@ void __cdecl Image_Rebuild(GfxImage *image)
     iassert( image->category >= IMG_CATEGORY_FIRST_UNMANAGED );
     iassert( !image->texture.basemap );
     category = image->category;
-    if (category == 5)
+    if (category == IMG_CATEGORY_WATER)
     {
         Image_BuildWaterMap(image);
     }
-    else if (category == 6)
+    else if (category == IMG_CATEGORY_RENDERTARGET)
     {
         if (!alwaysfails)
             MyAssertHandler(".\\r_image.cpp", 905, 1, "non-prog image cannot be a render target");
@@ -1086,9 +1086,9 @@ void __cdecl R_RebuildLostImage(XAssetHeader header)
 
     if (!image->texture.basemap)
     {
-        if (image->category < 5)
+        if (image->category < IMG_CATEGORY_FIRST_UNMANAGED)
         {
-            if (image->category == 3)
+            if (image->category == IMG_CATEGORY_LOAD_FROM_FILE)
             {
                 if (!image->delayLoadPixels && !Image_ReloadFromFile(image) && !Image_AssignDefaultTexture(image))
                     Com_Error(ERR_DROP, "Couldn't load image '%s' to recover from a lost device", image->name);
@@ -1226,7 +1226,7 @@ void __cdecl Image_Create3DTexture_PC(
     image->depth = depth;
     image->mapType = MAPTYPE_3D;
     usage = Image_GetUsage(imageFlags, imageFormat);
-    if ((imageFlags & 0x40000) != 0)
+    if ((imageFlags & IMG_FLAG_SYSTEMMEM) != 0)
     {
         v7 = dx.device->CreateVolumeTexture(width, height, depth, mipmapCount, 0, imageFormat, D3DPOOL_SYSTEMMEM, (IDirect3DVolumeTexture9 **)&image->texture, 0);
     }
@@ -1290,7 +1290,7 @@ void __cdecl Image_UpdatePicmip(GfxImage *image)
     Picmip picmip; // [esp+0h] [ebp-4h] BYREF
 
     iassert( image );
-    if (image->category == 3 && !image->noPicmip)
+    if (image->category == IMG_CATEGORY_LOAD_FROM_FILE && !image->noPicmip)
     {
         Image_GetPicmip(image, &picmip);
         if (image->picmip.platform[0] != picmip.platform[0])
@@ -1320,7 +1320,7 @@ void __cdecl Image_Create2DTexture_PC(
     image->depth = 1;
     image->mapType = MAPTYPE_2D;
     usage = Image_GetUsage(imageFlags, imageFormat);
-    if ((imageFlags & 0x40000) != 0)
+    if ((imageFlags & IMG_FLAG_SYSTEMMEM) != 0)
         v6 = dx.device->CreateTexture(
             width,
             height,
@@ -1422,7 +1422,7 @@ void __cdecl R_UpdateMipMap()
 }
 
 // idb R_ReloadImages @ 0x513D70.  The binary iterates a flat imageGlobals[32768]
-// GfxImage* array and reloads every loose-file (category==3) image from disk.  Kisak's
+// GfxImage* array and reloads every loose-file (IMG_CATEGORY_LOAD_FROM_FILE) image from disk.  Kisak's
 // imageGlobals.imageHashTable[IMAGE_HASH_TABLE_SIZE] (IMAGE_HASH_TABLE_SIZE==0x8000 in
 // the editor build) IS that same 32768-slot GfxImage* array — the "flat array vs struct"
 // divergence was illusory (the struct's first member is the 32768-entry table).  So the

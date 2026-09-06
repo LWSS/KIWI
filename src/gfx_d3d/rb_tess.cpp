@@ -135,7 +135,7 @@ uint __cdecl R_TessCodeMeshList(const GfxDrawSurfListArgs *listArgs, GfxCmdBufCo
         R_ChangeObjectPlacement(context.source, &rg.identityPlacement);
     R_ChangeDepthHackNearClip(context.source, 0);
     R_SetVertexDeclTypeNormal(context.state, VERTDECL_PACKED);
-    depthRangeType = (GfxDepthRangeType)((context.source->cameraView != 0) - 1);
+    depthRangeType = context.source->cameraView ? GFX_DEPTH_RANGE_SCENE : GFX_DEPTH_RANGE_FULL;
     if (depthRangeType != context.state->depthRangeType)
         R_ChangeDepthRange(context.state, depthRangeType);
     data = context.source->input.data;
@@ -315,7 +315,7 @@ uint __cdecl R_TessMarkMeshList(const GfxDrawSurfListArgs *listArgs, GfxCmdBufCo
     v7 = markType == 64 || markType == 192;
     declType = (MaterialVertexDeclType)(2 - v7);
     R_SetVertexDeclTypeNormal(context.state, declType);
-    depthRangeType = (GfxDepthRangeType)((context.source->cameraView != 0) - 1);
+    depthRangeType = context.source->cameraView ? GFX_DEPTH_RANGE_SCENE : GFX_DEPTH_RANGE_FULL;
     if (depthRangeType != context.state->depthRangeType)
         R_ChangeDepthRange(context.state, depthRangeType);
     R_SetMeshStream(context.state, (GfxMeshData*)&data->markMesh);
@@ -467,7 +467,7 @@ uint __cdecl R_TessParticleCloudList(const GfxDrawSurfListArgs *listArgs, GfxCmd
     R_SetupPassCriticalPixelShaderArgs(context);
     R_ChangeDepthHackNearClip(commonSource, 0);
     R_SetVertexDeclTypeNormal(context.state, VERTDECL_POS_TEX);
-    depthRangeType = (GfxDepthRangeType)((context.source->cameraView != 0) - 1);
+    depthRangeType = context.source->cameraView ? GFX_DEPTH_RANGE_SCENE : GFX_DEPTH_RANGE_FULL;
     if (depthRangeType != context.state->depthRangeType)
         R_ChangeDepthRange(context.state, depthRangeType);
     if (context.state->prim.indexBuffer != gfxBuf.particleCloudIndexBuffer)
@@ -1015,7 +1015,7 @@ uint __cdecl R_TessStaticModelCachedList(const GfxDrawSurfListArgs *listArgs, Gf
     if (commonSource->objectPlacement != &rg.identityPlacement)
         R_ChangeObjectPlacement(commonSource, &rg.identityPlacement);
     R_SetVertexDeclTypeNormal(context.state, VERTDECL_STATICMODELCACHE);
-    depthRangeType = (GfxDepthRangeType)((context.source->cameraView != 0) - 1);
+    depthRangeType = context.source->cameraView ? GFX_DEPTH_RANGE_SCENE : GFX_DEPTH_RANGE_FULL;
     if (depthRangeType != context.state->depthRangeType)
         R_ChangeDepthRange(context.state, depthRangeType);
     primDrawSurfPos = &commonSource->input.data->primDrawSurfsBuf[info->drawSurfs[listArgs->firstDrawSurfIndex].fields.objectId];
@@ -1083,7 +1083,7 @@ uint __cdecl R_TessStaticModelPreTessList(const GfxDrawSurfListArgs *listArgs, G
     if (commonSource->objectPlacement != &rg.identityPlacement)
         R_ChangeObjectPlacement(commonSource, &rg.identityPlacement);
     R_SetVertexDeclTypeNormal(context.state, VERTDECL_STATICMODELCACHE);
-    depthRangeType = (GfxDepthRangeType)((context.source->cameraView != 0) - 1);
+    depthRangeType = context.source->cameraView ? GFX_DEPTH_RANGE_SCENE : GFX_DEPTH_RANGE_FULL;
     if (depthRangeType != context.state->depthRangeType)
         R_ChangeDepthRange(context.state, depthRangeType);
     primDrawSurfPos = &commonSource->input.data->primDrawSurfsBuf[info->drawSurfs[listArgs->firstDrawSurfIndex].fields.objectId];
@@ -1123,7 +1123,7 @@ uint __cdecl R_TessStaticModelSkinnedDrawSurfList(
     commonSource->objectPlacement = &s_manualObjectPlacement;
     R_ChangeDepthHackNearClip(commonSource, 0);
     R_SetVertexDeclTypeNormal(context.state, VERTDECL_PACKED);
-    depthRangeType = (GfxDepthRangeType)((context.source->cameraView != 0) - 1);
+    depthRangeType = context.source->cameraView ? GFX_DEPTH_RANGE_SCENE : GFX_DEPTH_RANGE_FULL;
     if (depthRangeType != context.state->depthRangeType)
         R_ChangeDepthRange(context.state, depthRangeType);
     primDrawSurfPos = &commonSource->input.data->primDrawSurfsBuf[info->drawSurfs[listArgs->firstDrawSurfIndex].fields.objectId];
@@ -1166,14 +1166,14 @@ uint __cdecl R_TessStaticModelRigidDrawSurfList(
     commonSource->objectPlacement = &s_manualObjectPlacement;
     R_ChangeDepthHackNearClip(commonSource, 0);
     R_SetVertexDeclTypeNormal(context.state, VERTDECL_PACKED);
-    depthRangeType = (GfxDepthRangeType)((context.source->cameraView != 0) - 1);
+    depthRangeType = context.source->cameraView ? GFX_DEPTH_RANGE_SCENE : GFX_DEPTH_RANGE_FULL;
     if (depthRangeType != context.state->depthRangeType)
         R_ChangeDepthRange(context.state, depthRangeType);
     if (prepassContext.state)
     {
         R_SetupPassCriticalPixelShaderArgs(prepassContext);
         R_SetVertexDeclTypeNormal(prepassContext.state, VERTDECL_PACKED);
-        v4 = (GfxDepthRangeType)((prepassContext.source->cameraView != 0) - 1);
+        v4 = prepassContext.source->cameraView ? GFX_DEPTH_RANGE_SCENE : GFX_DEPTH_RANGE_FULL;
         if (v4 != prepassContext.state->depthRangeType)
             R_ChangeDepthRange(prepassContext.state, v4);
     }
@@ -1331,7 +1331,7 @@ uint __cdecl R_TessTrianglesPreTessList(const GfxDrawSurfListArgs *listArgs, Gfx
         R_ChangeObjectPlacement(commonSource, &rg.identityPlacement);
     R_ChangeDepthHackNearClip(commonSource, 0);
     R_SetVertexDeclTypeWorld(context.state);
-    depthRangeType = (GfxDepthRangeType)((context.source->cameraView != 0) - 1);
+    depthRangeType = context.source->cameraView ? GFX_DEPTH_RANGE_SCENE : GFX_DEPTH_RANGE_FULL;
     if (depthRangeType != context.state->depthRangeType)
         R_ChangeDepthRange(context.state, depthRangeType);
     data = commonSource->input.data;
@@ -1371,7 +1371,7 @@ uint __cdecl R_TessTrianglesList(const GfxDrawSurfListArgs *listArgs, GfxCmdBufC
 
     R_ChangeDepthHackNearClip(commonSource, 0);
     R_SetVertexDeclTypeWorld(context.state);
-    depthRangeType = (GfxDepthRangeType)((context.source->cameraView != 0) - 1);
+    depthRangeType = context.source->cameraView ? GFX_DEPTH_RANGE_SCENE : GFX_DEPTH_RANGE_FULL;
     if (depthRangeType != context.state->depthRangeType)
         R_ChangeDepthRange(context.state, depthRangeType);
 
@@ -1379,7 +1379,7 @@ uint __cdecl R_TessTrianglesList(const GfxDrawSurfListArgs *listArgs, GfxCmdBufC
     {
         R_SetupPassCriticalPixelShaderArgs(prepassContext);
         R_SetVertexDeclTypeWorld(prepassContext.state);
-        v3 = (GfxDepthRangeType)((prepassContext.source->cameraView != 0) - 1);
+        v3 = prepassContext.source->cameraView ? GFX_DEPTH_RANGE_SCENE : GFX_DEPTH_RANGE_FULL;
         if (v3 != prepassContext.state->depthRangeType)
             R_ChangeDepthRange(prepassContext.state, v3);
     }
@@ -1463,7 +1463,7 @@ uint __cdecl R_TessBModel(const GfxDrawSurfListArgs *listArgs, GfxCmdBufContext 
 
     R_ChangeDepthHackNearClip(commonSource, 0);
     R_SetVertexDeclTypeWorld(context.state);
-    depthRangeType = (GfxDepthRangeType)((context.source->cameraView != 0) - 1);
+    depthRangeType = context.source->cameraView ? GFX_DEPTH_RANGE_SCENE : GFX_DEPTH_RANGE_FULL;
     if (depthRangeType != context.state->depthRangeType)
         R_ChangeDepthRange(context.state, depthRangeType);
 
@@ -1471,7 +1471,7 @@ uint __cdecl R_TessBModel(const GfxDrawSurfListArgs *listArgs, GfxCmdBufContext 
     {
         R_SetupPassCriticalPixelShaderArgs(prepassContext);
         R_SetVertexDeclTypeWorld(prepassContext.state);
-        v3 = (GfxDepthRangeType)((prepassContext.source->cameraView != 0) - 1);
+        v3 = prepassContext.source->cameraView ? GFX_DEPTH_RANGE_SCENE : GFX_DEPTH_RANGE_FULL;
         if (v3 != prepassContext.state->depthRangeType)
             R_ChangeDepthRange(prepassContext.state, v3);
         R_SetupPassPerObjectArgs(prepassContext);

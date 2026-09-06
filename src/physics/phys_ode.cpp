@@ -519,7 +519,7 @@ dxBody *__cdecl Phys_CreateBodyFromState(PhysWorld worldIndex, const BodyState *
     }
     else
     {
-        Com_PrintWarning(20, "Maximum number of physics bodies exceeded (more than %i)\n", 512);
+        Com_PrintWarning(CON_CHANNEL_PHYS, "Maximum number of physics bodies exceeded (more than %i)\n", 512);
         return 0;
     }
 }
@@ -570,7 +570,7 @@ void __cdecl Phys_BodyAddGeomAndSetMass(
             geomState->u.cylinderState.radius,
             geomState->u.cylinderState.halfHeight);
         if (!geom)
-            Com_PrintWarning(20, "Maximum number of physics geoms exceeded\n");
+            Com_PrintWarning(CON_CHANNEL_PHYS, "Maximum number of physics geoms exceeded\n");
         break;
     case PHYS_GEOM_BRUSHMODEL:
         Phys_MassSetBrushTotal(
@@ -584,7 +584,7 @@ void __cdecl Phys_BodyAddGeomAndSetMass(
             geomState->u.brushState.u.brushModel,
             centerOfMass);
         if (!geom)
-            Com_PrintWarning(20, "Maximum number of physics geoms exceeded\n");
+            Com_PrintWarning(CON_CHANNEL_PHYS, "Maximum number of physics geoms exceeded\n");
         break;
     case PHYS_GEOM_BRUSH:
         Phys_MassSetBrushTotal(
@@ -594,7 +594,7 @@ void __cdecl Phys_BodyAddGeomAndSetMass(
             geomState->u.brushState.productsOfInertia);
         geom = Phys_CreateBrushGeom(physGlob.space[worldIndex], body, geomState->u.brushState.u.brush, centerOfMass);
         if (!geom)
-            Com_PrintWarning(20, "Maximum number of physics geoms exceeded\n");
+            Com_PrintWarning(CON_CHANNEL_PHYS, "Maximum number of physics geoms exceeded\n");
         break;
     case PHYS_GEOM_CYLINDER:
         dMassSetCylinderTotal(
@@ -605,7 +605,7 @@ void __cdecl Phys_BodyAddGeomAndSetMass(
             geomState->u.cylinderState.halfHeight);
         geom = Phys_CreateCylinderGeom(physGlob.space[worldIndex], body, &geomState->u.cylinderState);
         if (!geom)
-            Com_PrintWarning(20, "Maximum number of physics geoms exceeded\n");
+            Com_PrintWarning(CON_CHANNEL_PHYS, "Maximum number of physics geoms exceeded\n");
         break;
     case PHYS_GEOM_CAPSULE:
         dMassSetCappedCylinderTotal(
@@ -616,7 +616,7 @@ void __cdecl Phys_BodyAddGeomAndSetMass(
             geomState->u.cylinderState.halfHeight);
         geom = Phys_CreateCapsuleGeom(physGlob.space[worldIndex], body, &geomState->u.cylinderState);
         if (!geom)
-            Com_PrintWarning(20, "Maximum number of physics geoms exceeded\n");
+            Com_PrintWarning(CON_CHANNEL_PHYS, "Maximum number of physics geoms exceeded\n");
         break;
     default:
         if (!alwaysfails)
@@ -633,7 +633,7 @@ void __cdecl Phys_BodyAddGeomAndSetMass(
         }
         else
         {
-            Com_PrintError(20, "Maximum number of physics geoms exceeded\n");
+            Com_PrintError(CON_CHANNEL_PHYS, "Maximum number of physics geoms exceeded\n");
         }
     }
     dBodySetMass(body, &mass);
@@ -1041,7 +1041,7 @@ void __cdecl Phys_ObjSetCollisionFromXModel(const XModel *model, PhysWorld world
             {
                 Phys_ObjAddGeomBrush(worldIndex, physId, (const cbrush_t *)geom->brush, &geomList->mass);
             }
-            else if (geom->type == 1)
+            else if (geom->type == PHYS_GEOM_BOX)
             {
                 Phys_ObjAddGeomBoxRotated(worldIndex, physId, geom->offset, geom->halfLengths, geom->orientation);
             }
@@ -1162,14 +1162,14 @@ int __cdecl Phys_IndexFromODEWorld(dxWorld *world)
 {
     int worldIndex; // [esp+0h] [ebp-4h]
 
-    for (worldIndex = 0; worldIndex < 3; ++worldIndex)
+    for (worldIndex = PHYS_WORLD_DYNENT; worldIndex < PHYS_WORLD_COUNT; ++worldIndex)
     {
         if (world == physGlob.world[worldIndex])
             return worldIndex;
     }
     if (!alwaysfails)
         MyAssertHandler("c:\\trees\\cod3\\src\\physics\\phys_local.h", 269, 0, "Invalid ODE world");
-    return 3;
+    return PHYS_WORLD_COUNT;
 }
 
 void __cdecl Phys_ObjBulletImpact(
@@ -1474,7 +1474,7 @@ void __cdecl Phys_CheckIfAliveTooLong(dxBody *body)
             else if (timeNow - userData->timeLastAsleep > 0x2710)
             {
                 userData->timeLastAsleep = timeNow - 5000;
-                Com_PrintWarning(20, "Physics body awake too long (%.0f, %.0f, %.0f)\n", newPos[0], newPos[1], newPos[2]);
+                Com_PrintWarning(CON_CHANNEL_PHYS, "Physics body awake too long (%.0f, %.0f, %.0f)\n", newPos[0], newPos[1], newPos[2]);
                 userData->hasDisplayedAwakeTooLongWarning = 1;
             }
         }
@@ -1497,7 +1497,7 @@ int __cdecl Phys_DoBodyOncePerFrame(uint worldIndex, dxBody *body, float deltaT)
 
     if (!dBodyIsEnabled(body))
         return 0;
-    if (worldIndex == 2)
+    if (worldIndex == PHYS_WORLD_RAGDOLL)
     {
         Vec3Scale(body->info.avel, -0.0099999998f, angDamp);
         Vec3Add(angDamp, body->info.avel, body->info.avel);
@@ -1558,9 +1558,9 @@ void __cdecl Phys_GeomUserGetAAContainedBox(dxGeom *geom, float *mins, float *ma
         Vec3Scale(brush->maxs, 0.0099999998f, maxs);
         if (*mins > *maxs || mins[1] > maxs[1] || mins[2] > maxs[2])
         {
-            Com_PrintError(20, "Assert Info\n");
+            Com_PrintError(CON_CHANNEL_PHYS, "Assert Info\n");
             v4 = va("brush: 0x%x, %i, 0x%x, 0x%x\n", brush, brush->numsides, brush->sides, brush->baseAdjacentSide);
-            Com_PrintError(20, v4);
+            Com_PrintError(CON_CHANNEL_PHYS, v4);
             v5 = va(
                 "brush->edgeCount: %i %i %i, %i %i %i\n",
                 brush->edgeCount[0][0],
@@ -1569,14 +1569,14 @@ void __cdecl Phys_GeomUserGetAAContainedBox(dxGeom *geom, float *mins, float *ma
                 brush->edgeCount[1][0],
                 brush->edgeCount[1][1],
                 brush->edgeCount[1][2]);
-            Com_PrintError(20, v5);
+            Com_PrintError(CON_CHANNEL_PHYS, v5);
             v6 = va("mins/maxs: (%f %f %f), (%f %f %f)\n", *mins, mins[1], mins[2], *maxs, maxs[1], maxs[2]);
-            Com_PrintError(20, v6);
+            Com_PrintError(CON_CHANNEL_PHYS, v6);
             Body = dGeomGetBody(geom);
             World = ODE_BodyGetWorld(Body);
             v9 = (PhysWorld)Phys_IndexFromODEWorld(World);
             v10 = va("Physics world: %i\n", v9);
-            Com_PrintError(20, v10);
+            Com_PrintError(CON_CHANNEL_PHYS, v10);
             if (!alwaysfails)
                 MyAssertHandler(
                     ".\\physics\\phys_ode.cpp",
@@ -2232,7 +2232,7 @@ void __cdecl Phys_Shutdown()
         ODE_LeakCheck();
         Cmd_RemoveCommand("phys_stop");
         Cmd_RemoveCommand("phys_go");
-        for (worldIndex = 0; worldIndex < 3; ++worldIndex)
+        for (worldIndex = PHYS_WORLD_DYNENT; worldIndex < PHYS_WORLD_COUNT; ++worldIndex)
         {
             if (physGlob.contactgroup[worldIndex])
             {
@@ -2389,7 +2389,7 @@ dxJointHinge *__cdecl Phys_CreateHinge(
     }
     else
     {
-        Com_PrintWarning(20, "Physics: Out of hinge joints (%d max)\n", 192);
+        Com_PrintWarning(CON_CHANNEL_PHYS, "Physics: Out of hinge joints (%d max)\n", 192);
         return 0;
     }
 }
@@ -2410,7 +2410,7 @@ dxJointBall *__cdecl Phys_CreateBallAndSocket(PhysWorld worldIndex, dxBody *obj1
     }
     else
     {
-        Com_PrintWarning(20, "Physics: Out of ball and socket joints (%d max)\n", 160);
+        Com_PrintWarning(CON_CHANNEL_PHYS, "Physics: Out of ball and socket joints (%d max)\n", 160);
         return 0;
     }
 }
@@ -2490,7 +2490,7 @@ dxJointAMotor *__cdecl Phys_CreateAngularMotor(
     }
     else
     {
-        Com_PrintWarning(20, "Physics: Out of angular motor joints (%d max)\n", 160);
+        Com_PrintWarning(CON_CHANNEL_PHYS, "Physics: Out of angular motor joints (%d max)\n", 160);
         return 0;
     }
 }

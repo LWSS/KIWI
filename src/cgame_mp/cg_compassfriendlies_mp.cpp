@@ -376,7 +376,7 @@ void __cdecl CG_CompassUpdateActors(int localClientNum)
     {
         bcassert(cgameGlob->nextSnap->ps.clientNum, MAX_CLIENTS);
         team = cgameGlob->bgs.clientinfo[cgameGlob->nextSnap->ps.clientNum].team;
-        if (team != 3)
+        if (team != TEAM_SPECTATOR)
         {
             clientIndex = localClientNum;
             for (num = 0; num < cgameGlob->nextSnap->numEntities; ++num)
@@ -491,7 +491,7 @@ void __cdecl CG_CompassDrawFriendlies(
         {
             bcassert(cgameGlob->nextSnap->ps.clientNum, MAX_CLIENTS);
             team = cgameGlob->bgs.clientinfo[cgameGlob->nextSnap->ps.clientNum].team;
-            if (team != 3 && team)
+            if (team != TEAM_SPECTATOR && team != TEAM_FREE)
             {
                 CG_CompassCalcDimensions(
                     compassType,
@@ -740,7 +740,7 @@ void __cdecl CG_CompassDrawEnemies(
         {
             bcassert(cgameGlob->nextSnap->ps.clientNum, MAX_CLIENTS);
             team = cgameGlob->bgs.clientinfo[cgameGlob->nextSnap->ps.clientNum].team;
-            if (team != 3)
+            if (team != TEAM_SPECTATOR)
             {
                 CG_CompassCalcDimensions(
                     compassType,

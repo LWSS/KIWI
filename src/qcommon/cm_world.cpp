@@ -541,7 +541,7 @@ void __cdecl CM_AreaEntities_r(uint nodeIndex, areaParms_t *ap)
             {
                 if (ap->count >= ap->maxcount)
                 {
-                    Com_DPrintf(16, "CM_AreaEntities: MAXCOUNT\n");
+                    Com_DPrintf(CON_CHANNEL_SYSTEM, "CM_AreaEntities: MAXCOUNT\n");
                     return;
                 }
 

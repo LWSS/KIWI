@@ -122,7 +122,7 @@ void __cdecl GetTagMatrix(
         }
         else
         {
-            Com_PrintWarning(14, "GetTagMatrix() unable to get vehicle DObj.\n");
+            Com_PrintWarning(CON_CHANNEL_CLIENT, "GetTagMatrix() unable to get vehicle DObj.\n");
             MatrixIdentity33(resultTagMat);
             *resultOrigin = 0.0;
             resultOrigin[1] = 0.0;
@@ -131,7 +131,7 @@ void __cdecl GetTagMatrix(
     }
     else
     {
-        Com_PrintWarning(14, "Vehicle being used by a player was not included in latest snapshot.\n");
+        Com_PrintWarning(CON_CHANNEL_CLIENT, "Vehicle being used by a player was not included in latest snapshot.\n");
         MatrixIdentity33(resultTagMat);
         *resultOrigin = 0.0;
         resultOrigin[1] = 0.0;
@@ -158,7 +158,7 @@ bool __cdecl CG_VehLocalClientDriving(int localClientNum)
     
     iassert(ci);
 
-    return ci->attachedVehEntNum != ENTITYNUM_NONE && ci->attachedVehSlotIndex == 0;
+    return ci->attachedVehEntNum != ENTITYNUM_NONE && ci->attachedVehSlotIndex == VEHICLE_RIDESLOT_DRIVER;
 }
 
 bool __cdecl CG_VehEntityUsingVehicle(int localClientNum, uint entNum)
@@ -252,7 +252,7 @@ void __cdecl SeatTransformForSlot(
         *resultOrigin = tagOrigin[0];
         resultOrigin[1] = tagOrigin[1];
         resultOrigin[2] = tagOrigin[2];
-        if (vehSlotIdx <= 1)
+        if (vehSlotIdx <= VEHICLE_RIDESLOT_PASSENGER)
             resultOrigin[2] = resultOrigin[2] + -35.0;
     }
 }

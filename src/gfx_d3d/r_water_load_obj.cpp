@@ -133,7 +133,7 @@ GfxImage *__cdecl R_CreateWaterMap(char *name, uint16_t imageWidth, uint16_t ima
 {
     GfxImage *image; // [esp+0h] [ebp-4h]
 
-    image = Image_Alloc(name, 5u, 0xBu, 9u);
+    image = Image_Alloc(name, IMG_CATEGORY_WATER, TS_WATER_MAP, 9u);
     iassert( image );
     image->width = imageWidth;
     image->height = imageHeight;
@@ -185,7 +185,7 @@ water_t *__cdecl R_LoadWaterSetup(const water_t *water)
     }
     if (waterMapSetupIndex == 16)
     {
-        Com_PrintError(8, "ERROR: map uses more than %i waterMap textures\n", 16);
+        Com_PrintError(CON_CHANNEL_GFX, "ERROR: map uses more than %i waterMap textures\n", 16);
         return 0;
     }
     else

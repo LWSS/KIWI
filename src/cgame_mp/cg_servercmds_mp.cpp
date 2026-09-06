@@ -202,7 +202,7 @@ void __cdecl CG_MapRestart(int localClientNum, int savepersist)
     cgs = CG_GetLocalClientStaticGlobals(localClientNum);
 
     if (cg_showmiss->current.integer)
-        Com_Printf(14, "CG_MapRestart\n");
+        Com_Printf(CON_CHANNEL_CLIENT, "CG_MapRestart\n");
 
     CG_ClearCenterPrint(localClientNum);
     cgameGlob->cursorHintFade = 0;
@@ -537,7 +537,7 @@ void __cdecl CG_DeployServerCommand(int localClientNum)
             I_strncpyz(text, (char *)s, 150);
             CG_RemoveChatEscapeChar(text);
             CG_AddToTeamChat(localClientNum, text);
-            Com_Printf(14, "%s\n", text);
+            Com_Printf(CON_CHANNEL_CLIENT, "%s\n", text);
         }
         break;
     case 0x69:
@@ -546,7 +546,7 @@ void __cdecl CG_DeployServerCommand(int localClientNum)
         I_strncpyz(text, (char *)s, 150);
         CG_RemoveChatEscapeChar(text);
         CG_AddToTeamChat(localClientNum, text);
-        Com_Printf(14, "%s\n", text);
+        Com_Printf(CON_CHANNEL_CLIENT, "%s\n", text);
         break;
     case 0x6A:
         v8 = Cmd_Argv(1);
@@ -655,17 +655,17 @@ void __cdecl CG_DeployServerCommand(int localClientNum)
         break;
     default:
         v40 = Cmd_Argv(0);
-        Com_Printf(14, "Unknown client game command: %s\n", v40);
+        Com_Printf(CON_CHANNEL_CLIENT, "Unknown client game command: %s\n", v40);
         argc = Cmd_Argc();
         if (argc > 1)
         {
-            Com_Printf(14, "Arguments(%i):", argc - 1);
+            Com_Printf(CON_CHANNEL_CLIENT, "Arguments(%i):", argc - 1);
             for (i = 1; i < argc; ++i)
             {
                 v41 = Cmd_Argv(i);
-                Com_Printf(14, " %s", v41);
+                Com_Printf(CON_CHANNEL_CLIENT, " %s", v41);
             }
-            Com_Printf(14, "\n");
+            Com_Printf(CON_CHANNEL_CLIENT, "\n");
         }
         break;
     }
@@ -739,7 +739,7 @@ void __cdecl CG_ParseScores(int localClientNum)
         cgameGlob->scores[i].assists = atoi(v11);
         clientNum = cgameGlob->scores[i].client;
         if (!cgameGlob->bgs.clientinfo[clientNum].infoValid)
-            Com_PrintError(14, "Invalid score client %i, bad scoreboard message\n", cgameGlob->scores[i].client);
+            Com_PrintError(CON_CHANNEL_CLIENT, "Invalid score client %i, bad scoreboard message\n", cgameGlob->scores[i].client);
         if (statusIconIndex > 0 && statusIconIndex <= 8)
         {
             pszIcon = CL_GetConfigString(localClientNum, statusIconIndex + 2258);
@@ -825,7 +825,7 @@ void __cdecl CG_SortSingleClientScore(cg_s *cgameGlob, int scoreIndex)
 
 bool __cdecl CG_ClientScoreIsBetter(score_t *scoreA, score_t *scoreB)
 {
-    if (scoreA->team != scoreB->team && (scoreA->team == 3 || scoreB->team == 3))
+    if (scoreA->team != scoreB->team && (scoreA->team == TEAM_SPECTATOR || scoreB->team == TEAM_SPECTATOR))
         return 0;
     if (scoreA->score > scoreB->score)
         return 1;
@@ -1080,14 +1080,14 @@ void __cdecl CG_OpenScriptMenu(int localClientNum)
     menuIndex = atoi(Cmd_Argv(1));
     if (menuIndex >= 0x20)
     {
-        Com_Printf(14, "Server tried to open a bad script menu index: %i\n", menuIndex);
+        Com_Printf(CON_CHANNEL_CLIENT, "Server tried to open a bad script menu index: %i\n", menuIndex);
         Cbuf_AddText(localClientNum, va("cmd mr %i bad\n", menuIndex));
         return;
     }
     menuName = CL_GetConfigString(localClientNum, menuIndex + 1970);
     if (!*menuName)
     {
-        Com_Printf(14, "Server tried to open a non-loaded script menu index: %i\n", menuIndex);
+        Com_Printf(CON_CHANNEL_CLIENT, "Server tried to open a non-loaded script menu index: %i\n", menuIndex);
         Cbuf_AddText(localClientNum, va("cmd mr %i bad\n", menuIndex));
         return;
     }
@@ -1176,7 +1176,7 @@ void CG_ReverbCmd()
     }
     else
     {
-        Com_PrintError(14, "ERROR: CG_ReverbCmd called with %i args (should be 6)\n", argc);
+        Com_PrintError(CON_CHANNEL_CLIENT, "ERROR: CG_ReverbCmd called with %i args (should be 6)\n", argc);
     }
 }
 
@@ -1204,7 +1204,7 @@ void CG_DeactivateReverbCmd()
     }
     else
     {
-        Com_PrintError(14, "ERROR: CG_DeactivateReverbCmd called with %i args (should be 3)\n", argc);
+        Com_PrintError(CON_CHANNEL_CLIENT, "ERROR: CG_DeactivateReverbCmd called with %i args (should be 3)\n", argc);
     }
 }
 
@@ -1230,7 +1230,7 @@ void __cdecl CG_SetChannelVolCmd(int localClientNum)
         
         if (shockIndex >= 16)
         {
-            Com_PrintError(14, "CG_SetChannelVolCmd: bad shellshock index %u\n", shockIndex);
+            Com_PrintError(CON_CHANNEL_CLIENT, "CG_SetChannelVolCmd: bad shellshock index %u\n", shockIndex);
             return;
         }
         
@@ -1246,7 +1246,7 @@ void __cdecl CG_SetChannelVolCmd(int localClientNum)
     }
     else
     {
-        Com_PrintError(9, "ERROR: CG_SetChannelVolCmd called with %i args (should be 4)\n", argc);
+        Com_PrintError(CON_CHANNEL_SOUND, "ERROR: CG_SetChannelVolCmd called with %i args (should be 4)\n", argc);
     }
 }
 
@@ -1274,7 +1274,7 @@ void CG_DeactivateChannelVolCmd()
     }
     else
     {
-        Com_PrintError(9, "ERROR: CG_DeactivateChannelVolCmd called with %i args (should be 3)\n", argc);
+        Com_PrintError(CON_CHANNEL_SOUND, "ERROR: CG_DeactivateChannelVolCmd called with %i args (should be 3)\n", argc);
     }
 }
 
@@ -1296,13 +1296,13 @@ char __cdecl LocalSound(int localClientNum)
         }
         else
         {
-            Com_PrintError(9, "ERROR: LocalSound() called with index %i (should be in range[1,%i])\n", index, 256);
+            Com_PrintError(CON_CHANNEL_SOUND, "ERROR: LocalSound() called with index %i (should be in range[1,%i])\n", index, 256);
             return 0;
         }
     }
     else
     {
-        Com_PrintError(9, "ERROR: LocalSound() called with %i args (should be 2)\n", argc);
+        Com_PrintError(CON_CHANNEL_SOUND, "ERROR: LocalSound() called with %i args (should be 2)\n", argc);
         return 0;
     }
 }
@@ -1322,12 +1322,12 @@ void __cdecl LocalSoundStop(int localClientNum)
         }
         else
         {
-            Com_PrintError(9, "ERROR: LocalSoundStop() called with index %i (should be in range[1,%i])\n", index, 256);
+            Com_PrintError(CON_CHANNEL_SOUND, "ERROR: LocalSoundStop() called with index %i (should be in range[1,%i])\n", index, 256);
         }
     }
     else
     {
-        Com_PrintError(9, "ERROR: LocalSoundStop(), should be called with 2 arguments.\n");
+        Com_PrintError(CON_CHANNEL_SOUND, "ERROR: LocalSoundStop(), should be called with 2 arguments.\n");
     }
 }
 

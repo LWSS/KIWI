@@ -658,49 +658,49 @@ bool __cdecl Material_MatchToken(const char **text, const char *match)
 
 int __cdecl Material_TechniqueTypeForName(const char *name)
 {
-    const char *techniqueNames[34]; // [esp+14h] [ebp-90h]
+    const char *techniqueNames[TECHNIQUE_COUNT]; // [esp+14h] [ebp-90h]
     int techniqueIndex; // [esp+A0h] [ebp-4h]
 
-    techniqueNames[0] = "\"depth prepass\"";
-    techniqueNames[1] = "\"build floatz\"";
-    techniqueNames[2] = "\"build shadowmap depth\"";
-    techniqueNames[3] = "\"build shadowmap color\"";
-    techniqueNames[4] = "\"unlit\"";
-    techniqueNames[5] = "\"emissive\"";
-    techniqueNames[6] = "\"emissive shadow\"";
-    techniqueNames[7] = "\"lit\"";
-    techniqueNames[8] = "\"lit sun\"";
-    techniqueNames[9] = "\"lit sun shadow\"";
-    techniqueNames[10] = "\"lit spot\"";
-    techniqueNames[11] = "\"lit spot shadow\"";
-    techniqueNames[12] = "\"lit omni\"";
-    techniqueNames[13] = "\"lit omni shadow\"";
-    techniqueNames[14] = "\"lit instanced\"";
-    techniqueNames[15] = "\"lit instanced sun\"";
-    techniqueNames[16] = "\"lit instanced sun shadow\"";
-    techniqueNames[17] = "\"lit instanced spot\"";
-    techniqueNames[18] = "\"lit instanced spot shadow\"";
-    techniqueNames[19] = "\"lit instanced omni\"";
-    techniqueNames[20] = "\"lit instanced omni shadow\"";
-    techniqueNames[21] = "\"light spot\"";
-    techniqueNames[22] = "\"light omni\"";
-    techniqueNames[23] = "\"light spot shadow\"";
-    techniqueNames[24] = "\"fakelight normal\"";
-    techniqueNames[25] = "\"fakelight view\"";
-    techniqueNames[26] = "\"sunlight preview\"";
-    techniqueNames[27] = "\"case texture\"";
-    techniqueNames[28] = "\"solid wireframe\"";
-    techniqueNames[29] = "\"shaded wireframe\"";
-    techniqueNames[30] = "\"shadowcookie caster\"";
-    techniqueNames[31] = "\"shadowcookie receiver\"";
-    techniqueNames[32] = "\"debug bumpmap\"";
-    techniqueNames[33] = "\"debug bumpmap instanced\"";
-    for (techniqueIndex = 0; techniqueIndex < 0x22; ++techniqueIndex)
+    techniqueNames[TECHNIQUE_DEPTH_PREPASS] = "\"depth prepass\"";
+    techniqueNames[TECHNIQUE_BUILD_FLOAT_Z] = "\"build floatz\"";
+    techniqueNames[TECHNIQUE_BUILD_SHADOWMAP_DEPTH] = "\"build shadowmap depth\"";
+    techniqueNames[TECHNIQUE_BUILD_SHADOWMAP_COLOR] = "\"build shadowmap color\"";
+    techniqueNames[TECHNIQUE_UNLIT] = "\"unlit\"";
+    techniqueNames[TECHNIQUE_EMISSIVE] = "\"emissive\"";
+    techniqueNames[TECHNIQUE_EMISSIVE_SHADOW] = "\"emissive shadow\"";
+    techniqueNames[TECHNIQUE_LIT] = "\"lit\"";
+    techniqueNames[TECHNIQUE_LIT_SUN] = "\"lit sun\"";
+    techniqueNames[TECHNIQUE_LIT_SUN_SHADOW] = "\"lit sun shadow\"";
+    techniqueNames[TECHNIQUE_LIT_SPOT] = "\"lit spot\"";
+    techniqueNames[TECHNIQUE_LIT_SPOT_SHADOW] = "\"lit spot shadow\"";
+    techniqueNames[TECHNIQUE_LIT_OMNI] = "\"lit omni\"";
+    techniqueNames[TECHNIQUE_LIT_OMNI_SHADOW] = "\"lit omni shadow\"";
+    techniqueNames[TECHNIQUE_LIT_INSTANCED] = "\"lit instanced\"";
+    techniqueNames[TECHNIQUE_LIT_INSTANCED_SUN] = "\"lit instanced sun\"";
+    techniqueNames[TECHNIQUE_LIT_INSTANCED_SUN_SHADOW] = "\"lit instanced sun shadow\"";
+    techniqueNames[TECHNIQUE_LIT_INSTANCED_SPOT] = "\"lit instanced spot\"";
+    techniqueNames[TECHNIQUE_LIT_INSTANCED_SPOT_SHADOW] = "\"lit instanced spot shadow\"";
+    techniqueNames[TECHNIQUE_LIT_INSTANCED_OMNI] = "\"lit instanced omni\"";
+    techniqueNames[TECHNIQUE_LIT_INSTANCED_OMNI_SHADOW] = "\"lit instanced omni shadow\"";
+    techniqueNames[TECHNIQUE_LIGHT_SPOT] = "\"light spot\"";
+    techniqueNames[TECHNIQUE_LIGHT_OMNI] = "\"light omni\"";
+    techniqueNames[TECHNIQUE_LIGHT_SPOT_SHADOW] = "\"light spot shadow\"";
+    techniqueNames[TECHNIQUE_FAKELIGHT_NORMAL] = "\"fakelight normal\"";
+    techniqueNames[TECHNIQUE_FAKELIGHT_VIEW] = "\"fakelight view\"";
+    techniqueNames[TECHNIQUE_SUNLIGHT_PREVIEW] = "\"sunlight preview\"";
+    techniqueNames[TECHNIQUE_CASE_TEXTURE] = "\"case texture\"";
+    techniqueNames[TECHNIQUE_WIREFRAME_SOLID] = "\"solid wireframe\"";
+    techniqueNames[TECHNIQUE_WIREFRAME_SHADED] = "\"shaded wireframe\"";
+    techniqueNames[TECHNIQUE_SHADOWCOOKIE_CASTER] = "\"shadowcookie caster\"";
+    techniqueNames[TECHNIQUE_SHADOWCOOKIE_RECEIVER] = "\"shadowcookie receiver\"";
+    techniqueNames[TECHNIQUE_DEBUG_BUMPMAP] = "\"debug bumpmap\"";
+    techniqueNames[TECHNIQUE_DEBUG_BUMPMAP_INSTANCED] = "\"debug bumpmap instanced\"";
+    for (techniqueIndex = TECHNIQUE_DEPTH_PREPASS; techniqueIndex < TECHNIQUE_COUNT; ++techniqueIndex)
     {
         if (!strcmp(name, techniqueNames[techniqueIndex]))
             return techniqueIndex;
     }
-    return 34;
+    return TECHNIQUE_COUNT;
 }
 
 // g_useTechnique gates which technique types Material_LoadTechniqueSet will actually
@@ -720,7 +720,7 @@ int __cdecl Material_TechniqueTypeForName(const char *name)
 #else
  #define KR_EDTECH false
 #endif
-const bool g_useTechnique[34] =
+const bool g_useTechnique[TECHNIQUE_COUNT] =
 {
   true,   // 0  DEPTH_PREPASS
   true,   // 1  BUILD_FLOAT_Z
@@ -774,7 +774,7 @@ const bool g_useTechnique[34] =
 #undef KR_EDTECH
 bool __cdecl Material_UsingTechnique(uint techType)
 {
-    bcassert(techType, 0x22);
+    bcassert(techType, TECHNIQUE_COUNT);
     return g_useTechnique[techType];
 }
 
@@ -1607,7 +1607,7 @@ uint __cdecl Material_GenerateShaderString(
     }
     else
     {
-        Com_PrintWarning(8, "Couldn't read shader '%s'\n", filepath);
+        Com_PrintWarning(CON_CHANNEL_GFX, "Couldn't read shader '%s'\n", filepath);
         return 0;
     }
 }
@@ -1632,7 +1632,7 @@ void __cdecl Material_DeleteDirectory(const char *dirname)
                 if (!DeleteFileA(fullfilename))
                 {
                     errorCode = GetLastError();
-                    Com_PrintError(1, "ERROR: Failed to delete %s errorCode %d\n", fullfilename, errorCode);
+                    Com_PrintError(CON_CHANNEL_ERROR, "ERROR: Failed to delete %s errorCode %d\n", fullfilename, errorCode);
                 }
             }
         } while (FindNextFileA(handle, &findData));
@@ -1688,7 +1688,7 @@ void __cdecl Material_DeleteOldFilesInDirectory(const char *dirname, uint16_t da
                 if (!DeleteFileA(fullfilename))
                 {
                     errorCode = GetLastError();
-                    Com_PrintError(1, "ERROR: Failed to delete %s errorCode %d\n", fullfilename, errorCode);
+                    Com_PrintError(CON_CHANNEL_ERROR, "ERROR: Failed to delete %s errorCode %d\n", fullfilename, errorCode);
                 }
             }
         } while (FindNextFileA(handle, &findData));
@@ -1814,7 +1814,7 @@ static bool Material_CopyTextToDXBuffer2(uint shaderHash, ID3DXBuffer **shader, 
 
     if (hr < 0)
     {
-        Com_PrintError(8, "ERROR: Material_CopyTextToDXBuffer: D3DXCreateBuffer(%d) failed: %s (0x%08x)\n", shaderLen, R_ErrorDescription(hr), hr);
+        Com_PrintError(CON_CHANNEL_GFX, "ERROR: Material_CopyTextToDXBuffer: D3DXCreateBuffer(%d) failed: %s (0x%08x)\n", shaderLen, R_ErrorDescription(hr), hr);
         free(cachedShader);
         return false;
     }
@@ -1841,7 +1841,7 @@ char __cdecl Material_CopyTextToDXBuffer(uint8_t *cachedShader, uint shaderLen, 
     {
         v3 = R_ErrorDescription(hr);
         Com_PrintError(
-            8,
+            CON_CHANNEL_GFX,
             "ERROR: Material_CopyTextToDXBuffer: D3DXCreateBuffer(%d) failed: %s (0x%08x)\n",
             shaderLen,
             v3,
@@ -1937,7 +1937,7 @@ void __cdecl Material_CacheShader(
     }
     else
     {
-        Com_PrintWarning(10, "Material_CacheShader: Failed to open '%s'\n", filename);
+        Com_PrintWarning(CON_CHANNEL_FILES, "Material_CacheShader: Failed to open '%s'\n", filename);
     }
 }
 
@@ -2416,8 +2416,8 @@ int __cdecl Material_CompareShaderArgumentsForCombining(uint16_t *e0, uint16_t *
     int v3; // [esp+0h] [ebp-18h]
     int v4; // [esp+4h] [ebp-14h]
 
-    v4 = *e0 == 4 || *e0 == 2;
-    v3 = *e1 == 4 || *e1 == 2;
+    v4 = *e0 == MTL_ARG_CODE_PIXEL_SAMPLER || *e0 == MTL_ARG_MATERIAL_PIXEL_SAMPLER;
+    v3 = *e1 == MTL_ARG_CODE_PIXEL_SAMPLER || *e1 == MTL_ARG_MATERIAL_PIXEL_SAMPLER;
     if (v4 == v3)
         return e0[1] - e1[1];
     else
@@ -2428,7 +2428,7 @@ char __cdecl Material_AttemptCombineShaderArguments(MaterialShaderArgument *arg0
 {
     if (arg0->type != arg1->type)
         return 0;
-    if (arg0->type != 3 && arg0->type != 5)
+    if (arg0->type != MTL_ARG_CODE_VERTEX_CONST && arg0->type != MTL_ARG_CODE_PIXEL_CONST)
         return 0;
     if (arg0->u.codeConst.rowCount + arg0->dest != arg1->dest)
         return 0;
@@ -2558,9 +2558,9 @@ char __cdecl Material_DefaultConstantSourceFromTable(
                 break;
         }
     }
-    argSource->type = 2 * (shaderType != MTL_VERTEX_SHADER) + 3;
+    argSource->type = shaderType == MTL_VERTEX_SHADER ? MTL_ARG_CODE_VERTEX_CONST : MTL_ARG_CODE_PIXEL_CONST;
     argSource->u.codeIndex = sourceTable[sourceIndex].source;
-    if (argSource->type != 3 && !s_codeConstUpdateFreq[argSource->u.codeIndex])
+    if (argSource->type != MTL_ARG_CODE_VERTEX_CONST && !s_codeConstUpdateFreq[argSource->u.codeIndex])
         MyAssertHandler(
             ".\\r_material_load_obj.cpp",
             2777,
@@ -2600,7 +2600,7 @@ char __cdecl Material_DefaultSamplerSourceFromTable(
             && !strcmp(constantName, sourceTable[sourceIndex].name)
             && Material_DefaultIndexRange(indexRange, sourceTable[sourceIndex].arrayCount, &argSource->indexRange))
         {
-            argSource->type = 4;
+            argSource->type = MTL_ARG_CODE_PIXEL_SAMPLER;
             argSource->u.codeIndex = sourceTable[sourceIndex].source;
             return 1;
         }
@@ -2667,7 +2667,7 @@ char __cdecl MaterialAddShaderArgument(
     MaterialShaderArgument *arg,
     char (*registerUsage)[64])
 {
-    if (arg->type > 1u && arg->type != 3)
+    if (arg->type > MTL_ARG_LITERAL_VERTEX_CONST && arg->type != MTL_ARG_CODE_VERTEX_CONST)
         return 1;
     if (arg->dest < 0x20u)
     {
@@ -2706,7 +2706,7 @@ char __cdecl Material_AddShaderArgumentFromMaterial(
     Material_RegisterString(name);
     arg->type = type;
     arg->dest = dest->resourceDest;
-    if (type == 6 && arg->dest >= 0x100u)
+    if (type == MTL_ARG_MATERIAL_PIXEL_CONST && arg->dest >= 0x100u)
         MyAssertHandler(
             ".\\r_material_load_obj.cpp",
             3141,
@@ -2729,7 +2729,7 @@ char __cdecl Material_AddShaderArgumentFromLiteral(
 {
     arg->type = type;
     arg->dest = dest->resourceDest;
-    if (type == 7 && arg->dest >= 0x100u)
+    if (type == MTL_ARG_LITERAL_PIXEL_CONST && arg->dest >= 0x100u)
         MyAssertHandler(
             ".\\r_material_load_obj.cpp",
             3082,
@@ -2764,7 +2764,7 @@ char __cdecl Material_AddShaderArgumentFromCodeConst(
 {
     arg->type = type;
     arg->dest = dest->resourceDest;
-    if (type == 5 && arg->dest >= 0x100u)
+    if (type == MTL_ARG_CODE_PIXEL_CONST && arg->dest >= 0x100u)
         MyAssertHandler(
             ".\\r_material_load_obj.cpp",
             3100,
@@ -3174,9 +3174,9 @@ bool __cdecl Material_ParseCodeConstantSource_r(
     }
     if (sourceTable[sourceIndex].subtable)
         return Material_ParseCodeConstantSource_r(shaderType, text, offset, sourceTable[sourceIndex].subtable, argSource);
-    argSource->type = 2 * (shaderType != MTL_VERTEX_SHADER) + 3;
+    argSource->type = shaderType == MTL_VERTEX_SHADER ? MTL_ARG_CODE_VERTEX_CONST : MTL_ARG_CODE_PIXEL_CONST;
     argSource->u.codeIndex = offset + sourceTable[sourceIndex].source;
-    if (argSource->type != 3 && !s_codeConstUpdateFreq[argSource->u.codeIndex])
+    if (argSource->type != MTL_ARG_CODE_VERTEX_CONST && !s_codeConstUpdateFreq[argSource->u.codeIndex])
         MyAssertHandler(
             ".\\r_material_load_obj.cpp",
             2691,
@@ -3483,7 +3483,7 @@ char __cdecl Material_ParseShaderArguments(
                 localArgs,
                 registerUsage))
                 return 0;
-            if (argSource.type == 4)
+            if (argSource.type == MTL_ARG_CODE_PIXEL_SAMPLER)
             {
                 switch (argSource.u.codeIndex)
                 {
@@ -3528,12 +3528,12 @@ char __cdecl Material_ParseShaderArguments(
                 &argDest.indexRange,
                 &argSource))
             {
-                if (argSource.type == 5)
+                if (argSource.type == MTL_ARG_CODE_PIXEL_CONST)
                 {
                     if (argSource.u.codeIndex == 4)
                         *techFlags |= 0x10u;
                 }
-                else if (argSource.type == 4
+                else if (argSource.type == MTL_ARG_CODE_PIXEL_SAMPLER
                     && (argSource.u.codeIndex == 18 || argSource.u.codeIndex == 19 || argSource.u.codeIndex == 20))
                 {
                     *techFlags |= 0x20u;
@@ -3554,13 +3554,13 @@ char __cdecl Material_ParseShaderArguments(
     }
     if (usedCount == paramCount)
         return Material_SetShaderArguments(usedCount, localArgs, argLimit, argCount, args);
-    Com_PrintWarning(8, "Undefined shader parameter(s) in %s\n", shaderName);
+    Com_PrintWarning(CON_CHANNEL_GFX, "Undefined shader parameter(s) in %s\n", shaderName);
     for (paramIndex = 0; paramIndex < paramCount; ++paramIndex)
     {
         if (!paramTable[paramIndex].isAssigned)
-            Com_PrintWarning(8, "  %s\n", paramTable[paramIndex].name);
+            Com_PrintWarning(CON_CHANNEL_GFX, "  %s\n", paramTable[paramIndex].name);
     }
-    Com_PrintWarning(8, "%i parameter(s) were undefined\n", paramCount - usedCount);
+    Com_PrintWarning(CON_CHANNEL_GFX, "%i parameter(s) were undefined\n", paramCount - usedCount);
     return 0;
 }
 
@@ -3742,7 +3742,8 @@ int __cdecl Material_CompareShaderArgumentsForRuntime(
         return updateFreq - updateFreq_4;
     if (e0->type != e1->type)
         return e0->type - e1->type;
-    if (!e0->type || e0->type == 6 || e0->type == 2)
+    if (e0->type == MTL_ARG_MATERIAL_VERTEX_CONST || e0->type == MTL_ARG_MATERIAL_PIXEL_CONST
+        || e0->type == MTL_ARG_MATERIAL_PIXEL_SAMPLER)
         return e0->u.codeSampler < e1->u.codeSampler ? -1 : 1;
     return e0->dest - e1->dest;
 }
@@ -4347,7 +4348,7 @@ MaterialTechniqueSet *__cdecl Material_LoadTechniqueSet(char *name, GfxRenderer 
     int techTypeCount; // [esp+14h] [ebp-1B8h]
     char filename[256]; // [esp+1Ch] [ebp-1B0h] BYREF
     int techTypeIndex; // [esp+120h] [ebp-ACh]
-    _DWORD techType[35]; // [esp+124h] [ebp-A8h]
+    _DWORD techType[TECHNIQUE_TOTAL_COUNT]; // [esp+124h] [ebp-A8h]
     bool usingTechnique; // [esp+1B3h] [ebp-19h]
     int nameSize; // [esp+1B4h] [ebp-18h]
     int fileSize; // [esp+1B8h] [ebp-14h]
@@ -4382,14 +4383,14 @@ MaterialTechniqueSet *__cdecl Material_LoadTechniqueSet(char *name, GfxRenderer 
                 break;
             if (*token == 34)
             {
-                if (techTypeCount == 34)
+                if (techTypeCount == TECHNIQUE_COUNT)
                 {
                     Com_ScriptError("Too many labels in technique set\n");
                     techniqueSet = 0;
                     break;
                 }
                 techType[techTypeCount] = Material_TechniqueTypeForName(token);
-                if (techType[techTypeCount] == 34)
+                if (techType[techTypeCount] == TECHNIQUE_COUNT)
                 {
                 LABEL_9:
                     Com_ScriptError("Unknown technique type '%s'\n", token);
@@ -4453,7 +4454,7 @@ MaterialTechniqueSet *__cdecl Material_LoadTechniqueSet(char *name, GfxRenderer 
     }
     else
     {
-        Com_PrintError(8, "^1ERROR: Couldn't open techniqueSet '%s'\n", filename);
+        Com_PrintError(CON_CHANNEL_GFX, "^1ERROR: Couldn't open techniqueSet '%s'\n", filename);
         return 0;
     }
 }
@@ -4744,7 +4745,7 @@ bool __cdecl Material_HasNormalMap(const Material *mtl)
     }
     iassert( mtl->textureTable[texIndex].nameStart == 'n' );
     iassert( mtl->textureTable[texIndex].nameEnd == 'p' );
-    if (mtl->textureTable[texIndex].semantic != 5)
+    if (mtl->textureTable[texIndex].semantic != TS_NORMAL_MAP)
         MyAssertHandler(
             ".\\r_material_load_obj.cpp",
             6404,
@@ -4836,7 +4837,7 @@ MaterialTechniqueSet *__cdecl Material_RegisterLayeredTechniqueSet(const Materia
         if (!lyrTechSetName)
         {
             Com_PrintWarning(
-                8,
+                CON_CHANNEL_GFX,
                 "Material '%s' uses technique set '%s' which cannot be used in a layered material; using default instead.  Recomp"
                 "ile the bsp to fix.\n",
                 mtl[layerIndex]->info.name,
@@ -4994,7 +4995,7 @@ uint __cdecl Material_CreateLayeredStateBitsTable(
     uint stateBitsCount; // [esp+Ch] [ebp-4h] BYREF
 
     stateBitsCount = 0;
-    for (techType = 0; techType < 0x22; ++techType)
+    for (techType = TECHNIQUE_DEPTH_PREPASS; techType < TECHNIQUE_COUNT; ++techType)
     {
         if (techSet->techniques[techType])
         {
@@ -5058,14 +5059,14 @@ Material *__cdecl Material_CreateLayered(
     uint constTableSize; // [esp+44h] [ebp-174h]
     MaterialTextureDef *newTexEntry; // [esp+48h] [ebp-170h]
     uint8_t oredGameFlags; // [esp+4Fh] [ebp-169h]
-    uint stateBitsTable[34][2]; // [esp+50h] [ebp-168h] BYREF
+    uint stateBitsTable[TECHNIQUE_COUNT][2]; // [esp+50h] [ebp-168h] BYREF
     const MaterialConstantDef *oldConstTable; // [esp+164h] [ebp-54h]
     uint tintConstNameHash; // [esp+168h] [ebp-50h]
     MaterialConstantDef *newConstEntry; // [esp+16Ch] [ebp-4Ch]
     bool isTintSpecified; // [esp+172h] [ebp-46h]
     uint8_t constantCount; // [esp+173h] [ebp-45h]
     const MaterialTextureDef *oldTexTable; // [esp+174h] [ebp-44h]
-    uint8_t stateBitsEntry[34]; // [esp+178h] [ebp-40h] BYREF
+    uint8_t stateBitsEntry[TECHNIQUE_COUNT]; // [esp+178h] [ebp-40h] BYREF
     Material *newMtl; // [esp+1A0h] [ebp-18h]
     uint layerIndex; // [esp+1A4h] [ebp-14h]
     uint constIndex; // [esp+1A8h] [ebp-10h]
@@ -5137,7 +5138,7 @@ Material *__cdecl Material_CreateLayered(
             newTexEntry->samplerState= v5->samplerState;
             newTexEntry->semantic= v5->semantic;
             newTexEntry->u.image = v5->u.image;
-            if ((newTexEntry->samplerState & 0x18) == 8 && (newTexEntry->semantic == 2 || newTexEntry->semantic == 5))
+            if ((newTexEntry->samplerState & 0x18) == 8 && (newTexEntry->semantic == TS_COLOR_MAP || newTexEntry->semantic == TS_NORMAL_MAP))
             {
                 newTexEntry->samplerState &= 0xE7u;
                 newTexEntry->samplerState |= 0x10u;
@@ -5251,13 +5252,13 @@ Material *__cdecl Material_LoadLayered(char *assetName)
         {
             if (expectNormal)
                 Com_PrintError(
-                    1,
+                    CON_CHANNEL_ERROR,
                     "In layered material, expected material '%s' %s; using default instead.  Recompile the bsp to fix.\n",
                     mtl[layerCount]->info.name,
                     "without a normal map to have one");
             else
                 Com_PrintError(
-                    1,
+                    CON_CHANNEL_ERROR,
                     "In layered material, expected material '%s' %s; using default instead.  Recompile the bsp to fix.\n",
                     mtl[layerCount]->info.name,
                     "with a normal map to not have one");
@@ -5331,13 +5332,15 @@ char __cdecl Material_ValidatePassArguments(
 
     for (argIndex = 0; argIndex < argCount; ++argIndex)
     {
-        if (args[argIndex].type && args[argIndex].type != 6)
+        if (args[argIndex].type != MTL_ARG_MATERIAL_VERTEX_CONST
+            && args[argIndex].type != MTL_ARG_MATERIAL_PIXEL_CONST)
         {
-            if (args[argIndex].type == 2 && !Material_HasTexture(mtl, args[argIndex].u.codeSampler))
+            if (args[argIndex].type == MTL_ARG_MATERIAL_PIXEL_SAMPLER
+                && !Material_HasTexture(mtl, args[argIndex].u.codeSampler))
             {
                 argNamea = Material_StringFromHash(args[argIndex].u.codeSampler);
                 Com_PrintError(
-                    8,
+                    CON_CHANNEL_GFX,
                     "material '%s' using technique '%s' from techniqueSet '%s' doesn't expose a '%s' texture\n",
                     mtl->info.name,
                     techniqueName,
@@ -5350,7 +5353,7 @@ char __cdecl Material_ValidatePassArguments(
         {
             argName = Material_StringFromHash(args[argIndex].u.codeSampler);
             Com_PrintError(
-                8,
+                CON_CHANNEL_GFX,
                 "material '%s' using technique '%s' from techniqueSet '%s' doesn't expose a '%s' constant\n",
                 mtl->info.name,
                 techniqueName,
@@ -5384,7 +5387,7 @@ char __cdecl Material_Validate(const Material *material)
 {
     int techType; // [esp+0h] [ebp-4h]
 
-    for (techType = 0; techType < 34; ++techType)
+    for (techType = TECHNIQUE_DEPTH_PREPASS; techType < TECHNIQUE_COUNT; ++techType)
     {
         if (material->techniqueSet->techniques[techType]
             && !Material_ValidateTechnique(material, material->techniqueSet->techniques[techType]))
@@ -5473,7 +5476,7 @@ BOOL __cdecl Material_FinishLoadingTexdef(
     if (material->info.sortKey == 4
         && R_IsWorldMaterialType(materialType)
         && (texdef->samplerState & 0x18) == 8
-        && (texdef->semantic == 2 || texdef->semantic == 5))
+        && (texdef->semantic == TS_COLOR_MAP || texdef->semantic == TS_NORMAL_MAP))
     {
         texdef->samplerState &= 0xE7u;
         texdef->samplerState |= 0x10u;
@@ -5481,7 +5484,7 @@ BOOL __cdecl Material_FinishLoadingTexdef(
 #ifdef KISAK_RADIANT
     texdef->samplerState &= 0x1Fu;
 #endif
-    if (texdef->semantic == 11)
+    if (texdef->semantic == TS_WATER_MAP)
         // BYTE offset into the material raw blob — disasm 0x51b057 is `add eax, edi` (offset + the
         // MaterialRaw base, raw byte add), exactly like the image path's `add esi, edi`. `material`
         // is a MaterialRaw*, so `material + offset` would scale by sizeof(MaterialRaw) → a wildly
@@ -5595,7 +5598,7 @@ uint __cdecl Material_GetCullFlags(Material *material)
     cullFlags = -1;
     techniqueSet = material->techniqueSet;
     iassert( techniqueSet );
-    for (techType = 7; techType < 0x15; ++techType)
+    for (techType = TECHNIQUE_LIT_BEGIN; techType < TECHNIQUE_LIT_END; ++techType)
     {
         if (techniqueSet->techniques[techType])
         {
@@ -5686,7 +5689,7 @@ uint __cdecl Material_GetUsesDepthBufferFlags(const Material *mtl)
 
     techniqueSet = mtl->techniqueSet;
     iassert( techniqueSet );
-    for (techType = 0; techType < 0x22; ++techType)
+    for (techType = TECHNIQUE_DEPTH_PREPASS; techType < TECHNIQUE_COUNT; ++techType)
     {
         technique = techniqueSet->techniques[techType];
         if (technique)
@@ -5713,7 +5716,7 @@ uint __cdecl Material_GetUsesStencilBufferFlags(const Material *mtl)
 
     techniqueSet = mtl->techniqueSet;
     iassert( techniqueSet );
-    for (techType = 0; techType < 0x22; ++techType)
+    for (techType = TECHNIQUE_DEPTH_PREPASS; techType < TECHNIQUE_COUNT; ++techType)
     {
         technique = techniqueSet->techniques[techType];
         if (technique)
@@ -5771,7 +5774,7 @@ void __cdecl Material_BuildStateBitsTable(Material *material, __int16 toolFlags,
     uint passIndex; // [esp+470h] [ebp-4h]
 
     stateBitsCount = 0;
-    for (techType = 0; techType < 0x22; ++techType)
+    for (techType = TECHNIQUE_DEPTH_PREPASS; techType < TECHNIQUE_COUNT; ++techType)
     {
         technique = material->techniqueSet->techniques[techType];
         if (technique)
@@ -5935,7 +5938,7 @@ Material *__cdecl Material_LoadRaw(const MaterialRaw *mtlRaw, uint materialType,
                     "%s",
                     "material->textureTable[texIndex].samplerState & SAMPLER_FILTER_MASK");
             material->textureTable[texIndex].semantic = textureTableRaw[texIndex].semantic;
-            if (material->textureTable[texIndex].semantic == 11)
+            if (material->textureTable[texIndex].semantic == TS_WATER_MAP)
                 // BYTE offset (cast mtlRaw to char*) — same fix as Material_FinishLoadingTexdef; the
                 // Image_Register path just below already does (const char*)mtlRaw + offset. Without the
                 // cast, MaterialRaw* arithmetic scales by sizeof(MaterialRaw) → out-of-bounds → AV.
@@ -6025,14 +6028,14 @@ Material *__cdecl Material_Load(char *assetName, int imageTrack)
         else
         {
             FS_FCloseFile(fileHandle);
-            Com_PrintError(8, "^1ERROR: material '%s' has zero length\n", assetName);
+            Com_PrintError(CON_CHANNEL_GFX, "^1ERROR: material '%s' has zero length\n", assetName);
             return 0;
         }
     }
     else
     {
         if (*assetName != 36)
-            Com_PrintError(8, "^1ERROR: Couldn't find material '%s'\n", assetName);
+            Com_PrintError(CON_CHANNEL_GFX, "^1ERROR: Couldn't find material '%s'\n", assetName);
         return 0;
     }
 }
@@ -6225,13 +6228,15 @@ void __cdecl R_GetPixelLiteralConsts(
     argCount = pass->stableArgCount;
     if (pass->stableArgCount)
     {
-        for (arg = &pass->args[pass->perPrimArgCount + pass->perObjArgCount]; arg->type < 6u; ++arg)
+        for (arg = &pass->args[pass->perPrimArgCount + pass->perObjArgCount];
+             arg->type < MTL_ARG_MATERIAL_PIXEL_CONST;
+             ++arg)
         {
             if (!--argCount)
                 return;
         }
         constDef = mtl->constantTable;
-        while (arg->type == 6)
+        while (arg->type == MTL_ARG_MATERIAL_PIXEL_CONST)
         {
             while (constDef->nameHash != arg->u.codeSampler)
             {
@@ -6254,7 +6259,7 @@ void __cdecl R_GetPixelLiteralConsts(
         }
         do
         {
-            if (arg->type != 7)
+            if (arg->type != MTL_ARG_LITERAL_PIXEL_CONST)
                 break;
             R_RegisterShaderConst(arg->dest, arg->u.literalConst, pixelLiteralConsts);
             ++arg;
@@ -6283,13 +6288,13 @@ int __cdecl R_ComparePixelConsts(const Material **material, const MaterialPass *
         argCount = pass[i]->stableArgCount;
         if (argCount)
         {
-            while (arg->type < 5u)
+            while (arg->type < MTL_ARG_CODE_PIXEL_CONST)
             {
                 ++arg;
                 if (!--argCount)
                     goto done_2;
             }
-            while (arg->type == 5)
+            while (arg->type == MTL_ARG_CODE_PIXEL_CONST)
             {
                 bcassert(pixelConstsCount[i], 0x100);
                 pixelConsts[i][pixelConstsCount[i]++] = arg->u.codeConst.index;

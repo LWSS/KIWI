@@ -161,7 +161,7 @@ Inserts the current value of a variable as command text
 void Cmd_Vstr_f(void) {
 
 	if (Cmd_Argc() != 2) {
-		Com_Printf(0, "vstr <variablename> : execute a variable command\n");
+		Com_Printf(CON_CHANNEL_DONT_FILTER, "vstr <variablename> : execute a variable command\n");
 		return;
 	}
 
@@ -176,12 +176,12 @@ void Cmd_Vstr_f(void) {
 		}
 		else
 		{
-			Com_Printf(0, "%s is not a string-based dvar\n", dvar->name);
+			Com_Printf(CON_CHANNEL_DONT_FILTER, "%s is not a string-based dvar\n", dvar->name);
 		}
 	}
 	else
 	{
-		Com_Printf(0, "%s doesn't exist\n", dvarName);
+		Com_Printf(CON_CHANNEL_DONT_FILTER, "%s doesn't exist\n", dvarName);
 	}
 }
 
@@ -451,7 +451,7 @@ void Cmd_AddCommandInternal(const char* cmdName, void(__cdecl* function)(), cmd_
 
 		if (function)
 		{
-			Com_Printf(16, "Cmd_AddCommand: %s already defined\n", cmdName);
+			Com_Printf(CON_CHANNEL_SYSTEM, "Cmd_AddCommand: %s already defined\n", cmdName);
 		}
 	}
 	else
@@ -545,7 +545,7 @@ void __cdecl Cbuf_AddText(int  localClientNum, const char *text)
     }
     else
     {
-        Com_Printf(16, "Cbuf_AddText: overflow\n");
+        Com_Printf(CON_CHANNEL_SYSTEM, "Cbuf_AddText: overflow\n");
     }
     Sys_LeaveCriticalSection(CRITSECT_CBUF);
 }
@@ -590,7 +590,7 @@ void __cdecl Cbuf_InsertText(int  localClientNum, const char *text)
     }
     else
     {
-        Com_PrintError(1, "Cbuf_InsertText overflowed\n");
+        Com_PrintError(CON_CHANNEL_ERROR, "Cbuf_InsertText overflowed\n");
         Sys_LeaveCriticalSection(CRITSECT_CBUF);
     }
 }
@@ -691,7 +691,7 @@ void __cdecl Cmd_AddServerCommandInternal(const char *cmdName, void(__cdecl *fun
     }
     iassert( cmd == allocedCmd );
     if (function)
-        Com_Printf(16, "Cmd_AddServerCommand: %s already defined\n", cmdName);
+        Com_Printf(CON_CHANNEL_SYSTEM, "Cmd_AddServerCommand: %s already defined\n", cmdName);
 }
 
 void __cdecl Cbuf_ExecuteBuffer(int  localClientNum, int  controllerIndex, const char *buffer)
@@ -804,17 +804,17 @@ void __cdecl _Cmd_Vstr_f()
             }
             else
             {
-                Com_Printf(0, "%s is not a string-based dvar\n", dvar->name);
+                Com_Printf(CON_CHANNEL_DONT_FILTER, "%s is not a string-based dvar\n", dvar->name);
             }
         }
         else
         {
-            Com_Printf(0, "%s doesn't exist\n", dvarName);
+            Com_Printf(CON_CHANNEL_DONT_FILTER, "%s doesn't exist\n", dvarName);
         }
     }
     else
     {
-        Com_Printf(0, "vstr <variablename> : execute a variable command\n");
+        Com_Printf(CON_CHANNEL_DONT_FILTER, "vstr <variablename> : execute a variable command\n");
     }
 }
 
@@ -1041,11 +1041,11 @@ void __cdecl AssertCmdArgsConsistency(const CmdArgs *args, const CmdArgsPrivate 
     }
     if (totalUsedArgvPool != argsPriv->totalUsedArgvPool)
     {
-        Com_Printf(16, "About to assert totalUsedArgvPool\n");
+        Com_Printf(CON_CHANNEL_SYSTEM, "About to assert totalUsedArgvPool\n");
         for (nestinga = 0; nestinga <= args->nesting; ++nestinga)
         {
             for (arg = 0; arg < args->argc[nestinga]; ++arg)
-                Com_Printf(16, "nesting %i, arg %i: '%s'\n", nestinga, arg, args->argv[nestinga][arg]);
+                Com_Printf(CON_CHANNEL_SYSTEM, "nesting %i, arg %i: '%s'\n", nestinga, arg, args->argv[nestinga][arg]);
         }
     }
     if (totalUsedArgvPool != argsPriv->totalUsedArgvPool)
@@ -1252,11 +1252,11 @@ void __cdecl Cmd_List_f()
     {
         if (!match || Com_Filter(match, (char *)cmd->name, 0))
         {
-            Com_Printf(0, "%s\n", cmd->name);
+            Com_Printf(CON_CHANNEL_DONT_FILTER, "%s\n", cmd->name);
             ++i;
         }
     }
-    Com_Printf(0, "%i commands\n", i);
+    Com_Printf(CON_CHANNEL_DONT_FILTER, "%i commands\n", i);
 }
 
 void __cdecl Cmd_Exec_f()
@@ -1286,7 +1286,7 @@ void __cdecl Cmd_Exec_f()
                 && !Cmd_ExecFromDisk(localClientNum, 0, filename))
             {
                 v1 = Cmd_Argv(1);
-                Com_PrintError(1, "couldn't exec %s\n", v1);
+                Com_PrintError(CON_CHANNEL_ERROR, "couldn't exec %s\n", v1);
             }
         }
         else
@@ -1296,7 +1296,7 @@ void __cdecl Cmd_Exec_f()
     }
     else
     {
-        Com_Printf(0, "exec <filename> : execute a script file\n");
+        Com_Printf(CON_CHANNEL_DONT_FILTER, "exec <filename> : execute a script file\n");
     }
 }
 
@@ -1307,7 +1307,7 @@ char __cdecl Cmd_ExecFromDisk(int  localClientNum, int  controllerIndex, const c
     FS_ReadFile(filename, (void **)&text);
     if (!text)
         return 0;
-    Com_Printf(16, "execing %s from disk\n", filename);
+    Com_Printf(CON_CHANNEL_SYSTEM, "execing %s from disk\n", filename);
     Cbuf_ExecuteBuffer(localClientNum, controllerIndex, text);
     FS_FreeFile(text);
     return 1;
@@ -1328,7 +1328,7 @@ char __cdecl Cmd_ExecFromFastFile(int  localClientNum, int  controllerIndex, con
     rawfile = DB_FindXAssetHeader(ASSET_TYPE_RAWFILE, filename).rawfile;
     if (!rawfile)
         return 0;
-    Com_Printf(16, "execing %s from fastfile\n", filename);
+    Com_Printf(CON_CHANNEL_SYSTEM, "execing %s from fastfile\n", filename);
     Cbuf_ExecuteBuffer(localClientNum, controllerIndex, (char *)rawfile->buffer);
     return 1;
 }

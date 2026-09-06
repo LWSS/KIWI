@@ -21,7 +21,7 @@ void __cdecl SV_UnmutePlayer_f(client_t *cl)
     if (otherClient < MAX_CLIENTS)
         cl->muteList[otherClient] = 0;
     else
-        Com_Printf(0, "Invalid unmute client %i\n", otherClient);
+        Com_Printf(CON_CHANNEL_DONT_FILTER, "Invalid unmute client %i\n", otherClient);
 }
 
 void __cdecl SV_MutePlayer_f(client_t *cl)
@@ -34,7 +34,7 @@ void __cdecl SV_MutePlayer_f(client_t *cl)
     if (otherClient < MAX_CLIENTS)
         cl->muteList[otherClient] = 1;
     else
-        Com_Printf(0, "Invalid mute client %i\n", otherClient);
+        Com_Printf(CON_CHANNEL_DONT_FILTER, "Invalid mute client %i\n", otherClient);
 }
 
 void __cdecl SV_WWWDownLoad_Clear(client_t *cl)
@@ -59,7 +59,7 @@ void __cdecl SV_WWWDownload_f(client_t *cl)
             if (!cl->clientDownloadingWWW)
             {
             LABEL_2:
-                Com_Printf(15, "SV_WWWDownload: unexpected wwwdl '%s' for client '%s'\n", subcmd, cl->name);
+                Com_Printf(CON_CHANNEL_SERVER, "SV_WWWDownload: unexpected wwwdl '%s' for client '%s'\n", subcmd, cl->name);
                 SV_DropClient(cl, "PC_PATCH_1_1_UNEXPECTEDDOWLOADMESSAGE", 1);
                 return;
             }
@@ -69,17 +69,17 @@ void __cdecl SV_WWWDownload_f(client_t *cl)
                 {
                     if (I_stricmp(subcmd, "chkfail"))
                     {
-                        Com_Printf(15, "SV_WWWDownload: unknown wwwdl subcommand '%s' for client '%s'\n", subcmd, cl->name);
+                        Com_Printf(CON_CHANNEL_SERVER, "SV_WWWDownload: unknown wwwdl subcommand '%s' for client '%s'\n", subcmd, cl->name);
                         SV_DropClient(cl, "PC_PATCH_1_1_UNEXPECTEDDOWLOADMESSAGE", 1);
                     }
                     else
                     {
                         Com_Printf(
-                            15,
+                            CON_CHANNEL_SERVER,
                             "WARNING: client '%s' reports that the redirect download for '%s' had wrong checksum.\n",
                             cl->name,
                             cl->downloadName);
-                        Com_Printf(15, "         you should check your download redirect configuration.\n");
+                        Com_Printf(CON_CHANNEL_SERVER, "         you should check your download redirect configuration.\n");
                         SV_WWWDownLoad_Clear(cl);
                         cl->wwwFallback = 1;
                         SV_SendClientGameState(cl);
@@ -90,7 +90,7 @@ void __cdecl SV_WWWDownload_f(client_t *cl)
                     SV_WWWDownLoad_Clear(cl);
                     cl->wwwFallback = 1;
                     Com_Printf(
-                        15,
+                        CON_CHANNEL_SERVER,
                         "Client '%s' reported that the http download of '%s' failed, falling back to a server download\n",
                         cl->name,
                         cl->downloadName);
@@ -110,7 +110,7 @@ void __cdecl SV_WWWDownload_f(client_t *cl)
     else
     {
         if (cl->clientDownloadingWWW)
-            Com_Printf(15, "WARNING: dupe wwwdl ack from client '%s'\n", cl->name);
+            Com_Printf(CON_CHANNEL_SERVER, "WARNING: dupe wwwdl ack from client '%s'\n", cl->name);
         cl->clientDownloadingWWW = 1;
     }
 }
@@ -126,7 +126,7 @@ void __cdecl SV_RetransmitDownload_f(client_t *cl)
 
 void __cdecl SV_DoneDownload_f(client_t *cl)
 {
-    Com_DPrintf(0, "clientDownload: %s Done\n", cl->name);
+    Com_DPrintf(CON_CHANNEL_DONT_FILTER, "clientDownload: %s Done\n", cl->name);
     SV_Download_Clear(cl);
     SV_SendClientGameState(cl);
 }
@@ -134,7 +134,7 @@ void __cdecl SV_DoneDownload_f(client_t *cl)
 void __cdecl SV_StopDownload_f(client_t *cl)
 {
     if (cl->downloadName[0])
-        Com_DPrintf(0, "clientDownload: %d : file \"%s\" aborted\n", cl - svs.clients, cl->downloadName);
+        Com_DPrintf(CON_CHANNEL_DONT_FILTER, "clientDownload: %d : file \"%s\" aborted\n", cl - svs.clients, cl->downloadName);
     SV_CloseDownload(cl);
     SV_Download_Clear(cl);
 }
@@ -153,7 +153,7 @@ void __cdecl SV_NextDownload_f(client_t *cl)
     block = atoi(v1);
     if (block == cl->downloadClientBlock)
     {
-        Com_DPrintf(0, "clientDownload: %d : client acknowledge of block %d\n", cl - svs.clients, block);
+        Com_DPrintf(CON_CHANNEL_DONT_FILTER, "clientDownload: %d : client acknowledge of block %d\n", cl - svs.clients, block);
         if (cl->downloadBlockSize[cl->downloadClientBlock % 8])
         {
             cl->downloadSendTime = svs.time;
@@ -161,7 +161,7 @@ void __cdecl SV_NextDownload_f(client_t *cl)
         }
         else
         {
-            Com_Printf(0, "clientDownload: %d : file \"%s\" completed\n", cl - svs.clients, cl->downloadName);
+            Com_Printf(CON_CHANNEL_DONT_FILTER, "clientDownload: %d : file \"%s\" completed\n", cl - svs.clients, cl->downloadName);
             SV_CloseDownload(cl);
         }
     }

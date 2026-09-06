@@ -484,7 +484,7 @@ void LiveStorage_NoStatsFound()
     memset(statData.playerStats, 0, sizeof(statData.playerStats));
     LiveStorage_WriteChecksumToBuffer(statData.playerStats, 0x2000);
     statData.statsFetched = 1;
-    Com_Printf(16, "No stats found, zeroing out stats buffer\n");
+    Com_Printf(CON_CHANNEL_SYSTEM, "No stats found, zeroing out stats buffer\n");
     LiveStorage_StatsInit(0);
     iassert(stat_version);
     unsignedInt = stat_version->current.unsignedInt;
@@ -571,11 +571,11 @@ void __cdecl LiveStorage_UploadStats()
             if (v2)
             {
                 statData.statWriteNeeded = 0;
-                Com_Printf(16, "Successfully wrote stats data\n");
+                Com_Printf(CON_CHANNEL_SYSTEM, "Successfully wrote stats data\n");
             }
             else
             {
-                Com_Printf(16, "Unable to write stats: %s.\n", path);
+                Com_Printf(CON_CHANNEL_SYSTEM, "Unable to write stats: %s.\n", path);
             }
         }
     }
@@ -628,13 +628,13 @@ void __cdecl LiveStorage_SetStat(int __formal, int index, uint value)
     // KISAK: reject it for real in addition to asserting
     if ((uint32_t)index >= 3498)
     {
-        Com_PrintError(14, "LiveStorage_SetStat: bad stat index %i\n", index);
+        Com_PrintError(CON_CHANNEL_CLIENT, "LiveStorage_SetStat: bad stat index %i\n", index);
         return;
     }
     
     if (!statData.statsFetched)
     {
-        Com_Printf(14, "Tried to set stat index %i before we have obtained player stats\n", index);
+        Com_Printf(CON_CHANNEL_CLIENT, "Tried to set stat index %i before we have obtained player stats\n", index);
         return;
     }
     if (index >= 2000)
@@ -651,7 +651,7 @@ void __cdecl LiveStorage_SetStat(int __formal, int index, uint value)
         {
             iassert(debugStats);
             if (debugStats->current.enabled)
-                Com_Printf(14, "Setting stat %i from %i to %i\n", index, *(int*)&statData.playerStats[4 * index - 5996], value);
+                Com_Printf(CON_CHANNEL_CLIENT, "Setting stat %i from %i to %i\n", index, *(int*)&statData.playerStats[4 * index - 5996], value);
             if (*(int*)&statData.playerStats[4 * index - 5996] != value)
             {
                 *(int*)&statData.playerStats[4 * index - 5996] = value;
@@ -673,8 +673,8 @@ void __cdecl LiveStorage_SetStat(int __formal, int index, uint value)
         iassert(debugStats);
         if (debugStats->current.enabled)
         {
-            //Com_Printf(14, "Setting stat %i from %i to %i\n", index, *(unsigned __int8 *)(index + 231835788), value);
-            Com_Printf(14, "Setting stat %i from %i to %i\n", index, statData.playerStats[index + 4], value);
+            //Com_Printf(CON_CHANNEL_CLIENT, "Setting stat %i from %i to %i\n", index, *(unsigned __int8 *)(index + 231835788), value);
+            Com_Printf(CON_CHANNEL_CLIENT, "Setting stat %i from %i to %i\n", index, statData.playerStats[index + 4], value);
         }
         
         //if (*(unsigned __int8 *)(index + 231835788) != value)
@@ -738,7 +738,7 @@ void __cdecl LiveStorage_StatSetCmd()
     }
     else
     {
-        Com_PrintError(15, "statset usage: statset <index> <value>\n");
+        Com_PrintError(CON_CHANNEL_SERVER, "statset usage: statset <index> <value>\n");
     }
 }
 
@@ -753,11 +753,11 @@ void __cdecl LiveStorage_StatGetCmd()
         v0 = Cmd_Argv(1);
         index = atoi(v0);
         Stat = LiveStorage_GetStat(0, index);
-        Com_Printf(16, "Stat %i: %i\n", index, Stat);
+        Com_Printf(CON_CHANNEL_SYSTEM, "Stat %i: %i\n", index, Stat);
     }
     else
     {
-        Com_PrintError(15, "statget usage: statget <index>\n");
+        Com_PrintError(CON_CHANNEL_SERVER, "statget usage: statget <index>\n");
     }
 }
 
@@ -780,7 +780,7 @@ void __cdecl LiveStorage_StatGetInDvarCmd()
     }
     else
     {
-        Com_PrintError(15, "statgetindvar usage: statgetindvar <index> <dvar>\n");
+        Com_PrintError(CON_CHANNEL_SERVER, "statgetindvar usage: statgetindvar <index> <dvar>\n");
     }
 }
 

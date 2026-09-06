@@ -27,17 +27,17 @@ void __cdecl Image_PicmipForSemantic(uint8_t semantic, Picmip *picmip)
 
     switch (semantic)
     {
-    case 0u:
-    case 1u:
+    case TS_2D:
+    case TS_FUNCTION:
         goto $LN7_78;
-    case 2u:
-    case 0xBu:
+    case TS_COLOR_MAP:
+    case TS_WATER_MAP:
         picmipUsed = imageGlobals.picmip;
         goto LABEL_8;
-    case 5u:
+    case TS_NORMAL_MAP:
         picmipUsed = imageGlobals.picmipBump;
         goto LABEL_8;
-    case 8u:
+    case TS_SPECULAR_MAP:
         picmipUsed = imageGlobals.picmipSpec;
     LABEL_8:
         picmip->platform[1] = 2;
@@ -439,7 +439,7 @@ void __cdecl Image_TrackFullscreenTexture(
         platformWidth = Image_GetPlatformScreenWidth(platform, fullscreenWidth);
         platformHeight = Image_GetPlatformScreenHeight(platform, fullscreenHeight);
         Image_GetMipmapResolution(platformWidth, platformHeight, picmip, &width, &height);
-        memory = Image_GetCardMemoryAmount(3, format, width, height, 1u);
+        memory = Image_GetCardMemoryAmount(IMG_FLAG_NOPICMIP | IMG_FLAG_NOMIPMAPS, format, width, height, 1u);
         if (!IsFastFileLoad())
             Image_TrackTotalMemory(image, platform, memory);
         image->cardMemory.platform[platform] = memory;

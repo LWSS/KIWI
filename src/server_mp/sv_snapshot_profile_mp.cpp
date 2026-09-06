@@ -241,9 +241,9 @@ void __cdecl SV_PacketDataIsType(int clientNum, const msg_t *msg, packetModeList
             if (sv_debugPacketContents->current.enabled && oldMode != PACKETDATA_NOTNETWORKDATA && bitsUsed > bitsUsedPrev)
             {
                 if (oldMode == PACKETDATA_FIRST)
-                    Com_Printf(15, "Unknown data!\n");
+                    Com_Printf(CON_CHANNEL_SERVER, "Unknown data!\n");
                 PacketDataTypeName = SV_GetPacketDataTypeName(oldMode);
-                Com_Printf(15, "%i bits of %s\n", bitsUsed - bitsUsedPrev, PacketDataTypeName);
+                Com_Printf(CON_CHANNEL_SERVER, "%i bits of %s\n", bitsUsed - bitsUsedPrev, PacketDataTypeName);
             }
         }
     }
@@ -476,10 +476,10 @@ void __cdecl SV_AnalyzePacketData(int clientNum, const msg_t *msg)
     const char *type; // [esp+20h] [ebp-4h]
 
     if (sv_debugPacketContents->current.enabled
-        || msg->cursize > largestSize && svs.clients[clientNum].ping < 999 && svs.clients[clientNum].header.state == 4)
+        || msg->cursize > largestSize && svs.clients[clientNum].ping < 999 && svs.clients[clientNum].header.state == CS_ACTIVE)
     {
         largestSize = msg->cursize;
-        Com_Printf(15, "Client %s's snapshot\n", svs.clients[clientNum].name);
+        Com_Printf(CON_CHANNEL_SERVER, "Client %s's snapshot\n", svs.clients[clientNum].name);
         bitsUsed = MSG_GetUsedBitCount(msg);
         for (packetType = 0; packetType < 20; ++packetType)
         {
@@ -491,19 +491,19 @@ void __cdecl SV_AnalyzePacketData(int clientNum, const msg_t *msg)
                     v7 = s_packetMetaDataSize[clientNum][packetType] / 8;
                     v6 = s_packetMetaDataSize[clientNum][packetType];
                     PacketDataTypeName = SV_GetPacketDataTypeName(packetType);
-                    Com_Printf(15, "%30s: %9i (%9i bytes) - %3i%%\n", PacketDataTypeName, v6, v7, v9);
+                    Com_Printf(CON_CHANNEL_SERVER, "%30s: %9i (%9i bytes) - %3i%%\n", PacketDataTypeName, v6, v7, v9);
                 }
             }
         }
         type = "";
         Com_Printf(
-            15,
+            CON_CHANNEL_SERVER,
             "begin---------------------------------------------------------------------------------------------\n");
         v8 = s_avgSnapshotSize;
         cursize = msg->cursize;
         v3 = Sys_Milliseconds();
         Com_Printf(
-            15,
+            CON_CHANNEL_SERVER,
             "%i] %i byte snapshot for %s (average snapshot size is %f)\n",
             v3,
             cursize,
@@ -515,15 +515,15 @@ void __cdecl SV_AnalyzePacketData(int clientNum, const msg_t *msg)
             {
             case 0:
                 type = "Entity deltas";
-                Com_Printf(15, "%s - %i bits\n", "Entity deltas", g_bitsSent[clientNum][dataType]);
+                Com_Printf(CON_CHANNEL_SERVER, "%s - %i bits\n", "Entity deltas", g_bitsSent[clientNum][dataType]);
                 break;
             case 1:
                 type = "New entities";
-                Com_Printf(15, "%s - %i bits\n", "New entities", g_bitsSent[clientNum][dataType]);
+                Com_Printf(CON_CHANNEL_SERVER, "%s - %i bits\n", "New entities", g_bitsSent[clientNum][dataType]);
                 break;
             case 2:
                 type = "Removed entities";
-                Com_Printf(15, "%s - %i bits\n", "Removed entities", g_bitsSent[clientNum][dataType]);
+                Com_Printf(CON_CHANNEL_SERVER, "%s - %i bits\n", "Removed entities", g_bitsSent[clientNum][dataType]);
                 break;
             case 3:
             case 5:
@@ -531,31 +531,31 @@ void __cdecl SV_AnalyzePacketData(int clientNum, const msg_t *msg)
                 continue;
             case 4:
                 type = "Temp entity";
-                Com_Printf(15, "%s - %i bits\n", "Temp entity", g_bitsSent[clientNum][dataType]);
+                Com_Printf(CON_CHANNEL_SERVER, "%s - %i bits\n", "Temp entity", g_bitsSent[clientNum][dataType]);
                 break;
             case 6:
                 type = "Client deltas";
-                Com_Printf(15, "%s - %i bits\n", "Client deltas", g_bitsSent[clientNum][dataType]);
+                Com_Printf(CON_CHANNEL_SERVER, "%s - %i bits\n", "Client deltas", g_bitsSent[clientNum][dataType]);
                 break;
             case 7:
                 type = "New clients";
-                Com_Printf(15, "%s - %i bits\n", "New clients", g_bitsSent[clientNum][dataType]);
+                Com_Printf(CON_CHANNEL_SERVER, "%s - %i bits\n", "New clients", g_bitsSent[clientNum][dataType]);
                 break;
             case 8:
                 type = "Removed clients";
-                Com_Printf(15, "%s - %i bits\n", "Removed clients", g_bitsSent[clientNum][dataType]);
+                Com_Printf(CON_CHANNEL_SERVER, "%s - %i bits\n", "Removed clients", g_bitsSent[clientNum][dataType]);
                 break;
             case 10:
                 type = "Playerstate deltas";
-                Com_Printf(15, "%s - %i bits\n", "Playerstate deltas", g_bitsSent[clientNum][dataType]);
+                Com_Printf(CON_CHANNEL_SERVER, "%s - %i bits\n", "Playerstate deltas", g_bitsSent[clientNum][dataType]);
                 break;
             case 11:
                 type = "Playerstate nodelta";
-                Com_Printf(15, "%s - %i bits\n", "Playerstate nodelta", g_bitsSent[clientNum][dataType]);
+                Com_Printf(CON_CHANNEL_SERVER, "%s - %i bits\n", "Playerstate nodelta", g_bitsSent[clientNum][dataType]);
                 break;
             case 12:
                 type = "Server commands";
-                Com_Printf(15, "%s - %i bits\n", "Server commands", g_bitsSent[clientNum][dataType]);
+                Com_Printf(CON_CHANNEL_SERVER, "%s - %i bits\n", "Server commands", g_bitsSent[clientNum][dataType]);
                 break;
             default:
                 if (!alwaysfails)
@@ -564,25 +564,25 @@ void __cdecl SV_AnalyzePacketData(int clientNum, const msg_t *msg)
                         613,
                         0,
                         "Unknown field in the snapshot analysis in SV_AnalyzePacketData()!\n");
-                Com_Printf(15, "%s - %i bits\n", type, g_bitsSent[clientNum][dataType]);
+                Com_Printf(CON_CHANNEL_SERVER, "%s - %i bits\n", type, g_bitsSent[clientNum][dataType]);
                 break;
             }
         }
         for (entityType = 0; entityType < 23; ++entityType)
         {
             EntityTypeString = SV_GetEntityTypeString(entityType);
-            Com_Printf(15, "%s fields changed: (format fieldnum: timeschanged)\n", EntityTypeString);
+            Com_Printf(CON_CHANNEL_SERVER, "%s fields changed: (format fieldnum: timeschanged)\n", EntityTypeString);
             if (sv_debugPacketContents->current.enabled)
             {
                 for (field = 0; field < 160; ++field)
                 {
                     if (currentSnapshotNetworkEntityFieldsChanged[entityType][field])
-                        Com_Printf(15, "%i: %u\n", field, currentSnapshotNetworkEntityFieldsChanged[entityType][field]);
+                        Com_Printf(CON_CHANNEL_SERVER, "%i: %u\n", field, currentSnapshotNetworkEntityFieldsChanged[entityType][field]);
                 }
             }
         }
         Com_Printf(
-            15,
+            CON_CHANNEL_SERVER,
             "end-----------------------------------------------------------------------------------------------\n");
     }
     memset(s_packetMetaDataSize[clientNum], 0, sizeof(int[20]));
@@ -670,7 +670,7 @@ void __cdecl SV_TrackFieldChange(int clientNum, int entityType, uint field)
         {
             string = SV_GetEntityTypeString(entityType);
             if (*string)
-                Com_Printf(15, "%s - field %i changed\n", string, field);
+                Com_Printf(CON_CHANNEL_SERVER, "%s - field %i changed\n", string, field);
         }
     }
     else
@@ -1008,17 +1008,17 @@ void __cdecl SV_Netchan_PrintProfileStats(int bPrintToConsole)
     iassert(net_profile->current.integer);
     SV_Netchan_UpdateProfileStats();
     if (bPrintToConsole)
-        Com_Printf(15, "\n\n");
+        Com_Printf(CON_CHANNEL_SERVER, "\n\n");
     Com_sprintf(szLine, 0x400u, "====================");
     if (bPrintToConsole)
-        Com_Printf(15, "%s\n", szLine);
+        Com_Printf(CON_CHANNEL_SERVER, "%s\n", szLine);
     Com_sprintf(szLine, 0x400u, "Server Network Profile:");
     if (bPrintToConsole)
-        Com_Printf(15, "%s\n\n", szLine);
+        Com_Printf(CON_CHANNEL_SERVER, "%s\n\n", szLine);
     Com_sprintf(szLine, 0x400u, "                    | Sent To                                   | From |");
     if (bPrintToConsole)
     {
-        Com_Printf(15, "%s\n", szLine);
+        Com_Printf(CON_CHANNEL_SERVER, "%s\n", szLine);
     }
     else
     {
@@ -1028,7 +1028,7 @@ void __cdecl SV_Netchan_PrintProfileStats(int bPrintToConsole)
     Com_sprintf(szLine, 0x400u, "              Source|   bps|  max|  min|frag%%|drop%%|ak|huff%%|p/s|   bps|");
     if (bPrintToConsole)
     {
-        Com_Printf(15, "%s\n", szLine);
+        Com_Printf(CON_CHANNEL_SERVER, "%s\n", szLine);
     }
     else
     {
@@ -1116,7 +1116,7 @@ void __cdecl SV_Netchan_PrintProfileStats(int bPrintToConsole)
             iTotalBPSRecieved);
     if (bPrintToConsole)
     {
-        Com_Printf(15, "%s\n", szLine);
+        Com_Printf(CON_CHANNEL_SERVER, "%s\n", szLine);
     }
     else
     {
@@ -1158,7 +1158,7 @@ void __cdecl SV_Netchan_PrintProfileStats(int bPrintToConsole)
         pStream->recieve.iBytesPerSecond);
     if (bPrintToConsole)
     {
-        Com_Printf(15, "%s\n", szLine);
+        Com_Printf(CON_CHANNEL_SERVER, "%s\n", szLine);
     }
     else
     {
@@ -1230,7 +1230,7 @@ void __cdecl SV_Netchan_PrintProfileStats(int bPrintToConsole)
                 pStream->recieve.iBytesPerSecond);
             if (bPrintToConsole)
             {
-                Com_Printf(15, "%s\n", szLine);
+                Com_Printf(CON_CHANNEL_SERVER, "%s\n", szLine);
             }
             else
             {

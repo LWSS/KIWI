@@ -17,7 +17,7 @@ const netadr_t *__cdecl SV_MasterAddress()
 
     if (adr.type == NA_BOT)
     {
-        Com_Printf(15, "Resolving %s\n", com_masterServerName->current.string);
+        Com_Printf(CON_CHANNEL_SERVER, "Resolving %s\n", com_masterServerName->current.string);
         if (NET_StringToAdr((char *)com_masterServerName->current.integer, &adr))
         {
             const char* result = strstr(":", (char*)com_masterServerName->current.integer);
@@ -25,7 +25,7 @@ const netadr_t *__cdecl SV_MasterAddress()
                 adr.port = BigShort(com_masterPort->current.integer);
             v1 = BigShort(adr.port);
             Com_Printf(
-                15,
+                CON_CHANNEL_SERVER,
                 "%s resolved to %i.%i.%i.%i:%i\n",
                 com_masterServerName->current.string,
                 adr.ip[0],
@@ -38,7 +38,7 @@ const netadr_t *__cdecl SV_MasterAddress()
         else
         {
             iassert(adr.type == NA_BAD);
-            Com_Printf(15, "Couldn't resolve address: %s\n", com_masterServerName->current.string);
+            Com_Printf(CON_CHANNEL_SERVER, "Couldn't resolve address: %s\n", com_masterServerName->current.string);
         }
     }
     return &adr;
@@ -66,7 +66,7 @@ void __cdecl SV_MasterGameCompleteStatus()
         iassert(adr);
         if (adr->type != NA_BAD)
         {
-            Com_Printf(15, "Sending gameCompleteStatus to %s\n", com_masterServerName->current.string);
+            Com_Printf(CON_CHANNEL_SERVER, "Sending gameCompleteStatus to %s\n", com_masterServerName->current.string);
             SVC_GameCompleteStatus(*adr);
         }
     }
@@ -86,7 +86,7 @@ void __cdecl SV_MasterHeartbeat(const char *hbname)
     //        MyAssertHandler(".\\server_mp\\sv_main_pc_mp.cpp", 94, 0, "%s", "adr");
     //    if (adr->type != NA_BAD)
     //    {
-    //        Com_Printf(15, "Sending heartbeat to %s\n", com_masterServerName->current.string);
+    //        Com_Printf(CON_CHANNEL_SERVER, "Sending heartbeat to %s\n", com_masterServerName->current.string);
     //        v1 = va("heartbeat %s\n", hbname);
     //        NET_OutOfBandPrint(NS_SERVER, *adr, v1);
     //    }
@@ -116,7 +116,7 @@ void __cdecl SV_AuthorizeIpPacket(netadr_t from)
 
     if (!NET_CompareBaseAdr(from, svs.authorizeAddress))
     {
-        Com_Printf(15, "SV_AuthorizeIpPacket: not from authorize server\n");
+        Com_Printf(CON_CHANNEL_SERVER, "SV_AuthorizeIpPacket: not from authorize server\n");
         return;
     }
     v1 = SV_Cmd_Argv(1);
@@ -125,7 +125,7 @@ void __cdecl SV_AuthorizeIpPacket(netadr_t from)
         ;
     if (i == 1024)
     {
-        Com_Printf(15, "SV_AuthorizeIpPacket: challenge not found\n");
+        Com_Printf(CON_CHANNEL_SERVER, "SV_AuthorizeIpPacket: challenge not found\n");
         return;
     }
     svs.challenges[i].pingTime = svs.time;
@@ -203,7 +203,7 @@ void __cdecl SV_AuthorizeIpPacket(netadr_t from)
     else
     {
         Com_Printf(
-            15,
+            CON_CHANNEL_SERVER,
             "rejecting connection due to mismatched GUID: expected \"%s\", got \"%s\"\n",
             svs.challenges[i].cdkeyHash,
             cdkeyHashFromAuth);
@@ -260,14 +260,14 @@ void __cdecl SVC_RemoteCommand(netadr_t from)
             valid = 1;
             v6 = SV_Cmd_Argv(2);
             v2 = NET_AdrToString(from);
-            Com_Printf(15, "Rcon from %s:\n%s\n", v2, v6);
+            Com_Printf(CON_CHANNEL_SERVER, "Rcon from %s:\n%s\n", v2, v6);
         }
         else
         {
             valid = 0;
             v5 = SV_Cmd_Argv(2);
             v1 = NET_AdrToString(from);
-            Com_Printf(15, "Bad rcon from %s:\n%s\n", v1, v5);
+            Com_Printf(CON_CHANNEL_SERVER, "Bad rcon from %s:\n%s\n", v1, v5);
         }
         svs.redirectAddress = from;
         Com_BeginRedirect(sv_outputbuf, 0x7F0u, SV_FlushRedirect);
@@ -293,16 +293,16 @@ void __cdecl SVC_RemoteCommand(netadr_t from)
             }
             else if (*password)
             {
-                Com_Printf(15, "Invalid password.\n");
+                Com_Printf(CON_CHANNEL_SERVER, "Invalid password.\n");
             }
             else
             {
-                Com_Printf(15, "You must log in with 'rcon login <password>' before using 'rcon'.\n");
+                Com_Printf(CON_CHANNEL_SERVER, "You must log in with 'rcon login <password>' before using 'rcon'.\n");
             }
         }
         else
         {
-            Com_Printf(15, "The server must set 'rcon_password' for clients to use 'rcon'.\n");
+            Com_Printf(CON_CHANNEL_SERVER, "The server must set 'rcon_password' for clients to use 'rcon'.\n");
         }
         Com_EndRedirect();
     }
@@ -316,10 +316,10 @@ void __cdecl SV_VoicePacket(netadr_t from, msg_t *msg)
 
     qport = MSG_ReadShort(msg);
     ClientByAddress = SV_FindClientByAddress(from, qport);
-    if (ClientByAddress && ClientByAddress->header.state != 1)
+    if (ClientByAddress && ClientByAddress->header.state != CS_ZOMBIE)
     {
         ClientByAddress->lastPacketTime = svs.time;
-        if (ClientByAddress->header.state >= 4)
+        if (ClientByAddress->header.state >= CS_ACTIVE)
         {
             if (!ClientByAddress->gentity)
                 MyAssertHandler(".\\server_mp\\sv_main_mp.cpp", 534, 0, "%s", "cl->gentity");

@@ -168,14 +168,14 @@ int __cdecl Scr_GetFunctionHandle(const char* filename, const char* name)
     nameId = FindVariable(id, str);
     if (!nameId)
         return 0;
-    if (GetValueType(nameId) != 1)
+    if (GetValueType(nameId) != VAR_POINTER)
         return 0;
     threadId = FindObject(nameId);
     iassert(threadId);
     posId = FindVariable(threadId, 1u);
     iassert(posId);
     v3 = Scr_EvalVariable(posId);
-    if (v3.type != 7 && v3.type != 12)
+    if (v3.type != VAR_CODEPOS && v3.type != VAR_DEVELOPER_CODEPOS)
         MyAssertHandler(
             ".\\script\\scr_main.cpp",
             99,
@@ -367,7 +367,7 @@ char* __cdecl Scr_GetNextCodepos(VariableValue* top, const char* pos, int opcode
                 goto $LN54_3;
             case 'R':
             case 'V':
-                if (top->type != 1)
+                if (top->type != VAR_POINTER)
                     goto LABEL_19;
             $LN58_0:
                 if (scrVmPub.function_count >= 32)
@@ -377,10 +377,10 @@ char* __cdecl Scr_GetNextCodepos(VariableValue* top, const char* pos, int opcode
                 break;
             case 'S':
             case 'W':
-                if (top[-1].type != 1)
+                if (top[-1].type != VAR_POINTER)
                     goto LABEL_19;
             $LN54_3:
-                if (top->type != 9 || scrVmPub.function_count >= 32)
+                if (top->type != VAR_FUNCTION || scrVmPub.function_count >= 32)
                     goto LABEL_19;
                 *localId = 0;
                 result = (char*)top->u.intValue;
@@ -584,13 +584,13 @@ char* __cdecl Scr_GetNextCodepos(VariableValue* top, const char* pos, int opcode
                 posa = posb + 2;
                 caseCount = v12;
                 v9 = top->type;
-                if (v9 == 2)
+                if (v9 == VAR_STRING)
                 {
                     caseValue = top->u.intValue;
                 }
                 else
                 {
-                    if (v9 != 6)
+                    if (v9 != VAR_INTEGER)
                         return (char*)&posa[8 * v12];
                     if (!IsValidArrayIndex(top->u.intValue))
                         return (char*)&posa[8 * v12];
@@ -703,14 +703,14 @@ bool __cdecl Scr_IsEndonThread(uint localId)
     uint stackId; // [esp+0h] [ebp-8h]
     uint type; // [esp+4h] [ebp-4h]
 
-    if (GetObjectType(localId) != 15)
+    if (GetObjectType(localId) != VAR_NOTIFY_THREAD)
         return 0;
     if (GetStartLocalId(localId) != localId)
         return 0;
     stackId = Scr_GetWaittillThreadStackId(localId, localId);
     type = GetValueType(stackId);
     iassert((type == VAR_UNDEFINED) || (type == VAR_STACK));
-    return type == 0;
+    return type == VAR_UNDEFINED;
 }
 
 uint __cdecl Scr_GetWaittillThreadStackId(uint localId, uint startLocalId)
@@ -758,12 +758,12 @@ const char* __cdecl Scr_GetThreadPos(uint localId)
     ObjectType = GetObjectType(startLocalId);
     switch (ObjectType)
     {
-    case 0xEu:
+    case VAR_THREAD:
         return Scr_GetRunningThreadPos(localId);
-    case 0xFu:
+    case VAR_NOTIFY_THREAD:
         stackId = Scr_GetWaittillThreadStackId(localId, startLocalId);
         iassert(stackId);
-        if (GetValueType(stackId) != 10)
+        if (GetValueType(stackId) != VAR_STACK)
         {
             ValueType = GetValueType(stackId);
             MyAssertHandler(
@@ -775,10 +775,10 @@ const char* __cdecl Scr_GetThreadPos(uint localId)
                 ValueType);
         }
         goto LABEL_21;
-    case 0x10u:
+    case VAR_TIME_THREAD:
         stackId = Scr_GetWaitThreadStackId(localId, startLocalId);
         iassert(stackId);
-        if (GetValueType(stackId) != 10)
+        if (GetValueType(stackId) != VAR_STACK)
         {
             v3 = GetValueType(stackId);
             MyAssertHandler(
@@ -822,7 +822,7 @@ const char* __cdecl Scr_GetStackThreadPos(uint endLocalId, VariableStackBuffer* 
         u.intValue = *(int*)bufa;
         buf = bufa - 1;
         --size;
-        if (*buf == 7)
+        if (*buf == VAR_CODEPOS)
         {
             parentLocalId = GetParentLocalId(localId);
             if (localId == endLocalId)
@@ -1144,13 +1144,13 @@ void __cdecl Scr_TerminateThread(uint localId)
     ObjectType = GetObjectType(startLocalId);
     switch (ObjectType)
     {
-    case 0xEu:
+    case VAR_THREAD:
         Scr_TerminateRunningThread(localId);
         break;
-    case 0xFu:
+    case VAR_NOTIFY_THREAD:
         Scr_TerminateWaittillThread(localId, startLocalId);
         break;
-    case 0x10u:
+    case VAR_TIME_THREAD:
         Scr_TerminateWaitThread(localId, startLocalId);
         break;
     default:
@@ -1332,7 +1332,7 @@ void __cdecl Scr_TerminateWaittillThread(uint localId, uint startLocalId)
         stackIda = FindVariable(startLocalId, 0x18001u);
         if (!stackIda)
             MyAssertHandler(".\\script\\scr_vm.cpp", 3293, 0, "%s", "stackId");
-        if (GetValueType(stackIda) != 10)
+        if (GetValueType(stackIda) != VAR_STACK)
             MyAssertHandler(".\\script\\scr_vm.cpp", 3294, 0, "%s", "GetValueType( stackId ) == VAR_STACK");
         stackValue = (VariableStackBuffer*)GetVariableValueAddress(stackIda)->u.intValue;
         if (scrVarPub.developer)
@@ -1482,8 +1482,8 @@ void VM_PrintJumpHistory()
     const char *pos; // [esp+0h] [ebp-8h]
     int index; // [esp+4h] [ebp-4h]
 
-    Com_Printf(23, "********************************\n");
-    Com_Printf(23, "Recent loop history (from most recent) :\n");
+    Com_Printf(CON_CHANNEL_PARSERSCRIPT, "********************************\n");
+    Com_Printf(CON_CHANNEL_PARSERSCRIPT, "Recent loop history (from most recent) :\n");
     index = scrVmDebugPub.jumpbackHistoryIndex;
     do
     {
@@ -1492,9 +1492,9 @@ void VM_PrintJumpHistory()
         pos = scrVmDebugPub.jumpbackHistory[--index];
         if (!pos)
             break;
-        Scr_PrintPrevCodePos(23, (char *)pos, 0);
+        Scr_PrintPrevCodePos(CON_CHANNEL_PARSERSCRIPT, (char *)pos, 0);
     } while (index != scrVmDebugPub.jumpbackHistoryIndex);
-    Com_Printf(23, "********************************\n");
+    Com_Printf(CON_CHANNEL_PARSERSCRIPT, "********************************\n");
 }
 
 VariableStackBuffer *__cdecl VM_ArchiveStack()
@@ -3004,7 +3004,7 @@ function_call:
                 iassert(logScriptTimes);
                 if (logScriptTimes->current.enabled)
                 {
-                    Com_Printf(23, "EXCEED TIME: %d\n", Sys_Milliseconds());
+                    Com_Printf(CON_CHANNEL_PARSERSCRIPT, "EXCEED TIME: %d\n", Sys_Milliseconds());
                 }
                 if (!scrVmGlob.loading)
                 {
@@ -3018,7 +3018,7 @@ function_call:
                     }
                     if (!scrVmPub.abort_on_error)
                     {
-                        Com_Printf(1, "script runtime error: potential infinite loop in script - killing thread.\n");
+                        Com_Printf(CON_CHANNEL_ERROR, "script runtime error: potential infinite loop in script - killing thread.\n");
                         Scr_PrintPrevCodePos(CON_CHANNEL_DONT_FILTER, (char*)fs.pos, 0);
                         Scr_ResetTimeout();
                         while (1)
@@ -3051,7 +3051,7 @@ function_call:
                     }
                     Scr_TerminalError("potential infinite loop in script");
                 }
-                Com_Printf(1, "script runtime warning: potential infinite loop in script.\n");
+                Com_Printf(CON_CHANNEL_ERROR, "script runtime warning: potential infinite loop in script.\n");
                 Scr_PrintPrevCodePos(CON_CHANNEL_DONT_FILTER, (char*)fs.pos, 0);
                 jumpOffset = Scr_ReadUnsignedShort(&fs.pos);
                 fs.pos -= jumpOffset;
@@ -3836,7 +3836,7 @@ scr_anim_s __cdecl Scr_GetAnim(uint index, XAnimTree_s* tree)
     if (index < scrVmPub.outparamcount)
     {
         value = &scrVmPub.top[-(int)index];
-        if (value->type == 11)
+        if (value->type == VAR_ANIMATION)
         {
             anim = (scr_anim_s)value->u.intValue;
             if (!tree)
@@ -3882,9 +3882,9 @@ BOOL Scr_ErrorInternal()
     {
         if (scrVmPub.function_count || scrVmPub.debugCode)
         {
-            Com_PrintMessage(6, "throwing script exception: ", 0);
-            Com_PrintMessage(6, (char*)scrVarPub.error_message, 0);
-            Com_PrintMessage(6, "\n", 0);
+            Com_PrintMessage(CON_CHANNEL_LOGFILEONLY, "throwing script exception: ", 0);
+            Com_PrintMessage(CON_CHANNEL_LOGFILEONLY, (char*)scrVarPub.error_message, 0);
+            Com_PrintMessage(CON_CHANNEL_LOGFILEONLY, "\n", 0);
 
             bcassert(g_script_error_level, ARRAY_COUNT(g_script_error));
 
@@ -3907,9 +3907,9 @@ float __cdecl Scr_GetFloat(uint index)
     if (index < scrVmPub.outparamcount)
     {
         value = &scrVmPub.top[-(int)index];
-        if (value->type == 5)
+        if (value->type == VAR_FLOAT)
             return value->u.floatValue;
-        if (value->type == 6)
+        if (value->type == VAR_INTEGER)
             return (double)value->u.intValue;
         scrVarPub.error_index = index + 1;
         Scr_Error(va("type %s is not a float", var_typename[value->type]));
@@ -4055,7 +4055,7 @@ void __cdecl Scr_GetVector(uint index, float* vectorValue)
     if (index < scrVmPub.outparamcount)
     {
         value = &scrVmPub.top[-(int)index];
-        if (value->type == 4)
+        if (value->type == VAR_VECTOR)
         {
             vecValue = value->u.vectorValue;
             vectorValue[0] = vecValue[0];
@@ -4225,8 +4225,7 @@ void __cdecl Scr_AddObject(uint id)
 {
     iassert(id);
     iassert(GetObjectType( id ) != VAR_THREAD);
-    if (GetObjectType(id) == 15)
-        MyAssertHandler(".\\script\\scr_vm.cpp", 4895, 0, "%s", "GetObjectType( id ) != VAR_NOTIFY_THREAD");
+    iassert(GetObjectType( id ) != VAR_NOTIFY_THREAD);
     iassert(GetObjectType( id ) != VAR_TIME_THREAD);
     iassert(GetObjectType( id ) != VAR_CHILD_THREAD);
     iassert(GetObjectType( id ) != VAR_DEAD_THREAD);
@@ -4493,7 +4492,7 @@ void VM_SetTime()
             iassert(logScriptTimes);
             if (logScriptTimes->current.enabled)
             {
-                Com_Printf(23, "SET TIME: %d\n", Sys_Milliseconds());
+                Com_Printf(CON_CHANNEL_PARSERSCRIPT, "SET TIME: %d\n", Sys_Milliseconds());
             }
             Object = FindObject(id);
             VM_Resume(Object);
@@ -4755,7 +4754,7 @@ void __cdecl Scr_ResetTimeout()
     if (logScriptTimes->current.enabled)
     {
         v0 = Sys_Milliseconds();
-        Com_Printf(23, "RESET TIME: %d\n", v0);
+        Com_Printf(CON_CHANNEL_PARSERSCRIPT, "RESET TIME: %d\n", v0);
     }
     memset(scrVmDebugPub.jumpbackHistory, 0, sizeof(scrVmDebugPub.jumpbackHistory));
 }
@@ -4875,7 +4874,7 @@ char __cdecl Scr_PrintProfileBuiltinTimes(float minTime)
             {
                 v2 = *((float*)Sys_GetValue(0) + 20782);
                 Com_Printf(
-                    23,
+                    CON_CHANNEL_PARSERSCRIPT,
                     "time: %f, usage: %d, %s\n",
                     (double)scrVmDebugPub.func_table[j].prof * v2,
                     scrVmDebugPub.func_table[j].usage,
@@ -4983,7 +4982,7 @@ uint Scr_GetFunc(uint index)
     if (index < scrVmPub.outparamcount)
     {
         value = &scrVmPub.top[-index];
-        if (value->type == 9)
+        if (value->type == VAR_FUNCTION)
         {
             iassert(Scr_IsInOpcodeMemory( value->u.codePosValue ));
             return value->u.intValue - (uint)scrVarPub.programBuffer;
@@ -5032,7 +5031,7 @@ XAnim_s * Scr_GetAnimTree(uint index)
     {
         v3 = &scrVmPub.top[-index];
         type = v3->type;
-        if (type == 6)
+        if (type == VAR_INTEGER)
         {
             if (v3->u.intValue <= scrAnimPub.xanim_num[1])
             {

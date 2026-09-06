@@ -109,7 +109,7 @@ void __cdecl SV_UserVoice(client_t *cl, msg_t *msg)
             voicePacket.dataSize = MSG_ReadByte(msg);
             if (voicePacket.dataSize <= 0 || voicePacket.dataSize > 256)
             {
-                Com_Printf(15, "Received invalid voice packet of size %i from %s\n", voicePacket.dataSize, cl->name);
+                Com_Printf(CON_CHANNEL_SERVER, "Received invalid voice packet of size %i from %s\n", voicePacket.dataSize, cl->name);
                 return;
             }
             iassert(msg->data);
@@ -159,7 +159,7 @@ void __cdecl SV_PreGameUserVoice(client_t *cl, msg_t *msg)
             voicePacket.dataSize = MSG_ReadShort(msg);
             if (voicePacket.dataSize <= 0 || voicePacket.dataSize > 256)
             {
-                Com_Printf(15, "Received invalid voice packet of size %i from %s\n", voicePacket.dataSize, cl->name);
+                Com_Printf(CON_CHANNEL_SERVER, "Received invalid voice packet of size %i from %s\n", voicePacket.dataSize, cl->name);
                 return;
             }
             iassert(msg->data);
@@ -169,7 +169,7 @@ void __cdecl SV_PreGameUserVoice(client_t *cl, msg_t *msg)
             for (otherPlayer = 0; otherPlayer < 64; ++otherPlayer)
             {
                 if (otherPlayer != talker
-                    && svs.clients[otherPlayer].header.state >= 2
+                    && svs.clients[otherPlayer].header.state >= CS_CONNECTED
                     && !SV_ClientHasClientMuted(otherPlayer, talker)
                     && SV_ClientWantsVoiceData(otherPlayer))
                 {

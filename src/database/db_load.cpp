@@ -2431,7 +2431,7 @@ void __cdecl Load_MaterialTechnique(bool atStreamStart)
 
 void __cdecl Load_MaterialTextureDefInfo(bool atStreamStart)
 {
-    if (varMaterialTextureDef->semantic == 11)
+    if (varMaterialTextureDef->semantic == TS_WATER_MAP)
     {
         if (*varMaterialTextureDefInfo)
         {
@@ -2655,7 +2655,7 @@ void __cdecl Load_MaterialHandleArray(bool atStreamStart, int count)
 
 void __cdecl Mark_MaterialTextureDefInfo()
 {
-    if (varMaterialTextureDef->semantic == 11)
+    if (varMaterialTextureDef->semantic == TS_WATER_MAP)
     {
         if (varMaterialTextureDefInfo)
         {

@@ -137,7 +137,7 @@ uint __cdecl RB_UploadMaterialTechnique(const MaterialTechnique *tech, uint tech
         || !strncmp(tech->name, "effect_", 7u))
     {
         vertDeclType = VERTDECL_PACKED;
-        if (techType >= 0xE && techType < 0x15)
+        if (techType >= TECHNIQUE_LIT_INSTANCED && techType < TECHNIQUE_LIT_END)
             vertDeclType = VERTDECL_STATICMODELCACHE;
     }
     else

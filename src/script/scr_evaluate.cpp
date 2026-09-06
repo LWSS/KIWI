@@ -240,17 +240,17 @@ void __cdecl Scr_GetValueString(uint localId, VariableValue *value, int len, cha
     uint type; // [esp+2Ch] [ebp-8h]
     VariableUnion id; // [esp+30h] [ebp-4h]
 
-    if (value->type >= 0x17u)
+    if (value->type >= VAR_COUNT)
         MyAssertHandler(".\\script\\scr_evaluate.cpp", 342, 0, "%s", "(unsigned)value->type < VAR_COUNT");
     switch (value->type)
     {
-    case 0:
+    case VAR_UNDEFINED:
         I_strncpyz(s, "undefined", len);
         break;
-    case 1:
+    case VAR_POINTER:
         id.intValue = value->u.intValue;
         type = GetObjectType(value->u.intValue);
-        if (type == 20)
+        if (type == VAR_ENTITY)
         {
             EntNum = Scr_GetEntNum(id.stringValue);
             EntClassId = Scr_GetEntClassId(id.stringValue);
@@ -266,22 +266,22 @@ void __cdecl Scr_GetValueString(uint localId, VariableValue *value, int len, cha
         }
         else
         {
-            if (type >= 0x17)
+            if (type >= VAR_COUNT)
                 MyAssertHandler(".\\script\\scr_evaluate.cpp", 397, 0, "%s", "(unsigned)type < VAR_COUNT");
             switch (type)
             {
-            case 0xEu:
-            case 0xFu:
-            case 0x10u:
-            case 0x11u:
+            case VAR_THREAD:
+            case VAR_NOTIFY_THREAD:
+            case VAR_TIME_THREAD:
+            case VAR_CHILD_THREAD:
                 Com_sprintf(s, len, "$t%i", id.intValue);
                 break;
-            case 0x12u:
+            case VAR_OBJECT:
                 if (!localId || id.intValue != Scr_GetSelf(localId))
                     goto LABEL_26;
                 I_strncpyz(s, "self", len);
                 break;
-            case 0x15u:
+            case VAR_ARRAY:
                 ArraySize = GetArraySize(id.stringValue);
                 Com_sprintf(s, len, "<array of size %i>", ArraySize);
                 break;
@@ -292,13 +292,13 @@ void __cdecl Scr_GetValueString(uint localId, VariableValue *value, int len, cha
             }
         }
         break;
-    case 2:
+    case VAR_STRING:
         Com_sprintf(s, len, "\"%s\"", SL_ConvertToString(value->u.intValue));
         break;
-    case 3:
+    case VAR_ISTRING:
         Com_sprintf(s, len, "&\"%s\"", SL_ConvertToString(value->u.intValue));
         break;
-    case 4:
+    case VAR_VECTOR:
         sprintf(
             s,
             "(%g, %g, %g)",
@@ -306,16 +306,16 @@ void __cdecl Scr_GetValueString(uint localId, VariableValue *value, int len, cha
             *(float *)(value->u.intValue + 4),
             *(float *)(value->u.intValue + 8));
         break;
-    case 5:
+    case VAR_FLOAT:
         Com_sprintf(s, len, "%g", value->u.floatValue);
         break;
-    case 6:
+    case VAR_INTEGER:
         Com_sprintf(s, len, "%i", value->u.intValue);
         break;
-    case 9:
+    case VAR_FUNCTION:
         Scr_GetCodePos((const char *)(value->u.intValue - 1), 1u, s, len);
         break;
-    case 0xB:
+    case VAR_ANIMATION:
         intValue = (uint16_t)value->u.intValue;
         Anims = Scr_GetAnims(HIWORD(value->u.intValue));
         AnimDebugName = XAnimGetAnimDebugName(Anims, intValue);
@@ -775,7 +775,7 @@ void __cdecl Scr_CompileTextInternal(const char *text, ScriptExpression_t *scrip
         if (scrVarPub.error_message)
         {
             if (*text)
-                Com_PrintError(23, "%s\n", scrVarPub.error_message);
+                Com_PrintError(CON_CHANNEL_PARSERSCRIPT, "%s\n", scrVarPub.error_message);
             Scr_ClearErrorMessage();
             scriptExpr->parseData = debugger_node0(ENUM_bad_expression);
             SL_ShutdownSystem(2);
@@ -805,7 +805,7 @@ void __cdecl Scr_CompileTextInternal(const char *text, ScriptExpression_t *scrip
                 Scr_CompileStatement(scriptExpr->parseData);
                 if (scrVarPub.error_message)
                 {
-                    Com_PrintError(23, "%s\n", scrVarPub.error_message);
+                    Com_PrintError(CON_CHANNEL_PARSERSCRIPT, "%s\n", scrVarPub.error_message);
                     Scr_ClearErrorMessage();
                     scriptExpr->parseData = debugger_node0(ENUM_bad_statement);
                     SL_ShutdownSystem(2);
@@ -1016,8 +1016,8 @@ void __cdecl Scr_EvalPrimitiveExpression(sval_u expr, uint localId, VariableValu
     case ENUM_breakon:
         Scr_EvalPrimitiveExpression(expr.node[1], localId, &objectValue);
         Scr_EvalExpression(expr.node[2], localId, &stringValue);
-        if (objectValue.type == 1
-            && stringValue.type == 2
+        if (objectValue.type == VAR_POINTER
+            && stringValue.type == VAR_STRING
             && g_breakonObject == objectValue.u.intValue
             && g_breakonString == stringValue.u.intValue)
         {
@@ -1230,13 +1230,13 @@ void __cdecl Scr_EvalSelfValue(VariableValue *value)
     signed int ObjectType; // [esp+0h] [ebp-8h]
     VariableUnion threadId; // [esp+4h] [ebp-4h]
 
-    if (value->type != 1)
+    if (value->type != VAR_POINTER)
         goto LABEL_8;
     threadId.intValue = value->u.intValue;
     ObjectType = GetObjectType(value->u.intValue);
-    if (ObjectType < 14)
+    if (ObjectType < VAR_THREAD)
         goto LABEL_8;
-    if (ObjectType <= 17)
+    if (ObjectType <= VAR_CHILD_THREAD)
     {
         value->type = VAR_POINTER;
         value->u.intValue = Scr_GetSelf(threadId.stringValue);
@@ -1244,7 +1244,7 @@ void __cdecl Scr_EvalSelfValue(VariableValue *value)
         RemoveRefToObject(threadId.stringValue);
         return;
     }
-    if (ObjectType == 22)
+    if (ObjectType == VAR_DEAD_THREAD)
     {
         Scr_Error("thread not active");
         Scr_ClearValue(value);
@@ -1446,7 +1446,7 @@ void __cdecl Scr_EvalMethod(sval_u expr, sval_u func_name, sval_u params, uint l
             33);
     if (!setjmp(g_script_error[g_script_error_level]))
     {
-        if (objectValue.type != 1)
+        if (objectValue.type != VAR_POINTER)
         {
             type = objectValue.type;
             RemoveRefToValue(objectValue.type, objectValue.u);
@@ -1455,7 +1455,7 @@ void __cdecl Scr_EvalMethod(sval_u expr, sval_u func_name, sval_u params, uint l
             Scr_Error(v5);
         }
         objectId.intValue = objectValue.u.intValue;
-        if (GetObjectType(objectValue.u.stringValue) != 20)
+        if (GetObjectType(objectValue.u.stringValue) != VAR_ENTITY)
         {
             typea = GetObjectType(objectId.stringValue);
             RemoveRefToObject(objectId.stringValue);
@@ -1479,11 +1479,11 @@ void __cdecl Scr_EvalBoolOrExpression(sval_u expr1, sval_u expr2, uint localId, 
 
     Scr_EvalExpression(expr1, localId, value);
     Scr_CastBool(value);
-    v5 = value->type == 6 && value->u.intValue;
+    v5 = value->type == VAR_INTEGER && value->u.intValue;
     RemoveRefToValue(value->type, value->u);
     Scr_EvalExpression(expr2, localId, value);
     Scr_CastBool(value);
-    v4 = v5 || value->type == 6 && value->u.intValue;
+    v4 = v5 || value->type == VAR_INTEGER && value->u.intValue;
     RemoveRefToValue(value->type, value->u);
     value->type = VAR_INTEGER;
     value->u.intValue = v4;
@@ -1496,11 +1496,11 @@ void __cdecl Scr_EvalBoolAndExpression(sval_u expr1, sval_u expr2, uint localId,
 
     Scr_EvalExpression(expr1, localId, value);
     Scr_CastBool(value);
-    v5 = value->type == 6 && value->u.intValue;
+    v5 = value->type == VAR_INTEGER && value->u.intValue;
     RemoveRefToValue(value->type, value->u);
     Scr_EvalExpression(expr2, localId, value);
     Scr_CastBool(value);
-    v4 = v5 && value->type == 6 && value->u.intValue;
+    v4 = v5 && value->type == VAR_INTEGER && value->u.intValue;
     RemoveRefToValue(value->type, value->u);
     value->type = VAR_INTEGER;
     value->u.intValue = v4;

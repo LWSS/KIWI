@@ -121,7 +121,7 @@ char __cdecl CG_DrawScoreboard_GetTeamColorIndex(int team, int localClientNum)
 
     bcassert(cgameGlob->clientNum, MAX_CLIENTS);
 
-    if (team != 2 && team != 1)
+    if (team != TEAM_ALLIES && team != TEAM_AXIS)
         return 55;
 
     if (cgameGlob->bgs.clientinfo[cgameGlob->clientNum].team != TEAM_ALLIES
@@ -560,14 +560,14 @@ double __cdecl CG_DrawScoreboard_ListBanner(
     bannerFont = UI_GetFontHandle(scrPlace, cg_scoreboardFont->current.integer, v17);
     if (team)
     {
-        if (team == 1)
+        if (team == TEAM_AXIS)
         {
             shaderName = (char *)Dvar_GetString("g_TeamIcon_Axis");
             teamName = Dvar_GetString("g_TeamName_Axis");
             v8 = SEH_LocalizeTextMessage(teamName, "scoreboard team name", LOCMSG_SAFE);
             displayString = va("%s", v8);
         }
-        else if (team == 2)
+        else if (team == TEAM_ALLIES)
         {
             shaderName = (char *)Dvar_GetString("g_TeamIcon_Allies");
             teamNamea = Dvar_GetString("g_TeamName_Allies");
@@ -713,7 +713,7 @@ double __cdecl CG_DrawClientScore(
             DrawListString(localClientNum, (char *)string, x, y, w, info[i].iAlignment, listFont, v23, 3, textColor);
             break;
         case LCT_SCORE:
-            if (score->team != 3)
+            if (score->team != TEAM_SPECTATOR)
             {
                 string = va("%i", score->score);
                 v22 = CG_BannerScoreboardScaleMultiplier() * 0.3499999940395355;
@@ -721,7 +721,7 @@ double __cdecl CG_DrawClientScore(
             }
             break;
         case LCT_DEATHS:
-            if (score->team != 3)
+            if (score->team != TEAM_SPECTATOR)
             {
                 string = va("%i", score->deaths);
                 v21 = CG_BannerScoreboardScaleMultiplier() * 0.3499999940395355;
@@ -780,7 +780,7 @@ double __cdecl CG_DrawClientScore(
             }
             break;
         case LCT_KILLS:
-            if (score->team != 3)
+            if (score->team != TEAM_SPECTATOR)
             {
                 string = va("%i", score->kills);
                 v20 = CG_BannerScoreboardScaleMultiplier() * 0.3499999940395355;
@@ -817,7 +817,7 @@ double __cdecl CG_DrawClientScore(
             }
             break;
         case LCT_ASSISTS:
-            if (score->team != 3)
+            if (score->team != TEAM_SPECTATOR)
             {
                 string = va("%i", score->assists);
                 v19 = CG_BannerScoreboardScaleMultiplier() * 0.3499999940395355;

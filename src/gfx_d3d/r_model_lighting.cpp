@@ -1,5 +1,6 @@
 #include <universal/q_shared.h>
 #include "r_model_lighting.h"
+#include "r_image.h"
 #include "r_dvars.h"
 #include "r_staticmodelcache.h"
 #include "r_dpvs.h"
@@ -473,13 +474,13 @@ void __cdecl R_SetModelGroundLighting(uint entryIndex, const uint8_t *groundLigh
 
 void __cdecl R_SetModelLightingCoordsForSource(uint16_t handle, GfxCmdBufSourceState *source)
 {
-    R_SetModelLightingCoords(handle, source->input.consts[57]);
+    R_SetModelLightingCoords(handle, source->input.consts[CONST_SRC_CODE_BASE_LIGHTING_COORDS]);
     R_DirtyCodeConstant(source, CONST_SRC_CODE_BASE_LIGHTING_COORDS);
 }
 
 void __cdecl R_SetStaticModelLightingCoordsForSource(uint smodelIndex, GfxCmdBufSourceState *source)
 {
-    R_SetModelLightingCoords(rgp.world->dpvs.smodelDrawInsts[smodelIndex].lightingHandle, source->input.consts[57]);
+    R_SetModelLightingCoords(rgp.world->dpvs.smodelDrawInsts[smodelIndex].lightingHandle, source->input.consts[CONST_SRC_CODE_BASE_LIGHTING_COORDS]);
     R_DirtyCodeConstant(source, CONST_SRC_CODE_BASE_LIGHTING_COORDS);
 }
 
@@ -616,16 +617,16 @@ void __cdecl R_InitModelLightingImage()
     iassert(modelLightGlob.totalEntryLimit);
 
     useAltUpdate = Dvar_GetBool("r_altModelLightingUpdate");
-    modelLightGlob.lightImages[0] = Image_AllocProg(12, 4u, 1u);
+    modelLightGlob.lightImages[0] = Image_AllocProg(12, IMG_CATEGORY_RAW, TS_FUNCTION);
     if (useAltUpdate)
     {
-        Image_SetupAndLoad(modelLightGlob.lightImages[0], 256, modelLightGlob.imageHeight, 4, 0x1000A, D3DFMT_A8R8G8B8);
-        modelLightGlob.lightImages[1] = Image_AllocProg(13, 4u, 1u);
-        Image_SetupAndLoad(modelLightGlob.lightImages[1], 256, modelLightGlob.imageHeight, 4, 0x4000A, D3DFMT_A8R8G8B8);
+        Image_SetupAndLoad(modelLightGlob.lightImages[0], 256, modelLightGlob.imageHeight, 4, IMG_FLAG_NOMIPMAPS | IMG_FLAG_VOLMAP | IMG_FLAG_DYNAMIC, D3DFMT_A8R8G8B8);
+        modelLightGlob.lightImages[1] = Image_AllocProg(13, IMG_CATEGORY_RAW, TS_FUNCTION);
+        Image_SetupAndLoad(modelLightGlob.lightImages[1], 256, modelLightGlob.imageHeight, 4, IMG_FLAG_NOMIPMAPS | IMG_FLAG_VOLMAP | IMG_FLAG_SYSTEMMEM, D3DFMT_A8R8G8B8);
     }
     else
     {
-        Image_SetupAndLoad(modelLightGlob.lightImages[0], 256, modelLightGlob.imageHeight, 4, 0xA, D3DFMT_A8R8G8B8);
+        Image_SetupAndLoad(modelLightGlob.lightImages[0], 256, modelLightGlob.imageHeight, 4, IMG_FLAG_NOMIPMAPS | IMG_FLAG_VOLMAP, D3DFMT_A8R8G8B8);
         modelLightGlob.lightImages[1] = 0;
     }
     modelLightGlob.image = modelLightGlob.lightImages[0];

@@ -455,7 +455,7 @@ void __cdecl RunLogicOp(
         v9 = GetSourceString(data1);
         v6 = GetNameForValueType(data1.dataType);
         Com_Printf(
-            13,
+            CON_CHANNEL_UI,
             "running %s on a %s (%s) and a %s (%s)\n",
             g_expOperatorNames[op],
             v6,
@@ -474,7 +474,7 @@ void __cdecl RunLogicOp(
         v12 = GetNameForValueType(data2.dataType);
         v10 = GetSourceString(data1);
         v7 = GetNameForValueType(data1.dataType);
-        Com_PrintError(13, "Error: You cannot %s a '%s' (%s) and a '%s' (%s)\n", opDescription, v7, v10, v12, v14);
+        Com_PrintError(CON_CHANNEL_UI, "Error: You cannot %s a '%s' (%s) and a '%s' (%s)\n", opDescription, v7, v10, v12, v14);
         operandResult.dataType = VAL_INT;
         operandResult.internals.intVal = 0;
     }
@@ -483,7 +483,7 @@ void __cdecl RunLogicOp(
     {
         v15 = GetSourceString(operandResult);
         v8 = GetNameForValueType(operandResult.dataType);
-        Com_Printf(13, "result is a %s (%s)\n", v8, v15);
+        Com_Printf(CON_CHANNEL_UI, "result is a %s (%s)\n", v8, v15);
     }
 }
 
@@ -554,7 +554,7 @@ char __cdecl GetOperand(OperandStack *dataStack, Operand *data)
         else
         {
             Com_PrintError(
-                13,
+                CON_CHANNEL_UI,
                 "Error: Invalid operand count - expected to find one operand but instead found %i\n",
                 list->operandCount);
             data->dataType = VAL_INT;
@@ -564,7 +564,7 @@ char __cdecl GetOperand(OperandStack *dataStack, Operand *data)
     }
     else
     {
-        Com_PrintError(13, "Error: Invalid operation - missing parameter inside function or parenthesis\n");
+        Com_PrintError(CON_CHANNEL_UI, "Error: Invalid operation - missing parameter inside function or parenthesis\n");
         dataStack->numOperandLists = 1;
         dataStack->stack[0].operandCount = 1;
         v2.intVal = (int)dataStack->stack[0].operands[0].internals;
@@ -592,7 +592,7 @@ char __cdecl GetOperandList(OperandStack *dataStack, OperandList *list)
     }
     else
     {
-        Com_PrintError(13, "Error: Invalid operation - missing parameter inside function or parenthesis\n");
+        Com_PrintError(CON_CHANNEL_UI, "Error: Invalid operation - missing parameter inside function or parenthesis\n");
         dataStack->numOperandLists = 1;
         memcpy(list, dataStack, sizeof(OperandList));
         list->operandCount = 1;
@@ -613,7 +613,7 @@ void __cdecl GetIsIntermission(int localClientNum, Operand *result)
     result->dataType = VAL_INT;
     result->internals.intVal = CG_IsIntermission(localClientNum);
     if (uiscript_debug->current.integer)
-        Com_Printf(13, "isIntermission() = %i\n", result->internals.intVal);
+        Com_Printf(CON_CHANNEL_UI, "isIntermission() = %i\n", result->internals.intVal);
 }
 #endif
 
@@ -636,7 +636,7 @@ void __cdecl RunOp(int localClientNum, OperatorStack *opStack, OperandStack *dat
     op = opStack->stack[--opStack->numOperators];
     opStack->stack[opStack->numOperators] = OP_NOOP;
     if (uiscript_debug->current.integer > 1)
-        Com_Printf(13, "evaluating %s\n", g_expOperatorNames[op]);
+        Com_Printf(CON_CHANNEL_UI, "evaluating %s\n", g_expOperatorNames[op]);
     switch (op)
     {
     case OP_NOOP:
@@ -653,7 +653,7 @@ void __cdecl RunOp(int localClientNum, OperatorStack *opStack, OperandStack *dat
             RunOp(localClientNum, opStack, dataStack);
         } while (!OpPairsWithRightParen(op));
         if (!OpPairsWithRightParen(op))
-            Com_PrintError(13, "Error: found ')' but couldn't find what it was closing\n");
+            Com_PrintError(CON_CHANNEL_UI, "Error: found ')' but couldn't find what it was closing\n");
         return;
     case OP_MULTIPLY:
     case OP_DIVIDE:
@@ -686,7 +686,7 @@ void __cdecl RunOp(int localClientNum, OperatorStack *opStack, OperandStack *dat
             {
                 if (data2.dataType != VAL_FLOAT)
                 {
-                    Com_PrintError(13, "Error: trying to negate a string: %s\n", data2.internals.string);
+                    Com_PrintError(CON_CHANNEL_UI, "Error: trying to negate a string: %s\n", data2.internals.string);
                     return;
                 }
                 data2.internals.floatVal = -data2.internals.floatVal;
@@ -1027,12 +1027,12 @@ void __cdecl GetDvarStringValue(Operand *source, Operand *result)
             result->internals.intVal = (int)"";
         }
         if (uiscript_debug->current.integer)
-            Com_Printf(13, "dvarstring( %s ) = %s\n", source->internals.string, result->internals.string);
+            Com_Printf(CON_CHANNEL_UI, "dvarstring( %s ) = %s\n", source->internals.string, result->internals.string);
     }
     else
     {
         NameForValueType = GetNameForValueType(source->dataType);
-        Com_PrintError(13, "Error: Must use a string as the name of a dvar, not a %s\n", NameForValueType);
+        Com_PrintError(CON_CHANNEL_UI, "Error: Must use a string as the name of a dvar, not a %s\n", NameForValueType);
         result->dataType = VAL_STRING;
         result->internals.intVal = (int)"";
     }
@@ -1060,12 +1060,12 @@ void __cdecl GetDvarBoolValue(Operand *source, Operand *result)
         VariantString = Dvar_GetVariantString(source->internals.string);
         result->internals.intVal = atoi(VariantString);
         if (uiscript_debug->current.integer)
-            Com_Printf(13, "dvarbool( %s ) = %i\n", source->internals.string, result->internals.intVal);
+            Com_Printf(CON_CHANNEL_UI, "dvarbool( %s ) = %i\n", source->internals.string, result->internals.intVal);
     }
     else
     {
         NameForValueType = GetNameForValueType(source->dataType);
-        Com_PrintError(13, "Error: Must use a string as the name of a dvar, not a %s\n", NameForValueType);
+        Com_PrintError(CON_CHANNEL_UI, "Error: Must use a string as the name of a dvar, not a %s\n", NameForValueType);
         result->dataType = VAL_INT;
         result->internals.intVal = 0;
     }
@@ -1082,12 +1082,12 @@ void __cdecl GetDvarIntValue(Operand *source, Operand *result)
         VariantString = Dvar_GetVariantString(source->internals.string);
         result->internals.intVal = atoi(VariantString);
         if (uiscript_debug->current.integer)
-            Com_Printf(13, "dvarint( %s ) = %i\n", source->internals.string, result->internals.intVal);
+            Com_Printf(CON_CHANNEL_UI, "dvarint( %s ) = %i\n", source->internals.string, result->internals.intVal);
     }
     else
     {
         NameForValueType = GetNameForValueType(source->dataType);
-        Com_PrintError(13, "Error: Must use a string as the name of a dvar, not a %s\n", NameForValueType);
+        Com_PrintError(CON_CHANNEL_UI, "Error: Must use a string as the name of a dvar, not a %s\n", NameForValueType);
         result->dataType = VAL_INT;
         result->internals.intVal = 0;
     }
@@ -1104,12 +1104,12 @@ void __cdecl GetDvarFloatValue(Operand *source, Operand *result)
         VariantString = Dvar_GetVariantString(source->internals.string);
         result->internals.floatVal = atof(VariantString);
         if (uiscript_debug->current.integer)
-            Com_Printf(13, "dvarfloat( %s ) = %f\n", source->internals.string, result->internals.floatVal);
+            Com_Printf(CON_CHANNEL_UI, "dvarfloat( %s ) = %f\n", source->internals.string, result->internals.floatVal);
     }
     else
     {
         NameForValueType = GetNameForValueType(source->dataType);
-        Com_PrintError(13, "Error: Must use a string as the name of a dvar, not a %s\n", NameForValueType);
+        Com_PrintError(CON_CHANNEL_UI, "Error: Must use a string as the name of a dvar, not a %s\n", NameForValueType);
         result->dataType = VAL_FLOAT;
         result->internals.floatVal = 0.0;
     }
@@ -1130,7 +1130,7 @@ void __cdecl GetLocalVarStringValue(
         result->dataType = VAL_STRING;
         result->internals.string = UILocalVar_GetString(var->table, stringBuf, size);
         if (uiscript_debug->current.integer)
-            Com_Printf(13, "localVarString( %s ) = %s\n", source->internals.string, result->internals.string);
+            Com_Printf(CON_CHANNEL_UI, "localVarString( %s ) = %s\n", source->internals.string, result->internals.string);
     }
     else
     {
@@ -1154,7 +1154,7 @@ UILocalVarContext *__cdecl GetLocalVar(int localClientNum, Operand *source)
     else
     {
         NameForValueType = GetNameForValueType(source->dataType);
-        Com_PrintError(13, "Error: Must use a string as the name of a localVar, not a %s\n", NameForValueType);
+        Com_PrintError(CON_CHANNEL_UI, "Error: Must use a string as the name of a localVar, not a %s\n", NameForValueType);
         return 0;
     }
 }
@@ -1169,7 +1169,7 @@ void __cdecl GetLocalVarBoolValue(int localClientNum, Operand *source, Operand *
         result->dataType = VAL_INT;
         result->internals.intVal = UILocalVar_GetBool(var->table);
         if (uiscript_debug->current.integer)
-            Com_Printf(13, "localVarBool( %s ) = %i\n", source->internals.string, result->internals.intVal);
+            Com_Printf(CON_CHANNEL_UI, "localVarBool( %s ) = %i\n", source->internals.string, result->internals.intVal);
     }
     else
     {
@@ -1188,7 +1188,7 @@ void __cdecl GetLocalVarIntValue(int localClientNum, Operand *source, Operand *r
         result->dataType = VAL_INT;
         result->internals.intVal = UILocalVar_GetInt(var->table).integer;
         if (uiscript_debug->current.integer)
-            Com_Printf(13, "localVarInt( %s ) = %i\n", source->internals.string, result->internals.intVal);
+            Com_Printf(CON_CHANNEL_UI, "localVarInt( %s ) = %i\n", source->internals.string, result->internals.intVal);
     }
     else
     {
@@ -1207,7 +1207,7 @@ void __cdecl GetLocalVarFloatValue(int localClientNum, Operand *source, Operand 
         result->dataType = VAL_FLOAT;
         result->internals.floatVal = UILocalVar_GetFloat(var->table);
         if (uiscript_debug->current.integer)
-            Com_Printf(13, "localVarFloat( %s ) = %f\n", source->internals.string, result->internals.floatVal);
+            Com_Printf(CON_CHANNEL_UI, "localVarFloat( %s ) = %f\n", source->internals.string, result->internals.floatVal);
     }
     else
     {
@@ -1226,7 +1226,7 @@ void __cdecl GetSinValue(Operand *source, Operand *result)
     v2 = sin(val);
     result->internals.floatVal = v2;
     if (uiscript_debug->current.integer)
-        Com_Printf(13, "sin( %f ) = %f\n", val, result->internals.floatVal);
+        Com_Printf(CON_CHANNEL_UI, "sin( %f ) = %f\n", val, result->internals.floatVal);
 }
 
 void __cdecl GetCosValue(Operand *source, Operand *result)
@@ -1239,7 +1239,7 @@ void __cdecl GetCosValue(Operand *source, Operand *result)
     v2 = cos(val);
     result->internals.floatVal = v2;
     if (uiscript_debug->current.integer)
-        Com_Printf(13, "cos( %f ) = %f\n", val, result->internals.floatVal);
+        Com_Printf(CON_CHANNEL_UI, "cos( %f ) = %f\n", val, result->internals.floatVal);
 }
 
 void __cdecl GetMilliseconds(Operand *result)
@@ -1278,7 +1278,7 @@ void __cdecl GetPlayerField(int localClientNum, Operand *source, Operand *result
                                     {
                                         if (I_stricmp(source->internals.string, "ping"))
                                         {
-                                            Com_Printf(13, "ERROR: Unknown player field '%s'\n", source->internals.string);
+                                            Com_Printf(CON_CHANNEL_UI, "ERROR: Unknown player field '%s'\n", source->internals.string);
                                             result->dataType = VAL_INT;
                                             result->internals.intVal = 0;
                                         }
@@ -1295,7 +1295,7 @@ void __cdecl GetPlayerField(int localClientNum, Operand *source, Operand *result
                                             }
                                             result->dataType = VAL_INT;
                                             if (uiscript_debug->current.integer)
-                                                Com_Printf(13, "player( %s ) = %i\n", source->internals.string, result->internals.intVal);
+                                                Com_Printf(CON_CHANNEL_UI, "player( %s ) = %i\n", source->internals.string, result->internals.intVal);
                                         }
                                     }
                                     else
@@ -1313,7 +1313,7 @@ void __cdecl GetPlayerField(int localClientNum, Operand *source, Operand *result
                                         }
                                         result->dataType = VAL_INT;
                                         if (uiscript_debug->current.integer)
-                                            Com_Printf(13, "player( %s ) = %i\n", source->internals.string, result->internals.intVal);
+                                            Com_Printf(CON_CHANNEL_UI, "player( %s ) = %i\n", source->internals.string, result->internals.intVal);
                                     }
                                 }
                                 else
@@ -1331,7 +1331,7 @@ void __cdecl GetPlayerField(int localClientNum, Operand *source, Operand *result
                                     }
                                     result->dataType = VAL_INT;
                                     if (uiscript_debug->current.integer)
-                                        Com_Printf(13, "player( %s ) = %i\n", source->internals.string, result->internals.intVal);
+                                        Com_Printf(CON_CHANNEL_UI, "player( %s ) = %i\n", source->internals.string, result->internals.intVal);
                                 }
                             }
                             else
@@ -1349,7 +1349,7 @@ void __cdecl GetPlayerField(int localClientNum, Operand *source, Operand *result
                                 }
                                 result->dataType = VAL_INT;
                                 if (uiscript_debug->current.integer)
-                                    Com_Printf(13, "player( %s ) = %i\n", source->internals.string, result->internals.intVal);
+                                    Com_Printf(CON_CHANNEL_UI, "player( %s ) = %i\n", source->internals.string, result->internals.intVal);
                             }
                         }
                         else
@@ -1357,7 +1357,7 @@ void __cdecl GetPlayerField(int localClientNum, Operand *source, Operand *result
                             result->dataType = VAL_INT;
                             result->internals.intVal = (uint8_t)CG_LookingThroughNightVision(localClientNum);
                             if (uiscript_debug->current.integer)
-                                Com_Printf(13, "player( %s ) = %i\n", source->internals.string, result->internals.intVal);
+                                Com_Printf(CON_CHANNEL_UI, "player( %s ) = %i\n", source->internals.string, result->internals.intVal);
                         }
                     }
                     else
@@ -1365,7 +1365,7 @@ void __cdecl GetPlayerField(int localClientNum, Operand *source, Operand *result
                         result->dataType = VAL_INT;
                         result->internals.intVal = CG_GetPlayerClipAmmoCount(localClientNum);
                         if (uiscript_debug->current.integer)
-                            Com_Printf(13, "player( %s ) = %s\n", source->internals.string, result->internals.string);
+                            Com_Printf(CON_CHANNEL_UI, "player( %s ) = %s\n", source->internals.string, result->internals.string);
                     }
                 }
                 else
@@ -1373,7 +1373,7 @@ void __cdecl GetPlayerField(int localClientNum, Operand *source, Operand *result
                     result->dataType = VAL_INT;
                     result->internals.intVal = CG_IsPlayerDead(localClientNum);
                     if (uiscript_debug->current.integer)
-                        Com_Printf(13, "player( %s ) = %i\n", source->internals.string, result->internals.intVal);
+                        Com_Printf(CON_CHANNEL_UI, "player( %s ) = %i\n", source->internals.string, result->internals.intVal);
                 }
             }
             else
@@ -1381,7 +1381,7 @@ void __cdecl GetPlayerField(int localClientNum, Operand *source, Operand *result
                 result->dataType = VAL_STRING;
                 result->internals.intVal = (int)CG_GetPlayerOpposingTeamName(localClientNum);
                 if (uiscript_debug->current.integer)
-                    Com_Printf(13, "player( %s ) = %s\n", source->internals.string, result->internals.string);
+                    Com_Printf(CON_CHANNEL_UI, "player( %s ) = %s\n", source->internals.string, result->internals.string);
             }
         }
         else
@@ -1389,13 +1389,13 @@ void __cdecl GetPlayerField(int localClientNum, Operand *source, Operand *result
             result->dataType = VAL_STRING;
             result->internals.intVal = (int)CG_GetPlayerTeamName(localClientNum);
             if (uiscript_debug->current.integer)
-                Com_Printf(13, "player( %s ) = %s\n", source->internals.string, result->internals.string);
+                Com_Printf(CON_CHANNEL_UI, "player( %s ) = %s\n", source->internals.string, result->internals.string);
         }
     }
     else
     {
         NameForValueType = GetNameForValueType(source->dataType);
-        Com_PrintError(13, "Error: Must use a string as the name of a player field, not a %s\n", NameForValueType);
+        Com_PrintError(CON_CHANNEL_UI, "Error: Must use a string as the name of a player field, not a %s\n", NameForValueType);
         result->dataType = VAL_STRING;
         result->internals.intVal = (int)"";
     }
@@ -1444,7 +1444,7 @@ void __cdecl GetFieldForTeam(int localClientNum, team_t team, Operand *fieldName
         {
             if (I_stricmp(fieldName->internals.string, "name"))
             {
-                Com_Printf(13, "ERROR: Unknown team field '%s'\n", fieldName->internals.string);
+                Com_Printf(CON_CHANNEL_UI, "ERROR: Unknown team field '%s'\n", fieldName->internals.string);
                 result->dataType = VAL_INT;
                 result->internals.intVal = 0;
             }
@@ -1453,7 +1453,7 @@ void __cdecl GetFieldForTeam(int localClientNum, team_t team, Operand *fieldName
                 result->dataType = VAL_STRING;
                 result->internals.intVal = (int)CG_GetTeamName(team);
                 if (uiscript_debug->current.integer)
-                    Com_Printf(13, "team(%i)( %s ) = %s\n", team, fieldName->internals.string, result->internals.string);
+                    Com_Printf(CON_CHANNEL_UI, "team(%i)( %s ) = %s\n", team, fieldName->internals.string, result->internals.string);
             }
         }
         else
@@ -1465,13 +1465,13 @@ void __cdecl GetFieldForTeam(int localClientNum, team_t team, Operand *fieldName
             result->internals.intVal = 0;
 #endif
             if (uiscript_debug->current.integer)
-                Com_Printf(13, "team(%i)( %s ) = %i\n", team, fieldName->internals.string, result->internals.intVal);
+                Com_Printf(CON_CHANNEL_UI, "team(%i)( %s ) = %i\n", team, fieldName->internals.string, result->internals.intVal);
         }
     }
     else
     {
         NameForValueType = GetNameForValueType(fieldName->dataType);
-        Com_PrintError(13, "Error: Must use a string as the name of a team parameter, not a %s\n", NameForValueType);
+        Com_PrintError(CON_CHANNEL_UI, "Error: Must use a string as the name of a team parameter, not a %s\n", NameForValueType);
         result->dataType = VAL_STRING;
         result->internals.intVal = (int)"";
     }
@@ -1506,7 +1506,7 @@ void __cdecl GetUIActive(int localClientNum, Operand *result)
     result->dataType = VAL_INT;
     result->internals.intVal = CL_IsUIActive(localClientNum);
     if (uiscript_debug->current.integer)
-        Com_Printf(13, "ui_active() = %i\n", result->internals.intVal);
+        Com_Printf(CON_CHANNEL_UI, "ui_active() = %i\n", result->internals.intVal);
 }
 
 void __cdecl GetFlashbanged(int localClientNum, Operand *result)
@@ -1514,7 +1514,7 @@ void __cdecl GetFlashbanged(int localClientNum, Operand *result)
     result->dataType = VAL_INT;
     result->internals.intVal = CG_Flashbanged(localClientNum);
     if (uiscript_debug->current.integer)
-        Com_Printf(13, "flashbanged() = %i\n", result->internals.intVal);
+        Com_Printf(CON_CHANNEL_UI, "flashbanged() = %i\n", result->internals.intVal);
 }
 
 void __cdecl GetScoped(int localClientNum, Operand *result)
@@ -1522,7 +1522,7 @@ void __cdecl GetScoped(int localClientNum, Operand *result)
     result->dataType = VAL_INT;
     result->internals.intVal = (uint8_t)CG_ScopeIsOverlayed(localClientNum);
     if (uiscript_debug->current.integer)
-        Com_Printf(13, "scoped() = %i\n", result->internals.intVal);
+        Com_Printf(CON_CHANNEL_UI, "scoped() = %i\n", result->internals.intVal);
 }
 
 void __cdecl InKillcam(int localClientNum, Operand *result)
@@ -1535,7 +1535,7 @@ void __cdecl InKillcam(int localClientNum, Operand *result)
     result->internals.intVal = 0;
 #endif
     if (uiscript_debug->current.integer)
-        Com_Printf(13, "InKillcam() = %i\n", result->internals.intVal);
+        Com_Printf(CON_CHANNEL_UI, "InKillcam() = %i\n", result->internals.intVal);
 }
 
 void __cdecl GetScoreboardVisible(int localClientNum, Operand *result)
@@ -1547,7 +1547,7 @@ void __cdecl GetScoreboardVisible(int localClientNum, Operand *result)
     result->internals.intVal = 0;
 #endif
     if (uiscript_debug->current.integer)
-        Com_Printf(13, "scoreboard_visible() = %i\n", result->internals.intVal);
+        Com_Printf(CON_CHANNEL_UI, "scoreboard_visible() = %i\n", result->internals.intVal);
 }
 
 void __cdecl GetSelectingLocation(int localClientNum, Operand *result)
@@ -1555,7 +1555,7 @@ void __cdecl GetSelectingLocation(int localClientNum, Operand *result)
     result->dataType = VAL_INT;
     result->internals.intVal = CG_IsSelectingLocation(localClientNum);
     if (uiscript_debug->current.integer)
-        Com_Printf(13, "selecting_location() = %i\n", result->internals.intVal);
+        Com_Printf(CON_CHANNEL_UI, "selecting_location() = %i\n", result->internals.intVal);
 }
 
 void __cdecl PrivatePartyHostInLobby(int localClientNum, Operand *result)
@@ -1563,7 +1563,7 @@ void __cdecl PrivatePartyHostInLobby(int localClientNum, Operand *result)
     result->internals.intVal = 0;
     result->dataType = VAL_INT;
     if (uiscript_debug->current.integer)
-        Com_Printf(13, "PrivatePartyHostInLobby() = %i\n", result->internals.intVal);
+        Com_Printf(CON_CHANNEL_UI, "PrivatePartyHostInLobby() = %i\n", result->internals.intVal);
 }
 
 void __cdecl AloneInPrivateParty(int localClientNum, Operand *result)
@@ -1571,7 +1571,7 @@ void __cdecl AloneInPrivateParty(int localClientNum, Operand *result)
     result->internals.intVal = 0;
     result->dataType = VAL_INT;
     if (uiscript_debug->current.integer)
-        Com_Printf(13, "AloneInPrivateParty() = %i\n", result->internals.intVal);
+        Com_Printf(CON_CHANNEL_UI, "AloneInPrivateParty() = %i\n", result->internals.intVal);
 }
 
 void __cdecl InLobby(int localClientNum, Operand *result)
@@ -1579,7 +1579,7 @@ void __cdecl InLobby(int localClientNum, Operand *result)
     result->dataType = VAL_INT;
     result->internals.intVal = 0;
     if (uiscript_debug->current.integer)
-        Com_Printf(13, "InLobby() = %i\n", result->internals.intVal);
+        Com_Printf(CON_CHANNEL_UI, "InLobby() = %i\n", result->internals.intVal);
 }
 
 void __cdecl InPrivateParty(int localClientNum, Operand *result)
@@ -1587,7 +1587,7 @@ void __cdecl InPrivateParty(int localClientNum, Operand *result)
     result->dataType = VAL_INT;
     result->internals.intVal = 0;
     if (uiscript_debug->current.integer)
-        Com_Printf(13, "InPrivateParty() = %i\n", result->internals.intVal);
+        Com_Printf(CON_CHANNEL_UI, "InPrivateParty() = %i\n", result->internals.intVal);
 }
 
 void __cdecl PrivatePartyHost(int localClientNum, Operand *result)
@@ -1595,7 +1595,7 @@ void __cdecl PrivatePartyHost(int localClientNum, Operand *result)
     result->dataType = VAL_INT;
     result->internals.intVal = 0;
     if (uiscript_debug->current.integer)
-        Com_Printf(13, "PrivatePartyHost() = %i\n", result->internals.intVal);
+        Com_Printf(CON_CHANNEL_UI, "PrivatePartyHost() = %i\n", result->internals.intVal);
 }
 
 void __cdecl GetPlayerStat(int localClientNum, Operand *source, Operand *result)
@@ -1608,7 +1608,7 @@ void __cdecl GetPlayerStat(int localClientNum, Operand *source, Operand *result)
     v3 = CL_ControllerIndexFromClientNum(localClientNum);
     result->internals.intVal = LiveStorage_GetStat(v3, index); // KISAKTODO: win_storage.cpp
     if (uiscript_debug->current.integer)
-        Com_Printf(13, "stat( %i ) = %i\n", index, result->internals.intVal);
+        Com_Printf(CON_CHANNEL_UI, "stat( %i ) = %i\n", index, result->internals.intVal);
 }
 
 operandInternalDataUnion __cdecl getOperandValueInt(Operand *source)
@@ -1656,12 +1656,12 @@ void __cdecl GetPlayerStatRangeBitsSet(int localClientNum, OperandList *list, Op
                 }
             }
             if (uiscript_debug->current.integer)
-                Com_Printf(13, "statRangeAnyBitsSet( %i, %i, %i ) = %i\n", minStat, maxStat, bitMask, result->internals.intVal);
+                Com_Printf(CON_CHANNEL_UI, "statRangeAnyBitsSet( %i, %i, %i ) = %i\n", minStat, maxStat, bitMask, result->internals.intVal);
         }
         else
         {
             Com_PrintError(
-                13,
+                CON_CHANNEL_UI,
                 "UI Expression Error: minStat %i was greater than maxStat %i in StatRangeAnyBitsSet\n",
                 minStat,
                 maxStat);
@@ -1672,7 +1672,7 @@ void __cdecl GetPlayerStatRangeBitsSet(int localClientNum, OperandList *list, Op
     else
     {
         Com_PrintError(
-            13,
+            CON_CHANNEL_UI,
             "UI Expression Error: Expected 3 params to function StatRangeAnyBitsSet, found %i\n",
             list->operandCount);
         result->dataType = VAL_INT;
@@ -1748,7 +1748,7 @@ void __cdecl GetKeyBinding(int localClientNum, Operand *fieldName, Operand *resu
     else
     {
         NameForValueType = GetNameForValueType(fieldName->dataType);
-        Com_PrintError(13, "Error: Must use a string as KeyBinding() parameter, not a %s\n", NameForValueType);
+        Com_PrintError(CON_CHANNEL_UI, "Error: Must use a string as KeyBinding() parameter, not a %s\n", NameForValueType);
         result->dataType = VAL_STRING;
         result->internals.intVal = (int)"";
     }
@@ -1766,7 +1766,7 @@ void __cdecl GetActionSlotUsable(int localClientNum, Operand *fieldName, Operand
     }
     else
     {
-        Com_PrintError(13, "UI Expression Error: ActionSlot() slot ID should be in range (1,%i) not %i.\n", 4, slotId);
+        Com_PrintError(CON_CHANNEL_UI, "UI Expression Error: ActionSlot() slot ID should be in range (1,%i) not %i.\n", 4, slotId);
         result->dataType = VAL_INT;
         result->internals.intVal = 0;
     }
@@ -1794,7 +1794,7 @@ void __cdecl GetHudFade(int localClientNum, Operand *fieldName, Operand *result)
                         {
                             NameForValueType = GetNameForValueType(fieldName->dataType);
                             Com_PrintError(
-                                13,
+                                CON_CHANNEL_UI,
                                 "Error: Argument to HudFade() must be \"dpad\", \"compass\", \"scoreboard\", or \"weapon\".\n",
                                 NameForValueType);
                             result->internals.floatVal = 0.0;
@@ -1822,7 +1822,7 @@ void __cdecl GetHudFade(int localClientNum, Operand *fieldName, Operand *result)
         else
         {
             v3 = GetNameForValueType(fieldName->dataType);
-            Com_PrintError(13, "Error: Must use a string as HudFade() parameter, not a %s\n", v3);
+            Com_PrintError(CON_CHANNEL_UI, "Error: Must use a string as HudFade() parameter, not a %s\n", v3);
             result->internals.floatVal = 0.0;
         }
     }
@@ -1847,12 +1847,12 @@ void __cdecl IsMenuOpen(int localClientNum, Operand *source, Operand *result)
         result->dataType = VAL_INT;
         result->internals.intVal = Menu_IsMenuOpenAndVisible(localClientNum, source->internals.string);
         if (uiscript_debug->current.integer)
-            Com_Printf(13, "ismenuopen( %s ) = %i\n", source->internals.string, result->internals.intVal);
+            Com_Printf(CON_CHANNEL_UI, "ismenuopen( %s ) = %i\n", source->internals.string, result->internals.intVal);
     }
     else
     {
         NameForValueType = GetNameForValueType(source->dataType);
-        Com_PrintError(13, "Error: Must use a string as the name of a menu, not a %s\n", NameForValueType);
+        Com_PrintError(CON_CHANNEL_UI, "Error: Must use a string as the name of a menu, not a %s\n", NameForValueType);
         result->dataType = VAL_INT;
         result->internals.intVal = 0;
     }
@@ -1863,7 +1863,7 @@ void __cdecl WritingData(int localClientNum, Operand *result)
     result->dataType = VAL_INT;
     result->internals.intVal = 0;
     if (uiscript_debug->current.integer)
-        Com_Printf(13, "writingdata() = %i\n", result->internals.intVal);
+        Com_Printf(CON_CHANNEL_UI, "writingdata() = %i\n", result->internals.intVal);
 }
 
 void __cdecl LogicalNot(int localClientNum, Operand *source, Operand *result)
@@ -1876,7 +1876,7 @@ void __cdecl LogicalNot(int localClientNum, Operand *source, Operand *result)
     {
         SourceString = GetSourceString(*source);
         NameForValueType = GetNameForValueType(source->dataType);
-        Com_PrintError(13, "Error: You cannot ! a '%s' (%s)\n", NameForValueType, SourceString);
+        Com_PrintError(CON_CHANNEL_UI, "Error: You cannot ! a '%s' (%s)\n", NameForValueType, SourceString);
         result->internals.intVal = 0;
     }
     else if (source->dataType)
@@ -1884,7 +1884,7 @@ void __cdecl LogicalNot(int localClientNum, Operand *source, Operand *result)
         if (source->dataType == VAL_FLOAT)
             result->internals.intVal = source->internals.floatVal == 0.0;
         else
-            Com_PrintError(16, "Unknown datatype %i in LogicalNot()\n", source->dataType);
+            Com_PrintError(CON_CHANNEL_SYSTEM, "Unknown datatype %i in LogicalNot()\n", source->dataType);
     }
     else
     {
@@ -1903,7 +1903,7 @@ void __cdecl BitwiseNot(int localClientNum, Operand *source, Operand *result)
     {
         SourceString = GetSourceString(*source);
         NameForValueType = GetNameForValueType(source->dataType);
-        Com_PrintError(13, "Error: You cannot ~ a '%s' (%s)\n", NameForValueType, SourceString);
+        Com_PrintError(CON_CHANNEL_UI, "Error: You cannot ~ a '%s' (%s)\n", NameForValueType, SourceString);
         result->internals.intVal = 0;
     }
     else
@@ -1917,7 +1917,7 @@ void __cdecl BitwiseNot(int localClientNum, Operand *source, Operand *result)
             else
             {
                 val = 0;
-                Com_PrintError(16, "Unknown datatype %i in LogicalNot()\n", source->dataType);
+                Com_PrintError(CON_CHANNEL_SYSTEM, "Unknown datatype %i in LogicalNot()\n", source->dataType);
             }
         }
         else
@@ -1926,7 +1926,7 @@ void __cdecl BitwiseNot(int localClientNum, Operand *source, Operand *result)
         }
         result->internals.intVal = ~val;
         if (uiscript_debug->current.integer)
-            Com_Printf(13, "~%i = %i\n", val, result->internals.intVal);
+            Com_Printf(CON_CHANNEL_UI, "~%i = %i\n", val, result->internals.intVal);
     }
 }
 
@@ -1940,7 +1940,7 @@ void __cdecl BitShiftLeft(int localClientNum, Operand *source, Operand *bitsSour
     result->dataType = VAL_INT;
     result->internals.intVal = val << bits;
     if (uiscript_debug->current.integer)
-        Com_Printf(13, "%i << %i = %i\n", val, bits, result->internals.intVal);
+        Com_Printf(CON_CHANNEL_UI, "%i << %i = %i\n", val, bits, result->internals.intVal);
 }
 
 void __cdecl BitShiftRight(int localClientNum, Operand *source, Operand *bitsSource, Operand *result)
@@ -1953,7 +1953,7 @@ void __cdecl BitShiftRight(int localClientNum, Operand *source, Operand *bitsSou
     result->dataType = VAL_INT;
     result->internals.intVal = val >> bits;
     if (uiscript_debug->current.integer)
-        Com_Printf(13, "%i >> %i = %i\n", val, bits, result->internals.intVal);
+        Com_Printf(CON_CHANNEL_UI, "%i >> %i = %i\n", val, bits, result->internals.intVal);
 }
 
 void __cdecl GetAdsJavelin(int localClientNum, Operand *result)
@@ -1962,7 +1962,7 @@ void __cdecl GetAdsJavelin(int localClientNum, Operand *result)
     vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     result->internals.intVal = clientUIActives[0].connectionState >= CA_LOADING && CG_JavelinADS(localClientNum);
     if (uiscript_debug->current.integer)
-        Com_Printf(13, "adsjavelin() = %i\n", result->internals.intVal);
+        Com_Printf(CON_CHANNEL_UI, "adsjavelin() = %i\n", result->internals.intVal);
 }
 
 void __cdecl GetWeapLockBlink(int localClientNum, Operand *source, Operand *result)
@@ -1993,7 +1993,7 @@ void __cdecl GetWeapLockBlink(int localClientNum, Operand *source, Operand *resu
 	}
 #endif
     if (uiscript_debug->current.integer)
-        Com_Printf(13, "weaplockblink( %.2f ) = %i\n", bps, result->internals.intVal);
+        Com_Printf(CON_CHANNEL_UI, "weaplockblink( %.2f ) = %i\n", bps, result->internals.intVal);
 }
 
 void __cdecl GetWeapAttackTop(int localClientNum, Operand *result)
@@ -2006,7 +2006,7 @@ void __cdecl GetWeapAttackTop(int localClientNum, Operand *result)
 	result->internals.intVal = clientUIActives[0].connectionState >= CA_LOADING && (CG_GetLocalClientGlobals(localClientNum)->predictedPlayerState.weapLockFlags & 4) != 0;
 #endif
     if (uiscript_debug->current.integer)
-        Com_Printf(13, "weapattacktop() = %i\n", result->internals.intVal);
+        Com_Printf(CON_CHANNEL_UI, "weapattacktop() = %i\n", result->internals.intVal);
 }
 
 void __cdecl GetWeapAttackDirect(int localClientNum, Operand *result)
@@ -2019,7 +2019,7 @@ void __cdecl GetWeapAttackDirect(int localClientNum, Operand *result)
 	result->internals.intVal = clientUIActives[0].connectionState >= CA_LOADING && (CG_GetLocalClientGlobals(localClientNum)->predictedPlayerState.weapLockFlags & 8) != 0;
 #endif
     if (uiscript_debug->current.integer)
-        Com_Printf(13, "weapattackdirect() = %i\n", result->internals.intVal);
+        Com_Printf(CON_CHANNEL_UI, "weapattackdirect() = %i\n", result->internals.intVal);
 }
 
 void __cdecl SecondsToTimeDisplay(int localClientNum, Operand *source, Operand *result)
@@ -2038,7 +2038,7 @@ void __cdecl SecondsToTimeDisplay(int localClientNum, Operand *source, Operand *
     result->dataType = VAL_STRING;
     result->internals.intVal = (int)resultString_0;
     if (uiscript_debug->current.integer)
-        Com_Printf(13, "secondsToTime() = %s\n", resultString_0);
+        Com_Printf(CON_CHANNEL_UI, "secondsToTime() = %s\n", resultString_0);
 }
 
 void __cdecl SecondsToCountdownDisplay(int localClientNum, int seconds, Operand *result)
@@ -2051,7 +2051,7 @@ void __cdecl SecondsToCountdownDisplay(int localClientNum, int seconds, Operand 
     {
         _snprintf(resultString_1, 0x80u, "%2i:%02i", seconds / 60, seconds % 60);
         if (uiscript_debug->current.integer)
-            Com_Printf(13, "secondsToCountdown() = %s\n", resultString_1);
+            Com_Printf(CON_CHANNEL_UI, "secondsToCountdown() = %s\n", resultString_1);
     }
     else
     {
@@ -2168,7 +2168,7 @@ void __cdecl GetScore(int localClientNum, Operand *source, Operand *result)
     if (source->dataType)
     {
         NameForValueType = GetNameForValueType(source->dataType);
-        Com_PrintError(13, "Error: Must use an integer for the rank: %s\n", NameForValueType);
+        Com_PrintError(CON_CHANNEL_UI, "Error: Must use an integer for the rank: %s\n", NameForValueType);
     }
     else if (source->internals.intVal > 0)
     {
@@ -2178,7 +2178,7 @@ void __cdecl GetScore(int localClientNum, Operand *source, Operand *result)
     }
     else
     {
-        Com_PrintError(13, "Error: rank must be > 0: %i\n", source->internals.intVal);
+        Com_PrintError(CON_CHANNEL_UI, "Error: rank must be > 0: %i\n", source->internals.intVal);
     }
 
 #elif KISAK_SP
@@ -2197,7 +2197,7 @@ void __cdecl GetGameMessageWindowActive(int localClientNum, Operand *source, Ope
     if (Con_IsValidGameMessageWindow(windowIndex))
         result->internals.intVal = Con_IsGameMessageWindowActive(localClientNum, windowIndex);
     else
-        Com_PrintError(13, "UI Script error: gameMsgWndActive was passed an invalid window index\n");
+        Com_PrintError(CON_CHANNEL_UI, "UI Script error: gameMsgWndActive was passed an invalid window index\n");
 }
 
 void __cdecl GetFollowing(int localClientNum, Operand *result)
@@ -2256,7 +2256,7 @@ void __cdecl RunCommaOp(int localClientNum, OperandStack *dataStack, OperandList
     }
     else
     {
-        Com_PrintError(13, "UI Script error: No function takes %i parameters\n", list2->operandCount + list1->operandCount);
+        Com_PrintError(CON_CHANNEL_UI, "UI Script error: No function takes %i parameters\n", list2->operandCount + list1->operandCount);
         operandResult.dataType = VAL_INT;
         operandResult.internals.intVal = 0;
         AddOperandToStack(dataStack, &operandResult);
@@ -2295,13 +2295,13 @@ void __cdecl TableLookup(int localClientNum, OperandList *list, Operand *operand
                 v7 = GetSourceString(list->operands[2]);
                 v6.intVal = GetSourceInt(&list->operands[1]).intVal;
                 v5 = GetSourceString(list->operands[0]);
-                Com_Printf(13, "tablelookup( %s, %i, %s, %i ) == %s\n", v5, v6.intVal, v7, v9.intVal, string);
+                Com_Printf(CON_CHANNEL_UI, "tablelookup( %s, %i, %s, %i ) == %s\n", v5, v6.intVal, v7, v9.intVal, string);
             }
         }
         else
         {
             Com_PrintError(
-                13,
+                CON_CHANNEL_UI,
                 "UI Expression Error: Expected 4 params to function StringTableLookup, found %i\n",
                 list->operandCount);
             operandResult->dataType = VAL_STRING;
@@ -2330,7 +2330,7 @@ void __cdecl MinValue(OperandList *list, Operand *operandResult)
     }
     else
     {
-        Com_PrintError(13, "UI Expression Error: Expected at least 1 parameter to min()\n");
+        Com_PrintError(CON_CHANNEL_UI, "UI Expression Error: Expected at least 1 parameter to min()\n");
         operandResult->dataType = VAL_FLOAT;
         operandResult->internals.floatVal = 0.0;
     }
@@ -2356,7 +2356,7 @@ void __cdecl MaxValue(OperandList *list, Operand *operandResult)
     }
     else
     {
-        Com_PrintError(13, "UI Expression Error: Expected at least 1 parameter to max()\n");
+        Com_PrintError(CON_CHANNEL_UI, "UI Expression Error: Expected at least 1 parameter to max()\n");
         operandResult->dataType = VAL_FLOAT;
         operandResult->internals.floatVal = 0.0;
     }
@@ -2403,7 +2403,7 @@ void __cdecl LocalizeString(OperandList *list, Operand *operandResult)
             for (charIndex = 0; charIndex < tokenLen; ++charIndex)
             {
                 if (token[charIndex] == 20 || token[charIndex] == 21 || token[charIndex] == 22)
-                    Com_PrintError(13, "Error: bad escape character (%i) present in string", token[charIndex]);
+                    Com_PrintError(CON_CHANNEL_UI, "Error: bad escape character (%i) present in string", token[charIndex]);
                 if (isalpha(token[charIndex]))
                 {
                     v2 = va("Non-localized UI strings are not allowed to have letters in them: \"%s\"", token);
@@ -2441,7 +2441,7 @@ void __cdecl LocalizationError(const char *errorMessage)
         if (Dvar_GetBool("loc_warningsAsErrors"))
             Com_Error(ERR_LOCALIZATION, "Error: %s", errorMessage);
         else
-            Com_PrintWarning(13, "WARNING: %s\n", errorMessage);
+            Com_PrintWarning(CON_CHANNEL_UI, "WARNING: %s\n", errorMessage);
     }
 }
 
@@ -2537,7 +2537,7 @@ char *__cdecl GetExpressionResultString(int localClientNum, const statement_s *s
     {
         lastWarnTime = Sys_Milliseconds();
         Com_PrintWarning(
-            13,
+            CON_CHANNEL_UI,
             "Warning: Expression result string has been truncated, longer than %d characters: %s...\n",
             256,
             resultString_2);
@@ -2563,7 +2563,7 @@ Operand *__cdecl EvaluateExpression(int localClientNum, const statement_s *state
         {
             if (dst.numOperandLists == 60)
             {
-                Com_PrintError(13, "Invalid expression - too many operands\n");
+                Com_PrintError(CON_CHANNEL_UI, "Invalid expression - too many operands\n");
                 return 0;
             }
             AddOperandToStack(&dst, (Operand *)&v4->data);
@@ -2574,7 +2574,7 @@ Operand *__cdecl EvaluateExpression(int localClientNum, const statement_s *state
                 RunHigherPriorityOperators(localClientNum, v4->data.op, &opStack, &dst);
             if (opStack.numOperators == 60)
             {
-                Com_PrintError(13, "Invalid expression - operators are nested too deeply\n");
+                Com_PrintError(CON_CHANNEL_UI, "Invalid expression - operators are nested too deeply\n");
                 return 0;
             }
             opStack.stack[opStack.numOperators++] = v4->data.op;
@@ -2593,7 +2593,7 @@ Operand *__cdecl EvaluateExpression(int localClientNum, const statement_s *state
             }
             else
             {
-                Com_PrintError(13, "Error: More than one operand in expression result\n");
+                Com_PrintError(CON_CHANNEL_UI, "Error: More than one operand in expression result\n");
                 return 0;
             }
         }
@@ -2606,7 +2606,7 @@ Operand *__cdecl EvaluateExpression(int localClientNum, const statement_s *state
     }
     else
     {
-        Com_PrintError(13, "Error: stray operands in expression\n");
+        Com_PrintError(CON_CHANNEL_UI, "Error: stray operands in expression\n");
         return 0;
     }
 }

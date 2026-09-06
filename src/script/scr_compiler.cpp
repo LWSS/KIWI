@@ -378,22 +378,22 @@ void __cdecl EmitValue(VariableCompileValue *constValue)
 {
     switch (constValue->value.type)
     {
-    case 0:
+    case VAR_UNDEFINED:
         EmitGetUndefined(constValue->sourcePos);
         break;
-    case 2:
+    case VAR_STRING:
         EmitGetString(constValue->value.u.intValue, constValue->sourcePos);
         break;
-    case 3:
+    case VAR_ISTRING:
         EmitGetIString(constValue->value.u.intValue, constValue->sourcePos);
         break;
-    case 4:
+    case VAR_VECTOR:
         EmitGetVector(constValue->value.u.vectorValue, constValue->sourcePos);
         break;
-    case 5:
+    case VAR_FLOAT:
         EmitGetFloat(constValue->value.u.floatValue, constValue->sourcePos);
         break;
-    case 6:
+    case VAR_INTEGER:
         EmitGetInteger(constValue->value.u.intValue, constValue->sourcePos);
         break;
     default:
@@ -438,7 +438,7 @@ void __cdecl EmitCastFieldObject(sval_u sourcePos)
 
 int __cdecl Scr_GetUncacheType(int type)
 {
-    if (type == 7)
+    if (type == VAR_CODEPOS)
         return 0;
     iassert(type == VAR_DEVELOPER_CODEPOS);
     return 1;
@@ -620,7 +620,7 @@ void __cdecl EmitFunction(sval_u func, sval_u sourcePos)
     if (value.type)
     {
         threadPtr = FindVariable(fileId, func.node[2].idValue);
-        if (!threadPtr || GetValueType(threadPtr) != 1)
+        if (!threadPtr || GetValueType(threadPtr) != VAR_POINTER)
         {
         LABEL_26:
             CompileError(sourcePos.stringValue, "unknown function");
@@ -638,7 +638,7 @@ void __cdecl EmitFunction(sval_u func, sval_u sourcePos)
         goto LABEL_39;
     pos = Scr_EvalVariable(posId);
     vassert((pos.type == VAR_CODEPOS || pos.type == VAR_DEVELOPER_CODEPOS || pos.type == VAR_INCLUDE_CODEPOS), "(pos.type) = %i", pos.type);
-    if (pos.type == 13)
+    if (pos.type == VAR_INCLUDE_CODEPOS)
         goto LABEL_26;
     if (!pos.u.intValue)
     {
@@ -670,7 +670,7 @@ void __cdecl EmitFunction(sval_u func, sval_u sourcePos)
         AddOpcodePos(sourcePos.stringValue, 0);
         return;
     }
-    if (pos.type == 7)
+    if (pos.type == VAR_CODEPOS)
         goto LABEL_29;
     iassert(pos.type == VAR_DEVELOPER_CODEPOS);
     iassert(scrVarPub.developer_script);
@@ -1152,7 +1152,8 @@ void __cdecl EmitObject(sval_u expr, sval_u sourcePos)
             if (idValue < 0x8000 && !IsObjectFree(idValue))
             {
                 ObjectType = GetObjectType(idValue);
-                if (ObjectType >= 14 && (ObjectType <= 17 || ObjectType == 22))
+                if (ObjectType >= VAR_THREAD
+                    && (ObjectType <= VAR_CHILD_THREAD || ObjectType == VAR_DEAD_THREAD))
                 {
                     EmitOpcode(OP_thread_object, 1, 0);
                     EmitShort(idValue);
@@ -1261,13 +1262,13 @@ void __cdecl Scr_CreateVector(VariableCompileValue *constValue, VariableValue *v
     for (i = 0; i < 3; ++i)
     {
         type = constValue[i].value.type;
-        if (type == 5)
+        if (type == VAR_FLOAT)
         {
             vec[2 - i] = constValue[i].value.u.floatValue;
         }
         else
         {
-            if (type != 6)
+            if (type != VAR_INTEGER)
             {
                 CompileError(constValue[i].sourcePos.stringValue, "type %s is not a float", var_typename[type]);
                 return;
@@ -2293,7 +2294,7 @@ void __cdecl EmitForStatement(
         constConditional = 0;
         if (EmitOrEvalExpression(expr.node[1], &constValue, block))
         {
-            if (constValue.value.type == 6 || constValue.value.type == 5)
+            if (constValue.value.type == VAR_INTEGER || constValue.value.type == VAR_FLOAT)
             {
                 Scr_CastBool(&constValue.value);
                 if (!constValue.value.u.intValue)
@@ -2421,7 +2422,7 @@ void __cdecl EmitWhileStatement(
     constConditional = 0;
     if (EmitOrEvalExpression(expr, &constValue, block))
     {
-        if (constValue.value.type == 6 || constValue.value.type == 5)
+        if (constValue.value.type == VAR_INTEGER || constValue.value.type == VAR_FLOAT)
         {
             Scr_CastBool(&constValue.value);
             if (!constValue.value.u.intValue)
@@ -3759,7 +3760,7 @@ void __cdecl Scr_CalcLocalVarsWhileStatement(sval_u expr, sval_u stmt, scr_block
     constConditional = 0;
     if (EvalExpression(expr, &constValue))
     {
-        if (constValue.value.type == 6 || constValue.value.type == 5)
+        if (constValue.value.type == VAR_INTEGER || constValue.value.type == VAR_FLOAT)
         {
             Scr_CastBool(&constValue.value);
             if (constValue.value.u.intValue)
@@ -4269,7 +4270,7 @@ void __cdecl LinkThread(unsigned int threadId, VariableValue *pos, bool allowFar
     if (countId)
     {
         v3 = Scr_EvalVariable(countId);
-        if (v3.type != 6)
+        if (v3.type != VAR_INTEGER)
             MyAssertHandler(".\\script\\scr_compiler.cpp", 2307, 0, "%s", "count.type == VAR_INTEGER");
         for (i = 0; i < v3.u.intValue; ++i)
         {
@@ -4278,10 +4279,10 @@ void __cdecl LinkThread(unsigned int threadId, VariableValue *pos, bool allowFar
             value = GetVariableValueAddress(valueId);
             type = GetValueType(valueId);
             iassert(type == VAR_CODEPOS || type == VAR_DEVELOPER_CODEPOS);
-            if (pos->type == 12)
+            if (pos->type == VAR_DEVELOPER_CODEPOS)
             {
                 iassert(scrVarPub.developer_script);
-                if (type == 7)
+                if (type == VAR_CODEPOS)
                 {
                     CompileError2((char*)value->u.intValue, "normal script cannot reference a function in a /# ... #/ comment");
                     return;
@@ -4315,7 +4316,7 @@ void __cdecl LinkFile(unsigned int fileId)
         if (posId)
         {
             pos = Scr_EvalVariable(posId);
-            if (pos.type == 13)
+            if (pos.type == VAR_INCLUDE_CODEPOS)
             {
                 SetVariableValue(threadPtr, &emptyValue);
             }
@@ -4414,7 +4415,7 @@ void __cdecl ScriptCompile(
             precachescript->include = 0;
             for (threadPtr = FindFirstSibling(includeFileId); threadPtr; threadPtr = FindNextSibling(threadPtr))
             {
-                if (GetValueType(threadPtr) == 1)
+                if (GetValueType(threadPtr) == VAR_POINTER)
                 {
                     threadId = FindObject(threadPtr);
                     iassert(threadId);
@@ -4422,7 +4423,7 @@ void __cdecl ScriptCompile(
                     if (posId)
                     {
                         pos = Scr_EvalVariable(posId);
-                        if (pos.type != 13)
+                        if (pos.type != VAR_INCLUDE_CODEPOS)
                         {
                             iassert(pos.type == VAR_CODEPOS || pos.type == VAR_DEVELOPER_CODEPOS);
                             name = GetVariableName(threadPtr);

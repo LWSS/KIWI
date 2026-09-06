@@ -573,7 +573,7 @@ void UI_UpdateSaveUI()
     if (!ui_saveTimeGlob.hasfirstFrameShown)
     {
         v0 = Sys_Milliseconds();
-        Com_Printf(13, "Save Message First Frame Shown: %i\n", v0);
+        Com_Printf(CON_CHANNEL_UI, "Save Message First Frame Shown: %i\n", v0);
         ui_saveTimeGlob.hasfirstFrameShown = 1;
     }
     if (ui_saveTimeGlob.callWrite)
@@ -592,7 +592,7 @@ void UI_UpdateSaveUI()
             Dvar_SetBool(ui_isSaving, 0);
             Menus_CloseByName(&uiInfo.uiDC, ui_saveTimeGlob.saveMenuName);
             v1 = Sys_Milliseconds();
-            Com_Printf(13, "Save Message Last Frame Shown: %i\n", v1);
+            Com_Printf(CON_CHANNEL_UI, "Save Message Last Frame Shown: %i\n", v1);
         }
     }
 }
@@ -927,19 +927,19 @@ int __cdecl UI_GetOpenOrCloseMenuOnDvarArgs(
             }
             else
             {
-                Com_Printf(13, "%s: invalid menu name.\n", cmd);
+                Com_Printf(CON_CHANNEL_UI, "%s: invalid menu name.\n", cmd);
                 return 0;
             }
         }
         else
         {
-            Com_Printf(13, "%s: invalid test value.\n", cmd);
+            Com_Printf(CON_CHANNEL_UI, "%s: invalid test value.\n", cmd);
             return 0;
         }
     }
     else
     {
-        Com_Printf(13, "%s: invalid dvar name.\n", cmd);
+        Com_Printf(CON_CHANNEL_UI, "%s: invalid dvar name.\n", cmd);
         return 0;
     }
 }
@@ -958,7 +958,7 @@ bool __cdecl UI_DvarValueTest(const char *cmd, const char *dvarName, const char 
     }
     else
     {
-        Com_Printf(13, "%s: cannot find dvar %s\n", cmd, dvarName);
+        Com_Printf(CON_CHANNEL_UI, "%s: cannot find dvar %s\n", cmd, dvarName);
         return 0;
     }
 }
@@ -1213,7 +1213,7 @@ void __cdecl UI_MapLoadInfo(const char *filename)
         }
         else
         {
-            Com_PrintWarning(13, "WARNING: Could not find '%s'.\n", filename);
+            Com_PrintWarning(CON_CHANNEL_UI, "WARNING: Could not find '%s'.\n", filename);
         }
     }
 }
@@ -1390,7 +1390,7 @@ char *__cdecl UI_SafeTranslateString(const char *reference)
         if (loc_warningsAsErrors->current.enabled)
             Com_Error(ERR_LOCALIZATION, "Could not translate string \"%s\"", v1);
         else
-            Com_PrintWarning(13, "WARNING: Could not translate string \"%s\"\n", v1);
+            Com_PrintWarning(CON_CHANNEL_UI, "WARNING: Could not translate string \"%s\"\n", v1);
         v3 = errorString;
         v4 = "^1UNLOCALIZED(^7";
         v5 = 17;
@@ -1965,7 +1965,7 @@ void __cdecl UI_DelSavegame()
     if (FS_DeleteInDir(path, (char*)"players"))
 #endif
     {
-        Com_Printf(13, "Deleted savegame: %s.svg\n", file);
+        Com_Printf(CON_CHANNEL_UI, "Deleted savegame: %s.svg\n", file);
 #ifdef KISAK_XBOX
         Com_sprintf(path, sizeof(path), "save/%s.jpg", file);
         FS_Delete(path);
@@ -1977,7 +1977,7 @@ void __cdecl UI_DelSavegame()
     }
     else
     {
-        Com_Printf(13, "Unable to delete savegame: %s.svg\n", file);
+        Com_Printf(CON_CHANNEL_UI, "Unable to delete savegame: %s.svg\n", file);
     }
 }
 
@@ -2439,7 +2439,7 @@ void __cdecl UI_RunMenuScript(int localClientNum, const char **args, const char 
         return;
     }
 
-    Com_Printf(13, "unknown UI script %s in block:\n%s\n", out, actualScript);
+    Com_Printf(CON_CHANNEL_UI, "unknown UI script %s in block:\n%s\n", out, actualScript);
 }
 
 int __cdecl UI_SetActiveMenu(int localClientNum, uiMenuCommand_t menu)

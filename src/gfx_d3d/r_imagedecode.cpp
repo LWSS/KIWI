@@ -18,8 +18,8 @@ void __cdecl Image_CopyBitmapData(GfxRawImage *image, GfxImageFileHeader *imageF
     pixel = image->pixels;
     switch (imageFile->format)
     {
-    case 1u:
-    case 6u:
+    case IMG_FORMAT_BITMAP_RGBA:
+    case IMG_FORMAT_WAVELET_RGBA:
         while (pixelCount)
         {
             pixel->r = imageData[2];
@@ -31,8 +31,8 @@ void __cdecl Image_CopyBitmapData(GfxRawImage *image, GfxImageFileHeader *imageF
             --pixelCount;
         }
         break;
-    case 2u:
-    case 7u:
+    case IMG_FORMAT_BITMAP_RGB:
+    case IMG_FORMAT_WAVELET_RGB:
         while (pixelCount)
         {
             pixel->r = imageData[2];
@@ -44,8 +44,8 @@ void __cdecl Image_CopyBitmapData(GfxRawImage *image, GfxImageFileHeader *imageF
             --pixelCount;
         }
         break;
-    case 3u:
-    case 8u:
+    case IMG_FORMAT_BITMAP_LUMINANCE_ALPHA:
+    case IMG_FORMAT_WAVELET_LUMINANCE_ALPHA:
         while (pixelCount)
         {
             pixel->r = *imageData;
@@ -57,8 +57,8 @@ void __cdecl Image_CopyBitmapData(GfxRawImage *image, GfxImageFileHeader *imageF
             --pixelCount;
         }
         break;
-    case 4u:
-    case 9u:
+    case IMG_FORMAT_BITMAP_LUMINANCE:
+    case IMG_FORMAT_WAVELET_LUMINANCE:
         while (pixelCount)
         {
             pixel->r = *imageData;
@@ -70,8 +70,8 @@ void __cdecl Image_CopyBitmapData(GfxRawImage *image, GfxImageFileHeader *imageF
             --pixelCount;
         }
         break;
-    case 5u:
-    case 0xAu:
+    case IMG_FORMAT_BITMAP_ALPHA:
+    case IMG_FORMAT_WAVELET_ALPHA:
         while (pixelCount)
         {
             pixel->r = 0;
@@ -103,7 +103,7 @@ void __cdecl Image_DecodeBitmap(
 
     iassert( image );
     iassert( imageFile );
-    if ((imageFile->flags & 4) != 0)
+    if ((imageFile->flags & IMG_FLAG_CUBEMAP) != 0)
         faceCount = 6;
     else
         faceCount = 1;
@@ -280,15 +280,15 @@ void __cdecl Image_CopyDxtcData(GfxRawImage *image, GfxImageFileHeader *imageFil
     format = imageFile->format;
     switch (format)
     {
-    case 0xBu:
+    case IMG_FORMAT_DXT1:
         blockSize = 8;
         DecompressDxtcBlock = Image_DecompressDxt1;
         break;
-    case 0xCu:
+    case IMG_FORMAT_DXT3:
         blockSize = 16;
         DecompressDxtcBlock = Image_DecompressDxt3;
         break;
-    case 0xDu:
+    case IMG_FORMAT_DXT5:
         blockSize = 16;
         DecompressDxtcBlock = Image_DecompressDxt5;
         break;
@@ -321,14 +321,14 @@ void __cdecl Image_DecodeDxtc(
 
     iassert( image );
     iassert( imageFile );
-    if (bytesPerBlock != 8 * (imageFile->format != 11) + 8)
+    if (bytesPerBlock != 8 * (imageFile->format != IMG_FORMAT_DXT1) + 8)
         MyAssertHandler(
             ".\\r_imagedecode.cpp",
             463,
             0,
             "%s",
             "bytesPerBlock == (imageFile->format == IMG_FORMAT_DXT1 ? 8 : 16)");
-    if ((imageFile->flags & 4) != 0)
+    if ((imageFile->flags & IMG_FLAG_CUBEMAP) != 0)
         faceCount = 6;
     else
         faceCount = 1;
@@ -372,52 +372,52 @@ void __cdecl Image_GetRawPixels(char *imageName, GfxRawImage *image)
     imageData = imageFile + 1;
     switch (imageFile->format)
     {
-    case 1u:
+    case IMG_FORMAT_BITMAP_RGBA:
         image->hasAlpha = 1;
         Image_DecodeBitmap(image, imageFile, (byte*)imageData, 4);
         break;
-    case 2u:
+    case IMG_FORMAT_BITMAP_RGB:
         image->hasAlpha = 0;
         Image_DecodeBitmap(image, imageFile, (byte *)imageData, 3);
         break;
-    case 3u:
+    case IMG_FORMAT_BITMAP_LUMINANCE_ALPHA:
         image->hasAlpha = 1;
         Image_DecodeBitmap(image, imageFile, (byte *)imageData, 2);
         break;
-    case 4u:
+    case IMG_FORMAT_BITMAP_LUMINANCE:
         image->hasAlpha = 0;
         Image_DecodeBitmap(image, imageFile, (byte *)imageData, 1);
         break;
-    case 5u:
+    case IMG_FORMAT_BITMAP_ALPHA:
         image->hasAlpha = 1;
         Image_DecodeBitmap(image, imageFile, (byte *)imageData, 1);
         break;
-    case 6u:
+    case IMG_FORMAT_WAVELET_RGBA:
         image->hasAlpha = 1;
         Image_DecodeWavelet(image, imageFile, (byte *)imageData, 4);
         break;
-    case 7u:
+    case IMG_FORMAT_WAVELET_RGB:
         image->hasAlpha = 0;
         Image_DecodeWavelet(image, imageFile, (byte *)imageData, 3);
         break;
-    case 8u:
+    case IMG_FORMAT_WAVELET_LUMINANCE_ALPHA:
         image->hasAlpha = 1;
         Image_DecodeWavelet(image, imageFile, (byte *)imageData, 2);
         break;
-    case 9u:
+    case IMG_FORMAT_WAVELET_LUMINANCE:
         image->hasAlpha = 0;
         Image_DecodeWavelet(image, imageFile, (byte *)imageData, 1);
         break;
-    case 0xAu:
+    case IMG_FORMAT_WAVELET_ALPHA:
         image->hasAlpha = 1;
         Image_DecodeWavelet(image, imageFile, (byte *)imageData, 1);
         break;
-    case 0xBu:
+    case IMG_FORMAT_DXT1:
         image->hasAlpha = 0;
         Image_DecodeDxtc(image, imageFile, (byte*)imageData, 8);
         break;
-    case 0xCu:
-    case 0xDu:
+    case IMG_FORMAT_DXT3:
+    case IMG_FORMAT_DXT5:
         image->hasAlpha = 1;
         Image_DecodeDxtc(image, imageFile, (byte *)imageData, 16);
         break;
@@ -437,7 +437,7 @@ int __cdecl Image_CountMipmapsForFile(GfxImageFileHeader *imageFile)
     int width; // [esp+14h] [ebp-8h]
     int height; // [esp+18h] [ebp-4h]
 
-    if ((imageFile->flags & 2) != 0)
+    if ((imageFile->flags & IMG_FLAG_NOMIPMAPS) != 0)
         return 1;
     mipCount = 1;
     width = imageFile->dimensions[0];
@@ -468,7 +468,7 @@ int __cdecl Image_CountMipmapsForFile_0(GfxImageFileHeader *imageFile)
     int width; // [esp+14h] [ebp-8h]
     int height; // [esp+18h] [ebp-4h]
 
-    if ((imageFile->flags & 2) != 0)
+    if ((imageFile->flags & IMG_FLAG_NOMIPMAPS) != 0)
         return 1;
     mipCount = 1;
     width = imageFile->dimensions[0];
@@ -521,7 +521,7 @@ void __cdecl Image_DecodeWavelet(
     decode.channels = bytesPerPixel;
     decode.bpp = bytesPerPixel;
     decode.dataInitialized = 0;
-    if ((imageFile->flags & 4) != 0)
+    if ((imageFile->flags & IMG_FLAG_CUBEMAP) != 0)
         faceCount = 6;
     else
         faceCount = 1;

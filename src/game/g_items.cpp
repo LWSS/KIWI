@@ -793,7 +793,7 @@ int __cdecl GetFreeDropCueIdx()
     }
     if (iBest == -1)
     {
-        Com_PrintWarning(16, "Could not find a suitable weapon entity to free out of %i possible.  Using index zero.\n", maxDroppedWeapon);
+        Com_PrintWarning(CON_CHANNEL_SYSTEM, "Could not find a suitable weapon entity to free out of %i possible.  Using index zero.\n", maxDroppedWeapon);
         iBest = 0;
     }
     ent = level.droppedWeaponCue[iBest].ent();
@@ -848,7 +848,7 @@ gentity_s *__cdecl Drop_Weapon(gentity_s *ent, int weapIdx, uint8_t weaponModel,
         {
             WeaponDef = BG_GetWeaponDef(weapIdx);
             Com_PrintError(
-                15,
+                CON_CHANNEL_SERVER,
                 "Drop_Weapon(): Trying to drop alt-type weapon, \"%s\", but it has no corresponding altWeapon set.\n",
                 WeaponDef->szInternalName);
             return 0;
@@ -1055,7 +1055,7 @@ void __cdecl FinishSpawningItem(gentity_s *ent)
         }
         if (tr.startsolid)
         {
-            Com_Printf(15, "FinishSpawningItem: %s startsolid at %s\n", SL_ConvertToString(ent->classname), vtos(ent->r.currentOrigin));
+            Com_Printf(CON_CHANNEL_SERVER, "FinishSpawningItem: %s startsolid at %s\n", SL_ConvertToString(ent->classname), vtos(ent->r.currentOrigin));
             G_FreeEntity(ent);
             return;
         }

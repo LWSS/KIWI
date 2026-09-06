@@ -70,7 +70,7 @@ void Com_TouchMemory()
     for (ia = (s_hunkTotal - hunk_high.permanent) >> 2; ia < hunk_high.permanent >> 2; ia += 64)
         sum += *(_DWORD *)&s_hunkData[4 * ia];
     end = Sys_Milliseconds();
-    Com_Printf(16, "Com_TouchMemory: %i msec. Using sum: %d\n", end - start, sum);
+    Com_Printf(CON_CHANNEL_SYSTEM, "Com_TouchMemory: %i msec. Using sum: %d\n", end - start, sum);
 }
 
 /*
@@ -235,7 +235,7 @@ void __cdecl Com_TempMeminfo_f()
 {
     iassert(Sys_IsMainThread());
     //track_PrintTempInfo();
-    Com_Printf(0, "Related commands: meminfo, imagelist, gfx_world, gfx_model, cg_drawfps, com_statmon, tempmeminfo\n");
+    Com_Printf(CON_CHANNEL_DONT_FILTER, "Related commands: meminfo, imagelist, gfx_world, gfx_model, cg_drawfps, com_statmon, tempmeminfo\n");
 }
 
 void Com_InitHunkMemory()
@@ -277,7 +277,7 @@ void __cdecl Com_Meminfo_f()
     track_PrintInfo();
     if (IsFastFileLoad())
         PMem_DumpMemStats();
-    Com_Printf(0, "Related commands: meminfo, imagelist, gfx_world, gfx_model, cg_drawfps, com_statmon, tempmeminfo\n");
+    Com_Printf(CON_CHANNEL_DONT_FILTER, "Related commands: meminfo, imagelist, gfx_world, gfx_model, cg_drawfps, com_statmon, tempmeminfo\n");
 }
 
 void* __cdecl Hunk_FindDataForFile(int type, const char* name)
@@ -980,7 +980,7 @@ static uint* __cdecl Z_TryMalloc(int size, const char* name, int type)
 
 static void __cdecl Z_MallocFailed(int size)
 {
-    Com_PrintError(16, "Failed to Z_Malloc %i bytes\n", size);
+    Com_PrintError(CON_CHANNEL_SYSTEM, "Failed to Z_Malloc %i bytes\n", size);
     Sys_OutOfMemErrorInternal(".\\universal\\com_memory.cpp", 593);
 }
 

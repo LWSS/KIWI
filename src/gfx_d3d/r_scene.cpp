@@ -267,7 +267,7 @@ void __cdecl R_AddOmniLightToScene(const float *org, float radius, float r, floa
                 dst = &scene.addedLight[scene.addedLightCount++];
                 memset(&dst->type, 0, sizeof(GfxLight));
                 dst->def = rgp.dlightDef;
-                dst->type = 3;
+                dst->type = GFX_LIGHT_TYPE_OMNI;
                 dst->origin[0] = *org;
                 dst->origin[1] = org[1];
                 dst->origin[2] = org[2];
@@ -325,7 +325,7 @@ void __cdecl R_AddSpotLightToScene(const float *org, const float *dir, float rad
                 spotLightOffset = r_spotLightStartRadius->current.value / v8;
                 memset(&dst->type, 0, sizeof(GfxLight));
                 dst->def = rgp.dlightDef;
-                dst->type = 2;
+                dst->type = GFX_LIGHT_TYPE_SPOT;
                 dst->origin[0] = *org;
                 dst->origin[1] = org[1];
                 dst->origin[2] = org[2];
@@ -676,12 +676,12 @@ GfxDrawSurf *__cdecl R_AddXModelSurfaces(
                 }
                 if (skinnedCachedOffset == -2)
                 {
-                    surfType = 7;
+                    surfType = SF_XMODEL_RIGID;
                 }
                 else
                 {
                     iassert(skinnedCachedOffset == -1);
-                    surfType = 8;
+                    surfType = SF_XMODEL_RIGID_SKINNED;
                 }
 
                 bcassert(surfId, (1 << MTL_SORT_OBJECT_ID_BITS));
@@ -920,7 +920,7 @@ GfxDrawSurf *__cdecl R_AddDObjSurfaces(
                 continue;
             if (*(uint *)modelSurf == -2)
             {
-                surfType = 7;
+                surfType = SF_XMODEL_RIGID;
                 surfSize = 56;
             }
             else
@@ -934,7 +934,7 @@ GfxDrawSurf *__cdecl R_AddDObjSurfaces(
                     modelSurf += surfSize;
                     goto LABEL_18;
                 }
-                surfType = 9;
+                surfType = SF_XMODEL_SKINNED;
                 surfSize = 24;
             }
             iassert(*material);

@@ -11,7 +11,28 @@ enum GfxRefBlendMode : int
     BLENDMODE_LT128 = 0x4,
     BLENDMODE_ADD = 0x5,
 };
-enum file_image_flags_t : int
+
+enum GfxImageFileFormat : __int32
+{
+    IMG_FORMAT_INVALID = 0x0,
+    IMG_FORMAT_BITMAP_RGBA = 0x1,
+    IMG_FORMAT_BITMAP_RGB = 0x2,
+    IMG_FORMAT_BITMAP_LUMINANCE_ALPHA = 0x3,
+    IMG_FORMAT_BITMAP_LUMINANCE = 0x4,
+    IMG_FORMAT_BITMAP_ALPHA = 0x5,
+    IMG_FORMAT_WAVELET_RGBA = 0x6,
+    IMG_FORMAT_WAVELET_RGB = 0x7,
+    IMG_FORMAT_WAVELET_LUMINANCE_ALPHA = 0x8,
+    IMG_FORMAT_WAVELET_LUMINANCE = 0x9,
+    IMG_FORMAT_WAVELET_ALPHA = 0xA,
+    IMG_FORMAT_DXT1 = 0xB,
+    IMG_FORMAT_DXT3 = 0xC,
+    IMG_FORMAT_DXT5 = 0xD,
+    IMG_FORMAT_DXN = 0xE,
+    IMG_FORMAT_COUNT = 0xF,
+};
+
+enum file_image_flags_t : __int32
 {
     IMG_FLAG_NOPICMIP = 0x1,
     IMG_FLAG_NOMIPMAPS = 0x2,
@@ -231,14 +252,14 @@ void __cdecl R_DownsampleMipMapBilinear(
 
 inline uint __cdecl Image_GetUsage(int imageFlags, _D3DFORMAT imageFormat)
 {
-    if ((imageFlags & 0x20000) != 0)
+    if ((imageFlags & IMG_FLAG_RENDER_TARGET) != 0)
     {
         if (imageFormat == D3DFMT_D24S8 || imageFormat == D3DFMT_D24X8 || imageFormat == D3DFMT_D16)
             return 2;
         else
             return 1;
     }
-    else if ((imageFlags & 0x10000) != 0)
+    else if ((imageFlags & IMG_FLAG_DYNAMIC) != 0)
     {
         return 512;
     }

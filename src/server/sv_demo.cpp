@@ -113,7 +113,7 @@ int __cdecl SV_HistoryAlloc(server_demo_history_t *history, unsigned __int8 **pD
     v9 = v8 + size;
     if ((unsigned int)(v8 + size) > 0x300000)
     {
-        Com_PrintError(1, "SV_HistoryAlloc failed. Needed %d more memory\n", v9 - 3145728);
+        Com_PrintError(CON_CHANNEL_ERROR, "SV_HistoryAlloc failed. Needed %d more memory\n", v9 - 3145728);
         return 0;
     }
     else
@@ -455,7 +455,7 @@ _iobuf *__cdecl SV_DemoOpenFile(const char *fileName)
     FS_BuildOSPath(v2, "", fileName, v4);
     if (!FS_CreatePath(v4))
         return FS_FileOpenWriteReadBinary(v4);
-    Com_PrintError(1, "Failed to create path '%s'\n", v4);
+    Com_PrintError(CON_CHANNEL_ERROR, "Failed to create path '%s'\n", v4);
     return 0;
 }
 
@@ -696,12 +696,12 @@ void __cdecl SV_SaveDemo(const char *demoName, const char *description, uint sav
     v3 = demoName;
     if (!sv.demo.msg.data)
     {
-        Com_Printf(15, "No replay.\n");
+        Com_Printf(CON_CHANNEL_SERVER, "No replay.\n");
         return;
     }
     if (!sv.demo.save.bufLen)
     {
-        Com_Printf(15, "Replay start failed to save.\n");
+        Com_Printf(CON_CHANNEL_SERVER, "Replay start failed to save.\n");
         return;
     }
     sv.demo.changed = 0;
@@ -842,7 +842,7 @@ void __cdecl SV_SaveDemo_f()
     }
     else
     {
-        Com_Printf(0, "replay_save <name>\n");
+        Com_Printf(CON_CHANNEL_DONT_FILTER, "replay_save <name>\n");
     }
 }
 
@@ -875,7 +875,7 @@ void __cdecl SV_DemoRestart_f()
     }
     else
     {
-        Com_Printf(0, "No replay.\n");
+        Com_Printf(CON_CHANNEL_DONT_FILTER, "No replay.\n");
     }
 }
 
@@ -964,9 +964,9 @@ void Cmd_Echo_f()
         if (i >= sv_cmd_args.argc[nesting])
             break;
         v2 = SV_Cmd_Argv(i);
-        Com_Printf(0, "^3%s ", v2);
+        Com_Printf(CON_CHANNEL_DONT_FILTER, "^3%s ", v2);
     }
-    Com_Printf(0, "\n");
+    Com_Printf(CON_CHANNEL_DONT_FILTER, "\n");
     if (SV_RecordingDemo())
     {
         if (sv_cmd_args.nesting >= 8u)
@@ -1047,7 +1047,7 @@ void __cdecl SV_SaveHistoryTime(server_demo_history_t *history)
     {
         if (g_numFileSkips == 3600)
         {
-            Com_PrintWarning(15, "Failed to save demo history.  Disabling autosave.\n");
+            Com_PrintWarning(CON_CHANNEL_SERVER, "Failed to save demo history.  Disabling autosave.\n");
             Dvar_SetInt(replay_autosave, 0);
         }
         else
@@ -1063,7 +1063,7 @@ void __cdecl SV_SaveHistoryTime(server_demo_history_t *history)
                 v2 = g_fileTimeHistory;
             }
             if (!SV_WriteHistory(v2, history))
-                Com_PrintError(1, "Failed to save demo history.\n");
+                Com_PrintError(CON_CHANNEL_ERROR, "Failed to save demo history.\n");
             v3 = g_fileTimeHistory;
             g_fileSkips[g_numFileSkips].time = history->time;
             v4 = FS_FileTell(v3);
@@ -1074,7 +1074,7 @@ void __cdecl SV_SaveHistoryTime(server_demo_history_t *history)
     }
     else
     {
-        Com_PrintError(1, "Failed to open demo cache file.\n");
+        Com_PrintError(CON_CHANNEL_ERROR, "Failed to open demo cache file.\n");
     }
 }
 
@@ -1088,7 +1088,7 @@ void __cdecl SV_SaveHistoryMark(const server_demo_history_t *history)
     iassert(history->manual);
     if (!g_fileMarkHistory)
     {
-        Com_PrintError(1, "Failed to open demo cache file.\n");
+        Com_PrintError(CON_CHANNEL_ERROR, "Failed to open demo cache file.\n");
         return;
     }
     MarkSkip = SV_FindMarkSkip(history->name);
@@ -1096,7 +1096,7 @@ void __cdecl SV_SaveHistoryMark(const server_demo_history_t *history)
     {
         if (g_numFileMarkSkips == 50)
         {
-            Com_PrintError(1, "Out of mark slots.\n");
+            Com_PrintError(CON_CHANNEL_ERROR, "Out of mark slots.\n");
             return;
         }
         MarkSkip = &g_fileMarkSkips[g_numFileMarkSkips];
@@ -1108,7 +1108,7 @@ void __cdecl SV_SaveHistoryMark(const server_demo_history_t *history)
     MarkSkip->fileOffset = v3;
     if (!SV_WriteHistory(v4, history))
     {
-        Com_PrintError(1, "Failed to save demo history.\n");
+        Com_PrintError(CON_CHANNEL_ERROR, "Failed to save demo history.\n");
         MarkSkip->name[0] = 0;
     }
 }
@@ -1251,15 +1251,15 @@ server_demo_history_t *__cdecl SV_DemoGetBuffer()
                 if (g_historySaving)
                 {
                     iassert(replay_autosave);
-                    Com_PrintError(1, "Stalling for previous demo history to save.\n");
+                    Com_PrintError(CON_CHANNEL_ERROR, "Stalling for previous demo history to save.\n");
                     Com_PrintError(
-                        1,
+                        CON_CHANNEL_ERROR,
                         "You may want to increase replay_autosave(%i) to avoid hitches.\n",
                         replay_autosave->current.integer);
                 }
                 if (!Sys_WaitForSaveHistoryDone())
                 {
-                    Com_PrintError(1, "Demo history save time out.\n");
+                    Com_PrintError(CON_CHANNEL_ERROR, "Demo history save time out.\n");
                     result = 0;
                     g_history = 0;
                     return result;
@@ -1389,17 +1389,17 @@ void __cdecl SV_DemoMark_f()
             }
             else
             {
-                Com_Printf(0, "Mark failed because previous save hasn't finished.\n");
+                Com_Printf(CON_CHANNEL_DONT_FILTER, "Mark failed because previous save hasn't finished.\n");
             }
         }
         else
         {
-            Com_Printf(0, "Past end of replay.\n");
+            Com_Printf(CON_CHANNEL_DONT_FILTER, "Past end of replay.\n");
         }
     }
     else
     {
-        Com_Printf(0, "No replay.\n");
+        Com_Printf(CON_CHANNEL_DONT_FILTER, "No replay.\n");
     }
 }
 
@@ -1462,7 +1462,7 @@ bool __cdecl SV_DemoLoadHistory(_iobuf *fileHistory, int fileOffset)
         ;
     if (FS_FileSeek(fileHistory, fileOffset, 2))
     {
-        Com_PrintError(1, "SV_DemoLoadHistory: seek failed\n");
+        Com_PrintError(CON_CHANNEL_ERROR, "SV_DemoLoadHistory: seek failed\n");
         return 0;
     }
     SV_FreeHistoryData(g_history);
@@ -1586,12 +1586,12 @@ void __cdecl SV_DemoGoto_f()
         }
         else
         {
-            Com_Printf(0, "Mark not found.\n");
+            Com_Printf(CON_CHANNEL_DONT_FILTER, "Mark not found.\n");
         }
     }
     else
     {
-        Com_Printf(0, "No replay.\n");
+        Com_Printf(CON_CHANNEL_DONT_FILTER, "No replay.\n");
     }
 }
 
@@ -1630,12 +1630,12 @@ void __cdecl SV_DemoBack_f()
     }
     if (!sv.demo.msg.data)
     {
-        Com_Printf(0, "No replay.\n");
+        Com_Printf(CON_CHANNEL_DONT_FILTER, "No replay.\n");
         return;
     }
     if (sv.demo.forwardMsec)
     {
-        Com_Printf(0, "replay_back ignored.\n");
+        Com_Printf(CON_CHANNEL_DONT_FILTER, "replay_back ignored.\n");
         return;
     }
     if (SV_Cmd_Argc() <= 1)
@@ -1654,7 +1654,7 @@ void __cdecl SV_DemoBack_f()
     v0 = (int)(*(double *)&v3 * 1000.0);
     if (v0 > 0)
         goto LABEL_11;
-    Com_Printf(0, "bad value\n");
+    Com_Printf(CON_CHANNEL_DONT_FILTER, "bad value\n");
 }
 
 void __cdecl SV_DemoForward_f()
@@ -1674,12 +1674,12 @@ void __cdecl SV_DemoForward_f()
     }
     if (!sv.demo.playing)
     {
-        Com_Printf(0, "Not playing replay.\n");
+        Com_Printf(CON_CHANNEL_DONT_FILTER, "Not playing replay.\n");
         return;
     }
     if (sv.demo.forwardMsec)
     {
-        Com_Printf(0, "replay_forward ignored.\n");
+        Com_Printf(CON_CHANNEL_DONT_FILTER, "replay_forward ignored.\n");
         return;
     }
     if (SV_Cmd_Argc() <= 1)
@@ -1692,7 +1692,7 @@ void __cdecl SV_DemoForward_f()
     v2 = (int)(*(double *)&v1 * 1000.0);
     if (v2 <= 0)
     {
-        Com_Printf(0, "bad value\n");
+        Com_Printf(CON_CHANNEL_DONT_FILTER, "bad value\n");
         return;
     }
     v3 = G_GetTime() + v2;
@@ -1734,12 +1734,12 @@ void __cdecl SV_DemoFullForward_f()
     }
     if (!sv.demo.playing)
     {
-        Com_Printf(0, "Not playing replay.\n");
+        Com_Printf(CON_CHANNEL_DONT_FILTER, "Not playing replay.\n");
         return;
     }
     if (sv.demo.forwardMsec)
     {
-        Com_Printf(0, "replay_forward_full ignored.\n");
+        Com_Printf(CON_CHANNEL_DONT_FILTER, "replay_forward_full ignored.\n");
         return;
     }
     if (SV_Cmd_Argc() <= 1)
@@ -1754,7 +1754,7 @@ void __cdecl SV_DemoFullForward_f()
     v0 = (int)(*(double *)&v2 * 1000.0);
     if (v0 > 0)
         goto LABEL_11;
-    Com_Printf(0, "bad value\n");
+    Com_Printf(CON_CHANNEL_DONT_FILTER, "bad value\n");
 }
 
 void __cdecl SV_DemoLive_f()
@@ -1771,7 +1771,7 @@ void __cdecl SV_DemoLive_f()
     if (sv.demo.playing)
         sv.demo.startLive = 1;
     else
-        Com_Printf(0, "Not playing replay.\n");
+        Com_Printf(CON_CHANNEL_DONT_FILTER, "Not playing replay.\n");
 }
 
 void __cdecl SV_DemoInfo_f()
@@ -1785,14 +1785,14 @@ void __cdecl SV_DemoInfo_f()
     if (g_numFileMarkSkips > 0)
     {
         iassert(g_fileMarkHistory);
-        Com_Printf(0, "Named Marks(%d):\n", g_numFileSkips);
+        Com_Printf(CON_CHANNEL_DONT_FILTER, "Named Marks(%d):\n", g_numFileSkips);
         v4 = 0;
         if (g_numFileMarkSkips > 0)
         {
             v5 = g_fileMarkSkips;
             do
             {
-                Com_Printf(0, "\t'%s':%d\n", v5->name, v5->fileOffset);
+                Com_Printf(CON_CHANNEL_DONT_FILTER, "\t'%s':%d\n", v5->name, v5->fileOffset);
                 ++v4;
                 ++v5;
             } while (v4 < g_numFileMarkSkips);
@@ -1801,10 +1801,10 @@ void __cdecl SV_DemoInfo_f()
     if (g_numFileSkips > 0)
     {
         iassert(g_fileTimeHistory);
-        Com_Printf(0, "Time Marks(%d):\n", g_numFileSkips);
+        Com_Printf(CON_CHANNEL_DONT_FILTER, "Time Marks(%d):\n", g_numFileSkips);
         for (i = 0; i < g_numFileSkips; ++v3)
         {
-            Com_Printf(0, "\t%d:%d\n", v3->time, v3->fileEndOffset);
+            Com_Printf(CON_CHANNEL_DONT_FILTER, "\t%d:%d\n", v3->time, v3->fileEndOffset);
             ++i;
         }
     }
@@ -1860,7 +1860,7 @@ void SV_DoAutoSaveHistory()
         }
         else
         {
-            Com_PrintError(1, "Replay autosave failed because previous save hasn't finish.\n");
+            Com_PrintError(CON_CHANNEL_ERROR, "Replay autosave failed because previous save hasn't finish.\n");
         }
     }
 }
@@ -1894,12 +1894,12 @@ void __cdecl SV_EndDemo(bool error)
     iassert(!sv.demo.recording);
     if (error)
     {
-        Com_Printf(15, "Aborted replay due to inconsistency.\n");
+        Com_Printf(CON_CHANNEL_SERVER, "Aborted replay due to inconsistency.\n");
         Dvar_SetInt(cl_paused, 1);
     }
     else
     {
-        Com_Printf(15, "End of replay.\n");
+        Com_Printf(CON_CHANNEL_SERVER, "End of replay.\n");
         sv.demo.recording = 1;
         if (sv.demo.startLive)
         {

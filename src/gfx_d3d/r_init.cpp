@@ -2742,10 +2742,10 @@ const char *__stdcall DXGetErrorDescription9A(int a1)
 
 void __cdecl  R_FatalInitError(const char *msg)
 {
-    Com_Printf(8, "********** DirectX returned an unrecoverable error code during initialization  **********\n");
-    Com_Printf(8, "********** Initialization also happens while playing if DirectX loses a device **********\n");
-    Com_Printf(8, "********** Consult the readme for how to continue from this problem            **********\n");
-    Com_Printf(8, "\n%s\n", msg);
+    Com_Printf(CON_CHANNEL_GFX, "********** DirectX returned an unrecoverable error code during initialization  **********\n");
+    Com_Printf(CON_CHANNEL_GFX, "********** Initialization also happens while playing if DirectX loses a device **********\n");
+    Com_Printf(CON_CHANNEL_GFX, "********** Consult the readme for how to continue from this problem            **********\n");
+    Com_Printf(CON_CHANNEL_GFX, "\n%s\n", msg);
     Sys_DirectXFatalError();
 }
 
@@ -2753,9 +2753,9 @@ void __cdecl  R_FatalLockError(HRESULT hr)
 {
     const char *v1; // eax
 
-    Com_Printf(8, "********** DirectX failed a call to lock a vertex buffer or an index buffer **********\n");
+    Com_Printf(CON_CHANNEL_GFX, "********** DirectX failed a call to lock a vertex buffer or an index buffer **********\n");
     v1 = R_ErrorDescription(hr);
-    Com_Printf(8, "********** error information:  %s\n", v1);
+    Com_Printf(CON_CHANNEL_GFX, "********** error information:  %s\n", v1);
     Sys_DirectXFatalError();
 }
 
@@ -2976,7 +2976,7 @@ void R_Init()
 {
     HRESULT hr; // [esp+0h] [ebp-4h]
 
-    Com_Printf(8, "----- R_Init -----\n");
+    Com_Printf(CON_CHANNEL_GFX, "----- R_Init -----\n");
     Swap_Init();
     R_Register();
     R_InitGlobalStructs();
@@ -2992,7 +2992,7 @@ void R_Init()
             dx.sunSpriteSamples = RB_CalcSunSpriteSamples();
             if (!dx.sunSpriteSamples)
             {
-                Com_Printf(8, "Sun sprite occlusion query calibration failed; reverting to low-quality sun visibility test");
+                Com_Printf(CON_CHANNEL_GFX, "Sun sprite occlusion query calibration failed; reverting to low-quality sun visibility test");
                 RB_FreeSunSpriteQueries();
             }
         }
@@ -3216,11 +3216,11 @@ char __cdecl R_PreCreateWindow()
     }
     else
     {
-        Com_Printf(8, "Getting Direct3D 9 interface...\n");
+        Com_Printf(CON_CHANNEL_GFX, "Getting Direct3D 9 interface...\n");
         dx.d3d9 = Direct3DCreate9(0x20u);
         if (!dx.d3d9)
         {
-            Com_Printf(8, "Direct3D 9 failed to initialize\n");
+            Com_Printf(CON_CHANNEL_GFX, "Direct3D 9 failed to initialize\n");
             return 0;
         }
     }
@@ -3238,12 +3238,12 @@ void __cdecl R_RespondToMissingCaps(DxCapsResponse response, const char *msg, in
     if (response == DX_CAPS_RESPONSE_WARN)
     {
         Printf = (void (*)(int, const char *, ...))Com_PrintWarning;
-        Com_PrintWarning(8, "Video card or driver %s.\n", msg);
+        Com_PrintWarning(CON_CHANNEL_GFX, "Video card or driver %s.\n", msg);
     }
     else
     {
         Printf = (void (*)(int, const char *, ...))Com_Printf;
-        Com_Printf(8, "Video card or driver %s.\n", msg);
+        Com_Printf(CON_CHANNEL_GFX, "Video card or driver %s.\n", msg);
     }
     switch (response)
     {
@@ -3316,12 +3316,12 @@ void __cdecl R_PickRenderer(_D3DCAPS9 *caps)
     int rendererIter; // [esp+8h] [ebp-4h]
 
     Com_Printf(
-        8,
+        CON_CHANNEL_GFX,
         "Pixel shader version is %i.%i\n",
         BYTE1(caps->PixelShaderVersion),
         (uint8_t)caps->PixelShaderVersion);
     Com_Printf(
-        8,
+        CON_CHANNEL_GFX,
         "Vertex shader version is %i.%i\n",
         BYTE1(caps->VertexShaderVersion),
         (uint8_t)caps->VertexShaderVersion);
@@ -3333,7 +3333,7 @@ void __cdecl R_PickRenderer(_D3DCAPS9 *caps)
         {
             rendererChosen = (GfxRenderer)rendererIter;
             v1 = R_DescribeRenderer(rendererIter);
-            Com_Printf(8, "%s code path is available.\n", v1);
+            Com_Printf(CON_CHANNEL_GFX, "%s code path is available.\n", v1);
         }
     }
     if (rendererChosen == GFX_RENDERER_COUNT)
@@ -3341,7 +3341,7 @@ void __cdecl R_PickRenderer(_D3DCAPS9 *caps)
     if (r_rendererPreference->current.integer == 2)
     {
         v4 = R_DescribeRenderer(rendererChosen);
-        Com_Printf(8, "Using %s code path because it is the best available path on this hardware.\n", v4);
+        Com_Printf(CON_CHANNEL_GFX, "Using %s code path because it is the best available path on this hardware.\n", v4);
     }
     else
     {
@@ -3350,13 +3350,13 @@ void __cdecl R_PickRenderer(_D3DCAPS9 *caps)
             rendererChosena = (GfxRenderer)r_rendererPreference->current.integer;
             v5 = Dvar_EnumToString(r_rendererPreference);
             v2 = R_DescribeRenderer(rendererChosena);
-            Com_Printf(8, "Using %s code path because r_rendererPreference is set to %s.\n", v2, v5);
+            Com_Printf(CON_CHANNEL_GFX, "Using %s code path because r_rendererPreference is set to %s.\n", v2, v5);
             Dvar_SetInt((dvar_s *)r_rendererInUse, rendererChosena);
             return;
         }
         v6 = R_DescribeRenderer(r_rendererPreference->current.integer);
         v3 = R_DescribeRenderer(rendererChosen);
-        Com_Printf(8, "Using %s code path because the requested %s code path is unavailable.\n", v3, v6);
+        Com_Printf(CON_CHANNEL_GFX, "Using %s code path because the requested %s code path is unavailable.\n", v3, v6);
     }
     Dvar_SetInt((dvar_s *)r_rendererInUse, rendererChosen);
 }
@@ -3571,7 +3571,7 @@ char __cdecl R_CreateWindow(GfxWindowParms *wndParms)
     if (wndParms->fullscreen)
     {
         Com_Printf(
-            8,
+            CON_CHANNEL_GFX,
             "Attempting %i x %i fullscreen with 32 bpp at %i hz\n",
             wndParms->displayWidth,
             wndParms->displayHeight,
@@ -3582,7 +3582,7 @@ char __cdecl R_CreateWindow(GfxWindowParms *wndParms)
     else
     {
         Com_Printf(
-            8,
+            CON_CHANNEL_GFX,
             "Attempting %i x %i window at (%i, %i)\n",
             wndParms->displayWidth,
             wndParms->displayHeight,
@@ -3623,12 +3623,12 @@ char __cdecl R_CreateWindow(GfxWindowParms *wndParms)
         0);
     if (wndParms->hwnd)
     {
-        Com_Printf(8, "Game window successfully created.\n");
+        Com_Printf(CON_CHANNEL_GFX, "Game window successfully created.\n");
         return 1;
     }
     else
     {
-        Com_Printf(8, "Couldn't create a window.\n");
+        Com_Printf(CON_CHANNEL_GFX, "Couldn't create a window.\n");
         return 0;
     }
 }
@@ -3768,7 +3768,7 @@ char __cdecl R_InitHardware(const GfxWindowParms *wndParms)
     if (!R_CreateForInitOrReset())
         return 0;
     R_Cinematic_Init();
-    Com_Printf(8, "Setting initial state...\n");
+    Com_Printf(CON_CHANNEL_GFX, "Setting initial state...\n");
     RB_SetInitialState();
     R_InitGamma();
     R_InitScene();
@@ -3865,23 +3865,23 @@ char __cdecl R_CreateForInitOrReset()
     int hr; // [esp+8h] [ebp-8h]
     uint fenceIter; // [esp+Ch] [ebp-4h]
 
-    Com_Printf(8, "Initializing render targets...\n");
+    Com_Printf(CON_CHANNEL_GFX, "Initializing render targets...\n");
     R_InitRenderTargets();
     if (!g_allocateMinimalResources)
     {
         R_InitRenderBuffers();
         R_InitModelLightingImage();
-        Com_Printf(8, "Initializing static model cache...\n");
+        Com_Printf(CON_CHANNEL_GFX, "Initializing static model cache...\n");
         R_InitStaticModelCache();
     }
-    Com_Printf(8, "Initializing dynamic buffers...\n");
+    Com_Printf(CON_CHANNEL_GFX, "Initializing dynamic buffers...\n");
     R_CreateDynamicBuffers();
     if (!g_allocateMinimalResources)
     {
-        Com_Printf(8, "Initializing particle cloud buffer...\n");
+        Com_Printf(CON_CHANNEL_GFX, "Initializing particle cloud buffer...\n");
         R_CreateParticleCloudBuffer();
     }
-    Com_Printf(8, "Creating Direct3D queries...\n");
+    Com_Printf(CON_CHANNEL_GFX, "Creating Direct3D queries...\n");
     dx.nextFence = 0;
     dx.flushGpuQueryIssued = 0;
     dx.flushGpuQueryCount = 0;
@@ -3907,7 +3907,7 @@ char __cdecl R_CreateForInitOrReset()
     {
     LABEL_6:
         v0 = R_ErrorDescription(hr);
-        Com_Printf(8, "Event query creation failed: %s (0x%08x)\n", v0, hr);
+        Com_Printf(CON_CHANNEL_GFX, "Event query creation failed: %s (0x%08x)\n", v0, hr);
         return 0;
     }
 }
@@ -3922,7 +3922,7 @@ IDirect3DQuery9 *__cdecl RB_HW_AllocOcclusionQuery()
     if (hr >= 0)
         return query;
     v0 = R_ErrorDescription(hr);
-    Com_Printf(8, "Occlusion query creation failed: %s (0x%08x)\n", v0, hr);
+    Com_Printf(CON_CHANNEL_GFX, "Occlusion query creation failed: %s (0x%08x)\n", v0, hr);
     return 0;
 }
 
@@ -3953,7 +3953,7 @@ char __cdecl R_CreateDevice(const GfxWindowParms *wndParms)
     else
     {
         v1 = R_ErrorDescription(hr);
-        Com_Printf(8, "Couldn't create a Direct3D device: %s\n", v1);
+        Com_Printf(CON_CHANNEL_GFX, "Couldn't create a Direct3D device: %s\n", v1);
         return 0;
     }
 }
@@ -4011,7 +4011,7 @@ void __cdecl R_SetupAntiAliasing(const GfxWindowParms *wndParms)
             multiSampleCount,
             &qualityLevels) >= 0)
         {
-            Com_Printf(8, "Using %ix anti-aliasing\n", multiSampleCount);
+            Com_Printf(CON_CHANNEL_GFX, "Using %ix anti-aliasing\n", multiSampleCount);
             dx.multiSampleQuality = qualityLevels - 1;
             return;
         }
@@ -4049,7 +4049,7 @@ HRESULT __cdecl R_CreateDeviceInternal(HWND__ *hwnd, uint behavior, _D3DPRESENT_
     HRESULT hr; // [esp+14h] [ebp-8h]
     int attempt; // [esp+18h] [ebp-4h]
 
-    Com_Printf(8, "Creating Direct3D device...\n");
+    Com_Printf(CON_CHANNEL_GFX, "Creating Direct3D device...\n");
     attempt = 0;
     while (1)
     {
@@ -4658,7 +4658,7 @@ char __cdecl R_RecoverLostDevice()
     {
         iassert( gfxBuf.dynamicVertexBuffer->buffer );
         iassert( gfxBuf.dynamicIndexBuffer->buffer );
-        Com_Printf(8, "Recovering lost device...\n");
+        Com_Printf(CON_CHANNEL_GFX, "Recovering lost device...\n");
         remoteScreenUpdateNesting = R_PopRemoteScreenUpdate();
 #ifdef KISAK_RADIANT
         s_savedRemoteNesting = remoteScreenUpdateNesting;
@@ -4695,7 +4695,7 @@ char __cdecl R_RecoverLostDevice()
     DB_EndRecoverLostDevice();
     R_Cinematic_EndLostDevice();
     R_PushRemoteScreenUpdate(remoteScreenUpdateNesting);
-    Com_Printf(8, "Finished recovering lost device.\n");
+    Com_Printf(CON_CHANNEL_GFX, "Finished recovering lost device.\n");
     return 1;
 }
 
@@ -5025,7 +5025,7 @@ extern void Radiant_FL_Log( const char *fmt, ... );   // radiant/mainfrm.cpp (Fi
 void __cdecl R_InitEditor()
 {
     iassert( !rg.registered );
-    Com_Printf(8, "----- R_Init -----\n");
+    Com_Printf(CON_CHANNEL_GFX, "----- R_Init -----\n");
     Radiant_FL_Log( "    R_InitEditor: Swap_Init" );        Swap_Init();
     Radiant_FL_Log( "    R_InitEditor: R_RegisterDvars" );  R_RegisterDvars();
     Radiant_FL_Log( "    R_InitEditor: R_RegisterCmds" );   R_RegisterCmds();
@@ -5238,7 +5238,7 @@ char __cdecl R_BeginRegistration_R_InitHardware(GfxWindowParms *wnd)
     RB_InitSceneViewport();
     if (!R_CreateForInitOrReset())
         return 0;
-    Com_Printf(8, "Setting initial state...\n");
+    Com_Printf(CON_CHANNEL_GFX, "Setting initial state...\n");
     RB_SetInitialState();
     R_InitScene();
     R_InitSystems();                 // Material_Init/R_InitFonts/R_InitLoadWater/R_InitLightDefs + rg.registered=1

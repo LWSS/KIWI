@@ -184,7 +184,7 @@ int __cdecl Ragdoll_CreateRagdollForDObj(int localClientNum, int ragdollDef, int
     }
     else
     {
-        Com_Printf(20, "Ragdoll allocation failed, out of ragdoll bodies (obj %d)\n", dobj);
+        Com_Printf(CON_CHANNEL_PHYS, "Ragdoll allocation failed, out of ragdoll bodies (obj %d)\n", dobj);
         return 0;
     }
 }
@@ -468,12 +468,12 @@ char __cdecl Ragdoll_ReadGeomType(int arg, BoneDef *bone)
                 return 1;
             }
         }
-        Com_Printf(14, "Ragdoll: Unknown bone geom type %s\n", name);
+        Com_Printf(CON_CHANNEL_CLIENT, "Ragdoll: Unknown bone geom type %s\n", name);
         return 0;
     }
     else
     {
-        Com_Printf(14, "Ragdoll: Missing geom type arg %d\n", arg);
+        Com_Printf(CON_CHANNEL_CLIENT, "Ragdoll: Missing geom type arg %d\n", arg);
         return 0;
     }
 }
@@ -494,12 +494,12 @@ char __cdecl Ragdoll_ReadJointType(int arg, JointDef *joint)
                 return 1;
             }
         }
-        Com_Printf(14, "Ragdoll: Unknown joint type %s\n", name);
+        Com_Printf(CON_CHANNEL_CLIENT, "Ragdoll: Unknown joint type %s\n", name);
         return 0;
     }
     else
     {
-        Com_Printf(14, "Ragdoll: Missing joint type arg %d\n", arg);
+        Com_Printf(CON_CHANNEL_CLIENT, "Ragdoll: Missing joint type arg %d\n", arg);
         return 0;
     }
 }
@@ -538,7 +538,7 @@ char __cdecl Ragdoll_ReadAxis(int arg, float *dest)
         {
             if (idx >= 4)
             {
-                Com_Printf(14, "Ragdoll: Unknown bone axis %s\n", argv);
+                Com_Printf(CON_CHANNEL_CLIENT, "Ragdoll: Unknown bone axis %s\n", argv);
                 return 0;
             }
             if (!I_stricmp(argv, axisTable[idx].name))
@@ -558,7 +558,7 @@ char __cdecl Ragdoll_ReadAxis(int arg, float *dest)
     }
     else
     {
-        Com_Printf(14, "Ragdoll: Missing axis arg %d\n", arg);
+        Com_Printf(CON_CHANNEL_CLIENT, "Ragdoll: Missing axis arg %d\n", arg);
         *dest = 0.0;
         dest[1] = 0.0;
         dest[2] = 0.0;
@@ -608,7 +608,7 @@ void __cdecl Ragdoll_Bone_f()
             def = &ragdollDefs[ragdoll];
             if (def->numBones >= 14)
             {
-                Com_Printf(14, "Ragdoll: Too many ragdoll bones, max %d\n", 14);
+                Com_Printf(CON_CHANNEL_CLIENT, "Ragdoll: Too many ragdoll bones, max %d\n", 14);
                 return;
             }
             bone = &def->boneDefs[def->numBones];
@@ -636,7 +636,7 @@ void __cdecl Ragdoll_Bone_f()
             {
                 if (parentBone >= def->numBones)
                 {
-                    Com_Printf(14, "Ragdoll: Child bones must come after parent bones: %d\n", parentBone);
+                    Com_Printf(CON_CHANNEL_CLIENT, "Ragdoll: Child bones must come after parent bones: %d\n", parentBone);
                     return;
                 }
                 bone->parentBone = parentBone;
@@ -652,7 +652,7 @@ void __cdecl Ragdoll_Bone_f()
                 }
                 else
                 {
-                    Com_Printf(14, "Ragdoll: Bone %d validation failed\n", def->numBones);
+                    Com_Printf(CON_CHANNEL_CLIENT, "Ragdoll: Bone %d validation failed\n", def->numBones);
                 }
             }
         }
@@ -715,7 +715,7 @@ void __cdecl Ragdoll_BaseLerpBone_f()
             }
             else
             {
-                Com_Printf(14, "Ragdoll: Too many base pose lerping bones, max %d\n", 9);
+                Com_Printf(CON_CHANNEL_CLIENT, "Ragdoll: Too many base pose lerping bones, max %d\n", 9);
             }
         }
     }
@@ -752,17 +752,17 @@ void __cdecl Ragdoll_PinBone_f()
                     }
                     else
                     {
-                        Com_Printf(14, (char *)"Ragdoll: Pinned bone has invalid parent index %d\n", bone->parentBoneIndex);
+                        Com_Printf(CON_CHANNEL_CLIENT, (char *)"Ragdoll: Pinned bone has invalid parent index %d\n", bone->parentBoneIndex);
                     }
                 }
                 else
                 {
-                    Com_Printf(14, (char *)"Ragdoll: Couldn't find pinned bone named %s\n", name);
+                    Com_Printf(CON_CHANNEL_CLIENT, (char *)"Ragdoll: Couldn't find pinned bone named %s\n", name);
                 }
             }
             else
             {
-                Com_Printf(14, (char *)"Ragdoll: Too many base pose lerping bones, max %d\n", 9);
+                Com_Printf(CON_CHANNEL_CLIENT, (char *)"Ragdoll: Too many base pose lerping bones, max %d\n", 9);
             }
         }
     }
@@ -799,17 +799,17 @@ void __cdecl Ragdoll_Joint_f()
                     }
                     else
                     {
-                        Com_Printf(14, "Ragdoll: Joint referenced bone with no parent (0)\n");
+                        Com_Printf(CON_CHANNEL_CLIENT, "Ragdoll: Joint referenced bone with no parent (0)\n");
                     }
                 }
                 else
                 {
-                    Com_Printf(14, "Ragdoll: Joint referenced nonexistent bone\n");
+                    Com_Printf(CON_CHANNEL_CLIENT, "Ragdoll: Joint referenced nonexistent bone\n");
                 }
             }
             else
             {
-                Com_Printf(14, "Ragdoll: Too many ragdoll joints, max %d\n", 28);
+                Com_Printf(CON_CHANNEL_CLIENT, "Ragdoll: Too many ragdoll joints, max %d\n", 28);
             }
         }
     }
@@ -894,17 +894,17 @@ void __cdecl Ragdoll_Limit_f()
                     }
                     else
                     {
-                        Com_Printf(14, "Ragdoll: Too many limit axes for joint %d, max %d\n", jointNum, 3);
+                        Com_Printf(CON_CHANNEL_CLIENT, "Ragdoll: Too many limit axes for joint %d, max %d\n", jointNum, 3);
                     }
                 }
                 else
                 {
-                    Com_Printf(14, "Ragdoll: Angular limit added to nonexistent joint %d\n", jointNum);
+                    Com_Printf(CON_CHANNEL_CLIENT, "Ragdoll: Angular limit added to nonexistent joint %d\n", jointNum);
                 }
             }
             else
             {
-                Com_Printf(14, "Ragdoll: Too many ragdoll joints, max %d\n", 28);
+                Com_Printf(CON_CHANNEL_CLIENT, "Ragdoll: Too many ragdoll joints, max %d\n", 28);
             }
         }
     }
@@ -934,7 +934,7 @@ void __cdecl Ragdoll_Selfpair_f()
                     pair->bones[i] = atoi(v1);
                     if (pair->bones[i] > def->numBones)
                     {
-                        Com_Printf(14, "Ragdoll: Bad self collision pair bone %d\n", pair->bones[i]);
+                        Com_Printf(CON_CHANNEL_CLIENT, "Ragdoll: Bad self collision pair bone %d\n", pair->bones[i]);
                         return;
                     }
                 }
@@ -943,7 +943,7 @@ void __cdecl Ragdoll_Selfpair_f()
             }
             else
             {
-                Com_Printf(14, "Ragdoll: Too many ragdoll self collision pairs, max %d\n", 33);
+                Com_Printf(CON_CHANNEL_CLIENT, "Ragdoll: Too many ragdoll self collision pairs, max %d\n", 33);
             }
         }
     }

@@ -1159,7 +1159,7 @@ void __cdecl CG_DrawOverheadNames(int localClientNum, const centity_s *cent, flo
         }
         else
         {
-            Com_PrintError(14, "Unable to get name for client num: %i\n", cent->nextState.clientNum);
+            Com_PrintError(CON_CHANNEL_CLIENT, "Unable to get name for client num: %i\n", cent->nextState.clientNum);
         }
     }
 }

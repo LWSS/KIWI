@@ -51,7 +51,7 @@ void __cdecl R_SetUpSunLight(const float *sunColor, const float *sunDirection, G
 {
     iassert( light );
     memset(&light->type, 0, sizeof(GfxLight));
-    light->type = 1;
+    light->type = GFX_LIGHT_TYPE_DIR;
     light->dir[0] = *sunDirection;
     light->dir[1] = sunDirection[1];
     light->dir[2] = sunDirection[2];
@@ -187,7 +187,7 @@ BOOL __cdecl R_ChooseTrisContextType()
 
 void __cdecl R_LoadStep(const char *description)
 {
-    Com_Printf(8, "Loading %s...\n", description);
+    Com_Printf(CON_CHANNEL_GFX, "Loading %s...\n", description);
 #ifndef KISAK_RADIANT
     SCR_UpdateLoadScreen();
 #endif
@@ -302,7 +302,7 @@ char *__cdecl R_ParseSunLight(SunLightParseParams *params, char *text)
                 if (params->ambientScale > 2.0)
                 {
                     Com_PrintWarning(
-                        8,
+                        CON_CHANNEL_GFX,
                         "WARNING: ambient too big, assuming it uses the old 0-255 scale instead of the proper 0-1 scale (value = '%s')\n",
                         nptr);
                     params->ambientScale = params->ambientScale * 0.01568627543747425;
@@ -333,7 +333,7 @@ void __cdecl R_LoadPrimaryLights(uint bspVersion)
     {
         iassert( comWorld.isInUse );
         s_world.primaryLightCount = comWorld.primaryLightCount;
-        s_world.sunPrimaryLightIndex = comWorld.primaryLightCount > 1 && Com_GetPrimaryLight(1)->type == 1;
+        s_world.sunPrimaryLightIndex = comWorld.primaryLightCount > 1 && Com_GetPrimaryLight(1)->type == GFX_LIGHT_TYPE_DIR;
         for (lightIndex = 0; lightIndex < s_world.primaryLightCount; ++lightIndex)
         {
             primaryLight = Com_GetPrimaryLight(lightIndex);
@@ -669,7 +669,7 @@ int __cdecl R_BuildLightmapMergability(GfxBspLoad *load, r_lightmapGroup_t *grou
         groupInfo[newLmapCount].wideCount = wideCount;
         groupInfo[newLmapCount++].highCount = highCount;
     }
-    Com_Printf(8, "%i merged lightmaps from %i original lightmaps\n", newLmapCount, origLmapCount);
+    Com_Printf(CON_CHANNEL_GFX, "%i merged lightmaps from %i original lightmaps\n", newLmapCount, origLmapCount);
     return origLmapCount;
 }
 
@@ -879,14 +879,14 @@ void __cdecl R_LoadLightmaps(GfxBspLoad *load)
             defCopyCfg.zoom = groupInfo[newLmapIndex].wideCount;
             R_EnumLightDefs((void(*)(GfxLightDef*, void*))R_CopyLightDefAttenuationImage, &defCopyCfg);
             v1 = va("*lightmap%i_primary", newLmapIndex);
-            v2 = Image_Alloc(v1, 2u, 1u, 4u);
+            v2 = Image_Alloc(v1, IMG_CATEGORY_LIGHTMAP, TS_FUNCTION, 4u);
             s_world.lightmaps[newLmapIndex].primary = v2;
             iassert( s_world.lightmaps[newLmapIndex].primary );
             width = groupInfo[newLmapIndex].wideCount << 10;
             height = groupInfo[newLmapIndex].highCount << 10;
             Image_Generate2D(s_world.lightmaps[newLmapIndex].primary, primaryImage, width, height, D3DFMT_L8);
             v3 = va("*lightmap%i_secondary", newLmapIndex);
-            v4 = Image_Alloc(v3, 2u, 1u, 4u);
+            v4 = Image_Alloc(v3, IMG_CATEGORY_LIGHTMAP, TS_FUNCTION, 4u);
             s_world.lightmaps[newLmapIndex].secondary = v4;
             iassert( s_world.lightmaps[newLmapIndex].secondary );
             width = groupInfo[newLmapIndex].wideCount << 9;
@@ -1172,7 +1172,7 @@ void __cdecl R_SetSkyImage(const Material *skyMaterial)
         texdef = &skyMaterial->textureTable[textureIndex];
         if (texdef->nameHash == colorMapHash)
         {
-            if (texdef->semantic == 11 || texdef->u.image->mapType != MAPTYPE_CUBE)
+            if (texdef->semantic == TS_WATER_MAP || texdef->u.image->mapType != MAPTYPE_CUBE)
                 Com_Error(
                     ERR_DROP,
                     "colorMap '%s' for sky material '%s' is not a cubemap\n",
@@ -1304,7 +1304,7 @@ void __cdecl R_LoadSurfaces(GfxBspLoad *load)
 
     iassert( load );
     if (load->bspVersion < 0x16)
-        Com_PrintWarning(8, "Bsp compiled with old version of cod2map.\n");
+        Com_PrintWarning(CON_CHANNEL_GFX, "Bsp compiled with old version of cod2map.\n");
     R_LoadTriangleSurfaces(load->bspVersion, load->trisType, &diskSurfaces, &surfCount);
     if (!surfCount)
         Com_Error(ERR_DROP, "LoadMap: no surfaces in %s", s_world.name);
@@ -2387,7 +2387,7 @@ static void __cdecl R_CheckValidStaticModel(char *(*spawnVars)[2], int spawnVarC
     if (v4)
     {
         Com_PrintError(
-            8,
+            CON_CHANNEL_GFX,
             "bad static model '%s' at (%.0f %.0f %.0f)\n",
             modelName,
             tempOrigin[0],

@@ -55,7 +55,7 @@ void __cdecl DevGui_AddDvar(const char *path, const dvar_s *dvar)
         else
         {
             Com_Printf(
-                11,
+                CON_CHANNEL_DEVGUI,
                 "Path '%s' can't be used for dvar '%s' because it is already used for something else.\n",
                 path,
                 (const char *)dvar);
@@ -281,7 +281,7 @@ char __cdecl DevGui_IsValidPath(const char *path)
         tokResult = DevGui_PathToken(&path, label, &sortKey);
         if (tokResult == DEVGUI_TOKEN_LAST)
         {
-            Com_Printf(11, "Path '%s' must have at least one menu separator ('/' character).\n", originalPath);
+            Com_Printf(CON_CHANNEL_DEVGUI, "Path '%s' must have at least one menu separator ('/' character).\n", originalPath);
             return 0;
         }
         else
@@ -291,7 +291,7 @@ char __cdecl DevGui_IsValidPath(const char *path)
                 if (tokResult == DEVGUI_TOKEN_ERROR)
                 {
                     Com_Printf(
-                        11,
+                        CON_CHANNEL_DEVGUI,
                         "path '%s' is invalid.  Format is 'menu name:sortkey/submenu/...', where 'sortkey' is any (possibly signed) integer.\n",
                         originalPath);
                     return 0;
@@ -303,7 +303,7 @@ char __cdecl DevGui_IsValidPath(const char *path)
     }
     else
     {
-        Com_Printf(11, "Path '%s' must be no longer than %i characters (currently %i).\n", path, 120, strlen(path));
+        Com_Printf(CON_CHANNEL_DEVGUI, "Path '%s' must be no longer than %i characters (currently %i).\n", path, 120, strlen(path));
         return 0;
     }
 }
@@ -329,7 +329,7 @@ void __cdecl DevGui_AddCommand(const char *path, char *command)
         else
         {
             Com_Printf(
-                11,
+                CON_CHANNEL_DEVGUI,
                 "Path '%s' can't be used for command '%s' because it is already used for something else.\n",
                 path,
                 command);
@@ -363,7 +363,7 @@ void __cdecl DevGui_AddGraph(const char *path, DevGraph *graph)
         }
         else
         {
-            Com_Printf(11, "Path '%s' can't be added for this graph because it is already used for something else.\n", path);
+            Com_Printf(CON_CHANNEL_DEVGUI, "Path '%s' can't be added for this graph because it is already used for something else.\n", path);
         }
     }
 }
@@ -1302,7 +1302,7 @@ void __cdecl DevGui_KeyPressed(int key)
         {
             if (key == 9 || key == 167)
             {
-                Com_Printf(11, "Can't rebind 'tab' or 'F1'\n");
+                Com_Printf(CON_CHANNEL_DEVGUI, "Can't rebind 'tab' or 'F1'\n");
             }
             else
             {
@@ -2085,7 +2085,7 @@ void __cdecl DevGui_AddGraphKnot(DevGraph *graph, int localClientNum)
     iassert(graph->selectedKnot < *graph->knotCount);
     if (*graph->knotCount == graph->knotCountMax)
     {
-        Com_Printf(11, "^3Maximum number of knots have reached for this graph\n");
+        Com_Printf(CON_CHANNEL_DEVGUI, "^3Maximum number of knots have reached for this graph\n");
     }
     else
     {

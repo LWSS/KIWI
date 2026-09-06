@@ -788,9 +788,9 @@ GfxCmdHeader *__cdecl R_GetCommandBuffer(GfxRenderCommand renderCmd, int bytes)
     }
 #else
     if (renderCmd < RC_FIRST_NONCRITICAL && s_cmdList->usedCritical < 7680 && bytes + s_cmdList->usedCritical >= 7680)
-        Com_PrintWarning(8, "RENDERCOMMAND_CRITICAL_WARN_SIZE (%i bytes) reached\n", 7680);
+        Com_PrintWarning(CON_CHANNEL_GFX, "RENDERCOMMAND_CRITICAL_WARN_SIZE (%i bytes) reached\n", 7680);
     if (s_cmdList->usedTotal < s_renderCmdWarnSize && bytes + s_cmdList->usedTotal >= s_renderCmdWarnSize)
-        Com_PrintWarning(8, "RENDERCOMMAND_WARN_SIZE (%.0f KB) reached\n", (double)s_renderCmdWarnSize / 1024.0);
+        Com_PrintWarning(CON_CHANNEL_GFX, "RENDERCOMMAND_WARN_SIZE (%.0f KB) reached\n", (double)s_renderCmdWarnSize / 1024.0);
 #endif
     sizeLimit = s_renderCmdBufferSize - s_cmdList->usedTotal;
     if (renderCmd >= RC_FIRST_NONCRITICAL)
@@ -992,7 +992,7 @@ void __cdecl R_AddCmdDrawStretchPic(
         {
             Name = Material_GetName(material);
             Com_PrintWarning(
-                8,
+                CON_CHANNEL_GFX,
                 "R_AddCmdDrawStretchPic: NOT DRAWING WITH MATERIAL \"%s\", because it uses the depth buffer. Set materialType to 2d.\n",
                 Name);
             actualMaterial = rgp.defaultMaterial;
@@ -1002,7 +1002,7 @@ void __cdecl R_AddCmdDrawStretchPic(
     {
         v10 = Material_GetName(material);
         Com_PrintWarning(
-            8,
+            CON_CHANNEL_GFX,
             "R_AddCmdDrawStretchPic: NOT DRAWING WITH MATERIAL \"%s\", because it has a fogable technique.\n",
             v10);
         actualMaterial = rgp.defaultMaterial;
@@ -1087,7 +1087,7 @@ void __cdecl R_AddCmdDrawStretchPicFlipST(
         {
             Name = Material_GetName(material);
             Com_PrintWarning(
-                8,
+                CON_CHANNEL_GFX,
                 "R_AddCmdDrawStretchPicFlipST: NOT DRAWING WITH MATERIAL \"%s\", because it uses the depth buffer. Set materialType to 2d.\n",
                 Name);
             actualMaterial = rgp.defaultMaterial;
@@ -1097,7 +1097,7 @@ void __cdecl R_AddCmdDrawStretchPicFlipST(
     {
         v10 = Material_GetName(material);
         Com_PrintWarning(
-            8,
+            CON_CHANNEL_GFX,
             "R_AddCmdDrawStretchPicFlipST: NOT DRAWING WITH MATERIAL \"%s\", because it has a fogable technique.\n",
             v10);
         actualMaterial = rgp.defaultMaterial;

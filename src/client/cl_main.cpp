@@ -153,7 +153,7 @@ int __cdecl CL_LocalClientNumFromControllerIndex(unsigned int controllerIndex)
     bcassert(controllerIndex, 4);
     if (!cl_multi_gamepads_enabled && controllerIndex != cl_controller_in_use)
         Com_PrintError(
-            14,
+            CON_CHANNEL_CLIENT,
             "Request for controller %i's clientNum, but that controller doesn't have a clientNum because only controller %i is playing\n",
             controllerIndex,
             cl_controller_in_use);
@@ -184,7 +184,7 @@ void __cdecl CL_RunOncePerClientFrame(int localClientNum, int msec)
 
 void __cdecl CL_DumpReliableCommand(int cmdIndex, const char *cmd)
 {
-    Com_Printf(0, "cmd[%d] '%s'\n", cmdIndex, cmd);
+    Com_Printf(CON_CHANNEL_DONT_FILTER, "cmd[%d] '%s'\n", cmdIndex, cmd);
 }
 
 void __cdecl CL_DumpReliableCommands(clientConnection_t *clc)
@@ -201,7 +201,7 @@ void __cdecl CL_DumpReliableCommands(clientConnection_t *clc)
     reliableSequence = (unsigned __int8)clc->reliableSequence;
     v4 = (unsigned __int8)(reliableAcknowledge + 1);
     Com_Printf(
-        0,
+        CON_CHANNEL_DONT_FILTER,
         "command numbers %d - %d = %d %d -> %d\n",
         clc->reliableSequence,
         reliableAcknowledge + 1,
@@ -213,14 +213,14 @@ void __cdecl CL_DumpReliableCommands(clientConnection_t *clc)
         v6 = clc->reliableCommands[v4];
         do
         {
-            Com_Printf(0, "cmd[%d] '%s'\n", v4++, v6);
+            Com_Printf(CON_CHANNEL_DONT_FILTER, "cmd[%d] '%s'\n", v4++, v6);
             v6 += 1024;
         } while (v4 < 256);
         v7 = 0;
         v8 = clc->reliableCommands[0];
         do
         {
-            Com_Printf(0, "cmd[%d] '%s'\n", v7++, v8);
+            Com_Printf(CON_CHANNEL_DONT_FILTER, "cmd[%d] '%s'\n", v7++, v8);
             v8 += 1024;
         } while (v7 <= reliableSequence);
     }
@@ -229,7 +229,7 @@ void __cdecl CL_DumpReliableCommands(clientConnection_t *clc)
         v5 = clc->reliableCommands[v4];
         do
         {
-            Com_Printf(0, "cmd[%d] '%s'\n", v4++, v5);
+            Com_Printf(CON_CHANNEL_DONT_FILTER, "cmd[%d] '%s'\n", v4++, v5);
             v5 += 1024;
         } while (v4 <= reliableSequence);
     }
@@ -669,7 +669,7 @@ void __cdecl CL_ForwardCommandToServer(int localClientNum, const char *string)
     {
         if (cls.demoplaying || clientUIActives[0].connectionState == CA_DISCONNECTED || *cmd == '+')
         {
-            Com_Printf(14, "Unknown command \"%s\"\n", cmd);
+            Com_Printf(CON_CHANNEL_CLIENT, "Unknown command \"%s\"\n", cmd);
         }
         else if (Cmd_Argc() <= 1)
         {
@@ -688,7 +688,7 @@ void __cdecl CL_ForwardToServer_f()
 
     if (clientUIActives[0].connectionState != CA_ACTIVE || cls.demoplaying)
     {
-        Com_Printf(0, "Not connected to a server.\n");
+        Com_Printf(CON_CHANNEL_DONT_FILTER, "Not connected to a server.\n");
     }
     else if (Cmd_Argc() > 1)
     {
@@ -901,13 +901,13 @@ void CL_DevGuiDvar_f()
         else
         {
             v4 = Cmd_Argv(2);
-            Com_Printf(11, "dvar '%s' doesn't exist\n", v4);
+            Com_Printf(CON_CHANNEL_DEVGUI, "dvar '%s' doesn't exist\n", v4);
         }
     }
     else
     {
         v1 = Cmd_Argv(0);
-        Com_Printf(0, "USAGE: %s \"devgui path\" dvarName\n", v1);
+        Com_Printf(CON_CHANNEL_DONT_FILTER, "USAGE: %s \"devgui path\" dvarName\n", v1);
     }
 }
 
@@ -939,7 +939,7 @@ void CL_DevGuiCmd_f()
     else
     {
         v1 = Cmd_Argv(0);
-        Com_Printf(0, "USAGE: %s \"devgui path\" \"command text\"\n", v1);
+        Com_Printf(CON_CHANNEL_DONT_FILTER, "USAGE: %s \"devgui path\" \"command text\"\n", v1);
     }
 }
 
@@ -969,7 +969,7 @@ void CL_DevGuiOpen_f()
     else
     {
         v1 = Cmd_Argv(0);
-        Com_Printf(0, "USAGE: %s \"devgui path\"\n", v1);
+        Com_Printf(CON_CHANNEL_DONT_FILTER, "USAGE: %s \"devgui path\"\n", v1);
     }
 }
 
@@ -1037,7 +1037,7 @@ void __cdecl CL_InitRef()
 {
     GfxConfiguration config; // [sp+50h] [-20h] BYREF
 
-    Com_Printf(14, "----- Initializing Renderer ----\n");
+    Com_Printf(CON_CHANNEL_CLIENT, "----- Initializing Renderer ----\n");
     SetupGfxConfig(&config);
     CL_SetFastFileNames(&config, 0);
     R_ConfigureRenderer(&config);
@@ -1070,13 +1070,13 @@ void __cdecl CL_ShellExecute_URL_f()
     const char *v3; // r3
     const char *v4; // r3
 
-    Com_DPrintf(0, "CL_ShellExecute_URL_f\n");
+    Com_DPrintf(CON_CHANNEL_DONT_FILTER, "CL_ShellExecute_URL_f\n");
 
     v1 = Cmd_Argv(1);
 
     if (I_stricmp(v1, "open"))
     {
-        Com_DPrintf(0, "invalid CL_ShellExecute_URL_f syntax (shellExecute \"open\" <url> <doExit>)\n");
+        Com_DPrintf(CON_CHANNEL_DONT_FILTER, "invalid CL_ShellExecute_URL_f syntax (shellExecute \"open\" <url> <doExit>)\n");
     }
     else
     {
@@ -1114,7 +1114,7 @@ void __cdecl CL_IncAnimWeight_f()
     if (v10 > 1.0)
         v10 = 1.0;
     Dvar_SetFloat(v7, v10);
-    Com_Printf(0, (const char *)HIDWORD(v10), LODWORD(v10));
+    Com_Printf(CON_CHANNEL_DONT_FILTER, (const char *)HIDWORD(v10), LODWORD(v10));
 }
 
 void __cdecl CL_DecAnimWeight_f()
@@ -1137,7 +1137,7 @@ void __cdecl CL_DecAnimWeight_f()
     if (v10 < 0.0)
         v10 = 0.0;
     Dvar_SetFloat(v7, v10);
-    Com_Printf(0, (const char *)HIDWORD(v10), LODWORD(v10));
+    Com_Printf(CON_CHANNEL_DONT_FILTER, (const char *)HIDWORD(v10), LODWORD(v10));
 }
 
 void __cdecl CL_StopLogo(int localClientNum)
@@ -1191,10 +1191,10 @@ void __cdecl CL_PlayLogo_f()
     }
     if (cmd_args.argc[nesting] != 5)
     {
-        Com_Printf(0, "USAGE: logo <image name> <fadein seconds> <full duration seconds> <fadeout seconds>\n");
+        Com_Printf(CON_CHANNEL_DONT_FILTER, "USAGE: logo <image name> <fadein seconds> <full duration seconds> <fadeout seconds>\n");
         return;
     }
-    Com_DPrintf(0, "CL_PlayLogo_f\n");
+    Com_DPrintf(CON_CHANNEL_DONT_FILTER, "CL_PlayLogo_f\n");
     if (cmd_args.nesting >= 8u)
         MyAssertHandler(
             "c:\\trees\\cod3\\cod3src\\src\\client\\../qcommon/cmd.h",
@@ -1327,7 +1327,7 @@ void __cdecl CL_Shutdown(int localClientNum)
 {
     iassert(Sys_IsMainThread());
     Com_SyncThreads();
-    Com_Printf(14, "----- CL_Shutdown -----\n");
+    Com_Printf(CON_CHANNEL_CLIENT, "----- CL_Shutdown -----\n");
     if (recursive)
     {
         printf("recursive shutdown\n");
@@ -1370,7 +1370,7 @@ void __cdecl CL_Shutdown(int localClientNum)
         clientUIActives[0].isRunning = 0;
         recursive = 0;
         memset(&cls, 0, sizeof(cls));
-        Com_Printf(14, "-----------------------\n");
+        Com_Printf(CON_CHANNEL_CLIENT, "-----------------------\n");
     }
 }
 
@@ -1743,7 +1743,7 @@ void __cdecl CL_Init(int localClientNum)
     unsigned __int16 v27; // r4
     char v29[80]; // [sp+70h] [-90h] BYREF
 
-    Com_Printf(14, "----- Client Initialization -----\n");
+    Com_Printf(CON_CHANNEL_CLIENT, "----- Client Initialization -----\n");
     srand(Sys_MillisecondsRaw());
     Con_Init();
     vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
@@ -1857,7 +1857,7 @@ void __cdecl CL_Init(int localClientNum)
     //CL_Xenon_RegisterDvars();
     //CL_Xenon_RegisterCommands();
     Cmd_AddCommandInternal("stopControllerRumble", CL_StopControllerRumbles, &CL_StopControllerRumbles_VAR);
-    Com_Printf(14, "----- Initializing Renderer ----\n");
+    Com_Printf(CON_CHANNEL_CLIENT, "----- Initializing Renderer ----\n");
 
     CL_InitRef();
 
@@ -1865,6 +1865,6 @@ void __cdecl CL_Init(int localClientNum)
     Cbuf_Execute(0, cl_controller_in_use);
     clientUIActives[0].isRunning = 1;
     clients[0].usingAds = 0;
-    Com_Printf(14, "----- Client Initialization Complete -----\n");
+    Com_Printf(CON_CHANNEL_CLIENT, "----- Client Initialization Complete -----\n");
 }
 

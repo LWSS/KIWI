@@ -222,7 +222,7 @@ XModelPieces *__cdecl XModelPiecesLoadFile(const char *name, void *(__cdecl *All
 
     if (Com_sprintf(filename, 0x40u, "xmodelpieces/%s", name) < 0)
     {
-        Com_PrintError(19, "ERROR: filename '%s' too long\n", filename);
+        Com_PrintError(CON_CHANNEL_ANIM, "ERROR: filename '%s' too long\n", filename);
         return 0;
     }
 
@@ -231,13 +231,13 @@ XModelPieces *__cdecl XModelPiecesLoadFile(const char *name, void *(__cdecl *All
     if (fileSize < 0)
     {
         iassert(!buf);
-        Com_PrintError(19, "ERROR: xmodelpieces '%s' not found\n", name);
+        Com_PrintError(CON_CHANNEL_ANIM, "ERROR: xmodelpieces '%s' not found\n", name);
         return 0;
     }
 
     if (!fileSize)
     {
-        Com_PrintError(19, "ERROR: xmodelpieces '%s' has 0 length\n", name);
+        Com_PrintError(CON_CHANNEL_ANIM, "ERROR: xmodelpieces '%s' has 0 length\n", name);
         FS_FreeFile((char *)buf);
         return 0;
     }
@@ -259,7 +259,7 @@ XModelPieces *__cdecl XModelPiecesLoadFile(const char *name, void *(__cdecl *All
             len = strlen((const char *)pos) + 1;
             if (len > 64)
             {
-                Com_PrintError(19, "ERROR: piecename '%s' too long\n", (const char *)pos);
+                Com_PrintError(CON_CHANNEL_ANIM, "ERROR: piecename '%s' too long\n", (const char *)pos);
                 FS_FreeFile((char *)buf);
                 return 0;
             }
@@ -277,7 +277,7 @@ XModelPieces *__cdecl XModelPiecesLoadFile(const char *name, void *(__cdecl *All
             piece->model = R_RegisterModel(piecename);
             if (!piece->model)
             {
-                Com_PrintError(1, "ERROR: xmodel piece '%s' missing from pieces model 's%'\n", piecename, filename);
+                Com_PrintError(CON_CHANNEL_ERROR, "ERROR: xmodel piece '%s' missing from pieces model 's%'\n", piecename, filename);
                 FS_FreeFile((char *)buf);
                 return 0;
             }
@@ -291,7 +291,7 @@ XModelPieces *__cdecl XModelPiecesLoadFile(const char *name, void *(__cdecl *All
     else
     {
         FS_FreeFile((char *)buf);
-        Com_PrintError(19, "ERROR: xmodelpieces '%s' out of date (version %d, expecting %d).\n", name, version, 1);
+        Com_PrintError(CON_CHANNEL_ANIM, "ERROR: xmodelpieces '%s' out of date (version %d, expecting %d).\n", name, version, 1);
         return 0;
     }
 }
@@ -316,7 +316,7 @@ XModelPieces *__cdecl XModelPiecesPrecache(const char *name, void *(__cdecl *All
     }
     else
     {
-        Com_PrintError(20, "ERROR: Cannot find xmodel pieces '%s'.\n", name);
+        Com_PrintError(CON_CHANNEL_PHYS, "ERROR: Cannot find xmodel pieces '%s'.\n", name);
         return 0;
     }
 }
@@ -976,7 +976,7 @@ XAnimParts *__cdecl XAnimLoadFile(char *name, void *(__cdecl *Alloc)(int))
 
     if (Com_sprintf(dest, 0x40u, "xanim/%s", name) < 0)
     {
-        Com_PrintError(19, (char *)"ERROR: filename '%s' too long\n", dest);
+        Com_PrintError(CON_CHANNEL_ANIM, (char *)"ERROR: filename '%s' too long\n", dest);
         return 0;
     }
 
@@ -985,13 +985,13 @@ XAnimParts *__cdecl XAnimLoadFile(char *name, void *(__cdecl *Alloc)(int))
     if (fileSize < 0)
     {
         iassert(!buf);
-        Com_PrintError(19, (char *)"ERROR: xanim '%s' not found\n", name);
+        Com_PrintError(CON_CHANNEL_ANIM, (char *)"ERROR: xanim '%s' not found\n", name);
         return 0;
     }
 
     if (!fileSize)
     {
-        Com_PrintError(19, (char *)"ERROR: xanim '%s' has 0 length\n", name);
+        Com_PrintError(CON_CHANNEL_ANIM, (char *)"ERROR: xanim '%s' has 0 length\n", name);
         FS_FreeFile((char *)buf);
         return 0;
     }
@@ -1005,7 +1005,7 @@ XAnimParts *__cdecl XAnimLoadFile(char *name, void *(__cdecl *Alloc)(int))
     if (version != 17)
     {
         FS_FreeFile((char *)buf);
-        Com_PrintError(19, (char *)"ERROR: xanim '%s' out of date (version %d, expecting %d)\n", name, version, 17);
+        Com_PrintError(CON_CHANNEL_ANIM, (char *)"ERROR: xanim '%s' out of date (version %d, expecting %d)\n", name, version, 17);
         return 0;
     }
 

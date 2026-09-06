@@ -704,7 +704,7 @@ void __cdecl Actor_DodgeDebug(
             number = otherActor->ent->s.number;
         else
             number = ENTITYNUM_NONE;
-        Com_Printf(18, debugString, self->ent->s.number, number, a5, a6, a7, otherActor);
+        Com_Printf(CON_CHANNEL_AI, debugString, self->ent->s.number, number, a5, a6, a7, otherActor);
     }
 }
 
@@ -867,7 +867,7 @@ ai_teammove_t __cdecl Actor_GetTeamMoveStatus(actor_s *self, bool bUseInterval, 
                 number = pOtherActor->ent->s.number;
             else
                 number = ENTITYNUM_NONE;
-            Com_Printf(18, "AI %d failed right dodge pathing AI %d\n", self->ent->s.number, number);
+            Com_Printf(CON_CHANNEL_AI, "AI %d failed right dodge pathing AI %d\n", self->ent->s.number, number);
         }
 
         vOrgDodgeStart[0] -= (v20 * 2.0f);
@@ -894,7 +894,7 @@ ai_teammove_t __cdecl Actor_GetTeamMoveStatus(actor_s *self, bool bUseInterval, 
                     v36 = pOtherActor->ent->s.number;
                 else
                     v36 = ENTITYNUM_NONE;
-                Com_Printf(18, "AI %d left dodge succeed AI %d\n", self->ent->s.number, v36);
+                Com_Printf(CON_CHANNEL_AI, "AI %d left dodge succeed AI %d\n", self->ent->s.number, v36);
             }
             goto LABEL_114;
         }
@@ -904,7 +904,7 @@ ai_teammove_t __cdecl Actor_GetTeamMoveStatus(actor_s *self, bool bUseInterval, 
                 v27 = pOtherActor->ent->s.number;
             else
                 v27 = ENTITYNUM_NONE;
-            Com_Printf(18, "AI %d failed left dodge pathing AI %d\n", self->ent->s.number, v27);
+            Com_Printf(CON_CHANNEL_AI, "AI %d failed left dodge pathing AI %d\n", self->ent->s.number, v27);
         }
     failed_dodge:
         if (pOtherActor
@@ -933,7 +933,7 @@ ai_teammove_t __cdecl Actor_GetTeamMoveStatus(actor_s *self, bool bUseInterval, 
                     && Actor_IsAtGoal(pOtherActor))
                 {
                     if (ai_showDodge->current.enabled)
-                        Com_Printf(18, "AI %d failed to dodge stationary AI %d\n", self->ent->s.number, pOtherActor->ent->s.number);
+                        Com_Printf(CON_CHANNEL_AI, "AI %d failed to dodge stationary AI %d\n", self->ent->s.number, pOtherActor->ent->s.number);
                     goto dodge;
                 }
                 v30 = pOtherActor->eState[pOtherActor->stateLevel];
@@ -982,11 +982,11 @@ ai_teammove_t __cdecl Actor_GetTeamMoveStatus(actor_s *self, bool bUseInterval, 
             }
         LABEL_88:
             if (ai_showDodge->current.enabled)
-                Com_Printf(18, "AI %d failed to dodge scripted AI %d\n", self->ent->s.number, pOtherActor->ent->s.number);
+                Com_Printf(CON_CHANNEL_AI, "AI %d failed to dodge scripted AI %d\n", self->ent->s.number, pOtherActor->ent->s.number);
             goto dodge;
         }
         if (ai_showDodge->current.enabled)
-            Com_Printf(18, "AI %d failed to dodge pathing AI %d\n", self->ent->s.number, pOtherActor->ent->s.number);
+            Com_Printf(CON_CHANNEL_AI, "AI %d failed to dodge pathing AI %d\n", self->ent->s.number, pOtherActor->ent->s.number);
     dodge:
         moveMode = self->moveMode;
         self->iTeamMoveDodgeTime = level.time + 1000;
@@ -1005,7 +1005,7 @@ ai_teammove_t __cdecl Actor_GetTeamMoveStatus(actor_s *self, bool bUseInterval, 
             v37 = pOtherActor->ent->s.number;
         else
             v37 = ENTITYNUM_NONE;
-        Com_Printf(18, "AI %d right dodge succeed AI %d\n", self->ent->s.number, v37);
+        Com_Printf(CON_CHANNEL_AI, "AI %d right dodge succeed AI %d\n", self->ent->s.number, v37);
     }
 LABEL_114:
     v38 = self->moveMode;

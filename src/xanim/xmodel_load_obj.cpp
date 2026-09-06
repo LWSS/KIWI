@@ -1020,7 +1020,7 @@ XModelSurfs *__cdecl R_XModelSurfsLoadFile(
 
     if (Com_sprintf(filename, 0x40u, "xmodelsurfs/%s", name) < 0)
     {
-        Com_PrintError(19, "ERROR: filename '%s' too long\n", filename);
+        Com_PrintError(CON_CHANNEL_ANIM, "ERROR: filename '%s' too long\n", filename);
         return 0;
     }
 
@@ -1029,13 +1029,13 @@ XModelSurfs *__cdecl R_XModelSurfsLoadFile(
     if (fileSize < 0)
     {
         iassert(!buf);
-        Com_PrintError(19, "ERROR: xmodelsurf '%s' not found\n", name);
+        Com_PrintError(CON_CHANNEL_ANIM, "ERROR: xmodelsurf '%s' not found\n", name);
         return 0;
     }
 
     if (!fileSize)
     {
-        Com_PrintError(19, "ERROR: xmodelsurf '%s' has 0 length\n", name);
+        Com_PrintError(CON_CHANNEL_ANIM, "ERROR: xmodelsurf '%s' has 0 length\n", name);
         FS_FreeFile((char *)buf);
         return 0;
     }
@@ -1082,7 +1082,7 @@ XModelSurfs *__cdecl R_XModelSurfsLoadFile(
         {
             FS_FreeFile((char*)buf);
             Com_PrintError(
-                19,
+                CON_CHANNEL_ANIM,
                 "ERROR: File conflict (between non-iwd and iwd file) on xmodelsurfs '%s' for xmodel '%s'.\n"
                 "Rename the export file to fix.\n",
                 name,
@@ -1093,7 +1093,7 @@ XModelSurfs *__cdecl R_XModelSurfsLoadFile(
     else
     {
         FS_FreeFile((char*)buf);
-        Com_PrintError(19, "ERROR: xmodelsurfs '%s' out of date (version %d, expecting %d).\n", name, version, 25);
+        Com_PrintError(CON_CHANNEL_ANIM, "ERROR: xmodelsurfs '%s' out of date (version %d, expecting %d).\n", name, version, 25);
         return 0;
     }
 }
@@ -1131,7 +1131,7 @@ int __cdecl XModelSurfsPrecache(
         }
         else
         {
-            Com_PrintError(19, "ERROR: Cannot find 'xmodelsurfs '%s'.\n", name);
+            Com_PrintError(CON_CHANNEL_ANIM, "ERROR: Cannot find 'xmodelsurfs '%s'.\n", name);
             return 0;
         }
     }
@@ -1224,7 +1224,7 @@ char __cdecl XModelLoadConfigFile(const char *name, unsigned __int8 **pos, XMode
 
     if (version != 25)
     {
-        Com_PrintError(19, "ERROR: xmodel '%s' out of date (version %d, expecting %d).\n", name, version, 25);
+        Com_PrintError(CON_CHANNEL_ANIM, "ERROR: xmodel '%s' out of date (version %d, expecting %d).\n", name, version, 25);
         return 0;
     }
 
@@ -1308,7 +1308,7 @@ XModelPartsLoad *__cdecl XModelPartsPrecache(XModel *model, const char *name, vo
     }
     else
     {
-        Com_PrintError(19, "ERROR: Cannot find xmodelparts '%s'.\n", name);
+        Com_PrintError(CON_CHANNEL_ANIM, "ERROR: Cannot find xmodelparts '%s'.\n", name);
         return 0;
     }
 }
@@ -1357,13 +1357,13 @@ XModel *__cdecl XModelLoadFile(char *name, void *(__cdecl *Alloc)(int), void *(_
 
     if (Com_IsLegacyXModelName(name))
     {
-        Com_PrintError(19, "ERROR: Remove xmodel prefix from model name '%s'\n", name);
+        Com_PrintError(CON_CHANNEL_ANIM, "ERROR: Remove xmodel prefix from model name '%s'\n", name);
         return 0;
     }
 
     if (Com_sprintf(dest, 0x40u, "xmodel/%s", name) < 0)
     {
-        Com_PrintError(19, "ERROR: filename '%s' too long\n", dest);
+        Com_PrintError(CON_CHANNEL_ANIM, "ERROR: filename '%s' too long\n", dest);
         return 0;
     }
 
@@ -1372,13 +1372,13 @@ XModel *__cdecl XModelLoadFile(char *name, void *(__cdecl *Alloc)(int), void *(_
     if (filelen < 0)
     {
         iassert(!buf);
-        Com_PrintError(19, "ERROR: xmodel '%s' not found\n", name);
+        Com_PrintError(CON_CHANNEL_ANIM, "ERROR: xmodel '%s' not found\n", name);
         return 0;
     }
 
     if (!filelen)
     {
-        Com_PrintError(19, "ERROR: xmodel '%s' has 0 length\n", name);
+        Com_PrintError(CON_CHANNEL_ANIM, "ERROR: xmodel '%s' has 0 length\n", name);
         FS_FreeFile((char *)buf);
         return 0;
     }
@@ -1608,7 +1608,7 @@ XModelPartsLoad *__cdecl XModelPartsLoadFile(XModel *model, const char *name, vo
 
     if (Com_sprintf(filename, 0x40u, "xmodelparts/%s", name) < 0)
     {
-        Com_PrintError(19, "ERROR: filename '%s' too long\n", filename);
+        Com_PrintError(CON_CHANNEL_ANIM, "ERROR: filename '%s' too long\n", filename);
         return 0;
     }
 
@@ -1617,13 +1617,13 @@ XModelPartsLoad *__cdecl XModelPartsLoadFile(XModel *model, const char *name, vo
     if (fileSize < 0)
     {
         iassert(!buf);
-        Com_PrintError(19, "ERROR: xmodelparts '%s' not found\n", name);
+        Com_PrintError(CON_CHANNEL_ANIM, "ERROR: xmodelparts '%s' not found\n", name);
         return 0;
     }
 
     if (!fileSize)
     {
-        Com_PrintError(19, "ERROR: xmodelparts '%s' has 0 length\n", name);
+        Com_PrintError(CON_CHANNEL_ANIM, "ERROR: xmodelparts '%s' has 0 length\n", name);
         FS_FreeFile((char *)buf);
         return 0;
     }
@@ -1636,7 +1636,7 @@ XModelPartsLoad *__cdecl XModelPartsLoadFile(XModel *model, const char *name, vo
     if (version != 25)
     {
         FS_FreeFile((char *)buf);
-        Com_PrintError(19, "ERROR: xmodelparts '%s' out of date (version %d, expecting %d).\n", name, version, 25);
+        Com_PrintError(CON_CHANNEL_ANIM, "ERROR: xmodelparts '%s' out of date (version %d, expecting %d).\n", name, version, 25);
         return 0;
     }
 
@@ -1722,7 +1722,7 @@ XModelPartsLoad *__cdecl XModelPartsLoadFile(XModel *model, const char *name, vo
     else
     {
         FS_FreeFile((char *)buf);
-        Com_PrintError(19, "ERROR: xmodel '%s' has more than %d bones\n", name, 127);
+        Com_PrintError(CON_CHANNEL_ANIM, "ERROR: xmodel '%s' has more than %d bones\n", name, 127);
         return 0;
     }
 }
@@ -1811,7 +1811,7 @@ XModel *__cdecl XModelPrecache_LoadObj(char *name, void *(__cdecl *Alloc)(int), 
     }
     else
     {
-        Com_PrintError(19, "ERROR: Cannot find xmodel '%s'.\n", name);
+        Com_PrintError(CON_CHANNEL_ANIM, "ERROR: Cannot find xmodel '%s'.\n", name);
         return XModelDefaultModel(name, Alloc);
     }
 }

@@ -1295,7 +1295,7 @@ LABEL_39:
         if (start)
         {
             v5 = g_assetNames[type];
-            Com_Printf(10, "Waited %i msec for asset '%s' of type '%s'.\n", Sys_Milliseconds() - start, name, v5);
+            Com_Printf(CON_CHANNEL_FILES, "Waited %i msec for asset '%s' of type '%s'.\n", Sys_Milliseconds() - start, name, v5);
             ProfLoad_End();
         }
         return assetEntry->asset.header;
@@ -1403,7 +1403,7 @@ void DB_SetReorderIncludeSequence()
     for (entryIter = 0; entryIter < s_dbReorder.entryCount; ++entryIter)
     {
         entry = &s_dbReorder.entries[entryIter];
-        if (entry->type == 33 && !I_strnicmp(entry->typeString, "include", 7))
+        if (entry->type == ASSET_TYPE_STRING && !I_strnicmp(entry->typeString, "include", 7))
             entry->sequence = s_dbReorder.sequenceForIncludes;
     }
 }
@@ -1414,28 +1414,28 @@ bool __cdecl DB_CompareReorderEntries(const DBReorderAssetEntry& e0, const DBReo
 
     if (e0.sequence != e1.sequence)
         return e0.sequence < e1.sequence;
-    if (e0.type == 33)
+    if (e0.type == ASSET_TYPE_STRING)
     {
-        if (e1.type != 33)
+        if (e1.type != ASSET_TYPE_STRING)
             return 1;
         comparison = _stricmp(e0.typeString, e1.typeString);
         if (comparison)
             return comparison < 0;
         return _stricmp(e0.assetName, e1.assetName) < 0;
     }
-    if (e1.type == 33)
+    if (e1.type == ASSET_TYPE_STRING)
         return 0;
     if (e0.type == e1.type)
         return _stricmp(e0.assetName, e1.assetName) < 0;
     if (e0.sequence != -1)
         return e0.type < e1.type;
-    if (e0.type == 7)
+    if (e0.type == ASSET_TYPE_SOUND)
         return 1;
-    if (e1.type == 7)
+    if (e1.type == ASSET_TYPE_SOUND)
         return 0;
-    if (e0.type == 22)
+    if (e0.type == ASSET_TYPE_LOCALIZE_ENTRY)
         return 1;
-    return e1.type != 22 && e0.type < e1.type;
+    return e1.type != ASSET_TYPE_LOCALIZE_ENTRY && e0.type < e1.type;
 }
 
 void DB_EndReorderZone()
@@ -1476,11 +1476,11 @@ void DB_EndReorderZone()
                 {
                     switch (entry->type)
                     {
-                    case 7:
-                    case 0xA:
-                    case 0xB:
-                    case 0x16:
-                    case 0x21:
+                    case ASSET_TYPE_SOUND:
+                    case ASSET_TYPE_CLIPMAP:
+                    case ASSET_TYPE_CLIPMAP_PVS:
+                    case ASSET_TYPE_LOCALIZE_ENTRY:
+                    case ASSET_TYPE_STRING:
                         break;
                     default:
                         wroteBlank = 1;
@@ -1488,14 +1488,14 @@ void DB_EndReorderZone()
                         break;
                     }
                 }
-                if (entry->type == 23)
+                if (entry->type == ASSET_TYPE_WEAPON)
                 {
                     bytesa = Com_sprintf(line, 0x200u, "%s,%s%s\r\n", entry->typeString, "mp/", entry->assetName);
                     WriteFile(file, line, bytesa, &written, 0);
                 }
                 else
                 {
-                    if (entry->type == 7)
+                    if (entry->type == ASSET_TYPE_SOUND)
                         bytes = Com_sprintf(
                             line,
                             0x200u,
@@ -1545,15 +1545,15 @@ void __cdecl DB_RegisteredReorderAsset(int type, const char *assetName, XAssetEn
 
     if (s_dbReorder.entryCount)
     {
-        if (type == 22)
+        if (type == ASSET_TYPE_LOCALIZE_ENTRY)
         {
             if (!s_dbReorder.loadedLocalization)
-                s_dbReorder.loadedLocalization = DB_RegisterAllReorderAssetsOfType(22, assetEntry) != 0;
+                s_dbReorder.loadedLocalization = DB_RegisterAllReorderAssetsOfType(ASSET_TYPE_LOCALIZE_ENTRY, assetEntry) != 0;
         }
-        else if (type == 7)
+        else if (type == ASSET_TYPE_SOUND)
         {
             if (!s_dbReorder.loadedSound)
-                s_dbReorder.loadedSound = DB_RegisterAllReorderAssetsOfType(7, assetEntry) != 0;
+                s_dbReorder.loadedSound = DB_RegisterAllReorderAssetsOfType(ASSET_TYPE_SOUND, assetEntry) != 0;
         }
         else if (!s_dbReorder.lastEntry
             || s_dbReorder.lastEntry->type != type
@@ -1570,7 +1570,7 @@ void __cdecl DB_RegisteredReorderAsset(int type, const char *assetName, XAssetEn
                     if (entry->sequence == -1)
                     {
                         entry->sequence = s_dbReorder.sequence;
-                        if (entry->type == 31)
+                        if (entry->type == ASSET_TYPE_RAWFILE)
                         {
                             extension = Com_GetExtensionSubString(assetName);
                             if (!I_stricmp(extension, ".gsc"))
@@ -1673,7 +1673,7 @@ XAssetHeader __cdecl DB_AllocXAssetHeader(XAssetType type)
     if (!header.data)
     {
         Sys_UnlockWrite(&db_hashCritSect);
-        Com_PrintError(1, "Exceeded limit of %d '%s' assets.\n", g_poolSize[type], g_assetNames[type]);
+        Com_PrintError(CON_CHANNEL_ERROR, "Exceeded limit of %d '%s' assets.\n", g_poolSize[type], g_assetNames[type]);
         DB_EnumXAssets(type, (void(__cdecl *)(XAssetHeader, void *))DB_PrintAssetName, &type, 1);
         Com_Error(ERR_DROP, "Exceeded limit of %d '%s' assets.\n", g_poolSize[type], g_assetNames[type]);
     }
@@ -1685,7 +1685,7 @@ void __cdecl DB_PrintAssetName(XAssetHeader header, int *data)
     const char *XAssetHeaderName; // eax
 
     XAssetHeaderName = DB_GetXAssetHeaderName(*data, &header);
-    Com_Printf(0, "%s\n", XAssetHeaderName);
+    Com_Printf(CON_CHANNEL_DONT_FILTER, "%s\n", XAssetHeaderName);
 }
 
 void __cdecl DB_CloneXAssetInternal(const XAsset *from, XAsset *to)
@@ -1734,9 +1734,9 @@ void __cdecl PrintWaitedError(XAssetType type, const char *name, int waitedMsec)
     if (waitedMsec > 100)
     {
         if (type == ASSET_TYPE_SOUND)
-            Com_Printf(10, "Waited %i msec for missing asset \"%s\".\n", waitedMsec, name);
+            Com_Printf(CON_CHANNEL_FILES, "Waited %i msec for missing asset \"%s\".\n", waitedMsec, name);
         else
-            Com_PrintError(1, "Waited %i msec for missing asset \"%s\".\n", waitedMsec, name);
+            Com_PrintError(CON_CHANNEL_ERROR, "Waited %i msec for missing asset \"%s\".\n", waitedMsec, name);
     }
     if (type != ASSET_TYPE_SOUND)
     {
@@ -1747,10 +1747,10 @@ void __cdecl PrintWaitedError(XAssetType type, const char *name, int waitedMsec)
                 if (loc_warningsAsErrors->current.enabled)
                 {
                 LABEL_15:
-                    Com_PrintError(1, "Could not load %s \"%s\".\n", g_assetNames[type], name);
+                    Com_PrintError(CON_CHANNEL_ERROR, "Could not load %s \"%s\".\n", g_assetNames[type], name);
                     return;
                 }
-                Com_PrintWarning(10, "Could not load %s \"%s\".\n", g_assetNames[type], name);
+                Com_PrintWarning(CON_CHANNEL_FILES, "Could not load %s \"%s\".\n", g_assetNames[type], name);
             }
         }
         else if (type != ASSET_TYPE_RAWFILE || !IsConfigFile(name))
@@ -2096,12 +2096,12 @@ void __cdecl DB_DelayedCloneXAsset(XAssetEntry *newEntry)
     {
         if (g_copyInfoCount >= 0x800)
         {
-            Com_Printf(0, "g_copyInfo exceeded\n"); // LWSS: if this hits, it means that PostLoadXZone isn't setting back to zero (prob not being called)
+            Com_Printf(CON_CHANNEL_DONT_FILTER, "g_copyInfo exceeded\n"); // LWSS: if this hits, it means that PostLoadXZone isn't setting back to zero (prob not being called)
             for (i = 0; i < 0x800; ++i)
             {
                 XAssetName = DB_GetXAssetName(&g_copyInfo[i]->asset);
                 XAssetTypeName = DB_GetXAssetTypeName(g_copyInfo[i]->asset.type);
-                Com_Printf(0, "%s: %s\n", XAssetTypeName, XAssetName);
+                Com_Printf(CON_CHANNEL_DONT_FILTER, "%s: %s\n", XAssetTypeName, XAssetName);
             }
             Sys_Error("g_copyInfo exceeded");
         }
@@ -2320,7 +2320,7 @@ void __cdecl DB_LoadXZone(XZoneInfo *zoneInfo, uint zoneCount)
             if (zoneInfoCount >= 8)
                 MyAssertHandler(".\\database\\db_registry.cpp", 3249, 0, "%s", "zoneInfoCount < ARRAY_COUNT( g_zoneInfo )");
             I_strncpyz(g_zoneInfo[zoneInfoCount].name, zoneName, 64);
-            Com_Printf(16, "Loading fastfile %s\n", g_zoneInfo[zoneInfoCount].name);
+            Com_Printf(CON_CHANNEL_SYSTEM, "Loading fastfile %s\n", g_zoneInfo[zoneInfoCount].name);
             g_zoneInfo[zoneInfoCount++].flags = zoneInfo[j].allocFlags;
             if (zoneInfoCount)
             {
@@ -2458,9 +2458,9 @@ void __cdecl DB_AddReorderAsset(const char *typeString, const char *assetName)
     int type; // [esp+8h] [ebp-8h]
     uint entryIter; // [esp+Ch] [ebp-4h]
 
-    for (type = 0; type < 33 && _stricmp(typeString, g_assetNames[type]); ++type)
+    for (type = ASSET_TYPE_XMODELPIECES; type < ASSET_TYPE_COUNT && _stricmp(typeString, g_assetNames[type]); ++type)
         ;
-    if (type == 23)
+    if (type == ASSET_TYPE_WEAPON)
     {
         //if (strnicmp(assetName, "mp/", 3u))
         if (_strnicmp(assetName, "mp/", 3u))
@@ -2480,15 +2480,15 @@ void __cdecl DB_AddReorderAsset(const char *typeString, const char *assetName)
     }
     entrya = &s_dbReorder.entries[s_dbReorder.entryCount++];
     entrya->type = type;
-    if (type >= 33)
+    if (type >= ASSET_TYPE_COUNT)
         v2 = _strdup(typeString);
     else
         v2 = (char *)g_assetNames[type];
     entrya->typeString = v2;
     entrya->assetName = _strdup(assetName);
-    if (entrya->type != 33 || I_stricmp(typeString, "ignore"))
+    if (entrya->type != ASSET_TYPE_STRING || I_stricmp(typeString, "ignore"))
     {
-        if (entrya->type == 10 || entrya->type == 11)
+        if (entrya->type == ASSET_TYPE_CLIPMAP || entrya->type == ASSET_TYPE_CLIPMAP_PVS)
             entrya->sequence = 1;
         else
             entrya->sequence = -1;
@@ -2522,7 +2522,7 @@ void __cdecl DB_BeginReorderZone(const char *zoneName)
     {
         entry = &s_dbReorder.entries[entryIter];
         free((void *)entry->assetName);
-        if (entry->type == 33)
+        if (entry->type == ASSET_TYPE_STRING)
             free((void *)entry->typeString);
     }
     s_dbReorder.entryCount = 0;
@@ -2627,7 +2627,7 @@ int __cdecl DB_TryLoadXFileInternal(char *zoneName, int zoneFlags)
     uint i; // [esp+114h] [ebp-8h]
     void *zoneFile; // [esp+118h] [ebp-4h]
 
-    Com_Printf(0, "Trying to load file %s with flags %x\n", zoneName, zoneFlags);
+    Com_Printf(CON_CHANNEL_DONT_FILTER, "Trying to load file %s with flags %x\n", zoneName, zoneFlags);
 
     modZone = 0;
     iassert(!g_zoneInfoCount);
@@ -2654,12 +2654,12 @@ int __cdecl DB_TryLoadXFileInternal(char *zoneName, int zoneFlags)
         zoneFile = CreateFileA("update:\\mp_patch.ff", 0x80000000, 0, 0, 3u, 0x60000000u, 0);
         if (zoneFile == (void *)-1)
         {
-            Com_Printf(16, "Loading mp_patch.ff from disc, not from the update drive\n");
+            Com_Printf(CON_CHANNEL_SYSTEM, "Loading mp_patch.ff from disc, not from the update drive\n");
             DB_BuildOSPath(zoneName, 256, filename);
             zoneFile = CreateFileA(filename, 0x80000000, 0, 0, 3u, 0x60000000u, 0);
             if (zoneFile == (void *)-1)
             {
-                Com_PrintWarning(10, "WARNING: Could not find zone '%s'\n", filename);
+                Com_PrintWarning(CON_CHANNEL_FILES, "WARNING: Could not find zone '%s'\n", filename);
                 return 0;
             }
         }
@@ -2669,7 +2669,7 @@ int __cdecl DB_TryLoadXFileInternal(char *zoneName, int zoneFlags)
         v3 = strstr(filename, "_load");
         if (v3)
         {
-            Com_PrintWarning(10, "WARNING: Could not find zone '%s'\n", filename);
+            Com_PrintWarning(CON_CHANNEL_FILES, "WARNING: Could not find zone '%s'\n", filename);
         }
         else
         {
@@ -2730,11 +2730,11 @@ int __cdecl DB_TryLoadXFileInternal(char *zoneName, int zoneFlags)
         if (g_zoneAllocType == 1 && g_initializing)
         {
             startWaitingTime = Sys_Milliseconds();
-            Com_Printf(0, "Waiting for $init to finish.  There may be assets missing from code_post_gfx.\n");
+            Com_Printf(CON_CHANNEL_DONT_FILTER, "Waiting for $init to finish.  There may be assets missing from code_post_gfx.\n");
             while (g_initializing)
                 DB_Sleep(1);
             v4 = Sys_Milliseconds();
-            Com_Printf(16, "Waited %d ms for $init to finish.\n", v4 - startWaitingTime);
+            Com_Printf(CON_CHANNEL_SYSTEM, "Waited %d ms for $init to finish.\n", v4 - startWaitingTime);
         }
         PMem_BeginAlloc(zone->name, g_zoneAllocType);
         zone->allocType = g_zoneAllocType;
@@ -2796,16 +2796,16 @@ void __cdecl DB_UnloadXZone(uint zoneIndex, bool createDefault)
 
     // KISAKTODO: would be nice
 #if 0
-    //Com_Printf(16, "Unloading assets from fastfile '%s' ", g_zoneNames[zoneIndex]) // KISAKTODO: would be nice
-    Com_Printf(16, "Unloading assets from fastfile '%i' ", zoneIndex);
+    //Com_Printf(CON_CHANNEL_SYSTEM, "Unloading assets from fastfile '%s' ", g_zoneNames[zoneIndex]) // KISAKTODO: would be nice
+    Com_Printf(CON_CHANNEL_SYSTEM, "Unloading assets from fastfile '%i' ", zoneIndex);
     
     if (createDefault)
     {
-        Com_Printf(16, "and creating default assets stubs\n");
+        Com_Printf(CON_CHANNEL_SYSTEM, "and creating default assets stubs\n");
     }
     else
     {
-        Com_Printf(16, "and deleting all assets\n");
+        Com_Printf(CON_CHANNEL_SYSTEM, "and deleting all assets\n");
     }
 #endif
 
@@ -2988,7 +2988,7 @@ void __cdecl DB_FreeXZoneMemory(XZoneMemory *zoneMem)
 void __cdecl DB_UnloadXZoneMemory(XZone *zone)
 {
     DB_FreeXZoneMemory(&zone->mem);
-    Com_Printf(16, "Unloaded fastfile %s\n", zone->name);
+    Com_Printf(CON_CHANNEL_SYSTEM, "Unloaded fastfile %s\n", zone->name);
     PMem_Free(zone->name, zone->allocType);
     zone->name[0] = 0;
 }

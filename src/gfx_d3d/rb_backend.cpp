@@ -810,12 +810,12 @@ void __cdecl R_TessEnd(GfxCmdBufContext context, GfxCmdBufContext prepassContext
             "prepassContext.state == NULL || commonSource == prepassContext.source");
     context.source->objectPlacement = 0;
     R_ChangeDepthHackNearClip(context.source, 0);
-    depthRangeType = (GfxDepthRangeType)((context.source->cameraView != 0) - 1);
+    depthRangeType = context.source->cameraView ? GFX_DEPTH_RANGE_SCENE : GFX_DEPTH_RANGE_FULL;
     if (depthRangeType != context.state->depthRangeType)
         R_ChangeDepthRange(context.state, depthRangeType);
     if (prepassContext.state)
     {
-        v2 = (GfxDepthRangeType)((prepassContext.source->cameraView != 0) - 1);
+        v2 = prepassContext.source->cameraView ? GFX_DEPTH_RANGE_SCENE : GFX_DEPTH_RANGE_FULL;
         if (v2 != prepassContext.state->depthRangeType)
             R_ChangeDepthRange(prepassContext.state, v2);
     }
@@ -1653,7 +1653,7 @@ void __cdecl RB_LookupColor(uint8_t c, GfxColor *color)
     {
         if (c == 56)
         {
-            if (rg.team == 2)
+            if (rg.team == TEAM_ALLIES)
                 p_color_allies = &rg.color_allies;
             else
                 p_color_allies = &rg.color_axis;
@@ -1661,7 +1661,7 @@ void __cdecl RB_LookupColor(uint8_t c, GfxColor *color)
         }
         else if (c == 57)
         {
-            if (rg.team == 2)
+            if (rg.team == TEAM_ALLIES)
                 p_color_axis = &rg.color_axis;
             else
                 p_color_axis = &rg.color_allies;
