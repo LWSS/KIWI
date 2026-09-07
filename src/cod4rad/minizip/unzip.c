@@ -2016,7 +2016,8 @@ extern unzFile ZEXPORT unzReopen(const char *path, unzFile templateFile)
 
     /* Replace file stream with new handle */
     /* Use fill_fopen_filefunc to set up proper ioapi for the new stream */
-    fill_fopen64_filefunc(&s->z_filefunc);
+    memset(&s->z_filefunc, 0, sizeof(zlib_filefunc64_32_def));
+    fill_fopen64_filefunc(&s->z_filefunc.zfile_func64);
     s->filestream = fin;
 
     /* No file currently being read */

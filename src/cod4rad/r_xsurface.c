@@ -27,46 +27,16 @@ Copy triangle indices with a base vertex offset added.
 */
 void R_XSurfaceCopyIndices(XSurface_t *surface, unsigned short *dstIndices, unsigned short baseIndex)
 {
-    int triCount;
-    unsigned int *src;
-    unsigned int *dst;
-    unsigned int indexPair;
+    int indexCount = surface->triCount * 3;
     int i;
 
-    /* assert: surface->triIndices is 4-byte aligned (line 0x37) */
-    Assert("(reinterpret_cast< size_t >( surface->triIndices ) & 3) == 0",
-           "..\\src\\gfx_d3d\\r_xsurface.cpp", 0x37, 0, 1);
-
-    /* assert: dstIndices is 4-byte aligned (line 0x38) */
-    Assert("(reinterpret_cast< size_t >( dstIndices ) & 3) == 0",
-           "..\\src\\gfx_d3d\\r_xsurface.cpp", 0x38, 0, 1);
-
-    /* assert: triCount is even (line 0x39) */
-    Assert("(surface->triCount & 1) == 0",
-           "..\\src\\gfx_d3d\\r_xsurface.cpp", 0x39, 0, 1);
-
-    if (baseIndex)
+    /* Process each 16-bit index independently, including odd triangle counts. */
+    for (i = 0; i < indexCount; ++i)
     {
-        /* add baseIndex to each index, processing 2 indices (1 dword) at a time */
-        triCount = surface->triCount;
-        src = (unsigned int *)surface->triIndices;
-        dst = (unsigned int *)dstIndices;
-        indexPair = ((unsigned int)baseIndex << 16) | baseIndex;
-
-        for (i = triCount / 2; i > 0; i--)
-        {
-            dst[0] = src[0] + indexPair;
-            dst[1] = src[1] + indexPair;
-            dst[2] = src[2] + indexPair;
-            src += 3;
-            dst += 3;
-        }
-    }
-    else
-    {
-        /* no offset — straight memcpy */
-        triCount = surface->triCount;
-        memcpy(dstIndices, surface->triIndices, triCount * 3 * sizeof(unsigned short));
+        unsigned int index = (unsigned int)surface->triIndices[i] + baseIndex;
+        if (index > USHRT_MAX)
+            ErrorMsg("R_XSurfaceCopyIndices: vertex index exceeds 16 bits\n");
+        dstIndices[i] = (unsigned short)index;
     }
 }
 
@@ -94,7 +64,7 @@ void R_XSurfaceDeformVerts(XSurface_t *surface, BoneMatrix_t *boneMats, float *o
     if (boneOffset != -1)
     {
         /* RIGID: all verts use the same bone matrix */
-        Assert("v", "..\\src\\gfx_d3d\\r_xsurface.cpp", 0x85, 0, 1);
+        Assert(v, 0);
 
         if (vertCount == 0)
             return;
@@ -147,7 +117,7 @@ void R_XSurfaceDeformVerts(XSurface_t *surface, BoneMatrix_t *boneMats, float *o
     else
     {
         /* DEFORMED: each vert has its own boneOffset, may have blend weights */
-        Assert("v", "..\\src\\gfx_d3d\\r_xsurface.cpp", 0xB5, 0, 1);
+        Assert(v, 0);
 
         if (vertCount == 0)
             return;

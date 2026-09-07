@@ -73,3 +73,5 @@ set(COD4MAP_ZLIB
     "${DEPS_DIR}/zlib/uncompr.c"
     "${DEPS_DIR}/zlib/zutil.c"
 )
+
+set(COD4MAP_ASM_SOURCES "${SRC_DIR}/cod4map/x87_math.asm")

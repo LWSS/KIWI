@@ -70,12 +70,12 @@ Z_MallocFailed
 Reports Z_Malloc allocation failure — asserts and calls Com_Error
 ================
 */
-void Z_MallocFailed(int size)
+void Z_MallocFailed(size_t size)
 {
   if ( !g_assertsDisabled )
   {
     int assertResult = AssertFailed(
-      va("Z_Malloc: failed to allocate %d bytes", size),
+      va("Z_Malloc: failed to allocate %zu bytes", size),
       SRCFILE,
       __LINE__,
       0,
@@ -83,7 +83,7 @@ void Z_MallocFailed(int size)
     if ( !assertResult )
       DebugBreak();
   }
-  Sys_Printf("Z_Malloc: failed to allocate %d bytes\n", size);
+  Sys_Printf("Z_Malloc: failed to allocate %zu bytes\n", size);
   Com_ErrorLevel(0, "Z_Malloc: EXE_ERR_OUT_OF_MEMORY");
 }
 
@@ -101,10 +101,10 @@ void *Z_Malloc(size_t size)
   buf = malloc(size);
   if ( buf )
   {
-    Com_Memset(buf, 0, (int)size);
+    memset(buf, 0, size);
     return buf;
   }
-  Z_MallocFailed((int)size);
+  Z_MallocFailed(size);
   return NULL;
 }
 
@@ -117,13 +117,13 @@ Looks up cached file data by hash index, type, and name
 */
 /* hunkFileEntry_t */
 typedef struct HunkFileEntry_s {
-    int                      data;    /* [0] cached data pointer */
+    void                    *data;    /* [0] cached data pointer */
     struct HunkFileEntry_s  *next;    /* [4] next in hash chain */
     unsigned char            type;    /* [8] file type */
     char                     name[1]; /* [9] file name (variable length) */
 } hunkFileEntry_t;
 
-int Hunk_FindDataForFileInternal_Lookup(int hashIndex, int type, const char *name)
+void *Hunk_FindDataForFileInternal_Lookup(int hashIndex, int type, const char *name)
 {
   hunkFileEntry_t *entry;
 
@@ -142,7 +142,7 @@ Hunk_PurgeFreeListRange
 Removes free list entries in [lowAddr, highAddr) range
 ================
 */
-void Hunk_PurgeFreeListRange(hunkFileEntry_t **listHead, unsigned int highAddr, unsigned int lowAddr)
+void Hunk_PurgeFreeListRange(hunkFileEntry_t **listHead, uintptr_t highAddr, uintptr_t lowAddr)
 {
   hunkFileEntry_t *entry;
 
@@ -166,13 +166,13 @@ Purges all temp memory entries from the free list hash table
 */
 void Hunk_ClearTempMemory()
 {
-  unsigned int low, high;
+  uintptr_t low, high;
   int i;
 
   Assert(Sys_IsMainThread(), s_assertDisable_Hunk_ClearTempMemory);
 
-  low = (unsigned int)(hunk_low_permanent + s_hunkData);
-  high = (unsigned int)(s_hunkData + s_hunkTotal - hunk_high_permanent);
+  low = (uintptr_t)(hunk_low_permanent + s_hunkData);
+  high = (uintptr_t)(s_hunkData + s_hunkTotal - hunk_high_permanent);
 
   /* purge all hash buckets */
   #define HUNK_HASH_SIZE 1024
@@ -227,10 +227,10 @@ int *Hunk_AllocateTempMemory(size_t size)
     void *buf = malloc(size);
     if ( buf )
     {
-      Com_Memset(buf, 0, (int)size);
+      memset(buf, 0, size);
       return buf;
     }
-    Z_MallocFailed((int)size);
+    Z_MallocFailed(size);
     return NULL;
   }
 
@@ -241,7 +241,13 @@ int *Hunk_AllocateTempMemory(size_t size)
   #define HUNK_SENTINEL_ALLOC  0x89ABCDF2
   #define HUNK_SENTINEL_FREE   0x89ABCDF3
 
+  if (size > INT_MAX - HUNK_HEADER_SIZE - HUNK_ALIGNMENT_MASK
+      || hunk_low_temp > INT_MAX - HUNK_ALIGNMENT_MASK)
+    Com_ErrorLevel(1, "Hunk_AllocateTempMemory: allocation too large (%zu bytes)", size);
   aligned = (hunk_low_temp + HUNK_ALIGNMENT_MASK) & ~HUNK_ALIGNMENT_MASK;
+  if (aligned > (unsigned int)(s_hunkTotal - hunk_high_temp)
+      || size + HUNK_HEADER_SIZE > (size_t)(s_hunkTotal - hunk_high_temp) - aligned)
+    Com_ErrorLevel(1, "Hunk_AllocateTempMemory: hunk exhausted (%zu bytes)", size);
   header = (hunkHeader_t *)(aligned + s_hunkData);
   newLowTemp = (int)(size + HUNK_HEADER_SIZE + aligned);
   prevLowTemp = hunk_low_temp;
@@ -249,7 +255,7 @@ int *Hunk_AllocateTempMemory(size_t size)
 
   if ( hunk_high_temp + newLowTemp > s_hunkTotal )
     Com_ErrorLevel(1,
-      "Hunk_AllocateTempMemory: failed on %i bytes (total %i MB, low %i MB, high %i MB), needs %i more hunk bytes",
+      "Hunk_AllocateTempMemory: failed on %zu bytes (total %i MB, low %i MB, high %i MB), needs %i more hunk bytes",
       size + HUNK_HEADER_SIZE, s_hunkTotal >> 20, newLowTemp >> 20, hunk_high_temp >> 20,
       newLowTemp + hunk_high_temp - s_hunkTotal);
 
@@ -364,6 +370,8 @@ intptr_t Hunk_AllocAlign(unsigned int size, int alignment)
   Assert(Sys_IsMainThread(), s_assertDisable_Hunk_AllocAlign);
   Assert(s_hunkData, s_assertDisable_Hunk_AllocAlign);
 
+  if (alignment <= 0 || alignment > 4096 || (alignment & (alignment - 1)))
+    Com_ErrorLevel(1, "Invalid hunk alignment %i", alignment);
   alignMask = alignment - 1;
   Assert(((alignMask) & alignment) == 0, s_assertDisable_Hunk_AllocAlign);
   #define HUNK_MAX_ALIGNMENT 4096
@@ -372,6 +380,8 @@ intptr_t Hunk_AllocAlign(unsigned int size, int alignment)
   Hunk_CheckTempMemoryHigh();
 
   /* allocate from high end, growing downward */
+  if ((((size_t)hunk_high_permanent + size + alignMask) & ~(size_t)alignMask) > (size_t)(s_hunkTotal - hunk_low_temp))
+    Com_ErrorLevel(1, "Hunk_AllocAlign: hunk exhausted (%u bytes)", size);
   newHighPerm = ~alignMask & (alignMask + size + hunk_high_permanent);
   allocPtr = s_hunkData + s_hunkTotal - newHighPerm;
   hunk_high_permanent = newHighPerm;
@@ -404,6 +414,8 @@ intptr_t Hunk_AllocLowAlign(unsigned int size, int alignment)
   Assert(Sys_IsMainThread(), s_assertDisable_Hunk_AllocLowAlign);
   Assert(s_hunkData, s_assertDisable_Hunk_AllocLowAlign);
 
+  if (alignment <= 0 || alignment > 4096 || (alignment & (alignment - 1)))
+    Com_ErrorLevel(1, "Invalid hunk alignment %i", alignment);
   alignMask = alignment - 1;
 
   /* assert power of two */
@@ -413,6 +425,8 @@ intptr_t Hunk_AllocLowAlign(unsigned int size, int alignment)
   Hunk_CheckTempMemoryLow();
 
   /* allocate from low end, growing upward */
+  if ((((size_t)hunk_low_permanent + alignMask) & ~(size_t)alignMask) + size > (size_t)(s_hunkTotal - hunk_high_temp))
+    Com_ErrorLevel(1, "Hunk_AllocLowAlign: hunk exhausted (%u bytes)", size);
   aligned = ~alignMask & (hunk_low_permanent + alignMask);
   allocPtr = aligned + s_hunkData;
   newLowPerm = size + aligned;

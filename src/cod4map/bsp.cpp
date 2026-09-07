@@ -496,9 +496,9 @@ int Com_ErrorLevel(int errorLevel, char *fmt, ...)
   va_list args;
 
   va_start(args, fmt);
-  vsprintf(buffer, fmt, args);
+  vsnprintf(buffer, sizeof(buffer), fmt, args);
   va_end(args);
-  Com_Printf(buffer);
+  Com_Error("%s", buffer);
   return 0;
 }
 

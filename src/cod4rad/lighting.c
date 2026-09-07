@@ -88,7 +88,8 @@ Allocate the lightmap data buffer.
 */
 void Lighting_AllocLightmapData(void)
 {
-    Assert("(lightingGlob.lmapCount >= 0)", ".\\lighting.cpp", 0x36, 0, 1);
+    if (g_lightmapSize < 0 || g_lightmapSize > INT_MAX / (512 * 512))
+        ErrorMsg("Invalid lightmap count %i\n", g_lightmapSize);
 
     g_lightingSamples = malloc((unsigned long long)g_lightmapSize * LIGHTMAP_DATA_SIZE);
     if (!g_lightingSamples)
@@ -126,9 +127,11 @@ void Lighting_RegisterLightmap(int lmapIndex)
 {
     int newCount;
 
-    Assert("lmapIndex != LIGHTMAP_NONE", ".\\lighting.cpp", 0x0D, 0, 1);
-    Assert("lightingGlob.lmapDefs == NULL", ".\\lighting.cpp", 0x2D, 0, 1);
+    Assert(lmapIndex != LIGHTMAP_NONE, 0);
+    Assert(g_lightingSamples == NULL, 0);
 
+    if (lmapIndex < 0 || lmapIndex >= INT_MAX / (512 * 512))
+        ErrorMsg("Invalid lightmap index %i\n", lmapIndex);
     newCount = lmapIndex + 1;
     if (g_lightmapSize < newCount)
         g_lightmapSize = newCount;
@@ -193,7 +196,7 @@ Apply degamma (raise to g_gamma power).
 */
 float DegammaColorChannel(float color)
 {
-    Assert("(color >= 0)", ".\\lighting.cpp", 0xBD, 0, 1);
+    Assert((color >= 0), 0);
 
     return powf(color, g_degamma);
 }
@@ -207,7 +210,7 @@ Apply inverse gamma correction.
 */
 float GammaCorrectColorChannel(float color)
 {
-    Assert("(color >= 0)", ".\\lighting.cpp", 0xCF, 0, 1);
+    Assert((color >= 0), 0);
 
     return powf(color, 1.0f / g_degamma);
 }
@@ -221,20 +224,18 @@ Apply degamma to RGB color in place.
 */
 void DegammaColor(float *color)
 {
-    /* KIWI FIX: the retail assert is a string literal (always true, see AUDIT_cod4rad F4),
-       so a negative channel sailed into powf and came out NaN.  A negative colour has no
-       meaning; clamp it so every caller (point, spot, sun, ambient) is safe. */
+    /* Clamp negative inputs before powf to avoid NaNs. */
     if (color[0] < 0.0f) color[0] = 0.0f;
     if (color[1] < 0.0f) color[1] = 0.0f;
     if (color[2] < 0.0f) color[2] = 0.0f;
 
-    Assert("(color >= 0)", ".\\lighting.cpp", 0xBD, 0, 1);
+    Assert(color[0] >= 0.0f, 0);
     color[0] = powf(color[0], g_degamma);
 
-    Assert("(color >= 0)", ".\\lighting.cpp", 0xBD, 0, 1);
+    Assert(color[1] >= 0.0f, 0);
     color[1] = powf(color[1], g_degamma);
 
-    Assert("(color >= 0)", ".\\lighting.cpp", 0xBD, 0, 1);
+    Assert(color[2] >= 0.0f, 0);
     color[2] = powf(color[2], g_degamma);
 }
 
@@ -247,29 +248,28 @@ Count useful samples, allocate vars pool, assign vars.
 */
 void Lighting_InitSamples(void)
 {
-    int allocSize;
+    size_t allocSize;
 
     s_finalLightmapsBuilt = 0;
 
-    Assert("lightingGlob.totalSampleCount == 0", ".\\lighting.cpp", 0x9D, 0, 1);
+    Assert(g_totalSampleCount == 0, 0);
 
     g_totalSampleCount = g_lightmapSize << 18;
 
-    Assert("lightingGlob.usefulSampleCount == 0", ".\\lighting.cpp", 0xA0, 0, 1);
+    Assert(g_usefulSampleCount == 0, 0);
 
     /* pass 1: count useful samples */
     g_lightingSampleCallback = (void *)Lighting_IncrementUsefulSampleCount;
     ForEachLightmapPixel(g_lightmapSize << 18,
                           (void *)Lighting_SampleCallback_Trampoline1, 1);
 
-    Assert("lightingGlob.usefulSampleCount <= lightingGlob.totalSampleCount",
-           ".\\lighting.cpp", 0xA3, 0, 1);
+    Assert(g_usefulSampleCount <= g_totalSampleCount, 0);
 
     /* allocate vars pool */
-    allocSize = g_usefulSampleCount * SAMPLE_VARS_SIZE;
-    g_sampleVarsPool = malloc((unsigned long long)allocSize);
+    allocSize = (size_t)g_usefulSampleCount * sizeof(SampleVars_t);
+    g_sampleVarsPool = malloc(allocSize ? allocSize : 1);
     if (!g_sampleVarsPool)
-        Com_Printf("Couldn't allocate %.2g MB for %i useful samples\n",
+        ErrorMsg("Couldn't allocate %.2g MB for %i useful samples\n",
                     (double)((float)allocSize / (1024.0f * 1024.0f)),
                     g_usefulSampleCount);
 
@@ -292,18 +292,18 @@ Allocate anti-bleed vars for empty samples.
 void Lighting_InitAntiBleed(void)
 {
     int antiBleedCount;
-    int allocSize;
+    size_t allocSize;
     char *antiBleedPool;
     int antiBleedIndex;
     int lmap, row, col;
     long long sampleOffset = 0;
 
     antiBleedCount = g_totalSampleCount - g_usefulSampleCount;
-    allocSize = antiBleedCount * SAMPLE_VARS_SIZE;
+    allocSize = (size_t)antiBleedCount * sizeof(SampleVars_t);
 
-    antiBleedPool = (char *)malloc((unsigned long long)antiBleedCount * SAMPLE_VARS_SIZE);
+    antiBleedPool = (char *)malloc(allocSize ? allocSize : 1);
     if (!antiBleedPool)
-        Com_Printf("Couldn't allocate %i bytes to fix lightmap bleeding\n", allocSize);
+        ErrorMsg("Couldn't allocate %zu bytes to fix lightmap bleeding\n", allocSize);
 
     memset(antiBleedPool, 0, allocSize);
 
@@ -321,8 +321,7 @@ void Lighting_InitAntiBleed(void)
 
                 if (*(void **)sampleSlot == NULL)
                 {
-                    Assert("antiBleedIndex < lightingGlob.totalSampleCount - lightingGlob.usefulSampleCount",
-                           ".\\lighting.cpp", 0x1AA, 0, 1);
+                    Assert(antiBleedIndex < g_totalSampleCount - g_usefulSampleCount, 0);
 
                     *(void **)sampleSlot = antiBleedPool
                         + (long long)antiBleedIndex * SAMPLE_VARS_SIZE;
@@ -334,8 +333,7 @@ void Lighting_InitAntiBleed(void)
         }
     }
 
-    Assert("antiBleedIndex == lightingGlob.totalSampleCount - lightingGlob.usefulSampleCount",
-           ".\\lighting.cpp", 0x1B1, 0, 1);
+    Assert(antiBleedIndex == g_totalSampleCount - g_usefulSampleCount, 0);
 }
 
 /*
@@ -366,7 +364,7 @@ unsigned char EncodeGammaCorrectedByte(float value)
     if (value >= 1.0f)
         return 255;
 
-    Assert("(color >= 0)", ".\\lighting.cpp", 0xCF, 0, 1);
+    Assert(value >= 0.0f, 0);
 
     corrected = powf(value, 1.0f / g_degamma);
 
@@ -1138,13 +1136,12 @@ void Lighting_GetGatheredLight(LightingSample_t *sample, float *outColor)
 {
     SampleVars_t *vars;
 
-    Assert("sample", ".\\lighting.cpp", 0xB2, 0, 1);
-    Assert("sample->vars", ".\\lighting.cpp", 0xB3, 0, 1);
+    Assert(sample, 0);
+    Assert(sample->vars, 0);
 
     vars = sample->vars;
 
-    Assert("!IS_NAN((sample->vars->gathered)[0]) && !IS_NAN((sample->vars->gathered)[1]) && !IS_NAN((sample->vars->gathered)[2])",
-           ".\\lighting.cpp", 0xB4, 0, 1);
+    Assert(!IS_NAN((sample->vars->gatheredIncident)[0]) && !IS_NAN((sample->vars->gatheredIncident)[1]) && !IS_NAN((sample->vars->gatheredIncident)[2]), 0);
 
     outColor[0] = vars->gatheredIncident[0] * vars->scattered[0];
     outColor[1] = vars->gatheredIncident[1] * vars->scattered[1];
@@ -1169,12 +1166,10 @@ void AdjustLightingContrast(int sampleCount, int baseIndex, float *srcSamples, f
     float contrast;
     float contrastPow;
 
-    Assert("(sampleCount > 0 && sampleCount <= (sizeof(luminances) / sizeof(luminances[0])))",
-           ".\\lighting.cpp", 0x12B, 0, 1);
-    Assert("((baseIndex >= 0 && baseIndex < sampleCount) || baseIndex == -1)",
-           ".\\lighting.cpp", 0x12C, 0, 1);
-    Assert("srcSamples", ".\\lighting.cpp", 0x12D, 0, 1);
-    Assert("dstColors", ".\\lighting.cpp", 0x12E, 0, 1);
+    Assert((sampleCount > 0 && sampleCount <= (sizeof(luminances) / sizeof(float))), 0);
+    Assert(((baseIndex >= 0 && baseIndex < sampleCount) || baseIndex == -1), 0);
+    Assert(srcSamples, 0);
+    Assert(dstColors, 0);
 
     minLum = 3.402823e+38f;
     maxLum = -3.402823e+38f;
@@ -1204,7 +1199,7 @@ void AdjustLightingContrast(int sampleCount, int baseIndex, float *srcSamples, f
 
     contrast = maxLum - minLum;
 
-    Assert("contrast >= 0.0f", ".\\lighting.cpp", 0x141, 0, 1);
+    Assert(contrast >= 0.0f, 0);
 
     if (contrast == 0.0f || contrast >= 0.5f)
         goto done;
@@ -1351,7 +1346,7 @@ Assign vars from pool to a lighting sample.
 */
 void Lighting_AllocSampleVars(LightingSample_t *sample)
 {
-    Assert("sample->vars == NULL", ".\\lighting.cpp", 0x93, 0, 1);
+    Assert(sample->vars == NULL, 0);
 
     sample->vars = (float *)((char *)g_sampleVarsPool
                    + (long long)g_usefulSampleCount * SAMPLE_VARS_SIZE);

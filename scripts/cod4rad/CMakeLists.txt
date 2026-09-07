@@ -59,9 +59,9 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE
 )
 
 target_compile_options(${PROJECT_NAME} PRIVATE
-    /O2
-    /fp:strict
-    /W0
+    $<$<COMPILE_LANGUAGE:C,CXX>:/O2>
+    $<$<COMPILE_LANGUAGE:C,CXX>:/fp:strict>
+    $<$<COMPILE_LANGUAGE:C,CXX>:/W3>
     $<$<COMPILE_LANGUAGE:CXX>:/EHsc>
 )
 

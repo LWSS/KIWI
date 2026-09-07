@@ -136,6 +136,10 @@ Platform compatibility
 
 ------------------------------------------------------------------------------- */
 
+/* Native carriers follow the host ABI. Disk-record assertions below remain
+   unconditional; the x86 values document the recovered executable layout. */
+#define COD4MAP_NATIVE_LAYOUT(x86Size, x64Size) (sizeof(void *) == 8 ? (x64Size) : (x86Size))
+
 typedef char static_assert_int_is_4_bytes[sizeof(int) == 4 ? 1 : -1];
 typedef char static_assert_float_is_4_bytes[sizeof(float) == 4 ? 1 : -1];
 
@@ -738,7 +742,7 @@ typedef struct TrisReorderEntry_s {
     int           maxVert;  /* [12] */
 } TrisReorderEntry_t;
 
-typedef char static_assert_tris_reorder_entry_size[sizeof(TrisReorderEntry_t) == 0x10 ? 1 : -1];
+typedef char static_assert_tris_reorder_entry_size[sizeof(TrisReorderEntry_t) == COD4MAP_NATIVE_LAYOUT(0x10, 0x18) ? 1 : -1];
 
 /* Native transient sun-shadow classifications carried by a TriSoup before
    serialization.  The disk field is a boolean produced by
@@ -1157,7 +1161,7 @@ typedef char cod4map_primary_light_region_desc_size_must_be_0x24[
     sizeof(PrimaryLightRegionDesc_t) == 0x24 ? 1 : -1
 ];
 typedef char cod4map_primary_light_region_node_size_must_be_0x30[
-    sizeof(PrimaryLightRegionNode_t) == 0x30 ? 1 : -1
+    sizeof(PrimaryLightRegionNode_t) == COD4MAP_NATIVE_LAYOUT(0x30, 0x40) ? 1 : -1
 ];
 
 /* Plane_t */
@@ -1227,7 +1231,7 @@ typedef struct Face_s {
     Winding_t     *w;        /* [12] face winding polygon */
 } Face_t;
 
-typedef char cod4map_face_size_must_be_0x10[sizeof(Face_t) == 0x10 ? 1 : -1];
+typedef char cod4map_face_size_must_be_0x10[sizeof(Face_t) == COD4MAP_NATIVE_LAYOUT(0x10, 0x18) ? 1 : -1];
 
 /* Compact side-index list attached to a collision brush side. */
 typedef struct BrushAdjacencyWinding_s {
@@ -1259,7 +1263,7 @@ typedef struct BrushSide_s {
     int             culled;            /* [112] portal state */
     struct Brush_s *ownerBrush;       /* [116] brush that owns this side (for portal warnings) */
 } BrushSide_t;
-typedef char cod4map_brushside_size_must_be_0x78[sizeof(BrushSide_t) == 0x78 ? 1 : -1];
+typedef char cod4map_brushside_size_must_be_0x78[sizeof(BrushSide_t) == COD4MAP_NATIVE_LAYOUT(0x78, 0x98) ? 1 : -1];
 
 /* Brush_t */
 typedef struct Brush_s {
@@ -1277,7 +1281,7 @@ typedef struct Brush_s {
     struct Brush_s *original; int numCollisionSides; BrushSide_t *collisionSides;
     float eMins[3]; float eMaxs[3]; int numSides; BrushSide_t sides[];
 } Brush_t;
-typedef char cod4map_brush_size_must_be_0x54[sizeof(Brush_t) == 0x54 ? 1 : -1];
+typedef char cod4map_brush_size_must_be_0x54[sizeof(Brush_t) == COD4MAP_NATIVE_LAYOUT(0x54, 0x70) ? 1 : -1];
 
 /* Entity_t */
 typedef struct Entity_s {
@@ -1295,7 +1299,7 @@ typedef struct Entity_s {
 } Entity_t;
 
 typedef char cod4map_entity_size_must_be_0x34[
-    sizeof(Entity_t) == 0x34 ? 1 : -1
+    sizeof(Entity_t) == COD4MAP_NATIVE_LAYOUT(0x34, 0x50) ? 1 : -1
 ];
 
 /* Patch_t */
@@ -1375,8 +1379,8 @@ typedef struct Tree_s {
     float   maxs[3];      /* [124] tree bounding box max */
 } Tree_t;
 
-typedef char cod4map_node_size_must_be_0x6c[sizeof(Node_t) == 0x6C ? 1 : -1];
-typedef char cod4map_tree_size_must_be_0x88[sizeof(Tree_t) == 0x88 ? 1 : -1];
+typedef char cod4map_node_size_must_be_0x6c[sizeof(Node_t) == COD4MAP_NATIVE_LAYOUT(0x6C, 0xa8) ? 1 : -1];
+typedef char cod4map_tree_size_must_be_0x88[sizeof(Tree_t) == COD4MAP_NATIVE_LAYOUT(0x88, 0xc8) ? 1 : -1];
 
 /* CellPortalLink_t */
 typedef struct CellPortalLink_s {
@@ -1467,23 +1471,23 @@ typedef struct MapDrawSurf_s {
 typedef char cod4map_meshvert_size_must_be_0x2c[
     sizeof(MeshVert_t) == 0x2C ? 1 : -1];
 typedef char cod4map_mapdrawsurfunion_size_must_be_0x0c[
-    sizeof(MapDrawSurfUnion_t) == 0xC ? 1 : -1];
+    sizeof(MapDrawSurfUnion_t) == COD4MAP_NATIVE_LAYOUT(0xC, 0x18) ? 1 : -1];
 typedef char cod4map_mapdrawsurf_size_must_be_0x44[
-    sizeof(MapDrawSurf_t) == 0x44 ? 1 : -1];
+    sizeof(MapDrawSurf_t) == COD4MAP_NATIVE_LAYOUT(0x44, 0x68) ? 1 : -1];
 typedef char cod4map_mapdrawsurf_reflectionprobe_offset_must_be_0x08[
-    offsetof(MapDrawSurf_t, reflectionProbeIndex) == 0x08 ? 1 : -1];
+    offsetof(MapDrawSurf_t, reflectionProbeIndex) == COD4MAP_NATIVE_LAYOUT(0x08, 0x10) ? 1 : -1];
 typedef char cod4map_mapdrawsurf_lightmap_offset_must_be_0x0c[
-    offsetof(MapDrawSurf_t, lightmapIndex) == 0x0C ? 1 : -1];
+    offsetof(MapDrawSurf_t, lightmapIndex) == COD4MAP_NATIVE_LAYOUT(0x0C, 0x14) ? 1 : -1];
 typedef char cod4map_mapdrawsurf_vertcount_offset_must_be_0x28[
-    offsetof(MapDrawSurf_t, vertCount) == 0x28 ? 1 : -1];
+    offsetof(MapDrawSurf_t, vertCount) == COD4MAP_NATIVE_LAYOUT(0x28, 0x38) ? 1 : -1];
 typedef char cod4map_mapdrawsurf_verts_offset_must_be_0x2c[
-    offsetof(MapDrawSurf_t, verts) == 0x2C ? 1 : -1];
+    offsetof(MapDrawSurf_t, verts) == COD4MAP_NATIVE_LAYOUT(0x2C, 0x40) ? 1 : -1];
 typedef char cod4map_mapdrawsurf_patch_offset_must_be_0x36[
-    offsetof(MapDrawSurf_t, isPatch) == 0x36 ? 1 : -1];
+    offsetof(MapDrawSurf_t, isPatch) == COD4MAP_NATIVE_LAYOUT(0x36, 0x4e) ? 1 : -1];
 typedef char cod4map_mapdrawsurf_terrain_offset_must_be_0x37[
-    offsetof(MapDrawSurf_t, isTerrain) == 0x37 ? 1 : -1];
+    offsetof(MapDrawSurf_t, isTerrain) == COD4MAP_NATIVE_LAYOUT(0x37, 0x4f) ? 1 : -1];
 typedef char cod4map_mapdrawsurf_union_offset_must_be_0x38[
-    offsetof(MapDrawSurf_t, u) == 0x38 ? 1 : -1];
+    offsetof(MapDrawSurf_t, u) == COD4MAP_NATIVE_LAYOUT(0x38, 0x50) ? 1 : -1];
 
 /* Mesh_t */
 typedef struct Mesh_s {
@@ -1509,11 +1513,11 @@ typedef struct TerrainNode_s {
     MeshVert_t           *verts;        /* [40] vertex array (44 bytes per vert) */
 } TerrainNode_t;
 typedef char cod4map_terrainnode_size_must_be_0x2c[
-    sizeof(TerrainNode_t) == 0x2C ? 1 : -1];
+    sizeof(TerrainNode_t) == COD4MAP_NATIVE_LAYOUT(0x2C, 0x48) ? 1 : -1];
 typedef char cod4map_terrainnode_indexes_offset_must_be_0x20[
-    offsetof(TerrainNode_t, indexes) == 0x20 ? 1 : -1];
+    offsetof(TerrainNode_t, indexes) == COD4MAP_NATIVE_LAYOUT(0x20, 0x30) ? 1 : -1];
 typedef char cod4map_terrainnode_verts_offset_must_be_0x28[
-    offsetof(TerrainNode_t, verts) == 0x28 ? 1 : -1];
+    offsetof(TerrainNode_t, verts) == COD4MAP_NATIVE_LAYOUT(0x28, 0x40) ? 1 : -1];
 
 
 
@@ -1543,10 +1547,10 @@ typedef struct TriSurfProps_s {
 } TriSurfProps_t;
 
 /* Directly recovered from 0x43D550, 0x43FB60, and 0x44E6F0/0x44EE30. */
-static_assert(sizeof(TriSurfProps_t) == 0xAC, "TriSurfProps_t must match cod4map.exe");
-static_assert(offsetof(TriSurfProps_t, plane) == 0x94, "TriSurfProps_t::plane offset");
-static_assert(offsetof(TriSurfProps_t, coalesceChain) == 0xA4, "TriSurfProps_t::coalesceChain offset");
-static_assert(offsetof(TriSurfProps_t, freeListNext) == 0xA8, "TriSurfProps_t::freeListNext offset");
+static_assert(sizeof(TriSurfProps_t) == COD4MAP_NATIVE_LAYOUT(0xAC, 0xb8), "TriSurfProps_t native x86/x64 layout");
+static_assert(offsetof(TriSurfProps_t, plane) == COD4MAP_NATIVE_LAYOUT(0x94, 0x98), "TriSurfProps_t::plane offset");
+static_assert(offsetof(TriSurfProps_t, coalesceChain) == COD4MAP_NATIVE_LAYOUT(0xA4, 0xa8), "TriSurfProps_t::coalesceChain offset");
+static_assert(offsetof(TriSurfProps_t, freeListNext) == COD4MAP_NATIVE_LAYOUT(0xA8, 0xb0), "TriSurfProps_t::freeListNext offset");
 
 /* KIWI-only state that cannot occupy native TriSurfProps_t bytes. */
 typedef struct TriSurfPropsSidecar_s {
@@ -1582,11 +1586,11 @@ typedef struct TriSurf_s {
 } TriSurf_t;
 
 static_assert(offsetof(TriSurf_t, winding) == 0x00, "TriSurf_t::winding offset");
-static_assert(offsetof(TriSurf_t, props) == 0x08, "TriSurf_t::props offset");
-static_assert(offsetof(TriSurf_t, origWinding) == 0x24, "TriSurf_t::origWinding offset");
-static_assert(offsetof(TriSurf_t, prev) == 0x28, "TriSurf_t::prev offset");
-static_assert(offsetof(TriSurf_t, holes) == 0x3C, "TriSurf_t::holes offset");
-static_assert(offsetof(TriSurf_t, auxElemSize) == 0x40, "TriSurf_t native prefix size");
+static_assert(offsetof(TriSurf_t, props) == COD4MAP_NATIVE_LAYOUT(0x08, 0x10), "TriSurf_t::props offset");
+static_assert(offsetof(TriSurf_t, origWinding) == COD4MAP_NATIVE_LAYOUT(0x24, 0x30), "TriSurf_t::origWinding offset");
+static_assert(offsetof(TriSurf_t, prev) == COD4MAP_NATIVE_LAYOUT(0x28, 0x38), "TriSurf_t::prev offset");
+static_assert(offsetof(TriSurf_t, holes) == COD4MAP_NATIVE_LAYOUT(0x3C, 0x60), "TriSurf_t::holes offset");
+static_assert(offsetof(TriSurf_t, auxElemSize) == COD4MAP_NATIVE_LAYOUT(0x40, 0x68), "TriSurf_t native prefix size");
 
 /* Native tris_lightmap.cpp transient carriers.  They remain separate from
    the legacy TriSurf_t fields while the compiler transitions from the donor
@@ -1651,17 +1655,17 @@ typedef struct TrisLmapRasterScratch_s {
 } TrisLmapRasterScratch_t;
 
 typedef char static_assert_tris_lmap_transient_size[
-    sizeof(TrisLmapTransient_t) == 0x40 ? 1 : -1];
+    sizeof(TrisLmapTransient_t) == COD4MAP_NATIVE_LAYOUT(0x40, 0x50) ? 1 : -1];
 typedef char static_assert_tris_lmap_group_size[
-    sizeof(TrisLmapGroup_t) == 0x24 ? 1 : -1];
+    sizeof(TrisLmapGroup_t) == COD4MAP_NATIVE_LAYOUT(0x24, 0x38) ? 1 : -1];
 typedef char static_assert_tris_lmap_assignment_payload_size[
     sizeof(TrisLmapAssignmentPayload_t) == 0x28 ? 1 : -1];
 typedef char static_assert_tris_lmap_assignment_sidecar_size[
-    sizeof(TrisLmapAssignmentSidecar_t) == 0x34 ? 1 : -1];
+    sizeof(TrisLmapAssignmentSidecar_t) == COD4MAP_NATIVE_LAYOUT(0x34, 0x40) ? 1 : -1];
 typedef char static_assert_tris_lmap_span_size[
     sizeof(TrisLmapSpan_t) == 0x4 ? 1 : -1];
 typedef char static_assert_tris_lmap_raster_scratch_size[
-    sizeof(TrisLmapRasterScratch_t) == 0xC ? 1 : -1];
+    sizeof(TrisLmapRasterScratch_t) == COD4MAP_NATIVE_LAYOUT(0xC, 0x10) ? 1 : -1];
 
 /* TriSoup_t */
 typedef struct TriSoup_s {
@@ -1776,7 +1780,7 @@ typedef struct GridTreeNode_s {
     TriSurf_t *surfListHead; /* [8] native head of surface linked list */
 } GridTreeNode_t;
 typedef char cod4map_gridtree_node_size_must_be_0x0c[
-    sizeof(GridTreeNode_t) == 0x0c ? 1 : -1
+    sizeof(GridTreeNode_t) == COD4MAP_NATIVE_LAYOUT(0x0c, 0x10) ? 1 : -1
 ];
 
 /* Callback used by the native grid-tree segment traversal.  Return nonzero
@@ -1812,7 +1816,7 @@ typedef struct TjuncPoint_s {
     struct TjuncPoint_s *prev;      /* [20] linked list prev */
     struct TjuncPoint_s *next;      /* [24] linked list next */ 
 } TjuncPoint_t;
-typedef char cod4map_tjunc_point_size_must_be_0x1c[sizeof(TjuncPoint_t) == 0x1C ? 1 : -1];
+typedef char cod4map_tjunc_point_size_must_be_0x1c[sizeof(TjuncPoint_t) == COD4MAP_NATIVE_LAYOUT(0x1C, 0x28) ? 1 : -1];
 
 /* TjuncEdgeLine_t */
 typedef struct TjuncEdgeLine_s {
@@ -1827,7 +1831,7 @@ typedef struct TjuncEdgeLine_s {
     struct TjuncEdgeLine_s *hashNext;     /* [64] next edge in hash chain */
     TjuncPoint_t            sentinel;     /* [68] sentinel node for sorted point list */
 } TjuncEdgeLine_t;
-typedef char cod4map_tjunc_edge_line_size_must_be_0x60[sizeof(TjuncEdgeLine_t) == 0x60 ? 1 : -1];
+typedef char cod4map_tjunc_edge_line_size_must_be_0x60[sizeof(TjuncEdgeLine_t) == COD4MAP_NATIVE_LAYOUT(0x60, 0x78) ? 1 : -1];
 
 /* TangentSources_t */
 typedef struct TangentSources_s {
@@ -2102,7 +2106,7 @@ typedef struct LmFreeBlock_s {
     struct LmFreeBlock_s *prev;        /* [24] prev in free list */
 } LmFreeBlock_t;
 
-typedef char static_assert_lm_free_block_size[sizeof(LmFreeBlock_t) == 0x1C ? 1 : -1];
+typedef char static_assert_lm_free_block_size[sizeof(LmFreeBlock_t) == COD4MAP_NATIVE_LAYOUT(0x1C, 0x28) ? 1 : -1];
 
 /* LmAllowedNode_t */
 typedef struct LmAllowedNode_s {
@@ -2200,7 +2204,7 @@ typedef struct Iwd_s {
     FileInIwd_t **hashTable;        /* [788] hash table for lookups */
     FileInIwd_t  *buildBuffer;      /* [792] file entry array */
 } Iwd_t;
-static_assert(sizeof(Iwd_t) == 0x31C, "Iwd_t must match cod4map.exe");
+static_assert(sizeof(Iwd_t) == COD4MAP_NATIVE_LAYOUT(0x31C, 0x328), "Iwd_t native x86/x64 layout");
 
 /* Searchpath_t */
 typedef struct Searchpath_s {
@@ -2212,7 +2216,7 @@ typedef struct Searchpath_s {
     int                  ignorePureCheck; /* [20] players-directory control */
     int                  language;  /* [24] language index */
 } Searchpath_t;
-static_assert(sizeof(Searchpath_t) == 0x1C, "Searchpath_t must match cod4map.exe");
+static_assert(sizeof(Searchpath_t) == COD4MAP_NATIVE_LAYOUT(0x1C, 0x28), "Searchpath_t native x86/x64 layout");
 
 /* FileHandleData_t */
 typedef struct FileHandleData_s {
@@ -2225,7 +2229,7 @@ typedef struct FileHandleData_s {
     int       streamed;   /* [24] streamed flag */
     char      name[256];  /* [28] file path name */
 } FileHandleData_t;
-static_assert(sizeof(FileHandleData_t) == 0x11C, "FileHandleData_t must match cod4map.exe");
+static_assert(sizeof(FileHandleData_t) == COD4MAP_NATIVE_LAYOUT(0x11C, 0x130), "FileHandleData_t native x86/x64 layout");
 
 
 
@@ -2246,14 +2250,14 @@ typedef struct ParseInfo_s {
     const char *backup_text;            /* [1048] backup text pointer */                   
     const char *parseFile;              /* [1052] parse file pointer */                       
 } ParseInfo_t;
-static_assert(sizeof(ParseInfo_t) == 0x420, "ParseInfo_t must match cod4map.exe");
+static_assert(sizeof(ParseInfo_t) == COD4MAP_NATIVE_LAYOUT(0x420, 0x438), "ParseInfo_t native x86/x64 layout");
 
 /* ParseThreadInfo_t */
 typedef struct ParseThreadInfo_s {
     ParseInfo_t parseInfo[MAX_PARSE_INFO]; /* [0]     parse info stack */
     int         parseInfoNum;              /* [17856] parse depth */
 } ParseThreadInfo_t;
-static_assert(sizeof(ParseThreadInfo_t) == 0x4204, "ParseThreadInfo_t must match cod4map.exe");
+static_assert(sizeof(ParseThreadInfo_t) == COD4MAP_NATIVE_LAYOUT(0x4204, 0x4388), "ParseThreadInfo_t native x86/x64 layout");
 
 /* ComParseMark_t */
 typedef struct ComParseMark_s {
@@ -3470,7 +3474,7 @@ void SL_FreeHashChain(AssertHashNode_t *node);
 AssertHashNode_t *SL_HashNode_ScalarDtor(AssertHashNode_t *node, char flags);
 unsigned int SL_DestroyStringTable(AssertStringTable_t *table);
 HMODULE Assertive_GetModuleHandle(const char *moduleName);
-int Assertive_FormatStackFrame(char *buffer, char *hitMain, unsigned int instrAddr);
+int Assertive_FormatStackFrame(char *buffer, char *hitMain, uintptr_t instrAddr);
 int Assertive_CopyToClipboard(void);
 void Assertive_ClearFlag(void);
 AssertHashNode_t *Assertive_AllocSymbol(AssertHashNode_t *node, const char *name, int hashValue, AssertHashNode_t *nextNode);
@@ -3522,8 +3526,8 @@ int FS_LoadFile(const char *filename, void **bufferptr);
 void FS_ClearIwdReferences(void);
 int FS_SV_GetFilepath(const char *filename, char *ospath);
 Iwd_t *FS_LoadZipFile(char *zipPath, char *basename);
-int *FS_ListFilteredFiles(Searchpath_t *searchPaths, const char *path, char *extension, char *filter, int flags, int *numFilesOut);
-int *FS_ListFiles(const char *path, char *extension, char *filter, int flags, int *numFilesOut, int gameDirFlags);
+char **FS_ListFilteredFiles(Searchpath_t *searchPaths, const char *path, char *extension, char *filter, int flags, int *numFilesOut);
+char **FS_ListFiles(const char *path, char *extension, char *filter, int flags, int *numFilesOut, int gameDirFlags);
 void FS_AddIwdFilesForGameDirectory(const char *basepath, char *gamedir);
 void FS_AddGameDirectory(const char *basepath, int localized, const char *gamedir, int language);
 void FS_AddGameDirectoryBoth(const char *basepath, const char *gamedir);
@@ -3613,10 +3617,10 @@ int CullBoxFromConicSectionOfSphere(const float *coneOrg, const float *coneDir, 
 
 /* Universal/com_memory.c */
 void Z_Free(void *Block);
-void Z_MallocFailed(int size);
+void Z_MallocFailed(size_t size);
 void *Z_Malloc(size_t size);
-int Hunk_FindDataForFileInternal_Lookup(int hashIndex, int type, const char *name);
-void Hunk_PurgeFreeListRange(struct HunkFileEntry_s **listHead, unsigned int highAddr, unsigned int lowAddr);
+void *Hunk_FindDataForFileInternal_Lookup(int hashIndex, int type, const char *name);
+void Hunk_PurgeFreeListRange(struct HunkFileEntry_s **listHead, uintptr_t highAddr, uintptr_t lowAddr);
 void Hunk_ClearTempMemory();
 void Hunk_Clear();
 int *Hunk_AllocateTempMemory(size_t Size);
@@ -4185,7 +4189,7 @@ extern unsigned int   Msg;
 extern unsigned int   uNumber;
 extern char           Buffer[16];
 extern char           DstBuf[MAX_OS_PATH];
-extern char           Str;
+extern char           Str[ASSERT_LINE_BUFSIZE];
 extern char           g_basePath[MAX_OS_PATH];
 extern char           g_decimalPoint;
 extern char           g_emptyString[4];

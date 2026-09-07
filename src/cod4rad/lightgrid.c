@@ -99,8 +99,7 @@ static void LightGrid_BuildCod4Basis(void)
         }
     }
 
-    Assert("basisIndex == GFX_LIGHTGRID_SAMPLE_COUNT",
-           ".\\lightgrid.cpp", 1170, 0, basisIndex == 56);
+    Assert(basisIndex == 56, 0);
 }
 
 static void LightGrid_AccumulateCod4Vector(const float *color,
@@ -454,7 +453,6 @@ static void LightGrid_QuantizeVectors(void)
 }
 
 /* external functions not in master header */
-extern void qsort(void *base, unsigned long long count, unsigned long long size, void *cmp);
 extern void *fopen_wrap(const char *path, const char *mode);
 extern void fseek_wrap(void *file, int offset, int whence);
 extern int ftell_wrap(void *file);
@@ -732,7 +730,6 @@ static void LightGrid_ApplyGridNot(void)
 extern int rand_int(void);
 extern int FindLightingSamplesAndNormal(int sampleIdx, float *position, float *normal,
     float offset, void *outputLighting, float *outputNormal);
-extern void Lighting_GetGatheredLight(void *sample, float *outVars); /* lighting_412550 */
 /* MUST match the pointlights.c definition — a shorter local prototype here
  * shifted every argument (lightIndex took a truncated pointer, pos became
  * null) and crashed the grid phase on the first map with a point light. */
@@ -1079,7 +1076,10 @@ static void LightGrid_BuildCod4Compact(void)
                                rowHeightOver255, cells, runBegin, rowEnd,
                                &entryCount);
 
-        g_cod4LightGridRowsSize = (g_cod4LightGridRowsSize + 3) & ~3;
+        /* Re-lighting reuses a buffer loaded from the previous BSP.
+         * Explicitly clear padding instead of leaving old run bytes there. */
+        while (g_cod4LightGridRowsSize & 3)
+            g_cod4LightGridRows[g_cod4LightGridRowsSize++] = 0;
         i = rowEnd;
     }
 
@@ -1263,10 +1263,10 @@ void AddStaticModelLightGridSamples(void)
     int autoPointCount = 0;
 
     /* assert: pointCount == 0 (line 0x62) */
-    Assert("(lightGridGlob.pointCount == 0)", ".\\lightgrid.cpp", 0x62, 0, 1);
+    Assert((g_gridPointCount == 0), 0);
 
     /* assert: points == NULL (line 0x63) */
-    Assert("lightGridGlob.points == NULL", ".\\lightgrid.cpp", 0x63, 0, 1);
+    Assert(g_gridPoints == NULL, 0);
 
     /* sub_40FCF0 only wins when an authored .grid exists.  Its allocator
      * sub_40FB70 prepends .grid_auto, so preserve that merge and ordering. */
@@ -1711,7 +1711,7 @@ void CalculateLightGrid(int flags)
     g_cod4LightGridRowsSize = 0;
 
     /* assert: pointCount == 0 (line 0x142) */
-    Assert("lightGridGlob.pointCount == 0", ".\\lightgrid.cpp", 0x142, 0, 1);
+    Assert(g_gridPointCount == 0, 0);
 
     /* load grid points from file */
     AddStaticModelLightGridSamples();
@@ -1836,10 +1836,10 @@ void CalculateLightGrid_Setup(void)
     int i;
 
     /* assert: pointCount == 0 (line 0x90) */
-    Assert("(lightGridGlob.pointCount == 0)", ".\\lightgrid.cpp", 0x90, 0, 1);
+    Assert((g_gridPointCount == 0), 0);
 
     /* assert: points == NULL (line 0x91) */
-    Assert("lightGridGlob.points == NULL", ".\\lightgrid.cpp", 0x91, 0, 1);
+    Assert(g_gridPoints == NULL, 0);
 
     /* 0x410C90 tries .vclog after an absent .grid.  Whether .vclog exists
      * or not, allocator sub_40FB70 then merges .grid_auto before it. */
@@ -1976,7 +1976,7 @@ void CalculateLightGrid_SortPoints(void)
     int i;
 
     /* assert: pointCount > 0 (line 0x12B) */
-    Assert("(lightGridGlob.pointCount > 0)", ".\\lightgrid.cpp", 0x12B, 0, 1);
+    Assert((g_gridPointCount > 0), 0);
 
     /* sort grid points */
     qsort(g_gridPoints, g_gridPointCount, 6, (void *)GridSamplePoint_Compare);

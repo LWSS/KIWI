@@ -24,7 +24,7 @@ typedef struct MapInfo_s
   float scale;
 } MapInfo_t;
 
-typedef char MapInfo_t_must_be_0x20[(sizeof(MapInfo_t) == 0x20) ? 1 : -1];
+typedef char MapInfo_t_must_be_0x20[(sizeof(MapInfo_t) == COD4MAP_NATIVE_LAYOUT(0x20, 0x28)) ? 1 : -1];
 
 static MapInfo_t s_mapInfo[MAX_MAP_INFOS];
 static int s_mapInfoCount;

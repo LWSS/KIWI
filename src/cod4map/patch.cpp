@@ -203,22 +203,22 @@ int ComparePatchSurfaces(const void *elemA, const void *elemB)
 
   /* sort by surface flags first */
   if ( a->surfaceFlags != b->surfaceFlags )
-    return a->surfaceFlags - b->surfaceFlags;
+    return a->surfaceFlags < b->surfaceFlags ? -1 : 1;
 
   /* then by content flags */
   if ( a->contentFlags != b->contentFlags )
-    return a->contentFlags - b->contentFlags;
+    return a->contentFlags < b->contentFlags ? -1 : 1;
 
-  /* CoD4's comparator uses the raw material-pool stride (64 bytes), then
-     the separate terrain grouping key at Patch_t+60. */
+  /* Materials belong to the same pool. Compare elements without assuming
+     the x86 material stride or narrowing an address difference. */
   if ( a->material == b->material )
   {
     if ( a->lmMaterial == b->lmMaterial )
       return a->terrainSortKey - b->terrainSortKey;
-    return (int)(((intptr_t)a->lmMaterial - (intptr_t)b->lmMaterial) >> 6);
+    return a->lmMaterial < b->lmMaterial ? -1 : 1;
   }
   
-  return (int)(((intptr_t)a->material - (intptr_t)b->material) >> 6);
+  return a->material < b->material ? -1 : 1;
 }
 
 /*

@@ -6,8 +6,6 @@
 extern char *AssertFormat(const char *fmt, const char *expr, ...);
 extern void ComputeBaryCoords(float *v0, float *v1, float *v2,
                               float *plane, float *out0, float *out1);
-extern void MatrixTransformPoint(void *texcoordData,
-                                   DrawVert_t *vertData, float *pos);
 extern void Lighting_RegisterLightmap(int lightmapIdx);
 extern void memcpy_fast(void *dst, const void *src, int size);
 #include <stdlib.h>
@@ -15,13 +13,10 @@ extern void *Hunk_AllocateTempMemory(int bytes);
 extern void Hunk_FreeTempMemory(void *ptr);
 extern void *LocalAlloc_wrapper(int bytes);
 extern void *HeapReAlloc_wrapper(void *ptr, int bytes);
-extern void ForEachQuantum(int count, void (*callback)(int, int), int threadCount);
 extern void BuildLightTransfers_PerTri(int triIndex, int edx, int count, void *callback);
-extern void GetLightingSubSample(int lightmapIdx, float u, float v, void *result);
 extern void ProcessLightingSampleArea(float areaX2, float *centroid,
                                       float *polyVerts, int vertCount,
                                       void *userData, int areaIndex);
-extern int CompareFunction(const void *a, const void *b);
 extern void qsort_wrapper(void *base, __int64 num, int size,
                            int (*cmp)(const void *, const void *));
 extern float ceilf_wrapper(float x);
@@ -30,16 +25,7 @@ extern void ForEach2dArea(void *coords, int vertCount,
                           float sStart, float tStart,
                           float sPixelSize, float tPixelSize,
                           ForEach2dAreaCallback callback, void *userData);
-extern int FindLightingTransfers_inner(int sampleIdx, float *position, float *normal,
-                                       float subAreaFactor, float skyFactor,
-                                       unsigned char primaryLightIndex,
-                                       void *subSample);
 extern int ComputeLinearMappingForTriangle(Triangle_t *tri, void *outMapping);
-extern void MatrixTransformDirection(void *lightmapMatrix, void *vertData, void *output);
-extern int SetupLinearMapping(float *basis, float *baryCoords, float *outCoords,
-                              float *outAxes, float *outMapping);
-extern void OrientationDirToWorldDir(float *mapping, float xmm1, float xmm2,
-                                  float xmm3, float *output);     /* linearmapping_4152C0 */
 
 /* g_bspPlanes / g_bspFileNodes are same arrays as bspPlanes / bspNodes in bspfile.c */
 #define g_bspPlanes ((float(*)[4])bspPlanes)
@@ -213,7 +199,7 @@ void AddTriangle(SurfaceInfo_t *surface, unsigned short materialIdx,
         Assert(vertIndex >= 0 && vertIndex < numBSPDrawVerts, s_assertDisable_AddTriangle_vertIndex);
         Assert(texcoordData || 0, s_assertDisable_AddTriangle_or);
 
-        MatrixTransformPoint(texcoordData, &g_vertData[vertIndex], g_vertPositions[vertIndex]);
+        MatrixTransformPoint(texcoordData, g_vertData[vertIndex].pos, g_vertPositions[vertIndex]);
     }
 
     area = BuildTriangleNormal(tri);
@@ -1079,7 +1065,7 @@ void GetLightingSubSampleWithLock(float area, float *samplePos,
                                   void *userData, int areaIndex)
 {
     Triangle_t *tri = (Triangle_t *)userData;
-    LightingSampleResult_t result;
+    SubSample_t result;
     int combinedIndex;
 
     (void)polyVerts;
@@ -1088,16 +1074,16 @@ void GetLightingSubSampleWithLock(float area, float *samplePos,
 
     GetLightingSubSample((int)tri->lightmapIdx, samplePos[0] * 2.0f, samplePos[1] * 2.0f, &result);
 
-    AcquireThreadLock((unsigned int)(uintptr_t)result.lock);
+    AcquireThreadLock((unsigned int)(uintptr_t)((LightmapSample_t *)result.sample));
 
     /* accumulate total weight */
-    result.lock->weight += area;
+    ((LightmapSample_t *)result.sample)->weight += area;
 
     /* accumulate per-channel weight */
-    combinedIndex = result.index0 + result.index1 * 2;
-    result.lock->channelWeight[combinedIndex] += area;
+    combinedIndex = result.s + result.t * 2;
+    ((LightmapSample_t *)result.sample)->channelWeight[combinedIndex] += area;
 
-    ReleaseThreadLock((unsigned int)(uintptr_t)result.lock);
+    ReleaseThreadLock((unsigned int)(uintptr_t)((LightmapSample_t *)result.sample));
 }
 
 static void CountTexelsCallback(float area, float *samplePos,
@@ -1123,7 +1109,7 @@ calling GetLightingSubSampleWithLock with area=1.
 Also counts texels per triangle for sorted dispatch.
 ================
 */
-void SetLightingSampleAreas_Callback(int triIndex, int unused)
+void SetLightingSampleAreas_Callback(unsigned int triIndex, unsigned int unused)
 {
     Triangle_t *tri = &g_triangles[triIndex];
 
@@ -1148,7 +1134,7 @@ Tail-calls BuildLightTransfers_PerTri with transfer count
 and ProcessLightingSampleArea as the processing callback.
 ================
 */
-void BuildLightTransfers_Callback(int triIndex, int unused)
+void BuildLightTransfers_Callback(unsigned int triIndex, unsigned int unused)
 {
     if (!g_lightingTransportPass)
         BuildRadiosityColor_PerTri(triIndex);
@@ -1255,7 +1241,7 @@ static void RadiosityColorArea(float areaX2, float *centroid,
                                void *userData, int areaIndex)
 {
     RadiosityColorMapping_t *mapping = (RadiosityColorMapping_t *)userData;
-    LightingSampleResult_t result;
+    SubSample_t result;
     LightmapSample_t *sample;
     float color[3];
     float scale;
@@ -1264,7 +1250,7 @@ static void RadiosityColorArea(float areaX2, float *centroid,
 
     GetLightingSubSample((int)mapping->tri->lightmapIdx,
                          centroid[0] * 2.0f, centroid[1] * 2.0f, &result);
-    sample = result.lock;
+    sample = ((LightmapSample_t *)result.sample);
     if (!sample || !sample->vars || sample->weight <= 0.0f)
         return;
 
@@ -1405,7 +1391,7 @@ If triangle has a lightmap, calls ForEachLightingSampleInTriangle
 with the stored callback and parameter.
 ================
 */
-void ForEachLightmapPixel_Callback(int triIndex, int unused)
+void ForEachLightmapPixel_Callback(unsigned int triIndex, unsigned int unused)
 {
     Triangle_t *tri = &g_triangles[triIndex];
 
@@ -2033,21 +2019,21 @@ void InitGeometry(void)
     /* allocate triangle ref data: g_triCount * 32 entries * 8 bytes */
     allocSize = g_triCount << 5;
     g_bspNodeAlloc = allocSize;
-    g_triPointerArray = (Triangle_t **)malloc((size_t)allocSize * 8);
+    g_triPointerArray = (Triangle_t **)malloc((size_t)allocSize * sizeof(Triangle_t *));
     if (!g_triPointerArray)
-        ErrorMsg("Couldn't allocate %i bytes for triangle refs\n",
-                 (long long)allocSize * 8);
+        ErrorMsg("Couldn't allocate %zu bytes for triangle refs\n",
+                 (size_t)allocSize * sizeof(Triangle_t *));
 
     /* assert node count fits */
     Assert(g_numBSPNodes <= 0x40000, s_assertDisable_SetupBSP_nodes);
 
     /* allocate BSP node array: 0x600000 bytes for 0x40000 nodes */
-    g_bspNodeData = (BSPCollisionNode_t *)malloc(0x600000);
+    g_bspNodeData = (BSPCollisionNode_t *)malloc(0x40000 * sizeof(BSPCollisionNode_t));
     if (!g_bspNodeData)
         ErrorMsg("Couldn't allocate %i bytes for internal bsp nodes\n", 0x600000);
 
     /* allocate BSP leaf array: 0x200008 bytes */
-    g_bspLeafData = (BSPCollisionLeaf_t *)malloc(0x200008);
+    g_bspLeafData = (BSPCollisionLeaf_t *)malloc(0x40001 * sizeof(BSPCollisionLeaf_t));
     if (!g_bspLeafData)
         ErrorMsg("Couldn't allocate %i bytes for internal bsp leafs\n", 0x200008);
 
@@ -2060,9 +2046,9 @@ void InitGeometry(void)
 
     /* reallocate to actual used size */
     g_bspNodeData = (BSPCollisionNode_t *)realloc(
-        g_bspNodeData, g_bspNodeCount * 24);
+        g_bspNodeData, g_bspNodeCount * sizeof(BSPCollisionNode_t));
     g_bspLeafData = (BSPCollisionLeaf_t *)realloc(
-        g_bspLeafData, g_bspLeafCount * 8);
+        g_bspLeafData, g_bspLeafCount * sizeof(BSPCollisionLeaf_t));
 
     /* world bounds from BSP root node (node 0) — stored as INTEGERS, convert to float via cvtsi2ss */
     {
@@ -2174,13 +2160,13 @@ int ComputeLinearMappingForTriangle(Triangle_t *tri, void *outMapping)
         lmMatrix = g_modelBoundsData[materialRef];
 
         /* transform tangent through lightmap matrix */
-        MatrixTransformDirection(lmMatrix, &g_vertData[vi].tangent, &tangentXform[i]);
+        MatrixTransformDirection(lmMatrix, g_vertData[vi].tangent, tangentXform[i]);
 
         /* transform binormal through lightmap matrix */
-        MatrixTransformDirection(lmMatrix, &g_vertData[vi].binormal, &binormalXform[i]);
+        MatrixTransformDirection(lmMatrix, g_vertData[vi].binormal, binormalXform[i]);
 
         /* transform normal through lightmap matrix */
-        MatrixTransformDirection(lmMatrix, &g_vertData[vi].normal, &normalXform[i]);
+        MatrixTransformDirection(lmMatrix, g_vertData[vi].normal, normalXform[i]);
     }
 
     /* build the linear mapping from scaled UV coordinates */

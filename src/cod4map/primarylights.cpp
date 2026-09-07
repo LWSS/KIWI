@@ -104,7 +104,7 @@ typedef struct PrimaryLightSurfaceAabbNode_s {
   int                childCount;
 } PrimaryLightSurfaceAabbNode_t;
 typedef char primarylight_surfaceaabbnode_size_must_be_0x28[
-    sizeof(PrimaryLightSurfaceAabbNode_t) == 0x28 ? 1 : -1];
+    sizeof(PrimaryLightSurfaceAabbNode_t) == COD4MAP_NATIVE_LAYOUT(0x28, 0x38) ? 1 : -1];
 static PrimaryLightSurfaceAabbNode_t *s_primaryLightSurfaceAabbNodes;
 
 /* Native 0x434550/0x4344F0 K-DOP payload.  0x4360A0 owns allocation and
@@ -136,7 +136,7 @@ typedef struct PrimaryLightRegionOutput_s {
   PrimaryLightKdopHull_t *hulls[8];
 } PrimaryLightRegionOutput_t;
 typedef char primarylight_regionoutput_size_must_be_0x24[
-    sizeof(PrimaryLightRegionOutput_t) == 0x24 ? 1 : -1];
+    sizeof(PrimaryLightRegionOutput_t) == COD4MAP_NATIVE_LAYOUT(0x24, 0x48) ? 1 : -1];
 static PrimaryLightRegionOutput_t s_primaryLightRegionOutput[MAX_MAP_PRIMARY_LIGHTS];
 
 /* Native 0x432D90.  The first non-sentinel primary light is the sun when
@@ -769,7 +769,7 @@ typedef struct PrimaryLightGridContext_s {
   MapDrawSurf_t *lastBlockingSurface[MAX_MAP_PRIMARY_LIGHTS]; /* [0x128] */
 } PrimaryLightGridContext_t;
 typedef char primarylight_gridcontext_size_must_be_0x524[
-    sizeof(PrimaryLightGridContext_t) == 0x524 ? 1 : -1];
+    sizeof(PrimaryLightGridContext_t) == COD4MAP_NATIVE_LAYOUT(0x524, 0x928) ? 1 : -1];
 
 static void AssignPrimaryLightsToGridCell(float logArea, float *centroid,
                                           float *coords, int vertCount,

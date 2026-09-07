@@ -129,7 +129,7 @@ void ClusterMerge(int leafnum)
   char portalvector[MAX_MAP_LEAFS / 8];                                  /* leaf bits  — leafbytes */
   /* KIWI FIX (AUDIT_cod4map finding 13): this buffer holds the PORTAL bitvector (memset and
      OR'd for portalbytes), so it must be sized from the portal cap, not MAX_MAP_LEAFS. */
-  uintptr_t uncompressed[MAX_VIS_PORTALBYTES / sizeof(uintptr_t)];       /* portal bits — portalbytes */
+  uint32_t uncompressed[MAX_VIS_PORTALBYTES / sizeof(uint32_t)];       /* portal bits — portalbytes */
 
   /* resolve merged leaf chain */
   mergedLeafnum = leafnum;
@@ -149,7 +149,7 @@ void ClusterMerge(int leafnum)
       Com_Error("portal not done");
 
     for ( j = 0; j < visPortalLongs; j++ )
-      uncompressed[j] |= ((uintptr_t *)p->portalvis)[j];
+      uncompressed[j] |= ((uint32_t *)p->portalvis)[j];
 
     /* mark this portal as visible */
     pidx = (int)(p - visPortals);
@@ -243,7 +243,7 @@ void BuildPHS(void)
 
   for ( i = 0; i < portalclusters; i++ )
   {
-    pvsRow = (unsigned char *)(bspVisBytes + leafbytes * i);
+    pvsRow = (unsigned char *)(((BspVisibility_t *)bspVisBytes)->data + leafbytes * i);
     memcpy(phsBuf, pvsRow, leafbytes);
 
     /* for each bit set in PVS, OR in that cluster's PVS row */
@@ -258,7 +258,7 @@ void BuildPHS(void)
         cluster = bit + j * 8;
         if ( cluster >= portalclusters )
           Com_Error("Bad bit in PVS");
-        { unsigned int *srcRow = (unsigned int *)(bspVisBytes + leafbytes * cluster);
+        { unsigned int *srcRow = (unsigned int *)(((BspVisibility_t *)bspVisBytes)->data + leafbytes * cluster);
         for ( k = 0; k < leaflongs; k++ )
           phsBuf[k] |= srcRow[k];
         }
@@ -866,12 +866,95 @@ VisMain
 Vis stage entry point: parses args, loads BSP and portals, runs visibility computation
 ================
 */
+/* Visibility only changes one chunk. Do not decode lighting through donor
+   CoD2 structures or re-emit unrelated CoD4/extension chunks. */
+static BspFileHeader_t *Vis_LoadBsp(const char *path, size_t *fileSize)
+{
+  BspFileHeader_t *header;
+  int length = LoadFile((char *)path, (void **)&header);
+  size_t offset;
+  unsigned int i;
+  int visCount = 0;
+
+  if (length < 12)
+    Com_Error("Vis: invalid BSP header in %s", path);
+  if (header->magic != BSP_IDENT || header->version != BSP_VERSION)
+    Com_Error("Vis requires a PC CoD4 v22 BSP: %s", path);
+  if (header->chunkCount > BSP_CHUNK_LIMIT)
+    Com_Error("Vis: too many BSP chunks");
+  offset = 12 + sizeof(BspChunk_t) * header->chunkCount;
+  if (offset > (size_t)length)
+    Com_Error("Vis: truncated BSP directory");
+  for (i = 0; i < header->chunkCount; ++i)
+  {
+    if (offset > (size_t)length || header->chunks[i].length > (size_t)length - offset)
+      Com_Error("Vis: truncated BSP chunk %u", header->chunks[i].type);
+    if (header->chunks[i].type == LUMP_VISIBILITY)
+      ++visCount;
+    offset += ((size_t)header->chunks[i].length + 3) & ~(size_t)3;
+  }
+  if (visCount > 1 || (!visCount && header->chunkCount == BSP_CHUNK_LIMIT))
+    Com_Error("Vis: invalid visibility chunk directory");
+  *fileSize = (size_t)length;
+  return header;
+}
+
+static void Vis_WriteBsp(const char *path, const BspFileHeader_t *input, size_t inputSize)
+{
+  unsigned int i, count = input->chunkCount;
+  int hasVis = 0;
+  size_t inputOffset = 12 + sizeof(BspChunk_t) * input->chunkCount;
+  size_t outputOffset, outputSize;
+  BspFileHeader_t *output;
+  char tempPath[MAX_OS_PATH];
+  FILE *stream;
+
+  for (i = 0; i < count; ++i)
+    hasVis |= input->chunks[i].type == LUMP_VISIBILITY;
+  if (!hasVis)
+    ++count;
+  outputOffset = 12 + sizeof(BspChunk_t) * count;
+  outputSize = outputOffset + inputSize + (size_t)numBSPVisBytes + 3;
+  output = (BspFileHeader_t *)calloc(1, outputSize);
+  if (!output)
+    Com_Error("Vis: unable to allocate output BSP (%zu bytes)", outputSize);
+  output->magic = BSP_IDENT;
+  output->version = BSP_VERSION;
+  output->chunkCount = count;
+  for (i = 0; i < count; ++i)
+  {
+    int replaceVis = i == input->chunkCount || input->chunks[i].type == LUMP_VISIBILITY;
+    size_t length = replaceVis ? (size_t)numBSPVisBytes : input->chunks[i].length;
+    output->chunks[i].type = replaceVis ? LUMP_VISIBILITY : input->chunks[i].type;
+    output->chunks[i].length = (uint32_t)length;
+    memcpy((byte *)output + outputOffset,
+           replaceVis ? bspVisBytes : (const byte *)input + inputOffset, length);
+    outputOffset += (length + 3) & ~(size_t)3;
+    if (i < input->chunkCount)
+      inputOffset += ((size_t)input->chunks[i].length + 3) & ~(size_t)3;
+  }
+  if (snprintf(tempPath, sizeof(tempPath), "%s.vis.tmp", path) >= sizeof(tempPath))
+    Com_Error("Vis: output path too long");
+  stream = fopen(tempPath, "wb");
+  if (!stream)
+    Com_Error("Vis: cannot write %s", tempPath);
+  if (fwrite(output, 1, outputOffset, stream) != outputOffset)
+    Com_Error("Vis: failed writing %s", tempPath);
+  if (fclose(stream))
+    Com_Error("Vis: failed closing %s", tempPath);
+  if (!MoveFileExA(tempPath, path, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+    Com_Error("Vis: cannot replace %s (error %lu)", path, GetLastError());
+  free(output);
+}
+
 int VisMain( int argc, char **argv )
 {
   int i, j, activePortals;
   double startTime;
   char prtPath[MAX_OS_PATH];
   char bspPath[MAX_OS_PATH];
+  BspFileHeader_t *inputBsp;
+  size_t inputBspSize;
 
   Com_Printf( "---- vis ----\n" );
 
@@ -949,8 +1032,9 @@ int VisMain( int argc, char **argv )
   StripExtension( bspPath );
   strcat( bspPath, GetBSPFileExtension() );
   Com_Printf( "reading %s\n", bspPath );
-  LoadBSPFile( bspPath );
-  ParseEntities();
+  if (g_targetPlatform->platformId != PLATFORM_PC)
+    Com_Error("Vis operates on PC BSP files; convert platforms separately");
+  inputBsp = Vis_LoadBsp(bspPath, &inputBspSize);
 
   /* load the portal file */
   sprintf( prtPath, "%s%s", visTmpDir, ExpandArg( argv[i] ) );
@@ -982,7 +1066,8 @@ int VisMain( int argc, char **argv )
   /* write output */
   Com_Printf( "writing %s\n", bspPath );
   Assert( g_targetPlatform, s_assertDisable_VisMain );
-  WriteBSPFile( bspPath, g_targetPlatform->bigEndian );
+  Vis_WriteBsp(bspPath, inputBsp, inputBspSize);
+  free(inputBsp);
   Com_Printf( "%5.2f seconds elapsed\n", I_FloatTime() - startTime );
   return 0;
 }

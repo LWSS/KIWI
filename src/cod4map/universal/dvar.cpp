@@ -196,13 +196,13 @@ void Dvar_MakeExplicitType(
 
   if (type != DVAR_TYPE_STRING && Dvar_ShouldFreeCurrentString(dvar))
     Dvar_FreeString(&dvar->current);
-  dvar->current.integer = 0;
+  dvar->current.string = NULL;
   if (Dvar_ShouldFreeLatchedString(dvar))
     Dvar_FreeString(&dvar->latched);
-  dvar->latched.integer = 0;
+  dvar->latched.string = NULL;
   if (Dvar_ShouldFreeResetString(dvar))
     Dvar_FreeString(&dvar->reset);
-  dvar->reset.integer = 0;
+  dvar->reset.string = NULL;
 
   Dvar_UpdateResetValue(dvar, resetValue);
   Dvar_UpdateValue(dvar, value);
@@ -227,14 +227,14 @@ void Dvar_FreeCurrentValue(Dvar_t *dvar)
   str = (char *)dvar->current.string;
   if ( str == (char *)dvar->latched.string || str == (char *)dvar->reset.string )
   {
-    dvar->current.integer = 0;
+    dvar->current.string = NULL;
   }
   else
   {
     firstCh = *str;
     if ( *str && (str[1] || firstCh < '0' || firstCh > '9') && str != g_dvarStringOff && str != g_dvarStringOn )
       Z_Free(str);
-    dvar->current.integer = 0;
+    dvar->current.string = NULL;
   }
 }
 
@@ -253,14 +253,14 @@ void Dvar_FreeLatchedValue(Dvar_t *dvar)
   str = (char *)dvar->latched.string;
   if ( str == (char *)dvar->current.string || str == (char *)dvar->reset.string )
   {
-    dvar->latched.integer = 0;
+    dvar->latched.string = NULL;
   }
   else
   {
     firstCh = *str;
     if ( *str && (str[1] || firstCh < '0' || firstCh > '9') && str != g_dvarStringOff && str != g_dvarStringOn )
       Z_Free(str);
-    dvar->latched.integer = 0;
+    dvar->latched.string = NULL;
   }
 }
 
@@ -279,14 +279,14 @@ void Dvar_FreeResetValue(Dvar_t *dvar)
   str = (char *)dvar->reset.string;
   if ( str == (char *)dvar->current.string || str == (char *)dvar->latched.string )
   {
-    dvar->reset.integer = 0;
+    dvar->reset.string = NULL;
   }
   else
   {
     firstCh = *str;
     if ( *str && (str[1] || firstCh < '0' || firstCh > '9') && str != g_dvarStringOff && str != g_dvarStringOn )
       Z_Free(str);
-    dvar->reset.integer = 0;
+    dvar->reset.string = NULL;
   }
 }
 
@@ -825,23 +825,23 @@ char *Dvar_AllocNameString(const char *name)
 
 bool Dvar_ShouldFreeCurrentString(const Dvar_t *dvar)
 {
-  return dvar->current.integer
-      && dvar->current.integer != dvar->latched.integer
-      && dvar->current.integer != dvar->reset.integer;
+  return dvar->current.string
+      && dvar->current.string != dvar->latched.string
+      && dvar->current.string != dvar->reset.string;
 }
 
 bool Dvar_ShouldFreeLatchedString(const Dvar_t *dvar)
 {
-  return dvar->latched.integer
-      && dvar->latched.integer != dvar->current.integer
-      && dvar->latched.integer != dvar->reset.integer;
+  return dvar->latched.string
+      && dvar->latched.string != dvar->current.string
+      && dvar->latched.string != dvar->reset.string;
 }
 
 bool Dvar_ShouldFreeResetString(const Dvar_t *dvar)
 {
-  return dvar->reset.integer
-      && dvar->reset.integer != dvar->current.integer
-      && dvar->reset.integer != dvar->latched.integer;
+  return dvar->reset.string
+      && dvar->reset.string != dvar->current.string
+      && dvar->reset.string != dvar->latched.string;
 }
 
 void Dvar_FreeString(DvarValue_t *value)
@@ -853,7 +853,7 @@ void Dvar_FreeString(DvarValue_t *value)
   {
     Z_Free(string);
   }
-  value->integer = 0;
+  value->string = NULL;
 }
 
 void Dvar_Shutdown(void)
@@ -868,15 +868,15 @@ void Dvar_Shutdown(void)
       if (Dvar_ShouldFreeCurrentString(dvar))
         Dvar_FreeString(&dvar->current);
       else
-        dvar->current.integer = 0;
+        dvar->current.string = NULL;
       if (Dvar_ShouldFreeResetString(dvar))
         Dvar_FreeString(&dvar->reset);
       else
-        dvar->reset.integer = 0;
+        dvar->reset.string = NULL;
       if (Dvar_ShouldFreeLatchedString(dvar))
         Dvar_FreeString(&dvar->latched);
       else
-        dvar->latched.integer = 0;
+        dvar->latched.string = NULL;
     }
     if ( dvar->flags & DVAR_EXTERNAL )
       Dvar_FreeNameString(dvar->name);
@@ -1240,7 +1240,7 @@ void Dvar_SetLatchedValue(Dvar_t *dvar, DvarValue_t value)
       dvar->latched = value;
       break;
     case DVAR_TYPE_STRING:
-      if (dvar->latched.integer != value.integer)
+      if (dvar->latched.string != value.string)
       {
         DvarValue_t oldString = {};
         const bool shouldFree = Dvar_ShouldFreeLatchedString(dvar);
@@ -1366,7 +1366,7 @@ void Dvar_SetVariant(Dvar_t *dvar, DvarValue_t value, DvarSetSource_t source)
       break;
     case DVAR_TYPE_STRING:
       Assert(dvar->name, s_assertDisable_Dvar_SetVariant);
-      Assert(value.integer != dvar->current.integer || value.integer == dvar->latched.integer || value.integer == dvar->reset.integer, s_assertDisable_Dvar_SetVariant);
+      Assert(value.string != dvar->current.string || value.string == dvar->latched.string || value.string == dvar->reset.string, s_assertDisable_Dvar_SetVariant);
       shouldFreeString = Dvar_ShouldFreeCurrentString(dvar);
       if (shouldFreeString)
         oldString = dvar->current;
@@ -1374,7 +1374,7 @@ void Dvar_SetVariant(Dvar_t *dvar, DvarValue_t value, DvarSetSource_t source)
       dvar->current = currentString;
       if (Dvar_ShouldFreeLatchedString(dvar))
         Dvar_FreeString(&dvar->latched);
-      dvar->latched.integer = 0;
+      dvar->latched.string = NULL;
       dvar->latched.string = dvar->current.string;
       if (shouldFreeString)
         Dvar_FreeString(&oldString);
@@ -1388,9 +1388,8 @@ void Dvar_SetVariant(Dvar_t *dvar, DvarValue_t value, DvarSetSource_t source)
   }
 }
 
-/* Transitional call adapters for pre-audit registration code below.  They
- * preserve the native by-value carrier at the API boundary while that later
- * registration cluster is audited separately. */
+/* Adapt the scalar setter wrappers below to the inline value carrier.
+ * String pointers must retain all address bits. */
 static DvarValue_t Dvar_LegacyValue(const Dvar_t *dvar, intptr_t value)
 {
   DvarValue_t result = {};
@@ -1399,6 +1398,10 @@ static DvarValue_t Dvar_LegacyValue(const Dvar_t *dvar, intptr_t value)
     const float *vector = (const float *)value;
     for (int i = 0; i < dvar->type; ++i)
       result.vector[i] = vector[i];
+  }
+  else if (dvar->type == DVAR_TYPE_STRING)
+  {
+    result.string = (const char *)value;
   }
   else
   {
@@ -1412,38 +1415,7 @@ static void Dvar_SetVariantLegacy(Dvar_t *dvar, intptr_t value, DvarSetSource_t 
   Dvar_SetVariant(dvar, Dvar_LegacyValue(dvar, value), source);
 }
 
-static void Dvar_SetLatchedValueLegacy(Dvar_t *dvar, intptr_t value)
-{
-  Dvar_SetLatchedValue(dvar, Dvar_LegacyValue(dvar, value));
-}
-
-static void Dvar_UpdateResetValueLegacy(Dvar_t *dvar, intptr_t value)
-{
-  Dvar_UpdateResetValue(dvar, Dvar_LegacyValue(dvar, value));
-}
-
-static bool Dvar_ValuesEqualLegacy(unsigned char type, float *val0, float *val1)
-{
-  DvarValue_t first = {}, second = {};
-  if (type == DVAR_TYPE_VEC2 || type == DVAR_TYPE_VEC3 || type == DVAR_TYPE_VEC4)
-  {
-    for (int i = 0; i < type; ++i)
-    {
-      first.vector[i] = val0[i];
-      second.vector[i] = val1[i];
-    }
-  }
-  else
-  {
-    first.integer = (int)(intptr_t)val0;
-    second.integer = (int)(intptr_t)val1;
-  }
-  return Dvar_ValuesEqual(type, first, second);
-}
-
 #define Dvar_SetVariant(dvar, value, source) Dvar_SetVariantLegacy((dvar), (intptr_t)(value), (source))
-#define Dvar_SetLatchedValue(dvar, value) Dvar_SetLatchedValueLegacy((dvar), (intptr_t)(value))
-#define Dvar_ValuesEqual(type, val0, val1) Dvar_ValuesEqualLegacy((type), (val0), (val1))
 
 /*
 ================
@@ -1498,11 +1470,11 @@ void Dvar_PerformUnregistration(Dvar_t *dvar)
     dvar->current.string = Dvar_CopyString(latchedStr);
     if (Dvar_ShouldFreeLatchedString(dvar))
       Dvar_FreeString(&dvar->latched);
-    dvar->latched.integer = 0;
+    dvar->latched.string = NULL;
     dvar->latched.string = dvar->current.string;
     if (Dvar_ShouldFreeResetString(dvar))
       Dvar_FreeString(&dvar->reset);
-    dvar->reset.integer = 0;
+    dvar->reset.string = NULL;
     resetStr = Dvar_DisplayableResetValue(dvar);
     DvarValue_t resetValue = {};
     Dvar_AssignResetStringValue(dvar, &resetValue, resetStr);
@@ -1563,7 +1535,7 @@ void Dvar_UpdateResetValue(Dvar_t *dvar, DvarValue_t value)
       dvar->reset = value;
       break;
     case DVAR_TYPE_STRING:
-      if (dvar->reset.integer != value.integer)
+      if (dvar->reset.string != value.string)
       {
         DvarValue_t oldString = {};
         const bool shouldFree = Dvar_ShouldFreeResetString(dvar);
@@ -1582,7 +1554,6 @@ void Dvar_UpdateResetValue(Dvar_t *dvar, DvarValue_t value)
   }
 }
 
-#define Dvar_UpdateResetValue(dvar, value) Dvar_UpdateResetValueLegacy((dvar), (intptr_t)(value))
 
 /*
 ================
@@ -1629,7 +1600,7 @@ void Dvar_UpdateValue(Dvar_t *dvar, DvarValue_t value)
         dvar->current = currentString;
         if (Dvar_ShouldFreeLatchedString(dvar))
           Dvar_FreeString(&dvar->latched);
-        dvar->latched.integer = 0;
+        dvar->latched.string = NULL;
         dvar->latched.string = dvar->current.string;
         if (shouldFreeCurrentString)
           Dvar_FreeString(&oldString);
@@ -1640,178 +1611,6 @@ void Dvar_UpdateValue(Dvar_t *dvar, DvarValue_t value)
       dvar->latched = value;
       break;
   }
-}
-
-static void Dvar_UpdateValueLegacy(Dvar_t *dvar, intptr_t value)
-{
-  Dvar_UpdateValue(dvar, Dvar_LegacyValue(dvar, value));
-}
-
-/*
-================
-Dvar_ReRegisterVariant
-
-Re-registers a dvar with a new type, converting from string and setting up new values.
-================
-*/
-static int Dvar_MakeExplicitTypeLegacy(Dvar_t *dvar, int type, unsigned short flags, intptr_t value, int domainMin, float domainMax)
-{
-  union { int i; float f; } udomMin;
-  udomMin.i = domainMin;
-  unsigned char oldType;
-  float *clampedValue;
-  intptr_t resetValue;
-  float *resultValue;
-  unsigned char newType;
-  int *vecMem;
-  int vecSize;
-  int *vecLatched;
-  int result;
-
-  oldType = dvar->type;
-  Assert(!(oldType != DVAR_TYPE_STRING), s_assertDisable_Dvar_ReRegisterVariant);
-  dvar->type = (unsigned char)type;
-  dvar->domain.integer.min = domainMin;
-  dvar->domain.value.max = domainMax;
-  if ( (flags & DVAR_ROM) != 0 || (flags & DVAR_CHEAT) != 0 && dvar_cheats && !dvar_cheats->current.enabled )
-  {
-    resetValue = value;
-    resultValue = (float *)value;
-  }
-  else
-  {
-    DvarValue_t parsedValue = {};
-    Dvar_StringToValue(&parsedValue, (unsigned char)type, dvar->domain, dvar->current.string);
-    DvarValue_t requestedValue = Dvar_LegacyValue(dvar, value);
-    DvarValue_t clampedCarrier = {};
-    resetValue = value;
-    Dvar_ClampValueToDomain(&clampedCarrier, (unsigned char)type, parsedValue, requestedValue, dvar->domain);
-    resultValue = (type == DVAR_TYPE_VEC2 || type == DVAR_TYPE_VEC3 || type == DVAR_TYPE_VEC4)
-        ? clampedCarrier.vector
-        : (float *)(intptr_t)clampedCarrier.integer;
-  }
-  if ( dvar->type != DVAR_TYPE_STRING )
-    Dvar_FreeCurrentValue(dvar);
-  Dvar_FreeLatchedValue(dvar);
-  Dvar_FreeResetValue(dvar);
-  newType = dvar->type;
-  if ( newType == DVAR_TYPE_VEC2 || newType == DVAR_TYPE_VEC3 || newType == DVAR_TYPE_VEC4 )
-  {
-    vecMem = Z_Malloc( 3 * sizeof(int) * newType );
-    vecSize = dvar->type;
-    dvar->current.integer = (intptr_t)vecMem;
-    vecLatched = &vecMem[vecSize];
-    dvar->latched.integer = (intptr_t)vecLatched;
-    dvar->reset.integer = (intptr_t)&vecLatched[vecSize];
-  }
-  Dvar_UpdateResetValue(dvar, resetValue);
-  Dvar_UpdateValueLegacy(dvar, (intptr_t)resultValue);
-  result = flags | dvar_modifiedFlags;
-  dvar_modifiedFlags = result;
-  return result;
-}
-
-/*
-================
-Dvar_ReRegister
-
-Re-registers an external dvar with new type and flags, converting from string storage.
-================
-*/
-static unsigned short Dvar_ReinterpretDvarLegacy(Dvar_t *dvar, const char *dvarName, int type, unsigned short flags, char *value, int domainMin, float domainMax)
-{
-  unsigned short result;
-  short dvarFlags;
-  char *resetValue;
-  DvarValue_t parsedReset;
-  DvarLimits_t domain;
-
-  result = dvar->flags;
-  if ( (result & DVAR_EXTERNAL) != 0 && (flags & DVAR_EXTERNAL) == 0 )
-  {
-    Assert(!((result & DVAR_SYS_MASK) != DVAR_EXTERNAL), s_assertDisable_Dvar_ReRegisterVariant);
-    dvarFlags = dvar->flags;
-    if ( dvarFlags >= 0 || (flags & DVAR_SERVERINFO_NOUPDATE) == 0 || (dvarFlags & (DVAR_INIT | DVAR_ROM | DVAR_CHEAT)) != 0 )
-      resetValue = value;
-    else
-    {
-      domain.integer.min = domainMin;
-      domain.value.max = domainMax;
-      Dvar_StringToValue(&parsedReset, (unsigned char)type, domain, dvar->reset.string);
-      resetValue = (type == DVAR_TYPE_VEC2 || type == DVAR_TYPE_VEC3 || type == DVAR_TYPE_VEC4)
-          ? (char *)parsedReset.vector
-          : (char *)(intptr_t)parsedReset.integer;
-    }
-    Dvar_PerformUnregistration(dvar);
-    Z_Free((void *)dvar->name);
-    dvar->flags &= ~DVAR_EXTERNAL;
-    dvar->name = dvarName;
-    return Dvar_MakeExplicitTypeLegacy(dvar, type, flags, (intptr_t)resetValue, domainMin, domainMax);
-  }
-  return result;
-}
-
-/*
-================
-Dvar_RegisterVariant
-
-Registers or updates an existing dvar with the given type, flags, and reset value.
-================
-*/
-static void Dvar_ReregisterLegacy(Dvar_t *dvar, const char *dvarName, int type, unsigned short flags, char *resetValue, int domainMin, float domainMax)
-{
-  int ar;
-  unsigned char dvarType;
-  char *msg;
-  bool isEnum;
-  unsigned char curType;
-  float *resetPtr;
-  char *resetDisplay;
-  char *valueStr;
-
-  Assert(dvar, s_assertDisable_Dvar_RegisterVariant);
-  Assert(dvarName, s_assertDisable_Dvar_RegisterVariant);
-  dvarType = dvar->type;
-  Assert(dvarType == (unsigned char)type || (dvar->flags & DVAR_EXTERNAL), s_assertDisable_Dvar_RegisterVariant);
-  if ( (((flags >> 8) ^ (dvar->flags >> 8)) & (DVAR_INIT | DVAR_LATCH | DVAR_ROM)) != 0 )
-  {
-    Dvar_ReinterpretDvarLegacy(dvar, dvarName, type, flags, resetValue, domainMin, domainMax);
-    if ( (flags & DVAR_EXTERNAL) == 0 && (flags & DVAR_CHANGEABLE_RESET) != 0 && (dvar->flags & DVAR_CHANGEABLE_RESET) == 0 )
-    {
-      isEnum = dvar->type == DVAR_TYPE_ENUM;
-      dvar->name = dvarName;
-      if ( isEnum )
-      {
-        dvar->domain.integer.min = domainMin;
-        dvar->domain.value.max = domainMax;
-      }
-    }
-  }
-  if ( (dvar->flags & DVAR_EXTERNAL) == 0 || (curType = dvar->type, curType == (unsigned char)type) )
-  {
-    resetPtr = (float *)resetValue;
-  }
-  else
-  {
-    Assert(curType == DVAR_TYPE_STRING, s_assertDisable_Dvar_RegisterVariant);
-    resetPtr = (float *)resetValue;
-    Dvar_MakeExplicitTypeLegacy(dvar, type, flags, (intptr_t)resetValue, domainMin, domainMax);
-  }
-  Assert(dvar->type == (unsigned char)type, s_assertDisable_Dvar_RegisterVariant);
-  #define DVAR_SKIP_RESET_CHECK  0x8600  /* CHANGEABLE_RESET | SAVED | AUTOEXEC */
-  DvarValue_t requestedReset = Dvar_LegacyValue(dvar, (intptr_t)resetValue);
-  Assert(
-      (dvar->flags & DVAR_SKIP_RESET_CHECK)
-          || (Dvar_ValuesEqual)((unsigned char)type, dvar->reset, requestedReset),
-      s_assertDisable_Dvar_RegisterVariant);
-  dvar->flags |= flags;
-  if ( (dvar->flags & DVAR_CHEAT) && dvar_cheats && !dvar_cheats->current.enabled )
-  {
-    Dvar_SetVariant(dvar, dvar->reset.integer, DVAR_SOURCE_INTERNAL);
-    Dvar_SetLatchedValue(dvar, dvar->reset.integer);
-  }
-  if ( (dvar->flags & DVAR_LATCH) != 0 )
-    Dvar_SetVariant(dvar, dvar->latched.integer, DVAR_SOURCE_INTERNAL);
 }
 
 /*
@@ -2027,6 +1826,10 @@ Dvar_t *Dvar_FindOrRegisterVariant(short flags, char *dvarName, int type, char *
     for (int component = 0; component < type; ++component)
       nativeValue.vector[component] = vector[component];
   }
+  else if (type == DVAR_TYPE_STRING)
+  {
+    nativeValue.string = value;
+  }
   else
   {
     nativeValue.integer = (int)(intptr_t)value;
@@ -2195,8 +1998,8 @@ void Dvar_SetVec2FromSource(Dvar_t *dvar, float x, float y, DvarSetSource_t sour
 
   Assert( dvar, s_assertDisable_Dvar_SetVec2 );
   Assert( dvar->name, s_assertDisable_Dvar_SetVec2 );
-  Assert(!(dvar->type != DVAR_TYPE_VEC4 && (dvar->type != DVAR_TYPE_STRING || (dvar->flags & DVAR_EXTERNAL) == 0)), s_assertDisable_Dvar_SetVec2);
-  if ( dvar->type == DVAR_TYPE_VEC4 )
+  Assert(!(dvar->type != DVAR_TYPE_VEC2 && (dvar->type != DVAR_TYPE_STRING || (dvar->flags & DVAR_EXTERNAL) == 0)), s_assertDisable_Dvar_SetVec2);
+  if ( dvar->type == DVAR_TYPE_VEC2 )
   {
     vecBuf[0] = x;
     vecBuf[1] = y;

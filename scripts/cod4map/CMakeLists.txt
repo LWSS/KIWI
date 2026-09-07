@@ -1,6 +1,6 @@
 message("----- KIWI cod4map -----")
 
-project(KIWI-cod4map)
+project(KIWI-cod4map LANGUAGES C ASM_MASM)
 
 include(cod4map_files.cmake)
 
@@ -11,13 +11,14 @@ set(COD4MAP_C_SOURCES ${COD4MAP_SOURCES})
 list(FILTER COD4MAP_C_SOURCES INCLUDE REGEX "\\.cpp$")
 set_source_files_properties(${COD4MAP_C_SOURCES} PROPERTIES LANGUAGE C)
 
-if(NOT CMAKE_SIZEOF_VOID_P EQUAL 4)
-    message(FATAL_ERROR "KIWI-cod4map currently requires an x86/Win32 build")
+if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
+    message(FATAL_ERROR "KIWI-cod4map is an x64 tool; configure with -A x64")
 endif()
 
 add_executable(${PROJECT_NAME}
     ${COD4MAP_SOURCES}
     ${COD4MAP_ZLIB}
+    ${COD4MAP_ASM_SOURCES}
 )
 
 target_compile_definitions(${PROJECT_NAME} PRIVATE
@@ -32,15 +33,14 @@ string(REPLACE "/RTC1" "" CMAKE_C_FLAGS_DEBUG   "${CMAKE_C_FLAGS_DEBUG}")
 string(REPLACE "/RTC1" "" CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG}")
 
 target_compile_options(${PROJECT_NAME} PRIVATE
-    /O2
-    /Ot
-    /Ob2
-    /Oi
-    /Oy
-    /fp:precise
-    /arch:IA32
-    /W3
-    /Z7
+    $<$<COMPILE_LANGUAGE:C,CXX>:/O2>
+    $<$<COMPILE_LANGUAGE:C,CXX>:/Ot>
+    $<$<COMPILE_LANGUAGE:C,CXX>:/Ob2>
+    $<$<COMPILE_LANGUAGE:C,CXX>:/Oi>
+    $<$<COMPILE_LANGUAGE:C,CXX>:/Oy>
+    $<$<COMPILE_LANGUAGE:C,CXX>:/fp:precise>
+    $<$<COMPILE_LANGUAGE:C,CXX>:/W3>
+    $<$<COMPILE_LANGUAGE:C,CXX>:/Z7>
 )
 
 set_property(TARGET ${PROJECT_NAME} PROPERTY
@@ -61,9 +61,11 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
 )
 
 target_link_options(${PROJECT_NAME} PRIVATE
-    /machine:x86
+    /machine:x64
+    # The large static compiler pools require a full link. Incremental Debug
+    # images can link successfully but fail Windows image validation at launch.
+    /INCREMENTAL:NO
     /STACK:8388608
-    /DYNAMICBASE:NO
     "$<$<CONFIG:Release>:/DEBUG>"
 )
 

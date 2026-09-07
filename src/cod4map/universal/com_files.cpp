@@ -161,42 +161,29 @@ char *FS_ReplacePlatformPath(char *path, char *searchStr, const char *replaceStr
 
   searchLen = (int)strlen(searchStr);
   pathLen = (int)strlen(path);
-  scanPtr = path + pathLen - 1;
-
-  if ( scanPtr == path )
+  if (!searchLen || !pathLen)
     return path;
 
-  /* scan backwards looking for searchStr */
-  do
+  /* An index keeps the empty path and the first character in bounds. */
+  for (pathLen--; pathLen >= 0; --pathLen)
   {
-    if ( !Q_stricmpn(scanPtr, searchStr, searchLen) )
-    {
-      /* find end of matched component (next '/' or '\\' or end) */
-      for ( afterMatch = scanPtr + searchLen; *afterMatch; afterMatch++ )
-      {
-        if ( *afterMatch == '/' || *afterMatch == '\\' )
-          break;
-      }
-
-      /* build replacement: prefix + replaceStr + suffix */
-      memset(tempBuf, 0, sizeof(tempBuf));
-      strncpy(tempBuf, path, scanPtr - path);
-      strcat(tempBuf, replaceStr);
-      strcat(tempBuf, afterMatch);
-
-      /* convert backslashes to forward slashes in basepath portion */
-      for ( i = 0; i < strlen(g_basePath); i++ )
-      {
-        if ( tempBuf[i] == '\\' )
-          tempBuf[i] = '/';
-      }
-
-      /* copy result back to path */
-      strcpy(path, tempBuf);
-    }
-    scanPtr--;
+    scanPtr = path + pathLen;
+    if (Q_stricmpn(scanPtr, searchStr, searchLen))
+      continue;
+    for (afterMatch = scanPtr + searchLen; *afterMatch; ++afterMatch)
+      if (*afterMatch == '/' || *afterMatch == '\\')
+        break;
+    if ((size_t)pathLen + strlen(replaceStr) + strlen(afterMatch) >= sizeof(tempBuf))
+      Com_Error("FS_ReplacePlatformPath: path too long");
+    memcpy(tempBuf, path, pathLen);
+    tempBuf[pathLen] = 0;
+    strcat(tempBuf, replaceStr);
+    strcat(tempBuf, afterMatch);
+    for (i = 0; tempBuf[i] && i < strlen(g_basePath); ++i)
+      if (tempBuf[i] == '\\')
+        tempBuf[i] = '/';
+    strcpy(path, tempBuf);
   }
-  while ( scanPtr != path );
 
   return path;
 }
@@ -1557,14 +1544,14 @@ static void FS_AddOwnedFileToList(char **result, int *numFiles, char **hunkPos,
   }
 
   copyLength = strlen(filename) + 1;
-  if ( *hunkPos + copyLength > hunkEnd )
+  if ( copyLength > (size_t)(hunkEnd - *hunkPos) )
     Com_ErrorLevel(0, "Hunk_UserAlloc: out of memory");
   memcpy(*hunkPos, filename, copyLength);
   result[(*numFiles)++] = *hunkPos;
   *hunkPos += copyLength;
 }
 
-int *FS_ListFilteredFiles(Searchpath_t *searchPaths, const char *path, char *extension, char *filter, int flags, int *numFilesOut)
+char **FS_ListFilteredFiles(Searchpath_t *searchPaths, const char *path, char *extension, char *filter, int flags, int *numFilesOut)
 {
   Searchpath_t *sp;
   Iwd_t *pak;
@@ -1610,18 +1597,19 @@ int *FS_ListFilteredFiles(Searchpath_t *searchPaths, const char *path, char *ext
 
   /*
    * Native 0x46A1D0 owns both the pointer list and its copied names through
-   * one 0x20000-byte HunkUser.  The word immediately before the returned
+   * one HunkUser (0x20000 bytes in the x86 reference). The slot before the returned
    * list is the owner pointer; callers of the engine API use that to release
    * the whole list as one allocation.  Keep the same externally visible
    * layout while this standalone compiler retains its hunk-user carrier
    * locally.
    */
-  hunkUser = Z_Malloc(0x20000);
+  /* Reserve pointer slots separately from the copied-name arena. */
+  hunkUser = Z_Malloc(32 + sizeof(void *) + 0x2000 * sizeof(char *) + 0x18000);
   result = (char **)((char *)hunkUser + 32);
   result[0] = (char *)hunkUser;
   ++result;
-  hunkPos = (char *)result + 0x8000;
-  hunkEnd = (char *)hunkUser + 0x20000;
+  hunkPos = (char *)(result + 0x2000);
+  hunkEnd = hunkPos + 0x18000;
   numFiles = 0;
 
   for ( sp = searchPaths; sp; sp = sp->next )
@@ -1698,14 +1686,14 @@ int *FS_ListFilteredFiles(Searchpath_t *searchPaths, const char *path, char *ext
     return 0;
   }
   result[numFiles] = 0;
-  return (int *)result;
+  return result;
 }
 
 /*
 ================
 FS_FreeFileList
 
-The filtered-list API returns the list one word past its 0x20000 arena owner.
+The filtered-list API stores its arena owner in the pointer slot before the list.
 The native free wrapper recovers and destroys that owner as a single unit.
 ================
 */
@@ -1722,11 +1710,11 @@ FS_ListFiles
 Builds filtered search path list and calls FS_ListFilteredFiles.
 ================
 */
-int *FS_ListFiles( const char *path, char *extension, char *filter, int flags, int *numFilesOut, int gameDirFlags )
+char **FS_ListFiles( const char *path, char *extension, char *filter, int flags, int *numFilesOut, int gameDirFlags )
 {
   Searchpath_t *sp, *head, *tail, *newNode, *next;
   char *dirName;
-  int *result;
+  char **result;
 
   /* build filtered search path list */
   head = NULL;

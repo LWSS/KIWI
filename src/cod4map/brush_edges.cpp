@@ -82,7 +82,7 @@ static BrushPoint_t *PopPointFormedByPlane(int planeIndex, BrushPoint_t **begin,
   if ( found == end )
     return NULL;
   point = *found;
-  memcpy(found, found + 1, sizeof(*found) * (end - found - 1));
+  memmove(found, found + 1, sizeof(BrushPoint_t *) * (end - found - 1));
   return point;
 }
 
@@ -358,7 +358,7 @@ static int RemovePointsWithInsufficientPlaneOccurrences(BrushPoint_t **points, i
     }
     else
     {
-      memcpy(&points[i], &points[i + 1], sizeof(*points) * (pointCount - i - 1));
+      memmove(&points[i], &points[i + 1], sizeof(BrushPoint_t *) * (pointCount - i - 1));
       --pointCount;
       i = 0;
     }
@@ -392,7 +392,7 @@ static int RemovePoint(BrushPoint_t **points, int pointCount, BrushPoint_t *poin
     ;
   if ( i == pointCount )
     return pointCount;
-  memcpy(&points[i], &points[i + 1], sizeof(*points) * (pointCount - i - 1));
+  memmove(&points[i], &points[i + 1], sizeof(BrushPoint_t *) * (pointCount - i - 1));
   --pointCount;
   return pointCount >= 3 ? RemovePointsWithInsufficientPlaneOccurrences(points, pointCount) : pointCount;
 }

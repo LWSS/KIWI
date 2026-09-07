@@ -869,7 +869,6 @@ void NormalizeLightTransfers(Sample_t *sample)
 }
 
 /* TraceSetup_and_Dispatch declared in cod2rad64.h — sub_40CDB0 */
-extern int TraceStaticModels(void *startPos, void *endPos);
 /* sqrtf is CRT (sub_43B200) */
 /* g_vertexData — view into g_vertData[0].lmCoord (stride sizeof(DrawVert_t)=0x44).
  * Binary uses raw byte indexing with stride 0x44 from unk_1270FCC4. */
@@ -1332,10 +1331,8 @@ extern void BuildLightTransfers(int threadCount);
 extern void Lighting_InitSamples(void);                                /* lighting_412350 */
 extern void BeginProgress(const char *msg);
 extern void EndProgress(void);
-extern void ForEachUsefulLightingSample(void (*func)(void *), int threadCount);
 extern void CalculateGroundLightingForAllStaticModels(void);
 /* malloc/free from <stdlib.h> */
-extern void Lighting_GetGatheredLight(void *sample, float *outColor);    /* lighting_412550 */
 extern void *g_lightDirArray;                                  /* qword_480A60 */
 extern int g_totalLightCount;                                  /* dword_480A48 */
 
@@ -1654,8 +1651,6 @@ area and neighbor distances. Used for the radiosity transfer
 radius computation.
 ================
 */
-extern void UniformPointsOnHemisphere(int count, float *dirs, int stride); /* com_math_428CF0 */
-extern float Vec2DistanceSq(float *a, float *b);                    /* sub_4291D0: distance between 2D points */
 /* sqrtf is from CRT (sub_43D3C0) */
 float g_invTraces;       /* native 0x407C48: 2.0 / g_traces */
 

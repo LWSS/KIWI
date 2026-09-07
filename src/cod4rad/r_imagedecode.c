@@ -563,7 +563,7 @@ int Image_ValidateHeader(void *fileData, char *path)
 
     return 1;
 }
-extern void *Z_Malloc(int size);                        /* com_memory_429EE0 */
+extern void *Z_Malloc(size_t size);                        /* com_memory_429EE0 */
 
 void Image_LoadIWI(const char *imageName, ImageDecodeState_t *dst)
 {

@@ -37,10 +37,10 @@ const char *ValueForKey(Entity_t *entity, const char *key)
     KeyValuePair_t *kv;
 
     /* assert: entity != NULL (line 0x2D) */
-    Assert("entity", ".\\mapio.cpp", 0x2D, 0, 1);
+    Assert(entity, 0);
 
     /* assert: key != NULL (line 0x2E) */
-    Assert("key", ".\\mapio.cpp", 0x2E, 0, 1);
+    Assert(key, 0);
 
     /* walk key-value list */
     kv = entity->keyValues;
@@ -108,10 +108,10 @@ Entity_t *FindEntityWithKeyValue(const char *key, const char *value)
         KeyValuePair_t *kv;
 
         /* assert: entity != NULL (line 0x2D) */
-        Assert("entity", ".\\mapio.cpp", 0x2D, 0, 1);
+        Assert(ent, 0);
 
         /* assert: key != NULL (line 0x2E) */
-        Assert("key", ".\\mapio.cpp", 0x2E, 0, 1);
+        Assert(key, 0);
 
         /* walk key-value list */
         kv = ent->keyValues;
@@ -141,7 +141,6 @@ Entity_t *FindEntityWithKeyValue(const char *key, const char *value)
 extern int atoi_wrap(const char *str);
 
 /* dword_1268FC80 = bspTriangles[] (bspfile.c), same static array */
-extern void AddTrianglesForSurface(void *tri, int modelIndex, float *transform); /* geometry_40BBE0 */
 
 void ProcessBrushModelTriangles(Entity_t *entity, const char *modelValue)
 {
@@ -232,7 +231,7 @@ void ProcessEntity(Entity_t *entity)
     else
     {
         /* assert: entity != NULL (line 0x2D) */
-        Assert("entity", ".\\mapio.cpp", 0x2D, 0, 1);
+        Assert(entity, 0);
 
         value = ValueForKey(entity, "radiosityScale");
         if (!value)
@@ -267,7 +266,7 @@ void ProcessEntity(Entity_t *entity)
     }
     else
     {
-        Assert("entity", ".\\mapio.cpp", 0x2D, 0, 1);
+        Assert(entity, 0);
 
         value = ValueForKey(entity, "contrastGain");
         if (!value)
@@ -298,7 +297,7 @@ void ProcessEntity(Entity_t *entity)
     /* Native worldspawn lighting setup recovered from cod4rad.exe. */
 
     /* sunlight (float intensity) */
-    Assert("entity", ".\\mapio.cpp", 0x2D, 0, 1);
+    Assert(entity, 0);
     float sunIntensity = 0.0f;
     value = ValueForKey(entity, "sunlight");
     if (value)
@@ -516,7 +515,6 @@ void ProcessEntity(Entity_t *entity)
                  * places redzones between them).  Generate into a real vec3
                  * and then publish the three components. */
                 float worldSunDir[3];
-                extern void AngleVectors(float *inDir, float *outGlobal, int a3, int a4);
                 AngleVectors(sunDir, worldSunDir, 0, 0);
                 g_sunDirX = worldSunDir[0];
                 g_sunDirY = worldSunDir[1];
@@ -574,7 +572,7 @@ void ProcessLightEntity(Entity_t *entity)
     KeyValuePair_t *kv;
 
     /* assert: entity != NULL (line 0x2D) */
-    Assert("entity", ".\\mapio.cpp", 0x2D, 0, 1);
+    Assert(entity, 0);
 
     /* parse origin (inline, 4 format tries) */
     {
@@ -813,7 +811,7 @@ void ProcessBrushModel(Entity_t *entity)
     float modelScale;
 
     /* assert: entity != NULL (line 0x2D) */
-    Assert("entity", ".\\mapio.cpp", 0x2D, 0, 1);
+    Assert(entity, 0);
 
     /* check spawnflags bit 1 — skip if set */
     spawnFlags = 0;
@@ -967,7 +965,7 @@ void GetEntityOriginAndAngles(Entity_t *entity, float *outTransform)
     KeyValuePair_t *kv;
 
     /* assert: entity != NULL (line 0x2D) */
-    Assert("entity", ".\\mapio.cpp", 0x2D, 0, 1);
+    Assert(entity, 0);
 
     /* look up "origin" key inline */
     originStr = NULL;
@@ -1053,13 +1051,13 @@ void ProcessEntities(Entity_t *entity)
     const char *modelValue;
 
     /* assert: entity != NULL (line 0x2D) */
-    Assert("entity", ".\\mapio.cpp", 0x2D, 0, 1);
+    Assert(entity, 0);
 
     /* look up classname */
     classname = ValueForKey(entity, "classname");
 
     /* assert: classname found (line 0x1A7) */
-    Assert("classname", ".\\mapio.cpp", 0x1A7, 0, 1);
+    Assert(classname, 0);
 
     /* dispatch based on classname */
     if (I_stricmp(classname, "worldspawn") == 0)

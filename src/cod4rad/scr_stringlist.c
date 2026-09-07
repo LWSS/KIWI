@@ -798,8 +798,6 @@ restart_entry:
     /* phase 2: re-allocate protected strings in fresh memory tree */
     {
         extern void *MT_AllocBitmap(void);
-        extern void MT_ReAllocFromBitmap(void *allocBits, unsigned int nodeNum, int numBytes); /* scr_memorytree_4217C0 */
-        extern void MT_FreeBitmapUnused(void *allocBits);
 
         void *allocBits = MT_AllocBitmap();
         Assert(allocBits, s_assertDisable_SL_Shutdown_sv);

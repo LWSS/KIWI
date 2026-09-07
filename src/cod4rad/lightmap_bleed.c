@@ -273,8 +273,9 @@ both primary (512) and secondary (1024, coords scaled by 2x) data.
 ================
 */
 void Lmap_FindBleeding_Callback(float unused, float *samplePos,
-                                int unused1, int unused2, int *lmapIdxPtr)
+                                int unused1, int unused2, void *userData)
 {
+    int *lmapIdxPtr = (int *)userData;
     int lmapIdx = *lmapIdxPtr;
 
     /* primary: 512x512, original coords */
@@ -354,18 +355,20 @@ reconstruct invalid coefficient texels and primary-light subsamples.
 */
 void Lmap_InitBilinearBleeding(int lmapCount, int threadCount)
 {
-    int allocSize;
+    size_t allocSize;
     void *data;
 
-    allocSize = lmapCount * 5 * (1 << 18);
-    data = malloc(allocSize);
+    if (lmapCount < 0)
+        ErrorMsg("Invalid lightmap count %i\n", lmapCount);
+    allocSize = (size_t)lmapCount * 5 * (1 << 18);
+    data = malloc(allocSize ? allocSize : 1);
     g_primaryBleedData = data;
     if (!data)
-        ErrorMsg("Out of memory trying to allocate lightmap bleed info (%i bytes)\n", allocSize);
+        ErrorMsg("Out of memory trying to allocate lightmap bleed info (%zu bytes)\n", allocSize);
 
-    memset_fast(g_primaryBleedData, 0, allocSize);
+    memset(g_primaryBleedData, 0, allocSize);
 
-    g_secondaryBleedData = (char *)g_primaryBleedData + lmapCount * (1 << 18);
+    g_secondaryBleedData = (char *)g_primaryBleedData + (size_t)lmapCount * (1 << 18);
 
     /* find bleeding for all lightmap pixels */
     ForEachLightmapPixelInPoly(Lmap_FindBleeding_Callback, 2, threadCount);

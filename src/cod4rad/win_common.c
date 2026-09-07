@@ -165,7 +165,7 @@ char **Sys_ListFiles(const char *directory, const char *extension, char *filter,
         listbuf[nfiles] = NULL;
         if (!nfiles)
             return NULL;
-        list = (char **)Z_Malloc(8 * nfiles + 8);
+        list = (char **)Z_Malloc(sizeof(char *) * (nfiles + 1));
         if (nfiles > 0)
             memmove(list, listbuf, 8 * nfiles);
         list[nfiles] = NULL;
@@ -238,7 +238,7 @@ char **Sys_ListFiles(const char *directory, const char *extension, char *filter,
     if (!nfiles)
         return NULL;
 
-    list = (char **)Z_Malloc(8 * nfiles + 8);
+    list = (char **)Z_Malloc(sizeof(char *) * (nfiles + 1));
     if (nfiles > 0)
         memmove(list, listbuf, 8 * nfiles);
     list[nfiles] = NULL;

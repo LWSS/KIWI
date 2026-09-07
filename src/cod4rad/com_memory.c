@@ -54,7 +54,7 @@ Z_Malloc
 Allocates zeroed memory via malloc. Asserts on failure.
 ================
 */
-void *Z_Malloc(int size)
+void *Z_Malloc(size_t size)
 {
     void *buf;
 
@@ -62,7 +62,7 @@ void *Z_Malloc(int size)
     if (!buf)
     {
         Assert(0, s_assertDisable_Z_Malloc);
-        Com_Printf("Z_Malloc: failed to allocate %d bytes\n", size);
+        Com_Printf("Z_Malloc: failed to allocate %zu bytes\n", size);
         Com_Error(0, "Z_Malloc: EXE_ERR_OUT_OF_MEMORY");
         return NULL;
     }
@@ -248,7 +248,7 @@ void *Hunk_AddDataForFile(int type, const char *name, void *data, void *(*alloca
     }
 
     /* allocate node: 8(data) + 8(next) + 1(type) + strlen + 1(null) = 18 + strlen */
-    node = (HunkDataNode_t *)allocator((int)strlen(name) + 18);
+    node = (HunkDataNode_t *)allocator((int)(offsetof(HunkDataNode_t, name) + strlen(name) + 1));
     if (!node)
         return NULL;
     node->data = data;

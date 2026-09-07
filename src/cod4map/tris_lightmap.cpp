@@ -2208,6 +2208,16 @@ Fixes T-junctions in shadow casters by subdividing into a 3D grid
 and processing each cell.
 ================
 */
+static void ShadowMid_CollectSurfaceEdges(TriSurf_t *surf)
+{
+  TJunc_ProcessSurface((WindingAuxPair_t *)&surf->winding);
+}
+
+static void ShadowMid_FixSurfaceEdges(TriSurf_t *surf)
+{
+  TjuncFixSurfaceEdges(surf);
+}
+
 int ShadowMid_FixTJunctions(void)
 {
   float dims[3], stepSize[3];
@@ -2247,8 +2257,8 @@ int ShadowMid_FixTJunctions(void)
         cellMins[0] = FMA1(g_smGridMins[0], (float)ix, stepSize[0]);
         cellMaxs[0] = cellMins[0] + stepSize[0];
 
-        GridTree_ForEach(cellMins, cellMaxs, TJunc_ProcessSurface);
-        GridTree_ForEach(cellMins, cellMaxs, TjuncFixSurfaceEdges);
+        GridTree_ForEach(cellMins, cellMaxs, ShadowMid_CollectSurfaceEdges);
+        GridTree_ForEach(cellMins, cellMaxs, ShadowMid_FixSurfaceEdges);
         TjuncReset();
       }
     }

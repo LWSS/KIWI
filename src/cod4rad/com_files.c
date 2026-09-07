@@ -297,7 +297,9 @@ Uses unzGetCurrentFileInfo API (same as cod2map).
 static int FS_ZipFileLength(void *zipHandle)
 {
     unz_file_info fi;
-    unzGetCurrentFileInfo(zipHandle, &fi, NULL, 0, NULL, 0, NULL, 0);
+    if (unzGetCurrentFileInfo(zipHandle, &fi, NULL, 0, NULL, 0, NULL, 0) != UNZ_OK
+        || fi.uncompressed_size > INT_MAX)
+        Com_Error(0, "Invalid or oversized IWD entry");
     return (int)fi.uncompressed_size;
 }
 
@@ -320,7 +322,7 @@ int FS_filelength(int f)
         Com_Error(0, "Filesystem call made without initialization");
 
     if (fsh[f].zipFile)
-        return *(int *)((char *)fsh[f].handleFile + 0x48); /* cached unz_s.cur_file_info.uncompressed_size */
+        return FS_ZipFileLength(fsh[f].handleFile);
 
     file = FS_FileForHandle(f);
     pos = ftell(file);
@@ -766,10 +768,10 @@ iwd_t *FS_LoadIwdFile(const char *zipPath, const char *basename)
     /* no null check — binary relies on unzGetGlobalInfo failing with NULL handle */
 
     {
-        int globalInfo[2];
-        if (unzGetGlobalInfo(uf, globalInfo))
+        unz_global_info globalInfo;
+        if (unzGetGlobalInfo(uf, &globalInfo))
             return NULL;
-        numFiles = (unsigned int)globalInfo[0];
+        numFiles = (unsigned int)globalInfo.number_entry;
     }
 
     g_totalIwdFiles += numFiles;

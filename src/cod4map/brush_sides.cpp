@@ -11,7 +11,7 @@ typedef struct BrushSideTreeNode_s {
 } BrushSideTreeNode_t;
 
 typedef char brush_side_tree_node_size_must_be_0x28[
-    sizeof(BrushSideTreeNode_t) == 0x28 ? 1 : -1];
+    sizeof(BrushSideTreeNode_t) == COD4MAP_NATIVE_LAYOUT(0x28, 0x38) ? 1 : -1];
 
 typedef struct BrushSideGlobals_s {
   unsigned char isTreeInitialized;

@@ -250,12 +250,10 @@ CollisionAabbTree_t *AddStaticModelCollision(int numTris, void *triData,
         CollisionAabbTree_t *dst = &result[i];
 
         /* assert: firstItem >= 0 (line 0xBA) */
-        Assert("treeNodes[nodeIndex].firstItem >= 0",
-               ".\\modelcollision.cpp", 0xBA, 0, 1);
+        Assert(src->firstItem >= 0, 0);
 
         /* assert: firstItem + itemCount <= numTris (line 0xBB) */
-        Assert("treeNodes[nodeIndex].firstItem + treeNodes[nodeIndex].itemCount <= numStaticModelCollisionTris",
-               ".\\modelcollision.cpp", 0xBB, 0, 1);
+        Assert(src->firstItem + src->itemCount <= numTris, 0);
 
         /* itemCount */
         dst->itemCount = src->itemCount;
@@ -289,7 +287,6 @@ extern CollisionMeshNode_t *g_collisionMeshList;  /* qword_630CC10 */
 /* DObjGetSurface, PlaneFromPoints — in cod2rad64.h */
 extern void ComputeBaryCoords(float *v0, float *v1, float *v2, float *plane,
                                float *outBary0, float *outBary1);
-extern void __security_check_cookie(void *cookie);
 
 /*
  * BuildStaticModelCollisionMesh — build collision mesh for a static model.
@@ -305,10 +302,14 @@ extern void __security_check_cookie(void *cookie);
 CollisionMeshNode_t *BuildStaticModelCollisionMesh(void *model)
 {
     CollisionMeshNode_t *mesh;
-    char dobj[0x100];           /* local DObj (large enough for stack DObj) */
-    char boneMats[0x10000];     /* bone matrices buffer */
+    DObj_t dobj;
+    BoneMatrix_t boneMats[DOBJ_MAX_PARTS];
+    union {
+        DSkel_t skel;
+        unsigned char storage[offsetof(DSkel_t, mat) + DOBJ_MAX_PARTS * sizeof(DObjAnimMat_t)];
+    } skelStorage;
     int partBits[4];
-    short surfMap[256];         /* surface map from DObjGetSurfaces */
+    unsigned short surfMap[256];         /* surface map from DObjGetSurfaces */
     unsigned short indices[0x8000]; /* index buffer for R_XSurfaceCopyIndices */
     float positions[0x8000 * 3]; /* deformed positions */
     float texcoords[0x8000 * 2]; /* deformed texcoords */
@@ -318,7 +319,7 @@ CollisionMeshNode_t *BuildStaticModelCollisionMesh(void *model)
     int i, j;
     void *surface;
     MaterialDef_t *material;
-    unsigned char lodBuf[256];
+    char lodBuf[256];
     void *triData;
     float *triMins;
     float *triMaxs;
@@ -328,7 +329,7 @@ CollisionMeshNode_t *BuildStaticModelCollisionMesh(void *model)
     /* allocate collision mesh node */
     mesh = (CollisionMeshNode_t *)malloc(sizeof(CollisionMeshNode_t));
     if (!mesh)
-        Com_Printf("Out of memory for model collision mesh node\n");
+        ErrorMsg("Out of memory for model collision mesh node\n");
 
     /* initialize mesh node */
     mesh->model = model;
@@ -344,43 +345,38 @@ CollisionMeshNode_t *BuildStaticModelCollisionMesh(void *model)
 
     /* create DObj from model */
     {
-        struct { void *model; void *boneName; int ignoreCollision; int pad; } dobjModel;
+        DObjModel_t dobjModel = {0};
         dobjModel.model = model;
         dobjModel.boneName = NULL;
         dobjModel.ignoreCollision = 0;
-        DObjCreate(&dobjModel, 1, 0, dobj, 0);
+        DObjCreate(&dobjModel, 1, NULL, &dobj, 0);
     }
 
     /* calculate skeleton */
-    DObjCreateSkel(dobj, boneMats, 0);
+    DObjCreateSkel(&dobj, &skelStorage.skel, 0);
 
     /* calculate animation with full partBits */
     partBits[0] = -1;
     partBits[1] = -1;
     partBits[2] = -1;
     partBits[3] = -1;
-    DObjCalcAnim(dobj, partBits);
-    DObjCalcSkel(dobj, partBits);
+    DObjCalcAnim(&dobj, partBits);
+    DObjCalcSkel(&dobj, partBits);
 
     /* get all surfaces */
     memset(lodBuf, 0, sizeof(lodBuf));
-    surfCount = DObjGetSurfaces(dobj, surfMap, partBits, lodBuf);
+    surfCount = DObjGetSurfaces(&dobj, surfMap, partBits, lodBuf);
 
-    /* get bone matrices for deformation — use separate buffer from skel */
-    {
-        char outMats[0x10000];
-        memset(outMats, 0, sizeof(outMats));
-        DObjGetMatrices(dobj, partBits, outMats); /* dobj_41C750 */
-        memcpy(boneMats, outMats, sizeof(outMats));
-    }
-
+    /* Keep the quaternion skeleton separate from the deformation matrices. */
+    memset(boneMats, 0, sizeof(boneMats));
+    DObjGetMatrices(&dobj, partBits, boneMats);
 
     /* first pass: count total tris and check materials */
     totalTris = 0;
     for (i = 0; i < surfCount; i++)
     {
         /* DObjGetSurfaceName returns material name string (DObj stores surfNames[subMatIdx] via SL_ConvertToString) */
-        const char *surfMatName = DObjGetSurfaceName(dobj, surfMap[i * 2], surfMap[i * 2 + 1], lodBuf[surfMap[i * 2]]);
+        const char *surfMatName = DObjGetSurfaceName(&dobj, surfMap[i * 2], surfMap[i * 2 + 1], lodBuf[surfMap[i * 2]]);
         material = LoadMaterial(surfMatName);
 
         /* Retail CoD4Rad sub_41A590 (0x41A6F7..0x41A71F) accepts a
@@ -396,7 +392,7 @@ CollisionMeshNode_t *BuildStaticModelCollisionMesh(void *model)
                 && !(material->surfaceFlags & SURF_NOCASTSHADOW))
             {
                 /* valid collision material */
-                surface = DObjGetSurface(dobj, surfMap[i * 2], surfMap[i * 2 + 1], 0);
+                surface = DObjGetSurface(&dobj, surfMap[i * 2], surfMap[i * 2 + 1], 0);
                 /* KIWI: the fixed stack buffers below hold 0x8000 indices /
                  * 0x8000 verts; an oversized surface silently smashed the
                  * stack (garbage verts, collvec scale assert). Skip it with a
@@ -428,13 +424,13 @@ CollisionMeshNode_t *BuildStaticModelCollisionMesh(void *model)
     /* allocate tri data: 0x50 (80) bytes per tri */
     triData = malloc((long long)totalTris * 0x50);
     if (!triData)
-        Com_Printf("Out of memory for model collision triangles: %i tris (%i bytes)\n",
+        ErrorMsg("Out of memory for model collision triangles: %i tris (%i bytes)\n",
                     totalTris, totalTris * 0x50);
 
     /* allocate mins/maxs: 3 floats each * totalTris * 2 (mins + maxs) */
     triMins = (float *)malloc((long long)totalTris * 2 * 3 * sizeof(float));
     if (!triMins)
-        Com_Printf("Out of memory for model collision triangle bounds: %i tris (%i bytes)\n",
+        ErrorMsg("Out of memory for model collision triangle bounds: %i tris (%i bytes)\n",
                     totalTris, totalTris * 2 * 3 * (int)sizeof(float));
 
     triMaxs = triMins + totalTris * 3;
@@ -447,7 +443,7 @@ CollisionMeshNode_t *BuildStaticModelCollisionMesh(void *model)
             continue;
 
         /* get surface with bone info */
-        surface = DObjGetSurface(dobj, surfMap[i * 2], surfMap[i * 2 + 1], 0);
+        surface = DObjGetSurface(&dobj, surfMap[i * 2], surfMap[i * 2 + 1], 0);
 
         /* copy indices (no offset) */
         R_XSurfaceCopyIndices(surface, indices, 0);
@@ -460,7 +456,7 @@ CollisionMeshNode_t *BuildStaticModelCollisionMesh(void *model)
             int lastIdx = numTris * 3;
 
             /* check for degenerate last tri (last 2 indices equal) */
-            if (indices[lastIdx - 3] == indices[lastIdx - 2])
+            if (numTris > 0 && indices[lastIdx - 3] == indices[lastIdx - 2])
                 numTris--;
 
             if (numTris > 0)
@@ -657,7 +653,6 @@ void CM_TraceBox(void *model, float *scale, ModelPlacement_t *placement,
  * If node is a leaf (childCount == 0), test each tri (itemCount items, 0x50 stride)
  * against the trace box.
  */
-extern int TestAlphaMask(void *collData, float *localTrace); /* geometry_40C070 */
 
 int TraceModelCollision_r(CollisionAabbTree_t *node, float *traceData)
 {
@@ -842,8 +837,7 @@ int TraceModelCollision_Node(int nodeIndex, float *start, float *end)
         }
 
         /* straddle: assert end != start on split axis (line 0x1E5) */
-        Assert("end[node->axis] - start[node->axis] != 0",
-               ".\\modelcollision.cpp", 0x1E5, 1, 1);
+        Assert(endVal - startVal != 0, 0);
 
         /* compute intersection t and midpoint */
         t = (splitPos - startVal) / (endVal - startVal);

@@ -495,7 +495,6 @@ void DObjCreateSkel(DObj_t *obj, DSkel_t *skel, int time)
     }
 }
 
-extern void DObjAnimMatToSkelMat(DObjAnimMat_t *mat, void *outMat); /* xanim_public_41B340 */
 
 /*
 ================
@@ -529,10 +528,10 @@ void DObjGetMatrices(DObj_t *obj, int *partBits, void *outMatrices)
     for (i = 0; i < boneCount; i++)
     {
         if (partBits[i >> 5] & bit)
-            DObjAnimMatToSkelMat(mat, outBuf);
+            DObjAnimMatToSkelMat(mat, (DObjSkelMat_t *)outBuf);
 
         mat++;
-        outBuf += sizeof(float[16]); /* 4x4 bone matrix = 64 bytes */
+        outBuf += sizeof(DObjSkelMat_t); /* 4x4 bone matrix = 64 bytes */
         /* rotate bit left by 1 (wraps from 0x80000000 back to 1 every 32 iterations) */
         bit = (bit << 1) | (bit >> 31);
     }
@@ -1344,7 +1343,7 @@ int DObjGetSurfaces(const DObj_t *obj, unsigned short *surfMap,
                 {
                     XModel_t *mdl = obj->models[m];
                     int mlod = (signed char)lods[m];
-                    XSurface_t *_surfs;
+                    XSurface_t **_surfs;
                     int *_pb;
                     int mNumSurfs = XModelGetSurfaces(mdl, &_surfs, mlod, &_pb);
                     Com_Printf("  model '%s' lod %i has %i surfaces\n",

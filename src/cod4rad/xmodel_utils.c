@@ -69,7 +69,7 @@ Access pattern (from LST):
   return lodInfo[lod].numsurfs          (short at model + lod*40 + 24)
 ================
 */
-int XModelGetSurfaces(const XModel_t *model, XSurface_t **surfaces,
+int XModelGetSurfaces(const XModel_t *model, XSurface_t ***surfaces,
                       int lod, int **partBits)
 {
     XModelSurfs_t *modelSurfs;

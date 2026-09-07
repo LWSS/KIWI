@@ -13,11 +13,11 @@ AssertStringTable_t *g_assertModuleList;
 
 const char g_assertFmtFuncFile[] = "%s\t\t...%s";
 const char g_assertFmtFuncFileLine[] = "%s\t\t...%s, line %i";
-const char g_assertFmtModule[] = { '%', 's', ':', '\t' };
+const char g_assertFmtModule[] = "%s:\t";
 const char g_assertFmtOOM[] = "Out of memory: filename '%s', line %d\n";
 const char g_assertFmtLineNumbers[] = "%i %x:%x %i %x:%x %i %x:%x %i %x:%x\r\n";
-const char g_assertFmtSymbol[] = "%x:%x %s %x";
-const char g_assertFmtSegment[] = "%x:%x %xH %s %s";
+const char g_assertFmtSymbol[] = "%x:%x %255s %llx";
+const char g_assertFmtSegment[] = "%x:%x %xH %255s %255s";
 
 char   Filename[MAX_PATH];
 char   g_assertActive;
@@ -28,7 +28,7 @@ char   g_assertMsgBuffer[MAXPRINTMSG];
 char   g_assertPad;
 char   g_assertParseFlag;
 int    g_assertsDisabled;
-char   Str = '\0';
+char Str[ASSERT_LINE_BUFSIZE];
 
 /* CoD4 0x401ED0. */
 int Assertive_MapParseError(const char *message)
@@ -262,7 +262,7 @@ module/function/file/line. Sets *hitMain=1 when WinMain/main
 reached (or unknown function). Returns bytes written.
 ================
 */
-int Assertive_FormatStackFrame(char *buffer, char *hitMain, unsigned int instrAddr)
+int Assertive_FormatStackFrame(char *buffer, char *hitMain, uintptr_t instrAddr)
 {
   AssertStringTable_t *module;
   AssertSymbolNode_t *bestNoLine = NULL, *bestWithLine = NULL, *iter;
@@ -433,7 +433,7 @@ char *Assertive_InternString(AssertStringTable_t *table, const char *str)
       return node->string;
 
   /* not found — allocate and insert */
-  { AssertHashNode_t *newNode = malloc(sizeof(*newNode));
+  { AssertHashNode_t *newNode = malloc(sizeof(AssertHashNode_t));
   node = newNode ? Assertive_AllocSymbol(newNode, str, hash, table->hashBuckets[bucket]) : NULL;
   table->hashBuckets[bucket] = node;
   if ( !node )
@@ -454,21 +454,22 @@ Returns 1 on success, 0 on parse error.
 */
 char Assertive_ParseMapFile(AssertStringTable_t *table, FILE *stream, uintptr_t moduleBase)
 {
-  unsigned int endAddr;
+  uintptr_t endAddr;
   char *lastSpace;
   AssertSymbolNode_t *newSym;
   char *openParen;
   char *closeParen;
   int fieldCount;
   AssertSymbolNode_t *lineNode;
-  char sep1, sep2, sep3, sep4;
-  int addrs[4];
+  unsigned int sep1, sep2, sep3, sep4;
+  unsigned int addrs[4];
   int lineNums[4];
-  int preferredLoadAddr;
+  unsigned long long preferredLoadAddr;
+  unsigned long long symbolAddress;
   char *internedFile;
-  int segOffset;
-  int segIndex;
-  int symAddr;
+  unsigned int segOffset;
+  unsigned int segIndex;
+  unsigned int symAddr;
   int i;
   char symName[MAX_OS_PATH];
   char fileName[MAX_OS_PATH];
@@ -477,116 +478,116 @@ char Assertive_ParseMapFile(AssertStringTable_t *table, FILE *stream, uintptr_t 
 
   /* find "Preferred load address" line */
   do {
-    if ( !fgets(&Str, ASSERT_LINE_BUFSIZE, stream) )
+    if ( !fgets(Str, ASSERT_LINE_BUFSIZE, stream) )
       goto error_unexpected_eof;
-  } while ( sscanf(&Str, " Preferred load address is %x\r\n", &preferredLoadAddr) != 1 );
+  } while ( sscanf(Str, " Preferred load address is %llx\r\n", &preferredLoadAddr) != 1 );
 
-  table->baseAddr = (unsigned int)moduleBase;
+  table->baseAddr = moduleBase;
 
   /* skip 2 header lines in segments section */
   for ( i = 0; i < 2; i++ ) {
-    if ( !fgets(&Str, ASSERT_LINE_BUFSIZE, stream) )
+    if ( !fgets(Str, ASSERT_LINE_BUFSIZE, stream) )
       goto error_unexpected_eof;
   }
 
   /* parse segments -- compute endAddr from segment sizes */
-  while ( fgets(&Str, ASSERT_LINE_BUFSIZE, stream) ) {
-    if ( !strcmp(&Str, "\r\n") )
+  while ( fgets(Str, ASSERT_LINE_BUFSIZE, stream) ) {
+    if ( !strcmp(Str, "\r\n") )
       break;
-    if ( sscanf(&Str, g_assertFmtSegment, &segIndex, &segOffset, &symAddr, symName, fileName) != 5 ) {
+    if ( sscanf(Str, g_assertFmtSegment, &segIndex, &segOffset, &symAddr, symName, fileName) != 5 ) {
       Assertive_MapParseError("Unknown line format in the segments section");
       return 0;
     }
     if ( segIndex == 1 ) {
-      endAddr = (unsigned int)(symAddr + segOffset + moduleBase + PE_PAGE_SIZE);
+      endAddr = moduleBase + PE_PAGE_SIZE + segOffset + symAddr;
       if ( table->endAddr < endAddr )
-        table->endAddr = (unsigned int)endAddr;
+        table->endAddr = endAddr;
     }
   }
 
   /* find "Publics by Value" section */
-  while ( fgets(&Str, ASSERT_LINE_BUFSIZE, stream) ) {
-    if ( strstr(&Str, "Publics by Value") )
+  while ( fgets(Str, ASSERT_LINE_BUFSIZE, stream) ) {
+    if ( strstr(Str, "Publics by Value") )
       break;
   }
   if ( feof(stream) )
     goto error_unexpected_eof;
 
   /* skip 1 header line */
-  if ( !fgets(&Str, ASSERT_LINE_BUFSIZE, stream) )
+  if ( !fgets(Str, ASSERT_LINE_BUFSIZE, stream) )
     goto error_unexpected_eof;
 
   /* parse public symbols */
-  while ( fgets(&Str, ASSERT_LINE_BUFSIZE, stream) ) {
-    if ( !strcmp(&Str, "\r\n") )
+  while ( fgets(Str, ASSERT_LINE_BUFSIZE, stream) ) {
+    if ( !strcmp(Str, "\r\n") )
       break;
-    if ( sscanf(&Str, g_assertFmtSymbol, &segIndex, &segOffset, symName, &symAddr) != 4 ) {
+    if ( sscanf(Str, g_assertFmtSymbol, &segIndex, &segOffset, symName, &symbolAddress) != 4 ) {
       Assertive_MapParseError("Unknown line format in the public symbols section");
       return 0;
     }
-    lastSpace = strrchr(&Str, ' ');
-    if ( !lastSpace || sscanf(lastSpace + 1, "%s", fileName) != 1 ) {
+    lastSpace = strrchr(Str, ' ');
+    if ( !lastSpace || sscanf(lastSpace + 1, "%255s", fileName) != 1 ) {
       Assertive_MapParseError("Couldn't parse file name in the public symbols section");
       return 0;
     }
-    newSym = malloc(sizeof(*newSym));
+    newSym = malloc(sizeof(AssertSymbolNode_t));
     if ( !newSym )
       Assertive_OutOfMemory(SRCFILE, __LINE__);
     newSym->next = table->symbolsNoLines;
     table->symbolsNoLines = newSym;
     newSym->name = Assertive_InternString(table, fileName);
-    newSym->address = (unsigned int)(moduleBase + symAddr - preferredLoadAddr);
+    newSym->address = moduleBase + (uintptr_t)(symbolAddress - preferredLoadAddr);
     newSym->file = Assertive_InternString(table, symName);
   }
 
   /* skip 2 lines after public symbols */
   for ( i = 0; i < 2; i++ ) {
-    if ( !fgets(&Str, ASSERT_LINE_BUFSIZE, stream) )
+    if ( !fgets(Str, ASSERT_LINE_BUFSIZE, stream) )
       goto error_unexpected_eof;
   }
 
   /* read next line -- check for static symbols section */
-  if ( !fgets(&Str, ASSERT_LINE_BUFSIZE, stream) )
+  if ( !fgets(Str, ASSERT_LINE_BUFSIZE, stream) )
     goto error_unexpected_eof;
 
-  if ( !strcmp(&Str, " Static symbols\r\n") ) {
+  if ( !strcmp(Str, " Static symbols\r\n") ) {
     /* skip 1 header line */
-    if ( !fgets(&Str, ASSERT_LINE_BUFSIZE, stream) )
+    if ( !fgets(Str, ASSERT_LINE_BUFSIZE, stream) )
       goto error_unexpected_eof;
 
     /* parse static symbols */
-    while ( fgets(&Str, ASSERT_LINE_BUFSIZE, stream) && Str && strcmp(&Str, "\r\n") ) {
-      if ( sscanf(&Str, g_assertFmtSymbol, &segIndex, &segOffset, symName, &symAddr) != 4 ) {
+    while ( fgets(Str, ASSERT_LINE_BUFSIZE, stream) && Str[0] && strcmp(Str, "\r\n") ) {
+      if ( sscanf(Str, g_assertFmtSymbol, &segIndex, &segOffset, symName, &symbolAddress) != 4 ) {
         Assertive_MapParseError("Unknown line format in the static symbols section");
         return 0;
       }
-      lastSpace = strrchr(&Str, ' ');
-      if ( !lastSpace || sscanf(lastSpace + 1, "%s", fileName) != 1 ) {
+      lastSpace = strrchr(Str, ' ');
+      if ( !lastSpace || sscanf(lastSpace + 1, "%255s", fileName) != 1 ) {
         Assertive_MapParseError("Couldn't parse file name in the static symbols section");
         return 0;
       }
-      newSym = malloc(sizeof(*newSym));
+      newSym = malloc(sizeof(AssertSymbolNode_t));
       if ( !newSym )
         Assertive_OutOfMemory(SRCFILE, __LINE__);
       newSym->next = table->symbolsNoLines;
       table->symbolsNoLines = newSym;
       newSym->name = Assertive_InternString(table, fileName);
-      newSym->address = symAddr;
+      newSym->address = moduleBase + (uintptr_t)(symbolAddress - preferredLoadAddr);
       newSym->file = Assertive_InternString(table, symName);
     }
   }
 
   /* parse line number sections */
   for ( ;; ) {
-    if ( !fgets(&Str, ASSERT_LINE_BUFSIZE, stream) )
+    if ( !fgets(Str, ASSERT_LINE_BUFSIZE, stream) )
       return 1;  /* end of file = success */
-    if ( strncmp(&Str, "Line numbers for ", 17) ) {
+    if ( strncmp(Str, "Line numbers for ", 17) ) {
       Assertive_MapParseError("Expected line number section");
       return 0;
     }
 
     /* extract source filename between '(' and ')' */
-    openParen = strchr(&Str, '(');
+    openParen = strchr(Str, '(');
     if ( !openParen ) {
       Assertive_MapParseError("Couldn't find '(' in line number section");
       return 0;
@@ -596,17 +597,19 @@ char Assertive_ParseMapFile(AssertStringTable_t *table, FILE *stream, uintptr_t 
       Assertive_MapParseError("Couldn't find ')' in line number section");
       return 0;
     }
-    strncpy(fileName, openParen + 1, closeParen - openParen - 1);
+    if ((size_t)(closeParen - openParen - 1) >= sizeof(fileName))
+      return 0;
+    memcpy(fileName, openParen + 1, closeParen - openParen - 1);
     fileName[closeParen - openParen - 1] = 0;
     internedFile = Assertive_InternString(table, fileName);
 
     /* skip 1 header line */
-    if ( !fgets(&Str, ASSERT_LINE_BUFSIZE, stream) )
+    if ( !fgets(Str, ASSERT_LINE_BUFSIZE, stream) )
       goto error_unexpected_eof;
 
     /* parse line number entries: up to 4 "linenum seg:addr" per line */
-    while ( fgets(&Str, ASSERT_LINE_BUFSIZE, stream) && Str && strcmp(&Str, "\r\n") ) {
-      fieldCount = sscanf(&Str, g_assertFmtLineNumbers,
+    while ( fgets(Str, ASSERT_LINE_BUFSIZE, stream) && Str[0] && strcmp(Str, "\r\n") ) {
+      fieldCount = sscanf(Str, g_assertFmtLineNumbers,
         &lineNums[0], &sep1, &addrs[0],
         &lineNums[1], &sep2, &addrs[1],
         &lineNums[2], &sep3, &addrs[2],
@@ -616,13 +619,13 @@ char Assertive_ParseMapFile(AssertStringTable_t *table, FILE *stream, uintptr_t 
         return 0;
       }
       for ( i = 0; i < fieldCount / 3; i++ ) {
-        lineNode = malloc(sizeof(*lineNode));
+        lineNode = malloc(sizeof(AssertSymbolNode_t));
         if ( !lineNode )
           Assertive_OutOfMemory(SRCFILE, __LINE__);
         lineNode->next = table->symbolsWithLines;
         table->symbolsWithLines = lineNode;
         lineNode->name = internedFile;
-        lineNode->address = (unsigned int)(addrs[i] + moduleBase + PE_PAGE_SIZE);
+        lineNode->address = moduleBase + PE_PAGE_SIZE + addrs[i];
         lineNode->lineNum = lineNums[i];
       }
     }
@@ -691,10 +694,10 @@ void Assertive_LoadMapFiles(char *exeDir)
       continue;
 
     /* allocate and zero-init a new AssertStringTable_t */
-    newTable = malloc(sizeof(*newTable));
+    newTable = malloc(sizeof(AssertStringTable_t));
     if ( !newTable )
       Assertive_OutOfMemory(SRCFILE, __LINE__);
-    memset(newTable, 0, sizeof(*newTable));
+    memset(newTable, 0, sizeof(AssertStringTable_t));
 
     /* parse the .MAP file */
     if ( Assertive_ParseMapFile(newTable, mapFile, (uintptr_t)moduleHandle) ) {
@@ -721,35 +724,23 @@ Walk the stack via EBP chain, format each frame. Skips first skipFrames frames.
 Returns total bytes written to buffer.
 ================
 */
-/* ebpFrame_t */
-typedef struct ebpFrame_s {
-    struct ebpFrame_s *prev;       /* [0] saved EBP — previous frame */
-    unsigned int       returnAddr; /* [4] return address pushed by call */
-} ebpFrame_t;
-
 int Assertive_WalkStack(char *buffer, int maxFrames, int skipFrames)
 {
-  char *writePos;
-  int frameIdx;
-  ebpFrame_t *frame;
-  char hitMain;
-  int savedEbp; /* stack walk starts from this function's EBP */
+  void *frames[ASSERT_MAX_FRAMES];
+  unsigned short frameCount;
+  unsigned short i;
+  char *writePos = buffer;
 
-  Assertive_LoadMapFiles(g_fsBaseGame);
-  frame = (ebpFrame_t *)&savedEbp;
-  writePos = buffer;
-  frameIdx = 0;
-  for ( hitMain = 0; frameIdx < maxFrames + skipFrames; ++frameIdx )
-  {
-    unsigned int callAddr = frame->returnAddr - X86_CALL_INSTR_SIZE; /* back up past call instruction */
-    frame = frame->prev;
-    if ( frameIdx >= skipFrames )
-    {
-      writePos += Assertive_FormatStackFrame(writePos, &hitMain, callAddr);
-      if ( hitMain )
-        break;
-    }
-  }
+  if (maxFrames <= 0)
+    return 0;
+  if (maxFrames > ASSERT_MAX_FRAMES)
+    maxFrames = ASSERT_MAX_FRAMES;
+  if (skipFrames < 0)
+    skipFrames = 0;
+  /* Windows unwinds x64 frames from unwind metadata; there is no EBP chain. */
+  frameCount = CaptureStackBackTrace((DWORD)skipFrames + 1, (DWORD)maxFrames, frames, NULL);
+  for (i = 0; i < frameCount; ++i)
+    writePos += sprintf(writePos, "  %p\n", frames[i]);
   return (int)(writePos - buffer);
 }
 

@@ -296,7 +296,7 @@ typedef struct LayeredMaterialDescriptor_s
 } LayeredMaterialDescriptor_t;
 
 typedef char static_assert_layered_material_descriptor_size[
-  sizeof(LayeredMaterialDescriptor_t) == 104 ? 1 : -1];
+  sizeof(LayeredMaterialDescriptor_t) == COD4MAP_NATIVE_LAYOUT(104, 0x80) ? 1 : -1];
 
 #define MAX_LAYERED_MATERIAL_DESCRIPTORS 1224
 static LayeredMaterialDescriptor_t s_layeredMaterialDescriptors[MAX_LAYERED_MATERIAL_DESCRIPTORS];
@@ -2730,7 +2730,7 @@ typedef struct NativeDirectTriSortCarrier_s {
 } NativeDirectTriSortCarrier_t;
 
 typedef char static_assert_native_direct_tri_sort_carrier_size[
-  sizeof(NativeDirectTriSortCarrier_t) == 0x60 ? 1 : -1];
+  sizeof(NativeDirectTriSortCarrier_t) == COD4MAP_NATIVE_LAYOUT(0x60, 0x68) ? 1 : -1];
 
 static bool NativeDirectTriCarrierLess(const NativeDirectTriSortCarrier_t *left,
                                        const NativeDirectTriSortCarrier_t *right)
@@ -6655,11 +6655,13 @@ static int LayerCombineSortEntryCompare(const void *left, const void *right)
 {
   const LayerCombineSortEntry_t *a = (const LayerCombineSortEntry_t *)left;
   const LayerCombineSortEntry_t *b = (const LayerCombineSortEntry_t *)right;
-  intptr_t difference = a->sortedIndex[0] - b->sortedIndex[0];
-  if (difference) return difference;
-  difference = a->sortedIndex[1] - b->sortedIndex[1];
-  if (difference) return difference;
-  return a->sortedIndex[2] - b->sortedIndex[2];
+  int i;
+  for (i = 0; i < 3; ++i)
+  {
+    if (a->sortedIndex[i] != b->sortedIndex[i])
+      return a->sortedIndex[i] < b->sortedIndex[i] ? -1 : 1;
+  }
+  return 0;
 }
 
 /* 0x43DF00 generalized from two native record ranges to an explicit pointer
@@ -7406,9 +7408,7 @@ int EmitTriSurfForProps(Winding_t *winding, Tree_t *bspTree, TriSurfProps_t *mat
   double sumX, sumY, sumZ, invCount;
   int visResult, result;
 
-  /* surf_buf must be a contiguous struct — TesselateWinding accesses it
-     as a single 68-byte TriSurf_t starting from &surfData[0]. */
-  struct { intptr_t surfData[4]; float boundsMin[3]; float boundsMax[10]; } surf_buf;
+  TriSurf_t surf_buf;
 
   Assert(material, s_assertDisable_EmitTriSurfForProps);
   Assert(!material->coalesceChain, s_assertDisable_EmitTriSurfForProps);
@@ -7446,25 +7446,21 @@ int EmitTriSurfForProps(Winding_t *winding, Tree_t *bspTree, TriSurfProps_t *mat
     visResult = CELLNUM_UNKNOWN;
   }
 
-  /* build temporary triSurf for tesselation */
+  /* Use the native carrier instead of overlaying a recovered stack layout. */
   Assert(!trisTransientMode, s_assertDisable_EmitTriSurfForProps);
   trisTransientMode = 1;
-  surf_buf.surfData[0] = 0;
-  surf_buf.surfData[1] = (intptr_t)CopyWinding(winding);
-  surf_buf.surfData[2] = 0;
-  ((TriSurf_t *)surf_buf.surfData)->origWinding = winding;
-  surf_buf.surfData[3] = (intptr_t)material;
+  memset(&surf_buf, 0, sizeof(TriSurf_t));
+  surf_buf.winding = CopyWinding(winding);
+  surf_buf.origWinding = CopyWinding(winding);
+  surf_buf.props = material;
+  ClearBounds(surf_buf.mins, surf_buf.maxs);
+  for (i = 0; i < winding->numpoints; ++i)
+    AddPointToBounds(winding->points[i], surf_buf.mins, surf_buf.maxs);
 
-  /* compute winding bounds */
-  ClearBounds(surf_buf.boundsMin, surf_buf.boundsMax);
-  for ( i = 0; i < winding->numpoints; i++ )
-    AddPointToBounds(winding->points[i], surf_buf.boundsMin, surf_buf.boundsMax);
-
-  surf_buf.boundsMax[5] = 0.0;
-  surf_buf.boundsMax[4] = 0.0;
-  memset(&surf_buf.boundsMax[7], 0, 12);
-
-  result = TesselateWinding((TriSurf_t *)surf_buf.surfData, visResult, cellIndex, TriangulateSurf);
+  result = TesselateWinding(&surf_buf, visResult, cellIndex, TriangulateSurf);
+  FreeWinding(surf_buf.winding);
+  FreeWinding(surf_buf.origWinding);
+  free(surf_buf.auxData);
   trisTransientMode = 0;
   return result;
 }

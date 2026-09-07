@@ -1715,7 +1715,7 @@ Function Prototypes — com_math.c
 
 ------------------------------------------------------------------------------- */
 
-extern int CompareFunction(const float *a, const float *b);
+extern int CompareFunction(const void *a, const void *b);
 extern float Vec2DistanceSq(const float *a, const float *b);
 extern void Vec3Cross(const float *v1, const float *v2, float *out);
 extern float Vec3Normalize(float *vec);
@@ -1749,7 +1749,7 @@ Function Prototypes — com_memory.c
 
 extern void Z_FreeInternal(void *ptr);
 extern void Z_VirtualFree(void *ptr);
-extern void *Z_Malloc(int size);
+extern void *Z_Malloc(size_t size);
 extern void *Z_VirtualAlloc(int size);
 extern char *Z_StrDup(const char *string);
 extern void Hunk_FreeTempMemory(void *buf);
@@ -1878,11 +1878,11 @@ extern int ScoreTrianglesAgainstPlane(Triangle_t **triArray, int triCount, float
 extern void GatherLightingSampleWithLock(float area, float *samplePos,
                                          float *polyVerts, int vertCount,
                                          void *userData, int areaIndex);
-extern void SetLightingSampleAreas_Callback(int triIndex, int unused);
-extern void BuildLightTransfers_Callback(int triIndex, int unused);
+extern void SetLightingSampleAreas_Callback(unsigned int triIndex, unsigned int unused);
+extern void BuildLightTransfers_Callback(unsigned int triIndex, unsigned int unused);
 extern void SetLightingSampleAreas(int threadCount);
 extern void BuildLightTransfers(int threadCount);
-extern void ForEachLightmapPixel_Callback(int triIndex, int unused);
+extern void ForEachLightmapPixel_Callback(unsigned int triIndex, unsigned int unused);
 extern void ForEachLightmapPixelInPoly(void *callback, int param, int threadCount);
 extern void GramSchmidt(float *v);
 extern int FindBestAxisSplit(Triangle_t **triArray, int triCount, float *outPlane);
@@ -1949,7 +1949,7 @@ extern void Bleed_ScaleSampleX2_Secondary(float scale, void *data, int s, int t)
 extern void Bleed_ScaleSampleX2_Primary(float scale, void *data, int s, int t);
 extern void Bleed_AddWeightedSample_Secondary(void *srcData, int srcS, int srcT, float weight, void *dstData, int dstS, int dstT);
 extern void Bleed_AddWeightedSubSample_Primary(void *srcData, int srcS, int srcT, float weight, void *dstData, int dstS, int dstT);
-extern void Lmap_FindBleeding_Callback(float unused, float *samplePos, void *data1, void *data2, void *userData);
+extern void Lmap_FindBleeding_Callback(float unused, float *samplePos, int unused1, int unused2, void *userData);
 extern void Bleed_CopySampleX2_Secondary(void *srcData, int s, int t, void *dstData);
 extern void Lmap_InitBilinearBleeding(int lmapCount, int threadCount);
 extern void Lmap_ApplyBleeding(void *lmapData, int lmapIdx);
@@ -2131,12 +2131,12 @@ extern void DObjCreate(DObjModel_t *dobjModels, unsigned int numModels, struct X
 extern void DObjCreateSkel(DObj_t *obj, DSkel_t *skel, int time);
 extern void DObjGetMatrices(DObj_t *obj, int *partBits, void *outMatrices);
 extern XSurface_t *DObjGetSurface(const DObj_t *obj, int modelIndex, int surfIndex, int lod);
-extern const char *DObjGetSurfaceName(const DObj_t *obj, int modelIndex, int surfIndex, int lod);
+extern const char *DObjGetSurfaceName(const DObj_t *obj, int modelIndex, unsigned int subMatIndex, int lod);
 extern const char *DObjGetBoneName(const DObj_t *obj, int index);
 extern void DObjDumpInfo(const DObj_t *obj);
 extern void DObjCalcSkel(const DObj_t *obj, int *partBits);
 extern void DObjCalcAnim(const DObj_t *obj, int *partBits);
-extern int DObjGetSurfaces(const DObj_t *obj, unsigned short *surfMap, int maxSurfaces, int lod);
+extern int DObjGetSurfaces(const DObj_t *obj, unsigned short *surfMap, int *partBits, const char *lods);
 
 /* xanim_public.c — inlined helpers that MSVC emitted as standalone functions */
 extern void DObjAnimMatToAxis(const DObjAnimMat_t *mat, float axis[3][3]);
@@ -2187,7 +2187,7 @@ Function Prototypes — xmodel_utils.c
 
 extern XModel_t *XModelLoad(const char *name, void *(*alloc)(int), void *(*allocColl)(int));
 extern const char *XModelGetName(const XModel_t *model);
-extern int XModelGetSurfaces(const XModel_t *model, XSurface_t **surfaces, int lod, int **partBits);
+extern int XModelGetSurfaces(const XModel_t *model, XSurface_t ***surfaces, int lod, int **partBits);
 
 
 
@@ -2418,6 +2418,15 @@ Function Prototypes — misc externs (CRT thunks, assert)
 ------------------------------------------------------------------------------- */
 
 extern int AssertFailed(const char *expr, const char *file, int line, int skip, int type);
+/* These native records are also accessed by recovered byte-stride code. */
+typedef char cod4rad_pointer_size[(sizeof(void *) == 8) ? 1 : -1];
+typedef char cod4rad_lightmap_sample_size[(sizeof(LightmapSample_t) == 32) ? 1 : -1];
+typedef char cod4rad_bleed_sample_size[(sizeof(LmapSample_t) == 32) ? 1 : -1];
+typedef char cod4rad_sample_weight_offset[(offsetof(LightmapSample_t, weight) == 8) ? 1 : -1];
+typedef char cod4rad_collision_tri_size[(sizeof(CollisionTri_t) == 80) ? 1 : -1];
+typedef char cod4rad_draw_vert_size[(sizeof(DrawVert_t) == 68) ? 1 : -1];
+typedef char cod4rad_skel_matrix_size[(sizeof(DObjSkelMat_t) == 64) ? 1 : -1];
+
 /* 2-arg Assert used throughout source files: Assert(condition, disableFlag) */
 #define Assert(cond, disableFlag) \
     ((cond) || (disableFlag) ? (void)0 : (void)AssertFailed(#cond, __FILE__, __LINE__, 0, 1))

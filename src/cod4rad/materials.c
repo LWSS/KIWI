@@ -20,7 +20,7 @@ extern int LoadFile(const char *path, void **fileData);
 extern void FS_FreeFile(void *fileData);                                         /* com_files_427580 */
 extern int sprintf_wrap(char *buf, const char *fmt, ...);
 extern float FloatSwap(float v);
-extern void *Z_Malloc(int size);
+extern void *Z_Malloc(size_t size);
 extern void Z_FreeInternal(void *ptr);
 extern void memset_fast(void *dst, int val, int size);
 /* Image_LoadIWI — in cod2rad64.h */
