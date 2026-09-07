@@ -276,7 +276,7 @@ const char *svc_strings[256] =
 
 void __cdecl TRACK_cl_parse()
 {
-    track_static_alloc_internal(svc_strings, 1024, "svc_strings", 9);
+    track_static_alloc_internal(svc_strings, sizeof(svc_strings), "svc_strings", 9);
 }
 
 void __cdecl SHOWNET(msg_t *msg, char *s)
@@ -307,7 +307,7 @@ void __cdecl CL_ParsePacketEntities(clientActive_t *cl, msg_t *msg, clSnapshot_t
 
 void __cdecl CL_ParseSnapshot(msg_t *msg)
 {
-    memset(clients, 0, 0xB2F8u);
+    memset(&clients[0].snap, 0, sizeof(clSnapshot_t));
     clients[0].snap.serverCommandNum = clientConnections[0].serverCommands.header.sequence;
     clients[0].snap.serverTime = MSG_ReadLong(msg);
     clients[0].snap.messageNum = clientConnections[0].serverMessageSequence;
@@ -321,49 +321,39 @@ void __cdecl CL_ParseSnapshot(msg_t *msg)
     CL_ParsePacketEntities(clients, msg, &clients[0].snap);
     if (!clients[0].snap.valid)
         MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\client\\cl_parse.cpp", 128, 0, "%s", "cl->snap.valid");
-    memcpy(clients[0].snapshots, clients, sizeof(clients[0].snapshots));
+    clients[0].snapshots[0] = clients[0].snap;
     if (cl_shownet->current.integer == 3)
         Com_Printf(CON_CHANNEL_CLIENT, "   snapshot:%i\n", clients[0].snap.messageNum);
 }
 
 void __cdecl CL_ParseGamestate(char *configstrings)
 {
-    int v2; // r28
-    unsigned __int16 *v3; // r31
-    int v4; // r22
-    unsigned int v5; // r30
+    int configStringIndex;
+    uint16_t incoming;
 
-    if (!clientUIActives[0].isRunning)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\client\\cl_parse.cpp", 154, 0, "%s", "clUI->isRunning");
+    iassert(clientUIActives[0].isRunning);
     if (clientUIActives[0].cgameInitialized)
     {
         CG_SetTime(com_time);
         CL_SetFrametime(0, 0);
     }
-    v2 = 0;
-    v3 = clients[0].configstrings;
-    v4 = configstrings - (char *)clients[0].configstrings;
-    do
+    for (configStringIndex = 0; configStringIndex < MAX_CONFIGSTRINGS; ++configStringIndex)
     {
-        v5 = *(unsigned __int16 *)((char *)v3 + v4);
-        if (!*(unsigned __int16 *)((char *)v3 + v4))
-            MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\client\\cl_parse.cpp", 164, 0, "%s", "s");
-        if (*v3)
+        memcpy(&incoming, configstrings + configStringIndex * sizeof(uint16_t), sizeof(uint16_t));
+        iassert(incoming);
+        if (clients[0].configstrings[configStringIndex])
         {
-            if (v5 == *v3)
-                goto LABEL_15;
+            if (incoming == clients[0].configstrings[configStringIndex])
+                continue;
         }
-        else if (clientUIActives[0].cgameInitialized)
+        else
         {
-            MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\client\\cl_parse.cpp", 173, 0, "%s", "!clUI->cgameInitialized");
+            iassert(!clientUIActives[0].cgameInitialized);
         }
-        Scr_SetString(v3, v5);
+        Scr_SetString(&clients[0].configstrings[configStringIndex], incoming);
         if (clientUIActives[0].isLoadComplete)
-            CG_ConfigStringModifiedInternal(0, v2);
-    LABEL_15:
-        ++v3;
-        ++v2;
-    } while ((int)v3 < (int)clients[0].mapname);
+            CG_ConfigStringModifiedInternal(0, configStringIndex);
+    }
 }
 
 void __cdecl CL_ParseServerCommands(msg_t *msg)

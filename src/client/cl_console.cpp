@@ -96,7 +96,7 @@ const float con_outputBarSize = 10.0f;
 
 void __cdecl TRACK_cl_console()
 {
-    track_static_alloc_internal(&con, 84684, "con", 10);
+    track_static_alloc_internal(&con, sizeof(Console), "con", 10);
 }
 
 void __cdecl Con_ToggleConsole()
@@ -1659,9 +1659,6 @@ bool __cdecl Con_HasActiveAutoComplete()
 
 char __cdecl Con_CommitToAutoComplete()
 {
-    char v1; // [esp+13h] [ebp-11h]
-    char *buffer; // [esp+18h] [ebp-Ch]
-    ConDrawInputGlob *v3; // [esp+1Ch] [ebp-8h]
     const char *originalCommand; // [esp+20h] [ebp-4h]
 
     if (!Con_HasActiveAutoComplete())
@@ -1673,15 +1670,7 @@ char __cdecl Con_CommitToAutoComplete()
     }
     else
     {
-        v3 = &conDrawInputGlob;
-        buffer = g_consoleField.buffer;
-        do
-        {
-            v1 = v3->autoCompleteChoice[0];
-            *buffer = v3->autoCompleteChoice[0];
-            v3 = (ConDrawInputGlob *)((char *)v3 + 1);
-            ++buffer;
-        } while (v1);
+        I_strncpyz(g_consoleField.buffer, conDrawInputGlob.autoCompleteChoice, sizeof(g_consoleField.buffer));
     }
     Cmd_EndTokenizedString();
     g_consoleField.cursor = strlen(g_consoleField.buffer);
@@ -2313,7 +2302,7 @@ bool __cdecl Con_IsValidGameMessageWindow(uint windowIndex)
 bool __cdecl Con_IsGameMessageWindowActive(int localClientNum, uint windowIndex)
 {
     bcassert(windowIndex, GAMEMSG_WINDOW_COUNT); // 4
-    return SLODWORD(con.color[4630 * localClientNum - 2571 + 13 * windowIndex]) > 0;
+    return con.messageBuffer[localClientNum].gamemsgWindows[windowIndex].activeLineCount > 0;
 }
 
 void __cdecl Con_DrawSay(int localClientNum, int x, int y)
@@ -2714,7 +2703,7 @@ void __cdecl ConDrawInput_AutoCompleteArg(const char **stringList, int stringCou
         }
         if (matchCount)
         {
-            qsort(matches, matchCount, 4u, (int(__cdecl *)(const void *, const void *))ConDrawInput_CompareStrings);
+            qsort(matches, matchCount, sizeof(char *), (int(__cdecl *)(const void *, const void *))ConDrawInput_CompareStrings);
             consoleFont = cls.consoleFont;
             ArgChar = ConDrawInput_TextFieldFirstArgChar();
             x = (double)R_TextWidth(g_consoleField.buffer, ArgChar, consoleFont) + conDrawInputGlob.leftX - 6.0;

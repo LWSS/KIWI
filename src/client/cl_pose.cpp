@@ -13,28 +13,21 @@
 
 char *__cdecl CL_AllocSkelMemory(unsigned int size)
 {
+    clientActive_t *skelGlob = &clients[R_GetLocalClientNum()];
+    int skelMemPos;
+
     iassert(size);
-
-    // Align size to `SKEL_MEM_ALIGNMENT`
-    size = (size + (SKEL_MEM_ALIGNMENT - 1)) & ~(SKEL_MEM_ALIGNMENT - 1);
-
-    iassert(size <= CL_SKEL_MEMORY_SIZE - SKEL_MEM_ALIGNMENT);
-
-    clientActive_t *skel_glob = &clients[R_GetLocalClientNum()];
-
-    iassert(skel_glob->skelMemoryStart);
-
-    int skelMemPos = InterlockedExchangeAdd(&skel_glob->skelMemPos, size);
-
-    char *result = skel_glob->skelMemoryStart + skelMemPos;
-
-    if (!result || (size + skelMemPos > CL_SKEL_MEMORY_SIZE))
-    {
-        iassert(0);
+    if (!size || size > CL_SKEL_MEMORY_SIZE - SKEL_MEM_ALIGNMENT)
         return NULL;
-    }
+    size = (size + SKEL_MEM_ALIGNMENT - 1) & ~(SKEL_MEM_ALIGNMENT - 1);
+    iassert(skelGlob->skelMemoryStart);
+    if (!skelGlob->skelMemoryStart)
+        return NULL;
 
-    return result;
+    skelMemPos = InterlockedExchangeAdd(&skelGlob->skelMemPos, size);
+    if (skelMemPos < 0 || (uint)skelMemPos > CL_SKEL_MEMORY_SIZE - size)
+        return NULL;
+    return skelGlob->skelMemoryStart + skelMemPos;
 }
 
 int __cdecl CL_GetSkelTimeStamp()

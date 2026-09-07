@@ -274,7 +274,7 @@ void __cdecl Con_InitChannels()
 {
     uint channel; // [esp+0h] [ebp-4h]
 
-    memset((uint8_t *)&pcGlob, 0, 0x2100u);
+    memset(pcGlob.openChannels, 0, sizeof(pcGlob.openChannels));
     for (channel = 0; channel < 0x19; ++channel)
         Con_OpenChannel((char *)builtinChannels[channel], 0);
     pcGlob.openChannels[24].allowScript = 1;
@@ -380,53 +380,25 @@ void __cdecl Con_CloseChannelInternal(uint channel)
 #ifdef KISAK_SP
 void Con_SaveChannels(MemoryFile *memFile)
 {
-    int v2; // r10
-    PrintChannel *v3; // r11
-    int v4; // r29
-    PrintChannelGlob *v5; // r31
-    PrintChannelGlob *v6; // r11
-    int v7; // r9
-    int v8; // r30
-    _DWORD v9[16]; // [sp+50h] [-40h] BYREF
+    int channel;
+    int count = 0;
+    int length;
 
-    v2 = 0;
-    v3 = &pcGlob.openChannels[1];
-    do
+    for (channel = 0; channel < ARRAY_COUNT(pcGlob.openChannels); ++channel)
     {
-        if (v3[-1].name[0])
-            ++v2;
-        if (v3->name[0])
-            ++v2;
-        if (v3[1].name[0])
-            ++v2;
-        if (v3[2].name[0])
-            ++v2;
-        v3 += 4;
-    } while ((int)v3 < (int)((char *)&pcGlob.filters[1][0] + 1));
-    v9[0] = v2;
-    MemFile_WriteData(memFile, 4, v9);
-    v4 = 0;
-    v5 = &pcGlob;
-    do
+        if (pcGlob.openChannels[channel].name[0])
+            ++count;
+    }
+    MemFile_WriteData(memFile, sizeof(int), &count);
+    for (channel = 0; channel < ARRAY_COUNT(pcGlob.openChannels); ++channel)
     {
-        if (v5->openChannels[0].name[0])
-        {
-            v6 = v5;
-            do
-            {
-                v7 = (uint8_t)v6->openChannels[0].name[0];
-                v6 = (PrintChannelGlob *)((char *)v6 + 1);
-            } while (v7);
-            v9[0] = v4;
-            v8 = (char *)v6 - (char *)v5 - 1;
-            MemFile_WriteData(memFile, 4, v9);
-            v9[0] = v8;
-            MemFile_WriteData(memFile, 4, v9);
-            MemFile_WriteData(memFile, v8, v5);
-        }
-        v5 = (PrintChannelGlob *)((char *)v5 + 33);
-        ++v4;
-    } while ((int)v5 < (int)pcGlob.filters);
+        if (!pcGlob.openChannels[channel].name[0])
+            continue;
+        length = (int)strlen(pcGlob.openChannels[channel].name);
+        MemFile_WriteData(memFile, sizeof(int), &channel);
+        MemFile_WriteData(memFile, sizeof(int), &length);
+        MemFile_WriteData(memFile, length, pcGlob.openChannels[channel].name);
+    }
 }
 
 void Con_RestoreChannels(MemoryFile *memFile)

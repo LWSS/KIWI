@@ -10,24 +10,21 @@
 
 char *__cdecl CL_AllocSkelMemory(uint size)
 {
-    volatile uint *Addend; // [esp+0h] [ebp-Ch]
-    char *result; // [esp+4h] [ebp-8h]
-    int skelMemPos; // [esp+8h] [ebp-4h]
-    uint sizea; // [esp+14h] [ebp+8h]
+    clientActive_t *skelGlob = &clients[R_GetLocalClientNum()];
+    int skelMemPos;
 
     iassert(size);
-    sizea = (size + 15) & 0xFFFFFFF0;
-    if (sizea > 0x3FFF0)
-        MyAssertHandler(".\\client_mp\\cl_pose_mp.cpp", 33, 0, "%s", "size <= CL_SKEL_MEMORY_SIZE - SKEL_MEM_ALIGNMENT");
-    if (!clients[R_GetLocalClientNum()].skelMemoryStart)
-        MyAssertHandler(".\\client_mp\\cl_pose_mp.cpp", 35, 0, "%s", "skel_glob->skelMemoryStart");
-    Addend = &clients[R_GetLocalClientNum()].skelMemPos;
-    skelMemPos = InterlockedExchangeAdd(Addend, sizea);
-    result = &clients[R_GetLocalClientNum()].skelMemoryStart[skelMemPos];
-    if (sizea + skelMemPos > 0x3FFF0)
-        return 0;
-    iassert(result);
-    return result;
+    if (!size || size > 0x3FFF0)
+        return NULL;
+    size = (size + 16 - 1) & ~(16 - 1);
+    iassert(skelGlob->skelMemoryStart);
+    if (!skelGlob->skelMemoryStart)
+        return NULL;
+
+    skelMemPos = InterlockedExchangeAdd(&skelGlob->skelMemPos, size);
+    if (skelMemPos < 0 || (uint)skelMemPos > 0x3FFF0 - size)
+        return NULL;
+    return skelGlob->skelMemoryStart + skelMemPos;
 }
 
 int __cdecl CL_GetSkelTimeStamp()

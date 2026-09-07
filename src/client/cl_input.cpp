@@ -86,7 +86,7 @@ kbutton_t kb[29];
 
 void __cdecl TRACK_cl_input()
 {
-    track_static_alloc_internal(kb, 580, "kb", 10);
+    track_static_alloc_internal(kb, sizeof(kb), "kb", 10);
 }
 
 bool __cdecl IN_IsTempProneKeyActive()

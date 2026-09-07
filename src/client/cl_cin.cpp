@@ -65,7 +65,7 @@ void __cdecl SCR_StopCinematic(int localClientNum)
         {
             vassert((localClientNum) == 0, "%i not in [0, %i)", localClientNum, 1);
             clientUIActives[localClientNum].connectionState = CA_DISCONNECTED;
-            if (nextmap->current.integer)
+            if (nextmap->current.string[0])
             {
                 v1 = va("%s\n", nextmap->current.string);
                 Cbuf_AddText(0, v1);

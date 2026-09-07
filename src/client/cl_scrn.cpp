@@ -322,7 +322,6 @@ void __cdecl CL_CubemapShot_f()
     CubemapShot i; // r31
     DemoType DemoType; // r3
     CubemapShot v27; // r30
-    const char **v28; // r31
     const char *v29; // r3
     float v30; // [sp+50h] [-A0h] BYREF
     float v31; // [sp+54h] [-9Ch]
@@ -420,15 +419,11 @@ LABEL_20:
         if (v9)
             R_LightingFromCubemapShots(&v30);
 
-        v27 = CUBEMAPSHOT_RIGHT;
-        v28 = (const char **)&szShotName[0];
-        do
+        for (v27 = CUBEMAPSHOT_RIGHT; v27 < CUBEMAPSHOT_RIGHT + ARRAY_COUNT(szShotName); ++v27)
         {
-            v29 = va("env/%s%s.tga", v33, *v28);
-            R_SaveCubemapShot((char*)v29, v27, v10, v11);
-            ++v28;
-            ++v27;
-        } while ((int)v28 < (int)&szShotName[6]);
+            v29 = va("env/%s%s.tga", v33, szShotName[v27 - CUBEMAPSHOT_RIGHT]);
+            R_SaveCubemapShot((char *)v29, v27, v10, v11);
+        }
     }
     else
     {

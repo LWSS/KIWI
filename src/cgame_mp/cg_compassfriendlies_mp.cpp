@@ -15,8 +15,8 @@ CompassVehicle s_compassVehicles[1][8];
 
 void __cdecl TRACK_cg_compassfriendlies()
 {
-    track_static_alloc_internal(s_compassActors, 3072, "s_compassActors", 9);
-    track_static_alloc_internal(s_compassVehicles, 224, "s_compassVehicles", 9);
+    track_static_alloc_internal(s_compassActors, sizeof(s_compassActors), "s_compassActors", 9);
+    track_static_alloc_internal(s_compassVehicles, sizeof(s_compassVehicles), "s_compassVehicles", 9);
 }
 
 void __cdecl CG_ClearCompassPingData()

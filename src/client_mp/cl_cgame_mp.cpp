@@ -45,8 +45,8 @@ const float g_color_table[8][4]
 
 void __cdecl TRACK_cl_cgame()
 {
-    track_static_alloc_internal(bigConfigString, 0x2000, "bigConfigString", 9);
-    track_static_alloc_internal((void *)g_color_table, 128, "g_color_table", 10);
+    track_static_alloc_internal(bigConfigString, sizeof(bigConfigString), "bigConfigString", 9);
+    track_static_alloc_internal((void *)g_color_table, sizeof(g_color_table), "g_color_table", 10);
 }
 
 void __cdecl CL_GetScreenDimensions(int *width, int *height, float *aspect)
@@ -346,17 +346,17 @@ void __cdecl CL_ConfigstringModified(int localClientNum)
     const char *v1; // eax
     uint v2; // [esp+0h] [ebp-4Ch]
     clientActive_t *LocalClientGlobals; // [esp+24h] [ebp-28h]
-    uint8_t *oldGs; // [esp+28h] [ebp-24h]
+    gameState_t *oldGs; // [esp+28h] [ebp-24h]
     char *dup; // [esp+2Ch] [ebp-20h]
     int index; // [esp+3Ch] [ebp-10h]
     const char *s; // [esp+40h] [ebp-Ch]
     int i; // [esp+44h] [ebp-8h]
     const char *old; // [esp+48h] [ebp-4h]
 
-    LargeLocal oldGs_large_local(0x2262C);
+    LargeLocal oldGs_large_local(sizeof(gameState_t));
     //LargeLocal::LargeLocal(&oldGs_large_local, 140844);
     //oldGs = LargeLocal::GetBuf(&oldGs_large_local);
-    oldGs = oldGs_large_local.GetBuf();
+    oldGs = (gameState_t *)oldGs_large_local.GetBuf();
     v1 = Cmd_Argv(1);
     index = atoi(v1);
     if ((uint)index >= 2442)
@@ -366,7 +366,7 @@ void __cdecl CL_ConfigstringModified(int localClientNum)
     old = &LocalClientGlobals->gameState.stringData[LocalClientGlobals->gameState.stringOffsets[index]];
     if (strcmp(old, s))
     {
-        memcpy(oldGs, (uint8_t *)&LocalClientGlobals->gameState, 0x2262Cu);
+        memcpy(oldGs, &LocalClientGlobals->gameState, sizeof(gameState_t));
         memset((uint8_t *)&LocalClientGlobals->gameState, 0, sizeof(LocalClientGlobals->gameState));
         LocalClientGlobals->gameState.dataCount = 1;
         for (i = 0; i < 2442; ++i)
@@ -374,7 +374,7 @@ void __cdecl CL_ConfigstringModified(int localClientNum)
             if (i == index)
                 dup = (char *)s;
             else
-                dup = (char *)&oldGs[*(uint *)&oldGs[4 * i] + 9768];
+                dup = &oldGs->stringData[oldGs->stringOffsets[i]];
             if (*dup)
             {
                 v2 = strlen(dup);
@@ -781,7 +781,7 @@ void __cdecl CL_FirstSnapshot(int localClientNum)
         LocalClientGlobals->serverTime = LocalClientGlobals->snap.serverTime;
         clc->timeDemoBaseTime = LocalClientGlobals->snap.serverTime;
         Con_TimeJumped(localClientNum, LocalClientGlobals->serverTime);
-        if (*(_BYTE *)cl_activeAction->current.integer)
+        if (*cl_activeAction->current.string)
         {
             Cbuf_AddText(localClientNum, cl_activeAction->current.string);
             Cbuf_AddText(localClientNum, "\n");
@@ -855,7 +855,7 @@ void __cdecl CL_NextDemo(int localClientNum)
 {
     char v[1028]; // [esp+0h] [ebp-408h] BYREF
 
-    I_strncpyz(v, (char *)nextdemo->current.integer, 1024);
+    I_strncpyz(v, nextdemo->current.string, 1024);
     Com_DPrintf(CON_CHANNEL_CLIENT, "CL_NextDemo: %s\n", v);
     if (v[0])
     {

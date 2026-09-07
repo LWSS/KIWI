@@ -48,8 +48,8 @@ void __cdecl CL_SetLocalClientConnectionState(int localClientNum, connstate_t co
 
 void __cdecl TRACK_cl_cgame()
 {
-    track_static_alloc_internal(bigConfigString, 0x2000, "bigConfigString", 9);
-    track_static_alloc_internal((void *)g_color_table, 128, "g_color_table", 10);
+    track_static_alloc_internal(bigConfigString, sizeof(bigConfigString), "bigConfigString", 9);
+    track_static_alloc_internal((void *)g_color_table, sizeof(g_color_table), "g_color_table", 10);
 }
 
 void __cdecl CL_GetScreenDimensions(int *width, int *height, float *aspect)

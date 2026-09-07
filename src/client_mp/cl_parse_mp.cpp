@@ -35,7 +35,7 @@ constexpr size_t CLIENT_ARCHIVE_SIZE = 256;
 
 void __cdecl TRACK_cl_parse()
 {
-    track_static_alloc_internal(svc_strings, 1024, "svc_strings", 9);
+    track_static_alloc_internal(svc_strings, sizeof(svc_strings), "svc_strings", 9);
 }
 
 void __cdecl SHOWNET(msg_t *msg, const char *s)
@@ -960,7 +960,7 @@ void __cdecl CL_InitDownloads(int localClientNum)
     {
         if (strlen(cl_updatefiles->current.string) > 4)
         {
-            I_strncpyz(autoupdateFilename, (char *)cl_updatefiles->current.integer, 64);
+            I_strncpyz(autoupdateFilename, cl_updatefiles->current.string, 64);
             v1 = va("@%s/%s@%s/%s", dir, cl_updatefiles->current.string, dir, cl_updatefiles->current.string);
             I_strncpyz(cls.downloadList, v1, 1024);
             clientUIActives[localClientNum].connectionState = CA_CONNECTED;

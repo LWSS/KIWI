@@ -1161,12 +1161,12 @@ void __cdecl CG_RegisterDvars()
 
 void __cdecl TRACK_cg_main()
 {
-    track_static_alloc_internal(cgDC, 5752, "cgDC", 34);
-    track_static_alloc_internal(cgArray, 1045888, "cgArray", 9);
-    track_static_alloc_internal(cgsArray, 14884, "cgsArray", 9);
-    track_static_alloc_internal(cg_entitiesArray, 487424, "cg_entitiesArray", 9);
-    track_static_alloc_internal(cg_weaponsArray, 8704, "cg_weaponsArray", 9);
-    track_static_alloc_internal(cg_entityOriginArray, 12288, "cg_entityOriginArray", 9);
+    track_static_alloc_internal(cgDC, sizeof(cgDC), "cgDC", 34);
+    track_static_alloc_internal(cgArray, sizeof(cgArray), "cgArray", 9);
+    track_static_alloc_internal(cgsArray, sizeof(cgsArray), "cgsArray", 9);
+    track_static_alloc_internal(cg_entitiesArray, sizeof(cg_entitiesArray), "cg_entitiesArray", 9);
+    track_static_alloc_internal(cg_weaponsArray, sizeof(cg_weaponsArray), "cg_weaponsArray", 9);
+    track_static_alloc_internal(cg_entityOriginArray, sizeof(cg_entityOriginArray), "cg_entityOriginArray", 9);
 }
 
 void __cdecl CG_GetDObjOrientation(int localClientNum, int dobjHandle, mat3x3 &axis, float *origin)
@@ -1577,7 +1577,6 @@ void __cdecl CG_RestartSmokeGrenades(int localClientNum)
 {
     int eventIndex; // [esp+18h] [ebp-3Ch]
     snapshot_s *nextSnap; // [esp+20h] [ebp-34h]
-    int v3; // [esp+24h] [ebp-30h]
     int i; // [esp+2Ch] [ebp-28h]
     float axis[3][3]; // [esp+30h] [ebp-24h] BYREF
     const cg_s *cgameGlob;
@@ -1594,7 +1593,6 @@ void __cdecl CG_RestartSmokeGrenades(int localClientNum)
         nextSnap = cgameGlob->nextSnap;
         for (i = 0; i < nextSnap->numEntities; ++i)
         {
-            v3 = (int)&nextSnap->entities[i];
             if ((nextSnap->entities[i].lerp.eFlags & 0x10000) != 0
                 && nextSnap->entities[i].time2 >= cgameGlob->time
                 && nextSnap->entities[i].lerp.u.customExplode.startTime <= cgameGlob->time)
@@ -1608,16 +1606,16 @@ void __cdecl CG_RestartSmokeGrenades(int localClientNum)
                         "(es->eType == ET_GENERAL)",
                         nextSnap->entities[i].eType);
                 eventIndex = ((uint8_t)nextSnap->entities[i].eventSequence - 1) & 3;
-                if (*(int *)(v3 + 4 * eventIndex + 164) < 45 || *(int *)(v3 + 4 * eventIndex + 164) > 50)
+                if (nextSnap->entities[i].events[eventIndex] < 45 || nextSnap->entities[i].events[eventIndex] > 50)
                     MyAssertHandler(
                         ".\\cgame_mp\\cg_main_mp.cpp",
                         1586,
                         0,
                         "es->events[eventIndex] not in [EV_GRENADE_EXPLODE, EV_CUSTOM_EXPLODE_NOMARKS]\n\t%i not in [%i, %i]",
-                        *(_DWORD *)(v3 + 4 * eventIndex + 164),
+                        nextSnap->entities[i].events[eventIndex],
                         45,
                         50);
-                ByteToDir(*(_DWORD *)(v3 + 4 * eventIndex + 180), axis[0]);
+                ByteToDir(nextSnap->entities[i].eventParms[eventIndex], axis[0]);
                 Vec3Basis_RightHanded(axis[0], axis[1], axis[2]);
                 Com_Printf(
                     CON_CHANNEL_CLIENT,

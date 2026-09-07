@@ -165,7 +165,7 @@ void __cdecl CG_DrawSnapshotAnalysis(int localClientNum)
                     s_clientAnalysisData = cgameGlob->bitsSent[arrayFrameb];
                     for (fielda = 0; fielda < 13; ++fielda)
                         sortedSamples[fielda] = fielda;
-                    qsort(sortedSamples, 0xDu, 4u, (int(__cdecl *)(const void *, const void *))CG_ComparePacketAnalysisSamples);
+                    qsort(sortedSamples, 0xDu, sizeof(int), (int(__cdecl *)(const void *, const void *))CG_ComparePacketAnalysisSamples);
                     for (column = 0; column < 13; ++column)
                     {
                         fieldb = sortedSamples[column];
@@ -572,7 +572,7 @@ void __cdecl CG_DrawSnapshotEntityAnalysis(int localClientNum)
                 s_sampleNum = sample;
                 for (field = 0; field <= 17; ++field)
                     sortedSamples[field] = field;
-                qsort(sortedSamples, 0x12u, 4u, (int(__cdecl *)(const void *, const void *))CG_CompareEntityAnalysisSamples);
+                qsort(sortedSamples, 0x12u, sizeof(int), (int(__cdecl *)(const void *, const void *))CG_CompareEntityAnalysisSamples);
                 for (fielda = 0; fielda <= 17; ++fielda)
                 {
                     eType = sortedSamples[fielda];

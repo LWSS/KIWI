@@ -122,10 +122,10 @@ const dvar_s *arcadeScore[19]{ 0 };
 
 void __cdecl TRACK_cl_main()
 {
-    track_static_alloc_internal(clientUIActives, 20, "clientUIActives", 9);
-    track_static_alloc_internal(clients, 633532, "clients", 9);
-    track_static_alloc_internal(clientConnections, 271392, "clientConnections", 9);
-    track_static_alloc_internal(&cls, 612, "cls", 9);
+    track_static_alloc_internal(clientUIActives, sizeof(clientUIActives), "clientUIActives", 9);
+    track_static_alloc_internal(clients, sizeof(clients), "clients", 9);
+    track_static_alloc_internal(clientConnections, sizeof(clientConnections), "clientConnections", 9);
+    track_static_alloc_internal(&cls, sizeof(clientStatic_t), "cls", 9);
 }
 
 int __cdecl CL_GetLocalClientActiveCount()
@@ -623,24 +623,22 @@ void __cdecl CL_ResetSkeletonCache()
     //PIXSetMarker(0xFFFFFFFF, "CL_ResetSkeletonCache");
     if (!++clients[0].skelTimeStamp)
         clients[0].skelTimeStamp = 1;
-    clients[0].skelMemoryStart = (char *)((unsigned int)&clients[0].skelMemory[15] & 0xFFFFFFF0);
+    clients[0].skelMemoryStart = (char *)((uintptr_t)&clients[0].skelMemory[15] & ~(uintptr_t)15);
     clients[0].skelMemPos = 0;
 }
 
 void __cdecl CL_ClearState()
 {
-    unsigned __int16 *configstrings; // r31
+    int configStringIndex;
 
     CG_CreateNextSnap(0, 0.0, 0);
     CG_SetNextSnap(0);
     SND_StopSounds(SND_STOP_ALL);
-    configstrings = clients[0].configstrings;
-    do
+    for (configStringIndex = 0; configStringIndex < MAX_CONFIGSTRINGS; ++configStringIndex)
     {
-        if (*configstrings)
-            SL_RemoveRefToString(*configstrings);
-        ++configstrings;
-    } while ((int)configstrings < (int)clients[0].mapname);
+        if (clients[0].configstrings[configStringIndex])
+            SL_RemoveRefToString(clients[0].configstrings[configStringIndex]);
+    }
     memset(clients, 0, sizeof(clients));
     Com_ClientDObjClearAllSkel();
     memset(clientConnections, 0, sizeof(clientConnections));
@@ -1736,7 +1734,6 @@ cmd_function_s CL_StopControllerRumbles_VAR;
 void __cdecl CL_Init(int localClientNum)
 {
     int v21; // r28
-    const dvar_s **v22; // r29
     const char *v23; // r5
     unsigned __int16 v24; // r4
     const char *v26; // r5
@@ -1804,14 +1801,11 @@ void __cdecl CL_Init(int localClientNum)
         0x4001u,
         "Used by script for keeping track of cheats");
 
-    v21 = 0;
-    v22 = arcadeScore;
-    do
+    for (v21 = 0; v21 < ARRAY_COUNT(arcadeScore); ++v21)
     {
         Com_sprintf(v29, 32, "s%d", v21);
-        *v22++ = Dvar_RegisterInt(v29, 0, 0, 0x7FFFFFFF, 0x4001u, "Used by script for keeping track of arcade scores");
-        ++v21;
-    } while ((int)v22 < (int)&arcadeScore[19]);
+        arcadeScore[v21] = Dvar_RegisterInt(v29, 0, 0, 0x7FFFFFFF, 0x4001u, "Used by script for keeping track of arcade scores");
+    }
 
     input_invertPitch = Dvar_RegisterBool("input_invertPitch", 0, 0x400u, "Invert gamepad pitch");
     input_viewSensitivity = Dvar_RegisterFloat("input_viewSensitivity", 1.0, 0.000099999997, 5.0, 0, 0);

@@ -377,7 +377,7 @@ void __cdecl CL_ResetSkeletonCache(int localClientNum)
     v1 = &clients[localClientNum];
     if (!++v1->skelTimeStamp)
         ++v1->skelTimeStamp;
-    v1->skelMemoryStart = (char *)((uint)&v1->skelMemory[15] & 0xFFFFFFF0);
+    v1->skelMemoryStart = (char *)((uintptr_t)&v1->skelMemory[15] & ~(uintptr_t)15);
     v1->skelMemPos = 0;
 }
 
@@ -523,7 +523,7 @@ void __cdecl CL_RequestAuthorization(int localClientNum)
     //if (!cls.authorizeServer.port)
     //{
     //    Com_Printf(CON_CHANNEL_CLIENT, "Resolving %s\n", com_authServerName->current.string);
-    //    if (!NET_StringToAdr((char *)com_authServerName->current.integer, &cls.authorizeServer))
+    //    if (!NET_StringToAdr((char *)com_authServerName->current.string, &cls.authorizeServer))
     //    {
     //        Com_Printf(CON_CHANNEL_CLIENT, "Couldn't resolve address\n");
     //        return;
@@ -1266,7 +1266,7 @@ void __cdecl CL_SortGlobalServers()
     qsort(
         cls.globalServers,
         cls.numglobalservers,
-        0x94u,
+        sizeof(serverInfo_t),
         (int(__cdecl *)(const void *, const void *))CL_CompareAdrSigned);
 }
 
@@ -1893,7 +1893,7 @@ void __cdecl CL_WWWDownload()
         else if (ret == DL_DONE)
         {
             cls.download = 0;
-            FS_BuildOSPath((char*)fs_homepath->current.integer, cls.originalDownloadName, (char*)"", to_ospath);
+            FS_BuildOSPath(fs_homepath->current.string, cls.originalDownloadName, (char*)"", to_ospath);
             to_ospath[&to_ospath[strlen(to_ospath) + 1] - &to_ospath[1] - 1] = 0;
             if (rename(cls.downloadTempName, to_ospath))
             {
@@ -2119,11 +2119,7 @@ void __cdecl CL_ParseBadPacket_f()
     fileSize = FS_ReadFile("badpacket.dat", (void **)&file);
     if (fileSize >= 0)
     {
-        msg.overflowed = 0;
-        msg.readOnly = 0;
-        msg.splitData = 0;
-        msg.maxsize = 0;
-        memset(&msg.splitSize, 0, 16);
+        memset(&msg, 0, sizeof(msg_t));
         msg.cursize = fileSize;
         msg.data = (uint8_t *)file;
         MSG_ReadLong(&msg);
@@ -3198,7 +3194,7 @@ void __cdecl Com_WriteLocalizedSoundAliasFiles()
     int fileCount; // [esp+224h] [ebp-4h] BYREF
 
     FS_BuildOSPath(
-        (char*)fs_homepath->current.integer,
+        fs_homepath->current.string,
         (char*)"../source_data/string_resources/subtitle.st",
         (char*)"",
         stringEdExternalFileName);
@@ -3209,7 +3205,7 @@ void __cdecl Com_WriteLocalizedSoundAliasFiles()
     if (f)
     {
         fclose(f);
-        FS_BuildOSPath((char*)fs_basepath->current.integer, fs_gamedir, (char*)"soundaliases/subtitle.st", stringEdFileName);
+        FS_BuildOSPath(fs_basepath->current.string, fs_gamedir, (char*)"soundaliases/subtitle.st", stringEdFileName);
         FS_CopyFile(stringEdExternalFileName, stringEdFileName);
         if (FS_FileExists((char*)"soundaliases/subtitle.st"))
         {

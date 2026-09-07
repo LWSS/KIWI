@@ -34,8 +34,8 @@ OverheadFade overheadFade[64];
 
 void __cdecl TRACK_cg_draw()
 {
-    track_static_alloc_internal(s_centerPrint, 1032, "s_centerPrint", 9);
-    track_static_alloc_internal(overheadFade, 768, "overheadFade", 10);
+    track_static_alloc_internal(s_centerPrint, sizeof(s_centerPrint), "s_centerPrint", 9);
+    track_static_alloc_internal(overheadFade, sizeof(overheadFade), "overheadFade", 10);
 }
 
 void __cdecl CG_PriorityCenterPrint(int localClientNum, const char* str, int priority)

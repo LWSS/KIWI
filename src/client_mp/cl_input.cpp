@@ -59,7 +59,7 @@ static kbutton_t playersKb[1][30];
 
 void __cdecl TRACK_cl_input()
 {
-    track_static_alloc_internal(playersKb, 600, "playersKb", 10);
+    track_static_alloc_internal(playersKb, sizeof(playersKb), "playersKb", 10);
 }
 
 void __cdecl CL_ShowSystemCursor(BOOL show)

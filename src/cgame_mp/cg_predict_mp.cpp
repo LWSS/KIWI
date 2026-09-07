@@ -18,8 +18,8 @@ static int cg_itemLocalClientNum;
 
 void __cdecl TRACK_cg_predict()
 {
-    track_static_alloc_internal(cg_pmove, 272, "cg_pmove", 9);
-    track_static_alloc_internal(cg_itemEntities, 2048, "cg_itemEntities", 9);
+    track_static_alloc_internal(cg_pmove, sizeof(cg_pmove), "cg_pmove", 9);
+    track_static_alloc_internal(cg_itemEntities, sizeof(cg_itemEntities), "cg_itemEntities", 9);
 }
 
 int __cdecl CG_ItemListLocalClientNum()

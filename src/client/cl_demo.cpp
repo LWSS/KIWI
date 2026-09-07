@@ -417,7 +417,7 @@ void __cdecl CL_Record_f()
     int nesting; // r7
     const char *v1; // r3
     int i; // r30
-    unsigned __int16 *configstrings; // r30
+    int configStringIndex;
     const char *v4; // r3
     const char *v5; // r3
     char *v6; // r30
@@ -478,21 +478,18 @@ void __cdecl CL_Record_f()
                 I_strncpyz(cls.demoName, v14, 64);
                 MSG_Init(&v13, v16, 0x4000);
                 MSG_WriteLong(&v13, clientConnections[0].serverCommands.header.sent);
-                configstrings = clients[0].configstrings;
-                do
+                for (configStringIndex = 0; configStringIndex < MAX_CONFIGSTRINGS; ++configStringIndex)
                 {
-                    if (!*configstrings)
-                        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\client\\cl_demo.cpp", 489, 0, "%s", "cl->configstrings[i]");
-                    v4 = SL_ConvertToString(*configstrings);
-                    MSG_WriteString(&v13, (char*)v4);
-                    ++configstrings;
-                } while ((int)configstrings < (int)clients[0].mapname);
+                    iassert(clients[0].configstrings[configStringIndex]);
+                    v4 = SL_ConvertToString(clients[0].configstrings[configStringIndex]);
+                    MSG_WriteString(&v13, (char *)v4);
+                }
                 v5 = SL_ConvertToString(clients[0].configstrings[0]);
                 v6 = (char*)Info_ValueForKey(v5, "mapname");
                 v7 = v6;
                 while (*v7++)
                     ;
-                v10[0] = (_BYTE)v7 - (_BYTE)v6 - 1;
+                v10[0] = (uint8_t)(v7 - v6 - 1);
                 FS_Write((const char*)v10, 1, cls.demofile);
                 v9 = FS_Write(v6, v10[0], cls.demofile);
                 Hunk_CheckTempMemoryClear();
@@ -827,7 +824,7 @@ void __cdecl CL_FinishLoadingDemo()
             } while (!v4);
             if (v4)
             {
-                v5 = (const char *)SV_GetConfigstringConst(v0);
+                v5 = SL_ConvertToString(SV_GetConfigstringConst(v0));
                 v6 = va("%s != %s", v5, v8);
                 MyAssertHandler(
                     "c:\\trees\\cod3\\cod3src\\src\\client\\cl_demo.cpp",

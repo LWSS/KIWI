@@ -249,12 +249,12 @@ bool s_hasExactMatch;
 
 void __cdecl TRACK_cl_keys()
 {
-    track_static_alloc_internal(playerKeys, 3368, "playerKeys", 10);
-    track_static_alloc_internal(&g_consoleField, 280, "g_consoleField", 10);
-    track_static_alloc_internal(historyEditLines, 8960, "historyEditLines", 10);
-    track_static_alloc_internal(keynames, 768, "keynames", 10);
-    track_static_alloc_internal(keynames_localized, 768, "keynames_localized", 10);
-    track_static_alloc_internal(s_shortestMatch, 1024, "s_shortestMatch", 3);
+    track_static_alloc_internal(playerKeys, sizeof(playerKeys), "playerKeys", 10);
+    track_static_alloc_internal(&g_consoleField, sizeof(field_t), "g_consoleField", 10);
+    track_static_alloc_internal(historyEditLines, sizeof(historyEditLines), "historyEditLines", 10);
+    track_static_alloc_internal(keynames, sizeof(keynames), "keynames", 10);
+    track_static_alloc_internal(keynames_localized, sizeof(keynames_localized), "keynames_localized", 10);
+    track_static_alloc_internal(s_shortestMatch, sizeof(s_shortestMatch), "s_shortestMatch", 3);
 }
 
 void __cdecl Field_DrawTextOverride(
@@ -661,7 +661,7 @@ char __cdecl Field_KeyDownEvent(int localClientNum, const ScreenPlacement *scrPl
                 --edit->cursor;
             if (isCtrlDown)
             {
-                while (edit->cursor > 0 && isalnum(*((char *)&edit->fixedSize + edit->cursor + 3)))
+                while (edit->cursor > 0 && isalnum(edit->buffer[edit->cursor - 1]))
                     --edit->cursor;
             }
             if (edit->cursor < edit->scroll)
@@ -725,7 +725,7 @@ bool __cdecl Field_CharEvent(int localClientNum, const ScreenPlacement *scrPlace
         if (edit->cursor > 0)
         {
             memmove(
-                (uint8_t *)&edit->fixedSize + edit->cursor + 3,
+                (uint8_t *)&edit->buffer[edit->cursor - 1],
                 (uint8_t *)&edit->buffer[edit->cursor],
                 len + 1 - edit->cursor);
             --edit->cursor;

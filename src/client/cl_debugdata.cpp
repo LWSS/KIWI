@@ -53,13 +53,13 @@ bool __cdecl CreateDebugStringsIfNeeded()
         cls.debug.clStrings.max = 1024;
         cls.debug.svStrings.max = 1024;
         cls.debug.svStringsBuffer.max = 1024;
-        R_DebugAlloc((void **)&cls.debug.clStrings.strings, 0x20000, "Client Debug Strings");
-        R_DebugAlloc((void **)&cls.debug.clStrings.durations, 4 * cls.debug.clStrings.max, "Client Debug Strings");
+        R_DebugAlloc((void **)&cls.debug.clStrings.strings, sizeof(trDebugString_t) * cls.debug.clStrings.max, "Client Debug Strings");
+        R_DebugAlloc((void **)&cls.debug.clStrings.durations, sizeof(int) * cls.debug.clStrings.max, "Client Debug Strings");
         cls.debug.clStrings.num = 0;
-        R_DebugAlloc((void **)&cls.debug.svStrings.strings, cls.debug.svStrings.max << 7, "Client Debug Strings");
-        R_DebugAlloc((void **)&cls.debug.svStrings.durations, 4 * cls.debug.svStrings.max, "Client Debug Strings");
+        R_DebugAlloc((void **)&cls.debug.svStrings.strings, sizeof(trDebugString_t) * cls.debug.svStrings.max, "Client Debug Strings");
+        R_DebugAlloc((void **)&cls.debug.svStrings.durations, sizeof(int) * cls.debug.svStrings.max, "Client Debug Strings");
         cls.debug.svStrings.num = 0;
-        R_DebugAlloc((void **)&cls.debug.svStringsBuffer.strings, cls.debug.svStrings.max << 7, "Client Debug Strings");
+        R_DebugAlloc((void **)&cls.debug.svStringsBuffer.strings, sizeof(trDebugString_t) * cls.debug.svStringsBuffer.max, "Client Debug Strings");
         cls.debug.svStringsBuffer.num = 0;
         return cls.debug.clStrings.strings
             && cls.debug.clStrings.durations
@@ -131,13 +131,13 @@ bool __cdecl CreateDebugLinesIfNeeded()
         cls.debug.clLines.max = 2048;
         cls.debug.svLines.max = 2048;
         cls.debug.svLinesBuffer.max = 2048;
-        R_DebugAlloc((void **)&cls.debug.clLines.lines, 90112, "Client Debug Lines");
-        R_DebugAlloc((void **)&cls.debug.clLines.durations, 0x2000, "Client Debug Lines");
+        R_DebugAlloc((void **)&cls.debug.clLines.lines, sizeof(trDebugLine_t) * cls.debug.clLines.max, "Client Debug Lines");
+        R_DebugAlloc((void **)&cls.debug.clLines.durations, sizeof(int) * cls.debug.clLines.max, "Client Debug Lines");
         cls.debug.clLines.num = 0;
-        R_DebugAlloc((void **)&cls.debug.svLines.lines, 90112, "Client Debug Lines");
-        R_DebugAlloc((void **)&cls.debug.svLines.durations, 0x2000, "Client Debug Lines");
+        R_DebugAlloc((void **)&cls.debug.svLines.lines, sizeof(trDebugLine_t) * cls.debug.svLines.max, "Client Debug Lines");
+        R_DebugAlloc((void **)&cls.debug.svLines.durations, sizeof(int) * cls.debug.svLines.max, "Client Debug Lines");
         cls.debug.svLines.num = 0;
-        R_DebugAlloc((void **)&cls.debug.svLinesBuffer.lines, 90112, "Client Debug Lines");
+        R_DebugAlloc((void **)&cls.debug.svLinesBuffer.lines, sizeof(trDebugLine_t) * cls.debug.svLinesBuffer.max, "Client Debug Lines");
         cls.debug.svLinesBuffer.num = 0;
         return cls.debug.clLines.lines
             && cls.debug.clLines.durations
@@ -314,15 +314,15 @@ void __cdecl CL_FlushDebugServerData()
 
 void __cdecl CL_UpdateDebugServerData()
 {
-    int copySize; // [esp+0h] [ebp-4h]
-    int copySizea; // [esp+0h] [ebp-4h]
+    size_t copySize; // [esp+0h] [ebp-4h]
+    size_t copySizea; // [esp+0h] [ebp-4h]
 
     if (cls.rendererStarted)
     {
-        copySize = svStr->num << 7;
+        copySize = sizeof(trDebugString_t) * svStr->num;
         svStrBuff->num = svStr->num;
         memcpy((uint8_t *)svStrBuff->strings, (uint8_t *)svStr->strings, copySize);
-        copySizea = 44 * svLine->num;
+        copySizea = sizeof(trDebugLine_t) * svLine->num;
         svLineBuff->num = svLine->num;
         memcpy((uint8_t *)svLineBuff->lines, (uint8_t *)svLine->lines, copySizea);
     }

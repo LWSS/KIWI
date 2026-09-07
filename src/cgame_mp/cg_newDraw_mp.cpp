@@ -1059,7 +1059,7 @@ void __cdecl CG_DrawStanceHintPrints(
     const char *binding; // [esp+254h] [ebp-8h]
     float y; // [esp+258h] [ebp-4h]
 
-    memset(standCmds, 0, 24);
+    memset(standCmds[0], 0, 6 * sizeof(const char *));
     standCmds[1][0] = "gocrouch";
     standCmds[1][1] = "togglecrouch";
     standCmds[1][2] = "lowerstance";
@@ -2287,7 +2287,7 @@ void __cdecl CG_DrawTalkerNum(
                     if (cgameGlob->nextSnap->ps.pm_type != PM_INTERMISSION && isEnemy && (cgameGlob->nextSnap->ps.perks & 0x200) != 0)
                     {
                         CG_RelativeTeamColor(client, "g_TeamColor", textColor, localClientNum);
-                        material = Material_RegisterHandle((const char*)perk_parabolicIcon->current.integer, 7);
+                        material = Material_RegisterHandle(perk_parabolicIcon->current.string, 7);
                     }
                     else
                     {
