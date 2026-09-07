@@ -9,7 +9,7 @@ void __cdecl TRACK_DynEntityCollWorld()
     int collType; // [esp+0h] [ebp-4h]
 
     for (collType = 0; collType < 2; ++collType)
-        track_static_alloc_internal(&dynEntCollWorlds[collType], 20508, "dynEntCollWorlds[collType]", 25);
+        track_static_alloc_internal(&dynEntCollWorlds[collType], sizeof(DynEntityCollWorld), "dynEntCollWorlds[collType]", 25);
 }
 
 DynEntityCollSector *__cdecl DynEnt_GetCollSector(DynEntityCollType collType, uint sectorIndex)

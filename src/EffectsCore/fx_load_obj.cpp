@@ -1065,7 +1065,7 @@ bool __cdecl FX_LoadEditorEffect(const char *name, FxEditorEffectDef *edEffectDe
 
 void* FX_AllocMem(uint size)
 {
-    return Hunk_AllocAlign(size, 4, "FX_Alloc", 8);
+    return Hunk_AllocAlign(size, sizeof(void *), "FX_Alloc", 8);
 }
 
 PhysPreset *__cdecl FX_RegisterPhysPreset(const char *name)
@@ -1076,56 +1076,47 @@ PhysPreset *__cdecl FX_RegisterPhysPreset(const char *name)
 
 const FxEffectDef *__cdecl FX_LoadFailed(const char *name)
 {
-    char v2; // [esp+3h] [ebp-55h]
-    _BYTE *v3; // [esp+8h] [ebp-50h]
-    const char *v4; // [esp+Ch] [ebp-4Ch]
-    const char *v5; // [esp+2Ch] [ebp-2Ch]
-    _DWORD *v6; // [esp+30h] [ebp-28h]
-    _DWORD *v7; // [esp+34h] [ebp-24h]
-    uint baseBytesNeeded; // [esp+40h] [ebp-18h]
-    byte *effectDef; // [esp+48h] [ebp-10h]
-    int relocationDistance; // [esp+4Ch] [ebp-Ch]
-    int elemIndex; // [esp+54h] [ebp-4h]
-
     if (!fx_load.defaultEffect)
     {
         if (!I_stricmp(name, "misc/missing_fx"))
             Com_Error(ERR_FATAL, "Couldn't load default effect");
         FX_RegisterDefaultEffect();
-        if (!fx_load.defaultEffect)
-            MyAssertHandler(".\\EffectsCore\\fx_load_obj.cpp", 1220, 1, "%s", "fx_load.defaultEffect");
-        if (!fx_load.defaultEffect->name)
-            MyAssertHandler(".\\EffectsCore\\fx_load_obj.cpp", 1221, 1, "%s", "fx_load.defaultEffect->name");
-        if (I_strcmp(fx_load.defaultEffect->name, "misc/missing_fx"))
-            MyAssertHandler(
-                ".\\EffectsCore\\fx_load_obj.cpp",
-                1222,
-                1,
-                "%s",
-                "!I_strcmp( fx_load.defaultEffect->name, FX_DEFAULT_EFFECT_NAME )");
     }
-    v5 = &fx_load.defaultEffect->name[strlen(fx_load.defaultEffect->name) + 1];
-    baseBytesNeeded = fx_load.defaultEffect->totalSize - (v5 - fx_load.defaultEffect->name);
-    effectDef = (byte *)FX_AllocMem(fx_load.defaultEffect->totalSize - (v5 - (fx_load.defaultEffect->name + 1)) + strlen(name));
-    memcpy(effectDef, (uint8_t *)fx_load.defaultEffect, baseBytesNeeded);
-    *(_DWORD *)effectDef = (_DWORD)&effectDef[baseBytesNeeded];
-    v4 = name;
-    v3 = *(_BYTE **)effectDef;
-    do
+    const FxEffectDef *source = fx_load.defaultEffect;
+    iassert(source && source->name);
+    size_t baseBytes = source->totalSize - strlen(source->name) - 1;
+    size_t totalBytes = baseBytes + strlen(name) + 1;
+    if (totalBytes > INT_MAX)
+        Com_Error(ERR_DROP, "Default effect copy is too large");
+    FxEffectDef *effect = (FxEffectDef *)FX_AllocMem((uint)totalBytes);
+    memcpy(effect, source, baseBytes);
+    effect->name = (char *)effect + baseBytes;
+    memcpy((char *)effect->name, name, strlen(name) + 1);
+    effect->totalSize = (int)totalBytes;
+    uintptr_t relocation = (uintptr_t)effect - (uintptr_t)source;
+    effect->elemDefs = (const FxElemDef *)((uintptr_t)source->elemDefs + relocation);
+    int count = effect->elemDefCountLooping + effect->elemDefCountOneShot + effect->elemDefCountEmission;
+    for (int i = 0; i < count; ++i)
     {
-        v2 = *v4;
-        *v3++ = *v4++;
-    } while (v2);
-    relocationDistance = effectDef - (uint8_t *)fx_load.defaultEffect;
-    *((_DWORD *)effectDef + 7) += effectDef - (uint8_t *)fx_load.defaultEffect;
-    for (elemIndex = 0; elemIndex < *((_DWORD *)effectDef + 5) + *((_DWORD *)effectDef + 4); ++elemIndex)
-    {
-        v7 = (_DWORD *)(*((_DWORD *)effectDef + 7) + 252 * elemIndex + 180);
-        *v7 += relocationDistance;
-        v6 = (_DWORD *)(*((_DWORD *)effectDef + 7) + 252 * elemIndex + 184);
-        *v6 += relocationDistance;
+        FxElemDef *elem = (FxElemDef *)&effect->elemDefs[i];
+        if (elem->velSamples)
+            elem->velSamples = (FxElemVelStateSample *)((uintptr_t)elem->velSamples + relocation);
+        if (elem->visSamples)
+            elem->visSamples = (FxElemVisStateSample *)((uintptr_t)elem->visSamples + relocation);
+        if (elem->elemType == 9 && elem->visuals.markArray)
+            elem->visuals.markArray = (FxElemMarkVisuals *)((uintptr_t)elem->visuals.markArray + relocation);
+        else if (elem->visualCount > 1)
+            elem->visuals.array = (FxElemVisuals *)((uintptr_t)elem->visuals.array + relocation);
+        /* Emitted definitions can retain an external trail definition. */
+        if ((uintptr_t)elem->trailDef >= (uintptr_t)source &&
+            (uintptr_t)elem->trailDef - (uintptr_t)source < baseBytes)
+        {
+            elem->trailDef = (FxTrailDef *)((uintptr_t)elem->trailDef + relocation);
+            elem->trailDef->verts = (FxTrailVertex *)((uintptr_t)elem->trailDef->verts + relocation);
+            elem->trailDef->inds = (uint16_t *)((uintptr_t)elem->trailDef->inds + relocation);
+        }
     }
-    return (const FxEffectDef *)effectDef;
+    return effect;
 }
 
 const FxEffectDef *__cdecl FX_Load(const char *name)

@@ -739,7 +739,7 @@ void __cdecl FX_UpdateEffectPartialForClass(
     uint16_t elemHandleFirstExisting; // [esp+30h] [ebp-4h]
 
     int unk1;
-    int unk2;
+    const FxIntRange *lifeSpanRange;
 
     vassert(effect->msecLastUpdate <= msecUpdateEnd, "%g, %g", effect->msecLastUpdate, msecUpdateEnd);
     elemHandleFirstExisting = effect->firstElemHandle[elemClass];
@@ -774,9 +774,9 @@ void __cdecl FX_UpdateEffectPartialForClass(
                     elem = FX_PoolFromHandle_Generic<FxElem, 2048>(system->elems, elemHandle);
                     unk1 = (elem->item.msecBegin + effect->randomSeed + 296 * (uint)elem->item.sequence)
                         % 0x1DF;
-                    unk2 = (int)&effect->def->elemDefs[elem->item.defIndex].lifeSpanMsec;
-                    lifeSpan = *(_DWORD*)unk2
-                        + (((*(_DWORD*)(unk2 + 4) + 1) * LOWORD(fx_randomTable[unk1 + 17])) >> 16);
+                    lifeSpanRange = &effect->def->elemDefs[elem->item.defIndex].lifeSpanMsec;
+                    lifeSpan = lifeSpanRange->base
+                        + (((lifeSpanRange->amplitude + 1) * LOWORD(fx_randomTable[unk1 + 17])) >> 16);
                     Com_Printf(
                         CON_CHANNEL_DONT_FILTER,
                         "  elem %i def %i seq %i spawn %i die %i\n",
@@ -816,7 +816,7 @@ FxUpdateResult __cdecl FX_UpdateElement(
 {
     float msec; // [esp+0h] [ebp-140h]
     bool v7; // [esp+10h] [ebp-130h]
-    int physObjId; // [esp+8Ch] [ebp-B4h]
+    uintptr_t physObjId; // [esp+8Ch] [ebp-B4h]
     FxUpdateElem update; // [esp+A8h] [ebp-98h] BYREF
     const FxElemDef *elemDef; // [esp+128h] [ebp-18h]
     FxUpdateResult updateResult; // [esp+12Ch] [ebp-14h] BYREF

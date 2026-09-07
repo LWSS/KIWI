@@ -31,9 +31,9 @@ FxMarksSystem fx_marksSystemPool[1];
 
 void __cdecl TRACK_fx_system()
 {
-    track_static_alloc_internal(fx_systemPool, 2656, "fx_systemPool", 8);
-    track_static_alloc_internal(fx_systemBufferPool, 291968, "fx_systemBufferPool", 8);
-    track_static_alloc_internal(fx_marksSystemPool, 294940, "fx_marksSystemPool", 8);
+    track_static_alloc_internal(fx_systemPool, sizeof(fx_systemPool), "fx_systemPool", 8);
+    track_static_alloc_internal(fx_systemBufferPool, sizeof(fx_systemBufferPool), "fx_systemBufferPool", 8);
+    track_static_alloc_internal(fx_marksSystemPool, sizeof(fx_marksSystemPool), "fx_marksSystemPool", 8);
 }
 
 XModel *__cdecl FX_RegisterModel(const char *modelName)
@@ -172,12 +172,12 @@ void __cdecl FX_ShutdownSystem(int localClientNum)
     FX_UnregisterAll();
 }
 
-void __cdecl FX_RelocateSystem(FxSystem *system, int relocationDistance)
+void __cdecl FX_RelocateSystem(FxSystem *system, uintptr_t relocationDistance)
 {
     if (relocationDistance)
     {
-        system->visStateBufferRead = (const FxVisState *)((char *)system->visStateBufferRead + relocationDistance);
-        system->visStateBufferWrite = (FxVisState *)((char *)system->visStateBufferWrite + relocationDistance);
+        system->visStateBufferRead = (const FxVisState *)((uintptr_t)system->visStateBufferRead + relocationDistance);
+        system->visStateBufferWrite = (FxVisState *)((uintptr_t)system->visStateBufferWrite + relocationDistance);
     }
 }
 
@@ -503,7 +503,7 @@ void __cdecl FX_FreePool_Generic_FxElem_(FxElem* item, volatile long* firstFreeI
 {
     volatile uint freedIndex; // [esp+4h] [ebp-4h]
 
-    freedIndex = ((char*)item - (char*)pool) / 40;
+    freedIndex = (uint)((FxPool<FxElem> *)item - pool);
     if (freedIndex >= 0x800)
         MyAssertHandler(
             ".\\EffectsCore\\fx_system.cpp",
@@ -1774,14 +1774,14 @@ bool __cdecl FX_SpawnModelPhysics(
     angularVelocity[2] = v6 * 1000.0;
     Sys_EnterCriticalSection(CRITSECT_PHYSICS);
     visuals.anonymous = FX_GetElemVisuals(elemDef, randomSeed).anonymous;
-    if (!*((_DWORD*)visuals.anonymous + 53))
+    if (!visuals.model->physPreset)
         MyAssertHandler(".\\EffectsCore\\fx_system.cpp", 1853, 0, "%s", "visuals.model->physPreset");
-    elem->physObjId = (int)Phys_ObjCreate(
+    elem->physObjId = (uintptr_t)Phys_ObjCreate(
         PHYS_WORLD_FX,
         worldOrigin,
         quat,
         velocity,
-        *((const PhysPreset**)visuals.anonymous + 53));
+        visuals.model->physPreset);
     if (elem->physObjId)
     {
         Phys_ObjSetCollisionFromXModel(visuals.model, PHYS_WORLD_FX, (dxBody*)elem->physObjId);

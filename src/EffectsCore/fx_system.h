@@ -61,7 +61,7 @@ void __cdecl FX_InitSystem(int localClientNum);
 void __cdecl FX_ResetSystem(FxSystem *system);
 int __cdecl FX_EffectToHandle(FxSystem *system, FxEffect *effect);
 void __cdecl FX_ShutdownSystem(int localClientNum);
-void __cdecl FX_RelocateSystem(FxSystem *system, int relocationDistance);
+void __cdecl FX_RelocateSystem(FxSystem *system, uintptr_t relocationDistance);
 void __cdecl FX_EffectNoLongerReferenced(FxSystem *system, FxEffect *remoteEffect);
 void __cdecl FX_DelRefToEffect(FxSystem *system, FxEffect *effect);
 void __cdecl FX_RunGarbageCollection(FxSystem *system);
@@ -248,7 +248,7 @@ struct MarkInfoCollidedDObj // sizeof=0xC
     // padding byte
     // padding byte
 };
-static_assert(sizeof(MarkInfoCollidedDObj) == 0xC);
+static_assert(sizeof(MarkInfoCollidedDObj) == (sizeof(void *) == 8 ? 0x18 : 0xC));
 
 struct MarkInfoCollidedBModel // sizeof=0xC
 {                                       // ...
@@ -258,7 +258,7 @@ struct MarkInfoCollidedBModel // sizeof=0xC
     // padding byte
     // padding byte
 };
-static_assert(sizeof(MarkInfoCollidedBModel) == 0xC);
+static_assert(sizeof(MarkInfoCollidedBModel) == (sizeof(void *) == 8 ? 0x18 : 0xC));
 
 struct MarkInfo // sizeof=0x448
 {                                       // ...
@@ -292,7 +292,7 @@ struct MarkInfo // sizeof=0x448
     void(__cdecl *callback)(void *, int, FxMarkTri *, int, FxMarkPoint *, const float *, const float *);
     void *callbackContext;
 };
-static_assert(sizeof(MarkInfo) == 0x448);
+static_assert(sizeof(MarkInfo) == (sizeof(void *) == 8 ? 0x770 : 0x448));
 
 struct MarkModelCoreContext // sizeof=0x1C
 {                                       // ...
@@ -304,7 +304,7 @@ struct MarkModelCoreContext // sizeof=0x1C
     const float (*transformMatrix)[3];  // ...
     const float (*transformNormalMatrix)[3]; // ...
 };
-static_assert(sizeof(MarkModelCoreContext) == 0x1C);
+static_assert(sizeof(MarkModelCoreContext) == (sizeof(void *) == 8 ? 0x38 : 0x1C));
 
 struct FxMarkDObjUpdateContext // sizeof=0x108
 {                                       // ...
@@ -315,7 +315,7 @@ struct FxMarkDObjUpdateContext // sizeof=0x108
     // padding byte
     uint16_t brushIndex;
 };
-static_assert(sizeof(FxMarkDObjUpdateContext) == 0x108);
+static_assert(sizeof(FxMarkDObjUpdateContext) == (sizeof(void *) == 8 ? 0x208 : 0x108));
 
 struct FxActiveMarkSurf // sizeof=0x14
 {                                       // ...
@@ -326,7 +326,7 @@ struct FxActiveMarkSurf // sizeof=0x14
     int indexCount;
     uint16_t *indices;
 };
-static_assert(sizeof(FxActiveMarkSurf) == 0x14);
+static_assert(sizeof(FxActiveMarkSurf) == (sizeof(void *) == 8 ? 0x20 : 0x14));
 
 void __cdecl TRACK_fx_marks();
 void __cdecl FX_InitMarksSystem(FxMarksSystem *marksSystem);
@@ -443,7 +443,7 @@ struct FxDrawState // sizeof=0xA8
     float physicsLerpFrac;
     int msecDraw;                       // ...
 };
-static_assert(sizeof(FxDrawState) == 0xA8);
+static_assert(sizeof(FxDrawState) == (sizeof(void *) == 8 ? 0xC8 : 0xA8));
 
 struct FxTrailSegmentDrawState // sizeof=0x3C
 {                                       // ...
@@ -455,7 +455,7 @@ struct FxTrailSegmentDrawState // sizeof=0x3C
     float uCoord;                       // ...
     uint8_t color[4];           // ...
 };
-static_assert(sizeof(FxTrailSegmentDrawState) == 0x3C);
+static_assert(sizeof(FxTrailSegmentDrawState) == (sizeof(void *) == 8 ? 0x40 : 0x3C));
 
 struct FxBeam // sizeof=0x34
 {                                       // ...
@@ -469,14 +469,14 @@ struct FxBeam // sizeof=0x34
     int segmentCount;                   // ...
     float wiggleDist;                   // ...
 };
-static_assert(sizeof(FxBeam) == 0x34);
+static_assert(sizeof(FxBeam) == (sizeof(void *) == 8 ? 0x38 : 0x34));
 
 struct FxBeamInfo // sizeof=0x1384
 {                                       // ...
     FxBeam beams[96];
     int beamCount;                      // ...
 };
-static_assert(sizeof(FxBeamInfo) == 0x1384);
+static_assert(sizeof(FxBeamInfo) == (sizeof(void *) == 8 ? 0x1508 : 0x1384));
 
 struct FxPostLight // sizeof=0x24
 {                                       // ...
@@ -486,14 +486,14 @@ struct FxPostLight // sizeof=0x24
     GfxColor color;                     // ...
     Material *material;                 // ...
 };
-static_assert(sizeof(FxPostLight) == 0x24);
+static_assert(sizeof(FxPostLight) == (sizeof(void *) == 8 ? 0x28 : 0x24));
 
 struct FxPostLightInfo // sizeof=0xD84
 {                                       // ...
     FxPostLight postLights[96];
     int postLightCount;                 // ...
 };
-static_assert(sizeof(FxPostLightInfo) == 0xD84);
+static_assert(sizeof(FxPostLightInfo) == (sizeof(void *) == 8 ? 0xF08 : 0xD84));
 
 struct FxGenerateVertsCmd // sizeof=0x44
 {                                       // ...
@@ -505,7 +505,7 @@ struct FxGenerateVertsCmd // sizeof=0x44
     float vieworg[3];
     float viewaxis[3][3];
 };
-static_assert(sizeof(FxGenerateVertsCmd) == 0x44);
+static_assert(sizeof(FxGenerateVertsCmd) == (sizeof(void *) == 8 ? 0x58 : 0x44));
 
 void __cdecl FX_EvaluateVisAlpha(FxElemPreVisualState *preVisState, FxElemVisualState *visState);
 uint8_t __cdecl FX_InterpolateColor(
@@ -719,24 +719,24 @@ bool __cdecl FX_ExistingElemSortsBeforeNewElem(
 // fx_archive
 struct FxEffectDefTableEntry // sizeof=0x8
 {                                       // ...
-    uint key;
+    uintptr_t key;
     const FxEffectDef *effectDef;
 };
-static_assert(sizeof(FxEffectDefTableEntry) == 0x8);
+static_assert(sizeof(FxEffectDefTableEntry) == (sizeof(void *) == 8 ? 0x10 : 0x8));
 
 struct FxEffectDefTable // sizeof=0x2004
 {                                       // ...
     int count;
     FxEffectDefTableEntry entries[1024];
 };
-static_assert(sizeof(FxEffectDefTable) == 0x2004);
+static_assert(sizeof(FxEffectDefTable) == (sizeof(void *) == 8 ? 0x4008 : 0x2004));
 
 void __cdecl FX_Restore(int clientIndex, MemoryFile *memFile);
 void __cdecl FX_RestoreEffectDefTable(MemoryFile *memFile, FxEffectDefTable *table);
-void __cdecl FX_AddEffectDefTableEntry(FxEffectDefTable *table, uint key, const FxEffectDef *effectDef);
+void __cdecl FX_AddEffectDefTableEntry(FxEffectDefTable *table, uintptr_t key, const FxEffectDef *effectDef);
 void __cdecl FX_FixupEffectDefHandles(FxSystem *system, FxEffectDefTable *table);
 FxEffect *__cdecl FX_EffectFromHandle(FxSystem *system, uint16_t handle);
-const FxEffectDef *__cdecl FX_FindEffectDefInTable(const FxEffectDefTable *table, uint key);
+const FxEffectDef *__cdecl FX_FindEffectDefInTable(const FxEffectDefTable *table, uintptr_t key);
 void __cdecl FX_RestorePhysicsData(FxSystem *system, MemoryFile *memFile);
 FxElemVisuals __cdecl FX_GetElemVisuals(const FxElemDef *elemDef, int randomSeed);
 void __cdecl FX_Save(int clientIndex, MemoryFile *memFile);
@@ -772,7 +772,7 @@ struct FxProfileEntry // sizeof=0x1C
     int activeTrailElemCount;
     int pendingTrailElemCount;
 };
-static_assert(sizeof(FxProfileEntry) == 0x1C);
+static_assert(sizeof(FxProfileEntry) == (sizeof(void *) == 8 ? 0x20 : 0x1C));
 
 void __cdecl FX_DrawProfile(int clientIndex, void(__cdecl *drawFunc)(char *), float *profilePos);
 FxProfileEntry *__cdecl FX_GetProfileEntry(const FxEffectDef *effectDef, FxProfileEntry *entryPool, int *entryCount);
@@ -800,7 +800,7 @@ struct FxSprite // sizeof=0x20
     float minScreenRadius;
     int flags;
 };
-static_assert(sizeof(FxSprite) == 0x20);
+static_assert(sizeof(FxSprite) == (sizeof(void *) == 8 ? 0x28 : 0x20));
 
 void __cdecl FX_SpriteGenerateVerts(FxGenerateVertsCmd *cmd);
 void __cdecl FX_GenerateSpriteCodeMeshVerts(FxSprite *sprite, FxGenerateVertsCmd *cmd);
@@ -1114,7 +1114,7 @@ struct FxCurveIterator // sizeof=0x8
     const FxCurve *master;
     int currentKeyIndex;
 };
-static_assert(sizeof(FxCurveIterator) == 0x8);
+static_assert(sizeof(FxCurveIterator) == (sizeof(void *) == 8 ? 0x10 : 0x8));
 
 double __cdecl FxCurve_Interpolate1d(const float *key, float intermediateTime);
 void __cdecl FxCurve_Interpolate3d(const float *key, float intermediateTime, float *result);
@@ -1207,7 +1207,7 @@ struct FxEditorElemDef // sizeof=0x858
     float trailScrollTime;
     FxEditorTrailDef trailDef;
 };
-static_assert(sizeof(FxEditorElemDef) == 0x858);
+static_assert(sizeof(FxEditorElemDef) == (sizeof(void *) == 8 ? 0x958 : 0x858));
 
 struct FxEditorEffectDef // sizeof=0x10B44
 {                                       // ...
@@ -1215,20 +1215,20 @@ struct FxEditorEffectDef // sizeof=0x10B44
     int elemCount;
     FxEditorElemDef elems[32];
 };
-static_assert(sizeof(FxEditorEffectDef) == 0x10B44);
+static_assert(sizeof(FxEditorEffectDef) == (sizeof(void *) == 8 ? 0x12B48 : 0x10B44));
 
 struct FxElemField // sizeof=0x8
 {                                       // ...
     const char *keyName;                // ...
     bool(__cdecl *handler)(const char **, FxEditorElemDef *); // ...
 };
-static_assert(sizeof(FxElemField) == 0x8);
+static_assert(sizeof(FxElemField) == (sizeof(void *) == 8 ? 0x10 : 0x8));
 
 struct FxFlagOutputSet // sizeof=0xC
 {                                       // ...
     int *flags[3];                      // ...
 };
-static_assert(sizeof(FxFlagOutputSet) == 0xC);
+static_assert(sizeof(FxFlagOutputSet) == (sizeof(void *) == 8 ? 0x18 : 0xC));
 
 struct FxFlagDef // sizeof=0x10
 {
@@ -1237,7 +1237,7 @@ struct FxFlagDef // sizeof=0x10
     int mask;
     int value;
 };
-static_assert(sizeof(FxFlagDef) == 0x10);
+static_assert(sizeof(FxFlagDef) == (sizeof(void *) == 8 ? 0x18 : 0x10));
 
 enum FxSampleChannel : int
 {                                       // ...

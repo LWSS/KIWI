@@ -75,77 +75,34 @@ void __cdecl FxCurve_Interpolate3d(const float *key, float intermediateTime, flo
 
 const FxCurve *__cdecl FxCurve_AllocAndCreateWithKeys(float *keyArray, int dimensionCount, int keyCount)
 {
-    int createdKeyCount; // [esp+14h] [ebp-1Ch]
-    int keySize; // [esp+18h] [ebp-18h]
-    bool addKeyAtStart; // [esp+1Fh] [ebp-11h]
-    int keyIndex; // [esp+20h] [ebp-10h]
-    int keyIndexa; // [esp+20h] [ebp-10h]
-    bool addKeyAtEnd; // [esp+27h] [ebp-9h]
-    uint8_t *newCurve; // [esp+28h] [ebp-8h]
-    int elementIndex; // [esp+2Ch] [ebp-4h]
-    int elementIndexa; // [esp+2Ch] [ebp-4h]
-
     iassert(keyArray);
-    vassert((keyCount > 0), "(keyCount) = %i", keyCount);
-    vassert((dimensionCount > 0), "(dimensionCount) = %i", dimensionCount);
-    keySize = dimensionCount + 1;
-    addKeyAtStart = *keyArray != 0.0;
-    addKeyAtEnd = keyArray[(dimensionCount + 1) * (keyCount - 1)] != 1.0;
-    createdKeyCount = addKeyAtEnd + keyCount + addKeyAtStart;
-    if (createdKeyCount < 2)
-        MyAssertHandler(
-            ".\\EffectsCore\\FxCurve_load_obj.cpp",
-            29,
-            1,
-            "%s\n\t(createdKeyCount) = %i",
-            "(createdKeyCount >= 2)",
-            createdKeyCount);
-    newCurve = Hunk_AllocAlign(4 * createdKeyCount * keySize + 8, 4, "FxCurve_AllocAndCreateWithKeys", 8);
-    iassert(newCurve);
-    *(_DWORD *)newCurve = dimensionCount;
-    keyIndex = 0;
-    if (addKeyAtStart)
+    if (dimensionCount <= 0 || dimensionCount == INT_MAX || keyCount <= 0 || keyCount > INT_MAX - 2)
+        Com_Error(ERR_DROP, "Invalid effect curve dimensions");
+    int keySize = dimensionCount + 1;
+    if (keyCount > (INT_MAX - 2) / keySize)
+        Com_Error(ERR_DROP, "Effect curve is too large");
+    bool addStart = keyArray[0] != 0.0f;
+    bool addEnd = keyArray[(keyCount - 1) * keySize] != 1.0f;
+    int createdKeyCount = keyCount + addStart + addEnd;
+    size_t bytes = offsetof(FxCurve, keys) + sizeof(float) * (size_t)createdKeyCount * keySize;
+    if (createdKeyCount < 2 || bytes > INT_MAX)
+        Com_Error(ERR_DROP, "Invalid effect curve size");
+    FxCurve *curve = (FxCurve *)Hunk_AllocAlign((int)bytes, sizeof(float), "FxCurve_AllocAndCreateWithKeys", 8);
+    curve->dimensionCount = dimensionCount;
+    curve->keyCount = createdKeyCount;
+    if (addStart)
     {
-        *((float *)newCurve + 2) = 0.0;
-        for (elementIndex = 0; elementIndex != dimensionCount; ++elementIndex)
-            *(float *)&newCurve[4 * elementIndex + 12] = keyArray[elementIndex + 1];
-        keyIndex = 1;
+        memcpy(curve->keys, keyArray, sizeof(float) * keySize);
+        curve->keys[0] = 0.0f;
     }
-    memcpy(&newCurve[4 * keySize * keyIndex + 8], (uint8_t *)keyArray, 4 * keySize * keyCount);
-    keyIndexa = keyCount + keyIndex;
-    if (addKeyAtEnd)
+    memcpy(curve->keys + addStart * keySize, keyArray, sizeof(float) * keySize * keyCount);
+    if (addEnd)
     {
-        *(float *)&newCurve[4 * keySize * keyIndexa + 8] = 1.0;
-        for (elementIndexa = 0; elementIndexa != dimensionCount; ++elementIndexa)
-            *(float *)&newCurve[4 * keySize * keyIndexa + 12 + 4 * elementIndexa] = keyArray[elementIndexa + 1];
-        ++keyIndexa;
+        float *last = curve->keys + (createdKeyCount - 1) * keySize;
+        memcpy(last, keyArray + (keyCount - 1) * keySize, sizeof(float) * keySize);
+        last[0] = 1.0f;
     }
-    if (keyIndexa != createdKeyCount)
-        MyAssertHandler(
-            ".\\EffectsCore\\FxCurve_load_obj.cpp",
-            61,
-            1,
-            "keyIndex == createdKeyCount\n\t%i, %i",
-            keyIndexa,
-            createdKeyCount);
-    if (*((float *)newCurve + 2) != 0.0)
-        MyAssertHandler(
-            ".\\EffectsCore\\FxCurve_load_obj.cpp",
-            62,
-            1,
-            "%s\n\t(newCurve->keys[0 * keySize + 0]) = %g",
-            "(newCurve->keys[0 * keySize + 0] == 0.0f)",
-            *((float *)newCurve + 2));
-    if (*(float *)&newCurve[4 * keySize * (createdKeyCount - 1) + 8] != 1.0)
-        MyAssertHandler(
-            ".\\EffectsCore\\FxCurve_load_obj.cpp",
-            63,
-            1,
-            "%s\n\t(newCurve->keys[(createdKeyCount - 1) * keySize + 0]) = %g",
-            "(newCurve->keys[(createdKeyCount - 1) * keySize + 0] == 1.0f)",
-            *(float *)&newCurve[4 * keySize * (createdKeyCount - 1) + 8]);
-    *((_DWORD *)newCurve + 1) = keyCount;
-    return (const FxCurve *)newCurve;
+    return curve;
 }
 
 

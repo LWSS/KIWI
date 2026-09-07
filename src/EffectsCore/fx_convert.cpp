@@ -2,6 +2,7 @@
 #include "fx_system.h"
 #include <gfx_d3d/r_material.h>
 #include <universal/com_math.h>
+#include <xanim/xanim.h>
 
 bool __cdecl FX_ElemUsesMaterial(const FxEditorElemDef *edElemDef)
 {
@@ -533,14 +534,14 @@ int __cdecl FX_AdditionalBytesNeededForElemDef(
 {
     int bytesNeeded; // [esp+0h] [ebp-4h]
 
-    bytesNeeded = 96 * velStateSampleCount + 48 * visStateSampleCount;
+    bytesNeeded = sizeof(FxElemVelStateSample) * velStateSampleCount + sizeof(FxElemVisStateSample) * visStateSampleCount;
     if (elemType == 9)
     {
-        bytesNeeded += 8 * visualCount;
+        bytesNeeded += sizeof(FxElemMarkVisuals) * visualCount;
     }
     else if (visualCount > 1)
     {
-        bytesNeeded += 4 * visualCount;
+        bytesNeeded += sizeof(FxElemVisuals) * visualCount;
     }
     return bytesNeeded;
 }
@@ -548,7 +549,7 @@ int __cdecl FX_AdditionalBytesNeededForElemDef(
 int __cdecl FX_AdditionalBytesNeededForGeomTrail(const FxEditorElemDef *elemDef)
 {
     if (elemDef->elemType == 3)
-        return 22 * elemDef->trailDef.indCount + 28;
+        return (sizeof(FxTrailDef) + (sizeof(FxTrailVertex) + sizeof(uint16_t)) * elemDef->trailDef.indCount + sizeof(void *) - 1) & ~(sizeof(void *) - 1);
     else
         return 0;
 }
@@ -585,7 +586,7 @@ int __cdecl FX_AdditionalBytesNeededForEmission(const FxEffectDef *emission)
     int elemDefIndex; // [esp+18h] [ebp-4h]
 
     iassert(emission);
-    bytesNeeded = 252 * emission->elemDefCountOneShot;
+    bytesNeeded = sizeof(FxElemDef) * emission->elemDefCountOneShot;
     elemDefStop = emission->elemDefCountOneShot + emission->elemDefCountLooping;
     for (elemDefIndex = emission->elemDefCountLooping; elemDefIndex != elemDefStop; ++elemDefIndex)
     {
@@ -704,11 +705,11 @@ void __cdecl FX_ReserveElemDefMemory(FxElemDef *elemDef, uint8_t **memPool)
     iassert(*memPool);
     iassert(elemDef->velIntervalCount);
     elemDef->velSamples = (FxElemVelStateSample *)*memPool;
-    *memPool += 96 * elemDef->velIntervalCount + 96;
+    *memPool += sizeof(FxElemVelStateSample) * (elemDef->velIntervalCount + 1);
     if (elemDef->visStateIntervalCount)
     {
         elemDef->visSamples = (FxElemVisStateSample *)*memPool;
-        *memPool += 48 * elemDef->visStateIntervalCount + 48;
+        *memPool += sizeof(FxElemVisStateSample) * (elemDef->visStateIntervalCount + 1);
     }
     else
     {
@@ -717,12 +718,12 @@ void __cdecl FX_ReserveElemDefMemory(FxElemDef *elemDef, uint8_t **memPool)
     if (elemDef->elemType == 9)
     {
         elemDef->visuals.markArray = (FxElemMarkVisuals *)*memPool;
-        *memPool += 8 * elemDef->visualCount;
+        *memPool += sizeof(FxElemMarkVisuals) * elemDef->visualCount;
     }
     else if (elemDef->visualCount > 1u)
     {
         elemDef->visuals.markArray = (FxElemMarkVisuals *)*memPool;
-        *memPool += 4 * elemDef->visualCount;
+        *memPool += sizeof(FxElemVisuals) * elemDef->visualCount;
     }
 }
 
@@ -1052,12 +1053,12 @@ void __cdecl FX_SampleVisualState(FxElemDef *elemDef, const FxEditorElemDef *edE
 
 void __cdecl FX_CopyMarkVisuals(const FxEditorElemDef *edElemDef, FxElemMarkVisuals *markVisualsArray)
 {
-    memcpy(markVisualsArray, &edElemDef->markVisuals, 8 * edElemDef->visualCount);
+    memcpy(markVisualsArray, &edElemDef->markVisuals, sizeof(FxElemMarkVisuals) * edElemDef->visualCount);
 }
 
 void __cdecl FX_CopyVisuals(const FxEditorElemDef *edElemDef, FxElemVisuals *visualsArray)
 {
-    memcpy(visualsArray, &edElemDef->markVisuals, 4 * edElemDef->visualCount);
+    memcpy(visualsArray, edElemDef->visuals, sizeof(FxElemVisuals) * edElemDef->visualCount);
 }
 
 void __cdecl FX_ConvertTrail_CalcNormForSegment(const float *vert0, const float *vert1, float *outNormal)
@@ -1224,8 +1225,9 @@ void __cdecl FX_ConvertTrail(FxTrailDef **outTrailDef, const FxEditorElemDef *ed
     if (edElemDef->elemType == 3)
     {
         *outTrailDef = (FxTrailDef *)*mempool;
-        *mempool += 28;
+        *mempool += sizeof(FxTrailDef);
         FX_ConvertTrail_CompileVertices(edElemDef, *outTrailDef, mempool);
+        *mempool = (uint8_t *)(((uintptr_t)*mempool + sizeof(void *) - 1) & ~(uintptr_t)(sizeof(void *) - 1));
         iassert(edElemDef->trailSplitDist > 0);
         iassert(edElemDef->trailRepeatDist > 0);
         (*outTrailDef)->splitDist = edElemDef->trailSplitDist;
@@ -1440,7 +1442,7 @@ int __cdecl FX_CopyEmittedElemDefs(
     const FxEditorEffectDef *editorEffect,
     uint8_t **memPool)
 {
-    uint8_t **elemDefEmit; // [esp+8h] [ebp-20h]
+    const FxElemDef *elemDefEmit; // [esp+8h] [ebp-20h]
     const FxEffectDef *emission; // [esp+Ch] [ebp-1Ch]
     int elemIndexEmit; // [esp+10h] [ebp-18h]
     FxElemDef *elemDef; // [esp+14h] [ebp-14h]
@@ -1459,7 +1461,7 @@ int __cdecl FX_CopyEmittedElemDefs(
             for (elemIndexEmit = emission->elemDefCountLooping; elemIndexEmit != elemIndexStop; ++elemIndexEmit)
             {
                 elemDef = &elemDefArray[elemCount++];
-                elemDefEmit = (uint8_t **)&emission->elemDefs[elemIndexEmit];
+                elemDefEmit = &emission->elemDefs[elemIndexEmit];
                 memcpy((void *)elemDef, elemDefEmit, sizeof(FxElemDef));
                 if ((elemDef->flags & 0xC0) == 0x40)
                 {
@@ -1467,11 +1469,13 @@ int __cdecl FX_CopyEmittedElemDefs(
                     elemDef->flags = elemDef->flags;
                 }
                 FX_ReserveElemDefMemory(elemDef, memPool);
-                memcpy((uint8_t *)elemDef->velSamples, elemDefEmit[45], 96 * (elemDef->velIntervalCount + 1));
+                memcpy((uint8_t *)elemDef->velSamples, elemDefEmit->velSamples, sizeof(FxElemVelStateSample) * (elemDef->velIntervalCount + 1));
                 if (elemDef->visSamples)
-                    memcpy(elemDef->visSamples->base.color, elemDefEmit[46], 48 * (elemDef->visStateIntervalCount + 1));
-                if (elemDef->visualCount > 1u)
-                    memcpy((uint8_t *)elemDef->visuals.markArray, elemDefEmit[47], 4 * elemDef->visualCount);
+                    memcpy(elemDef->visSamples->base.color, elemDefEmit->visSamples, sizeof(FxElemVisStateSample) * (elemDef->visStateIntervalCount + 1));
+                if (elemDef->elemType == 9)
+                    memcpy(elemDef->visuals.markArray, elemDefEmit->visuals.markArray, sizeof(FxElemMarkVisuals) * elemDef->visualCount);
+                else if (elemDef->visualCount > 1u)
+                    memcpy(elemDef->visuals.array, elemDefEmit->visuals.array, sizeof(FxElemVisuals) * elemDef->visualCount);
             }
         }
     }
@@ -1508,9 +1512,6 @@ const FxEffectDef *__cdecl FX_Convert(const FxEditorEffectDef *editorEffect, voi
     int v10; // eax
     int v11; // eax
     int LoopingLife; // eax
-    char v13; // [esp+13h] [ebp-1E1h]
-    char *name; // [esp+18h] [ebp-1DCh]
-    const FxEditorEffectDef *v15; // [esp+1Ch] [ebp-1D8h]
     int intervalLimit; // [esp+34h] [ebp-1C0h]
     int elemCountTotal; // [esp+38h] [ebp-1BCh]
     int velStateCount[32]; // [esp+3Ch] [ebp-1B8h] BYREF
@@ -1518,7 +1519,7 @@ const FxEffectDef *__cdecl FX_Convert(const FxEditorEffectDef *editorEffect, voi
     int visualIndex; // [esp+C0h] [ebp-134h]
     int emitIndex[32]; // [esp+C4h] [ebp-130h] BYREF
     int firstEmitted; // [esp+144h] [ebp-B0h]
-    int totalBytesNeeded; // [esp+148h] [ebp-ACh]
+    size_t totalBytesNeeded; // native allocation size
     int visStateCount[33]; // [esp+14Ch] [ebp-A8h] BYREF
     const FxEditorElemDef *edElemDef; // [esp+1D0h] [ebp-24h]
     int elemIndex; // [esp+1D4h] [ebp-20h]
@@ -1527,8 +1528,10 @@ const FxEffectDef *__cdecl FX_Convert(const FxEditorEffectDef *editorEffect, voi
     const FxElemVisuals *elemVisual; // [esp+1F0h] [ebp-4h]
 
     iassert(editorEffect);
+    if (editorEffect->elemCount < 0 || editorEffect->elemCount > 32)
+        Com_Error(ERR_DROP, "Too many editor effect elements");
     memset((uint8_t *)emitIndex, 0xFFu, sizeof(emitIndex));
-    totalBytesNeeded = 252 * editorEffect->elemCount + 32;
+    totalBytesNeeded = sizeof(FxElemDef) * editorEffect->elemCount + sizeof(FxEffectDef);
     elemCountTotal = editorEffect->elemCount;
     for (elemIndex = 0; elemIndex < editorEffect->elemCount; ++elemIndex)
     {
@@ -1540,14 +1543,14 @@ const FxEffectDef *__cdecl FX_Convert(const FxEditorEffectDef *editorEffect, voi
                 elemVisual = &edElemDef->visuals[visualIndex];
                 if (elemVisual->anonymous)
                 {
-                    if (!*((_DWORD *)elemVisual->anonymous + 53))
+                    if (!elemVisual->model->physPreset)
                     {
                         v2 = FX_RegisterPhysPreset("default");
-                        *((_DWORD *)elemVisual->anonymous + 53) = (_DWORD)v2;
+                        elemVisual->model->physPreset = v2;
                         Com_PrintError(
                             CON_CHANNEL_PHYS,
                             "ERROR: no physics preset specified for the FX model [%s]\n",
-                            *(const char **)elemVisual->anonymous);
+                            elemVisual->model->name);
                     }
                 }
             }
@@ -1578,6 +1581,9 @@ const FxEffectDef *__cdecl FX_Convert(const FxEditorEffectDef *editorEffect, voi
             if (firstEmitted == elemIndex)
             {
                 emitIndex[elemIndex] = elemCountTotal;
+                if (edElemDef->emission->elemDefCountOneShot < 0 ||
+                    edElemDef->emission->elemDefCountOneShot > 256 - elemCountTotal)
+                    Com_Error(ERR_DROP, "Too many emitted effect elements");
                 elemCountTotal += edElemDef->emission->elemDefCountOneShot;
                 v8 = FX_AdditionalBytesNeededForEmission(edElemDef->emission);
                 totalBytesNeeded += v8;
@@ -1588,11 +1594,17 @@ const FxEffectDef *__cdecl FX_Convert(const FxEditorEffectDef *editorEffect, voi
             }
         }
     }
+    if (elemCountTotal > 256)
+        Com_Error(ERR_DROP, "Too many converted effect elements");
     totalBytesNeeded += strlen(editorEffect->name) + 1;
-    effect = (FxEffectDef *)Alloc(totalBytesNeeded);
+    if (totalBytesNeeded > INT_MAX)
+        Com_Error(ERR_DROP, "Effect definition is too large");
+    effect = (FxEffectDef *)Alloc((uint)totalBytesNeeded);
+    if (!effect)
+        Com_Error(ERR_DROP, "Could not allocate effect definition");
     memPool = (uint8_t *)&effect[1];
     effect->elemDefs = (const FxElemDef *)&effect[1];
-    memPool += 252 * elemCountTotal;
+    memPool += sizeof(FxElemDef) * elemCountTotal;
     v9 = FX_ConvertElemDefsOfType((FxElemDef*)effect->elemDefs, editorEffect, 1u, velStateCount, visStateCount, emitIndex, &memPool);
     effect->elemDefCountLooping = v9;
     v10 = FX_ConvertElemDefsOfType(
@@ -1629,24 +1641,16 @@ const FxEffectDef *__cdecl FX_Convert(const FxEditorEffectDef *editorEffect, voi
     }
     LoopingLife = FX_GetLoopingLife(effect);
     effect->msecLoopingLife = LoopingLife;
-    effect->totalSize = totalBytesNeeded;
+    effect->totalSize = (int)totalBytesNeeded;
     effect->name = (const char *)memPool;
-    v15 = editorEffect;
-    name = (char *)effect->name;
-    do
-    {
-        v13 = v15->name[0];
-        *name = v15->name[0];
-        v15 = (const FxEditorEffectDef *)((char *)v15 + 1);
-        ++name;
-    } while (v13);
+    memcpy((char *)effect->name, editorEffect->name, strlen(editorEffect->name) + 1);
     memPool += &effect->name[strlen(effect->name) + 1] - effect->name;
     if (memPool - (uint8_t *)effect != effect->totalSize)
         MyAssertHandler(
             ".\\EffectsCore\\fx_convert.cpp",
             1536,
             1,
-            "memPool - reinterpret_cast< byte * >( effect ) == effect->totalSize\n\t%i, %i",
+            "memPool - reinterpret_cast< byte * >( effect ) == effect->totalSize\n\t%td, %i",
             memPool - (uint8_t *)effect,
             effect->totalSize);
     return effect;

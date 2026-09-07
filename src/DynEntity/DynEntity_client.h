@@ -45,7 +45,7 @@ struct DynEntityDef // sizeof=0x60
     PhysMass mass;
     int contents;
 };
-static_assert(sizeof(DynEntityDef) == 0x60);
+static_assert(sizeof(DynEntityDef) == (sizeof(void *) == 8 ? 0x78 : 0x60));
 
 struct DynEntityPose // sizeof=0x20
 {
@@ -56,12 +56,12 @@ static_assert(sizeof(DynEntityPose) == 0x20);;
 
 struct DynEntityClient // sizeof=0xC
 {
-    int physObjId;
+    uintptr_t physObjId;
     uint16_t flags;
     uint16_t lightingHandle;
     int health;
 };
-static_assert(sizeof(DynEntityClient) == 0xC);
+static_assert(sizeof(DynEntityClient) == (sizeof(void *) == 8 ? 0x10 : 0xC));
 
 struct DynEntityColl // sizeof=0x14
 {
@@ -81,7 +81,7 @@ struct DynEntityAreaParms // sizeof=0x14
     uint16_t maxCount;          // ...
     uint16_t count;             // ...
 };
-static_assert(sizeof(DynEntityAreaParms) == 0x14);
+static_assert(sizeof(DynEntityAreaParms) == (sizeof(void *) == 8 ? 0x28 : 0x14));
 
 struct DynEntSortStruct // sizeof=0x8
 {
@@ -97,12 +97,12 @@ static_assert(sizeof(DynEntSortStruct) == 0x8);
 struct BreakablePiece // sizeof=0xC
 {                                       // ...
     const XModel *model;                // ...
-    int physObjId;                      // ...
+    uintptr_t physObjId;                      // ...
     uint16_t lightingHandle;    // ...
     bool active;                        // ...
     // padding byte
 };
-static_assert(sizeof(BreakablePiece) == 0xC);
+static_assert(sizeof(BreakablePiece) == (sizeof(void *) == 8 ? 0x18 : 0xC));
 
 struct pointtrace_t;
 struct trace_t;
@@ -256,7 +256,7 @@ struct DynEntityProps // sizeof=0x8
     bool usePhysics;
     bool destroyable;
 };
-static_assert(sizeof(DynEntityProps) == 0x8);
+static_assert(sizeof(DynEntityProps) == (sizeof(void *) == 8 ? 0x10 : 0x8));
 
 struct DynEntityCreateParams // sizeof=0x1C0
 {                                       // ...

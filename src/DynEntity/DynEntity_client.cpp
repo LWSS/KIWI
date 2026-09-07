@@ -101,7 +101,7 @@ void __cdecl DynEntCl_InitEntities(int localClientNum)
                 dynEntPose = DynEnt_GetClientPose(dynEntId, drawType);
                 dynEntClient = DynEnt_GetClientEntity(dynEntId, drawType);
                 dynEntColl = DynEnt_GetEntityColl((DynEntityCollType)drawType, dynEntId);
-                memcpy(dynEntPose, &dynEntDef->pose, 0x1Cu);
+                dynEntPose->pose = dynEntDef->pose;
                 dynEntClient->physObjId = 0;
                 dynEntClient->flags = 2;
                 dynEntClient->health = dynEntDef->health;
@@ -118,178 +118,36 @@ void __cdecl DynEntCl_InitEntities(int localClientNum)
     }
 }
 
+static void DynEntCl_TransformBounds(const float mins[3], const float maxs[3],
+    const GfxPlacement *pose, float worldMins[3], float worldMaxs[3])
+{
+    float axis[3][3];
+    UnitQuatToAxis(pose->quat, axis);
+    for (int dim = 0; dim < 3; ++dim)
+    {
+        worldMins[dim] = pose->origin[dim];
+        worldMaxs[dim] = pose->origin[dim];
+        for (int source = 0; source < 3; ++source)
+        {
+            float a = mins[source] * axis[source][dim];
+            float b = maxs[source] * axis[source][dim];
+            worldMins[dim] += a < b ? a : b;
+            worldMaxs[dim] += a > b ? a : b;
+        }
+    }
+}
+
 void __cdecl DynEntCl_LinkModel(uint16_t dynEntId)
 {
-    int v1; // [esp+0h] [ebp-204h]
-    int v2; // [esp+4h] [ebp-200h]
-    int v3; // [esp+8h] [ebp-1FCh]
-    int v4; // [esp+Ch] [ebp-1F8h]
-    int v5; // [esp+10h] [ebp-1F4h]
-    int v6; // [esp+14h] [ebp-1F0h]
-    int v7; // [esp+18h] [ebp-1ECh]
-    int v8; // [esp+1Ch] [ebp-1E8h]
-    int v9; // [esp+20h] [ebp-1E4h]
-    int v10; // [esp+24h] [ebp-1E0h]
-    int v11; // [esp+28h] [ebp-1DCh]
-    int v12; // [esp+2Ch] [ebp-1D8h]
-    float v13; // [esp+90h] [ebp-174h]
-    float v14; // [esp+E0h] [ebp-124h]
-    float v15; // [esp+F0h] [ebp-114h]
-    float v16; // [esp+134h] [ebp-D0h]
-    float v17; // [esp+138h] [ebp-CCh]
-    float v18; // [esp+13Ch] [ebp-C8h]
-    float v19; // [esp+140h] [ebp-C4h]
-    DynEntityPose *dynEntPose; // [esp+160h] [ebp-A4h]
-    float modelBoundsVec3[2][3]; // [esp+164h] [ebp-A0h] BYREF
-    float4 worldBoundsFloat4[2]; // [esp+17Ch] [ebp-88h]
-    XModel *model; // [esp+19Ch] [ebp-68h]
-    const DynEntityDef *dynEntDef; // [esp+1A0h] [ebp-64h]
-    float modelAxis[3][3]; // [esp+1A4h] [ebp-60h] BYREF
-    float worldBoundsVec3[2][3]; // [esp+1C8h] [ebp-3Ch] BYREF
-    float4 modelBoundsFloat4[2]; // [esp+1E0h] [ebp-24h]
-
-    dynEntDef = DynEnt_GetEntityDef(dynEntId, DYNENT_DRAW_MODEL);
-    dynEntPose = DynEnt_GetClientPose(dynEntId, DYNENT_DRAW_MODEL);
-    model = dynEntDef->xModel;
-    iassert(model);
-    dynEntPose->radius = XModelGetRadius(model);
-    XModelGetBounds(model, modelBoundsVec3[0], modelBoundsVec3[1]);
-    modelBoundsFloat4[0].v[0] = modelBoundsVec3[0][0];
-    modelBoundsFloat4[0].v[1] = modelBoundsVec3[0][1];
-    modelBoundsFloat4[0].v[2] = modelBoundsVec3[0][2];
-    modelBoundsFloat4[0].v[3] = 0.0;
-    modelBoundsFloat4[1].v[0] = modelBoundsVec3[1][0];
-    modelBoundsFloat4[1].v[1] = modelBoundsVec3[1][1];
-    modelBoundsFloat4[1].v[2] = modelBoundsVec3[1][2];
-    modelBoundsFloat4[1].v[3] = 0.0;
-    UnitQuatToAxis(dynEntPose->pose.quat, modelAxis);
-    v14 = 0.0;
-    v13 = 0.0;
-    v15 = 0.0;
-    v16 = dynEntPose->pose.origin[0];
-    v17 = dynEntPose->pose.origin[1];
-    v18 = dynEntPose->pose.origin[2];
-    v19 = 0.0;
-    if (modelAxis[0][0] >= 0.0)
-        v12 = 0;
-    else
-        v12 = -1;
-    if (modelAxis[0][1] >= 0.0)
-        v11 = 0;
-    else
-        v11 = -1;
-    if (modelAxis[0][2] >= 0.0)
-        v10 = 0;
-    else
-        v10 = -1;
-    if (v14 >= 0.0)
-        v9 = 0;
-    else
-        v9 = -1;
-    if (modelAxis[1][0] >= 0.0)
-        v8 = 0;
-    else
-        v8 = -1;
-    if (modelAxis[1][1] >= 0.0)
-        v7 = 0;
-    else
-        v7 = -1;
-    if (modelAxis[1][2] >= 0.0)
-        v6 = 0;
-    else
-        v6 = -1;
-    if (v13 >= 0.0)
-        v5 = 0;
-    else
-        v5 = -1;
-    if (modelAxis[2][0] >= 0.0)
-        v4 = 0;
-    else
-        v4 = -1;
-    if (modelAxis[2][1] >= 0.0)
-        v3 = 0;
-    else
-        v3 = -1;
-    if (modelAxis[2][2] >= 0.0)
-        v2 = 0;
-    else
-        v2 = -1;
-    if (v15 >= 0.0)
-        v1 = 0;
-    else
-        v1 = -1;
-    worldBoundsFloat4[0].v[0] = COERCE_FLOAT(modelBoundsFloat4[1].u[0] & v12 | modelBoundsFloat4[0].u[0] & ~v12)
-        * modelAxis[0][0]
-        + v16;
-    worldBoundsFloat4[0].v[1] = COERCE_FLOAT(modelBoundsFloat4[1].u[0] & v11 | modelBoundsFloat4[0].u[0] & ~v11)
-        * modelAxis[0][1]
-        + v17;
-    worldBoundsFloat4[0].v[2] = COERCE_FLOAT(modelBoundsFloat4[1].u[0] & v10 | modelBoundsFloat4[0].u[0] & ~v10)
-        * modelAxis[0][2]
-        + v18;
-    worldBoundsFloat4[0].v[3] = COERCE_FLOAT(modelBoundsFloat4[1].u[0] & v9 | modelBoundsFloat4[0].u[0] & ~v9) * v14 + v19;
-    worldBoundsFloat4[0].v[0] = COERCE_FLOAT(modelBoundsFloat4[1].u[1] & v8 | modelBoundsFloat4[0].u[1] & ~v8)
-        * modelAxis[1][0]
-        + worldBoundsFloat4[0].v[0];
-    worldBoundsFloat4[0].v[1] = COERCE_FLOAT(modelBoundsFloat4[1].u[1] & v7 | modelBoundsFloat4[0].u[1] & ~v7)
-        * modelAxis[1][1]
-        + worldBoundsFloat4[0].v[1];
-    worldBoundsFloat4[0].v[2] = COERCE_FLOAT(modelBoundsFloat4[1].u[1] & v6 | modelBoundsFloat4[0].u[1] & ~v6)
-        * modelAxis[1][2]
-        + worldBoundsFloat4[0].v[2];
-    worldBoundsFloat4[0].v[3] = COERCE_FLOAT(modelBoundsFloat4[1].u[1] & v5 | modelBoundsFloat4[0].u[1] & ~v5) * v13
-        + worldBoundsFloat4[0].v[3];
-    worldBoundsFloat4[0].v[0] = COERCE_FLOAT(modelBoundsFloat4[1].u[2] & v4 | modelBoundsFloat4[0].u[2] & ~v4)
-        * modelAxis[2][0]
-        + worldBoundsFloat4[0].v[0];
-    worldBoundsFloat4[0].v[1] = COERCE_FLOAT(modelBoundsFloat4[1].u[2] & v3 | modelBoundsFloat4[0].u[2] & ~v3)
-        * modelAxis[2][1]
-        + worldBoundsFloat4[0].v[1];
-    worldBoundsFloat4[0].v[2] = COERCE_FLOAT(modelBoundsFloat4[1].u[2] & v2 | modelBoundsFloat4[0].u[2] & ~v2)
-        * modelAxis[2][2]
-        + worldBoundsFloat4[0].v[2];
-    worldBoundsFloat4[0].v[3] = COERCE_FLOAT(modelBoundsFloat4[1].u[2] & v1 | modelBoundsFloat4[0].u[2] & ~v1) * v15
-        + worldBoundsFloat4[0].v[3];
-    worldBoundsFloat4[1].v[0] = COERCE_FLOAT(modelBoundsFloat4[0].u[0] & v12 | modelBoundsFloat4[1].u[0] & ~v12)
-        * modelAxis[0][0]
-        + v16;
-    worldBoundsFloat4[1].v[1] = COERCE_FLOAT(modelBoundsFloat4[0].u[0] & v11 | modelBoundsFloat4[1].u[0] & ~v11)
-        * modelAxis[0][1]
-        + v17;
-    worldBoundsFloat4[1].v[2] = COERCE_FLOAT(modelBoundsFloat4[0].u[0] & v10 | modelBoundsFloat4[1].u[0] & ~v10)
-        * modelAxis[0][2]
-        + v18;
-    worldBoundsFloat4[1].v[3] = COERCE_FLOAT(modelBoundsFloat4[0].u[0] & v9 | modelBoundsFloat4[1].u[0] & ~v9) * v14 + v19;
-    worldBoundsFloat4[1].v[0] = COERCE_FLOAT(modelBoundsFloat4[0].u[1] & v8 | modelBoundsFloat4[1].u[1] & ~v8)
-        * modelAxis[1][0]
-        + worldBoundsFloat4[1].v[0];
-    worldBoundsFloat4[1].v[1] = COERCE_FLOAT(modelBoundsFloat4[0].u[1] & v7 | modelBoundsFloat4[1].u[1] & ~v7)
-        * modelAxis[1][1]
-        + worldBoundsFloat4[1].v[1];
-    worldBoundsFloat4[1].v[2] = COERCE_FLOAT(modelBoundsFloat4[0].u[1] & v6 | modelBoundsFloat4[1].u[1] & ~v6)
-        * modelAxis[1][2]
-        + worldBoundsFloat4[1].v[2];
-    worldBoundsFloat4[1].v[3] = COERCE_FLOAT(modelBoundsFloat4[0].u[1] & v5 | modelBoundsFloat4[1].u[1] & ~v5) * v13
-        + worldBoundsFloat4[1].v[3];
-    worldBoundsFloat4[1].v[0] = COERCE_FLOAT(modelBoundsFloat4[0].u[2] & v4 | modelBoundsFloat4[1].u[2] & ~v4)
-        * modelAxis[2][0]
-        + worldBoundsFloat4[1].v[0];
-    worldBoundsFloat4[1].v[1] = COERCE_FLOAT(modelBoundsFloat4[0].u[2] & v3 | modelBoundsFloat4[1].u[2] & ~v3)
-        * modelAxis[2][1]
-        + worldBoundsFloat4[1].v[1];
-    worldBoundsFloat4[1].v[2] = COERCE_FLOAT(modelBoundsFloat4[0].u[2] & v2 | modelBoundsFloat4[1].u[2] & ~v2)
-        * modelAxis[2][2]
-        + worldBoundsFloat4[1].v[2];
-    worldBoundsFloat4[1].v[3] = COERCE_FLOAT(modelBoundsFloat4[0].u[2] & v1 | modelBoundsFloat4[1].u[2] & ~v1) * v15
-        + worldBoundsFloat4[1].v[3];
-    worldBoundsVec3[0][0] = worldBoundsFloat4[0].v[0];
-    worldBoundsVec3[0][1] = worldBoundsFloat4[0].v[1];
-    worldBoundsVec3[0][2] = worldBoundsFloat4[0].v[2];
-    worldBoundsVec3[1][0] = worldBoundsFloat4[1].v[0];
-    worldBoundsVec3[1][1] = worldBoundsFloat4[1].v[1];
-    worldBoundsVec3[1][2] = worldBoundsFloat4[1].v[2];
-    DynEnt_LinkEntity(DYNENT_COLL_CLIENT_FIRST, dynEntId, worldBoundsVec3[0], worldBoundsVec3[1]);
-    R_LinkDynEnt(dynEntId, DYNENT_DRAW_MODEL, worldBoundsVec3[0], worldBoundsVec3[1]);
+    const DynEntityDef *def = DynEnt_GetEntityDef(dynEntId, DYNENT_DRAW_MODEL);
+    DynEntityPose *pose = DynEnt_GetClientPose(dynEntId, DYNENT_DRAW_MODEL);
+    float mins[3], maxs[3], worldMins[3], worldMaxs[3];
+    iassert(def->xModel);
+    pose->radius = XModelGetRadius(def->xModel);
+    XModelGetBounds(def->xModel, mins, maxs);
+    DynEntCl_TransformBounds(mins, maxs, &pose->pose, worldMins, worldMaxs);
+    DynEnt_LinkEntity(DYNENT_COLL_CLIENT_MODEL, dynEntId, worldMins, worldMaxs);
+    R_LinkDynEnt(dynEntId, DYNENT_DRAW_MODEL, worldMins, worldMaxs);
 }
 
 void __cdecl DynEntCl_LinkBrush(uint16_t dynEntId)
@@ -317,114 +175,9 @@ void __cdecl DynEntCl_LinkBrush(uint16_t dynEntId)
 
 double __cdecl DynEntCl_UpdateBModelWorldBounds(const DynEntityDef *dynEntDef, const GfxPlacement *pose)
 {
-    int v3; // [esp+4h] [ebp-1C0h]
-    int v4; // [esp+8h] [ebp-1BCh]
-    int v5; // [esp+Ch] [ebp-1B8h]
-    int v6; // [esp+14h] [ebp-1B0h]
-    int v7; // [esp+18h] [ebp-1ACh]
-    int v8; // [esp+1Ch] [ebp-1A8h]
-    int v9; // [esp+24h] [ebp-1A0h]
-    int v10; // [esp+28h] [ebp-19Ch]
-    int v11; // [esp+2Ch] [ebp-198h]
-    float *maxs; // [esp+30h] [ebp-194h]
-    float v13; // [esp+134h] [ebp-90h]
-    float v14; // [esp+138h] [ebp-8Ch]
-    float v15; // [esp+13Ch] [ebp-88h]
-    float rotatedBounds; // [esp+158h] [ebp-6Ch]
-    float rotatedBoundsa; // [esp+158h] [ebp-6Ch]
-    float rotatedBoundsb; // [esp+158h] [ebp-6Ch]
-    float rotatedBounds_4; // [esp+15Ch] [ebp-68h]
-    float rotatedBounds_4a; // [esp+15Ch] [ebp-68h]
-    float rotatedBounds_4b; // [esp+15Ch] [ebp-68h]
-    float rotatedBounds_8; // [esp+160h] [ebp-64h]
-    float rotatedBounds_8a; // [esp+160h] [ebp-64h]
-    float rotatedBounds_8b; // [esp+160h] [ebp-64h]
-    float rotatedBounds_16; // [esp+168h] [ebp-5Ch]
-    float rotatedBounds_16a; // [esp+168h] [ebp-5Ch]
-    float rotatedBounds_16b; // [esp+168h] [ebp-5Ch]
-    float rotatedBounds_20; // [esp+16Ch] [ebp-58h]
-    float rotatedBounds_20a; // [esp+16Ch] [ebp-58h]
-    float rotatedBounds_20b; // [esp+16Ch] [ebp-58h]
-    float rotatedBounds_24; // [esp+170h] [ebp-54h]
-    float rotatedBounds_24a; // [esp+170h] [ebp-54h]
-    float rotatedBounds_24b; // [esp+170h] [ebp-54h]
-    __int64 bounds; // [esp+178h] [ebp-4Ch]
-    __int64 bounds_8; // [esp+180h] [ebp-44h]
-    __int64 bounds_16; // [esp+188h] [ebp-3Ch]
-    __int64 bounds_24; // [esp+190h] [ebp-34h]
-    float axis[3][3]; // [esp+19Ch] [ebp-28h] BYREF
-    GfxBrushModel *bmodel; // [esp+1C0h] [ebp-4h]
-
-    bmodel = R_GetBrushModel(dynEntDef->brushModel);
-    bounds = *(_QWORD *)&bmodel->bounds[0][0];
-    bounds_8 = *(_QWORD *)&bmodel->bounds[0][2];
-    bounds_16 = *(_QWORD *)&bmodel->bounds[1][0];
-    bounds_24 = *(_QWORD *)&bmodel->bounds[1][2];
-    UnitQuatToAxis(pose->quat, axis);
-    v13 = pose->origin[0];
-    v14 = pose->origin[1];
-    v15 = pose->origin[2];
-    if (axis[0][0] >= 0.0)
-        v11 = 0;
-    else
-        v11 = -1;
-    if (axis[0][1] >= 0.0)
-        v10 = 0;
-    else
-        v10 = -1;
-    if (axis[0][2] >= 0.0)
-        v9 = 0;
-    else
-        v9 = -1;
-    if (axis[1][0] >= 0.0)
-        v8 = 0;
-    else
-        v8 = -1;
-    if (axis[1][1] >= 0.0)
-        v7 = 0;
-    else
-        v7 = -1;
-    if (axis[1][2] >= 0.0)
-        v6 = 0;
-    else
-        v6 = -1;
-    if (axis[2][0] >= 0.0)
-        v5 = 0;
-    else
-        v5 = -1;
-    if (axis[2][1] >= 0.0)
-        v4 = 0;
-    else
-        v4 = -1;
-    if (axis[2][2] >= 0.0)
-        v3 = 0;
-    else
-        v3 = -1;
-    rotatedBounds = COERCE_FLOAT(bounds_16 & v11 | bounds & ~v11) * axis[0][0] + v13;
-    rotatedBounds_4 = COERCE_FLOAT(bounds_16 & v10 | bounds & ~v10) * axis[0][1] + v14;
-    rotatedBounds_8 = COERCE_FLOAT(bounds_16 & v9 | bounds & ~v9) * axis[0][2] + v15;
-    rotatedBoundsa = COERCE_FLOAT(HIDWORD(bounds_16) & v8 | HIDWORD(bounds) & ~v8) * axis[1][0] + rotatedBounds;
-    rotatedBounds_4a = COERCE_FLOAT(HIDWORD(bounds_16) & v7 | HIDWORD(bounds) & ~v7) * axis[1][1] + rotatedBounds_4;
-    rotatedBounds_8a = COERCE_FLOAT(HIDWORD(bounds_16) & v6 | HIDWORD(bounds) & ~v6) * axis[1][2] + rotatedBounds_8;
-    rotatedBoundsb = COERCE_FLOAT(bounds_24 & v5 | bounds_8 & ~v5) * axis[2][0] + rotatedBoundsa;
-    rotatedBounds_4b = COERCE_FLOAT(bounds_24 & v4 | bounds_8 & ~v4) * axis[2][1] + rotatedBounds_4a;
-    rotatedBounds_8b = COERCE_FLOAT(bounds_24 & v3 | bounds_8 & ~v3) * axis[2][2] + rotatedBounds_8a;
-    rotatedBounds_16 = COERCE_FLOAT(bounds & v11 | bounds_16 & ~v11) * axis[0][0] + v13;
-    rotatedBounds_20 = COERCE_FLOAT(bounds & v10 | bounds_16 & ~v10) * axis[0][1] + v14;
-    rotatedBounds_24 = COERCE_FLOAT(bounds & v9 | bounds_16 & ~v9) * axis[0][2] + v15;
-    rotatedBounds_16a = COERCE_FLOAT(HIDWORD(bounds) & v8 | HIDWORD(bounds_16) & ~v8) * axis[1][0] + rotatedBounds_16;
-    rotatedBounds_20a = COERCE_FLOAT(HIDWORD(bounds) & v7 | HIDWORD(bounds_16) & ~v7) * axis[1][1] + rotatedBounds_20;
-    rotatedBounds_24a = COERCE_FLOAT(HIDWORD(bounds) & v6 | HIDWORD(bounds_16) & ~v6) * axis[1][2] + rotatedBounds_24;
-    rotatedBounds_16b = COERCE_FLOAT(bounds_8 & v5 | bounds_24 & ~v5) * axis[2][0] + rotatedBounds_16a;
-    rotatedBounds_20b = COERCE_FLOAT(bounds_8 & v4 | bounds_24 & ~v4) * axis[2][1] + rotatedBounds_20a;
-    rotatedBounds_24b = COERCE_FLOAT(bounds_8 & v3 | bounds_24 & ~v3) * axis[2][2] + rotatedBounds_24a;
-    bmodel->writable.mins[0] = rotatedBoundsb;
-    bmodel->writable.mins[1] = rotatedBounds_4b;
-    bmodel->writable.mins[2] = rotatedBounds_8b;
-    maxs = bmodel->writable.maxs;
-    bmodel->writable.maxs[0] = rotatedBounds_16b;
-    maxs[1] = rotatedBounds_20b;
-    maxs[2] = rotatedBounds_24b;
+    GfxBrushModel *bmodel = R_GetBrushModel(dynEntDef->brushModel);
+    DynEntCl_TransformBounds(bmodel->bounds[0], bmodel->bounds[1], pose,
+        bmodel->writable.mins, bmodel->writable.maxs);
     return RadiusFromBounds(bmodel->bounds[0], bmodel->bounds[1]);
 }
 
@@ -1137,7 +890,7 @@ char __cdecl DynEntCl_DynEntImpactEvent(
         if (!dynEntClient->physObjId)
         {
             PhysObj = DynEntCl_CreatePhysObj(dynEntDef, &dynEntPose->pose);
-            dynEntClient->physObjId = (int)PhysObj;
+            dynEntClient->physObjId = (uintptr_t)PhysObj;
         }
         if (dynEntClient->physObjId)
             Phys_ObjBulletImpact(
@@ -1402,7 +1155,7 @@ void __cdecl DynEntCl_ExplosionEvent(
                         if (!dynEntClient->physObjId)
                         {
                             PhysObj = DynEntCl_CreatePhysObj(dynEntDef, &dynEntPose->pose);
-                            dynEntClient->physObjId = (int)PhysObj;
+                            dynEntClient->physObjId = (uintptr_t)PhysObj;
                         }
                         if (dynEntClient->physObjId)
                         {
@@ -1564,7 +1317,7 @@ void __cdecl DynEntCl_JitterEvent(
                 {
                     dynEntPosea = DynEnt_GetClientPose(dynEntList[i], drawType);
                     PhysObj = DynEntCl_CreatePhysObj(dynEntDef, &dynEntPosea->pose);
-                    ClientEntity->physObjId = (int)PhysObj;
+                    ClientEntity->physObjId = (uintptr_t)PhysObj;
                 }
             }
         }
@@ -1648,7 +1401,7 @@ void DynEntCl_WakeUpAroundPlayer(int localClientNum)
                 if (DynEnt_GetEntityProps(EntityDef->type)->usePhysics && !dynEntClient->physObjId)
                 {
                     ClientPose = DynEnt_GetClientPose(dynEntId, drawType);
-                    dynEntClient->physObjId = (int)DynEntCl_CreatePhysObj(EntityDef, &ClientPose->pose);
+                    dynEntClient->physObjId = (uintptr_t)DynEntCl_CreatePhysObj(EntityDef, &ClientPose->pose);
                 }
             }
 

@@ -76,7 +76,7 @@ adjacencyWinding_t *__cdecl BuildBrushdAdjacencyWindingForSide(
             v21 = TestConvexWithoutNearPoints((const SimplePlaneIntersection **)cycle[1], cycleCount[1]);
             if (CycleLess(v20, v21, perimiter1, perimiter2, cycleCount[0], cycleCount[1]))
             {
-                memcpy((uint8_t *)cycle, (uint8_t *)cycle[1], 4 * cycleCount[1]);
+                memcpy(cycle[0], cycle[1], sizeof(SimplePlaneIntersection *) * cycleCount[1]);
                 cycleCount[0] = cycleCount[1];
             }
         }
@@ -292,7 +292,7 @@ const SimplePlaneIntersection *__cdecl RemoveNextPointFormedByThisPlane(
     if (begina == end)
         return 0;
     returnVal = *begina;
-    memmove((uint8_t *)begina, (uint8_t *)begina + 4, 4 * (end - (begina + 1)));
+    memmove(begina, begina + 1, sizeof(const SimplePlaneIntersection *) * (end - (begina + 1)));
     return returnVal;
 }
 
@@ -562,7 +562,7 @@ struct CycleQueueNode
     int depth;                              // v13 / v14[4*idx-1]
     CycleQueueNode *back;                   // v14[4*idx]
 };
-static_assert(sizeof(CycleQueueNode) == 0x10);
+static_assert(sizeof(CycleQueueNode) == (sizeof(void *) == 8 ? 0x18 : 0x10));
 
 // aislop
 char __cdecl FindCycleBFS(
@@ -665,7 +665,7 @@ int __cdecl RemovePtsWithPlanesThatOccurLessThanTwice(const SimplePlaneIntersect
         }
         else
         {
-            memmove(&pts[ptsIndex], &pts[ptsIndex + 1], 4 * (ptsCount - ptsIndex) - 4);
+            memmove(&pts[ptsIndex], &pts[ptsIndex + 1], sizeof(const SimplePlaneIntersection *) * (ptsCount - ptsIndex - 1));
             --ptsCount;
             ptsIndex = 0;
         }
@@ -756,7 +756,7 @@ int __cdecl ChooseEdgeToRemove(
     v14 = TestConvexWithoutNearPoints(v11, ptCount);
     v15 = TestConvexWithoutNearPoints(v12, v18);
     v9 = CycleLess(v13, v14, perimiter1, perimiter2, resultCycleCount, ptCount);
-    if (CycleLess(*(&v13 + v9), v15, *(&perimiter1 + v9), v21, *(&resultCycleCount + v9), v18))
+    if (CycleLess(v9 ? v14 : v13, v15, v9 ? perimiter2 : perimiter1, v21, v9 ? ptCount : resultCycleCount, v18))
         v9 = 2;
     return 2 - v9;
 }
@@ -798,7 +798,7 @@ int __cdecl PartitionEdges(
                 if (i < v10 - 1)
                 {
                     v8 = edges[v14];
-                    memmove(&edges[partition[i] + 1], &edges[partition[i]], 4 * (v14 - partition[i]));
+                    memmove(&edges[partition[i] + 1], &edges[partition[i]], sizeof(const SimplePlaneIntersection *) * (v14 - partition[i]));
                     edges[partition[i]] = v8;
                 }
                 for (j = i; j < v10; ++j)
@@ -821,7 +821,7 @@ int __cdecl Remove(const SimplePlaneIntersection **pts, int ptsCount, const Simp
         ;
     if (ptsIndex == ptsCount)
         return ptsCount;
-    memmove(&pts[ptsIndex], &pts[ptsIndex + 1], 4 * (ptsCount - ptsIndex) - 4);
+    memmove(&pts[ptsIndex], &pts[ptsIndex + 1], sizeof(const SimplePlaneIntersection *) * (ptsCount - ptsIndex - 1));
     ptsCounta = ptsCount - 1;
     if (ptsCounta >= 3)
         return RemovePtsWithPlanesThatOccurLessThanTwice(pts, ptsCounta);
@@ -831,7 +831,7 @@ int __cdecl Remove(const SimplePlaneIntersection **pts, int ptsCount, const Simp
 
 int __cdecl NumberOfUniquePoints(const SimplePlaneIntersection **pts, int ptsCount)
 {
-    uint v3[1025]; // [esp+10h] [ebp-1010h]
+    const SimplePlaneIntersection *v3[1025]; // [esp+10h] [ebp-1010h]
     int v4; // [esp+1014h] [ebp-Ch]
     int j; // [esp+1018h] [ebp-8h]
     int i; // [esp+101Ch] [ebp-4h]
@@ -841,10 +841,10 @@ int __cdecl NumberOfUniquePoints(const SimplePlaneIntersection **pts, int ptsCou
     v4 = 0;
     for (i = 0; i < ptsCount; ++i)
     {
-        for (j = 0; j < v4 && !VecNCompareCustomEpsilon(pts[i]->xyz, (const float*)v3[j], 0.0099999998f, 3); ++j) // KISAKTODO: more sus casts
+        for (j = 0; j < v4 && !VecNCompareCustomEpsilon(pts[i]->xyz, v3[j]->xyz, 0.0099999998f, 3); ++j) // KISAKTODO: more sus casts
             ;
         if (j == v4)
-            v3[v4++] = (uint)pts[i];
+            v3[v4++] = pts[i];
     }
     return v4;
 }

@@ -75,7 +75,7 @@ struct FxEffectDef // sizeof=0x20
     int elemDefCountEmission;
     const FxElemDef *elemDefs;
 };
-static_assert(sizeof(FxEffectDef) == 32);
+static_assert(sizeof(FxEffectDef) == (sizeof(void *) == 8 ? 0x28 : 32));
 
 struct FxEffect // sizeof=0x80
 {                                       // ...
@@ -142,7 +142,7 @@ struct FxElem // sizeof=0x28
     //$A58BA6DA60295001BBA5E9F807131CF1 ___u8;
     union
     {
-        int physObjId;
+        uintptr_t physObjId;
         float origin[3];
     };
     //FxElem::<unnamed_type_u> u;
@@ -302,7 +302,7 @@ struct FxUpdateElem // sizeof=0x7C
     // padding byte
     // padding byte
     // padding byte
-    int physObjId;                      // ...
+    uintptr_t physObjId;                      // ...
 };
 struct FxCmd // sizeof=0xC
 {                                       // ...
@@ -477,7 +477,7 @@ struct FxImpactTable // sizeof=0x8
     const char *name;
     FxImpactEntry *table;
 };
-static_assert(sizeof(FxImpactTable) == 8);
+static_assert(sizeof(FxImpactTable) == (sizeof(void *) == 8 ? 0x10 : 8));
 
 struct FxSystemBuffers // sizeof=0x47480
 {                                       // ...

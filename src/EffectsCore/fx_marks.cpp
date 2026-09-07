@@ -31,7 +31,7 @@ static uint g_markThread[1];
 
 void __cdecl TRACK_fx_marks()
 {
-    track_static_alloc_internal(g_fxMarkPoints, 24480, "g_fxMarkPoints", 8);
+    track_static_alloc_internal(g_fxMarkPoints, sizeof(g_fxMarkPoints), "g_fxMarkPoints", 8);
 }
 
 uint16_t __cdecl FX_MarkToHandle(FxMarksSystem *marksSystem, FxMark *mark)
@@ -56,7 +56,7 @@ FxMark *__cdecl FX_MarkFromHandle(FxMarksSystem *marksSystem, uint16_t handle)
 
 static FxTriGroupPool *__cdecl FX_TriGroupFromHandle(FxMarksSystem *marksSystem, uint handle)
 {
-    bcassert(handle, FX_TRI_GROUP_LIMIT * sizeof(FxTriGroup));
+    bcassert(handle, FX_TRI_GROUP_LIMIT * sizeof(FxTriGroupPool));
     iassert(marksSystem);
 
     return (FxTriGroupPool *)((char *)marksSystem->triGroups + handle);
@@ -64,7 +64,7 @@ static FxTriGroupPool *__cdecl FX_TriGroupFromHandle(FxMarksSystem *marksSystem,
 
 static FxPointGroupPool *__cdecl FX_PointGroupFromHandle(FxMarksSystem *marksSystem, uint handle)
 {
-    bcassert(handle, FX_POINT_GROUP_LIMIT * sizeof(FxPointGroup));
+    bcassert(handle, FX_POINT_GROUP_LIMIT * sizeof(FxPointGroupPool));
     iassert(marksSystem);
     return (FxPointGroupPool *)((char *)marksSystem->pointGroups + handle);
 }
@@ -75,7 +75,7 @@ static int __cdecl FX_TriGroupToHandle(FxMarksSystem *marksSystem, FxTriGroup *g
     iassert(group);
 
     uint handle = (char *)group - (char *)marksSystem->triGroups;
-    bcassert(handle, FX_TRI_GROUP_LIMIT * sizeof(FxTriGroup));
+    bcassert(handle, FX_TRI_GROUP_LIMIT * sizeof(FxTriGroupPool));
 
     return handle;
 }
@@ -86,7 +86,7 @@ static int __cdecl FX_PointGroupToHandle(FxMarksSystem *marksSystem, FxPointGrou
     iassert(group);
 
     uint handle = (char *)group - (char *)marksSystem->pointGroups;
-    bcassert(handle, FX_POINT_GROUP_LIMIT * sizeof(FxPointGroup));
+    bcassert(handle, FX_POINT_GROUP_LIMIT * sizeof(FxPointGroupPool));
     
     return (char *)group - (char *)marksSystem->pointGroups;
 }
@@ -1003,12 +1003,12 @@ static void __cdecl FX_EmitMarkTri(
         index.value[0] = marksSystem->carryIndex;
         index.value[1] = *indices + baseVertex;
         pIndex = (r_double_index_t *)&outSurf->indices[outSurf->indexCount - 1];
-        iassert(!((uint)pIndex & 3));
+        iassert(!((uintptr_t)pIndex & 3));
         *pIndex = index;
         index.value[0] = indices[1] + baseVertex;
         index.value[1] = indices[2] + baseVertex;
         pIndex = pIndex + 1;
-        iassert(!((uint)pIndex & 3));
+        iassert(!((uintptr_t)pIndex & 3));
         *pIndex = index;
         marksSystem->hasCarryIndex = 0;
     }
@@ -1017,8 +1017,8 @@ static void __cdecl FX_EmitMarkTri(
         index.value[0] = *indices + baseVertex;
         index.value[1] = indices[1] + baseVertex;
         pIndex = (r_double_index_t *)&outSurf->indices[outSurf->indexCount];
-        if (((uint8_t)pIndex & 3) != 0)
-            MyAssertHandler(".\\EffectsCore\\fx_marks.cpp", 1255, 0, "%s", "!((uint)pIndex & 3)");
+        if (((uintptr_t)pIndex & 3) != 0)
+            MyAssertHandler(".\\EffectsCore\\fx_marks.cpp", 1255, 0, "%s", "!((uintptr_t)pIndex & 3)");
         *pIndex = index;
         marksSystem->hasCarryIndex = 1;
         marksSystem->carryIndex = indices[2] + baseVertex;

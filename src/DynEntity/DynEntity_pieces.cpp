@@ -105,7 +105,7 @@ bool __cdecl DynEntPieces_SpawnPhysicsModel(
     float forceDir[3]; // [esp+10h] [ebp-5Ch] BYREF
     float velocity[3]; // [esp+1Ch] [ebp-50h] BYREF
     float angularVelocity[3]; // [esp+28h] [ebp-44h] BYREF
-    int physObjId; // [esp+34h] [ebp-38h]
+    uintptr_t physObjId; // [esp+34h] [ebp-38h]
     float mins[3]; // [esp+38h] [ebp-34h] BYREF
     float quat[4]; // [esp+44h] [ebp-28h] BYREF
     float maxs[3]; // [esp+54h] [ebp-18h] BYREF
@@ -131,7 +131,7 @@ bool __cdecl DynEntPieces_SpawnPhysicsModel(
         angularVelocity[2] = dynEntPieces_angularVelocity->current.vector[2];
         velocity[2] = velocity[2] + model->physPreset->piecesUpwardVelocity;
         Sys_EnterCriticalSection(CRITSECT_PHYSICS);
-        physObjId = (int)DynEntPieces_SpawnPhysObj(
+        physObjId = (uintptr_t)DynEntPieces_SpawnPhysObj(
             model->name,
             mins,
             maxs,
