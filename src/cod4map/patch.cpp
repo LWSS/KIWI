@@ -624,11 +624,13 @@ Patch_t *ParsePatch(double unused, char **parsePtr, int patchType, float *transf
   COM_ParseInt(parsePtr);
   subdivLevel = COM_ParseInt(parsePtr);
 
-  if ( (unsigned)width > MAX_PATCH_SIZE || (unsigned)height > MAX_PATCH_SIZE )
+  if ( width < 1 || width > MAX_PATCH_SIZE || height < 1 || height > MAX_PATCH_SIZE )
     Com_Error("ParsePatch: bad size %i x %i", width, height);
 
   verts = malloc(sizeof(MeshVert_t) * width * height);
   indices = malloc(sizeof(int) * width * height);
+  if ( !verts || !indices )
+    Com_Error("ParsePatch: out of memory for %i x %i patch", width, height);
 
   /* parse vertices in column-major order */
   for ( col = 0; col < width; col++ )
@@ -655,6 +657,8 @@ Patch_t *ParsePatch(double unused, char **parsePtr, int patchType, float *transf
     {
       free(g_kiwiLayerColorCopy);
       g_kiwiLayerColorCopy = malloc(sizeof(int) * width * height);
+      if (!g_kiwiLayerColorCopy)
+        Com_Error("ParsePatch: out of memory for layer colors");
       g_kiwiLayerColorCopyCount = width * height;
     }
     for (vi = 0; vi < width * height; ++vi)
@@ -662,6 +666,8 @@ Patch_t *ParsePatch(double unused, char **parsePtr, int patchType, float *transf
   }
   /* create patch structure */
   patch = malloc(sizeof(Patch_t));
+  if (!patch)
+    Com_Error("ParsePatch: out of memory for patch");
   memset(patch, 0, sizeof(Patch_t));
   patch->outputNum = -1;
   patch->terrainSortKey = -1;
@@ -720,6 +726,8 @@ Patch_t *ParsePatch(double unused, char **parsePtr, int patchType, float *transf
           continue;
         lverts = malloc(sizeof(MeshVert_t) * width * height);
         lindices = malloc(sizeof(int) * width * height);
+        if (!lverts || !lindices)
+          Com_Error("ParsePatch: out of memory for layer vertices");
         memcpy(lverts, verts, sizeof(MeshVert_t) * width * height);
         memcpy(lindices, indices, sizeof(int) * width * height);
         for (vi = 0; vi < width * height; ++vi)
@@ -731,6 +739,8 @@ Patch_t *ParsePatch(double unused, char **parsePtr, int patchType, float *transf
           c[0] = c[1] = c[2] = 255;
         }
         layer = malloc(sizeof(Patch_t));
+        if (!layer)
+          Com_Error("ParsePatch: out of memory for layer patch");
         memcpy(layer, patch, sizeof(Patch_t));
         layer->material = LoadMaterial(kiwiLayerName[kslot]);
         layer->vertexData = lverts;

@@ -1014,7 +1014,7 @@ void NestShadowAabbs(void)
   ShadowAabb_t *aabb, *nextAabb, *container;
   float minVolume;
 
-  for ( aabb = g_shadowAabbPool; aabb; aabb = nextAabb )
+  for ( aabb = g_shadowAabbFreeList; aabb; aabb = nextAabb )
   {
     nextAabb = aabb->nextSibling;
     if ( aabb->nodeType == 2 )
@@ -1676,8 +1676,7 @@ void CollectShadowTris(float *lightPlane, double unusedFpu)
 {
   int triSoupIdx;
   ExtraShadowTri_t *extra;
-  float plane[3];
-  float planeDist = 0.0f;  /* must follow plane[3] in memory — PlaneFromPoints writes plane[3] here */
+  float plane[4];
 
   /* classify all triSoups */
   for ( triSoupIdx = 0; triSoupIdx < numBSPTriSoups; triSoupIdx++ )
@@ -1688,8 +1687,7 @@ void CollectShadowTris(float *lightPlane, double unusedFpu)
   {
     if ( PlaneFromPoints(plane, extra->v0, extra->v1, extra->v2) )
     {
-      planeDist = -planeDist;
-      if ( DotProduct(plane, lightPlane) + planeDist * lightPlane[3] <= 0.0 )
+      if ( DotProduct(plane, lightPlane) - plane[3] * lightPlane[3] <= 0.0 )
         EmitShadowTriIndices(extra->v0);
     }
   }

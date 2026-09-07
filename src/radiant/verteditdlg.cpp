@@ -7,55 +7,22 @@
 #include "stdafx.h"
 #include "qe3.h"
 #include "mainfrm.h"
+#include "radiant_ui_actions.h"
 #include <cstring>
 
 extern void Assert( const char *file, int line, int type, const char *fmt, ... );
 
 // ── externs (per-TU, matching pmesh.cpp / undo.cpp) ───────────────────────────
 extern undo_s   *g_lastundo;                                   // 0x23F162C (undo.cpp)
-extern void      Undo_AddBrush( entity_brush_s *pBrushInst );  // 0x45E680 (undo.cpp)
-extern void      Undo_AddEntity( int a1 );                     // 0x45E8B0 (undo.cpp)
+extern void      Undo_ClearRedo();
+extern void      Undo_GeneralStart( const char *operation );
+extern void      Undo_AddBrushList( selbrush_t *list );
+extern void      Undo_EndBrushList( selbrush_t *list );
+extern void      Undo_End();
 extern void      Patch_Rebuild( patchMesh_t *p, char doBounds );// 0x438D80 (pmesh.cpp)
 extern int       Sys_Printf( const char *fmt, ... );           // 0x499E90
 extern int       g_nUpdateBits;                                // 0x25D5A74 (engine_stubs.cpp)
 // selected_brushes sentinel + g_qeglobals are declared in qe3.h.
-
-// The Undo bracket the binary opens on the FIRST recoloured control point of a patch
-// (0x461210 inner: g_lastundo==0 ? "no last undo" : the Undo_AddBrushList idiom).  Sets the
-// patch's xx22b "already-bracketed" flag so subsequent points on the same patch don't
-// re-bracket.  Returns true once the patch is bracketed (so the apply marks it changed).
-static void VED_BracketPatch( patchMesh_t *patch )
-{
-    if ( patch->xx22b )
-        return;
-    patch->xx22b = true;
-
-    if ( !g_lastundo )
-    {
-        Sys_Printf( "Undo_AddBrush: no last undo.\n" );
-        return;
-    }
-    if ( g_lastundo->entitylist.next != &g_lastundo->entitylist )
-        Sys_Printf( "Undo_AddBrush: WARNING adding brushes after entity.\n" );
-
-    entity_brush_s *pSymbiot = patch->pSymbiot;          // the symbiont brush DEF node
-    entity_s_def   *owner    = (entity_s_def *)pSymbiot->owner;
-    if ( *(int *)&owner->eclass->fixedsize )             // owner->eclass->fixedsize (eclass@0x60, fixedsize@0x08)
-        Undo_AddEntity( (int)(intptr_t)owner );
-    Undo_AddBrush( pSymbiot );
-}
-
-// One [Apply] pass snapshot: the four R/G/B/A slider values and the two enable check
-// boxes the paint consults.
-struct vertEditState_t
-{
-    byte r;               // IDC_VED_R_SLIDER   (binary this+128)
-    byte g;               // IDC_VED_G_SLIDER   (binary this+124)
-    byte b;               // IDC_VED_B_SLIDER   (binary this+120)
-    byte a;               // IDC_VED_A_SLIDER   (binary this+116)
-    bool doColour;        // IDC_VED_CHK_COLOR  (binary CButton @this+600)
-    bool doAlpha;         // IDC_VED_CHK_ALPHA  (binary CButton @this+516)
-};
 
 // ═════════════════════════════════════════════════════════════════════════════
 //  UI-independent action behind CVertEditDlg's [Apply] button.
@@ -65,6 +32,16 @@ struct vertEditState_t
 // ═════════════════════════════════════════════════════════════════════════════
 void VertEditDlg_Apply( const vertEditState_t &st )
 {
+    if ( !st.doColour && !st.doAlpha )
+        return;
+    // Do not nest a dialog edit inside an unfinished transform/paint record.
+    if ( g_lastundo && !g_lastundo->done )
+    {
+        Sys_Printf( "Finish the current edit before applying vertex color.\n" );
+        return;
+    }
+    bool undoStarted = false;
+
     for ( selbrush_t *sb = selected_brushes.next; sb != &selected_brushes; sb = sb->next )
     {
         patch_t *pInst = sb->patch;
@@ -94,18 +71,31 @@ void VertEditDlg_Apply( const vertEditState_t &st )
                 if ( !picked )
                     continue;
 
+                const bool colourChanged = st.doColour &&
+                    ( cp->vert_color.r != st.r || cp->vert_color.g != st.g || cp->vert_color.b != st.b );
+                const bool alphaChanged = st.doAlpha && cp->vert_color.a != st.a;
+                if ( !colourChanged && !alphaChanged )
+                    continue;
+
+                if ( !undoStarted )
+                {
+                    Undo_ClearRedo();
+                    Undo_GeneralStart( "vertex color" );
+                    // Snapshot the same list that EndBrushList stamps, including
+                    // selected brushes without picked points, so undo retains them.
+                    Undo_AddBrushList( &selected_brushes );
+                    undoStarted = true;
+                }
+                changed = true;
+
                 if ( st.doColour )                       // SendMessageA(this+600, BM_GETCHECK)
                 {
-                    VED_BracketPatch( patch );
-                    changed = true;
                     cp->vert_color.b = st.b;             // this+120
                     cp->vert_color.g = st.g;             // this+124
                     cp->vert_color.r = st.r;             // this+128
                 }
                 if ( st.doAlpha )                        // SendMessageA(this+516, BM_GETCHECK)
                 {
-                    VED_BracketPatch( patch );
-                    changed = true;
                     cp->vert_color.a = st.a;             // this+116
                 }
             }
@@ -114,12 +104,17 @@ void VertEditDlg_Apply( const vertEditState_t &st )
             Patch_Rebuild( patch, 1 );
     }
 
-    g_nUpdateBits = -1;
+    if ( undoStarted )
+    {
+        Undo_EndBrushList( &selected_brushes );
+        Undo_End();
+        g_nUpdateBits = -1;
+    }
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
 //  MFC shell — CVertEditDlg, the hand-built modeless popup (CVehicleDlg / CModelDlg
 //  pattern).  vertEditState_t + VertEditDlg_Apply above stay COMMON (the ImGui panel
-//  imgui_panel_vertedit.cpp mirrors the struct and calls the action).
+//  imgui_panel_vertedit.cpp uses the shared state and calls the action).
 // ══════════════════════════════════════════════════════════════════════════════
 

@@ -11,11 +11,6 @@
 
 // The undo API has no shared header — every TU declares it locally (the
 // mainfrm.cpp:6216 pattern). Used by the Thicken panel's click bracket.
-extern void Undo_ClearRedo();               // undo.cpp
-extern void Undo_GeneralStart( const char *op );
-extern void Undo_AddBrushList( selbrush_t *list );
-extern void Undo_EndBrushList( selbrush_t *list );
-extern void Undo_End();
 
 static bool s_showGoTo      = false;
 static bool s_showArbRotate = false;
@@ -269,15 +264,8 @@ void ImGuiPanels_Draw()
             ImGui::Checkbox( "Seam", &seam );
             if ( ImGui::Button( "Thicken" ) )
             {
-                // The MFC caller brackets around the MODAL; panel flow brackets
-                // around the click (sanctioned divergence — no empty undo record
-                // on cancel).
-                Undo_ClearRedo();
-                Undo_GeneralStart( "curve thicken" );
-                Undo_AddBrushList( &selected_brushes );
+                // Patch_Thicken validates selection and owns one complete undo record.
                 CurveThicken_Apply( amount, seam );
-                Undo_EndBrushList( &selected_brushes );
-                Undo_End();
             }
         }
         ImGuiShell_CloseOnFocusLoss( &s_showThicken );

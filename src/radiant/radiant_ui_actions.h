@@ -5,17 +5,24 @@
 // ImGui panels (imgui_panel_*.cpp, via this header). Definitions live in the
 // dialog .cpp named in each comment; signatures must match exactly.
 //
-// Only actions with plain-type signatures are declared here; struct-coupled
-// ones (surfaceDlgState_t etc.) are declared in the panel that owns them until
-// the structs move to a shared header in Phase 3's consolidation pass.
+// Shared action snapshots belong here so panels and cores use one definition.
 
-// ── win_dlg.cpp ───────────────────────────────────────────────────────────────
+// verteditdlg.cpp: shared snapshot for the vertex-color Apply action.
+struct vertEditState_t
+{
+    unsigned char r, g, b, a;
+    bool doColour;
+    bool doAlpha;
+};
+void VertEditDlg_Apply( const vertEditState_t &state );
+
+// win_dlg.cpp
 void FindBrush_Apply( int brushIdx, int entIdx );
 void GoTo_Apply( const char *text );
 void ArbRotate_Apply( float xDeg, float yDeg, float zDeg );
 
 // ── mainfrm.cpp ───────────────────────────────────────────────────────────────
-void CurveThicken_Apply( int amount, bool seam );        // undo bracket is the CALLER's
+void CurveThicken_Apply( int amount, bool seam );        // Patch_Thicken owns the undo bracket
 void SelectScale_Apply( float x, float y, float z );     // brackets + validations inside
 void Radiant_ExecCommand( unsigned int cmdId );          // any menu/accel command id
 

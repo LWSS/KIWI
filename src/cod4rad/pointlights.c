@@ -250,15 +250,14 @@ int PointLightEvaluatePoint(int surfacePrimaryLightIndex, int traceIndex,
     float traceStart[3];
     int result;
 
-    /* assert: lightIndex in range (line 0x95) */
-    Assert("(lightIndex >= 0 && lightIndex < pointLightCount)",
-           ".\\pointlights.cpp", 0x95, 0, 1);
+    if (lightIndex < 0 || lightIndex >= g_numPointLights)
+        ErrorMsg("PointLightEvaluatePoint: light index %i out of range\n", lightIndex);
 
     light = &g_pointLights[lightIndex];
     result = (light->primaryLightIndex != surfacePrimaryLightIndex) + 1;
 
-    /* assert: light->def != NULL (line 0x98) */
-    Assert("light->def", ".\\pointlights.cpp", 0x98, 0, 1);
+    if (!light->def)
+        ErrorMsg("PointLightEvaluatePoint: light %i has no definition\n", lightIndex);
 
     /* compute direction vector from light to pos */
     dx = light->origin[0] - pos[0];

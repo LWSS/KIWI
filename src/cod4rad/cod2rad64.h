@@ -1947,13 +1947,13 @@ extern float Bleed_GetSampleAreaX2_Secondary(void *data, int s, int t);
 extern void Bleed_CopySampleX2_Primary(void *srcData, int s, int t, void *dstData);
 extern void Bleed_ScaleSampleX2_Secondary(float scale, void *data, int s, int t);
 extern void Bleed_ScaleSampleX2_Primary(float scale, void *data, int s, int t);
-extern void Bleed_AddWeightedSample_Secondary(void *srcData, int srcS, int srcT, void *dstData, int dstS, int dstT, float weight);
-extern void Bleed_AddWeightedSubSample_Primary(void *srcData, int srcS, int srcT, void *dstData, int dstS, int dstT, float weight);
+extern void Bleed_AddWeightedSample_Secondary(void *srcData, int srcS, int srcT, float weight, void *dstData, int dstS, int dstT);
+extern void Bleed_AddWeightedSubSample_Primary(void *srcData, int srcS, int srcT, float weight, void *dstData, int dstS, int dstT);
 extern void Lmap_FindBleeding_Callback(float unused, float *samplePos, void *data1, void *data2, void *userData);
 extern void Bleed_CopySampleX2_Secondary(void *srcData, int s, int t, void *dstData);
 extern void Lmap_InitBilinearBleeding(int lmapCount, int threadCount);
 extern void Lmap_ApplyBleeding(void *lmapData, int lmapIdx);
-extern void Lmap_FindBleedingForSample(void *data, int lmapIdx, int width, int height, int s, int t);
+extern void Lmap_FindBleedingForSample(void *data, int lmapIdx, int width, int height, float u, float v);
 extern void Bleed_FillEmptySubSamples(void *data);
 
 
@@ -2370,7 +2370,7 @@ Function Prototypes — scr_stringlist.c
 
 extern void SL_InitOrShutdown(void);
 extern void SL_Init(void);
-extern void SL_FreeString(unsigned int stringValue, unsigned int len);
+extern void SL_FreeString(unsigned int stringValue, ScriptStringRef *refStr, unsigned int len);
 extern unsigned int SL_GetString(const char *str, unsigned int user, int context);
 extern unsigned int SL_GetStringOfLen(const char *str, unsigned int user, unsigned int len, int context);
 extern unsigned int SL_FindString(const char *str);

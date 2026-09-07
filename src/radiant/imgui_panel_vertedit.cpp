@@ -17,12 +17,8 @@
 //     tail already stamps g_nUpdateBits = -1 (verteditdlg.cpp:120), which makes the |= 1
 //     a no-op in practice; it is bound anyway because that is what the handler does.)
 //
-// KNOWN CORE ISSUE, bound AS-IS: the action's undo bracket is one-shot per patch —
-// VED_BracketPatch sets `patch->xx22b` and nothing on the vert-edit path ever clears it
-// (only Patch_Paint / PMESH_18 do), so a SECOND [Apply] on the same patch silently skips
-// the undo bracket (RADIANT_KNOWN_ISSUES.md, verteditdlg.cpp ~34).  The panel must not
-// paper over it: no extra Undo_* calls here, and no repeat-apply guard.  The fix belongs in
-// the core, against IDB 0x461210, and lands separately.
+// The core owns one undo record per Apply that changes a value. The panel must
+// not open another bracket around it.
 //
 // Sanctioned Phase-3 divergences (RADIANT_UI_REWORK_PLAN.md):
 //   * the panel stays open; hiding it is the OnClose ShowWindow( SW_HIDE ) equivalent, so
@@ -46,21 +42,6 @@
 
 // ── verteditdlg.cpp bindings ──────────────────────────────────────────────────
 extern int g_nUpdateBits;                    // 0x25D5A74 (engine_stubs.cpp), as verteditdlg.cpp:20
-
-// One [Apply] pass snapshot: the four R/G/B/A slider values and the two enable check
-// boxes the paint consults.
-// MUST MATCH verteditdlg.cpp verbatim (shared-header consolidation pending)
-struct vertEditState_t
-{
-    byte r;               // IDC_VED_R_SLIDER   (binary this+128)
-    byte g;               // IDC_VED_G_SLIDER   (binary this+124)
-    byte b;               // IDC_VED_B_SLIDER   (binary this+120)
-    byte a;               // IDC_VED_A_SLIDER   (binary this+116)
-    bool doColour;        // IDC_VED_CHK_COLOR  (binary CButton @this+600)
-    bool doAlpha;         // IDC_VED_CHK_ALPHA  (binary CButton @this+516)
-};
-
-extern void VertEditDlg_Apply( const vertEditState_t &st );   // 0x461210 (verteditdlg.cpp:66)
 
 // ── panel state ───────────────────────────────────────────────────────────────
 static bool s_showVertEdit = false;

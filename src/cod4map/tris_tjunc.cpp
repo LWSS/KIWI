@@ -1109,7 +1109,7 @@ void RemoveDegenerateEdges(WindingAuxPair_t *verts, int auxElemSize)
   Assert(w->numpoints > 0 && w->numpoints < MAX_CONCAVE_WINDING_POINTS, s_assertDisable_RemoveDegenerateEdges);
 
   i = 0;
-  while ( i < w->numpoints )
+  while ( w->numpoints > 1 && i < w->numpoints )
   {
     next = (i + 1) % w->numpoints;
     if ( !VectorCompareEpsilon(w->points[i], w->points[next], DEGENERATE_EPSILON, 3) )
@@ -1122,9 +1122,9 @@ void RemoveDegenerateEdges(WindingAuxPair_t *verts, int auxElemSize)
     if ( next )
     {
       int tail = w->numpoints - next;
-      memcpy(w->points[i], w->points[next], sizeof(vec3_t) * tail);
+      memmove(w->points[i], w->points[next], sizeof(vec3_t) * tail);
       if ( auxElemSize )
-        memcpy(&auxData[auxElemSize * i], &auxData[auxElemSize * next], auxElemSize * tail);
+        memmove(&auxData[auxElemSize * i], &auxData[auxElemSize * next], auxElemSize * tail);
     }
     else
     {
@@ -1145,7 +1145,7 @@ static void TJunc_RemoveDegenerateEdgesWindingNative(Winding_t *winding)
   Assert(winding->numpoints > 0 && winding->numpoints < MAX_CONCAVE_WINDING_POINTS, s_assertDisable_RemoveDegenerateEdges);
 
   pointIndex = 0;
-  while ( pointIndex < winding->numpoints )
+  while ( winding->numpoints > 1 && pointIndex < winding->numpoints )
   {
     int nextIndex = (pointIndex + 1) % winding->numpoints;
 
@@ -1156,7 +1156,7 @@ static void TJunc_RemoveDegenerateEdgesWindingNative(Winding_t *winding)
     }
 
     if ( nextIndex )
-      memcpy(winding->points[pointIndex], winding->points[nextIndex], sizeof(vec3_t) * (winding->numpoints - nextIndex));
+      memmove(winding->points[pointIndex], winding->points[nextIndex], sizeof(vec3_t) * (winding->numpoints - nextIndex));
     else
       --pointIndex;
     --winding->numpoints;

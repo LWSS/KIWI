@@ -35,9 +35,6 @@ unsigned char g_bleedNeighborMask[9] = {
     0x02, 0x01, 0x80,
 };
 
-extern void Lmap_FindBleedingForSample(void *data, int lmapIdx, int width, int height,
-                                       float u, float v); /* lightmap_bleed_413720 */
-
 /*
 ================
 Bleed_GetSampleAreaX2_Secondary

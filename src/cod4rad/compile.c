@@ -143,8 +143,8 @@ toSample for a given light index. Uses a hash chain hanging off
 fromSample->vars[+0x58]. Each hash block holds 15 entries.
 
 If the (toSample, lightIdx) pair already exists, adds weight to it.
-Otherwise allocates a new entry via a pool allocator and inserts
-it using binary search to maintain sorted order within the block.
+Otherwise allocates a new entry via a pool allocator, using binary
+search to find the first unused slot in the head block.
 ================
 */
 static unsigned int TransferHash(void *fromSample, void *toSample, int lightIdx)
@@ -201,7 +201,7 @@ void AllocLightingTransfer(Sample_t *fromSample, void *toSample, int lightIdx,
             {
                 entry = &cur->entries[i];
                 if (entry->toSample == 0)
-                    goto not_found;
+                    break; /* A partial head block may precede older full blocks. */
                 if (entry->toSample == toSample && entry->lightIdx == lightIdx)
                 {
                     weight += entry->weight;
@@ -216,7 +216,6 @@ void AllocLightingTransfer(Sample_t *fromSample, void *toSample, int lightIdx,
         }
     }
 
-not_found:
     if (block)
     {
         if (block->entries[TRANSFERS_PER_BLOCK - 1].toSample == 0)
@@ -872,7 +871,6 @@ void NormalizeLightTransfers(Sample_t *sample)
 /* TraceSetup_and_Dispatch declared in cod2rad64.h — sub_40CDB0 */
 extern int TraceStaticModels(void *startPos, void *endPos);
 /* sqrtf is CRT (sub_43B200) */
-extern void GetLightingSample(int lightmapIdx, float u, float v, void *output); /* lighting_411DF0 */
 /* g_vertexData — view into g_vertData[0].lmCoord (stride sizeof(DrawVert_t)=0x44).
  * Binary uses raw byte indexing with stride 0x44 from unk_1270FCC4. */
 unsigned char *g_vertexData = (unsigned char *)&g_vertData[0].lmCoord;

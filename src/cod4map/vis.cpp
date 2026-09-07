@@ -532,11 +532,13 @@ static Winding_t *NewWinding(int numPoints)
   int allocationSize;
   Winding_t *winding;
 
-  if ( numPoints > MAX_POINTS_ON_WINDING )
+  if ( numPoints < 0 || numPoints > MAX_POINTS_ON_WINDING )
     Com_Error("NewWinding: %i pts", numPoints);
 
   allocationSize = sizeof(int) + sizeof(vec3_t) * numPoints;
   winding = (Winding_t *)malloc(allocationSize);
+  if ( !winding )
+    Com_Error("NewWinding: out of memory for %i points", numPoints);
   memset(winding, 0, allocationSize);
   return winding;
 }
@@ -690,7 +692,7 @@ Reads .d3dprt portal file, builds forward and backward portal structures and fac
 int LoadPortals( char *portalFile )
 {
   int i, j, numpoints;
-  unsigned int leafnums[2];
+  int leafnums[2];
   Vportal_t *p;
   Leaf_t *l;
   Winding_t *w;
@@ -700,7 +702,7 @@ int LoadPortals( char *portalFile )
   FILE *f;
 
   if ( !strcmp( portalFile, "-" ) )
-    f = (FILE *)&"";
+    f = stdin;
   else
   {
     f = fopen( portalFile, "r" );
@@ -713,27 +715,37 @@ int LoadPortals( char *portalFile )
   if ( strcmp( magic, "PRT1" ) )
     Com_Error( "LoadPortals: not a portal file" );
 
+  /* Validate before rounding counts or multiplying allocation sizes. */
+  if ( portalclusters < 1 || portalclusters > MAX_MAP_LEAFS )
+    Com_Error( "LoadPortals: invalid cluster count %i", portalclusters );
+  if ( numportals < 0 || (size_t)numportals > MAX_VIS_PORTALBYTES * 4 )
+    Com_Error( "LoadPortals: invalid portal count %i", numportals );
+  if ( numfaces < 0 || numfaces > portalclusters * MAX_PORTALS_ON_LEAF )
+    Com_Error( "LoadPortals: invalid face count %i", numfaces );
+
   Com_Printf( "%6i portalclusters\n", portalclusters );
   Com_Printf( "%6i numportals\n", numportals );
   Com_Printf( "%6i numfaces\n", numfaces );
 
   leafbytes = ((portalclusters + 63) & ~63) >> 3;
   leaflongs = leafbytes / sizeof(long);
+  if ( (size_t)portalclusters * leafbytes + offsetof(BspVisibility_t, data) > sizeof(bspVisBytes) )
+    Com_Error( "MAX_MAP_VISIBILITY (%i) exceeded\n", MAX_MAP_VISIBILITY );
   portalbytes = ((numportals * 2 + 63) & ~63) >> 3;
   visPortalLongs = (int)(portalbytes / sizeof(uint32_t));
 
-  /* KIWI FIX (AUDIT_cod4map finding 13): every fixed portal bitvector (Pstack_t::mightsee,
-     ClusterMerge's uncompressed[]) is MAX_VIS_PORTALBYTES long and is filled for portalbytes.
-     Nothing else bounds numportals, so fail loudly rather than overrun them. */
+  /* The rounded size must fit the shared Pstack_t::mightsee capacity too. */
   if ( portalbytes > MAX_VIS_PORTALBYTES )
     Com_Error( "LoadPortals: too many portals (%i, max %i)", numportals, (int)(MAX_VIS_PORTALBYTES * 4) );
 
   /* each file portal is split into two memory portals (forward + back) */
-  visPortals = malloc( 2 * numportals * sizeof(Vportal_t) );
-  memset( visPortals, 0, 2 * numportals * sizeof(Vportal_t) );
+  visPortals = (Vportal_t *)calloc( numportals ? 2 * numportals : 1, sizeof(Vportal_t) );
+  if ( !visPortals )
+    Com_Error( "LoadPortals: out of memory for portals" );
 
-  leafs = malloc( sizeof(Leaf_t) * portalclusters );
-  memset( leafs, 0, sizeof(Leaf_t) * portalclusters );
+  leafs = (Leaf_t *)calloc( portalclusters, sizeof(Leaf_t) );
+  if ( !leafs )
+    Com_Error( "LoadPortals: out of memory for clusters" );
   for ( i = 0; i < portalclusters; i++ )
     leafs[i].merged = -1;
 
@@ -746,9 +758,9 @@ int LoadPortals( char *portalFile )
   {
     if ( fscanf( f, "%i %i %i ", &numpoints, &leafnums[0], &leafnums[1] ) != 3 )
       Com_Error( "LoadPortals: reading portal %i", i );
-    if ( numpoints > MAX_POINTS_ON_WINDING )
-      Com_Error( "LoadPortals: portal %i has too many pts", i );
-    if ( leafnums[0] > (unsigned int)portalclusters || leafnums[1] > (unsigned int)portalclusters )
+    if ( numpoints < 3 || numpoints > MAX_POINTS_ON_WINDING )
+      Com_Error( "LoadPortals: portal %i has invalid point count %i", i, numpoints );
+    if ( leafnums[0] < 0 || leafnums[0] >= portalclusters || leafnums[1] < 0 || leafnums[1] >= portalclusters )
       Com_Error( "LoadPortals: reading portal %i", i );
 
     w = NewWinding( numpoints );
@@ -800,15 +812,19 @@ int LoadPortals( char *portalFile )
   }
 
   /* load face portals */
-  visFacePortals = malloc( 2 * numfaces * sizeof(Vportal_t) );
-  memset( visFacePortals, 0, 2 * numfaces * sizeof(Vportal_t) );
-  faceleafs = malloc( sizeof(Leaf_t) * portalclusters );
-  memset( faceleafs, 0, sizeof(Leaf_t) * portalclusters );
+  visFacePortals = (Vportal_t *)calloc( numfaces ? numfaces : 1, sizeof(Vportal_t) );
+  faceleafs = (Leaf_t *)calloc( portalclusters, sizeof(Leaf_t) );
+  if ( !visFacePortals || !faceleafs )
+    Com_Error( "LoadPortals: out of memory for face portals" );
 
   for ( i = 0, p = visFacePortals; i < numfaces; i++ )
   {
     if ( fscanf( f, "%i %i ", &numpoints, &leafnums[0] ) != 2 )
       Com_Error( "LoadPortals: reading portal %i", i );
+    if ( numpoints < 3 || numpoints > MAX_POINTS_ON_WINDING )
+      Com_Error( "LoadPortals: face %i has invalid point count %i", i, numpoints );
+    if ( leafnums[0] < 0 || leafnums[0] >= portalclusters )
+      Com_Error( "LoadPortals: face %i has invalid cluster %i", i, leafnums[0] );
 
     w = NewWinding( numpoints );
     w->numpoints = numpoints;
@@ -840,7 +856,7 @@ int LoadPortals( char *portalFile )
     p++;
   }
 
-  return fclose( f );
+  return f == stdin ? 0 : fclose( f );
 }
 
 /*

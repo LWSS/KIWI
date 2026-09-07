@@ -1003,6 +1003,9 @@ void Undo_Undo()
     MainFrm_BrushList( (int)(intptr_t)v47, &selected_brushes );
     MainFrm_EntList( &entityInsts, "after undo" );
 
+    // KIWI: undo after saving changes the document and must restore the save prompt.
+    MarkMapModified();
+
     Sys_Printf( "Updating layers...\n" );
     Layers_SetMapLayers();
     Layers_02();
@@ -1193,19 +1196,11 @@ void Undo_Redo()
             }
             else
             {
-                // World fallback. The inline link sets onext->owner = world_entity->def, but the
-                // binary then passes &entityInsts (NOT world_entity) to Brush_AddToList: IDA
-                // Undo_Redo sets edi = entityInsts.next @0x45f6ba, both no-match/empty exits leave
-                // edi == &entityInsts, and loc_45F748..0x45f7a7 never touch edi -> push edi = &entityInsts.
-                // This is a LATENT BUG in the original Undo_Redo: it trips Brush_AddToList's
-                // brush.cpp:2386 `def->owner == owner->def` assert (def->owner = world_entity->def,
-                // &entityInsts.def = 0) and links the instance into the entityInsts sentinel's chain
-                // instead of world's. The sibling Undo_Undo (0x45f17c `mov ebx, world_entity`) does NOT
-                // share the bug. Reproduced verbatim per the match-IDA-exactly directive (a prior port
-                // had "fixed" this to world_entity, which diverged from the IDB).
+                // KIWI: the restored definition and instance must share an owner.
+                // Match Undo_Undo's world fallback instead of attaching to the list sentinel.
                 entity_s_def *worldDef = (entity_s_def *)world_entity->def;
                 Entity_LinkBrush( onext, (entity_s *)worldDef );   // inlined in the binary
-                v17 = (entity_s *)&entityInsts;
+                v17 = world_entity;
             }
 
             selbrush_t *newInst = Brush_AddToList( onext, v17 );

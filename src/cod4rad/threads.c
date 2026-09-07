@@ -3,8 +3,10 @@
  */
 
 #include "cod2rad64.h"
+#include <limits.h>
 
-#define MAX_THREADS      64
+/* Geometry's visibility cache and Triangle_t::cacheStamp have four slots. */
+#define MAX_LIGHTING_THREADS 4
 #define NUM_THREAD_LOCKS 4099
 
 static CRITICAL_SECTION g_threadLocks[NUM_THREAD_LOCKS];
@@ -48,10 +50,7 @@ Uses NUM_THREAD_LOCKS critical sections for per-resource locking.
 static void ThreadDispatch(void (*workFunc)(unsigned int, unsigned int), unsigned int threadCount)
 {
     int i;
-    HANDLE *handles;
-    DWORD threadId;
-
-    handles = (HANDLE *)malloc(threadCount * sizeof(HANDLE));
+    HANDLE handles[MAX_LIGHTING_THREADS];
 
     if (!g_threadLocksInitialized)
     {
@@ -64,16 +63,18 @@ static void ThreadDispatch(void (*workFunc)(unsigned int, unsigned int), unsigne
     g_threadWorkFunc = workFunc;
 
     for (i = 0; i < (int)threadCount; i++)
-        handles[i] = CreateThread(NULL, 0, StartAddress, (LPVOID)(uintptr_t)i, 0, &threadId);
-
-    for (i = 0; i < (int)threadCount; i += MAXIMUM_WAIT_OBJECTS)
     {
-        int batch = (int)threadCount - i;
-        if (batch > MAXIMUM_WAIT_OBJECTS) batch = MAXIMUM_WAIT_OBJECTS;
-        WaitForMultipleObjects(batch, &handles[i], TRUE, INFINITE);
+        handles[i] = CreateThread(NULL, 0, StartAddress, (LPVOID)(uintptr_t)i, 0, NULL);
+        if (!handles[i])
+            ErrorMsg("ThreadDispatch: CreateThread failed (%lu)\n", GetLastError());
     }
 
-    free(handles);
+    for (i = 0; i < (int)threadCount; i++)
+    {
+        if (WaitForSingleObject(handles[i], INFINITE) != WAIT_OBJECT_0)
+            ErrorMsg("ThreadDispatch: waiting for worker failed (%lu)\n", GetLastError());
+        CloseHandle(handles[i]);
+    }
 }
 
 /*
@@ -86,6 +87,12 @@ Dispatches work items across threads. If threadCount==1, runs single-threaded.
 void ForEachQuantum(unsigned int count, void (*workFunc)(unsigned int, unsigned int), unsigned int threadCount)
 {
     int i;
+
+    if (threadCount < 1 || threadCount > MAX_LIGHTING_THREADS)
+        ErrorMsg("ForEachQuantum: thread count must be between 1 and %i\n", MAX_LIGHTING_THREADS);
+    /* Each worker increments once more when it discovers the queue is empty. */
+    if (count > INT_MAX - threadCount)
+        ErrorMsg("ForEachQuantum: work count exceeds supported range\n");
 
     g_threadWorkEnd = count;
     SetProgress(0, count);

@@ -535,7 +535,7 @@ int PCL_SetContrastGain(int argc, const char **argv)
 ================
 PCL_SetThreadCount
 
-Parse thread count from command line. Minimum 1, no upper cap.
+Parse thread count from command line. Clamp to the four visibility-cache slots.
 ================
 */
 int PCL_SetThreadCount(int argc, const char **argv)

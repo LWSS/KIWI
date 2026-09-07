@@ -4658,6 +4658,8 @@ char SplitSoupOnAxis( TriSoup_t *ts, int axis, float splitValue )
       {
         subSoup.firstVert = numBSPDrawVertsEmitted;
         subSoup.vertCount = vertCounts[i];
+        if ( subSoup.vertCount > MAX_MAP_DRAW_VERTS - numBSPDrawVertsEmitted )
+          Com_Error("MAX_MAP_DRAW_VERTS (%i) exceeded\n", MAX_MAP_DRAW_VERTS);
         memcpy(&bspTriSoupData[numBSPDrawVertsEmitted], vertBufs[i], sizeof(BspDrawVert_t) * subSoup.vertCount);
         if (bspTriSoupLayerData)
           memcpy(bspTriSoupLayerData
@@ -4672,6 +4674,8 @@ char SplitSoupOnAxis( TriSoup_t *ts, int axis, float splitValue )
       }
       subSoup.firstIndex = numBSPDrawIndexes;
       subSoup.indexCount = indexCounts[i];
+      if ( subSoup.indexCount > MAX_MAP_DRAW_INDEXES - numBSPDrawIndexes )
+        Com_Error("MAX_MAP_DRAW_INDICES");
       memcpy(&bspDrawIndexes[numBSPDrawIndexes], indexBufs[i], sizeof(unsigned short) * subSoup.indexCount);
       PartitionTriSoupRecursive((TriSoup_t *)&subSoup, 0);
       Assert(numBSPDrawVertsEmitted >= subSoup.firstVert + subSoup.vertCount, s_assertDisable_SplitSoupOnAxis);
@@ -4942,6 +4946,8 @@ int EmitTriangleSoup(TriRecord_t *triRecs, int triCount, Tree_t *bspTree)
         break;
 
       /* emit 3 vertices + 3 indices */
+      if ( soup.numIndices > MAX_MAP_DRAW_INDEXES - soup.firstIndex - 3 )
+        Com_Error("MAX_MAP_DRAW_INDICES");
       g_emitDrawVertCount = &soup;
       for ( v = 0; v < 3; v++ )
       {
@@ -8389,7 +8395,8 @@ static int Tris_SelectTriSurfSplitPlane(const Winding_t *winding, const TriSurfP
 
   /* 0x44C040 is 31 - bsr(value); 0x441F8B therefore selects the
      half-highest power-of-two grid step. */
-  Assert(worldSpan > 1, s_assertDisable_Tris_FindWindings);
+  if (worldSpan <= 1)
+    Com_Error("Tris_SelectTriSurfSplitPlane: texture span exceeds limit on a surface too small to split; reduce texture scale");
   highestBit = 0;
   for (unsigned int value = (unsigned int)worldSpan; value >>= 1; ++highestBit)
   {
@@ -8428,8 +8435,8 @@ static void Tris_SplitTriSurfs_r(TriSurf_t *surf, TriSurf_t **listHead)
     return;
 
   ClipWindingEpsilon(surf->winding, plane, plane[3], 0.1f, &front, &back, 0);
-  Assert(front, s_assertDisable_Tris_FindWindings);
-  Assert(back, s_assertDisable_Tris_FindWindings);
+  if (!front || !back)
+    Com_Error("Tris_SplitTriSurfs_r: texture span exceeds limit but the split does not divide the surface; reduce texture scale");
   UnlinkAndFreeSurf(surf, listHead);
   FreeTriSurf(surf);
   Tris_SplitTriSurfs_r(PrependTriSurf(front, NULL, 0, props, listHead), listHead);

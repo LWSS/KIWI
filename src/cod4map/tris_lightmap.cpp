@@ -1202,7 +1202,9 @@ static int TrisLmap_LoadedMaterialIndex(const TriSurf_t *surf)
 
     Assert(surf && surf->props && surf->props->si, s_assertDisable_TrisLmapCreateSurface);
     index = FindLoadedMaterialIndex(surf->props->si);
-    Assert(index >= 0 && index < TRIS_LMAP_MAX_MATERIALS, s_assertDisable_TrisLmapCreateSurface);
+    if (index < 0 || index >= TRIS_LMAP_MAX_MATERIALS)
+        Com_Error("TrisLmap_LoadedMaterialIndex: material index %i exceeds table capacity %i",
+                  index, TRIS_LMAP_MAX_MATERIALS);
     return index;
 }
 
@@ -1945,23 +1947,8 @@ float  g_smLightOriginZ;
 int    g_smNumCasterTris;
 int    g_smNumOccluders;
 char   g_smPerspectiveEnabled;
-float  g_smTransposedInvMatrix[17];
-float  g_smViewProjMatrix;
-float  g_smViewProjMatrix_01;
-float  g_smViewProjMatrix_02;
-float  g_smViewProjMatrix_03;
-float  g_smViewProjMatrix_10;
-float  g_smViewProjMatrix_11;
-float  g_smViewProjMatrix_12;
-float  g_smViewProjMatrix_13;
-float  g_smViewProjMatrix_20;
-float  g_smViewProjMatrix_21;
-float  g_smViewProjMatrix_22;
-float  g_smViewProjMatrix_23;
-float  g_smViewProjMatrix_30;
-float  g_smViewProjMatrix_31;
-float  g_smViewProjMatrix_32;
-float  g_smViewProjMatrix_33;
+float  g_smTransposedInvMatrix[16];
+float  g_smViewProjMatrix[16];
 
 char s_assertDisable_SM_AddCasterTriangle;
 char s_assertDisable_SM_AddCasterTriangle;
@@ -2132,7 +2119,7 @@ int ShadowMid_CompareOccluderEntries(SmOccluder_t *lhs, SmOccluder_t *rhs)
 
   /* primary sort: group (flag) */
   if ( lhs->casterTri->flag != rhs->casterTri->flag )
-    return 1;
+    return lhs->casterTri->flag < rhs->casterTri->flag ? -1 : 1;
 
   /* secondary sort: area */
   areaDiff = lhs->area - rhs->area;
@@ -3014,8 +3001,8 @@ void SM_BuildProjectionMatrix(void)
     SetPerspectiveProjection(perspMatrix, SHADOW_FOV, SHADOW_FOV, 1.0);
   else
     MatrixIdentity44(perspMatrix);
-  MatrixMultiply44(viewMatrix, perspMatrix, &g_smViewProjMatrix);
-  MatrixInverse44(&g_smViewProjMatrix, g_smInvViewProjMatrix);
+  MatrixMultiply44(viewMatrix, perspMatrix, g_smViewProjMatrix);
+  MatrixInverse44(g_smViewProjMatrix, g_smInvViewProjMatrix);
   MatrixTranspose44(g_smInvViewProjMatrix, g_smTransposedInvMatrix);
 }
 /*
@@ -3031,15 +3018,15 @@ void SM_ProjectPoint(float *projected, float *pt)
   Assert(projected, s_assertDisable_SM_ProjectPoint);
   Assert(pt != projected, s_assertDisable_SM_ProjectPoint);
 #ifdef _WIN64
-  projected[0] = (float)((double)g_smViewProjMatrix_01*pt[1] + (double)g_smViewProjMatrix_02*pt[2] + (double)g_smViewProjMatrix*pt[0] + (double)g_smViewProjMatrix_03);
-  projected[1] = (float)((double)g_smViewProjMatrix_11*pt[1] + (double)g_smViewProjMatrix_12*pt[2] + (double)g_smViewProjMatrix_10*pt[0] + (double)g_smViewProjMatrix_13);
-  projected[2] = (float)((double)g_smViewProjMatrix_20*pt[0] + (double)g_smViewProjMatrix_21*pt[1] + (double)g_smViewProjMatrix_22*pt[2] + (double)g_smViewProjMatrix_23);
-  projected[3] = (float)((double)g_smViewProjMatrix_31*pt[1] + (double)g_smViewProjMatrix_32*pt[2] + (double)g_smViewProjMatrix_30*pt[0] + (double)g_smViewProjMatrix_33);
+  projected[0] = (float)((double)g_smViewProjMatrix[1]*pt[1] + (double)g_smViewProjMatrix[2]*pt[2] + (double)g_smViewProjMatrix[0]*pt[0] + (double)g_smViewProjMatrix[3]);
+  projected[1] = (float)((double)g_smViewProjMatrix[5]*pt[1] + (double)g_smViewProjMatrix[6]*pt[2] + (double)g_smViewProjMatrix[4]*pt[0] + (double)g_smViewProjMatrix[7]);
+  projected[2] = (float)((double)g_smViewProjMatrix[8]*pt[0] + (double)g_smViewProjMatrix[9]*pt[1] + (double)g_smViewProjMatrix[10]*pt[2] + (double)g_smViewProjMatrix[11]);
+  projected[3] = (float)((double)g_smViewProjMatrix[13]*pt[1] + (double)g_smViewProjMatrix[14]*pt[2] + (double)g_smViewProjMatrix[12]*pt[0] + (double)g_smViewProjMatrix[15]);
 #else
-  projected[0] = g_smViewProjMatrix_01 * pt[1] + g_smViewProjMatrix_02 * pt[2] + g_smViewProjMatrix * pt[0] + g_smViewProjMatrix_03;
-  projected[1] = g_smViewProjMatrix_11 * pt[1] + g_smViewProjMatrix_12 * pt[2] + g_smViewProjMatrix_10 * pt[0] + g_smViewProjMatrix_13;
-  projected[2] = g_smViewProjMatrix_20 * pt[0] + g_smViewProjMatrix_21 * pt[1] + g_smViewProjMatrix_22 * pt[2] + g_smViewProjMatrix_23;
-  projected[3] = g_smViewProjMatrix_31 * pt[1] + g_smViewProjMatrix_32 * pt[2] + g_smViewProjMatrix_30 * pt[0] + g_smViewProjMatrix_33;
+  projected[0] = g_smViewProjMatrix[1] * pt[1] + g_smViewProjMatrix[2] * pt[2] + g_smViewProjMatrix[0] * pt[0] + g_smViewProjMatrix[3];
+  projected[1] = g_smViewProjMatrix[5] * pt[1] + g_smViewProjMatrix[6] * pt[2] + g_smViewProjMatrix[4] * pt[0] + g_smViewProjMatrix[7];
+  projected[2] = g_smViewProjMatrix[8] * pt[0] + g_smViewProjMatrix[9] * pt[1] + g_smViewProjMatrix[10] * pt[2] + g_smViewProjMatrix[11];
+  projected[3] = g_smViewProjMatrix[13] * pt[1] + g_smViewProjMatrix[14] * pt[2] + g_smViewProjMatrix[12] * pt[0] + g_smViewProjMatrix[15];
 #endif
 }
 

@@ -3703,7 +3703,15 @@ bool KiwiCon_SaveSidecar( const char *mapPath )
     {
         // With no objects, hidden solids or groups, remove any existing sidecar.
         // (Groups are serialized below, so an empty-groups-only map must keep its file.)
-        ::DeleteFileA( path );
+        if ( !::DeleteFileA( path ) )
+        {
+            const DWORD error = ::GetLastError();
+            if ( error != ERROR_FILE_NOT_FOUND && error != ERROR_PATH_NOT_FOUND )
+            {
+                Sys_Printf( "WARNING: could not remove empty construction sidecar %s (%lu)\n", path, error );
+                return false;
+            }
+        }
         return true;
     }
 
@@ -3786,8 +3794,10 @@ bool KiwiCon_SaveSidecar( const char *mapPath )
     }
 
     // Check both accumulated writes and buffered close before promoting the temp.
-    // Bitwise OR is intentional: fclose must run even when ferror is already set.
-    if ( ferror( f ) | ( fclose( f ) != 0 ) )
+    // Sequence these calls: ferror must not read a FILE that fclose already freed.
+    const bool writeFailed = ferror( f ) != 0;
+    const bool closeFailed = fclose( f ) != 0;
+    if ( writeFailed || closeFailed )
     {
         Sys_Printf( "WARNING: could not write construction sidecar %s (disk full?) — "
                     "the existing sidecar was left untouched.\n", tmp );

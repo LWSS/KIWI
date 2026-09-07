@@ -707,9 +707,9 @@ int GuessPatchPlane(Mesh_t *inMesh, float *plane)
   dist = avgDist;
 
   /* validate all vertices lie within +/-1.0 of the plane */
-  for ( colIdx = 0; colIdx < inMesh->width - 1; colIdx++ )
+  for ( colIdx = 0; colIdx < inMesh->width; colIdx++ )
   {
-    for ( row = 0; row < inMesh->height - 1; row++ )
+    for ( row = 0; row < inMesh->height; row++ )
     {
       MeshVert_t *cv = &inMesh->verts[colIdx + row * inMesh->width];
       dotDist = DotProduct210(sumNormal, cv->pos) - dist;

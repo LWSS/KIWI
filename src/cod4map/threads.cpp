@@ -32,9 +32,12 @@ int ThreadSetDefault(void)
   {
     GetSystemInfo(&si);
     numthreads = si.dwNumberOfProcessors;
-    if ( numthreads < 1 || numthreads > MAX_THREADS )
-      numthreads = 1;
   }
+
+  if ( numthreads < 1 )
+    numthreads = 1;
+  else if ( numthreads > MAX_THREADS )
+    numthreads = MAX_THREADS;
 
   return Com_DPrintf("%i threads\n", numthreads);
 }
@@ -49,7 +52,12 @@ Creates worker threads and waits for completion.
 int RunThreadsOn(int workcnt, int showpacifier, LPTHREAD_START_ROUTINE func)
 {
   int i, startTime, endTime;
-  HANDLE threadHandles[128];
+  HANDLE threadHandles[MAX_THREADS];
+
+  if ( numthreads < 1 || numthreads > MAX_THREADS )
+    ThreadSetDefault();
+  if ( workcnt < 0 )
+    Com_Error("RunThreadsOn: negative work count (%i)\n", workcnt);
 
   startTime = (int)I_FloatTime();
   g_threadDispatch = 0;
@@ -67,11 +75,19 @@ int RunThreadsOn(int workcnt, int showpacifier, LPTHREAD_START_ROUTINE func)
   {
     /* spawn worker threads */
     for ( i = 0; i < numthreads; i++ )
-      threadHandles[i] = CreateThread(NULL, 0, func, (LPVOID)(intptr_t)i, 0, (LPDWORD)&threadHandles[i + 64]);
+    {
+      threadHandles[i] = CreateThread(NULL, 0, func, (LPVOID)(intptr_t)i, 0, NULL);
+      if ( !threadHandles[i] )
+        Com_Error("RunThreadsOn: CreateThread failed (%lu)\n", GetLastError());
+    }
 
     /* wait for all threads to finish */
     for ( i = 0; i < numthreads; i++ )
-      WaitForSingleObject(threadHandles[i], INFINITE);
+    {
+      if ( WaitForSingleObject(threadHandles[i], INFINITE) != WAIT_OBJECT_0 )
+        Com_Error("RunThreadsOn: waiting for worker failed (%lu)\n", GetLastError());
+      CloseHandle(threadHandles[i]);
+    }
   }
 
   DeleteCriticalSection(&CriticalSection);

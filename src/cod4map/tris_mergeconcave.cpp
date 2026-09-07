@@ -289,6 +289,8 @@ signed int AddWindingWithoutOverlap_r(int startIdx, int surfCount, int prevSurfC
   Assert(surfCount <= (int)mergeSurfCount, s_assertDisable_AddWindingWithoutOverlap_r);
   if ( surfCount != prevSurfCount )
   {
+    if ( mergeSurfCount >= mergeSurfCapacity )
+      Com_Error("more than %i windings\n", mergeSurfCapacity);
     mergeSurfArray[mergeSurfCount] = mergeSurfArray[surfCount];
     mergeSurfArray[surfCount] = AllocTriSurf(curWinding.winding, curWinding.auxData, windingBase, props);
     mergeSurfCount++;
@@ -1214,6 +1216,9 @@ int InsertHole(WindingAuxPair_t *verts, float area, float *plane,
     }
   }
 
+  if ( holeCount < 0 || holeCount >= MAX_HOLES )
+    Com_Error("InsertHole: maximum hole count (%i) exceeded", MAX_HOLES);
+
   { float negArea = -area;
   for ( insertIdx = holeCount; insertIdx > 0 && holeArea[insertIdx - 1] < (double)negArea; insertIdx-- )
   {
@@ -1397,7 +1402,7 @@ void CollectHoles(TriSurf_t *ts, Tree_t *bspHead, int auxElemSize)
   WindingAuxPair_t copyPair;
   WindingAuxPair_t holesBuf[MAX_HOLE_BUF];
   float areasBuf[MAX_HOLE_BUF];
-  int totalHoles, i;
+  int totalHoles;
 
   (void)bspHead;
 
@@ -1414,20 +1419,12 @@ void CollectHoles(TriSurf_t *ts, Tree_t *bspHead, int auxElemSize)
 
   if ( totalHoles > 0 )
   {
-    for ( i = 0; i < totalHoles; i++ )
-    {
-      int n = ts->holeCount;
-      holesBuf[n] = holesBuf[i];
-      ts->holeCount = n + 1;
-    }
-
-    if ( ts->holeCount )
-    {
-      int sz = sizeof(WindingAuxPair_t) * ts->holeCount;
-      ts->holes = (WindingAuxPair_t *)malloc(sz);
-      memcpy(ts->holes, holesBuf, sz);
-    }
-
+    ts->holeCount = totalHoles;
+    int sz = sizeof(WindingAuxPair_t) * ts->holeCount;
+    ts->holes = (WindingAuxPair_t *)malloc(sz);
+    if ( !ts->holes )
+      Com_Error("CollectHoles: out of memory for %i holes", ts->holeCount);
+    memcpy(ts->holes, holesBuf, sz);
   }
 
   /* Native 0x458110 always publishes the copied/processed carrier for a
@@ -1468,6 +1465,8 @@ void MergeHoles( TriSurf_t *ts )
   AssertFatal( mergedW->numpoints == 0, s_assertDisable_MergeHoles );
 
   mergedAux = ts->auxElemSize ? malloc( totalPts * ts->auxElemSize ) : 0;
+  if ( ts->auxElemSize && !mergedAux )
+    Com_Error("MergeHoles: out of memory for auxiliary vertices");
   baseW = ts->winding;
   baseAux = ts->auxData;
   basePair.winding = baseW;
@@ -1499,7 +1498,8 @@ void MergeHoles( TriSurf_t *ts )
         best = i;
       }
     }
-    Assert( best >= 0, s_assertDisable_MergeHoles );
+    if ( best < 0 )
+      Com_Error("MergeHoles: no valid bridge for %i remaining holes", ts->holeCount);
 
     /* merge chosen hole into base, output into mergedW */
     holePair = ts->holes[best];
@@ -1523,6 +1523,8 @@ void MergeHoles( TriSurf_t *ts )
     if ( ts->auxElemSize )
     {
       baseAux = malloc( ts->auxElemSize * mergedW->numpoints );
+      if ( !baseAux )
+        Com_Error("MergeHoles: out of memory for auxiliary vertices");
       memcpy( baseAux, mergedAux, ts->auxElemSize * mergedW->numpoints );
     }
     else
@@ -1551,6 +1553,9 @@ Restarts the full scan after each removal.
 int RemoveDuplicateIndices(int numPts, int *indices, char *auxData, int auxElemSize)
 {
   int n = numPts;
+
+  if ( n < 3 )
+    return 0;
 
   for (;;)
   {
@@ -1585,9 +1590,9 @@ int RemoveDuplicateIndices(int numPts, int *indices, char *auxData, int auxElemS
       if ( prev == 0 )
       {
         /* wrap case: spike spans end/start — remove first 2 elements */
-        memcpy(indices, &indices[2], sizeof(int) * n);
+        memmove(indices, &indices[2], sizeof(int) * n);
         if ( auxElemSize )
-          memcpy(auxData, &auxData[auxElemSize * 2], auxElemSize * n);
+          memmove(auxData, &auxData[auxElemSize * 2], auxElemSize * n);
       }
       else
       {
@@ -1595,9 +1600,9 @@ int RemoveDuplicateIndices(int numPts, int *indices, char *auxData, int auxElemS
         int tail = n - im2;
         Assert(n + 2 - cur > 0, s_assertDisable_RemoveDuplicateIndices);
         Assert(im2 < cur, s_assertDisable_RemoveDuplicateIndices);
-        memcpy(&indices[im2], &indices[cur], sizeof(int) * tail);
+        memmove(&indices[im2], &indices[cur], sizeof(int) * tail);
         if ( auxElemSize )
-          memcpy(&auxData[auxElemSize * im2], &auxData[auxElemSize * (im2 + 2)], auxElemSize * tail);
+          memmove(&auxData[auxElemSize * im2], &auxData[auxElemSize * (im2 + 2)], auxElemSize * tail);
       }
 
       matched = 1;
@@ -1624,11 +1629,17 @@ IntWinding_t *BuildIndexList(WindingAuxPair_t *vertsPair, int auxElemSize)
   #define MAX_INDEX_LIST_POINTS 1024
   Winding_t *w = vertsPair->winding;
   int indices[MAX_INDEX_LIST_POINTS];
-  void *auxCopy = auxElemSize ? malloc(auxElemSize * w->numpoints) : 0;
+  void *auxCopy;
   int i, n, dstCount = 0;
   IntWinding_t *result = 0;
 
-  Assert(w->numpoints <= MAX_INDEX_LIST_POINTS, s_assertDisable_BuildIndexList);
+  if ( w->numpoints < 0 || w->numpoints > MAX_INDEX_LIST_POINTS )
+    Com_Error("BuildIndexList: invalid winding size %i (max %i)", w->numpoints, MAX_INDEX_LIST_POINTS);
+  if ( w->numpoints < 3 )
+    return NULL;
+  auxCopy = auxElemSize ? malloc(auxElemSize * w->numpoints) : 0;
+  if ( auxElemSize && !auxCopy )
+    Com_Error("BuildIndexList: out of memory for auxiliary vertices");
 
   /* map each float vertex to a merge-table index, skip consecutive duplicates */
   n = w->numpoints;
@@ -1701,7 +1712,7 @@ int InitVertMap(IntWinding_t **indexLists, int totalVerts)
       /* degenerate surface — remove and shift array */
       mergeSurfCount--;
       FreeTriSurf(mergeSurfArray[i]);
-      memcpy(&mergeSurfArray[i], &mergeSurfArray[i + 1], sizeof(TriSurf_t *) * (mergeSurfCount - i));
+      memmove(&mergeSurfArray[i], &mergeSurfArray[i + 1], sizeof(TriSurf_t *) * (mergeSurfCount - i));
     }
   }
   return i;
@@ -1987,6 +1998,8 @@ size_t MergeGroupSurfaces(
 
   Assert((int)mergeSurfCount >= 1, s_assertDisable_MergeGroupSurfaces);
   RemoveOverlappingWindings(mode);
+  if ( !mergeSurfCount )
+    return 0;
   if ( mergeSurfCount == 1 && !baseSurf )
     return 1;
 
@@ -1998,7 +2011,14 @@ size_t MergeGroupSurfaces(
 
   TjuncFixFaces((intptr_t *)mergeSurfArray, (int)mergeSurfCount, baseSurf);
   baseVertCount = baseSurf ? baseSurf->winding->numpoints : 0;
+  if ( mergeSurfCount > MAX_CONCAVE_INDEX_LISTS )
+    Com_Error("MergeGroupSurfaces: exceeded %i index lists", MAX_CONCAVE_INDEX_LISTS);
   InitVertMap(indexLists, baseVertCount);
+  if ( !mergeSurfCount )
+  {
+    FreeMergeVertMap();
+    return 0;
+  }
 
   if ( baseSurf )
     baseIndexList = BuildIndexList((WindingAuxPair_t *)&baseSurf->winding, baseSurf->auxElemSize);

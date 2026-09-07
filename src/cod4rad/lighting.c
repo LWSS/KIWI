@@ -145,14 +145,13 @@ void GetLightingSample(int lmapIndex, float sScaled, float tScaled, void **outSa
 {
     int s, t;
 
-    Assert("(lmapIndex >= 0 && lmapIndex < ((124 * 512)))", ".\\lighting.cpp", 0x46, 0, 1);
-    Assert("sample", ".\\lighting.cpp", 0x47, 0, 1);
+    if (!outSample || !g_lightingSamples || lmapIndex < 0 || lmapIndex >= g_lightmapSize)
+        ErrorMsg("GetLightingSample: invalid lightmap %i or sample storage\n", lmapIndex);
+    if (!(sScaled >= 0.0f && sScaled < 512.0f && tScaled >= 0.0f && tScaled < 512.0f))
+        ErrorMsg("GetLightingSample: coordinates outside the 512 x 512 lightmap\n");
 
     s = (int)floorf(sScaled);
     t = (int)floorf(tScaled);
-
-    Assert("(s >= 0 && s < ((512 < 1024) ? 512 : 1024))", ".\\lighting.cpp", 0x4C, 0, 1);
-    Assert("(t >= 0 && t < ((512 < 1024) ? 512 : 1024))", ".\\lighting.cpp", 0x4D, 0, 1);
 
     *outSample = (char *)g_lightingSamples
                + (((long long)lmapIndex * 512 + t) * 512 + s) * 32;
@@ -169,14 +168,14 @@ void GetLightingSubSample(int lmapIndex, float sScaled, float tScaled, SubSample
 {
     int s, t;
 
-    Assert("(lmapIndex >= 0 && lmapIndex < ((124 * 512)))", ".\\lighting.cpp", 0x58, 0, 1);
-    Assert("subSample", ".\\lighting.cpp", 0x59, 0, 1);
+    if (!outSubSample || !g_lightingSamples || lmapIndex < 0 || lmapIndex >= g_lightmapSize)
+        ErrorMsg("GetLightingSubSample: invalid lightmap %i or sample storage\n", lmapIndex);
+    /* Rasterizer callers supply coordinates at twice the lightmap resolution. */
+    if (!(sScaled >= 0.0f && sScaled < 1024.0f && tScaled >= 0.0f && tScaled < 1024.0f))
+        ErrorMsg("GetLightingSubSample: coordinates outside the 1024 x 1024 subsample grid\n");
 
     s = (int)floorf(sScaled);
     t = (int)floorf(tScaled);
-
-    Assert("(s >= 0 && s < ((512 < 1024) ? 512 : 1024))", ".\\lighting.cpp", 0x5E, 0, 1);
-    Assert("(t >= 0 && t < ((512 < 1024) ? 512 : 1024))", ".\\lighting.cpp", 0x5F, 0, 1);
 
     outSubSample->s = s & 1;
     outSubSample->t = t & 1;

@@ -8562,3 +8562,23 @@ the CAMERA CONTRACT, the disposition table for every round-BK camera change, and
   "NO region derived" + "loop gap" once per store generation, and a live G/R/S bumps
   the generation every mouse move.  The report is now skipped while a command is
   active and fires once when the gesture settles.
+
+## 2026-09-06 source review (UNBUILT)
+
+- Saved-map undo now calls `MarkMapModified`; redo's missing-owner fallback uses
+  `world_entity` for both the restored definition and instance (`undo.cpp`).
+- Map saving now checks stream errors and close failures, propagates sidecar-save
+  failure, and keeps the modified flag set on failure (`map.cpp`). Removed the
+  leftover `c:/tstamps.log` write. The map writer is still not transactional.
+- Sidecar saving sequences `ferror` before `fclose` and reports failed deletion of
+  obsolete sidecars (`kiwi_construct.cpp`).
+- Regression runner: `python tools/kiwitest/run_review_regressions.py` after a VS
+  build. Current-executable attempt timed out in renderer startup before any test
+  commands ran. Full findings and validation: `tools/kiwitest/REVIEW_20260906.md`.
+
+- Further review (UNBUILT): vertex-color Apply now owns a complete undo record per
+  changed apply, skips no-op changes, and no longer relies on persistent patch
+  paint flags. Shared state declaration moved to `radiant_ui_actions.h`.
+- The Thicken panel now relies on `Patch_Thicken`'s existing undo bracket instead
+  of leaving an extra unfinished outer record. Repeated-apply and actual-panel
+  regression procedures are recorded in `tools/kiwitest/REVIEW_20260906.md`.

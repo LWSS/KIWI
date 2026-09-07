@@ -260,6 +260,9 @@ int AddBspMaterial(const char *materialName, int surfaceFlags, int contentFlags)
 
   if ( !materialName )
     materialName = "$default";
+  if ( strlen(materialName) >= sizeof(bspMaterials[0].material) )
+    Com_Error("AddBspMaterial: material name exceeds %i characters",
+              (int)sizeof(bspMaterials[0].material) - 1);
 
   for ( i = 0; i < numBSPMaterials; i++ )
   {

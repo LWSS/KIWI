@@ -254,10 +254,11 @@ Brush_t *CopyCollisionBrush(Brush_t *srcBrush)
     {
       destSides[i].winding = CopyWinding(srcSides[i].winding);
     }
-    if ( srcBrush->sides[i].adjacencyWinding )
-      destSides[i].adjacencyWinding = CopyBrushAdjacencyWinding(srcBrush->sides[i].adjacencyWinding);
+    if ( srcSides[i].adjacencyWinding )
+      destSides[i].adjacencyWinding = CopyBrushAdjacencyWinding(srcSides[i].adjacencyWinding);
   }
   destBrush->numSides = srcBrush->numCollisionSides;
+  destBrush->collisionSides = destSides;
   return destBrush;
 }
 

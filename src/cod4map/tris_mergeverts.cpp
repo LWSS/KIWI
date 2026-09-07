@@ -282,9 +282,9 @@ int RemoveLoops( int ptCount, int *indices, intptr_t auxData, int auxElemSize, i
       if ( len + start > ptCount )
         start = loopStarts[j];
       remain = ptCount - len - start;
-      memcpy( &indices[start], &indices[start + len], sizeof(int) * remain );
+      memmove( &indices[start], &indices[start + len], sizeof(int) * remain );
       if ( auxElemSize )
-        memcpy( (void *)(auxData + auxElemSize * start), (const void *)(auxData + auxElemSize * (start + len)), auxElemSize * remain );
+        memmove( (void *)(auxData + auxElemSize * start), (const void *)(auxData + auxElemSize * (start + len)), auxElemSize * remain );
       return ptCount - len;
     }
   }

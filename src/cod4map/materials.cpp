@@ -676,6 +676,10 @@ static ShaderInfo_t *LoadMaterialForTarget(const char *materialName, int targetI
   void *fileData;
   char filePath[MAX_OS_PATH];
 
+  if (!materialName || strlen(materialName) >= sizeof(((ShaderInfo_t *)0)->name))
+    Com_Error("LoadMaterial: material name is missing or exceeds %i characters",
+              (int)sizeof(((ShaderInfo_t *)0)->name) - 1);
+
   nativeEntry = FindLoadedMaterial(materialName, targetIndex);
   if (nativeEntry)
   {

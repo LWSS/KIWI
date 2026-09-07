@@ -856,12 +856,22 @@ void Map_SaveFile( const char *path, char a1, char a2 )
         }
     }
 
-    fclose( fout );
+    const bool writeFailed = ferror( fout ) != 0;
+    const bool closeFailed = fclose( fout ) != 0;
 
     if ( a1 && g_region_active )
     {
         for ( int i = 0; i < 4; ++i )
             Brush_Free( region_sides[i] );   // IDA 0x486fd1 frees all 4 region walls unconditionally
+    }
+
+    // KIWI: a failed write/flush must not clear the dirty flag or replace the sidecar.
+    if ( writeFailed || closeFailed )
+    {
+        Sys_Printf( "ERROR: could not finish writing map %s. The map is still modified.\n", path );
+        MarkMapModified();
+        if ( savedPathHeap ) free( savedPathHeap );
+        return;
     }
 
     // KIWI-UX (RADIANT_UX_DESIGN §7 / decision D-5, Phase 4): write the construction
@@ -874,7 +884,13 @@ void Map_SaveFile( const char *path, char a1, char a2 )
     if ( !a1 )
     {
         extern bool KiwiCon_SaveSidecar( const char *mapPath );   // kiwi_construct.cpp
-        KiwiCon_SaveSidecar( path );
+        if ( !KiwiCon_SaveSidecar( path ) )
+        {
+            Sys_Printf( "ERROR: map written, but its sidecar was not saved. The map is still modified.\n" );
+            MarkMapModified();
+            if ( savedPathHeap ) free( savedPathHeap );
+            return;
+        }
     }
 
     Sys_Printf( "Saved.\n" );
@@ -886,14 +902,6 @@ void Map_SaveFile( const char *path, char a1, char a2 )
     if ( !a1 )
     {
         MessageBeep( 0x30 );
-        // KISAK: differs from 0x48704e — the binary fcloses the handle TWICE on success
-        // (0x487070 + 0x487078) and fclose(NULL)s it on failure.  Closed once here.
-        FILE *tslog = fopen( "c:/tstamps.log", "a" );
-        if ( tslog )
-        {
-            fprintf( tslog, "%s", path );
-            fclose( tslog );
-        }
         SendMessageA( g_qeglobals.d_hwndStatus, WM_USER + 1, 0, (LPARAM)"Saved.\n" );
     }
 
