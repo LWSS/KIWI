@@ -63,33 +63,20 @@ static const char *mpDefaultDrawBoneOptions[4] = { "Draw None", "Draw All Tags",
 
 void __cdecl CG_ModPrvUpdateMru(const dvar_s **mruDvars, const char **stringTable, const dvar_s *dvar)
 {
-    const dvar_s **v3; // r31
-    int v6; // r30
-    char *v7; // r27
+    int dvarIndex;
 
-    v3 = mruDvars;
     iassert(mruDvars);
     iassert(stringTable);
-    v6 = 0;
-    v7 = (char *)((char *)stringTable - (char *)v3);
-    do
+    for (dvarIndex = 0; dvarIndex < 4; ++dvarIndex)
     {
-        if (!*v3)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_modelpreviewer.cpp",
-                350,
-                0,
-                "%s",
-                "mruDvars[dvarIndex]");
-        if (v6 && !*(_BYTE *)(*v3)->current.integer)
+        iassert(mruDvars[dvarIndex]);
+        if (dvarIndex && !mruDvars[dvarIndex]->current.string[0])
             break;
-        ++v6;
-        *(const dvar_s **)((char *)v3 + (unsigned int)v7) = (const dvar_s *)(*v3)->current.integer;
-        ++v3;
-    } while (v6 < 4);
-    stringTable[v6] = 0;
+        stringTable[dvarIndex] = mruDvars[dvarIndex]->current.string;
+    }
+    stringTable[dvarIndex] = NULL;
     if (dvar)
-        Dvar_UpdateEnumDomain((dvar_s*)(dvar_s*)dvar, stringTable);
+        Dvar_UpdateEnumDomain((dvar_s *)dvar, stringTable);
 }
 
 void __cdecl CG_ModPrvPushMruEntry(
@@ -441,10 +428,10 @@ void __cdecl CG_ModPrvFree(void *allocated, int size)
 
 void CG_ModPrvResetGlobals()
 {
-    DObj_s **p_obj; // r10
+    MdlPrvClone *clone;
     int v1; // r11
 
-    p_obj = &g_mdlprv.model.clones[0].obj;
+    clone = g_mdlprv.model.clones;
     g_mdlprv.system.cachedAllModels = 0;
     g_mdlprv.system.uiModePC = SELECTION_MODE;
     g_mdlprv.system.uiModeGPad = MDLPRVMODE_FOCUSED;
@@ -471,8 +458,8 @@ void CG_ModPrvResetGlobals()
     do
     {
         --v1;
-        *p_obj = 0;
-        p_obj += 78;
+        clone->obj = 0;
+        ++clone;
     } while (v1);
     g_mdlprv.model.ragdoll = 0;
     g_mdlprv.viewer.centerRadius = 100.0;
@@ -945,7 +932,7 @@ void __cdecl CG_ModPrvLoadAnimations(const char *animationFilename)
         fromCurrentIndex = g_mdlprv.anim.fromCurrentIndex;
         if (g_mdlprv.anim.fromCurrentIndex >= 0)
         {
-            if (g_mdlprv.anim.toCurrentIndex >= 0 && *(unsigned int *)(modPrvAnimBlendMode + 12) == 1)
+            if (g_mdlprv.anim.toCurrentIndex >= 0 && modPrvAnimBlendMode->current.integer == 1)
                 value = modPrvAnimBlendWeight->current.value;
             else
                 value = (float)((float)1.0 - modPrvAnimBlendWeight->current.value);
@@ -956,7 +943,7 @@ void __cdecl CG_ModPrvLoadAnimations(const char *animationFilename)
         }
         if (g_mdlprv.anim.toCurrentIndex >= 0)
         {
-            if (fromCurrentIndex >= 0 && *(unsigned int *)(modPrvAnimBlendMode + 12) == 1)
+            if (fromCurrentIndex >= 0 && modPrvAnimBlendMode->current.integer == 1)
                 XAnimSetGoalWeightKnobAll(g_mdlprv.model.currentObj, 2, 0, 1.0, 1.0, 1.0, 0, 0, 1);// KISAKTODO: args sus
             //g_mdlprv.anim.isToLooped = (_cntlzw(XAnimIsLooped(v6, 2u)) & 0x20) == 0;
             g_mdlprv.anim.isToLooped = XAnimIsLooped(xAnims, 2);
@@ -1030,7 +1017,7 @@ void __cdecl CG_ModPrvApplyDelta(double deltaTime)
 
     if (g_mdlprv.model.currentObj
         && DObjGetTree(g_mdlprv.model.currentObj)
-        && *(_BYTE *)(modPrvAnimApplyDelta + 12)
+        && modPrvAnimApplyDelta->current.enabled
         && g_mdlprv.anim.isAnimPlaying)
     {
         v3 = 0.0;
@@ -1129,7 +1116,7 @@ LABEL_15:
     {
         if (fromCurrentIndex >= 0 && v1 >= 1.0)
         {
-            if (*(unsigned int *)(modPrvAnimBlendMode + 12) == 1)
+            if (modPrvAnimBlendMode->current.integer == 1)
                 value = modPrvAnimBlendWeight->current.value;
             else
                 value = (float)((float)1.0 - modPrvAnimBlendWeight->current.value);
@@ -1440,9 +1427,9 @@ void CG_ModPrvLightValuesUpdate()
 
 void __cdecl TRACK_cg_modelpreviewer()
 {
-    track_static_alloc_internal(&g_mdlprv, 34904, "g_mdlprv", 0);
-    track_static_alloc_internal(mpDefaultDrawBoneOptions, 16, "mpDefaultDrawBoneOptions", 0);
-    track_static_alloc_internal(modPrvAnimBlendModeNames, 12, "modPrvAnimBlendModeNames", 0);
+    track_static_alloc_internal(&g_mdlprv, sizeof(g_mdlprv), "g_mdlprv", 0);
+    track_static_alloc_internal(mpDefaultDrawBoneOptions, sizeof(mpDefaultDrawBoneOptions), "mpDefaultDrawBoneOptions", 0);
+    track_static_alloc_internal(modPrvAnimBlendModeNames, sizeof(modPrvAnimBlendModeNames), "modPrvAnimBlendModeNames", 0);
 }
 
 void __cdecl CG_ModelPreviewerPauseAnim()
@@ -2173,19 +2160,19 @@ void __cdecl MdlPrvCloneClear(MdlPrvClone *clone)
 void MdlPrvCloneClearAll()
 {
     int v0; // r30
-    DObj_s **p_obj; // r31
+    MdlPrvClone *clone;
 
     v0 = 10;
-    p_obj = &g_mdlprv.model.clones[0].obj;
+    clone = g_mdlprv.model.clones;
     do
     {
-        if (*p_obj)
+        if (clone->obj)
         {
-            DObjFree(*p_obj);
-            *p_obj = 0;
+            DObjFree(clone->obj);
+            clone->obj = 0;
         }
         --v0;
-        p_obj += 78;
+        ++clone;
     } while (v0);
 }
 
@@ -2221,7 +2208,7 @@ void __cdecl MdlPrvCloneModel(const cg_s *cgGlob)
     DObjClone(g_mdlprv.model.currentObj, (DObj_s*)pClone->objBuf);
     pClone->obj = (DObj_s *)pClone->objBuf;
     DObjSetTree((DObj_s *)pClone->objBuf, 0);
-    memcpy(pClone, &g_mdlprv.model.currentEntity, 0x7Cu);
+    pClone->ent = g_mdlprv.model.currentEntity;
     AngleVectors(cgGlob->refdefViewAngles, forward, right, up);
     ++g_mdlprv.model.cloneNextIdx;
     g_mdlprv.model.initialOrigin[1] = g_mdlprv.model.initialOrigin[1] + (forward[0] * 16.0f);
@@ -2550,7 +2537,7 @@ void __cdecl MdlPrvUpdateViewFocused(float *viewOrigin, float (*viewAxis)[3], fl
     v22[14] = 0.0;
     MatrixMultiply44((const mat4x4&)v22, (const mat4x4&)v21, (mat4x4&)v23);
     MatrixMultiply44((const mat4x4&)v23, (const mat4x4&)v20, (mat4x4&)v19[28]);
-    if (*(_BYTE *)(modPrvAnimApplyDelta + 12) && g_mdlprv.anim.isAnimPlaying)
+    if (modPrvAnimApplyDelta->current.enabled && g_mdlprv.anim.isAnimPlaying)
     {
         v8 = modPrvCenterOffset;
         v9 = (float)(modPrvCenterOffset->current.value + g_mdlprv.model.initialOrigin[0]);
@@ -2881,16 +2868,16 @@ void __cdecl CG_ModelPreviewerBuildViewPosStr(char *buffer, int bufferSize)
 void __cdecl CG_ModPrvSaveDObjs()
 {
     int v0; // r30
-    DObj_s **p_obj; // r31
+    MdlPrvClone *clone;
 
     v0 = 10;
-    p_obj = &g_mdlprv.model.clones[0].obj;
+    clone = g_mdlprv.model.clones;
     do
     {
-        if (*p_obj)
-            DObjArchive(*p_obj);
+        if (clone->obj)
+            DObjArchive(clone->obj);
         --v0;
-        p_obj += 78;
+        ++clone;
     } while (v0);
     if (g_mdlprv.model.currentObj)
         DObjArchive(g_mdlprv.model.currentObj);
@@ -2899,16 +2886,16 @@ void __cdecl CG_ModPrvSaveDObjs()
 void __cdecl CG_ModPrvLoadDObjs()
 {
     int v0; // r30
-    DObj_s **p_obj; // r31
+    MdlPrvClone *clone;
 
     v0 = 10;
-    p_obj = &g_mdlprv.model.clones[0].obj;
+    clone = g_mdlprv.model.clones;
     do
     {
-        if (*p_obj)
-            DObjUnarchive(*p_obj);
+        if (clone->obj)
+            DObjUnarchive(clone->obj);
         --v0;
-        p_obj += 78;
+        ++clone;
     } while (v0);
     if (g_mdlprv.model.currentObj)
         DObjUnarchive(g_mdlprv.model.currentObj);

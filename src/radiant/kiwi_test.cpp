@@ -9,6 +9,7 @@
 #include "mainfrm.h"
 #include "kiwi_refimage.h"     // refimage verbs + expectations (test mode)
 #include "kiwi_terrain.h"      // terrain verb: tool / set / arm / stroke (test mode)
+#include "kiwi_plastbridge.h"  // plasticity_export verb (test mode, no hand-off)
 #include "xywnd.h"             // expect xyview: Ed_ActiveXY / ED_VIEW_*
 
 #include <algorithm>
@@ -1233,6 +1234,21 @@ static void ExecuteLine( const ScriptLine &line )
     {
         if ( w.size() != 2 ) { ScriptError( line, "%s requires one map path", command.c_str() ); return; }
         Map_SaveFile( w[1].c_str(), 0, 0 );
+        return;
+    }
+    if ( command == "plasticity_export" )
+    {
+        // KIWI: the Ctrl+Shift+P export without its dialog.  Writes <map>_ref.step/.obj
+        // beside the map and prints the paths; never drives Plasticity in test mode.
+        bool construction = false;
+        for ( size_t i = 1; i < w.size(); ++i )
+        {
+            if ( Lower( w[i] ) == "construction" ) { construction = true; continue; }
+            ScriptError( line, "plasticity_export accepts only the word 'construction'" );
+            return;
+        }
+        if ( !KiwiPlastBridge_ExportNow( construction, false ) )
+            ScriptError( line, "plasticity_export wrote nothing (see console)" );
         return;
     }
     if ( command == "frames" )

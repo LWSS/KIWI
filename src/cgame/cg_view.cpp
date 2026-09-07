@@ -31,8 +31,8 @@ TestEffect s_testEffect[1];
 
 void __cdecl TRACK_cg_view()
 {
-    track_static_alloc_internal(clientViewParamsArray, 16, "clientViewParamsArray", 10);
-    track_static_alloc_internal(s_testEffect, 84, "s_testEffect", 9);
+    track_static_alloc_internal(clientViewParamsArray, sizeof(clientViewParamsArray), "clientViewParamsArray", 10);
+    track_static_alloc_internal(s_testEffect, sizeof(s_testEffect), "s_testEffect", 9);
 }
 
 void __cdecl CG_PlayTestFx(int localClientNum)
@@ -721,20 +721,9 @@ float __cdecl CG_GetViewZoomScale()
 
 void __cdecl CG_CalcCubemapViewValues(cg_s *cgameGlob)
 {
-    playerState_s *p_predictedPlayerState; // r10
-    int *p_fromAlignOrg; // r3
-    int cubemapSize; // r5
-    CubemapShot cubemapShot; // r4
-
-    p_predictedPlayerState = &cgameGlob->predictedPlayerState;
-    cgameGlob->refdef.vieworg[0] = cgameGlob->predictedPlayerState.origin[0];
-    cgameGlob->refdef.vieworg[1] = cgameGlob->predictedPlayerState.origin[1];
-    cgameGlob->refdef.vieworg[2] = cgameGlob->predictedPlayerState.origin[2];
-    cubemapSize = cgameGlob->cubemapSize;
-    cubemapShot = cgameGlob->cubemapShot;
-    p_fromAlignOrg = &cgameGlob->predictedPlayerState.hud.elem[123].fromAlignOrg;
-    *((float *)p_fromAlignOrg + 5823) = p_predictedPlayerState->viewHeightCurrent + *((float *)p_fromAlignOrg + 5823);
-    R_CalcCubeMapViewValues((refdef_s *)(p_fromAlignOrg + 5815), cubemapShot, cubemapSize);
+    Vec3Copy(cgameGlob->predictedPlayerState.origin, cgameGlob->refdef.vieworg);
+    cgameGlob->refdef.vieworg[2] += cgameGlob->predictedPlayerState.viewHeightCurrent;
+    R_CalcCubeMapViewValues(&cgameGlob->refdef, cgameGlob->cubemapShot, cgameGlob->cubemapSize);
 }
 
 void __cdecl CG_CalcVehicleViewValues(int localClientNum)
@@ -1150,17 +1139,15 @@ void __cdecl CG_UpdateEntInfo(int localClientNum)
     v4 = 0;
     if (nextSnap->numEntities > 0)
     {
-        v5 = 45796;
         do
         {
-            v6 = *(int *)((char *)&nextSnap->snapFlags + v5);
+            v6 = nextSnap->entityNums[v4];
             bcassert(v6, 0x880);
             ClientDObj = Com_GetClientDObj(v6, localClientNum);
             if (ClientDObj)
                 CG_DObjUpdateInfo(cgArray, ClientDObj, 0);
             nextSnap = cgArray[0].nextSnap;
             ++v4;
-            v5 += 4;
         } while (v4 < cgArray[0].nextSnap->numEntities);
     }
     //Profile_EndInternal(0);

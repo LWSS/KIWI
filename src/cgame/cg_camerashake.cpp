@@ -19,7 +19,7 @@ CameraShakeSet s_cameraShakeSet[1];
 
 void __cdecl TRACK_cg_camerashake()
 {
-    track_static_alloc_internal(s_cameraShakeSet, 148, "s_cameraShakeSet", 9);
+    track_static_alloc_internal(s_cameraShakeSet, sizeof(s_cameraShakeSet), "s_cameraShakeSet", 9);
 }
 
 void __cdecl CG_StartShakeCamera(int localClientNum, float p, int duration, float *src, float radius)
@@ -190,7 +190,7 @@ void __cdecl CG_ShakeCamera(int localClientNum)
 
 void __cdecl CG_ClearCameraShakes(int localClientNum)
 {
-    memset((uint8_t *)&s_cameraShakeSet[localClientNum], 0, 0x90u);
+    memset(s_cameraShakeSet[localClientNum].shakes, 0, sizeof(s_cameraShakeSet[localClientNum].shakes));
 }
 
 #ifdef KISAK_SP

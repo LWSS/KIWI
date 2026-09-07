@@ -273,7 +273,7 @@ void __cdecl CG_DoBaseOriginController(const cpose_t *pose, const DObj_s *obj, i
             goto notSet;
     }
 
-    if (((0xFFFFFFFF >> ((rootBoneCount & 0x1F) + 1)) | setPartBits[maxHighIndex]) == 0xFFFFFFFF)
+    if (((0x7FFFFFFFu >> (rootBoneCount & 0x1F)) | setPartBits[maxHighIndex]) == 0xFFFFFFFF)
         return;
 
 notSet:

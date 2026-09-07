@@ -8,5 +8,5 @@ int itemRegistered[2048] = { 0 };
 
 void __cdecl TRACK_bg_misctables()
 {
-	track_static_alloc_internal(bg_itemlist, 0x2000, "bg_itemlist", 9);
+	track_static_alloc_internal(bg_itemlist, sizeof(bg_itemlist), "bg_itemlist", 9);
 }

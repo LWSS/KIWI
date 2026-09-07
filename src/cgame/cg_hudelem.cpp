@@ -1763,7 +1763,7 @@ int __cdecl GetSortedHudElems(int localClientNum, hudelem_s **elems)
     CopyInUseHudElems(elems, &elemCount, ps->hud.elem, 256);
 #endif
 
-    qsort(elems, elemCount, 4, compare_hudelems);
+    qsort(elems, elemCount, sizeof(hudelem_s *), compare_hudelems);
     return elemCount;
 }
 

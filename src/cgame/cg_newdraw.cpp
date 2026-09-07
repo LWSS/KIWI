@@ -317,7 +317,7 @@ void __cdecl CG_DrawStanceHintPrints(
     const char *binding; // [esp+254h] [ebp-8h]
     float y; // [esp+258h] [ebp-4h]
 
-    memset(standCmds, 0, 24);
+    memset(standCmds[0], 0, sizeof(standCmds[0]));
     standCmds[1][0] = "gocrouch";
     standCmds[1][1] = "togglecrouch";
     standCmds[1][2] = "lowerstance";
@@ -824,7 +824,7 @@ char *__cdecl CG_GetWeaponUseString(int localClientNum, const char **secondarySt
     int cursorHintIcon; // r11
     int v5; // r30
     WeaponDef *WeaponDef; // r29
-    char *v7; // r28
+    weaponInfo_s *weapInfo;
     char *v8; // r30
     char *v9; // r30
     char v11[336]; // [sp+50h] [-150h] BYREF
@@ -844,7 +844,7 @@ char *__cdecl CG_GetWeaponUseString(int localClientNum, const char **secondarySt
     v5 = cursorHintIcon - 4;
     WeaponDef = BG_GetWeaponDef(cursorHintIcon - 4);
     vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
-    v7 = (char *)cg_weaponsArray + 72 * v5;
+    weapInfo = &cg_weaponsArray[0][v5];
     if (WeaponDef->inventoryType)
     {
         if (WeaponDef->offhandClass == OFFHAND_CLASS_FRAG_GRENADE)
@@ -864,7 +864,7 @@ char *__cdecl CG_GetWeaponUseString(int localClientNum, const char **secondarySt
         else
             v8 = UI_SafeTranslateString("PLATFORM_PICKUPNEWWEAPON");
     }
-    *secondaryString = (const char *)*((unsigned int *)v7 + 15);
+    *secondaryString = weapInfo->translatedDisplayName;
     return UI_ReplaceConversionString(v8, v11);
 }
 

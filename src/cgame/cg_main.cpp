@@ -656,12 +656,12 @@ void CG_RegisterDvars()
 
 void __cdecl TRACK_cg_main()
 {
-    track_static_alloc_internal(&cgDC, 3448, "cgDC", 34);
-    track_static_alloc_internal(cgArray, 192072, "cgArray", 9);
-    track_static_alloc_internal(cgsArray, 1112, "cgsArray", 9);
-    track_static_alloc_internal(cg_entitiesArray, 809472, "cg_entitiesArray", 9);
-    track_static_alloc_internal(cg_weaponsArray, 9216, "cg_weaponsArray", 9);
-    track_static_alloc_internal(cg_entityOriginArray, 26112, "cg_entityOriginArray", 9);
+    track_static_alloc_internal(&cgDC, sizeof(cgDC), "cgDC", 34);
+    track_static_alloc_internal(cgArray, sizeof(cgArray), "cgArray", 9);
+    track_static_alloc_internal(cgsArray, sizeof(cgsArray), "cgsArray", 9);
+    track_static_alloc_internal(cg_entitiesArray, sizeof(cg_entitiesArray), "cg_entitiesArray", 9);
+    track_static_alloc_internal(cg_weaponsArray, sizeof(cg_weaponsArray), "cg_weaponsArray", 9);
+    track_static_alloc_internal(cg_entityOriginArray, sizeof(cg_entityOriginArray), "cg_entityOriginArray", 9);
 }
 
 void __cdecl CG_GetDObjOrientation(int localClientNum, int dobjHandle, float (*axis)[3], float *origin)
@@ -1000,7 +1000,7 @@ void __cdecl CG_RegisterGraphics(int localClientNum, const char *mapname)
             MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_main.cpp", 1026, 0, "%s", "cgs->fxs[i]");
         ++v7;
         ++v6;
-    } while ((int)v7 < (int)&cgsArray[0].holdBreathParams);
+    } while (v7 < cgsArray[0].fxs + ARRAY_COUNT(cgsArray[0].fxs));
     ProfLoad_End();
     ProfLoad_Begin("Register shellshocks");
     for (j = 1; j < 16; ++j)
@@ -1468,9 +1468,9 @@ void __cdecl CG_FreeWeapons(int localClientNum)
     v2 = 1;
     if (BG_GetNumWeapons() > 1)
     {
-        p_tree = &cg_weaponsArray[0][1].tree;
         do
         {
+            p_tree = &cg_weaponsArray[0][v2].tree;
             v4 = CG_WeaponDObjHandle(v2);
             Com_SafeClientDObjFree(v4, localClientNum);
             vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
@@ -1480,7 +1480,6 @@ void __cdecl CG_FreeWeapons(int localClientNum)
                 *p_tree = 0;
             }
             ++v2;
-            p_tree += 18;
         } while (v2 < BG_GetNumWeapons());
     }
     memset(cg_weaponsArray[localClientNum], 0, sizeof(weaponInfo_s[128]));

@@ -174,7 +174,7 @@ void __cdecl AimAssist_DrawCenterBox(
     float clipHalfWidth,
     float clipHalfHeight,
     const float *color);
-void __cdecl AimAssist_DrawTargets(int64_t localClientNum, const float *color);
+void __cdecl AimAssist_DrawTargets(uint localClientNum, const playerState_s *ps, const float *color);
 
 
 // aim_target_mp

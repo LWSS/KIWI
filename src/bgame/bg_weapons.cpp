@@ -38,9 +38,9 @@ uint bg_lastParsedWeaponIndex;
 
 void __cdecl TRACK_bg_weapons()
 {
-    track_static_alloc_internal(bg_weapAmmoTypes, 512, "bg_weapAmmoTypes", 9);
-    track_static_alloc_internal(bg_sharedAmmoCaps, 512, "bg_sharedAmmoCaps", 9);
-    track_static_alloc_internal(bg_weapClips, 512, "bg_weapClips", 9);
+    track_static_alloc_internal(bg_weapAmmoTypes, sizeof(bg_weapAmmoTypes), "bg_weapAmmoTypes", 9);
+    track_static_alloc_internal(bg_sharedAmmoCaps, sizeof(bg_sharedAmmoCaps), "bg_sharedAmmoCaps", 9);
+    track_static_alloc_internal(bg_weapClips, sizeof(bg_weapClips), "bg_weapClips", 9);
 }
 
 void __cdecl BG_LoadPenetrationDepthTable()
@@ -178,7 +178,7 @@ void __cdecl BG_FreeWeaponDefStrings()
 
 void __cdecl BG_ShutdownWeaponDefFiles()
 {
-    //if (*(_BYTE *)fs_gameDirVar->current.integer || !IsFastFileLoad())
+    //if (fs_gameDirVar->current.string[0] || !IsFastFileLoad())
     if (!IsFastFileLoad())// LWSS: clear these even without a mod folder
     {
         BG_ClearSurfaceTypeSounds();
@@ -4537,7 +4537,7 @@ bool __cdecl BG_ThrowingBackGrenade(const playerState_s *ps)
 WeaponDef *__cdecl BG_LoadWeaponDef(const char *name)
 {
 #ifndef DEDICATED
-    if (*(_BYTE *)fs_gameDirVar->current.integer || !IsFastFileLoad())
+    if (fs_gameDirVar->current.string[0] || !IsFastFileLoad())
         return BG_LoadWeaponDef_LoadObj(name);
     else
         return BG_LoadWeaponDef_FastFile(name);

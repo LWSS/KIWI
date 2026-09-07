@@ -19,9 +19,9 @@ ScreenFade s_screenFade[1];
 
 void __cdecl TRACK_cg_draw()
 {
-    track_static_alloc_internal(s_centerPrint, 1028, "s_centerPrint", 9);
-    track_static_alloc_internal(s_screenBlur, 28, "s_screenBlur", 9);
-    track_static_alloc_internal(s_screenFade, 16, "s_screenFade", 9);
+    track_static_alloc_internal(s_centerPrint, sizeof(s_centerPrint), "s_centerPrint", 9);
+    track_static_alloc_internal(s_screenBlur, sizeof(s_screenBlur), "s_screenBlur", 9);
+    track_static_alloc_internal(s_screenFade, sizeof(s_screenFade), "s_screenFade", 9);
 }
 
 void __cdecl CG_CenterPrint(int localClientNum, const char *str)

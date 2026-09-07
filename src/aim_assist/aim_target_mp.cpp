@@ -14,7 +14,7 @@ const dvar_t *aim_target_sentient_radius;
 
 void __cdecl TRACK_aim_target()
 {
-    track_static_alloc_internal(atGlobArray, 5640, "atGlobArray", 10);
+    track_static_alloc_internal(atGlobArray, sizeof(atGlobArray), "atGlobArray", 10);
 }
 
 void __cdecl AimTarget_Init(int localClientNum)

@@ -16,8 +16,8 @@ enum
 
 void __cdecl TRACK_CG_CollWorld()
 {
-    track_static_alloc_internal(cgEntCollWorld, 16412, "cgEntCollWorld", 25);
-    track_static_alloc_internal(cgEntCollNodes, 20480, "cgEntCollNodes", 25);
+    track_static_alloc_internal(cgEntCollWorld, sizeof(cgEntCollWorld), "cgEntCollWorld", 25);
+    track_static_alloc_internal(cgEntCollNodes, sizeof(cgEntCollNodes), "cgEntCollNodes", 25);
 }
 
 void __cdecl CG_SetCollWorldLocalClientNum(int localClientNum)

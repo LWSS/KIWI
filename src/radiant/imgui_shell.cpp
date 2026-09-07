@@ -1831,6 +1831,11 @@ void ImGuiShell_DrawOverlay( IDirect3DDevice9 *device, HWND activeHwnd )
     // Popup / BeginPopupModal must run outside any other window's Begin/End pair.  It
     // early-outs to nothing when there is no queue.
     KiwiImport_Draw();
+    { // KIWI: the Ctrl+Shift+P "Send Selection to Plasticity" options dialog — the same
+      // modal-popup shape as the wizard above (top-level scope, early-out when idle).
+        extern void KiwiPlastBridge_Draw();     // kiwi_plastbridge.cpp
+        KiwiPlastBridge_Draw();
+    }
     // KIWI-UX (ROUND BF): the BUILD & RUN dialog.  Also not a dock window — a FLOATING
     // window with its own file-scope open flag, so this round adds no kiwiWindow_t row and
     // does NOT bump KIWI_LAYOUT_VERSION either.  It is called UNCONDITIONALLY and POLLS ITS

@@ -20,8 +20,8 @@ LONG g_localEntThread;
 
 void __cdecl TRACK_cg_localents()
 {
-    track_static_alloc_internal(cg_localEntities, 10240, "cg_localEntities", 9);
-    track_static_alloc_internal(cg_activeLocalEntities, 80, "cg_activeLocalEntities", 9);
+    track_static_alloc_internal(cg_localEntities, sizeof(cg_localEntities), "cg_localEntities", 9);
+    track_static_alloc_internal(cg_activeLocalEntities, sizeof(cg_activeLocalEntities), "cg_activeLocalEntities", 9);
 }
 
 void __cdecl CG_InitLocalEntities(int localClientNum)

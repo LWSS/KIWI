@@ -19,7 +19,7 @@ const dvar_s *aim_target_sentient_radius;
 
 void __cdecl TRACK_aim_target()
 {
-    track_static_alloc_internal(&atGlob, 5640, "atGlob", 10);
+    track_static_alloc_internal(&atGlob, sizeof(atGlob), "atGlob", 10);
 }
 
 const dvar_s *__cdecl AimTarget_RegisterDvars(int a1, unsigned __int16 a2, const char *a3)

@@ -241,7 +241,7 @@ void __cdecl CG_mg42_PreControllers(int localClientNum, const DObj_s *obj, centi
     if (v5)
     {
         cent->pose.cullIn = 0;
-        cent->pose.actor.proneType = (int)cgArray[0].refdefViewAngles;
+        cent->pose.turret.viewAngles = cgArray[0].refdefViewAngles;
     }
     else
     {
@@ -1442,7 +1442,7 @@ void __cdecl CG_CreatePhysicsObject(int localClientNum, centity_s *cent)
 
 void __cdecl CG_UpdatePhysicsPose(centity_s *cent)
 {
-    int physObjId; // r11
+    uintptr_t physObjId; // r11
     float v3[4]; // [sp+50h] [-20h] BYREF
 
     physObjId = cent->pose.physObjId;
@@ -1499,7 +1499,7 @@ void __cdecl CG_CalcEntityPhysicsPositions(int localClientNum, centity_s *cent)
 void __cdecl CG_SaveEntityPhysics(centity_s *cent, SaveGame *save)
 {
     const DObj_s *obj; // r28
-    int physObjId; // r11
+    uintptr_t physObjId; // r11
     char v6; // r11
     bool v7; // zf
     const char *modelName; // r29
@@ -2136,10 +2136,9 @@ int __cdecl CG_AddPacketEntities(int localClientNum)
     v5 = 0;
     if (cgArray[0].nextSnap->numEntities > 0)
     {
-        v6 = 45796;
         do
         {
-            v7 = *(int *)((char *)&nextSnap->snapFlags + v6);
+            v7 = nextSnap->entityNums[v5];
             Entity = CG_GetEntity(localClientNum, v7);
             if (Entity->nextState.eType < ET_EVENTS)
             {
@@ -2155,7 +2154,6 @@ int __cdecl CG_AddPacketEntities(int localClientNum)
             }
             nextSnap = cgArray[0].nextSnap;
             ++v5;
-            v6 += 4;
         } while (v5 < cgArray[0].nextSnap->numEntities);
     }
     //Profile_EndInternal(0);
@@ -2180,15 +2178,13 @@ DObjAnimMat *__cdecl CG_DObjGetLocalBoneMatrix(const cpose_t *pose, DObj_s *obj,
 
 DObjAnimMat *__cdecl CG_DObjGetLocalTagMatrix(const cpose_t *pose, DObj_s *obj, unsigned int tagName)
 {
-    DObjAnimMat *result; // r3
-    unsigned __int8 v7; // [sp+50h] [-30h] BYREF
+    unsigned __int8 boneIndex;
 
     iassert(obj);
-    v7 = -2;
-    result = (DObjAnimMat *)DObjGetBoneIndex(obj, tagName, &v7);
-    if (result)
-        return CG_DObjGetLocalBoneMatrix(pose, obj, v7);
-    return result;
+    boneIndex = -2;
+    if (DObjGetBoneIndex(obj, tagName, &boneIndex))
+        return CG_DObjGetLocalBoneMatrix(pose, obj, boneIndex);
+    return NULL;
 }
 
 int __cdecl CG_DObjGetWorldBoneMatrix(

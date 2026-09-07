@@ -8582,3 +8582,18 @@ the CAMERA CONTRACT, the disposition table for every round-BK camera change, and
 - The Thicken panel now relies on `Patch_Thicken`'s existing undo bracket instead
   of leaving an extra unfinished outer record. Repeated-apply and actual-panel
   regression procedures are recorded in `tools/kiwitest/REVIEW_20260906.md`.
+
+## 2026-09-07 Plasticity push: construction lines as tiny prisms (UNBUILT)
+
+- Ctrl+Shift+P now opens a "Send Selection to Plasticity" dialog (paths, selection
+  count, `Include construction lines` + prism thickness, auto-import) instead of
+  exporting immediately.  Prefs: `PlasticityExportConstruction` (default off),
+  `PlasticityConstructionThicknessMilli` (default 20 = 0.020 in = 0.5 mm).
+- Plasticity has no construction-line import and the bridge cannot create curves, so
+  visible construction objects are appended to the brush STEP as square prisms.
+  Profile corner 0 sits ON the line: snap to that long edge in Plasticity.  Planar
+  objects become one mitred prism per object (rings for circles/rects); non-planar
+  polylines, turns sharper than ~174 deg, and segments shorter than their mitres fall
+  back to one box per segment (`con<N>_<type>[_name]_s<seg>`).  Hidden objects and
+  the global construction-visibility toggle: only `hidden` is honoured.
+- Test verb `plasticity_export [construction]` writes the files without the dialog.

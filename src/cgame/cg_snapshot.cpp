@@ -26,7 +26,7 @@ void __cdecl CG_ShutdownEntity(int localClientNum, centity_s *cent)
     FxEffect *effect; // r4
     trajectory_t *p_pos; // r29
     int ragdollHandle; // r3
-    int physObjId; // r4
+    uintptr_t physObjId; // r4
 
     oldEType = cent->oldEType;
     if (oldEType == 8 || oldEType == 7)
@@ -250,9 +250,9 @@ int __cdecl CG_DObjCloneToBuffer(int localClientNum, centity_s *cent, const XAni
             MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_snapshot.cpp", 241, 0, "%s", "tree");
         goto LABEL_9;
     }
-    result = (int)G_AllocAnimClientTree();
-    SmallTree = (XAnimTree_s *)result;
-    if (result)
+    SmallTree = G_AllocAnimClientTree();
+    result = 0;
+    if (SmallTree)
     {
     LABEL_9:
         XAnimCloneClientAnimTree(serverTree, SmallTree);

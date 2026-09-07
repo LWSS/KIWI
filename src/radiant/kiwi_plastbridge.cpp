@@ -9,6 +9,7 @@
 
 #include "kiwi_plastbridge.h"
 #include "kiwi_command.h"
+#include "kiwi_construct.h"        // construction lines -> tiny STEP prisms
 #include "kiwi_droptrace.h"
 #include "kiwi_shadowcache.h"
 #include "kiwi_windows.h"          // KiwiWindows_RevealInExplorer
@@ -48,6 +49,20 @@ namespace
     int s_autoImport = -1;
     volatile LONG s_autoImportBusy = 0;
     HWND s_autoImportResultWindow = nullptr;
+
+    // KIWI: construction lines ride along inside the brush STEP as tiny square
+    // prisms (Plasticity has no construction-line import and the bridge cannot
+    // create curves).  Both preferences persist beside PlasticityAutoImport; the
+    // thickness is stored in thousandths of a unit because the profile API is
+    // integer-only.
+    const char *PLASTICITY_DIALOG_TITLE = "Send Selection to Plasticity";
+    const int CONSTRUCTION_THICKNESS_DEFAULT_MILLI = 20;   // 0.020 in = 0.5 mm
+    const int CONSTRUCTION_THICKNESS_MIN_MILLI = 5;        // 5x the STEP weld tolerance
+    const int CONSTRUCTION_THICKNESS_MAX_MILLI = 4000;
+    int s_exportConstruction = -1;
+    int s_constructionThicknessMilli = -1;
+    bool s_dialogRequest = false;   // Ctrl+Shift+P owes the frame an OpenPopup
+    bool s_dialogOpen = false;
 
     struct ObjVertex
     {
@@ -104,12 +119,18 @@ namespace
         unsigned int patches;
         unsigned int models;
         unsigned int brushFallbacks;
+        unsigned int constructionObjects;   // visible construction objects visited
+        unsigned int constructionPrisms;    // one mitered prism per planar object
+        unsigned int constructionBoxes;     // per-segment fallback boxes
+        unsigned int constructionSkipped;   // objects/segments that built nothing
         unsigned __int64 stepFaces;
         unsigned __int64 objFaces;
 
         ExportStats()
             : skippedFixed( 0 ), skippedInvalid( 0 ), skippedModelGeo( 0 ),
               stepBrushes( 0 ), patches( 0 ), models( 0 ), brushFallbacks( 0 ),
+              constructionObjects( 0 ), constructionPrisms( 0 ),
+              constructionBoxes( 0 ), constructionSkipped( 0 ),
               stepFaces( 0 ), objFaces( 0 ) {}
     };
 
@@ -433,6 +454,9 @@ namespace
         std::vector<StepPoint> points;
     };
 
+    bool AssembleStepSolid( const std::vector<PreparedStepFace> &prepared,
+                            const std::string &name, StepSolid &solid );
+
     bool BuildStepSolid( const brush_t *brush, const std::string &name,
                          StepSolid &solid )
     {
@@ -480,7 +504,15 @@ namespace
                 std::reverse( face.points.begin(), face.points.end() );
             prepared.push_back( face );
         }
+        return AssembleStepSolid( prepared, name, solid );
+    }
 
+    // Weld the prepared faces into one manifold solid: every edge must be used
+    // exactly twice, once in each direction.  Shared by brushes and the
+    // construction-line prisms below.
+    bool AssembleStepSolid( const std::vector<PreparedStepFace> &prepared,
+                            const std::string &name, StepSolid &solid )
+    {
         solid.name = name;
         solid.faces.reserve( prepared.size() );
         for ( size_t faceIndex = 0; faceIndex < prepared.size(); ++faceIndex )
@@ -724,6 +756,410 @@ namespace
         return true;
     }
 
+    // ---- Construction lines as tiny STEP prisms --------------------------------
+    // Plasticity cannot import construction lines and the bridge cannot create
+    // curves, so each visible construction object is swept into a square prism
+    // `thickness` units across and appended to the brush STEP.  Profile corner 0
+    // sits ON the path: one long edge of every prism IS the construction line, so
+    // snapping to that edge in Plasticity snaps to the line exactly.  Planar
+    // objects become ONE mitred prism per object (a ring for closed shapes); the
+    // mitre keeps every side face planar because all four corners of a side lie
+    // at a constant in-plane offset from the segment.  Non-planar polylines, over-
+    // sharp turns, and segments shorter than their mitres fall back to one box per
+    // segment.  Face orientation is settled by the signed volume, so the winding
+    // convention below only has to be topologically consistent.
+
+    const double SWEEP_POINT_WELD = 1.0e-4;      // consecutive-point collapse, units
+    const double SWEEP_MIN_MITRE_DENOM = 0.05;   // 1 + left(prev).left(next); ~174 deg turn
+    const double SWEEP_PLANAR_DOT = 1.0e-3;      // |segment dir . plane normal| ceiling
+
+    void Scale3( double value[3], double scale )
+    {
+        value[0] *= scale;
+        value[1] *= scale;
+        value[2] *= scale;
+    }
+
+    StepPoint OffsetPoint( const StepPoint &base, const double *along, double a,
+                           const double *normal, double b )
+    {
+        StepPoint point = { base.x + along[0] * a + normal[0] * b,
+                            base.y + along[1] * a + normal[1] * b,
+                            base.z + along[2] * a + normal[2] * b };
+        return point;
+    }
+
+    double SignedVolume( const std::vector<PreparedStepFace> &faces )
+    {
+        double volume = 0.0;
+        for ( size_t f = 0; f < faces.size(); ++f )
+        {
+            const std::vector<StepPoint> &p = faces[f].points;
+            for ( size_t i = 1; i + 1 < p.size(); ++i )
+            {
+                const double a[3] = { p[0].x, p[0].y, p[0].z };
+                const double b[3] = { p[i].x, p[i].y, p[i].z };
+                const double c[3] = { p[i + 1].x, p[i + 1].y, p[i + 1].z };
+                double cross[3];
+                Cross3( b, c, cross );
+                volume += Dot3( a, cross );
+            }
+        }
+        return volume / 6.0;
+    }
+
+    // `path` must already lie in the plane with unit `planeNormal`.  Closed paths
+    // need three points and get no caps; open paths get a cap at each end.
+    bool BuildSweepSolid( const std::vector<StepPoint> &path, bool closed,
+                          const double planeNormal[3], double thickness,
+                          const std::string &name, StepSolid &solid,
+                          std::string &reason )
+    {
+        const size_t count = path.size();
+        if ( count < 2 || ( closed && count < 3 ) )
+        {
+            reason = "too few points";
+            return false;
+        }
+        if ( !FiniteDouble( thickness ) || thickness <= STEP_WELD_TOLERANCE * 2.0 )
+        {
+            reason = "thickness below the STEP weld tolerance";
+            return false;
+        }
+        const size_t segments = closed ? count : count - 1;
+
+        // Unit direction, in-plane left offset (n x d) and length per segment.
+        std::vector<double> dir( segments * 3 ), left( segments * 3 ), length( segments );
+        for ( size_t i = 0; i < segments; ++i )
+        {
+            const StepPoint &a = path[i];
+            const StepPoint &b = path[( i + 1 ) % count];
+            double d[3] = { b.x - a.x, b.y - a.y, b.z - a.z };
+            const double len = sqrt( Dot3( d, d ) );
+            if ( !FiniteDouble( len ) || len <= SWEEP_POINT_WELD )
+            {
+                reason = "degenerate segment";
+                return false;
+            }
+            Scale3( d, 1.0 / len );
+            if ( fabs( Dot3( d, planeNormal ) ) > SWEEP_PLANAR_DOT )
+            {
+                reason = "path leaves its plane";
+                return false;
+            }
+            double u[3];
+            Cross3( planeNormal, d, u );
+            if ( !Normalize3( u ) )
+            {
+                reason = "segment parallel to the plane normal";
+                return false;
+            }
+            for ( int k = 0; k < 3; ++k )
+            {
+                dir[i * 3 + k] = d[k];
+                left[i * 3 + k] = u[k];
+            }
+            length[i] = len;
+        }
+
+        // Per-joint mitre direction w, scaled so w.left == 1 for BOTH adjacent
+        // segments: the corner sits at in-plane distance `thickness` from each.
+        std::vector<double> mitre( count * 3 );
+        for ( size_t j = 0; j < count; ++j )
+        {
+            const bool interior = closed || ( j > 0 && j + 1 < count );
+            double w[3];
+            if ( !interior )
+            {
+                const size_t seg = j == 0 ? 0 : segments - 1;
+                for ( int k = 0; k < 3; ++k )
+                    w[k] = left[seg * 3 + k];
+            }
+            else
+            {
+                const size_t prev = ( j + segments - 1 ) % segments;
+                const size_t next = j % segments;
+                const double denominator =
+                    1.0 + Dot3( &left[prev * 3], &left[next * 3] );
+                if ( !FiniteDouble( denominator ) || denominator < SWEEP_MIN_MITRE_DENOM )
+                {
+                    reason = "turn too sharp for a mitre";
+                    return false;
+                }
+                for ( int k = 0; k < 3; ++k )
+                    w[k] = ( left[prev * 3 + k] + left[next * 3 + k] ) / denominator;
+            }
+            for ( int k = 0; k < 3; ++k )
+                mitre[j * 3 + k] = w[k];
+        }
+
+        // The offset corners must not cross: the mitred side of a segment keeps a
+        // positive length after both end mitres are pushed along it.
+        for ( size_t i = 0; i < segments; ++i )
+        {
+            const size_t j0 = i;
+            const size_t j1 = ( i + 1 ) % count;
+            const double startPush = Dot3( &mitre[j0 * 3], &dir[i * 3] );
+            const double endPush = Dot3( &mitre[j1 * 3], &dir[i * 3] );
+            const double remaining = length[i] - thickness * ( startPush - endPush );
+            if ( remaining <= STEP_WELD_TOLERANCE * 4.0 )
+            {
+                reason = "segment shorter than its mitres";
+                return false;
+            }
+        }
+
+        // Profile corners as (along mitre, along normal) multiples of thickness.
+        // Corner 0 is the construction line itself.
+        static const double CORNER_A[4] = { 0.0, 1.0, 1.0, 0.0 };
+        static const double CORNER_B[4] = { 0.0, 0.0, 1.0, 1.0 };
+        std::vector<StepPoint> corner( count * 4 );
+        for ( size_t j = 0; j < count; ++j )
+            for ( int k = 0; k < 4; ++k )
+                corner[j * 4 + k] = OffsetPoint( path[j], &mitre[j * 3],
+                                                 thickness * CORNER_A[k],
+                                                 planeNormal, thickness * CORNER_B[k] );
+
+        std::vector<PreparedStepFace> faces;
+        faces.reserve( segments * 4 + 2 );
+        for ( size_t i = 0; i < segments; ++i )
+        {
+            const size_t j0 = i;
+            const size_t j1 = ( i + 1 ) % count;
+            for ( int k = 0; k < 4; ++k )
+            {
+                const int k1 = ( k + 1 ) & 3;
+                PreparedStepFace face;
+                face.points.push_back( corner[j0 * 4 + k] );
+                face.points.push_back( corner[j0 * 4 + k1] );
+                face.points.push_back( corner[j1 * 4 + k1] );
+                face.points.push_back( corner[j1 * 4 + k] );
+                faces.push_back( face );
+            }
+        }
+        if ( !closed )
+        {
+            PreparedStepFace start;
+            for ( int k = 3; k >= 0; --k )
+                start.points.push_back( corner[k] );
+            faces.push_back( start );
+            PreparedStepFace end;
+            for ( int k = 0; k < 4; ++k )
+                end.points.push_back( corner[( count - 1 ) * 4 + k] );
+            faces.push_back( end );
+        }
+
+        const double volume = SignedVolume( faces );
+        if ( !FiniteDouble( volume ) || fabs( volume ) <= 1.0e-12 )
+        {
+            reason = "prism has no volume";
+            return false;
+        }
+        for ( size_t f = 0; f < faces.size(); ++f )
+        {
+            PreparedStepFace &face = faces[f];
+            if ( volume < 0.0 )
+                std::reverse( face.points.begin(), face.points.end() );
+            if ( !NewellNormal( face.points, face.normal ) ||
+                 !Normalize3( face.normal ) )
+            {
+                reason = "degenerate prism face";
+                return false;
+            }
+        }
+        return AssembleStepSolid( faces, name, solid );
+    }
+
+    // Any unit vector perpendicular to `d`, for the per-segment box fallback.
+    void PerpendicularTo( const double d[3], double out[3] )
+    {
+        int smallest = 0;
+        if ( fabs( d[1] ) < fabs( d[smallest] ) )
+            smallest = 1;
+        if ( fabs( d[2] ) < fabs( d[smallest] ) )
+            smallest = 2;
+        double axis[3] = { 0.0, 0.0, 0.0 };
+        axis[smallest] = 1.0;
+        Cross3( axis, d, out );
+        if ( !Normalize3( out ) )
+        {
+            out[0] = 0.0;
+            out[1] = 0.0;
+            out[2] = 1.0;
+        }
+    }
+
+    bool BuildSegmentBox( const StepPoint &a, const StepPoint &b, double thickness,
+                          const std::string &name, StepSolid &solid,
+                          std::string &reason )
+    {
+        double d[3] = { b.x - a.x, b.y - a.y, b.z - a.z };
+        if ( !Normalize3( d ) )
+        {
+            reason = "degenerate segment";
+            return false;
+        }
+        double normal[3];
+        PerpendicularTo( d, normal );
+        std::vector<StepPoint> path;
+        path.push_back( a );
+        path.push_back( b );
+        return BuildSweepSolid( path, false, normal, thickness, name, solid, reason );
+    }
+
+    std::string ConstructionName( int index, const kconObject_t &object )
+    {
+        static const char *TYPE_NAMES[KCON_TYPE_COUNT] =
+            { "line", "polyline", "rect", "circle", "arc" };
+        const int type = (int)object.type;
+        const char *typeName = type >= 0 && type < (int)KCON_TYPE_COUNT
+                             ? TYPE_NAMES[type] : "construction";
+        char base[64];
+        _snprintf( base, sizeof( base ), "con%d_%s", index, typeName );
+        base[sizeof( base ) - 1] = '\0';
+        std::string name = base;
+        const char *label = KiwiCon_Name( index );
+        if ( label && label[0] )
+        {
+            std::string suffix = label;
+            SanitizeName( suffix );
+            name += "_" + suffix;
+        }
+        return name;
+    }
+
+    // Tessellated world-space path with consecutive duplicates welded away.
+    bool ConstructionPath( const kconObject_t &object, std::vector<StepPoint> &path,
+                           bool &closed )
+    {
+        const int vertCount = KiwiCon_VertCount( object );
+        const int segmentCount = KiwiCon_SegmentCount( object );
+        if ( vertCount < 2 || segmentCount < 1 )
+            return false;
+        closed = segmentCount == vertCount;
+
+        path.clear();
+        path.reserve( (size_t)vertCount );
+        const double weldSquared = SWEEP_POINT_WELD * SWEEP_POINT_WELD;
+        for ( int v = 0; v < vertCount; ++v )
+        {
+            float world[3];
+            if ( !KiwiCon_VertWorld( object, v, world ) || !FinitePoint( world ) )
+                return false;
+            StepPoint point = { (double)world[0], (double)world[1], (double)world[2] };
+            if ( !path.empty() &&
+                 PointDistanceSquared( path.back(), point ) <= weldSquared )
+                continue;
+            path.push_back( point );
+        }
+        while ( closed && path.size() > 1 &&
+                PointDistanceSquared( path.front(), path.back() ) <= weldSquared )
+            path.pop_back();
+        if ( closed && path.size() < 3 )
+            closed = false;
+        return path.size() >= 2;
+    }
+
+    void CountVisibleConstruction( int &objects, int &segments )
+    {
+        objects = 0;
+        segments = 0;
+        const int count = KiwiCon_Count();
+        for ( int index = 0; index < count; ++index )
+        {
+            const kconObject_t *object = KiwiCon_At( index );
+            if ( !object || object->hidden )
+                continue;
+            const int objectSegments = KiwiCon_SegmentCount( *object );
+            if ( objectSegments < 1 )
+                continue;
+            ++objects;
+            segments += objectSegments;
+        }
+    }
+
+    void GatherConstruction( double thickness, std::vector<StepSolid> &solids,
+                             ExportStats &stats )
+    {
+        const int count = KiwiCon_Count();
+        for ( int index = 0; index < count; ++index )
+        {
+            const kconObject_t *object = KiwiCon_At( index );
+            if ( !object || object->hidden )
+                continue;
+
+            std::vector<StepPoint> path;
+            bool closed = false;
+            if ( !ConstructionPath( *object, path, closed ) )
+            {
+                if ( KiwiCon_SegmentCount( *object ) > 0 )
+                    ++stats.constructionSkipped;
+                continue;
+            }
+            ++stats.constructionObjects;
+            const std::string name = ConstructionName( index, *object );
+
+            kconPlane_t plane;
+            std::string reason;
+            if ( KiwiCon_ObjectPlane( *object, &plane ) )
+            {
+                double normal[3] = { (double)plane.normal[0], (double)plane.normal[1],
+                                     (double)plane.normal[2] };
+                if ( Normalize3( normal ) )
+                {
+                    // Flatten float noise so every side face is exactly planar.
+                    const double origin[3] = { (double)plane.origin[0],
+                                               (double)plane.origin[1],
+                                               (double)plane.origin[2] };
+                    for ( size_t p = 0; p < path.size(); ++p )
+                    {
+                        const double offset[3] = { path[p].x - origin[0],
+                                                   path[p].y - origin[1],
+                                                   path[p].z - origin[2] };
+                        const double height = Dot3( offset, normal );
+                        path[p].x -= normal[0] * height;
+                        path[p].y -= normal[1] * height;
+                        path[p].z -= normal[2] * height;
+                    }
+                    StepSolid solid;
+                    if ( BuildSweepSolid( path, closed, normal, thickness, name,
+                                          solid, reason ) )
+                    {
+                        ++stats.constructionPrisms;
+                        stats.stepFaces += (unsigned __int64)solid.faces.size();
+                        solids.push_back( solid );
+                        continue;
+                    }
+                    Sys_Printf( "Plasticity export: construction \"%s\": %s; "
+                                "exporting one box per segment instead.\n",
+                                name.c_str(), reason.c_str() );
+                }
+            }
+
+            const size_t segments = closed ? path.size() : path.size() - 1;
+            unsigned int boxes = 0;
+            for ( size_t s = 0; s < segments; ++s )
+            {
+                char suffix[32];
+                _snprintf( suffix, sizeof( suffix ), "_s%u", (unsigned int)s );
+                suffix[sizeof( suffix ) - 1] = '\0';
+                StepSolid solid;
+                if ( !BuildSegmentBox( path[s], path[( s + 1 ) % path.size()], thickness,
+                                       name + suffix, solid, reason ) )
+                {
+                    ++stats.constructionSkipped;
+                    Sys_Printf( "Plasticity export: construction \"%s%s\": %s; skipped.\n",
+                                name.c_str(), suffix, reason.c_str() );
+                    continue;
+                }
+                ++boxes;
+                stats.stepFaces += (unsigned __int64)solid.faces.size();
+                solids.push_back( solid );
+            }
+            stats.constructionBoxes += boxes;
+        }
+    }
+
     void PrintExportStats( const ExportStats &stats )
     {
         Sys_Printf( "Plasticity export: %u brush(es) -> STEP; %u patch(es), "
@@ -733,6 +1169,11 @@ namespace
                     stats.stepBrushes, stats.patches, stats.models,
                     stats.brushFallbacks, stats.skippedModelGeo,
                     stats.skippedFixed, stats.skippedInvalid );
+        if ( stats.constructionObjects || stats.constructionSkipped )
+            Sys_Printf( "Plasticity export: %u construction object(s) -> %u prism(s) "
+                        "+ %u per-segment box(es) in the STEP; %u skipped.\n",
+                        stats.constructionObjects, stats.constructionPrisms,
+                        stats.constructionBoxes, stats.constructionSkipped );
     }
 
     bool ExportPaths( std::string &stepPath, std::string &objPath,
@@ -1142,6 +1583,57 @@ namespace
             return;
         s_autoImport = value;
         Radiant_ProfileSetInt( PLASTICITY_PREF_SECTION, "PlasticityAutoImport", value );
+    }
+
+    bool ExportConstructionEnabled()
+    {
+        if ( s_exportConstruction < 0 )
+            s_exportConstruction = Radiant_ProfileGetInt( PLASTICITY_PREF_SECTION,
+                                                          "PlasticityExportConstruction",
+                                                          0 ) ? 1 : 0;
+        return s_exportConstruction != 0;
+    }
+
+    void SetExportConstructionEnabled( bool enabled )
+    {
+        const int value = enabled ? 1 : 0;
+        if ( s_exportConstruction == value )
+            return;
+        s_exportConstruction = value;
+        Radiant_ProfileSetInt( PLASTICITY_PREF_SECTION, "PlasticityExportConstruction",
+                               value );
+    }
+
+    int ClampThicknessMilli( int milli )
+    {
+        if ( milli < CONSTRUCTION_THICKNESS_MIN_MILLI )
+            return CONSTRUCTION_THICKNESS_MIN_MILLI;
+        if ( milli > CONSTRUCTION_THICKNESS_MAX_MILLI )
+            return CONSTRUCTION_THICKNESS_MAX_MILLI;
+        return milli;
+    }
+
+    // Prism cross-section width in Radiant units.
+    double ConstructionThickness()
+    {
+        if ( s_constructionThicknessMilli < 0 )
+            s_constructionThicknessMilli = ClampThicknessMilli(
+                Radiant_ProfileGetInt( PLASTICITY_PREF_SECTION,
+                                       "PlasticityConstructionThicknessMilli",
+                                       CONSTRUCTION_THICKNESS_DEFAULT_MILLI ) );
+        return s_constructionThicknessMilli / 1000.0;
+    }
+
+    void SetConstructionThickness( double units )
+    {
+        if ( !FiniteDouble( units ) )
+            return;
+        const int value = ClampThicknessMilli( (int)floor( units * 1000.0 + 0.5 ) );
+        if ( s_constructionThicknessMilli == value )
+            return;
+        s_constructionThicknessMilli = value;
+        Radiant_ProfileSetInt( PLASTICITY_PREF_SECTION,
+                               "PlasticityConstructionThicknessMilli", value );
     }
 
     enum ExportFileKind
@@ -1917,7 +2409,10 @@ namespace
         ::CloseHandle( thread );
     }
 
-    void ExecuteExport()
+    // `handOff` false writes the files and only prints their paths (test mode);
+    // true runs the auto-import, which itself falls back to Explorer when the
+    // PlasticityAutoImport preference is off.
+    bool ExecuteExport( bool includeConstruction, bool handOff )
     {
         std::string stepPath;
         std::string objPath;
@@ -1926,17 +2421,20 @@ namespace
         if ( !ExportPaths( stepPath, objPath, groupName, error ) )
         {
             Sys_Printf( "Plasticity export: %s.\n", error.c_str() );
-            return;
+            return false;
         }
 
         std::vector<StepSolid> solids;
         std::vector<ObjObject> objects;
         ExportStats stats;
-        if ( !GatherObjects( solids, objects, stats, error ) )
+        const bool gathered = GatherObjects( solids, objects, stats, error );
+        if ( includeConstruction )
+            GatherConstruction( ConstructionThickness(), solids, stats );
+        if ( !gathered && solids.empty() )
         {
             Sys_Printf( "Plasticity export: %s.\n", error.c_str() );
             PrintExportStats( stats );
-            return;
+            return false;
         }
         PrintExportStats( stats );
 
@@ -1948,7 +2446,7 @@ namespace
             {
                 Sys_Printf( "Plasticity STEP export: \"%s\": %s.\n",
                             stepPath.c_str(), error.c_str() );
-                return;
+                return false;
             }
             ExportFile exported;
             exported.kind = EXPORT_FILE_STEP;
@@ -1963,7 +2461,7 @@ namespace
             {
                 Sys_Printf( "Plasticity OBJ export: \"%s\": %s.\n",
                             objPath.c_str(), error.c_str() );
-                return;
+                return false;
             }
             ExportFile exported;
             exported.kind = EXPORT_FILE_OBJ;
@@ -1972,8 +2470,131 @@ namespace
             exported.faceCount = stats.objFaces;
             job.files.push_back( exported );
         }
+        if ( !handOff )
+        {
+            for ( size_t i = 0; i < job.files.size(); ++i )
+                Sys_Printf( "Plasticity export: wrote \"%s\" (%u object(s)).\n",
+                            job.files[i].path.c_str(), job.files[i].objectCount );
+            return true;
+        }
         StartAutoImport( job );
+        return true;
     }
+
+    unsigned int SelectedObjectCount()
+    {
+        unsigned int count = 0;
+        for ( selbrush_t *selected = selected_brushes.next;
+              selected && selected != &selected_brushes; selected = selected->next )
+            ++count;
+        return count;
+    }
+
+    void DrawConstructionOptions( int conObjects, int conSegments )
+    {
+        bool includeConstruction = ExportConstructionEnabled();
+        char label[160];
+        _snprintf( label, sizeof( label ),
+                   "Include construction lines (%d visible object(s), %d segment(s))",
+                   conObjects, conSegments );
+        label[sizeof( label ) - 1] = '\0';
+        if ( ImGui::Checkbox( label, &includeConstruction ) )
+            SetExportConstructionEnabled( includeConstruction );
+        if ( ImGui::IsItemHovered() )
+            ImGui::SetTooltip( "Plasticity cannot import construction lines, so each visible\n"
+                               "one is written into the brush STEP as a tiny square prism.\n"
+                               "One long edge of every prism lies EXACTLY on the line:\n"
+                               "snap to that edge in Plasticity.  Planar objects become one\n"
+                               "mitred prism (a ring for circles/rects); non-planar polylines\n"
+                               "fall back to one box per segment.  Hidden objects are skipped." );
+        if ( !includeConstruction )
+            return;
+        float thickness = (float)ConstructionThickness();
+        ImGui::SetNextItemWidth( 140.0f );
+        if ( ImGui::InputFloat( "Prism thickness (units)", &thickness, 0.005f, 0.05f, "%.3f" ) )
+            SetConstructionThickness( (double)thickness );
+        if ( ImGui::IsItemHovered() )
+            ImGui::SetTooltip( "Cross-section width of the construction prisms, in Radiant\n"
+                               "units (inches).  0.020 = 0.5 mm.  Range %.3f .. %.1f.",
+                               CONSTRUCTION_THICKNESS_MIN_MILLI / 1000.0,
+                               CONSTRUCTION_THICKNESS_MAX_MILLI / 1000.0 );
+    }
+}
+
+// Top-level window scope: the modal popup must be opened/drawn outside any other
+// window's Begin/End pair (imgui_shell.cpp calls this beside KiwiImport_Draw).
+void KiwiPlastBridge_Draw()
+{
+    if ( s_dialogRequest )
+    {
+        ImGui::OpenPopup( PLASTICITY_DIALOG_TITLE );
+        s_dialogRequest = false;
+        s_dialogOpen = true;
+    }
+    if ( !s_dialogOpen )
+        return;
+    if ( !ImGui::BeginPopupModal( PLASTICITY_DIALOG_TITLE, nullptr,
+                                  ImGuiWindowFlags_AlwaysAutoResize ) )
+    {
+        s_dialogOpen = false;           // dismissed externally: nothing was written
+        return;
+    }
+
+    std::string stepPath;
+    std::string objPath;
+    std::string groupName;
+    std::string error;
+    const bool pathsOk = ExportPaths( stepPath, objPath, groupName, error );
+    const unsigned int selectedCount = SelectedObjectCount();
+    int conObjects = 0;
+    int conSegments = 0;
+    CountVisibleConstruction( conObjects, conSegments );
+
+    if ( pathsOk )
+    {
+        ImGui::Text( "Brush STEP:        %s", stepPath.c_str() );
+        ImGui::Text( "Patch/model OBJ:   %s", objPath.c_str() );
+    }
+    else
+        ImGui::TextColored( ImVec4( 1.0f, 0.4f, 0.3f, 1.0f ), "%s", error.c_str() );
+    ImGui::Text( "%u selected object(s) -> STEP brushes, OBJ patches/models", selectedCount );
+    ImGui::Separator();
+
+    DrawConstructionOptions( conObjects, conSegments );
+    const bool includeConstruction = ExportConstructionEnabled();
+
+    bool autoImport = AutoImportEnabled();
+    if ( ImGui::Checkbox( "Auto-import into Plasticity", &autoImport ) )
+        SetAutoImportEnabled( autoImport );
+    if ( ImGui::IsItemHovered() )
+        ImGui::SetTooltip( "Drives Plasticity's Ctrl+Shift+O file:import for each file.\n"
+                           "Off: the files are written and revealed in Explorer." );
+    ImGui::Separator();
+
+    const bool canSend = pathsOk &&
+                         ( selectedCount > 0 || ( includeConstruction && conObjects > 0 ) );
+    const bool enter = ImGui::IsKeyPressed( ImGuiKey_Enter, false ) ||
+                       ImGui::IsKeyPressed( ImGuiKey_KeypadEnter, false );
+    ImGui::BeginDisabled( !canSend );
+    const bool send = ImGui::Button( "Send", ImVec2( 140.0f, 0.0f ) ) || ( canSend && enter );
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    const bool cancel = ImGui::Button( "Cancel", ImVec2( 140.0f, 0.0f ) ) ||
+                        ImGui::IsKeyPressed( ImGuiKey_Escape, false );
+    if ( send || cancel )
+    {
+        ImGui::CloseCurrentPopup();
+        s_dialogOpen = false;
+    }
+    ImGui::EndPopup();
+
+    if ( send )
+        ExecuteExport( includeConstruction, true );
+}
+
+bool KiwiPlastBridge_ExportNow( bool includeConstruction, bool handOff )
+{
+    return ExecuteExport( includeConstruction, handOff );
 }
 
 bool KiwiPlastBridge_CanPush()
@@ -2001,6 +2622,16 @@ bool KiwiPlastBridge_CanPush()
         else if ( selected->def->faces && selected->def->faceCount > 0 )
             return true;
     }
+
+    // Construction lines alone are worth sending when that option is on.
+    if ( ExportConstructionEnabled() )
+    {
+        int conObjects = 0;
+        int conSegments = 0;
+        CountVisibleConstruction( conObjects, conSegments );
+        if ( conObjects > 0 )
+            return true;
+    }
     return false;
 }
 
@@ -2014,7 +2645,7 @@ bool KiwiPlastBridge_DispatchInstant( unsigned int cmdId )
 {
     if ( cmdId != (unsigned int)KIWI_CMD_PLASTICITY_PUSH )
         return false;
-    ExecuteExport();
+    s_dialogRequest = true;             // KiwiPlastBridge_Draw opens the options dialog
     return true;
 }
 
@@ -2041,6 +2672,12 @@ void KiwiPlastBridge_DrawSettings()
                            "Imports brush STEP first, then patch/model OBJ.\n"
                            "Failures print and reveal every exported path; the failed "
                            "path is copied to the clipboard." );
+    {
+        int conObjects = 0;
+        int conSegments = 0;
+        CountVisibleConstruction( conObjects, conSegments );
+        DrawConstructionOptions( conObjects, conSegments );
+    }
 
     std::string stepPath;
     std::string objPath;

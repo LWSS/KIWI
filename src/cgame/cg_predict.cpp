@@ -15,7 +15,7 @@ pmove_t cg_pmove;
 
 void __cdecl TRACK_cg_predict()
 {
-    track_static_alloc_internal(&cg_pmove, 292, "cg_pmove", 9);
+    track_static_alloc_internal(&cg_pmove, sizeof(cg_pmove), "cg_pmove", 9);
 }
 
 char __cdecl CG_ShouldInterpolatePlayerStateViewClamp(int localClientNum, const snapshot_s *prevSnap)

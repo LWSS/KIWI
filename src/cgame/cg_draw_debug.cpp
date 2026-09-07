@@ -660,12 +660,12 @@ void CG_DrawVersion()
     h = (float)UI_TextHeight(font, 0.25);
     y = -h - cg_drawVersionY->current.value + 1.0f;
     x = -w - cg_drawVersionX->current.value + 1.0f;
-    UI_DrawText(&scrPlaceFullUnsafe, (char *)version->current.integer, 0x7FFFFFFF, font, x, y, 3, 3, 0.25f, shadowColor, 0);
+    UI_DrawText(&scrPlaceFullUnsafe, version->current.string, 0x7FFFFFFF, font, x, y, 3, 3, 0.25f, shadowColor, 0);
     v1 = -h - cg_drawVersionY->current.value;
     v0 = -w - cg_drawVersionX->current.value;
     UI_DrawText(
         &scrPlaceFullUnsafe,
-        (char *)version->current.integer,
+        version->current.string,
         0x7FFFFFFF,
         font,
         v0,
@@ -768,7 +768,7 @@ void __cdecl CG_DrawSoundOverlay(const ScreenPlacement *scrPlace)
         v2 = 8.0f;
         charHeight = 10.0f;
         Int = Dvar_GetInt("snd_khz");
-        string = va("Listing Active Sounds of Type: %s", *(const char **)(snd_drawInfo->domain.integer.max + 4 * type));
+        string = va("Listing Active Sounds of Type: %s", snd_drawInfo->domain.enumeration.strings[type]);
         CG_DrawStringExt(scrPlace, x, y, string, colorWhite, 0, 1, charHeight);
         y = y + charHeight;
         string = va("CPU: ^3%%%i ^7kHz: ^3%i ", cpu, Int);

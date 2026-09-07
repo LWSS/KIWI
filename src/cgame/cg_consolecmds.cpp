@@ -297,10 +297,8 @@ void CG_UFO_f()
 
 void __cdecl CG_SetViewPos_f()
 {
-    int v0; // r30
-    float *origin; // r31
-    const char *v2; // r3
-    long double v3; // fp2
+    int axis;
+    float *origin;
     unsigned int nesting; // r7
     const char *v5; // r3
     long double v6; // fp2
@@ -325,14 +323,11 @@ void __cdecl CG_SetViewPos_f()
                 "\"cg_setviewpos\" isn't very useful when server controlled.  Use cg_ufo/cg_noclip or use \"setviewpos\"\n");
         if (Cmd_Argc() == 4 || Cmd_Argc() == 6)
         {
-            v0 = 0;
             origin = cgArray[0].predictedPlayerState.origin;
-            do
+            for (axis = 0; axis < 3; ++axis)
             {
-                v2 = Cmd_Argv(++v0);
-                v3 = atof(v2);
-                *origin++ = *(double *)&v3;
-            } while ((int)origin < (int)cgArray[0].predictedPlayerState.velocity);
+                origin[axis] = (float)atof(Cmd_Argv(axis + 1));
+            }
             nesting = cmd_args.nesting;
             if (cmd_args.nesting >= 8u)
             {
@@ -361,7 +356,7 @@ void __cdecl CG_SetViewPos_f()
                 if (cmd_args.argc[nesting] <= 4)
                     v5 = "";
                 else
-                    v5 = (const char *)*((unsigned int *)cmd_args.argv[nesting] + 4);
+                    v5 = cmd_args.argv[nesting][4];
                 v6 = atof(v5);
                 v7 = cmd_args.nesting;
                 v10[1] = *(double *)&v6;
@@ -379,7 +374,7 @@ void __cdecl CG_SetViewPos_f()
                 if (cmd_args.argc[v7] <= 5)
                     v8 = "";
                 else
-                    v8 = (const char *)*((unsigned int *)cmd_args.argv[v7] + 5);
+                    v8 = cmd_args.argv[v7][5];
                 v9 = atof(v8);
                 v10[2] = 0.0;
                 v10[0] = *(double *)&v9;
