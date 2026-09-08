@@ -2448,7 +2448,6 @@ void __cdecl MatrixTransformVectorQuatTrans(const vec3r in, const DObjAnimMat *m
 
 void __cdecl AxisToQuat(const float (*mat)[3], float *out)
 {
-    float v2; // [esp+8h] [ebp-50h]
     float invLength; // [esp+Ch] [ebp-4Ch]
     float test[4][4]; // [esp+10h] [ebp-48h] BYREF
     int best; // [esp+50h] [ebp-8h]
@@ -2500,8 +2499,15 @@ void __cdecl AxisToQuat(const float (*mat)[3], float *out)
     
     iassert(testSizeSq != 0.0);
 
-    v2 = sqrt(testSizeSq);
-    invLength = 1.0 / v2;
+    // Retain refined quaternion normalization independently of the raw Q_rsqrt.
+    // Doom 3 BFG refinement, adapted for KIWI; Copyright (C) 1993-2012
+    // id Software LLC, a ZeniMax Media company. GPL-3.0-or-later with upstream
+    // additional terms: experiments/math_bench/SOURCE.md and BFG-COPYING.txt.
+    const __m128 n = _mm_set1_ps(testSizeSq);
+    const __m128 r = _mm_rsqrt_ps(n);
+    const __m128 nr = _mm_mul_ps(n, r);
+    const __m128 correction = _mm_sub_ps(_mm_mul_ps(nr, r), _mm_set1_ps(3.0f));
+    invLength = _mm_cvtss_f32(_mm_mul_ps(_mm_mul_ps(r, _mm_set1_ps(-0.5f)), correction));
     Vec4Scale(test[best], invLength, out);
 }
 

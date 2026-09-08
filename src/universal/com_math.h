@@ -4,6 +4,7 @@
 
 #include <math.h>
 #include <cstdint>
+#include <xmmintrin.h>
 
 #define EQUAL_EPSILON 0.001f
 #define ZERO_EPSILON 0.000001f
@@ -586,6 +587,7 @@ inline float __cdecl Q_rsqrt(float number)
     iassert(number);
     iassert(!isnan(number));
 
+#if 0
     union standards_compliant_fp_bit_hack {
         int i;
         float f;
@@ -603,8 +605,12 @@ inline float __cdecl Q_rsqrt(float number)
     y = y * (threehalfs - (x2 * y * y));   // 1st iteration
     //	y  = y * ( threehalfs - ( x2 * y * y ) );   // 2nd iteration, this can be removed
 
-    // TODO: use rsqrtss instead since it's not 1990 anymore
     return y;
+#endif
+
+	// LWSS: note that there is going to be a small variance across CPU's (.000007 in this below example)
+	// https://robert.ocallahan.org/2021/09/rr-trace-portability-diverging-behavior.html
+    return _mm_cvtss_f32(_mm_rsqrt_ss(_mm_set_ss(number)));
 }
 
 float Q_fabs(float f);
