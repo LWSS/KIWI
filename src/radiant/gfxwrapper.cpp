@@ -45,7 +45,8 @@ Material *R_BeginRegistrationInternal()
     // ABI mismatch against their canonical declarations.
     Dvar_RegisterBool("com_statmon", 0, 0, "Draw stats monitor");
     Dvar_RegisterBool("sv_cheats", 1, 72, "Allow server side cheats");
-    Dvar_RegisterBool("sys_SSE", 0, 64, "Operating system allows Streaming SIMD Extensions");
+    Dvar_RegisterBool("sys_SSE", IsProcessorFeaturePresent(PF_XMMI_INSTRUCTIONS_AVAILABLE) != 0,
+        DVAR_ROM, "Operating system allows Streaming SIMD Extensions");
 
     Dvar_SetIntByName("r_picmip", g_qeglobals.d_savedinfo.d_picmip);
     Dvar_SetIntByName("r_picmip_spec", 3);

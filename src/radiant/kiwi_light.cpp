@@ -35,9 +35,9 @@ extern float      world_orient_matrix[4][3];
 extern int        g_nUpdateBits;
 extern entity_s_def *edit_entity;
 
-extern char  *ValueForKey2( int e, const char *key );
-extern float  Entity_GetFloatValueForKey( int e, const char *key );
-extern int    Entity_GetIntValueForKey( int e, const char *key );
+extern char  *ValueForKey2( const entity_s *e, const char *key );
+extern float  Entity_GetFloatValueForKey( const entity_s *e, const char *key );
+extern int    Entity_GetIntValueForKey( const entity_s *e, const char *key );
 extern int    Entity_GetVec3ForKey( entity_s_def *e, float *out, const char *key );
 extern bool   HasKeyValuePair( entity_s_def *e, const char *key );
 extern void   SetKeyValue( entity_s_def *e, const char *key, const char *value );
@@ -58,7 +58,7 @@ extern void      Ed_EnsureCurrentMaterial_Kiwi();
 extern int       Sys_Printf( const char *fmt, ... );
 extern bool      Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId );
 extern void      Radiant_ExecCommand( unsigned int commandId );
-extern void      CamWnd_AddLightPreview( selbrush_t *inst, int arg2,
+extern void      CamWnd_AddLightPreview( selbrush_t *inst, selbrush_t *arg2,
                                          const orientation_t *orient );
 extern void      ImGuiShell_FocusTab( const char *title );
 extern ImGuiID   ImGuiShell_DockRoot();
@@ -274,7 +274,7 @@ namespace
 
     const char *Key( entity_s_def *def, const char *name )
     {
-        return def ? ValueForKey2( (int)(intptr_t)def, name ) : "";
+        return def ? ValueForKey2( def, name ) : "";
     }
 
     entity_s_def *FindTarget( const char *name )
@@ -322,11 +322,11 @@ namespace
         out->origin[2] = 0.5f * ( brush->def->mins[2] + brush->def->maxs[2] );
         out->rawColor[0] = out->rawColor[1] = out->rawColor[2] = 1.0f;
         Entity_GetVec3ForKey( def, out->rawColor, "_color" );
-        out->intensity = Entity_GetFloatValueForKey( (int)(intptr_t)def, "intensity" );
-        out->radius = Entity_GetFloatValueForKey( (int)(intptr_t)def, "radius" );
-        out->flags = Entity_GetIntValueForKey( (int)(intptr_t)def, "spawnflags" );
-        out->fovOuter = Entity_GetFloatValueForKey( (int)(intptr_t)def, "fov_outer" );
-        out->fovInner = Entity_GetFloatValueForKey( (int)(intptr_t)def, "fov_inner" );
+        out->intensity = Entity_GetFloatValueForKey( def, "intensity" );
+        out->radius = Entity_GetFloatValueForKey( def, "radius" );
+        out->flags = Entity_GetIntValueForKey( def, "spawnflags" );
+        out->fovOuter = Entity_GetFloatValueForKey( def, "fov_outer" );
+        out->fovInner = Entity_GetFloatValueForKey( def, "fov_inner" );
 
         float hue[3];
         NormalizeMax( out->rawColor, hue );
@@ -448,7 +448,7 @@ namespace
     {
         FloatEdit &edit = s_floatEdit[field];
         if ( !edit.active && def )
-            edit.value = Entity_GetFloatValueForKey( (int)(intptr_t)def, key );
+            edit.value = Entity_GetFloatValueForKey( def, key );
         ImGui::SetNextItemWidth( 116.0f );
         ImGui::DragFloat( label, &edit.value, speed, lo, hi, "%.3f",
                           ImGuiSliderFlags_AlwaysClamp );
@@ -1044,7 +1044,7 @@ void KiwiLight_Draw()
             if ( FloatWidget( KF_FOV_OUTER, "fov_outer", first, "fov_outer", 0.25f, 0.0f, 180.0f ) )
             {
                 float value = s_floatEdit[KF_FOV_OUTER].value;
-                const float inner = Entity_GetFloatValueForKey( (int)(intptr_t)first, "fov_inner" );
+                const float inner = Entity_GetFloatValueForKey( first, "fov_inner" );
                 if ( value > 0.0f && value <= inner ) value = Clamp( inner + 0.1f, 0.1f, 180.0f );
                 s_floatEdit[KF_FOV_OUTER].value = value;
                 WriteFloatAll( lights, "fov_outer", value, "light outer fov" );
@@ -1062,7 +1062,7 @@ void KiwiLight_Draw()
             }
             ItemTooltip( KTIP_FOV_INNER );
             if ( !s_exponentActive )
-                s_exponentEdit = Entity_GetIntValueForKey( (int)(intptr_t)first, "exponent" );
+                s_exponentEdit = Entity_GetIntValueForKey( first, "exponent" );
             ImGui::SetNextItemWidth( 116.0f );
             ImGui::DragInt( "exponent", &s_exponentEdit, 1.0f, 0, 10, "%d",
                             ImGuiSliderFlags_AlwaysClamp );

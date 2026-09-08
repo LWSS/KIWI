@@ -64,15 +64,15 @@ extern int        g_nUpdateBits;             // engine_stubs 0x25D5A74
 // with the headless-safe degenerate fallback — Texture_GetHandle needs the live renderer).
 extern void              SetMaterial( const char *name, patchMesh_material *out );  // materialdef.cpp 0x4315C0
 extern LayerMaterialDef *Materialdef_GetName( MaterialDef *m );                     // materialdef.cpp 0x431640
-extern int               Init_MaterialLayer( MaterialDef *channel, MaterialDef *src ); // materialdef.cpp 0x472C00
+extern int               Init_MaterialLayer( MaterialDef *channel, float src ); // materialdef.cpp 0x472C00
 namespace LayerMat { int GetCurrentLayer( MaterialDef *def ); }                     // 0x431B30
 
 // face texdef apply (brush.cpp):
 //   Brush_SetFaceTexdefSize (0x476740) — write the {Material*, qtexture*} pair into the
 //     face's current-layer slot (the IDB's sub_476740 per-face apply, a1 = a 2-elem array).
 //   Brush_SetFaceTexdef     (0x4767e0) — copy a full texdef_sub_t mapping into the slot.
-extern void    Brush_SetFaceTexdefSize( const float *size2, face_t *f, brush_t *b );  // 0x476740
-extern void    sub_4767E0( const texdef_sub_t *texDef, int facePtr, int brushDef );   // 0x4767E0 Brush_SetFaceTexdef
+extern void    Brush_SetFaceTexdefSize( const patchMesh_material *material, face_t *f, brush_t *b );  // 0x476740
+extern void    sub_4767E0( const texdef_sub_t *texDef, face_t *facePtr, brush_t *brushDef );   // 0x4767E0 Brush_SetFaceTexdef
 
 // rebuild / housekeeping (brush.cpp / select.cpp / map.cpp):
 extern void    Brush_BuildWindings( brush_t *b, int bFull );  // 0x477AC0
@@ -179,12 +179,11 @@ static char FindReplaceTexture_Brush( selbrush_t *inst, const char *findName,
             {
                 int            layer  = g_qeglobals.current_edit_layer;
                 MaterialDef   *curMtl = &g_qeglobals.random_texture_stuff[layer].mtl;
-                MaterialDef   *sampleArg;
-                memcpy( &sampleArg, &g_qeglobals.random_texture_stuff[layer].sampleSize, sizeof( sampleArg ) );
+                float sampleArg = g_qeglobals.random_texture_stuff[layer].sampleSize;
                 Init_MaterialLayer( curMtl, sampleArg );
                 int curLayer = LayerMat::GetCurrentLayer( curMtl );
                 sub_4767E0( &curMtl->mat_texDef + curLayer,
-                            (int)(intptr_t)faces, (int)(intptr_t)def );
+                            faces, def );
             }
 
             // Resolve the replacement name to its {lyrMtl, radMtl} pair and write it into
@@ -198,7 +197,7 @@ static char FindReplaceTexture_Brush( selbrush_t *inst, const char *findName,
             // click-apply (proven) uses.
             patchMesh_material pair{};
             SetMaterial( replaceName, &pair );   // its tail iassert carries MaterialDef.cpp:65
-            Brush_SetFaceTexdefSize( (const float *)&pair, faces, def );
+            Brush_SetFaceTexdefSize( (const patchMesh_material *)&pair, faces, def );
             replaced = 1;
         }
     }

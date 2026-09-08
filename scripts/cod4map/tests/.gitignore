@@ -1,7 +1,0 @@
-# Compiler products generated beside source .map fixtures
-*.d3dbsp
-*.d3dprt
-*.d3dpoly
-*.lin
-*.reg
-*.log

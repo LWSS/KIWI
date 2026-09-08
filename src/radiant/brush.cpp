@@ -65,7 +65,7 @@ extern void        SetMaterial( const char *name, patchMesh_material *out );
 
 // ─── Init_MaterialLayer (0x472c00) ──────────────────────────────────────────
 // __usercall(a1@<eax>, a2): first arg in eax, second on stack
-extern int Init_MaterialLayer( MaterialDef *channel, MaterialDef *src );
+extern int Init_MaterialLayer( MaterialDef *channel, float src );
 
 // ─── Byte4PackPixelColor (0x402ac0) ─────────────────────────────────────────
 extern char Byte4PackPixelColor( float *from, GfxColor *out );
@@ -82,9 +82,9 @@ extern void         SetupVertexSelection();             // engine_stubs (vertex/
 extern int Face_MakePlane( face_t *face );              // brush.cpp (Chunk C)
 
 // ─── patch helpers (patchsys.cpp / patch.cpp) ───────────────────────────────
-extern void        PMESH_32_Symbiot( int patch );
+extern void        PMESH_32_Symbiot( patchMesh_t *patch );
 extern patch_t    *PMESH_55( patchMesh_t *def );
-extern curvePatchDef_t *Patch_GenericMesh2( patchMesh_t *p, int layer, int colMap, int rowMap ); // pmesh.cpp 0x438b60
+extern curvePatchDef_t *Patch_GenericMesh2( patchMesh_t *p, int layer, int *colMap, int *rowMap ); // pmesh.cpp 0x438b60
 extern void        PMESH_33( patch_t *patch );
 extern void        PMESH_22_Indices( patch_t *patch );
 extern patchMesh_t *Patch_Duplicate( patchMesh_t *from );
@@ -98,7 +98,7 @@ extern int  Visuals_InitFaceVis( faceVis_s *vis, face_t *faceDef,
                                   const orientation_t *orient );
 // Vis_Free (0x4702b0) + PlanePts_Alloc (0x470250) — defined further below; the faithful
 // Brush_MakeFaceVisuals (~:155) uses them before their definitions, so forward-declare.
-void  Vis_Free( int count, faceVis_s *f, int brushPtr );
+void  Vis_Free( int count, faceVis_s *f, selbrush_t *brushPtr );
 void *PlanePts_Alloc( int count );
 // sub_482B50 = Entity_GetOrientationInverse (entity.cpp, 0x482B50)
 extern void Entity_GetOrientationInverse( entity_s_def *entityDef, orientation_t *orient,
@@ -111,16 +111,6 @@ extern void Entity_GetOrientation( entity_s_def *ent, orientation_t *orParent,
 // prefab_s — local mirror of entity.cpp's prefab_s (0x54).  Only the instanced-brush
 // list head/tail sentinels are accessed here (the prefab-render path).  Layout MUST
 // match entity.cpp (static_assert below).
-struct prefab_s
-{
-    entity_s    *prev_entity;           // 0x00
-    entity_s    *next_entity;           // 0x04
-    void        *unk;                   // 0x08
-    selbrush_t  *active_brushlist;      // 0x0C   tail sentinel (prev side)
-    selbrush_t  *active_brushlist_next; // 0x10   head sentinel (next side)
-    char         _pad[0x54 - 0x14];    // 0x14 .. 0x53
-};
-static_assert(sizeof(prefab_s) == 0x54, "prefab_s (brush.cpp mirror != entity.cpp)");
 
 // ═════════════════════════════════════════════════════════════════════════════
 //  Brush_MakeFaceVisuals (0x477c50) + Brush_CheckBuildFaceVis (0x477d70)
@@ -151,7 +141,7 @@ static void Brush_MakeFaceVisuals( selbrush_t *b, const float *orientArg )
     if ( b->faceCount != b->def->faceCount )
     {
         if ( b->faces )
-            Vis_Free( b->faceCount, b->faces, (int)(intptr_t)b );
+            Vis_Free( b->faceCount, b->faces, b );
         b->faceCount = b->def->faceCount;
         b->faces = (faceVis_s *)PlanePts_Alloc( b->faceCount > 0 ? b->faceCount : 1 );
     }
@@ -238,7 +228,7 @@ static void Entity_UnlinkBrush_def( brush_t *def )
 }
 
 // ─── Vis_Free forward (needed by Brush_Free, Brush_InvalidateVis) ────────────
-extern void Vis_Free( int count, faceVis_s *f, int brushPtr );
+extern void Vis_Free( int count, faceVis_s *f, selbrush_t *brushPtr );
 
 // ─── PlanePts_Alloc forward ──────────────────────────────────────────────────
 extern void *PlanePts_Alloc( int count );
@@ -249,8 +239,14 @@ extern void *PlanePts_Alloc( int count );
 static face_t *Face_Alloc_R( int count )
 {
     iassert( count > 0 );
-    face_t *v = (face_t *)operator new( (size_t)(232 * count) );
-    memset( v, 0, (size_t)(232 * count) );
+    if ( count <= 0 || (size_t)count > SIZE_MAX / sizeof(face_t) )
+    {
+        Com_Error( ERR_FATAL, "Face_Alloc_R: invalid face count %i", count );
+        return NULL;
+    }
+    size_t bytes = (size_t)count * sizeof(face_t);
+    face_t *v = (face_t *)operator new( bytes );
+    memset( v, 0, bytes );
     return v;
 }
 
@@ -280,21 +276,29 @@ static void Face_Free( int count, face_t *f )
 void *PlanePts_Alloc( int count )
 {
     iassert( count > 0 );
-    void *p = operator new( (size_t)(12 * count) );
-    memset( p, 0, (size_t)(12 * count) );
+    if ( count <= 0 || (size_t)count > SIZE_MAX / sizeof(faceVis_s) )
+    {
+        Com_Error( ERR_FATAL, "PlanePts_Alloc: invalid face count %i", count );
+        return NULL;
+    }
+    size_t bytes = (size_t)count * sizeof(faceVis_s);
+    void *p = operator new( bytes );
+    memset( p, 0, bytes );
     return p;
 }
 
 // ────────────────────────────────────────────────────────────────────────────
 // Vis_Free  (0x4702b0) — calls Visuals_VisArray on each slot then frees array
 // ────────────────────────────────────────────────────────────────────────────
-void Vis_Free( int count, faceVis_s *f, int b )
+void Vis_Free( int count, faceVis_s *f, selbrush_t *b )
 {
     iassert( b );            // brush.cpp:337
     iassert( f );            // brush.cpp:338
     iassert( count >= 0 );   // brush.cpp:339
     for ( int i = 0; i < count; ++i )
-        Visuals_VisArray( (faceVis_s *)((char *)f + 12 * i) );
+    {
+        Visuals_VisArray( &f[i] );
+    }
     j__free_0( f );
 }
 
@@ -312,7 +316,9 @@ face_t *Face_Alloc( brush_t *b, face_t *f )
 
     // copy existing faces (INCLUDING their winding pointers) to faceList
     if ( b->faceCount )
-        memcpy( faceList, b->faces, (size_t)(232 * b->faceCount) );
+    {
+        memcpy( faceList, b->faces, sizeof(face_t) * b->faceCount );
+    }
 
     // append new face (clone its winding)
     face_t *dst = faceList + b->faceCount;
@@ -343,7 +349,7 @@ face_t *Face_Alloc( brush_t *b, face_t *f )
 // Removes face at faceIndex from b's face array; shifts remaining faces down.
 // Returns byte offset of removed face (mostly ignored by callers).
 // ────────────────────────────────────────────────────────────────────────────
-unsigned int Brush_RemoveFace( brush_t *b, unsigned int faceIndex )
+size_t Brush_RemoveFace( brush_t *b, unsigned int faceIndex )
 {
     iassert( b );   // brush.cpp:852
     iassert( faceIndex >= 0 && faceIndex < b->faceCount );   // brush.cpp:853
@@ -362,13 +368,11 @@ unsigned int Brush_RemoveFace( brush_t *b, unsigned int faceIndex )
     --b->faceCount;
     if ( faceIndex < (unsigned int)b->faceCount )
     {
-        unsigned int dstOff = 232 * faceIndex;
         for ( unsigned int i = faceIndex; i < (unsigned int)b->faceCount; ++i )
         {
-            memcpy( (char *)b->faces + 232 * i,
-                    (char *)b->faces + 232 * (i + 1), 232 );
+            b->faces[i] = b->faces[i + 1];
         }
-        return 232 * faceIndex;
+        return sizeof(face_t) * faceIndex;
     }
     return faceIndex;
 }
@@ -416,7 +420,7 @@ int Brush_FaceIndexCmp( unsigned int faceIndex2, brush_t *b, unsigned int faceIn
 // channel: 0=$default, 1=lightmap_gray, 2=smoothing_hard
 // ────────────────────────────────────────────────────────────────────────────
 int Face_InitMaterialChannel( unsigned int textureChannel, face_t *faceDef,
-                                      MaterialDef *src )
+                                      float src )
 {
     static const char *tex_names[3] = { "$default", "lightmap_gray", "smoothing_hard" };
     iassert( faceDef );   // brush.cpp:1383
@@ -438,13 +442,9 @@ static void Face_SetDefaultMaterials( face_t *faceDef )
     // The d_savedinfo material channel table: 3 MaterialDef* entries at stride
     // 0x834 bytes starting at g_qeglobals + 0x700A8 (random_texture_stuff[0x24]).
     // Channel 0 is skipped (only lightmap and smoothing are defaulted here).
-    MaterialDef **chan_ptr =
-        (MaterialDef **)((char *)&g_qeglobals + 0x700A8);
-    for ( unsigned int ch = 0; ch < 3; ++ch )
+    for ( unsigned int ch = 1; ch < 3; ++ch )
     {
-        if ( ch )
-            Face_InitMaterialChannel( ch, faceDef, *chan_ptr );
-        chan_ptr = (MaterialDef **)((char *)chan_ptr + 0x834);
+        Face_InitMaterialChannel( ch, faceDef, g_qeglobals.random_texture_stuff[ch].sampleSize );
     }
 }
 
@@ -468,12 +468,16 @@ brush_t *Brush_Alloc( const void *planeptsSrc, eclass_t *ecls )
     // Pack colorWhite into GfxColor
     GfxColor col;
     if ( ecls )
-        Byte4PackPixelColor( (float *)((char *)ecls + 36), &col );
+    {
+        Byte4PackPixelColor( ecls->color, &col );
+    }
     else
+    {
         Byte4PackPixelColor( const_cast<float*>(colorWhite), &col );
+    }
 
-    brush_t *b = (brush_t *)operator new( 0x58u );
-    memset( b, 0, 0x58u );
+    brush_t *b = (brush_t *)operator new( sizeof(brush_t) );
+    memset( b, 0, sizeof(brush_t) );
     iassert( b );   // brush.cpp:2354
 
     if ( b->parent_layer_string )
@@ -494,7 +498,7 @@ brush_t *Brush_Alloc( const void *planeptsSrc, eclass_t *ecls )
     {
         face_t *f = &b->faces[i];
         // copy planepts block (36 bytes) to f->mtldef[0] area
-        memcpy( &f->mtldef[0], planeptsSrc, 0x24u );
+        memcpy( &f->mtldef[0], planeptsSrc, sizeof(MaterialDef) );
         // clear certain flags then set packed color
         *(int *)&f->contents &= 0xF7FFDF7B;
         f->packedColor = col.packed;
@@ -677,8 +681,8 @@ selbrush_t *Brush_AddToList( brush_t *def, entity_s *owner )
     iassert( owner );   // brush.cpp:2385
     iassert( def->owner == owner->def );   // brush.cpp:2386
 
-    selbrush_t *b = (selbrush_t *)operator new( 0x38u );
-    memset( b, 0, 0x38u );
+    selbrush_t *b = (selbrush_t *)operator new( sizeof(selbrush_t) );
+    memset( b, 0, sizeof(selbrush_t) );
     b->def = (brush_t *)def;
     b->version = (short)(def->version - 1);  // LOWORD set to def->version-1
     b->cullFlag = true;                        // BYTE2 of version+2 = 1
@@ -710,7 +714,7 @@ void Brush_Free_R( brush_t *def )
     vassert( (def->refCount == 0), "(def->refCount) = %i", def->refCount );   // brush.cpp:2423
 
     if ( def->patch )
-        PMESH_32_Symbiot( (int)def->patch );
+        PMESH_32_Symbiot( def->patch );
     if ( def->faces )
         Face_Free( def->faceCount, def->faces );
     if ( def->parent_layer_string )
@@ -736,8 +740,8 @@ brush_t *Brush_Clone( brush_t *def )
         return (brush_t *)dup->pSymbiot;
     }
 
-    brush_t *b = (brush_t *)operator new( 0x58u );
-    memset( b, 0, 0x58u );
+    brush_t *b = (brush_t *)operator new( sizeof(brush_t) );
+    memset( b, 0, sizeof(brush_t) );
     iassert( b );   // brush.cpp:2354
 
     if ( b->parent_layer_string )
@@ -758,9 +762,9 @@ brush_t *Brush_Clone( brush_t *def )
         face_t *dst  = &b->faces[i];
         face_t *srcc = &def->faces[i];
         // copy mtldef block (0x6C bytes at offset +0x24=36)
-        memcpy( &dst->mtldef[0], &srcc->mtldef[0], 0x6Cu );
+        memcpy( &dst->mtldef[0], &srcc->mtldef[0], 3 * sizeof(MaterialDef) );
         // copy extra fields at stride 144 from planepts
-        memcpy( &dst->mtldef[3], &srcc->mtldef[3], 0x24u );
+        dst->mtldef[3] = srcc->mtldef[3];
         // copy packed color and flags verbatim
         dst->packedColor = srcc->packedColor;
         dst->contents    = srcc->contents;
@@ -1021,7 +1025,7 @@ void Brush_Free( selbrush_t *b )
         PMESH_33( b->patch );
 
     if ( b->faces )
-        Vis_Free( b->faceCount, b->faces, (int)(intptr_t)b );
+        Vis_Free( b->faceCount, b->faces, b );
 
     Entity_LinkBrush( nullptr, b );
 
@@ -1372,9 +1376,9 @@ void Brush_MakeFacePlanes( brush_t *b )
 // 0x431690  CM_CheckBrushContents — true iff the two 8-byte blocks at face+0x24
 // (the base mtldef's lyrMtl/radMtl handle pair) are identical (base-material
 // homogeneity test). Affects def->xx1 only, not geometry.
-bool CM_CheckBrushContents( const int *a, const int *b )
+bool CM_CheckBrushContents( const MaterialDef *a, const MaterialDef *b )
 {
-    return memcmp( a, b, 8 ) == 0;
+    return a->lyrMtl == b->lyrMtl && a->radMtl == b->radMtl;
 }
 
 // 0x4a8240  VectorMaxValues — expand [mins,maxs] to include point `pt`.
@@ -1402,15 +1406,14 @@ void VectorMaxValues( const float *pt, float *mins, float *maxs )
 extern void OrientationPosToWorldPos( float *out, const float *localPos,
                                       const orientation_t *orient );          // draw.cpp 0x4BA430
 // 0x47ABE0 — 4619 KEEP_VERBOSE ("or" is a reserved word).
-void Brush_AccumulateWorldBounds( int orientPtr, int brushPtr, int minsPtr, int maxsPtr )
+void Brush_AccumulateWorldBounds( const orientation_t *orient, const brush_t *b, float *mins, float *maxs )
 {
-    const orientation_t *orient = (const orientation_t *)orientPtr;
-    brush_t             *b      = (brush_t *)brushPtr;
-    float               *mins   = (float *)minsPtr;
-    float               *maxs   = (float *)maxsPtr;
 
     iassert( b );      // brush.cpp:4618
-    if ( !orient ) Assert( "C:\\trees\\cod3-pc\\cod3-modtools\\cod3src\\Radiant\\brush.cpp", 4619, 0, "%s", "or" );   // 4619: binary param is "or" (C++ reserved word) — kept verbose
+    if ( !orient )
+    {
+        Assert( "C:\\trees\\cod3-pc\\cod3-modtools\\cod3src\\Radiant\\brush.cpp", 4619, 0, "%s", "or" );
+    }
     iassert( mins );   // brush.cpp:4620
     iassert( maxs );   // brush.cpp:4621
 
@@ -1418,7 +1421,9 @@ void Brush_AccumulateWorldBounds( int orientPtr, int brushPtr, int minsPtr, int 
     {
         winding_t *w = b->faces[f].w;
         if ( !w )
+        {
             continue;
+        }
         for ( int i = 0; i < w->numpoints; ++i )
         {
             float worldPt[3];
@@ -1449,7 +1454,7 @@ void Brush_BuildWindings( brush_t *def, int bFull )
         Com_PrintMessage( "Brush_BuildWindings: Encountered degenerate brush.\n" );
 
     def->contents = -1;
-    def->xx1      = (int)(intptr_t)def->faces->mtldef;
+    def->xx1      = def->faceCount ? def->faces->mtldef : NULL;
 
     for ( int fi = 0; fi < def->faceCount; ++fi )
     {
@@ -1479,9 +1484,11 @@ void Brush_BuildWindings( brush_t *def, int bFull )
         // layer's lyrMtl/radMtl handle pair), NOT kisak face+0xB4 (`contents`).
         // xx1 itself was set to &faces[0].mtldef above, so both operands
         // must address the mtldef block. (Was &f->contents — wrong field.)
-        int *xx1 = (int *)(intptr_t)def->xx1;
-        if ( xx1 && !edwind::CM_CheckBrushContents( (const int *)face->mtldef, xx1 ) )
+        MaterialDef *xx1 = def->xx1;
+        if ( xx1 && !edwind::CM_CheckBrushContents( face->mtldef, xx1 ) )
+        {
             def->xx1 = 0;
+        }
     }
 
     // compute AABB from intersection points
@@ -1713,19 +1720,17 @@ extern char sub_51CB70( Material *material, int vertCount, int vertHandle );
 // winding (a1->w) rather than alias it. Matches the binary's selective copy exactly
 // (note unk02 @0xBC is intentionally NOT copied — left zeroed by Face_Alloc_R).
 extern winding_t *Winding_Clone( winding_t *w );   // winding.cpp (0x4d7d60)
-void Face_FullClone( int src, int dst )
+void Face_FullClone( const face_t *src, face_t *dst )
 {
-    int *a1 = (int *)(intptr_t)src;
-    int *a2 = (int *)(intptr_t)dst;
-    memcpy( a2 + 9,  a1 + 9,  0x6Cu );   // mtldef bytes 36..143
-    memcpy( a2 + 36, a1 + 36, 0x24u );   // mtldef bytes 144..179
-    a2[57] = a1[57];                     // field_0xE4 (228)
-    a2[45] = a1[45];                     // contents   (180)
-    a2[46] = a1[46];                     // toolflags  (184)
-    memcpy( a2, a1, 0x24u );             // planepts   (0..35)
-    memcpy( a2 + 48, a1 + 48, 0x20u );   // plane + unk03/04 (192..223)
-    winding_t *w = (winding_t *)(intptr_t)a1[56];   // face->w (224)
-    a2[56] = w ? (int)(intptr_t)Winding_Clone( w ) : 0;
+    memcpy( dst->mtldef, src->mtldef, 4 * sizeof(MaterialDef) );
+    dst->packedColor = src->packedColor;
+    dst->contents = src->contents;
+    dst->toolflags = src->toolflags;
+    memcpy( dst->planepts, src->planepts, 3 * sizeof(vec3_t) );
+    dst->plane = src->plane;
+    dst->unk03 = src->unk03;
+    dst->unk04 = src->unk04;
+    dst->w = src->w ? Winding_Clone( src->w ) : NULL;
 }
 
 // ─── MarkMapModified (0x499bb0) — marks the map as modified ────────────────────
@@ -1746,16 +1751,16 @@ static brush_t *Brush_ParsePhysCylinder( const char **text );
 // materialdef.cpp helpers
 // MaterialDef_11/13/14 externs removed (p4-final): dead — declared but never
 // called here; the real defs live in materialdef.cpp with their true signatures.
-extern int  TexWnd_06_LayerCount( int mtlDef, int layerHandle );
+extern texdef_sub_t *TexWnd_06_LayerCount( MaterialDef *mtlDef, int layerHandle );
 namespace LayerMat {
     extern int GetCurrentLayer( MaterialDef *def );
 }
 
 // surface/texture helpers
-extern void Face_MoveTexture( int surfDef, const float *normal, int outVecs,
-                               int uvBase, float sizeX, float sizeY );
-extern void sub_4A47D0( int outS, int inVecs );
-extern void sub_46F6C0( int mtlDef, int faceDef, int visIdx, int *outData );
+extern void Face_MoveTexture( const float *surfDef, const float *normal, float *outVecs,
+                               const float *uvBase, float sizeX, float sizeY );
+extern void sub_4A47D0( float *outS, const float *inVecs );
+extern void sub_46F6C0( MaterialDef *mtlDef, const face_t *faceDef, int visIdx, int *outData );
 extern int  sub_51D1D0( int material, int vertCount, int positions, int sVec,
                          int tVec, float dummy, int normalInfo, int uvData );
 
@@ -1763,9 +1768,9 @@ extern int  sub_51D1D0( int material, int vertCount, int positions, int sVec,
 extern void Vec3Cross( const float *a, const float *b, float *out );
 extern float Vec3Normalize_R( float *v );   // returns pre-normalize length (callers here ignore it)
 extern void MatrixInverse44( const void *src, void *dst );
-extern void texturevecs_02( int surfDef, int uvVecs, float v5, int normal,
-                             float dist, int arg6, int arg7, int arg8 );
-extern void sub_4769A0( int a1, int a2, int a3 );
+extern void texturevecs_02( float *surfDef, float *uvVecs, float v5, const float *normal,
+                             float dist, float *arg6, float *arg7, float *arg8 );
+extern void sub_4769A0( float *a1, const float *a2, float *a3 );
 
 // ─── parsing (real engine parser — universal/q_parse.cpp) ───────────────────
 // The CoD4Radiant binary parses brushes through the engine's q_parse.cpp, NOT a
@@ -1781,9 +1786,6 @@ extern void   Error( const char *fmt, ... );
 extern long   j__atol( const char *str );
 
 // Patch_Write (pmesh.cpp, 0x4458f0) declared near Brush_Write where WriteWriter_t exists.
-extern void MapLoad_ParseBrush_Layer( int (***writer)(...), int layerStr );
-extern void MapLoad_ParseBrush_Content( int contentName, void (***writer)(...),
-                                         int val, void *table );
 extern int  *contents;   // content table for MapLoad_ParseBrush_Content
 extern int  *toolflags;  // toolflags table
 
@@ -1800,7 +1802,7 @@ extern float sub_4AACC0( float f, int threshold );  // 0x4AACC0 FP-noise cleaner
 static void     Brush_RotateFacePlanepts( const float *pivot, const float *anglesDeg,
                                           brush_t *b );
 extern void     AxisToAngles( float *angles, float (*axis)[3] );
-extern void     vectoangles( float *angles, int vec );
+extern void     Radiant_VecToAngles( float *angles, const float *vec );
 // sub_4AA220 (0x4AA220) — rotate a vec3 by sequential X/Y/Z Euler angles (engine_stubs.cpp).
 extern void     sub_4AA220( const float *in, const float *anglesDeg, float *out );
 // 0x4A59C0 (com_math.cpp:1399) is the engine's ClosestApproachOfTwoLines — the
@@ -2253,22 +2255,21 @@ char Radiant_PatchGetTexdef( patchMesh_t *patch, texdef_sub_t *texdef )
 
 // 0x45D360  TexWnd_06_LayerCount — find the texdef block whose vis key matches
 // `layerHandle` within the MaterialDef. Returns the texdef base ptr (as int), or 0.
-int TexWnd_06_LayerCount( int mtlDef, int layerHandle )
+texdef_sub_t *TexWnd_06_LayerCount( MaterialDef *mtlDef, int layerHandle )
 {
-    int *a1 = (int *)mtlDef;                  // &MaterialDef (dword array)
-    int  layerCount = MaterialDef_04( (MaterialDef *)a1 );
+    int layerCount = MaterialDef_04( mtlDef );
     iassert( layerCount );   // TexWnd.cpp:1646
-    if ( layerCount <= 0 )
-        return 0;
-    int  v4 = 0;
-    int *i  = a1 + 8;                          // first key at dword index 8 (= mat_texDef+24)
-    while ( *i != layerHandle )
+    for ( int layer = 0; layer < layerCount; ++layer )
     {
-        if ( ++v4 >= layerCount )
-            return 0;
-        i += 7;                                // 28-byte stride
+        texdef_sub_t *texdef = &mtlDef->mat_texDef + layer;
+        int key;
+        memcpy( &key, &texdef->sample_size, sizeof(int) );
+        if ( key == layerHandle )
+        {
+            return texdef;
+        }
     }
-    return (int)&a1[7 * v4 + 2];               // &mat_texDef of the matched block
+    return NULL;
 }
 
 // 0x51AD50  Material "colorTint" constant lookup — fill out[4], return 1 if found.
@@ -2311,10 +2312,10 @@ static void Ed_PackColor( const float *a1, byte *a2 )
 
 // 0x46F6C0  per-layer face colour: colorTint·entityColor if the material defines a
 // "colorTint" constant, else the per-face packed colour (face_t+228, default white).
-void sub_46F6C0( int mtlDef, int faceDef, int visIdx, int *outData )
+void sub_46F6C0( MaterialDef *mtlDef, const face_t *faceDef, int visIdx, int *outData )
 {
     MaterialDef   *a1 = (MaterialDef *)mtlDef;
-    byte *a2 = (byte *)faceDef;
+    const byte *color = (const byte *)&faceDef->packedColor;
     Material      *mtl = MaterialDef_14( visIdx, a1 );
     iassert( mtl );   // MaterialDef.cpp:336
     float tint[4];
@@ -2322,15 +2323,15 @@ void sub_46F6C0( int mtlDef, int faceDef, int visIdx, int *outData )
     {
         const double k = 0.003921568859368563;   // 1/255
         float v9[4];
-        v9[0] = tint[0] * (float)( (double)a2[230] * k );
-        v9[1] = tint[1] * (float)( (double)a2[229] * k );
-        v9[2] = tint[2] * (float)( (double)a2[228] * k );
-        v9[3] = tint[3] * (float)( k * (double)a2[231] );
+        v9[0] = tint[0] * (float)( (double)color[2] * k );
+        v9[1] = tint[1] * (float)( (double)color[1] * k );
+        v9[2] = tint[2] * (float)( (double)color[0] * k );
+        v9[3] = tint[3] * (float)( k * (double)color[3] );
         Ed_PackColor( v9, (byte *)outData );
     }
     else
     {
-        *outData = ( (face_t *)a2 )->packedColor;
+        *outData = faceDef->packedColor;
     }
 }
 
@@ -2359,10 +2360,10 @@ void sub_46F6C0( int mtlDef, int faceDef, int visIdx, int *outData )
 // 0x48FB70 — fill [mins,maxs] from the whole current selection (Texture_Fit a4!=0
 // "fit across selection" mode).  OnFit / Brush_FitTexture always pass a4==0, so this
 // is a tripwire, not a silent no-op.  (Distinct from Select_GetBounds 0x48FB10.)
-extern void sub_48FB70( int minsOut, int maxsOut );
+extern void sub_48FB70( float *minsOut, float *maxsOut );
 
 // 0x47C590
-void Texture_Fit( int a1, float a2, float a3, int a4 )
+void Texture_Fit( face_t *a1, float a2, float a3, int a4 )
 {
     face_t *f = (face_t *)(intptr_t)a1;
 
@@ -2374,7 +2375,7 @@ void Texture_Fit( int a1, float a2, float a3, int a4 )
     float maxs[3] = { -131072.0f, -131072.0f, -131072.0f };
     if ( a4 )
     {
-        sub_48FB70( (int)(intptr_t)mins, (int)(intptr_t)maxs );
+        sub_48FB70( mins, maxs );
     }
     else
     {
@@ -2462,7 +2463,7 @@ extern void Patch_FitTexturing( patchMesh_t *patch );
 // 0x47C950 — fit every face of a brush def (Brush_FitTexture's brush-pass).  Patch
 // brushes route to Patch_FitTexturing; solid brushes Texture_Fit each face (a4==0).
 // patch -> Patch_FitTexturing, else the per-face Texture_Fit loop.
-void sub_47C950( int a1, float a2, float a3 )
+void sub_47C950( brush_t *a1, float a2, float a3 )
 {
     brush_t *def = (brush_t *)(intptr_t)a1;
     if ( def->patch )
@@ -2471,7 +2472,7 @@ void sub_47C950( int a1, float a2, float a3 )
         return;
     }
     for ( int i = 0; i < def->faceCount; ++i )
-        Texture_Fit( (int)(intptr_t)&def->faces[i], a2, a3, 0 );
+        Texture_Fit( &def->faces[i], a2, a3, 0 );
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -2489,7 +2490,7 @@ void sub_47C950( int a1, float a2, float a3 )
 //  active when Cam_Draw selects it (g_edSun.active), never on the faithful path.
 // ════════════════════════════════════════════════════════════════════════════
 extern int   Entity_GetVec3ForKey( entity_s_def *e, float *out, const char *key );
-extern float Entity_GetFloatValueForKey( int e, const char *key );
+extern float Entity_GetFloatValueForKey( const entity_s *e, const char *key );
 
 struct EdSunState { int active; float dir[3]; float color[3]; float ambient; float diffuse; };
 EdSunState g_edSun = { 0, { 0, 0, -1 }, { 1, 1, 1 }, 0.15f, 0.85f };
@@ -2517,11 +2518,11 @@ void SunPrev_Setup()
     float col[3] = { 1, 1, 1 };
     Entity_GetVec3ForKey( wd, col, "suncolor" );
     g_edSun.color[0] = col[0]; g_edSun.color[1] = col[1]; g_edSun.color[2] = col[2];
-    float sunlight = Entity_GetFloatValueForKey( (int)(intptr_t)wd, "sunlight" );
+    float sunlight = Entity_GetFloatValueForKey( wd, "sunlight" );
     if ( sunlight <= 0.0f ) sunlight = 1.0f;
-    float diffuseFrac = Entity_GetFloatValueForKey( (int)(intptr_t)wd, "diffusefraction" );
+    float diffuseFrac = Entity_GetFloatValueForKey( wd, "diffusefraction" );
     if ( diffuseFrac <= 0.0f ) diffuseFrac = 0.5f;
-    float ambient = Entity_GetFloatValueForKey( (int)(intptr_t)wd, "ambient" );
+    float ambient = Entity_GetFloatValueForKey( wd, "ambient" );
     if ( ambient < 0.05f ) ambient = 0.15f;
     g_edSun.ambient = ambient;
     g_edSun.diffuse = sunlight * diffuseFrac;
@@ -2588,19 +2589,19 @@ bool Face_BuildLayerGeom( face_t *faceDef, const orientation_t *orient,
     OrientationDirToWorldDir( wn, orient, faceDef->plane.normal );
 
     int   visVal = MaterialDef_13( layer, mtldef );
-    int   texdef = TexWnd_06_LayerCount( (int)mtldef, visVal );
+    texdef_sub_t *texdef = TexWnd_06_LayerCount( mtldef, visVal );
     if ( !texdef )
         return false;
     float texMat[8];
     texdef_sub_t *td = (texdef_sub_t *)(intptr_t)texdef;
-    Face_MoveTexture( texdef, faceDef->plane.normal, (int)texMat, texdef + 8,
+    Face_MoveTexture( texdef->size, faceDef->plane.normal, texMat, texdef->shift,
                       td->rotate, td->crossterm );
 
-    float tang[3];   sub_4A47D0( (int)tang, (int)texMat );  // tangent = normalize(row0)
+    float tang[3];   sub_4A47D0( (float *)tang, (float *)texMat );  // tangent = normalize(row0)
     float binorm[3]; Vec3Cross( wn, tang, binorm );          // binormal = N × T
 
     unsigned int col = 0;
-    sub_46F6C0( (int)mtldef, (int)faceDef, layer, (int *)&col );
+    sub_46F6C0( mtldef, faceDef, layer, (int *)&col );
     // Stage-2 APPROXIMATION ONLY: bake the directional sun into the per-vertex colour.
     // The binary's Visuals_InitFaceVis (0x46F7A0) has NO such term — it is kisak's
     // fallback for the sun preview when the faithful R_SunPrev_Main path is unavailable.
@@ -2726,15 +2727,15 @@ int Visuals_InitFaceVis( faceVis_s *face, face_t *def, const orientation_t *orie
 //  mis-store stayed dormant.  arg `size2` is that {lyrMtl,radMtl} pair reinterpreted as
 //  floats (the bit pattern is copied verbatim — pointers are 4 bytes on x86).
 // ════════════════════════════════════════════════════════════════════════════
-void Brush_SetFaceTexdefSize( const float *size2, face_t *f, brush_t *b )
+void Brush_SetFaceTexdefSize( const patchMesh_material *material, face_t *f, brush_t *b )
 {
     iassert( b );   // brush.cpp:2872
     iassert( f );   // brush.cpp:2873
     iassert( f >= &b->faces[0] && f < &b->faces[b->faceCount] );   // brush.cpp:2874
 
     MaterialDef *md = &f->mtldef[ g_qeglobals.current_edit_layer ];
-    md->lyrMtl = *(LayerMaterialDef * const *)&size2[0];   // arg0[0]
-    md->radMtl = *(qtexture_s * const *)&size2[1];         // arg0[1]
+    md->lyrMtl = material->lyrMtl;
+    md->radMtl = material->radMtl;
     ++b->version;
 }
 
@@ -2929,12 +2930,12 @@ void sub_477080( brush_t *b, int sampleSize )
 //  Brush_SetTextureMapping's brush pass ("set brush texture mapping"); the FATAL stub
 //  crashed that pass (the face pass already worked via sub_4767E0).
 // ════════════════════════════════════════════════════════════════════════════
-extern void sub_4767E0( const texdef_sub_t *texDef, int facePtr, int brushDef );   // engine_stubs trampoline -> Brush_SetFaceTexdef
+extern void sub_4767E0( const texdef_sub_t *texDef, face_t *facePtr, brush_t *brushDef );   // engine_stubs trampoline -> Brush_SetFaceTexdef
 
 void sub_477020( brush_t *b, const texdef_sub_t *texdef )
 {
     for ( int i = 0; i < b->faceCount; ++i )
-        sub_4767E0( texdef, (int)(intptr_t)&b->faces[i], (int)(intptr_t)b );
+        sub_4767E0( texdef, &b->faces[i], b );
     Brush_BuildWindings( b, 1 );
     if ( g_qeglobals.d_select_mode == sel_vertex || g_qeglobals.d_select_mode == sel_edge )
         SetupVertexSelection();
@@ -2950,7 +2951,7 @@ void sub_477020( brush_t *b, const texdef_sub_t *texdef )
 // ════════════════════════════════════════════════════════════════════════════
 // IDA a1=srcFace, a2=dstBrushDef (brush_t*), a3=dstFace.
 // Callers pass (srcFacePtr, brushPtr, dstFacePtr) — note a2 is the brush, not the face.
-brush_t *Brush_ApplyTextureProjection( int srcFace, brush_t *b, int dstFace )
+brush_t *Brush_ApplyTextureProjection( face_t *srcFace, brush_t *b, face_t *dstFace )
 {
     // IDA's 36*layer+face+44 = &mtldef[layer].mat_texDef (MaterialDef @36+36*layer,
     // texDef @+8); +60 rotate, +64 crossterm; plane.normal @+192, plane.dist @+208.
@@ -2965,7 +2966,6 @@ brush_t *Brush_ApplyTextureProjection( int srcFace, brush_t *b, int dstFace )
     float src_v19 = srcTd->crossterm;
     float src_v17 = srcTd->rotate;
     float *src_normal = src->plane.normal;
-    int dst_base = (int)(intptr_t)dstTd;
 
     {
         // IDA v39..v57 are adjacent stack slots filled through BYREF pointers
@@ -2977,8 +2977,8 @@ brush_t *Brush_ApplyTextureProjection( int srcFace, brush_t *b, int dstFace )
         float tvAxis[3];    // v35..v37 — shared rotation axis
         float crossSrc[3];  // v55..v57 — Vec3Cross(src) out
 
-        Face_MoveTexture( (int)(intptr_t)srcTd, src_normal,
-                          (int)texVec, (int)(intptr_t)srcTd->shift,
+        Face_MoveTexture( (float *)srcTd, src_normal,
+                          (float *)texVec, (float *)srcTd->shift,
                           src_v17, src_v19 );
 
         float *dst_normal = dst->plane.normal;
@@ -2992,11 +2992,9 @@ brush_t *Brush_ApplyTextureProjection( int srcFace, brush_t *b, int dstFace )
         {
             // Parallel planes: direct copy of texdef values
             float dist_val = dst->plane.dist;
-            int dst20 = dst_base + 20;
-            int dst16 = dst_base + 16;
-            texturevecs_02( dst_base, (int)texVec, (float)dst_normal[2],
-                            (int)dst_normal, dist_val,
-                            dst_base + 8, dst16, dst20 );
+            texturevecs_02( dstTd->size, texVec, (float)dst_normal[2],
+                            dst_normal, dist_val,
+                            dstTd->shift, &dstTd->rotate, &dstTd->crossterm );
         }
         else
         {
@@ -3011,7 +3009,7 @@ brush_t *Brush_ApplyTextureProjection( int srcFace, brush_t *b, int dstFace )
             inVec[3] = -src->plane.dist;
             inVec[7] = -dst->plane.dist;
 
-            sub_4769A0( (int)tvAxis, (int)inVec, (int)tvGrad );
+            sub_4769A0( tvAxis, inVec, tvGrad );
 
             float v29 = src->plane.normal[2] * tvGrad[2]
                       + src->plane.normal[1] * tvGrad[1]
@@ -3092,9 +3090,9 @@ brush_t *Brush_ApplyTextureProjection( int srcFace, brush_t *b, int dstFace )
             }
 
             float dist_dst = dst->plane.dist;
-            texturevecs_02( dst_base, (int)texVec, (float)dst_normal[2],
-                            (int)dst_normal, dist_dst,
-                            dst_base + 8, dst_base + 16, dst_base + 20 );
+            texturevecs_02( dstTd->size, texVec, (float)dst_normal[2],
+                            dst_normal, dist_dst,
+                            dstTd->shift, &dstTd->rotate, &dstTd->crossterm );
         }
     }
 
@@ -3185,7 +3183,7 @@ static int Face_ParseSurfDef( const char **text, MaterialDef *surfDef, int versi
     // Then +28*curLayer advances through 28-byte texdef_sub_t blocks.
     // Since texdef_sub_t is 28 bytes and mat_texDef is a texdef_sub_t (the first block),
     // this is: &surfDef->mat_texDef + curLayer (where each block is 28 bytes).
-    float *v11_base = (float *)((char *)surfDef + 8 + 28 * curLayer);
+    float *v11_base = (float *)(&surfDef->mat_texDef + curLayer);
 
     double v12 = 0.0;
 
@@ -3408,7 +3406,7 @@ static void Sphere_Point( float *out, float radius, float ang )
 // a1 = the brush DEF (selected_brushes_next->def), a2 = side count,
 // a3 = the cylinder axis (0=X,1=Y,2=Z) from the active XY-view type,
 // a4 = snap-to-integer flag (floor(x+0.5) on each side-face point).
-void Brush_MakeSided( int a1, unsigned int sides, int axis, char snap )
+void Brush_MakeSided( brush_t *a1, unsigned int sides, int axis, char snap )
 {
     if ( sides < 3 )
     {
@@ -3644,7 +3642,7 @@ void Brush_MakeSided_Prolog( unsigned int sides, char snap )
     case 2: axis = 2; break;
     default: axis = 0; break;   // IDA 0x4735E0: baseline re-inits to 0 when an XY view exists
     }
-    Brush_MakeSided( (int)selected_brushes.next->def, sides, axis, snap );
+    Brush_MakeSided( selected_brushes.next->def, sides, axis, snap );
 }
 
 // ─── Brush_MakeSidedCone (0x47BC10) ───────────────────────────────────────────
@@ -3881,12 +3879,12 @@ static brush_t *Brush_ParsePhysCylinder( const char **text )
     MarkMapModified();
     ++v17->version;
 
-    Brush_MakeSided( (int)v17, 16u, 0, 0 );
+    Brush_MakeSided( v17, 16u, 0, 0 );
 
     // Orient the 16-sided cylinder along the parsed axis: vectoangles -> (pitch,yaw,0),
     // reorder (pitch,yaw,roll) -> (roll,pitch,yaw), rotate planepts about the center.
     float ang[3];
-    vectoangles( ang, (int)vec );
+    Radiant_VecToAngles( ang, vec );
     float rot[3] = { ang[2], ang[0], ang[1] };
     Brush_RotateFacePlanepts( center, rot, v17 );
 
@@ -4003,8 +4001,8 @@ brush_t *Brush_Parse( const char **text, int version )
         if ( Com_Parse( text )->token[0] == '}' )
         {
             // Done — build the brush
-            brush_t *nb = (brush_t *)operator new( 0x58u );
-            memset( nb, 0, 0x58u );
+            brush_t *nb = (brush_t *)operator new( sizeof(brush_t) );
+            memset( nb, 0, sizeof(brush_t) );
             nb->faceCount = v16;
             nb->faces     = Face_Alloc_R( v16 );
             if ( nb->parent_layer_string )                 // always null after the memset
@@ -4013,7 +4011,7 @@ brush_t *Brush_Parse( const char **text, int version )
             void *lc = operator new( ll + 1 );
             memcpy( lc, layerStr, ll + 1 );
             nb->parent_layer_string = (char *)lc;
-            memcpy( nb->faces, s_faceStack, 232 * v16 );
+            memcpy( nb->faces, s_faceStack, sizeof(face_t) * v16 );
             return nb;
         }
 
@@ -4026,9 +4024,9 @@ brush_t *Brush_Parse( const char **text, int version )
         }
 
         face_t *facePtr = v47;
-        v47 = (face_t *)((char *)v47 + 232);
+        ++v47;
         int nextCount = v16 + 1;
-        ((int *)facePtr)[56] = 0;  // w = nullptr
+        facePtr->w = NULL;
 
         // Read 3 sets of planepts: "( x y z )"
         for ( int i = 0; i < 3; ++i )
@@ -4057,7 +4055,7 @@ brush_t *Brush_Parse( const char **text, int version )
         if ( version < 4 )
         {
             Byte4PackPixelColor( const_cast<float*>(colorWhite),
-                                 (GfxColor *)((char *)facePtr + 228) );
+                                 (GfxColor *)&facePtr->packedColor );
             // IDA: sub_472EC0(text, (MaterialDef*)v49+1, version, 0); &mtldef[0] = face+36.
             if ( Face_ParseSurfDef( text, &facePtr->mtldef[0], version, 0 ) )
             {
@@ -4070,7 +4068,7 @@ brush_t *Brush_Parse( const char **text, int version )
                 // IDA: v32 = &mtldef[0] + 28*curLayer + 8 — NOTE the 28-byte (texdef-only)
                 // stride over the 36-byte MaterialDef array; kept bit-faithful via the cast.
                 texdef_sub_t *tdl =
-                    (texdef_sub_t *)( (char *)&facePtr->mtldef[0] + 28 * curLayer2 + 8 );
+                    &facePtr->mtldef[0].mat_texDef + curLayer2;
                 float v31 = tdl->size[0];
                 tdl->shift[0] = -v31 * tdl->shift[0];
                 tdl->shift[1] = -tdl->size[1] * tdl->shift[1];
@@ -4091,24 +4089,24 @@ brush_t *Brush_Parse( const char **text, int version )
         // face contents/flags words (face[45]=offset 180, face[46]=offset 184)
         if ( v27 > 3 )
         {
-            ((int *)facePtr)[45] = v46;
+            facePtr->contents = v46;
         }
         else
         {
             parseInfo_t *v34 = Com_ParseOnLine( text );
-            ((int *)facePtr)[45] = (int)j__atol( v34->token );
+            facePtr->contents = (int)j__atol( v34->token );
         }
 
         bool doSampleSize;   // = IDA LABEL_65 (sample size + lightmap + Init_MaterialLayer)
         if ( v27 == 3 )
         {
             parseInfo_t *v35 = Com_ParseOnLine( text );
-            ((int *)facePtr)[46] = (int)j__atol( v35->token );
+            facePtr->toolflags = (int)j__atol( v35->token );
             doSampleSize = true;
         }
         else
         {
-            ((int *)facePtr)[46] = v48;
+            facePtr->toolflags = v48;
             if ( v27 <= 1 )
                 Com_ParseOnLine( text );
             if ( !v27 )
@@ -4129,19 +4127,18 @@ brush_t *Brush_Parse( const char **text, int version )
             if ( v53 <= 0 ) v53 = 16;
 
             Face_SetDefaultMaterials( facePtr );   // sub_472D30
-            SetMaterial( "lightmap_gray", (patchMesh_material *)((char *)facePtr + 9 * 8) );
+            SetMaterial( "lightmap_gray", (patchMesh_material *)&facePtr->mtldef[1] );
             // IDA: v44 = (float)v53; Init_MaterialLayer(..., (MaterialDef*)LODWORD(v44)).
             // §11 COERCE: the 2nd arg is the BIT pattern of the float sample size,
             // NOT a value-cast — Init_MaterialLayer reinterprets the pointer bits as float.
             float fv53 = (float)v53;
-            Init_MaterialLayer( (MaterialDef *)facePtr + 2,
-                                (MaterialDef *)(uintptr_t)*(unsigned int *)&fv53 );
+            Init_MaterialLayer( &facePtr->mtldef[1], fv53 );
         }
         else
         {
             // version >= 4: read up to 3 surface defs (radiosity / lightmap / smoothing)
             int chanIdx = 0;
-            MaterialDef *mdPtr = (MaterialDef *)((char *)facePtr + 36);
+            MaterialDef *mdPtr = facePtr->mtldef;
             while ( Face_ParseSurfDef( text, mdPtr, version, chanIdx ) )
             {
                 ++chanIdx;
@@ -4163,10 +4160,10 @@ brush_t *Brush_Parse( const char **text, int version )
 // ════════════════════════════════════════════════════════════════════════════
 // IDA: the writer is a void(***)(int ctx, const char* fmt, ...) where the ctx
 // is the pointer itself cast to int.  WriteWriter_t = the triple-pointer handle.
-typedef int WriteFunc_t( int ctx, const char *fmt, ... );
+typedef int WriteFunc_t( void *ctx, const char *fmt, ... );
 typedef WriteFunc_t **WriteWriter_t;
 // Convenience: WRITE(w, fmt, ...) = (**w)((int)(intptr_t)w, fmt, ...)
-#define WRITE(w, ...) ((**w)((int)(intptr_t)(w), __VA_ARGS__))
+#define WRITE(w, ...) ((**w)((w), __VA_ARGS__))
 
 // Write sub-function forward declarations (defined as static below)
 static int Brush_WritePhysicsBox( brush_t *b, WriteWriter_t writer );
@@ -4174,8 +4171,8 @@ static int Brush_WritePhysCylinder( brush_t *b, WriteWriter_t writer );
 
 // MapLoad helpers needed by Brush_Write
 extern int  Patch_Write( WriteWriter_t writer, patchMesh_t *patch );   // pmesh.cpp 0x4458f0
-extern void MapLoad_ParseBrush_Layer( WriteWriter_t writer, int layerStr );
-extern void MapLoad_ParseBrush_Content( int name, WriteWriter_t writer,
+extern void MapLoad_ParseBrush_Layer( WriteWriter_t writer, const char *layerStr );
+extern void MapLoad_ParseBrush_Content( const char *name, WriteWriter_t writer,
                                          int val, void *table );
 extern int *contents_table;
 extern int *toolflags_table;
@@ -4249,11 +4246,13 @@ int Brush_Write( WriteWriter_t writer, brush_t *brush )
     // A kisak save-path UAF can violate that (a freed+reallocated brush def reaches here
     // during a save), but the right fix is the upstream UAF, not a guard here.
     if ( strcmp( brush->parent_layer_string, "000_Global" ) )
-        MapLoad_ParseBrush_Layer( writer, (int)brush->parent_layer_string );
+    {
+        MapLoad_ParseBrush_Layer( writer, brush->parent_layer_string );
+    }
 
-    MapLoad_ParseBrush_Content( (int)"contents",  writer,
+    MapLoad_ParseBrush_Content( "contents",  writer,
                                  brush->faces->contents,  contents_table );
-    MapLoad_ParseBrush_Content( (int)"toolFlags",  writer,
+    MapLoad_ParseBrush_Content( "toolFlags",  writer,
                                  brush->faces->toolflags, toolflags_table );
 
     for ( int fi = 0; fi < brush->faceCount; ++fi )
@@ -4275,7 +4274,7 @@ int Brush_Write( WriteWriter_t writer, brush_t *brush )
             // IDA: v9 = (MaterialDef*)(&v12[9*ch+9]) — raw float-array offset
             // &v12[0] = face->planepts[0][0]. 9*ch+9 floats forward = face+4*(9*ch+9).
             // For ch=0: 4*9=36 from planepts[0][0] = mtldef[0] start (+36 from face). Correct.
-            MaterialDef *md = (MaterialDef *)((float *)f + (9 * ch + 9));
+            MaterialDef *md = &f->mtldef[ch];
             // the binary inlines Materialdef_GetName here (MaterialDef.cpp:85 lives in it)
             extern LayerMaterialDef *Materialdef_GetName( MaterialDef *m );   // materialdef.cpp 0x431640
             const char *name    = (const char *)Materialdef_GetName( md );
@@ -4632,7 +4631,7 @@ void Brush_SplitBrushByFace( brush_t *in, face_t *face, brush_t **front, brush_t
         j__free_0( b->parent_layer_string );
     b->parent_layer_string = AllocMaterialString( in->parent_layer_string );
     face_t *nf = Face_Alloc( b, face );
-    Byte4PackPixelColor( const_cast<float*>(colorWhite), (GfxColor *)((char *)nf + 228) );
+    Byte4PackPixelColor( const_cast<float*>(colorWhite), (GfxColor *)&nf->packedColor );
     Brush_BuildWindings( b, 1 );
     if ( g_qeglobals.d_select_mode == sel_vertex || g_qeglobals.d_select_mode == sel_edge )
         SetupVertexSelection();
@@ -4666,7 +4665,7 @@ void Brush_SplitBrushByFace( brush_t *in, face_t *face, brush_t **front, brush_t
     nf2->planepts[1][0] = t0;
     nf2->planepts[1][1] = t1;
     nf2->planepts[1][2] = t2;
-    Byte4PackPixelColor( const_cast<float*>(colorWhite), (GfxColor *)((char *)nf2 + 228) );
+    Byte4PackPixelColor( const_cast<float*>(colorWhite), (GfxColor *)&nf2->packedColor );
     Brush_BuildWindings( b, 1 );
     if ( g_qeglobals.d_select_mode == sel_vertex || g_qeglobals.d_select_mode == sel_edge )
         SetupVertexSelection();
@@ -5211,9 +5210,9 @@ next_clamp_face:;
 //  toggle (w_cyclePreviewMode), never set during a map load.
 // ─────────────────────────────────────────────────────────────────────────────
 extern "C++" {
-    extern char *ValueForKey2( int e, const char *key );          // entity.cpp 0x4825C0
+    extern char *ValueForKey2( const entity_s *e, const char *key );          // entity.cpp 0x4825C0
     extern bool  Eclass_hasModel( eclass_t *e );                  // eclass.cpp 0x481740
-    extern models_t *Eclass_01( const char *name, int ownerDef ); // eclass.cpp 0x482300
+    extern models_t *Eclass_01( const char *name, entity_s *ownerDef ); // eclass.cpp 0x482300
     extern void  Entity_FreePrefab( entity_s *e );                // entity.cpp 0x4825F0
     extern void  RemoveModelInstFromBuf( int inst );              // engine_stubs 0x4FDCE0
     extern void  SetupModelInst( float *ident_mtx, entity_s *e ); // entity.cpp 0x485890
@@ -5241,9 +5240,9 @@ static void VecMultiplyAdd( const float *a, float scale, const float *b, float *
 extern edTrace_t *Trace_AllDirectionsIfFailed( float *cam_origin, edTrace_t *trace_result,
                                                float *dir, int contents );
 
-bool Model_SetModel( entity_brush_s *b, int orientMatrix )
+bool Model_SetModel( entity_brush_s *b, const float *orientMatrix )
 {
-    const float *a2 = (const float *)(intptr_t)orientMatrix;   // 12-float orient matrix
+    const float *a2 = orientMatrix;   // 12-float orient matrix
 
     // 1. Local copy of the caller's orientation matrix (3x4 = 12 floats).
     float mtx[12];
@@ -5320,7 +5319,7 @@ bool Model_SetModel( entity_brush_s *b, int orientMatrix )
             }
             else
             {
-                modelName = ValueForKey2( (int)(intptr_t)ownerDef, "model" );
+                modelName = ValueForKey2( ownerDef, "model" );
             }
 
             // brush.cpp:3763 — LEVEL 1 (binary asserts modelName != NULL post-resolve).
@@ -5330,7 +5329,7 @@ bool Model_SetModel( entity_brush_s *b, int orientMatrix )
             if ( !*modelName )
                 return *Brush_ModelFailedByte( b->def ) == 0;
 
-            e = (entitymodel_t *)Eclass_01( modelName, (int)(intptr_t)ownerDef );
+            e = Eclass_01( modelName, ownerDef );
         }
     }
 
@@ -5360,7 +5359,7 @@ bool Model_SetModel( entity_brush_s *b, int orientMatrix )
                   pb = pb->next )
                 ++nBrush;
             Radiant_FL_Log( "Model_SetModel: prefab '%s' instanced %d brush(es)",
-                            ValueForKey2( (int)(intptr_t)ownerDef, "model" ), nBrush );
+                            ValueForKey2( ownerDef, "model" ), nBrush );
         }
     }
 
@@ -5389,7 +5388,7 @@ static char Brush_IsInSelectedList( selbrush_t *b )
 // (else asserts unless modelFailed).  Faithful to 0x479610.  (Note: a1 is a brush instance;
 // its def->modelFailed byte is at +0x4C = brush_t.unk01 low byte = Brush_ModelFailedByte.)
 // ─────────────────────────────────────────────────────────────────────────────
-char Entity_HasRenderableModel( brush_t_with_custom_def *a1, int orient )
+char Entity_HasRenderableModel( brush_t_with_custom_def *a1, const float *orient )
 {
     selbrush_t *b = (selbrush_t *)a1;
     entity_s_def *eDef = (entity_s_def *)b->owner->def;
@@ -5561,7 +5560,7 @@ void OverbrightShift( float a1 )
         char buf[32];
         if ( !_stricmp( eclass->name, "light" ) )
         {
-            float v = Entity_GetFloatValueForKey( (int)(intptr_t)def, "overbrightShift" ) + a1;
+            float v = Entity_GetFloatValueForKey( def, "overbrightShift" ) + a1;
             if ( v > 1.0f )        v = 1.0f;
             else if ( v < 0.0f )   v = 0.0f;
             sprintf( buf, "%f", v );
@@ -5569,7 +5568,7 @@ void OverbrightShift( float a1 )
         }
         else
         {
-            float v = Entity_GetFloatValueForKey( (int)(intptr_t)def, "fixedNodeSafeRadius" );
+            float v = Entity_GetFloatValueForKey( def, "fixedNodeSafeRadius" );
             if ( v == 0.0f )   v = 256.0f;
             v = v - a1 * 320.0f;
             if ( v < 0.0f )   v = 0.0f;
@@ -5598,7 +5597,7 @@ void Light_01( float a1 )
         char buf[32];
         if ( !_stricmp( eclass->name, "light" ) )
         {
-            float v = Entity_GetFloatValueForKey( (int)(intptr_t)def, "light" );
+            float v = Entity_GetFloatValueForKey( def, "light" );
             if ( v == 0.0f )   v = 300.0f;
             v = v * a1;
             if ( v < 0.0f )   v = 0.0f;
@@ -5607,7 +5606,7 @@ void Light_01( float a1 )
         }
         else
         {
-            float v = Entity_GetFloatValueForKey( (int)(intptr_t)def, "radius" );
+            float v = Entity_GetFloatValueForKey( def, "radius" );
             if ( v == 0.0f )   v = 256.0f;
             v = v * a1;
             if ( v < 0.0f )   v = 0.0f;
@@ -5635,7 +5634,7 @@ void Light_Height( float a1 )
         if ( ( eclass->classtype & 0x40 ) == 0 )
             continue;
 
-        float v = Entity_GetFloatValueForKey( (int)(intptr_t)def, "height" );
+        float v = Entity_GetFloatValueForKey( def, "height" );
         if ( v == 0.0f )   v = 128.0f;
         v = v * a1;
         if ( v < 0.0f )   v = 0.0f;
@@ -5661,7 +5660,7 @@ extern int   MaterialDef_06( qtexture_s *radMtl );                         // ma
 extern int   dword_181F51C;                                               // engine_stubs.cpp (realize-state)
 extern bool  MaterialDef_10_LayeredMatHandle( MaterialDef *mtlDef );       // materialdef.cpp 0x431A60
 extern char  MtlDef_IsFaceFiltered( MaterialDef *mtlDef );                 // mayaexport.cpp 0x46FBE0
-extern void  PMESH_29_Winding( int patchInst, const orientation_t *orient, float *desc, rface_t **outList ); // pmesh.cpp 0x441AD0
+extern void PMESH_29_Winding( patch_t *patchInst, const orientation_t *orient, float *desc, rface_t **outList );
 
 // sub_409F20 (0x409F20) — midpoint of two vec3.
 static void Region_BoundsMidpoint( const float *a, const float *b, float *out )
@@ -5694,7 +5693,7 @@ void Brush_DrawSubmitFaceWindings( selbrush_t *inst, const orientation_t *orient
     // patch brush → route to the pmesh winding submitter
     if ( inst->patch )
     {
-        PMESH_29_Winding( (int)(intptr_t)inst->patch, orient, a3, outList );
+        PMESH_29_Winding( inst->patch, orient, a3, outList );
         return;
     }
 
@@ -5790,9 +5789,9 @@ static void Brush_UpdateSpecialMaterialFlag( brush_t *def );             // fwd 
 // 0x47b900 — walk a model's content brush tree, refreshing each brush's special-material
 // flag.  `node` is &model->x2 (model+8); the entity list head is node[1] (entities.next
 // @+0xC) and each entity's brush list uses the def(+0x08)/brushes(+0x0C) head overlay.
-static void Brush_UpdateSpecialMaterialFlag_Recurse( int *node )
+static void Brush_UpdateSpecialMaterialFlag_Recurse( entity_s *node )
 {
-    for ( entity_s *ent = (entity_s *)node[1]; ent != (entity_s *)node; ent = ent->next )
+    for ( entity_s *ent = node->next; ent != node; ent = ent->next )
     {
         for ( brush_t *b = (brush_t *)ent->brushes.prev; b != (brush_t *)&ent->def; b = b->onext )
             Brush_UpdateSpecialMaterialFlag( b );
@@ -5810,10 +5809,12 @@ static void Brush_UpdateSpecialMaterialFlag( brush_t *def )
         entitymodel_t *mc = (entitymodel_t *)owner->modelClass;
         if ( !mc )                                           // IDA: modelClass==0 → return
             return;
-        models_t *model = mc->model;                         // modelClass->model @0x160
+        modelnode_t *model = mc->model;
         iassert( model );                                    // "b->owner->modelClass->model" (L0)
         if ( model->entities.next )                          // model+0xC non-empty
-            Brush_UpdateSpecialMaterialFlag_Recurse( &model->x2 );
+        {
+            Brush_UpdateSpecialMaterialFlag_Recurse( &model->entities );
+        }
         return;
     }
 
@@ -6348,7 +6349,7 @@ void Patch_DrawControlPoints( patch_t *patchInstance, const orientation_t *orien
 // sites: layer switch / relayer / script-group / layered-material / prefab enter-leave.
 // [audit U5, 2026-07-25 — was a no-op stub in engine_stubs.cpp whose comment called it
 // a "benign display rebuild"; stale patch tessellation on layer ops was the symptom.]
-void sub_47D060( int listHead )
+void sub_47D060( selbrush_t *listHead )
 {
 
     selbrush_t *sentinel = (selbrush_t *)(intptr_t)listHead;
@@ -6369,7 +6370,7 @@ void sub_47D060( int listHead )
         if ( owner )                                          // 0x47d0c9
         {
             if ( owner->prefab )                              // 0x47d0d0
-                sub_47D060( (int)(intptr_t)( (char *)owner->prefab + 0xC ) );    // 0x47d0d6
+                sub_47D060( &((prefab_s *)owner->prefab)->brushes );    // 0x47d0d6
             entity_s *eDef = (entity_s *)owner->def;          // 0x47d0e1
             ++*(unsigned __int16 *)&eDef->version_prob_wrong; // 0x47d0e4  add word [def+0x78],1
         }
@@ -6638,7 +6639,7 @@ void DrawAngles( int drawType, const orientation_t *orient, GfxColor *col )
 //  branch (where the binary calls DrawModels). DrawLightsMain's glow-sphere is ported
 //  separately (camwnd.cpp Cam_DrawLightPreviewSpheres). [render decorations, opus]
 // ═════════════════════════════════════════════════════════════════════════════
-extern char *ValueForKey2( int e, const char *key );                 // entity.cpp 0x4825C0
+extern char *ValueForKey2( const entity_s *e, const char *key );                 // entity.cpp 0x4825C0
 extern int   ScriptGroup_Unreachable( const char *a1 );              // scriptgroup.cpp 0x451170
 extern bool  ScriptGroup_BrushIsTrigger( selbrush_t *b );            // scriptgroup.cpp 0x453FD0
 extern void  __cdecl R_AddRenderCmdDrawTris(
@@ -6806,7 +6807,7 @@ static void DrawOriginBox( const float *mins, const float *origin, char width,
 // classname strstr("node") raises the quad by +32; the quad is a diamond in
 // the XY plane at the bbox top z (+0.01).  One R_AddRenderCmdDrawTris.
 // ─────────────────────────────────────────────────────────────────────────────
-void Ed_DrawScriptColorQuad( int entDef, const float *color )
+void Ed_DrawScriptColorQuad( const entity_s *entDef, const float *color )
 {
     GfxColor col;
     Byte4PackPixelColor( const_cast<float *>( color ), &col );
@@ -6815,7 +6816,7 @@ void Ed_DrawScriptColorQuad( int entDef, const float *color )
     // the eclass bbox: v2[3]=mins[0]? No — +0x60 is eclass; eclass+0x0C=mins. The IDB
     // reads v2[3..7] = eclass+0x0C..0x1C = eclass mins[0..2]/maxs[0..1]. Matches the
     // origin-relative diamond the binary builds; entity origin is entity_s+0x68 (a1+104..112).
-    entity_s_def *e = (entity_s_def *)(intptr_t)entDef;
+    const entity_s_def *e = entDef;
     eclass_t     *eclass = e->eclass;          // *(float**)(a1+96) = entity_s+0x60
     const float minx = eclass->mins[0], miny = eclass->mins[1], minz = eclass->mins[2];
     const float maxx = eclass->maxs[0], maxy = eclass->maxs[1];   // v2[6], v2[7]
@@ -6858,7 +6859,7 @@ static void Ed_DrawScriptForceColor( selbrush_t *b )
     if ( !owner || owner == world_entity )
         return;
     iassert( b->owner->def == b->def->owner );
-    int eDef = (int)(intptr_t)owner->def;
+    const entity_s *eDef = owner->def;
     char *fc = ValueForKey2( eDef, "script_forcecolor" );
     if ( fc && fc[0] )
     {
@@ -6919,7 +6920,7 @@ char Brush_GetEntityLineColor( float *outRgba, brush_t *brushDef, const float *i
         {
             if ( HasKeyValuePair( (entity_s_def *)owner, "targetname" ) )
             {
-                char *tn = ValueForKey2( (int)(intptr_t)owner, "targetname" );
+                char *tn = ValueForKey2( owner, "targetname" );
                 if ( strncmp( tn, "auto", 4 ) != 0 )
                 {
                     outRgba[0] = 0.0f; outRgba[1] = 1.0f; outRgba[2] = 0.0f; outRgba[3] = 1.0f;
@@ -6934,7 +6935,7 @@ char Brush_GetEntityLineColor( float *outRgba, brush_t *brushDef, const float *i
     // Alpha is the eclass slot at +0x30 (eclass_t::unk), NOT a constant: the binary reads
     // it as a field in BOTH branches (0x47ab5d / 0x47ab3a) right after color[0..2] at
     // +0x24/+0x28/+0x2C.  An earlier copy of this function hardcoded 1.0f here.
-    char *sf = ValueForKey2( (int)(intptr_t)owner, "spawnflags" );
+    char *sf = ValueForKey2( owner, "spawnflags" );
     bool sfZero = ( atol( sf ) == 0 );
     outRgba[0] = ec->color[0];
     if ( sfZero )
@@ -7121,7 +7122,7 @@ void KiwiPrefabPrefix_Shutdown()
     ++s_prefabPrefixEpoch;
 }
 
-extern char *ValueForKey2( int e, const char *key );   // entity.cpp:89 (0x4825C0)
+extern char *ValueForKey2( const entity_s *e, const char *key );   // entity.cpp:89 (0x4825C0)
 
 static const char *PrefabContent_ChildPrefix( entity_s_def *eDef, const char *layerPrefix )
 {
@@ -7139,7 +7140,7 @@ static const char *PrefabContent_ChildPrefix( entity_s_def *eDef, const char *la
         if ( e->key && e->key != eDef && e->epoch == s_prefabPrefixEpoch )
             continue;
         // Free, stale, or ours-with-a-different-parent: (re)build in this slot.
-        const char *model = ValueForKey2( (int)(intptr_t)eDef, "model" );
+        const char *model = ValueForKey2( eDef, "model" );
         if ( !model )
             model = "";
         const size_t pl = strlen( layerPrefix );
@@ -7184,14 +7185,14 @@ static void DrawBrush_PrefabContents( selbrush_t *bboxBrush, entity_s_def *eDef,
     // (_stricmp key "model", miss → the `zero` empty string) is exactly ValueForKey2.
     // served from the cache above; the inline build stays as the
     // out-of-memory fallback and as the readable statement of what the bytes are.
-    extern char *ValueForKey2( int e, const char *key );          // entity.cpp 0x4825C0
+    extern char *ValueForKey2( const entity_s *e, const char *key );          // entity.cpp 0x4825C0
     const char *childPrefix = PrefabContent_ChildPrefix( eDef, layerPrefix );
     char childPrefixBuf[1028];                                    // v33[1028]
     if ( !childPrefix )
     {
         char modelLc[1024];                                       // v32[1024]
         strcpy( childPrefixBuf, layerPrefix );                    // 0x478b50
-        strcpy( modelLc, ValueForKey2( (int)(intptr_t)eDef, "model" ) );
+        strcpy( modelLc, ValueForKey2( eDef, "model" ) );
         _strlwr( modelLc );                                       // 0x478ba3
         strcat( childPrefixBuf, modelLc );                        // 0x478bd8
         strcat( childPrefixBuf, "/" );                            // 0x478c0a
@@ -7400,14 +7401,14 @@ void DrawBrush( selbrush_t *b, const orientation_t *orient, int viewType,
             // (the MaterialDef_15_Drawflag_Multiply skip bit), per 0x479785.
             if ( b->owner->prefab )
             {
-                extern char *ValueForKey2( int e, const char *key );          // entity.cpp 0x4825C0
+                extern char *ValueForKey2( const entity_s *e, const char *key );          // entity.cpp 0x4825C0
                 int contentFlags = drawFlags;
                 // -1 = no replay open: read the epair, as before.  Only SetKeyValue can change
                 // this answer, and SetKeyValue drops the recording (entity.cpp:212).
                 const int spawnBit = KiwiWalk_SpawnflagsBit( b );
                 const bool spawnSet = ( spawnBit >= 0 )
                                     ? ( spawnBit != 0 )
-                                    : ( atol( ValueForKey2( (int)(intptr_t)eDef, "spawnflags" ) ) != 0 );
+                                    : ( atol( ValueForKey2( eDef, "spawnflags" ) ) != 0 );
                 if ( spawnSet )
                     contentFlags |= 2;
                 // draw_meth1 role (0x47b11a): View→Entities-as-wireframe (show-state bit 0)
@@ -7463,7 +7464,7 @@ size_t Brush_MemorySize( brush_t *def )
 {
     // IDA 0x475cb4: v1 = (void*)a1[20] = *(esi+0x50) = def->patch (a1[20]=80=0x50, NOT
     // parent_layer_string@0x48 — disasm `mov eax,[esi+50h]`); base = 0x58 = 88 (= sizeof brush_t).
-    size_t total = 88;
+    size_t total = sizeof(brush_t);
     if ( def->patch )
         total += _msize( def->patch );
     if ( def->faceCount )
@@ -7473,11 +7474,11 @@ size_t Brush_MemorySize( brush_t *def )
             // IDA: *(DWORD*)(v3 + a1[17] + 224) = per-face winding or layer str
             face_t *f = &def->faces[i];
             // face_t stride = 232; material string is at face+224 (IDA: +224 offset)
-            void *faceStr = *(void **)((char *)f + 224);
+            void *faceStr = f->w;
             if ( faceStr )
-                total += _msize( faceStr ) + 232;
+                total += _msize( faceStr ) + sizeof(face_t);
             else
-                total += 232;
+                total += sizeof(face_t);
         }
     }
     return total;
@@ -7535,8 +7536,8 @@ brush_t_with_custom_def *Brush_FullClone_sub475E80( entity_brush_s *a1 )
     }
     else
     {
-        brush_t_with_custom_def *b = (brush_t_with_custom_def *)::operator new( 0x58u );
-        memset( b, 0, 0x58u );
+        brush_t_with_custom_def *b = (brush_t_with_custom_def *)::operator new( sizeof(brush_t_with_custom_def) );
+        memset( b, 0, sizeof(brush_t_with_custom_def) );
         iassert( b );
 
         // parent_layer_string: IDA v5[18] (offset 72 in new alloc = parent_layer_string)
@@ -7568,8 +7569,9 @@ brush_t_with_custom_def *Brush_FullClone_sub475E80( entity_brush_s *a1 )
         // Allocate + deep-clone faces
         b->faces = Face_Alloc_R( src->faceCount );
         for ( int i = 0; i < src->faceCount; ++i )
-            Face_FullClone( (int)((char *)src->faces + i * 232),
-                            (int)((char *)b->faces   + i * 232) );
+        {
+            Face_FullClone( &src->faces[i], &b->faces[i] );
+        }
 
         return b;
     }
@@ -7621,10 +7623,10 @@ static void Face_TexLock_Save( float *saveBuf, face_t *face )
                 // td points at the layer's rotate field, so td-0x10 is the texdef base.
                 texdef_sub_t *tds = (texdef_sub_t *)( td - 0x10 );
                 float texMat[8];
-                Face_MoveTexture( (int)(intptr_t)tds,                 // size[2]
+                Face_MoveTexture( (float *)tds,                 // size[2]
                                   &face->plane.normal[0],             // edi + 0xC0
-                                  (int)(intptr_t)texMat,              // out matrix (var_38..)
-                                  (int)(intptr_t)tds->shift,          // shift[2]
+                                  (float *)texMat,              // out matrix (var_38..)
+                                  (float *)tds->shift,          // shift[2]
                                   tds->rotate,
                                   tds->crossterm );
 
@@ -7711,14 +7713,14 @@ static void Face_TexLock_Reproject( face_t *face, const float *saveBuf,
                     // stores plane.dist as a float (see Face_MakePlane §11 note) —
                     // readers reconstitute (double); the float value is authoritative.
                     float planeDist = face->plane.dist;
-                    texturevecs_02( (int)(intptr_t)( td - 0x10 ),  // outSize (edi = eax-0x10)
-                                    (int)(intptr_t)texMat,         // texMat (esi = &var_44)
+                    texturevecs_02( (float *)( td - 0x10 ),  // outSize (edi = eax-0x10)
+                                    (float *)texMat,         // texMat (esi = &var_44)
                                     0.0f,                          // phantom (x87 artifact)
-                                    (int)(intptr_t)&face->plane.normal[0],  // normal (var_24)
+                                    (float *)&face->plane.normal[0],  // normal (var_24)
                                     planeDist,                     // plane dist
-                                    (int)(intptr_t)( td - 8 ),     // outShift (ecx = eax-8)
-                                    (int)(intptr_t)( td ),         // outRotate (eax)
-                                    (int)(intptr_t)( td + 4 ) );   // outCrossterm (edx = eax+4)
+                                    (float *)( td - 8 ),     // outShift (ecx = eax-8)
+                                    (float *)( td ),         // outRotate (eax)
+                                    (float *)( td + 4 ) );   // outCrossterm (edx = eax+4)
 
                     sv += 6;                               // var_C += 0x18
                     td += 0x1C;                            // var_8 += 0x1C
@@ -8003,7 +8005,7 @@ static char ExportTo3D_CreatePolyFacet( faceVis_s *face, face_t *def,
 
     // texdef + texture matrix (layer 0 — the export base layer; layerHandle=0 as in the binary).
     MaterialDef *mtldef = &def->mtldef[0];                     // [def+0x24]
-    int texdef = TexWnd_06_LayerCount( (int)mtldef, 0 );
+    texdef_sub_t *texdef = TexWnd_06_LayerCount( mtldef, 0 );
 
     // §11 (headless-vs-GUI material-realize invariant): the binary derefs `texdef`
     // UNCONDITIONALLY (Face_MoveTexture + the texCoord matrix), relying on the GUI's
@@ -8018,7 +8020,7 @@ static char ExportTo3D_CreatePolyFacet( faceVis_s *face, face_t *def,
     if ( haveTex )
     {
         texdef_sub_t *tdp = (texdef_sub_t *)(intptr_t)texdef;
-        Face_MoveTexture( texdef, def->plane.normal, (int)texMat, texdef + 8,
+        Face_MoveTexture( texdef->size, def->plane.normal, texMat, texdef->shift,
                           tdp->rotate, tdp->crossterm );
     }
     else
@@ -8037,7 +8039,7 @@ static char ExportTo3D_CreatePolyFacet( faceVis_s *face, face_t *def,
     if ( haveTex )                        // colour probe also needs a realized layer (MaterialDef_14)
     {
         unsigned int packedColor = 0;    // sub_46F6C0 result (unused by the -p emit, faithful)
-        sub_46F6C0( (int)mtldef, (int)def, 0, (int *)&packedColor );
+        sub_46F6C0( mtldef, def, 0, (int *)&packedColor );
     }
 
     // texcoords are buffered then emitted in the SAME reverse order as the -p list.
@@ -8079,11 +8081,9 @@ static char ExportTo3D_CreatePolyFacet( faceVis_s *face, face_t *def,
 // loop @+228 stride 232, version@0x4E 16-bit ++. 2167 converted (same-file after the move).
 unsigned int Entity_ColorSth( brush_t *b )
 {
-    int a1 = (int)(intptr_t)b;
-
     iassert( b );   // brush.cpp:2167
 
-    entity_s_def *entDef = *(entity_s_def **)((char *)b + 8); // b->owner
+    entity_s_def *entDef = (entity_s_def *)b->owner;
 
     // IDA passes &rgba[0] to Entity_GetVec3ForKey, which writes rgba[0..2].  ONE float[4],
     // never three loose locals: MSVC may reorder separate locals and the write runs off.
@@ -8112,13 +8112,10 @@ unsigned int Entity_ColorSth( brush_t *b )
     int faceCount = b->faceCount;
     if ( faceCount )
     {
-        int v6 = 0;
         do
         {
-            // face_t at b->faces[result]; GfxColor at face+228
-            *(GfxColor *)( (char *)b->faces + v6 + 228 ) = v11;
+            memcpy( &b->faces[result].packedColor, &v11, sizeof(GfxColor) );
             ++result;
-            v6 += 232;  // sizeof(face_t)
         }
         while ( result < (unsigned)faceCount );
     }
@@ -8146,7 +8143,7 @@ char ExportTo3D( selbrush_t *b, const orientation_t *orient, FILE *f,
     if ( b->faceCount != b->def->faceCount )
     {
         if ( b->faces )
-            Vis_Free( b->faceCount, b->faces, (int)(intptr_t)b );
+            Vis_Free( b->faceCount, b->faces, b );
         b->faceCount = b->def->faceCount;
         b->faces     = (faceVis_s *)PlanePts_Alloc( b->faceCount );
     }
@@ -8272,7 +8269,7 @@ void ScriptGroup_AssignNextNumber()
 
         if ( !HasKeyValuePair( def, groupKey ) )
             continue;
-        const char *group = ValueForKey2( (int)(intptr_t)def, groupKey );   // the binary's local
+        const char *group = ValueForKey2( def, groupKey );   // the binary's local
         iassert( group );   // brush.cpp:4298
         if ( group && *group )
         {

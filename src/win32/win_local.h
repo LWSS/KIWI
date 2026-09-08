@@ -68,10 +68,10 @@ static_assert(sizeof(netadr_t) == 20,            "radiant netadr_t must match wi
 static_assert(offsetof(netadr_t, ip)   == 4,     "netadr_t.ip offset");
 static_assert(offsetof(netadr_t, port) == 8,     "netadr_t.port offset");
 static_assert(offsetof(netadr_t, ipx)  == 10,    "netadr_t.ipx offset");
-static_assert(sizeof(msg_t) == 40,               "radiant msg_t must match qcommon/msg.h layout");
+static_assert(sizeof(msg_t) == (sizeof(void *) == 8 ? 48 : 40), "radiant msg_t must match qcommon/msg.h layout");
 static_assert(offsetof(msg_t, data)      == 8,   "msg_t.data offset");
-static_assert(offsetof(msg_t, maxsize)   == 16,  "msg_t.maxsize offset");
-static_assert(offsetof(msg_t, readcount) == 28,  "msg_t.readcount offset");
+static_assert(offsetof(msg_t, maxsize)   == (sizeof(void *) == 8 ? 24 : 16), "msg_t.maxsize offset");
+static_assert(offsetof(msg_t, readcount) == (sizeof(void *) == 8 ? 36 : 28), "msg_t.readcount offset");
 #endif
 
 void	IN_MouseEvent (int mstate);

@@ -49,7 +49,7 @@ extern void        DecRef( entity_s *e );                   // entity.cpp 0x483c
 extern entity_s   *Prefab_Init( prefab_s *instList, entity_s_def *def, selbrush_t *activeList );
 
 // Entity_Clone (sub_485090 @ 0x485090) -- allocs a new entity_s_def, copies epairs.
-extern entity_s   *Entity_Clone_sub485090( int srcPtr );
+extern entity_s   *Entity_Clone_sub485090( const entity_s *src );
 // Entity_MemorySize (sub_483DE0 @ 0x483de0) -- returns _msize(e) + sum of epair strings.
 extern size_t      Entity_MemorySize_sub483DE0( entity_s *e );
 
@@ -59,7 +59,7 @@ extern void        MarkMapModified();
 // Sys_PrintActiveBrushes (IDB 0x42c640) populates the brush/entity list diagnostics. Used by
 // Undo_GeneralStart's head and Undo_End's tail; both call MainFrm_BrushList/EntList here.
 extern void        Select_Deselect( int bSilent );
-extern void        MainFrm_BrushList( int label, selbrush_t *list );
+extern void        MainFrm_BrushList( const char *label, selbrush_t *list );
 extern void        MainFrm_EntList( entity_s *list, const char *label );
 // va is in q_shared.h (included via stdafx.h)
 // entity.cpp global -- screen-update guard
@@ -117,7 +117,7 @@ static inline brush_t *BrushDef_FullClone( selbrush_t *src )
 
 static inline entity_s *EntityDef_Clone( entity_s *src )
 {
-    return Entity_Clone_sub485090( (int)(intptr_t)src );
+    return Entity_Clone_sub485090( src );
 }
 
 static inline size_t EntityDef_MemorySize( entity_s *e )
@@ -253,7 +253,7 @@ void Undo_Clear()
             entity = eNext;
         }
 
-        g_undoMemorySize -= 256; // sizeof(undo_s)
+        g_undoMemorySize -= sizeof(undo_s);
         ::operator delete( undo );
         undo = nextundo;
     }
@@ -348,7 +348,7 @@ void Undo_FreeFirstUndo()
         entity = eNext;
     }
 
-    g_undoMemorySize -= 256; // sizeof(undo_s)
+    g_undoMemorySize -= sizeof(undo_s);
     ::operator delete( undo );
     --g_undoSize;
 
@@ -367,15 +367,15 @@ void Undo_FreeFirstUndo()
 void Undo_GeneralStart( const char *operation )
 {
     char *s1 = (char *)va( "%s - active_brushes", operation );
-    MainFrm_BrushList( (int)(intptr_t)s1, &active_brushes );
+    MainFrm_BrushList( s1, &active_brushes );
     char *s2 = (char *)va( "%s - active_brushes", operation );
-    MainFrm_BrushList( (int)(intptr_t)s2, &selected_brushes );
+    MainFrm_BrushList( s2, &selected_brushes );
     MainFrm_EntList( &entityInsts, operation );
 
     if ( g_lastundo && !g_lastundo->done )
         Sys_Printf( "Undo_Start: WARNING last undo not finished.\n" );
 
-    undo_s *_undo = (undo_s *)::operator new( 0x100u );
+    undo_s *_undo = (undo_s *)::operator new( sizeof(undo_s) );
     if ( !_undo )
         return;
 
@@ -439,7 +439,7 @@ void Undo_GeneralStart( const char *operation )
         pEntity = pEntity->next;
     }
 
-    g_undoMemorySize += 256; // sizeof(undo_s)
+    g_undoMemorySize += sizeof(undo_s);
     if ( ++g_undoSize > g_undoMaxSize )
         Undo_FreeFirstUndo();
 }
@@ -483,7 +483,7 @@ void Undo_Start( const char *operation )
 }
 
 // Forward declaration so Undo_AddBrushList can call Undo_AddEntity below.
-void Undo_AddEntity( int a1 );
+void Undo_AddEntity( entity_s *entity );
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 0x45e680  Undo_AddBrush  (236 bytes)
@@ -563,7 +563,7 @@ void Undo_AddBrushList( selbrush_t *sb )
     {
         entity_s_def *owner = (entity_s_def *)i->def->owner;
         if ( *(int *)&owner->eclass->fixedsize )
-            Undo_AddEntity( (int)(intptr_t)owner );
+            Undo_AddEntity( (entity_s *)owner );
         Undo_AddBrush( (entity_brush_s *)i->def );
     }
 }
@@ -598,13 +598,14 @@ void Undo_EndBrushList( selbrush_t *brushlist )
 // __usercall: a1@<eax> = entity_s* (as int for __usercall).
 // Called from select.cpp as Undo_AddEntity(int entPtr).
 // ─────────────────────────────────────────────────────────────────────────────
-void Undo_AddEntity( int a1 )
+void Undo_AddEntity( entity_s *entity )
 {
-    entity_s *entity = (entity_s *)(intptr_t)a1;
     iassert( entity );   // 500
 
     if ( Undo_EntityInUndo( (entity_s_def *)entity ) )
+    {
         return;
+    }
 
     entity_s *clone = EntityDef_Clone( entity );
     // KEEP_VERBOSE: binary passes level=1 (SANITY CHECK) here (push 1 @0x45e901); the
@@ -634,7 +635,7 @@ void Undo_AddEntity_W( entity_s *a1 )
 {
     if ( g_lastundo )
     {
-        Undo_AddEntity( (int)(intptr_t)a1 );
+        Undo_AddEntity( (entity_s *)a1 );
         if ( a1 != (entity_s *)world_entity->def )
         {
             // Walk the entity's brush DEF list and Undo_AddBrush each.  Disasm-verified
@@ -708,9 +709,9 @@ void Undo_End()
     // Refresh the brush/entity list diagnostics.
     {
         char *s1 = (char *)va( "%s - active_brushes", g_lastundo->operation );
-        MainFrm_BrushList( (int)(intptr_t)s1, &active_brushes );
+        MainFrm_BrushList( s1, &active_brushes );
         char *s2 = (char *)va( "%s - active_brushes", g_lastundo->operation );
-        MainFrm_BrushList( (int)(intptr_t)s2, &selected_brushes );
+        MainFrm_BrushList( s2, &selected_brushes );
         MainFrm_EntList( &entityInsts, g_lastundo->operation );
     }
 
@@ -746,9 +747,9 @@ void Undo_Undo()
     // Refresh the brush/entity list diagnostics.
     {
         char *s1 = (char *)va( "%s - active_brushes", g_lastundo->operation );
-        MainFrm_BrushList( (int)(intptr_t)s1, &active_brushes );
+        MainFrm_BrushList( s1, &active_brushes );
         char *s2 = (char *)va( "%s - active_brushes", g_lastundo->operation );
-        MainFrm_BrushList( (int)(intptr_t)s2, &selected_brushes );
+        MainFrm_BrushList( s2, &selected_brushes );
         MainFrm_EntList( &entityInsts, g_lastundo->operation );
     }
 
@@ -762,7 +763,7 @@ void Undo_Undo()
     g_lastundo = undo->prev;
 
     // Allocate a new redo record
-    undo_s *redo = (undo_s *)::operator new( 0x100u );
+    undo_s *redo = (undo_s *)::operator new( sizeof(undo_s) );
     if ( !redo )
         return;
     memset( redo, 0, sizeof(undo_s) );
@@ -983,7 +984,7 @@ void Undo_Undo()
 
     Sys_Printf( "%s undone.\n", v35->operation );
 
-    g_undoMemorySize -= 256; // sizeof(undo_s)
+    g_undoMemorySize -= sizeof(undo_s);
     ::operator delete( v35 );
     --g_undoSize;
 
@@ -998,9 +999,9 @@ void Undo_Undo()
         sub_47B940( m->def );
 
     char *v46 = (char *)va( "%s - active_brushes", "after undo" );
-    MainFrm_BrushList( (int)(intptr_t)v46, &active_brushes );
+    MainFrm_BrushList( v46, &active_brushes );
     char *v47 = (char *)va( "%s - active_brushes", "after undo" );
-    MainFrm_BrushList( (int)(intptr_t)v47, &selected_brushes );
+    MainFrm_BrushList( v47, &selected_brushes );
     MainFrm_EntList( &entityInsts, "after undo" );
 
     // KIWI: undo after saving changes the document and must restore the save prompt.
@@ -1033,9 +1034,9 @@ void Undo_Redo()
     // Refresh the brush/entity list diagnostics.
     {
         char *s1 = (char *)va( "%s - active_brushes", g_lastredo->operation );
-        MainFrm_BrushList( (int)(intptr_t)s1, &active_brushes );
+        MainFrm_BrushList( s1, &active_brushes );
         char *s2 = (char *)va( "%s - active_brushes", g_lastredo->operation );
-        MainFrm_BrushList( (int)(intptr_t)s2, &selected_brushes );
+        MainFrm_BrushList( s2, &selected_brushes );
         MainFrm_EntList( &entityInsts, g_lastredo->operation );
     }
 
@@ -1221,9 +1222,9 @@ void Undo_Redo()
 
     g_bScreenUpdates = 1;
     char *v24 = (char *)va( "%s - active_brushes", "after redo" );
-    MainFrm_BrushList( (int)(intptr_t)v24, &active_brushes );
+    MainFrm_BrushList( v24, &active_brushes );
     char *v25 = (char *)va( "%s - active_brushes", "after redo" );
-    MainFrm_BrushList( (int)(intptr_t)v25, &selected_brushes );
+    MainFrm_BrushList( v25, &selected_brushes );
     MainFrm_EntList( &entityInsts, "after redo" );
     g_nUpdateBits = -1;
 

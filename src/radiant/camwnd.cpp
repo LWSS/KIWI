@@ -112,11 +112,11 @@ extern void __cdecl R_InterpretSunLightParseParamsIntoLights( SunLightParseParam
 // with the command sweep that drops the dead menu entry, not to a gate invented in here.
 struct camLightPreviewRec_t   // == CCamWnd::LightPreviewRec, 56 B (IDB stride 14 dwords)
 {
-    int           inst;
-    int           arg2;
+    selbrush_t   *inst;
+    selbrush_t   *arg2;
     orientation_t orient;
 };
-static_assert( sizeof(camLightPreviewRec_t) == 56, "camLightPreviewRec_t" );
+static_assert( sizeof(camLightPreviewRec_t) == (sizeof(void *) == 8 ? 64 : 56), "camLightPreviewRec_t" );
 
 struct camwndState_t
 {
@@ -1790,7 +1790,7 @@ static void Cam_DrawSelectedFaceFill()
 // Cam_Draw reaches misc_model meshes through DrawBrush -> DrawModels -> SetupModelInst
 // (Entity_UpdateModelInst registers the xmodel in the editor model-inst buffer) + SkinModelInst
 // (builds GfxModelSkinnedSurfaces, queued as ED_SURF_MODEL surfs); R_AddEditorSurfsCmd flushes.
-extern bool  Model_SetModel( entity_brush_s *b, int orientMatrix );        // brush.cpp 0x478780
+extern bool  Model_SetModel( entity_brush_s *b, const float *orientMatrix );        // brush.cpp 0x478780
 extern void  SkinModelInst( int instanceHandle, Material *checkhandle, int techType,
                             const int *colorPtr, int drawFlags );          // r_ed_scene.cpp 0x4FE2E0
 extern void Radiant_FL_Log( const char *fmt, ... );                       // mainfrm.cpp
@@ -1816,7 +1816,7 @@ bool Editor_ModelsEnabled()
 // returns 1 with no modelInst and the caller draws the prefab CONTENTS).
 // Its own function because MSVC forbids setjmp and __try in one function (C2713).
 extern float world_orient_matrix[4][3];                                   // entity.cpp
-extern char  Entity_HasRenderableModel( brush_t_with_custom_def *b, int orient );  // brush.cpp 0x479610
+extern char  Entity_HasRenderableModel( brush_t_with_custom_def *b, const float *orient );  // brush.cpp 0x479610
 // Non-zero only across the 2D view's UNSELECTED brush loop (XY_DrawBrushes, xywnd.cpp): the
 // per-entity tint travels as a flat MATERIAL_COLOR instead of a per-vertex stamp, because
 // the stamp forces a writable tempSkinBuf copy and that disqualifies the surface from the
@@ -1830,7 +1830,7 @@ static int Cam_SkinModelSEH( selbrush_t *b, const orientation_t *orient, int mes
     int renderable = 0;
     __try
     {
-        if ( Entity_HasRenderableModel( (brush_t_with_custom_def *)b, (int)(intptr_t)orient ) )
+        if ( Entity_HasRenderableModel( (brush_t_with_custom_def *)b, (const float *)orient ) )
         {
             renderable = 1;
             if ( b->owner->modelInst )
@@ -1933,17 +1933,17 @@ int Editor_ModelShadowGuarded( selbrush_t *b, orientation_t *orient, const float
 extern selbrush_t selected_brushes;                                // map.cpp (0x23F1864)
 extern void  OrientationPosToWorldPos( float *out, const float *localPos,
                                        const orientation_t *orient );   // brush.cpp (0x4BA430)
-extern float Entity_GetFloatValueForKey( int e, const char *key );      // entity.cpp (0x4837C0)
-extern int   Entity_GetIntValueForKey( int e, const char *key );        // entity.cpp (0x483820)
+extern float Entity_GetFloatValueForKey( const entity_s *e, const char *key );      // entity.cpp (0x4837C0)
+extern int   Entity_GetIntValueForKey( const entity_s *e, const char *key );        // entity.cpp (0x483820)
 extern int   Entity_GetVec3ForKey( entity_s_def *e, float *out,
                                    const char *key );                    // entity.cpp (0x483860)
-extern char *ValueForKey2( int e, const char *key );                    // entity.cpp (0x4825C0)
+extern char *ValueForKey2( const entity_s *e, const char *key );                    // entity.cpp (0x4825C0)
 extern void __cdecl R_SetLightShaderConstants( const float *origin, float radius,
                                                const float *color, const char *defName,
                                                const float *dir, float cosHalfFovInner,
                                                float cosHalfFovOuter, int exponent );
 
-static int Entity_Light( const float *worldPos, int defPtr, selbrush_t *scope,
+static int Entity_Light( const float *worldPos, const entity_s *defPtr, selbrush_t *scope,
                          const orientation_t *orient,
                          float *outDir, float *outCosInner, float *outCosOuter,
                          float *outCosHalfFov );
@@ -2065,12 +2065,12 @@ static int Cam_LightPreview_SetLightTechnique( const float *origin, float radius
 {
     float dir[3] = { 0.0f, 0.0f, 0.0f };
     float cosInner = 0.0f, cosOuter = 0.0f, cosHalfFov = 0.0f;
-    int cls = Entity_Light( origin, (int)(intptr_t)ent, scope, orient, dir,
+    int cls = Entity_Light( origin, ent, scope, orient, dir,
                             &cosInner, &cosOuter, &cosHalfFov );
     // KIWI-UX: faithful Entity_Light (IDB 0x4063A0) gives bit 1 immediate omni
     // precedence.  cod4map tests primary bit 2 first, so a valid dual-bit authored
     // primary previews as the compiler's spot without changing the faithful function.
-    const int spawnflags = Entity_GetIntValueForKey( (int)(intptr_t)ent, "spawnflags" );
+    const int spawnflags = Entity_GetIntValueForKey( ent, "spawnflags" );
     if ( ( spawnflags & 3 ) == 3
       && Cam_LightPreview_CompilerSpotForDualBits(
              origin, ent, scope, orient, dir, &cosInner, &cosOuter, &cosHalfFov ) )
@@ -2078,10 +2078,10 @@ static int Cam_LightPreview_SetLightTechnique( const float *origin, float radius
     (void)cosHalfFov;
 
     R_AddCmdProjectionSet2D();
-    const char *defName = ValueForKey2( (int)(intptr_t)ent, "def" );
+    const char *defName = ValueForKey2( ent, "def" );
     if ( cls == 2 )
     {
-        const int exponent = Entity_GetIntValueForKey( (int)(intptr_t)ent, "exponent" );
+        const int exponent = Entity_GetIntValueForKey( ent, "exponent" );
         R_SetLightShaderConstants( origin, radius, color, defName, dir,
                                    cosInner, cosOuter, exponent );
         return TECHNIQUE_LIGHT_SPOT;
@@ -2144,7 +2144,7 @@ static bool Cam_LightPreview_DrawLight( const float origin[4], float radius,
             if ( maxComp != 0.0f )
             {
                 const float ambient = Entity_GetFloatValueForKey(
-                    (int)(intptr_t)worldDef, "ambient" );
+                    worldDef, "ambient" );
                 ambientColor[0] *= ambient;
                 ambientColor[1] *= ambient;
                 ambientColor[2] *= ambient;
@@ -2200,7 +2200,7 @@ static bool Cam_DrawLightsMain( selbrush_t *brush, selbrush_t *scope,
     extern char FilterBrush( selbrush_t *b, int updateFilters );
     if ( FilterBrush( brush, 0 ) )
         return false;
-    const float radius = Entity_GetFloatValueForKey( (int)(intptr_t)ent, "radius" );
+    const float radius = Entity_GetFloatValueForKey( ent, "radius" );
     if ( radius <= 0.0f )
         return false;
 
@@ -2214,13 +2214,13 @@ static bool Cam_DrawLightsMain( selbrush_t *brush, selbrush_t *scope,
     worldCenter[3] = 1.0f;
 
     float color[3] = { 1.0f, 1.0f, 1.0f };
-    const char *colorText = ValueForKey2( (int)(intptr_t)ent, "_color" );
+    const char *colorText = ValueForKey2( ent, "_color" );
     float parsed[3];
     if ( colorText
       && sscanf( colorText, "%f %f %f", &parsed[0], &parsed[1], &parsed[2] ) == 3 )
         memcpy( color, parsed, sizeof(color) );
 
-    float intensity = Entity_GetFloatValueForKey( (int)(intptr_t)ent, "intensity" );
+    float intensity = Entity_GetFloatValueForKey( ent, "intensity" );
     if ( !g_qeglobals.preview_at_max_intensity )
         intensity = 10000000.0f;
     else if ( intensity <= 0.0f )
@@ -2257,8 +2257,10 @@ static void Cam_DrawLightPreviews( bool ambientBaseDone, Material *multiplyMater
             camLightPreviewRec_t *rec = &cam->light_preview_arr[i];
             selbrush_t *brush = (selbrush_t *)(intptr_t)rec->inst;
             // 0x406727: the signed-byte gate is brush+52, not preview-record+52.
-            if ( *( (char *)brush + 52 ) < 0 )
+            if ( brush->brushFlags & 0x80 )
+            {
                 continue;
+            }
             // KIWI-UX: use the same cod4map acceptance gates as the Light status panel.
             if ( KiwiLight_PreviewPrimaryOnly() && !KiwiLight_GameWillRender( brush ) )
                 continue;
@@ -2287,10 +2289,10 @@ static void Cam_DrawLightPreviews( bool ambientBaseDone, Material *multiplyMater
 // Camera decorations drawn after the world pass: DrawTriggerRadius (0x407410) and
 // CamWnd_Tokens (0x4076C0), both on the immediate RC_DRAW_TRIANGLES (d_white, UNLIT) path.
 extern bool  HasKeyValuePair( entity_s_def *e, const char *key );                    // entity.cpp 0x4838B0
-extern char *ValueForKey2( int e, const char *key );                                 // entity.cpp 0x4825C0
+extern char *ValueForKey2( const entity_s *e, const char *key );                                 // entity.cpp 0x4825C0
 extern int   ScriptGroup_Unreachable( const char *a1 );                              // scriptgroup.cpp 0x451170
 extern char  FilterBrush( selbrush_t *b, int updateFilters );                        // filters.cpp 0x46A1F0
-extern void  Ed_DrawScriptColorQuad( int entDef, const float *color );               // brush.cpp 0x46AE10
+extern void  Ed_DrawScriptColorQuad( const entity_s *entDef, const float *color );               // brush.cpp 0x46AE10
 
 // flt_73B098 — the 7 token colours (r/b/y/c/g/p/o), shared with brush.cpp.
 static const float kCamTokenColors[7][4] = {
@@ -2390,8 +2392,8 @@ static void Cam_DrawTriggerRadius( selbrush_t *b )
 {
     iassert( b->owner->def == b->def->owner );
     entity_s_def *eDef = (entity_s_def *)b->owner->def;
-    const float radius   = Entity_GetFloatValueForKey( (int)(intptr_t)eDef, "radius" );
-    const float safeRad  = Entity_GetFloatValueForKey( (int)(intptr_t)eDef, "fixedNodeSafeRadius" );
+    const float radius   = Entity_GetFloatValueForKey( eDef, "radius" );
+    const float safeRad  = Entity_GetFloatValueForKey( eDef, "fixedNodeSafeRadius" );
     if ( !( radius > 0.0f || safeRad > 0.0f ) )
         return;
     if ( ( b->brushFlags & 2 ) != 0 )            // hidden (brushFlags bit 1)
@@ -2404,7 +2406,7 @@ static void Cam_DrawTriggerRadius( selbrush_t *b )
         height = 32.0f;
     else
     {
-        height = Entity_GetFloatValueForKey( (int)(intptr_t)eDef, "height" );
+        height = Entity_GetFloatValueForKey( eDef, "height" );
         if ( !( height > 0.0f ) )
             height = 80.0f;
     }
@@ -2453,7 +2455,7 @@ static bool Cam_Token_EntityGate( selbrush_t *b )
 static bool Cam_Token_Match( selbrush_t *b, const char *token )
 {
     entity_s_def *e = (entity_s_def *)b->owner->def;
-    const char *teamVal = ValueForKey2( (int)(intptr_t)e, g_PrefsDlg->ScriptColorTeamKey.c_str() );
+    const char *teamVal = ValueForKey2( e, g_PrefsDlg->ScriptColorTeamKey.c_str() );
     return strstr( teamVal, token ) != nullptr;
 }
 
@@ -2534,7 +2536,7 @@ static void Cam_DrawTokens( const char *teamKeyValue )
             for ( int ti = 0; ti < tokens; ++ti )
                 if ( Cam_Token_Match( b, tokenStr[ti] ) )
                 {
-                    Ed_DrawScriptColorQuad( (int)(intptr_t)b->owner->def, tokenCol[ti] );
+                    Ed_DrawScriptColorQuad( b->owner->def, tokenCol[ti] );
                 }
         }
     }
@@ -3016,11 +3018,11 @@ void CamWnd_Draw( HWND hwnd )
         if ( bake != s_prevBake )
         {
             s_prevBake = bake;
-            extern void sub_47D060( int listHead );        // brush.cpp (0x47D060)
+            extern void sub_47D060( selbrush_t *listHead );        // brush.cpp (0x47D060)
             extern selbrush_t filtered_brushes;            // map.cpp display lists
-            sub_47D060( (int)(intptr_t)&active_brushes );
-            sub_47D060( (int)(intptr_t)&selected_brushes );
-            sub_47D060( (int)(intptr_t)&filtered_brushes );
+            sub_47D060( &active_brushes );
+            sub_47D060( &selected_brushes );
+            sub_47D060( &filtered_brushes );
         }
         g_edSunBakeVertColor = bake;
     }
@@ -4034,7 +4036,7 @@ void CamWnd_Draw( HWND hwnd )
             const char *teamVal = nullptr;
             for ( selbrush_t *b = selected_brushes.next; b && b != &selected_brushes; b = b->next )
                 if ( ScriptGroup_BrushIsTrigger( b ) )
-                    teamVal = ValueForKey2( (int)(intptr_t)b->owner->def, g_PrefsDlg->ScriptColorTeamKey.c_str() );
+                    teamVal = ValueForKey2( b->owner->def, g_PrefsDlg->ScriptColorTeamKey.c_str() );
             if ( teamVal && teamVal[0] )
                 Cam_DrawTokens( teamVal );
         }
@@ -5295,8 +5297,8 @@ void CamWnd_ChangeFloor( int a2 )
 // (lightDesc_t {int cls; float p[8]}): a3[1..3] = cone centre, a3[7] = radius, a3[8] =
 // cosHalfFov - i.e. a3 == (float*)&desc with cls reinterpreted at a3[0].
 #include "primarylights_region.h"
-extern char  *ValueForKey2( int e, const char *key );                      // entity.cpp 0x4825C0
-extern int    Entity_GetIntValueForKey( int e, const char *key );          // entity.cpp 0x483820
+extern char  *ValueForKey2( const entity_s *e, const char *key );                      // entity.cpp 0x4825C0
+extern int    Entity_GetIntValueForKey( const entity_s *e, const char *key );          // entity.cpp 0x483820
 extern bool   Entity_HasEpairMatch( entity_s *e, const char *key, const char *val ); // entity.cpp
 extern void   Entity_GetOrientation( entity_s_def *ent, orientation_t *orParent, orientation_t *orOut ); // entity.cpp
 extern char   FilterBrush( selbrush_t *b, int a2 );                        // filters.cpp 0x46A1F0
@@ -5427,7 +5429,7 @@ static entity_s_def *Region_FindTargetEntity( selbrush_t *scope, const char *nam
 {
     entity_s *head = &entities;
     if ( scope )
-        head = (entity_s *)( (char *)scope->owner->modelClass->model + 8 );
+        head = &scope->owner->modelClass->model->entities;
     entity_s *cur = head->next;
     while ( cur != head )
     {
@@ -5445,28 +5447,28 @@ static float Region_CosSum( float a1, float a2 )
 }
 
 // 0x4063A0  Entity_Light — classify a light + derive its cone.  Returns 2 (cone) / 3.
-static int Entity_Light( const float *worldPos, int defPtr, selbrush_t *scope,
+static int Entity_Light( const float *worldPos, const entity_s *defPtr, selbrush_t *scope,
                          const orientation_t *orient,
                          float *outDir, float *outCosInner, float *outCosOuter, float *outCosHalfFov )
 {
     if ( ( Entity_GetIntValueForKey( defPtr, "spawnflags" ) & 1 ) != 0 )
         return 3;
 
-    char *ep = *(char **)( defPtr + 116 );        // entity_s.epairs @0x74
+    epair_t *ep = defPtr->epairs;
     const char *targetName = "";
     bool found = false;
     while ( ep )
     {
-        const char *key = *(const char **)( (char *)ep + 4 );
+        const char *key = ep->key;
         if ( !_stricmp( key, "target" ) )
         {
-            targetName = *(const char **)( (char *)ep + 8 );
+            targetName = ep->value;
             if ( !targetName )
                 return 3;
             found = true;
             break;
         }
-        ep = *(char **)ep;
+        ep = ep->next;
     }
     (void)found;
 
@@ -5514,7 +5516,7 @@ static bool Cam_LightPreview_CompilerSpotForDualBits(
     const orientation_t *orient, float *outDir, float *outCosInner,
     float *outCosOuter, float *outCosHalfFov )
 {
-    const int defPtr = (int)(intptr_t)ent;
+    const entity_s *defPtr = ent;
     const char *targetName = ValueForKey2( defPtr, "target" );
     if ( !targetName || !*targetName )
         return false;
@@ -5665,7 +5667,7 @@ static void Region_BuildForLight( int cls, const float *coneCenter, const float 
 static void Region_ForOneLight( selbrush_t *inst, selbrush_t *scope,
                                 const orientation_t *orient )
 {
-    int defPtr = (int)(intptr_t)inst->owner->def;
+    const entity_s *defPtr = inst->owner->def;
     float radius = Entity_GetFloatValueForKey( defPtr, "radius" );
     if ( radius <= 0.0f )
         return;
@@ -5699,7 +5701,7 @@ static void Region_ForOneLight( selbrush_t *inst, selbrush_t *scope,
 // U-VP-CAM: the binary's return value is the __userpurge `result` register, i.e. the cam pointer
 // itself — no caller reads it, so the free fn returns void and the MFC forwarder at the bottom
 // reproduces the old `(int)cam` return for mainfrm.cpp/brush.cpp's declared signature.
-void CamWnd_AddLightPreview( selbrush_t *inst, int arg2, const orientation_t *orient )
+void CamWnd_AddLightPreview( selbrush_t *inst, selbrush_t *arg2, const orientation_t *orient )
 {
     camwndState_t *cam = &g_camwndState;
 
@@ -5719,7 +5721,7 @@ void CamWnd_AddLightPreview( selbrush_t *inst, int arg2, const orientation_t *or
             cam->light_preview_arr[i] = cam->light_preview_arr[i + 1];
     }
     int slot = cam->light_preview_count;
-    cam->light_preview_arr[slot].inst  = (int)(intptr_t)inst;
+    cam->light_preview_arr[slot].inst  = inst;
     cam->light_preview_arr[slot].arg2  = arg2;
     memcpy( &cam->light_preview_arr[slot].orient, orient, 0x30u );
     ++cam->light_preview_count;

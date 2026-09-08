@@ -43,7 +43,7 @@ extern selbrush_t   active_brushes;
 extern void         Select_Deselect( int deselectFaces );
 extern patchMesh_t *MakeNewPatch();                                            // pmesh.cpp 0x438210
 extern void         SetMaterial( const char *name, patchMesh_material *out );  // materialdef.cpp:101
-extern curvePatchDef_t *Patch_GenericMesh2( patchMesh_t *p, int layer, int colMapArg, int rowMapArg ); // pmesh.cpp:721
+extern curvePatchDef_t *Patch_GenericMesh2( patchMesh_t *p, int layer, int *colMapArg, int *rowMapArg ); // pmesh.cpp:721
 extern brush_t     *AddBrushForPatch( patchMesh_t *p, entity_s *world_ent );   // pmesh.cpp:841
 extern selbrush_t  *Brush_AddToList( brush_t *def, entity_s *owner );          // brush.cpp:670
 extern void         Brush_AddToList2( selbrush_t *b );                         // brush.cpp:928

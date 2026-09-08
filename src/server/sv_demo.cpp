@@ -1566,7 +1566,7 @@ int __cdecl SV_LoadHistoryForMark(const char *name)
     FileMarkSkip *MarkSkip; // r11
     server_demo_history_t *v5; // r11
 
-    v2 = (char)g_history;
+    v2 = g_history != NULL;
     if (g_history)
         v2 = g_history->manual && I_stricmp(g_history->name, name) == 0;
     if (!v2)

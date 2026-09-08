@@ -54,12 +54,8 @@ extern "C" void free( void * );
 //  parentheses.  The evaluator is FilterCondition_Eval (sub_412170) below; the case
 //  numbers here are EXACTLY the surfaceFlags values it switches on.
 //
-// Each filter_info_s node is allocated as 16 bytes (operator new(0x10)).
-//  even though the named-fields struct is 12 — the 4th DWORD at +12 is the AND/OR
-//  "next sibling" link, read by FilterCondition_Eval as `info[1].surfaceFlags` (byte
-//  +12) and chased by Filters_FreeCondTree as `info[3]`.  We allocate 16 and write
-//  +12 by hand (same pattern as Layers_BuildFilter).  Leaf contents nodes are 8 bytes
-//  ({bits/name@0, flags@4}) except KeyValue which is 12 ({key,value,flags}).
+// Nodes carry an explicit native sibling link. Payloads keep string pointers
+// separate from scalar flag values; the original x86 sizes are not allocation sizes.
 //
 //  PARSE IDIOM: the binary inlined Com_Parse/Com_ParseOnLine, so the IDA shows the
 //  ungetToken-restore prologue + Com_ParseExt(.,1)/(.,0) open-coded.  Per the
@@ -84,15 +80,17 @@ enum {
 // _GetToken (0x4B83E0) — read the next ON-LINE token (== Com_ParseOnLine; see idiom).
 static inline parseInfo_t *Filter_GetToken( const char **text ) { return Com_ParseOnLine( text ); }
 
-// Allocate a 16-byte filter_info_s (12 named bytes + the +12 sibling link), set type
-// + negate, zero contents + sibling.  The contents node is allocated by the caller.
+struct FilterNameCondition { char *name; int flags; };
+struct FilterBitsCondition { int bits; int flags; };
+
+// Allocate the complete condition node, including its native sibling link.
 static filter_info_s *Filter_NewInfo( int type )
 {
-    filter_info_s *n = (filter_info_s *)operator new( 0x10u );
+    filter_info_s *n = (filter_info_s *)operator new( sizeof(filter_info_s) );
     n->surfaceFlags    = type;        // [n]      condition type
     n->z_pad_0x0004[0] = 0;           // [n+4]    negate flag (set by caller)
     n->contents_ptr    = nullptr;     // [n+8]    contents/children
-    *((void **)n + 3)  = nullptr;     // [n+0xC]  next-sibling link (leaf → 0)
+    n->next           = nullptr;     // [n+0xC]  next-sibling link (leaf → 0)
     return n;
 }
 
@@ -102,13 +100,21 @@ static filter_info_s *Filter_NewInfo( int type )
 static filter_info_s *Filter_ParseTexture( const char **text )
 {
     filter_info_s *n = Filter_NewInfo( FILT_TEXTURE );
-    int *c = (int *)operator new( 8u );
+    FilterNameCondition *c = (FilterNameCondition *)operator new( sizeof(FilterNameCondition) );
     n->contents_ptr = (filter_contents_s *)c;
-    c[0] = 0; c[1] = 0;
+    c->name = 0; c->flags = 0;
     parseInfo_t *t = Filter_GetToken( text );
-    if ( !_stricmp( t->token, "all" ) ) { c[1] |= 2; t = Filter_GetToken( text ); }
-    if ( t->token[0] == '*' )           { c[1] |= 1; t = Filter_GetToken( text ); }
-    c[0] = (int)AllocMaterialString( t->token );
+    if ( !_stricmp( t->token, "all" ) )
+    {
+        c->flags |= 2;
+        t = Filter_GetToken( text );
+    }
+    if ( t->token[0] == '*' )
+    {
+        c->flags |= 1;
+        t = Filter_GetToken( text );
+    }
+    c->name = AllocMaterialString( t->token );
     return n;
 }
 
@@ -158,14 +164,18 @@ static int Filter_LookupBits( const FilterFlagName *tbl, int n, const char *name
 static filter_info_s *Filter_ParseContents( const char **text )
 {
     filter_info_s *n = Filter_NewInfo( FILT_CONTENTS );
-    int *c = (int *)operator new( 8u );
+    FilterBitsCondition *c = (FilterBitsCondition *)operator new( sizeof(FilterBitsCondition) );
     n->contents_ptr = (filter_contents_s *)c;
-    c[0] = 0; c[1] = 0;
+    c->bits = 0; c->flags = 0;
     parseInfo_t *t = Filter_GetToken( text );
-    if ( !_stricmp( t->token, "all" ) ) { c[1] |= 2; t = Filter_GetToken( text ); }
+    if ( !_stricmp( t->token, "all" ) )
+    {
+        c->flags |= 2;
+        t = Filter_GetToken( text );
+    }
     char *nm = (char *)AllocMaterialString( t->token );
     _strlwr( nm );
-    c[0] = Filter_LookupBits( s_contentsTbl, 34, nm );
+    c->bits = Filter_LookupBits( s_contentsTbl, 34, nm );
     free( nm );
     return n;
 }
@@ -175,13 +185,13 @@ static filter_info_s *Filter_ParseContents( const char **text )
 static filter_info_s *Filter_ParseEClassFlag( const char **text )
 {
     filter_info_s *n = Filter_NewInfo( FILT_ECLASS );
-    int *c = (int *)operator new( 8u );
+    FilterBitsCondition *c = (FilterBitsCondition *)operator new( sizeof(FilterBitsCondition) );
     n->contents_ptr = (filter_contents_s *)c;
-    c[0] = 0; c[1] = 0;
+    c->bits = 0; c->flags = 0;
     parseInfo_t *t = Filter_GetToken( text );
     char *nm = (char *)AllocMaterialString( t->token );
     _strlwr( nm );
-    c[0] = Filter_LookupBits( s_eclassTbl, 9, nm );
+    c->bits = Filter_LookupBits( s_eclassTbl, 9, nm );
     free( nm );
     return n;
 }
@@ -191,14 +201,18 @@ static filter_info_s *Filter_ParseEClassFlag( const char **text )
 static filter_info_s *Filter_ParseSurface( const char **text )
 {
     filter_info_s *n = Filter_NewInfo( FILT_SURFACE );
-    int *c = (int *)operator new( 8u );
+    FilterBitsCondition *c = (FilterBitsCondition *)operator new( sizeof(FilterBitsCondition) );
     n->contents_ptr = (filter_contents_s *)c;
-    c[0] = 0; c[1] = 0;
+    c->bits = 0; c->flags = 0;
     parseInfo_t *t = Filter_GetToken( text );
-    if ( !_stricmp( t->token, "all" ) ) { c[1] |= 2; t = Filter_GetToken( text ); }
+    if ( !_stricmp( t->token, "all" ) )
+    {
+        c->flags |= 2;
+        t = Filter_GetToken( text );
+    }
     char *nm = (char *)AllocMaterialString( t->token );
     _strlwr( nm );
-    c[0] = Filter_LookupBits( s_surfaceTbl, 17, nm );
+    c->bits = Filter_LookupBits( s_surfaceTbl, 17, nm );
     free( nm );
     return n;
 }
@@ -210,17 +224,21 @@ static filter_info_s *Filter_ParseSurface( const char **text )
 static filter_info_s *Filter_ParseKeyValue( const char **text )
 {
     filter_info_s *n = Filter_NewInfo( FILT_KEYVALUE );
-    int *c = (int *)operator new( 0xCu );
+    filter_contents_s *c = (filter_contents_s *)operator new( sizeof(filter_contents_s) );
     n->contents_ptr = (filter_contents_s *)c;
-    c[2] = 0;
+    c->flags = 0;
     parseInfo_t *t = Filter_GetToken( text );
-    c[0] = (int)AllocMaterialString( t->token );
+    c->key = AllocMaterialString( t->token );
     t = Filter_GetToken( text );
-    c[1] = (int)AllocMaterialString( t->token );
+    c->value = AllocMaterialString( t->token );
     if ( Filter_GetToken( text )->token[0] == '*' )
-        c[2] |= 1;
+    {
+        c->flags |= 1;
+    }
     else
-        Com_UngetToken();                         // value had no trailing `*`
+    {
+        Com_UngetToken();
+    }                         // value had no trailing `*`
     return n;
 }
 
@@ -229,13 +247,17 @@ static filter_info_s *Filter_ParseKeyValue( const char **text )
 static filter_info_s *Filter_ParseMisc( const char **text )
 {
     filter_info_s *n = Filter_NewInfo( FILT_MISC );
-    int *c = (int *)operator new( 8u );
+    FilterNameCondition *c = (FilterNameCondition *)operator new( sizeof(FilterNameCondition) );
     n->contents_ptr = (filter_contents_s *)c;
-    c[1] = 0;
+    c->flags = 0;
     parseInfo_t *t = Filter_GetToken( text );
-    if ( !_stricmp( t->token, "all" ) ) { c[1] |= 2; t = Filter_GetToken( text ); }
-    c[0] = (int)AllocMaterialString( t->token );
-    _strlwr( (char *)c[0] );
+    if ( !_stricmp( t->token, "all" ) )
+    {
+        c->flags |= 2;
+        t = Filter_GetToken( text );
+    }
+    c->name = AllocMaterialString( t->token );
+    _strlwr( (char *)c->name );
     return n;
 }
 
@@ -258,7 +280,7 @@ filter_info_s *DynamicFilter_ParseCondition( const char **text )
         {
             filter_info_s *child = DynamicFilter_ParseCondition( text );
             // Prepend the child to list->contents_ptr; the sibling link is child[+12].
-            *((void **)child + 3) = list->contents_ptr;
+            child->next = (filter_info_s *)list->contents_ptr;
             list->contents_ptr    = (filter_contents_s *)child;
             t = Com_Parse( text );
             if ( !strcmp( t->token, "&&" ) ) { list->surfaceFlags = FILT_AND; continue; }
@@ -296,7 +318,7 @@ FaceTexNode *qe3_cpp_01( const char **text )
         return nullptr;
     while ( true )
     {
-        FaceTexNode *node = (FaceTexNode *)operator new( 8u );
+        FaceTexNode *node = (FaceTexNode *)operator new( sizeof(FaceTexNode) );
         node->name = AllocMaterialString( t->token );
         node->next = head;
         head = node;
@@ -334,7 +356,7 @@ static bool FilterCondition_Eval(brush_t *a1, filter_info_s *a2)
         do {
             if ( !FilterCondition_Eval(a1, (filter_info_s *)child) )
                 return (bool)a2->z_pad_0x0004[0];
-            child = (filter_contents_s *)((filter_info_s *)child)[1].surfaceFlags;
+            child = (filter_contents_s *)((filter_info_s *)child)->next;
         } while ( child );
         return a2->z_pad_0x0004[0] == 0;
     }
@@ -346,7 +368,7 @@ static bool FilterCondition_Eval(brush_t *a1, filter_info_s *a2)
         do {
             if ( FilterCondition_Eval(a1, (filter_info_s *)child) )
                 return a2->z_pad_0x0004[0] == 0;
-            child = (filter_contents_s *)((filter_info_s *)child)[1].surfaceFlags;
+            child = (filter_contents_s *)((filter_info_s *)child)->next;
         } while ( child );
         return (bool)a2->z_pad_0x0004[0];
     }
@@ -379,8 +401,8 @@ static bool FilterCondition_Eval(brush_t *a1, filter_info_s *a2)
 // Match → !negate; no match → negate (faithful to *(a2+4)==0 / *(a2+4)).
 static bool FilterCond_Material(brush_t *a1, filter_info_s *a2)
 {
-    const int   flags  = ((int *)a2->contents_ptr)[1];               // node.flags (bit0=`*`, bit1=All)
-    const char *target = (const char *)((void **)a2->contents_ptr)[0]; // node.name
+    const int   flags  = ((FilterNameCondition *)a2->contents_ptr)->flags;               // node.flags (bit0=`*`, bit1=All)
+    const char *target = ((FilterNameCondition *)a2->contents_ptr)->name; // node.name
     bool        negate = (a2->z_pad_0x0004[0] != 0);
 
     if ( ( flags & 2 ) == 0 && !a1->patch )
@@ -402,7 +424,7 @@ static bool FilterCond_Material(brush_t *a1, filter_info_s *a2)
 
     // "All" or patch: one representative material for the whole brush.
     MaterialDef *md = a1->patch ? (MaterialDef *)&a1->patch->texture
-                                : (MaterialDef *)(intptr_t)a1->xx1;
+                                : a1->xx1;
     if ( !md )
         return negate;
     const char *name = (const char *)Materialdef_GetName( md );
@@ -484,8 +506,9 @@ static bool FilterCond_Surface(brush_t *a1, filter_info_s *a2)
 // SAFE (a decal filter just hides nothing), not a logic error.  See PROGRESS material-P3.
 static bool FilterCond_Misc(brush_t *a1, filter_info_s *a2)
 {
-    const char *node = (const char *)((void **)a2->contents_ptr)[0];  // {char* name@0, flags@4}
-    const int   flags = ((int *)a2->contents_ptr)[1];
+    const FilterNameCondition *cond = (const FilterNameCondition *)a2->contents_ptr;
+    const char *node = cond->name;
+    const int   flags = cond->flags;
     bool        negate = (a2->z_pad_0x0004[0] != 0);
 
     if ( !strcmp( node, "world" )
@@ -1187,16 +1210,7 @@ const char *Layers_BuildFilter( const char *layerName )
     entry->material_ptr    = nullptr;
     g_qeglobals.d_filterGlobals_layerFilters = entry;
 
-    // The condition node is 16 bytes in the binary (operator new(0x10)) — a 12-byte
-    // filter_info_s PLUS a 4th DWORD at +12 (the AND/OR "next sibling" link, read by
-    // FilterCondition_Eval as child[1].surfaceFlags and chased by Filters_FreeCondTree
-    // as info[3]).  A leaf script_layer node never participates in an AND/OR list, so
-    // +12 stays 0; allocate the full 16 + zero +12 to match the binary exactly (and so
-    // the recursive free reads a NUL sibling link, not heap garbage).
-    filter_info_s *info = (filter_info_s *)operator new( 16 );
-    info->surfaceFlags    = 5;                // [esi]    case 5 — script_layer key/value
-    info->z_pad_0x0004[0] = 0;                // [esi+4]  negate = 0
-    *((void **)info + 3)  = nullptr;          // [esi+0Ch] next-sibling link = 0 (leaf)
+    filter_info_s *info = Filter_NewInfo( FILT_KEYVALUE );
 
     filter_contents_s *cond = (filter_contents_s *)operator new( sizeof( filter_contents_s ) );
     cond->key   = AllocMaterialString( "script_layer" );
@@ -1224,7 +1238,7 @@ static void Filters_FreeCondTree( filter_info_s *info )
     {
         filter_info_s *self = info;
         int type = info->surfaceFlags;
-        info = (filter_info_s *)*((void **)info + 3);   // v1 = v1[3] (next sibling)
+        info = info->next;   // v1 = v1[3] (next sibling)
         filter_contents_s *c = self->contents_ptr;       // v2[2]
         switch ( (unsigned)type )
         {

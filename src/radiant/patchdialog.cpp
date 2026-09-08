@@ -242,7 +242,7 @@ int sub_401D50()
 
 // sub_43E6F0 (0x43E6F0) — the addpoint paint drag.  buttons 1=raise/LMB, 2=lower/RMB;
 // origin/dir are float* ray endpoints (int-cast by Drag_MouseMoved).
-void sub_43E6F0( int buttons, int origin, int dir )
+void sub_43E6F0( int buttons, float *origin, float *dir )
 {
     extern void Radiant_FL_Log( const char *fmt, ... );   // mainfrm.cpp — DIAG (terrain paint)
     if ( buttons != 1 && buttons != 2 )

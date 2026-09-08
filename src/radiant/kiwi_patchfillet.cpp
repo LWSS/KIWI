@@ -32,7 +32,7 @@
 extern int          Sys_Printf( const char *fmt, ... );                       // win_qe3.cpp:118
 extern int          g_nUpdateBits;                                            // 0x25D5A74 (mainfrm.cpp)
 
-extern unsigned int Brush_RemoveFace( brush_t *b, unsigned int faceIndex );   // brush.cpp:345  0x471640
+extern size_t Brush_RemoveFace( brush_t *b, unsigned int faceIndex );   // brush.cpp:345  0x471640
 extern selbrush_t  *Brush_AddToList( brush_t *def, entity_s *owner );         // brush.cpp:669  0x475980
 extern void         Brush_AddToList2( selbrush_t *b );                        // brush.cpp:927  0x4765A0
 extern void         Select_Deselect( int a1 );                                // select.cpp:1444 0x48E800 (int, NOT char — mangling)

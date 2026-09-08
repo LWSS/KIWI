@@ -64,7 +64,17 @@ if(KIWI_BUILD_GAME)
     add_subdirectory(${SCRIPTS_DIR}/dedi)
 endif()
 
-# Both offline compilers are native x64 tools. Radiant remains Win32.
+# Editor and offline tool targets are independent of the game target.
+if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+    set(KIWI_BUILD_RADIANT_DEFAULT OFF) # Native editor port is opt-in until integration passes.
+else()
+    set(KIWI_BUILD_RADIANT_DEFAULT ON)
+endif()
+option(KIWI_BUILD_RADIANT "Build the Radiant editor" ${KIWI_BUILD_RADIANT_DEFAULT})
+if(KIWI_BUILD_RADIANT)
+    add_subdirectory(${SCRIPTS_DIR}/radiant)
+endif()
+
 option(KIWI_BUILD_COD4MAP "Build or expose the CoD4Map tool target" ON)
 option(KIWI_BUILD_COD4RAD "Build or expose the CoD4Rad tool target" ON)
 option(KIWI_COD4RAD_WITH_EMBREE "Build the optional Embree 4 ray-tracing extension" OFF)
@@ -78,8 +88,6 @@ if(CMAKE_SIZEOF_VOID_P EQUAL 8)
         add_subdirectory(${SCRIPTS_DIR}/cod4rad)
     endif()
 else()
-    add_subdirectory(${SCRIPTS_DIR}/radiant)
-
     if(CMAKE_GENERATOR MATCHES "^Visual Studio")
         foreach(_tool cod4map cod4rad)
             string(TOUPPER "${_tool}" _tool_upper)

@@ -70,12 +70,12 @@ extern int  g_nUpdateBits;                           // 0x25D5A74
 
 // Offsets within each 84-byte entry.
 enum {
-    LYR_ENTRY_SIZE    = 84,
+    LYR_ENTRY_SIZE    = sizeof(LyrEntry_t),
     LYR_NAME_SIZE     = 64,
     LYR_NEXTID_OFF    = 0x40,
     LYR_LAYERCNT_OFF  = 0x44,
-    LYR_ID_OFF        = 0x4C,   // layer[0].id
-    LYR_HANDLE_OFF    = 0x50,   // layer[0].handle
+    LYR_ID_OFF        = offsetof(LyrEntry_t, layers),
+    LYR_HANDLE_OFF    = offsetof(LyrEntry_t, layers) + offsetof(LyrEntryLayer_t, handle),
     LYR_MAX_ENTRIES   = 512,
     LYR_MAX_LAYERS    = 1,
 };
@@ -83,14 +83,7 @@ enum {
 // Typed view of one 84-byte library entry (stride within lyrMtlGlob.Layers).
 // Same head layout as materialdef.cpp's 120-byte LayerMaterialDef, but the library
 // stride only carries LYR_MAX_LAYERS layer slots.
-struct LyrEntry_t
-{
-    char name[LYR_NAME_SIZE];                                   // 0x00
-    int  nextId;                                                // 0x40
-    int  layerCount;                                            // 0x44
-    int  activeLayer;                                           // 0x48
-    struct { int id; qtexture_s *handle; } layers[LYR_MAX_LAYERS]; // 0x4C
-};
+// Shared native entry in qe3.h.
 static_assert( sizeof( LyrEntry_t ) == LYR_ENTRY_SIZE, "LyrEntry_t" );
 static_assert( offsetof( LyrEntry_t, nextId ) == LYR_NEXTID_OFF
             && offsetof( LyrEntry_t, layers ) == LYR_ID_OFF, "LyrEntry_t offsets" );
@@ -486,6 +479,15 @@ void LayeredMaterials_AddEntries( char *name, HWND hWnd )
         return;
     }
 
+    // Check before shifting: discovering a duplicate midway through the move
+    // would otherwise leave the existing library entries overwritten.
+    if ( LayeredMaterials_GetMaterial( name ) )
+    {
+        MessageBoxA( hWnd, "A layered material with that name already exists.",
+                     "Radiant", MB_ICONEXCLAMATION );
+        return;
+    }
+
     // Find the sorted insertion slot, shifting larger entries up.  IDA (0x417050) walks
     // from the LAST entry downward and decrements the slot index (v12) once per shift:
     //   cursor = &entry[count-1];  slot = count;
@@ -512,9 +514,11 @@ void LayeredMaterials_AddEntries( char *name, HWND hWnd )
             {
                 // cursor entry sorts AFTER name → shift it up one slot, keep scanning down.
                 memcpy( cursor + LYR_ENTRY_SIZE, cursor, LYR_ENTRY_SIZE );
-                cursor -= LYR_ENTRY_SIZE;
                 if ( --slot <= 0 )
+                {
                     break;
+                }
+                cursor -= LYR_ENTRY_SIZE;
                 continue;
             }
             break;   // cursor entry sorts BEFORE name → insert at `slot` (unchanged)
@@ -526,7 +530,7 @@ void LayeredMaterials_AddEntries( char *name, HWND hWnd )
     entry->layerCount = 0;                                   // (IDA dword_1814D44[21*slot])
     strcpy( entry->name, name );
 
-    lyrMtlWndGlob.activeLyrMtl = (int)(intptr_t)entry;
+    lyrMtlWndGlob.activeLyrMtl = entry;
     lyrMtlWndGlob.selectedLayerIndex  = 0;
     g_nUpdateBits |= 0x10u;   // W_TEXTURE
     ++lyrMtlGlob.entryCount;
@@ -550,7 +554,7 @@ char LayeredMaterials_Save()
     // current CRC matches it, nothing was modified → return 1 without writing.  The
     // headless round-trip gate has an empty library (entryCount==0 → CRC of 0 bytes ==
     // 0 == the initial token) so this is the path it always takes.
-    if ( CheckLayeredMaterial_Modifications( lyrMtlGlob.Layers, 84 * lyrMtlGlob.entryCount, 0 )
+    if ( CheckLayeredMaterial_Modifications( lyrMtlGlob.Layers, LYR_ENTRY_SIZE * lyrMtlGlob.entryCount, 0 )
          != (unsigned)lyrMtlGlob.crcToken )
     {
         // Resolve the destination path from the project's "layeredmaterials" epair.
@@ -577,7 +581,7 @@ char LayeredMaterials_Save()
         }
         // Re-baseline the clean-library token to the just-written contents.
         lyrMtlGlob.crcToken = (int)CheckLayeredMaterial_Modifications( lyrMtlGlob.Layers,
-                                                                 84 * lyrMtlGlob.entryCount, 0 );
+                                                                 LYR_ENTRY_SIZE * lyrMtlGlob.entryCount, 0 );
     }
     return 1;
 }
@@ -602,14 +606,14 @@ void *LayeredMaterials_texcoords( char *a1 )
 
     // (3) validate the entry index.
     int entryCount = lyrMtlGlob.entryCount;
-    unsigned int entryIndex = (unsigned int)( a1 - (char *)lyrMtlGlob.Layers ) / 84u;
+    size_t entryIndex = (size_t)( a1 - (char *)lyrMtlGlob.Layers ) / sizeof(LyrEntry_t);
     bcassert( entryIndex, (unsigned int)lyrMtlGlob.entryCount );   // LayeredMaterials.cpp:297
 
     // (4) drop the entry: shrink count, shift the remaining entries down.
     lyrMtlGlob.entryCount = entryCount - 1;
-    void *result = memcpy( &lyrMtlGlob.Layers[84 * entryIndex],
-                           &lyrMtlGlob.Layers[84 * ( entryIndex + 1 )],
-                           84 * ( entryCount - 1 - entryIndex ) );
+    void *result = memmove( &lyrMtlGlob.Layers[sizeof(LyrEntry_t) * entryIndex],
+                            &lyrMtlGlob.Layers[sizeof(LyrEntry_t) * ( entryIndex + 1 )],
+                            sizeof(LyrEntry_t) * ( entryCount - 1 - entryIndex ) );
 
     // (5) request a redraw.
     g_nUpdateBits |= 0x10;   // W_TEXTURE

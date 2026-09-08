@@ -20,7 +20,7 @@ extern int  Sys_Printf( const char *fmt, ... );
 // entity.cpp:629
 extern void Entity_GetOrientation( entity_s_def *ent, orientation_t *orParent, orientation_t *orOut );
 // entity.cpp:89
-extern char *ValueForKey2( int e, const char *key );
+extern char *ValueForKey2( const entity_s *e, const char *key );
 // filters.cpp:688
 extern char FilterBrush( selbrush_t *a1, int a2 );
 // brush.cpp:7389
@@ -35,16 +35,7 @@ extern int  g_edPrefabBrushesWalked;
 extern int  g_edPrefabBrushesDrawn;
 
 // prefab_s - local mirror of entity.cpp:316's prefab_s (0x54); only the list sentinels are read.
-struct prefab_s
-{
-    entity_s    *prev_entity;           // 0x00
-    entity_s    *next_entity;           // 0x04
-    void        *unk;                   // 0x08
-    selbrush_t  *active_brushlist;      // 0x0C   tail sentinel (prev side)
-    selbrush_t  *active_brushlist_next; // 0x10   head sentinel (next side)
-    char         _pad[0x54 - 0x14];     // 0x14 .. 0x53
-};
-static_assert( sizeof( prefab_s ) == 0x54, "prefab_s (kiwi_walkcache.cpp mirror != entity.cpp)" );
+// Shared native prefab_s is declared in qe3.h.
 
 // Exceeding any cap abandons recording so the caller runs the original walk.
 #define KIWI_WALK_MAX_NODES     1000000
@@ -200,7 +191,7 @@ static bool Walk_RecordPrefab( WalkRec *w, selbrush_t *b, entity_s *ent, int ori
         n->childOrient = childIdx;
         n->subtreeEnd  = nodeIdx + 1;      // closed below
         // An entity key DrawBrush reads per prefab per frame, so it belongs to the recording.
-        n->flags       = atol( ValueForKey2( (int)(intptr_t)ent->def, "spawnflags" ) )
+        n->flags       = atol( ValueForKey2( ent->def, "spawnflags" ) )
                        ? KIWI_WALK_SPAWNFLAGS : 0;
     }
 

@@ -53,7 +53,7 @@ struct editorMesh_s {              // 24 bytes
     int       handle;             // +C  (LOWORD=firstIndex, HIWORD=vb buffer)
     uint16_t  vertCount;          // +10
     uint16_t  indexCount;         // +12
-    int       indexTable;         // +14 (IDB "unk3" — edFaceIndices/edBackFaceIndices)
+    const uint16_t *indexTable;         // +14 (IDB "unk3" — edFaceIndices/edBackFaceIndices)
 };
 
 // IDB editorSurf_sub — the ED_SURF_MODEL surf record (vs editorMesh_s, the brush-face one).
@@ -217,7 +217,7 @@ static void Editor_CheckSubmittedOpaqueDepth(const Material *material, int techT
 
 // 0x4FDA50  Editor_AddMeshCmd — append one cached mesh + its surf entry.
 void __cdecl Editor_AddMeshCmd(Material *handle, int techType, int sortKey,
-                               int vertCount, int vbIndexAndOffs, int indexCount, int indexTable)
+                               int vertCount, int vbIndexAndOffs, int indexCount, const uint16_t *indexTable)
 {
     iassert(techType >= 0);                               // 0x4fda66 (level 0)
     const Material *material = Material_FromHandle(handle);
@@ -274,7 +274,7 @@ void __cdecl Editor_AddGeoFace(Material *handle, int techType, int sortKey, int 
         Assert("C:\\trees\\cod3-pc\\cod3-modtools\\cod3src\\src\\gfx_d3d\\r_ed_scene.cpp", 197, 0, "%s\n\t(vertCount) = %i", "vertCount fan fits edFaceIndices", vertCount);
         return;
     }
-    Editor_AddMeshCmd(handle, techType, sortKey, vertCount, vbIndexAndOffs, 3 * vertCount - 6, (int)edFaceIndices);
+    Editor_AddMeshCmd(handle, techType, sortKey, vertCount, vbIndexAndOffs, 3 * vertCount - 6, edFaceIndices);
 }
 
 // 0x4FEF50  sub_4FEF50 — emit a back-facing fan (edBackFaceIndices) for one face.
@@ -288,7 +288,7 @@ void __cdecl Editor_AddGeoBackFace(Material *handle, int techType, int sortKey, 
         Assert("C:\\trees\\cod3-pc\\cod3-modtools\\cod3src\\src\\gfx_d3d\\r_ed_scene.cpp", 204, 0, "%s\n\t(vertCount) = %i", "vertCount fan fits edBackFaceIndices", vertCount);
         return;
     }
-    Editor_AddMeshCmd(handle, techType, sortKey, vertCount, vbIndexAndOffs, 3 * vertCount - 6, (int)edBackFaceIndices);
+    Editor_AddMeshCmd(handle, techType, sortKey, vertCount, vbIndexAndOffs, 3 * vertCount - 6, edBackFaceIndices);
 }
 
 // 0x4FDBB0  sub_4FDBB0 — the sortKey DrawGeo (0x47acf0) passes to Editor_AddGeoFace: 100 x
@@ -595,7 +595,10 @@ struct model_inst {                // 44 bytes
     XModel  *model;                // +36
     int      inuse;                // +40  IDB "random_one"
 };
-static_assert(sizeof(model_inst) == 44, "model_inst must alias GfxScaledPlacement+{pad,model,inuse}");
+static_assert(sizeof(model_inst) == (sizeof(void *) == 8 ? 56 : 44), "model_inst native storage");
+static_assert(offsetof(model_inst, angles) == 0, "model_inst placement quaternion");
+static_assert(offsetof(model_inst, origin) == offsetof(GfxScaledPlacement, base) + offsetof(GfxPlacement, origin), "model_inst placement origin");
+static_assert(offsetof(model_inst, modelscale) == offsetof(GfxScaledPlacement, scale), "model_inst placement scale");
 
 #define ED_MAP_MAX_MODELINST 65536
 struct EdMapGlobals {              // IDB edMapGlobals @ 0x835648

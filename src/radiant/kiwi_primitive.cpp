@@ -44,7 +44,7 @@ extern void      Radiant_ExecCommand( unsigned int cmdId );             // mainf
 extern camera_s *Ed_Camera();                                           // camwnd.cpp:161
 
 // Brush_MakeSided's first `int` really carries brush_t* (0x4731E0).
-extern void      Brush_MakeSided( int a1, unsigned int sides, int axis, char snap ); // brush.cpp:3405 (0x4731E0)
+extern void      Brush_MakeSided( brush_t *a1, unsigned int sides, int axis, char snap ); // brush.cpp:3405 (0x4731E0)
 extern void      Brush_MakeSidedCone( int sides );                      // brush.cpp:3653 (0x47BC10)
 extern void      Brush_MakeSidedSphere( int sides );                    // brush.cpp:3728 (0x47BE90)
 
@@ -1104,7 +1104,7 @@ namespace
 
             // snap=0 preserves the modern-grid radius; the ported tail still
             // rebuilds with bFull=1 and may apply legacy snapping.
-            Brush_MakeSided( (int)(intptr_t)def, (unsigned int)m_sides, axis, 0 );
+            Brush_MakeSided( def, (unsigned int)m_sides, axis, 0 );
 
             const char *why = "unknown";
             if ( !KiwiValid_CheckBrush( def, &why ) )

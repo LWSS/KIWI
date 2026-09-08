@@ -285,7 +285,7 @@ void KiwiMtl_InfoCommand()
 // Repairs use the ported Face_InitMaterialChannel and SetMaterial helpers.
 
 extern int   Face_InitMaterialChannel( unsigned int textureChannel, face_t *faceDef,
-                                       MaterialDef *src );                     // brush.cpp:417  (0x472C90)
+                                       float src );                     // brush.cpp:417  (0x472C90)
 extern void  SetMaterial( const char *tex_name, patchMesh_material *mtlDef );  // materialdef.cpp:101 (0x4315C0)
 extern qtexture_s *MaterialDef_GetLayeredMaterial( MaterialDef *mtlDef );      // materialdef.cpp:168 (0x4314A0)
 namespace LayerMat { int GetCurrentLayer( MaterialDef *def ); }                // materialdef.cpp:252 (0x431B30)
@@ -400,9 +400,7 @@ bool KiwiMtl_EnsureFaceLayers( face_t *f )
         float sample = g_qeglobals.random_texture_stuff[c].sampleSize;
         if ( !IsFiniteNonZero( sample ) )
             sample = KMTL_CHANNEL_SAMPLE[c];
-        MaterialDef *sampleBits = 0;
-        memcpy( &sampleBits, &sample, sizeof( sample ) );
-        Face_InitMaterialChannel( (unsigned int)c, f, sampleBits );
+        Face_InitMaterialChannel( (unsigned int)c, f, sample );
         repaired = true;
     }
 

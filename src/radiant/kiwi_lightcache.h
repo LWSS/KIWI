@@ -11,7 +11,7 @@ struct KiwiLightCasterRecord
     orientation_t orient;
     selbrush_t    *brush;
 };
-static_assert(sizeof(KiwiLightCasterRecord) == 52, "light caster record");
+static_assert(sizeof(KiwiLightCasterRecord) == (sizeof(void *) == 8 ? 56 : 52), "light caster record");
 
 typedef int (__cdecl *KiwiLightGatherFn)(KiwiLightCasterRecord *out,
                                          const float *origin, float radius);

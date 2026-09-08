@@ -40,7 +40,7 @@ extern void        Radiant_ExecCommand( unsigned int cmdId );                 //
 // Difference tools are outside selected_brushes, so cover them explicitly.
 // Entities must precede their brushes in the undo record.
 extern void        Undo_AddBrush( entity_brush_s *pBrushInst );                // undo.cpp:494  (0x45e680)
-extern void        Undo_AddEntity( int a1 );                                   // undo.cpp:601  (0x45e8a0)
+extern void        Undo_AddEntity( entity_s *entity );                                   // undo.cpp:601  (0x45e8a0)
 
 // Translucent fill entry points; R_AddCmdSetMaterialColor is in r_rendercmds.h.
 extern char        Byte4PackPixelColor( float *from, GfxColor *out );          // 0x402ac0
@@ -942,7 +942,7 @@ namespace
                     continue;
                 entity_s *owner = tools[t]->def->owner;
                 if ( owner && owner->eclass && owner->eclass->fixedsize )
-                    Undo_AddEntity( (int)(intptr_t)owner );
+                    Undo_AddEntity( (entity_s *)owner );
                 Undo_AddBrush( (entity_brush_s *)tools[t]->def );
             }
 

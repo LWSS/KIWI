@@ -594,7 +594,7 @@ extern selbrush_t selected_brushes;                                   // engine_
 extern float      world_orient_matrix[4][3];                          // entity.cpp (identity)
 extern char       FilterBrush(selbrush_t *b, int fastDrag);           // filters.cpp (0x46A1F0)
 extern entity_s  *world_entity;                                       // engine_stubs.cpp (0x25D5B30)
-extern char      *ValueForKey2(int e, const char *key);               // entity.cpp (0x4825C0)
+extern char      *ValueForKey2( const entity_s *e, const char *key);               // entity.cpp (0x4825C0)
 extern entity_s   entityInsts;                                        // entity.cpp (0x23F1748) — entity INSTANCE list head
 extern bool       HasKeyValuePair(entity_s_def *e, const char *key);  // entity.cpp (0x4838B0)
 extern float      Vec3Normalize_R(float *v);                          // engine_stubs.cpp (0x40A5E0) — returns length
@@ -639,7 +639,7 @@ static const char *Ed_EntityNameForBrush( selbrush_t *brush )
     brush_t *repBrush = (brush_t *)def->brushes.prev;   // IDA brushes.oprev (+0x0C)
     if ( brush->def != repBrush || ( brush->brushFlags & 2 ) != 0 )
         return nullptr;
-    const char *name = ValueForKey2( (int)(intptr_t)def, "classname" );
+    const char *name = ValueForKey2( def, "classname" );
     return ( name && *name ) ? name : nullptr;
 }
 
@@ -753,7 +753,7 @@ static void XY_BrushColor(selbrush_t *b, GfxColor *out, float *outRgba = nullptr
 //  via Entity_GetFloatValueForKey @0x74), NOT the instance.
 // ════════════════════════════════════════════════════════════════════════════
 
-extern float Entity_GetFloatValueForKey( int e, const char *key );   // entity.cpp (0x4837C0)
+extern float Entity_GetFloatValueForKey( const entity_s *e, const char *key );   // entity.cpp (0x4837C0)
 static const char *Ed_EntFirstKey( entity_s *e, const char *key );   // defined below (epair scan)
 extern void Assert( const char *file, int line, int type, const char *fmt, ... ); // (also declared below)
 // script-group single-char team-colour visualization (scriptgroup.cpp): the selected-
@@ -881,8 +881,8 @@ static void Ed_DrawLightRadiusXY( selbrush_t *brush, const GfxColor *col, int vi
                         ( def->mins[2] + def->maxs[2] ) * 0.5f };
     iassert( brush->owner->def == brush->def->owner );      // IDB 0x46c2f9 (L0)
     // the binary reads (and discards) the "light" key first, then "radius" — channel 1.
-    Entity_GetFloatValueForKey( (int)(intptr_t)eDef, "light" );
-    float radius = Entity_GetFloatValueForKey( (int)(intptr_t)eDef, "radius" );
+    Entity_GetFloatValueForKey( eDef, "light" );
+    float radius = Entity_GetFloatValueForKey( eDef, "radius" );
     Ed_DrawRadiusCircle( col, center, viewType, radius, 1 );
 }
 
@@ -918,7 +918,7 @@ static void Ed_DrawColoredRadiusXY( selbrush_t *brush, int viewType, char channe
                         ( def->mins[1] + def->maxs[1] ) * 0.5f,
                         ( def->mins[2] + def->maxs[2] ) * 0.5f };
     iassert( brush->owner->def == brush->def->owner );      // IDB 0x46c44a (L0)
-    float radius = Entity_GetFloatValueForKey( (int)(intptr_t)eDef, "radius" );
+    float radius = Entity_GetFloatValueForKey( eDef, "radius" );
     if ( radius != 0.0f )
         Ed_DrawRadiusCircle( &col, center, viewType, radius, channel );
 }
@@ -932,8 +932,8 @@ static void Ed_DrawNodeRadiusXY( char channel, selbrush_t *brush, int viewType, 
 {
     entity_s_def *eDef = (entity_s_def *)brush->owner->def;  // *(b[2]+...) = owner->def
     iassert( brush->owner->def == brush->def->owner );      // IDB 0x46c71a (L0)
-    float radius     = Entity_GetFloatValueForKey( (int)(intptr_t)eDef, "radius" );
-    float safeRadius = Entity_GetFloatValueForKey( (int)(intptr_t)eDef, "fixedNodeSafeRadius" );
+    float radius     = Entity_GetFloatValueForKey( eDef, "radius" );
+    float safeRadius = Entity_GetFloatValueForKey( eDef, "fixedNodeSafeRadius" );
 
     // gate: at least one radius > 0 AND the instance isn't a hidden/filtered brush (brushFlags&2).
     if ( ( radius <= 0.0f && safeRadius <= 0.0f ) || ( brush->brushFlags & 2 ) != 0 )
@@ -947,7 +947,7 @@ static void Ed_DrawNodeRadiusXY( char channel, selbrush_t *brush, int viewType, 
     }
     else
     {
-        height = Entity_GetFloatValueForKey( (int)(intptr_t)eDef, "height" );
+        height = Entity_GetFloatValueForKey( eDef, "height" );
         if ( height <= 0.0f )
             height = 80.0f;
     }
@@ -1271,7 +1271,7 @@ extern void       Entity_LinkBrush( brush_t *b, entity_s *world_ent );          
 extern selbrush_t*Brush_AddToList( brush_t *def, entity_s *owner );                // brush.cpp 0x475980 (instance)
 // ── CreateEntityFromName Path B (re-class) deps ──
 extern void       Undo_AddEntity_W( entity_s *a1 );                                // undo.cpp 0x45e990
-extern int        Init_MaterialLayer( MaterialDef *a1, MaterialDef *a2 );          // materialdef.cpp 0x472c00
+extern int        Init_MaterialLayer( MaterialDef *a1, float a2 );          // materialdef.cpp 0x472c00
 extern void       sub_476330( selbrush_t *b );                                     // brush.cpp Brush_Deselect_Helper 0x476330
 extern void       Brush_Free( selbrush_t *b );                                     // brush.cpp 0x475ba0
 extern eclass_t  *Entity_SetDefaultModelKey( brush_t *a1, eclass_t *a2 );          // entity.cpp 0x485510
@@ -1302,7 +1302,7 @@ extern entity_s  *Entity_Create( eclass_t *eclass );                            
 extern void       EntityAssignModel( entity_s_def *a1 );                           // entity.cpp 0x485410
 extern void       Undo_SetIdForEntity( entity_s_def *ent );                        // undo.cpp 0x45e9e0
 extern void       SetKeyValue( entity_s_def *e, const char *key, const char *value );// entity.cpp 0x483690
-extern char      *ValueForKey2( int defPtr, const char *key );                     // entity.cpp 0x4825c0
+extern char      *ValueForKey2( const entity_s *defPtr, const char *key );                     // entity.cpp 0x4825c0
 extern char      *Map_GetNextExportId( int slot );                                 // map.cpp 0x487a70
 extern int        I_stricmp( const char *s0, const char *s1 );                      // q_shared
 extern void       Assert( const char *file, int line, int type, const char *fmt, ... );
@@ -3061,7 +3061,7 @@ void XYWnd_OnLButtonDown( HWND hwnd, unsigned int nFlags, int x, int y )
     Ed_InvalidateAllViews();   // selection / clip points changed -> repaint XY + Z
 }
 
-extern void SelectFaceSth( int a1, int a2, int a3 );   // select.cpp 0x48e340 (via drag.cpp extern)
+extern void SelectFaceSth( float *a1, float *a2, int a3 );   // select.cpp 0x48e340 (via drag.cpp extern)
 
 void XYWnd_OnLButtonUp( unsigned int nFlags, int x, int y )
 {
@@ -3095,7 +3095,7 @@ void XYWnd_OnLButtonUp( unsigned int nFlags, int x, int y )
         if ( g_PrefsDlg->sky_brush_off )       flags |= 2048;
         float start[3], dir[3];
         Ed_XY_ToPoint( wnd, wnd->m_nPressx, wnd->m_nPressy, start, dir );
-        SelectFaceSth( (int)dir, (int)start, flags );
+        SelectFaceSth( dir, start, flags );
     }
     Drag_MouseUp( nFlags );        // == XY_MouseUp's Drag_MouseUp (toggle_unk02/ShowCursor reset
     wnd->m_nButtonstate = 0;       //    omitted — consistent with the documented scroll reduction)
@@ -3289,7 +3289,7 @@ static bool Entity_NeedsExportKey( entity_s_def *e )
 {
     if ( !e || !e->eclass || !*(int *)&e->eclass->fixedsize )
         return false;
-    const char *cn = ValueForKey2( (int)(intptr_t)e, "classname" );
+    const char *cn = ValueForKey2( e, "classname" );
     if ( !cn ) return false;
     if ( strstr( cn, "actor" ) )       return true;
     if ( strstr( cn, "misc_turret" ) ) return true;
@@ -3593,10 +3593,10 @@ void CreateEntityFromName( const char *str )
                 // memset for safety, matching the gate-proven Entity_Create bbox build.
                 MaterialDef matdef;
                 memset( &matdef, 0, sizeof( matdef ) );
-                matdef.lyrMtl = *(LayerMaterialDef **)&eclass->material[0];  // [esi+0x34] -> var_5C
-                matdef.radMtl = (qtexture_s *)eclass->textureTableOrSth;     // [esi+0x38] -> var_58
+                matdef.lyrMtl = eclass->material.lyrMtl;
+                matdef.radMtl = eclass->material.radMtl;
                 float ss = 0.25f;                                            // flt_6F42F0 (COERCE_MATERIALDEF_)
-                Init_MaterialLayer( &matdef, *(MaterialDef **)&ss );
+                Init_MaterialLayer( &matdef, ss );
 
                 brush_t *nb = Brush_Alloc( &matdef, eclass );
                 Brush_Create( newMins, newMaxs, nb, eclass );
@@ -4304,7 +4304,7 @@ void XYWnd_RenderToRT( int w, int h )
 // ═════════════════════════════════════════════════════════════════════════════
 // deps of the moved viz cluster (previously file-local to scriptgroup.cpp):
 extern int  ScriptGroup_Unreachable( const char *a1 );                 // scriptgroup.cpp 0x451170
-extern void Ed_DrawScriptColorQuad( int entDef, const float *color );  // brush.cpp 0x46AE10
+extern void Ed_DrawScriptColorQuad( const entity_s *entDef, const float *color );  // brush.cpp 0x46AE10
 static const char zero[] = "";       // scriptgroup's `zero` (default team-key value)
 // flt_73B098 (0x73B098) — the 7 script-colour token colours (r/b/y/c/g/p/o),
 // indexed by ScriptGroup_Unreachable.  Same table as brush.cpp/camwnd.cpp.
@@ -4459,7 +4459,7 @@ void ScriptGroup_DrawTeamColorViz( const char *a1, const float *viewMins,
             for ( int n = 0; n < tokens; ++n )
             {
                 if ( CamTokens_BrushMatchesToken( b, tokStr[n] ) )
-                    Ed_DrawScriptColorQuad( (int)(intptr_t)b->owner->def, &tokCol[4 * n + 4] );
+                    Ed_DrawScriptColorQuad( b->owner->def, &tokCol[4 * n + 4] );
             }
         }
     }

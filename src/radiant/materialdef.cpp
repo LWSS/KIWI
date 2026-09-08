@@ -30,8 +30,8 @@ struct LayerMaterialDef
     struct { int vis; qtexture_s *radMtl; } layers[5];   // 0x4C  interleaved {vis@+0, radMtl@+4}
     int   _tail_74;        // 0x74
 };
-static_assert(sizeof(LayerMaterialDef) == 120, "LayerMaterialDef must be 120 bytes (IDB)");
-static_assert(offsetof(LayerMaterialDef, layers) == 0x4C, "LayerMaterialDef.layers");
+static_assert(sizeof(LayerMaterialDef) == (sizeof(void *) == 8 ? 168 : 120), "LayerMaterialDef must be 120 bytes (IDB)");
+static_assert(offsetof(LayerMaterialDef, layers) == (sizeof(void *) == 8 ? 80 : 0x4C), "LayerMaterialDef.layers");
 
 // MaterialDef realize-state (defined in engine_stubs.cpp). MaterialDef_05..09 AND
 // per-texture flag bits into it; MaterialDef_02 walks the layers feeding them.
@@ -190,8 +190,7 @@ void MaterialDef_02( MaterialDef *mtlDef, int (*cb)( qtexture_s * ) )
     // layers[] live at 0x4C, 8-byte stride {vis, radMtl}.
     for ( int i = 0; i < mtlDef->lyrMtl->layerCount; ++i )
     {
-        qtexture_s **layer = (qtexture_s **)( (char *)mtlDef->lyrMtl + 80 + 8 * i );
-        cb( *layer );
+        cb( mtlDef->lyrMtl->layers[i].radMtl );
     }
 }
 
@@ -290,17 +289,17 @@ Material *MaterialDef_14( unsigned int visIndex, MaterialDef *mtlDef )
 }
 
 // 0x431D70  MaterialDef_GetActiveLayerHandle (sub_431D70) — handle of the active layer.
-int MaterialDef_GetActiveLayerHandle( MaterialDef *mtlDef )
+Material *MaterialDef_GetActiveLayerHandle( MaterialDef *mtlDef )
 {
     iassert( MtlDef_IsValid( mtlDef ) );                   // 0x431d90 (level 0)
     if ( mtlDef->lyrMtl )
     {
         iassert( mtlDef->lyrMtl->layers[mtlDef->lyrMtl->activeLayer].radMtl->handle );   // MaterialDef.cpp:321
-        return (int)(intptr_t)mtlDef->lyrMtl->layers[mtlDef->lyrMtl->activeLayer].radMtl->handle;
+        return mtlDef->lyrMtl->layers[mtlDef->lyrMtl->activeLayer].radMtl->handle;
     }
     iassert( mtlDef->radMtl );   // MaterialDef.cpp:325
     iassert( mtlDef->radMtl->handle );   // MaterialDef.cpp:326
-    return (int)(intptr_t)mtlDef->radMtl->handle;
+    return mtlDef->radMtl->handle;
 }
 
 // 0x431E90  MaterialDef_15_Drawflag_Multiply — drawflag/multiply gate.
@@ -348,12 +347,12 @@ char MaterialDef_SetColorTint( MaterialDef *mtlDef, unsigned int visIndex, float
 // 0x472C00  Init_MaterialLayer — seed each layer's mat_texDef from the material
 // dimensions and a sample size.  a2 carries the sample-size FLOAT bit-pattern
 // The binary reinterprets the pointer-sized argument as a float.
-int Init_MaterialLayer( MaterialDef *a1, MaterialDef *a2 )
+int Init_MaterialLayer( MaterialDef *a1, float a2 )
 {
     qtexture_s *lm = MaterialDef_GetLayeredMaterial( a1 );
     int width  = lm ? lm->width  : 512;
     int height = lm ? lm->height : 512;
-    float sampleSize = *(float *)&a2;
+    float sampleSize = a2;
     int n = MaterialDef_04( a1 );                 // layer count (degenerate → 0)
     int result = n;
     float *v6 = &a1->mat_texDef.size[1];          // each block is 7 floats (28 bytes)

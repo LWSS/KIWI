@@ -71,7 +71,7 @@
 extern int  Sys_Printf( const char *fmt, ... );                  // win_qe3.cpp:118 (undo.cpp:57 declares it the same way)
 extern void Undo_ClearRedo();                                    // undo.cpp 0x45e2b0
 extern void Undo_AddBrush( entity_brush_s *pBrushInst );         // undo.cpp:494  (0x45E680)
-extern void Undo_AddEntity( int a1 );                            // undo.cpp:601  (0x45E8B0)
+extern void Undo_AddEntity( entity_s *entity );                            // undo.cpp:601  (0x45E8B0)
 extern void Undo_GeneralStart( const char *operation );          // undo.cpp 0x45e3f0
 extern void Undo_AddBrushList( selbrush_t *sb );                 // undo.cpp 0x45e7c0
 extern void Undo_EndBrushList( selbrush_t *brushlist );          // undo.cpp 0x45e870
@@ -1596,7 +1596,7 @@ void KiwiCmd_UndoCoverBrush( selbrush_t *node )
         return;
     entity_s *owner = node->def->owner;
     if ( owner && owner->eclass && owner->eclass->fixedsize )
-        Undo_AddEntity( (int)(intptr_t)owner );
+        Undo_AddEntity( (entity_s *)owner );
     Undo_AddBrush( (entity_brush_s *)node->def );
 }
 

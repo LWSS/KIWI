@@ -88,7 +88,7 @@ struct searchpath_s;
 extern searchpath_s *fs_searchpaths;
 
 // sub_483500 (eclass default attribute setter, IDB 0x483500)
-void sub_483500(int listPtr, const char *key, const char *value);
+void sub_483500(epair_t **head, const char *key, const char *value);
 
 // materialdef.cpp (IDB 0x4315C0) — resolve a material name into a patchMesh_material.
 void SetMaterial(const char *name, patchMesh_material *out);
@@ -96,7 +96,7 @@ void SetMaterial(const char *name, patchMesh_material *out);
 // Prefab loader (IDB 0x480AB0) — load a prefab .map into the model sub-node.
 // REAL port below (after Eclass_RealizeModel); called by Eclass_LoadModel for
 // classtype&0x10 (CLASS_PREFAB) eclasses.
-char Prefab_Load(const char *path, int *node);
+char Prefab_Load(const char *path, modelnode_t **node);
 
 // Com_Parse token-buffer parser (IDB sub_48CA40 @ 0x48CA40) — the editor's own
 // GetToken. Writes the next whitespace/quote/special-delimited token into g_eclassToken
@@ -122,7 +122,7 @@ eclass_t   *eclass_bad   = nullptr;   // 0x025D5B24  (IDB dword_25D5B24)
 
 // Per-map model eclass list (singly-linked via eclass_t::next cast to int).
 // Each entry is a models_t* that has been allocated for a map entity model.
-int         g_models     = 0;         // 0x025D5B28  (IDB dword_25D5B28)
+models_t   *g_models     = NULL;      // 0x025D5B28
 
 // When non-zero, Init_ScanFiles stops after the first /*QUAKED block found.
 int         g_eclassStopOnFirst = 0;  // 0x025D5B2C  (IDB dword_25D5B2C)
@@ -131,11 +131,11 @@ int         g_eclassStopOnFirst = 0;  // 0x025D5B2C  (IDB dword_25D5B2C)
 char        g_bBuildList = 0;         // 0x025D5B05
 
 // Last eclass successfully parsed in Init_ScanFiles.
-int         g_lastParsedEclass  = 0;  // 0x023F1728  (IDB dword_23F1728)
+eclass_t   *g_lastParsedEclass  = NULL; // 0x023F1728
 // Non-zero once the first /*QUAKED block has been found in the current scan.
 int         g_eclassParsedAny   = 0;  // 0x023F172C  (IDB dword_23F172C)
 // Points to the name field of the eclass currently being built (for Assert msgs).
-int         g_eclassCurrentName = 0;  // 0x023F1730  (IDB dword_23F1730)
+const char *g_eclassCurrentName = NULL; // 0x023F1730
 
 // Resolved filepath set by Eclass_InitForSourceDirectory before each
 // Init_ScanFiles call (replacing the register-arg calling convention in IDA).
@@ -143,7 +143,7 @@ char        g_scanFilePath[1024];     // not an original global; bridges ecx-arg
 
 
 // ── forward declarations ───────────────────────────────────────────────────────
-static void Eclass_FreeEntityList(models_t *model);
+static void Eclass_FreeEntityList(modelnode_t *model);
 static void Eclass_FreeEpairs(models_t *model);
 static void Eclass_FreeAll();
 
@@ -172,13 +172,13 @@ static void Eclass_FreeAll();
 //               loop while eax != esi+8
 //   After brushes: add [esi+88h], -1 = --entity->refCount  (entity_s.refCount at 0x88)
 //   Entity_Free_R(entity)
-static void Eclass_FreeEntityList(models_t *model)
+static void Eclass_FreeEntityList(modelnode_t *model)
 {
     iassert( model->entities.next );   // eclass.cpp:39
 
     // Circular entity list: first at entities.next (+0xC), sentinel &x2 (+0x8) —
     // the same head/sentinel overlay as entity_s def(+0x08)/brushes(+0x0C).
-    while ( model->entities.next != (int)&model->x2 )
+    while ( model->entities.next != &model->entities )
     {
         entity_s *e = (entity_s *)model->entities.next;
         iassert( e->refCount == 1 );   // eclass.cpp:43
@@ -202,21 +202,16 @@ static void Eclass_FreeEntityList(models_t *model)
 // ─────────────────────────────────────────────────────────────────────────────
 static void Eclass_FreeEpairs(models_t *model)
 {
-    void **v1 = (void **)model->x95;
-    if ( v1 )
+    epair_t *node = model->xx8;
+    while ( node )
     {
-        void **v2;
-        do
-        {
-            v2 = (void **)*v1;
-            j__free_0(v1[1]);
-            j__free_0(v1[2]);
-            j__free(v1);
-            v1 = v2;
-        }
-        while ( v2 );
+        epair_t *next = node->next;
+        j__free_0(node->key);
+        j__free_0(node->value);
+        j__free(node);
+        node = next;
     }
-    model->x95 = 0;
+    model->xx8 = NULL;
 }
 
 
@@ -236,15 +231,15 @@ static void Eclass_FreeEpairs(models_t *model)
 // ─────────────────────────────────────────────────────────────────────────────
 void Eclass_CheckEntities(models_t *model)
 {
-    models_t *sub = (models_t *)model->x88;
+    modelnode_t *sub = (modelnode_t *)model->xx1;
     while ( sub )
     {
-        models_t *next = (models_t *)sub->x0;
+        modelnode_t *next = (modelnode_t *)sub->next;
         if ( sub->entities.next )   // non-zero means the entity list is populated
         {
             Eclass_FreeEntityList( sub );
             {
-                models_t *model = sub;
+                modelnode_t *model = sub;
                 iassert( model->entities.next == NULL );   // eclass.cpp:88
             }
         }
@@ -252,21 +247,17 @@ void Eclass_CheckEntities(models_t *model)
         sub = next;
     }
 
-    j__free_0((void *)model->x94);
-    j__free_0((void *)model->x89);
+    j__free_0((void *)model->modelpath);
+    j__free_0((void *)model->default_model_name);
 
-    int *p_x90 = &model->x90;
-    int  cnt   = 4;
-    do
+    for ( int i = 1; i < 5; ++i )
     {
-        j__free_0((void *)*p_x90++);
-        --cnt;
+        j__free_0((void *)model->cycleModelName[i]);
     }
-    while ( cnt );
 
     Eclass_FreeEpairs( model );
-    j__free_0((void *)model->handle);   // heap NAME string, NOT an XModel* — BY3-audit note at EOF
-    j__free_0((void *)model->x15);
+    j__free_0((void *)model->name);   // heap NAME string, NOT an XModel* — BY3-audit note at EOF
+    j__free_0((void *)model->comments);
     j__free(model);
 }
 
@@ -284,17 +275,17 @@ void Eclass_CheckEntities(models_t *model)
 // After loading, for each entity in the list: bump refCount to 1, rebuild brush
 // windings (Brush_BuildWindings), and optionally refresh vertex selection.
 // ─────────────────────────────────────────────────────────────────────────────
-static char Eclass_RealizeModel(int *a1, const char *a2)
+static char Eclass_RealizeModel(modelnode_t **a1, const char *a2)
 {
     // a1 is a POINTER-TO the sub-node pointer (Prefab_Load passes &j). IDA derefs:
     // v3 = *a1 + 8 (the entity-list sentinel), *a1 + 148 = the "file exists" byte.
     // (TASK 3 review fix: the earlier port treated a1 as the node itself and dropped
     //  the deref — a latent crash that surfaces once Prefab_Load is ported.)
-    int  node = *a1;
-    int *v3   = (int *)( node + 8 );      // circular entity-list sentinel
-    int *v7   = v3;
-    v3[1] = (int)v3;   // sentinel.next = self
-    v3[0] = (int)v3;   // sentinel.prev = self
+    modelnode_t *node = *a1;
+    entity_s *v3 = &node->entities;
+    entity_s *v7 = v3;
+    v3->next = v3;
+    v3->prev = v3;
 
     // Prefab-load material gate: the prefab's brushes/patches resolve their materials
     // through SetMaterial during the parse below; force the degenerate (wireframe)
@@ -310,17 +301,17 @@ static char Eclass_RealizeModel(int *a1, const char *a2)
         // Optional: mark the eclass if the file also physically exists on disk.
         if ( g_qeglobals.toggle_unk05 && FileExists(a2) )
         {
-            *(byte *)( node + 148 ) = 1;
+            node->fileExists = 1;
         }
 
         // Walk all loaded entities (circular list, v7 is sentinel, v5 = current).
-        int *v5 = (int *)v3[1];
+        entity_s *v5 = v3->next;
         if ( v5 != v3 )
         {
             do
             {
                 // v5[34] == entity refCount (offset 34*4 = 136 = 0x88)
-                ++v5[34];
+                ++v5->refCount;
                 {
                     entity_s *e = (entity_s *)v5;
                     iassert( e->refCount == 1 );   // eclass.cpp:159
@@ -329,8 +320,8 @@ static char Eclass_RealizeModel(int *a1, const char *a2)
                 // Walk brush list: sentinel at v5+2 (offset +8 within entity sub-node,
                 // which matches entity->def as the head).
                 // v5[3] == brushes.oprev (first brush back-link = offset +12 = brush head)
-                for ( brush_t *b = (brush_t *)v5[3];
-                      b != (brush_t *)(v5 + 2);
+                for ( brush_t *b = (brush_t *)v5->brushes.prev;
+                      b != (brush_t *)&v5->def;
                       b = b->onext )
                 {
                     ++b->refCount;
@@ -352,7 +343,7 @@ static char Eclass_RealizeModel(int *a1, const char *a2)
                     }
                     ++b->version;
                 }
-                v5 = (int *)v5[1];
+                v5 = v5->next;
             }
             while ( v5 != v7 );
         }
@@ -360,8 +351,8 @@ static char Eclass_RealizeModel(int *a1, const char *a2)
     }
     else
     {
-        v3[1] = 0;
-        v3[0] = 0;
+        v3->next = NULL;
+        v3->prev = NULL;
         return 0;
     }
 }
@@ -384,7 +375,7 @@ static char Eclass_RealizeModel(int *a1, const char *a2)
 // release) is reproduced 1:1 with a real MFC CString — exactly as Eclass_LoadModel
 // (CStringList) and CEntityWnd_OpenModelDialog (CString) do.
 // ─────────────────────────────────────────────────────────────────────────────
-char Prefab_Load(const char *a1, int *a2)
+char Prefab_Load(const char *a1, modelnode_t **a2)
 {
     Sys_Printf( "Loading prefab %s...", a1 );
 
@@ -427,7 +418,7 @@ char Prefab_Load(const char *a1, int *a2)
 //   a1 = model path string
 //   a2 = int* pointing to a models_t** (i.e. *(int*)a2 is the models_t*, field +4 is handle)
 // ─────────────────────────────────────────────────────────────────────────────
-LRESULT Model_load(char *modelPath, int a2)
+LRESULT Model_load(char *modelPath, modelnode_t **a2)
 {
     // R_RegisterModel below is not a lookup: on a miss it pulls the XModel off disk/iwd, then
     // every material it references, then every image those bind — synchronously.
@@ -447,17 +438,17 @@ LRESULT Model_load(char *modelPath, int a2)
     // node->handle = R_RegisterModel(path).  HEX-RAYS DOUBLE-DEREF ARTIFACT: hex-rays
     // rendered this as **(int**)(*(int*)a2 + 4) = ... but the disasm is a SINGLE store
     // `mov [ecx+4], eax` (the extra `*` crashed — handle is 0 for a fresh node).
-    models_t *node = *(models_t **)a2;
-    node->handle = (int)R_RegisterModel((char *)path);
+    modelnode_t *node = *a2;
+    node->handle = R_RegisterModel((char *)path);
     // counted after the registration, so the plot's rise
     // tracks completed precaches rather than attempts.
 
     {
-        models_t **model = (models_t **)a2;
+        modelnode_t **model = a2;
         iassert( (*model)->handle );   // eclass.cpp:179
     }
 
-    int v4 = node->handle;
+    XModel *v4 = node->handle;
     // (the null-model check is XModelBad's own head iassert — xmodel.cpp:48 — which the
     // binary inlined into this caller)
 
@@ -487,25 +478,25 @@ void Eclass_FreeModel(void **a1)
     models_t *model = (models_t *)a1;
 
     // Unlink from the g_models singly-linked list.
-    int *ec = (int *)g_models;
-    int *i  = &g_models;
-    for ( ; ec != (int *)a1; ec = (int *)*ec )
+    models_t *ec = g_models;
+    models_t **i = &g_models;
+    for ( ; ec != model; ec = ec->next )
     {
         iassert(ec);
-        i = ec;
+        i = &ec->next;
     }
-    *i = *ec;  // splice out
+    *i = ec->next;  // splice out
 
     // Free entity-group sub-nodes in model->x88; each sub-node's circular entity
     // list uses the def(+0x08)/entities.next(+0x0C) head overlay (sentinel &x2).
-    models_t *sub = (models_t *)model->x88;
+    modelnode_t *sub = (modelnode_t *)model->xx1;
     while ( sub )
     {
-        models_t *next = (models_t *)sub->x0;
+        modelnode_t *next = (modelnode_t *)sub->next;
         entity_s *e    = (entity_s *)sub->entities.next;
         if ( e )
         {
-            for ( ; e != (entity_s *)&sub->x2; e = e->next )
+            for ( ; e != (entity_s *)&sub->entities; e = e->next )
             {
                 iassert( e->refCount >= 2 );   // eclass.cpp:258
                 --e->refCount;
@@ -521,14 +512,15 @@ void Eclass_FreeModel(void **a1)
         sub = next;
     }
 
-    j__free_0( (void *)model->x94 );
-    j__free_0( (void *)model->x89 );
-    int *p_x90 = &model->x90;      // x90..x93: four material strings
-    for ( int cnt = 4; cnt; --cnt )
-        j__free_0( (void *)*p_x90++ );
+    j__free_0( (void *)model->modelpath );
+    j__free_0( (void *)model->default_model_name );
+    for ( int i = 1; i < 5; ++i )
+    {
+        j__free_0( (void *)model->cycleModelName[i] );
+    }
 
-    j__free_0( (void *)model->handle );   // heap NAME string, NOT an XModel* — BY3-audit note at EOF
-    j__free_0( (void *)model->x15 );
+    j__free_0( (void *)model->name );   // heap NAME string, NOT an XModel* — BY3-audit note at EOF
+    j__free_0( (void *)model->comments );
     j__free( model );
 }
 
@@ -545,7 +537,7 @@ static void Eclass_FreeAll()
         eclass_t *x0;
         do
         {
-            x0 = (eclass_t *)v0->x0;
+            x0 = (eclass_t *)v0->next;
             Eclass_CheckEntities(v0);
             v0       = (models_t *)x0;
             g_eclass = x0;
@@ -557,10 +549,10 @@ static void Eclass_FreeAll()
     g_eclass = nullptr;
     if ( g_models )
     {
-        int v3;
+        models_t *v3;
         do
         {
-            v3 = v2->x0;
+            v3 = v2->next;
             Eclass_CheckEntities(v2);
             v2       = (models_t *)v3;
             g_models = v3;
@@ -571,8 +563,8 @@ static void Eclass_FreeAll()
 
     if ( eclass_bad )
     {
-        j__free_0(*((void **)eclass_bad + 1));    // eclass_bad->name (field[1])
-        j__free_0(*((void **)eclass_bad + 15));   // field[15]
+        j__free_0(eclass_bad->name);
+        j__free_0(eclass_bad->comments);
         j__free(eclass_bad);
         eclass_bad = nullptr;
     }
@@ -593,9 +585,9 @@ models_t *Model_FreeMapModels()
     {
         do
         {
-            if ( v0->x88 )
+            if ( v0->xx1 )
             {
-                *v1 = (eclass_t *)v0->x0;
+                *v1 = (eclass_t *)v0->next;
                 Eclass_CheckEntities(v0);
             }
             else
@@ -613,10 +605,10 @@ models_t *Model_FreeMapModels()
         models_t *x0;
         do
         {
-            x0       = (models_t *)result->x0;
+            x0       = (models_t *)result->next;
             Eclass_CheckEntities(result);
             result   = x0;
-            g_models = (int)x0;
+            g_models = x0;
         }
         while ( x0 );
     }
@@ -663,34 +655,31 @@ static void Init_CStr(eclass_t *ec, void **out, const char *key)
 
 // ─────────────────────────────────────────────────────────────────────────────
 // sub_483500  (qe3.cpp:56)  — SetKeyValue for the eclass default/epair list.
-// listPtr is the ADDRESS of the list-head pointer; nodes are {next, char* key,
-// char* value} (12 bytes; freed by Eclass_FreeEpairs). If a node with matching key
+// head is the ADDRESS of the list-head pointer; nodes are native epair_t objects
+// (freed by Eclass_FreeEpairs). If a node with matching key
 // exists, its value is replaced; otherwise a new node is prepended. Ported here
 // (qe3.cpp not yet done) because Eclass_ParseDefaults needs it.
 // ─────────────────────────────────────────────────────────────────────────────
-void sub_483500(int listPtr, const char *key, const char *value)
+void sub_483500(epair_t **head, const char *key, const char *value)
 {
-    int **a1  = (int **)listPtr;   // &listHead
-    int  *node = *a1;
-    while ( node )
+    for ( epair_t *node = *head; node; node = node->next )
     {
-        if ( !strcmp( (const char *)node[1], key ) )
+        if ( !strcmp( node->key, key ) )
         {
-            j__free_0( (void *)node[2] );
-            node[2] = (int)(intptr_t)AllocMaterialString( value );   // inlined in the binary (qe3.cpp:56)
+            // The caller may be reusing this value, or a substring of it.
+            char *replacement = AllocMaterialString( value );
+            j__free_0( node->value );
+            node->value = replacement;
             return;
         }
-        if ( !node[0] )
-            break;
-        node = (int *)node[0];
     }
 
     // Not found → prepend a new {next, key, value} node.
-    int *nn = (int *)operator new( 0xCu );
-    nn[0] = (int)*a1;
-    *a1   = nn;
-    nn[1] = (int)(intptr_t)AllocMaterialString( key );     // inlined in the binary (qe3.cpp:56)
-    nn[2] = (int)(intptr_t)AllocMaterialString( value );
+    epair_t *node = (epair_t *)operator new( sizeof(epair_t) );
+    node->next = *head;
+    node->key = AllocMaterialString( key );
+    node->value = AllocMaterialString( value );
+    *head = node;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -722,7 +711,7 @@ static void Eclass_ParseDefaults(eclass_t *ec)
 
         // ec+0x17C (= &ec->xx8) is the eclass default/epair list head (freed by
         // Eclass_FreeEpairs at +380). IDA: sub_483500(this+95, key, value).
-        sub_483500( (int)(intptr_t)&ec->xx8, key, value );
+        sub_483500( &ec->xx8, key, value );
 
         p = strstr( text, "default:" );
     }
@@ -804,8 +793,8 @@ eclass_t *Eclass_InitFromText( void *textPtr )
 {
     char *text = (char *)textPtr;
 
-    eclass_t *ec = (eclass_t *)operator new( 0x184u );
-    memset( ec, 0, 0x184u );
+    eclass_t *ec = (eclass_t *)operator new( sizeof(eclass_t) );
+    memset( ec, 0, sizeof(eclass_t) );
 
     // Entity name = first token after "/*QUAKED " (text + 9).
     char *v3 = Eclass_GetToken( text + 9 );
@@ -814,13 +803,13 @@ eclass_t *Eclass_InitFromText( void *textPtr )
 
     ec->color[0] = ec->color[1] = ec->color[2] = 1.0f;
     ec->unk = 1.0f;
-    g_eclassCurrentName = (int)ec->name;
+    g_eclassCurrentName = ec->name;
 
     // Color block " (r g b)".
     if ( sscanf( v3, " (%g %g %g)", &ec->color[0], &ec->color[1], &ec->color[2] ) != 3 )
         return ec;
 
-    SetMaterial( "$opaque", (patchMesh_material *)ec->material );
+    SetMaterial( "$opaque", &ec->material );
 
     // Advance to the ')' that closes the color block.
     char *q = v3;
@@ -892,12 +881,15 @@ eclass_t *Eclass_InitFromText( void *textPtr )
     // 2. Tokenize the flag line into up to 8 flag names (ec+0x40 + 32*k).
     {
         char *tp = descLine;
+        char *flagNames[8] = { ec->flagname0, ec->flagname1, ec->flagname2, ec->flagname3,
+                               ec->flagname4, ec->flagname5, ec->flagname6, ec->flagname7 };
         for ( int k = 0; k < 8; ++k )
         {
             tp = Eclass_GetToken( tp );
             if ( !tp )
                 break;
-            strcpy( (char *)ec + 64 + 32 * k, g_eclassToken );
+            strncpy( flagNames[k], g_eclassToken, sizeof(ec->flagname0) - 1 );
+            flagNames[k][sizeof(ec->flagname0) - 1] = '\0';
         }
     }
 
@@ -985,18 +977,16 @@ LABEL_4:
 // The binary uses an MFC CStringList (sub_5AC540 ctor / sub_5ACA05 AddTail / GetAt /
 // sub_5AC676 dtor); with MFC enabled this is a real CStringList walked head→tail.
 // ─────────────────────────────────────────────────────────────────────────────
-void Eclass_LoadModel(int a1)
+void Eclass_LoadModel(eclass_t *ec)
 {
-
-    eclass_t *ec = (eclass_t *)a1;
     std::vector<std::string> list;   // was MFC CStringList; IDA sub_5AC540(&v9, 10) — 10 is only an allocation hint
 
     // ec->xx1 (+0x160) heads the sub-model node list; create the first node if absent.
     if ( !ec->xx1 )
     {
-        void *node = operator new( 0x98u );
-        memset( node, 0, 0x98u );
-        ec->xx1 = (int)node;
+        modelnode_t *node = (modelnode_t *)operator new( sizeof(modelnode_t) );
+        memset( node, 0, sizeof(modelnode_t) );
+        ec->xx1 = node;
     }
 
     // Split modelpath on ';' into the list (operate on a copy — strtok is destructive).
@@ -1004,8 +994,8 @@ void Eclass_LoadModel(int a1)
     for ( char *tok = strtok( copy, ";" ); tok; tok = strtok( nullptr, ";" ) )
         list.push_back( tok );
 
-    int v4 = ec->xx1;                  // current (tail) node
-    int j  = v4;                       // node handed to the loader
+    modelnode_t *v4 = ec->xx1;
+    modelnode_t *j = v4;
 
     // Forward head->tail walk (was CStringList GetHeadPosition/GetNext; == IDA's GetAt(idx)).
     // Each `name` is a mutable copy, matching the binary's per-iteration CString copy, so the
@@ -1013,15 +1003,19 @@ void Eclass_LoadModel(int a1)
     for ( std::string name : list )
     {
         if ( ec->classtype & 0x10 )
+        {
             Prefab_Load( name.c_str(), &j );
+        }
         else
-            Model_load( (char *)name.c_str(), (int)&j );
+        {
+            Model_load( (char *)name.c_str(), &j );
+        }
 
-        int newNode = (int)operator new( 0x98u );
-        *(int *)v4 = newNode;          // link: *v4 = newNode
+        modelnode_t *newNode = (modelnode_t *)operator new( sizeof(modelnode_t) );
+        v4->next = newNode;
         v4 = newNode;
         j  = newNode;
-        memset( (void *)newNode, 0, 0x98u );
+        memset( newNode, 0, sizeof(modelnode_t) );
     }
 
     j__free_0( copy );
@@ -1043,11 +1037,11 @@ bool Eclass_hasModel(eclass_t *e)
     // If modelpath is set, attempt to load it now (converts path → handle).
     if ( e->modelpath )
     {
-        Eclass_LoadModel((int)e);
+        Eclass_LoadModel(e);
         iassert( e->modelpath == NULL );   // eclass.cpp:522
     }
 
-    models_t *xx1 = (models_t *)e->xx1;
+    modelnode_t *xx1 = (modelnode_t *)e->xx1;
     if ( !xx1 )
         return false;
 
@@ -1144,13 +1138,11 @@ LABEL_6:
 // The model-type flag (bit 4 = 0x10) is at eclass_t byte offset 384 (classtype).
 // ─────────────────────────────────────────────────────────────────────────────
 // shim so Eclass_01's iassert( Eclass_hasModel( e ) ) stringizes 1:1 over its models_t* local.
-static inline bool Eclass_hasModel( models_t *e ) { return Eclass_hasModel( (eclass_t *)e ) != 0; }
-models_t *Eclass_01(const char *a1, int a2)
+models_t *Eclass_01(const char *a1, entity_s *ent)
 {
     // The model/prefab CLASS cache is a LINEAR LIST walked with _stricmp per node, once per
     // model entity — O(entities x distinct models).  Eclass_InsertAlphabetized keeps g_models
     // sorted, so an early-exit or a hash index is available if a load profile ever wants one.
-    entity_s *ent = (entity_s *)(intptr_t)a2;
 
     if ( !a1 || !strlen(a1) )
         return nullptr;
@@ -1161,10 +1153,10 @@ models_t *Eclass_01(const char *a1, int a2)
 
     // Search g_models for a node whose name matches a1 AND whose model-type
     // flag (bit 4 of x96/classtype, byte 384) matches the entity's eclass flag.
-    while ( _stricmp(a1, (const char *)e->handle) ||
-            (((byte)e->x96 ^ (byte)ent->eclass->classtype) & 0x10) != 0 )
+    while ( _stricmp(a1, (const char *)e->name) ||
+            (((byte)e->classtype ^ (byte)ent->eclass->classtype) & 0x10) != 0 )
     {
-        e = (models_t *)e->x0;
+        e = (models_t *)e->next;
         if ( !e )
             goto LABEL_7;
     }
@@ -1177,34 +1169,35 @@ LABEL_7:
     {
         DisableRendering_pp();
 
-        models_t *models = (models_t *)operator new(0x184u);
+        models_t *models = (models_t *)operator new(sizeof(models_t));
         memset(models, 0, sizeof(models_t));
 
         unsigned int v5 = (unsigned int)strlen(a1);
         void *v11 = operator new(v5 + 1);
         memcpy_0(v11, a1, v5 + 1);
-        models->handle = (int)v11;
+        models->name = (char *)v11;
 
         unsigned int v6 = (unsigned int)strlen(a1);
         void *v12 = operator new(v6 + 1);
         memcpy_0(v12, a1, v6 + 1);
-        models->x94 = (int)v12;
+        models->modelpath = (char *)v12;
 
         // Copy the model-type flag bit from the entity's eclass.
         int v7 = ent->eclass->classtype;
-        *(float *)&models->x11 = 0.85000002f;
-        *(float *)&models->x9  = 0.85000002f;
-        models->x96 |= v7 & 0x10;
+        models->color[2] = 0.85000002f;
+        models->color[0] = 0.85000002f;
+        models->classtype |= v7 & 0x10;
 
         // Seed the node's bounds from the eclass: mins/maxs (6 floats @+0xC..+0x20)
         // bit-copied into the int fields entities.next..x8 at the same offsets.
         eclass_t *srcEc = Eclass_ForName(0, a1);
-        memcpy( &models->entities.next, &srcEc->mins, 2 * sizeof(vec3_t) );
+        memcpy( models->mins, srcEc->mins, sizeof(vec3_t) );
+        memcpy( models->maxs, srcEc->maxs, sizeof(vec3_t) );
 
         const char *v9 = srcEc->default_model_name;   // +0x164
         if ( v9 )
         {
-            models->x89 = (int)AllocMaterialString(v9);
+            models->default_model_name = AllocMaterialString(v9);
         }
 
         if ( Eclass_hasModel((eclass_t *)models) )
@@ -1330,7 +1323,7 @@ void Init_ScanFiles(int a1)
                    (const char *)g_eclassCurrentName, filePath);
         }
 
-        g_lastParsedEclass = (int)v13;
+        g_lastParsedEclass = (eclass_t *)v13;
         g_eclassParsedAny  = 1;
 
         if ( g_eclassStopOnFirst )

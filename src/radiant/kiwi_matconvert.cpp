@@ -24,7 +24,7 @@ extern qtexture_s *Texture_GetHandle( const char *name );
 extern qtexture_s *TexWnd_RegisterMaterialByName( const char *name );
 extern qtexture_s *MaterialDef_GetLayeredMaterial( MaterialDef *def );
 extern bool        Materialdef_Realize( MaterialDef *def );
-extern void        sub_47D060( int brushList );
+extern void        sub_47D060( selbrush_t *brushList );
 extern int         g_nUpdateBits;
 extern entity_s    entities;
 
@@ -481,9 +481,9 @@ void RefreshLiveMaterial( const char *name, Material *oldMaterial, Material *fre
     if ( browserMaterial )
         browserMaterial->handle = oldMaterial;
 
-    sub_47D060( (int)(intptr_t)&active_brushes );
-    sub_47D060( (int)(intptr_t)&selected_brushes );
-    sub_47D060( (int)(intptr_t)&filtered_brushes );
+    sub_47D060( &active_brushes );
+    sub_47D060( &selected_brushes );
+    sub_47D060( &filtered_brushes );
     g_nUpdateBits = -1;
 }
 

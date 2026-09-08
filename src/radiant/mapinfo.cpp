@@ -41,7 +41,7 @@ extern entity_s   entityInsts;                       // map.cpp 0x23F1748 (entit
 // with a realized prefab recurses with a2 for BOTH blocks, so nested prefabs share counters.
 void __cdecl MapInfo_01(
     int        *worldStats,   // a1 — output counters for the world
-    int         prefabStats,  // a2 — output counters for prefab children (int* cast to int)
+    int        *prefabStats,  // output counters for prefab children
     selbrush_t *brushList,    // a3 — active_brushes or prefab active_brushlist sentinel
     entity_s   *entList )     // a4 — entityInsts sentinel
 {
@@ -182,7 +182,7 @@ void MapInfo_Gather( mapInfoStats_t &out )
     // The binary's 14 zeroed stack ints, passed as two contiguous 7-counter blocks.
     int worldStats[7]  = { 0, 0, 0, 0, 0, 0, 0 };
     int prefabStats[7] = { 0, 0, 0, 0, 0, 0, 0 };
-    MapInfo_01( worldStats, (int)prefabStats, &active_brushes, &entityInsts );
+    MapInfo_01( worldStats, prefabStats, &active_brushes, &entityInsts );
 
     out.brushes    = worldStats[0]; out.curves     = worldStats[1]; out.terrain    = worldStats[2];
     out.brush_ents = worldStats[3]; out.box_ents   = worldStats[4]; out.model_ents = worldStats[5];

@@ -79,7 +79,7 @@ void Ed_SinCos( float deg, float *s, float *c )
 
 // 0x4A47D0  Vec3Normalize (out-of-place) — normalize inVecs[0..2] into outS[0..2].
 // lensq narrows to float; zero-guard (-len >= 0 -> 1.0).
-void sub_4A47D0( int outS, int inVecs )
+void sub_4A47D0( float *outS, const float *inVecs )
 {
     float       *a1 = (float *)outS;
     const float *a2 = (const float *)inVecs;
@@ -98,8 +98,8 @@ void sub_4A47D0( int outS, int inVecs )
 // full 2x4 matrix chain, pure x87; bit-exact rotation depends on Ed_SinCos.
 // Carries the 7 texturevecs.cpp:157,160-166 level-1 output-contract asserts (s!=t +
 // xv/yv unit-vector properties).
-void Face_MoveTexture( int surfDef, const float *normal, int outVecs,
-                       int uvBase, float rotate, float crossterm )
+void Face_MoveTexture( const float *surfDef, const float *normal, float *outVecs,
+                       const float *uvBase, float rotate, float crossterm )
 {
     const float *scale = (const float *)surfDef;   // [0]=sizeX [1]=sizeY
     const float *shift = (const float *)uvBase;     // [0]=shiftX [1]=shiftY
@@ -216,9 +216,9 @@ static double sub_4AAD00( float value, float granularity, float epsilon )
 //    flt_6F4300 =  4.0,   flt_6F4640 = 0.005    (rotate snap:       gran=4,  eps=0.005)
 //    dbl_6F4578 = 57.2957763671875              (radians -> degrees, 180/pi)
 // ════════════════════════════════════════════════════════════════════════════
-void texturevecs_02( int outSize, int texMatPtr, float /*st1_phantom*/,
-                     int planeNormalPtr, float planeDist,
-                     int outShift, int outRotate, int outCrossterm )
+void texturevecs_02( float *outSize, float *texMatPtr, float /*st1_phantom*/,
+                     const float *planeNormalPtr, float planeDist,
+                     float *outShift, float *outRotate, float *outCrossterm )
 {
     float       *edi  = (float *)outSize;          // out size[2]
     float       *esi  = (float *)texMatPtr;        // texMat[0..7] (in/scratch)

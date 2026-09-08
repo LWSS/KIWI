@@ -444,3 +444,18 @@ build-radiant/
 KIWI/
 radiant_artifacts/
 /plasticity
+
+# Local AI reports and reverse-engineering/test scaffolding
+/.mcp.json
+/.kiwi_briefs/
+/CLAUDE.md
+/AGENTS.md
+/X64_*.md
+/RADIANT_*.md
+/Y_blops_xanim_audit_report.md
+/scripts/x64_audit/
+/scripts/cod4map/tools/
+/scripts/cod4map/tests/
+/scripts/cod4rad/tools/
+/scripts/inspect_raw_xmodel_blends.py
+/tools/

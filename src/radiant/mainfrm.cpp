@@ -81,7 +81,7 @@ extern void       CamWnd_MouseControl( float dtime );            // was Cam_Mous
 extern void       CamWnd_Scroll( float amount );                 // was CCamWnd_Scroll( frame, amt )
 extern void       CamWnd_ChangeFloor( int a2 );                  // was CCamWnd::Cam_ChangeFloor( cam, a2 )
 extern void       CamWnd_RegionsForSelected();                   // was Regions_ForSelected( cam )
-extern void       CamWnd_AddLightPreview( selbrush_t *inst, int arg2, const orientation_t *orient );
+extern void       CamWnd_AddLightPreview( selbrush_t *inst, selbrush_t *arg2, const orientation_t *orient );
 extern int        CamWnd_RemoveLightPreview( selbrush_t *removed );
 extern void       CamWnd_ClearLightPreviews();                   // was m_pCamWnd->light_preview_count = 0
 
@@ -554,8 +554,8 @@ static void Radiant_SetProjectMapsPath( const char *mapPath )
     entity_s_def *proj = g_qeglobals.d_project_entity;
     if ( !proj )
     {
-        proj = (entity_s_def *)operator new( 0x8Cu );
-        memset( proj, 0, 0x8Cu );
+        proj = (entity_s_def *)operator new( sizeof(entity_s_def) );
+        memset( proj, 0, sizeof(entity_s_def) );
         proj->brushes.prev         = (selbrush_t *)&proj->def;
         proj->def = (entity_s *)&proj->def;
         g_qeglobals.d_project_entity = proj;
@@ -857,7 +857,7 @@ static void Radiant_Kiwi_SeedSnapshotLayer0( const curTexWndLayer_t *src )
 void Radiant_SeedCurrentTexdefs()
 {
     extern void SetMaterial( const char *name, patchMesh_material *out );          // materialdef.cpp 0x4315c0
-    extern int  Init_MaterialLayer( MaterialDef *channel, MaterialDef *src );      // materialdef.cpp 0x472c00
+    extern int  Init_MaterialLayer( MaterialDef *channel, float src );      // materialdef.cpp 0x472c00
     curTexWndLayer_t *rts = g_qeglobals.random_texture_stuff;
     Get_MaterialNames();       // 0x45d143
     rts[0].sampleSize = 0.25f;   // 0x45d14e
@@ -870,9 +870,9 @@ void Radiant_SeedCurrentTexdefs()
     // Init_MaterialLayer's 2nd arg is the sample-size FLOAT BITS reinterpreted as a ptr
     // (cf. map.cpp / Face_InitMaterialChannel).
     float s0 = 0.25f, s1 = 16.0f, s2 = 0.25f;
-    Init_MaterialLayer( &rts[0].mtl, *(MaterialDef **)&s0 );   // 0x45d1ac
-    Init_MaterialLayer( &rts[1].mtl, *(MaterialDef **)&s1 );   // 0x45d1bf
-    Init_MaterialLayer( &rts[2].mtl, *(MaterialDef **)&s2 );   // 0x45d1cf
+    Init_MaterialLayer( &rts[0].mtl, s0 );   // 0x45d1ac
+    Init_MaterialLayer( &rts[1].mtl, s1 );   // 0x45d1bf
+    Init_MaterialLayer( &rts[2].mtl, s2 );   // 0x45d1cf
 
     // KIWI-UX (ROUND AA, ITEM 1) — SNAPSHOT, so the restore below needs no calls.
     // See Radiant_ApplyStartupTextureScale for why the round-Y restore could not
@@ -889,7 +889,7 @@ void Radiant_SeedCurrentTexdefs()
 void Radiant_LoadEclassDefs()
 {
     extern eclass_t *Eclass_InitForSourceDirectory( char *path );  // eclass.cpp (0x481B50)
-    extern char     *ValueForKey2( int e, const char *key );       // entity.cpp 0x4825C0
+    extern char     *ValueForKey2( const entity_s *e, const char *key );       // entity.cpp 0x4825C0
     extern void      Load_Defs( const char *folder );              // eclass.cpp (0x48B6C0)
     extern void      ScanWeapAiFiles();                            // eclass.cpp (0x48BA40)
     extern const char *Dvar_GetString( const char *dvarName );     // qcommon (fs_basepath)
@@ -902,7 +902,7 @@ void Radiant_LoadEclassDefs()
     // entitypath against <fs_basepath>\bin\ and only run the FreeAll-ing scan when the
     // resolved file EXISTS - else a missing cod4.def would WIPE the palette.
     char *entitypath = g_qeglobals.d_project_entity
-        ? ValueForKey2( (int)(intptr_t)g_qeglobals.d_project_entity, "entitypath" )
+        ? ValueForKey2( g_qeglobals.d_project_entity, "entitypath" )
         : (char *)"";
     char resolvedDef[MAX_PATH] = "";
     if ( entitypath && *entitypath )
@@ -1852,7 +1852,7 @@ extern void        MRU_InsertItem( LPMRUMENU *mru, HMENU hMenu );             //
 extern void        SaveMruInReg( LPMRUMENU *mru );                            // qe3.cpp 0x48A750
 extern void        LoadMruInReg( LPMRUMENU *mru );                            // qe3.cpp 0x48A870
 extern BOOL        DoMru( short nID, HWND hWnd );                             // qe3.cpp 0x4994B0
-extern char       *ValueForKey2( int e, const char *key );                   // entity.cpp 0x4825C0
+extern char       *ValueForKey2( const entity_s *e, const char *key );                   // entity.cpp 0x4825C0
 extern void        SetKeyValue( entity_s_def *e, const char *key, const char *value ); // entity.cpp
 
 // â”€â”€ 0x495330  ProjectDlgProc â€” the IDD_PROJECT_SETTINGS content, UI-independent â”€â”€
@@ -1865,7 +1865,7 @@ const char *ProjectSettings_Get( const char *key )
     entity_s_def *proj = (entity_s_def *)g_qeglobals.d_project_entity;
     if ( !proj )
         return "";
-    return ValueForKey2( (int)(intptr_t)proj, key );
+    return ValueForKey2( proj, key );
 }
 
 void ProjectSettings_Apply( const char *basepath, const char *mapspath, const char *entitypath,
@@ -4514,7 +4514,7 @@ bool Radiant_OkToDiscard()
 {
     if ( !HasUnsavedChangesOrInsidePrefab_mf()
          && CheckLayeredMaterial_Modifications( lyrMtlGlob.Layers,
-                                                84 * lyrMtlGlob.entryCount, 0 ) == (unsigned)lyrMtlGlob.crcToken )
+                                                sizeof(LyrEntry_t) * lyrMtlGlob.entryCount, 0 ) == (unsigned)lyrMtlGlob.crcToken )
         return true;                       // nothing dirty â†’ proceed silently
     return Radiant_ConfirmModified();      // dirty â†’ prompt
 }
@@ -5304,11 +5304,11 @@ static void Cmd_OnPreviewAtMaxIntensity()  // cmd 36122 (0x425670)
 extern void Map_ImportFile( const char *path );                  // map.cpp 0x488C70
 extern void DefaultExtension( char *path, const char *ext );     // cmdlib.cpp
 extern void Map_SaveFile( const char *path, char bRegion, char a3 ); // map.cpp
-typedef int WriteFunc_map_t( int ctx, const char *fmt, ... );
+typedef int WriteFunc_map_t( void *ctx, const char *fmt, ... );
 extern void Entity_WriteSelected_R( WriteFunc_map_t **writer );  // map.cpp 0x488DF0
 
 // File-writing WriteFunc for OnFileExportmap_Sub (a 2-slot writer whose [1] is the FILE*).
-static int Radiant_FileWriter( int ctx, const char *fmt, ... )
+static int Radiant_FileWriter( void *ctx, const char *fmt, ... )
 {
     WriteFunc_map_t **writer = (WriteFunc_map_t **)ctx;
     FILE *fp = (FILE *)writer[1];
@@ -5403,9 +5403,9 @@ extern bool g_radiantFirstLightRendererReady;
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 extern void Assert( const char *file, int line, int type, const char *fmt, ... );  // engine_stubs.cpp
 
-void MainFrm_BrushList( int message, selbrush_t *brushList )
+void MainFrm_BrushList( const char *message, selbrush_t *brushList )
 {
-    const char *msg = (const char *)(intptr_t)message;
+    const char *msg = message;
     iassert( brushList );   // mainfrm.cpp:6372
 
     for ( selbrush_t *brush = brushList->next; brush != brushList; brush = brush->next )

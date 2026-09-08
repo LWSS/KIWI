@@ -466,6 +466,7 @@ uint8_t *__cdecl Hunk_AllocAlign(uint size, int alignment, const char *name, int
     uint8_t *buf;      // [esp+4h] [ebp-10h]
     uint8_t *endBuf;   // [esp+8h] [ebp-Ch]
     int alignmenta;    // [esp+20h] [ebp+Ch]
+    uint64_t new_permanent;
 
 #ifdef KISAK_MP
     iassert(Sys_IsMainThread());
@@ -473,23 +474,22 @@ uint8_t *__cdecl Hunk_AllocAlign(uint size, int alignment, const char *name, int
     iassert(s_hunkData);
     iassert(!(alignment & (alignment - 1)));
     iassert(alignment <= HUNK_MAX_ALIGNEMT);
-    alignmenta = alignment - 1;
     Hunk_CheckTempMemoryHighClear();
-    if (alignment <= 0 || alignment > HUNK_MAX_ALIGNEMT || (alignment & (alignment - 1))
-        || (((uint64_t)hunk_high.permanent + size + alignment - 1) & ~(uint64_t)(alignment - 1)) + hunk_low.temp > s_hunkTotal)
+    if (alignment <= 0 || alignment > HUNK_MAX_ALIGNEMT || (alignment & (alignment - 1)))
     {
-        Com_Error(ERR_DROP, "Hunk_AllocAlign: invalid or exhausted allocation");
+        Com_Error(ERR_DROP, "Hunk_AllocAlign: invalid alignment %i", alignment);
+    }
+    alignmenta = alignment - 1;
+    new_permanent = ((uint64_t)hunk_high.permanent + size + alignmenta) & ~(uint64_t)alignmenta;
+    if (new_permanent + hunk_low.temp > (uint64_t)s_hunkTotal)
+    {
+        track_PrintAllInfo();
+        Com_Error(ERR_DROP, "Hunk_AllocAlign failed on %u bytes (total %i MB, low %i MB, high %u MB)", size, s_hunkTotal / 0x100000, hunk_low.temp / 0x100000, (unsigned int)(new_permanent / 0x100000));
     }
     old_permanent = hunk_high.permanent;
     endBuf = (uint8_t *)((uintptr_t)&s_hunkData[s_hunkTotal - hunk_high.permanent] & ~(uintptr_t)0xFFF);
-    hunk_high.permanent += size;
-    hunk_high.permanent = ~alignmenta & (alignmenta + hunk_high.permanent);
+    hunk_high.permanent = (int)new_permanent;
     hunk_high.temp = hunk_high.permanent;
-    if (hunk_high.permanent + hunk_low.temp > s_hunkTotal)
-    {
-        track_PrintAllInfo();
-        Com_Error(ERR_DROP, "Hunk_AllocAlign failed on %i bytes (total %i MB, low %i MB, high %i MB)", size, s_hunkTotal / 0x100000, hunk_low.temp / 0x100000, hunk_high.temp / 0x100000);
-    }
     buf = &s_hunkData[s_hunkTotal - hunk_high.permanent];
     if ((alignmenta & (uintptr_t)buf) != 0)
     {

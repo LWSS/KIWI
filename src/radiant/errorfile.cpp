@@ -29,7 +29,7 @@ extern void Map_LoadFromFile( const char *filename );
 extern void I_strncpyz( char *dest, const char *src, int destsize ); // q_shared.cpp (0x4B9290)
 extern void Select_ByEntityNumber( int brushIdx, int entIdx );  // win_dlg.cpp (0x495550)
 extern void Material_SetMode( int lightmapMode );
-extern void vectoangles( float *angles, int vec );
+extern void Radiant_VecToAngles( float *angles, const float *vec );
 
 // ── error-log loader deps (Pointfile_Errorfile parse path) ───────────────────
 // Com_Parse / Com_BeginParseSession come from <universal/q_parse.h> (included above).
@@ -200,7 +200,7 @@ have_value:
     // Check for unsaved changes or layered-material modifications.
     if ( ( HasUnsavedChangesOrInsidePrefab()
            || CheckLayeredMaterial_Modifications( lyrMtlGlob.Layers,
-                                                  84 * lyrMtlGlob.entryCount,
+                                                  sizeof(LyrEntry_t) * lyrMtlGlob.entryCount,
                                                   0 ) != lyrMtlGlob.crcToken )
          // NO-MFC: the same prompt, now that U-CMD-2 lifted it out of CMainFrame.  The
          // g_pParentWnd liveness half of the MFC expression has no analog (the prompt is a
@@ -248,7 +248,7 @@ do_position:
 
             // vectoangles converts a direction vector into (pitch, yaw, 0).
             // IDA: vectoangles(m_pCamWnd->camera.angles, (int)&unk_180AD04 + 40*v7)
-            vectoangles( cam->angles, (int)(intptr_t)&s_errLog[v7].dir[0] );
+            Radiant_VecToAngles( cam->angles, &s_errLog[v7].dir[0] );
 
             // Negate pitch (IDA: *angles = -v12 where v12 = *angles before g_nUpdateBits).
             float pitch = cam->angles[0];

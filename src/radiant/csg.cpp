@@ -53,7 +53,7 @@ extern void     Brush_BuildWindings( brush_t *b, int bFull );                  /
 // Updates brush colour based on entity class.
 extern unsigned int Entity_ColorSth( brush_t *b );                             // 0x475110 (entity.cpp)
 // Applies a face material to the face in brush; used by AutoCaulk.
-extern void     sub_476740( int texdef, face_t *face, brush_t *brush );        // 0x476740
+extern void     sub_476740( const patchMesh_material *texdef, face_t *face, brush_t *brush );        // 0x476740
 
 // ─── externs from materialdef.cpp ────────────────────────────────────────────
 extern qtexture_s *MaterialDef_GetLayeredMaterial( MaterialDef *def );         // 0x4314a0
@@ -492,7 +492,7 @@ selbrush_t *Brush_MergeList( selbrush_t *brushList )
 
     // Phase 2: allocate the new brush DEF and collect the outer faces.
     brush_t *newBrush = (brush_t *)operator new( 0x58u );
-    memset( newBrush, 0, 0x58 );  // sizeof(brush_t) = 0x58 = 88 (the DEF, not the instance)
+    memset( newBrush, 0, sizeof(brush_t) );
 
     for ( selbrush_t *node1 = brushList; node1; node1 = node1->next )
     {
@@ -663,7 +663,7 @@ bool Brush_AutoCaulkFace( brush_t *brush, face_t *face )
     {
         patchMesh_material mat{};
         SetMaterial( "caulk", &mat );
-        sub_476740( (int)&mat, face, brush );   // pass &mat — sub_476740 derefs a1[0]/a1[1] = {lyrMtl,radMtl}; *(int*)&mat passed mat.lyrMtl (garbage/NULL-deref)
+        sub_476740( &mat, face, brush );   // pass &mat — sub_476740 derefs a1[0]/a1[1] = {lyrMtl,radMtl}; *(int*)&mat passed mat.lyrMtl (garbage/NULL-deref)
         return true;
     }
 
@@ -677,7 +677,7 @@ bool Brush_AutoCaulkFace( brush_t *brush, face_t *face )
     {
         patchMesh_material mat{};
         SetMaterial( "caulk", &mat );
-        sub_476740( (int)&mat, face, brush );
+        sub_476740( &mat, face, brush );
         return true;
     }
     return false;

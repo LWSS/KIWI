@@ -33,9 +33,9 @@ extern int       g_nUpdateBits;                                            // en
 extern int       Sys_Printf( const char *fmt, ... );                       // win_qe3.cpp:118
 extern void      MarkMapModified();                                        // win_qe3.cpp:195
 extern entity_s *world_entity;                                             // map.cpp:62
-extern char     *ValueForKey2( int e, const char *key );                   // entity.cpp:89
+extern char     *ValueForKey2( const entity_s *e, const char *key );                   // entity.cpp:89
 extern int       Entity_GetVec3ForKey( entity_s_def *e, float *out, const char *key ); // entity.cpp:99
-extern float     Entity_GetFloatValueForKey( int e, const char *key );     // entity.cpp:109
+extern float     Entity_GetFloatValueForKey( const entity_s *e, const char *key );     // entity.cpp:109
 // File-local elsewhere; needed to re-dock this window when it reopens.
 extern ImGuiID   ImGuiShell_DockRoot();                                    // imgui_shell.cpp:796
 extern void      SetKeyValue( entity_s_def *e, const char *key, const char *value );   // entity.cpp:212
@@ -570,7 +570,7 @@ void KiwiSun_Place()
     int  toWrite = 0;
     for ( int i = 0; i < count; ++i )
     {
-        const char *have = ValueForKey2( (int)(intptr_t)wd, defaults[i].key );
+        const char *have = ValueForKey2( wd, defaults[i].key );
         missing[i] = !have || !have[0];
         if ( missing[i] )
             ++toWrite;
@@ -638,7 +638,7 @@ void KiwiSun_Delete()
     int present = 0;
     for ( int i = 0; i < 7; ++i )
     {
-        const char *have = ValueForKey2( (int)(intptr_t)wd, sunKeys[i] );
+        const char *have = ValueForKey2( wd, sunKeys[i] );
         if ( have && have[0] )
             ++present;
     }
@@ -1014,7 +1014,7 @@ void KiwiSun_Draw()
         // in the entity window. BeginDisabled does not skip reads, so guard `wd`
         // before Entity_Get* walks e->epairs (entity.cpp:102,111).
         if ( wd && !s_uiEditing[2] )
-            s_uiLight = Entity_GetFloatValueForKey( (int)(intptr_t)wd, "sunlight" );
+            s_uiLight = Entity_GetFloatValueForKey( wd, "sunlight" );
 
         ImGui::SetNextItemWidth( KSUNUI_FIELD_W );
         const bool litEnter =

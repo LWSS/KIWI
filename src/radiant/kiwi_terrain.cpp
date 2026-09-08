@@ -92,7 +92,7 @@ extern void         KiwiMtl_RealizeFace( face_t *f );                           
 // The weight overlay re-emits a patch's flat-colour run after the reference images.
 extern int          Editor_MaterialSortKey( Material *handle );        // r_ed_scene.cpp 0x4FDBB0
 extern void         Editor_AddMeshCmd( Material *handle, int techType, int sortKey,
-                        int vertCount, int vbIndexAndOffs, int indexCount, int indexTable ); // r_ed_scene.cpp 0x4FDA50
+                        int vertCount, int vbIndexAndOffs, int indexCount, const uint16_t *indexTable ); // r_ed_scene.cpp 0x4FDA50
 extern void        *R_AddEditorSurfsCmd();                             // r_ed_scene.cpp 0x4FDA10
 extern void         R_SortMaterials();                                 // r_ed_scene.cpp
 // Legacy soft-select vertex drag (Advanced Patch Editor mode 1).
@@ -4053,7 +4053,7 @@ static void DrawWeightOverlay()
                 }
                 Editor_AddMeshCmd( flat, TECHNIQUE_UNLIT, sortKey + L, inst->vertCount,
                                    inst->visArray[L].vertHandle, inst->indexCount,
-                                   (int)(intptr_t)inst->indicesFront );
+                                   inst->indicesFront );
             }
         }
     }

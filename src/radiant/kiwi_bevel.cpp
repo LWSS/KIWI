@@ -32,7 +32,7 @@ extern int          Sys_Printf( const char *fmt, ... );                       //
 extern int          g_nUpdateBits;                                            // 0x25D5A74 (mainfrm.cpp)
 
 extern face_t      *Face_Alloc( brush_t *b, face_t *f );                      // brush.cpp:304  0x471500
-extern unsigned int Brush_RemoveFace( brush_t *b, unsigned int faceIndex );   // brush.cpp:345  0x471640
+extern size_t Brush_RemoveFace( brush_t *b, unsigned int faceIndex );   // brush.cpp:345  0x471640
 extern brush_t     *Brush_Clone( brush_t *def );                              // brush.cpp:729  0x475D20
 extern void         Brush_Free_R( brush_t *def );                             // brush.cpp:706  0x475AF0
 extern selbrush_t  *Brush_AddToList( brush_t *def, entity_s *owner );         // brush.cpp:669  0x475980

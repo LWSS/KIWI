@@ -28,7 +28,7 @@ int g_svBatchKB       = 0;   // bytes those batches copy into the render command
 // Assert/Sys_Printf — defined in engine_stubs.cpp (same pattern as all other radiant TUs).
 extern void Assert( const char *file, int line, int type, const char *fmt, ... );
 extern int  Sys_Printf( const char *fmt, ... );
-extern int  Entity_GetIntValueForKey( int e, const char *key );
+extern int  Entity_GetIntValueForKey( const entity_s *e, const char *key );
 
 // ─────────────────────────────────────────────────────────────────────────────
 // R_AddRenderCmdDrawTris (0x4FD1C0) — not declared in kisak headers for KISAK_RADIANT.
@@ -354,22 +354,12 @@ extern void  Patch_Fill_SyncVersion( patch_t *inst, const orientation_t *orient 
 
 // prefab_s — local mirror of entity.cpp's prefab_s (0x54 bytes); only the instanced-
 // brush list sentinels are read here (the prefab-content recursion at 0x47b359).
-struct prefab_s
-{
-    entity_s    *prev_entity;           // 0x00
-    entity_s    *next_entity;           // 0x04
-    void        *unk;                   // 0x08
-    selbrush_t  *active_brushlist;      // 0x0C   tail sentinel (prev side)
-    selbrush_t  *active_brushlist_next; // 0x10   head sentinel (next side)
-    char         _pad[0x54 - 0x14];     // 0x14 .. 0x53
-};
-static_assert(sizeof(prefab_s) == 0x54, "prefab_s (shadowvolume.cpp mirror != entity.cpp)");
 
 // ── model-shadow (sub_479BF0) dependencies — all ported in their home files ──
 extern void  SetupModelInst( float *ident_mtx, entity_s *e );                       // entity.cpp 0x485890
 extern void  Entity_GetOrientation( entity_s_def *ent, orientation_t *orParent,
                                      orientation_t *orOut );                         // entity.cpp 0x482a70
-extern char  Entity_HasRenderableModel( brush_t_with_custom_def *b, int orient );   // brush.cpp 0x479610
+extern char  Entity_HasRenderableModel( brush_t_with_custom_def *b, const float *orient );   // brush.cpp 0x479610
 extern void  sub_477D70( selbrush_t *b, const float *orient );                     // brush.cpp 0x477d70 Brush_CheckBuildFaceVis
 // Editor_ExtractXModelGeo (sub_4FEBB0, r_xsurface.cpp) — XModel CPU geometry → vert/idx
 // buffers; returns the INDEX count.  XModel/entitymodel_t come from qe3.h's engine headers.
@@ -706,9 +696,9 @@ char Radiant_ShadVol_ModelShadowArm( selbrush_t *sb, orientation_t *orient, cons
     // NO_STATIC_SHADOWS; cod4rad's mapio caster policy suppresses them before geometry
     // extraction.  This function is precisely the fixed-size misc_model shadow arm.
     entity_s_def *ed = ( sb && sb->owner ) ? (entity_s_def *)sb->owner->def : nullptr;
-    if ( ed && ( Entity_GetIntValueForKey( (int)(intptr_t)ed, "spawnflags" ) & 6 ) != 0 )
+    if ( ed && ( Entity_GetIntValueForKey( ed, "spawnflags" ) & 6 ) != 0 )
         return 0;
-    if ( !Entity_HasRenderableModel( (brush_t_with_custom_def *)sb, (int)orient ) )  // 0x47b2e1
+    if ( !Entity_HasRenderableModel( (brush_t_with_custom_def *)sb, (const float *)orient ) )  // 0x47b2e1
         return 0;
     return SunLightPreview_DrawModelShadow( sb, orient, light );                     // 0x47b2f0
 }

@@ -45,7 +45,7 @@ extern void        MarkMapModified();                                        // 
 extern void        sub_476330( selbrush_t *b );                              // brush.cpp:851; Brush_Deselect_Helper
 extern void        sub_476470( selbrush_t *b );                              // brush.cpp:970; Brush_Select_Helper
 extern void        SetKeyValue( entity_s_def *e, const char *key, const char *value ); // entity.cpp:212
-extern char       *ValueForKey2( int e, const char *key );                   // entity.cpp:89; "" when absent
+extern char       *ValueForKey2( const entity_s *e, const char *key );                   // entity.cpp:89; "" when absent
 extern void        Undo_ClearRedo();                                         // undo.cpp:176
 extern void        Undo_GeneralStart( const char *operation );               // undo.cpp:367
 extern void        Undo_AddBrush( entity_brush_s *pBrushInst );              // undo.cpp:494; takes brush def
@@ -284,7 +284,7 @@ koutKind_t EntitySection( entity_s *inst )
 
     if ( !_stricmp( cn, "script_model" ) && def )
     {
-        const char *model = ValueForKey2( (int)(intptr_t)def, "model" );
+        const char *model = ValueForKey2( def, "model" );
         if ( model && model[0] )
             return KOUT_SECTION_MODELS;
     }
@@ -311,7 +311,7 @@ unsigned SectionKey( koutKind_t kind )
 void FolderName( entity_s *inst, char *out, int outSize )
 {
     entity_s_def *def = DefOf( inst );
-    const char   *tn  = def ? ValueForKey2( (int)(intptr_t)def, "targetname" ) : "";
+    const char   *tn  = def ? ValueForKey2( def, "targetname" ) : "";
     if ( tn && tn[0] )
     {
         _snprintf( out, (size_t)outSize, "%s", tn );

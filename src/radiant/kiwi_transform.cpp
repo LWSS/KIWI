@@ -64,7 +64,7 @@ extern void  Ed_FaceTexLockReproject( face_t *face, const float *saveBuf, const 
 
 // Face selections need per-brush undo coverage beyond selected_brushes.
 extern void  Undo_AddBrush( entity_brush_s *pBrushInst );              // undo.cpp:494  (0x45E680)
-extern void  Undo_AddEntity( int a1 );                                 // undo.cpp:601  (0x45E8B0)
+extern void  Undo_AddEntity( entity_s *entity );                                 // undo.cpp:601  (0x45E8B0)
 // Push-through deletion uses the classic selection delete core.
 extern void  Undo_AddEntity_W( entity_s *a1 );                         // undo.cpp:633
 extern void  Select_Deselect( int bAlsoFreeFaces );                    // select.cpp:1444 (0x48E800)

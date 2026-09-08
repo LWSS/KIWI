@@ -10,17 +10,22 @@ include(${SCRIPTS_DIR}/common_files.cmake)
 # Editor file list + radiant-specific engine subset
 include(radiant_files.cmake)
 
-# DXSDK — same pattern as pre_build.cmake
+# DXSDK — select libraries for the configured target architecture.
+if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+    set(RADIANT_ARCH x64)
+else()
+    set(RADIANT_ARCH x86)
+endif()
 if (DEFINED CICD)
     if (NOT DEFINED DXSDK_DIR)
         message(FATAL_ERROR "DXSDK_DIR must be set for CI builds (-DDXSDK_DIR=...)")
     endif()
     set(DXSDK_INC_DIR ${DXSDK_DIR}/include)
-    set(DXSDK_LIB_DIR ${DXSDK_DIR}/${CMAKE_BUILD_TYPE}/lib/x86)
+    set(DXSDK_LIB_DIR ${DXSDK_DIR}/${CMAKE_BUILD_TYPE}/lib/${RADIANT_ARCH})
 else()
     set(DXSDK_DIR $ENV{DXSDK_DIR})
     set(DXSDK_INC_DIR ${DXSDK_DIR}/include)
-    set(DXSDK_LIB_DIR ${DXSDK_DIR}/lib/x86)
+    set(DXSDK_LIB_DIR ${DXSDK_DIR}/lib/${RADIANT_ARCH})
 endif()
 
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
@@ -126,9 +131,8 @@ target_compile_options(${PROJECT_NAME} PRIVATE /we4700) # Uninit'd variable used
 set_property(TARGET ${PROJECT_NAME} PROPERTY
     MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
-# x86 / Win32
-set(CMAKE_GENERATOR_PLATFORM "Win32")
-target_link_options(${PROJECT_NAME} PRIVATE /machine:x86)
+# The generator's selected architecture also determines the linker machine.
+target_link_options(${PROJECT_NAME} PRIVATE /machine:${RADIANT_ARCH})
 
 # mp_backlot exhausts the 2 GB user address space without this (the 128 KB malloc in
 # XModelReadSurface_BuildCollisionTree fails).  Radiant target only.

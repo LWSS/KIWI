@@ -27,7 +27,7 @@ extern int   Sys_Printf( const char *fmt, ... );                       // win_qe
 extern int   g_nUpdateBits;                                            // 0x25D5A74 (mainfrm.cpp)
 extern int   Face_MakePlane( face_t *face );                           // brush.cpp:4495 (0x470470)
 // Drops the source when its matched plane duplicates another half-space.
-extern unsigned int Brush_RemoveFace( brush_t *b, unsigned int faceIndex );   // brush.cpp:345  0x471640
+extern size_t Brush_RemoveFace( brush_t *b, unsigned int faceIndex );   // brush.cpp:345  0x471640
 // Keep at file scope; a block-scope declaration caused an MSVC linkage mismatch.
 extern bool  Radiant_RegisterCommand( const char *name, byte vk, byte mods,
                                       int commandId );                 // mainfrm.cpp:1340

@@ -981,18 +981,22 @@ void CG_ParseAmp()
                     if (v17 >= v14)
                     {
                         if (v20 >= 0.0)
+                        {
                             SND_Amplify(v21, v9, v11, v14, v17, v20);
+                        }
                         else
-                            Com_PrintError(CON_CHANNEL_CLIENT, (const char *)HIDWORD(v20), LODWORD(v20));
+                        {
+                            Com_PrintError(CON_CHANNEL_CLIENT, "amplify(): falloff (%g) must be >= 0", v20);
+                        }
                     }
                     else
                     {
-                        Com_PrintError(CON_CHANNEL_CLIENT, (const char *)HIDWORD(v17), LODWORD(v17), LODWORD(v14));
+                        Com_PrintError(CON_CHANNEL_CLIENT, "amplify(): max_vol (%g) must be >= min_vol (%g)", v17, v14);
                     }
                 }
                 else
                 {
-                    Com_PrintError(CON_CHANNEL_CLIENT, (const char *)HIDWORD(v14), LODWORD(v14));
+                    Com_PrintError(CON_CHANNEL_CLIENT, "amplify(): min_vol (%g) must be >= 0", v14);
                 }
             }
             else

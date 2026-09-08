@@ -229,7 +229,7 @@ struct scr_anim_s // sizeof=0x4
         const char* linkPointer;
     };
 };
-static_assert(sizeof(struct scr_anim_s) == 0x4);
+static_assert(sizeof(struct scr_anim_s) == (sizeof(void *) == 8 ? 8 : 0x4));
 
 struct loadAnim_t // sizeof=0x48
 {
@@ -237,7 +237,7 @@ struct loadAnim_t // sizeof=0x48
     int iNameHash;
     char szAnimName[64];
 };
-static_assert((sizeof(struct loadAnim_t) * 512) == 36864);
+static_assert((sizeof(struct loadAnim_t) * 512) == (sizeof(void *) == 8 ? 40960 : 36864));
 
 struct pml_t // sizeof=0x80
 {                                       // ...
@@ -254,14 +254,14 @@ struct pml_t // sizeof=0x80
     float previous_origin[3];           // ...
     float previous_velocity[3];         // ...
 };
-static_assert(sizeof(pml_t) == 0x80);
+static_assert(sizeof(pml_t) == (sizeof(void *) == 8 ? 136 : 0x80));
 
 struct animStringItem_t // sizeof=0x8
 {                                       // ...
     const char *string;                 // ...
     int hash;                           // ...
 };
-static_assert(sizeof(animStringItem_t) == 0x8);
+static_assert(sizeof(animStringItem_t) == (sizeof(void *) == 8 ? 16 : 0x8));
 
 struct controller_info_t // sizeof=0x60
 {                                       // ...
@@ -276,7 +276,7 @@ struct animConditionTable_t // sizeof=0x8
     animScriptConditionTypes_t type;    // ...
     animStringItem_t *values;           // ...
 };
-static_assert(sizeof(animConditionTable_t) == 0x8);
+static_assert(sizeof(animConditionTable_t) == (sizeof(void *) == 8 ? 16 : 0x8));
 
 struct viewDamage_t // sizeof=0xC
 {                                       // ...
@@ -368,7 +368,7 @@ struct shellshock_t // sizeof=0x20
     float viewDelta[2];
     int hasSavedScreen;
 };
-static_assert(sizeof(shellshock_t) == 0x20);
+static_assert(sizeof(shellshock_t) == (sizeof(void *) == 8 ? 40 : 0x20));
 
 struct __declspec(align(8)) animation_s // sizeof=0x68
 {                                       // ...
@@ -406,7 +406,7 @@ struct animScriptCommand_t // sizeof=0x10
     int16_t animDuration[2];
     snd_alias_list_t* soundAlias;
 };
-static_assert(sizeof(animScriptCommand_t) == 0x10);
+static_assert(sizeof(animScriptCommand_t) == (sizeof(void *) == 8 ? 24 : 0x10));
 
 enum animScriptParseMode_t : int
 {                                       // ...
@@ -425,14 +425,14 @@ struct animScriptItem_t // sizeof=0x100
     int numCommands;
     animScriptCommand_t commands[8];
 };
-static_assert(sizeof(animScriptItem_t) == 0x100);
+static_assert(sizeof(animScriptItem_t) == (sizeof(void *) == 8 ? 320 : 0x100));
 
 struct animScript_t // sizeof=0x204
 {                                       // ...
     int numItems;
     animScriptItem_t* items[128];
 };
-static_assert(sizeof(animScript_t) == 0x204);
+static_assert(sizeof(animScript_t) == (sizeof(void *) == 8 ? 1032 : 0x204));
 
 struct scr_animtree_t // sizeof=0x4
 {                                       // ...
@@ -442,7 +442,7 @@ struct scr_animtree_t // sizeof=0x4
     }
     XAnim_s* anims;                     // ...
 };
-static_assert(sizeof(scr_animtree_t) == 0x4);
+static_assert(sizeof(scr_animtree_t) == (sizeof(void *) == 8 ? 8 : 0x4));
 
 struct __declspec(align(8)) animScriptData_t // sizeof=0x9A9D0
 {                                       // ...
@@ -467,7 +467,7 @@ struct __declspec(align(8)) animScriptData_t // sizeof=0x9A9D0
     // padding byte
     // padding byte
 };
-static_assert(sizeof(animScriptData_t) == 0x9A9D0);
+static_assert(sizeof(animScriptData_t) == (sizeof(void *) == 8 ? 820112 : 0x9A9D0));
 
 struct lerpFrame_t // sizeof=0x30
 {                                       // ...
@@ -482,7 +482,7 @@ struct lerpFrame_t // sizeof=0x30
     float animSpeedScale;
     int oldFrameSnapshotTime;
 };
-static_assert(sizeof(lerpFrame_t) == 0x30);
+static_assert(sizeof(lerpFrame_t) == (sizeof(void *) == 8 ? 56 : 0x30));
 
 struct clientControllers_t // sizeof=0x60
 {                                       // ...
@@ -538,7 +538,7 @@ struct clientInfo_t // sizeof=0x4CC
     // padding byte
     // padding byte
 };
-static_assert(sizeof(clientInfo_t) == 0x4CC);
+static_assert(sizeof(clientInfo_t) == (sizeof(void *) == 8 ? 1256 : 0x4CC));
 
 struct bgs_t_human // sizeof=0x10
 {                                       // ...
@@ -547,7 +547,7 @@ struct bgs_t_human // sizeof=0x10
     scr_anim_s legs;
     scr_anim_s turning;
 };
-static_assert(sizeof(bgs_t_human) == 0x10);
+static_assert(sizeof(bgs_t_human) == (sizeof(void *) == 8 ? 32 : 0x10));
 
 struct bgs_t // sizeof=0xADD08
 {                                       // ...
@@ -565,7 +565,7 @@ struct bgs_t // sizeof=0xADD08
     void* (__cdecl* AllocXAnim)(int);   // ...
     clientInfo_t clientinfo[64];        // ...
 };
-static_assert(sizeof(bgs_t) == 0xADD08);
+static_assert(sizeof(bgs_t) == (sizeof(void *) == 8 ? 900592 : 0xADD08));
 #endif
 
 struct hudElemSoundInfo_t // sizeof=0x4
@@ -1102,7 +1102,7 @@ struct CEntPlayerInfo // sizeof=0xC
     // padding byte
     // padding byte
 };
-static_assert(sizeof(CEntPlayerInfo) == 0xC);
+static_assert(sizeof(CEntPlayerInfo) == (sizeof(void *) == 8 ? 16 : 0xC));
 
 struct CEntTurretAngles // sizeof=0x8
 {                                       // ...
@@ -1172,7 +1172,7 @@ struct CEntFx // sizeof=0x8  (SP/MP Same)
     int triggerTime;
     FxEffect* effect;
 };
-static_assert(sizeof(CEntFx) == 0x8);
+static_assert(sizeof(CEntFx) == (sizeof(void *) == 8 ? 16 : 0x8));
 
 #if defined(KISAK_MP) || defined(KISAK_RADIANT) // radiant: for cpose_t
 struct GfxSkinCacheEntry // sizeof=0xC
@@ -1193,7 +1193,7 @@ struct cpose_t // sizeof=0x64
     uint8_t isRagdoll;
     int ragdollHandle;
     int killcamRagdollHandle;
-    int physObjId;
+    intptr_t physObjId;
     float origin[3];
     float angles[3];
     GfxSkinCacheEntry skinCacheEntry;
@@ -1205,7 +1205,7 @@ struct cpose_t // sizeof=0x64
         CEntFx fx;
     };
 };
-static_assert(sizeof(cpose_t) == 0x64);
+static_assert(sizeof(cpose_t) == (sizeof(void *) == 8 ? 112 : 0x64));
 #elif KISAK_SP
 struct CEntActorInfo
 {
@@ -2163,7 +2163,7 @@ struct BulletTraceResults // sizeof=0x44
     // padding byte
     int depthSurfaceType;               // ...
 };
-static_assert(sizeof(BulletTraceResults) == 0x44);
+static_assert(sizeof(BulletTraceResults) == (sizeof(void *) == 8 ? 80 : 0x44));
 
 struct viewState_t // sizeof=0x24
 {                                       // ...
@@ -2177,7 +2177,7 @@ struct viewState_t // sizeof=0x24
     float fLastIdleFactor;              // ...
     int*weapIdleTime;                  // ...
 };
-static_assert(sizeof(viewState_t) == 0x24);
+static_assert(sizeof(viewState_t) == (sizeof(void *) == 8 ? 48 : 0x24));
 
 struct weaponState_t // sizeof=0x54
 {                                       // ...
@@ -2195,7 +2195,7 @@ struct weaponState_t // sizeof=0x54
     float swayAngles[3];                // ...
     int*weapIdleTime;                  // ...
 };
-static_assert(sizeof(weaponState_t) == 0x54);
+static_assert(sizeof(weaponState_t) == (sizeof(void *) == 8 ? 96 : 0x54));
 
 void __cdecl TRACK_bg_weapons();
 void __cdecl BG_LoadPenetrationDepthTable();

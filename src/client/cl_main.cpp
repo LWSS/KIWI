@@ -1110,9 +1110,11 @@ void __cdecl CL_IncAnimWeight_f()
     }
     v10 = (float)((float)((float)((float)cls.frametime / (float)v8) * (float)0.0020000001) + (float)value);
     if (v10 > 1.0)
+    {
         v10 = 1.0;
+    }
     Dvar_SetFloat(v7, v10);
-    Com_Printf(CON_CHANNEL_DONT_FILTER, (const char *)HIDWORD(v10), LODWORD(v10));
+    Com_Printf(CON_CHANNEL_DONT_FILTER, "cl_testAnimWeight: %g\n", v10);
 }
 
 void __cdecl CL_DecAnimWeight_f()
@@ -1133,9 +1135,11 @@ void __cdecl CL_DecAnimWeight_f()
     }
     v10 = (float)-(float)((float)((float)((float)cls.frametime / (float)v8) * (float)0.0020000001) - (float)value);
     if (v10 < 0.0)
+    {
         v10 = 0.0;
+    }
     Dvar_SetFloat(v7, v10);
-    Com_Printf(CON_CHANNEL_DONT_FILTER, (const char *)HIDWORD(v10), LODWORD(v10));
+    Com_Printf(CON_CHANNEL_DONT_FILTER, "cl_testAnimWeight: %g\n", v10);
 }
 
 void __cdecl CL_StopLogo(int localClientNum)

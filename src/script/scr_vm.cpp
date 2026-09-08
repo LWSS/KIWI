@@ -1640,13 +1640,10 @@ ushort Scr_ReadUnsignedShort(const char **pos)
     return value;
 }
 
-const uint *Scr_ReadIntArray(const char **pos, int count)
+void Scr_SkipSwitchCases(const char **pos, unsigned int count)
 {
-    const uint *value;
-
-    value = reinterpret_cast<const uint *>(*pos);
-    *pos += sizeof(uint) * count;
-    return value;
+    // Each case contains a native-sized value followed by a code pointer.
+    *pos += 2 * sizeof(uintptr_t) * count;
 }
 
 float Scr_ReadFloat(const char **pos)
@@ -3364,7 +3361,7 @@ function_call:
 
         case OP_endswitch:
             caseCount = Scr_ReadUnsignedShort(&fs.pos);
-            Scr_ReadIntArray(&fs.pos, 2 * caseCount);
+            Scr_SkipSwitchCases(&fs.pos, caseCount);
             continue;
 
         case OP_vector:

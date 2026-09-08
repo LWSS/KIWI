@@ -17,7 +17,7 @@ extern int  Sys_Printf( const char *fmt, ... );
 extern void Assert( const char *file, int line, int type, const char *fmt, ... );
 
 // Brush-list display rebuild.
-extern void sub_47D060( int listHead );   // 0x47D060
+extern void sub_47D060( selbrush_t *listHead );   // 0x47D060
 
 // Global brush lists (qe3.cpp).
 extern selbrush_t active_brushes;          // 0x23F189C
@@ -49,20 +49,12 @@ LyrMtlWndGlob_t lyrMtlWndGlob = {};
 //    its offset enum; named here for the tool's field accesses.  Per the IDA cap
 //    (LayeredMaterialWnd_RadMtl 0x4185C0) a library entry holds at most ONE layer, so
 //    only layer[0] fits the 84-byte stride.
-struct LyrMtlEntry
-{
-    char        name[64];      // 0x00
-    int         nextId;        // 0x40  next layer id to allocate
-    int         layerCount;    // 0x44  # layers (0 or 1)
-    int         _pad48;        // 0x48
-    int         layerId;       // 0x4C  layer[0].id
-    qtexture_s *layerHandle;   // 0x50  layer[0].handle (radMtl)
-};
-static_assert( sizeof( LyrMtlEntry ) == 84, "LyrMtlEntry must be the 84-byte library entry" );
+typedef LyrEntry_t LyrMtlEntry;
+static_assert( sizeof( LyrMtlEntry ) == sizeof(LyrEntry_t), "native library entry" );
 // The per-layer pair {id,handle} stride is 8 bytes; the tool indexes layer i at
 // (0x4C + 8*i, 0x50 + 8*i).  Helpers keep the byte arithmetic identical to the IDB.
-static inline int  *EntryLayerId    ( LyrMtlEntry *e, int i ) { return (int *)( (char *)e + 0x4C + 8 * i ); }
-static inline void **EntryLayerHandle( LyrMtlEntry *e, int i ) { return (void **)( (char *)e + 0x50 + 8 * i ); }
+static inline int  *EntryLayerId    ( LyrMtlEntry *e, int i ) { return &e->layers[i].id; }
+static inline void **EntryLayerHandle( LyrMtlEntry *e, int i ) { return (void **)&e->layers[i].handle; }
 static inline LyrMtlEntry *ActiveEntry() { return (LyrMtlEntry *)(intptr_t)lyrMtlWndGlob.activeLyrMtl; }
 
 // Forward decls (mutual references within this TU).
@@ -89,9 +81,9 @@ static int LayeredMaterialWnd_ToggleLiveAdd()
 // ═══════════════════════════════════════════════════════════════════════════════
 static BOOL sub_417710()
 {
-    sub_47D060( (int)(intptr_t)&active_brushes );
-    sub_47D060( (int)(intptr_t)&selected_brushes );
-    sub_47D060( (int)(intptr_t)&filtered_brushes );
+    sub_47D060( &active_brushes );
+    sub_47D060( &selected_brushes );
+    sub_47D060( &filtered_brushes );
     g_nUpdateBits = -1;
     return TRUE;
 }
@@ -151,7 +143,7 @@ BOOL LyrMtlRemoveLayer_Apply()
     bcassert( (unsigned)sel, (unsigned)e->layerCount );    // LayeredMaterialWnd.cpp:181
     // memcpy( &layer[sel], &layer[sel+1], 8 * (--layerCount - sel) )
     int remaining = --e->layerCount - sel;
-    memcpy( EntryLayerId( e, sel ), EntryLayerId( e, sel + 1 ), (size_t)8 * remaining );
+    memmove( &e->layers[sel], &e->layers[sel + 1], sizeof(LyrEntryLayer_t) * remaining );
     if ( lyrMtlWndGlob.selectedLayerIndex )
         --lyrMtlWndGlob.selectedLayerIndex;
     return sub_417710();
@@ -260,9 +252,9 @@ LRESULT LayeredMaterialWnd_RadMtl( qtexture_s *radMtl )
     *EntryLayerHandle( lyrMtl, count ) = radMtl;
     *EntryLayerId( lyrMtl, lyrMtl->layerCount++ ) = lyrMtl->nextId++;
 
-    sub_47D060( (int)(intptr_t)&active_brushes );
-    sub_47D060( (int)(intptr_t)&selected_brushes );
-    sub_47D060( (int)(intptr_t)&filtered_brushes );
+    sub_47D060( &active_brushes );
+    sub_47D060( &selected_brushes );
+    sub_47D060( &filtered_brushes );
     g_nUpdateBits = -1;
     return 0;
 }

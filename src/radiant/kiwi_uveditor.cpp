@@ -51,10 +51,10 @@ extern ImGuiID     ImGuiShell_DockRoot();                                    // 
 
 // Copied from brush.cpp:1736-1749. The pointer-as-int parameters preserve the binary's
 // usercall convention (texturevecs.cpp:94-101, 195-221).
-extern void Face_MoveTexture( int surfDef, const float *normal, int outVecs,
-                               int uvBase, float sizeX, float sizeY );       // texturevecs.cpp:101  void Face_MoveTexture(int,const float*,int,int,float,float)
-extern void texturevecs_02( int surfDef, int uvVecs, float v5, int normal,
-                             float dist, int arg6, int arg7, int arg8 );     // texturevecs.cpp:219  void texturevecs_02(int,int,float,int,float,int,int,int)
+extern void Face_MoveTexture( const float *surfDef, const float *normal, float *outVecs,
+                               const float *uvBase, float sizeX, float sizeY );       // texturevecs.cpp:101  void Face_MoveTexture(int,const float*,int,int,float,float)
+extern void texturevecs_02( float *surfDef, float *uvVecs, float v5, const float *normal,
+                             float dist, float *arg6, float *arg7, float *arg8 );     // texturevecs.cpp:219  void texturevecs_02(int,int,float,int,float,int,int,int)
 
 extern void        TexMatToFakeTexCoords( MaterialDef *def, texdef_sub_t *texDef );  // materialdef.cpp:377  void TexMatToFakeTexCoords(MaterialDef*,texdef_sub_t*)
 extern void        Brush_BuildWindings( brush_t *b, int bFull );             // brush.cpp:1434    void Brush_BuildWindings(brush_t*,int)
@@ -631,8 +631,8 @@ namespace
 
     void BuildTexMat( const texdef_sub_t *td, const float *normal, float *outMat8 )
     {
-        Face_MoveTexture( (int)(intptr_t)td, normal, (int)(intptr_t)outMat8,
-                          (int)(intptr_t)&td->shift[0], td->rotate, td->crossterm );
+        Face_MoveTexture( (float *)td, normal, (float *)outMat8,
+                          (float *)&td->shift[0], td->rotate, td->crossterm );
     }
 
     void StFromMat( const float *m, const float *p, float *s, float *t )
@@ -1113,12 +1113,12 @@ namespace
         // texturevecs_02 consumes m as scratch and writes size/shift/rotate/crossterm byref.
         // Call shape matches Face_TexLock_Reproject (brush.cpp:2978-2980); arg 3 is the
         // ignored Hex-Rays x87 phantom.
-        texturevecs_02( (int)(intptr_t)&out->size[0], (int)(intptr_t)m,
+        texturevecs_02( (float *)&out->size[0], (float *)m,
                         fd->plane.normal[2],
-                        (int)(intptr_t)fd->plane.normal, fd->plane.dist,
-                        (int)(intptr_t)&out->shift[0],
-                        (int)(intptr_t)&out->rotate,
-                        (int)(intptr_t)&out->crossterm );
+                        (float *)fd->plane.normal, fd->plane.dist,
+                        (float *)&out->shift[0],
+                        (float *)&out->rotate,
+                        (float *)&out->crossterm );
     }
 
     // Exact translation: m3=-shift[0]/sx, so shift=shift0-d*size0, with the port's

@@ -60,7 +60,7 @@ struct rface_t
     float    pad;         // +0x28
     rface_t *next;        // +0x2C
 };
-static_assert( sizeof(rface_t) == 0x30, "rface_t (primarylights region node) != 0x30" );
+static_assert( sizeof(rface_t) == (sizeof(void *) == 8 ? 64 : 0x30), "rface_t (primarylights region node) != 0x30" );
 
 // ═════════════════════════════════════════════════════════════════════════════
 //  s_kdopNormals (unk_6DD214 / unk_6DD218 / flt_6DD258) — the 26-direction k-DOP

@@ -4181,47 +4181,32 @@ void CG_LoadViewModelAnimTrees(SaveGame *save, const playerState_s *ps)
 
 void CG_ArchiveWeaponInfo(MemoryFile *memFile)
 {
-    BOOL IsWriting; // r22
-    float numWeapons; // r30
-    uint NumWeapons; // r3
-    int v5; // r28
-    int *p_hasAnimTree; // r30
-    const DObj_s *v7; // r3
-    float v8[24]; // [sp+50h] [-60h] BYREF
-
     iassert(memFile);
-    IsWriting = MemFile_IsWriting(memFile);
-    if (IsWriting)
+    bool isWriting = MemFile_IsWriting(memFile);
+    unsigned int numWeapons = BG_GetNumWeapons();
+
+    if (!isWriting)
     {
-        numWeapons = COERCE_FLOAT(BG_GetNumWeapons());
-        v8[0] = numWeapons;
-        MemFile_WriteData(memFile, 4, v8);
+        MemFile_ReadData(memFile, sizeof(unsigned int), (byte *)&numWeapons);
     }
-    else
+    if (numWeapons > BG_GetNumWeapons() || numWeapons > ARRAY_COUNT(cg_weaponsArray[0]))
     {
-        MemFile_ReadData(memFile, 4, (byte*)v8);
-        numWeapons = v8[0];
-        iassert(LODWORD(numWeapons) <= BG_GetNumWeapons());
+        Com_Error(ERR_DROP, "CG_ArchiveWeaponInfo: invalid weapon count %u", numWeapons);
     }
-    if (LODWORD(numWeapons) > 1)
+    if (isWriting)
     {
-        v5 = LODWORD(numWeapons) - 1;
-        p_hasAnimTree = &cg_weaponsArray[0][1].hasAnimTree;
-        do
+        MemFile_WriteData(memFile, sizeof(unsigned int), &numWeapons);
+    }
+    for (unsigned int i = 1; i < numWeapons; ++i)
+    {
+        weaponInfo_s *weapon = &cg_weaponsArray[0][i];
+        if (isWriting)
         {
-            if (IsWriting)
-            {
-                v7 = (const DObj_s *)*(p_hasAnimTree - 11);
-                *p_hasAnimTree = v7 && DObjGetTree(v7);
-            }
-            iassert(memFile);
-            iassert(memFile->archiveProc);
-            memFile->archiveProc(memFile, 4, (byte*)p_hasAnimTree);
-            iassert(memFile->archiveProc);
-            memFile->archiveProc(memFile, 4, (byte *)p_hasAnimTree - 1);
-            --v5;
-            p_hasAnimTree += 18;
-        } while (v5);
+            weapon->hasAnimTree = weapon->viewModelDObj && DObjGetTree(weapon->viewModelDObj);
+        }
+        iassert(memFile->archiveProc);
+        memFile->archiveProc(memFile, sizeof(int), (byte *)&weapon->hasAnimTree);
+        memFile->archiveProc(memFile, sizeof(int), (byte *)&weapon->iPrevAnim);
     }
     iassert(memFile);
     iassert(memFile->archiveProc);
@@ -4242,10 +4227,8 @@ void CG_ArchiveWeaponInfo(MemoryFile *memFile)
     memFile->archiveProc(memFile, 4, (byte *)&cgArray[0].holdBreathDelay);
     iassert(memFile->archiveProc);
     memFile->archiveProc(memFile, 4, (byte *)&cgArray[0].holdBreathFrac);
-    v8[0] = cgArray[0].holdBreathFrac;
     iassert(!IS_NAN(cgArray[0].holdBreathFrac)); // KISAK_AI: *value -> cgArray[0].holdBreathFrac
     // "!IS_NAN(*value)"
 }
 
 #endif // KISAK_SP
-

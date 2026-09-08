@@ -22,7 +22,7 @@ extern void         SetKeyValue( entity_s_def *e, const char *key, const char *v
 extern void         DeleteKey( epair_t **head, const char *key );         // 0x483720
 extern bool         Entity_HasEpairMatch( entity_s *e, const char *key, const char *val );// 0x483930
 extern bool         HasKeyValuePair( entity_s_def *e, const char *key );  // 0x4838B0 (entity.cpp)
-extern char        *ValueForKey2( int defPtr, const char *key );          // 0x4825C0 (entity.cpp)
+extern char        *ValueForKey2( const entity_s *defPtr, const char *key );          // 0x4825C0 (entity.cpp)
 extern int          UpdateSelection( int wParam, eclass_t *cls );         // 0x497180 (win_ent.cpp)
 extern void         ImGuiPanel_ScriptGroup_Toggle();                      // imgui_panel_scriptgroup.cpp:76  void ImGuiPanel_ScriptGroup_Toggle()
 // selected_brushes / active_brushes sentinels are declared in qe3.h.
@@ -316,7 +316,7 @@ extern void Brush_RemoveFromList( selbrush_t *b );   // brush.cpp 0x476680
 extern void Brush_AddToList2( selbrush_t *b );       // brush.cpp 0x4765a0
 extern void Select_Deselect( int bDeselectFaces );   // select.cpp 0x48E800
 extern int  g_nUpdateBits;                           // engine_stubs.cpp 0x25D5A74
-extern void sub_47D060( int listSentinel );          // brush.cpp (brush-list display rebuild)
+extern void sub_47D060( selbrush_t *listSentinel );   // brush.cpp (brush-list display rebuild)
 
 // 0x451200  ScriptGroup_Type  (ScriptGroup.cpp:62)
 // Grow the selection by trigger COLOUR GROUP: gather the colour-group numbers of every
@@ -568,7 +568,7 @@ static bool ScriptGroup_SelectedHasColorTeam( selbrush_t *b, const char *code )
         return false;
 
     char buf[1024];
-    strcpy( buf, ValueForKey2( (int)(intptr_t)def, g_PrefsDlg->ScriptColorTeamKey.c_str() ) );
+    strcpy( buf, ValueForKey2( def, g_PrefsDlg->ScriptColorTeamKey.c_str() ) );
     return buf[0] && strstr( buf, code ) != nullptr;
 }
 
@@ -684,7 +684,7 @@ static void ScriptGroup_SetKey2( selbrush_t *b, int colorNumber )
 
     const char *scriptColorKey = g_PrefsDlg->ScriptColorKey.c_str();
     char buf[1024];
-    strcpy( buf, ValueForKey2( (int)(intptr_t)def, g_PrefsDlg->ScriptColorTeamKey.c_str() ) );
+    strcpy( buf, ValueForKey2( def, g_PrefsDlg->ScriptColorTeamKey.c_str() ) );
     if ( !buf[0] || !strstr( buf, scriptColorKey ) )
         return;
 
@@ -1118,7 +1118,7 @@ static void ScriptGroup_01( entity_s_def *def, int colorNumber )
             continue;
 
         char list[1024];
-        strcpy( list, ValueForKey2( (int)(intptr_t)trigDef, g_PrefsDlg->ScriptColorTeamKey.c_str() ) );
+        strcpy( list, ValueForKey2( trigDef, g_PrefsDlg->ScriptColorTeamKey.c_str() ) );
         for ( char *token = strtok( list, " " ); token; token = strtok( nullptr, " " ) )
         {
             iassert( token[0] );
@@ -1168,7 +1168,7 @@ static void ScriptGroup_SetKey( int colorNumber )
         {
             if ( strstr( classname, "node" ) )
             {
-                if ( !strcmp( ValueForKey2( (int)(intptr_t)def, "radius" ), zero ) )
+                if ( !strcmp( ValueForKey2( def, "radius" ), zero ) )
                     SetKeyValue( def, "radius", "64" );
             }
             else if ( !strstr( classname, "info_volume" ) )
@@ -1460,9 +1460,9 @@ void ScriptGroupTurretShare_Apply()   // 0x455b60
             ScriptGroupAddSubKey_Apply( subKey.c_str(), exportStr.c_str() );
     }
 
-    sub_47D060( (int)(intptr_t)&active_brushes );
-    sub_47D060( (int)(intptr_t)&selected_brushes );
-    sub_47D060( (int)(intptr_t)&filtered_brushes );
+    sub_47D060( &active_brushes );
+    sub_47D060( &selected_brushes );
+    sub_47D060( &filtered_brushes );
     g_nUpdateBits = -1;
 }
 
@@ -1532,9 +1532,9 @@ void ScriptGroupTurretKey_Apply( const char *turretKey )   // 0x455d80
     for ( int i = 0; i < exports; ++i )
         ScriptGroupAddSubKey_Apply( subKey.c_str(), String[i] );
 
-    sub_47D060( (int)(intptr_t)&active_brushes );
-    sub_47D060( (int)(intptr_t)&selected_brushes );
-    sub_47D060( (int)(intptr_t)&filtered_brushes );
+    sub_47D060( &active_brushes );
+    sub_47D060( &selected_brushes );
+    sub_47D060( &filtered_brushes );
     g_nUpdateBits = -1;
 }
 
@@ -1544,9 +1544,9 @@ void ScriptGroupTurretKey_Apply( const char *turretKey )   // 0x455d80
 void ScriptGroupKeyPreset_Apply( const char *key )
 {
     g_PrefsDlg->ScriptGroupKey = key;
-    sub_47D060( (int)(intptr_t)&active_brushes );
-    sub_47D060( (int)(intptr_t)&selected_brushes );
-    sub_47D060( (int)(intptr_t)&filtered_brushes );
+    sub_47D060( &active_brushes );
+    sub_47D060( &selected_brushes );
+    sub_47D060( &filtered_brushes );
     Prefs_SavePrefs( g_PrefsDlg );
     ScriptGroup_AssignNextNumber();
     g_nUpdateBits = -1;
@@ -1583,7 +1583,7 @@ void AssociateEntities()
 //  non-empty ScriptColorTeamKey value).
 // ═════════════════════════════════════════════════════════════════════════════
 extern char  FilterBrush( selbrush_t *b, int updateFilters );        // filters.cpp 0x46A1F0
-extern void  Ed_DrawScriptColorQuad( int entDef, const float *color );// brush.cpp  0x46AE10
+extern void  Ed_DrawScriptColorQuad( const entity_s *entDef, const float *color );// brush.cpp  0x46AE10
 
 // 0x4560F0  PrefsDlg_ScriptTeamColorEnabled (sub_4560F0) — true when the team-colour
 // visualization is active: ScriptGroupKey != "token" AND ScriptGroupKey == the

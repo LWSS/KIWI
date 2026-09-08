@@ -227,7 +227,6 @@ void __cdecl CG_DrawObjectiveList(
     float v63; // [sp+70h] [-170h]
     __int64 v64; // [sp+80h] [-160h] BYREF
     const char *v65; // [sp+88h] [-158h]
-    __int64 v66; // [sp+90h] [-150h]
     float v67; // [sp+A0h] [-140h]
     float v68; // [sp+A4h] [-13Ch]
     float v69; // [sp+A8h] [-138h]
@@ -251,7 +250,6 @@ void __cdecl CG_DrawObjectiveList(
 
     v9 = "%s\n\t(localClientNum) = %i";
     v11 = "(localClientNum == 0)";
-    HIDWORD(v66) = (uintptr_t)"%s\n\t(localClientNum) = %i";
     v65 = "(localClientNum == 0)";
     vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     fadeAlpha = CG_FadeObjectives(cgArray);
@@ -370,7 +368,7 @@ void __cdecl CG_DrawObjectiveList(
                     drawText = wordwrapNext;
                 } while (wordwrapNext);
                 v11 = v65;
-                v9 = (const char *)HIDWORD(v66);
+                v9 = "%s\n\t(localClientNum) = %i";
                 break;
             default:
                 break;
@@ -386,7 +384,6 @@ void __cdecl CG_DrawObjectiveList(
                 int scaledOne = (int)floorf(scrPlaceView[localClientNum].scaleVirtualToReal[0] + 0.5f);
                 w = rect->w;
                 x = rect->x;
-                v66 = scaledOne;
                 width = (float)scaledOne;
                 x = ScrPlace_ApplyX(
                     &scrPlaceView[localClientNum],

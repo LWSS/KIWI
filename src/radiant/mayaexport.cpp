@@ -29,22 +29,13 @@ struct edPatchInst_t
     ushort *indices;     // 0x10
     char            pad14[48];   // 0x14 .. 0x44 (revIndices @0x14 + tail; unused here)
 };
-static_assert(sizeof(edPatchInst_t) == 68, "edPatchInst_t (pPatch_t) != 68");
-static_assert(offsetof(edPatchInst_t, indexCount) == 12, "edPatchInst_t.indexCount");
-static_assert(offsetof(edPatchInst_t, indices) == 16, "edPatchInst_t.indices");
+static_assert(sizeof(edPatchInst_t) == (sizeof(void *) == 8 ? 80 : 68), "edPatchInst_t (pPatch_t) != 68");
+static_assert(offsetof(edPatchInst_t, indexCount) == (sizeof(void *) == 8 ? 16 : 12), "edPatchInst_t.indexCount");
+static_assert(offsetof(edPatchInst_t, indices) == (sizeof(void *) == 8 ? 24 : 16), "edPatchInst_t.indices");
 
 // ─── prefab_s (IDB 0x54) — mirror of entity.cpp/brush.cpp.  Maya export only reads
 //     the instanced-brush list head/tail sentinels (the prefab-render lineage). ──────
-struct prefab_s
-{
-    entity_s   *prev_entity;            // 0x00
-    entity_s   *next_entity;            // 0x04
-    void       *unk;                    // 0x08
-    selbrush_t *active_brushlist;       // 0x0C  tail sentinel (prev side)
-    selbrush_t *active_brushlist_next;  // 0x10  head sentinel (next side)
-    char        _pad[0x54 - 0x14];      // 0x14 .. 0x53
-};
-static_assert(sizeof(prefab_s) == 0x54, "prefab_s (mayaexport mirror != entity.cpp)");
+// Shared native prefab_s is declared in qe3.h.
 
 // ─── externs (radiant target) ───────────────────────────────────────────────
 extern void  Assert( const char *file, int line, int type, const char *fmt, ... );
@@ -55,11 +46,11 @@ extern float      world_orient_matrix[4][3];        // 0x6DE290  (identity world
 // brush.cpp
 extern char  FilterBrush( selbrush_t *b, int flag );
 extern void *PlanePts_Alloc( int count );
-extern void  Vis_Free( int count, faceVis_s *f, int brushPtr );
+extern void  Vis_Free( int count, faceVis_s *f, selbrush_t *brushPtr );
 extern void  Face_MoveTexture( int surfDef, const float *normal, int outVecs,
                                int uvBase, float rotate, float crossterm );
-extern int   TexWnd_06_LayerCount( int mtlDef, int layerHandle );
-extern void  sub_46F6C0( int mtlDef, int faceDef, int visIdx, int *outData );  // packed face colour
+extern texdef_sub_t *TexWnd_06_LayerCount( MaterialDef *mtlDef, int layerHandle );
+extern void  sub_46F6C0( MaterialDef *mtlDef, const face_t *faceDef, int visIdx, int *outData );  // packed face colour
 
 // draw.cpp
 extern void  OrientationPosToWorldPos( float *out, const float *pos, const orientation_t *orient );

@@ -84,16 +84,7 @@ extern qtexture_s *TexWnd_GetMaterialListHead();
 // ─── prefab_s (IDB 0x54; mirror of entity.cpp/mayaexport.cpp) ─────────────────
 // The 5-pointer head holds the prefab's instanced entity + brush list sentinels;
 // Prefab_NextLevel splices these into the live world on enter.
-struct prefab_s
-{
-    entity_s    *prev_entity;           // 0x00
-    entity_s    *next_entity;           // 0x04
-    void        *unk;                   // 0x08
-    selbrush_t  *active_brushlist;      // 0x0C   tail sentinel (prev side)
-    selbrush_t  *active_brushlist_next; // 0x10   head sentinel (next side)
-    char         _pad[0x54 - 0x14];     // 0x14 .. 0x53
-};
-static_assert(sizeof(prefab_s) == 0x54, "prefab_s (map.cpp mirror != entity.cpp)");
+// Shared native prefab_s is declared in qe3.h.
 
 // ─── surface window flag / dialog ─────────────────────────────────────────────
 // surfDlgGlob (surface inspector; .hwnd = HWND when open) comes from qe3.h
@@ -112,7 +103,7 @@ void Map_ApplyRegion();
 int  Map_GetNextAutoTarget();
 char *Map_GetNextExportId( int slot );
 void Entity_WriteSelected_R( int *writerVtbl );
-void FreePrefabLevel( entity_s *a1, entity_s *a2, entity_s *a3, int level );
+void FreePrefabLevel( entity_s *a1, entity_s *a2, entity_s *a3, entitymodel_t *level );
 FILE *Map_SaveFileToPerforce( const char *path, char a2 );
 char MapFile_WriteEntity( entity_s_def *a1, FILE *a2, char a3 );
 void Prefab_NextLevel( void *a1 );
@@ -123,7 +114,7 @@ void Prefab_LevelBack();
 // WriteFunc_map_t: the writer function type shared between Entity_WriteSelected
 // and Brush_Write.  int(int ctx, const char *fmt, ...) — matches brush.cpp WriteFunc_t
 // and entity.cpp WriteFunc_entity_t.
-typedef int WriteFunc_map_t( int ctx, const char *fmt, ... );
+typedef int WriteFunc_map_t( void *ctx, const char *fmt, ... );
 
 // entity.cpp
 extern int          Map_LoadEntities( const char *filename, entity_s *entList, char a3 );   // defined below (0x486500)
@@ -135,7 +126,7 @@ extern int          Entity_GetVec3ForKey( entity_s_def *e, float *out, const cha
 extern void         SetKeyValue( entity_s_def *e, const char *key, const char *value );
 extern void         Entity_WriteSelected( entity_s_def *ent, WriteFunc_map_t **writer );
 extern void         Entity_FreePrefab( entity_s *e );
-extern char        *ValueForKey2( int e, const char *key );                     // entity.cpp 0x4825C0
+extern char        *ValueForKey2( const entity_s *e, const char *key );                     // entity.cpp 0x4825C0
 extern bool         Entity_NeedsAutoExportId( entity_s_def *def );              // entity.cpp 0x487B10
 extern void         DeleteKey( epair_t **head, const char *key );               // entity.cpp 0x483720
 extern void         Checkkey_Model( entity_s_def *e, const char *key );         // entity.cpp 0x482F70 (Checkkey_Model_0)
@@ -155,7 +146,7 @@ extern brush_t     *Brush_Alloc( const void *planeptsSrc, eclass_t *ecls );     
 extern void         Brush_Create( float *mins, float *maxs, brush_t *b, eclass_t *ecls );  // brush.cpp 0x475300
 extern void         Entity_LinkBrush( brush_t *b, entity_s *world_ent );           // entity.cpp 0x484fc0
 extern void         SetMaterial( const char *tex_name, patchMesh_material *out );  // materialdef.cpp 0x4315c0
-extern int          Init_MaterialLayer( MaterialDef *a1, MaterialDef *a2 );        // materialdef.cpp 0x472c00
+extern int          Init_MaterialLayer( MaterialDef *a1, float a2 );        // materialdef.cpp 0x472c00
 
 // layers.cpp
 extern void         Map_InitlLayers();
@@ -167,13 +158,13 @@ extern models_t    *Model_FreeMapModels();   // eclass.cpp 0x480C50 (returns mod
 extern LRESULT      Texture_ShowInuse();   // texwnd.cpp (0x45B850) — mark/count in-use textures
 extern void         Undo_Clear();
 extern void         CopySelectedFaceValues();
-extern bool         Model_SetModel( entity_brush_s *b, int orientMatrix );  // brush.cpp 0x478780 (prefab load-on-open)
+extern bool         Model_SetModel( entity_brush_s *b, const float *orientMatrix );  // brush.cpp 0x478780 (prefab load-on-open)
 extern int          AddModelToModelInstBuff( XModel *model, float *axis, float scale );
 extern void         ModelInstUpdate( int inst, float (*axis)[3], float scale );
 extern void         RemoveModelInstFromBuf( int inst );
 extern char         LayeredMaterials_Save();   // 0x416f40 — 1 ok/unchanged, 0 write-fail
 extern void         sub_41C9C0( const char *name );
-extern void         sub_47D060( int list );  // brush list display rebuild
+extern void         sub_47D060( selbrush_t *list );  // brush list display rebuild
 // Prefab-edit-in-place layer-state save/restore (#18). The binary stacks the layer
 // RB-tree into each prefab slot (+2088) via sub_489810/sub_41A5A0/sub_489F30; this
 // port models the layer map as a std::map, so the deep RB-copy collapses to a
@@ -186,7 +177,7 @@ extern void         Select_Deselect( int a1 );
 extern void         SetupVertexSelection();    // select.cpp 0x494bc0 (vertex/edge select mode)
 
 // UI stubs (MFC)
-extern void         MainFrm_BrushList( int label, selbrush_t *list );
+extern void         MainFrm_BrushList( const char *label, selbrush_t *list );
 extern void         MainFrm_EntList( entity_s *list, const char *label );
 extern void         sub_47B940( brush_t *b );             // brush.cpp 0x47B940 Brush_UpdateSpecialMaterialFlag
 extern void         sub_418A50( const char *modelpath );  // layers.cpp 0x418A50 Layers_MarkModelPrefix
@@ -543,7 +534,7 @@ void Map_LoadFromFile( const char *path )
             // Model entity: assign model to first brush instance
             selbrush_t *firstBrush = eInst->brushes.ownerNext;
             if ( firstBrush && firstBrush != (selbrush_t *)&eInst->brushes )
-                Model_SetModel( (entity_brush_s *)firstBrush, (int)&world_orient_matrix );
+                Model_SetModel( (entity_brush_s *)firstBrush, (const float *)&world_orient_matrix );
         }
 
         eDef = nextDef;
@@ -688,8 +679,8 @@ void Map_LoadFromFile( const char *path )
             sub_47B940( sb->def );
     }
 
-    MainFrm_BrushList( (int)VA( 0, "%s - active_brushes",   "loaded map" ), &active_brushes );
-    MainFrm_BrushList( (int)VA( 1, "%s - active_brushes", "loaded map" ), &selected_brushes );
+    MainFrm_BrushList( VA( 0, "%s - active_brushes",   "loaded map" ), &active_brushes );
+    MainFrm_BrushList( VA( 1, "%s - active_brushes", "loaded map" ), &selected_brushes );
     MainFrm_EntList( &entityInsts, "loaded map" );
 
     // KIWI-UX (RADIANT_UX_DESIGN §7, Phase 4): load the construction sidecar
@@ -1003,8 +994,10 @@ bool Kiwi_RescueSave( char *outPath, int outPathSize )
         return false;
     outPath[0] = '\0';
 
-    if ( entities.next == &entities )          // no map loaded → nothing to rescue
+    if ( !entities.next || !entities.prev || entities.next == &entities )
+    {
         return false;
+    }
 
     int wrote = 0;
     __try
@@ -1076,7 +1069,7 @@ void AddRegionBrushes()
     SetMaterial( "region", (patchMesh_material *)&mat );          // 0x48723d
     {
         float ss = 0.25f;                                        // 0x48724e COERCE_MATERIALDEF_(0.25):
-        Init_MaterialLayer( &mat, *(MaterialDef **)&ss );        //   pass 0.25f's bits as the ptr arg
+        Init_MaterialLayer( &mat, ss );        //   pass 0.25f's bits as the ptr arg
     }
 
     // Four boundary-wall slabs around the region box.  The ±16/±1 offsets use the binary's
@@ -1375,7 +1368,7 @@ void Entity_WriteSelected_R( WriteFunc_map_t **writer )
           e  = (entity_s_def *)e->next, ++entIdx )
     {
         WriteFunc_map_t *fn = *writer;
-        fn( (int)(intptr_t)writer, "// entity %i\n", entIdx );
+        fn( writer, "// entity %i\n", entIdx );
         Entity_WriteSelected( e, writer );
     }
 }
@@ -1386,14 +1379,14 @@ void Entity_WriteSelected_R( WriteFunc_map_t **writer )
 // of the prefab being entered.  a4 is that prefab's modelClass POINTER (sub_4890F0 passes
 // (int)modelClass), not a numeric level; the compare base at 0x489089 is `def` (i[2]+0x64),
 // NOT def->eclass.
-static void sub_488FC0( entity_s *a1, entity_s *a2, entity_s *a3, int a4 )
+static void sub_488FC0( entity_s *a1, entity_s *a2, entity_s *a3, entitymodel_t *a4 )
 {
     for ( entity_s *i = a1; i != a2; i = i->next )
     {
         entity_s_def *def = (entity_s_def *)i->def;
         if ( ( def->eclass->classtype & 0x10 ) == 0 )   // not ECLASS_PREFAB
             continue;
-        int modelClass = (int)(intptr_t)def->modelClass;   // def+0x64
+        entitymodel_t *modelClass = def->modelClass;
         if ( !modelClass )
             continue;
         if ( i == a3 )
@@ -1413,9 +1406,8 @@ static void sub_488FC0( entity_s *a1, entity_s *a2, entity_s *a3, int a4 )
 // 0x4890F0  sub_4890F0 — free every realized instance of one prefab across the whole stack
 // (each saved slot's instance list + the live entityInsts), then clear their def fields.
 // IDA __usercall(ebx=skip-entity, edi=modelClass).
-static void sub_4890F0( int skipEnt, int level )
+static void sub_4890F0( entity_s *a3, entitymodel_t *level )
 {
-    entity_s *a3 = (entity_s *)(intptr_t)skipEnt;
     // unk_25EB660 = &g_prefabStack[0].entityInstsNext (the binary's raw dword walk).
     for ( int v2 = 0; v2 < prefabStackLevel; ++v2 )
         FreePrefabLevel( g_prefabStack[v2].entityInstsNext, &entityInsts, a3, level );
@@ -1430,7 +1422,7 @@ static void sub_4890F0( int skipEnt, int level )
 // 0x489030  FreePrefabLevel — recursively free the realized child instances of one prefab.
 // a4 is the prefab's modelClass pointer, matched against def->modelClass (def+0x64); the
 // compare base at 0x48908c is `def` (i[2]), NOT def->eclass.
-void FreePrefabLevel( entity_s *a1, entity_s *a2, entity_s *a3, int a4 )
+void FreePrefabLevel( entity_s *a1, entity_s *a2, entity_s *a3, entitymodel_t *a4 )
 {
     for ( entity_s *i = a1; i != a2; i = i->next )
     {
@@ -1446,7 +1438,7 @@ void FreePrefabLevel( entity_s *a1, entity_s *a2, entity_s *a3, int a4 )
         if ( i == a3 )
             continue;
 
-        int modelClass = (int)(intptr_t)def->modelClass;   // def+0x64
+        entitymodel_t *modelClass = def->modelClass;
 
         if ( modelClass == a4 )
         {
@@ -1467,7 +1459,7 @@ void FreePrefabLevel( entity_s *a1, entity_s *a2, entity_s *a3, int a4 )
         }
         else
         {
-            entity_s *subList = (entity_s *)((int *)i->prefab)[1];
+            entity_s *subList = ((prefab_s *)i->prefab)->next_entity;
             entity_s *subEnd  = (entity_s *)i->prefab;
             FreePrefabLevel( subList, subEnd, a3, a4 );
         }
@@ -1552,7 +1544,7 @@ char MapFile_WriteEntity( entity_s_def *a1, FILE *a2, char a3 )
     static WriteFunc_map_t *s_writer_fn   = nullptr;
     struct NormalFileWriter
     {
-        static int Write( int ctx, const char *fmt, ... )
+        static int Write( void *ctx, const char *fmt, ... )
         {
             (void)ctx;
             va_list ap;
@@ -1733,8 +1725,8 @@ void Prefab_NextLevel( void *a1 )
 
     // 0x489206 Sys_PrintActiveBrushes("before entering prefab") — NOT a console line: it
     // repopulates the debug brush-list window, exactly as Prefab_PrevLevel does inline.
-    MainFrm_BrushList( (int)VA( 0, "%s - active_brushes", "before entering prefab" ), &active_brushes );
-    MainFrm_BrushList( (int)VA( 1, "%s - active_brushes", "before entering prefab" ), &selected_brushes );
+    MainFrm_BrushList( VA( 0, "%s - active_brushes", "before entering prefab" ), &active_brushes );
+    MainFrm_BrushList( VA( 1, "%s - active_brushes", "before entering prefab" ), &selected_brushes );
     MainFrm_EntList( &entityInsts, "before entering prefab" );
 
     // Resolve the brush instance + its prefab.
@@ -1756,16 +1748,16 @@ void Prefab_NextLevel( void *a1 )
     // @+0x160), whose x2(+8)/entities.next(+12) are the def `entities` sentinel head.
     entity_s_def *def        = (entity_s_def *)owner->def;
     entitymodel_t *modelClass = def->modelClass;
-    models_t *defEntsRoot    = modelClass->model;             // models_t.x88 slot
+    modelnode_t *defEntsRoot = modelClass->model;
     entity_s *defEntsNext    = (entity_s *)defEntsRoot->entities.next;
-    int       defEntsPrev    = defEntsRoot->x2;
+    entity_s *defEntsPrev = defEntsRoot->entities.prev;
 
     // 0x489267: drop the cached light previews — they belong to the parent map's brushes,
     // which are about to be swapped out (same reset as CMainFrame::OnClearPreviewList).
     CamWnd_ClearLightPreviews();   // U-GLOBALS: was m_pCamWnd->light_preview_count = 0
 
     // Free any previously-realized prefab instances for this owner (recursive).
-    sub_4890F0( (int)v1->owner, (int)modelClass );
+    sub_4890F0( v1->owner, modelClass );
 
     if ( !a1 )
         Select_Deselect( 1 );
@@ -1982,8 +1974,8 @@ void Prefab_NextLevel( void *a1 )
     g_nUpdateBits = -1;
     SetWindowTextA( g_qeglobals.d_hwndMain, currentmap );
 
-    MainFrm_BrushList( (int)VA( 0, "%s - active_brushes",   "after entering prefab" ), &active_brushes );
-    MainFrm_BrushList( (int)VA( 1, "%s - active_brushes",   "after entering prefab" ), &selected_brushes );
+    MainFrm_BrushList( VA( 0, "%s - active_brushes",   "after entering prefab" ), &active_brushes );
+    MainFrm_BrushList( VA( 1, "%s - active_brushes",   "after entering prefab" ), &selected_brushes );
     MainFrm_EntList( &entityInsts, "after entering prefab" );
 }
 
@@ -1994,8 +1986,8 @@ void Prefab_PrevLevel()
 {
     iassert( prefabStackLevel > 0 );
 
-    MainFrm_BrushList( (int)VA( 0, "%s - active_brushes",   "before leaving prefab" ), &active_brushes );
-    MainFrm_BrushList( (int)VA( 1, "%s - active_brushes", "before leaving prefab" ), &selected_brushes );
+    MainFrm_BrushList( VA( 0, "%s - active_brushes",   "before leaving prefab" ), &active_brushes );
+    MainFrm_BrushList( VA( 1, "%s - active_brushes", "before leaving prefab" ), &selected_brushes );
     MainFrm_EntList( &entityInsts, "before leaving prefab" );
 
     Select_Deselect( 1 );
@@ -2051,7 +2043,7 @@ void Prefab_PrevLevel()
 
     // The prefab brush the user was editing.
     entity_brush_s *prefabBrush = (entity_brush_s *)slot->prefabBrush;
-    Model_SetModel( prefabBrush, (int)&world_orient_matrix );
+    Model_SetModel( prefabBrush, (const float *)&world_orient_matrix );
     Map_InitlLayers();
 
     // Restore the parent map's layers (binary: sub_41A5A0 clears the live RB-tree, then
@@ -2113,9 +2105,9 @@ void Prefab_PrevLevel()
     // re-gathers from the current texdef, so there is nothing to push.  Same treatment as
     // the sibling sites in surfacedlg.cpp:633 and texwnd.cpp:1398.
 
-    sub_47D060( (int)&active_brushes );
-    sub_47D060( (int)&selected_brushes );
-    sub_47D060( (int)&filtered_brushes );
+    sub_47D060( &active_brushes );
+    sub_47D060( &selected_brushes );
+    sub_47D060( &filtered_brushes );
     CopySelectedFaceValues();
 
     if ( g_region_active )
@@ -2125,8 +2117,8 @@ void Prefab_PrevLevel()
     g_nUpdateBits = -1;
     SetWindowTextA( g_qeglobals.d_hwndMain, currentmap );
 
-    MainFrm_BrushList( (int)VA( 0, "%s - active_brushes",   "after leaving prefab" ), &active_brushes );
-    MainFrm_BrushList( (int)VA( 1, "%s - active_brushes", "after leaving prefab" ), &selected_brushes );
+    MainFrm_BrushList( VA( 0, "%s - active_brushes",   "after leaving prefab" ), &active_brushes );
+    MainFrm_BrushList( VA( 1, "%s - active_brushes", "after leaving prefab" ), &selected_brushes );
     MainFrm_EntList( &entityInsts, "after leaving prefab" );
 }
 
@@ -2246,7 +2238,7 @@ extern void        Select_Brush( selbrush_t *b, char some_overwrite, char bStatu
 extern void        Undo_ClearRedo();                                       // undo.cpp 0x45DF20
 extern void        Undo_GeneralStart( const char *op );                    // undo.cpp 0x45E3F0
 extern void        Undo_End();                                             // undo.cpp 0x45EA20
-extern bool        Model_SetModel( entity_brush_s *b, int orientMatrix );  // brush.cpp 0x478780
+extern bool        Model_SetModel( entity_brush_s *b, const float *orientMatrix );  // brush.cpp 0x478780
 extern undo_s     *g_lastundo;                                             // undo.cpp 0x23F162C
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2366,7 +2358,7 @@ char *Map_ImportBuffer( const char **text, int version )
     {
         entity_s_def *ownerDef = (entity_s_def *)ab->owner->def;
 
-        const char *ln = ValueForKey2( (int)(intptr_t)ownerDef, "script_linkName" );
+        const char *ln = ValueForKey2( ownerDef, "script_linkName" );
         if ( *ln )
         {
             int num = (int)atol( ln );
@@ -2380,7 +2372,7 @@ char *Map_ImportBuffer( const char **text, int version )
             }
         }
 
-        const char *lt = ValueForKey2( (int)(intptr_t)ownerDef, "script_linkTo" );
+        const char *lt = ValueForKey2( ownerDef, "script_linkTo" );
         if ( *lt )
         {
             Map_ParseLinkList( &links, lt );
@@ -2514,7 +2506,7 @@ char *Map_ImportBuffer( const char **text, int version )
         {
             // target: colliding with an existing entity's "target" → remapped "auto%i".
             // Only values that themselves start with "auto" are rewritten (0x488405).
-            std::string oldVal = ValueForKey2( (int)(intptr_t)eDef, "target" );
+            std::string oldVal = ValueForKey2( eDef, "target" );
             if ( !oldVal.empty() )
             {
                 entity_s *match = entities.next;
@@ -2545,7 +2537,7 @@ char *Map_ImportBuffer( const char **text, int version )
 
             // targetname: same remap table as target (a target/targetname PAIR maps to
             // the same fresh name, keeping intra-paste references wired together).
-            oldVal = ValueForKey2( (int)(intptr_t)eDef, "targetname" );
+            oldVal = ValueForKey2( eDef, "targetname" );
             if ( !oldVal.empty() )
             {
                 entity_s *match = entities.next;
@@ -2573,7 +2565,7 @@ char *Map_ImportBuffer( const char **text, int version )
             }
 
             // script_linkName: a number already used in the scene → its fresh replacement.
-            const char *ln = ValueForKey2( (int)(intptr_t)eDef, "script_linkName" );
+            const char *ln = ValueForKey2( eDef, "script_linkName" );
             if ( *ln )
             {
                 int num = (int)atol( ln );
@@ -2586,7 +2578,7 @@ char *Map_ImportBuffer( const char **text, int version )
 
             // script_linkTo: renumber each colliding id in the list; non-colliding ids
             // pass through unchanged. Rebuilt as "%i %i ... " like the binary (0x488827).
-            const char *lt = ValueForKey2( (int)(intptr_t)eDef, "script_linkTo" );
+            const char *lt = ValueForKey2( eDef, "script_linkTo" );
             if ( *lt )
             {
                 Map_ParseLinkList( &links, lt );
@@ -2628,7 +2620,7 @@ char *Map_ImportBuffer( const char **text, int version )
         {
             entity_brush_s *fb = entInst->brushes.ownerNext;
             if ( fb != &entInst->brushes )
-                Model_SetModel( fb, (int)(intptr_t)&world_orient_matrix );
+                Model_SetModel( fb, (const float *)&world_orient_matrix );
         }
     }
 
@@ -2652,8 +2644,8 @@ char *Map_ImportBuffer( const char **text, int version )
             // key lookup case-insensitive, VALUE compare case-sensitive (0x488ae6);
             // both default to "" — an entity with neither key also compares equal,
             // making the deletes no-ops (faithful to the binary).
-            const char *tgt = ValueForKey2( (int)(intptr_t)ownerDef, "target" );
-            const char *tnm = ValueForKey2( (int)(intptr_t)ownerDef, "targetname" );
+            const char *tgt = ValueForKey2( ownerDef, "target" );
+            const char *tnm = ValueForKey2( ownerDef, "targetname" );
             if ( !strcmp( tgt, tnm ) )
             {
                 DeleteKey( &ownerDef->epairs, "targetname" );

@@ -88,7 +88,7 @@ struct texwnd_s
     char         _pad1003a[2];                   // 0x1003a
     nPos_s       nPos[3];                         // 0x1003c  per-layer scroll (current/max)
 };
-static_assert(sizeof(texwnd_s) == 0x1006c, "texwnd_s must match the IDB (0x1006c)");
+static_assert(sizeof(texwnd_s) == (sizeof(void *) == 8 ? 131192 : 0x1006c), "texwnd_s must match the IDB (0x1006c)");
 
 texwnd_s texWndGlob_textureOffset = {};
 
@@ -673,7 +673,7 @@ qtexture_s *TexWnd_RegisterMaterialByName( const char *name )
 // filter_material_t {char* name; int index} (8B); the menu/shutdown code below reuses it.
 // Declared here (ahead of TexWnd_FilterAccept, which reads these arrays).
 struct RadiantFilterEntry { char *name; int index; };
-static_assert(sizeof(RadiantFilterEntry) == 8, "filter_material_t must be 8 bytes (IDB)");
+static_assert(sizeof(RadiantFilterEntry) == (sizeof(void *) == 8 ? 16 : 8), "filter_material_t must be 8 bytes (IDB)");
 extern RadiantFilterEntry filter_usage_array[256];       // IDB 0x739F80
 extern RadiantFilterEntry filter_locale_array[256];      // IDB 0x73A780
 extern RadiantFilterEntry filter_surfacetype_array[29];  // IDB 0x73AF80 (this TU, below)
@@ -1605,7 +1605,7 @@ int TexWnd_OnMouseWheel( short zDelta )
 extern void  Surf_RefreshFields();                      // surfacedlg.cpp (Select_SetTexture_2 field refresh)
 extern void  SurfaceInspector_SetTexMods();             // surfacedlg.cpp (0x458270 — multi-layer snapshot)
 extern void  CopySelectedFaceValues();                  // brush.cpp 0x47d130
-extern void  sub_47D060( int brushList );               // brush.cpp
+extern void  sub_47D060( selbrush_t *brushList );               // brush.cpp
 
 void Material_SetMode( int iMode )
 {
@@ -1632,9 +1632,9 @@ void Material_SetMode( int iMode )
     }
 
 
-    sub_47D060( (int)(intptr_t)&active_brushes );
-    sub_47D060( (int)(intptr_t)&selected_brushes );
-    sub_47D060( (int)(intptr_t)&filtered_brushes );
+    sub_47D060( &active_brushes );
+    sub_47D060( &selected_brushes );
+    sub_47D060( &filtered_brushes );
     CopySelectedFaceValues();
 
     // 0x13 repaints camera, XY, and the texture browser.
@@ -1932,20 +1932,12 @@ int g_texwnd_simple_layered_selection = 0;
 // 84-byte library entry view (mirrors layeredmaterials.cpp's offset enum + the authoring
 // window's LyrMtlEntry).  Per the IDB cap a library entry holds at most ONE layer, but the
 // draw indexes layer i at handle offset 0x50 + 8*i (faithful to sub_45CEA0's a1[2*i+20]).
-struct LyrMtlDrawEntry
-{
-    char        name[64];       // 0x00  the entry name (passed straight to R_AddCmdDrawText)
-    int         nextId;         // 0x40
-    int         layerCount;     // 0x44  a1[17]
-    int         _pad48;         // 0x48
-    int         layerId0;       // 0x4C  layer[0].id
-    qtexture_s *layerHandle0;   // 0x50  layer[0].handle (radMtl)  — a1[20]
-};
-static_assert( sizeof( LyrMtlDrawEntry ) == 84, "LyrMtlDrawEntry must match the 84-byte library stride" );
+typedef LyrEntry_t LyrMtlDrawEntry;
+static_assert( sizeof( LyrMtlDrawEntry ) == sizeof(LyrEntry_t), "native library entry" );
 // layer i's handle pointer lives at 0x50 + 8*i (the {id,handle} pair stride is 8).
 static inline qtexture_s *LyrMtl_LayerHandle( const LyrMtlDrawEntry *e, int i )
 {
-    return *(qtexture_s *const *)( (const char *)e + 0x50 + 8 * i );
+    return e->layers[i].handle;
 }
 
 // R_DrawOutlineRect (IDB 0x45cb10) — draw a 2D rectangle outline (xL,yT)-(xR,yB) in
@@ -2094,7 +2086,7 @@ static void TexWnd_DrawLayeredMaterialEntry( LyrMtlDrawEntry *entry, int *py )
 
     // outline colour: active entry = colors[10] (highlight), else colors[8].
     const float *frameCol =
-        ( (int)(intptr_t)entry == lyrMtlWndGlob.activeLyrMtl )
+        ( entry == lyrMtlWndGlob.activeLyrMtl )
             ? g_qeglobals.d_savedinfo.colors[10]
             : g_qeglobals.d_savedinfo.colors[8];
     if ( entry->layerCount )
@@ -2145,7 +2137,7 @@ static int TexWnd_02( qtexture_s *radMtl )
         RadiantMaterialInfo localRaw;                      // IDB v1[56] equivalent for qtexture metadata
         radMtl->next = Register_WorldMaterial( radMtl->name, &localRaw );
     }
-    return (int)(intptr_t)radMtl->next;                   // callback return; MaterialDef_02 discards it
+    return radMtl->next != NULL;   // MaterialDef_02 discards the callback result.
 }
 
 // sub_415CE0 / sub_415D40 (IDB 0x415ce0 / 0x415d40).

@@ -57,7 +57,7 @@ extern entity_s   *Entity_Create( eclass_t *eclass ); // entity.cpp   (0x484980)
 
 extern void        SetKeyValue( entity_s_def *e, const char *key, const char *value ); // entity.cpp 0x483690
 extern void        DeleteKey( epair_t **head, const char *key );                       // entity.cpp 0x483720
-extern char       *ValueForKey2( int e, const char *key );                             // entity.cpp 0x4825C0
+extern char       *ValueForKey2( const entity_s *e, const char *key );                             // entity.cpp 0x4825C0
 extern int         Entity_GetVec3ForKey( entity_s_def *e, float *out, const char *key );// entity.cpp 0x483860
 extern void        Checkkey_Model( entity_s_def *e, const char *key );                 // entity.cpp 0x482F70
 extern void        Checkkey_Color( entity_s_def *e, const char *key );                 // entity.cpp 0x483210

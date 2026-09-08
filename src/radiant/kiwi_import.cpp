@@ -36,7 +36,7 @@ extern int  texWndGlob_textureOffset_localeCount();                             
 
 // FillTextureMenu loads usage/locale; surface types are compiled in.
 struct RadiantFilterEntry { char *name; int index; };
-static_assert( sizeof( RadiantFilterEntry ) == 8, "filter_material_t must be 8 bytes (IDB)" );
+static_assert( sizeof( RadiantFilterEntry ) == (sizeof(void *) == 8 ? 16 : 8), "filter_material_t must be 8 bytes (IDB)" );
 extern RadiantFilterEntry filter_usage_array[256];        // engine_stubs.cpp:821  (IDB 0x739F80)
 extern RadiantFilterEntry filter_locale_array[256];       // engine_stubs.cpp:822  (IDB 0x73A780)
 extern RadiantFilterEntry filter_surfacetype_array[29];   // texwnd.cpp:1736       (IDB 0x73AF80)

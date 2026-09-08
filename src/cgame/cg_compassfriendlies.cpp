@@ -319,8 +319,6 @@ void __cdecl CG_CompassDrawActors(
     float xy[2]; // [sp+80h] [-140h] BYREF
     //float y; // [sp+84h] [-13Ch]
     float compassNorth[2]; // [sp+88h] [-138h] BYREF
-    unsigned __int64 v68; // [sp+90h] [-130h]
-    unsigned __int64 v69; // [sp+98h] [-128h]
     unsigned __int64 v70; // [sp+A0h] [-120h]
     float v71; // [sp+A8h] [-118h]
     float v72; // [sp+B0h] [-110h]
@@ -372,9 +370,7 @@ void __cdecl CG_CompassDrawActors(
                 v23 = yawTo;
                 compassping_friendlyfiring = 0;
                 v25 = (float)(compassSoundPingFadeTime->current.value * (float)1000.0);
-                v68 = __PAIR64__((unsigned int)compassSoundPingFadeTime, cgameGlob->time);
-                v69 = __PAIR64__((unsigned int)compassSoundPingFadeTime, beginFadeTime);
-                if ((float)((float)__SPAIR64__((unsigned int)compassSoundPingFadeTime, beginFadeTime) + (float)v25) < (double)(float)__SPAIR64__((unsigned int)compassSoundPingFadeTime, cgameGlob->time))
+                if ((float)beginFadeTime + v25 < (float)cgameGlob->time)
                 {
                     firingFade = pingAlpha;
                 }
@@ -556,4 +552,3 @@ void __cdecl CG_CompassDrawVehicles(
         } while (v16);
     }
 }
-

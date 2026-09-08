@@ -48,8 +48,8 @@ MaterialGlobals materialGlobals{};
 GfxWorld s_world{};
 fileData_s *com_fileDataHashTable[1024] = {};
 HWND g_splashWnd = nullptr;
-uint s_affinityMaskForCpu[4] = {};
-uint s_affinityMaskForProcess = 0;
+uintptr_t s_affinityMaskForCpu[4] = {};
+uintptr_t s_affinityMaskForProcess = 0;
 uint s_cpuCount = 1;
 volatile uint g_mainThreadBlocked = 0;
 
@@ -817,7 +817,7 @@ struct TexWndGlob_t { void *materialNameRemap; } texWndGlob;   // IDB texWndGlob
 // TexFilter_LoadMenuFile (qe3.cpp).  Entry [0] is the static {"all", 0} the IDB ships in
 // .data and CTexWnd_Shutdown's free loop skips it, so its literal is never freed.
 struct RadiantFilterEntry { char *name; int index; };
-static_assert(sizeof(RadiantFilterEntry) == 8, "filter_material_t must be 8 bytes (IDB)");
+static_assert(sizeof(RadiantFilterEntry) == (sizeof(void *) == 8 ? 16 : 8), "filter_material_t must be 8 bytes (IDB)");
 RadiantFilterEntry filter_usage_array[256]  = { { (char *)"all", 0 } };
 RadiantFilterEntry filter_locale_array[256] = { { (char *)"all", 0 } };
 
@@ -887,10 +887,10 @@ extern int Vec3_MajorAxis( const float *dir );
 // 0x4769a0 — solve the 2D texture-coordinate gradient for a face from two texture planes.
 // a1 = out face normal, a2 = {Sx,Sy,Sz,Sd, Tx,Ty,Tz,Td}, a3 = out gradient.  Reached from
 // Brush_ApplyTextureProjection (Drag_FaceAlign: align texture between two faces).
-void sub_4769A0( int a1, int a2, int a3 )
+void sub_4769A0( float *a1, const float *a2, float *a3 )
 {
     float *normalOut = (float *)(intptr_t)a1;
-    float *p         = (float *)(intptr_t)a2;   // S plane p[0..3], T plane p[4..7]
+    const float *p   = a2;   // S plane p[0..3], T plane p[4..7]
     float *grad      = (float *)(intptr_t)a3;
 
     Vec3Cross( p, p + 4, normalOut );
@@ -1031,9 +1031,8 @@ void sub_4AA220( const float *in, const float *anglesDeg, float *out )   // 0x4a
 // on the prefab-enter camera reframe, not on the .map round-trip path.
 static const double RAD_PI = 3.1415927410125732;   // dbl_6F42B0 (float PI widened)
 
-void vectoangles( float *ang, int vecAddr )         // 0x4a5020
+void Radiant_VecToAngles( float *ang, const float *vec )         // 0x4a5020
 {
-    const float *vec = (const float *)(intptr_t)vecAddr;
     float yaw, pitch;
     if ( vec[1] == 0.0f && vec[0] == 0.0f )
     {
@@ -1070,7 +1069,7 @@ void AxisToAngles( float *angles, float (*axis)[3] )   // 0x4a8a00
     // pitch/yaw from the forward vector; roll by rotating the right vector back through
     // -yaw then -pitch and reading the residual signed pitch (its sign vs the rolled-right
     // Y picks the 0 / +-180 quadrant).  axis layout: [0]=fwd, [1]=right, [2]=up.
-    vectoangles( angles, (int)(intptr_t)&axis[0][0] );
+    Radiant_VecToAngles( angles, &axis[0][0] );
 
     float rx = axis[1][0], ry = axis[1][1], rz = axis[1][2];
 
@@ -1143,32 +1142,32 @@ void Vec3RotateTranspose( float * const in, float ( *matrix )[3], float * const 
 
 // ─── .map writer helpers (mapparsing.cpp) ────────────────────────────────────
 // 0x42fb40 — write `layer "<name>"` for a non-default layer.
-void MapLoad_ParseBrush_Layer(int (**writer)(int, const char *, ...), int layerStr)
+void MapLoad_ParseBrush_Layer(int (**writer)(void *, const char *, ...), const char *layerStr)
 {
     // KEEP_VERBOSE: this IS the mapparsing.cpp:190 assert carrier (foreign common/ TU).
     if ( !layerStr )
         Assert( "C:\\trees\\cod3-pc\\cod3-modtools\\cod3src\\common\\mapparsing.cpp",
                 190, 0, "%s", "layerName" );
-    (**writer)( (int)(intptr_t)writer, "layer \"%s\"\n", layerStr );
+    (**writer)( writer, "layer \"%s\"\n", layerStr );
 }
 // 0x42f6a0 — write `  <keyword> name name ... ;` when value is non-zero, nothing
 // otherwise (so solid brushes emit no contents/toolFlags line).
-void MapLoad_ParseBrush_Content(int keyword, int (**writer)(int, const char *, ...),
+void MapLoad_ParseBrush_Content(const char *keyword, int (**writer)(void *, const char *, ...),
                                 int value, void *tablePtr)
 {
     if ( !value )
         return;
     const RadiantFlagName *table = (const RadiantFlagName *)tablePtr;
-    (**writer)( (int)(intptr_t)writer, "  %s", keyword );
+    (**writer)( writer, "  %s", keyword );
     for ( int i = 0; table[i].name; ++i )
     {
         if ( ( value & table[i].bits ) == table[i].bits )
         {
-            (**writer)( (int)(intptr_t)writer, " %s", (int)(intptr_t)table[i].name );
+            (**writer)( writer, " %s", table[i].name );
             value &= ~table[i].bits;
         }
     }
-    (**writer)( (int)(intptr_t)writer, ";\n" );
+    (**writer)( writer, ";\n" );
 }
 
 // Radiant Error() — wraps Com_Error (used by brush parse code).
@@ -1188,13 +1187,13 @@ long j__atol(const char *s) { return atol(s); }
 // Trampolines for two brush.cpp entry points whose IDB __usercall shape passes
 // face/brush as ints: sub_476740 -> Brush_SetFaceTexdefSize, sub_4767E0 ->
 // Brush_SetFaceTexdef (find/replace "Live" path + select.cpp Brush_SetTextureMapping).
-void Brush_SetFaceTexdefSize(const float *size2, face_t *f, brush_t *b);           // brush.cpp 0x476740
+void Brush_SetFaceTexdefSize( const patchMesh_material *material, face_t *f, brush_t *b);           // brush.cpp 0x476740
 brush_t *Brush_SetFaceTexdef( const texdef_sub_t *texDef, face_t *f, brush_t *b );  // brush.cpp 0x4767e0
-void sub_476740(int texdef, face_t *face, brush_t *brush)
+void sub_476740( const patchMesh_material *texdef, face_t *face, brush_t *brush)
 {
-    Brush_SetFaceTexdefSize((const float *)(intptr_t)texdef, face, brush);
+    Brush_SetFaceTexdefSize(texdef, face, brush);
 }
-void sub_4767E0( const texdef_sub_t *texDef, int facePtr, int brushDef )
+void sub_4767E0( const texdef_sub_t *texDef, face_t *facePtr, brush_t *brushDef )
 {
     Brush_SetFaceTexdef( texDef, (face_t *)(intptr_t)facePtr, (brush_t *)(intptr_t)brushDef );
 }

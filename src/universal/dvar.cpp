@@ -1311,12 +1311,7 @@ void __cdecl Dvar_SetVariant(dvar_s *dvar, DvarValue value, DvarSetSource source
         }
         return;
     }
-    if (dvar->domainFunc && !((uint8_t(__cdecl *)(dvar_s *, int, uint, uint, uint))dvar->domainFunc)(
-                                dvar,
-                                value.integer,
-                                LODWORD(value.vector[1]),
-                                LODWORD(value.vector[2]),
-                                LODWORD(value.vector[3])))
+    if (dvar->domainFunc && !dvar->domainFunc(dvar, value))
     {
         v8 = dvar->name;
         v6 = Dvar_ValueToString(dvar, value);
@@ -2613,12 +2608,7 @@ void __cdecl Dvar_SetDomainFunc(dvar_s *dvar, bool(__cdecl *customFunc)(dvar_s *
     dvar->domainFunc = customFunc;
     if (customFunc)
     {
-        if (!((uint8_t(__cdecl *)(dvar_s *, int, uint, uint, uint))dvar->domainFunc)(
-            dvar,
-            dvar->current.integer,
-            LODWORD(dvar->current.vector[1]),
-            LODWORD(dvar->current.vector[2]),
-            LODWORD(dvar->current.vector[3])))
+        if (!dvar->domainFunc(dvar, dvar->current))
         {
             name = dvar->name;
             v2 = Dvar_ValueToString(dvar, dvar->current);

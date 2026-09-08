@@ -35,7 +35,7 @@ struct patch_texdef_t
     int         unk3;         // 0x24
     float       sample_size;  // 0x28
 };
-static_assert( sizeof( patch_texdef_t ) == 44, "patch_texdef_t" );
+static_assert( sizeof( patch_texdef_t ) == (sizeof(void *) == 8 ? 56 : 44), "patch_texdef_t" );
 patch_texdef_t g_patch_texdef;      // IDB g_patch_texdef (0x23F15F8)
 
 // Fit the texture to the selected face(s) (Brush_FitTexture 0x4939E0, select.cpp) —

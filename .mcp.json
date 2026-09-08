@@ -1,8 +1,0 @@
-{
-  "mcpServers": {
-    "tracy": {
-      "type": "http",
-      "url": "http://localhost:47380/mcp"
-    }
-  }
-}

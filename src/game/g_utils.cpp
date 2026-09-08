@@ -24,8 +24,8 @@ XModel *cached_models[512]{ NULL };
 
 void __cdecl TRACK_g_utils()
 {
-    track_static_alloc_internal(entityTypeNames, 68, "entityTypeNames", 9);
-    track_static_alloc_internal(cached_models, 2048, "cached_models", 9);
+    track_static_alloc_internal(entityTypeNames, sizeof(entityTypeNames), "entityTypeNames", 9);
+    track_static_alloc_internal(cached_models, sizeof(cached_models), "cached_models", 9);
 }
 
 static bool dumpedOnce = false;
@@ -281,7 +281,7 @@ int __cdecl G_ModelIndex(const char *name)
 XModel *__cdecl G_GetModel(int index)
 {
     iassert(index > 0);
-    iassert(index < MAX_MODELS);
+    iassert(index < ARRAY_COUNT(cached_models));
     return cached_models[index];
 }
 

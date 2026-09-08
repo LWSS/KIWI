@@ -3952,6 +3952,11 @@ char __cdecl R_CreateDevice(const GfxWindowParms *wndParms)
     {
         v1 = R_ErrorDescription(hr);
         Com_Printf(CON_CHANNEL_GFX, "Couldn't create a Direct3D device: %s\n", v1);
+#ifdef KISAK_RADIANT
+        extern void Radiant_FL_Log(const char *fmt, ...);
+        Radiant_FL_Log("R_CreateDevice failed: HRESULT=0x%08X, adapter=%u, size=%dx%d, window=%p",
+            (unsigned int)hr, dx.adapterIndex, wndParms->displayWidth, wndParms->displayHeight, (void *)hwnd);
+#endif
         return 0;
     }
 }

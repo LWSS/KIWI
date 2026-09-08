@@ -56,7 +56,7 @@ char *AllocMaterialString( const char *src )
 // CTexWnd_Shutdown's free() pairs (the binary's static-CRT operator new is malloc).
 // ─────────────────────────────────────────────────────────────────────────────
 struct RadiantFilterEntry { char *name; int index; };   // = IDB filter_material_t (8B)
-static_assert( sizeof( RadiantFilterEntry ) == 8, "filter_material_t must be 8 bytes (IDB)" );
+static_assert( sizeof( RadiantFilterEntry ) == (sizeof(void *) == 8 ? 16 : 8), "filter_material_t must be 8 bytes (IDB)" );
 
 int TexFilter_LoadMenuFile( const char *txt, void *dest, int startId )
 {
@@ -140,7 +140,7 @@ next_line:
 // script_linkTo list, strip that self-reference, write the cleaned list back and return 1;
 // otherwise return 0.  Script_Link uses it to detect "both already in the same group".
 // ─────────────────────────────────────────────────────────────────────────────
-extern char       *ValueForKey2( int e, const char *key );                            // entity.cpp 0x4825C0
+extern char       *ValueForKey2( const entity_s *e, const char *key );                            // entity.cpp 0x4825C0
 extern void        SetKeyValue( entity_s_def *e, const char *key, const char *value ); // entity.cpp 0x483690
 extern char       *va( const char *fmt, ... );                                         // q_shared
 extern void       *zero;                                                                // empty-string sentinel (engine_stubs.cpp)
@@ -156,7 +156,7 @@ static char ScriptGroup_LinkTo( entity_s_def *e )
         return 0;
 
     // 0x48c261: e's own link id.
-    char *linkName = ValueForKey2( (int)e, "script_linkName" );
+    char *linkName = ValueForKey2( e, "script_linkName" );
     if ( !linkName || !*linkName )
         return 0;
     int myId = atol( linkName );
@@ -210,7 +210,7 @@ void Script_Link( entity_s_def *a, entity_s_def *b )
 
     // 0x48bf61: assign / reuse b's script_linkName id.
     int newId;
-    char *bLinkName = ValueForKey2( (int)b, "script_linkName" );
+    char *bLinkName = ValueForKey2( b, "script_linkName" );
     if ( bLinkName && *bLinkName )
     {
         newId = atol( bLinkName );             // 0x48bf7f: reuse existing id
@@ -413,7 +413,7 @@ extern int    LoadFileNoCrash( const char *filename, void **bufferptr );   // cm
 extern void   Com_BeginParseSession( const char *name );                   // q_parse
 extern entity_s *ParseEntity( const char **text, int version, char a2, char a3 ); // entity.cpp 0x483E70
 extern void   SetKeyValue( entity_s_def *e, const char *key, const char *value ); // entity.cpp 0x483690
-extern char  *ValueForKey2( int e, const char *key );                      // entity.cpp 0x4825C0
+extern char  *ValueForKey2( const entity_s *e, const char *key );                      // entity.cpp 0x4825C0
 extern void   Prefab_LevelBack();                                          // errorfile.cpp 0x489D50
 extern void   Map_LoadFromFile( const char *path );                        // map.cpp 0x486680
 // Com_Error / ERR_FATAL come from qcommon.h (via qe3.h → r_material.h).
@@ -569,12 +569,12 @@ signed int QE_LoadProject_ParseFile( const char *path )
     // ALWAYS the exe-derived path (com_files.cpp); game data lives next to the exe.  The
     // .prj's other keys (mapspath/autosave/basegame/game) keep their meaning.
     {
-        const char *base = ValueForKey2( (int)(intptr_t)g_qeglobals.d_project_entity, "basepath" );
+        const char *base = ValueForKey2( g_qeglobals.d_project_entity, "basepath" );
         if ( base && *base )
             Sys_Printf( "QE_LoadProject: ignoring .prj basepath '%s' (fs_basepath is exe-derived)\n", base );
     }
-    Project_RegisterFsDvar( "fs_basegame", ValueForKey2( (int)(intptr_t)g_qeglobals.d_project_entity, "basegame" ) );
-    Project_RegisterFsDvar( "fs_game",     ValueForKey2( (int)(intptr_t)g_qeglobals.d_project_entity, "game" ) );
+    Project_RegisterFsDvar( "fs_basegame", ValueForKey2( g_qeglobals.d_project_entity, "basegame" ) );
+    Project_RegisterFsDvar( "fs_game",     ValueForKey2( g_qeglobals.d_project_entity, "game" ) );
 
     Sys_Printf( "QE_LoadProject: parsed %s\n", path );
     return 1;

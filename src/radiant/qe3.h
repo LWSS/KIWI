@@ -7,7 +7,9 @@
 // qe3.h — CoD4Radiant (IW3xRadiant) editor object model.
 // Phase 3 (plan §5). Layouts are ported field-for-field from the CoD4Radiant IDB
 // (port 13346) and pinned with permanent static_assert(sizeof) + offsetof asserts
-// on load-bearing fields (the layout regression net for Phase 4 pointer-walking
+// on load-bearing fields. Numeric field comments describe the original x86 layout.
+// Native sizes/offsets are checked separately for x86 and x64 (the regression net
+// for pointer-walking
 // code). IDA is the authority; GtkRadiant 1.6 supplies field names only.
 //
 // CoD asset types (Material/GfxImage/MaterialTechniqueSet) come from the kisak
@@ -31,7 +33,7 @@ struct brush_t;
 struct selbrush_t;         // canonical 56-byte brush-instance / list node (ruling below)
 struct patchMesh_t;
 struct eclass_t;
-struct entitymodel_t;      // eclass-like model node (defined below)
+typedef eclass_t entitymodel_t;
 struct LayerMaterialDef;   // pointer-only (Phase 6 layeredmaterials)
 struct undo_s;             // forward-decl; full definition below (after entity_s)
 struct Material;           // gfx_d3d r_material.h — referenced pointer-only by faceVisuals_s
@@ -66,7 +68,7 @@ struct qtexture_s
     int          in_use;                       // 0x20  (contents; MaterialDef_08 ANDs this)
     qtexture_s  *prev;                         // 0x24  (texWndGlob list link)
 };
-static_assert(sizeof(qtexture_s) == 40, "qtexture_s must be 40 bytes (IDB ordinal 463)");
+static_assert(sizeof(qtexture_s) == (sizeof(void *) == 8 ? 56 : 40), "qtexture_s must be 40 bytes (IDB ordinal 463)");
 
 // ── patch control-point vertex (editor-only; absent from the kisak tree) ───────
 struct drawVert_t
@@ -102,7 +104,7 @@ struct curvePatchDef_t
     curveVert_t *verts;       // 0x0C  width*height verts (allocated immediately after)
     int          unk_after;   // 0x10
 };
-static_assert(sizeof(curvePatchDef_t) == 20, "curvePatchDef_t");
+static_assert(sizeof(curvePatchDef_t) == (sizeof(void *) == 8 ? 32 : 20), "curvePatchDef_t");
 
 // ── per-face / per-patch material binding ─────────────────────────────────────
 // MaterialDef = the two material pointers + an inline texture-projection block.
@@ -112,7 +114,7 @@ struct MaterialDef
     qtexture_s       *radMtl;     // 0x04  radiant texture wrapper
     texdef_sub_t      mat_texDef; // 0x08
 };
-static_assert(sizeof(MaterialDef) == 36, "MaterialDef");
+static_assert(sizeof(MaterialDef) == (sizeof(void *) == 8 ? 48 : 36), "MaterialDef");
 
 // patchMesh_t.texture/lightmap/smoothing — the pointer pair without the texDef.
 struct patchMesh_material
@@ -120,7 +122,7 @@ struct patchMesh_material
     LayerMaterialDef *lyrMtl;     // 0x00
     qtexture_s       *radMtl;     // 0x04
 };
-static_assert(sizeof(patchMesh_material) == 8, "patchMesh_material");
+static_assert(sizeof(patchMesh_material) == (sizeof(void *) == 8 ? 16 : 8), "patchMesh_material");
 
 // ── face texture definition (face_t.texdef points at the sub-block; texdef_t is
 //    the full per-surface record used by the surface inspector) ────────────────
@@ -137,7 +139,7 @@ struct texdef_t
     int         xx006;                // 0x40
     int         texdef_0x24_question; // 0x44
 };
-static_assert(sizeof(texdef_t) == 72, "texdef_t");
+static_assert(sizeof(texdef_t) == (sizeof(void *) == 8 ? 88 : 72), "texdef_t");
 
 // ── brush face (IDB face_t_new — the corrected 232-byte layout; the older IDB
 //    `face_t` flattened the MaterialDef[4] block and mislabeled contents@0x24) ──
@@ -160,11 +162,11 @@ struct face_t
         int field_0xE4;        //       (historical name; init -1)
     };
 };
-static_assert(sizeof(face_t) == 232, "face_t");
-static_assert(offsetof(face_t, mtldef) == 36,  "face_t.mtldef");
-static_assert(offsetof(face_t, contents) == 180, "face_t.contents");
-static_assert(offsetof(face_t, plane) == 192,  "face_t.plane");
-static_assert(offsetof(face_t, w) == 224,      "face_t.w");
+static_assert(sizeof(face_t) == (sizeof(void *) == 8 ? 296 : 232), "face_t");
+static_assert(offsetof(face_t, mtldef) == (sizeof(void *) == 8 ? 40 : 36),  "face_t.mtldef");
+static_assert(offsetof(face_t, contents) == (sizeof(void *) == 8 ? 232 : 180), "face_t.contents");
+static_assert(offsetof(face_t, plane) == (sizeof(void *) == 8 ? 244 : 192),  "face_t.plane");
+static_assert(offsetof(face_t, w) == (sizeof(void *) == 8 ? 280 : 224),      "face_t.w");
 
 // ── per-face render visuals (IDB faceVis_s, 12 bytes) ─────────────────────────
 // Each selbrush_t.faces is a heap array of faceVis_s with faceCount elements.
@@ -175,7 +177,7 @@ struct faceVisuals_s
     Material *mtlHandle;  // 0x00  the layer's render material (IDB "mtlHandle")
     int       vertHandle; // 0x04  editor vertex-buffer handle
 };
-static_assert(sizeof(faceVisuals_s) == 8, "faceVisuals_s");
+static_assert(sizeof(faceVisuals_s) == (sizeof(void *) == 8 ? 16 : 8), "faceVisuals_s");
 
 struct faceVis_s
 {
@@ -183,7 +185,7 @@ struct faceVis_s
     int           visCount;  // 0x04
     faceVisuals_s *visArray; // 0x08
 };
-static_assert(sizeof(faceVis_s) == 12, "faceVis_s");
+static_assert(sizeof(faceVis_s) == (sizeof(void *) == 8 ? 16 : 12), "faceVis_s");
 
 // ── vertex/edge-selection edge record (g_qeglobals.d_edges) ───────────────────
 // IDB pedge_t (16 bytes): two point indices into d_points + the (up to two) faces
@@ -196,7 +198,7 @@ struct pedge_t
     face_t *f1;   // 0x08  first face sharing this edge
     face_t *f2;   // 0x0C  second face (set when the reverse edge is found)
 };
-static_assert(sizeof(pedge_t) == 16, "pedge_t");
+static_assert(sizeof(pedge_t) == (sizeof(void *) == 8 ? 24 : 16), "pedge_t");
 
 // ── EdLayerGeom — Stage 1d editor surf-cache per-layer scratch (NOT an IDB
 //    layout). Holds one material layer's faithful per-vertex geometry, computed
@@ -232,7 +234,7 @@ struct selface_t
     faceVis_s  *face;   // 0x04
     int         index;  // 0x08
 };
-static_assert(sizeof(selface_t) == 12, "selface_t");
+static_assert(sizeof(selface_t) == (sizeof(void *) == 8 ? 24 : 12), "selface_t");
 
 // ── g_SelectedFaces — the face-selection array ───────────────────────────────
 // IDB: MFC CArray<selface_t, selface_t&> at 0x73C70C (m_pData@0x73C710,
@@ -271,11 +273,25 @@ extern SurfDlgGlob_t surfDlgGlob;
 // IDB lyrMtlGlob (0x1814CF8) — the layered-material library block (assert strings
 // name its members).  Entry stride 84 bytes, 512 entries (== layeredmaterials.cpp's
 // LYR_ENTRY_SIZE/LYR_MAX_ENTRIES, static_asserted at the definition).
+struct LyrEntryLayer_t
+{
+    int id;
+    qtexture_s *handle;
+};
+struct LyrEntry_t
+{
+    char name[64];
+    int nextId;
+    int layerCount;
+    int activeLayer;
+    LyrEntryLayer_t layers[1];
+};
+static_assert(sizeof(LyrEntry_t) == (sizeof(void *) == 8 ? 96 : 84), "LyrEntry_t");
 struct LyrMtlGlob_t
 {
     int     crcToken;              // 0x1814CF8  clean-library CRC (was dword_1814CF8)
     int     entryCount;            // 0x1814CFC
-    uint8_t Layers[512 * 84];      // 0x1814D00  inline array
+    alignas(LyrEntry_t) uint8_t Layers[512 * sizeof(LyrEntry_t)];
 };
 extern LyrMtlGlob_t lyrMtlGlob;    // layeredmaterials.cpp
 
@@ -287,7 +303,7 @@ struct LyrMtlWndGlob_t
     HWND toolbar;            // 0x04  COMCTL32 toolbar child
     HWND layerList;          // 0x08  custom layer-list child
     int  liveAddActive;      // 0x0C  "clicking adds a layer" flag (only low byte used)
-    int  activeLyrMtl;       // 0x10  pointer-as-int into lyrMtlGlob.Layers (IDB type)
+    LyrEntry_t *activeLyrMtl; // active entry in lyrMtlGlob.Layers
     int  selectedLayerIndex; // 0x14
 };
 extern LyrMtlWndGlob_t lyrMtlWndGlob;   // layeredmaterialwnd.cpp
@@ -315,29 +331,29 @@ void Map_ParseLinkList( LinkList_t *buf, const char *linkTo );   // qe3.cpp 0x48
 #define ECLASS_PREFAB 0x10                // eclass_t.nShowFlags prefab-class bit (assert strings)
 
 // ── edTrace_t — editor ray-pick result (IDB trace_t, 88 bytes) ───────────────
-// Filled by Test_Ray. hit@0 {brush, face, index}, dist@68, selected@72,
-// normal@76. The binary's assert strings ("t.hit.face", "t.hit.brush->version ==
-// t.hit.brush->def->version") show the original nested the hit record as a
-// selface_t member named `hit` — layout-identical to the flat brush/face/xx1 the
-// port used before. (Named edTrace_t, not trace_t, because q_shared.h's engine
-// trace_t — 44 bytes, totally different — is already in scope via stdafx.h.)
+// Outer brush/face identify the selectable prefab instance; leaf brush/face and
+// orientation retain the nested geometry hit. The third pointer was previously
+// mistaken for selface_t.index. This is separate from the engine trace_t.
 struct edTrace_t
 {
-    selface_t hit;             // 0x00  hit record {brush@0, face@4, index@8}
-    int   xx2, xx3, xx4;       // 0x0C..0x14  (xx4 begins a 0x30 orientation copy)
-    int   xx5, xx6, xx7, xx8;  // 0x18..0x24
-    int   xx9, xx10, xx11;     // 0x28..0x30
-    short xx12, xx12_2;        // 0x34
-    int   xx13, xx14, xx15;    // 0x38..0x40
+    struct
+    {
+        selbrush_t *brush;
+        faceVis_s *face;
+        selbrush_t *leafBrush;
+    } hit;
+    faceVis_s *leafFace;
+    entity_s *prefabOwner;
+    orientation_t orientation;
     float dist;                // 0x44  param along dir to the hit
     bool  selected;            // 0x48  hit brush was in the selected list
     char  _pad[3];             // 0x49
     vec3_t normal;             // 0x4C  hit face normal
 };
-static_assert(sizeof(edTrace_t) == 88, "edTrace_t");
-static_assert(offsetof(edTrace_t, dist) == 68, "edTrace_t.dist");
-static_assert(offsetof(edTrace_t, selected) == 72, "edTrace_t.selected");
-static_assert(offsetof(edTrace_t, normal) == 76, "edTrace_t.normal");
+static_assert(sizeof(edTrace_t) == (sizeof(void *) == 8 ? 112 : 88), "edTrace_t");
+static_assert(offsetof(edTrace_t, dist) == (sizeof(void *) == 8 ? 88 : 68), "edTrace_t.dist");
+static_assert(offsetof(edTrace_t, selected) == (sizeof(void *) == 8 ? 92 : 72), "edTrace_t.selected");
+static_assert(offsetof(edTrace_t, normal) == (sizeof(void *) == 8 ? 96 : 76), "edTrace_t.normal");
 
 // ═════════════════════════════════════════════════════════════════════════════
 //  RULING: the CoD4Radiant brush list model.
@@ -400,7 +416,7 @@ struct patchVisuals_s
     Material *material;   // 0x00  MaterialDef_14(layer) handle
     int       vertHandle; // 0x04  Editor_VB_Upload return (buffer<<16 | firstIndex)
 };
-static_assert(sizeof(patchVisuals_s) == 8, "patchVisuals_s");
+static_assert(sizeof(patchVisuals_s) == (sizeof(void *) == 8 ? 16 : 8), "patchVisuals_s");
 
 struct patch_t
 {
@@ -421,10 +437,10 @@ struct patch_t
     patchVisuals_s  *visArray;     // 0x1C  a1[7]  visCount * {material, vertHandle}
     byte    pad_20[36];   // 0x20  (to the 68-byte IDB instance size)
 };
-static_assert(sizeof(patch_t) == 68, "patch_t (pPatch_t instance) != 68");
-static_assert(offsetof(patch_t, vertCount)  == 8,  "patch_t.vertCount");
-static_assert(offsetof(patch_t, indicesFront) == 16, "patch_t.indicesFront");
-static_assert(offsetof(patch_t, visArray)   == 28, "patch_t.visArray");
+static_assert(sizeof(patch_t) == (sizeof(void *) == 8 ? 96 : 68), "patch_t (pPatch_t instance) != 68");
+static_assert(offsetof(patch_t, vertCount)  == (sizeof(void *) == 8 ? 12 : 8),  "patch_t.vertCount");
+static_assert(offsetof(patch_t, indicesFront) == (sizeof(void *) == 8 ? 24 : 16), "patch_t.indicesFront");
+static_assert(offsetof(patch_t, visArray)   == (sizeof(void *) == 8 ? 48 : 28), "patch_t.visArray");
 
 struct selbrush_t
 {
@@ -445,15 +461,15 @@ struct selbrush_t
     int         xx7;         // 0x30  (zeroed on add-to-selection — Brush_AddToList2)
     int         brushFlags;  // 0x34  low 5 bits cleared on select; bit7 gates UI on remove
 };
-static_assert(sizeof(selbrush_t) == 56,              "selbrush_t (brush-instance node) != 0x38");
-static_assert(offsetof(selbrush_t, owner) == 8,      "selbrush_t.owner");
-static_assert(offsetof(selbrush_t, ownerNext) == 12, "selbrush_t.ownerNext");
-static_assert(offsetof(selbrush_t, ownerPrev) == 16, "selbrush_t.ownerPrev");
-static_assert(offsetof(selbrush_t, def) == 20,       "selbrush_t.def");
-static_assert(offsetof(selbrush_t, faceCount) == 24, "selbrush_t.faceCount");
-static_assert(offsetof(selbrush_t, patch) == 32,     "selbrush_t.patch");
-static_assert(offsetof(selbrush_t, version) == 36,   "selbrush_t.version");
-static_assert(offsetof(selbrush_t, brushFlags) == 52,"selbrush_t.brushFlags");
+static_assert(sizeof(selbrush_t) == (sizeof(void *) == 8 ? 96 : 56),              "selbrush_t (brush-instance node) != 0x38");
+static_assert(offsetof(selbrush_t, owner) == (sizeof(void *) == 8 ? 16 : 8),      "selbrush_t.owner");
+static_assert(offsetof(selbrush_t, ownerNext) == (sizeof(void *) == 8 ? 24 : 12), "selbrush_t.ownerNext");
+static_assert(offsetof(selbrush_t, ownerPrev) == (sizeof(void *) == 8 ? 32 : 16), "selbrush_t.ownerPrev");
+static_assert(offsetof(selbrush_t, def) == (sizeof(void *) == 8 ? 40 : 20),       "selbrush_t.def");
+static_assert(offsetof(selbrush_t, faceCount) == (sizeof(void *) == 8 ? 48 : 24), "selbrush_t.faceCount");
+static_assert(offsetof(selbrush_t, patch) == (sizeof(void *) == 8 ? 64 : 32),     "selbrush_t.patch");
+static_assert(offsetof(selbrush_t, version) == (sizeof(void *) == 8 ? 72 : 36),   "selbrush_t.version");
+static_assert(offsetof(selbrush_t, brushFlags) == (sizeof(void *) == 8 ? 88 : 52),"selbrush_t.brushFlags");
 
 // entity_s embeds this node as its brush-list head; d_select_order holds pointers
 // to it. Same 56-byte node, different role → an alias, not a second struct.
@@ -483,7 +499,7 @@ struct brush_t
     int          refCount;     // 0x1C
     vec3_t       mins;         // 0x20
     vec3_t       maxs;         // 0x2C
-    int          xx1;          // 0x38
+    MaterialDef *xx1;          // 0x38 (x86): representative material, or NULL when mixed.
     int          contents;     // 0x3C
     int          faceCount;    // 0x40
     face_t      *faces;  // 0x44
@@ -496,12 +512,12 @@ struct brush_t
     patchMesh_t *patch;        // 0x50
     int          numberId;     // 0x54  (IDB "total_size_0x58"; GtkRadiant id region — unverified)
 };
-static_assert(sizeof(brush_t) == 88, "brush_t");
+static_assert(sizeof(brush_t) == (sizeof(void *) == 8 ? 136 : 88), "brush_t");
 
-static_assert(offsetof(brush_t, owner) == 8,        "brush_t.owner");
-static_assert(offsetof(brush_t, faces) == 68, "brush_t.faces");
-static_assert(offsetof(brush_t, version) == 78,     "brush_t.version");
-static_assert(offsetof(brush_t, patch) == 80,       "brush_t.patch");
+static_assert(offsetof(brush_t, owner) == (sizeof(void *) == 8 ? 16 : 8),        "brush_t.owner");
+static_assert(offsetof(brush_t, faces) == (sizeof(void *) == 8 ? 96 : 68), "brush_t.faces");
+static_assert(offsetof(brush_t, version) == (sizeof(void *) == 8 ? 114 : 78),     "brush_t.version");
+static_assert(offsetof(brush_t, patch) == (sizeof(void *) == 8 ? 120 : 80),       "brush_t.patch");
 
 // IDA uses several names for the same 88-byte def type; alias them all to brush_t.
 typedef brush_t brush_t_with_custom_def;
@@ -510,6 +526,29 @@ typedef brush_t brush_t_def;
 // selbrush_t (the 56-byte brush-instance / list node) is defined ABOVE, before
 // brush_t — entity_s embeds it by value, so it must be a complete type here.
 // (The old IDB-verbatim 64-byte selbrush_t was over-padded; see the ruling above.)
+
+// Prefab instance container. Its prefix shares the entity instance list layout.
+// Keep a complete brush sentinel: pointer-only mirrors underallocate it on x64.
+struct prefab_s
+{
+    entity_s *prev_entity;
+    entity_s *next_entity;
+    void *unk;
+    union
+    {
+        selbrush_t brushes;
+        struct
+        {
+            selbrush_t *active_brushlist;
+            selbrush_t *active_brushlist_next;
+        };
+    };
+    int modelInst;
+    void *prefab;
+    int version;
+    char *mapLayer;
+};
+static_assert(sizeof(prefab_s) == (sizeof(void *) == 8 ? 152 : 84), "prefab_s");
 
 // ── map entity ────────────────────────────────────────────────────────────────
 struct entity_s
@@ -539,15 +578,17 @@ struct entity_s
     int            numberId;            // 0x84  unique entity number (dword_739DC4++)
     int            refCount;            // 0x88
 };
-static_assert(sizeof(entity_s) == 140, "entity_s");
-static_assert(offsetof(entity_s, def) == 8,        "entity_s.def");        // IDB owner->def @+8
-static_assert(offsetof(entity_s, brushes) == 12, "entity_s.brushes");
-static_assert(offsetof(entity_s, prefab) == 0x48,  "entity_s.prefab");     // IDB owner->prefab @+0x48
-static_assert(offsetof(entity_s, eclass) == 96,  "entity_s.eclass");
-static_assert(offsetof(entity_s, modelClass) == 0x64, "entity_s.modelClass"); // IDB def->modelClass @+0x64
-static_assert(offsetof(entity_s, origin) == 104, "entity_s.origin");
-static_assert(offsetof(entity_s, epairs) == 116, "entity_s.epairs");
-static_assert(offsetof(entity_s, redoId) == 0x80 && offsetof(entity_s, numberId) == 0x84, "entity_s id stamps");
+static_assert(sizeof(entity_s) == (sizeof(void *) == 8 ? 232 : 140), "entity_s");
+static_assert(offsetof(prefab_s, brushes) == offsetof(entity_s, brushes), "prefab brush sentinel");
+static_assert(offsetof(prefab_s, mapLayer) == offsetof(entity_s, mapLayer), "prefab instance prefix");
+static_assert(offsetof(entity_s, def) == (sizeof(void *) == 8 ? 16 : 8),        "entity_s.def");        // IDB owner->def @+8
+static_assert(offsetof(entity_s, brushes) == (sizeof(void *) == 8 ? 24 : 12), "entity_s.brushes");
+static_assert(offsetof(entity_s, prefab) == (sizeof(void *) == 8 ? 128 : 72),  "entity_s.prefab");     // IDB owner->prefab @+0x48
+static_assert(offsetof(entity_s, eclass) == (sizeof(void *) == 8 ? 168 : 96),  "entity_s.eclass");
+static_assert(offsetof(entity_s, modelClass) == (sizeof(void *) == 8 ? 176 : 100), "entity_s.modelClass"); // IDB def->modelClass @+0x64
+static_assert(offsetof(entity_s, origin) == (sizeof(void *) == 8 ? 184 : 104), "entity_s.origin");
+static_assert(offsetof(entity_s, epairs) == (sizeof(void *) == 8 ? 200 : 116), "entity_s.epairs");
+static_assert(offsetof(entity_s, redoId) == (sizeof(void *) == 8 ? 216 : 128) && offsetof(entity_s, numberId) == (sizeof(void *) == 8 ? 220 : 132), "entity_s id stamps");
 
 // ── undo_s — full definition (shared by undo.cpp, select.cpp) ─────────────────
 // IDA-verified layout (sizeof = 256 = operator new(0x100)).
@@ -567,13 +608,23 @@ struct undo_s
     undo_s     *prev;        // 0xF8  = offset 248
     undo_s     *next;        // 0xFC  = offset 252  (IDA: next____totalsize_0x100)
 };
-static_assert(sizeof(undo_s)              == 256, "undo_s size");
+static_assert(sizeof(undo_s)              == (sizeof(void *) == 8 ? 408 : 256), "undo_s size");
 static_assert(offsetof(undo_s, id)        ==   8, "undo_s.id");
 static_assert(offsetof(undo_s, done)      ==  12, "undo_s.done");
-static_assert(offsetof(undo_s, brushlist) ==  20, "undo_s.brushlist");
-static_assert(offsetof(undo_s, entitylist)== 108, "undo_s.entitylist");
-static_assert(offsetof(undo_s, prev)      == 248, "undo_s.prev");
-static_assert(offsetof(undo_s, next)      == 252, "undo_s.next");
+static_assert(offsetof(undo_s, brushlist) ==  (sizeof(void *) == 8 ? 24 : 20), "undo_s.brushlist");
+static_assert(offsetof(undo_s, entitylist)== (sizeof(void *) == 8 ? 160 : 108), "undo_s.entitylist");
+static_assert(offsetof(undo_s, prev)      == (sizeof(void *) == 8 ? 392 : 248), "undo_s.prev");
+static_assert(offsetof(undo_s, next)      == (sizeof(void *) == 8 ? 400 : 252), "undo_s.next");
+
+// A loaded model or prefab, distinct from its owning eclass/cache entry.
+struct modelnode_t
+{
+    modelnode_t *next;
+    XModel *handle;
+    entity_s entities;
+    byte fileExists;
+};
+static_assert(sizeof(modelnode_t) == (sizeof(void *) == 8 ? 256 : 152), "modelnode_t");
 
 // ── entity class (eclass) ─────────────────────────────────────────────────────
 struct eclass_t
@@ -586,8 +637,7 @@ struct eclass_t
     vec3_t    maxs;                 // 0x18
     vec3_t    color;                // 0x24
     float     unk;                  // 0x30
-    char      material[4];          // 0x34
-    void     *textureTableOrSth;    // 0x38
+    patchMesh_material material;   // native layer/material pointer pair
     char     *comments;             // 0x3C
     char      flagname0[32];        // 0x40
     char      flagname1[32];        // 0x60
@@ -598,7 +648,7 @@ struct eclass_t
     char      flagname6[32];        // 0x100
     char      flagname7[32];        // 0x120
     char      flagname8[32];        // 0x140
-    int       xx1;                  // 0x160
+    union { modelnode_t *xx1; modelnode_t *model; }; // loaded-model list
     union {                         // 0x164  five model names; w_cyclePreviewMode indexes them
         struct {
             const char *default_model_name; // 0x164
@@ -609,8 +659,8 @@ struct eclass_t
         };
         const char *cycleModelName[5];
     };
-    int       modelpath;            // 0x178
-    int       xx8;                  // 0x17C
+    char     *modelpath;            // pending model names
+    epair_t  *xx8;                  // default key/value list
     union {                         // 0x180
         int classtype;              //   (port's historical name)
         int nShowFlags;             //   (the binary's name — assert strings)
@@ -620,117 +670,15 @@ struct eclass_t
     int       xx12;                 // 0x18C
     char     *commands;             // 0x190  (IDB "commands_total_0x184_eclass_initfromtext")
 };
-static_assert(sizeof(eclass_t) == 404, "eclass_t");
-static_assert(offsetof(eclass_t, fixedsize) == 8,  "eclass_t.fixedsize");
-static_assert(offsetof(eclass_t, classtype) == 384, "eclass_t.classtype");
+static_assert(sizeof(eclass_t) == (sizeof(void *) == 8 ? 464 : 404), "eclass_t");
+static_assert(offsetof(eclass_t, fixedsize) == (sizeof(void *) == 8 ? 16 : 8),  "eclass_t.fixedsize");
+static_assert(offsetof(eclass_t, classtype) == (sizeof(void *) == 8 ? 440 : 384), "eclass_t.classtype");
 
 // ── per-map model entity class (IDB models_t, 0x184 bytes) ───────────────────
 // Used by Eclass_01, Eclass_CheckEntities, Model_FreeMapModels, etc.
 // Fields are mostly opaque ints; only the ones accessed by eclass.cpp are named.
 // Size confirmed: operator new(0x184u) in Eclass_01 (0x482300).
-struct models_t
-{
-    int x0;          // 0x000  next node in g_models / g_eclass linked list
-    int handle;      // 0x004  char* model name (heap string)
-    int x2;          // 0x008
-    struct { int next; } entities; // 0x00C  from eclass field[3] (source name: entities.next)
-    int x4;          // 0x010  from eclass field[4]
-    int x5;          // 0x014  from eclass field[5]
-    int x6;          // 0x018  from eclass field[6]
-    int x7;          // 0x01C  from eclass field[7]
-    int x8;          // 0x020  from eclass field[8]
-    int x9;          // 0x024  float — scale factor 0.85
-    int x10;         // 0x028
-    int x11;         // 0x02C  float — scale factor 0.85
-    int x12;         // 0x030
-    int x13;         // 0x034
-    int x14;         // 0x038
-    int x15;         // 0x03C  char* (freed in Eclass_CheckEntities)
-    int x16;         // 0x040
-    int x17;         // 0x044
-    int x18;         // 0x048
-    int x19;         // 0x04C
-    int x20;         // 0x050
-    int x21;         // 0x054
-    int x22;         // 0x058
-    int x23;         // 0x05C
-    int x24;         // 0x060
-    int x25;         // 0x064
-    int x26;         // 0x068
-    int x27;         // 0x06C
-    int x28;         // 0x070
-    int x29;         // 0x074
-    int x30;         // 0x078
-    int x31;         // 0x07C
-    int x32;         // 0x080
-    int x33;         // 0x084
-    int x34;         // 0x088
-    int x35;         // 0x08C
-    int x36;         // 0x090
-    int x37;         // 0x094
-    int x38;         // 0x098
-    int x39;         // 0x09C
-    int x40;         // 0x0A0
-    int x41;         // 0x0A4
-    int x42;         // 0x0A8
-    int x43;         // 0x0AC
-    int x44;         // 0x0B0
-    int x45;         // 0x0B4
-    int x46;         // 0x0B8
-    int x47;         // 0x0BC
-    int x48;         // 0x0C0
-    int x49;         // 0x0C4
-    int x50;         // 0x0C8
-    int x51;         // 0x0CC
-    int x52;         // 0x0D0
-    int x53;         // 0x0D4
-    int x54;         // 0x0D8
-    int x55;         // 0x0DC
-    int x56;         // 0x0E0
-    int x57;         // 0x0E4
-    int x58;         // 0x0E8
-    int x59;         // 0x0EC
-    int x60;         // 0x0F0
-    int x61;         // 0x0F4
-    int x62;         // 0x0F8
-    int x63;         // 0x0FC
-    int x64;         // 0x100
-    int x65;         // 0x104
-    int x66;         // 0x108
-    int x67;         // 0x10C
-    int x68;         // 0x110
-    int x69;         // 0x114
-    int x70;         // 0x118
-    int x71;         // 0x11C
-    int x72;         // 0x120
-    int x73;         // 0x124
-    int x74;         // 0x128
-    int x75;         // 0x12C
-    int x76;         // 0x130
-    int x77;         // 0x134
-    int x78;         // 0x138
-    int x79;         // 0x13C
-    int x80;         // 0x140
-    int x81;         // 0x144
-    int x82;         // 0x148
-    int x83;         // 0x14C
-    int x84;         // 0x150
-    int x85;         // 0x154
-    int x86;         // 0x158
-    int x87;         // 0x15C
-    int x88;         // 0x160  head of entity sub-node linked list
-    int x89;         // 0x164  char* material string (freed in Eclass_CheckEntities)
-    int x90;         // 0x168  char* material string 1 of 4
-    int x91;         // 0x16C  char* material string 2 of 4
-    int x92;         // 0x170  char* material string 3 of 4
-    int x93;         // 0x174  char* material string 4 of 4
-    int x94;         // 0x178  char* name copy (freed in Eclass_CheckEntities)
-    int x95;         // 0x17C
-    int x96;         // 0x180  model-type flags (bit 4 = 0x10 = prefab)
-};
-static_assert(sizeof(models_t) == 388, "models_t");
-static_assert(offsetof(models_t, x88) == 0x160, "models_t.x88");
-static_assert(offsetof(models_t, x96) == 0x180, "models_t.x96");
+typedef eclass_t models_t;
 
 // ── patch mesh (Bezier/terrain). Bulk is a 16x16 control-point grid. ──────────
 struct patchMesh_t
@@ -764,9 +712,9 @@ struct patchMesh_t
     // cod4map expands them into the stock duplicate-patch layered surface itself.
     char               kiwiLayer[4][64];     // 0x504C
 };
-static_assert(sizeof(patchMesh_t) == 20556 + 256, "patchMesh_t (+KIWI layer slots)");
-static_assert(offsetof(patchMesh_t, ctrl) == 56,       "patchMesh_t.ctrl");
-static_assert(offsetof(patchMesh_t, pSymbiot) == 20540, "patchMesh_t.pSymbiot");
+static_assert(sizeof(patchMesh_t) == (sizeof(void *) == 8 ? 20856 : 20812), "patchMesh_t (+KIWI layer slots)");
+static_assert(offsetof(patchMesh_t, ctrl) == (sizeof(void *) == 8 ? 88 : 56),       "patchMesh_t.ctrl");
+static_assert(offsetof(patchMesh_t, pSymbiot) == (sizeof(void *) == 8 ? 20576 : 20540), "patchMesh_t.pSymbiot");
 
 // ── SavedInfo_t (708 bytes = 0x2C4) — persistent editor prefs block inside ────
 // qeglobals_t.d_savedinfo.  Ports field-by-field from IDA type SavedInfo_t.
@@ -786,7 +734,7 @@ static_assert(offsetof(SavedInfo_t, szProject) == 8,        "SavedInfo_t.szProje
 static_assert(offsetof(SavedInfo_t, colors) == 0x108,       "SavedInfo_t.colors");
 static_assert(offsetof(SavedInfo_t, d_xyShowFlags) == 0x2B8,"SavedInfo_t.d_xyShowFlags");
 
-// ── filter condition node (IDB filter_info_s, 12 bytes) ───────────────────────
+// ── filter condition node (16 allocated bytes in the x86 binary) ───────────────────────
 // Used by DynamicFilter_ParseCondition / sub_412170 (filter condition evaluator).
 struct filter_contents_s;  // forward-decl (recursive list node)
 struct filter_info_s
@@ -794,8 +742,9 @@ struct filter_info_s
     int               surfaceFlags;  // 0x00  condition type (1=AND, 2=OR, 3=material, 4-8=others)
     char              z_pad_0x0004[4]; // 0x04  negation flag (z_pad_0x0004[0])
     filter_contents_s *contents_ptr; // 0x08  child conditions list (recursive)
+    filter_info_s     *next;         // IDA 0x411760/0x4119D0: sibling at x86 +0x0C.
 };
-static_assert(sizeof(filter_info_s) == 12, "filter_info_s");
+static_assert(sizeof(filter_info_s) == (sizeof(void *) == 8 ? 24 : 16), "filter_info_s including sibling");
 
 // ── filter "contents" payload node (IDB filter_contents_s, 12 bytes) ──────────
 // For a key/value condition (surface case 5 = script_layer): key@0x00, value@0x04,
@@ -810,7 +759,7 @@ struct filter_contents_s
     char *value;        // 0x04  condition value (the layer name)
     int   flags;        // 0x08  bit0 set → literal compare; clear → epair match
 };
-static_assert(sizeof(filter_contents_s) == 12, "filter_contents_s");
+static_assert(sizeof(filter_contents_s) == (sizeof(void *) == 8 ? 24 : 12), "filter_contents_s");
 
 // ── filter entry (IDB filter_entry_s, 24 bytes) ───────────────────────────────
 // Singly-linked list node; four lists hang off qeglobals_t:
@@ -828,12 +777,12 @@ struct filter_entry_s
     filter_info_s  *info;             // 0x10  condition tree root (non-face type)
     filter_entry_s *next_filter;      // 0x14  next entry in same category list
 };
-static_assert(sizeof(filter_entry_s) == 24, "filter_entry_s");
+static_assert(sizeof(filter_entry_s) == (sizeof(void *) == 8 ? 40 : 24), "filter_entry_s");
 static_assert(offsetof(filter_entry_s, isShown) == 4,       "filter_entry_s.isShown");
 static_assert(offsetof(filter_entry_s, material_ptr) == 8,  "filter_entry_s.material_ptr");
-static_assert(offsetof(filter_entry_s, name) == 12,         "filter_entry_s.name");
-static_assert(offsetof(filter_entry_s, info) == 16,         "filter_entry_s.info");
-static_assert(offsetof(filter_entry_s, next_filter) == 20,  "filter_entry_s.next_filter");
+static_assert(offsetof(filter_entry_s, name) == (sizeof(void *) == 8 ? 16 : 12),         "filter_entry_s.name");
+static_assert(offsetof(filter_entry_s, info) == (sizeof(void *) == 8 ? 24 : 16),         "filter_entry_s.info");
+static_assert(offsetof(filter_entry_s, next_filter) == (sizeof(void *) == 8 ? 32 : 20),  "filter_entry_s.next_filter");
 
 // ── selection info counters (qeglobals_t.d_select_info @ 0x71C08, 20 bytes) ────
 struct select_info_t
@@ -860,8 +809,8 @@ struct curTexWndLayer_t
     int         gridHeight;           // 0x030
     float       st[16][16][2];        // 0x034  stored ST pairs (row stride 128)
 };
-static_assert(sizeof(curTexWndLayer_t) == 2100, "curTexWndLayer_t");
-static_assert(offsetof(curTexWndLayer_t, st) == 0x34, "curTexWndLayer_t.st");
+static_assert(sizeof(curTexWndLayer_t) == (sizeof(void *) == 8 ? 2112 : 2100), "curTexWndLayer_t");
+static_assert(offsetof(curTexWndLayer_t, st) == (sizeof(void *) == 8 ? 64 : 52), "curTexWndLayer_t.st");
 
 // ── terrainVert_t (IDB terrainVert_t, 8 bytes) — qeglobals.d_terrapoints[i] points
 //    here.  Recovered from MoveSelection (0x47f0c0) + Brush_SideSelect (0x4777d0):
@@ -893,7 +842,7 @@ struct LPMRUMENU
     ushort wIdMru;           // 0x08  base command id                 (8000)
     char          *lpMRU;            // 0x0C  flat item store (wNbLruMenu × wMaxSizeLruItem)
 };
-static_assert(sizeof(LPMRUMENU) == 16, "LPMRUMENU");
+static_assert(sizeof(LPMRUMENU) == (sizeof(void *) == 8 ? 24 : 16), "LPMRUMENU");
 
 // ── editor global state (g_qeglobals @ IDB 0x25f39c0). Ported field-for-field;
 //    a handful of sub-structs (pedge_t/SavedInfo_t/select_info_t/filter_entry_s)
@@ -993,12 +942,12 @@ struct qeglobals_t
     filter_entry_s *d_filterGlobals_otherFilters;    // 0x71CD8
     filter_entry_s *d_filterGlobals_layerFilters;    // 0x71CDC
 };
-static_assert(sizeof(qeglobals_t) == 466144, "qeglobals_t");
-static_assert(offsetof(qeglobals_t, d_points) == 84,          "qeglobals_t.d_points");
-static_assert(offsetof(qeglobals_t, d_select_count) == 465900,"qeglobals_t.d_select_count");
-static_assert(offsetof(qeglobals_t, d_select_mode) == 465924, "qeglobals_t.d_select_mode");
-static_assert(offsetof(qeglobals_t, d_white) == 465964,       "qeglobals_t.d_white");
-static_assert(offsetof(qeglobals_t, g_oldtime) == 466096,     "qeglobals_t.g_oldtime");
+static_assert(sizeof(qeglobals_t) == (sizeof(void *) == 8 ? 503176 : 466144), "qeglobals_t");
+static_assert(offsetof(qeglobals_t, d_points) == (sizeof(void *) == 8 ? 136 : 84),          "qeglobals_t.d_points");
+static_assert(offsetof(qeglobals_t, d_select_count) == (sizeof(void *) == 8 ? 502872 : 465900),"qeglobals_t.d_select_count");
+static_assert(offsetof(qeglobals_t, d_select_mode) == (sizeof(void *) == 8 ? 502908 : 465924), "qeglobals_t.d_select_mode");
+static_assert(offsetof(qeglobals_t, d_white) == (sizeof(void *) == 8 ? 502952 : 465964),       "qeglobals_t.d_white");
+static_assert(offsetof(qeglobals_t, g_oldtime) == (sizeof(void *) == 8 ? 503104 : 466096),     "qeglobals_t.g_oldtime");
 
 // entity_s is also used as an entity definition (the 140-byte "def" record with
 // full epairs, eclass, origin, refCount). Both the map-level def and the truncated
@@ -1010,12 +959,7 @@ typedef entity_s entity_s_def;
 // Its ->model sub-node (the loaded-model record whose +4 handle is the XModel*) is at
 // offset 0x160 (the IDB Entity_UpdateModelInst reads [modelClass+0x160]->[+4]; this is the
 // same field eclass.cpp calls `xx1` (+0x160) — the head of the sub-model node list).
-struct entitymodel_t
-{
-    char      _pad0[0x160];   // the models_t prefix (name/handle/eclass fields)
-    models_t *model;          // 0x160  the loaded model sub-node (model->handle@+4 = XModel*)
-    int       rest[1];        // placeholder — do not index
-};
+// entitymodel_t aliases the actual eclass/cache record above.
 
 // ── prefab-edit stack (IDB byte_25EB240 @ 0x25EB240) ──────────────────────────
 // One saved parent-map state per nested prefab level (Prefab_NextLevel writes,
@@ -1046,8 +990,8 @@ struct prefabLevel_t
     float       regionMins[3];        // +0x860  (536)
     float       regionMaxs[3];        // +0x86C  (539)
 };
-static_assert(sizeof(prefabLevel_t) == 2168, "prefabLevel_t must match the binary's 2168-byte slot");
-static_assert(offsetof(prefabLevel_t, activeNext) == 257 * 4 && offsetof(prefabLevel_t, camOrigin) == 525 * 4,
+static_assert(sizeof(prefabLevel_t) == (sizeof(void *) == 8 ? 2208 : 2168), "prefabLevel_t must match the binary's 2168-byte slot");
+static_assert(offsetof(prefabLevel_t, activeNext) == (sizeof(void *) == 8 ? 1032 : 1028) && offsetof(prefabLevel_t, camOrigin) == (sizeof(void *) == 8 ? 2140 : 2100),
               "prefabLevel_t dword indices");
 extern prefabLevel_t g_prefabStack[16];  // engine_stubs.cpp (IDB byte_25EB240)
 
@@ -1125,10 +1069,10 @@ struct CClipPoint
     POINT   m_ptScreen;   // 0x10  screen coords it was dropped at
     bool    m_bSet;       // 0x18  this point has been placed
 };
-static_assert(sizeof(CClipPoint) == 28,            "CClipPoint != 28");
-static_assert(offsetof(CClipPoint, m_pVec3) == 12, "CClipPoint.m_pVec3");
-static_assert(offsetof(CClipPoint, m_ptScreen) == 16, "CClipPoint.m_ptScreen");
-static_assert(offsetof(CClipPoint, m_bSet) == 24,  "CClipPoint.m_bSet");
+static_assert(sizeof(CClipPoint) == (sizeof(void *) == 8 ? 40 : 28),            "CClipPoint != 28");
+static_assert(offsetof(CClipPoint, m_pVec3) == (sizeof(void *) == 8 ? 16 : 12), "CClipPoint.m_pVec3");
+static_assert(offsetof(CClipPoint, m_ptScreen) == (sizeof(void *) == 8 ? 24 : 16), "CClipPoint.m_ptScreen");
+static_assert(offsetof(CClipPoint, m_bSet) == (sizeof(void *) == 8 ? 32 : 24),  "CClipPoint.m_bSet");
 
 // The three placed clip points + the clip-mode flags + the front/back split-brush
 // display lists (selbrush_t sentinels, like selected_brushes). DrawClipper/DropClipPoint
@@ -1157,11 +1101,11 @@ extern selbrush_t g_brBackSplits;        // 0x23f1664 (back-split display list h
 // qeglobals_t.d_white/d_opague/d_additive), so the size divergence is non-breaking
 // — the editor is internally consistent on the kisak (CoD3) layout. The asserts
 // below pin the KISAK sizes the radiant build actually uses (NOT the IDB sizes).
-static_assert(sizeof(GfxImage) == 36,               "GfxImage size drifted from 36");
+static_assert(sizeof(GfxImage) == (sizeof(void *) == 8 ? 48 : 36),               "GfxImage size drifted from 36");
 // KISAK_RADIANT widens Material with trailing editor-only fields (surfaceFlags@80 so
 // Material_CastsStencilShadow can read IW3 surfaceFlags, + editorUsage@84/editorLocale@88
 // so the texture-browser usage/locale filter has data) without disturbing SP/MP; sizeof
 // rounds to 96 (GfxDrawSurf forces 8-byte align → tail pad). SP/MP keep 80.
 // See gfx_d3d/r_material.h.
-static_assert(sizeof(Material) == 96,               "kisak (radiant) Material size drifted from 0x60");
-static_assert(sizeof(MaterialTechniqueSet) == 148,  "kisak MaterialTechniqueSet size drifted from 0x94");
+static_assert(sizeof(Material) == (sizeof(void *) == 8 ? 120 : 96),               "kisak (radiant) Material size drifted from 0x60");
+static_assert(sizeof(MaterialTechniqueSet) == (sizeof(void *) == 8 ? 296 : 148),  "kisak MaterialTechniqueSet size drifted from 0x94");

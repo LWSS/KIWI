@@ -202,7 +202,7 @@ struct epair_t
     char    *key;       // 0x04
     char    *value;     // 0x08
 };
-static_assert(sizeof(epair_t) == 12, "epair_t");
+static_assert(sizeof(epair_t) == (sizeof(void *) == 8 ? 24 : 12), "epair_t");
 
 // ── vertex/edge selection point (drag.cpp / select.cpp) ───────────────────────
 struct BrushPt_t

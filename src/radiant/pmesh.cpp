@@ -61,9 +61,9 @@ extern brush_t *Brush_Alloc( const void *materialDefSrc, eclass_t *ecls );
 extern void     Brush_Create( float *mins, float *maxs, brush_t *b, eclass_t *ecls );
 extern void     Brush_BuildWindings( brush_t *b, int rebuild );
 extern void     SetupVertexSelection();
-extern int      TexWnd_06_LayerCount( int mtlDef, int layerHandle );   // brush.cpp 0x45D360
-extern void     Face_MoveTexture( int surfDef, const float *normal, int outVecs,
-                                  int uvBase, float rotate, float crossterm ); // brush.cpp 0x45A1C0
+extern texdef_sub_t *TexWnd_06_LayerCount( MaterialDef *mtlDef, int layerHandle );   // brush.cpp 0x45D360
+extern void     Face_MoveTexture( const float *surfDef, const float *normal, float *outVecs,
+                                  const float *uvBase, float rotate, float crossterm ); // brush.cpp 0x45A1C0
 
 // draw.cpp (q_shared 0x4BA430) — out = orient->origin + orient->axisᵀ · pos.
 extern void     OrientationPosToWorldPos( float *out, const float *pos, const orientation_t *orient );
@@ -105,10 +105,10 @@ extern void     Map_ParseEntityLayerKey( const char **text, const char *def,
 // engine_stubs.cpp — contents / toolFlags flag-name tables (for the writer).
 extern int     *contents_table;
 extern int     *toolflags_table;
-extern void     MapLoad_ParseBrush_Content( int keyword, int (**writer)(int, const char *, ...),
+extern void     MapLoad_ParseBrush_Content( const char *keyword, int (**writer)(void *, const char *, ...),
                                             int value, void *table );
-extern void     MapLoad_ParseBrush_Layer( int (**writer)(int, const char *, ...),
-                                          int layerStr );   // engine_stubs 0x42fb40
+extern void     MapLoad_ParseBrush_Layer( int (**writer)(void *, const char *, ...),
+                                          const char *layerStr );   // engine_stubs 0x42fb40
 
 // qtexture_s is the canonical 40-byte IDB layout in qe3.h (was a wrong local
 // char[64]@0 copy; width@0x14 / height@0x18).
@@ -448,7 +448,7 @@ static curvePatchDef_t *Curve_SubdivideSetup( int cols, int rows, const curveVer
 
     int w = dims[0], h = dims[1];
     size_t bytes = (size_t)44 * w * h;
-    curvePatchDef_t *out = (curvePatchDef_t *)malloc( bytes + 20 );
+    curvePatchDef_t *out = (curvePatchDef_t *)malloc( bytes + sizeof(curvePatchDef_t) );
     out->width  = w;
     out->height = h;
     out->verts  = (curveVert_t *)( out + 1 );
@@ -702,7 +702,7 @@ static curvePatchDef_t *Curve_RemoveDegenerate( const curvePatchDef_t *in, int *
     }
 
     size_t bytes = (size_t)44 * cols * rows;
-    curvePatchDef_t *out = (curvePatchDef_t *)malloc( bytes + 20 );
+    curvePatchDef_t *out = (curvePatchDef_t *)malloc( bytes + sizeof(curvePatchDef_t) );
     out->width  = cols;
     out->height = rows;
     out->verts  = (curveVert_t *)( out + 1 );
@@ -719,7 +719,7 @@ static curvePatchDef_t *Curve_RemoveDegenerate( const curvePatchDef_t *in, int *
 //  binary threads through (null on the render path).  Returns a freshly malloc'd
 //  curvePatchDef_t (caller assigns it to patchMesh_t.curveDef and owns the free).
 // ════════════════════════════════════════════════════════════════════════════
-curvePatchDef_t *Patch_GenericMesh2( patchMesh_t *p, int layer, int colMapArg, int rowMapArg )
+curvePatchDef_t *Patch_GenericMesh2( patchMesh_t *p, int layer, int *colMapArg, int *rowMapArg )
 {
     int   width  = p->width;
     int   height = p->height;
@@ -758,7 +758,7 @@ curvePatchDef_t *Patch_GenericMesh2( patchMesh_t *p, int layer, int colMapArg, i
     {
         // terrain patches ARE their control grid (no subdivision).
         size_t bytes = (size_t)44 * width * height;
-        result = (curvePatchDef_t *)malloc( bytes + 20 );
+        result = (curvePatchDef_t *)malloc( bytes + sizeof(curvePatchDef_t) );
         result->width  = width;
         result->height = height;
         result->verts  = (curveVert_t *)( result + 1 );
@@ -1080,9 +1080,9 @@ brush_t *Patch_ParseMesh( const char **text, int version, int isMesh )
 //  The writer handle is a triple-pointer to a (ctx, fmt, ...) printf-like fn; the
 //  ctx is the handle pointer cast to int (same convention as brush.cpp Brush_Write).
 // ════════════════════════════════════════════════════════════════════════════
-typedef int  WriteFunc_t( int ctx, const char *fmt, ... );
+typedef int  WriteFunc_t( void *ctx, const char *fmt, ... );
 typedef WriteFunc_t **WriteWriter_t;
-#define WRITE( w, ... ) ( ( **(w) )( (int)(intptr_t)(w), __VA_ARGS__ ) )
+#define WRITE( w, ... ) ( ( **(w) )( (w), __VA_ARGS__ ) )
 
 // VC7.1-compatible "%.8g" (round-half-away-from-zero + 3-digit exponent). Defined
 // once in brush.cpp (the brush planept/texdef writer); shared here so patch verts
@@ -1150,11 +1150,13 @@ int Patch_Write( WriteWriter_t writer, patchMesh_t *p )
 
     const char *layerName = ( (brush_t *)p->pSymbiot )->parent_layer_string;
     if ( strcmp( layerName, "000_Global" ) )   // MapLoad_ParseBrush_Layer inlined in the binary
-        MapLoad_ParseBrush_Layer( (int (**)(int, const char *, ...))writer, (int)(intptr_t)layerName );
+    {
+        MapLoad_ParseBrush_Layer( writer, layerName );
+    }
 
-    MapLoad_ParseBrush_Content( (int)"contents",  (int (**)(int, const char *, ...))writer,
+    MapLoad_ParseBrush_Content( "contents",  writer,
                                 p->contents, contents_table );
-    MapLoad_ParseBrush_Content( (int)"toolFlags", (int (**)(int, const char *, ...))writer,
+    MapLoad_ParseBrush_Content( "toolFlags", writer,
                                 p->flags,    toolflags_table );
 
     // texture / lightmap / smoothing NAMES. Must go through Materialdef_GetName, NOT a raw
@@ -2430,8 +2432,8 @@ extern void Select_SetTexture( float *out );           // 0x456D70 select.cpp (l
 //  real, with a 512 fallback) and the already-real Face_MoveTexture projection.
 // ════════════════════════════════════════════════════════════════════════════
 
-extern void  Face_MoveTexture( int surfDef, const float *normal, int outVecs,
-                               int uvBase, float rotate, float crossterm );   // brush.cpp 0x45A1C0
+extern void  Face_MoveTexture( const float *surfDef, const float *normal, float *outVecs,
+                               const float *uvBase, float rotate, float crossterm );   // brush.cpp 0x45A1C0
 extern float Vec3Normalize_R( float *v );                                     // 0x40A5E0 (returns length)
 
 int g_nFaceCycle = 0;   // 0x25D5B10 — Patch_GetAxisFace's round-robin face cursor
@@ -2583,8 +2585,8 @@ static face_t *Patch_GetAxisFace( patchMesh_t *p )
 static void Patch_ST( const float *params, const float *faceNormal, patchMesh_t *p, int layer )
 {
     float mat[8];
-    Face_MoveTexture( (int)(intptr_t)params, faceNormal, (int)(intptr_t)mat,
-                      (int)(intptr_t)( params + 2 ), params[4], params[5] );
+    Face_MoveTexture( (float *)params, faceNormal, (float *)mat,
+                      (float *)( params + 2 ), params[4], params[5] );
 
     for ( int col = 0; col < p->width; ++col )
     {
@@ -4168,7 +4170,7 @@ static void Patch_UpdateSelected_0( const float *move )
 extern int sub_401D50();              // patchdialog.cpp — "is terrain-paint mode active?"
 extern int sub_401DB0();              // patchdialog.cpp — checked mode radio index
 void       sub_43DD00( float amount );   // forward (soft-sel height drag dispatch, below)
-void Patch_UpdateSelected( int move )
+void Patch_UpdateSelected( float *move )
 {
     if ( sub_401D50() && sub_401DB0() == 1 )
         sub_43DD00( ( (const float *)(intptr_t)move )[2] );   // soft-sel: push Z by the drag delta
@@ -4388,7 +4390,7 @@ curvePatchDef_t *PMESH_37( patchMesh_t *a1, int axis )
 extern int     Sys_Printf( const char *fmt, ... );      // 0x499E90
 extern undo_s *g_lastundo;                               // undo.cpp 0x23F162C
 extern void    Undo_AddBrush( entity_brush_s *pBrushInst );   // 0x45E680
-extern void    Undo_AddEntity( int a1 );                      // 0x45E8B0
+extern void    Undo_AddEntity( entity_s *entity );                      // 0x45E8B0
 
 // ── PlaneFromPoints_Real (0x4a9950) ───────────────────────────────────────────
 //  out[0..2] = normalized normal of triangle (A,B,C) about pivot B = (C-B)×(A-B);
@@ -5341,7 +5343,7 @@ typedef float (*PaintCallback)( float *cp, int channel, float cur, float strengt
 
 extern int       Sys_Printf( const char *fmt, ... );           // win_qe3.cpp
 extern void      Undo_AddBrush( entity_brush_s *pBrushInst );  // undo.cpp (0x45E680)
-extern void      Undo_AddEntity( int owner );                  // undo.cpp (0x45E8B0)
+extern void      Undo_AddEntity( entity_s *entity );                  // undo.cpp (0x45E8B0)
 extern undo_s   *g_lastundo;                                   // undo.cpp (0x23F162C)
 
 // sub_4A56B0 (0x4A56B0) — squared distance from a point to an AABB (0 when inside).
@@ -5372,7 +5374,7 @@ static void sub_45E770( entity_brush_s *pBrushInst )
 
     entity_s *owner = pBrushInst->owner;
     if ( *(int *)&owner->eclass->fixedsize )           // fixed-size entity -> also track the entity
-        Undo_AddEntity( (int)(intptr_t)owner );
+        Undo_AddEntity( (entity_s *)owner );
     Undo_AddBrush( pBrushInst );
 }
 
@@ -5565,7 +5567,7 @@ void CurveEdit_SetCtrl( int slot, int id, float value )
 //  Ray-pick the nearest terrain edge across all selected patches (PMESH_51), then
 //  toggle that cell's turned_edge diagonal and rebuild.  Undo-bracketed.  `org`/`dir`
 //  arrive as int-cast float* ray endpoints (drag.cpp's trace_start / trace_dir).
-void Patch_TurnEdge( int org, int dir )
+void Patch_TurnEdge( float *org, float *dir )
 {
     const float *rayOrg = (const float *)(intptr_t)org;
     const float *rayDir = (const float *)(intptr_t)dir;
@@ -5609,7 +5611,7 @@ void Patch_TurnEdge( int org, int dir )
             Sys_Printf( "Undo_AddBrush: WARNING adding brushes after entity.\n" );
         entity_s *owner = pSymbiot->owner;
         if ( *(int *)&owner->eclass->fixedsize )
-            Undo_AddEntity( (int)(intptr_t)owner );
+            Undo_AddEntity( (entity_s *)owner );
         Undo_AddBrush( pSymbiot );
     }
     else
@@ -6204,7 +6206,7 @@ static curvePatchDef_t *Curve_AdaptiveSubdivide( const curvePatchDef_t *in, floa
     }
 
     size_t bytes = (size_t)44 * W * H;
-    curvePatchDef_t *out = (curvePatchDef_t *)malloc( bytes + 20 );
+    curvePatchDef_t *out = (curvePatchDef_t *)malloc( bytes + sizeof(curvePatchDef_t) );
     out->width  = W;
     out->height = H;
     out->verts  = (curveVert_t *)( out + 1 );
@@ -6361,7 +6363,7 @@ static void PMESH_02( patchMesh_t *p, int layer, float sampleSize )
     static int colCounts[512], rowCounts[512], colMap[512], rowMap[512];
 
     curvePatchDef_t *base = Patch_GenericMesh2( p, layer,
-                                                (int)(intptr_t)colMap, (int)(intptr_t)rowMap );
+                                                colMap, rowMap );
     curvePatchDef_t *refined = Curve_AdaptiveSubdivide( base, sampleSize,
                                                         colCounts, rowCounts, colMap, rowMap );
     free( base );
@@ -6513,7 +6515,7 @@ void Patch_Subdivide( int decrease )
 
 // brush.cpp (0x478780) — load/realize the brush's model + copy the orientation matrix
 // into the entity instance; returns true if the brush carries a (misc_)model.
-extern bool      Model_SetModel( entity_brush_s *b, int orientMatrix );
+extern bool      Model_SetModel( entity_brush_s *b, const float *orientMatrix );
 // entity.cpp (0x482A70) — orParent ∘ ent's own orientation → orOut.
 extern void      Entity_GetOrientation( entity_s_def *ent, orientation_t *orParent, orientation_t *orOut );
 // CMainFrame_UpdatePatchToolbarButtons() already extern'd above (select.cpp).
@@ -6629,7 +6631,7 @@ static void VertSnap_CollectModel( selbrush_t *b, const orientation_t *orient )
 {
     entity_s_def  *def   = (entity_s_def *)b->owner->def;
     entitymodel_t *mc    = (entitymodel_t *)def->modelClass;
-    models_t      *model = mc->model;
+    modelnode_t   *model = mc->model;
     XModel        *xmodel = (XModel *)(intptr_t)model->handle;
 
     // IDB stack buffers v6[196612] (16384 vec3 positions) + v10[65538] (65536 indices);
@@ -6694,7 +6696,7 @@ static void VertSnapTo_ModelBrushPrefab( selbrush_t *listHead, orientation_t *or
             }
             else                                           // model entity (misc_model etc.)
             {
-                if ( Model_SetModel( cur, (int)(intptr_t)orient ) )
+                if ( Model_SetModel( cur, (const float *)orient ) )
                 {
                     entity_s_def *ed = (entity_s_def *)cur->owner->def;
                     if ( !strcmp( ed->eclass->name, "misc_model" ) )
@@ -6830,7 +6832,7 @@ static char Patch_QuadIsConvex( const PatchQuad *q )
     return 1;
 }
 
-void PMESH_29_Winding( int patchInst, const orientation_t *orient, float *desc, rface_t **outList )
+void PMESH_29_Winding( patch_t *patchInst, const orientation_t *orient, float *desc, rface_t **outList )
 {
     patch_t *pm = (patch_t *)(intptr_t)patchInst;             // the binary's local `pm`
     MaterialDef *md = (MaterialDef *)&pm->def->texture;       // def+24 = mtldef
@@ -8397,17 +8399,17 @@ restartSplit:
 // terrain single-row/col helpers already exist (Patch_TerrainInsert/RemoveRow/Column).
 // Deps declared elsewhere: PMESH_08_Verts_RowCol_02 (above), Patch_Rebuild, etc.
 
-extern int   TexWnd_06_LayerCount( int mtlDef, int layerHandle );   // brush.cpp 0x45D360
+extern texdef_sub_t *TexWnd_06_LayerCount( MaterialDef *mtlDef, int layerHandle );   // brush.cpp 0x45D360
 extern float grid_sizes[];                                          // engine_stubs 0x6DDE5C
 extern selbrush_t active_brushes;                                   // 0x23F189C
 #define active_brushes_next ( active_brushes.next )
 extern bool  HasKeyValuePair( entity_s_def *e, const char *key );          // entity.cpp
-extern char *ValueForKey2( int e, const char *key );                       // entity.cpp
+extern char *ValueForKey2( const entity_s *e, const char *key );                       // entity.cpp
 extern bool  Entity_HasEpairMatch( entity_s *e, const char *key, const char *val ); // entity.cpp
 extern void  DeleteKey( epair_t **head, const char *key );                 // entity.cpp
 extern void  Checkkey_Model( entity_s_def *e, const char *key );           // entity.cpp (Checkkey_Model_0)
 extern void  Checkkey_Color( entity_s_def *a1, const char *a2 );           // entity.cpp
-extern void  Undo_AddEntity( int a1 );                                     // undo.cpp 0x45E8B0
+extern void  Undo_AddEntity( entity_s *entity );                                     // undo.cpp 0x45E8B0
 extern void  Undo_AddBrush( entity_brush_s *pBrushInst );                  // undo.cpp 0x45E680
 extern void  Brush_SnapToGrid( brush_t *b );                               // brush.cpp 0x4783D0
 
@@ -8415,7 +8417,7 @@ extern void  Brush_SnapToGrid( brush_t *b );                               // br
 //   Finds the (up to two) selected control points that belong to `patch`; fills the
 //   pair struct pPair = {int x[2]; int y[2]} with their (col,row).  Returns 1 iff
 //   exactly two points were found on the same row OR the same column.
-static char PMESH_08_Verts_RowCol( int patch, char *pPair )
+static char PMESH_08_Verts_RowCol( patchMesh_t *patch, char *pPair )
 {
     if ( !patch ) Assert( PMESH_CPP, 1887, 0, "%s", "patch" );
     if ( !pPair ) Assert( PMESH_CPP, 1888, 0, "%s", "pPair" );
@@ -8426,8 +8428,8 @@ static char PMESH_08_Verts_RowCol( int patch, char *pPair )
     for ( int i = 0; i < g_qeglobals.d_num_move_points; ++i )
     {
         drawVert_t *dv = g_qeglobals.d_move_points[i];
-        if ( (unsigned int)dv >= (unsigned int)( patch + 56 )
-          && (unsigned int)dv <= (unsigned int)( patch + 20456 ) )
+        if ( (uintptr_t)dv >= (uintptr_t)&patch->ctrl[0][0]
+          && (uintptr_t)dv <= (uintptr_t)&patch->ctrl[15][15] )
         {
             if ( found[0] )
             {
@@ -8445,13 +8447,16 @@ static char PMESH_08_Verts_RowCol( int patch, char *pPair )
     int *pair = (int *)pPair;               // pPair->x[0], x[1], y[0], y[1] laid out {x0,x1,y0,y1}
     for ( int i = 0; i < 2; ++i )
     {
-        int flat = ( (int)(intptr_t)found[i] - patch - 56 ) / 80;
+        size_t offset = (uintptr_t)found[i] - (uintptr_t)&patch->ctrl[0][0];
+        int flat = (int)( offset / sizeof(drawVert_t) );
         pair[i]     = flat / 16;            // x[i] = col
         pair[i + 2] = flat % 16;            // y[i] = row
-        if ( (int)(intptr_t)found[i]
-             != 80 * ( flat % 16 + 16 * ( flat / 16 ) ) + patch + 56 )
+        if ( found[i] != &patch->ctrl[pair[i]][pair[i + 2]] )
+        {
             Assert( PMESH_CPP, 1914, 0, "%s",
                     "pdvFound[i] == &patch->ctrl[pPair->x[i]][pPair->y[i]]" );
+            return 0;
+        }
     }
     if ( pair[0] == pair[1] || pair[2] == pair[3] )   // same col OR same row
         return 1;
@@ -8658,7 +8663,7 @@ void RemoveTerrainRowCol()
             {
                 // this entity has a "target": push its target onto everything that
                 // targeted it (re-route the chain through us).
-                newTargetName = ValueForKey2( (int)(intptr_t)entDef, "target" );
+                newTargetName = ValueForKey2( entDef, "target" );
                 for ( selbrush_t *ab = active_brushes_next; ab != &active_brushes; ab = ab->next )
                 {
                     entity_s_def *abDef = (entity_s_def *)ab->owner->def;
@@ -8691,7 +8696,7 @@ void RemoveTerrainRowCol()
                 entity_s_def *ownerDef = (entity_s_def *)owner->def;
                 if ( g_lastundo )
                 {
-                    Undo_AddEntity( (int)(intptr_t)owner->def );
+                    Undo_AddEntity( (entity_s *)owner->def );
                     if ( ownerDef != (entity_s_def *)world_entity->def )
                     {
                         for ( entity_brush_s *ob = (entity_brush_s *)ownerDef->brushes.ownerPrev;
@@ -8767,7 +8772,7 @@ void Patch_InsertRemoveFromVertPair()
                 Assert( PMESH_CPP, 8379, 0, "%s", "b->patch->def == b->def->patch" );
             def = v0->patch->def;
             if ( ( def->type & PATCH_TERRAIN ) != 0
-              && PMESH_08_Verts_RowCol( (int)(intptr_t)def, (char *)pair ) )
+              && PMESH_08_Verts_RowCol( def, (char *)pair ) )
                 break;                  // found a valid pair → do the insert below
         }
         next = v0->next;
@@ -8823,8 +8828,8 @@ void Patch_InsertRemoveFromVertPair()
 //   each control point's texcoords through the face's 3 layer texture matrices.  Returns
 //   the new brush instance (linked into active_brushes), or 0 if the strip would exceed
 //   MAX_PATCH_WIDTH.  Reached via OnFaceToTerrain (cmd 36102).  Transcribed from disasm.
-extern void Face_MoveTexture( int surfDef, const float *normal, int outVecs,
-                              int uvBase, float rotate, float crossterm );  // brush.cpp 0x45A1C0
+extern void Face_MoveTexture( const float *surfDef, const float *normal, float *outVecs,
+                              const float *uvBase, float rotate, float crossterm );  // brush.cpp 0x45A1C0
 brush_t *PMESH_58( face_t *face, selbrush_t *ownerInst )
 {
     // build the 3 layer texture-projection matrices (8 floats each) from the face's
@@ -8832,9 +8837,9 @@ brush_t *PMESH_58( face_t *face, selbrush_t *ownerInst )
     float mats[24];                             // 3 layers * 8 floats
     for ( int L = 0; L < 3; ++L )
     {
-        float *td = (float *)TexWnd_06_LayerCount( (int)(intptr_t)&face->mtldef[L], 0 );
-        Face_MoveTexture( (int)(intptr_t)td, face->plane.normal,
-                          (int)(intptr_t)&mats[8 * L], (int)(intptr_t)( td + 2 ), td[4], td[5] );
+        float *td = (float *)TexWnd_06_LayerCount( &face->mtldef[L], 0 );
+        Face_MoveTexture( (float *)td, face->plane.normal,
+                          (float *)&mats[8 * L], (float *)( td + 2 ), td[4], td[5] );
     }
 
     winding_t *w = face->w;
@@ -9137,7 +9142,7 @@ void DoRedistPatchPts()
 //  (the inlined single-brush Undo_EndBrushList).  Prints the "Autofliped" tally.
 //  sub_44B1B0 (which takes two drawVert_t BY VALUE) is just the xyz distance.
 extern void Undo_AddBrush( entity_brush_s *pBrushInst );   // undo.cpp 0x45E680
-extern void Undo_AddEntity( int a1 );                      // undo.cpp 0x45E8B0
+extern void Undo_AddEntity( entity_s *entity );                      // undo.cpp 0x45E8B0
 extern undo_s *g_lastundo;                                 // undo.cpp 0x23F162C
 
 static float Patch_CtrlDist( const drawVert_t *a, const drawVert_t *b )   // sub_44B1B0
@@ -9191,7 +9196,7 @@ void DoTurnTerrainEdges()
                             Sys_Printf( "Undo_AddBrush: WARNING adding brushes after entity.\n" );
                         entity_s *owner = (entity_s *)( (brush_t *)(intptr_t)sym )->owner;
                         if ( *(int *)&owner->eclass->fixedsize )
-                            Undo_AddEntity( (int)(intptr_t)owner );
+                            Undo_AddEntity( (entity_s *)owner );
                         Undo_AddBrush( sym );
                     }
                     else
@@ -9749,7 +9754,7 @@ extern unsigned int Editor_VB_Upload( Material *material, int vertCount,
 extern char         R_Ed_FreeVertices( Material *handle, int vertCount, int vertHandle );  // r_ed_vertbuf.cpp 0x51CB70
 extern int          Editor_MaterialSortKey( Material *handle );                            // r_ed_scene.cpp 0x4FDBB0
 extern void         Editor_AddMeshCmd( Material *handle, int techType, int sortKey,
-                        int vertCount, int vbIndexAndOffs, int indexCount, int indexTable ); // r_ed_scene.cpp 0x4FDA50
+                        int vertCount, int vbIndexAndOffs, int indexCount, const uint16_t *indexTable ); // r_ed_scene.cpp 0x4FDA50
 extern const MaterialTechnique *__cdecl Material_GetTechnique( const Material *material,
                         MaterialTechniqueType techType );
 
@@ -10142,7 +10147,7 @@ void PMESH_33( patch_t *p )
 //  break the symbiot back-pointer (brush_t.patch @0x50) so it can't dangle, free the
 //  tessellated curveDef, free the def, refresh the Patch Inspector.  The three asserts
 //  are the binary's (symbiot present / back-pointer identity / refCount drained).
-void PMESH_32_Symbiot( int patchDef )
+void PMESH_32_Symbiot( patchMesh_t *patchDef )
 {
     patchMesh_t *p = (patchMesh_t *)(intptr_t)patchDef;
     brush_t *symbiot = p->symbiot;                          // 0x503C
@@ -10446,7 +10451,7 @@ static bool Patch_Fill_Emit( patch_t *inst, Material *mtlOverride, int face, int
         Editor_AddMeshCmd( mtlOverride, techType,
                            Editor_MaterialSortKey( mtlOverride ) + sortKeyBias,
                            inst->vertCount, inst->visArray[0].vertHandle,
-                           inst->indexCount, (int)indexTable );
+                           inst->indexCount, indexTable );
         emitted = true;
     }
     else
@@ -10463,7 +10468,7 @@ static bool Patch_Fill_Emit( patch_t *inst, Material *mtlOverride, int face, int
             Editor_AddMeshCmd( m, techType,
                                sortKeyBias ? ( sortKey + sortKeyBias ) : ( sortKey + L ),
                                inst->vertCount, inst->visArray[L].vertHandle,
-                               inst->indexCount, (int)indexTable );
+                               inst->indexCount, indexTable );
             emitted = true;
         }
     }
@@ -10479,7 +10484,7 @@ bool DrawPatches( patch_t *inst, const orientation_t *orient, int techType, int 
     // Ensure the tessellated render mesh exists (built at load; safety net).
     if ( !inst->def->curveDef )
     {
-        extern curvePatchDef_t *Patch_GenericMesh2( patchMesh_t *p, int layer, int a3, int a4 );
+        extern curvePatchDef_t *Patch_GenericMesh2( patchMesh_t *p, int layer, int *a3, int *a4 );
         inst->def->curveDef = Patch_GenericMesh2( inst->def, g_qeglobals.current_edit_layer, 0, 0 );
         ++inst->def->version;
         if ( !inst->def->curveDef )

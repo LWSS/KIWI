@@ -39,22 +39,22 @@ extern void    Undo_End();
 extern void    Undo_EndBrushList( selbrush_t *list );
 
 // select.cpp
-extern void    SelectFaceSth( int a1, int a2, int a3 );
+extern void    SelectFaceSth( float *a1, float *a2, int a3 );
 extern void    Select_Deselect( int bDeselectFaces );
 
 // engine_stubs.cpp (stubs for Phase-5 functions)
 extern void    sub_43ECB0();           // addpoint mode cleanup (FATAL stub)
-extern void    SelectVertexByRay( int origin, int dir );
-extern void    SelectCurvePointByRay( int origin, int dir, unsigned int buttons );
-extern void    Select_Edge( int dir, int origin );
+extern void    SelectVertexByRay( float *origin, float *dir );
+extern void    SelectCurvePointByRay( float *origin, float *dir, unsigned int buttons );
+extern void    Select_Edge( float *dir, float *origin );
 // IDA a2 = (int)&brush->def->faces[idx] — face address as int, NOT a raw index.
-extern void    Brush_SelectFaceForDragging( brush_t *def, int facePtr, int shear );
+extern void Brush_SelectFaceForDragging( brush_t *def, face_t *facePtr, int shear );
 extern void    Brush_SideSelect( float *origin, brush_t *def, float *dir, int control );
 extern void    Patch_RedispersePreDrag();   // pmesh.cpp (0x43D7A0; was sub_43D7A0)
 
 // pmesh.cpp / engine_stubs.cpp (Phase-5 patch stubs)
-extern void    Patch_TurnEdge( int origin, int dir );
-extern void    Patch_UpdateSelected( int move );
+extern void    Patch_TurnEdge( float *origin, float *dir );
+extern void    Patch_UpdateSelected( float *move );
 extern int     Patch_DragScale( float *delta, void *patchDef, float *move );
 extern void    Patch_SelectBendNormal();
 extern void    Patch_SelectBendAxis();
@@ -66,7 +66,7 @@ extern void    Brush_BuildWindings( brush_t *b, int bFull );
 extern void    SetupVertexSelection();
 extern void    MarkMapModified();
 extern int     Brush_MoveVertex( vec3_t delta, brush_t *brush, vec3_t move_points, vec3_t end );
-extern unsigned int Brush_RemoveFace( brush_t *b, unsigned int faceIndex );  // 0x471640
+extern size_t Brush_RemoveFace( brush_t *b, unsigned int faceIndex );  // 0x471640
 extern void    Brush_Free( selbrush_t *b );                                  // 0x475ba0
 
 // select.cpp - selection movers used by MoveSelection
@@ -79,7 +79,7 @@ extern void    Select_ApplyMatrix( float *matrix, selbrush_t *b, int bSnap, floa
 extern void        MainFrm_SetStatusText( int pane, const char *text );
 // (g_pParentWnd extern retired — U-GLOBALS swept every use onto Ed_ActiveXY())
 extern void        CMainFrame_UpdatePatchToolbarButtons();// select.cpp (FATAL until P5)
-extern void        sub_43E6F0( int buttons, int origin, int dir ); // addpoint-drag helper
+extern void sub_43E6F0( int buttons, float *origin, float *dir );
 
 // qcommon / com_math
 extern void    Com_PrintMessage( const char *fmt, ... );
@@ -269,7 +269,7 @@ void Drag_Setup( float *trace_dir, float *trace_start, float *press_origin,
         }
         else
         {
-            SelectCurvePointByRay( (int)trace_start, (int)trace_dir, buttons );
+            SelectCurvePointByRay( trace_start, trace_dir, buttons );
             if ( g_qeglobals.d_num_move_points || g_qeglobals.d_select_mode == sel_area )
             {
                 drag_ok = 1;
@@ -291,7 +291,7 @@ void Drag_Setup( float *trace_dir, float *trace_start, float *press_origin,
     // ── sel_cycle_edge_direction_quad mode ──────────────────────────────────
     if ( g_qeglobals.d_select_mode == sel_cycle_edge_direction_quad )
     {
-        Patch_TurnEdge( (int)trace_start, (int)trace_dir );
+        Patch_TurnEdge( trace_start, trace_dir );
         return;
     }
 
@@ -342,7 +342,7 @@ LABEL_15:
     // ── sel_vertex mode ───────────────────────────────────────────────────────
     if ( g_qeglobals.d_select_mode == sel_vertex )
     {
-        SelectVertexByRay( (int)trace_start, (int)trace_dir );
+        SelectVertexByRay( trace_start, trace_dir );
         if ( g_qeglobals.d_num_move_points )
         {
             drag_ok = 1;
@@ -356,7 +356,7 @@ LABEL_15:
     // ── sel_edge mode ─────────────────────────────────────────────────────────
     if ( g_qeglobals.d_select_mode == sel_edge )
     {
-        Select_Edge( (int)trace_dir, (int)trace_start );
+        Select_Edge( trace_dir, trace_start );
         if ( g_qeglobals.d_num_move_points )
         {
             drag_ok = 1;
@@ -390,7 +390,7 @@ LABEL_15:
                 int fIdx = drag_face_index( hitBrush, hitFace );
                 // IDA: arg2 = (int)&brush->def->faces[fIdx]
                 Brush_SelectFaceForDragging( hitBrush->def,
-                    (int)&hitBrush->def->faces[fIdx], 1 );
+                    &hitBrush->def->faces[fIdx], 1 );
             }
         }
         else if ( buttons == (MK_LBUTTON | MK_SHIFT | MK_CONTROL) )  // 0xD
@@ -402,7 +402,7 @@ LABEL_15:
                 {
                     // IDA: arg2 = (int)&brush->def->faces[v17]
                     Brush_SelectFaceForDragging( hitBrush->def,
-                        (int)&hitBrush->def->faces[v17], 0 );
+                        &hitBrush->def->faces[v17], 0 );
                 }
             }
         }
@@ -468,7 +468,7 @@ LABEL_15:
 
 // Forward: Brush_ApplyTextureProjection (brush.cpp 0x476a30)
 // IDA a1=srcFace, a2=dstBrushDef (brush_t*), a3=dstFace — brush is the middle arg.
-extern brush_t *Brush_ApplyTextureProjection( int srcFace, brush_t *b, int dstFace );
+extern brush_t *Brush_ApplyTextureProjection( face_t *srcFace, brush_t *b, face_t *dstFace );
 
 // count != 2 -> Assert 270; count < 2 -> unknown_libname_291 (CRT range-check abort,
 // noreturn).  The port's explicit `return` after the abort is harmless; the binary falls
@@ -491,9 +491,9 @@ void Drag_FaceAlign()
     //                  g_SelectedFaces.GetAt( 1 ).brush->def,            ← a2 = brush_t*
     //                  &g_SelectedFaces.GetAt( 1 ).brush->def->faces[g_SelectedFaces.GetAt( 1 ).index])
     Brush_ApplyTextureProjection(
-        (int)&g_SelectedFaces.GetAt( 0 ).brush->def->faces[ g_SelectedFaces.GetAt( 0 ).index ],
+        &g_SelectedFaces.GetAt( 0 ).brush->def->faces[ g_SelectedFaces.GetAt( 0 ).index ],
              g_SelectedFaces.GetAt( 1 ).brush->def,
-        (int)&g_SelectedFaces.GetAt( 1 ).brush->def->faces[ g_SelectedFaces.GetAt( 1 ).index ]
+        &g_SelectedFaces.GetAt( 1 ).brush->def->faces[ g_SelectedFaces.GetAt( 1 ).index ]
     );
 }
 
@@ -544,7 +544,7 @@ extern void UpdatePatchInspector();                                   // patchdi
 namespace SurfaceInspector { void UpdateSurfaceDialog(); }            // 0x458590 (engine_stubs no-op)
 // brush.cpp ports used by the apply branches:
 //   Brush_SetFaceTexdefSize == Face_SetMaterial (0x476740): write {lyrMtl,radMtl} into face->mtldef[layer]
-extern void Brush_SetFaceTexdefSize( const float *size2, face_t *f, brush_t *b ); // 0x476740
+extern void Brush_SetFaceTexdefSize( const patchMesh_material *material, face_t *f, brush_t *b ); // 0x476740
 extern void sub_4766F0( brush_t *def, const face_t *srcFace );        // brush.cpp 0x4766f0 (propagate face texdef)
 // per-BRUSH apply (set every face to the current material) — documented benign NO-OP stub
 // (the faithful body needs the unported per-brush texture-projection helpers; engine_stubs.cpp).
@@ -606,7 +606,7 @@ void Drag_Begin( void *pressFunc, unsigned int buttons, int viewz,
             if ( g_nPatchClickedView == 1 )
             {
             LABEL_33:
-                SelectFaceSth( (int)trace_dir, (int)trace_start, contents );
+                SelectFaceSth( trace_dir, trace_start, contents );
                 return;
             }
             goto LABEL_20;
@@ -616,12 +616,12 @@ void Drag_Begin( void *pressFunc, unsigned int buttons, int viewz,
     {
         if ( GetAsyncKeyState( VK_MENU ) < 0 && mode != sel_curvepoint )
         {
-            SelectFaceSth( (int)trace_dir, (int)trace_start, contents | 0x40 );
+            SelectFaceSth( trace_dir, trace_start, contents | 0x40 );
             return;
         }
         if ( ( GetAsyncKeyState( VK_MENU ) & 0x8000 ) == 0 && mode != sel_curvepoint )
         {
-            SelectFaceSth( (int)trace_dir, (int)trace_start, 520 );
+            SelectFaceSth( trace_dir, trace_start, 520 );
             return;
         }
         goto LABEL_34;
@@ -835,7 +835,7 @@ LABEL_34:
         face_t *face = &def->faces[ faceIdx ];
         // Face_SetMaterial(&random_texture_stuff[layer], face, def): write the {lyrMtl,radMtl}
         // pair into face->mtldef[layer]; ++def->version.
-        Brush_SetFaceTexdefSize( (const float *)&g_qeglobals.random_texture_stuff[ layer ], face, def );
+        Brush_SetFaceTexdefSize( (const patchMesh_material *)&g_qeglobals.random_texture_stuff[ layer ], face, def );
         g_nUpdateBits = -1;
         return;
     }
@@ -847,7 +847,7 @@ LABEL_34:
         int n = g_SelectedFaces.GetSize();
         if ( n > 1 )
             g_SelectedFaces.RemoveAt( 0, n - 1 );   // keep only the last selected face
-        SelectFaceSth( (int)trace_dir, (int)trace_start, 520 );
+        SelectFaceSth( trace_dir, trace_start, 520 );
         if ( g_SelectedFaces.GetSize() == 2 )
             Drag_FaceAlign();                   // ported; internally parks on texturevecs_02
         return;
@@ -981,7 +981,7 @@ void MoveSelection( float *origin, float *dir, float *move )
         }
         if ( g_qeglobals.d_select_mode == sel_curvepoint )
         {
-            Patch_UpdateSelected( (int)move );
+            Patch_UpdateSelected( move );
             return;
         }
         if ( g_qeglobals.d_select_mode != sel_vertex )
@@ -1421,7 +1421,7 @@ void Drag_MouseMoved( int a1, int a2, int buttons, float *a4, float *a5 )
     {
         if ( GetAsyncKeyState( VK_MENU ) < 0 )
         {
-            sub_43E6F0( v5, (int)a4, (int)a5 );
+            sub_43E6F0( v5, a4, a5 );
         }
         else
         {
@@ -1628,7 +1628,7 @@ void Drag_MouseUp( unsigned int buttons )
                      && mode != sel_curvepoint && mode != sel_terrainpoint
                      && mode != sel_terraintexture )
                     flag = 4;
-                SelectFaceSth( (int)dir, (int)start, flag );
+                SelectFaceSth( dir, start, flag );
                 g_qeglobals.d_select_mode = sel_brush;
                 g_nUpdateBits = -1;
                 didClick = true;

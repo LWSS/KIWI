@@ -53,7 +53,7 @@ extern void  Assert( const char *file, int line, int type, const char *fmt, ... 
 extern int   Sys_Printf( const char *fmt, ... );
 extern void  R_Warn( int warnType, const char *fmt, ... );        // cmdlib.cpp (0x40B630)
 extern float Vec3Normalize_R( float *v );                         // engine_stubs.cpp (0x40A5E0)
-extern void  vectoangles( float *angles, int vec );               // engine_stubs.cpp (0x4A5020)
+extern void  Radiant_VecToAngles( float *angles, const float *vec );               // engine_stubs.cpp (0x4A5020)
 extern char  Byte4PackPixelColor( float *from, GfxColor *out );   // engine_stubs.cpp (0x402AC0)
 extern int   R_Add3DLine( GfxPointVertex *verts, const orientation_t *orient,
                           const float *p1, const float *p2, const unsigned int *color,
@@ -64,8 +64,8 @@ extern entity_s   entityInsts;        // entity.cpp  (0x23F1748) — entity-inst
 extern selbrush_t selected_brushes;   // map.cpp     (0x23F1864) — selection ring sentinel
 
 extern char   FilterBrush( selbrush_t *b, int updateFilters );        // filters.cpp (0x46A1F0)
-extern char  *ValueForKey2( int e, const char *key );                 // entity.cpp  (0x4825C0)
-extern int    Entity_GetIntValueForKey( int e, const char *key );     // entity.cpp  (0x483820)
+extern char  *ValueForKey2( const entity_s *e, const char *key );                 // entity.cpp  (0x4825C0)
+extern int    Entity_GetIntValueForKey( const entity_s *e, const char *key );     // entity.cpp  (0x483820)
 extern int    Entity_GetVec3ForKey( entity_s_def *e, float *out, const char *key ); // entity.cpp (0x483860)
 extern bool   HasKeyValuePair( entity_s_def *e, const char *key );    // entity.cpp  (0x4838B0)
 
@@ -95,16 +95,16 @@ struct VehiclePathNode
     __int16     nextIndex;     // 0x44  node this one targets, or -1
     __int16     prevIndex;     // 0x46  node that targets this one, or -1
 };
-static_assert( sizeof( VehiclePathNode ) == 72, "VehiclePathNode must be 72 bytes (IDB stride)" );
-static_assert( offsetof( VehiclePathNode, isRotateNode ) == 0x10, "VehiclePathNode.isRotateNode" );
-static_assert( offsetof( VehiclePathNode, speed )        == 0x14, "VehiclePathNode.speed" );
-static_assert( offsetof( VehiclePathNode, lookahead )    == 0x18, "VehiclePathNode.lookahead" );
-static_assert( offsetof( VehiclePathNode, origin )       == 0x1C, "VehiclePathNode.origin" );
-static_assert( offsetof( VehiclePathNode, dir )          == 0x28, "VehiclePathNode.dir" );
-static_assert( offsetof( VehiclePathNode, angles )       == 0x34, "VehiclePathNode.angles" );
-static_assert( offsetof( VehiclePathNode, dist )         == 0x40, "VehiclePathNode.dist" );
-static_assert( offsetof( VehiclePathNode, nextIndex )    == 0x44, "VehiclePathNode.nextIndex" );
-static_assert( offsetof( VehiclePathNode, prevIndex )    == 0x46, "VehiclePathNode.prevIndex" );
+static_assert( sizeof( VehiclePathNode ) == (sizeof(void *) == 8 ? 80 : 72), "VehiclePathNode must be 72 bytes (IDB stride)" );
+static_assert( offsetof( VehiclePathNode, isRotateNode ) == (sizeof(void *) == 8 ? 24 : 0x10), "VehiclePathNode.isRotateNode" );
+static_assert( offsetof( VehiclePathNode, speed ) == (sizeof(void *) == 8 ? 28 : 0x14), "VehiclePathNode.speed" );
+static_assert( offsetof( VehiclePathNode, lookahead ) == (sizeof(void *) == 8 ? 32 : 0x18), "VehiclePathNode.lookahead" );
+static_assert( offsetof( VehiclePathNode, origin ) == (sizeof(void *) == 8 ? 36 : 0x1C), "VehiclePathNode.origin" );
+static_assert( offsetof( VehiclePathNode, dir ) == (sizeof(void *) == 8 ? 48 : 0x28), "VehiclePathNode.dir" );
+static_assert( offsetof( VehiclePathNode, angles ) == (sizeof(void *) == 8 ? 60 : 0x34), "VehiclePathNode.angles" );
+static_assert( offsetof( VehiclePathNode, dist ) == (sizeof(void *) == 8 ? 72 : 0x40), "VehiclePathNode.dist" );
+static_assert( offsetof( VehiclePathNode, nextIndex ) == (sizeof(void *) == 8 ? 76 : 0x44), "VehiclePathNode.nextIndex" );
+static_assert( offsetof( VehiclePathNode, prevIndex ) == (sizeof(void *) == 8 ? 78 : 0x46), "VehiclePathNode.prevIndex" );
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  VehiclePathTracer — the 200-byte simulation state (the IDB shows it only as the
@@ -126,12 +126,12 @@ struct VehiclePathTracer
     VehiclePathNode nodeOverride;   // 0x38  see VehiclePath_StepTracer
     VehiclePathNode nodeSaved;      // 0x80  see VehiclePath_StepTracer
 };
-static_assert( sizeof( VehiclePathTracer ) == 200, "VehiclePathTracer must be 200 bytes (the IDB __int16[100] local)" );
+static_assert( sizeof( VehiclePathTracer ) == (sizeof(void *) == 8 ? 216 : 200), "VehiclePathTracer must be 200 bytes (the IDB __int16[100] local)" );
 static_assert( offsetof( VehiclePathTracer, origin )       == 0x14, "VehiclePathTracer.origin" );
 static_assert( offsetof( VehiclePathTracer, angles )       == 0x20, "VehiclePathTracer.angles" );
 static_assert( offsetof( VehiclePathTracer, lookaheadPos ) == 0x2C, "VehiclePathTracer.lookaheadPos" );
 static_assert( offsetof( VehiclePathTracer, nodeOverride ) == 0x38, "VehiclePathTracer.nodeOverride" );
-static_assert( offsetof( VehiclePathTracer, nodeSaved )    == 0x80, "VehiclePathTracer.nodeSaved" );
+static_assert( offsetof( VehiclePathTracer, nodeSaved ) == (sizeof(void *) == 8 ? 136 : 0x80), "VehiclePathTracer.nodeSaved" );
 
 #define MAX_VEHICLE_NODES 4000     // the Sys_Printf("...Max vehicle Nodes hit [%d]", 4000) cap
 
@@ -1018,7 +1018,7 @@ static int VehiclePath_StepTracer( VehiclePathTracer *tracer, __int16 stopNode )
     }
     else
     {
-        vectoangles( tracer->angles, (int)(intptr_t)vec );
+        Radiant_VecToAngles( tracer->angles, vec );
         tracer->angles[0] = VehiclePath_AngleNormalize180( tracer->angles[0] );
         tracer->angles[1] = VehiclePath_AngleNormalize180( tracer->angles[1] );
         tracer->angles[2] = VehiclePath_AngleNormalize180( tracer->angles[2] );
@@ -1163,7 +1163,7 @@ selfLinkCheck:
                     n->dir[2] = g_vehiclePathNodes[next].origin[2] - n->origin[2];
                     n->dist   = Vec3Normalize_R( n->dir );
                     if ( !n->isRotateNode )
-                        vectoangles( n->angles, (int)(intptr_t)n->dir );
+                        Radiant_VecToAngles( n->angles, n->dir );
                 }
                 ++n;
                 --left;
@@ -1269,19 +1269,19 @@ void VehiclePath_AddNode()
         if ( !I_stricmp( ecls->name, "info_vehicle_node_rotate" ) )
             node->isRotateNode = 1;
 
-        node->targetname  = ValueForKey2( (int)(intptr_t)ent->def, "targetname" );
-        node->target      = ValueForKey2( (int)(intptr_t)ent->def, "target" );
-        node->spawnflags1 = Entity_GetIntValueForKey( (int)(intptr_t)ent->def, "spawnflags" ) & 1;
+        node->targetname  = ValueForKey2( ent->def, "targetname" );
+        node->target      = ValueForKey2( ent->def, "target" );
+        node->spawnflags1 = Entity_GetIntValueForKey( ent->def, "spawnflags" ) & 1;
 
         // A node without a non-empty targetname is unusable — the slot is left for the
         // next entity (the count is NOT advanced, so the record is overwritten).
         if ( node->targetname && *node->targetname )
         {
-            const char *speed = ValueForKey2( (int)(intptr_t)ent->def, "speed" );
+            const char *speed = ValueForKey2( ent->def, "speed" );
             if ( speed && *speed )
                 node->speed = (float)( atof( speed ) * MPH_TO_INCHES_PER_SEC );   // mph -> units/sec
 
-            const char *lookahead = ValueForKey2( (int)(intptr_t)ent->def, "lookahead" );
+            const char *lookahead = ValueForKey2( ent->def, "lookahead" );
             if ( lookahead && *lookahead )
                 node->lookahead = (float)atof( lookahead );
 
