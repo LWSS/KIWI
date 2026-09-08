@@ -64,20 +64,16 @@ void __cdecl Decode_Shutdown()
 
 int __cdecl Decode_Sample(char *buffer, int maxLength, int16_t *out, int frame_size)
 {
-    int v5; // [esp+0h] [ebp-400Ch]
-    float v6[4097]; // [esp+4h] [ebp-4008h]
-    int i; // [esp+4008h] [ebp-4h]
-
-    iassert(maxLength <= 4096);
-    iassert(maxLength <= frame_size);
-
+    if (!g_decoder || !buffer || !out || maxLength < 0 || maxLength > 4096
+        || g_decode_frame_size <= 0 || g_decode_frame_size > frame_size)
+    {
+        return 0;
+    }
     speex_bits_read_from(&decodeBits, buffer, maxLength);
-    if (speex_decode(g_decoder, &decodeBits, v6))
-        v5 = 0;
-    else
-        v5 = 2 * frame_size;
-    for (i = 0; i < v5; ++i)
-        out[i] = v6[i];
-    return v5;
+    if (speex_decode_int(g_decoder, &decodeBits, out))
+    {
+        return 0;
+    }
+    return g_decode_frame_size * sizeof(int16_t);
 }
 

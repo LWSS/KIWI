@@ -157,6 +157,10 @@ int speex_decode_int(void *state, SpeexBits *bits, spx_int16_t *out)
    int ret;
    speex_decoder_ctl(state, SPEEX_GET_FRAME_SIZE, &N);
    ret = (*((SpeexMode**)state))->dec(state, bits, float_out);
+   if (ret)
+   {
+      return ret;
+   }
    for (i=0;i<N;i++)
    {
       if (float_out[i]>32767.f)

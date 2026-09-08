@@ -34,33 +34,45 @@
 #ifndef STACK_ALLOC_H
 #define STACK_ALLOC_H
 
+#include <stdint.h>
+
+/* Use Speex's per-call scratch path on MSVC. The fixed wideband arena is
+   too small for codebook search, and pointer arrays grow on x64. */
+#if defined(_MSC_VER) && !defined(VAR_ARRAYS) && !defined(USE_ALLOCA)
+#define USE_ALLOCA
+#endif
+
 #ifdef USE_ALLOCA
+#ifdef _MSC_VER
+#include <malloc.h>
+#else
 #include <alloca.h>
+#endif
 #endif
 
 #ifdef ENABLE_VALGRIND
 
 #include <valgrind/memcheck.h>
 /*Aligns the stack to a 'size' boundary */
-#define ALIGN(stack, size) ((stack) += ((size) - (long)(stack)) & ((size) - 1))
+#define ALIGN(stack, size) ((stack) += ((size) - (uintptr_t)(stack)) & ((size) - 1))
 
 /* Allocates 'size' elements of type 'type' on the stack */
 #define PUSH(stack, size, type) (VALGRIND_MAKE_NOACCESS(stack, 1000),ALIGN((stack),sizeof(type)),VALGRIND_MAKE_WRITABLE(stack, ((size)*sizeof(type))),(stack)+=((size)*sizeof(type)),(type*)((stack)-((size)*sizeof(type))))
 
 /* Allocates a struct stack */
-#define PUSHS(stack, type) (VALGRIND_MAKE_NOACCESS(stack, 1000),ALIGN((stack),sizeof(long)),VALGRIND_MAKE_WRITABLE(stack, (sizeof(type))),(stack)+=(sizeof(type)),(type*)((stack)-(sizeof(type))))
+#define PUSHS(stack, type) (VALGRIND_MAKE_NOACCESS(stack, 1000),ALIGN((stack),sizeof(void *)),VALGRIND_MAKE_WRITABLE(stack, (sizeof(type))),(stack)+=(sizeof(type)),(type*)((stack)-(sizeof(type))))
 
 #else
 
 
 /*Aligns the stack to a 'size' boundary */
-#define ALIGN(stack, size) ((stack) += ((size) - (long)(stack)) & ((size) - 1))
+#define ALIGN(stack, size) ((stack) += ((size) - (uintptr_t)(stack)) & ((size) - 1))
 
 /* Allocates 'size' elements of type 'type' on the stack */
 #define PUSH(stack, size, type) (ALIGN((stack),sizeof(type)),(stack)+=((size)*sizeof(type)),(type*)((stack)-((size)*sizeof(type))))
 
 /* Allocates a struct stack */
-#define PUSHS(stack, type) (ALIGN((stack),sizeof(long)),(stack)+=(sizeof(type)),(type*)((stack)-(sizeof(type))))
+#define PUSHS(stack, type) (ALIGN((stack),sizeof(void *)),(stack)+=(sizeof(type)),(type*)((stack)-(sizeof(type))))
 
 #endif
 
@@ -69,7 +81,11 @@
 #define ALLOC(var, size, type) type var[size]
 #elif defined(USE_ALLOCA)
 #define VARDECL(var) var
+#ifdef _MSC_VER
+#define ALLOC(var, size, type) var = (type *)_alloca(sizeof(type)*(size))
+#else
 #define ALLOC(var, size, type) var = alloca(sizeof(type)*size)
+#endif
 #else
 #define VARDECL(var) var
 #define ALLOC(var, size, type) var = PUSH(stack, size, type)

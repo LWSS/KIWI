@@ -47,7 +47,7 @@ struct dsound_sample_t // sizeof=0x48
     // padding byte
     // padding byte
 };
-static_assert(sizeof(dsound_sample_t) == 0x48);
+static_assert(sizeof(dsound_sample_t) == (sizeof(void *) == 8 ? 80 : 72));
 
 struct audioSample_t // sizeof=0x20
 {                                       // ...
@@ -63,7 +63,7 @@ struct audioSample_t // sizeof=0x20
     int channels;                       // ...
     int sampleOffset;                   // ...
 };
-static_assert(sizeof(audioSample_t) == 0x20);
+static_assert(sizeof(audioSample_t) == (sizeof(void *) == 8 ? 40 : 32));
 
 
 // play_dsound

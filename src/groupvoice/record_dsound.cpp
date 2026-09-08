@@ -128,7 +128,10 @@ dsound_sample_t *__cdecl DSOUNDRecord_NewSample()
     if (!g_recording_initialized)
         return nullptr;
 
-    iassert(s_recordingSamplePtr - s_recordingSamples <= 64 /* MAX_CLIENTS */ + 1);
+    if (s_recordingSamplePtr >= s_recordingSamples + ARRAY_COUNT(s_recordingSamples))
+    {
+        return NULL;
+    }
 
     pRecSample = s_recordingSamplePtr++;
     memset(pRecSample, 0, sizeof(dsound_sample_t));
@@ -171,7 +174,7 @@ HRESULT __cdecl DSOUNDRecord_Start(dsound_sample_t *pRecSample)
     wfx.nAvgBytesPerSec = 2 * g_sound_channels * g_sound_recordFrequency;
     wfx.nBlockAlign = 2 * g_sound_channels;
     wfx.cbSize = 0;
-    dscbd.dwSize = 28;
+    dscbd.dwSize = sizeof(DSCBUFFERDESC);
     dscbd.dwFlags = 0;
     dscbd.dwBufferBytes = g_sound_recordBufferSize;
     dscbd.dwReserved = 0;
@@ -288,7 +291,9 @@ void __cdecl DSOUNDRecord_Shutdown()
         hr = g_pDSCaptureInstance->Release();
     g_pDSCaptureInstance = 0;
     if (hr < 0)
-        Com_PrintError(CON_CHANNEL_SOUND, "Error releasing direct sound instance!  %s\n", hr);
+    {
+        Com_PrintError(CON_CHANNEL_SOUND, "Error releasing direct sound instance!  0x%08lx\n", (unsigned long)hr);
+    }
 }
 
 void __cdecl Record_SetRecordingCallback(int(__cdecl *new_audioCallback)(audioSample_t *))
