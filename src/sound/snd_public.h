@@ -121,7 +121,7 @@ struct LoadedSound // sizeof=0x2C
     const char *name;
     MssSoundCOD4 sound;
 };
-static_assert(sizeof(LoadedSound) == 44);
+static_assert(sizeof(LoadedSound) == (sizeof(void *) == 8 ? 64 : 44));
 
 struct StreamFileNameRaw // sizeof=0x8
 {                                       // ...
@@ -160,7 +160,7 @@ struct SndCurve // sizeof=0x48
     int knotCount;                      // ...
     float knots[8][2];                  // ...
 };
-static_assert(sizeof(SndCurve) == 72);
+static_assert(sizeof(SndCurve) == (sizeof(void *) == 8 ? 80 : 72));
 
 struct MSSSpeakerLevels // sizeof=0x10
 {                                       // ...
@@ -213,7 +213,7 @@ struct snd_alias_t // sizeof=0x5C
     float envelopPercentage;
     SpeakerMap *speakerMap;
 };
-static_assert(sizeof(snd_alias_t) == 92);
+static_assert(sizeof(snd_alias_t) == (sizeof(void *) == 8 ? 128 : 92));
 
 struct snd_alias_list_t // sizeof=0xC
 {                                       // ...
@@ -221,7 +221,7 @@ struct snd_alias_list_t // sizeof=0xC
     snd_alias_t *head;                  // ...
     int count;                          // ...
 };
-static_assert(sizeof(snd_alias_list_t) == 12);
+static_assert(sizeof(snd_alias_list_t) == (sizeof(void *) == 8 ? 24 : 12));
 
 struct snd_entchannel_info_t // sizeof=0x50
 {                                       // ...
@@ -652,7 +652,7 @@ void SND_StopAmplify();
 void SND_SetPauseSettings(const bool *pauseSettings);
 void SND_MapInit();
 void SND_SetEq(const char *channelName, int eqIndex, int band, SND_EQTYPE type, float gain, float freq, float q);
-int SND_FindPlaybackId(const snd_alias_t *sndEnt, const char *aliasName);
+int SND_FindPlaybackId(SndEntHandle sndEnt, const char *aliasName);
 #endif
 
 // snd_driver_load_obj

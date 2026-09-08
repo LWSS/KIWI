@@ -22,7 +22,7 @@ const dvar_t *snd_outputConfiguration;
 
 void __cdecl TRACK_snd_driver()
 {
-    track_static_alloc_internal(&milesGlob, 9936, "milesGlob", 13);
+    track_static_alloc_internal(&milesGlob, sizeof(milesGlob), "milesGlob", 13);
 }
 
 bool __cdecl SND_IsMultiChannel()
@@ -704,7 +704,6 @@ int __cdecl SND_StartAliasStreamOnChannel(SndStartAliasInfo *startAliasInfo, int
         }
         Com_GetSoundFileName(startAliasInfo->alias0, filename, 128);
         Com_sprintf(realname, 0x100u, "sound/%s", filename);
-        total_msec[1] = (int)realname;
         {
             PROF_SCOPED("SND_open_stream");
             handle = (_SAMPLE *)AIL_open_stream(milesGlob.driver, realname, 0);
@@ -1540,13 +1539,14 @@ void __cdecl SND_SetData(MssSoundCOD4 *mssSound, void *srcData)
 void SND_SetEqLerp(float lerp)
 {
     if (lerp < 0.0 || lerp > 1.0)
+    {
         MyAssertHandler(
             "c:\\trees\\cod3\\cod3src\\src\\xenon\\snd_driver.cpp",
             1740,
             0,
             "%s\n\t(lerp) = %g",
-            HIDWORD(lerp),
-            LODWORD(lerp));
+            "lerp >= 0.0f && lerp <= 1.0f", lerp);
+    }
 	milesGlob.eqLerp = (float)lerp;
 	SND_UpdateEqs();
 }

@@ -52,7 +52,7 @@ AsyncPlaySound g_FXPlaySounds[32];
 
 void __cdecl TRACK_snd()
 {
-    track_static_alloc_internal(&g_snd, 32504, "g_snd", 13);
+    track_static_alloc_internal(&g_snd, sizeof(snd_local_t), "g_snd", 13);
 }
 
 void __cdecl SND_DebugAliasPrint(bool condition, const snd_alias_t *alias, const char *msg)
@@ -669,6 +669,10 @@ char __cdecl SND_AddLengthNotify(int playbackId, const snd_alias_t *lengthNotify
                     }
                 }
                 bcassert(lengthNotifyIndex, SND_LENGTHNOTIFY_COUNT);
+                if (lengthNotifyIndex >= SND_LENGTHNOTIFY_COUNT)
+                {
+                    return 0;
+                }
 
                 ++chanInfo->lengthNotifyInfo.count;
                 chanInfo->lengthNotifyInfo.id[lengthNotifyIndex] = id;
@@ -1385,7 +1389,7 @@ int __cdecl SND_PlaySoundAlias_Internal(
         Vec3Sub(a->orient.origin, org, diff);
         distListenerSq = Vec3LengthSq(diff);
         outOfRange = distListenerSq > distMax * distMax;
-        if (*(_BYTE *)snd_debugAlias->current.integer)
+        if (*snd_debugAlias->current.string)
         {
             SND_DebugAliasPrint(outOfRange, alias0, va("Not playing, out of range: %.1f > %.1f", sqrt(distListenerSq), distMax));
         }
@@ -3446,9 +3450,6 @@ void SND_InitEntChannels()
 
 void __cdecl SND_ParseEntChannelFile(const char *buffer)
 {
-    char v1; // [esp+3h] [ebp-7Dh]
-    snd_entchannel_info_t *v2; // [esp+8h] [ebp-78h]
-    char *v3; // [esp+Ch] [ebp-74h]
     char v4; // [esp+13h] [ebp-6Dh]
     char *v5; // [esp+18h] [ebp-68h]
     const char *v6; // [esp+1Ch] [ebp-64h]
@@ -3469,7 +3470,13 @@ void __cdecl SND_ParseEntChannelFile(const char *buffer)
             break;
         if (*value && *value != 35)
         {
-            if (strlen(value) > 64)
+            if (g_snd.entchannel_count >= ARRAY_COUNT(g_snd.entchaninfo))
+            {
+                Com_EndParseSession();
+                Com_Error(ERR_DROP, "channel definition file exceeded max number of channels (%d).\n", (int)ARRAY_COUNT(g_snd.entchaninfo));
+                return;
+            }
+            if (strlen(value) >= sizeof(g_snd.entchaninfo[0].name))
             {
                 Com_EndParseSession();
                 Com_Error(
@@ -3532,14 +3539,7 @@ void __cdecl SND_ParseEntChannelFile(const char *buffer)
             {
                 maxVoices = SND_MAX_CHANNELS;
             }
-            v3 = channelName;
-            v2 = &g_snd.entchaninfo[g_snd.entchannel_count];
-            do
-            {
-                v1 = *v3;
-                v2->name[0] = *v3++;
-                v2 = (snd_entchannel_info_t *)((char *)v2 + 1);
-            } while (v1);
+            I_strncpyz(g_snd.entchaninfo[g_snd.entchannel_count].name, channelName, sizeof(g_snd.entchaninfo[0].name));
             g_snd.entchaninfo[g_snd.entchannel_count].maxVoices = maxVoices;
             g_snd.entchaninfo[g_snd.entchannel_count++].voiceCount = 0;
             if (g_snd.entchannel_count > 64)
@@ -3714,13 +3714,18 @@ void __cdecl SND_SaveChanInfo(const snd_channel_info_t *chaninfo, MemoryFile *me
 void __cdecl SND_SaveLengthNotifyInfo(const sndLengthNotifyInfo *info, MemoryFile *memFile)
 {
     SndLengthId v2; // [esp+0h] [ebp-14h]
-    void *v3; // [esp+4h] [ebp-10h] BYREF
+    unsigned int v3;
     char v4; // [esp+Bh] [ebp-9h] BYREF
     int p; // [esp+Ch] [ebp-8h] BYREF
     int i; // [esp+10h] [ebp-4h]
 
     iassert(info);
-    bcassert(info->count, SND_LENGTHNOTIFY_COUNT);
+    iassert((unsigned int)info->count <= SND_LENGTHNOTIFY_COUNT);
+    if ((unsigned int)info->count > SND_LENGTHNOTIFY_COUNT)
+    {
+        Com_Error(ERR_DROP, "Invalid sound length notification count");
+        return;
+    }
     iassert(memFile);
 
     p = info->count;
@@ -3739,7 +3744,7 @@ void __cdecl SND_SaveLengthNotifyInfo(const sndLengthNotifyInfo *info, MemoryFil
             }
             else
             {
-                v3 = info->data[i];
+                v3 = (unsigned int)(uintptr_t)info->data[i];
                 MemFile_WriteData(memFile, 4, &v3);
             }
         }
@@ -3963,7 +3968,7 @@ void __cdecl SND_RestoreChanInfo(snd_channel_info_t *chaninfo, MemoryFile *memFi
 void __cdecl SND_RestoreLengthNotifyInfo(MemoryFile *memFile, sndLengthNotifyInfo *info)
 {
     snd_alias_t *v2; // eax
-    void *v3; // [esp+4h] [ebp-14h] BYREF
+    unsigned int v3;
     uint8_t v4; // [esp+Bh] [ebp-Dh] BYREF
     int p; // [esp+Ch] [ebp-Ch] BYREF
     int i; // [esp+10h] [ebp-8h]
@@ -3975,7 +3980,12 @@ void __cdecl SND_RestoreLengthNotifyInfo(MemoryFile *memFile, sndLengthNotifyInf
     MemFile_ReadData(memFile, 4, (uint8_t *)&p);
     info->count = p;
 
-    bcassert(info->count, SND_LENGTHNOTIFY_COUNT);
+    iassert((unsigned int)info->count <= SND_LENGTHNOTIFY_COUNT);
+    if ((unsigned int)info->count > SND_LENGTHNOTIFY_COUNT)
+    {
+        Com_Error(ERR_DROP, "Invalid sound length notification count");
+        return;
+    }
 
     if (info->count)
     {
@@ -3997,7 +4007,7 @@ void __cdecl SND_RestoreLengthNotifyInfo(MemoryFile *memFile, sndLengthNotifyInf
             else
             {
                 MemFile_ReadData(memFile, 4, (uint8_t *)&v3);
-                info->data[i] = v3;
+                info->data[i] = (void *)(uintptr_t)v3;
             }
         }
     }
@@ -4405,21 +4415,25 @@ double __cdecl SND_GetVolumeNormalized()
 #ifdef KISAK_SP
 void SND_RestoreEventually(MemoryFile *memFile)
 {
-    int v2; // r11
-    int *v3; // r28
-    int v4; // r29
-
     SND_StopSounds(SND_KEEP_MUSIC_AND_AMBIENT);
     g_snd.restore.size = 0;
-    v2 = memFile->bytesUsed - 4;
-    v3 = (int *)&memFile->buffer[v2];
-    memFile->bytesUsed = v2;
-    v4 = *v3;
-    if (*v3 > 0x4000)
-        Com_Error(ERR_DROP, "SND_RESTORE_BUFFER_SIZE exceeded");
-    g_snd.restore.size = v4;
+    if (!memFile->buffer || memFile->bytesUsed < (int)sizeof(int) || memFile->bytesUsed > memFile->bufferSize)
+    {
+        Com_Error(ERR_DROP, "Invalid sound restore segment");
+        return;
+    }
+    int start = memFile->bytesUsed - sizeof(int);
+    int size;
+    memcpy(&size, memFile->buffer + start, sizeof(int));
+    if (size < (int)sizeof(int) || size > (int)sizeof(g_snd.restore.buffer) || size > memFile->bufferSize - start)
+    {
+        Com_Error(ERR_DROP, "SND_RESTORE_BUFFER_SIZE exceeded or invalid segment");
+        return;
+    }
+    memFile->bytesUsed = start;
+    memcpy(g_snd.restore.buffer, memFile->buffer + start, size);
+    g_snd.restore.size = size;
     g_snd.restore.compress = memFile->compress;
-    memcpy(&g_snd.restore, v3, v4);
 }
 
 void SND_Amplify(float *org, int min_r, int max_r, double min_vol, double max_vol, double falloff)
@@ -4480,73 +4494,57 @@ void SND_SetPauseSettings(const bool *pauseSettings)
 
 void SND_MapInit()
 {
-    __int64 v0; // r9
-    int v1; // r11
-    double v2; // fp13
-
     SND_StopSounds(SND_STOP_ALL);
-    LODWORD(v0) = snd_levelFadeTime->current.integer;
-    if (!(_DWORD)v0)
-        LODWORD(v0) = 1;
-    HIDWORD(v0) = 0;
-    if (g_snd.entchannel_count > 0)
+    int fadeTime = snd_levelFadeTime->current.integer;
+    if (fadeTime <= 0)
     {
-        v1 = 0;
-        v2 = (float)((float)1.0 / (float)v0);
-        do
-        {
-            ++HIDWORD(v0);
-            g_snd.channelvol->channelvol[v1].volume = 0.0;
-            g_snd.channelvol->channelvol[v1].goalrate = g_snd.channelvol->channelvol[v1].goalvolume * (float)v2;
-            ++v1;
-        } while (SHIDWORD(v0) < g_snd.entchannel_count);
+        fadeTime = 1;
+    }
+    float rate = 1.0f / fadeTime;
+    for (int i = 0; i < g_snd.entchannel_count; ++i)
+    {
+        g_snd.channelvol->channelvol[i].volume = 0.0f;
+        g_snd.channelvol->channelvol[i].goalrate = g_snd.channelvol->channelvol[i].goalvolume * rate;
     }
 }
 
-int SND_FindPlaybackId(const snd_alias_t *sndEnt, const char *aliasName)
+int SND_FindPlaybackId(SndEntHandle sndEnt, const char *aliasName)
 {
-    int v4; // r31
-    const snd_alias_t **p_alias0; // r29
-    bool IsStreamChannelFree; // r3
-    const char **v7; // r11
-
     if (!g_snd.Initialized2d)
+    {
         return SND_PLAYBACKID_NOTPLAYED;
-    v4 = 0;
-    p_alias0 = &g_snd.chaninfo[0].alias0;
-    while (1)
-    {
-        if (*(p_alias0 - 18) != sndEnt)
-            goto LABEL_18;
-        if (v4 >= 0 && v4 < g_snd.max_2D_channels)
-        {
-            IsStreamChannelFree = SND_Is2DChannelFree(v4);
-            goto LABEL_13;
-        }
-        if (v4 >= 8 && v4 < g_snd.max_3D_channels + 8)
-        {
-            IsStreamChannelFree = SND_Is3DChannelFree(v4);
-            goto LABEL_13;
-        }
-        if (v4 < SND_FIRST_STREAM_CHANNEL || v4 >= SND_FIRST_STREAM_CHANNEL + g_snd.max_stream_channels)
-            break;
-        IsStreamChannelFree = SND_IsStreamChannelFree(v4);
-    LABEL_13:
-        if (!IsStreamChannelFree)
-            break;
-    LABEL_18:
-        p_alias0 += 35;
-        ++v4;
-        if ((int)p_alias0 >= (int)&g_sndPhysics.info[4].org[2])
-            return SND_PLAYBACKID_NOTPLAYED;
     }
-    if (!*p_alias0 || I_stricmp((*p_alias0)->aliasName, aliasName))
+    for (int i = 0; i < ARRAY_COUNT(g_snd.chaninfo); ++i)
     {
-        v7 = (const char **)p_alias0[1];
-        if (!v7 || I_stricmp(*v7, aliasName))
-            goto LABEL_18;
+        const snd_channel_info_t *channel = &g_snd.chaninfo[i];
+        if (channel->sndEnt.handle != sndEnt.handle)
+        {
+            continue;
+        }
+        bool isFree;
+        if (i < g_snd.max_2D_channels)
+        {
+            isFree = SND_Is2DChannelFree(i);
+        }
+        else if (i >= 8 && i < 8 + g_snd.max_3D_channels)
+        {
+            isFree = SND_Is3DChannelFree(i);
+        }
+        else if (i >= SND_FIRST_STREAM_CHANNEL && i < SND_FIRST_STREAM_CHANNEL + g_snd.max_stream_channels)
+        {
+            isFree = SND_IsStreamChannelFree(i);
+        }
+        else
+        {
+            continue;
+        }
+        if (!isFree && ((channel->alias0 && !I_stricmp(channel->alias0->aliasName, aliasName))
+            || (channel->alias1 && !I_stricmp(channel->alias1->aliasName, aliasName))))
+        {
+            return channel->playbackId;
+        }
     }
-    return (int)*(p_alias0 - 12);
+    return SND_PLAYBACKID_NOTPLAYED;
 }
 
 #endif // KISAK_SP

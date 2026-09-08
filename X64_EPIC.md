@@ -13,7 +13,7 @@ Coding conventions: C-style implementation, explicit `sizeof(Type)`, braces for 
 | 5 | script | Complete |
 | 6 | server | Complete |
 | 7 | server_mp | Complete |
-| 8 | sound | Pending |
+| 8 | sound | Complete |
 | 9 | stringed | Pending |
 | 10 | ui | Pending |
 | 11 | ui_mp | Pending |
@@ -25,6 +25,17 @@ Validation distinguishes diagnostic compilation and isolated regression tests fr
 
 Part 5 checkpoint: `510631ac`.
 Part 6 checkpoint: `91eb549f`.
+Part 7 checkpoint: `ec0f97bc`.
+
+## Part 8: sound
+
+Audited all seven files. Native loaded-sound allocation and sound/alias/curve layout assertions now cover both architectures. Miles file-open callbacks initialize the entire native handle; allocator dispatch preserves native return pointers. Removed a pointer cast into unused integer scratch. Playback lookup uses typed channel traversal and a real entity handle, with the cgame caller updated. Script notification tokens remain four bytes on disk and are explicitly widened on restore; subtitle alias pointers remain native. Native sound tracking and debug dvar string access were corrected.
+
+Independent fixes include bounds for channel-name/count parsing and length notifications, restore-segment size validation, and a malformed EQ assertion. Replaced the fade setup's integer/counter packing into one int64 with separate variables; the old loop changed the denominator while iterating. Deferred sound restore copies into its actual buffer. All new/changed save fields retain their existing fixed-width layout.
+
+Validation: 20 sound and six shared cgame call-site diagnostic checks pass. `test_sound.py` links the supplied x86/x64 Miles libraries and runs their actual WAV parser on PCM data. Both native runs pass handle-width, allocator-return, loaded-sound canary/layout, 53-channel lookup, fade-rate, four-entry/24-byte notification save/restore, and restore-buffer boundary tests. Audio-device playback was not performed.
+
+CMake selects the matching supplied Miles import library/runtime directory by pointer width. Full x64 game configuration/linking still needs the global `/machine:x86`, DirectX/Steam selection and other pending owners addressed; this is not a claim that the full game builds yet.
 
 ## Part 7: server_mp
 

@@ -22,7 +22,7 @@ LoadedSound *__cdecl SND_LoadFromBuffer(void *buffer, const char *soundName)
     {
         if (info.data_len)
         {
-            loadSnd = (LoadedSound*)Hunk_Alloc(0x2Cu, "SND_LoadFromBuffer", 15);
+            loadSnd = (LoadedSound*)Hunk_Alloc(sizeof(LoadedSound), "SND_LoadFromBuffer", 15);
             loadSnd->name = soundName;
             // KISAK (miles9): the original did qmemcpy(&loadSnd->sound, &info, 0x24) against a
             // Miles build whose AILSOUNDINFO had no channel_mask. Every Miles we ship (7.2e and

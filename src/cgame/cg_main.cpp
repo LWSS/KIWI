@@ -1141,7 +1141,7 @@ void __cdecl CG_ScriptNotifySndLengthNotify(int msec, void *lengthNotifyData)
 {
     const char *v2; // r3
 
-    v2 = va("sl %i %i", lengthNotifyData, msec);
+    v2 = va("sl %i %i", (int)(intptr_t)lengthNotifyData, msec);
     CL_AddReliableCommand(0, v2);
 }
 
@@ -1599,4 +1599,3 @@ int __cdecl CG_PlayEntitySoundAliasByName(int localClientNum, SndEntHandle entit
     SND_AddLengthNotify(v9, v7, SndLengthNotify_Subtitle);
     return v9;
 }
-

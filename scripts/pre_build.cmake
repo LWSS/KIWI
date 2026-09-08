@@ -78,7 +78,13 @@ target_link_options(${PROJECT_NAME} PRIVATE "$<$<CONFIG:Release>:/OPT:ICF>")
 target_link_options(${PROJECT_NAME} PRIVATE /machine:x86)
 set_target_properties(${PROJECT_NAME} PROPERTIES WIN32_EXECUTABLE TRUE)
 
-target_link_libraries(${PROJECT_NAME} PUBLIC mss32.lib)
+if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+    target_link_libraries(${PROJECT_NAME} PUBLIC "${DEPS_DIR}/msslib/x64/mss64.lib")
+    set(MILES_RUNTIME_DIR "${DEPS_DIR}/msslib/x64")
+else()
+    target_link_libraries(${PROJECT_NAME} PUBLIC "${DEPS_DIR}/msslib/mss32.lib")
+    set(MILES_RUNTIME_DIR "${DEPS_DIR}/msslib/dlls")
+endif()
 
 target_link_libraries(${PROJECT_NAME} PUBLIC
         dsound.lib

@@ -494,7 +494,7 @@ void __cdecl CG_EntityEvent(int localClientNum, centity_s *cent, int event)
                         const char *v90 = CL_GetConfigString(localClientNum, cent->nextState.eventParm + CS_SOUNDALIASES);
                         if (v90)
                         {
-                            SND_AddLengthNotify(SND_FindPlaybackId((const snd_alias_t *)cent->nextState.number, v90), (const snd_alias_t *)cent->nextState.number, SndLengthNotify_Script);
+                            SND_AddLengthNotify(SND_FindPlaybackId(cent->nextState.number, v90), (const snd_alias_t *)(uintptr_t)cent->nextState.number, SndLengthNotify_Script);
                         }
                     }
                 }

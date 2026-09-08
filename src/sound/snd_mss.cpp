@@ -9,7 +9,10 @@
 
 uint __stdcall MSS_FileOpenCallback(const MSS_FILE *pszFilename, UINTa *phFileHandle)
 {
-    return (FS_FOpenFileReadStream(pszFilename, (int *)phFileHandle) & 0x80000000) == 0;
+    int handle = 0;
+    int result = FS_FOpenFileReadStream(pszFilename, &handle);
+    *phFileHandle = (UINTa)handle;
+    return result >= 0;
 }
 void __stdcall MSS_FileCloseCallback(UINTa hFileHandle)
 {
@@ -280,9 +283,13 @@ int __cdecl MSS_DigitalFormatType(int waveFormat, int bits, int channels)
 uint8_t *__cdecl MSS_Alloc(uint bytes, uint rate)
 {
   if ( IsFastFileLoad() )
-    return (uint8_t *)((int (__cdecl *)(uint, uint))MSS_Alloc_FastFile)(bytes, rate);
+  {
+    return (uint8_t *)MSS_Alloc_FastFile(bytes);
+  }
   else
+  {
     return MSS_Alloc_LoadObj(bytes, rate);
+  }
 }
 
 uint8_t *__cdecl MSS_Alloc_LoadObj(uint bytes, uint rate)

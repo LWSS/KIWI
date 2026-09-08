@@ -14,6 +14,7 @@ import subprocess
 parser = argparse.ArgumentParser()
 parser.add_argument('folder')
 parser.add_argument('--modes', nargs='+', default=['MP', 'SP'])
+parser.add_argument('--files', nargs='+', help='Only these basenames within the folder')
 parser.add_argument('--configured', action='store_true', help='Only translation units listed in game CMake source lists')
 options = parser.parse_args()
 root = Path.cwd()
@@ -27,6 +28,8 @@ includes += [sdk/n for n in ['ucrt', 'shared', 'um', 'winrt']]
 probe = output/'diagnostic.h'
 probe.write_text('// Test only: shared x86 assertions are audited separately.\n#define static_assert(...)\n')
 files = sorted(p for p in (root/'src'/options.folder).rglob('*') if p.suffix in ['.c', '.cpp'])
+if options.files:
+    files = [p for p in files if p.name in options.files]
 if options.configured:
     lists = ['scripts/common_files.cmake', 'scripts/mp/mp_files.cmake', 'scripts/sp/sp_files.cmake']
     configured = set()
