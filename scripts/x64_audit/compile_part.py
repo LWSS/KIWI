@@ -30,10 +30,13 @@ files = sorted(p for p in (root/'src'/options.folder).rglob('*') if p.suffix in 
 if options.configured:
     lists = ['scripts/common_files.cmake', 'scripts/mp/mp_files.cmake', 'scripts/sp/sp_files.cmake']
     configured = set()
+    mode_files = {}
     for name in lists:
         path = root/name
         if path.exists():
-            configured.update(re.findall(r'^\s*"\$\{SRC_DIR\}/([^"\n]+)"', path.read_text(), re.M))
+            entries = set(re.findall(r'^\s*"\$\{SRC_DIR\}/([^"\n]+)"', path.read_text(), re.M))
+            configured.update(entries)
+            mode_files[name] = entries
     excluded = [str(p.relative_to(root)) for p in files if p.relative_to(root/'src').as_posix() not in configured]
     (output/'excluded.json').write_text(json.dumps(excluded, indent=2))
     files = [p for p in files if p.relative_to(root/'src').as_posix() in configured]
@@ -54,6 +57,11 @@ def check(case):
                 returncode=result.returncode, output=result.stdout+result.stderr)
 
 cases = [(file, arch, mode) for file in files for arch in ['x86', 'x64'] for mode in options.modes]
+if options.configured:
+    cases = [(file, arch, mode) for file, arch, mode in cases
+             if file.relative_to(root/'src').as_posix() in
+             (mode_files.get('scripts/common_files.cmake', set()) |
+              mode_files.get('scripts/'+mode.lower()+'/'+mode.lower()+'_files.cmake', set()))]
 with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
     results = list(pool.map(check, cases))
 (output/'compile.json').write_text(json.dumps(results, indent=2))

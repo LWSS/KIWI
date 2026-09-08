@@ -697,8 +697,8 @@ MISC
 ==============================================================
 */
 
-#define RoundUp(N, M) ((N) + ((uint)(M)) - (((uint)(N)) % ((uint)(M))))
-#define RoundDown(N, M) ((N) - (((uint)(N)) % ((uint)(M))))
+#define RoundUp(N, M) ((N) + ((size_t)(M)) - (((size_t)(N)) % ((size_t)(M))))
+#define RoundDown(N, M) ((N) - (((size_t)(N)) % ((size_t)(M))))
 
 void _copyDWord(uint *dest, const uint constant, const uint count);
 
@@ -1168,7 +1168,7 @@ struct SpawnVar // sizeof=0xA0C
     int numSpawnVarChars;
     char spawnVarChars[2048];
 };
-static_assert(sizeof(SpawnVar) == 0xA0C);
+static_assert(sizeof(SpawnVar) == (sizeof(void *) == 8 ? 3088 : 2572));
 
 void __cdecl CM_LoadMapData_LoadObj(const char *name);
 struct cplane_s *__cdecl CM_GetPlanes();

@@ -20,10 +20,10 @@ static uint8_t serverObjDirty[272];
 
 void __cdecl TRACK_dobj_management()
 {
-    track_static_alloc_internal(objBuf, 204800, "objBuf", 11);
-    track_static_alloc_internal(objAlloced, 2048, "objAlloced", 11);
-    track_static_alloc_internal(clientObjMap, 2304, "clientObjMap", 11);
-    track_static_alloc_internal(serverObjMap, 2048, "serverObjMap", 11);
+    track_static_alloc_internal(objBuf, sizeof(objBuf), "objBuf", 11);
+    track_static_alloc_internal(objAlloced, sizeof(objAlloced), "objAlloced", 11);
+    track_static_alloc_internal(clientObjMap, sizeof(clientObjMap), "clientObjMap", 11);
+    track_static_alloc_internal(serverObjMap, sizeof(serverObjMap), "serverObjMap", 11);
 }
 
 DObj_s *__cdecl Com_GetClientDObj(uint handle, int localClientNum)

@@ -99,7 +99,7 @@ float __cdecl MSG_ReadFloat(msg_t *msg);
 int __cdecl MSG_ReadString(msg_t *msg, char *buffer, int bufsize);
 float __cdecl MSG_ReadAngle16(msg_t *msg);
 void __cdecl MSG_ReadData(msg_t *msg, byte *data, int len);
-int __cdecl MSG_ReadInt64(msg_t *msg);
+uint64_t __cdecl MSG_ReadInt64(msg_t *msg);
 void __cdecl MSG_WriteDelta(msg_t *msg, int oldV, int newV, unsigned int bits);
 int __cdecl MSG_ReadDelta(msg_t *msg, int oldV, unsigned int bits);
 void __cdecl MSG_WriteDeltaFloat(msg_t *msg, double oldV, double newV);

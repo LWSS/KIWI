@@ -189,7 +189,7 @@ void __cdecl CM_LoadStaticModels()
     }
     if (numStaticModels)
     {
-        cm.staticModelList = (cStaticModel_s *)CM_Hunk_Alloc(80 * numStaticModels, "CM_CreateStaticModel", 27);
+        cm.staticModelList = (cStaticModel_s *)CM_Hunk_Alloc(sizeof(cStaticModel_s) * numStaticModels, "CM_CreateStaticModel", 27);
         ptr = Com_EntityString(0);
         iassert( ptr );
         ProfLoad_Begin("Create static model collision");
@@ -427,7 +427,6 @@ void CMod_LoadMaterials()
 
 void CMod_LoadNodes()
 {
-    cNode_t *result; // eax
     int j; // [esp+0h] [ebp-1Ch]
     cNode_t *out; // [esp+4h] [ebp-18h]
     char *in; // [esp+Ch] [ebp-10h] // KISAKTODO: assign struct type (idk what it is)
@@ -438,8 +437,7 @@ void CMod_LoadNodes()
     in = Com_GetBspLump(LUMP_NODES, 0x24u, &count);
     if (!count)
         Com_Error(ERR_DROP, "Map has no nodes");
-    cm.nodes = (cNode_t*)CM_Hunk_Alloc(8 * count, "CMod_LoadNodes", 25);
-    result = (cNode_t*)count;
+    cm.nodes = (cNode_t*)CM_Hunk_Alloc(sizeof(cNode_t) * count, "CMod_LoadNodes", 25);
     cm.numNodes = count;
     out = cm.nodes;
     for (nodeIter = 0; nodeIter < count; ++nodeIter)
@@ -533,7 +531,7 @@ void CMod_LoadCollisionPartitions()
     uint index; // [esp+Ch] [ebp-8h]
     uint count; // [esp+10h] [ebp-4h] BYREF
 
-    iassert(sizeof(CollisionPartition) == 12);
+    iassert(sizeof(CollisionPartition) == (sizeof(void *) == 8 ? 16 : 12));
 
     in = (DiskCollPartition *)Com_GetBspLump(LUMP_COLLISIONPARTITIONS, 0xCu, &count);
     cm.partitions = (CollisionPartition*)CM_Hunk_Alloc(sizeof(CollisionPartition) * count, "CMod_LoadCollisionPartitions", 28);
@@ -600,7 +598,7 @@ MapEnts *__cdecl MapEnts_GetFromString(char *name, const char *entityString, int
     const char *begin; // [esp+A38h] [ebp-4h]
     char *entityStringa; // [esp+A48h] [ebp+Ch]
 
-    mapEnts = (MapEnts*)CM_Hunk_Alloc(0xCu, "CMod_LoadEntityString", 30);
+    mapEnts = (MapEnts*)CM_Hunk_Alloc(sizeof(MapEnts), "CMod_LoadEntityString", 30);
     nameLen = strlen(name);
     mapEnts->name = (const char*)CM_Hunk_Alloc(nameLen + 1, "CMod_LoadEntityString", 30);
     memcpy((void*)mapEnts->name, name, nameLen + 1);
@@ -740,18 +738,18 @@ void __cdecl CMod_LoadBrushRelated(uint version, bool usePvs)
     CMod_LoadSubmodels();
     user = Hunk_UserCreate(0x400000, "CMod_LoadBrushRelated", 1, 0, 26);
     TempMemoryReset(user);
-    cm.leafbrushNodes = (cLeafBrushNode_s*)(TempMalloc(0) - 20);
+    cm.leafbrushNodes = (cLeafBrushNode_s *)TempMalloc(sizeof(cLeafBrushNode_s));
+    memset(cm.leafbrushNodes, 0, sizeof(cLeafBrushNode_s));
     if (version > 0xE)
         CMod_LoadLeafBrushNodes();
     else
         CMod_LoadLeafBrushNodes_Version14();
     CMod_LoadSubmodelBrushNodes();
     CM_InitBoxHull();
-    ++cm.leafbrushNodes;
-    leafbrushNodesCount = (TempMalloc(0) - (char*)cm.leafbrushNodes) / 20;
-    cm.leafbrushNodesCount = leafbrushNodesCount + 1;
-    leafbrushNodes = (cLeafBrushNode_s*)CM_Hunk_Alloc(20 * (leafbrushNodesCount + 1), "CMod_LoadBrushRelated", 26);
-    memcpy(&leafbrushNodes[1].axis, &cm.leafbrushNodes->axis, 20 * leafbrushNodesCount);
+    leafbrushNodesCount = (TempMalloc(0) - (char*)cm.leafbrushNodes) / sizeof(cLeafBrushNode_s);
+    cm.leafbrushNodesCount = leafbrushNodesCount;
+    leafbrushNodes = (cLeafBrushNode_s*)CM_Hunk_Alloc(sizeof(cLeafBrushNode_s) * leafbrushNodesCount, "CMod_LoadBrushRelated", 26);
+    memcpy(leafbrushNodes, cm.leafbrushNodes, sizeof(cLeafBrushNode_s) * leafbrushNodesCount);
     cm.leafbrushNodes = leafbrushNodes;
     Hunk_UserDestroy(user);
 }
@@ -1083,7 +1081,7 @@ cLeafBrushNode_s *__cdecl CMod_AllocLeafBrushNode()
 {
     cLeafBrushNode_s *result; // eax
 
-    result = (cLeafBrushNode_s*)TempMalloc(0x14u);
+    result = (cLeafBrushNode_s*)TempMalloc(sizeof(cLeafBrushNode_s));
     result->axis = 0;
     result->leafBrushCount = 0;
     result->contents = 0;
@@ -1216,7 +1214,7 @@ void CMod_LoadBrushes()
     memcpy(cm.brushEdges, inEdges, allocSizeEdges);
     outEdges = cm.brushEdges;
     sidesCount -= 6 * brushCount;
-    allocSizeSides = 12 * sidesCount;
+    allocSizeSides = sizeof(cbrushside_t) * sidesCount;
     if (sidesCount)
         cm.brushsides = (cbrushside_t *)CM_Hunk_Alloc(allocSizeSides, "CMod_LoadBrushSides", 26);
     else
@@ -1224,7 +1222,7 @@ void CMod_LoadBrushes()
     cm.numBrushSides = sidesCount;
     outSides = cm.brushsides;
     countAllocatedBrushes = brushCount + 1;
-    allocSizeBrushes = 80 * (brushCount + 1);
+    allocSizeBrushes = sizeof(cbrush_t) * (brushCount + 1);
     cm.brushes = (cbrush_t*)CM_Hunk_Alloc(allocSizeBrushes, "CMod_LoadBrushes", 26);
     cm.numBrushes = brushCount;
     if (brushCount != brushCount)

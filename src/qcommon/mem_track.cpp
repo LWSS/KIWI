@@ -781,13 +781,15 @@ void __cdecl track_addbasicmeminfo(meminfo_t* sum, meminfo_t* in)
 #endif
 }
 
-static int __cdecl mem_track_compare(uint *elem1, uint *elem2)
+static int __cdecl mem_track_compare(const void *left, const void *right)
 {
-    if (*((uint8_t *)elem1 + 16) < (int)*((uint8_t *)elem2 + 16))
-        return -1;
-    if (*((uint8_t *)elem1 + 16) <= (int)*((uint8_t *)elem2 + 16))
-        return elem1[2] - elem2[2];
-    return 1;
+    const mem_track_t *elem1 = (const mem_track_t *)left;
+    const mem_track_t *elem2 = (const mem_track_t *)right;
+    if (elem1->type != elem2->type)
+    {
+        return (elem1->type > elem2->type) - (elem1->type < elem2->type);
+    }
+    return (elem1->size > elem2->size) - (elem1->size < elem2->size);
 }
 
 void __cdecl track_PrintInfo()
@@ -834,7 +836,7 @@ void __cdecl track_PrintInfo()
         ++nodeCount;
     nodeCount += g_physicalMemInfoCount;
     len2 += nodeCount;
-    sorted_mem_track = (mem_track_t*)malloc(20 * len2);
+    sorted_mem_track = (mem_track_t*)malloc(sizeof(mem_track_t) * len2);
     if (sorted_mem_track)
     {
         len = 0;
@@ -950,7 +952,7 @@ void __cdecl track_PrintInfo()
             if (v8)
                 info.nonSwapMinSpecTotal += mem_trackb->size;
         }
-        qsort(sorted_mem_track, len, 0x14u, (int(__cdecl*)(const void*, const void*))mem_track_compare);
+        qsort(sorted_mem_track, len, sizeof(mem_track_t), mem_track_compare);
         info.typeTotal[23] = info.typeTotal[19]
             + info.typeTotal[22]
             + info.typeTotal[21]

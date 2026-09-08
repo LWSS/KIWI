@@ -2362,8 +2362,8 @@ void Com_CheckError()
     Sys_LeaveCriticalSection(CRITSECT_COM_ERROR);
     if (v0)
     {
-        void * value = Sys_GetValue(2);
-        longjmp((int*)value, -1);
+        jmp_buf *value = (jmp_buf *)Sys_GetValue(2);
+        longjmp(*value, -1);
     }
 }
 

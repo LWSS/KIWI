@@ -8,7 +8,7 @@ Coding conventions: C-style implementation, explicit `sizeof(Type)`, braces for 
 | --- | --- | --- |
 | 1 | groupvoice | Complete |
 | 2 | physics | Complete |
-| 3 | qcommon | Pending |
+| 3 | qcommon | Complete |
 | 4 | ragdoll | Pending |
 | 5 | script | Pending |
 | 6 | server | Pending |
@@ -42,3 +42,13 @@ Validation: all 29 configured translation units passed x86/x64 MP/SP assertion-e
 The game CMake lists exclude 16 legacy ODE translation units (recorded in `%TEMP%/kiwi-x64-epic/physics/excluded.json`). An initial all-files probe found their pre-existing missing declarations, disabled OPCODE dependencies, and an unprocessed stack template on both x86 and x64. They were inspected for portability patterns but were not enabled or rebuilt as an alternative ODE library. ODE's configured runtime already uses typed body/joint pointers and native allocation sizes. The shared pool allocator is revisited in the universal part.
 
 Part 1 checkpoint: `9db19a78`.
+
+Part 2 checkpoint: `70b3b817`.
+
+## Part 3: qcommon
+
+Audited all 54 source/header files. Native collision allocations and leaf-node strides now follow their types; the leaf-node sentinel has real, zeroed storage. Primary lights, profile strings, Huffman pointer sorting, SP network-field traversal, memory tracking sizes, thread handles, and setjmp storage no longer depend on x86 pointer layout. SpawnVar has architecture-specific layout assertions. Fixed-width BSP and network records retain their existing widths. Disabled libwww download code remains disabled and requires a separate implementation if restored.
+
+Corrected MSG_ReadInt64 to return and read all eight bytes, including overflow handling. Its independent upstream patch is exported outside the repository.
+
+Validation: 118 configured x86/x64 MP/SP diagnostic compilation checks passed. Production-code regression executables passed on both architectures for collision allocation canaries/native node strides, 64-bit message reads and truncation, Huffman symbol roundtrips, all 143 SP player-state fields, and HUD serialization. Huffman and SP message output was byte-identical across architectures. Reproduce with `scripts/x64_audit/test_qcommon.py` and `compile_part.py qcommon --configured`. Full game/network integration remains pending the later parts. The compiler runner now respects each mode's CMake file list.

@@ -220,7 +220,7 @@ const netField_t playerStateFields[143] =
 
 void __cdecl TRACK_msg()
 {
-    track_static_alloc_internal((void *)playerStateFields, 1716, "playerStateFields", 9);
+    track_static_alloc_internal((void *)playerStateFields, sizeof(playerStateFields), "playerStateFields", 9);
 }
 
 void __cdecl MSG_Init(msg_t *buf, unsigned __int8 *data, int length)
@@ -689,29 +689,17 @@ void __cdecl MSG_ReadData(msg_t *msg, _BYTE *data, int len)
     }
 }
 
-int __cdecl MSG_ReadInt64(msg_t *msg)
+uint64_t __cdecl MSG_ReadInt64(msg_t *msg)
 {
-    int readcount; // r4
-    int v3; // r30
-    unsigned __int64 v4; // r4
-    unsigned __int64 v5; // r4
-    __int64 v7; // [sp+50h] [-20h] BYREF
-
-    readcount = msg->readcount;
-    v3 = readcount + 8;
-    if (readcount + 8 > msg->splitSize + msg->cursize)
+    uint64_t value;
+    if (msg->readcount + sizeof(uint64_t) > msg->splitSize + msg->cursize)
     {
-        HIDWORD(v5) = 0;
         msg->overflowed = 1;
+        return 0;
     }
-    else
-    {
-        MSG_GetBytes(msg, readcount, (unsigned __int8 *)&v7, 8);
-        HIDWORD(v4) = v7;
-        v5 = LittleLong64(v4);
-        msg->readcount = v3;
-    }
-    return HIDWORD(v5);
+    MSG_GetBytes(msg, msg->readcount, (byte *)&value, sizeof(uint64_t));
+    msg->readcount += sizeof(uint64_t);
+    return LittleLong64(value);
 }
 
 void __cdecl MSG_WriteDelta(msg_t *msg, int oldV, int newV, unsigned int bits)
@@ -1392,7 +1380,7 @@ void __cdecl MSG_WriteDeltaHudElems(msg_t *msg, hudelem_s *to, int count)
     int v9; // r24
     int v10; // r31
     int v11; // r9
-    int *p_offset; // r11
+    const netField_t *offsetField; // r11
     int v13; // r8
     const netField_t *v14; // r30
     int v15; // r31
@@ -1425,15 +1413,17 @@ void __cdecl MSG_WriteDeltaHudElems(msg_t *msg, hudelem_s *to, int count)
         {
             v10 = 0;
             v11 = 0;
-            p_offset = &hudElemFields[0].offset;
+            offsetField = hudElemFields;
             v13 = 43;
             do
             {
-                if (*(he_type_t *)((char *)&to->type + *p_offset + v8 * 172))
+                if (*(he_type_t *)((char *)&to->type + offsetField->offset + v8 * 172))
+                {
                     v10 = v11;
+                }
                 --v13;
                 ++v11;
-                p_offset += 3;
+                ++offsetField;
             } while (v13);
             MSG_WriteBits(msg, v10, 6u);
             v14 = hudElemFields;
@@ -1457,7 +1447,7 @@ void __cdecl MSG_ReadDeltaHudElems(msg_t *msg, hudelem_s *to, unsigned int count
     int v8; // r26
     int i; // r21
     unsigned int v10; // r27
-    int *p_bits; // r29
+    const netField_t *field; // r29
     unsigned int v12; // r25
     int v13; // r31
     msg_t *v14; // r3
@@ -1465,7 +1455,7 @@ void __cdecl MSG_ReadDeltaHudElems(msg_t *msg, hudelem_s *to, unsigned int count
     __int64 v16; // r11
     unsigned int v17; // r4
     unsigned int v18; // r11
-    int *p_offset; // r10
+    const netField_t *offsetField; // r10
     int v20; // r9
     hudelem_s *v21; // r31
 
@@ -1484,24 +1474,24 @@ void __cdecl MSG_ReadDeltaHudElems(msg_t *msg, hudelem_s *to, unsigned int count
         for (i = Bits; i; --i)
         {
             v10 = MSG_ReadBits(msg, 6u) + 1;
-            p_bits = &hudElemFields[0].bits;
+            field = hudElemFields;
             v12 = v10;
             do
             {
-                v13 = *(p_bits - 1) + v8;
+                v13 = field->offset + v8;
                 if (!MSG_ReadBits(msg, 1u))
                 {
                     *(he_type_t *)((char *)&to->type + v13) = HE_TYPE_FREE;
                     goto LABEL_18;
                 }
-                if (*p_bits)
+                if (field->bits)
                 {
                     if (!MSG_ReadBits(msg, 1u))
                     {
                         *(he_type_t *)((char *)&to->type + v13) = HE_TYPE_FREE;
                         goto LABEL_18;
                     }
-                    v17 = *p_bits;
+                    v17 = field->bits;
                     v14 = msg;
                 }
                 else
@@ -1524,17 +1514,17 @@ void __cdecl MSG_ReadDeltaHudElems(msg_t *msg, hudelem_s *to, unsigned int count
                 *(he_type_t *)((char *)&to->type + v13) = (he_type_t)MSG_ReadBits(v14, v17);
             LABEL_18:
                 --v12;
-                p_bits += 3;
+                ++field;
             } while (v12);
             if (v10 < 0x2B)
             {
                 v18 = 43 - v10;
-                p_offset = &hudElemFields[v10].offset;
+                offsetField = &hudElemFields[v10];
                 do
                 {
                     --v18;
-                    v20 = *p_offset + v8;
-                    p_offset += 3;
+                    v20 = offsetField->offset + v8;
+                    ++offsetField;
                     *(he_type_t *)((char *)&to->type + v20) = HE_TYPE_FREE;
                 } while (v18);
             }
@@ -1570,7 +1560,7 @@ void __cdecl MSG_WriteDeltaPlayerstate(msg_t *msg, playerState_s *to)
     int integer; // r11
     int v8; // r19
     int v9; // r23
-    const int *p_bits; // r26
+    const netField_t *field; // r26
     int v11; // r27
     __int64 v12; // r11
     double v13; // fp0
@@ -1643,21 +1633,21 @@ void __cdecl MSG_WriteDeltaPlayerstate(msg_t *msg, playerState_s *to)
         v8 = 0;
     }
     v9 = 143;
-    p_bits = &playerStateFields[0].bits;
+    field = playerStateFields;
     do
     {
-        v11 = *(p_bits - 1);
+        v11 = field->offset;
         if (!*(int *)((char *)&to->commandTime + v11))
         {
             MSG_WriteBits(msg, 0, 1u);
             goto LABEL_31;
         }
         MSG_WriteBits(msg, 1, 1u);
-        LODWORD(v12) = *p_bits;
-        if (*p_bits)
+        LODWORD(v12) = field->bits;
+        if (field->bits)
         {
             v16 = *(int *)((char *)&to->commandTime + v11);
-            v17 = *p_bits;
+            v17 = field->bits;
             if ((int)v12 <= 0)
                 v17 = -(int)v12;
             v18 = v17 & 7;
@@ -1685,7 +1675,7 @@ void __cdecl MSG_WriteDeltaPlayerstate(msg_t *msg, playerState_s *to)
             {
                 v15 = *(int *)((char *)&to->commandTime + v11);
             LABEL_30:
-                Com_Printf(CON_CHANNEL_SYSTEM, "%s:%i ", (const char *)*(p_bits - 2), v15);
+                Com_Printf(CON_CHANNEL_SYSTEM, "%s:%i ", field->name, v15);
             }
         }
         else
@@ -1704,11 +1694,13 @@ void __cdecl MSG_WriteDeltaPlayerstate(msg_t *msg, playerState_s *to)
             MSG_WriteBits(msg, 1, 1u);
             MSG_WriteBits(msg, *(int *)((char *)&to->commandTime + v11), 0x20u);
             if (v8)
-                Com_Printf(CON_CHANNEL_SYSTEM, "%s:%f ", (const char *)*(p_bits - 2), *(float *)((char *)&to->commandTime + v11));
+            {
+                Com_Printf(CON_CHANNEL_SYSTEM, "%s:%f ", field->name, *(float *)((char *)&to->commandTime + v11));
+            }
         }
     LABEL_31:
         --v9;
-        p_bits += 3;
+        ++field;
     } while (v9);
     v20 = 0;
     v21 = 2;
@@ -2082,7 +2074,7 @@ void __cdecl MSG_ReadDeltaPlayerstate(msg_t *msg, playerState_s *to)
     int integer; // r11
     int print; // r18
     int v9; // r23
-    const int *p_bits; // r26
+    const netField_t *field; // r26
     int v11; // r28
     unsigned int v12; // r11
     int Bits; // r6
@@ -2186,19 +2178,19 @@ void __cdecl MSG_ReadDeltaPlayerstate(msg_t *msg, playerState_s *to)
     }
 
     v9 = 143;
-    p_bits = &playerStateFields[0].bits;
+    field = playerStateFields;
     do
     {
-        v11 = *(p_bits - 1);
+        v11 = field->offset;
         if (!MSG_ReadBits(msg, 1u))
         {
             *(int *)((char *)&to->commandTime + v11) = 0;
             goto LABEL_34;
         }
-        v12 = *p_bits;
-        if (*p_bits)
+        v12 = field->bits;
+        if (field->bits)
         {
-            v15 = *p_bits;
+            v15 = field->bits;
             //v16 = _cntlzw(v12) == 0;
             v16 = (v12 & 0x80000000u) != 0;
             if (v16)
@@ -2241,15 +2233,19 @@ void __cdecl MSG_ReadDeltaPlayerstate(msg_t *msg, playerState_s *to)
             *(float *)((char *)&to->commandTime + v11) = (float)Bits;
         LABEL_32:
             if (print)
-                Com_Printf(CON_CHANNEL_SYSTEM, "%s:%i ", (const char *)*(p_bits - 2), Bits);
+            {
+                Com_Printf(CON_CHANNEL_SYSTEM, "%s:%i ", field->name, Bits);
+            }
             goto LABEL_34;
         }
         *(int *)((char *)&to->commandTime + v11) = MSG_ReadBits(msg, 0x20u);
         if (print)
-            Com_Printf(CON_CHANNEL_SYSTEM, "%s:%f ", (const char *)*(p_bits - 2), *(float *)((char *)&to->commandTime + v11));
+        {
+            Com_Printf(CON_CHANNEL_SYSTEM, "%s:%f ", field->name, *(float *)((char *)&to->commandTime + v11));
+        }
     LABEL_34:
         --v9;
-        p_bits += 3;
+        ++field;
     } while (v9);
     if (MSG_ReadBits(msg, 1u))
     {

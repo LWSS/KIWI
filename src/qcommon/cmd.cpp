@@ -264,7 +264,7 @@ void Cmd_Dumpraw_f(void)
 {
     auto DumpFileType = [](XAssetType type) -> void
     {
-		auto rawDir = std::format("{}\\raw\\", (char*)fs_basepath->current.integer);
+		auto rawDir = std::format("{}\\raw\\", fs_basepath->current.string);
 
         XAssetHeader files[10000]{ 0 };
 		int read = DB_GetAllXAssetOfType_FastFile(type, files, 10000);
@@ -383,7 +383,7 @@ void Cmd_Dumpraw_f(void)
 		}
     }; 
 
-    auto zoneDir = std::format("{}\\zone\\english\\", (char *)fs_basepath->current.integer);
+    auto zoneDir = std::format("{}\\zone\\english\\", fs_basepath->current.string);
 
 
     // just dump from common ff's

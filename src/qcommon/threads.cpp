@@ -731,15 +731,12 @@ void Sys_ClearClientMessage()
 }
 int Sys_SpawnServerThread(void(*function)(uint))
 {
-    int result; // r3
-
     wakeServerEvent = CreateEventA(0, 1, 0, 0);
     serverCompletedEvent = CreateEventA(0, 1, 0, 0);
     allowSendClientMessagesEvent = CreateEventA(0, 1, 0, 0);
     serverSnapshotEvent = CreateEventA(0, 0, 0, 0);
     clientMessageReceived = CreateEventA(0, 1, 1, 0);
     Sys_CreateThread(function, THREAD_CONTEXT_SERVER);
-    result = (int)threadHandle[THREAD_CONTEXT_SERVER];
 
     if (threadHandle[THREAD_CONTEXT_SERVER])
     {
@@ -748,7 +745,7 @@ int Sys_SpawnServerThread(void(*function)(uint))
         return 1;
     }
 
-    return result;
+    return 0;
 }
 void Sys_WaitClientMessageReceived()
 {
@@ -881,19 +878,16 @@ bool Sys_WaitForSaveHistoryDone()
 
 int Sys_SpawnServerDemoThread(void(*function)(uint))
 {
-    int result; // r3
-
     g_saveHistoryEvent = CreateEventA(0, 0, 0, 0);
     g_saveHistoryDoneEvent = CreateEventA(0, 0, 0, 0);
     Sys_CreateThread(function, THREAD_CONTEXT_SERVER_DEMO);
-    result = (int)threadHandle[THREAD_CONTEXT_SERVER_DEMO];
     if (threadHandle[THREAD_CONTEXT_SERVER_DEMO])
     {
         //XSetThreadProcessor(threadHandle[11], 2u);
         Sys_ResumeThread(THREAD_CONTEXT_SERVER_DEMO);
         return 1;
     }
-    return result;
+    return 0;
 }
 
 void Sys_SetSaveHistoryEvent()

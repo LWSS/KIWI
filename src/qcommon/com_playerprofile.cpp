@@ -72,7 +72,7 @@ int __cdecl Com_BuildPlayerProfilePath_Internal(
 bool __cdecl Com_HasPlayerProfile()
 {
     iassert( com_playerProfile );
-    return *(char *)com_playerProfile->current.integer != 0;
+    return com_playerProfile->current.string[0] != 0;
 }
 
 
@@ -166,7 +166,7 @@ char __cdecl Com_DeletePlayerProfile(const char *profileName)
     if (!Com_IsValidPlayerProfileDir(profileName))
         return 0;
     Com_BuildPlayerProfilePathForPlayer(profilePath, 64, profileName, "");
-    FS_BuildOSPath((char *)fs_basepath->current.integer, (char*)"players", profilePath, osPath);
+    FS_BuildOSPath(fs_basepath->current.string, "players", profilePath, osPath);
     if (!Sys_RemoveDirTree(osPath))
         return 0;
     if (!I_stricmp(profileName, com_playerProfile->current.string))
@@ -203,7 +203,7 @@ char __cdecl Com_NewPlayerProfile(const char *profileName)
     else
     {
         Com_BuildPlayerProfilePathForPlayer(profilePath, 64, profileName, "");
-        FS_BuildOSPath((char *)fs_basepath->current.integer, (char*)"players", profilePath, osPath);
+        FS_BuildOSPath(fs_basepath->current.string, "players", profilePath, osPath);
         if (FS_CreatePath(osPath))
         {
             Com_Printf(CON_CHANNEL_SYSTEM, "Unable to create new profile path: %s\n", osPath);
