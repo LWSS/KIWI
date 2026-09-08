@@ -36,8 +36,8 @@ RagdollBody ragdollBodies[32];
 
 void __cdecl TRACK_ragdoll()
 {
-    track_static_alloc_internal(ragdollDefs, 7584, "ragdollDefs", 10);
-    track_static_alloc_internal(ragdollBodies, 80512, "ragdollBodies", 10);
+    track_static_alloc_internal(ragdollDefs, sizeof(ragdollDefs), "ragdollDefs", 10);
+    track_static_alloc_internal(ragdollBodies, sizeof(ragdollBodies), "ragdollBodies", 10);
 }
 
 void __cdecl Ragdoll_DebugDraw()
@@ -990,8 +990,10 @@ void __cdecl Ragdoll_Init()
     if (!ragdollInited)
     {
         if (ragdoll_enable->current.enabled && ragdoll_max_simulating->current.integer < 8)
+        {
             Dvar_SetInt((dvar_s *)ragdoll_max_simulating, 8);
-        memset((uint8_t *)ragdollBodies, 0, 0x13A80u);
+        }
+        memset(ragdollBodies, 0, sizeof(ragdollBodies));
         for (i = 0; i < 2; ++i)
         {
             ragdollDefs[i].bound = 0;

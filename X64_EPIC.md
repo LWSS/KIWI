@@ -9,7 +9,7 @@ Coding conventions: C-style implementation, explicit `sizeof(Type)`, braces for 
 | 1 | groupvoice | Complete |
 | 2 | physics | Complete |
 | 3 | qcommon | Complete |
-| 4 | ragdoll | Pending |
+| 4 | ragdoll | Complete |
 | 5 | script | Pending |
 | 6 | server | Pending |
 | 7 | server_mp | Pending |
@@ -52,3 +52,11 @@ Audited all 54 source/header files. Native collision allocations and leaf-node s
 Corrected MSG_ReadInt64 to return and read all eight bytes, including overflow handling. Its independent upstream patch is exported outside the repository.
 
 Validation: 118 configured x86/x64 MP/SP diagnostic compilation checks passed. Production-code regression executables passed on both architectures for collision allocation canaries/native node strides, 64-bit message reads and truncation, Huffman symbol roundtrips, all 143 SP player-state fields, and HUD serialization. Huffman and SP message output was byte-identical across architectures. Reproduce with `scripts/x64_audit/test_qcommon.py` and `compile_part.py qcommon --configured`. Full game/network integration remains pending the later parts. The compiler runner now respects each mode's CMake file list.
+
+Part 3 checkpoint: `652ab0aa`.
+
+## Part 4: ragdoll
+
+Audited all five files, including definition parsing, native body/joint arrays, controller and state callback traversal, physics handoff, and quaternion routines. Initialization and allocation tracking now cover the complete native arrays. No raw archive implementation exists in this folder. Corrected the second bone endpoint's invalid-index check and the timeout diagnostic's swapped pointer/handle arguments; these are exported separately for upstream.
+
+Validation: all 16 x86/x64 MP/SP diagnostic compilation checks passed. Production-function regression executables passed on both architectures: complete array initialization from poisoned memory, 32-slot exhaustion, all 28 joint pairs and 14 body pointers through destruction callbacks, both orientation buffers, and rejection of an invalid second bone endpoint. Native Joint/Bone/StateEnt layouts were asserted. Reproduce with `scripts/x64_audit/test_ragdoll.py` and `compile_part.py ragdoll --configured`. Physics calls are boundary stubs in these tests; full animated simulation remains an integration check.

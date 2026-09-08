@@ -1580,8 +1580,10 @@ bool __cdecl Ragdoll_ExitDObjWait(RagdollBody *body, BodyState_t prevState, Body
             return 0;
         if (boneDef->animBoneNames[1])
         {
-			if (!DObjGetBoneIndex(obj, boneDef->animBoneNames[1], &bone->animBones[1]) || bone->animBones[0] == 255)
-				return 0;
+            if (!DObjGetBoneIndex(obj, boneDef->animBoneNames[1], &bone->animBones[1]) || bone->animBones[1] == 255)
+            {
+                return 0;
+            }
         }
         else
         {
@@ -1708,9 +1710,13 @@ void __cdecl Ragdoll_UpdateDObjWait(RagdollBody *body)
     else
     {
         if (body->obj)
-            Com_PrintWarning(CON_CHANNEL_PHYS, "Ragdoll activation timed out waiting for dobj 0x%x\n", body->dobj);
+        {
+            Com_PrintWarning(CON_CHANNEL_PHYS, "Ragdoll activation timed out waiting for dobj %p\n", (void *)body->obj);
+        }
         else
-            Com_PrintWarning(CON_CHANNEL_PHYS, "Ragdoll activation timed out waiting for dobj 0x%x\n", body->obj);
+        {
+            Com_PrintWarning(CON_CHANNEL_PHYS, "Ragdoll activation timed out waiting for dobj 0x%x\n", body->dobj);
+        }
         Ragdoll_BodyNewState(body, BodyState_t::BS_DEAD);
     }
 }
