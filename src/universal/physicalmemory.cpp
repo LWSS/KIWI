@@ -93,9 +93,11 @@ void __cdecl PMem_EndAllocInPrim(PhysicalMemoryPrim *prim, const char *name)
     iassert(prim->allocName == name);
     prim->allocName = 0;
     if (!prim->allocListCount)
+    {
         MyAssertHandler(".\\universal\\physicalmemory.cpp", 368, 0, "%s", "prim->allocListCount > 0");
-    v2 = prim->pos - *(&prim->pos + 2 * prim->allocListCount);
-    //track_physical_alloc((HIunsigned int(v2) ^ v2) - HIunsigned int(v2), name, 10);
+    }
+    v2 = (int64_t)prim->pos - prim->allocList[prim->allocListCount - 1].pos;
+    // track_physical_alloc((HIunsigned int(v2) ^ v2) - HIunsigned int(v2), name, 10);
 }
 
 void __cdecl PMem_Free(const char *name, uint allocType)
@@ -120,36 +122,40 @@ void __cdecl PMem_FreeInPrim(PhysicalMemoryPrim *prim, const char *name)
 
 void __cdecl PMem_FreeIndex(PhysicalMemoryPrim *prim, uint allocIndex)
 {
-    __int64 v2; // rax
-    const char *v3; // eax
-    __int64 v4; // rax
+    __int64 v2;                           // rax
+    const char *v3;                       // eax
+    __int64 v4;                           // rax
     PhysicalMemoryAllocation *allocEntry; // [esp+0h] [ebp-Ch]
-    const char *name; // [esp+4h] [ebp-8h]
+    const char *name;                     // [esp+4h] [ebp-8h]
 
     iassert(!prim->allocName);
     allocEntry = &prim->allocList[allocIndex];
     name = allocEntry->name;
     if (!allocEntry->name)
+    {
         MyAssertHandler(".\\universal\\physicalmemory.cpp", 400, 0, "%s", "name");
+    }
     allocEntry->name = 0;
     if (allocIndex == prim->allocListCount - 1)
     {
         v4 = prim->pos - prim->allocList[allocIndex].pos;
-        //track_physical_alloc(HIunsigned int(v4) - (HIunsigned int(v4) ^ v4), name, 10);
+        // track_physical_alloc(HIunsigned int(v4) - (HIunsigned int(v4) ^ v4), name, 10);
         do
         {
             prim->pos = allocEntry->pos;
             iassert(prim->allocListCount);
             if (!--prim->allocListCount)
+            {
                 break;
-            allocEntry = (PhysicalMemoryAllocation *)(&prim->allocListCount + 2 * prim->allocListCount);
+            }
+            allocEntry = &prim->allocList[prim->allocListCount - 1];
         } while (!allocEntry->name);
     }
     else
     {
         iassert(allocIndex + 1 < prim->allocListCount);
         v2 = prim->allocList[allocIndex + 1].pos - prim->allocList[allocIndex].pos;
-        //track_physical_alloc(HIunsigned int(v2) - (HIunsigned int(v2) ^ v2), name, 10);
+        // track_physical_alloc(HIunsigned int(v2) - (HIunsigned int(v2) ^ v2), name, 10);
         if (!alwaysfails)
         {
             v3 = va("freeing '%s' caused a memory hole\n", name);

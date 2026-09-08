@@ -563,32 +563,38 @@ int __cdecl FS_HandleForFile(FsThread thread)
 int __cdecl FS_FOpenTextFileWrite(const char *filename)
 {
     char ospath[260]; // [esp+0h] [ebp-110h] BYREF
-    FILE *f; // [esp+108h] [ebp-8h]
-    int h; // [esp+10Ch] [ebp-4h]
+    FILE *f;          // [esp+108h] [ebp-8h]
+    int h;            // [esp+10Ch] [ebp-4h]
 
     FS_CheckFileSystemStarted();
     h = FS_HandleForFile(FS_THREAD_MAIN);
     fsh[h].zipFile = 0;
-    FS_BuildOSPath((char *)fs_homepath->current.integer, fs_gamedir, filename, ospath);
+    FS_BuildOSPath((char *)fs_homepath->current.string, fs_gamedir, filename, ospath);
     if (fs_debug->current.integer)
+    {
         Com_Printf(CON_CHANNEL_FILES, "FS_FOpenFileWrite: %s\n", ospath);
+    }
     if (FS_CreatePath(ospath))
+    {
         return 0;
+    }
     f = FS_FileOpenWriteText(ospath);
     fsh[h].handleFiles.file.o = f;
     I_strncpyz(fsh[h].name, filename, 256);
     fsh[h].handleSync = 0;
     if (!fsh[h].handleFiles.file.o)
+    {
         return 0;
+    }
     return h;
 }
 
 int __cdecl FS_FOpenFileAppend(const char *filename)
 {
     bool IsMainThread; // al
-    char ospath[260]; // [esp+0h] [ebp-110h] BYREF
-    FILE *f; // [esp+108h] [ebp-8h]
-    int h; // [esp+10Ch] [ebp-4h]
+    char ospath[260];  // [esp+0h] [ebp-110h] BYREF
+    FILE *f;           // [esp+108h] [ebp-8h]
+    int h;             // [esp+10Ch] [ebp-4h]
 
     iassert(Sys_IsMainThread() || Sys_IsRenderThread());
     FS_CheckFileSystemStarted();
@@ -596,16 +602,22 @@ int __cdecl FS_FOpenFileAppend(const char *filename)
     h = FS_HandleForFile(IsMainThread ? FS_THREAD_MAIN : FS_THREAD_BACKEND);
     fsh[h].zipFile = 0;
     I_strncpyz(fsh[h].name, filename, 256);
-    FS_BuildOSPath((char *)fs_homepath->current.integer, fs_gamedir, filename, ospath);
+    FS_BuildOSPath((char *)fs_homepath->current.string, fs_gamedir, filename, ospath);
     if (fs_debug->current.integer)
+    {
         Com_Printf(CON_CHANNEL_FILES, "FS_FOpenFileAppend: %s\n", ospath);
+    }
     if (FS_CreatePath(ospath))
+    {
         return 0;
+    }
     f = FS_FileOpenAppendText(ospath);
     fsh[h].handleFiles.file.o = f;
     fsh[h].handleSync = 0;
     if (!fsh[h].handleFiles.file.o)
+    {
         return 0;
+    }
     return h;
 }
 
@@ -713,23 +725,23 @@ int __cdecl FS_FilenameCompare(const char *s1, const char *s2)
 
 uint __cdecl FS_FOpenFileReadForThread(const char *filename, int *file, FsThread thread)
 {
-    char *v4; // eax
-    const char *v5; // eax
-    const char *v6; // [esp-4h] [ebp-334h]
-    char copypath[256]; // [esp+0h] [ebp-330h] BYREF
-    char sanitizedName[256]; // [esp+100h] [ebp-230h] BYREF
-    fileInIwd_s *iwdFile; // [esp+200h] [ebp-130h]
-    directory_t *dir; // [esp+204h] [ebp-12Ch]
-    int hash; // [esp+208h] [ebp-128h]
-    unz_s *zfi; // [esp+20Ch] [ebp-124h]
-    const char *impureIwd; // [esp+210h] [ebp-120h]
-    iwd_t *iwd; // [esp+214h] [ebp-11Ch]
-    const char *extension; // [esp+218h] [ebp-118h]
+    char *v4;                         // eax
+    const char *v5;                   // eax
+    const char *v6;                   // [esp-4h] [ebp-334h]
+    char copypath[256];               // [esp+0h] [ebp-330h] BYREF
+    char sanitizedName[256];          // [esp+100h] [ebp-230h] BYREF
+    fileInIwd_s *iwdFile;             // [esp+200h] [ebp-130h]
+    directory_t *dir;                 // [esp+204h] [ebp-12Ch]
+    int hash;                         // [esp+208h] [ebp-128h]
+    unz_s *zfi;                       // [esp+20Ch] [ebp-124h]
+    const char *impureIwd;            // [esp+210h] [ebp-120h]
+    iwd_t *iwd;                       // [esp+214h] [ebp-11Ch]
+    const char *extension;            // [esp+218h] [ebp-118h]
     file_in_zip_read_info_s *ziptemp; // [esp+21Ch] [ebp-114h]
-    char netpath[256]; // [esp+220h] [ebp-110h] BYREF
-    bool wasSkipped; // [esp+327h] [ebp-9h]
-    searchpath_s *search; // [esp+328h] [ebp-8h]
-    FILE *filetemp; // [esp+32Ch] [ebp-4h]
+    char netpath[256];                // [esp+220h] [ebp-110h] BYREF
+    bool wasSkipped;                  // [esp+327h] [ebp-9h]
+    searchpath_s *search;             // [esp+328h] [ebp-8h]
+    FILE *filetemp;                   // [esp+32Ch] [ebp-4h]
 
     impureIwd = 0;
     wasSkipped = 0;
@@ -739,19 +751,25 @@ uint __cdecl FS_FOpenFileReadForThread(const char *filename, int *file, FsThread
     if (!FS_SanitizeFilename(filename, sanitizedName, 256))
     {
         if (file)
+        {
             *file = 0;
+        }
         return -1;
     }
     if (!file)
     {
-        for (search = fs_searchpaths; ; search = search->next)
+        for (search = fs_searchpaths;; search = search->next)
         {
             if (!search)
+            {
                 return -1;
+            }
             if (FS_UseSearchPath(search))
             {
                 if (search->iwd)
+                {
                     hash = FS_HashFileName(sanitizedName, search->iwd->hashSize);
+                }
                 if (search->iwd && search->iwd->hashTable[hash])
                 {
                     iwd = search->iwd;
@@ -760,7 +778,9 @@ uint __cdecl FS_FOpenFileReadForThread(const char *filename, int *file, FsThread
                     {
                         iwdFile = iwdFile->next;
                         if (!iwdFile)
+                        {
                             goto LABEL_9;
+                        }
                     }
                     return 1;
                 }
@@ -776,52 +796,61 @@ uint __cdecl FS_FOpenFileReadForThread(const char *filename, int *file, FsThread
                     }
                 }
             }
-        LABEL_9:
-            ;
+        LABEL_9:;
         }
     }
     *file = FS_HandleForFile(thread);
     if (!*file)
+    {
         return -1;
-    for (search = fs_searchpaths; ; search = search->next)
+    }
+    for (search = fs_searchpaths;; search = search->next)
     {
         if (!search)
         {
             if (fs_debug->current.integer && thread == FS_THREAD_MAIN)
+            {
                 Com_Printf(CON_CHANNEL_FILES, "Can't find %s\n", filename);
+            }
             *file = 0;
             if (impureIwd)
             {
                 v6 = impureIwd;
-                v4 = SEH_SafeTranslateString((char*)"EXE_UNPURECLIENTDETECTED");
+                v4 = SEH_SafeTranslateString((char *)"EXE_UNPURECLIENTDETECTED");
                 v5 = va("%s %s", v4, v6);
                 Com_Error(ERR_DROP, v5);
             }
             if (!wasSkipped)
+            {
                 return -1;
+            }
             if (fs_numServerIwds || fs_restrict->current.enabled)
+            {
                 Com_Printf(CON_CHANNEL_FILES, "Error: %s must be in an IWD\n", filename);
+            }
             else
+            {
                 Com_Printf(CON_CHANNEL_FILES, "Error: %s must be in an IWD or not in the main directory\n", filename);
+            }
             return -2;
         }
         if (FS_UseSearchPath(search))
+        {
             break;
-    LABEL_29:
-        ;
+        }
+    LABEL_29:;
     }
     iwd = search->iwd;
     if (iwd)
+    {
         hash = FS_HashFileName(sanitizedName, iwd->hashSize);
+    }
     if (!iwd || !iwd->hashTable[hash])
     {
         if (search->dir)
         {
             extension = Com_GetExtensionSubString(sanitizedName);
-            if (!search->ignore && !fs_restrict->current.enabled && !fs_numServerIwds
-                || search->bLocalized
-                || search->ignorePureCheck
-                || FS_PureIgnoresExtension(extension))
+            if (!search->ignore && !fs_restrict->current.enabled && !fs_numServerIwds || search->bLocalized || search->ignorePureCheck || FS_PureIgnoresExtension(extension))
             {
                 dir = search->dir;
                 FS_BuildOSPathForThread(dir->path, dir->gamedir, sanitizedName, netpath, thread);
@@ -829,14 +858,18 @@ uint __cdecl FS_FOpenFileReadForThread(const char *filename, int *file, FsThread
                 if (fsh[*file].handleFiles.file.o)
                 {
                     if (!search->bLocalized && !search->ignorePureCheck && !FS_PureIgnoresExtension(extension))
+                    {
                         fs_fakeChkSum = rand() + 1;
+                    }
                     I_strncpyz(fsh[*file].name, sanitizedName, 256);
                     fsh[*file].zipFile = 0;
                     if (fs_debug->current.integer && thread == FS_THREAD_MAIN)
+                    {
                         Com_Printf(CON_CHANNEL_FILES, "FS_FOpenFileRead: %s (found in '%s/%s')\n", sanitizedName, dir->path, dir->gamedir);
+                    }
                     if (fs_copyfiles->current.enabled && !I_stricmp(dir->path, fs_cdpath->current.string))
                     {
-                        FS_BuildOSPathForThread((char*)fs_basepath->current.integer, dir->gamedir, sanitizedName, copypath, thread);
+                        FS_BuildOSPathForThread((char *)fs_basepath->current.string, dir->gamedir, sanitizedName, copypath, thread);
                         FS_CopyFile(netpath, copypath);
                     }
                     return FS_filelength(*file);
@@ -861,7 +894,9 @@ uint __cdecl FS_FOpenFileReadForThread(const char *filename, int *file, FsThread
     {
         iwdFile = iwdFile->next;
         if (!iwdFile)
+        {
             goto LABEL_29;
+        }
     }
     if (!search->bLocalized && !search->ignorePureCheck && !FS_IwdIsPure(iwd))
     {
@@ -869,7 +904,9 @@ uint __cdecl FS_FOpenFileReadForThread(const char *filename, int *file, FsThread
         goto LABEL_29;
     }
     if (!iwd->referenced && !FS_FilesAreLoadedGlobally(sanitizedName))
+    {
         iwd->referenced = 1;
+    }
     if (InterlockedCompareExchange(&iwd->hasOpenFile, 1, 0) == 1)
     {
         fsh[*file].handleFiles.iwdIsClone = 1;
@@ -902,7 +939,9 @@ uint __cdecl FS_FOpenFileReadForThread(const char *filename, int *file, FsThread
     unzOpenCurrentFile(fsh[*file].handleFiles.file.z);
     fsh[*file].zipFilePos = iwdFile->pos;
     if (fs_debug->current.integer && thread == FS_THREAD_MAIN)
+    {
         Com_Printf(CON_CHANNEL_FILES, "FS_FOpenFileRead: %s (found in '%s')\n", sanitizedName, iwd->iwdFilename);
+    }
     return zfi->cur_file_info.uncompressed_size;
 }
 
@@ -924,8 +963,10 @@ bool __cdecl FS_Delete(const char *filename)
     FS_CheckFileSystemStarted();
     iassert(filename);
     if (!*filename)
+    {
         return 0;
-    FS_BuildOSPath((char *)fs_homepath->current.integer, fs_gamedir, filename, ospath);
+    }
+    FS_BuildOSPath((char *)fs_homepath->current.string, fs_gamedir, filename, ospath);
     return remove(ospath) != -1;
 }
 
@@ -1011,6 +1052,8 @@ void FS_Printf(int h, const char *fmt, ...)
 
     va_start(va, fmt);
     _vsnprintf(string, 0x1000u, fmt, va);
+    va_end(va);
+    string[(0x1000u) - 1] = 0;
     FS_Write(string, &string[strlen(string) + 1] - &string[1], h);
 }
 
@@ -1146,13 +1189,15 @@ void __cdecl FS_FreeMem(char *buffer)
 
 int __cdecl FS_FileExists(char *file)
 {
-    FILE *f; // [esp+0h] [ebp-10Ch]
+    FILE *f;            // [esp+0h] [ebp-10Ch]
     char testpath[260]; // [esp+4h] [ebp-108h] BYREF
 
-    FS_BuildOSPath((char *)fs_homepath->current.integer, fs_gamedir, file, testpath);
+    FS_BuildOSPath((char *)fs_homepath->current.string, fs_gamedir, file, testpath);
     f = FS_FileOpenReadBinary(testpath);
     if (!f)
+    {
         return 0;
+    }
     FS_FileClose(f);
     return 1;
 }
@@ -1199,32 +1244,23 @@ void __cdecl FS_ConvertPath(char *s)
 
 bool __cdecl FS_GameDirDomainFunc(dvar_s *dvar, DvarValue newValue)
 {
-    bool result; // al
-    int v3; // eax
-    int v4; // eax
-
     iassert(dvar);
-    if (!*(_BYTE *)newValue.integer)
-        return 1;
-    if (I_strnicmp(newValue.string, "mods", 4))
-        return 0;
-    if (strlen(newValue.string) < 6 || *(_BYTE *)(newValue.integer + 4) != 47 && *(_BYTE *)(newValue.integer + 4) != 92)
-        return 0;
-    v3 = (int)strstr((char*)newValue.integer, "..");
-    result = 0;
-    if (!v3)
+    const char *name = newValue.string;
+    if (!name || !*name)
     {
-        v4 = (int)strstr((char*)newValue.integer, "::");
-        if (!v4)
-            return 1;
+        return true;
     }
-    return result;
+    if (I_strnicmp(name, "mods", 4) || strlen(name) < 6 || (name[4] != '/' && name[4] != '\\'))
+    {
+        return false;
+    }
+    return !strstr(name, "..") && !strstr(name, "::");
 }
 
 void FS_RegisterDvars()
 {
-    char *v1; // eax
-    char *v2; // eax
+    char *v1;       // eax
+    char *v2;       // eax
     char *homePath; // [esp+0h] [ebp-4h]
 
     fs_debug = Dvar_RegisterInt("fs_debug", 0, (DvarLimits)0x200000000LL, DVAR_NOFLAG, "Enable file system debugging information");
@@ -1242,39 +1278,45 @@ void FS_RegisterDvars()
     // ERROR (on request) — a visible message box beats an editor full of missing assets.
     {
         static char s_fsBase[MAX_PATH];
-        int   foundBase = 0;
-        char  exeDir[MAX_PATH];
-        if ( GetModuleFileNameA( NULL, exeDir, sizeof( exeDir ) ) )
+        int foundBase = 0;
+        char exeDir[MAX_PATH];
+        if (GetModuleFileNameA(NULL, exeDir, sizeof(exeDir)))
         {
-            char *slash = strrchr( exeDir, '\\' );
-            if ( slash ) *slash = 0;                       // strip the exe name -> its directory
-            I_strncpyz( s_fsBase, exeDir, sizeof( s_fsBase ) );   // remember the exe directory
-            for ( int up = 0; up < 6 && !foundBase; ++up )
+            char *slash = strrchr(exeDir, '\\');
+            if (slash)
+            {
+                *slash = 0; // strip the exe name -> its directory
+            }
+            I_strncpyz(s_fsBase, exeDir, sizeof(s_fsBase)); // remember the exe directory
+            for (int up = 0; up < 6 && !foundBase; ++up)
             {
                 char probe[MAX_PATH];
-                Com_sprintf( probe, sizeof( probe ), "%s\\raw", exeDir );
-                if ( GetFileAttributesA( probe ) != INVALID_FILE_ATTRIBUTES )
+                Com_sprintf(probe, sizeof(probe), "%s\\raw", exeDir);
+                if (GetFileAttributesA(probe) != INVALID_FILE_ATTRIBUTES)
                 {
-                    I_strncpyz( s_fsBase, exeDir, sizeof( s_fsBase ) );
+                    I_strncpyz(s_fsBase, exeDir, sizeof(s_fsBase));
                     foundBase = 1;
                 }
                 else
                 {
-                    char *u = strrchr( exeDir, '\\' );     // climb one directory level
-                    if ( !u ) break;
+                    char *u = strrchr(exeDir, '\\'); // climb one directory level
+                    if (!u)
+                    {
+                        break;
+                    }
                     *u = 0;
                 }
             }
         }
-        if ( !foundBase )
+        if (!foundBase)
         {
             char msg[MAX_PATH + 128];
-            Com_sprintf( msg, sizeof( msg ),
-                         "No raw\\ folder found beside the exe (or up to 6 levels above it).\n\n"
-                         "Game data must sit next to the exe:\n%s\\raw\\",
-                         s_fsBase[0] ? s_fsBase : "<exe directory>" );
-            MessageBoxA( NULL, msg, "KIWI-Radiant - missing game data", MB_OK | MB_ICONERROR );
-            Com_Error( ERR_FATAL, "%s", msg );
+            Com_sprintf(msg, sizeof(msg),
+                        "No raw\\ folder found beside the exe (or up to 6 levels above it).\n\n"
+                        "Game data must sit next to the exe:\n%s\\raw\\",
+                        s_fsBase[0] ? s_fsBase : "<exe directory>");
+            MessageBoxA(NULL, msg, "KIWI-Radiant - missing game data", MB_OK | MB_ICONERROR);
+            Com_Error(ERR_FATAL, "%s", msg);
         }
         v2 = s_fsBase;
     }
@@ -1288,9 +1330,11 @@ void FS_RegisterDvars()
         "Game data directory. Must be \"\" or a sub directory of 'mods/'.");
     Dvar_SetDomainFunc((dvar_s *)fs_gameDirVar, FS_GameDirDomainFunc);
     fs_ignoreLocalized = Dvar_RegisterBool("fs_ignoreLocalized", 0, DVAR_LATCH | DVAR_CHEAT, "Ignore localized files");
-    homePath = (char *)RETURN_ZERO32();
+    homePath = 0;
     if (!homePath || !*homePath)
-        homePath = (char *)fs_basepath->reset.integer;
+    {
+        homePath = (char *)fs_basepath->reset.string;
+    }
     fs_homepath = Dvar_RegisterString("fs_homepath", homePath, DVAR_INIT | DVAR_AUTOEXEC, "Game home path");
     fs_restrict = Dvar_RegisterBool("fs_restrict", 0, DVAR_INIT, "Restrict file access for demos etc.");
 }
@@ -1471,22 +1515,22 @@ int __cdecl iwdsort(const char **a, char **b)
 
 void __cdecl FS_AddIwdFilesForGameDirectory(char *path, char *pszGameFolder)
 {
-    char *v2; // eax
+    char *v2;                 // eax
     const char *LanguageName; // eax
-    char v4; // [esp+3h] [ebp-1149h]
-    char *iwdGamename; // [esp+8h] [ebp-1144h]
-    char *v6; // [esp+Ch] [ebp-1140h]
-    signed int j; // [esp+20h] [ebp-112Ch]
-    char ospath[260]; // [esp+24h] [ebp-1128h] BYREF
-    iwd_t *ZipFile; // [esp+12Ch] [ebp-1020h]
-    int v10; // [esp+130h] [ebp-101Ch]
-    char **list; // [esp+134h] [ebp-1018h]
-    char *pszLanguageName; // [esp+138h] [ebp-1014h]
-    searchpath_s *search; // [esp+13Ch] [ebp-1010h]
-    int i; // [esp+140h] [ebp-100Ch]
-    int piLanguageIndex; // [esp+144h] [ebp-1008h] BYREF
-    int numfiles; // [esp+148h] [ebp-1004h] BYREF
-    char *s0[1024]; // [esp+14Ch] [ebp-1000h] BYREF
+    char v4;                  // [esp+3h] [ebp-1149h]
+    char *iwdGamename;        // [esp+8h] [ebp-1144h]
+    char *v6;                 // [esp+Ch] [ebp-1140h]
+    signed int j;             // [esp+20h] [ebp-112Ch]
+    char ospath[260];         // [esp+24h] [ebp-1128h] BYREF
+    iwd_t *ZipFile;           // [esp+12Ch] [ebp-1020h]
+    int v10;                  // [esp+130h] [ebp-101Ch]
+    char **list;              // [esp+134h] [ebp-1018h]
+    char *pszLanguageName;    // [esp+138h] [ebp-1014h]
+    searchpath_s *search;     // [esp+13Ch] [ebp-1010h]
+    int i;                    // [esp+140h] [ebp-100Ch]
+    int piLanguageIndex;      // [esp+144h] [ebp-1008h] BYREF
+    int numfiles;             // [esp+148h] [ebp-1004h] BYREF
+    char *s0[1024];           // [esp+14Ch] [ebp-1000h] BYREF
 
     FS_BuildOSPath(path, pszGameFolder, (char *)"", ospath);
     ospath[&ospath[strlen(ospath) + 1] - &ospath[1] - 1] = 0;
@@ -1509,11 +1553,11 @@ void __cdecl FS_AddIwdFilesForGameDirectory(char *path, char *pszGameFolder)
         {
             v2 = s0[i];
             *(_DWORD *)v2 = *(_DWORD *)"          ";
-            *((_DWORD *)v2 + 1) = 538976288;    
+            *((_DWORD *)v2 + 1) = 538976288;
             *((_WORD *)v2 + 4) = 8224;
         }
     }
-    qsort(s0, numfiles, 4u, (int(__cdecl *)(const void *, const void *))iwdsort);
+    qsort(s0, numfiles, sizeof(char *), (int(__cdecl *)(const void *, const void *))iwdsort);
     for (i = 0; i < numfiles; ++i)
     {
         if (I_strncmp(s0[i], "          ", 10))
@@ -1584,17 +1628,18 @@ void __cdecl FS_AddIwdFilesForGameDirectory(char *path, char *pszGameFolder)
 int __cdecl Sys_DirectoryHasContents(const char *directory)
 {
     _finddata64i32_t findinfo; // [esp+0h] [ebp-238h] BYREF
-    int findhandle; // [esp+12Ch] [ebp-10Ch]
-    char search[260]; // [esp+130h] [ebp-108h] BYREF
+    intptr_t findhandle;       // [esp+12Ch] [ebp-10Ch]
+    char search[260];          // [esp+130h] [ebp-108h] BYREF
 
     Com_sprintf(search, 0x100u, "%s\\*", directory);
     findhandle = _findfirst64i32(search, &findinfo);
     if (findhandle == -1)
+    {
         return 0;
+    }
     do
     {
-        if ((findinfo.attrib & 0x10) == 0
-            || I_stricmp(findinfo.name, ".") && I_stricmp(findinfo.name, "..") && I_stricmp(findinfo.name, "CVS"))
+        if ((findinfo.attrib & 0x10) == 0 || I_stricmp(findinfo.name, ".") && I_stricmp(findinfo.name, "..") && I_stricmp(findinfo.name, "CVS"))
         {
             _findclose(findhandle);
             return 1;
@@ -1840,7 +1885,7 @@ void __cdecl FS_SortFileList(const char **filelist, int numfiles)
     int i; // [esp+10h] [ebp-8h]
     const char **sortedlist; // [esp+14h] [ebp-4h]
 
-    sortedlist = (const char **)Z_Malloc(sizeof(*sortedlist) * (numfiles + 1), "FS_SortFileList", 3);
+    sortedlist = (const char **)Z_Malloc(sizeof(const char *) * (numfiles + 1), "FS_SortFileList", 3);
     sortedlist[0] = 0;
     numsortedfiles = 0;
     for (i = 0; i < numfiles; ++i)
@@ -1852,7 +1897,7 @@ void __cdecl FS_SortFileList(const char **filelist, int numfiles)
         sortedlist[j] = filelist[i];
         ++numsortedfiles;
     }
-    Com_Memcpy(filelist, sortedlist, sizeof(*sortedlist) * numfiles);
+    Com_Memcpy(filelist, sortedlist, sizeof(const char *) * numfiles);
     Z_Free(sortedlist, 3);
 }
 
@@ -1931,67 +1976,75 @@ void __cdecl FS_Startup(char *gameName)
 
     Com_Printf(CON_CHANNEL_FILES, "----- FS_Startup -----\n");
     FS_RegisterDvars();
-    if (*(_BYTE *)fs_basepath->current.integer)
+    if (*(_BYTE *)fs_basepath->current.string)
     {
-        FS_AddLocalizedGameDirectory((char *)fs_basepath->current.integer, (char*)"devraw_shared");
-        FS_AddLocalizedGameDirectory((char *)fs_basepath->current.integer, (char*)"devraw");
-        FS_AddLocalizedGameDirectory((char *)fs_basepath->current.integer, (char*)"raw_shared");
-        FS_AddLocalizedGameDirectory((char *)fs_basepath->current.integer, (char*)"raw");
-        FS_AddLocalizedGameDirectory((char *)fs_basepath->current.integer, (char*)"players");
+        FS_AddLocalizedGameDirectory((char *)fs_basepath->current.string, (char *)"devraw_shared");
+        FS_AddLocalizedGameDirectory((char *)fs_basepath->current.string, (char *)"devraw");
+        FS_AddLocalizedGameDirectory((char *)fs_basepath->current.string, (char *)"raw_shared");
+        FS_AddLocalizedGameDirectory((char *)fs_basepath->current.string, (char *)"raw");
+        FS_AddLocalizedGameDirectory((char *)fs_basepath->current.string, (char *)"players");
     }
-    if (*(_BYTE *)fs_homepath->current.integer && I_stricmp(fs_basepath->current.string, fs_homepath->current.string))
+    if (*(_BYTE *)fs_homepath->current.string && I_stricmp(fs_basepath->current.string, fs_homepath->current.string))
     {
-        FS_AddLocalizedGameDirectory((char *)fs_homepath->current.integer, (char*)"devraw_shared");
-        FS_AddLocalizedGameDirectory((char *)fs_homepath->current.integer, (char*)"devraw");
-        FS_AddLocalizedGameDirectory((char *)fs_homepath->current.integer, (char*)"raw_shared");
-        FS_AddLocalizedGameDirectory((char *)fs_homepath->current.integer, (char*)"raw");
+        FS_AddLocalizedGameDirectory((char *)fs_homepath->current.string, (char *)"devraw_shared");
+        FS_AddLocalizedGameDirectory((char *)fs_homepath->current.string, (char *)"devraw");
+        FS_AddLocalizedGameDirectory((char *)fs_homepath->current.string, (char *)"raw_shared");
+        FS_AddLocalizedGameDirectory((char *)fs_homepath->current.string, (char *)"raw");
     }
-    if (*(_BYTE *)fs_cdpath->current.integer && I_stricmp(fs_basepath->current.string, fs_cdpath->current.string))
+    if (*(_BYTE *)fs_cdpath->current.string && I_stricmp(fs_basepath->current.string, fs_cdpath->current.string))
     {
-        FS_AddLocalizedGameDirectory((char *)fs_cdpath->current.integer, (char*)"devraw_shared");
-        FS_AddLocalizedGameDirectory((char *)fs_cdpath->current.integer, (char*)"devraw");
-        FS_AddLocalizedGameDirectory((char *)fs_cdpath->current.integer, (char*)"raw_shared");
-        FS_AddLocalizedGameDirectory((char *)fs_cdpath->current.integer, (char*)"raw");
-        FS_AddLocalizedGameDirectory((char *)fs_cdpath->current.integer, gameName);
+        FS_AddLocalizedGameDirectory((char *)fs_cdpath->current.string, (char *)"devraw_shared");
+        FS_AddLocalizedGameDirectory((char *)fs_cdpath->current.string, (char *)"devraw");
+        FS_AddLocalizedGameDirectory((char *)fs_cdpath->current.string, (char *)"raw_shared");
+        FS_AddLocalizedGameDirectory((char *)fs_cdpath->current.string, (char *)"raw");
+        FS_AddLocalizedGameDirectory((char *)fs_cdpath->current.string, gameName);
     }
-    if (*(_BYTE *)fs_basepath->current.integer)
+    if (*(_BYTE *)fs_basepath->current.string)
     {
         v2 = va("%s_shared", gameName);
-        FS_AddLocalizedGameDirectory((char *)fs_basepath->current.integer, v2);
-        FS_AddLocalizedGameDirectory((char *)fs_basepath->current.integer, gameName);
+        FS_AddLocalizedGameDirectory((char *)fs_basepath->current.string, v2);
+        FS_AddLocalizedGameDirectory((char *)fs_basepath->current.string, gameName);
     }
-    if (*(_BYTE *)fs_basepath->current.integer && I_stricmp(fs_homepath->current.string, fs_basepath->current.string))
+    if (*(_BYTE *)fs_basepath->current.string && I_stricmp(fs_homepath->current.string, fs_basepath->current.string))
     {
         v3 = va("%s_shared", gameName);
-        FS_AddLocalizedGameDirectory((char *)fs_basepath->current.integer, v3);
-        FS_AddLocalizedGameDirectory((char *)fs_homepath->current.integer, gameName);
+        FS_AddLocalizedGameDirectory((char *)fs_basepath->current.string, v3);
+        FS_AddLocalizedGameDirectory((char *)fs_homepath->current.string, gameName);
     }
-    if (*(_BYTE *)fs_basegame->current.integer
-        && !I_stricmp(gameName, "main")
-        && I_stricmp(fs_basegame->current.string, gameName))
+    if (*(_BYTE *)fs_basegame->current.string && !I_stricmp(gameName, "main") && I_stricmp(fs_basegame->current.string, gameName))
     {
-        if (*(_BYTE *)fs_cdpath->current.integer)
-            FS_AddLocalizedGameDirectory((char *)fs_cdpath->current.integer, (char *)fs_basegame->current.integer);
-        if (*(_BYTE *)fs_basepath->current.integer)
-            FS_AddLocalizedGameDirectory((char *)fs_basepath->current.integer, (char *)fs_basegame->current.integer);
-        if (*(_BYTE *)fs_homepath->current.integer && I_stricmp(fs_homepath->current.string, fs_basepath->current.string))
-            FS_AddLocalizedGameDirectory((char *)fs_homepath->current.integer, (char *)fs_basegame->current.integer);
+        if (*(_BYTE *)fs_cdpath->current.string)
+        {
+            FS_AddLocalizedGameDirectory((char *)fs_cdpath->current.string, (char *)fs_basegame->current.string);
+        }
+        if (*(_BYTE *)fs_basepath->current.string)
+        {
+            FS_AddLocalizedGameDirectory((char *)fs_basepath->current.string, (char *)fs_basegame->current.string);
+        }
+        if (*(_BYTE *)fs_homepath->current.string && I_stricmp(fs_homepath->current.string, fs_basepath->current.string))
+        {
+            FS_AddLocalizedGameDirectory((char *)fs_homepath->current.string, (char *)fs_basegame->current.string);
+        }
     }
-    if (*(_BYTE *)fs_gameDirVar->current.integer
-        && !I_stricmp(gameName, "main")
-        && I_stricmp(fs_gameDirVar->current.string, gameName))
+    if (*(_BYTE *)fs_gameDirVar->current.string && !I_stricmp(gameName, "main") && I_stricmp(fs_gameDirVar->current.string, gameName))
     {
-        if (*(_BYTE *)fs_cdpath->current.integer)
-            FS_AddLocalizedGameDirectory((char *)fs_cdpath->current.integer, (char *)fs_gameDirVar->current.integer);
-        if (*(_BYTE *)fs_basepath->current.integer)
-            FS_AddLocalizedGameDirectory((char *)fs_basepath->current.integer, (char *)fs_gameDirVar->current.integer);
-        if (*(_BYTE *)fs_homepath->current.integer && I_stricmp(fs_homepath->current.string, fs_basepath->current.string))
-            FS_AddLocalizedGameDirectory((char *)fs_homepath->current.integer, (char *)fs_gameDirVar->current.integer);
+        if (*(_BYTE *)fs_cdpath->current.string)
+        {
+            FS_AddLocalizedGameDirectory((char *)fs_cdpath->current.string, (char *)fs_gameDirVar->current.string);
+        }
+        if (*(_BYTE *)fs_basepath->current.string)
+        {
+            FS_AddLocalizedGameDirectory((char *)fs_basepath->current.string, (char *)fs_gameDirVar->current.string);
+        }
+        if (*(_BYTE *)fs_homepath->current.string && I_stricmp(fs_homepath->current.string, fs_basepath->current.string))
+        {
+            FS_AddLocalizedGameDirectory((char *)fs_homepath->current.string, (char *)fs_gameDirVar->current.string);
+        }
     }
     Com_ReadCDKey();
     FS_AddCommands();
     FS_Path_f();
-    Dvar_ClearModified((dvar_s*)fs_gameDirVar);
+    Dvar_ClearModified((dvar_s *)fs_gameDirVar);
     Com_Printf(CON_CHANNEL_FILES, "----------------------\n");
     Com_Printf(CON_CHANNEL_FILES, "%d files in iwd files\n", fs_iwdFileCount);
 }
@@ -2031,17 +2084,19 @@ void __cdecl FS_InitFilesystem()
     Com_StartupVariable("fs_restrict");
     Com_StartupVariable("loc_language");
     SEH_InitLanguage();
-    FS_Startup((char*)"main");
+    FS_Startup((char *)"main");
     SEH_Init_StringEd();
     SEH_UpdateLanguageInfo();
     FS_SetRestrictions();
     if (!FS_IsBasePathValid())
+    {
         Com_Error(
             ERR_FATAL,
             "Couldn't load %s.  Make sure Call of Duty is run from the correct folder.",
             "fileSysCheck.cfg");
-    I_strncpyz(lastValidBase, (char *)fs_basepath->current.integer, 256);
-    I_strncpyz(lastValidGame, (char *)fs_gameDirVar->current.integer, 256);
+    }
+    I_strncpyz(lastValidBase, (char *)fs_basepath->current.string, 256);
+    I_strncpyz(lastValidGame, (char *)fs_gameDirVar->current.string, 256);
 }
 
 uint __cdecl FS_FOpenFileByMode(char *qpath, int *f, fsMode_t mode)
@@ -2339,32 +2394,32 @@ const char **__cdecl FS_ListFilteredFiles(
     FsListBehavior_e behavior,
     int *numfiles)
 {
-    char v7; // [esp+13h] [ebp-3E1h]
-    char *v8; // [esp+18h] [ebp-3DCh]
-    char *v9; // [esp+1Ch] [ebp-3D8h]
-    char *v10; // [esp+5Ch] [ebp-398h]
-    char netpath[256]; // [esp+64h] [ebp-390h] BYREF
-    int numSysFiles; // [esp+164h] [ebp-290h] BYREF
-    char **sysFiles; // [esp+168h] [ebp-28Ch]
-    char szTrimmedName[68]; // [esp+16Ch] [ebp-288h] BYREF
-    int depth; // [esp+1B0h] [ebp-244h] BYREF
-    char *name; // [esp+1B4h] [ebp-240h]
-    int zpathLen; // [esp+1B8h] [ebp-23Ch]
-    int pathDepth; // [esp+1BCh] [ebp-238h] BYREF
-    iwd_t *iwd; // [esp+1C0h] [ebp-234h]
-    char zpath[259]; // [esp+1C4h] [ebp-230h] BYREF
-    bool isDirSearch; // [esp+2C7h] [ebp-12Dh]
-    const char **list; // [esp+2C8h] [ebp-12Ch]
-    int extensionLength; // [esp+2CCh] [ebp-128h]
-    int nfiles; // [esp+2D0h] [ebp-124h]
-    int pathLength; // [esp+2D4h] [ebp-120h]
+    char v7;                  // [esp+13h] [ebp-3E1h]
+    char *v8;                 // [esp+18h] [ebp-3DCh]
+    char *v9;                 // [esp+1Ch] [ebp-3D8h]
+    char *v10;                // [esp+5Ch] [ebp-398h]
+    char netpath[256];        // [esp+64h] [ebp-390h] BYREF
+    int numSysFiles;          // [esp+164h] [ebp-290h] BYREF
+    char **sysFiles;          // [esp+168h] [ebp-28Ch]
+    char szTrimmedName[68];   // [esp+16Ch] [ebp-288h] BYREF
+    int depth;                // [esp+1B0h] [ebp-244h] BYREF
+    char *name;               // [esp+1B4h] [ebp-240h]
+    int zpathLen;             // [esp+1B8h] [ebp-23Ch]
+    int pathDepth;            // [esp+1BCh] [ebp-238h] BYREF
+    iwd_t *iwd;               // [esp+1C0h] [ebp-234h]
+    char zpath[259];          // [esp+1C4h] [ebp-230h] BYREF
+    bool isDirSearch;         // [esp+2C7h] [ebp-12Dh]
+    const char **list;        // [esp+2C8h] [ebp-12Ch]
+    int extensionLength;      // [esp+2CCh] [ebp-128h]
+    int nfiles;               // [esp+2D0h] [ebp-124h]
+    int pathLength;           // [esp+2D4h] [ebp-120h]
     fileInIwd_s *buildBuffer; // [esp+2D8h] [ebp-11Ch]
-    HunkUser *user; // [esp+2DCh] [ebp-118h]
-    int temp; // [esp+2E0h] [ebp-114h]
-    char sanitizedPath[256]; // [esp+2E4h] [ebp-110h] BYREF
-    searchpath_s *search; // [esp+3E8h] [ebp-Ch]
-    int i; // [esp+3ECh] [ebp-8h]
-    int length; // [esp+3F0h] [ebp-4h]
+    HunkUser *user;           // [esp+2DCh] [ebp-118h]
+    int temp;                 // [esp+2E0h] [ebp-114h]
+    char sanitizedPath[256];  // [esp+2E4h] [ebp-110h] BYREF
+    searchpath_s *search;     // [esp+3E8h] [ebp-Ch]
+    int i;                    // [esp+3ECh] [ebp-8h]
+    int length;               // [esp+3F0h] [ebp-4h]
 
     FS_CheckFileSystemStarted();
     if (!path)
@@ -2373,7 +2428,9 @@ const char **__cdecl FS_ListFilteredFiles(
         return 0;
     }
     if (!extension)
+    {
         extension = "";
+    }
     if (!FS_SanitizeFilename(path, sanitizedPath, 256))
     {
         *numfiles = 0;
@@ -2383,14 +2440,18 @@ const char **__cdecl FS_ListFilteredFiles(
     v10 = &sanitizedPath[strlen(sanitizedPath) + 1];
     pathLength = v10 - &sanitizedPath[1];
     if (v10 != &sanitizedPath[1] && (sanitizedPath[pathLength - 1] == 92 || sanitizedPath[pathLength - 1] == 47))
+    {
         --pathLength;
+    }
     extensionLength = strlen(extension);
     nfiles = 0;
     FS_ReturnPath(sanitizedPath, zpath, &pathDepth);
     if (sanitizedPath[0])
+    {
         ++pathDepth;
+    }
     user = Hunk_UserCreate(0x20000, "FS_ListFilteredFiles", 0, 0, 3);
-    list = (const char **)Hunk_UserAlloc(user, 0x8004u, 4);
+    list = (const char **)Hunk_UserAlloc(user, 8193 * sizeof(const char *), alignof(const char *));
     *list++ = (const char *)user;
     for (search = searchPath; search; search = search->next)
     {
@@ -2408,23 +2469,20 @@ const char **__cdecl FS_ListFilteredFiles(
                         if (filter)
                         {
                             if (Com_FilterPath(filter, name, 0))
+                            {
                                 nfiles = FS_AddFileToList(user, name, list, nfiles);
+                            }
                             continue;
                         }
                         zpathLen = FS_ReturnPath(name, zpath, &depth);
-                        if (depth == pathDepth
-                            && pathLength <= zpathLen
-                            && (pathLength <= 0 || name[pathLength] == 47)
-                            && !I_strnicmp(name, sanitizedPath, pathLength))
+                        if (depth == pathDepth && pathLength <= zpathLen && (pathLength <= 0 || name[pathLength] == 47) && !I_strnicmp(name, sanitizedPath, pathLength))
                         {
                             if (!isDirSearch)
                             {
                                 if (extensionLength)
                                 {
                                     length = strlen(name);
-                                    if (length <= extensionLength
-                                        || name[length - extensionLength - 1] != 46
-                                        || I_stricmp(&name[length - extensionLength], extension))
+                                    if (length <= extensionLength || name[length - extensionLength - 1] != 46 || I_stricmp(&name[length - extensionLength], extension))
                                     {
                                         continue;
                                     }
@@ -2432,7 +2490,9 @@ const char **__cdecl FS_ListFilteredFiles(
                             LABEL_44:
                                 temp = pathLength;
                                 if (pathLength)
+                                {
                                     ++temp;
+                                }
                                 if (isDirSearch)
                                 {
                                     v9 = &name[temp];
@@ -2452,16 +2512,22 @@ const char **__cdecl FS_ListFilteredFiles(
                                 continue;
                             }
                             if (extensionLength != 1)
+                            {
                                 MyAssertHandler(".\\universal\\com_files.cpp", 3314, 1, "%s", "extensionLength == 1");
+                            }
                             if (*extension != 47 || extension[1])
+                            {
                                 MyAssertHandler(
                                     ".\\universal\\com_files.cpp",
                                     3315,
                                     1,
                                     "%s",
                                     "extension[0] == '/' && extension[1] == '\\0'");
+                            }
                             if (name[strlen(name) - 1] == 47)
+                            {
                                 goto LABEL_44;
+                            }
                         }
                     }
                 }
@@ -2471,7 +2537,9 @@ const char **__cdecl FS_ListFilteredFiles(
                 FS_BuildOSPath(search->dir->path, search->dir->gamedir, sanitizedPath, netpath);
                 sysFiles = Sys_ListFiles(netpath, extension, filter, &numSysFiles, isDirSearch);
                 for (i = 0; i < numSysFiles; ++i)
+                {
                     nfiles = FS_AddFileToList(user, sysFiles[i], list, nfiles);
+                }
                 FS_FreeFileList((const char **)sysFiles);
             }
         }
@@ -2519,12 +2587,12 @@ const char **__cdecl FS_ListFilteredFilesInLocation(
     int *numfiles,
     int lookInFlags)
 {
-    const char **result; // [esp+0h] [ebp-18h]
+    const char **result;              // [esp+0h] [ebp-18h]
     searchpath_s *locationSearchPath; // [esp+4h] [ebp-14h]
-    HunkUser *user; // [esp+8h] [ebp-10h]
-    char *pathDir; // [esp+Ch] [ebp-Ch]
-    searchpath_s *search; // [esp+10h] [ebp-8h]
-    searchpath_s *locationSearch; // [esp+14h] [ebp-4h]
+    HunkUser *user;                   // [esp+8h] [ebp-10h]
+    char *pathDir;                    // [esp+Ch] [ebp-Ch]
+    searchpath_s *search;             // [esp+10h] [ebp-8h]
+    searchpath_s *locationSearch;     // [esp+14h] [ebp-4h]
 
     user = Hunk_UserCreate(0x20000, "FS_ListFilteredFilesInLocation", 0, 0, 3);
     locationSearchPath = 0;
@@ -2548,12 +2616,12 @@ const char **__cdecl FS_ListFilteredFilesInLocation(
         {
             if (locationSearchPath)
             {
-                locationSearch->next = (searchpath_s *)Hunk_UserAlloc(user, 0x1Cu, 4);
+                locationSearch->next = (searchpath_s *)Hunk_UserAlloc(user, sizeof(searchpath_s), alignof(searchpath_s));
                 locationSearch = locationSearch->next;
             }
             else
             {
-                locationSearchPath = (searchpath_s *)Hunk_UserAlloc(user, 0x1Cu, 4);
+                locationSearchPath = (searchpath_s *)Hunk_UserAlloc(user, sizeof(searchpath_s), alignof(searchpath_s));
                 locationSearch = locationSearchPath;
             }
             locationSearch->next = 0;
@@ -2646,29 +2714,35 @@ int __cdecl FS_SV_FOpenFileRead(const char *filename, int *fp)
 
 int __cdecl FS_SV_FOpenFileWrite(const char *filename)
 {
-    FILE *v2; // eax
-    char *v3; // [esp+Ch] [ebp-10Ch]
+    FILE *v2;         // eax
+    char *v3;         // [esp+Ch] [ebp-10Ch]
     char ospath[256]; // [esp+10h] [ebp-108h] BYREF
-    int f; // [esp+114h] [ebp-4h]
+    int f;            // [esp+114h] [ebp-4h]
 
     FS_CheckFileSystemStarted();
-    FS_BuildOSPath((char *)fs_homepath->current.integer, (char *)filename, (char *)"", ospath);
+    FS_BuildOSPath((char *)fs_homepath->current.string, (char *)filename, (char *)"", ospath);
     v3 = ospath;
     v3 += strlen(v3) + 1;
     ospath[v3 - &ospath[1] - 1] = 0;
     f = FS_HandleForFile(FS_THREAD_MAIN);
     fsh[f].zipFile = 0;
     if (fs_debug->current.integer)
+    {
         Com_Printf(CON_CHANNEL_FILES, "FS_SV_FOpenFileWrite: %s\n", ospath);
+    }
     if (FS_CreatePath(ospath))
+    {
         return 0;
+    }
     Com_DPrintf(CON_CHANNEL_FILES, "writing to: %s\n", ospath);
     v2 = FS_FileOpenWriteBinary(ospath);
     fsh[f].handleFiles.file.o = v2;
     I_strncpyz(fsh[f].name, (char *)filename, 256);
     fsh[f].handleSync = 0;
     if (!fsh[f].handleFiles.file.o)
+    {
         return 0;
+    }
     return f;
 }
 
@@ -2708,17 +2782,19 @@ void __cdecl FS_Remove(const char *osPath)
 
 void __cdecl FS_SV_Rename(char *from, char *to)
 {
-    char to_ospath[256]; // [esp+20h] [ebp-208h] BYREF
+    char to_ospath[256];   // [esp+20h] [ebp-208h] BYREF
     char from_ospath[260]; // [esp+120h] [ebp-108h] BYREF
 
     FS_CheckFileSystemStarted();
-    FS_BuildOSPath((char *)fs_homepath->current.integer, from, (char *)"", from_ospath);
-    FS_BuildOSPath((char *)fs_homepath->current.integer, to, (char *)"", to_ospath);
+    FS_BuildOSPath((char *)fs_homepath->current.string, from, (char *)"", from_ospath);
+    FS_BuildOSPath((char *)fs_homepath->current.string, to, (char *)"", to_ospath);
 
     from_ospath[strlen(from_ospath) - 1] = 0;
     to_ospath[strlen(to_ospath) - 1] = 0;
     if (fs_debug->current.integer)
+    {
         Com_Printf(CON_CHANNEL_FILES, "FS_SV_Rename: %s --> %s\n", from_ospath, to_ospath);
+    }
     if (rename(from_ospath, to_ospath))
     {
         FS_CopyFile(from_ospath, to_ospath);
@@ -2728,14 +2804,16 @@ void __cdecl FS_SV_Rename(char *from, char *to)
 
 int __cdecl FS_SV_FileExists(char *file)
 {
-    FILE *f; // [esp+10h] [ebp-10Ch]
+    FILE *f;            // [esp+10h] [ebp-10Ch]
     char testpath[260]; // [esp+14h] [ebp-108h] BYREF
 
-    FS_BuildOSPath((char *)fs_homepath->current.integer, file, (char *)"", testpath);
+    FS_BuildOSPath((char *)fs_homepath->current.string, file, (char *)"", testpath);
     testpath[&testpath[strlen(testpath) + 1] - &testpath[1] - 1] = 0;
     f = FS_FileOpenReadBinary(testpath);
     if (!f)
+    {
         return 0;
+    }
     FS_FileClose(f);
     return 1;
 }
@@ -2834,13 +2912,19 @@ int __cdecl FS_FOpenFileWriteToDirForThread(const char *filename, const char *di
     char ospath[260]; // [esp+0h] [ebp-108h] BYREF
 
     FS_CheckFileSystemStarted();
-    FS_BuildOSPath((char *)fs_homepath->current.integer, dir, filename, ospath);
+    FS_BuildOSPath((char *)fs_homepath->current.string, dir, filename, ospath);
     if (fs_debug->current.integer)
+    {
         Com_Printf(CON_CHANNEL_FILES, "FS_FOpenFileWrite: %s\n", ospath);
+    }
     if (FS_CreatePath(ospath))
+    {
         return 0;
+    }
     else
+    {
         return FS_GetHandleAndOpenFile(filename, ospath, thread);
+    }
 }
 
 int __cdecl FS_WriteFileToDir(const char *filename, const char *path, char *buffer, uint size)

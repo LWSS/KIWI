@@ -386,26 +386,26 @@ void __cdecl BuildAabbTree_r(GenericAabbTree *tree, const GenericAabbTreeOptions
 
 int __cdecl BuildAabbTree(const GenericAabbTreeOptions *options)
 {
-    float *v2; // [esp+4h] [ebp-454h]
-    float *v3; // [esp+8h] [ebp-450h]
-    float *v4; // [esp+Ch] [ebp-44Ch]
-    float *v5; // [esp+10h] [ebp-448h]
-    uint8_t *boundCopies; // [esp+44h] [ebp-414h]
-    int *remap; // [esp+48h] [ebp-410h]
-    int itemIndex; // [esp+4Ch] [ebp-40Ch]
-    int itemIndexa; // [esp+4Ch] [ebp-40Ch]
-    int itemIndexb; // [esp+4Ch] [ebp-40Ch]
-    int itemIndexc; // [esp+4Ch] [ebp-40Ch]
-    int remapBuffer[64]; // [esp+50h] [ebp-408h] BYREF
+    float *v2;                 // [esp+4h] [ebp-454h]
+    float *v3;                 // [esp+8h] [ebp-450h]
+    float *v4;                 // [esp+Ch] [ebp-44Ch]
+    float *v5;                 // [esp+10h] [ebp-448h]
+    uint8_t *boundCopies;      // [esp+44h] [ebp-414h]
+    int *remap;                // [esp+48h] [ebp-410h]
+    int itemIndex;             // [esp+4Ch] [ebp-40Ch]
+    int itemIndexa;            // [esp+4Ch] [ebp-40Ch]
+    int itemIndexb;            // [esp+4Ch] [ebp-40Ch]
+    int itemIndexc;            // [esp+4Ch] [ebp-40Ch]
+    int remapBuffer[64];       // [esp+50h] [ebp-408h] BYREF
     float sortedBounds[3][64]; // [esp+150h] [ebp-308h] BYREF
-    uint8_t *itemCopies; // [esp+454h] [ebp-4h]
+    uint8_t *itemCopies;       // [esp+454h] [ebp-4h]
 
     if (options->itemCount > 0x40u)
     {
-        remap = (int*)operator new(4 * options->itemCount);
-        sortedMins = (float*)operator new(4 * options->itemCount);
-        sortedMaxs = (float*)operator new(4 * options->itemCount);
-        sortedCoplanar = (float*)operator new(4 * options->itemCount);
+        remap = (int *)operator new(sizeof(int) * (size_t)options->itemCount);
+        sortedMins = (float *)operator new(sizeof(float) * (size_t)options->itemCount);
+        sortedMaxs = (float *)operator new(sizeof(float) * (size_t)options->itemCount);
+        sortedCoplanar = (float *)operator new(sizeof(float) * (size_t)options->itemCount);
     }
     else
     {
@@ -415,36 +415,40 @@ int __cdecl BuildAabbTree(const GenericAabbTreeOptions *options)
         sortedCoplanar = sortedBounds[2];
     }
     for (itemIndex = 0; itemIndex < options->itemCount; ++itemIndex)
+    {
         remap[itemIndex] = itemIndex;
+    }
     options->treeNodePool->firstItem = 0;
     options->treeNodePool->itemCount = options->itemCount;
     aabbTreeCount = 1;
     BuildAabbTree_r(options->treeNodePool, options, remap);
-    itemCopies = (byte*)operator new(options->itemSize * options->itemCount);
-    memcpy(itemCopies, options->items, options->itemSize * options->itemCount);
+    itemCopies = (byte *)operator new((size_t)options->itemSize * options->itemCount);
+    memcpy(itemCopies, options->items, (size_t)options->itemSize * options->itemCount);
     for (itemIndexa = 0; itemIndexa < options->itemCount; ++itemIndexa)
+    {
         memcpy(
-            (char*)options->items + options->itemSize * itemIndexa,
-            &itemCopies[options->itemSize * remap[itemIndexa]],
+            (char *)options->items + (size_t)options->itemSize * itemIndexa,
+            &itemCopies[(size_t)options->itemSize * remap[itemIndexa]],
             options->itemSize);
+    }
     operator delete(itemCopies);
     if (options->maintainValidBounds)
     {
-        boundCopies = (byte*)operator new(4 * ((3 * (unsigned __int64)options->itemCount) >> 32 != 0 ? -1 : 3 * options->itemCount));
-        memcpy(boundCopies, options->mins, 12 * options->itemCount);
+        boundCopies = (byte *)operator new(sizeof(float[3]) * (size_t)options->itemCount);
+        memcpy(boundCopies, options->mins, sizeof(float[3]) * (size_t)options->itemCount);
         for (itemIndexb = 0; itemIndexb < options->itemCount; ++itemIndexb)
         {
             v4 = options->mins[itemIndexb];
-            v5 = (float*)&boundCopies[12 * remap[itemIndexb]];
+            v5 = (float *)&boundCopies[12 * remap[itemIndexb]];
             *v4 = *v5;
             v4[1] = v5[1];
             v4[2] = v5[2];
         }
-        memcpy(boundCopies, options->maxs, 12 * options->itemCount);
+        memcpy(boundCopies, options->maxs, sizeof(float[3]) * (size_t)options->itemCount);
         for (itemIndexc = 0; itemIndexc < options->itemCount; ++itemIndexc)
         {
             v2 = options->maxs[itemIndexc];
-            v3 = (float*)&boundCopies[12 * remap[itemIndexc]];
+            v3 = (float *)&boundCopies[12 * remap[itemIndexc]];
             *v2 = *v3;
             v2[1] = v3[1];
             v2[2] = v3[2];

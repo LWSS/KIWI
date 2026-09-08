@@ -7,13 +7,9 @@
 
 const char *__cdecl StringTable_GetColumnValueForRow(const StringTable *table, int row, int column)
 {
-    if (column < table->columnCount
-        && row < table->rowCount
-        && row >= 0
-        && column >= 0
-        && (&table->values[column])[table->columnCount * row])
+    if (column < table->columnCount && row < table->rowCount && row >= 0 && column >= 0 && table->values[(size_t)table->columnCount * row + column])
     {
-        return (&table->values[column])[table->columnCount * row];
+        return table->values[(size_t)table->columnCount * row + column];
     }
     else
     {
@@ -43,22 +39,28 @@ const char *__cdecl StringTable_Lookup(
 
 int __cdecl StringTable_LookupRowNumForValue(const StringTable *table, int comparisonColumn, const char *value)
 {
-    int slot; // [esp+0h] [ebp-8h]
+    size_t slot;
     int row; // [esp+4h] [ebp-4h]
 
     if (!table->columnCount)
+    {
         return -1;
-    if (comparisonColumn >= table->columnCount)
+    }
+    if (comparisonColumn < 0 || comparisonColumn >= table->columnCount)
+    {
         Com_Error(
             ERR_DROP,
             "Unable to compare against column number %i - there are only %i columns",
             comparisonColumn,
             table->columnCount);
+    }
     for (row = table->rowCount - 1; row >= 0; --row)
     {
-        slot = comparisonColumn + table->columnCount * row;
+        slot = comparisonColumn + (size_t)table->columnCount * row;
         if (table->values[slot] && !I_stricmp(value, table->values[slot]))
+        {
             return row;
+        }
     }
     return -1;
 }
@@ -82,13 +84,21 @@ void __cdecl StringTable_GetAsset(const char *filename, StringTable **tablePtr)
             }
         }
 
+        if (g_numStringTables >= STRING_TABLE_CACHE_SIZE)
+        {
+            Com_Error(ERR_DROP, "String table cache is full");
+        }
         int f;
         int fileSize = FS_FOpenFileByMode((char *)filename, &f, FS_READ);
 
-        //iassert(fileSize > 0);
+        // iassert(fileSize > 0);
 
-        if (fileSize < 0)
+        if (fileSize <= 0)
         {
+            if (f)
+            {
+                FS_FCloseFile(f);
+            }
             *tablePtr = NULL;
             return;
         }
@@ -110,22 +120,34 @@ void __cdecl StringTable_GetAsset(const char *filename, StringTable **tablePtr)
         for (int i = 0; i < fileSize; i++)
         {
             if (filebuf[i] == '\n')
+            {
                 newlines++;
+            }
         }
 
+        if (filebuf[fileSize - 1] != '\n')
+        {
+            ++newlines;
+        }
         StringTable table;
 
         int totalcells = 0;
 
-        char *ptrs[0x4000]{ 0 };
+        char *ptrs[0x4000]{0};
 
         while (1)
         {
             parseInfo_t *token = Com_Parse(&buf);
 
             if (!buf)
+            {
                 break;
+            }
 
+            if (totalcells >= ARRAY_COUNT(ptrs))
+            {
+                Com_Error(ERR_DROP, "String table has too many cells: %s", filename);
+            }
             if (token->token[0])
             {
                 char *text = (char *)Z_Malloc(strlen(token->token) + 1, "Kisak stringtable->value (text)", 21);
@@ -147,7 +169,7 @@ void __cdecl StringTable_GetAsset(const char *filename, StringTable **tablePtr)
         table.columnCount = (totalcells / table.rowCount);
 
         table.name = (const char *)Z_Malloc(strlen(filename) + 1, "Kisak stringtable->name", 21);
-        strcpy((char*)table.name, filename);
+        strcpy((char *)table.name, filename);
 
         g_stringTableCache[g_numStringTables] = table;
         *tablePtr = &g_stringTableCache[g_numStringTables];
@@ -157,12 +179,11 @@ void __cdecl StringTable_GetAsset(const char *filename, StringTable **tablePtr)
 
         g_numStringTables++;
 
-        iassert(g_numStringTables < STRING_TABLE_CACHE_SIZE);
+        iassert(g_numStringTables <= STRING_TABLE_CACHE_SIZE);
     }
     else
     {
         *tablePtr = DB_FindXAssetHeader(ASSET_TYPE_STRINGTABLE, filename).stringTable;
     }
-
 }
 

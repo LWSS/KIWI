@@ -87,16 +87,16 @@ int Sys_InterlockedDecrement(uint *addend)
     return InterlockedDecrement(addend);
 }
 
-uint Win_InitThreads()
+uintptr_t Win_InitThreads()
 {
     HANDLE CurrentProcess;
-    unsigned long result; 
-    unsigned long cpuCount; 
+    uintptr_t result;
+    unsigned long cpuCount;
     DWORD_PTR systemAffinityMask;
-    unsigned long cpuOffset; 
+    unsigned long cpuOffset;
     DWORD_PTR threadAffinityMask;
-    DWORD_PTR affinityMaskBits[33];
-    DWORD_PTR processAffinityMask; 
+    DWORD_PTR affinityMaskBits[sizeof(DWORD_PTR) * CHAR_BIT];
+    DWORD_PTR processAffinityMask = 0;
 
     CurrentProcess = GetCurrentProcess();
     result = GetProcessAffinityMask(CurrentProcess, &processAffinityMask, &systemAffinityMask);
@@ -108,8 +108,10 @@ uint Win_InitThreads()
         {
             result = cpuCount;
             affinityMaskBits[cpuCount++] = threadAffinityMask;
-            if (cpuCount == 32)
+            if (cpuCount == ARRAY_COUNT(affinityMaskBits))
+            {
                 break;
+            }
         }
         result = 2 * threadAffinityMask;
     }
@@ -159,37 +161,51 @@ void __cdecl Sys_Mkdir(const char *path)
 
 BOOL __cdecl Sys_RemoveDirTree(const char *path)
 {
-    bool v2; // [esp+8h] [ebp-250h]
-    int handle; // [esp+1Ch] [ebp-23Ch]
-    char childPath[256]; // [esp+20h] [ebp-238h] BYREF
-    _finddata64i32_t find; // [esp+120h] [ebp-138h] BYREF
-    bool hasError; // [esp+252h] [ebp-6h]
+    bool v2;                   // [esp+8h] [ebp-250h]
+    intptr_t handle;           // [esp+1Ch] [ebp-23Ch]
+    char childPath[256];       // [esp+20h] [ebp-238h] BYREF
+    _finddata64i32_t find;     // [esp+120h] [ebp-138h] BYREF
+    bool hasError;             // [esp+252h] [ebp-6h]
     bool hasTrailingSeparater; // [esp+253h] [ebp-5h]
-    int length; // [esp+254h] [ebp-4h]
+    int length;                // [esp+254h] [ebp-4h]
 
     length = strlen(path);
     v2 = path[length - 1] == 92 || path[length - 1] == 47;
     hasTrailingSeparater = v2;
     if (v2)
+    {
         Com_sprintf(childPath, 0x100u, "%s*", path);
+    }
     else
+    {
         Com_sprintf(childPath, 0x100u, "%s\\*", path);
+    }
     handle = _findfirst64i32(childPath, &find);
     if (handle == -1)
+    {
         return _rmdir(path) != -1;
+    }
     hasError = 0;
     do
     {
         if (find.name[0] != 46 || find.name[1] && (find.name[1] != 46 || find.name[2]))
         {
             if (hasTrailingSeparater)
+            {
                 Com_sprintf(childPath, 0x100u, "%s%s", path, find.name);
+            }
             else
+            {
                 Com_sprintf(childPath, 0x100u, "%s\\%s", path, find.name);
+            }
             if ((find.attrib & 0x10) != 0)
+            {
                 hasError = !Sys_RemoveDirTree(childPath);
+            }
             else
+            {
                 hasError = remove(childPath) == -1;
+            }
         }
     } while (!hasError && _findnext64i32(handle, &find) != -1);
     _findclose(handle);
@@ -204,33 +220,44 @@ void __cdecl Sys_ListFilteredFiles(
     char **list,
     int *numfiles)
 {
-    char filename[256]; // [esp+10h] [ebp-338h] BYREF
+    char filename[256];        // [esp+10h] [ebp-338h] BYREF
     _finddata64i32_t findinfo; // [esp+110h] [ebp-238h] BYREF
-    int findhandle; // [esp+23Ch] [ebp-10Ch]
-    char search[260]; // [esp+240h] [ebp-108h] BYREF
+    intptr_t findhandle;       // [esp+23Ch] [ebp-10Ch]
+    char search[260];          // [esp+240h] [ebp-108h] BYREF
 
     if (*numfiles < 0x1FFF)
     {
         if (strlen(subdirs))
+        {
             Com_sprintf(search, 0x100u, "%s\\%s\\*", basedir, subdirs);
+        }
         else
+        {
             Com_sprintf(search, 0x100u, "%s\\*", basedir);
+        }
         findhandle = _findfirst64i32(search, &findinfo);
         if (findhandle != -1)
         {
             do
             {
-                if ((findinfo.attrib & 0x10) == 0
-                    || I_stricmp(findinfo.name, ".") && I_stricmp(findinfo.name, "..") && I_stricmp(findinfo.name, "CVS"))
+                if ((findinfo.attrib & 0x10) == 0 || I_stricmp(findinfo.name, ".") && I_stricmp(findinfo.name, "..") && I_stricmp(findinfo.name, "CVS"))
                 {
                     if (*numfiles >= 0x1FFF)
+                    {
                         break;
+                    }
                     if (subdirs)
+                    {
                         Com_sprintf(filename, 0x100u, "%s\\%s", subdirs, findinfo.name);
+                    }
                     else
+                    {
                         Com_sprintf(filename, 0x100u, "%s", findinfo.name);
+                    }
                     if (Com_FilterPath(filter, filename, 0))
+                    {
                         list[(*numfiles)++] = Hunk_CopyString(user, filename);
+                    }
                 }
             } while (_findnext64i32(findhandle, &findinfo) != -1);
             _findclose(findhandle);
@@ -269,21 +296,21 @@ char **__cdecl Sys_ListFiles(
     int *numfiles,
     int wantsubs)
 {
-    char *v6; // eax
-    char **v7; // [esp+4h] [ebp-264h]
+    char *v6;                  // eax
+    char **v7;                 // [esp+4h] [ebp-264h]
     _finddata64i32_t findinfo; // [esp+18h] [ebp-250h] BYREF
-    int flag; // [esp+140h] [ebp-128h]
-    char **listCopy; // [esp+144h] [ebp-124h]
-    int findhandle; // [esp+148h] [ebp-120h]
-    char *(*list)[8192]; // [esp+14Ch] [ebp-11Ch]
-    int nfiles; // [esp+150h] [ebp-118h] BYREF
-    HunkUser *user; // [esp+154h] [ebp-114h]
-    char search[256]; // [esp+160h] [ebp-108h] BYREF
-    int i; // [esp+264h] [ebp-4h]
+    int flag;                  // [esp+140h] [ebp-128h]
+    char **listCopy;           // [esp+144h] [ebp-124h]
+    intptr_t findhandle;       // [esp+148h] [ebp-120h]
+    char *(*list)[8192];       // [esp+14Ch] [ebp-11Ch]
+    int nfiles;                // [esp+150h] [ebp-118h] BYREF
+    HunkUser *user;            // [esp+154h] [ebp-114h]
+    char search[256];          // [esp+160h] [ebp-108h] BYREF
+    int i;                     // [esp+264h] [ebp-4h]
 
-    LargeLocal list_large_local(0x8000); // [esp+158h] [ebp-110h] BYREF
-    //LargeLocal::LargeLocal(&list_large_local, 0x8000);
-    //list = (char *(*)[8192])LargeLocal::GetBuf(&list_large_local);
+    LargeLocal list_large_local(sizeof(char *[8192])); // [esp+158h] [ebp-110h] BYREF
+    // LargeLocal::LargeLocal(&list_large_local, 0x8000);
+    // list = (char *(*)[8192])LargeLocal::GetBuf(&list_large_local);
     list = (char *(*)[8192])list_large_local.GetBuf();
     if (filter)
     {
@@ -294,25 +321,29 @@ char **__cdecl Sys_ListFiles(
         *numfiles = nfiles;
         if (nfiles)
         {
-            listCopy = (char **)Hunk_UserAlloc(user, 4 * nfiles + 8, 4);
+            listCopy = (char **)Hunk_UserAlloc(user, sizeof(char *) * (nfiles + 2), alignof(char *));
             *listCopy++ = (char *)user;
             for (i = 0; i < nfiles; ++i)
+            {
                 listCopy[i] = (*list)[i];
+            }
             listCopy[i] = 0;
-            //LargeLocal::~LargeLocal(&list_large_local);
+            // LargeLocal::~LargeLocal(&list_large_local);
             return listCopy;
         }
         else
         {
             Hunk_UserDestroy(user);
-            //LargeLocal::~LargeLocal(&list_large_local);
+            // LargeLocal::~LargeLocal(&list_large_local);
             return 0;
         }
     }
     else
     {
         if (!extension)
+        {
             extension = "";
+        }
         if (*extension != 47 || extension[1])
         {
             flag = 16;
@@ -323,15 +354,19 @@ char **__cdecl Sys_ListFiles(
             flag = 0;
         }
         if (*extension)
+        {
             Com_sprintf(search, 0x100u, "%s\\*.%s", directory, extension);
+        }
         else
+        {
             Com_sprintf(search, 0x100u, "%s\\*", directory);
+        }
         nfiles = 0;
         findhandle = _findfirst64i32(search, &findinfo);
         if (findhandle == -1)
         {
             *numfiles = 0;
-            //LargeLocal::~LargeLocal(&list_large_local);
+            // LargeLocal::~LargeLocal(&list_large_local);
             return 0;
         }
         else
@@ -339,15 +374,14 @@ char **__cdecl Sys_ListFiles(
             user = Hunk_UserCreate(0x20000, "Sys_ListFiles", 0, 0, 3);
             do
             {
-                if ((!wantsubs && flag != (findinfo.attrib & 0x10) || wantsubs && (findinfo.attrib & 0x10) != 0)
-                    && ((findinfo.attrib & 0x10) == 0
-                        || I_stricmp(findinfo.name, ".") && I_stricmp(findinfo.name, "..") && I_stricmp(findinfo.name, "CVS"))
-                    && (!*extension || HasFileExtension(findinfo.name, extension)))
+                if ((!wantsubs && flag != (findinfo.attrib & 0x10) || wantsubs && (findinfo.attrib & 0x10) != 0) && ((findinfo.attrib & 0x10) == 0 || I_stricmp(findinfo.name, ".") && I_stricmp(findinfo.name, "..") && I_stricmp(findinfo.name, "CVS")) && (!*extension || HasFileExtension(findinfo.name, extension)))
                 {
                     v6 = Hunk_CopyString(user, findinfo.name);
                     (*list)[nfiles++] = v6;
                     if (nfiles == 0x1FFF)
+                    {
                         break;
+                    }
                 }
             } while (_findnext64i32(findhandle, &findinfo) != -1);
             (*list)[nfiles] = 0;
@@ -355,19 +389,21 @@ char **__cdecl Sys_ListFiles(
             *numfiles = nfiles;
             if (nfiles)
             {
-                listCopy = (char **)Hunk_UserAlloc(user, 4 * nfiles + 8, 4);
+                listCopy = (char **)Hunk_UserAlloc(user, sizeof(char *) * (nfiles + 2), alignof(char *));
                 *listCopy++ = (char *)user;
                 for (i = 0; i < nfiles; ++i)
+                {
                     listCopy[i] = (*list)[i];
+                }
                 listCopy[i] = 0;
                 v7 = listCopy;
-                //LargeLocal::~LargeLocal(&list_large_local);
+                // LargeLocal::~LargeLocal(&list_large_local);
                 return v7;
             }
             else
             {
                 Hunk_UserDestroy(user);
-                //LargeLocal::~LargeLocal(&list_large_local);
+                // LargeLocal::~LargeLocal(&list_large_local);
                 return 0;
             }
         }

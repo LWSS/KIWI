@@ -19,7 +19,7 @@ struct parseInfo_t // sizeof=0x420
     const char *backup_text;
     const char *parseFile;
 };
-static_assert(sizeof(struct parseInfo_t) == 0x420);
+static_assert(sizeof(parseInfo_t) == (sizeof(void *) == 8 ? 0x438 : 0x420));
 
 struct ParseThreadInfo // sizeof=0x460C
 {                                       // ...
@@ -29,7 +29,7 @@ struct ParseThreadInfo // sizeof=0x460C
     const char *prevTokenPos;
     char line[1024];
 };
-static_assert(sizeof(struct ParseThreadInfo) == 0x460C);
+static_assert(sizeof(ParseThreadInfo) == (sizeof(void *) == 8 ? 0x4798 : 0x460C));
 
 struct com_parse_mark_t // sizeof=0x14
 {                                       // ...
@@ -39,7 +39,7 @@ struct com_parse_mark_t // sizeof=0x14
     int backup_lines;
     const char *backup_text;
 };
-static_assert(sizeof(struct com_parse_mark_t) == 0x14);
+static_assert(sizeof(com_parse_mark_t) == (sizeof(void *) == 8 ? 0x20 : 0x14));
 
 void __cdecl TRACK_q_parse();
 void __cdecl Com_InitParse();

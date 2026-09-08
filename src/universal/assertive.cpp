@@ -194,96 +194,116 @@ void __cdecl ParseError(const char* msg)
 
 struct AddressInfo
 {
-    uint address;
+    uintptr_t address;
     char moduleName[64];
     char bestFunction[64];
     char bestFunctionFilename[64];
-    uint bestFunctionAddress;
+    uintptr_t bestFunctionAddress;
     char bestLineFilename[64];
-    uint bestLineAddress;
+    uintptr_t bestLineAddress;
     uint bestLineNumber;
 }; // idb
 
 uint g_assertAddressCount;
 AddressInfo g_assertAddress[0x20];
 
-char __cdecl ParseMapFile(FILE* fp, uint baseAddress, char* mapName)
+char __cdecl ParseMapFile(FILE *fp, uintptr_t baseAddress, char *mapName)
 {
-    int v4; // eax
-    const char* v5; // eax
-    char* v6; // eax
-    const char* v7; // eax
-    const char* v8; // eax
-    char* v9; // eax
-    const char* v10; // eax
-    char* v11; // eax
-    char* v12; // eax
-    const char* v13; // eax
-    char* pszNameStop; // [esp+14h] [ebp-878h]
-    char* pszNameStart; // [esp+18h] [ebp-874h]
-    uint loadAddress; // [esp+20h] [ebp-86Ch] BYREF
-    const char* filenameSubStr; // [esp+24h] [ebp-868h]
-    int j; // [esp+28h] [ebp-864h]
-    uint address; // [esp+2Ch] [ebp-860h] BYREF
-    const char* filename; // [esp+30h] [ebp-85Ch]
-    AddressInfo* addressInfo; // [esp+34h] [ebp-858h]
-    uint relAddress; // [esp+38h] [ebp-854h]
-    uint lineOffset[4]; // [esp+3Ch] [ebp-850h] BYREF
-    char filenameBuffer[1024]; // [esp+4Ch] [ebp-840h] BYREF
-    uint offset; // [esp+44Ch] [ebp-440h] BYREF
-    uint baseEndAddress; // [esp+450h] [ebp-43Ch]
-    uint group; // [esp+454h] [ebp-438h] BYREF
-    const char* funcName; // [esp+458h] [ebp-434h]
-    uint lineGroup[4]; // [esp+45Ch] [ebp-430h] BYREF
-    int i; // [esp+46Ch] [ebp-420h]
-    uint lineNumber[4]; // [esp+470h] [ebp-41Ch] BYREF
-    char* atChar; // [esp+480h] [ebp-40Ch]
-    char function[1024]; // [esp+484h] [ebp-408h] BYREF
-    int readCount; // [esp+888h] [ebp-4h]
+    int v4;                     // eax
+    const char *v5;             // eax
+    char *v6;                   // eax
+    const char *v7;             // eax
+    const char *v8;             // eax
+    char *v9;                   // eax
+    const char *v10;            // eax
+    char *v11;                  // eax
+    char *v12;                  // eax
+    const char *v13;            // eax
+    char *pszNameStop;          // [esp+14h] [ebp-878h]
+    char *pszNameStart;         // [esp+18h] [ebp-874h]
+    uintptr_t loadAddress;      // [esp+20h] [ebp-86Ch] BYREF
+    const char *filenameSubStr; // [esp+24h] [ebp-868h]
+    int j;                      // [esp+28h] [ebp-864h]
+    uintptr_t address;          // [esp+2Ch] [ebp-860h] BYREF
+    const char *filename;       // [esp+30h] [ebp-85Ch]
+    AddressInfo *addressInfo;   // [esp+34h] [ebp-858h]
+    uintptr_t relAddress;       // [esp+38h] [ebp-854h]
+    uint lineOffset[4];         // [esp+3Ch] [ebp-850h] BYREF
+    char filenameBuffer[1024];  // [esp+4Ch] [ebp-840h] BYREF
+    uint offset;                // [esp+44Ch] [ebp-440h] BYREF
+    uintptr_t baseEndAddress;   // [esp+450h] [ebp-43Ch]
+    uint group;                 // [esp+454h] [ebp-438h] BYREF
+    const char *funcName;       // [esp+458h] [ebp-434h]
+    uint lineGroup[4];          // [esp+45Ch] [ebp-430h] BYREF
+    int i;                      // [esp+46Ch] [ebp-420h]
+    uint lineNumber[4];         // [esp+470h] [ebp-41Ch] BYREF
+    char *atChar;               // [esp+480h] [ebp-40Ch]
+    char function[1024];        // [esp+484h] [ebp-408h] BYREF
+    int readCount;              // [esp+888h] [ebp-4h]
 
     do
     {
         if (!ReadLine(fp))
+        {
             return 0;
-    } while (sscanf(lineBuffer, " Preferred load address is %x\r\n", &loadAddress) != 1);
+        }
+    } while (sscanf(lineBuffer, " Preferred load address is %Ix\r\n", &loadAddress) != 1);
     if (!SkipLines(2, fp))
+    {
         return 0;
+    }
     baseEndAddress = 0;
     while (1)
     {
         if (!ReadLine(fp))
+        {
             return 0;
+        }
         if (!lineBuffer[0])
+        {
             break;
-        if (sscanf(lineBuffer, "%x:%x %xH %s %s", &group, &offset, &address, function, filenameBuffer) != 5)
+        }
+        if (sscanf(lineBuffer, "%x:%x %IxH %1023s %1023s", &group, &offset, &address, function, filenameBuffer) != 5)
         {
             ParseError("Unknown line format in the segments section");
             return 0;
         }
         if (group == 1 && baseEndAddress < address + offset + baseAddress + 4096)
+        {
             baseEndAddress = address + offset + baseAddress + 4096;
+        }
     }
     for (j = 0; j < g_assertAddressCount; ++j)
     {
         addressInfo = &g_assertAddress[j];
         if (addressInfo->address >= baseAddress && addressInfo->address < baseEndAddress)
+        {
             I_strncpyz(addressInfo->moduleName, mapName, 64);
+        }
     }
     do
     {
         if (!ReadLine(fp))
+        {
             return 0;
+        }
         v4 = !!strstr(lineBuffer, "Publics by Value");
     } while (!v4);
     if (!SkipLines(1, fp))
+    {
         return 0;
+    }
     while (1)
     {
         if (!ReadLine(fp))
+        {
             return 0;
+        }
         if (!lineBuffer[0])
+        {
             break;
-        if (sscanf(lineBuffer, "%x:%x %s %x", &group, &offset, function, &address) != 4)
+        }
+        if (sscanf(lineBuffer, "%x:%x %1023s %Ix", &group, &offset, function, &address) != 4)
         {
             ParseError("Unknown line format in the public symbols section");
             return 0;
@@ -295,45 +315,58 @@ char __cdecl ParseMapFile(FILE* fp, uint baseAddress, char* mapName)
             ParseError("Couldn't parse file name in the public symbols section");
             return 0;
         }
-        relAddress = address;
+        relAddress = address - loadAddress + baseAddress;
         for (j = 0; j < g_assertAddressCount; ++j)
         {
             addressInfo = &g_assertAddress[j];
-            if (addressInfo->address >= baseAddress
-                && addressInfo->address < baseEndAddress
-                && relAddress <= addressInfo->address
-                && (!addressInfo->bestFunction[0] || addressInfo->bestFunctionAddress < relAddress))
+            if (addressInfo->address >= baseAddress && addressInfo->address < baseEndAddress && relAddress <= addressInfo->address && (!addressInfo->bestFunction[0] || addressInfo->bestFunctionAddress < relAddress))
             {
                 addressInfo->bestFunctionAddress = relAddress;
                 funcName = function;
                 if (function[0] == 95 || *funcName == 63)
+                {
                     ++funcName;
-                I_strncpyz(addressInfo->bestFunction, (char*)funcName, 64);
+                }
+                I_strncpyz(addressInfo->bestFunction, (char *)funcName, 64);
                 v6 = strchr(addressInfo->bestFunction, 0x40u);
                 atChar = v6;
                 if (v6)
+                {
                     *atChar = 0;
+                }
                 v7 = strrchr(filenameBuffer, 0x5Cu);
                 filename = v7;
                 if (v7)
+                {
                     ++filename;
+                }
                 else
+                {
                     filename = filenameBuffer;
-                I_strncpyz(addressInfo->bestFunctionFilename, (char*)filename, 64);
+                }
+                I_strncpyz(addressInfo->bestFunctionFilename, (char *)filename, 64);
             }
         }
     }
     if (!SkipLines(2, fp))
+    {
         return 0;
+    }
     if (!ReadLine(fp))
+    {
         return 0;
+    }
     if (strcmp(lineBuffer, " Static symbols\r"))
+    {
         goto LABEL_90;
+    }
     if (!SkipLines(1, fp))
+    {
         return 0;
+    }
     while (ReadLine(fp) && lineBuffer[0])
     {
-        if (sscanf(lineBuffer, "%x:%x %s %x", &group, &offset, function, &address) != 4)
+        if (sscanf(lineBuffer, "%x:%x %1023s %Ix", &group, &offset, function, &address) != 4)
         {
             ParseError("Unknown line format in the static symbols section");
             return 0;
@@ -345,31 +378,36 @@ char __cdecl ParseMapFile(FILE* fp, uint baseAddress, char* mapName)
             ParseError("Couldn't parse file name in the static symbols section");
             return 0;
         }
-        relAddress = address;
+        relAddress = address - loadAddress + baseAddress;
         for (j = 0; j < g_assertAddressCount; ++j)
         {
             addressInfo = &g_assertAddress[j];
-            if (addressInfo->address >= baseAddress
-                && addressInfo->address < baseEndAddress
-                && relAddress <= addressInfo->address
-                && (!addressInfo->bestFunction[0] || addressInfo->bestFunctionAddress < relAddress))
+            if (addressInfo->address >= baseAddress && addressInfo->address < baseEndAddress && relAddress <= addressInfo->address && (!addressInfo->bestFunction[0] || addressInfo->bestFunctionAddress < relAddress))
             {
                 addressInfo->bestFunctionAddress = relAddress;
                 funcName = function;
                 if (function[0] == 95 || *funcName == 63)
+                {
                     ++funcName;
-                I_strncpyz(addressInfo->bestFunction, (char*)funcName, 64);
+                }
+                I_strncpyz(addressInfo->bestFunction, (char *)funcName, 64);
                 v9 = strchr(addressInfo->bestFunction, 0x40u);
                 atChar = v9;
                 if (v9)
+                {
                     *atChar = 0;
+                }
                 v10 = strrchr(filenameBuffer, 0x5Cu);
                 filename = v10;
                 if (v10)
+                {
                     ++filename;
+                }
                 else
+                {
                     filename = filenameBuffer;
-                I_strncpyz(addressInfo->bestFunctionFilename, (char*)filename, 64);
+                }
+                I_strncpyz(addressInfo->bestFunctionFilename, (char *)filename, 64);
             }
         }
     }
@@ -382,7 +420,7 @@ LABEL_90:
             return 0;
         }
         v11 = strchr(lineBuffer, 0x28u);
-        pszNameStart = (char*)v11;
+        pszNameStart = (char *)v11;
         if (!v11)
         {
             ParseError("Couldn't find '(' for the name of the source file in line number section");
@@ -399,7 +437,9 @@ LABEL_90:
         filenameBuffer[pszNameStop - pszNameStart - 1] = 0;
         filenameSubStr = filenameBuffer;
         if (!SkipLines(1, fp))
+        {
             return 0;
+        }
         while (ReadLine(fp) && lineBuffer[0])
         {
             readCount = sscanf(
@@ -428,20 +468,21 @@ LABEL_90:
                 for (j = 0; j < g_assertAddressCount; ++j)
                 {
                     addressInfo = &g_assertAddress[j];
-                    if (addressInfo->address >= baseAddress
-                        && addressInfo->address < baseEndAddress
-                        && relAddress <= addressInfo->address
-                        && (!addressInfo->bestLineFilename[0] || addressInfo->bestLineAddress < relAddress))
+                    if (addressInfo->address >= baseAddress && addressInfo->address < baseEndAddress && relAddress <= addressInfo->address && (!addressInfo->bestLineFilename[0] || addressInfo->bestLineAddress < relAddress))
                     {
                         addressInfo->bestLineAddress = relAddress;
                         addressInfo->bestLineNumber = lineNumber[i];
                         v13 = strrchr(filenameSubStr, 0x5Cu);
                         filename = v13;
                         if (v13)
+                        {
                             ++filename;
+                        }
                         else
+                        {
                             filename = filenameSubStr;
-                        I_strncpyz(addressInfo->bestLineFilename, (char*)filename, 64);
+                        }
+                        I_strncpyz(addressInfo->bestLineFilename, (char *)filename, 64);
                     }
                 }
             }
@@ -450,20 +491,20 @@ LABEL_90:
     return 1;
 }
 
-void __cdecl LoadMapFilesForDir(const char* dir)
+void __cdecl LoadMapFilesForDir(const char *dir)
 {
-    char* v1; // eax
-    char* v2; // eax
-    char* v3; // eax
-    char v4; // [esp+13h] [ebp-1165h]
-    char* p_file; // [esp+18h] [ebp-1160h]
-    char* cFileName; // [esp+1Ch] [ebp-115Ch]
+    char *v1;                       // eax
+    char *v2;                       // eax
+    char *v3;                       // eax
+    char v4;                        // [esp+13h] [ebp-1165h]
+    char *p_file;                   // [esp+18h] [ebp-1160h]
+    char *cFileName;                // [esp+1Ch] [ebp-115Ch]
     _WIN32_FIND_DATAA FindFileData; // [esp+20h] [ebp-1158h] BYREF
-    char file[MAX_PATH]; // [esp+160h] [ebp-1018h] BYREF
-    uint baseAddress; // [esp+964h] [ebp-814h]
-    FILE* fp; // [esp+968h] [ebp-810h]
-    HANDLE hFindFile; // [esp+96Ch] [ebp-80Ch]
-    char string[2052]; // [esp+970h] [ebp-808h] BYREF
+    char file[MAX_PATH];            // [esp+160h] [ebp-1018h] BYREF
+    uintptr_t baseAddress;          // [esp+964h] [ebp-814h]
+    FILE *fp;                       // [esp+968h] [ebp-810h]
+    HANDLE hFindFile;               // [esp+96Ch] [ebp-80Ch]
+    char string[2052];              // [esp+970h] [ebp-808h] BYREF
 
     if (*dir)
     {
@@ -480,7 +521,7 @@ void __cdecl LoadMapFilesForDir(const char* dir)
     {
         do
         {
-            baseAddress = (uint)GetModuleBase(FindFileData.cFileName);
+            baseAddress = (uintptr_t)GetModuleBase(FindFileData.cFileName);
             if (baseAddress)
             {
                 v3 = Sys_DefaultInstallPath();
@@ -505,14 +546,14 @@ void __cdecl LoadMapFilesForDir(const char* dir)
     }
 }
 
-int __cdecl LoadMapFiles(char* msg)
+int __cdecl LoadMapFiles(char *msg)
 {
-    int v1; // eax
-    int j; // [esp+0h] [ebp-Ch]
-    AddressInfo* addressInfo; // [esp+4h] [ebp-8h]
-    char* curPos; // [esp+8h] [ebp-4h]
-    char* curPosa; // [esp+8h] [ebp-4h]
-    char* curPosb; // [esp+8h] [ebp-4h]
+    int v1;                   // eax
+    int j;                    // [esp+0h] [ebp-Ch]
+    AddressInfo *addressInfo; // [esp+4h] [ebp-8h]
+    char *curPos;             // [esp+8h] [ebp-4h]
+    char *curPosa;            // [esp+8h] [ebp-4h]
+    char *curPosb;            // [esp+8h] [ebp-4h]
 
     LoadMapFilesForDir("");
     curPos = msg;
@@ -535,14 +576,18 @@ int __cdecl LoadMapFiles(char* msg)
             else
             {
                 if (addressInfo->bestFunction[0])
+                {
                     curPosb = &curPosa[sprintf(
                         curPosa,
-                        "%s        ...%s, address %x",
+                        "%s        ...%s, address %Ix",
                         addressInfo->bestFunction,
                         addressInfo->bestFunctionFilename,
                         addressInfo->address)];
+                }
                 else
-                    curPosb = &curPosa[sprintf(curPosa, "%s, address %x", addressInfo->bestFunction, addressInfo->address)];
+                {
+                    curPosb = &curPosa[sprintf(curPosa, "%s, address %Ix", addressInfo->bestFunction, addressInfo->address)];
+                }
                 v1 = sprintf(curPosb, "\n");
             }
             curPos = &curPosb[v1];
@@ -555,32 +600,18 @@ char g_module[MAX_PATH];
 
 #include <intrin.h>
 
-// KISAKX64
-// this is broken right now
-int __cdecl DoStackTrace(char* msg, int nIgnore)
+int __cdecl DoStackTrace(char *msg, int nIgnore)
 {
-    int* v2; // ecx
-    int* reg_ebp; // [esp+4h] [ebp-10h]
-    int i; // [esp+10h] [ebp-4h]
-
-    memset((uint8_t*)g_assertAddress, 0, sizeof(g_assertAddress));
-    g_assertAddressCount = 0;
-    reg_ebp = 0;
-    __asm {
-        mov reg_ebp, ebp
-    }
-    for (i = 0; i < nIgnore + 32; ++i)
+    void *frames[32];
+    memset(g_assertAddress, 0, sizeof(g_assertAddress));
+    if (nIgnore < 0)
     {
-        v2 = reg_ebp;
-        if ((uint)reg_ebp <= 0x400)
-            break;
-        reg_ebp = (int*)*reg_ebp;
-        if (i >= nIgnore)
-        {
-            g_assertAddress[g_assertAddressCount++].address = v2[1] - 5;
-            if (!reg_ebp)
-                break;
-        }
+        nIgnore = 0;
+    }
+    g_assertAddressCount = CaptureStackBackTrace((DWORD)nIgnore + 1, ARRAY_COUNT(frames), frames, 0);
+    for (unsigned int i = 0; i < g_assertAddressCount; ++i)
+    {
+        g_assertAddress[i].address = (uintptr_t)frames[i] - 1;
     }
     return LoadMapFiles(msg);
 }
@@ -668,11 +699,12 @@ void MyAssertHandler(const char *filename, int line, int type, const char *fmt, 
 {
 #ifdef KISAK_PURE
     char shouldBreak; // [esp+3h] [ebp-5h]
-    va_list va; // [esp+20h] [ebp+18h] BYREF
-    
+    va_list va;       // [esp+20h] [ebp+18h] BYREF
+
     va_start(va, fmt);
     Sys_EnterCriticalSection(CRITSECT_ASSERT);
     _vsnprintf(message, 0x400u, fmt, va);
+    va_end(va);
     message[1023] = 0;
 
     fprintf(stderr, "\x1b[31mASSERTION FAIL AT \x1b[33m%s:%d (TYPE: %d)\x1b[m:\n\t%s\n", filename, line, type, message);
@@ -699,13 +731,17 @@ void MyAssertHandler(const char *filename, int line, int type, const char *fmt, 
     Com_Printf(CON_CHANNEL_SYSTEM, "%s", assertMessage);
     Com_Printf(CON_CHANNEL_SYSTEM, "ASSERTEND ---------------------------------------------------------------------\n");
     if (QuitOnError())
+    {
         ExitProcess(0xFFFFFFFF);
+    }
     CopyMessageToClipboard();
     shouldBreak = AssertNotify(type, FIRST_TIME);
     isHandlingAssert = 0;
     Sys_LeaveCriticalSection(CRITSECT_ASSERT);
     if (shouldBreak)
+    {
         DebugBreak();
+    }
 #else
 
 #ifdef KISAK_RADIANT
@@ -718,18 +754,18 @@ void MyAssertHandler(const char *filename, int line, int type, const char *fmt, 
     {
         char m[1024];
         va_list va;
-        va_start( va, fmt );
-        _vsnprintf( m, sizeof( m ), fmt ? fmt : "", va );
-        va_end( va );
+        va_start(va, fmt);
+        _vsnprintf(m, sizeof(m), fmt ? fmt : "", va);
+        va_end(va);
         m[1023] = 0;
         char tmp[MAX_PATH], p2[MAX_PATH];
-        GetTempPathA( sizeof( tmp ), tmp );
-        _snprintf( p2, sizeof( p2 ), "%sradiant_firstlight.log", tmp );
-        FILE *f = fopen( p2, "a" );
-        if ( f )
+        GetTempPathA(sizeof(tmp), tmp);
+        _snprintf(p2, sizeof(p2), "%sradiant_firstlight.log", tmp);
+        FILE *f = fopen(p2, "a");
+        if (f)
         {
-            fprintf( f, "ASSERT FAIL %s:%d (type %d): %s\n", filename ? filename : "?", line, type, m );
-            fclose( f );
+            fprintf(f, "ASSERT FAIL %s:%d (type %d): %s\n", filename ? filename : "?", line, type, m);
+            fclose(f);
         }
     }
 #endif

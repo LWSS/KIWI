@@ -123,6 +123,6 @@ void Win_UpdateThreadLock();
 extern void *g_threadValues[THREAD_CONTEXT_COUNT][4];
 extern DWORD threadId[THREAD_CONTEXT_COUNT];
 extern HANDLE threadHandle[THREAD_CONTEXT_COUNT];
-extern uint s_affinityMaskForProcess;
+extern uintptr_t s_affinityMaskForProcess;
 extern uint s_cpuCount;
-extern uint s_affinityMaskForCpu[4];
+extern uintptr_t s_affinityMaskForCpu[4];

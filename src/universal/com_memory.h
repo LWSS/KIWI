@@ -16,7 +16,7 @@ struct TempMemInfo // sizeof=0x28
     mem_track_t data;                   // ...
 };
 
-void __cdecl Hunk_AddAsset(XAssetHeader header, _DWORD *data);
+void __cdecl Hunk_AddAsset(XAssetHeader header, void *data);
 
 void Com_TouchMemory();
 
@@ -61,15 +61,15 @@ struct HunkUser // sizeof=0x24
     HunkUser* current;
     HunkUser* next;
     int maxSize;
-    int end;
-    int pos;
+    uintptr_t end;
+    uintptr_t pos;
     const char* name;
     bool fixed;
     bool tempMem;
     // padding byte
     // padding byte
     int type;
-    uint8_t buf[1];
+    alignas(32) uint8_t buf[1];
     // padding byte
     // padding byte
     // padding byte

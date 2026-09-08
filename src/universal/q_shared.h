@@ -62,12 +62,16 @@
 #ifdef NDEBUG
 #ifdef _M_IX86
 #define	CPUSTRING	"win-x86"
+#elif defined _M_X64
+#define CPUSTRING "win-x64"
 #elif defined _M_ALPHA
 #define	CPUSTRING	"win-AXP"
 #endif
 #else
 #ifdef _M_IX86
 #define	CPUSTRING	"win-x86-debug"
+#elif defined _M_X64
+#define CPUSTRING "win-x64-debug"
 #elif defined _M_ALPHA
 #define	CPUSTRING	"win-AXP-debug"
 #endif
@@ -506,27 +510,27 @@ enum DvarFlags : uint16
 
 union DvarValue 
 {                
-	DvarValue()
+	DvarValue() : vector{}
 	{
 		integer = 0;
 	}
-	DvarValue(int i)
+	DvarValue(int i) : vector{}
 	{
 		integer = i;
 	}
-	DvarValue(bool b)
+	DvarValue(bool b) : vector{}
 	{
 		enabled = b;
 	}
-	DvarValue(float f)
+	DvarValue(float f) : vector{}
 	{
 		value = f;
 	}
-	DvarValue(const char *str)
+	DvarValue(const char *str) : vector{}
 	{
 		string = str;
 	}
-	DvarValue(char *str)
+	DvarValue(char *str) : vector{}
 	{
 		string = str;
 	}
@@ -561,17 +565,17 @@ struct DvarLimits_Vector
 union DvarLimits
 {
 	// LWSS: KISAKTODO double check this...
-	DvarLimits()
+	DvarLimits() : enumeration{}
 	{
 		integer.min = INT_MIN;
 		integer.max = INT_MAX;
 	}
-	DvarLimits(uint64 val)
+	DvarLimits(uint64 val) : enumeration{}
 	{
 		integer.max = HIDWORD(val);
 		integer.min = LODWORD(val);
 	}
-	DvarLimits(int min, int max)
+	DvarLimits(int min, int max) : enumeration{}
 	{
 		integer.min = min; 
 		integer.max = max;
@@ -892,7 +896,7 @@ struct StringTable // sizeof=0x10
 	int rowCount;
 	const char **values;
 };
-static_assert(sizeof(StringTable) == 16);
+static_assert(sizeof(StringTable) == (sizeof(void *) == 8 ? 24 : 16));
 
 const char *__cdecl StringTable_GetColumnValueForRow(const StringTable *table, int row, int column);
 const char *__cdecl StringTable_Lookup(

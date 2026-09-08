@@ -58,4 +58,4 @@ const char* __cdecl MemFile_ReadCString(MemoryFile* memFile);
 void __cdecl MemFile_ReadData(MemoryFile* memFile, int byteCount, uint8_t* p);
 uint8_t __cdecl MemFile_ReadByteInternal(MemoryFile* memFile);
 void MemFile_Shutdown(MemoryFile *memFile);
-uint8_t *MemFile_CopySegments(MemoryFile *memFile, int index, void *buf);
+size_t MemFile_CopySegments(MemoryFile *memFile, int index, void *buf);

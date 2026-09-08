@@ -609,9 +609,9 @@ SndCurve *__cdecl Com_RegisterSoundAliasVolumeFalloffCurve(const char *filename,
     for (i = 0; i < 16; ++i)
     {
         // KISAKTODO: PSYCHO NEGA-ARRAY
-        if (*(_DWORD *)&g_sa.volumeFalloffCurveNames[-18][72 * i] && !I_stricmp(filename, *(const char**)&g_sa.volumeFalloffCurveNames[-18][72 * i]))
+        if (g_sa.volumeFalloffCurves[i].filename && !I_stricmp(filename, g_sa.volumeFalloffCurves[i].filename))
         {
-            return (SndCurve *)&g_sa.volumeFalloffCurveNames[-18][72 * i];
+            return &g_sa.volumeFalloffCurves[i];
         }
     }
     Com_Error(ERR_DROP, "Sound alias file %s: Volume Falloff Curve %s not found.", sourceFile, filename);
@@ -853,16 +853,17 @@ void __cdecl Com_AddBuildSoundAlias(snd_alias_build_s *build)
 
 void __cdecl Com_LoadSoundAliasFile(const char *loadspec, const char *loadspecCurGame, const char *sourceFile)
 {
-    int bHasName; // [esp+4h] [ebp-620h]
-    int bHasFile; // [esp+8h] [ebp-61Ch]
+    int bHasName;      // [esp+4h] [ebp-620h]
+    int bHasFile;      // [esp+8h] [ebp-61Ch]
     char filename[64]; // [esp+Ch] [ebp-618h] BYREF
-    char *file; // [esp+4Ch] [ebp-5D8h] BYREF
-    const char *ptr[257]; // [esp+50h] [ebp-5D4h] BYREF
-    snd_alias_build_s alias; // [esp+454h] [ebp-1D0h] BYREF
-    const char *token; // [esp+5F4h] [ebp-30h]
-    int i; // [esp+5F8h] [ebp-2Ch]
-    char isFieldSet[32]; // [esp+5FCh] [ebp-28h] BYREF
-    int iColCount; // [esp+620h] [ebp-4h]
+    char *file;        // [esp+4Ch] [ebp-5D8h] BYREF
+    const char *cursor;
+    snd_alias_members_t columns[256]; // [esp+50h] [ebp-5D4h] BYREF
+    snd_alias_build_s alias;          // [esp+454h] [ebp-1D0h] BYREF
+    const char *token;                // [esp+5F4h] [ebp-30h]
+    int i;                            // [esp+5F8h] [ebp-2Ch]
+    char isFieldSet[32];              // [esp+5FCh] [ebp-28h] BYREF
+    int iColCount;                    // [esp+620h] [ebp-4h]
 
     memset((uint8_t *)&alias, 0, sizeof(alias));
     Com_sprintf(filename, 0x40u, "soundaliases/%s", sourceFile);
@@ -883,13 +884,15 @@ void __cdecl Com_LoadSoundAliasFile(const char *loadspec, const char *loadspecCu
         }
         Com_BeginParseSession(filename);
         Com_SetCSV(1);
-        ptr[0] = file;
+        cursor = file;
         iColCount = 0;
         while (1)
         {
-            token = (const char *)Com_Parse(ptr);
-            if (!ptr[0])
+            token = (const char *)Com_Parse(&cursor);
+            if (!cursor)
+            {
                 break;
+            }
             if (*token && *token != 35)
             {
                 if (iColCount)
@@ -900,21 +903,26 @@ void __cdecl Com_LoadSoundAliasFile(const char *loadspec, const char *loadspecCu
                     while (1)
                     {
                         if (*token)
+                        {
                             Com_LoadSoundAliasField(
                                 loadspec,
                                 loadspecCurGame,
                                 sourceFile,
                                 (char *)token,
-                                (snd_alias_members_t)(int)ptr[i + 1],
+                                columns[i],
                                 isFieldSet,
                                 &alias);
+                        }
                         if (++i == iColCount)
+                        {
                             break;
-                        token = (const char *)Com_ParseOnLine(ptr);
+                        }
+                        token = (const char *)Com_ParseOnLine(&cursor);
                     }
                     if (!isFieldSet[1] || !isFieldSet[3])
                     {
                         if (saLoadObjGlob.tempAliases)
+                        {
                             Com_PrintError(
                                 CON_CHANNEL_SOUND,
                                 "ERROR: Sound alias file '%s': alias entry missing name and/or file. Error details:\n"
@@ -923,7 +931,9 @@ void __cdecl Com_LoadSoundAliasFile(const char *loadspec, const char *loadspecCu
                                 alias.aliasName,
                                 alias.soundFile,
                                 saLoadObjGlob.tempAliases->aliasName);
+                        }
                         else
+                        {
                             Com_PrintError(
                                 CON_CHANNEL_SOUND,
                                 "ERROR: Sound alias file '%s': alias entry missing name and/or file. Error details:\n"
@@ -932,12 +942,17 @@ void __cdecl Com_LoadSoundAliasFile(const char *loadspec, const char *loadspecCu
                                 alias.aliasName,
                                 alias.soundFile,
                                 "");
+                        }
                         break;
                     }
                     if (!isFieldSet[16])
+                    {
                         alias.keep = Com_SoundAliasLoadSpec(loadspec, loadspecCurGame, "", sourceFile);
+                    }
                     if (alias.keep && !alias.error && Com_FinishBuildingSoundAlias(&alias))
+                    {
                         Com_AddBuildSoundAlias(&alias);
+                    }
                 }
                 else
                 {
@@ -945,12 +960,12 @@ void __cdecl Com_LoadSoundAliasFile(const char *loadspec, const char *loadspecCu
                     bHasFile = 0;
                     while (2)
                     {
-                        ptr[iColCount + 1] = 0;
+                        columns[iColCount] = (snd_alias_members_t)0;
                         for (i = 1; i < 29; ++i)
                         {
                             if (!I_stricmp(g_pszSndAliasKeyNames[i], token))
                             {
-                                ptr[iColCount + 1] = (const char *)i;
+                                columns[iColCount] = (snd_alias_members_t)i;
                                 if (i == 1)
                                 {
                                     bHasName = 1;
@@ -962,9 +977,9 @@ void __cdecl Com_LoadSoundAliasFile(const char *loadspec, const char *loadspecCu
                                 break;
                             }
                         }
-                        if (++iColCount != 256 && ptr[0] && *ptr[0] != 10)
+                        if (++iColCount != 256 && cursor && *cursor != 10)
                         {
-                            token = (const char *)Com_ParseOnLine(ptr);
+                            token = (const char *)Com_ParseOnLine(&cursor);
                             continue;
                         }
                         break;
@@ -977,7 +992,7 @@ void __cdecl Com_LoadSoundAliasFile(const char *loadspec, const char *loadspecCu
                     }
                 }
             }
-            Com_SkipRestOfLine(ptr);
+            Com_SkipRestOfLine(&cursor);
         }
         Com_EndParseSession();
     }
@@ -1370,7 +1385,7 @@ void __cdecl Com_AddLoadedSoundFile(SoundFile *soundFile, char *fileName)
     else
     {
         soundFile->exists = 0;
-        soundFile->u.loadSnd = (LoadedSound*)CM_Hunk_Alloc(0x2Cu, "_loaded", 15);
+        soundFile->u.loadSnd = (LoadedSound *)CM_Hunk_Alloc(sizeof(LoadedSound), "_loaded", 15);
         soundFile->u.loadSnd->name = fileName;
     }
 }
@@ -1391,38 +1406,38 @@ void __cdecl Com_AddStreamedSoundFile(SoundFile *soundFile, char *fileName)
 
 void __cdecl Com_MakeSoundAliasesPermanent(snd_alias_list_t *aliasInfo, SoundFileInfo *soundFileInfo)
 {
-    char v2; // [esp+13h] [ebp-D5h]
-    char *v3; // [esp+18h] [ebp-D0h]
-    char *soundFile; // [esp+1Ch] [ebp-CCh]
-    char v5; // [esp+33h] [ebp-B5h]
-    char *v6; // [esp+38h] [ebp-B0h]
-    char *subtitleText; // [esp+3Ch] [ebp-ACh]
-    char v8; // [esp+53h] [ebp-95h]
-    char *v9; // [esp+58h] [ebp-90h]
-    char *aliasName; // [esp+5Ch] [ebp-8Ch]
-    bool v11; // [esp+80h] [ebp-68h]
-    bool v12; // [esp+84h] [ebp-64h]
-    bool v13; // [esp+88h] [ebp-60h]
-    snd_alias_type_t eType; // [esp+9Ch] [ebp-4Ch]
-    char *fileName; // [esp+A0h] [ebp-48h]
-    int savedBytesCount; // [esp+A4h] [ebp-44h]
-    char *strings; // [esp+B0h] [ebp-38h]
-    SoundFile *currentSound; // [esp+B4h] [ebp-34h]
-    char *currentName; // [esp+B8h] [ebp-30h]
-    char *currentNamea; // [esp+B8h] [ebp-30h]
-    char *currentNameb; // [esp+B8h] [ebp-30h]
-    char *subtitle; // [esp+BCh] [ebp-2Ch]
-    uint aliasCount; // [esp+C0h] [ebp-28h]
-    snd_alias_build_s *other; // [esp+C4h] [ebp-24h]
+    char v2;                     // [esp+13h] [ebp-D5h]
+    char *v3;                    // [esp+18h] [ebp-D0h]
+    char *soundFile;             // [esp+1Ch] [ebp-CCh]
+    char v5;                     // [esp+33h] [ebp-B5h]
+    char *v6;                    // [esp+38h] [ebp-B0h]
+    char *subtitleText;          // [esp+3Ch] [ebp-ACh]
+    char v8;                     // [esp+53h] [ebp-95h]
+    char *v9;                    // [esp+58h] [ebp-90h]
+    char *aliasName;             // [esp+5Ch] [ebp-8Ch]
+    bool v11;                    // [esp+80h] [ebp-68h]
+    bool v12;                    // [esp+84h] [ebp-64h]
+    bool v13;                    // [esp+88h] [ebp-60h]
+    snd_alias_type_t eType;      // [esp+9Ch] [ebp-4Ch]
+    char *fileName;              // [esp+A0h] [ebp-48h]
+    int savedBytesCount;         // [esp+A4h] [ebp-44h]
+    char *strings;               // [esp+B0h] [ebp-38h]
+    SoundFile *currentSound;     // [esp+B4h] [ebp-34h]
+    char *currentName;           // [esp+B8h] [ebp-30h]
+    char *currentNamea;          // [esp+B8h] [ebp-30h]
+    char *currentNameb;          // [esp+B8h] [ebp-30h]
+    char *subtitle;              // [esp+BCh] [ebp-2Ch]
+    uint aliasCount;             // [esp+C0h] [ebp-28h]
+    snd_alias_build_s *other;    // [esp+C4h] [ebp-24h]
     snd_alias_list_t *aliasList; // [esp+C8h] [ebp-20h]
-    snd_alias_build_s *build; // [esp+CCh] [ebp-1Ch]
-    snd_alias_build_s *builda; // [esp+CCh] [ebp-1Ch]
-    snd_alias_build_s *buildb; // [esp+CCh] [ebp-1Ch]
-    snd_alias_t *alias; // [esp+D0h] [ebp-18h]
-    int soundCount; // [esp+D4h] [ebp-14h]
-    int bytesCount; // [esp+D8h] [ebp-10h]
-    int bytesCounta; // [esp+D8h] [ebp-10h]
-    uint stringBytesCount; // [esp+E0h] [ebp-8h]
+    snd_alias_build_s *build;    // [esp+CCh] [ebp-1Ch]
+    snd_alias_build_s *builda;   // [esp+CCh] [ebp-1Ch]
+    snd_alias_build_s *buildb;   // [esp+CCh] [ebp-1Ch]
+    snd_alias_t *alias;          // [esp+D0h] [ebp-18h]
+    int soundCount;              // [esp+D4h] [ebp-14h]
+    int bytesCount;              // [esp+D8h] [ebp-10h]
+    int bytesCounta;             // [esp+D8h] [ebp-10h]
+    uint stringBytesCount;       // [esp+E0h] [ebp-8h]
 
     soundFileInfo->count = 0;
     aliasInfo->count = 0;
@@ -1461,7 +1476,9 @@ void __cdecl Com_MakeSoundAliasesPermanent(snd_alias_list_t *aliasInfo, SoundFil
                     else
                     {
                         if (v12 && !v13)
+                        {
                             Com_SameFileWarning(build, other);
+                        }
                         other = build;
                         currentName = build->soundFile;
                         build->pSameSoundFile = 0;
@@ -1492,18 +1509,22 @@ void __cdecl Com_MakeSoundAliasesPermanent(snd_alias_list_t *aliasInfo, SoundFil
                             currentNamea = builda->aliasName;
                         }
                         if (builda->subtitleText)
+                        {
                             stringBytesCount += strlen(builda->subtitleText) + 1;
+                        }
                     }
                     Com_InitSoundAliasHash(aliasCount);
-                    aliasInfo->head = (snd_alias_t*)CM_Hunk_Alloc(92 * saLoadObjGlob.tempAliasCount, "_aliases", 15);
-                    soundFileInfo->files = (SoundFile*)CM_Hunk_Alloc(sizeof(SoundFile) * soundCount, "_sound files", 15);
-                    strings = (char*)CM_Hunk_Alloc(stringBytesCount, "_strings", 15);
+                    aliasInfo->head = (snd_alias_t *)CM_Hunk_Alloc(sizeof(snd_alias_t) * saLoadObjGlob.tempAliasCount, "_aliases", 15);
+                    soundFileInfo->files = (SoundFile *)CM_Hunk_Alloc(sizeof(SoundFile) * soundCount, "_sound files", 15);
+                    strings = (char *)CM_Hunk_Alloc(stringBytesCount, "_strings", 15);
                     currentNameb = 0;
                     aliasList = 0;
-                    for (buildb = saLoadObjGlob.tempAliases; ; buildb = buildb->pNext)
+                    for (buildb = saLoadObjGlob.tempAliases;; buildb = buildb->pNext)
                     {
                         if (!buildb)
+                        {
                             return;
+                        }
                         if (!currentNameb || I_stricmp(currentNameb, buildb->aliasName))
                         {
                             currentNameb = strings;
@@ -1535,7 +1556,7 @@ void __cdecl Com_MakeSoundAliasesPermanent(snd_alias_list_t *aliasInfo, SoundFil
                         alias = &aliasInfo->head[aliasInfo->count];
                         if (!aliasList || I_stricmp(aliasList->head->aliasName, currentNameb))
                         {
-                            aliasList = (snd_alias_list_t*)CM_Hunk_Alloc(0xCu, "_alias list", 15);
+                            aliasList = (snd_alias_list_t *)CM_Hunk_Alloc(sizeof(snd_alias_list_t), "_alias list", 15);
                             if (!Com_AddAliasList(currentNameb, aliasList))
                             {
                                 aliasList = 0;
@@ -1565,9 +1586,13 @@ void __cdecl Com_MakeSoundAliasesPermanent(snd_alias_list_t *aliasInfo, SoundFil
                             iassert(fileName);
                             currentSound->type = eType;
                             if (eType == SAT_LOADED)
+                            {
                                 Com_AddLoadedSoundFile(currentSound, fileName);
+                            }
                             else
+                            {
                                 Com_AddStreamedSoundFile(currentSound, fileName);
+                            }
                             ++soundFileInfo->count;
                         }
                         buildb->permSoundFile = currentSound;
@@ -1704,22 +1729,22 @@ void __cdecl Com_SetChannelMapEntry(
 void Com_InitSoundDevGuiGraphs_LoadObj()
 {
     char devguiPath[256]; // [esp+0h] [ebp-108h] BYREF
-    int i; // [esp+104h] [ebp-4h]
+    int i;                // [esp+104h] [ebp-4h]
 
     iassert(g_sa.curvesInitialized);
     for (i = 1; i < 16; ++i)
     {
-        if (*(_DWORD *)&g_sa.volumeFalloffCurveNames[-18][72 * i])
+        if (g_sa.volumeFalloffCurves[i].filename)
         {
 #ifndef ARRAYSIZE
 #define ARRAYSIZE(x) (sizeof(x) / sizeof(x[0]))
 #endif
-            snprintf(devguiPath, ARRAYSIZE(devguiPath), "Main/Snd:6/Volume Falloff Curves/%s:%d", *(const char**)&g_sa.volumeFalloffCurveNames[-18][72 * i], i);
+            snprintf(devguiPath, ARRAYSIZE(devguiPath), "Main/Snd:6/Volume Falloff Curves/%s:%d", g_sa.volumeFalloffCurves[i].filename, i);
             g_sa.curveDevGraphs[i].knotCountMax = 8;
             g_sa.curveDevGraphs[i].knots = g_sa.volumeFalloffCurves[i].knots;
             g_sa.curveDevGraphs[i].knotCount = &g_sa.volumeFalloffCurves[i].knotCount;
             g_sa.curveDevGraphs[i].eventCallback = Com_VolumeFalloffCurveGraphEventCallback;
-            g_sa.curveDevGraphs[i].data = (void*)i;
+            g_sa.curveDevGraphs[i].data = (void *)(intptr_t)i;
             g_sa.curveDevGraphs[i].disableEditingEndPoints = 1;
             DevGui_AddGraph(devguiPath, &g_sa.curveDevGraphs[i]);
         }

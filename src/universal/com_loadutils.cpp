@@ -34,20 +34,31 @@ const char *__cdecl Com_LoadInfoString_FastFile(const char *fileName, const char
 
 char *__cdecl Com_LoadInfoString_LoadObj(char *fileName, const char *fileDesc, const char *ident, char *loadBuffer)
 {
-    uint v5; // [esp+0h] [ebp-1Ch]
+    uint v5;        // [esp+0h] [ebp-1Ch]
     int fileHandle; // [esp+14h] [ebp-8h] BYREF
-    int fileLen; // [esp+18h] [ebp-4h]
+    int fileLen;    // [esp+18h] [ebp-4h]
 
     fileLen = FS_FOpenFileByMode(fileName, &fileHandle, FS_READ);
     if (fileLen < 0)
+    {
         Com_Error(ERR_DROP, "Could not load %s [%s]", fileDesc, fileName);
+    }
     v5 = strlen(ident);
+    if (v5 >= 0x2000 || v5 > (uint)fileLen)
+    {
+        FS_FCloseFile(fileHandle);
+        Com_Error(ERR_DROP, "File [%s] is too short or has an invalid identifier", fileName);
+    }
     FS_Read((uint8_t *)loadBuffer, v5, fileHandle);
     loadBuffer[v5] = 0;
     if (strncmp(loadBuffer, ident, v5))
+    {
         Com_Error(ERR_DROP, "File [%s] is not a %s", fileName, fileDesc);
+    }
     if ((int)(fileLen - v5) >= 0x2000)
+    {
         Com_Error(ERR_DROP, "File [%s] is too long of a %s to parse", fileName, fileDesc);
+    }
     FS_Read((uint8_t *)loadBuffer, fileLen - v5, fileHandle);
     loadBuffer[fileLen - v5] = 0;
     FS_FCloseFile(fileHandle);

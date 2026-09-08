@@ -289,56 +289,8 @@ void __cdecl Com_Memcpy(void *dest_p, const void *src_p, const size_t count)
 }
 
 
-void __cdecl Com_Memset(void *dest_p, const int val, const size_t count)
+void __cdecl Com_Memset(void *dest, int value, size_t count)
 {
-    uint *dest = (uint *)dest_p;
-
-    uint *v3; // edx
-    int v4; // eax
-    int v5; // eax
-    int v6; // ecx
-    char *v7; // ebx
-
-    if (count >= 8)
-    {
-        _copyDWord(dest, val | (val << 8) | ((val | (val << 8)) << 16), count / 4);
-        if ((count & 3) != 0)
-        {
-            v7 = (char *)dest + (count & 0xFFFFFFFC);
-            if ((count & 3u) < 2)
-            {
-                if ((count & 3) != 0)
-                    *v7 = val;
-            }
-            else
-            {
-                *(_WORD *)v7 = val | ((_WORD)val << 8);
-                if ((count & 3) != 2)
-                    v7[2] = val;
-            }
-        }
-    }
-    else
-    {
-        v3 = dest;
-        v4 = val;
-        BYTE1(v4) = val;
-        v5 = (uint16_t)v4 + (v4 << 16);
-        v6 = count;
-        if (count >= 4)
-        {
-            *dest = v5;
-            v3 = dest + 1;
-            v6 = count - 4;
-        }
-        if (v6 >= 2)
-        {
-            *(_WORD *)v3 = v5;
-            v3 = (uint *)((char *)v3 + 2);
-            v6 -= 2;
-        }
-        if (v6)
-            *(_BYTE *)v3 = v5;
-    }
+    memset(dest, value, count);
 }
 

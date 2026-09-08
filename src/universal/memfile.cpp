@@ -220,16 +220,18 @@ void MemFile_StartSegment(MemoryFile* memFile, int index)
     }
 }
 
-void __cdecl MemFile_deflateInit(uint8_t* next_out, uint avail_out, bool compress)
+void __cdecl MemFile_deflateInit(uint8_t *next_out, uint avail_out, bool compress)
 {
     AssertStreamMode(MEM_FILE_MODE_DEFAULT);
     if (compress)
     {
-        memset((uint8_t*)&stream, 0, sizeof(stream));
+        memset((uint8_t *)&stream, 0, sizeof(stream));
         stream.next_out = next_out;
         stream.avail_out = avail_out;
-        if (deflateInit_(&stream, 1, "1.1.4", 52))
+        if (deflateInit_(&stream, 1, ZLIB_VERSION, sizeof(z_stream_s)))
+        {
             MyAssertHandler(".\\universal\\memfile.cpp", 224, 0, "%s", "err == Z_OK");
+        }
     }
     SetStreamMode(MEM_FILE_MODE_DEFLATE);
     g_compress = compress;
@@ -305,21 +307,28 @@ uint __cdecl MemFile_deflateEnd(bool compress)
     return err;
 }
 
-void __cdecl MemFile_MoveToSegment(MemoryFile* memFile, int index)
+void __cdecl MemFile_MoveToSegment(MemoryFile *memFile, int index)
 {
-    uint8_t* data; // [esp+4h] [ebp-8h]
-    uint len; // [esp+8h] [ebp-4h]
+    uint8_t *data; // [esp+4h] [ebp-8h]
+    uint len;      // [esp+8h] [ebp-4h]
 
     vassert(((index >= -1) && (index < SAVE_SEGMENT_COUNT)), "(index) = %i", index);
     if (!memFile->memoryOverflow)
     {
         if (memFile->segmentIndex >= 0 && MemFile_inflateEnd(memFile->compress))
+        {
             MyAssertHandler(".\\universal\\memfile.cpp", 454, 0, "%s", "err == Z_OK");
+        }
         memFile->segmentIndex = index;
         if (index >= 0)
         {
             data = MemFile_GetSegmentAddess(memFile, index);
-            len = *(uint*)data - 4;
+            memcpy(&len, data, sizeof(uint));
+            if (len < sizeof(uint) || len > (size_t)memFile->bufferSize - (data - memFile->buffer))
+            {
+                Com_Error(ERR_DROP, "MemFile_MoveToSegment: invalid segment length");
+            }
+            len -= sizeof(uint);
             memFile->bytesUsed = data - memFile->buffer + 4;
             MemFile_inflateInit(&memFile->buffer[memFile->bytesUsed], len, memFile->compress);
             g_nonZeroCount = 0;
@@ -328,16 +337,18 @@ void __cdecl MemFile_MoveToSegment(MemoryFile* memFile, int index)
     }
 }
 
-void __cdecl MemFile_inflateInit(uint8_t* next_in, uint len, bool compress)
+void __cdecl MemFile_inflateInit(uint8_t *next_in, uint len, bool compress)
 {
     AssertStreamMode(MEM_FILE_MODE_DEFAULT);
     if (compress)
     {
-        memset((uint8_t*)&stream, 0, sizeof(stream));
+        memset((uint8_t *)&stream, 0, sizeof(stream));
         stream.next_in = next_in;
         stream.avail_in = len;
-        if (inflateInit_(&stream, "1.1.4", 52))
+        if (inflateInit_(&stream, ZLIB_VERSION, sizeof(z_stream_s)))
+        {
             MyAssertHandler(".\\universal\\memfile.cpp", 387, 0, "%s", "err == Z_OK");
+        }
     }
     SetStreamMode(MEM_FILE_MODE_INFLATE);
     g_compress = compress;
@@ -356,40 +367,31 @@ int __cdecl MemFile_inflateEnd(bool compress)
     return err;
 }
 
-uint8_t* __cdecl MemFile_GetSegmentAddess(MemoryFile* memFile, uint index)
+uint8_t *MemFile_GetSegmentAddess(MemoryFile *memFile, uint index)
 {
-    int segmentStart; // [esp+0h] [ebp-4h]
-
-    if (index >= 8)
-        MyAssertHandler(
-            ".\\universal\\memfile.cpp",
-            418,
-            0,
-            "%s\n\t(index) = %i",
-            "((index >= 0) && (index < SAVE_SEGMENT_COUNT))",
-            index);
-    iassert(!memFile->memoryOverflow);
-    segmentStart = 0;
-    while (index)
+    if (index >= 8 || memFile->memoryOverflow || memFile->bufferSize < (int)sizeof(int))
     {
-        if (segmentStart + 4 > memFile->bufferSize)
-            MyAssertHandler(
-                ".\\universal\\memfile.cpp",
-                424,
-                0,
-                "%s",
-                "segmentStart + static_cast< int >( sizeof( int ) ) <= memFile->bufferSize");
-        segmentStart += *(uint*)&memFile->buffer[segmentStart];
-        --index;
+        Com_Error(ERR_DROP, "Invalid memfile segment");
     }
-    if (segmentStart + 4 > memFile->bufferSize)
-        MyAssertHandler(
-            ".\\universal\\memfile.cpp",
-            429,
-            0,
-            "%s",
-            "segmentStart + static_cast< int >( sizeof( int ) ) <= memFile->bufferSize");
-    return &memFile->buffer[segmentStart];
+    size_t offset = 0;
+    for (uint segment = 0;; ++segment)
+    {
+        if (offset > (size_t)memFile->bufferSize - sizeof(int))
+        {
+            Com_Error(ERR_DROP, "Truncated memfile segment");
+        }
+        if (segment == index)
+        {
+            return memFile->buffer + offset;
+        }
+        unsigned int length;
+        memcpy(&length, memFile->buffer + offset, sizeof(unsigned int));
+        if (length < sizeof(int) || length > (size_t)memFile->bufferSize - offset)
+        {
+            Com_Error(ERR_DROP, "Invalid memfile segment length");
+        }
+        offset += length;
+    }
 }
 
 void __cdecl MemFile_WriteError(MemoryFile* memFile)
@@ -852,16 +854,19 @@ void MemFile_Shutdown(MemoryFile *memFile)
     memFile->buffer = 0;
 }
 
-uint8_t *MemFile_CopySegments(MemoryFile *memFile, int index, void *buf)
+size_t MemFile_CopySegments(MemoryFile *memFile, int index, void *buf)
 {
-    const uint8_t *SegmentAddess; // r4
-    uint8_t *v7; // r31
-
     iassert(!memFile->memoryOverflow);
-
-    SegmentAddess = MemFile_GetSegmentAddess(memFile, index);
-    v7 = &memFile->buffer[memFile->bufferSize - (_DWORD)SegmentAddess];
+    const uint8_t *segmentAddress = MemFile_GetSegmentAddess(memFile, index);
+    size_t offset = (uintptr_t)segmentAddress - (uintptr_t)memFile->buffer;
+    if (memFile->bufferSize < 0 || offset > (size_t)memFile->bufferSize)
+    {
+        Com_Error(ERR_DROP, "Invalid memfile segment address");
+    }
+    size_t size = (size_t)memFile->bufferSize - offset;
     if (buf)
-        memcpy(buf, SegmentAddess, (size_t)v7);
-    return v7;
+    {
+        memcpy(buf, segmentAddress, size);
+    }
+    return size;
 }

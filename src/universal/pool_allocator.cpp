@@ -1,24 +1,29 @@
 #include <universal/q_shared.h>
 #include "pool_allocator.h"
 #include "assertive.h"
+#include <qcommon/qcommon.h>
 #include <cstdint>
 
 void __cdecl Pool_Init(char *pool, pooldata_t *pooldata, uint itemSize, uint itemCount)
 {
-    uint itemIndex; // [esp+4h] [ebp-4h]
-
     iassert(pool);
     iassert(pooldata);
-    if (itemSize < 4)
-        MyAssertHandler(".\\universal\\pool_allocator.cpp", 18, 0, "%s", "itemSize >= sizeof( byte * )");
-    iassert(itemCount >= 2);
-    pooldata->firstFree = pool;
-
-    for (itemIndex = 0; itemIndex < itemCount - 1; ++itemIndex)
-        *(uint *)&pool[itemSize * itemIndex] = (uint)&pool[itemSize * (itemIndex + 1)];
-
-    *(uint *)&pool[itemSize * itemIndex] = 0;
+    pooldata->firstFree = 0;
     pooldata->activeCount = 0;
+    if (!itemCount)
+    {
+        return;
+    }
+    if (itemSize < sizeof(freenode) || itemSize % alignof(freenode) || (uintptr_t)pool % alignof(freenode))
+    {
+        Com_Error(ERR_FATAL, "Invalid pool element size or alignment");
+    }
+    pooldata->firstFree = pool;
+    for (uint itemIndex = 0; itemIndex < itemCount; ++itemIndex)
+    {
+        freenode *item = (freenode *)(pool + (size_t)itemSize * itemIndex);
+        item->next = itemIndex + 1 < itemCount ? (freenode *)(pool + (size_t)itemSize * (itemIndex + 1)) : 0;
+    }
 }
 
 freenode *__cdecl Pool_Alloc(pooldata_t *pooldata)

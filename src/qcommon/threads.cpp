@@ -16,7 +16,7 @@
 #endif
 #include <gfx_d3d/rb_backend.h>
 
-uint Win_InitThreads();
+uintptr_t Win_InitThreads();
 
 
 // NOTE(mrsteyk): keep in mind this is 4 elements long.
@@ -46,9 +46,9 @@ static ThreadFuncFn threadFunc[THREAD_CONTEXT_COUNT];
 void *g_threadValues[THREAD_CONTEXT_COUNT][4];
 DWORD threadId[THREAD_CONTEXT_COUNT];
 HANDLE threadHandle[THREAD_CONTEXT_COUNT];
-uint s_affinityMaskForProcess;
+uintptr_t s_affinityMaskForProcess;
 uint s_cpuCount;
-uint s_affinityMaskForCpu[4];
+uintptr_t s_affinityMaskForCpu[4];
 
 static int g_databaseThreadOwner;
 

@@ -505,33 +505,45 @@ uint8_t __cdecl I_CleanChar(uint8_t character)
 
 int Com_sprintf(char *dest, uint size, const char *fmt, ...)
 {
+    if (!size)
+    {
+        return -1;
+    }
     int result; // eax
     va_list va; // [esp+1Ch] [ebp+14h] BYREF
 
     va_start(va, fmt);
     result = _vsnprintf(dest, size, fmt, va);
+    va_end(va);
     dest[size - 1] = 0;
     return result;
 }
 
 int Com_sprintfPos(char *dest, int destSize, int *destPos, const char *fmt, ...)
 {
-    int len; // [esp+4h] [ebp-Ch]
-    char *destMod; // [esp+8h] [ebp-8h]
+    int len;          // [esp+4h] [ebp-Ch]
+    char *destMod;    // [esp+8h] [ebp-8h]
     uint destModSize; // [esp+Ch] [ebp-4h]
-    va_list va; // [esp+28h] [ebp+18h] BYREF
+    va_list va;       // [esp+28h] [ebp+18h] BYREF
 
-    va_start(va, fmt);
-    if (*destPos >= destSize - 1)
+    if (destSize <= 0 || *destPos < 0 || *destPos >= destSize - 1)
+    {
         return -1;
+    }
+    va_start(va, fmt);
     destMod = &dest[*destPos];
     destModSize = destSize - *destPos;
     len = _vsnprintf(destMod, destModSize, fmt, va);
+    va_end(va);
     destMod[destModSize - 1] = 0;
     if (len == destModSize || len == -1)
+    {
         *destPos = destSize - 1;
+    }
     else
+    {
         *destPos += len;
+    }
     return len;
 }
 
@@ -757,30 +769,32 @@ void __cdecl Info_RemoveKey_Big(char *s, const char *key)
 
 bool __cdecl Info_Validate(const char *s)
 {
-    int v1; // eax
-    int v3; // eax
+    const char *v1; // eax
+    const char *v3; // eax
 
-    v1 = (int)strchr(s, 0x22u);
+    v1 = strchr(s, 0x22u);
 
     if (v1)
+    {
         return 0;
+    }
 
-    v3 = (int)strchr(s, 0x3Bu);
+    v3 = strchr(s, 0x3Bu);
 
     return v3 == 0;
 }
 
 void __cdecl Info_SetValueForKey(char *s, const char *key, const char *value)
 {
-    int v3; // eax
-    int v4; // eax
-    int v5; // eax
-    int j; // [esp+54h] [ebp-818h]
-    char c; // [esp+5Bh] [ebp-811h]
+    const char *v3;        // eax
+    const char *v4;        // eax
+    const char *v5;        // eax
+    int j;                 // [esp+54h] [ebp-818h]
+    char c;                // [esp+5Bh] [ebp-811h]
     char cleanValue[1028]; // [esp+5Ch] [ebp-810h] BYREF
-    int len; // [esp+460h] [ebp-40Ch]
-    char newi[1024]; // [esp+464h] [ebp-408h] BYREF
-    int i; // [esp+868h] [ebp-4h]
+    int len;               // [esp+460h] [ebp-40Ch]
+    char newi[1024];       // [esp+464h] [ebp-408h] BYREF
+    int i;                 // [esp+868h] [ebp-4h]
 
     iassert(value);
     if (strlen(s) < 0x400)
@@ -790,7 +804,9 @@ void __cdecl Info_SetValueForKey(char *s, const char *key, const char *value)
         {
             c = value[i];
             if (!c)
+            {
                 break;
+            }
             if (c != 92 && c != 59 && c != 34)
             {
                 iassert(j < MAX_INFO_STRING);
@@ -799,21 +815,21 @@ void __cdecl Info_SetValueForKey(char *s, const char *key, const char *value)
         }
         iassert(j < MAX_INFO_STRING);
         cleanValue[j] = 0;
-        v3 = (int)strchr(key, 0x5Cu);
+        v3 = strchr(key, 0x5Cu);
         if (v3)
         {
             Com_Printf(CON_CHANNEL_SYSTEM, "Can't use keys with a \\ key: %s value: %s", key, value);
         }
         else
         {
-            v4 = (int)strchr(key, 0x3Bu);
+            v4 = strchr(key, 0x3Bu);
             if (v4)
             {
                 Com_Printf(CON_CHANNEL_SYSTEM, "Can't use keys with a semicolon. key: %s value: %s", key, value);
             }
             else
             {
-                v5 = (int)strchr(key, 0x22u);
+                v5 = strchr(key, 0x22u);
                 if (v5)
                 {
                     Com_Printf(CON_CHANNEL_SYSTEM, "Can't use keys with a \". key: %s value: %s", key, value);
@@ -827,9 +843,13 @@ void __cdecl Info_SetValueForKey(char *s, const char *key, const char *value)
                         if (len > 0)
                         {
                             if (strlen(s) + &newi[strlen(newi) + 1] - &newi[1] < 0x400)
+                            {
                                 memcpy(&s[strlen(s)], newi, &newi[strlen(newi) + 1] - newi);
+                            }
                             else
+                            {
                                 Com_Printf(CON_CHANNEL_SYSTEM, "Info string length exceeded. key: %s value: %s Info string: %s", key, value, s);
+                            }
                         }
                         else
                         {
@@ -942,21 +962,21 @@ bool __cdecl ParseConfigStringToStructCustomSize(
     int(__cdecl *parseSpecialFieldType)(uint8_t *, const char *, const int),
     void(__cdecl *parseStrcpy)(uint8_t *, const char *))
 {
-    int v7; // eax
-    int v8; // eax
-    const FxEffectDef *v9; // eax
-    Material *v10; // eax
+    int v7;                       // eax
+    int v8;                       // eax
+    const FxEffectDef *v9;        // eax
+    Material *v10;                // eax
     snd_alias_list_t *SoundAlias; // eax
-    const char *v12; // eax
-    const char *v14; // eax
-    float v15; // [esp+0h] [ebp-2024h]
-    float v16; // [esp+4h] [ebp-2020h]
-    const char *src; // [esp+Ch] [ebp-2018h]
-    char v18; // [esp+13h] [ebp-2011h]
-    char dest[8192]; // [esp+14h] [ebp-2010h] BYREF
-    const cspField_t *v20; // [esp+2018h] [ebp-Ch]
-    int v21; // [esp+201Ch] [ebp-8h]
-    XModel *v22; // [esp+2020h] [ebp-4h]
+    const char *v12;              // eax
+    const char *v14;              // eax
+    float v15;                    // [esp+0h] [ebp-2024h]
+    float v16;                    // [esp+4h] [ebp-2020h]
+    const char *src;              // [esp+Ch] [ebp-2018h]
+    char v18;                     // [esp+13h] [ebp-2011h]
+    char dest[8192];              // [esp+14h] [ebp-2010h] BYREF
+    const cspField_t *v20;        // [esp+2018h] [ebp-Ch]
+    int v21;                      // [esp+201Ch] [ebp-8h]
+    XModel *v22;                  // [esp+2020h] [ebp-4h]
 
     v18 = 0;
     v21 = 0;
@@ -981,7 +1001,9 @@ bool __cdecl ParseConfigStringToStructCustomSize(
                 {
                     iassert(parseSpecialFieldType != NULL);
                     if (!parseSpecialFieldType(pStruct, src, v20->iFieldType))
+                    {
                         return 0;
+                    }
                 }
             }
             else
@@ -1022,15 +1044,17 @@ bool __cdecl ParseConfigStringToStructCustomSize(
 #endif
                     {
                         v9 = FX_Register(src);
-                        *(uint *)&pStruct[v20->iOffset] = (uint)v9;
+                        *(const FxEffectDef **)&pStruct[v20->iOffset] = v9;
                     }
                     break;
                 case CSPFT_XMODEL:
                     I_strncpyz(dest, src, 0x2000);
                     v22 = R_RegisterModel(dest);
-                    *(uint *)&pStruct[v20->iOffset] = (uint)v22;
+                    *(XModel **)&pStruct[v20->iOffset] = v22;
                     if (!v22)
+                    {
                         v18 = 1;
+                    }
                     break;
                 case CSPFT_MATERIAL:
 #ifdef KISAK_MP
@@ -1038,22 +1062,24 @@ bool __cdecl ParseConfigStringToStructCustomSize(
 #endif
                     {
                         v10 = Material_RegisterHandle(src, 0);
-                        *(uint *)&pStruct[v20->iOffset] = (uint)v10;
+                        *(Material **)&pStruct[v20->iOffset] = v10;
                     }
                     break;
                 case CSPFT_SOUND:
                     SoundAlias = Com_FindSoundAlias(src);
-                    *(uint *)&pStruct[v20->iOffset] = (uint)SoundAlias;
+                    *(snd_alias_list_t **)&pStruct[v20->iOffset] = SoundAlias;
                     break;
                 default:
                     if (v20->iFieldType >= CSPFT_STRING)
                     {
                         if (!alwaysfails)
+                        {
                             MyAssertHandler(
                                 ".\\universal\\q_shared.cpp",
                                 1487,
                                 0,
                                 "ParseConfigStringToStruct is out of sync with the csParseFieldType_t enum list\n");
+                        }
                     }
                     else if (!alwaysfails)
                     {

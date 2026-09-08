@@ -17,7 +17,7 @@ Coding conventions: C-style implementation, explicit `sizeof(Type)`, braces for 
 | 9 | stringed | Complete |
 | 10 | ui | Complete |
 | 11 | ui_mp | Complete |
-| 12 | universal | Pending |
+| 12 | universal | Complete |
 | 13 | win32 | Pending |
 | 14 | xanim | Pending |
 
@@ -29,6 +29,15 @@ Part 7 checkpoint: `ec0f97bc`.
 Part 8 checkpoint: `1883deb0`.
 Part 9 checkpoint: `18c58233`.
 Part 10 checkpoint: `778c83d8`.
+Part 11 checkpoint: `68c05ec8`.
+
+## Part 12: universal
+
+Audited all 47 files. Native hunk headers, user positions, page masks, pool links, scratch alignment, filesystem pointer tables/find handles, sound-alias storage, CSV column tables, enum/string dvar values and parser layouts now follow their native types. Dvar union constructors initialize all bytes, preventing uninitialized upper string-pointer bits. Physical-allocation records use named array entries. Stack traces use CaptureStackBackTrace and native map addresses instead of x86 frame assembly. Affinity masks and their qcommon declarations use uintptr_t. Radiant's excluded affinity stubs need reconciliation when that application is ported.
+
+Memfile segment sizes remain 32-bit on disk; native segment-copy counts now return size_t. Zlib initialization uses its actual stream size and version. Shared byte filling, dvar unregistration, raw info/string-table input bounds, segment validation and allocator release bounds were corrected. Selected independent fixes are in the external `12-universal-correctness.patch`.
+
+Validation: 108 configured MP/SP x86/x64 diagnostic compilation checks and four thread-integration checks pass. `test_universal.py` passes native pool exhaustion/reuse, real Windows hunk commit/growth/reset, allocation alignment and bounds, temp-header roundtrips, physical record traversal, parser marks/nesting, dvar ownership, segment copying and byte fills. `test_universal_memfile.py` builds the actual bundled zlib on both architectures and passes eight-segment compressed/uncompressed roundtrips with chunked zero/nonzero runs and strings; output bytes match across architectures. The excluded vehicle-path source is an empty SP stub; disabled legacy profiling remains disabled. No complete filesystem asset load, symbolized live crash or full game run was performed.
 
 ## Part 11: ui_mp
 

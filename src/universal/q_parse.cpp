@@ -142,42 +142,52 @@ void __cdecl Com_SetScriptWarningPrefix(const char *prefix)
 
 void Com_ScriptErrorDrop(const char *msg, ...)
 {
-    char string[4096]; // [esp+0h] [ebp-1010h] BYREF
-    char *ap; // [esp+1004h] [ebp-Ch]
-    parseInfo_t *v3; // [esp+1008h] [ebp-8h]
+    char string[4096];                // [esp+0h] [ebp-1010h] BYREF
+    char *ap;                         // [esp+1004h] [ebp-Ch]
+    parseInfo_t *v3;                  // [esp+1008h] [ebp-8h]
     ParseThreadInfo *ParseThreadInfo; // [esp+100Ch] [ebp-4h]
-    va_list va; // [esp+101Ch] [ebp+Ch] BYREF
+    va_list va;                       // [esp+101Ch] [ebp+Ch] BYREF
 
     va_start(va, msg);
     ParseThreadInfo = Com_GetParseThreadInfo();
     v3 = &ParseThreadInfo->parseInfo[ParseThreadInfo->parseInfoNum];
-    va_copy(ap, va);
     _vsnprintf(string, 0x1000u, msg, va);
+    va_end(va);
+    string[(0x1000u) - 1] = 0;
     ap = 0;
     if (ParseThreadInfo->parseInfoNum)
+    {
         Com_Error(ERR_DROP, "%sFile %s, line %i: %s", v3->errorPrefix, v3->parseFile, v3->lines, string);
+    }
     else
+    {
         Com_Error(ERR_DROP, "%s", string);
+    }
 }
 
 void Com_ScriptError(const char *msg, ...)
 {
-    char string[4096]; // [esp+0h] [ebp-1010h] BYREF
-    char *ap; // [esp+1004h] [ebp-Ch]
-    parseInfo_t *v3; // [esp+1008h] [ebp-8h]
+    char string[4096];                // [esp+0h] [ebp-1010h] BYREF
+    char *ap;                         // [esp+1004h] [ebp-Ch]
+    parseInfo_t *v3;                  // [esp+1008h] [ebp-8h]
     ParseThreadInfo *ParseThreadInfo; // [esp+100Ch] [ebp-4h]
-    va_list va; // [esp+101Ch] [ebp+Ch] BYREF
+    va_list va;                       // [esp+101Ch] [ebp+Ch] BYREF
 
     va_start(va, msg);
     ParseThreadInfo = Com_GetParseThreadInfo();
     v3 = &ParseThreadInfo->parseInfo[ParseThreadInfo->parseInfoNum];
-    va_copy(ap, va);
     _vsnprintf(string, 0x1000u, msg, va);
+    va_end(va);
+    string[(0x1000u) - 1] = 0;
     ap = 0;
     if (ParseThreadInfo->parseInfoNum)
+    {
         Com_PrintError(CON_CHANNEL_PARSERSCRIPT, "%sFile %s, line %i: %s", v3->warningPrefix, v3->parseFile, v3->lines, string);
+    }
     else
+    {
         Com_PrintError(CON_CHANNEL_PARSERSCRIPT, "%s", string);
+    }
 }
 
 void __cdecl Com_UngetToken()
