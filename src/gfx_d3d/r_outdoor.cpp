@@ -97,9 +97,9 @@ void Outdoor_TempHunkFreePic()
     Hunk_FreeTempMemory((char *)outdoorGlob.pic);
 }
 
-uint8_t *Outdoor_ComputeTexels()
+void Outdoor_ComputeTexels()
 {
-    uint8_t *result; // eax
+
     int zTexture; // [esp+24h] [ebp-1Ch]
     float zWorld; // [esp+28h] [ebp-18h]
     float yWorld; // [esp+2Ch] [ebp-14h]
@@ -109,14 +109,12 @@ uint8_t *Outdoor_ComputeTexels()
     float xWorld; // [esp+3Ch] [ebp-4h]
 
     iassert( outdoorGlob.pic );
-    result = outdoorGlob.pic;
     outByte = outdoorGlob.pic;
     for (y = 0; y != outdoorMapSize[1]; ++y)
     {
         yWorld = outdoorGlob.invScale[1] * ((double)y + 0.5 - outdoorGlob.add[1]);
         for (x = 0; ; ++x)
         {
-            result = (uint8_t *)x;
             if (x == outdoorMapSize[0])
                 break;
             xWorld = outdoorGlob.invScale[0] * ((double)x + 0.5 - outdoorGlob.add[0]);
@@ -127,7 +125,6 @@ uint8_t *Outdoor_ComputeTexels()
             ++outByte;
         }
     }
-    return result;
 }
 
 double __cdecl Outdoor_TraceHeightInWorld(float worldX, float worldY)

@@ -320,7 +320,7 @@ void R_LoadSunSettings()
 
     text = Com_GetBspLump(LUMP_ENTITIES, 1u, &size);
     R_ParseSunLight(&s_world.sunParse, (char*)text);
-    s_world.sunLight = (GfxLight*)Hunk_Alloc(0x40u, "R_LoadSunSettings", 20);
+    s_world.sunLight = (GfxLight*)Hunk_Alloc(sizeof(GfxLight), "R_LoadSunSettings", 20);
     R_InterpretSunLightParseParamsIntoLights(&s_world.sunParse, s_world.sunLight);
 }
 
@@ -364,14 +364,14 @@ void R_LoadLightRegions()
     const DiskLightRegion *diskRegions; // [esp+34h] [ebp-8h]
     uint regionIter; // [esp+38h] [ebp-4h]
 
-    s_world.lightRegion = (GfxLightRegion*)Hunk_Alloc(8 * s_world.primaryLightCount, "R_LoadLightRegions", 20);
+    s_world.lightRegion = (GfxLightRegion*)Hunk_Alloc(sizeof(GfxLightRegion) * s_world.primaryLightCount, "R_LoadLightRegions", 20);
     diskRegions = (DiskLightRegion*)Com_GetBspLump(LUMP_LIGHTREGIONS, 1u, &regionCount);
     s_world.lightGrid.hasLightRegions = diskRegions != 0;
     if (diskRegions)
     {
         diskHulls = Com_GetBspLump(LUMP_LIGHTREGION_HULLS, 0x4Cu, &hullCount);
         diskAxes = (byte*)Com_GetBspLump(LUMP_LIGHTREGION_AXES, 0x14u, &axisCount);
-        hulls = (GfxLightRegionHull*)Hunk_Alloc(80 * hullCount, "R_LoadLightRegionHulls", 20);
+        hulls = (GfxLightRegionHull*)Hunk_Alloc(sizeof(GfxLightRegionHull) * hullCount, "R_LoadLightRegionHulls", 20);
         axes = Hunk_Alloc(20 * axisCount, "R_LoadLightRegionAxes", 20);
         vassert(regionCount == s_world.primaryLightCount, "%i, %i", regionCount, s_world.primaryLightCount);
         usedHullCount = 0;
@@ -695,7 +695,7 @@ void __cdecl R_CopyLightmap(
     }
 }
 
-void __cdecl R_CopyLightDefAttenuationImage(GfxLightDef *def, _DWORD *anonymousConfig)
+void __cdecl R_CopyLightDefAttenuationImage(GfxLightDef *def, LightDefCopyConfig *cfg)
 {
     int endCount; // [esp+30h] [ebp-7Ch]
     uint8_t *dstPixel; // [esp+38h] [ebp-74h]
@@ -708,74 +708,67 @@ void __cdecl R_CopyLightDefAttenuationImage(GfxLightDef *def, _DWORD *anonymousC
 
     Image_GetRawPixels((char*)def->attenuation.image->name, &rawImage);
     iassert( rawImage.width == def->attenuation.image->width );
-    dstPixel = (byte*)(*anonymousConfig + anonymousConfig[1] * (4 * def->lmapLookupStart - 4));
+    dstPixel = cfg->dest + cfg->zoom * (4 * def->lmapLookupStart - 4);
     srcPixel = rawImage.pixels;
-    if (anonymousConfig[1] == 1)
+    if (cfg->zoom == 1)
     {
-        *dstPixel = (rawImage.pixels->a << 24) | rawImage.pixels->b | (rawImage.pixels->g << 8) | (rawImage.pixels->r << 16);
+        *(uint32_t *)dstPixel = (rawImage.pixels->a << 24) | rawImage.pixels->b | (rawImage.pixels->g << 8) | (rawImage.pixels->r << 16);
         dstPixela = dstPixel + 4;
         for (iter = 0; iter < rawImage.width; ++iter)
         {
-            *dstPixela = (srcPixel->a << 24) | srcPixel->b | (srcPixel->g << 8) | (srcPixel->r << 16);
+            *(uint32_t *)dstPixela = (srcPixel->a << 24) | srcPixel->b | (srcPixel->g << 8) | (srcPixel->r << 16);
             dstPixela += 4;
             ++srcPixel;
         }
-        *dstPixela = (rawImage.pixels[rawImage.width - 1].a << 24)
+        *(uint32_t *)dstPixela = (rawImage.pixels[rawImage.width - 1].a << 24)
             | rawImage.pixels[rawImage.width - 1].b
             | (rawImage.pixels[rawImage.width - 1].g << 8)
             | (rawImage.pixels[rawImage.width - 1].r << 16);
     }
     else
     {
-        endCount = anonymousConfig[1] + (anonymousConfig[1] >> 1);
+        endCount = cfg->zoom + (cfg->zoom >> 1);
         for (iter = 0; iter < endCount; ++iter)
         {
-            *dstPixel = (srcPixel->a << 24) | srcPixel->b | (srcPixel->g << 8) | (srcPixel->r << 16);
+            *(uint32_t *)dstPixel = (srcPixel->a << 24) | srcPixel->b | (srcPixel->g << 8) | (srcPixel->r << 16);
             dstPixel += 4;
         }
-        if ((anonymousConfig[1] & (anonymousConfig[1] - 1)) != 0)
+        if ((cfg->zoom & (cfg->zoom - 1)) != 0)
             MyAssertHandler(
                 ".\\r_light_load_obj.cpp",
                 172,
                 0,
                 "%s\n\t(cfg->zoom) = %i",
                 "((((cfg->zoom) & ((cfg->zoom) - 1)) == 0))",
-                anonymousConfig[1]);
+                cfg->zoom);
         lerp = 1;
-        do
+        while (srcPixel < &rawImage.pixels[rawImage.width - 1])
         {
             do
             {
-                lerpedPixel.r = (anonymousConfig[1] + lerp * srcPixel[1].r + (2 * anonymousConfig[1] - lerp) * srcPixel->r)
+                lerpedPixel.r = (cfg->zoom + lerp * srcPixel[1].r + (2 * cfg->zoom - lerp) * srcPixel->r)
                     / (2
-                        * anonymousConfig[1]);
-                lerpedPixel.g = (anonymousConfig[1] + lerp * srcPixel[1].g + (2 * anonymousConfig[1] - lerp) * srcPixel->g)
+                        * cfg->zoom);
+                lerpedPixel.g = (cfg->zoom + lerp * srcPixel[1].g + (2 * cfg->zoom - lerp) * srcPixel->g)
                     / (2
-                        * anonymousConfig[1]);
-                lerpedPixel.b = (anonymousConfig[1] + lerp * srcPixel[1].b + (2 * anonymousConfig[1] - lerp) * srcPixel->b)
+                        * cfg->zoom);
+                lerpedPixel.b = (cfg->zoom + lerp * srcPixel[1].b + (2 * cfg->zoom - lerp) * srcPixel->b)
                     / (2
-                        * anonymousConfig[1]);
-                lerpedPixel.a = (anonymousConfig[1] + lerp * srcPixel[1].a + (2 * anonymousConfig[1] - lerp) * srcPixel->a)
+                        * cfg->zoom);
+                lerpedPixel.a = (cfg->zoom + lerp * srcPixel[1].a + (2 * cfg->zoom - lerp) * srcPixel->a)
                     / (2
-                        * anonymousConfig[1]);
-                *dstPixel = (lerpedPixel.a << 24) | lerpedPixel.b | (lerpedPixel.g << 8) | (lerpedPixel.r << 16);
+                        * cfg->zoom);
+                *(uint32_t *)dstPixel = (lerpedPixel.a << 24) | lerpedPixel.b | (lerpedPixel.g << 8) | (lerpedPixel.r << 16);
                 dstPixel += 4;
                 lerp += 2;
-            } while (lerp <= 2 * anonymousConfig[1]);
+            } while (lerp <= 2 * cfg->zoom);
             lerp = 1;
             ++srcPixel;
-        } while (srcPixel != &rawImage.pixels[rawImage.width - 1]);
-        if ((int)((int)&dstPixel[-(int)*anonymousConfig] >> 2) != ((int)(anonymousConfig[1] * (def->lmapLookupStart + rawImage.width + 1) - endCount)))
-            MyAssertHandler(
-                ".\\r_light_load_obj.cpp",
-                193,
-                1,
-                "(dstPixel - cfg->dest) / 4u == (def->lmapLookupStart + rawImage.width + 1) * cfg->zoom - endCount\n\t%i, %i",
-                (int)&dstPixel[-(int)*anonymousConfig] >> 2,
-                anonymousConfig[1] * (def->lmapLookupStart + rawImage.width + 1) - endCount);
+        }
+        iassert((dstPixel - cfg->dest) / sizeof(uint32_t) == (def->lmapLookupStart + rawImage.width + 1) * cfg->zoom - endCount);
         for (iter = 0; iter < endCount; ++iter)
         {
-            *dstPixel = (srcPixel->a << 24) | srcPixel->b | (srcPixel->g << 8) | (srcPixel->r << 16);
+            *(uint32_t *)dstPixel = (srcPixel->a << 24) | srcPixel->b | (srcPixel->g << 8) | (srcPixel->r << 16);
             dstPixel += 4;
         }
     }
@@ -827,19 +820,19 @@ void __cdecl R_LoadLightmaps(GfxBspLoad *load)
         if (!len)
             memset(primaryImage, 0xFFu, totalImageSize);
         imageFlags = 56;
-        s_world.lightmaps = (GfxLightmapArray*)Hunk_Alloc(0x100u, "R_LoadLightmaps", 20);
+        s_world.lightmaps = (GfxLightmapArray*)Hunk_Alloc(32 * sizeof(GfxLightmapArray), "R_LoadLightmaps", 20);
         newLmapIndex = 0;
         oldLmapBaseIndex = 0;
         while (oldLmapBaseIndex < oldLmapCount)
         {
-            if (newLmapIndex && groupInfo[newLmapIndex].wideCount > *(&height + 2 * newLmapIndex))
+            if (newLmapIndex && groupInfo[newLmapIndex].wideCount > groupInfo[newLmapIndex - 1].wideCount)
                 MyAssertHandler(
                     ".\\r_bsp_load_obj.cpp",
                     722,
                     0,
                     "%s",
                     "newLmapIndex == 0 || groupInfo[newLmapIndex].wideCount <= groupInfo[newLmapIndex - 1].wideCount");
-            if (newLmapIndex && groupInfo[newLmapIndex].highCount > (int)(&buf_p)[2 * newLmapIndex])
+            if (newLmapIndex && groupInfo[newLmapIndex].highCount > groupInfo[newLmapIndex - 1].highCount)
                 MyAssertHandler(
                     ".\\r_bsp_load_obj.cpp",
                     723,
@@ -898,8 +891,8 @@ void __cdecl R_LoadLightmaps(GfxBspLoad *load)
         s_world.lightmapCount = newLmapIndex;
         Hunk_FreeTempMemory((char*)primaryImage);
         vassert((s_world.lightmapCount <= ((93 * 1024 * 1024) / ((1024 * 1024 * 1 * 1) + (512 * 512 * 4 * 2)))), "(s_world.lightmapCount) = %i", s_world.lightmapCount);
-        s_world.lightmapPrimaryTextures = (GfxTexture*)Hunk_Alloc(4 * s_world.lightmapCount, "R_LoadLightmaps", 20);
-        s_world.lightmapSecondaryTextures = (GfxTexture*)Hunk_Alloc(4 * s_world.lightmapCount, "R_LoadLightmaps", 20);
+        s_world.lightmapPrimaryTextures = (GfxTexture*)Hunk_Alloc(sizeof(GfxTexture) * s_world.lightmapCount, "R_LoadLightmaps", 20);
+        s_world.lightmapSecondaryTextures = (GfxTexture*)Hunk_Alloc(sizeof(GfxTexture) * s_world.lightmapCount, "R_LoadLightmaps", 20);
     }
     else
     {
@@ -912,7 +905,7 @@ GfxShadowGeometry *R_AllocShadowGeometryHeaderMemory()
     GfxShadowGeometry *result; // eax
 
     iassert( s_world.shadowGeom == NULL );
-    result = (GfxShadowGeometry*)Hunk_Alloc(12 * s_world.primaryLightCount, "R_AllocShadowGeometryHeaderMemory", 20);
+    result = (GfxShadowGeometry*)Hunk_Alloc(sizeof(GfxShadowGeometry) * s_world.primaryLightCount, "R_AllocShadowGeometryHeaderMemory", 20);
     s_world.shadowGeom = result;
     return result;
 }
@@ -927,7 +920,7 @@ void __cdecl R_LoadSubmodels(TrisType trisType)
     uint modelCount; // [esp+18h] [ebp-4h] BYREF
 
     in = (DiskBrushModel *)Com_GetBspLump(LUMP_MODELS, 48u, &modelCount);
-    out = (GfxBrushModel *)Hunk_Alloc(56 * modelCount, "R_LoadSubmodels", 20);
+    out = (GfxBrushModel *)Hunk_Alloc(sizeof(GfxBrushModel) * modelCount, "R_LoadSubmodels", 20);
     s_world.models = out;
     s_world.modelCount = modelCount;
     for (modelIndex = 0; modelIndex < modelCount; ++modelIndex)
@@ -1112,7 +1105,7 @@ MaterialUsage *__cdecl R_GetMaterialUsageData(Material *material)
 
 void __cdecl R_MaterialUsage(Material *material, uint firstVertex, int vertexCount, int surfPlusIndexSize)
 {
-    uint *v4; // eax
+    VertUsage *newUsage;
     VertUsage *vertUsage; // [esp+0h] [ebp-8h]
     MaterialUsage *materialUsage; // [esp+4h] [ebp-4h]
 
@@ -1123,12 +1116,14 @@ void __cdecl R_MaterialUsage(Material *material, uint firstVertex, int vertexCou
         for (vertUsage = materialUsage->verts; vertUsage; vertUsage = vertUsage->next)
         {
             if (firstVertex == vertUsage->index)
+            {
                 return;
+            }
         }
-        v4 = (uint *)Z_Malloc(8, "R_MaterialUsage", 0);
-        *v4 = firstVertex;
-        v4[1] = (uint)materialUsage->verts;
-        materialUsage->verts = (VertUsage*)v4;
+        newUsage = (VertUsage *)Z_Malloc(sizeof(VertUsage), "R_MaterialUsage", 0);
+        newUsage->index = firstVertex;
+        newUsage->next = materialUsage->verts;
+        materialUsage->verts = newUsage;
         materialUsage->memory += 44 * vertexCount;
     }
 }
@@ -1252,7 +1247,7 @@ void __cdecl R_CreateMaterialList()
     }
     if (s_world.materialMemoryCount)
     {
-        s_world.materialMemory = (MaterialMemory*)Hunk_Alloc(8 * s_world.materialMemoryCount, "R_CreateMaterialList", 20);
+        s_world.materialMemory = (MaterialMemory*)Hunk_Alloc(sizeof(MaterialMemory) * s_world.materialMemoryCount, "R_CreateMaterialList", 20);
         index = 0;
         for (hashIndexa = 0; hashIndexa < 0x800u; ++hashIndexa)
         {
@@ -1365,7 +1360,7 @@ void __cdecl R_LoadSurfaces(GfxBspLoad *load)
     indices = (const ushort*)Com_GetBspLump(lumpType, 2u, &indexCount);
     iassert( (surfCount <= 65536) );
     s_world.surfaceCount = surfCount;
-    s_world.dpvs.surfaces = (GfxSurface*)Hunk_Alloc(48 * surfCount, "R_LoadSurfaces", 20);
+    s_world.dpvs.surfaces = (GfxSurface*)Hunk_Alloc(sizeof(GfxSurface) * surfCount, "R_LoadSurfaces", 20);
     s_world.indexCount = 0;
     for (surfIndex = 0; surfIndex < surfCount; ++surfIndex)
     {
@@ -1615,7 +1610,7 @@ void __cdecl R_LoadAabbTrees(TrisType trisType)
 
     lumpType = trisType != TRIS_TYPE_LAYERED ? LUMP_UNLAYERED_AABBTREES : LUMP_AABBTREES;
     in = (const DiskGfxAabbTree *)Com_GetBspLump(lumpType, 0xCu, &aabbTreeCount);
-    out = (GfxAabbTree *)Hunk_Alloc(44 * aabbTreeCount, "R_LoadAabbTrees", 22);
+    out = (GfxAabbTree *)Hunk_Alloc(sizeof(GfxAabbTree) * aabbTreeCount, "R_LoadAabbTrees", 22);
     rgl.aabbTrees = out;
     rgl.aabbTreeCount = aabbTreeCount;
     for (aabbTreeIndex = 0; aabbTreeIndex < aabbTreeCount; ++aabbTreeIndex)
@@ -1663,7 +1658,7 @@ void __cdecl R_LoadCells(uint bspVersion, TrisType trisType)
     {
         in = Com_GetBspLump(LUMP_CELLS, 0x34u, &cellCount);
     }
-    out = (GfxCell *)Hunk_Alloc(56 * cellCount, "R_LoadCells", 22);
+    out = (GfxCell *)Hunk_Alloc(sizeof(GfxCell) * cellCount, "R_LoadCells", 22);
     s_world.cells = out;
     s_world.dpvsPlanes.cellCount = cellCount;
     s_world.cellBitsCount = 16 * ((cellCount + 127) >> 7);
@@ -1676,7 +1671,7 @@ void __cdecl R_LoadCells(uint bspVersion, TrisType trisType)
         out->maxs[1] = *((float *)in + 4);
         out->maxs[2] = *((float *)in + 5);
         out->aabbTree = &rgl.aabbTrees[*(uint16_t *)&in[2 * trisType + 24]];
-        out->portals = (GfxPortal *)(68 * *((_DWORD *)in + 7));
+        out->portals = (GfxPortal *)(uintptr_t)*((_DWORD *)in + 7);
         out->portalCount = *((_DWORD *)in + 8);
         cullGroupCount = *((_DWORD *)in + 10);
         if (cullGroupCount)
@@ -1731,7 +1726,7 @@ uint R_LoadPortals()
     uint portalCount; // [esp+28h] [ebp-4h] BYREF
 
     in = Com_GetBspLump(LUMP_PORTALS, 0x10u, &portalCount);
-    out = (GfxPortal *)Hunk_Alloc(68 * portalCount, "R_LoadPortals", 22);
+    out = (GfxPortal *)Hunk_Alloc(sizeof(GfxPortal) * portalCount, "R_LoadPortals", 22);
     iassert( s_world.cells );
     iassert( s_world.dpvsPlanes.planes );
     for (portalIndex = 0; ; ++portalIndex)
@@ -1766,7 +1761,7 @@ uint R_LoadPortals()
     for (cellIndex = 0; cellIndex < s_world.dpvsPlanes.cellCount; ++cellIndex)
     {
         if (s_world.cells[cellIndex].portalCount)
-            v1 = &out[(int)s_world.cells[cellIndex].portals / 68];
+            v1 = &out[(uintptr_t)s_world.cells[cellIndex].portals];
         else
             v1 = 0;
         s_world.cells[cellIndex].portals = v1;
@@ -2057,7 +2052,7 @@ uint R_SortSurfaces()
         result = 48 * surfIndexb;
         if (!s_world.dpvs.surfaces[surfIndexb].material->techniqueSet)
             break;
-        result = (uint)Material_GetTechnique(s_world.dpvs.surfaces[surfIndexb].material, TECHNIQUE_LIT_BEGIN);
+        result = Material_GetTechnique(s_world.dpvs.surfaces[surfIndexb].material, TECHNIQUE_LIT_BEGIN) != NULL;
         if (!result)
             break;
         result = s_world.dpvs.surfaces[surfIndexb].material->info.sortKey;
@@ -2074,10 +2069,9 @@ uint R_SortSurfaces()
     s_world.dpvs.emissiveSurfsBegin = surfIndexb;
     while (surfIndexb < surfaceCounta)
     {
-        result = (uint)s_world.dpvs.surfaces;
         if (!s_world.dpvs.surfaces[surfIndexb].material->techniqueSet)
             break;
-        result = (uint)Material_GetTechnique(s_world.dpvs.surfaces[surfIndexb].material, TECHNIQUE_EMISSIVE);
+        result = Material_GetTechnique(s_world.dpvs.surfaces[surfIndexb].material, TECHNIQUE_EMISSIVE) != NULL;
         if (!result)
             break;
         result = ++surfIndexb;
@@ -2088,92 +2082,25 @@ uint R_SortSurfaces()
 
 char __cdecl R_DoWorldTrisCoincide(const float **xyz0, const float **xyz1)
 {
-    char v3; // [esp+0h] [ebp-78h]
-    BOOL v5; // [esp+8h] [ebp-70h]
-    char v7; // [esp+10h] [ebp-68h]
-    BOOL v9; // [esp+18h] [ebp-60h]
-    char v11; // [esp+20h] [ebp-58h]
-    BOOL v13; // [esp+28h] [ebp-50h]
-    const float *v15; // [esp+30h] [ebp-48h]
-    const float *v16; // [esp+34h] [ebp-44h]
-    int v17; // [esp+38h] [ebp-40h]
-    const float *v18; // [esp+3Ch] [ebp-3Ch]
-    const float *v19; // [esp+40h] [ebp-38h]
-    int v20; // [esp+44h] [ebp-34h]
-    int v21; // [esp+48h] [ebp-30h]
-    const float *v22; // [esp+4Ch] [ebp-2Ch]
-    const float *v23; // [esp+50h] [ebp-28h]
-    const float *v24; // [esp+54h] [ebp-24h]
-    const float *v25; // [esp+58h] [ebp-20h]
-    int v26; // [esp+5Ch] [ebp-1Ch]
-    const float *v27; // [esp+60h] [ebp-18h]
-    const float *v28; // [esp+64h] [ebp-14h]
-    const float *v29; // [esp+68h] [ebp-10h]
-    const float *v30; // [esp+6Ch] [ebp-Ch]
-    int v31; // [esp+70h] [ebp-8h]
-    int v32; // [esp+74h] [ebp-4h]
-
-    v31 = *(int *)xyz1;
-    v32 = *(int *)xyz0;
-    if (**xyz1 == **xyz0 && *(int*)(v31 + 4) == *(int*)(v32 + 4) && *(int *)(v31 + 8) == *(int *)(v32 + 8))
+    for (int rotation = 0; rotation < 3; ++rotation)
     {
-        v29 = xyz1[1];
-        v30 = xyz0[1];
-        v13 = *v29 == *v30 && v29[1] == v30[1] && v29[2] == v30[2];
-        v11 = 0;
-        if (v13)
+        bool match = true;
+        for (int vertex = 0; vertex < 3; ++vertex)
         {
-            v27 = xyz1[2];
-            v28 = xyz0[2];
-            if (*v27 == *v28 && v27[1] == v28[1] && v27[2] == v28[2])
-                return 1;
+            const float *a = xyz0[vertex];
+            const float *b = xyz1[(vertex + rotation) % 3];
+            if (a[0] != b[0] || a[1] != b[1] || a[2] != b[2])
+            {
+                match = false;
+                break;
+            }
         }
-        return v11;
-    }
-    else
-    {
-        v25 = xyz1[1];
-        v26 = *(int *)xyz0;
-        if (*v25 == **xyz0 && v25[1] == *(int *)(v26 + 4) && v25[2] == *(int *)(v26 + 8))
+        if (match)
         {
-            v23 = xyz1[2];
-            v24 = xyz0[1];
-            v9 = *v23 == *v24 && v23[1] == v24[1] && v23[2] == v24[2];
-            v7 = 0;
-            if (v9)
-            {
-                v21 = *(int *)xyz1;
-                v22 = xyz0[2];
-                if (**xyz1 == *v22 && *(int *)(v21 + 4) == v22[1] && *(int *)(v21 + 8) == v22[2])
-                    return 1;
-            }
-            return v7;
-        }
-        else
-        {
-            v19 = xyz1[2];
-            v20 = *(int *)xyz0;
-            if (*v19 == **xyz0 && v19[1] == *(int *)(v20 + 4) && v19[2] == *(int *)(v20 + 8))
-            {
-                v17 = *(int *)xyz1;
-                v18 = xyz0[1];
-                v5 = **xyz1 == *v18 && *(int *)(v17 + 4) == v18[1] && *(int *)(v17 + 8) == v18[2];
-                v3 = 0;
-                if (v5)
-                {
-                    v15 = xyz1[1];
-                    v16 = xyz0[2];
-                    if (*v15 == *v16 && v15[1] == v16[1] && v15[2] == v16[2])
-                        return 1;
-                }
-                return v3;
-            }
-            else
-            {
-                return 0;
-            }
+            return 1;
         }
     }
+    return 0;
 }
 
 char __cdecl R_DoesTriCoverAnyOtherTri(
@@ -2679,7 +2606,7 @@ void __cdecl R_LoadEntities(uint bspVersion)
         if (!I_stricmp(spawnVars[0][1], "misc_model"))
             ++smodelCount;
     }
-    s_world.dpvs.smodelDrawInsts = (GfxStaticModelDrawInst*)Hunk_Alloc(76 * smodelCount, "R_LoadEntities", 21);
+    s_world.dpvs.smodelDrawInsts = (GfxStaticModelDrawInst*)Hunk_Alloc(sizeof(GfxStaticModelDrawInst) * smodelCount, "R_LoadEntities", 21);
     s_world.dpvs.smodelInsts = (GfxStaticModelInst*)Hunk_Alloc(28 * smodelCount, "R_LoadEntities", 21);
     s_world.dpvs.smodelCount = 0;
     text = startPos;
@@ -2835,14 +2762,19 @@ void __cdecl R_AddStaticModelToAabbTree_r(GfxWorld *world, GfxAabbTree *tree, in
         {
             if (childIndexa >= tree->childCount)
             {
-                newChildren = Hunk_AllocAlign(44 * (tree->childCount + 1), 4, "R_AddStaticModelToAabbTree_r", 21);
+                newChildren = Hunk_AllocAlign(sizeof(GfxAabbTree) * (tree->childCount + 1), alignof(GfxAabbTree), "R_AddStaticModelToAabbTree_r", 21);
                 children = (uint8_t *)tree + tree->childrenOffset;
-                memcpy(newChildren, children, 44 * tree->childCount);
+                memcpy(newChildren, children, sizeof(GfxAabbTree) * tree->childCount);
                 tree->childrenOffset = newChildren - (uint8_t *)tree;
                 for (childIndexb = 0; childIndexb < tree->childCount; ++childIndexb)
-                    *(_DWORD *)&newChildren[44 * childIndexb + 40] = &children[44 * childIndexb
-                    + *(_DWORD *)&children[44 * childIndexb + 40]]
-                    - &newChildren[44 * childIndexb];
+                {
+                    GfxAabbTree *oldChild = &((GfxAabbTree *)children)[childIndexb];
+                    GfxAabbTree *newChild = &((GfxAabbTree *)newChildren)[childIndexb];
+                    if (oldChild->childCount)
+                    {
+                        newChild->childrenOffset = (uint8_t *)oldChild + oldChild->childrenOffset - (uint8_t *)newChild;
+                    }
+                }
                 childTreea = (GfxAabbTree *)((char *)&tree[tree->childCount++] + tree->childrenOffset);
                 childTreea->mins[0] = smodelInst->mins[0];
                 childTreea->mins[1] = smodelInst->mins[1];
@@ -3130,7 +3062,7 @@ void __cdecl R_SortGfxAabbTree(GfxWorld *world, GfxAabbTree *tree)
                     ++count;
                 if (smodelIndexCount)
                     ++count;
-                tree->childrenOffset = Hunk_AllocAlign(44 * count, 4, "R_SortGfxAabbTree", 21) - (byte*)tree;
+                tree->childrenOffset = Hunk_AllocAlign(sizeof(GfxAabbTree) * count, alignof(GfxAabbTree), "R_SortGfxAabbTree", 21) - (byte*)tree;
                 if (tree->surfaceCount)
                 {
                     children = (GfxAabbTree *)((char *)tree + tree->childrenOffset);
@@ -3214,7 +3146,7 @@ void __cdecl R_FixupGfxAabbTrees(GfxCell *cell)
     tree = cell->aabbTree;
     iassert( tree );
     cell->aabbTreeCount = R_AabbTreeChildrenCount_r(tree);
-    newTree = (GfxAabbTree*)Hunk_AllocAlign(44 * cell->aabbTreeCount, 4, "R_FixupGfxAabbTrees", 21);
+    newTree = (GfxAabbTree*)Hunk_AllocAlign(sizeof(GfxAabbTree) * cell->aabbTreeCount, alignof(GfxAabbTree), "R_FixupGfxAabbTrees", 21);
     if (R_AabbTreeMove_r(tree, newTree, newTree + 1) - newTree != cell->aabbTreeCount)
         MyAssertHandler(".\\r_bsp_load_obj.cpp", 3383, 0, "%s", "allocChildren - newTree == cell->aabbTreeCount");
     cell->aabbTree = newTree;
@@ -3232,7 +3164,7 @@ int R_PostLoadEntities()
     uint smodelIndexb; // [esp+520h] [ebp-4h]
 
     iassert( rgl.staticModelReflectionProbesLoaded );
-    smodelCombinedInsts = (GfxStaticModelCombinedInst*)Z_Malloc(104 * s_world.dpvs.smodelCount, "R_PostLoadEntities", 21);
+    smodelCombinedInsts = (GfxStaticModelCombinedInst*)Z_Malloc(sizeof(GfxStaticModelCombinedInst) * s_world.dpvs.smodelCount, "R_PostLoadEntities", 21);
     for (smodelIndex = 0; smodelIndex < s_world.dpvs.smodelCount; ++smodelIndex)
     {
         qmemcpy(&smodelCombinedInsts[smodelIndex], &s_world.dpvs.smodelDrawInsts[smodelIndex], 0x4Cu);
@@ -3244,7 +3176,7 @@ int R_PostLoadEntities()
     //std::_Sort<GfxStaticModelCombinedInst *, int, bool(__cdecl *)(GfxStaticModelCombinedInst const &, GfxStaticModelCombinedInst const &)>(
     //    smodelCombinedInsts,
     //    &smodelCombinedInsts[s_world.dpvs.smodelCount],
-    //    (104 * s_world.dpvs.smodelCount) / 104,
+    //    (sizeof(GfxStaticModelCombinedInst) * s_world.dpvs.smodelCount) / 104,
     //    R_StaticModelCompare);
     std::sort(&smodelCombinedInsts[0], &smodelCombinedInsts[s_world.dpvs.smodelCount], R_StaticModelCompare);
     for (smodelIndexa = 0; smodelIndexa < s_world.dpvs.smodelCount; ++smodelIndexa)
@@ -3664,13 +3596,13 @@ uint __cdecl R_OptimalSModelResourceStats(GfxWorld *world, GfxSModelSurfStats *s
     iassert( world );
     if (!world->dpvs.smodelCount)
         return 0;
-    drawInstArray = (const GfxStaticModelDrawInst **)Hunk_AllocateTempMemory(4 * world->dpvs.smodelCount, "R_AssignSModelCacheResources");
+    drawInstArray = (const GfxStaticModelDrawInst **)Hunk_AllocateTempMemory(sizeof(GfxStaticModelDrawInst *) * world->dpvs.smodelCount, "R_AssignSModelCacheResources");
     for (smodelIter = 0; smodelIter != world->dpvs.smodelCount; ++smodelIter)
         drawInstArray[smodelIter] = &world->dpvs.smodelDrawInsts[smodelIter];
     //std::_Sort<int *, int, bool(__cdecl *)(int, int)>(
     //    drawInstArray,
     //    &drawInstArray[world->dpvs.smodelCount],
-    //    (4 * world->dpvs.smodelCount) >> 2,
+    //    (sizeof(GfxStaticModelDrawInst *) * world->dpvs.smodelCount) >> 2,
     //    R_CompareSModels_Model);
     std::sort(&drawInstArray[0], &drawInstArray[world->dpvs.smodelCount], R_CompareSModels_Model);
     statCount = 0;

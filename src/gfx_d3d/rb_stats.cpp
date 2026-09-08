@@ -448,7 +448,7 @@ void __cdecl RB_DrawPrimHistogramOverlay()
                 totalPrims[viewStatsIndex] += curCount;
                 if (curCount)
                 {
-                    v3.packed = (uint)colorNow[subTotalIndex];
+                    v3.packed = colorNow[subTotalIndex].packed;
                     v18 = y + fontHeight - 1.0;
                     t1 = x;
                     s1 = backEnd.debugFont;

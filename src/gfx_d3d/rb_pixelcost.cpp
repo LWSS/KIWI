@@ -4,16 +4,6 @@
 #include <universal/timing.h>
 #include "r_state.h"
 
-struct GfxPixelCostKey_s // sizeof=0x8
-{                                       // ...
-    const Material *material;
-    MaterialTechniqueType techType;
-};
-union GfxPixelCostKey // sizeof=0x8
-{                                       // ...
-    GfxPixelCostKey_s mtl;
-    unsigned __int64 packed;
-};
 struct GfxPixelCostRecord // sizeof=0x20
 {                                       // ...
     uint16_t costHistory[12];   // ...
@@ -110,12 +100,12 @@ const Material *__cdecl R_PixelCost_GetAccumulationMaterial(const Material *mate
 void __cdecl R_PixelCost_BeginSurface(GfxCmdBufContext context)
 {
     int cost; // [esp+4h] [ebp-Ch]
-    unsigned __int64 packedKey; // [esp+8h] [ebp-8h]
-    unsigned __int64 packedKeya; // [esp+8h] [ebp-8h]
+    GfxPixelCostKey packedKey; // [esp+8h] [ebp-8h]
+    GfxPixelCostKey packedKeya; // [esp+8h] [ebp-8h]
 
     if (pixelCostMode == GFX_PIXEL_COST_MODE_MEASURE_COST)
     {
-        packedKey = R_PixelCost_PackedKeyForMaterial(*(_QWORD *)&context.state->material);
+        packedKey = R_PixelCost_PackedKeyForMaterial(context.state->material, context.state->techType);
         if (!RB_PixelCost_DoesPrimMatch(packedKey))
             RB_PixelCost_ResetPrim(packedKey);
         ++pixelCostGlob.expectedCount;
@@ -124,7 +114,7 @@ void __cdecl R_PixelCost_BeginSurface(GfxCmdBufContext context)
     }
     else if (pixelCostMode == GFX_PIXEL_COST_MODE_MEASURE_MSEC)
     {
-        packedKeya = R_PixelCost_PackedKeyForMaterial(*(_QWORD *)&context.state->material);
+        packedKeya = R_PixelCost_PackedKeyForMaterial(context.state->material, context.state->techType);
         if (!RB_PixelCost_DoesPrimMatch(packedKeya))
             RB_PixelCost_ResetPrim(packedKeya);
         ++pixelCostGlob.expectedCount;
@@ -226,25 +216,25 @@ int __cdecl RB_PixelCost_GetCostForRecordIndex(int recordIndex)
     }
 }
 
-unsigned __int64 __cdecl R_PixelCost_PackedKeyForMaterial(__int64 material)
+GfxPixelCostKey __cdecl R_PixelCost_PackedKeyForMaterial(const Material *material, MaterialTechniqueType techType)
 {
-    iassert( material );
-    return material;
+    iassert(material);
+    GfxPixelCostKey key = {material, techType};
+    return key;
 }
 
-bool __cdecl RB_PixelCost_DoesPrimMatch(unsigned __int64 packedKey)
+bool __cdecl RB_PixelCost_DoesPrimMatch(GfxPixelCostKey packedKey)
 {
-    return __PAIR64__(
-        pixelCostGlob.records[pixelCostGlob.recordCount].key.mtl.techType,
-        pixelCostGlob.records[pixelCostGlob.recordCount].key.mtl.material) == packedKey;
+    const GfxPixelCostKey *key = &pixelCostGlob.records[pixelCostGlob.recordCount].key;
+    return key->material == packedKey.material && key->techType == packedKey.techType;
 }
 
-void __cdecl RB_PixelCost_ResetPrim(unsigned __int64 packedKey)
+void __cdecl RB_PixelCost_ResetPrim(GfxPixelCostKey packedKey)
 {
     GfxPixelCostRecord *record; // [esp+0h] [ebp-4h]
 
     record = &pixelCostGlob.records[pixelCostGlob.expectedCount];
-    record->key.packed = packedKey;
+    record->key = packedKey;
     *(uint *)record->costHistory = 0;
     *(uint *)&record->costHistory[2] = 0;
     *(uint *)&record->costHistory[4] = 0;

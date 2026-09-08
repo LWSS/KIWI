@@ -484,14 +484,14 @@ uint8_t* __cdecl Hunk_AllocAlign(uint size, int alignment, const char* name, int
     return buf;
 }
 
-uint __cdecl Hunk_AllocateTempMemoryHigh(int size, const char* name)
+void *__cdecl Hunk_AllocateTempMemoryHigh(int size, const char* name)
 {
-    uint buf; // [esp+0h] [ebp-10h]
+    uint8_t *buf; // [esp+0h] [ebp-10h]
     uint8_t* endBuf; // [esp+4h] [ebp-Ch]
 
     iassert(Sys_IsMainThread());
     iassert(s_hunkData);
-    endBuf = (uint8_t*)((uint)&s_hunkData[s_hunkTotal - hunk_high.temp] & 0xFFFFF000);
+    endBuf = (uint8_t *)((uintptr_t)&s_hunkData[s_hunkTotal - hunk_high.temp] & ~(uintptr_t)0xFFF);
     hunk_high.temp += size;
     hunk_high.temp = (hunk_high.temp + 15) & 0xFFFFFFF0;
     if (hunk_high.temp + hunk_low.temp > s_hunkTotal)
@@ -499,11 +499,13 @@ uint __cdecl Hunk_AllocateTempMemoryHigh(int size, const char* name)
         track_PrintAllInfo();
         Com_Error(ERR_DROP, "Hunk_AllocateTempMemoryHigh: failed on %i bytes (total %i MB, low %i MB, high %i MB)", size, s_hunkTotal / 0x100000, hunk_low.temp / 0x100000, hunk_high.temp / 0x100000);
     }
-    buf = (uint)&s_hunkData[s_hunkTotal - hunk_high.temp];
-    if ((((_BYTE)s_hunkTotal + (_BYTE)s_hunkData - LOBYTE(hunk_high.temp)) & 0xF) != 0)
-        MyAssertHandler(".\\universal\\com_memory.cpp", 2074, 0, "%s", "!(((psize_int)buf) & 15)");
-    if (endBuf != (uint8_t*)(buf & 0xFFFFF000))
-        Z_VirtualCommit((void*)(buf & 0xFFFFF000), (int)&endBuf[-(int)(buf & 0xFFFFF000)]); // KISAKTODO: sus int cast
+    buf = &s_hunkData[s_hunkTotal - hunk_high.temp];
+    iassert(!((uintptr_t)buf & 15));
+    uint8_t *commitStart = (uint8_t *)((uintptr_t)buf & ~(uintptr_t)0xFFF);
+    if (endBuf != commitStart)
+    {
+        Z_VirtualCommit(commitStart, (int)(endBuf - commitStart));
+    }
     track_temp_high_alloc(size, hunk_high.temp + hunk_low.temp, hunk_high.permanent, name);
     return buf;
 }

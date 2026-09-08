@@ -334,9 +334,9 @@ void __cdecl R_GetBspOmniLightSurfs(const GfxLight *light, int lightIndex, GfxBs
 
 int __cdecl R_AllowBspOmniLight(int surfIndex, void *bspLightCallbackAsVoid)
 {
-    return *(_BYTE *)(*(uint *)bspLightCallbackAsVoid + surfIndex)
-        && *((float *)bspLightCallbackAsVoid + 4) >= PointToBoxDistSq(
-            (const float *)bspLightCallbackAsVoid + 1,
+    const BspOmniLightCallback *callback = (const BspOmniLightCallback *)bspLightCallbackAsVoid;
+    return callback->surfaceVisData[surfIndex]
+        && callback->radiusSq >= PointToBoxDistSq(callback->position,
             rgp.world->dpvs.surfaces[surfIndex].bounds[0],
             rgp.world->dpvs.surfaces[surfIndex].bounds[1]);
 }
@@ -431,13 +431,14 @@ void __cdecl R_GetBspSpotLightSurfs(const GfxLight *light, int lightIndex, GfxBs
 
 int __cdecl R_AllowBspSpotLightShadows(int surfIndex, void *bspLightCallbackAsVoid)
 {
+    const BspSpotLightCallback *callback = (const BspSpotLightCallback *)bspLightCallbackAsVoid;
     if (r_spotLightShadows->current.enabled)
-        return R_BoxInPlanes(
-            (const float (*)[4])((uint)bspLightCallbackAsVoid + 4),
+    {
+        return R_BoxInPlanes(callback->planes,
             rgp.world->dpvs.surfaces[surfIndex].bounds[0],
             rgp.world->dpvs.surfaces[surfIndex].bounds[1]);
-    else
-        return 0;
+    }
+    return 0;
 }
 
 int __cdecl R_BoxInPlanes(const float (*planes)[4], const float *mins, const float *maxs)
@@ -528,13 +529,14 @@ int __cdecl R_BoxInPlanes(const float (*planes)[4], const float *mins, const flo
 
 int __cdecl R_AllowBspSpotLight(int surfIndex, void *bspLightCallbackAsVoid)
 {
-    if (*(_BYTE *)(*(uint *)bspLightCallbackAsVoid + surfIndex))
-        return R_BoxInPlanes(
-            (const float (*)[4])((uint)bspLightCallbackAsVoid + 4),
+    const BspSpotLightCallback *callback = (const BspSpotLightCallback *)bspLightCallbackAsVoid;
+    if (callback->surfaceVisData[surfIndex])
+    {
+        return R_BoxInPlanes(callback->planes,
             rgp.world->dpvs.surfaces[surfIndex].bounds[0],
             rgp.world->dpvs.surfaces[surfIndex].bounds[1]);
-    else
-        return 0;
+    }
+    return 0;
 }
 
 void __cdecl R_CalcSpotLightPlanes(const GfxLight *light, float (*planes)[4])
@@ -1350,7 +1352,7 @@ int __cdecl R_EmitPointLightPartitionSurfs(
         drawSurfCount = frontEndDataOut->drawSurfCount - firstDrawSurf;
         if (drawSurfCount)
         {
-            memcpy(partition, light, 0x40u);
+            memcpy(&partition->light, light, sizeof(GfxLight));
             partition->info.drawSurfs = &frontEndDataOut->drawSurfs[firstDrawSurf];
             partitions[partitionCount++].info.drawSurfCount = drawSurfCount;
         }

@@ -225,7 +225,7 @@ void __cdecl R_AddAllSceneEntSurfacesCamera(const GfxViewInfo *viewInfo)
             {
                 sceneEnt = &scene.sceneDObj[sceneEntIndex];
                 iassert(sceneEnt->cull.state >= CULL_STATE_BOUNDED);
-                cachedLightingHandle = (uint16_t *)LongNoSwap((uint)sceneEnt->info.cachedLightingHandle);
+                cachedLightingHandle = sceneEnt->info.cachedLightingHandle;
                 lightingHandle = R_AllocModelLighting_Box(
                     viewInfo,
                     sceneEnt->lightingOrigin,

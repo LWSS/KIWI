@@ -583,7 +583,7 @@ void __cdecl R_InitCmdBufState(GfxCmdBufState *state)
 
     iassert( state );
     device = state->prim.device;
-    memset(state->refSamplerState, 0, sizeof(GfxCmdBufState));
+    memset(state, 0, sizeof(GfxCmdBufState));
     state->prim.device = device;
     state->depthRangeType = GFX_DEPTH_RANGE_FULL;
     state->depthRangeNear = 0.0;

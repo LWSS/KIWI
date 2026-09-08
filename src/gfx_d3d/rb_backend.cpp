@@ -1377,7 +1377,7 @@ void __cdecl RB_DrawTrianglesCmd(GfxRenderCommandExecState *execState)
 
     GfxCmdDrawTriangles *cmd = (GfxCmdDrawTriangles *)execState->cmd;
 
-    xyzwOffset = 16;
+    xyzwOffset = sizeof(GfxCmdDrawTriangles);
     xyzwSize = 16 * cmd->vertexCount;
 
     normalOffset = xyzwOffset + xyzwSize;
@@ -1674,7 +1674,7 @@ void __cdecl RB_LookupColor(uint8_t c, GfxColor *color)
     }
     else
     {
-        color->packed = (uint)color_table[index];
+        color->packed = color_table[index].packed;
     }
 }
 
@@ -2246,9 +2246,11 @@ double __cdecl RB_DrawHudIcon(
     ya = y - ((double)font->pixelHeight * yScale + h) * 0.5;
     iassert( w > 0 );
     iassert( h > 0 );
-    if (!IsValidMaterialHandle(*(Material *const *)(text + 3)))
+    v9 = R_DecodeHudIconMaterial(text + 3);
+    if (!v9)
+    {
         return 0.0;
-    v9 = Material_FromHandle(*(Material **)(text + 3));
+    }
     RB_DrawStretchPicRotate(v9, x, ya, w, h, s0, 0.0, s1, 1.0, sinAngle, cosAngle, color, GFX_PRIM_STATS_HUD);
     return w;
 }

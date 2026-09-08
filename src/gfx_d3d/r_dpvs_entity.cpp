@@ -17,15 +17,16 @@ void __cdecl R_AddEntitySurfacesInFrustumCmd(uint16_t *data)
     const DpvsPlane *planes; // [esp+24h] [ebp-8h]
     GfxSceneEntity *sceneEnt; // [esp+28h] [ebp-4h]
 
-    sceneEnt = *(GfxSceneEntity **)data;
+    const DpvsEntityCmd *cmd = (const DpvsEntityCmd *)data;
+    sceneEnt = cmd->sceneEnt;
     boneMatrix = R_UpdateSceneEntBounds(sceneEnt, &localSceneEnt, &obj, 1);
     if (boneMatrix)
     {
         iassert( localSceneEnt );
-        planes = (const DpvsPlane *)*((uint *)data + 1);
+        planes = cmd->planes;
         itr = 0;
         plane = planes;
-        while (itr < data[4])
+        while (itr < cmd->planeCount)
         {
             //if (*(float *)((char *)localSceneEnt->cull.mins + v2->side[0]) * v2->coeffs[0]
             //    + v2->coeffs[3]
@@ -44,7 +45,7 @@ void __cdecl R_AddEntitySurfacesInFrustumCmd(uint16_t *data)
         if (!v1
             && R_BoundsInCell(
                 (mnode_t *)rgp.world->dpvsPlanes.nodes,
-                data[5],
+                cmd->cellIndex,
                 localSceneEnt->cull.mins,
                 localSceneEnt->cull.maxs))
         {
@@ -53,7 +54,7 @@ void __cdecl R_AddEntitySurfacesInFrustumCmd(uint16_t *data)
 #endif
             R_SkinSceneDObj(sceneEnt, localSceneEnt, obj, boneMatrix, 0);
             iassert( localSceneEnt->entnum != gfxCfg.entnumNone );
-            *(_BYTE *)(localSceneEnt->entnum + *((uint *)data + 3)) = 1;
+            cmd->entVisData[localSceneEnt->entnum] = 1;
         }
         else
         {

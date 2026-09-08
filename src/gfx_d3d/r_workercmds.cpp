@@ -68,13 +68,13 @@ int __cdecl R_EndFenceBusy(void *args)
 
 void __cdecl TRACK_r_workercmds()
 {
-    track_static_alloc_internal(g_GfxEntityBoundsBuf, 1024, "g_GfxEntityBoundsBuf", 18);
-    track_static_alloc_internal(g_SkinGfxEntityBuf, 4096, "g_SkinGfxEntityBuf", 18);
-    track_static_alloc_internal(g_UpdateFxNonDependentBuf, 12, "g_UpdateFxNonDependentBuf", 18);
-    track_static_alloc_internal(g_UpdateFxRemainingBuf, 12, "g_UpdateFxRemainingBuf", 18);
-    track_static_alloc_internal(g_skinCachedStaticModelBuf, 2048, "g_skinCachedStaticModelBuf", 18);
-    track_static_alloc_internal(g_SkinXModelBuf, 28672, "g_SkinXModelBuf", 18);
-    track_static_alloc_internal(g_workerCmds, 2176, "g_workerCmds", 18);
+    track_static_alloc_internal(g_GfxEntityBoundsBuf, sizeof(g_GfxEntityBoundsBuf), "g_GfxEntityBoundsBuf", 18);
+    track_static_alloc_internal(g_SkinGfxEntityBuf, sizeof(g_SkinGfxEntityBuf), "g_SkinGfxEntityBuf", 18);
+    track_static_alloc_internal(g_UpdateFxNonDependentBuf, sizeof(g_UpdateFxNonDependentBuf), "g_UpdateFxNonDependentBuf", 18);
+    track_static_alloc_internal(g_UpdateFxRemainingBuf, sizeof(g_UpdateFxRemainingBuf), "g_UpdateFxRemainingBuf", 18);
+    track_static_alloc_internal(g_skinCachedStaticModelBuf, sizeof(g_skinCachedStaticModelBuf), "g_skinCachedStaticModelBuf", 18);
+    track_static_alloc_internal(g_SkinXModelBuf, sizeof(g_SkinXModelBuf), "g_SkinXModelBuf", 18);
+    track_static_alloc_internal(g_workerCmds, sizeof(g_workerCmds), "g_workerCmds", 18);
 }
 
 volatile LONG g_workerCmdMinType;
@@ -218,7 +218,7 @@ int __cdecl R_ProcessWorkerCmd(WorkerCmdType type)
     int v2; // eax
     int v3; // eax
     uint bufCount; // [esp+0h] [ebp-7A4h]
-    uint8_t data[1920]; // [esp+4h] [ebp-7A0h] BYREF
+    __declspec(align(16)) uint8_t data[1920]; // [esp+4h] [ebp-7A0h] BYREF
     int dataSize; // [esp+788h] [ebp-1Ch]
     WorkerCmds *workerCmds; // [esp+78Ch] [ebp-18h]
     uint currentCount; // [esp+790h] [ebp-14h]
@@ -390,72 +390,72 @@ void R_InitWorkerThreads()
 int R_InitWorkerCmds()
 {
     g_workerCmds[WRKCMD_UPDATE_FX_SPOT_LIGHT].buf = (uint8_t *)g_UpdateFxSpotLightBuf;
-    g_workerCmds[WRKCMD_UPDATE_FX_SPOT_LIGHT].bufSize = 12;
-    g_workerCmds[WRKCMD_UPDATE_FX_SPOT_LIGHT].dataSize = 12;
+    g_workerCmds[WRKCMD_UPDATE_FX_SPOT_LIGHT].bufSize = sizeof(g_UpdateFxSpotLightBuf);
+    g_workerCmds[WRKCMD_UPDATE_FX_SPOT_LIGHT].dataSize = sizeof(FxCmd);
 
     g_workerCmds[WRKCMD_UPDATE_FX_NON_DEPENDENT].buf = (uint8_t *)g_UpdateFxNonDependentBuf;
-    g_workerCmds[WRKCMD_UPDATE_FX_NON_DEPENDENT].bufSize = 12;
-    g_workerCmds[WRKCMD_UPDATE_FX_NON_DEPENDENT].dataSize = 12;
+    g_workerCmds[WRKCMD_UPDATE_FX_NON_DEPENDENT].bufSize = sizeof(g_UpdateFxNonDependentBuf);
+    g_workerCmds[WRKCMD_UPDATE_FX_NON_DEPENDENT].dataSize = sizeof(FxCmd);
 
     g_workerCmds[WRKCMD_UPDATE_FX_REMAINING].buf = (uint8_t *)g_UpdateFxRemainingBuf;
-    g_workerCmds[WRKCMD_UPDATE_FX_REMAINING].bufSize = 12;
-    g_workerCmds[WRKCMD_UPDATE_FX_REMAINING].dataSize = 12;
+    g_workerCmds[WRKCMD_UPDATE_FX_REMAINING].bufSize = sizeof(g_UpdateFxRemainingBuf);
+    g_workerCmds[WRKCMD_UPDATE_FX_REMAINING].dataSize = sizeof(FxCmd);
 
     g_workerCmds[WRKCMD_DPVS_CELL_STATIC].buf = (uint8_t *)g_dpvsCellStaticBuf;
-    g_workerCmds[WRKCMD_DPVS_CELL_STATIC].bufSize = 3072;
-    g_workerCmds[WRKCMD_DPVS_CELL_STATIC].dataSize = 12;
+    g_workerCmds[WRKCMD_DPVS_CELL_STATIC].bufSize = sizeof(g_dpvsCellStaticBuf);
+    g_workerCmds[WRKCMD_DPVS_CELL_STATIC].dataSize = sizeof(DpvsStaticCellCmd);
 
     g_workerCmds[WRKCMD_DPVS_CELL_SCENE_ENT].buf = (uint8_t *)g_dpvsCellSceneEntBuf;
-    g_workerCmds[WRKCMD_DPVS_CELL_SCENE_ENT].bufSize = 6144;
-    g_workerCmds[WRKCMD_DPVS_CELL_SCENE_ENT].dataSize = 12;
+    g_workerCmds[WRKCMD_DPVS_CELL_SCENE_ENT].bufSize = sizeof(g_dpvsCellSceneEntBuf);
+    g_workerCmds[WRKCMD_DPVS_CELL_SCENE_ENT].dataSize = sizeof(DpvsDynamicCellCmd);
 
     g_workerCmds[WRKCMD_DPVS_CELL_DYN_MODEL].buf = (uint8_t *)g_dpvsCellDynModelBuf;
-    g_workerCmds[WRKCMD_DPVS_CELL_DYN_MODEL].bufSize = 6144;
-    g_workerCmds[WRKCMD_DPVS_CELL_DYN_MODEL].dataSize = 12;
+    g_workerCmds[WRKCMD_DPVS_CELL_DYN_MODEL].bufSize = sizeof(g_dpvsCellDynModelBuf);
+    g_workerCmds[WRKCMD_DPVS_CELL_DYN_MODEL].dataSize = sizeof(DpvsDynamicCellCmd);
 
     g_workerCmds[WRKCMD_DPVS_CELL_DYN_BRUSH].buf = (uint8_t *)g_dpvsCellDynBrushBuf;
-    g_workerCmds[WRKCMD_DPVS_CELL_DYN_BRUSH].bufSize = 6144;
-    g_workerCmds[WRKCMD_DPVS_CELL_DYN_BRUSH].dataSize = 12;
+    g_workerCmds[WRKCMD_DPVS_CELL_DYN_BRUSH].bufSize = sizeof(g_dpvsCellDynBrushBuf);
+    g_workerCmds[WRKCMD_DPVS_CELL_DYN_BRUSH].dataSize = sizeof(DpvsDynamicCellCmd);
 
     g_workerCmds[WRKCMD_DPVS_ENTITY].buf = (uint8_t *)g_dpvsEntityBuf;
-    g_workerCmds[WRKCMD_DPVS_ENTITY].bufSize = 0x8000;
-    g_workerCmds[WRKCMD_DPVS_ENTITY].dataSize = 16;
+    g_workerCmds[WRKCMD_DPVS_ENTITY].bufSize = sizeof(g_dpvsEntityBuf);
+    g_workerCmds[WRKCMD_DPVS_ENTITY].dataSize = sizeof(DpvsEntityCmd);
 
     g_workerCmds[WRKCMD_ADD_SCENE_ENT].buf = (uint8_t *)g_addSceneEntBuf;
-    g_workerCmds[WRKCMD_ADD_SCENE_ENT].bufSize = 4;
-    g_workerCmds[WRKCMD_ADD_SCENE_ENT].dataSize = 4;
+    g_workerCmds[WRKCMD_ADD_SCENE_ENT].bufSize = sizeof(g_addSceneEntBuf);
+    g_workerCmds[WRKCMD_ADD_SCENE_ENT].dataSize = sizeof(SceneEntCmd);
 
     g_workerCmds[WRKCMD_SPOT_SHADOW_ENT].buf = (uint8_t *)g_spotShadowEntBuf;
-    g_workerCmds[WRKCMD_SPOT_SHADOW_ENT].bufSize = 2048;
-    g_workerCmds[WRKCMD_SPOT_SHADOW_ENT].dataSize = 8;
+    g_workerCmds[WRKCMD_SPOT_SHADOW_ENT].bufSize = sizeof(g_spotShadowEntBuf);
+    g_workerCmds[WRKCMD_SPOT_SHADOW_ENT].dataSize = sizeof(GfxSpotShadowEntCmd);
 
     g_workerCmds[WRKCMD_SHADOW_COOKIE].buf = (uint8_t *)g_shadowCookieBuf;
-    g_workerCmds[WRKCMD_SHADOW_COOKIE].bufSize = 16;
-    g_workerCmds[WRKCMD_SHADOW_COOKIE].dataSize = 16;
+    g_workerCmds[WRKCMD_SHADOW_COOKIE].bufSize = sizeof(g_shadowCookieBuf);
+    g_workerCmds[WRKCMD_SHADOW_COOKIE].dataSize = sizeof(ShadowCookieCmd);
 
     g_workerCmds[WRKCMD_BOUNDS_ENT_DELAYED].buf = (uint8_t *)g_GfxEntityBoundsBuf;
-    g_workerCmds[WRKCMD_BOUNDS_ENT_DELAYED].bufSize = 1024;
-    g_workerCmds[WRKCMD_BOUNDS_ENT_DELAYED].dataSize = 4;
+    g_workerCmds[WRKCMD_BOUNDS_ENT_DELAYED].bufSize = sizeof(g_GfxEntityBoundsBuf);
+    g_workerCmds[WRKCMD_BOUNDS_ENT_DELAYED].dataSize = sizeof(GfxEntity *);
 
     g_workerCmds[WRKCMD_SKIN_ENT_DELAYED].buf = (uint8_t *)g_SkinGfxEntityBuf;
-    g_workerCmds[WRKCMD_SKIN_ENT_DELAYED].bufSize = 4096;
-    g_workerCmds[WRKCMD_SKIN_ENT_DELAYED].dataSize = 4;
+    g_workerCmds[WRKCMD_SKIN_ENT_DELAYED].bufSize = sizeof(g_SkinGfxEntityBuf);
+    g_workerCmds[WRKCMD_SKIN_ENT_DELAYED].dataSize = sizeof(GfxEntity *);
 
     g_workerCmds[WRKCMD_GENERATE_FX_VERTS].buf = (uint8_t *)g_GenerateFxVertsBuf;
-    g_workerCmds[WRKCMD_GENERATE_FX_VERTS].bufSize = 136;
-    g_workerCmds[WRKCMD_GENERATE_FX_VERTS].dataSize = 68;
+    g_workerCmds[WRKCMD_GENERATE_FX_VERTS].bufSize = sizeof(g_GenerateFxVertsBuf);
+    g_workerCmds[WRKCMD_GENERATE_FX_VERTS].dataSize = sizeof(FxGenerateVertsCmd);
 
     g_workerCmds[WRKCMD_GENERATE_MARK_VERTS].buf = (uint8_t *)g_GenerateMarkVertsBuf;
-    g_workerCmds[WRKCMD_GENERATE_MARK_VERTS].bufSize = 12;
-    g_workerCmds[WRKCMD_GENERATE_MARK_VERTS].dataSize = 12;
+    g_workerCmds[WRKCMD_GENERATE_MARK_VERTS].bufSize = sizeof(g_GenerateMarkVertsBuf);
+    g_workerCmds[WRKCMD_GENERATE_MARK_VERTS].dataSize = sizeof(FxCmd);
 
     g_workerCmds[WRKCMD_SKIN_CACHED_STATICMODEL].buf = (uint8_t *)g_skinCachedStaticModelBuf;
-    g_workerCmds[WRKCMD_SKIN_CACHED_STATICMODEL].bufSize = 2048;
-    g_workerCmds[WRKCMD_SKIN_CACHED_STATICMODEL].dataSize = 4;
+    g_workerCmds[WRKCMD_SKIN_CACHED_STATICMODEL].bufSize = sizeof(g_skinCachedStaticModelBuf);
+    g_workerCmds[WRKCMD_SKIN_CACHED_STATICMODEL].dataSize = sizeof(SkinCachedStaticModelCmd);
 
     g_workerCmds[WRKCMD_SKIN_XMODEL].buf = (uint8_t *)g_SkinXModelBuf;
-    g_workerCmds[WRKCMD_SKIN_XMODEL].bufSize = 28672;
-    g_workerCmds[WRKCMD_SKIN_XMODEL].dataSize = 28;
+    g_workerCmds[WRKCMD_SKIN_XMODEL].bufSize = sizeof(g_SkinXModelBuf);
+    g_workerCmds[WRKCMD_SKIN_XMODEL].dataSize = sizeof(SkinXModelCmd);
 
     return R_InitWorkerCmdsPos();
 }

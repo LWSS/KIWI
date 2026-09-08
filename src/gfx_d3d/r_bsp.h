@@ -202,7 +202,7 @@ struct GfxWorld // sizeof=0x2DC
     GfxWorldDpvsStatic dpvs;            // ...
     GfxWorldDpvsDynamic dpvsDyn;        // ...
 };
-static_assert(sizeof(GfxWorld) == 0x2DC);
+static_assert(sizeof(GfxWorld) == (sizeof(void *) == 8 ? 1032 : 732));
 
 // r_bsp
 void __cdecl R_ReloadWorld();

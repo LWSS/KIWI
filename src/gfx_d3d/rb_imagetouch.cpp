@@ -8,20 +8,21 @@
 
 int __cdecl RB_CompareTouchImages(int *e0, int *e1)
 {
-    int image; // [esp+0h] [ebp-Ch]
-    int image_4; // [esp+4h] [ebp-8h]
-
-    image = *e0;
-    image_4 = *e1;
-    if (!*(_BYTE *)(*e1 + 11))
-        return -1;
-    if (!*(_BYTE *)(image + 11))
+    const GfxImage *a = *(const GfxImage *const *)e0;
+    const GfxImage *b = *(const GfxImage *const *)e1;
+    if (!b->semantic)
+    {
+        return a->semantic ? -1 : 0;
+    }
+    if (!a->semantic)
+    {
         return 1;
-    if (*(_DWORD *)(image_4 + 16) != *(_DWORD *)(image + 16))
-        return *(_DWORD *)(image_4 + 16) - *(_DWORD *)(image + 16);
-    if (*(uint8_t *)(image + 11) == *(uint8_t *)(image_4 + 11))
-        return 0;
-    return *(uint8_t *)(image + 11) - *(uint8_t *)(image_4 + 11);
+    }
+    if (a->cardMemory.platform[0] != b->cardMemory.platform[0])
+    {
+        return a->cardMemory.platform[0] < b->cardMemory.platform[0] ? 1 : -1;
+    }
+    return (int)a->semantic - (int)b->semantic;
 }
 
 void __cdecl RB_TouchImage(GfxImage *image)
@@ -79,7 +80,7 @@ void __cdecl RB_TouchAllImages()
     if (tess.indexCount)
         RB_EndTessSurface();
     R_GetImageList(&imageList);
-    qsort(imageList.image, imageList.count, 4u, (int(__cdecl *)(const void *, const void *))RB_CompareTouchImages);
+    qsort(imageList.image, imageList.count, sizeof(GfxImage *), (int(__cdecl *)(const void *, const void *))RB_CompareTouchImages);
     v6 = 0;
     for (i = 0; i < imageList.count && imageList.image[i]->semantic; ++i)
     {

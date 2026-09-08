@@ -38,10 +38,9 @@ void __cdecl R_InitStaticModelCache()
 
 static_model_leaf_t *SMC_GetLeaf(uint cacheIndex)
 {
-    iassert(cacheIndex);
-    static_model_leaf_t *retval = &s_cache.leafs[0][cacheIndex - 1];
-    iassert((char *)retval == ((char *)&s_cache.leafs + (sizeof(static_model_leaf_t) * (cacheIndex - 1))));
-    return retval;
+    iassert(cacheIndex && cacheIndex <= 512 * 32);
+    uint index = cacheIndex - 1;
+    return &s_cache.leafs[index / 32][index % 32];
 }
 
 void __cdecl R_ShutdownStaticModelCache()
@@ -148,7 +147,7 @@ char __cdecl SMC_GetFreeBlockOfSize(uint smcIndex, uint listIndex)
     static_model_node_list_t *blocka; // [esp+Ch] [ebp-1Ch]
     static_model_tree_t *tree; // [esp+10h] [ebp-18h]
     static_model_leaf_t *leafs; // [esp+14h] [ebp-14h]
-    static_model_leaf_t *freelist; // [esp+18h] [ebp-10h]
+    static_model_node_list_t *freelist; // [esp+18h] [ebp-10h]
     uint index; // [esp+1Ch] [ebp-Ch]
     uint treeIndex; // [esp+24h] [ebp-4h]
 
@@ -157,10 +156,10 @@ char __cdecl SMC_GetFreeBlockOfSize(uint smcIndex, uint listIndex)
     iassert(s_cache.freelist[smcIndex][listIndex].prev == &s_cache.freelist[smcIndex][listIndex]);
     if (!listIndex)
         return SMC_ForceFreeBlock(smcIndex);
-    freelist = &s_cache.leafs[511][6 * smcIndex + 31 + listIndex];
-    if (freelist->freenode.next == (static_model_node_list_t*)freelist && !SMC_GetFreeBlockOfSize(smcIndex, listIndex - 1))
+    freelist = &s_cache.freelist[smcIndex][listIndex - 1];
+    if (freelist->next == (static_model_node_list_t*)freelist && !SMC_GetFreeBlockOfSize(smcIndex, listIndex - 1))
         return 0;
-    block = freelist->freenode.next;
+    block = freelist->next;
     iassert( (uintptr_t)block != (uintptr_t)freelist );
     block->next->prev = block->prev;
     block->prev->next = block->next;
@@ -175,7 +174,7 @@ char __cdecl SMC_GetFreeBlockOfSize(uint smcIndex, uint listIndex)
         tree->usedlist.next->prev = &tree->usedlist;
     }
     leafs = s_cache.leafs[treeIndex];
-    index = ((char*)block - (char*)leafs) / 8;
+    index = ((char*)block - (char*)leafs) / sizeof(static_model_leaf_t);
     bcassert(index, ARRAY_COUNT(s_cache.leafs[treeIndex]));
     if (block != (static_model_node_list_t *)&leafs[index])
         MyAssertHandler(
@@ -219,7 +218,7 @@ uint16_t __cdecl SMC_Allocate(uint smcIndex, uint bitCount)
     iassert(block->prev->next == block);
     block->next->prev = block->prev;
     block->prev->next = block->next;
-    static_assert(sizeof(s_cache.leafs[0]) == 256);
+    static_assert(sizeof(s_cache.leafs[0]) == 32 * sizeof(static_model_leaf_t));
     treeIndex = ((char *)block - (char *)s_cache.leafs) / sizeof(s_cache.leafs[0]);
     bcassert(treeIndex, ARRAY_COUNT(s_cache.trees));
     tree = &s_cache.trees[treeIndex];
@@ -231,7 +230,7 @@ uint16_t __cdecl SMC_Allocate(uint smcIndex, uint bitCount)
         tree->usedlist.next->prev = &tree->usedlist;
     }
     leafs = s_cache.leafs[treeIndex];
-    index = ((char *)block - (char *)leafs) / 8;
+    index = ((char *)block - (char *)leafs) / sizeof(static_model_leaf_t);
     bcassert(index, ARRAY_COUNT(s_cache.leafs[treeIndex]));
     iassert(block == &leafs[index].freenode);
     nodeIndex = ((index + 32) >> (5 - listIndex)) - 1;
@@ -281,7 +280,7 @@ uint16_t __cdecl R_CacheStaticModelSurface(
     if (cacheIndex)
     {
         cachedSurf = &SMC_GetLeaf(cacheIndex)->cachedSurf;
-        tree = &s_cache.trees[((char*)cachedSurf - (char*)s_cache.leafs) / 256];
+        tree = &s_cache.trees[((char*)cachedSurf - (char*)s_cache.leafs) / sizeof(s_cache.leafs[0])];
         if (tree->frameCount != rg.frontEndFrameCount)
         {
             tree->frameCount = rg.frontEndFrameCount;
@@ -329,7 +328,7 @@ uint16_t __cdecl R_CacheStaticModelSurface(
                 frontEndDataOut->smcPatchVertsUsed += cachedVertsNeeded;
                 R_AddWorkerCmd(WRKCMD_SKIN_CACHED_STATICMODEL, (byte*)&skinSmodelCmd);
                 R_CacheStaticModelIndices(cachedSurfa->smodelIndex, cachedSurfa->lodIndex, cachedSurfa->baseVertIndex);
-                treea = &s_cache.trees[((char*)cachedSurfa - (char*)s_cache.leafs) / 256];
+                treea = &s_cache.trees[((char*)cachedSurfa - (char*)s_cache.leafs) / sizeof(s_cache.leafs[0])];
                 treea->frameCount = rg.frontEndFrameCount;
                 
                 iassert(treea->usedlist.prev->prev->next == treea->usedlist.prev);

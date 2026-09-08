@@ -56,7 +56,10 @@ static void __cdecl R_MultiplySkelMat(const DObjSkelMat *mat0, const DObjSkelMat
 
 void R_SkinXModelCmd(_WORD *data)
 {
-    if (dx.deviceLost) return;
+    if (dx.deviceLost)
+    {
+        return;
+    }
 
     PROF_SCOPED("R_SkinXModel");
 
@@ -94,12 +97,14 @@ void R_SkinXModelCmd(_WORD *data)
             for (uint j = boneIndex; j < totalBones; j++)
             {
                 if ((skinCmd->surfacePartBits[j >> 5] & (0x80000000 >> (j & 0x1F))) == 0)
+                {
                     continue;
+                }
 
                 if (sseStateUsed)
                 {
                     sseStateUsed = false;
-                    _m_empty();
+                    _mm_sfence();
                 }
 
                 DObjSkelMat mat0, mat1;
@@ -117,7 +122,7 @@ void R_SkinXModelCmd(_WORD *data)
 
         if (skinnedSurf->skinnedCachedOffset == -2)
         {
-            surfPos = (GfxModelSkinnedSurface *)((char *)surfPos + 56);
+            surfPos = (GfxModelSkinnedSurface *)((char *)surfPos + sizeof(GfxModelRigidSurface));
             continue;
         }
 
@@ -128,13 +133,13 @@ void R_SkinXModelCmd(_WORD *data)
 
         if (skinnedSurf->skinnedCachedOffset < 0)
         {
-            iassert((reinterpret_cast<uint>(skinnedSurf->skinnedVert) & 15) == 0);
+            iassert(((uintptr_t)skinnedSurf->skinnedVert & 15) == 0);
             skinVerticesOut = skinnedSurf->skinnedVert;
         }
         else
         {
             iassert(gfxBuf.skinnedCacheLockAddr);
-            iassert(((reinterpret_cast<uint>(gfxBuf.skinnedCacheLockAddr) & 15) == 0));
+            iassert((((uintptr_t)gfxBuf.skinnedCacheLockAddr & 15) == 0));
             iassert(((skinnedSurf->skinnedCachedOffset & 15) == 0));
             skinVerticesOut = (GfxPackedVertex*)&gfxBuf.skinnedCacheLockAddr[skinnedSurf->skinnedCachedOffset];
         }
@@ -144,16 +149,17 @@ void R_SkinXModelCmd(_WORD *data)
             if (!sseStateUsed)
             {
                 sseStateUsed = true;
-                _m_empty();
+                _mm_sfence();
             }
         
             GfxPackedVertexNormal *skinVertNormalIn = 0, *skinVertNormalOut = 0;
-            if (gfxBuf.fastSkin)
+            if (gfxBuf.fastSkin && skinnedSurf->skinnedCachedOffset >= 0)
             {
-                if (skinnedSurf->skinnedCachedOffset >= 0)
-                    skinVertNormalOut = &gfxBuf.skinnedCacheNormalsAddr[skinnedSurf->skinnedCachedOffset >> 5];
-                if (skinnedSurf->skinnedVert)
-                    skinVertNormalIn = &gfxBuf.oldSkinnedCacheNormalsAddr[(int)skinnedSurf->skinnedVert >> 5];
+                skinVertNormalOut = &gfxBuf.skinnedCacheNormalsAddr[skinnedSurf->skinnedCachedOffset >> 5];
+                if (skinnedSurf->oldSkinnedCachedOffset >= 0)
+                {
+                    skinVertNormalIn = &gfxBuf.oldSkinnedCacheNormalsAddr[skinnedSurf->oldSkinnedCachedOffset >> 5];
+                }
             }
             R_SkinXSurfaceSkinnedSse(xsurf, &boneSkelMats[boneIndex], skinVertNormalIn, skinVertNormalOut, skinVerticesOut);
         }
@@ -164,7 +170,9 @@ void R_SkinXModelCmd(_WORD *data)
     }
 
     if (sseStateUsed)
-        _m_empty();
+    {
+        _mm_sfence();
+    }
 }
 
 
@@ -174,9 +182,13 @@ void __cdecl R_SkinXSurfaceSkinned(
     GfxPackedVertex *skinVerticesOut)
 {
     if (xsurf->deformed)
+    {
         R_SkinXSurfaceWeight(xsurf->verts0, &xsurf->vertInfo, boneMatrix, skinVerticesOut);
+    }
     else
+    {
         R_SkinXSurfaceRigid(xsurf, xsurf->vertCount, boneMatrix, skinVerticesOut);
+    }
 }
 
 void __cdecl R_SkinXSurfaceWeight(
@@ -211,7 +223,9 @@ void __cdecl R_SkinXSurfaceWeight(
         vertsBlend += 5 * vertexInfo->vertCount[2];
     }
     if (vertexInfo->vertCount[3])
+    {
         R_SkinXSurfaceWeight3(&inVerts[vertIndex], vertsBlend, vertexInfo->vertCount[3], boneMatrix, &outVerts[vertIndex]);
+    }
 }
 
 
@@ -437,8 +451,8 @@ void __cdecl R_SkinXSurfaceRigid(
     const DObjSkelMat *bone; // [esp+5Ch] [ebp-4h]
 
     iassert(vertices);
-    iassert(!(reinterpret_cast<unsigned>(vertices) & 15));
-    iassert(!(reinterpret_cast<unsigned>(boneMatrix) & 15));
+    iassert(!((uintptr_t)vertices & 15));
+    iassert(!((uintptr_t)boneMatrix & 15));
 
     PROF_SCOPED("SkinXSurfaceWeight");
 

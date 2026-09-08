@@ -26,7 +26,7 @@ struct Font_s // sizeof=0x18 // (SP/MP same)
     struct Material *glowMaterial;
     Glyph *glyphs;
 };
-static_assert(sizeof(Font_s) == 24);
+static_assert(sizeof(Font_s) == (sizeof(void *) == 8 ? 40 : 24));
 
 const Glyph *__cdecl R_GetCharacterGlyph(Font_s *font, uint letter);
 uint __cdecl R_FontGetRandomLetter(Font_s *font, int seed);

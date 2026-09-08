@@ -761,6 +761,11 @@ GfxCmdHeader *__cdecl R_GetCommandBuffer(GfxRenderCommand renderCmd, int bytes)
             "(renderCmd >= 0 && renderCmd < RC_COUNT)",
             renderCmd);
     iassert( ((bytes & 3) == 0) );
+    if (bytes < sizeof(GfxCmdHeader) || bytes > (0xFFFF & ~(alignof(void *) - 1)))
+    {
+        return NULL;
+    }
+    bytes = (bytes + alignof(void *) - 1) & ~(alignof(void *) - 1);
     iassert( (bytes < s_renderCmdBufferSize) );
     vassert((bytes == static_cast< unsigned short >( bytes )), "(bytes) = %i", bytes);
     iassert( s_cmdList );
@@ -826,7 +831,7 @@ GfxCmdHeader *__cdecl R_GetCommandBuffer(GfxRenderCommand renderCmd, int bytes)
         // advanced, lastCmd is cleared so nothing merges onto it), i.e. silently DROPPED. The
         // frame renders whatever fit before the wall instead of crashing. (Non-critical adders
         // already null-check, so they keep dropping cleanly on their own.)
-        static uint8_t s_overflowScratch[0x10000];   // >= any single command's byte size
+        static __declspec(align(16)) uint8_t s_overflowScratch[0x10000];   // >= any single command's byte size
         static bool    s_warned = false;
         if ( !s_warned )
         {
@@ -1008,7 +1013,7 @@ void __cdecl R_AddCmdDrawStretchPic(
         actualMaterial = rgp.defaultMaterial;
     }
     iassert( !Material_UsesDepthBuffer( actualMaterial ) );
-    cmd = (GfxCmdStretchPic *)R_GetCommandBuffer(RC_FIRST_NONCRITICAL, 44);
+    cmd = (GfxCmdStretchPic *)R_GetCommandBuffer(RC_FIRST_NONCRITICAL, sizeof(GfxCmdStretchPic));
     if (cmd)
     {
         cmd->material = actualMaterial;
@@ -1103,7 +1108,7 @@ void __cdecl R_AddCmdDrawStretchPicFlipST(
         actualMaterial = rgp.defaultMaterial;
     }
     iassert( !Material_UsesDepthBuffer( actualMaterial ) );
-    cmd = (GfxCmdStretchPic *)R_GetCommandBuffer(RC_STRETCH_PIC_FLIP_ST, 44);
+    cmd = (GfxCmdStretchPic *)R_GetCommandBuffer(RC_STRETCH_PIC_FLIP_ST, sizeof(GfxCmdStretchPic));
     if (cmd)
     {
         cmd->material = actualMaterial;
@@ -1135,7 +1140,7 @@ void __cdecl R_AddCmdDrawStretchPicRotateXY(
     Material *defaultMaterial; // [esp+4h] [ebp-8h]
     GfxCmdStretchPicRotateXY *cmd; // [esp+8h] [ebp-4h]
 
-    cmd = (GfxCmdStretchPicRotateXY *)R_GetCommandBuffer(RC_STRETCH_PIC_ROTATE_XY, 48);
+    cmd = (GfxCmdStretchPicRotateXY *)R_GetCommandBuffer(RC_STRETCH_PIC_ROTATE_XY, sizeof(GfxCmdStretchPicRotateXY));
     if (cmd)
     {
         if (material)
@@ -1173,7 +1178,7 @@ void __cdecl R_AddCmdDrawStretchPicRotateST(
     Material *defaultMaterial; // [esp+4h] [ebp-8h]
     GfxCmdStretchPicRotateST *cmd; // [esp+8h] [ebp-4h]
 
-    cmd = (GfxCmdStretchPicRotateST *)R_GetCommandBuffer(RC_STRETCH_PIC_ROTATE_ST, 52);
+    cmd = (GfxCmdStretchPicRotateST *)R_GetCommandBuffer(RC_STRETCH_PIC_ROTATE_ST, sizeof(GfxCmdStretchPicRotateST));
     if (cmd)
     {
         if (material)
@@ -1234,7 +1239,7 @@ GfxCmdDrawText2D *__cdecl AddBaseDrawTextCmd(
     if (!*text && cursorPos < 0)
         return 0;
     v13 = strlen(text);
-    cmd = (GfxCmdDrawText2D *)R_GetCommandBuffer(RC_DRAW_TEXT_2D, (v13 + 84) & 0xFFFFFFFC);
+    cmd = (GfxCmdDrawText2D *)R_GetCommandBuffer(RC_DRAW_TEXT_2D, (v13 + offsetof(GfxCmdDrawText2D, text) + 1 + 3) & ~3u);
     if (!cmd)
         return 0;
     cmd->x = x;
@@ -1444,7 +1449,7 @@ GfxCmdDrawText2D *__cdecl AddBaseDrawConsoleTextCmd(
     iassert( textPool );
     if (!charCount)
         return 0;
-    cmd = (GfxCmdDrawText2D *)R_GetCommandBuffer(RC_DRAW_TEXT_2D, (charCount + 84) & 0xFFFFFFFC);
+    cmd = (GfxCmdDrawText2D *)R_GetCommandBuffer(RC_DRAW_TEXT_2D, (charCount + offsetof(GfxCmdDrawText2D, text) + 1 + 3) & ~3u);
     if (!cmd)
         return 0;
     cmd->x = x;
@@ -1578,7 +1583,7 @@ void __cdecl R_AddCmdDrawQuadPic(const float (*verts)[2], const float *color, Ma
     int cornerIndex; // [esp+Ch] [ebp-8h]
     GfxCmdDrawQuadPic *cmd; // [esp+10h] [ebp-4h]
 
-    cmd = (GfxCmdDrawQuadPic *)R_GetCommandBuffer(RC_DRAW_QUAD_PIC, 44);
+    cmd = (GfxCmdDrawQuadPic *)R_GetCommandBuffer(RC_DRAW_QUAD_PIC, sizeof(GfxCmdDrawQuadPic));
     if (cmd)
     {
         if (material)
@@ -1853,7 +1858,7 @@ void __cdecl R_AddCmdClearScreen(int whichToClear, const float *color, float dep
             whichToClear);
     iassert( color );
     iassert( (depth >= 0.0f && depth <= 1.0f) );
-    cmd = (GfxCmdClearScreen *)R_GetCommandBuffer(RC_CLEAR_SCREEN, 28);
+    cmd = (GfxCmdClearScreen *)R_GetCommandBuffer(RC_CLEAR_SCREEN, sizeof(GfxCmdClearScreen));
     iassert( cmd );
     cmd->whichToClear = whichToClear;
     iassert( cmd->whichToClear == whichToClear );
@@ -1878,7 +1883,7 @@ void __cdecl R_AddCmdSaveScreen(uint screenTimerId)
             screenTimerId,
             0,
             3);
-    cmd = (GfxCmdSaveScreen *)R_GetCommandBuffer(RC_SAVE_SCREEN, 8);
+    cmd = (GfxCmdSaveScreen *)R_GetCommandBuffer(RC_SAVE_SCREEN, sizeof(GfxCmdSaveScreen));
     iassert( cmd );
     cmd->screenTimerId = screenTimerId;
 }
@@ -1901,7 +1906,7 @@ void __cdecl R_AddCmdSaveScreenSection(
             screenTimerId,
             0,
             3);
-    cmd = (GfxCmdSaveScreenSection *)R_GetCommandBuffer(RC_SAVE_SCREEN_SECTION, 24);
+    cmd = (GfxCmdSaveScreenSection *)R_GetCommandBuffer(RC_SAVE_SCREEN_SECTION, sizeof(GfxCmdSaveScreenSection));
     iassert( cmd );
     cmd->s0 = viewX;
     cmd->t0 = viewY;
@@ -1931,7 +1936,7 @@ void __cdecl R_AddCmdBlendSavedScreenShockBlurred(
             3);
     if (fadeMsec > 0)
     {
-        cmd = (GfxCmdBlendSavedScreenBlurred *)R_GetCommandBuffer(RC_BLEND_SAVED_SCREEN_BLURRED, 28);
+        cmd = (GfxCmdBlendSavedScreenBlurred *)R_GetCommandBuffer(RC_BLEND_SAVED_SCREEN_BLURRED, sizeof(GfxCmdBlendSavedScreenBlurred));
         if (cmd)
         {
             cmd->fadeMsec = fadeMsec;
@@ -1954,7 +1959,7 @@ void __cdecl R_AddCmdBlendSavedScreenShockFlashed(
 {
     GfxCmdBlendSavedScreenFlashed *cmd; // [esp+0h] [ebp-4h]
 
-    cmd = (GfxCmdBlendSavedScreenFlashed *)R_GetCommandBuffer(RC_BLEND_SAVED_SCREEN_FLASHED, 28);
+    cmd = (GfxCmdBlendSavedScreenFlashed *)R_GetCommandBuffer(RC_BLEND_SAVED_SCREEN_FLASHED, sizeof(GfxCmdBlendSavedScreenFlashed));
     if (cmd)
     {
         cmd->intensityWhiteout = intensityWhiteout;
@@ -1985,7 +1990,7 @@ void __cdecl R_AddCmdProjectionSet(GfxProjectionTypes projection)
 {
     GfxCmdProjectionSet *cmd; // [esp+0h] [ebp-4h]
 
-    cmd = (GfxCmdProjectionSet *)R_GetCommandBuffer(RC_PROJECTION_SET, 8);
+    cmd = (GfxCmdProjectionSet *)R_GetCommandBuffer(RC_PROJECTION_SET, sizeof(GfxCmdProjectionSet));
     if (cmd)
         cmd->projection = projection;
 }
@@ -2514,7 +2519,7 @@ void __cdecl R_AddRenderCmdDrawTris(
         return;                                  // material lacks this technique → skip
 
     int vc           = vertexCount;
-    int xyzwOffset   = 16;                        // after the 16-byte GfxCmdDrawTriangles
+    int xyzwOffset   = sizeof(GfxCmdDrawTriangles);                        // after the 16-byte GfxCmdDrawTriangles
     int normalOffset = xyzwOffset   + 16 * vc;
     int colorOffset  = normalOffset + 12 * vc;
     int stOffset     = colorOffset  +  4 * vc;
@@ -2768,7 +2773,7 @@ void __cdecl R_AddCmdDraw2DImage(
     const float *color, Material *material)
 {
     Material *actualMaterial = material ? (Material *)Material_FromHandle(material) : rgp.defaultMaterial;
-    GfxCmdStretchPic *cmd = (GfxCmdStretchPic *)R_GetCommandBuffer(RC_STRETCH_PIC, 44);
+    GfxCmdStretchPic *cmd = (GfxCmdStretchPic *)R_GetCommandBuffer(RC_STRETCH_PIC, sizeof(GfxCmdStretchPic));
     if ( cmd )
     {
         cmd->material = actualMaterial;

@@ -1236,7 +1236,7 @@ MaterialStateMap *__cdecl Material_LoadStateMap(char *name)
         Com_SetSpaceDelimited(0);
         v2 = strlen(name);
         nameSize = v2 + 1;
-        stateMap = (MaterialStateMap*)Material_Alloc(v2 + 45);
+        stateMap = (MaterialStateMap*)Material_Alloc(v2 + 1 + sizeof(MaterialStateMap));
         stateMap->name = (const char*)&stateMap[1]; // (skip past statemap struct and use rest of buffer for name)
         memcpy((void*)stateMap->name, name, nameSize);
         if (!Material_ParseStateMap(&text, stateMap))
@@ -2494,9 +2494,9 @@ char __cdecl Material_SetShaderArguments(
 
     if (*argCount + usedCount <= argLimit)
     {
-        qsort(localArgs, usedCount, 8u, (int(*)(const void*, const void*))Material_CompareShaderArgumentsForCombining);
+        qsort(localArgs, usedCount, sizeof(MaterialShaderArgument), (int(*)(const void*, const void*))Material_CompareShaderArgumentsForCombining);
         usedCounta = Material_CombineShaderArguments(usedCount, localArgs);
-        memcpy(&args[*argCount], localArgs, 8 * usedCounta);
+        memcpy(&args[*argCount], localArgs, sizeof(MaterialShaderArgument) * usedCounta);
         *argCount += usedCounta;
         return 1;
     }
@@ -4128,7 +4128,7 @@ bool __cdecl Material_LoadPass(
         {
             if (!Material_LoadPassPixelShader(text, renderer, techFlags, &pixelParamSet, pass, 0x40u, &argCount, args))
                 goto LABEL_8;
-            qsort(args, argCount, 8u, (int(*)(const void*, const void*))Material_CompareShaderArgumentsForRuntime);
+            qsort(args, argCount, sizeof(MaterialShaderArgument), (int(*)(const void*, const void*))Material_CompareShaderArgumentsForRuntime);
             firstArg = 0;
             pass->perPrimArgCount = Material_CountArgsWithUpdateFrequency(MTL_UPDATE_PER_PRIM, args, argCount, &firstArg);
             pass->perObjArgCount = Material_CountArgsWithUpdateFrequency(MTL_UPDATE_PER_OBJECT, args, argCount, &firstArg);
@@ -4160,8 +4160,8 @@ bool __cdecl Material_LoadPass(
                 ++customArg;
             }
             argCount = pass->stableArgCount + pass->perObjArgCount + pass->perPrimArgCount;
-            pass->args = (MaterialShaderArgument*)Material_Alloc(8 * argCount);
-            memcpy(pass->args, args, 8 * argCount);
+            pass->args = (MaterialShaderArgument*)Material_Alloc(sizeof(MaterialShaderArgument) * argCount);
+            memcpy(pass->args, args, sizeof(MaterialShaderArgument) * argCount);
             arg = pass->args;
             for (argIndex = 0; argIndex < pass->perPrimArgCount; ++argIndex)
             {
@@ -4275,29 +4275,32 @@ MaterialTechnique *__cdecl Material_LoadTechnique(char *name, GfxRenderer render
         }
         else if (passCount)
         {
-            stateMapSize = 4 * passCount;
+            stateMapSize = sizeof(MaterialStateMap *) * passCount;
             nameSize = strlen(name) + 1;
-            technique = Material_Alloc(nameSize + 24 * passCount + 8);
-            stateMapForPass = (MaterialStateMap**)&technique[20 * passCount + 8];
-            *(DWORD*)technique = (DWORD)&stateMapForPass[passCount];
-            memcpy(*(byte**)technique, name, nameSize);
-            *((_WORD *)technique + 2) = techFlags;
-            if (!strcmp(*(const char**)technique, "zprepass"))
-                *((_WORD *)technique + 2) |= 4u;
+            size_t passEnd = offsetof(MaterialTechnique, passArray) + sizeof(MaterialPass) * passCount;
+            MaterialTechnique *newTechnique = (MaterialTechnique *)Material_Alloc(passEnd + stateMapSize + nameSize);
+            stateMapForPass = (MaterialStateMap **)((uint8_t *)newTechnique + passEnd);
+            newTechnique->name = (const char *)&stateMapForPass[passCount];
+            memcpy((void *)newTechnique->name, name, nameSize);
+            newTechnique->flags = techFlags;
+            if (!strcmp(newTechnique->name, "zprepass"))
+            {
+                newTechnique->flags |= 4u;
+            }
             for (passIndex = 0; passIndex < passCount; ++passIndex)
             {
                 vertexDecl = passes[passIndex].vertexDecl;
-                iassert( vertexDecl );
+                iassert(vertexDecl);
                 if (vertexDecl->hasOptionalSource)
                 {
-                    *((_WORD *)technique + 2) |= 8u;
+                    newTechnique->flags |= 8u;
                     break;
                 }
             }
-            *((_WORD *)technique + 3) = passCount;
-            memcpy(technique + 8, passes, 20 * passCount);
+            newTechnique->passCount = passCount;
+            memcpy(newTechnique->passArray, passes, sizeof(MaterialPass) * passCount);
             memcpy(stateMapForPass, stateMap, stateMapSize);
-            return (MaterialTechnique*)technique;
+            return newTechnique;
         }
         else
         {
@@ -4363,7 +4366,7 @@ MaterialTechniqueSet *__cdecl Material_LoadTechniqueSet(char *name, GfxRenderer 
     {
         v3 = strlen(name);
         nameSize = v3 + 1;
-        techniqueSet = (MaterialTechniqueSet*)Material_Alloc(v3 + 149);
+        techniqueSet = (MaterialTechniqueSet*)Material_Alloc(v3 + 1 + sizeof(MaterialTechniqueSet));
         techniqueSet->name = (const char*)&techniqueSet[1];
         techniqueSet->worldVertFormat = 0;
         memcpy((void*)techniqueSet->name, name, nameSize);
@@ -4683,27 +4686,27 @@ Material *__cdecl Material_Duplicate(Material *mtlCopy, char *name)
     else
     {
         v3 = strlen(name);
-        mtlNew = Material_Alloc(v3 + 81);
-        memcpy(mtlNew, mtlCopy, 0x50u);
-        *(_DWORD *)mtlNew = (uint32)mtlNew + 80;
-        memcpy(*(uint8_t **)mtlNew, (uint8_t *)name, v3 + 1);
-        stateBitsTableSize = 8 * mtlCopy->stateBitsCount;
-        *((_DWORD *)mtlNew + 19) = (uint32)Material_Alloc(stateBitsTableSize);
-        memcpy(*((uint8_t **)mtlNew + 19), (uint8_t *)mtlCopy->stateBitsTable, stateBitsTableSize);
+        Material *newMaterial = (Material *)Material_Alloc(sizeof(Material) + v3 + 1);
+        *newMaterial = *mtlCopy;
+        newMaterial->info.name = (const char *)(newMaterial + 1);
+        memcpy((void *)newMaterial->info.name, name, v3 + 1);
+        stateBitsTableSize = sizeof(GfxStateBits) * mtlCopy->stateBitsCount;
+        newMaterial->stateBitsTable = (GfxStateBits *)Material_Alloc(stateBitsTableSize);
+        memcpy(newMaterial->stateBitsTable, mtlCopy->stateBitsTable, stateBitsTableSize);
         if (mtlCopy->textureTable)
         {
-            textureTableSize = 12 * mtlCopy->textureCount;
-            *((_DWORD *)mtlNew + 17) = (uint32)Material_Alloc(textureTableSize);
-            memcpy(*((uint8_t **)mtlNew + 17), (uint8_t *)mtlCopy->textureTable, textureTableSize);
+            textureTableSize = sizeof(MaterialTextureDef) * mtlCopy->textureCount;
+            newMaterial->textureTable = (MaterialTextureDef *)Material_Alloc(textureTableSize);
+            memcpy(newMaterial->textureTable, mtlCopy->textureTable, textureTableSize);
         }
         if (mtlCopy->constantTable)
         {
-            constantTableSize = 32 * mtlCopy->constantCount;
-            *((_DWORD *)mtlNew + 18) = (uint32)Material_Alloc(constantTableSize);
-            memcpy(*((uint8_t **)mtlNew + 18), (uint8_t *)mtlCopy->constantTable, constantTableSize);
+            constantTableSize = sizeof(MaterialConstantDef) * mtlCopy->constantCount;
+            newMaterial->constantTable = (MaterialConstantDef *)Material_Alloc(constantTableSize);
+            memcpy(newMaterial->constantTable, mtlCopy->constantTable, constantTableSize);
         }
-        Material_Add((Material *)mtlNew, hashIndex[0]);
-        return (Material *)mtlNew;
+        Material_Add(newMaterial, hashIndex[0]);
+        return newMaterial;
     }
 }
 
@@ -5092,23 +5095,23 @@ Material *__cdecl Material_CreateLayered(
     }
     stateBitsCount = Material_CreateLayeredStateBitsTable(layerMtl, layerCount, techSet, stateBitsEntry, stateBitsTable);
     v10 = strlen(name);
-    texTableSize = 12 * textureCount;
+    texTableSize = sizeof(MaterialTextureDef) * textureCount;
     constTableSize = 32 * constantCount;
-    memory = Material_Alloc(v10 + 1 + texTableSize + constTableSize + 80);
-    memset(memory, 0, v10 + 1 + texTableSize + constTableSize + 80);
+    memory = Material_Alloc(v10 + 1 + texTableSize + constTableSize + sizeof(Material));
+    memset(memory, 0, v10 + 1 + texTableSize + constTableSize + sizeof(Material));
     newMtl = (Material*)memory;
     if (texTableSize)
-        v9 = (MaterialTextureDef*)(memory + 80);
+        v9 = (MaterialTextureDef*)(memory + sizeof(Material));
     else
         v9 = 0;
     newMtl->textureTable = v9;
     if (constTableSize)
-        v8 = (MaterialConstantDef*)&memory[texTableSize + 80];
+        v8 = (MaterialConstantDef*)&memory[texTableSize + sizeof(Material)];
     else
         v8 = 0;
     newMtl->constantTable = v8;
     newMtl->techniqueSet = techSet;
-    newMtl->info.name = (const char*)&memory[texTableSize + 80 + constTableSize];
+    newMtl->info.name = (const char*)&memory[texTableSize + sizeof(Material) + constTableSize];
     memcpy((void*)newMtl->info.name, name, v10 + 1);
     newMtl->info.gameFlags = oredGameFlags & 0xFB | andedGameFlags & 4;
     newMtl->info.sortKey = (*layerMtl)->info.sortKey;
@@ -5116,8 +5119,7 @@ Material *__cdecl Material_CreateLayered(
     newMtl->textureCount = textureCount;
     newMtl->constantCount = constantCount;
     v4 = newMtl->stateBitsEntry;
-    qmemcpy(newMtl->stateBitsEntry, stateBitsEntry, 0x20u);
-    *((_WORD *)v4 + 16) = *(_WORD *)&stateBitsEntry[32];
+    memcpy(newMtl->stateBitsEntry, stateBitsEntry, sizeof(newMtl->stateBitsEntry));
     Material_SetStateBits(newMtl, stateBitsTable, stateBitsCount);
     newTexEntry = newMtl->textureTable;
     newConstEntry = newMtl->constantTable;
@@ -5183,7 +5185,7 @@ Material *__cdecl Material_CreateLayered(
     }
     vassert(newTexEntry - newMtl->textureTable == newMtl->textureCount, "%i, %i", newTexEntry - newMtl->textureTable, newMtl->textureCount);
     vassert(newConstEntry - newMtl->constantTable == newMtl->constantCount, "%i, %i", newConstEntry - newMtl->constantTable, newMtl->constantCount);
-    qsort(newMtl->textureTable, newMtl->textureCount, 0xCu, (int(*)(const void*, const void*))CompareHashedMaterialTextures);
+    qsort(newMtl->textureTable, newMtl->textureCount, sizeof(MaterialTextureDef), (int(*)(const void*, const void*))CompareHashedMaterialTextures);
     qsort(newMtl->constantTable, newMtl->constantCount, 0x20u, (int(*)(const void *, const void *))CompareHashedMaterialTextures);
     Material_SetMaterialDrawRegion(newMtl);
     if (Material_Validate(newMtl))
@@ -5921,7 +5923,7 @@ Material *__cdecl Material_LoadRaw(const MaterialRaw *mtlRaw, uint materialType,
     material->techniqueSet = techniqueSet;
     if (mtlRaw->textureCount)
     {
-        material->textureTable = (MaterialTextureDef*)Material_Alloc(12 * mtlRaw->textureCount);
+        material->textureTable = (MaterialTextureDef*)Material_Alloc(sizeof(MaterialTextureDef) * mtlRaw->textureCount);
         textureTableRaw = (const MaterialTextureDefRaw*)((char*)mtlRaw + mtlRaw->textureTableOffset);
         for (texIndex = 0; texIndex < mtlRaw->textureCount; ++texIndex)
         {
@@ -6150,7 +6152,7 @@ void __cdecl Material_FreeAll()
     {
         memset(mtlLoadGlob.techniqueHashTable, 0, sizeof(mtlLoadGlob.techniqueHashTable));
         mtlLoadGlob.techniqueCount = 0;
-        memset(&mtlLoadGlob.vertexDeclHashTable[0].streamCount, 0, 0xC80u);
+        memset(mtlLoadGlob.vertexDeclHashTable, 0, sizeof(mtlLoadGlob.vertexDeclHashTable));
         mtlLoadGlob.vertexDeclCount = 0;
         memset(mtlLoadGlob.vertexShaderHashTable, 0, sizeof(mtlLoadGlob.vertexShaderHashTable));
         mtlLoadGlob.vertexShaderCount = 0;

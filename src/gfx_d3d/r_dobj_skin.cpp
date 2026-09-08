@@ -113,7 +113,7 @@ int  R_SkinSceneDObjModels(
 
     PROF_SCOPED("R_SkinXModel");
 
-    byte surfsBuffer[150 * sizeof(GfxModelSkinnedSurface)]{0}; // ~3588
+    __declspec(align(16)) byte surfsBuffer[128 * sizeof(GfxModelRigidSurface)]{0};
     GfxModelSkinnedSurface *surfPos = (GfxModelSkinnedSurface *)surfsBuffer;
     GfxModelSurfaceInfo targBoneIndexHigh;
 
@@ -198,10 +198,20 @@ int  R_SkinSceneDObjModels(
                     partBitsCheck[3] = (surfPartBits[6 - boneIndex_div32] >> boneIndex_mod32) | (surfPartBits[5 - boneIndex_div32] << boneIndex_rem32);
                 }
 
-                if (partBitsCheck[3] & partbits[3]
+                bool hidden = (partBitsCheck[3] & partbits[3]
                     | partBitsCheck[2] & partbits[2]
                     | partBitsCheck[1] & partbits[1]
-                    | partBitsCheck[0] & partbits[0])
+                    | partBitsCheck[0] & partbits[0]) != 0;
+                size_t surfSize = hidden ? sizeof(int)
+                    : (!surface->deformed && IsFastFileLoad() && surface->vertListCount == 1
+                        ? sizeof(GfxModelRigidSurface) : sizeof(GfxModelSkinnedSurface));
+                if (surfSize > sizeof(surfsBuffer) - ((byte *)surfPos - surfsBuffer))
+                {
+                    R_WarnOncePerFrame(R_WARN_MAX_SCENE_SURFS_SIZE);
+                    return 0;
+                }
+
+                if (hidden)
                 {
                     surfPos->skinnedCachedOffset = -3;
                     surfPos = (GfxModelSkinnedSurface *)((char *)surfPos + 4);
@@ -225,7 +235,7 @@ int  R_SkinSceneDObjModels(
                 skinnedSurface->xsurf = surface;
                 skinnedSurface->info = targBoneIndexHigh;
 
-                iassert(surfBufSize);
+                iassert(surfBufSize == surfSize);
                 surfPos = (GfxModelSkinnedSurface *)((char *)surfPos + surfBufSize);
             }
         }
@@ -315,7 +325,7 @@ int  R_SkinSceneDObjModels(
                 }
                 else
                 {
-                    surfPos2->oldSkinnedCachedOffset = (int)&frontEndDataOut->tempSkinBuf[sizeof(GfxPackedVertex) * surfPos2->skinnedCachedOffset + firstSurf];
+                    surfPos2->skinnedVert = (GfxPackedVertex *)&frontEndDataOut->tempSkinBuf[sizeof(GfxPackedVertex) * surfPos2->skinnedCachedOffset + firstSurf];
                     surfPos2->skinnedCachedOffset = -1;
                     ++surfPos2;
                 }

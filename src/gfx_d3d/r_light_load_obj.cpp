@@ -842,7 +842,7 @@ GfxLightDef *__cdecl R_LoadLightDef(const char *name)
         return 0;
     if (fileSize)
     {
-        def = (GfxLightDef *)Hunk_Alloc(0x10u, "R_RegisterLightDef", 20);
+        def = (GfxLightDef *)Hunk_Alloc(sizeof(GfxLightDef), "R_RegisterLightDef", 20);
         def->name = (const char *)Hunk_Alloc(strlen(name) + 1, "R_RegisterLightDef", 20);
         iassert( def );
         readPos = file;

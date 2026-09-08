@@ -139,7 +139,7 @@ void __cdecl R_AddDelayedStaticModelDrawSurf(
     uint count)
 {
     R_WritePrimDrawSurfInt(delayedCmdBuf, count);
-    R_WritePrimDrawSurfInt(delayedCmdBuf, (uint)xsurf);
+    R_WritePrimDrawSurfData(delayedCmdBuf, (uint8_t *)&xsurf, sizeof(XSurface *) / sizeof(uint));
     R_WritePrimDrawSurfData(delayedCmdBuf, list, (count + 1) >> 1);
 }
 
@@ -388,7 +388,7 @@ void __cdecl R_SkinStaticModelsCameraForLod(
                         &surfData->drawSurf[region],
                         &surfData->delayedCmdBuf)))
             {
-                if (!R_AllocDrawSurf(&surfData->delayedCmdBuf, drawSurf, &surfData->drawSurf[region], ((count + 1) >> 1) + 2))
+                if (!R_AllocDrawSurf(&surfData->delayedCmdBuf, drawSurf, &surfData->drawSurf[region], ((count + 1) >> 1) + 1 + sizeof(XSurface *) / sizeof(uint)))
                     return;
                 R_AddDelayedStaticModelDrawSurf(&surfData->delayedCmdBuf, &surfaces[surfaceIndex], list, count);
             }
@@ -521,8 +521,7 @@ float radius2pixels;
 void __cdecl R_StaticModelWriteInfo(int fileHandle, const GfxStaticModelDrawInst *smodelDrawInst, const float dist)
 {
     float v3; // [esp+5Ch] [ebp-101Ch]
-    char dest; // [esp+60h] [ebp-1018h] BYREF
-    _BYTE v5[4103]; // [esp+61h] [ebp-1017h] BYREF
+    char dest[4096] = {};
     float v6; // [esp+1068h] [ebp-10h]
     XModel *xmodel; // [esp+106Ch] [ebp-Ch]
     float v8; // [esp+1070h] [ebp-8h]
@@ -534,19 +533,18 @@ void __cdecl R_StaticModelWriteInfo(int fileHandle, const GfxStaticModelDrawInst
         v3 = tan(22.5);
         radius2pixels = 720.0 / v3;
     }
-    *(uint *)&v5[4099] = 4096;
     xmodel = smodelDrawInst->model;
     iassert( xmodel );
     iassert( xmodel->name );
     iassert( xmodel->numLods > 0 );
-    lodDist = *((float *)&xmodel->parentList + 7 * xmodel->numLods);
+    lodDist = xmodel->lodInfo[xmodel->numLods - 1].dist;
     iassert( lodDist > 0.0f );
     v6 = radius2pixels * xmodel->radius / lodDist;
     v8 = radius2pixels * xmodel->radius;
     ++g_dumpStaticModelCount;
     if (smodelDrawInst->placement.scale > 0.0 && dist > 0.0)
         Com_sprintf(
-            &dest,
+            dest,
             0x1000u,
             "%d,%s,%.1f,%d,%.1f,%.1f,%.1f,%.1f,%.1f,%.1f,%.1f,%.1f\n",
             g_dumpStaticModelCount,
@@ -561,7 +559,7 @@ void __cdecl R_StaticModelWriteInfo(int fileHandle, const GfxStaticModelDrawInst
             smodelDrawInst->placement.origin[1],
             smodelDrawInst->placement.origin[2],
             v8 / (dist / smodelDrawInst->placement.scale));
-    FS_Write(&dest, &v5[strlen(&dest)] - v5, fileHandle);
+    FS_Write(dest, strlen(dest), fileHandle);
 }
 
 void __cdecl R_SortAllStaticModelSurfacesCamera()
@@ -783,7 +781,7 @@ void __cdecl R_SkinStaticModelsShadowForLod(
                         &surfData->drawSurfList,
                         &surfData->delayedCmdBuf)))
             {
-                if (!R_AllocDrawSurf(&surfData->delayedCmdBuf, drawSurf, &surfData->drawSurfList, ((count + 1) >> 1) + 2))
+                if (!R_AllocDrawSurf(&surfData->delayedCmdBuf, drawSurf, &surfData->drawSurfList, ((count + 1) >> 1) + 1 + sizeof(XSurface *) / sizeof(uint)))
                     return;
                 R_AddDelayedStaticModelDrawSurf(&surfData->delayedCmdBuf, &surfaces[0][surfaceIndex], list, count);
             }

@@ -600,6 +600,12 @@ bool __cdecl R_MaterialCompare(const MaterialMemory &material0, const MaterialMe
 {
     return material0.memory < material1.memory;
 }
+struct GfxMaterialList
+{
+    uint count;
+    MaterialMemory sorted[2049];
+};
+
 void __cdecl R_MaterialList_f()
 {
     const char *fmt; // [esp+8h] [ebp-4150h]
@@ -607,24 +613,23 @@ void __cdecl R_MaterialList_f()
     Material *material; // [esp+13Ch] [ebp-401Ch]
     int v3; // [esp+140h] [ebp-4018h]
     MaterialMemory *v4; // [esp+144h] [ebp-4014h]
-    uint inData; // [esp+148h] [ebp-4010h] BYREF
-    MaterialMemory v6[2049]; // [esp+14Ch] [ebp-400Ch] BYREF
+    GfxMaterialList list = {};
     float v7; // [esp+4154h] [ebp-4h]
 
     v3 = 0;
     Com_Printf(CON_CHANNEL_GFX, "-----------------------\n");
-    inData = 0;
-    DB_EnumXAssets(ASSET_TYPE_MATERIAL, (void(__cdecl *)(XAssetHeader, void*))R_GetMaterialList, &inData, 0);
+    list.count = 0;
+    DB_EnumXAssets(ASSET_TYPE_MATERIAL, (void(__cdecl *)(XAssetHeader, void*))R_GetMaterialList, &list, 0);
     // std::_Sort<ShadowCandidate *, int, bool(__cdecl *)(ShadowCandidate const &, ShadowCandidate const &)>(
     //     (ShadowCandidate *)v6,
-    //     (ShadowCandidate *)&v6[inData],
-    //     (int)(8 * inData) >> 3,
+    //     (ShadowCandidate *)&list.sorted[list.count],
+    //     (int)(8 * list.count) >> 3,
     //     R_MaterialCompare);
-    std::sort(&v6[0], &v6[inData], R_MaterialCompare);
+    std::sort(&list.sorted[0], &list.sorted[list.count], R_MaterialCompare);
     Com_Printf(CON_CHANNEL_GFX, "geo KB   name\n");
-    for (i = 0; i < inData; ++i)
+    for (i = 0; i < list.count; ++i)
     {
-        v4 = &v6[i];
+        v4 = &list.sorted[i];
         material = v4->material;
         iassert( material );
         v3 += v4->memory;
@@ -638,23 +643,20 @@ void __cdecl R_MaterialList_f()
     }
     Com_Printf(CON_CHANNEL_GFX, "-----------------------\n");
     Com_Printf(CON_CHANNEL_GFX, "current total  %5.1f MB\n", (double)v3 / 1048576.0);
-    Com_Printf(CON_CHANNEL_GFX, "%i total geometry materials\n", inData);
+    Com_Printf(CON_CHANNEL_GFX, "%i total geometry materials\n", list.count);
     Com_Printf(CON_CHANNEL_GFX, "Related commands: meminfo, imagelist, gfx_world, gfx_model, cg_drawfps, com_statmon, tempmeminfo\n");
 }
 
 void __cdecl R_GetMaterialList(XAssetHeader header, char *data)
 {
-    int memory; // [esp+0h] [ebp-Ch]
-    XAssetHeader *materialMemory; // [esp+4h] [ebp-8h]
-
-    memory = R_GetMaterialMemory(header.material);
+    GfxMaterialList *list = (GfxMaterialList *)data;
+    int memory = R_GetMaterialMemory(header.material);
     if (memory)
     {
-        //iassert( materialList->count < ARRAY_COUNT( materialList->sorted ) ); // KISAKTODO
-        materialMemory = (XAssetHeader *)&data[8 * *(uint *)data + 4];
-        materialMemory->xmodelPieces = header.xmodelPieces;
-        materialMemory[1].xmodelPieces = (XModelPieces *)memory;
-        ++*(uint *)data;
+        iassert(list->count < ARRAY_COUNT(list->sorted));
+        list->sorted[list->count].material = header.material;
+        list->sorted[list->count].memory = memory;
+        ++list->count;
     }
 }
 
@@ -922,7 +924,7 @@ void __cdecl Material_CollateTechniqueSets(XAssetHeader header, TechniqueSetList
 
 bool __cdecl IsValidMaterialHandle(Material *const handle)
 {
-    iassert( ( 0x0003 & reinterpret_cast<int>( handle ) ) == 0x0 );
+    iassert( ( 0x0003 & (uintptr_t)handle ) == 0x0 );
     return handle && handle->info.name && *handle->info.name;
 }
 
@@ -1037,4 +1039,36 @@ Material *Material_RegisterRawImage(const char *name, int imageTrack)
     iassert(rgp.defaultMaterial);
 
     return rgp.defaultMaterial;
+}
+
+// Four nonzero bytes keep the console text protocol independent of pointer size.
+void R_EncodeHudIconMaterial(char *encoded, Material *material)
+{
+    uint16_t index;
+    bool exists;
+    Material_GetHashIndex(material->info.name, &index, &exists);
+    iassert(exists && rg.materialHashTable[index] == material);
+    for (int i = 0; i < 4; ++i)
+    {
+        encoded[i] = (char)(0x10 + ((index >> (4 * i)) & 15));
+    }
+}
+
+Material *R_DecodeHudIconMaterial(const char *encoded)
+{
+    uint index = 0;
+    for (int i = 0; i < 4; ++i)
+    {
+        uint digit = (uint8_t)encoded[i] - 0x10u;
+        if (digit > 15)
+        {
+            return NULL;
+        }
+        index |= digit << (4 * i);
+    }
+    if (index >= ARRAY_COUNT(rg.materialHashTable))
+    {
+        return NULL;
+    }
+    return rg.materialHashTable[index];
 }

@@ -1,6 +1,8 @@
 #pragma once
 #include "r_scene.h"
 
+// Surface records share a stream with four-byte hidden-surface markers.
+#pragma pack(push, 4)
 struct GfxModelSurfaceInfo // sizeof=0xC
 {                                       // ...
     const struct DObjAnimMat *baseMat;
@@ -24,14 +26,16 @@ struct GfxModelSkinnedSurface // sizeof=0x18
         int oldSkinnedCachedOffset;
     };
 };
-static_assert(sizeof(GfxModelSkinnedSurface) == 24);
+static_assert(sizeof(GfxModelSkinnedSurface) == (sizeof(void *) == 8 ? 36 : 24));
 
 struct GfxModelRigidSurface // sizeof=0x38
 {
     GfxModelSkinnedSurface surf;
     GfxScaledPlacement placement;
 };
-static_assert(sizeof(GfxModelRigidSurface) == 56);
+static_assert(sizeof(GfxModelRigidSurface) == (sizeof(void *) == 8 ? 68 : 56));
+
+#pragma pack(pop)
 
 struct SkinXModelCmd // sizeof=0x1C
 {                                       // ...

@@ -2006,16 +2006,16 @@ bool __cdecl R_MarkModelCoreCallback_0_(
         clipPoints[0][vertIndex].vertWeights[vertIndex] = 1.0;
     }
     return R_MarkFragment_IsTriangleRejected(
-        *(const float**)((uintptr_t)contextAsVoid + 12),
+        ((const MarkModelCoreContext *)contextAsVoid)->markDir,
         clipPoints[0][0].xyz,
         clipPoints[0][1].xyz,
         clipPoints[0][2].xyz)
         || R_MarkFragment_DoTriangle_0_(
-            *(MarkInfo**)contextAsVoid,
-            *(const float(**)[4])((uintptr_t)contextAsVoid + 16),
-            *(const GfxMarkContext**)((uintptr_t)contextAsVoid + 4),
+            ((const MarkModelCoreContext *)contextAsVoid)->markInfo,
+            ((const MarkModelCoreContext *)contextAsVoid)->clipPlanes,
+            ((const MarkModelCoreContext *)contextAsVoid)->markContext,
             triVerts1,
-            *(const float(**)[3])((uintptr_t)contextAsVoid + 24),
+            ((const MarkModelCoreContext *)contextAsVoid)->transformNormalMatrix,
             clipPoints) != 0;
 }
 

@@ -982,7 +982,7 @@ GfxModelLightingPatch *__cdecl R_BackEndDataAllocAndClearModelLightingPatch(GfxB
     if (patchIndex >= 0x1000)
         Com_Error(ERR_FATAL, "modelLightingPatchList ran out of elements.");
     v1 = &frontEndDataOut->modelLightingPatchList[patchIndex];
-    memset(v1, 0, sizeof(*v1));
+    memset(v1, 0, sizeof(GfxModelLightingPatch));
     return v1;
 }
 

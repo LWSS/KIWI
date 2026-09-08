@@ -264,7 +264,7 @@ struct MaterialPixelShaderProgram // sizeof=0xC
     IDirect3DPixelShader9 *ps;
     GfxPixelShaderLoadDef loadDef;
 };
-static_assert(sizeof(MaterialPixelShaderProgram) == 12);
+static_assert(sizeof(MaterialPixelShaderProgram) == (sizeof(void *) == 8 ? 24 : 12));
 
 struct MaterialPixelShader // sizeof=0x10
 {                                       // ...
@@ -455,7 +455,7 @@ struct MaterialTechniqueSet // sizeof=0x94
     MaterialTechniqueSet *remappedTechniqueSet;
     MaterialTechnique *techniques[34];
 };
-static_assert(sizeof(MaterialTechniqueSet) == 148);
+static_assert(sizeof(MaterialTechniqueSet) == (sizeof(void *) == 8 ? 296 : 148));
 
 struct Material // sizeof=0x50
 {                                       // ...
@@ -498,9 +498,9 @@ struct Material // sizeof=0x50
 // surfaceFlags lands at offset 80 (right after stateBitsTable@76), editorUsage@84,
 // editorLocale@88; sizeof rounds to 96 because GfxDrawSurf (in MaterialInfo) forces
 // 8-byte alignment. The pad is harmless — the fields are read/written by name.
-static_assert(sizeof(Material) == 96);
+static_assert(sizeof(Material) == (sizeof(void *) == 8 ? 120 : 96));
 #else
-static_assert(sizeof(Material) == 80);
+static_assert(sizeof(Material) == (sizeof(void *) == 8 ? 104 : 80));
 #endif
 
 struct MaterialMemory // sizeof=0x8
@@ -771,3 +771,6 @@ extern int g_vertexNamesCount;
 extern ShaderBinNames *g_vertexNamesList;
 extern int g_pixelNamesCount;
 extern ShaderBinNames *g_pixelNamesList;
+
+void R_EncodeHudIconMaterial(char *encoded, Material *material);
+Material *R_DecodeHudIconMaterial(const char *encoded);

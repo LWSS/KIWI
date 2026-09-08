@@ -88,7 +88,7 @@ Font_s *__cdecl R_LoadFont(const char *fontName, int imageTrack)
         if (fileLen >= 16)
         {
             varMemSize = fileLen - 16;
-            totalMemSize = fileLen - 16 + 24;
+            totalMemSize = fileLen - 16 + sizeof(Font_s);
             font = (Font_s *)Hunk_Alloc(totalMemSize, "R_LoadFont", 22);
             variableFontData = (char *)&font[1];
             FS_Read((uint8_t *)&fontNameOffset, 4u, file);

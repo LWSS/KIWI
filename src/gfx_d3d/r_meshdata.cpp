@@ -24,7 +24,7 @@ char __cdecl R_ReserveMeshIndices(GfxMeshData *mesh, int indexCount, r_double_in
         return 0;
     mesh->indexCount = indexCount + usedCodeMeshIndexCount;
     *indicesOut = (r_double_index_t *)&mesh->indices[usedCodeMeshIndexCount];
-    vassert((!((uint)(*indicesOut) & 3)), "((uint)(*indicesOut)) = %i", *indicesOut);
+    vassert((!((uintptr_t)(*indicesOut) & 3)), "(*indicesOut) = %p", *indicesOut);
     return 1;
 }
 

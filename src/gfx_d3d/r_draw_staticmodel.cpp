@@ -79,9 +79,9 @@ int __cdecl R_GetNextStaticModelSurf(GfxStaticModelDrawStream *drawStream, XSurf
     if (!drawStream->smodelCount)
         return 0;
     primDrawSurfPos = drawStream->primDrawSurfPos;
-    drawStream->primDrawSurfPos += ((drawStream->smodelCount + 1) >> 1) + 1;
-    xsurf = (XSurface *)*primDrawSurfPos;
-    drawStream->smodelList = (const uint16_t *)(primDrawSurfPos + 1);
+    drawStream->primDrawSurfPos += ((drawStream->smodelCount + 1) >> 1) + sizeof(XSurface *) / sizeof(uint);
+    memcpy(&xsurf, primDrawSurfPos, sizeof(XSurface *));
+    drawStream->smodelList = (const uint16_t *)(primDrawSurfPos + sizeof(XSurface *) / sizeof(uint));
     drawStream->localSurf = xsurf;
     g_frameStatsCur.geoIndexCount += 3 * drawStream->smodelCount * xsurf->triCount;
 
@@ -182,7 +182,8 @@ int __cdecl R_GetNextStaticModelCachedSurf(GfxStaticModelDrawStream *drawStream)
     drawStream->smodelCount = *drawStream->primDrawSurfPos++;
     if (!drawStream->smodelCount)
         return 0;
-    xsurf = (XSurface *)*drawStream->primDrawSurfPos++;
+    memcpy(&xsurf, drawStream->primDrawSurfPos, sizeof(XSurface *));
+    drawStream->primDrawSurfPos += sizeof(XSurface *) / sizeof(uint);
     drawStream->smodelList = (const ushort*)drawStream->primDrawSurfPos;
     drawStream->primDrawSurfPos += (drawStream->smodelCount + 1) >> 1;
     smodelDrawInst = &rgp.world->dpvs.smodelDrawInsts[R_GetCachedSModelSurf(*drawStream->smodelList)->smodelIndex];

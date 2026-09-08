@@ -252,7 +252,7 @@ void __cdecl RB_DrawProfileHistoryGraph(const ProfileReadable *read, int parity,
     maxMsec = prof_probeMaxMsec->current.integer;
     if (maxMsec < 1)
         maxMsec = 1;
-    pixelsPerClock = *((float *)Sys_GetValue(0) + 20782) * 64.0 / (double)maxMsec;
+    pixelsPerClock = ((ProfileStack *)Sys_GetValue(0))->prof_timescale * 64.0 / (double)maxMsec;
     j0 = drawProfGlob.sortedProbeIndices[362 * probeIndex - 1809] - 120;
     if (j0 < 0)
         j0 = 0;
@@ -467,8 +467,8 @@ double __cdecl RB_DrawProfileRow(int probeIndex, int indentation, float y)
         global = &drawProfGlob.global[probeIndex];
         col = indentation + 1;
         iassert( global->sequence );
-        avgSelf = *((float *)Sys_GetValue(0) + 20782) * global->selfClks / (double)global->sequence;
-        avgTotal = *((float *)Sys_GetValue(0) + 20782) * global->totalClks / (double)global->sequence;
+        avgSelf = ((ProfileStack *)Sys_GetValue(0))->prof_timescale * global->selfClks / (double)global->sequence;
+        avgTotal = ((ProfileStack *)Sys_GetValue(0))->prof_timescale * global->totalClks / (double)global->sequence;
         avgHits = (double)global->hits / (double)global->sequence;
         minTime = global->min.value[0];
         if (avgHits == 0.0)
@@ -477,46 +477,46 @@ double __cdecl RB_DrawProfileRow(int probeIndex, int indentation, float y)
             v29 = avgTotal / avgHits;
         I_strncpyz(probeName, (char *)prof_enumNames[probeIndex], 28 - indentation);
         RB_DrawProfileString(col, y, probeName, drawProfGlob.textColor);
-        v34 = *((float *)Sys_GetValue(0) + 20782);
-        v15.packed = (uint)drawProfGlob.textColor;
+        v34 = ((ProfileStack *)Sys_GetValue(0))->prof_timescale;
+        v15.packed = drawProfGlob.textColor.packed;
         v3 = va("%6.2f", (double)drawProfGlob.global[probeIndex].read.self.value[0] * v34);
         RB_DrawProfileString(28, y, v3, v15);
-        v33 = *((float *)Sys_GetValue(0) + 20782);
-        v16.packed = (uint)drawProfGlob.textColor;
+        v33 = ((ProfileStack *)Sys_GetValue(0))->prof_timescale;
+        v16.packed = drawProfGlob.textColor.packed;
         v4 = va("%6.2f", (double)drawProfGlob.global[probeIndex].read.total.value[0] * v33);
         RB_DrawProfileString(34, y, v4, v16);
         if (avgSelf > 30.0)
             avgSelf = 0.0;
-        v17.packed = (uint)drawProfGlob.textColor;
+        v17.packed = drawProfGlob.textColor.packed;
         v5 = va("%6.2f", avgSelf);
         RB_DrawProfileString(40, y, v5, v17);
-        v32 = *((float *)Sys_GetValue(0) + 20782);
-        v18.packed = (uint)drawProfGlob.textColor;
+        v32 = ((ProfileStack *)Sys_GetValue(0))->prof_timescale;
+        v18.packed = drawProfGlob.textColor.packed;
         v6 = va("%7.2f", (double)global->maxSelf.value[0] * v32);
         RB_DrawProfileString(46, y, v6, v18);
         g_tally = g_tally + avgSelf;
-        v19.packed = (uint)drawProfGlob.textColor;
+        v19.packed = drawProfGlob.textColor.packed;
         v7 = va("%6.2f", g_tally);
         RB_DrawProfileString(53, y, v7, v19);
-        v20.packed = (uint)drawProfGlob.textColor;
+        v20.packed = drawProfGlob.textColor.packed;
         v8 = va("%6.2f", avgTotal);
         RB_DrawProfileString(60, y, v8, v20);
-        v31 = *((float *)Sys_GetValue(0) + 20782);
-        v21.packed = (uint)drawProfGlob.textColor;
+        v31 = ((ProfileStack *)Sys_GetValue(0))->prof_timescale;
+        v21.packed = drawProfGlob.textColor.packed;
         v9 = va("%6.2f", (double)minTime * v31);
         RB_DrawProfileString(66, y, v9, v21);
-        v30 = *((float *)Sys_GetValue(0) + 20782);
-        v22.packed = (uint)drawProfGlob.textColor;
+        v30 = ((ProfileStack *)Sys_GetValue(0))->prof_timescale;
+        v22.packed = drawProfGlob.textColor.packed;
         v10 = va("%7.2f", (double)global->max.value[0] * v30);
         RB_DrawProfileString(72, y, v10, v22);
-        v23.packed = (uint)drawProfGlob.textColor;
+        v23.packed = drawProfGlob.textColor.packed;
         v11 = va("%5u", drawProfGlob.global[probeIndex].read.hits);
         RB_DrawProfileString(79, y, v11, v23);
         if (avgHits == 0.0 || avgHits >= 10.0)
             format = (char*)"%5.0f";
         else
             format = (char*)"%5.1f";
-        v24.packed = (uint)drawProfGlob.textColor;
+        v24.packed = drawProfGlob.textColor.packed;
         v12 = va(format, avgHits);
         RB_DrawProfileString(84, y, v12, v24);
         if (avgHits == 0.0)
@@ -529,7 +529,7 @@ double __cdecl RB_DrawProfileRow(int probeIndex, int indentation, float y)
             s = va("%6.2f", avgTotPerHit);
         }
         RB_DrawProfileString(89, y, s, drawProfGlob.textColor);
-        v25.packed = (uint)drawProfGlob.textColor;
+        v25.packed = drawProfGlob.textColor.packed;
         v13 = va("%5u", global->maxHits);
         RB_DrawProfileString(95, y, v13, v25);
     }
@@ -673,23 +673,23 @@ void __cdecl RB_DrawProfileScript()
             if (profile->profileScriptNames[profileIndex][0])
             {
                 RB_DrawProfileBackground(y);
-                v14.packed = (uint)drawProfGlob.textColor;
+                v14.packed = drawProfGlob.textColor.packed;
                 v0 = va("%02d", profileIndex);
                 RB_DrawProfileString(1, y, v0, v14);
                 RB_DrawProfileString(5, y, profile->profileScriptNames[profileIndex], drawProfGlob.textColor);
-                v36 = *((float *)Sys_GetValue(0) + 20782);
-                v15.packed = (uint)drawProfGlob.textColor;
+                v36 = ((ProfileStack *)Sys_GetValue(0))->prof_timescale;
+                v15.packed = drawProfGlob.textColor.packed;
                 v1 = va("%6.2f", (double)profile->totalTime[profileIndex] * v36);
                 RB_DrawProfileString(28, y, v1, v15);
-                v35 = *((float *)Sys_GetValue(0) + 20782);
-                v16.packed = (uint)drawProfGlob.textColor;
+                v35 = ((ProfileStack *)Sys_GetValue(0))->prof_timescale;
+                v16.packed = drawProfGlob.textColor.packed;
                 v2 = va("%6.2f", (double)profile->avgTime[profileIndex] * v35);
                 RB_DrawProfileString(38, y, v2, v16);
-                v34 = *((float *)Sys_GetValue(0) + 20782);
-                v17.packed = (uint)drawProfGlob.textColor;
+                v34 = ((ProfileStack *)Sys_GetValue(0))->prof_timescale;
+                v17.packed = drawProfGlob.textColor.packed;
                 v3 = va("%6.2f", (double)profile->maxTime[profileIndex] * v34);
                 RB_DrawProfileString(48, y, v3, v17);
-                v18.packed = (uint)drawProfGlob.textColor;
+                v18.packed = drawProfGlob.textColor.packed;
                 v4 = va("%8.0f", profile->cumulative[profileIndex]);
                 RB_DrawProfileString(58, y, v4, v18);
                 y = y + drawProfGlob.fontHeight;
@@ -715,25 +715,25 @@ void __cdecl RB_DrawProfileScript()
             {
                 RB_DrawProfileBackground(ya);
                 RB_DrawProfileString(1, ya, srcBuffer->buf, drawProfGlob.textColor);
-                v33 = *((float *)Sys_GetValue(0) + 20782);
-                v19.packed = (uint)drawProfGlob.textColor;
+                v33 = ((ProfileStack *)Sys_GetValue(0))->prof_timescale;
+                v19.packed = drawProfGlob.textColor.packed;
                 v5 = va("%6.2f", (double)srcBuffer->time * v33);
                 RB_DrawProfileString(33, ya, v5, v19);
-                v32 = *((float *)Sys_GetValue(0) + 20782);
-                v20.packed = (uint)drawProfGlob.textColor;
+                v32 = ((ProfileStack *)Sys_GetValue(0))->prof_timescale;
+                v20.packed = drawProfGlob.textColor.packed;
                 v6 = va("%6.2f", (double)srcBuffer->avgTime * v32);
                 RB_DrawProfileString(45, ya, v6, v20);
-                v31 = *((float *)Sys_GetValue(0) + 20782);
-                v21.packed = (uint)drawProfGlob.textColor;
+                v31 = ((ProfileStack *)Sys_GetValue(0))->prof_timescale;
+                v21.packed = drawProfGlob.textColor.packed;
                 v7 = va("%6.2f", (double)srcBuffer->maxTime * v31);
                 RB_DrawProfileString(57, ya, v7, v21);
-                v22.packed = (uint)drawProfGlob.textColor;
+                v22.packed = drawProfGlob.textColor.packed;
                 v8 = va("%8.0f", srcBuffer->totalBuiltIn);
                 RB_DrawProfileString(69, ya, v8, v22);
-                v23.packed = (uint)drawProfGlob.textColor;
+                v23.packed = drawProfGlob.textColor.packed;
                 v9 = va("%8.0f", srcBuffer->totalTime - srcBuffer->totalBuiltIn);
                 RB_DrawProfileString(81, ya, v9, v23);
-                v24.packed = (uint)drawProfGlob.textColor;
+                v24.packed = drawProfGlob.textColor.packed;
                 v10 = va("%8.0f", srcBuffer->totalTime);
                 RB_DrawProfileString(93, ya, v10, v24);
                 ya = ya + drawProfGlob.fontHeight;
@@ -742,17 +742,17 @@ void __cdecl RB_DrawProfileScript()
         yb = ya + drawProfGlob.fontHeight;
         RB_DrawProfileBackground(yb);
         RB_DrawProfileString(1, yb, "Total", drawProfGlob.textColor);
-        v30 = *((float *)Sys_GetValue(0) + 20782);
-        v25.packed = (uint)drawProfGlob.textColor;
+        v30 = ((ProfileStack *)Sys_GetValue(0))->prof_timescale;
+        v25.packed = drawProfGlob.textColor.packed;
         v11 = va("%6.2f", (double)profilea->srcTotal * v30);
         RB_DrawProfileString(33, yb, v11, v25);
-        v29 = *((float *)Sys_GetValue(0) + 20782);
-        v26.packed = (uint)drawProfGlob.textColor;
+        v29 = ((ProfileStack *)Sys_GetValue(0))->prof_timescale;
+        v26.packed = drawProfGlob.textColor.packed;
         v12 = va("%6.2f", (double)profilea->srcAvgTime * v29);
         RB_DrawProfileString(45, yb, v12, v26);
         Value = (float *)Sys_GetValue(0);
-        v27.packed = (uint)drawProfGlob.textColor;
-        v13 = va("%6.2f", (double)profilea->srcMaxTime * Value[20782]);
+        v27.packed = drawProfGlob.textColor.packed;
+        v13 = va("%6.2f", (double)profilea->srcMaxTime * ((ProfileStack *)Value)->prof_timescale);
         RB_DrawProfileString(57, yb, v13, v27);
     }
 }

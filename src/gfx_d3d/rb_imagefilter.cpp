@@ -177,7 +177,7 @@ void __cdecl RB_GenerateGaussianFilter1D(float radius, int *res, int axis, GfxIm
 int __cdecl RB_PickSymmetricFilterMaterial(int halfTapCount, const Material **material)
 {
     vassert((halfTapCount > 0 && halfTapCount <= 8), "(halfTapCount) = %i", halfTapCount);
-    *material = (const Material *)*((uint *)&rgp.postFxMaterial + halfTapCount);
+    *material = rgp.symmetricFilterMaterial[halfTapCount - 1];
     return halfTapCount;
 }
 

@@ -794,7 +794,7 @@ struct GfxCmdSetLightColor // sizeof=0x44
     GfxCmdHeader header;
     GfxLight     light;
 };
-static_assert(sizeof(GfxCmdSetLightColor) == 0x44, "GfxCmdSetLightColor");
+static_assert(sizeof(GfxCmdSetLightColor) == (sizeof(void *) == 8 ? 80 : 68), "GfxCmdSetLightColor");
 void __cdecl RC_SetLightColor(const GfxLight *light);
 void __cdecl RB_SetLightColorCmd(GfxRenderCommandExecState *execState);
 // Editor full-screen colored quad — IDB R_AddCmdDrawFullScreenColoredQuad @ 0x4fc260

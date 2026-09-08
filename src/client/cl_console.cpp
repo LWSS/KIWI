@@ -1454,9 +1454,9 @@ uint __cdecl CL_AddDeathMessageIcon(
     deathMsg[deathMsgLenc] = v8;
     deathMsgLend = deathMsgLenc + 1;
 
-    iassert(deathMsgLend + sizeof(iconShader) <= deathMsgMaxLen);
+    iassert(deathMsgLend + 4 <= deathMsgMaxLen);
 
-    *(uint *)&deathMsg[deathMsgLend] = (uint)iconShader;
+    R_EncodeHudIconMaterial(&deathMsg[deathMsgLend], iconShader);
     deathMsgLene = deathMsgLend + 4;
 
     iassert(deathMsgLene - deathMsgLen == CONTXTCMD_LEN_HUDICON + 1);
@@ -1491,7 +1491,7 @@ uint __cdecl CL_AddDeathMessageIcon(
     deathMsg[deathMsgLen++] = (char)(horzFlipIcon + 1);
     deathMsg[deathMsgLen++] = encodedWidth;
     deathMsg[deathMsgLen++] = encodedHeight;
-    *(uint*)&deathMsg[deathMsgLen] = (uint)iconShader;
+    R_EncodeHudIconMaterial(&deathMsg[deathMsgLen], iconShader);
     deathMsgLen += 4;
 
     iassert(deathMsgLen - startLen == CONTXTCMD_LEN_HUDICON + 1);
