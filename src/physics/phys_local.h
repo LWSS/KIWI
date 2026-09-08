@@ -482,7 +482,7 @@ void __cdecl CM_PositionGeomTestInAabbTree_r(CollisionAabbTree *aabbTree, const 
 bool __cdecl CM_CullBox2(const objInfo *input, const float *origin, const float *halfSize);
 void __cdecl CM_TestGeomInLeaf(cLeaf_t *leaf, const objInfo *input, Results *results);
 void __cdecl CM_TestGeomInLeafBrushNode(cLeaf_t *leaf, const objInfo *input, Results *results);
-void __cdecl Phys_TestGeomInBrush(const cbrush_t *brush, uint *userData);
+void __cdecl Phys_TestGeomInBrush(const cbrush_t *brush, void *userData);
 void __cdecl Phys_TestAgainstEntities(const objInfo *input, Results *results);
 void __cdecl Phys_InitWorldCollision();
 void __cdecl Phys_InitBrushmodelGeomClass();

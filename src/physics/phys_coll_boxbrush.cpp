@@ -1952,16 +1952,17 @@ void __cdecl Phys_CollideOrientedBrushModelWithBrush(const cbrush_t *fixedBrush,
 
 void __cdecl Phys_CollideOrientedBrushWithBrush_Wrapper(const cbrush_t *orientedBrush, void *userData)
 {
-    Results *results; // [esp+4h] [ebp-4h]
-
     iassert(userData);
-    results = (Results *)*((uint *)userData + 2);
+    BrushBrushData *data = (BrushBrushData *)userData;
+    Results *results = data->results;
     if (results->contactCount < results->maxContacts)
+    {
         Phys_CollideOrientedBrushWithBrush(
             orientedBrush,
-            *(const cbrush_t **)userData,
-            *((const objInfo **)userData + 1),
+            data->fixedBrush,
+            data->input,
             results);
+    }
 }
 
 void __cdecl Phys_CollideOrientedBrushWithTriangleList(
@@ -2443,14 +2444,15 @@ void __cdecl Phys_CollideOrientedBrushModelWithTriangleList(
 void __cdecl Phys_CollideOrientedBrushWithTriangleList_Wrapper(const cbrush_t *orientedBrush, void *userData)
 {
     iassert(userData);
+    BrushTrimeshData *data = (BrushTrimeshData *)userData;
     Phys_CollideOrientedBrushWithTriangleList(
         orientedBrush,
-        *(const unsigned __int16 **)userData,
-        *((const float (**)[3])userData + 1),
-        *((uint *)userData + 2),
-        *((const objInfo **)userData + 3),
-        *((uint *)userData + 4),
-        *((Results **)userData + 5));
+        data->indices,
+        data->verts,
+        data->triCount,
+        data->input,
+        data->surfaceFlags,
+        data->results);
 }
 
 void __cdecl Phys_CollideBoxWithTriangleList(

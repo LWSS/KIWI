@@ -274,51 +274,51 @@ void __cdecl CM_TestGeomInLeafBrushNode(cLeaf_t *leaf, const objInfo *input, Res
         input->bounds[1],
         1,
         input->clipMask,
-        (void(__cdecl *)(const cbrush_t *, void *))Phys_TestGeomInBrush,
+        Phys_TestGeomInBrush,
         &io);
 }
 
-void __cdecl Phys_TestGeomInBrush(const cbrush_t *brush, uint *userData)
+void __cdecl Phys_TestGeomInBrush(const cbrush_t *brush, void *userData)
 {
-    Results *results; // [esp+68h] [ebp-8h]
-
-    results = (Results *)userData[1];
+    InputOutput *io = (InputOutput *)userData;
+    const objInfo *input = io->Input;
+    Results *results = io->Output;
     if (results->contactCount < results->maxContacts)
     {
-        switch (*(uint *)(*userData + 52))
+        switch (input->type)
         {
         case 1:
         {
             PROF_SCOPED("Phys_BoxBrushColl");
-            Phys_CollideBoxWithBrush(brush, (const objInfo *)*userData, results);
+            Phys_CollideBoxWithBrush(brush, input, results);
             break;
         }
         case 2:
         {
             PROF_SCOPED("Phys_BrushBrushColl");
-            Phys_CollideOrientedBrushModelWithBrush(brush, (const objInfo *)*userData, results);
+            Phys_CollideOrientedBrushModelWithBrush(brush, input, results);
             break;
         }
         case 3:
         {
             PROF_SCOPED("Phys_BrushBrushColl");
             Phys_CollideOrientedBrushWithBrush(
-                *(const cbrush_t **)(*userData + 140),
+                input->u.brush,
                 brush,
-                (const objInfo *)*userData,
+                input,
                 results);
             break;
         }
         case 4:
         {
             PROF_SCOPED("Phys_CylinderBrushColl");
-            Phys_CollideCylinderWithBrush(brush, (const objInfo *)*userData, results);
+            Phys_CollideCylinderWithBrush(brush, input, results);
             break;
         }
         case 5:
         {
             PROF_SCOPED("Phys_CapsuleBrushColl");
-            Phys_CollideCapsuleWithBrush(brush, (const objInfo *)*userData, results);
+            Phys_CollideCapsuleWithBrush(brush, input, results);
             break;
         }
         default:
@@ -673,7 +673,7 @@ void __cdecl Phys_InitBrushmodelGeomClass()
     gclass.isPlaceable = true;
     gclass.collider = Phys_GetColliderNull;
     gclass.aabb = Phys_GetBrushmodelAABB;
-    gclass.bytes = 16;
+    gclass.bytes = sizeof(BrushInfo);
     classID = dCreateGeomClass(&gclass);
     if (classID != 11)
         MyAssertHandler(
@@ -729,7 +729,7 @@ void __cdecl Phys_InitBrushGeomClass()
     gclass.isPlaceable = true;
     gclass.collider = Phys_GetColliderNull;
     gclass.aabb = Phys_GetBrushAABB;
-    gclass.bytes = 16;
+    gclass.bytes = sizeof(BrushInfo);
     classID = dCreateGeomClass(&gclass);
     if (classID != 12)
         MyAssertHandler(

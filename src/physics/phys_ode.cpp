@@ -122,7 +122,7 @@ void __cdecl Phys_Init()
     if (!physInited)
     {
         memset((uint8_t *)&physGlob, 0, sizeof(physGlob));
-        Pool_Init((char *)physGlob.userData, &physGlob.userDataPool, 0x70u, 0x200u);
+        Pool_Init((char *)physGlob.userData, &physGlob.userDataPool, sizeof(PhysObjUserData), ARRAY_COUNT(physGlob.userData));
         ODE_Init();
         for (worldIndex = PHYS_WORLD_DYNENT; worldIndex < PHYS_WORLD_COUNT; ++worldIndex)
         {
@@ -864,8 +864,8 @@ void __cdecl Phys_ObjAddGeomBrushModel(
     body = id;
     geomState.type = PHYS_GEOM_BRUSHMODEL;
     geomState.u.brushState.u.brushModel = brushModel;
-    geomState.u.cylinderState.radius = physMass->momentsOfInertia[0];
-    geomState.u.cylinderState.halfHeight = physMass->momentsOfInertia[1];
+    geomState.u.brushState.momentsOfInertia[0] = physMass->momentsOfInertia[0];
+    geomState.u.brushState.momentsOfInertia[1] = physMass->momentsOfInertia[1];
     geomState.u.brushState.momentsOfInertia[2] = physMass->momentsOfInertia[2];
     geomState.u.brushState.productsOfInertia[0] = physMass->productsOfInertia[0];
     geomState.u.brushState.productsOfInertia[1] = physMass->productsOfInertia[1];
@@ -885,9 +885,9 @@ void __cdecl Phys_ObjAddGeomBrush(PhysWorld worldIndex, dxBody *id, const cbrush
     iassert(id);
     body = id;
     geomState.type = PHYS_GEOM_BRUSH;
-    geomState.u.cylinderState.direction = (int)brush;
-    geomState.u.cylinderState.radius = physMass->momentsOfInertia[0];
-    geomState.u.cylinderState.halfHeight = physMass->momentsOfInertia[1];
+    geomState.u.brushState.u.brush = brush;
+    geomState.u.brushState.momentsOfInertia[0] = physMass->momentsOfInertia[0];
+    geomState.u.brushState.momentsOfInertia[1] = physMass->momentsOfInertia[1];
     geomState.u.brushState.momentsOfInertia[2] = physMass->momentsOfInertia[2];
     geomState.u.brushState.productsOfInertia[0] = physMass->productsOfInertia[0];
     geomState.u.brushState.productsOfInertia[1] = physMass->productsOfInertia[1];
@@ -1155,7 +1155,7 @@ void __cdecl Phys_ObjAddForce(PhysWorld worldIndex, dxBody *id, float *worldPos,
     dBodyEnable(id);
     userData = (PhysObjUserData *)dBodyGetData(id);
     odeWorld = ODE_BodyGetWorld(id);
-    userData->timeLastAsleep = (int)physGlob.space[51 * Phys_IndexFromODEWorld(odeWorld) - 152];
+    userData->timeLastAsleep = physGlob.worldData[Phys_IndexFromODEWorld(odeWorld)].timeLastUpdate;
 }
 
 int __cdecl Phys_IndexFromODEWorld(dxWorld *world)
@@ -1353,7 +1353,7 @@ int __cdecl Phys_DrawDebugTextForWorld(
     v6 = va("   Awake: %i", physGlob.debugActiveObjCount);
     CG_DrawStringExt(scrPlace, *x, *y, v6, colorGreen, 0, 1, charHeight);
     *y = *y + charHeight;
-    text = va("   Asleep: %i", (char *)bodyCount - physGlob.debugActiveObjCount);
+    text = va("   Asleep: %i", bodyCount - physGlob.debugActiveObjCount);
     CG_DrawStringExt(scrPlace, *x, *y, text, colorGreen, 0, 1, charHeight);
     *y = *y + charHeight;
     return physGlob.debugActiveObjCount;
@@ -1397,7 +1397,7 @@ void __cdecl dxPostProcessIslands(PhysWorld worldIndex)
         }
     }
     dJointGroupEmpty(physGlob.contactgroup[worldIndex]);
-    physGlob.space[51 * worldIndex - 149] = 0;
+    physGlob.worldData[worldIndex].numJitterRegions = 0;
     seconds = world->seconds;
     bodyEnableCount = 0;
     for (bodyIter = world->firstbody; bodyIter; bodyIter = (dxBody *)bodyIter->next)
@@ -2592,16 +2592,24 @@ void Phys_SetGravityDir(float *down)
 
 void Phys_ArchiveState(MemoryFile *memFile)
 {
-    if (MemFile_IsWriting(memFile))
+    for (int worldIndex = 0; worldIndex < PHYS_WORLD_COUNT; ++worldIndex)
     {
-        MemFile_WriteData(memFile, 612, physGlob.worldData);
-        MemFile_WriteData(memFile, 12, physGlob.gravityDirection);
+        PhysWorldData *world = &physGlob.worldData[worldIndex];
+        uint32_t callbackSlot = 0;
+        byte padding[3] = {};
+
+        // Preserve the 204-byte legacy record, but retain the registered native
+        // callback instead of serializing or restoring an executable address.
+        MemFile_ArchiveData(memFile, sizeof(int), &world->timeLastSnapshot);
+        MemFile_ArchiveData(memFile, sizeof(int), &world->timeLastUpdate);
+        MemFile_ArchiveData(memFile, sizeof(float), &world->timeNowLerpFrac);
+        MemFile_ArchiveData(memFile, sizeof(uint32_t), &callbackSlot);
+        MemFile_ArchiveData(memFile, sizeof(int), &world->numJitterRegions);
+        MemFile_ArchiveData(memFile, sizeof(bool), &world->useContactCentroids);
+        MemFile_ArchiveData(memFile, sizeof(padding), padding);
+        MemFile_ArchiveData(memFile, sizeof(Jitter) * ARRAY_COUNT(world->jitterRegions), world->jitterRegions);
     }
-    else
-    {
-        MemFile_ReadData(memFile, 612, (byte*)physGlob.worldData);
-        MemFile_ReadData(memFile, 12, (byte*)physGlob.gravityDirection);
-    }
+    MemFile_ArchiveData(memFile, sizeof(physGlob.gravityDirection), physGlob.gravityDirection);
 }
 
 

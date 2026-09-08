@@ -415,7 +415,7 @@ bool __cdecl Phys_CapsuleSeparatingAxisTest(
     float v12[3]; // [esp+3Ch] [ebp-17Ch] BYREF
     float v13[3]; // [esp+48h] [ebp-170h] BYREF
     float v0[3]; // [esp+54h] [ebp-164h] BYREF
-    float v15[52]; // [esp+60h] [ebp-158h] BYREF
+    float v15[3];
     float diff[3]; // [esp+130h] [ebp-88h] BYREF
     float cross[3]; // [esp+13Ch] [ebp-7Ch] BYREF
     float *normal; // [esp+148h] [ebp-70h]
@@ -443,7 +443,6 @@ bool __cdecl Phys_CapsuleSeparatingAxisTest(
     Vec3Sub(tri0, capsule->center, p0);
     Vec3Sub(tri1, capsule->center, p1);
     Vec3Sub(tri2, capsule->center, p2);
-    LODWORD(v15[51]) = (uint32)capsule->axis;
     Vec3Sub(tri0, cp0, diff);
     Vec3Cross(diff, capsule->axis, cross);
     Vec3Cross(cross, capsule->axis, testAxis);

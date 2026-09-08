@@ -224,7 +224,11 @@ struct dxSimpleSpace : public dxSpace {
 };
 
 struct dxUserGeom : public dxGeom {
-    char user_data[16]; // MOD
+    union
+    {
+        void *user_data_alignment;
+        char user_data[sizeof(void *) == 8 ? 24 : 16]; // Native BrushInfo storage.
+    };
 
     dxUserGeom(int class_num = dFirstUserClass, dxSpace *space = nullptr, dxBody *body = nullptr); // MOD
 

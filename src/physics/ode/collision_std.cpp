@@ -1832,14 +1832,16 @@ int __cdecl ODE_CollideCapsuleBox(
     float pl[4]; // [esp+40h] [ebp-20h] BYREF
     float endOffset[4]; // [esp+50h] [ebp-10h]
 
-    if (skip < 44)
+    if (skip < (int)sizeof(dContactGeom))
+    {
         MyAssertHandler(
             ".\\physics\\ode\\src\\collision_std.cpp",
             1392,
             0,
             "skip >= (int)sizeof( dContactGeom )\n\t%i, %i",
             skip,
-            44);
+            (int)sizeof(dContactGeom));
+    }
     iassert(maxc > 0);
     endOffset[0] = capHalfHeight * capRot[2];
     endOffset[1] = capHalfHeight * capRot[6];

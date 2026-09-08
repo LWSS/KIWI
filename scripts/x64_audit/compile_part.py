@@ -7,12 +7,14 @@ import argparse
 import concurrent.futures
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 
 parser = argparse.ArgumentParser()
 parser.add_argument('folder')
 parser.add_argument('--modes', nargs='+', default=['MP', 'SP'])
+parser.add_argument('--configured', action='store_true', help='Only translation units listed in game CMake source lists')
 options = parser.parse_args()
 root = Path.cwd()
 output = Path(os.environ['TEMP']) / 'kiwi-x64-epic' / options.folder
@@ -25,6 +27,16 @@ includes += [sdk/n for n in ['ucrt', 'shared', 'um', 'winrt']]
 probe = output/'diagnostic.h'
 probe.write_text('// Test only: shared x86 assertions are audited separately.\n#define static_assert(...)\n')
 files = sorted(p for p in (root/'src'/options.folder).rglob('*') if p.suffix in ['.c', '.cpp'])
+if options.configured:
+    lists = ['scripts/common_files.cmake', 'scripts/mp/mp_files.cmake', 'scripts/sp/sp_files.cmake']
+    configured = set()
+    for name in lists:
+        path = root/name
+        if path.exists():
+            configured.update(re.findall(r'^\s*"\$\{SRC_DIR\}/([^"\n]+)"', path.read_text(), re.M))
+    excluded = [str(p.relative_to(root)) for p in files if p.relative_to(root/'src').as_posix() not in configured]
+    (output/'excluded.json').write_text(json.dumps(excluded, indent=2))
+    files = [p for p in files if p.relative_to(root/'src').as_posix() in configured]
 
 def check(case):
     file, arch, mode = case
@@ -48,6 +60,6 @@ with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
 for result in results:
     if result['returncode']:
         print(result['file'], result['arch'], result['mode'], 'FAIL')
-        print('\n'.join(line for line in result['output'].splitlines() if 'error' in line))
+        print('\n'.join(line for line in result['output'].splitlines() if ': error ' in line or ': fatal error ' in line)[:2000])
 print(len(results), 'checks;', sum(r['returncode'] != 0 for r in results), 'failed;', output)
 raise SystemExit(any(r['returncode'] != 0 for r in results))

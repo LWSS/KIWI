@@ -77,12 +77,12 @@ struct dStack {
 
   // allocate `size' bytes from the stack and return a pointer to the allocated
   // memory. `size' must be >= 0. the returned pointer will be aligned to the
-  // size of a long int.
+  // size of a pointer.
 
   char * alloc (int size)
   {
     char *ret = pointer;
-    pointer += ((size-1) | (sizeof(long int)-1) )+1;
+    pointer += ((size-1) | (sizeof(void *)-1) )+1;
 #   ifdef WIN32
     // for windows we need to commit pages as they are required
     if ((pointer-base) > committed) {
