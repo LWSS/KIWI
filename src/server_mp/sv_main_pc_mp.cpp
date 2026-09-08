@@ -18,9 +18,9 @@ const netadr_t *__cdecl SV_MasterAddress()
     if (adr.type == NA_BOT)
     {
         Com_Printf(CON_CHANNEL_SERVER, "Resolving %s\n", com_masterServerName->current.string);
-        if (NET_StringToAdr((char *)com_masterServerName->current.integer, &adr))
+        if (NET_StringToAdr((char *)com_masterServerName->current.string, &adr))
         {
-            const char* result = strstr(":", (char*)com_masterServerName->current.integer);
+            const char* result = strchr(com_masterServerName->current.string, ':');
             if (!result)
                 adr.port = BigShort(com_masterPort->current.integer);
             v1 = BigShort(adr.port);
@@ -331,4 +331,3 @@ void __cdecl SV_VoicePacket(netadr_t from, msg_t *msg)
         }
     }
 }
-

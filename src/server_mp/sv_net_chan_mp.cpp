@@ -105,7 +105,7 @@ void __cdecl SV_Netchan_UpdateProfileStats()
     client_t *pClient; // [esp+0h] [ebp-8h]
     int i; // [esp+4h] [ebp-4h]
 
-    if (&svs != (serverStatic_t *)-4601868 && net_profile->current.integer)
+    if (net_profile->current.integer)
     {
         NetProf_UpdateStatistics(&svs.OOBProf.send);
         NetProf_UpdateStatistics(&svs.OOBProf.recieve);

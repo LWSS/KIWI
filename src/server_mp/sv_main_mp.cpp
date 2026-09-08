@@ -76,8 +76,8 @@ int com_time;
 
 void __cdecl TRACK_sv_main()
 {
-    track_static_alloc_internal(&svs, 0xB227480, "svs", 9);
-    track_static_alloc_internal(&sv, 392288, "sv", 9);
+    track_static_alloc_internal(&svs, sizeof(serverStatic_t), "svs", 9);
+    track_static_alloc_internal(&sv, sizeof(server_t), "sv", 9);
 }
 
 char string_2[1024];
@@ -253,6 +253,8 @@ void SV_SendServerCommand(client_t *cl, svscmd_type type, const char *fmt, ...)
 
     va_start(va, fmt);
     _vsnprintf((char *)tempServerCommandBuf, 0x20000u, fmt, va);
+    va_end(va);
+    tempServerCommandBuf[sizeof(tempServerCommandBuf) - 1] = 0;
     if (cl)
     {
         SV_AddServerCommand(cl, type, (char *)tempServerCommandBuf);
@@ -1350,4 +1352,3 @@ char __cdecl SV_CheckOverflow()
         return 1;
     }
 }
-

@@ -15,12 +15,10 @@ void __cdecl SV_ArchiveSnapshot(msg_t *msg)
     clientState_s *ClientStateLocal; // eax
     clientState_s *v2; // eax
     const char *v3; // eax
-    float v4; // eax
     const char *v5; // eax
     const clientState_s *v6; // eax
     int FollowPlayerStateLocal; // eax
     const char *v8; // eax
-    float v9; // ecx
     float *absmax; // [esp+3Ch] [ebp-3138h]
     float *v11; // [esp+40h] [ebp-3134h]
     float *absmin; // [esp+44h] [ebp-3130h]
@@ -30,7 +28,7 @@ void __cdecl SV_ArchiveSnapshot(msg_t *msg)
     int numa; // [esp+6Ch] [ebp-3108h]
     client_t *clients; // [esp+74h] [ebp-3100h]
     int v18; // [esp+80h] [ebp-30F4h]
-    SnapshotInfo_s snapInfo; // [esp+90h] [ebp-30E4h] BYREF
+    SnapshotInfo_s snapInfo = {};
     archivedEntity_s *v20; // [esp+A8h] [ebp-30CCh]
     int v21; // [esp+ACh] [ebp-30C8h]
     int clientIndex; // [esp+B0h] [ebp-30C4h]
@@ -170,11 +168,8 @@ void __cdecl SV_ArchiveSnapshot(msg_t *msg)
                             || (v30->r.svFlags & 1) == 0
                             && ((v30->r.svFlags & 0x18) != 0 || svsHeader.svEntities[v30->s.number].numClusters))
                         {
-                            LODWORD(v4) = 376 * v30->s.number;
-                            from = (archivedEntity_s *)((char *)&svsHeader.svEntities->baseline + LODWORD(v4));
-                            if ((svEntity_s *)((char *)svsHeader.svEntities + LODWORD(v4)) == (svEntity_s *)-4)
-                                MyAssertHandler(".\\server_mp\\sv_archive_mp.cpp", 286, 0, "%s", "baseline");
-                            memcpy(&to, v30, 0xF4u);
+                            from = &svsHeader.svEntities[v30->s.number].baseline;
+                            memcpy(&to.s, &v30->s, sizeof(entityState_s));
                             to.r.svFlags = v30->r.svFlags;
                             if (v30->r.broadcastTime)
                                 to.r.svFlags |= 8u;
@@ -273,12 +268,9 @@ void __cdecl SV_ArchiveSnapshot(msg_t *msg)
                 || (v30->r.svFlags & 1) == 0
                 && ((v30->r.svFlags & 0x18) != 0 || svsHeader.svEntities[v30->s.number].numClusters))
             {
-                LODWORD(v9) = 376 * v30->s.number;
-                from = (archivedEntity_s *)((char *)&svsHeader.svEntities->baseline + LODWORD(v9));
-                if ((svEntity_s *)((char *)svsHeader.svEntities + LODWORD(v9)) == (svEntity_s *)-4)
-                    MyAssertHandler(".\\server_mp\\sv_archive_mp.cpp", 392, 0, "%s", "baseline");
+                from = &svsHeader.svEntities[v30->s.number].baseline;
                 v20 = &svsHeader.cachedSnapshotEntities[svsHeader.nextCachedSnapshotEntities % 0x4000];
-                memcpy(v20, v30, 0xF4u);
+                memcpy(&v20->s, &v30->s, sizeof(entityState_s));
                 v20->r.svFlags = v30->r.svFlags;
                 if (v30->r.broadcastTime)
                     v20->r.svFlags |= 8u;

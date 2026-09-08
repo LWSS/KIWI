@@ -62,7 +62,7 @@ void __cdecl SV_AuthorizeRequest(netadr_t from, int challenge, const char *cdkey
     const char *v4; // eax
     char v5; // [esp+3h] [ebp-419h]
     char *v6; // [esp+8h] [ebp-414h]
-    char *integer; // [esp+Ch] [ebp-410h]
+    const char *integer;
     const dvar_s *v8; // [esp+10h] [ebp-40Ch]
     char game[1027]; // [esp+14h] [ebp-408h] BYREF
     bool allowAnonymous; // [esp+417h] [ebp-5h]
@@ -72,9 +72,9 @@ void __cdecl SV_AuthorizeRequest(netadr_t from, int challenge, const char *cdkey
     {
         game[0] = 0;
         v8 = Dvar_RegisterString("fs_game", "", DVAR_SERVERINFO | DVAR_SYSTEMINFO | DVAR_INIT, "File sysytem base game name");
-        if (v8 && v8->current.integer)
+        if (v8 && v8->current.string)
         {
-            integer = (char*)v8->current.integer;
+            integer = v8->current.string;
             v6 = game;
             do
             {
@@ -349,68 +349,54 @@ void __cdecl SV_ReceiveStats(netadr_t from, msg_t *msg)
 
 void __cdecl SV_SetClientStat(int clientNum, int index, uint value)
 {
-    const char *v3; // eax
-    client_t *v4; // [esp+0h] [ebp-8h]
-
-    if (svs.clients[clientNum].statPacketsReceived != 127)
-        MyAssertHandler(
-            ".\\server_mp\\sv_client_mp.cpp",
-            335,
-            0,
-            "%s",
-            "svs.clients[clientNum].statPacketsReceived == ( 1 << MAX_STATPACKETS ) - 1");
-    iassert(svs.clients[clientNum].header.state >= CS_CONNECTED);
-    v4 = &svs.clients[clientNum];
-    if (index >= 2000)
+    if ((unsigned int)clientNum >= ARRAY_COUNT(svs.clients) || (unsigned int)index >= 3498)
     {
-        if (index < 3498)
+        iassert(alwaysfails);
+        return;
+    }
+    client_t *client = &svs.clients[clientNum];
+    iassert(client->statPacketsReceived == 127);
+    iassert(client->header.state >= CS_CONNECTED);
+    if (index < 2000)
+    {
+        iassert(value <= 255);
+        if (client->stats[index + 4] == (byte)value)
         {
-            if (*(uint *)&svs.clients[clientNum].voicePackets[17].data[4 * index + 75] == value) // KISAKTODO
-                return;
-            *(uint *)&svs.clients[clientNum].voicePackets[17].data[4 * index + 75] = value;
-            goto LABEL_16;
+            return;
         }
-        if (!alwaysfails)
-        {
-            v3 = va("Unhandled stat index %i", index);
-            MyAssertHandler(".\\server_mp\\sv_client_mp.cpp", 359, 0, v3);
-        }
+        client->stats[index + 4] = (byte)value;
     }
     else
     {
-        if (value >= 0x100)
-            MyAssertHandler(".\\server_mp\\sv_client_mp.cpp", 342, 0, "%s", "value >= 0 && value <= 255");
-        if (v4->stats[index + 4] != (uint8_t)value)
+        unsigned int oldValue;
+        byte *stat = &client->stats[2004 + (index - 2000) * sizeof(unsigned int)];
+        memcpy(&oldValue, stat, sizeof(unsigned int));
+        if (oldValue == value)
         {
-            v4->stats[index + 4] = value;
-        LABEL_16:
-            SV_SendServerCommand(v4, SV_CMD_RELIABLE, "%c %i %i", 78, index, value);
+            return;
         }
+        memcpy(stat, &value, sizeof(unsigned int));
     }
+    SV_SendServerCommand(client, SV_CMD_RELIABLE, "%c %i %i", 78, index, value);
 }
 
 int __cdecl SV_GetClientStat(int clientNum, int index)
 {
-    const char *v3; // eax
-
-    if (svs.clients[clientNum].statPacketsReceived != 127)
-        MyAssertHandler(
-            ".\\server_mp\\sv_client_mp.cpp",
-            369,
-            0,
-            "%s",
-            "svs.clients[clientNum].statPacketsReceived == ( 1 << MAX_STATPACKETS ) - 1");
-    iassert(svs.clients[clientNum].header.state >= CS_CONNECTED);
-    if (index < 2000)
-        return svs.clients[clientNum].stats[index + 4];
-    if (index < 3498)
-        return *(uint *)&svs.clients[clientNum].voicePackets[17].data[4 * index + 75]; // KISAKTODO
-    if (!alwaysfails)
+    if ((unsigned int)clientNum >= ARRAY_COUNT(svs.clients) || (unsigned int)index >= 3498)
     {
-        v3 = va("Unhandled stat index %i", index);
-        MyAssertHandler(".\\server_mp\\sv_client_mp.cpp", 383, 0, v3);
+        iassert(alwaysfails);
+        return 0;
     }
-    return 0;
+    client_t *client = &svs.clients[clientNum];
+    iassert(client->statPacketsReceived == 127);
+    iassert(client->header.state >= CS_CONNECTED);
+    if (index < 2000)
+    {
+        return client->stats[index + 4];
+    }
+    int value;
+    memcpy(&value, &client->stats[2004 + (index - 2000) * sizeof(int)], sizeof(int));
+    return value;
 }
 
 void __cdecl SV_BanGuidBriefly(const char *cdkeyHash)
@@ -1711,4 +1697,3 @@ gentity_s *__cdecl SV_AddTestClient()
     SV_ClientEnterWorld(clienta, &nullcmd);
     return SV_GentityNum(i);
 }
-

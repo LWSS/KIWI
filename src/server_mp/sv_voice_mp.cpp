@@ -113,9 +113,11 @@ void __cdecl SV_UserVoice(client_t *cl, msg_t *msg)
                 return;
             }
             iassert(msg->data);
-            if (&voicePacket == (VoicePacket_t *)-1)
-                MyAssertHandler(".\\server_mp\\sv_voice_mp.cpp", 190, 0, "%s", "voicePacket.data");
             MSG_ReadData(msg, voicePacket.data, voicePacket.dataSize);
+            if (msg->overflowed)
+            {
+                return;
+            }
             G_BroadcastVoice(cl->gentity, &voicePacket);
         }
     }
@@ -130,12 +132,12 @@ void __cdecl SV_QueueVoicePacket(int talkerNum, int clientNum, VoicePacket_t *vo
     iassert(talkerNum < sv_maxclients->current.integer);
     iassert(clientNum < sv_maxclients->current.integer);
     client = &svs.clients[clientNum];
-    if (client->voicePacketCount < 40)
+    if ((unsigned int)client->voicePacketCount < ARRAY_COUNT(client->voicePackets)
+        && voicePacket->dataSize > 0 && (unsigned int)voicePacket->dataSize <= sizeof(voicePacket->data))
     {
         client->voicePackets[client->voicePacketCount].dataSize = voicePacket->dataSize;
         memcpy(client->voicePackets[client->voicePacketCount].data, voicePacket->data, voicePacket->dataSize);
-        if (talkerNum != talkerNum)
-            MyAssertHandler(".\\server_mp\\sv_voice_mp.cpp", 149, 0, "%s", "talkerNum == static_cast<byte>(talkerNum)");
+        iassert(talkerNum == (byte)talkerNum);
         client->voicePackets[client->voicePacketCount++].talker = talkerNum;
     }
 }
@@ -163,9 +165,11 @@ void __cdecl SV_PreGameUserVoice(client_t *cl, msg_t *msg)
                 return;
             }
             iassert(msg->data);
-            if (&voicePacket == (VoicePacket_t *)-1)
-                MyAssertHandler(".\\server_mp\\sv_voice_mp.cpp", 241, 0, "%s", "voicePacket.data");
             MSG_ReadData(msg, voicePacket.data, voicePacket.dataSize);
+            if (msg->overflowed)
+            {
+                return;
+            }
             for (otherPlayer = 0; otherPlayer < 64; ++otherPlayer)
             {
                 if (otherPlayer != talker

@@ -405,7 +405,7 @@ void __cdecl SV_Map_f()
         if (IsFastFileLoad())
         {
             iassert(fs_gameDirVar);
-            if (!DB_FileSize(mapname, 0) && (!*(_BYTE *)fs_gameDirVar->current.integer || !DB_FileSize(mapname, 1)))
+            if (!DB_FileSize(mapname, 0) && (!*fs_gameDirVar->current.string || !DB_FileSize(mapname, 1)))
             {
                 Com_PrintError(CON_CHANNEL_ERROR, "Can't find map \"%s\".\n", mapname);
                 return;
@@ -469,7 +469,7 @@ void __cdecl SV_MapRestart(int fast_restart)
     if (com_sv_running->current.enabled)
     {
         SV_SetGametype();
-        I_strncpyz(sv.gametype, (char *)sv_gametype->current.integer, 64);
+        I_strncpyz(sv.gametype, sv_gametype->current.string, 64);
         savepersist = G_GetSavePersist();
         if (sv_maxclients->modified || I_stricmp(sv.gametype, sv_gametype->current.string) || !fast_restart)
         {
@@ -565,12 +565,14 @@ void __cdecl SV_MapRotate_f()
     Com_Printf(CON_CHANNEL_DONT_FILTER, "map_rotate...\n\n");
     Com_Printf(CON_CHANNEL_DONT_FILTER, "\"sv_mapRotation\" is:\"%s\"\n\n", sv_mapRotation->current.string);
     Com_Printf(CON_CHANNEL_DONT_FILTER, "\"sv_mapRotationCurrent\" is:\"%s\"\n\n", sv_mapRotationCurrent->current.string);
-    if (!*(_BYTE *)sv_mapRotationCurrent->current.integer)
-        Dvar_SetString((dvar_s *)sv_mapRotationCurrent, (char *)sv_mapRotation->current.integer);
+    if (!*sv_mapRotationCurrent->current.string)
+    {
+        Dvar_SetString((dvar_s *)sv_mapRotationCurrent, sv_mapRotation->current.string);
+    }
     token = SV_GetMapRotationToken();
     if (!token)
     {
-        Dvar_SetString((dvar_s *)sv_mapRotationCurrent, (char *)sv_mapRotation->current.integer);
+        Dvar_SetString((dvar_s *)sv_mapRotationCurrent, sv_mapRotation->current.string);
         token = SV_GetMapRotationToken();
     }
     while (1)

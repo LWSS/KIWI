@@ -12,7 +12,7 @@ Coding conventions: C-style implementation, explicit `sizeof(Type)`, braces for 
 | 4 | ragdoll | Complete |
 | 5 | script | Complete |
 | 6 | server | Complete |
-| 7 | server_mp | Pending |
+| 7 | server_mp | Complete |
 | 8 | sound | Pending |
 | 9 | stringed | Pending |
 | 10 | ui | Pending |
@@ -24,6 +24,15 @@ Coding conventions: C-style implementation, explicit `sizeof(Type)`, braces for 
 Validation distinguishes diagnostic compilation and isolated regression tests from a full native game link/run. Shared x86 layout assertions may require a test-only override until their owning part is ported. Production assertions are never globally disabled.
 
 Part 5 checkpoint: `510631ac`.
+Part 6 checkpoint: `91eb549f`.
+
+## Part 7: server_mp
+
+Audited all 12 files. Replaced fixed client allocation/copy/clear lengths and server clearing/tracking sizes with native sizes. Dvar strings use the string union member. Snapshot information is fully initialized; baseline traversal uses native entity-array stride, archive frame sizes use named fields, and player-state accesses use named fields. Removed bogus offset-derived pointer assertions. Netfield offsets use `offsetof`.
+
+Independent fixes: stats now address their actual storage (2000 bytes followed by 1498 integers), matching `LiveStorage_GetStat`; range checks reject invalid client/stat indexes. The prior accesses depended on packed voice-packet layout and could corrupt voice storage even on x86. Master-server port detection uses `strchr` with the correct argument order. Formatted commands close their va_list and terminate their output. Voice reads reject truncated messages, and queue writes reject invalid payload sizes and exhausted capacity.
+
+Validation: 22 configured x86/x64 MP diagnostic compilation checks pass. Native regression tests (`test_server_mp.py`) pass on both architectures: all 3498 stat values and unchanged-value suppression, voice-storage canaries, client resizing with pointer/tail preservation and full clearing, allocation canaries, queue capacity/invalid lengths, and static verification of the replaced player-state offsets. No multiplayer match or network integration run was performed. External correctness patch: `07-server-mp-correctness.patch`.
 
 ## Part 6: server
 

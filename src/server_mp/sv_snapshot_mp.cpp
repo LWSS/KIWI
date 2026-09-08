@@ -55,7 +55,7 @@ void __cdecl SV_WriteSnapshotToClient(client_t *client, msg_t *msg)
             "%s\n\t(clientNum) = %i",
             "(clientNum >= 0 && clientNum < 64)",
             clientNum);
-    memset(&snapInfo.snapshotDeltaTime, 0, 16);
+    memset(&snapInfo, 0, sizeof(SnapshotInfo_s));
     snapInfo.clientNum = clientNum;
     snapInfo.client = &client->header;
     remoteFrame = &client->frames[client->header.netchan.outgoingSequence & 0x1F];
@@ -69,8 +69,7 @@ void __cdecl SV_WriteSnapshotToClient(client_t *client, msg_t *msg)
         {
             v2 = client->header.deltaMessage & 0x1F;
             oldframe = &client->frames[v2];
-            if ((client_t *)((char *)client + v2 * 12164) == (client_t *)-136296)
-                MyAssertHandler(".\\server_mp\\sv_snapshot_mp.cpp", 551, 0, "%s", "oldframe");
+            iassert(oldframe);
             lastframe = client->header.netchan.outgoingSequence - client->header.deltaMessage;
             lastServerTime = oldframe->serverTime;
             if (oldframe->first_entity < svsHeader.nextSnapshotEntities - svsHeader.numSnapshotEntities)
@@ -301,8 +300,7 @@ void __cdecl SV_EmitPacketEntities(
         else
         {
             baseline = &svsHeader.svEntities[newnum].baseline.s;
-            if (&svsHeader.svEntities[newnum] == (svEntity_s *)-4)
-                MyAssertHandler(".\\server_mp\\sv_snapshot_mp.cpp", 229, 0, "%s", "baseline");
+            iassert(baseline);
             snapInfo->fromBaseline = 1;
             MSG_WriteEntity(snapInfo, msg, svsHeader.time, (entityState_s *)baseline, newent, 1);
             snapInfo->fromBaseline = 0;
@@ -755,18 +753,22 @@ cachedSnapshot_t *__cdecl SV_GetCachedSnapshotInternal(int archivedFrame)
     }
     v2 = svs.archivedSnapshotFrames[archivedFrame % 1200].start % 0x2000000;
     partSize = 0x2000000 - v2;
-    if (*(_DWORD *)&svs.archivedSnapshotBuffer[8 * (archivedFrame % 1200) - 9596] > 0x2000000 - v2)
+    if (svs.archivedSnapshotFrames[archivedFrame % 1200].size > 0x2000000 - v2)
+    {
         MSG_InitReadOnlySplit(
             &msg,
             &svs.archivedSnapshotBuffer[v2],
             partSize,
             svs.archivedSnapshotBuffer,
-            *(_DWORD *)&svs.archivedSnapshotBuffer[8 * (archivedFrame % 1200) - 9596] - partSize);
+            svs.archivedSnapshotFrames[archivedFrame % 1200].size - partSize);
+    }
     else
+    {
         MSG_InitReadOnly(
             &msg,
             &svs.archivedSnapshotBuffer[v2],
-            *(_DWORD *)&svs.archivedSnapshotBuffer[8 * (archivedFrame % 1200) - 9596]);
+            svs.archivedSnapshotFrames[archivedFrame % 1200].size);
+    }
     MSG_BeginReading(&msg);
     if (MSG_ReadBit(&msg))
     {
@@ -975,7 +977,6 @@ int __cdecl SV_GetCurrentClientInfo(int clientNum, playerState_s *ps, clientStat
 
 void __cdecl SV_BuildClientSnapshot(client_t *client)
 {
-    uint8_t *v1; // eax
     clientState_s *ClientState; // eax
     int v3; // [esp+18h] [ebp-1154h]
     entityState_s *v4; // [esp+20h] [ebp-114Ch]
@@ -991,7 +992,6 @@ void __cdecl SV_BuildClientSnapshot(client_t *client)
     gentity_s *v15; // [esp+1154h] [ebp-18h]
     int i; // [esp+1158h] [ebp-14h]
     int clientNum; // [esp+115Ch] [ebp-10h]
-    uint8_t *dst; // [esp+1160h] [ebp-Ch]
     int v19; // [esp+1164h] [ebp-8h]
     cachedClient_s *v20; // [esp+1168h] [ebp-4h]
     client_t *clients; // [esp+1174h] [ebp+8h]
@@ -1017,18 +1017,16 @@ void __cdecl SV_BuildClientSnapshot(client_t *client)
                 else
                     v3 = 0;
                 v19 = v3;
-                dst = (uint8_t *)v5;
-                v1 = (uint8_t *)SV_GameClientNum(clientNum);
-                memcpy(dst, v1, 0x2F64u);
-                clientNum = *((uint *)dst + 55);
+                memcpy(&v5->ps, SV_GameClientNum(clientNum), sizeof(playerState_s));
+                clientNum = v5->ps.clientNum;
                 if ((uint)clientNum >= 0x400)
+                {
                     Com_Error(ERR_DROP, "SV_BuildClientSnapshot: bad gEnt");
-                position[0] = *((float *)dst + 7);
-                position[1] = *((float *)dst + 8);
-                position[2] = *((float *)dst + 9);
-                position[2] = position[2] + *((float *)dst + 70);
-                AddLeanToPosition(position, *((float *)dst + 67), *((float *)dst + 23), 16.0, 20.0);
-                memset((uint8_t *)v12, 0, 0x100u);
+                }
+                Vec3Copy(v5->ps.origin, position);
+                position[2] += v5->ps.viewHeightCurrent;
+                AddLeanToPosition(position, v5->ps.viewangles[1], v5->ps.leanf, 16.0, 20.0);
+                memset(v12, 0, sizeof(v12));
                 if (CachedSnapshot)
                 {
                     SV_AddCachedEntitiesVisibleFromPoint(
@@ -1258,7 +1256,7 @@ void __cdecl SV_AddCachedEntitiesVisibleFromPoint(
         fogOpaqueDistSqrd = G_GetFogOpaqueDistSqrd();
         if (fogOpaqueDistSqrd == FLT_MAX)
             fogOpaqueDistSqrd = 0.0;
-        memset((uint8_t *)dst, 0, 0x1000u);
+        memset(dst, 0, sizeof(dst));
         for (e = 0; e < from_num_entities; ++e)
         {
             v13 = &svs.cachedSnapshotEntities[(e + from_first_entity) % 0x4000];
@@ -1695,7 +1693,7 @@ void __cdecl SV_SetServerStaticHeader()
     svsHeader.cachedSnapshotEntities = svs.cachedSnapshotEntities;
     svsHeader.cachedSnapshotClients = svs.cachedSnapshotClients;
     svsHeader.archivedSnapshotBuffer = svs.archivedSnapshotBuffer;
-    svsHeader.cachedSnapshotFrames = (cachedSnapshot_t *)&svs;
+    svsHeader.cachedSnapshotFrames = svs.cachedSnapshotFrames;
     svsHeader.nextCachedSnapshotFrames = svs.nextCachedSnapshotFrames;
     svsHeader.nextArchivedSnapshotFrames = svs.nextArchivedSnapshotFrames;
     svsHeader.nextCachedSnapshotEntities = svs.nextCachedSnapshotEntities;
@@ -1737,7 +1735,7 @@ void __cdecl SV_GetServerStaticHeader()
     iassert(svsHeader.cachedSnapshotEntities == svs.cachedSnapshotEntities);
     iassert(svsHeader.cachedSnapshotClients == svs.cachedSnapshotClients);
     iassert(svsHeader.archivedSnapshotBuffer == svs.archivedSnapshotBuffer);
-    if ((serverStatic_t *)svsHeader.cachedSnapshotFrames != &svs)
+    if (svsHeader.cachedSnapshotFrames != svs.cachedSnapshotFrames)
         MyAssertHandler(
             ".\\server_mp\\sv_snapshot_mp.cpp",
             2179,
@@ -1977,4 +1975,3 @@ void __cdecl SV_SendClientMessages()
     if (sv_debugPacketContents->current.enabled || net_showprofile->current.integer)
         SV_EnablePacketData();
 }
-

@@ -24,7 +24,7 @@ enum svscmd_type : int
     SV_CMD_RELIABLE = 0x1,
 };
 
-#define	NETF_BASE(s, x) #x,(size_t)&((s*)0)->x
+#define	NETF_BASE(s, x) #x,offsetof(s, x)
 #define NETF_HUD(x) NETF_BASE(hudelem_s, x)
 
 const NetField hudElemFields[40] =

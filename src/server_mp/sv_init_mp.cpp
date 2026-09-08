@@ -280,7 +280,7 @@ void __cdecl SV_ClearServer()
     }
     if (sv.emptyConfigString)
         SL_RemoveRefToString(sv.emptyConfigString);
-    Com_Memset((uint *)&sv, 0, 392288);
+    Com_Memset(&sv, 0, sizeof(server_t));
     com_inServerFrame = 0;
 }
 
@@ -319,15 +319,19 @@ void __cdecl SV_ChangeMaxClients()
     SV_BoundMaxClients(counta);
     if (sv_maxclients->current.integer != oldMaxClients)
     {
-        oldClients = (client_t *)Hunk_AllocateTempMemory(677432 * counta, "SV_ChangeMaxClients");
+        oldClients = (client_t *)Hunk_AllocateTempMemory(sizeof(client_t) * counta, "SV_ChangeMaxClients");
         for (ia = 0; ia < counta; ++ia)
         {
             if (svs.clients[ia].header.state < CS_CONNECTED)
-                Com_Memset(&oldClients[ia], 0, 677432);
+            {
+                Com_Memset(&oldClients[ia], 0, sizeof(client_t));
+            }
             else
+            {
                 memcpy(&oldClients[ia], &svs.clients[ia], sizeof(client_t));
+            }
         }
-        Com_Memset(svs.clients, 0, 677432 * sv_maxclients->current.integer);
+        Com_Memset(svs.clients, 0, sizeof(client_t) * sv_maxclients->current.integer);
         for (ib = 0; ib < counta; ++ib)
         {
             if (oldClients[ib].header.state >= CS_CONNECTED)
@@ -484,7 +488,7 @@ void __cdecl SV_SpawnServer(char *mapname)
     }
 
 
-    I_strncpyz(sv.gametype, (char *)sv_gametype->current.integer, 64);
+    I_strncpyz(sv.gametype, sv_gametype->current.string, 64);
 
     srand(Sys_MillisecondsRaw());
     sv.checksumFeed = Sys_Milliseconds() ^ (rand() ^ (rand() << 16));
