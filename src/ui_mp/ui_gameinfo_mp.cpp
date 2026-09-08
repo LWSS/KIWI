@@ -74,89 +74,66 @@ int __cdecl UI_ParseInfos(const char *buf, int max, char **infos)
 
 void __cdecl UI_LoadArenas()
 {
-    const char *v0; // eax
-    const char *v1; // eax
-    const char *v2; // eax
-    const char *v3; // eax
-    const char *pszText; // [esp+0h] [ebp-14h] BYREF
-    const char *pszGameTypes; // [esp+4h] [ebp-10h]
-    int i; // [esp+8h] [ebp-Ch]
-    int n; // [esp+Ch] [ebp-8h]
-    const char *pszToken; // [esp+10h] [ebp-4h]
-
     sharedUiInfo.mapCount = 0;
     UI_LoadArenasFromFile();
-    for (n = 0; n < ui_numArenas; ++n)
+    for (int n = 0; n < ui_numArenas && sharedUiInfo.mapCount < ARRAY_COUNT(sharedUiInfo.mapList); ++n)
     {
-        v0 = Info_ValueForKey(ui_arenaInfos[n], "map");
-        sharedUiInfo.serverHardwareIconList[40 * sharedUiInfo.mapCount - 5119] = (Material *)String_Alloc(v0);
-        v1 = Info_ValueForKey(ui_arenaInfos[n], "longname");
-        sharedUiInfo.mapList[sharedUiInfo.mapCount].mapName = String_Alloc(v1);
-        sharedUiInfo.serverHardwareIconList[40 * sharedUiInfo.mapCount - 5082] = 0;
-        v2 = va("loadscreen_%s", (const char *)sharedUiInfo.serverHardwareIconList[40 * sharedUiInfo.mapCount - 5119]);
-        sharedUiInfo.serverHardwareIconList[40 * sharedUiInfo.mapCount - 5118] = (Material *)String_Alloc(v2);
-        sharedUiInfo.serverHardwareIconList[40 * sharedUiInfo.mapCount - 5082] = Material_RegisterHandle(
-            (char *)sharedUiInfo.serverHardwareIconList[40 * sharedUiInfo.mapCount - 5118],
-            3);
-        pszGameTypes = Info_ValueForKey(ui_arenaInfos[n], "gametype");
-        if (!pszGameTypes)
-            goto LABEL_15;
-        if (*pszGameTypes)
+        mapInfo *map = &sharedUiInfo.mapList[sharedUiInfo.mapCount];
+        map->mapLoadName = String_Alloc(Info_ValueForKey(ui_arenaInfos[n], "map"));
+        map->mapName = String_Alloc(Info_ValueForKey(ui_arenaInfos[n], "longname"));
+        map->imageName = String_Alloc(va("loadscreen_%s", map->mapLoadName));
+        map->levelShot = Material_RegisterHandle(map->imageName, 3);
+        const char *gameTypes = Info_ValueForKey(ui_arenaInfos[n], "gametype");
+        map->typeBits = -1;
+        if (gameTypes && *gameTypes)
         {
-            sharedUiInfo.serverHardwareIconList[40 * sharedUiInfo.mapCount - 5115] = 0;
-            v3 = va(".arena files : %s", (const char *)sharedUiInfo.serverHardwareIconList[40 * sharedUiInfo.mapCount - 5119]);
-            Com_BeginParseSession(v3);
-            pszText = pszGameTypes;
-            while (1)
+            map->typeBits = 0;
+            Com_BeginParseSession(va(".arena files : %s", map->mapLoadName));
+            for (;;)
             {
-                pszToken = (const char *)Com_Parse(&pszText);
-                if (!pszToken || !*pszToken)
-                    break;
-                for (i = 0; i < sharedUiInfo.numGameTypes; ++i)
+                const char *token = Com_Parse(&gameTypes)->token;
+                if (!token || !*token)
                 {
-                    if (!I_stricmp(pszToken, sharedUiInfo.gameTypes[i].gameType))
-                        sharedUiInfo.serverHardwareIconList[40 * sharedUiInfo.mapCount - 5115] = (Material *)((int)sharedUiInfo.serverHardwareIconList[40 * sharedUiInfo.mapCount - 5115]
-                            | (1 << i));
+                    break;
+                }
+                for (int i = 0; i < sharedUiInfo.numGameTypes && i < ARRAY_COUNT(sharedUiInfo.gameTypes); ++i)
+                {
+                    if (!I_stricmp(token, sharedUiInfo.gameTypes[i].gameType))
+                    {
+                        map->typeBits |= 1u << i;
+                    }
                 }
             }
             Com_EndParseSession();
         }
-        else
-        {
-        LABEL_15:
-            sharedUiInfo.serverHardwareIconList[40 * sharedUiInfo.mapCount - 5115] = (Material *)-1;
-        }
-        if (++sharedUiInfo.mapCount >= 128)
-            break;
+        ++sharedUiInfo.mapCount;
     }
 }
 
-const char *UI_LoadArenasFromFile_LoadObj()
+void UI_LoadArenasFromFile_LoadObj()
 {
-    char *result; // eax
-    const char *v1; // [esp+14h] [ebp-24A4h]
-    char string[132]; // [esp+18h] [ebp-24A0h] BYREF
-    char *v3; // [esp+9Ch] [ebp-241Ch]
+    int fileCount;
+    char string[132];   // [esp+18h] [ebp-24A0h] BYREF
+    char *v3;           // [esp+9Ch] [ebp-241Ch]
     char listbuf[1024]; // [esp+A0h] [ebp-2418h] BYREF
-    char buffer[8196]; // [esp+4A0h] [ebp-2018h] BYREF
-    int len; // [esp+24A8h] [ebp-10h]
-    int f; // [esp+24ACh] [ebp-Ch] BYREF
-    int v8; // [esp+24B0h] [ebp-8h]
-    uint v9; // [esp+24B4h] [ebp-4h]
+    char buffer[8196];  // [esp+4A0h] [ebp-2018h] BYREF
+    int len;            // [esp+24A8h] [ebp-10h]
+    int f;              // [esp+24ACh] [ebp-Ch] BYREF
+    int v8;             // [esp+24B0h] [ebp-8h]
+    uint v9;            // [esp+24B4h] [ebp-4h]
 
     ui_numArenas = 0;
-    result = (char *)FS_GetFileList("mp", "arena", FS_LIST_PURE_ONLY, listbuf, 1024);
-    v1 = result;
+    fileCount = FS_GetFileList("mp", "arena", FS_LIST_PURE_ONLY, listbuf, sizeof(listbuf));
     v3 = listbuf;
     v8 = 0;
-    while (v8 < (int)v1)
+    while (v8 < fileCount)
     {
         v9 = strlen(v3);
         snprintf(string, ARRAYSIZE(string), "%s/%s", "mp", v3);
         len = FS_FOpenFileByMode(string, &f, FS_READ);
         if (f)
         {
-            if (len < 0x2000)
+            if (len >= 0 && len < 0x2000)
             {
                 FS_Read((uint8_t *)buffer, len, f);
                 buffer[len] = 0;
@@ -174,10 +151,8 @@ const char *UI_LoadArenasFromFile_LoadObj()
             Com_PrintError(CON_CHANNEL_UI, "file not found: %s\n", string);
         }
         ++v8;
-        result = &v3[v9 + 1];
-        v3 = result;
+        v3 += v9 + 1;
     }
-    return result;
 }
 
 void UI_LoadArenasFromFile()

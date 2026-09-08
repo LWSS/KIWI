@@ -16,7 +16,7 @@ Coding conventions: C-style implementation, explicit `sizeof(Type)`, braces for 
 | 8 | sound | Complete |
 | 9 | stringed | Complete |
 | 10 | ui | Complete |
-| 11 | ui_mp | Pending |
+| 11 | ui_mp | Complete |
 | 12 | universal | Pending |
 | 13 | win32 | Pending |
 | 14 | xanim | Pending |
@@ -28,6 +28,15 @@ Part 6 checkpoint: `91eb549f`.
 Part 7 checkpoint: `ec0f97bc`.
 Part 8 checkpoint: `1883deb0`.
 Part 9 checkpoint: `18c58233`.
+Part 10 checkpoint: `778c83d8`.
+
+## Part 11: ui_mp
+
+Audited all three files. Replaced backward indexing from material arrays with named map fields, including native name/image/material pointers and integer game-type masks. Reconstructed the browser's used scalar fields and 20,000-entry server list as `UIServerBrowserStatus`, keeping its 82,200-byte layout and leaving the separate client `serverStatus_s` intact. Server search uses native status-row pointers and named found-player arrays. Removed unused pointer-shaped count/time return values, corrected profile dvar string access, native tracking sizes and the qsort callback signature.
+
+Independent fixes: bound server-list insertion in release and shift from the old count (the former preincrement copied one element too far); bound profile enumeration, status ping labels and conversion output; reject invalid feeder indexes/game-type shifts; return safely for an empty map list; use literal formatting for substitutions. `11-ui-mp-correctness.patch` exports selected standalone fixes against the previous layout.
+
+Validation: four configured UI MP and four client-header integration compilation checks pass. `test_ui_mp.py` passes on x86/x64: all 20,000 insertion slots plus overflow/negative-index rejection, removal/reinsertion ordering and adjacent-field preservation, 128 native map records including game-type bit 31, native server-status row parsing, and bounded substitutions. Explicit layout checks verify browser offsets/size and native map sizes. No live server-browser/network session or rendered UI was run.
 
 ## Part 10: ui
 

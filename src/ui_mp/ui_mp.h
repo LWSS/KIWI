@@ -100,6 +100,28 @@ struct pendingServerStatus_t // sizeof=0x8C4
     int num;                            // ...
     pendingServer_t server[16];         // ...
 };
+struct UIServerBrowserStatus
+{
+    unsigned char unusedPrefix[1104];
+    int refreshTime;
+    int unused1108;
+    int sortKey;
+    int sortDir;
+    int unused1120;
+    int refreshActive;
+    int currentServer;
+    int displayServers[20000];
+    int numDisplayServers;
+    int totalServers;
+    int numPlayersOnServers;
+    int nextDisplayRefresh;
+    int unused81148;
+    int motdLen;
+    int motdWidth;
+    unsigned char unused81160[16];
+    char motd[1024];
+};
+
 struct sharedUiInfo_t // sizeof=0x1C5B0
 {                                       // ...
     CachedAssets_t assets;              // ...
@@ -120,8 +142,7 @@ struct sharedUiInfo_t // sizeof=0x1C5B0
     modInfo_t modList[64];              // ...
     int modCount;                       // ...
     int modIndex;                       // ...
-    serverStatus_s serverStatus;        // ...
-    _BYTE gap8EB4[73968];               // ... // KISAKTODO: clean this thing up
+    UIServerBrowserStatus serverStatus;
     char serverStatusAddress[64];       // ...
     serverStatusInfo_t serverStatusInfo; // ...
     int nextServerStatusRefresh;        // ...
@@ -212,7 +233,7 @@ void __cdecl UI_DrawTalkerNum(
 
 int __cdecl UI_CheckExecKey(int localClientNum, int key);
 void __cdecl UI_ServersSort(int column, int force);
-int __cdecl UI_ServersQsortCompare(uint *arg1, uint *arg2);
+int __cdecl UI_ServersQsortCompare(const void *arg1, const void *arg2);
 void UI_VerifyLanguage();
 void __cdecl UI_UpdateDisplayServers(uiInfo_s *uiInfo);
 char __cdecl UI_GetOpenOrCloseMenuOnDvarArgs(
